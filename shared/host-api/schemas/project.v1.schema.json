@@ -1,0 +1,145 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://ied.local/schemas/project.v1.schema.json",
+	"title": "IED project file v1 (<Name>.ied.proj)",
+	"description": "One per project. May live anywhere (e.g. build/projects/); 'root' says where the code is. Variable syntax in strings: ${name}.",
+	"type": "object",
+	"required": ["version", "name"],
+	"additionalProperties": false,
+	"properties": {
+		"version": { "const": 1 },
+		"name": { "type": "string" },
+		"root": { "type": "string", "default": ".", "description": "Code root, relative to this file." },
+		"include": { "type": "array", "items": { "type": "string" }, "default": ["**/*"] },
+		"exclude": { "type": "array", "items": { "type": "string" } },
+		"kind": { "enum": ["executable", "library", "plugin", "tests", "other"], "description": "Display + startup-project eligibility; the build system remains authoritative." },
+		"buildSystem": {
+			"type": "object",
+			"required": ["id"],
+			"description": "Opaque to the host except 'id'; presets and tasks read the other fields as ${buildSystem.<field>}.",
+			"properties": {
+				"id": { "type": "string", "description": "e.g. 'nuke'." },
+				"projectName": { "type": "string" }
+			}
+		},
+		"presets": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Task preset ids from plugins (e.g. 'c4.nuke'). Local variables/tasks/toolbar/debug below override preset entries by key."
+		},
+		"variables": { "type": "object", "additionalProperties": { "$ref": "#/$defs/variable" } },
+		"tasks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/task" } },
+		"toolbar": { "$ref": "#/$defs/toolbar" },
+		"debug": { "$ref": "#/$defs/debug" },
+		"lspProfiles": { "type": "array", "items": { "type": "string" } },
+		"env": { "type": "object", "additionalProperties": { "type": "string" } },
+		"sandbox": { "type": "string", "description": "Default sandbox name for tasks with target 'sandbox'." },
+		"references": { "type": "array", "items": { "type": "string" }, "description": "Other project names this depends on (display only; the build system decides build order)." }
+	},
+	"$defs": {
+		"variable": {
+			"type": "object",
+			"required": ["kind"],
+			"additionalProperties": false,
+			"properties": {
+				"kind": { "enum": ["dropdown", "text", "toggle"] },
+				"label": { "type": "string" },
+				"values": { "type": "array", "items": { "type": "string" } },
+				"valuesFrom": {
+					"type": "object",
+					"description": "Produce dropdown values dynamically. Output: JSON array of strings, or one value per line.",
+					"additionalProperties": false,
+					"properties": {
+						"run": { "type": "array", "items": { "type": "string" } },
+						"binding": { "type": "string" },
+						"cacheSeconds": { "type": "integer", "default": 60 }
+					}
+				},
+				"default": { "type": ["string", "boolean"] },
+				"scope": { "enum": ["project", "solution"], "default": "project", "description": "solution = one selection shared by all projects (e.g. configuration)." }
+			}
+		},
+		"task": {
+			"type": "object",
+			"required": ["steps"],
+			"additionalProperties": false,
+			"properties": {
+				"label": { "type": "string" },
+				"icon": { "type": "string" },
+				"tooltip": { "type": "string" },
+				"slot": {
+					"enum": ["build", "rebuild", "clean", "run", "debug", "test", "testSelected", "debugTest", "profile", "none"],
+					"description": "Standard slot the shell binds to menus and keys (F5 = debug, Ctrl+F5 = run, Ctrl+Shift+B = build)."
+				},
+				"concurrency": { "enum": ["queue", "single", "restart", "parallel"], "default": "queue" },
+				"saveBefore": { "enum": ["all", "project", "none"], "default": "all" },
+				"steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } },
+				"when": { "type": "string" }
+			}
+		},
+		"step": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"run": {
+					"oneOf": [
+						{ "type": "array", "items": { "type": "string" }, "description": "argv (preferred: no shell parsing)." },
+						{ "type": "string", "description": "Shell string, run with the workspace's default shell." }
+					]
+				},
+				"task": { "type": "string", "description": "Run another task by key." },
+				"debug": { "type": "string", "description": "Launch the named debug configuration." },
+				"binding": { "type": "string" },
+				"args": { "type": "object", "description": "Arguments for 'binding'." },
+				"label": { "type": "string" },
+				"cwd": { "type": "string", "default": "${projectRoot}" },
+				"env": { "type": "object", "additionalProperties": { "type": "string" } },
+				"output": { "type": "string", "description": "Output source id: build, run, debug, test, or a contributed one." },
+				"problemMatcher": {
+					"oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ]
+				},
+				"diagnosticsFile": { "type": "string", "description": "Structured diagnostics JSON written by the step; preferred over matchers." },
+				"testResults": { "type": "object", "properties": { "format": { "type": "string" }, "path": { "type": "string" } } },
+				"onlyIf": { "enum": ["prevSuccess", "prevFailure", "always"], "default": "prevSuccess" },
+				"when": { "type": "string", "description": "Expression over variables, e.g. \"config != 'Dist'\"." },
+				"timeoutSeconds": { "type": "integer" },
+				"background": {
+					"type": "object",
+					"description": "Step keeps running; the task continues once readyPattern matches (dev servers, watchers).",
+					"properties": { "readyPattern": { "type": "string" }, "readyTimeoutSeconds": { "type": "integer" } }
+				},
+				"target": { "type": "string", "description": "'host' (default) or 'sandbox:<name>'." }
+			},
+			"oneOf": [
+				{ "required": ["run"] },
+				{ "required": ["task"] },
+				{ "required": ["debug"] },
+				{ "required": ["binding"] }
+			]
+		},
+		"toolbar": {
+			"type": "array",
+			"description": "Ordered items: variable keys (rendered as dropdowns/toggles), task keys (rendered as buttons), '|' separators.",
+			"items": { "type": "string" }
+		},
+		"debug": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"default": { "type": "string" },
+				"configurations": {
+					"type": "object",
+					"description": "Name to DAP launch/attach config: { type, request, ...adapter fields }.",
+					"additionalProperties": {
+						"type": "object",
+						"required": ["type", "request"],
+						"properties": {
+							"type": { "type": "string" },
+							"request": { "enum": ["launch", "attach"] }
+						}
+					}
+				}
+			}
+		}
+	}
+}

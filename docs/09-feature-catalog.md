@@ -35,13 +35,34 @@ The full feature set of IED, one area per file under `docs/features/`. This is t
 | [features/13-plugins](features/13-plugins.md) | Plugin host, contribution points, bindings, trust, plugin dev loop | PLG |
 | [features/14-settings](features/14-settings.md) | Settings window, tiers, secrets, keybindings, model config UI | SET |
 | [features/15-ops-and-distribution](features/15-ops-and-distribution.md) | Logs, health, crash recovery, trash, installer, CLI, bundled services, updates | OPS |
+| [features/16-orchestration](features/16-orchestration.md) | Mission Control, goal queue/board, worktree-isolated parallel agents, verifier, schedules, cross-workspace handoff, model scorecards and evals | ORC |
 
 AI tool calls are catalogued separately in `docs/13-ai-tool-catalog.md` (IDs `T-<group>-<n>`), because their schemas matter more than their UI.
 
+## Ambition: surpass Echo, do not port it
+
+Owner directive (2026-10-19): **"this should not just have parity with echo but drastically surpass."** Echo parity (`docs/20`) is the *floor* - a checklist of things IED must not regress - never the definition of done. Where IED is designed to be in a different league:
+
+| Area | Echo (today) | IED |
+|---|---|---|
+| Harness reliability | Stops when a reply has no tool call (outside Goal mode); text tool calls unparsed; mid-stream errors fatal; wrong context sizes | Stop taxonomy, bounded recovery for every class, dialect normalization, real `n_ctx` discovery, visible "model or harness" answer (`docs/12`) |
+| Orchestration | One model per chat + read-only research helpers; Kanban/heartbeat designs never built | Mission Control, goal queue + board, parallel agents in worktrees, independent verifier, schedules, away mode, cross-workspace handoff (ORC) |
+| Model use | Per-chat endpoint, vision rerouting | Role-based model groups with temperatures, slot-aware scheduler, limit/load/capability/privacy routing, scorecards, eval arena (AIR, ORC) |
+| Privacy | none | Privacy classes, local-only policy, sticky taint tracking, tor/VPN egress (AIR) |
+| IDE | VS Code-like code view | Visual Studio-class: Error List, problem matchers, Test Explorer, full debugger windows, toolbar task templates, bound splits, map-mode scrollbar, code-aware spell check (EDT, BLD, DBG) |
+| State | Server-owned chats; unsaved buffers in browser IndexedDB | Everything server-owned incl. unsaved buffers, layouts per device class, seq-numbered resume (SRV, `docs/10`) |
+| Context | One summarizer pass, chars/3.5 estimates | Ledger, tiered + cache-aware compression, real tokenizers, history retrieval, scratchpad and tasks never compressed away (AIR) |
+| Tools | Generic file/shell/web | Symbol-first LSP tools for small-context local models, debugger/build/test/profiler/browser/window-capture/image-diff tools, on-demand tool groups (`docs/13`) |
+| Extensibility | iframe views + JSON-RPC tools | Composable bindings, declarative language plugins, project-local plugins, 40+ contribution points (PLG) |
+| Game dev | none | Profiler with by-task view and GPU lanes, engine plugin hooks, visual verification (PRF, `docs/13`) |
+| Cloud | none | Claude via the user's own Claude Code CLI or API key, usage windows and reset times (AIR) |
+
+Several items the first draft marked P2 were raised to P1 because they are what makes the difference (ghost-text completion, IED as an MCP server, worktree isolation, project memory).
+
 ## Priority totals and the MVP line
 
-The **P0 set** is defined as: the smallest IED the owner can switch to from Echo for daily C4/Claymore work. It must therefore cover Echo's parity list (`docs/20`) for the features the owner actually uses, plus the plan's non-negotiables: split server/web with resume, VS-style editor with LSP, toolbar build/run with output routing, chat with streaming + tool calls + persistence + stall protection, terminal, git basics, settings with model groups.
+The **P0 set** is the first release the owner switches to *and immediately feels the upgrade from Echo*: it covers Echo's parity list (`docs/20`) for the features the owner actually uses, the plan's non-negotiables (split server/web with resume, VS-style editor with LSP, toolbar build/run with output routing, chat with streaming + tool calls + persistence, terminal, git basics, settings with model groups), **and** the first differentiators: the full stall-protection harness, symbol-first LSP tools, Mission Control's run list + attention queue, server-owned unsaved buffers, and privacy classes.
 
-Everything else the plan asks for is P1. P2 is extrapolation the plan does not require.
+Everything else the plan asks for, plus the orchestration layer, is P1. P2 is extrapolation the plan does not require.
 
-The roadmap (`docs/18`) sequences P0 into milestones M1-M6 and P1 into M7-M10.
+The roadmap (`docs/18`) sequences P0 into milestones M1-M6 and P1 into M7-M11.

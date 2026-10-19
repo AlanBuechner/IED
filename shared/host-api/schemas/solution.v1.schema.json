@@ -1,0 +1,70 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://ied.local/schemas/solution.v1.schema.json",
+	"title": "IED solution file v1 (<Name>.ied.sln)",
+	"description": "Lives at the solution root (the folder that also holds .ied/). Paths are relative to this file.",
+	"type": "object",
+	"required": ["version", "name", "projects"],
+	"additionalProperties": false,
+	"properties": {
+		"version": { "const": 1 },
+		"name": { "type": "string" },
+		"projects": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["file"],
+				"additionalProperties": false,
+				"properties": {
+					"file": { "type": "string", "description": "Path to a .ied.proj file; globs allowed ('build/projects/*.ied.proj')." },
+					"optional": { "type": "boolean", "default": false, "description": "Missing file is not an error (generated projects not yet generated)." }
+				}
+			}
+		},
+		"groups": {
+			"type": "array",
+			"description": "Display grouping (VS solution folders). Nested allowed.",
+			"items": { "$ref": "#/$defs/group" }
+		},
+		"items": {
+			"type": "array",
+			"description": "Loose files shown under 'Solution Items' (README, AGENTS.md, docs).",
+			"items": { "type": "string" }
+		},
+		"localPlugins": {
+			"type": "array",
+			"description": "Project-local plugins; loaded only when the workspace is trusted.",
+			"items": {
+				"type": "object",
+				"required": ["path"],
+				"additionalProperties": false,
+				"properties": {
+					"id": { "type": "string", "description": "Expected plugin id; mismatch with the manifest is an error." },
+					"path": { "type": "string", "description": "Folder containing ied-plugin.json." },
+					"enabled": { "type": "boolean", "default": true }
+				}
+			}
+		},
+		"generator": {
+			"type": "object",
+			"description": "Who generates the project files, so IED can offer 'Regenerate' and avoid hand-editing generated files.",
+			"additionalProperties": false,
+			"properties": {
+				"run": { "type": "array", "items": { "type": "string" } },
+				"generatedPaths": { "type": "array", "items": { "type": "string" } }
+			}
+		}
+	},
+	"$defs": {
+		"group": {
+			"type": "object",
+			"required": ["name"],
+			"additionalProperties": false,
+			"properties": {
+				"name": { "type": "string" },
+				"projects": { "type": "array", "items": { "type": "string", "description": "Project name (from the .ied.proj 'name')." } },
+				"groups": { "type": "array", "items": { "$ref": "#/$defs/group" } }
+			}
+		}
+	}
+}

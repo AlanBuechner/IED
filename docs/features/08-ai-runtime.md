@@ -77,7 +77,7 @@ Owner: `src/ai` unless noted. Design: `docs/04` (models, routing, privacy, conte
 | F-AIR-63 | Skills index in the prompt: if <= N skills, list name + one-liner; above N, list only top-K relevant to the current task and rely on `skill_search` | P0 | US-CTX-4 |
 | F-AIR-64 | Trajectory store per chat (JSONL) with rotation and retention limits (size and age), raw media stored as files not base64 | P0 | US-CHT-17 |
 | F-AIR-65 | Skill authoring: `skill_write` tool (approval-gated) and "Synthesize skill from this chat" action | P1 | US-CTX-6 |
-| F-AIR-66 | Project memory (`.ied/memory/`): small fact files the agent can read/append with approval; reviewable list in settings | P2 | US-CTX-8 |
+| F-AIR-66 | Project memory (`.ied/memory/`): small fact files the agent can read/append with approval; reviewable list in settings | P1 | US-CTX-8 |
 
 ## MCP
 
@@ -86,7 +86,7 @@ Owner: `src/ai` unless noted. Design: `docs/04` (models, routing, privacy, conte
 | F-AIR-70 | MCP client: stdio and streamable HTTP transports; tools, resources (as @-mentionable context), prompts (as slash commands) | P1 | US-TOOL-6 |
 | F-AIR-71 | MCP server config at app / solution / project tier (project-defined servers need trust); per-server enable, env, privacy class, egress policy | P1 | US-TOOL-6 |
 | F-AIR-72 | MCP server supervision: start on demand, restart on crash with backoff, logs to an output source, health in settings | P1 | US-OPS-1 |
-| F-AIR-73 | IED as an MCP server (stdio shim + HTTP): exposes a curated set of IED tools (LSP navigation, build/test, editor open, diagnostics) to external agents; per-client allowlist | P2 | US-TOOL-9 |
+| F-AIR-73 | IED as an MCP server (stdio shim + HTTP): exposes a curated set of IED tools (LSP navigation, build/test, editor open, diagnostics) to external agents; per-client allowlist | P1 | US-TOOL-9 |
 | F-AIR-74 | Remote MCP OAuth flows | P2 | - |
 
 ## Web egress

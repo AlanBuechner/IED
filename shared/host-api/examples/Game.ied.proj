@@ -1,0 +1,61 @@
+{
+	"version": 1,
+	"name": "Game",
+	"root": "../../src/Game",
+	"kind": "executable",
+	"buildSystem": { "id": "nuke", "projectName": "Game" },
+	"presets": ["c4.nuke"],
+	"variables": {
+		"config": { "kind": "dropdown", "label": "Configuration", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution" },
+		"arch": { "kind": "dropdown", "label": "Platform", "values": ["x64"], "default": "x64", "scope": "solution" }
+	},
+	"tasks": {
+		"build": {
+			"slot": "build",
+			"label": "Build",
+			"icon": "$(gear)",
+			"steps": [
+				{ "run": ["${solutionDir}/nuke.bat", "build", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"], "cwd": "${solutionDir}", "output": "build", "problemMatcher": "c4" }
+			]
+		},
+		"run": {
+			"slot": "run",
+			"label": "Run",
+			"icon": "$(run)",
+			"steps": [
+				{ "task": "build" },
+				{ "run": ["${solutionDir}/nuke.bat", "run", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"], "cwd": "${solutionDir}", "output": "run", "onlyIf": "prevSuccess" }
+			]
+		},
+		"debug": {
+			"slot": "debug",
+			"label": "Start",
+			"icon": "$(debug-start)",
+			"steps": [
+				{ "task": "build" },
+				{ "debug": "Game", "onlyIf": "prevSuccess" }
+			]
+		},
+		"test": {
+			"slot": "test",
+			"label": "Test",
+			"icon": "$(beaker)",
+			"steps": [
+				{ "run": ["${solutionDir}/nuke.bat", "test", "-c", "${config}"], "cwd": "${solutionDir}", "output": "test", "problemMatcher": ["c4", "c4-test"], "testResults": { "format": "c4-test-json", "path": "${solutionDir}/build/int/${config}-windows-${arch}/test-results.json" } }
+			]
+		}
+	},
+	"toolbar": ["config", "arch", "|", "debug", "build", "test"],
+	"debug": {
+		"default": "Game",
+		"configurations": {
+			"Game": {
+				"type": "c4",
+				"request": "launch",
+				"program": "${solutionDir}/build/bin/${config}-windows-${arch}/Game/Game.exe",
+				"cwd": "${solutionDir}"
+			}
+		}
+	},
+	"lspProfiles": ["c4-language-server"]
+}

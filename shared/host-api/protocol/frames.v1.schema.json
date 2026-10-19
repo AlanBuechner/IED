@@ -1,0 +1,161 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://ied.local/protocol/frames.v1.schema.json",
+	"title": "IED WebSocket frame v1",
+	"description": "One JSON object per WebSocket text message. Semantics: docs/10-server-protocol.md.",
+	"oneOf": [
+		{ "$ref": "#/$defs/hello" },
+		{ "$ref": "#/$defs/req" },
+		{ "$ref": "#/$defs/cancel" },
+		{ "$ref": "#/$defs/sub" },
+		{ "$ref": "#/$defs/unsub" },
+		{ "$ref": "#/$defs/ack" },
+		{ "$ref": "#/$defs/ping" },
+		{ "$ref": "#/$defs/welcome" },
+		{ "$ref": "#/$defs/res" },
+		{ "$ref": "#/$defs/evt" },
+		{ "$ref": "#/$defs/snap" },
+		{ "$ref": "#/$defs/gap" },
+		{ "$ref": "#/$defs/pong" },
+		{ "$ref": "#/$defs/bye" }
+	],
+	"$defs": {
+		"topicKey": { "type": "string", "pattern": "^([a-z][a-z0-9-]*(\\.[a-z0-9-]+)*/)?[a-z]+(:[^\\s]+)?$" },
+		"cursors": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+		"hello": {
+			"type": "object",
+			"required": ["t", "proto", "clientId", "deviceId", "deviceClass"],
+			"properties": {
+				"t": { "const": "hello" },
+				"proto": { "type": "integer" },
+				"clientId": { "type": "string" },
+				"deviceId": { "type": "string" },
+				"deviceClass": { "enum": ["desktop", "tablet", "phone"] },
+				"deviceName": { "type": "string" },
+				"resume": {
+					"type": "object",
+					"required": ["sessionEpoch", "cursors"],
+					"properties": { "sessionEpoch": { "type": "string" }, "cursors": { "$ref": "#/$defs/cursors" } }
+				}
+			}
+		},
+		"req": {
+			"type": "object",
+			"required": ["t", "id", "method"],
+			"properties": {
+				"t": { "const": "req" },
+				"id": { "type": "integer", "minimum": 1 },
+				"method": { "type": "string" },
+				"params": { "type": "object" },
+				"opId": { "type": "string", "description": "Idempotency key for retried mutations." }
+			}
+		},
+		"cancel": {
+			"type": "object",
+			"required": ["t", "id"],
+			"properties": { "t": { "const": "cancel" }, "id": { "type": "integer" } }
+		},
+		"sub": {
+			"type": "object",
+			"required": ["t", "id", "topics"],
+			"properties": {
+				"t": { "const": "sub" },
+				"id": { "type": "integer" },
+				"topics": { "type": "array", "items": { "$ref": "#/$defs/topicKey" } },
+				"from": { "$ref": "#/$defs/cursors" }
+			}
+		},
+		"unsub": {
+			"type": "object",
+			"required": ["t", "topics"],
+			"properties": { "t": { "const": "unsub" }, "topics": { "type": "array", "items": { "$ref": "#/$defs/topicKey" } } }
+		},
+		"ack": {
+			"type": "object",
+			"required": ["t", "cursors"],
+			"properties": { "t": { "const": "ack" }, "cursors": { "$ref": "#/$defs/cursors" } }
+		},
+		"ping": {
+			"type": "object",
+			"required": ["t"],
+			"properties": { "t": { "const": "ping" }, "ts": { "type": "integer" } }
+		},
+		"welcome": {
+			"type": "object",
+			"required": ["t", "proto", "serverVersion", "sessionEpoch", "clientId"],
+			"properties": {
+				"t": { "const": "welcome" },
+				"proto": { "type": "integer" },
+				"serverVersion": { "type": "string" },
+				"sessionEpoch": { "type": "string" },
+				"clientId": { "type": "string" },
+				"resume": { "type": "object", "additionalProperties": { "enum": ["ok", "snapshot"] } }
+			}
+		},
+		"res": {
+			"type": "object",
+			"required": ["t", "id", "ok"],
+			"properties": {
+				"t": { "const": "res" },
+				"id": { "type": "integer" },
+				"ok": { "type": "boolean" },
+				"result": {},
+				"error": {
+					"type": "object",
+					"required": ["code", "message"],
+					"properties": {
+						"code": {
+							"enum": ["bad_request", "not_found", "forbidden", "untrusted", "conflict", "busy", "cancelled", "timeout", "unavailable", "internal", "plugin_error"]
+						},
+						"message": { "type": "string" },
+						"data": {}
+					}
+				}
+			}
+		},
+		"evt": {
+			"type": "object",
+			"required": ["t", "topic", "seq", "kind"],
+			"properties": {
+				"t": { "const": "evt" },
+				"topic": { "$ref": "#/$defs/topicKey" },
+				"seq": { "type": "integer", "minimum": 1 },
+				"kind": { "type": "string" },
+				"data": {}
+			}
+		},
+		"snap": {
+			"type": "object",
+			"required": ["t", "topic", "seq", "data"],
+			"properties": {
+				"t": { "const": "snap" },
+				"topic": { "$ref": "#/$defs/topicKey" },
+				"seq": { "type": "integer", "minimum": 0 },
+				"data": {}
+			}
+		},
+		"gap": {
+			"type": "object",
+			"required": ["t", "topic", "from", "to"],
+			"properties": {
+				"t": { "const": "gap" },
+				"topic": { "$ref": "#/$defs/topicKey" },
+				"from": { "type": "integer" },
+				"to": { "type": "integer" }
+			}
+		},
+		"pong": {
+			"type": "object",
+			"required": ["t"],
+			"properties": { "t": { "const": "pong" }, "ts": { "type": "integer" } }
+		},
+		"bye": {
+			"type": "object",
+			"required": ["t", "reason"],
+			"properties": {
+				"t": { "const": "bye" },
+				"reason": { "enum": ["server-restart", "auth-revoked", "protocol-mismatch", "shutdown"] }
+			}
+		}
+	}
+}

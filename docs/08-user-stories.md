@@ -180,7 +180,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-CTX-5** `ext` `P1` - As Agent, `AGENTS.md` files in subfolders (and in each root of a federation) are picked up when I start working in that area.
 - **US-CTX-6** `ext` `P1` - As Owner, the AI can create or update skills from a conversation (with my approval), so lessons stick.
 - **US-CTX-7** `ext` `P1` - As Owner, compression is designed around local-model prompt caching (stable prefixes), so long chats stay fast on llama.cpp.
-- **US-CTX-8** `ext` `P2` - As Owner, a persistent project memory (facts, decisions) the AI can read and append, stored in `.ied/` and reviewable.
+- **US-CTX-8** `ext` `P1` - As Owner, a persistent project memory (facts, decisions) the AI can read and append, stored in `.ied/` and reviewable.
 
 ### TOOL - AI tools
 
@@ -192,7 +192,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-TOOL-6** `plan` `P1` - As Agent, I can use MCP servers (Blender, Claymore, others) as ordinary tools.
 - **US-TOOL-7** `plan` `P1` - As Agent, I have game/engine-oriented tools: window capture of a running app, image compare/diff, process CPU/memory stats, profiler queries, sandbox runs.
 - **US-TOOL-8** `ext` `P1` - As Agent, I can ask the user a structured question (options) and wait, instead of guessing.
-- **US-TOOL-9** `ext` `P2` - As Owner, IED itself is an MCP server, so external agents (e.g. Claude Code in the terminal) can use IED's LSP/build/editor tools.
+- **US-TOOL-9** `ext` `P1` - As Owner, IED itself is an MCP server, so external agents (e.g. Claude Code in the terminal) can use IED's LSP/build/editor tools.
 
 ### WEB - Web access and egress
 
@@ -204,7 +204,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 
 - **US-INL-1** `plan` `P1` - As Owner, Ctrl+I opens an inline chat at the cursor/selection; proposed changes appear as an inline diff I accept or reject (undoable).
 - **US-INL-2** `ext` `P1` - As Owner, AI actions sit on the right-click menu and error lightbulb: explain, fix this error, write tests, document, refactor.
-- **US-INL-3** `ext` `P2` - As Owner, ghost-text completions come from a fast local fill-in-the-middle model.
+- **US-INL-3** `ext` `P1` - As Owner, ghost-text completions come from a fast local fill-in-the-middle model.
 
 ### GIT - Source control
 
@@ -213,7 +213,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-GIT-3** `plan+` `P1` - As Owner, I merge, rebase (including an interactive-rebase UI), cherry-pick, revert, reset, and resolve conflicts in a 3-way merge editor with optional AI help.
 - **US-GIT-4** `ext` `P1` - As Owner, Git LFS (game assets), submodules and worktrees are handled.
 - **US-GIT-5** `ext` `P1` - As Owner, blame is available inline in the editor and as a view.
-- **US-GIT-6** `ext` `P2` - As Owner, agents can work in separate git worktrees so parallel agents do not collide.
+- **US-GIT-6** `ext` `P1` - As Owner, agents can work in separate git worktrees so parallel agents do not collide.
 
 ### TRM - Terminal
 
@@ -284,6 +284,23 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-XRP-3** `plan` `P1` - As Owner, C4Assist is rewritten for IED (its features become C4 plugin contributions).
 - **US-XRP-4** `plan` `P1` - As Owner, Bedrock exposes profiler hooks so C4 apps are profileable by default.
 - **US-XRP-5** `ext` `P1` - As Owner, Claymore can ship plugins for its shader language, scene/asset files, session control (named-pipe CLI) and GPU captures, all through generic contribution points.
+
+### ORC - Orchestration and mission control (where IED goes furthest beyond Echo)
+
+- **US-ORC-1** `ext` `P0` - As Remote owner, one Mission Control screen shows every run on the server across workspaces, and one attention queue holds everything waiting on me, so I can triage from my phone in a minute.
+- **US-ORC-2** `ext` `P1` - As Owner, I keep a queue/board of goals per workspace; agents pick up the next ready goal when model capacity frees up, so my local GPUs work while I do not.
+- **US-ORC-3** `ext` `P1` - As Owner, parallel agents work in separate git worktrees and land their results in a Review column where I merge, request changes, or discard.
+- **US-ORC-4** `ext` `P1` - As Owner, an agent's "done" is checked by an independent verifier (a different model at temperature 0) against executable acceptance criteria before it reaches me.
+- **US-ORC-5** `ext` `P1` - As Owner, the scheduler knows each model server's slots and gives my interactive chat priority over background goals.
+- **US-ORC-6** `ext` `P1` - As Owner, I schedule recurring goals ("nightly: run all tests, fix what fails") and cap daily cloud spend.
+- **US-ORC-7** `ext` `P1` - As Owner, in away mode a goal that needs approval waits without blocking the others, and I get a digest when I return.
+- **US-ORC-8** `ext` `P1` - As Owner, a goal can span repos (fix C4 -> refresh Claymore's vendored compiler -> rebuild Claymore), and an agent that finds a bug in another repo files a goal there instead of working around it.
+- **US-ORC-9** `ext` `P1` - As Owner, IED keeps scorecards of how each model actually performs per role (stalls, tool-call validity, verification pass rate, speed) and can run an eval suite across model groups, so I choose models from evidence.
+
+Journeys added for this epic:
+
+- **J13 - Overnight queue.** Owner queues five goals in Claymore and two in C4, sets away mode and goes to bed. Workers run in worktrees on the local box's slots; the verifier rejects one result and the agent fixes it; one goal waits for a `git push` approval without blocking the rest. In the morning the phone shows a digest: four in Review with green evidence, one needs an answer, one failed twice with a post-mortem.
+- **J14 - Cross-repo bug.** A Claymore agent hits a C4 compiler bug, writes a minimal repro, and files a goal in the C4 workspace via handoff. The C4 agent fixes the compiler and runs the C4 gates. A federation goal then refreshes Claymore's vendored `C4.exe` and resumes the original Claymore goal - all visible in Mission Control.
 
 ## Coverage check
 

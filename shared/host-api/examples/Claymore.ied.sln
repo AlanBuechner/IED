@@ -1,0 +1,19 @@
+{
+	"version": 1,
+	"name": "Claymore",
+	"projects": [
+		{ "file": "build/ied/*.ied.proj", "optional": true }
+	],
+	"groups": [
+		{ "name": "Engine", "projects": ["Engine"] },
+		{ "name": "Game", "projects": ["Game"] }
+	],
+	"items": ["AGENTS.md", "docs/WorkOrder.md"],
+	"localPlugins": [
+		{ "id": "c4", "path": "Nuke/tools/ied" }
+	],
+	"generator": {
+		"run": ["nuke.bat", "--init", "--ied"],
+		"generatedPaths": ["build/ied/"]
+	}
+}

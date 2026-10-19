@@ -1,0 +1,70 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://ied.local/schemas/agent-mode.v1.schema.json",
+	"title": "IED agent mode v1 (.ied/modes/<id>.json, app-tier modes, or plugin agentModes)",
+	"type": "object",
+	"required": ["version", "id", "label", "base"],
+	"additionalProperties": false,
+	"properties": {
+		"version": { "const": 1 },
+		"id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+		"label": { "type": "string" },
+		"description": { "type": "string" },
+		"base": { "enum": ["ask", "plan", "agent"], "description": "Completion semantics come from the base (docs/12)." },
+		"instructions": { "type": "string", "description": "Appended to the system message (or 'instructionsFile')." },
+		"instructionsFile": { "type": "string" },
+		"modelGroup": { "type": "string" },
+		"roleOverrides": {
+			"type": "object",
+			"description": "Role to { model, temperature, effort } overrides for this mode.",
+			"additionalProperties": {
+				"type": "object",
+				"properties": {
+					"model": { "type": "string" },
+					"temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+					"effort": { "enum": ["off", "low", "medium", "high", "max"] }
+				}
+			}
+		},
+		"permissionMode": { "enum": ["plan", "ask", "acceptEdits", "auto"] },
+		"tools": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"allow": { "type": "array", "items": { "type": "string" }, "description": "Tool names or 'group:<id>'; omitted = base defaults." },
+				"deny": { "type": "array", "items": { "type": "string" } },
+				"preEnabledGroups": { "type": "array", "items": { "type": "string" } }
+			}
+		},
+		"paths": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"read": { "type": "array", "items": { "type": "string" } },
+				"write": { "type": "array", "items": { "type": "string" } }
+			}
+		},
+		"budgets": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"maxSteps": { "type": "integer" },
+				"maxTokens": { "type": "integer" },
+				"maxWallMinutes": { "type": "integer" },
+				"maxCostUsd": { "type": "number" },
+				"maxToolCalls": { "type": "integer" }
+			}
+		},
+		"subAgents": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"allowed": { "type": "boolean", "default": true },
+				"maxParallel": { "type": "integer" },
+				"roles": { "type": "array", "items": { "type": "string" } }
+			}
+		},
+		"requireVerification": { "type": "boolean", "default": true, "description": "Agent base: finish() must cite a build/test/tool result." },
+		"isolation": { "enum": ["none", "worktree"], "default": "none", "description": "worktree = run in its own git worktree + branch (F-ORC)." }
+	}
+}

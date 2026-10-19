@@ -43,7 +43,7 @@ Owner: `plugins/git` (UI + orchestration) on `src/git` (host plumbing).
 | F-GIT-30 | Git LFS: detect, show LFS-tracked files and pointer-vs-content status, `lfs pull/fetch` actions, warnings for large untracked binaries | P1 | US-GIT-4 |
 | F-GIT-31 | Submodules: status, update/init, open submodule as repo | P1 | US-GIT-4 |
 | F-GIT-32 | Worktrees: list/create/remove; open a worktree as a workspace; "run this agent in a new worktree" (F-GIT-33) | P1 | US-GIT-4, US-GIT-6 |
-| F-GIT-33 | Agent isolation: a chat can be bound to its own worktree + branch so parallel agents never edit the same checkout; merge-back flow with review | P2 | US-GIT-6 |
+| F-GIT-33 | Agent isolation: a chat can be bound to its own worktree + branch so parallel agents never edit the same checkout; merge-back flow with review | P1 | US-GIT-6 |
 | F-GIT-34 | Performance: fsmonitor/untracked-cache hints for big repos, status debounced from file watching, graph paging | P1 | - |
 
 ## AI and integrations

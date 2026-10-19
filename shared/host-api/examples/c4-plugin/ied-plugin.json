@@ -1,0 +1,130 @@
+{
+	"manifestVersion": 1,
+	"id": "c4",
+	"name": "C4 Language",
+	"version": "0.1.0",
+	"description": "Example: what the C4 repo's project-local plugin (the C4Assist rewrite) looks like as a declarative IED plugin. Lives in the C4 repo, copied into Nuke/tools/ied by the kit build.",
+	"publisher": "explosion",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
+	"contributes": {
+		"languages": [
+			{
+				"id": "c4",
+				"aliases": ["C4"],
+				"extensions": [".cf", ".ch"],
+				"lineComment": "//",
+				"blockComment": ["/*", "*/"],
+				"brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
+				"autoClosingPairs": [["{", "}"], ["[", "]"], ["(", ")"], ["\"", "\""], ["'", "'"]],
+				"grammar": "grammars/c4.monarch.json",
+				"taskComments": ["TODO", "HACK", "FIXME", "NOTE"]
+			}
+		],
+		"semanticTokenColors": [
+			{
+				"languageId": "c4",
+				"label": "Visual Assist style",
+				"rules": {
+					"type": "--syntax-type",
+					"type.builtin": "--syntax-keyword",
+					"class": "--syntax-type",
+					"struct": "--syntax-type",
+					"enum": "--syntax-type",
+					"function": "--syntax-function",
+					"method": "--syntax-function",
+					"macro": "--syntax-macro",
+					"variable": "--syntax-variable",
+					"parameter": "--syntax-parameter",
+					"property": "--syntax-member",
+					"enumMember": "--syntax-constant",
+					"namespace": "--syntax-namespace",
+					"controlFlow": "--syntax-control",
+					"keyword": "--syntax-keyword",
+					"string": "--syntax-string",
+					"number": "--syntax-number",
+					"comment": "--syntax-comment"
+				}
+			}
+		],
+		"headerSourcePairs": [ { "extensions": [".cf", ".ch"] } ],
+		"lspProfiles": [
+			{
+				"id": "c4-language-server",
+				"label": "C4LSP",
+				"command": "${solutionDir}/Nuke/tools/C4LSP/C4LSP.exe",
+				"selector": { "languages": ["c4"], "extensions": [".cf", ".ch"] },
+				"initializationOptionsFile": "${solutionDir}/.ied/local/lsp-options/c4.json",
+				"settingsBindings": { "c4.tidy": "tidy", "c4.quickfixes": "quickfixes", "c4.createDefinition": "createDefinition" },
+				"launchMode": "staged",
+				"positionEncoding": "bytes",
+				"requestIds": "integer",
+				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
+				"codeActionsNeedClientFilter": true,
+				"when": "workspaceTrusted && config.c4.languageServer"
+			}
+		],
+		"dapProviders": [
+			{
+				"type": "c4",
+				"label": "C4 Debugger",
+				"command": "${solutionDir}/Nuke/tools/C4DAP/C4DAP.exe",
+				"languages": ["c4"],
+				"launchMode": "staged",
+				"configurationTemplates": [
+					{ "type": "c4", "request": "launch", "program": "${solutionDir}/build/bin/${config}-windows-${arch}/${project}/${project}.exe", "cwd": "${solutionDir}" }
+				]
+			}
+		],
+		"problemMatchers": [
+			{
+				"id": "c4",
+				"source": "c4",
+				"fileLocation": { "kind": "search", "roots": ["${cwd}", "${projectRoot}", "${lspIncludePaths}"] },
+				"patterns": [
+					{ "regexp": "^(.+?) \\((\\d+):(\\d+)\\) (error|warning|fatal error): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5 }
+				],
+				"severityMap": { "fatal error": "error" }
+			},
+			{
+				"id": "c4-test",
+				"source": "c4-test",
+				"fileLocation": { "kind": "search", "roots": ["${cwd}", "${projectRoot}"] },
+				"patterns": [
+					{ "regexp": "^FAIL: (.+?):(\\d+): (.*)$", "file": 1, "line": 2, "message": 3 }
+				],
+				"defaultSeverity": "error"
+			}
+		],
+		"testProviders": [
+			{ "id": "c4-tests", "languages": ["c4"], "results": { "format": "c4-test-json" }, "runTask": "test" }
+		],
+		"taskPresets": [
+			{
+				"id": "c4.nuke",
+				"label": "Nuke (C4)",
+				"detect": "Project.py",
+				"variables": {
+					"config": { "kind": "dropdown", "label": "Configuration", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution" },
+					"arch": { "kind": "dropdown", "label": "Platform", "values": ["x64"], "default": "x64", "scope": "solution" }
+				},
+				"toolbar": ["config", "arch", "|", "debug", "build", "test"]
+			}
+		],
+		"projectTemplates": [
+			{
+				"id": "c4.executable",
+				"title": "C4 Executable",
+				"kind": "project",
+				"parameters": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } },
+				"steps": [ { "run": ["${solutionDir}/nuke.bat", "--init", "--ied", "${param.name}"], "cwd": "${solutionDir}", "output": "build" } ]
+			}
+		],
+		"skills": ["skills/"],
+		"systemMessageSections": [
+			{ "id": "c4-docs", "text": "This solution is written in C4. Language reference: the c4-language skill. Build with Nuke (nuke-build-system skill); never hand-edit generated project files under build/.", "maxTokens": 120 }
+		],
+		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C4" }
+	}
+}
