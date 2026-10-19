@@ -1,31 +1,57 @@
-# 99 — Open questions (blocking first)
+# 99 - Open questions and decision record
 
-Decide these during the design phase, then **move the answer into the relevant doc and mark it resolved here** (keep a one-line record so history is visible). Items marked *blocking* gate implementation.
+Decide open items during design, then **move the answer into the relevant doc and record it here** (one line, so history stays visible). Items marked *owner* are genuinely the owner's call; the rest have a recommended answer the implementer may adopt unless the owner objects.
 
-## Blocking
+## Resolved
 
-1. **UI delivery model.** **Resolved: split server + served web frontend** (owner note confirms: "backend will have a served front end like a normal server so we can access the ui remotely… but a bundled desktop app for a more seamless experience"). The server is standalone and owns all state; the UI is a plain web app in any browser (desktop/phone). A bundled desktop window (WebView2 embedding the local server) is an optional later convenience — my pick: WebView2 when it happens, not before. → `docs/01`
-2. **Server↔client protocol v1.** One multiplexed WebSocket per client + HTTP for simple ops. Frame types: request/response with `id`, push events by topic, streaming chunks, cancellation — plus **reconnect/resume** (server-side ring buffer replay + state reconciliation). Must handle AI token streams, build/terminal output floods, LSP diagnostics without dropping frames. → `docs/01`
-3. **Plugin manifest v1 final schema.** The sketch in `docs/02` is the starting point; freeze field names and permission list before any plugin code exists — every default plugin codes against it. → `shared/host-api/`, `docs/02`
-4. **Project/solution file schemas.** Freeze `.ied.sln` / `.ied.proj` (sketch in `docs/03`) including the toolbar command-template grammar (`{var}` substitution, `onlyIf`). These are on-disk formats — expensive to change later. → `shared/host-api/`, `docs/03`, `docs/06`
-5. **C4 compiler readiness.** The compiler must be able to build this repo before any implementation starts (stated precondition). Confirm the target C4 version/features needed (e.g. does it support what the server needs for HTTP/WS serving, sockets, process spawning) and file gaps upstream in `C:\GameDev\C4`. → `WORK.md`
+| # | Question | Decision | Where |
+|---|---|---|---|
+| 1 | UI delivery model | Split server + served web client; WebView2 desktop wrapper is optional later (P2) | `docs/01`, `docs/21` |
+| 2 | Server <-> client protocol v1 | One WS per tab; req/res + topic events with seq + snapshots + gaps; ring-buffer resume; backpressure; idempotent `opId`; doc lease + rebase | `docs/10`, `shared/host-api/protocol/` |
+| 3 | Plugin manifest v1 | Drafted as JSON Schema with four runtimes (builtin, declarative, js, process) and 40+ contribution points; frozen after owner review | `docs/02`, `shared/host-api/schemas/plugin-manifest.v1.schema.json` |
+| 4 | Project/solution schemas + toolbar grammar | Drafted as JSON Schema; variables use `${name}`; tasks = steps (run/task/debug/binding) with `onlyIf`/`when`, output targets, matchers; federations added | `docs/03`, `docs/06`, `shared/host-api/schemas/` |
+| 5 | C4 compiler readiness | Gap analysis done; readiness checklist of 10 items; C4-repo work packages P-1..P-7 | `docs/17` |
+| 6 | JS plugin runtime | QuickJS-ng kept for in-process JS logic (behind a C shim because of CBind union issues), plus out-of-process plugins over `ied-plugin-rpc/1` for anything heavy or native; built-ins compiled into the server because C4 has no DLL output | `docs/02`, `docs/17` |
+| 7 | Context compression details | Ledger + tiered compression (mechanical first, then `summarizer` role); cache-aware (append-only between large compressions); 70% warn / 85% compress defaults; history tools | `docs/04`, `docs/12` |
+| 8 | SearXNG packaging | Bundled with embeddable Python + waitress (spike in M0 to confirm on Windows); fallback isolated auto-install (WSL/Docker); tor bundled | `docs/21` |
+| 9 | Profiler trace format | ITP v1: chunked varint event stream, explicit string interning, timestamped thread renames, task events, GPU calibration, streamed to `.iedtrace` | `docs/16` |
+| 10 | `.echo/` migration | `.echo/` stays in folders; IED never writes it; Nuke keeps writing it for now but nothing depends on Echo; `ied import echo` converts settings/skills/modes/chats | `docs/17` (N9), `docs/20` |
+| 11 | Claude integration shape | Two providers: Anthropic API (API key) and a bridge that drives the owner's own installed, self-signed-in `claude` CLI in stream-json mode with IED tools via MCP; IED never touches Claude credentials (Anthropic policy) | `docs/04` |
+| 12 | Request routing policy | Role fallback lists; failure-class triggers; slot-aware scheduler with interactive priority; privacy always wins (queue rather than leak); capability matching; scorecards optional | `docs/04`, `docs/features/08`, `docs/features/16` |
+| 13 | Remote access security and concurrency | Loopback default; Host/Origin checks; loopback one-time token; owner password required for LAN; device sessions; TLS via Tailscale (built-in TLS P2); explicit per-resource concurrency rules | `docs/11` |
+| 14 | Git backend | git CLI for everything (porcelain v2 / NUL-separated formats); libgit2 stays vendored for a possible graph optimization later | `docs/features/09-git.md` |
+| 15 | Ambition level | Owner: "not just parity with echo but drastically surpass" - Echo parity is the floor; orchestration area added; differentiators raised to P1 | `docs/09`, `docs/20`, `docs/features/16` |
 
-## Design-phase (resolve before implementing the affected area)
+## Open - owner's call
 
-6. **JS plugin runtime.** **Resolved: QuickJS-ng** (vendored at `third_party/quickjs-ng-v0.17.0`, amalgam single-file build). ChakraCore is out — unmaintained since 2020 and its official binary links are dead. Remaining work when the first JS plugin lands: wire async I/O to host APIs + timers around the amalgam. → `docs/02` NOTE: i will let you pick whatever is the best for the job
-7. **Context compression strategy details.** Thresholds, which model role summarizes, what the compressed ledger entry format looks like. Prototype against real long sessions before polishing the UI panel. → `docs/04`
-8. **SearXNG packaging.** Bundled binary vs vendored docker image; tor via system install vs bundled. Affects installer size and sandbox plugin's docker assumption. → `docs/04` NOTE: prefer bundled or if not possible auto install isolated. i want the distribution of this to be easy.
-9. **Profiler trace format.** The seam between C4's Bedrock profiler hooks and the IED profiler plugin — define the file/socket format early since both sides (two repos) build against it. Must carry: CPU spans, allocations, dynamic thread renames, GPU traces. → `docs/05`, AGENTS.md coordination
-10. **`.echo/` migration.** During transition, do C4 repos carry both `.echo/` and `.ied/`? Who writes which? Decide with the Nuke port. → `docs/03` NOTE: .echo will still exist in this folder but c4 will no longer care about echo
-11. **Claude Agent SDK integration shape.** How the SDK's own tool loop composes with IED's tool registry (does Claude get IED's tools, or does it stay in its own sandbox?), and what subscription-usage data the SDK/account API actually exposes for the usage views. → `docs/04`
-12. **Request routing policy.** Concrete fallback-list semantics per role, load tracking across models, and the privacy flagging rules (what marks a request "sensitive": keyword heuristics? user tagging? solution-level strict mode only?). → `docs/04`
-13. **Remote access security & concurrency.** Since the UI is served remotely: default bind address (localhost-only vs LAN), auth for non-localhost clients, TLS story; and multi-client semantics — can two devices drive the same workspace at once? Which client wins a given action (cursor, chat send)? → `docs/01`
+| # | Question | Recommendation |
+|---|---|---|
+| O1 | **"Federated projects"** - is it a set of solutions/repos opened together as one workspace (C4 + Claymore + IED), as designed in `docs/03`? Or something else (e.g. a remote project on another machine)? | As designed |
+| O2 | **Claude subscription use.** Anthropic's policy forbids third-party apps from offering claude.ai login or routing requests through Pro/Max credentials; an end user may run the official `claude` CLI signed in themselves. IED's bridge drives *your own* installed CLI for personal use and never reads credentials. If IED is ever distributed to others, should the bridge be off by default (API key only) unless Anthropic approves? | Yes: bridge = personal-use feature, documented; API key path for everyone else |
+| O3 | **OS primitives for the server**: build them as Bedrock modules (`Net::`, `Process::`, `FS::Watch`, `Time::`) in the C4 repo, or wrap libuv behind a C shim first? | Bedrock modules (Claymore needs them too), libuv acceptable as their implementation |
+| O4 | **Syntax highlighting colors.** The plan says grayscale unless color carries meaning. Token-type colors carry meaning (and C4Assist ships Visual Assist palettes). OK to have a restrained syntax palette, owner-selectable, with a pure-grayscale option? | Yes, restrained default + grayscale option |
+| O5 | **Loopback token friction.** Even on localhost, IED requires the one-time token / cookie (blocks malicious web pages from driving the server). Acceptable? (The CLI and tray open URLs with the token, so normal use is seamless.) | Yes |
+| O6 | **Default autonomy.** New chats default to `ask` permission mode and interrupted Agent runs auto-resume after a server restart. OK? | Yes |
+| O7 | **Server platform scope.** v1 server is Windows x64 only (C4 is Windows-only today); a Linux server comes after C4's Linux target. Clients are any browser. OK? | Yes |
+| O8 | **Not core**: ComfyUI generation, Perforce/Fossil, GitHub PR integration as optional plugins rather than built-ins. OK? | Yes |
+| O9 | **"Explosion theming"**: purely functional grayscale, or a signature accent moment (logo, title treatment, splash)? | Functional; identity in iconography only |
+| O10 | **Phone editing**: read + light edits by default (tap to edit), or full editing parity? | Read + light edit |
 
-## Later (v2+ candidates, no pressure)
+## Open - design (resolve before implementing the affected area)
 
-- Bundled desktop window (WebView2 embedding the local server) — "installed app" convenience; not a v1 requirement.
-- Out-of-process plugin isolation for misbehaving plugins.
-- Per-test structured output from Nuke's TestRunner (Test Explorer UI waits on this).
-- Cross-platform IED binaries (only if demand appears; sandbox already covers cross-OS *development*).
-- Light theme (plan says no; revisit only if the family ever wants it).
-- Plugin marketplace / sharing mechanism (v1: global plugins are manual installs from a path/zip).
+| # | Question | Notes |
+|---|---|---|
+| D1 | Reflection-based JSON serialization in Bedrock (needs String/Array/HashMap/enum support) vs hand-written DTO codecs in IED | Depends on Bedrock timeline (`docs/17` checklist item 6) |
+| D2 | Binary WS frames for terminal/profiler bulk | Measure in M1/M9 before adding |
+| D3 | Embeddings for skills/history search: which local embedding model/endpoint by default | P2; BM25 first |
+| D4 | Exact prefill-progress signals available from llama.cpp/vLLM/Ollama streams | Verify field names during M4; the estimate-based watchdog works without them |
+| D5 | Spell-check dictionary source and license (SCOWL-based Hunspell en_US) | Check before bundling |
+| D6 | Whether Nuke should read `.ied.proj` directly someday | No for v1 (Nuke stays authoritative; `nuke --init --ied` generates IED files) |
+
+## Later (v2+ candidates)
+
+- Out-of-process isolation for *all* third-party plugin logic (v1: JS in-process with permissions, process plugins isolated).
+- Linux/macOS IED server builds (after C4 targets them).
+- Light theme (plan says no).
+- Plugin marketplace / sharing.
+- Multi-user servers (v1 is single-owner).

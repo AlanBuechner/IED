@@ -1,14 +1,14 @@
-# plugins/ — default IED plugins
+# plugins/ - built-in IED plugins
 
-One folder per plugin; each is an ordinary project (built by Nuke) with a manifest, entry point and its own `skills/`. Full feature breakdowns: `../docs/05-default-plugins.md`. Manifest sketch + contribution model: `../docs/02-plugin-architecture.md`.
+One folder per built-in plugin: its `ied-plugin.json` manifest, UI modules, skills, and (once the compiler is ready) its C4 sources compiled into the server (`runtime.kind = "builtin"`; C4 has no DLL output - `docs/02`). Overview: `docs/05`. Feature lists: `docs/features/`.
 
 | Plugin | Role |
 |---|---|
-| `chat/` | AI chat: browser-like tabs, streaming thinking/tool calls, model groups, context panel; owns the default tool-call set (file/shell/web) |
-| `editor/` | The IDE: Monaco + LSP/DAP, project tree, toolbar with command templates, output window, search, splits, markdown preview, inline AI edits, minimap, line indicators |
-| `git/` | Fork/GitKraken-class source control UI (graph, staging, sync, conflicts) |
-| `terminal/` | Always-present collapsible bottom shell (PowerShell/bash); also the backend for toolbar commands and the AI shell tool |
-| `sandbox/` | Docker cross-OS build/test/develop; exposes autonomous "verify on linux" tools to the AI |
-| `profiler/` | Tracy-class profiler: CPU/allocation views, dynamic thread rename + by-task grouping, GPU traces |
+| `chat/` | AI chat (tabs, streaming, approvals, scratchpad, tasks, context panel), **Mission Control** and the goal board, default AI tool bindings |
+| `editor/` | The Visual Studio-style IDE: Monaco on server buffers, LSP/DAP UI, Solution Explorer, toolbar tasks, Output, Error List, Find, Test Explorer, debugger windows, viewers, inline AI |
+| `git/` | Fork/GitKraken-class source control on the git CLI |
+| `terminal/` | Always-present bottom terminal (ConPTY), AI terminals per chat |
+| `sandbox/` | Docker / WSL / SSH sandboxes with egress control and AI tools |
+| `profiler/` | Tracy-class profiler on the ITP trace protocol (Tracy is a feature reference only) |
 
-Sidebar order (default): chat, editor, git — then plugin-contributed icons. All six are disable-able; app must stay usable with just editor + terminal.
+Default sidebar order: chat, editor, git, then plugin activities. All six are disable-able; IED must stay usable with only editor + terminal.

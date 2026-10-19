@@ -1,88 +1,64 @@
-# 03 — Project and solution model
+# 03 - Project and solution model
 
 ## Purpose
 
-Define IED's project/solution format: Visual Studio-style grouping, with the twist that **project files can live elsewhere than the code they describe** (so generated project files can sit in a build directory instead of polluting source folders).
+Define IED's workspace formats: Visual Studio-style solutions and projects, with the twist that **project files can live elsewhere than the code they describe** (generated project files sit under `build/` instead of polluting source folders), plus folder/file modes and federations. Schemas: `shared/host-api/schemas/`. Examples: `shared/host-api/examples/`. Features: `docs/features/03-workspaces.md`.
 
-## Files
+## Workspace kinds
 
-### Solution file: `<Name>.ied.sln` (JSON)
+| Kind | File | Notes |
+|---|---|---|
+| Solution | `<Name>.ied.sln` | groups projects; holds local-plugin pins and the generator recipe |
+| Folder | - | `ied ./`; `.ied/` created lazily only when something workspace-tier is saved |
+| File | - | `ied file.txt`; lightweight folder workspace with just that document |
+| Federation | `<Name>.ied.fed` | several solutions/folders (e.g. C4 + Claymore + IED) in one workspace; each member keeps its own `.ied/`, trust, plugins, settings (interpretation of the plan's "federated projects", `docs/99` O1) |
 
-At the solution root. Groups projects and carries solution-level configuration.
+## Solution file (`solution.v1.schema.json`)
 
-```jsonc
-{
-  "version": 1,
-  "name": "MyGame",
-  "projects": [
-    { "file": "build/projects/Core.ied.proj" },          // path relative to solution root
-    { "file": "Engine/Claymore.ied.proj" }               // or anywhere else
-  ],
-  "groups": [                                            // optional display grouping in the tree
-    { "name": "Engine",   "projects": ["Engine/Claymore.ied.proj"] },
-    { "name": "Gameplay", "projects": ["build/projects/Core.ied.proj"] }
-  ],
-  "localPlugins": [                                      // project-local plugins, trusted-workspace only
-    { "id": "c4", "path": "../C4/Nuke/tools/ied" }       // relative to solution root
-  ],
-  "settingsRef": ".ied/solution.json"                    // solution-tier settings (see 07)
-}
-```
+Fields: `version`, `name`, `projects[]` (paths or globs to `.ied.proj`, optionally `optional` for generated files not yet generated), `groups[]` (nested display folders), `items[]` (Solution Items: README, AGENTS.md...), `localPlugins[]` (path + expected id; trusted workspaces only), `generator` (the command that regenerates project files, e.g. `nuke --init --ied`, and which paths it owns - so IED offers *Regenerate* and warns before hand-editing generated files).
 
-### Project file: `<Name>.ied.proj` (JSON)
+## Project file (`project.v1.schema.json`)
 
-One per project. The key feature from the plan: **`root` may point to a folder other than the one containing this file.**
+Fields: `version`, `name`, **`root`** (code root relative to the project file - the key feature), `include`/`exclude`, `kind` (executable/library/plugin/tests/other), `buildSystem` (opaque except `id`; e.g. `{ "id": "nuke", "projectName": "Game" }`), `presets` (task presets from plugins, e.g. `c4.nuke`), `variables` (toolbar dropdowns/toggles), `tasks` (named step lists bound to standard slots like `build`, `run`, `debug`, `test`, `profile`), `toolbar` (ordered variable and task keys), `debug` (launch/attach configurations), `lspProfiles`, `env`, `sandbox`, `references`.
 
-```jsonc
-{
-  "version": 1,
-  "name": "Core",
-  "root": "../src/Core",        // where the code actually is; defaults to "." (this file's folder)
-  "build": {
-    "system": "nuke",           // build system id; "nuke" = invoke nuke.bat (see 06). Generic slot for others.
-    "projectName": "Core",      // how the build system knows this project
-    "defaultConfiguration": "Development"
-  },
-  "toolbars": [                 // per-project toolbar config (dropdowns + buttons) — see 06
-    { "id": "main", "items": [ ... ] }
-  ],
-  "lspProfiles": ["c4"],        // which registered LSP profiles apply to this project's files
-  "settingsRef": ".ied/projects/Core.json"   // optional project-tier settings
-}
-```
+Because `root` is explicit, a solution can keep every `.ied.proj` under `build/ied/` (generated, gitignored) while code folders stay clean. The Solution Explorer shows each project's files from its `root`, grouped by the solution's `groups`. Task grammar and the build-system seam: `docs/06`.
 
-Because `root` is explicit, a solution can keep all `.ied.proj` files under `build/projects/` (generated, gitignored) while the code stays clean — exactly the workflow the plan calls for. The file tree in the editor is rooted at each project's `root`, and the tree groups projects by the solution's `groups`.
+## The `.ied/` folder (at the solution root)
 
-## The `.ied/` hidden folder (solution root)
-
-Mirrors how C4 repos use `.echo/` today (plugins.json + c4-lsp.json + skills). It is **committed** so deleting generated files never loses configuration:
+Committed, so deleting generated files never loses configuration ("if we delete the generated files the settings and skills will not be lost" - IDEplan):
 
 ```
 .ied/
-├── solution.json          # solution-tier settings (toolbar defaults, AI model group overrides, secure mode…)
-├── projects/              # project-tier settings, one file per project name
-│   └── Core.json
-├── skills/                # project skills — markdown, keyword-searchable by the AI
-│   ├── c4-language/SKILL.md
-│   └── mygame-architecture/SKILL.md
-├── plugins.local.json     # resolved local plugin pins (written by tooling when a kit like Nuke inits a project)
-└── local/                 # per-machine state — gitignored, never committed
-    ├── workspace.json     # open tabs, pane layout, last toolbar selections
-    └── lsp-options/       # machine-specific LSP initialization options (build-derived, e.g. c4.json)
++- solution.json            solution-tier settings (default model group, egress policy, toolbar defaults, permissions rules)
++- solutions/<Name>.json    per-solution settings when several solutions share one folder
++- projects/<Name>.json     project-tier settings
++- skills/<name>/SKILL.md   project skills (keyword-searchable by the AI)
++- modes/<id>.json          custom agent modes (agent-mode.v1 schema)
++- privacy.json             sensitive-path globs for AI taint tracking
++- dictionary.txt           project spell-check words
++- memory/                  project memory facts (approved AI additions)
++- evals/                   eval tasks for the model arena
++- sandbox/<name>/          Dockerfile + setup.sh per sandbox
++- local/                   per-machine, gitignored:
+   +- chats/                  chat transcripts, run journals, trajectories, media, checkpoints
+   +- buffers/                journal of unsaved edits (hot exit)
+   +- layout/                 layouts per device class, open documents, toolbar selections, startup project
+   +- breakpoints.json, bookmarks.json
+   +- lsp-options/<id>.json   build-derived LSP initialization options (written by the build system)
+   +- captures/               profiler traces
 ```
 
 Rules:
 
-- Tooling that generates project files (Nuke's `--init` port, a future `ied --init`) writes the `.ied/` contents **idempotently and never clobbers hand edits** — same discipline as Nuke's current `EchoConfig.py`.
-- LSP initialization options are *derived from the build* (include paths + defines exactly as passed to the compiler) so diagnostics match a real build. That file is regenerated on every build; user files under `.ied/` are not touched by builds.
-- Skills live here (not in `build/`) on purpose: "if we delete the generated files the settings and skills will not be lost" (IDEplan).
+- Generators (Nuke's `--init --ied`, templates) write `.ied/` contents **idempotently and never clobber hand edits** (same discipline as Nuke's `EchoConfig.py` today).
+- LSP initialization options are **derived from the build** (exact include paths and defines the compiler saw), regenerated after each successful build, and live in `local/` because they contain absolute paths.
+- Trust is never stored in the repo (a repo cannot trust itself); it lives in app data (`docs/11`).
+- The repo's `.gitignore` gets `.ied/local/` (generators add it).
 
-## How this maps to Nuke today
+## How this maps to Nuke
 
-Nuke auto-discovers projects by walking for `Project.py` and reads `Config.py` at the repo root. IED does **not** replace that — it adds a layer: the solution/project files tell IED *what exists and where*, while Nuke keeps owning *how to build*. The project file's `build.projectName` is what gets passed as `-p` to `nuke.bat`. When both exist, Nuke's discovery is authoritative for build inputs; IED's files are the IDE-facing index. (See 06 for the exact interplay and one open question about whether Nuke should eventually learn to read `.ied.proj` directly.)
+Nuke discovers projects by walking for `Project.py` (project name = folder name) and owns *how to build*. IED's files are the IDE-facing index of *what exists and where*. `nuke --init --ied` (C4-repo work item N2, `docs/17`) writes the solution, generated project files under `build/ied/`, and the `.ied/` scaffold; the project's `buildSystem.projectName` is what tasks pass as `-p`. Nuke stays authoritative; IED never re-derives build inputs (`docs/99` D6).
 
-## Open items
+## Transition from `.echo/`
 
-- Final JSON schemas for `.ied.sln` / `.ied.proj` → `shared/host-api/` (blocking, see 99).
-- Multiple solutions in one folder: allowed, each is just a file; the workspace opens exactly one at a time.
-- Migration story for existing C4 repos (which have `.echo/`): does Nuke's init write both folders during a transition period? Decide when the C4 repo work starts.
+`.echo/` folders remain in existing repos (Echo may still be used there). IED never writes `.echo/`; `ied import echo` converts settings, skills, modes and chats once (`docs/20`). Nuke keeps writing `.echo/c4-lsp.json` until the owner retires Echo, and additionally writes `.ied/local/lsp-options/c4.json`.

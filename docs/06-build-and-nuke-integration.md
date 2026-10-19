@@ -1,73 +1,72 @@
-# 06 — Build & Nuke integration
+# 06 - Build and Nuke integration
 
 ## Purpose
 
-IED does **not** reimplement a build system. For C4 repos it drives **Nuke** (`C:\GameDev\C4\Nuke`, ported into this repo's `Nuke/` kit). This doc defines the seam: what IED configures, how commands are built, where output goes, and how LSP stays in sync with real builds.
+IED does **not** reimplement a build system (AGENTS.md rule 3). It runs **tasks** - configured step lists - that invoke whatever the project uses; for C4 projects that is **Nuke** (`nuke.bat`). This doc defines the task model, how values flow from toolbar dropdowns into commands, where output goes, how errors become Error List entries, and what Nuke must add for a first-class experience. Features: `docs/features/05-build-run-test.md`. Schema: `shared/host-api/schemas/project.v1.schema.json`.
 
-## Why Nuke (recap of what we're reusing)
+## What Nuke is today (2026-10-19)
 
-From studying `C:\GameDev\C4\Nuke`:
+- `nuke.bat` -> `Nuke/nuke.py`; actions `build | run | test | clean | list | init`; flags `-p <project>`, `-c <config>`, `-a <arch>`, `-s <system>`, `-ci` (compile info), `--setup`; configs `Debug | Development (default) | Dist` with aliases; a bare `nuke` builds.
+- Projects are folders with `Project.py` (`GetProject()` returning build type, module links, includes, defines, links, copies...); the project name is the folder name. Output `build/{bin,int}/{config}-{system}-{arc}/{proj}` (Claymore's older copy uses `nuke-bin/`/`nuke-int/`).
+- Output is plain text (no ANSI); **compiler output is printed in one block after each compile** (not streamed). Diagnostics: `<path> (<line>:<col>) error|warning|fatal error: <msg>` followed by the source line and a caret; `<path>` is **relative to its owning source root** (can be ambiguous across roots).
+- After a successful build: `build-info.json` (per-project timings) and `build-trace.json` (Chrome trace) in the int dir.
+- Tests: test projects (`src/tests/` present) are built with `-test`; output lines `[TEST] name`, `ok name (ms)`, `FAILED name`, `FAIL: file:line: msg`. The compiler supports `-test-json <path>` and test executables accept `--filter <glob>`, but **Nuke passes neither** yet.
+- `EchoConfig.py` writes `.echo/plugins.json` (once) and `.echo/c4-lsp.json` (after each successful build, only when changed): `{ includePaths, defines, c4Home, projects }`.
 
-- **Launcher:** repo-root `nuke.bat` delegates to `Nuke/nuke.py`. Positional actions (`build|run|test|clean|list [config]`) plus long flags; config aliases (`dev`→Development); default config **Development**.
-- **Config.py** owns: configurations (`Debug`, `Development`, `Dist`), architectures (`x64`), systems (`windows`), output layout `build/{bin,int}/{config}-{system}-{arc}/{projName}`, compiler path, extra project folders.
-- **ProjectManager** auto-discovers projects by walking for `Project.py`; maintains the module graph with cycle detection; sources are `.cf`/`.ch`.
-- **ObjectBuilder** does incremental decisions (args cache + dependency tree); **TestRunner** discovers test-bearing projects (any executable with `src/tests/`) and aggregates exit codes.
-- **EchoConfig.py** is today's editor bridge: writes `.echo/plugins.json` (plugin recipe) and `.echo/c4-lsp.json` (build-derived LSP init options: exact `-I` include paths + defines), regenerated idempotently on every build so LSP diagnostics match a real compile.
-
-IED keeps all of that. The port into this repo is mechanical once the C4 compiler can build it: copy the kit, point `Config.py` at IED's projects, add the new bridge (below).
-
-## Command templates & toolbar injection
-
-Toolbar buttons (see 05/editor) are **lists of command steps** with template variables filled from toolbar dropdowns and project state:
+## Task model
 
 ```jsonc
-// in .ied.proj "toolbars"
-{
-  "id": "main",
-  "items": [
-    { "kind": "dropdown", "id": "config", "values": ["Debug", "Development", "Dist"], "default": "Development" },
-    { "kind": "dropdown", "id": "arch",   "values": ["x64"], "default": "x64" },
-    { "kind": "button", "id": "build", "icon": "build.svg",
-      "steps": [
-        { "command": "nuke.bat build -p {project} -c {config} -a {arch}", "output": "build" }
-      ] },
-    { "kind": "button", "id": "run", "icon": "run.svg",
-      "steps": [
-        { "command": "nuke.bat build -p {project} -c {config} -a {arch}", "output": "build" },
-        { "command": "nuke.bat run   -p {project} -c {config} -a {arch}", "output": "run", "onlyIf": "prevSuccess" }
-      ] },
-    { "kind": "button", "id": "test", "icon": "test.svg",
-      "steps": [ { "command": "nuke.bat test -c {config}", "output": "test" } ] }
-  ]
-}
+// in a .ied.proj (full example: shared/host-api/examples/Game.ied.proj)
+"variables": {
+	"config": { "kind": "dropdown", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution" },
+	"arch":   { "kind": "dropdown", "values": ["x64"], "default": "x64", "scope": "solution" }
+},
+"tasks": {
+	"build": { "slot": "build", "icon": "$(gear)", "steps": [
+		{ "run": ["${solutionDir}/nuke.bat", "build", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"],
+		  "cwd": "${solutionDir}", "output": "build", "problemMatcher": "c4" } ] },
+	"debug": { "slot": "debug", "icon": "$(debug-start)", "steps": [
+		{ "task": "build" },
+		{ "debug": "Game", "onlyIf": "prevSuccess" } ] }
+},
+"toolbar": ["config", "arch", "|", "debug", "build", "test"]
 ```
 
-- `{project}`, `{config}`, `{arch}`, `{system}` are built-in variables; dropdowns define custom ones.
-- `onlyIf: prevSuccess` gives the plan's "build, then if successful run" behavior generically — no C4 knowledge in IED.
-- Each step runs through the **terminal supervisor** (streaming output), so toolbar commands, AI shell calls and the human terminal share one process manager. Exit codes drive `onlyIf` and the success/failure status bar.
-- The build system id in `.ied.proj` (`"system": "nuke"`) selects which command vocabulary applies; other build systems plug in via their own template conventions later. Nothing here is C4-specific — Nuke is just the first registered build system.
+- **Variables** use `${name}` (the earlier `{name}` sketch is retired): built-ins (`solutionDir`, `projectRoot`, `project`, `config`, `arch`, `file`, `line`, `selection`, `startupProject`, `testFilter`...), project/preset variables, `env:`, `setting:`, `input:`. Unknown variables fail the task visibly.
+- **Dropdowns** have fixed `values` or `valuesFrom` (a command or binding, e.g. a future `nuke list --json`); `scope: solution` shares one selection across projects (VS-style solution configuration).
+- **Steps:** `run` (argv preferred, or a shell string), `task` (compose tasks), `debug` (start a DAP session from a named configuration), `binding` (call a plugin). Each has `cwd`, `env`, `output`, `problemMatcher` or `diagnosticsFile`, `testResults`, `onlyIf` (`prevSuccess` default, `prevFailure`, `always`), `when` expressions, `timeoutSeconds`, `background.readyPattern`, `target` (`host` or `sandbox:<name>`).
+- **Slots** bind tasks to VS keys and menus: `debug` = F5, `run` = Ctrl+F5, `build` = Ctrl+Shift+B, plus `rebuild`, `clean`, `test`, `testSelected`, `debugTest`, `profile`.
+- **Presets:** the `c4` plugin contributes the `c4.nuke` preset (variables, toolbar, standard tasks), so a `nuke --init --ied` project needs only `"presets": ["c4.nuke"]` and overrides by key.
+- Nothing here is C4-specific: Nuke is just the first build system a plugin configures.
 
-## Output routing
+## Execution and output
 
-- Steps declare `"output": "<tabId>"`; the editor plugin's output window routes each step's stdout/stderr (ANSI preserved) to that tab: `build`, `run`, `test` by default, any plugin can register more.
-- Long-running steps show a live spinner on the button; failure colors the status bar red with the first error line; clicking it jumps to the output tab at the error.
+- Every process step runs through the host supervisor (`src/terminal`): a job object per task (cancel kills the whole tree), streamed stdout/stderr, exit codes. The AI's `build_run`/`task_run` tools run the very same tasks (tagged with the chat).
+- Steps write to **output sources** (`build`, `run`, `debug`, `test`, or plugin-contributed); the Output window selects a source from a dropdown (VS) and renders ANSI colors.
+- Running state: spinner on the button, status bar "Building <project>... 0:12", Build > Cancel (Ctrl+Break); failure turns the status bar red with the first error; clicking jumps to it.
+
+## Errors: problem matchers and structured diagnostics
+
+- **Problem matchers** (contributed by plugins) parse output lines into Error List entries. The `c4` matcher handles `<path> (<line>:<col>) <severity>: <msg>`; `c4-test` handles `FAIL: <file>:<line>: <msg>`.
+- **Path resolution** tries, in order: absolute path, step `cwd`, project `root`, then each include path from the build-derived LSP options (`${lspIncludePaths}`) - needed because the compiler prints root-relative names. Ambiguous matches are flagged in the entry.
+- **Structured diagnostics** beat regexes: if a step declares `diagnosticsFile`, IED reads JSON diagnostics instead. Nuke work item N5 adds this with absolute paths.
+- Build diagnostics persist until the next build of that project; LSP diagnostics for the same location are de-duplicated.
+
+## Tests
+
+- Test Explorer reads `c4-test-json` result files (once Nuke passes `-test-json`, N4) and falls back to the text matcher before that.
+- Run selected/failed tests by setting `${testFilter}` (Nuke must pass `--filter`, N4); debug a test by launching its harness under C4DAP with the filter.
 
 ## LSP/build sync (the `.echo/` bridge, reborn)
 
-Today's `EchoConfig.py` pattern carries over unchanged in spirit:
+Nuke's `IEDConfig.py` (work item N1) writes `.ied/local/lsp-options/<id>.json` after each successful build with exactly the include paths and defines the compiler used (same content as `.echo/c4-lsp.json`). The `c4` plugin's LSP profile points `initializationOptionsFile` at it; IED watches the file and pushes changes (`didChangeConfiguration` or restart). Diagnostics therefore match a real build.
 
-- Nuke's IED port gains an **IEDConfig** step: after each successful build, write `.ied/local/lsp-options/<proj>.json` with exactly the include paths and defines passed to the compiler (same logic as current `WriteLspOptions`).
-- The C4 plugin's LSP profile references that file via `initializationOptionsFile` — so the language server always sees the same compiler input a real build uses, and diagnostics match.
-- `nuke --init` (ported) writes the IED project/solution files + `.ied/` scaffold for new projects, idempotently, never clobbering hand edits.
-- The LSP options file lives in `.ied/local/` because it's machine-specific (absolute paths); everything else in `.ied/` is committed.
+## Nuke work items (C4 repo)
 
-## Test integration
+N1 IEDConfig LSP options; N2 `nuke --init --ied` writes solution/project/`.ied/` scaffold; N3 stream compiler output; N4 `nuke test --json-results <path> --filter <glob>`; N5 `--diagnostics-json` with absolute paths; N6 `nuke list --json`; N7 optional ANSI color; N8 update Claymore's older copy (exit codes, `-g`, `--projects`); N9 keep `.echo/` output during the transition. Details and rationale: `docs/17`.
 
-- `nuke test` runs every test-bearing project; IED streams per-project results to the `test` output tab and surfaces a summary (pass/fail counts) in the status bar.
-- Per-test granularity: when Nuke's test runner gains structured output (JSON), the editor plugin renders a VS-style Test Explorer view. Until then, console text is enough — don't build the UI before the data exists.
+## Decided
 
-## Open items
-
-- Should `.ied.proj` eventually be *read by Nuke* (single source of truth) instead of IED translating to `-p/-c/-a` flags? Leaning no for v1 — keep Nuke untouched and IED as a thin caller; revisit when the C4 repo work happens.
-- `--ci` (per-file compile times) output: route to build tab now, consider feeding the profiler plugin later.
-- Multi-solution builds (building more than one project at once from the toolbar): v1 = sequential steps; parallelization is a Nuke concern, not IED's.
+- `.ied.proj` is **not** read by Nuke; Nuke stays the build authority and generates IED files (`docs/99` D6).
+- Build insights (`build-trace.json`) open in the profiler timeline (P2).
+- Multi-project builds are the build system's job; IED runs one task.

@@ -8,7 +8,7 @@ The full feature set of IED, one area per file under `docs/features/`. This is t
 
 ```
 | ID       | Feature                              | Pri | Stories        | Owner          |
-| F-EDT-07 | Bound split (header <-> source pair) | P1  | US-EDT-6       | plugins/editor |
+| F-EDT-71 | Bound split (header <-> source pair) | P1  | US-EDT-6       | plugins/editor |
 ```
 
 - **ID** `F-<AREA>-<n>`: stable once assigned. Never renumber; retire with a strike-through and a note.

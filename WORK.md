@@ -1,37 +1,50 @@
-# WORK.md — current state and next actions
+# WORK.md - current state and next actions
 
 Living document. Update it at every checkpoint commit.
 
-## Current state (scaffold only — no code)
+## Current state (planning complete for v1 scope; no product code)
 
-- [x] `IDEplan.md` — vision document (pre-existing; owner has since added: split server/web model, settings window, model routing, Claude SDK, chat persistence, scratchpad).
-- [x] Folder structure created: `docs/`, `Nuke/`, `src/` (server), `frontend/` (web client), `shared/{host-api,ui-kit}`, `plugins/{chat,editor,git,terminal,sandbox,profiler}`, `.ied/`.
-- [x] High-level planning docs in `docs/` (01–08) plus open questions (`99`).
-- [x] Root conventions: `README.md`, `AGENTS.md`, `WORK.md`, `.gitignore`.
-- [x] Third-party dependencies pre-downloaded into `third_party/` (gitignored): monaco 0.57.0, xterm 6.0.0 (+addons), codicons v0.0.46-45, quickjs-ng v0.17.0 amalgam, WebView2 1.0.4258.31 (desktop-wrapper only — see below), SearXNG master, Tracy (reference only — NOT a dependency), libgit2 master. Reproduce: `tools/fetch-deps.ps1`; committed record: `tools/deps-manifest.json`.
-- [ ] No code. The C4 compiler cannot build this repo yet.
+- [x] `IDEplan.md` - vision (owner-maintained).
+- [x] Folder structure, root conventions (`README.md`, `AGENTS.md`, `.gitignore`), third-party deps pre-downloaded (`tools/fetch-deps.ps1`).
+- [x] **User stories and journeys** - `docs/08` (personas, journeys J1-J14, 178 stories in 24 epics, tagged plan/plan+/ext and P0/P1/P2).
+- [x] **Full feature catalog** - `docs/09` + `docs/features/` (16 areas, 546 features - 247 P0, 240 P1, 59 P2 - with owners and story links; "surpass Echo" differentiators; 89 AI tools in `docs/13`).
+- [x] **Blocking decisions resolved as drafts** - protocol v1 (`docs/10`), security and multi-client (`docs/11`), manifest/solution/project/federation/agent-mode/frames schemas (`shared/host-api/`, validated examples).
+- [x] **Design docs** - agent runtime and stall protection (`docs/12`), tool catalog (`docs/13`), system prompt + shipped prompt texts (`docs/14`, `src/ai/prompts/`), UI shell with wireframes and keymap (`docs/15`), profiler + ITP trace protocol (`docs/16`), distribution (`docs/21`), Echo parity/surpass/migration (`docs/20`), testing (`docs/19`), roadmap M0-M11 (`docs/18`).
+- [x] **C4 readiness gap analysis + cross-repo work items** - `docs/17` (Bedrock Net/Process/FS.Watch/Time/Text, suspected CBind bugs S1-S7, C4LSP L1-L9, Nuke N1-N9, C4Assist -> declarative `c4` plugin, Bedrock `Profile::`).
+- [ ] No product code. The C4 compiler cannot build the server yet (`docs/17` readiness checklist).
 
-## Next actions (in dependency order)
+## Next actions
 
-1. **Resolve the blocking open questions** in `docs/99-open-questions.md`: WS protocol + resume semantics, plugin manifest v1, project/solution file formats, remote-access auth/bind/TLS. These gate everything else.
-2. **Define the server contract concretely** (`shared/host-api/`): WS frame types (request/response, events, streaming, cancellation, resume), HTTP ops, manifest types, contribution interfaces (sidebar icons, panels, toolbar, output tabs, skills, tool calls, LSP profiles, DAP providers, settings schema, system-message sections), binding registry. This is the contract every plugin + the web client code against — get it right before any plugin exists.
-3. **Theme tokens** (`frontend/css/`): the grayscale palette + semantic accent tokens as CSS custom properties. Cheap to do now, and everything visual depends on it. Include responsive breakpoints (phone widths are first-class).
-4. **Port the Nuke kit** into `Nuke/` (from `C:\GameDev\C4\Nuke`) once the C4 compiler can build this repo: root launcher, `Config.py` with IED's projects, project manager, incremental builder, test runner. See `docs/06`.
-5. **Server skeleton** (`src/`): lifecycle + startup modes (foreground/background), web server (static + WS hub), settings loader (app/solution/project tiers), plugin discovery/validation/enabling, event ring buffer + resume.
-6. **Implement default plugins in this order** (each unlocks the next's usability):
-   1. `editor` — core UX: Monaco, project tree, output window, toolbar; LSP/DAP wiring.
-   2. `chat` — core value: streaming chat, tool calls, model groups, context panel.
-   3. `terminal` — bottom shell (also the AI's shell tool).
-   4. `git` — source control UI.
-   5. `sandbox` — docker cross-OS builds.
-   6. `profiler` — Tracy-like view + C4 library hooks (needs C4 repo work; Tracy itself is a **feature reference only**, never linked in).
-7. **C4 repo coordination** (parallel track, see AGENTS.md): LSP/DAP retarget from Echo to IED, Nuke `.ied/` bridge, C4Assist rewrite, Bedrock profiler hooks.
+**Owner:** review `docs/99` "Open - owner's call" (O1-O10) and the M0 deliverables below; sign off the schemas so they can be frozen.
+
+**M0 - can start now (no compiler needed), in this order:**
+
+1. Freeze `shared/host-api` v1 after owner review (manifest, solution, project, frames).
+2. `frontend/css/theme.css` + static HTML mocks of the six review screens (`docs/15`); screenshots at 1920x1080, 1366x768, 390x844; owner sign-off.
+3. `tools/mock-server/` (Python, protocol v1) + `tools/conformance/` suite.
+4. Frontend shell on the mock server: sidebar, docking, menus/commands/keybindings, status bar, WS client with resume, phone shell - with Playwright e2e and resume tests.
+5. `tools/fake-model/` + scripted cases for every stop class in `docs/12`.
+6. SearXNG-on-Windows spike (`docs/21`).
+
+**C4 repo (parallel, owner's other track):** verify suspected bugs S1-S7 and file/fix confirmed ones per `AGENTS.md`; Bedrock P-1 modules; scale test; Nuke N1-N6; the declarative `c4` plugin (schema-valid today: see `shared/host-api/examples/c4-plugin/`); C4LSP L1-L5.
+
+**Then M1-M11** per `docs/18` once the readiness checklist in `docs/17` is green.
 
 ## Decisions log
 
 | Date | Decision | Where recorded |
 |---|---|---|
-| 2026-10-19 | JS plugin runtime = **QuickJS-ng v0.17.0** (ChakraCore dropped: unmaintained since 2020, official binary links dead) | `docs/99` #6, `tools/README.md` |
-| 2026-10-19 | Third-party deps pre-vendored to `third_party/` (gitignored); committed SHA256 record in `tools/deps-manifest.json`; SearXNG via codeload tarball (Windows-illegal filenames break git clone) | `tools/README.md` |
-| 2026-10-19 | UI delivery = **split server + served web frontend** (owner decision): standalone server owns all state, browser is disposable, remote/phone access first-class; bundled desktop window (WebView2) is optional-later, not v1 | `docs/99` #1, `docs/01`, AGENTS.md rule 2 |
-| 2026-10-19 | Tracy is a **feature reference only** — never linked into IED or C4, not a runtime dependency | `docs/05`, `tools/README.md` |
+| 2026-10-19 | JS plugin runtime = **QuickJS-ng v0.17.0** (ChakraCore dropped: unmaintained, dead links); behind a C shim | `docs/99` #6, `docs/02` |
+| 2026-10-19 | Third-party deps pre-vendored to `third_party/` (gitignored); SHA256 record in `tools/deps-manifest.json` | `tools/README.md` |
+| 2026-10-19 | UI delivery = split server + served web frontend; WebView2 wrapper optional later | `docs/99` #1, `docs/01` |
+| 2026-10-19 | Tracy is a feature reference only - never linked | `docs/05`, `docs/16` |
+| 2026-10-19 | **Echo parity is the floor; IED must drastically surpass it** (owner) - orchestration area, differentiators raised to P1 | `docs/09`, `docs/20`, `docs/features/16` |
+| 2026-10-19 | Plugin runtimes: builtin (compiled in) / declarative / JS / process - C4 has no DLL output | `docs/02`, `docs/17` |
+| 2026-10-19 | Protocol v1: one WS per tab, topic seq + snapshots + gaps, opId idempotency, doc lease + rebase | `docs/10` |
+| 2026-10-19 | Security: loopback default, Host/Origin checks, loopback one-time token, password required for LAN | `docs/11` |
+| 2026-10-19 | Task variables use `${name}` (replaces `{name}`) | `docs/06`, schemas |
+| 2026-10-19 | Git backend = git CLI; libgit2 kept vendored for later | `docs/99` #14 |
+| 2026-10-19 | Claude: API-key provider + bridge driving the owner's own `claude` CLI; IED never handles Claude credentials (Anthropic policy) | `docs/04`, `docs/99` O2 |
+| 2026-10-19 | Profiler trace protocol = ITP v1 (explicit interning, timestamped thread renames, task events) | `docs/16` |
+| 2026-10-19 | SearXNG bundled via embeddable Python (spike pending); tor bundled; Edge via CDP for browser tools | `docs/21` |
+| 2026-10-19 | Native APIs only through hand-written C shims with opaque handles until CBind struct bugs are verified/fixed | `docs/17` |

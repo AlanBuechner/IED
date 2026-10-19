@@ -1,135 +1,123 @@
-# 04 — AI chat design
+# 04 - AI design: models, routing, privacy, context, knowledge, egress
 
 ## Purpose
 
-The AI is a first-class citizen of IED, not an add-on. This doc covers the runtime that the chat plugin (05) sits on, plus the cross-cutting pieces: model groups, context compression, system-message assembly, skills search, MCP, and web egress.
+The AI is a first-class citizen of IED. This doc covers the AI runtime's cross-cutting design. Companion docs: `docs/12` (agent loop, modes, sub-agents, stall protection), `docs/13` (tools), `docs/14` (system prompt), `docs/features/07-chat.md` + `08-ai-runtime.md` + `16-orchestration.md` (feature lists).
 
 ## Where things live
 
-- **AI runtime (host, `src/ai/`):** model connections, streaming, token accounting, tool-call execution, context management, egress proxying. Not a plugin — it's infrastructure, like the LSP pool.
-- **Chat plugin (`plugins/chat/`):** all UI (tabs, streaming views, context panel) *and* the default tool-call set (file/shell/web tools). The plan explicitly says these default tools belong to the chat plugin.
+- **AI runtime (`src/ai/`, host infrastructure, not a plugin):** providers, dialect adapters, scheduler and routing, agent loop, tool executor, permissions, context ledger and compression, persistence, egress proxy, MCP client, usage tracking, goal queue and verifier.
+- **Chat plugin (`plugins/chat/`):** all chat UI (tabs, streaming views, approval cards, right panel, scratchpad, tasks, Mission Control) and the default tool set's bindings.
 
-## Model configuration & model groups
+## Providers
 
-Settings define **models** (endpoint URL, API style — OpenAI-compatible is the baseline — auth, context window size, tool-calling support, vision support, **temperature**, privacy class: `local` or `cloud`) and **model groups**: named bundles that pick a model *and its temperature* per *role*:
+| Provider | Covers | Notes |
+|---|---|---|
+| OpenAI-compatible Chat Completions | llama.cpp server, vLLM, SGLang, LM Studio, Ollama `/v1`, OpenRouter, others | the baseline; streaming SSE, tools, vision parts |
+| Anthropic Messages API | Claude with an API key | thinking, tool use, prompt caching, rate-limit headers |
+| Claude Code bridge | Claude through the owner's own installed `claude` CLI | see "Claude" below |
+| Plugin providers | anything else | `modelProviders` contribution |
+
+**Model profiles** (app tier) hold: endpoint, model id, context window (discovered), max output, capabilities (tools, vision, thinking, FIM), effort mapping, default sampling, parallel slots (discovered from llama.cpp `/props` where available), privacy class (`local` / `lan` / `cloud`), cost, prompt variant, dialect, stall-policy overrides. Discovery and a capability probe fill most of it ("Test connection").
+
+**Dialects** normalize what local servers actually emit: reasoning fields (`reasoning_content`, `reasoning`, `thinking`, `<think>` tags), tool calls as text (Hermes, Qwen, Mistral, harmony, fenced JSON), parallel call deltas (merge by id then index), finish reasons. Details and the reasons they matter: `docs/12`.
+
+## Model groups and roles
+
+A **model group** assigns, per **role**, a model + temperature + effort + fallback list:
 
 ```jsonc
-{
-  "groups": {
-    "default": {
-      "planning":       { "model": "claude",        "temperature": 0.3 },  // e.g. Claude does the planning…
-      "primary":        { "model": "local-big",     "temperature": 0.2 },
-      "implementation": { "model": "local-fast",    "temperature": 0.0 },  // …temp-0 local model implements
-      "researchSubAgent": { "model": "local-fast",  "temperature": 0.1 },
-      "workerSubAgent":   { "model": "local-fast",  "temperature": 0.0 }
-    },
-    "fast": { "primary": { "model": "local-fast" } }
-  }
+"ai.groups": {
+	"plan-claude/impl-local": {
+		"primary":        { "model": "qwen3.8-27b@spark", "temperature": 0.3, "effort": "medium", "fallback": ["qwen-coder-32b@desk"] },
+		"planning":       { "model": "claude-opus-5-5",   "temperature": 0.3, "effort": "high",   "fallback": ["qwen3.8-27b@spark"] },
+		"implementation": { "model": "qwen-coder-32b@desk","temperature": 0.0 },
+		"worker":         { "model": "qwen-coder-32b@desk","temperature": 0.0 },
+		"research":       { "model": "qwen3.8-27b@spark", "temperature": 0.2 },
+		"verifier":       { "model": "qwen3.8-27b@spark", "temperature": 0.0 },
+		"summarizer":     { "model": "qwen-small@desk",   "temperature": 0.1 },
+		"titler":         { "model": "qwen-small@desk",   "temperature": 0.2 },
+		"vision":         { "model": "qwen-vl@spark" },
+		"completion":     { "model": "qwen-coder-fim@desk" },
+		"inline":         { "model": "qwen-coder-32b@desk", "temperature": 0.1 }
+	}
 }
 ```
 
-- The chat UI shows a **model group selector** per chat tab (plus per-message overrides later).
-- Roles exist so sub-agent work (planning, research, parallel workers) can run on different models *at different temperatures* than the main loop — the plan's example: a strong model plans, a temp-0 local model implements.
-- Per-chat and per-message **effort** setting (maps to reasoning effort / thinking budget where the model supports it).
+Groups are defined at app tier; a solution can pick its default group or override roles; each chat selects a group (and effort). This is the plan's "Claude plans, a temp-0 local model implements" made concrete (journey J3).
 
-## Request routing
+## Scheduling and routing
 
-On top of group/role selection, the AI runtime routes each request intelligently:
+1. **Role -> candidate list** (the role's model, then its fallbacks).
+2. **Filter**: privacy (a private/tainted chat or local-only solution removes `cloud`, and `lan` if the policy says so), capabilities (vision, tools, FIM), context fit (prompt + reserve <= discovered window), availability (not marked exhausted or unreachable).
+3. **Pick**: first candidate with a free slot; if none is free, queue on the first candidate (interactive requests ahead of agent work ahead of background work like titles/summaries); optional scorecard preference among equivalents (`docs/features/16`).
+4. **On failure** (429/usage exhausted, unreachable, context too small): mark the model's state, move to the next candidate, show a routing note in the chat.
 
-- **Limit-aware fallback:** when a model hits token/rate limits, retry on the next eligible model in the role's fallback list — transparently, with a visible note in the chat ("routed to X after Y hit its limit").
-- **Load-aware selection:** prefer models that are idle; a busy strong model yields to an available one of similar class.
-- **Privacy routing (the important one):** every model carries a privacy class (`local` / `cloud`). When a request is flagged sensitive (or the project's policy says so), it routes **only to local models** so personal information never reaches cloud endpoints. Policy tiers: per-model default, per-group override, per-solution strict mode (`.ied/solution.json`: `"aiEgress": "local-only"`).
+Privacy always wins: a private request waits for a local slot rather than fall back to the cloud.
 
-## System prompt
+## Privacy
 
-A strong base system prompt ships with IED and is user-editable in the settings window: design discipline + **the owner's preferred styling — tabs, not spaces** ("always indent with tabs" is a standing instruction), plus how to use IED's tools/skills. `AGENTS.md` (per solution) layers project-specific rules on top (see below). The indentation-fixer tool call (editor plugin) enforces the same rule mechanically when needed.
+- **Classes** on models and MCP servers (`local`, `lan`, `cloud`).
+- **Per-chat private toggle** (lock icon) and **solution policy** `aiEgress.models: any | local-only | lan-only` in `.ied/solution.json` (committed: a repo can declare itself private).
+- **Taint tracking:** `.ied/privacy.json` path globs (and optional detectors for key-like strings) mark content sensitive. When sensitive content enters a chat's context (file read, attachment, tool result), the chat becomes local-only and stays so (sticky), with the reason shown on the lock. Removing taint means forking without that content.
+- Private chats also restrict tools: web tools follow the egress policy (tor if configured), `cloud` MCP servers are hidden.
 
-## Streaming & telemetry
+## Claude
 
-- Everything streams: thinking blocks, normal messages, tool calls — rendered in real time as they arrive.
-- Each segment carries metadata shown in the UI: duration, tokens, tokens/sec. Tool calls show success/failure + elapsed time.
-- The chat bar shows aggregate session stats (total tokens, current speed).
-- **Collapsible right-side breakdown** per session: context usage (what's consuming the window), list of modified files, tool-call log summary.
+IED is primarily local-AI; Claude is optional. Anthropic's policy (Agent SDK overview and legal docs, checked 2026-10-19) says third-party products may not offer claude.ai login or route requests through Free/Pro/Max credentials, and may not collect or intermediate claude.ai credentials; an end user may run the unmodified Claude Code CLI signed in themselves. So:
 
-## Context management — the long-chat problem
+1. **Anthropic API provider** (API key in the Windows credential store): clean for any use. Usage view from `anthropic-ratelimit-*` response headers + cost estimates.
+2. **Claude Code bridge** (personal use): IED spawns the owner's own installed `claude` CLI headless (`-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`), removes its built-in tools (`--tools ""`), exposes IED's tools to it through an MCP server config (`--mcp-config ... --strict-mcp-config`), routes its permission prompts to an IED approval tool (`--permission-prompt-tool`), and maps its stream (assistant/tool/result/`rate_limit_event`) onto IED's chat events. IED never reads, stores or asks for Claude credentials; the owner signs in to the CLI themselves. Subscription usage (5-hour and 7-day utilization, reset times) comes from the CLI's `rate_limit_event` stream and status data. Whether this path is enabled for anyone other than the owner is open question O2.
+3. Model ids current at writing: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-1` (verify at implementation time).
 
-Goal: "fast and high quality context compression so we can have long running chats." Working design:
+Flags and event shapes must be re-verified against the installed CLI version when implementing (they change across releases).
 
-1. **Structured context ledger.** Every item in the conversation is tracked with type (user / assistant / thinking / tool-call / tool-result / injected), token count, and an importance class. Tool results are the big ones — they're summarizable by construction (they have structure).
-2. **Tiered compression**, triggered when usage crosses thresholds (e.g. 70% warn, 85% compress):
-   - *Lossless first:* truncate/summarize large tool results to their conclusions + key excerpts; drop superseded file reads (a later read of the same file replaces the earlier one).
-   - *Summarizing second:* a cheap model group member summarizes older conversation segments into compact narrative entries that preserve decisions, open questions, and file paths.
-   - The ledger stays authoritative: the UI's context panel always shows what's live vs compressed, and compression is visible to the user (never silent).
-3. **Skills are never in-context by default** — they're searched on demand (below), which is what makes "a massive amount of skills" viable.
+## Context management
 
-## System message assembly
+- **Ledger:** every context item typed and counted (provider usage is authoritative; per-family tokenizers or llama.cpp `/tokenize` for estimates). Feeds the right-panel context view.
+- **Tiered compression** at a high-water mark (defaults: warn 70%, compress at 85% of the discovered window, target 50%):
+  1. *Mechanical:* superseded file reads dropped (a later read of the same file wins), large tool results trimmed to conclusions + excerpts, stale diagnostics dropped.
+  2. *Summary:* older turns summarized by the `summarizer` role into a structured summary (goal, constraints, decisions, progress, files touched, open questions, exact snippets to keep).
+- **Cache-aware:** the system message and early prefix stay byte-identical; between compressions the context is append-only; compression happens in big steps rarely, so llama.cpp and Anthropic prefix caches stay warm (this is what makes long local chats *fast*, not just possible).
+- **Never lost:** the raw history stays on disk; `history_search` / `history_read` retrieve compressed-away details. Scratchpad and task list are never compressed (they travel as tail notes).
+- **Overflow recovery:** a context-length error updates the model's window from the error text, compresses and retries (`docs/12`).
 
-Built per session from, in order:
+## System message
 
-1. Base IED identity + UI conventions.
-2. **`AGENTS.md`** from the solution root, if present (read verbatim; this repo's own AGENTS.md is the template for what it should contain).
-3. **Plugin `systemMessageSections`** — small appended notes from enabled plugins (e.g. C4 language plugin: "Docs for this project are in docs/…"). Bounded size per section so one plugin can't blow the context; overflow gets truncated with a pointer to where the full text lives.
-4. Project/solution summary (solution name, projects, build system) — generated from `.ied.sln` / `.ied.proj`.
+Assembled in a fixed order - base prompt, style rules, mode instructions, solution `AGENTS.md`, bounded plugin sections, workspace summary, tool-group index, skills index - with volatile state kept out of it. Exact rules and the shipped texts: `docs/14`, `src/ai/prompts/`. Nested `AGENTS.md` files (subfolders, federation members) are injected as tail notes the first time the agent works in that area.
 
-## Skills search
+## Skills
 
-- Skills = markdown files with frontmatter (`name`, `description`, `keywords`). Sources: `.ied/skills/` (project), global app-data skills, plugin-bundled skills.
-- At session start the AI gets **only metadata** (name + one-line description) for all skills — cheap even at hundreds of skills.
-- A `searchSkills(keywords)` tool call returns full skill bodies on demand; the host does keyword + fuzzy matching over name/description/keywords fields (full-text index later if needed).
-- This mirrors how the C4 repo already ships skills (`Nuke/skills/<name>/SKILL.md`), so C4's existing skill content ports straight into `.ied/skills/`.
+- Sources: `.ied/skills/` (project, committed), `%APPDATA%/IED/skills/`, plugin `skills` paths. Format: `shared/host-api/README.md` (compatible with the C4 repo's existing skills, which use `triggers`).
+- Index: BM25 over name, description, keywords, triggers and headings; optional embedding rerank (P2).
+- In the prompt: the whole index when small (<= 40), otherwise the top 15 for the task + `skill_search`. Bodies load only via `skill_read`; a skill can declare tool groups to enable.
+- Authoring: `skill_write` (approval-gated) and "synthesize skill from this chat"; the orchestration learning loop proposes skill updates after successful goals.
 
-## Tool calls — default set (chat plugin)
+## MCP
 
-| Tool | Notes |
+MCP client for stdio and streamable-HTTP servers (Blender, Claymore, anything), configured at app/solution/project tier (project-defined servers need trust). Tools surface as group `mcp_<server>` in the same registry; resources become @-mentionable context; prompts become slash commands. Each server has a privacy class and inherits the workspace egress policy. IED is also an MCP *server* (P1) so external agents can use its LSP/build/editor tools.
+
+## Web egress and secure mode
+
+- **SearXNG bundled** and managed by the host (`docs/21`); `web_search` goes through it.
+- **Egress proxy:** all AI-originated HTTP (fetch, search upstreams, browser tool, MCP HTTP) goes through the host's proxy with a per-workspace policy `direct | tor | proxy:<profile>`; untrusted workspaces have egress off.
+- **tor** bundled (managed process, new circuit on rate limiting); **VPN profiles** are SOCKS5/HTTP proxy endpoints (a provider's proxy, or a `gluetun` container started via the sandbox plugin for WireGuard/OpenVPN providers).
+
+## Persistence
+
+Per chat, under `.ied/local/chats/<chatId>/` (generic chats under `%APPDATA%/IED/chats/`):
+
+| File | Content |
 |---|---|
-| `fs.read / fs.write / fs.search` | workspace-scoped; writes tracked for the "modified files" panel; @-mention aware |
-| `shell.exec` | runs via the terminal supervisor; streaming output; timeout + permission-gated |
-| `loadImage / loadVideo` | if the model supports vision; from workspace paths or attachments |
-| `web.search` | routed through packaged SearXNG (below) |
-| `web.fetch` | same egress path |
-| `renderPage(url)` / `screenshot()` | headless render to get console output + DOM; interact-with-page actions (click/type/extract) for web work |
-| `chat.inject(text)` | user-injected guidance mid-run ("inject commands into the chat") |
-| `scratchpad(action, ...)` | internal planning/note-taking pane: read/append/replace sections; dockable next to the chat (see 05) |
-| `searchSkills(keywords)` | see above |
+| `chat.json` | header: title, mode, group, permissions, privacy/taint state, task list, scratchpad, pinned items |
+| `turns.jsonl` | completed turns and segments (the transcript) - append-only, compacted occasionally |
+| `steps.jsonl` | run journal (state transitions, tool call started/finished) for crash-safe resume |
+| `trajectory/*.jsonl` | raw requests/responses/timings, rotated with retention limits |
+| `media/` | attachments and tool media as files (never base64 in JSONL) |
+| `checkpoints/` | content-addressed pre-edit file snapshots for rewind |
 
-Plus a standing set for code + game/engine work (editor plugin contributes most of these): build/run/test via toolbar templates, debug session control (breakpoints, stepping, variables), LSP navigation wrappers (def/refs/hover — so the model never has to read whole files), indentation fixer (tabs), markdown preview interaction, and profiler queries.
+Only the active window of each chat stays in server memory; older turns load lazily on scroll.
 
-Plugins add tools on top: editor exposes build/run/debug/LSP-navigation tools; sandbox exposes "run this in linux container"; profiler exposes session queries. All tool calls are permission-checked and appear live in the UI with status + timing.
+## Attachments and @-mentions
 
-## MCP support
-
-- Host runs **MCP client** connections to external servers (blender, Claymore tooling, anything). Servers configured in settings (command or URL), per app / solution / project tier.
-- MCP tools surface into the same tool-call registry as native ones — the model doesn't care where a tool came from; the UI shows the source.
-- MCP servers launched for a workspace inherit that workspace's egress policy (below).
-
-## Web egress & privacy ("secure mode")
-
-- **SearXNG is packaged with IED** and runs as a local process managed by the host — no separate setup, per the plan. Configurable (engines, instance list) in settings.
-- All AI web traffic (search + fetch + MCP egress) goes through the host's **egress proxy**, which can route through:
-  - direct (default), or
-  - **tor / a user-configured VPN** when the project's "secure mode" is enabled — prevents rate limiting and adds privacy.
-- Egress policy is per-solution (`.ied/solution.json`): `direct | tor | vpn:<profile>`. Untrusted workspaces: egress off until trusted.
-
-## Cloud model integration — Claude Agent SDK
-
-IED is primarily local-AI, but first-class **Claude** integration via the Claude Agent SDK is wanted:
-
-- The SDK runs as an MCP-style backend inside the host AI runtime (it's just another "model provider" from the chat's point of view; its tool-calling loop maps onto IED's existing streaming/tool-call UI).
-- **Subscription usage views:** the chat window shows Claude subscription state — usage remaining in the current session, rollover times, reset countdowns — like Claude Code does. Data comes from the SDK/account API where available; if not, show what the SDK reports and mark the rest "n/a" rather than guessing.
-- Privacy routing (above) treats Claude as `cloud`: sensitive requests never route to it unless the user explicitly overrides for that chat.
-
-## Chat persistence & memory management
-
-- **Chats save to disk** (`.ied/local/chats/<chatId>.jsonl` — per-machine, gitignored): every message/tool-call/compression event appended as it happens, so a crash loses at most the in-flight stream. Reopening a workspace restores all chat tabs from disk.
-- **Eviction:** only the active window of each chat lives in memory; old messages are evicted and re-hydrated lazily on scroll/expand (JSONL makes this cheap). The context ledger (above) is persisted with the chat so compression state survives restarts too.
-
-## Attachments & @-mentions
-
-- Drag-drop or picker to attach files; images/videos go to vision-capable models, text files get path-referenced and read on demand.
-- Typing `@` in the chat input opens a file-path suggestion list (fuzzy, workspace-scoped); inserting produces a structured reference the model resolves to real content at call time — not pasted blindly into context.
-
-## Open items
-
-- Compression trigger thresholds + which role does summarization (default: group's `workerSubAgent` on a fast local model).
-- SearXNG packaging details: bundled binary vs vendored docker image; tor integration via system tor vs bundled. Decide in design phase.
-- Whether sub-agents (research/worker) get their own visible chat tabs or stay inside the parent tool-call view. Leaning: collapsed sections inside the parent, with an option to expand into a full tab.
+Drag-drop, paste and picker attachments (images/videos to vision-capable models; others become file references read on demand). `@` opens fuzzy suggestions: files and folders, symbols (`@#Name`), open documents, terminals, output sources, Error List, `@diff`, other chats; mentions become structured references resolved at call time.

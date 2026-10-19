@@ -1,102 +1,85 @@
-# 02 — Plugin architecture
+# 02 - Plugin architecture
 
 ## Purpose
 
-Define how IED is extended, because "the main parts of the project will be implemented as plugins" (IDEplan). This doc sketches **manifest v1 and the contribution model** concretely enough to start coding; exact field names get finalized in `shared/host-api/`.
+Define how IED is extended, because "the main parts of the project will be implemented as plugins" (IDEplan). The contract is frozen in `shared/host-api/schemas/plugin-manifest.v1.schema.json`; this doc explains the model behind it. Feature list: `docs/features/13-plugins.md`.
 
-## Two plugin languages, one host API
+## Four runtimes, one contribution model
 
-Both run **on the server** (see `docs/01` — the client is a thin web view):
+C4 cannot produce or safely load DLLs (process-global GC state, no DLL output - `docs/17`), so "native C4 plugins loaded at runtime" is not a v1 option. Plugins come in four kinds, all using the same manifest and contribution points:
 
-- **C4 plugins** — native, loaded by the server. Used where performance or OS access matters (the editor's LSP/DAP glue, sandbox docker control).
-- **JS plugins** — run in QuickJS-ng inside the server. Used for UI-centric logic and anything quick to iterate on.
+| Kind | Code runs | Used for | Isolation |
+|---|---|---|---|
+| `builtin` | compiled into `ied-server` (C4 modules) | the default plugins: chat, editor, git, terminal, sandbox, profiler | none (trusted, but declare permissions and can be disabled) |
+| `declarative` | nowhere - manifest + data files only | language plugins (C4!), task presets, problem matchers, LSP/DAP profiles, skills, snippets, templates, token color maps, system-message sections | n/a |
+| `js` | QuickJS-ng on the server, one runtime per plugin | glue logic: bindings, AI tools, small services | own heap + interrupt handler; host API permission-checked |
+| `process` | a separate executable speaking `ied-plugin-rpc/1` (JSON-RPC over stdio) | heavy or native logic in any language - including a C4 program built by Nuke | OS process; crash restart + quarantine |
 
-Both implement the same contribution interfaces; the manifest declares which runtime a plugin uses. v1 ships both runtimes but every default plugin may start as JS and go native where profiling demands. Plugin **UI** contributions are web modules executed in the browser (loaded from the server); plugin **logic** always runs server-side.
+Every plugin may also ship **UI modules** (ES modules served by the server, executed in the browser) that render activities, tool windows, viewers and status items using `shared/ui-kit` and theme tokens. Plugin *logic* always runs server-side (work continues with no browser open); UI is only a view.
 
-## Plugin locations & trust
+Most third-party language/engine support should need **no code at all**: the C4 language plugin (C4Assist rewrite) is fully declarative - see `shared/host-api/examples/c4-plugin/ied-plugin.json`.
 
-| Scope | Where | Trust model |
+## Locations and trust
+
+| Scope | Where | Loads when |
 |---|---|---|
-| **Global** | user app-data dir (e.g. `%APPDATA%/IED/plugins/`) | installed by the user; enable/disable per plugin |
-| **Project-local** | referenced from the solution file, path relative to the solution root | only auto-enabled when the workspace is **trusted**; a project can pin its own language plugin + LSP this way (this is how C4 vendors its language support, and how Claymore could ship a GPU-debugger/shader-LSP plugin) |
+| Built-in | inside `ied-server` + `plugins/` assets in the install | always (disable-able) |
+| App (global) | `%APPDATA%/IED/plugins/<id>/` | owner approved the plugin's content hash and permissions |
+| Project-local | path referenced by the solution's `localPlugins` | the workspace is **trusted** (`docs/11`) |
 
-Trust: opening an untrusted workspace shows a banner; project-local plugins and AI egress stay off until the user marks it trusted. Per-project "secure mode" (tor/VPN egress for AI web access) is a separate setting — see 04.
-
-## Manifest v1 sketch
-
-```jsonc
-{
-  "id": "ied.chat",                 // unique, dotted; stable forever
-  "name": "Chat",
-  "version": "0.1.0",
-  "runtime": "js",                  // or "c4"
-  "entry": "./main.js",             // or native lib name for c4 runtime
-  "icon": "./icon.svg",             // sidebar icon if it registers one
-  "permissions": [                  // explicit; host validates at load, UI shows them on install
-    "fs.read", "fs.write", "shell.exec", "ai.models", "terminal.spawn"
-  ],
-  "contributions": {
-    "sidebarIcons": [ { "id": "chat", "order": 0 } ],   // thin left sidebar; order = top-to-bottom
-    "panels":       [ { "iconId": "chat", "title": "Chat" } ],
-    "toolbarButtons": [ ... ],      // see 06 — command templates + dropdown injection
-    "outputTabs":   [ { "id": "build", "title": "Build" } ],
-    "lspProfiles":  [ { "id": "c4", "command": "...", "initializationOptionsFile": ".ied/lsp-options/c4.json" } ],
-    "dapProviders": [ ... ],
-    "skills":       [ { "name": "...", "path": "./skills/..." } ],
-    "toolCalls":    [ ... ],        // AI-facing tools this plugin offers
-    "bindings":     [ ... ],        // named hooks other plugins can call (see below)
-    "settings":     { "schema": "./settings.schema.json" },
-    "systemMessageSections": [ { "text": "Docs for this project: docs/..." } ]
-  },
-  "dependencies": [ { "id": "ied.editor", "version": ">=0.1" } ]
-}
-```
-
-## Contribution points (the full v1 list)
-
-| Point | Consumer | Notes |
-|---|---|---|
-| `sidebarIcons` | shell | thin icon strip, left; plugins may or may not add one |
-| `panels` | shell | the main content area per sidebar icon; panels contain tabs/dockable views |
-| `toolbarButtons` / `toolbars` | editor plugin (hosted) | VS-style top toolbar: dropdowns + buttons with command templates — see 06 |
-| `outputTabs` | editor plugin's output window | dropdown-selected tabs, ANSI-colored console rendering |
-| `lspProfiles` | host LSP pool | a profile = how to launch/configure one language server; the editor consumes profiles generically |
-| `dapProviders` | host DAP pool | debug adapter launch config per language/target |
-| `skills` | AI runtime | markdown skills, discoverable by keyword search (see 04) |
-| `toolCalls` | AI runtime | named tools with JSON schemas; the chat plugin's defaults are themselves a plugin contribution |
-| `bindings` | any plugin | **the composition mechanism** — see below |
-| `settings` | settings UI | per-plugin schema, rendered in app/solution/project tiers (see 07) |
-| `systemMessageSections` | AI runtime | small text appended to the AI system message; e.g. "we have some docs for this over here <path>" |
-
-## Bindings — composing plugins on plugins
-
-A binding is a **named, typed hook** one plugin publishes and another subscribes to or calls. Examples:
-
-- `editor.openFile(path, line?)` — git plugin jumps from a commit diff to the editor; chat's file tools open results in the editor.
-- `editor.getSelectedText()` / `editor.applyEdit(range, text)` — inline AI edit tool targets.
-- `terminal.run(command)` — build buttons and the AI shell tool share one implementation.
-- `chat.injectMessage(text)` — "inject commands into the chat" feature; other plugins can feed guidance.
-- `build.status` (event) — profiler plugin starts a session when a run button's process starts.
-
-Rules: bindings are declared in the manifest (name + schema), so callers never import callee internals; calling an undeclared binding is a load-time error; events flow through the same registry. This is what lets "the C4 language configure its own vendored language plugin" and later let Claymore's plugins call into IED's editor/chat without either knowing about the other.
-
-## Skills & tool calls (AI-facing surface)
-
-- **Skills**: markdown files with frontmatter (name, description, keywords). Stored per-project in `.ied/skills/` (committed — survives build cleanup), globally in app-data, plus plugin-bundled ones. The AI searches them by keyword at runtime instead of loading all into context (see 04 for the search design).
-- **Tool calls**: JSON-schema-described functions the model can invoke. Default set ships with the chat plugin: file read/write/search, shell exec, image/video load, screenshot/webpage render + console capture + DOM interaction. Plugins add more (editor build/run/debug tools, LSP navigation, profiler queries…).
+If ids clash: project-local (trusted) > app > built-in, with a visible "overridden by" note in Settings > Plugins. That is how a repo pins *its* version of a language plugin (the C4 repo vendors its plugin under `Nuke/tools/ied`, Claymore can ship a shader-language or GPU-debugger plugin).
 
 ## Lifecycle
 
 ```
-discover -> validate manifest (schema + permissions) -> [trust check for project-local]
--> enable -> load runtime entry -> register contributions -> ready
-disable: unregister contributions, dispose resources; state persisted per tier
+discover (built-ins, app dir, solution localPlugins)
+ -> validate manifest (schema, ied.api range, permissions, dependency graph)
+ -> trust/approval check
+ -> register declarative contributions (always; cheap)
+ -> activate code lazily on its activation events (onLanguage:c4, onCommand:..., onTool:..., onView:...)
+ -> ready
+disable/unload: unregister contributions, deactivate(), stop process, drop JS runtime; state persisted per tier
 ```
 
-Validation failures surface in a "Plugins" settings page with the error text — never silent.
+Validation failures appear in Settings > Plugins and the *IED* output source - never silent. Hot reload (non-built-ins) re-runs the lifecycle for one plugin without restarting the server.
+
+## Contribution points
+
+Grouped; full shapes in the schema.
+
+| Group | Points |
+|---|---|
+| Shell | `activities` (sidebar icons + views), `toolWindows`, `commands`, `menus`, `keybindings`, `statusBarItems`, `outputSources` |
+| Editor | `languages` (extensions, comments, brackets, auto-close, indentation, Monarch grammar, task comments), `semanticTokenColors` (token -> `--syntax-*` theme token; raw colors rejected), `fileIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries` |
+| Build / debug | `lspProfiles`, `dapProviders`, `problemMatchers`, `testProviders`, `taskPresets` (toolbar presets), `projectTemplates` |
+| AI | `toolCalls`, `toolGroups`, `skills`, `systemMessageSections`, `agentModes`, `mcpServers`, `modelProviders`, `chatSlashCommands` |
+| Infra | `settings` (JSON Schema with tier hints), `bindings` (provides/consumes), `sandboxProviders`, `sourceControlProviders`, `profilerImporters` |
+
+LSP profiles carry the quirk switches the family's servers need today (`launchMode: staged`, `positionEncoding: bytes`, `requestIds: integer`, `refetchOnDiagnostics`, `codeActionsNeedClientFilter`), so the host's LSP client stays generic and the C4-specific knowledge lives in the C4 plugin.
+
+## Bindings - composing plugins on plugins
+
+A binding is a **named, versioned, schema-typed function or event** that one plugin `provides` and others `consume`:
+
+- `editor.openFile { path, line?, column?, split? }` - git, chat, profiler and the AI's `ide_open` all jump to code through it.
+- `editor.applyEdit`, `editor.getSelection` - inline AI and refactor tools.
+- `terminal.run { argv, cwd, title }` - tasks, AI shell tool and humans share one implementation.
+- `chat.inject { chatId, text }` - "inject commands into the chat", usable by any plugin.
+- `tasks.run { task, vars }`, event `tasks.status` - the profiler starts capturing when a run launches.
+- `orc.createGoal { workspace, title, ... }` - cross-workspace handoff (`docs/features/16`).
+
+Rules: a consumer never imports a provider's internals; a missing *required* binding is a load error, a missing *optional* one degrades the feature visibly; events flow through the same registry. Bindings marked `aiExposed` can surface as AI tools; any binding can be a task step (`{ "binding": "..." }`) and a command handler. This is how the C4 plugin, a Claymore plugin and IED's built-ins cooperate without knowing about each other.
+
+## Skills and AI tools
+
+- **Skills:** markdown `<name>/SKILL.md` with frontmatter (`name`, `description`, optional `keywords`, `triggers`, `tools`) - format in `shared/host-api/README.md`. Sources: `.ied/skills/` (committed), app-tier skills, plugin `skills` paths. The AI gets an index and searches/loads bodies on demand (`docs/04`).
+- **Tool calls:** declared in the manifest with JSON schemas, class (read/write/exec/net/meta), group and a binding that implements them. The host runs permission checks and approvals (`docs/11`) and renders them live (`docs/13` for the built-in catalog).
+
+## Permissions
+
+Declared in the manifest (`fs.read`, `fs.write`, `fs.watch`, `process.spawn`, `terminal`, `net.egress`, `net.listen`, `ai.invoke`, `ai.tools`, `ai.context`, `lsp`, `dap`, `git`, `sandbox`, `profiler`, `secrets`, `settings.write`, `ui.notifications`, `ui.clipboard`, `ui.externalLinks`), shown before enabling, enforced at the host API for JS and process plugins. A permission increase on update requires re-approval. UI modules run with full client privileges, so they are exactly as trusted as their plugin; untrusted third-party UI uses the sandboxed iframe view kind (`docs/11`).
 
 ## Open items
 
-- Final manifest schema → `shared/host-api/` (blocking, see 99).
-- JS runtime: **QuickJS-ng** (decided — see `docs/99` #6; vendored at `third_party/quickjs-ng-v0.17.0`). ChakraCore was considered and dropped (unmaintained since 2020, dead official download links).
-- Plugin sandboxing: v1 trusts enabled plugins within their declared permissions (permissions enforced by the host at each API call). Out-of-process isolation is a later hardening step.
+- Freeze the manifest schema after owner review (M0).
+- Typings generation (`ied.d.ts`) from `shared/host-api` (M11).
