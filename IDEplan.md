@@ -57,10 +57,16 @@ save chats to disk in case of crash and keep and evict old chat messages from me
 
 any tool calls that you can think of for writing code and working with games/game engines.
 
+i have had some issues withe local models stopping randomly. i dont know if that was the model its self or the harness but we should have some protections for that.
+
 ## projects
 projects will have a system similar to visual studio where each project has a file to configure it and a solution file that will group them with extra configuration like project local plugins the main difference is that each project file can define a root folder other then the one it is in that way we can generate the project files and put them in a folder in a build directory rather then filling up all the folders.
 
 the project will have a skills folder in the root of the solution(this can be outside of the folder where we might put generated project files that way if we delete the generated file the skills are still there)
+
+in the side bar at the top we should be able to switch between open projects and open federated projects as well as make new ones.
+
+although this is built for projects it would be nice to be able to open single files in it in the right click menu in the file browser or open a folder in the file browser with the same right click menu or even just type "ied ./" to open that folder in ied without making it a project just like in VS code.
 
 ## default plugins
 
@@ -75,7 +81,9 @@ the ability to inject commands into the chat to help guide it or give it extra w
 
 internal scratch pad for planing and note takeing that can be opened up and edited next to the chat ether as part of the chat window or as a tab that is docked next to the chat window.
 
-show indentation by default.
+milestone/task tracking in a chat window.
+
+separate generic chat not attached to a project.
 
 ### the text editor / IDE
 under the icon in the side bar we will want a text editor that will use the vs code monaco tool to display text with full LSP support through LSP plugins. we want this to act as much like normal visual studio/VSX as possible some features like code formatting will need to be implement in a language plugin or LSP(you can look at the LSP in C:\GameDev\C4) we will also want a robust code aware spell check.
@@ -105,6 +113,8 @@ showing what lines have been changed and saved(Green) and what changes have not 
 visual studio/VSX style right click menu and other tools such as LSP navigation high quality code completion(this might need to be part of the LSP) keyboard short cuts and any other tools.
 
 again when i say visual studio im taking about visual studio proper NOT vs code
+
+show indentation by default.
 
 ### git
 we should have a plugin for git that will show up under the text editor this is a git tool like fork or git gitkraken.
