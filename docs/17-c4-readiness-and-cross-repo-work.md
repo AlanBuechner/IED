@@ -1,0 +1,152 @@
+# 17 - C4 readiness and cross-repo work
+
+## Purpose
+
+Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / Bedrock before the IED server can be written in C4**, what the family's other tools (C4LSP, C4DAP, Nuke, C4Assist, Claymore) must change for IED, and in which order. Facts below come from reading `C:\GameDev\C4` and `C:\GameDev\Claymore` on 2026-10-19; re-verify before acting (the compiler moves fast).
+
+## Where C4 stands (2026-10-19)
+
+- Re-architecture (ProgramModel -> HIR -> codegen) is done; gates are green (TestCode 1505 assertions, NegativeTest 564, IsolatedTest 374 at -O0 and -O2, Bedrock 290 tests, C4Testing 964). `docs/status/known-bugs.md` lists no open bugs. Windows x64 only; Linux port (B31) planned; ORCv2 scripting (B30) at spike stage.
+- Largest C4 codebases so far: Bedrock ~10.9k lines, TestCode ~9.4k, Claymore ~4.2k. **Nothing near the IED server's expected size (40-80k lines) has been compiled.** Whole-program compile, no incremental builds yet (estimated 15-20 s at -O2 for 50k lines).
+
+## Capability gap table (server needs vs. C4 today)
+
+| Need | Status | Notes |
+|---|---|---|
+| Threads, mutex, condvar, atomics, futures, job system | **exists** | `Bedrock/Threading/*`; JobSystem is game-tuned, not I/O-aware |
+| JSON parse/serialize | **exists** (DOM) | No streaming parser; reflection-driven serialization handles only scalars + nested structs (no `String`, `Array`, `HashMap`, enum names) |
+| UTF-8 strings | **exists** | UTF-8 <-> UTF-16 helpers exist only inside the runtime; Win32 `W` APIs need them exposed |
+| File system basics | **partial** | read/write/list/mkdir/remove/rename/exists/size; **missing** stat/mtime, copy, canonicalize, locking, mmap |
+| File watching | **missing** | `ReadDirectoryChangesW` |
+| TCP sockets, event loop (IOCP), timers | **missing** | Bedrock lists networking as "Planned" |
+| HTTP/1.1, WebSocket, SHA-1, base64, TLS | **missing** | |
+| Child processes with pipes, job objects, env vars | **missing** in Bedrock | only reachable through `windows.h` interop (untested); C++ code in C4DAP does it |
+| ConPTY | **missing** | interop only; `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` is a macro -> hand-defined |
+| Wall-clock time / dates | **missing** | monotonic clock only |
+| Regex | **missing** | needed for problem matchers, search, `when` expressions |
+| C interop | **exists with sharp edges** | see suspected bugs below |
+| Compiling bundled C sources | **exists, slow** | `extern "c" source` is compiled without `-O` and recompiled every build; prebuilt `.lib` works |
+| DLL output / loading C4 DLLs | **missing / not designed** | GC has process-global state; native plugins as C4 DLLs are not a path (hence `docs/02`: built-ins compiled in, others JS or process) |
+| async/await | **missing** | not required: an event-loop + worker-thread design works without it |
+| Profiler hooks | **partial** | `GC::GetStats`, collection callbacks, monotonic clock, CodeView PDBs; no zone API, no allocation hooks |
+
+GC facts that shape server design: stop-the-world, conservative, non-moving; pause ~6 ms per 50 MiB live heap with 8 markers; threads created by native code must call `thread_attach()` before touching C4 objects; native memory holding C4 pointers must be registered or pinned; **an exception escaping a thread or job kills the process** (so every worker entry needs a catch-all, F-OPS-11).
+
+## Suspected C4 bugs found during research (verify, then file + fix per AGENTS.md)
+
+Found by reading CBind source, **not yet confirmed with probes**. Per `AGENTS.md`: confirm each with a minimal `sizeof`/offset probe, record confirmed ones in `C:\GameDev\C4\docs\status\known-bugs.md`, fix, validate with the C4 gates, then remove the entry.
+
+| # | Suspected bug | Where (per reading) | Impact on IED |
+|---|---|---|---|
+| S1 | Named C unions are emitted as `struct`, so overlapping members are laid out sequentially (wrong size/offsets) | `CBind BindingGenerator.cpp:34` | QuickJS `JSValue`, Win32 `LARGE_INTEGER`, many socket/IOCP structs |
+| S2 | Unmappable field types fall back to `void*` (8 bytes) regardless of real size | `CBind C4Text.cpp:132` | `in_addr.S_un` (4 bytes) breaks `sockaddr_in` |
+| S3 | Anonymous unions expose only their first member and lose their full size | `C4Text.cpp:144-164` | `OVERLAPPED`, many Win32 structs |
+| S4 | Bitfields are not handled | CBind | some Win32/third-party structs |
+| S5 | `static inline` functions in headers get no link target or wrapper (link errors) | `BindingGenerator.cpp:96-104`, `BindingShim.cpp:92-99` | QuickJS, many single-header libs |
+| S6 | `#define` constants are not bound | interop test defines `WM_CLOSE` by hand | every Win32 constant (`AF_INET`, `INVALID_SOCKET`, ...) |
+| S7 | Bundled C sources compiled without optimization and without an object cache; two sources with the same file stem collide | `BuildUtils.cpp:223-264`, `InteropPass.cpp:494-511` | QuickJS/sqlite builds slow and unoptimized |
+
+Until S1-S6 are fixed, **IED's policy is: every native API goes through a small hand-written C shim with opaque handles and plain scalar/pointer signatures** (no struct layouts cross the boundary). This is a good discipline anyway (one tested seam per subsystem) and removes the dependency on CBind's struct fidelity.
+
+## Recommended path: what goes where
+
+**Bedrock (C4 repo) should own OS primitives**, because Claymore needs most of them too (file watching for hot reload, processes for tools, sockets for the session pipe and profiler):
+
+| Bedrock module (proposed) | Contents | Also needed by |
+|---|---|---|
+| `Net::` | TCP listen/accept/connect, non-blocking sockets, an IOCP-backed event loop with timers, UDP (profiler discovery) | Claymore remote control, profiler client |
+| `Process::` | spawn with pipes, job objects (kill tree), exit codes, environment get/set, ConPTY sessions | Claymore tools, Nuke-in-C4 later |
+| `FS::Watch` + FS extras | `ReadDirectoryChangesW` watcher, stat/mtime, copy, canonical paths | Claymore hot reload |
+| `Time::` | wall clock, UTC/local formatting, durations | everyone |
+| `Text::` additions | UTF-16 conversion, regex (RE2-like subset or a vendored C engine behind a shim), base64, SHA-1/SHA-256 | everyone |
+| `Serialization::` | reflection serialization for `String`, `Array`, `HashMap`, enums; streaming JSON writer | IED protocol DTOs, Claymore assets |
+| `Profile::` | zone/frame/plot/message/alloc/thread-name/GPU APIs speaking the IED trace protocol (`docs/16`) | Claymore, every C4 app |
+
+**IED (this repo) owns** HTTP/1.1 + WebSocket on top of `Net::` (or a vendored C HTTP parser such as llhttp behind a shim), the protocol hub, and everything in `src/`.
+
+An alternative that gets IED unblocked sooner: wrap **libuv** (MIT, C; IOCP event loop, TCP, timers, processes with pipes, fs events, thread pool) as a prebuilt `.lib` behind a C shim, and build `Net::`/`Process::`/`FS::Watch` as thin C4 layers on it. ConPTY still needs its own small shim. The C4 team decides; the IED server only depends on the Bedrock-level API either way.
+
+## Readiness checklist ("the compiler can build IED")
+
+Implementation of `src/` starts when all of these are true. Each item is a C4-repo work package.
+
+1. [ ] `Net::` sockets + event loop + timers, with tests (echo server, 1k concurrent connections, timers under load).
+2. [ ] `Process::` spawn/pipes/job objects/env + ConPTY, with tests (spawn `cmd /c`, kill tree, PTY round trip).
+3. [ ] `FS::Watch`, stat/mtime, copy, canonical paths.
+4. [ ] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake).
+5. [ ] Regex engine available to C4 code.
+6. [ ] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide).
+7. [ ] Suspected bugs S1-S7 verified; confirmed ones fixed (or the C-shim-only policy formally adopted and S1-S6 deprioritized).
+8. [ ] **Scale test:** a synthetic 50k-line, 200-file, multi-threaded C4 program compiles at -O0 and -O2, runs a 24 h soak under load without GC or threading faults; compile time measured.
+9. [ ] Exceptions-at-thread-boundary policy documented (catch-all wrappers), `thread_attach` documented for native callbacks.
+10. [ ] Incremental or at least per-module compilation planned (roadmap 5.3), because a 20 s full rebuild for every IED server change is a heavy tax.
+
+Until then, the **frontend (`frontend/`, `shared/ui-kit`) and the contract (`shared/host-api`) can be built and tested against a mock server** - they do not depend on the compiler (`docs/18`, M0).
+
+## Cross-repo work items
+
+### C4LSP (C4 repo)
+
+Today: stdio, full sync, standard features (completion, hover, signature help, def/decl/type-def/impl, references, highlights, symbols, semantic tokens full, rename, formatting, code actions, folding), push diagnostics matching the compiler exactly. Echo-era quirks IED's generic client must tolerate now (the C4 plugin's LSP profile declares them, see `shared/host-api/examples/c4-plugin`) and the C4 team should fix:
+
+| # | Item | Why |
+|---|---|---|
+| L1 | Honor `general.positionEncodings` (offer `utf-8`; today columns are effectively bytes, correct for ASCII only) | Correct positions for non-ASCII text |
+| L2 | Accept string JSON-RPC ids (today answered with id -1) | Spec compliance |
+| L3 | Implement `$/cancelRequest` | Typing fast cancels stale completions |
+| L4 | Send `workspace/semanticTokens/refresh` (and folding/inlay refresh) after recompiles, or support `semanticTokens/full/delta` | Removes the client refetch-after-diagnostics hack |
+| L5 | `codeAction` honoring the request range/context | Removes client-side filtering |
+| L6 | `completionItem/resolve`, MarkupContent hovers (markdown) | Richer IntelliSense |
+| L7 | Inlay hints, call hierarchy, codeLens (tests: "Run / Debug"), `workspace/willRenameFiles` | VS parity features (F-EDT-21, F-BLD-43) |
+| L8 | Read config from IED's `.ied/local/lsp-options/c4.json` (via `initializationOptionsFile` - no LSP change needed) | Bridge retarget |
+| L9 | Incremental re-analysis (already on the C4 roadmap) | Latency on large projects (IED itself) |
+
+### C4DAP (C4 repo)
+
+Today: launch, line breakpoints, thrown/uncaught exception filters, continue/step/pause, threads, stack, one Locals scope, variables, limited evaluate. For VS-class debugging (F-DBG-*): conditional + hit-count + log breakpoints; setVariable; attach; function breakpoints; `readMemory`; `disassemble`; modules; Autos-friendly scopes; `evaluate` contexts (watch/hover/repl). Prioritize conditional breakpoints, attach and memory.
+
+### Nuke (C4 repo kit; Claymore's copy is older)
+
+| # | Item | Why |
+|---|---|---|
+| N1 | `IEDConfig.py`: write `.ied/local/lsp-options/<proj>.json` after each successful build (same content as today's `.echo/c4-lsp.json`: includePaths, defines, c4Home, projects) | LSP/build sync (`docs/06`) |
+| N2 | `nuke --init --ied`: write `<Name>.ied.sln`, generated `.ied.proj` files under `build/ied/`, `.ied/` scaffold (skills, solution.json), and the local plugin pin - idempotent, never clobbering hand edits | J7, F-WSP-60 |
+| N3 | **Stream compiler output** instead of printing it after the compile finishes | Live Build output |
+| N4 | Pass `-test-json <path>` and `--filter <glob>` through `nuke test` (`--json-results`, `--filter`) | Test Explorer (F-BLD-40) |
+| N5 | Machine-readable diagnostics: `--diagnostics-json <path>` (file, line, col, severity, message, code) **with absolute paths** - today names are relative to their owning source root and can collide | Error List without regex guessing (F-BLD-33) |
+| N6 | `nuke list --json` (projects, kinds, configs, archs) | Toolbar dropdown `valuesFrom` |
+| N7 | Optional ANSI color in Nuke/compiler output when `IED_COLOR=1` / a TTY is detected | Output window colors |
+| N8 | Bring Claymore's copy up to date (exit codes, `-g` for debugging, `--projects`) | F5 on Claymore needs PDBs; tasks rely on exit codes |
+| N9 | Keep writing `.echo/` for now (Echo still exists in the folder) but nothing in C4 depends on Echo anymore (owner note on `docs/99` #10) | Transition |
+
+### C4Assist -> the `c4` IED plugin (C4 repo)
+
+C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (see `shared/host-api/examples/c4-plugin/ied-plugin.json`):
+
+- Language definition + Monarch grammar; semantic token mapping to `--syntax-*` tokens (VAX-style palette as one option).
+- LSP profile (staged launch, byte positions, integer ids, refetch-on-diagnostics, client-side code-action filtering) and DAP provider.
+- Problem matchers (`c4`, `c4-test`), test provider (`c4-test-json`), Nuke task preset, project templates, header/source pairs.
+- Feature toggles become plugin settings + `when` clauses (no code).
+- Skills: the five Nuke-shipped skills (`c4-language`, `nuke-build-system`, `c4-testing`, `c4-reflection`, `c4-garbage-collector`) move to the plugin's `skills/`.
+- `kitStatus` becomes a status bar item fed by a binding the host already has (file exists + LSP state); `formatDocument` is the LSP's formatting (no separate tool).
+- Port C4Assist's 17 Playwright e2e specs to IED's frontend e2e harness (`docs/19`).
+
+### Bedrock profiler hooks (C4 repo)
+
+`Profile::` module implementing the client side of the IED trace protocol (`docs/16`): zones (scoped), frames, plots, messages, thread names (renamable), task begin/end, allocations (hooked into the GC allocator: alloc/free/size/pool, optional call stacks), GC collection events (from the existing collection callbacks), GPU contexts and zones (for Claymore's D3D12). Compiled out entirely unless a define is set (zero cost in Dist). Enabled by the IED *Profile* task through an environment variable.
+
+### Claymore (for later engine plugins)
+
+Claymore's plans already align with IED's generic hooks: a named-pipe session + `claymore` CLI with `--json`/`--describe` (-> engine MCP server or plugin bindings and tools), structured shader diagnostics (-> problem matcher / diagnostics JSON), JSON profile traces (-> profiler import, then the native trace protocol), structured logs (-> output source), hot reload (-> task + status bar), `.c4scene`/`.meta.c4`/`.jrn` files (-> file viewers, diff). Recommendation to the Claymore track: emit profiler data through Bedrock `Profile::` rather than a separate JSON format, so one profiler serves both.
+
+## Sequencing (C4 repo)
+
+```
+P-1  Bedrock Net + Process + FS.Watch + Time + Text extras   (gates IED server)
+P-2  Suspected bugs S1-S7 verify/fix                         (gates any binding work)
+P-3  Scale test + exception/thread policy                    (gates IED server)
+P-4  Nuke N1-N6 + C4 plugin rewrite (declarative)           (gates the C4 experience in IED; can start as soon as schemas are frozen)
+P-5  C4LSP L1-L5, C4DAP conditional/attach/memory            (quality; parallel with IED M2-M4)
+P-6  Bedrock Profile:: + trace protocol                      (gates IED profiler M9)
+P-7  Linux target (B31)                                      (makes the sandbox valuable for C4 projects)
+```
