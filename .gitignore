@@ -1,0 +1,13 @@
+# build outputs (Nuke layout: build/{bin,int}/{config}-{system}-{arc}/{proj})
+build/
+bin-int/
+
+# per-machine local state inside the committed .ied folder
+.ied/local/
+
+# user/editor noise
+*.user
+Thumbs.db
+__pycache__/
+.cache/
+.echo/
