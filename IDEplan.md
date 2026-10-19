@@ -26,10 +26,16 @@ this IDE is being built primarily(but not exclusively) for the C4 language and c
 C4 -> C:\GameDev\C4
 Claymore -> C:\GameDev\Claymore
 
+we will need a proper settings window to configure everything. this will be an icon at the bottom of the side bar.
+
 ## AI chat tools
 
 we will need chat tools that can be used by the plugins to interact with the ai.
 in the settings we can configure the AI models and configure the model groups so you can have different models for things like research sub agents or worker sub agents.
+
+the group we should be able to configure different models for planing research worker etc with different temperatures so we can for example have something like claude do the planing then have a temp zero local model do the implementations.
+
+being able to rout request around when you hit token limits or to pick the best model for a given task taking into account what models are busy and if a request needs more privacy so personal information does not get out to cloud models. 
 
 we will want to also configure connections for the ai to use things like SearXNG(have it packaged with this application if possible so we dont need to configure it separately) VPN/tor tools for web searches(searXNG will have to route through this to prevent rate limiting and general privacy) and fetches would also be nice to prevent getting rate limited(we can enable secure mode for the project that will use tor or a configured VPN when accessing the internet)
 
@@ -42,6 +48,14 @@ MCP support for things like blender or interacting with Claymore/other projects 
 the AI should be able to search for skills based on keywords that way it can still find skills even if it has a massive amount of them.
 
 attaching files and using @ to get file path suggestions.
+
+a strong system prompt to help the ai design and write high quality code with my preferred styling
+
+this is primarily for local AI but integration with Claude using the Claude Agent SDK would be nice though i would like to have views for the usage of my subscription so i know how much i have left in the sessions + rollover times etc like is currently in claude code in the chat window.
+
+save chats to disk in case of crash and keep and evict old chat messages from memory.
+
+any tool calls that you can think of for writing code and working with games/game engines.
 
 ## projects
 projects will have a system similar to visual studio where each project has a file to configure it and a solution file that will group them with extra configuration like project local plugins the main difference is that each project file can define a root folder other then the one it is in that way we can generate the project files and put them in a folder in a build directory rather then filling up all the folders.
@@ -59,6 +73,10 @@ it would be nice to have a collapsible breakdown on the right side showing the c
 
 the ability to inject commands into the chat to help guide it or give it extra work
 
+internal scratch pad for planing and note takeing that can be opened up and edited next to the chat ether as part of the chat window or as a tab that is docked next to the chat window.
+
+show indentation by default.
+
 ### the text editor / IDE
 under the icon in the side bar we will want a text editor that will use the vs code monaco tool to display text with full LSP support through LSP plugins. we want this to act as much like normal visual studio/VSX as possible some features like code formatting will need to be implement in a language plugin or LSP(you can look at the LSP in C:\GameDev\C4) we will also want a robust code aware spell check.
 
@@ -66,7 +84,7 @@ on the left side we will have the project/folder structure where projects are gi
 
 we will also need to have the tool bar at the top where you can configure per project dropdowns and buttons with the ability to inject the values for the drop downs into the commands for the buttons and configure images for the buttons that way we can configure dropdowns for platform,configuration, architecture, or any other configuration and have them be used by configured run/test/build/debug etc. the buttons will execute a list of command with different outputs configured so a run button can be configured to build and output to the build output then if the build was successful then run the application and output that to the debug or run output. all the buttons and drop downs are configurable though the DAP support its self is built in.
 
-this will also expose skills and tool calls to the AI so it can build run debug and access the debugger/LSP and other custom LSP endpoints like formatting etc to help the AI navigate the code.
+this will also expose skills and tool calls to the AI so it can build run debug and access the debugger/LSP and other custom LSP endpoints like formatting etc to help the AI navigate the code. giving the AI access to the LSP or other tool calls that wrap the LSP will allow for the AI to navigate code easily without needing to read the whole files.
 
 the text editor will need search features both in the file but search project wide or solution wide with regex or no regex and replace etc like in visual studio
 
@@ -76,6 +94,8 @@ we should support split views and even bound split views so we can auto open hea
 
 we should have markdown preview support with interactive elements(useful for checking off things in a table among other things) and built in browser to test web pages and support to load up any generic file.
 
+tools to fix indentation in files(i prefer tabs over spaces so we should default to tabs the ai should also be told to always use tabs as part of the system prompt).
+
 inline AI chat tools to edit files in place.
 
 code minimap on the scroll bar.
@@ -84,7 +104,7 @@ showing what lines have been changed and saved(Green) and what changes have not 
 
 visual studio/VSX style right click menu and other tools such as LSP navigation high quality code completion(this might need to be part of the LSP) keyboard short cuts and any other tools.
 
-
+again when i say visual studio im taking about visual studio proper NOT vs code
 
 ### git
 we should have a plugin for git that will show up under the text editor this is a git tool like fork or git gitkraken.

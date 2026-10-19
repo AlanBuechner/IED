@@ -96,5 +96,5 @@ Validation failures surface in a "Plugins" settings page with the error text —
 ## Open items
 
 - Final manifest schema → `shared/host-api/` (blocking, see 99).
-- JS runtime choice (QuickJS vs ChakraCore) — decide when first JS plugin lands; both are vendored single binaries, low risk either way.
+- JS runtime: **QuickJS-ng** (decided — see `docs/99` #6; vendored at `third_party/quickjs-ng-v0.17.0`). ChakraCore was considered and dropped (unmaintained since 2020, dead official download links).
 - Plugin sandboxing: v1 trusts enabled plugins within their declared permissions (permissions enforced by the host at each API call). Out-of-process isolation is a later hardening step.

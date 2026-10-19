@@ -7,9 +7,11 @@ Feature breakdown per default plugin. Each entry: **role, key features, bindings
 The first sidebar icon (top). Browser-like tabs at the top of its panel, one per conversation; multiple chats can be **docked side-by-side** (no free-floating windows — docking is DOM layout).
 
 - Real-time streaming: thinking blocks and tool calls render as they type; each segment shows duration, tokens, tokens/sec; tool calls show success/failure + elapsed.
-- Chat bar: model group selector, effort selector, session token totals + current speed.
+- Chat bar: model group selector, effort selector, session token totals + current speed; **cloud-model subscription usage** (e.g. Claude: remaining in session, rollover/reset times) shown where the provider reports it.
 - Collapsible right-side breakdown: context usage ledger, modified-files list, per-session info.
 - Inject commands mid-conversation to steer or add work.
+- **Scratchpad:** an internal planning/note-taking surface for the AI (and user) — a markdown pane that can be opened inline in the chat window or docked as a tab beside it; the model gets a `scratchpad` tool call (read/append/replace sections). Persists with the chat session.
+- Chats persist to disk and survive crashes; old messages evict from memory lazily (see 04, "Chat persistence").
 - Owns the **default tool-call set** (see 04) and exposes bindings: `chat.inject`, `chat.openTab`, `chat.getActiveContext`.
 
 ## editor (`plugins/editor/`) — the heart of the IDE
@@ -28,7 +30,8 @@ Must feel like Visual Studio, not VS Code. Components:
 - **Minimap** on the scrollbar.
 - **Line indicators:** green = changed & saved (vs VCS), yellow = unsaved changes — VS semantics, exactly.
 - Context menus (right-click) in VS style: open, open split, copy path, reveal in tree, git actions, AI actions ("explain", "fix", "chat with selection").
-- Exposes the biggest binding surface in IED: `editor.openFile`, `editor.getSelectedText`, `editor.applyEdit`, `editor.runToolbarButton(id)`, `editor.getOutput(tabId)`, plus LSP/DAP navigation tools for the AI (go-to-def, references, formatting via custom LSP endpoints).
+- **Indentation fixer tool:** a tool call (exposed to the AI + right-click menu) that normalizes file indentation — project default is **tabs** (the system prompt tells the model to always use tabs; this tool is the mechanical backstop).
+- Exposes the biggest binding surface in IED: `editor.openFile`, `editor.getSelectedText`, `editor.applyEdit`, `editor.runToolbarButton(id)`, `editor.getOutput(tabId)`, plus **LSP-wrapped navigation tools for the AI** (go-to-def, references, hover/type info, formatting via custom LSP endpoints) — so the model can navigate code by symbol without reading whole files.
 
 ## git (`plugins/git/`)
 
@@ -58,7 +61,7 @@ Docker-based cross-OS development: run a container (linux, macOS-ish) to build/t
 
 ## profiler (`plugins/profiler/`)
 
-Tracy-class, fully featured: find perf issues **and memory leaks**.
+Tracy-class, fully featured: find perf issues **and memory leaks**. (Reference implementation vendored at `third_party/tracy` — note upstream moved to `wolfpld/tracy`; use it for the trace format + view UX, not as a runtime dependency.)
 
 - Timeline view (CPU), allocation view (leaks/lifetime), call stacks, thread view.
 - **Dynamic thread renaming:** threads can change name mid-execution; the UI tints the segment where a rename happened, and offers a **"by task" grouping** so pooled worker threads are viewed by the task they're running, not by OS thread — this is a first-class view mode, not a filter.

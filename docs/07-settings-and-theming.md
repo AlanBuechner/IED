@@ -46,10 +46,15 @@ Rules:
 
 `frontend/css/theme.css` defines all tokens as CSS custom properties (backgrounds, borders, text levels, spacing scale, font stacks — monospace for code/terminals, UI sans elsewhere). The webview shell loads it first; Monaco and the ANSI console renderer map their palettes onto these same tokens so editor, terminal and chat can't drift apart.
 
-### Layout conventions (VS parity)
+## The settings window
+
+A proper **settings window** configures everything — it is its own sidebar icon at the **bottom of the sidebar** (distinct from plugin icons up top), not just a per-plugin page. It renders all three tiers with the effective-value indicators described above, plus first-class sections: AI models & groups (incl. per-role temperatures, fallbacks, privacy classes), egress (SearXNG engines, tor/VPN profiles, secure mode), cloud-provider accounts (Claude subscription + usage), plugins (install/enable/permissions), keybindings, theme tokens preview. Plugins contribute sections via their `settings.schema.json` — the window is a generic renderer over schemas, so nothing needs custom settings UI code.
+
+## Layout conventions (VS parity)
 
 - Thin left sidebar (icons only, ~40px), main content area per selected icon, collapsible bottom terminal, top toolbar + menu bar.
 - Dense: small paddings, 12–13px UI text, no rounded-corner decoration beyond subtle 2–4px radii, 1px borders for separation (no drop shadows except on context menus/popups).
+- **Indentation shown by default** in the editor; project default indent is **tabs** (owner preference — also a standing instruction in the AI system prompt).
 - Context menus everywhere a right-click lands; keyboard shortcuts are first-class and rebindable (app-tier setting).
 
 ## Open items

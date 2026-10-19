@@ -11,3 +11,6 @@ Thumbs.db
 __pycache__/
 .cache/
 .echo/
+
+# vendored third-party dependencies (reproduce with: powershell tools/fetch-deps.ps1)
+third_party/

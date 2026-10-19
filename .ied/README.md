@@ -8,5 +8,5 @@ This is the committed hidden folder for the IED repo itself — the same pattern
 │   └── ied-project/SKILL.md
 ├── solution.json      # (later) solution-tier settings
 ├── projects/          # (later) project-tier settings
-└── local/             # gitignored: workspace layout, build-derived LSP options
+└── local/             # gitignored: workspace layout, build-derived LSP options, chat history
 ```

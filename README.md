@@ -42,6 +42,8 @@ ied/
 │   ├── terminal/         # Always-present collapsible bottom shell (PowerShell/bash)
 │   ├── sandbox/          # Docker-based cross-OS build/test/develop sandbox
 │   └── profiler/         # Tracy-like profiler: threads, task-grouped view, GPU traces
+├── third_party/          # Vendored dependencies (gitignored; tools/fetch-deps.ps1 reproduces it)
+├── tools/                # Repo tooling: fetch-deps.ps1 + deps-manifest.json (committed SHA256 record)
 └── .ied/                 # IED's own solution hidden folder (mirrors C4's .echo/): settings + skills, committed
 ```
 

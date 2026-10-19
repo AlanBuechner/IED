@@ -11,20 +11,38 @@ The AI is a first-class citizen of IED, not an add-on. This doc covers the runti
 
 ## Model configuration & model groups
 
-Settings define **models** (endpoint URL, API style — OpenAI-compatible is the baseline — auth, context window size, tool-calling support, vision support) and **model groups**: named bundles that pick a model per *role*:
+Settings define **models** (endpoint URL, API style — OpenAI-compatible is the baseline — auth, context window size, tool-calling support, vision support, **temperature**, privacy class: `local` or `cloud`) and **model groups**: named bundles that pick a model *and its temperature* per *role*:
 
 ```jsonc
 {
   "groups": {
-    "default":  { "primary": "local-big",   "researchSubAgent": "local-fast", "workerSubAgent": "local-fast" },
-    "fast":     { "primary": "local-fast" }
+    "default": {
+      "planning":       { "model": "claude",        "temperature": 0.3 },  // e.g. Claude does the planning…
+      "primary":        { "model": "local-big",     "temperature": 0.2 },
+      "implementation": { "model": "local-fast",    "temperature": 0.0 },  // …temp-0 local model implements
+      "researchSubAgent": { "model": "local-fast",  "temperature": 0.1 },
+      "workerSubAgent":   { "model": "local-fast",  "temperature": 0.0 }
+    },
+    "fast": { "primary": { "model": "local-fast" } }
   }
 }
 ```
 
 - The chat UI shows a **model group selector** per chat tab (plus per-message overrides later).
-- Roles exist so sub-agent work (research, parallel workers) can run on cheaper/faster models while the main loop uses the strong one. Group membership is editable in settings; the runtime resolves role → model at call time.
+- Roles exist so sub-agent work (planning, research, parallel workers) can run on different models *at different temperatures* than the main loop — the plan's example: a strong model plans, a temp-0 local model implements.
 - Per-chat and per-message **effort** setting (maps to reasoning effort / thinking budget where the model supports it).
+
+## Request routing
+
+On top of group/role selection, the AI runtime routes each request intelligently:
+
+- **Limit-aware fallback:** when a model hits token/rate limits, retry on the next eligible model in the role's fallback list — transparently, with a visible note in the chat ("routed to X after Y hit its limit").
+- **Load-aware selection:** prefer models that are idle; a busy strong model yields to an available one of similar class.
+- **Privacy routing (the important one):** every model carries a privacy class (`local` / `cloud`). When a request is flagged sensitive (or the project's policy says so), it routes **only to local models** so personal information never reaches cloud endpoints. Policy tiers: per-model default, per-group override, per-solution strict mode (`.ied/solution.json`: `"aiEgress": "local-only"`).
+
+## System prompt
+
+A strong base system prompt ships with IED and is user-editable in the settings window: design discipline + **the owner's preferred styling — tabs, not spaces** ("always indent with tabs" is a standing instruction), plus how to use IED's tools/skills. `AGENTS.md` (per solution) layers project-specific rules on top (see below). The indentation-fixer tool call (editor plugin) enforces the same rule mechanically when needed.
 
 ## Streaming & telemetry
 
@@ -71,7 +89,10 @@ Built per session from, in order:
 | `web.fetch` | same egress path |
 | `renderPage(url)` / `screenshot()` | headless render to get console output + DOM; interact-with-page actions (click/type/extract) for web work |
 | `chat.inject(text)` | user-injected guidance mid-run ("inject commands into the chat") |
+| `scratchpad(action, ...)` | internal planning/note-taking pane: read/append/replace sections; dockable next to the chat (see 05) |
 | `searchSkills(keywords)` | see above |
+
+Plus a standing set for code + game/engine work (editor plugin contributes most of these): build/run/test via toolbar templates, debug session control (breakpoints, stepping, variables), LSP navigation wrappers (def/refs/hover — so the model never has to read whole files), indentation fixer (tabs), markdown preview interaction, and profiler queries.
 
 Plugins add tools on top: editor exposes build/run/debug/LSP-navigation tools; sandbox exposes "run this in linux container"; profiler exposes session queries. All tool calls are permission-checked and appear live in the UI with status + timing.
 
@@ -88,6 +109,19 @@ Plugins add tools on top: editor exposes build/run/debug/LSP-navigation tools; s
   - direct (default), or
   - **tor / a user-configured VPN** when the project's "secure mode" is enabled — prevents rate limiting and adds privacy.
 - Egress policy is per-solution (`.ied/solution.json`): `direct | tor | vpn:<profile>`. Untrusted workspaces: egress off until trusted.
+
+## Cloud model integration — Claude Agent SDK
+
+IED is primarily local-AI, but first-class **Claude** integration via the Claude Agent SDK is wanted:
+
+- The SDK runs as an MCP-style backend inside the host AI runtime (it's just another "model provider" from the chat's point of view; its tool-calling loop maps onto IED's existing streaming/tool-call UI).
+- **Subscription usage views:** the chat window shows Claude subscription state — usage remaining in the current session, rollover times, reset countdowns — like Claude Code does. Data comes from the SDK/account API where available; if not, show what the SDK reports and mark the rest "n/a" rather than guessing.
+- Privacy routing (above) treats Claude as `cloud`: sensitive requests never route to it unless the user explicitly overrides for that chat.
+
+## Chat persistence & memory management
+
+- **Chats save to disk** (`.ied/local/chats/<chatId>.jsonl` — per-machine, gitignored): every message/tool-call/compression event appended as it happens, so a crash loses at most the in-flight stream. Reopening a workspace restores all chat tabs from disk.
+- **Eviction:** only the active window of each chat lives in memory; old messages are evicted and re-hydrated lazily on scroll/expand (JSONL makes this cheap). The context ledger (above) is persisted with the chat so compression state survives restarts too.
 
 ## Attachments & @-mentions
 
