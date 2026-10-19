@@ -61,7 +61,7 @@ Docker-based cross-OS development: run a container (linux, macOS-ish) to build/t
 
 ## profiler (`plugins/profiler/`)
 
-Tracy-class, fully featured: find perf issues **and memory leaks**. (Reference implementation vendored at `third_party/tracy` — note upstream moved to `wolfpld/tracy`; use it for the trace format + view UX, not as a runtime dependency.)
+Tracy-class, fully featured: find perf issues **and memory leaks**. **Tracy (`third_party/tracy`) is a feature reference only — study its views and trace format for design; it is never linked into IED or C4, not a runtime dependency.**
 
 - Timeline view (CPU), allocation view (leaks/lifetime), call stacks, thread view.
 - **Dynamic thread renaming:** threads can change name mid-execution; the UI tints the segment where a rename happened, and offers a **"by task" grouping** so pooled worker threads are viewed by the task they're running, not by OS thread — this is a first-class view mode, not a filter.

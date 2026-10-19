@@ -44,7 +44,7 @@ Rules:
 
 ### Token file
 
-`frontend/css/theme.css` defines all tokens as CSS custom properties (backgrounds, borders, text levels, spacing scale, font stacks — monospace for code/terminals, UI sans elsewhere). The webview shell loads it first; Monaco and the ANSI console renderer map their palettes onto these same tokens so editor, terminal and chat can't drift apart.
+`frontend/css/theme.css` defines all tokens as CSS custom properties (backgrounds, borders, text levels, spacing scale, font stacks — monospace for code/terminals, UI sans elsewhere). The web client loads it first; Monaco and the ANSI console renderer map their palettes onto these same tokens so editor, terminal and chat can't drift apart.
 
 ## The settings window
 

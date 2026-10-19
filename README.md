@@ -8,7 +8,7 @@ IED is an IDE / AI chat tool that mimics **Visual Studio** (not VS Code) with fi
 | **Nuke** | The C4 build system (Python kit: `nuke.bat`, `Config.py`, project manager, incremental builder) | `C:\GameDev\C4\Nuke` |
 | **Claymore** | The game engine | `C:\GameDev\Claymore` |
 | **Echo** | The old IDE (being replaced by IED; C4Assist is currently written for it in Go) | — |
-| **IED** | This repo. Native C4 backend + web (html/css/js) frontend, plugin architecture | here |
+| **IED** | This repo. **Split server + web client:** a standalone C4-native server owns all state (plugins, LSP/DAP, AI runtime, builds, terminals); the UI is a plain web app you can open from any browser — desktop or phone — and close while the server keeps working in the background | here |
 
 ## Status
 
@@ -30,8 +30,8 @@ ied/
 ├── WORK.md               # Living state: what exists, what's next
 ├── docs/                 # High-level planning docs (numbered)
 ├── Nuke/                 # Build system kit — ported from C:\GameDev\C4\Nuke when the compiler is ready
-├── src/                  # Native host application (C4 sources later): plugin host, IPC, LSP/DAP, AI runtime
-├── frontend/             # Web UI shell (html/css/js): layout, theme tokens, panels, Monaco integration
+├── src/                  # IED server (C4 sources later): owns ALL state — plugins, LSP/DAP, AI runtime, builds, terminals; keeps running with no client connected
+├── frontend/             # Web UI client (html/css/js) served by the server: layout, theme tokens, panels, Monaco integration; works in any browser incl. phones
 ├── shared/               # Code shared between host and plugins
 │   ├── host-api/         # Plugin host API definitions (manifest types, contributions, bindings)
 │   └── ui-kit/           # Shared web components: tree view, tab strip, ANSI console renderer, icons
@@ -49,6 +49,7 @@ ied/
 
 ## Key conventions (summary — details in docs/)
 
+- **Split server + web client.** The server is standalone and owns all state; the browser is a disposable view. Close it, use your phone, reconnect later — chats, builds and terminals keep running and resume seamlessly. No feature may depend on a browser tab staying open.
 - **No language/engine specifics in the host.** C4 and Claymore get their support through plugins, LSP and DAP. The host is generic.
 - **Projects mirror Visual Studio:** per-project config file + a solution file that groups them. Project files may define a root folder other than their own location so generated project files can live in a build directory.
 - **Hidden folder at the solution root** (`.ied/`) holds project settings and skills, so deleting generated files never loses them.

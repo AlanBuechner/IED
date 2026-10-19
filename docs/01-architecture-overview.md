@@ -4,61 +4,49 @@
 
 Fix the top-level shape of IED so every later decision has a place to live.
 
-## The two halves
+## Core model: split server + web client
 
-IED is **native host + web frontend**:
+IED is a **standalone server** and a **web frontend**. The UI is an ordinary web app that runs in any browser — desktop, phone, another machine on the network. The server owns everything; the browser is a thin, disposable view.
 
-- **Host (C4, native):** application shell, window management, plugin runtime, IPC server, settings store, LSP/DAP client infrastructure, AI model clients (streaming inference over HTTP/sockets), terminal process spawning, file watchers, git plumbing, docker plumbing. Anything that needs OS access, performance, or long-lived processes lives here.
-- **Frontend (html/css/js):** everything the user sees and touches — layout, panels, Monaco editor, chat UI, trees, output consoles, settings forms. Runs in an embedded webview inside the host.
+Consequences (these are load-bearing):
 
-The frontend never talks to the OS directly; it calls host APIs over IPC. The host never renders anything itself.
+- **Close the app → work continues.** AI chats, builds, terminals and LSP servers all live on the server. Reopen or reconnect and you resume exactly where you left off (live streams replay from a ring buffer; history comes from disk).
+- **Remote access is first-class**, not an afterthought: phone browser, another PC, anywhere the HTTP(S)+WS endpoint is reachable. The UI must work at phone widths.
+- **All state lives on the server.** The browser holds no authoritative state; refresh or switch devices and everything (open tabs, layout, running sessions) restores from the server.
+- Multiple clients can attach to the same workspace concurrently (concurrency semantics: 99 #13).
 
-## Process model (working assumption — confirm in design)
+## Server (`ied-server`, C4 native)
 
 ```
-ied.exe                          single native process
-├── UI: embedded webview(s)      main window = one webview; split panes are DOM, not windows
-├── Plugin host                  in-process plugin API surface for C4 plugins
-│   └── JS plugin runtime        bundled JS engine for JS plugins
-├── IPC server                   single loop dispatching webview + plugin calls
-├── LSP client pool              one connection per registered LSP server (stdio or socket)
-├── DAP client pool              one connection per debug session
-├── AI runtime                   model connections, streaming, tool-call executor, compression
-└── Process supervisor           terminals, build processes (nuke), docker, MCP servers
+ied-server.exe                     standalone background process (foreground / start-minimized; service install later)
+├── Web server                     static assets + HTTP API + one multiplexed WebSocket hub per client
+├── Plugin host                    in-process C4 plugins; QuickJS-ng runtime for JS plugin logic
+├── LSP client pool                one connection per registered LSP server (stdio or socket)
+├── DAP client pool                one connection per debug session
+├── AI runtime                     model connections, streaming, tool executor, compression, egress proxy
+└── Process supervisor             terminal PTYs, nuke builds, docker, MCP servers
 ```
 
-Key constraint from the plan: **no free-floating chat windows** — docking/splitting is DOM layout inside one window. That keeps the webview story simple (one main webview).
+Everything that needs OS access, performance, or long-lived processes lives here. It keeps running with zero connected clients — that is the point.
 
-## IPC protocol sketch
+## Client (web app, html/css/js)
 
-- One bidirectional channel between webview and host. JSON messages; requests get an `id`, responses echo it; events are push-only with a topic name.
-- Method names are **plugin-namespaced**: `chat.openTab`, `editor.revealFile` — so plugins can call other plugins' exposed methods without coupling to their internals (see 02, bindings).
-- The same channel is what C4 plugins use from the native side; the JS runtime gets an async mirror of it.
-- **Open question:** exact framing/serialization and whether LSP/DAP traffic gets proxied through IPC or a dedicated side channel (perf for token streaming + diagnostics). See 99.
+Served by the server over HTTP; talks to it over **one multiplexed WebSocket**. Must run well in a phone browser. Monaco and xterm.js execute client-side; all heavy lifting (LSP, builds, AI inference plumbing, git, docker) stays server-side. No free-floating windows — docking/splits are DOM layout inside the page.
 
-## Module map (first cut)
+## Transport
 
-| Area | Location | Notes |
-|---|---|---|
-| App lifecycle, window, webview embed | `src/host/` | C4 sources; entry point |
-| IPC server + dispatch | `src/ipc/` | protocol lives in `shared/host-api/` so both sides code against it |
-| Settings store (3 tiers) | `src/settings/` | see 07 |
-| Plugin discovery/validation/loading | `src/plugins/` | manifest v1, enable/disable, trust |
-| JS plugin runtime | `src/jsruntime/` | vendored engine + host API bindings |
-| LSP client pool | `src/lsp/` | generic; servers registered by plugins (LSP profiles) |
-| DAP client pool | `src/dap/` | built-in support per the plan; adapters registered by plugins |
-| AI runtime | `src/ai/` | model groups, streaming, tool executor, compression, egress proxy |
-| Terminal supervisor | `src/terminal/` | PTY/process handling for bottom shell + AI shell tool |
-| Git plumbing | `src/git/` | wraps git CLI/libgit2; UI is the git plugin |
-| Docker/sandbox | `src/sandbox/` | container lifecycle for cross-OS builds |
-| File watching, FS tools | `src/fs/` | backs editor tree + AI file tools |
-| Webview shell (DOM app) | `frontend/src/` | layout engine, panel registry, theme CSS |
-| Shared UI components | `shared/ui-kit/` | tree view, tab strip, ANSI console renderer, icon set, context menus |
-| Protocol + API types | `shared/host-api/` | the contract; versioned |
+- **HTTP:** static assets + simple request/response ops (settings get/set, plugin list, workspace open…).
+- **One multiplexed WebSocket per client:** typed JSON frames — request/response with `id`, push events by topic (`ai.stream`, `build.output`, `terminal.io`, `lsp.diagnostics`, `fs.changed`, `toolcall.status`…), streaming chunks, cancellation.
+- **Reconnect/resume:** the server keeps a ring buffer of recent events per session; on (re)connect the client requests resume → replays missed events + reconciles full state. This is what makes "close the app and come back later" seamless.
 
-## Webview choice — open question
+## Plugin runtime split
 
-Candidates: WebView2 (Windows-first, matches "Visual Studio on Windows" positioning), embedded Chromium (cross-platform but heavy). The sandbox plugin wants docker for *other* OSes, not necessarily a cross-platform IED binary. **Tentative default: WebView2.** See 99.
+- **Server side:** C4 plugins + JS plugin *logic* (tool calls, bindings, LSP/DAP glue, skills) run in-process / QuickJS-ng on the server.
+- **Client side:** plugin *UI* contributions are web modules (js/css/html) that the shell loads from the server — same contribution model as any other UI, but executed in the browser. See `docs/02`.
+
+## Desktop wrapper (optional, later)
+
+A native window embedding a webview (WebView2 — already vendored in `third_party/`) pointed at the local server gives an "installed app" feel with one-click launch. It is **not required for any feature**; v1 ships as: start server → open browser. (This resolves the old webview question: no embedded webview in v1.)
 
 ## What deliberately does NOT exist in the host
 
@@ -68,6 +56,6 @@ Candidates: WebView2 (Windows-first, matches "Visual Studio on Windows" position
 
 ## Open items
 
-- Webview choice (99).
-- IPC framing + streaming channel design (99).
-- Whether plugins can run out-of-process for isolation, or in-process only (v1: in-process; revisit if a plugin misbehaves badly).
+- WS frame protocol v1, incl. resume semantics (99 #2).
+- Remote access security: auth for non-localhost clients, default bind address, TLS story (99 #13).
+- Multi-client concurrency semantics (99 #13).

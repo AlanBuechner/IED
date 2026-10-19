@@ -6,10 +6,12 @@ Define how IED is extended, because "the main parts of the project will be imple
 
 ## Two plugin languages, one host API
 
-- **C4 plugins** — native, loaded by the host. Used where performance or OS access matters (the editor's LSP/DAP glue, sandbox docker control).
-- **JS plugins** — run in a bundled JS runtime inside the host. Used for UI-centric logic and anything quick to iterate on.
+Both run **on the server** (see `docs/01` — the client is a thin web view):
 
-Both implement the same contribution interfaces; the manifest declares which runtime a plugin uses. v1 ships both runtimes but every default plugin may start as JS and go native where profiling demands.
+- **C4 plugins** — native, loaded by the server. Used where performance or OS access matters (the editor's LSP/DAP glue, sandbox docker control).
+- **JS plugins** — run in QuickJS-ng inside the server. Used for UI-centric logic and anything quick to iterate on.
+
+Both implement the same contribution interfaces; the manifest declares which runtime a plugin uses. v1 ships both runtimes but every default plugin may start as JS and go native where profiling demands. Plugin **UI** contributions are web modules executed in the browser (loaded from the server); plugin **logic** always runs server-side.
 
 ## Plugin locations & trust
 
