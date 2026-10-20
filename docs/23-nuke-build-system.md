@@ -36,6 +36,7 @@ Why Nuke is built the way it is, what it guarantees, and what is left to do. The
 | N-11 | The IDE bridge writes `.ied/local/lsp-options/<P>.json` after each compile | Replaces the predecessor's per-workspace LSP options file; same content, IED's location (`03`) |
 | N-12 | `nuke` on PATH through `bin/nuke.cmd` (and `bin/nuke` for POSIX shells), offered by `setup.bat` | A global command like the owner asked for, without installing anything outside the repository |
 | N-13 | Exit codes: 1 for Nuke-level errors, otherwise the failing tool's or program's exact code (32-bit crash codes included) | Scripts, IED tasks and agents can tell "your manifest is wrong" from "your program returned 3" |
+| N-14 | Debug and Development compile with C4's `--incremental`, Dist without; a configuration sets it with `incremental = true/false`, and Nuke passes it only when the toolchain's `-h` lists it | The edit loop of a large program (the IED server) must not pay a whole-program `-O3` optimize on every change: a one-module edit of the 60k-line ScaleTest rebuilds in 2.6 s instead of 12.3 s, at the same run speed; the shipped build keeps cross-object inlining (C4 D-76). Older pinned toolchains keep working |
 
 ## Not done yet (tracked in WORK.md)
 

@@ -60,10 +60,13 @@ class WorkspaceTest(unittest.TestCase):
 		self.compiler_log = os.path.join(self.tmp, "compiler.log")
 		os.environ["FAKE_C4_LOG"] = self.compiler_log
 		os.environ.pop("FAKE_C4_FAIL", None)
+		os.environ.pop("FAKE_C4_WITHOUT", None)
+		toolchains.listed_options.cache_clear()
 
 	def tearDown(self):
 		os.environ.pop("FAKE_C4_LOG", None)
 		os.environ.pop("FAKE_C4_FAIL", None)
+		os.environ.pop("FAKE_C4_WITHOUT", None)
 		shutil.rmtree(self.tmp, ignore_errors=True)
 
 	def files(self, files):

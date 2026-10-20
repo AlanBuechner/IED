@@ -9,7 +9,7 @@ All runners expect the compiler at `bin/Development-windows-x64/C4/C4.exe` (buil
 `assets/build-output/<suite>/` (gitignored). Nothing test-related goes in the repo root.
 
 `nuke gates` from the repository root (the folder above the C4 tree) is the one command that builds the compiler
-and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and `-O2`), IsolatedTest (`-O0` and
+and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`), NegativeTest (`-O0` and `-O2`), IsolatedTest (`-O0` and
 `-O2`), RuntimeTest, ScriptTest (`-O0` and `-O2`), ToolsTest and Bedrock (the steps are in `C4/nuke.toml`).
 `nuke test` there runs C4Testing alone (`nuke test C4 -- --filter "Lexer.*"`).
 
@@ -20,7 +20,7 @@ and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and 
 | Suite | Location | What it proves | Run |
 |---|---|---|---|
 | C4Testing | `C4Testing/src/Tests/` | C++ unit tests of the compiler library: lexer, source manager, parser, ProgramModel, overloads, HIR lowering, in-process codegen | `nuke test` (repository root), or `python Frost/Build.py -test -c Development -a x64 -p <C4 root>` |
-| TestCode (e2e) | `assets/TestCode/` | one large C4 program covering the language end to end, run at `-O0` and `-O2` | `assets/TestCode/RunTests.ps1 [-DebugInfo] [-Partitions n]` |
+| TestCode (e2e) | `assets/TestCode/` | one large C4 program covering the language end to end, run at `-O0` and `-O2` | `assets/TestCode/RunTests.ps1 [-DebugInfo] [-Partitions n] [-Incremental]` |
 | NegativeTest | `assets/NegativeTest/` | invalid programs fail with the exact, actionable diagnostic | `assets/NegativeTest/RunTests.ps1 [-Filter x] [-O2]` |
 | IsolatedTest | `assets/IsolatedTest/` | one folder = one feature or one historical bug, including interop | `assets/IsolatedTest/RunTests.ps1 [-Filter x] [-O2] [-DebugInfo] [-Partitions n]` |
 | RuntimeTest | `assets/RuntimeTest/` | small runtime behaviours (printf, struct-return ABI) compile and exit 0 | `assets/RuntimeTest/RunTests.ps1 [-Filter x]` |
@@ -69,7 +69,8 @@ and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and 
 2. builds the folder at the default `-O0` into `assets/build-output/testcode/Main.exe` and runs it;
 3. rebuilds the same folder at `-O2` and runs it again.
 
-Both runs must succeed with zero failed assertions. (The `-O2` build currently writes `Main_O2.*` into
+Both runs must succeed with zero failed assertions. `-Incremental` builds both with `--incremental`, so the `-O2`
+build optimizes each object alone (D-76); the gates run it as the step `e2e-incremental`. (The `-O2` build currently writes `Main_O2.*` into
 the test folder itself; stray `Main_O2.exe/.ll/.obj` files there are build output, not sources.)
 
 Adding a test:
@@ -202,6 +203,9 @@ assets\build-output\iso\SwizzleLanguage.exe
   - `ObjectCache` (roadmap 5.3): an unchanged rebuild reuses every object, editing one function reassembles only its
     partitions and the program shows the edit (no stale object is linked), an `-O2` build after `-O0` reuses none,
     the cache keeps only the latest build's objects, and `-c` makes no cache.
+  - `IncrementalBuild` (D-76): at `-O2 --incremental` an unchanged rebuild reuses every object, editing one function
+    reoptimizes only some and the program shows the edit, `-ftime` reports `optimize+codegen`, a whole-program build
+    afterwards reuses none, and `-c --incremental` is a usage error.
 
 Collector tests live in IsolatedTest `MemoryGC/` (liveness, deep lists, large objects, interior pointers,
 pins, hooks, finalizer order and exceptions, static roots, noscan, pacing, `delete`, collections while several

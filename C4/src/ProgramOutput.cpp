@@ -29,8 +29,9 @@ bool ProgramOutput::Write(llvm::Module& module)
 	if (!PrepareScriptHost(module)) return false; // the output folder exists: <out>.c4i goes there
 	if (m_In.options.emitBitcode) return WriteBitcode(module, base + ".bc");
 	if (m_In.options.emitIR) return WriteIR(module, base + ".ll"); // -S: the module as text, and nothing else
-	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads };
-	if (!Optimize(module, settings)) return false;
+	const bool optimizePartitions = m_In.options.incremental && m_In.options.optLevel > 0; // -O0 optimizes nothing to cache
+	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, optimizePartitions };
+	if (!optimizePartitions && !Optimize(module, settings)) return false;
 	if (m_In.options.compileOnly) return WriteCompiledObject(module, settings, base + ".obj"); // -c: the object is the output
 	const std::vector<std::string> objects = Assemble(module, settings, Scripting::ObjectCache(base + ".objects", CacheSalt(settings)));
 	return !objects.empty() && Link(objects);
@@ -118,7 +119,8 @@ std::string ProgramOutput::CacheSalt(const Scripting::ObjectSettings& settings)
 	const auto size = fs::file_size(compiler, ec);
 	const auto time = fs::last_write_time(compiler, ec).time_since_epoch().count();
 	return "C4 " + std::to_string(Scripting::CompilerVersion::Encoded) + " " + std::to_string(size) + " " + std::to_string(time) +
-		" -O" + std::to_string(settings.optLevel) + " " + settings.target->Cpu() + " " + settings.target->LlvmFeatures();
+		" -O" + std::to_string(settings.optLevel) + (settings.optimizePartitions ? " incremental " : " ") + settings.target->Cpu() + " " +
+		settings.target->LlvmFeatures();
 }
 
 bool ProgramOutput::WriteCompiledObject(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::string& objPath)
@@ -141,7 +143,7 @@ std::vector<std::string> ProgramOutput::Assemble(llvm::Module& module, const Scr
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
 	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(module, settings, partitions, cache, diagnostics);
 	Report(diagnostics);
-	Timed("codegen", start);
+	Timed(settings.optimizePartitions ? "optimize+codegen" : "codegen", start);
 	if (m_In.options.verbose)
 		std::cout << Scripting::InstructionCount(module) << " instructions in " << partitions << " object(s), " << objects.reused
 			<< " reused, the rest assembled on up to " << settings.threads << " thread(s), in " << cache.Folder().string() << std::endl;

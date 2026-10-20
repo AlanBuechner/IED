@@ -1,12 +1,26 @@
 """A stand-in for C4.exe in Nuke's tests: records its arguments and writes the output it is asked for.
-FAKE_C4_FAIL=<code> makes it fail with that exit code."""
+FAKE_C4_FAIL=<code> makes it fail with that exit code; FAKE_C4_WITHOUT=<option>,... plays an older compiler that
+neither lists nor accepts those options."""
 
 import json
 import os
 import sys
 
 
+OPTIONS = ("-o", "-O", "-g", "-D", "-l", "--projects", "--int-dir", "-test", "-test-json", "--incremental")
+
+
 def main(args):
+	missing = [o for o in os.environ.get("FAKE_C4_WITHOUT", "").split(",") if o]
+	if args == ["-h"]:
+		for option in OPTIONS:
+			if option not in missing:
+				print(f"  {option}    an option")
+		return 0
+	unknown = [a for a in args if a in missing]
+	if unknown:
+		print(f"error: unknown option '{unknown[0]}'")
+		return 2
 	log = os.environ.get("FAKE_C4_LOG")
 	if log:
 		with open(log, "a", encoding="utf-8") as f:

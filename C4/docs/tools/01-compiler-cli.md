@@ -47,6 +47,7 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 | `-O<n>`, `-O <n>` | Optimization level 0..3 (default 0): LLVM's default pipeline for that level, as clang runs it. C4 itself has no optimization pass. |
 | `-j <n>`, `--threads <n>` | Threads that generate code, 1..64 (default: the processors, at most 4). |
 | `--partitions <n>` | Assemble the program into `<n>` objects, 1..64 (default: by its size, at most `-j`); `-c` takes none. |
+| `--incremental` | Optimize each object alone, after the split, for a fast edit loop (D-76): an object whose code is unchanged reuses its cached object without being optimized again, so an edit reoptimizes only the objects it changes. Each object carries copies of the small functions it calls from the others, so those still inline; larger functions do not inline across objects, so the code can be somewhat slower than a whole-program build. No effect at `-O0`; `-c` takes none. Nuke's `Debug` and `Development` configurations pass it, `Dist` does not. |
 | `-march=<cpu>` | The processor to compile for ([vectors 8](../language/11-vectors-and-swizzling.md#8-the-simd-target), D-62): `x86-64` (the default), `x86-64-v2`, `x86-64-v3`, `x86-64-v4`, any LLVM x86-64 CPU name (`haswell`, `znver4`) or `native` (the building machine). Every function is compiled for it, foreign sources too, and it defines the `SIMD_*` macros. An unknown name is a usage error that lists the levels. |
 | `-m<feature>`, `-mno-<feature>` | Turn one processor feature on or off, with what it implies (`-mavx2` turns on `avx`, `-mno-avx` turns off `avx2` and `fma`): `sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd`. As in clang they apply after the last `-march`, in order. An unknown feature is a usage error that lists them. |
 | `-fno-strict-aliasing` | Turn off strict aliasing ([types 4.14](../language/04-types.md#414-strict-aliasing), D-64): the IR carries no type-based alias tags, so any load or store may touch any memory, for code that reads a value through a pointer to another type. |
@@ -93,8 +94,9 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 6. Optimize the module at `-O<n>` with LLVM's default pipeline and write `<base>.obj`, inside the compiler (no
    separate clang process); the target machine and every function carry the target's CPU and features. A large
    module is split into partitions (`--partitions`), assembled on `-j` threads into `<int>/<name>.objects/`, where
-   a partition whose code has not changed since the last build reuses its object. An assembler error in an `asm`
-   block is reported at the block's line. `-c` stops here, with one object, `<base>.obj`.
+   a partition whose code has not changed since the last build reuses its object. With `--incremental` the module is
+   split first and each partition is optimized alone, so a reused object skips the optimizer too. An assembler error
+   in an `asm` block is reported at the block's line. `-c` stops here, with one object, `<base>.obj`.
 7. Compile every C and C++ source of the runtime (`<home>/C4Runtime`: the GC, threads, reflection, tests, EH,
    IO, RTTI, memory) at `-O2` into `%TEMP%/c4_runtime/<hash of the runtime folder>/O2/`
    (`Compiler/RuntimeObjects.cpp`). An object's name carries a key of its source's bytes and every runtime

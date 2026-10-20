@@ -258,6 +258,8 @@ def _configuration(name, t):
 			raise NukeError(f"{t.file}: {t.where}.optimize must be 0, 1, 2 or 3")
 	if "debug-info" in t.data:
 		fields["debug-info"] = t.boolean("debug-info", True)
+	if "incremental" in t.data:
+		fields["incremental"] = t.boolean("incremental", False)
 	if "aliases" in t.data:
 		fields["aliases"] = t.strings("aliases")
 	if "defines" in t.data:

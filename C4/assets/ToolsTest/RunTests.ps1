@@ -120,7 +120,7 @@ function Test-UsageErrors {
 function Test-HelpListsEveryOption {
     $help = (Invoke-Compiler $compiler @("-h")).output
     $failures = @()
-    foreach ($flag in @("-o ", "-I ", "-D ", "-O ", "--threads", "--partitions", "-march=", "-m ", "--int-dir", "-l ", "-L ", "-c ", "-bc", "-S", "-test", "-test-json", "-reflect-tag",
+    foreach ($flag in @("-o ", "-I ", "-D ", "-O ", "--threads", "--partitions", "--incremental", "-march=", "-m ", "--int-dir", "-l ", "-L ", "-c ", "-bc", "-S", "-test", "-test-json", "-reflect-tag",
         "--script-host", "-gc-stats", "-Werror", "-w ", "-export-macros", "-ftime", "--pretty-print", "-v ", "--version", "-h")) {
         if (-not $help.Contains($flag)) { $failures += "-h does not list '$($flag.Trim())'" }
     }
@@ -731,10 +731,51 @@ int32 main()
     return $failures
 }
 
+# --incremental (D-76): each object optimized alone, so an edit reoptimizes only the objects it changes.
+function Test-IncrementalBuild {
+    $program = @'
+include "bedrock.ch"
+int32 Value() { return 1; }
+int32 Doubled(int32 v) { return v * 2; }
+int32 Tripled(int32 v) { return v * 3; }
+int32 Squared(int32 v) { return v * v; }
+int32 main()
+{
+	Core::String label = Core::String("incremental");
+	return label == "incremental" ? Value() + Doubled(1) + Tripled(1) + Squared(2) : 100;
+}
+'@
+    $dir = New-Sources "incremental" @{ "src/main.cf" = $program }
+    $src = Join-Path $dir "src"
+    $exe = Join-Path $dir "out/app.exe"
+    $failures = @()
+    $build = { param([string[]]$extra) $r = Invoke-Compiler $compiler (@($src, "-o", $exe, "-v", "-ftime", "--partitions", "4", "-O2") + $extra)
+        $m = [regex]::Match($r.output, "in (\d+) object\(s\), (\d+) reused")
+        return @{ exit = $r.exit; objects = [int]$m.Groups[1].Value; reused = [int]$m.Groups[2].Value; output = $r.output } }
+    $first = & $build @("--incremental")
+    if ($first.exit -ne 0) { return @("the program did not build: $($first.output)") }
+    & $exe | Out-Null
+    if ($LASTEXITCODE -ne 10) { $failures += "the first build exited $LASTEXITCODE, expected 10" }
+    if ($first.output -notmatch "optimize\+codegen" -or $first.output -match "(?m)^\s+optimize\s") { $failures += "-ftime does not report the optimizer inside code generation" }
+    $again = & $build @("--incremental")
+    if ($again.reused -ne 4 -or $again.objects -ne 4) { $failures += "an unchanged rebuild reused $($again.reused) of $($again.objects) objects" }
+    Set-Content -Path (Join-Path $src "main.cf") -Value ($program -replace "return v \* 3;", "return v * 30;") -Encoding ascii
+    $edited = & $build @("--incremental")
+    & $exe | Out-Null
+    if ($LASTEXITCODE -ne 37) { $failures += "after editing Tripled the program exited $LASTEXITCODE, expected 37 (a stale object was linked)" }
+    if ($edited.reused -lt 1 -or $edited.reused -ge $edited.objects) { $failures += "editing one function reused $($edited.reused) of $($edited.objects) objects" }
+    $whole = & $build @()
+    & $exe | Out-Null
+    if ($whole.exit -ne 0 -or $LASTEXITCODE -ne 37 -or $whole.reused -ne 0) { $failures += "a whole-program build after an incremental one reused $($whole.reused) objects or exited $LASTEXITCODE" }
+    $compileOnly = Invoke-Compiler $compiler @($src, "-o", (Join-Path $dir "c/app.exe"), "-c", "--incremental")
+    if ($compileOnly.exit -ne 2 -or $compileOnly.output -notmatch "--incremental needs a link") { $failures += "-c --incremental: exit $($compileOnly.exit), '$($compileOnly.output)'" }
+    return $failures
+}
+
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-DebugInfoFlag",
-    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache")
+    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

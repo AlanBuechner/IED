@@ -181,8 +181,11 @@ namespace Scripting
 		void Assemble(llvm::Module& module, const ObjectSettings& settings, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
 		{
 			CollectedDiagnostics collected(module.getContext(), diagnostics);
-			if (std::unique_ptr<llvm::TargetMachine> machine = MachineFor(module, settings, diagnostics))
-				WriteObject(module, *machine, objPath, diagnostics);
+			std::unique_ptr<llvm::TargetMachine> machine = MachineFor(module, settings, diagnostics);
+			if (!machine) return;
+			const size_t before = diagnostics.size();
+			if (settings.optimizePartitions) RunPipeline(module, *machine, settings.optLevel);
+			if (diagnostics.size() == before) WriteObject(module, *machine, objPath, diagnostics);
 		}
 
 		// Written beside its final name and moved there once complete, so an interrupted build never leaves a partial
@@ -220,9 +223,10 @@ namespace Scripting
 			AssembleInto(**module, settings, partition.objPath, partition.diagnostics);
 		}
 
-		std::vector<Partition> CachedPartitions(llvm::Module& module, unsigned count, const ObjectCache& cache)
+		std::vector<Partition> CachedPartitions(llvm::Module& module, const ObjectSettings& settings, unsigned count, const ObjectCache& cache)
 		{
-			std::vector<std::string> bitcode = count == 1 ? std::vector<std::string>{ ModuleBitcode(module) } : SplitModuleToBitcode(module, count);
+			const PartitionOptimization optimization = settings.optimizePartitions ? PartitionOptimization::After : PartitionOptimization::Before;
+			std::vector<std::string> bitcode = count == 1 ? std::vector<std::string>{ ModuleBitcode(module) } : SplitModuleToBitcode(module, count, optimization);
 			std::vector<Partition> partitions(bitcode.size());
 			for (size_t i = 0; i < bitcode.size(); ++i)
 			{
@@ -303,7 +307,7 @@ namespace Scripting
 			diagnostics.push_back({ 0, "cannot create the object cache '" + cache.Folder().string() + "': " + ec.message() });
 			return {};
 		}
-		std::vector<Partition> parts = CachedPartitions(module, partitions, cache);
+		std::vector<Partition> parts = CachedPartitions(module, settings, partitions, cache);
 		const size_t assembled = AssembleMissing(module, parts, settings);
 		const size_t before = diagnostics.size();
 		std::vector<std::filesystem::path> used;

@@ -1,4 +1,5 @@
 #include "Compiler/ModulePartitions.h"
+#include "Compiler/PartitionImports.h"
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
@@ -28,6 +29,19 @@ namespace Scripting
 			for (llvm::Function& function : module) MakeGlobal(function);
 			for (llvm::GlobalVariable& variable : module.globals()) MakeGlobal(variable);
 			for (llvm::GlobalAlias& alias : module.aliases()) MakeGlobal(alias);
+		}
+
+		// An optimizer drops a linkonce definition its own partition does not use, though another partition may.
+		void KeepDefinition(llvm::GlobalValue& value)
+		{
+			if (value.getLinkage() == llvm::GlobalValue::LinkOnceODRLinkage) value.setLinkage(llvm::GlobalValue::WeakODRLinkage);
+			else if (value.getLinkage() == llvm::GlobalValue::LinkOnceAnyLinkage) value.setLinkage(llvm::GlobalValue::WeakAnyLinkage);
+		}
+
+		void KeepDefinitions(llvm::Module& module)
+		{
+			for (llvm::Function& function : module) KeepDefinition(function);
+			for (llvm::GlobalVariable& variable : module.globals()) KeepDefinition(variable);
 		}
 
 		// How far a private symbol is followed to the code that uses it (a table of tables of strings).
@@ -182,7 +196,7 @@ namespace Scripting
 			CopyComdat(*to, from, partition);
 		}
 
-		void FillFunction(const llvm::Function& from, llvm::Module& partition, llvm::ValueToValueMapTy& map, Declarations& declarations)
+		void CloneBody(const llvm::Function& from, llvm::ValueToValueMapTy& map, Declarations& declarations)
 		{
 			auto* to = llvm::cast<llvm::Function>(map[&from]);
 			auto argument = to->arg_begin();
@@ -194,7 +208,6 @@ namespace Scripting
 			llvm::SmallVector<llvm::ReturnInst*, 8> returns;
 			llvm::CloneFunctionInto(to, &from, map, llvm::CloneFunctionChangeType::ClonedModule, returns, "", nullptr, nullptr, &declarations);
 			if (from.hasPersonalityFn()) to->setPersonalityFn(llvm::MapValue(from.getPersonalityFn(), map, llvm::RF_None, nullptr, &declarations));
-			CopyComdat(*to, from, partition);
 		}
 
 		void FillMembers(const std::vector<const llvm::GlobalValue*>& members, llvm::Module& partition, llvm::ValueToValueMapTy& map, Declarations& declarations)
@@ -202,9 +215,27 @@ namespace Scripting
 			for (const llvm::GlobalValue* member : members)
 			{
 				if (const auto* variable = llvm::dyn_cast<llvm::GlobalVariable>(member)) FillVariable(*variable, partition, map, declarations);
-				else if (const auto* function = llvm::dyn_cast<llvm::Function>(member)) FillFunction(*function, partition, map, declarations);
+				else if (const auto* function = llvm::dyn_cast<llvm::Function>(member))
+				{
+					CloneBody(*function, map, declarations);
+					CopyComdat(*llvm::cast<llvm::Function>(map[function]), *function, partition);
+				}
 				else if (const auto* alias = llvm::dyn_cast<llvm::GlobalAlias>(member))
 					llvm::cast<llvm::GlobalAlias>(map[alias])->setAliasee(llvm::MapValue(alias->getAliasee(), map, llvm::RF_None, nullptr, &declarations));
+			}
+		}
+
+		// A copy another partition defines: for the optimizer to inline, then drop (no comdat, no DLL storage).
+		void CreateImportShells(const std::vector<const llvm::Function*>& imports, llvm::Module& partition, llvm::ValueToValueMapTy& map)
+		{
+			for (const llvm::Function* import : imports)
+			{
+				auto* shell = llvm::Function::Create(import->getFunctionType(), llvm::GlobalValue::AvailableExternallyLinkage,
+					import->getAddressSpace(), import->getName(), &partition);
+				shell->copyAttributesFrom(import);
+				shell->setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
+				shell->setDLLStorageClass(llvm::GlobalValue::DefaultStorageClass);
+				map[import] = shell;
 			}
 		}
 
@@ -218,17 +249,27 @@ namespace Scripting
 			}
 		}
 
-		std::unique_ptr<llvm::Module> Partition(const llvm::Module& module, const std::vector<const llvm::GlobalValue*>& members, bool keepsAssembly)
+		// One partition: its members, then copies of the functions it imports.
+		struct Contents
+		{
+			std::vector<const llvm::GlobalValue*> members;
+			std::vector<const llvm::Function*> imports;
+			bool keepsAssembly = false;
+		};
+
+		std::unique_ptr<llvm::Module> Partition(const llvm::Module& module, const Contents& contents)
 		{
 			auto partition = std::make_unique<llvm::Module>(module.getModuleIdentifier(), module.getContext());
 			partition->setSourceFileName(module.getSourceFileName());
 			partition->setDataLayout(module.getDataLayout());
 			partition->setTargetTriple(module.getTargetTriple());
-			if (keepsAssembly) partition->setModuleInlineAsm(module.getModuleInlineAsm());
+			if (contents.keepsAssembly) partition->setModuleInlineAsm(module.getModuleInlineAsm());
 			llvm::ValueToValueMapTy map;
 			Declarations declarations(*partition);
-			CreateShells(members, *partition, map);
-			FillMembers(members, *partition, map, declarations);
+			CreateShells(contents.members, *partition, map);
+			CreateImportShells(contents.imports, *partition, map);
+			FillMembers(contents.members, *partition, map, declarations);
+			for (const llvm::Function* import : contents.imports) CloneBody(*import, map, declarations);
 			CopyNamedMetadata(module, *partition, map, declarations);
 			return partition;
 		}
@@ -243,12 +284,18 @@ namespace Scripting
 		return bitcode;
 	}
 
-	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count)
+	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count, PartitionOptimization optimization)
 	{
 		const std::vector<std::vector<const llvm::GlobalValue*>> members = AssignDefinitions(module, count);
 		MakeLocalsGlobal(module);
+		const bool after = optimization == PartitionOptimization::After;
+		if (after) KeepDefinitions(module);
 		std::vector<std::string> partitions;
-		for (unsigned i = 0; i < count; ++i) partitions.push_back(ModuleBitcode(*Partition(module, members[i], i == 0)));
+		for (unsigned i = 0; i < count; ++i)
+		{
+			const Contents contents{ members[i], after ? ImportsFor(members[i]) : std::vector<const llvm::Function*>(), i == 0 };
+			partitions.push_back(ModuleBitcode(*Partition(module, contents)));
+		}
 		return partitions;
 	}
 }

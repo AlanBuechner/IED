@@ -67,8 +67,10 @@ a **project** of the workspace. Commands run in order and each (command, project
 | `--version` | Nuke's version |
 
 **Configurations.** Built in: `Debug` (`debug`; `-O0 -g`), `Development` (`dev`; `-O3 -g`; the default) and
-`Dist` (`dist`, `release`, `ship`; `-O3`, no debug information). Names and aliases are case-insensitive. A
-workspace adds or changes them (section 3).
+`Dist` (`dist`, `release`, `ship`; `-O3`, no debug information). Debug and Development compile with C4's
+`--incremental` (each object optimized alone, so an edit reoptimizes only the objects it changes; small functions
+still inline across objects), when the pinned toolchain has it; Dist optimizes the whole program as one. Names and
+aliases are case-insensitive. A workspace adds or changes them (section 3).
 
 **Exit codes.** 0 on success; 1 for a problem with the command line, a manifest or the workspace; otherwise
 the exit code of the compile, step or program that failed (`run` passes a crash code like `0xC0000005`
@@ -96,6 +98,7 @@ ide = true                         # write the IDE bridge files (section 9)
 [configurations.Profile]           # add a configuration, or change a built-in one
 optimize = 2                       # 0..3
 debug-info = true
+incremental = false                # C4's --incremental (default: true for Debug and Development)
 aliases = ["prof"]
 defines = { PROFILE = "1" }        # passed to every C4 compile of this configuration
 

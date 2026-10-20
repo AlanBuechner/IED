@@ -217,7 +217,11 @@ namespace Scripting
 		if (!tree->complete) return;
 		m_Emitter.Emit(*tree);
 		m_Trees.push_back(std::move(tree));
-		m_MCtx.GetOrCreateFunction(thunk)->setLinkage(llvm::GlobalValue::InternalLinkage); // only the reflection image names it
+		llvm::Function* emitted = m_MCtx.GetOrCreateFunction(thunk);
+		emitted->setLinkage(llvm::GlobalValue::InternalLinkage); // only the reflection image names it
+		// Reflection calls through it seldom: small, with its target called rather than copied into it.
+		emitted->addFnAttr(llvm::Attribute::MinSize);
+		emitted->addFnAttr(llvm::Attribute::OptimizeForSize);
 		m_Thunks.insert(&target);
 	}
 

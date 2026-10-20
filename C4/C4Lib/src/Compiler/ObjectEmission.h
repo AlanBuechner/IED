@@ -17,6 +17,7 @@ namespace Scripting
 		int optLevel = 0;
 		const CpuTarget* target = nullptr;
 		unsigned threads = 1; // how many partitions are assembled at once
+		bool optimizePartitions = false; // incremental (D-76): each partition is optimized alone, after the split
 	};
 
 	/// An error the backend reports. `cookie` is the inline-asm location cookie (AsmEmitter::LocationCookie) of the
@@ -49,8 +50,9 @@ namespace Scripting
 	};
 
 	/// The module as `partitions` objects kept in `cache` (ModulePartitions splits it): a partition whose code is
-	/// unchanged since a build that kept it reuses its object, the others are assembled on up to `settings.threads`
-	/// threads. No paths, with diagnostics, when the assembler fails.
+	/// unchanged since a build that kept it reuses its object, the others are assembled (and with
+	/// `settings.optimizePartitions`, optimized first) on up to `settings.threads` threads. No paths, with diagnostics,
+	/// when the optimizer or the assembler fails.
 	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
 		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics);
 }

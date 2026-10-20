@@ -43,6 +43,11 @@ phase = "gates"
 run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/TestCode/RunTests.ps1"]
 
 [[project.steps]]
+name = "e2e-incremental"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/TestCode/RunTests.ps1", "-Incremental"]
+
+[[project.steps]]
 name = "negative"
 phase = "gates"
 run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/NegativeTest/RunTests.ps1"]

@@ -153,6 +153,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-73 | Record layouts in CBind | CBind writes a record's members from clang's `ASTRecordLayout` so that C4's natural layout reproduces it byte for byte: unions as `union`, anonymous unions as C4 anonymous unions of every arm (struct arms as views; one inside a view as bytes), bitfield runs as the integers that store them, members C4 cannot spell or place as named bytes, explicit padding wherever C4 would not place a member itself (always before a record-typed member, whose C4 alignment may be smaller), and tail padding only where C4's rounding falls short. Record types that fields need but no file-scope declaration names are bound too (anonymous ones named owner_field). C4 has no packing, alignment overrides or bitfields, so those are reproduced in layout only. Template patterns (no layout) are not bound. | [13](../language/13-interop.md) |
 | D-74 | Header functions and macro constants in CBind | Every external C-linkage function is bound with `[link]` to its own symbol, body or not. A function with no symbol of its own (`static`, or inline with no external definition) is bound only when the bound header itself defines it, through a forwarding wrapper in a shim CBind writes (C for a C header, C++ as before); a system header's thousands of inline helpers are not compiled. Object-like macros are bound as constants by a second clang parse of the header that declares `static const __typeof__((NAME)) __cbind_NAME = NAME;` for each candidate (filtered to tokens that cannot derail the parse) and evaluates it: integers keep C's width and signedness, floats their precision, narrow strings become `const char*`. A constant two bindings in one file both declare is kept once (`InteropPass`). | [13](../language/13-interop.md) |
 | D-75 | Foreign objects follow the build and are reused | A foreign source or shim compiles with the program's `-O<n>` and `-g`, and clang writes a depfile beside the object (`-MD -MF <obj>.d`). After a compile, `<obj>.key` records an FNV key of the compiler (path, size, time), the flags, the defines and include folders, and the bytes of every file the depfile lists (the source and each header); the next build reuses the object while the key is the same. Content, not times, so a checkout that only touches files rebuilds nothing. | [13](../language/13-interop.md) |
+| D-76 | Incremental builds optimize each partition alone | `--incremental` (Nuke's `Debug` and `Development`; `Dist` stays whole-program) splits the module before the optimizer, so a partition whose bitcode and settings are unchanged reuses its cached object with no optimization at all. To keep the inlining that matters, a partition copies the small functions it calls from other partitions as `available_externally` (ThinLTO's rule: 100 unoptimized instructions, 70% per further level, three levels), and its cache key covers the copies, so editing a small function rebuilds its callers' partitions too. A `minsize` caller copies nothing; reflection's invoke thunks are `minsize` in every build, since reflection calls through them seldom and a copy of each target in its thunk only cost optimizer time. Linkonce definitions become weak, so a partition's optimizer cannot drop what another uses. Large functions no longer inline across partitions, the price of the fast loop. | [pipeline 6](../compiler/01-pipeline.md) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1408,6 +1409,24 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 - **Tests:** `utf16_tests.cf` (3: every width, surrogates, ill-formed input both ways, every offset of a mixed
   string). Bedrock passes 467 tests.
 
+#### B61 - Incremental builds: partitions optimized alone (roadmap 5.3, step 2)
+- **Design:** D-76, [pipeline 6](../compiler/01-pipeline.md). **Depends on:** B48. **Status:** Done.
+- **Done notes:** `--incremental` (`CompileOptions::incremental`, `ObjectSettings::optimizePartitions`): from `-O1` on,
+  `ProgramOutput` skips the whole-module optimizer and `WriteCachedObjects` optimizes each missing partition on its
+  own thread before assembling it. `ModulePartitions` splits with `PartitionOptimization::After`: linkonce
+  definitions become weak, and `Compiler/PartitionImports` picks each partition's `available_externally` copies.
+  Reflection's invoke thunks are `minsize` (also in whole-program builds: the ScaleTest's `-O2` optimizer fell from
+  9.5 s to 7.9 s). Nuke passes `--incremental` for configurations with `incremental = true` (Debug and Development)
+  when the toolchain's `-h` lists it. On the 60k-line ScaleTest at `-O2`: cold 9.1 s (whole program 12.5 s),
+  unchanged 2.0 s, a one-module edit 2.6 s, where a whole-program edit took 12.3 s; run speed unchanged. Next for
+  5.3: the front end (1.1 s) and the split (0.8 s, cloning and writing every partition to hash it) dominate.
+- **Tests:** C4Testing `Compiler.PartitionImports` (7: small callees copied, large and noinline ones declared, copies
+  through small callees, minsize callers copy nothing, linkonce kept, an imported body changes its callers'
+  partitions, every partition verifies); ToolsTest `IncrementalBuild` (reuse, a stale object after an edit, no mixing
+  with a whole-program build, `-c` refused); TestCode `-Incremental` (gate step `e2e-incremental`: 1505 assertions);
+  Nuke `test_c4` (Development and Debug pass it, Dist does not, a configuration can turn it off, an older compiler
+  is not given it).
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1925,7 +1944,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

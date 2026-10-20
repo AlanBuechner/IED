@@ -43,6 +43,8 @@ def plan(session, project, test=False):
 	argv = toolchain.compiler_command() + ["--projects", description_path, f"-O{configuration.optimize}"]
 	if configuration.debug_info:
 		argv.append("-g")
+	if configuration.incremental and toolchain.accepts("--incremental"):
+		argv.append("--incremental")
 	results = None
 	if test:
 		results = fsutil.join(int_dir, TEST_RESULTS_FILE)

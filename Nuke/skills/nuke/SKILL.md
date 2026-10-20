@@ -27,6 +27,8 @@ command in any folder. Full reference: `<IED>/Nuke/README.md`. Inspect anything 
     nuke toolchain list|which|install|use|remove
 
 Configurations: Debug (`debug`, -O0 -g), Development (`dev`, -O3 -g, the default), Dist (`dist`/`release`, -O3).
+Debug and Development compile with `--incremental` (each object optimized alone: a small edit rebuilds in seconds,
+large functions do not inline across objects); measure performance with Dist, which optimizes the whole program.
 Outputs: `build/bin/<Config>-windows-x64/<Project>/`, intermediates in `build/int/...`.
 
 ## Manifests

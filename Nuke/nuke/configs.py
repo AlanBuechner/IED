@@ -15,11 +15,12 @@ class Configuration:
 	debug_info: bool
 	aliases: tuple = ()
 	defines: dict = field(default_factory=dict)
+	incremental: bool = False   # C4's --incremental: each object optimized alone, so an edit reoptimizes only its own
 
 
 BUILT_IN = (
-	Configuration("Debug", optimize=0, debug_info=True, aliases=("debug",)),
-	Configuration("Development", optimize=3, debug_info=True, aliases=("dev", "development")),
+	Configuration("Debug", optimize=0, debug_info=True, aliases=("debug",), incremental=True),
+	Configuration("Development", optimize=3, debug_info=True, aliases=("dev", "development"), incremental=True),
 	Configuration("Dist", optimize=3, debug_info=False, aliases=("dist", "release", "ship")),
 )
 DEFAULT_CONFIGURATION = "Development"
@@ -34,7 +35,8 @@ def merge(overrides):
 			optimize=fields.get("optimize", base.optimize),
 			debug_info=fields.get("debug-info", base.debug_info),
 			aliases=tuple(fields.get("aliases", base.aliases)),
-			defines={**base.defines, **fields.get("defines", {})})
+			defines={**base.defines, **fields.get("defines", {})},
+			incremental=fields.get("incremental", base.incremental))
 	return list(by_name.values())
 
 

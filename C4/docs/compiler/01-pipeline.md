@@ -210,6 +210,18 @@ straight from the module in memory).
   and reflection tables are named after their content; exception and RTTI records after the type they describe), so
   an edit renames nothing it did not change. On the Bedrock tests at `-O0` (32 partitions): a cold build 0.96 s, an
   unchanged rebuild 0.41 s, adding a test 0.46 s (28 objects reused), editing one 0.43 s (31 reused).
+- Incremental builds (`--incremental`, D-76, roadmap 5.3): from `-O1` on, the module is split before it is optimized
+  and each partition is optimized alone, on its own thread, so an unchanged partition skips the optimizer as well as
+  the assembler. A partition carries `available_externally` copies of the small functions its code calls from other
+  partitions (`Compiler/PartitionImports`: up to 100 instructions of unoptimized IR for a direct callee, 70% of that
+  for each level further, three levels, as ThinLTO imports; nothing for `minsize` callers such as reflection's invoke
+  thunks, nothing `noinline`), so they still inline; its bitcode, and with it the cache key, includes those copies.
+  Linkonce definitions become weak in this mode, since a partition's optimizer would drop one that only another
+  partition uses. The cache salt says `incremental`, so its objects never mix with a whole-program build's. On the
+  60k-line ScaleTest at `-O2` (32 partitions, `-j 3`): a cold build 9.1 s (the whole-program build: 12.5 s), an
+  unchanged rebuild 2.0 s (front end 1.1 s, split and hash 0.8 s), a one-module edit 2.6 s (31 objects reused); the
+  program runs at the whole-program build's speed, and the math benchmarks within 0-20% except a kernel whose helpers
+  are too large to copy (`batch_pointers`, 60%).
 - The X86 target is registered with its `LLVMInitializeX86*` functions; the compiler links LLVM statically and must
   not link `LLVM-C.lib`, whose import of `LLVM-C.dll` would bind those functions to the DLL's own copy of LLVM.
 - Runtime objects are compiled on demand (`Compiler/RuntimeObjects`) from every `.c` / `.cpp` under the

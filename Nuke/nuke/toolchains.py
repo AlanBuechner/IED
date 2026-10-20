@@ -4,6 +4,7 @@ A version folder is immutable once installed; "dev" is the one mutable entry, re
 Development build of the compiler in this repository (C4/nuke.toml)."""
 
 import datetime
+import functools
 import json
 import os
 import re
@@ -19,6 +20,7 @@ LATEST = "latest"
 METADATA_FILE = "toolchain.json"
 STORE_ENV = "NUKE_TOOLCHAINS"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$")
+OPTION = re.compile(r"(?<![\w-])(--?[A-Za-z][\w.=-]*)")
 # What a C4 install must hold to compile and link a program (the compiler finds the rest relative to itself).
 REQUIRED = ("C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe")
 
@@ -53,6 +55,10 @@ class Toolchain:
 	def skills_dir(self):
 		return fsutil.join(self.dir, "skills")
 
+	def accepts(self, option):
+		"""Whether the compiler takes `option`: its -h lists every option it has, and an older install lacks newer ones."""
+		return option in listed_options(tuple(self.compiler_command()))
+
 	def describe(self):
 		commit = self.metadata.get("commit")
 		extra = []
@@ -63,6 +69,16 @@ class Toolchain:
 		underlying = self.metadata.get("version")
 		name = f"c4 {self.version}" + (f" ({underlying})" if underlying and underlying != self.version else "")
 		return name + (f" ({'; '.join(extra)})" if extra else "")
+
+
+@functools.lru_cache(maxsize=None)
+def listed_options(command):
+	"""The options `<command> -h` lists (none when it cannot run)."""
+	try:
+		result = subprocess.run(list(command) + ["-h"], capture_output=True, text=True, timeout=60)
+	except (OSError, subprocess.TimeoutExpired):
+		return frozenset()
+	return frozenset(OPTION.findall(result.stdout))
 
 
 def missing_files(folder):

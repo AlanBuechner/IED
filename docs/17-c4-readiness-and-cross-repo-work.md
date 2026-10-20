@@ -15,7 +15,7 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 |---|---|---|
 | Threads, mutex, condvar, atomics, futures, job system | **exists** | `C4/Bedrock/Threading/*`; JobSystem is game-tuned, not I/O-aware |
 | JSON parse/serialize | **exists** (DOM) | No streaming parser; reflection-driven serialization of any type with strings, arrays, string-keyed maps and enum names: `Serialization::ToJson` / `FromJson` (C4 B56) |
-| UTF-8 strings | **exists** | UTF-8 <-> UTF-16 helpers exist only inside the runtime; Win32 `W` APIs need them exposed |
+| UTF-8 strings | **exists** | UTF-8 <-> UTF-16 conversion and UTF-16 offsets for LSP positions: `Core::ToUtf16` / `FromUtf16` / `Utf16OffsetOfByte` / `ByteOffsetOfUtf16` (C4 B60) |
 | File system basics | **exists** | read/write/list/mkdir/remove/rename/exists/size, `FS::GetInfo` (kind, size, times), copies of files and trees, absolute and canonical paths (C4 B53); **missing** locking, mmap |
 | File watching | **exists** | `FS::Watcher` over `ReadDirectoryChangesW` (B53): recursive, renames paired, `Overflow` when changes were dropped |
 | TCP sockets, event loop (IOCP), timers | **exists** | `Net::` TCP, UDP, resolution, `Poll`, blocking calls with timeouts (C4 B49); `Net::EventLoop` with socket watches, timers and work posted from other threads (B54, readiness-based over `WSAPoll`; tested with 1000 connections on one loop) |
@@ -73,13 +73,13 @@ Implementation of `src/` starts when all of these are true. Each item is a work 
 1. [x] `Net::` sockets + event loop + timers, with tests (echo server, 1k concurrent connections, timers under load). Done in C4 B49 and B54 (D-65, D-70).
 2. [x] `Process::` spawn/pipes/job objects/env + ConPTY, with tests (spawn `cmd /c`, kill tree, PTY round trip). Done in C4 B52 (D-68).
 3. [x] `FS::Watch`, stat/mtime, copy, canonical paths. Done in C4 B53 (D-69) as `FS::Watcher`, `FS::GetInfo`, `CopyFile` / `CopyTree`, `CanonicalPath`.
-4. [ ] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake). Wall clock (`Platform::`, B40), base64 and SHA-1 (B51) done; UTF-16 helpers still runtime-internal.
+4. [x] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake). Done: wall clock (`Platform::`, B40), base64 and SHA-1 (B51), UTF-16 conversion and LSP-style offsets (`Core::ToUtf16` / `FromUtf16` / `Utf16OffsetOfByte` / `ByteOffsetOfUtf16`, B60).
 5. [x] Regex engine available to C4 code. Done in C4 B55 (D-71).
 6. [x] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide). Done in C4 B56 (D-72): DTOs need no hand-written codecs.
 7. [x] Suspected bugs S1-S7 verified; confirmed ones fixed (or the C-shim-only policy formally adopted and S1-S6 deprioritized). All confirmed and fixed in C4 B57-B59 (BUG-279 to BUG-285): named and anonymous unions, unmappable fields, bitfields, header functions, `#define` constants, foreign-source optimization and caching.
 8. [ ] **Scale test:** a synthetic 50k-line, 200-file, multi-threaded C4 program compiles at -O0 and -O2, runs a 24 h soak under load without GC or threading faults; compile time measured. C4's `assets/ScaleTest` (60k lines, 401 files) compiles in 4.4 s at -O0 and 15.0 s at -O2 and ran 60 s on 4 threads without a wrong result; the 24 h soak is still to run (`python C4/assets/ScaleTest/run.py --seconds 86400 --levels O2`).
-9. [ ] Exceptions-at-thread-boundary policy documented (catch-all wrappers), `thread_attach` documented for native callbacks.
-10. [ ] Incremental or at least per-module compilation planned (roadmap 5.3), because a 20 s full rebuild for every IED server change is a heavy tax.
+9. [x] Exceptions-at-thread-boundary policy documented (catch-all wrappers), `thread_attach` documented for native callbacks. Done in C4 B60 (Bedrock's Threading section: an exception leaving a `Thread::Run` body, a job or an event loop's `Run` ends the process as in C++, so a server wraps each entry in `try { ... } catch (...)`; a thread native code started calls `thread_attach()` before it touches C4 objects and `thread_detach` before it ends).
+10. [x] Incremental or at least per-module compilation planned (roadmap 5.3), because a 20 s full rebuild for every IED server change is a heavy tax. Done in C4 B61 (D-76): Nuke's Debug and Development builds pass `--incremental`, which optimizes each object alone and reuses the unchanged ones; a one-module edit of the 60k-line ScaleTest at -O2 rebuilds in 2.6 s (whole program: 12.3 s) with the same run speed. Front-end caching is the next step (roadmap 5.3).
 
 Until then, the **frontend (`frontend/`, `shared/ui-kit`) and the contract (`shared/host-api`) can be built and tested against a mock server** - they do not depend on the compiler (`docs/18`, M0).
 

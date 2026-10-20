@@ -64,6 +64,8 @@ namespace Scripting
 					[](CompileOptions& o, const std::string& v) { o.threads = ParseCount(v, "-j", o); }, true },
 				{ { "--partitions" }, "<n>", "Assemble the program into <n> objects, 1 to 64 (default: by its size, at most -j)",
 					[](CompileOptions& o, const std::string& v) { o.partitions = ParseCount(v, "--partitions", o); } },
+				{ { "--incremental" }, nullptr, "Optimize each object alone: an edit reoptimizes only the objects it changes, inlining across objects only small functions",
+					[](CompileOptions& o, const std::string&) { o.incremental = true; } },
 				{ { "-march=" }, "<cpu>", "The processor to compile for: x86-64 (default), x86-64-v2/v3/v4, native or an LLVM CPU name",
 					[](CompileOptions& o, const std::string& v) { o.targetFlags.push_back("-march=" + v); }, true },
 				{ { "-m" }, "<feature>", "Turn a processor feature on (-mavx2) or off (-mno-avx2): sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd",
@@ -117,6 +119,7 @@ namespace Scripting
 		{
 			if (opts.threads == 0) opts.threads = std::clamp(processors, 1u, kDefaultThreads);
 			if (opts.compileOnly && opts.partitions > 1) opts.error = "--partitions needs a link: -c writes one object";
+			if (opts.compileOnly && opts.incremental) opts.error = "--incremental needs a link: -c writes one object";
 		}
 
 		// The target the -march / -m flags select (D-62), or the reason they select none.

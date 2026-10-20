@@ -41,6 +41,7 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(args[0:2], ["--projects", self.int("Game", "projects.toml").replace("\\", "/")])
 		self.assertIn("-O3", args)
 		self.assertIn("-g", args)
+		self.assertIn("--incremental", args)
 		self.assertNotIn("-test", args)
 		self.assertEqual(args[args.index("-D") + 1], "WIDE=1")
 		links = [args[i + 1] for i, a in enumerate(args) if a == "-l"]
@@ -53,11 +54,26 @@ class C4BuildTests(WorkspaceTest):
 		args = self.compiles()[0]
 		self.assertIn("-O3", args)
 		self.assertNotIn("-g", args)
+		self.assertNotIn("--incremental", args)  # Dist optimizes the whole program as one
 		self.assertIn("ship", args)
 		description = tomllib.loads(read(self.path("build", "int", "Dist-windows-x64", "Game", "projects.toml")))
 		self.assertEqual(description["project"][0]["defines"]["SHIP"], "1")
 		self.nuke("build", "debug")
 		self.assertIn("-O0", self.compiles()[1])
+		self.assertIn("--incremental", self.compiles()[1])
+
+	def test_incremental_can_be_turned_off(self):
+		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n"
+			"[configurations.Development]\nincremental = false\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertNotIn("--incremental", self.compiles()[0])
+
+	def test_an_older_compiler_is_not_given_incremental(self):
+		os.environ["FAKE_C4_WITHOUT"] = "--incremental"
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertNotIn("--incremental", self.compiles()[0])
 
 	def test_build_description(self):
 		self.nuke("build")
