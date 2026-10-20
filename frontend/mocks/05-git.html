@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 5 - Git activity</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/code.css">
+	<link rel="stylesheet" href="css/git.css">
+	<script defer src="js/git.js"></script>
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="git">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<div class="t"><span class="sb-ws" style="margin:0 4px 0 6px">C</span><b>Claymore</b><span class="muted" style="font-size:13px">port/logging</span><i class="ci ci-chevron-down sm c-2"></i></div>
+		<span class="ib"><i class="ci ci-repo-pull"></i></span>
+		<span class="ib"><i class="ci ci-repo-push"></i><span class="badge">3</span></span>
+	</div>
+
+	<main class="activity git-act">
+		<div class="git-bar">
+			<span class="dd"><i class="ci ci-repo c-1"></i>Claymore</span>
+			<span class="tb-sep"></span>
+			<span class="btn flat"><i class="ci ci-repo-fetch"></i>Fetch</span>
+			<span class="split-btn"><span class="btn flat"><i class="ci ci-repo-pull"></i>Pull</span><span class="btn flat"><i class="ci ci-chevron-down sm"></i></span></span>
+			<span class="btn flat"><i class="ci ci-repo-push"></i>Push<span class="count">3</span></span>
+			<span class="tb-sep"></span>
+			<span class="btn flat"><i class="ci ci-git-branch"></i>Branch</span>
+			<span class="btn flat"><i class="ci ci-git-merge"></i>Merge</span>
+			<span class="btn flat"><i class="ci ci-git-stash"></i>Stash</span>
+			<span class="btn flat"><i class="ci ci-worktree"></i>Worktree</span>
+			<span class="grow"></span>
+			<div class="input"><i class="ci ci-search sm"></i><span>Search message, author, hash, path</span></div>
+			<span class="btn flat"><i class="ci ci-terminal"></i>Terminal</span>
+			<div class="phone-only" style="align-items:center;gap:8px;width:100%">
+				<span class="chip solid" style="height:32px"><i class="ci ci-edit"></i>Local changes 4</span>
+				<span class="chip" style="height:32px"><i class="ci ci-repo-push"></i>3 to push</span>
+				<span class="chip" style="height:32px"><i class="ci ci-search"></i>Search</span>
+			</div>
+		</div>
+		<div class="git-body">
+			<aside class="refs scroll">
+				<div style="padding:6px 8px"><div class="input"><i class="ci ci-filter sm"></i><span>Filter refs</span></div></div>
+				<div class="group-head"><i class="ci ci-chevron-down sm"></i>Local branches<span class="meta">4</span></div>
+				<div class="row sel-dim" style="--d:1"><i class="ci ci-check"></i><span class="name"><b>port/logging</b></span><span class="meta ab"><i class="ci ci-arrow-up"></i>3</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-git-branch"></i><span class="name">master</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-git-branch"></i><span class="name">port/events</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-worktree"></i><span class="name">agents/fix-time-test</span><span class="meta"><i class="ci ci-sparkle c-ai" style="width:12px;height:12px"></i></span></div>
+				<div class="group-head"><i class="ci ci-chevron-down sm"></i>Remotes<span class="meta">1</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-cloud"></i><span class="name">origin</span></div>
+				<div class="row" style="--d:2"><i class="ci ci-git-branch"></i><span class="name">master</span></div>
+				<div class="row" style="--d:2"><i class="ci ci-git-branch"></i><span class="name">port/events</span></div>
+				<div class="row" style="--d:2"><i class="ci ci-git-branch"></i><span class="name">port/logging</span><span class="meta ab"><i class="ci ci-arrow-down"></i>0</span></div>
+				<div class="group-head"><i class="ci ci-chevron-down sm"></i>Tags<span class="meta">1</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-tag"></i><span class="name">m0-baseline</span></div>
+				<div class="group-head"><i class="ci ci-chevron-down sm"></i>Stashes<span class="meta">1</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-git-stash"></i><span class="name">WIP on port/logging: fmt experiment</span></div>
+				<div class="group-head"><i class="ci ci-chevron-down sm"></i>Worktrees<span class="meta">2</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-root-folder"></i><span class="name">C:\GameDev\Claymore</span><span class="meta">main</span></div>
+				<div class="row" style="--d:1"><i class="ci ci-worktree"></i><span class="name">.ied/worktrees/fix-time-test</span><span class="meta">chat</span></div>
+				<div class="group-head"><i class="ci ci-chevron-right sm"></i>Submodules<span class="meta">0</span></div>
+			</aside>
+			<div class="git-main">
+				<div class="graph">
+					<div class="graph-head"><div>Graph</div><div>Description</div><div>Author</div><div>Date</div><div>Commit</div></div>
+					<div class="graph-body"></div>
+				</div>
+				<div class="details">
+					<div class="meta-pane">
+						<div class="cmeta">
+							<div class="subject">Core: Ring&lt;T&gt; fixed-capacity ring buffer + tests</div>
+							<div class="kv">
+								<span class="k">Commit</span><span class="mono">51aa9e3c4d0b7f21e9a6&hellip; <i class="ci ci-copy sm c-2"></i></span>
+								<span class="k">Author</span><span>AlanBuechner &middot; Oct 18, 16:42</span>
+								<span class="k">Parents</span><span class="mono">4382b53</span>
+								<span class="k">In</span><span>master, port/logging, agents/fix-time-test</span>
+							</div>
+							<div class="body">Power-of-two capacity with index masking. Used by the editor console today and by the log ring sink next.</div>
+						</div>
+						<div class="panel-tools"><span class="muted">Changed files</span><span class="count">3</span><span class="tb-spacer"></span><span class="ib on"><i class="ci ci-list-tree"></i></span><span class="ib"><i class="ci ci-list-flat"></i></span></div>
+						<div class="cfiles scroll">
+							<div class="row sel"><span class="st-a">A</span><i class="ci ci-file-code ft-header"></i><span class="name">Engine/src/Core/Ring.ch</span><span class="meta"><span class="c-saved">+64</span></span></div>
+							<div class="row"><span class="st-a">A</span><i class="ci ci-beaker ft-source"></i><span class="name">Engine/src/tests/ring.cf</span><span class="meta"><span class="c-saved">+48</span></span></div>
+							<div class="row"><span class="st-m">M</span><i class="ci ci-beaker ft-source"></i><span class="name">Engine/src/tests/engine.cf</span><span class="meta"><span class="c-saved">+1</span></span></div>
+						</div>
+					</div>
+					<div class="diff-pane">
+						<div class="panel-tools"><i class="ci ci-file-code ft-header"></i><span>Engine/src/Core/Ring.ch</span><span class="muted">new file</span><span class="tb-spacer"></span><span class="seg"><span class="on">Inline</span><span>Side by side</span></span><span class="btn flat">Open at revision</span><span class="btn flat">Blame</span></div>
+						<div class="code" data-kind="diff">
+<pre>
+@@ -0,0 +1,64 @@
++`com:// Ring&lt;T&gt;: fixed-capacity ring buffer. Push overwrites the oldest element when full.`
++`mac:include` `str:"bedrock.ch"`
++
++`kw:namespace` `ns:Engine`
++{
++	`kw:template`&lt;`ty:T`&gt; `kw:class` `ty:Ring`
++	{
++	`kw:public`:
++		[`mac:operator`(`str:"create"`)] `kw:public` `kw:void` `fn:Init`() {}
++		`kw:public` `kw:void` `fn:Reserve`(`kw:int64` `par:capacity`);
++		`kw:public` `kw:void` `fn:Push`(`kw:const` `ty:T`&amp; `par:value`);
++		`kw:public` `kw:bool` `fn:Overwrote`() `kw:const` { `ctl:return` `mem:m_Overwrote`; }
++		`kw:public` `kw:int64` `fn:Count`() `kw:const` { `ctl:return` `mem:m_Count`; }
++		[`mac:operator`(`str:"index"`)] `kw:public` `ty:T`&amp; `fn:At`(`kw:int64` `par:i`) { `ctl:return` `mem:m_Items`[(`mem:m_Head` `op:+` `par:i`) `op:&amp;` `fn:Mask`()]; }
++	`kw:private`:
++		`kw:int32` `fn:Mask`() `kw:const` { `ctl:return` (`kw:int32`)(`mem:m_Capacity` `op:-` `num:1`); }
++		`ns:Core`::`ty:Array`&lt;`ty:T`&gt; `mem:m_Items`;
++		`kw:int64` `mem:m_Head`;
++		`kw:int64` `mem:m_Count`;
++		`kw:int64` `mem:m_Capacity`;
++		`kw:bool` `mem:m_Overwrote`;
++	}
+</pre>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar">
+		<span class="st">Ready</span>
+		<span class="st"><i class="ci ci-sparkle c-ai"></i>AI: 2 running, <span class="c-warn">1 needs approval</span></span>
+		<span class="st grow"></span>
+		<span class="st">16 commits &middot; 4 local changes</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>

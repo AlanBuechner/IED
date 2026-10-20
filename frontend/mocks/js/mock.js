@@ -2,7 +2,7 @@
 // - URL params land on <html> as data attributes (?syntax=grayscale, ?view=tasks, ?step=diff).
 // - Injects the window chrome shared by every activity (sidebar, menu bar, toolbar, terminal, phone nav).
 // - Renders <div class="code"> blocks: `kinds:text` token markup, gutters, indent guides, diffs, map scrollbar.
-// Page scripts register render hooks with Mock.onReady(fn) before this file runs.
+// Page scripts load before this file and register render hooks: (window.Mock = window.Mock || { hooks: [] }).hooks.push(fn).
 "use strict";
 
 window.Mock = window.Mock || { hooks: [] };
