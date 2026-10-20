@@ -1,0 +1,29 @@
+{
+	"description": "Only reasoning_content, then finish_reason=stop: no answer, no tool call.",
+	"stopClass": "reasoning_only",
+	"harness": "Same recovery as empty (nudge, then lower effort / disable thinking).",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"reasoning": "I need to look at player.c before answering. Let me think about the integration step"
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "",
+				"reasoningIncludes": "integration step"
+			}
+		}
+	]
+}

@@ -1,0 +1,38 @@
+{
+	"description": "Every request reads a different file (src/file_{request}.c), so no loop is detected.",
+	"stopClass": "budget",
+	"harness": "At 80% of max steps a harness note asks the model to wrap up; at 100% pause with stop budget_paused and a '+50% and continue' button.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "read_file",
+						"arguments": {
+							"path": "src/file_{request}.c"
+						}
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}

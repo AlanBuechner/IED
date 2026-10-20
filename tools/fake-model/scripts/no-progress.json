@@ -1,0 +1,30 @@
+{
+	"description": "Every request replies with text and no tool call or finish ('still working on it').",
+	"stopClass": "no_progress",
+	"harness": "Agent mode: each reply is a checkpoint followed by a continuation nudge; after the bound, pause as no_progress (never silently 'done').",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "I'm still analysing the code and will continue shortly."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop"
+			}
+		}
+	]
+}

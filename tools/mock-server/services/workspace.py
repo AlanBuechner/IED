@@ -1,0 +1,196 @@
+"""The fake workspace: in-memory file tree, 'ws:<wsId>' topic, fs.* methods with revision checks."""
+
+import posixpath
+import re
+
+from fixtures import workspace_files
+from rpc import RpcError
+
+MAX_SEARCH_MATCHES = 500
+
+
+class File:
+	def __init__(self, text, revision=1):
+		self.text = text
+		self.revision = revision
+
+
+class Workspace:
+	def __init__(self, ws_id, name, root, files, directories):
+		self.ws_id = ws_id
+		self.name = name
+		self.root = root
+		self.trusted = True
+		self.files = {path: File(text) for path, text in files.items()}
+		self.directories = set(directories)
+
+	def summary(self):
+		return {"wsId": self.ws_id, "name": self.name, "root": self.root, "trusted": self.trusted}
+
+	def is_dir(self, path):
+		if path == "" or path in self.directories:
+			return True
+		prefix = path + "/"
+		return any(p.startswith(prefix) for p in self.files) or any(d.startswith(prefix) for d in self.directories)
+
+	def entries(self, path):
+		prefix = path + "/" if path else ""
+		names = {}
+		for candidate in list(self.files) + list(self.directories):
+			if not candidate.startswith(prefix):
+				continue
+			head, sep, _ = candidate[len(prefix):].partition("/")
+			if sep or candidate in self.directories:
+				names[head] = "dir"
+			else:
+				names.setdefault(head, "file")
+		return sorted(names.items(), key=lambda item: (item[1] != "dir", item[0].lower()))
+
+
+def normalize(path):
+	clean = path.replace("\\", "/").strip("/")
+	if re.match(r"^[A-Za-z]:", clean) or any(part in ("..", ".") for part in clean.split("/") if part):
+		raise RpcError("bad_request", "path must be workspace-relative without '.' or '..': %r" % path)
+	return posixpath.normpath(clean) if clean else ""
+
+
+class Workspaces:
+	def __init__(self, server):
+		self.server = server
+		files = dict(workspace_files.FILES, **workspace_files.generated_files(server.config.tree_files))
+		fixture = workspace_files.WORKSPACE
+		ws = Workspace(fixture["wsId"], fixture["name"], fixture["root"], files, workspace_files.DIRECTORIES)
+		self.items = {ws.ws_id: ws}
+		server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
+		for name in ("ws.list", "ws.setTrust", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search"):
+			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
+
+	def summaries(self):
+		return [ws.summary() for ws in self.items.values()]
+
+	def snapshot(self, ws):
+		chats = [c.summary() for c in self.server.chat.items.values() if c.ws_id == ws.ws_id]
+		return dict(ws.summary(), kind="folder", roots=["."], plugins=[{"id": "mock.language", "state": "active"}], chats=chats)
+
+	def get(self, ws_id):
+		ws = self.items.get(ws_id)
+		if ws is None:
+			raise RpcError("not_found", "no workspace %r" % ws_id)
+		return ws
+
+	def file(self, ws, path):
+		entry = ws.files.get(path)
+		if entry is None:
+			raise RpcError("not_found", "no file %r" % path)
+		return entry
+
+	def write(self, ws, path, text, expected_revision=None):
+		entry = ws.files.get(path)
+		current = entry.revision if entry else 0
+		if expected_revision is not None and expected_revision != current:
+			raise RpcError("conflict", "file changed since revision %d" % expected_revision, {"revision": current})
+		if ws.is_dir(path) and entry is None:
+			raise RpcError("bad_request", "%r is a directory" % path)
+		revision = current + 1
+		ws.files[path] = File(text, revision)
+		self._tree_changed(ws, path, "changed" if entry else "created")
+		return revision
+
+	def _tree_changed(self, ws, path, change):
+		self.server.hub.publish("ws:" + ws.ws_id, "tree.changed", {"changes": [{"path": path, "change": change}]})
+
+	async def m_ws_list(self, call, p):
+		return {"workspaces": self.summaries()}
+
+	async def m_ws_setTrust(self, call, p):
+		ws = self.get(p.str("wsId"))
+		ws.trusted = p.bool("trusted")
+		self.server.hub.publish("ws:" + ws.ws_id, "trust.changed", {"trusted": ws.trusted})
+		return {"trusted": ws.trusted}
+
+	async def m_fs_list(self, call, p):
+		ws = self.get(p.str("wsId"))
+		path = normalize(p.str("path", "", required=False))
+		if not ws.is_dir(path):
+			raise RpcError("not_found", "no directory %r" % path)
+		entries = []
+		for name, kind in ws.entries(path):
+			full = posixpath.join(path, name) if path else name
+			entry = {"name": name, "path": full, "kind": kind}
+			if kind == "file":
+				entry.update(size=len(ws.files[full].text.encode("utf-8")), revision=ws.files[full].revision)
+			entries.append(entry)
+		return {"path": path, "entries": entries}
+
+	async def m_fs_read(self, call, p):
+		ws = self.get(p.str("wsId"))
+		path = normalize(p.str("path"))
+		entry = self.file(ws, path)
+		return {"path": path, "text": entry.text, "revision": entry.revision}
+
+	async def m_fs_write(self, call, p):
+		ws = self.get(p.str("wsId"))
+		path = normalize(p.str("path"))
+		text = p.str("text")
+		revision = self.write(ws, path, text, p.int("expectedRevision", required=False))
+		self.server.docs.on_disk_write(ws.ws_id, path, text, revision)
+		return {"path": path, "revision": revision}
+
+	async def m_fs_delete(self, call, p):
+		ws = self.get(p.str("wsId"))
+		path = normalize(p.str("path"))
+		entry = self.file(ws, path)
+		expected = p.int("expectedRevision", required=False)
+		if expected is not None and expected != entry.revision:
+			raise RpcError("conflict", "file changed since revision %d" % expected, {"revision": entry.revision})
+		del ws.files[path]
+		self._tree_changed(ws, path, "deleted")
+		return {}
+
+	async def m_fs_mkdir(self, call, p):
+		ws = self.get(p.str("wsId"))
+		path = normalize(p.str("path"))
+		if path in ws.files:
+			raise RpcError("conflict", "%r is a file" % path)
+		if not ws.is_dir(path):
+			ws.directories.add(path)
+			self._tree_changed(ws, path, "created")
+		return {"path": path}
+
+	async def m_fs_rename(self, call, p):
+		ws = self.get(p.str("wsId"))
+		source, target = normalize(p.str("from")), normalize(p.str("to"))
+		entry = self.file(ws, source)
+		if target in ws.files or ws.is_dir(target):
+			raise RpcError("conflict", "%r already exists" % target)
+		ws.files[target] = ws.files.pop(source)
+		self.server.hub.publish("ws:" + ws.ws_id, "tree.changed", {"changes": [
+			{"path": source, "change": "deleted"}, {"path": target, "change": "created"},
+		]})
+		return {"path": target, "revision": entry.revision}
+
+	async def m_fs_search(self, call, p):
+		ws = self.get(p.str("wsId"))
+		matcher = _matcher(p.str("query"), p.bool("regex", False, required=False), p.bool("caseSensitive", False, required=False))
+		matches = []
+		for path in sorted(ws.files):
+			for number, line in enumerate(ws.files[path].text.split("\n")):
+				hit = matcher(line)
+				if hit is not None:
+					matches.append({"path": path, "line": number, "col": hit, "preview": line.strip()[:200]})
+				if len(matches) >= MAX_SEARCH_MATCHES:
+					return {"matches": matches, "truncated": True}
+		return {"matches": matches, "truncated": False}
+
+
+def _matcher(query, is_regex, case_sensitive):
+	flags = 0 if case_sensitive else re.IGNORECASE
+	try:
+		pattern = re.compile(query if is_regex else re.escape(query), flags)
+	except re.error as e:
+		raise RpcError("bad_request", "bad regex: %s" % e)
+
+	def match(line):
+		found = pattern.search(line)
+		return len(line[:found.start()].encode("utf-16-le")) // 2 if found else None
+	return match

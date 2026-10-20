@@ -1,0 +1,53 @@
+{
+	"description": "OpenAI/vLLM-style HTTP 400 context_length_exceeded; the limit is only in the message text.",
+	"stopClass": "context_overflow",
+	"harness": "Parse the limit out of 'maximum context length is N tokens', update the profile, compress, retry.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"error": {
+						"status": 400,
+						"body": {
+							"error": {
+								"message": "This model's maximum context length is {n_ctx} tokens. However, your messages resulted in 40000 tokens. Please reduce the length of the messages.",
+								"type": "invalid_request_error",
+								"param": "messages",
+								"code": "context_length_exceeded"
+							}
+						}
+					}
+				}
+			],
+			"wire": {
+				"transport": "http_error",
+				"status": 400,
+				"errorIncludes": "maximum context length is 32768 tokens"
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Fits now."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Fits now."
+			}
+		}
+	]
+}

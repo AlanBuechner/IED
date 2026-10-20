@@ -1,0 +1,25 @@
+{
+	"description": "Text, then [DONE] with no finish_reason ever sent.",
+	"stopClass": "none",
+	"harness": "Negative test: [DONE] without finish_reason is accepted as a normal end.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "No finish reason here."
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": null,
+				"text": "No finish reason here."
+			}
+		}
+	]
+}

@@ -1,0 +1,67 @@
+{
+	"description": "A native tool call whose arguments are not valid JSON; the second request sends valid arguments.",
+	"stopClass": "malformed_tool_call",
+	"harness": "Repair fails, so return a tool error result with the validation message and the tool schema; the model fixes it; at most 3 per call id.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "read_file",
+						"arguments": "{\"path\": \"src/main.c\", \"line\": }"
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"argumentsValid": false
+					}
+				]
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "read_file",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}

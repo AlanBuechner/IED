@@ -1,0 +1,28 @@
+{
+	"description": "An answer that ends with finish_reason='eos'.",
+	"stopClass": "unknown_finish",
+	"harness": "unknown_finish(eos): treat as ended, then classify by content (here: a complete answer, so the turn finishes).",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "All done."
+				},
+				{
+					"finish": "eos"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "eos",
+				"text": "All done."
+			}
+		}
+	]
+}

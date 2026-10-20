@@ -1,0 +1,31 @@
+{
+	"description": "The reply ends by announcing an action ('Now I'll edit ...:') with no tool call.",
+	"stopClass": "announced_no_action",
+	"harness": "Nudge: 'You said you would edit src/game/player.c but did not call a tool. Call the tool now, or explain why not.'; at most 2 per step.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "I found the bug: velocity is never clamped. Now I'll edit src/game/player.c to fix it:"
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"textIncludes": "Now I'll edit"
+			}
+		}
+	]
+}

@@ -1,0 +1,53 @@
+{
+	"description": "HTTP 429 with Retry-After: 2, then success.",
+	"stopClass": "http_error",
+	"harness": "http_error(429): wait at least Retry-After seconds before retrying (the trajectory records the wait), then succeed.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"error": {
+						"status": 429,
+						"headers": {
+							"Retry-After": "2"
+						},
+						"body": {
+							"error": {
+								"message": "rate limited",
+								"type": "rate_limit_error"
+							}
+						}
+					}
+				}
+			],
+			"wire": {
+				"transport": "http_error",
+				"status": 429
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Thanks for waiting."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Thanks for waiting."
+			}
+		}
+	]
+}

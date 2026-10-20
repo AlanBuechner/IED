@@ -1,0 +1,32 @@
+{
+	"description": "A slow, long answer (about 2000 small chunks, 50 ms apart) to press Stop on.",
+	"stopClass": "user_cancelled",
+	"harness": "Stop cancels the HTTP request at once; the partial text is kept; stop reason user_cancelled.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. ",
+					"chunk": 2,
+					"delayMs": 50
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop"
+			}
+		}
+	]
+}

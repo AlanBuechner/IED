@@ -1,0 +1,27 @@
+{
+	"description": "An answer that ends with finish_reason='end_turn'.",
+	"stopClass": "unknown_finish",
+	"harness": "unknown_finish(end_turn): treat as ended, classify by content.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Finished my turn."
+				},
+				{
+					"finish": "end_turn"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "end_turn"
+			}
+		}
+	]
+}

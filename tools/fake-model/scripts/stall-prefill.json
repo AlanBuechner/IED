@@ -1,0 +1,58 @@
+{
+	"description": "No bytes at all (not even HTTP headers) for 120 s, then a normal answer if the client is still there. Second request answers at once.",
+	"stopClass": "stalled_prefill",
+	"harness": "The prefill watchdog (30 s base + promptTokens / prefillRate * 2) fires, the request is cancelled and retried like a disconnect; at most 2 per step. The UI shows 'processing prompt' until then.",
+	"responses": [
+		{
+			"headers": "lazy",
+			"steps": [
+				{
+					"stall": 120
+				},
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Sorry, I was slow."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"minSilence": 120
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Answer after the retry."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Answer after the retry."
+			}
+		}
+	]
+}

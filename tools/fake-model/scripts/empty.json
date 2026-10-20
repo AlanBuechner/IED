@@ -1,0 +1,25 @@
+{
+	"description": "finish_reason=stop with no content and no tool calls.",
+	"stopClass": "empty",
+	"harness": "Re-request with the nudge 'Your previous reply contained no answer and no tool call...'; on the 2nd occurrence also lower effort / disable thinking; at most 2 per step.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": ""
+			}
+		}
+	]
+}

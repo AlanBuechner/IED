@@ -1,0 +1,41 @@
+{
+	"description": "The server accepts the TCP connection and resets it before any HTTP response (a crashed or restarting server). The second request succeeds.",
+	"stopClass": "connect_failed",
+	"harness": "Retry with exponential backoff and jitter; after 2 failures try the role's fallback model (if privacy allows); at most 4 attempts, then pause with reason connect_failed. A refused port (nothing listening) is the other connect_failed shape: point the provider at a closed port.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"cut": "before-headers"
+				}
+			],
+			"wire": {
+				"transport": "no_response"
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Recovered after a connect failure."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Recovered after a connect failure."
+			}
+		}
+	]
+}

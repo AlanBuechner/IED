@@ -1,0 +1,18 @@
+// Frame examples from docs/10-server-protocol.md, made concrete. One frame per line.
+{ "t": "hello", "proto": 1, "clientId": "c-1", "deviceId": "d-1", "deviceClass": "desktop", "resume": { "sessionEpoch": "e-1", "cursors": { "chat:42": 1234 } } }
+{ "t": "req", "id": 17, "method": "fs.read", "params": { "path": "src/main.c" } }
+{ "t": "req", "id": 19, "method": "doc.edit", "opId": "op-7", "params": { "docId": "d1", "baseVersion": 4, "changes": [] } }
+{ "t": "cancel", "id": 17 }
+{ "t": "sub", "id": 18, "topics": ["chat:42", "task:7"], "from": { "chat:42": 1200 } }
+{ "t": "sub", "id": 20, "topics": ["myplugin/thing:42", "layout:w1:phone", "server"] }
+{ "t": "unsub", "topics": ["chat:42"] }
+{ "t": "ack", "cursors": { "chat:42": 1290 } }
+{ "t": "ping", "ts": 1729350000000 }
+{ "t": "welcome", "proto": 1, "serverVersion": "0.1.0", "sessionEpoch": "e-1", "clientId": "c-1", "resume": { "chat:42": "ok", "run:9": "snapshot" } }
+{ "t": "res", "id": 17, "ok": true, "result": { "text": "int main;" } }
+{ "t": "res", "id": 17, "ok": false, "error": { "code": "conflict", "message": "stale", "data": { "version": 9 } } }
+{ "t": "evt", "topic": "chat:42", "seq": 1291, "kind": "segment.delta", "data": { "segId": "s1", "text": "Let me look at" } }
+{ "t": "snap", "topic": "chat:42", "seq": 1291, "data": { "turns": [] } }
+{ "t": "gap", "topic": "run:950", "from": 800, "to": 950 }
+{ "t": "pong", "ts": 1729350000000 }
+{ "t": "bye", "reason": "server-restart" }

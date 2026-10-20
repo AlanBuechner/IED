@@ -1,0 +1,45 @@
+{
+	"description": "Text, then a clean end of the HTTP body with no finish_reason and no [DONE].",
+	"stopClass": "disconnected_mid_stream",
+	"harness": "A body that ends without a terminal chunk is disconnected_mid_stream (recoverable), not a fatal error: continue from the partial text.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Partial answer that just stops"
+				}
+			],
+			"wire": {
+				"transport": "eof",
+				"finishReason": null
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": " - and here is the rest."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": " - and here is the rest."
+			}
+		}
+	]
+}

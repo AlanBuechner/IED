@@ -1,0 +1,54 @@
+{
+	"description": "Text cut off with finish_reason=length; the second request finishes.",
+	"stopClass": "max_tokens",
+	"harness": "Continue (prefix continuation or partial text + continue note); at most 3 per step; footer shows 'continued after max_tokens'.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Here is the first half of a long explanation that ran out of"
+				},
+				{
+					"finish": "length"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "length"
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": " tokens, and the second half."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": " tokens, and the second half."
+			}
+		}
+	]
+}

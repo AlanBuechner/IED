@@ -1,0 +1,54 @@
+{
+	"description": "llama.cpp-style HTTP 400 exceed_context_size_error carrying n_ctx (the slot context, {n_ctx}) and n_prompt_tokens.",
+	"stopClass": "context_overflow",
+	"harness": "Read the real limit from the error (n_ctx), update the model profile, compress, retry; at most 3 per step.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"error": {
+						"status": 400,
+						"body": {
+							"error": {
+								"code": 400,
+								"message": "the request exceeds the available context size, try increasing it",
+								"type": "exceed_context_size_error",
+								"n_prompt_tokens": 40000,
+								"n_ctx": "{n_ctx}"
+							}
+						}
+					}
+				}
+			],
+			"wire": {
+				"transport": "http_error",
+				"status": 400,
+				"errorIncludes": "exceed_context_size_error"
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Fits now."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Fits now."
+			}
+		}
+	]
+}
