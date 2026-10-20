@@ -239,6 +239,22 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-PRF-6** `ext` `P1` - As Owner/Agent, profiler data is queryable by the AI (hot zones, frame breakdown, leak list).
 - **US-PRF-7** `ext` `P2` - As Owner, traces from other tools import (Chrome trace JSON, which Nuke's `build-trace.json` and Claymore's planned profile output already use).
 
+### GPU - Graphics debugger
+
+- **US-GPU-1** `plan` `P1` - As Owner, a GPU activity in the sidebar captures a frame of my D3D12 or Vulkan program and lets me inspect every event, its state, its resources and its outputs, at PIX/RenderDoc depth.
+- **US-GPU-2** `plan` `P1` - As Owner, I debug a shader at a pixel, vertex or compute thread with source-level stepping, and I see a pixel's full history with the reason each write passed or failed.
+- **US-GPU-3** `plan+` `P1` - As Owner, I see per-event and per-pass GPU time, the queue timeline, and (where the vendor allows) hardware counters with a verdict on what limits a pass.
+- **US-GPU-4** `plan` `P1` - As Owner, the debugger needs no Python runtime and its backend is swappable (RenderDoc now, IED's own later) without changing the UI.
+- **US-GPU-5** `ext` `P1` - As Owner/Agent, the AI can query captures (state, pixels, shader traces, timings) and answer "why is this pixel black?" or "why is this pass slow?" with event links.
+- **US-GPU-6** `ext` `P1` - As Owner, I compare two captures (two builds or commits) event by event: state, output and timing differences.
+- **US-GPU-7** `ext` `P2` - As Remote owner, I triage a capture from the phone: event list with timings, previews, pixel history, AI answers.
+- **US-GPU-8** `ext` `P1` - As Owner, I edit a shader in the IED editor, replay the capture with the edit, see the output change, and keep the edit as a real file change.
+- **US-GPU-9** `ext` `P2` - As Owner, C4 programs capture through Bedrock without injection, with engine metadata (bindless names, work graphs), and can keep a rolling buffer of frames that is written out when the profiler sees a hitch.
+
+Journey added for this epic:
+
+- **J15 - Black pixel*.** A black speck shows on a crate in Claymore. Owner clicks *Capture*; the next frame lands in the GPU library. They click the pixel: the history says the lit pass wrote 0. *Debug pixel* steps `DefaultLit` and shows shadow cascade 3 returning 0 from the PCSS lookup. They ask the AI to fix it; it proposes a bias change, Edit and Replay shows the pixel lit, the change is saved to the shader file and the game rebuilds. On the phone the same capture shows the pixel history and the AI's answer.
+
 ### PLG - Plugins and extensibility
 
 - **US-PLG-1** `plan` `P0` - As Plugin author, I write plugins that add sidebar views, tool windows, toolbar items, output tabs, LSP/DAP configs, skills, AI tools, bindings, settings and system-message sections.

@@ -33,6 +33,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [19-testing-strategy](19-testing-strategy.md) | Test layers, mock and fake-model servers, resume tests, screenshots, budgets, gates |
 | [20-echo-parity-and-migration](20-echo-parity-and-migration.md) | Echo parity floor, how IED surpasses each item, migration importer |
 | [21-distribution-and-bundled-services](21-distribution-and-bundled-services.md) | Install shape, on-disk layout, bundled vs detected components, SearXNG/tor packaging, first run |
+| [22-gpu-debugger](22-gpu-debugger.md) | GPU debugger: PIX/RenderDoc/Nsight comparison, architecture, RenderDoc vs own (Flashbang) backend, views, capture flow, AI, phases |
 
 ## Doc conventions
 

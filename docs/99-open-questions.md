@@ -36,6 +36,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 | O8 | **Not core**: ComfyUI generation, Perforce/Fossil, GitHub PR integration as optional plugins rather than built-ins. OK? | Yes |
 | O9 | **"Explosion theming"**: purely functional grayscale, or a signature accent moment (logo, title treatment, splash)? | Functional; identity in iconography only |
 | O10 | **Phone editing**: read + light edits by default (tap to edit), or full editing parity? | Read + light edit |
+| O11 | **GPU debugger backend** (`docs/22`): RenderDoc as the replay backend, our own ("Flashbang", RenderDoc as reference), or both? Neither needs Python (RenderDoc's replay API is C++). Also: ship RenderDoc's DLL inside IED, and is "Flashbang" the name? | Both behind one protocol: RenderDoc backend first (complete debugger fast), Flashbang for C4 programs where control matters (bindless/unbounded arrays, work graphs, engine metadata, time-travel debugging); bundle a pinned RenderDoc (MIT); name Flashbang |
 
 ## Open - design (resolve before implementing the affected area)
 

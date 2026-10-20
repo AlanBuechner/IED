@@ -1,6 +1,6 @@
 # 05 - Default plugins
 
-The six plugins that ship with IED. They are ordinary plugins (`docs/02`) of kind `builtin` - compiled into the server because C4 has no DLLs - using the same manifest, contribution points and bindings as anyone else; nothing about them is special-cased in the host, and each can be disabled. Full feature lists live in `docs/features/`; this doc gives each plugin's role, what it owns, and how it composes with the others.
+The seven plugins that ship with IED. They are ordinary plugins (`docs/02`) of kind `builtin` - compiled into the server because C4 has no DLLs - using the same manifest, contribution points and bindings as anyone else; nothing about them is special-cased in the host, and each can be disabled. Full feature lists live in `docs/features/`; this doc gives each plugin's role, what it owns, and how it composes with the others.
 
 | Plugin | Sidebar | Owns | Feature file |
 |---|---|---|---|
@@ -10,6 +10,7 @@ The six plugins that ship with IED. They are ordinary plugins (`docs/02`) of kin
 | `ied.terminal` | none (bottom dock) | always-present terminal, AI terminals | `features/10-terminal.md` |
 | `ied.sandbox` | plugin order | Docker/WSL/SSH sandboxes, sandbox terminals, AI sandbox tools | `features/11-sandbox.md` |
 | `ied.profiler` | plugin order | capture library, timeline, analysis views, AI profiler tools | `features/12-profiler.md`, `docs/16` |
+| `ied.gpu` | plugin order (after profiler) | GPU capture library, frame debugger views, replay backends (separate native processes), insights, compare, AI GPU tools | `features/17-gpu-debugger.md`, `docs/22` |
 
 Host modules they sit on (not plugins): `src/fs` (documents, search), `src/tasks`, `src/terminal` (PTYs), `src/lsp`, `src/dap`, `src/git`, `src/ai`, `src/sandbox`, `src/profiler`, `src/spell`.
 
@@ -40,6 +41,12 @@ Providers: Docker (Linux images), WSL, SSH (a Mac for macOS work, an ARM Linux b
 ## profiler
 
 Tracy-class profiler built on the ITP trace protocol (`docs/16`). Tracy itself is a **feature reference only** - never linked into IED or C4. Timeline with frames, zones, plots, messages, locks; **thread renames as a time series with tinted segments and a by-task view**; statistics, find-zone, flame graph, compare; memory (live allocations, leaks by call stack, pools, GC events); GPU lanes with calibration (D3D12 first); capture library; Chrome-trace import (Nuke build traces, Claymore profiles); AI query tools. Instrumentation comes from Bedrock `Profile::` (C4 repo) so C4 programs are profileable by default.
+
+## gpu
+
+PIX/RenderDoc/Nsight-class graphics debugger (`docs/22`). Capture library with build and commit metadata; Event Browser with GPU timing columns; Pipeline State with bindless resolution; Texture Viewer with browser-side display transforms and backend overlays; Mesh Viewer; Resources; Pixel History; Shader Debugger in an editor surface with Edit and Replay; Performance (timing, queue timeline, counter providers, insights); capture compare. Replay runs in a separate native backend process per capture (`rdc` over RenderDoc's C++ replay API first; IED's own Flashbang later), so a driver crash never takes the server down and no Python is involved.
+
+Bindings provided: `gpu.captureFrame`, `gpu.openEvent`, `gpu.attachToChat`. Consumes: `editor.openFile`, `editor.applyEdit`, `tasks.run`, `profiler.openZone`, `chat.attach`.
 
 ## Cross-plugin notes
 

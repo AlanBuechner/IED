@@ -1,0 +1,91 @@
+# Features: GPU debugger (GPU)
+
+Owner: `plugins/gpu` (builtin plugin: library, sessions, insights, compare, AI tools, UI module) with replay backends as separate native processes under `plugins/gpu/backends/` (`rdc` first, `flashbang` later). Capture-side support for C4 programs is Bedrock `Gpu::` in the C4 repo. Design: `docs/22`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
+
+PIX is the workflow reference, RenderDoc the inspection and openness reference, Nsight the performance reference; the "Beyond" column says what IED adds.
+
+## Capture and library
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-1 | GPU activity with a capture library: thumbnail, program, config, git commit, frame number, capture GPU and driver, backend, size; comments, pin, retention limits | P1 | US-GPU-1 | commit and build metadata on every capture |
+| F-GPU-2 | `Capture` task preset: build, launch under the active backend, capture the next frame (in-app hotkey, IED command from any device, or N frames) | P1 | US-GPU-1 | capture from the phone |
+| F-GPU-3 | Programmatic capture from code through Bedrock `Gpu::Capture` (RenderDoc in-app API, PIX programmatic API or Flashbang, whichever is active) | P1 | US-GPU-1 | one API over three capture tools |
+| F-GPU-4 | Hand-off: open a capture in RenderDoc's UI; capture with PIX and open in PIX; launch the program in Nsight Graphics | P2 | US-GPU-1 | - |
+| F-GPU-5 | Capture on hitch: a profiler frame-time trigger captures the next frame (rdc) or writes the rolling frames around the spike (Flashbang) | P2 | US-GPU-9 | none of the three tie GPU capture to a CPU profiler |
+
+## Events and timeline
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-10 | Event Browser: marker tree, EID, GPU-time column with bars, warning badges, bookmarks, search and a filter language (`kind:draw ps:DefaultLit rt:HDR time>0.5ms`) | P1 | US-GPU-1 | PIX timing columns + RenderDoc bookmarks in one tree |
+| F-GPU-11 | API Calls for the selected event with parameters and optional callstacks | P1 | US-GPU-1 | - |
+| F-GPU-12 | Frame timeline: Direct/Compute/Copy queues as lanes, event spans, barriers, fences, idle bubbles highlighted | P1 | US-GPU-3 | - |
+| F-GPU-13 | Marker names shared with the profiler (`Profile::Gpu::Zone`); GPU zone -> capture event and back | P1 | US-GPU-1 | one vocabulary for CPU profiler and GPU debugger |
+
+## State and resources
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-20 | Pipeline State as a flowchart (graphics, mesh, compute, ray tracing, work graph variants) with per-stage detail | P1 | US-GPU-1 | - |
+| F-GPU-21 | Bindings: root signature, descriptor tables and heaps; bindless indices resolved to the resource, its name and engine annotations | P1 | US-GPU-1 | bindless-first display (Claymore is bindless) |
+| F-GPU-22 | Constant buffer contents decoded with shader reflection (structs, arrays, root constants) | P1 | US-GPU-1 | - |
+| F-GPU-23 | Resources: usage, format, size, lifetime (first/last EID), heap and aliasing; per-resource read/write history | P1 | US-GPU-1 | - |
+| F-GPU-24 | Messages: debug layer and GPU-based validation output tied to EIDs | P1 | US-GPU-1 | - |
+
+## Textures, buffers, meshes
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-30 | Texture Viewer: input/output thumbnail strip, channels, range with histogram, mip/slice/sample, zoom, pixel context, typed pick values | P1 | US-GPU-1 | - |
+| F-GPU-31 | Display transforms in the browser (WebGL2) over decoded tiles: instant range/channel/gamma changes, NaN/Inf/negative highlight, on any device | P1 | US-GPU-1, US-GPU-7 | remote viewing without round trips per slider move |
+| F-GPU-32 | Backend overlays: highlight draw, wireframe, depth test, stencil test, backface, viewport/scissor, quad overdraw (draw/pass), triangle size | P1 | US-GPU-1 | - |
+| F-GPU-33 | Mesh Viewer: VS input/output, task/mesh output, table + WebGL2 3D preview | P1 | US-GPU-1 | - |
+| F-GPU-34 | Buffer viewer with a format language (struct layout from reflection or typed by hand) | P1 | US-GPU-1 | - |
+| F-GPU-35 | Export a resource (DDS, PNG, EXR, raw) and open it in the image viewer | P2 | US-GPU-1 | - |
+
+## Pixel and shader debugging
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-40 | Pixel History: every event that touched a pixel with before/after, shader output, the test that failed, and a plain-words summary | P1 | US-GPU-2 | the summary sentence |
+| F-GPU-41 | Shader debugger for a pixel, vertex or compute thread: source-level (PDB or embedded debug info), step in/over/out, breakpoints set in the editor, watch, locals, per-lane values, disassembly toggle | P1 | US-GPU-2 | stepping inside an IED editor surface with LSP |
+| F-GPU-42 | Edit and Replay: edit the shader in the editor, recompile with the shader language plugin's compiler, replay, show an output diff; save as a real file change | P1 | US-GPU-8 | output diff, and the edit is a normal document change |
+| F-GPU-43 | Time-travel shader debugging (step backward) by instrumented replay on the real GPU | P2 | US-GPU-9 | none of the three step backward |
+| F-GPU-44 | NaN/Inf hunt: scan a target across events and bisect the first event that wrote a bad value | P1 | US-GPU-5 | automated |
+
+## Performance
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-50 | Per-event and per-pass GPU timing (timestamp queries, N repeats, median) | P1 | US-GPU-3 | - |
+| F-GPU-51 | Pipeline statistics per event (invocations, primitives, clipping) | P1 | US-GPU-3 | - |
+| F-GPU-52 | Counter providers (AMD GPA, NVIDIA Perf SDK, Intel) as optional plugins; speed-of-light bars per unit, occupancy, limiter verdict | P2 | US-GPU-3 | vendor-neutral view |
+| F-GPU-53 | Insights: redundant barriers, overdraw hot spots, tiny draws, empty passes, unused render-target writes, large uploads, queue bubbles - each with "Ask AI" | P1 | US-GPU-5 | AI explains and proposes the fix |
+
+## Compare
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-60 | Capture compare: event alignment by marker path and call signature, state diff, output image diff, timing deltas per pass | P1 | US-GPU-6 | not offered by PIX, RenderDoc or Nsight |
+| F-GPU-61 | Visual-regression bisect across a commit range (the orchestration queue builds, captures and compares) | P2 | US-GPU-6 | - |
+
+## AI and integration
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-70 | AI tools `T-GPU-*` (`docs/13`) | P1 | US-GPU-5 | - |
+| F-GPU-71 | Chat attachments `@gpu:` capture, event, pixel, resource; GPU tool cards render thumbnails and value tables | P1 | US-GPU-5 | - |
+| F-GPU-72 | "Explain this event / pixel / pass" on context menus | P1 | US-GPU-5 | - |
+| F-GPU-73 | Golden-capture tests (pixel assertions, image compare) through the test provider binding | P2 | US-GPU-6 | - |
+| F-GPU-80 | Phone triage: library, event list with timings, texture preview and picks, pixel history, insights, AI answers | P2 | US-GPU-7 | - |
+
+## Backends
+
+| ID | Feature | Pri | Stories | Beyond |
+|---|---|---|---|---|
+| F-GPU-90 | `ied-gpu/1`: JSON-RPC over stdio plus shared-memory blobs; one backend process per open capture; crash restart without losing UI state | P1 | US-GPU-4 | - |
+| F-GPU-91 | `rdc` backend: C++ adapter over RenderDoc's replay API (`renderdoc_replay.h`), pinned RenderDoc version, adapter tests against stored captures; no Python | P1 | US-GPU-4 | - |
+| F-GPU-92 | Flashbang recorder in Bedrock `Gpu::` (C4 repo): records C4 programs without injection, metadata chunk (bindless names, entities, materials), rolling capture | P2 | US-GPU-9 | engine semantics in the capture |
+| F-GPU-93 | Flashbang replayer implementing `ied-gpu/1` (D3D12 first, work graphs, unbounded/bindless resources) | P2 | US-GPU-9 | covers what RenderDoc does not |
+| F-GPU-94 | Capture GPU/driver shown beside the replay GPU/driver; replay device selection | P1 | US-GPU-1 | - |

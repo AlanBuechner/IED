@@ -16,6 +16,7 @@ Sequence the feature catalog (`docs/09`) into milestones with clear entry condit
   P-4 Nuke N1-N6 + c4 plugin (declarative) ---> needed by M3 (C4 experience)                        +--> M9 profiler  <-- P-6 Bedrock Profile::
   P-5 C4LSP L1-L5, C4DAP depth ---------------> quality in M2/M3/M8                                 +--> M10 web, MCP, Claude, sandbox  <-- P-7 Linux (sandbox for C4)
                                                                                                     +--> M11 ecosystem + distribution
+                                                                                                    +--> M12 GPU debugger (RenderDoc) --> M13 Flashbang  <-- P-8 Bedrock Gpu::
 ```
 
 ## M0 - Pre-compiler groundwork (can start now)
@@ -106,6 +107,20 @@ Bundled SearXNG + tor + proxy profiles and per-workspace egress policy; web_fetc
 JS plugin runtime (QuickJS-ng behind a C shim) and process plugins; install/approval/update for third-party plugins; typings + plugin template + authoring skill; federations + cross-workspace handoff; installer + Explorer integration + first-run; desktop wrapper (WebView2); self-update.
 
 **Exit:** J7, J14; a third-party-style sample plugin built only from public docs.
+
+## M12 - GPU debugger on the RenderDoc backend
+
+`ied.gpu` with the `rdc` backend process (C++ over `renderdoc_replay.h`, pinned RenderDoc): capture task and library, Event Browser, Pipeline State, Texture Viewer (WebGL2 display + backend overlays), Mesh Viewer, Resources, API Calls, Messages, Pixel History, Shader Debugger, per-event timing, Edit and Replay, compare, insights, AI GPU tools, phone triage. Design: `docs/22`.
+
+Needs: process spawn and blob transport (M1), docking (M2), tasks (M3); GPU zones and capture on hitch need M9.
+
+**Exit:** J15 on a Claymore build, with RenderDoc's current limits noted (unbounded cbuffer arrays are not shader-debuggable there).
+
+## M13 - Flashbang (IED's own capture and replay)
+
+Bedrock `Gpu::` recorder for C4 programs (C4 repo, P-8), `.flash` format with metadata chunk, `flashbang-replay` backend, time-travel shader debugging by instrumented replay, work graphs, rolling capture on hitch.
+
+**Exit:** J15 fully on Flashbang, including stepping `DefaultLit` with its unbounded `u_Materials[]`, and a work-graph pass.
 
 ## Continuous throughout
 
