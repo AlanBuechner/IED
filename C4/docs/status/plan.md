@@ -154,6 +154,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-74 | Header functions and macro constants in CBind | Every external C-linkage function is bound with `[link]` to its own symbol, body or not. A function with no symbol of its own (`static`, or inline with no external definition) is bound only when the bound header itself defines it, through a forwarding wrapper in a shim CBind writes (C for a C header, C++ as before); a system header's thousands of inline helpers are not compiled. Object-like macros are bound as constants by a second clang parse of the header that declares `static const __typeof__((NAME)) __cbind_NAME = NAME;` for each candidate (filtered to tokens that cannot derail the parse) and evaluates it: integers keep C's width and signedness, floats their precision, narrow strings become `const char*`. A constant two bindings in one file both declare is kept once (`InteropPass`). | [13](../language/13-interop.md) |
 | D-75 | Foreign objects follow the build and are reused | A foreign source or shim compiles with the program's `-O<n>` and `-g`, and clang writes a depfile beside the object (`-MD -MF <obj>.d`). After a compile, `<obj>.key` records an FNV key of the compiler (path, size, time), the flags, the defines and include folders, and the bytes of every file the depfile lists (the source and each header); the next build reuses the object while the key is the same. Content, not times, so a checkout that only touches files rebuilds nothing. | [13](../language/13-interop.md) |
 | D-76 | Incremental builds optimize each partition alone | `--incremental` (Nuke's `Debug` and `Development`; `Dist` stays whole-program) splits the module before the optimizer, so a partition whose bitcode and settings are unchanged reuses its cached object with no optimization at all. To keep the inlining that matters, a partition copies the small functions it calls from other partitions as `available_externally` (ThinLTO's rule: 100 unoptimized instructions, 70% per further level, three levels), and its cache key covers the copies, so editing a small function rebuilds its callers' partitions too. A `minsize` caller copies nothing; reflection's invoke thunks are `minsize` in every build, since reflection calls through them seldom and a copy of each target in its thunk only cost optimizer time. Linkonce definitions become weak, so a partition's optimizer cannot drop what another uses. Large functions no longer inline across partitions, the price of the fast loop. | [pipeline 6](../compiler/01-pipeline.md) |
+| D-77 | Streaming reads | Data is decoded while it arrives through pull readers fed with chunks: `JsonStream` hands back one event at a time and `NeedMore` when the text so far ends inside one, keeping its place (a string's end is looked for from where it stopped), so a caller drives it from any source - a file read ahead on a thread (`FS::ChunkReader`, two buffers, the next read while the caller decodes), a pipe, a socket. It shares its tokens with `ReadJson` (`jsontokens`), so both accept and refuse the same text with the same errors; UTF-8 is checked as bytes are fed, up to the last whole character. Values come whole when asked (`ReadValue` into a `DomDoc`, `ReadNext` into a reflected type), so a level's entities are decoded one at a time and memory holds a chunk, not the file. `BinaryStream` does the same for `WriteBinary`'s records. Push callbacks and a SAX interface were not chosen: a pull reader composes with loops and with the event loop, and a callback is one loop away. | [Bedrock 5, 6](../library/bedrock.md#6-serialization-serialization) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1427,6 +1428,25 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   Nuke `test_c4` (Development and Debug pass it, Dist does not, a configuration can turn it off, an older compiler
   is not given it).
 
+#### B62 - Streaming reads (roadmap 3); views made in constant time
+- **Closes:** BUG-288. **Design:** D-77, [Bedrock 5, 6](../library/bedrock.md#6-serialization-serialization).
+  **Status:** Done.
+- **Done notes:** `Serialization/jsontokens` (strings and numbers, shared by `ReadJson` and the stream),
+  `jsonstream` (`JsonStream`: `Feed`, `Finish`, `Stop`, `Next`, `ReadValue`, `SkipValue`), `jsonfile`
+  (`JsonFileStream`, `ReadNext<T>`, `ReadStreamed<T>`), `binarystream` (`BinaryStream`), `DomDoc::Clear`, and
+  `FS/chunks` (`ChunkReader`). The first long-stream test took 20 s at `-O0`: making a `Core::StringView` decoded every
+  byte to count its characters, so `StringBuilder::View()` and `Substring` were O(n) and reading a growing buffer
+  quadratic (BUG-288); a view now counts its characters only when `CharCount()` asks, and the test takes 13 ms. On a
+  48 MB file of 500,000 entities the stream yields its 8.5 million events in 0.25 s (`ReadJson`: 0.5 s) and decodes
+  the first entity 2 ms after opening.
+- **Tests:** `jsonstream_tests.cf` (17: events, every chunk size of a document with every kind of token, the same
+  trees and the same errors with positions as `ReadJson` at several chunk sizes, depth, `ReadValue` and `SkipValue`
+  across feeds, values into reflected types and one that does not fit, a 200 KB string and 20,000 lines fed 16
+  bytes at a time with the error's line counted across the dropped text, feeding after Finish; `ChunkReader` order,
+  moves, missing and empty files, readers closed while reading; `JsonFileStream` over a 2000-entity file and a
+  missing one; `BinaryStream` fed 7 bytes at a time, cut short, an unknown type; `DomDoc::Clear`);
+  `stringview_tests.cf` `str.views_cost_nothing_to_make` (BUG-288). Bedrock passes 485 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1944,7 +1964,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

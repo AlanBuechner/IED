@@ -5,13 +5,13 @@ namespace Core
 	[operator("create")] void StringView::Init(const char* text) {
 		bytes = text;
 		byteLength = text ? (int64)strlen(text) : 0;
-		charCount = Utf8CharCount(bytes, byteLength);
+		charCount = -1;
 	}
 
 	[operator("create")] void StringView::Init(const char* bytes, int64 byteLength) {
 		this.bytes = bytes;
 		this.byteLength = byteLength;
-		charCount = Utf8CharCount(bytes, byteLength);
+		charCount = -1;
 	}
 
 	[operator("create")] void StringView::Init(const char* bytes, int64 byteLength, int64 charCount) {

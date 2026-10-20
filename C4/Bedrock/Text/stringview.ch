@@ -1,5 +1,5 @@
-// StringView: a non-owning view over UTF-8 bytes - where they start, how many bytes there are and how
-// many characters they decode to. It never allocates or frees; the owner of the bytes keeps them alive.
+// StringView: a non-owning view over UTF-8 bytes - where they start and how many there are; it counts the characters
+// they decode to when asked. It never allocates or frees; the owner of the bytes keeps them alive.
 // A view of part of a string is not null-terminated, so read it through Data() and ByteLength().
 //     Core::StringView s = Core::StringView("hello");
 
@@ -16,7 +16,8 @@ namespace Core
 
 		public const char* Data() const { return bytes; }
 		public int64 ByteLength() const { return byteLength; }
-		public int64 CharCount() const { return charCount; }
+		// Counted when asked (one pass over the bytes) unless the view was made with its count (BUG-288).
+		public int64 CharCount() const { return charCount >= 0 ? charCount : Utf8CharCount(bytes, byteLength); }
 		public bool IsEmpty() const { return byteLength == 0; }
 		public bool IsValidUtf8() const { return Core::IsValidUtf8(bytes, byteLength); }
 		public int32 ByteAt(int64 i) const { return (int32)((const uint8*)bytes)[i]; }
@@ -46,7 +47,7 @@ namespace Core
 
 		private const char* bytes;
 		private int64 byteLength;
-		private int64 charCount;
+		private int64 charCount;   // -1 when not known; a zero view's 0 is
 	}
 
 	// The number of characters in UTF-8 bytes: every byte that does not continue a sequence.

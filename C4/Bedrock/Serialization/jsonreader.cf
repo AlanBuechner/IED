@@ -1,21 +1,8 @@
 include "jsonreader.ch"
+include "jsontokens.ch"
 
 namespace Serialization
 {
-	// The int64 a JSON integer's digits (an optional '-' then digits) stand for; false when it does not fit.
-	bool JsonInteger(Core::StringView digits, int64& out) {
-		bool negative = digits.ByteAt(0) == '-';
-		uint64 limit = negative ? (uint64)1 << 63 : ((uint64)1 << 63) - 1;
-		uint64 magnitude = 0;
-		for (int64 i = negative ? 1 : 0; i < digits.ByteLength(); ++i) {
-			uint64 digit = (uint64)(digits.ByteAt(i) - '0');
-			if (magnitude > (limit - digit) / 10) return false;
-			magnitude = magnitude * 10 + digit;
-		}
-		out = negative ? (int64)((uint64)0 - magnitude) : (int64)magnitude;
-		return true;
-	}
-
 	// One pass over the text. A step that fails records the first error and returns an invalid node or false,
 	// and every caller stops there.
 	class JsonReader
@@ -30,14 +17,10 @@ namespace Serialization
 		private DomNode Array();
 		private DomNode Number();
 		private bool Word(const char* word);
-		private bool StringInto(Core::StringBuilder& out);    // at the opening quote
-		private bool Escape(Core::StringBuilder& out);        // after the backslash
-		private bool UnicodeEscape(Core::StringBuilder& out); // after "\u"
-		private int32 Hex4();                                 // the code unit of four hex digits, or -1
+		private bool StringInto(Core::StringBuilder& out);   // at the opening quote
 		private bool Enter();
 		private void Leave() { depth -= 1; }
 		private void SkipSpace();
-		private void SkipDigits() { while (IsDecimalDigit(Peek())) position += 1; }
 		private int32 Peek() const { return position < text.ByteLength() ? text.ByteAt(position) : -1; }
 		private bool At(int32 byte) const { return Peek() == byte; }
 		private DomNode Fail(const char* message) { return FailAt(position, message); }
@@ -124,34 +107,10 @@ namespace Serialization
 	}
 
 	DomNode JsonReader::Number() {
-		int64 start = position;
-		if (At('-')) position += 1;
-		if (!IsDecimalDigit(Peek())) return Fail("a number needs a digit here");
-		if (At('0')) {
-			position += 1;
-			if (IsDecimalDigit(Peek())) return Fail("a number cannot start with 0");
-		}
-		else SkipDigits();
-		bool integral = true;
-		if (At('.')) {
-			integral = false;
-			position += 1;
-			if (!IsDecimalDigit(Peek())) return Fail("a fraction needs a digit after '.'");
-			SkipDigits();
-		}
-		if (At('e') || At('E')) {
-			integral = false;
-			position += 1;
-			if (At('+') || At('-')) position += 1;
-			if (!IsDecimalDigit(Peek())) return Fail("an exponent needs a digit");
-			SkipDigits();
-		}
-		Core::StringView digits = text.Substring(start, position - start);
-		int64 whole = 0;
-		if (integral && JsonInteger(digits, whole)) return doc->NewInt(whole);
-		double real = 0.0;
-		parse_double(digits.Data(), digits.ByteLength(), &real);
-		return doc->NewFloat(real);
+		JsonNumber number;
+		JsonFault fault;
+		if (!ReadJsonNumber(text, position, number, fault)) return FailAt(fault.at, fault.error);
+		return number.integral ? doc->NewInt(number.integer) : doc->NewFloat(number.real);
 	}
 
 	bool JsonReader::Word(const char* word) {
@@ -162,68 +121,10 @@ namespace Serialization
 	}
 
 	bool JsonReader::StringInto(Core::StringBuilder& out) {
-		position += 1;
-		for (;;) {
-			int64 run = position;
-			while (position < text.ByteLength()) {
-				int32 c = text.ByteAt(position);
-				if (c == '"' || c == '\\' || c < 0x20) break;
-				position += 1;
-			}
-			out.AppendBytes(text.Data() + run, position - run);
-			int32 c = Peek();
-			if (c == '"') { position += 1; return true; }
-			if (c == '\\') { position += 1; if (!Escape(out)) return false; continue; }
-			Fail(c < 0 ? "the text ends inside a string" : "a control character in a string must be escaped");
-			return false;
-		}
-	}
-
-	bool JsonReader::Escape(Core::StringBuilder& out) {
-		int32 c = Peek();
-		position += 1;
-		switch (c) {
-			case '"': out.AppendByte('"'); return true;
-			case '\\': out.AppendByte('\\'); return true;
-			case '/': out.AppendByte('/'); return true;
-			case 'b': out.AppendByte(8); return true;
-			case 'f': out.AppendByte(12); return true;
-			case 'n': out.AppendByte(10); return true;
-			case 'r': out.AppendByte(13); return true;
-			case 't': out.AppendByte(9); return true;
-			case 'u': return UnicodeEscape(out);
-		}
-		FailAt(position - 2, c < 0 ? "the text ends inside a string" : "an unknown escape");
+		JsonFault fault;
+		if (ReadJsonString(text, position, out, fault)) return true;
+		FailAt(fault.at, fault.error);
 		return false;
-	}
-
-	bool JsonReader::UnicodeEscape(Core::StringBuilder& out) {
-		int64 at = position - 2;
-		int32 unit = Hex4();
-		if (unit < 0) { FailAt(at, "\\u needs four hex digits"); return false; }
-		int32 point = unit;
-		if (unit >= 0xDC00 && unit <= 0xDFFF) { FailAt(at, "a low surrogate escape without a high one"); return false; }
-		if (unit >= 0xD800 && unit <= 0xDBFF) {
-			bool escaped = At('\\') && position + 1 < text.ByteLength() && text.ByteAt(position + 1) == 'u';
-			if (escaped) position += 2;
-			int32 low = escaped ? Hex4() : -1;
-			if (low < 0xDC00 || low > 0xDFFF) { FailAt(at, "a high surrogate escape without a low one"); return false; }
-			point = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
-		}
-		out.AppendCodePoint(point);
-		return true;
-	}
-
-	int32 JsonReader::Hex4() {
-		if (position + 4 > text.ByteLength()) return -1;
-		int32 unit = 0;
-		for (int32 k = 0; k < 4; ++k) {
-			int32 digit = HexDigitValue(text.ByteAt(position + k));
-			if (digit < 0) return -1;
-			unit = unit * 16 + digit;
-		}
-		position += 4;
-		return unit;
 	}
 
 	bool JsonReader::Enter() {

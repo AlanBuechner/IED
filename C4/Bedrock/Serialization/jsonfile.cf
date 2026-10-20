@@ -1,0 +1,41 @@
+include "jsonfile.ch"
+
+namespace Serialization
+{
+	void JsonFileStream::Init(const char* path, int64 chunkBytes) {
+		file = FS::ChunkReader(path, chunkBytes);
+		if (!file.IsOpen()) json.Stop("the file cannot be opened");
+	}
+
+	// A finished or stopped stream never says NeedMore, so each loop ends.
+	JsonEvent JsonFileStream::Next() {
+		JsonEvent event = json.Next();
+		for (; event == JsonEvent::NeedMore; event = json.Next()) Refill();
+		return event;
+	}
+
+	JsonEvent JsonFileStream::ReadValue(DomDoc& doc, DomNode& node) {
+		JsonEvent event = json.ReadValue(doc, node);
+		for (; event == JsonEvent::NeedMore; event = json.ReadValue(doc, node)) Refill();
+		return event;
+	}
+
+	JsonEvent JsonFileStream::SkipValue() {
+		JsonEvent event = json.SkipValue();
+		for (; event == JsonEvent::NeedMore; event = json.SkipValue()) Refill();
+		return event;
+	}
+
+	void JsonFileStream::Refill() {
+		Core::StringView chunk = file.Next();
+		if (!chunk.IsEmpty()) json.Feed(chunk);
+		else if (file.Failed()) json.Stop("the file could not be read");
+		else json.Finish();
+	}
+
+	JsonEvent JsonFileStream::Fitted(bool fits) {
+		if (fits) return JsonEvent::Value;
+		json.Stop("a value does not fit the type it is read into");
+		return JsonEvent::Error;
+	}
+}

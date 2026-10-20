@@ -169,8 +169,10 @@ searches. `Core::Ascending<T>` orders by `<`.
 
 ### `Core::StringView` - non-owning UTF-8 view (`stringview.ch`)
 
-A small value `{ bytes, byteLength, charCount }`; pass it by value. A view of part of a string is not
-null-terminated, so read it through `Data()` and `ByteLength()`.
+A small value `{ bytes, byteLength, charCount }`; pass it by value. Making one costs nothing beyond `strlen` for a
+`const char*`: `CharCount` counts the characters when asked, unless the view was made with its count (`String::View`
+passes the one it keeps). A view of part of a string is not null-terminated, so read it through `Data()` and
+`ByteLength()`.
 
 `Init(const char*)`, `Init(bytes, byteLength)`, `Init(bytes, byteLength, charCount)`, `Data`,
 `ByteLength`, `CharCount`, `IsEmpty`, `IsValidUtf8` (Unicode table 3-7: no overlong forms, surrogates or
@@ -383,6 +385,21 @@ added, written, renamed and removed files, recursion, timeouts, a burst of 3000 
 removed, failures and moves), and `assets/IsolatedTest/Bedrock/Bug276ReparsePointNotLink` (a third-party reparse
 point is a file, not a link).
 
+### Reading a file in chunks (`chunks.ch`)
+
+`FS::ChunkReader(path, chunkBytes = FS::kDefaultChunkBytes)` (1 MiB) reads a file front to back, each next chunk on
+a thread of its own while the caller works on the one it has, so reading and decoding overlap (B62, roadmap 3).
+`Next()` waits for the chunk read ahead and returns it, valid until the next call; it is empty at the end of the
+file, after a failed read (`Failed()`) and once closed. The reader owns the file and the thread: it closes on delete
+(`Close()` stops the thread, idempotent) and cannot be copied (move it with `take()`; the thread's state lives on
+the heap). A file that cannot be opened gives a closed reader with no chunks.
+
+```c4
+FS::ChunkReader file = FS::ChunkReader("level.bin");
+Serialization::BinaryStream records;
+for (Core::StringView chunk = file.Next(); !chunk.IsEmpty(); chunk = file.Next()) records.Feed(chunk);
+```
+
 ---
 
 ## 6. Serialization (`Serialization/`)
@@ -433,6 +450,37 @@ if (!Serialization::FromJson(json.View(), loaded)) printf("not settings\n");
   `Serialization::ReadBinary(StringView bytes, int64 position, type, destination)` reads them back and
   returns the position after them, or `-1` when the bytes end too soon. Plain data only (no pointers or
   owning types).
+- **Streaming** (`jsonstream.ch`, `jsonfile.ch`, `binarystream.ch`; B62, D-77, roadmap 3): data decoded while it is
+  still arriving, so a large file's first values are in use before the rest is read and memory holds about a chunk.
+  - `Serialization::JsonStream` is a pull parser fed with chunks: `Feed(text)`, `Finish()` at the end, and `Next()`
+    returns one `JsonEvent` (`BeginObject`, `EndObject`, `BeginArray`, `EndArray`, `Key`, `Null`, `Bool`, `Int`,
+    `Float`, `String`, then `End`), `NeedMore` when the text so far ends inside one, or `Error`. A Key's or String's
+    text is `Text()` (until the next call), numbers `IntValue()` / `FloatValue()`, `BoolValue()`, and `Depth()` the
+    open containers. It accepts and refuses exactly what `ReadJson` does, with the same error, offset, line and
+    column (`Failure()`, a `ReadResult`), whatever the chunk sizes; text that is not UTF-8 fails as soon as it is
+    fed. `ReadValue(doc, node)` collects the next whole value into a `DomDoc` and `SkipValue()` passes over one, each
+    across as many feeds as it takes; where no value stands they return the event that does (`Key`, `EndArray`,
+    `EndObject`, `End`), which ends a loop over an array's elements. `Stop(why)` fails the stream for a source that
+    broke. A string fed in small pieces is scanned once, and the read part of the text is dropped as it goes.
+  - `Serialization::JsonFileStream(path, chunkBytes)` feeds a `JsonStream` from an `FS::ChunkReader`: the same calls,
+    which wait for the chunk being read instead of returning `NeedMore`, and `ReadNext(value)`, the next whole value
+    decoded into any reflected type (the rules of the reflection codec). A value that does not fit its type ends the
+    stream with an Error. `ReadStreamed(json, doc, value)` does the same over any `JsonStream`.
+  - `Serialization::BinaryStream` reads `WriteBinary`'s records as they arrive: `Feed`, `Finish`, and
+    `Read(type or name, destination)` returns `BinaryRead::Record`, `NeedMore`, `End` (finished, no bytes left) or
+    `Error` (the type is not reflected, or the bytes ended inside a record).
+  - `DomDoc::Clear()` empties a document and keeps its memory, for a loop that reads one value at a time.
+  - On a 48 MB file of 500,000 entities: the stream's 8.5 million events in 0.25 s (`ReadJson`, file read and DOM
+    built: 0.5 s); the first entity decoded 2 ms after opening against 0.5 s when the file is read first; all of them
+    decoded into reflected structs in 0.89 s (from the DOM: 0.92 s), holding one chunk instead of the file and
+    5 million nodes.
+
+```c4
+Serialization::JsonFileStream level = Serialization::JsonFileStream("level.json");   // {"entities": [...]}
+level.Next(); level.Next(); level.Next();                                           // {, "entities", [
+Entity entity;
+while (level.ReadNext(entity) == Serialization::JsonEvent::Value) { Spawn(entity); entity = Entity(); }
+```
 - **Readers** (`jsonreader.ch`, `yamlreader.ch`): `Serialization::ReadJson(text, doc)` and
   `Serialization::ReadYaml(text, doc)` build a tree in `doc` and return a `Serialization::ReadResult`:
   `root`, and on failure `error` (static text), `offset`, `line` and `column` (1-based, in bytes); `Ok()`.
@@ -912,11 +960,11 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 49 files, 467 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 50 files, 485 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -945,7 +993,7 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Math with explicit SSE/AVX intrinsics and wide (AVX) batches of vectors | **Implemented** (section 9: the vector and matrix functions on the SIMD intrinsics, `batch.ch`) |
 | ObjectDescription with in-memory JSON and YAML read and write | **Implemented** (one YAML document; no anchors or tags) |
 | Objects to and from JSON and YAML through reflection, strings, arrays, maps and enums included | **Implemented** (section 6, B56) |
-| Streaming reads (decode a large file while it is still being read) | **Planned** |
+| Streaming reads (decode a large file while it is still being read) | **Implemented** (sections 5 and 6, B62): `FS::ChunkReader`, `JsonStream`, `JsonFileStream`, `BinaryStream` |
 | Paths, directory listing, create, remove, rename | **Implemented** |
 | File information and times, copies of files and trees, absolute and canonical paths, watching a directory | **Implemented** (section 5, B53) |
 | `Core::InitList<T>` | **Implemented** |

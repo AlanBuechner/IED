@@ -1,0 +1,293 @@
+include "jsonstream.ch"
+include "jsontokens.ch"
+
+namespace Serialization
+{
+	// The read part of the held text is dropped once it is this large and more than half of what is held.
+	const int64 kJsonStreamDropBytes = 65536;
+
+	// Where the last character that has all its bytes ends: a lead byte whose sequence is cut short starts the rest.
+	static int64 WholeCharactersEnd(Core::StringView bytes) {
+		int64 end = bytes.ByteLength();
+		int64 lead = end - 1;
+		while (lead >= 0 && end - lead < 4 && (bytes.ByteAt(lead) & 0xC0) == 0x80) lead -= 1;
+		if (lead < 0) return end;
+		int32 first = bytes.ByteAt(lead);
+		int64 width = first >= 0xF0 ? 4 : first >= 0xE0 ? 3 : first >= 0xC0 ? 2 : 1;
+		return end - lead < width ? lead : end;
+	}
+
+	static bool IsNumberByte(int32 c) { return IsDecimalDigit(c) || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'; }
+
+	static bool IsClose(JsonEvent event) { return event == JsonEvent::EndObject || event == JsonEvent::EndArray; }
+
+	static bool IsOpen(JsonEvent event) { return event == JsonEvent::BeginObject || event == JsonEvent::BeginArray; }
+
+	// What stands where a value would, which ReadValue and SkipValue hand back as it is.
+	static bool IsNotAValue(JsonEvent event) { return event == JsonEvent::Key || IsClose(event) || event == JsonEvent::End; }
+
+	void JsonStream::Feed(Core::StringView more) {
+		if (error) return;
+		if (finished) { Fail(pending.ByteLength(), "text was fed after the stream was finished"); return; }
+		Compact();
+		pending.Append(more);
+		Validate();
+	}
+
+	void JsonStream::Finish() {
+		if (finished) return;
+		finished = true;
+		Validate();
+	}
+
+	void JsonStream::Stop(const char* why) { Fail(pending.ByteLength(), why); }
+
+	JsonEvent JsonStream::Next() {
+		if (error) return JsonEvent::Error;
+		if (!SkipMark()) return JsonEvent::NeedMore;
+		for (;;) {
+			SkipSpace();
+			if (position == checked) return EndOfText();
+			JsonEvent event = Step();
+			if (event != JsonEvent::Value) return event;   // Value: punctuation was read, go on
+		}
+	}
+
+	// One event, or Value after a ':' or ',' that stands between two.
+	JsonEvent JsonStream::Step() {
+		int32 c = Available().ByteAt(position);
+		if (expect == JsonExpect::Nothing) return Fail(position, "unexpected text after the value");
+		if (expect == JsonExpect::Colon) {
+			if (c != ':') return Fail(position, "expected ':' after a member's name");
+			position += 1;
+			expect = JsonExpect::Value;
+			return JsonEvent::Value;
+		}
+		if (expect == JsonExpect::CommaOrEnd) {
+			bool object = InObject();
+			if (c == (object ? '}' : ']')) return Close(object);
+			if (c != ',') return Fail(position, object ? "expected ',' or '}' after a member" : "expected ',' or ']' after an element");
+			position += 1;
+			expect = object ? JsonExpect::Key : JsonExpect::Value;
+			return JsonEvent::Value;
+		}
+		if (expect == JsonExpect::KeyOrEnd && c == '}') return Close(true);
+		if (expect == JsonExpect::KeyOrEnd || expect == JsonExpect::Key)
+			return c == '"' ? StringToken(true) : Fail(position, "a member's name must be a string");
+		if (expect == JsonExpect::ValueOrEnd && c == ']') return Close(false);
+		return ValueToken();
+	}
+
+	JsonEvent JsonStream::ValueToken() {
+		int32 c = Available().ByteAt(position);
+		if (c == '{') return Container(true);
+		if (c == '[') return Container(false);
+		if (c == '"') return StringToken(false);
+		if (c == '-' || IsDecimalDigit(c)) return NumberToken();
+		if (c == 't') return Word("true", JsonEvent::Bool);
+		if (c == 'f') return Word("false", JsonEvent::Bool);
+		if (c == 'n') return Word("null", JsonEvent::Null);
+		return Fail(position, "a value cannot start here");
+	}
+
+	JsonEvent JsonStream::Container(bool object) {
+		if (containers.Count() >= kMaxJsonDepth) return Fail(position, "objects and arrays nest too deeply");
+		containers.Push(object);
+		position += 1;
+		expect = object ? JsonExpect::KeyOrEnd : JsonExpect::ValueOrEnd;
+		return object ? JsonEvent::BeginObject : JsonEvent::BeginArray;
+	}
+
+	JsonEvent JsonStream::Close(bool object) {
+		position += 1;
+		containers.Pop();
+		return AfterValue(object ? JsonEvent::EndObject : JsonEvent::EndArray);
+	}
+
+	JsonEvent JsonStream::AfterValue(JsonEvent event) {
+		expect = containers.IsEmpty() ? JsonExpect::Nothing : JsonExpect::CommaOrEnd;
+		return event;
+	}
+
+	// Decoded once its closing quote has come, or once nothing that comes can make it valid; NeedMore before. The end
+	// is looked for from where the last call stopped, so a long string fed in small pieces is scanned once.
+	JsonEvent JsonStream::StringToken(bool key) {
+		Core::StringView held = Available();
+		int64 at = position + 1 + scanned;
+		bool decided = false;
+		while (at < held.ByteLength() && !decided) {
+			int32 c = held.ByteAt(at);
+			if (c == '"' || c < 0x20) decided = true;
+			else if (c != '\\') at += 1;
+			else if (at + 1 < held.ByteLength()) at += 2;
+			else break;
+		}
+		if (!decided && !finished) {
+			scanned = at - position - 1;
+			return JsonEvent::NeedMore;
+		}
+		scanned = 0;
+		text.Clear();
+		JsonFault fault;
+		if (!ReadJsonString(held, position, text, fault)) return Fail(fault.at, fault.error);
+		if (!key) return AfterValue(JsonEvent::String);
+		expect = JsonExpect::Colon;
+		return JsonEvent::Key;
+	}
+
+	// Read once a byte that cannot continue it has come (or the text has ended).
+	JsonEvent JsonStream::NumberToken() {
+		Core::StringView held = Available();
+		int64 end = position;
+		while (end < held.ByteLength() && IsNumberByte(held.ByteAt(end))) end += 1;
+		if (end == held.ByteLength() && !finished) return JsonEvent::NeedMore;
+		JsonNumber number;
+		JsonFault fault;
+		if (!ReadJsonNumber(held, position, number, fault)) return Fail(fault.at, fault.error);
+		if (!number.integral) {
+			real = number.real;
+			return AfterValue(JsonEvent::Float);
+		}
+		integer = number.integer;
+		return AfterValue(JsonEvent::Int);
+	}
+
+	JsonEvent JsonStream::Word(const char* word, JsonEvent event) {
+		Core::StringView expected = Core::StringView(word);
+		Core::StringView held = Available().Substring(position, expected.ByteLength());
+		if (held.ByteLength() < expected.ByteLength() && !finished && expected.StartsWith(held)) return JsonEvent::NeedMore;
+		if (!held.Equals(expected)) return Fail(position, "a value cannot start here");
+		position += expected.ByteLength();
+		boolean = expected.ByteAt(0) == 't';
+		return AfterValue(event);
+	}
+
+	JsonEvent JsonStream::EndOfText() {
+		if (!finished) return JsonEvent::NeedMore;
+		if (expect == JsonExpect::Nothing) return JsonEvent::End;
+		if (expect == JsonExpect::Colon) return Fail(position, "expected ':' after a member's name");
+		if (expect == JsonExpect::KeyOrEnd || expect == JsonExpect::Key) return Fail(position, "the text ends inside an object");
+		if (expect == JsonExpect::CommaOrEnd)
+			return Fail(position, InObject() ? "the text ends inside an object" : "the text ends inside an array");
+		return Fail(position, "the text ends where a value should be");
+	}
+
+	JsonEvent JsonStream::ReadValue(DomDoc& doc, DomNode& node) {
+		for (;;) {
+			JsonEvent event = Next();
+			if (event == JsonEvent::NeedMore || event == JsonEvent::Error) return event;
+			if (open.IsEmpty() && IsNotAValue(event)) return event;
+			if (Collect(event, doc, node)) return JsonEvent::Value;
+		}
+	}
+
+	// Adds an event to the value being built; true once it is whole.
+	bool JsonStream::Collect(JsonEvent event, DomDoc& doc, DomNode& node) {
+		if (event == JsonEvent::Key) {
+			key = text.ToString();
+			return false;
+		}
+		if (IsClose(event)) {
+			DomNode closed = open.Pop();
+			node = closed;
+			return open.IsEmpty();
+		}
+		DomNode made = Made(event, doc);
+		if (!open.IsEmpty()) {
+			DomNode parent = open.Back();
+			if (parent.Kind() == DomKind::Object) doc.AddMember(parent, key.View(), made);
+			else doc.Add(parent, made);
+		}
+		if (IsOpen(event)) {
+			open.Push(made);
+			return false;
+		}
+		node = made;
+		return open.IsEmpty();
+	}
+
+	DomNode JsonStream::Made(JsonEvent event, DomDoc& doc) {
+		if (event == JsonEvent::BeginObject) return doc.NewObject();
+		if (event == JsonEvent::BeginArray) return doc.NewArray();
+		if (event == JsonEvent::Bool) return doc.NewBool(boolean);
+		if (event == JsonEvent::Int) return doc.NewInt(integer);
+		if (event == JsonEvent::Float) return doc.NewFloat(real);
+		if (event == JsonEvent::String) return doc.NewString(text.View());
+		return doc.NewNull();
+	}
+
+	JsonEvent JsonStream::SkipValue() {
+		for (;;) {
+			JsonEvent event = Next();
+			if (event == JsonEvent::NeedMore || event == JsonEvent::Error) return event;
+			if (skipDepth == 0 && IsNotAValue(event)) return event;
+			if (IsOpen(event)) skipDepth += 1;
+			if (IsClose(event)) skipDepth -= 1;
+			if (skipDepth == 0 && event != JsonEvent::Key) return JsonEvent::Value;
+		}
+	}
+
+	ReadResult JsonStream::Failure() const {
+		if (!error) return ReadSuccess(DomNode());
+		ReadResult result;
+		result.error = error;
+		result.offset = errorAt;
+		int64 lines = line;
+		int64 start = lineStart;
+		Core::StringView held = pending.View();
+		for (int64 i = position; i < errorAt - base && i < held.ByteLength(); ++i)
+			if (held.ByteAt(i) == '\n') { lines += 1; start = base + i + 1; }
+		result.line = (int32)lines;
+		result.column = (int32)(errorAt - start) + 1;
+		return result;
+	}
+
+	// A byte order mark at the very start is skipped; false while too few bytes have come to tell.
+	bool JsonStream::SkipMark() {
+		if (marked) return true;
+		Core::StringView mark = Core::StringView("\xEF\xBB\xBF");
+		Core::StringView held = Available();
+		if (held.ByteLength() < mark.ByteLength() && !finished && mark.StartsWith(held)) return false;
+		if (held.StartsWith(mark)) position = mark.ByteLength();
+		marked = true;
+		return true;
+	}
+
+	void JsonStream::SkipSpace() {
+		Core::StringView held = Available();
+		while (position < held.ByteLength()) {
+			int32 c = held.ByteAt(position);
+			if (c == '\n') { line += 1; lineStart = base + position + 1; }
+			else if (c != ' ' && c != '\t' && c != '\r') return;
+			position += 1;
+		}
+	}
+
+	// The fed bytes are checked to be UTF-8 up to the last character that has all its bytes (every byte once
+	// finished), and the parser reads only checked bytes.
+	void JsonStream::Validate() {
+		if (error) return;
+		int64 end = finished ? pending.ByteLength() : WholeCharactersEnd(pending.View());
+		int64 bad = Core::InvalidUtf8Offset(pending.CStr() + checked, end - checked);
+		if (bad >= 0) { Fail(checked + bad, "the text is not valid UTF-8"); return; }
+		checked = end;
+	}
+
+	// Drops the read part of the held text once it is large, so a long stream holds about a chunk at a time.
+	void JsonStream::Compact() {
+		if (position < kJsonStreamDropBytes || position * 2 < pending.ByteLength()) return;
+		spare.Clear();
+		spare.Append(pending.View().Substring(position, -1));
+		base += position;
+		checked -= position;
+		position = 0;
+		Core::StringBuilder dropped = take(pending);
+		pending = take(spare);
+		spare = take(dropped);
+	}
+
+	JsonEvent JsonStream::Fail(int64 at, const char* message) {
+		if (!error) { error = message; errorAt = base + at; }
+		return JsonEvent::Error;
+	}
+}

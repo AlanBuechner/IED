@@ -1,0 +1,64 @@
+include "chunks.ch"
+
+namespace FS
+{
+	// Waits until the caller wants a chunk, reads it outside the lock, hands it over; stops at the end of the file, at
+	// an error, or when the reader closes.
+	static void ReadAhead(ChunkState* state, int64 chunkBytes) {
+		for (;;) {
+			{
+				Threading::LockGuard guard(state->mutex);
+				while (!state->wanted && !state->stopping) state->changed.Wait(state->mutex);
+				if (state->stopping) return;
+				state->wanted = false;
+			}
+			int64 got = state->file.Read(state->back.Data(), chunkBytes);
+			Threading::LockGuard guard(state->mutex);
+			state->backBytes = got;
+			state->backReady = true;
+			state->changed.NotifyAll();
+			if (got <= 0) return;
+		}
+	}
+
+	void ChunkReader::Init(const char* path, int64 chunkBytes) {
+		int64 bytes = chunkBytes > 0 ? chunkBytes : kDefaultChunkBytes;
+		ChunkState* shared = new ChunkState();
+		shared->file = File(path, "rb");
+		if (!shared->file.IsOpen()) return;
+		shared->front.Resize(bytes);
+		shared->back.Resize(bytes);
+		shared->wanted = true;
+		state = shared;
+		worker = Threading::Thread::Run([shared, bytes]() { ReadAhead(shared, bytes); });
+	}
+
+	Core::StringView ChunkReader::Next() {
+		if (!state || ended) return Core::StringView();
+		Threading::LockGuard guard(state->mutex);
+		while (!state->backReady) state->changed.Wait(state->mutex);
+		Core::Array<uint8> taken = take(state->front);
+		state->front = take(state->back);
+		state->back = take(taken);
+		int64 bytes = state->backBytes;
+		state->backReady = false;
+		failed = bytes < 0;
+		ended = bytes <= 0;
+		if (ended) return Core::StringView();
+		state->wanted = true;
+		state->changed.NotifyAll();
+		return Core::StringView((const char*)state->front.Data(), bytes);
+	}
+
+	void ChunkReader::Close() {
+		if (!state) return;
+		{
+			Threading::LockGuard guard(state->mutex);
+			state->stopping = true;
+			state->changed.NotifyAll();
+		}
+		worker.Join();
+		state->file.Close();
+		state = nullptr;
+	}
+}

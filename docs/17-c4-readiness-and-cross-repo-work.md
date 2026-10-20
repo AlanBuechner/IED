@@ -14,7 +14,7 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 | Need | Status | Notes |
 |---|---|---|
 | Threads, mutex, condvar, atomics, futures, job system | **exists** | `C4/Bedrock/Threading/*`; JobSystem is game-tuned, not I/O-aware |
-| JSON parse/serialize | **exists** (DOM) | No streaming parser; reflection-driven serialization of any type with strings, arrays, string-keyed maps and enum names: `Serialization::ToJson` / `FromJson` (C4 B56) |
+| JSON parse/serialize | **exists** (DOM and streaming) | `Serialization::JsonStream`, a pull parser fed with chunks (JSON-RPC messages as they arrive), and `JsonFileStream` (C4 B62); reflection-driven serialization of any type with strings, arrays, string-keyed maps and enum names: `Serialization::ToJson` / `FromJson` (C4 B56) |
 | UTF-8 strings | **exists** | UTF-8 <-> UTF-16 conversion and UTF-16 offsets for LSP positions: `Core::ToUtf16` / `FromUtf16` / `Utf16OffsetOfByte` / `ByteOffsetOfUtf16` (C4 B60) |
 | File system basics | **exists** | read/write/list/mkdir/remove/rename/exists/size, `FS::GetInfo` (kind, size, times), copies of files and trees, absolute and canonical paths (C4 B53); **missing** locking, mmap |
 | File watching | **exists** | `FS::Watcher` over `ReadDirectoryChangesW` (B53): recursive, renames paired, `Overflow` when changes were dropped |

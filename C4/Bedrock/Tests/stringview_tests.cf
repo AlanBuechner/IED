@@ -184,3 +184,19 @@ public static void TestAffixesAndOrder() {
 	assert_true(Core::StringView("same").Hash() == Core::StringView("xsame").Substring(1, 4).Hash(), "equal bytes hash alike");
 }
 
+
+// BUG-288: making a view decoded every byte, so views of a growing buffer made reading it quadratic.
+[test("str.views_cost_nothing_to_make")]
+public static void TestViewsCostNothingToMake() {
+	Core::StringBuilder big;
+	for (int32 i = 0; i < 4000000; ++i) big.AppendByte('a' + i % 26);
+	int64 start = clock_now_ns();
+	int64 bytes = 0;
+	for (int32 i = 0; i < 20000; ++i) bytes += big.View().Substring(i, 1000000).ByteLength();
+	int64 elapsedMs = (clock_now_ns() - start) / 1000000;
+	assert_eq((int64)20000 * 1000000, bytes, "every view has its bytes");
+	assert_true(elapsedMs < 1000, "20000 views of 4 MB take far less than a second (decoding them took minutes)");
+	assert_eq((int64)1000000, big.View().Substring(5, 1000000).CharCount(), "the characters are still counted when asked");
+	Core::StringView partial = Core::StringView("a\xC3\xA9\xE2\x82\xACz").Substring(1, 5);
+	assert_eq((int64)2, partial.CharCount(), "a substring counts its own characters");
+}

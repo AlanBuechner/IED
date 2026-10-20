@@ -1,0 +1,478 @@
+// Serialization::JsonStream: events fed whole and in every chunk size, the same trees and the same errors (message,
+// offset, line, column) as ReadJson, ReadValue and SkipValue across feeds, values read into reflected types, long
+// strings and long streams; FS::ChunkReader, JsonFileStream over a real file, BinaryStream and DomDoc::Clear.
+
+include "bedrock.ch"
+
+struct StreamedEntity
+{
+	public Core::String name;
+	public int32 hp;
+	public Core::Array<int32> tags;
+}
+
+struct StreamedRecord
+{
+	public int32 id;
+	public double weight;
+	public int64 stamp;
+}
+
+static void AppendEvent(Core::StringBuilder& log, const Serialization::JsonStream& json, Serialization::JsonEvent event) {
+	if (event == Serialization::JsonEvent::BeginObject) log.Append("{ ");
+	else if (event == Serialization::JsonEvent::EndObject) log.Append("} ");
+	else if (event == Serialization::JsonEvent::BeginArray) log.Append("[ ");
+	else if (event == Serialization::JsonEvent::EndArray) log.Append("] ");
+	else if (event == Serialization::JsonEvent::Null) log.Append("n ");
+	else if (event == Serialization::JsonEvent::Bool) log.Append(json.BoolValue() ? "true " : "false ");
+	else if (event == Serialization::JsonEvent::End) log.Append("$");
+	else if (event == Serialization::JsonEvent::Int) { log.Append("i"); log.AppendInt(json.IntValue()); log.Append(" "); }
+	else if (event == Serialization::JsonEvent::Float) { log.Append("f"); log.AppendDouble(json.FloatValue(), 6); log.Append(" "); }
+	else if (event == Serialization::JsonEvent::Key) { log.Append("k:"); log.Append(json.Text()); log.Append(" "); }
+	else if (event == Serialization::JsonEvent::String) { log.Append("s:"); log.Append(json.Text()); log.Append(" "); }
+	else if (event == Serialization::JsonEvent::Error) {
+		Serialization::ReadResult failure = json.Failure();
+		log.Append("!");
+		log.Append(failure.error);
+		log.Append("@");
+		log.AppendInt(failure.offset);
+		log.Append(":");
+		log.AppendInt(failure.line);
+		log.Append(":");
+		log.AppendInt(failure.column);
+	}
+}
+
+// Feeds the next `chunk` bytes of `text` (all of it for 0), or finishes once all are fed.
+static void FeedMore(Serialization::JsonStream& json, Core::StringView text, int64& fed, int64 chunk) {
+	if (fed >= text.ByteLength()) { json.Finish(); return; }
+	int64 count = chunk <= 0 ? text.ByteLength() : chunk;
+	json.Feed(text.Substring(fed, count));
+	fed += count;
+}
+
+// Every event of `text` fed `chunk` bytes at a time, as one line.
+static Core::String StreamEvents(Core::StringView text, int64 chunk) {
+	Serialization::JsonStream json;
+	Core::StringBuilder log;
+	int64 fed = 0;
+	for (;;) {
+		Serialization::JsonEvent event = json.Next();
+		if (event == Serialization::JsonEvent::NeedMore) { FeedMore(json, text, fed, chunk); continue; }
+		AppendEvent(log, json, event);
+		if (event == Serialization::JsonEvent::End || event == Serialization::JsonEvent::Error) return log.ToString();
+	}
+}
+
+// The whole text read with ReadValue, `chunk` bytes at a time, written back compactly; or the error as ReadJson's is.
+static Core::String StreamTree(Core::StringView text, int64 chunk) {
+	Serialization::JsonStream json;
+	Serialization::DomDoc doc;
+	Serialization::DomNode root;
+	int64 fed = 0;
+	Serialization::JsonEvent event = json.ReadValue(doc, root);
+	for (; event == Serialization::JsonEvent::NeedMore; event = json.ReadValue(doc, root)) FeedMore(json, text, fed, chunk);
+	for (Serialization::JsonEvent after = json.Next(); event == Serialization::JsonEvent::Value; after = json.Next()) {
+		if (after == Serialization::JsonEvent::NeedMore) { FeedMore(json, text, fed, chunk); continue; }
+		if (after == Serialization::JsonEvent::Error) event = after;
+		break;
+	}
+	Core::StringBuilder out;
+	if (event == Serialization::JsonEvent::Value) Serialization::WriteJson(root, &out, 0);
+	else AppendEvent(out, json, Serialization::JsonEvent::Error);
+	return out.ToString();
+}
+
+// ReadJson's answer in StreamTree's form.
+static Core::String WholeTree(Core::StringView text) {
+	Serialization::DomDoc doc;
+	Serialization::ReadResult read = Serialization::ReadJson(text, doc);
+	Core::StringBuilder out;
+	if (!read.Ok()) {
+		out.Append("!");
+		out.Append(read.error);
+		out.Append("@");
+		out.AppendInt(read.offset);
+		out.Append(":");
+		out.AppendInt(read.line);
+		out.Append(":");
+		out.AppendInt(read.column);
+		return out.ToString();
+	}
+	Serialization::WriteJson(read.root, &out, 0);
+	return out.ToString();
+}
+
+// A document with every kind of token: escapes, a surrogate pair, raw UTF-8, numbers of each form, words, nesting,
+// a byte order mark and lines.
+static Core::StringView Varied() {
+	return Core::StringView("\xEF\xBB\xBF{\"name\": \"caf\xC3\xA9 \\u20ac \\ud83d\\ude00 \\\"q\\\" \\\\ \\n\",\n"
+		"  \"n\": [0, -12, 3.5, -0.25e-3, 1E2, 9223372036854775807, 9223372036854775808],\n"
+		"  \"flags\": [true, false, null], \"empty\": {}, \"none\": [],\r\n"
+		"  \"deep\": {\"a\": [{\"b\": [[\"\xE2\x82\xAC\xF0\x9F\x98\x80\"]]}]}}  \n");
+}
+
+static bool WriteFile(const FS::Path& path, Core::StringView bytes) {
+	FS::File file = FS::File(path.CStr(), "wb");
+	if (!file.IsOpen()) return false;
+	return bytes.IsEmpty() || file.Write(bytes.Data(), bytes.ByteLength()) == bytes.ByteLength();
+}
+
+[test("serialization.json.stream")]
+class JsonStreamTests {
+	[test("events")]
+	public static void TestEvents() {
+		assert_se("{ k:a i1 k:b [ true false n f2.500000 s:x ] k:c { } } $",
+			StreamEvents(Core::StringView("{\"a\": 1, \"b\": [true, false, null, 2.5, \"x\"], \"c\": {}}"), 0).CStr(), "every event, in order");
+		assert_se("i42 $", StreamEvents(Core::StringView(" 42 "), 0).CStr(), "a scalar at the root");
+		assert_se("s: $", StreamEvents(Core::StringView("\"\""), 0).CStr(), "an empty string");
+	}
+
+	[test("every_chunk_size")]
+	public static void TestEveryChunkSize() {
+		Core::StringView text = Varied();
+		Core::String whole = StreamEvents(text, 0);
+		assert_true(whole.View().EndsWith(Core::StringView("$")), "the document reads whole");
+		for (int64 chunk = 1; chunk <= text.ByteLength(); ++chunk)
+			assert_true(StreamEvents(text, chunk).View() == whole.View(), "the same events in every chunk size");
+	}
+
+	[test("same_trees_as_read_json")]
+	public static void TestSameTreesAsReadJson() {
+		const char*[6] texts = { "null", "[1, [2, [3, []]], {\"k\": {\"j\": \"v\"}}]", "{\"a\": 1, \"a\": 2}", "-0.0", "\"\\u0041\\u00e9\"", "[]" };
+		const int64[5] chunks = { 1, 2, 3, 7, 0 };
+		for (int32 t = 0; t < 6; ++t)
+			for (int32 c = 0; c < 5; ++c)
+				assert_true(StreamTree(Core::StringView(texts[t]), chunks[c]).View() == WholeTree(Core::StringView(texts[t])).View(), texts[t]);
+		Core::StringView text = Varied();
+		for (int64 chunk = 1; chunk <= 40; ++chunk)
+			assert_true(StreamTree(text, chunk).View() == WholeTree(text).View(), "the varied document, chunk by chunk");
+	}
+
+	[test("same_errors_as_read_json")]
+	public static void TestSameErrorsAsReadJson() {
+		const char*[30] texts = { "", "   ", "[1, 2,]", "{\"a\": 1,}", "{'a': 1}", "{a: 1}", "01", "+1", ".5", "1.", "1e", "NaN",
+			"tru", "True", "[1] [2]", "// comment\n1", "\"tab\there\"", "\"\\x41\"", "\"\\u12\"", "\"\\ud83d\"", "\"\\ude00\"",
+			"\"\\ud83d\\u0041\"", "\"abc", "[1, 2", "{\"a\" 1}", "\"\xc3\"", "{\n  \"a\": 1,\n  \"b\" 2\n}", "[1,\n2,\n\xff]",
+			"{\"a\":", "\"ends with \\" };
+		const int64[4] chunks = { 1, 2, 5, 0 };
+		for (int32 t = 0; t < 30; ++t) {
+			Core::String expected = WholeTree(Core::StringView(texts[t]));
+			assert_true(expected.View().StartsWith(Core::StringView("!")), texts[t]);
+			for (int32 c = 0; c < 4; ++c) {
+				Core::String streamed = StreamEvents(Core::StringView(texts[t]), chunks[c]);
+				int64 bang = streamed.View().IndexOf(Core::StringView("!"));
+				assert_true(bang >= 0 && streamed.View().Substring(bang, -1) == expected.View(), texts[t]);
+			}
+		}
+	}
+
+	[test("depth")]
+	public static void TestDepth() {
+		Core::StringBuilder deep;
+		for (int32 i = 0; i < 512; ++i) deep.Append("[");
+		for (int32 i = 0; i < 512; ++i) deep.Append("]");
+		assert_true(StreamTree(deep.View(), 64).View() == WholeTree(deep.View()).View(), "512 levels read");
+		Core::StringBuilder deeper;
+		for (int32 i = 0; i < 513; ++i) deeper.Append("[");
+		assert_se("!objects and arrays nest too deeply@512:1:513", StreamTree(deeper.View(), 100).CStr(), "513 do not");
+		Serialization::JsonStream json;
+		json.Feed(Core::StringView("[[{"));
+		json.Next();
+		json.Next();
+		json.Next();
+		assert_eq((int64)3, json.Depth(), "Depth counts the open containers");
+	}
+
+	[test("read_value_across_feeds")]
+	public static void TestReadValueAcrossFeeds() {
+		Core::StringView text = Core::StringView("{\"items\": [{\"id\": 1, \"tags\": [\"a\"]}, 2, \"three\", {\"id\": 4}], \"after\": true}");
+		Serialization::JsonStream json;
+		Serialization::DomDoc doc;
+		int64 fed = 0;
+		Serialization::JsonEvent event = json.Next();
+		for (; event == Serialization::JsonEvent::NeedMore; event = json.Next()) FeedMore(json, text, fed, 3);
+		assert_true(event == Serialization::JsonEvent::BeginObject, "the root opens");
+		for (event = json.Next(); event == Serialization::JsonEvent::NeedMore; event = json.Next()) FeedMore(json, text, fed, 3);
+		assert_true(event == Serialization::JsonEvent::Key && json.Text() == Core::StringView("items"), "its first key");
+		for (event = json.Next(); event == Serialization::JsonEvent::NeedMore; event = json.Next()) FeedMore(json, text, fed, 3);
+		assert_true(event == Serialization::JsonEvent::BeginArray, "the array opens");
+		Core::StringBuilder seen;
+		int32 values = 0;
+		for (;;) {
+			Serialization::DomNode node;
+			event = json.ReadValue(doc, node);
+			if (event == Serialization::JsonEvent::NeedMore) { FeedMore(json, text, fed, 3); continue; }
+			if (event != Serialization::JsonEvent::Value) break;
+			values += 1;
+			Serialization::WriteJson(node, &seen, 0);
+			seen.Append(";");
+			doc.Clear();
+		}
+		assert_true(event == Serialization::JsonEvent::EndArray, "the array's end stops the loop");
+		assert_eq(4, values, "four elements");
+		assert_se("{\"id\":1,\"tags\":[\"a\"]};2;\"three\";{\"id\":4};", seen.CStr(), "each element whole");
+		for (event = json.Next(); event == Serialization::JsonEvent::NeedMore; event = json.Next()) FeedMore(json, text, fed, 3);
+		assert_true(event == Serialization::JsonEvent::Key && json.Text() == Core::StringView("after"), "the stream goes on after it");
+	}
+
+	[test("skip_value")]
+	public static void TestSkipValue() {
+		Core::StringView text = Core::StringView("{\"skip\": {\"a\": [1, {\"b\": [2, 3]}], \"c\": \"}\"}, \"keep\": 7}");
+		Serialization::JsonStream json;
+		int64 fed = 0;
+		Core::StringBuilder log;
+		for (;;) {
+			Serialization::JsonEvent event = json.Next();
+			if (event == Serialization::JsonEvent::NeedMore) { FeedMore(json, text, fed, 4); continue; }
+			AppendEvent(log, json, event);
+			if (event == Serialization::JsonEvent::Key && json.Text() == Core::StringView("skip")) {
+				event = json.SkipValue();
+				for (; event == Serialization::JsonEvent::NeedMore; event = json.SkipValue()) FeedMore(json, text, fed, 4);
+				assert_true(event == Serialization::JsonEvent::Value, "the skipped value ends");
+			}
+			if (event == Serialization::JsonEvent::End || event == Serialization::JsonEvent::Error) break;
+		}
+		assert_se("{ k:skip k:keep i7 } $", log.CStr(), "everything after the skipped value");
+	}
+
+	[test("into_reflected_types")]
+	public static void TestIntoReflectedTypes() {
+		Core::StringView text = Core::StringView("[{\"name\": \"orc\", \"hp\": 5, \"tags\": [1, 2]}, {\"name\": \"elf\", \"hp\": 9}, {\"hp\": \"x\"}]");
+		Serialization::JsonStream json;
+		Serialization::DomDoc doc;
+		int64 fed = 0;
+		Serialization::JsonEvent event = json.Next();
+		for (; event == Serialization::JsonEvent::NeedMore; event = json.Next()) FeedMore(json, text, fed, 5);
+		Core::Array<StreamedEntity> read;
+		for (;;) {
+			StreamedEntity entity;
+			event = Serialization::ReadStreamed(json, doc, entity);
+			if (event == Serialization::JsonEvent::NeedMore) { FeedMore(json, text, fed, 5); continue; }
+			if (event != Serialization::JsonEvent::Value) break;
+			read.Push(take(entity));
+			doc.Clear();
+		}
+		assert_eq((int64)2, read.Count(), "two entities fit");
+		assert_true(read[0].name.View() == Core::StringView("orc") && read[0].hp == 5 && read[0].tags.Count() == 2 && read[0].tags[1] == 2, "the first");
+		assert_true(read[1].name.View() == Core::StringView("elf") && read[1].hp == 9 && read[1].tags.IsEmpty(), "the second");
+		assert_true(event == Serialization::JsonEvent::Error, "the third does not fit");
+		assert_se("a value does not fit the type it is read into", json.Failure().error, "and says so");
+		assert_true(json.Next() == Serialization::JsonEvent::Error, "the stream stays failed");
+	}
+
+	[test("long_string_and_long_stream")]
+	public static void TestLongStringAndLongStream() {
+		Core::StringBuilder text;
+		text.Append("[\"");
+		for (int32 i = 0; i < 200000; ++i) text.AppendByte('a' + i % 26);
+		text.Append("\",\n");
+		for (int32 i = 0; i < 20000; ++i) { text.AppendInt(i); text.Append(",\n"); }
+		text.Append("x]");
+		Serialization::JsonStream json;
+		int64 fed = 0;
+		int64 sum = 0;
+		int64 longest = 0;
+		Serialization::JsonEvent event = Serialization::JsonEvent::NeedMore;
+		for (;;) {
+			event = json.Next();
+			if (event == Serialization::JsonEvent::NeedMore) { FeedMore(json, text.View(), fed, 16); continue; }
+			if (event == Serialization::JsonEvent::String) longest = json.Text().ByteLength();
+			if (event == Serialization::JsonEvent::Int) sum += json.IntValue();
+			if (event == Serialization::JsonEvent::Error || event == Serialization::JsonEvent::End) break;
+		}
+		assert_eq((int64)200000, longest, "a 200 KB string fed 16 bytes at a time");
+		assert_eq((int64)199990000, sum, "every number after it");
+		Serialization::ReadResult failure = json.Failure();
+		assert_se("a value cannot start here", failure.error, "the stray x");
+		assert_eq(20002, failure.line, "on the last line, counted across the dropped text");
+		assert_eq(1, failure.column, "at its start");
+		assert_eq(text.ByteLength() - 2, failure.offset, "at its byte in the whole text");
+	}
+
+	[test("feeding_after_finish")]
+	public static void TestFeedingAfterFinish() {
+		Serialization::JsonStream json;
+		json.Feed(Core::StringView("1"));
+		json.Finish();
+		json.Feed(Core::StringView("2"));
+		assert_true(json.Next() == Serialization::JsonEvent::Error, "text after Finish is an error");
+		assert_se("text was fed after the stream was finished", json.Failure().error, "that says so");
+		Serialization::JsonStream waiting;
+		waiting.Feed(Core::StringView("12"));
+		assert_true(waiting.Next() == Serialization::JsonEvent::NeedMore, "a number may go on");
+		waiting.Finish();
+		assert_true(waiting.Next() == Serialization::JsonEvent::Int && waiting.IntValue() == 12, "until the text ends");
+		assert_true(waiting.Next() == Serialization::JsonEvent::End && waiting.Next() == Serialization::JsonEvent::End, "then End, every time");
+	}
+}
+
+[test("fs.chunks")]
+class ChunkReaderTests {
+	[test("chunks_in_order")]
+	public static void TestChunksInOrder() {
+		FS::Path path = FS::TempDirectory() / "c4_bedrock_chunks_test.bin";
+		Core::StringBuilder bytes;
+		for (int32 i = 0; i < 2500; ++i) bytes.AppendByte(i % 251);
+		assert_true(WriteFile(path, bytes.View()), "the file is written");
+		FS::ChunkReader reader = FS::ChunkReader(path.CStr(), 1000);
+		assert_true(reader.IsOpen(), "it opens");
+		Core::StringBuilder back;
+		Core::Array<int64> sizes;
+		for (Core::StringView chunk = reader.Next(); !chunk.IsEmpty(); chunk = reader.Next()) {
+			back.Append(chunk);
+			sizes.Push(chunk.ByteLength());
+			if (sizes.Count() == 1) {
+				FS::ChunkReader moved = take(reader);   // the thread reads on for the moved reader
+				reader = take(moved);
+			}
+		}
+		assert_true(back.View() == bytes.View(), "the chunks are the file");
+		assert_true(sizes.Count() == 3 && sizes[0] == 1000 && sizes[2] == 500, "1000, 1000 and the 500 left");
+		assert_true(reader.Next().IsEmpty() && reader.Next().IsEmpty() && !reader.Failed(), "nothing more, and no failure");
+		reader.Close();
+		reader.Close();
+		assert_true(!reader.IsOpen() && reader.Next().IsEmpty(), "closed, twice");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("missing_and_empty")]
+	public static void TestMissingAndEmpty() {
+		FS::ChunkReader missing = FS::ChunkReader((FS::TempDirectory() / "c4_no_such_file.bin").CStr());
+		assert_true(!missing.IsOpen() && missing.Next().IsEmpty(), "a missing file has no chunks");
+		FS::Path path = FS::TempDirectory() / "c4_bedrock_chunks_empty.bin";
+		assert_true(WriteFile(path, Core::StringView("")), "an empty file");
+		FS::ChunkReader empty = FS::ChunkReader(path.CStr(), 64);
+		assert_true(empty.IsOpen() && empty.Next().IsEmpty() && !empty.Failed(), "an empty file has none");
+		empty.Close();
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("closed_while_reading")]
+	public static void TestClosedWhileReading() {
+		FS::Path path = FS::TempDirectory() / "c4_bedrock_chunks_close.bin";
+		Core::StringBuilder bytes;
+		for (int32 i = 0; i < 100000; ++i) bytes.AppendByte('z');
+		assert_true(WriteFile(path, bytes.View()), "the file is written");
+		bool firstChunks = true;
+		for (int32 round = 0; round < 50; ++round) {
+			FS::ChunkReader reader = FS::ChunkReader(path.CStr(), 128);
+			Core::StringView chunk = reader.Next();
+			firstChunks = firstChunks && chunk.ByteLength() == 128 && chunk.ByteAt(127) == 'z';
+		}   // each reader closes here with its next chunk being read
+		FS::RemoveFile(path.CStr());
+		assert_true(firstChunks, "readers closed while their thread reads on give their chunks and stop");
+	}
+}
+
+[test("serialization.json.file")]
+class JsonFileStreamTests {
+	[test("entities_from_a_file")]
+	public static void TestEntitiesFromAFile() {
+		FS::Path path = FS::TempDirectory() / "c4_bedrock_level_test.json";
+		Core::StringBuilder text;
+		text.Append("{\"level\": \"test\", \"entities\": [\n");
+		for (int32 i = 0; i < 2000; ++i) {
+			if (i > 0) text.Append(",\n");
+			text.Append("  {\"name\": \"e");
+			text.AppendInt(i);
+			text.Append("\", \"hp\": ");
+			text.AppendInt(i % 100);
+			text.Append(", \"tags\": [");
+			text.AppendInt(i);
+			text.Append("]}");
+		}
+		text.Append("\n], \"done\": true}");
+		assert_true(WriteFile(path, text.View()), "the level is written");
+		Serialization::JsonFileStream level = Serialization::JsonFileStream(path.CStr(), 777);
+		assert_true(level.IsOpen(), "it opens");
+		assert_true(level.Next() == Serialization::JsonEvent::BeginObject, "{");
+		assert_true(level.Next() == Serialization::JsonEvent::Key, "\"level\"");
+		assert_true(level.SkipValue() == Serialization::JsonEvent::Value, "skipped");
+		assert_true(level.Next() == Serialization::JsonEvent::Key && level.Stream().Text() == Core::StringView("entities"), "\"entities\"");
+		assert_true(level.Next() == Serialization::JsonEvent::BeginArray, "[");
+		int64 count = 0;
+		int64 hp = 0;
+		int64 tags = 0;
+		StreamedEntity entity;
+		Serialization::JsonEvent event = level.ReadNext(entity);
+		for (; event == Serialization::JsonEvent::Value; event = level.ReadNext(entity)) {
+			count += 1;
+			hp += entity.hp;
+			tags += entity.tags[0];
+			entity = StreamedEntity();
+		}
+		assert_true(event == Serialization::JsonEvent::EndArray, "the array ends the loop");
+		assert_eq((int64)2000, count, "every entity");
+		assert_eq((int64)99000, hp, "with its hp");
+		assert_eq((int64)1999000, tags, "and its tags");
+		assert_true(level.Next() == Serialization::JsonEvent::Key && level.Next() == Serialization::JsonEvent::Bool, "\"done\": true");
+		assert_true(level.Next() == Serialization::JsonEvent::EndObject && level.Next() == Serialization::JsonEvent::End, "}, then the end");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("missing_file")]
+	public static void TestMissingFile() {
+		Serialization::JsonFileStream missing = Serialization::JsonFileStream((FS::TempDirectory() / "c4_no_such_level.json").CStr());
+		assert_true(!missing.IsOpen() && missing.Next() == Serialization::JsonEvent::Error, "a missing file is an error");
+		assert_se("the file cannot be opened", missing.Stream().Failure().error, "that says so");
+	}
+}
+
+[test("serialization.binary.stream")]
+class BinaryStreamTests {
+	[test("records_in_pieces")]
+	public static void TestRecordsInPieces() {
+		Core::StringBuilder bytes;
+		for (int32 i = 0; i < 100; ++i) {
+			StreamedRecord record;
+			record.id = i;
+			record.weight = (double)i * 0.5;
+			record.stamp = (int64)i * 1000000007;
+			Serialization::WriteBinary(Reflection::FindType(nameof(StreamedRecord)), &record, &bytes);
+		}
+		Serialization::BinaryStream records;
+		int64 fed = 0;
+		int32 read = 0;
+		bool exact = true;
+		for (;;) {
+			StreamedRecord record;
+			Serialization::BinaryRead result = records.Read(nameof(StreamedRecord), &record);
+			if (result == Serialization::BinaryRead::NeedMore) {
+				if (fed >= bytes.ByteLength()) records.Finish();
+				else { records.Feed(bytes.View().Substring(fed, 7)); fed += 7; }
+				continue;
+			}
+			if (result != Serialization::BinaryRead::Record) {
+				assert_true(result == Serialization::BinaryRead::End, "the bytes end after the last record");
+				break;
+			}
+			exact = exact && record.id == read && record.weight == (double)read * 0.5 && record.stamp == (int64)read * 1000000007;
+			read += 1;
+		}
+		assert_eq(100, read, "every record, fed 7 bytes at a time");
+		assert_true(exact, "each as written");
+		Serialization::BinaryStream cut;
+		cut.Feed(bytes.View().Substring(0, 30));
+		cut.Finish();
+		StreamedRecord record;
+		assert_true(cut.Read(nameof(StreamedRecord), &record) == Serialization::BinaryRead::Record, "a whole record");
+		assert_true(cut.Read(nameof(StreamedRecord), &record) == Serialization::BinaryRead::Error, "then bytes that end inside one");
+		assert_true(cut.Read("NoSuchType", &record) == Serialization::BinaryRead::Error, "a type that is not reflected");
+	}
+
+	[test("dom_clear")]
+	public static void TestDomClear() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode first = doc.NewObject();
+		doc.AddMember(first, "a", doc.NewString("text"));
+		doc.Clear();
+		assert_eq((int64)0, doc.NodeCount(), "no nodes after Clear");
+		assert_true(!first.IsValid(), "an old handle is invalid");
+		Serialization::DomNode second = doc.NewArray();
+		doc.Add(second, doc.NewInt(7));
+		Core::StringBuilder out;
+		Serialization::WriteJson(second, &out, 0);
+		assert_se("[7]", out.CStr(), "the arena serves new nodes");
+	}
+}

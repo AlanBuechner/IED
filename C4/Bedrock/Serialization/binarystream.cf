@@ -1,0 +1,30 @@
+include "binarystream.ch"
+
+namespace Serialization
+{
+	// The read part of the held bytes is dropped once it is this large and more than half of what is held.
+	const int64 kBinaryStreamDropBytes = 65536;
+
+	void BinaryStream::Feed(Core::StringView bytes) {
+		if (position >= kBinaryStreamDropBytes && position * 2 >= held.ByteLength()) {
+			spare.Clear();
+			spare.Append(held.View().Substring(position, -1));
+			position = 0;
+			Core::StringBuilder dropped = take(held);
+			held = take(spare);
+			spare = take(dropped);
+		}
+		held.Append(bytes);
+	}
+
+	BinaryRead BinaryStream::Read(Reflection::Type type, void* destination) {
+		if (!type.IsValid()) return BinaryRead::Error;
+		int64 after = ReadBinary(held.View(), position, type, destination);
+		if (after >= 0) {
+			position = after;
+			return BinaryRead::Record;
+		}
+		if (!finished) return BinaryRead::NeedMore;
+		return Pending() == 0 ? BinaryRead::End : BinaryRead::Error;
+	}
+}

@@ -1,0 +1,126 @@
+include "jsontokens.ch"
+
+namespace Serialization
+{
+	// The int64 a JSON integer's digits (an optional '-' then digits) stand for; false when it does not fit.
+	static bool JsonInteger(Core::StringView digits, int64& out) {
+		bool negative = digits.ByteAt(0) == '-';
+		uint64 limit = negative ? (uint64)1 << 63 : ((uint64)1 << 63) - 1;
+		uint64 magnitude = 0;
+		for (int64 i = negative ? 1 : 0; i < digits.ByteLength(); ++i) {
+			uint64 digit = (uint64)(digits.ByteAt(i) - '0');
+			if (magnitude > (limit - digit) / 10) return false;
+			magnitude = magnitude * 10 + digit;
+		}
+		out = negative ? (int64)((uint64)0 - magnitude) : (int64)magnitude;
+		return true;
+	}
+
+	static bool Fault(JsonFault& fault, int64 at, const char* error) {
+		fault.error = error;
+		fault.at = at;
+		return false;
+	}
+
+	static int32 ByteAt(Core::StringView text, int64 at) { return at < text.ByteLength() ? text.ByteAt(at) : -1; }
+
+	static void SkipDigits(Core::StringView text, int64& at) { while (IsDecimalDigit(ByteAt(text, at))) at += 1; }
+
+	// The code unit of the four hex digits at `at`, or -1.
+	static int32 Hex4(Core::StringView text, int64& at) {
+		if (at + 4 > text.ByteLength()) return -1;
+		int32 unit = 0;
+		for (int32 k = 0; k < 4; ++k) {
+			int32 digit = HexDigitValue(text.ByteAt(at + k));
+			if (digit < 0) return -1;
+			unit = unit * 16 + digit;
+		}
+		at += 4;
+		return unit;
+	}
+
+	// After "\u": one escape, or a surrogate pair of them.
+	static bool UnicodeEscape(Core::StringView text, int64& at, Core::StringBuilder& out, JsonFault& fault) {
+		int64 escape = at - 2;
+		int32 unit = Hex4(text, at);
+		if (unit < 0) return Fault(fault, escape, "\\u needs four hex digits");
+		if (unit >= 0xDC00 && unit <= 0xDFFF) return Fault(fault, escape, "a low surrogate escape without a high one");
+		int32 point = unit;
+		if (unit >= 0xD800 && unit <= 0xDBFF) {
+			bool escaped = ByteAt(text, at) == '\\' && ByteAt(text, at + 1) == 'u';
+			if (escaped) at += 2;
+			int32 low = escaped ? Hex4(text, at) : -1;
+			if (low < 0xDC00 || low > 0xDFFF) return Fault(fault, escape, "a high surrogate escape without a low one");
+			point = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
+		}
+		out.AppendCodePoint(point);
+		return true;
+	}
+
+	// After the backslash.
+	static bool Escape(Core::StringView text, int64& at, Core::StringBuilder& out, JsonFault& fault) {
+		int32 c = ByteAt(text, at);
+		at += 1;
+		switch (c) {
+			case '"': out.AppendByte('"'); return true;
+			case '\\': out.AppendByte('\\'); return true;
+			case '/': out.AppendByte('/'); return true;
+			case 'b': out.AppendByte(8); return true;
+			case 'f': out.AppendByte(12); return true;
+			case 'n': out.AppendByte(10); return true;
+			case 'r': out.AppendByte(13); return true;
+			case 't': out.AppendByte(9); return true;
+			case 'u': return UnicodeEscape(text, at, out, fault);
+		}
+		return Fault(fault, at - 2, c < 0 ? "the text ends inside a string" : "an unknown escape");
+	}
+
+	bool ReadJsonString(Core::StringView text, int64& at, Core::StringBuilder& out, JsonFault& fault) {
+		at += 1;
+		for (;;) {
+			int64 run = at;
+			while (at < text.ByteLength()) {
+				int32 c = text.ByteAt(at);
+				if (c == '"' || c == '\\' || c < 0x20) break;
+				at += 1;
+			}
+			out.AppendBytes(text.Data() + run, at - run);
+			int32 c = ByteAt(text, at);
+			if (c == '"') { at += 1; return true; }
+			if (c == '\\') { at += 1; if (!Escape(text, at, out, fault)) return false; continue; }
+			return Fault(fault, at, c < 0 ? "the text ends inside a string" : "a control character in a string must be escaped");
+		}
+	}
+
+	bool ReadJsonNumber(Core::StringView text, int64& at, JsonNumber& number, JsonFault& fault) {
+		int64 start = at;
+		if (ByteAt(text, at) == '-') at += 1;
+		if (!IsDecimalDigit(ByteAt(text, at))) return Fault(fault, at, "a number needs a digit here");
+		if (ByteAt(text, at) == '0') {
+			at += 1;
+			if (IsDecimalDigit(ByteAt(text, at))) return Fault(fault, at, "a number cannot start with 0");
+		}
+		else SkipDigits(text, at);
+		number.integral = true;
+		if (ByteAt(text, at) == '.') {
+			number.integral = false;
+			at += 1;
+			if (!IsDecimalDigit(ByteAt(text, at))) return Fault(fault, at, "a fraction needs a digit after '.'");
+			SkipDigits(text, at);
+		}
+		int32 e = ByteAt(text, at);
+		if (e == 'e' || e == 'E') {
+			number.integral = false;
+			at += 1;
+			if (ByteAt(text, at) == '+' || ByteAt(text, at) == '-') at += 1;
+			if (!IsDecimalDigit(ByteAt(text, at))) return Fault(fault, at, "an exponent needs a digit");
+			SkipDigits(text, at);
+		}
+		Core::StringView digits = text.Substring(start, at - start);
+		if (number.integral && JsonInteger(digits, number.integer)) return true;
+		number.integral = false;
+		number.real = 0.0;
+		parse_double(digits.Data(), digits.ByteLength(), &number.real);
+		return true;
+	}
+}

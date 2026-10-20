@@ -70,6 +70,8 @@ namespace Serialization
 		public void Add(const DomNode& array, const DomNode& value);
 
 		public int64 NodeCount() const { return recordCount; }
+		// Every node gone (their handles become invalid); the arena keeps its memory for the nodes that follow.
+		public void Clear();
 
 		// Reflection bridge (reflectvalue.ch): a node tree of a reflected object, and an object's members applied to
 		// one (missing members are left alone). ReflectTo returns how many fields it set, or -1 when a member does not
