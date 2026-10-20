@@ -1,4 +1,5 @@
 #include "Backend/HIR/DeclLowerer.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Backend/HIR/ExprLowerer.h"
 #include "Backend/HIR/IndexLValue.h"
@@ -123,9 +124,12 @@ namespace Scripting
 		const Type* slotType = ref ? m_Ctx.queries().TypeStore()->Pointer(TypeHandle::UnwrapToValue(ref->GetReferentType())) : t;
 		if (ref)
 		{
-			auto address = ReferenceAddress(ref, initializer ? &initR.value : nullptr, slotType, name);
-			if (!address.Ok()) return m_Ctx.Fail(n, QueryResult<void>::Fail(address.error, address.message));
-			initNode = address.value;
+			if (initializer)
+			{
+				auto address = ReferenceBinding::Address(m_Ctx, ref, initR.value, slotType, name);
+				if (!address.Ok()) return m_Ctx.Fail(n, QueryResult<void>::Fail(address.error, address.message));
+				initNode = address.value;
+			}
 		}
 
 		const uint32 slot = m_Ctx.AllocSlot(slotType, name, SlotClass::Local);
@@ -230,7 +234,7 @@ namespace Scripting
 		return Lifecycle(m_Ctx).LowerStatement(body, [&]() -> QueryResult<void> {
 			auto init = m_Ctx.Fail(n, ExprLowerer(m_Ctx).ResolveExpr(d.m_Initializer.Get()));
 			if (!init.Ok()) return QueryResult<void>::Fail(init.error, init.message);
-			auto address = ReferenceAddress(ref, &init.value, storage->type, d.m_NameToken.GetText());
+			auto address = ReferenceBinding::Address(m_Ctx, ref, init.value, storage->type, d.m_NameToken.GetText());
 			if (!address.Ok()) return QueryResult<void>::Fail(address.error, address.message);
 			body->stmts.push_back(m_Ctx.out->NewNode<StoreNode>(storage, address.value));
 			return QueryResult<void>::Success();
@@ -345,34 +349,6 @@ namespace Scripting
 	}
 
 	// --- names and references ----------------------------------------------------------------------------
-
-	QueryResult<const HIRNode*> DeclLowerer::ReferenceAddress(const ReferenceType* ref, const Value* init,
-		const Type* slotType, const Core::String& name)
-	{
-		using Result = QueryResult<const HIRNode*>;
-		if (!init) return Result(static_cast<const HIRNode*>(nullptr));
-		if (!ref->IsConstReferent() && init->isLValue && IsReadOnly(m_Ctx, init->lvalue))
-			return Result::Fail(QueryError::NotAValue,
-				"cannot bind a non-const reference to a const object: '" + name + "' would allow mutating read-only data");
-		// A reference binds to a LOCATION (a call returning `T&` is one).
-		if (!init->isLValue)
-			return Result::Fail(QueryError::NotAValue,
-				"cannot bind a reference to a prvalue: '" + name + "' must initialize from an lvalue (a location), not a temporary");
-		if (Core::String why = BindingProblem(ref, TypeHandle::UnwrapToValue(init->type)); !why.empty()) return Result::Fail(QueryError::NotAValue, why);
-		return Result(m_Ctx.AddressAs(slotType, init->lvalue));
-	}
-
-	// A reference local names a location of its referent's type, or a derived object through its base (04 4.4); a
-	// conversion would make a temporary, which a reference local cannot hold.
-	Core::String DeclLowerer::BindingProblem(const ReferenceType* ref, const Type* located)
-	{
-		const Type* referent = TypeHandle::UnwrapToValue(ref->GetReferentType());
-		if (!located || located == referent || referent->GetKind() == TypeKind::Void) return "";
-		const auto* object = dynamic_cast<const ObjectType*>(located);
-		const auto* base = dynamic_cast<const ObjectType*>(referent);
-		if (object && base && ClassHierarchy::DerivesFrom(object, base)) return "";
-		return "cannot bind '" + ref->GetName() + "' to a '" + located->GetName() + "': a reference names a location of its own type";
-	}
 
 	QueryResult<void> DeclLowerer::BindName(const VariableDefinitionNode* n, const Core::String& name, const Type* type,
 		uint32 slot, const ReferenceType* ref)

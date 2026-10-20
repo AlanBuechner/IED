@@ -1,4 +1,5 @@
 #include "Backend/HIR/Construction.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/AccessCheck.h"
 #include "Model/Abstractness.h"
@@ -47,6 +48,7 @@ namespace Scripting
 	QueryResult<const HIRNode*> OmittedFieldValue(LoweringContext& ctx, const ObjectType* type, const ObjectType::FieldInfo& field)
 	{
 		if (field.m_Initializer) return InitializerOutsideObject(ctx, type, field);
+		if (ReferenceBinding::Of(field.m_Type)) return QueryResult<const HIRNode*>::Fail(QueryError::NotAValue, ReferenceBinding::Unbound(type, field));
 		const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(field.m_Type));
 		if (auto allowed = AccessCheck::CheckDefaultCreate(ctx, field.m_Type); !allowed.Ok())
 			return QueryResult<const HIRNode*>::Fail(allowed.error, allowed.message);
@@ -113,7 +115,8 @@ namespace Scripting
 
 		bool SlotNeedsValue(LoweringContext& ctx, const AggregateSlots::Slot& slot)
 		{
-			return slot.lane < 0 && (slot.field->m_Initializer || LifecycleFacts::NeedsConstruct(ctx.queries(), slot.field->m_Type));
+			return slot.lane < 0 && (slot.field->m_Initializer || ReferenceBinding::Of(slot.field->m_Type) ||
+				LifecycleFacts::NeedsConstruct(ctx.queries(), slot.field->m_Type));
 		}
 
 		// The arguments fill the aggregate's slots in order (AggregateSlots: one view of each union, packed lanes).

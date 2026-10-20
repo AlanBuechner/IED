@@ -44,6 +44,8 @@ namespace Testing
 		TEST_ASSERT(OperatorTable::CanonicalAnnotation("<<=", 1) == "shift_left_assign");
 		TEST_ASSERT(OperatorTable::CanonicalAnnotation(">>=", 1) == "shift_right_assign");
 		TEST_ASSERT(OperatorTable::CanonicalAnnotation("**", 1) == "power");
+		TEST_ASSERT(OperatorTable::CanonicalAnnotation("=", 1) == "assign"); // `=` and `assign` are one operator
+		TEST_ASSERT(OperatorTable::CanonicalAnnotation("assign", 1) == "assign");
 		TEST_ASSERT(OperatorTable::PlainFormFor("shift_left_assign") == "shift_left");
 		TEST_ASSERT(OperatorTable::PlainFormFor("and_assign") == "bitwise_and");
 		TEST_ASSERT(OperatorTable::IsAssignForm("shift_right_assign"));

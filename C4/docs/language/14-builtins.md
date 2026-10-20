@@ -29,7 +29,7 @@ Rules:
 
 | Intrinsic | Meaning |
 |---|---|
-| `sizeof(T)` / `sizeof(var)` | size in bytes, `int64` constant (see [10](10-expressions.md) for the `sizeof(expr)` limit) |
+| `sizeof(T)` / `sizeof(expr)` | size in bytes, `int64` constant; the expression is not evaluated ([10](10-expressions.md#41-sizeof-alignof-offsetof)) |
 | `__uuidof(T)` | pointer to the type's 16-byte `_GUID`: its `[uuid("...")]` ([13](13-interop.md)), else the RFC 4122 version 5 UUID of `"c4:"` + its qualified name in the URL namespace (`uuid.uuid5(uuid.NAMESPACE_URL, "c4:Ns::Box<int32>")` in Python), so every type has one (D-43) |
 | `__init_list<T>` | built-in initializer-list type: a braced list passed to it becomes `{data, size}`; maps to C++ `std::initializer_list<T>` |
 | `take(x)` | the value of the variable, field or element `x`, moved out; `x` is left zero ([06](06-lifecycle-and-operators.md#64-copy-move-and-assignment)) |

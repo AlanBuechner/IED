@@ -1,4 +1,5 @@
 #include "Backend/HIR/ExprLowerer.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/EvaluatedOnce.h"
 #include "Backend/HIR/AccessCheck.h"
@@ -125,6 +126,16 @@ namespace Scripting
 
 	QueryResult<Value> ExprLowerer::AssignValue(const AstNode* n, const Value& target, const Value& value)
 	{
+		// In its object's create, `r = x` binds the reference field `r` (where C++ writes a member initializer).
+		if (ReferenceBinding::BindsInCreate(m_Ctx, target.lvalue))
+		{
+			const LValue* field = target.lvalue->boundBy;
+			const ReferenceType* ref = ReferenceBinding::Of(field->type);
+			auto address = m_Ctx.Fail(n, ReferenceBinding::Address(m_Ctx, ref, value, ReferenceBinding::PointerFor(m_Ctx, ref), field->field->mName));
+			if (!address.Ok()) return QueryResult<Value>::Fail(address.error, address.message);
+			m_Ctx.boundReferences.push_back(field->field);
+			return Value::R(ReferenceBinding::Bind(m_Ctx, field, address.value), address.value->type);
+		}
 		// An object with a lifecycle is assigned by D-06 (its `=`, or new value / destroy old / relocate).
 		if (target.lvalue->kind != LValue::Kind::IndexOp && Lifecycle(m_Ctx).AssignmentNeedsLifecycle(target.type))
 		{

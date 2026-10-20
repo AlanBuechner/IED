@@ -1,0 +1,9 @@
+class Holder {
+	public int32& count;
+	public int32 other;
+	[operator("create")] public void Init(int32 c) { other = c; }
+}
+int32 main() {
+	Holder h = Holder(1);
+	return 0;
+}

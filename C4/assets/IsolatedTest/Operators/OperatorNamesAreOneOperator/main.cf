@@ -1,0 +1,41 @@
+// A token and its name are one operator: `[operator("=", "copy")]` is reached as `a = b`, the copy, and both
+// `operator_assign` and `operator_copy`; `[operator("=")]` and `[operator("assign")]` are the same operator.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct Counted {
+	int32 v;
+	int32 copies;
+	[operator("=", "copy")] void CopyFrom(const Counted& other) { v = other.v; copies = other.copies + 1; }
+	[operator("+", "add")] Counted Plus(const Counted& other) { Counted r; r.v = v + other.v; return r; }
+}
+struct Named {
+	int32 v;
+	int32 assigned;
+	[operator("assign")] void Assign(const Named& other) { v = other.v; assigned++; }
+}
+
+int32 main() {
+	Counted a;
+	a.v = 4;
+	Counted copied = a;
+	Check(copied.copies == 1, "a copy runs the copy name");
+	Counted assigned;
+	assigned = a;
+	Check(assigned.copies == 1, "= runs the same method");
+	Counted byName;
+	byName.operator_copy(a);
+	Check(byName.copies == 1 && byName.v == 4, "operator_copy");
+	Counted byToken;
+	byToken.operator_assign(a);
+	Check(byToken.copies == 1, "operator_assign reaches [operator(\"=\")]");
+	Check(a.operator_add(a).v == 8 && (a + a).v == 8, "operator_add and + are one operator");
+	Named x;
+	Named y;
+	y.v = 6;
+	x = y;
+	Check(x.v == 6 && x.assigned == 1, "[operator(\"assign\")] runs for =");
+	return g_failures;
+}

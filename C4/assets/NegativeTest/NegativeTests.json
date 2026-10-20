@@ -2430,5 +2430,29 @@
     "SwizzleWholeObjectOtherLanes": {
         "expect": ["a 'Int2' is not a 'packed float[2]'"],
         "reason": "A packed vector object fills a run only when its lanes match (count and element type)."
+    },
+    "ReferenceFieldDefaultConstructed": {
+        "expect": ["'View' cannot be default-constructed: the reference field 'target' of 'View' is not bound"],
+        "reason": "A reference field is bound where its object starts; default construction cannot bind it (BUG-268)."
+    },
+    "ReferenceFieldCreateLeavesUnbound": {
+        "expect": ["the create 'Init' of 'Holder' does not bind its reference field 'count'"],
+        "reason": "A create must bind every reference field without an initializer (BUG-268)."
+    },
+    "ReferenceFieldMissingEntry": {
+        "expect": ["the reference field 'target' of 'View' is not bound"],
+        "reason": "A braced list that names no entry for a reference field leaves it unbound (BUG-268)."
+    },
+    "ReferenceFieldFromTemporary": {
+        "expect": ["cannot bind a reference to a prvalue: 'target'"],
+        "reason": "A reference field binds a location, never a temporary (BUG-268)."
+    },
+    "ReferenceFieldBracedList": {
+        "expect": ["a braced list cannot bind the reference 'pair'"],
+        "reason": "A braced list builds a value; a reference field names a location (BUG-268)."
+    },
+    "ReferenceFieldConstLocation": {
+        "expect": ["cannot bind a non-const reference to a const object: 'target'"],
+        "reason": "A non-const reference field cannot bind a const location (BUG-268)."
     }
 }

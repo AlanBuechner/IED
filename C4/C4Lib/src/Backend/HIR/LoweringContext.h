@@ -207,6 +207,8 @@ namespace Scripting
 		// places both); a condition or loop step destroys its own as soon as it is computed.
 		struct PendingTemporary { uint32 slot = 0; const Type* type = nullptr; };
 		std::vector<PendingTemporary> pendingTemporaries;
+		// The reference fields an assignment in this create bound (ReferenceBinding::BindsInCreate).
+		std::vector<const ObjectType::FieldInfo*> boundReferences;
 
 		// --- last-use moves (D-05, Backend/HIR/LastUseMoves) ------------------------------------
 		// Every copy of a local's or by-value parameter's object, and each such variable's scope-exit cleanup.

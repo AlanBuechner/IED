@@ -323,6 +323,4 @@ Line k = Line{ to = { y = 1.0f } };           // designators in a composite lite
 | comma operator `a, b` | not an operator (D-40); a `for` step takes a comma-separated list ([09](09-statements-and-control-flow.md#2-conditionals-and-loops)) |
 | `typeof`, `decltype` | **Open question** (no `auto` either) |
 | `?.`, `??` null-conditional operators | **Open question** |
-| call operator `[operator("()")]` | **Open question** - not in the operator table |
-| `<<=`, `>>=` as user operators | **Planned** - parsed as assignments, no operator names |
 | pointer-to-member | not planned |

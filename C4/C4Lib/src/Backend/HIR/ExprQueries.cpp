@@ -1,4 +1,5 @@
 #include "Backend/HIR/ExprLowerer.h"
+#include "Backend/HIR/ReadOnly.h"
 #include "Model/CompileTimeQueries.h"
 #include "Model/Templates/Packs.h"
 #include "Model/Types.h"
@@ -49,6 +50,8 @@ namespace Scripting
 		m_Ctx.pendingTemporaries.resize(temporaries);
 		m_Ctx.transfers.resize(transfers);
 		if (!value.Ok()) return QueryResult<const Type*>::Fail(value.error, value.message);
+		if (value.value.isLValue && IsThisObject(value.value.lvalue)) // `sizeof(this)` is a pointer's size, as in C++
+			return QueryResult<const Type*>::Success(AddressType(m_Ctx, value.value.lvalue));
 		return QueryResult<const Type*>::Success(value.value.type);
 	}
 

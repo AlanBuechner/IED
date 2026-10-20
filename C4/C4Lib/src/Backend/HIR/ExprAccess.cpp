@@ -1,4 +1,5 @@
 #include "Backend/HIR/ExprLowerer.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/ConstantOperands.h"
 #include <tuple>
 #include "Backend/HIR/ReadOnly.h"
@@ -164,7 +165,8 @@ namespace Scripting
 				return m_Ctx.Fail(n, QueryResult<Value>::Fail(allowed.error, allowed.message));
 			LValue lv; lv.kind = LValue::Kind::Field; lv.type = f->m_Type; lv.field = f;
 			lv.base = SubobjectLValue(m_Ctx, baseLoc, owner, q.value.ownerOffset); // the declaring sub-object
-			return Value::L(m_Ctx.NewLValue(lv));
+			const LValue* field = m_Ctx.NewLValue(lv);
+			return Value::L(ReferenceBinding::Of(f->m_Type) ? ReferenceBinding::Referent(m_Ctx, field) : field);
 		}
 		return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotCallable, "'" + n->GetMemberNameToken().GetText() + "' is a method; call it"));
 	}

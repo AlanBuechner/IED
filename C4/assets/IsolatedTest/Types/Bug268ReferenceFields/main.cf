@@ -1,0 +1,76 @@
+// BUG-268: a reference field holds the address of its referent. It is bound where its object starts - a braced
+// entry (also in `T{...}` and `new T{...}`), its initializer, or an assignment in its object's create - and every
+// other use reads and writes the referent; `&o.r` is the referent's address. A reference owns nothing: copying the
+// object copies the reference, and destroying it leaves the referent alone.
+int32 g_failures = 0;
+int32 g_shared = 40;
+int32 g_destroyed = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct View { int32& target; }
+struct ReadOnlyView { const int32& target; }
+struct Defaulted { int32& target = g_shared; int32 extra; }
+class Tracked {
+	public int32 id;
+	[operator("create")] public void Init(int32 i) { id = i; }
+	[operator("delete")] public void Done() { if (id != 0) g_destroyed++; id = 0; }
+	[operator("copy")] public void CopyFrom(const Tracked& other) { id = other.id; }
+}
+class Holder {
+	public int32& count;
+	public Tracked& tracked;
+	[operator("create")] public void Init(int32& c, Tracked& t) { count = c; tracked = t; }
+	public void Bump() { count++; }
+}
+class Pair {
+	public int32& first;
+	public int32 second;
+	[operator("create")] public void Init(int32& f) { this.first = f; second = 2; }
+}
+int32 Read(View v) { return v.target; }
+
+int32 main() {
+	int32 x = 5;
+	View v = { x };
+	Check(v.target == 5, "a braced entry binds");
+	v.target = 9;
+	Check(x == 9, "a write goes to the referent");
+	Check(&v.target == &x, "&field is the referent's address");
+	View* pv = &v;
+	pv->target += 1;
+	Check(x == 10 && pv->target == 10, "through a pointer to the object");
+	View copy = v;
+	copy.target = 12;
+	Check(x == 12, "a copy refers to the same location");
+	Check(Read(v) == 12, "an object with a reference passed by value");
+	View made = View{ x };
+	Check(&made.target == &x, "T{...} binds");
+	View* heap = new View{ x };
+	heap->target = 13;
+	Check(x == 13, "new T{...} binds");
+
+	const int32 fixed = 7;
+	ReadOnlyView rv = { fixed };
+	Check(rv.target == 7 && &rv.target == &fixed, "a const reference field binds a const location");
+	Defaulted d;
+	Check(&d.target == &g_shared && d.target == 40, "an initializer binds");
+
+	int32 counter = 1;
+	{
+		Tracked t = Tracked(3);
+		Holder h = Holder(counter, t);
+		h.Bump();
+		Check(counter == 2, "a create binds by assignment; later writes go through");
+		Check(&h.tracked == &t && h.tracked.id == 3, "an object referent");
+		Holder second = h;
+		second.Bump();
+		Check(counter == 3, "copying the holder copies the reference");
+	}
+	Check(g_destroyed == 1, "the holder never destroys its referent");
+	int32 y = 8;
+	Pair p = Pair(y);
+	Check(&p.first == &y && p.second == 2, "this.field binds in a create");
+	return g_failures;
+}

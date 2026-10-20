@@ -1,4 +1,5 @@
 #include "Backend/HIR/CallArguments.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/ReadOnly.h"
 #include "Backend/HIR/PointerConversion.h"
 #include "Backend/HIR/Lifecycle.h"
@@ -45,6 +46,15 @@ namespace Scripting
 				: SubobjectLValue(ctx, whole, base, ClassHierarchy::LocateBase(static_cast<const ObjectType*>(from), base).offset);
 			return Lifecycle(ctx).CopyOf(part);
 		}
+
+		// `this` names the receiver object; where a pointer is wanted it is the receiver's address, as C++'s `this` is.
+		Value ReceiverAsPointer(LoweringContext& ctx, const Value& source, const Type* target)
+		{
+			if (!target || target->GetKind() != TypeKind::Pointer || !source.isLValue) return source;
+			if (source.lvalue->kind != LValue::Kind::This && source.lvalue != ctx.capturedThis) return source;
+			const Type* pointer = AddressType(ctx, source.lvalue);
+			return Value::R(ctx.out->NewNode<AddressOfNode>(pointer, source.lvalue), pointer);
+		}
 	}
 
 	QueryResult<const HIRNode*> ConvertedValue(LoweringContext& ctx, const Value& source, const Type* target)
@@ -56,7 +66,7 @@ namespace Scripting
 			if (!callable.Ok()) return Result::Fail(callable.error, callable.message);
 			if (callable.value.converted) return Result(callable.value.converted);
 		}
-		const HIRNode* loaded = ctx.LoadIfNeeded(source);
+		const HIRNode* loaded = ctx.LoadIfNeeded(ReceiverAsPointer(ctx, source, value));
 		if (auto converts = CheckPointerConversion(value, loaded); !converts.Ok()) return Result::Fail(converts.error, converts.message);
 		if (IsAggregateValue(value)) return ObjectStart(ctx, source, loaded, value);
 		return ImplicitConversion::Scalar(ctx, loaded, value);
@@ -64,6 +74,9 @@ namespace Scripting
 
 	QueryResult<const HIRNode*> InitialValue(LoweringContext& ctx, const Value& source, const Type* target)
 	{
+		// A reference starts bound to a location: its value is the location's address (a reference field's storage).
+		if (const ReferenceType* ref = ReferenceBinding::Of(target))
+			return ReferenceBinding::Address(ctx, ref, source, ReferenceBinding::PointerFor(ctx, ref), ref->GetName());
 		auto converted = ConvertedValue(ctx, source, target);
 		if (converted.Ok() || converted.error == QueryError::Ambiguous || dynamic_cast<const SignatureType*>(TypeHandle::UnwrapToValue(target)))
 			return converted;

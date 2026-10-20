@@ -1,4 +1,5 @@
 #include "Backend/HIR/DeclLowerer.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Backend/HIR/ExprLowerer.h"
 #include "Backend/HIR/IndexLValue.h"
@@ -73,8 +74,24 @@ namespace Scripting
 	{
 		// A nested brace fills the part in place; the part's lvalue is persisted first because the nested
 		// fill's lvalues point at it.
+		const ReferenceType* ref = ReferenceBinding::Of(target.type);
 		if (const auto* nested = dynamic_cast<const BracedInitializerNode*>(valueNode))
+		{
+			if (ref)
+				return m_Ctx.Fail(nested, QueryResult<void>::Fail(QueryError::NotAValue, "a braced list cannot bind the reference '" +
+					Core::String(target.field ? target.field->mName : name) + "': a reference names a location"));
 			return FillAggregate(target.type, nested, m_Ctx.NewLValue(target), block, name);
+		}
+		if (ref)
+		{
+			auto location = ExprLowerer(m_Ctx).ResolveExpr(valueNode);
+			if (!location.Ok()) return QueryResult<void>::Fail(location.error, location.message);
+			auto address = m_Ctx.Fail(valueNode, ReferenceBinding::Address(m_Ctx, ref, location.value, ReferenceBinding::PointerFor(m_Ctx, ref),
+				target.field ? target.field->mName : name));
+			if (!address.Ok()) return QueryResult<void>::Fail(address.error, address.message);
+			block->stmts.push_back(m_Ctx.out->NewNode<ExprStmtNode>(ReferenceBinding::Bind(m_Ctx, m_Ctx.NewLValue(target), address.value)));
+			return QueryResult<void>::Success();
+		}
 		auto v = ExprLowerer(m_Ctx).ResolveFor(valueNode, target.type);
 		if (!v.Ok()) return QueryResult<void>::Fail(v.error, v.message);
 		auto initial = InitialValue(m_Ctx, v.value, target.type);
@@ -267,6 +284,11 @@ namespace Scripting
 			if (!status.Ok() || std::find(given.begin(), given.end(), &f) != given.end()) return;
 			LValue lv; lv.kind = LValue::Kind::Field; lv.type = f.m_Type; lv.base = baseLoc; lv.field = &f;
 			const LValue* field = m_Ctx.NewLValue(lv);
+			if (!f.m_Initializer && ReferenceBinding::Of(f.m_Type))
+			{
+				status = QueryResult<void>::Fail(QueryError::NotAValue, ReferenceBinding::Unbound(obj, f));
+				return;
+			}
 			if (!f.m_Initializer)
 			{
 				status = AccessCheck::CheckDefaultCreate(m_Ctx, f.m_Type);

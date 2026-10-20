@@ -23,7 +23,7 @@ pass; Bedrock 340 tests (1729 assertions) at `-O0` and `-O2`, also built for `-O
 |---|---|---|---|
 | Whole-program compilation, parse-once includes | **Implemented** | Parallel parse, include closure, cycle recovery | [program model](../language/01-program-model.md) |
 | Include-closure visibility for bodies | **Implemented** | Declarations (fields, signatures) resolve program-wide | [program model](../language/01-program-model.md) |
-| File-scope order independence | **Partial** | A file-scope `const` used in some expression positions before its declaration may not fold | [program model](../language/01-program-model.md) |
+| File-scope order independence | **Implemented** | A file-scope `const` folds in every position before its declaration (B24) | [program model](../language/01-program-model.md) |
 | Namespaces | **Implemented** | | [program model](../language/01-program-model.md) |
 | `#define` / function-like / variadic macros, `#undef` | **Implemented** | | [preprocessor](../language/02-preprocessor.md) |
 | `#if` family, `#` / `##`, `\` continuation, `#error` / `#warning` / `#pragma`, calls across lines | **Implemented** | | [preprocessor](../language/02-preprocessor.md) |
@@ -34,6 +34,7 @@ pass; Bedrock 340 tests (1729 assertions) at `-O0` and `-O2`, also built for `-O
 | Feature | Status | Notes | Page |
 |---|---|---|---|
 | Primitives incl. `snorm` / `unorm`, `char8` / `char16` / `char32`; built-in aliases `int`, `uint`, `char` | **Implemented** | | [types](../language/04-types.md), [lexical](../language/03-lexical-structure.md) |
+| Reference fields: bound where the object starts, read and written through, never owning (B43) | **Implemented** | | [types](../language/04-types.md#44-references) |
 | Type-side arrays, pointers, references, const layers (`int32 const* p`, read-only locals, parameters, fields; `&x` of const is `const T*`; one pointer conversion rule) | **Implemented** | | [types](../language/04-types.md#42-declarators-modifiers-belong-to-the-type) |
 | `funcptr<R(A)>`, `func<R(A)>` | **Implemented** | | [types](../language/04-types.md#46-function-pointer-types-funcptr-and-func) |
 | `alias` (file, class, function scope; alias templates) | **Implemented** | | [types](../language/04-types.md) |
@@ -43,7 +44,7 @@ pass; Bedrock 340 tests (1729 assertions) at `-O0` and `-O2`, also built for `-O
 | Unions, anonymous unions | **Implemented** | | [objects](../language/05-objects.md) |
 | Visibility | **Implemented** | Labels require inline modifiers; private / protected checked for fields, methods, operators and creates | [objects](../language/05-objects.md) |
 | Single inheritance, virtual / override / pure virtual | **Implemented** | MSVC layout, vtables and RTTI; slots keyed by signature | [objects](../language/05-objects.md) |
-| Multiple interfaces | **Implemented** | One class base (first) + interfaces; per-sub-object vtables, thunks, adjusted conversions. `p->Base::F()` on an explicit receiver: Planned | [objects](../language/05-objects.md) |
+| Multiple interfaces | **Implemented** | One class base (first) + interfaces; per-sub-object vtables, thunks, adjusted conversions; `p->Base::F()` on an explicit receiver (B35) | [objects](../language/05-objects.md) |
 | Const methods, const overloads | **Implemented** | | [objects](../language/05-objects.md#const-methods) |
 | `abstract`, `final` | **Implemented** | No object of an abstract type; no deriving from a final class or overriding a final method | [objects](../language/05-objects.md#abstract-and-final) |
 | `volatile`, `thread_local` | **Implemented** | Volatile loads and stores; per-thread storage of any type; each thread starts its own copies (globals when it attaches, locals on its first pass) and destroys them when it ends; managed pointers in it are roots on every thread | [types](../language/04-types.md#413-storage-modifiers-volatile-and-thread_local) |
@@ -88,9 +89,8 @@ pass; Bedrock 340 tests (1729 assertions) at `-O0` and `-O2`, also built for `-O
 | `defer` | **Implemented** | Every exit edge, including exceptions; `finally` is a defer | [control flow](../language/09-statements-and-control-flow.md) |
 | `try` / `catch` / `finally` / `throw` / rethrow | **Implemented** | Catch by value, by reference, by base, `catch (...)`, across C++ interop; exception objects are copied and destroyed by their lifecycle functions; `noexcept` stops the program | [control flow](../language/09-statements-and-control-flow.md) |
 | Operator precedence | **Implemented** | C++'s table; `is`/`as` relational, `**` above prefix operators | [expressions](../language/10-expressions.md) |
-| `is` / `as` | **Implemented** | Checked through RTTI for pointers to polymorphic objects; `as T&` (BadCast): Planned | [expressions](../language/10-expressions.md) |
+| `is` / `as` | **Implemented** | Checked through RTTI for pointers to polymorphic objects; `as T&` throws BadCast (B34) | [expressions](../language/10-expressions.md) |
 | `static_cast` / `dynamic_cast` / ... | **Implemented** | Each allows what C++'s does (D-12, B34); `dynamic_cast<T*>` is checked; `reinterpret_cast` also keeps the bits of a vector (D-62) or a number (D-64) as another of the same size | [expressions](../language/10-expressions.md#4-unary-expressions) |
-| `sizeof` | **Partial** | `sizeof(T)` and `sizeof(identifier)` only | [expressions](../language/10-expressions.md) |
 | `**` power | **Implemented** | Integers (repeated squaring) and floats (`pow`); folds in constants; `[operator("power")]` on objects | [expressions](../language/10-expressions.md) |
 | `new` / `delete`, aggregate / nested / designated / range initializers | **Implemented** | | [expressions](../language/10-expressions.md) |
 | `new T[n]` / `new T[n]{...}` / `delete[]` | **Implemented** | Run-time count, `BadArrayLength`, elements destroyed exactly once (B42) | [expressions](../language/10-expressions.md#81-arrays-new-tn) |

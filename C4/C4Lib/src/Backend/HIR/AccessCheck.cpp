@@ -1,4 +1,5 @@
 #include "Backend/HIR/AccessCheck.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/Lifecycle.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
@@ -108,6 +109,10 @@ namespace Scripting::AccessCheck
 		// The type's own default create is checked even when it is empty and so never called.
 		const auto* obj = static_cast<const ObjectType*>(t);
 		const FunctionRecord* create = LifecycleFacts::Own(ctx.queries(), obj).defaultCreate;
+		if (!create)
+			if (const ObjectType::FieldInfo* unbound = ReferenceBinding::FirstUnbound(obj, {}))
+				return QueryResult<void>::Fail(QueryError::NotAValue, "'" + obj->GetName() + "' cannot be default-constructed: " +
+					ReferenceBinding::Unbound(obj, *unbound));
 		if (!create) create = Lifecycle(ctx).DefaultCreate(obj);
 		if (create)
 			if (auto allowed = CheckCall(ctx, *create); !allowed.Ok()) return allowed;

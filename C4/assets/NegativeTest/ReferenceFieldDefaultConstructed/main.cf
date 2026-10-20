@@ -1,0 +1,5 @@
+struct View { int32& target; }
+int32 main() {
+	View v;
+	return 0;
+}

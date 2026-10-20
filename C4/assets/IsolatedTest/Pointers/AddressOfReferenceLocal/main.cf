@@ -1,0 +1,24 @@
+// `&r` of a reference is the address of its referent, as in C++: locals, parameters and fields of reference type.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct View { int32& target; }
+int32* AddressOf(int32& r) { return &r; }
+const int32* ConstAddressOf(const int32& r) { return &r; }
+
+int32 main() {
+	int32 x = 5;
+	int32& r = x;
+	int32* p = &r;
+	*p = 7;
+	Check(x == 7 && p == &x, "a reference local");
+	Check(AddressOf(x) == &x, "a reference parameter");
+	Check(ConstAddressOf(x) == &x, "a const reference parameter gives a pointer to const");
+	View v = { x };
+	Check(&v.target == &x, "a reference field");
+	int32& again = r;
+	Check(&again == &x, "a reference to a reference");
+	return g_failures;
+}

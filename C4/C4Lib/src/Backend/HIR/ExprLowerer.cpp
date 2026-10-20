@@ -1,4 +1,5 @@
 #include "Backend/HIR/ExprLowerer.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include <tuple>
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/Lifecycle.h"
@@ -198,7 +199,8 @@ namespace Scripting
 					return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::Ambiguous, "'" + name + "' is ambiguous: more than one base of '" + m_Ctx.enclosingType->GetName() + "' declares it"));
 				LValue lv; lv.kind = LValue::Kind::Field; lv.type = hit.field->m_Type; lv.field = hit.field;
 				lv.base = SubobjectLValue(m_Ctx, m_Ctx.ReceiverLValue(), hit.owner, hit.ownerOffset);
-				return Value::L(m_Ctx.NewLValue(lv));
+				const LValue* field = m_Ctx.NewLValue(lv);
+				return Value::L(ReferenceBinding::Of(hit.field->m_Type) ? ReferenceBinding::Referent(m_Ctx, field) : field);
 			}
 		}
 
@@ -319,6 +321,10 @@ namespace Scripting
 		if (!thenV.Ok()) return thenV;
 		auto elseV = ResolveExpr(n->GetElseBranch().Get());
 		if (!elseV.Ok()) return elseV;
+		// `own ? this : other`: beside a pointer, `this` is the receiver's address.
+		auto isPointer = [](const Value& v) { const Type* t = TypeHandle::UnwrapToValue(v.type); return t && t->GetKind() == TypeKind::Pointer; };
+		if (isPointer(elseV.value)) thenV.value = ThisAsPointer(thenV.value);
+		if (isPointer(thenV.value)) elseV.value = ThisAsPointer(elseV.value);
 
 		auto common = ConditionalBranches::CommonType(m_Ctx, thenV.value, elseV.value);
 		if (!common.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(common.error, common.message));

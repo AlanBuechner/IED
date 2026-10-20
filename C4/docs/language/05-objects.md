@@ -51,8 +51,9 @@ A type body may contain fields, methods, `packed` / `unpacked` lane views
 - Methods can be defined inline or declared in the body and defined out of line
   (`float Shape::GetArea() { ... }`), see [07-functions-and-lambdas](07-functions-and-lambdas.md#72-declarations-definitions-and-out-of-line-methods).
 - Inside a method, members are reachable bare (`x`) or through `this`; `this->x` and `this.x` both
-  work. **Current implementation:** `this` denotes the receiver object itself (an lvalue of the
-  object type), not a pointer value; `->` is accepted on it and `*this` yields the same object.
+  work. `this` names the receiver: `*this` is the object, and wherever a pointer is wanted - a return, an
+  initializer, an argument, a comparison, a cast, `as` and `is`, a branch of `?:` beside a pointer, `delete this`,
+  `sizeof(this)` - it is the receiver's address, a `T*` (a `const T*` in a const method), as in C++.
 - All fields are visible to all method bodies regardless of declaration order, so a C++-style trailing
   `private:` data section works.
 - Several fields can share one declaration: `public float x, y, z;`.

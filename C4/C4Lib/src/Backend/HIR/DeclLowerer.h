@@ -107,9 +107,6 @@ namespace Scripting
 		QueryResult<void> RunPlan(const ConstructionPlan& plan, const LValue* self, BlockNode* region);
 
 		/// What a reference local's slot holds: the address of the location `init` names.
-		static Core::String BindingProblem(const ReferenceType* ref, const Type* located);
-		QueryResult<const HIRNode*> ReferenceAddress(const ReferenceType* ref, const Value* init,
-			const Type* slotType, const Core::String& name);
 		QueryResult<void> BindSlot(const AstNode* site, const Core::String& name, const Type* type, uint32 slot, const ReferenceType* ref,
 			bool isConst);
 		QueryResult<void> BindName(const VariableDefinitionNode* n, const Core::String& name, const Type* type,

@@ -23,10 +23,8 @@ class Buffer {
 - The argument is either the operator **token** (`"+"`, `"[]"`, `"+="`) or its **canonical name**
   (`"add"`, `"index"`, `"add_assign"`). Both spellings are the same operator.
 - One function may carry several operators when their signatures fit:
-  `[operator("+", "add")]`, AGENTS.md's `[operator("=", "copy")]`. **Current implementation:** for
-  operator expressions (`a + b`, `x[i]`, range-for) and for `operator_<name>` calls on a type's own
-  methods, only the **first** name in the annotation is recorded. `[operator("+", "add")]` works because
-  both spellings are the same operator; `[operator("=", "copy")]` registers only `"="`.
+  `[operator("+", "add")]`, AGENTS.md's `[operator("=", "copy")]`. Every name is recorded: the method of
+  `[operator("=", "copy")]` runs for `a = b`, for a copy, and for `a.operator_assign(b)` and `a.operator_copy(b)`.
 - An operator must be a **method** of the type or an **extension method** (`extends T`). A free
   function with `[operator(...)]` and no `extends` is not an operator.
 - Operators are inherited: an operator declared on a base (including a template base) applies to the

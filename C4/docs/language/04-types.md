@@ -130,9 +130,7 @@ both work.
   (`dropping const is not allowed`) except through `void*`; unrelated pointees are an error (`the pointees
   are unrelated`), and a base-to-derived conversion needs `as`.
 - Pointers and integers are truthy in conditions (`if (p)`).
-
-**Current implementation gap:** `&r` where `r` is a reference local is rejected (the type system forms
-`T&*`). Intended: `&r` is the address of the referent, as in C++.
+- `&r` of a reference (a local, a parameter or a field) is the address of its referent, as in C++.
 
 ## 4.4 References
 
@@ -156,6 +154,14 @@ Rules enforced today:
 - Writes through a value returned by a function are rejected (`access chain is rooted in a function-call
   result that returns by value`), and so are writes through a const access chain (`access chain is rooted
   in a read-only location`).
+- A **reference field** (`struct View { int32& target; }`) holds the address of its referent. It is bound where
+  its object starts: by a braced entry (`View v = { x };`, `View{ x }`, `new View{ x }`), by its initializer
+  (`int32& target = g_value;`), or by an assignment in its object's own create (`[operator("create")] void
+  Init(int32& c) { count = c; }`, where C++ writes a member initializer). Every other use reads and writes the
+  referent, and `&v.target` is the referent's address. A field nothing binds is an error (`the reference field
+  'target' of 'View' is not bound`, `the create 'Init' of 'Holder' does not bind its reference field 'count'`), and
+  so is a braced list or a temporary for one. A reference owns nothing: copying the object copies the reference
+  (the copy names the same location), and destroying it leaves the referent alone.
 
 ## 4.5 Arrays
 

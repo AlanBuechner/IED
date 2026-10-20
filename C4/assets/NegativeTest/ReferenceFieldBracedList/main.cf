@@ -1,0 +1,6 @@
+struct Pair { int32 a; int32 b; }
+struct View { Pair& pair; }
+int32 main() {
+	View v = { { 1, 2 } };
+	return 0;
+}

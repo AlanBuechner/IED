@@ -99,6 +99,7 @@ namespace Scripting
 		if (!target.Ok()) return QueryResult<Value>::Fail(target.error, target.message);
 		auto operand = ResolveExpr(n->GetOperand().Get());
 		if (!operand.Ok()) return operand;
+		operand.value = ThisAsPointer(operand.value); // `this is T` checks the receiver's dynamic type
 		const Type* boolT = m_Ctx.queries().TypeStore()->Builtin(TypeKind::Bool);
 		const Type* from = TypeHandle::UnwrapToValue(operand.value.type);
 		const Type* to = TypeHandle::UnwrapToValue(target.value);
@@ -120,6 +121,7 @@ namespace Scripting
 		if (!operand.Ok()) return operand;
 		if (target.value->GetKind() == TypeKind::Reference)
 			return ResolveCheckedReferenceCast(n, operand.value, static_cast<const ReferenceType*>(target.value));
+		operand.value = ThisAsPointer(operand.value);
 		const Type* from = TypeHandle::UnwrapToValue(operand.value.type);
 		const Type* to = TypeHandle::UnwrapToValue(target.value);
 		if (from->IsNumeric() && to->IsNumeric())
@@ -152,6 +154,7 @@ namespace Scripting
 		if (!target.Ok()) return QueryResult<Value>::Fail(target.error, target.message);
 		auto operand = ResolveExpr(n->GetOperand().Get());
 		if (!operand.Ok()) return operand;
+		if (TypeHandle::UnwrapToValue(target.value)->GetKind() == TypeKind::Pointer) operand.value = ThisAsPointer(operand.value);
 
 		// A [operator("cast")] method overrides the built-in conversion: `(float)a` calls a.ToFloat() and
 		// `(OpIVec2)5.5f` calls the primitive-receiver ToIVec2() (this = &value). The method's RETURN type IS

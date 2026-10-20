@@ -1140,6 +1140,27 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   NegativeTests `NewArrayCountNotInteger`, `NewArrayParenthesizedArguments`, `NewArrayElementNamedTwice`,
   `SwizzleWholeObjectOtherLanes`.
 
+#### B43 - Language gap sweep: `this` as a pointer, operator names, reference fields
+- **Closes:** BUG-268. **Design:** [objects](../language/05-objects.md), [types 4.4](../language/04-types.md#44-references),
+  [operators](../language/06-lifecycle-and-operators.md). **Depends on:** B42 (done). **Status:** Done.
+- **Done notes:** every "Current implementation", "Planned" and "Partial" note in `docs/language/` was re-checked
+  with a probe. Stale notes removed (they already worked and had tests): `&r` of a reference local, local functions,
+  range-for by reference, the call operator, `<<=` / `>>=` operators, `sizeof(expr)`, order-independent file-scope
+  constants, `p->Base::F()`, `as T&`, computed `__uuidof`. Fixed: `this` where a pointer is wanted is the receiver's
+  address everywhere (`CallArguments::ConvertedValue` for returns, initializers and arguments; casts, `as`, `is`,
+  `?:`, `sizeof(this)`); `=` and `assign` are one operator (`OperatorTable`), so `operator_assign` reaches
+  `[operator("=", "copy")]`. Found and fixed: BUG-268 - reference fields were unimplemented (a braced entry stored
+  the referent's value, reads saw the pointer bits, writes overwrote the field, `&o.r` was a `T&*`, and lifecycle
+  facts unwrapped the reference, so a holder would copy and destroy its referent). `Backend/HIR/ReferenceBinding`
+  now owns the binding rules for locals and fields: a field access yields the referent (`LValue::boundBy` remembers
+  the field), `InitialValue` binds a reference target, an assignment in the object's own create binds
+  (`LoweringContext::boundReferences`, checked by `MethodBody`), and default construction or a create that leaves a
+  reference field unbound is an error; references own nothing in `LifecycleFacts` and are never destroyed.
+- **Tests:** IsolatedTest `OOP/ThisAsPointer`, `Operators/OperatorNamesAreOneOperator`, `Pointers/AddressOfReferenceLocal`,
+  `Types/Bug268ReferenceFields`; NegativeTests `ReferenceFieldDefaultConstructed`, `ReferenceFieldCreateLeavesUnbound`,
+  `ReferenceFieldMissingEntry`, `ReferenceFieldFromTemporary`, `ReferenceFieldBracedList`, `ReferenceFieldConstLocation`;
+  C4Testing `Semantic.OperatorTable` (`=` is `assign`).
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1657,7 +1678,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

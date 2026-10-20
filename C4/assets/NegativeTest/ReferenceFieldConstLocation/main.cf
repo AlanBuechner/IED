@@ -1,0 +1,6 @@
+struct View { int32& target; }
+int32 main() {
+	const int32 fixed = 3;
+	View v = { fixed };
+	return 0;
+}

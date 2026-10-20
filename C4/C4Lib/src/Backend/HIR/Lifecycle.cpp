@@ -1,5 +1,6 @@
 #include "Backend/HIR/Lifecycle.h"
 #include "Backend/HIR/IndexLoop.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/AccessCheck.h"
 #include "Backend/HIR/IndexLValue.h"
 #include "Backend/HIR/CallArguments.h"
@@ -106,6 +107,7 @@ namespace Scripting
 
 	void Lifecycle::DestroyNow(BlockNode* region, const LValue* object)
 	{
+		if (ReferenceBinding::Of(object->type)) return; // a reference does not own its referent
 		if (const ArrayType* arr = AsArray(object->type))
 		{
 			if (!LifecycleFacts::NeedsDestroy(m_Ctx.queries(), arr->GetElementType())) return;
@@ -118,6 +120,7 @@ namespace Scripting
 
 	const HIRNode* Lifecycle::DestroyCall(const LValue* object)
 	{
+		if (ReferenceBinding::Of(object->type)) return nullptr;
 		const ObjectType* obj = AsObject(object->type);
 		const FunctionRecord* destroy = obj ? Destroy(obj) : nullptr;
 		return destroy ? DirectCall(destroy, object, {}) : nullptr;

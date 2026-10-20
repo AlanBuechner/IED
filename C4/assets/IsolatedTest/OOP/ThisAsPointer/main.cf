@@ -1,0 +1,81 @@
+// `this` names the receiver: members through `this.x` or `this->x`, and wherever a pointer is wanted it is the
+// receiver's address, as C++'s `this` is - a return, an initializer, an argument, a comparison, a cast, `as`,
+// `is`, either branch of `?:`, a lambda capture, `delete this` and `sizeof(this)`.
+int32 g_failures = 0;
+int32 g_deleted = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Node;
+Node* g_last = null;
+void Remember(Node* n) { g_last = n; }
+
+class Base {
+	public virtual int32 Kind() { return 1; }
+	public Base* Me() { return this; }
+}
+class Node : Base {
+	public int32 v;
+	public override int32 Kind() { return 2; }
+	public Node* Self() { return this; }
+	public void Register() { Remember(this); }
+	public bool Is(Node* other) { return this == other; }
+	public bool IsNull() { return this == null; }
+	public Node* AsPointer() { Node* p = this; return p; }
+	public const Node* Const() const { return this; }
+	public Base* Up() { return (Base*)this; }
+	public Base* UpStatic() { return static_cast<Base*>(this); }
+	public Node* Pick(bool own, Node* other) { return own ? this : other; }
+	public Node* PickLast(bool own, Node* other) { return own ? other : this; }
+	public func<Node*()> Getter() { return [this]() -> Node* { return this; }; }
+	public void* Raw() { return this; }
+	public Node& Ref() { return *this; }
+	public Node Copy() { return *this; }
+	public void Reset(const Node& other) { *this = other; }
+	public int32 Arrow() { return this->v + this.v; }
+	public uint64 PointerSize() { return sizeof(this); }
+	public uint64 ObjectSize() { return sizeof(*this); }
+}
+class Owned {
+	[operator("delete")] void Done() { g_deleted++; }
+	public void Release() { delete this; }
+}
+class Probe : Base {
+	public bool IsNode() { return this is Node; }
+	public Node* AsNode() { return this as Node*; }
+}
+
+int32 main() {
+	Node n;
+	n.v = 3;
+	Check(n.Self() == &n, "return this");
+	n.Register();
+	Check(g_last == &n, "this as an argument");
+	Check(n.Is(&n) && !n.IsNull(), "this compared");
+	Check(n.AsPointer() == &n, "this initializes a pointer");
+	Check(n.Const() == &n, "this in a const method is a pointer to const");
+	Check(n.Up()->Kind() == 2 && n.UpStatic()->Kind() == 2, "this cast to a base pointer");
+	Node* h = new Node;
+	Check(n.Pick(true, h) == &n && n.Pick(false, h) == h, "this as the first branch of ?:");
+	Check(n.PickLast(false, h) == &n, "this as the second branch of ?:");
+	Check(n.Getter()() == &n, "a lambda's captured this");
+	Check(n.Raw() == (void*)&n, "this as void*");
+	n.Ref().v = 5;
+	Check(n.v == 5, "*this as a reference");
+	Node copy = n.Copy();
+	Check(copy.v == 5, "*this copied");
+	Node other;
+	other.v = 8;
+	n.Reset(other);
+	Check(n.v == 8 && n.Arrow() == 16, "*this assigned, this-> and this.");
+	Check(n.PointerSize() == 8 && n.ObjectSize() == sizeof(Node), "sizeof(this) is a pointer's size");
+	Base* b = h->Me();
+	Check(b->Kind() == 2 && (b as Node*) == h, "a base method's this");
+	Probe p;
+	Check(!p.IsNode() && p.AsNode() == null, "this is T, this as T*");
+	Owned* o = new Owned;
+	o->Release();
+	Check(g_deleted == 1, "delete this");
+	return g_failures;
+}

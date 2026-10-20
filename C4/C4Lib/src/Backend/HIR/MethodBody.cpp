@@ -1,4 +1,5 @@
 #include "Backend/HIR/MethodBody.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/Lifecycle.h"
 #include "Backend/HIR/StmtLowerer.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
@@ -61,6 +62,16 @@ namespace Scripting
 			}
 		}
 
+		// A create starts the whole object: each reference field without an initializer is bound in its body.
+		QueryResult<void> BindsEveryReference(LoweringContext& ctx, const FunctionRecord* record, const CodeBlockNode* body)
+		{
+			const ObjectType::FieldInfo* unbound = ReferenceBinding::FirstUnbound(record->containingType, ctx.boundReferences);
+			if (!unbound) return QueryResult<void>::Success();
+			return ctx.Fail(body, QueryResult<void>::Fail(QueryError::NotAValue, "the create '" + record->name + "' of '" +
+				record->containingType->GetName() + "' does not bind its reference field '" + unbound->mName +
+				"': assign it a location in the create, or give it an initializer"));
+		}
+
 		const LValue* CopySource(LoweringContext& ctx, const FunctionRecord* record)
 		{
 			const Type* refT = record->type->GetParameters()[0].m_Type;
@@ -90,8 +101,10 @@ namespace Scripting
 		{
 			bool explicitBase = FirstStatementCallsBase(ctx, body, base, "create");
 			BlockNode* building = record->isNoexcept ? root : life.PartsGuard(root, type);
-			return stmts.LowerFunctionBody(body, building, explicitBase ? 1 : 0,
+			auto lowered = stmts.LowerFunctionBody(body, building, explicitBase ? 1 : 0,
 				[&]() { return life.ConstructParts(building, type, explicitBase, body); });
+			if (!lowered.Ok()) return lowered;
+			return BindsEveryReference(ctx, record, body);
 		}
 		case MethodRole::Delete:
 			life.ScheduleDestroyParts(root, type);

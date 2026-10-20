@@ -1,4 +1,5 @@
 #include "Backend/HIR/LifecycleFacts.h"
+#include "Backend/HIR/ReferenceBinding.h"
 #include "Model/TypeHandle.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 
@@ -47,6 +48,7 @@ namespace Scripting
 			// vector has none: it copies and goes away as one register value (its delete and copy are errors).
 			bool AnyPart(const ModelQueries& q, const Type* t, bool (*own)(const OwnMethods&))
 			{
+				if (ReferenceBinding::Of(t)) return false; // a reference owns nothing
 				if (const Type* elem = ElementOf(t)) return AnyPart(q, elem, own);
 				const ObjectType* obj = AsObject(t);
 				if (!obj || obj->IsPurePackedVector()) return false;
@@ -95,6 +97,7 @@ namespace Scripting
 		bool NeedsConstruct(const ModelQueries& q, const Type* t)
 		{
 			// A default create with something to run, or a field initializer, anywhere in the object.
+			if (ReferenceBinding::Of(t)) return false;
 			if (const Type* elem = ElementOf(t)) return NeedsConstruct(q, elem);
 			const ObjectType* obj = AsObject(t);
 			if (!obj) return false;
@@ -117,6 +120,7 @@ namespace Scripting
 
 		QueryResult<void> CheckCopyable(const ModelQueries& q, const Type* t)
 		{
+			if (ReferenceBinding::Of(t)) return QueryResult<void>::Success(); // copying a reference copies the address
 			if (const Type* elem = ElementOf(t)) return CheckCopyable(q, elem);
 			const ObjectType* obj = AsObject(t);
 			if (!obj) return QueryResult<void>::Success();

@@ -33,7 +33,7 @@ void F() {
 ```
 
 Local functions are lowered as ordinary functions; they do not capture the enclosing function's
-locals. **Partial**: covered by compiler unit tests, no end-to-end program yet.
+locals (IsolatedTest `Functions/LocalFunctionVsDirectInit`).
 
 ---
 
@@ -144,8 +144,8 @@ while (it notequal end) { v = dereference(it); body; it = increment(it); }
 assigned back to the iterator, so `increment` may either return a new iterator or mutate `this`
 and return it. A missing operator body is reported as `iterator protocol: 'begin' has no body`.
 
-Planned: `for (T& v : range)` reference loop variables that alias the element (**Planned** - not
-covered by tests today).
+`for (T& v : range)` makes the loop variable a reference to each element, so writes through it change the
+range (D-54, TestCode `ControlFlow/RangeForReference`).
 
 ---
 

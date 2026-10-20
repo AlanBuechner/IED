@@ -37,8 +37,10 @@ namespace Scripting
 		// Global: the model symbol whose storage backs this location.
 		const SymbolInfo* sym = nullptr;
 
-		// Deref: `*ptr` - the location behind a pointer (addr is the pointer-producing node).
+		// Deref: `*ptr` - the location behind a pointer (addr is the pointer-producing node). boundBy: the reference
+		// field this is the referent of (an assignment in its object's create binds the field instead).
 		const HIRNode* addr = nullptr;
+		const LValue* boundBy = nullptr;
 
 		// Lane: one scalar element of a packed SIMD vector. base is the ADDRESSABLE lvalue that holds
 		// the whole vector (a slot / field / global); laneIndex selects the element. A SIMD lane has no
