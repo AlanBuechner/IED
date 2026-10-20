@@ -2,7 +2,7 @@
 
 Owner: `plugins/gpu` (builtin plugin: library, sessions, insights, compare, AI tools, UI module) with replay backends as separate native processes under `plugins/gpu/backends/` (`rdc` first, `flashbang` later). Capture-side support for C4 programs is Bedrock `Gpu::` in the C4 repo. Design: `docs/22`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
 
-PIX is the workflow reference, RenderDoc the inspection and openness reference, Nsight the performance reference; the "Beyond" column says what IED adds.
+PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderDoc's look is not wanted) - RenderDoc the inspection and openness reference, Nsight the performance reference; the "Beyond" column says what IED adds.
 
 ## Capture and library
 
@@ -18,16 +18,17 @@ PIX is the workflow reference, RenderDoc the inspection and openness reference, 
 
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
-| F-GPU-10 | Event Browser: marker tree, EID, GPU-time column with bars, warning badges, bookmarks, search and a filter language (`kind:draw ps:DefaultLit rt:HDR time>0.5ms`) | P1 | US-GPU-1 | PIX timing columns + RenderDoc bookmarks in one tree |
+| F-GPU-10 | Events grid (PIX-style): markers as tree rows, API calls as rows with the object name, columns EID / GPU ms with in-cell bar / primitives / PS invocations, warning badges, bookmarks, a filter language (`kind:draw ps:DefaultLit rt:HDR time>0.5ms`) | P1 | US-GPU-1 | bookmarks and filter language inside PIX's grid |
 | F-GPU-11 | API Calls for the selected event with parameters and optional callstacks | P1 | US-GPU-1 | - |
-| F-GPU-12 | Frame timeline: Direct/Compute/Copy queues as lanes, event spans, barriers, fences, idle bubbles highlighted | P1 | US-GPU-3 | - |
+| F-GPU-12 | Timing timeline across the top of every view: marker rows, one row per queue (Direct/Compute/Copy) with fences and idle bubbles, counter plots, range selection | P1 | US-GPU-3 | - |
+| F-GPU-14 | Capture document with view tabs Overview / Pipeline / Debug / Performance / Compare; several captures open as document tabs | P1 | US-GPU-1 | - |
 | F-GPU-13 | Marker names shared with the profiler (`Profile::Gpu::Zone`); GPU zone -> capture event and back | P1 | US-GPU-1 | one vocabulary for CPU profiler and GPU debugger |
 
 ## State and resources
 
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
-| F-GPU-20 | Pipeline State as a flowchart (graphics, mesh, compute, ray tracing, work graph variants) with per-stage detail | P1 | US-GPU-1 | - |
+| F-GPU-20 | Pipeline view (PIX-style): state tree by stage (graphics, mesh, compute, ray tracing, work graph variants) with every binding; selecting an item shows it in the resource viewer | P1 | US-GPU-1 | - |
 | F-GPU-21 | Bindings: root signature, descriptor tables and heaps; bindless indices resolved to the resource, its name and engine annotations | P1 | US-GPU-1 | bindless-first display (Claymore is bindless) |
 | F-GPU-22 | Constant buffer contents decoded with shader reflection (structs, arrays, root constants) | P1 | US-GPU-1 | - |
 | F-GPU-23 | Resources: usage, format, size, lifetime (first/last EID), heap and aliasing; per-resource read/write history | P1 | US-GPU-1 | - |
@@ -37,9 +38,9 @@ PIX is the workflow reference, RenderDoc the inspection and openness reference, 
 
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
-| F-GPU-30 | Texture Viewer: input/output thumbnail strip, channels, range with histogram, mip/slice/sample, zoom, pixel context, typed pick values | P1 | US-GPU-1 | - |
+| F-GPU-30 | Resource viewer (PIX-style): channels, range, mip/slice/sample, zoom; status line with pixel, typed value, depth and last write; Pixel History / Debug Pixel / Resource History actions | P1 | US-GPU-1 | - |
 | F-GPU-31 | Display transforms in the browser (WebGL2) over decoded tiles: instant range/channel/gamma changes, NaN/Inf/negative highlight, on any device | P1 | US-GPU-1, US-GPU-7 | remote viewing without round trips per slider move |
-| F-GPU-32 | Backend overlays: highlight draw, wireframe, depth test, stencil test, backface, viewport/scissor, quad overdraw (draw/pass), triangle size | P1 | US-GPU-1 | - |
+| F-GPU-32 | *Visualize* menu rendered by the backend: NaN/Inf/negative, highlight draw, wireframe, depth test, stencil test, backface, viewport/scissor, quad overdraw (draw/pass), triangle size | P1 | US-GPU-1 | RenderDoc's overlays inside PIX's viewer |
 | F-GPU-33 | Mesh Viewer: VS input/output, task/mesh output, table + WebGL2 3D preview | P1 | US-GPU-1 | - |
 | F-GPU-34 | Buffer viewer with a format language (struct layout from reflection or typed by hand) | P1 | US-GPU-1 | - |
 | F-GPU-35 | Export a resource (DDS, PNG, EXR, raw) and open it in the image viewer | P2 | US-GPU-1 | - |

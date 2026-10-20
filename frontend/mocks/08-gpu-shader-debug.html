@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 8 - GPU debugger: Debug view</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/code.css">
+	<link rel="stylesheet" href="css/gpu.css">
+	<script defer src="js/gpuscene.js"></script>
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="gpu" data-phone="more">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t" style="flex-direction:column;align-items:flex-start;gap:0;line-height:1.15"><b>Pixel (<span data-pick="x"></span>, <span data-pick="y"></span>)</b><span class="muted" style="font-size:12px">Claymore_f1842 &middot; RTV 0 HDR</span></div>
+		<span class="ib"><i class="ci ci-sparkle c-ai"></i></span>
+	</div>
+
+	<main class="activity gpu-act">
+		<div class="tabs p-hide">
+			<div class="tab on"><i class="ci ci-device-camera"></i><span class="name">Claymore_f1842</span><span class="muted">GPU capture</span><i class="ci ci-close x"></i></div>
+			<div class="tab"><i class="ci ci-device-camera"></i><span class="name">Claymore_f1790</span><span class="muted">master</span><i class="ci ci-close x"></i></div>
+			<div class="tabs-tail"><span class="btn flat"><i class="ci ci-library"></i>Capture library</span></div>
+		</div>
+		<div class="gpu-bar">
+			<span class="ib" title="Continue (F5)"><i class="ci ci-debug-continue"></i></span>
+			<span class="ib" title="Step Over (F10)"><i class="ci ci-debug-step-over"></i></span>
+			<span class="ib" title="Step Into (F11)"><i class="ci ci-debug-step-into"></i></span>
+			<span class="ib" title="Step Out (Shift+F11)"><i class="ci ci-debug-step-out"></i></span>
+			<span class="ib dim" title="Step Back - needs the Flashbang backend (time-travel)"><i class="ci ci-debug-step-back"></i></span>
+			<span class="ib" title="Stop debugging"><i class="ci ci-debug-stop"></i></span>
+			<span class="tb-sep"></span>
+			<span class="muted">Debugging pixel (<span data-pick="x"></span>, <span data-pick="y"></span>) &middot; EID 1287 Crate_03 &middot; DefaultLit / pixel &middot; quad lane 0</span>
+			<span class="grow"></span>
+			<span class="btn flat"><i class="ci ci-file-binary"></i>Disassembly</span>
+			<span class="btn flat"><i class="ci ci-edit"></i>Edit and Replay</span>
+			<span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI</span>
+			<div class="p-only">
+				<span class="chip err" style="height:30px"><i class="ci ci-error"></i>wrote NaN</span>
+				<span class="chip" style="height:30px">EID 1287 &middot; Crate_03</span>
+			</div>
+		</div>
+		<div class="vtabs">
+			<span class="vtab">Overview</span>
+			<span class="vtab">Pipeline</span>
+			<span class="vtab on">Debug</span>
+			<span class="vtab">Performance</span>
+			<span class="vtab">Compare</span>
+			<span class="tail"><span class="chip backend">rdc &middot; RenderDoc 1.46</span>DXIL with embedded debug info &middot; source-level</span>
+		</div>
+
+		<div class="gpu-main">
+			<section class="phist gpu-col br">
+				<div class="pane-title"><b>Pixel History</b><span class="muted">(<span data-pick="x"></span>, <span data-pick="y"></span>) &middot; RTV 0 HDR</span><span class="grow"></span><span class="ib"><i class="ci ci-filter"></i></span></div>
+				<div class="hsum">6 events touched this pixel. The only write after the clear is EID 1287, and it is <span class="c-error">NaN</span>; the blit turns NaN into black.</div>
+				<div class="hgrid">
+					<div class="grid-head"><span class="n">EID</span><span>Event</span><span>Result</span><span>Out</span></div>
+					<div class="grow-r"><span class="n m">12</span><span>ClearRenderTargetView</span><span class="d">cleared</span><span><canvas data-swatch="0,0,0"></canvas></span></div>
+					<div class="grow-r"><span class="n m">1281</span><span>Ground</span><span class="d">rejected: depth</span><span><canvas data-swatch="0,0,0"></canvas></span></div>
+					<div class="grow-r sel"><span class="n m">1287</span><span>Crate_03</span><span class="res-bad">wrote NaN</span><span><canvas data-swatch="nan"></canvas></span></div>
+					<div class="grow-r"><span class="n m">1293</span><span>Foliage (instance 207)</span><span class="d">rejected: depth</span><span><canvas data-swatch="nan"></canvas></span></div>
+					<div class="grow-r"><span class="n m">1316</span><span>GUI &middot; FPS label</span><span class="d">rejected: scissor</span><span><canvas data-swatch="nan"></canvas></span></div>
+					<div class="grow-r"><span class="n m">1338</span><span>Blit to swapchain</span><span class="d">read NaN, wrote 0</span><span><canvas data-swatch="0,0,0"></canvas></span></div>
+				</div>
+				<div class="ai-sec">
+					<div class="h"><i class="ci ci-sparkle c-ai"></i>Why is this pixel black? &middot; qwen3.8-27b@spark &middot; 6 GPU tool calls</div>
+					<p><span class="eref">EID 1287</span> (Crate_03) writes NaN. In <code>DistributionGGX</code> roughness is 0, so <code>a2 = 0</code>, and at this pixel N.H is 1, so <code>denom = 0</code>: the return is 0 / 0.</p>
+					<p>Roughness is 0 because material <code>Crate_Weathered</code> binds <span class="eref">u_Textures[814]</span>, the engine's black default, as its roughness map. 26 pixels on the crate's highlight are affected.</p>
+					<p>Fix the material, or clamp in <code>PBR.hlsli</code>: <code>roughness = max(roughness, 0.045);</code></p>
+					<div class="acts"><span class="btn"><i class="ci ci-edit"></i>Apply clamp and replay</span><span class="btn">Open material</span><span class="btn">Find all NaN events</span></div>
+				</div>
+				<div class="ai-sec" style="box-shadow:none">
+					<div class="h"><i class="ci ci-edit"></i>Edit and Replay &middot; PBR.hlsli clamp (not saved)</div>
+					<div style="display:flex;gap:12px;align-items:flex-start;font-size:11px;color:var(--text-1)">
+						<figure style="margin:0"><canvas data-scene="zoom" data-nan data-cells="9" data-cell="9" style="width:81px;height:81px;image-rendering:pixelated;border:1px solid var(--border-1)"></canvas><figcaption>capture</figcaption></figure>
+						<figure style="margin:0"><canvas data-scene="zoom-fixed" data-cells="9" data-cell="9" style="width:81px;height:81px;image-rendering:pixelated;border:1px solid var(--border-1)"></canvas><figcaption>with edit</figcaption></figure>
+						<div style="line-height:1.6">NaN pixels in RTV 0: <span class="c-error">26</span> &rarr; <span class="c-saved">0</span><br>changed pixels: 26<br><span class="btn" style="margin-top:6px">Save to PBR.hlsli</span></div>
+					</div>
+				</div>
+			</section>
+
+			<div class="gpu-col grow p-hide">
+				<section class="src">
+					<div class="tabs">
+						<div class="tab"><i class="ci ci-file-code ft-shader"></i><span class="name">DefaultLit.hlsl</span><i class="ci ci-close x"></i></div>
+						<div class="tab on"><i class="ci ci-file-code ft-shader"></i><span class="name">PBR.hlsli</span><i class="ci ci-close x"></i></div>
+						<div class="tabs-tail"><span class="muted" style="font-size:11px;padding-right:8px">Claymore/embedded/Engine/Shaders/Include/PBR.hlsli</span></div>
+					</div>
+					<div class="code" data-first="1" data-bp="11" data-exec="14" data-fold="4,17,24,29" data-map="2">
+<pre>
+`com:// PBR.hlsli - Cook-Torrance BRDF for DefaultLit: GGX distribution, Smith geometry, Schlick Fresnel.`
+`mac:#define` `con:PI` `num:3.14159265`
+
+`kw:float` `fn:DistributionGGX`(`kw:float3` `par:N`, `kw:float3` `par:H`, `kw:float` `par:roughness`)
+{
+	`kw:float` `var:a` `op:=` `par:roughness` `op:*` `par:roughness`;`inline-val:a = 0.000`
+	`kw:float` `var:a2` `op:=` `var:a` `op:*` `var:a`;`inline-val:a2 = 0.000`
+	`kw:float` `var:NdotH` `op:=` `fn:max`(`fn:dot`(`par:N`, `par:H`), `num:0.0`);`inline-val:NdotH = 1.000`
+	`kw:float` `var:NdotH2` `op:=` `var:NdotH` `op:*` `var:NdotH`;`inline-val:NdotH2 = 1.000`
+
+	`kw:float` `var:denom` `op:=` (`var:NdotH2` `op:*` (`var:a2` `op:-` `num:1.0`) `op:+` `num:1.0`);`inline-val:denom = 0.000`
+	`var:denom` `op:=` `con:PI` `op:*` `var:denom` `op:*` `var:denom`;`inline-val:denom = 0.000`
+
+	`ctl:return` `var:a2` `op:/` `var:denom`;`inline-val bad:returns NaN (0 / 0)`
+}
+
+`kw:float` `fn:GeometrySchlickGGX`(`kw:float` `par:NdotV`, `kw:float` `par:roughness`)
+{
+	`kw:float` `var:r` `op:=` `par:roughness` `op:+` `num:1.0`;
+	`kw:float` `var:k` `op:=` (`var:r` `op:*` `var:r`) `op:/` `num:8.0`;
+	`ctl:return` `par:NdotV` `op:/` (`par:NdotV` `op:*` (`num:1.0` `op:-` `var:k`) `op:+` `var:k`);
+}
+
+`kw:float3` `fn:FresnelSchlick`(`kw:float` `par:cosTheta`, `kw:float3` `par:F0`)
+{
+	`ctl:return` `par:F0` `op:+` (`num:1.0` `op:-` `par:F0`) `op:*` `fn:pow`(`fn:saturate`(`num:1.0` `op:-` `par:cosTheta`), `num:5.0`);
+}
+
+`kw:float3` `fn:PBR`(`kw:float3` `par:albedo`, `kw:float3` `par:lightDir`, `kw:float3` `par:lightColor`, `kw:float` `par:intensity`, `kw:float3` `par:V`, `kw:float3` `par:N`, `kw:float` `par:roughness`, `kw:float` `par:metallic`)
+{
+	`kw:float3` `var:L` `op:=` `op:-``par:lightDir`;
+	`kw:float3` `var:H` `op:=` `fn:normalize`(`par:V` `op:+` `var:L`);
+	`kw:float3` `var:F0` `op:=` `fn:lerp`(`num:0.04`, `par:albedo`, `par:metallic`);
+
+	`kw:float` `var:NDF` `op:=` `fn:DistributionGGX`(`par:N`, `var:H`, `par:roughness`);
+	`kw:float` `var:G` `op:=` `fn:GeometrySmith`(`par:N`, `par:V`, `var:L`, `par:roughness`);
+</pre>
+					</div>
+				</section>
+				<div class="dbg-bottom">
+					<section class="gpu-col br vgrid">
+						<div class="pane-title"><b>Locals</b><span class="grow"></span><span class="muted">Watch 2</span></div>
+						<div class="grid-head"><span>Name</span><span>Value</span><span>Type</span></div>
+						<div class="scroll" style="flex:1">
+							<div class="grow-r"><span class="nm">N</span><span class="m">(0.000, 0.000, -1.000)</span><span class="d">float3</span></div>
+							<div class="grow-r"><span class="nm">H</span><span class="m">(0.001, 0.004, -1.000)</span><span class="d">float3</span></div>
+							<div class="grow-r"><span class="nm">roughness</span><span class="m c-warn">0.000</span><span class="d">float</span></div>
+							<div class="grow-r"><span class="nm">a</span><span class="m">0.000</span><span class="d">float</span></div>
+							<div class="grow-r"><span class="nm">a2</span><span class="m">0.000</span><span class="d">float</span></div>
+							<div class="grow-r"><span class="nm">NdotH</span><span class="m">1.000</span><span class="d">float</span></div>
+							<div class="grow-r"><span class="nm">NdotH2</span><span class="m">1.000</span><span class="d">float</span></div>
+							<div class="grow-r"><span class="nm">denom</span><span class="m bad">0.000</span><span class="d">float</span></div>
+							<div class="grow-r sel"><span class="nm">(return)</span><span class="m bad">NaN</span><span class="d">float</span></div>
+						</div>
+					</section>
+					<section class="gpu-col br cgrid">
+						<div class="pane-title"><b>Call Stack</b></div>
+						<div class="grid-head"><span></span><span>Function</span><span>Location</span></div>
+						<div class="grow-r sel"><span><i class="ci ci-debug-stackframe-active c-debug"></i></span><span>DistributionGGX</span><span class="m">PBR.hlsli:14</span></div>
+						<div class="grow-r"><span></span><span>PBR</span><span class="m">PBR.hlsli:35</span></div>
+						<div class="grow-r"><span></span><span>main</span><span class="m">DefaultLit.hlsl:268</span></div>
+						<div class="pane-title" style="margin-top:8px;border-top:1px solid var(--border-0)"><b>Watch</b></div>
+						<div class="grow-r"><span></span><span class="m">material.roughness</span><span class="m c-warn">814 (black)</span></div>
+						<div class="grow-r"><span></span><span class="m">input.uv</span><span class="m">(0.613, 0.402)</span></div>
+					</section>
+					<section class="gpu-col lgrid">
+						<div class="pane-title"><b>Quad Lanes</b><span class="muted">a2 / denom</span></div>
+						<div class="grid-head"><span class="n">Lane</span><span>Pixel</span><span>Value</span></div>
+						<div class="grow-r sel"><span class="n m">0</span><span class="m">this</span><span class="m bad">NaN</span></div>
+						<div class="grow-r"><span class="n m">1</span><span class="m">+1, 0</span><span class="m bad">NaN</span></div>
+						<div class="grow-r"><span class="n m">2</span><span class="m">0, +1</span><span class="m">0.000</span></div>
+						<div class="grow-r"><span class="n m">3</span><span class="m">+1, +1</span><span class="m">0.000</span></div>
+					</section>
+				</div>
+			</div>
+		</div>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar" data-state="debugging">
+		<span class="st"><i class="ci ci-debug-alt c-debug"></i>Shader debugging &middot; EID 1287 &middot; PBR.hlsli:14</span>
+		<span class="st"><i class="ci ci-sparkle c-ai"></i>AI: 2 running</span>
+		<span class="st grow"></span>
+		<span class="st">Pixel (<span data-pick="x"></span>, <span data-pick="y"></span>)</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>

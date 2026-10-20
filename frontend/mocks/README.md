@@ -1,6 +1,6 @@
 # frontend/mocks/ - M0 static review mocks
 
-Static HTML+CSS mocks of the six screens `docs/15` lists for design review, plus a token board. They exist so the owner can sign off the look before the real frontend is built (`docs/18` M0 item 2). Open `index.html` from disk; no server, no framework, no network.
+Static HTML+CSS mocks of the six screens `docs/15` lists for design review, the GPU debugger (`docs/22`), and a token board. They exist so the owner can sign off the look before the real frontend is built (`docs/18` M0 item 2). Open `index.html` from disk; no server, no framework, no network.
 
 | Page | Screen |
 |---|---|
@@ -11,6 +11,9 @@ Static HTML+CSS mocks of the six screens `docs/15` lists for design review, plus
 | `04-settings-model-groups.html` | Settings window on AI > Model Groups |
 | `05-git.html` | Git activity: refs, graph, commit details |
 | `06-profiler.html` | Profiler timeline, `?view=threads` or `?view=tasks` |
+| `07-gpu-frame.html` | GPU debugger (PIX layout): Pipeline view - timeline, events grid, state tree, resource viewer, warnings |
+| `08-gpu-shader-debug.html` | GPU debugger: Debug view - pixel history, AI answer, Edit and Replay, shader stepping, locals, call stack, lanes |
+| `09-gpu-performance.html` | GPU debugger: Performance view - counter plots, A/B passes grid, counters, analysis |
 
 Every page is responsive: below 720 px it switches to the phone shell (bottom nav, one pane).
 
@@ -19,6 +22,7 @@ Every page is responsive: below 720 px it switches to the phone shell (bottom na
 - Colors come only from `frontend/css/theme.css` tokens. `build.py lint` rejects raw colors anywhere else, non-ASCII bytes, and space indentation.
 - Shared chrome (sidebar, menu bar, standard toolbar, terminal dock, phone nav) is injected by `js/mock.js`; code blocks are written with `` `kind:text` `` token markup that `mock.js` renders (kinds map to `--syntax-*`).
 - `css/shell.css` is the seed for the real `frontend/css/layout.css`; `css/code.css` for the editor and diff surfaces.
+- The GPU screens' captured frame is drawn by `js/gpuscene.js`, a tiny ray caster: frame pixels are content written as numbers into canvas ImageData, so they never appear as colors in the source; overlay colors still come from theme tokens.
 
 ## Commands
 

@@ -41,6 +41,9 @@ SHOTS = [
 	("05-git.html", "", "05-git", ALL_SIZES),
 	("06-profiler.html", "?view=threads", "06-profiler-threads", ALL_SIZES),
 	("06-profiler.html", "?view=tasks", "06-profiler-tasks", ALL_SIZES),
+	("07-gpu-frame.html", "", "07-gpu-frame", ALL_SIZES),
+	("08-gpu-shader-debug.html", "", "08-gpu-shader-debug", ALL_SIZES),
+	("09-gpu-performance.html", "", "09-gpu-performance", ALL_SIZES),
 ]
 
 # icons that stylesheets use directly (pseudo-elements), exposed as :root { --ic-<name> }

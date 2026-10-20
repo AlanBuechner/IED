@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A graphics debugger as its own sidebar activity (**GPU**, plugin `ied.gpu`): capture frames from D3D12 and Vulkan programs, replay them on the server, inspect every event, debug shaders and pixels, and measure where GPU time goes. The owner works mostly in PIX; this design takes PIX's workflow as the base, RenderDoc's inspection depth and openness, and Nsight's performance analysis, then adds what none of them have: AI that can drive the whole debugger, capture diffs across builds, one timeline with the CPU profiler, and triage from any device.
+A graphics debugger as its own sidebar activity (**GPU**, plugin `ied.gpu`): capture frames from D3D12 and Vulkan programs, replay them on the server, inspect every event, debug shaders and pixels, and measure where GPU time goes. The owner works mostly in PIX, so **the UI follows PIX's layout and styling** (owner decision, 2026-10-19: RenderDoc's look is not wanted). RenderDoc contributes inspection depth and openness - as a backend and as capabilities placed inside PIX's layout - and Nsight contributes performance analysis. On top come what none of them have: AI that can drive the whole debugger, capture diffs across builds, one timeline with the CPU profiler, and triage from any device.
 
 Feature list: `docs/features/17-gpu-debugger.md`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
 
@@ -12,9 +12,9 @@ Generic by rule (AGENTS.md rule 1): the plugin knows D3D12, Vulkan and HLSL/SPIR
 
 | Area | PIX | RenderDoc | Nsight Graphics | IED |
 |---|---|---|---|---|
-| Event list | marker tree with per-event GPU timing columns | marker tree, bookmarks, search, API call list per event | frame debugger event list | PIX-style tree **with timing columns**, RenderDoc bookmarks and API call list, filters (`kind:draw ps:DefaultLit rt:HDR`) |
-| State | pipeline view per stage, resource lists | pipeline flowchart, bindings with contents, root signature | API inspector | RenderDoc flowchart + PIX stage tabs; **bindless indices resolved to the resource and its name** |
-| Textures | viewer, histogram | the best viewer: overlays (wireframe, depth/stencil test, overdraw, clipping, triangle size), pixel context, range, thumbnails of inputs/outputs | resource viewer | RenderDoc viewer, **display transforms run in the browser (WebGL2) so range/channel changes are instant even on a phone** |
+| Event list | marker tree with per-event GPU timing columns | marker tree, bookmarks, search, API call list per event | frame debugger event list | PIX's events grid (API calls as rows under markers, GPU time and statistics columns) plus bookmarks and a filter language (`kind:draw ps:DefaultLit rt:HDR`) |
+| State | Pipeline view: state tree by stage beside the selected resource | pipeline flowchart, bindings with contents, root signature | API inspector | PIX's state tree (no flowchart); **bindless indices resolved to the resource and its name**; constant buffers decoded in the tree |
+| Textures | resource viewer with channels, mips, range, pixel status line | overlays (wireframe, depth/stencil test, overdraw, clipping, triangle size), pixel context, thumbnails | resource viewer | PIX's resource viewer and status line; RenderDoc's overlays as entries of a *Visualize* menu (no thumbnail strip, no floating pixel box); **display transforms run in the browser (WebGL2), instant even on a phone** |
 | Geometry | mesh view | mesh viewer: VS in/out, mesh/task output, 3D preview, table | geometry view | RenderDoc mesh viewer |
 | Pixel history | yes | yes, with test-failure reasons per event | yes | RenderDoc history + "why" summary in plain words |
 | Shader debugging | HLSL source stepping | DXBC/DXIL/SPIR-V, source-level with debug info | yes | source-level stepping in an IED editor surface, watch/locals per lane; **later: time-travel debugging by instrumented replay** (Flashbang) |
@@ -74,22 +74,23 @@ Working name in the family's explosion theme (a flashbang lights up the whole fr
 
 ## Views
 
-The activity has a capture library start page and a frame debugger layout of dockable tool windows (shell docking, `docs/15`).
+PIX's structure, restyled with IED's tokens: a capture opens as a **document tab** (several captures side by side for compare); each capture document has **view tabs** - Overview, Pipeline, Debug, Performance, Compare; a **timing timeline** runs across the top (marker rows, one row per queue, counter plots); the **events grid** is on the left in every view; panes are dense grids with VS-style docked tool windows at the bottom (Warnings, Pixel History, Resource History, API Calls, Messages). The activity's start page is the capture library.
 
 | View | Contents |
 |---|---|
 | Capture library | captures per workspace with thumbnail, program, config, git commit, frame, GPU, size, backend; comments; pin; compare; open in PIX / Nsight / RenderDoc UI |
-| Event Browser | marker tree, EID, GPU time column with bars, warning badges, bookmarks, search and filter language, "hide empty markers" |
-| Frame timeline | queues (Direct, Compute, Copy, Video) as lanes, events as spans, barriers and fences, idle bubbles highlighted |
-| Texture Viewer | current output, thumbnails strip of inputs and outputs for the event, overlays, channels, range with histogram, mip/slice/sample, pixel context zoom, typed pick values, "debug this pixel", "history of this pixel" |
-| Pipeline State | flowchart IA -> VS/AS/MS -> RS -> PS -> OM (compute and work-graph variants), per-stage shader, bindings, root signature, descriptor heaps; bindless indices resolved with names; constant buffer contents decoded with the shader's reflection |
+| Events grid | markers as tree rows, API calls as rows (`DrawIndexedInstanced(36, 1, 0, 0, 37)` with the object name), columns EID, GPU ms with an in-cell bar, primitives, PS invocations; warning badges; bookmarks; filter language |
+| Timing timeline | marker rows (frame, passes, draws), one row per queue (Direct, Compute, Copy, Video) with idle bubbles, counter plots (GPU busy, occupancy, bandwidth), range selection |
+| Pipeline view | state tree by stage (Input Assembler ... Output Merger, Root Signature, Descriptor Heaps) with every binding; bindless indices resolved with names; constant buffers decoded with the shader's reflection; selecting an item shows it in the resource viewer |
+| Resource viewer | the selected texture or buffer: mip/slice/sample, channels, range, *Visualize* menu (NaN/Inf/negative, depth/stencil test, overdraw, wireframe, triangle size, highlight draw), zoom; a status line with the pixel, typed value, depth and last write; Pixel History / Debug Pixel / Resource History actions |
 | Mesh Viewer | VS input/output, mesh/task output, table + 3D preview with camera from the capture |
 | Resources | all resources with usage, format, size, lifetime (first/last EID), memory heap, aliasing; per-resource history of writes and reads |
 | API Calls | the calls inside the selected event, parameters, callstack if captured |
 | Pixel History | every event that touched a pixel: before/after values, shader output, which test failed (depth, stencil, scissor, culling, blend), plain-words summary |
 | Shader Debugger | source in an editor surface (LSP from the shader-language plugin), breakpoints, step in/over/out (and back, on Flashbang), watch, locals, per-lane view, disassembly toggle |
 | Messages | debug layer and GPU-based validation output tied to EIDs |
-| Performance | per-pass and per-event times, queue timeline, counters, SOL bars, limiter verdict, insights, A/B compare |
+| Performance | passes grid with A/B columns (A ms, B ms, delta) and statistics, counters grid for the selected range with throughput bars and a limiter verdict, Analysis findings, the timeline with counter plots |
+| Warnings / Analysis | one grid for debug-layer messages, GPU-based validation and IED's analysis (NaN writes, regressions, culling, barriers, overdraw, queue bubbles), each row linked to its EID with Ask AI |
 
 Phone (one pane at a time, `docs/15`): capture library, event list with timings, texture preview with picks, pixel history, insights and AI answers. Shader stepping and the mesh viewer are desktop-only.
 

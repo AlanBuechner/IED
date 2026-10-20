@@ -253,7 +253,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 
 Journey added for this epic:
 
-- **J15 - Black pixel*.** A black speck shows on a crate in Claymore. Owner clicks *Capture*; the next frame lands in the GPU library. They click the pixel: the history says the lit pass wrote 0. *Debug pixel* steps `DefaultLit` and shows shadow cascade 3 returning 0 from the PCSS lookup. They ask the AI to fix it; it proposes a bias change, Edit and Replay shows the pixel lit, the change is saved to the shader file and the game rebuilds. On the phone the same capture shows the pixel history and the AI's answer.
+- **J15 - Black pixel*.** A black speck shows on a crate in Claymore. Owner clicks *Capture*; the next frame lands in the GPU library. They click the pixel: the history says the lit pass wrote NaN, which the blit turned black. *Debug Pixel* steps `DefaultLit` into `PBR.hlsli` and stops at `DistributionGGX` returning 0 / 0: the crate's material binds the engine's black texture as its roughness map. They ask the AI; it explains the chain and proposes clamping roughness, Edit and Replay shows the 26 NaN pixels gone, the change is saved to the shader file and the game rebuilds. On the phone the same capture shows the pixel history and the AI's answer.
 
 ### PLG - Plugins and extensibility
 

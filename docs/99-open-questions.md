@@ -22,6 +22,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 | 14 | Git backend | git CLI for everything (porcelain v2 / NUL-separated formats); libgit2 stays vendored for a possible graph optimization later | `docs/features/09-git.md` |
 | 15 | Ambition level | Owner: "not just parity with echo but drastically surpass" - Echo parity is the floor; orchestration area added; differentiators raised to P1 | `docs/09`, `docs/20`, `docs/features/16` |
 | 16 | Syntax highlighting colors (was O4) | Owner: use the Visual Assist X scheme for code. Default palette = C4Assist's `c4-visual-assist-dark` values; a Grayscale palette stays as a per-user option | `docs/07`, `frontend/css/theme.css` |
+| 17 | GPU debugger look | Owner: PIX's layout and styling, not RenderDoc's - capture as a document with view tabs, timing timeline on top, events grid, Pipeline state tree beside a resource viewer, docked grids; RenderDoc stays a backend and a capability reference | `docs/22`, `frontend/mocks/07-09` |
 
 ## Open - owner's call
 

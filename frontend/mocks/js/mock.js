@@ -83,6 +83,7 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 			bp: parseRanges(d.bp), fold: parseRanges(d.fold), err: parseRanges(d.err), warn: parseRanges(d.warn),
 		};
 		const cur = Number(d.cur || 0);
+		const exec = Number(d.exec || 0);
 		let n = Number(d.first || 1);
 		let html = "";
 		const numbered = [];
@@ -96,7 +97,7 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 			const chg = marks.unsaved.has(n) ? "unsaved" : marks.saved.has(n) ? "saved" : marks.ai.has(n) ? "ai" : "";
 			const glyph = marks.bp.has(n) ? '<i class="bp"></i>' : "";
 			const fold = marks.fold.has(n) ? icon("ci-chevron-down", "xs") : "";
-			html += `<div class="ln${n === cur ? " cur" : ""}"><span class="gl">${glyph}</span><span class="no">${n}</span><span class="chg ${chg}"></span><span class="fd">${fold}</span><span class="tx">${renderLine(raw)}</span></div>`;
+			html += `<div class="ln${n === cur ? " cur" : ""}${n === exec ? " exec" : ""}"><span class="gl">${glyph}</span><span class="no">${n}</span><span class="chg ${chg}"></span><span class="fd">${fold}</span><span class="tx">${renderLine(raw)}</span></div>`;
 			numbered.push({ n, raw, chg });
 			n++;
 		}
@@ -198,6 +199,7 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 		["editor", "ci-files", "Editor"],
 		["git", "ci-source-control", "Git"],
 		["profiler", "ci-pulse", "Profiler"],
+		["gpu", "ci-device-camera", "GPU Debugger"],
 		["sandbox", "ci-vm", "Sandbox"],
 	];
 
@@ -224,7 +226,7 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 			'<span class="dd" title="Configuration">Development</span><span class="dd" title="Platform">x64</span><span class="dd" title="Startup project">Game</span>',
 			'<span class="tb-sep"></span>',
 			`<span class="split-btn"><span class="btn">${icon("ci-play")}Start</span><span class="btn">${icon("ci-chevron-down", "sm")}</span></span>`,
-			`<span class="btn flat">${icon("ci-tools")}Build</span><span class="btn flat">${icon("ci-beaker")}Test</span><span class="btn flat">${icon("ci-pulse")}Profile</span>`,
+			`<span class="btn flat">${icon("ci-tools")}Build</span><span class="btn flat">${icon("ci-beaker")}Test</span><span class="btn flat">${icon("ci-pulse")}Profile</span><span class="btn flat">${icon("ci-device-camera")}Capture</span>`,
 		].join("");
 	}
 
