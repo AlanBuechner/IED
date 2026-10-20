@@ -731,13 +731,64 @@ vectors, a million bytes, pieces against whole) and Base64 (RFC 4648 vectors, ev
 
 ---
 
-## 15. Tests
+## 15. Processes (`Process/`)
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 41 files, 405 tests (array, list, initlist,
+**Status:** **Implemented** (B52, D-68): programs started with pipes or under a terminal, each in a job object, over
+a small C API in the runtime (`C4Runtime/ProcessRuntimeC.h`, `C4Runtime/Process/*Win32.c`).
+
+```c4
+Process::StartInfo info;
+info.program = Core::String("git");                // a path, or a name found as the system finds programs
+info.arguments.Push(Core::String("log"));
+info.arguments.Push(Core::String("-1"));
+Process::Output git = Process::Run(info, 10000);   // stdout and stderr captured; ended after 10 s
+if (git.exitCode == 0) printf("%s", git.output.CStr());
+```
+
+- **Starting** (`child.ch`): `Process::Child::Start(info)` gives an open `Child`, or a closed one with `Error()` (no
+  such program, no such folder, a batch file). A bare program name is looked for as the system looks (the
+  program's folder, the current folder, the system folders, `PATH`), with `.exe` added when it has no extension.
+  Each argument reaches the child as written: it is quoted for `CommandLineToArgvW` and the C runtime. Batch files
+  are refused, because `cmd.exe` reads arguments its own way: run `cmd` with `/c` and a command written for cmd.
+  `environment` holds changes: `"NAME=value"` sets a variable, `"NAME"` removes one, and names compare as the
+  system compares them (ignoring case on Windows); with `inheritEnvironment = false` they are the whole environment.
+  `workingDirectory` empty is this process's.
+- **Streams:** each of `input`, `output` and `errors` is `Redirect::Inherit` (this process's own), `Pipe`, `Null`,
+  or, for errors only, `ToOutput` (the same pipe as the output). Only the child's ends of its own pipes are
+  inherited, so children started at once from several threads never hold each other's pipes open. `Write`,
+  `WriteAll`, `WriteText` and `CloseInput` feed the input. `Read(stream, ...)` reads one stream, and
+  `ReadAny(buffer, capacity, from, timeoutMs)` whichever of output and errors has bytes first, so one thread can
+  follow both. A stream that ends is closed, and `HasOutput()` turns false once both have. A stream ends (a read
+  gives 0) when the child and everything it started have closed it.
+- **The child's life:** `Wait(timeoutMs)` gives the exit code (0 to 4294967295) or `kTimedOut`. The child runs in a
+  job object: `Kill()` ends it and every process it started (their exit code is 1), and so does closing or
+  deleting the `Child` unless `killOnClose` is false. A `Child` owns its handles and cannot be copied (move it with
+  `take()`). One thread may read while others write, `Wait` or `Kill`; `Close` runs alone.
+- **Terminals:** with `terminal = true` the child runs under a pseudo console (ConPTY, Windows 10 1809 or later) of
+  `columns` x `rows`: `Write` is its keyboard, `Read(Stream::Output, ...)` its screen as VT sequences, and
+  `Resize(columns, rows)` changes its size. Its output does not end when the child does, only when the `Child`
+  closes, so wait for the child itself with `Wait`.
+- **Run** (`run.ch`): `Process::Run(info, timeoutMs)` runs a program to its end with its input from nowhere and its
+  stdout and stderr captured into an `Output` (`exitCode`, `output`, `errors`, `error`); a program still running at
+  the timeout is ended with everything it started, and `exitCode` is `kTimedOut`.
+
+Covered by `Bedrock/Tests/process_tests.cf` (18 tests) against the system's own programs (`cmd`, `sort`, `findstr`,
+`ping`, `tasklist`): output and errors apart and together, 5000 lines out and 600 KB in (far past a pipe's buffer),
+exit codes up to 4294967295, arguments with spaces, quotes and trailing backslashes as the child reads them, the
+environment changed (set, replaced in another case, removed, inherited) and replaced, the working folder, `ReadAny`
+until both streams end, timeouts on reads, waits and `Run`, `Kill` ending `cmd` and the `ping` it started, closing
+with and without `killOnClose`, 32 children from 8 threads at once, misuse and failures, and a terminal: a shell
+typed to, resized, and exiting with the code it was told.
+
+---
+
+## 16. Tests
+
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 42 files, 423 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, http, websocket, encoding). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, http, websocket, encoding, process). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -749,7 +800,7 @@ The exit code is the number of failed assertions. The `GC` namespace is covered 
 
 ---
 
-## 16. Missing versus the plan
+## 17. Missing versus the plan
 
 From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 
@@ -769,5 +820,6 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | `Core::InitList<T>` | **Implemented** |
 | Sockets / networking | **Implemented** (section 13, B49) |
 | HTTP server | **Implemented** (section 14, B50), with WebSockets (B51) |
+| Child processes: pipes, exit codes, environment, killing a tree, terminals | **Implemented** (section 15, B52) |
 | Threading primitives (join, promise, condition variable, work stealing) | **Implemented** (section 10, B29) |
 | `Platform::`: virtual memory, system and process information, environment variables, libraries, wall-clock time | **Implemented** (section 12, B40) |

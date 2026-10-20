@@ -81,6 +81,7 @@ void c4_test_begin(const char* name, const char* file, int32_t line)
 	g_caseFile = file ? file : "";
 	g_caseLine = line;
 	printf("[TEST] %s\n", name ? name : "");
+	fflush(stdout);   // a test that hangs or crashes still names itself in a redirected log
 }
 
 // Where a failed assertion is: its own call site when the compiler passed one (B37), else the test's.

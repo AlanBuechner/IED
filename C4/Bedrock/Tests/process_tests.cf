@@ -1,0 +1,344 @@
+// Process::Child and Process::Run against the system's own programs (cmd, sort, findstr, ping, tasklist): output and
+// errors apart or together, input, exit codes, arguments as the child reads them, the environment changed or
+// replaced, the working folder, waiting on both outputs at once, timeouts, killing a tree, closing ends the child,
+// children started from many threads, failures, and a terminal (a pseudo console).
+
+include "bedrock.ch"
+
+const int32 kProcessWaitMs = 20000;
+
+static Process::StartInfo Cmd(const char* command) {
+	Process::StartInfo info;
+	info.program = Core::String("cmd");
+	info.arguments.Push(Core::String("/c"));
+	info.arguments.Push(Core::String(command));
+	return info;
+}
+
+static Process::StartInfo Program(const char* program) {
+	Process::StartInfo info;
+	info.program = Core::String(program);
+	return info;
+}
+
+// A ping that runs for about 30 seconds unless it is ended.
+static Process::StartInfo LongPing() { return Cmd("ping -n 30 127.0.0.1"); }
+
+// Everything left on the child's stdout.
+static Core::String ReadOutput(Process::Child& child) {
+	Core::String text;
+	char[4096] buffer;
+	while (true) {
+		const int64 read = child.Read(Process::Stream::Output, (void*)&buffer[0], 4096, kProcessWaitMs);
+		if (read <= 0) return text;
+		text.Append(Core::StringView(&buffer[0], read));
+	}
+	return text;
+}
+
+static int64 MillisecondsSince(int64 startNs) { return (clock_now_ns() - startNs) / 1000000; }
+
+// Whether the system lists process `id` (tasklist's CSV names it in quotes).
+static bool IsRunning(uint32 id) {
+	Core::StringBuilder filter;
+	Core::Format(&filter, "PID eq {0}", (int64)id);
+	Core::StringBuilder listed;
+	Core::Format(&listed, "\"{0}\"", (int64)id);
+	Process::StartInfo tasklist = Program("tasklist");
+	tasklist.arguments.Push(Core::String("/FI"));
+	tasklist.arguments.Push(filter.ToString());
+	tasklist.arguments.Push(Core::String("/NH"));
+	tasklist.arguments.Push(Core::String("/FO"));
+	tasklist.arguments.Push(Core::String("CSV"));
+	return Process::Run(tasklist, kProcessWaitMs).output.View().Contains(listed.View());
+}
+
+static bool WaitUntilGone(uint32 id, int64 timeoutMs) {
+	const int64 start = clock_now_ns();
+	while (IsRunning(id))
+		if (MillisecondsSince(start) > timeoutMs) return false;
+		else Threading::Thread::Sleep((int64)50000000);
+	return true;
+}
+
+static int64 CountOf(Core::StringView text, char c) {
+	int64 count = 0;
+	for (int64 i = 0; i < text.ByteLength(); ++i)
+		if (text.ByteAt(i) == (int32)c) ++count;
+	return count;
+}
+
+[test("process.run")]
+class ProcessRunTests {
+	[test("echo")]
+	public static void TestEcho() {
+		Process::Output result = Process::Run(Cmd("echo hello"), kProcessWaitMs);
+		assert_eq((int64)0, result.exitCode, "cmd exits with 0");
+		assert_true(result.output.View() == "hello\r\n", "what it printed");
+		assert_true(result.errors.View().IsEmpty() && result.error.View().IsEmpty(), "nothing on stderr, no failure");
+	}
+
+	[test("exit_codes")]
+	public static void TestExitCodes() {
+		assert_eq((int64)3, Process::Run(Cmd("exit 3"), kProcessWaitMs).exitCode, "a small code");
+		assert_eq((int64)4294967295, Process::Run(Cmd("exit -1"), kProcessWaitMs).exitCode, "codes are unsigned 32-bit");
+	}
+
+	[test("output_and_errors")]
+	public static void TestOutputAndErrors() {
+		Process::Output apart = Process::Run(Cmd("echo a& echo b 1>&2& echo c"), kProcessWaitMs);
+		assert_true(apart.output.View() == "a\r\nc\r\n", "stdout alone");
+		assert_true(apart.errors.View().Trimmed() == "b", "stderr alone");
+		Process::StartInfo info = Cmd("echo a& echo b 1>&2& echo c");
+		info.errors = Process::Redirect::ToOutput;
+		Process::Output together = Process::Run(info, kProcessWaitMs);
+		assert_true(together.output.View() == "a\r\nb \r\nc\r\n", "stderr into stdout, in the order written");
+		assert_true(together.errors.View().IsEmpty(), "nothing apart");
+	}
+
+	[test("large_output")]
+	public static void TestLargeOutput() {
+		Process::Output result = Process::Run(Cmd("for /L %i in (1,1,5000) do @echo line %i"), kProcessWaitMs);
+		assert_eq((int64)0, result.exitCode, "ran to the end");
+		assert_eq((int64)5000, CountOf(result.output.View(), '\n'), "every line, far past a pipe's buffer");
+		assert_true(result.output.View().EndsWith(Core::StringView("line 5000\r\n")), "the last line last");
+	}
+
+	[test("timeout")]
+	public static void TestTimeout() {
+		const int64 start = clock_now_ns();
+		Process::Output result = Process::Run(LongPing(), 300);
+		assert_eq(Process::kTimedOut, result.exitCode, "a program that runs too long is ended");
+		assert_true(!result.error.View().IsEmpty(), "and says why");
+		assert_true(MillisecondsSince(start) < 10000, "without waiting for it");
+	}
+
+	[test("not_started")]
+	public static void TestNotStarted() {
+		Process::Output missing = Process::Run(Program("c4-no-such-program-anywhere"), kProcessWaitMs);
+		assert_eq(Process::kError, missing.exitCode, "no such program");
+		assert_true(missing.error.View().Contains(Core::StringView("no program named")), missing.error.CStr());
+		Process::StartInfo info = Cmd("cd");
+		info.workingDirectory = Core::String("C:/c4-no-such-folder/anywhere");
+		Process::Output folder = Process::Run(info, kProcessWaitMs);
+		assert_true(folder.exitCode == Process::kError && !folder.error.View().IsEmpty(), "no such folder");
+	}
+}
+
+[test("process.child")]
+class ProcessChildTests {
+	[test("input")]
+	public static void TestInput() {
+		Process::StartInfo info = Program("sort");
+		info.input = Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		Process::Child sort = Process::Child::Start(info);
+		assert_true(sort.IsOpen() && sort.Id() != 0, sort.Error());
+		assert_true(sort.WriteText(Core::StringView("c\r\na\r\nb\r\n"), kProcessWaitMs), "written");
+		sort.CloseInput();
+		assert_true(ReadOutput(sort).View() == "a\r\nb\r\nc\r\n", "sort read its input to the end");
+		assert_eq((int64)0, sort.Wait(kProcessWaitMs), "and exited");
+	}
+
+	[test("large_input")]
+	public static void TestLargeInput() {
+		Core::StringBuilder lines;
+		for (int32 i = 0; i < 100000; ++i) lines.Append("line\r\n");
+		const char*[2] patterns = { "line", "nomatch" };
+		for (int32 p = 0; p < 2; ++p) {
+			Process::StartInfo info = Program("findstr");
+			info.arguments.Push(Core::String(patterns[p]));
+			info.input = Process::Redirect::Pipe;
+			info.output = Process::Redirect::Null;
+			Process::Child findstr = Process::Child::Start(info);
+			assert_true(findstr.WriteAll((const void*)lines.CStr(), lines.ByteLength(), kProcessWaitMs), "600 KB through a 64 KB pipe");
+			findstr.CloseInput();
+			assert_eq((int64)p, findstr.Wait(kProcessWaitMs), "findstr read it all: 0 found, 1 not found");
+		}
+	}
+
+	[test("arguments")]
+	public static void TestArguments() {
+		Process::StartInfo info = Program("cmd");
+		const char*[7] arguments = { "/c", "echo", "a b", "c\"d", "e\\", "f\\ g\\", "" };
+		for (int32 i = 0; i < 7; ++i) info.arguments.Push(Core::String(arguments[i]));
+		Process::Output result = Process::Run(info, kProcessWaitMs);
+		assert_se("\"a b\" \"c\\\"d\" e\\ \"f\\ g\\\\\" \"\"\r\n", result.output.CStr(), "quoted as CommandLineToArgvW reads them back");
+	}
+
+	[test("environment")]
+	public static void TestEnvironment() {
+		Platform::SetEnvironmentVariable("C4_PROCESS_CASE", "old");
+		Platform::SetEnvironmentVariable("C4_PROCESS_GONE", "here");
+		Process::StartInfo info = Cmd("echo [%C4_PROCESS_SET%] [%C4_PROCESS_CASE%] [%C4_PROCESS_GONE%] [%C4_PROCESS_KEPT%]");
+		info.environment.Push(Core::String("C4_PROCESS_SET=hello world"));
+		info.environment.Push(Core::String("c4_process_case=new"));
+		info.environment.Push(Core::String("C4_PROCESS_GONE"));
+		Platform::SetEnvironmentVariable("C4_PROCESS_KEPT", "kept");
+		Process::Output changed = Process::Run(info, kProcessWaitMs);
+		assert_se("[hello world] [new] [%C4_PROCESS_GONE%] [kept]\r\n", changed.output.CStr(), "set, replaced whatever its case, removed, inherited");
+		Process::StartInfo alone = Cmd("set");
+		alone.inheritEnvironment = false;
+		alone.environment.Push(Core::String("C4_ONLY=yes"));
+		Process::Output whole = Process::Run(alone, kProcessWaitMs);
+		assert_true(whole.output.View().Contains(Core::StringView("C4_ONLY=yes\r\n")), whole.output.CStr());
+		assert_true(!whole.output.View().Contains(Core::StringView("C4_PROCESS_KEPT")), "nothing inherited");
+		Platform::RemoveEnvironmentVariable("C4_PROCESS_CASE");
+		Platform::RemoveEnvironmentVariable("C4_PROCESS_GONE");
+		Platform::RemoveEnvironmentVariable("C4_PROCESS_KEPT");
+		Process::StartInfo bad = Cmd("echo");
+		bad.environment.Push(Core::String("=C4_NO_NAME"));
+		assert_eq(Process::kError, Process::Run(bad, kProcessWaitMs).exitCode, "an entry with no name is refused");
+	}
+
+	[test("working_directory")]
+	public static void TestWorkingDirectory() {
+		Core::String windows = Platform::GetEnvironmentVariable("SystemRoot");
+		Process::StartInfo info = Cmd("cd");
+		info.workingDirectory = windows;
+		Process::Output result = Process::Run(info, kProcessWaitMs);
+		assert_true(result.output.View().Trimmed() == windows.View(), result.output.CStr());
+	}
+
+	[test("read_any")]
+	public static void TestReadAny() {
+		Process::StartInfo info = Cmd("echo a& echo b 1>&2");
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child child = Process::Child::Start(info);
+		Core::String output;
+		Core::String errors;
+		char[256] buffer;
+		while (child.HasOutput()) {
+			Process::Stream from = Process::Stream::Input;
+			const int64 read = child.ReadAny((void*)&buffer[0], 256, from, kProcessWaitMs);
+			assert_true(read >= 0, child.Error());
+			if (read < 0) return;
+			if (from == Process::Stream::Errors) errors.Append(Core::StringView(&buffer[0], read));
+			else output.Append(Core::StringView(&buffer[0], read));
+		}
+		assert_true(output.View() == "a\r\n" && errors.View().Trimmed() == "b", "each stream's bytes, until both ended");
+		assert_eq((int64)0, child.Wait(kProcessWaitMs), "exited");
+	}
+
+	[test("read_timeout")]
+	public static void TestReadTimeout() {
+		Process::StartInfo info = Program("findstr");
+		info.arguments.Push(Core::String("x"));
+		info.input = Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child findstr = Process::Child::Start(info);
+		char[64] buffer;
+		Process::Stream from = Process::Stream::Input;
+		assert_eq(Process::kTimedOut, findstr.ReadAny((void*)&buffer[0], 64, from, 100), "nothing to read while it waits for input");
+		assert_true(findstr.TimedOut(), "TimedOut() says so");
+		assert_eq(Process::kTimedOut, findstr.Read(Process::Stream::Output, (void*)&buffer[0], 64, 50), "one stream too");
+		assert_eq(Process::kTimedOut, findstr.Wait(50), "still running");
+		findstr.CloseInput();
+		while (findstr.HasOutput()) assert_eq((int64)0, findstr.ReadAny((void*)&buffer[0], 64, from, kProcessWaitMs), "both end empty");
+		assert_eq((int64)1, findstr.Wait(kProcessWaitMs), "no line matched");
+	}
+
+	[test("kill")]
+	public static void TestKill() {
+		Process::StartInfo info = LongPing();
+		info.output = Process::Redirect::Pipe;
+		Process::Child ping = Process::Child::Start(info);
+		const int64 start = clock_now_ns();
+		assert_true(ping.Kill(), "killed");
+		ReadOutput(ping);
+		assert_true(MillisecondsSince(start) < 10000, "the output ends: cmd and the ping it started are both gone");
+		assert_eq((int64)1, ping.Wait(kProcessWaitMs), "a killed child's code");
+		assert_true(ping.Kill(), "killing an ended child is fine");
+	}
+
+	[test("kill_on_close")]
+	public static void TestKillOnClose() {
+		Process::Child ping = Process::Child::Start(LongPing());
+		const uint32 id = ping.Id();
+		assert_true(IsRunning(id), "listed while it runs");
+		ping.Close();
+		assert_true(!ping.IsOpen() && ping.Id() == 0, "closed");
+		assert_true(WaitUntilGone(id, 5000), "closing the Child ended the process");
+		Process::StartInfo info = Cmd("ping -n 2 127.0.0.1");
+		info.killOnClose = false;
+		Process::Child kept = Process::Child::Start(info);
+		const uint32 keptId = kept.Id();
+		kept.Close();
+		assert_true(IsRunning(keptId), "without killOnClose it runs on");
+		assert_true(WaitUntilGone(keptId, kProcessWaitMs), "until it ends by itself");
+	}
+
+	[test("from_threads")]
+	public static void TestFromThreads() {
+		int32[8] right;
+		Threading::Thread[8] workers;
+		for (int32 t = 0; t < 8; ++t) {
+			int32* mine = &right[t];
+			*mine = 0;
+			const int32 id = t;
+			workers[t] = Threading::Thread::Run([mine, id]() {
+				Core::StringBuilder command;
+				Core::Format(&command, "echo child {0}", (int64)id);
+				Core::StringBuilder expected;
+				Core::Format(&expected, "child {0}\r\n", (int64)id);
+				for (int32 i = 0; i < 4; ++i)
+					if (Process::Run(Cmd(command.CStr()), kProcessWaitMs).output.View() == expected.View()) *mine = *mine + 1;
+			});
+		}
+		for (int32 t = 0; t < 8; ++t) workers[t].Join();
+		for (int32 t = 0; t < 8; ++t) assert_eq(4, right[t], "each thread's children printed their own text and ended");
+	}
+
+	[test("misuse")]
+	public static void TestMisuse() {
+		Process::StartInfo info = Cmd("exit 0");
+		info.output = Process::Redirect::Pipe;
+		Process::Child child = Process::Child::Start(info);
+		char[16] buffer;
+		assert_eq(Process::kError, child.Write((const void*)"x", 1, kProcessWaitMs), "no input pipe");
+		assert_true(child.Error()[0] != 0, "and why");
+		assert_eq(Process::kError, child.Read(Process::Stream::Input, (void*)&buffer[0], 16, kProcessWaitMs), "the input is not read");
+		assert_eq(Process::kError, child.Read(Process::Stream::Errors, (void*)&buffer[0], 16, kProcessWaitMs), "stderr was not piped");
+		assert_true(!child.Resize(100, 30), "not a terminal");
+		assert_eq((int64)0, child.Wait(kProcessWaitMs), "the child itself ran");
+		child.Close();
+		child.Close();
+		assert_eq(Process::kError, child.Wait(0), "a closed child");
+		Process::Child batch = Process::Child::Start(Program("C:/c4-anywhere/build.bat"));
+		assert_true(!batch.IsOpen() && Core::StringView(batch.Error()).Contains(Core::StringView("cmd.exe /c")), batch.Error());
+		Process::Child nothing = Process::Child::Start(Program(""));
+		assert_true(!nothing.IsOpen() && nothing.Error()[0] != 0, "no program");
+		Process::Child moved = Process::Child::Start(Cmd("exit 5"));
+		Process::Child taken = take(moved);
+		assert_true(!moved.IsOpen() && taken.IsOpen(), "moved with take()");
+		assert_eq((int64)5, taken.Wait(kProcessWaitMs), "the moved child");
+	}
+}
+
+[test("process.terminal")]
+class ProcessTerminalTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		Process::StartInfo info = Program("cmd");
+		info.terminal = true;
+		info.columns = 100;
+		info.rows = 30;
+		Process::Child shell = Process::Child::Start(info);
+		assert_true(shell.IsOpen(), shell.Error());
+		assert_true(shell.Resize(120, 40), "a terminal can be resized");
+		assert_true(shell.WriteText(Core::StringView("echo c4 terminal\r\nexit 7\r\n"), kProcessWaitMs), "typed");
+		Core::String screen;
+		char[4096] buffer;
+		const int64 start = clock_now_ns();
+		while (!screen.View().Contains(Core::StringView("c4 terminal")) && MillisecondsSince(start) < kProcessWaitMs) {
+			const int64 read = shell.Read(Process::Stream::Output, (void*)&buffer[0], 4096, 500);
+			if (read > 0) screen.Append(Core::StringView(&buffer[0], read));
+			if (read == 0 || read == Process::kError) break;
+		}
+		assert_true(screen.View().Contains(Core::StringView("c4 terminal")), "the screen shows what the shell printed");
+		assert_eq((int64)7, shell.Wait(kProcessWaitMs), "the shell ran the typed exit");
+		shell.Close();
+	}
+}

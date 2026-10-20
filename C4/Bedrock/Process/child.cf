@@ -1,0 +1,129 @@
+include "child.ch"
+
+namespace Process
+{
+	const int32 kErrorBytes = 512;
+
+	// The runtime's c4_process_options.
+	struct StartRecord
+	{
+		public const char* program;
+		public const char** arguments;
+		public int32 argumentCount;
+		public const char* workingDirectory;
+		public const char** environment;
+		public int32 environmentCount;
+		public int32 inheritEnvironment;
+		public int32 inputMode;
+		public int32 outputMode;
+		public int32 errorsMode;
+		public int32 terminal;
+		public int32 columns;
+		public int32 rows;
+		public int32 killOnClose;
+	}
+}
+
+[link("c4_process_start")] int32 c4_process_start(const Process::StartRecord* start, Process::Handles* out, char* error, int64 errorCapacity);
+[link("c4_process_write")] int64 c4_process_write(Process::Handles* process, const void* data, int64 size, int32 timeoutMs);
+[link("c4_process_read")] int64 c4_process_read(Process::Handles* process, int32 stream, void* buffer, int64 capacity, int32 timeoutMs);
+[link("c4_process_read_any")] int64 c4_process_read_any(Process::Handles* process, void* buffer, int64 capacity, int32 timeoutMs, int32* stream);
+[link("c4_process_close_pipe")] void c4_process_close_pipe(Process::Handles* process, int32 stream);
+[link("c4_process_wait")] int64 c4_process_wait(Process::Handles* process, int32 timeoutMs);
+[link("c4_process_kill")] int32 c4_process_kill(Process::Handles* process);
+[link("c4_process_resize")] int32 c4_process_resize(Process::Handles* process, int32 columns, int32 rows);
+[link("c4_process_close")] void c4_process_close(Process::Handles* process);
+
+namespace Process
+{
+	static Core::Array<const char*> CStrings(const Core::Array<Core::String>& strings) {
+		Core::Array<const char*> pointers;
+		for (int64 i = 0; i < strings.Count(); ++i) pointers.Push(strings[i].CStr());
+		return pointers;
+	}
+
+	Child Child::Start(const StartInfo& info) {
+		Core::Array<const char*> arguments = CStrings(info.arguments);
+		Core::Array<const char*> environment = CStrings(info.environment);
+		StartRecord start;
+		start.program = info.program.CStr();
+		start.arguments = arguments.Data();
+		start.argumentCount = (int32)arguments.Count();
+		start.workingDirectory = info.workingDirectory.CStr();
+		start.environment = environment.Data();
+		start.environmentCount = (int32)environment.Count();
+		start.inheritEnvironment = info.inheritEnvironment ? 1 : 0;
+		start.inputMode = (int32)info.input;
+		start.outputMode = (int32)info.output;
+		start.errorsMode = (int32)info.errors;
+		start.terminal = info.terminal ? 1 : 0;
+		start.columns = info.columns;
+		start.rows = info.rows;
+		start.killOnClose = info.killOnClose ? 1 : 0;
+		Child child;
+		char[kErrorBytes] why;
+		const int32 started = c4_process_start(&start, &child.handles, &why[0], kErrorBytes);
+		child.Record((int64)started, &why[0]);
+		return child;
+	}
+
+	int64 Child::Write(const void* bytes, int64 count, int32 timeoutMs) {
+		if (!IsOpen()) return Record(kError, "the child is closed");
+		return Record(c4_process_write(&handles, bytes, count, timeoutMs), "the child's input is closed");
+	}
+
+	bool Child::WriteAll(const void* bytes, int64 count, int32 timeoutMs) {
+		if (!IsOpen()) return Record(kError, "the child is closed") == 0;
+		const uint8* next = (const uint8*)bytes;
+		int64 left = count;
+		while (left > 0) {
+			const int64 written = Write((const void*)next, left, timeoutMs);
+			if (written <= 0) return false;
+			next = next + written;
+			left -= written;
+		}
+		return true;
+	}
+
+	void Child::CloseInput() { c4_process_close_pipe(&handles, (int32)Stream::Input); }
+
+	int64 Child::Read(Stream from, void* buffer, int64 capacity, int32 timeoutMs) {
+		if (!IsOpen()) return Record(kError, "the child is closed");
+		if (from == Stream::Input) return Record(kError, "the child's input is written, not read");
+		return Record(c4_process_read(&handles, (int32)from, buffer, capacity, timeoutMs), "the stream is not open to read");
+	}
+
+	int64 Child::ReadAny(void* buffer, int64 capacity, Stream& from, int32 timeoutMs) {
+		from = Stream::Output;
+		if (!IsOpen()) return Record(kError, "the child is closed");
+		int32 stream = -1;
+		const int64 read = Record(c4_process_read_any(&handles, buffer, capacity, timeoutMs, &stream), "reading the child's output failed");
+		if (stream == (int32)Stream::Errors) from = Stream::Errors;
+		return read;
+	}
+
+	int64 Child::Wait(int32 timeoutMs) {
+		if (!IsOpen()) return Record(kError, "the child is closed");
+		return Record(c4_process_wait(&handles, timeoutMs), "waiting for the child failed");
+	}
+
+	bool Child::Kill() {
+		if (!IsOpen()) return Record(kError, "the child is closed") == 0;
+		return Record((int64)c4_process_kill(&handles), "the child could not be ended") == 0;
+	}
+
+	bool Child::Resize(int32 columns, int32 rows) {
+		if (!IsOpen()) return Record(kError, "the child is closed") == 0;
+		return Record((int64)c4_process_resize(&handles, columns, rows), "the child is not a terminal, or the size is not one") == 0;
+	}
+
+	void Child::Close() { c4_process_close(&handles); }
+
+	// Keeps why a call failed: `why` when it returned kError, nothing otherwise.
+	int64 Child::Record(int64 result, const char* why) {
+		timedOut = result == kTimedOut;
+		if (result == kError && why[0] != 0) error = Core::String(why);
+		else error.Clear();
+		return result;
+	}
+}

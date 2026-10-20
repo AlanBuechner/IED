@@ -1,0 +1,59 @@
+include "run.ch"
+
+namespace Process
+{
+	const int64 kRunBufferBytes = 16384;
+
+	// Milliseconds until `deadlineNs` (clock_now_ns), at least 0; kWaitForever when there is no deadline.
+	static int32 Remaining(int64 deadlineNs) {
+		if (deadlineNs < 0) return kWaitForever;
+		const int64 left = (deadlineNs - clock_now_ns()) / 1000000;
+		return left > 0 ? (int32)left : 0;
+	}
+
+	static void Fail(Output& result, int64 exitCode, const char* why) {
+		result.exitCode = exitCode;
+		result.error = Core::String(why);
+	}
+
+	// Reads Output and Errors to their ends; false (with `result` saying why) when that fails or takes too long.
+	static bool Drain(Child& child, Output& result, int64 deadlineNs) {
+		uint8[kRunBufferBytes] buffer;
+		while (child.HasOutput()) {
+			Stream from = Stream::Output;
+			const int64 read = child.ReadAny((void*)&buffer[0], kRunBufferBytes, from, Remaining(deadlineNs));
+			if (read == kTimedOut) Fail(result, kTimedOut, "the program ran past its time");
+			else if (read < 0) Fail(result, kError, child.Error());
+			if (read < 0) return false;
+			Core::String* into = from == Stream::Errors ? &result.errors : &result.output;
+			into->Append(Core::StringView((const char*)&buffer[0], read));
+		}
+		return true;
+	}
+
+	Output Run(const StartInfo& info, int32 timeoutMs) {
+		const int64 deadlineNs = timeoutMs < 0 ? (int64)-1 : clock_now_ns() + (int64)timeoutMs * 1000000;
+		StartInfo piped = info;
+		piped.input = Redirect::Null;
+		piped.output = Redirect::Pipe;
+		piped.errors = info.errors == Redirect::ToOutput ? Redirect::ToOutput : Redirect::Pipe;
+		piped.terminal = false;
+		Output result;
+		Child child = Child::Start(piped);
+		if (!child.IsOpen()) {
+			Fail(result, kError, child.Error());
+			return result;
+		}
+		if (!Drain(child, result, deadlineNs)) {
+			child.Kill();
+			return result;
+		}
+		result.exitCode = child.Wait(Remaining(deadlineNs));
+		if (result.exitCode == kTimedOut) {
+			child.Kill();
+			result.error = Core::String("the program ran past its time");
+		}
+		else if (result.exitCode == kError) result.error = Core::String(child.Error());
+		return result;
+	}
+}
