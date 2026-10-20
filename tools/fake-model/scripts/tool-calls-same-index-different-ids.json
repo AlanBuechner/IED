@@ -1,7 +1,7 @@
 {
 	"description": "Two tool calls both streamed at index 0 with different ids.",
 	"stopClass": "none",
-	"harness": "Negative test: merge deltas by id first, index second, giving two calls (Echo merged by index only and corrupted them).",
+	"harness": "Negative test: merge deltas by id first, index second, giving two calls (the predecessor IDE merged by index only and corrupted them).",
 	"responses": [
 		{
 			"steps": [

@@ -30,5 +30,5 @@ Owner: `plugins/terminal` (UI, xterm.js) on `src/terminal` (PTY/process supervis
 | F-TRM-23 | AI terminals: each chat that runs shell commands gets its own named terminal ("AI: <chat title>"), so the human sees every command and its output live; the human can type into it only after pausing the agent | P0 | US-TRM-3 |
 | F-TRM-24 | Background processes for the AI: long-running commands (dev servers, watchers) started detached in their own terminal with a handle the AI can read/kill later | P1 | US-TOOL-1 |
 | F-TRM-25 | "Explain / fix with AI" on a terminal selection or the last failed command | P1 | US-INL-2 |
-| F-TRM-26 | Saved commands (Echo parity): named one-click commands per workspace | P2 | - |
+| F-TRM-26 | Saved commands (predecessor parity): named one-click commands per workspace | P2 | - |
 | F-TRM-27 | Phone: terminal as a slide-up drawer with an extra key row (Esc, Tab, Ctrl, arrows) | P1 | US-SRV-2 |

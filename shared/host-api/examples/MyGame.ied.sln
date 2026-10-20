@@ -1,6 +1,6 @@
 {
 	"version": 1,
-	"name": "Claymore",
+	"name": "MyGame",
 	"projects": [
 		{ "file": "build/ied/*.ied.proj", "optional": true }
 	],
@@ -13,7 +13,7 @@
 		{ "id": "c4", "path": "Nuke/tools/ied" }
 	],
 	"generator": {
-		"run": ["nuke.bat", "--init", "--ied"],
+		"run": ["nuke", "init", "--ied"],
 		"generatedPaths": ["build/ied/"]
 	}
 }

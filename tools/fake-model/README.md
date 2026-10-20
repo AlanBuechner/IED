@@ -122,7 +122,7 @@ An `error` or `cut` as the very first step happens before any header. When the s
 | `none` (must not stop) | `slow-prefill-keepalive` | 1 | 90 s prefill with a keepalive comment every 10 s |
 | `none` (must not stop) | `malformed-chunk` | 1 | one bad `data:` line mid-stream; skip it and go on |
 | `none` (must not stop) | `done-without-finish` | 1 | `[DONE]` with no finish_reason ever |
-| `none` (must not stop) | `tool-calls-same-index-different-ids` | 1 | two calls at index 0 with different ids: merge by id gives two calls (Echo's bug) |
+| `none` (must not stop) | `tool-calls-same-index-different-ids` | 1 | two calls at index 0 with different ids: merge by id gives two calls (the predecessor IDE's bug) |
 | `none` (must not stop) | `tool-call-id-on-every-delta`, `tool-calls-without-ids` | 1 each | id/name repeated on every delta; index-only parallel calls |
 | `none` (must not stop) | `reasoning-field-variants` | 1 | reasoning in `reasoning` and `thinking` fields |
 

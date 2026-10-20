@@ -7,7 +7,7 @@ The plan asks for "a sandbox that uses docker ... on another operating system ..
 1. **Linux** in Docker is easy (Docker Desktop's Linux containers, WSL2 backend).
 2. **macOS cannot legitimately run in Docker on PC hardware.** Docker-OSX-style images need a Linux KVM host and violate Apple's license outside Apple hardware. So "other OS" is generalized into **sandbox providers**: `docker` (Linux images), `wsl` (a dedicated WSL distro), and `ssh` (a remote machine - a Mac for macOS, the DGX Spark for ARM64 Linux, any build box). All three present the same interface to the UI and the AI.
 
-Also: C4 itself is Windows-only today (Linux port is planned upstream, `docs/17`), so for C4 projects the sandbox becomes useful once the compiler targets Linux. Non-C4 projects benefit immediately.
+Also: C4 itself is Windows-only today (a Linux port of the compiler is planned, `docs/17`), so for C4 projects the sandbox becomes useful once the compiler targets Linux. Non-C4 projects benefit immediately.
 
 ## Providers and lifecycle
 
@@ -38,5 +38,5 @@ Also: C4 itself is Windows-only today (Linux port is planned upstream, `docs/17`
 | F-SBX-21 | Task step target: a step may declare `target: sandbox:<name>` so a toolbar button ("Build (Linux)") runs inside it | P1 | US-SBX-1 |
 | F-SBX-22 | AI tools (T-SBX-*): run command in sandbox, build/test via a named task with sandbox target, read files from the sandbox, request network grant | P1 | US-SBX-1 |
 | F-SBX-23 | Problem matcher path mapping: container paths (`/workspace/...`) mapped back to host paths for Error List links | P1 | US-BLD-4 |
-| F-SBX-24 | GUI desktop: optional image variant with Xfce + noVNC; viewed in a pane; take-control pauses AI GUI actions (Echo parity) | P2 | US-SBX-4 |
+| F-SBX-24 | GUI desktop: optional image variant with Xfce + noVNC; viewed in a pane; take-control pauses AI GUI actions (predecessor parity) | P2 | US-SBX-4 |
 | F-SBX-25 | GPU: pass through NVIDIA GPU for compute (WSL2 CUDA); graphical apps render with software rasterizers (llvmpipe/lavapipe) - documented limitation | P2 | - |

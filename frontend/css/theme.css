@@ -94,7 +94,7 @@
 	--diff-filler: var(--bg-1);
 
 	/* ---------- syntax: Visual Assist X palette (default; owner choice 2026-10-19) ----------
-	   Values are C4Assist's c4-visual-assist-dark theme (C4/C4Assist/plugin/echo-plugin.json):
+	   Values are C4Assist's c4-visual-assist-dark theme:
 	   gold user types, blue keywords and built-in types, orange functions, olive variables/fields/params,
 	   purple macros, pink control flow, green comments, salmon strings. */
 	--syntax-keyword: #569cd6;

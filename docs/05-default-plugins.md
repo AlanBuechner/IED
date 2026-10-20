@@ -40,7 +40,7 @@ Providers: Docker (Linux images), WSL, SSH (a Mac for macOS work, an ARM Linux b
 
 ## profiler
 
-Tracy-class profiler built on the ITP trace protocol (`docs/16`). Tracy itself is a **feature reference only** - never linked into IED or C4. Timeline with frames, zones, plots, messages, locks; **thread renames as a time series with tinted segments and a by-task view**; statistics, find-zone, flame graph, compare; memory (live allocations, leaks by call stack, pools, GC events); GPU lanes with calibration (D3D12 first); capture library; Chrome-trace import (Nuke build traces, Claymore profiles); AI query tools. Instrumentation comes from Bedrock `Profile::` (C4 repo) so C4 programs are profileable by default.
+Tracy-class profiler built on the ITP trace protocol (`docs/16`). Tracy itself is a **feature reference only** - never linked into IED or C4. Timeline with frames, zones, plots, messages, locks; **thread renames as a time series with tinted segments and a by-task view**; statistics, find-zone, flame graph, compare; memory (live allocations, leaks by call stack, pools, GC events); GPU lanes with calibration (D3D12 first); capture library; Chrome-trace import (Nuke build traces, game-engine profiles); AI query tools. Instrumentation comes from Bedrock `Profile::` (`C4/Bedrock/`) so C4 programs are profileable by default.
 
 ## gpu
 

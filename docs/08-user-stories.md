@@ -12,7 +12,7 @@ Capture *who* IED is for and *what they need to do*, so every feature in `docs/f
   - `plan+` - stated in the plan; the detail here is an interpretation.
   - `ext` - extrapolated: not in the plan, but needed for the plan's goals to work. **The owner should skim `ext` items and strike anything unwanted.**
 - **Priority:**
-  - `P0` - needed before IED can replace Echo as the owner's daily driver (MVP).
+  - `P0` - needed before IED can replace the predecessor IDE as the owner's daily driver (MVP).
   - `P1` - needed for "v1 complete" (everything the plan asks for).
   - `P2` - later / nice to have.
 - **AC** = acceptance criteria. Only stated where it is not obvious from the story.
@@ -21,19 +21,19 @@ Capture *who* IED is for and *what they need to do*, so every feature in `docs/f
 
 | Persona | Who | What they care about |
 |---|---|---|
-| **Owner** | Builds the C4 compiler, the Claymore engine and games, on a Windows desktop. Runs local models (llama.cpp on a LAN box, e.g. the DGX Spark) and sometimes Claude. Lives in Visual Studio muscle memory. Prefers tabs. | Speed, density, VS-parity, AI that does real work unattended, privacy, nothing lost on crash. |
+| **Owner** | Builds the C4 compiler, a game engine and games, on a Windows desktop. Runs local models (llama.cpp on a LAN box, e.g. the DGX Spark) and sometimes Claude. Lives in Visual Studio muscle memory. Prefers tabs. | Speed, density, VS-parity, AI that does real work unattended, privacy, nothing lost on crash. |
 | **Remote owner** | The same person away from the desk: phone on the couch, laptop elsewhere. | See what the AI is doing, approve/steer it, read diffs, kick off a build - without a desktop. |
 | **Agent** | The AI itself (main loop and sub-agents) as a *user* of IED's tool surface. | Precise, cheap tools: navigate by symbol, build/test/debug, find skills, never needing whole files in context. Clear errors it can act on. |
-| **Plugin author** | The C4 team shipping the C4 language plugin; the Claymore team shipping engine plugins (shader LSP, GPU debugger, scene tools); third parties. | A stable, documented API; project-local plugins that just work in trusted workspaces; fast reload while developing. |
-| **Engine user** | Future users of C4/Claymore who are not the owner. | Open a project and have build/run/debug/AI work with zero setup. |
+| **Plugin author** | The C4 team shipping the C4 language plugin; a game-engine team shipping engine plugins (shader LSP, GPU debugger, scene tools); third parties. | A stable, documented API; project-local plugins that just work in trusted workspaces; fast reload while developing. |
+| **Engine user** | Future users of C4 and engines built on it who are not the owner. | Open a project and have build/run/debug/AI work with zero setup. |
 | **Drive-by** | Anyone opening a single file or folder (`ied ./`, Explorer right-click). | Instant open, no project ceremony. |
 
 ## Core journeys
 
 End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see `docs/19`). Every one must pass at desktop width and the starred (*) ones also at phone width.
 
-- **J1 - Morning build loop.** Owner double-clicks `Claymore.ied.sln` (or runs `ied .`). The browser opens to the solution with yesterday's tabs, splits and toolbar selections restored. They pick `Development | x64`, press F5: build output streams to *Build*, the error list fills with clickable errors, they fix one (green/yellow margins track it), press F5 again, the game launches under the debugger, hits a breakpoint, they inspect locals and step.
-- **J2 - Leave it running* .** Owner gives a chat a multi-hour task ("port the logging subsystem from Icepick"), closes the browser and leaves. The agent keeps working on the server. From the phone they open IED, see the task list half done, read the modified-files list and a diff, inject "use the existing Ring buffer type", and approve a pending shell command. Back at the desk later, everything is where the phone left it.
+- **J1 - Morning build loop.** Owner double-clicks `MyGame.ied.sln` (or runs `ied .`). The browser opens to the solution with yesterday's tabs, splits and toolbar selections restored. They pick `Development | x64`, press F5: build output streams to *Build*, the error list fills with clickable errors, they fix one (green/yellow margins track it), press F5 again, the game launches under the debugger, hits a breakpoint, they inspect locals and step.
+- **J2 - Leave it running* .** Owner gives a chat a multi-hour task ("port the logging subsystem from the C++ reference engine"), closes the browser and leaves. The agent keeps working on the server. From the phone they open IED, see the task list half done, read the modified-files list and a diff, inject "use the existing Ring buffer type", and approve a pending shell command. Back at the desk later, everything is where the phone left it.
 - **J3 - Planner + implementer.** Owner selects model group "plan-claude/impl-local": Claude writes the plan into the chat's task list and scratchpad; temp-0 local workers implement each task; the main loop verifies with build + tests. When Claude hits its session limit, planning routes to the strong local model with a visible note.
 - **J4 - Crash triage with AI.** A test fails. Owner right-clicks the failure -> "Fix with AI". The agent reads the failure, sets a breakpoint through the debugger tools, runs the test, inspects the stack, navigates by symbol via LSP tools, edits, rebuilds, reruns, and reports. Every tool call is visible live with timing and status.
 - **J5 - Frame hitch.** Owner clicks *Profile*. The game launches instrumented; the profiler shows a frame spike; in *by task* view the pooled worker threads regroup by job name (renames tinted); a GPU pass is long; they jump from a zone to its source in the editor. The AI is asked "why is frame 812 slow?" and answers using profiler query tools.
@@ -43,7 +43,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **J9 - The week-long chat.** A chat runs for days across many compressions and two IED server restarts. Context never overflows; the context panel shows what was compressed and when; old messages scroll back from disk; a crash loses at most the in-flight token stream.
 - **J10 - Drive-by edit*.** Right-click a `.md` file in Explorer -> *Open with IED*: it opens in a lightweight folder workspace with markdown preview; ticking a checkbox in the preview writes back to the file.
 - **J11 - Model went quiet.** A local model stops mid-answer. IED shows exactly why ("stream idle 90 s", "finish_reason=length", "ended after announcing a tool call"), automatically continues or retries per policy, and the trajectory view shows the raw exchange so the owner can tell harness from model.
-- **J12 - Game-engine assist.** With the Claymore plugin and its MCP server enabled, the agent inspects the running game's scene, takes a screenshot of the game window, compares it to a reference image, tweaks a shader, hot-reloads, and confirms visually.
+- **J12 - Game-engine assist.** With the game engine's plugin and its MCP server enabled, the agent inspects the running game's scene, takes a screenshot of the game window, compares it to a reference image, tweaks a shader, hot-reloads, and confirms visually.
 
 ## Stories by epic
 
@@ -55,7 +55,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-SRV-4** `ext` `P0` - As Owner, remote (non-localhost) access requires a login, and localhost access is protected from malicious web pages (DNS-rebinding / cross-site WebSocket attacks), because the server can run shell commands.
 - **US-SRV-5** `ext` `P0` - As Owner, I can see which devices are connected and revoke a remembered device.
 - **US-SRV-6** `ext` `P1` - As Remote owner, I get a notification (in-app, and push where the browser allows) when a chat needs approval, finishes, or fails, and when a build finishes.
-- **US-SRV-7** `ext` `P1` - As Owner, the server can host several workspaces at once (C4 and Claymore both have agents running) and I switch between them without stopping either.
+- **US-SRV-7** `ext` `P1` - As Owner, the server can host several workspaces at once (the C4 compiler and a game project both have agents running) and I switch between them without stopping either.
 - **US-SRV-8** `ext` `P1` - As Owner, the server starts on login (optional), runs headless in the background, and has a tray icon / CLI to open, stop, and show status.
 - **US-SRV-9** `ext` `P1` - As Remote owner, I can preview a web app the project serves on `localhost:<port>` of the server machine from my phone (port forwarding through IED).
 - **US-SRV-10** `ext` `P2` - As Owner, I can reach IED from outside my LAN securely (documented Tailscale/WireGuard path; optional built-in TLS).
@@ -80,10 +80,10 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-WSP-2** `plan` `P0` - As Owner, settings and skills live in a committed `.ied/` folder at the solution root, so deleting generated files loses nothing.
 - **US-WSP-3** `plan` `P0` - As Drive-by, `ied ./` opens the folder without creating a project; `ied file.cf:42` opens a file at a line.
 - **US-WSP-4** `plan` `P1` - As Drive-by, Explorer's right-click menu has *Open with IED* for files and folders.
-- **US-WSP-5** `plan+` `P1` - As Owner, I can open a **federation** - several solutions/folders from different repos (C4 + Claymore + IED) in one workspace - so one chat can work across them. *(Interpretation of "federated projects" - confirm in `docs/99`.)*
+- **US-WSP-5** `plan+` `P1` - As Owner, I can open a **federation** - several solutions/folders from different repos (this repo with IED + C4, plus a game project) in one workspace - so one chat can work across them. *(Interpretation of "federated projects" - confirm in `docs/99`.)*
 - **US-WSP-6** `plan` `P0` - As Owner, the Solution Explorer shows groups -> projects -> folders -> files with distinct file-type icons, like VS.
 - **US-WSP-7** `ext` `P0` - As Owner, opening an untrusted workspace asks whether to trust it; until trusted, project-local plugins, project-defined toolbar commands and AI tools that execute code stay off.
-- **US-WSP-8** `ext` `P1` - As Owner, *New Project* offers templates contributed by plugins (e.g. "C4 executable", "Claymore game"), and the generator writes `.ied.proj` / `.ied/` files idempotently.
+- **US-WSP-8** `ext` `P1` - As Owner, *New Project* offers templates contributed by plugins (e.g. "C4 executable", or a game template from an engine plugin), and the generator writes `.ied.proj` / `.ied/` files idempotently.
 - **US-WSP-9** `ext` `P1` - As Owner, I choose a startup project (VS concept) when the solution has several executables; F5 uses it.
 - **US-WSP-10** `ext` `P1` - As Owner, file operations in the tree (new, rename, move, delete-to-recoverable-trash, drag-drop, copy path, reveal in Explorer) work like VS, and renames can trigger LSP refactors.
 - **US-WSP-11** `ext` `P1` - As Owner, a single loose file opened in a solution shows under *Miscellaneous Files* (VS parity) instead of being lost.
@@ -189,7 +189,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-TOOL-3** `plan` `P0` - As Agent, I can build, run, test and read structured errors through the same toolbar commands the human uses.
 - **US-TOOL-4** `plan` `P1` - As Agent, I can drive the debugger: breakpoints, run, step, stack, locals, evaluate.
 - **US-TOOL-5** `plan` `P1` - As Agent, I can load images and video frames (when the model supports vision), take screenshots of a web page / app window, and drive a headless browser (navigate, click, type, read console and network).
-- **US-TOOL-6** `plan` `P1` - As Agent, I can use MCP servers (Blender, Claymore, others) as ordinary tools.
+- **US-TOOL-6** `plan` `P1` - As Agent, I can use MCP servers (Blender, a game engine, others) as ordinary tools.
 - **US-TOOL-7** `plan` `P1` - As Agent, I have game/engine-oriented tools: window capture of a running app, image compare/diff, process CPU/memory stats, profiler queries, sandbox runs.
 - **US-TOOL-8** `ext` `P1` - As Agent, I can ask the user a structured question (options) and wait, instead of guessing.
 - **US-TOOL-9** `ext` `P1` - As Owner, IED itself is an MCP server, so external agents (e.g. Claude Code in the terminal) can use IED's LSP/build/editor tools.
@@ -237,7 +237,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-PRF-4** `plan` `P1` - As Owner, GPU zones (D3D12 first) appear alongside CPU time, correctly calibrated.
 - **US-PRF-5** `plan` `P1` - As Owner, C4 programs are profileable out of the box through Bedrock.
 - **US-PRF-6** `ext` `P1` - As Owner/Agent, profiler data is queryable by the AI (hot zones, frame breakdown, leak list).
-- **US-PRF-7** `ext` `P2` - As Owner, traces from other tools import (Chrome trace JSON, which Nuke's `build-trace.json` and Claymore's planned profile output already use).
+- **US-PRF-7** `ext` `P2` - As Owner, traces from other tools import (Chrome trace JSON, which Nuke's `build-trace.json` and the game engine's planned profile output already use).
 
 ### GPU - Graphics debugger
 
@@ -253,7 +253,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 
 Journey added for this epic:
 
-- **J15 - Black pixel*.** A black speck shows on a crate in Claymore. Owner clicks *Capture*; the next frame lands in the GPU library. They click the pixel: the history says the lit pass wrote NaN, which the blit turned black. *Debug Pixel* steps `DefaultLit` into `PBR.hlsli` and stops at `DistributionGGX` returning 0 / 0: the crate's material binds the engine's black texture as its roughness map. They ask the AI; it explains the chain and proposes clamping roughness, Edit and Replay shows the 26 NaN pixels gone, the change is saved to the shader file and the game rebuilds. On the phone the same capture shows the pixel history and the AI's answer.
+- **J15 - Black pixel*.** A black speck shows on a crate in the game. Owner clicks *Capture*; the next frame lands in the GPU library. They click the pixel: the history says the lit pass wrote NaN, which the blit turned black. *Debug Pixel* steps `DefaultLit` into `PBR.hlsli` and stops at `DistributionGGX` returning 0 / 0: the crate's material binds the engine's black texture as its roughness map. They ask the AI; it explains the chain and proposes clamping roughness, Edit and Replay shows the 26 NaN pixels gone, the change is saved to the shader file and the game rebuilds. On the phone the same capture shows the pixel history and the AI's answer.
 
 ### PLG - Plugins and extensibility
 
@@ -293,15 +293,15 @@ Journey added for this epic:
 - **US-DST-3** `ext` `P1` - As Owner, first run walks me through: (optional) remote password, detecting local model servers on common ports, picking a first model group.
 - **US-DST-4** `ext` `P2` - As Owner, an optional desktop window (WebView2) gives an app-like experience where browser-reserved shortcuts (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab) work.
 
-### XRP - Family integration (generic features the C4/Nuke/Claymore plugins use)
+### XRP - Family integration (generic features the C4/Nuke/game-engine plugins use)
 
-- **US-XRP-1** `plan` `P0` - As Owner, C4 gets first-class support through a C4 plugin (in the C4 repo): language definition, C4LSP, C4DAP, problem matcher for compiler output, Nuke toolbar presets, project templates, C4 skills.
-- **US-XRP-2** `plan` `P0` - As Owner, Nuke keeps LSP options in sync with real builds (`.ied/local/lsp-options/`), and `nuke --init` writes IED solution/project files.
+- **US-XRP-1** `plan` `P0` - As Owner, C4 gets first-class support through a C4 plugin (maintained in this repo alongside `C4/` and `Nuke/`): language definition, C4LSP, C4DAP, problem matcher for compiler output, Nuke toolbar presets, project templates, C4 skills.
+- **US-XRP-2** `plan` `P0` - As Owner, Nuke keeps LSP options in sync with real builds (`.ied/local/lsp-options/`), and `nuke init --ied` writes IED solution/project files.
 - **US-XRP-3** `plan` `P1` - As Owner, C4Assist is rewritten for IED (its features become C4 plugin contributions).
 - **US-XRP-4** `plan` `P1` - As Owner, Bedrock exposes profiler hooks so C4 apps are profileable by default.
-- **US-XRP-5** `ext` `P1` - As Owner, Claymore can ship plugins for its shader language, scene/asset files, session control (named-pipe CLI) and GPU captures, all through generic contribution points.
+- **US-XRP-5** `ext` `P1` - As Owner, a game engine can ship plugins for its shader language, scene/asset files, session control (named-pipe CLI) and GPU captures, all through generic contribution points.
 
-### ORC - Orchestration and mission control (where IED goes furthest beyond Echo)
+### ORC - Orchestration and mission control (where IED goes furthest beyond its predecessor)
 
 - **US-ORC-1** `ext` `P0` - As Remote owner, one Mission Control screen shows every run on the server across workspaces, and one attention queue holds everything waiting on me, so I can triage from my phone in a minute.
 - **US-ORC-2** `ext` `P1` - As Owner, I keep a queue/board of goals per workspace; agents pick up the next ready goal when model capacity frees up, so my local GPUs work while I do not.
@@ -310,13 +310,13 @@ Journey added for this epic:
 - **US-ORC-5** `ext` `P1` - As Owner, the scheduler knows each model server's slots and gives my interactive chat priority over background goals.
 - **US-ORC-6** `ext` `P1` - As Owner, I schedule recurring goals ("nightly: run all tests, fix what fails") and cap daily cloud spend.
 - **US-ORC-7** `ext` `P1` - As Owner, in away mode a goal that needs approval waits without blocking the others, and I get a digest when I return.
-- **US-ORC-8** `ext` `P1` - As Owner, a goal can span repos (fix C4 -> refresh Claymore's vendored compiler -> rebuild Claymore), and an agent that finds a bug in another repo files a goal there instead of working around it.
+- **US-ORC-8** `ext` `P1` - As Owner, a goal can span repos (fix C4 -> refresh the game's vendored compiler -> rebuild the game), and an agent that finds a bug in another repo files a goal there instead of working around it.
 - **US-ORC-9** `ext` `P1` - As Owner, IED keeps scorecards of how each model actually performs per role (stalls, tool-call validity, verification pass rate, speed) and can run an eval suite across model groups, so I choose models from evidence.
 
 Journeys added for this epic:
 
-- **J13 - Overnight queue.** Owner queues five goals in Claymore and two in C4, sets away mode and goes to bed. Workers run in worktrees on the local box's slots; the verifier rejects one result and the agent fixes it; one goal waits for a `git push` approval without blocking the rest. In the morning the phone shows a digest: four in Review with green evidence, one needs an answer, one failed twice with a post-mortem.
-- **J14 - Cross-repo bug.** A Claymore agent hits a C4 compiler bug, writes a minimal repro, and files a goal in the C4 workspace via handoff. The C4 agent fixes the compiler and runs the C4 gates. A federation goal then refreshes Claymore's vendored `C4.exe` and resumes the original Claymore goal - all visible in Mission Control.
+- **J13 - Overnight queue.** Owner queues five goals in the game project and two in C4, sets away mode and goes to bed. Workers run in worktrees on the local box's slots; the verifier rejects one result and the agent fixes it; one goal waits for a `git push` approval without blocking the rest. In the morning the phone shows a digest: four in Review with green evidence, one needs an answer, one failed twice with a post-mortem.
+- **J14 - Cross-repo bug.** A game-project agent hits a C4 compiler bug, writes a minimal repro, and files a goal in the C4 workspace via handoff. The C4 agent fixes the compiler and runs the C4 gates. A federation goal then refreshes the game's vendored `C4.exe` and resumes the original game goal - all visible in Mission Control.
 
 ## Coverage check
 

@@ -25,7 +25,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 |    |                    | ========== Building: Game, Development ===  | |                 |
 +----+--------------------+---------------------------------------------+-----------------+
 | [>_ PowerShell v] [+] [split] [trash]                              [^ maximize] [v hide] |  terminal dock
-| PS C:\GameDev\Claymore> nuke build                                                      |  (all activities)
+| PS C:\Work\MyGame> nuke build                                                           |  (all activities)
 +-----------------------------------------------------------------------------------------+
 | Ready  |  AI: 2 running, 1 needs approval  |  Ln 13, Col 2  Tabs  UTF-8  CRLF  C4  | main | 2 devices |  status bar
 +-----------------------------------------------------------------------------------------+
@@ -44,11 +44,11 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 +----+-------------------------------------------------------------------------+------------------+
 |    | [Port logging *] [Fix test 3/7] [General]  [+]                           | v Context  62%   |
 |    +-------------------------------------------------------------------------+   system   4.1k  |
-|    | You: port the logging subsystem from Icepick                     10:02  |   AGENTS   2.0k  |
+|    | You: port the logging subsystem from RefEngine                   10:02  |   AGENTS   2.0k  |
 |    |                                                                         |   messages 38k   |
 |    | > Thinking  (12 s, 1.2k tok)                                            |   tools    31k   |
 |    | [code_symbols Log*]  ok 38 ms                                           | v Tasks  3/7     |
-|    | [fs_read Icepick/Log.cpp 1-200]  ok 4 ms                                |   [x] read ref   |
+|    | [fs_read RefEngine/Log.cpp 1-200]  ok 4 ms                              |   [x] read ref   |
 |    | [shell_run nuke build]  ok 18.2 s   exit 0                              |   [>] port sink  |
 |    | [fs_edit Engine/src/Core/Log.cf]  awaiting approval                     |   [ ] tests      |
 |    |  +-------------------------------------------------------------------+  | v Modified (4)   |
@@ -70,7 +70,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 
 ```
 +---------------------------+      +---------------------------+      +---------------------------+
-| Claymore v      (2) [bell]|      | < Ring.cf          [...]  |      | < Changes (4)      [...]  |
+| MyGame v        (2) [bell]|      | < Ring.cf          [...]  |      | < Changes (4)      [...]  |
 +---------------------------+      +---------------------------+      +---------------------------+
 | [Port logging *][Fix 3/7] |      | 12 	void Push(T item) |      | Engine/src/Core/Log.cf    |
 |                           |      | 13 	{                 |      |  - old line               |

@@ -53,4 +53,4 @@ Owner: `plugins/git` (UI + orchestration) on `src/git` (host plumbing).
 | F-GIT-40 | Git tools for the AI (T-GIT-*): status, diff, log, show, blame (read-only by default); stage/commit/branch gated by permission mode | P0 | US-TOOL-1 |
 | F-GIT-41 | "Review changes with AI": the working tree diff or a commit range sent to a chat with a review prompt | P1 | US-INL-2 |
 | F-GIT-42 | Hosting integration (GitHub PRs: list, checkout, create, review comments) as a separate optional plugin | P2 | - |
-| F-GIT-43 | Source control provider interface for other VCS plugins (Perforce, Fossil) - Echo had both | P2 | - |
+| F-GIT-43 | Source control provider interface for other VCS plugins (Perforce, Fossil) - the predecessor IDE had both | P2 | - |

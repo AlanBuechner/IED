@@ -4,7 +4,7 @@
 
 Specify how an AI run executes on the server: the loop, modes, sub-agents, tasks, steering, checkpoints - and, above all, **how IED keeps local models from "stopping randomly"** (IDEplan: "i dont know if that was the model its self or the harness but we should have some protections for that"). The answer to "model or harness?" must always be visible to the owner.
 
-This doc draws on a code-level review of Echo's harness (`C:\GameDev\echo`, the IDE the owner saw the stops in). Its failure causes are listed below with the fix IED applies to each.
+This doc draws on a code-level review of the predecessor IDE's harness (the IDE the owner saw the stops in). Its failure causes are listed below with the fix IED applies to each.
 
 ## Vocabulary
 
@@ -55,7 +55,7 @@ run(turn):
 			premature_stop  : apply recovery policy (below); continue or fail
 ```
 
-- **Ask mode:** a text reply with no tool calls ends the turn, *unless* the stop is classified as premature (below). This is the main Echo gap - there, any reply without tool calls ended the turn in every mode except Goal.
+- **Ask mode:** a text reply with no tool calls ends the turn, *unless* the stop is classified as premature (below). This is the predecessor's main gap - there, any reply without tool calls ended the turn in every mode except Goal.
 - **Agent mode:** the turn ends only via `finish(summary, verification)`. A reply with no tool call and no `finish` is a checkpoint followed by a continuation nudge (bounded; if the model keeps replying without acting, it is paused as "no progress" - never silently "done").
 - **Plan mode:** read-only tool set + `ask_user` + `research`; ends with a plan (`submit_plan(plan_markdown, tasks[])`) that the UI renders with approve/revise buttons (F-CHT-52).
 
@@ -95,7 +95,7 @@ A stop is classified into exactly one **stop reason**, shown in the turn footer 
 | `loop_detected` | pause with explanation (same call + same error 3x, or identical edits oscillating) | - |
 | any reason after its bound | **pause** (not fail) with the reason and an "attention" notification; the owner can resume, switch model, or edit | - |
 
-Nudges are **user-role** messages tagged `origin: harness` (rendered in the UI as small grey "harness" notes so the owner sees exactly what IED said to the model). No mid-history `system` messages (they break strict chat templates - an Echo issue).
+Nudges are **user-role** messages tagged `origin: harness` (rendered in the UI as small grey "harness" notes so the owner sees exactly what IED said to the model). No mid-history `system` messages (they break strict chat templates - a predecessor issue).
 
 ### Watchdogs (the "is it dead or thinking?" problem)
 
@@ -107,7 +107,7 @@ Two separate timers, because local prefill of a long prompt can legitimately tak
 
 ### Truth about the model's context window
 
-Echo defaulted every model to a 262144-token window. When the real server was smaller, the server silently truncated the prompt (Ollama `num_ctx`, llama.cpp context shift), the model lost its instructions, and behavior degraded into "random" stops. IED:
+The predecessor IDE defaulted every model to a 262144-token window. When the real server was smaller, the server silently truncated the prompt (Ollama `num_ctx`, llama.cpp context shift), the model lost its instructions, and behavior degraded into "random" stops. IED:
 
 1. Discovers the real context size (llama.cpp `/props`, Ollama `/api/show`, vLLM `max_model_len` in `/v1/models`) on connect and on every probe.
 2. Refuses to send a prompt larger than the discovered window (compresses first).
@@ -117,9 +117,9 @@ Echo defaulted every model to a 262144-token window. When the real server was sm
 ### Dialect normalization (the other big source of "stops")
 
 - **Tool calls arriving as text:** a fallback parser recognizes Hermes `<tool_call>{...}</tool_call>`, Qwen-style `<function=name>...`, Mistral `[TOOL_CALLS]`, fenced JSON objects with `name` + `arguments`, and harmony channels. Streaming detection: once a tool-call opener is seen in text, the UI renders a tool card instead of prose.
-- **Streaming tool-call deltas** merge by `id` when present, by `index` otherwise (Echo merged by index only and corrupted servers that send several calls at index 0 with different ids).
+- **Streaming tool-call deltas** merge by `id` when present, by `index` otherwise (the predecessor merged by index only and corrupted servers that send several calls at index 0 with different ids).
 - **Reasoning** from `reasoning_content`, `reasoning`, `thinking`, or `<think>...</think>` in content - normalized into thinking segments; a reply that is only an unclosed `<think>` is `reasoning_only`.
-- **Malformed SSE chunk:** logged and skipped; the stream continues (Echo aborted the whole stream on one bad chunk).
+- **Malformed SSE chunk:** logged and skipped; the stream continues (the predecessor aborted the whole stream on one bad chunk).
 - **`[DONE]` without finish_reason** is accepted; **EOF without either** is `disconnected_mid_stream` (recoverable), not a fatal error.
 
 ### Transparency (answering "model or harness?")
@@ -128,9 +128,9 @@ Echo defaulted every model to a 262144-token window. When the real server was sm
 - The trajectory stores the exact request body, raw response chunks (batched), timings (TTFT, prefill rate, tokens/s) and the classification decision.
 - "Report a stop" (F-CHT-93) bundles the last exchange so it can be replayed against the same server outside IED (curl script included). If the replay stops the same way, it is the model/server; if not, it is IED.
 
-### Echo failure causes -> IED fix (checklist for the implementer)
+### Predecessor failure causes -> IED fix (checklist for the implementer)
 
-| # | Echo behavior | IED fix |
+| # | Predecessor behavior | IED fix |
 |---|---|---|
 | 1 | Reply without tool calls ends the turn outside Goal mode | Mode-aware completion; `announced_no_action` detection; Agent mode needs `finish` |
 | 2 | No fallback parser for tool calls emitted as text | Text tool-call parser + dialect profile |

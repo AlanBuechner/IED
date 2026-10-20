@@ -18,7 +18,7 @@ A **workspace** is what one browser tab views. It is one of:
 | F-WSP-1 | `.ied.sln` / `.ied.proj` JSON files (schema v1); project `root` may point outside the project file's folder | P0 | US-WSP-1 | src/host, shared/host-api |
 | F-WSP-2 | Solution groups (display folders in the tree, VS "solution folders") | P0 | US-WSP-6 | src/host, plugins/editor |
 | F-WSP-3 | Startup project selection (per device? no - per workspace, stored in `.ied/local/`) and VS "multiple startup projects" P2 | P1 | US-WSP-9 | plugins/editor |
-| F-WSP-4 | File-system watching of solution/project files: external regeneration (e.g. `nuke --init`) reloads the tree without reopening | P0 | US-WSP-1 | src/fs |
+| F-WSP-4 | File-system watching of solution/project files: external regeneration (e.g. `nuke init`) reloads the tree without reopening | P0 | US-WSP-1 | src/fs |
 | F-WSP-5 | Project file include/exclude globs (default: everything under `root` except `.git`, build output dirs from settings) | P0 | US-WSP-6 | src/host |
 | F-WSP-6 | Validation errors in solution/project files are shown in the Error List with file/line, never silently ignored | P0 | - | src/host |
 | F-WSP-7 | Project properties page rendered from the project-file schema (+ plugin-contributed property pages) | P2 | US-WSP-12 | plugins/editor |
@@ -46,7 +46,7 @@ A **workspace** is what one browser tab views. It is one of:
 
 ## Federations
 
-Interpretation of the plan's "federated projects" (confirm in `docs/99`): a named set of roots that are worked on together - e.g. C4 + Claymore + IED - because the family's work constantly crosses repo boundaries (a Claymore bug is a C4 compiler fix).
+Interpretation of the plan's "federated projects" (confirm in `docs/99`): a named set of roots that are worked on together - e.g. this repo (IED + C4) plus a game project - because the work constantly crosses repo boundaries (a bug in the game is often a C4 compiler fix).
 
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
@@ -54,7 +54,7 @@ Interpretation of the plan's "federated projects" (confirm in `docs/99`): a name
 | F-WSP-31 | Tree shows one top node per member; search scopes: current project / current member / whole federation | P1 | US-WSP-5, US-EDT-4 | plugins/editor |
 | F-WSP-32 | Each member keeps its own `.ied/`, plugins, LSP options and trust; settings resolve per member for files inside it | P1 | US-WSP-5 | src/host |
 | F-WSP-33 | Chats in a federation see all members' `AGENTS.md` (each scoped to its root) and can use tools across members, subject to each member's trust and egress policy (strictest wins for a chat that touched several) | P1 | US-WSP-5, US-CTX-5 | src/ai |
-| F-WSP-34 | Federation-level toolbar (e.g. "build C4 compiler, refresh Claymore's vendored C4.exe, build Claymore") composed from member toolbars | P2 | US-WSP-5 | plugins/editor |
+| F-WSP-34 | Federation-level toolbar (e.g. "build C4 compiler, refresh the game's vendored C4.exe, build the game") composed from member toolbars | P2 | US-WSP-5 | plugins/editor |
 
 ## Trust
 
@@ -81,5 +81,5 @@ Interpretation of the plan's "federated projects" (confirm in `docs/99`): a name
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
 | F-WSP-60 | *New Project / New Solution* dialog listing `projectTemplates` contributions (name, description, icon, parameters schema) | P1 | US-WSP-8 | plugins/editor |
-| F-WSP-61 | Template execution = a command list (like toolbar steps), typically calling the build system's init (`nuke --init`) and then adding the result to the solution | P1 | US-WSP-8 | plugins/editor |
+| F-WSP-61 | Template execution = a command list (like toolbar steps), typically calling the build system's init (`nuke init`) and then adding the result to the solution | P1 | US-WSP-8 | plugins/editor |
 | F-WSP-62 | *Add New Item* (file templates per language, contributed) | P2 | US-WSP-8 | plugins/editor |

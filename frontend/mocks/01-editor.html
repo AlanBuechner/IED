@@ -35,7 +35,7 @@
 			</div>
 			<div style="padding: 6px 8px;"><div class="input"><span>Search Solution Explorer (Ctrl+;)</span><i class="ci ci-search sm" style="margin-left:auto"></i></div></div>
 			<div class="tree scroll">
-				<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-library ft-project"></i><span class="name">Solution 'Claymore' (2 of 2 projects)</span></div>
+				<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-library ft-project"></i><span class="name">Solution 'MyGame' (2 of 2 projects)</span></div>
 				<div class="row" style="--d:1"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-project ft-project"></i><span class="name">Engine</span><span class="meta">module</span></div>
 				<div class="row" style="--d:2"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">Core</span></div>
 				<div class="row" style="--d:3"><span class="tw"><i class="ci ci-chevron-right"></i></span><i class="ci ci-folder ft-folder"></i><span class="name">Math</span></div>
@@ -60,8 +60,8 @@
 				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">Main.cf</span></div>
 				<div class="row" style="--d:1"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">Solution Items</span></div>
 				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-markdown ft-doc"></i><span class="name">AGENTS.md</span></div>
-				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-python ft-script"></i><span class="name">Project.py</span></div>
-				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-terminal-cmd ft-script"></i><span class="name">nuke.bat</span></div>
+				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-python ft-script"></i><span class="name">nuke.toml</span></div>
+				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-terminal-cmd ft-script"></i><span class="name">build.py</span></div>
 				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-json ft-data"></i><span class="name">.ied/solution.json</span></div>
 			</div>
 		</aside>
@@ -150,7 +150,7 @@
 					</div>
 					<div class="code" data-first="1" data-ai="24-33" data-fold="5,10,18,24,35" data-map="4">
 <pre>
-`com:// Log - declarations (port of Icepick Core::Log). Implementation in Log.cf.`
+`com:// Log - declarations (port of RefEngine Core::Log). Implementation in Log.cf.`
 `mac:include` `str:"Core/Ring.ch"`
 
 `kw:namespace` `ns:Engine`
@@ -212,7 +212,7 @@
 					</div>
 <div class="out-body">Build started at 21:14:07 - Game, Development-windows-x64
 <span class="a-bold">========== Building: Game, Development-windows-x64 ==========</span>
-<span class="a-cyan">[nuke]</span> Claymore: resolving modules Engine, Game
+<span class="a-cyan">[nuke]</span> MyGame: resolving modules Engine, Game
 <span class="a-cyan">[nuke]</span> Engine: 3 of 41 files changed since the last build
 <span class="a-cyan">[nuke]</span> Engine: c4 -O0 -g -module Engine (14 jobs)
 <span class="hl-line"><span class="loc">Engine/src/Core/Log.cf (30:9)</span> <span class="a-yellow">warning</span>: unused variable 'level'</span>

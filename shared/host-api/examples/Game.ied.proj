@@ -15,7 +15,7 @@
 			"label": "Build",
 			"icon": "$(gear)",
 			"steps": [
-				{ "run": ["${solutionDir}/nuke.bat", "build", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"], "cwd": "${solutionDir}", "output": "build", "problemMatcher": "c4" }
+				{ "run": ["nuke", "build", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"], "cwd": "${solutionDir}", "output": "build", "problemMatcher": "c4" }
 			]
 		},
 		"run": {
@@ -24,7 +24,7 @@
 			"icon": "$(run)",
 			"steps": [
 				{ "task": "build" },
-				{ "run": ["${solutionDir}/nuke.bat", "run", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"], "cwd": "${solutionDir}", "output": "run", "onlyIf": "prevSuccess" }
+				{ "run": ["nuke", "run", "-p", "${buildSystem.projectName}", "-c", "${config}", "-a", "${arch}"], "cwd": "${solutionDir}", "output": "run", "onlyIf": "prevSuccess" }
 			]
 		},
 		"debug": {
@@ -41,7 +41,7 @@
 			"label": "Test",
 			"icon": "$(beaker)",
 			"steps": [
-				{ "run": ["${solutionDir}/nuke.bat", "test", "-c", "${config}"], "cwd": "${solutionDir}", "output": "test", "problemMatcher": ["c4", "c4-test"], "testResults": { "format": "c4-test-json", "path": "${solutionDir}/build/int/${config}-windows-${arch}/test-results.json" } }
+				{ "run": ["nuke", "test", "-c", "${config}"], "cwd": "${solutionDir}", "output": "test", "problemMatcher": ["c4", "c4-test"], "testResults": { "format": "c4-test-json", "path": "${solutionDir}/build/int/${config}-windows-${arch}/test-results.json" } }
 			]
 		}
 	},

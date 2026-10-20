@@ -517,7 +517,7 @@
 			"properties": {
 				"id": { "type": "string" },
 				"label": { "type": "string" },
-				"detect": { "type": "string", "description": "Glob that marks a project as using this preset (e.g. 'Project.py')." },
+				"detect": { "type": "string", "description": "Glob that marks a project as using this preset (e.g. 'nuke.toml')." },
 				"variables": { "type": "object", "additionalProperties": { "$ref": "project.v1.schema.json#/$defs/variable" } },
 				"tasks": { "type": "object", "additionalProperties": { "$ref": "project.v1.schema.json#/$defs/task" } },
 				"toolbar": { "$ref": "project.v1.schema.json#/$defs/toolbar" },

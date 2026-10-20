@@ -2,7 +2,7 @@
 
 ## host-api/
 
-**The contract** - see [`host-api/README.md`](host-api/README.md). v1 drafts exist for the plugin manifest, solution, project, federation and agent-mode files, the WebSocket frame schema, the process-plugin RPC (`ied-plugin-rpc/1`), the skill file format, plus validated examples (a Claymore-shaped solution/project and the C4 language plugin as a declarative manifest). Freeze after owner review (M0, `docs/18`).
+**The contract** - see [`host-api/README.md`](host-api/README.md). v1 drafts exist for the plugin manifest, solution, project, federation and agent-mode files, the WebSocket frame schema, the process-plugin RPC (`ied-plugin-rpc/1`), the skill file format, plus validated examples (a game-shaped `MyGame` solution/project and the C4 language plugin as a declarative manifest). Freeze after owner review (M0, `docs/18`).
 
 ## ui-kit/
 

@@ -27,7 +27,7 @@ Most third-party language/engine support should need **no code at all**: the C4 
 | App (global) | `%APPDATA%/IED/plugins/<id>/` | owner approved the plugin's content hash and permissions |
 | Project-local | path referenced by the solution's `localPlugins` | the workspace is **trusted** (`docs/11`) |
 
-If ids clash: project-local (trusted) > app > built-in, with a visible "overridden by" note in Settings > Plugins. That is how a repo pins *its* version of a language plugin (the C4 repo vendors its plugin under `Nuke/tools/ied`, Claymore can ship a shader-language or GPU-debugger plugin).
+If ids clash: project-local (trusted) > app > built-in, with a visible "overridden by" note in Settings > Plugins. That is how a repo pins *its* version of a language plugin (a C4 project vendors its plugin under `Nuke/tools/ied`, a game engine can ship a shader-language or GPU-debugger plugin).
 
 ## Lifecycle
 
@@ -68,7 +68,7 @@ A binding is a **named, versioned, schema-typed function or event** that one plu
 - `tasks.run { task, vars }`, event `tasks.status` - the profiler starts capturing when a run launches.
 - `orc.createGoal { workspace, title, ... }` - cross-workspace handoff (`docs/features/16`).
 
-Rules: a consumer never imports a provider's internals; a missing *required* binding is a load error, a missing *optional* one degrades the feature visibly; events flow through the same registry. Bindings marked `aiExposed` can surface as AI tools; any binding can be a task step (`{ "binding": "..." }`) and a command handler. This is how the C4 plugin, a Claymore plugin and IED's built-ins cooperate without knowing about each other.
+Rules: a consumer never imports a provider's internals; a missing *required* binding is a load error, a missing *optional* one degrades the feature visibly; events flow through the same registry. Bindings marked `aiExposed` can surface as AI tools; any binding can be a task step (`{ "binding": "..." }`) and a command handler. This is how the C4 plugin, a game-engine plugin and IED's built-ins cooperate without knowing about each other.
 
 ## Skills and AI tools
 

@@ -68,7 +68,7 @@ Syntax colors carry meaning (token kinds), so they are a sanctioned palette (`do
 
 Two palettes ship:
 
-- **Visual Assist X** - the default (owner decision, 2026-10-19). Values are C4Assist's `c4-visual-assist-dark` theme (`C4/C4Assist/plugin/echo-plugin.json`), so C4 code looks the way it did with C4Assist:
+- **Visual Assist X** - the default (owner decision, 2026-10-19). Values are C4Assist's `c4-visual-assist-dark` theme, so C4 code looks the way it did with C4Assist:
 
 | Token | Value | Kind |
 |---|---|---|

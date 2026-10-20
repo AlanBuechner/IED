@@ -1,6 +1,6 @@
 # Features: profiler (PRF)
 
-Owner: `plugins/profiler` (UI, analysis) on `src/profiler` (capture server, trace storage). Instrumentation side: Bedrock (C4 repo) and any other client that speaks the trace protocol. Design and wire format: `docs/16`.
+Owner: `plugins/profiler` (UI, analysis) on `src/profiler` (capture server, trace storage). Instrumentation side: Bedrock (`C4/Bedrock/`) and any other client that speaks the trace protocol. Design and wire format: `docs/16`.
 
 Tracy is the **feature reference only** (never linked). Where Tracy has a known limit, the "Beyond Tracy" column says what IED does differently.
 
@@ -14,7 +14,7 @@ Tracy is the **feature reference only** (never linked). Where Tracy has a known 
 | F-PRF-4 | Robust ingestion: an instrumentation error (unbalanced zone, free without alloc) is recorded as a warning event and the capture continues | P1 | US-PRF-1 | Tracy drops the connection |
 | F-PRF-5 | *Profile* standard task (build -> launch with env -> attach capture); auto-start capture when a run task launches if the project opts in (`build.status` binding) | P1 | US-PRF-1 | - |
 | F-PRF-6 | Capture library: list of saved traces per workspace with metadata (app, config, git commit, duration, size), open, delete, compare | P1 | US-PRF-1 | - |
-| F-PRF-7 | Import: Chrome trace JSON (Nuke `build-trace.json`, Claymore `claymore profile` output), and Tracy `.tracy` files (P2) | P2 | US-PRF-7 | - |
+| F-PRF-7 | Import: Chrome trace JSON (Nuke `build-trace.json`, a game engine's profile output), and Tracy `.tracy` files (P2) | P2 | US-PRF-7 | - |
 
 ## Timeline
 
@@ -57,7 +57,7 @@ Tracy is the **feature reference only** (never linked). Where Tracy has a known 
 |---|---|---|---|
 | F-PRF-40 | GPU contexts as lanes (per queue), GPU zones with CPU-side submit markers and connector lines | P1 | US-PRF-4 |
 | F-PRF-41 | Calibration: periodic CPU/GPU timestamp pairs (D3D12 `GetClockCalibration`) with drift correction | P1 | US-PRF-4 |
-| F-PRF-42 | D3D12 first (Claymore); Vulkan later through the same events | P1 (D3D12), P2 (Vulkan) | US-PRF-4 |
+| F-PRF-42 | D3D12 first (C4 game engines); Vulkan later through the same events | P1 (D3D12), P2 (Vulkan) | US-PRF-4 |
 | F-PRF-43 | Per-pass GPU statistics and frame breakdown table | P1 | US-PRF-4 |
 | F-PRF-44 | Link to external frame captures (PIX) when the app reports one was taken | P2 | - |
 

@@ -10,7 +10,7 @@ Versioned definitions that the server, the web client and every plugin code agai
 | `schemas/federation.v1.schema.json` | `<Name>.ied.fed` | v1 draft | `docs/03` |
 | `schemas/agent-mode.v1.schema.json` | `.ied/modes/<id>.json` | v1 draft | `docs/12` |
 | `protocol/frames.v1.schema.json` | WebSocket frames | v1 draft, ready | `docs/10` |
-| `examples/` | A Claymore-shaped solution + project, and the C4 language plugin as a declarative manifest | illustrative | - |
+| `examples/` | A game-shaped solution + project (`MyGame.ied.sln`, `Game.ied.proj`), and the C4 language plugin as a declarative manifest | illustrative | - |
 
 Validate the examples after any schema change (a minimal validator is enough; the schemas use only: type, required, properties, additionalProperties, items, enum, const, pattern, oneOf, minItems, local and cross-file `$ref`).
 
@@ -77,7 +77,7 @@ Skills are folders `<name>/SKILL.md` (plus optional resources next to it), found
 name: c4-testing                      # unique per source; collisions: project > plugin > app (shown in Settings > Skills)
 description: How to write and run [test] functions in C4 with the -test harness.
 keywords: [test, assert, fixture, nuke test]        # IED keyword field
-triggers: ["write a test", "test is failing"]       # accepted for C4-repo compatibility; indexed like keywords
+triggers: ["write a test", "test is failing"]       # accepted for compatibility with C4/skills/; indexed like keywords
 tools: [build, debug]                 # optional: tool groups enabled when this skill is read
 ---
 

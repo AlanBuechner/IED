@@ -11,11 +11,11 @@ Define IED's workspace formats: Visual Studio-style solutions and projects, with
 | Solution | `<Name>.ied.sln` | groups projects; holds local-plugin pins and the generator recipe |
 | Folder | - | `ied ./`; `.ied/` created lazily only when something workspace-tier is saved |
 | File | - | `ied file.txt`; lightweight folder workspace with just that document |
-| Federation | `<Name>.ied.fed` | several solutions/folders (e.g. C4 + Claymore + IED) in one workspace; each member keeps its own `.ied/`, trust, plugins, settings (interpretation of the plan's "federated projects", `docs/99` O1) |
+| Federation | `<Name>.ied.fed` | several solutions/folders (e.g. C4 + a game engine + IED) in one workspace; each member keeps its own `.ied/`, trust, plugins, settings (interpretation of the plan's "federated projects", `docs/99` O1) |
 
 ## Solution file (`solution.v1.schema.json`)
 
-Fields: `version`, `name`, `projects[]` (paths or globs to `.ied.proj`, optionally `optional` for generated files not yet generated), `groups[]` (nested display folders), `items[]` (Solution Items: README, AGENTS.md...), `localPlugins[]` (path + expected id; trusted workspaces only), `generator` (the command that regenerates project files, e.g. `nuke --init --ied`, and which paths it owns - so IED offers *Regenerate* and warns before hand-editing generated files).
+Fields: `version`, `name`, `projects[]` (paths or globs to `.ied.proj`, optionally `optional` for generated files not yet generated), `groups[]` (nested display folders), `items[]` (Solution Items: README, AGENTS.md...), `localPlugins[]` (path + expected id; trusted workspaces only), `generator` (the command that regenerates project files, e.g. `nuke init --ied`, and which paths it owns - so IED offers *Regenerate* and warns before hand-editing generated files).
 
 ## Project file (`project.v1.schema.json`)
 
@@ -50,15 +50,15 @@ Committed, so deleting generated files never loses configuration ("if we delete 
 
 Rules:
 
-- Generators (Nuke's `--init --ied`, templates) write `.ied/` contents **idempotently and never clobber hand edits** (same discipline as Nuke's `EchoConfig.py` today).
+- Generators (`nuke init --ied`, templates) write `.ied/` contents **idempotently and never clobber hand edits** (`nuke init` already creates files only when missing).
 - LSP initialization options are **derived from the build** (exact include paths and defines the compiler saw), regenerated after each successful build, and live in `local/` because they contain absolute paths.
 - Trust is never stored in the repo (a repo cannot trust itself); it lives in app data (`docs/11`).
 - The repo's `.gitignore` gets `.ied/local/` (generators add it).
 
 ## How this maps to Nuke
 
-Nuke discovers projects by walking for `Project.py` (project name = folder name) and owns *how to build*. IED's files are the IDE-facing index of *what exists and where*. `nuke --init --ied` (C4-repo work item N2, `docs/17`) writes the solution, generated project files under `build/ied/`, and the `.ied/` scaffold; the project's `buildSystem.projectName` is what tasks pass as `-p`. Nuke stays authoritative; IED never re-derives build inputs (`docs/99` D6).
+Nuke reads `nuke.toml` manifests (a `[workspace]` at the root, a `[project]` per project; `Nuke/README.md`) and owns *how to build*. IED's files are the IDE-facing index of *what exists and where*. `nuke init --ied` (work item N2, `docs/17`) will write the solution, generated project files under `build/ied/`, and the `.ied/` scaffold (today `nuke init` already copies the toolchain's skills into `.ied/skills/` and gitignores `.ied/local/`); the project's `buildSystem.projectName` is what tasks pass as `-p`. Nuke stays authoritative; IED never re-derives build inputs (`docs/99` D6), though it may read the declarative manifests for display.
 
-## Transition from `.echo/`
+## Legacy workspace folders
 
-`.echo/` folders remain in existing repos (Echo may still be used there). IED never writes `.echo/`; `ied import echo` converts settings, skills, modes and chats once (`docs/20`). Nuke keeps writing `.echo/c4-lsp.json` until the owner retires Echo, and additionally writes `.ied/local/lsp-options/c4.json`.
+A folder may still hold the predecessor IDE's hidden workspace folder. IED never writes it; `ied import legacy` converts its settings, skills, modes and chats once (`docs/20`). Nuke writes only IED's bridge (`.ied/local/lsp-options/<project>.json`).

@@ -32,4 +32,4 @@ python -I frontend/mocks/build.py lint           # ASCII, tabs, no raw colors ou
 python -I frontend/mocks/build.py shots [prefix] # Playwright screenshots into screenshots/
 ```
 
-`icons` needs `third_party/codicons` (`tools/fetch-deps.ps1`); only the icons the mocks reference are embedded, as data-URI masks (Microsoft vscode-codicons, CC BY 4.0). `shots` needs Python Playwright with its Chromium (`pip install playwright` then `python -m playwright install chromium`).
+`icons` needs `third_party/codicons` (a git submodule; `setup.bat` initializes it); only the icons the mocks reference are embedded, as data-URI masks (Microsoft vscode-codicons, CC BY 4.0). `shots` needs Python Playwright with its Chromium (`pip install playwright` then `python -m playwright install chromium`).

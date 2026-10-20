@@ -28,7 +28,7 @@ DEFAULT = [
 
 APPROVAL = [
 	("thinking", "To check the change I should run the tests. Running a shell command needs the owner's approval."),
-	("tool", {"name": "run_shell", "args": {"command": "nuke.bat test -c Development"}, "approval": True, "result": {"preview": "2 passed, 1 failed (test_player_update)"}, "ms": 2140}),
+	("tool", {"name": "run_shell", "args": {"command": "nuke test dev"}, "approval": True, "result": {"preview": "2 passed, 1 failed (test_player_update)"}, "ms": 2140}),
 	("text", "One test fails: `test_player_update` expects the position after one second, but the test only advanced one frame.\n"),
 	("end", "finished", {}),
 ]

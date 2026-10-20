@@ -3,7 +3,7 @@
 	"id": "c4",
 	"name": "C4 Language",
 	"version": "0.1.0",
-	"description": "Example: what the C4 repo's project-local plugin (the C4Assist rewrite) looks like as a declarative IED plugin. Lives in the C4 repo, copied into Nuke/tools/ied by the kit build.",
+	"description": "Example: what the C4 project-local plugin (the C4Assist rewrite) looks like as a declarative IED plugin. Lives with the C4 tree in this repo, copied into Nuke/tools/ied by the kit build.",
 	"publisher": "explosion",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
@@ -104,7 +104,7 @@
 			{
 				"id": "c4.nuke",
 				"label": "Nuke (C4)",
-				"detect": "Project.py",
+				"detect": "nuke.toml",
 				"variables": {
 					"config": { "kind": "dropdown", "label": "Configuration", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution" },
 					"arch": { "kind": "dropdown", "label": "Platform", "values": ["x64"], "default": "x64", "scope": "solution" }
@@ -118,7 +118,7 @@
 				"title": "C4 Executable",
 				"kind": "project",
 				"parameters": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } },
-				"steps": [ { "run": ["${solutionDir}/nuke.bat", "--init", "--ied", "${param.name}"], "cwd": "${solutionDir}", "output": "build" } ]
+				"steps": [ { "run": ["nuke", "init", "${param.name}"], "cwd": "${solutionDir}", "output": "build" } ]
 			}
 		],
 		"skills": ["skills/"],

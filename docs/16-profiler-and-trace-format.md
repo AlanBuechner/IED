@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Resolve `docs/99` #9: define the seam between instrumented programs (C4 apps through Bedrock `Profile::`, Claymore, anything else) and the IED profiler - the **IED Trace Protocol (ITP) v1** - and the profiler's server/client architecture. Feature list: `docs/features/12-profiler.md`.
+Resolve `docs/99` #9: define the seam between instrumented programs (C4 apps through Bedrock `Profile::`, game engines, anything else) and the IED profiler - the **IED Trace Protocol (ITP) v1** - and the profiler's server/client architecture. Feature list: `docs/features/12-profiler.md`.
 
-Tracy (`third_party/tracy`) is a **feature reference only**; it is never linked. ITP deliberately fixes the Tracy limitations that matter for this project:
+Tracy (the client sources are the `C4/Frost/Projects/Profiling/tracy` submodule, used by the compiler's C++ libraries) is a **feature reference only** for IED; it is never linked into IED. ITP deliberately fixes the Tracy limitations that matter for this project:
 
 | Tracy limitation | ITP / IED answer |
 |---|---|
@@ -130,7 +130,7 @@ Server -> client control messages (same framing, global chunks): `Configure { ca
 - Extension `.iedtrace`. Layout: the ITP stream exactly as received (so a file is replayable as a connection), followed by an index block and a footer `{ indexOffset, version, "ITPX" }`. A crash leaves a file without a footer; opening it rebuilds the index by scanning.
 - The server keeps derived indexes next to the trace (`.iedtrace.idx/`: per-lane interval trees, LOD pyramids, symbol cache) - deletable caches.
 - Captures live in `.ied/local/captures/` by default (per machine), with metadata (app, git commit, config, duration, size) for the capture library.
-- Import converters (F-PRF-7) produce `.iedtrace` from Chrome trace JSON (Nuke `build-trace.json`, Claymore's JSON profiles) and, later, Tracy files.
+- Import converters (F-PRF-7) produce `.iedtrace` from Chrome trace JSON (Nuke `build-trace.json`, game-engine JSON profiles) and, later, Tracy files.
 
 ## Client library requirements (Bedrock `Profile::`, and any other language)
 
@@ -138,7 +138,7 @@ Server -> client control messages (same framing, global chunks): `Configure { ca
 - Per-thread lock-free buffers; a background flusher thread; global events (memory, GPU, definitions) through a small mutex-protected queue (allocation reporting is inherently ordered).
 - Interning: string ids assigned on first use per connection (a hash map keyed by pointer + content hash on the client; content-based so unloading/reloading code cannot alias).
 - API surface (C4 side, names indicative): `Profile::Zone("Name")` (scoped), `Profile::ZoneText`, `Profile::Frame()`, `Profile::FrameBegin/End("Set")`, `Profile::Plot("name", value)`, `Profile::Message(severity, text)`, `Profile::SetThreadName(name)` (callable any time - that is the rename), `Profile::TaskScope("Name")` / `TaskBegin/End/Suspend/Resume`, `Profile::Alloc/Free(ptr, size, pool)`, GC events wired automatically from the runtime, `Profile::Gpu::Context(...)`, `Profile::Gpu::Zone(ctx, cmdList, "Name")`, `Profile::Gpu::Collect(ctx)`.
-- Thread names: C4's `Thread` and `JobSystem` call `SetThreadName` automatically ("Job Worker 3"), and `JobSystem` emits `TaskBegin/End` with the job's name when profiling is on - so Claymore gets the by-task view for free.
+- Thread names: C4's `Thread` and `JobSystem` call `SetThreadName` automatically ("Job Worker 3"), and `JobSystem` emits `TaskBegin/End` with the job's name when profiling is on - so C4 game engines get the by-task view for free.
 
 ## Open items
 

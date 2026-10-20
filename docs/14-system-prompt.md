@@ -29,7 +29,7 @@ Budget target for a typical C4 solution: ~4-5k tokens before the first user mess
 
 ## Principles behind the base text
 
-- **Act, don't announce.** "If you say you will do something, the same reply must contain the tool call" - directly targets the `announced_no_action` stop class that made Echo runs look like they stopped randomly.
+- **Act, don't announce.** "If you say you will do something, the same reply must contain the tool call" - directly targets the `announced_no_action` stop class that made the predecessor IDE's runs look like they stopped randomly.
 - **Evidence before "done".** Verification is part of the definition of done; Agent mode's `finish(summary, verification)` makes it structural.
 - **Honesty about bugs.** The family's experience (C4 `AGENTS.md`, "Compiler stability") is that agents report "everything works" while knowing of bugs. The base prompt forbids it; the style file repeats "fix every bug you find".
 - **Symbol-first navigation** keeps local-model contexts small.

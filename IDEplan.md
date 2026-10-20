@@ -2,7 +2,7 @@
 i would like for you to build an IDE/ai chat tool that mostly mimics visual studio(not vs code) but with AI features for local ai.
 
 # what is this 
-IED is an IDE/ai chat tool that follows in the explosion theming of my projects like C4(the language), nuke (the build system) or Claymore(the game engine).
+IED is an IDE/ai chat tool that follows in the explosion theming of my projects like C4(the language) and nuke (the build system).
 
 ## general structure
 this application will use the C4 programming language as a backend with web based html/css/js as the frontend
@@ -19,12 +19,12 @@ we will have application wide settings and project settings. we will have to put
 
 use a dark theme. no off gray coloring everything should be gray scale unless something is delicately colored to stand out or cary some meaning.
 
-we will need to update the C4 compiler/LSP/DAP/buildSystem(nuke)/C4Assist(re write as it is currently for another editor and made in go) to work with this new IDE rather then with echo(the old IDE).
+we will need to update the C4 compiler/LSP/DAP/buildSystem(nuke) and the C4 editor plugin (re write as it is currently for another editor and made in go) to work with this new IDE rather then with the old IDE.
 
-this IDE is being built primarily(but not exclusively) for the C4 language and claymore Engine so nothing should be explicit support for the language or engine but generic features that can be used by the language and engine to get high quality support through plugins and LSP/DAP etc.
+this IDE is being built primarily(but not exclusively) for the C4 language and my game engine so nothing should be explicit support for the language or engine but generic features that can be used by the language and engine to get high quality support through plugins and LSP/DAP etc.
 
-C4 -> C:\GameDev\C4
-Claymore -> C:\GameDev\Claymore
+C4 -> C4/ (in this repository)
+nuke -> Nuke/ (in this repository)
 
 we will need a proper settings window to configure everything. this will be an icon at the bottom of the side bar.
 
@@ -43,7 +43,7 @@ we will need fast and high quality context compression so we can have long runni
 
 the chat should be able to read an AGENTS.md file as part of the system message and the plugins should also be able to add a small section to the system message to tell the ai extra information like "we have some docs for this over here <some file path>"
 
-MCP support for things like blender or interacting with Claymore/other projects i use this for
+MCP support for things like blender or interacting with the game engine/other projects i use this for
 
 the AI should be able to search for skills based on keywords that way it can still find skills even if it has a massive amount of them.
 
@@ -86,7 +86,7 @@ milestone/task tracking in a chat window.
 separate generic chat not attached to a project.
 
 ### the text editor / IDE
-under the icon in the side bar we will want a text editor that will use the vs code monaco tool to display text with full LSP support through LSP plugins. we want this to act as much like normal visual studio/VSX as possible some features like code formatting will need to be implement in a language plugin or LSP(you can look at the LSP in C:\GameDev\C4) we will also want a robust code aware spell check.
+under the icon in the side bar we will want a text editor that will use the vs code monaco tool to display text with full LSP support through LSP plugins. we want this to act as much like normal visual studio/VSX as possible some features like code formatting will need to be implement in a language plugin or LSP(you can look at the LSP in C4/) we will also want a robust code aware spell check.
 
 on the left side we will have the project/folder structure where projects are given groups and we can see the files in each project just like in visual studio with nice icons to easily tell everything apart at a glance.
 

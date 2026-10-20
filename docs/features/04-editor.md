@@ -121,7 +121,7 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
 | F-EDT-100 | Ctrl+I inline chat at caret/selection: prompt box in the editor, `@` mentions, streams a proposed change as an inline diff (green/red), accept (Tab / check) / reject (Esc / X) / follow-up | P1 | US-INL-1 | plugins/editor, plugins/chat |
-| F-EDT-101 | Inline sessions are server-side (survive reload, unlike Echo) and listed in the chat panel's history as small chats | P1 | US-INL-1 | plugins/chat |
+| F-EDT-101 | Inline sessions are server-side (survive reload, unlike the predecessor IDE) and listed in the chat panel's history as small chats | P1 | US-INL-1 | plugins/chat |
 | F-EDT-102 | AI context-menu actions on selection/symbol: Explain, Fix, Document, Write tests, Refactor..., Send to chat (opens/focuses a chat with the selection attached) | P1 | US-INL-2 | plugins/editor |
 | F-EDT-103 | Lightbulb AI fixes: "Fix with AI" on diagnostics, alongside the LSP's quick fixes | P1 | US-INL-2 | plugins/editor |
 | F-EDT-104 | Ghost-text completion from a FIM-capable local model (role `completion` in the model group), debounced, cancellable, accept with Tab, word-by-word with Ctrl+Right | P1 | US-INL-3 | plugins/editor, src/ai |

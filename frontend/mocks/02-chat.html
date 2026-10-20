@@ -16,7 +16,7 @@
 	<div class="toolbar"></div>
 
 	<div class="phone-head">
-		<div class="t"><span class="sb-ws" style="margin:0 4px 0 6px">C</span><b>Claymore</b><i class="ci ci-chevron-down sm c-2"></i></div>
+		<div class="t"><span class="sb-ws" style="margin:0 4px 0 6px">M</span><b>MyGame</b><i class="ci ci-chevron-down sm c-2"></i></div>
 		<span class="ib"><i class="ci ci-shield"></i><span class="badge warn">1</span></span>
 		<span class="ib"><i class="ci ci-bell"></i><span class="badge">2</span></span>
 	</div>
@@ -46,19 +46,19 @@
 					<div class="harness"><i class="ci ci-history"></i>14 earlier turns &middot; context compressed at 21:02 (96.1k &rarr; 41.0k, summarizer qwen-small@desk) &middot; <a href="#summary">view summary</a></div>
 
 					<div class="turn-head"><i class="ci ci-person"></i><b>You</b><span class="muted">21:31 &middot; from desk</span><span class="meta"><i class="ci ci-edit sm"></i></span></div>
-					<div class="msg-user">Port the logging subsystem from Icepick (<code>Frost/Projects/Core/src/Core/Log.{h,cpp}</code>) into <code>Engine/src/Core</code>. Same API as Icepick; sinks: console + a ring buffer the in-game console can read. Add tests and keep <code>nuke build</code> warning-free.
-						<div><span class="chip ref"><i class="ci ci-file-code"></i>Icepick/Core/Log.h</span> <span class="chip ref"><i class="ci ci-file-code"></i>Icepick/Core/Log.cpp</span></div>
+					<div class="msg-user">Port the logging subsystem from RefEngine (<code>Frost/Projects/Core/src/Core/Log.{h,cpp}</code>) into <code>Engine/src/Core</code>. Same API as RefEngine; sinks: console + a ring buffer the in-game console can read. Add tests and keep <code>nuke build</code> warning-free.
+						<div><span class="chip ref"><i class="ci ci-file-code"></i>RefEngine/Core/Log.h</span> <span class="chip ref"><i class="ci ci-file-code"></i>RefEngine/Core/Log.cpp</span></div>
 					</div>
 
 					<div class="turn-head"><i class="ci ci-sparkle c-ai"></i><b>Agent</b><span class="muted">qwen3.8-27b@spark &middot; primary</span><span class="meta">21:31 &middot; 14m 52s</span></div>
 					<div class="think"><i class="ci ci-chevron-right"></i><span class="lbl">Thinking</span>12 s &middot; 1.2k tok</div>
-					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">code_symbols</span><span class="targs">Log* in Icepick/Core</span><span class="tstat"><span class="src">built-in</span>38 ms<i class="ci ci-chevron-right"></i></span></div></div>
-					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">fs_read</span><span class="targs">Icepick/Core/Log.cpp 1-200</span><span class="tstat"><span class="src">built-in</span>4 ms<i class="ci ci-chevron-right"></i></span></div></div>
+					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">code_symbols</span><span class="targs">Log* in RefEngine/Core</span><span class="tstat"><span class="src">built-in</span>38 ms<i class="ci ci-chevron-right"></i></span></div></div>
+					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">fs_read</span><span class="targs">RefEngine/Core/Log.cpp 1-200</span><span class="tstat"><span class="src">built-in</span>4 ms<i class="ci ci-chevron-right"></i></span></div></div>
 					<div class="sub">
-						<div class="tool-head"><i class="ci ci-pass c-saved"></i><i class="ci ci-telescope c-1"></i><span class="tname">research</span><span class="targs">sub-agent &middot; qwen3.8-27b@spark &middot; "how does Icepick format and route log records?"</span><span class="tstat">2m 14s<span class="btn flat desk">Open as tab</span></span></div>
+						<div class="tool-head"><i class="ci ci-pass c-saved"></i><i class="ci ci-telescope c-1"></i><span class="tname">research</span><span class="targs">sub-agent &middot; qwen3.8-27b@spark &middot; "how does RefEngine format and route log records?"</span><span class="tstat">2m 14s<span class="btn flat desk">Open as tab</span></span></div>
 						<div class="sub-body">Report: 3 sinks (console, file, editor console); fmt-style <code>{}</code> formatting; per-category minimum levels; the editor console keeps the last 1024 records.</div>
 					</div>
-					<div class="p">Icepick's logger is a static <code>Log</code> facade over a list of <code>LogSink</code>s. I'll keep the names 1:1 and port the editor-console sink as <code>RingSink</code>. File sink comes last since Bedrock <code>FS::</code> has no append mode yet.</div>
+					<div class="p">RefEngine's logger is a static <code>Log</code> facade over a list of <code>LogSink</code>s. I'll keep the names 1:1 and port the editor-console sink as <code>RingSink</code>. File sink comes last since Bedrock <code>FS::</code> has no append mode yet.</div>
 					<div class="seg-meta">qwen3.8-27b@spark &middot; 6.1 s &middot; 412 tok &middot; 41 tok/s</div>
 					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">fs_write</span><span class="targs">Engine/src/Core/Log.ch</span><span class="tstat"><span class="plus">+46</span><span class="src">auto: new file</span>6 ms<i class="ci ci-chevron-right"></i></span></div></div>
 					<div class="tool">
@@ -165,7 +165,7 @@ public static void TestRingDropsOldest() {
 				</div>
 				<div class="sec">
 					<div class="sec-head"><i class="ci ci-chevron-down"></i>Tasks<span class="meta">3/7</span></div>
-					<div class="row"><span class="check on"><i class="ci ci-check"></i></span><span class="name muted">Read Icepick Log.h / Log.cpp</span></div>
+					<div class="row"><span class="check on"><i class="ci ci-check"></i></span><span class="name muted">Read RefEngine Log.h / Log.cpp</span></div>
 					<div class="row"><span class="check on"><i class="ci ci-check"></i></span><span class="name muted">Log.ch declarations</span></div>
 					<div class="row"><span class="check on"><i class="ci ci-check"></i></span><span class="name muted">Log.cf Init / Write</span></div>
 					<div class="row sel-dim"><i class="ci ci-arrow-right c-0" style="width:13px;height:13px"></i><span class="name">RingSink on Ring&lt;T&gt;</span><span class="meta">now</span></div>
@@ -188,7 +188,7 @@ public static void TestRingDropsOldest() {
 				<div class="sec">
 					<div class="sec-head"><i class="ci ci-chevron-down"></i>Scratchpad<span class="meta"><i class="ci ci-link-external sm"></i></span></div>
 <div class="scratch">## Plan
-- keep Icepick names (Log, LogSink, ...)
+- keep RefEngine names (Log, LogSink, ...)
 - RingSink over Engine::Ring&lt;T&gt; (owner)
 - file sink after FS append lands</div>
 				</div>

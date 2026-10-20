@@ -1,53 +1,92 @@
 # IED
 
-IED is an IDE / AI workbench that mimics **Visual Studio** (not VS Code) with first-class **local AI** - built for the "explosion" project family, and designed to drastically surpass Echo, the IDE it replaces:
+IED is an IDE / AI workbench that mimics **Visual Studio** (not VS Code) with first-class **local AI**. It is a
+**split server + web client**: a C4 server owns all state (plugins, LSP/DAP, AI runtime, builds, terminals,
+agents) and the UI is a web app for any browser - desktop or phone - that you can close while the server
+keeps working.
 
-| Project | What it is | Where |
+This repository holds everything IED is built from:
+
+| Part | What it is | Where |
 |---|---|---|
-| **C4** | The programming language (compiler, LSP, DAP, runtime, Bedrock default library) | `C:\GameDev\C4` |
-| **Nuke** | The C4 build system (Python kit: `nuke.bat`, `Config.py`, `Project.py` discovery, incremental builder) | `C:\GameDev\C4\Nuke` |
-| **Claymore** | The game engine (C4 port of IcepickRPG) | `C:\GameDev\Claymore` |
-| **Echo** | The old IDE (Go + TypeScript), being replaced; parity is the floor, not the goal | `C:\GameDev\echo` |
-| **IED** | This repo. **Split server + web client:** a C4 server owns all state (plugins, LSP/DAP, AI runtime, builds, terminals, agents); the UI is a web app for any browser - desktop or phone - that you can close while the server keeps working | here |
+| **IED** | The IDE: server (`src/`), web client (`frontend/`), built-in plugins, the host API contracts | `src/`, `frontend/`, `plugins/`, `shared/` |
+| **C4** | The programming language IED is written in: compiler, LSP, DAP, runtime, the Bedrock default library, tests and the language docs | [`C4/`](C4/) |
+| **Nuke** | The build system for C4 workspaces, shared by every project on the machine, with versioned C4 toolchains | [`Nuke/`](Nuke/README.md) |
+
+Because the language lives here, an agent that finds a compiler or IDE bug while working fixes it at the
+source, rebuilds, and carries on (see "When the compiler is wrong" in [`Nuke/README.md`](Nuke/README.md#8-toolchains)).
 
 ## Status
 
-**Planning complete for the v1 scope; no product code yet.** The C4 compiler/library cannot build the server yet - `docs/17` lists exactly what is missing. Work that does not need the compiler (contracts, frontend on a mock server, test doubles) is milestone M0 in `docs/18`.
+**Planning complete for the v1 scope; M0 in progress** (contracts, static UI mocks, mock server, conformance
+suite, fake model server). The C4 compiler cannot build the IED server yet - `docs/17` lists what is missing;
+the roadmap is `docs/18`.
+
+## Getting started (Windows x64)
+
+Prerequisites: git, and the Visual Studio C++ build tools / Windows SDK (Frost compiles the compiler against
+the MSVC headers and libraries).
+
+```bat
+git clone --recursive https://github.com/AlanBuechner/IED.git
+cd IED
+setup.bat                 :: private Python, git submodules, LLVM 22.1.0, web libraries (nothing large is committed)
+nuke build                :: build the C4 compiler and tools; installs the "dev" C4 toolchain
+nuke test                 :: the compiler's unit tests
+nuke gates                :: every C4 test suite
+```
+
+`setup.bat` offers to put `bin/` on your PATH so `nuke` works in any folder (or pass `--add-to-path`;
+without it, use `nuke.bat` here). `setup.bat --toolchain` does the setup and the first build in one go.
+
+A new C4 program anywhere on the machine:
+
+```bat
+mkdir MyGame && cd MyGame
+nuke init                 :: nuke.toml, src/main.cf, .gitignore, AI skills in .ied/skills
+nuke build run            :: compiles with the pinned toolchain from this repository's store
+```
 
 ## Reading order
 
 1. [`IDEplan.md`](IDEplan.md) - the original vision (source of truth for *what* and *why*).
-2. [`AGENTS.md`](AGENTS.md) - working agreements for anyone (human or AI) implementing IED.
+2. [`AGENTS.md`](AGENTS.md) - working agreements for anyone (human or AI) working here.
 3. [`docs/README.md`](docs/README.md) - index and reading order of the planning docs (stories -> feature catalog -> roadmap -> design docs).
 4. [`WORK.md`](WORK.md) - current state and next actions.
+5. For the language: [`C4/docs/README.md`](C4/docs/README.md), [`C4/AGENTS.md`](C4/AGENTS.md) and [`C4/WORK.md`](C4/WORK.md).
 
 ## Repository map
 
 ```
-ied/
+IED/
 +- IDEplan.md            vision (owner)
 +- AGENTS.md             working agreements and hard rules
 +- WORK.md               living state: what exists, what is next, decisions log
++- setup.bat             installs what is not committed (tools/setup/deps.toml pins it)
++- nuke.toml             this repository as a Nuke workspace (builds the C4 compiler; later the IED server)
++- nuke.bat, bin/        the nuke launcher (bin/ goes on PATH)
 +- docs/                 numbered planning docs + features/ (the full feature catalog)
 +- shared/
 |  +- host-api/          THE CONTRACT: JSON Schemas (plugin manifest, solution, project, federation, agent mode),
 |  |                     WS frame schema, process-plugin RPC, skill format, examples (incl. the C4 plugin)
 |  +- ui-kit/            shared web components (tree, tabs, ANSI console, menus, dropdowns, icons)
 +- src/                  IED server (C4, when the compiler is ready); src/ai/prompts/ already holds the shipped prompt texts
-+- frontend/             web client (html/css/js): shell, docking, theme tokens, WS client
-+- plugins/              built-in plugins: chat, editor, git, terminal, sandbox, profiler
-+- Nuke/                 build kit (ported from the C4 repo when the compiler can build IED)
-+- tools/                repo tooling: fetch-deps.ps1 (+ planned: mock-server, fake-model, conformance)
-+- third_party/          vendored dependencies (gitignored; tools/fetch-deps.ps1 reproduces it)
++- frontend/             web client (html/css/js): theme tokens, static mocks, shell, docking, WS client
++- plugins/              built-in plugins: chat, editor, git, terminal, sandbox, profiler, gpu
++- C4/                   the C4 language (compiler sources, Bedrock, runtime, LSP, DAP, tests, docs, Frost)
++- Nuke/                 the build system (Python, stdlib only) + its tests
++- tools/                setup, mock server, conformance suite, fake model server, schema check
++- third_party/          git submodules (codicons, libgit2, quickjs-ng)
 +- .ied/                 IED's own committed solution folder (skills); .ied/local/ is gitignored
++- vendor/, toolchains/, build/   created by setup and builds; gitignored
 ```
 
 ## Key conventions (details in `docs/`)
 
 - **Split server + web client; the server owns all state** (even unsaved buffers). Close the browser, switch to the phone, reconnect - everything resumes.
-- **No language/engine specifics in the host.** C4 and Claymore get support through plugins (often purely declarative), LSP, DAP and MCP.
+- **No language/engine specifics in the host.** C4 and game engines get support through plugins (often purely declarative), LSP, DAP and MCP.
 - **Visual Studio parity** for the IDE (menus, keymap, Error List, Output dropdown, debugger windows, toolbar tasks with dropdown-injected `${variables}`).
 - **AI that works unattended**: role-based model groups, slot-aware routing with privacy guarantees, a harness that never "stops randomly" without saying why, Mission Control for many parallel agents, verified results.
-- **Builds are driven by Nuke** (or any build system a plugin configures) - never reimplemented.
+- **Builds are driven by Nuke** (or any build system a plugin configures) - never reimplemented in the IDE.
 - **`.ied/` at the solution root is committed** (settings, skills, modes); `.ied/local/` is per machine.
 - **Theme:** dark, grayscale base; color only where it carries meaning; tokens only.

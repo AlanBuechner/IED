@@ -2,7 +2,7 @@
 
 Owner: `src/ai` (scheduler, queue, verifier) + `plugins/chat` (Mission Control UI). Design: `docs/12` (runs, sub-agents), `docs/04` (routing).
 
-This is the area where IED goes furthest beyond Echo. Echo had one model per chat plus read-only research helpers; its Kanban/orchestrator/heartbeat/self-healing designs were never built (their docs drifted from the code). IED makes **many agents doing real work in parallel, unattended, verified, and steerable from a phone** a core capability, built on the server-owns-everything architecture.
+This is the area where IED goes furthest beyond its predecessor. The predecessor IDE had one model per chat plus read-only research helpers; its Kanban/orchestrator/heartbeat/self-healing designs were never built (their docs drifted from the code). IED makes **many agents doing real work in parallel, unattended, verified, and steerable from a phone** a core capability, built on the server-owns-everything architecture.
 
 ## Mission Control
 
@@ -53,8 +53,8 @@ This is the area where IED goes furthest beyond Echo. Echo had one model per cha
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-ORC-50 | Federation goals: one goal with ordered phases in different members ("fix compiler bug in C4 -> refresh vendored C4.exe in Claymore -> rebuild Claymore -> rerun its tests") | P1 | US-ORC-8 |
-| F-ORC-51 | Handoff: an agent can create a goal in another workspace's queue with a repro and context (e.g. a Claymore agent that finds a C4 compiler bug files it in the C4 workspace, per the family rule "a compiler bug is a compiler fix, not a workaround"), and optionally wait for it | P1 | US-ORC-8 |
+| F-ORC-50 | Federation goals: one goal with ordered phases in different members ("fix compiler bug in C4 -> refresh vendored C4.exe in the game project -> rebuild the game -> rerun its tests") | P1 | US-ORC-8 |
+| F-ORC-51 | Handoff: an agent can create a goal in another workspace's queue with a repro and context (e.g. a game-project agent that finds a C4 compiler bug files it in the C4 workspace, per the family rule "a compiler bug is a compiler fix, not a workaround"), and optionally wait for it | P1 | US-ORC-8 |
 
 ## Model quality loop
 

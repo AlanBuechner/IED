@@ -1,7 +1,7 @@
 {
 	"description": "One unparseable SSE data line in the middle of a normal stream.",
 	"stopClass": "none",
-	"harness": "Negative test: log and skip the bad chunk; the stream continues and the turn finishes (Echo aborted the whole stream).",
+	"harness": "Negative test: log and skip the bad chunk; the stream continues and the turn finishes (the predecessor IDE aborted the whole stream).",
 	"responses": [
 		{
 			"steps": [

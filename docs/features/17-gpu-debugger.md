@@ -1,6 +1,6 @@
 # Features: GPU debugger (GPU)
 
-Owner: `plugins/gpu` (builtin plugin: library, sessions, insights, compare, AI tools, UI module) with replay backends as separate native processes under `plugins/gpu/backends/` (`rdc` first, `flashbang` later). Capture-side support for C4 programs is Bedrock `Gpu::` in the C4 repo. Design: `docs/22`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
+Owner: `plugins/gpu` (builtin plugin: library, sessions, insights, compare, AI tools, UI module) with replay backends as separate native processes under `plugins/gpu/backends/` (`rdc` first, `flashbang` later). Capture-side support for C4 programs is Bedrock `Gpu::` in the C4 tree (`C4/Bedrock/`). Design: `docs/22`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
 
 PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderDoc's look is not wanted) - RenderDoc the inspection and openness reference, Nsight the performance reference; the "Beyond" column says what IED adds.
 
@@ -29,7 +29,7 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
 | F-GPU-20 | Pipeline view (PIX-style): state tree by stage (graphics, mesh, compute, ray tracing, work graph variants) with every binding; selecting an item shows it in the resource viewer | P1 | US-GPU-1 | - |
-| F-GPU-21 | Bindings: root signature, descriptor tables and heaps; bindless indices resolved to the resource, its name and engine annotations | P1 | US-GPU-1 | bindless-first display (Claymore is bindless) |
+| F-GPU-21 | Bindings: root signature, descriptor tables and heaps; bindless indices resolved to the resource, its name and engine annotations | P1 | US-GPU-1 | bindless-first display (the example engine is bindless) |
 | F-GPU-22 | Constant buffer contents decoded with shader reflection (structs, arrays, root constants) | P1 | US-GPU-1 | - |
 | F-GPU-23 | Resources: usage, format, size, lifetime (first/last EID), heap and aliasing; per-resource read/write history | P1 | US-GPU-1 | - |
 | F-GPU-24 | Messages: debug layer and GPU-based validation output tied to EIDs | P1 | US-GPU-1 | - |
@@ -87,6 +87,6 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 |---|---|---|---|---|
 | F-GPU-90 | `ied-gpu/1`: JSON-RPC over stdio plus shared-memory blobs; one backend process per open capture; crash restart without losing UI state | P1 | US-GPU-4 | - |
 | F-GPU-91 | `rdc` backend: C++ adapter over RenderDoc's replay API (`renderdoc_replay.h`), pinned RenderDoc version, adapter tests against stored captures; no Python | P1 | US-GPU-4 | - |
-| F-GPU-92 | Flashbang recorder in Bedrock `Gpu::` (C4 repo): records C4 programs without injection, metadata chunk (bindless names, entities, materials), rolling capture | P2 | US-GPU-9 | engine semantics in the capture |
+| F-GPU-92 | Flashbang recorder in Bedrock `Gpu::` (C4 tree): records C4 programs without injection, metadata chunk (bindless names, entities, materials), rolling capture | P2 | US-GPU-9 | engine semantics in the capture |
 | F-GPU-93 | Flashbang replayer implementing `ied-gpu/1` (D3D12 first, work graphs, unbounded/bindless resources) | P2 | US-GPU-9 | covers what RenderDoc does not |
 | F-GPU-94 | Capture GPU/driver shown beside the replay GPU/driver; replay device selection | P1 | US-GPU-1 | - |

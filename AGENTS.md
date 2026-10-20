@@ -15,29 +15,27 @@ design -> implement -> test -> review -> repeat
 
 ## Hard rules
 
-1. **The host stays generic.** Nothing C4- or Claymore-specific may live in `src/`, `frontend/`, or `shared/`. Language support comes exclusively through plugins, LSP servers and DAP adapters. If you find yourself special-casing a language or engine, stop and make it a plugin contribution.
+1. **The host stays generic.** Nothing C4- or engine-specific may live in `src/`, `frontend/`, or `shared/`. Language support comes exclusively through plugins, LSP servers and DAP adapters. If you find yourself special-casing a language or engine, stop and make it a plugin contribution.
 2. **Server owns all state; the browser is disposable.** IED is a split server + web client (see `docs/01`). No feature may depend on a browser tab staying open: chats, builds, terminals, LSP/DAP sessions live on the server; reconnects resume from the server's ring buffer + disk. The UI must work at phone widths. Don't put authoritative state in the frontend.
-3. **Do not reimplement the build system.** IED invokes Nuke (`nuke.bat`) for C4 projects. Incremental logic, module graphs, test discovery stay in Nuke. IED's job is: configure, invoke, stream output, surface results. See `docs/06-build-and-nuke-integration.md`.
-4. **Mirror the C4/Nuke repo conventions** (this family already has them; don't invent new ones):
+3. **Do not reimplement the build system.** IED invokes Nuke (`nuke`, `Nuke/README.md`) for C4 projects. Incremental logic, module graphs, test discovery stay in Nuke. IED's job is: configure, invoke, stream output, surface results. See `docs/06-build-and-nuke-integration.md`.
+4. **Mirror the C4/Nuke conventions** (they already exist; don't invent new ones):
    - Numbered docs with a `README.md` index in `docs/`.
    - Build outputs under `build/{bin,int}/{config}-{system}-{arc}/{projName}` (Nuke's layout).
    - Configurations: `Debug`, `Development`, `Dist` — default **Development**. Architecture `x64`, system `windows`.
-   - A root launcher (`nuke.bat`) that delegates to the kit folder.
+   - Workspaces are described by `nuke.toml` manifests and pin a C4 toolchain version; nothing vendors Nuke or the compiler.
 5. **The `.ied/` hidden folder is committed** (settings + skills must survive deletion of generated files). Per-machine state goes in `.ied/local/` which is gitignored. Generated build artifacts go under `build/` and are gitignored.
 6. **Theme discipline:** dark only, grayscale base, no off-grays without meaning. Color is reserved for semantic accents (saved = green, unsaved = yellow, error = red, info = blue). Plugins must use the shared CSS theme tokens, never raw hex values. See `docs/07-settings-and-theming.md`.
 7. **Plugins compose on plugins.** New capabilities should be exposed as named bindings/tool calls/skills so other plugins can hook them. If two default plugins need to talk, define a binding rather than a direct dependency.
 
-## Cross-repo coordination
+## Working on C4 and Nuke here
 
-IED is not built in isolation. When implementation reaches these points, the C4 repo (`C:\GameDev\C4`) needs matching work:
+The C4 language (`C4/`) and Nuke (`Nuke/`) live in this repository, so a bug in the compiler, the default library or the build system is fixed here, at the source, never worked around in IED code:
 
-- **C4 compiler** — must be able to build this repo (it can't yet; that gates everything).
-- **C4LSP / C4DAP** — updated to speak to IED's plugin host instead of Echo.
-- **Nuke** — `EchoConfig.py`'s `.echo/` bridge becomes an `.ied/` bridge: `nuke --init` should write the IED project/solution files and LSP options file, and every build should keep the LSP options in sync (same pattern as today's `.echo/c4-lsp.json`).
-- **C4Assist** — currently Go code written for Echo; rewrite it to target IED.
-- **Bedrock / C4 default library** — needs profiler hooks so C4 apps can use the IED profiler out of the box.
-
-If you find a bug in the C4 compiler or default library document it in the knows-bugs.md file in C4 then resolve the issue validate that it is resolved then remove the bug listed.
+- **C4 bugs:** add the bug to `C4/docs/status/known-bugs.md` (its template, the next `BUG-NNN`), fix it in `C4/` following `C4/AGENTS.md`, add a test that would have caught it, run `nuke build` and `nuke gates` from the repository root (every C4 suite must pass), then delete the entry. `nuke build` refreshes the `dev` toolchain, so workspaces pinned to `dev` (this one included) use the fix immediately.
+- **Releasing a toolchain:** bump `C4/C4Lib/src/Compiler/Version.h`, then `nuke install-c4`; installed versions never change.
+- **Nuke changes:** `python -m unittest discover -s Nuke/tests` must pass (`test_integration.py` runs against a real installed toolchain); keep `Nuke/README.md` and `docs/23` current.
+- **Planned C4-side work for IED** is tracked in `docs/17`: the compiler must build the IED server (it can't yet; that gates everything), C4LSP/C4DAP speak to IED's plugin host, the declarative `c4` plugin replaces the old editor plugin, `nuke init --ied` writes IED solution/project files, and Bedrock gets profiler hooks.
+- Setup is `setup.bat` (pins in `tools/setup/deps.toml`); never commit anything it installs (`vendor/`, `toolchains/`, `C4/Frost/vendor/`).
 
 ## What "done" looks like for a feature
 

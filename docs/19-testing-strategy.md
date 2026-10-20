@@ -16,7 +16,7 @@ Define how IED is verified, so "done" (AGENTS.md) is mechanical, not a feeling. 
 | **Frontend unit** | Layout tree ops, keybinding resolution (chords, `when`), ANSI parser, virtualized lists, WS client resume logic | in-browser test page run headless by Playwright | `frontend/tests/` |
 | **E2E** | Journeys J1-J14 (automatable parts), plus per-feature interaction scripts | Playwright (Python) at 3 viewports: 1920x1080, 1366x768, 390x844 | `tests/e2e/` |
 | **Visual** | Golden screenshots of key screens and states (empty, loading, error, populated) per viewport; pixel diff with a small threshold; reviewed when they change | Playwright screenshots + `image_compare` | `tests/visual/` |
-| **Soak / perf** | 24 h server soak with fake models and synthetic builds; flood tests (1M-line build output, 10 concurrent streams, 50 terminals); big repo (open C4 + Claymore federation); latency budgets | scripts + server health endpoint | `tests/perf/` |
+| **Soak / perf** | 24 h server soak with fake models and synthetic builds; flood tests (1M-line build output, 10 concurrent streams, 50 terminals); big repo (open a federation of this repo with C4 plus a game project); latency budgets | scripts + server health endpoint | `tests/perf/` |
 | **Security** | Host-header/DNS-rebinding, Origin, CSRF, token reuse/expiry, login rate limit, path traversal and symlink escape in fs tools, secrets redaction in logs/trajectories/tool results, untrusted-workspace gating | Python | `tests/security/` |
 | **Agent quality** | Eval suite (F-ORC-62): fixed tasks with executable acceptance criteria, run against model groups; tracks pass rate per IED build to catch harness/prompt regressions | IED's own eval harness (after M7); before that, a script driving the API | `.ied/evals/` |
 
@@ -24,7 +24,7 @@ Define how IED is verified, so "done" (AGENTS.md) is mechanical, not a feeling. 
 
 1. **Mock server** (`tools/mock-server/`, Python): implements protocol v1 with in-memory fixture data (a fake workspace tree, documents, a scripted chat stream, a build run with ANSI output, a terminal echo). It lets the whole frontend be built, screenshot-tested and resume-tested in M0. The conformance suite keeps it honest.
 2. **Fake model server** (`tools/fake-model/`, Python): OpenAI-compatible SSE with a script language (`emit text`, `emit tool_call(name,args)`, `emit text_tool_call(dialect)`, `stall 90s`, `cut`, `finish(reason)`, `error(status, body)`). Used by harness tests now (against the mock server's simulated runtime) and against the real runtime later.
-3. **Real family binaries**: C4LSP and C4DAP exist today (Claymore's `Nuke/tools/`), so LSP/DAP client tests run against the real servers from M2 on, not mocks.
+3. **Real family binaries**: C4LSP and C4DAP exist today (sources in `C4/C4LSP/` and `C4/C4DAP/`, binaries shipped through Nuke's `tools/`), so LSP/DAP client tests run against the real servers from M2 on, not mocks.
 
 Python is already in the family toolchain (Nuke vendors it), so these add no new language to the stack.
 

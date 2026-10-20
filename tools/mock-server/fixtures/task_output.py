@@ -28,11 +28,11 @@ def _compile_lines(error):
 
 
 def build_step():
-	return "Build demo", "nuke.bat build -c Development -a x64", _compile_lines(False)
+	return "Build demo", "nuke build dev", _compile_lines(False)
 
 
 def failing_build_step():
-	return "Build demo", "nuke.bat build -c Development -a x64", _compile_lines(True)
+	return "Build demo", "nuke build dev", _compile_lines(True)
 
 
 def _test_lines():
@@ -46,7 +46,7 @@ def _test_lines():
 
 
 def test_step():
-	return "Run tests", "nuke.bat test -c Development", _test_lines()
+	return "Run tests", "nuke test dev", _test_lines()
 
 
 def _run_lines():

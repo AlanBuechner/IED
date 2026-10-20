@@ -13,7 +13,7 @@ The full feature set of IED, one area per file under `docs/features/`. This is t
 
 - **ID** `F-<AREA>-<n>`: stable once assigned. Never renumber; retire with a strike-through and a note.
 - **Pri:** `P0` MVP daily driver, `P1` v1 complete, `P2` later (same scale as `docs/08`).
-- **Owner:** `src/<module>` (host), `frontend/` (web shell), `plugins/<name>` (default plugin), `shared/ui-kit`, or `C4 repo` / `Claymore repo` for cross-repo work. A feature with two owners lists the one that is accountable first.
+- **Owner:** `src/<module>` (host), `frontend/` (web shell), `plugins/<name>` (default plugin), `shared/ui-kit`, or `C4/` (the C4 tree) / an engine plugin for work outside the IED host. A feature with two owners lists the one that is accountable first.
 - Entries marked **(gen)** are generic host capabilities a *language/engine plugin* builds on; IED itself ships no language-specific behavior (AGENTS.md rule 1).
 
 ## Areas
@@ -40,11 +40,11 @@ The full feature set of IED, one area per file under `docs/features/`. This is t
 
 AI tool calls are catalogued separately in `docs/13-ai-tool-catalog.md` (IDs `T-<group>-<n>`), because their schemas matter more than their UI.
 
-## Ambition: surpass Echo, do not port it
+## Ambition: surpass the predecessor, do not port it
 
-Owner directive (2026-10-19): **"this should not just have parity with echo but drastically surpass."** Echo parity (`docs/20`) is the *floor* - a checklist of things IED must not regress - never the definition of done. Where IED is designed to be in a different league:
+Owner directive (2026-10-19): **IED should not just have parity with the predecessor IDE but drastically surpass it.** Predecessor parity (`docs/20`) is the *floor* - a checklist of things IED must not regress - never the definition of done. Where IED is designed to be in a different league:
 
-| Area | Echo (today) | IED |
+| Area | Predecessor (today) | IED |
 |---|---|---|
 | Harness reliability | Stops when a reply has no tool call (outside Goal mode); text tool calls unparsed; mid-stream errors fatal; wrong context sizes | Stop taxonomy, bounded recovery for every class, dialect normalization, real `n_ctx` discovery, visible "model or harness" answer (`docs/12`) |
 | Orchestration | One model per chat + read-only research helpers; Kanban/heartbeat designs never built | Mission Control, goal queue + board, parallel agents in worktrees, independent verifier, schedules, away mode, cross-workspace handoff (ORC) |
@@ -62,7 +62,7 @@ Several items the first draft marked P2 were raised to P1 because they are what 
 
 ## Priority totals and the MVP line
 
-The **P0 set** is the first release the owner switches to *and immediately feels the upgrade from Echo*: it covers Echo's parity list (`docs/20`) for the features the owner actually uses, the plan's non-negotiables (split server/web with resume, VS-style editor with LSP, toolbar build/run with output routing, chat with streaming + tool calls + persistence, terminal, git basics, settings with model groups), **and** the first differentiators: the full stall-protection harness, symbol-first LSP tools, Mission Control's run list + attention queue, server-owned unsaved buffers, and privacy classes.
+The **P0 set** is the first release the owner switches to **and immediately feels the upgrade from the predecessor IDE*: it covers the predecessor parity list (`docs/20`) for the features the owner actually uses, the plan's non-negotiables (split server/web with resume, VS-style editor with LSP, toolbar build/run with output routing, chat with streaming + tool calls + persistence, terminal, git basics, settings with model groups), **and** the first differentiators: the full stall-protection harness, symbol-first LSP tools, Mission Control's run list + attention queue, server-owned unsaved buffers, and privacy classes.
 
 Everything else the plan asks for, plus the orchestration layer, is P1. P2 is extrapolation the plan does not require.
 

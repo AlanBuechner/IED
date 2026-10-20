@@ -28,4 +28,4 @@ src/
                 Windows Graphics Capture, Credential Manager) - opaque handles only                       - docs/17
 ```
 
-Nothing here may contain C4-language or Claymore-specific logic (AGENTS.md rule 1).
+Nothing here may contain C4-language or game-engine-specific logic (AGENTS.md rule 1).

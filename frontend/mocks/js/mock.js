@@ -208,13 +208,13 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 			const extra = id === "chat" ? '<span class="badge warn">1</span>' : id === "git" ? '<span class="badge">4</span>' : "";
 			return `<div class="sb-act${id === active ? " on" : ""}" title="${title}">${icon(ic)}${extra}</div>`;
 		}).join("");
-		return `<nav class="sidebar"><div class="sb-ws" title="Workspace: Claymore">C</div><div class="sb-sep"></div>${acts}<div class="sb-spacer"></div><div class="sb-act" title="Notifications">${icon("ci-bell")}<span class="dot warn sm"></span></div><div class="sb-act${active === "settings" ? " on" : ""}" title="Settings">${icon("ci-settings-gear")}</div></nav>`;
+		return `<nav class="sidebar"><div class="sb-ws" title="Workspace: MyGame">M</div><div class="sb-sep"></div>${acts}<div class="sb-spacer"></div><div class="sb-act" title="Notifications">${icon("ci-bell")}<span class="dot warn sm"></span></div><div class="sb-act${active === "settings" ? " on" : ""}" title="Settings">${icon("ci-settings-gear")}</div></nav>`;
 	}
 
 	function menubar(openMenu) {
 		const menus = ["File", "Edit", "View", "Git", "Project", "Build", "Debug", "Test", "Analyze", "Tools", "Extensions", "Window", "Help"]
 			.map((m) => `<span class="mi${m === openMenu ? " open" : ""}">${m}</span>`).join("");
-		return `<header class="menubar"><div class="menus">${menus}</div><div class="title"><div class="search-box">${icon("ci-search", "sm")}<span>Feature search</span><span class="kbd">Ctrl+Q</span></div><span class="ws-title"><b>Claymore</b> &middot; Development x64</span><span class="conn" title="Server connection"><span class="dot saved sm"></span>live</span></div></header>`;
+		return `<header class="menubar"><div class="menus">${menus}</div><div class="title"><div class="search-box">${icon("ci-search", "sm")}<span>Feature search</span><span class="kbd">Ctrl+Q</span></div><span class="ws-title"><b>MyGame</b> &middot; Development x64</span><span class="conn" title="Server connection"><span class="dot saved sm"></span>live</span></div></header>`;
 	}
 
 	function toolbar() {
@@ -231,18 +231,18 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 	}
 
 	const TERMINAL = [
-		'<span class="a-gray">PS C:\\GameDev\\Claymore&gt;</span> nuke build -c Development',
-		'<span class="a-cyan">[nuke]</span> Claymore: 2 modules (Engine, Game), 3 files changed',
+		'<span class="a-gray">PS C:\\Work\\MyGame&gt;</span> nuke build -c Development',
+		'<span class="a-cyan">[nuke]</span> MyGame: 2 modules (Engine, Game), 3 files changed',
 		'<span class="a-cyan">[nuke]</span> Engine: compiling Core/Log.cf, Core/Log.ch, Engine/Core/Application.cf',
 		'<span class="loc">Engine/src/Core/Log.cf (30:9)</span> <span class="a-yellow">warning</span>: unused variable \'level\'',
 		'<span class="loc">Engine/src/Core/Ring.ch (31:5)</span> <span class="a-yellow">warning</span>: implicit int64 -&gt; int32 narrowing in \'Mask\'',
 		'<span class="a-cyan">[nuke]</span> Game: linking build/bin/Development-windows-x64/Game/Game.exe',
 		'<span class="a-green a-bold">Build succeeded</span> in 18.2 s <span class="a-gray">(2 warnings, 0 errors)</span>',
-		'<span class="a-gray">PS C:\\GameDev\\Claymore&gt;</span> git status -sb',
+		'<span class="a-gray">PS C:\\Work\\MyGame&gt;</span> git status -sb',
 		'<span class="a-green">## port/logging</span>...<span class="a-red">origin/port/logging</span> [ahead 3]',
 		' <span class="a-red">M</span> Engine/src/Core/Log.cf',
 		'<span class="a-red">??</span> Engine/src/tests/log.cf',
-		'<span class="a-gray">PS C:\\GameDev\\Claymore&gt;</span> <span class="term-cursor"></span>',
+		'<span class="a-gray">PS C:\\Work\\MyGame&gt;</span> <span class="term-cursor"></span>',
 	];
 
 	function terminal(el) {

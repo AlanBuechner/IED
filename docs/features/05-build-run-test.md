@@ -15,7 +15,7 @@ The generic mechanism is a **task**: a named list of **steps**, each a process (
 | F-BLD-5 | Per-step output target (output source id), `cwd`, `env`, timeout, `problemMatcher` id, `background: readyPattern` (for "start server then continue") | P0 | US-BLD-3 |
 | F-BLD-6 | Standard task slots the shell binds to keys and menus: `build` (Ctrl+Shift+B), `rebuild`, `clean`, `run` (Ctrl+F5), `debug` (F5), `test`, `testSelected`, `debugTest`, `profile`; a project fills any subset | P0 | US-BLD-1, US-DBG-1 |
 | F-BLD-7 | Solution-level tasks (build all projects in dependency order the build system decides; IED just calls it) | P1 | - |
-| F-BLD-8 | Toolbar presets contributed by plugins (the C4 plugin ships the Nuke preset so `nuke --init` projects need no hand-written toolbar) (gen) | P0 | US-XRP-1 |
+| F-BLD-8 | Toolbar presets contributed by plugins (the C4 plugin ships the Nuke preset so `nuke init` projects need no hand-written toolbar) (gen) | P0 | US-XRP-1 |
 | F-BLD-9 | Save-all-before-build (default on, VS) | P0 | - |
 
 ## Running tasks

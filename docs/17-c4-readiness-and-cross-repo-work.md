@@ -1,19 +1,19 @@
-# 17 - C4 readiness and cross-repo work
+# 17 - C4 readiness and work outside the IED host
 
 ## Purpose
 
-Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / Bedrock before the IED server can be written in C4**, what the family's other tools (C4LSP, C4DAP, Nuke, C4Assist, Claymore) must change for IED, and in which order. Facts below come from reading `C:\GameDev\C4` and `C:\GameDev\Claymore` on 2026-10-19; re-verify before acting (the compiler moves fast).
+Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / Bedrock before the IED server can be written in C4**, what the family's other tools (C4LSP, C4DAP, Nuke, C4Assist, game engines built on C4) must change for IED, and in which order. Facts below come from reading the C4 tree (now `C4/` in this repo) and a C4 game-engine port on 2026-10-19; re-verify before acting (the compiler moves fast).
 
 ## Where C4 stands (2026-10-19)
 
-- Re-architecture (ProgramModel -> HIR -> codegen) is done; gates are green (TestCode 1505 assertions, NegativeTest 564, IsolatedTest 374 at -O0 and -O2, Bedrock 290 tests, C4Testing 964). `docs/status/known-bugs.md` lists no open bugs. Windows x64 only; Linux port (B31) planned; ORCv2 scripting (B30) at spike stage.
-- Largest C4 codebases so far: Bedrock ~10.9k lines, TestCode ~9.4k, Claymore ~4.2k. **Nothing near the IED server's expected size (40-80k lines) has been compiled.** Whole-program compile, no incremental builds yet (estimated 15-20 s at -O2 for 50k lines).
+- Re-architecture (ProgramModel -> HIR -> codegen) is done; gates are green (TestCode 1505 assertions, NegativeTest 564, IsolatedTest 374 at -O0 and -O2, Bedrock 290 tests, C4Testing 964). `C4/docs/status/known-bugs.md` lists no open bugs. Windows x64 only; Linux port (B31) planned; ORCv2 scripting (B30) at spike stage.
+- Largest C4 codebases so far: Bedrock ~10.9k lines, TestCode ~9.4k, a game-engine port ~4.2k. **Nothing near the IED server's expected size (40-80k lines) has been compiled.** Whole-program compile, no incremental builds yet (estimated 15-20 s at -O2 for 50k lines).
 
 ## Capability gap table (server needs vs. C4 today)
 
 | Need | Status | Notes |
 |---|---|---|
-| Threads, mutex, condvar, atomics, futures, job system | **exists** | `Bedrock/Threading/*`; JobSystem is game-tuned, not I/O-aware |
+| Threads, mutex, condvar, atomics, futures, job system | **exists** | `C4/Bedrock/Threading/*`; JobSystem is game-tuned, not I/O-aware |
 | JSON parse/serialize | **exists** (DOM) | No streaming parser; reflection-driven serialization handles only scalars + nested structs (no `String`, `Array`, `HashMap`, enum names) |
 | UTF-8 strings | **exists** | UTF-8 <-> UTF-16 helpers exist only inside the runtime; Win32 `W` APIs need them exposed |
 | File system basics | **partial** | read/write/list/mkdir/remove/rename/exists/size; **missing** stat/mtime, copy, canonicalize, locking, mmap |
@@ -34,7 +34,7 @@ GC facts that shape server design: stop-the-world, conservative, non-moving; pau
 
 ## Suspected C4 bugs found during research (verify, then file + fix per AGENTS.md)
 
-Found by reading CBind source, **not yet confirmed with probes**. Per `AGENTS.md`: confirm each with a minimal `sizeof`/offset probe, record confirmed ones in `C:\GameDev\C4\docs\status\known-bugs.md`, fix, validate with the C4 gates, then remove the entry.
+Found by reading CBind source, **not yet confirmed with probes**. Per `AGENTS.md`: confirm each with a minimal `sizeof`/offset probe, record confirmed ones in `C4/docs/status/known-bugs.md`, fix, validate with the C4 gates, then remove the entry.
 
 | # | Suspected bug | Where (per reading) | Impact on IED |
 |---|---|---|---|
@@ -50,17 +50,17 @@ Until S1-S6 are fixed, **IED's policy is: every native API goes through a small 
 
 ## Recommended path: what goes where
 
-**Bedrock (C4 repo) should own OS primitives**, because Claymore needs most of them too (file watching for hot reload, processes for tools, sockets for the session pipe and profiler):
+***Bedrock (`C4/Bedrock/`) should own OS primitives**, because game engines need most of them too (file watching for hot reload, processes for tools, sockets for the session pipe and profiler):
 
 | Bedrock module (proposed) | Contents | Also needed by |
 |---|---|---|
-| `Net::` | TCP listen/accept/connect, non-blocking sockets, an IOCP-backed event loop with timers, UDP (profiler discovery) | Claymore remote control, profiler client |
-| `Process::` | spawn with pipes, job objects (kill tree), exit codes, environment get/set, ConPTY sessions | Claymore tools, Nuke-in-C4 later |
-| `FS::Watch` + FS extras | `ReadDirectoryChangesW` watcher, stat/mtime, copy, canonical paths | Claymore hot reload |
+| `Net::` | TCP listen/accept/connect, non-blocking sockets, an IOCP-backed event loop with timers, UDP (profiler discovery) | engine remote control, profiler client |
+| `Process::` | spawn with pipes, job objects (kill tree), exit codes, environment get/set, ConPTY sessions | engine tools, Nuke-in-C4 later |
+| `FS::Watch` + FS extras | `ReadDirectoryChangesW` watcher, stat/mtime, copy, canonical paths | engine hot reload |
 | `Time::` | wall clock, UTC/local formatting, durations | everyone |
 | `Text::` additions | UTF-16 conversion, regex (RE2-like subset or a vendored C engine behind a shim), base64, SHA-1/SHA-256 | everyone |
-| `Serialization::` | reflection serialization for `String`, `Array`, `HashMap`, enums; streaming JSON writer | IED protocol DTOs, Claymore assets |
-| `Profile::` | zone/frame/plot/message/alloc/thread-name/GPU APIs speaking the IED trace protocol (`docs/16`) | Claymore, every C4 app |
+| `Serialization::` | reflection serialization for `String`, `Array`, `HashMap`, enums; streaming JSON writer | IED protocol DTOs, engine assets |
+| `Profile::` | zone/frame/plot/message/alloc/thread-name/GPU APIs speaking the IED trace protocol (`docs/16`) | game engines, every C4 app |
 
 **IED (this repo) owns** HTTP/1.1 + WebSocket on top of `Net::` (or a vendored C HTTP parser such as llhttp behind a shim), the protocol hub, and everything in `src/`.
 
@@ -68,7 +68,7 @@ An alternative that gets IED unblocked sooner: wrap **libuv** (MIT, C; IOCP even
 
 ## Readiness checklist ("the compiler can build IED")
 
-Implementation of `src/` starts when all of these are true. Each item is a C4-repo work package.
+Implementation of `src/` starts when all of these are true. Each item is a work package in the C4 tree (`C4/`).
 
 1. [ ] `Net::` sockets + event loop + timers, with tests (echo server, 1k concurrent connections, timers under load).
 2. [ ] `Process::` spawn/pipes/job objects/env + ConPTY, with tests (spawn `cmd /c`, kill tree, PTY round trip).
@@ -83,11 +83,11 @@ Implementation of `src/` starts when all of these are true. Each item is a C4-re
 
 Until then, the **frontend (`frontend/`, `shared/ui-kit`) and the contract (`shared/host-api`) can be built and tested against a mock server** - they do not depend on the compiler (`docs/18`, M0).
 
-## Cross-repo work items
+## Work items in C4, Nuke and engine tools
 
-### C4LSP (C4 repo)
+### C4LSP (`C4/C4LSP/`)
 
-Today: stdio, full sync, standard features (completion, hover, signature help, def/decl/type-def/impl, references, highlights, symbols, semantic tokens full, rename, formatting, code actions, folding), push diagnostics matching the compiler exactly. Echo-era quirks IED's generic client must tolerate now (the C4 plugin's LSP profile declares them, see `shared/host-api/examples/c4-plugin`) and the C4 team should fix:
+Today: stdio, full sync, standard features (completion, hover, signature help, def/decl/type-def/impl, references, highlights, symbols, semantic tokens full, rename, formatting, code actions, folding), push diagnostics matching the compiler exactly. Legacy quirks IED's generic client must tolerate now (the C4 plugin's LSP profile declares them, see `shared/host-api/examples/c4-plugin`) and the C4 team should fix:
 
 | # | Item | Why |
 |---|---|---|
@@ -101,25 +101,27 @@ Today: stdio, full sync, standard features (completion, hover, signature help, d
 | L8 | Read config from IED's `.ied/local/lsp-options/c4.json` (via `initializationOptionsFile` - no LSP change needed) | Bridge retarget |
 | L9 | Incremental re-analysis (already on the C4 roadmap) | Latency on large projects (IED itself) |
 
-### C4DAP (C4 repo)
+### C4DAP (`C4/C4DAP/`)
 
 Today: launch, line breakpoints, thrown/uncaught exception filters, continue/step/pause, threads, stack, one Locals scope, variables, limited evaluate. For VS-class debugging (F-DBG-*): conditional + hit-count + log breakpoints; setVariable; attach; function breakpoints; `readMemory`; `disassemble`; modules; Autos-friendly scopes; `evaluate` contexts (watch/hover/repl). Prioritize conditional breakpoints, attach and memory.
 
-### Nuke (C4 repo kit; Claymore's copy is older)
+### Nuke (`Nuke/`; copies vendored into game projects may be older)
 
 | # | Item | Why |
 |---|---|---|
-| N1 | `IEDConfig.py`: write `.ied/local/lsp-options/<proj>.json` after each successful build (same content as today's `.echo/c4-lsp.json`: includePaths, defines, c4Home, projects) | LSP/build sync (`docs/06`) |
-| N2 | `nuke --init --ied`: write `<Name>.ied.sln`, generated `.ied.proj` files under `build/ied/`, `.ied/` scaffold (skills, solution.json), and the local plugin pin - idempotent, never clobbering hand edits | J7, F-WSP-60 |
-| N3 | **Stream compiler output** instead of printing it after the compile finishes | Live Build output |
-| N4 | Pass `-test-json <path>` and `--filter <glob>` through `nuke test` (`--json-results`, `--filter`) | Test Explorer (F-BLD-40) |
+| N1 | **Done 2026-10-20** (`Nuke/nuke/c4/ide_bridge.py`, `docs/23` N-11): `IEDConfig.py`: write `.ied/local/lsp-options/<proj>.json` after each successful build (same content as the `c4-lsp.json` it writes today for the predecessor IDE: includePaths, defines, c4Home, projects) | LSP/build sync (`docs/06`) |
+| N2 | `nuke init --ied`: write `<Name>.ied.sln`, generated `.ied.proj` files under `build/ied/`, `.ied/` scaffold (skills, solution.json), and the local plugin pin - idempotent, never clobbering hand edits | J7, F-WSP-60 |
+| N3 | **Done 2026-10-20** (compiler output streams line by line): **Stream compiler output** instead of printing it after the compile finishes | Live Build output |
+| N4 | **Done 2026-10-20** (`nuke test --filter GLOB`; every harness writes `<int>/tests/results.json`): Pass `-test-json <path>` and `--filter <glob>` through `nuke test` (`--json-results`, `--filter`) | Test Explorer (F-BLD-40) |
 | N5 | Machine-readable diagnostics: `--diagnostics-json <path>` (file, line, col, severity, message, code) **with absolute paths** - today names are relative to their owning source root and can collide | Error List without regex guessing (F-BLD-33) |
-| N6 | `nuke list --json` (projects, kinds, configs, archs) | Toolbar dropdown `valuesFrom` |
+| N6 | **Done 2026-10-20** (`nuke list --json`; configurations, toolchain and commands in `nuke info --json`): `nuke list --json` (projects, kinds, configs, archs) | Toolbar dropdown `valuesFrom` |
 | N7 | Optional ANSI color in Nuke/compiler output when `IED_COLOR=1` / a TTY is detected | Output window colors |
-| N8 | Bring Claymore's copy up to date (exit codes, `-g` for debugging, `--projects`) | F5 on Claymore needs PDBs; tasks rely on exit codes |
-| N9 | Keep writing `.echo/` for now (Echo still exists in the folder) but nothing in C4 depends on Echo anymore (owner note on `docs/99` #10) | Transition |
+| N8 | **Superseded 2026-10-20**: workspaces no longer vendor Nuke or the compiler; they pin a shared toolchain (`docs/23` N-7) and their manifests become `nuke.toml`. Was: Bring vendored copies in game projects up to date (exit codes, `-g` for debugging, `--projects`) | F5 on a game project needs PDBs; tasks rely on exit codes |
+| N9 | **Retired 2026-10-20**: the rebuilt Nuke writes only IED's bridge. Was: Keep writing the predecessor IDE's legacy workspace folder for now (it may still be used) but nothing in C4 depends on it anymore (owner note on `docs/99` #10) | Transition |
 
-### C4Assist -> the `c4` IED plugin (C4 repo)
+### C4Assist -> the `c4` IED plugin (C4 tree)
+
+C4Assist (the C4 plugin for the predecessor IDE, Go + TypeScript) was not carried into this repository when C4 moved in (2026-10-20); this section is the record of what it did and what the rewrite needs. Its theme values live on in `frontend/css/theme.css`.
 
 C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (see `shared/host-api/examples/c4-plugin/ied-plugin.json`):
 
@@ -131,19 +133,19 @@ C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes,
 - `kitStatus` becomes a status bar item fed by a binding the host already has (file exists + LSP state); `formatDocument` is the LSP's formatting (no separate tool).
 - Port C4Assist's 17 Playwright e2e specs to IED's frontend e2e harness (`docs/19`).
 
-### Bedrock profiler hooks (C4 repo)
+### Bedrock profiler hooks (`C4/Bedrock/`)
 
-`Profile::` module implementing the client side of the IED trace protocol (`docs/16`): zones (scoped), frames, plots, messages, thread names (renamable), task begin/end, allocations (hooked into the GC allocator: alloc/free/size/pool, optional call stacks), GC collection events (from the existing collection callbacks), GPU contexts and zones (for Claymore's D3D12). Compiled out entirely unless a define is set (zero cost in Dist). Enabled by the IED *Profile* task through an environment variable.
+`Profile::` module implementing the client side of the IED trace protocol (`docs/16`): zones (scoped), frames, plots, messages, thread names (renamable), task begin/end, allocations (hooked into the GC allocator: alloc/free/size/pool, optional call stacks), GC collection events (from the existing collection callbacks), GPU contexts and zones (for D3D12 engines). Compiled out entirely unless a define is set (zero cost in Dist). Enabled by the IED *Profile* task through an environment variable.
 
-### Bedrock `Gpu::` (C4 repo, for the GPU debugger)
+### Bedrock `Gpu::` (`C4/Bedrock/`, for the GPU debugger)
 
 Two steps (`docs/22`). First, small: `Gpu::Capture` (`NextFrames(n)`, `Begin/End`, `SetComment`) over whichever capture tool is loaded - RenderDoc's in-app API (`renderdoc_app.h`, found with `GetModuleHandle`), PIX's programmatic capture, or nothing - plus marker scopes shared with `Profile::Gpu::Zone`. Later (P-8): the Flashbang recorder - a layer under the program's D3D12 calls that writes `.flash` captures, with `Gpu::Annotate` for bindless slot -> asset, material -> source, draw -> entity metadata, and a rolling frame ring. Compiled out unless enabled, like `Profile::`.
 
-### Claymore (for later engine plugins)
+### Game engines (for later engine plugins)
 
-Claymore's plans already align with IED's generic hooks: a named-pipe session + `claymore` CLI with `--json`/`--describe` (-> engine MCP server or plugin bindings and tools), structured shader diagnostics (-> problem matcher / diagnostics JSON), JSON profile traces (-> profiler import, then the native trace protocol), structured logs (-> output source), hot reload (-> task + status bar), `.c4scene`/`.meta.c4`/`.jrn` files (-> file viewers, diff). Recommendation to the Claymore track: emit profiler data through Bedrock `Profile::` rather than a separate JSON format, so one profiler serves both.
+The C4 game-engine port's plans already align with IED's generic hooks: a named-pipe session + an engine CLI with `--json`/`--describe` (-> engine MCP server or plugin bindings and tools), structured shader diagnostics (-> problem matcher / diagnostics JSON), JSON profile traces (-> profiler import, then the native trace protocol), structured logs (-> output source), hot reload (-> task + status bar), `.c4scene`/`.meta.c4`/`.jrn` files (-> file viewers, diff). Recommendation to the engine track: emit profiler data through Bedrock `Profile::` rather than a separate JSON format, so one profiler serves both.
 
-## Sequencing (C4 repo)
+## Sequencing (C4 tree)
 
 ```
 P-1  Bedrock Net + Process + FS.Watch + Time + Text extras   (gates IED server)

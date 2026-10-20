@@ -6,7 +6,7 @@ A graphics debugger as its own sidebar activity (**GPU**, plugin `ied.gpu`): cap
 
 Feature list: `docs/features/17-gpu-debugger.md`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
 
-Generic by rule (AGENTS.md rule 1): the plugin knows D3D12, Vulkan and HLSL/SPIR-V, never Claymore. Engine meaning (pass names, material and entity names, what a bindless index points at) arrives inside the capture as debug markers, object names and an optional metadata chunk that any engine can write.
+Generic by rule (AGENTS.md rule 1): the plugin knows D3D12, Vulkan and HLSL/SPIR-V, never a specific engine. Engine meaning (pass names, material and entity names, what a bindless index points at) arrives inside the capture as debug markers, object names and an optional metadata chunk that any engine can write.
 
 ## What we take from each tool
 
@@ -54,7 +54,7 @@ The question the owner asked: use RenderDoc as the backend, or build our own wit
 
 | Option | Gets us | Costs | Limits we would hit |
 |---|---|---|---|
-| **A. RenderDoc backend** (adapter process) | A complete D3D11/12 + Vulkan debugger in weeks: capture, replay, state, textures, meshes, pixel history, DXIL/SPIR-V shader debugging. MIT license. | Pinning and adapting to its API across versions; its replay model decides what is possible. | Shaders with unbounded cbuffer arrays are marked not debuggable (release notes v1.45) - Icepick's `DefaultLit.hlsl` declares `ConstantBuffer<Material> u_Materials[]`, so Claymore's main lit shader is affected. Work graphs do not appear in its release notes (Icepick has `WorkGraphShaderPass`). Its notes warn of an AMD driver bug breaking multi-thread shader debugging. No engine semantics beyond names and markers. |
+| **A. RenderDoc backend** (adapter process) | A complete D3D11/12 + Vulkan debugger in weeks: capture, replay, state, textures, meshes, pixel history, DXIL/SPIR-V shader debugging. MIT license. | Pinning and adapting to its API across versions; its replay model decides what is possible. | Shaders with unbounded cbuffer arrays are marked not debuggable (release notes v1.45) - the target engine's `DefaultLit.hlsl` declares `ConstantBuffer<Material> u_Materials[]`, so its main lit shader is affected. Work graphs do not appear in RenderDoc's release notes (the engine's C++ reference implementation has `WorkGraphShaderPass`). Its notes warn of an AMD driver bug breaking multi-thread shader debugging. No engine semantics beyond names and markers. |
 | **B. Own backend from scratch** (Flashbang), RenderDoc as reference | Full control: bindless, work graphs, engine metadata, multi-frame and rolling captures, our own capture format, shader debugging designed for our needs. | Capture layer, serializer, replayer, format decoders, pixel history and a shader debugger: many months before it matches A. | Everything is ours to maintain, per API and driver quirk. |
 | **C. PIX as backend** | - | - | Not possible: `.wpix` is closed and there is no replay API. PIX stays a hand-off: programmatic capture (`WinPixGpuCapturer.dll`, `PIXGpuCaptureNextFrames`) and "Open in PIX". |
 | **D. Nsight as backend** | - | - | Closed. Hand-off only ("Open in Nsight Graphics"). |
@@ -65,7 +65,7 @@ The question the owner asked: use RenderDoc as the backend, or build our own wit
 
 Working name in the family's explosion theme (a flashbang lights up the whole frame for an instant); owner to confirm (`docs/99` O11).
 
-- **Capture inside C4 programs, no injection.** Bedrock gets a `Gpu::` module (`docs/17`) that wraps the D3D12 calls a program makes; Claymore's RHI already routes every call through its `CommandList` abstraction, so recording is a layer under it rather than a hook. Programs opt in with a define (compiled out in `Dist`, like `Profile::`).
+- **Capture inside C4 programs, no injection.** Bedrock gets a `Gpu::` module (`docs/17`) that wraps the D3D12 calls a program makes; when an engine's RHI already routes every call through a `CommandList` abstraction, recording is a layer under it rather than a hook. Programs opt in with a define (compiled out in `Dist`, like `Profile::`).
 - **Engine semantics for free.** The recorder takes marker scopes from `Profile::Gpu::Zone` (so capture events and profiler GPU zones share names), object names, and an optional `Gpu::Annotate` table: bindless slot -> asset path, material -> source file, draw -> entity. Any engine can write the same chunk; IED only displays it.
 - **Format `.flash`:** chunked like ITP (`docs/16`): interned strings, resource table, per-command-list API streams, initial contents of referenced resources (zstd), shader blobs + PDBs, metadata chunk. Rolling mode keeps the last N frames in a ring and writes them out on a trigger ("capture on hitch": the profiler sees a spike and keeps the frames around it).
 - **Replayer:** `flashbang-replay.exe` implements `ied-gpu/1`. Native C++ first; C4 later is possible because it is an executable, not a DLL.
@@ -119,7 +119,7 @@ GPU tools (`docs/13`, group `gpu`) let the agent work the debugger the way the o
 |---|---|---|
 | G1 | rdc backend; library; launch capture; Event Browser, Pipeline State, Texture Viewer, Resources, API Calls, Messages, Pixel History, Shader Debugger (RenderDoc's), Mesh Viewer; per-event timing; read-only AI tools | process spawn + blobs (M1), tasks (M3), docking (M2) |
 | G2 | Performance view with counters providers; compare and insights; Edit and Replay; phone triage; capture on hitch with the profiler | G1, profiler (M9) |
-| G3 | Flashbang: Bedrock `Gpu::` recorder, `.flash`, replayer, time-travel shader debugging, work graphs, rolling captures | G2, Bedrock `Gpu::` (C4 repo) |
+| G3 | Flashbang: Bedrock `Gpu::` recorder, `.flash`, replayer, time-travel shader debugging, work graphs, rolling captures | G2, Bedrock `Gpu::` (C4 tree) |
 
 Roadmap placement: `docs/18` M12 (G1-G2) and M13 (G3).
 

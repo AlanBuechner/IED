@@ -88,14 +88,14 @@ Assembled in a fixed order - base prompt, style rules, mode instructions, soluti
 
 ## Skills
 
-- Sources: `.ied/skills/` (project, committed), `%APPDATA%/IED/skills/`, plugin `skills` paths. Format: `shared/host-api/README.md` (compatible with the C4 repo's existing skills, which use `triggers`).
+- Sources: `.ied/skills/` (project, committed), `%APPDATA%/IED/skills/`, plugin `skills` paths. Format: `shared/host-api/README.md` (compatible with the existing C4 skills in `C4/skills/`, which use `triggers`).
 - Index: BM25 over name, description, keywords, triggers and headings; optional embedding rerank (P2).
 - In the prompt: the whole index when small (<= 40), otherwise the top 15 for the task + `skill_search`. Bodies load only via `skill_read`; a skill can declare tool groups to enable.
 - Authoring: `skill_write` (approval-gated) and "synthesize skill from this chat"; the orchestration learning loop proposes skill updates after successful goals.
 
 ## MCP
 
-MCP client for stdio and streamable-HTTP servers (Blender, Claymore, anything), configured at app/solution/project tier (project-defined servers need trust). Tools surface as group `mcp_<server>` in the same registry; resources become @-mentionable context; prompts become slash commands. Each server has a privacy class and inherits the workspace egress policy. IED is also an MCP *server* (P1) so external agents can use its LSP/build/editor tools.
+MCP client for stdio and streamable-HTTP servers (Blender, a game engine, anything), configured at app/solution/project tier (project-defined servers need trust). Tools surface as group `mcp_<server>` in the same registry; resources become @-mentionable context; prompts become slash commands. Each server has a privacy class and inherits the workspace egress policy. IED is also an MCP *server* (P1) so external agents can use its LSP/build/editor tools.
 
 ## Web egress and secure mode
 

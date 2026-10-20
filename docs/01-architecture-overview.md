@@ -13,7 +13,7 @@ Consequences (load-bearing):
 - **Close the browser -> work continues.** AI runs, builds, terminals, debug sessions and LSP servers live on the server. Reopen or switch devices and you resume exactly where you left off (live streams replay from ring buffers; history comes from disk) - `docs/10`.
 - **Remote access is first-class**: phone browser, another PC, anywhere the endpoint is reachable (securely - `docs/11`). The UI has real phone layouts (`docs/15`).
 - **All state lives on the server**, including unsaved editor buffers, layouts (per device class) and drafts. The browser holds no authoritative state.
-- **Multi-workspace:** one server hosts several open workspaces at once (C4 and Claymore can both have agents running); each browser tab views one.
+- **Multi-workspace:** one server hosts several open workspaces at once (the C4 compiler and a game project can both have agents running); each browser tab views one.
 - Multiple clients can attach concurrently, with explicit per-resource conflict rules (`docs/11`).
 
 ## Server (`ied-server`, C4)
@@ -67,6 +67,6 @@ A WebView2 window pointed at the local server gives an app feel and receives bro
 
 ## What deliberately does NOT exist in the host
 
-- No C4 language logic, no Claymore knowledge, no hardcoded toolchain paths. Language/engine support arrives through plugins, LSP, DAP and MCP.
+- No C4 language logic, no game-engine knowledge, no hardcoded toolchain paths. Language/engine support arrives through plugins, LSP, DAP and MCP.
 - No build system. Nuke (or any other) is invoked through tasks (`docs/06`).
 - No model weights. "Local AI" means the owner runs model servers; IED connects to them.
