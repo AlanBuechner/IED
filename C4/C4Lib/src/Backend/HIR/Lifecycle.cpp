@@ -1,4 +1,5 @@
 #include "Backend/HIR/Lifecycle.h"
+#include "Backend/HIR/IndexLoop.h"
 #include "Backend/HIR/AccessCheck.h"
 #include "Backend/HIR/IndexLValue.h"
 #include "Backend/HIR/CallArguments.h"
@@ -83,6 +84,11 @@ namespace Scripting
 		if (!obj) return;
 		if (const FunctionRecord* create = DefaultCreate(obj))
 			region->stmts.push_back(m_Ctx.out->NewNode<ExprStmtNode>(DirectCall(create, object, DefaultArguments(create))));
+	}
+
+	void Lifecycle::ConstructVariable(BlockNode* region, const LValue* object)
+	{
+		Construct(AsArray(object->type) ? FillGuard(region, object) : region, object);
 	}
 
 	void Lifecycle::ConstructElements(BlockNode* region, const LValue* array, uint64 begin, uint64 end)
@@ -472,35 +478,14 @@ namespace Scripting
 	void Lifecycle::ForEachIndex(BlockNode* region, uint64 begin, uint64 end, bool reverse,
 		const std::function<void(BlockNode*, const HIRNode*)>& visit)
 	{
-		// One index needs no loop. Otherwise for (i = begin; i < end; ++i) visit(i), or
-		// for (i = end; i > begin; ) { --i; visit(i); }
+		// One index needs no loop.
 		if (begin >= end) return;
 		if (end - begin == 1)
 		{
 			visit(region, IndexConstant(begin));
 			return;
 		}
-		TypeStore* ts = m_Ctx.queries().TypeStore();
-		const Type* i64 = ts->Builtin(TypeKind::Int64);
-		const Type* boolT = ts->Builtin(TypeKind::Bool);
-		uint32 slot = m_Ctx.AllocSlot(i64, "__element", SlotClass::Temp);
-		LValue idxLv; idxLv.kind = LValue::Kind::Slot; idxLv.type = i64; idxLv.slot = slot;
-		const LValue* idx = m_Ctx.NewLValue(idxLv);
-		auto constant = [&](uint64 v) { return IndexConstant(v); };
-		auto load = [&]() { return m_Ctx.out->NewNode<LoadNode>(i64, idx); };
-		region->stmts.push_back(m_Ctx.out->NewNode<LocalDeclNode>(slot, i64, constant(reverse ? end : begin)));
-		const HIRNode* cond = reverse ? m_Ctx.out->NewNode<IntrinsicOpNode>(boolT, IntrinsicOp::Gt, load(), constant(begin))
-			: m_Ctx.out->NewNode<IntrinsicOpNode>(boolT, IntrinsicOp::Lt, load(), constant(end));
-		auto* loop = m_Ctx.out->NewNode<WhileNode>(cond);
-		loop->breakLabel = m_Ctx.NewLabel();
-		loop->continueLabel = m_Ctx.NewLabel();
-		loop->body = m_Ctx.out->NewNode<BlockNode>(nullptr);
-		auto step = [&](IntrinsicOp op) {
-			loop->body->stmts.push_back(m_Ctx.out->NewNode<StoreNode>(idx, m_Ctx.out->NewNode<IntrinsicOpNode>(i64, op, load(), constant(1))));
-		};
-		if (reverse) step(IntrinsicOp::Sub);
-		visit(loop->body, load());
-		if (!reverse) step(IntrinsicOp::Add);
-		region->stmts.push_back(loop);
+		IndexRange range{ [&] { return IndexConstant(begin); }, [&] { return IndexConstant(end); } };
+		AppendIndexLoop(m_Ctx, region, range, reverse, visit);
 	}
 } // namespace Scripting

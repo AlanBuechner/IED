@@ -158,6 +158,8 @@ namespace Scripting
 		SequenceNode(const Type* t) : HIRNode(Kind::Sequence, t) {}
 	};
 
+	struct BlockNode;
+
 	// Allocation. Result is a POINTER rvalue (the object's address); *p / p->x lower via Deref.
 	struct NewNode : HIRNode
 	{
@@ -167,6 +169,12 @@ namespace Scripting
 		const FunctionRecord* finalizer = nullptr; // [operator("delete")] method registered for GC reclamation, or null
 		bool aggregateInit = false;        // new T{...}: args positionally fill the fields (no ctor)
 		const HIRNode* placement = nullptr; // `new (p) T(...)`: the storage (a T*); null allocates on the managed heap
+		// `new T[n]` (docs/language/10): `count` (an int64 rvalue) zeroed elements of objectType, each with its vptrs.
+		// The pointer to the first is stored in `elements`, then `initialize` starts them; a heap array then gets a
+		// finalizer destroying every element (`finalizer` is the element's, or its innermost element's, delete).
+		const HIRNode* count = nullptr;
+		const LValue* elements = nullptr;
+		const BlockNode* initialize = nullptr;
 		NewNode(const Type* ptrType, const Type* objType) : HIRNode(Kind::New, ptrType), objectType(objType) {}
 	};
 

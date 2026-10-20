@@ -1,0 +1,8 @@
+struct Vec3 { public union { packed float x, y, z; }; }
+struct Int2 { public union { packed int32 a, b; }; }
+int32 main() {
+	Vec3 v = { 0.0f, 0.0f, 0.0f };
+	Int2 i = { 1, 2 };
+	v.xy = i;
+	return 0;
+}

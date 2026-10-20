@@ -1,0 +1,30 @@
+// `new (storage) T[n]` starts n elements in storage the caller owns: zeroed, started, never collected or
+// finalized; the caller ends them with destroy() on each element.
+int32 g_failures = 0;
+int32 g_live = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct Counted {
+	int32 id = 2;
+	[operator("create")] void Init() { g_live++; }
+	[operator("delete")] void Done() { if (id != 0) g_live--; id = 0; }
+}
+
+int32 main() {
+	int32[8] storage;
+	storage[5] = 77;
+	int32 n = 4;
+	int32* placed = new (&storage[0]) int32[n]{ 5, 6 };
+	Check(placed == &storage[0], "the result is the storage");
+	Check(storage[0] == 5 && storage[1] == 6 && storage[2] == 0 && storage[3] == 0, "entries then zero");
+	Check(storage[5] == 77, "storage past the elements is untouched");
+	Counted[3] slots;
+	g_live = 0;
+	Counted* again = new (&slots[0]) Counted[3];
+	Check(g_live == 3 && again[2].id == 2, "objects start in place");
+	for (int32 i = 0; i < 3; i++) destroy(&again[i]);
+	Check(g_live == 0, "destroy ends each element");
+	return g_failures;
+}

@@ -25,6 +25,17 @@ namespace Scripting
 		void RegisterFinalizer(llvm::Value* object, const FunctionRecord& finalizer);
 
 	private:
+		/// What an array's finalizer walks: `perElement` innermost elements in each element, `stride` bytes apart.
+		struct ArrayCount
+		{
+			uint64 perElement;
+			uint64 stride;
+		};
+
+		llvm::Value* EmitNewArray(const NewNode* n);
+		llvm::Value* AllocateRun(const NewNode* n, llvm::Value* count, llvm::Value* bytes);
+		llvm::Value* ZeroedRun(const NewNode* n, llvm::Value* bytes);
+		static ArrayCount Layout(const Type* element);
 		llvm::Value* ZeroedPlacement(const NewNode* n);
 		void Initialize(const Type* objectType, llvm::Value* storage, const FunctionRecord* ctor, bool aggregateInit,
 			const std::vector<const HIRNode*>& args);

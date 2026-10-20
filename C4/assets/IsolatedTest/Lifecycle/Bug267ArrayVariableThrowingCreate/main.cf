@@ -1,0 +1,35 @@
+// BUG-267: an array variable whose element create throws destroys the elements it already started (local,
+// global start and static local), as a braced fill and an object's create do.
+int32 g_failures = 0;
+int32 g_live = 0;
+int32 g_limit = 1000;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct Counted {
+	int32 id;
+	[operator("create")] void Init() { if (g_live >= g_limit) throw 9; g_live++; id = g_live; }
+	[operator("delete")] void Done() { if (id != 0) g_live--; id = 0; }
+}
+struct Holder { Counted[5] items; }
+
+void StaticStart() { static Counted[4] kept; }
+
+int32 main() {
+	g_limit = 3;
+	try { Counted[5] items; } catch (int32 e) { }
+	Check(g_live == 0, "a local array destroys the elements it started");
+	try { Counted[2][3] grid; } catch (int32 e) { }
+	Check(g_live == 0, "a local array of arrays destroys every element it started");
+	try { Holder h; } catch (int32 e) { }
+	Check(g_live == 0, "an array field is destroyed by its object's create");
+	try { StaticStart(); } catch (int32 e) { }
+	Check(g_live == 0, "a static local's start destroys the elements it started");
+	g_limit = 1000;
+	StaticStart();
+	Check(g_live == 4, "the static local starts on the next pass");
+	{ Counted[3] fine; Check(g_live == 7, "a finished array keeps its elements"); }
+	Check(g_live == 4, "a finished array is destroyed at its scope's end");
+	return g_failures;
+}

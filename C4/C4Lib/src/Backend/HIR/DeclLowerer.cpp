@@ -154,7 +154,7 @@ namespace Scripting
 		else if (!hasInitializer)
 		{
 			if (auto allowed = AccessCheck::CheckDefaultCreate(m_Ctx, t); !allowed.Ok()) return m_Ctx.Fail(n, allowed);
-			life.Construct(region, self);
+			life.ConstructVariable(region, self);
 		}
 		m_Ctx.NoteCleanup(slot, life.ScheduleDestroy(region, self));
 		return QueryResult<void>::Success();
@@ -261,7 +261,7 @@ namespace Scripting
 			return ConstructFrom(obj, args.value, false, target, body, start.site);
 		}
 		if (auto allowed = AccessCheck::CheckDefaultCreate(m_Ctx, target->type); !allowed.Ok()) return m_Ctx.Fail(start.site, allowed);
-		Lifecycle(m_Ctx).Construct(body, target);
+		Lifecycle(m_Ctx).ConstructVariable(body, target);
 		return QueryResult<void>::Success();
 	}
 

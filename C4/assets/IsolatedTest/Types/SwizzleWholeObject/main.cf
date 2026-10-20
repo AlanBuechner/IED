@@ -1,0 +1,38 @@
+// A pure packed vector object is a vector of its lanes: it is written into a swizzle run of the same lanes
+// whole (`v3.zx = v2`), combines with one in operators, and a run reads back into one.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct Vec2 { public union { packed float x, y; }; }
+struct Vec3 { public union { packed float x, y, z; }; }
+struct Vec4 { public union { packed float x, y, z, w; }; }
+struct Int2 { public union { packed int32 a, b; }; }
+struct Int4 { public union { packed int32 a, b, c, d; }; }
+
+int32 main() {
+	Vec3 v3 = { 0.0f, 0.0f, 0.0f };
+	Vec2 v2 = { 1.0f, 2.0f };
+	v3.zx = v2;
+	Check(v3.z == 1.0f && v3.x == 2.0f && v3.y == 0.0f, "an object into a reordered run");
+	v3.xy += v2;
+	Check(v3.x == 3.0f && v3.y == 2.0f, "a compound operator with an object operand");
+	Vec4 q = { 0.0f, 0.0f, 0.0f, 0.0f };
+	q.wzy = v3;
+	Check(q.w == 3.0f && q.z == 2.0f && q.y == 1.0f && q.x == 0.0f, "a three-lane object");
+	Vec2 back = q.wz;
+	Check(back.x == 3.0f && back.y == 2.0f, "a run read into an object");
+	Vec4* pq = &q;
+	pq->xw = v2;
+	Check(q.x == 1.0f && q.w == 2.0f, "through a pointer");
+	Vec2 sum = q.xw + v2;
+	Check(sum.x == 2.0f && sum.y == 4.0f, "run plus object");
+	Vec2 product = v2 * q.xw;
+	Check(product.x == 1.0f && product.y == 4.0f, "object times run");
+	Int4 i4 = { 1, 2, 3, 4 };
+	Int2 i2 = { 10, 20 };
+	i4.da = i2;
+	Check(i4.d == 10 && i4.a == 20 && i4.b == 2, "integer lanes");
+	return g_failures;
+}

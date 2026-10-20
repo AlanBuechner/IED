@@ -29,6 +29,11 @@ namespace Scripting
 		Core::String result = "new ";
 		if (m_Placement) result += "(" + m_Placement->ToString() + ") ";
 		result += m_Type ? m_Type->ToString() : "";
+		if (m_ArrayCount)
+		{
+			result += "[" + m_ArrayCount->ToString() + "]";
+			return m_ArrayInitializer ? result + m_ArrayInitializer->ToString() : result;
+		}
 		if (m_HasBraces) return result + "{" + JoinArguments(m_Arguments) + "}";
 		return result + "(" + JoinArguments(m_Arguments) + ")";
 	}
@@ -46,6 +51,14 @@ namespace Scripting
 		if (!m_Type)
 		{
 			state.GetErrorTracker().AddError(lexer.PeekCompound().GetStartLocation(), "Expected a type after 'new'", ErrorSeverity::Error);
+			return;
+		}
+
+		if (Ref<QualTypeNode> element = m_Type->WithoutOuterArray())
+		{
+			m_ArrayCount = m_Type->GetIndirections().Back().arraySizeExpr;
+			m_Type = element;
+			ParseArrayRest(state);
 			return;
 		}
 
@@ -100,9 +113,33 @@ namespace Scripting
 		lexer.NextCompoundToken();
 	}
 
+	void NewExpressionNode::ParseArrayRest(ParserState& state)
+	{
+		// `new T[n]`, `new T[n]{ entries }` (the first elements, the rest default-constructed) or `new T[n]()`.
+		Lexer& lexer = state.GetLexer();
+		endLocation = m_Type->endLocation;
+		if (lexer.PeekCompound().GetType() == TokenType::OpenCurl)
+		{
+			m_HasBraces = true;
+			m_ArrayInitializer = CreateRef<BracedInitializerNode>();
+			m_ArrayInitializer->ParseBody(state);
+			endLocation = m_ArrayInitializer->endLocation;
+		}
+		else if (lexer.PeekCompound().GetType() == TokenType::OpenParen)
+		{
+			ParseArguments(state, TokenType::CloseParen, ")");
+			if (!m_Arguments.Empty())
+				state.GetErrorTracker().AddError(m_Arguments[0]->startLocation,
+					"'new T[n](...)' takes no arguments: initialize the elements with 'new T[n]{ ... }'", ErrorSeverity::Error);
+		}
+		CollectChildren();
+	}
+
 	void NewExpressionNode::CollectChildren()
 	{
 		if (m_Placement) m_Children.Push(m_Placement);
+		if (m_ArrayCount) m_Children.Push(m_ArrayCount);
+		if (m_ArrayInitializer) m_Children.Push(m_ArrayInitializer);
 		for (const auto& a : m_Arguments) m_Children.Push(a);
 	}
 }

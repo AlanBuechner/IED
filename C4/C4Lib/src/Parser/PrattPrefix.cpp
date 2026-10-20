@@ -346,6 +346,13 @@ namespace Scripting
 			node->m_IsPostfix = false;
 			node->startLocation = token.GetStartLocation();
 			lexer.NextCompoundToken(); // consume delete/new
+			if (type == TokenType::Delete && lexer.PeekCompound().GetType() == TokenType::OpenBracket
+				&& lexer.PeekCompound(1).GetType() == TokenType::CloseBracket)
+			{
+				node->m_IsArrayDelete = true;
+				lexer.NextCompoundToken();
+				lexer.NextCompoundToken();
+			}
 
 			auto operand = ParseExpression(state, BindPower::PrefixOperand);
 			if (!operand)

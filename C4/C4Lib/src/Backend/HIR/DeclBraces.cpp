@@ -167,7 +167,14 @@ namespace Scripting
 		return FillOmittedFields(obj, given, baseLoc, block);
 	}
 
-	QueryResult<std::vector<DeclLowerer::ElementEntry>> DeclLowerer::ElementEntries(const ArrayType* ar, const BracedInitializerNode* br,
+	QueryResult<uint64> DeclLowerer::ElementsNamed(const BracedInitializerNode* br, const Core::String& name)
+	{
+		auto entries = ElementEntries(UINT64_MAX, br, name);
+		if (!entries.Ok()) return QueryResult<uint64>::Fail(entries.error, entries.message);
+		return QueryResult<uint64>(entries.value.empty() ? 0 : entries.value.back().last + 1);
+	}
+
+	QueryResult<std::vector<DeclLowerer::ElementEntry>> DeclLowerer::ElementEntries(uint64 count, const BracedInitializerNode* br,
 		const Core::String& name)
 	{
 		// Where each entry lands: a positional one continues after the previous entry, so { 1, 2, [5] = 9, 7 }
@@ -180,7 +187,6 @@ namespace Scripting
 			*out = (uint64)v.value.AsInt();
 			return QueryResult<void>::Success();
 		};
-		const uint64 count = ar->GetElementCount();
 		auto items = BracedItems(br);
 		if (!items.Ok()) return Result::Fail(items.error, items.message);
 		std::vector<ElementEntry> entries;
@@ -215,7 +221,7 @@ namespace Scripting
 	{
 		// Elements start in index order; one no entry names is default-constructed. A range entry's value is
 		// evaluated once, into its first element, and copied into the rest.
-		auto entries = ElementEntries(ar, br, name);
+		auto entries = ElementEntries(ar->GetElementCount(), br, name);
 		if (!entries.Ok()) return QueryResult<void>::Fail(entries.error, entries.message);
 		const Type* elemType = ar->GetElementType();
 		Value array; array.isLValue = true; array.lvalue = baseLoc; array.type = ar;

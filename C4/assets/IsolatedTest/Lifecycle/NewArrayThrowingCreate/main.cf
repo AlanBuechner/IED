@@ -1,0 +1,34 @@
+// When an element's start throws, `new T[n]` destroys the elements it already started, last first, and the
+// exception continues; nothing is destroyed twice later.
+int32 g_failures = 0;
+int32 g_live = 0;
+int32 g_limit = 1000;
+int32 g_lastDestroyed = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct Counted {
+	int32 id;
+	[operator("create")] void Init() { if (g_live >= g_limit) throw 5; g_live++; id = g_live; }
+	[operator("create")] void Init(int32 x) { if (x < 0) throw 6; g_live++; id = g_live; }
+	[operator("delete")] void Done() { if (id != 0) { g_live--; g_lastDestroyed = id; } id = 0; }
+}
+
+int32 main() {
+	g_limit = 3;
+	int32 caught = 0;
+	try { Counted* items = new Counted[5]; } catch (int32 e) { caught = e; }
+	Check(caught == 5 && g_live == 0, "the started elements are destroyed");
+	Check(g_lastDestroyed == 1, "the first element is destroyed last");
+	g_limit = 1000;
+	caught = 0;
+	try { Counted* items = new Counted[4]{ Counted(1), Counted(-1) }; } catch (int32 e) { caught = e; }
+	Check(caught == 6 && g_live == 0, "a throwing entry destroys the entries already started");
+	gc_collect();
+	gc_collect();
+	Check(g_live == 0, "the abandoned storage destroys nothing again");
+	Counted* fine = new Counted[2];
+	Check(g_live == 2, "a later array starts normally");
+	return g_failures;
+}

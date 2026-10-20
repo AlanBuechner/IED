@@ -104,6 +104,7 @@ float s = LaneSum4(q.wwww);    // repeated lanes read as a splat (w, w, w, w); a
 | `v.wwww` | repeated lanes are allowed when reading (splat) |
 | `v.xy = { a, b }` | braced write: element i goes to the i-th lane named in the run (HLSL destination order) |
 | `v.zx = w.xy` | run-to-run copy, lane by lane |
+| `v3.zx = v2` | a pure packed vector object (section 1.2) of the same lanes is that vector: it fills the run whole, and combines with a run in operators (`v3.xy += v2`, `q.xw + v2`) |
 | inside a method, bare `x`, `xy`, `data` | resolve to `this` lanes and views |
 | `v.zyx[i]`, `v.data[i]` | lane i of the run or vector, read or written; `i` may be a runtime value |
 | `p->xy = { ... }` | the same through a pointer |

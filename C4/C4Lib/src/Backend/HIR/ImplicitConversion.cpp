@@ -74,9 +74,18 @@ namespace Scripting::ImplicitConversion
 			return Result::Fail(QueryError::NotAValue, why);
 		}
 
+		// A pure packed vector object of the same lanes is that vector (`v3.zx = v2`), the representation they share.
+		bool SameLanes(const Type* from, const SwizzleType* to)
+		{
+			const auto* object = dynamic_cast<const ObjectType*>(from);
+			const SwizzleType* lanes = object && object->IsPurePackedVector() ? object->GetPackedVectorSwizzle() : nullptr;
+			return lanes && lanes->GetLaneCount() == to->GetLaneCount() && lanes->GetElementType() == to->GetElementType();
+		}
+
 		// A scalar converts to a packed vector by broadcasting to every lane, after converting to the element (D-62).
 		Result ToPacked(LoweringContext& ctx, const HIRNode* value, const Type* from, const SwizzleType* to)
 		{
+			if (SameLanes(from, to)) return Result(ctx.out->NewNode<ConvertNode>(value, from, to));
 			if (from->GetKind() == TypeKind::Swizzle)
 				return Result::Fail(QueryError::NotAValue, "a " + Quoted(from) + " is not a " + Quoted(to) + ": convert the lanes with (" +
 					to->GetName() + ")v");

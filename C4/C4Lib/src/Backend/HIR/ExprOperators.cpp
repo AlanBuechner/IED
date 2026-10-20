@@ -27,6 +27,7 @@
 #include "Model/TypeHandle.h"
 #include <algorithm>
 #include <iterator>
+#include <optional>
 
 namespace Scripting
 {
@@ -120,6 +121,10 @@ namespace Scripting
 		{
 			bool isCompare = tok == "==" || tok == "!=" || tok == "<" || tok == ">" || tok == "<=" || tok == ">=";
 			const Type* common = l;
+
+			// A pure packed vector object beside a run of its lanes is that vector (`v3.xy += v2`).
+			if (std::optional<Value> lanes = SameLanesAs(lhs, r)) { lhs = *lanes; l = TypeHandle::UnwrapToValue(lhs.type); }
+			if (std::optional<Value> lanes = SameLanesAs(rhs, l)) { rhs = *lanes; r = TypeHandle::UnwrapToValue(rhs.type); }
 
 			// An object or union has no built-in operator: without a method on the left operand's type it is an error.
 			auto aggregate = [](const Type* t) { return t->GetKind() == TypeKind::Object || t->GetKind() == TypeKind::Union; };
@@ -380,6 +385,16 @@ namespace Scripting
 			return Value::R(del, voidT);
 		}
 		return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::Unsupported, "unary operator not yet lowered: " + tok));
+	}
+
+	std::optional<Value> ExprLowerer::SameLanesAs(const Value& operand, const Type* other)
+	{
+		const auto* run = dynamic_cast<const SwizzleType*>(other);
+		const auto* object = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(operand.type));
+		if (!run || !run->IsPacked() || !object || !object->IsPurePackedVector()) return std::nullopt;
+		const SwizzleType* lanes = object->GetPackedVectorSwizzle();
+		if (lanes->GetLaneCount() != run->GetLaneCount() || lanes->GetElementType() != run->GetElementType()) return std::nullopt;
+		return Value::R(m_Ctx.out->NewNode<ConvertNode>(m_Ctx.LoadIfNeeded(operand), object, run), run);
 	}
 
 	QueryResult<Value> ExprLowerer::VectorBinary(const AstNode* n, IntrinsicOp op, bool isCompare, const Value& lhs, const Value& rhs)

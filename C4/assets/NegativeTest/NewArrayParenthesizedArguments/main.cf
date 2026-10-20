@@ -1,0 +1,5 @@
+int32 main() {
+	int32 n = 2;
+	int32* p = new int32[n](4);
+	return 0;
+}

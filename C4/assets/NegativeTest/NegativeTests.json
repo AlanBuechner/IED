@@ -2414,5 +2414,21 @@
     "TypeInstanceAsValue": {
         "expect": ["'Box<int32>' is not a value: only a function template's instance is"],
         "reason": "BUG-264: a template's instance named before ';' is a value only when it is a function's."
+    },
+    "NewArrayCountNotInteger": {
+        "expect": ["the element count of 'new T[n]' is an integer, got 'float'"],
+        "reason": "new T[n] counts elements: a float count is an error naming its type."
+    },
+    "NewArrayParenthesizedArguments": {
+        "expect": ["'new T[n](...)' takes no arguments"],
+        "reason": "Elements of new T[n] start from braces; parenthesized arguments are rejected with the fix."
+    },
+    "NewArrayElementNamedTwice": {
+        "expect": ["element 1 of 'new int32[n]' is initialized twice"],
+        "reason": "The braces of new T[n] follow the array initializer rules, named after the new expression."
+    },
+    "SwizzleWholeObjectOtherLanes": {
+        "expect": ["a 'Int2' is not a 'packed float[2]'"],
+        "reason": "A packed vector object fills a run only when its lanes match (count and element type)."
     }
 }

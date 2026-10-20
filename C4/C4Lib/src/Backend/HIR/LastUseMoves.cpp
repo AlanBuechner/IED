@@ -82,7 +82,12 @@ namespace Scripting
 				case HIRNode::Kind::Call: Call(*static_cast<const CallNode*>(n)); return;
 				case HIRNode::Kind::IntrinsicOp: Walk(static_cast<const IntrinsicOpNode*>(n)->lhs); Walk(static_cast<const IntrinsicOpNode*>(n)->rhs); return;
 				case HIRNode::Kind::Convert: Walk(static_cast<const ConvertNode*>(n)->src); return;
-				case HIRNode::Kind::New: Walk(static_cast<const NewNode*>(n)->placement); All(static_cast<const NewNode*>(n)->args); return;
+				case HIRNode::Kind::New:
+				{
+					const auto* nw = static_cast<const NewNode*>(n);
+					Walk(nw->placement); Walk(nw->count); All(nw->args); Walk(nw->initialize);
+					return;
+				}
 				case HIRNode::Kind::Delete: Walk(static_cast<const DeleteNode*>(n)->operand); return;
 				case HIRNode::Kind::Construct: All(static_cast<const ConstructNode*>(n)->args); return;
 				case HIRNode::Kind::AddressOf: Address(*static_cast<const AddressOfNode*>(n)); return;

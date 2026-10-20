@@ -1,9 +1,12 @@
 #include "Backend/CodeGen/ObjectEmitter.h"
+#include "Backend/CodeGen/ArrayStorage.h"
 #include "Backend/CodeGen/CallEmitter.h"
 #include "Backend/CodeGen/ExprEmitter.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/AggregateSlots.h"
+#include <llvm/IR/Intrinsics.h>
+#include <algorithm>
 
 namespace Scripting
 {
@@ -23,6 +26,7 @@ namespace Scripting
 		// c4_alloc returns zeroed managed storage; placement storage is zeroed here. A heap object's
 		// [operator("delete")] is registered as the GC finalizer, so it runs exactly once on reclamation
 		// (explicit delete or the collector).
+		if (n->count) return EmitNewArray(n);
 		const Type* objT = n->objectType;
 		llvm::Value* object = n->placement ? ZeroedPlacement(n) : Allocate(objT);
 		Initialize(objT, object, n->ctor, n->aggregateInit, n->args);
@@ -48,6 +52,73 @@ namespace Scripting
 		auto* i64 = llvm::Type::getInt64Ty(ctx);
 		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, llvm::PointerType::get(ctx, 0), { i64, i64 });
 		return m_Ctx.Call(allocFn, { llvm::ConstantInt::get(i64, size), llvm::ConstantInt::get(i64, align) }, false);
+	}
+
+	llvm::Value* ObjectEmitter::EmitNewArray(const NewNode* n)
+	{
+		// Zeroed elements with their vptrs; the address of the first goes to `elements`, `initialize` starts them, and
+		// only then does a heap array get the finalizer that destroys every element.
+		auto& B = m_Ctx.builder();
+		const Type* element = n->objectType;
+		const uint64 stride = element->GetSize();
+		llvm::Value* count = m_Expr.Emit(n->count);
+		llvm::Value* bytes = B.CreateMul(count, B.getInt64(stride));
+		llvm::Value* first = n->placement ? ZeroedRun(n, bytes) : AllocateRun(n, count, bytes);
+		if (m_Ctx.mctx().vtables().HasVptrs(element))
+			ArrayStorage::ForEach(B, first, count, stride, [&](llvm::Value* e) { m_Ctx.mctx().vtables().StoreVptrs(B, element, e); });
+		llvm::Value* elements = m_Expr.LValueAddress(n->elements);
+		B.CreateStore(first, elements);
+		m_Ctx.EmitNestedBlock(n->initialize);
+		first = B.CreateLoad(B.getPtrTy(), elements);
+		if (n->finalizer)
+		{
+			const ArrayCount layout = Layout(element);
+			llvm::Value* base = B.CreateGEP(B.getInt8Ty(), first, B.getInt64(-static_cast<int64>(ArrayStorage::CountBytes(element->GetAlignment()))));
+			llvm::Function* finalizer = ArrayStorage::Finalizer(m_Ctx.mctx(), *n->finalizer, layout.perElement, layout.stride,
+				ArrayStorage::CountBytes(element->GetAlignment()));
+			auto* regFn = m_Ctx.mctx().RuntimeFunction("c4_gc_register_finalizer", B.getVoidTy(), { B.getPtrTy(), B.getPtrTy() });
+			m_Ctx.Call(regFn, { base, finalizer }, false);
+		}
+		return first;
+	}
+
+	llvm::Value* ObjectEmitter::AllocateRun(const NewNode* n, llvm::Value* count, llvm::Value* bytes)
+	{
+		// A counted array keeps its element count before the first element, for its finalizer. At least one byte is
+		// allocated, so the pointer to the first element always points into the allocation.
+		auto& B = m_Ctx.builder();
+		const Type* element = n->objectType;
+		const uint64 countBytes = n->finalizer ? ArrayStorage::CountBytes(element->GetAlignment()) : 0;
+		const uint64 align = std::max<uint64>(element->GetAlignment(), kDefaultAlignment);
+		llvm::Value* size = B.CreateAdd(B.CreateBinaryIntrinsic(llvm::Intrinsic::umax, bytes, B.getInt64(1)), B.getInt64(countBytes));
+		const char* allocator = TypeHandle::MayHoldPointers(element) ? "c4_alloc" : "c4_alloc_noscan";
+		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, B.getPtrTy(), { B.getInt64Ty(), B.getInt64Ty() });
+		llvm::Value* base = m_Ctx.Call(allocFn, { size, B.getInt64(align) }, false);
+		if (!countBytes) return base;
+		B.CreateStore(count, base);
+		return B.CreateGEP(B.getInt8Ty(), base, B.getInt64(countBytes));
+	}
+
+	llvm::Value* ObjectEmitter::ZeroedRun(const NewNode* n, llvm::Value* bytes)
+	{
+		llvm::Value* storage = m_Expr.Emit(n->placement);
+		const llvm::Align align(n->objectType->GetAlignment() ? n->objectType->GetAlignment() : 1);
+		m_Ctx.builder().CreateMemSet(storage, m_Ctx.builder().getInt8(0), bytes, align);
+		return storage;
+	}
+
+	ObjectEmitter::ArrayCount ObjectEmitter::Layout(const Type* element)
+	{
+		// The innermost elements a finalizer destroys: a `T[2]` element is two T.
+		ArrayCount layout{ 1, element->GetSize() };
+		const Type* inner = TypeHandle::UnwrapToValue(element);
+		while (const auto* array = dynamic_cast<const ArrayType*>(inner))
+		{
+			layout.perElement *= array->GetElementCount();
+			inner = TypeHandle::UnwrapToValue(array->GetElementType());
+			layout.stride = inner->GetSize();
+		}
+		return layout;
 	}
 
 	llvm::Value* ObjectEmitter::ZeroedPlacement(const NewNode* n)

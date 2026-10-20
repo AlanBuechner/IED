@@ -1120,6 +1120,26 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   mismatch), `ReinterpretCastBool`, `ReinterpretCastEnum`, `ReinterpretCastFloatToPointer`; ToolsTest
   `StrictAliasingFlag`; `Benchmarks/math/run-benchmark.ps1 -Check` (six batch kernels).
 
+#### B42 - `new T[n]`, whole-object swizzle runs (roadmap 1c)
+- **Closes:** BUG-267. **Design:** [expressions 8.1](../language/10-expressions.md#81-arrays-new-tn),
+  [vectors 2](../language/11-vectors-and-swizzling.md#2-lane-access-and-swizzle-runs). **Depends on:** A3 (done).
+  **Status:** Done.
+- **Done notes:** the parser splits the outer `[n]` off the type of a `new` (`QualTypeNode::WithoutOuterArray`) and
+  reads `{ ... }` as a braced initializer; `delete[]` is parsed (the same operation as `delete`). HIR
+  `Backend/HIR/NewArray` lowers the count (once, to int64), the length check (`__c4_bad_array_length`, the prelude's
+  `BadArrayLength`) and a `NewNode` whose `initialize` block starts the elements: the braced ones as a `T[k]` fill
+  (`DeclLowerer::StartFromBraces`, `ElementsNamed`), the rest default-constructed in a run-time loop
+  (`Backend/HIR/IndexLoop`, now also behind `Lifecycle::ForEachIndex`), guarded so a throwing start destroys the
+  started elements last first. Codegen (`ObjectEmitter::EmitNewArray`, `Backend/CodeGen/ArrayStorage`) allocates the
+  count before the elements when they need destruction and registers an array finalizer after `initialize`.
+  A pure packed vector object converts to a packed run of the same lanes (`ImplicitConversion::ToPacked`,
+  `ExprLowerer::SameLanesAs`). Found and fixed on the way: BUG-267 (array variables whose element create threw left
+  the started elements undestroyed; `Lifecycle::ConstructVariable` guards a whole array variable).
+- **Tests:** IsolatedTest `Lifecycle/NewArrayElements`, `NewArrayDestruction`, `NewArrayThrowingCreate`,
+  `NewArrayBadLength`, `NewArrayPlacement`, `Bug267ArrayVariableThrowingCreate`, `Types/SwizzleWholeObject`;
+  NegativeTests `NewArrayCountNotInteger`, `NewArrayParenthesizedArguments`, `NewArrayElementNamedTwice`,
+  `SwizzleWholeObjectOtherLanes`.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1637,7 +1657,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

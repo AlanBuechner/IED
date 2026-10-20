@@ -51,6 +51,10 @@ namespace Scripting
 		QueryResult<const HIRNode*> BracedValue(const BracedInitializerNode* br, const Type* type, const AstNode* site);
 		/// The local `local` names, starting from `value`, in scope from here to the end of `region`'s scope.
 		QueryResult<void> DeclareValue(const LocalStart& local, const Value& value, BlockNode* region);
+		/// A braced start of `target`: an `__init_list<T>`, a create taking the elements, or a fill.
+		QueryResult<void> StartFromBraces(const BracedInitializerNode* br, const LValue* target, BlockNode* region, const AstNode* site, const Core::String& name);
+		/// How many leading elements of an array a braced list starts: one past the last element an entry names.
+		QueryResult<uint64> ElementsNamed(const BracedInitializerNode* br, const Core::String& name);
 
 	private:
 		QueryResult<void> LowerLocal(const VariableDefinitionNode* n, const Declarator& d, const Type* t, BlockNode* region);
@@ -66,8 +70,6 @@ namespace Scripting
 
 		/// `V v = {1, 2};` / `int32[4] a = {...}` for a local: declare the slot, then fill it in place.
 		QueryResult<void> LowerAggregateInit(const VariableDefinitionNode* n, const Type* t, const BracedInitializerNode* br, BlockNode* region);
-		/// A braced start of `target`: an `__init_list<T>`, a create taking the elements, or a fill.
-		QueryResult<void> StartFromBraces(const BracedInitializerNode* br, const LValue* target, BlockNode* region, const AstNode* site, const Core::String& name);
 		/// Fill an aggregate lvalue from a braced initializer; a nested brace recurses.
 		QueryResult<void> FillAggregate(const Type* t, const BracedInitializerNode* br,
 			const LValue* baseLoc, BlockNode* region, const Core::String& name);
@@ -88,7 +90,7 @@ namespace Scripting
 			BlockNode* block, const Core::String& name);
 		/// The elements one entry of an array's braced list starts (inclusive), and its value.
 		struct ElementEntry { uint64 first = 0; uint64 last = 0; BracedItem item; };
-		QueryResult<std::vector<ElementEntry>> ElementEntries(const ArrayType* ar, const BracedInitializerNode* br, const Core::String& name);
+		QueryResult<std::vector<ElementEntry>> ElementEntries(uint64 count, const BracedInitializerNode* br, const Core::String& name);
 		QueryResult<void> FillElements(const ArrayType* ar, const BracedInitializerNode* br, const LValue* baseLoc,
 			BlockNode* block, const Core::String& name);
 		// A slot of `object` as a location: the field, or the lane of its packed storage.

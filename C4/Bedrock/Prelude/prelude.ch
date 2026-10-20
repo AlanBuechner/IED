@@ -252,3 +252,13 @@ class BadCast {
 
 // A checked cast to a reference that found no T: the compiler calls this.
 void* __c4_bad_cast(const char* target) { throw BadCast{ target }; }
+
+// --- Arrays on the heap -----------------------------------------------------------------------------
+// What `new T[n]` throws when n is negative, too large to allocate, or smaller than its braced entries.
+class BadArrayLength {
+	public int64 length;  // the count asked for
+	public int64 minimum; // the entries the braces give
+}
+
+// A `new T[n]` whose count cannot hold its elements: the compiler calls this.
+void __c4_bad_array_length(int64 length, int64 minimum) { throw BadArrayLength{ length, minimum }; }

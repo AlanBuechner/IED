@@ -93,6 +93,7 @@ pass; Bedrock 340 tests (1729 assertions) at `-O0` and `-O2`, also built for `-O
 | `sizeof` | **Partial** | `sizeof(T)` and `sizeof(identifier)` only | [expressions](../language/10-expressions.md) |
 | `**` power | **Implemented** | Integers (repeated squaring) and floats (`pow`); folds in constants; `[operator("power")]` on objects | [expressions](../language/10-expressions.md) |
 | `new` / `delete`, aggregate / nested / designated / range initializers | **Implemented** | | [expressions](../language/10-expressions.md) |
+| `new T[n]` / `new T[n]{...}` / `delete[]` | **Implemented** | Run-time count, `BadArrayLength`, elements destroyed exactly once (B42) | [expressions](../language/10-expressions.md#81-arrays-new-tn) |
 
 ### Interop, runtime, library
 | Feature | Status | Notes | Page |

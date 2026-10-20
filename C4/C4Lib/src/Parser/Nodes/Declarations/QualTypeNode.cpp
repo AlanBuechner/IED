@@ -78,6 +78,20 @@ namespace Scripting
 		return false;
 	}
 
+	Ref<QualTypeNode> QualTypeNode::WithoutOuterArray() const
+	{
+		if (m_Indirections.Empty() || m_Indirections.Back().indirectionToken != TokenType::OpenBracket) return nullptr;
+		if (!m_Indirections.Back().arraySizeExpr) return nullptr;
+		Core::Vector<IndirectionLayer> inner = m_Indirections;
+		inner.Pop();
+		auto node = FromParts(m_BaseName, m_DelegateType, inner, m_IsLeadingConst);
+		if (m_IsPacked && !node->HasArrayLayer()) return nullptr; // `packed float[4]` is one vector, not four floats
+		node->m_LeadingConstToken = m_LeadingConstToken;
+		node->m_IsPacked = m_IsPacked;
+		node->m_PackedToken = m_PackedToken;
+		return node;
+	}
+
 	Ref<QualTypeNode> QualTypeNode::TryParse(ParserState& state)
 	{
 		Lexer& lexer = state.GetLexer();

@@ -1,0 +1,5 @@
+int32 main() {
+	float count = 2.0f;
+	int32* p = new int32[count];
+	return 0;
+}

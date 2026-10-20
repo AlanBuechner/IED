@@ -1,0 +1,31 @@
+// A count that is negative, too large for the elements, or below the elements the braces name throws the
+// prelude's BadArrayLength with the count and the braced minimum; nothing is allocated or started.
+int32 g_failures = 0;
+int32 g_started = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct Big { int64[64] payload; [operator("create")] void Init() { g_started++; } }
+
+int32 main() {
+	int32 negative = -2;
+	bool threw = false;
+	try { int32* p = new int32[negative]; } catch (BadArrayLength& e) { threw = e.length == -2 && e.minimum == 0; }
+	Check(threw, "a negative count throws");
+	threw = false;
+	int64 huge = 9223372036854775807;
+	try { Big* p = new Big[huge]; } catch (BadArrayLength& e) { threw = e.length == huge; }
+	Check(threw && g_started == 0, "a count too large to allocate throws before anything starts");
+	threw = false;
+	int32 one = 1;
+	try { int32* p = new int32[one]{ 1, 2, 3 }; } catch (BadArrayLength& e) { threw = e.length == 1 && e.minimum == 3; }
+	Check(threw, "fewer elements than entries throws");
+	threw = false;
+	uint64 wraps = 18446744073709551615;
+	try { int32* p = new int32[wraps]; } catch (BadArrayLength& e) { threw = true; }
+	Check(threw, "an unsigned count past int64 throws");
+	int32* exact = new int32[3]{ 1, 2, 3 };
+	Check(exact[2] == 3, "a count equal to the entries is fine");
+	return g_failures;
+}

@@ -2,7 +2,8 @@
 
 Builtins are what every program sees with no include: the small set of C runtime functions C4 code
 needs before any library exists, the hooks into the C4 runtime (GC, reflection, file I/O, tests), the
-`_GUID` type, and `BadCast`, what a checked cast to a reference throws ([10](10-expressions.md)). They are ordinary C4 declarations in the **prelude**, `Bedrock/Prelude/prelude.ch`, which the
+`_GUID` type, `BadCast`, what a checked cast to a reference throws, and `BadArrayLength`, what `new T[n]` throws
+for a count that cannot hold its elements ([10](10-expressions.md)). They are ordinary C4 declarations in the **prelude**, `Bedrock/Prelude/prelude.ch`, which the
 compiler makes every unit include (D-43). Only the intrinsics of section 1, the `va_*` forms of section 8, the
 atomics of section 10 and the SIMD intrinsics of section 11 stay in the compiler.
 

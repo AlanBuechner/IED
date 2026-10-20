@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include "Backend/HIR/LoweringContext.h"
 #include "Backend/HIR/Construction.h"
 
@@ -96,6 +97,8 @@ namespace Scripting
 		/// A built-in operator with a `packed T[N]` operand (D-36): lane by lane, a scalar operand broadcast to
 		/// every lane; a comparison gives a `packed bool[N]`.
 		QueryResult<Value> VectorBinary(const AstNode* n, IntrinsicOp op, bool isCompare, const Value& lhs, const Value& rhs);
+		/// `operand` read as a packed run of type `other` when it is a pure packed vector object of the same lanes, else null.
+		std::optional<Value> SameLanesAs(const Value& operand, const Type* other);
 		/// The value an object or array target of an assignment takes from `value` (a derived object's base part).
 		QueryResult<Value> AssignedPart(const AstNode* n, const Type* target, const Value& value);
 		/// `value` + 1 or - 1 for `++` / `--`: a pointer moves by one element.

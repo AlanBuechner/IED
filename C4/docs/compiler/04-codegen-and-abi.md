@@ -20,7 +20,7 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 | `RegionEmitter` | one function | Statements and control-flow blocks, block frames and labels, scope exit (`ExitCleanups` / `BranchThroughCleanups`), try/catch, throw, and the lazily created cleanup pads (`CleanupPadFor`). |
 | `ExprEmitter` (+ `ExprOperatorEmitter.cpp`: operators and conversions) | one function | Rvalue nodes -> SSA values; lvalue -> address resolution (incl. base sub-objects); loads/stores incl. SIMD lanes; conversions (object pointers move to the target sub-object); checked casts; the one store helper (`GcStore`). Creates blocks only for ternary and short-circuit joins. |
 | `CallEmitter` | one call | Hidden parameters in MSVC order, each argument per `Abi`, the callee (direct, virtual through the receiver's vptr, indirect through a funcptr), the result unpacked to its C4 type. Constructor calls share it. |
-| `ObjectEmitter` | one expression | `new T(...)`, `T(...)` temporaries, `__init_list<T>` arrays, `delete p`: storage, vptrs, then the constructor or the field fill. |
+| `ObjectEmitter` | one expression | `new T(...)`, `new T[n]`, `T(...)` temporaries, `__init_list<T>` arrays, `delete p`: storage, vptrs, then the constructor or the field fill. |
 | `VtableEmitter` | one compile | Vtables of complete objects (one per vptr location), this-adjusting thunks, `c4_purecall` for unimplemented slots, and the vptr sites of any type (`StoreVptrs`, `ZeroImage` for statics). |
 | `RttiEmitter` | one compile | MSVC RTTI: TypeDescriptors (by decorated name), ClassHierarchyDescriptors with their base class arrays, CompleteObjectLocators. |
 | `EhTables` | one compile | ThrowInfo / CatchableTypeArray per thrown type; the catchpad operands of a clause. |
@@ -269,6 +269,12 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
    is a plain store; a future generational or concurrent collector adds its barrier there.
 2. **Allocation.** `new` -> `c4_alloc(size, align)`, or `c4_alloc_noscan` for a type that holds no pointers
    (`TypeHandle::MayHoldPointers`); finalizer registration when `[operator("delete")]` exists.
+   `new T[n]` (`ObjectEmitter::EmitNewArray`, `ArrayStorage`): one allocation of `n * sizeof(T)` bytes (at least
+   one, so the pointer to the first element is always inside it). When the elements need destruction an `int64`
+   element count comes first, padded to `T`'s alignment, and after HIR's `initialize` block has started every
+   element the finalizer `__c4_array_finalizer_<delete>_<per element>_<count bytes>` is registered on the
+   allocation: it reads the count and runs the innermost element's delete on each element, last first (a
+   `T[2]` element is two `T`). The elements get their vptrs (a loop over the count) before they start.
 3. **Explicit free.** `delete` -> `c4_free`.
 4. **Roots.** `__c4_gc_roots` for global storage (assembly step 8); everything else is found by the runtime,
    which captures the register file and then scans the stack conservatively, so pointers that optimized

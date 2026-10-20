@@ -2,6 +2,7 @@
 #include <tuple>
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/Lifecycle.h"
+#include "Backend/HIR/NewArray.h"
 #include "Backend/HIR/DeclLowerer.h"
 #include "Backend/HIR/LambdaLowerer.h"
 #include "Backend/HIR/FoldLowerer.h"
@@ -48,7 +49,7 @@ namespace Scripting
 		return ResolveConstruct(n, list.value, args.value, true);
 	}
 
-	// `new T(...)` (05): allocate; the result is a POINTER rvalue (`*p` / `p->x` lower via Deref).
+	// `new T(...)` (05): allocate; the result is a POINTER rvalue (`*p` / `p->x` lower via Deref). `new T[n]`: NewArray.
 	QueryResult<Value> ExprLowerer::ResolveNew(const NewExpressionNode* n)
 	{
 		// The object is constructed in place (docs/language/06). A heap object's full destruction is registered
@@ -60,13 +61,16 @@ namespace Scripting
 		if (Core::String why = Abstractness::Creation(m_Ctx.model(), objT); !why.empty())
 			return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, why));
 		const Type* ptrT = m_Ctx.queries().TypeStore()->Pointer(objT);
-		auto* nw = m_Ctx.out->NewNode<NewNode>(ptrT, objT);
+		const HIRNode* placement = nullptr;
 		if (n->GetPlacement())
 		{
 			auto storage = PlacementStorage(n, ptrT);
 			if (!storage.Ok()) return QueryResult<Value>::Fail(storage.error, storage.message);
-			nw->placement = storage.value;
+			placement = storage.value;
 		}
+		if (n->IsArray()) return NewArrayLowerer(m_Ctx, *this).Lower(n, objT, placement);
+		auto* nw = m_Ctx.out->NewNode<NewNode>(ptrT, objT);
+		nw->placement = placement;
 		auto args = ConstructionArguments(n->GetArguments());
 		if (!args.Ok()) return QueryResult<Value>::Fail(args.error, args.message);
 		const auto* obj = dynamic_cast<const ObjectType*>(objT);

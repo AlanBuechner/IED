@@ -221,14 +221,13 @@ try {
 	Square& square = shape as Square&;
 	square.size = 2;
 } catch (const BadCast& e) {
-	printf("not a %s
-", e.target);
+	printf("not a %s\n", e.target);
 }
 ```
 
 ## 8. Allocation: `new` and `delete`
 
-**Status:** **Implemented** (single objects), **Planned** (arrays)
+**Status:** **Implemented**
 
 ```c4
 GCNode* a = new GCNode;          // zeroed; runs the 0-arg create if it has one
@@ -242,8 +241,35 @@ delete b;                        // runs [operator("delete")] once, then frees
 - Every `T*` is a garbage-collected pointer; `delete` is optional and only makes reclamation
   immediate. The finalizer runs exactly once, whether by `delete` or by the collector
   ([runtime/01-memory-and-gc.md](../runtime/01-memory-and-gc.md)).
-- `new T[n]` array allocation does not exist yet (**Planned**); containers use `raw_alloc` plus
-  `gc_register_region` instead.
+
+### 8.1 Arrays: `new T[n]`
+
+```c4
+int32 n = Count();
+Particle* ps = new Particle[n];            // n elements, each zeroed then default-constructed
+int32* xs = new int32[n]{ 1, 2, 3 };       // the entries start the first elements, the rest are zero
+int32[4]* rows = new int32[4][n];          // n elements of int32[4]: the outer [n] is the count
+Shape* s = new (storage) Shape[3];         // placement: built in the caller's storage
+delete[] ps;                               // the same as `delete ps`
+```
+
+- `new T[n]` allocates `n` elements of `T` in one managed object and yields a `T*` to the first, as in C++.
+  The count is any integer expression, evaluated once; only the outermost `[n]` is the count, so
+  `new int32[4][n]` is `n` elements of `int32[4]`.
+- Each element is zeroed and gets its vptrs, then the braced entries (if any) start the first elements exactly
+  as an array initializer would (designators, ranges and nested braces included, section 9), and the rest are
+  default-constructed in index order. `new T[n]()` is the same as `new T[n]`; arguments in the parentheses are
+  an error (`'new T[n](...)' takes no arguments`).
+- A count that is negative, larger than a 64-bit size can hold, or smaller than the elements the braces name
+  throws the prelude's `BadArrayLength` (`length` is the count, `minimum` the elements the braces need) before
+  anything is allocated ([14](14-builtins.md)).
+- When an element's start throws, the elements already started are destroyed, last first, and the exception
+  continues; the storage is reclaimed by the collector.
+- A heap array whose elements need destruction is finalized as a whole: `delete[] p`, `delete p` and the
+  collector all destroy every element exactly once, last first. On the collected heap `delete[]` and `delete`
+  are the same operation (the collector knows every allocation's extent); `delete[]` is accepted for C++ habit.
+- `new (storage) T[n]` builds the elements in `storage` (a `T*`), which belongs to the caller: it is zeroed for
+  the `n` elements, never collected and never finalized; end each element with `destroy(p + i)`.
 
 ## 9. Braced initialization
 

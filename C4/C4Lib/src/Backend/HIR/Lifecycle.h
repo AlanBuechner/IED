@@ -25,6 +25,9 @@ namespace Scripting
 
 		/// Statements appended to `region`. `object` is complete storage of its lvalue type.
 		void Construct(BlockNode* region, const LValue* object);                  // zeroed -> default-constructed
+		/// A whole variable default-constructed: an array whose element start throws destroys its elements (the
+		/// ones not started yet are still zero) before the exception continues, as an object's create does its parts.
+		void ConstructVariable(BlockNode* region, const LValue* object);
 		/// The elements of `array` in [begin, end), default-constructed (nothing when they need nothing).
 		void ConstructElements(BlockNode* region, const LValue* array, uint64 begin, uint64 end);
 		/// Element `source` of `array` copied into each zeroed element in [begin, end).
@@ -112,6 +115,10 @@ namespace Scripting
 		/// array's elements, are destroyed if the fill throws.
 		BlockNode* FillGuard(BlockNode* root, const LValue* object);
 
+		/// A block appended to `root` whose statements, when an exception leaves them, run what `undo` appends to
+		/// its block, then continue unwinding.
+		BlockNode* GuardWith(BlockNode* root, const std::function<void(BlockNode*)>& undo);
+
 		/// `value` evaluated now into a hidden slot (appended to `prelude`), read back later by the returned
 		/// node: a value that needs destruction is a statement temporary until it is moved out, so an
 		/// exception between the two destroys it.
@@ -132,7 +139,6 @@ namespace Scripting
 		void DestroyTemporaries(std::vector<const HIRNode*>& steps, size_t mark);
 		void DestroyPartsNow(BlockNode* region, const LValue* object, const ObjectType* type); // fields reversed, then the base
 		bool PartsNeedDestroy(const ObjectType* type);
-		BlockNode* GuardWith(BlockNode* root, const std::function<void(BlockNode*)>& undo);
 
 		LoweringContext& m_Ctx;
 	};

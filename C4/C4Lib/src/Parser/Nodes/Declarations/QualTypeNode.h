@@ -34,6 +34,9 @@ namespace Scripting
 		const Token& GetPackedToken() const { return m_PackedToken; }
 		/// Whether any layer is an array (`packed` needs one).
 		bool HasArrayLayer() const;
+		/// This type without its outermost layer when that layer is a sized array (`T[2][n]` -> `T[2]`), else null:
+		/// `new T[n]` allocates n elements of the rest.
+		Ref<QualTypeNode> WithoutOuterArray() const;
 		const Ref<NamespaceQualifiedNameNode>& BaseName() const { return m_BaseName; }
 		const Ref<AstNode>& FuncPtrType() const { return m_DelegateType; } // FunPtrTypeNode when funcptr type
 		uint32 IndirectionCount() const { return m_Indirections.Count(); }
