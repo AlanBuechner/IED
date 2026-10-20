@@ -123,7 +123,7 @@ Today: launch, line breakpoints, thrown/uncaught exception filters, continue/ste
 
 C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (see `shared/host-api/examples/c4-plugin/ied-plugin.json`):
 
-- Language definition + Monarch grammar; semantic token mapping to `--syntax-*` tokens (VAX-style palette as one option).
+- Language definition + Monarch grammar; semantic token mapping to `--syntax-*` tokens (IED's default palette is the Visual Assist X one C4Assist ships, `docs/07`).
 - LSP profile (staged launch, byte positions, integer ids, refetch-on-diagnostics, client-side code-action filtering) and DAP provider.
 - Problem matchers (`c4`, `c4-test`), test provider (`c4-test-json`), Nuke task preset, project templates, header/source pairs.
 - Feature toggles become plugin settings + `when` clauses (no code).
@@ -134,6 +134,10 @@ C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes,
 ### Bedrock profiler hooks (C4 repo)
 
 `Profile::` module implementing the client side of the IED trace protocol (`docs/16`): zones (scoped), frames, plots, messages, thread names (renamable), task begin/end, allocations (hooked into the GC allocator: alloc/free/size/pool, optional call stacks), GC collection events (from the existing collection callbacks), GPU contexts and zones (for Claymore's D3D12). Compiled out entirely unless a define is set (zero cost in Dist). Enabled by the IED *Profile* task through an environment variable.
+
+### Bedrock `Gpu::` (C4 repo, for the GPU debugger)
+
+Two steps (`docs/22`). First, small: `Gpu::Capture` (`NextFrames(n)`, `Begin/End`, `SetComment`) over whichever capture tool is loaded - RenderDoc's in-app API (`renderdoc_app.h`, found with `GetModuleHandle`), PIX's programmatic capture, or nothing - plus marker scopes shared with `Profile::Gpu::Zone`. Later (P-8): the Flashbang recorder - a layer under the program's D3D12 calls that writes `.flash` captures, with `Gpu::Annotate` for bindless slot -> asset, material -> source, draw -> entity metadata, and a rolling frame ring. Compiled out unless enabled, like `Profile::`.
 
 ### Claymore (for later engine plugins)
 
@@ -149,4 +153,5 @@ P-4  Nuke N1-N6 + C4 plugin rewrite (declarative)           (gates the C4 experi
 P-5  C4LSP L1-L5, C4DAP conditional/attach/memory            (quality; parallel with IED M2-M4)
 P-6  Bedrock Profile:: + trace protocol                      (gates IED profiler M9)
 P-7  Linux target (B31)                                      (makes the sandbox valuable for C4 projects)
+P-8  Bedrock Gpu:: capture API, then the Flashbang recorder (gates GPU debugger M12 triggers, M13 Flashbang)
 ```

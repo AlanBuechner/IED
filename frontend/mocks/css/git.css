@@ -1,0 +1,103 @@
+/* git.css - Git activity (screen 5): Fork-style refs pane, commit graph, commit details + diff. */
+
+.git-act { display: flex; flex-direction: column; min-height: 0; background: var(--bg-2); }
+.git-bar { display: flex; align-items: center; gap: var(--space-2); height: 34px; padding: 0 var(--space-4); border-bottom: var(--border-width) solid var(--border-0); background: var(--bg-1); flex: none; white-space: nowrap; overflow: hidden; }
+.git-bar .btn.flat { color: var(--text-0); }
+.git-bar .grow { flex: 1; }
+.git-bar .input { width: 300px; }
+.count { font-size: var(--font-size-xs); color: var(--text-1); background: var(--bg-4); border-radius: var(--radius-round); padding: 0 5px; line-height: 15px; }
+.git-body { flex: 1; display: flex; min-height: 0; }
+.refs { width: 250px; flex: none; background: var(--bg-1); border-right: var(--border-width) solid var(--border-0); }
+.refs .row { padding-left: calc(8px + var(--d, 0) * 14px); }
+.refs .row .ci { width: 15px; height: 15px; color: var(--text-1); }
+.refs .row b { font-weight: var(--font-weight-semibold); }
+.refs .ab { font-size: var(--font-size-xs); color: var(--text-2); display: inline-flex; align-items: center; gap: 1px; }
+.refs .ab .ci { width: 11px; height: 11px; color: var(--text-2); }
+.git-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.graph { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.graph-head, .grow-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 160px 128px 76px; align-items: center; }
+.graph-head { height: 24px; font-size: var(--font-size-sm); color: var(--text-2); border-bottom: var(--border-width) solid var(--border-0); flex: none; }
+.graph-head > div { padding: 0 var(--space-3); }
+.graph-body { position: relative; flex: 1; overflow: hidden; }
+.graph-svg { position: absolute; left: 0; top: 0; pointer-events: none; }
+.graph-svg path { fill: none; stroke-width: 2; }
+.graph-svg .dash { stroke-dasharray: 3 3; }
+.graph-svg .fill { stroke: none; }
+.graph-svg .dot-head { fill: var(--bg-2); stroke-width: 2; }
+.graph-svg .dot-local { fill: var(--bg-2); stroke: var(--text-1); stroke-width: 1.5; stroke-dasharray: 2 2; }
+.graph-svg .l0 { stroke: var(--series-1); }
+.graph-svg .l1 { stroke: var(--series-2); }
+.graph-svg .l2 { stroke: var(--series-3); }
+.graph-svg .fill.l0 { fill: var(--series-1); }
+.graph-svg .fill.l1 { fill: var(--series-2); }
+.graph-svg .fill.l2 { fill: var(--series-3); }
+.grow-row { height: 24px; font-size: var(--font-size-sm); white-space: nowrap; }
+.grow-row > div { padding: 0 var(--space-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.grow-row .desc { display: flex; align-items: center; gap: var(--space-2); }
+.grow-row .msg { overflow: hidden; text-overflow: ellipsis; color: var(--text-0); }
+.grow-row .au { color: var(--text-1); display: flex; align-items: center; gap: var(--space-2); }
+.grow-row .au .ci { width: 12px; height: 12px; }
+.grow-row .dt { color: var(--text-1); }
+.grow-row .hs { color: var(--text-2); font-family: var(--font-mono); font-size: var(--font-size-xs); }
+.grow-row.sel { background: var(--selection-active); }
+.grow-row .sub2 { display: none; }
+.ref {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	height: 17px;
+	padding: 0 var(--space-3) 0 var(--space-2);
+	border: var(--border-width) solid var(--border-1);
+	border-left-width: 2px;
+	border-radius: var(--radius-1);
+	font-size: var(--font-size-xs);
+	color: var(--text-0);
+	background: var(--bg-3);
+	flex: none;
+}
+.ref .ci { width: 11px; height: 11px; color: var(--text-1); }
+.ref.head { font-weight: var(--font-weight-semibold); background: var(--bg-4); }
+.ref.remote, .ref.tag, .ref.worktree { color: var(--text-1); background: transparent; }
+.ref.l0 { border-left-color: var(--series-1); }
+.ref.l1 { border-left-color: var(--series-2); }
+.ref.l2 { border-left-color: var(--series-3); }
+.ref.local-ref { border-left-color: var(--text-2); border-style: dashed; border-left-style: solid; }
+
+.details { height: 44%; display: flex; min-height: 0; border-top: var(--border-width) solid var(--border-1); flex: none; }
+.meta-pane { width: 420px; flex: none; display: flex; flex-direction: column; background: var(--bg-1); border-right: var(--border-width) solid var(--border-0); min-height: 0; }
+.cmeta { padding: var(--space-4) var(--space-5); border-bottom: var(--border-width) solid var(--border-0); font-size: var(--font-size-sm); }
+.cmeta .subject { font-size: var(--font-size-ui); color: var(--text-0); font-weight: var(--font-weight-semibold); margin-bottom: var(--space-3); }
+.cmeta .kv { display: grid; grid-template-columns: 64px 1fr; gap: 2px var(--space-3); color: var(--text-1); }
+.cmeta .kv .k { color: var(--text-2); }
+.cmeta .body { color: var(--text-1); margin-top: var(--space-3); }
+.cfiles { flex: 1; min-height: 0; }
+.cfiles .row { padding-left: var(--space-4); }
+.st-a, .st-m, .st-d { width: 14px; font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); text-align: center; flex: none; }
+.st-a { color: var(--accent-saved); }
+.st-m { color: var(--text-1); }
+.st-d { color: var(--accent-error); }
+.diff-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.diff-pane .code { flex: 1; }
+
+@media (max-width: 1500px) {
+	.refs { width: 210px; }
+	.meta-pane { width: 340px; }
+	.graph-head, .grow-row { grid-template-columns: 64px minmax(0, 1fr) 128px 104px 70px; }
+	.git-bar .input { width: 200px; }
+}
+
+@media (max-width: 719px) {
+	.refs, .details, .graph-head, .git-bar .btn, .git-bar .input, .git-bar .dd, .git-bar .tb-sep, .git-bar .split-btn { display: none !important; }
+	.git-bar { height: 52px; gap: var(--space-3); padding: 0 var(--space-4); }
+	.git-bar .phone-only { display: flex; }
+	.graph-head, .grow-row { grid-template-columns: 52px minmax(0, 1fr); }
+	.grow-row { height: 64px; }
+	.grow-row .au, .grow-row .dt, .grow-row .hs { display: none; }
+	.grow-row .desc { flex-wrap: wrap; align-content: center; row-gap: 2px; font-size: var(--font-size-ui); }
+	.grow-row .msg { width: 100%; order: 2; }
+	.grow-row .sub2 { display: block; order: 3; width: 100%; color: var(--text-2); font-size: var(--font-size-xs); }
+	.grow-row .ref { order: 1; height: 20px; font-size: var(--font-size-xs); }
+	.grow-row .desc:not(:has(.ref)) .msg { order: 1; }
+	.grow-row.sel { background: transparent; }
+}

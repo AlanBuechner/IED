@@ -21,6 +21,8 @@ Decide open items during design, then **move the answer into the relevant doc an
 | 13 | Remote access security and concurrency | Loopback default; Host/Origin checks; loopback one-time token; owner password required for LAN; device sessions; TLS via Tailscale (built-in TLS P2); explicit per-resource concurrency rules | `docs/11` |
 | 14 | Git backend | git CLI for everything (porcelain v2 / NUL-separated formats); libgit2 stays vendored for a possible graph optimization later | `docs/features/09-git.md` |
 | 15 | Ambition level | Owner: "not just parity with echo but drastically surpass" - Echo parity is the floor; orchestration area added; differentiators raised to P1 | `docs/09`, `docs/20`, `docs/features/16` |
+| 16 | Syntax highlighting colors (was O4) | Owner: use the Visual Assist X scheme for code. Default palette = C4Assist's `c4-visual-assist-dark` values; a Grayscale palette stays as a per-user option | `docs/07`, `frontend/css/theme.css` |
+| 17 | GPU debugger look | Owner: PIX's layout and styling, not RenderDoc's - capture as a document with view tabs, timing timeline on top, events grid, Pipeline state tree beside a resource viewer, docked grids; RenderDoc stays a backend and a capability reference | `docs/22`, `frontend/mocks/07-09` |
 
 ## Open - owner's call
 
@@ -29,13 +31,13 @@ Decide open items during design, then **move the answer into the relevant doc an
 | O1 | **"Federated projects"** - is it a set of solutions/repos opened together as one workspace (C4 + Claymore + IED), as designed in `docs/03`? Or something else (e.g. a remote project on another machine)? | As designed |
 | O2 | **Claude subscription use.** Anthropic's policy forbids third-party apps from offering claude.ai login or routing requests through Pro/Max credentials; an end user may run the official `claude` CLI signed in themselves. IED's bridge drives *your own* installed CLI for personal use and never reads credentials. If IED is ever distributed to others, should the bridge be off by default (API key only) unless Anthropic approves? | Yes: bridge = personal-use feature, documented; API key path for everyone else |
 | O3 | **OS primitives for the server**: build them as Bedrock modules (`Net::`, `Process::`, `FS::Watch`, `Time::`) in the C4 repo, or wrap libuv behind a C shim first? | Bedrock modules (Claymore needs them too), libuv acceptable as their implementation |
-| O4 | **Syntax highlighting colors.** The plan says grayscale unless color carries meaning. Token-type colors carry meaning (and C4Assist ships Visual Assist palettes). OK to have a restrained syntax palette, owner-selectable, with a pure-grayscale option? | Yes, restrained default + grayscale option |
 | O5 | **Loopback token friction.** Even on localhost, IED requires the one-time token / cookie (blocks malicious web pages from driving the server). Acceptable? (The CLI and tray open URLs with the token, so normal use is seamless.) | Yes |
 | O6 | **Default autonomy.** New chats default to `ask` permission mode and interrupted Agent runs auto-resume after a server restart. OK? | Yes |
 | O7 | **Server platform scope.** v1 server is Windows x64 only (C4 is Windows-only today); a Linux server comes after C4's Linux target. Clients are any browser. OK? | Yes |
 | O8 | **Not core**: ComfyUI generation, Perforce/Fossil, GitHub PR integration as optional plugins rather than built-ins. OK? | Yes |
 | O9 | **"Explosion theming"**: purely functional grayscale, or a signature accent moment (logo, title treatment, splash)? | Functional; identity in iconography only |
 | O10 | **Phone editing**: read + light edits by default (tap to edit), or full editing parity? | Read + light edit |
+| O11 | **GPU debugger backend** (`docs/22`): RenderDoc as the replay backend, our own ("Flashbang", RenderDoc as reference), or both? Neither needs Python (RenderDoc's replay API is C++). Also: ship RenderDoc's DLL inside IED, and is "Flashbang" the name? | Both behind one protocol: RenderDoc backend first (complete debugger fast), Flashbang for C4 programs where control matters (bindless/unbounded arrays, work graphs, engine metadata, time-travel debugging); bundle a pinned RenderDoc (MIT); name Flashbang |
 
 ## Open - design (resolve before implementing the affected area)
 

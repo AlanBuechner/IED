@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 7 - GPU debugger: Pipeline view</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/gpu.css">
+	<script defer src="js/gpuscene.js"></script>
+	<script defer src="js/gpu.js"></script>
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="gpu" data-phone="more">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t" style="flex-direction:column;align-items:flex-start;gap:0;line-height:1.15"><b>Claymore_f1842</b><span class="muted" style="font-size:12px">GPU capture &middot; EID 1287 &middot; rdc</span></div>
+		<span class="ib"><i class="ci ci-device-camera"></i></span>
+		<span class="ib"><i class="ci ci-sparkle c-ai"></i></span>
+	</div>
+
+	<main class="activity gpu-act">
+		<div class="tabs p-hide">
+			<div class="tab on"><i class="ci ci-device-camera"></i><span class="name">Claymore_f1842</span><span class="muted">GPU capture</span><i class="ci ci-close x"></i></div>
+			<div class="tab"><i class="ci ci-device-camera"></i><span class="name">Claymore_f1790</span><span class="muted">master</span><i class="ci ci-close x"></i></div>
+			<div class="tab"><i class="ci ci-pulse"></i><span class="name">Timing 21:40</span><i class="ci ci-close x"></i></div>
+			<div class="tabs-tail"><span class="btn flat"><i class="ci ci-library"></i>Capture library</span></div>
+		</div>
+		<div class="gpu-bar">
+			<span class="btn flat"><i class="ci ci-record c-error"></i>Capture next frame</span>
+			<span class="btn flat"><i class="ci ci-play"></i>Collect timing data</span>
+			<span class="chip ok"><i class="ci ci-check"></i>timing: 5 replays</span>
+			<span class="tb-sep"></span>
+			<div class="input"><i class="ci ci-filter sm"></i><span>Filter events: kind:draw ps:DefaultLit</span></div>
+			<span class="grow"></span>
+			<span class="btn flat"><i class="ci ci-diff-multiple"></i>Compare with&hellip;</span>
+			<span class="btn flat wide"><i class="ci ci-link-external"></i>Open in RenderDoc</span>
+			<span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI</span>
+			<div class="p-only">
+				<span class="chip solid" style="height:30px">EID 1287</span>
+				<span class="chip err" style="height:30px"><i class="ci ci-error"></i>26 NaN px</span>
+				<span class="chip" style="height:30px">GPU 10.56 ms</span>
+			</div>
+		</div>
+		<div class="vtabs">
+			<span class="vtab">Overview</span>
+			<span class="vtab on">Pipeline</span>
+			<span class="vtab">Debug</span>
+			<span class="vtab">Performance</span>
+			<span class="vtab">Compare</span>
+			<span class="tail"><span class="chip backend">rdc &middot; RenderDoc 1.46</span>replay on the capture GPU &middot; D3D12 &middot; 1920x1080</span>
+		</div>
+		<div class="ptl" data-sel="Crate_03" data-cur="6.67" data-plots="busy"></div>
+
+		<div class="gpu-main frame">
+			<section class="egrid gpu-col br">
+				<div class="pane-title"><b>Events</b><span class="muted">1,342 &middot; 2,148 draws</span><span class="grow"></span><span class="ib"><i class="ci ci-bookmark"></i></span><span class="ib"><i class="ci ci-collapse-all"></i></span></div>
+				<div class="grid-head"><span class="n">EID</span><span>Name</span><span class="n">GPU ms</span><span class="n">Prims</span><span class="n">PS inv.</span></div>
+				<div class="scroll" style="flex:1">
+					<div class="grow-r mk" style="--d:0"><span class="n m">1</span><span class="nm"><i class="ci ci-chevron-down"></i>Frame 1842</span><span class="n dur"><i style="width:100%"></i><b>10.56</b></span><span class="n d">3.42M</span><span class="n d">9.21M</span></div>
+					<div class="grow-r mk" style="--d:1"><span class="n m">2</span><span class="nm"><i class="ci ci-chevron-right"></i>Upload <span class="d">(Copy)</span></span><span class="n dur"><i style="width:5%"></i><b>0.58</b></span><span class="n d"></span><span class="n d"></span></div>
+					<div class="grow-r mk" style="--d:1"><span class="n m">41</span><span class="nm"><i class="ci ci-chevron-right"></i>DepthPrepass</span><span class="n dur"><i style="width:9%"></i><b>0.92</b></span><span class="n d">1.21M</span><span class="n d">0</span></div>
+					<div class="grow-r mk" style="--d:1"><span class="n m">241</span><span class="nm"><i class="ci ci-chevron-down"></i>ShadowCascades<i class="ci ci-warning c-warn flag"></i></span><span class="n dur"><i style="width:29%"></i><b>3.04</b></span><span class="n d">2.86M</span><span class="n d">0</span></div>
+					<div class="grow-r mk" style="--d:2"><span class="n m">242</span><span class="nm"><i class="ci ci-chevron-right"></i>Cascade 0 <span class="d">178</span></span><span class="n dur"><i style="width:6%"></i><b>0.61</b></span><span class="n d">0.41M</span><span class="n d">0</span></div>
+					<div class="grow-r mk" style="--d:2"><span class="n m">421</span><span class="nm"><i class="ci ci-chevron-right"></i>Cascade 1 <span class="d">186</span></span><span class="n dur"><i style="width:7%"></i><b>0.70</b></span><span class="n d">0.52M</span><span class="n d">0</span></div>
+					<div class="grow-r mk" style="--d:2"><span class="n m">608</span><span class="nm"><i class="ci ci-chevron-right"></i>Cascade 2 <span class="d">212</span></span><span class="n dur"><i style="width:8%"></i><b>0.79</b></span><span class="n d">0.71M</span><span class="n d">0</span></div>
+					<div class="grow-r mk" style="--d:2"><span class="n m">821</span><span class="nm"><i class="ci ci-chevron-right"></i>Cascade 3 <span class="d">612</span><i class="ci ci-warning c-warn flag"></i></span><span class="n dur"><i style="width:9%"></i><b>0.94</b></span><span class="n d">1.22M</span><span class="n d">0</span></div>
+					<div class="grow-r mk" style="--d:1"><span class="n m">1261</span><span class="nm"><i class="ci ci-chevron-right"></i>EntityID</span><span class="n dur"><i style="width:4%"></i><b>0.38</b></span><span class="n d">1.21M</span><span class="n d">2.07M</span></div>
+					<div class="grow-r mk" style="--d:1"><span class="n m">1280</span><span class="nm"><i class="ci ci-chevron-down"></i>Lit</span><span class="n dur"><i style="width:46%"></i><b>4.86</b></span><span class="n d">0.21M</span><span class="n d">3.80M</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1281</span><span class="nm"><span>Ground</span><span class="api d">DrawIndexedInstanced(6, 1, 0, 0, 0)</span></span><span class="n dur"><i style="width:11%"></i><b>1.21</b></span><span class="n d">2</span><span class="n d">1.10M</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1283</span><span class="nm"><span>Crate_01</span><span class="api d">DrawIndexedInstanced(36, 1, 0, 0, 35)</span></span><span class="n dur"><i style="width:2%"></i><b>0.18</b></span><span class="n d">12</span><span class="n d">61.2K</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1285</span><span class="nm"><span>Crate_02</span><span class="api d">DrawIndexedInstanced(36, 1, 0, 0, 36)</span></span><span class="n dur"><i style="width:2%"></i><b>0.16</b></span><span class="n d">12</span><span class="n d">48.9K</span></div>
+					<div class="grow-r sel" style="--d:2"><span class="n m">1287</span><span class="nm"><span>Crate_03</span><span class="api d">DrawIndexedInstanced(36, 1, 0, 0, 37)</span><i class="ci ci-error c-error flag" title="Writes NaN"></i></span><span class="n dur"><i style="width:2%"></i><b>0.21</b></span><span class="n d">12</span><span class="n d">88.4K</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1289</span><span class="nm"><span>Barrel</span><span class="api d">DrawIndexedInstanced(2880, 1, 0, 0, 38)</span></span><span class="n dur"><i style="width:1%"></i><b>0.14</b></span><span class="n d">960</span><span class="n d">40.3K</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1291</span><span class="nm"><span>Pillar_A</span><span class="api d">DrawIndexedInstanced(36, 1, 0, 0, 39)</span></span><span class="n dur"><i style="width:3%"></i><b>0.33</b></span><span class="n d">12</span><span class="n d">152K</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1293</span><span class="nm"><span>Foliage</span><span class="api d">DrawIndexedInstanced(1536, 412, 0, 0, 40)</span><i class="ci ci-info c-info flag"></i></span><span class="n dur"><i style="width:19%"></i><b>2.04</b></span><span class="n d">210K</span><span class="n d">1.62M</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1295</span><span class="nm"><span>Prop_far</span><span class="api d">DrawIndexedInstanced(36, 6, 0, 0, 452)</span></span><span class="n dur"><i style="width:3%"></i><b>0.31</b></span><span class="n d">72</span><span class="n d">38.0K</span></div>
+					<div class="grow-r" style="--d:2"><span class="n m">1297</span><span class="nm"><span>Wall</span><span class="api d">DrawIndexedInstanced(36, 1, 0, 0, 458)</span></span><span class="n dur"><i style="width:3%"></i><b>0.28</b></span><span class="n d">12</span><span class="n d">410K</span></div>
+					<div class="grow-r mk" style="--d:1"><span class="n m">1301</span><span class="nm"><i class="ci ci-chevron-right"></i>Grid + Gizmos</span><span class="n dur"><i style="width:2%"></i><b>0.22</b></span><span class="n d">4.1K</span><span class="n d">0.31M</span></div>
+					<div class="grow-r mk" style="--d:1"><span class="n m">1311</span><span class="nm"><i class="ci ci-chevron-right"></i>GUI</span><span class="n dur"><i style="width:3%"></i><b>0.31</b></span><span class="n d">2.2K</span><span class="n d">0.18M</span></div>
+					<div class="grow-r" style="--d:1"><span class="n m">1338</span><span class="nm"><span>Blit to swapchain</span><span class="api d">Draw(3, 1, 0, 0)</span></span><span class="n dur"><i style="width:1%"></i><b>0.09</b></span><span class="n d">1</span><span class="n d">2.07M</span></div>
+					<div class="grow-r" style="--d:1"><span class="n m">1342</span><span class="nm"><span class="api">Present(1, 0)</span></span><span class="n"></span><span class="n d"></span><span class="n d"></span></div>
+				</div>
+			</section>
+
+			<div class="gpu-col grow">
+				<div class="gpu-main">
+					<section class="stree gpu-col br">
+						<div class="pane-title"><b>State</b><span class="muted">EID 1287</span><span class="grow"></span><span class="seg"><span class="on">By stage</span><span>D3D12</span></span></div>
+						<div class="scroll" style="flex:1">
+							<div class="row hd" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><span class="name">Input Assembler</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">Topology</span><span class="v">TriangleList</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">VB 0</span><span class="v">Crate_03.vb &middot; 24 B x 24</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">VB 1</span><span class="v">InstanceData &middot; 16 B x 512</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">IB</span><span class="v">Crate_03.ib &middot; R16_UINT x 36</span></div>
+							<div class="row hd" style="--d:0"><span class="tw"><i class="ci ci-chevron-right"></i></span><span class="name">Vertex Shader</span><span class="meta">DefaultLit / vertex</span></div>
+							<div class="row hd" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><span class="name">Pixel Shader</span><span class="meta">DefaultLit / pixel &middot; ps_6_6</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">Constant</span><span class="v">u_UseDirLight = 1</span></div>
+							<div class="row" style="--d:1"><span class="tw"><i class="ci ci-chevron-right"></i></span><span class="k">CBV</span><span class="v">u_Materials[37] &middot; Crate_Weathered</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">SRV</span><span class="v">u_Textures[812] &middot; Crate_03_Albedo</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">SRV</span><span class="v">u_Textures[813] &middot; Crate_03_Normal</span></div>
+							<div class="row warn" style="--d:1"><span class="tw"></span><span class="k">SRV</span><span class="v">u_Textures[814] &middot; <span class="c-warn">black</span> <span class="muted">(roughness)</span></span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">SRV</span><span class="v">u_Textures[2051] &middot; ShadowCascade3</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">CBV</span><span class="v">u_DirLight &middot; DirectionalLight</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">SRV</span><span class="v">u_Cascades &middot; 4 x Cascade</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">Sampler</span><span class="v">s_TextureSampler &middot; aniso 16</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">Sampler</span><span class="v">s_ShadowSampler &middot; point clamp</span></div>
+							<div class="row hd" style="--d:0"><span class="tw"><i class="ci ci-chevron-right"></i></span><span class="name">Rasterizer</span><span class="meta">solid, cull back</span></div>
+							<div class="row hd" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><span class="name">Output Merger</span></div>
+							<div class="row sel" style="--d:1"><span class="tw"></span><span class="k">RTV 0</span><span class="v">HDR &middot; R16G16B16A16_FLOAT</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">DSV</span><span class="v">Depth &middot; D32 &middot; EQUAL, no write</span></div>
+							<div class="row" style="--d:1"><span class="tw"></span><span class="k">Blend</span><span class="v">off</span></div>
+							<div class="row hd" style="--d:0"><span class="tw"><i class="ci ci-chevron-right"></i></span><span class="name">Root Signature</span><span class="meta">bindless</span></div>
+							<div class="row hd" style="--d:0"><span class="tw"><i class="ci ci-chevron-right"></i></span><span class="name">Descriptor Heaps</span></div>
+						</div>
+					</section>
+					<section class="rv">
+						<div class="rv-tools">
+							<span class="dd">Mip 0</span>
+							<span class="chan"><span class="on">R</span><span class="on">G</span><span class="on">B</span><span>A</span></span>
+							<span class="dd">Visualize: NaN / Inf</span>
+							<span class="muted desktop-wide">Range 0.00 - 4.00</span>
+							<span class="tb-spacer"></span>
+							<span class="btn flat"><i class="ci ci-history"></i>Pixel History</span>
+							<span class="btn flat"><i class="ci ci-debug-alt"></i>Debug Pixel</span>
+							<span class="btn flat desktop-wide"><i class="ci ci-references"></i>Resource History</span>
+						</div>
+						<div class="rv-view">
+							<div class="tex-frame">
+								<canvas data-scene="hdr" data-nan></canvas>
+								<span class="pick-marker"></span>
+							</div>
+						</div>
+						<div class="rv-status">
+							<span><span class="k">Pixel</span>(<span data-pick="x"></span>, <span data-pick="y"></span>)</span>
+							<span class="c-error"><span class="k">RGBA</span>NaN NaN NaN 1.000</span>
+							<span class="p-hide"><span class="k">Depth</span>0.94117</span>
+							<span class="p-hide"><span class="k">Last write</span>EID 1287</span>
+							<span class="p-hide"><span class="k">Texture</span>RTV 0 &middot; 1920x1080 &middot; R16G16B16A16_FLOAT</span>
+						</div>
+					</section>
+				</div>
+				<section class="tw-group gpu-bottom wgrid">
+					<div class="grid-head"><span></span><span class="n">EID</span><span>Warning</span><span>Category</span><span>Source</span></div>
+					<div class="scroll" style="flex:1">
+						<div class="grow-r sel"><span><i class="ci ci-error c-error"></i></span><span class="n m">1287</span><span>26 pixels of RTV 0 written as NaN by DrawIndexedInstanced (Crate_03)</span><span class="d">NaN / Inf scan</span><span class="d">IED analysis</span></div>
+						<div class="grow-r"><span><i class="ci ci-warning c-warn"></i></span><span class="n m">241</span><span>ShadowCascades is 0.92 ms slower than Claymore_f1790 (master)</span><span class="d">Compare</span><span class="d">IED analysis</span></div>
+						<div class="grow-r"><span><i class="ci ci-warning c-warn"></i></span><span class="n m">821</span><span>Cascade 3 draws 612 objects (1.22M prims) covering 0.6% of the view</span><span class="d">Culling</span><span class="d">IED analysis</span></div>
+						<div class="grow-r"><span><i class="ci ci-warning c-warn"></i></span><span class="n m">1280</span><span>38 COPY_DEST to PIXEL_SHADER_RESOURCE barriers on static textures every frame</span><span class="d">Barriers</span><span class="d">IED analysis</span></div>
+						<div class="grow-r"><span><i class="ci ci-info c-info"></i></span><span class="n m">1293</span><span>Foliage: quad overdraw 4.2 in Lit</span><span class="d">Overdraw</span><span class="d">IED analysis</span></div>
+						<div class="grow-r"><span><i class="ci ci-info c-info"></i></span><span class="n m">12</span><span>ClearRenderTargetView: clear value does not match the optimized clear value</span><span class="d">Performance</span><span class="d">D3D12 debug layer</span></div>
+					</div>
+					<div class="tw-tabs"><span class="tw-tab on">Warnings 6</span><span class="tw-tab">Pixel History</span><span class="tw-tab">Resource History</span><span class="tw-tab">API Calls</span><span class="tw-tab">Messages 1</span></div>
+				</section>
+			</div>
+		</div>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar">
+		<span class="st">Ready</span>
+		<span class="st"><i class="ci ci-device-camera c-1"></i>Claymore_f1842 &middot; rdc backend</span>
+		<span class="st grow"></span>
+		<span class="st">EID 1287 &middot; Pixel (<span data-pick="x"></span>, <span data-pick="y"></span>)</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>

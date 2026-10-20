@@ -36,6 +36,7 @@ The full feature set of IED, one area per file under `docs/features/`. This is t
 | [features/14-settings](features/14-settings.md) | Settings window, tiers, secrets, keybindings, model config UI | SET |
 | [features/15-ops-and-distribution](features/15-ops-and-distribution.md) | Logs, health, crash recovery, trash, installer, CLI, bundled services, updates | OPS |
 | [features/16-orchestration](features/16-orchestration.md) | Mission Control, goal queue/board, worktree-isolated parallel agents, verifier, schedules, cross-workspace handoff, model scorecards and evals | ORC |
+| [features/17-gpu-debugger](features/17-gpu-debugger.md) | GPU debugger: capture library, event browser, pipeline state, texture/mesh viewers, pixel history, shader debugging, performance, compare, swappable replay backends (RenderDoc, Flashbang) | GPU |
 
 AI tool calls are catalogued separately in `docs/13-ai-tool-catalog.md` (IDs `T-<group>-<n>`), because their schemas matter more than their UI.
 
@@ -54,7 +55,7 @@ Owner directive (2026-10-19): **"this should not just have parity with echo but 
 | Context | One summarizer pass, chars/3.5 estimates | Ledger, tiered + cache-aware compression, real tokenizers, history retrieval, scratchpad and tasks never compressed away (AIR) |
 | Tools | Generic file/shell/web | Symbol-first LSP tools for small-context local models, debugger/build/test/profiler/browser/window-capture/image-diff tools, on-demand tool groups (`docs/13`) |
 | Extensibility | iframe views + JSON-RPC tools | Composable bindings, declarative language plugins, project-local plugins, 40+ contribution points (PLG) |
-| Game dev | none | Profiler with by-task view and GPU lanes, engine plugin hooks, visual verification (PRF, `docs/13`) |
+| Game dev | none | Profiler with by-task view and GPU lanes, a PIX/RenderDoc-class GPU debugger with AI and capture compare, engine plugin hooks, visual verification (PRF, GPU, `docs/13`) |
 | Cloud | none | Claude via the user's own Claude Code CLI or API key, usage windows and reset times (AIR) |
 
 Several items the first draft marked P2 were raised to P1 because they are what makes the difference (ghost-text completion, IED as an MCP server, worktree isolation, project memory).

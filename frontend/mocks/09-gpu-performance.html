@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 9 - GPU debugger: Performance and compare</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/gpu.css">
+	<script defer src="js/gpu.js"></script>
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="gpu" data-phone="more">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t" style="flex-direction:column;align-items:flex-start;gap:0;line-height:1.15"><b>Performance</b><span class="muted" style="font-size:12px">Claymore_f1842 vs master</span></div>
+		<span class="ib"><i class="ci ci-sparkle c-ai"></i></span>
+	</div>
+
+	<main class="activity gpu-act">
+		<div class="tabs p-hide">
+			<div class="tab on"><i class="ci ci-device-camera"></i><span class="name">Claymore_f1842</span><span class="muted">GPU capture</span><i class="ci ci-close x"></i></div>
+			<div class="tab"><i class="ci ci-device-camera"></i><span class="name">Claymore_f1790</span><span class="muted">master</span><i class="ci ci-close x"></i></div>
+			<div class="tabs-tail"><span class="btn flat"><i class="ci ci-library"></i>Capture library</span></div>
+		</div>
+		<div class="gpu-bar p-hide">
+			<span class="btn flat"><i class="ci ci-play"></i>Collect timing data</span>
+			<span class="chip ok"><i class="ci ci-check"></i>5 replays &middot; median</span>
+			<span class="tb-sep"></span>
+			<span class="dd" title="Counter provider">Counters: vendor provider</span>
+			<span class="dd" title="Compare with">B: Claymore_f1790 &middot; master @ d3e8f61</span>
+			<span class="grow"></span>
+			<span class="btn flat wide"><i class="ci ci-export"></i>Export CSV</span>
+			<span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI</span>
+		</div>
+		<div class="vtabs">
+			<span class="vtab">Overview</span>
+			<span class="vtab">Pipeline</span>
+			<span class="vtab">Debug</span>
+			<span class="vtab on">Performance</span>
+			<span class="vtab">Compare</span>
+			<span class="tail"><span class="chip backend">rdc &middot; RenderDoc 1.46</span>GPU 10.56 ms &middot; master 9.24 ms &middot; <span class="c-warn">+1.32 ms</span></span>
+		</div>
+		<div class="perf-sum-p">
+			<span class="chip warn">GPU 10.56 ms +1.32</span>
+			<span class="chip">2,148 draws</span>
+			<span class="chip err"><i class="ci ci-error"></i>26 NaN px</span>
+		</div>
+		<div class="ptl" data-sel="Cascade 3" data-range="3.69,4.60" data-plots="busy,occupancy,bandwidth"></div>
+
+		<div class="perf-main">
+			<div class="pgrid-wrap br">
+				<section class="gpu-col pgrid" style="flex:1">
+					<div class="pane-title"><b>Passes</b><span class="muted">A = Claymore_f1842 (port/logging) &middot; B = Claymore_f1790 (master)</span></div>
+					<div class="grid-head"><span>Pass</span><span class="n">A ms</span><span class="n">B ms</span><span class="n">Delta</span><span class="n">Draws</span><span class="n">Prims</span><span class="n">PS inv.</span></div>
+					<div class="scroll" style="flex:1">
+						<div class="grow-r"><span class="nm" style="--d:0"><i class="ci ci-chevron-down"></i>Frame 1842 (GPU)</span><span class="n">10.56</span><span class="n d">9.24</span><span class="n up">+1.32</span><span class="n d">2,148</span><span class="n d">3.42M</span><span class="n d">9.21M</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1">Upload (Copy)</span><span class="n">0.58</span><span class="n d">0.57</span><span class="n d">+0.01</span><span class="n d">-</span><span class="n d">-</span><span class="n d">-</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1">DepthPrepass</span><span class="n">0.92</span><span class="n d">0.91</span><span class="n d">+0.01</span><span class="n d">412</span><span class="n d">1.21M</span><span class="n d">0</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1"><i class="ci ci-chevron-down"></i>ShadowCascades</span><span class="n">3.04</span><span class="n d">2.12</span><span class="n up">+0.92</span><span class="n d">1,188</span><span class="n d">2.86M</span><span class="n d">0</span></div>
+						<div class="grow-r"><span class="nm" style="--d:2">Cascade 0</span><span class="n">0.61</span><span class="n d">0.60</span><span class="n d">+0.01</span><span class="n d">178</span><span class="n d">0.41M</span><span class="n d">0</span></div>
+						<div class="grow-r"><span class="nm" style="--d:2">Cascade 1</span><span class="n">0.70</span><span class="n d">0.69</span><span class="n d">+0.01</span><span class="n d">186</span><span class="n d">0.52M</span><span class="n d">0</span></div>
+						<div class="grow-r"><span class="nm" style="--d:2">Cascade 2</span><span class="n">0.79</span><span class="n d">0.52</span><span class="n up">+0.27</span><span class="n d">212</span><span class="n d">0.71M</span><span class="n d">0</span></div>
+						<div class="grow-r sel"><span class="nm" style="--d:2">Cascade 3</span><span class="n">0.94</span><span class="n d">0.31</span><span class="n up">+0.63</span><span class="n d">612</span><span class="n d">1.22M</span><span class="n d">0</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1">EntityID</span><span class="n">0.38</span><span class="n d">0.38</span><span class="n d">0.00</span><span class="n d">412</span><span class="n d">1.21M</span><span class="n d">2.07M</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1"><i class="ci ci-chevron-down"></i>Lit</span><span class="n">4.86</span><span class="n d">4.45</span><span class="n up">+0.41</span><span class="n d">418</span><span class="n d">0.21M</span><span class="n d">3.80M</span></div>
+						<div class="grow-r"><span class="nm" style="--d:2">Foliage</span><span class="n">2.04</span><span class="n d">1.66</span><span class="n up">+0.38</span><span class="n d">1</span><span class="n d">210K</span><span class="n d">1.62M</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1">Grid + Gizmos</span><span class="n">0.22</span><span class="n d">0.22</span><span class="n d">0.00</span><span class="n d">9</span><span class="n d">4.1K</span><span class="n d">0.31M</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1">GUI</span><span class="n">0.31</span><span class="n d">0.33</span><span class="n down">-0.02</span><span class="n d">25</span><span class="n d">2.2K</span><span class="n d">0.18M</span></div>
+						<div class="grow-r"><span class="nm" style="--d:1">Blit to swapchain</span><span class="n">0.09</span><span class="n d">0.09</span><span class="n d">0.00</span><span class="n d">1</span><span class="n d">1</span><span class="n d">2.07M</span></div>
+					</div>
+				</section>
+				<section class="gpu-col igrid ibox">
+					<div class="pane-title"><b>Analysis</b><span class="muted">5 findings</span></div>
+					<div class="grid-head"><span></span><span>Finding</span><span class="n">Cost</span><span></span></div>
+					<div class="scroll" style="flex:1">
+						<div class="grow-r sel"><span><i class="ci ci-warning c-warn"></i></span><span>Cascade 3 renders 612 casters (master: 74); casters are culled by the camera far plane instead of the cascade split</span><span class="n up">+0.63 ms</span><span><span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI</span><span class="btn flat">EID 821</span></span></div>
+						<div class="grow-r"><span><i class="ci ci-warning c-warn"></i></span><span>Foliage quad overdraw 4.2 in Lit (master: 3.1); alpha-tested cards drawn back to front</span><span class="n up">+0.38 ms</span><span><span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI</span><span class="btn flat">EID 1293</span></span></div>
+						<div class="grow-r"><span><i class="ci ci-warning c-warn"></i></span><span>Direct queue idles 0.62 ms at frame start waiting on the Copy queue fence (Upload)</span><span class="n d">0.62 ms</span><span><span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI</span><span class="btn flat">EID 2</span></span></div>
+						<div class="grow-r"><span><i class="ci ci-info c-info"></i></span><span>38 COPY_DEST to PIXEL_SHADER_RESOURCE barriers on static textures every frame</span><span class="n d">0.05 ms</span><span><span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI</span><span class="btn flat">EID 1280</span></span></div>
+						<div class="grow-r"><span><i class="ci ci-error c-error"></i></span><span>EID 1287 writes 26 NaN pixels (roughness 0 in GGX)</span><span class="n d">-</span><span><span class="btn flat"><i class="ci ci-debug-alt"></i>Debug</span><span class="btn flat">EID 1287</span></span></div>
+					</div>
+				</section>
+			</div>
+			<aside class="ctrs gpu-col cgrid2">
+				<div class="pane-title"><b>Counters</b><span class="muted">Cascade 3 &middot; EID 821 - 1260</span></div>
+				<div class="grid-head"><span>Unit</span><span class="n">Value</span><span>Throughput</span></div>
+				<div class="grow-r lim"><span>Primitive / vertex</span><span class="n">78%</span><span><span class="cbar"><i style="width:78%"></i></span></span></div>
+				<div class="grow-r"><span>Rasterizer</span><span class="n">41%</span><span><span class="cbar"><i style="width:41%"></i></span></span></div>
+				<div class="grow-r"><span>Depth / ROP</span><span class="n">22%</span><span><span class="cbar"><i style="width:22%"></i></span></span></div>
+				<div class="grow-r"><span>Shader ALU</span><span class="n">12%</span><span><span class="cbar"><i style="width:12%"></i></span></span></div>
+				<div class="grow-r"><span>Texture fetch</span><span class="n">4%</span><span><span class="cbar"><i style="width:4%"></i></span></span></div>
+				<div class="grow-r"><span>L2 cache</span><span class="n">33%</span><span><span class="cbar"><i style="width:33%"></i></span></span></div>
+				<div class="grow-r"><span>VRAM bandwidth</span><span class="n">35%</span><span><span class="cbar"><i style="width:35%"></i></span></span></div>
+				<div class="grow-r"><span>Occupancy</span><span class="n">28%</span><span><span class="cbar"><i style="width:28%"></i></span></span></div>
+				<div class="verdict"><b>Limiter: primitive throughput.</b> 612 draws and 1.22M primitives for 0.6% of the view; 96% of them are outside cascade 3's split. Culling casters by the cascade frustum would bring this pass back to about 0.3 ms.</div>
+				<div class="pane-title" style="border-top:1px solid var(--border-0)"><b>Pipeline statistics</b><span class="muted">Cascade 3</span></div>
+				<div class="grow-r"><span>IA primitives</span><span class="n">1.22M</span><span class="d">master 0.15M</span></div>
+				<div class="grow-r"><span>VS invocations</span><span class="n">3.41M</span><span class="d">master 0.42M</span></div>
+				<div class="grow-r"><span>Clipped primitives</span><span class="n">1.17M</span><span class="d">96%</span></div>
+				<div class="grow-r"><span>PS invocations</span><span class="n">0</span><span class="d">depth only</span></div>
+			</aside>
+		</div>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar">
+		<span class="st">Ready</span>
+		<span class="st"><i class="ci ci-device-camera c-1"></i>Claymore_f1842 vs Claymore_f1790 &middot; aligned 1,342 / 1,339 events</span>
+		<span class="st grow"></span>
+		<span class="st">Selection 3.69 - 4.60 ms &middot; Cascade 3</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>

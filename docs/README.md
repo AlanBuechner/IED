@@ -21,7 +21,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [04-ai-chat-design](04-ai-chat-design.md) | Providers, model groups and roles, scheduling/routing, privacy, Claude, context, skills, MCP, egress, persistence |
 | [05-default-plugins](05-default-plugins.md) | The six built-in plugins and how they compose |
 | [06-build-and-nuke-integration](06-build-and-nuke-integration.md) | Task model, `${var}` injection, output sources, problem matchers, tests, LSP/build sync, Nuke work items |
-| [07-settings-and-theming](07-settings-and-theming.md) | Settings tiers and window, theme tokens (proposed values), syntax palettes, typography |
+| [07-settings-and-theming](07-settings-and-theming.md) | Settings tiers and window, theme tokens (values in `frontend/css/theme.css`, checked on the M0 mocks), Visual Assist X + Grayscale syntax palettes, typography |
 | [10-server-protocol](10-server-protocol.md) | WebSocket protocol v1: frames, topics, resume, backpressure, document editing, CLI pipe |
 | [11-security-and-multi-client](11-security-and-multi-client.md) | Threat model, access defaults, trust layers, AI permissions, secrets, concurrency rules |
 | [12-agent-runtime-and-reliability](12-agent-runtime-and-reliability.md) | Run state machine, loop, modes, **stall/stop protection**, tools execution, sub-agents, checkpoints, budgets |
@@ -33,6 +33,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [19-testing-strategy](19-testing-strategy.md) | Test layers, mock and fake-model servers, resume tests, screenshots, budgets, gates |
 | [20-echo-parity-and-migration](20-echo-parity-and-migration.md) | Echo parity floor, how IED surpasses each item, migration importer |
 | [21-distribution-and-bundled-services](21-distribution-and-bundled-services.md) | Install shape, on-disk layout, bundled vs detected components, SearXNG/tor packaging, first run |
+| [22-gpu-debugger](22-gpu-debugger.md) | GPU debugger: PIX/RenderDoc/Nsight comparison, architecture, RenderDoc vs own (Flashbang) backend, views, capture flow, AI, phases |
 
 ## Doc conventions
 

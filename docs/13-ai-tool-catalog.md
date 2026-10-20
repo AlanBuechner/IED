@@ -182,6 +182,23 @@ Permission handling per class is defined in `docs/11`.
 | T-PRF-5 | `profile_leaks(capture, group_by: callstack|pool)` | read | Live allocations at end. |
 | T-PRF-6 | `profile_compare(a, b)` | read | Zone and frame-time deltas. |
 
+### `gpu`
+
+From `ied.gpu` (`docs/22`). Results cite EIDs, which the UI renders as links; images go only to vision-capable models the chat's privacy allows.
+
+| ID | Tool | Class | Notes |
+|---|---|---|---|
+| T-GPU-1 | `gpu_capture(task?, frames?)` | exec | Build + launch under the active backend, capture N frames, return the capture id. |
+| T-GPU-2 | `gpu_events(capture, filter?, range?)` | read | Marker tree slice with EIDs, kinds and GPU times; same filter language as the Event Browser. |
+| T-GPU-3 | `gpu_event_state(capture, eid, stages?)` | read | Normalized pipeline state: shaders, bindings (bindless resolved with names), targets, blend/depth/raster. |
+| T-GPU-4 | `gpu_pixel(capture, eid, target, x, y)` | read | Typed value plus pixel history with failed tests and a one-line summary. |
+| T-GPU-5 | `gpu_debug_shader(capture, eid, target: pixel(x,y)|vertex(i)|thread(xyz))` | read | Runs the shader debugger; returns executed source lines with variable values (bounded). |
+| T-GPU-6 | `gpu_scan(capture, target, check: nan|inf|negative|range, eids?)` | read | Bisects the first event that produced bad values; returns EID and pixel count. |
+| T-GPU-7 | `gpu_timing(capture, by: event|pass, top?)` | read | GPU times (median of N replays), pipeline statistics, counters when a provider is present. |
+| T-GPU-8 | `gpu_compare(a, b)` | read | Aligned events: state diffs, output image diffs (changed-pixel %), timing deltas per pass. |
+| T-GPU-9 | `gpu_texture(capture, eid, resource, mip?, region?)` | read | Image for vision models plus stats (min/max/mean, NaN count, histogram). |
+| T-GPU-10 | `gpu_replay_with_shader(capture, shader, source)` | exec | Edit and Replay without saving; returns the output diff. |
+
 ### Plugin and MCP tools
 
 - Plugins add tools via `toolCalls` (named `<pluginId>_<tool>` unless the plugin claims a group name) and assign them to groups.

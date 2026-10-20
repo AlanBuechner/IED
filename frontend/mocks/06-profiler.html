@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en" data-view="threads">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 6 - Profiler timeline</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/profiler.css">
+	<script defer src="js/profiler.js"></script>
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="profiler" data-phone="more">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t"><b>Profiler</b><span class="rec" style="font-size:13px"><i class="r"></i>Game.exe live</span></div>
+		<span class="ib"><i class="ci ci-debug-pause"></i></span>
+		<span class="ib"><i class="ci ci-ellipsis"></i></span>
+	</div>
+
+	<main class="activity prof-act">
+		<div class="prof-bar">
+			<span class="rec desktop-only"><i class="r"></i>Capturing Game.exe <span class="muted">Development &middot; pid 18244 &middot; 3m 12s &middot; 1.2 GB</span></span>
+			<span class="tb-sep"></span>
+			<span class="btn flat"><i class="ci ci-debug-pause"></i>Pause view</span>
+			<span class="btn flat"><i class="ci ci-debug-stop"></i>Stop</span>
+			<span class="tb-sep"></span>
+			<span class="seg"><span data-view-btn="threads"><i class="ci ci-list-flat"></i>Threads</span><span data-view-btn="tasks"><i class="ci ci-symbol-event"></i>Tasks</span></span>
+			<span class="legend" data-view-only="tasks">Ran on:<span><i class="sw s1"></i>Worker 0</span><span><i class="sw s2"></i>Worker 1</span><span><i class="sw s3"></i>Worker 2</span><span><i class="sw s5"></i>Worker 3</span></span>
+			<span class="legend" data-view-only="threads"><span class="muted">Tinted spans: thread renamed (task name at the boundary)</span></span>
+			<span class="grow"></span>
+			<span class="btn flat wide"><i class="ci ci-table"></i>Statistics</span>
+			<span class="btn flat wide"><i class="ci ci-search"></i>Find zone</span>
+			<span class="btn flat"><i class="ci ci-flame"></i>Flame graph</span>
+			<span class="btn flat"><i class="ci ci-database"></i>Memory</span>
+			<span class="btn flat wide"><i class="ci ci-circuit-board"></i>GPU</span>
+			<span class="tb-sep"></span>
+			<span class="btn flat"><i class="ci ci-sparkle c-ai"></i>Ask AI about selection</span>
+			<div class="phone-only">
+				<span class="seg"><span data-view-btn="threads">Threads</span><span data-view-btn="tasks">Tasks</span></span>
+				<span class="grow" style="flex:1"></span>
+				<span class="muted" style="font-size:13px">Frame 1842 &middot; <span class="c-warn">23.8 ms</span></span>
+			</div>
+		</div>
+		<div class="fg"></div>
+		<div class="prof-main">
+			<div class="tl">
+				<div class="tl-ruler"><div class="lbl-col">74.2 s</div><div class="track"></div></div>
+				<div class="tl-frames"><div class="lbl-col">Frames</div><div class="track"></div></div>
+				<div class="tl-lanes"></div>
+			</div>
+			<aside class="prof-side">
+				<div class="zd">
+					<div class="zname"><i class="ci ci-symbol-event c-1"></i>Physics::Step</div>
+					<div class="kv">
+						<span class="k">Duration</span><span>1.50 ms &middot; self 0.11 ms</span>
+						<span class="k" data-view-only="threads">Thread</span><span data-view-only="threads">Job Worker 1 &middot; named "Physics" from 74.2555 s to 74.2570 s</span>
+						<span class="k" data-view-only="tasks">Task</span><span data-view-only="tasks">Physics &middot; run 2 of 3 in view &middot; on Job Worker 1</span>
+						<span class="k">Frame</span><span>1842 <span class="c-warn">(23.8 ms, GC pause 5.1 ms)</span></span>
+						<span class="k">Source</span><a class="mono">Engine/src/Physics/World.cf:118</a>
+						<span class="k">Text</span><span>bodies=2048 islands=37</span>
+					</div>
+					<div class="acts"><span class="btn"><i class="ci ci-go-to-file"></i>Open source</span><span class="btn"><i class="ci ci-search"></i>Find zone</span><span class="btn"><i class="ci ci-sparkle c-ai"></i>Ask AI</span></div>
+				</div>
+				<div class="group-head">Children</div>
+				<div class="kids">
+					<div class="row"><span class="name">Narrowphase</span><span class="bar"><i style="width:34%"></i></span><span class="meta">0.51 ms</span></div>
+					<div class="row"><span class="name">Solve</span><span class="bar"><i style="width:36%"></i></span><span class="meta">0.54 ms</span></div>
+					<div class="row"><span class="name">Broadphase</span><span class="bar"><i style="width:21%"></i></span><span class="meta">0.31 ms</span></div>
+				</div>
+				<div class="tall-only">
+					<div class="group-head" style="margin-top:6px">Find zone &middot; Physics::Step<span class="meta">11,520 calls</span></div>
+					<div class="histo"></div>
+					<div class="histo-axis"><span>0.9 ms</span><span>median 1.21</span><span>p95 1.62</span><span>3.4 ms</span></div>
+				</div>
+				<div class="group-head short-only" style="margin-top:6px">Statistics &middot; view<span class="meta" data-view-only="threads">by zone</span><span class="meta" data-view-only="tasks">by task</span></div>
+				<table class="stats short-only" data-view-only="threads">
+					<thead><tr><th>Zone</th><th>Count</th><th>Total</th><th>Self</th><th>p95</th></tr></thead>
+					<tbody>
+						<tr><td>WaitForGPU</td><td>4</td><td>17.9</td><td>17.9</td><td>5.4</td></tr>
+						<tr><td>Zstd::Decompress</td><td>3</td><td>21.5</td><td>6.4</td><td>8.0</td></tr>
+						<tr><td>GC::Collect gen 1</td><td>1</td><td>5.1</td><td>5.1</td><td>5.1</td></tr>
+						<tr><td>GBuffer</td><td>3</td><td>9.3</td><td>9.3</td><td>3.1</td></tr>
+						<tr class="sel"><td>Physics::Step</td><td>3</td><td>4.5</td><td>0.3</td><td>1.5</td></tr>
+						<tr><td>Scene.Update</td><td>4</td><td>12.4</td><td>0.4</td><td>3.1</td></tr>
+						<tr><td>AI::Tick</td><td>4</td><td>10.0</td><td>0.2</td><td>2.5</td></tr>
+					</tbody>
+				</table>
+				<table class="stats short-only" data-view-only="tasks">
+					<thead><tr><th>Task</th><th>Runs</th><th>Total</th><th>Mean</th><th>Threads</th></tr></thead>
+					<tbody>
+						<tr><td>Decompress</td><td>3</td><td>21.5</td><td>7.2</td><td>3</td></tr>
+						<tr><td>Streaming</td><td>3</td><td>16.2</td><td>5.4</td><td>2</td></tr>
+						<tr><td>AI.Tick</td><td>4</td><td>10.0</td><td>2.5</td><td>3</td></tr>
+						<tr><td>Audio.Mix</td><td>6</td><td>7.2</td><td>1.2</td><td>1</td></tr>
+						<tr class="sel"><td>Physics</td><td>3</td><td>4.5</td><td>1.5</td><td>2</td></tr>
+					</tbody>
+				</table>
+			</aside>
+		</div>
+		<section class="tw-group prof-bottom">
+			<div class="panel-tools"><span class="muted">Statistics</span><span class="seg"><span class="on">Zones</span><span>Tasks</span><span>Threads</span></span><span class="muted">Range: view (frames 1841-1843) &middot; 3 frames</span><span class="tb-spacer"></span><span class="btn flat"><i class="ci ci-export"></i>CSV</span><div class="input" style="width:220px"><i class="ci ci-search sm"></i><span>Filter zones</span></div></div>
+			<div class="scroll" style="flex:1">
+				<table class="stats wide-stats">
+					<thead><tr><th>Zone</th><th>Source</th><th>Count</th><th>Total ms</th><th>Self ms</th><th>Mean</th><th>Median</th><th>p95</th><th>Max</th><th>% of frame</th></tr></thead>
+					<tbody>
+						<tr><td>Zstd::Decompress</td><td class="src">Engine/src/Assets/Pack.cf:212</td><td>3</td><td>21.5</td><td>6.4</td><td>7.17</td><td>7.50</td><td>8.00</td><td>8.00</td><td><span class="pct"><i style="width:38%"></i></span>38.8</td></tr>
+						<tr><td>WaitForGPU</td><td class="src">Engine/src/Engine/Core/Application.cf:71</td><td>4</td><td>17.9</td><td>17.9</td><td>4.48</td><td>4.80</td><td>5.40</td><td>7.10</td><td><span class="pct"><i style="width:32%"></i></span>32.3</td></tr>
+						<tr><td>Streaming::Load</td><td class="src">Engine/src/Assets/Streamer.cf:88</td><td>3</td><td>16.2</td><td>0.9</td><td>5.40</td><td>5.80</td><td>6.00</td><td>6.00</td><td><span class="pct"><i style="width:29%"></i></span>29.2</td></tr>
+						<tr><td>Scene.Update</td><td class="src">Engine/src/Scene/Scene.cf:140</td><td>4</td><td>12.4</td><td>0.4</td><td>3.10</td><td>3.10</td><td>3.10</td><td>3.10</td><td><span class="pct"><i style="width:22%"></i></span>22.4</td></tr>
+						<tr><td>AI::Tick</td><td class="src">Game/src/AI/Brain.cf:33</td><td>4</td><td>10.0</td><td>0.2</td><td>2.50</td><td>2.50</td><td>2.50</td><td>2.50</td><td><span class="pct"><i style="width:18%"></i></span>18.0</td></tr>
+						<tr><td>GBuffer</td><td class="src">GPU &middot; Direct queue</td><td>3</td><td>9.3</td><td>9.3</td><td>3.10</td><td>3.10</td><td>3.10</td><td>3.10</td><td><span class="pct"><i style="width:17%"></i></span>16.8</td></tr>
+						<tr><td>Audio::Mix</td><td class="src">Engine/src/Audio/Mixer.cf:57</td><td>6</td><td>7.2</td><td>7.2</td><td>1.20</td><td>1.20</td><td>1.20</td><td>1.20</td><td><span class="pct"><i style="width:13%"></i></span>13.0</td></tr>
+						<tr><td class="c-warn">GC::Collect gen 1</td><td class="src">C4 runtime</td><td>1</td><td>5.1</td><td>5.1</td><td>5.10</td><td>5.10</td><td>5.10</td><td>5.10</td><td><span class="pct"><i style="width:9%"></i></span>9.2</td></tr>
+						<tr class="sel"><td>Physics::Step</td><td class="src">Engine/src/Physics/World.cf:118</td><td>3</td><td>4.5</td><td>0.3</td><td>1.50</td><td>1.50</td><td>1.50</td><td>1.50</td><td><span class="pct"><i style="width:8%"></i></span>8.1</td></tr>
+						<tr><td>Transform.Propagate</td><td class="src">Engine/src/Scene/Transform.cf:64</td><td>4</td><td>6.0</td><td>6.0</td><td>1.50</td><td>1.50</td><td>1.50</td><td>1.50</td><td><span class="pct"><i style="width:11%"></i></span>10.8</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="tw-tabs"><span class="tw-tab on">Statistics</span><span class="tw-tab">Find Zone</span><span class="tw-tab">Messages</span><span class="tw-tab">Memory</span><span class="tw-tab">Flame Graph</span></div>
+		</section>
+		<div class="phone-sheet">
+			<div class="grab"></div>
+			<div class="zname"><i class="ci ci-symbol-event c-1"></i>Physics::Step<span class="muted" style="margin:0 0 0 auto">1.50 ms</span></div>
+			<div class="muted" data-view-only="threads">Job Worker 1, named "Physics" &middot; World.cf:118</div>
+			<div class="muted" data-view-only="tasks">Task Physics on Job Worker 1 &middot; World.cf:118</div>
+			<div class="acts"><span class="btn"><i class="ci ci-go-to-file"></i>Source</span><span class="btn"><i class="ci ci-sparkle c-ai"></i>Ask AI</span></div>
+		</div>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar" data-state="building">
+		<span class="st"><i class="ci ci-record c-error"></i>Capturing &middot; Game.exe</span>
+		<span class="st"><i class="ci ci-sparkle c-ai"></i>AI: 2 running, <span class="c-warn">1 needs approval</span></span>
+		<span class="st grow"></span>
+		<span class="st">View 59.0 ms &middot; 3 frames &middot; 1 over budget</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>

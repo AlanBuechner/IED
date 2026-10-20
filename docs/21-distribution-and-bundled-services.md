@@ -47,6 +47,8 @@ Per workspace: `.ied/` (committed) and `.ied/local/` (gitignored) as in `docs/03
 | Headless browser for AI browser tools | **detected**: Microsoft Edge (always present on Windows 10/11) driven over CDP; Chrome as alternative | no 150 MB Chromium bundle needed |
 | Video frame extraction | **Media Foundation** through a C shim (built into Windows); ffmpeg optional if the owner points to one | avoids an 80 MB bundle and LGPL packaging work |
 | Window capture | Windows Graphics Capture API (shim) | built into Windows |
+| RenderDoc (GPU debugger `rdc` backend) | **bundled**, pinned version: `renderdoc.dll` + the IED adapter process (`docs/22`); an installed RenderDoc is never required | MIT license; replay API is C++, so no Python ships with it |
+| PIX, Nsight Graphics | **detected** for hand-off only ("Open in PIX", "Launch in Nsight") | closed tools, installed by the owner |
 | Git | **detected** (Git for Windows); if missing, offer a one-click isolated install of MinGit into `%LOCALAPPDATA%\IED\services\git` | git CLI is the git backend (`docs/features/09-git.md`) |
 | Docker | **detected** (Docker Desktop); sandbox shows setup guidance if absent | too large and system-level to bundle |
 | Claude Code CLI | **detected** (`claude` on PATH) for the Claude bridge | the user installs and signs in themselves (policy, `docs/04`) |

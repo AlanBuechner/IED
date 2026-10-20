@@ -1,0 +1,293 @@
+/*
+	theme.css - every IED design token (docs/07). The single source of visual truth.
+
+	Rules:
+	- This is the only file in frontend/, shared/ and plugins/ that may contain a raw color.
+	  Everything else uses var(--token).
+	- Dark only. The base is a grayscale ramp; hue appears only where it carries meaning
+	  (semantic accents, syntax kinds, file-type identity, series identity in graphs).
+	- Tokens that generators read (Monaco theme, xterm/ANSI palette, Output window) are plain
+	  hex or var() of plain hex. color-mix() tints are for CSS-only use.
+	- Device classes (docs/15): desktop >= 1100 px, tablet 720-1099 px, phone < 720 px.
+*/
+
+:root {
+	color-scheme: dark;
+
+	/* ---------- grayscale ramp ---------- */
+	--bg-0: #0e0e0e;          /* app chrome, sidebar, menu bar, status bar */
+	--bg-1: #141414;          /* panels, tool windows, Solution Explorer, terminal */
+	--bg-2: #1a1a1a;          /* editor and document surfaces */
+	--bg-3: #222222;          /* hover, raised rows, input fields */
+	--bg-4: #2c2c2c;          /* inactive selection, pressed */
+	--border-0: #262626;      /* separators */
+	--border-1: #363636;      /* input borders, focused panel edges */
+	--text-0: #e8e8e8;        /* primary text */
+	--text-1: #b4b4b4;        /* secondary text, labels */
+	--text-2: #808080;        /* tertiary, line numbers, placeholders */
+	--text-3: #565656;        /* disabled */
+	--focus: #d0d0d0;         /* focus ring (1 px) */
+	--selection: #3a3a3a;     /* text selection */
+	--selection-active: #474747; /* selected row in the focused list */
+	--veil: color-mix(in srgb, var(--text-0) 6%, transparent); /* hover wash on any surface */
+	--scroll-thumb: #383838;
+	--scroll-thumb-hover: #4a4a4a;
+	--map-viewport: color-mix(in srgb, var(--text-0) 8%, transparent);
+	--inverse-bg: var(--text-0);    /* primary button: inverted grayscale, no hue */
+	--inverse-text: var(--bg-0);
+
+	/* ---------- semantic accents (the only UI colors) ---------- */
+	--accent-saved: #5aa65a;  /* changed and saved, success, passed */
+	--accent-unsaved: #d4b13c; /* unsaved changes */
+	--accent-error: #d9534f;  /* errors, failures */
+	--accent-warn: #d08a3a;   /* warnings, needs attention */
+	--accent-info: #4a8fd6;   /* information, links, building */
+	--accent-ai: #9a85cf;     /* AI-originated content, sparingly */
+	--accent-debug: #c0679a;  /* debugging state, current statement */
+
+	/* accent tints: low-area backgrounds derived from the accents, never new hues */
+	--tint-saved: color-mix(in srgb, var(--accent-saved) 16%, transparent);
+	--tint-unsaved: color-mix(in srgb, var(--accent-unsaved) 16%, transparent);
+	--tint-error: color-mix(in srgb, var(--accent-error) 16%, transparent);
+	--tint-warn: color-mix(in srgb, var(--accent-warn) 16%, transparent);
+	--tint-info: color-mix(in srgb, var(--accent-info) 16%, transparent);
+	--tint-ai: color-mix(in srgb, var(--accent-ai) 14%, transparent);
+	--tint-debug: color-mix(in srgb, var(--accent-debug) 16%, transparent);
+	--link: var(--accent-info);
+
+	/* status bar states (F-SHL-6): idle gray, building blue, debugging accent, failed red */
+	--status-idle-bg: var(--bg-0);
+	--status-building-bg: color-mix(in srgb, var(--accent-info) 26%, var(--bg-0));
+	--status-debugging-bg: color-mix(in srgb, var(--accent-debug) 26%, var(--bg-0));
+	--status-failed-bg: color-mix(in srgb, var(--accent-error) 26%, var(--bg-0));
+
+	/* ---------- editor surfaces and markers ---------- */
+	--editor-bg: var(--bg-2);
+	--gutter-bg: var(--bg-2);
+	--line-number: var(--text-3);
+	--line-number-active: var(--text-1);
+	--current-line: #1f1f1f;
+	--current-line-border: #2a2a2a;
+	--indent-guide: #323232;
+	--indent-guide-active: #4a4a4a;
+	--ref-highlight: #2f2f2f;
+	--find-match: #3d3d3d;
+	--find-match-border: #6a6a6a;
+	--ghost-text: var(--text-3);
+	--squiggle-error: var(--accent-error);
+	--squiggle-warn: var(--accent-warn);
+	--squiggle-info: var(--accent-info);
+	--squiggle-spell: var(--text-2);
+	--marker-saved: var(--accent-saved);
+	--marker-unsaved: var(--accent-unsaved);
+	--marker-ai: var(--accent-ai);
+	--marker-breakpoint: var(--accent-error);
+	--marker-current: var(--accent-debug);
+
+	/* diff */
+	--diff-add-bg: color-mix(in srgb, var(--accent-saved) 12%, transparent);
+	--diff-del-bg: color-mix(in srgb, var(--accent-error) 12%, transparent);
+	--diff-add-word: color-mix(in srgb, var(--accent-saved) 34%, transparent);
+	--diff-del-word: color-mix(in srgb, var(--accent-error) 34%, transparent);
+	--diff-add-gutter: var(--accent-saved);
+	--diff-del-gutter: var(--accent-error);
+	--diff-filler: var(--bg-1);
+
+	/* ---------- syntax: Visual Assist X palette (default; owner choice 2026-10-19) ----------
+	   Values are C4Assist's c4-visual-assist-dark theme (C4/C4Assist/plugin/echo-plugin.json):
+	   gold user types, blue keywords and built-in types, orange functions, olive variables/fields/params,
+	   purple macros, pink control flow, green comments, salmon strings. */
+	--syntax-keyword: #569cd6;
+	--syntax-control: #d8a0df;
+	--syntax-type: #ffd700;
+	--syntax-function: #ff8000;
+	--syntax-variable: #bdb76b;
+	--syntax-parameter: #bdb76b;
+	--syntax-member: #bdb76b;
+	--syntax-constant: #b8d7a3;
+	--syntax-namespace: #b5cea8;
+	--syntax-macro: #bd63c5;
+	--syntax-string: #d69d85;
+	--syntax-number: #b5cea8;
+	--syntax-comment: #57a64a;
+	--syntax-operator: #b4b4b4;
+	--syntax-invalid: var(--accent-error);
+	--syntax-plain: #b4b4b4;
+
+	--syntax-keyword-weight: 400;  --syntax-keyword-style: normal;
+	--syntax-control-weight: 400;  --syntax-control-style: normal;
+	--syntax-type-weight: 400;     --syntax-type-style: normal;
+	--syntax-function-weight: 400; --syntax-function-style: normal;
+	--syntax-variable-weight: 400; --syntax-variable-style: normal;
+	--syntax-parameter-weight: 400; --syntax-parameter-style: normal;
+	--syntax-member-weight: 400;   --syntax-member-style: normal;
+	--syntax-constant-weight: 400; --syntax-constant-style: normal;
+	--syntax-namespace-weight: 400; --syntax-namespace-style: normal;
+	--syntax-macro-weight: 400;    --syntax-macro-style: normal;
+	--syntax-string-weight: 400;   --syntax-string-style: normal;
+	--syntax-number-weight: 400;   --syntax-number-style: normal;
+	--syntax-comment-weight: 400;  --syntax-comment-style: normal;
+	--syntax-operator-weight: 400; --syntax-operator-style: normal;
+	--syntax-invalid-weight: 400;  --syntax-invalid-style: normal;
+
+	/* ---------- terminal / Output ANSI palette ---------- */
+	--ansi-black: #3c3c3c;
+	--ansi-red: var(--accent-error);
+	--ansi-green: var(--accent-saved);
+	--ansi-yellow: var(--accent-unsaved);
+	--ansi-blue: var(--accent-info);
+	--ansi-magenta: #b07cc6;
+	--ansi-cyan: #4fa6b0;
+	--ansi-white: var(--text-1);
+	--ansi-bright-black: var(--text-2);
+	--ansi-bright-red: #ef7b76;
+	--ansi-bright-green: #7cc47c;
+	--ansi-bright-yellow: #e6cb6a;
+	--ansi-bright-blue: #74aef0;
+	--ansi-bright-magenta: #cc9be0;
+	--ansi-bright-cyan: #79c6cf;
+	--ansi-bright-white: var(--text-0);
+	--terminal-bg: var(--bg-1);
+	--terminal-fg: var(--text-0);
+	--terminal-cursor: var(--text-0);
+
+	/* ---------- identity colors (meaning = which thing) ---------- */
+	/* file-type icons: restrained hue per file category (docs/15 Icons) */
+	--filetype-source: #8aa3d6;
+	--filetype-header: #6eb4a2;
+	--filetype-data: #c9a76f;
+	--filetype-doc: #a0a0a0;
+	--filetype-script: #c88f7a;
+	--filetype-shader: #c58fb4;
+	--filetype-media: #8fb07f;
+	--filetype-folder: var(--text-2);
+	--filetype-project: var(--text-1);
+
+	/* series: categorical identity in graphs (git lanes, profiler threads, charts) */
+	--series-1: #7a9ccc;
+	--series-2: #6ab0a0;
+	--series-3: #c9a76f;
+	--series-4: #b98fb3;
+	--series-5: #8fb07f;
+	--series-6: #c88a78;
+	--series-7: #9b9bd0;
+	--series-8: #9a9a9a;
+
+	/* ---------- profiler ---------- */
+	--prof-zone-0: #3e3e3e;
+	--prof-zone-1: #373737;
+	--prof-zone-2: #313131;
+	--prof-zone-3: #2b2b2b;
+	--prof-zone-border: #4c4c4c;
+	--prof-zone-text: var(--text-0);
+	--prof-rename-tint-a: color-mix(in srgb, var(--text-0) 6%, transparent);
+	--prof-rename-tint-b: color-mix(in srgb, var(--text-0) 10%, transparent);
+	--prof-rename-edge: var(--text-2);
+	--prof-frame-bar: #4a4a4a;
+	--prof-frame-over: var(--accent-warn);
+	--prof-frame-spike: var(--accent-error);
+	--prof-budget-line: var(--text-2);
+	--prof-selection: color-mix(in srgb, var(--text-0) 10%, transparent);
+	--prof-gc: var(--accent-warn);
+
+	/* ---------- typography ---------- */
+	--font-ui: "Segoe UI", system-ui, -apple-system, "Roboto", "Helvetica Neue", sans-serif;
+	--font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, "DejaVu Sans Mono", monospace;
+	--font-size-xs: 11px;
+	--font-size-sm: 12px;
+	--font-size-ui: 13px;
+	--font-size-lg: 15px;
+	--font-size-xl: 18px;
+	--font-size-code: 13px;
+	--line-height-code: 18px;
+	--line-height-ui: 1.35;
+	--font-weight-normal: 400;
+	--font-weight-semibold: 600;
+	--tab-size: 4;
+
+	/* ---------- spacing, radii, borders ---------- */
+	--space-1: 2px;
+	--space-2: 4px;
+	--space-3: 6px;
+	--space-4: 8px;
+	--space-5: 12px;
+	--space-6: 16px;
+	--space-7: 24px;
+	--space-8: 32px;
+	--radius-1: 2px;
+	--radius-2: 3px;
+	--radius-3: 4px;
+	--radius-round: 999px;
+	--border-width: 1px;
+
+	/* ---------- shell metrics and density ---------- */
+	--row-h: 22px;
+	--row-h-touch: 40px;
+	--icon-size: 16px;
+	--sidebar-w: 40px;
+	--menubar-h: 26px;
+	--toolbar-h: 30px;
+	--tab-h: 26px;
+	--statusbar-h: 22px;
+	--panel-header-h: 26px;
+	--input-h: 22px;
+
+	/* ---------- elevation (menus and popups only) ---------- */
+	--shadow-popup: 0 8px 24px rgb(0 0 0 / 55%), 0 0 0 1px var(--border-1);
+	--scrim: rgb(0 0 0 / 45%);
+
+	/* ---------- motion (minimal) ---------- */
+	--motion-fast: 80ms;
+	--motion-normal: 140ms;
+}
+
+/* ---------- syntax: Grayscale palette (luminance, weight and italics only) ----------
+	Opt in on the root or on any subtree (custom properties inherit). */
+:root[data-syntax="grayscale"], [data-syntax="grayscale"] {
+	--syntax-keyword: #a3a3a3;
+	--syntax-control: #c6c6c6;
+	--syntax-type: #e2e2e2;
+	--syntax-function: #f2f2f2;
+	--syntax-variable: #cdcdcd;
+	--syntax-parameter: #bcbcbc;
+	--syntax-member: #c4c4c4;
+	--syntax-constant: #d8d8d8;
+	--syntax-namespace: #969696;
+	--syntax-macro: #b3b3b3;
+	--syntax-string: #9c9c9c;
+	--syntax-number: #c2c2c2;
+	--syntax-comment: #6e6e6e;
+	--syntax-operator: #8c8c8c;
+	--syntax-plain: #cdcdcd;
+
+	--syntax-keyword-weight: 600;
+	--syntax-control-weight: 600;
+	--syntax-type-weight: 600;
+	--syntax-parameter-style: italic;
+	--syntax-constant-style: italic;
+	--syntax-macro-style: italic;
+	--syntax-comment-style: italic;
+}
+
+/* ---------- phone density (< 720 px): touch targets, larger type ---------- */
+@media (max-width: 719px) {
+	:root {
+		--font-size-ui: 15px;
+		--font-size-sm: 13px;
+		--font-size-xs: 12px;
+		--font-size-code: 14px;
+		--line-height-code: 21px;
+		--row-h: 40px;
+		--tab-h: 40px;
+		--icon-size: 18px;
+		--panel-header-h: 44px;
+		--input-h: 40px;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--motion-fast: 0ms;
+		--motion-normal: 0ms;
+	}
+}

@@ -1,0 +1,86 @@
+/* editor.css - Editor activity (screen 1): Solution Explorer, document well, bottom tool windows. */
+
+.editor-act { display: flex; min-height: 0; }
+.sol { width: 264px; flex: none; }
+.sol .tree { flex: 1; padding: var(--space-1) 0; }
+.sol .row { padding-left: calc(4px + var(--d, 0) * 14px); }
+.sol .row .ci { width: 16px; height: 16px; }
+.sol .row b { font-weight: var(--font-weight-semibold); }
+.git-m { color: var(--text-1); font-size: var(--font-size-xs); width: 12px; text-align: center; font-weight: var(--font-weight-semibold); }
+.git-a { color: var(--accent-saved); font-size: var(--font-size-xs); width: 12px; text-align: center; font-weight: var(--font-weight-semibold); }
+
+.center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.well-row { flex: 1; display: flex; min-height: 0; }
+.well-row > .well { min-width: 0; }
+.well.left { flex: 58 1 0; }
+.well.right { flex: 42 1 0; }
+.well .code { flex: 1; }
+.bound { display: flex; align-items: center; gap: var(--space-2); color: var(--text-2); font-size: var(--font-size-xs); padding: 0 var(--space-3); }
+.bound .ci { width: 13px; height: 13px; }
+
+.bottom-dock { height: clamp(150px, 26vh, 300px); display: flex; flex: none; min-height: 0; }
+.bottom-dock .tw-group.out { flex: 56 1 0; }
+.bottom-dock .tw-group.err { flex: 44 1 0; }
+.terminal-dock { --term-lines: 8; }
+@media (max-height: 900px) { .terminal-dock { --term-lines: 4; } }
+
+.out-body {
+	flex: 1;
+	font-family: var(--font-mono);
+	font-size: calc(var(--font-size-code) - 1px);
+	line-height: 17px;
+	padding: var(--space-2) var(--space-4);
+	white-space: pre;
+	overflow: hidden;
+	color: var(--text-1);
+	background: var(--bg-1);
+}
+.out-body .hl-line { background: var(--bg-3); display: inline-block; width: 100%; }
+
+.errtable { flex: 1; overflow: hidden; font-size: var(--font-size-sm); }
+.errtable table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.errtable th {
+	text-align: left;
+	font-weight: var(--font-weight-normal);
+	color: var(--text-2);
+	height: 22px;
+	padding: 0 var(--space-3);
+	border-bottom: var(--border-width) solid var(--border-0);
+	border-right: var(--border-width) solid var(--border-0);
+	white-space: nowrap;
+}
+.errtable td { height: var(--row-h); padding: 0 var(--space-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-0); }
+.errtable td.m { color: var(--text-1); }
+.errtable tr.sel td { background: var(--bg-4); }
+.errtable .ci { width: 14px; height: 14px; }
+
+.phone-bar { display: none; }
+
+@media (max-width: 1500px) {
+	.sol { width: 224px; }
+	.errtable .c-proj, .errtable .c-src { display: none; }
+}
+
+@media (max-width: 719px) {
+	.editor-act .sol, .editor-act .bottom-dock, .editor-act .well.right, .editor-act .autohide, .editor-act .vsplit, .editor-act .hsplit,
+	.well.left .tabs, .well.left .navbar { display: none !important; }
+	.well.left .code .map { display: none; }
+	.well.left .code.has-map .lines { margin-right: 0; }
+	.well.left .ln .gl { width: 12px; }
+	.well.left .ln .fd { width: 6px; }
+	.well.left .ln .fd .ci { display: none; }
+	.phone-head .t { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.15; }
+	.phone-head .t .muted { font-size: var(--font-size-xs); }
+	.phone-bar {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-4);
+		background: var(--bg-1);
+		border-top: var(--border-width) solid var(--border-0);
+		flex: none;
+	}
+	.phone-bar .grow { flex: 1; }
+	.well.left .ln { height: auto; min-height: var(--line-height-code); }
+	.well.left .ln .tx { white-space: pre-wrap; overflow-wrap: anywhere; }
+}

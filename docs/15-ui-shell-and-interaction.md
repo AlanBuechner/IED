@@ -32,7 +32,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
   ^ sidebar: WS = workspace switcher, C = chat, E = editor, G = git, P = profiler, ... ; settings gear at the very bottom
 ```
 
-- **Sidebar** (~40 px): workspace switcher at top (icon of the current workspace, click = switcher menu), then activities in order: Chat, Editor, Git, then plugin activities (Profiler, Sandbox...). Bottom: notifications bell, settings gear.
+- **Sidebar** (~40 px): workspace switcher at top (icon of the current workspace, click = switcher menu), then activities in order: Chat, Editor, Git, then plugin activities (Profiler, GPU, Sandbox...). Bottom: notifications bell, settings gear.
 - **Menu bar and toolbar** belong to the window (shared by all activities), like VS. The toolbar shows the active project's toolbar config; activities may add their own toolbar strips (e.g. the git view's Fetch/Pull/Push).
 - **Activities** replace the center area. The Editor activity is VS-shaped: Solution Explorer left, document well center, tool windows docked bottom/right. The Chat activity is a document well of chat tabs (each chat optionally with its right breakdown panel).
 - **Terminal dock** spans the full width under every activity (plan requirement), collapsible to a header row.
@@ -149,5 +149,6 @@ Codicons (vendored) for UI glyphs. File-type icons: a VS-like set in `shared/ui-
 4. Settings window: Models and Model Groups pages.
 5. Git activity: graph + commit details.
 6. Profiler: timeline in thread view and by-task view.
+7. GPU debugger: frame debugger, shader debugging with pixel history, performance and compare (`docs/22`).
 
-Each gets a static HTML mock against `theme.css` (no server needed) and screenshots at 1920x1080, 1366x768, 390x844 - the first frontend deliverable (`docs/18`, M1).
+Each gets a static HTML mock against `theme.css` (no server needed) and screenshots at 1920x1080, 1366x768, 390x844 - the first frontend deliverable (`docs/18`, M0). Built: `frontend/mocks/` (open `index.html`; screenshots in `frontend/mocks/screenshots/`).

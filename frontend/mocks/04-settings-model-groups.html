@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 4 - Settings: Model Groups</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/settings.css">
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="settings" data-phone="more">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t"><b>AI &rsaquo; Model Groups</b></div>
+		<span class="ib"><i class="ci ci-search"></i></span>
+		<span class="ib"><i class="ci ci-json"></i></span>
+	</div>
+
+	<main class="activity settings-act">
+		<div class="tabs">
+			<div class="tab"><i class="ci ci-file-code ft-source"></i><span class="name">Log.cf</span><span class="dirty"></span><i class="ci ci-close x"></i></div>
+			<div class="tab on"><i class="ci ci-settings-gear"></i><span class="name">Settings</span><i class="ci ci-close x"></i></div>
+		</div>
+		<div class="set-top">
+			<div class="input focus"><i class="ci ci-search sm"></i><span>Search settings</span><span class="kbd" style="margin-left:auto">Ctrl+E</span></div>
+			<span class="muted">Editing tier</span>
+			<span class="seg"><span class="on"><i class="ci ci-account"></i>User</span><span><i class="ci ci-library"></i>Solution: Claymore</span><span><i class="ci ci-project"></i>Project: Game</span></span>
+			<span class="muted desktop-wide">Effective values for <b class="c-0" style="font-weight:600">Game</b></span>
+			<span class="grow"></span>
+			<span class="btn"><i class="ci ci-json"></i>Edit as JSON</span>
+		</div>
+		<div class="set-body">
+			<nav class="set-tree scroll">
+				<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-right"></i></span><span class="name">Environment</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Keyboard</span></div>
+				<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-right"></i></span><span class="name">Text Editor</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Projects and Solutions</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Build and Run</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Debugging</span></div>
+				<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><span class="name">AI</span></div>
+				<div class="row" style="--d:1"><span class="tw"></span><span class="name">Models</span><span class="meta">7</span></div>
+				<div class="row sel" style="--d:1"><span class="tw"></span><span class="name">Model Groups</span><span class="meta"><i class="ci ci-warning c-warn"></i></span></div>
+				<div class="row" style="--d:1"><span class="tw"></span><span class="name">Routing</span></div>
+				<div class="row" style="--d:1"><span class="tw"></span><span class="name">Privacy</span></div>
+				<div class="row" style="--d:1"><span class="tw"></span><span class="name">Prompts</span></div>
+				<div class="row" style="--d:1"><span class="tw"></span><span class="name">Skills</span><span class="meta">42</span></div>
+				<div class="row" style="--d:1"><span class="tw"></span><span class="name">MCP</span><span class="meta">2</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Web and Egress</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Source Control</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Terminal</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Sandbox</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Profiler</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Plugins</span><span class="meta">9</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Accounts</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Remote Access</span></div>
+				<div class="row" style="--d:0"><span class="tw"></span><span class="name">Diagnostics</span></div>
+			</nav>
+			<div class="set-page">
+				<section class="set-main">
+					<div class="crumbs">AI &rsaquo; Model Groups &middot; <span class="mono">ai.groups</span></div>
+					<h1 class="desktop-only">Model Groups</h1>
+					<p class="lead">A group assigns a model, temperature, effort and fallbacks to every role. Chats pick a group; the scheduler walks a role's candidates in order, skipping models that are busy, unreachable, too small for the context or not allowed by the chat's privacy.</p>
+					<div class="groups-bar">
+						<span class="grp-list"><span class="on"><i class="ci ci-star-full"></i>plan-claude/impl-local</span><span>all-local</span><span>private-local-only</span><span class="desktop-wide">fast-draft</span></span>
+						<span class="btn"><i class="ci ci-add"></i>New</span>
+						<span class="btn"><i class="ci ci-copy"></i>Duplicate</span>
+						<span class="btn">Rename</span>
+						<span class="grow"></span>
+						<span class="btn danger"><i class="ci ci-trash"></i>Delete</span>
+					</div>
+					<table class="roles">
+						<colgroup><col style="width:128px"><col style="width:27%"><col style="width:74px"><col style="width:96px"><col><col class="c-tier" style="width:132px"><col style="width:40px"></colgroup>
+						<thead><tr><th>Role</th><th>Model</th><th>Temp</th><th>Effort</th><th>Fallbacks (in order)</th><th class="c-tier">Set by</th><th></th></tr></thead>
+						<tbody>
+							<tr><td class="role">primary<span class="muted">chat turns</span></td><td><span class="dd"><span class="dot info sm"></span><span class="name">qwen3.8-27b@spark</span><span class="priv">local</span></span></td><td><span class="num-in">0.3</span></td><td><span class="dd">medium</span></td><td><span class="chips"><span class="chip">qwen-coder-32b@desk</span><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr class="sel"><td class="role">planning<span class="muted">Plan mode, reviews</span></td><td><span class="dd"><span class="dot sm"></span><span class="name">claude-opus-5-5</span><span class="priv cloud"><i class="ci ci-cloud"></i>cloud</span></span></td><td><span class="num-in">0.3</span></td><td><span class="dd">high</span></td><td><span class="chips"><span class="chip">qwen3.8-27b@spark</span><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-discard"></i></td></tr>
+							<tr><td class="role">implementation<span class="muted">Agent edits</span></td><td><span class="dd"><span class="dot info sm"></span><span class="name">qwen-coder-32b@desk</span><span class="priv">local</span></span></td><td><span class="num-in">0.0</span></td><td><span class="dd">-</span></td><td><span class="chips"><span class="chip">qwen3.8-27b@spark</span><i class="ci ci-add sm c-2"></i></span></td><td class="tier over"><i class="ci ci-library"></i> Solution</td><td class="acts"><i class="ci ci-discard"></i></td></tr>
+							<tr><td class="role">worker<span class="muted">sub-agents</span></td><td><span class="dd"><span class="dot info sm"></span><span class="name">qwen-coder-32b@desk</span><span class="priv">local</span></span></td><td><span class="num-in">0.0</span></td><td><span class="dd">-</span></td><td><span class="chips"><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr><td class="role">research<span class="muted">sub-agents</span></td><td><span class="dd"><span class="dot info sm"></span><span class="name">qwen3.8-27b@spark</span><span class="priv">local</span></span></td><td><span class="num-in">0.2</span></td><td><span class="dd">medium</span></td><td><span class="chips"><span class="chip">claude-sonnet-5-5</span><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr><td class="role">verifier<span class="muted">independent check</span></td><td><span class="dd"><span class="dot info sm"></span><span class="name">qwen3.8-27b@spark</span><span class="priv">local</span></span></td><td><span class="num-in">0.0</span></td><td><span class="dd">high</span></td><td><span class="chips"><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr><td class="role">summarizer<span class="muted">compression</span></td><td><span class="dd"><span class="dot saved sm"></span><span class="name">qwen-small@desk</span><span class="priv">local</span></span></td><td><span class="num-in">0.1</span></td><td><span class="dd">-</span></td><td><span class="chips"><span class="chip">qwen3.8-27b@spark</span><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr><td class="role">titler<span class="muted">titles, commit msgs</span></td><td><span class="dd"><span class="dot saved sm"></span><span class="name">qwen-small@desk</span><span class="priv">local</span></span></td><td><span class="num-in">0.2</span></td><td><span class="dd">-</span></td><td><span class="chips"><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr><td class="role">vision<span class="muted">images, video frames</span></td><td><span class="dd"><span class="dot saved sm"></span><span class="name">qwen-vl@spark</span><span class="priv">local</span></span></td><td><span class="num-in dim">0.2</span></td><td><span class="dd">-</span></td><td><span class="chips"><span class="chip">claude-sonnet-5-5</span><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr><td class="role">completion<span class="muted">ghost text (FIM)</span></td><td><span class="dd"><span class="dot error sm"></span><span class="name">qwen-coder-fim@laptop</span><span class="priv">lan</span></span></td><td><span class="num-in dim">0.0</span></td><td><span class="dd">-</span></td><td><span class="chips"><span class="chip">qwen-coder-fim@desk</span><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+							<tr class="note"><td colspan="7"><i class="ci ci-warning"></i> qwen-coder-fim@laptop unreachable since 21:40 (connection refused); completion is using the fallback qwen-coder-fim@desk.</td></tr>
+							<tr><td class="role">inline<span class="muted">Ctrl+I edits</span></td><td><span class="dd"><span class="dot info sm"></span><span class="name">qwen-coder-32b@desk</span><span class="priv">local</span></span></td><td><span class="num-in">0.1</span></td><td><span class="dd">low</span></td><td><span class="chips"><i class="ci ci-add sm c-2"></i></span></td><td class="tier">User</td><td class="acts"><i class="ci ci-ellipsis"></i></td></tr>
+						</tbody>
+					</table>
+
+					<div class="role-detail desktop-only">
+						<div class="rd-head"><b>planning</b><span class="muted">Plan mode, plan reviews, verifier escalations</span><span class="grow"></span><span class="btn"><i class="ci ci-play"></i>Test role</span><span class="muted">last test 21:12 &middot; ok &middot; TTFT 0.9 s &middot; 61 tok/s</span></div>
+						<div class="rd-grid">
+							<div class="fld"><label>Model</label><span class="dd"><span class="dot sm"></span><span class="name">claude-opus-5-5</span><span class="priv cloud"><i class="ci ci-cloud"></i>cloud</span></span><span class="hint">Anthropic API key (secret: anthropic) &middot; 200k context</span></div>
+							<div class="fld"><label>Temperature</label><span class="slider"><i style="width:30%"></i><b style="left:30%"></b></span><span class="hint">0.3 &middot; model default 1.0</span></div>
+							<div class="fld"><label>Effort</label><span class="seg"><span>low</span><span>medium</span><span class="on">high</span></span><span class="hint">high &rarr; thinking budget 32k tokens</span></div>
+							<div class="fld"><label>Fallbacks</label><span class="fb"><i class="ci ci-gripper c-3"></i>1. qwen3.8-27b@spark<span class="priv">local</span></span><span class="hint">used when usage is exhausted, the model is unreachable, or the chat is private</span></div>
+							<div class="fld"><label>Private chats</label><span class="c-1"><i class="ci ci-lock sm"></i> skipped (cloud) &rarr; fallback</span><span class="hint">privacy always wins over availability</span></div>
+							<div class="fld"><label>Max output</label><span class="num-in">16k</span><span class="hint">continue on max_tokens: up to 2x</span></div>
+						</div>
+					</div>
+
+					<div class="phone-roles">
+						<div class="rcard"><div class="t"><b>primary</b><span class="muted">chat turns</span><span class="grow"></span><span class="c-1">0.3 &middot; medium</span></div><div class="m"><span class="dot info sm"></span>qwen3.8-27b@spark<span class="priv">local</span></div><div class="s">fallback: qwen-coder-32b@desk</div></div>
+						<div class="rcard"><div class="t"><b>planning</b><span class="muted">Plan mode</span><span class="grow"></span><span class="c-1">0.3 &middot; high</span></div><div class="m"><span class="dot sm"></span>claude-opus-5-5<span class="priv cloud"><i class="ci ci-cloud"></i>cloud</span></div><div class="s">fallback: qwen3.8-27b@spark</div></div>
+						<div class="rcard"><div class="t"><b>implementation</b><span class="muted">Agent edits</span><span class="grow"></span><span class="c-1">0.0</span></div><div class="m"><span class="dot info sm"></span>qwen-coder-32b@desk<span class="priv">local</span></div><div class="s">set by Solution: Claymore &middot; fallback: qwen3.8-27b@spark</div></div>
+						<div class="rcard"><div class="t"><b>worker</b><span class="muted">sub-agents</span><span class="grow"></span><span class="c-1">0.0</span></div><div class="m"><span class="dot info sm"></span>qwen-coder-32b@desk<span class="priv">local</span></div></div>
+						<div class="rcard warn"><div class="t"><b>completion</b><span class="muted">ghost text</span><span class="grow"></span><i class="ci ci-warning c-warn"></i></div><div class="m"><span class="dot error sm"></span>qwen-coder-fim@laptop<span class="priv">lan</span></div><div class="s">unreachable since 21:40 &middot; using qwen-coder-fim@desk</div></div>
+						<div class="rcard"><div class="t"><b>summarizer</b><span class="muted">compression</span><span class="grow"></span><span class="c-1">0.1</span></div><div class="m"><span class="dot saved sm"></span>qwen-small@desk<span class="priv">local</span></div></div>
+					</div>
+				</section>
+
+				<aside class="set-side">
+					<h2>Routing preview</h2>
+					<div class="box">
+						<div class="kv"><span class="k">Role</span><span class="dd" style="flex:1">planning</span></div>
+						<div class="kv"><span class="k">Chat</span><span class="dd" style="flex:1"><i class="ci ci-lock sm"></i>private (local + lan)</span></div>
+						<div class="kv"><span class="k">Context</span><span class="dd" style="flex:1">58k tokens</span></div>
+						<div style="height:8px"></div>
+						<div class="cand out"><i class="ci ci-circle-slash c-2"></i><span class="nm">claude-opus-5-5</span><span class="priv cloud"><i class="ci ci-cloud"></i>cloud</span><span class="why">removed: privacy (chat is private)</span></div>
+						<div class="cand picked"><i class="ci ci-pass c-saved"></i><span class="nm">qwen3.8-27b@spark</span><span class="muted">slot 2/2 busy</span><span class="why">picked: queued, position 1 (interactive before agent work)</span></div>
+					</div>
+					<h2>Models in this group</h2>
+					<div class="box">
+						<div class="model-row"><span class="dot info sm"></span><span>qwen3.8-27b@spark <span class="muted">131k &middot; 2 slots</span></span><span class="muted">busy</span></div>
+						<div class="model-row"><span class="dot info sm"></span><span>qwen-coder-32b@desk <span class="muted">65k &middot; 2 slots</span></span><span class="muted">1/2</span></div>
+						<div class="model-row"><span class="dot saved sm"></span><span>qwen-small@desk <span class="muted">32k</span></span><span class="muted">idle</span></div>
+						<div class="model-row"><span class="dot saved sm"></span><span>qwen-vl@spark <span class="muted">32k &middot; vision</span></span><span class="muted">idle</span></div>
+						<div class="model-row"><span class="dot sm"></span><span>claude-opus-5-5 <span class="muted">API key</span></span><span class="muted">5h 34%</span></div>
+						<div class="model-row"><span class="dot error sm"></span><span>qwen-coder-fim@laptop</span><span class="c-error">offline</span></div>
+					</div>
+					<h2>Where this is stored</h2>
+<div class="box json-hint">%APPDATA%/IED/settings.json
+"ai.groups" &gt; "plan-claude/impl-local"
+Solution override: .ied/solution.json
+"ai.groups.*.implementation"</div>
+				</aside>
+			</div>
+		</div>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar">
+		<span class="st">Ready</span>
+		<span class="st"><i class="ci ci-sparkle c-ai"></i>AI: 2 running, <span class="c-warn">1 needs approval</span></span>
+		<span class="st grow"></span>
+		<span class="st"><i class="ci ci-warning c-warn"></i>Settings: 1 warning</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>
