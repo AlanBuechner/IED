@@ -41,6 +41,10 @@ namespace Ied
 		public Core::String ApplyEdit(Document* doc, int64 baseVersion, const Core::Array<Change>& changes, Core::StringView origin, Core::StringView opId);
 		// A file written behind an open document: a clean one reloads, a dirty one is told.
 		public void OnDiskWrite(Workspace* ws, Core::StringView path, Core::StringView text, int64 revision);
+		// A file deleted behind an open document: it is told (doc.diskChanged with revision 0) and keeps its text.
+		public void OnDiskDeleted(Workspace* ws, Core::StringView path);
+		public bool IsOpen(Workspace* ws, Core::StringView path) const;
+		public Core::Array<Core::String> OpenPaths(Workspace* ws) const;
 
 	private:
 		private Document* Open(Workspace* ws, Core::StringView path);

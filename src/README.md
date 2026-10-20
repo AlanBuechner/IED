@@ -7,6 +7,7 @@ The native half of IED: a **standalone background server that owns all state**. 
 ```bat
 nuke build ied-server
 build\bin\Development-windows-x64\ied-server\ied-server.exe --static frontend --workspace .
+nuke test ied-server
 nuke conformance
 ```
 
@@ -16,7 +17,8 @@ beyond loopback needs an owner password), `--port` (0: a free one), `--static <d
 state; default `%LOCALAPPDATA%\IED`, with `--test-hooks` a fresh temporary folder), `--workspace <dir>` (repeatable),
 `--test-hooks` (the test suites' `testhooks.*`, never in normal use), `--idle-timeout <s>`, `--outbound-budget-mb`,
 `--coalesce-kb`, `--allow-origin`, `--allow-host`, `--quiet`. `nuke conformance` builds the server and runs
-`tools/conformance` (46 checks) and `tools/security` (30 checks) against it; all pass.
+`tools/conformance` (46 checks) and `tools/server-checks` (38 checks: access rules and file watching) against it;
+`nuke test ied-server` runs the unit tests in `tests/` (13). All pass.
 
 ## What exists (M1, in progress)
 
@@ -26,13 +28,14 @@ state; default `%LOCALAPPDATA%\IED`, with `--test-hooks` a fresh temporary folde
 | `web/` | `json`, `frames`, `hub`, `outbox`, `rpc`, `rpcerror`, `params`, `session`, `front`, `authgate` | protocol v1 (`docs/10`): frames and their checks, topics with seq and rings, per-client outbox (budget, coalescing, gaps), methods with typed params, stable errors, opId idempotency and cancellation, the WebSocket session (hello/resume, sub/unsub, liveness, a writer thread), HTTP (Host/Origin checks, `/ws`, `/healthz`, uploads and blobs, static files with the content policy), the session cookie, the launch-token exchange and `/api/auth/*` |
 | `auth/` | `auth`, `devices`, `throttle` | `docs/11`: launch tokens, device sessions (only the SHA-256 of a cookie is kept), the Argon2id owner password hashed outside the lock, the login throttle, `auth.setPassword` / `auth.devices` / `auth.revoke` |
 | `services/` | `presence`, `workspaces`, `documents`, `testhooks`, `blobs` | the `server` topic and notifications; folders with `fs.*` and revision checks; server-owned documents with lease and rebase; the conformance hooks |
-| `fs/` | `textedit` | line/column (UTF-16) edits, their rebase, applying them |
+| `fs/` | `textedit`, `changes`, `watching` | line/column (UTF-16) edits, their rebase, applying them; a watcher thread per workspace folder whose changes are gathered and folded per path, then published unless they were the server's own (recognized by the digest of what it wrote) |
+| `tests/` | `*_tests.cf` | unit tests of the honest parts (`nuke test ied-server`) |
 
 Methods run holding the server lock, as the mock's single thread does, and release it only to wait (`Call::Sleep`); each
 request runs on a thread of its own, so responses overtake each other; each socket has a writer thread, so a slow
 client never holds up a producer.
 
-Still to come in M1 (`docs/18`): settings tiers, the plugin host (built-in and declarative), file watching, single
+Still to come in M1 (`docs/18`): settings tiers, the plugin host (built-in and declarative), single
 instance and the named-pipe CLI (which will hand out launch tokens), the IED output source, the 24 h idle soak.
 
 ```

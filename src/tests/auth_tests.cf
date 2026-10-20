@@ -1,0 +1,74 @@
+// auth/throttle and web/authgate's parsing: the lockout schedule, cookie and query values, device names.
+
+include "../auth/throttle.ch"
+include "../web/authgate.ch"
+
+static Core::StringView View(const char* text) { return Core::StringView(text); }
+
+[test("server.throttle")]
+class ThrottleTests {
+	[test("five_failures_lock_out")]
+	public static void TestFiveFailuresLockOut() {
+		Ied::LoginThrottle throttle;
+		for (int32 i = 0; i < 4; ++i) assert_true(!throttle.Failed(View("10.0.0.1"), 1000 + i), "four failures do not lock");
+		assert_eq((int64)0, throttle.RetryAfterS(View("10.0.0.1"), 1010), "not locked yet");
+		assert_true(throttle.Failed(View("10.0.0.1"), 1010), "the fifth locks");
+		assert_eq((int64)60, throttle.RetryAfterS(View("10.0.0.1"), 1010), "for a minute");
+		assert_eq((int64)1, throttle.RetryAfterS(View("10.0.0.1"), 1010 + 59001), "rounded up to whole seconds");
+		assert_eq((int64)0, throttle.RetryAfterS(View("10.0.0.1"), 1010 + 60000), "and then free");
+		assert_eq((int64)0, throttle.RetryAfterS(View("10.0.0.2"), 1010), "another address is not affected");
+	}
+
+	[test("old_failures_expire")]
+	public static void TestOldFailuresExpire() {
+		Ied::LoginThrottle throttle;
+		for (int32 i = 0; i < 4; ++i) throttle.Failed(View("a"), (int64)i * 1000);
+		assert_true(!throttle.Failed(View("a"), 61000), "failures older than a minute do not count");
+	}
+
+	[test("lockouts_double")]
+	public static void TestLockoutsDouble() {
+		Ied::LoginThrottle throttle;
+		int64 now = 0;
+		const int64[7] expected = { 60, 120, 240, 480, 960, 1920, 3600 };
+		for (int32 lockout = 0; lockout < 7; ++lockout) {
+			for (int32 i = 0; i < 5; ++i) throttle.Failed(View("a"), now);
+			assert_eq(expected[lockout], throttle.RetryAfterS(View("a"), now), "each lockout in a row doubles, up to an hour");
+			now += expected[lockout] * 1000;
+		}
+		throttle.Succeeded(View("a"));
+		for (int32 i = 0; i < 5; ++i) throttle.Failed(View("a"), now);
+		assert_eq((int64)60, throttle.RetryAfterS(View("a"), now), "a success starts over");
+	}
+}
+
+[test("server.authgate")]
+class AuthGateTests {
+	[test("cookie_value")]
+	public static void TestCookieValue() {
+		assert_true(Ied::CookieValue(View("a=1; ied-8765=abc; b=2"), View("ied-8765")) == "abc", "among others");
+		assert_true(Ied::CookieValue(View("ied-8765=abc"), View("ied-8765")) == "abc", "alone");
+		assert_true(Ied::CookieValue(View("xied-8765=abc"), View("ied-8765")).IsEmpty(), "a longer name is another cookie");
+		assert_true(Ied::CookieValue(View("ied-8766=abc"), View("ied-8765")).IsEmpty(), "another port's");
+		assert_true(Ied::CookieValue(View(""), View("ied-8765")).IsEmpty(), "no cookies");
+		assert_true(Ied::CookieValue(View("ied-8765"), View("ied-8765")).IsEmpty(), "a name without a value");
+	}
+
+	[test("query_value")]
+	public static void TestQueryValue() {
+		assert_true(Ied::QueryValue(View("t=abc"), View("t")) == "abc", "alone");
+		assert_true(Ied::QueryValue(View("x=1&t=abc&y=2"), View("t")) == "abc", "among others");
+		assert_true(Ied::QueryValue(View("tt=abc"), View("t")).IsEmpty(), "a longer name");
+		assert_true(Ied::QueryValue(View(""), View("t")).IsEmpty(), "no query");
+		assert_true(Ied::QueryValue(View("t="), View("t")).IsEmpty(), "an empty value");
+	}
+
+	[test("device_name")]
+	public static void TestDeviceName() {
+		assert_se("Edge on Windows", Ied::DeviceNameFrom(View("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 Edg/130.0")).CStr(), "Edge");
+		assert_se("Safari on iOS", Ied::DeviceNameFrom(View("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")).CStr(), "an iPhone");
+		assert_se("Chrome on Android", Ied::DeviceNameFrom(View("Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36")).CStr(), "Android before Linux");
+		assert_se("Firefox on Linux", Ied::DeviceNameFrom(View("Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0")).CStr(), "Firefox");
+		assert_se("Unknown browser", Ied::DeviceNameFrom(View("Python-urllib/3.14")).CStr(), "not a browser");
+	}
+}

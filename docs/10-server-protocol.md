@@ -73,6 +73,12 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 
 Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is generic.
 
+**Files changed on disk.** The server watches each workspace folder, so changes made by anything else (a git checkout, another editor, a build) arrive like its own:
+
+- `tree.changed {changes: [{path, change: created|changed|deleted}], overflow?: true}`. Changes are gathered until the folder has been quiet for 100 ms, at most a second, and folded per path: created then deleted is nothing, a rename is a delete and a create. `overflow` means the system dropped changes, so the client lists the folder again. The repository folder (`.git/`) is not reported.
+- The server's own writes are reported once, by the method that made them; a change from outside moves the file's revision, so a write based on the old revision gets `conflict`.
+- An open document whose file changes reloads when it is clean (a `doc.edit` with origin `disk`) and gets `doc.diskChanged {docId, revision}` when it is dirty. When its file is deleted it gets `doc.diskChanged` with revision 0 and keeps its text.
+
 ## Resume
 
 1. On connect the client sends `hello` with the `sessionEpoch` it last saw and its per-topic cursors.

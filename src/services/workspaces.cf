@@ -49,6 +49,10 @@ namespace Ied
 
 	FS::Path Workspace::At(Core::StringView path) const { return path.IsEmpty() ? root : root / path; }
 
+	Core::String TextDigest(Core::StringView text) { return Crypto::Sha256((const void*)text.Data(), text.ByteLength()).ToHex(); }
+
+	bool IsHiddenPath(Core::StringView path) { return path == ".git" || path.StartsWith(Core::StringView(".git/")); }
+
 	Core::String Workspace::SummaryJson() const {
 		JsonWriter json;
 		json.BeginObject();
@@ -84,7 +88,19 @@ namespace Ied
 		Workspaces* self = this;
 		Core::String topic = Core::String("ws:") + ws->wsId.View();
 		server->hub.Add(topic.View(), [self, ws]() -> Core::String { return self->Snapshot(ws); });
+		Watch(ws);
 		return ws;
+	}
+
+	void Workspaces::Watch(Workspace* ws) {
+		Server* shared = server;
+		Workspaces* self = this;
+		Core::String error;
+		const bool watching = ws->watch.Start(ws->root, [shared, self, ws](const ChangeBatch& batch) {
+			Threading::LockGuard guard(shared->lock);
+			self->ApplyExternal(ws, batch);
+		}, error);
+		if (!watching) server->Log((Core::String("not watching ") + ws->root.View() + ": " + error.View()).View());
 	}
 
 	Workspace* Workspaces::Get(Core::StringView wsId) const {
@@ -130,11 +146,14 @@ namespace Ied
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
 	}
 
-	Core::String Workspaces::Read(Workspace* ws, Core::StringView path) const {
+	Core::String Workspaces::Read(Workspace* ws, Core::StringView path) {
 		FS::Path file = ws->At(path);
 		if (!FS::FileExists(file.CStr())) throw Missing("file", path);
 		FS::File opened = FS::File(file.CStr(), "rb");
-		return opened.ReadText();
+		Core::String text = opened.ReadText();
+		ws->digests.At(Core::String(path)) = TextDigest(text.View());
+		Revision(ws, path);
+		return text;
 	}
 
 	int64 Workspaces::Revision(Workspace* ws, Core::StringView path) {
@@ -156,8 +175,78 @@ namespace Ied
 		opened.Close();
 		if (!written) throw RpcError(ErrorCode::Unavailable, "the file could not be written");
 		ws->revisions.At(Core::String(path)) = current + 1;
+		ws->digests.At(Core::String(path)) = TextDigest(text);
 		TreeChanged(ws, path, current ? "changed" : "created");
 		return current + 1;
+	}
+
+	// --- Changes made behind the server's back -------------------------------------------------------------------------
+
+	void Workspaces::ApplyExternal(Workspace* ws, const ChangeBatch& batch) {
+		Core::Array<TreeChange> published;
+		for (const TreeChange& change : batch.Changes())
+			if (!IsHiddenPath(change.path.View()) && External(ws, change)) published.Push(change);
+		if (batch.Overflowed())
+			for (const Core::String& path : server->documents->OpenPaths(ws)) ExternalWrite(ws, path.View());
+		if (!published.IsEmpty() || batch.Overflowed()) PublishTree(ws, published, batch.Overflowed());
+	}
+
+	// Whether a change is someone else's; it updates what the server knows of the path either way.
+	bool Workspaces::External(Workspace* ws, const TreeChange& change) {
+		FS::Path file = ws->At(change.path.View());
+		if (FS::IsDirectory(file.CStr())) return change.kind == TreeChangeKind::Created && !ws->ownDirectories.Remove(change.path);
+		if (FS::FileExists(file.CStr())) return ExternalWrite(ws, change.path.View());
+		return ExternalDelete(ws, change.path.View());
+	}
+
+	// Only a file the server read, wrote or holds open is read again, to compare it with what the server knows: any
+	// other change cannot be the server's own.
+	bool Workspaces::ExternalWrite(Workspace* ws, Core::StringView path) {
+		Core::String key = Core::String(path);
+		Core::String known;
+		const bool tracked = ws->digests.TryGet(key, known);
+		int64* revision = ws->revisions.Find(key);
+		if (!tracked && !server->documents->IsOpen(ws, path)) {
+			if (revision) *revision += 1;
+			return true;
+		}
+		FS::File opened = FS::File(ws->At(path).CStr(), "rb");
+		if (!opened.IsOpen()) return false;
+		Core::String text = opened.ReadText();
+		Core::String digest = TextDigest(text.View());
+		if (tracked && known.View() == digest.View()) return false;
+		ws->digests.At(key) = digest;
+		if (revision) *revision += 1;
+		server->documents->OnDiskWrite(ws, path, text.View(), Revision(ws, path));
+		return true;
+	}
+
+	bool Workspaces::ExternalDelete(Workspace* ws, Core::StringView path) {
+		Core::String key = Core::String(path);
+		Core::String known;
+		const bool own = ws->digests.TryGet(key, known) && known.IsEmpty();
+		ws->digests.Remove(key);
+		ws->revisions.Remove(key);
+		if (own) return false;
+		server->documents->OnDiskDeleted(ws, path);
+		return true;
+	}
+
+	void Workspaces::PublishTree(Workspace* ws, const Core::Array<TreeChange>& changes, bool overflow) {
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("changes"));
+		data.BeginArray();
+		for (const TreeChange& change : changes) {
+			data.BeginObject();
+			data.Field("path", change.path.View());
+			data.Field("change", TreeChangeName(change.kind));
+			data.EndObject();
+		}
+		data.EndArray();
+		if (overflow) data.BoolField("overflow", true);
+		data.EndObject();
+		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
 	}
 
 	// --- Methods -----------------------------------------------------------------------------------------------------
@@ -251,6 +340,7 @@ namespace Ied
 		if (expected >= 0 && expected != current) throw Changed(current);
 		if (!FS::RemoveFile(ws->At(path.View()).CStr())) throw RpcError(ErrorCode::Unavailable, "the file could not be deleted");
 		ws->revisions.Remove(path);
+		ws->digests.At(path) = Core::String();
 		TreeChanged(ws, path.View(), "deleted");
 		return Core::String("{}");
 	}
@@ -262,6 +352,7 @@ namespace Ied
 		if (FS::FileExists(folder.CStr())) throw RpcError(ErrorCode::Conflict, "that path is a file");
 		if (!FS::IsDirectory(folder.CStr())) {
 			if (!FS::MakeDirectories(folder.CStr())) throw RpcError(ErrorCode::Unavailable, "the directory could not be made");
+			ws->ownDirectories.At(path) = true;
 			TreeChanged(ws, path.View(), "created");
 		}
 		JsonWriter json;
@@ -283,6 +374,9 @@ namespace Ied
 		if (!FS::Rename(ws->At(source.View()).CStr(), to.CStr())) throw RpcError(ErrorCode::Unavailable, "the file could not be renamed");
 		ws->revisions.Remove(source);
 		ws->revisions.At(target) = revision;
+		ws->digests.At(source) = Core::String();
+		FS::File moved = FS::File(to.CStr(), "rb");
+		ws->digests.At(target) = TextDigest(moved.ReadText().View());
 		JsonWriter data;
 		data.BeginObject();
 		data.Key(Core::StringView("changes"));

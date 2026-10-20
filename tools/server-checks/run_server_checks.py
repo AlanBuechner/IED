@@ -1,7 +1,8 @@
-"""Runs the security suite (docs/11) against an ied-server executable: each test starts its own server.
+"""Runs the server checks against an ied-server executable: what only the real server does - its access rules
+(docs/11) and file watching. Each test starts its own server.
 
-	python -I tools/security/run_security.py --server build/bin/Development-windows-x64/ied-server/ied-server.exe
-	python -I tools/security/run_security.py --server <exe> -k lockout -v
+	python -I tools/server-checks/run_server_checks.py --server build/bin/Development-windows-x64/ied-server/ied-server.exe
+	python -I tools/server-checks/run_server_checks.py --server <exe> -k lockout -v
 
 Exit code 0 = every check passed.
 """

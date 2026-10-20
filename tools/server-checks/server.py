@@ -10,7 +10,7 @@ import tempfile
 import unittest
 import urllib.parse
 
-EXECUTABLE_ENV = "IED_SECURITY_SERVER"
+EXECUTABLE_ENV = "IED_SERVER_CHECKS_SERVER"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 FRONTEND = os.path.join(REPO, "frontend")
@@ -47,7 +47,7 @@ class IedServer:
 
 	def __init__(self, data=None, port=0, host="127.0.0.1", static=True, extra=()):
 		self.owns_data = data is None
-		self.data = data or tempfile.mkdtemp(prefix="ied-security-")
+		self.data = data or tempfile.mkdtemp(prefix="ied-checks-")
 		argv = [os.environ[EXECUTABLE_ENV], "--host", host, "--port", str(port), "--data", self.data, "--test-hooks", "--quiet"]
 		if static:
 			argv += ["--static", FRONTEND]

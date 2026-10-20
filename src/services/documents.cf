@@ -131,6 +131,28 @@ namespace Ied
 		return result.ToString();
 	}
 
+	static Core::String PathKey(const Workspace* ws, Core::StringView path) { return (ws->wsId + "/") + path; }
+
+	bool Documents::IsOpen(Workspace* ws, Core::StringView path) const { return byPath.Contains(PathKey(ws, path)); }
+
+	Core::Array<Core::String> Documents::OpenPaths(Workspace* ws) const {
+		Core::Array<Core::String> paths;
+		for (const Core::KeyValue<Core::String, Document*>& entry : byPath)
+			if (entry.value->ws == ws) paths.Push(entry.value->path);
+		return paths;
+	}
+
+	void Documents::OnDiskDeleted(Workspace* ws, Core::StringView path) {
+		Document* doc = nullptr;
+		if (!byPath.TryGet(PathKey(ws, path), doc)) return;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->docId.View());
+		data.IntField("revision", 0);
+		data.EndObject();
+		server->hub.Publish(doc->Topic().View(), "doc.diskChanged", data.View());
+	}
+
 	void Documents::OnDiskWrite(Workspace* ws, Core::StringView path, Core::StringView text, int64 revision) {
 		Document* doc = nullptr;
 		if (!byPath.TryGet((ws->wsId + "/") + path, doc) || doc->text.View() == text) return;

@@ -1,0 +1,38 @@
+// services/workspaces' honest parts: workspace-relative paths and the paths no one browses.
+
+include "../services/workspaces.ch"
+
+static bool Refused(const char* path) {
+	try {
+		Ied::NormalizePath(Core::StringView(path));
+	}
+	catch (Ied::RpcError& error) {
+		return error.code == Ied::ErrorCode::BadRequest;
+	}
+	return false;
+}
+
+[test("server.workspaces")]
+class WorkspaceTests {
+	[test("normalize_path")]
+	public static void TestNormalizePath() {
+		assert_se("src/main.cf", Ied::NormalizePath(Core::StringView("src/main.cf")).CStr(), "as it is");
+		assert_se("src/main.cf", Ied::NormalizePath(Core::StringView("src\\main.cf")).CStr(), "backslashes");
+		assert_se("a/b", Ied::NormalizePath(Core::StringView("/a//b/")).CStr(), "empty parts dropped");
+		assert_true(Ied::NormalizePath(Core::StringView("")).IsEmpty(), "the root");
+		const char*[5] bad = { "..", "a/../b", "./a", "C:/Windows", "a/." };
+		for (int32 i = 0; i < 5; ++i) assert_true(Refused(bad[i]), bad[i]);
+	}
+
+	[test("hidden_paths")]
+	public static void TestHiddenPaths() {
+		assert_true(Ied::IsHiddenPath(Core::StringView(".git")) && Ied::IsHiddenPath(Core::StringView(".git/HEAD")), "a repository's folder");
+		assert_true(!Ied::IsHiddenPath(Core::StringView(".github/workflows/ci.yml")), "not a folder that merely starts alike");
+		assert_true(!Ied::IsHiddenPath(Core::StringView("src/.gitignore")), "nor a file named like it");
+	}
+
+	[test("text_digest")]
+	public static void TestTextDigest() {
+		assert_se("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Ied::TextDigest(Core::StringView("abc")).CStr(), "SHA-256, hex");
+	}
+}
