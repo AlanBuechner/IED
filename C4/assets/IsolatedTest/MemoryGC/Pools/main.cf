@@ -1,0 +1,145 @@
+// Pools (D-78): a collection ends the taken objects nothing reaches and frees their slots, telling `released`; keepAll
+// keeps every taken object and what it reaches; `keep` keeps the ones it chooses; a pool object reached from a root
+// stays, and so does what it points to; a noscan pool's words keep nothing alive; Take collects before it gives up.
+include "bedrock.ch"
+
+const int32 kObjects = 200;
+
+struct Node {
+	public int32 value;
+	public Target* target;
+}
+
+struct Target {
+	public int32 value;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+int32 g_finalized = 0;
+int32 g_released = 0;
+int32 g_releasedOdd = 0;
+Node* g_rooted = nullptr;
+
+// Takes `count` objects whose only references die with this frame; each points to a new Target.
+void TakeUnreached(GC::Pool& pool, int32 count) {
+	for (int32 i = 0; i < count; i++) {
+		Node* node = (Node*)pool.Take();
+		node->value = i;
+		node->target = new Target;
+	}
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+void CollectClean() {
+	Scrub(8);
+	GC::Collect();
+	GC::Collect();
+}
+
+// What the cases before left to end ends now, so each case counts only its own.
+void StartCase() {
+	CollectClean();
+	g_finalized = 0;
+	g_released = 0;
+	g_releasedOdd = 0;
+}
+
+int32 Taken(const GC::Pool& pool) {
+	int32 taken = 0;
+	for (int64 i = 0; i < pool.Count(); i++)
+		if (pool.Holds(pool.At(i))) taken++;
+	return taken;
+}
+
+int32 Released() {
+	StartCase();
+	GC::PoolOptions options;
+	options.released = [](void* object) { g_released++; };
+	GC::Pool pool = GC::Pool(sizeof(Node), kObjects, options);
+	TakeUnreached(pool, kObjects);
+	g_rooted = (Node*)pool.At(7);   // a root keeps one
+	CollectClean();
+	if (g_released < kObjects - 6 || g_released > kObjects - 1) return 1;
+	if (!pool.Holds(g_rooted) || g_rooted->value != 7) return 2;
+	if (Taken(pool) != kObjects - g_released) return 3;
+	if (g_finalized < kObjects - 6) return 4;          // the targets of ended objects went too
+	g_rooted = nullptr;
+	return 0;
+}
+
+int32 KeptAll() {
+	StartCase();
+	GC::PoolOptions options;
+	options.keepAll = true;
+	options.released = [](void* object) { g_released++; };
+	GC::Pool pool = GC::Pool(sizeof(Node), kObjects, options);
+	TakeUnreached(pool, kObjects);
+	CollectClean();
+	if (g_released != 0 || Taken(pool) != kObjects) return 11;
+	if (g_finalized != 0) return 12;                   // what kept objects reach stays
+	for (int64 i = 0; i < kObjects; i++) pool.Give(pool.At(i));
+	CollectClean();
+	if (Taken(pool) != 0 || g_finalized < kObjects - 6) return 13;
+	return 0;
+}
+
+int32 KeptByChoice() {
+	StartCase();
+	GC::PoolOptions options;
+	options.keep = [](void* object) -> bool { return ((Node*)object)->value % 2 == 0; };
+	options.released = [](void* object) { g_released++; if (((Node*)object)->value % 2 == 1) g_releasedOdd++; };
+	GC::Pool pool = GC::Pool(sizeof(Node), kObjects, options);
+	TakeUnreached(pool, kObjects);
+	CollectClean();
+	if (g_released != g_releasedOdd) return 21;        // only odd ones ended
+	if (g_released < kObjects / 2 - 6) return 22;
+	for (int64 i = 0; i < kObjects; i += 2)
+		if (!pool.Holds(pool.At(i))) return 23;        // every even one was kept
+	return 0;
+}
+
+int32 NoScan() {
+	StartCase();
+	GC::PoolOptions options;
+	options.noscan = true;
+	options.keepAll = true;
+	GC::Pool pool = GC::Pool(sizeof(Node), kObjects, options);
+	TakeUnreached(pool, kObjects);
+	CollectClean();
+	if (Taken(pool) != kObjects) return 31;
+	if (g_finalized < kObjects - 6) return 32;         // a noscan pool's pointers keep nothing
+	return 0;
+}
+
+int32 TakeCollects() {
+	StartCase();
+	GC::Pool pool = GC::Pool(sizeof(Node), 16);
+	TakeUnreached(pool, 16);
+	Scrub(8);
+	int32 again = 0;
+	for (int32 i = 0; i < 12; i++)
+		if (pool.Take() != nullptr) again++;           // the full pool collects, then gives the freed slots
+	if (again < 10) return 41;
+	return 0;
+}
+
+int32 main() {
+	int32 failed = Released();
+	if (failed == 0) failed = KeptAll();
+	if (failed == 0) failed = KeptByChoice();
+	if (failed == 0) failed = NoScan();
+	if (failed == 0) failed = TakeCollects();
+	if (failed != 0) {
+		printf("POOLS FAILED %d (released %d, finalized %d)\n", failed, g_released, g_finalized);
+		return failed;
+	}
+	printf("POOLS OK\n");
+	return 0;
+}

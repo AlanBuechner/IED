@@ -1,6 +1,6 @@
 ---
 name: c4-garbage-collector
-description: C4 garbage collector - conservative, non-moving, stop-the-world mark-sweep with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
+description: C4 garbage collector - conservative, non-moving, stop-the-world mark-sweep with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, custom-allocator pools, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
 triggers:
   - "C4 garbage collector"
   - "non-moving mark-sweep stop-the-world finalizer"
@@ -56,9 +56,16 @@ size limit, and hooks may (un)register hooks while they run.
 - **Collection results**: after each sweep; `IsReachable` tells which objects survived.
 - **Pins**: keep an object and its referents alive while native code holds it.
 - **Disable windows**: suppress automatic collection in latency-critical sections; `Collect()` still works.
+- **Pools** (`GC::Pool`, `include "Memory/pool.ch"`; D-78): a custom allocator's block of same-size objects that the
+  collector tracks one by one. `Take()` a zeroed slot, `Give(object)` it back; a collection ends taken objects
+  nothing reaches and frees their slots (`options.released` hears of each; `Take` collects once before saying the
+  pool is full). `options.keepAll` keeps every taken object (and what it reaches) until given back; `options.keep`
+  may keep one a collection would end (it runs with other threads stopped: no locks, no Take); `options.noscan` for
+  pointer-free objects. `At(i)`, `IndexOf`, `Holds`; `delete` and finalizers do not apply to pool objects.
 
 ## Internals (C4Runtime/GC/)
 `GCPlatformWin32.c` (OS memory, register capture + stack scan, clock), `GCPageHeap` (64 MiB arenas,
 two-level page map, coalescing free runs, scavenging to the OS), `GCHeap` (72 size classes, bitmaps, large
 objects, sweep), `GCMark` (explicit mark stack), `GCFinalize`, `GCRoots`, `GCPtrMap`, `GCCollector`
-(cycle, pacing), `GCApi.c` (exports; the only process state). Single-threaded; threading is B29 (D-48).
+(cycle, pacing), `GCPools` (pool spans, keep decisions, release queue), `GCApi.c` (exports; the only process
+state). Threads are D-48: suspend-and-scan with per-thread caches and parallel marking.

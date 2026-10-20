@@ -6,6 +6,7 @@
 #include "GC/GCFinalize.h"
 #include "GC/GCThreads.h"
 #include "GC/GCParallelMark.h"
+#include "GC/GCPools.h"
 
 #define GC_DEFAULT_PERCENT 100
 #define GC_MIN_TRIGGER_BYTES ((size_t)4 << 20)
@@ -27,6 +28,8 @@ typedef struct GCState
 	GCPtrMap rootTables;                // another image's root table (key)
 	GCPtrMap enumerators;               // key -> enumerator (a), user data (b)
 	GCPtrMap results;                   // key -> callback (a), user data (b)
+	GCPool* pools;                      // every pool (GCPools.h)
+	GCReleaseQueue releases;            // pool objects collections vacated, for their release callbacks
 	const c4_gc_root_range* globals;
 	uint64_t collections;
 	uint64_t allocs;
@@ -38,6 +41,7 @@ typedef struct GCState
 	int collecting;
 	int collected;                      // a collection ended whose callbacks and finalizers have not run yet
 	int runningFinalizers;              // a thread is running the ready finalizers
+	int runningReleases;                // a thread is running the queued releases
 	void (*statsPrinter)(const c4_gc_stats*);
 } GCState;
 

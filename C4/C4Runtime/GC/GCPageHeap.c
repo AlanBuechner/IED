@@ -264,6 +264,18 @@ GCSpan* gc_pages_alloc(GCPageHeap* heap, size_t npages)
 	return fresh_span(heap, run);
 }
 
+GCSpan* gc_pages_split(GCPageHeap* heap, GCSpan* span, size_t npages)
+{
+	GCSpan* first = new_record(heap);
+	first->base = span->base;
+	first->npages = npages;
+	first->needsZero = span->needsZero;
+	set_pages(heap, first->base, npages, first);
+	span->base += npages << GC_PAGE_SHIFT;
+	span->npages -= npages;
+	return first;
+}
+
 void gc_pages_free(GCPageHeap* heap, GCSpan* span, uint64_t epoch)
 {
 	set_pages(heap, span->base, span->npages, NULL);

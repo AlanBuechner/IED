@@ -1,0 +1,114 @@
+// GC::Pool's surface (D-78): slots and their addresses, taking and giving back, sizes out of range, closing, moving,
+// and threads taking and giving at once. What collections do to pool objects is IsolatedTest MemoryGC/Pools.
+
+include "bedrock.ch"
+
+struct PoolItem
+{
+	public int64 id;
+	public int64[3] payload;
+}
+
+[test("gc.pool")]
+class PoolTests {
+	[test("slots")]
+	public static void TestSlots() {
+		GC::Pool pool = GC::Pool(sizeof(PoolItem), 1000);
+		assert_true(pool.IsOpen(), "it opens");
+		assert_eq((int64)32, pool.SlotBytes(), "32 bytes a slot");
+		assert_eq((int64)1000, pool.Count(), "1000 slots");
+		assert_true((uint8*)pool.At(1) - (uint8*)pool.At(0) == 32 && pool.At(1000) == nullptr && pool.At(-1) == nullptr, "slots are contiguous");
+		assert_eq((int64)999, pool.IndexOf(pool.At(999)), "a slot's index");
+		assert_eq((int64)-1, pool.IndexOf((uint8*)pool.At(3) + 8), "inside a slot is no slot");
+		int64 local = 0;
+		assert_eq((int64)-1, pool.IndexOf(&local), "nor is memory elsewhere");
+		GC::Pool odd = GC::Pool(20, 3);
+		assert_eq((int64)32, odd.SlotBytes(), "a slot size rounds up to 16");
+	}
+
+	[test("take_and_give")]
+	public static void TestTakeAndGive() {
+		GC::PoolOptions options;
+		options.keepAll = true;
+		GC::Pool pool = GC::Pool(sizeof(PoolItem), 600, options);   // past one 512-slot chunk
+		Core::Array<PoolItem*> taken;
+		bool zeroed = true;
+		for (int32 i = 0; i < 600; ++i) {
+			PoolItem* item = (PoolItem*)pool.Take();
+			zeroed = zeroed && item != nullptr && item->id == 0 && item->payload[2] == 0;
+			item->id = i + 1;
+			taken.Push(item);
+		}
+		assert_true(zeroed, "every slot comes zeroed");
+		assert_true(pool.Take() == nullptr, "a full keep-all pool has nothing more");
+		bool held = true;
+		for (int64 i = 0; i < taken.Count(); ++i) held = held && pool.Holds(taken[i]);
+		assert_true(held, "every taken object is held");
+		pool.Give(taken[599]);
+		pool.Give(taken[10]);
+		assert_true(!pool.Holds(taken[10]) && !pool.Holds(taken[599]), "given back");
+		pool.Give(taken[10]);
+		PoolItem* again = (PoolItem*)pool.Take();
+		PoolItem* other = (PoolItem*)pool.Take();
+		assert_true((again == taken[10] && other == taken[599]) || (again == taken[599] && other == taken[10]), "their slots come back, each once");
+		assert_true(again->id == 0, "zeroed again");
+		assert_true(pool.Take() == nullptr, "and then it is full again");
+	}
+
+	[test("out_of_range_and_closed")]
+	public static void TestOutOfRangeAndClosed() {
+		assert_true(!GC::Pool(0, 10).IsOpen(), "no slot size");
+		assert_true(!GC::Pool(16, 0).IsOpen(), "no slots");
+		assert_true(!GC::Pool(2097152, 4).IsOpen(), "a slot over 1 MiB");
+		GC::Pool pool = GC::Pool(64, 4);
+		void* item = pool.Take();
+		pool.Close();
+		pool.Close();
+		assert_true(!pool.IsOpen() && pool.Take() == nullptr && !pool.Holds(item) && pool.At(0) == nullptr, "closed, twice");
+		pool.Give(item);
+		GC::Pool none;
+		assert_true(!none.IsOpen() && none.Take() == nullptr && none.Count() == 0, "a zero pool is closed");
+	}
+
+	[test("moves")]
+	public static void TestMoves() {
+		GC::PoolOptions options;
+		options.keepAll = true;
+		GC::Pool pool = GC::Pool(sizeof(PoolItem), 8, options);
+		PoolItem* first = (PoolItem*)pool.Take();
+		first->id = 42;
+		GC::Pool moved = take(pool);
+		assert_true(!pool.IsOpen() && moved.Holds(first) && ((PoolItem*)moved.At(moved.IndexOf(first)))->id == 42, "the pool moves with its objects");
+		GC::Collect();
+		assert_true(moved.Holds(first) && first->id == 42, "and keeps them through a collection");
+	}
+
+	[test("threads")]
+	public static void TestThreads() {
+		GC::PoolOptions options;
+		options.keepAll = true;
+		GC::Pool* pool = new GC::Pool(sizeof(PoolItem), 256, options);
+		Threading::Atomic<int32> clashes;
+		Core::Array<Threading::Thread> workers;
+		for (int32 t = 0; t < 4; ++t)
+			workers.Push(Threading::Thread::Run([pool, &clashes, t]() {
+				for (int32 round = 0; round < 2000; ++round) {
+					PoolItem* item = (PoolItem*)pool->Take();
+					if (item == nullptr) continue;
+					if (item->id != 0) clashes.FetchAdd(1);
+					item->id = t + 1;
+					Threading::Thread::Yield();
+					if (item->id != t + 1) clashes.FetchAdd(1);
+					item->id = 0;
+					pool->Give(item);
+				}
+			}));
+		for (int64 i = 0; i < workers.Count(); ++i) workers[i].Join();
+		assert_eq(0, clashes.Load(), "no slot is ever taken twice at once");
+		int32 held = 0;
+		for (int64 i = 0; i < pool->Count(); ++i)
+			if (pool->Holds(pool->At(i))) held += 1;
+		assert_eq(0, held, "every slot was given back");
+		pool->Close();
+	}
+}

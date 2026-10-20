@@ -515,7 +515,7 @@ int64 width = read.root.Member("window").Member("width").AsInt();   // 1280
 
 ---
 
-## 7. Memory (`Memory/gc.ch`)
+## 7. Memory (`Memory/gc.ch`, `Memory/pool.ch`)
 
 The `GC` namespace: the collector's C API ([runtime/01](../runtime/01-memory-and-gc.md#3-what-c4-code-can-reach))
 as `[link]` declarations, with no wrappers.
@@ -540,6 +540,33 @@ void Enumerate(void* pool, GC::VisitRoot visit, void* ctx) { visit(ctx, ((Pool*)
 
 GC::RegisterRootEnumerator((void*)&g_pool, Enumerate, (void*)&g_pool);
 GC::Stats s = GC::GetStats();
+```
+
+### Pools (`Memory/pool.ch`)
+
+`GC::Pool(slotBytes, count, options)` (B63, D-78) is a block of `count` slots of `slotBytes` (rounded up to 16, at
+most 1 MiB) for objects of one kind kept together - an engine's components, particles - that the collector still
+tracks one by one. `Take()` gives a free slot, zeroed (nullptr when every slot holds an object something reaches:
+it collects once before saying so), `Give(object)` frees one now; `At(index)`, `IndexOf(object)` (-1 for anything
+but a slot's start), `Holds(object)`, `SlotBytes()`, `Count()`, `Close()`. A collection marks taken objects like
+any other and ends those nothing reaches, freeing their slots. `GC::PoolOptions`:
+
+| Option | Meaning |
+|---|---|
+| `noscan` | the objects hold no managed pointers: marking does not scan them |
+| `keepAll` | a taken object, and what it reaches, stays until it is given back (the pool is a root) |
+| `keep` | `func<bool(void*)>`: asked about each taken object a collection would end; true keeps it and what it reaches. It runs during the collection while every other thread is stopped: it must not lock or `Take` |
+| `released` | `func<void(void*)>`: told of each object a collection ended, after the collection, one at a time; its slot is free again |
+
+`delete` and finalizers do not apply to pool objects: their allocator ends them. Taken slots count as live bytes in
+the collector's pacing. A pool owns its memory and gives it back on delete (its objects end with it), so it
+cannot be copied (move it with `take()`).
+
+```c4
+GC::PoolOptions options;
+options.released = [](void* p) { Recycle((Particle*)p); };
+GC::Pool particles = GC::Pool(sizeof(Particle), 4096, options);
+Particle* p = (Particle*)particles.Take();
 ```
 
 ---
@@ -960,11 +987,11 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 50 files, 485 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 51 files, 490 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

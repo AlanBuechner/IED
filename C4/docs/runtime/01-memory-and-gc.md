@@ -96,7 +96,8 @@ code (D-48). Windows x64.
 Source layout (`C4Runtime/GC/`): `GCPlatformWin32.c` (OS memory, the lock and private heap, thread suspension
 and stack scans, thread exit, clock - the only platform file), `GCThreads` (the thread registry, per-thread
 caches and their fast path), `GCPageHeap` (arenas, page map, free runs), `GCHeap` (size-class spans, allocation, release, sweep),
-`GCMark` (mark stack, range scanning), `GCFinalize` (finalizer selection and queue), `GCRoots` (root
+`GCMark` (mark stack, range scanning), `GCFinalize` (finalizer selection and queue), `GCPools` (pools: their spans,
+keep decisions, the release queue), `GCRoots` (root
 marking, pins), `GCPtrMap` (the hash map behind finalizers, pins, regions and hooks), `GCCollector` (the
 collection cycle, pacing), `GCApi.c` (the exported functions; the only file with process state).
 
@@ -120,6 +121,7 @@ declarations.
 | Another image's root table (a script's globals, in the `__c4_gc_roots` form) | `c4_gc_add_root_table(table)`, `c4_gc_remove_root_table(table)` | used by the script host (docs/runtime/04) |
 | Drop the finalizers in a code range (before that code unloads) | `c4_gc_drop_finalizers_in(low, high)`: the registered and the queued ones; returns how many | used by the script host |
 | Post-collection callbacks | `c4_gc_register_collection_result(key, fn, user)`, `c4_gc_is_reachable(p)` | `GC::RegisterCollectionResult`, `GC::IsReachable` |
+| Pools: a custom allocator's objects tracked one by one | `c4_gc_pool_create(desc)` (`slot_size`, `slot_count`, `noscan`, `keep_all`, `keep`, `release`, `user_data`), `c4_gc_pool_destroy`, `c4_gc_pool_base` / `_slot_size` / `_slot_count`, `c4_gc_pool_occupy` / `_vacate` / `_occupied` | `GC::Pool` ([Bedrock 7](../library/bedrock.md#pools-memorypoolch)) |
 | Pin / unpin (counted) | `c4_gc_pin(p)`, `c4_gc_unpin(p)` | `GC::Pin`, `GC::Unpin` |
 | Stats | `c4_gc_get_stats`, `c4_gc_allocs`, `c4_gc_collections`, `c4_gc_heap_bytes`, `c4_gc_free_bytes`, `c4_gc_region_count` | `GC::GetStats()`, `gc_allocs()`, `gc_collections()`, `gc_heap_bytes()`, `gc_free_bytes()` |
 | Finalizer registration | `c4_gc_register_finalizer(obj, fn)` | implicit through `[operator("delete")]` |
@@ -153,6 +155,14 @@ These exist so an engine can use custom allocators and handle-based storage with
   GC window. Pins are counted.
 - **Disable windows**: `c4_gc_disable()` / `c4_gc_enable()` stop automatic collection during a
   latency-critical section; an explicit collection still runs inside the window.
+- **Pools** (D-78): a block a custom allocator divides into objects of one size, which the collector tracks one by
+  one. The allocator occupies and vacates slots; the pool's pages are spans of 512 slots each (`GC_SPAN_POOL`), so
+  finding and marking a pool object is finding and marking any object, and a pointer into a slot keeps that object
+  only. A collection marks the occupied objects of a `keep_all` pool as roots; after the drain it offers each occupied
+  object nothing reached to the pool's `keep` callback (a kept one is marked and drained at once, so what it reaches
+  is never offered); the sweep vacates the rest and queues them, and after the collection one thread at a time hands
+  each to the pool's `release` callback without the lock. Destroying a pool drops its queued releases. Occupied
+  bytes count as live bytes for pacing; `delete` and finalizers do not apply to pool objects.
 
 Hooks may register or unregister hooks while they run. There is no limit on the number of regions, pins,
 enumerators or callbacks.
@@ -177,9 +187,8 @@ From LongTermPlan.txt item 5 ("GC audit") and the user's statement that C4 uses 
    churn and frame-time measurements (B32). **Planned**
 2. **Custom-allocator hooks**: an allocator must be able to split one allocation into many objects and
    have the GC track each object inside it directly, and decide itself whether objects in that
-   allocator should be cleaned up at all. Root enumerators and collection results cover part of this;
-   still missing is an API to describe sub-object boundaries inside a region (per-object tracking and
-   finalization) and a "should this be collected" decision callback. **Planned**
+   allocator should be cleaned up at all. **Implemented** (B63, D-78): pools, with per-object tracking, a
+   release callback in place of finalization, `keep_all` and a per-object `keep` decision.
 3. **Threading** (D-48): suspend-and-scan of registered threads and per-thread allocation caches per size
    class. **Implemented**; a concurrent mark that shortens the pause is a later step.
 

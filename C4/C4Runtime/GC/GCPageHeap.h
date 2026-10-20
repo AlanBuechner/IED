@@ -32,6 +32,9 @@ typedef struct GCPageHeap
 // the pages may hold old bytes. NULL when the OS gives no more memory.
 GCSpan* gc_pages_alloc(GCPageHeap* heap, size_t npages);
 
+// The first `npages` pages of an allocated span as a span of their own; `span` keeps the rest.
+GCSpan* gc_pages_split(GCPageHeap* heap, GCSpan* span, size_t npages);
+
 // Returns a span's pages; `epoch` is the current collection count.
 void gc_pages_free(GCPageHeap* heap, GCSpan* span, uint64_t epoch);
 

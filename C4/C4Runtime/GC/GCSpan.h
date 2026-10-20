@@ -13,8 +13,11 @@ typedef enum GCSpanState
 {
 	GC_SPAN_FREE,
 	GC_SPAN_SMALL,
-	GC_SPAN_LARGE
+	GC_SPAN_LARGE,
+	GC_SPAN_POOL              // slots of a pool (GCPools.h): its allocator says which hold objects
 } GCSpanState;
+
+struct GCPool;
 
 typedef struct GCSpan
 {
@@ -33,6 +36,7 @@ typedef struct GCSpan
 	uint8_t decommitted;      // free runs: the pages were returned to the OS
 	uint64_t freeEpoch;       // free runs: the collection that freed them
 	const void* owner;        // small spans: the thread cache that allocates from it, or NULL
+	struct GCPool* pool;      // pool spans: their pool
 	struct GCSpan* next;      // the list the span is on (its class, the large list or a free bin)
 	struct GCSpan* prev;
 	struct GCSpan* nextPartial;

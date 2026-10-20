@@ -52,6 +52,7 @@ static void mark(GCState* gc, const GCThread* self)
 	const uint32_t helpers = wanted_helpers(gc);
 	if (helpers && gc_mark_helpers_ready(&gc->helpers, &gc->heap, helpers)) gc_mark_drain_together(&gc->helpers, &gc->marker);
 	else gc_mark_drain(&gc->marker);
+	gc_pools_decide(&gc->marker, gc->pools);
 	gc_finalize_select(&gc->marker, &gc->finalizers, &gc->ready);
 }
 
@@ -59,6 +60,7 @@ static void reclaim(GCState* gc)
 {
 	gc->collections++;
 	gc_heap_sweep(&gc->heap, gc->collections);
+	gc_pools_sweep(gc->pools, &gc->releases, &gc->heap.liveBytes);
 	gc->heap.allocateMarked = 0;
 	gc_pages_scavenge(&gc->heap.pages, gc->collections);
 	gc->nextCollection = next_collection(gc_heap_live_bytes(&gc->heap), gc->percent);
@@ -171,7 +173,7 @@ void* gc_release_begin(GCState* gc, void* ptr, gc_finalizer_fn* finalizer)
 {
 	GCObject object = gc_heap_find(&gc->heap, ptr);
 	*finalizer = NULL;
-	if (!object.span) return NULL;
+	if (!object.span || object.span->state == GC_SPAN_POOL) return NULL; // a pool's allocator ends its objects
 	void* base = gc_object_base(object);
 	gc_map_remove(&gc->pins, base);
 	*finalizer = take_finalizer(gc, base);
@@ -187,6 +189,6 @@ void gc_release_end(GCState* gc, const GCThread* self, void* base)
 void gc_register_finalizer(GCState* gc, void* ptr, gc_finalizer_fn fn)
 {
 	GCObject object = gc_heap_find(&gc->heap, ptr);
-	if (!object.span || !fn) return;
+	if (!object.span || object.span->state == GC_SPAN_POOL || !fn) return;
 	gc_map_upsert(&gc->finalizers, gc_object_base(object))->a = (void*)fn;
 }

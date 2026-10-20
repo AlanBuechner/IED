@@ -63,6 +63,7 @@ void gc_mark_roots(GCMarker* marker, const GCState* gc, const GCThread* self)
 	gc_threads_mark(marker, &gc->threads, self);
 	mark_regions(marker, &gc->regions);
 	mark_pins(marker, &gc->pins);
+	gc_pools_mark_kept(marker, gc->pools);
 	gc_finalize_mark_queue(marker, &gc->ready);
 }
 

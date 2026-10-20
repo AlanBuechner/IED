@@ -67,6 +67,39 @@ void c4_gc_unregister_root_enumerator(void* key);
 void c4_gc_pin(void* obj);
 void c4_gc_unpin(void* obj);
 
+// --- Pools ---------------------------------------------------------------------------------------
+// Memory a custom allocator divides into objects of one size, which the collector tracks one by one (D-78). The
+// allocator occupies and vacates slots; a collection marks occupied objects like any other, and vacates each one
+// nothing reached, handing it to `release` after the collection (without the lock, one at a time) - unless
+// `keep_all` keeps every occupied object, or `keep` keeps that one. `keep` runs during the collection with every
+// other thread stopped, so it must not take a lock another thread may hold, nor occupy slots. Slot i is at
+// c4_gc_pool_base(pool) + i * c4_gc_pool_slot_size(pool) (`slot_size` rounded up to 16, at most 1 MiB); the memory
+// starts zeroed and is the pool's until it is destroyed. `delete` and finalizers do not apply to pool objects.
+typedef bool (*c4_gc_pool_keep_fn)(void* user_data, void* object);
+typedef void (*c4_gc_pool_release_fn)(void* user_data, void* object);
+typedef struct c4_gc_pool_desc
+{
+	size_t slot_size;
+	size_t slot_count;
+	bool noscan;                       // the objects hold no managed pointers: marking does not scan them
+	bool keep_all;                     // every occupied object stays alive, scanned, until it is vacated
+	c4_gc_pool_keep_fn keep;           // optional: asked for each occupied object nothing reached
+	c4_gc_pool_release_fn release;     // optional: told of each object a collection vacated
+	void* user_data;
+} c4_gc_pool_desc;
+typedef struct c4_gc_pool c4_gc_pool;
+// NULL when the sizes are out of range or memory ran out.
+c4_gc_pool* c4_gc_pool_create(const c4_gc_pool_desc* desc);
+// Its objects end with it; releases still queued for it are dropped.
+void c4_gc_pool_destroy(c4_gc_pool* pool);
+void* c4_gc_pool_base(const c4_gc_pool* pool);
+size_t c4_gc_pool_slot_size(const c4_gc_pool* pool);
+size_t c4_gc_pool_slot_count(const c4_gc_pool* pool);
+// False when `object` is not the start of one of the pool's slots.
+bool c4_gc_pool_occupy(c4_gc_pool* pool, void* object);
+bool c4_gc_pool_vacate(c4_gc_pool* pool, void* object);
+bool c4_gc_pool_occupied(const c4_gc_pool* pool, const void* object);
+
 // --- After a collection ---------------------------------------------------------------------------
 // Callbacks run after each collection's sweep. There, c4_gc_is_reachable tells whether an object survived.
 typedef void (*c4_gc_on_collection_fn)(void* user_data);

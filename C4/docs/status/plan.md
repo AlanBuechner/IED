@@ -155,6 +155,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-75 | Foreign objects follow the build and are reused | A foreign source or shim compiles with the program's `-O<n>` and `-g`, and clang writes a depfile beside the object (`-MD -MF <obj>.d`). After a compile, `<obj>.key` records an FNV key of the compiler (path, size, time), the flags, the defines and include folders, and the bytes of every file the depfile lists (the source and each header); the next build reuses the object while the key is the same. Content, not times, so a checkout that only touches files rebuilds nothing. | [13](../language/13-interop.md) |
 | D-76 | Incremental builds optimize each partition alone | `--incremental` (Nuke's `Debug` and `Development`; `Dist` stays whole-program) splits the module before the optimizer, so a partition whose bitcode and settings are unchanged reuses its cached object with no optimization at all. To keep the inlining that matters, a partition copies the small functions it calls from other partitions as `available_externally` (ThinLTO's rule: 100 unoptimized instructions, 70% per further level, three levels), and its cache key covers the copies, so editing a small function rebuilds its callers' partitions too. A `minsize` caller copies nothing; reflection's invoke thunks are `minsize` in every build, since reflection calls through them seldom and a copy of each target in its thunk only cost optimizer time. Linkonce definitions become weak, so a partition's optimizer cannot drop what another uses. Large functions no longer inline across partitions, the price of the fast loop. | [pipeline 6](../compiler/01-pipeline.md) |
 | D-77 | Streaming reads | Data is decoded while it arrives through pull readers fed with chunks: `JsonStream` hands back one event at a time and `NeedMore` when the text so far ends inside one, keeping its place (a string's end is looked for from where it stopped), so a caller drives it from any source - a file read ahead on a thread (`FS::ChunkReader`, two buffers, the next read while the caller decodes), a pipe, a socket. It shares its tokens with `ReadJson` (`jsontokens`), so both accept and refuse the same text with the same errors; UTF-8 is checked as bytes are fed, up to the last whole character. Values come whole when asked (`ReadValue` into a `DomDoc`, `ReadNext` into a reflected type), so a level's entities are decoded one at a time and memory holds a chunk, not the file. `BinaryStream` does the same for `WriteBinary`'s records. Push callbacks and a SAX interface were not chosen: a pull reader composes with loops and with the event loop, and a callback is one loop away. | [Bedrock 5, 6](../library/bedrock.md#6-serialization-serialization) |
+| D-78 | Pools for custom allocators | An allocator that keeps objects of one size together (components, particles) gets a pool: the collector's pages, carved into spans of 512 equal slots (`GC_SPAN_POOL`), whose allocation bits only the allocator sets (occupy, vacate). Finding and marking a pool object is then finding and marking any object - a pointer into a slot keeps that object, not the block - so per-object liveness costs nothing new in the mark loop. The allocator decides what may be collected: `keep_all` makes every occupied object a root, a `keep` callback is asked about each occupied object nothing reached (after the drain, before finalizer selection, draining after each one kept), and the rest are vacated in the sweep and handed to a `release` callback after the collection, without the lock - the pool's form of finalization, so `delete` and finalizers do not apply. Bedrock's `GC::Pool` keeps the free list and collects once before it reports a full pool. | [memory and GC 3](../runtime/01-memory-and-gc.md#engine-hooks) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1447,6 +1448,19 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   missing one; `BinaryStream` fed 7 bytes at a time, cut short, an unknown type; `DomDoc::Clear`);
   `stringview_tests.cf` `str.views_cost_nothing_to_make` (BUG-288). Bedrock passes 485 tests.
 
+#### B63 - Pools for custom allocators (roadmap 5)
+- **Design:** D-78, [memory and GC](../runtime/01-memory-and-gc.md#engine-hooks). **Status:** Done.
+- **Done notes:** `C4Runtime/GC/GCPools` (pool creation on the page heap, split into 512-slot spans with the new
+  `gc_pages_split`; marking of keep-all pools from the roots; keep decisions after the drain; the sweep's vacating
+  and the release queue), the `c4_gc_pool_*` C API, releases run after a collection one thread at a time
+  (`GCApi.c`), `delete` and finalizer registration ignore pool objects; Bedrock `Memory/pool` (`GC::Pool`,
+  `GC::PoolOptions`).
+- **Tests:** IsolatedTest `MemoryGC/Pools` (unreached objects end and are released with their referents, a rooted
+  one stays; keep-all keeps everything until given back; a keep callback keeps exactly what it chooses; a noscan
+  pool's pointers keep nothing; a full pool's Take collects and gives the freed slots); Bedrock `gc_pool_tests.cf`
+  (5: slots and addresses across chunks, take and give, sizes out of range and closing, moves, four threads taking
+  and giving at once). Bedrock passes 490 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1964,7 +1978,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

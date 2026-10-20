@@ -98,6 +98,27 @@ static void run_finalizers(GCState* gc)
 	}
 }
 
+// One thread at a time hands vacated pool objects to their pools; a pool destroyed meanwhile has its own dropped.
+static void run_releases(GCState* gc)
+{
+	gc_os_lock();
+	const int busy = gc->runningReleases;
+	gc->runningReleases = 1;
+	gc_os_unlock();
+	if (busy) return;
+	for (;;)
+	{
+		GCPoolRelease release;
+		gc_os_lock();
+		const int ready = gc_release_pop(&gc->releases, &release);
+		const c4_gc_pool_desc desc = ready ? release.pool->desc : (c4_gc_pool_desc){ 0 };
+		if (!ready) gc->runningReleases = 0;
+		gc_os_unlock();
+		if (!ready) return;
+		desc.release(desc.user_data, release.object);
+	}
+}
+
 static void after_collection(void)
 {
 	GCState* gc = &g_gc;
@@ -110,6 +131,7 @@ static void after_collection(void)
 	if (!collected) return;
 	notify_results(gc);
 	if (printer) printer(&stats);
+	run_releases(gc);
 	run_finalizers(gc);
 }
 
@@ -273,6 +295,55 @@ void c4_gc_unregister_collection_result(void* key)
 
 void c4_gc_pin(void* obj) { gc_os_lock(); gc_pin(collector(), obj); gc_os_unlock(); }
 void c4_gc_unpin(void* obj) { gc_os_lock(); gc_unpin(collector(), obj); gc_os_unlock(); }
+
+// ------------------------------------------------------------------------------------------------
+// Pools
+
+c4_gc_pool* c4_gc_pool_create(const c4_gc_pool_desc* desc)
+{
+	if (!desc) return NULL;
+	gc_os_lock();
+	GCState* gc = collector();
+	GCPool* pool = gc_pool_create(&gc->heap, &gc->pools, desc);
+	gc_os_unlock();
+	return (c4_gc_pool*)pool;
+}
+
+void c4_gc_pool_destroy(c4_gc_pool* pool)
+{
+	if (!pool) return;
+	gc_os_lock();
+	GCState* gc = collector();
+	gc_pool_destroy(&gc->heap, &gc->pools, (GCPool*)pool, &gc->releases, gc->collections);
+	gc_os_unlock();
+}
+
+void* c4_gc_pool_base(const c4_gc_pool* pool) { return pool ? ((const GCPool*)pool)->base : NULL; }
+size_t c4_gc_pool_slot_size(const c4_gc_pool* pool) { return pool ? ((const GCPool*)pool)->desc.slot_size : 0; }
+size_t c4_gc_pool_slot_count(const c4_gc_pool* pool) { return pool ? ((const GCPool*)pool)->desc.slot_count : 0; }
+
+static bool set_occupied(c4_gc_pool* pool, void* object, int occupied)
+{
+	const int64_t slot = pool ? gc_pool_slot_of((const GCPool*)pool, object) : -1;
+	if (slot < 0) return false;
+	gc_os_lock();
+	gc_pool_set_occupied((GCPool*)pool, (size_t)slot, occupied);
+	gc_os_unlock();
+	return true;
+}
+
+bool c4_gc_pool_occupy(c4_gc_pool* pool, void* object) { return set_occupied(pool, object, 1); }
+bool c4_gc_pool_vacate(c4_gc_pool* pool, void* object) { return set_occupied(pool, object, 0); }
+
+bool c4_gc_pool_occupied(const c4_gc_pool* pool, const void* object)
+{
+	const int64_t slot = pool ? gc_pool_slot_of((const GCPool*)pool, object) : -1;
+	if (slot < 0) return false;
+	gc_os_lock();
+	const bool occupied = gc_pool_occupied((const GCPool*)pool, (size_t)slot) != 0;
+	gc_os_unlock();
+	return occupied;
+}
 
 bool c4_gc_is_reachable(const void* ptr)
 {
