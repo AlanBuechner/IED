@@ -1,4 +1,5 @@
 include "dom.ch"
+include "reflectvalue.ch"
 
 namespace Serialization
 {
@@ -166,53 +167,12 @@ namespace Serialization
 	// ---- reflection bridge -----------------------------------------------------------------------------
 
 	DomNode DomDoc::ReflectFrom(Reflection::Type type, const void* object) {
-		if (!type.IsValid() || type.FieldCount() == 0) return NewNull();
-		const char* base = (const char*)object;
-		DomNode result = NewObject();
-		for (Reflection::Field field : type) {
-			if (field.IsAlias()) continue;
-			const char* at = base + field.Offset();
-			Reflection::Type fieldType = field.TypeOf();
-			const char* name = field.TypeName();
-			DomNode value;
-			if (fieldType.IsValid() && fieldType.FieldCount() > 0) value = ReflectFrom(fieldType, at);
-			else if (strcmp(name, "bool") == 0) value = NewBool(*(const bool*)at);
-			else if (strcmp(name, "float") == 0) value = NewFloat((double)*(const float*)at);
-			else if (strcmp(name, "double") == 0) value = NewFloat(*(const double*)at);
-			else if (field.SizeOf() == 1) value = NewInt((int64)*(const int8*)at);
-			else if (field.SizeOf() == 2) value = NewInt((int64)*(const int16*)at);
-			else if (field.SizeOf() == 4) value = NewInt((int64)*(const int32*)at);
-			else if (field.SizeOf() == 8) value = NewInt(*(const int64*)at);
-			else value = NewNull();
-			AddMember(result, field.Name(), value);
-		}
-		return result;
+		if (!type.IsValid()) return NewNull();
+		return WriteValue(*this, DescribeValue(type.Name()), object);
 	}
 
 	int32 DomDoc::ReflectTo(Reflection::Type type, const DomNode& object, void* destination) {
-		if (!type.IsValid() || object.Kind() != DomKind::Object) return -1;
-		char* base = (char*)destination;
-		int32 applied = 0;
-		for (Reflection::Field field : type) {
-			if (field.IsAlias()) continue;
-			DomNode value = object.Member(field.Name());
-			if (value.IsNull()) continue;
-			char* at = base + field.Offset();
-			Reflection::Type fieldType = field.TypeOf();
-			const char* name = field.TypeName();
-			if (fieldType.IsValid() && fieldType.FieldCount() > 0) {
-				if (ReflectTo(fieldType, value, at) < 0) return -1;
-			}
-			else if (strcmp(name, "bool") == 0) *(bool*)at = value.AsBool();
-			else if (strcmp(name, "float") == 0) *(float*)at = (float)value.AsFloat();
-			else if (strcmp(name, "double") == 0) *(double*)at = value.AsFloat();
-			else if (field.SizeOf() == 1) *(int8*)at = (int8)value.AsInt();
-			else if (field.SizeOf() == 2) *(int16*)at = (int16)value.AsInt();
-			else if (field.SizeOf() == 4) *(int32*)at = (int32)value.AsInt();
-			else if (field.SizeOf() == 8) *(int64*)at = value.AsInt();
-			else continue;
-			applied += 1;
-		}
-		return applied;
+		if (!type.IsValid()) return -1;
+		return ReadFields(object, type, destination);
 	}
 }

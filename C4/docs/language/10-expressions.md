@@ -104,6 +104,7 @@ through a const access chain.
 | `alignof(T)`, `alignof(expr)` | the alignment, an `int64` constant |
 | `offsetof(T, field)`, `offsetof(T, a.b)` | the byte offset of a (nested) field, an `int64` constant |
 | `__uuidof(T)` | pointer to the `_GUID` from `[uuid("...")]` ([13](13-interop.md)); error if `T` has none |
+| `nameof(T)`, `nameof(expr)` | the qualified name of a type, or of an expression's type, as reflection registers it (`Core::Array<Geo::Point>`, D-72): a string constant; in a template, of the argument |
 | `new T`, `new T(args)`, `new T{args}` | heap allocation (GC managed), see section 9 |
 | `delete p` | runs `[operator("delete")]` then frees |
 

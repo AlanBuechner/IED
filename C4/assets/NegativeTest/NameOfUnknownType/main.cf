@@ -1,0 +1,4 @@
+int32 main() {
+	const char* name = nameof(NoSuchType);
+	return 0;
+}

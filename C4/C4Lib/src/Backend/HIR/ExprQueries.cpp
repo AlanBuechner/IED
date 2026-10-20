@@ -12,12 +12,14 @@
 namespace Scripting
 {
 	// Compile-time queries (docs/language/10 4): sizeof, alignof, offsetof (int64 constants), __uuidof (the
-	// address of a COM GUID) and sizeof...(pack). Nothing runs: an expression operand is typed, not evaluated.
+	// address of a COM GUID), nameof (a type's qualified name) and sizeof...(pack). Nothing runs: an expression operand
+	// is typed, not evaluated.
 
 	QueryResult<Value> ExprLowerer::ResolveTypeOf(const TypeOfExpressionNode* n)
 	{
 		if (n->GetKind() == TypeOfExpressionNode::Kind::SizeOfPack) return ResolveSizeOfPack(n);
 		if (n->GetKind() == TypeOfExpressionNode::Kind::UuidOf) return ResolveUuidOf(n);
+		if (n->GetKind() == TypeOfExpressionNode::Kind::NameOf) return ResolveNameOf(n);
 		auto operand = QueryOperandType(n);
 		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, operand.message));
 		auto value = CompileTimeQueryValue(*n, operand.value);
@@ -75,6 +77,16 @@ namespace Scripting
 			for (int i = 0; i < 8; ++i) bytes[8 + i] = g.m_Data4[i];
 			return bytes;
 		}
+	}
+
+	// nameof(T): the type's qualified name as reflection registers it (D-50) - `Core::Array<int32>`, `Geo::Point*` -
+	// a string literal; for an expression, its type's.
+	QueryResult<Value> ExprLowerer::ResolveNameOf(const TypeOfExpressionNode* n)
+	{
+		auto operand = QueryOperandType(n);
+		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, "nameof: " + operand.message));
+		TypeStore* types = m_Ctx.queries().TypeStore();
+		return Constant(types->Pointer(types->Builtin(TypeKind::Char8)), ConstantValue::String(QualifiedName(operand.value), 1));
 	}
 
 	// __uuidof(T): the [uuid("...")] a type carries (CBind emits it for __declspec(uuid) / MIDL_INTERFACE), else the

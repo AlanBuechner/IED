@@ -1,0 +1,306 @@
+include "reflectvalue.ch"
+
+namespace Serialization
+{
+	static Reflection::Type FindType(const char* name) { return Reflection::Type(nullptr).FindByName(name); }
+
+	// --- describing -------------------------------------------------------------------------------------------------
+
+	static bool Is(const ValueType& value, const char* name) { return value.name.View() == name; }
+
+	static bool DescribePrimitive(ValueType& value) {
+		const char*[4] signedNames = { "int8", "int16", "int32", "int64" };
+		const char*[7] unsignedNames = { "uint8", "uint16", "uint32", "uint64", "char8", "char16", "char32" };
+		const int64[7] unsignedSizes = { 1, 2, 4, 8, 1, 2, 4 };
+		for (int32 i = 0; i < 4; ++i)
+			if (Is(value, signedNames[i])) {
+				value.kind = ValueKind::Signed;
+				value.size = (int64)1 << i;
+			}
+		for (int32 i = 0; i < 7; ++i)
+			if (Is(value, unsignedNames[i])) {
+				value.kind = ValueKind::Unsigned;
+				value.size = unsignedSizes[i];
+			}
+		if (Is(value, "bool")) { value.kind = ValueKind::Bool; value.size = 1; }
+		if (Is(value, "float")) { value.kind = ValueKind::Float; value.size = 4; }
+		if (Is(value, "double")) { value.kind = ValueKind::Double; value.size = 8; }
+		value.align = value.size;
+		return value.kind != ValueKind::Unsupported;
+	}
+
+	// `T[N]`: N of T, laid out back to back.
+	static ValueType DescribeFixedArray(ValueType value) {
+		const Core::StringView text = value.name.View();
+		int64 open = -1;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.ByteAt(i) == '[') open = i;
+		int64 count = 0;
+		for (int64 i = open + 1; open >= 0 && i < text.ByteLength() - 1; ++i) count = count * 10 + (text.ByteAt(i) - '0');
+		if (open <= 0) return value;
+		value.element = Core::String(text.Substring(0, open));
+		const ValueType element = DescribeValue(value.element.CStr());
+		if (element.kind == ValueKind::Unsupported) return value;
+		value.kind = ValueKind::FixedArray;
+		value.count = count;
+		value.size = element.size * count;
+		value.align = element.align;
+		return value;
+	}
+
+	// The type a pointer field points to: "Item*" is "Item".
+	static Core::String Pointee(const char* pointer) {
+		const Core::StringView text = Core::StringView(pointer);
+		return Core::String(text.Substring(0, text.ByteLength() - 1));
+	}
+
+	static void DescribeArray(ValueType& value) {
+		const Reflection::Field data = value.type.FindField("data");
+		if (!data.IsValid()) return;
+		value.element = Pointee(data.TypeName());
+		value.kind = ValueKind::Array;
+	}
+
+	// A HashMap whose keys are Core::String: its KeyValue's layout, from the type of its `entries`.
+	static void DescribeStringMap(ValueType& value) {
+		const Reflection::Field entries = value.type.FindField("entries");
+		if (!entries.IsValid()) return;
+		const Reflection::Type entry = FindType(Pointee(entries.TypeName()).CStr());
+		const Reflection::Field key = entry.FindField("key");
+		const Reflection::Field mapped = entry.FindField("value");
+		if (!entry.IsValid() || !key.IsValid() || !mapped.IsValid() || key.Offset() != 0 || Core::StringView(key.TypeName()) != "Core::String") return;
+		value.element = Core::String(mapped.TypeName());
+		value.valueOffset = (int64)mapped.Offset();
+		value.entrySize = (int64)entry.SizeOf();
+		value.entryAlign = (int64)entry.AlignOf();
+		value.kind = ValueKind::StringMap;
+	}
+
+	ValueType DescribeValue(const char* name) {
+		ValueType value;
+		value.name = Core::String(name);
+		const Core::StringView text = value.name.View();
+		if (text.EndsWith(Core::StringView("*"))) {
+			value.kind = ValueKind::Pointer;
+			value.size = 8;
+			value.align = 8;
+			return value;
+		}
+		if (DescribePrimitive(value)) return value;
+		if (text.EndsWith(Core::StringView("]"))) return DescribeFixedArray(value);
+		value.type = FindType(name);
+		if (!value.type.IsValid()) return value;
+		value.size = (int64)value.type.SizeOf();
+		value.align = (int64)value.type.AlignOf();
+		if (value.type.Kind() == Reflection::EntityKind::Enum) value.kind = ValueKind::Enum;
+		else if (text == "Core::String") value.kind = ValueKind::String;
+		else if (text.StartsWith(Core::StringView("Core::Array<"))) DescribeArray(value);
+		else if (text.StartsWith(Core::StringView("Core::HashMap<Core::String,"))) DescribeStringMap(value);
+		else if (value.type.Kind() == Reflection::EntityKind::Object || value.type.Kind() == Reflection::EntityKind::Union) value.kind = ValueKind::Object;
+		return value;
+	}
+
+	// --- integers of any width --------------------------------------------------------------------------------------
+
+	static int64 LoadSigned(const void* at, int64 size) {
+		if (size == 1) return (int64)*(const int8*)at;
+		if (size == 2) return (int64)*(const int16*)at;
+		if (size == 4) return (int64)*(const int32*)at;
+		return *(const int64*)at;
+	}
+
+	static uint64 LoadUnsigned(const void* at, int64 size) {
+		if (size == 1) return (uint64)*(const uint8*)at;
+		if (size == 2) return (uint64)*(const uint16*)at;
+		if (size == 4) return (uint64)*(const uint32*)at;
+		return *(const uint64*)at;
+	}
+
+	static void StoreInteger(void* at, int64 size, int64 value) {
+		if (size == 1) *(int8*)at = (int8)value;
+		else if (size == 2) *(int16*)at = (int16)value;
+		else if (size == 4) *(int32*)at = (int32)value;
+		else *(int64*)at = value;
+	}
+
+	// --- writing ----------------------------------------------------------------------------------------------------
+
+	// An enumerator's name; its number when no enumerator has the value.
+	static DomNode WriteEnum(DomDoc& doc, const ValueType& type, const void* at) {
+		const int64 asSigned = LoadSigned(at, type.size);
+		const int64 asUnsigned = (int64)LoadUnsigned(at, type.size);
+		for (int64 i = 0; i < type.type.EnumCount(); ++i) {
+			const int64 value = type.type.EnumAt(i).Value();
+			if (value == asSigned || value == asUnsigned) return doc.NewString(type.type.EnumAt(i).Name());
+		}
+		return doc.NewInt(asSigned);
+	}
+
+	static DomNode WriteElements(DomDoc& doc, const char* elementName, const void* first, int64 count) {
+		const ValueType element = DescribeValue(elementName);
+		DomNode array = doc.NewArray();
+		for (int64 i = 0; i < count; ++i) doc.Add(array, WriteValue(doc, element, (const void*)((const uint8*)first + i * element.size)));
+		return array;
+	}
+
+	// A JSON object in the map's own order.
+	static DomNode WriteStringMap(DomDoc& doc, const ValueType& type, const void* at) {
+		const Core::HashMapLayout* map = (const Core::HashMapLayout*)at;
+		const ValueType mapped = DescribeValue(type.element.CStr());
+		DomNode object = doc.NewObject();
+		for (int64 i = 0; i < map->capacity; ++i) {
+			if (map->states[i] != Core::kLiveSlot) continue;
+			const uint8* entry = (const uint8*)map->entries + i * type.entrySize;
+			doc.AddMember(object, ((const Core::String*)entry)->View(), WriteValue(doc, mapped, (const void*)(entry + type.valueOffset)));
+		}
+		return object;
+	}
+
+	static DomNode WriteObject(DomDoc& doc, Reflection::Type type, const void* at) {
+		DomNode object = doc.NewObject();
+		for (Reflection::Field field : type) {
+			if (field.IsAlias()) continue;
+			const ValueType fieldType = DescribeValue(field.TypeName());
+			doc.AddMember(object, field.Name(), WriteValue(doc, fieldType, (const void*)((const uint8*)at + field.Offset())));
+		}
+		return object;
+	}
+
+	DomNode WriteValue(DomDoc& doc, const ValueType& type, const void* at) {
+		const ValueKind kind = type.kind;
+		if (kind == ValueKind::Bool) return doc.NewBool(*(const bool*)at);
+		if (kind == ValueKind::Signed) return doc.NewInt(LoadSigned(at, type.size));
+		if (kind == ValueKind::Unsigned) return doc.NewInt((int64)LoadUnsigned(at, type.size));
+		if (kind == ValueKind::Float) return doc.NewFloat((double)*(const float*)at);
+		if (kind == ValueKind::Double) return doc.NewFloat(*(const double*)at);
+		if (kind == ValueKind::String) return doc.NewString(((const Core::String*)at)->View());
+		if (kind == ValueKind::Enum) return WriteEnum(doc, type, at);
+		if (kind == ValueKind::Array) {
+			const Core::ArrayLayout* array = (const Core::ArrayLayout*)at;
+			return WriteElements(doc, type.element.CStr(), (const void*)array->data, array->count);
+		}
+		if (kind == ValueKind::FixedArray) return WriteElements(doc, type.element.CStr(), at, type.count);
+		if (kind == ValueKind::StringMap) return WriteStringMap(doc, type, at);
+		if (kind == ValueKind::Object) return WriteObject(doc, type.type, at);
+		return doc.NewNull();
+	}
+
+	// --- reading ----------------------------------------------------------------------------------------------------
+
+	static bool IsNumber(const DomNode& node) { return node.Kind() == DomKind::Int || node.Kind() == DomKind::Float; }
+
+	// An enumerator's name, or a number.
+	static bool ReadEnum(const DomNode& node, const ValueType& type, void* at) {
+		if (node.Kind() == DomKind::Int) {
+			StoreInteger(at, type.size, node.AsInt());
+			return true;
+		}
+		if (node.Kind() != DomKind::String) return false;
+		for (int64 i = 0; i < type.type.EnumCount(); ++i)
+			if (node.AsView() == type.type.EnumAt(i).Name()) {
+				StoreInteger(at, type.size, type.type.EnumAt(i).Value());
+				return true;
+			}
+		return false;
+	}
+
+	static bool ReadElements(const DomNode& node, const ValueType& element, void* first) {
+		for (int64 i = 0; i < node.Count(); ++i)
+			if (!ReadValue(node.At(i), element, (void*)((uint8*)first + i * element.size))) return false;
+		return true;
+	}
+
+	static bool ReadArray(const DomNode& node, const ValueType& type, void* at) {
+		const ValueType element = DescribeValue(type.element.CStr());
+		if (node.Kind() != DomKind::Array || element.kind == ValueKind::Unsupported) return false;
+		if (!Core::ResizeEmptyArray(at, node.Count(), element.size, element.align)) return false;
+		return ReadElements(node, element, ((Core::ArrayLayout*)at)->data);
+	}
+
+	static bool ReadFixedArray(const DomNode& node, const ValueType& type, void* at) {
+		if (node.Kind() != DomKind::Array || node.Count() > type.count) return false;
+		return ReadElements(node, DescribeValue(type.element.CStr()), at);
+	}
+
+	// Room for `members` keys in an empty map, as HashMap::Reserve gives it.
+	static void ReserveMap(Core::HashMapLayout* map, int64 members, const ValueType& type) {
+		int64 capacity = Core::NextPowerOfTwo((members * 4 + 2) / 3);
+		if (capacity < 8) capacity = 8;
+		const bool aligned = (uint64)type.entryAlign > Core::kRawAllocAlignment;
+		if (map->entries) {
+			gc_unregister_region(map->entries);
+			if (aligned) raw_free_aligned(map->entries);
+			else raw_free(map->entries);
+		}
+		if (map->states) raw_free((void*)map->states);
+		const uint64 bytes = (uint64)(capacity * type.entrySize);
+		map->entries = aligned ? raw_alloc_aligned(bytes, (uint64)type.entryAlign) : raw_alloc(bytes);
+		memset(map->entries, 0, bytes);
+		gc_register_region(map->entries, bytes);
+		map->states = (uint8*)raw_alloc((uint64)capacity);
+		memset((void*)map->states, 0, (uint64)capacity);
+		map->capacity = capacity;
+		map->used = 0;
+	}
+
+	// Where `key` goes: a free slot on its probe, or -1 when it is there already (the first of duplicate keys stays).
+	static int64 SlotFor(const Core::HashMapLayout* map, Core::StringView key, int64 entrySize) {
+		const int64 mask = map->capacity - 1;
+		for (int64 i = (int64)key.Hash() & mask;; i = (i + 1) & mask) {
+			if (map->states[i] != Core::kLiveSlot) return i;
+			if (((const Core::String*)((const uint8*)map->entries + i * entrySize))->View() == key) return -1;
+		}
+		return -1;
+	}
+
+	static bool ReadStringMap(const DomNode& node, const ValueType& type, void* at) {
+		Core::HashMapLayout* map = (Core::HashMapLayout*)at;
+		if (node.Kind() != DomKind::Object || map->count != 0) return false;
+		if (node.Count() == 0) return true;
+		const ValueType mapped = DescribeValue(type.element.CStr());
+		ReserveMap(map, node.Count(), type);
+		for (int64 i = 0; i < node.Count(); ++i) {
+			const Core::StringView key = node.KeyAt(i);
+			const int64 slot = SlotFor(map, key, type.entrySize);
+			if (slot < 0) continue;
+			uint8* entry = (uint8*)map->entries + slot * type.entrySize;
+			new ((Core::String*)entry) Core::String(key);
+			map->states[slot] = Core::kLiveSlot;
+			map->count += 1;
+			map->used += 1;
+			if (!ReadValue(node.ValueAt(i), mapped, (void*)(entry + type.valueOffset))) return false;
+		}
+		return true;
+	}
+
+	int32 ReadFields(const DomNode& node, Reflection::Type type, void* at) {
+		if (node.Kind() != DomKind::Object) return -1;
+		int32 applied = 0;
+		for (Reflection::Field field : type) {
+			if (field.IsAlias()) continue;
+			const DomNode value = node.Member(field.Name());
+			if (value.IsNull()) continue;
+			const ValueType fieldType = DescribeValue(field.TypeName());
+			if (fieldType.kind == ValueKind::Pointer || fieldType.kind == ValueKind::Unsupported) continue;
+			if (!ReadValue(value, fieldType, (void*)((uint8*)at + field.Offset()))) return -1;
+			applied += 1;
+		}
+		return applied;
+	}
+
+	bool ReadValue(const DomNode& node, const ValueType& type, void* at) {
+		const ValueKind kind = type.kind;
+		if (kind == ValueKind::Bool && node.Kind() == DomKind::Bool) *(bool*)at = node.AsBool();
+		else if ((kind == ValueKind::Signed || kind == ValueKind::Unsigned) && IsNumber(node)) StoreInteger(at, type.size, node.AsInt());
+		else if (kind == ValueKind::Float && IsNumber(node)) *(float*)at = (float)node.AsFloat();
+		else if (kind == ValueKind::Double && IsNumber(node)) *(double*)at = node.AsFloat();
+		else if (kind == ValueKind::String && node.Kind() == DomKind::String) *(Core::String*)at = Core::String(node.AsView());
+		else if (kind == ValueKind::Enum) return ReadEnum(node, type, at);
+		else if (kind == ValueKind::Array) return ReadArray(node, type, at);
+		else if (kind == ValueKind::FixedArray) return ReadFixedArray(node, type, at);
+		else if (kind == ValueKind::StringMap) return ReadStringMap(node, type, at);
+		else if (kind == ValueKind::Object) return ReadFields(node, type.type, at) >= 0;
+		else return kind == ValueKind::Pointer || kind == ValueKind::Unsupported;
+		return true;
+	}
+}

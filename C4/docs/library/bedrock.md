@@ -95,6 +95,9 @@ than the 16 bytes `raw_alloc` guarantees, so an element such as a `packed float[
 | Algorithms | `Sort()` (by `<`), `SortBy(before)`, `Reverse()`, `LowerBound(v)`, `UpperBound(v)`, `LowerBoundBy(v, before)`, `UpperBoundBy(v, before)` |
 | Iteration | range-for through `ArrayIterator<T>` (yields `T&`); a const array iterates through `ConstArrayIterator<T>` (yields `const T&`) |
 
+`Core::ArrayLayout` and `Core::ResizeEmptyArray(array, count, elementBytes, elementAlign)` give code that knows
+the element type only at run time (the reflection codec) an empty array's storage, zeroed.
+
 Growth doubles the capacity (at least 4 on the first insert). Every container's insertions (`Queue::Push`,
 `Stack::Push`, `List::PushBack` and the rest, `HashMap::Insert`) take their value the same way, so
 `Core::Array<Net::TcpStream>` or `Core::HashMap<int64, Net::TcpStream>` filled with `take(stream)` work. `before(a, b)` is any callable that says
@@ -386,10 +389,28 @@ point is a file, not a link).
     An invalid node - a missing member, an index out of range - reads as Null, and a lookup never adds a
     node.
   - Reflection bridge: `ReflectFrom(type, object)` builds a node tree from an object;
-    `ReflectTo(type, node, destination)` fills an object from a tree (scalars and nested objects) and
-    returns how many fields it set. Both skip alias fields ([reflection](../runtime/02-reflection.md#2-registry-model)),
-    so a union or a set of views is written once, through its first view, and a vector by its lanes
-    (`{"x":1.0,"y":2.0,"z":3.0}`).
+    `ReflectTo(type, node, destination)` fills an object from a tree and returns how many fields it set, or -1
+    when a member does not fit its field. Both go through the reflection codec below and skip alias fields
+    ([reflection](../runtime/02-reflection.md#2-registry-model)), so a union or a set of views is written once,
+    through its first view, and a vector by its lanes (`{"x":1.0,"y":2.0,"z":3.0}`).
+- **Reflection codec** (`reflectvalue.ch`, `reflecttext.ch`; B56, D-72): values of any reflected type to and from a
+  DOM, by what their type names say: numbers and `bool`, `Core::String`, enums (an enumerator's name; a number
+  reads too), `Core::Array<T>`, `T[N]`, `Core::HashMap<Core::String, V>` (a JSON object, in the map's order),
+  objects and unions, nested to any depth. A pointer is written as null and never read; a type with no such form
+  (a `func`, a map with other keys) the same. `Serialization::ToJson(value, indent)` / `FromJson(text, value)` and
+  `ToYaml` / `FromYaml` do it in one call for any `T` (found through `nameof(T)`). Reading fills the members the
+  text has and keeps the other fields; `null` keeps a field too. Arrays and maps it fills must start empty, and
+  their new elements start zero rather than created, then take what the text has - a type whose zero is a valid
+  value (every Bedrock value type is). A member that does not fit its field (a string for a number, a name that is
+  no enumerator, more elements than a `T[N]`) makes the read false. The pieces: `DescribeValue(nameof(T))`,
+  `WriteValue(doc, type, &value)`, `ReadValue(node, type, &value)`, `ReadFields`.
+
+```c4
+struct Settings { public Core::String name; public Core::Array<int32> sizes; public Core::HashMap<Core::String, Core::String> labels; }
+Core::String json = Serialization::ToJson(settings, 2);
+Settings loaded;
+if (!Serialization::FromJson(json.View(), loaded)) printf("not settings\n");
+```
 - **JSON** (`json.ch`): `Serialization::WriteJson(node, out, indent)` (0 = compact). Floats are written
   in the shortest form that reads back as the same double, always with a fraction or exponent (`1.0`);
   NaN and the infinities, which JSON cannot express, are `null`. Control characters are `\uXXXX`.
@@ -874,11 +895,11 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 47 files, 457 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 48 files, 464 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -906,6 +927,7 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Math library in `Math::`: vectors with swizzling, matrices, quaternions, the math functions, left-handed, 0-1 NDC, parity with GLM | **Implemented** (section 9), opt-in through `include "math.ch"` |
 | Math with explicit SSE/AVX intrinsics and wide (AVX) batches of vectors | **Implemented** (section 9: the vector and matrix functions on the SIMD intrinsics, `batch.ch`) |
 | ObjectDescription with in-memory JSON and YAML read and write | **Implemented** (one YAML document; no anchors or tags) |
+| Objects to and from JSON and YAML through reflection, strings, arrays, maps and enums included | **Implemented** (section 6, B56) |
 | Streaming reads (decode a large file while it is still being read) | **Planned** |
 | Paths, directory listing, create, remove, rename | **Implemented** |
 | File information and times, copies of files and trees, absolute and canonical paths, watching a directory | **Implemented** (section 5, B53) |

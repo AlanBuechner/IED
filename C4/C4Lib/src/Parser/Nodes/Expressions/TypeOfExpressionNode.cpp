@@ -12,6 +12,7 @@ namespace Scripting
 			if (text == "alignof") return Kind::AlignOf;
 			if (text == "offsetof") return Kind::OffsetOf;
 			if (text == "__uuidof") return Kind::UuidOf;
+			if (text == "nameof") return Kind::NameOf;
 			return Kind::SizeOf;
 		}
 
@@ -32,7 +33,7 @@ namespace Scripting
 
 	bool TypeOfExpressionNode::IsKeyword(const Core::String& text)
 	{
-		return text == "sizeof" || text == "alignof" || text == "offsetof" || text == "__uuidof";
+		return text == "sizeof" || text == "alignof" || text == "offsetof" || text == "__uuidof" || text == "nameof";
 	}
 
 	Ref<TypeOfExpressionNode> TypeOfExpressionNode::TryParse(ParserState& state)
@@ -90,7 +91,7 @@ namespace Scripting
 		Lexer& lexer = state.GetLexer();
 		if (lexer.PeekCompound().GetType() != TokenType::OpenParen)
 			return false;
-		const bool takesExpression = m_Kind == Kind::SizeOf || m_Kind == Kind::AlignOf;
+		const bool takesExpression = m_Kind == Kind::SizeOf || m_Kind == Kind::AlignOf || m_Kind == Kind::NameOf;
 		Ref<AstNode> expression = takesExpression ? SpeculativeParenthesizedExpression(state) : nullptr;
 
 		auto undo = LexerUndoScope(lexer);
@@ -146,7 +147,7 @@ namespace Scripting
 	// `sizeof expr` / `sizeof(a + b)`: the operand binds like a prefix operator's (`sizeof x * 2` is `(sizeof x) * 2`).
 	bool TypeOfExpressionNode::ParseExpressionOperand(ParserState& state)
 	{
-		if (m_Kind != Kind::SizeOf && m_Kind != Kind::AlignOf)
+		if (m_Kind != Kind::SizeOf && m_Kind != Kind::AlignOf && m_Kind != Kind::NameOf)
 			return false;
 		m_Operand = PrattParser::ParseExpression(state, BindPower::PrefixOperand);
 		if (!m_Operand)

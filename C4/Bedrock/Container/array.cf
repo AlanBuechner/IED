@@ -5,6 +5,26 @@ include "array.ch"
 
 namespace Core
 {
+	bool ResizeEmptyArray(void* array, int64 count, int64 elementBytes, int64 elementAlign) {
+		ArrayLayout* layout = (ArrayLayout*)array;
+		if (layout->count != 0 || count < 0) return false;
+		if (count == 0) return true;
+		const uint64 bytes = (uint64)(count * elementBytes);
+		const bool aligned = (uint64)elementAlign > kRawAllocAlignment;
+		void* storage = aligned ? raw_alloc_aligned(bytes, (uint64)elementAlign) : raw_alloc(bytes);
+		memset(storage, 0, bytes);
+		gc_register_region(storage, bytes);
+		if (layout->data) {
+			gc_unregister_region(layout->data);
+			if (aligned) raw_free_aligned(layout->data);
+			else raw_free(layout->data);
+		}
+		layout->data = storage;
+		layout->count = count;
+		layout->capacity = count;
+		return true;
+	}
+
 	template<T>
 	private void Array::Reallocate(int64 newCapacity) {
 		T* old = data;

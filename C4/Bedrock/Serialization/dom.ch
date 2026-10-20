@@ -71,9 +71,9 @@ namespace Serialization
 
 		public int64 NodeCount() const { return recordCount; }
 
-		// Reflection bridge: a node tree of a reflected object (scalars and nested objects; other fields are
-		// Null), and an object's members applied to one (missing members are left alone). ReflectTo returns
-		// how many fields it set, or -1 when a nested member is not an object.
+		// Reflection bridge (reflectvalue.ch): a node tree of a reflected object, and an object's members applied to
+		// one (missing members are left alone). ReflectTo returns how many fields it set, or -1 when a member does not
+		// fit its field.
 		public DomNode ReflectFrom(Reflection::Type type, const void* object);
 		public int32 ReflectTo(Reflection::Type type, const DomNode& object, void* destination);
 

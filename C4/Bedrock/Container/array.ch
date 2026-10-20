@@ -95,4 +95,17 @@ namespace Core
 		private int64 count;
 		private int64 capacity;
 	}
-}
+
+	// The layout every Array<T> shares, for code that knows the element type only at run time (Serialization reading
+	// through reflection).
+	struct ArrayLayout
+	{
+		public void* data;
+		public int64 count;
+		public int64 capacity;
+	}
+
+	// Gives the empty Array<T> at `array` `count` elements of `elementBytes` aligned to `elementAlign` (sizeof(T) and
+	// alignof(T)), stored as Array<T> stores them and zero rather than created: for element types whose zero is a
+	// valid value. False when the array is not empty.
+	bool ResizeEmptyArray(void* array, int64 count, int64 elementBytes, int64 elementAlign);

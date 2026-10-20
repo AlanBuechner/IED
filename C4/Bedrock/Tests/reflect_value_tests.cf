@@ -1,0 +1,186 @@
+// Serialization's reflection codec (reflectvalue, reflecttext): every kind of field to JSON and YAML and back, partial
+// documents, enums by name and number, mismatches refused, arrays and maps that must start empty, values that are not
+// objects at the top, and maps built through the shared layout that HashMap then searches and grows as its own.
+
+include "bedrock.ch"
+
+enum class RvMood { Calm = 1, Busy = 2, Lost = 30 }
+
+struct RvPoint
+{
+	public int32 x;
+	public int32 y;
+}
+
+struct RvSettings
+{
+	public Core::String name;
+	public int32 width;
+	public uint8 level;
+	public int64 big;
+	public bool fullscreen;
+	public float scale;
+	public double ratio;
+	public RvMood mood;
+	public Core::Array<int32> numbers;
+	public Core::Array<Core::String> tags;
+	public Core::Array<RvPoint> points;
+	public Core::Array<Core::Array<int32>> grid;
+	public int32[3] fixed;
+	public Core::HashMap<Core::String, RvPoint> named;
+	public Core::HashMap<Core::String, Core::String> labels;
+	public RvPoint origin;
+	public RvPoint* ignored;
+}
+
+static RvPoint Point(int32 x, int32 y) {
+	RvPoint point;
+	point.x = x;
+	point.y = y;
+	return point;
+}
+
+static void Fill(RvSettings& s) {
+	s.name = Core::String("c4 \"quoted\" \xC3\xA9");
+	s.width = -1280;
+	s.level = (uint8)200;
+	s.big = (int64)9000000000;
+	s.fullscreen = true;
+	s.scale = 1.5f;
+	s.ratio = 0.125;
+	s.mood = RvMood::Busy;
+	for (int32 i = 0; i < 3; ++i) s.numbers.Push(i * 10);
+	s.tags.Push(Core::String("a"));
+	s.tags.Push(Core::String("bc"));
+	s.points.Push(Point(1, 2));
+	s.points.Push(Point(3, 4));
+	Core::Array<int32> row;
+	row.Push(7);
+	s.grid.Push(row);
+	s.grid.Push(Core::Array<int32>());
+	s.fixed[0] = 5;
+	s.fixed[1] = 6;
+	s.fixed[2] = 7;
+	s.named.Insert(Core::String("home"), Point(10, 20));
+	s.labels.Insert(Core::String("k"), Core::String("v"));
+	s.origin = Point(-1, -2);
+}
+
+static bool SameSettings(RvSettings& a, RvSettings& b) {
+	bool same = a.name == b.name && a.width == b.width && a.level == b.level && a.big == b.big && a.fullscreen == b.fullscreen;
+	same = same && a.scale == b.scale && a.ratio == b.ratio && a.mood == b.mood && a.origin.x == b.origin.x && a.origin.y == b.origin.y;
+	same = same && a.numbers.Count() == b.numbers.Count() && b.numbers[2] == 20 && b.tags.Count() == 2 && b.tags[1] == "bc";
+	same = same && b.points.Count() == 2 && b.points[1].y == 4 && b.grid.Count() == 2 && b.grid[0][0] == 7 && b.grid[1].IsEmpty();
+	same = same && b.fixed[2] == 7 && b.named.Get(Core::String("home")).y == 20 && b.labels.Get(Core::String("k")) == "v";
+	return same && b.ignored == nullptr;
+}
+
+[test("serialization.reflect_value")]
+class ReflectValueTests {
+	[test("json_round_trip")]
+	public static void TestJsonRoundTrip() {
+		RvSettings written;
+		Fill(written);
+		Core::String json = Serialization::ToJson(written);
+		assert_true(json.View().Contains(Core::StringView("\"mood\":\"Busy\"")), "an enum by its name");
+		assert_true(json.View().Contains(Core::StringView("\"fixed\":[5,6,7]")) && json.View().Contains(Core::StringView("\"ignored\":null")), json.CStr());
+		assert_true(json.View().Contains(Core::StringView("\"grid\":[[7],[]]")) && json.View().Contains(Core::StringView("\"level\":200")), "nested arrays, unsigned bytes");
+		RvSettings read;
+		assert_true(Serialization::FromJson(json.View(), read), "read back");
+		assert_true(SameSettings(written, read), "every field the same");
+	}
+
+	[test("yaml_round_trip")]
+	public static void TestYamlRoundTrip() {
+		RvSettings written;
+		Fill(written);
+		RvSettings read;
+		assert_true(Serialization::FromYaml(Serialization::ToYaml(written).View(), read), "read back");
+		assert_true(SameSettings(written, read), "every field the same through YAML");
+	}
+
+	[test("partial_and_enums")]
+	public static void TestPartialAndEnums() {
+		RvSettings s;
+		s.name = Core::String("kept");
+		assert_true(Serialization::FromJson(Core::StringView("{\"width\":5,\"unknown\":1}"), s), "a member that is no field is passed over");
+		assert_true(s.width == 5 && s.name == "kept", "the fields the text has, the rest kept");
+		assert_true(Serialization::FromJson(Core::StringView("{\"mood\":30}"), s) && s.mood == RvMood::Lost, "an enum by number");
+		assert_true(Serialization::FromJson(Core::StringView("{\"mood\":\"Calm\"}"), s) && s.mood == RvMood::Calm, "by name");
+		assert_true(!Serialization::FromJson(Core::StringView("{\"mood\":\"Happy\"}"), s), "a name that is no enumerator");
+		assert_true(Serialization::FromJson(Core::StringView("{\"name\":null}"), s) && s.name == "kept", "null leaves a field as it was");
+	}
+
+	[test("mismatches")]
+	public static void TestMismatches() {
+		RvSettings s;
+		assert_true(!Serialization::FromJson(Core::StringView("{\"width\":\"wide\"}"), s), "a string for a number");
+		assert_true(!Serialization::FromJson(Core::StringView("{\"numbers\":5}"), s), "a number for an array");
+		assert_true(!Serialization::FromJson(Core::StringView("{\"fixed\":[1,2,3,4]}"), s), "more elements than a fixed array holds");
+		assert_true(!Serialization::FromJson(Core::StringView("[1]"), s), "an array for an object");
+		assert_true(!Serialization::FromJson(Core::StringView("{\"width\":"), s), "not JSON");
+		RvSettings full;
+		full.numbers.Push(1);
+		assert_true(!Serialization::FromJson(Core::StringView("{\"numbers\":[2]}"), full) && full.numbers.Count() == 1, "an array must start empty");
+	}
+
+	[test("not_objects")]
+	public static void TestNotObjects() {
+		Core::Array<RvPoint> points;
+		points.Push(Point(1, 2));
+		assert_se("[{\"x\":1,\"y\":2}]", Serialization::ToJson(points).CStr(), "an array at the top");
+		Core::Array<RvPoint> back;
+		assert_true(Serialization::FromJson(Core::StringView("[{\"x\":3,\"y\":4},{\"x\":5}]"), back) && back.Count() == 2 && back[1].x == 5 && back[1].y == 0, "elements start zero");
+		assert_se("\"hi\"", Serialization::ToJson(Core::String("hi")).CStr(), "a string");
+		int32 number = 0;
+		assert_true(Serialization::FromJson(Core::StringView("42"), number) && number == 42, "a number");
+		assert_se("\"Lost\"", Serialization::ToJson(RvMood::Lost).CStr(), "an enum");
+	}
+
+	[test("maps_are_hashmaps")]
+	public static void TestMapsAreHashMaps() {
+		Core::StringBuilder json;
+		json.Append("{");
+		for (int32 i = 0; i < 100; ++i) {
+			if (i > 0) json.Append(",");
+			json.Append("\"k");
+			json.AppendInt(i);
+			json.Append("\":{\"x\":");
+			json.AppendInt(i);
+			json.Append(",\"y\":0}");
+		}
+		json.Append(",\"k7\":{\"x\":-1}}");
+		Core::HashMap<Core::String, RvPoint> map;
+		assert_true(Serialization::FromJson(json.View(), map), "read");
+		assert_eq((int64)100, map.Count(), "every key once: of two k7 the first stays");
+		bool found = true;
+		for (int32 i = 0; i < 100; ++i) {
+			Core::StringBuilder key;
+			Core::Format(&key, "k{0}", (int64)i);
+			if (map.Get(key.ToString()).x != i) found = false;
+		}
+		assert_true(found, "HashMap finds every key the reader placed");
+		for (int32 i = 100; i < 300; ++i) {
+			Core::StringBuilder key;
+			Core::Format(&key, "k{0}", (int64)i);
+			map.Insert(key.ToString(), Point(i, 0));
+		}
+		assert_true(map.Count() == 300 && map.Get(Core::String("k42")).x == 42 && map.Get(Core::String("k299")).x == 299, "and grows it as its own");
+		Core::HashMap<Core::String, RvPoint> full;
+		full.Insert(Core::String("a"), Point(1, 1));
+		assert_true(!Serialization::FromJson(Core::StringView("{\"b\":{}}"), full), "a map must start empty");
+	}
+
+	[test("dom_bridge")]
+	public static void TestDomBridge() {
+		RvSettings written;
+		Fill(written);
+		Reflection::Type type = Reflection::Type(nullptr).FindByName(nameof(RvSettings));
+		Serialization::DomDoc doc;
+		Serialization::DomNode tree = doc.ReflectFrom(type, (const void*)&written);
+		assert_true(tree.Member("tags").At(1).AsView() == "bc" && tree.Member("origin").Member("y").AsInt() == -2, "ReflectFrom writes every kind of field");
+		RvSettings read;
+		assert_eq(16, doc.ReflectTo(type, tree, (void*)&read), "ReflectTo sets every field but the pointer");
+		assert_true(SameSettings(written, read), "the same");
+	}
+}

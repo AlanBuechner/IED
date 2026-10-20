@@ -31,6 +31,7 @@ Rules:
 |---|---|
 | `sizeof(T)` / `sizeof(expr)` | size in bytes, `int64` constant; the expression is not evaluated ([10](10-expressions.md#41-sizeof-alignof-offsetof)) |
 | `__uuidof(T)` | pointer to the type's 16-byte `_GUID`: its `[uuid("...")]` ([13](13-interop.md)), else the RFC 4122 version 5 UUID of `"c4:"` + its qualified name in the URL namespace (`uuid.uuid5(uuid.NAMESPACE_URL, "c4:Ns::Box<int32>")` in Python), so every type has one (D-43) |
+| `nameof(T)` / `nameof(expr)` | the type's qualified name as reflection registers it (D-50): `int32`, `Geo::Point*`, `Core::Array<Geo::Point>`, a string literal; the expression is not evaluated. Generic code finds a template argument's reflection with it: `Reflection::Type(nullptr).FindByName(nameof(T))` (D-72) |
 | `__init_list<T>` | built-in initializer-list type: a braced list passed to it becomes `{data, size}`; maps to C++ `std::initializer_list<T>` |
 | `take(x)` | the value of the variable, field or element `x`, moved out; `x` is left zero ([06](06-lifecycle-and-operators.md#64-copy-move-and-assignment)) |
 | `new (p) T(args)` | builds a `T` in the storage `p` points to (any pointer): zeroes it, then constructs as `T(args)` does (a create, an aggregate fill, or a copy for `new (p) T(x)` with `x` a `T`); yields `p` as a `T*`. Nothing is registered with the GC: the caller destroys it |

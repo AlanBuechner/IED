@@ -14,7 +14,7 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 | Need | Status | Notes |
 |---|---|---|
 | Threads, mutex, condvar, atomics, futures, job system | **exists** | `C4/Bedrock/Threading/*`; JobSystem is game-tuned, not I/O-aware |
-| JSON parse/serialize | **exists** (DOM) | No streaming parser; reflection-driven serialization handles only scalars + nested structs (no `String`, `Array`, `HashMap`, enum names) |
+| JSON parse/serialize | **exists** (DOM) | No streaming parser; reflection-driven serialization of any type with strings, arrays, string-keyed maps and enum names: `Serialization::ToJson` / `FromJson` (C4 B56) |
 | UTF-8 strings | **exists** | UTF-8 <-> UTF-16 helpers exist only inside the runtime; Win32 `W` APIs need them exposed |
 | File system basics | **exists** | read/write/list/mkdir/remove/rename/exists/size, `FS::GetInfo` (kind, size, times), copies of files and trees, absolute and canonical paths (C4 B53); **missing** locking, mmap |
 | File watching | **exists** | `FS::Watcher` over `ReadDirectoryChangesW` (B53): recursive, renames paired, `Overflow` when changes were dropped |
@@ -75,7 +75,7 @@ Implementation of `src/` starts when all of these are true. Each item is a work 
 3. [x] `FS::Watch`, stat/mtime, copy, canonical paths. Done in C4 B53 (D-69) as `FS::Watcher`, `FS::GetInfo`, `CopyFile` / `CopyTree`, `CanonicalPath`.
 4. [ ] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake). Wall clock (`Platform::`, B40), base64 and SHA-1 (B51) done; UTF-16 helpers still runtime-internal.
 5. [x] Regex engine available to C4 code. Done in C4 B55 (D-71).
-6. [ ] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide).
+6. [x] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide). Done in C4 B56 (D-72): DTOs need no hand-written codecs.
 7. [ ] Suspected bugs S1-S7 verified; confirmed ones fixed (or the C-shim-only policy formally adopted and S1-S6 deprioritized).
 8. [ ] **Scale test:** a synthetic 50k-line, 200-file, multi-threaded C4 program compiles at -O0 and -O2, runs a 24 h soak under load without GC or threading faults; compile time measured.
 9. [ ] Exceptions-at-thread-boundary policy documented (catch-all wrappers), `thread_attach` documented for native callbacks.

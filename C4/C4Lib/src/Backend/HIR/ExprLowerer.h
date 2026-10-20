@@ -215,6 +215,7 @@ namespace Scripting
 		/// `sizeof...(Ts)`: the element count of a pack, an int64 constant.
 		QueryResult<Value> ResolveSizeOfPack(const TypeOfExpressionNode* n);
 		QueryResult<Value> ResolveUuidOf(const TypeOfExpressionNode* n);
+		QueryResult<Value> ResolveNameOf(const TypeOfExpressionNode* n);
 		QueryResult<const Type*> QueryOperandType(const TypeOfExpressionNode* n);
 		QueryResult<const Type*> UnevaluatedType(const AstNode* operand);
 		// A lambda expression: a closure object (LambdaLowerer).

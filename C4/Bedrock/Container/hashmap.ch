@@ -81,4 +81,14 @@ namespace Core
 	const uint8 kEmptySlot = 0;
 	const uint8 kLiveSlot = 1;
 	const uint8 kRemovedSlot = 2;
-}
+
+	// The layout every HashMap<K, V> shares, for code that knows V only at run time: Serialization reads and builds
+	// HashMap<Core::String, V> through it (Serialization/reflectvalue.cf), so the two change together.
+	struct HashMapLayout
+	{
+		public void* entries;   // KeyValue<K, V>[capacity]
+		public uint8* states;
+		public int64 count;
+		public int64 used;
+		public int64 capacity;
+	}

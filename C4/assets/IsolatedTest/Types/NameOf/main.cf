@@ -1,0 +1,20 @@
+// nameof(T): a type's qualified name as reflection registers it, a string constant; nameof(expr) names the
+// expression's type. A template names its arguments.
+include "bedrock.ch"
+
+namespace Geo { struct Point { public float x; } }
+
+template<T> const char* NameOf() { return nameof(T); }
+
+static bool Is(const char* name, const char* expected) { return Core::StringView(name) == expected; }
+
+int32 main() {
+	Core::Array<Geo::Point> points;
+	if (!Is(nameof(int32), "int32")) return 1;
+	if (!Is(nameof(Geo::Point*), "Geo::Point*")) return 2;
+	if (!Is(NameOf<Core::Array<Geo::Point>>(), "Core::Array<Geo::Point>")) return 3;
+	if (!Is(nameof(points), "Core::Array<Geo::Point>")) return 4;
+	if (!Is(nameof(points[0].x), "float")) return 5;
+	if (!Reflection::Type(nullptr).FindByName(NameOf<Geo::Point>()).IsValid()) return 6;
+	return 0;
+}
