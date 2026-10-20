@@ -119,7 +119,7 @@
 .ln.add .sign { color: var(--diff-add-gutter); }
 .ln.del .sign { color: var(--diff-del-gutter); }
 .ln.add .no, .ln.del .no { color: var(--text-2); }
-.ln.fill { background: var(--diff-filler); }
+.ln.fill { background: repeating-linear-gradient(-45deg, var(--diff-filler) 0 5px, var(--bg-2) 5px 10px); }
 .ln.hunk { color: var(--text-2); background: var(--bg-1); font-size: var(--font-size-sm); }
 .ln.hunk .tx { padding-left: var(--space-4); }
 .w-add { background: var(--diff-add-word); border-radius: var(--radius-1); }

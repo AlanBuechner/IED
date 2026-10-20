@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en" data-step="diff">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 3 - Diff review from a notification</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/code.css">
+	<link rel="stylesheet" href="css/chat.css">
+	<link rel="stylesheet" href="css/review.css">
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="chat">
+	<div class="toolbar"></div>
+
+	<!-- phone heads, one per step (?step=notification | changes | diff) -->
+	<div class="phone-head" data-step="notification">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t"><b>Notifications</b></div>
+		<span class="ib"><i class="ci ci-check-all"></i></span>
+		<span class="ib"><i class="ci ci-settings"></i></span>
+	</div>
+	<div class="phone-head" data-step="changes">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t t2"><b>Changes (4)</b><span class="subt">Port logging &middot; since 21:08</span></div>
+		<span class="ib"><i class="ci ci-ellipsis"></i></span>
+	</div>
+	<div class="phone-head" data-step="diff">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t t2"><b>Log.cf &nbsp;<span class="subt">1 of 4</span></b><span class="subt">Engine/src/Core &middot; <span class="plus">+120</span> <span class="minus">-31</span></span></div>
+		<span class="ib"><i class="ci ci-comment"></i></span>
+		<span class="ib"><i class="ci ci-ellipsis"></i></span>
+	</div>
+
+	<main class="activity review-act">
+		<!-- desktop: review document in the chat activity, opened from the notification center -->
+		<section class="review-doc">
+			<div class="tabs chat-tabs">
+				<div class="tab"><i class="ci ci-comment-discussion"></i><span class="name">Port logging</span><span class="glyph attn">!</span><span class="glyph">3/7</span><i class="ci ci-close x"></i></div>
+				<div class="tab on"><i class="ci ci-diff-multiple"></i><span class="name">Review: Port logging</span><i class="ci ci-close x"></i></div>
+				<div class="tab"><i class="ci ci-loading spin"></i><span class="name">Fix engine.time test</span><i class="ci ci-close x"></i></div>
+				<div class="tabs-tail"><span class="ib"><i class="ci ci-history"></i></span></div>
+			</div>
+			<div class="review-head">
+				<i class="ci ci-diff-multiple c-1"></i><span class="title">Changes by Port logging</span>
+				<span class="muted">4 files &middot; <span class="plus">+227</span> <span class="minus">-32</span> &middot; since run start 21:08 &middot; 1 edit awaiting approval</span>
+				<span class="grow"></span>
+				<span class="seg"><span class="on">Side by side</span><span>Inline</span></span>
+				<span class="btn"><i class="ci ci-discard"></i>Revert all</span>
+				<span class="btn"><i class="ci ci-comment"></i>Send review to chat</span>
+				<span class="btn primary"><i class="ci ci-check"></i>Accept all</span>
+			</div>
+			<div class="review-body">
+				<aside class="files scroll">
+					<div class="group-head">Files<span class="meta">by folder</span></div>
+					<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">Engine/src/Core</span></div>
+					<div class="row sel" style="--d:1"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">Log.cf</span><span class="dot warn sm" title="Edit awaiting approval"></span><span class="stat"><span class="plus">+120</span> <span class="minus">-31</span></span></div>
+					<div class="row" style="--d:1"><span class="tw"></span><i class="ci ci-file-code ft-header"></i><span class="name">Log.ch</span><span class="stat"><span class="plus">+46</span></span></div>
+					<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">Engine/src/Engine/Core</span></div>
+					<div class="row" style="--d:1"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">Application.cf</span><span class="stat"><span class="plus">+3</span> <span class="minus">-1</span></span></div>
+					<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">Engine/src/tests</span></div>
+					<div class="row" style="--d:1"><span class="tw"></span><i class="ci ci-beaker ft-source"></i><span class="name">log.cf</span><span class="muted" style="font-size:11px">worker</span><span class="stat"><span class="plus">+58</span></span></div>
+					<div class="group-head" style="margin-top:8px">Turns</div>
+					<div class="row" style="--d:0"><span class="tw"></span><i class="ci ci-sparkle c-ai"></i><span class="name">21:31 Agent</span><span class="stat muted">3 files</span></div>
+					<div class="row" style="--d:0"><span class="tw"></span><i class="ci ci-sparkle c-ai"></i><span class="name">21:46 Agent (after inject)</span><span class="stat muted">1 pending</span></div>
+					<div class="row" style="--d:0"><span class="tw"></span><i class="ci ci-tools c-1"></i><span class="name">worker sub-agent</span><span class="stat muted">1 file</span></div>
+				</aside>
+				<div class="diffs">
+					<div class="file-head"><i class="ci ci-file-code ft-source"></i><b>Engine/src/Core/Log.cf</b><span class="muted">M</span><span class="grow"></span><span class="btn flat"><i class="ci ci-go-to-file"></i>Open</span><span class="btn flat"><i class="ci ci-discard"></i>Revert file</span></div>
+					<div class="hunk-head"><span>@@ -1,7 +1,8 @@</span><span class="grow"></span><span class="muted" style="font-family:var(--font-ui)">applied 21:33</span><span class="btn flat">Revert hunk</span><span class="btn flat">Comment</span></div>
+					<div class="code" data-kind="split" data-nohunk>
+<pre>
+@@ -1,7 +1,8 @@
+ `com:// Log - port of Icepick Core::Log (Frost/Projects/Core/src/Core/Log.{h,cpp}).`
+-`com:// ``com w-del:TODO: port from Icepick`
++`com:// ``com w-add:Sinks receive formatted records; RingSink keeps the last N for the in-game console.`
+
+ `mac:include` `str:"bedrock.ch"`
+ `mac:include` `str:"Core/Log.ch"`
++`mac:include` `str:"Core/Ring.ch"`
+ `mac:include` `str:"Core/Time.ch"`
+</pre>
+					</div>
+					<div class="hunk-head pending"><span>@@ -21,8 +21,6 @@ void RingSink::Write</span><span class="tag">proposed by fs_edit &middot; awaiting approval 2m 08s</span><span class="grow"></span><span class="btn">Deny&hellip;</span><span class="btn primary"><i class="ci ci-check"></i>Allow</span></div>
+					<div class="code" data-kind="split" data-nohunk>
+<pre>
+@@ -21,8 +21,6 @@
+ 	`kw:void` `ty:RingSink`::`fn:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`)
+ 	{
+-		`mem:m_Buffer`[`mem:m_Head`] `op:=` `par:record`;
+-		`mem:m_Head` `op:=` (`mem:m_Head` `op:+` `num:1`) `op:%` `mem:m_Capacity`;
+-		`ctl:if` (`mem:m_Count` `op:==` `mem:m_Capacity`) `mem:m_Dropped` `op:+=` `num:1`;
+-		`ctl:else` `mem:m_Count` `op:+=` `num:1`;
++		`mem w-add:m_Records`.`fn w-add:Push`(`par:record`);
++		`mem:m_Dropped` `op:+=` `mem w-add:m_Records`.`fn w-add:Overwrote`() ? `num:1` : `num:0`;
+ 	}
+
+</pre>
+					</div>
+					<div class="hunk-head"><span>@@ -38,6 +36,12 @@ string Log::FormatRecord</span><span class="grow"></span><span class="muted" style="font-family:var(--font-ui)">applied 21:35</span><span class="btn flat">Revert hunk</span><span class="btn flat">Comment</span></div>
+					<div class="code" data-kind="split" data-nohunk>
+<pre>
+@@ -38,6 +36,12 @@
++	`kw:string` `ty:Log`::`fn:FormatRecord`(`kw:const` `ty:LogRecord`&amp; `par:record`)
++	{
++		`ctl:return` `ns:Core`::`fn:Format`(`str:"[{:.3f}] [{}] {}: {}"`,
++			`par:record`.`mem:time`, `fn:LevelName`(`par:record`.`mem:level`), `par:record`.`mem:category`, `par:record`.`mem:message`);
++	}
++
+ 	`kw:void` `ty:Log`::`fn:Write`(`ty:LogLevel` `par:level`, `kw:const` `kw:string`&amp; `par:category`, `kw:const` `kw:string`&amp; `par:message`)
+ 	{
+-		`ctl:if` (`par:level` `op:&lt;` `ty:LogLevel`.`con:Info`) `ctl:return`;
++		`ctl:if` (`par:level` `op:&lt;` `var w-add:s_MinLevel`) `ctl:return`;
+</pre>
+					</div>
+					<div class="hunk-head"><span>@@ -52,9 +56,14 @@ void Log::Write</span><span class="grow"></span><span class="muted" style="font-family:var(--font-ui)">applied 21:35</span><span class="btn flat">Revert hunk</span><span class="btn flat">Comment</span></div>
+					<div class="code" data-kind="split" data-nohunk>
+<pre>
+@@ -52,9 +56,14 @@
+ 		`ty:LogRecord` `var:record`;
+ 		`var:record`.`mem:time` `op:=` `ty:Time`::`fn:GetTime`();
+-		`fn:printf`(`str:"%s\n"`, `par:message`.`fn:CStr`());
++		`var:record`.`mem:level` `op:=` `par:level`;
++		`var:record`.`mem:category` `op:=` `par:category`;
++		`var:record`.`mem:message` `op:=` `par:message`;
++		`ctl:for` (`ty:LogSink`* `var:sink` : `var:s_Sinks`) `var:sink`-&gt;`fn:Write`(`var:record`);
+ 	}
+</pre>
+					</div>
+					<div class="file-head"><i class="ci ci-file-code ft-header"></i><b>Engine/src/Core/Log.ch</b><span class="muted">A</span><span class="grow"></span><span class="btn flat"><i class="ci ci-go-to-file"></i>Open</span><span class="btn flat"><i class="ci ci-discard"></i>Revert file</span></div>
+					<div class="code" data-kind="split" data-nohunk>
+<pre>
+@@ -0,0 +1,12 @@
++`com:// Log - declarations (port of Icepick Core::Log). Implementation in Log.cf.`
++`mac:include` `str:"Core/Ring.ch"`
++
++`kw:namespace` `ns:Engine`
++{
++	`kw:enum` `ty:LogLevel` { `con:Trace`, `con:Info`, `con:Warn`, `con:Error`, `con:Fatal` }
++
++	`kw:const` `kw:int64` `con:LOG_RING_CAPACITY` `op:=` `num:1024`;
++
++	`kw:struct` `ty:LogRecord`
++	{
++		`kw:public` `kw:double` `mem:time`;
+</pre>
+					</div>
+				</div>
+			</div>
+			<div class="review-comment">
+				<i class="ci ci-comment c-2"></i>
+				<div class="input"><span>Comment to the agent (sent as Inject at the next tool boundary)&hellip;</span></div>
+				<span class="btn">Queue</span><span class="btn">Inject</span>
+			</div>
+		</section>
+
+		<!-- notification center flyout (bell) -->
+		<aside class="flyout">
+			<div class="panel-title">Notifications<span class="grow"></span><span class="btn flat">Mark all read</span><span class="ib"><i class="ci ci-close sm"></i></span></div>
+			<div class="notif-filters"><span class="chip solid">All</span><span class="chip">Needs action 1</span><span class="chip">Builds</span><span class="chip">Chats</span></div>
+			<div class="scroll" style="flex:1">
+				<div class="notif unread sel"><i class="ci ci-shield c-warn"></i><span class="what">Port logging needs approval</span><span class="when">2m</span><span class="detail">fs_edit Engine/src/Core/Log.cf &middot; <span class="plus">+2</span> <span class="minus">-4</span></span><span class="acts"><span class="btn">Review changes</span><span class="btn">Allow</span></span></div>
+				<div class="notif unread"><i class="ci ci-pass c-saved"></i><span class="what">Build succeeded - Game, Development</span><span class="when">4m</span><span class="detail">18.2 s &middot; 2 warnings &middot; started by Port logging</span></div>
+				<div class="notif unread"><i class="ci ci-sparkle c-ai"></i><span class="what">Fix engine.time test finished</span><span class="when">6m</span><span class="detail">12/12 tests passed &middot; 3 files changed &middot; awaiting your review</span></div>
+				<div class="notif"><i class="ci ci-error c-error"></i><span class="what">Shader cache bug: shell_run failed</span><span class="when">21m</span><span class="detail">nuke build exited 1 (D3D12 shader cache path) &middot; agent retried</span></div>
+				<div class="notif"><i class="ci ci-info c-info"></i><span class="what">Phone connected</span><span class="when">38m</span><span class="detail">Pixel 9 (LAN, password) &middot; 2 devices</span></div>
+				<div class="notif"><i class="ci ci-sync c-2"></i><span class="what">Port logging resumed after stall</span><span class="when">52m</span><span class="detail">stream idle 90 s on qwen3.8-27b@spark - retried (1x)</span></div>
+			</div>
+		</aside>
+
+		<!-- phone step 1: notification center -->
+		<section class="pstep" data-step="notification">
+			<div class="notif-filters"><span class="chip solid">All</span><span class="chip">Needs action 1</span><span class="chip">Builds</span><span class="chip">Chats</span></div>
+			<div class="scroll">
+				<div class="notif unread sel"><i class="ci ci-shield c-warn"></i><span class="what">Port logging needs approval</span><span class="when">2m</span><span class="detail">fs_edit Engine/src/Core/Log.cf &middot; <span class="plus">+2</span> <span class="minus">-4</span> &middot; 4 files changed in this run</span><span class="acts"><span class="btn primary">Review changes</span><span class="btn">Allow</span></span></div>
+				<div class="notif unread"><i class="ci ci-pass c-saved"></i><span class="what">Build succeeded - Game</span><span class="when">4m</span><span class="detail">Development &middot; 18.2 s &middot; 2 warnings</span></div>
+				<div class="notif unread"><i class="ci ci-sparkle c-ai"></i><span class="what">Fix engine.time test finished</span><span class="when">6m</span><span class="detail">12/12 tests passed &middot; 3 files changed</span></div>
+				<div class="notif"><i class="ci ci-error c-error"></i><span class="what">Shader cache bug: shell_run failed</span><span class="when">21m</span><span class="detail">nuke build exited 1 &middot; agent retried</span></div>
+				<div class="notif"><i class="ci ci-sync c-2"></i><span class="what">Port logging resumed after stall</span><span class="when">52m</span><span class="detail">stream idle 90 s - retried (1x)</span></div>
+			</div>
+		</section>
+
+		<!-- phone step 2: changes list -->
+		<section class="pstep" data-step="changes">
+			<div class="scroll">
+				<div class="attn-card"><i class="ci ci-shield c-warn"></i><span class="grow">1 edit awaiting approval<br><span class="muted" style="font-size:13px">fs_edit Log.cf &middot; 2m 08s</span></span><i class="ci ci-chevron-right c-2"></i></div>
+				<div class="summary"><span class="plus">+227</span> <span class="minus">-32</span> across 4 files &middot; tasks 3/7</div>
+				<div class="group-head" style="margin-top:8px">Engine/src/Core</div>
+				<div class="row"><i class="ci ci-file-code ft-source"></i><span class="two"><span>Log.cf</span><span class="muted">modified &middot; 1 pending hunk</span></span><span class="dot warn sm"></span><span class="stat"><span class="plus">+120</span> <span class="minus">-31</span></span><i class="ci ci-chevron-right c-2" style="margin-right:4px"></i></div>
+				<div class="row"><i class="ci ci-file-code ft-header"></i><span class="two"><span>Log.ch</span><span class="muted">added</span></span><span class="stat"><span class="plus">+46</span></span><i class="ci ci-chevron-right c-2" style="margin-right:4px"></i></div>
+				<div class="group-head">Engine/src/Engine/Core</div>
+				<div class="row"><i class="ci ci-file-code ft-source"></i><span class="two"><span>Application.cf</span><span class="muted">modified</span></span><span class="stat"><span class="plus">+3</span> <span class="minus">-1</span></span><i class="ci ci-chevron-right c-2" style="margin-right:4px"></i></div>
+				<div class="group-head">Engine/src/tests</div>
+				<div class="row"><i class="ci ci-beaker ft-source"></i><span class="two"><span>log.cf</span><span class="muted">added by worker sub-agent</span></span><span class="stat"><span class="plus">+58</span></span><i class="ci ci-chevron-right c-2" style="margin-right:4px"></i></div>
+			</div>
+			<div class="pbar"><span class="btn"><i class="ci ci-comment"></i>Inject&hellip;</span><span class="btn"><i class="ci ci-discard"></i>Revert all</span><span class="btn primary"><i class="ci ci-check"></i>Accept</span></div>
+		</section>
+
+		<!-- phone step 3: inline diff with the pending hunk -->
+		<section class="pstep" data-step="diff">
+			<div class="scroll">
+				<div class="hunk-head"><span>@@ -1,7 +1,8 @@</span><span class="grow"></span><span class="muted" style="font-family:var(--font-ui)">applied</span></div>
+				<div class="code" data-kind="diff" data-nohunk>
+<pre>
+@@ -1,7 +1,8 @@
+-`com:// TODO: port from Icepick`
++`com:// Sinks receive formatted records; RingSink keeps the last N.`
+
+ `mac:include` `str:"Core/Log.ch"`
++`mac:include` `str:"Core/Ring.ch"`
+ `mac:include` `str:"Core/Time.ch"`
+</pre>
+				</div>
+				<div class="hunk-head pending"><span>@@ -21,8 +21,6 @@</span><span class="grow"></span><span class="tag">awaiting approval</span></div>
+				<div class="code" data-kind="diff" data-nohunk>
+<pre>
+@@ -21,8 +21,6 @@
+ 	`kw:void` `ty:RingSink`::`fn:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`)
+ 	{
+-		`mem:m_Buffer`[`mem:m_Head`] `op:=` `par:record`;
+-		`mem:m_Head` `op:=` (`mem:m_Head` `op:+` `num:1`) `op:%` `mem:m_Capacity`;
+-		`ctl:if` (`mem:m_Count` `op:==` `mem:m_Capacity`) `mem:m_Dropped` `op:+=` `num:1`;
+-		`ctl:else` `mem:m_Count` `op:+=` `num:1`;
++		`mem:m_Records`.`fn:Push`(`par:record`);
++		`mem:m_Dropped` `op:+=` `mem:m_Records`.`fn:Overwrote`() ? `num:1` : `num:0`;
+ 	}
+</pre>
+				</div>
+				<div class="papproval">
+					<div class="t"><i class="ci ci-shield c-warn"></i><span><b>fs_edit</b> &middot; Log.cf &middot; <span class="plus">+2</span> <span class="minus">-4</span></span></div>
+					<div class="acts"><span class="btn primary"><i class="ci ci-check"></i>Allow</span><span class="btn">Deny&hellip;</span><span class="btn"><i class="ci ci-ellipsis"></i></span></div>
+				</div>
+			</div>
+			<div class="pbar"><span class="btn"><i class="ci ci-arrow-left"></i>Prev</span><span class="btn"><i class="ci ci-comment"></i>Inject</span><span class="btn">Next<i class="ci ci-arrow-right"></i></span></div>
+		</section>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar">
+		<span class="st">Ready</span>
+		<span class="st"><i class="ci ci-sparkle c-ai"></i>AI: 2 running, <span class="c-warn">1 needs approval</span></span>
+		<span class="st grow"></span>
+		<span class="st">Review: 4 files &middot; 1 pending</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>

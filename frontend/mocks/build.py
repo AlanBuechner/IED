@@ -5,6 +5,7 @@
 	python -I frontend/mocks/build.py shots [prefix]  screenshots at 1920x1080, 1366x768, 390x844 (Playwright)
 	python -I frontend/mocks/build.py all     icons + lint + shots
 
+Lint: inside <pre> code sources a leading space is a diff sign, so the tab check skips them.
 Icons: only the codicons the mocks reference (class "ci-<name>") are embedded, as data-URI masks,
 so the mocks open straight from disk with no server and no font build.
 """
@@ -103,8 +104,10 @@ def lint_file(path):
 	except UnicodeDecodeError as e:
 		return [f"non-ASCII byte at offset {e.start}"]
 	check_color = path.name not in ("theme.css", "codicons.css", "build.py")
+	in_pre = False
 	for number, line in enumerate(text.split("\n"), 1):
-		if path.suffix in INDENT_SUFFIXES and re.match(r"^ +\S", line):
+		in_pre = (in_pre or "<pre>" in line) and "</pre>" not in line
+		if path.suffix in INDENT_SUFFIXES and not in_pre and re.match(r"^ +\S", line):
 			problems.append(f"{number}: indented with spaces")
 		if line.rstrip("\r") != line.rstrip(" \t\r") and line.strip():
 			problems.append(f"{number}: trailing whitespace")

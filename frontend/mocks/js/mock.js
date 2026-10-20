@@ -150,7 +150,7 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 	function renderUnified(el) {
 		let html = "";
 		for (const row of parseDiff(sourceLines(el))) {
-			if (row.kind === "hunk") html += `<div class="ln hunk"><span class="tx">${escapeHtml(row.text)}</span></div>`;
+			if (row.kind === "hunk") html += el.dataset.nohunk === undefined ? `<div class="ln hunk"><span class="tx">${escapeHtml(row.text)}</span></div>` : "";
 			else if (row.kind === "add") html += diffRow("add", "", row.newN, "+", renderLine(row.text));
 			else if (row.kind === "del") html += diffRow("del", row.oldN, "", "-", renderLine(row.text));
 			else html += diffRow("ctx", row.oldN, row.newN, "", renderLine(row.text));
@@ -169,7 +169,7 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 		for (let i = 0; i < rows.length; i++) {
 			const row = rows[i];
 			if (row.kind === "hunk") {
-				const h = `<div class="ln hunk"><span class="tx">${escapeHtml(row.text)}</span></div>`;
+				const h = el.dataset.nohunk === undefined ? `<div class="ln hunk"><span class="tx">${escapeHtml(row.text)}</span></div>` : "";
 				left += h;
 				right += h;
 				continue;
