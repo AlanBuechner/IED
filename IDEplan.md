@@ -33,7 +33,7 @@ we will need a proper settings window to configure everything. this will be an i
 we will need chat tools that can be used by the plugins to interact with the ai.
 in the settings we can configure the AI models and configure the model groups so you can have different models for things like research sub agents or worker sub agents.
 
-the group we should be able to configure different models for planing research worker etc with different temperatures so we can for example have something like claude do the planing then have a temp zero local model do the implementations.
+the group we should be able to configure different models for planing research worker etc with different temperatures so we can for example have something like claude do the planing then have a temp zero local model do the implementations. the main ai should be able to delegate work to other AI models that way the smart models can do the planing then hand off implementation work to the smaller local models to help save on tokens usage.
 
 being able to rout request around when you hit token limits or to pick the best model for a given task taking into account what models are busy and if a request needs more privacy so personal information does not get out to cloud models. 
 

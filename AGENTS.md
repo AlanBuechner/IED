@@ -37,6 +37,8 @@ IED is not built in isolation. When implementation reaches these points, the C4 
 - **C4Assist** — currently Go code written for Echo; rewrite it to target IED.
 - **Bedrock / C4 default library** — needs profiler hooks so C4 apps can use the IED profiler out of the box.
 
+If you find a bug in the C4 compiler or default library document it in the knows-bugs.md file in C4 then resolve the issue validate that it is resolved then remove the bug listed.
+
 ## What "done" looks like for a feature
 
 - Works end-to-end in the running app, verified by screenshots.
