@@ -7,6 +7,7 @@
 #include "Backend/CodeGen/VectorAlignment.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
+#include "Backend/CodeGen/UseSites.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Script/ScriptModulePasses.h"
 #include "Model/TypeHandle.h"
@@ -75,15 +76,35 @@ namespace Scripting
 			{
 				if (!HasBody(*rec) || rec->isLocal || m_Emitted.count(rec)) continue; // nested bodies come with their parent
 				m_Emitted.insert(rec);
+				const size_t errorsBefore = m_LoweringErrors.GetErrors().Count();
 				m_Trees.push_back(std::make_unique<HIRFunction>(LowerFunction(model, m_LoweringErrors, rec)));
 				lowered.push_back(m_Trees.back().get());
+				NoteUse(model, *rec, errorsBefore);
 			}
 			batch.Clear();
 			if (LoweringFailed(errorMessage)) return false;
 			if (lowered.empty()) return true;
 			for (const HIRFunction* tree : lowered)
-				if (tree->complete) m_Emitter.Emit(*tree);
+			{
+				if (!tree->complete) continue;
+				m_Emitter.Emit(*tree);
+				for (const FunctionRecord* rec : m_MCtx.TakeNewFunctions())
+				{
+					m_FirstUsers.emplace(rec, tree);
+					batch.Push(rec);
+				}
+			}
 		}
+	}
+
+	// A template-made body's diagnostics name the instance and where the program first uses it.
+	void CodeGenDriver::NoteUse(const ProgramModel& model, const FunctionRecord& rec, size_t errorsBefore)
+	{
+		Core::Vector<CompilationError>& errors = m_LoweringErrors.GetErrorsMutable();
+		if (errors.Count() == errorsBefore) return;
+		const auto user = m_FirstUsers.find(&rec);
+		const Core::String note = UseNote(model, rec, user == m_FirstUsers.end() ? nullptr : user->second);
+		for (size_t i = errorsBefore; i < errors.Count(); ++i) errors[i].message += note;
 	}
 
 	bool CodeGenDriver::LoweringFailed(std::string* errorMessage) const

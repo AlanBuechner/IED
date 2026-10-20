@@ -28,7 +28,7 @@ namespace Core
 		public int64 Capacity() const { return capacity; }
 		public bool IsEmpty() const { return count == 0; }
 
-		public void Push(const T& value);
+		public void Push(T value);   // copies `value` in, or moves it: Push(take(x))
 		public T Pop();   // the front moved out; a zero T when empty
 		public T& Front() { return data[head]; }
 		public const T& Front() const { return data[head]; }

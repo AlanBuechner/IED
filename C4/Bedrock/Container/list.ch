@@ -53,10 +53,11 @@ namespace Core
 		public const ListNode<T>* Last() const { return tail; }
 
 		// Each returns the new element's node.
-		public ListNode<T>* PushFront(const T& value) { return InsertBefore(head, value); }
-		public ListNode<T>* PushBack(const T& value) { return InsertBefore(nullptr, value); }
-		public ListNode<T>* InsertBefore(ListNode<T>* position, const T& value);   // a null position is the back
-		public ListNode<T>* InsertAfter(ListNode<T>* position, const T& value);    // a null position is the front
+		// Each copies `value` in, or moves it: PushBack(take(x)) puts in a value that cannot be copied.
+		public ListNode<T>* PushFront(T value) { return InsertBefore(head, take(value)); }
+		public ListNode<T>* PushBack(T value) { return InsertBefore(nullptr, take(value)); }
+		public ListNode<T>* InsertBefore(ListNode<T>* position, T value);   // a null position is the back
+		public ListNode<T>* InsertAfter(ListNode<T>* position, T value);    // a null position is the front
 
 		public T PopFront();   // the front moved out; a zero T when empty
 		public T PopBack();    // the back moved out; a zero T when empty
@@ -79,7 +80,7 @@ namespace Core
 		[operator("end")] public ConstListIterator<T> End() const { ConstListIterator<T> it; return it; }
 
 	private:
-		private ListNode<T>* NewNode(const T& value);
+		private ListNode<T>* NewNode(T value);
 		private void FreeNode(ListNode<T>* node);
 		private void Link(ListNode<T>* node, ListNode<T>* before);   // before == null links at the back
 		private void Unlink(ListNode<T>* node);

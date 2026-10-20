@@ -1,0 +1,234 @@
+include "loop.ch"
+include "tcp.ch"
+
+namespace Net
+{
+	const int64 kNsPerMs = 1000000;
+
+	// --- the timer heap ---------------------------------------------------------------------------------------------
+
+	static bool Earlier(const DueTimer& a, const DueTimer& b) { return a.dueNs < b.dueNs || (a.dueNs == b.dueNs && a.id < b.id); }
+
+	static void Swap(Core::Array<DueTimer>& heap, int64 i, int64 j) {
+		const DueTimer kept = heap[i];
+		heap[i] = heap[j];
+		heap[j] = kept;
+	}
+
+	static void HeapPush(Core::Array<DueTimer>& heap, DueTimer timer) {
+		heap.Push(timer);
+		int64 i = heap.Count() - 1;
+		while (i > 0 && Earlier(heap[i], heap[(i - 1) / 2])) {
+			Swap(heap, i, (i - 1) / 2);
+			i = (i - 1) / 2;
+		}
+	}
+
+	static DueTimer HeapPop(Core::Array<DueTimer>& heap) {
+		const DueTimer first = heap[0];
+		heap[0] = heap[heap.Count() - 1];
+		heap.Pop();
+		int64 i = 0;
+		while (true) {
+			int64 least = i;
+			const int64 left = i * 2 + 1;
+			if (left < heap.Count() && Earlier(heap[left], heap[least])) least = left;
+			if (left + 1 < heap.Count() && Earlier(heap[left + 1], heap[least])) least = left + 1;
+			if (least == i) return first;
+			Swap(heap, i, least);
+			i = least;
+		}
+		return first;
+	}
+
+	// --- setting up -------------------------------------------------------------------------------------------------
+
+	[operator("create")] void EventLoop::Init() {
+		if (!wake.Open(Address::Loopback(0)) || !waker.Open(Address::Loopback(0))) {
+			error = Core::String(wake.IsOpen() ? waker.Error() : wake.Error());
+			wake.Close();
+			waker.Close();
+			return;
+		}
+		wakeAddress = wake.LocalAddress();
+	}
+
+	int64 EventLoop::Watch(int64 socket, int32 wanted, func<void(int32)> callback) {
+		if (socket < 0) return 0;
+		LoopWatch watch;
+		watch.socket = socket;
+		watch.wanted = wanted;
+		watch.callback = callback;
+		nextId += 1;
+		watches.Insert(nextId, watch);
+		return nextId;
+	}
+
+	bool EventLoop::Change(int64 watch, int32 wanted) {
+		LoopWatch* found = watches.Find(watch);
+		if (found == nullptr) return false;
+		found->wanted = wanted;
+		return true;
+	}
+
+	bool EventLoop::Unwatch(int64 watch) { return watches.Remove(watch); }
+
+	int64 EventLoop::After(int64 delayMs, func<void()> callback) {
+		LoopTimer timer;
+		timer.dueNs = clock_now_ns() + (delayMs > 0 ? delayMs : (int64)0) * kNsPerMs;
+		timer.callback = callback;
+		nextId += 1;
+		timers.Insert(nextId, timer);
+		DueTimer queued;
+		queued.dueNs = timer.dueNs;
+		queued.id = nextId;
+		HeapPush(due, queued);
+		return nextId;
+	}
+
+	int64 EventLoop::Every(int64 periodMs, func<void()> callback) {
+		const int64 period = periodMs > 0 ? periodMs : (int64)1;
+		const int64 id = After(period, callback);
+		timers.Find(id)->periodNs = period * kNsPerMs;
+		return id;
+	}
+
+	bool EventLoop::Cancel(int64 timer) { return timers.Remove(timer); }
+
+	// --- other threads ----------------------------------------------------------------------------------------------
+
+	bool EventLoop::Post(func<void()> work) {
+		Threading::LockGuard guard(postLock);
+		if (closed || !wake.IsOpen()) return false;
+		posted.Push(work);
+		Wake();
+		return true;
+	}
+
+	void EventLoop::Stop() {
+		stopping.Store(true);
+		Threading::LockGuard guard(postLock);
+		if (!closed) Wake();
+	}
+
+	void EventLoop::Wake() {
+		if (woken.Exchange(true)) return;
+		uint8 byte = (uint8)1;
+		if (waker.SendTo((const void*)&byte, 1, wakeAddress, 0) != 1) woken.Store(false);   // the next Post tries again
+	}
+
+	void EventLoop::Close() {
+		Threading::LockGuard guard(postLock);
+		closed = true;
+		posted.Clear();
+		waker.Close();
+		wake.Close();
+		watches.Clear();
+		timers.Clear();
+		due.Clear();
+	}
+
+	// --- turns ------------------------------------------------------------------------------------------------------
+
+	void EventLoop::Run() {
+		while (!stopping.Load() && IsOpen()) RunOnce(kWaitForever);
+		stopping.Store(false);
+	}
+
+	int32 EventLoop::RunOnce(int32 timeoutMs) {
+		if (!IsOpen()) return 0;
+		Core::Array<PollEntry> entries;
+		Core::Array<int64> ids;
+		entries.Push(PollEntry::For(wake.Socket(), kReadable));
+		ids.Push((int64)0);
+		for (Core::KeyValue<int64, LoopWatch>& watch : watches)
+			if (watch.value.wanted != 0) {
+				entries.Push(PollEntry::For(watch.value.socket, watch.value.wanted));
+				ids.Push(watch.key);
+			}
+		Poll(entries, WaitFor(timeoutMs));
+		if (entries[0].ready != 0) Drain();
+		return RunReadySockets(entries, ids) + RunDueTimers() + RunPosted();
+	}
+
+	// How long this turn may wait: not past the first due timer, and not at all with work posted.
+	int32 EventLoop::WaitFor(int32 timeoutMs) {
+		{
+			Threading::LockGuard guard(postLock);
+			if (!posted.IsEmpty()) return 0;
+		}
+		if (due.IsEmpty()) return timeoutMs;
+		const int64 untilNs = due[0].dueNs - clock_now_ns();
+		const int64 untilMs = untilNs <= 0 ? (int64)0 : (untilNs + kNsPerMs - 1) / kNsPerMs;
+		if (timeoutMs >= 0 && (int64)timeoutMs < untilMs) return timeoutMs;
+		return untilMs > (int64)2147483647 ? (int32)2147483647 : (int32)untilMs;
+	}
+
+	// The wake socket's bytes, then `woken` cleared: work posted before that is in the queue this turn reads, and work
+	// posted after it sends a byte the next turn sees.
+	void EventLoop::Drain() {
+		uint8[64] bytes;
+		Address from;
+		while (wake.ReceiveFrom((void*)&bytes[0], 64, from, 0) > 0) {}
+		woken.Store(false);
+	}
+
+	// Each ready socket's callback, unless an earlier callback this turn unwatched it.
+	int32 EventLoop::RunReadySockets(Core::Array<PollEntry>& entries, Core::Array<int64>& ids) {
+		int32 ran = 0;
+		for (int64 i = 1; i < entries.Count(); ++i) {
+			if (entries[i].ready == 0) continue;
+			LoopWatch* watch = watches.Find(ids[i]);
+			if (watch == nullptr || watch->wanted == 0) continue;
+			func<void(int32)> callback = watch->callback;
+			callback(entries[i].ready);
+			ran += 1;
+		}
+		return ran;
+	}
+
+	// Timers due when the turn began. A periodic one is due again before its callback runs; a cancelled or moved one's
+	// old place in the heap is skipped.
+	int32 EventLoop::RunDueTimers() {
+		const int64 now = clock_now_ns();
+		int32 ran = 0;
+		while (!due.IsEmpty() && due[0].dueNs <= now) {
+			const DueTimer next = HeapPop(due);
+			LoopTimer* timer = timers.Find(next.id);
+			if (timer == nullptr || timer->dueNs != next.dueNs) continue;
+			func<void()> callback = timer->callback;
+			if (timer->periodNs == 0) timers.Remove(next.id);
+			else {
+				timer->dueNs = next.dueNs + timer->periodNs > now ? next.dueNs + timer->periodNs : now + timer->periodNs;
+				DueTimer again;
+				again.dueNs = timer->dueNs;
+				again.id = next.id;
+				HeapPush(due, again);
+			}
+			callback();
+			ran += 1;
+		}
+		return ran;
+	}
+
+	// The work posted before the turn's posted work began; what callbacks post runs next turn.
+	int32 EventLoop::RunPosted() {
+		int64 waiting = 0;
+		{
+			Threading::LockGuard guard(postLock);
+			waiting = posted.Count();
+		}
+		int32 ran = 0;
+		for (int64 i = 0; i < waiting; ++i) {
+			func<void()> work;
+			{
+				Threading::LockGuard guard(postLock);
+				if (posted.IsEmpty()) return ran;
+				work = posted.Pop();
+			}
+			work();
+			ran += 1;
+		}
+		return ran;
+	}
+}

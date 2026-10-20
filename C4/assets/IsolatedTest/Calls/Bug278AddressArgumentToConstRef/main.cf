@@ -1,0 +1,26 @@
+// BUG-278: an address the program computes (`&x`) passed to a `const T&` parameter whose T is a pointer was taken
+// as the reference's own address, so the callee read x's bytes as the pointer. A HashMap<int32*, V> found nothing
+// by `Get(&key)`. The value now goes through a temporary like any other.
+include "bedrock.ch"
+
+template<K> uint64 ViaRef(const K& key) { return (uint64)key; }
+
+class Holder {
+	public uint64 seen;
+	template<K> public void Keep(const K& key) { seen = (uint64)key; }
+}
+
+int32 main() {
+	int32 x = 0;
+	int32 y = 0;
+	int32* px = &x;
+	if (ViaRef<int32*>(&x) != (uint64)px) return 1;
+	Holder holder;
+	holder.Keep<int32*>(&x);
+	if (holder.seen != (uint64)px) return 2;
+	Core::HashMap<int32*, int32> map;
+	map.Insert(&x, 1);
+	map[&y] = 2;
+	if (map.Get(&x) != 1 || map.Get(&y) != 2 || !map.Contains(&x)) return 3;
+	return 0;
+}

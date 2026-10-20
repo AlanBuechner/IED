@@ -1,0 +1,236 @@
+// Net::EventLoop: timers in order, periodic timers and cancelling, work posted from many threads, Stop from another
+// thread, a callback that throws, watches changed and removed from callbacks, and an echo server on one loop thread
+// holding 1000 connections at once while a timer keeps ticking.
+
+include "bedrock.ch"
+
+const int32 kLoopWaitMs = 20000;
+
+// Runs `loop` on a thread of its own until Stop.
+static Threading::Thread RunLoop(Net::EventLoop* loop) { return Threading::Thread::Run([loop]() { loop->Run(); }); }
+
+[test("net.loop")]
+class EventLoopTests {
+	[test("timers_in_order")]
+	public static void TestTimersInOrder() {
+		Net::EventLoop loop;
+		assert_true(loop.IsOpen(), loop.Error());
+		Core::Array<int32> order;
+		Core::Array<int32>* seen = &order;
+		loop.After(30, [seen]() { seen->Push(30); });
+		loop.After(10, [seen]() { seen->Push(10); });
+		loop.After(20, [seen]() { seen->Push(20); });
+		loop.After(20, [seen]() { seen->Push(21); });
+		Net::EventLoop* running = &loop;
+		loop.After(40, [running]() { running->Stop(); });
+		const int64 start = clock_now_ns();
+		loop.Run();
+		const int64 elapsedMs = (clock_now_ns() - start) / 1000000;
+		assert_true(order.Count() == 4 && order[0] == 10 && order[1] == 20 && order[2] == 21 && order[3] == 30, "by due time, then the order made");
+		assert_true(elapsedMs >= 39 && elapsedMs < 5000, "waited for them, not longer");
+	}
+
+	[test("every_and_cancel")]
+	public static void TestEveryAndCancel() {
+		Net::EventLoop loop;
+		int32 ticks = 0;
+		int32* counted = &ticks;
+		Net::EventLoop* running = &loop;
+		int64 periodic = 0;
+		int64* id = &periodic;
+		periodic = loop.Every(5, [counted, running, id]() {
+			*counted = *counted + 1;
+			if (*counted == 5) running->Cancel(*id);
+		});
+		bool cancelledRan = false;
+		bool* ran = &cancelledRan;
+		const int64 cancelled = loop.After(10, [ran]() { *ran = true; });
+		assert_true(loop.Cancel(cancelled) && !loop.Cancel(cancelled), "cancelled once");
+		loop.After(200, [running]() { running->Stop(); });
+		loop.Run();
+		assert_eq(5, ticks, "ran every period until it cancelled itself");
+		assert_true(!cancelledRan, "a cancelled timer never runs");
+		assert_eq(0, loop.RunOnce(0), "nothing left to do");
+	}
+
+	[test("post_from_threads")]
+	public static void TestPostFromThreads() {
+		Net::EventLoop loop;
+		Threading::Thread runner = RunLoop(&loop);
+		int32[4] last;
+		int32[4] outOfOrder;
+		Threading::Thread[4] posters;
+		Net::EventLoop* target = &loop;
+		for (int32 t = 0; t < 4; ++t) {
+			int32* mine = &last[t];
+			int32* wrong = &outOfOrder[t];
+			*mine = -1;
+			*wrong = 0;
+			posters[t] = Threading::Thread::Run([target, mine, wrong]() {
+				for (int32 i = 0; i < 1000; ++i)
+					target->Post([mine, wrong, i]() {
+						if (*mine != i - 1) *wrong = *wrong + 1;
+						*mine = i;
+					});
+			});
+		}
+		for (int32 t = 0; t < 4; ++t) posters[t].Join();
+		Threading::WaitGroup done;
+		done.Add(1);
+		Threading::WaitGroup* finished = &done;
+		loop.Post([finished]() { finished->Done(); });
+		done.Wait();
+		loop.Stop();
+		runner.Join();
+		for (int32 t = 0; t < 4; ++t) assert_true(last[t] == 999 && outOfOrder[t] == 0, "every piece of work ran, each thread's in its order");
+	}
+
+	[test("stop_from_another_thread")]
+	public static void TestStopFromAnotherThread() {
+		Net::EventLoop loop;
+		Threading::Thread runner = RunLoop(&loop);
+		Threading::Thread::Sleep((int64)50000000);
+		const int64 start = clock_now_ns();
+		loop.Stop();
+		runner.Join();
+		assert_true((clock_now_ns() - start) / 1000000 < 5000, "a loop waiting with nothing to do wakes and returns");
+		loop.Stop();
+		loop.Run();
+		assert_true(true, "a Stop before Run makes it return at once");
+	}
+
+	[test("callback_throws")]
+	public static void TestCallbackThrows() {
+		Net::EventLoop loop;
+		int32 after = 0;
+		int32* counted = &after;
+		loop.Post([]() { throw 7; });
+		loop.Post([counted]() { *counted = *counted + 1; });
+		bool caught = false;
+		try {
+			loop.RunOnce(0);
+		}
+		catch (...) {
+			caught = true;
+		}
+		assert_true(caught, "the exception leaves the turn");
+		assert_eq(1, loop.RunOnce(0), "the loop goes on with the rest");
+		assert_eq(1, after, "the work after it ran");
+	}
+
+	[test("watches")]
+	public static void TestWatches() {
+		Net::EventLoop loop;
+		Net::UdpSocket socket;
+		socket.Open(Net::Address::Loopback(0));
+		Net::UdpSocket sender;
+		sender.Open(Net::Address::Loopback(0));
+		int32 calls = 0;
+		int32* counted = &calls;
+		Net::UdpSocket* receiving = &socket;
+		const int64 watch = loop.Watch(socket.Socket(), Net::kReadable, [counted, receiving](int32 ready) {
+			*counted = *counted + 1;
+			uint8[16] bytes;
+			Net::Address from;
+			receiving->ReceiveFrom((void*)&bytes[0], 16, from, 0);
+		});
+		assert_true(watch != 0 && loop.WatchCount() == 1, "watched");
+		assert_eq(0, loop.RunOnce(0), "nothing to read");
+		sender.SendTo((const void*)"x", 1, socket.LocalAddress());
+		assert_eq(1, loop.RunOnce(1000), "readable once a datagram comes");
+		assert_true(loop.Change(watch, 0), "paused");
+		sender.SendTo((const void*)"y", 1, socket.LocalAddress());
+		assert_eq(0, loop.RunOnce(50), "a paused watch is not called");
+		loop.Change(watch, Net::kReadable);
+		assert_eq(1, loop.RunOnce(1000), "and resumes");
+		assert_true(loop.Unwatch(watch) && !loop.Unwatch(watch) && loop.WatchCount() == 0, "unwatched once");
+		assert_eq((int64)0, loop.Watch(-1, Net::kReadable, [](int32 ready) {}), "not a socket");
+		assert_eq(2, calls, "two calls in all");
+	}
+
+	[test("closed")]
+	public static void TestClosed() {
+		Net::EventLoop loop;
+		loop.Close();
+		loop.Close();
+		assert_true(!loop.IsOpen() && !loop.Post([]() {}), "a closed loop takes no work");
+		assert_eq(0, loop.RunOnce(0), "and runs nothing");
+		loop.Run();
+	}
+}
+
+// One loop thread echoing every connection back: the listener's watch accepts, each stream's watch echoes.
+class EchoServer
+{
+	public Net::EventLoop loop;
+	public Net::TcpListener listener;
+	public Core::Array<Net::TcpStream> streams;
+	public int64 accepted;
+	public int64 mostWatched;
+
+	public void Start() {
+		listener.Listen(Net::Address::Loopback(0), 1024);
+		EchoServer* server = this;
+		loop.Watch(listener.Socket(), Net::kReadable, [server](int32 ready) { server->AcceptAll(); });
+	}
+
+	public void AcceptAll() {
+		while (true) {
+			Net::TcpStream stream = listener.Accept(0);
+			if (!stream.IsOpen()) return;
+			const int64 index = streams.Count();
+			const int64 socket = stream.Socket();
+			streams.Push(take(stream));
+			accepted += 1;
+			EchoServer* server = this;
+			loop.Watch(socket, Net::kReadable, [server, index](int32 ready) { server->Echo(index); });
+			if (loop.WatchCount() > mostWatched) mostWatched = loop.WatchCount();
+		}
+	}
+
+	public void Echo(int64 index) {
+		uint8[512] bytes;
+		Net::TcpStream& stream = streams[index];
+		const int64 received = stream.Receive((void*)&bytes[0], 512, 0);
+		if (received > 0) stream.SendAll((const void*)&bytes[0], received, 5000);
+	}
+}
+
+[test("net.loop_load")]
+class EventLoopLoadTests {
+	[test("echo_1000_connections")]
+	public static void TestEcho1000() {
+		EchoServer server;
+		server.Start();
+		int32 ticks = 0;
+		int32* counted = &ticks;
+		server.loop.Every(10, [counted]() { *counted = *counted + 1; });
+		Threading::Thread runner = RunLoop(&server.loop);
+		const int32 count = 1000;
+		Core::Array<Net::TcpStream> clients;
+		for (int32 i = 0; i < count; ++i) clients.Push(Net::TcpStream::Connect(server.listener.LocalAddress(), kLoopWaitMs));
+		int32 open = 0;
+		for (int32 i = 0; i < count; ++i)
+			if (clients[i].IsOpen()) open += 1;
+		assert_eq(count, open, "1000 clients connected");
+		int32 echoed = 0;
+		for (int32 i = 0; i < count; ++i) {
+			Core::StringBuilder message;
+			Core::Format(&message, "message {0:d.4}", (int64)i);
+			clients[i].SendText(message.View(), kLoopWaitMs);
+		}
+		for (int32 i = 0; i < count; ++i) {
+			Core::StringBuilder message;
+			Core::Format(&message, "message {0:d.4}", (int64)i);
+			char[12] back;
+			if (clients[i].ReceiveAll((void*)&back[0], 12, kLoopWaitMs) && Core::StringView(&back[0], 12) == message.View()) echoed += 1;
+		}
+		server.loop.Stop();
+		runner.Join();
+		server.streams.Clear();   // the server's ends close first: TIME_WAIT stays off the clients' ephemeral ports
+		clients.Clear();
+		assert_eq(count, echoed, "every connection got its own message back");
+		assert_true(server.accepted == (int64)count && server.mostWatched == (int64)count + 1, "all at once: 1000 streams and the listener on one loop");
+		assert_true(ticks > 0, "the timer kept running under the load");
+	}
+}

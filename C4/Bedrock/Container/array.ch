@@ -53,9 +53,11 @@ namespace Core
 		public T* Data() { return data; }
 		public const T* Data() const { return data; }
 
-		public void Push(const T& value);   // `value` may be an element of this array
+		// Copies `value` in, or moves it: Push(take(x)) puts in a value that cannot be copied. `value` may be an
+		// element of this array.
+		public void Push(T value);
 		public T Pop();                     // the last element moved out; a zero T when empty
-		public void Insert(int64 index, const T& value);
+		public void Insert(int64 index, T value);   // as Push, at `index` (at most Count())
 		public void Append(const Array<T>& other);
 		public void Append(const T* items, int64 count);   // `items` may point into this array
 		public void RemoveAt(int64 index);

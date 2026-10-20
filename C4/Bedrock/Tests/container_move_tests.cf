@@ -1,0 +1,78 @@
+// Values that cannot be copied go into every container by take() or as temporaries, survive the container growing,
+// come back out by Pop, and are destroyed exactly once.
+
+include "bedrock.ch"
+
+// Counts its own destruction through `deaths`; a value take() left behind is zero and counts nothing.
+class Unique
+{
+	[operator("create")] public void Init() {}
+	[operator("delete")] public void Delete() {
+		if (deaths != nullptr) *deaths = *deaths + 1;
+	}
+
+	public static Unique Make(int32 value, int32* deaths) {
+		Unique made;
+		made.value = value;
+		made.deaths = deaths;
+		return made;
+	}
+
+	public int32 value;
+	public int32* deaths;
+}
+
+[test("container.moved_in")]
+class MovedInTests {
+	[test("array")]
+	public static void TestArray() {
+		int32 deaths = 0;
+		{
+			Core::Array<Unique> items;
+			for (int32 i = 0; i < 100; ++i) {
+				Unique one = Unique::Make(i, &deaths);
+				items.Push(take(one));
+			}
+			items.Insert(0, Unique::Make(-1, &deaths));
+			assert_true(items.Count() == 101 && items[0].value == -1 && items[100].value == 99, "moved in, through the buffer growing");
+			assert_eq(0, deaths, "nothing destroyed on the way in");
+			Unique last = items.Pop();
+			assert_true(last.value == 99 && items.Count() == 100, "moved back out");
+		}
+		assert_eq(101, deaths, "each destroyed once");
+	}
+
+	[test("queue_stack_list")]
+	public static void TestQueueStackList() {
+		int32 deaths = 0;
+		{
+			Core::Queue<Unique> queue;
+			Core::Stack<Unique> stack;
+			Core::List<Unique> list;
+			for (int32 i = 0; i < 10; ++i) {
+				queue.Push(Unique::Make(i, &deaths));
+				stack.Push(Unique::Make(i, &deaths));
+				Unique one = Unique::Make(i, &deaths);
+				list.PushBack(take(one));
+			}
+			assert_true(queue.Pop().value == 0 && stack.Pop().value == 9, "first in first out; last in first out");
+			assert_eq(2, deaths, "the popped values, destroyed where they were used");
+			assert_true(list.Count() == 10, "listed");
+		}
+		assert_eq(30, deaths, "each destroyed once");
+	}
+
+	[test("hashmap")]
+	public static void TestHashMap() {
+		int32 deaths = 0;
+		{
+			Core::HashMap<int32, Unique> map;
+			for (int32 i = 0; i < 50; ++i) map.Insert(i, Unique::Make(i, &deaths));
+			assert_true(map.Count() == 50 && map.Find(42)->value == 42, "inserted through rehashing");
+			Unique replacement = Unique::Make(1000, &deaths);
+			assert_true(!map.Insert(7, take(replacement)), "an existing key's value is replaced");
+			assert_true(map.Find(7)->value == 1000 && deaths == 1, "the old value destroyed, the new one moved in");
+		}
+		assert_eq(51, deaths, "each destroyed once");
+	}
+}

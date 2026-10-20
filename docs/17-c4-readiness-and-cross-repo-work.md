@@ -18,7 +18,7 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 | UTF-8 strings | **exists** | UTF-8 <-> UTF-16 helpers exist only inside the runtime; Win32 `W` APIs need them exposed |
 | File system basics | **exists** | read/write/list/mkdir/remove/rename/exists/size, `FS::GetInfo` (kind, size, times), copies of files and trees, absolute and canonical paths (C4 B53); **missing** locking, mmap |
 | File watching | **exists** | `FS::Watcher` over `ReadDirectoryChangesW` (B53): recursive, renames paired, `Overflow` when changes were dropped |
-| TCP sockets, event loop (IOCP), timers | **partial** | `Net::` TCP, UDP, resolution, `Poll`, blocking calls with timeouts (C4 B49); no event loop or timers yet |
+| TCP sockets, event loop (IOCP), timers | **exists** | `Net::` TCP, UDP, resolution, `Poll`, blocking calls with timeouts (C4 B49); `Net::EventLoop` with socket watches, timers and work posted from other threads (B54, readiness-based over `WSAPoll`; tested with 1000 connections on one loop) |
 | HTTP/1.1, WebSocket, SHA-1, base64, TLS | **exists** except TLS | `Http::` server (thread per connection) and client (B50), WebSockets (B51), `Core::Sha1`, `Core::Base64*` |
 | Child processes with pipes, job objects, env vars | **exists** | `Process::Child` / `Process::Run` (C4 B52): pipes with timeouts, `ReadAny`, job objects (kill the tree, kill on close), environment changes; env get/set in `Platform::` (B40) |
 | ConPTY | **exists** | `Process::StartInfo::terminal` (B52): keyboard in, VT screen out, `Resize` |
@@ -70,7 +70,7 @@ An alternative that gets IED unblocked sooner: wrap **libuv** (MIT, C; IOCP even
 
 Implementation of `src/` starts when all of these are true. Each item is a work package in the C4 tree (`C4/`).
 
-1. [ ] `Net::` sockets + event loop + timers, with tests (echo server, 1k concurrent connections, timers under load).
+1. [x] `Net::` sockets + event loop + timers, with tests (echo server, 1k concurrent connections, timers under load). Done in C4 B49 and B54 (D-65, D-70).
 2. [x] `Process::` spawn/pipes/job objects/env + ConPTY, with tests (spawn `cmd /c`, kill tree, PTY round trip). Done in C4 B52 (D-68).
 3. [x] `FS::Watch`, stat/mtime, copy, canonical paths. Done in C4 B53 (D-69) as `FS::Watcher`, `FS::GetInfo`, `CopyFile` / `CopyTree`, `CanonicalPath`.
 4. [ ] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake). Wall clock (`Platform::`, B40), base64 and SHA-1 (B51) done; UTF-16 helpers still runtime-internal.

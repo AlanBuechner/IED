@@ -1,0 +1,16 @@
+// An error inside a body made from a template names the instance and where the program uses it.
+template<T> class Box {
+	public T held;
+	public void Put(const T& value) { held = value; }
+}
+
+class Owner {
+	[operator("delete")] public void Delete() {}
+}
+
+int32 main() {
+	Box<Owner> box;
+	Owner owner;
+	box.Put(owner);
+	return 0;
+}

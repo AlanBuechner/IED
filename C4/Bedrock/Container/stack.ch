@@ -15,7 +15,7 @@ namespace Core
 		public int64 Capacity() const { return items.Capacity(); }
 		public bool IsEmpty() const { return items.IsEmpty(); }
 
-		public void Push(const T& value) { items.Push(value); }
+		public void Push(T value) { items.Push(take(value)); }   // copies `value` in, or moves it: Push(take(x))
 		public T Pop() { return items.Pop(); }   // the top moved out; a zero T when empty
 		public T& Top() { return items.Back(); }
 		public const T& Top() const { return items.Back(); }

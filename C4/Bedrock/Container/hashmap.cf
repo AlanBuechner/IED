@@ -94,13 +94,13 @@ namespace Core
 	}
 
 	template<K, V, Traits>
-	public bool HashMap::Insert(const K& key, const V& value) {
+	public bool HashMap::Insert(K key, V value) {
 		int64 found = Slot(key);
-		if (found >= 0) { entries[found].value = value; return false; }
+		if (found >= 0) { entries[found].value = take(value); return false; }
 		MakeRoom();
 		int64 slot = FreeSlot(key);
-		new (&entries[slot].key) K(key);
-		new (&entries[slot].value) V(value);
+		new (&entries[slot].key) K(take(key));
+		new (&entries[slot].value) V(take(value));
 		if (states[slot] == kEmptySlot) used += 1;
 		states[slot] = kLiveSlot;
 		count += 1;

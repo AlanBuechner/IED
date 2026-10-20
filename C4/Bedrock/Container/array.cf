@@ -53,15 +53,9 @@ namespace Core
 	}
 
 	template<T>
-	public void Array::Push(const T& value) {
-		if (count < capacity) {
-			new (&data[count]) T(value);
-			count += 1;
-			return;
-		}
-		T held = value;   // value may be an element of this array: copy it before the buffer moves
-		Grow(count + 1);
-		new (&data[count]) T(take(held));
+	public void Array::Push(T value) {
+		if (count == capacity) Grow(count + 1);   // `value` is the caller's copy: an element it came from may move
+		new (&data[count]) T(take(value));
 		count += 1;
 	}
 
@@ -73,12 +67,11 @@ namespace Core
 	}
 
 	template<T>
-	public void Array::Insert(int64 index, const T& value) {
+	public void Array::Insert(int64 index, T value) {
 		if (index > count) index = count;
-		T held = value;   // value may be an element of this array: copy it before the elements move
 		if (count == capacity) Grow(count + 1);
 		memmove((void*)&data[index + 1], (void*)&data[index], (uint64)((count - index) * (int64)sizeof(T)));
-		new (&data[index]) T(take(held));
+		new (&data[index]) T(take(value));
 		count += 1;
 	}
 

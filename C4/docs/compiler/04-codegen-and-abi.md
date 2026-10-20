@@ -11,7 +11,7 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 
 | Component | Lifetime | Responsibility |
 |---|---|---|
-| `CodeGenDriver` | one compile | Owns the `ModuleContext` and the lowered HIR trees; runs the assembly order below. Entry: `Lower(model, entryName, errorMessage, runTests)`. |
+| `CodeGenDriver` | one compile | Owns the `ModuleContext` and the lowered HIR trees; runs the assembly order below. Entry: `Lower(model, entryName, errorMessage, runTests)`. It remembers which emitted tree first referenced each new function, so an error in a template-made body ends with the instance and that use (`UseSites`: `(in 'Core::Array<Net::TcpStream>::Push', used at main.cf (12:5))`). |
 | `ModuleContext` | one compile | The module; the single C4 -> LLVM type map (`Lower`); struct creation/filling (`StructFor`, `FillStruct`); function signatures (`GetOrCreateFunction`, `SignatureOf`); global storage (`GlobalAddress`); runtime entry points (`RuntimeFunction`). Owns the `Abi` brick and the object-model emitters below. |
 | `Abi` | one compile | THE calling-convention brick: which types are by-value aggregates, register vs hidden pointer, sret, the LLVM param/return types at a boundary. |
 | `IRContext` | one function | The `IRBuilder`, slot allocas, `this`, entry-block temporaries, the `CleanupStack`, the unwind-target query, and the ONE call brick (`Call`: funclet bundle + invoke). Truthiness rule. |

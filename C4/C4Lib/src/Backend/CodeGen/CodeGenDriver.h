@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <unordered_map>
 #include <set>
 #include <deque>
 
@@ -100,6 +101,7 @@ namespace Scripting
 		/// references for the first time, until none is left (D-16). False, with the diagnostics, when a body
 		/// fails to lower.
 		bool EmitReachable(ProgramModel& model, Core::Vector<const FunctionRecord*> batch, std::string* errorMessage);
+		void NoteUse(const ProgramModel& model, const FunctionRecord& rec, size_t errorsBefore);
 		/// `__c4_global_init`, registered to run before main: it runs the rounds of Backend/HIR/GlobalInit in
 		/// order, each emitted with the functions it reaches, then attaches the main thread. `__c4_thread_start`
 		/// runs the thread_local rounds on a thread that attaches. False, with the diagnostics, when a start or a
@@ -160,6 +162,7 @@ namespace Scripting
 		Core::String m_ReflectionTag;
 		std::optional<ScriptLowering> m_Script;
 		std::set<const FunctionRecord*> m_Emitted; // lowered (a failed one too: no retry)
+		std::unordered_map<const FunctionRecord*, const HIRFunction*> m_FirstUsers; // whose emitted code first referenced it
 		std::deque<FunctionRecord> m_GlobalInitRounds; // compiler-written: no model record
 		std::vector<llvm::Function*> m_FirstUseStarts; // the starts of a script's thread_locals that start on first use
 		std::deque<FunctionRecord> m_ThunkRecords;     // compiler-written: no model record

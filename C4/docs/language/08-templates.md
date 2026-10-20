@@ -255,7 +255,9 @@ template<U> void Box<U>::Set(float v) { ... }
 - **Members are compiled when used (D-16).** An instance's member function is lowered and type-checked
   only when something uses it: a call, its address, or - for a virtual member - the instance's vtable.
   A method that only makes sense for some `T` (one that uses `<` on `T`) does not stop an instance whose
-  `T` lacks it, as long as that method is not called; when it is called, its errors are reported then.
+  `T` lacks it, as long as that method is not called; when it is called, its errors are reported then, each
+  ending with the instance and the first place the program uses it: `(in 'Box<Owner>::Put', used at main.cf
+  (14:2))`.
   Non-template code is always compiled.
 - **Bodies can live in `.cf` files.** Because the whole program compiles as one unit
   ([01 - Program model](01-program-model.md)), a function template or template method may be

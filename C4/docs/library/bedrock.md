@@ -90,12 +90,14 @@ than the 16 bytes `raw_alloc` guarantees, so an element such as a `packed float[
 | Create / delete | `Init()` (allocates nothing), `Init(int64 capacity)`, `Init(__init_list<T>)` (enables `Core::Array<int32> a = {1, 2, 3}`), copy, `Delete()` |
 | Size | `Count()`, `Capacity()`, `ByteSize()`, `IsEmpty()` |
 | Access | `At(int64 i)` and `a[i]` -> `T&`, `Front()`, `Back()`, `Data()`; on a const array they give `const T&` / `const T*` |
-| Modify | `Push(v)` (safe when `v` is an element of the same array), `Pop()` (moves the last element out), `Insert(i, v)`, `Append(const Array<T>&)`, `Append(const T* items, count)` (both safe with the array's own elements; they grow as `Push` does), `RemoveAt(i)`, `RemoveRange(first, end)`, `RemoveSwap(i)` (O(1)), `Clear()` (destroys the elements, keeps the buffer), `Reserve(n)`, `Resize(n)` (default-creates or destroys), `ShrinkToFit()`, `Swap(Array<T>&)` |
+| Modify | `Push(v)` (takes `v` by value: a temporary or `take(x)` moves in, so a value that cannot be copied fits; safe when `v` is an element of the same array), `Pop()` (moves the last element out), `Insert(i, v)` (as `Push`), `Append(const Array<T>&)`, `Append(const T* items, count)` (both safe with the array's own elements; they grow as `Push` does), `RemoveAt(i)`, `RemoveRange(first, end)`, `RemoveSwap(i)` (O(1)), `Clear()` (destroys the elements, keeps the buffer), `Reserve(n)`, `Resize(n)` (default-creates or destroys), `ShrinkToFit()`, `Swap(Array<T>&)` |
 | Search | `IndexOf(v)` (`==`, `-1` when absent), `Contains(v)` |
 | Algorithms | `Sort()` (by `<`), `SortBy(before)`, `Reverse()`, `LowerBound(v)`, `UpperBound(v)`, `LowerBoundBy(v, before)`, `UpperBoundBy(v, before)` |
 | Iteration | range-for through `ArrayIterator<T>` (yields `T&`); a const array iterates through `ConstArrayIterator<T>` (yields `const T&`) |
 
-Growth doubles the capacity (at least 4 on the first insert). `before(a, b)` is any callable that says
+Growth doubles the capacity (at least 4 on the first insert). Every container's insertions (`Queue::Push`,
+`Stack::Push`, `List::PushBack` and the rest, `HashMap::Insert`) take their value the same way, so
+`Core::Array<Net::TcpStream>` or `Core::HashMap<int64, Net::TcpStream>` filled with `take(stream)` work. `before(a, b)` is any callable that says
 whether `a` comes first: a lambda, a `funcptr` or an object with `[operator("call")]`.
 
 ### `Core::List<T>` - doubly linked list (`list.ch`)
@@ -694,11 +696,27 @@ if (!accepted.ReceiveAll((void*)&reply[0], 4, 2000)) printf("%s\n", accepted.Err
   `Accept`) `Error()` and `TimedOut()` say why.
 - Sockets are not inherited by processes the program starts. A listener takes its port exclusively. Windows answers
   a connection refused on this machine after about 2 seconds of retries.
+- **The event loop** (`loop.ch`, B54, D-70): `Net::EventLoop` runs one thread's callbacks one at a time - a socket's
+  (`Watch(socket, wanted, callback)`, called with what it is ready for each turn it is; `Change` and `Unwatch`), a
+  timer's (`After(delayMs, ...)`, `Every(periodMs, ...)`, `Cancel`) and work posted from any thread (`Post`, run in
+  the order posted). `Run` takes turns until `Stop` (safe from any thread); `RunOnce(timeoutMs)` takes one. A
+  callback that throws ends the turn with the exception, the loop intact. Blocking work goes to another thread,
+  which posts its result back. Underneath it is `Poll` plus a loopback datagram that ends a wait when work is posted.
+
+```c4
+Net::EventLoop loop;
+loop.Watch(listener.Socket(), Net::kReadable, [&listener](int32 ready) { Serve(listener.Accept(0)); });
+loop.Every(1000, []() { printf("tick\n"); });
+loop.Run();
+```
 
 Covered by `Bedrock/Tests/net_tests.cf`: parsing and printing every address form and rejecting malformed ones,
 resolution (also of a name that does not exist), a TCP round trip over IPv4 and IPv6, timeouts on accept, receive and
 `ReceiveAll`, a refused connection, shutdown, a 4 MiB transfer from another thread, a port in use, closed and moved
-streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams.
+streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams. `loop_tests.cf` covers the
+event loop: timers in order, periodic timers cancelling themselves, 4000 pieces of work posted from 4 threads,
+`Stop` from another thread, a callback that throws, watches paused and removed, and an echo server holding 1000
+connections at once on one loop thread while a timer keeps running.
 
 ---
 
@@ -825,11 +843,11 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 44 files, 436 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 46 files, 447 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, http, websocket, encoding, process, file_info, watch). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -860,7 +878,7 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Paths, directory listing, create, remove, rename | **Implemented** |
 | File information and times, copies of files and trees, absolute and canonical paths, watching a directory | **Implemented** (section 5, B53) |
 | `Core::InitList<T>` | **Implemented** |
-| Sockets / networking | **Implemented** (section 13, B49) |
+| Sockets / networking | **Implemented** (section 13, B49), with an event loop and timers (B54) |
 | HTTP server | **Implemented** (section 14, B50), with WebSockets (B51) |
 | Child processes: pipes, exit codes, environment, killing a tree, terminals | **Implemented** (section 15, B52) |
 | Threading primitives (join, promise, condition variable, work stealing) | **Implemented** (section 10, B29) |

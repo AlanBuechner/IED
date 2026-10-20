@@ -46,10 +46,9 @@ namespace Core
 	}
 
 	template<T>
-	public void Queue::Push(const T& value) {
-		T held = value;   // value may be an element of this queue: copy it before the buffer moves
+	public void Queue::Push(T value) {
 		if (count == capacity) Reserve(capacity < 4 ? 4 : capacity * 2);
-		new (&data[(head + count) & (capacity - 1)]) T(take(held));
+		new (&data[(head + count) & (capacity - 1)]) T(take(value));
 		count += 1;
 	}
 

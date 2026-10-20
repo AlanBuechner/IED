@@ -44,7 +44,8 @@ namespace Core
 		public bool IsEmpty() const { return count == 0; }
 
 		// True when the key was added, false when its value was replaced.
-		public bool Insert(const K& key, const V& value);
+		// Copies `value` in, or moves it: Insert(key, take(x)) puts in a value that cannot be copied.
+		public bool Insert(K key, V value);
 		// The value of `key`, added (default-created) when absent.
 		[operator("index")] public V& At(const K& key);
 		// The value of `key`, or null; valid until the map changes.

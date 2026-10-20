@@ -111,7 +111,10 @@ namespace Scripting
 				return QueryResult<const HIRNode*>(ctx.AddressAs(pointer, Lifecycle(ctx).Temporary(converted.value)));
 			}
 			if (arg.isLValue) return QueryResult<const HIRNode*>(ctx.AddressAs(pointer, arg.lvalue, true)); // for the call only
-			if (Lifecycle::IsFresh(loaded) && LifecycleFacts::NeedsDestroy(ctx.queries(), loaded->type))
+			// An address the program computes (`&x` bound to a `const T*&`) is a value like any other: codegen takes an
+			// AddressOf argument as the bound address itself, so the value goes through a temporary (BUG-278).
+			const bool pointerValue = loaded->kind == HIRNode::Kind::AddressOf;
+			if (pointerValue || (Lifecycle::IsFresh(loaded) && LifecycleFacts::NeedsDestroy(ctx.queries(), loaded->type)))
 				return QueryResult<const HIRNode*>(ctx.AddressAs(pointer, Lifecycle(ctx).Temporary(loaded)));
 			return QueryResult<const HIRNode*>(loaded); // codegen materializes an rvalue bound to a reference
 		}
