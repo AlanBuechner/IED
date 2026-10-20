@@ -13,6 +13,7 @@
 	path = third_party/libgit2
 	url = https://github.com/libgit2/libgit2.git
 	shallow = true
+	update = none
 [submodule "third_party/quickjs-ng"]
 	path = third_party/quickjs-ng
 	url = https://github.com/quickjs-ng/quickjs.git

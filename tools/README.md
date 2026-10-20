@@ -32,6 +32,7 @@ setup.bat --only llvm --force     re-download and re-extract one package
 - Downloads land in `vendor/` (gitignored; the archives in `vendor/_downloads/` are deleted after extraction unless `--keep-downloads`), except LLVM, which Frost expects at `C4/Frost/vendor/Compiler` (gitignored by `C4/.gitignore`).
 - In a linked **git worktree**, packages marked `share-with-worktrees` (LLVM, 4 GB) become a directory junction to the main checkout's copy instead of a second download; `--force` replaces the junction, never the main copy.
 - Sources that are git repositories are **submodules** instead (`.gitmodules`): `third_party/codicons`, `third_party/libgit2`, `third_party/quickjs-ng`, and the compiler's `C4/Frost/Projects/Profiling/tracy` and `C4/Frost/Projects/Core/Modules/yaml/yaml-cpp`.
+- `third_party/libgit2` is not checked out by a clone or by setup (`update = none`): nothing uses it yet, and its test fixtures exceed Windows' 260-character path limit in deep folders. Fetch it when needed with `git -c core.longpaths=true submodule update --init --checkout third_party/libgit2`.
 
 ## Dependencies and why (as of 2026-10-20)
 
@@ -42,7 +43,7 @@ setup.bat --only llvm --force     re-download and re-extract one package
 | `@xterm/xterm` + addon-fit + addon-web-links | 6.0.0 / 0.11.0 / 0.12.0 | download (ied) | terminal plugin, output window | npm tarballs |
 | `codicons` | v0.0.46-45 (`8853e0b`) | submodule | shared/ui-kit icon set, `frontend/mocks/build.py icons` | icons CC BY 4.0, code MIT |
 | `quickjs-ng` | v0.17.0 | submodule | JS plugin runtime (`src/jsruntime/`) | chosen over ChakraCore: actively maintained, modern JS, small C sources. **ChakraCore was dropped**: unmaintained since 2020 and its official binary links are dead |
-| `libgit2` | `42a89d7c` | submodule | git plumbing candidate (`src/git/`) | the git CLI is the backend (docs/99 #14); libgit2 stays as a possible later graph optimization |
+| `libgit2` | `42a89d7c` | submodule, **opt-in** (`update = none`) | git plumbing candidate (`src/git/`) | the git CLI is the backend (docs/99 #14); libgit2 stays as a possible later graph optimization |
 | `Microsoft.Web.WebView2` | 1.0.4258.31 | download (extras) | optional desktop wrapper only | `build/native/include/WebView2.h` + libs. **Not a v1 dependency** - IED is a split server + web client (docs/01) |
 | `searxng` | `d47cb96b` | download (extras) | AI web egress (docs/04) | a tarball, not a submodule: 4 template files have Windows-illegal names (`*.conf:socket`) that break checkout; setup skips them on extract. Packaging: docs/21 |
 | Tracy profiler GUI | 0.12.0 | download (extras) | viewing traces of the compiler's C++ libraries | the client sources are the compiler's submodule; for IED, Tracy is a **feature reference only** (docs/16) |
