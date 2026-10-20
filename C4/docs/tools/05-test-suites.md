@@ -25,6 +25,7 @@ and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and 
 | IsolatedTest | `assets/IsolatedTest/` | one folder = one feature or one historical bug, including interop | `assets/IsolatedTest/RunTests.ps1 [-Filter x] [-O2] [-DebugInfo] [-Partitions n]` |
 | RuntimeTest | `assets/RuntimeTest/` | small runtime behaviours (printf, struct-return ABI) compile and exit 0 | `assets/RuntimeTest/RunTests.ps1 [-Filter x]` |
 | StressTest | `assets/StressTest/Dx12Game/` | a large DX12 + Win32 game program compiles clean | `assets/StressTest/RunTests.ps1 [-Run]` |
+| ScaleTest | `assets/ScaleTest/` | a generated 60k-line, 401-file program (classes, templates, containers, strings, GC objects, cross-module calls) compiles at `-O0` and `-O2` and runs on several threads with every result matching the single-threaded one | `python assets/ScaleTest/run.py [--seconds n --threads n --modules n]` |
 | ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2` | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2]` |
 | ToolsTest | `assets/ToolsTest/` | the install and a toolchain outside the repository, every compiler flag, `nuke toolchain install` / `nuke init` / `nuke run` | `assets/ToolsTest/RunTests.ps1` |
 | Bedrock | `Bedrock/Tests/` | the default library, through the built-in `[test]` framework | `C4.exe Bedrock\Tests -o <out>.exe -test`, then run `<out>.exe` |
@@ -209,6 +210,18 @@ object *was* collected allows a few survivors: a conservative collector may keep
 still in a register or a dead stack slot.
 
 ---
+
+### ScaleTest
+
+`generate.py` writes the program under `assets/build-output/scale/src`: 200 modules (`m<i>.ch` / `m<i>.cf`), each a
+record type, a ledger class over `Array` and `HashMap<String, int64>`, a template used at two types, a chain of
+GC-allocated holders, twelve arithmetic steps and a `Work` that calls the module before it, and a `main.cf` that
+runs every module's `Work` on `SCALE_THREADS` threads for `SCALE_SECONDS`, checking each result against the one a
+single thread computed first (the exit code counts the wrong ones). `run.py` generates it, compiles it with the
+repository's `C4.exe` at each level, times the compile and runs it. It is not in `nuke gates` (it takes minutes);
+run it after changes to the runtime's threading, the GC, or code generation at scale. Recorded 2026-10-20: 59646
+lines in 401 files, `-O0` in 4.4 s and `-O2` in 15.0 s with `-j 3`; 60 s on 4 threads, 18939 runs at `-O0` and
+29849 at `-O2`, none wrong.
 
 ## 7. Bedrock tests
 

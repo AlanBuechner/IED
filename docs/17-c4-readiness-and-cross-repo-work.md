@@ -77,7 +77,7 @@ Implementation of `src/` starts when all of these are true. Each item is a work 
 5. [x] Regex engine available to C4 code. Done in C4 B55 (D-71).
 6. [x] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide). Done in C4 B56 (D-72): DTOs need no hand-written codecs.
 7. [ ] Suspected bugs S1-S7 verified; confirmed ones fixed (or the C-shim-only policy formally adopted and S1-S6 deprioritized).
-8. [ ] **Scale test:** a synthetic 50k-line, 200-file, multi-threaded C4 program compiles at -O0 and -O2, runs a 24 h soak under load without GC or threading faults; compile time measured.
+8. [ ] **Scale test:** a synthetic 50k-line, 200-file, multi-threaded C4 program compiles at -O0 and -O2, runs a 24 h soak under load without GC or threading faults; compile time measured. C4's `assets/ScaleTest` (60k lines, 401 files) compiles in 4.4 s at -O0 and 15.0 s at -O2 and ran 60 s on 4 threads without a wrong result; the 24 h soak is still to run (`python C4/assets/ScaleTest/run.py --seconds 86400 --levels O2`).
 9. [ ] Exceptions-at-thread-boundary policy documented (catch-all wrappers), `thread_attach` documented for native callbacks.
 10. [ ] Incremental or at least per-module compilation planned (roadmap 5.3), because a 20 s full rebuild for every IED server change is a heavy tax.
 
