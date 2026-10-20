@@ -42,7 +42,9 @@ and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and 
   IsolatedCorpusModelTest - the last one loads real `assets/IsolatedTest` files with the headers beside each;
   DebugInfoTest - the `-g` metadata of a lowered module; ConstEvaluatorTest - constant folding; ScopeGuardTest;
   AliasTagsTest - the strict-aliasing class of each access, D-64),
-  `Compiler/` (the runtime objects, the error tracker, project sets), `Protocol/` (the JSON values and framing of `C4Protocol`), `LSP/` (the language server, linked
+  `Compiler/` (the runtime objects, the error tracker, project sets, the object cache and the module split:
+  every partition verifies, a definition is in one partition, private data lives with its user, and adding a
+  function leaves the other partitions' bitcode byte for byte the same), `Protocol/` (the JSON values and framing of `C4Protocol`), `LSP/` (the language server, linked
   through `C4LSPLib`) and `DAP/` (the debug adapter, linked through `C4DAPLib`: its pieces, and sessions of
   programs it builds with `C4.exe -g`; those tests take up to 60 seconds, `TEST_FUNC_TIMEOUT`).
 - Filter with `--filter "Lexer.*"`.
@@ -196,6 +198,9 @@ assets\build-output\iso\SwizzleLanguage.exe
     a create runs when assembled into 4 objects, into 3 with `-g` (its `.pdb` has the functions), into 3 on one
     thread at `-O2`, and by default; a one-line program is one object; `-c` writes one; bad `-j` / `--partitions`
     counts and `-c --partitions 2` are usage errors.
+  - `ObjectCache` (roadmap 5.3): an unchanged rebuild reuses every object, editing one function reassembles only its
+    partitions and the program shows the edit (no stale object is linked), an `-O2` build after `-O0` reuses none,
+    the cache keeps only the latest build's objects, and `-c` makes no cache.
 
 Collector tests live in IsolatedTest `MemoryGC/` (liveness, deep lists, large objects, interior pointers,
 pins, hooks, finalizer order and exceptions, static roots, noscan, pacing, `delete`, collections while several

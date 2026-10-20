@@ -26,10 +26,9 @@ namespace Scripting
 
 	private:
 		llvm::GlobalVariable* ClassHierarchyDescriptor(const ObjectType* type);
-		llvm::Constant* BaseClassArray(const std::vector<ClassHierarchy::Subobject>& subobjects);
+		llvm::Constant* BaseClassArray(const std::string& typeName, const std::vector<ClassHierarchy::Subobject>& subobjects);
 
 		llvm::Module& m_Module;
-		uint32 m_Counter = 0;
 		std::unordered_map<std::string, llvm::GlobalVariable*> m_Descriptors;
 		std::unordered_map<const ObjectType*, llvm::GlobalVariable*> m_Hierarchies;
 		std::map<std::pair<const ObjectType*, int64>, llvm::GlobalVariable*> m_Locators;

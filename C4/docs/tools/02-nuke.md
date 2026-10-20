@@ -74,7 +74,7 @@ both at the workspace root.
   module's links reach every program it is compiled into.
 - The program's `compiler-args` (and those of its `[project.config.<Config>]` override) go on the command line.
   The processor goes here: `compiler-args = ["-march=x86-64-v3"]`, which the editor bridge passes on as `target`.
-- The compiler's intermediate (`.obj`) goes to `<int>`, the executable and its `.pdb` to `<bin>`; then the
+- The compiler's intermediates (the object cache `<name>.objects/`, foreign objects in `<name>.interop/`) go to `<int>`, the executable and its `.pdb` to `<bin>`; then the
   `[[project.copy]]` entries of the program and its modules are copied into `<bin>`.
 - A dependency cycle is an error that prints the chain.
 

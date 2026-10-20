@@ -92,8 +92,9 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 5. `-S` writes `<base>.ll` and stops; `-bc` writes `<base>.bc` and stops.
 6. Optimize the module at `-O<n>` with LLVM's default pipeline and write `<base>.obj`, inside the compiler (no
    separate clang process); the target machine and every function carry the target's CPU and features. A large
-   module is split into partitions written on `-j` threads: `<base>.obj`, `<base>.p1.obj`, ... (`--partitions`). An
-   assembler error in an `asm` block is reported at the block's line. `-c` stops here, with one object.
+   module is split into partitions (`--partitions`), assembled on `-j` threads into `<int>/<name>.objects/`, where
+   a partition whose code has not changed since the last build reuses its object. An assembler error in an `asm`
+   block is reported at the block's line. `-c` stops here, with one object, `<base>.obj`.
 7. Compile every C and C++ source of the runtime (`<home>/C4Runtime`: the GC, threads, reflection, tests, EH,
    IO, RTTI, memory) at `-O2` into `%TEMP%/c4_runtime/<hash of the runtime folder>/O2/`
    (`Compiler/RuntimeObjects.cpp`). An object's name carries a key of its source's bytes and every runtime

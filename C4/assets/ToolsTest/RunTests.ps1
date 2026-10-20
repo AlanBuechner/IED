@@ -139,7 +139,7 @@ function Test-OutputFlags {
     if ($bitcode.exit -ne 0 -or -not (Test-Path $bc)) { $failures += "-bc wrote no app.bc" }
     elseif ([System.IO.File]::ReadAllBytes($bc)[0..1] -join "," -ne "66,67") { $failures += "app.bc is not LLVM bitcode" }
     $moved = Invoke-Compiler $compiler @($src, "-o", (Join-Path $dir "out/app.exe"), "--int-dir", (Join-Path $dir "int"))
-    if ($moved.exit -ne 0 -or -not (Test-Path (Join-Path $dir "int/app.obj")) -or (Test-Path (Join-Path $dir "out/app.obj"))) { $failures += "--int-dir did not take the intermediates" }
+    if ($moved.exit -ne 0 -or @(Get-ChildItem (Join-Path $dir "int/app.objects") -Filter "*.obj" -ErrorAction SilentlyContinue).Count -eq 0 -or (Test-Path (Join-Path $dir "out/app.objects"))) { $failures += "--int-dir did not take the intermediates" }
     elseif ((& (Join-Path $dir "out/app.exe")) -ne "hello") { $failures += "the --int-dir build does not run" }
     return $failures
 }
@@ -316,7 +316,7 @@ function Test-NukeToolchainProject {
         $failures = @()
         $run = Invoke-Nuke $root """$nuke"" run"
         if ($run.exit -ne 0 -or $run.output -notmatch "(?m)^Game\s*$") { return @("the nuke init project did not build and run: " + ($run.output -split "`n" | Select-Object -Last 6) -join " | ") }
-        $built = "build/{0}/Development-windows-x64/Game/Game.obj"
+        $built = "build/{0}/Development-windows-x64/Game/Game.objects"
         if (-not (Test-Path (Join-Path $root ($built -f "int"))) -or (Test-Path (Join-Path $root ($built -f "bin")))) { $failures += "Nuke did not put the intermediates in build/int" }
 
         New-Item -ItemType Directory -Force (Join-Path $root "Engine/src") | Out-Null
@@ -665,12 +665,12 @@ int32 main()
         if ($build.exit -ne 0) { $failures += "$($case.name): did not build: $($build.output)"; continue }
         & (Join-Path $out "app.exe") | Out-Null
         if ($LASTEXITCODE -ne 0) { $failures += "$($case.name): the program exited $LASTEXITCODE" }
-        $objects = @(Get-ChildItem $out -Filter "app*.obj").Count
+        $objects = @(Get-ChildItem (Join-Path $out "app.objects") -Filter "*.obj" -ErrorAction SilentlyContinue).Count
         if ($case.objects -gt 0 -and $objects -ne $case.objects) { $failures += "$($case.name): $objects objects, expected $($case.objects)" }
     }
     $tiny = New-Sources "partitions-tiny" @{ "main.cf" = $hello }
     $small = Invoke-Compiler $compiler @($tiny, "-o", (Join-Path $tiny "app.exe"), "-O2")
-    if ($small.exit -ne 0 -or @(Get-ChildItem $tiny -Filter "app*.obj").Count -ne 1) { $failures += "a one-line program was not assembled as one object by default" }
+    if ($small.exit -ne 0 -or @(Get-ChildItem (Join-Path $tiny "app.objects") -Filter "*.obj" -ErrorAction SilentlyContinue).Count -ne 1) { $failures += "a one-line program was not assembled as one object by default" }
     $pdbutil = Join-Path $repoRoot "Frost/vendor/Compiler/bin/llvm-pdbutil.exe"
     $pdb = Join-Path $dir "debug/app.pdb"
     $symbols = if (Test-Path $pdb) { (& $pdbutil dump --symbols $pdb | Out-String) } else { "" }
@@ -686,10 +686,55 @@ int32 main()
     return $failures
 }
 
+# The object cache (roadmap 5.3): a rebuild of unchanged code reuses every object, an edit to one function
+# reassembles only the partitions it touched and the program shows the edit, another -O level reuses nothing, the
+# folder keeps only the latest build's objects, and -c writes no cache.
+function Test-ObjectCache {
+    $program = @'
+include "bedrock.ch"
+int32 Value() { return 1; }
+int32 Doubled(int32 v) { return v * 2; }
+int32 Tripled(int32 v) { return v * 3; }
+int32 Squared(int32 v) { return v * v; }
+int32 main()
+{
+	Core::String label = Core::String("cache");
+	return label == "cache" ? Value() + Doubled(1) + Tripled(1) + Squared(2) : 100;
+}
+'@
+    $dir = New-Sources "objectcache" @{ "src/main.cf" = $program }
+    $src = Join-Path $dir "src"
+    $exe = Join-Path $dir "out/app.exe"
+    $cache = Join-Path $dir "out/app.objects"
+    $failures = @()
+    $build = { param([string[]]$extra) $r = Invoke-Compiler $compiler (@($src, "-o", $exe, "-v", "--partitions", "4") + $extra)
+        $m = [regex]::Match($r.output, "in (\d+) object\(s\), (\d+) reused")
+        return @{ exit = $r.exit; objects = [int]$m.Groups[1].Value; reused = [int]$m.Groups[2].Value; output = $r.output } }
+    $first = & $build @()
+    if ($first.exit -ne 0) { return @("the program did not build: $($first.output)") }
+    & $exe | Out-Null
+    if ($LASTEXITCODE -ne 10) { $failures += "the first build exited $LASTEXITCODE, expected 10" }
+    if ($first.reused -ne 0) { $failures += "a first build reused $($first.reused) objects" }
+    $again = & $build @()
+    if ($again.reused -ne $again.objects -or $again.objects -ne 4) { $failures += "an unchanged rebuild reused $($again.reused) of $($again.objects) objects" }
+    Set-Content -Path (Join-Path $src "main.cf") -Value ($program -replace "return v \* 3;", "return v * 30;") -Encoding ascii
+    $edited = & $build @()
+    & $exe | Out-Null
+    if ($LASTEXITCODE -ne 37) { $failures += "after editing Tripled the program exited $LASTEXITCODE, expected 37 (a stale object was linked)" }
+    if ($edited.reused -lt 1 -or $edited.reused -ge $edited.objects) { $failures += "editing one function reused $($edited.reused) of $($edited.objects) objects" }
+    if (@(Get-ChildItem $cache -Filter "*.obj").Count -ne 4 -or @(Get-ChildItem $cache -Filter "*.tmp").Count -ne 0) { $failures += "the cache keeps more than the latest build's objects" }
+    $optimized = & $build @("-O2")
+    & $exe | Out-Null
+    if ($optimized.exit -ne 0 -or $LASTEXITCODE -ne 37 -or $optimized.reused -ne 0) { $failures += "an -O2 build after -O0 reused $($optimized.reused) objects or exited $LASTEXITCODE" }
+    $compileOnly = Invoke-Compiler $compiler @($src, "-o", (Join-Path $dir "c/app.exe"), "-c")
+    if ($compileOnly.exit -ne 0 -or (Test-Path (Join-Path $dir "c/app.objects"))) { $failures += "-c made an object cache" }
+    return $failures
+}
+
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-DebugInfoFlag",
-    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions")
+    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

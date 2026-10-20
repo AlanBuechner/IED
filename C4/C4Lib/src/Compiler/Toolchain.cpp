@@ -18,12 +18,8 @@ namespace Scripting::Toolchain
 
 		fs::path ExecutableFolder()
 		{
-#ifdef _WIN32
-			wchar_t buffer[MAX_PATH] = {};
-			const DWORD length = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-			if (length > 0 && length < MAX_PATH) return fs::path(buffer).parent_path();
-#endif
-			return fs::current_path();
+			const fs::path executable = Executable();
+			return executable.empty() ? fs::current_path() : executable.parent_path();
 		}
 
 		// `relative` in the nearest folder above the executable that has it, for a development build.
@@ -37,6 +33,16 @@ namespace Scripting::Toolchain
 			}
 			return {};
 		}
+	}
+
+	fs::path Executable()
+	{
+#ifdef _WIN32
+		wchar_t buffer[MAX_PATH] = {};
+		const DWORD length = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+		if (length > 0 && length < MAX_PATH) return fs::path(buffer);
+#endif
+		return {};
 	}
 
 	fs::path Home()

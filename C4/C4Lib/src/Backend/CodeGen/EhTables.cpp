@@ -69,8 +69,13 @@ namespace Scripting
 		return list;
 	}
 
+	// Shared by every throw that can be caught as it, and named after what it describes (as MSVC names its _CT
+	// records), so no name depends on the order the program's throws were lowered in.
 	llvm::Constant* EhTables::CatchableType(const Catchable& c)
 	{
+		const std::string name = "c4.eh.ct." + c.name + "." + std::to_string(c.offset) + "." + std::to_string(c.size) +
+			(c.simple ? ".s" : "") + (c.copy ? "." + c.copy->getName().str() : "");
+		if (auto* existing = m_Module.getGlobalVariable(name, true)) return PeTables::ImageRelative(m_Module, existing);
 		// { properties, TypeDescriptor, PMD { mdisp, pdisp, vdisp }, size, copy function }. The copy function
 		// is the type's copy (member convention: this, source); 0 when the handler may copy the bytes.
 		llvm::LLVMContext& ctx = m_Module.getContext();
@@ -78,7 +83,7 @@ namespace Scripting
 			PeTables::I32(ctx, c.simple ? kCatchableSimpleType : 0), PeTables::ImageRelative(m_Module, m_Rtti.TypeDescriptor(c.name)),
 			PeTables::I32(ctx, c.offset), PeTables::I32(ctx, kNoVirtualBase), PeTables::I32(ctx, 0),
 			PeTables::I32(ctx, c.size), FunctionOffset(c.copy) });
-		return PeTables::ImageRelative(m_Module, PeTables::Private(m_Module, "c4.eh.ct." + std::to_string(++m_Counter), init));
+		return PeTables::ImageRelative(m_Module, PeTables::Private(m_Module, name, init));
 	}
 
 	llvm::Constant* EhTables::FunctionOffset(llvm::Function* fn)
@@ -92,17 +97,19 @@ namespace Scripting
 		if (it != m_ThrowInfos.end()) return it->second;
 		llvm::LLVMContext& ctx = m_Module.getContext();
 		std::vector<llvm::Constant*> types;
-		for (const Catchable& c : CatchableTypes(thrown, lifecycle)) types.push_back(CatchableType(c));
+		const std::vector<Catchable> catchables = CatchableTypes(thrown, lifecycle);
+		for (const Catchable& c : catchables) types.push_back(CatchableType(c));
+		const std::string thrownName = catchables.empty() ? std::string("void") : catchables.front().name;
 		// CatchableTypeArray { count, CatchableType[count] }.
 		auto* arrayTy = llvm::ArrayType::get(llvm::Type::getInt32Ty(ctx), types.size());
-		auto* cta = PeTables::Private(m_Module, "c4.eh.cta." + std::to_string(++m_Counter),
+		auto* cta = PeTables::Private(m_Module, "c4.eh.cta." + thrownName,
 			llvm::ConstantStruct::getAnon(ctx, { PeTables::I32(ctx, static_cast<int64>(types.size())), llvm::ConstantArray::get(arrayTy, types) }));
 		// ThrowInfo { attributes, destructor, forward compat, CatchableTypeArray }: the destructor runs on the
 		// exception object when the last handler is done with it.
 		const PointerType* ptr = AsPointer(thrown);
 		uint32_t attributes = ptr && ptr->IsConstReferent() ? kThrowConst : 0;
 		llvm::Function* destroy = lifecycle.destroy ? m_FunctionFor(*lifecycle.destroy) : nullptr;
-		auto* ti = PeTables::Private(m_Module, "c4.eh.ti." + std::to_string(++m_Counter), llvm::ConstantStruct::getAnon(ctx, {
+		auto* ti = PeTables::Private(m_Module, "c4.eh.ti." + thrownName, llvm::ConstantStruct::getAnon(ctx, {
 			PeTables::I32(ctx, attributes), FunctionOffset(destroy), PeTables::I32(ctx, 0), PeTables::ImageRelative(m_Module, cta) }));
 		m_ThrowInfos[thrown] = ti;
 		return ti;

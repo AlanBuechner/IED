@@ -3,6 +3,7 @@
 #include "Backend/CodeGen/NormalizedConversion.h"
 #include "Backend/CodeGen/EhTables.h"
 #include "Backend/CodeGen/RttiEmitter.h"
+#include "Backend/CodeGen/StableNames.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
@@ -382,7 +383,7 @@ namespace Scripting
 			: value.unitWidth == 2 ? UnitArray<uint16_t>(m_Context, value.stringValue, 2)
 			: llvm::ConstantDataArray::getString(m_Context, value.stringValue, true);
 		auto* global = new llvm::GlobalVariable(*m_Module, data->getType(), true, llvm::GlobalValue::PrivateLinkage, data,
-			".str." + std::to_string(m_StringGlobals.size()));
+			StableNames::ForBytes(".str." + std::to_string(value.unitWidth), value.stringValue));
 		global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
 		m_StringGlobals.emplace(std::move(key), global);
 		return global;

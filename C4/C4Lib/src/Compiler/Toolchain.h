@@ -10,6 +10,9 @@ namespace Scripting::Toolchain
 	/// headers) and CBind/.
 	fs::path Home();
 
+	/// The running compiler's own executable.
+	fs::path Executable();
+
 	/// clang.exe in <home>/toolchain/bin; a development build also finds the repository's vendored LLVM above
 	/// the executable. Empty when there is none.
 	fs::path Clang();

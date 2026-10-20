@@ -2,6 +2,7 @@
 #include "Compiler/BuildUtils.h"
 #include "Compiler/CompilationResult.h"
 #include "Compiler/CompilerInstance.h"
+#include "Compiler/ObjectCache.h"
 #include "Compiler/ObjectEmission.h"
 #include "Interop/InteropPass.h"
 #include "Macro/MacroTable.h"
@@ -41,8 +42,9 @@ private:
 	bool WriteBitcode(const llvm::Module& module, const std::string& path);
 	bool Optimize(llvm::Module& module, const Scripting::ObjectSettings& settings);
 	unsigned PartitionsFor(const llvm::Module& module, const Scripting::ObjectSettings& settings) const;
-	static std::vector<std::string> ObjectPaths(const std::string& base, unsigned count);
-	bool Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::vector<std::string>& objects);
+	static std::string CacheSalt(const Scripting::ObjectSettings& settings);
+	bool WriteCompiledObject(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::string& objPath);
+	std::vector<std::string> Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& cache);
 	void Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics);
 	bool Link(const std::vector<std::string>& programObjects);
 	bool PrepareScriptHost(llvm::Module& module);

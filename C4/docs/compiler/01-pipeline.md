@@ -38,8 +38,9 @@ in `C4Lib`.
      -S / --emit-ir writes <out>.ll and stops here; -bc writes <out>.bc and stops
         |
         v
- [6] OptimizeModule, then WriteObjects (in the compiler): LLVM's -O<n> pipeline, then the X86 backend
-     -> <out>.obj, or <out>.obj + <out>.p1.obj ... for a module split into partitions on -j threads
+ [6] OptimizeModule, then WriteCachedObjects (in the compiler): LLVM's -O<n> pipeline, the module split into
+     partitions, and the X86 backend on -j threads for each partition whose object is not already cached
+     -> <int>/<out name>.objects/<hash>.obj (-c: <out>.obj)
  [7] runtime objects (GC, reflect, test, IO as C; EH as C++), cached in %TEMP%/c4_runtime
  [8] clang driver -> lld-link: main obj + runtimes + foreign objs + libs -> <out>.exe
 ```
@@ -180,7 +181,7 @@ straight from the module in memory).
 
 ## 6. Object, runtime, reflection, link (`src/ProgramOutput`, `Compiler/ObjectEmission`, `Compiler/BuildUtils`)
 
-- `OptimizeModule` and `WriteObjects` (roadmap 5.1): the module is optimized and assembled inside the compiler, with no textual-IR round
+- `OptimizeModule` and `WriteCachedObjects` (roadmap 5.1, 5.3): the module is optimized and assembled inside the compiler, with no textual-IR round
   trip or second process. A `TargetMachine` for the build's CPU and features runs LLVM's default pipeline at
   `-O<n>` (`PassBuilder::buildPerModuleDefaultPipeline`, `buildO0DefaultPipeline` at `-O0`; loop unrolling,
   interleaving and both vectorizers from `-O2`, as clang sets them), then the X86 backend writes the COFF object.
@@ -188,13 +189,25 @@ straight from the module in memory).
   parity with C++ - see [../tools/05-test-suites.md](../tools/05-test-suites.md)). An error the assembler reports
   for an `asm` block comes back with the block's `!srcloc` cookie (`AsmEmitter::LocationCookie`) and is reported at
   the C4 line: `main.cf (4:2) error: invalid operand for instruction: 'mov rax, ecx'`.
-- Parallel code generation: after the whole module is optimized (inlining across the program is unchanged),
-  `WriteObjects` splits it into partitions (`Compiler/ModulePartitions`, LLVM's `SplitModule`) and assembles each on
-  a thread of its own, from a bitcode copy read into a context of its own. Local symbols become hidden globals with
-  a `.local` suffix, which no C or C++ symbol can have, so they meet no foreign object's names in the link; file-scope
-  assembly stays in the first partition. How many: `--partitions <n>`, else one per 4,000 instructions (12,000 at
-  `-O0`, where an instruction is cheaper to assemble), at most `-j` (default: the processors, at most 4). `-c` always
-  writes one object. The objects are identical whatever the thread count.
+- Partitions (`Compiler/ModulePartitions`): after the whole module is optimized (inlining across the program is
+  unchanged), it is split into partitions that link back into the same program. A definition goes to the partition its
+  name hashes to (a comdat's members by the comdat's name; private data with the user whose name sorts first, so a
+  literal travels with its function), and each partition is built from its own definitions plus declarations of only
+  what they reach, so it changes only when its own code does. Local symbols become hidden globals with a `.local`
+  suffix, which no C or C++ symbol can have, so they meet no foreign object's names in the link; file-scope assembly
+  stays in the first partition. How many: `--partitions <n>`, else about one per 1,000 instructions (3,000 at `-O0`,
+  where an instruction is cheaper to assemble) rounded down to a power of two, from 1 to 32, so the count changes
+  only when the program doubles or halves. Partitions are assembled on up to `-j` threads (default: the processors,
+  at most 4), each from a bitcode copy read into a context of its own. `-c` always writes one object.
+- The object cache (`Compiler/ObjectCache`, roadmap 5.3): a linked build keeps its objects in
+  `<int>/<out name>.objects/`, each named after the hash of its partition's bitcode and of the compiler (its version,
+  and the size and time of its executable) and the target settings, so a partition whose code is unchanged reuses
+  its object and a rebuilt compiler or another `-O` / `-march` reuses none. An object is written beside its name and
+  moved into place when complete; the folder keeps only the latest build's objects. `-v` says how many were reused.
+  Names do not depend on the order code is generated in (`Backend/CodeGen/StableNames`: literals, test-runner strings
+  and reflection tables are named after their content; exception and RTTI records after the type they describe), so
+  an edit renames nothing it did not change. On the Bedrock tests at `-O0` (32 partitions): a cold build 0.96 s, an
+  unchanged rebuild 0.41 s, adding a test 0.46 s (28 objects reused), editing one 0.43 s (31 reused).
 - The X86 target is registered with its `LLVMInitializeX86*` functions; the compiler links LLVM statically and must
   not link `LLVM-C.lib`, whose import of `LLVM-C.dll` would bind those functions to the DLL's own copy of LLVM.
 - Runtime objects are compiled on demand (`Compiler/RuntimeObjects`) from every `.c` / `.cpp` under the

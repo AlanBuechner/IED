@@ -1232,6 +1232,22 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   `DuplicateAliasDefinition` (now naming both types); Bedrock `string.operators`, `str.comparison_operators`,
   `compare_and_hash`.
 
+#### B48 - Object cache (roadmap 5.3, step 1)
+- **Design:** [pipeline 6](../compiler/01-pipeline.md). **Depends on:** B47. **Status:** Done.
+- **Done notes:** `Compiler/ObjectCache` keeps a linked build's objects in `<int>/<name>.objects/`, each named by the
+  hash of its partition's bitcode and of the compiler (version, size and time of its executable) and target settings;
+  objects are written then moved into place, and the folder keeps only the latest build's. `Compiler/ModulePartitions`
+  no longer uses LLVM's `SplitModule` (which copied the whole module into every partition): a partition is built
+  from its own definitions plus declarations of only what they reach, a definition goes where its name hashes to, and
+  private data goes with the user whose name sorts first. Generation-order names are gone
+  (`Backend/CodeGen/StableNames`: string literals, test-runner strings and reflection tables by content, exception and
+  RTTI records by type; catchable-type records are shared). Partition counts are powers of two up to 32,
+  independent of `-j`. Bedrock tests at `-O0`: cold 0.96 s, unchanged 0.41 s (32 of 32 objects reused), a test added
+  0.46 s (28 reused), a test edited 0.43 s (31 reused); an unchanged rebuild spends 0.12 s splitting and hashing.
+- **Tests:** C4Testing `Compiler.ObjectCache` (4), `Compiler.ModulePartitions` (6, including byte-identical
+  partitions after a function is added); ToolsTest `ObjectCache`, `Partitions`, `OutputFlags`; IsolatedTest
+  `-Partitions 4 -DebugInfo` and TestCode `-Partitions 8`.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1749,7 +1765,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

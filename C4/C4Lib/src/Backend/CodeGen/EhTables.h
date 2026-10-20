@@ -39,7 +39,6 @@ namespace Scripting
 		llvm::Module& m_Module;
 		RttiEmitter& m_Rtti;
 		std::function<llvm::Function*(const FunctionRecord&)> m_FunctionFor;
-		uint32 m_Counter = 0;
 		std::unordered_map<const Type*, llvm::GlobalVariable*> m_ThrowInfos;
 	};
 } // namespace Scripting

@@ -1,6 +1,8 @@
 #include "ProgramOutput.h"
 #include "Core/Core.h"
+#include "Compiler/ObjectCache.h"
 #include "Compiler/ObjectEmission.h"
+#include "Compiler/Version.h"
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/Toolchain.h"
 #include "Backend/CodeGen/AsmEmitter.h"
@@ -29,14 +31,9 @@ bool ProgramOutput::Write(llvm::Module& module)
 	if (m_In.options.emitIR) return WriteIR(module, base + ".ll"); // -S: the module as text, and nothing else
 	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads };
 	if (!Optimize(module, settings)) return false;
-	const std::vector<std::string> objects = ObjectPaths(base, PartitionsFor(module, settings));
-	if (!Assemble(module, settings, objects)) return false;
-	if (m_In.options.compileOnly)
-	{
-		CORE_INFO("Compiled {0}", objects[0]);
-		return true; // -c: the object is the output
-	}
-	return Link(objects);
+	if (m_In.options.compileOnly) return WriteCompiledObject(module, settings, base + ".obj"); // -c: the object is the output
+	const std::vector<std::string> objects = Assemble(module, settings, Scripting::ObjectCache(base + ".objects", CacheSalt(settings)));
+	return !objects.empty() && Link(objects);
 }
 
 // The compiler owns its output location: a missing folder is created, as every toolchain does.
@@ -106,35 +103,49 @@ bool ProgramOutput::Optimize(llvm::Module& module, const Scripting::ObjectSettin
 	return optimized;
 }
 
-// -c writes one object; otherwise --partitions, or as many as the module's size is worth on -j threads.
+// --partitions, or as many as the module's size is worth.
 unsigned ProgramOutput::PartitionsFor(const llvm::Module& module, const Scripting::ObjectSettings& settings) const
 {
-	if (m_In.options.compileOnly) return 1;
-	if (m_In.options.partitions) return m_In.options.partitions;
-	return Scripting::PartitionCount(module, settings);
+	return m_In.options.partitions ? m_In.options.partitions : Scripting::PartitionCount(module, settings);
 }
 
-// <base>.obj, then <base>.p1.obj, <base>.p2.obj, ... for the other partitions.
-std::vector<std::string> ProgramOutput::ObjectPaths(const std::string& base, unsigned count)
+// What a cached object depends on besides its code: the compiler that assembled it (its version, and the size and
+// time of its executable, so a rebuilt compiler never reuses an old one's objects) and the target settings.
+std::string ProgramOutput::CacheSalt(const Scripting::ObjectSettings& settings)
 {
-	std::vector<std::string> paths = { base + ".obj" };
-	for (unsigned i = 1; i < count; ++i) paths.push_back(base + ".p" + std::to_string(i) + ".obj");
-	return paths;
+	std::error_code ec;
+	const fs::path compiler = Scripting::Toolchain::Executable();
+	const auto size = fs::file_size(compiler, ec);
+	const auto time = fs::last_write_time(compiler, ec).time_since_epoch().count();
+	return "C4 " + std::to_string(Scripting::CompilerVersion::Encoded) + " " + std::to_string(size) + " " + std::to_string(time) +
+		" -O" + std::to_string(settings.optLevel) + " " + settings.target->Cpu() + " " + settings.target->LlvmFeatures();
 }
 
-// The module assembled into its objects inside the compiler; an error the assembler reports for an asm block is
-// placed at that block.
-bool ProgramOutput::Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::vector<std::string>& objects)
+bool ProgramOutput::WriteCompiledObject(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::string& objPath)
 {
 	const auto start = std::chrono::steady_clock::now();
-	if (m_In.options.verbose)
-		std::cout << "Writing " << Scripting::InstructionCount(module) << " instructions as " << objects.size() << " object(s) on up to "
-			<< settings.threads << " thread(s): " << objects[0] << std::endl;
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
-	const bool written = Scripting::WriteObjects(module, settings, objects, diagnostics);
+	const bool written = Scripting::WriteObject(module, settings, objPath, diagnostics);
 	Report(diagnostics);
 	Timed("codegen", start);
+	if (written) CORE_INFO("Compiled {0}", objPath);
 	return written;
+}
+
+// The module assembled into its objects inside the compiler, reusing the cached objects of unchanged partitions; an
+// error the assembler reports for an asm block is placed at that block.
+std::vector<std::string> ProgramOutput::Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& cache)
+{
+	const auto start = std::chrono::steady_clock::now();
+	const unsigned partitions = PartitionsFor(module, settings);
+	std::vector<Scripting::ObjectDiagnostic> diagnostics;
+	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(module, settings, partitions, cache, diagnostics);
+	Report(diagnostics);
+	Timed("codegen", start);
+	if (m_In.options.verbose)
+		std::cout << Scripting::InstructionCount(module) << " instructions in " << partitions << " object(s), " << objects.reused
+			<< " reused, the rest assembled on up to " << settings.threads << " thread(s), in " << cache.Folder().string() << std::endl;
+	return objects.paths;
 }
 
 void ProgramOutput::Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics)

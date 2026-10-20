@@ -63,7 +63,7 @@ namespace Scripting
 		// self entry lets a reader find the image base from the locator alone.
 		auto* layout = llvm::StructType::get(ctx, { i32, i32, i32, i32, i32, i32 });
 		auto* col = new llvm::GlobalVariable(m_Module, layout, true, llvm::GlobalValue::PrivateLinkage, nullptr,
-			"c4.rtti.col." + std::to_string(++m_Counter));
+			"c4.rtti.col." + MsvcNames::TypeDescriptorName(type) + "." + std::to_string(vptrOffset));
 		col->setInitializer(llvm::ConstantStruct::get(layout, {
 			PeTables::I32(ctx, kLocatorSignatureX64), PeTables::I32(ctx, vptrOffset), PeTables::I32(ctx, 0),
 			PeTables::ImageRelative(m_Module, TypeDescriptor(type)),
@@ -82,11 +82,12 @@ namespace Scripting
 		// { signature, attributes, base count, base class array }. Created before its array so a base
 		// descriptor of this type can point back at it.
 		auto* layout = llvm::StructType::get(ctx, { i32, i32, i32, i32 });
+		const std::string typeName = MsvcNames::TypeDescriptorName(type);
 		auto* chd = new llvm::GlobalVariable(m_Module, layout, true, llvm::GlobalValue::PrivateLinkage, nullptr,
-			"c4.rtti.chd." + std::to_string(++m_Counter));
+			"c4.rtti.chd." + typeName);
 		m_Hierarchies[type] = chd;
 		std::vector<ClassHierarchy::Subobject> subobjects = ClassHierarchy::Subobjects(type);
-		llvm::Constant* array = BaseClassArray(subobjects);
+		llvm::Constant* array = BaseClassArray(typeName, subobjects);
 		chd->setInitializer(llvm::ConstantStruct::get(layout, {
 			PeTables::I32(ctx, 0), PeTables::I32(ctx, HierarchyAttributes(subobjects)),
 			PeTables::I32(ctx, static_cast<int64>(subobjects.size())),
@@ -94,7 +95,7 @@ namespace Scripting
 		return chd;
 	}
 
-	llvm::Constant* RttiEmitter::BaseClassArray(const std::vector<ClassHierarchy::Subobject>& subobjects)
+	llvm::Constant* RttiEmitter::BaseClassArray(const std::string& typeName, const std::vector<ClassHierarchy::Subobject>& subobjects)
 	{
 		llvm::LLVMContext& ctx = m_Module.getContext();
 		std::vector<llvm::Constant*> entries;
@@ -106,11 +107,11 @@ namespace Scripting
 				PeTables::ImageRelative(m_Module, TypeDescriptor(s.type)), PeTables::I32(ctx, s.containedBases),
 				PeTables::I32(ctx, s.offset), PeTables::I32(ctx, kNoVirtualBase), PeTables::I32(ctx, 0),
 				PeTables::I32(ctx, attributes), PeTables::ImageRelative(m_Module, ClassHierarchyDescriptor(s.type)) });
-			auto* g = PeTables::Private(m_Module, "c4.rtti.bcd." + std::to_string(++m_Counter), bcd);
+			auto* g = PeTables::Private(m_Module, "c4.rtti.bcd." + typeName + "." + std::to_string(entries.size()), bcd);
 			entries.push_back(PeTables::ImageRelative(m_Module, g));
 		}
 		entries.push_back(PeTables::I32(ctx, 0));
 		auto* arrayTy = llvm::ArrayType::get(llvm::Type::getInt32Ty(ctx), entries.size());
-		return PeTables::Private(m_Module, "c4.rtti.bca." + std::to_string(++m_Counter), llvm::ConstantArray::get(arrayTy, entries));
+		return PeTables::Private(m_Module, "c4.rtti.bca." + typeName, llvm::ConstantArray::get(arrayTy, entries));
 	}
 } // namespace Scripting

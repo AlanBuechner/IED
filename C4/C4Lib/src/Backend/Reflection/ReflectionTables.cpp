@@ -1,5 +1,6 @@
 #include "Backend/Reflection/ReflectionTables.h"
 #include "Backend/CodeGen/ModuleContext.h"
+#include "Backend/CodeGen/StableNames.h"
 #include "Model/ConstantValue.h"
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Module.h>
@@ -34,8 +35,11 @@ namespace Scripting
 	llvm::Constant* ReflectionTables::Array(llvm::Type* rowType, const std::vector<llvm::Constant*>& rows)
 	{
 		if (rows.empty()) return Null();
-		auto* type = llvm::ArrayType::get(rowType, rows.size());
-		return Global("c4.reflect.rows", llvm::ConstantArray::get(type, rows));
+		auto* table = llvm::ConstantArray::get(llvm::ArrayType::get(rowType, rows.size()), rows);
+		// Named after its rows; LLVM keeps one copy of each distinct constant, so the same pointer is the same table.
+		const std::string name = StableNames::ForConstant("c4.reflect.rows", *table);
+		if (llvm::GlobalVariable* same = m_Module.module().getGlobalVariable(name, true); same && same->getInitializer() == table) return same;
+		return Global(name, table);
 	}
 
 	llvm::Constant* ReflectionTables::Row(llvm::StructType* type, const std::vector<llvm::Constant*>& fields)

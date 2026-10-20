@@ -6,6 +6,8 @@
 
 namespace llvm { class Module; }
 
+namespace Scripting { class ObjectCache; }
+
 namespace Scripting
 {
 	/// How a finished module becomes object files inside the compiler (roadmap 5.1): LLVM's default optimization
@@ -27,17 +29,28 @@ namespace Scripting
 
 	uint64_t InstructionCount(const llvm::Module& module);
 
-	/// How many objects `module` is worth assembling in parallel: one per few thousand instructions (fewer at -O0),
-	/// at least one and at most `settings.threads`.
+	/// How many partitions `module` is worth: about one per few thousand instructions (fewer at -O0), rounded down to
+	/// a power of two (so the count, and with it which partition a function is in, changes only when the program
+	/// doubles or halves), from 1 to 32.
 	unsigned PartitionCount(const llvm::Module& module, const ObjectSettings& settings);
 
 	/// Optimizes `module` for the target at `settings.optLevel`. False, with what went wrong in `diagnostics`, when
 	/// the target has no code generator or the optimizer reports an error.
 	bool OptimizeModule(llvm::Module& module, const ObjectSettings& settings, std::vector<ObjectDiagnostic>& diagnostics);
 
-	/// Writes `module` as one object per path: with several paths it is split into that many partitions
-	/// (ModulePartitions) and assembled on up to `settings.threads` threads. False, with diagnostics, when the
-	/// assembler fails.
-	bool WriteObjects(llvm::Module& module, const ObjectSettings& settings, const std::vector<std::string>& objectPaths,
-		std::vector<ObjectDiagnostic>& diagnostics);
+	/// The whole module as one object at `objPath` (`-c`).
+	bool WriteObject(llvm::Module& module, const ObjectSettings& settings, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics);
+
+	/// The objects of a module, in partition order, and how many of them an earlier build had already assembled.
+	struct CachedObjects
+	{
+		std::vector<std::string> paths;
+		size_t reused = 0;
+	};
+
+	/// The module as `partitions` objects kept in `cache` (ModulePartitions splits it): a partition whose code is
+	/// unchanged since a build that kept it reuses its object, the others are assembled on up to `settings.threads`
+	/// threads. No paths, with diagnostics, when the assembler fails.
+	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
+		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics);
 }

@@ -1,4 +1,5 @@
 #include "Backend/CodeGen/TestHarnessEmitter.h"
+#include "Backend/CodeGen/StableNames.h"
 #include "Model/Types/ObjectType.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Module.h>
@@ -102,7 +103,8 @@ namespace Scripting
 		auto it = m_Texts.find(text);
 		if (it != m_Texts.end()) return it->second;
 		auto* bytes = llvm::ConstantDataArray::getString(m_MCtx.context(), text, true);
-		auto* global = new llvm::GlobalVariable(m_MCtx.module(), bytes->getType(), true, llvm::GlobalValue::PrivateLinkage, bytes, "c4.test.str");
+		auto* global = new llvm::GlobalVariable(m_MCtx.module(), bytes->getType(), true, llvm::GlobalValue::PrivateLinkage, bytes,
+			StableNames::ForBytes("c4.test.str", text));
 		m_Texts[text] = global;
 		return global;
 	}
