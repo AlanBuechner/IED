@@ -18,11 +18,13 @@
 #     (for features whose effect is the code itself: volatile accesses, thread_local storage).
 #   - Every other folder must compile AND run with exit 0.
 #
-# Usage:  .\RunTests.ps1 [-Filter "Types"] [-O2] [-DebugInfo]   (-DebugInfo: every program built with -g)
+# Usage:  .\RunTests.ps1 [-Filter "Types"] [-O2] [-DebugInfo] [-Partitions <n>]   (-DebugInfo: every program built with
+#         -g; -Partitions: every program assembled into <n> objects, the parallel code generation path)
 param(
     [string]$Filter = "",
     [switch]$O2,
-    [switch]$DebugInfo
+    [switch]$DebugInfo,
+    [int]$Partitions = 0
 )
 $ErrorActionPreference = "Continue"
 
@@ -86,6 +88,7 @@ $expected = Load-ExpectedManifest (Join-Path $root "ExpectedExit.json")
 $flags = @()
 if ($O2) { $flags += "-O2" }
 if ($DebugInfo) { $flags += "-g" }
+if ($Partitions -gt 0) { $flags += @("--partitions", "$Partitions") }
 
 # A test program still running after this long is killed and fails its case: a hang (an infinite loop the
 # optimizer made of a recursion, a deadlock) must not stall the whole run.

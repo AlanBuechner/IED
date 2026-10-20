@@ -86,13 +86,23 @@ private:
 		struct PendingQualifiedFunc { Core::String prefix; Core::String last; const FunctionDefinitionNode* fn; uint32 unitId; Scope* declScope = nullptr; };
 		struct PendingBase { const ObjectType* obj; const QualTypeNode* type; const Scope* declScope; uint32 unitId; };
 		struct PendingEnum { EnumType* raw; const EnumDefinitionNode* en; uint32 unitId; const Scope* scope = nullptr; Core::String why; };
-		struct PendingAlias { AliasType* raw; const QualTypeNode* target; uint32 unitId; const Scope* scope = nullptr; };
+		// `repeats`: the alias of the same name this declaration repeats, which must name the same type (BUG-273).
+		struct PendingAlias
+		{
+			AliasType* raw;
+			const QualTypeNode* target;
+			uint32 unitId;
+			const Scope* scope = nullptr;
+			const AliasType* repeats = nullptr;
+			const AstNode* declaration = nullptr;
+		};
 		struct PendingUnion { UnionType* raw; const UnionDefinitionNode* un; uint32 unitId; const Scope* scope = nullptr; };
 
 		// --- Pass 1: registration (shells only) ------------------------------------------
 		void VisitUnit(Context& ctx, const AstNode* root);
 		void VisitDeclaration(Context& ctx, const AstNode* node);
 		void RegisterNamespace(Context& ctx, const NamespaceNode& ns);
+		static const AliasType* EarlierAlias(const Scope& scope, const Core::String& name);
 		void RegisterObject(Context& ctx, const ObjectDefinitionNode& obj);
 		void RegisterEnum(Context& ctx, const EnumDefinitionNode& en);
 		void RegisterAlias(Context& ctx, const AliasDefinitionNode& alias);

@@ -1,0 +1,3 @@
+struct Size { int32 v; }
+alias Size = int32;
+int32 main() { return 0; }

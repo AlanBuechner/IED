@@ -30,7 +30,13 @@ namespace Core
 		public bool StartsWith(StringView prefix) const;
 		public bool EndsWith(StringView suffix) const;
 		[operator("==")] public bool Equals(StringView other) const;
+		[operator("!=")] public bool NotEquals(StringView other) const { return !Equals(other); }
+		[operator("==")] public bool EqualsText(const char* text) const { return Equals(StringView(text)); }
+		[operator("!=")] public bool NotEqualsText(const char* text) const { return !Equals(StringView(text)); }
 		[operator("<")] public bool Less(StringView other) const;   // byte order
+		[operator(">")] public bool Greater(StringView other) const { return other.Less(*this); }
+		[operator("<=")] public bool LessOrEqual(StringView other) const { return !other.Less(*this); }
+		[operator(">=")] public bool GreaterOrEqual(StringView other) const { return !Less(other); }
 		[operator("hash")] public uint64 Hash() const { return Core::HashBytes(bytes, byteLength); }
 
 		// Bytes [start, start + length) of this view, clamped to it; no allocation.

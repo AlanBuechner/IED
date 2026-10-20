@@ -1,0 +1,12 @@
+// BUG-272: util.c and util.cpp were both compiled to util.obj in one shared folder, so the second overwrote the
+// first and the link lost CValue. Each foreign object is now named after its file's full path.
+extern "c" include "cvalue.h"
+extern "c" include "cppvalue.h"
+extern "c" source "util.c"
+extern "c++" source "util.cpp"
+
+int32 main() {
+	if (CValue() != 3) return 1;
+	if (CppValue() != 4) return 2;
+	return 0;
+}

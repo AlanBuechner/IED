@@ -95,6 +95,7 @@ class PathTests {
 	public static void TestCompareAndHash() {
 		assert_true(FS::Path("a/b") == FS::Path("a/b"), "equal text");
 		assert_true(!(FS::Path("a/b") == FS::Path("a\\b")), "compared as text, separators included");
+		assert_true(FS::Path("a/b") != FS::Path("a/c") && !(FS::Path("a/b") != FS::Path("a/b")), "!= (BUG-271)");
 		Core::HashMap<FS::Path, int32> sizes;
 		sizes[FS::Path("a/b")] = 3;
 		assert_eq(3, sizes.Get(FS::Path("a/b")), "a path is a hash map key");

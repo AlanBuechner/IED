@@ -47,6 +47,21 @@ public static void TestStrEquals() {
 	assert_true(sub.Equals(Core::StringView("cde")), "sub-view equals matching literal");
 }
 
+[test("str.comparison_operators")]
+public static void TestStrComparisonOperators() {
+	Core::StringView ab = Core::StringView("ab");
+	Core::StringView abc = Core::StringView("abcdef").Substring(0, 3);
+	Core::StringView b = Core::StringView("b");
+	assert_true(ab == Core::StringView("ab") && !(ab == abc), "==");
+	assert_true(ab != abc && !(ab != Core::StringView("ab")), "!= (BUG-271)");
+	assert_true(ab < abc && abc < b && !(b < ab), "< is byte order, a prefix first");
+	assert_true(b > abc && !(ab > abc) && !(ab > ab), ">");
+	assert_true(ab <= ab && ab <= abc && !(b <= abc), "<=");
+	assert_true(ab >= ab && b >= ab && !(ab >= abc), ">=");
+	assert_true(Core::StringView("") < ab && Core::StringView("") <= Core::StringView(""), "the empty view sorts first");
+	assert_true(abc == "abc" && abc != "abcdef" && !(abc == "ab") && !(abc != "abc"), "against a literal, by length");
+}
+
 [test("str.indexof")]
 public static void TestStrIndexOf() {
 	Core::StringView s = Core::StringView("banana");

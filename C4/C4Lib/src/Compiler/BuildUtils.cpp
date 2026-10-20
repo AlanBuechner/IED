@@ -6,7 +6,10 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <algorithm>
 #include <array>
+#include <cctype>
+#include <thread>
 #include <cstring>
 #include <cstdlib>
 #include <unordered_map>
@@ -30,6 +33,21 @@ namespace Scripting
 			bool attached = false; // `-DNAME`, `-O2`, `-lname`: the value may follow the name directly
 		};
 
+		constexpr unsigned kMaxCount = 64;
+		// More threads than this by default only adds memory pressure: the gain flattens past four partitions.
+		constexpr unsigned kDefaultThreads = 4;
+
+		// A count of threads or objects, 1 to kMaxCount; 0 with the error recorded.
+		unsigned ParseCount(const std::string& v, const char* option, CompileOptions& o)
+		{
+			char* end = nullptr;
+			const unsigned long count = std::strtoul(v.c_str(), &end, 10);
+			if (!v.empty() && std::isdigit(static_cast<unsigned char>(v[0])) && *end == '\0' && count >= 1 && count <= kMaxCount)
+				return static_cast<unsigned>(count);
+			o.error = std::string("'") + option + "' needs a count from 1 to " + std::to_string(kMaxCount);
+			return 0;
+		}
+
 		const std::vector<Option>& Options()
 		{
 			static const std::vector<Option> options = {
@@ -42,13 +60,17 @@ namespace Scripting
 					o.defines.push_back(ParseMacroDefine(v)); }, true },
 				{ { "-O" }, "<n>", "Optimization level of the generated code, 0 to 3 (default 0)", [](CompileOptions& o, const std::string& v) {
 					o.optLevel = v.size() == 1 && v[0] >= '0' && v[0] <= '3' ? v[0] - '0' : -1; }, true },
+				{ { "-j", "--threads" }, "<n>", "Threads that generate code, 1 to 64 (default: the processors, at most 4)",
+					[](CompileOptions& o, const std::string& v) { o.threads = ParseCount(v, "-j", o); }, true },
+				{ { "--partitions" }, "<n>", "Assemble the program into <n> objects, 1 to 64 (default: by its size, at most -j)",
+					[](CompileOptions& o, const std::string& v) { o.partitions = ParseCount(v, "--partitions", o); } },
 				{ { "-march=" }, "<cpu>", "The processor to compile for: x86-64 (default), x86-64-v2/v3/v4, native or an LLVM CPU name",
 					[](CompileOptions& o, const std::string& v) { o.targetFlags.push_back("-march=" + v); }, true },
 				{ { "-m" }, "<feature>", "Turn a processor feature on (-mavx2) or off (-mno-avx2): sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd",
 					[](CompileOptions& o, const std::string& v) { o.targetFlags.push_back("-m" + v); }, true },
 				{ { "-fno-strict-aliasing" }, nullptr, "Any load or store may touch any memory: no type-based alias information (D-64)",
 					[](CompileOptions& o, const std::string&) { o.strictAliasing = false; } },
-				{ { "--int-dir" }, "<dir>", "Write the intermediates (.ll, .obj) here, not next to the output", [](CompileOptions& o, const std::string& v) {
+				{ { "--int-dir" }, "<dir>", "Write the intermediates (.obj, .ll, .bc) here, not next to the output", [](CompileOptions& o, const std::string& v) {
 					o.intermediateDir = v; } },
 				{ { "-l" }, "<lib>", "Link the library <lib> (<lib>.lib)", [](CompileOptions& o, const std::string& v) { o.linkArguments.Push("-l" + v); }, true },
 				{ { "-L" }, "<dir>", "Look for -l libraries in <dir>", [](CompileOptions& o, const std::string& v) { o.linkArguments.Push("-L" + v); }, true },
@@ -90,6 +112,13 @@ namespace Scripting
 			return nullptr;
 		}
 
+		// What the command line leaves open: the thread count follows the processors; -c writes one object.
+		void ResolveCodeGeneration(CompileOptions& opts, unsigned processors)
+		{
+			if (opts.threads == 0) opts.threads = std::clamp(processors, 1u, kDefaultThreads);
+			if (opts.compileOnly && opts.partitions > 1) opts.error = "--partitions needs a link: -c writes one object";
+		}
+
 		// The target the -march / -m flags select (D-62), or the reason they select none.
 		void ResolveTarget(CompileOptions& opts)
 		{
@@ -129,8 +158,15 @@ namespace Scripting
 			option->apply(opts, value);
 			if (opts.optLevel < 0) opts.error = "'" + arg + "' needs an optimization level from 0 to 3";
 		}
+		if (opts.error.empty()) ResolveCodeGeneration(opts, std::thread::hardware_concurrency());
 		if (opts.error.empty()) ResolveTarget(opts);
 		return opts;
+	}
+
+	fs::path IntermediateFolder(const CompileOptions& options)
+	{
+		if (!options.intermediateDir.empty()) return fs::path(options.intermediateDir.c_str());
+		return fs::path(options.outputFile.c_str()).parent_path();
 	}
 
 	std::string ClangPath()
@@ -254,19 +290,16 @@ namespace Scripting
 		return RunTool(args);
 	}
 
-	bool LinkWithLLD(const Core::String& objPath, const Core::Vector<Core::String>& extraObjects,
-		const Core::Vector<Core::String>& libraries, const Core::String& outputPath, bool verbose)
+	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
+		const Core::String& outputPath, bool verbose)
 	{
 		const std::string clangPath = ClangPath();
 		if (clangPath.empty()) return false;
 
 		// Link directly with clang - it handles CRT discovery and MSVC import libs correctly.
-		std::vector<std::string> args = {
-			clangPath, "-target", "x86_64-pc-windows-msvc", "-fuse-ld=lld",
-			objPath
-		};
-		for (const auto& extra : extraObjects)
-			args.push_back(extra);
+		std::vector<std::string> args = { clangPath, "-target", "x86_64-pc-windows-msvc", "-fuse-ld=lld" };
+		for (const auto& object : objects)
+			args.push_back(object.c_str());
 		for (const auto& lib : libraries)
 			args.push_back(lib.c_str());
 

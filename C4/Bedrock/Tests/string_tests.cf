@@ -123,7 +123,13 @@ public static void TestStringOperators() {
 	Core::String b = Core::String("ab");
 	Core::String c = Core::String("abc");
 	assert_true(a == b && !(a == c), "==");
+	assert_true(a != c && !(a != b), "!=");
 	assert_true(a < c && !(c < a) && !(a < b), "<");
+	assert_true(c > a && !(a > c) && !(a > b), ">");
+	assert_true(a <= b && a <= c && !(c <= a), "<=");
+	assert_true(a >= b && c >= a && !(a >= c), ">=");
+	assert_true(a == "ab" && a != "abc" && !(a == "a") && !(a != "ab"), "against a literal (BUG-271)");
+	assert_true(a == Core::StringView("ab") && a != c.View() && !(a == c.View()), "against a view");
 	assert_true(a.Hash() == b.Hash(), "equal strings hash alike");
 	Core::String joined = a + Core::StringView("-") + c.View();
 	assert_se("ab-abc", joined.CStr(), "+ concatenates");

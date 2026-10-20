@@ -150,6 +150,14 @@ namespace Scripting
 		return changed;
 	}
 
+	namespace
+	{
+		bool SameType(const Type* a, const Type* b)
+		{
+			return TypeHandle(a).ResolveAlias().Raw() == TypeHandle(b).ResolveAlias().Raw();
+		}
+	}
+
 	bool ModelResolver::ResolveAliases(ModelBuilder& builder, ModelBuilder::Context& ctx)
 	{
 		bool changed = false;
@@ -161,7 +169,11 @@ namespace Scripting
 			// (a pre-scope-fix entry) falls back to root, as before.
 			auto t = ctx.model->ResolveTypeInContext(*a.target, a.unitId, a.scope);
 			if (!t.Ok()) { ++i; continue; }
+			if (a.repeats && !a.repeats->GetAliasedType()) { ++i; continue; } // the first declaration resolves first
 			a.raw->SetAliasedType(t.value);
+			if (a.repeats && !SameType(t.value, a.repeats->GetAliasedType()))
+				builder.ErrorAt(ctx, a.declaration, "redefinition of alias '" + a.raw->GetName() + "' as a different type: '" +
+					t.value->ToString() + "', was '" + a.repeats->GetAliasedType()->ToString() + "'");
 			builder.m_PendingAliases.Remove(i);
 			changed = true;
 		}

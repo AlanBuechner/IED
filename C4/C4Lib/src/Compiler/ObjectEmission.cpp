@@ -1,6 +1,8 @@
 #include "Compiler/ObjectEmission.h"
+#include "Compiler/ModulePartitions.h"
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Analysis/TargetTransformInfo.h>
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/DiagnosticInfo.h>
 #include <llvm/IR/DiagnosticPrinter.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -9,18 +11,27 @@
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Triple.h>
+#include <algorithm>
+#include <atomic>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 namespace Scripting
 {
 	namespace
 	{
+		// About 60 ms of code generation per partition: below that a thread costs more than it saves (the split, the
+		// bitcode round trip, a context). An instruction takes about three times as long from -O1 on.
+		constexpr uint64_t kInstructionsPerPartitionO0 = 12000;
+		constexpr uint64_t kInstructionsPerPartition = 4000;
+
 		// LLVM's target registry is process-wide; registering X86 twice is harmless but wasted work. The assembly parser
 		// assembles inline asm.
 		void InitializeX86()
@@ -65,6 +76,22 @@ namespace Scripting
 			std::vector<ObjectDiagnostic>& m_Errors;
 		};
 
+		// Collects a context's errors into `errors` while it lives, then gives the context its handler back.
+		class CollectedDiagnostics
+		{
+		public:
+			CollectedDiagnostics(llvm::LLVMContext& context, std::vector<ObjectDiagnostic>& errors)
+				: m_Context(context), m_Previous(context.getDiagnosticHandler())
+			{
+				context.setDiagnosticHandler(std::make_unique<Diagnostics>(errors));
+			}
+			~CollectedDiagnostics() { m_Context.setDiagnosticHandler(std::move(m_Previous)); }
+
+		private:
+			llvm::LLVMContext& m_Context;
+			std::unique_ptr<llvm::DiagnosticHandler> m_Previous;
+		};
+
 		llvm::OptimizationLevel PipelineLevel(int optLevel)
 		{
 			if (optLevel <= 1) return llvm::OptimizationLevel::O1;
@@ -82,18 +109,27 @@ namespace Scripting
 			}
 		}
 
-		std::unique_ptr<llvm::TargetMachine> MakeTargetMachine(const llvm::Module& module, const ObjectSettings& settings, std::string& error)
+		// The target machine for `module`, which gets the machine's data layout; nullptr with the reason in `diagnostics`.
+		std::unique_ptr<llvm::TargetMachine> MachineFor(llvm::Module& module, const ObjectSettings& settings, std::vector<ObjectDiagnostic>& diagnostics)
 		{
+			InitializeX86();
 			const llvm::Triple& triple = module.getTargetTriple();
+			std::string error;
 			const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, error);
-			if (!target) return nullptr;
+			if (!target)
+			{
+				diagnostics.push_back({ 0, "no code generator for '" + triple.str() + "': " + error });
+				return nullptr;
+			}
 			llvm::TargetOptions options;
-			return std::unique_ptr<llvm::TargetMachine>(target->createTargetMachine(triple, settings.target->Cpu(),
+			std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple, settings.target->Cpu(),
 				settings.target->LlvmFeatures(), options, std::nullopt, std::nullopt, CodeGenLevel(settings.optLevel)));
+			module.setDataLayout(machine->createDataLayout());
+			return machine;
 		}
 
 		// The pipeline `clang -O<n>` runs: unrolling and both vectorizers from -O2 on.
-		void Optimize(llvm::Module& module, llvm::TargetMachine& machine, int optLevel)
+		void RunPipeline(llvm::Module& module, llvm::TargetMachine& machine, int optLevel)
 		{
 			llvm::LoopAnalysisManager loops;
 			llvm::FunctionAnalysisManager functions;
@@ -115,44 +151,115 @@ namespace Scripting
 			pipeline.run(module, modules);
 		}
 
-		bool WriteObject(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::string& error)
+		void WriteObject(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
 		{
 			std::error_code ec;
 			llvm::raw_fd_ostream out(objPath, ec, llvm::sys::fs::OF_None);
 			if (ec)
 			{
-				error = "cannot write the object file '" + objPath + "': " + ec.message();
-				return false;
+				diagnostics.push_back({ 0, "cannot write the object file '" + objPath + "': " + ec.message() });
+				return;
 			}
 			llvm::legacy::PassManager backend;
 			backend.add(new llvm::TargetLibraryInfoWrapperPass(module.getTargetTriple()));
 			backend.add(llvm::createTargetTransformInfoWrapperPass(machine.getTargetIRAnalysis()));
 			if (machine.addPassesToEmitFile(backend, out, nullptr, llvm::CodeGenFileType::ObjectFile))
 			{
-				error = "the target cannot write object files";
-				return false;
+				diagnostics.push_back({ 0, "the target cannot write object files" });
+				return;
 			}
 			backend.run(module);
 			out.flush();
-			return true;
+		}
+
+		void Assemble(llvm::Module& module, const ObjectSettings& settings, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
+		{
+			CollectedDiagnostics collected(module.getContext(), diagnostics);
+			if (std::unique_ptr<llvm::TargetMachine> machine = MachineFor(module, settings, diagnostics))
+				WriteObject(module, *machine, objPath, diagnostics);
+		}
+
+		// One partition of a split module, assembled on a thread of its own in a context of its own.
+		struct Partition
+		{
+			std::string bitcode;
+			std::string objPath;
+			std::vector<ObjectDiagnostic> diagnostics;
+		};
+
+		void AssemblePartition(Partition& partition, const ObjectSettings& settings)
+		{
+			llvm::LLVMContext context;
+			llvm::Expected<std::unique_ptr<llvm::Module>> module = llvm::parseBitcodeFile(
+				llvm::MemoryBufferRef(partition.bitcode, partition.objPath), context);
+			if (!module)
+			{
+				partition.diagnostics.push_back({ 0, "cannot read a partition of the module back: " + llvm::toString(module.takeError()) });
+				return;
+			}
+			Assemble(**module, settings, partition.objPath, partition.diagnostics);
+		}
+
+		std::vector<Partition> Partitions(llvm::Module& module, const std::vector<std::string>& objectPaths)
+		{
+			std::vector<std::string> bitcode = SplitModuleToBitcode(module, static_cast<unsigned>(objectPaths.size()));
+			std::vector<Partition> partitions(bitcode.size());
+			for (size_t i = 0; i < bitcode.size(); ++i)
+			{
+				partitions[i].bitcode = std::move(bitcode[i]);
+				partitions[i].objPath = objectPaths[i];
+			}
+			return partitions;
+		}
+
+		void AssembleInParallel(std::vector<Partition>& partitions, const ObjectSettings& settings)
+		{
+			std::atomic<size_t> next = 0;
+			auto worker = [&] {
+				for (size_t i = next++; i < partitions.size(); i = next++) AssemblePartition(partitions[i], settings);
+			};
+			std::vector<std::thread> threads;
+			const size_t count = std::clamp<size_t>(settings.threads, 1, partitions.size());
+			for (size_t i = 0; i < count; ++i) threads.emplace_back(worker);
+			for (std::thread& thread : threads) thread.join();
 		}
 	}
 
-	bool EmitObject(llvm::Module& module, const std::string& objPath, const ObjectSettings& settings, std::vector<ObjectDiagnostic>& diagnostics)
+	uint64_t InstructionCount(const llvm::Module& module)
 	{
-		InitializeX86();
-		std::string error;
-		std::unique_ptr<llvm::TargetMachine> machine = MakeTargetMachine(module, settings, error);
-		if (!machine)
-		{
-			diagnostics.push_back({ 0, "no code generator for '" + module.getTargetTriple().str() + "': " + error });
-			return false;
-		}
-		module.setDataLayout(machine->createDataLayout());
+		uint64_t count = 0;
+		for (const llvm::Function& function : module) count += function.getInstructionCount();
+		return count;
+	}
+
+	unsigned PartitionCount(const llvm::Module& module, const ObjectSettings& settings)
+	{
+		const uint64_t worth = InstructionCount(module) / (settings.optLevel == 0 ? kInstructionsPerPartitionO0 : kInstructionsPerPartition);
+		return static_cast<unsigned>(std::clamp<uint64_t>(worth, 1, std::max(settings.threads, 1u)));
+	}
+
+	bool OptimizeModule(llvm::Module& module, const ObjectSettings& settings, std::vector<ObjectDiagnostic>& diagnostics)
+	{
 		const size_t before = diagnostics.size();
-		module.getContext().setDiagnosticHandler(std::make_unique<Diagnostics>(diagnostics));
-		Optimize(module, *machine, settings.optLevel);
-		if (!WriteObject(module, *machine, objPath, error)) diagnostics.push_back({ 0, error });
+		CollectedDiagnostics collected(module.getContext(), diagnostics);
+		std::unique_ptr<llvm::TargetMachine> machine = MachineFor(module, settings, diagnostics);
+		if (machine) RunPipeline(module, *machine, settings.optLevel);
+		return diagnostics.size() == before;
+	}
+
+	bool WriteObjects(llvm::Module& module, const ObjectSettings& settings, const std::vector<std::string>& objectPaths,
+		std::vector<ObjectDiagnostic>& diagnostics)
+	{
+		const size_t before = diagnostics.size();
+		if (objectPaths.size() == 1)
+		{
+			Assemble(module, settings, objectPaths[0], diagnostics);
+			return diagnostics.size() == before;
+		}
+		std::vector<Partition> partitions = Partitions(module, objectPaths);
+		AssembleInParallel(partitions, settings);
+		for (const Partition& partition : partitions)
+			diagnostics.insert(diagnostics.end(), partition.diagnostics.begin(), partition.diagnostics.end());
 		return diagnostics.size() == before;
 	}
 }

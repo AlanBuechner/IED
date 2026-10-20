@@ -41,6 +41,7 @@ namespace FS
 		public Path Normalized() const;
 
 		[operator("==")] public bool Equals(const Path& other) const { return text == other.text; }
+		[operator("!=")] public bool NotEquals(const Path& other) const { return text != other.text; }
 		[operator("hash")] public uint64 Hash() const { return text.Hash(); }
 
 		private Core::String text;

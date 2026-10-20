@@ -1508,8 +1508,12 @@
         "reason": "BUG-207: a second union of one name is reported at the second definition."
     },
     "DuplicateAliasDefinition": {
+        "expect": ["main.cf (2:1) error: redefinition of alias 'Size' as a different type: 'int64', was 'int32'"],
+        "reason": "BUG-207, BUG-273: an alias declared again as a different type is reported at the second definition."
+    },
+    "AliasOverTypeName": {
         "expect": ["main.cf (2:1) error: redefinition of alias 'Size'"],
-        "reason": "BUG-207: a second alias of one name is reported at the second definition."
+        "reason": "BUG-273: only an alias may be declared again; a type of the same name is a redefinition."
     },
     "NamespaceNameTaken": {
         "expect": ["main.cf (2:11) error: redeclaration of namespace 'Shapes'"],

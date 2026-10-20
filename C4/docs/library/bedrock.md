@@ -167,8 +167,9 @@ null-terminated, so read it through `Data()` and `ByteLength()`.
 `Init(const char*)`, `Init(bytes, byteLength)`, `Init(bytes, byteLength, charCount)`, `Data`,
 `ByteLength`, `CharCount`, `IsEmpty`, `IsValidUtf8` (Unicode table 3-7: no overlong forms, surrogates or
 code points above U+10FFFF), `ByteAt(i)`, `CodePointAt(charIndex)` (`-1` when out of range or
-malformed), `IndexOf(char, start)`, `IndexOf(StringView)`, `Contains`, `StartsWith`, `EndsWith`, `==`, `<`
-(byte order), `hash`, `Substring(start, length)` (clamped, no allocation), `Trimmed()`. Free functions:
+malformed), `IndexOf(char, start)`, `IndexOf(StringView)`, `Contains`, `StartsWith`, `EndsWith`, `==`, `!=`,
+`<`, `>`, `<=`, `>=` (byte order; `==` and `!=` also against a `const char*`: `view == "ab"`), `hash`,
+`Substring(start, length)` (clamped, no allocation), `Trimmed()`. Free functions:
 `Core::Utf8CharCount`, `Core::IsValidUtf8`, `Core::InvalidUtf8Offset` (where the first ill-formed sequence
 starts, or -1), `Core::IsSpace`.
 
@@ -178,7 +179,8 @@ A value: `Core::String s = Core::String("hello");` (no implicit conversion from 
 null-terminated buffer and keeps its character count current; a zero `String` is the empty string.
 
 `Init(const char*)`, `Init(StringView)`, `Init(int64 reserve)`, copy, `Delete`, `ByteLength`,
-`CharCount`, `Capacity`, `IsEmpty`, `CStr()`, `View()`, `CodePointAt`, `==`, `<`, `hash`, `+`
+`CharCount`, `Capacity`, `IsEmpty`, `CStr()`, `View()`, `CodePointAt`, `==`, `!=`, `<`, `>`, `<=`, `>=` (`==` and `!=`
+also against a `StringView` or a `const char*`: `s == "ab"`), `hash`, `+`
 (a new `String`), `Append(StringView)` and `Append(const char*)` (safe with a view of itself), `Clear`,
 `Reserve`.
 

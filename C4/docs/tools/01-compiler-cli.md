@@ -44,7 +44,9 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 | `-I <dir>`, `-I<dir>` | A project this one builds with: `<dir>` is an input folder (its sources compile into the program) and an include root (its headers resolve, for C4 and for interop headers). This is how one build combines several projects; see section 5. |
 | `--projects <file>` | Build the projects a description names, each with its own sources, include folders, defines and dependencies ([language/15-projects.md](../language/15-projects.md)). It replaces the inputs: giving both is a usage error. |
 | `-D NAME[=VALUE]`, `-DNAME[=VALUE]` | Define a macro for every file (value 1 when omitted); it may replace a predefined macro ([02-preprocessor](../language/02-preprocessor.md#26-predefined-macros)). |
-| `-O<n>`, `-O <n>` | Optimization level 0..3 (default 0), passed to clang when compiling the generated IR. C4 itself has no optimization pass. |
+| `-O<n>`, `-O <n>` | Optimization level 0..3 (default 0): LLVM's default pipeline for that level, as clang runs it. C4 itself has no optimization pass. |
+| `-j <n>`, `--threads <n>` | Threads that generate code, 1..64 (default: the processors, at most 4). |
+| `--partitions <n>` | Assemble the program into `<n>` objects, 1..64 (default: by its size, at most `-j`); `-c` takes none. |
 | `-march=<cpu>` | The processor to compile for ([vectors 8](../language/11-vectors-and-swizzling.md#8-the-simd-target), D-62): `x86-64` (the default), `x86-64-v2`, `x86-64-v3`, `x86-64-v4`, any LLVM x86-64 CPU name (`haswell`, `znver4`) or `native` (the building machine). Every function is compiled for it, foreign sources too, and it defines the `SIMD_*` macros. An unknown name is a usage error that lists the levels. |
 | `-m<feature>`, `-mno-<feature>` | Turn one processor feature on or off, with what it implies (`-mavx2` turns on `avx`, `-mno-avx` turns off `avx2` and `fma`): `sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd`. As in clang they apply after the last `-march`, in order. An unknown feature is a usage error that lists them. |
 | `-fno-strict-aliasing` | Turn off strict aliasing ([types 4.14](../language/04-types.md#414-strict-aliasing), D-64): the IR carries no type-based alias tags, so any load or store may touch any memory, for code that reads a value through a pointer to another type. |
@@ -63,7 +65,7 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 | `-Werror` | Every warning is an error: the build fails on the first phase that reports one. |
 | `-w` | Warnings are not reported. |
 | `-export-macros` | Write each file's final macro table as `<name>.c4macro` next to the output. |
-| `-ftime`, `--time-phases` | Print a per-phase timing footer (preprocess, parse, model, lower, object, runtime+link), also when the build succeeds. |
+| `-ftime`, `--time-phases` | Print a per-phase timing footer (preprocess, parse, model, lower, optimize, codegen, runtime+link), also when the build succeeds. |
 | `--pretty-print` | Dump the parsed ASTs. |
 | `-v` | Verbose: prints the tool command lines (clang, CBind, link). |
 | `--version` | Print `C4 <major>.<minor>.<patch>` and exit 0. |
@@ -81,15 +83,17 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 2. **Macro pass**: a text pre-pass per file (`#define`, `#if`, ...). See
    [language/02-preprocessor.md](../language/02-preprocessor.md).
 3. **Interop pass**: `extern "c"` / `extern "c++"` blocks. `include` headers go through `CBind.exe`;
-   `source` files are compiled with clang into `%TEMP%/c4_interop`, both with the build's `-march` / `-m` flags. See
+   `source` files are compiled with clang into `<int>/<output name>.interop/`, both with the build's `-march` / `-m`
+   flags. See
    [language/13-interop.md](../language/13-interop.md).
 4. **Parse** (multithreaded, once per file), **build the ProgramModel**, **lower to HIR and LLVM IR**.
    Any front-end error stops the build. Diagnostics print as `file (line:col) error: message`, followed
    by the source line and a caret; warnings print the same way after a successful build.
 5. `-S` writes `<base>.ll` and stops; `-bc` writes `<base>.bc` and stops.
 6. Optimize the module at `-O<n>` with LLVM's default pipeline and write `<base>.obj`, inside the compiler (no
-   separate clang process); the target machine and every function carry the target's CPU and features. An
-   assembler error in an `asm` block is reported at the block's line. `-c` stops here.
+   separate clang process); the target machine and every function carry the target's CPU and features. A large
+   module is split into partitions written on `-j` threads: `<base>.obj`, `<base>.p1.obj`, ... (`--partitions`). An
+   assembler error in an `asm` block is reported at the block's line. `-c` stops here, with one object.
 7. Compile every C and C++ source of the runtime (`<home>/C4Runtime`: the GC, threads, reflection, tests, EH,
    IO, RTTI, memory) at `-O2` into `%TEMP%/c4_runtime/<hash of the runtime folder>/O2/`
    (`Compiler/RuntimeObjects.cpp`). An object's name carries a key of its source's bytes and every runtime

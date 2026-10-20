@@ -20,8 +20,8 @@ namespace Scripting
 	Core::Vector<Core::String> inputs;
 	Core::String outputFile = "output.exe";
 	Core::Vector<Core::String> includeDirs;
-	Core::String projectsFile;
-	bool debugInfo = false; // -g: CodeView in the object, a .pdb beside the executable // --projects <file>: the build description (docs/language/15-projects.md)
+	Core::String projectsFile; // --projects <file>: the build description (docs/language/15-projects.md)
+	bool debugInfo = false; // -g: CodeView in the objects, a .pdb beside the executable
 	std::vector<MacroDefine> defines; // -D NAME / -D NAME=VALUE: predefined macros for every file
 	bool compileOnly = false;
 	bool emitIR = false;
@@ -31,7 +31,9 @@ namespace Scripting
 	bool exportMacros = false;
 	bool gcStats = false; // install the GC runtime's default stats printer in the entry point
 	bool timePhases = false; // -ftime: print a per-phase compile timing breakdown (parse/semantic/HIR/codegen)
-	int optLevel = 0; // -O<n>: optimization level passed to clang (0..3). Default 0 = debug, matches C++ compilers.
+	int optLevel = 0; // -O<n>: optimization level (0..3). Default 0 = debug, matches C++ compilers.
+	unsigned threads = 0;    // -j <n>: threads that generate code; 0 until ParseArgs picks the default
+	unsigned partitions = 0; // --partitions <n>: objects the program is assembled into; 0: by the module's size
 	std::vector<std::string> targetFlags; // -march=<cpu>, -m<feature>, -mno-<feature>, in order (D-62)
 	CpuTarget target;                     // what targetFlags select
 	bool strictAliasing = true;           // -fno-strict-aliasing turns it off: no alias tags (D-64)
@@ -41,7 +43,7 @@ namespace Scripting
 	bool scriptHost = false;   // --script-host: a symbol table scripts link against, and <out>.c4i (docs/runtime/04)
 	bool warningsAsErrors = false; // -Werror: every warning fails the build
 	bool noWarnings = false;       // -w: warnings are not reported
-	Core::String intermediateDir;  // --int-dir: where .ll / .obj go; empty: next to the output
+	Core::String intermediateDir;  // --int-dir: where the intermediates (.obj, .ll, .bc) go; empty: next to the output
 	Core::Vector<Core::String> linkArguments; // -l<lib> / -L<dir>, passed to the link as written
 	bool printVersion = false;     // --version
 	bool printHelp = false;        // -h
@@ -50,6 +52,9 @@ namespace Scripting
 
 	// Parse command-line arguments into CompileOptions
 	CompileOptions ParseArgs(int argc, char** argv);
+
+	// Where a build's intermediates go: --int-dir, else the output's folder (empty: the current folder).
+	fs::path IntermediateFolder(const CompileOptions& options);
 
 	// Print usage/help message
 	void PrintUsage();
@@ -67,10 +72,10 @@ namespace Scripting
 	bool RunTool(const std::vector<std::string>& args);
 
 
-	// Link the program's object, the runtime and foreign objects and the libraries (.lib paths, bare names or
+	// Link the objects (the program's, the runtime's and foreign ones) and the libraries (.lib paths, bare names or
 	// -l / -L arguments) into an executable with clang and lld.
-	bool LinkWithLLD(const Core::String& objPath, const Core::Vector<Core::String>& extraObjects,
-		const Core::Vector<Core::String>& libraries, const Core::String& outputPath, bool verbose);
+	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
+		const Core::String& outputPath, bool verbose);
 
 	// Run an executable, streaming its output live and returning its exit code (no error noise - a
 	// non-zero exit is expected for failing test runs). Returns false only if it couldn't be started.

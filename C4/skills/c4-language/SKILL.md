@@ -161,6 +161,8 @@ Bedrock's names live in one-level namespaces: `Core` (containers `Array<T>`, `Ha
     Core::StringBuilder text;
     Core::Format(&text, "{0:s} is {1}", "ada", ages.Get(Core::String("ada")));
 
+A `String` is never made from a `char*` implicitly (`Core::String s = Core::String("ada");`), but strings and views compare with `==`, `!=`, `<`, `>`, `<=`, `>=`, and with `==` / `!=` against a literal directly: `if (name == "ada")`.
+
 ## Conventions
 - One concept per file; name files after their primary type or feature. Shared declarations go in `.ch`, definitions in the paired `.cf`.
 - Comments stay minimal: self-documenting names first, one short line max when intent is not obvious (see AGENTS.md for the full standard).

@@ -20,9 +20,9 @@ and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and 
 | Suite | Location | What it proves | Run |
 |---|---|---|---|
 | C4Testing | `C4Testing/src/Tests/` | C++ unit tests of the compiler library: lexer, source manager, parser, ProgramModel, overloads, HIR lowering, in-process codegen | `nuke test` (repository root), or `python Frost/Build.py -test -c Development -a x64 -p <C4 root>` |
-| TestCode (e2e) | `assets/TestCode/` | one large C4 program covering the language end to end, run at `-O0` and `-O2` | `assets/TestCode/RunTests.ps1` |
+| TestCode (e2e) | `assets/TestCode/` | one large C4 program covering the language end to end, run at `-O0` and `-O2` | `assets/TestCode/RunTests.ps1 [-DebugInfo] [-Partitions n]` |
 | NegativeTest | `assets/NegativeTest/` | invalid programs fail with the exact, actionable diagnostic | `assets/NegativeTest/RunTests.ps1 [-Filter x] [-O2]` |
-| IsolatedTest | `assets/IsolatedTest/` | one folder = one feature or one historical bug, including interop | `assets/IsolatedTest/RunTests.ps1 [-Filter x] [-O2] [-DebugInfo]` |
+| IsolatedTest | `assets/IsolatedTest/` | one folder = one feature or one historical bug, including interop | `assets/IsolatedTest/RunTests.ps1 [-Filter x] [-O2] [-DebugInfo] [-Partitions n]` |
 | RuntimeTest | `assets/RuntimeTest/` | small runtime behaviours (printf, struct-return ABI) compile and exit 0 | `assets/RuntimeTest/RunTests.ps1 [-Filter x]` |
 | StressTest | `assets/StressTest/Dx12Game/` | a large DX12 + Win32 game program compiles clean | `assets/StressTest/RunTests.ps1 [-Run]` |
 | ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2` | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2]` |
@@ -117,6 +117,8 @@ Adding a test:
   unless a manifest says otherwise. A program still running after 60 seconds is killed and fails its case.
 - `-DebugInfo` builds every folder with `-g`, so the debug information is checked against the whole corpus
   (it must verify, link and change nothing the program does).
+- `-Partitions <n>` (TestCode too) assembles every program into `<n>` objects (`--partitions`), so the parallel
+  code generation path runs the whole corpus: run it when touching codegen, linkage or `ModulePartitions`.
 - Manifests next to the runner:
   - `NegativeTests.json` - folders that must fail to compile, with expected diagnostics;
   - `ExpectedExit.json` - folders that must compile and exit with a given code (for example uncaught
@@ -189,6 +191,11 @@ assets\build-output\iso\SwizzleLanguage.exe
     CBind binds both see the same processor (`__AVX2__`).
   - `StrictAliasingFlag` (D-64): a default build's IR has alias tags and a `-fno-strict-aliasing` one has none; a
     pointer pun the optimizer cannot see through reads what was written at `-O2 -fno-strict-aliasing`.
+  - `Partitions` (roadmap 5.1): a program with a `static` global that a foreign C global shares the name of,
+    file-scope assembly, virtual calls, template instances, exceptions, `thread_local`, reflection and a global with
+    a create runs when assembled into 4 objects, into 3 with `-g` (its `.pdb` has the functions), into 3 on one
+    thread at `-O2`, and by default; a one-line program is one object; `-c` writes one; bad `-j` / `--partitions`
+    counts and `-c --partitions 2` are usage errors.
 
 Collector tests live in IsolatedTest `MemoryGC/` (liveness, deep lists, large objects, interior pointers,
 pins, hooks, finalizer order and exceptions, static roots, noscan, pacing, `delete`, collections while several
@@ -282,17 +289,18 @@ heap: a concurrent mark is the next step (roadmap 3.11).
 `Benchmarks/compile/` (B32): C4.exe end to end on a one-line program, the Bedrock tests and TestCode, at `-O0`
 and `-O2`, the median of 3 builds with each build's `--time-phases` breakdown; `-Check` builds each once.
 
-Baselines (2026-10-19, ms; phases in seconds):
+Baselines (2026-10-20, after B46 and B47, 4 code generation threads; ms, phases in seconds; 2026-10-19 before them
+in parentheses):
 
-| Program | -O0 | -O2 | Where -O2 goes |
-|---|---|---|---|
-| hello | 142 | 147 | object 0.025, runtime and link 0.11 |
-| Bedrock tests (31 files) | 1,235 | 4,219 | preprocess 0.21, parse + model + lower 0.11, object 3.55, runtime and link 0.28 |
-| TestCode | 491 | 854 | parse + model + lower 0.07, object 0.53, runtime and link 0.17 |
+| Program | -O0 | -O2 | Where -O0 goes | Where -O2 goes |
+|---|---|---|---|---|
+| hello | 97 (142) | 96 (147) | runtime and link 0.08 | runtime and link 0.08 |
+| Bedrock tests (31 files) | 698 (1,235) | 3,178 (4,219) | lower 0.12, codegen 0.36, link 0.09 | lower 0.13, optimize 1.95, codegen 0.87, link 0.09 |
+| TestCode | 360 (491) | 605 (854) | parse 0.04, lower 0.03, codegen 0.12, link 0.09 | optimize 0.23, codegen 0.13, link 0.09 |
 
-The front end is a small part of every build; the LLVM optimizer and object emission (`clang -c` on the written
-`.ll`) dominate at `-O2`. Emitting the object in process, without the text IR round trip, and splitting the
-module for parallel code generation are the open compile-time items (roadmap 5.1).
+The front end is a small part of every build. The object is now emitted in process (B46) and a large module is
+assembled in parallel partitions (B47); at `-O2` the single-threaded LLVM optimizer is now most of the time, and at
+`-O0` code generation. Caching the objects of unchanged partitions is the next compile-time item (roadmap 5.3).
 
 ---
 

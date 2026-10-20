@@ -324,8 +324,16 @@ namespace
 			for (const auto& inc : m_Options.includeDirs)
 				cliIncludes.push_back(std::string(inc.c_str()));
 
-			std::string objDir = (fs::temp_directory_path() / "c4_interop").string();
-			fs::create_directories(objDir);
+			// The build's own folder: two programs built at once never share a foreign object.
+			const fs::path interopFolder = Scripting::IntermediateFolder(m_Options) / (fs::path(m_Options.outputFile.c_str()).stem().string() + ".interop");
+			std::error_code ec;
+			fs::create_directories(interopFolder, ec);
+			if (ec)
+			{
+				m_Result.AddBackendError("cannot create the interop folder " + Core::String(interopFolder.string().c_str()) + ": " + Core::String(ec.message().c_str()));
+				return;
+			}
+			const std::string objDir = interopFolder.string();
 
 			m_Interop = Scripting::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target.Flags(), m_Options.verbose);
 

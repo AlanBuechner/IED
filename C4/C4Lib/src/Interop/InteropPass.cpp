@@ -312,16 +312,13 @@ namespace Scripting
 		}
 	}
 
-		// Binding output is keyed by the header's ABSOLUTE path, not its file name. Several files in
-		// one project can include same-named headers that differ (e.g. four `game.hpp` stubs pulling
-		// different SDK headers); keying by name alone made them overwrite each other's bindings, so
-		// most of the project saw only the last-processed header's symbols and reported the rest as
-		// undefined. A short hash of the absolute path keeps names unique and filesystem-safe.
-		std::string BindingOutName(const std::string& absPath)
+		// What an intermediate made from a foreign file is named after: a hash of the file's absolute path, then its
+		// name. Same-named files in different folders, and `util.c` beside `util.cpp`, must not share an output.
+		std::string PathTag(const std::string& absPath)
 		{
 			char buf[24];
 			snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)std::hash<std::string>{}(absPath));
-			return std::string(buf) + "_" + fs::path(absPath).filename().string() + ".c4bind";
+			return std::string(buf) + "_" + fs::path(absPath).filename().string();
 		}
 
 	bool InteropPass::ResolveForeignHeader(const std::string& headerPath, const std::string& fileDir,
@@ -434,7 +431,7 @@ namespace Scripting
 						"' referenced in " + name + ". Install the CBind tool next to the compiler.");
 					continue;
 				}
-				std::string outFile = Norm(objDir + "/" + BindingOutName(absPath));
+				std::string outFile = Norm(objDir + "/" + PathTag(absPath) + ".c4bind");
 				bool haveBindings = false;
 				const BindingFlags flags{ d.language, d.defines, d.includeDirs, targetFlags };
 				if (fs::exists(outFile) && BindingIsCached(outFile, absPath, cbindExe, flags))
@@ -474,7 +471,7 @@ namespace Scripting
 					{
 						ForeignObject fo;
 						fo.srcPath = Norm(shimPath.string());
-						fo.objPath = Norm(objDir + "/" + fs::path(absPath).stem().string() + "_shim.obj");
+						fo.objPath = Norm(objDir + "/" + PathTag(absPath) + ".shim.obj");
 						fo.language = "c++";
 						fo.defines = d.defines;
 						fo.targetFlags = targetFlags;
@@ -501,7 +498,7 @@ namespace Scripting
 				{
 					ForeignObject fo;
 					fo.srcPath = absPath;
-					fo.objPath = Norm(objDir + "/" + fs::path(absPath).stem().string() + ".obj");
+					fo.objPath = Norm(objDir + "/" + PathTag(absPath) + ".obj");
 					fo.language = d.language;
 					fo.defines = d.defines;
 					fo.includeDirs = d.includeDirs;

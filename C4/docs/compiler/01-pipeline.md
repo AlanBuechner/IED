@@ -38,7 +38,8 @@ in `C4Lib`.
      -S / --emit-ir writes <out>.ll and stops here; -bc writes <out>.bc and stops
         |
         v
- [6] EmitObject (in the compiler): LLVM's -O<n> pipeline, then the X86 backend  -> <out>.obj
+ [6] OptimizeModule, then WriteObjects (in the compiler): LLVM's -O<n> pipeline, then the X86 backend
+     -> <out>.obj, or <out>.obj + <out>.p1.obj ... for a module split into partitions on -j threads
  [7] runtime objects (GC, reflect, test, IO as C; EH as C++), cached in %TEMP%/c4_runtime
  [8] clang driver -> lld-link: main obj + runtimes + foreign objs + libs -> <out>.exe
 ```
@@ -99,8 +100,10 @@ extern "c" source "helpers.c";
   timestamps. C++ headers also get a generated shim with an `extern "C"` wrapper for every bound
   constructor, destructor, method and C++-linkage function, compiled and linked as a foreign object, so
   C4 calls them (virtuals dispatch through a typed pointer in the wrapper).
-- `source`: compiles the C/C++ file with the bundled clang (`-std=c11` / `-std=c++20`) into
-  `%TEMP%/c4_interop`, and links the object.
+- `source`: compiles the C/C++ file with the bundled clang (`-std=c11` / `-std=c++20`) and links the object. The
+  bindings, shims and objects go to the build's own `<int>/<output name>.interop/` folder (`--int-dir`, else beside
+  the output), each named after a hash of its file's absolute path and the file's name: two programs built at
+  once, two same-named files in different folders, and `util.c` beside `util.cpp` never share an output.
 - `lib("x.lib")`: adds an import library (bare names are resolved against the newest Windows SDK).
 - Any interop failure is a hard error. See [../language/13-interop.md](../language/13-interop.md).
 
@@ -177,7 +180,7 @@ straight from the module in memory).
 
 ## 6. Object, runtime, reflection, link (`src/ProgramOutput`, `Compiler/ObjectEmission`, `Compiler/BuildUtils`)
 
-- `EmitObject` (roadmap 5.1): the module is optimized and assembled inside the compiler, with no textual-IR round
+- `OptimizeModule` and `WriteObjects` (roadmap 5.1): the module is optimized and assembled inside the compiler, with no textual-IR round
   trip or second process. A `TargetMachine` for the build's CPU and features runs LLVM's default pipeline at
   `-O<n>` (`PassBuilder::buildPerModuleDefaultPipeline`, `buildO0DefaultPipeline` at `-O0`; loop unrolling,
   interleaving and both vectorizers from `-O2`, as clang sets them), then the X86 backend writes the COFF object.
@@ -185,6 +188,13 @@ straight from the module in memory).
   parity with C++ - see [../tools/05-test-suites.md](../tools/05-test-suites.md)). An error the assembler reports
   for an `asm` block comes back with the block's `!srcloc` cookie (`AsmEmitter::LocationCookie`) and is reported at
   the C4 line: `main.cf (4:2) error: invalid operand for instruction: 'mov rax, ecx'`.
+- Parallel code generation: after the whole module is optimized (inlining across the program is unchanged),
+  `WriteObjects` splits it into partitions (`Compiler/ModulePartitions`, LLVM's `SplitModule`) and assembles each on
+  a thread of its own, from a bitcode copy read into a context of its own. Local symbols become hidden globals with
+  a `.local` suffix, which no C or C++ symbol can have, so they meet no foreign object's names in the link; file-scope
+  assembly stays in the first partition. How many: `--partitions <n>`, else one per 4,000 instructions (12,000 at
+  `-O0`, where an instruction is cheaper to assemble), at most `-j` (default: the processors, at most 4). `-c` always
+  writes one object. The objects are identical whatever the thread count.
 - The X86 target is registered with its `LLVMInitializeX86*` functions; the compiler links LLVM statically and must
   not link `LLVM-C.lib`, whose import of `LLVM-C.dll` would bind those functions to the DLL's own copy of LLVM.
 - Runtime objects are compiled on demand (`Compiler/RuntimeObjects`) from every `.c` / `.cpp` under the

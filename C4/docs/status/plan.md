@@ -1210,6 +1210,28 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 - **Tests:** every gate (all suites build through `EmitObject`); `asmerr` probe: `main.cf (4:2) error: invalid
   operand for instruction: 'mov rax, ecx'`.
 
+#### B47 - Parallel code generation (roadmap 5.1, step 2)
+- **Closes:** BUG-271, BUG-272, BUG-273. **Design:** [pipeline 6](../compiler/01-pipeline.md). **Depends on:** B46.
+  **Status:** Done.
+- **Done notes:** `Compiler/ObjectEmission` is two phases, `OptimizeModule` (the whole module, so inlining across the
+  program is unchanged) and `WriteObjects`, which splits a large module into partitions (`Compiler/ModulePartitions`
+  over LLVM's `SplitModule`; locals become hidden `.local` globals; file-scope assembly stays in the first) and
+  assembles each from a bitcode copy in a context of its own on up to `-j` threads (default: the processors, at most
+  4). `--partitions <n>` sets the count; by default one per 4,000 instructions (12,000 at `-O0`). `--time-phases`
+  shows `optimize` and `codegen`; the link takes every object. The Bedrock tests build in 0.63 s at `-O0` (0.93 s
+  before) and 3.0 s at `-O2` (4.5 s; code generation 2.2 s -> 0.8 s, the rest is the single-threaded optimizer).
+  Found on the way: BUG-271 (`Core::String`, `StringView` and `FS::Path` had no `!=`, the strings no `>`, `<=`,
+  `>=`, and a string could not be compared with a literal: added, with `==` / `!=` against `const char*`); BUG-272
+  (foreign objects were named by their file's stem in one shared `%TEMP%/c4_interop`, so `util.c` and `util.cpp`,
+  or two programs built at once, overwrote each other's objects: they are now path-tagged in the build's own
+  `<name>.interop` folder); BUG-273 (two C headers in one file failed: both bindings declare `size_t`; an alias may
+  now be declared again when it names the same type, as in C++).
+- **Tests:** TestCode and IsolatedTest gained `-Partitions <n>`; the whole e2e corpus at 4 partitions (1505 x 2) and
+  IsolatedTest at 3 (424) pass. ToolsTest `Partitions`, `TimePhasesFlag`, `HelpListsEveryOption`; IsolatedTest
+  `Interop/Bug272SameNamedForeignSources`, `Types/Bug273AliasDeclaredAgain`; NegativeTest `AliasOverTypeName`,
+  `DuplicateAliasDefinition` (now naming both types); Bedrock `string.operators`, `str.comparison_operators`,
+  `compare_and_hash`.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1727,7 +1749,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

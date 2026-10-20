@@ -295,8 +295,23 @@ namespace Scripting
 		info.type = raw;
 		info.definingUnit = ctx.unitId;
 		info.declNode = &alias;
-		if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &alias, "redefinition of alias '" + name + "'");
+		const AliasType* repeats = nullptr;
+		if (!ctx.scope->Register(name, info))
+		{
+			repeats = EarlierAlias(*ctx.scope, name);
+			if (!repeats) ErrorAt(ctx, &alias, "redefinition of alias '" + name + "'");
+		}
+		// scope: the target resolves in the alias's own namespace
+		m_PendingAliases.Push({ raw, alias.GetAliasedType().Get(), ctx.unitId, ctx.scope, repeats, &alias });
+	}
 
-		m_PendingAliases.Push({ raw, alias.GetAliasedType().Get(), ctx.unitId, ctx.scope }); // scope: target resolves in the alias's own namespace
+	// As in C++, an alias may be declared again in its scope when it names the same type: two C headers' bindings
+	// in one file each declare `size_t`.
+	const AliasType* ModelBuilder::EarlierAlias(const Scope& scope, const Core::String& name)
+	{
+		for (const auto& entry : scope.Entries(name))
+			if (entry->kind == SymbolKind::Type && entry->type && entry->type->GetKind() == TypeKind::Alias)
+				return static_cast<const AliasType*>(entry->type);
+		return nullptr;
 	}
 } // namespace Scripting

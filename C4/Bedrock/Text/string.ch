@@ -27,7 +27,15 @@ namespace Core
 		public int32 CodePointAt(int64 charIndex) const { return View().CodePointAt(charIndex); }
 
 		[operator("==")] public bool Equals(const String& other) const { return View() == other.View(); }
+		[operator("!=")] public bool NotEquals(const String& other) const { return View() != other.View(); }
+		[operator("==")] public bool EqualsView(StringView other) const { return View() == other; }
+		[operator("!=")] public bool NotEqualsView(StringView other) const { return View() != other; }
+		[operator("==")] public bool EqualsText(const char* text) const { return View() == text; }
+		[operator("!=")] public bool NotEqualsText(const char* text) const { return View() != text; }
 		[operator("<")] public bool Less(const String& other) const { return View() < other.View(); }
+		[operator(">")] public bool Greater(const String& other) const { return View() > other.View(); }
+		[operator("<=")] public bool LessOrEqual(const String& other) const { return View() <= other.View(); }
+		[operator(">=")] public bool GreaterOrEqual(const String& other) const { return View() >= other.View(); }
 		[operator("hash")] public uint64 Hash() const { return View().Hash(); }
 		[operator("+")] public String Concat(StringView other) const;
 

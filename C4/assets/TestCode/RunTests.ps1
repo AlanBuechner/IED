@@ -1,7 +1,8 @@
 # C4 Test Runner - Clean, Build, Run, Report
 # Native tools (C4.exe, lld) emit diagnostics on stderr even on success; only the exit code is authoritative.
-# Usage:  .\RunTests.ps1 [-DebugInfo]   (-DebugInfo: both builds with -g)
-param([switch]$DebugInfo)
+# Usage:  .\RunTests.ps1 [-DebugInfo] [-Partitions <n>]   (-DebugInfo: both builds with -g; -Partitions: both builds
+#         assembled into <n> objects, the parallel code generation path)
+param([switch]$DebugInfo, [int]$Partitions = 0)
 $ErrorActionPreference = "Continue"
 
 # Paths are relative to this script (never hardcoded) so the suite runs from any checkout location.
@@ -11,6 +12,7 @@ $compiler = Join-Path $repoRoot "bin/Development-windows-x64/C4/C4.exe"
 $testDir  = $root
 $flags    = @()
 if ($DebugInfo) { $flags += "-g" }
+if ($Partitions -gt 0) { $flags += @("--partitions", "$Partitions") }
 # Build artifacts go to assets/build-output/testcode, not into the test source folder.
 $outputExe = Join-Path $repoRoot "assets/build-output/testcode/Main.exe"
 $outputIrr = Join-Path $repoRoot "assets/build-output/testcode/Main.exe.ll"

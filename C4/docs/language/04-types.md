@@ -230,6 +230,10 @@ alias FVector2 = TVector2<float>;
   shadowable in a nested block).
 - Alias templates are supported (see [08-templates](08-templates.md)).
 - Aliases are transparent: an alias and its target are the same type for overloading and conversion.
+- As a C++ typedef may, an alias may be declared again in its scope when it names the same type (`alias Size =
+  uint64;` twice; the bindings of two C headers in one file both declare `size_t`). Naming a different type is an
+  error: `redefinition of alias 'Size' as a different type: 'int64', was 'int32'`; so is an alias with the name of
+  another type.
 - There is no `typedef` or `using X = ...`.
 
 ## 4.8 Enumerations

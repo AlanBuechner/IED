@@ -1,0 +1,26 @@
+// BUG-273: an alias may be declared again in its scope when it names the same type, as a C++ typedef may: two C
+// headers' bindings in one file both declare size_t.
+alias Size = uint64;
+alias Size = uint64;
+alias Count = int32;
+alias Count = int;
+alias Bytes = char*;
+alias Bytes = char8*;
+alias Late = Later;
+alias Late = Later;
+struct Later { int32 v; }
+
+namespace Inner {
+	alias Size = int16;
+	alias Size = int16;
+}
+
+int32 main() {
+	Size big = 1;
+	Count n = 2;
+	Inner::Size small = 3;
+	Late later;
+	later.v = 4;
+	if (sizeof(Size) != 8 || sizeof(Inner::Size) != 2) return 1;
+	return (int32)big + n + small + later.v == 10 ? 0 : 2;
+}

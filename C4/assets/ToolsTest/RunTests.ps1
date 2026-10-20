@@ -120,7 +120,7 @@ function Test-UsageErrors {
 function Test-HelpListsEveryOption {
     $help = (Invoke-Compiler $compiler @("-h")).output
     $failures = @()
-    foreach ($flag in @("-o ", "-I ", "-D ", "-O ", "-march=", "-m ", "--int-dir", "-l ", "-L ", "-c ", "-bc", "-S", "-test", "-test-json", "-reflect-tag",
+    foreach ($flag in @("-o ", "-I ", "-D ", "-O ", "--threads", "--partitions", "-march=", "-m ", "--int-dir", "-l ", "-L ", "-c ", "-bc", "-S", "-test", "-test-json", "-reflect-tag",
         "--script-host", "-gc-stats", "-Werror", "-w ", "-export-macros", "-ftime", "--pretty-print", "-v ", "--version", "-h")) {
         if (-not $help.Contains($flag)) { $failures += "-h does not list '$($flag.Trim())'" }
     }
@@ -161,7 +161,7 @@ function Test-TimePhasesFlag {
     $build = Invoke-Compiler $compiler @($dir, "-o", (Join-Path $dir "app.exe"), "--time-phases")
     if ($build.exit -ne 0) { return @("--time-phases did not build: $($build.output)") }
     $failures = @()
-    foreach ($phase in @("Phase timing:", "parse", "model", "lower", "object", "runtime+link")) {
+    foreach ($phase in @("Phase timing:", "parse", "model", "lower", "optimize", "codegen", "runtime+link")) {
         if (-not $build.output.Contains($phase)) { $failures += "--time-phases printed no '$phase'" }
     }
     return $failures
@@ -598,10 +598,98 @@ int32 main()
     return $failures
 }
 
+# A program split into partitions (parallel code generation, roadmap 5.1) links and runs like the one-object build:
+# a static global whose name a foreign C global also has, file-scope assembly, virtual calls, template instances,
+# exceptions, thread_local, reflection and a global with a create, with -g and on one thread too, and by default
+# (as many objects as its size is worth). -c writes one object, a one-line program stays one, and the counts are
+# checked.
+function Test-Partitions {
+    $program = @'
+extern "c" include "counter.h"
+extern "c" source "counter.c"
+include "bedrock.ch"
+
+static int32 counter = 5;
+static int32 Bump() { counter += 1; return counter; }
+
+asm {
+	".text";
+	".globl c4_part_answer";
+	"c4_part_answer:";
+	"mov eax, 42";
+	"ret";
+}
+[link("c4_part_answer")] int32 Answer();
+
+class Shape { public virtual int32 Area() { return 0; } }
+class Square : Shape { public int32 side; public int32 Area() override { return side * side; } }
+
+template<typename T> T Twice(T v) { return v + v; }
+
+void Raise(int32 v) { throw v; }
+
+thread_local int32 t_calls = 0;
+int32 Calls() { t_calls += 1; return t_calls; }
+
+struct Item { public int32 weight; }
+
+Core::String g_greeting = Core::String("partitioned");
+
+int32 main()
+{
+	if (Bump() != 6) return 1;
+	if (ReadCounter() != 7) return 2;
+	if (Answer() != 42) return 3;
+	Square square;
+	square.side = 3;
+	Shape* shape = &square;
+	if (shape->Area() != 9) return 4;
+	if (Twice<int32>(21) != 42 || Twice<float>(1.5f) != 3.0f) return 5;
+	int32 caught = 0;
+	try { Raise(7); } catch (int32 e) { caught = e; }
+	if (caught != 7) return 6;
+	Calls();
+	if (Calls() != 2) return 7;
+	if (!Reflection::FindType("Item").IsValid()) return 8;
+	if (g_greeting != "partitioned") return 9;
+	return 0;
+}
+'@
+    $dir = New-Sources "partitions" @{ "src/main.cf" = $program; "src/counter.h" = "int ReadCounter(void);"; "src/counter.c" = "int counter = 7;`nint ReadCounter(void) { return counter; }" }
+    $src = Join-Path $dir "src"
+    $failures = @()
+    foreach ($case in @(@{ name = "four"; flags = @("--partitions", "4"); objects = 4 }, @{ name = "debug"; flags = @("--partitions", "3", "-g"); objects = 3 },
+        @{ name = "onethread"; flags = @("--partitions", "3", "-j", "1", "-O2"); objects = 3 }, @{ name = "default"; flags = @(); objects = 0 })) {
+        $out = Join-Path $dir $case.name
+        $build = Invoke-Compiler $compiler (@($src, "-o", (Join-Path $out "app.exe")) + $case.flags)
+        if ($build.exit -ne 0) { $failures += "$($case.name): did not build: $($build.output)"; continue }
+        & (Join-Path $out "app.exe") | Out-Null
+        if ($LASTEXITCODE -ne 0) { $failures += "$($case.name): the program exited $LASTEXITCODE" }
+        $objects = @(Get-ChildItem $out -Filter "app*.obj").Count
+        if ($case.objects -gt 0 -and $objects -ne $case.objects) { $failures += "$($case.name): $objects objects, expected $($case.objects)" }
+    }
+    $tiny = New-Sources "partitions-tiny" @{ "main.cf" = $hello }
+    $small = Invoke-Compiler $compiler @($tiny, "-o", (Join-Path $tiny "app.exe"), "-O2")
+    if ($small.exit -ne 0 -or @(Get-ChildItem $tiny -Filter "app*.obj").Count -ne 1) { $failures += "a one-line program was not assembled as one object by default" }
+    $pdbutil = Join-Path $repoRoot "Frost/vendor/Compiler/bin/llvm-pdbutil.exe"
+    $pdb = Join-Path $dir "debug/app.pdb"
+    $symbols = if (Test-Path $pdb) { (& $pdbutil dump --symbols $pdb | Out-String) } else { "" }
+    if ($symbols -notmatch "``main``" -or $symbols -notmatch "``Raise``") { $failures += "the partitioned -g build's .pdb lacks main or Raise" }
+    $one = Invoke-Compiler $compiler @($src, "-o", (Join-Path $dir "c/app.exe"), "-c")
+    if ($one.exit -ne 0 -or @(Get-ChildItem (Join-Path $dir "c") -Filter "*.obj").Count -ne 1) { $failures += "-c did not write exactly one object" }
+    foreach ($bad in @(@("-j", "0"), @("-j", "x"), @("-j65"), @("--partitions", "0"), @("--partitions", "-3"))) {
+        $r = Invoke-Compiler $compiler (@($src) + $bad)
+        if ($r.exit -ne 2 -or $r.output -notmatch "needs a count from 1 to 64") { $failures += "'$($bad -join ' ')': exit $($r.exit), '$($r.output)'" }
+    }
+    $c = Invoke-Compiler $compiler @($src, "-c", "--partitions", "2")
+    if ($c.exit -ne 2 -or $c.output -notmatch "--partitions needs a link") { $failures += "-c with --partitions 2: exit $($c.exit), '$($c.output)'" }
+    return $failures
+}
+
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-DebugInfoFlag",
-    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag")
+    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

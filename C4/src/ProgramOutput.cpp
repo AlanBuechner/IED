@@ -27,14 +27,16 @@ bool ProgramOutput::Write(llvm::Module& module)
 	if (!PrepareScriptHost(module)) return false; // the output folder exists: <out>.c4i goes there
 	if (m_In.options.emitBitcode) return WriteBitcode(module, base + ".bc");
 	if (m_In.options.emitIR) return WriteIR(module, base + ".ll"); // -S: the module as text, and nothing else
-	const std::string objPath = base + ".obj";
-	if (!WriteObject(module, objPath)) return false;
+	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads };
+	if (!Optimize(module, settings)) return false;
+	const std::vector<std::string> objects = ObjectPaths(base, PartitionsFor(module, settings));
+	if (!Assemble(module, settings, objects)) return false;
 	if (m_In.options.compileOnly)
 	{
-		CORE_INFO("Compiled {0}", objPath);
+		CORE_INFO("Compiled {0}", objects[0]);
 		return true; // -c: the object is the output
 	}
-	return Link(objPath);
+	return Link(objects);
 }
 
 // The compiler owns its output location: a missing folder is created, as every toolchain does.
@@ -53,8 +55,7 @@ bool ProgramOutput::MakeOutputFolder()
 // without an extension. Empty (with the error recorded) when the folder cannot be made.
 std::string ProgramOutput::IntermediateBase()
 {
-	const fs::path out(m_In.options.outputFile.c_str());
-	const fs::path folder = m_In.options.intermediateDir.empty() ? out.parent_path() : fs::path(m_In.options.intermediateDir.c_str());
+	const fs::path folder = Scripting::IntermediateFolder(m_In.options);
 	std::error_code ec;
 	if (!folder.empty()) fs::create_directories(folder, ec);
 	if (ec)
@@ -62,7 +63,7 @@ std::string ProgramOutput::IntermediateBase()
 		m_In.result.AddBackendError("failed to create the intermediate folder: " + Core::String(folder.string().c_str()));
 		return "";
 	}
-	return (folder / out.stem()).string();
+	return (folder / fs::path(m_In.options.outputFile.c_str()).stem()).string();
 }
 
 bool ProgramOutput::WriteIR(const llvm::Module& module, const std::string& path)
@@ -94,15 +95,50 @@ bool ProgramOutput::WriteBitcode(const llvm::Module& module, const std::string& 
 	return true;
 }
 
-// The module optimized at -O<n> and assembled into an object inside the compiler; an error the assembler reports
-// for an asm block is placed at that block.
-bool ProgramOutput::WriteObject(llvm::Module& module, const std::string& objPath)
+bool ProgramOutput::Optimize(llvm::Module& module, const Scripting::ObjectSettings& settings)
 {
 	const auto start = std::chrono::steady_clock::now();
-	if (m_In.options.verbose) std::cout << "Optimizing (-O" << m_In.options.optLevel << ") and writing " << objPath << std::endl;
+	if (m_In.options.verbose) std::cout << "Optimizing (-O" << settings.optLevel << ")" << std::endl;
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
-	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target };
-	const bool written = Scripting::EmitObject(module, objPath, settings, diagnostics);
+	const bool optimized = Scripting::OptimizeModule(module, settings, diagnostics);
+	Report(diagnostics);
+	Timed("optimize", start);
+	return optimized;
+}
+
+// -c writes one object; otherwise --partitions, or as many as the module's size is worth on -j threads.
+unsigned ProgramOutput::PartitionsFor(const llvm::Module& module, const Scripting::ObjectSettings& settings) const
+{
+	if (m_In.options.compileOnly) return 1;
+	if (m_In.options.partitions) return m_In.options.partitions;
+	return Scripting::PartitionCount(module, settings);
+}
+
+// <base>.obj, then <base>.p1.obj, <base>.p2.obj, ... for the other partitions.
+std::vector<std::string> ProgramOutput::ObjectPaths(const std::string& base, unsigned count)
+{
+	std::vector<std::string> paths = { base + ".obj" };
+	for (unsigned i = 1; i < count; ++i) paths.push_back(base + ".p" + std::to_string(i) + ".obj");
+	return paths;
+}
+
+// The module assembled into its objects inside the compiler; an error the assembler reports for an asm block is
+// placed at that block.
+bool ProgramOutput::Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::vector<std::string>& objects)
+{
+	const auto start = std::chrono::steady_clock::now();
+	if (m_In.options.verbose)
+		std::cout << "Writing " << Scripting::InstructionCount(module) << " instructions as " << objects.size() << " object(s) on up to "
+			<< settings.threads << " thread(s): " << objects[0] << std::endl;
+	std::vector<Scripting::ObjectDiagnostic> diagnostics;
+	const bool written = Scripting::WriteObjects(module, settings, objects, diagnostics);
+	Report(diagnostics);
+	Timed("codegen", start);
+	return written;
+}
+
+void ProgramOutput::Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics)
+{
 	for (const Scripting::ObjectDiagnostic& diagnostic : diagnostics)
 	{
 		Scripting::CompilationError error;
@@ -110,17 +146,16 @@ bool ProgramOutput::WriteObject(llvm::Module& module, const std::string& objPath
 		error.message = Core::String(diagnostic.message.c_str());
 		m_In.result.errors.Push(error);
 	}
-	Timed("object", start);
-	return written;
 }
 
-bool ProgramOutput::Link(const std::string& objPath)
+bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
 {
 	const auto start = std::chrono::steady_clock::now();
 	const Core::String& out = m_In.options.outputFile;
+	Core::Vector<Core::String> objects;
+	for (const std::string& object : programObjects) objects.Push(Core::String(object.c_str()));
 	// The C4 runtime linked into every executable (Compiler/RuntimeObjects.h).
-	Core::Vector<Core::String> extraObjs;
-	if (!Scripting::EnsureRuntimeObjects(m_In.options.verbose, extraObjs))
+	if (!Scripting::EnsureRuntimeObjects(m_In.options.verbose, objects))
 	{
 		m_In.result.AddBackendError("the C4 runtime could not be built");
 		return false;
@@ -128,7 +163,7 @@ bool ProgramOutput::Link(const std::string& objPath)
 	// Foreign C/C++ objects compiled by the interop pre-pass (`extern "c" source` files and their shims): a [link]
 	// variable or extern function only resolves against them.
 	for (const auto& foreign : m_In.interop.objects)
-		if (!foreign.objPath.empty()) extraObjs.Push(Core::String(foreign.objPath.c_str()));
+		if (!foreign.objPath.empty()) objects.Push(Core::String(foreign.objPath.c_str()));
 	Core::Vector<Core::String> libraries;
 	for (const auto& lib : m_In.interop.libraries) libraries.Push(Core::String(lib.c_str()));
 	for (const auto& argument : m_In.options.linkArguments) libraries.Push(argument);
@@ -143,7 +178,7 @@ bool ProgramOutput::Link(const std::string& objPath)
 		}
 		libraries.Push(Core::String((scriptHost / "C4Script.lib").string().c_str()));
 	}
-	if (!Scripting::LinkWithLLD(Core::String(objPath.c_str()), extraObjs, libraries, out, m_In.options.verbose))
+	if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.verbose))
 	{
 		m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
 		return false;
