@@ -210,33 +210,6 @@ namespace Scripting
 		return true;
 	}
 
-	bool CompileIRToObj(const Core::String& irPath, const Core::String& objPath, int optLevel, const CpuTarget& target, bool verbose)
-	{
-		const std::string clangPath = ClangPath();
-		if (clangPath.empty()) return false;
-
-		std::vector<std::string> args = {
-			clangPath, "-c", "-target", "x86_64-pc-windows-msvc", "-mstackrealign", "-march=" + target.Cpu(),
-			"-fexceptions", "-Wno-override-module" // clang adds the installed MSVC version to the module's triple
-		};
-		if (optLevel > 0)
-		{
-			args.push_back("-O" + std::to_string(optLevel));
-		}
-		args.push_back(irPath);
-		args.push_back("-o");
-		args.push_back(objPath);
-
-		if (verbose)
-		{
-			std::cout << "Compiling: ";
-			for (const auto& a : args) std::cout << a << " ";
-			std::cout << std::endl;
-		}
-
-		return RunTool(args);
-	}
-
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,
 		const Core::String& language, const Core::Vector<Core::String>& defines,
 		const Core::Vector<Core::String>& includeDirs, const std::vector<std::string>& targetFlags, bool verbose)

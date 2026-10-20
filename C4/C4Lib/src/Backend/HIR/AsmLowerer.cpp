@@ -96,6 +96,7 @@ namespace Scripting
 		if (!clobbers.Ok()) return m_Ctx.Fail(n, QueryResult<void>::Fail(clobbers.error, clobbers.message));
 
 		auto* node = m_Ctx.out->NewNode<AsmNode>();
+		node->origin = n->startLocation;
 		node->text = text.value;
 		std::vector<std::string> constraints = plan.outputConstraints;
 		constraints.insert(constraints.end(), plan.inputConstraints.begin(), plan.inputConstraints.end());

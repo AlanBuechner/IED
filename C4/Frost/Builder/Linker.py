@@ -38,17 +38,11 @@ def LinkObjects(intDir, links, projDir, outputFile, linkerArgs, buildType, needs
 		args.extend(["-fuse-ld=llvm-lib"])
 	elif(buildType == Config.BuildType.DYNAMIC_LIBRARY):
 		args.extend(["-shared", "-fPIC"])
-	# An archive only collects objects; executables and DLLs link the sanitizer runtime.
+	# An archive only collects objects; executables and DLLs link the sanitizer runtime (the clang driver adds the
+	# runtime and its thunk library itself).
 	if(Config.useAsan == True and buildType != Config.BuildType.STATIC_LIBRARY):
 		args.append("-fsanitize=address")
 		args.append("-fno-sanitize-address-use-odr-indicator")
-		asanLibDir = Config.GetClangLibDir()
-		thunkLib = f"{asanLibDir}/clang_rt.asan_dynamic_runtime_thunk-x86_64.lib"
-		if os.path.isfile(thunkLib):
-			args.append(f"-Xlinker")
-			args.append(f"/LIBPATH:{asanLibDir}")
-			args.append(f"-Xlinker")
-			args.append(f"/WHOLEARCHIVE:{thunkLib}")
 
 	args.extend(["-o", outputFile])
 	files = Utils.ResolveFiles([f"{intDir}/**.obj"], intDir)

@@ -57,9 +57,6 @@ namespace Scripting
 	// The toolchain's clang.exe (Toolchain::Clang), or empty after printing where it was looked for.
 	std::string ClangPath();
 
-	// Compile LLVM IR to an object file for `target` using clang.exe
-	bool CompileIRToObj(const Core::String& irPath, const Core::String& objPath, int optLevel, const CpuTarget& target, bool verbose);
-
 	// Compile a foreign C/C++ source file to an object file using the bundled clang.
 	// language is "c" or "c++"; defines/includeDirs are passed as -D / -I flags, targetFlags as written (D-62).
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,

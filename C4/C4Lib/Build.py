@@ -20,6 +20,9 @@ def GetProject():
 	p.links = []
 	if os.path.exists(compilerLibDir):
 		for libPath in glob.glob(os.path.join(compilerLibDir, "LLVM*.lib")):
+			# LLVM-C.lib imports LLVM-C.dll: its C API functions (LLVMInitializeX86Target, ...) would bind to the DLL's
+			# copy of LLVM, whose target registry the statically linked compiler never sees.
+			if os.path.basename(libPath).lower() == "llvm-c.lib": continue
 			p.links.append(os.path.basename(libPath))
 		for libPath in glob.glob(os.path.join(compilerLibDir, "Remarks.lib")):
 			p.links.append(os.path.basename(libPath))

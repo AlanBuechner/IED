@@ -86,10 +86,10 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 4. **Parse** (multithreaded, once per file), **build the ProgramModel**, **lower to HIR and LLVM IR**.
    Any front-end error stops the build. Diagnostics print as `file (line:col) error: message`, followed
    by the source line and a caret; warnings print the same way after a successful build.
-5. Write `<base>.ll` (always), and `<base>.bc` for `-bc`.
-6. `clang -c -target x86_64-pc-windows-msvc -mstackrealign -march=<cpu> -fexceptions -Wno-override-module -O<n>
-   <base>.ll -o <base>.obj` (`-O<n>` is omitted when the level is 0); every function in the IR already carries the
-   target's `target-cpu` and `target-features`. `-c` stops here.
+5. `-S` writes `<base>.ll` and stops; `-bc` writes `<base>.bc` and stops.
+6. Optimize the module at `-O<n>` with LLVM's default pipeline and write `<base>.obj`, inside the compiler (no
+   separate clang process); the target machine and every function carry the target's CPU and features. An
+   assembler error in an `asm` block is reported at the block's line. `-c` stops here.
 7. Compile every C and C++ source of the runtime (`<home>/C4Runtime`: the GC, threads, reflection, tests, EH,
    IO, RTTI, memory) at `-O2` into `%TEMP%/c4_runtime/<hash of the runtime folder>/O2/`
    (`Compiler/RuntimeObjects.cpp`). An object's name carries a key of its source's bytes and every runtime

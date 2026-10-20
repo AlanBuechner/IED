@@ -37,7 +37,8 @@ def CreateBaseArgs(includes, sysIncludes, defines, useSys = True, sourceFile = N
 	else:
 		args.extend([f"-std={Config.cppVersion}", "-x", "c++"])
 	if(Config.useAsan == True):
-		args.append("-fsanitize=address")
+		# The prebuilt LLVM libraries are not sanitized: the STL must lay out strings and vectors the way they do.
+		args.extend(["-fsanitize=address", "-D_DISABLE_STRING_ANNOTATION", "-D_DISABLE_VECTOR_ANNOTATION"])
 	for i in includes:
 		args.extend(["-I", i])
 	for i in sysIncludes:

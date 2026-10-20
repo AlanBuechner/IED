@@ -115,9 +115,10 @@ operands are an error there.
 
 - `asm` is a keyword.
 - The target is x86-64 (Windows x64 today); an `asm` block is written for that target.
-- Assembly the assembler rejects is a compile error with the assembler's message and the offending line
-  (`<inline asm>:2:2: error: invalid operand for instruction` / `mov rax, ecx`): the operand sizes it picked are the
-  operands' types, so a 32-bit value in a 64-bit instruction is an error, not a silent truncation.
+- Assembly the assembler rejects is a compile error at the asm block, with the assembler's message and the offending
+  instruction (`main.cf (4:2) error: invalid operand for instruction: 'mov rax, ecx'`): the operand sizes are the
+  operands' types, so a 32-bit value in a 64-bit instruction is an error, not a silent truncation. An error in a
+  file-scope block has no C4 line (the module assembler reports it as it is).
 - Operand names are unique within a block; `in`, `out`, `inout`, `clobber` and `clobber_abi` are words only inside it.
 - An output's location is any assignable location of the operand's type (a variable, field, element or `*p`);
   writing through it obeys the usual rules (no output into a const location).

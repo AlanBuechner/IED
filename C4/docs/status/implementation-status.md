@@ -86,7 +86,7 @@ pass; Bedrock 340 tests (1729 assertions) at `-O0` and `-O2`, also built for `-O
 |---|---|---|---|
 | if / while / do / for / range-for / switch / `fallthrough` / break / continue | **Implemented** | | [control flow](../language/09-statements-and-control-flow.md) |
 | `goto` / labels | **Implemented** | Jump-scope rules enforced | [control flow](../language/09-statements-and-control-flow.md) |
-| `asm` statements and file-scope `asm` | **Implemented** | x86-64; an assembler error names the inline-asm line, not yet the C4 source line (roadmap 5.1) | [inline assembly](../language/16-inline-assembly.md) |
+| `asm` statements and file-scope `asm` | **Implemented** | x86-64; an assembler error is reported at the asm block's line | [inline assembly](../language/16-inline-assembly.md) |
 | `defer` | **Implemented** | Every exit edge, including exceptions; `finally` is a defer | [control flow](../language/09-statements-and-control-flow.md) |
 | `try` / `catch` / `finally` / `throw` / rethrow | **Implemented** | Catch by value, by reference, by base, `catch (...)`, across C++ interop; exception objects are copied and destroyed by their lifecycle functions; `noexcept` stops the program | [control flow](../language/09-statements-and-control-flow.md) |
 | Operator precedence | **Implemented** | C++'s table; `is`/`as` relational, `**` above prefix operators | [expressions](../language/10-expressions.md) |

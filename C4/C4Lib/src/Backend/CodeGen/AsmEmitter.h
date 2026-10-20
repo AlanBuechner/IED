@@ -15,6 +15,11 @@ namespace Scripting
 		/// Whether control continues after the block (false for a `noreturn` one, which ends in `unreachable`).
 		bool Emit(const AsmNode* n);
 
+		/// The `!srcloc` cookie of a source location: LLVM hands it back with an error the assembler reports for the
+		/// block, and LocationOf turns it back into the location.
+		static uint64_t LocationCookie(const SourceLocation& at);
+		static SourceLocation LocationOf(uint64_t cookie);
+
 	private:
 		llvm::Type* ResultType(const AsmNode* n);
 

@@ -10,8 +10,6 @@ sys.dont_write_bytecode = True  # never drop __pycache__ into the caller's direc
 location = os.path.dirname(__file__).replace("\\", "/")
 compilerLibDir = (Config.compilerFolder + "/lib").replace("\\", "/")
 
-Config.useAsan = False
-
 enableProfiling = False
 enableMemoryTracker = False
 
@@ -77,6 +75,9 @@ links = [
 llvmLibs = []
 if os.path.exists(compilerLibDir):
 	for libPath in glob.glob(os.path.join(compilerLibDir, "LLVM*.lib")):
+		# LLVM-C.lib imports LLVM-C.dll: its C API functions (LLVMInitializeX86Target, ...) would bind to the DLL's
+		# copy of LLVM, whose target registry the statically linked compiler never sees.
+		if os.path.basename(libPath).lower() == "llvm-c.lib": continue
 		llvmLibs.append(os.path.basename(libPath))
 	for libPath in glob.glob(os.path.join(compilerLibDir, "Remarks.lib")):
 		llvmLibs.append(os.path.basename(libPath))

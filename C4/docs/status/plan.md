@@ -1195,6 +1195,21 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 - **Tests:** IsolatedTest `Asm/Operands`, `Asm/RegisterClasses`, `Asm/Options`, `Asm/FileScope`, `Asm/ClobberAbiCall`;
   29 NegativeTests `Asm*`; C4Testing `Parser.Statements.Asm` (6) and `Semantic.Asm` (5).
 
+#### B46 - In-process object emission (roadmap 5.1, step 1)
+- **Design:** [pipeline 6](../compiler/01-pipeline.md). **Depends on:** none. **Status:** Done.
+- **Done notes:** `Compiler/ObjectEmission` optimizes the verified module with LLVM's default pipeline at `-O<n>`
+  (the tuning clang uses) and writes the COFF object with the X86 backend, replacing the `.ll` file plus `clang -c`
+  (`CompileIRToObj` is gone). The output stage moved out of the driver into `src/ProgramOutput` (IR for `-S`,
+  bitcode for `-bc`, the object, the link, the script host). Backend diagnostics carry inline-asm `!srcloc` cookies
+  (`AsmEmitter::LocationCookie`), so an assembler error names the asm block's C4 line. Found on the way: `LLVM-C.lib`
+  was in the link (the `LLVM*.lib` glob), which bound `LLVMInitializeX86*` to `LLVM-C.dll`'s separate copy of LLVM;
+  both build scripts now skip it. The IsolatedTest runner asks for `-S` for its IR checks (a normal build writes no
+  `.ll`). Frost: `-asan` builds now instrument C4 itself (the workspace no longer forces it off) and link (no second
+  thunk library; STL annotations off to match the prebuilt LLVM) - but ASan builds blue-screen the owner's machine,
+  see WORK.md.
+- **Tests:** every gate (all suites build through `EmitObject`); `asmerr` probe: `main.cf (4:2) error: invalid
+  operand for instruction: 'mov rax, ecx'`.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1712,7 +1727,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

@@ -35,10 +35,10 @@ in `C4Lib`.
         |   -> @main wrapper -> __c4_global_init rounds -> globals -> reflection image
         |   -> __c4_gc_roots -> verify
         v
-     <out>.ll  ----------------------------------- (-S / --emit-ir stops here)
+     -S / --emit-ir writes <out>.ll and stops here; -bc writes <out>.bc and stops
         |
         v
- [6] clang -c -target x86_64-pc-windows-msvc -mstackrealign -fexceptions -O<n>  -> <out>.obj
+ [6] EmitObject (in the compiler): LLVM's -O<n> pipeline, then the X86 backend  -> <out>.obj
  [7] runtime objects (GC, reflect, test, IO as C; EH as C++), cached in %TEMP%/c4_runtime
  [8] clang driver -> lld-link: main obj + runtimes + foreign objs + libs -> <out>.exe
 ```
@@ -172,13 +172,21 @@ With `-g` the module also carries CodeView debug information: a subprogram per w
 parameters and locals, the types, the globals and a line per statement
 ([04-codegen-and-abi.md](04-codegen-and-abi.md#debug-information--g)).
 
-The `.ll` is always written next to the output (`<out-base>.ll`). `-S` / `--emit-ir` stop after it.
+`-S` / `--emit-ir` write the module as `<out-base>.ll` and stop; a normal build writes no `.ll` (the object comes
+straight from the module in memory).
 
-## 6. Object, runtime, reflection, link (`Compiler/BuildUtils`)
+## 6. Object, runtime, reflection, link (`src/ProgramOutput`, `Compiler/ObjectEmission`, `Compiler/BuildUtils`)
 
-- `CompileIRToObj`: `clang -c -target x86_64-pc-windows-msvc -mstackrealign -fexceptions -O<n>`. `-O<n>` is
-  the only optimization in the pipeline; C4 itself runs no optimization pass (GEMM at `-O2` measured at
-  parity with C++ - see [../tools/05-test-suites.md](../tools/05-test-suites.md)).
+- `EmitObject` (roadmap 5.1): the module is optimized and assembled inside the compiler, with no textual-IR round
+  trip or second process. A `TargetMachine` for the build's CPU and features runs LLVM's default pipeline at
+  `-O<n>` (`PassBuilder::buildPerModuleDefaultPipeline`, `buildO0DefaultPipeline` at `-O0`; loop unrolling,
+  interleaving and both vectorizers from `-O2`, as clang sets them), then the X86 backend writes the COFF object.
+  `-O<n>` is the only optimization in the pipeline; C4 itself runs no optimization pass (GEMM at `-O2` measured at
+  parity with C++ - see [../tools/05-test-suites.md](../tools/05-test-suites.md)). An error the assembler reports
+  for an `asm` block comes back with the block's `!srcloc` cookie (`AsmEmitter::LocationCookie`) and is reported at
+  the C4 line: `main.cf (4:2) error: invalid operand for instruction: 'mov rax, ecx'`.
+- The X86 target is registered with its `LLVMInitializeX86*` functions; the compiler links LLVM statically and must
+  not link `LLVM-C.lib`, whose import of `LLVM-C.dll` would bind those functions to the DLL's own copy of LLVM.
 - Runtime objects are compiled on demand (`Compiler/RuntimeObjects`) from every `.c` / `.cpp` under the
   install's `C4Runtime/` ([../tools/01-compiler-cli.md](../tools/01-compiler-cli.md#4-the-install)) into
   `%TEMP%/c4_runtime/<hash of the runtime folder>/O2` (at `-O2 -Werror`), so two installs never share
@@ -223,7 +231,7 @@ consumer (`unresolved signature for function 'main'`) - a weak diagnostic tracke
 | ModelBuilder | every unit's own top-level declarations | `ProgramModel` | lower a function body |
 | HIR | one `FunctionRecord` + the model | typed `HIRFunction` (complete or not) + diagnostics | mutate the AST, re-derive layout |
 | CodeGen | HIR trees + model layout/symbols | one verified `llvm::Module` | resolve names, overloads or types |
-| BuildUtils | `.ll`, runtimes, foreign objects | `.obj`, `.exe` | hide a tool failure |
+| ProgramOutput / ObjectEmission / BuildUtils | the verified module, runtimes, foreign objects | `.obj`, `.exe` (`.ll` for `-S`, `.bc` for `-bc`) | hide a tool failure |
 
 The LSP (`C4LSP`) runs phases 1-4 plus HIR lowering for diagnostics, so editor errors are exactly the
 compiler's (see [../tools/03-editor-lsp-dap.md](../tools/03-editor-lsp-dap.md)).

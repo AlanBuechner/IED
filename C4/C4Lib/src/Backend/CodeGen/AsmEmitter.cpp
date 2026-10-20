@@ -19,6 +19,9 @@ namespace Scripting
 			n->intel ? llvm::InlineAsm::AD_Intel : llvm::InlineAsm::AD_ATT);
 		llvm::CallInst* call = B.CreateCall(type, assembly, args);
 		call->addFnAttr(llvm::Attribute::NoUnwind);
+		llvm::LLVMContext& c = m_Ctx.mctx().context();
+		call->setMetadata("srcloc", llvm::MDNode::get(c, llvm::ConstantAsMetadata::get(
+			llvm::ConstantInt::get(llvm::Type::getInt64Ty(c), LocationCookie(n->origin)))));
 		if (n->memory == AsmNode::Memory::None) call->setMemoryEffects(llvm::MemoryEffects::none());
 		else if (n->memory == AsmNode::Memory::Read) call->setMemoryEffects(llvm::MemoryEffects::readOnly());
 		for (size_t i = 0; i < n->outputs.size(); ++i)
@@ -29,6 +32,29 @@ namespace Scripting
 		if (!n->noReturn) return true;
 		B.CreateUnreachable();
 		return false;
+	}
+
+	namespace
+	{
+		// The cookie's fields: the source in the top 24 bits, the line in the next 24, the column in the low 16.
+		constexpr uint64_t kLineBits = 24;
+		constexpr uint64_t kColumnBits = 16;
+		constexpr uint64_t kLineMask = (1ull << kLineBits) - 1;
+		constexpr uint64_t kColumnMask = (1ull << kColumnBits) - 1;
+	}
+
+	uint64_t AsmEmitter::LocationCookie(const SourceLocation& at)
+	{
+		return (static_cast<uint64_t>(at.sourceId) << (kLineBits + kColumnBits)) | ((at.line & kLineMask) << kColumnBits) | (at.column & kColumnMask);
+	}
+
+	SourceLocation AsmEmitter::LocationOf(uint64_t cookie)
+	{
+		SourceLocation at;
+		at.sourceId = static_cast<uint32>(cookie >> (kLineBits + kColumnBits));
+		at.line = static_cast<uint32>((cookie >> kColumnBits) & kLineMask);
+		at.column = static_cast<uint32>(cookie & kColumnMask);
+		return at;
 	}
 
 	llvm::Type* AsmEmitter::ResultType(const AsmNode* n)

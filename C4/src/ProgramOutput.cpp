@@ -1,0 +1,215 @@
+#include "ProgramOutput.h"
+#include "Core/Core.h"
+#include "Compiler/ObjectEmission.h"
+#include "Compiler/RuntimeObjects.h"
+#include "Compiler/Toolchain.h"
+#include "Backend/CodeGen/AsmEmitter.h"
+#include "Backend/CodeGen/CodeGen.h"
+#include "Backend/Reflection/RegistrationEmitter.h"
+#include "Script/HostInterface.h"
+#include "Script/HostTable.h"
+#include "Script/InlineBodies.h"
+#include "Script/InterfaceBuilder.h"
+#include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
+#include <iostream>
+#include <optional>
+#include <system_error>
+
+namespace fs = std::filesystem;
+
+bool ProgramOutput::Write(llvm::Module& module)
+{
+	if (!MakeOutputFolder()) return false;
+	const std::string base = IntermediateBase();
+	if (base.empty()) return false;
+	if (!PrepareScriptHost(module)) return false; // the output folder exists: <out>.c4i goes there
+	if (m_In.options.emitBitcode) return WriteBitcode(module, base + ".bc");
+	if (m_In.options.emitIR) return WriteIR(module, base + ".ll"); // -S: the module as text, and nothing else
+	const std::string objPath = base + ".obj";
+	if (!WriteObject(module, objPath)) return false;
+	if (m_In.options.compileOnly)
+	{
+		CORE_INFO("Compiled {0}", objPath);
+		return true; // -c: the object is the output
+	}
+	return Link(objPath);
+}
+
+// The compiler owns its output location: a missing folder is created, as every toolchain does.
+bool ProgramOutput::MakeOutputFolder()
+{
+	fs::path folder = fs::path(m_In.options.outputFile.c_str()).parent_path();
+	if (folder.empty()) folder = fs::current_path();
+	std::error_code ec;
+	fs::create_directories(folder, ec);
+	if (!ec) return true;
+	m_In.result.AddBackendError("failed to create output folder: " + Core::String(folder.string().c_str()));
+	return false;
+}
+
+// Where the intermediates go: `--int-dir`'s folder with the output's name, else next to the output, as `<path>/<name>`
+// without an extension. Empty (with the error recorded) when the folder cannot be made.
+std::string ProgramOutput::IntermediateBase()
+{
+	const fs::path out(m_In.options.outputFile.c_str());
+	const fs::path folder = m_In.options.intermediateDir.empty() ? out.parent_path() : fs::path(m_In.options.intermediateDir.c_str());
+	std::error_code ec;
+	if (!folder.empty()) fs::create_directories(folder, ec);
+	if (ec)
+	{
+		m_In.result.AddBackendError("failed to create the intermediate folder: " + Core::String(folder.string().c_str()));
+		return "";
+	}
+	return (folder / out.stem()).string();
+}
+
+bool ProgramOutput::WriteIR(const llvm::Module& module, const std::string& path)
+{
+	std::error_code ec;
+	llvm::raw_fd_ostream file(path, ec);
+	if (ec)
+	{
+		m_In.result.AddBackendError("failed to open IR output: " + Core::String(path.c_str()));
+		return false;
+	}
+	module.print(file, nullptr);
+	CORE_INFO("Emitted LLVM IR to {0}", path);
+	return true;
+}
+
+// -bc: the module as bitcode, the input of the scripting pipeline.
+bool ProgramOutput::WriteBitcode(const llvm::Module& module, const std::string& path)
+{
+	std::error_code ec;
+	llvm::raw_fd_ostream file(path, ec);
+	if (ec)
+	{
+		m_In.result.AddBackendError("failed to open the bitcode output: " + Core::String(path.c_str()));
+		return false;
+	}
+	llvm::WriteBitcodeToFile(module, file);
+	CORE_INFO("Wrote bitcode to {0}", path);
+	return true;
+}
+
+// The module optimized at -O<n> and assembled into an object inside the compiler; an error the assembler reports
+// for an asm block is placed at that block.
+bool ProgramOutput::WriteObject(llvm::Module& module, const std::string& objPath)
+{
+	const auto start = std::chrono::steady_clock::now();
+	if (m_In.options.verbose) std::cout << "Optimizing (-O" << m_In.options.optLevel << ") and writing " << objPath << std::endl;
+	std::vector<Scripting::ObjectDiagnostic> diagnostics;
+	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target };
+	const bool written = Scripting::EmitObject(module, objPath, settings, diagnostics);
+	for (const Scripting::ObjectDiagnostic& diagnostic : diagnostics)
+	{
+		Scripting::CompilationError error;
+		if (diagnostic.cookie) error.location = Scripting::AsmEmitter::LocationOf(diagnostic.cookie);
+		error.message = Core::String(diagnostic.message.c_str());
+		m_In.result.errors.Push(error);
+	}
+	Timed("object", start);
+	return written;
+}
+
+bool ProgramOutput::Link(const std::string& objPath)
+{
+	const auto start = std::chrono::steady_clock::now();
+	const Core::String& out = m_In.options.outputFile;
+	// The C4 runtime linked into every executable (Compiler/RuntimeObjects.h).
+	Core::Vector<Core::String> extraObjs;
+	if (!Scripting::EnsureRuntimeObjects(m_In.options.verbose, extraObjs))
+	{
+		m_In.result.AddBackendError("the C4 runtime could not be built");
+		return false;
+	}
+	// Foreign C/C++ objects compiled by the interop pre-pass (`extern "c" source` files and their shims): a [link]
+	// variable or extern function only resolves against them.
+	for (const auto& foreign : m_In.interop.objects)
+		if (!foreign.objPath.empty()) extraObjs.Push(Core::String(foreign.objPath.c_str()));
+	Core::Vector<Core::String> libraries;
+	for (const auto& lib : m_In.interop.libraries) libraries.Push(Core::String(lib.c_str()));
+	for (const auto& argument : m_In.options.linkArguments) libraries.Push(argument);
+	if (m_In.options.debugInfo) libraries.Push("-Wl,/DEBUG"); // the .pdb beside the executable
+	const fs::path scriptHost = m_In.options.scriptHost ? Scripting::Toolchain::ScriptHost() : fs::path();
+	if (m_In.options.scriptHost)
+	{
+		if (scriptHost.empty())
+		{
+			m_In.result.AddBackendError("--script-host needs the script host library, C4Script.dll, which this install does not have");
+			return false;
+		}
+		libraries.Push(Core::String((scriptHost / "C4Script.lib").string().c_str()));
+	}
+	if (!Scripting::LinkWithLLD(Core::String(objPath.c_str()), extraObjs, libraries, out, m_In.options.verbose))
+	{
+		m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
+		return false;
+	}
+	CORE_INFO("Linked {0}", out);
+	if (m_In.options.scriptHost && !ShipScriptHost(scriptHost)) return false;
+	Timed("runtime+link", start);
+	return true;
+}
+
+// --script-host (docs/runtime/04 section 3): the thread_local accessors, the symbol table and <out>.c4i. A program that
+// uses the scripting API without it has no table to link against: an error that says what to do.
+bool ProgramOutput::PrepareScriptHost(llvm::Module& module)
+{
+	if (!m_In.options.scriptHost)
+	{
+		if (!module.getNamedGlobal("__c4_script_table")) return true;
+		m_In.result.AddBackendError("this program uses the scripting API (Scripting::Host), which needs a script host: build it with --script-host");
+		return false;
+	}
+	Scripting::EmitThreadLocalAccessors(module);
+	const Scripting::ProgramModel& model = m_In.compiler.GetProgramModel();
+	std::string error;
+	std::vector<std::string> objects;
+	for (const auto& foreign : m_In.interop.objects)
+		if (!foreign.objPath.empty()) objects.push_back(foreign.objPath);
+	std::optional<std::vector<std::string>> listed = Scripting::ForeignDefinitions(objects, &error);
+	if (!listed)
+	{
+		m_In.result.AddBackendError(Core::String(error.c_str()));
+		return false;
+	}
+	const std::vector<std::string> prelude = Scripting::PreludeFunctionSymbols(model);
+	listed->insert(listed->begin(), prelude.begin(), prelude.end());
+	Scripting::HostBuild build;
+	build.symbols = Scripting::HostSymbols(module, *listed);
+	build.inlineBodies = Scripting::InlineBodies(module, build.symbols);
+	build.reflectedTypes = Scripting::ReflectedTypeNames(model);
+	std::optional<Scripting::HostInterface> host = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(build), &error);
+	if (!host || !Scripting::EmitHostTable(module, host->symbols, host->buildId, &error))
+	{
+		m_In.result.AddBackendError(Core::String(error.c_str()));
+		return false;
+	}
+	const std::string interfacePath = fs::path(m_In.options.outputFile.c_str()).replace_extension(".c4i").string();
+	if (!Scripting::WriteInterface(*host, interfacePath, &error))
+	{
+		m_In.result.AddBackendError(Core::String(error.c_str()));
+		return false;
+	}
+	CORE_INFO("Wrote the script interface to {0}", interfacePath);
+	return true;
+}
+
+// The script host library goes beside the program, which loads it as it starts.
+bool ProgramOutput::ShipScriptHost(const fs::path& scriptHost)
+{
+	const fs::path target = fs::path(m_In.options.outputFile.c_str()).parent_path() / "C4Script.dll";
+	std::error_code ec;
+	fs::copy_file(scriptHost / "C4Script.dll", target, fs::copy_options::update_existing, ec);
+	if (!ec) return true;
+	m_In.result.AddBackendError(Core::String(("cannot copy C4Script.dll beside the program: " + ec.message()).c_str()));
+	return false;
+}
+
+void ProgramOutput::Timed(const char* phase, std::chrono::steady_clock::time_point since)
+{
+	m_In.compiler.AddPhaseTime(phase, std::chrono::duration<double>(std::chrono::steady_clock::now() - since).count());
+}

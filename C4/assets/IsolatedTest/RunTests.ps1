@@ -49,7 +49,7 @@ function Load-Manifest([string]$path) {
 $negative = Load-Manifest (Join-Path $root "NegativeTests.json")
 $skipped  = Load-Manifest (Join-Path $root "SkipTests.json")
 
-# ExpectedIR.json: substrings the emitted out.ll of a case must contain.
+# ExpectedIR.json: substrings the case's IR (an extra -S compile writes out.ll) must contain.
 function Load-IRManifest([string]$path) {
     if (-not (Test-Path $path)) { return @{} }
     $json = Get-Content $path -Raw | ConvertFrom-Json
@@ -179,7 +179,10 @@ foreach ($f in $folders) {
     }
 
     if ($irExpected.ContainsKey($rel)) {
+        # The compiler writes the IR only when asked (-S stops after it), so the case is compiled once more for it.
         $llPath = [System.IO.Path]::ChangeExtension($exe, ".ll")
+        Remove-Item $llPath -ErrorAction SilentlyContinue
+        & $compiler $sub -o $exe -S @caseFlags 2>&1 | Out-Null
         $ir = if (Test-Path $llPath) { Get-Content $llPath -Raw } else { "" }
         $absent = $irExpected[$rel] | Where-Object { -not $ir.Contains($_) } | Select-Object -First 1
         if ($absent) {
