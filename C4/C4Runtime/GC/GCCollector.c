@@ -8,15 +8,17 @@ void gc_state_init(GCState* gc, const c4_gc_root_range* globals)
 	memset(gc, 0, sizeof(*gc));
 	gc->globals = globals;
 	gc->percent = GC_DEFAULT_PERCENT;
+	gc->minTrigger = GC_MIN_TRIGGER_BYTES;
 	gc->nextCollection = GC_MIN_TRIGGER_BYTES;
 	gc->marker.heap = &gc->heap;
 	gc->markThreads = -1;
+	gc->concurrent.threshold = GC_DEFAULT_CONCURRENT_BYTES;
 }
 
-static size_t next_collection(size_t liveBytes, int32_t percent)
+static size_t next_collection(size_t liveBytes, int32_t percent, size_t minimum)
 {
 	const size_t grown = liveBytes + liveBytes / 100 * (size_t)percent;
-	return grown > GC_MIN_TRIGGER_BYTES ? grown : GC_MIN_TRIGGER_BYTES;
+	return grown > minimum ? grown : minimum;
 }
 
 c4_gc_stats gc_stats(const GCState* gc)
@@ -36,7 +38,7 @@ c4_gc_stats gc_stats(const GCState* gc)
 // Collection: every other thread stays stopped from the first mark to the end of the sweep
 
 // Helpers for this collection's drain: none for a small heap, or when the program asked for one marking thread.
-static uint32_t wanted_helpers(const GCState* gc)
+uint32_t gc_mark_helpers_wanted(const GCState* gc)
 {
 	if (gc_heap_live_bytes(&gc->heap) < GC_PARALLEL_MARK_BYTES || gc->markThreads == 0 || gc->markThreads == 1) return 0;
 	if (gc->markThreads > 1) return (uint32_t)gc->markThreads - 1u;
@@ -49,21 +51,21 @@ static void mark(GCState* gc, const GCThread* self)
 {
 	gc->heap.allocateMarked = 1; // an enumerator may allocate while roots are marked
 	gc_mark_roots(&gc->marker, gc, self);
-	const uint32_t helpers = wanted_helpers(gc);
+	const uint32_t helpers = gc_mark_helpers_wanted(gc);
 	if (helpers && gc_mark_helpers_ready(&gc->helpers, &gc->heap, helpers)) gc_mark_drain_together(&gc->helpers, &gc->marker);
 	else gc_mark_drain(&gc->marker);
 	gc_pools_decide(&gc->marker, gc->pools);
 	gc_finalize_select(&gc->marker, &gc->finalizers, &gc->ready);
 }
 
-static void reclaim(GCState* gc)
+void gc_reclaim(GCState* gc)
 {
 	gc->collections++;
 	gc_heap_sweep(&gc->heap, gc->collections);
 	gc_pools_sweep(gc->pools, &gc->releases, &gc->heap.liveBytes);
 	gc->heap.allocateMarked = 0;
 	gc_pages_scavenge(&gc->heap.pages, gc->collections);
-	gc->nextCollection = next_collection(gc_heap_live_bytes(&gc->heap), gc->percent);
+	gc->nextCollection = next_collection(gc_heap_live_bytes(&gc->heap), gc->percent, gc->minTrigger);
 }
 
 void gc_collect(GCState* gc, GCThread* self)
@@ -75,7 +77,7 @@ void gc_collect(GCState* gc, GCThread* self)
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs);
 	mark(gc, self);
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs); // what an enumerator allocated meanwhile
-	reclaim(gc);
+	gc_reclaim(gc);
 	gc_threads_resume(&gc->threads, self);
 	gc->lastPauseNs = gc_os_now_ns() - start;
 	gc->pauseNs += gc->lastPauseNs;
@@ -136,6 +138,17 @@ static void* allocate_once(GCState* gc, GCThread* self, GCAllocRequest request)
 	return p;
 }
 
+// An automatic collection: a concurrent cycle for a large heap when the collector's thread runs (one already running
+// carries on), else a stop-the-world one.
+static void start_collection(GCState* gc, GCThread* self)
+{
+	if (gc_concurrent_busy(gc)) return;
+	GCConcurrent* c = &gc->concurrent;
+	if (gc_concurrent_wanted(gc) && !c->threadRunning && gc->startCollectorThread) c->threadRunning = gc->startCollectorThread();
+	if (gc_concurrent_wanted(gc) && c->threadRunning) gc_concurrent_ask(gc);
+	else gc_collect(gc, self);
+}
+
 void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request)
 {
 	check_request(request);
@@ -144,8 +157,9 @@ void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request)
 	gc->allocs += self->cache.allocs;
 	self->cache.allocatedBytes = 0;
 	self->cache.allocs = 0;
-	if (!gc->disabled && gc_heap_live_bytes(&gc->heap) >= gc->nextCollection) gc_collect(gc, self);
+	if (!gc->disabled && !gc->collecting && gc_heap_live_bytes(&gc->heap) >= gc->nextCollection) start_collection(gc, self);
 	void* p = allocate_once(gc, self, request);
+	if (!p && gc_concurrent_busy(gc)) return NULL;
 	if (!p)
 	{
 		gc_collect(gc, self);

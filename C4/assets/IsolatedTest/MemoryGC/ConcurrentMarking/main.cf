@@ -1,0 +1,92 @@
+// Concurrent marking (D-79): four threads move references between heap objects, a raw region, globals and their
+// stacks while automatic collections mark beside them, every one verified against a fresh mark from the roots. A lost
+// object would be a fatal verification error, or a node whose check value is wrong once its slot is reused.
+include "bedrock.ch"
+
+const int32 kThreads = 4;
+const int32 kSlots = 512;
+
+struct Node {
+	public int64 id;
+	public int64 check;
+	public Node* next;
+	public Node* other;
+	public Core::Array<int64> payload;
+}
+
+Node*[4] g_heads;                 // each thread's list, a root
+Node** g_region = nullptr;        // raw memory registered as a region: kThreads * kSlots slots
+Threading::Atomic<int64> g_broken;
+Threading::Atomic<int64> g_made;
+
+Node* Make(int64 id) {
+	Node* node = new Node;
+	node->id = id;
+	node->check = id * 7 + 3;
+	node->payload.Push(id);
+	g_made.FetchAdd(1);
+	return node;
+}
+
+bool Good(Node* node) { return node == nullptr || (node->check == node->id * 7 + 3 && node->payload.Count() == 1 && node->payload[0] == node->id); }
+
+uint64 Next(uint64& state) {
+	state = state * 6364136223846794005u + 1442695040888963407u;
+	return state >> 33;
+}
+
+void Churn(int32 t) {
+	uint64 state = (uint64)t * 977u + 1u;
+	Node** region = g_region + t * kSlots;
+	int64 id = (int64)t << 40;
+	for (int32 round = 0; round < 60000; ++round) {
+		uint64 r = Next(state);
+		int32 slot = (int32)(r % (uint64)kSlots);
+		Node* held = region[slot];                   // a reference only this stack holds for a while
+		region[slot] = Make(++id);
+		if (held != nullptr) {
+			if (!Good(held)) g_broken.FetchAdd(1);
+			held->next = g_heads[t];                  // moved from the region into the heap...
+			g_heads[t] = held;                        // ...and a global
+		}
+		if (r % 3 == 0 && g_heads[t] != nullptr) {
+			Node* first = g_heads[t];
+			g_heads[t] = first->next;                 // dropped from the list,
+			Node* keeper = region[(slot + 1) % kSlots];
+			if (keeper != nullptr) keeper->other = first;   // kept only through another heap object
+		}
+		if (r % 64 == 0) {
+			int32 length = 0;
+			for (Node* n = g_heads[t]; n != nullptr && length < 64; n = n->next, ++length)
+				if (!Good(n) || !Good(n->other)) g_broken.FetchAdd(1);
+			while (length >= 64 && g_heads[t] != nullptr) { g_heads[t] = nullptr; length = 0; }
+		}
+	}
+}
+
+int32 main() {
+	GC::SetConcurrent(123);
+	if (GC::SetConcurrent(0) != 123) return 4;   // each call returns the setting before it
+	GC::SetVerify(true);
+	GC::SetPercent(10);
+	g_region = (Node**)raw_alloc((uint64)(kThreads * kSlots) * sizeof(Node*));
+	for (int32 i = 0; i < kThreads * kSlots; ++i) g_region[i] = nullptr;
+	GC::RegisterRegion((void*)g_region, (uint64)(kThreads * kSlots) * sizeof(Node*));
+	uint64 collectionsBefore = GC::GetStats().collections;
+	Core::Array<Threading::Thread> threads;
+	for (int32 t = 0; t < kThreads; ++t) threads.Push(Threading::Thread::Run([t]() { Churn(t); }));
+	for (int64 i = 0; i < threads.Count(); ++i) threads[i].Join();
+	GC::Collect();
+	uint64 collections = GC::GetStats().collections - collectionsBefore;
+	int32 alive = 0;
+	for (int32 i = 0; i < kThreads * kSlots; ++i) {
+		if (!Good(g_region[i])) g_broken.FetchAdd(1);
+		if (g_region[i] != nullptr) alive++;
+	}
+	printf("concurrent: %lld nodes made, %llu collections, %d held, %lld broken\n", g_made.Load(), collections, alive, g_broken.Load());
+	if (g_broken.Load() != 0) return 1;
+	if (collections < 2) return 2;   // the churn must have run concurrent cycles
+	if (alive != kThreads * kSlots) return 3;
+	printf("CONCURRENT OK\n");
+	return 0;
+}

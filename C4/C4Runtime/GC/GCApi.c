@@ -6,10 +6,32 @@
 #include "GC/GCCollector.h"
 #include "ThreadRuntimeC.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 static GCState g_gc;
 static int g_ready;
 static _Thread_local GCThread* t_self;
+
+static int start_collector_thread(void);
+
+// C4_GC_CONCURRENT: "always", "never" or the live bytes from which automatic collections mark concurrently;
+// C4_GC_VERIFY=1 checks every concurrent mark (D-79); C4_GC_TRACE=1 prints a line about each concurrent cycle;
+// C4_GC_MIN_TRIGGER: the fewest live bytes that start an automatic collection (default 4 MiB), so small test programs
+// collect often. For tests and diagnosis.
+static void configure_from_environment(GCState* gc)
+{
+	const char* trigger = getenv("C4_GC_MIN_TRIGGER");
+	if (trigger && strtoll(trigger, NULL, 10) > 0) gc->minTrigger = gc->nextCollection = (size_t)strtoll(trigger, NULL, 10);
+	const char* concurrent = getenv("C4_GC_CONCURRENT");
+	if (concurrent && strcmp(concurrent, "always") == 0) gc->concurrent.threshold = 0;
+	else if (concurrent && strcmp(concurrent, "never") == 0) gc->concurrent.threshold = -1;
+	else if (concurrent) gc->concurrent.threshold = (int64_t)strtoll(concurrent, NULL, 10);
+	const char* verify = getenv("C4_GC_VERIFY");
+	gc->concurrent.verify = verify && verify[0] == '1';
+	const char* trace = getenv("C4_GC_TRACE");
+	gc->concurrent.trace = trace && trace[0] == '1';
+}
 
 // The lock is held.
 static GCState* collector(void)
@@ -17,9 +39,20 @@ static GCState* collector(void)
 	if (!g_ready)
 	{
 		gc_state_init(&g_gc, __c4_gc_roots);
+		g_gc.startCollectorThread = start_collector_thread;
+		configure_from_environment(&g_gc);
 		g_ready = 1;
 	}
 	return &g_gc;
+}
+
+// Without the lock: the collector, made the first time.
+static GCState* ready_collector(void)
+{
+	gc_os_lock();
+	GCState* gc = collector();
+	gc_os_unlock();
+	return gc;
 }
 
 // The thread's C4 life ends: its thread_local objects first (they may still allocate), then its registration.
@@ -138,6 +171,13 @@ static void after_collection(void)
 // ------------------------------------------------------------------------------------------------
 // Objects
 
+// A concurrent cycle that the program's allocation outruns is finished at once, so the heap stays within twice the
+// size that started it.
+static int cycle_outrun(const GCState* gc)
+{
+	return gc_concurrent_busy(gc) && gc_heap_live_bytes(&gc->heap) >= gc->nextCollection * 2;
+}
+
 static void* allocate(GCAllocRequest request)
 {
 	GCThread* self = this_thread();
@@ -147,11 +187,22 @@ static void* allocate(GCAllocRequest request)
 		void* p = gc_thread_alloc_fast(self, &g_gc.heap, spanClass);
 		if (p) return p;
 	}
-	gc_os_lock();
-	void* p = gc_allocate(collector(), self, request);
-	gc_os_unlock();
-	after_collection();
-	return p;
+	for (;;)
+	{
+		gc_os_lock();
+		GCState* gc = collector();
+		void* p = gc_allocate(gc, self, request);
+		const int outrun = cycle_outrun(gc);
+		gc_os_unlock();
+		if (p && !outrun)
+		{
+			after_collection();
+			return p;
+		}
+		gc_concurrent_finish_now(gc);
+		after_collection();
+		if (p) return p;
+	}
 }
 
 static GCAllocRequest request_of(size_t size, size_t align, int noscan)
@@ -188,11 +239,51 @@ void c4_gc_register_finalizer(void* obj, void (*fn)(void*))
 void c4_gc_collect(void)
 {
 	GCThread* self = this_thread();
-	gc_os_lock();
-	gc_collect(collector(), self);
-	gc_os_unlock();
+	GCState* gc = ready_collector();
+	for (;;)
+	{
+		gc_concurrent_finish_now(gc);
+		after_collection();
+		gc_os_lock();
+		const int busy = gc_concurrent_busy(gc); // another thread asked for a cycle meanwhile: finish that one too
+		if (!busy) gc_collect(gc, self);
+		gc_os_unlock();
+		if (!busy) break;
+	}
 	after_collection();
 }
+
+int64_t c4_gc_set_concurrent(int64_t bytes)
+{
+	gc_os_lock();
+	GCState* gc = collector();
+	const int64_t previous = gc->concurrent.threshold;
+	gc->concurrent.threshold = bytes < -1 ? -1 : bytes;
+	gc_os_unlock();
+	return previous;
+}
+
+void c4_gc_set_verify(bool on)
+{
+	gc_os_lock();
+	collector()->concurrent.verify = on ? 1 : 0;
+	gc_os_unlock();
+}
+
+// The thread that runs concurrent cycles: registered, so the C4 code a cycle runs (root enumerators, pool keep
+// callbacks) may allocate; after each cycle it runs the callbacks, releases and finalizers itself.
+static void collector_thread(void* unused)
+{
+	(void)unused;
+	GCThread* self = this_thread();
+	for (;;)
+	{
+		gc_concurrent_serve(&g_gc, self);
+		after_collection();
+	}
+}
+
+static int start_collector_thread(void) { return gc_os_start_helper(collector_thread, NULL); }
 
 void c4_gc_disable(void) { gc_os_lock(); collector()->disabled = 1; gc_os_unlock(); }
 void c4_gc_enable(void) { gc_os_lock(); collector()->disabled = 0; gc_os_unlock(); }
@@ -327,7 +418,7 @@ static bool set_occupied(c4_gc_pool* pool, void* object, int occupied)
 	const int64_t slot = pool ? gc_pool_slot_of((const GCPool*)pool, object) : -1;
 	if (slot < 0) return false;
 	gc_os_lock();
-	gc_pool_set_occupied((GCPool*)pool, (size_t)slot, occupied);
+	gc_pool_set_occupied((GCPool*)pool, (size_t)slot, occupied, __atomic_load_n(&collector()->heap.allocateMarked, __ATOMIC_ACQUIRE));
 	gc_os_unlock();
 	return true;
 }

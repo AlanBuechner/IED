@@ -4,8 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// `size` bytes of committed, zeroed memory aligned to `align` (a power of two). NULL when the OS refuses.
+// `size` bytes of committed, zeroed memory aligned to `align` (a power of two), with its written pages tracked (D-79).
+// NULL when the OS refuses.
 void* gc_os_map(size_t size, size_t align);
+
+// Written-page tracking over one mapping: forget what was written so far; or report every page written since the
+// last report or forget, forgetting each as it is reported (a write while this runs is reported now or next time).
+void gc_os_forget_writes(void* base, size_t size);
+typedef void (*gc_page_fn)(void* ctx, uint8_t* page, size_t size);
+void gc_os_take_writes(void* base, size_t size, gc_page_fn written, void* ctx);
 
 // Return the pages of [start, start + size) to the OS / take them back zeroed. Ranges never cross a mapping.
 void gc_os_decommit(void* start, size_t size);
@@ -55,7 +62,8 @@ void gc_os_scan_suspended(const GCOsThread* thread, gc_scan_range_fn scanNow, gc
 void* gc_os_scratch_realloc(void* p, size_t size);
 void gc_os_scratch_free(void* p);
 
-// A thread for parallel marking. It never runs C4 code, so it is never registered or stopped. 0 when none starts.
+// A thread for parallel marking (it never runs C4 code, so it is never registered or stopped) or for concurrent
+// marking (it registers itself). 0 when none starts.
 int gc_os_start_helper(void (*run)(void*), void* arg);
 uint32_t gc_os_processor_count(void);
 void gc_os_relax(void);   // a spin-wait hint

@@ -45,6 +45,15 @@ int32_t c4_gc_set_percent(int32_t percent);
 // chooses by the processors (up to 8), 1 or 0 marks on the collecting thread alone. Returns the previous value.
 int32_t c4_gc_set_mark_threads(int32_t threads);
 
+// Automatic collections of a live heap of at least `bytes` mark concurrently (D-79): two short stops of the program,
+// the marking itself beside it. -1: never; 0: always; default 16 MiB. A collection the program asks for (c4_gc_collect)
+// stops the world, after finishing a concurrent one that runs. Returns the previous value. The environment's
+// C4_GC_CONCURRENT ("always", "never" or bytes) sets it at startup.
+int64_t c4_gc_set_concurrent(int64_t bytes);
+// Checks every concurrent cycle's marks against a fresh mark from the roots, a fatal error naming any object it missed
+// (tests and diagnosis; slow). C4_GC_VERIFY=1 sets it at startup.
+void c4_gc_set_verify(bool on);
+
 // Suppress / resume automatic collection (not counted: one enable resumes it).
 void c4_gc_disable(void);
 void c4_gc_enable(void);

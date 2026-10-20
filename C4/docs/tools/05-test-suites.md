@@ -209,7 +209,10 @@ assets\build-output\iso\SwizzleLanguage.exe
 
 Collector tests live in IsolatedTest `MemoryGC/` (liveness, deep lists, large objects, interior pointers,
 pins, hooks, finalizer order and exceptions, static roots, noscan, pacing, `delete`, collections while several
-threads allocate, thread_local roots). A test that asserts an
+threads allocate, thread_local roots, pools, concurrent marking). The gate step `gc-concurrent`
+(`assets/ConcurrentGcTest/run.py`) runs Bedrock's tests, IsolatedTest `MemoryGC` and the GC benchmark's check again
+with every automatic collection a concurrent cycle verified against a fresh mark (`C4_GC_CONCURRENT=always`,
+`C4_GC_VERIFY=1`) and a 64 KiB trigger (`C4_GC_MIN_TRIGGER`). A test that asserts an
 object *was* collected allows a few survivors: a conservative collector may keep an object whose address is
 still in a register or a dead stack slot.
 
@@ -290,7 +293,8 @@ stores into a pointer it must reload.
 
 `Benchmarks/gc/` (B32): a live world of entities (each with a chain of components and a parent link) that stays
 reachable while every frame allocates short-lived garbage and replaces a share of the world; run on the main
-thread alone and with the frame's churn as job-system jobs. It prints frame-time percentiles, collections, the
+thread alone and with the frame's churn as job-system jobs, each with stop-the-world collections
+(`C4_GC_CONCURRENT=never`) and with the default, which marks this heap concurrently (D-79). It prints frame-time percentiles, collections, the
 average and worst pause, the GC's share of the time and allocations per second; `-Check` runs a small world both
 ways and requires the same checksum.
 
@@ -305,8 +309,18 @@ replacements; 16 logical processors):
 
 Marking is the whole pause (the sweep takes about 0.1 ms, stopping 16 threads about 0.2 ms). It scales by
 marker count as 19.3, 9.5, 7.1, 5.7 and 5.1 ms for 1, 2, 4, 8 and 12 markers; more markers than processors
-oversubscribe (16 markers: a 31 ms worst pause), so the default stops at 8. A pause stays proportional to the live
-heap: a concurrent mark is the next step (roadmap 3.11).
+oversubscribe (16 markers: a 31 ms worst pause), so the default stops at 8.
+
+Concurrent marking (B64, 2026-10-20; the pause columns add up a cycle's stops, each under about 1 ms):
+
+| Mode | Avg frame | p99 frame | Worst frame | Pauses per cycle | Live at the end |
+|---|---|---|---|---|---|
+| Alone, stop-the-world | 0.54 ms | 5.2 ms | 7.5 ms | 4.9 ms | 53 MiB |
+| Alone, concurrent | 0.54 ms | 1.1 ms | 1.6 ms | 1.7 ms in 4 stops | 80 MiB |
+| Jobs (15 workers), stop-the-world | 0.17 ms | 4.8 ms | 6.6 ms | 5.0 ms | 51 MiB |
+| Jobs (15 workers), concurrent | 0.18 ms | 1.3 ms | 6.1 ms | 5.4 ms in 5 stops | 114 MiB |
+
+With 15 workers the marking helpers compete for the 16 processors, which shows in the worst frame.
 
 `Benchmarks/compile/` (B32): C4.exe end to end on a one-line program, the Bedrock tests and TestCode, at `-O0`
 and `-O2`, the median of 3 builds with each build's `--time-phases` breakdown; `-Check` builds each once.

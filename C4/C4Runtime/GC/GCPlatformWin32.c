@@ -11,7 +11,30 @@ enum { kMapAttempts = 16 };
 
 static void* map_at(void* address, size_t size)
 {
-	return VirtualAlloc(address, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	return VirtualAlloc(address, size, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE);
+}
+
+void gc_os_forget_writes(void* base, size_t size)
+{
+	ResetWriteWatch(base, size);
+}
+
+void gc_os_take_writes(void* base, size_t size, gc_page_fn written, void* ctx)
+{
+	enum { kBatch = 4096 };
+	PVOID pages[kBatch];
+	uint8_t* from = (uint8_t*)base;
+	uint8_t* const end = (uint8_t*)base + size;
+	while (from < end)
+	{
+		ULONG_PTR count = kBatch;
+		DWORD granularity = 0;
+		if (GetWriteWatch(WRITE_WATCH_FLAG_RESET, from, (SIZE_T)(end - from), pages, &count, &granularity) != 0)
+			gc_os_fatal("the collector could not read which pages were written");
+		for (ULONG_PTR i = 0; i < count; ++i) written(ctx, (uint8_t*)pages[i], granularity);
+		if (count < kBatch) return;
+		from = (uint8_t*)pages[count - 1] + granularity;
+	}
 }
 
 void* gc_os_map(size_t size, size_t align)

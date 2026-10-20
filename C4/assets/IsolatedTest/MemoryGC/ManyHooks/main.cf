@@ -63,6 +63,7 @@ int32 Sum() {
 }
 
 int32 main() {
+	GC::Disable();   // the counts are per explicit collection: no automatic one (C4_GC_MIN_TRIGGER in the gates) between
 	Register();
 	CollectWithChurn();
 	CollectWithChurn();

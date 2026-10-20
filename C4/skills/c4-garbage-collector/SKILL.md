@@ -1,6 +1,6 @@
 ---
 name: c4-garbage-collector
-description: C4 garbage collector - conservative, non-moving, stop-the-world mark-sweep with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, custom-allocator pools, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
+description: C4 garbage collector - conservative, non-moving mark-sweep, mostly concurrent past 16 MiB live (OS write watch, no barrier), with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, custom-allocator pools, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
 triggers:
   - "C4 garbage collector"
   - "non-moving mark-sweep stop-the-world finalizer"
@@ -56,6 +56,11 @@ size limit, and hooks may (un)register hooks while they run.
 - **Collection results**: after each sweep; `IsReachable` tells which objects survived.
 - **Pins**: keep an object and its referents alive while native code holds it.
 - **Disable windows**: suppress automatic collection in latency-critical sections; `Collect()` still works.
+- **Concurrent marking** (D-79): a heap past `GC::SetConcurrent(bytes)` live (default 16 MiB) is collected by a cycle
+  on the collector's own thread: a stop to copy the roots, marking beside the program, rescans of the pages it
+  wrote (Windows write watch, so no write barrier), a final stop to finish. Stops stay under ~1 ms; `Collect()`
+  stops the world after finishing a running cycle; finalizers of a cycle run on the collector's thread.
+  `C4_GC_CONCURRENT=always|never|<bytes>`, `C4_GC_VERIFY=1` (check every cycle), `C4_GC_TRACE=1` (a line a cycle).
 - **Pools** (`GC::Pool`, `include "Memory/pool.ch"`; D-78): a custom allocator's block of same-size objects that the
   collector tracks one by one. `Take()` a zeroed slot, `Give(object)` it back; a collection ends taken objects
   nothing reaches and frees their slots (`options.released` hears of each; `Take` collects once before saying the

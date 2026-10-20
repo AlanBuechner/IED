@@ -94,11 +94,14 @@ int64_t gc_pool_slot_of(const GCPool* pool, const void* object)
 	return slot < pool->desc.slot_count ? (int64_t)slot : -1;
 }
 
-void gc_pool_set_occupied(GCPool* pool, size_t slot, int occupied)
+void gc_pool_set_occupied(GCPool* pool, size_t slot, int occupied, int marked)
 {
 	GCSpan* chunk = pool->chunks[slot / GC_POOL_CHUNK_SLOTS];
-	if (occupied) gc_bit_set(chunk->allocBits, (uint32_t)(slot % GC_POOL_CHUNK_SLOTS));
-	else gc_bit_clear(chunk->allocBits, (uint32_t)(slot % GC_POOL_CHUNK_SLOTS));
+	const uint32_t bit = (uint32_t)(slot % GC_POOL_CHUNK_SLOTS);
+	const uint64_t mask = (uint64_t)1 << (bit & 63u);
+	if (occupied && marked) gc_bit_claim(chunk->markBits, bit);
+	if (occupied) __atomic_fetch_or(&chunk->allocBits[bit >> 6], mask, __ATOMIC_RELEASE);
+	else __atomic_fetch_and(&chunk->allocBits[bit >> 6], ~mask, __ATOMIC_RELEASE);
 }
 
 int gc_pool_occupied(const GCPool* pool, size_t slot)

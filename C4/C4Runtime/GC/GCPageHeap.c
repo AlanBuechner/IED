@@ -71,12 +71,18 @@ static void set_run_ends(GCPageHeap* heap, GCSpan* run, GCSpan* value)
 static void register_arena(GCPageHeap* heap, uint8_t* base)
 {
 	const uintptr_t address = (uintptr_t)base;
+	// Published with release stores: a concurrent marker and the write barrier read the map without the lock.
 	GCArena*** l2 = &heap->l1[address >> GC_L1_SHIFT];
-	if (!*l2) *l2 = (GCArena**)gc_mem_alloc(GC_L2_COUNT * sizeof(GCArena*));
+	if (!*l2)
+	{
+		GCArena** table = (GCArena**)gc_mem_alloc(GC_L2_COUNT * sizeof(GCArena*));
+		if (!table) gc_os_fatal("out of memory for collector metadata");
+		__atomic_store_n(l2, table, __ATOMIC_RELEASE);
+	}
 	GCArena* arena = (GCArena*)gc_mem_alloc(sizeof(GCArena));
-	if (!*l2 || !arena) gc_os_fatal("out of memory for collector metadata");
+	if (!arena) gc_os_fatal("out of memory for collector metadata");
 	arena->base = base;
-	(*l2)[(address >> GC_ARENA_SHIFT) & (GC_L2_COUNT - 1u)] = arena;
+	__atomic_store_n(&(*l2)[(address >> GC_ARENA_SHIFT) & (GC_L2_COUNT - 1u)], arena, __ATOMIC_RELEASE);
 }
 
 static void widen_range(GCPageHeap* heap, uintptr_t lo, uintptr_t hi)
@@ -196,6 +202,9 @@ static int add_arenas(GCPageHeap* heap, size_t npages)
 	if (!base) return 0;
 	for (size_t i = 0; i < count; ++i) register_arena(heap, base + i * GC_ARENA_SIZE);
 	widen_range(heap, (uintptr_t)base, (uintptr_t)base + bytes);
+	heap->mappings = (GCMapping*)gc_mem_realloc(heap->mappings, (heap->mappingCount + 1) * sizeof(GCMapping));
+	if (!heap->mappings) gc_os_fatal("out of memory for collector metadata");
+	heap->mappings[heap->mappingCount++] = (GCMapping){ base, bytes };
 	heap->committedBytes += bytes;
 
 	GCSpan* run = new_record(heap);
@@ -262,6 +271,16 @@ GCSpan* gc_pages_alloc(GCPageHeap* heap, size_t npages)
 	if (run->decommitted && !recommit(heap, run, npages)) return NULL;
 	trim(heap, run, npages);
 	return fresh_span(heap, run);
+}
+
+GCMapping* gc_pages_mappings(const GCPageHeap* heap, size_t* count)
+{
+	*count = heap->mappingCount;
+	if (!heap->mappingCount) return NULL;
+	GCMapping* copy = (GCMapping*)gc_mem_alloc(heap->mappingCount * sizeof(GCMapping));
+	if (!copy) gc_os_fatal("out of memory for collector metadata");
+	memcpy(copy, heap->mappings, heap->mappingCount * sizeof(GCMapping));
+	return copy;
 }
 
 GCSpan* gc_pages_split(GCPageHeap* heap, GCSpan* span, size_t npages)

@@ -4,6 +4,7 @@
 // together (GCParallelMark.h) a mark bit is claimed atomically, so each object is scanned once.
 
 #include "GC/GCHeap.h"
+#include "GC/GCPtrMap.h"
 
 typedef struct GCScanItem
 {
@@ -21,6 +22,13 @@ typedef struct GCMarker
 	size_t capacity;
 	const uint8_t* ignored;   // an object that its own contents do not mark (finalizer selection)
 	struct GCMarkShare* share; // set while markers drain together
+	int snapshot;             // ranges to scan later are copied now and their copies scanned later (a concurrent mark's
+	                          // snapshot of the roots: the program changes or frees them once it runs again)
+	uint8_t** copies;         // the copies, for gc_marker_free_copies
+	size_t copyCount;
+	size_t copyCapacity;
+	int atomicClaims;         // others claim mark bits meanwhile (a concurrent mark: the program, its barrier)
+	GCPtrMap* verifying;      // set: check that every object reached is marked, visiting each once (D-79)
 } GCMarker;
 
 void gc_mark_word(GCMarker* marker, uintptr_t word);
@@ -44,3 +52,5 @@ void gc_mark_contents(GCMarker* marker, GCObject object);
 void gc_mark_drain(GCMarker* marker);
 
 void gc_marker_free(GCMarker* marker);
+// Frees the snapshot's copies (after the drain that scanned them).
+void gc_marker_free_copies(GCMarker* marker);

@@ -19,10 +19,19 @@ typedef struct GCArena
 	GCSpan* pages[GC_ARENA_PAGES]; // a page's span; a free run lists only its first and last page
 } GCArena;
 
+// One run of arenas the OS mapped at once: what written-page tracking works over.
+typedef struct GCMapping
+{
+	uint8_t* base;
+	size_t size;
+} GCMapping;
+
 typedef struct GCPageHeap
 {
 	GCArena** l1[GC_L1_COUNT];
 	uintptr_t lo, hi;              // every arena lies in [lo, hi)
+	GCMapping* mappings;
+	size_t mappingCount;
 	GCSpan* bins[GC_FREE_BINS];
 	GCSpan* spareSpans;            // span records ready for reuse
 	size_t committedBytes;
@@ -37,6 +46,9 @@ GCSpan* gc_pages_split(GCPageHeap* heap, GCSpan* span, size_t npages);
 
 // Returns a span's pages; `epoch` is the current collection count.
 void gc_pages_free(GCPageHeap* heap, GCSpan* span, uint64_t epoch);
+
+// A copy of the mappings (the collector's memory: gc_mem_free it), for walking them without the lock.
+GCMapping* gc_pages_mappings(const GCPageHeap* heap, size_t* count);
 
 // Gives the OS back the pages of every large run that has stayed free since before `epoch`.
 void gc_pages_scavenge(GCPageHeap* heap, uint64_t epoch);

@@ -130,7 +130,7 @@ void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span)
 	if (slot == span->nelems) return NULL;
 	uint8_t* p = gc_span_slot_base(span, slot);
 	if (__atomic_load_n(&span->needsZero, __ATOMIC_ACQUIRE)) memset(p, 0, span->elemSize);
-	if (heap->allocateMarked) gc_bit_set(span->markBits, slot); // only the collecting thread runs then
+	if (__atomic_load_n(&heap->allocateMarked, __ATOMIC_ACQUIRE)) gc_bit_claim(span->markBits, slot); // markers claim beside it
 	return p;
 }
 
@@ -150,7 +150,7 @@ void* gc_heap_alloc_large(GCHeap* heap, GCAllocRequest request)
 	span->allocCount = 1;
 	gc_bit_set(span->allocBits, 0);
 	if (span->needsZero) memset(span->base, 0, size);
-	if (heap->allocateMarked) gc_bit_set(span->markBits, 0);
+	if (__atomic_load_n(&heap->allocateMarked, __ATOMIC_ACQUIRE)) gc_bit_claim(span->markBits, 0);
 	list_push(&heap->large, span);
 	heap->liveBytes += (int64_t)size;
 	return span->base;
@@ -168,7 +168,7 @@ void gc_heap_release(GCHeap* heap, GCObject object, uint64_t epoch, const void* 
 	}
 	// The slot reads as free only once it is marked dirty: an owner claiming it then zeroes it.
 	__atomic_store_n(&span->needsZero, 1, __ATOMIC_RELEASE);
-	gc_bit_clear(span->markBits, object.slot);
+	__atomic_fetch_and(&span->markBits[object.slot >> 6], ~((uint64_t)1 << (object.slot & 63u)), __ATOMIC_RELAXED); // a concurrent marker claims beside it
 	__atomic_fetch_and(&span->allocBits[object.slot >> 6], ~((uint64_t)1 << (object.slot & 63u)), __ATOMIC_RELEASE);
 	__atomic_fetch_sub(&span->allocCount, 1u, __ATOMIC_RELAXED);
 	// Only the owner moves its own search position; another owner finds the slot when its search wraps.

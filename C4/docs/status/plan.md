@@ -156,6 +156,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-76 | Incremental builds optimize each partition alone | `--incremental` (Nuke's `Debug` and `Development`; `Dist` stays whole-program) splits the module before the optimizer, so a partition whose bitcode and settings are unchanged reuses its cached object with no optimization at all. To keep the inlining that matters, a partition copies the small functions it calls from other partitions as `available_externally` (ThinLTO's rule: 100 unoptimized instructions, 70% per further level, three levels), and its cache key covers the copies, so editing a small function rebuilds its callers' partitions too. A `minsize` caller copies nothing; reflection's invoke thunks are `minsize` in every build, since reflection calls through them seldom and a copy of each target in its thunk only cost optimizer time. Linkonce definitions become weak, so a partition's optimizer cannot drop what another uses. Large functions no longer inline across partitions, the price of the fast loop. | [pipeline 6](../compiler/01-pipeline.md) |
 | D-77 | Streaming reads | Data is decoded while it arrives through pull readers fed with chunks: `JsonStream` hands back one event at a time and `NeedMore` when the text so far ends inside one, keeping its place (a string's end is looked for from where it stopped), so a caller drives it from any source - a file read ahead on a thread (`FS::ChunkReader`, two buffers, the next read while the caller decodes), a pipe, a socket. It shares its tokens with `ReadJson` (`jsontokens`), so both accept and refuse the same text with the same errors; UTF-8 is checked as bytes are fed, up to the last whole character. Values come whole when asked (`ReadValue` into a `DomDoc`, `ReadNext` into a reflected type), so a level's entities are decoded one at a time and memory holds a chunk, not the file. `BinaryStream` does the same for `WriteBinary`'s records. Push callbacks and a SAX interface were not chosen: a pull reader composes with loops and with the event loop, and a callback is one loop away. | [Bedrock 5, 6](../library/bedrock.md#6-serialization-serialization) |
 | D-78 | Pools for custom allocators | An allocator that keeps objects of one size together (components, particles) gets a pool: the collector's pages, carved into spans of 512 equal slots (`GC_SPAN_POOL`), whose allocation bits only the allocator sets (occupy, vacate). Finding and marking a pool object is then finding and marking any object - a pointer into a slot keeps that object, not the block - so per-object liveness costs nothing new in the mark loop. The allocator decides what may be collected: `keep_all` makes every occupied object a root, a `keep` callback is asked about each occupied object nothing reached (after the drain, before finalizer selection, draining after each one kept), and the rest are vacated in the sweep and handed to a `release` callback after the collection, without the lock - the pool's form of finalization, so `delete` and finalizers do not apply. Bedrock's `GC::Pool` keeps the free list and collects once before it reports a full pool. | [memory and GC 3](../runtime/01-memory-and-gc.md#engine-hooks) |
+| D-79 | Concurrent marking without a write barrier | A mostly-concurrent mark-sweep (Boehm, Demers and Shenker 1991), as .NET's first concurrent collector did it, rather than a compiler write barrier: threads are suspended at any instruction, so a barrier's flag check and its store can straddle the stop that turns marking on, and closing that window needs safepoints C4 does not have. The OS tracks written pages instead (`MEM_WRITE_WATCH`): the cycle forgets them, stops the program to copy its roots, marks from the copies beside the program, rescans the marked objects on written pages (a few passes, each with fresh root copies), and a final stop marks from the roots and the pages written since before the sweep. Native code, memcpy and atomics need nothing. Objects allocated during a cycle start unmarked, so frame garbage dies in the cycle it was made in. Heaps past 16 MiB live by default; `Collect()` stays stop-the-world; a verification mode compares each cycle with a fresh mark. | [memory and GC 2](../runtime/01-memory-and-gc.md#2-the-collector) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1461,6 +1462,25 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   (5: slots and addresses across chunks, take and give, sizes out of range and closing, moves, four threads taking
   and giving at once). Bedrock passes 490 tests.
 
+#### B64 - Concurrent marking (roadmap 5, 3.11)
+- **Design:** D-79, [memory and GC 2](../runtime/01-memory-and-gc.md#2-the-collector). **Status:** Done.
+- **Done notes:** `C4Runtime/GC/GCConcurrent` (the cycle on a registered thread of the collector's own: forget written
+  pages, a stop that copies the roots (`GCMarker.snapshot`), parallel marking beside the program with the helpers,
+  up to three passes of fresh root copies and written-page rescans, the final stop, verification), written-page
+  tracking in the platform layer (`MEM_WRITE_WATCH`, `gc_os_forget_writes`, `gc_os_take_writes`) and the page heap's
+  list of mappings, a page map published with release stores for lock-free readers, atomic mark-bit claims beside the
+  program (allocation, explicit deletes, pools), `c4_gc_set_concurrent` / `c4_gc_set_verify`, `C4_GC_CONCURRENT` /
+  `C4_GC_VERIFY` / `C4_GC_TRACE` / `C4_GC_MIN_TRIGGER`, Bedrock `GC::SetConcurrent` / `GC::SetVerify`. A compiler
+  write barrier was the first plan and was dropped (D-79). Verification found that the cycle thread's own stack was
+  being scanned as a root (it holds arena addresses): it no longer is. Allocating marked during a cycle made the heap
+  grow 3x and every new page a rescan; unmarked allocation keeps the GC benchmark's heap near its stop-the-world size.
+- **Tests:** IsolatedTest `MemoryGC/ConcurrentMarking` (four threads move references between heap objects, a raw
+  region, globals and their stacks through verified concurrent cycles; no node lost or corrupted, at `-O0` and
+  `-O2`); the gate step `gc-concurrent` (`assets/ConcurrentGcTest/run.py`: Bedrock's tests, IsolatedTest `MemoryGC`
+  and the GC benchmark's check with every automatic collection a verified concurrent cycle and a 64 KiB trigger);
+  `MemoryGC/ManyHooks` disables automatic collection so its counts hold under that environment.
+  `Benchmarks/gc/` reports both modes: alone, p99 frame 1.1 ms and worst 1.6 ms (stop-the-world 5.2 and 7.5).
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1978,7 +1998,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

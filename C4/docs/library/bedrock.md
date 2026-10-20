@@ -527,6 +527,8 @@ as `[link]` declarations, with no wrappers.
 | `SetPercent(int32)` | live-heap growth that starts the next automatic collection (default 100); returns the previous value |
 | `SetMarkThreads(int32)` | threads that mark a heap past 8 MiB, the collecting one included (-1 default: the processors, up to 8; 1: alone); returns the previous value |
 | `Disable()`, `Enable()` | suppress / resume automatic collection |
+| `SetConcurrent(int64 bytes)` | automatic collections of a live heap of at least `bytes` mark beside the program, with stops under about a millisecond (D-79): -1 never, 0 always, default 16 MiB; returns the previous value. `Collect()` always stops the world |
+| `SetVerify(bool)` | check every concurrent mark against a fresh one; a missed object is a fatal error (tests; slow) |
 | `Pin(void*)`, `Unpin(void*)` | keep an object and what it refers to alive (counted; any pointer into it) |
 | `IsReachable(void*)` | whether a pointer is into a live object (for collection callbacks) |
 | `RegisterRegion`, `UnregisterRegion` | raw memory scanned for pointers |

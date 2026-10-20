@@ -1,5 +1,6 @@
 # GC pause and throughput under game-like churn (B32): a live world of entities, per-frame garbage and
-# replacements, on the main thread and with the frame's churn on job-system workers. -Check runs a small world in
+# replacements, on the main thread and with the frame's churn on job-system workers, with stop-the-world and
+# concurrent collections (D-79). -Check runs a small world in
 # both modes and requires the same checksum (the gate); without it the full sizes run, 3 times each, and the
 # median run (by average frame time) of each mode is reported.
 param([switch]$Check)
@@ -29,9 +30,15 @@ if ($Check) {
     exit 0
 }
 
+# Each mode with the collector stopping the world for every collection and with its default, which marks a heap of
+# this size concurrently (D-79).
 $workers = [Math]::Max(1, [Environment]::ProcessorCount - 1)
-foreach ($mode in @(@{ name = "alone"; workers = 0 }, @{ name = "jobs ($workers workers)"; workers = $workers })) {
-    $runs = 1..3 | ForEach-Object { & $exe 200000 600 20000 200 $mode.workers }
-    $median = $runs | Sort-Object { [double](Field $_ "avg_frame_ms") } | Select-Object -Index 1
-    Write-Host ("{0}: {1}" -f $mode.name, $median)
+foreach ($collector in @(@{ name = "stop-the-world"; setting = "never" }, @{ name = "concurrent"; setting = "" })) {
+    $env:C4_GC_CONCURRENT = $collector.setting
+    foreach ($mode in @(@{ name = "alone"; workers = 0 }, @{ name = "jobs ($workers workers)"; workers = $workers })) {
+        $runs = 1..3 | ForEach-Object { & $exe 200000 600 20000 200 $mode.workers }
+        $median = $runs | Sort-Object { [double](Field $_ "avg_frame_ms") } | Select-Object -Index 1
+        Write-Host ("{0}, {1}: {2}" -f $collector.name, $mode.name, $median)
+    }
 }
+$env:C4_GC_CONCURRENT = $null

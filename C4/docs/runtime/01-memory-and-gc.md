@@ -75,8 +75,8 @@ unreachable, never in the middle of it:
 
 ## 2. The collector
 
-**Implemented** - conservative, non-moving, stop-the-world mark-sweep (D-47) over every thread that runs C4
-code (D-48). Windows x64.
+**Implemented** - conservative, non-moving mark-sweep (D-47) over every thread that runs C4 code (D-48): a heap
+past 16 MiB live is marked mostly concurrently (D-79), a smaller one stop-the-world. Windows x64.
 
 | Aspect | Behaviour |
 |---|---|
@@ -90,13 +90,15 @@ code (D-48). Windows x64.
 | Finalize | After marking: unreachable finalizable objects are kept with what they reach and queued (see section 1); their finalizers run after the collection, without the lock and one thread at a time, through `c4_gc_run_finalizer` (`GC/GCFinalizerShim.cpp`). Collection-result callbacks also run without the lock, so both may allocate, block or start threads. |
 | Sweep | The marked slots become the allocated slots; spans left empty return their pages. Free pages coalesce; runs of at least 512 KiB that stayed free for a whole collection are returned to the OS and recommitted on reuse. |
 | Trigger | Automatic, checked when an allocation leaves its thread's cache: a collection starts when the live bytes reach `live after the last collection x (1 + percent/100)`, at least 4 MiB. `percent` is 100 by default (`c4_gc_set_percent`). `c4_gc_disable` suppresses it; `gc_collect()` always works. Out of memory is a fatal error after one forced collection. |
-| Write barrier | None: the stop-the-world collector rescans everything. A concurrent or generational collector would add one in codegen's store helper. |
+| Concurrent marking | D-79, a mostly-concurrent mark-sweep (Boehm, Demers and Shenker). An automatic collection of a heap of at least `c4_gc_set_concurrent` bytes (default 16 MiB; `C4_GC_CONCURRENT=always/never/<bytes>`) is a cycle run by a thread of the collector's own: it forgets which heap pages were written (the arenas are mapped with `MEM_WRITE_WATCH`), stops the program to copy its roots (stacks, registers, globals, thread_locals, regions, enumerated handles, pins, keep-all pools, the finalizer queue) and marks from the copies while the program runs, with the parallel helpers; up to three times it copies the roots again and rescans the marked objects on the pages written meanwhile; a final stop marks from the roots and the pages written since, then selects finalizers, decides pools and sweeps. Objects allocated during a cycle start unmarked: the ones still reached are found at the final stop, the rest go in this cycle. The stops are each under about 1 ms on the GC benchmark's 52 MiB world (p99 frame 1.1 ms, stop-the-world 5.2 ms). A program whose allocation outruns a cycle (the live heap doubles) finishes it at once; `c4_gc_collect` finishes a running cycle and then stops the world. The cycle thread runs collection callbacks, pool releases and finalizers after each cycle. `c4_gc_set_verify` / `C4_GC_VERIFY=1` checks every cycle against a fresh mark from the roots (a missed object is a fatal error naming it); `C4_GC_TRACE=1` prints a line per cycle. |
+| Write barrier | None: the OS tracks written pages, so compiled code, native code and memcpy store pointers freely. |
 | Stats | `c4_gc_get_stats()` returns `{ allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes, lastPauseNs }`. `heapBytes` is the memory held from the OS, `freeBytes` the part of it not holding objects. A thread sees its own allocations in the counts at once; another thread's arrive when it next refills its cache or a collection runs. |
 
 Source layout (`C4Runtime/GC/`): `GCPlatformWin32.c` (OS memory, the lock and private heap, thread suspension
 and stack scans, thread exit, clock - the only platform file), `GCThreads` (the thread registry, per-thread
 caches and their fast path), `GCPageHeap` (arenas, page map, free runs), `GCHeap` (size-class spans, allocation, release, sweep),
-`GCMark` (mark stack, range scanning), `GCFinalize` (finalizer selection and queue), `GCPools` (pools: their spans,
+`GCMark` (mark stack, range scanning, root snapshots, verification), `GCConcurrent` (concurrent cycles), `GCFinalize`
+(finalizer selection and queue), `GCPools` (pools: their spans,
 keep decisions, the release queue), `GCRoots` (root
 marking, pins), `GCPtrMap` (the hash map behind finalizers, pins, regions and hooks), `GCCollector` (the
 collection cycle, pacing), `GCApi.c` (the exported functions; the only file with process state).
@@ -116,6 +118,7 @@ declarations.
 | Pacing | `c4_gc_set_percent(percent)` | `GC::SetPercent` |
 | Marking threads | `c4_gc_set_mark_threads(threads)` | `GC::SetMarkThreads` |
 | Disable / enable automatic collection | `c4_gc_disable()`, `c4_gc_enable()` | `GC::Disable`, `GC::Enable` |
+| Concurrent marking | `c4_gc_set_concurrent(bytes)`, `c4_gc_set_verify(on)` | `GC::SetConcurrent`, `GC::SetVerify` |
 | Scan regions | `c4_gc_register_region(start, size)`, `c4_gc_unregister_region(start)` | `gc_register_region`, `gc_unregister_region`, `GC::RegisterRegion`, `GC::UnregisterRegion` |
 | Root enumerators | `c4_gc_register_root_enumerator(key, fn, user)`, `..._unregister_...(key)` | `GC::RegisterRootEnumerator`, `GC::UnregisterRootEnumerator` |
 | Another image's root table (a script's globals, in the `__c4_gc_roots` form) | `c4_gc_add_root_table(table)`, `c4_gc_remove_root_table(table)` | used by the script host (docs/runtime/04) |
@@ -145,7 +148,7 @@ These exist so an engine can use custom allocators and handle-based storage with
 - **Scan regions**: conservative scanning of memory you own (native buffers, FFI state). Unregister before
   freeing. Registering the same start again replaces its size.
 - **Root enumerators**: for storage that holds indices, offsets or handles instead of pointers. Once per
-  collection your callback `fn(user, visit, visitContext)` turns handles into pointers and reports each by
+  stop-the-world collection (in each stop of a concurrent cycle) your callback `fn(user, visit, visitContext)` turns handles into pointers and reports each by
   calling `visit(visitContext, ptr)`; the GC then traces them like any other root. It runs while every other
   thread is stopped, so it must not take a lock another thread may hold (the C runtime's heap included).
 - **Collection results**: callbacks that run after the sweep of each collection. Inside them
@@ -174,7 +177,6 @@ enumerators or callbacks.
 | Gap | Status |
 |---|---|
 | Win32 only (`GCPlatformWin32.c`). Linux needs a `GCPlatformPosix.c` (B31). | **Planned** |
-| A pause is proportional to the live heap: about 6 ms per 50 MiB with 8 markers (`Benchmarks/gc/`). A concurrent mark, with a write barrier in codegen, would bound it. | **Planned** |
 | Conservative scanning can keep an object alive while a stale copy of its address sits in a register or a dead stack slot. Precise stack maps would remove that (an idea, see section 5). | By design |
 
 ---
@@ -190,12 +192,12 @@ From LongTermPlan.txt item 5 ("GC audit") and the user's statement that C4 uses 
    allocator should be cleaned up at all. **Implemented** (B63, D-78): pools, with per-object tracking, a
    release callback in place of finalization, `keep_all` and a per-object `keep` decision.
 3. **Threading** (D-48): suspend-and-scan of registered threads and per-thread allocation caches per size
-   class. **Implemented**; a concurrent mark that shortens the pause is a later step.
+   class. **Implemented**; concurrent marking (D-79, B64) keeps the pauses short whatever the live heap.
 
 Possible future ideas from the older "universal GC" design notes. These are not commitments; each
 needs a decision before work starts:
 
 - Compiler-driven frame arenas with promotion to the GC heap.
 - Young/old generations (would need a write barrier in codegen's store helper).
-- Concurrent marking or lazy sweeping, for shorter pauses.
+- Lazy or concurrent sweeping, for a shorter final stop on a very large heap.
 - Precise stack scanning from LLVM stack maps, with conservative scanning as a fallback.

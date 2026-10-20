@@ -31,6 +31,12 @@ namespace GC
 	// up to 8; 1 marks alone. Returns the previous value.
 	[link("c4_gc_set_mark_threads")] int32 SetMarkThreads(int32 threads);
 
+	// Automatic collections of a live heap of at least `bytes` mark beside the program, with two short stops (D-79):
+	// -1 never, 0 always, default 16 MiB. Collect() stops the world. Returns the previous value.
+	[link("c4_gc_set_concurrent")] int64 SetConcurrent(int64 bytes);
+	// Checks every concurrent mark against a fresh mark from the roots; a missed object is a fatal error (tests; slow).
+	[link("c4_gc_set_verify")] void SetVerify(bool on);
+
 	// Suppress / resume automatic collection (not counted). Collect() still works while disabled.
 	[link("c4_gc_disable")] void Disable();
 	[link("c4_gc_enable")] void Enable();

@@ -42,7 +42,8 @@ void gc_pool_destroy(GCHeap* heap, GCPool** pools, GCPool* pool, GCReleaseQueue*
 
 // The slot whose start `object` is, or -1.
 int64_t gc_pool_slot_of(const GCPool* pool, const void* object);
-void gc_pool_set_occupied(GCPool* pool, size_t slot, int occupied);
+// An object occupied while a collection marks (`marked`) counts as reached, like a new allocation.
+void gc_pool_set_occupied(GCPool* pool, size_t slot, int occupied, int marked);
 int gc_pool_occupied(const GCPool* pool, size_t slot);
 
 // During a collection: the occupied objects of keep-all pools, as roots.

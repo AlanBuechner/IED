@@ -22,7 +22,7 @@ typedef struct GCHeap
 	GCClassSpans classes[GC_SPAN_CLASSES];
 	GCSpan* large;            // every large span (doubly linked)
 	int64_t liveBytes;        // bytes of slots holding objects, as far as the heap has heard (thread caches report late)
-	int allocateMarked;       // set while a collection marks: new objects count as reached
+	int allocateMarked;       // set while a collection marks (also beside the program): new objects count as reached
 } GCHeap;
 
 typedef struct GCObject

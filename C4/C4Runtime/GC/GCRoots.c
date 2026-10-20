@@ -57,7 +57,7 @@ static void mark_enumerated(GCMarker* marker, const GCPtrMap* enumerators)
 void gc_mark_roots(GCMarker* marker, const GCState* gc, const GCThread* self)
 {
 	mark_enumerated(marker, &gc->enumerators);
-	gc_os_scan_stack(gc_mark_range_callback, marker);
+	if (self != gc->concurrent.thread) gc_os_scan_stack(gc_mark_range_callback, marker);
 	mark_globals(marker, gc->globals);
 	mark_root_tables(marker, &gc->rootTables);
 	gc_threads_mark(marker, &gc->threads, self);

@@ -101,3 +101,8 @@ run = ["bin/${config}-windows-x64/C4/C4.exe", "Bedrock/Tests", "-test", "-o", "a
 name = "bedrock"
 phase = "gates"
 run = ["assets/build-output/bedrock/BedrockTests.exe"]
+
+[[project.steps]]
+name = "gc-concurrent"
+phase = "gates"
+run = ["${python}", "assets/ConcurrentGcTest/run.py"]
