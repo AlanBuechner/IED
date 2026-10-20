@@ -1,0 +1,265 @@
+include "server.ch"
+include "../Text/stringbuilder.ch"
+
+namespace Http
+{
+	// How long a connection waits on one receive before it looks at Stop and its timeouts again.
+	const int32 kSliceMs = 50;
+	// How much a connection receives at a time.
+	const int64 kReceiveBytes = 16 * 1024;
+	const int64 kNanosecondsPerMillisecond = 1000000;
+
+	// One accepted connection: its stream, what it has received but not yet read, its thread, and whether it is done.
+	class Connection
+	{
+		public Net::TcpStream stream;
+		public Core::Array<uint8> pending;
+		public Threading::Thread worker;
+		public Threading::Atomic<bool> finished;
+	}
+
+	ServerLimits Effective(const ServerLimits& wanted) {
+		ServerLimits limits = wanted;
+		if (limits.maxHeadBytes <= 0) limits.maxHeadBytes = kDefaultMaxHeadBytes;
+		if (limits.maxBodyBytes <= 0) limits.maxBodyBytes = kDefaultMaxBodyBytes;
+		if (limits.idleTimeoutMs <= 0) limits.idleTimeoutMs = kDefaultIdleTimeoutMs;
+		if (limits.requestTimeoutMs <= 0) limits.requestTimeoutMs = kDefaultRequestTimeoutMs;
+		return limits;
+	}
+
+	Core::StringView Pending(const Connection& c) { return Core::StringView((const char*)c.pending.Data(), c.pending.Count()); }
+
+	int64 Deadline(int32 timeoutMs) { return clock_now_ns() + (int64)timeoutMs * kNanosecondsPerMillisecond; }
+
+	// --- answering ------------------------------------------------------------------------------------------------------
+
+	// No body may follow a 1xx, 204 or 304 status line.
+	bool StatusHasBody(int32 status) { return status >= 200 && status != 204 && status != 304; }
+
+	bool ListsToken(const Core::String* list, const char* token) {
+		if (!list) return false;
+		Core::StringView text = list->View();
+		int64 start = 0;
+		while (start <= text.ByteLength()) {
+			const int64 comma = text.IndexOf(',', start);
+			const int64 end = comma < 0 ? text.ByteLength() : comma;
+			if (EqualsIgnoringCase(text.Substring(start, end - start).Trimmed(), Core::StringView(token))) return true;
+			start = end + 1;
+		}
+		return false;
+	}
+
+	// HTTP/1.1 stays open unless either side says close; HTTP/1.0 only when the client asked for keep-alive.
+	bool KeepsAlive(const Request& request, const Response& response) {
+		const Core::String* asked = request.headers.Find(Core::StringView("Connection"));
+		if (ListsToken(asked, "close") || ListsToken(response.headers.Find(Core::StringView("Connection")), "close")) return false;
+		return request.minorVersion >= 1 || ListsToken(asked, "keep-alive");
+	}
+
+	// The status line, the handler's headers (but the framing, which the server writes), Content-Length, and
+	// Connection: close when the connection ends after this response.
+	void WriteHead(Core::StringBuilder& head, const Response& response, bool closing) {
+		head.Append("HTTP/1.1 ");
+		head.AppendInt(response.status);
+		head.Append(" ");
+		head.Append(ReasonPhrase(response.status));
+		head.Append("\r\n");
+		for (int64 i = 0; i < response.headers.Count(); ++i) {
+			const Header& header = response.headers.At(i);
+			if (EqualsIgnoringCase(header.name.View(), Core::StringView("Content-Length")) ||
+				EqualsIgnoringCase(header.name.View(), Core::StringView("Transfer-Encoding")) ||
+				EqualsIgnoringCase(header.name.View(), Core::StringView("Connection"))) continue;
+			head.Append(header.name.View());
+			head.Append(": ");
+			head.Append(header.value.View());
+			head.Append("\r\n");
+		}
+		if (StatusHasBody(response.status)) {
+			head.Append("Content-Length: ");
+			head.AppendInt(response.body.Count());
+			head.Append("\r\n");
+		}
+		if (closing) head.Append("Connection: close\r\n");
+		head.Append("\r\n");
+	}
+
+	bool Send(Connection& c, const Response& response, bool closing, bool headOnly) {
+		Core::StringBuilder head;
+		WriteHead(head, response, closing);
+		if (!c.stream.SendText(head.View())) return false;
+		if (headOnly || !StatusHasBody(response.status) || response.body.IsEmpty()) return true;
+		return c.stream.SendAll((const void*)response.body.Data(), response.body.Count());
+	}
+
+	// A request that cannot be served: the status, why as text, and the connection closes.
+	void Refuse(Connection& c, int32 status, Core::StringView why) {
+		Response response;
+		response.status = status;
+		response.SetText(Core::StringView("text/plain; charset=utf-8"), why);
+		Send(c, response, true, false);
+	}
+
+	void RunHandler(const Handler& handler, const Request& request, Response& response) {
+		try {
+			handler(request, response);
+		}
+		catch (...) {
+			response = Response();
+			response.status = 500;
+			response.SetText(Core::StringView("text/plain; charset=utf-8"), Core::StringView("the request handler failed"));
+		}
+	}
+
+	// --- reading --------------------------------------------------------------------------------------------------------
+
+	// What waiting for more bytes came to.
+	enum class Arrival { More, Closed, TimedOut, Stopped }
+
+	// More bytes onto `pending`, by `deadlineNs`. Between requests `stopping` is the server's flag, which ends the wait;
+	// while a request is underway it is null, so the request finishes first.
+	Arrival ReceiveMore(Connection& c, int64 deadlineNs, const Threading::Atomic<bool>* stopping) {
+		uint8[kReceiveBytes] buffer;
+		while (true) {
+			if (stopping && stopping->Load()) return Arrival::Stopped;
+			if (clock_now_ns() >= deadlineNs) return Arrival::TimedOut;
+			const int64 got = c.stream.Receive((void*)&buffer[0], kReceiveBytes, kSliceMs);
+			if (got > 0) {
+				c.pending.Append(&buffer[0], got);
+				return Arrival::More;
+			}
+			if (got != Net::kTimedOut) return Arrival::Closed;
+		}
+	}
+
+	// The next request's head; false when the connection ends instead (closed, idle too long, the server stopping, or
+	// a bad head, which is answered).
+	bool ReadHead(Connection& c, const ServerLimits& limits, const Threading::Atomic<bool>& stopping, Request& request, int64& length) {
+		const int64 idleUntil = Deadline(limits.idleTimeoutMs);
+		int64 requestUntil = 0;
+		while (true) {
+			HeadParse head = ParseRequestHead(Pending(c), limits.maxHeadBytes, request);
+			if (head.status == ParseStatus::Complete) {
+				length = head.length;
+				return true;
+			}
+			if (head.status != ParseStatus::Incomplete) {
+				Refuse(c, head.answer, head.error.View());
+				return false;
+			}
+			const bool idle = c.pending.IsEmpty();
+			if (!idle && requestUntil == 0) requestUntil = Deadline(limits.requestTimeoutMs);
+			const Arrival arrival = idle ? ReceiveMore(c, idleUntil, &stopping) : ReceiveMore(c, requestUntil, nullptr);
+			if (arrival == Arrival::TimedOut && !idle) Refuse(c, 408, Core::StringView("the request did not arrive in time"));
+			if (arrival != Arrival::More) return false;
+		}
+	}
+
+	// A client that sent Expect: 100-continue waits for this before it sends the body.
+	void InviteBody(Connection& c, const Request& request) {
+		const Core::String* expect = request.headers.Find(Core::StringView("Expect"));
+		if (expect && EqualsIgnoringCase(expect->View(), Core::StringView("100-continue"))) c.stream.SendText(Core::StringView("HTTP/1.1 100 Continue\r\n\r\n"));
+	}
+
+	bool ReadSizedBody(Connection& c, const ServerLimits& limits, int64 start, int64 length, Request& request) {
+		if (length > limits.maxBodyBytes) {
+			Refuse(c, 413, Core::StringView("the body is larger than the limit"));
+			return false;
+		}
+		if (length > 0) InviteBody(c, request);
+		const int64 until = Deadline(limits.requestTimeoutMs);
+		while (c.pending.Count() < start + length) {
+			const Arrival arrival = ReceiveMore(c, until, nullptr);
+			if (arrival == Arrival::TimedOut) Refuse(c, 408, Core::StringView("the body did not arrive in time"));
+			if (arrival != Arrival::More) return false;
+		}
+		request.body.Append(c.pending.Data() + start, length);
+		return true;
+	}
+
+	// The chunked body from `start`; how many pending bytes it took, or -1 when the connection ends (answered).
+	int64 ReadChunkedBody(Connection& c, const ServerLimits& limits, int64 start, Request& request) {
+		InviteBody(c, request);
+		ChunkedDecoder decoder;
+		const int64 until = Deadline(limits.requestTimeoutMs);
+		int64 at = start;
+		while (true) {
+			const ChunkedStep step = decoder.Feed(Pending(c).Substring(at, c.pending.Count() - at), limits.maxBodyBytes, request.body);
+			at += step.consumed;
+			if (step.status == ParseStatus::Complete) return at;
+			if (step.status != ParseStatus::Incomplete) {
+				Refuse(c, step.status == ParseStatus::TooLarge ? 413 : 400, step.error.View());
+				return -1;
+			}
+			const Arrival arrival = ReceiveMore(c, until, nullptr);
+			if (arrival == Arrival::TimedOut) Refuse(c, 408, Core::StringView("the body did not arrive in time"));
+			if (arrival != Arrival::More) return -1;
+		}
+	}
+
+	// The body after a head of `headLength` bytes; how many pending bytes the request took, or -1 (answered).
+	int64 ReadBody(Connection& c, const ServerLimits& limits, int64 headLength, Request& request) {
+		const BodyFraming framing = RequestFraming(request.headers);
+		if (framing.kind == BodyKind::None) return headLength;
+		if (framing.kind == BodyKind::Length) return ReadSizedBody(c, limits, headLength, framing.length, request) ? headLength + framing.length : -1;
+		if (framing.kind == BodyKind::Chunked) return ReadChunkedBody(c, limits, headLength, request);
+		Refuse(c, framing.kind == BodyKind::Unsupported ? 501 : 400, framing.error.View());
+		return -1;
+	}
+
+	// --- a connection ---------------------------------------------------------------------------------------------------
+
+	// Reads one request and answers it; whether the connection stays open for another.
+	bool AnswerNext(Connection& c, const Handler& handler, const ServerLimits& limits, const Threading::Atomic<bool>& stopping) {
+		Request request;
+		int64 headLength = 0;
+		if (!ReadHead(c, limits, stopping, request, headLength)) return false;
+		const int64 used = ReadBody(c, limits, headLength, request);
+		if (used < 0) return false;
+		c.pending.RemoveRange(0, used);
+		Response response;
+		RunHandler(handler, request, response);
+		const bool keep = KeepsAlive(request, response) && !stopping.Load();
+		return Send(c, response, !keep, request.method == "HEAD") && keep;
+	}
+
+	void Converse(Connection& c, const Handler& handler, const ServerLimits& limits, const Threading::Atomic<bool>& stopping) {
+		c.stream.SetNoDelay(true);
+		while (AnswerNext(c, handler, limits, stopping)) {}
+		c.stream.Close();
+	}
+
+	void ReapFinished(Core::Array<Connection*>& live) {
+		for (int64 i = live.Count() - 1; i >= 0; --i) {
+			if (!live[i]->finished.Load()) continue;
+			live[i]->worker.Join();
+			live.RemoveSwap(i);
+		}
+	}
+
+	// --- Server ---------------------------------------------------------------------------------------------------------
+
+	bool Server::Listen(const Net::Address& at) { return listener.Listen(at); }
+
+	void Server::Serve(Handler handler) {
+		if (!listener.IsOpen()) return;
+		const ServerLimits effective = Effective(limits);
+		Threading::Atomic<bool>* stop = &stopping;
+		Core::Array<Connection*> live;
+		while (!stopping.Load()) {
+			Net::TcpStream accepted = listener.Accept(kSliceMs);
+			ReapFinished(live);
+			if (!accepted.IsOpen()) {
+				if (!listener.TimedOut()) break;
+				continue;
+			}
+			Connection* connection = new Connection();
+			connection->stream = take(accepted);
+			connection->worker = Threading::Thread::Run([connection, handler, effective, stop]() {
+				Converse(*connection, handler, effective, *stop);
+				connection->finished.Store(true);
+			});
+			live.Push(connection);
+		}
+		for (int64 i = 0; i < live.Count(); ++i) live[i]->worker.Join();
+	}
+}

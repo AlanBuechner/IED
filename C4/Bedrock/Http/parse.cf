@@ -1,0 +1,368 @@
+include "parse.ch"
+
+namespace Http
+{
+	// The longest chunk-size or trailer line a ChunkedDecoder waits for.
+	const int64 kMaxChunkLineBytes = 4096;
+	// More hex digits than this cannot be a size an int64 holds.
+	const int32 kMaxChunkSizeDigits = 15;
+	// More decimal digits than this cannot be a Content-Length an int64 holds.
+	const int32 kMaxLengthDigits = 18;
+
+	// --- lines and tokens -----------------------------------------------------------------------------------------------
+
+	int64 LineEnd(Core::StringView bytes, int64 from) {
+		const char* data = bytes.Data();
+		for (int64 i = from; i < bytes.ByteLength(); ++i)
+			if (data[i] == '\n') return i;
+		return -1;
+	}
+
+	// The line from `from` to its '\n' at `end`, without the '\n' or a '\r' before it.
+	Core::StringView LineAt(Core::StringView bytes, int64 from, int64 end) {
+		const int64 last = end > from && bytes.Data()[end - 1] == '\r' ? end - 1 : end;
+		return bytes.Substring(from, last - from);
+	}
+
+	bool IsTokenChar(char c) {
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return true;
+		switch (c) {
+			case '!': case '#': case '$': case '%': case '&': case '\'': case '*': case '+': case '-': case '.': case '^':
+			case '_': case '`': case '|': case '~':
+				return true;
+		}
+		return false;
+	}
+
+	bool IsToken(Core::StringView text) {
+		if (text.IsEmpty()) return false;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (!IsTokenChar(text.Data()[i])) return false;
+		return true;
+	}
+
+	// No space and no control character: a request target, a version.
+	bool IsVisible(Core::StringView text) {
+		if (text.IsEmpty()) return false;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const uint8 c = (uint8)text.Data()[i];
+			if (c <= 32 || c == 127) return false;
+		}
+		return true;
+	}
+
+	// A field value may hold tabs and bytes past ASCII, but no other control character.
+	bool IsFieldValue(Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const uint8 c = (uint8)text.Data()[i];
+			if ((c < 32 && c != 9) || c == 127) return false;
+		}
+		return true;
+	}
+
+	bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
+
+	Core::StringView WithoutSpaces(Core::StringView text) {
+		int64 first = 0;
+		int64 end = text.ByteLength();
+		while (first < end && IsSpaceOrTab(text.Data()[first])) first += 1;
+		while (end > first && IsSpaceOrTab(text.Data()[end - 1])) end -= 1;
+		return text.Substring(first, end - first);
+	}
+
+	// --- heads ----------------------------------------------------------------------------------------------------------
+
+	HeadParse Head(ParseStatus status, int64 length, const char* error, int32 answer) {
+		HeadParse result;
+		result.status = status;
+		result.length = length;
+		result.error = Core::String(error);
+		result.answer = answer;
+		return result;
+	}
+
+	HeadParse NotYet(Core::StringView bytes, int64 maxBytes) {
+		if (bytes.ByteLength() > maxBytes) return Head(ParseStatus::TooLarge, 0, "the head is larger than the limit", 431);
+		return Head(ParseStatus::Incomplete, 0, "", 0);
+	}
+
+	// Past the empty lines a client may send before a request line (RFC 9112 section 2.2).
+	int64 SkipEmptyLines(Core::StringView bytes) {
+		int64 from = 0;
+		while (true) {
+			const int64 end = LineEnd(bytes, from);
+			if (end < 0 || !LineAt(bytes, from, end).IsEmpty()) return from;
+			from = end + 1;
+		}
+	}
+
+	// "Name: value": false with why when the line is not a field line.
+	bool AddFieldLine(Core::StringView line, Headers& headers, Core::String& why) {
+		if (IsSpaceOrTab(line.Data()[0])) {
+			why = Core::String("a header line continues the one before it (obsolete line folding)");
+			return false;
+		}
+		const int64 colon = line.IndexOf(':', 0);
+		const Core::StringView name = colon < 0 ? line : line.Substring(0, colon);
+		if (colon < 0 || !IsToken(name)) {
+			why = Core::String("a header line is not 'name: value'");
+			return false;
+		}
+		const Core::StringView value = WithoutSpaces(line.Substring(colon + 1, line.ByteLength() - colon - 1));
+		if (!IsFieldValue(value)) {
+			why = Core::String("a header value holds a control character");
+			return false;
+		}
+		headers.Add(name, value);
+		return true;
+	}
+
+	// The head at the start of `bytes`: its first line into `firstLine`, its field lines into `headers`.
+	HeadParse ReadHead(Core::StringView bytes, int64 maxBytes, Core::StringView& firstLine, Headers& headers) {
+		const int64 start = SkipEmptyLines(bytes);
+		const int64 firstEnd = LineEnd(bytes, start);
+		if (firstEnd < 0) return NotYet(bytes, maxBytes);
+		firstLine = LineAt(bytes, start, firstEnd);
+		int64 from = firstEnd + 1;
+		Core::String why;
+		while (true) {
+			const int64 end = LineEnd(bytes, from);
+			if (end < 0) return NotYet(bytes, maxBytes);
+			if (end + 1 > maxBytes) return Head(ParseStatus::TooLarge, 0, "the head is larger than the limit", 431);
+			const Core::StringView line = LineAt(bytes, from, end);
+			if (line.IsEmpty()) return Head(ParseStatus::Complete, end + 1, "", 0);
+			if (!AddFieldLine(line, headers, why)) return Head(ParseStatus::Malformed, 0, why.CStr(), 400);
+			from = end + 1;
+		}
+	}
+
+	// "HTTP/1.x": x, or -1.
+	int32 MinorVersion(Core::StringView version) {
+		if (version.ByteLength() != 8 || !version.StartsWith(Core::StringView("HTTP/1."))) return -1;
+		const char digit = version.Data()[7];
+		return digit >= '0' && digit <= '9' ? (int32)(digit - '0') : -1;
+	}
+
+	// The path of a request target: an origin-form target up to its '?'; an absolute-form one from the '/' after its
+	// authority ("/" when it has none); "*" as it is.
+	void SplitTarget(Request& request) {
+		Core::StringView target = request.target.View();
+		const int64 scheme = target.IndexOf(Core::StringView("://"));
+		if (scheme > 0) {
+			const int64 slash = target.IndexOf('/', scheme + 3);
+			target = slash < 0 ? Core::StringView("/") : target.Substring(slash, target.ByteLength() - slash);
+		}
+		const int64 mark = target.IndexOf('?', 0);
+		request.path = Core::String(mark < 0 ? target : target.Substring(0, mark));
+		request.query = Core::String(mark < 0 ? Core::StringView("") : target.Substring(mark + 1, target.ByteLength() - mark - 1));
+	}
+
+	HeadParse ParseRequestLine(Core::StringView line, Request& request) {
+		const int64 first = line.IndexOf(' ', 0);
+		const int64 second = first < 0 ? -1 : line.IndexOf(' ', first + 1);
+		if (second < 0 || line.IndexOf(' ', second + 1) >= 0) return Head(ParseStatus::Malformed, 0, "the request line is not 'method target version'", 400);
+		const Core::StringView method = line.Substring(0, first);
+		const Core::StringView target = line.Substring(first + 1, second - first - 1);
+		const Core::StringView version = line.Substring(second + 1, line.ByteLength() - second - 1);
+		if (!IsToken(method)) return Head(ParseStatus::Malformed, 0, "the method is not a token", 400);
+		if (!IsVisible(target)) return Head(ParseStatus::Malformed, 0, "the request target is empty or holds a space or control character", 400);
+		const int32 minor = MinorVersion(version);
+		if (minor < 0) return Head(ParseStatus::Malformed, 0, "the version is not HTTP/1.x", version.StartsWith(Core::StringView("HTTP/")) ? 505 : 400);
+		request.method = Core::String(method);
+		request.target = Core::String(target);
+		request.minorVersion = minor;
+		SplitTarget(request);
+		return Head(ParseStatus::Complete, 0, "", 0);
+	}
+
+	HeadParse ParseRequestHead(Core::StringView bytes, int64 maxBytes, Request& request) {
+		Core::StringView line;
+		request.headers.Clear();
+		HeadParse head = ReadHead(bytes, maxBytes, line, request.headers);
+		if (head.status != ParseStatus::Complete) return head;
+		HeadParse first = ParseRequestLine(line, request);
+		if (first.status != ParseStatus::Complete) return first;
+		return head;
+	}
+
+	HeadParse ParseStatusLine(Core::StringView line, Response& response) {
+		const int64 space = line.IndexOf(' ', 0);
+		if (space < 0 || MinorVersion(line.Substring(0, space)) < 0) return Head(ParseStatus::Malformed, 0, "the status line does not start with HTTP/1.x", 0);
+		const Core::StringView code = line.Substring(space + 1, 3);
+		const bool digits = code.ByteLength() == 3 && code.Data()[0] >= '1' && code.Data()[0] <= '5' && code.Data()[1] >= '0' &&
+			code.Data()[1] <= '9' && code.Data()[2] >= '0' && code.Data()[2] <= '9';
+		const int64 after = space + 4;
+		if (!digits || (after < line.ByteLength() && line.Data()[after] != ' ')) return Head(ParseStatus::Malformed, 0, "the status code is not three digits", 0);
+		response.status = (int32)((code.Data()[0] - '0') * 100 + (code.Data()[1] - '0') * 10 + (code.Data()[2] - '0'));
+		return Head(ParseStatus::Complete, 0, "", 0);
+	}
+
+	HeadParse ParseResponseHead(Core::StringView bytes, int64 maxBytes, Response& response) {
+		Core::StringView line;
+		response.headers.Clear();
+		HeadParse head = ReadHead(bytes, maxBytes, line, response.headers);
+		if (head.status != ParseStatus::Complete) return head;
+		HeadParse first = ParseStatusLine(line, response);
+		if (first.status != ParseStatus::Complete) return first;
+		return head;
+	}
+
+	// --- body framing ---------------------------------------------------------------------------------------------------
+
+	BodyFraming Framing(BodyKind kind, int64 length, const char* error) {
+		BodyFraming framing;
+		framing.kind = kind;
+		framing.length = length;
+		framing.error = Core::String(error);
+		return framing;
+	}
+
+	// Every Transfer-Encoding header names exactly one coding between them, and it is chunked.
+	bool OnlyChunked(const Headers& headers) {
+		int32 codings = 0;
+		bool chunked = false;
+		for (int64 i = 0; i < headers.Count(); ++i) {
+			if (!EqualsIgnoringCase(headers.At(i).name.View(), Core::StringView("Transfer-Encoding"))) continue;
+			Core::StringView list = headers.At(i).value.View();
+			int64 start = 0;
+			while (start <= list.ByteLength()) {
+				const int64 comma = list.IndexOf(',', start);
+				const int64 end = comma < 0 ? list.ByteLength() : comma;
+				const Core::StringView coding = WithoutSpaces(list.Substring(start, end - start));
+				if (!coding.IsEmpty()) {
+					codings += 1;
+					chunked = EqualsIgnoringCase(coding, Core::StringView("chunked"));
+				}
+				start = end + 1;
+			}
+		}
+		return codings == 1 && chunked;
+	}
+
+	// Every Content-Length value (several headers, or a comma list) is the same decimal number: it, or -1.
+	int64 ContentLength(const Headers& headers) {
+		int64 length = -1;
+		for (int64 i = 0; i < headers.Count(); ++i) {
+			if (!EqualsIgnoringCase(headers.At(i).name.View(), Core::StringView("Content-Length"))) continue;
+			Core::StringView list = headers.At(i).value.View();
+			int64 start = 0;
+			while (start <= list.ByteLength()) {
+				const int64 comma = list.IndexOf(',', start);
+				const int64 end = comma < 0 ? list.ByteLength() : comma;
+				const Core::StringView number = WithoutSpaces(list.Substring(start, end - start));
+				if (number.IsEmpty() || number.ByteLength() > kMaxLengthDigits) return -1;
+				int64 value = 0;
+				for (int64 d = 0; d < number.ByteLength(); ++d) {
+					const char c = number.Data()[d];
+					if (c < '0' || c > '9') return -1;
+					value = value * 10 + (int64)(c - '0');
+				}
+				if (length >= 0 && value != length) return -1;
+				length = value;
+				start = end + 1;
+			}
+		}
+		return length;
+	}
+
+	BodyFraming RequestFraming(const Headers& headers) {
+		const bool coded = headers.Has(Core::StringView("Transfer-Encoding"));
+		const bool sized = headers.Has(Core::StringView("Content-Length"));
+		if (coded && sized) return Framing(BodyKind::Malformed, 0, "both Content-Length and Transfer-Encoding");
+		if (coded) return OnlyChunked(headers) ? Framing(BodyKind::Chunked, 0, "") : Framing(BodyKind::Unsupported, 0, "a transfer coding other than chunked");
+		if (!sized) return Framing(BodyKind::None, 0, "");
+		const int64 length = ContentLength(headers);
+		if (length < 0) return Framing(BodyKind::Malformed, 0, "Content-Length is not one decimal number");
+		return Framing(BodyKind::Length, length, "");
+	}
+
+	BodyFraming ResponseFraming(const Headers& headers, int32 status, Core::StringView requestMethod) {
+		if (requestMethod == "HEAD" || (status >= 100 && status < 200) || status == 204 || status == 304) return Framing(BodyKind::None, 0, "");
+		if (!headers.Has(Core::StringView("Transfer-Encoding")) && !headers.Has(Core::StringView("Content-Length")))
+			return Framing(BodyKind::UntilClose, 0, "");
+		return RequestFraming(headers);
+	}
+
+	// --- chunked bodies -------------------------------------------------------------------------------------------------
+
+	ChunkedStep Step(ParseStatus status, int64 consumed, const char* error) {
+		ChunkedStep step;
+		step.status = status;
+		step.consumed = consumed;
+		step.error = Core::String(error);
+		return step;
+	}
+
+	int32 HexDigit(char c) {
+		if (c >= '0' && c <= '9') return (int32)(c - '0');
+		if (c >= 'a' && c <= 'f') return (int32)(c - 'a' + 10);
+		if (c >= 'A' && c <= 'F') return (int32)(c - 'A' + 10);
+		return -1;
+	}
+
+	// The size at the start of a chunk-size line ("1a", "1a;name=value"), or -1.
+	int64 ChunkSize(Core::StringView line) {
+		int64 size = 0;
+		int32 digits = 0;
+		for (int64 i = 0; i < line.ByteLength(); ++i) {
+			const char c = line.Data()[i];
+			if (c == ';' || IsSpaceOrTab(c)) break;
+			const int32 digit = HexDigit(c);
+			if (digit < 0 || digits == kMaxChunkSizeDigits) return -1;
+			size = size * 16 + digit;
+			digits += 1;
+		}
+		return digits == 0 ? -1 : size;
+	}
+
+	ParseStatus ChunkedDecoder::TakeLine(Core::StringView line, int64 bodyBytes, int64 maxBody, Core::String& why) {
+		if (stage == ChunkStage::DataEnd) {
+			stage = ChunkStage::Size;
+			if (line.IsEmpty()) return ParseStatus::Complete;
+			why = Core::String("a chunk's data runs past its size");
+			return ParseStatus::Malformed;
+		}
+		if (stage == ChunkStage::Trailer) {
+			if (line.IsEmpty()) stage = ChunkStage::Done;
+			return ParseStatus::Complete;
+		}
+		const int64 size = ChunkSize(line);
+		if (size < 0) {
+			why = Core::String("a chunk size is not hexadecimal");
+			return ParseStatus::Malformed;
+		}
+		if (bodyBytes + size > maxBody) {
+			why = Core::String("the body is larger than the limit");
+			return ParseStatus::TooLarge;
+		}
+		remaining = size;
+		stage = size == 0 ? ChunkStage::Trailer : ChunkStage::Data;
+		return ParseStatus::Complete;
+	}
+
+	ChunkedStep ChunkedDecoder::Feed(Core::StringView bytes, int64 maxBody, Core::Array<uint8>& body) {
+		int64 at = 0;
+		while (stage != ChunkStage::Done) {
+			if (stage == ChunkStage::Data) {
+				const int64 available = bytes.ByteLength() - at;
+				const int64 taken = available < remaining ? available : remaining;
+				body.Append((const uint8*)(bytes.Data() + at), taken);
+				at += taken;
+				remaining -= taken;
+				if (remaining > 0) return Step(ParseStatus::Incomplete, at, "");
+				stage = ChunkStage::DataEnd;
+				continue;
+			}
+			const int64 end = LineEnd(bytes, at);
+			if (end < 0) {
+				if (bytes.ByteLength() - at > kMaxChunkLineBytes) return Step(ParseStatus::Malformed, at, "a chunk line is too long");
+				return Step(ParseStatus::Incomplete, at, "");
+			}
+			Core::String why;
+			const ParseStatus line = TakeLine(LineAt(bytes, at, end), body.Count(), maxBody, why);
+			if (line != ParseStatus::Complete) return Step(line, at, why.CStr());
+			at = end + 1;
+		}
+		return Step(ParseStatus::Complete, at, "");
+	}
+}

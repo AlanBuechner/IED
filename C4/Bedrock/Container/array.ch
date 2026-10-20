@@ -57,6 +57,7 @@ namespace Core
 		public T Pop();                     // the last element moved out; a zero T when empty
 		public void Insert(int64 index, const T& value);
 		public void Append(const Array<T>& other);
+		public void Append(const T* items, int64 count);   // `items` may point into this array
 		public void RemoveAt(int64 index);
 		public void RemoveRange(int64 first, int64 end);   // elements [first, end)
 		public void RemoveSwap(int64 index);               // O(1): the last element takes its place

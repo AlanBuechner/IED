@@ -176,6 +176,33 @@ class ArrayTests {
 		assert_eq(1, a[5], "the second half starts over");
 	}
 
+	[test("append_pointer")]
+	public static void TestAppendPointer() {
+		Core::Array<int32> a;
+		int32[3] items = { 7, 8, 9 };
+		a.Append(&items[0], 3);
+		assert_true(a.Count() == 3 && a[2] == 9, "items from a pointer");
+		a.Append(a.Data() + 1, 2);
+		assert_true(a.Count() == 5 && a[3] == 8 && a[4] == 9, "items from the array itself");
+		a.Append(&items[0], 0);
+		a.Append(nullptr, 0);
+		assert_eq(5, a.Count(), "no items: nothing");
+	}
+
+	[test("append_grows_geometrically")]
+	public static void TestAppendGrowsGeometrically() {
+		// BUG-274: Append reserved exactly the new count, so appending in a loop reallocated on every call.
+		Core::Array<int32> a;
+		Core::Array<int32> one = { 1 };
+		for (int32 i = 0; i < 100; ++i) a.Append(one);
+		assert_true(a.Capacity() > a.Count(), "the buffer grows ahead of the count");
+		assert_true(a.Capacity() <= 2 * a.Count() + 4, "by at most twice");
+		Core::Array<uint8> bytes;
+		uint8[1] byte = { 5 };
+		for (int32 i = 0; i < 100; ++i) bytes.Append(&byte[0], 1);
+		assert_true(bytes.Capacity() > bytes.Count() && bytes[99] == 5, "from a pointer too");
+	}
+
 	[test("const_access")]
 	public static void TestConstAccess() {
 		Core::Array<int32> v = { 0, 10, 20, 30 };

@@ -83,11 +83,21 @@ namespace Core
 	}
 
 	template<T>
-	public void Array::Append(const Array<T>& other) {
-		if (&other == this) { Array<T> copy = other; Append(copy); return; }
-		Reserve(count + other.count);
-		for (int64 k = 0; k < other.count; ++k) new (&data[count + k]) T(other.data[k]);
-		count += other.count;
+	public void Array::Append(const Array<T>& other) { Append(other.data, other.count); }
+
+	// Grows as Push does (BUG-274: an exact reserve made repeated appends quadratic).
+	template<T>
+	public void Array::Append(const T* items, int64 n) {
+		if (n <= 0) return;
+		if (count > 0 && items >= data && items < data + count) {
+			Array<T> copy;
+			copy.Append(items, n);
+			Append(copy.data, n);
+			return;
+		}
+		if (count + n > capacity) Grow(count + n);
+		for (int64 k = 0; k < n; ++k) new (&data[count + k]) T(items[k]);
+		count += n;
 	}
 
 	template<T>

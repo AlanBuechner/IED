@@ -1,0 +1,220 @@
+include "client.ch"
+include "../Text/stringbuilder.ch"
+
+namespace Http
+{
+	const int64 kFetchReceiveBytes = 16 * 1024;
+	const int32 kDefaultHttpPort = 80;
+
+	FetchResult Failed(const char* why) {
+		FetchResult result;
+		result.error = Core::String(why);
+		return result;
+	}
+
+	// --- URLs -----------------------------------------------------------------------------------------------------------
+
+	// The port text after a ':' (digits, 1 to 65535), or -1.
+	int32 PortNumber(Core::StringView text) {
+		if (text.IsEmpty() || text.ByteLength() > 5) return -1;
+		int32 port = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const char c = text.Data()[i];
+			if (c < '0' || c > '9') return -1;
+			port = port * 10 + (int32)(c - '0');
+		}
+		return port >= 1 && port <= Net::kMaxPort ? port : -1;
+	}
+
+	// "host", "host:port", "[v6]" or "[v6]:port" into `url`; false when it is none of those.
+	bool ParseAuthority(Core::StringView authority, Url& url) {
+		Core::StringView host = authority;
+		Core::StringView port;
+		if (authority.StartsWith(Core::StringView("["))) {
+			const int64 close = authority.IndexOf(']', 0);
+			if (close < 0) return false;
+			host = authority.Substring(1, close - 1);
+			const Core::StringView rest = authority.Substring(close + 1, authority.ByteLength() - close - 1);
+			if (!rest.IsEmpty() && !rest.StartsWith(Core::StringView(":"))) return false;
+			port = rest.IsEmpty() ? rest : rest.Substring(1, rest.ByteLength() - 1);
+		}
+		else {
+			const int64 colon = authority.IndexOf(':', 0);
+			if (colon >= 0) {
+				host = authority.Substring(0, colon);
+				port = authority.Substring(colon + 1, authority.ByteLength() - colon - 1);
+			}
+		}
+		url.port = port.IsEmpty() && authority.IndexOf(':', 0) < 0 ? kDefaultHttpPort : PortNumber(port);
+		url.host = Core::String(host);
+		return !host.IsEmpty() && url.port > 0;
+	}
+
+	Url ParseUrl(Core::StringView text) {
+		Url url;
+		const Core::StringView scheme = Core::StringView("http://");
+		if (text.ByteLength() <= scheme.ByteLength() || !EqualsIgnoringCase(text.Substring(0, scheme.ByteLength()), scheme)) return url;
+		const Core::StringView rest = text.Substring(scheme.ByteLength(), text.ByteLength() - scheme.ByteLength());
+		int64 end = rest.ByteLength();
+		const int64 slash = rest.IndexOf('/', 0);
+		const int64 mark = rest.IndexOf('?', 0);
+		if (slash >= 0 && slash < end) end = slash;
+		if (mark >= 0 && mark < end) end = mark;
+		if (!ParseAuthority(rest.Substring(0, end), url)) return Url();
+		const Core::StringView target = rest.Substring(end, rest.ByteLength() - end);
+		url.target = target.IsEmpty() ? Core::String("/") : target.StartsWith(Core::StringView("?")) ? Core::String("/") + target : Core::String(target);
+		url.valid = true;
+		return url;
+	}
+
+	// --- one exchange ---------------------------------------------------------------------------------------------------
+
+	void WriteRequest(Core::StringBuilder& head, const Request& request, const Net::Address& at) {
+		head.Append(request.method.View());
+		head.Append(" ");
+		head.Append(request.target.IsEmpty() ? Core::StringView("/") : request.target.View());
+		head.Append(" HTTP/1.1\r\n");
+		if (!request.headers.Has(Core::StringView("Host"))) {
+			head.Append("Host: ");
+			head.Append(at.ToString().View());
+			head.Append("\r\n");
+		}
+		for (int64 i = 0; i < request.headers.Count(); ++i) {
+			const Header& header = request.headers.At(i);
+			if (EqualsIgnoringCase(header.name.View(), Core::StringView("Content-Length")) ||
+				EqualsIgnoringCase(header.name.View(), Core::StringView("Transfer-Encoding")) ||
+				EqualsIgnoringCase(header.name.View(), Core::StringView("Connection"))) continue;
+			head.Append(header.name.View());
+			head.Append(": ");
+			head.Append(header.value.View());
+			head.Append("\r\n");
+		}
+		if (!request.body.IsEmpty() || request.method == "POST" || request.method == "PUT") {
+			head.Append("Content-Length: ");
+			head.AppendInt(request.body.Count());
+			head.Append("\r\n");
+		}
+		head.Append("Connection: close\r\n\r\n");
+	}
+
+	// More bytes onto `received`: false when the connection ends, fails or the wait times out.
+	bool ReceiveInto(Net::TcpStream& stream, Core::Array<uint8>& received, int32 timeoutMs) {
+		uint8[kFetchReceiveBytes] buffer;
+		const int64 got = stream.Receive((void*)&buffer[0], kFetchReceiveBytes, timeoutMs);
+		if (got <= 0) return false;
+		received.Append(&buffer[0], got);
+		return true;
+	}
+
+	Core::StringView Received(const Core::Array<uint8>& received, int64 from) {
+		return Core::StringView((const char*)received.Data() + from, received.Count() - from);
+	}
+
+	// The final head (past interim 1xx ones) into `response`; where its body starts, or -1 with `why`.
+	int64 ReadResponseHead(Net::TcpStream& stream, Core::Array<uint8>& received, int32 timeoutMs, Response& response, Core::String& why) {
+		int64 start = 0;
+		while (true) {
+			const HeadParse head = ParseResponseHead(Received(received, start), kMaxFetchHeadBytes, response);
+			if (head.status == ParseStatus::Complete && response.status >= 200) return start + head.length;
+			if (head.status == ParseStatus::Complete) {
+				start += head.length;
+				continue;
+			}
+			if (head.status != ParseStatus::Incomplete) {
+				why = head.error;
+				return -1;
+			}
+			if (!ReceiveInto(stream, received, timeoutMs)) {
+				why = Core::String("the connection ended before the response head");
+				return -1;
+			}
+		}
+	}
+
+	// The body after `start`, framed as `framing` says; false with `why`.
+	bool ReadResponseBody(Net::TcpStream& stream, Core::Array<uint8>& received, int64 start, const BodyFraming& framing, int32 timeoutMs,
+		Response& response, Core::String& why) {
+		if (framing.kind == BodyKind::Malformed || framing.kind == BodyKind::Unsupported) {
+			why = framing.error;
+			return false;
+		}
+		if (framing.kind == BodyKind::Chunked) {
+			ChunkedDecoder decoder;
+			int64 at = start;
+			while (true) {
+				const ChunkedStep step = decoder.Feed(Received(received, at), kMaxFetchBodyBytes, response.body);
+				at += step.consumed;
+				if (step.status == ParseStatus::Complete) return true;
+				if (step.status != ParseStatus::Incomplete || !ReceiveInto(stream, received, timeoutMs)) {
+					why = step.status == ParseStatus::Incomplete ? Core::String("the connection ended inside a chunked body") : step.error;
+					return false;
+				}
+			}
+		}
+		const bool sized = framing.kind == BodyKind::Length;
+		while ((sized && received.Count() - start < framing.length) || framing.kind == BodyKind::UntilClose) {
+			if (received.Count() - start > kMaxFetchBodyBytes) {
+				why = Core::String("the body is larger than the limit");
+				return false;
+			}
+			if (!ReceiveInto(stream, received, timeoutMs)) {
+				if (framing.kind == BodyKind::UntilClose && !stream.TimedOut()) break;
+				why = Core::String("the connection ended before the whole body");
+				return false;
+			}
+		}
+		const int64 length = sized ? framing.length : received.Count() - start;
+		if (framing.kind != BodyKind::None) response.body.Append(received.Data() + start, length);
+		return true;
+	}
+
+	FetchResult Fetch(const Net::Address& at, const Request& request, int32 timeoutMs) {
+		Net::TcpStream stream = Net::TcpStream::Connect(at, timeoutMs);
+		if (!stream.IsOpen()) return Failed(stream.Error());
+		Core::StringBuilder head;
+		WriteRequest(head, request, at);
+		if (!stream.SendText(head.View(), timeoutMs) || !stream.SendAll((const void*)request.body.Data(), request.body.Count(), timeoutMs))
+			return Failed(stream.Error());
+		FetchResult result;
+		Core::Array<uint8> received;
+		const int64 bodyStart = ReadResponseHead(stream, received, timeoutMs, result.response, result.error);
+		if (bodyStart < 0) return result;
+		const BodyFraming framing = ResponseFraming(result.response.headers, result.response.status, request.method.View());
+		result.ok = ReadResponseBody(stream, received, bodyStart, framing, timeoutMs, result.response, result.error);
+		return result;
+	}
+
+	// The request for `url` with `method` and `body`, sent to the first address its host resolves to.
+	FetchResult FetchUrl(Core::StringView url, Request& request, int32 timeoutMs) {
+		const Url parsed = ParseUrl(url);
+		if (!parsed.valid) return Failed("not an http://host[:port]/path URL");
+		const Net::Resolution found = Net::Resolve(parsed.host.CStr(), parsed.port);
+		if (!found.Found()) return Failed(found.error.CStr());
+		request.target = parsed.target;
+		Core::StringBuilder host;
+		const bool bracketed = parsed.host.View().IndexOf(':', 0) >= 0;   // an IPv6 address
+		if (bracketed) host.Append("[");
+		host.Append(parsed.host.View());
+		if (bracketed) host.Append("]");
+		if (parsed.port != kDefaultHttpPort) {
+			host.Append(":");
+			host.AppendInt(parsed.port);
+		}
+		request.headers.Set(Core::StringView("Host"), host.View());
+		return Fetch(found.addresses[0], request, timeoutMs);
+	}
+
+	FetchResult Get(Core::StringView url, int32 timeoutMs) {
+		Request request;
+		request.method = Core::String("GET");
+		return FetchUrl(url, request, timeoutMs);
+	}
+
+	FetchResult Post(Core::StringView url, Core::StringView contentType, Core::StringView body, int32 timeoutMs) {
+		Request request;
+		request.method = Core::String("POST");
+		request.headers.Set(Core::StringView("Content-Type"), contentType);
+		request.SetBody(body);
+		return FetchUrl(url, request, timeoutMs);
+	}
+}

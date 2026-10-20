@@ -1,0 +1,438 @@
+// Http (D-66): request and response heads parsed (every malformed form, the limits, CRLF or LF, absolute targets),
+// body framing, chunked bodies fed whole and a byte at a time, URLs and headers; a server on loopback answering GET,
+// POST, pipelined keep-alive requests, chunked bodies, HEAD, Expect: 100-continue, HTTP/1.0, bad requests, bodies over
+// the limit, a handler that throws, concurrent clients, and Stop; and the client reading chunked, until-close and
+// interim responses from a raw server.
+
+include "bedrock.ch"
+
+const int32 kHttpWaitMs = 3000;
+
+static Core::StringView HttpText(const char* text) { return Core::StringView(text); }
+
+static bool HttpContains(Core::StringView text, const char* part) { return text.IndexOf(Core::StringView(part)) >= 0; }
+
+// What `stream` receives until the server closes the connection (or a wait times out).
+static Core::String HttpReadToClose(Net::TcpStream& stream) {
+	Core::StringBuilder got;
+	char[4096] buffer;
+	while (true) {
+		const int64 n = stream.Receive((void*)&buffer[0], 4096, kHttpWaitMs);
+		if (n <= 0) break;
+		got.AppendBytes(&buffer[0], n);
+	}
+	return got.ToString();
+}
+
+// Connects to `at`, sends `raw` and reads the answer to the close.
+static Core::String HttpExchange(const Net::Address& at, const char* raw) {
+	Net::TcpStream stream = Net::TcpStream::Connect(at, kHttpWaitMs);
+	stream.SendText(Core::StringView(raw));
+	return HttpReadToClose(stream);
+}
+
+// A server answering with `handler` on a thread of its own until Finish.
+struct HttpRig {
+	public Http::Server server;
+	public Threading::Thread serving;
+
+	public void Start(Http::Handler handler) {
+		server.Listen(Net::Address::Loopback(0));
+		Http::Server* running = &server;
+		serving = Threading::Thread::Run([running, handler]() { running->Serve(handler); });
+	}
+
+	public Net::Address At() const { return server.LocalAddress(); }
+
+	public Core::StringBuilder Url(const char* path) const {
+		Core::StringBuilder url;
+		url.Append("http://");
+		url.Append(At().ToString().View());
+		url.Append(path);
+		return url;
+	}
+
+	public void Finish() {
+		server.Stop();
+		serving.Join();
+	}
+}
+
+static void Echo(const Http::Request& request, Http::Response& response) {
+	Core::StringBuilder text;
+	text.Append(request.method.View());
+	text.Append(" ");
+	text.Append(request.path.View());
+	text.Append(" ");
+	text.Append(request.query.View());
+	text.Append(" ");
+	text.Append(request.BodyText());
+	response.SetText(HttpText("text/plain"), text.View());
+}
+
+[test("http.parse")]
+class HttpParseTests {
+	[test("request_head")]
+	public static void TestRequestHead() {
+		Http::Request request;
+		const char* raw = "GET /a/b?x=1&y=2 HTTP/1.1\r\nHost: example\r\nX-Two: a\r\nx-two:  b \r\n\r\nBODY";
+		Http::HeadParse head = Http::ParseRequestHead(HttpText(raw), 4096, request);
+		assert_true(head.status == Http::ParseStatus::Complete, "a whole head");
+		assert_eq((int64)66, head.length, "ends after the empty line, before the body");
+		assert_true(request.method == "GET" && request.target == "/a/b?x=1&y=2", "the method and target");
+		assert_true(request.path == "/a/b" && request.query == "x=1&y=2", "the path and query");
+		assert_eq(1, request.minorVersion, "HTTP/1.1");
+		assert_eq((int64)3, request.headers.Count(), "every header, in order");
+		assert_true(*request.headers.Find(HttpText("HOST")) == "example", "found without regard to case");
+		assert_true(*request.headers.Find(HttpText("x-two")) == "a", "the first of two");
+		assert_true(request.headers.At(2).value == "b", "values lose their surrounding spaces");
+	}
+
+	[test("incomplete")]
+	public static void TestIncomplete() {
+		Http::Request request;
+		assert_true(Http::ParseRequestHead(HttpText(""), 4096, request).status == Http::ParseStatus::Incomplete, "nothing yet");
+		assert_true(Http::ParseRequestHead(HttpText("GET / HTTP/1.1\r\nHost: x\r\n"), 4096, request).status == Http::ParseStatus::Incomplete,
+			"no empty line yet");
+		assert_true(Http::ParseRequestHead(HttpText("GET / HT"), 4096, request).status == Http::ParseStatus::Incomplete, "half a line");
+	}
+
+	[test("lenient_lines")]
+	public static void TestLenientLines() {
+		Http::Request request;
+		Http::HeadParse head = Http::ParseRequestHead(HttpText("\r\n\nGET / HTTP/1.0\nA: b\n\n"), 4096, request);
+		assert_true(head.status == Http::ParseStatus::Complete, "empty lines first, lines ended by LF alone");
+		assert_true(request.minorVersion == 0 && *request.headers.Find(HttpText("a")) == "b", "HTTP/1.0 and its header");
+	}
+
+	[test("malformed")]
+	public static void TestMalformed() {
+		const char*[10] bad = { "GET /\r\n\r\n", "GET  / HTTP/1.1\r\n\r\n", "G(T / HTTP/1.1\r\n\r\n", "GET / FTP/1.0\r\n\r\n",
+			"GET /a b HTTP/1.1\r\n\r\n", "GET / HTTP/1.1\r\nNoColon\r\n\r\n", "GET / HTTP/1.1\r\nA: b\r\n folded\r\n\r\n",
+			"GET / HTTP/1.1\r\nBad Name: x\r\n\r\n", "GET / HTTP/1.1\r\nA: b\x01\r\n\r\n", "GET / HTTP/1.1\r\n: empty\r\n\r\n" };
+		for (int32 i = 0; i < 10; ++i) {
+			Http::Request request;
+			Http::HeadParse head = Http::ParseRequestHead(HttpText(bad[i]), 4096, request);
+			assert_true(head.status == Http::ParseStatus::Malformed && head.answer == 400 && !head.error.IsEmpty(), bad[i]);
+		}
+		Http::Request request;
+		Http::HeadParse two = Http::ParseRequestHead(HttpText("GET / HTTP/2.0\r\n\r\n"), 4096, request);
+		assert_true(two.status == Http::ParseStatus::Malformed && two.answer == 505, "another HTTP version is answered 505");
+	}
+
+	[test("too_large")]
+	public static void TestTooLarge() {
+		Http::Request request;
+		Http::HeadParse waiting = Http::ParseRequestHead(HttpText("GET / HTTP/1.1\r\nA: 0123456789\r\n"), 20, request);
+		assert_true(waiting.status == Http::ParseStatus::TooLarge && waiting.answer == 431, "an unfinished head past the limit");
+		Http::HeadParse whole = Http::ParseRequestHead(HttpText("GET / HTTP/1.1\r\nA: 0123456789\r\n\r\n"), 20, request);
+		assert_true(whole.status == Http::ParseStatus::TooLarge, "a whole one past it too");
+		assert_true(Http::ParseRequestHead(HttpText("GET / HTTP/1.1\r\n\r\n"), 18, request).status == Http::ParseStatus::Complete,
+			"exactly the limit fits");
+	}
+
+	[test("targets")]
+	public static void TestTargets() {
+		Http::Request request;
+		Http::ParseRequestHead(HttpText("GET http://example.com/p?q HTTP/1.1\r\n\r\n"), 4096, request);
+		assert_true(request.path == "/p" && request.query == "q", "an absolute target's path and query");
+		Http::ParseRequestHead(HttpText("GET http://example.com HTTP/1.1\r\n\r\n"), 4096, request);
+		assert_true(request.path == "/" && request.query.IsEmpty(), "with no path: /");
+		Http::ParseRequestHead(HttpText("OPTIONS * HTTP/1.1\r\n\r\n"), 4096, request);
+		assert_true(request.path == "*", "the asterisk form");
+	}
+
+	[test("framing")]
+	public static void TestFraming() {
+		Http::Headers headers;
+		assert_true(Http::RequestFraming(headers).kind == Http::BodyKind::None, "no body headers: no body");
+		headers.Set(HttpText("Content-Length"), HttpText("10"));
+		Http::BodyFraming sized = Http::RequestFraming(headers);
+		assert_true(sized.kind == Http::BodyKind::Length && sized.length == 10, "Content-Length");
+		headers.Set(HttpText("Content-Length"), HttpText("10, 10"));
+		assert_true(Http::RequestFraming(headers).length == 10, "a repeated equal length");
+		const char*[5] badLengths = { "10, 11", "-1", "abc", "", "1234567890123456789" };
+		for (int32 i = 0; i < 5; ++i) {
+			headers.Set(HttpText("Content-Length"), HttpText(badLengths[i]));
+			assert_true(Http::RequestFraming(headers).kind == Http::BodyKind::Malformed, badLengths[i]);
+		}
+		headers.Clear();
+		headers.Set(HttpText("Transfer-Encoding"), HttpText("Chunked"));
+		assert_true(Http::RequestFraming(headers).kind == Http::BodyKind::Chunked, "chunked, any case");
+		headers.Set(HttpText("Content-Length"), HttpText("3"));
+		assert_true(Http::RequestFraming(headers).kind == Http::BodyKind::Malformed, "both framings: refused (request smuggling)");
+		headers.Clear();
+		headers.Set(HttpText("Transfer-Encoding"), HttpText("gzip, chunked"));
+		assert_true(Http::RequestFraming(headers).kind == Http::BodyKind::Unsupported, "another coding");
+		Http::Headers none;
+		assert_true(Http::ResponseFraming(none, 200, HttpText("GET")).kind == Http::BodyKind::UntilClose, "a response without framing: until close");
+		assert_true(Http::ResponseFraming(none, 200, HttpText("HEAD")).kind == Http::BodyKind::None, "a HEAD response has none");
+		assert_true(Http::ResponseFraming(none, 204, HttpText("GET")).kind == Http::BodyKind::None, "nor does a 204");
+		assert_true(Http::ResponseFraming(none, 304, HttpText("GET")).kind == Http::BodyKind::None, "nor a 304");
+	}
+
+	[test("chunked")]
+	public static void TestChunked() {
+		const char* raw = "4\r\nWiki\r\n5;name=value\r\npedia\r\n0\r\nTrailer: x\r\n\r\nNEXT";
+		Http::ChunkedDecoder decoder;
+		Core::Array<uint8> body;
+		Http::ChunkedStep step = decoder.Feed(HttpText(raw), 1024, body);
+		assert_true(step.status == Http::ParseStatus::Complete && decoder.Done(), "a whole chunked body");
+		assert_true(Core::StringView((const char*)body.Data(), body.Count()) == "Wikipedia", "its data, extensions and trailers dropped");
+		assert_eq((int64)47, step.consumed, "it stops before what follows");
+		Http::ChunkedDecoder bytewise;
+		Core::Array<uint8> pieces;
+		Core::StringView all = HttpText(raw);
+		int64 at = 0;
+		int64 fed = 0;
+		while (!bytewise.Done() && fed < all.ByteLength()) {
+			fed += 1;
+			at += bytewise.Feed(all.Substring(at, fed - at), 1024, pieces).consumed;
+		}
+		assert_true(bytewise.Done() && Core::StringView((const char*)pieces.Data(), pieces.Count()) == "Wikipedia", "fed a byte at a time");
+		Http::ChunkedDecoder bad;
+		assert_true(bad.Feed(HttpText("zz\r\n"), 1024, body).status == Http::ParseStatus::Malformed, "a size that is not hexadecimal");
+		Http::ChunkedDecoder overrun;
+		assert_true(overrun.Feed(HttpText("2\r\nabc\r\n"), 1024, body).status == Http::ParseStatus::Malformed, "data past its size");
+		Http::ChunkedDecoder large;
+		Core::Array<uint8> limited;
+		assert_true(large.Feed(HttpText("10\r\n"), 15, limited).status == Http::ParseStatus::TooLarge, "a chunk past the limit");
+	}
+
+	[test("response_head")]
+	public static void TestResponseHead() {
+		Http::Response response;
+		Http::HeadParse head = Http::ParseResponseHead(HttpText("HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nabc"), 4096, response);
+		assert_true(head.status == Http::ParseStatus::Complete && response.status == 404, "the status");
+		assert_true(*response.headers.Find(HttpText("content-length")) == "3", "and the headers");
+		assert_true(Http::ParseResponseHead(HttpText("HTTP/1.1 200\r\n\r\n"), 4096, response).status == Http::ParseStatus::Complete, "no reason phrase");
+		assert_true(Http::ParseResponseHead(HttpText("HTTP/1.1 2000 OK\r\n\r\n"), 4096, response).status == Http::ParseStatus::Malformed, "four digits");
+		assert_true(Http::ParseResponseHead(HttpText("HTTP/1.1 OK\r\n\r\n"), 4096, response).status == Http::ParseStatus::Malformed, "no code");
+	}
+
+	[test("urls")]
+	public static void TestUrls() {
+		Http::Url url = Http::ParseUrl(HttpText("http://127.0.0.1:8080/x?y=1"));
+		assert_true(url.valid && url.host == "127.0.0.1" && url.port == 8080 && url.target == "/x?y=1", "host, port and target");
+		Http::Url plain = Http::ParseUrl(HttpText("HTTP://example.com"));
+		assert_true(plain.valid && plain.port == 80 && plain.target == "/", "the default port and path; the scheme in any case");
+		Http::Url v6 = Http::ParseUrl(HttpText("http://[::1]:9/a"));
+		assert_true(v6.valid && v6.host == "::1" && v6.port == 9, "an IPv6 host in brackets");
+		assert_true(Http::ParseUrl(HttpText("http://h?q")).target == "/?q", "a query with no path");
+		const char*[7] bad = { "https://x", "http://", "http://:80/", "http://h:0/", "http://h:99999", "http://h:/", "ftp://h" };
+		for (int32 i = 0; i < 7; ++i) assert_true(!Http::ParseUrl(HttpText(bad[i])).valid, bad[i]);
+	}
+
+	[test("headers")]
+	public static void TestHeaders() {
+		Http::Headers headers;
+		headers.Add(HttpText("Set-Cookie"), HttpText("a=1"));
+		headers.Add(HttpText("set-cookie"), HttpText("b=2"));
+		assert_eq((int64)2, headers.Count(), "Add keeps both");
+		headers.Set(HttpText("SET-COOKIE"), HttpText("c=3"));
+		assert_true(headers.Count() == 1 && headers.At(0).value == "c=3", "Set replaces every one");
+		headers.Remove(HttpText("Set-Cookie"));
+		assert_true(headers.Count() == 0 && headers.Find(HttpText("set-cookie")) == nullptr, "Remove takes them away");
+		assert_se("Not Found", Http::ReasonPhrase(404), "reason phrases");
+		assert_se("Unknown", Http::ReasonPhrase(299), "an unknown code");
+	}
+}
+
+[test("http.server")]
+class HttpServerTests {
+	[test("get_and_post")]
+	public static void TestGetAndPost() {
+		HttpRig rig;
+		rig.Start(Echo);
+		Http::FetchResult got = Http::Get(rig.Url("/hello?name=c4").View(), kHttpWaitMs);
+		assert_true(got.ok && got.response.status == 200, "GET answered 200");
+		assert_true(got.response.BodyText() == "GET /hello name=c4 ", "the handler saw the method, path and query");
+		assert_true(*got.response.headers.Find(HttpText("Content-Type")) == "text/plain", "with its headers");
+		Http::FetchResult posted = Http::Post(rig.Url("/echo").View(), HttpText("text/plain"), HttpText("payload"), kHttpWaitMs);
+		assert_true(posted.ok && posted.response.BodyText() == "POST /echo  payload", "POST carried its body");
+		rig.Finish();
+	}
+
+	[test("keep_alive")]
+	public static void TestKeepAlive() {
+		HttpRig rig;
+		rig.Start(Echo);
+		Core::String all = HttpExchange(rig.At(), "GET /1 HTTP/1.1\r\nHost: x\r\n\r\nGET /2 HTTP/1.1\r\nHost: x\r\n\r\nGET /3 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+		const int64 first = all.View().IndexOf(HttpText("GET /1"));
+		const int64 second = all.View().IndexOf(HttpText("GET /2"));
+		const int64 third = all.View().IndexOf(HttpText("GET /3"));
+		assert_true(first >= 0 && second > first && third > second, "three pipelined requests answered in order on one connection");
+		assert_true(HttpContains(all.View(), "Connection: close"), "the last says it closes, and the server closed it");
+		rig.Finish();
+	}
+
+	[test("chunked_request")]
+	public static void TestChunkedRequest() {
+		HttpRig rig;
+		rig.Start(Echo);
+		Core::String all = HttpExchange(rig.At(), "POST /c HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n");
+		assert_true(HttpContains(all.View(), "200 OK") && HttpContains(all.View(), "POST /c  abcde"), "the chunks became the body");
+		rig.Finish();
+	}
+
+	[test("head")]
+	public static void TestHead() {
+		HttpRig rig;
+		rig.Start(Echo);
+		Core::String all = HttpExchange(rig.At(), "HEAD /h HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+		assert_true(HttpContains(all.View(), "Content-Length: 9"), "HEAD gets the length the body would have");
+		assert_true(!HttpContains(all.View(), "HEAD /h"), "but no body");
+		rig.Finish();
+	}
+
+	[test("expect_continue")]
+	public static void TestExpectContinue() {
+		HttpRig rig;
+		rig.Start(Echo);
+		Net::TcpStream stream = Net::TcpStream::Connect(rig.At(), kHttpWaitMs);
+		stream.SendText(HttpText("PUT /up HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n"));
+		char[64] interim;
+		const int64 n = stream.Receive((void*)&interim[0], 25, kHttpWaitMs);
+		assert_true(n == 25 && Core::StringView(&interim[0], 25) == "HTTP/1.1 100 Continue\r\n\r\n", "the server invites the body first");
+		stream.SendText(HttpText("12345"));
+		assert_true(HttpContains(HttpReadToClose(stream).View(), "PUT /up  12345"), "then answers with it");
+		rig.Finish();
+	}
+
+	[test("http10")]
+	public static void TestHttp10() {
+		HttpRig rig;
+		rig.Start(Echo);
+		Core::String all = HttpExchange(rig.At(), "GET /old HTTP/1.0\r\n\r\n");
+		assert_true(HttpContains(all.View(), "200 OK") && HttpContains(all.View(), "Connection: close"), "an HTTP/1.0 client gets one answer and a close");
+		rig.Finish();
+	}
+
+	[test("refusals")]
+	public static void TestRefusals() {
+		HttpRig rig;
+		Http::ServerLimits limits;
+		limits.maxBodyBytes = 10;
+		rig.server.SetLimits(limits);
+		rig.Start(Echo);
+		assert_true(HttpExchange(rig.At(), "NOT A REQUEST\r\n\r\n").View().StartsWith(HttpText("HTTP/1.1 400 Bad Request")), "a bad request: 400");
+		assert_true(HttpExchange(rig.At(), "GET / HTTP/3.0\r\n\r\n").View().StartsWith(HttpText("HTTP/1.1 505")), "another version: 505");
+		assert_true(HttpExchange(rig.At(), "POST / HTTP/1.1\r\nContent-Length: 11\r\n\r\n01234567890").View().StartsWith(HttpText("HTTP/1.1 413")),
+			"a body over the limit: 413");
+		assert_true(HttpExchange(rig.At(), "POST / HTTP/1.1\r\nTransfer-Encoding: gzip\r\n\r\n").View().StartsWith(HttpText("HTTP/1.1 501")),
+			"an unknown coding: 501");
+		rig.Finish();
+	}
+
+	[test("handler_throws")]
+	public static void TestHandlerThrows() {
+		HttpRig rig;
+		rig.Start([](const Http::Request& request, Http::Response& response) { throw 7; });
+		Http::FetchResult got = Http::Get(rig.Url("/").View(), kHttpWaitMs);
+		assert_true(got.ok && got.response.status == 500, "a handler that throws: 500, and the server goes on");
+		assert_true(Http::Get(rig.Url("/").View(), kHttpWaitMs).response.status == 500, "for the next request too");
+		rig.Finish();
+	}
+
+	[test("concurrent")]
+	public static void TestConcurrent() {
+		HttpRig rig;
+		Threading::Atomic<int32> served;
+		Threading::Atomic<int32>* count = &served;
+		rig.Start([count](const Http::Request& request, Http::Response& response) {
+			count->FetchAdd(1);
+			response.SetText(HttpText("text/plain"), request.path.View());
+		});
+		const int32 clients = 8;
+		Threading::Atomic<int32> answered;
+		Threading::Atomic<int32>* ok = &answered;
+		Core::StringBuilder url = rig.Url("/c");
+		Core::String target = url.ToString();
+		Threading::Thread[8] threads;
+		for (int32 t = 0; t < clients; ++t)
+			threads[t] = Threading::Thread::Run([ok, target]() {
+				for (int32 i = 0; i < 4; ++i)
+					if (Http::Get(target.View(), kHttpWaitMs).response.BodyText() == "/c") ok->FetchAdd(1);
+			});
+		for (int32 t = 0; t < clients; ++t) threads[t].Join();
+		assert_eq(32, answered.Load(), "8 clients, 4 requests each, all answered");
+		assert_eq(32, served.Load(), "each by the handler once");
+		rig.Finish();
+	}
+
+	[test("stop_from_handler")]
+	public static void TestStopFromHandler() {
+		Http::Server server;
+		server.Listen(Net::Address::Loopback(0));
+		Http::Server* running = &server;
+		Threading::Atomic<bool> returned;
+		Threading::Atomic<bool>* done = &returned;
+		Threading::Thread serving = Threading::Thread::Run([running, done]() {
+			running->Serve([running](const Http::Request& request, Http::Response& response) { running->Stop(); });
+			done->Store(true);
+		});
+		Core::String url = Core::String("http://") + server.LocalAddress().ToString().View() + Core::StringView("/stop");
+		Http::FetchResult got = Http::Get(url.View(), kHttpWaitMs);
+		serving.Join();
+		assert_true(got.ok && got.response.status == 200, "the request that stopped the server was answered");
+		assert_true(returned.Load() && server.Stopping(), "and Serve returned");
+		Http::Server never;
+		never.Serve(Echo);
+		assert_true(!never.Stopping(), "Serve without Listen returns at once");
+	}
+}
+
+[test("http.client")]
+class HttpClientTests {
+	// A raw server for one connection: it reads the request head and answers `raw`, then closes.
+	static Http::FetchResult FetchFrom(const char* raw) {
+		Net::TcpListener listener;
+		listener.Listen(Net::Address::Loopback(0));
+		Net::TcpListener* raws = &listener;
+		Threading::Thread answering = Threading::Thread::Run([raws, raw]() {
+			Net::TcpStream stream = raws->Accept(kHttpWaitMs);
+			char[1024] request;
+			stream.Receive((void*)&request[0], 1024, kHttpWaitMs);
+			stream.SendText(Core::StringView(raw));
+		});
+		Http::Request request;
+		request.method = Core::String("GET");
+		request.target = Core::String("/");
+		Http::FetchResult got = Http::Fetch(listener.LocalAddress(), request, kHttpWaitMs);
+		answering.Join();
+		return got;
+	}
+
+	[test("chunked_response")]
+	public static void TestChunkedResponse() {
+		Http::FetchResult got = FetchFrom("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n");
+		assert_true(got.ok && got.response.BodyText() == "hello world", "a chunked response is put together");
+	}
+
+	[test("until_close")]
+	public static void TestUntilClose() {
+		Http::FetchResult got = FetchFrom("HTTP/1.1 200 OK\r\nX-A: b\r\n\r\nall of it");
+		assert_true(got.ok && got.response.BodyText() == "all of it", "with no framing the body runs to the close");
+	}
+
+	[test("interim")]
+	public static void TestInterim() {
+		Http::FetchResult got = FetchFrom("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\nok");
+		assert_true(got.ok && got.response.status == 201 && got.response.BodyText() == "ok", "an interim 100 is skipped");
+	}
+
+	[test("failures")]
+	public static void TestFailures() {
+		Http::FetchResult cut = FetchFrom("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nshort");
+		assert_true(!cut.ok && HttpContains(cut.error.View(), "whole body"), "a body cut short");
+		Http::FetchResult junk = FetchFrom("SPDY nonsense\r\n\r\n");
+		assert_true(!junk.ok && !junk.error.IsEmpty(), "not HTTP");
+		assert_true(!Http::Get(HttpText("https://example.com/"), kHttpWaitMs).ok, "https is not spoken");
+		Net::TcpListener closed;
+		closed.Listen(Net::Address::Loopback(0));
+		Core::String gone = Core::String("http://") + closed.LocalAddress().ToString().View() + Core::StringView("/");
+		closed.Close();
+		Http::FetchResult refused = Http::Get(gone.View(), kHttpWaitMs);
+		assert_true(!refused.ok && HttpContains(refused.error.View(), "10061"), "a refused connection says so");
+	}
+}

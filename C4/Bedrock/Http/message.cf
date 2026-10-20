@@ -1,0 +1,89 @@
+include "message.ch"
+
+namespace Http
+{
+	char AsciiLower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c + ('a' - 'A')) : c; }
+
+	bool EqualsIgnoringCase(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		const char* x = a.Data();
+		const char* y = b.Data();
+		for (int64 i = 0; i < a.ByteLength(); ++i)
+			if (AsciiLower(x[i]) != AsciiLower(y[i])) return false;
+		return true;
+	}
+
+	const Core::String* Headers::Find(Core::StringView name) const {
+		for (int64 i = 0; i < list.Count(); ++i)
+			if (EqualsIgnoringCase(list[i].name.View(), name)) return &list[i].value;
+		return nullptr;
+	}
+
+	void Headers::Set(Core::StringView name, Core::StringView value) {
+		Remove(name);
+		Add(name, value);
+	}
+
+	void Headers::Add(Core::StringView name, Core::StringView value) {
+		Header header;
+		header.name = Core::String(name);
+		header.value = Core::String(value);
+		list.Push(header);
+	}
+
+	void Headers::Remove(Core::StringView name) {
+		for (int64 i = list.Count() - 1; i >= 0; --i)
+			if (EqualsIgnoringCase(list[i].name.View(), name)) list.RemoveAt(i);
+	}
+
+	void Request::SetBody(Core::StringView text) {
+		body.Clear();
+		body.Append((const uint8*)text.Data(), text.ByteLength());
+	}
+
+	void Response::SetText(Core::StringView contentType, Core::StringView text) {
+		headers.Set(Core::StringView("Content-Type"), contentType);
+		body.Clear();
+		body.Append((const uint8*)text.Data(), text.ByteLength());
+	}
+
+	const char* ReasonPhrase(int32 status) {
+		switch (status) {
+			case 100: return "Continue";
+			case 101: return "Switching Protocols";
+			case 200: return "OK";
+			case 201: return "Created";
+			case 202: return "Accepted";
+			case 204: return "No Content";
+			case 206: return "Partial Content";
+			case 301: return "Moved Permanently";
+			case 302: return "Found";
+			case 303: return "See Other";
+			case 304: return "Not Modified";
+			case 307: return "Temporary Redirect";
+			case 308: return "Permanent Redirect";
+			case 400: return "Bad Request";
+			case 401: return "Unauthorized";
+			case 403: return "Forbidden";
+			case 404: return "Not Found";
+			case 405: return "Method Not Allowed";
+			case 408: return "Request Timeout";
+			case 409: return "Conflict";
+			case 411: return "Length Required";
+			case 413: return "Content Too Large";
+			case 414: return "URI Too Long";
+			case 415: return "Unsupported Media Type";
+			case 417: return "Expectation Failed";
+			case 426: return "Upgrade Required";
+			case 429: return "Too Many Requests";
+			case 431: return "Request Header Fields Too Large";
+			case 500: return "Internal Server Error";
+			case 501: return "Not Implemented";
+			case 502: return "Bad Gateway";
+			case 503: return "Service Unavailable";
+			case 504: return "Gateway Timeout";
+			case 505: return "HTTP Version Not Supported";
+		}
+		return "Unknown";
+	}
+}

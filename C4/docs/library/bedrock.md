@@ -90,7 +90,7 @@ than the 16 bytes `raw_alloc` guarantees, so an element such as a `packed float[
 | Create / delete | `Init()` (allocates nothing), `Init(int64 capacity)`, `Init(__init_list<T>)` (enables `Core::Array<int32> a = {1, 2, 3}`), copy, `Delete()` |
 | Size | `Count()`, `Capacity()`, `ByteSize()`, `IsEmpty()` |
 | Access | `At(int64 i)` and `a[i]` -> `T&`, `Front()`, `Back()`, `Data()`; on a const array they give `const T&` / `const T*` |
-| Modify | `Push(v)` (safe when `v` is an element of the same array), `Pop()` (moves the last element out), `Insert(i, v)`, `Append(const Array<T>&)` (safe with itself), `RemoveAt(i)`, `RemoveRange(first, end)`, `RemoveSwap(i)` (O(1)), `Clear()` (destroys the elements, keeps the buffer), `Reserve(n)`, `Resize(n)` (default-creates or destroys), `ShrinkToFit()`, `Swap(Array<T>&)` |
+| Modify | `Push(v)` (safe when `v` is an element of the same array), `Pop()` (moves the last element out), `Insert(i, v)`, `Append(const Array<T>&)`, `Append(const T* items, count)` (both safe with the array's own elements; they grow as `Push` does), `RemoveAt(i)`, `RemoveRange(first, end)`, `RemoveSwap(i)` (O(1)), `Clear()` (destroys the elements, keeps the buffer), `Reserve(n)`, `Resize(n)` (default-creates or destroys), `ShrinkToFit()`, `Swap(Array<T>&)` |
 | Search | `IndexOf(v)` (`==`, `-1` when absent), `Contains(v)` |
 | Algorithms | `Sort()` (by `<`), `SortBy(before)`, `Reverse()`, `LowerBound(v)`, `UpperBound(v)`, `LowerBoundBy(v, before)`, `UpperBoundBy(v, before)` |
 | Iteration | range-for through `ArrayIterator<T>` (yields `T&`); a const array iterates through `ConstArrayIterator<T>` (yields `const T&`) |
@@ -608,7 +608,7 @@ Covered by `Bedrock/Tests/platform_*_tests.cf` and, for faults on protected page
 
 **Status:** **Implemented** (B49, D-65): TCP and UDP over IPv4 and IPv6, name resolution and waiting on many sockets,
 through a small C API in the runtime (`C4Runtime/NetRuntimeC.h`, `C4Runtime/Net/SocketsWin32.c` over Winsock 2).
-HTTP is next (`Http::`, B50).
+HTTP is built on it (section 14).
 
 ```c4
 Net::TcpListener server;
@@ -651,13 +651,64 @@ streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners an
 
 ---
 
-## 14. Tests
+## 14. HTTP (`Http/`)
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 38 files, 358 tests (array, list, initlist,
+**Status:** **Implemented** (B50, D-66): HTTP/1.1 messages, a server that answers each connection on a thread of its
+own, and a client for one request at a time, all plain C4 over `Net::`. Plain http only: no TLS. WebSockets are
+next (the IDE's server pushes to the browser through them).
+
+```c4
+Http::Server server;
+server.Listen(Net::Address::Loopback(8080));
+server.Serve([](const Http::Request& request, Http::Response& response) {      // until server.Stop()
+    if (request.path != "/status") { response.status = 404; return; }
+    response.SetText(Core::StringView("application/json"), Core::StringView("{\"ok\":true}"));
+});
+
+Http::FetchResult got = Http::Get(Core::StringView("http://127.0.0.1:8080/status"), 2000);
+if (got.ok) printf("%d\n", got.response.status);
+```
+
+- **Messages** (`message.ch`): `Request` (`method`, `target` as sent, `path` and `query` split at the `?` and not
+  percent-decoded, `minorVersion`, `headers`, `body` bytes with `BodyText()`), `Response` (`status`, 200 unless set;
+  `headers`; `body`; `SetText(contentType, text)`). `Headers` keeps the order headers came in and finds them without
+  regard to case: `Find`, `Has`, `Set` (replaces every one of the name), `Add` (keeps the others, as Set-Cookie
+  needs), `Remove`, `Count`, `At`. `ReasonPhrase(status)`.
+- **Parsing** (`parse.ch`): pure functions over bytes the server and the client share - `ParseRequestHead`,
+  `ParseResponseHead` (Complete with the head's length, Incomplete, TooLarge, or Malformed with why and the status a
+  server answers: 400, 431, 505), `RequestFraming` / `ResponseFraming` (`Content-Length`, chunked, none, or until
+  close; a bad or conflicting length, or both framings at once, is Malformed; another transfer coding Unsupported)
+  and `ChunkedDecoder`, fed bytes as they arrive. Lines may end in CRLF or LF; empty lines before a request line are
+  skipped; folded header lines, control characters in values and malformed tokens are refused.
+- **Server** (`server.ch`): `Listen(address)`, `Serve(handler)` on the calling thread until `Stop()` (safe from any
+  thread, also from a handler: no new connection is accepted, each one ends once it has answered its request, and
+  Serve returns when they have), `SetLimits(ServerLimits { maxHeadBytes, maxBodyBytes, idleTimeoutMs,
+  requestTimeoutMs })` (64 KiB, 16 MiB, 30 s, 30 s by default). Each connection reads requests one after another
+  (keep-alive; pipelined requests are answered in order) and the handler runs on several threads at once. The server
+  writes the framing - `Content-Length`, `Connection: close` when it closes after a response - and answers
+  `Expect: 100-continue` before reading the body; HEAD gets the head only. It refuses with 400 (malformed), 408 (too
+  slow), 413 (body over the limit), 431 (head over the limit), 501 (another transfer coding) and 505 (another
+  version); a handler that throws answers 500.
+- **Client** (`client.ch`): `Fetch(address, request, timeoutMs)` sends one request on a connection of its own and
+  reads the response (interim 1xx ones skipped; a `Content-Length`, chunked or until-close body); `Get(url,
+  timeoutMs)` and `Post(url, contentType, body, timeoutMs)` take an `http://host[:port]/path?query` URL
+  (`ParseUrl`; an IPv6 host in brackets). A `FetchResult` is `ok` with the `response`, or not, with `error`.
+
+Covered by `Bedrock/Tests/http_tests.cf` (26 tests): heads (every malformed form, the limits, CRLF or LF, absolute
+targets), framing, chunked bodies fed whole and a byte at a time, URLs, headers; the server's GET and POST, three
+pipelined requests on one connection, a chunked request, HEAD, Expect: 100-continue, HTTP/1.0, the refusals, a
+handler that throws, 8 concurrent clients and Stop from a handler; the client's chunked, until-close and interim
+responses and its failures.
+
+---
+
+## 15. Tests
+
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 39 files, 385 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, http). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -669,7 +720,7 @@ The exit code is the number of failed assertions. The `GC` namespace is covered 
 
 ---
 
-## 15. Missing versus the plan
+## 16. Missing versus the plan
 
 From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 
@@ -688,6 +739,6 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Paths, directory listing, create, remove, rename | **Implemented** |
 | `Core::InitList<T>` | **Implemented** |
 | Sockets / networking | **Implemented** (section 13, B49) |
-| HTTP server | **Planned** (B50) |
+| HTTP server | **Implemented** (section 14, B50); WebSockets planned |
 | Threading primitives (join, promise, condition variable, work stealing) | **Implemented** (section 10, B29) |
 | `Platform::`: virtual memory, system and process information, environment variables, libraries, wall-clock time | **Implemented** (section 12, B40) |
