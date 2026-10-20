@@ -180,8 +180,8 @@
 	--prof-zone-3: #2b2b2b;
 	--prof-zone-border: #4c4c4c;
 	--prof-zone-text: var(--text-0);
-	--prof-rename-tint-a: color-mix(in srgb, var(--text-0) 4%, transparent);
-	--prof-rename-tint-b: color-mix(in srgb, var(--text-0) 8%, transparent);
+	--prof-rename-tint-a: color-mix(in srgb, var(--text-0) 6%, transparent);
+	--prof-rename-tint-b: color-mix(in srgb, var(--text-0) 10%, transparent);
 	--prof-rename-edge: var(--text-2);
 	--prof-frame-bar: #4a4a4a;
 	--prof-frame-over: var(--accent-warn);

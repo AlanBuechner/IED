@@ -578,7 +578,7 @@ code, .mono { font-family: var(--font-mono); font-size: calc(var(--font-size-cod
 .muted { color: var(--text-2); }
 .num { font-variant-numeric: tabular-nums; }
 .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.hidden { display: none !important; }
+.hidden, [hidden] { display: none !important; }
 .check {
 	display: inline-grid;
 	place-items: center;
