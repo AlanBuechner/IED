@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 1 - Editor activity</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/code.css">
+	<link rel="stylesheet" href="css/editor.css">
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="editor">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<span class="ib"><i class="ci ci-chevron-left"></i></span>
+		<div class="t"><b>Log.cf</b><span class="muted">Engine/src/Core &middot; unsaved</span></div>
+		<span class="ib"><i class="ci ci-search"></i></span>
+		<span class="ib"><i class="ci ci-ellipsis"></i></span>
+	</div>
+
+	<main class="activity editor-act">
+		<aside class="panel sol">
+			<div class="panel-title">Solution Explorer<span class="grow"></span><span class="ib"><i class="ci ci-pin sm"></i></span><span class="ib"><i class="ci ci-close sm"></i></span></div>
+			<div class="panel-tools">
+				<span class="ib"><i class="ci ci-home"></i></span>
+				<span class="ib on" title="Sync with active document"><i class="ci ci-arrow-swap"></i></span>
+				<span class="ib"><i class="ci ci-collapse-all"></i></span>
+				<span class="ib" title="Pending changes filter"><i class="ci ci-filter"></i></span>
+				<span class="ib" title="Show all files"><i class="ci ci-eye"></i></span>
+				<span class="ib"><i class="ci ci-refresh"></i></span>
+			</div>
+			<div style="padding: 6px 8px;"><div class="input"><span>Search Solution Explorer (Ctrl+;)</span><i class="ci ci-search sm" style="margin-left:auto"></i></div></div>
+			<div class="tree scroll">
+				<div class="row" style="--d:0"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-library ft-project"></i><span class="name">Solution 'Claymore' (2 of 2 projects)</span></div>
+				<div class="row" style="--d:1"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-project ft-project"></i><span class="name">Engine</span><span class="meta">module</span></div>
+				<div class="row" style="--d:2"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">Core</span></div>
+				<div class="row" style="--d:3"><span class="tw"><i class="ci ci-chevron-right"></i></span><i class="ci ci-folder ft-folder"></i><span class="name">Math</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">ArgList.cf</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-header"></i><span class="name">ArgList.ch</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">Hash.cf</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-header"></i><span class="name">Hash.ch</span></div>
+				<div class="row sel-dim" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">Log.cf</span><span class="meta"><span class="git-m">M</span></span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-header"></i><span class="name">Log.ch</span><span class="meta"><span class="git-a">A</span></span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-header"></i><span class="name">Ring.ch</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">Time.cf</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-header"></i><span class="name">Time.ch</span></div>
+				<div class="row" style="--d:2"><span class="tw"><i class="ci ci-chevron-right"></i></span><i class="ci ci-folder ft-folder"></i><span class="name">Engine</span></div>
+				<div class="row" style="--d:2"><span class="tw"><i class="ci ci-chevron-right"></i></span><i class="ci ci-folder ft-folder"></i><span class="name">Platform</span></div>
+				<div class="row" style="--d:2"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">tests</span></div>
+				<div class="row" style="--d:3"><span class="tw"><i class="ci ci-chevron-right"></i></span><i class="ci ci-folder ft-folder"></i><span class="name">Math</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-beaker ft-source"></i><span class="name">engine.cf</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-beaker ft-source"></i><span class="name">log.cf</span><span class="meta"><span class="git-a">A</span></span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-beaker ft-source"></i><span class="name">time.cf</span></div>
+				<div class="row" style="--d:1"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-project ft-project"></i><span class="name"><b>Game</b></span><span class="meta">startup</span></div>
+				<div class="row" style="--d:2"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">src/Game</span></div>
+				<div class="row" style="--d:3"><span class="tw"></span><i class="ci ci-file-code ft-source"></i><span class="name">Main.cf</span></div>
+				<div class="row" style="--d:1"><span class="tw"><i class="ci ci-chevron-down"></i></span><i class="ci ci-folder-opened ft-folder"></i><span class="name">Solution Items</span></div>
+				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-markdown ft-doc"></i><span class="name">AGENTS.md</span></div>
+				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-python ft-script"></i><span class="name">Project.py</span></div>
+				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-terminal-cmd ft-script"></i><span class="name">nuke.bat</span></div>
+				<div class="row" style="--d:2"><span class="tw"></span><i class="ci ci-json ft-data"></i><span class="name">.ied/solution.json</span></div>
+			</div>
+		</aside>
+		<div class="vsplit"></div>
+
+		<div class="center">
+			<div class="well-row">
+				<section class="well left focused">
+					<div class="tabs">
+						<div class="tab on"><i class="ci ci-file-code ft-source"></i><span class="name">Log.cf</span><span class="dirty" title="Unsaved changes"></span><i class="ci ci-close x"></i></div>
+						<div class="tab"><i class="ci ci-file-code ft-header"></i><span class="name">Ring.ch</span><i class="ci ci-close x"></i></div>
+						<div class="tab preview"><i class="ci ci-file-code ft-source"></i><span class="name">Application.cf</span><i class="ci ci-close x"></i></div>
+						<div class="tabs-tail"><span class="ib"><i class="ci ci-chevron-down sm"></i></span></div>
+					</div>
+					<div class="navbar">
+						<span class="dd"><i class="ci ci-project ft-project"></i><span class="name">Engine</span></span>
+						<span class="dd"><i class="ci ci-symbol-class c-1"></i><span class="name">Engine::RingSink</span></span>
+						<span class="dd"><i class="ci ci-symbol-method c-1"></i><span class="name">Write(const LogRecord&amp; record)</span></span>
+					</div>
+					<div class="code" data-first="9" data-ai="16-18" data-saved="35-37" data-unsaved="21-26" data-bp="24" data-cur="25" data-fold="9,14,21,28,35,45" data-err="32" data-warn="30" data-map="5" data-map-marks="warn:58,find:71,find:84">
+<pre>
+`kw:namespace` `ns:Engine`
+{
+	`ty:LogLevel` `var:s_MinLevel` `op:=` `ty:LogLevel`.`con:Info`;		`com:// module state: C4 static data members (c4/WORK.md)`
+	`ns:Core`::`ty:Array`&lt;`ty:LogSink`*&gt; `var:s_Sinks`;
+
+@lens 4 references | 2 changes | IED agent (Port logging), 12 min ago
+	`kw:void` `ty:Log`::`fn:Init`(`ty:LogLevel` `par:minLevel`)
+	{
+		`var:s_MinLevel` `op:=` `par:minLevel`;
+		`var:s_Sinks`.`fn:Push`(`kw:new` `fn:ConsoleSink`());
+		`var:s_Sinks`.`fn:Push`(`kw:new` `fn:RingSink`(`con:LOG_RING_CAPACITY`));
+	}
+
+	`kw:void` `ty:RingSink`::`fn:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`)
+	{
+		`com:// Ring&lt;T&gt; overwrites the oldest ``com sq-spell:recrod``com: when full; count what the console never saw.`
+		`mem:m_Records`.`fn:Push`(`par:record`);
+		`mem:m_Dropped` `op:+=` `caret:``ghost:m_Records.Overwrote() ? 1 : 0;``ghost-hint:Tab`
+	}
+
+	`kw:string` `ty:Log`::`fn:FormatRecord`(`kw:const` `ty:LogRecord`&amp; `par:record`)
+	{
+		`kw:int32` `var sq-warn:level` `op:=` (`kw:int32`)`par:record`.`mem:level`;
+		`ctl:return` `ns:Core`::`fn:Format`(`str:"[{:.3f}] [{}] {}: {}"`,
+			`par:record`.`mem:time`, `fn:LevelName`(`par:record`.`mem:level`), `par:record`.`mem sq-err:categry`, `par:record`.`mem:message`);
+	}
+
+@lens 11 references | 1 change | you, 3 min ago
+	`kw:void` `ty:Log`::`fn:Write`(`ty:LogLevel` `par:level`, `kw:const` `kw:string`&amp; `par:category`, `kw:const` `kw:string`&amp; `par:message`)
+	{
+		`ctl:if` (`par:level` `op:&lt;` `var:s_MinLevel`) `ctl:return`;
+
+		`ty:LogRecord` `var:record`;
+		`var:record`.`mem:time` `op:=` `ty:Time`::`fn:GetTime`();
+		`var:record`.`mem:level` `op:=` `par:level`;
+		`var:record`.`mem:category` `op:=` `par:category`;
+		`var:record`.`mem:message` `op:=` `par:message`;
+
+		`ctl:for` (`ty:LogSink`* `var:sink` : `var:s_Sinks`)
+		{
+			`var:sink`-&gt;`fn:Write`(`var:record`);
+		}
+	}
+}
+</pre>
+					</div>
+					<div class="phone-bar">
+						<span class="dd">Development</span>
+						<span class="chip err"><i class="ci ci-error"></i>1</span>
+						<span class="chip warn"><i class="ci ci-warning"></i>2</span>
+						<span class="grow"></span>
+						<span class="btn"><i class="ci ci-tools"></i>Build</span>
+						<span class="btn primary"><i class="ci ci-play"></i>Run</span>
+					</div>
+				</section>
+				<div class="vsplit"></div>
+				<section class="well right">
+					<div class="tabs">
+						<div class="tab on"><i class="ci ci-file-code ft-header"></i><span class="name">Log.ch</span><i class="ci ci-close x"></i></div>
+						<div class="tabs-tail"><span class="bound" title="Bound split: follows the header/source of the left group"><i class="ci ci-link"></i>bound to Log.cf</span></div>
+					</div>
+					<div class="navbar">
+						<span class="dd"><i class="ci ci-project ft-project"></i><span class="name">Engine</span></span>
+						<span class="dd"><i class="ci ci-symbol-class c-1"></i><span class="name">Engine::RingSink</span></span>
+					</div>
+					<div class="code" data-first="1" data-ai="24-33" data-fold="5,10,18,24,35" data-map="4">
+<pre>
+`com:// Log - declarations (port of Icepick Core::Log). Implementation in Log.cf.`
+`mac:include` `str:"Core/Ring.ch"`
+
+`kw:namespace` `ns:Engine`
+{
+	`kw:enum` `ty:LogLevel` { `con:Trace`, `con:Info`, `con:Warn`, `con:Error`, `con:Fatal` }
+
+	`kw:const` `kw:int64` `con:LOG_RING_CAPACITY` `op:=` `num:1024`;
+
+	`kw:struct` `ty:LogRecord`
+	{
+		`kw:public` `kw:double` `mem:time`;
+		`kw:public` `ty:LogLevel` `mem:level`;
+		`kw:public` `kw:string` `mem:category`;
+		`kw:public` `kw:string` `mem:message`;
+	}
+
+	`kw:class` `ty:LogSink`
+	{
+	`kw:public`:
+		`kw:public` `kw:virtual` `kw:void` `fn:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`) `op:=` `num:0`;
+	}
+
+	`kw:class` `ty:RingSink` : `ty:LogSink`
+	{
+	`kw:public`:
+		[`mac:operator`(`str:"create"`)] `kw:public` `kw:void` `fn:Init`(`kw:int64` `par:capacity`) { `mem:m_Records`.`fn:Reserve`(`par:capacity`); }
+		`kw:public` `kw:void` `fn hl-ref:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`);
+		`kw:public` `kw:int64` `fn:Dropped`() `kw:const` { `ctl:return` `mem:m_Dropped`; }
+	`kw:private`:
+		`ty:Ring`&lt;`ty:LogRecord`&gt; `mem:m_Records`;
+		`kw:int64` `mem:m_Dropped`;
+	}
+
+	`kw:class` `ty:Log`
+	{
+	`kw:public`:
+		`kw:public` `kw:static` `kw:void` `fn:Init`(`ty:LogLevel` `par:minLevel`);
+		`kw:public` `kw:static` `kw:void` `fn:Write`(`ty:LogLevel` `par:level`, `kw:const` `kw:string`&amp; `par:category`, `kw:const` `kw:string`&amp; `par:message`);
+	}
+}
+</pre>
+					</div>
+				</section>
+			</div>
+			<div class="hsplit"></div>
+			<div class="bottom-dock">
+				<section class="tw-group out">
+					<div class="panel-title">Output<span class="grow"></span><span class="ib"><i class="ci ci-pin sm"></i></span><span class="ib"><i class="ci ci-close sm"></i></span></div>
+					<div class="panel-tools">
+						<span class="muted">Show output from:</span>
+						<span class="dd" style="width:150px">Build</span>
+						<span class="tb-sep"></span>
+						<span class="ib" title="Find"><i class="ci ci-search"></i></span>
+						<span class="ib" title="Go to previous message"><i class="ci ci-arrow-up"></i></span>
+						<span class="ib" title="Go to next message"><i class="ci ci-arrow-down"></i></span>
+						<span class="ib" title="Clear all"><i class="ci ci-clear-all"></i></span>
+						<span class="ib on" title="Word wrap"><i class="ci ci-word-wrap"></i></span>
+						<span class="ib" title="Scroll lock"><i class="ci ci-lock"></i></span>
+					</div>
+<div class="out-body">Build started at 21:14:07 - Game, Development-windows-x64
+<span class="a-bold">========== Building: Game, Development-windows-x64 ==========</span>
+<span class="a-cyan">[nuke]</span> Claymore: resolving modules Engine, Game
+<span class="a-cyan">[nuke]</span> Engine: 3 of 41 files changed since the last build
+<span class="a-cyan">[nuke]</span> Engine: c4 -O0 -g -module Engine (14 jobs)
+<span class="hl-line"><span class="loc">Engine/src/Core/Log.cf (30:9)</span> <span class="a-yellow">warning</span>: unused variable 'level'</span>
+<span class="loc">Engine/src/Core/Ring.ch (31:5)</span> <span class="a-yellow">warning</span>: implicit int64 -&gt; int32 narrowing in 'Mask'
+<span class="a-cyan">[nuke]</span> Engine: 12 [test] functions registered
+<span class="a-cyan">[nuke]</span> Game: c4 -O0 -g src/Game/Main.cf
+<span class="a-cyan">[nuke]</span> Game: linking build/bin/Development-windows-x64/Game/Game.exe
+<span class="a-green a-bold">========== Build: 2 succeeded, 0 failed, 0 skipped | 2 warnings | 18.2 s ==========</span>
+Build completed at 21:14:25</div>
+					<div class="tw-tabs"><span class="tw-tab on">Output</span><span class="tw-tab">Find Results 1</span><span class="tw-tab">Call Stack</span></div>
+				</section>
+				<div class="vsplit"></div>
+				<section class="tw-group err">
+					<div class="panel-title">Error List<span class="grow"></span><span class="ib"><i class="ci ci-pin sm"></i></span><span class="ib"><i class="ci ci-close sm"></i></span></div>
+					<div class="panel-tools">
+						<span class="dd">Entire Solution</span>
+						<span class="filter-chip on"><i class="ci ci-error c-error"></i>1 Error</span>
+						<span class="filter-chip on"><i class="ci ci-warning c-warn"></i>2 Warnings</span>
+						<span class="filter-chip on"><i class="ci ci-info c-info"></i>1 Message</span>
+						<span class="dd desktop-wide">Build + IntelliSense</span>
+					</div>
+					<div class="errtable">
+						<table>
+							<colgroup><col style="width:28px"><col style="width:112px"><col><col class="c-proj" style="width:64px"><col style="width:64px"><col style="width:40px"><col class="c-src" style="width:64px"></colgroup>
+							<thead><tr><th></th><th>Code</th><th>Description</th><th class="c-proj">Project</th><th>File</th><th>Line</th><th class="c-src">Source</th></tr></thead>
+							<tbody>
+								<tr class="sel"><td><i class="ci ci-error c-error"></i></td><td class="m">unknown-member</td><td>'LogRecord' has no member 'categry'; did you mean 'category'?</td><td class="m c-proj">Engine</td><td class="m">Log.cf</td><td class="m num">32</td><td class="m c-src">C4LSP</td></tr>
+								<tr><td><i class="ci ci-warning c-warn"></i></td><td class="m">unused-variable</td><td>unused variable 'level'</td><td class="m c-proj">Engine</td><td class="m">Log.cf</td><td class="m num">30</td><td class="m c-src">Build</td></tr>
+								<tr><td><i class="ci ci-warning c-warn"></i></td><td class="m">narrowing</td><td>implicit int64 -&gt; int32 narrowing in 'Mask'</td><td class="m c-proj">Engine</td><td class="m">Ring.ch</td><td class="m num">31</td><td class="m c-src">Build</td></tr>
+								<tr><td><i class="ci ci-info c-info"></i></td><td class="m">spelling</td><td>'recrod' is not a word; suggestion: record</td><td class="m c-proj">Engine</td><td class="m">Log.cf</td><td class="m num">23</td><td class="m c-src">Spell</td></tr>
+							</tbody>
+						</table>
+					</div>
+					<div class="tw-tabs"><span class="tw-tab on">Error List</span><span class="tw-tab">Task List</span><span class="tw-tab">Bookmarks</span></div>
+				</section>
+			</div>
+		</div>
+
+		<div class="autohide"><span>Properties</span><span>Git Changes</span><span>Document Outline</span><span>Test Explorer</span></div>
+	</main>
+
+	<section class="terminal-dock"></section>
+
+	<footer class="statusbar" data-state="idle">
+		<span class="st">Ready</span>
+		<span class="st"><i class="ci ci-pass c-saved"></i>Build succeeded &middot; 2 warnings</span>
+		<span class="st"><i class="ci ci-sparkle c-ai"></i>AI: 2 running, <span class="c-warn">1 needs approval</span></span>
+		<span class="st grow"></span>
+		<span class="st">Ln 25, Col 17</span>
+		<span class="st">Tabs: 4</span>
+		<span class="st desktop-wide">UTF-8</span>
+		<span class="st desktop-wide">CRLF</span>
+		<span class="st"><i class="ci ci-check c-2"></i>C4 &middot; C4LSP</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>

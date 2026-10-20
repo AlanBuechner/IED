@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 2 - Chat activity mid-run</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/code.css">
+	<link rel="stylesheet" href="css/chat.css">
+	<script defer src="js/mock.js"></script>
+</head>
+<body>
+<div class="app" data-activity="chat">
+	<div class="toolbar"></div>
+
+	<div class="phone-head">
+		<div class="t"><span class="sb-ws" style="margin:0 4px 0 6px">C</span><b>Claymore</b><i class="ci ci-chevron-down sm c-2"></i></div>
+		<span class="ib"><i class="ci ci-shield"></i><span class="badge warn">1</span></span>
+		<span class="ib"><i class="ci ci-bell"></i><span class="badge">2</span></span>
+	</div>
+
+	<main class="activity chat-act">
+		<section class="chat-main">
+			<div class="tabs chat-tabs">
+				<div class="tab on"><i class="ci ci-comment-discussion"></i><span class="name">Port logging</span><span class="glyph attn">!</span><span class="glyph">3/7</span><i class="ci ci-close x"></i></div>
+				<div class="tab"><i class="ci ci-loading spin"></i><span class="name">Fix engine.time test</span><i class="ci ci-close x"></i></div>
+				<div class="tab"><span class="dot info sm"></span><span class="name">Shader cache bug</span><i class="ci ci-close x"></i></div>
+				<div class="tab"><i class="ci ci-globe"></i><span class="name">General</span><i class="ci ci-close x"></i></div>
+				<div class="tab" style="border-right:0"><i class="ci ci-add"></i></div>
+				<div class="tabs-tail">
+					<span class="ib" title="All chats"><i class="ci ci-history"></i></span>
+					<span class="ib" title="Scratchpad"><i class="ci ci-note"></i></span>
+					<span class="ib on" title="Breakdown panel"><i class="ci ci-layout-sidebar-right"></i></span>
+				</div>
+			</div>
+			<div class="phone-chips">
+				<span class="chip solid">Port logging <span class="c-warn">!</span> 3/7</span>
+				<span class="chip"><i class="ci ci-loading c-info"></i>Fix engine.time</span>
+				<span class="chip"><span class="dot info sm"></span>Shader cache</span>
+			</div>
+
+			<div class="transcript scroll" data-scroll="bottom">
+				<div class="col">
+					<div class="harness"><i class="ci ci-history"></i>14 earlier turns &middot; context compressed at 21:02 (96.1k &rarr; 41.0k, summarizer qwen-small@desk) &middot; <a href="#summary">view summary</a></div>
+
+					<div class="turn-head"><i class="ci ci-person"></i><b>You</b><span class="muted">21:31 &middot; from desk</span><span class="meta"><i class="ci ci-edit sm"></i></span></div>
+					<div class="msg-user">Port the logging subsystem from Icepick (<code>Frost/Projects/Core/src/Core/Log.{h,cpp}</code>) into <code>Engine/src/Core</code>. Same API as Icepick; sinks: console + a ring buffer the in-game console can read. Add tests and keep <code>nuke build</code> warning-free.
+						<div><span class="chip ref"><i class="ci ci-file-code"></i>Icepick/Core/Log.h</span> <span class="chip ref"><i class="ci ci-file-code"></i>Icepick/Core/Log.cpp</span></div>
+					</div>
+
+					<div class="turn-head"><i class="ci ci-sparkle c-ai"></i><b>Agent</b><span class="muted">qwen3.8-27b@spark &middot; primary</span><span class="meta">21:31 &middot; 14m 52s</span></div>
+					<div class="think"><i class="ci ci-chevron-right"></i><span class="lbl">Thinking</span>12 s &middot; 1.2k tok</div>
+					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">code_symbols</span><span class="targs">Log* in Icepick/Core</span><span class="tstat"><span class="src">built-in</span>38 ms<i class="ci ci-chevron-right"></i></span></div></div>
+					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">fs_read</span><span class="targs">Icepick/Core/Log.cpp 1-200</span><span class="tstat"><span class="src">built-in</span>4 ms<i class="ci ci-chevron-right"></i></span></div></div>
+					<div class="sub">
+						<div class="tool-head"><i class="ci ci-pass c-saved"></i><i class="ci ci-telescope c-1"></i><span class="tname">research</span><span class="targs">sub-agent &middot; qwen3.8-27b@spark &middot; "how does Icepick format and route log records?"</span><span class="tstat">2m 14s<span class="btn flat desk">Open as tab</span></span></div>
+						<div class="sub-body">Report: 3 sinks (console, file, editor console); fmt-style <code>{}</code> formatting; per-category minimum levels; the editor console keeps the last 1024 records.</div>
+					</div>
+					<div class="p">Icepick's logger is a static <code>Log</code> facade over a list of <code>LogSink</code>s. I'll keep the names 1:1 and port the editor-console sink as <code>RingSink</code>. File sink comes last since Bedrock <code>FS::</code> has no append mode yet.</div>
+					<div class="seg-meta">qwen3.8-27b@spark &middot; 6.1 s &middot; 412 tok &middot; 41 tok/s</div>
+					<div class="tool"><div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">fs_write</span><span class="targs">Engine/src/Core/Log.ch</span><span class="tstat"><span class="plus">+46</span><span class="src">auto: new file</span>6 ms<i class="ci ci-chevron-right"></i></span></div></div>
+					<div class="tool">
+						<div class="tool-head"><i class="ci ci-pass c-saved"></i><span class="tname">shell_run</span><span class="targs">nuke build -c Development</span><span class="tstat"><span class="src">AI terminal 3</span>exit 0 &middot; 18.2 s<i class="ci ci-chevron-down"></i></span></div>
+<div class="tool-out"><span class="loc">Engine/src/Core/Log.cf (30:9)</span> <span class="a-yellow">warning</span>: unused variable 'level'
+<span class="loc">Engine/src/Core/Ring.ch (31:5)</span> <span class="a-yellow">warning</span>: implicit int64 -&gt; int32 narrowing in 'Mask'
+<span class="a-green">Build succeeded</span> in 18.2 s (2 warnings, 0 errors)</div>
+					</div>
+					<div class="harness"><i class="ci ci-sync"></i>harness: continued after max_tokens (1x)</div>
+
+					<div class="turn-head"><i class="ci ci-person"></i><b>You</b><span class="muted">21:46 &middot; from phone &middot; injected at tool boundary</span></div>
+					<div class="msg-user inject">use the existing Ring buffer type in <code>Engine/src/Core/Ring.ch</code>, don't write a new one</div>
+
+					<div class="turn-head"><i class="ci ci-sparkle c-ai"></i><b>Agent</b><span class="muted">qwen3.8-27b@spark &middot; primary</span><span class="meta">21:46 &middot; running 2m 31s</span></div>
+					<div class="think"><i class="ci ci-chevron-right"></i><span class="lbl">Thinking</span>4 s &middot; 310 tok</div>
+					<div class="p">Good call: <code>Ring&lt;T&gt;</code> already handles wraparound. Switching <code>RingSink</code> to it and deleting my hand-rolled buffer.</div>
+					<div class="approval">
+						<div class="tool-head"><i class="ci ci-shield c-warn"></i><span class="tname">fs_edit</span><span class="targs">Engine/src/Core/Log.cf</span><span class="tstat"><span class="plus">+2</span><span class="minus">-4</span>&middot; awaiting approval 2m 08s</span></div>
+						<div class="code" data-kind="diff">
+<pre>
+@@ -21,8 +21,6 @@ void RingSink::Write(const LogRecord&amp; record)
+ 	`kw:void` `ty:RingSink`::`fn:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`)
+ 	{
+-		`mem:m_Buffer`[`mem:m_Head`] `op:=` `par:record`;
+-		`mem:m_Head` `op:=` (`mem:m_Head` `op:+` `num:1`) `op:%` `mem:m_Capacity`;
+-		`ctl:if` (`mem:m_Count` `op:==` `mem:m_Capacity`) `mem:m_Dropped` `op:+=` `num:1`;
+-		`ctl:else` `mem:m_Count` `op:+=` `num:1`;
++		`mem:m_Records`.`fn:Push`(`par:record`);
++		`mem:m_Dropped` `op:+=` `mem:m_Records`.`fn:Overwrote`() ? `num:1` : `num:0`;
+ 	}
+</pre>
+						</div>
+						<div class="why">Agent mode, permission "Ask for edits to existing files". Rule match: none.</div>
+						<div class="actions">
+							<span class="btn primary"><i class="ci ci-check"></i>Allow once</span>
+							<span class="btn">Allow for this chat<span class="muted desk">: fs_edit Engine/src/**</span></span>
+							<span class="btn">Always allow&hellip;</span>
+							<span class="btn">Deny with message&hellip;</span>
+							<span class="kbd">Alt+A allow &middot; Alt+D deny</span>
+						</div>
+					</div>
+					<div class="sub">
+						<div class="tool-head"><i class="ci ci-loading c-info"></i><i class="ci ci-tools c-1"></i><span class="tname">worker</span><span class="targs">sub-agent &middot; qwen-coder-32b@desk &middot; "write engine.log.* tests"</span><span class="tstat">running 1m 12s &middot; 36 tok/s<span class="btn flat desk">Open as tab</span></span></div>
+<div class="sub-body live-wrap"><div class="live">[test("engine.log.ring_drops_oldest")]
+public static void TestRingDropsOldest() {
+	RingSink sink = RingSink(2);<span class="live-caret"></span></div></div>
+					</div>
+					<div class="tasks-pin"><i class="ci ci-checklist"></i><b>Tasks 3/7</b><span class="bar"><i style="width:43%"></i></span><span class="ellip">In progress: RingSink on Ring&lt;T&gt;</span></div>
+				</div>
+			</div>
+
+			<div class="composer-wrap">
+				<div class="col">
+					<div class="queued"><i class="ci ci-list-ordered c-2"></i><span class="muted">Queued for next turn:</span><span class="ellip">also add a test for wraparound at capacity 1</span><span class="ib"><i class="ci ci-edit sm"></i></span><span class="ib"><i class="ci ci-close sm"></i></span></div>
+					<div class="composer focus">
+						<div class="text"><span class="ph desk">Message Port logging - @ to mention, / for commands</span><span class="ph phone-only">Message or steer&hellip;</span></div>
+						<div class="row2">
+							<span class="ib desk" title="Attach"><i class="ci ci-attach"></i></span>
+							<span class="ib desk" title="Mention"><i class="ci ci-mention"></i></span>
+							<span class="ib desk" title="Commands"><i class="ci ci-symbol-keyword"></i></span>
+							<span class="grow desk"></span>
+							<span class="btn desk">Queue</span>
+							<span class="btn">Inject</span>
+							<span class="btn desk"><i class="ci ci-debug-stop"></i>Stop<span class="kbd">Esc</span></span>
+							<span class="btn primary"><i class="ci ci-send"></i></span>
+						</div>
+					</div>
+					<div class="selectors">
+						<span class="muted">Group</span><span class="dd">plan-claude/impl-local</span>
+						<span class="muted">Effort</span><span class="dd">high</span>
+						<span class="muted">Mode</span><span class="dd">Agent</span>
+						<span class="muted">Permissions</span><span class="dd">Ask for edits</span>
+						<span class="btn flat"><i class="ci ci-unlock"></i>Private: off</span>
+					</div>
+					<div class="telemetry">
+						<span><b>41.3k</b> in / <b>3.9k</b> out</span>
+						<span><b>38.2</b> tok/s</span>
+						<span>TTFT <b>1.4 s</b></span>
+						<span class="mchip">ctx <span class="bar"><i style="width:62%"></i></span><b>62%</b> of 128k</span>
+						<span class="sep"></span>
+						<span class="mchip"><span class="dot info sm"></span>qwen3.8-27b@spark 2/2</span>
+						<span class="mchip"><span class="dot info sm"></span>qwen-coder-32b@desk 1/2</span>
+						<span class="mchip desktop-wide"><span class="dot sm"></span>claude-opus-5-5 idle</span>
+						<span class="sep desktop-wide"></span>
+						<span class="desktop-wide">Claude 5h <b>34%</b> &middot; resets 2h 10m</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<aside class="panel chat-panel">
+			<div class="panel-title">Port logging<span class="grow"></span><span class="ib"><i class="ci ci-ellipsis"></i></span></div>
+			<div class="scroll">
+				<div class="sec">
+					<div class="sec-head"><i class="ci ci-chevron-down"></i>Context<span class="meta">62% of 128k</span></div>
+					<div class="stack"><i class="s1" style="width:3.2%"></i><i class="s2" style="width:1.6%"></i><i class="s3" style="width:0.7%"></i><i class="s4" style="width:1.1%"></i><i class="s5" style="width:2.5%"></i><i class="s6" style="width:29.7%"></i><i class="s7" style="width:24.2%"></i></div>
+					<div class="row"><span class="sw s1"></span><span class="name">System prompt</span><span class="meta">4.1k</span></div>
+					<div class="row"><span class="sw s2"></span><span class="name">AGENTS.md (2)</span><span class="meta">2.0k</span></div>
+					<div class="row"><span class="sw s3"></span><span class="name">Plugin sections</span><span class="meta">0.9k</span></div>
+					<div class="row"><span class="sw s4"></span><span class="name">Skills (3 loaded)</span><span class="meta">1.4k</span></div>
+					<div class="row"><span class="sw s5"></span><span class="name">Summary (1)</span><span class="meta">3.2k</span></div>
+					<div class="row"><span class="sw s6"></span><span class="name">Messages</span><span class="meta">38.0k</span></div>
+					<div class="row"><span class="sw s7"></span><span class="name">Tool results</span><span class="meta">31.0k</span></div>
+					<div class="row"><span class="sw" style="background:var(--bg-4)"></span><span class="name muted">Free (compress at 85%)</span><span class="meta">47.5k</span></div>
+				</div>
+				<div class="sec">
+					<div class="sec-head"><i class="ci ci-chevron-down"></i>Tasks<span class="meta">3/7</span></div>
+					<div class="row"><span class="check on"><i class="ci ci-check"></i></span><span class="name muted">Read Icepick Log.h / Log.cpp</span></div>
+					<div class="row"><span class="check on"><i class="ci ci-check"></i></span><span class="name muted">Log.ch declarations</span></div>
+					<div class="row"><span class="check on"><i class="ci ci-check"></i></span><span class="name muted">Log.cf Init / Write</span></div>
+					<div class="row sel-dim"><i class="ci ci-arrow-right c-0" style="width:13px;height:13px"></i><span class="name">RingSink on Ring&lt;T&gt;</span><span class="meta">now</span></div>
+					<div class="row"><span class="check"></span><span class="name">FormatRecord parity</span></div>
+					<div class="row"><span class="check"></span><span class="name">Tests engine.log.*</span><span class="meta">worker</span></div>
+					<div class="row"><span class="check"></span><span class="name">Build + test at -O0 and -O2</span></div>
+				</div>
+				<div class="sec">
+					<div class="sec-head"><i class="ci ci-chevron-down"></i>Modified files<span class="meta">4</span></div>
+					<div class="row"><i class="ci ci-file-code ft-source"></i><span class="name">Log.cf</span><span class="meta"><span class="plus">+120</span> <span class="minus">-31</span></span></div>
+					<div class="row"><i class="ci ci-file-code ft-header"></i><span class="name">Log.ch</span><span class="meta"><span class="plus">+46</span></span></div>
+					<div class="row"><i class="ci ci-file-code ft-source"></i><span class="name">Application.cf</span><span class="meta"><span class="plus">+3</span> <span class="minus">-1</span></span></div>
+					<div class="row"><i class="ci ci-beaker ft-source"></i><span class="name">tests/log.cf</span><span class="meta"><span class="plus">+58</span></span></div>
+				</div>
+				<div class="sec">
+					<div class="sec-head"><i class="ci ci-chevron-down"></i>Sub-agents<span class="meta">2</span></div>
+					<div class="row"><i class="ci ci-pass c-saved"></i><span class="name">research</span><span class="meta">done 2m 14s</span></div>
+					<div class="row"><i class="ci ci-loading c-info"></i><span class="name">worker &middot; tests</span><span class="meta">1m 12s</span></div>
+				</div>
+				<div class="sec">
+					<div class="sec-head"><i class="ci ci-chevron-down"></i>Scratchpad<span class="meta"><i class="ci ci-link-external sm"></i></span></div>
+<div class="scratch">## Plan
+- keep Icepick names (Log, LogSink, ...)
+- RingSink over Engine::Ring&lt;T&gt; (owner)
+- file sink after FS append lands</div>
+				</div>
+				<div class="sec closed"><div class="sec-head"><i class="ci ci-chevron-right"></i>Compression<span class="meta">1 event</span></div></div>
+				<div class="sec closed"><div class="sec-head"><i class="ci ci-chevron-right"></i>Tool stats<span class="meta">31 calls &middot; 1 failed</span></div></div>
+				<div class="sec closed"><div class="sec-head"><i class="ci ci-chevron-right"></i>Run info<span class="meta">38m &middot; $0.42</span></div></div>
+			</div>
+		</aside>
+	</main>
+
+	<section class="terminal-dock collapsed"></section>
+
+	<footer class="statusbar">
+		<span class="st">Ready</span>
+		<span class="st"><i class="ci ci-sparkle c-ai"></i>AI: 2 running, <span class="c-warn">1 needs approval</span></span>
+		<span class="st grow"></span>
+		<span class="st">Port logging &middot; Agent &middot; plan-claude/impl-local</span>
+		<span class="st"><i class="ci ci-git-branch"></i>port/logging<i class="ci ci-arrow-up sm"></i>3</span>
+		<span class="st desktop-wide"><i class="ci ci-device-mobile"></i>2 devices</span>
+	</footer>
+</div>
+</body>
+</html>
