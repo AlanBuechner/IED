@@ -1,0 +1,28 @@
+// Types - Cross-Unit Template Monomorphization Tests (implementation)
+include "../Framework/Assert.ch"
+include "CrossUnitTemplate.ch"
+
+void TestCrossUnitTemplate() {
+    int32[3] arr;
+    arr[0] = 10; arr[1] = 32; arr[2] = 100;
+
+    // CURef<int32> is instantiated in the CrossUnitTemplate.ch compilation unit (a NON-entry
+    // unit); this entry-unit test calls its reference-returning method. Before the cross-unit
+    // instantiation-record merge, Deref's concrete signature never reached the entry unit and the
+    // call lowered as a value return (or a void-typed load) instead of an address-of-referent.
+    CUBox b;
+    b.r.items = &arr[0];
+    b.r.index = 0;
+
+    int32 first = b.r.Deref();
+    AssertIntEquals(10, first, "cross-unit template ref-return Deref[0]");
+
+    b.r.index = 2;
+    int32 third = b.r.Deref();
+    AssertIntEquals(100, third, "cross-unit template ref-return Deref[2]");
+
+    // A reference return must be an lvalue: assigning through it writes the referent.
+    b.r.index = 1;
+    b.r.Deref() = 99;
+    AssertIntEquals(99, arr[1], "cross-unit template ref-return is an lvalue");
+}

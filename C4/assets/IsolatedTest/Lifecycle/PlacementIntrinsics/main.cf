@@ -1,0 +1,45 @@
+// new (p) T(...) builds an object in existing storage, destroy(p) runs its destructor and relocate(dst, src)
+// moves it, leaving the source zero (docs/language/14).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 main() {
+	int32 live = 0;
+	Probe* buf = (Probe*)raw_alloc(4 * sizeof(Probe));
+	Probe* first = new (buf) Probe(&live, 7);
+	Check(first == buf && live == 1, "placement new returns the storage it built in");
+	new (&buf[1]) Probe(buf[0]);
+	Check(live == 2 && buf[1].id == 7, "placement copy-construction runs the copy operator");
+	relocate(&buf[2], &buf[1]);
+	Check(buf[2].id == 7 && buf[1].id == 0 && buf[1].live == null && live == 2, "relocate moves and leaves the source zero");
+	destroy(&buf[2]);
+	destroy(&buf[0]);
+	Check(live == 0, "destroy runs the destructor");
+	int32* n = (int32*)raw_alloc(sizeof(int32));
+	new (n) int32(42);
+	Check(*n == 42, "placement new of a scalar stores its value");
+	destroy(n);
+	Check(*n == 42, "destroying a scalar does nothing");
+	int32 m = 5;
+	relocate(n, &m);
+	Check(*n == 5 && m == 0, "relocating a scalar moves it and zeroes the source");
+	raw_free(n);
+	raw_free(buf);
+	return g_failures;
+}

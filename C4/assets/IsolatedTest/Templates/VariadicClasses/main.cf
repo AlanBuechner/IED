@@ -1,0 +1,59 @@
+// Variadic object templates (D-19): a type pack binds the trailing arguments, expands in template argument
+// lists (`Tuple<Rest...>`, `List<Box<Ts>...>`), counts with `sizeof...` in constant positions, and is deduced
+// through an instance parameter (`Tuple<Ts...>&`). Methods of a variadic template may be defined out of line.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<...Ts> struct List { static const int64 Size = sizeof...(Ts); }
+
+template<...Ts> struct Tuple {}
+template<T, ...Rest> struct Tuple<T, Rest...> {
+	public T head;
+	public Tuple<Rest...> tail;
+}
+
+template<T> struct Box { public T value; }
+template<...Ts> int64 BoxedSize() { return List<Box<Ts>...>::Size; }
+
+template<...Ts> struct Bytes { public int8[sizeof...(Ts)] data; }
+
+template<...Ts> int64 Arity(Tuple<Ts...>& t) { return sizeof...(Ts); }
+
+template<...Ts> struct Holder {
+	public int64 Count();
+	public int64 Inline() { return sizeof...(Ts) * 10; }
+}
+template<...Us> int64 Holder<Us...>::Count() { return sizeof...(Us); }
+
+template<...int32 Ns> struct Seq {
+	static const int64 Size = sizeof...(Ns);
+	static const int32 Sum = (Ns + ... + 0);
+}
+
+template<T, ...Rest> struct First { public T value; static const int64 RestSize = sizeof...(Rest); }
+
+int32 main() {
+	Check(List<int32, float, int8>::Size == 3, "a pack's size in a static constant");
+	Check(List<>::Size == 0, "an empty pack");
+	Tuple<int32, int64, int8> t;
+	t.head = 1;
+	t.tail.head = 2;
+	t.tail.tail.head = 3;
+	Check(t.head + t.tail.head + t.tail.tail.head == 6, "a recursive specialization peels one element per level");
+	Check(sizeof(Tuple<int32, int32>) == 8, "the recursion ends at the empty primary");
+	Check(BoxedSize<int32, float>() == 2, "a pattern in a template argument list");
+	Check(sizeof(Bytes<int32, int32, int32, int32>) == 4, "sizeof... in an array size");
+	Check(Arity(t) == 3, "a pack deduced through an instance parameter");
+	Holder<int32, int8> h;
+	Check(h.Count() == 2, "an out-of-line method of a variadic template");
+	Check(h.Inline() == 20, "an inline method sees the pack");
+	Check(Seq<1, 2, 3>::Size == 3, "a value pack's size");
+	Check(Seq<1, 2, 3>::Sum == 6, "a fold over a value pack in a constant");
+	First<float, int8, int8> f;
+	f.value = 1.5f;
+	Check(f.value == 1.5f && First<float, int8, int8>::RestSize == 2, "a pack after a fixed parameter");
+	return g_failures;
+}

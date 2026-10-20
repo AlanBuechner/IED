@@ -1,0 +1,34 @@
+// A C4 variadic function reads int32, double and uint64 arguments through a va_list; a float argument arrives as a
+// double (D-35). main returns the failed step.
+int32 SumInts(int32 count, ...) {
+	va_list ap;
+	va_start(ap);
+	int32 sum = 0;
+	for (int32 i = 0; i < count; i++) { sum += va_arg(ap, int32); }
+	va_end(ap);
+	return sum;
+}
+double SumDoubles(int32 count, ...) {
+	va_list ap;
+	va_start(ap);
+	double sum = 0.0;
+	for (int32 i = 0; i < count; i++) { sum += va_arg(ap, double); }
+	va_end(ap);
+	return sum;
+}
+uint64 FirstU64(int32 count, ...) {
+	va_list ap;
+	va_start(ap);
+	uint64 v = 0;
+	if (count > 0) v = va_arg(ap, uint64);
+	va_end(ap);
+	return v;
+}
+int32 main() {
+	if (SumInts(3, 10, 20, 30) != 60) return 1;
+	if (SumInts(1, 42) != 42) return 2;
+	if (SumInts(0) != 0) return 3;
+	if (SumDoubles(2, 3.5f, 4.5f) != 8.0) return 4;
+	if (FirstU64(1, 99u) != 99u) return 5;
+	return 0;
+}

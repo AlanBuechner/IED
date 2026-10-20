@@ -1,0 +1,22 @@
+include "../Framework/Assert.ch"
+include "AddressOfReferenceLocal.ch"
+
+struct RefTarget { public int32 v; }
+
+void TestAddressOfReferenceLocal() {
+	RefTarget s;
+	s.v = 7;
+	RefTarget& r = s;
+	RefTarget* q = &r;
+	q->v = 9;
+	AssertIntEquals(9, s.v, "a pointer taken from a reference local writes the referent");
+	Assert(q == &s, "it is the referent's address");
+	int32 x = 1;
+	int32& rx = x;
+	int32* px = &rx;
+	*px = 5;
+	AssertIntEquals(5, x, "the same for a primitive");
+	const int32& cx = x;
+	const int32* pcx = &cx;
+	AssertIntEquals(5, *pcx, "a reference to const gives a pointer to const");
+}

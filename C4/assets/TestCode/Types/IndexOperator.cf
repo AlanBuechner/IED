@@ -1,0 +1,49 @@
+// Types - Bracket index operator ([]) dispatch tests (implementation).
+include "../Framework/Assert.ch"
+include "IndexOperator.ch"
+
+void TestBracketIndexOperator() {
+	// [operator("[]")] read form: obj[i] on a value receiver dispatches to Index(i).
+	IdxBuf b;
+	b.data[0] = 10;
+	b.data[1] = 7;
+	AssertEqual(7, b[1]);
+	AssertEqual(10, b[0]);
+
+	// [operator("[]=")] write form: obj[i] = v dispatches to SetIndex(i, v).
+	b[2] = 42;
+	AssertEqual(42, b.data[2]);
+	AssertEqual(42, b[2]); // read back through the [] operator
+
+	// Plain array indexing is unaffected by the operator machinery.
+	int32[3] arr;
+	arr[0] = 5;
+	arr[1] = 6;
+	arr[2] = 7;
+	AssertEqual(6, arr[1]);
+	AssertEqual(12, arr[0] + arr[2]);
+}
+
+// Inherited indexers (found through the base) and non-first-field layouts (setter path, not raw GEP).
+void TestInheritedAndOffsetIndex() {
+	// The operators are declared on IdxBase; a derived object must dispatch to them.
+	IdxDerived d;
+	d.tag = 77;
+	d.data[0] = 5;
+	d[1] = 9;                 // inherited setter
+	AssertEqual(9, d.data[1]);
+	AssertEqual(5, d[0]);     // inherited reader
+	d[0] += 3;                // inherited compound read-modify-write
+	AssertEqual(8, d.data[0]);
+	AssertEqual(77, d.tag);   // the setter path must not touch other fields
+
+	// data is at a non-zero offset: every store goes through the setter.
+	IdxOffset m;
+	m.tag = 55;
+	m.data[0] = 10;
+	m[0] = 42;
+	AssertEqual(42, m.data[0]);
+	AssertEqual(55, m.tag);   // intact: proves no raw GEP into the struct's memory
+	m[1] += 8;
+	AssertEqual(8, m.data[1]);
+}

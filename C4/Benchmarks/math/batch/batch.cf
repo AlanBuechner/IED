@@ -1,0 +1,156 @@
+// Batch math benchmark - C4 side. Eight vectors at a time in Bedrock Math's batches (FVector3x8: structure of
+// arrays, one AVX register per component), built with -march=x86-64-v3; batch.cpp is the same program as
+// hand-written AVX2 intrinsics and as per-vector GLM loops, and run-benchmark.ps1 checks the checksums agree.
+
+include "math.ch"
+
+[link("QueryPerformanceCounter")] int32 QueryPerformanceCounter(int64* count);
+[link("QueryPerformanceFrequency")] int32 QueryPerformanceFrequency(int64* frequency);
+
+const int32 kCount = 4096;
+const int32 kLanes = 8;
+const int32 kBatches = kCount / kLanes;
+const int32 kBatchMask = kBatches - 1;
+const int32 kRepeats = 400;
+const float kDt = 1.0f / 60.0f;
+
+alias Batch = Math::FVector3x8;
+
+// What a system that does not own the arrays holds: pointers to them. A store through `out` cannot change these
+// pointers (strict aliasing, D-64), so a loop keeps them in registers.
+struct SceneView {
+	public const Math::Mat4* matrices;
+	public const Batch* positions;
+	public Batch* out;
+}
+
+// The arrays live in the scene, as batch.cpp's do: a kernel reaches them at fixed offsets from `scene`, or through
+// the pointers in `view`.
+struct Scene {
+	public Math::Mat4[64] matrices;
+	public Math::Quat[kBatches] rotations;
+	public Math::FVector3[kBatches] eyes;
+	public Batch[kBatches] positions;
+	public Batch[kBatches] velocities;
+	public Batch[kBatches] directions;
+	public Batch[kBatches] out;
+	public SceneView view;
+}
+
+Scene g_scene;
+
+// --- the scene: the same values batch.cpp makes ------------------------------------------------------------
+
+float Wave(int32 i, int32 lane) { return Math::Sin((float)(i * 7 + lane * 13) * 0.01f); }
+
+Math::FVector3 WaveVector(int32 i, int32 lane) { return Math::FVector3(Wave(i, lane), Wave(i, lane + 1), Wave(i, lane + 2)); }
+
+Math::Mat4 SceneMatrix(int32 m) {
+	Math::FVector3 a = WaveVector(m, 20);
+	return Math::Mat4(Math::FVector4(a.x + 1.0f, a.y, a.z, 0.0f), Math::FVector4(a.y, a.z + 1.0f, a.x, 0.0f), Math::FVector4(a.z, a.x, a.y + 1.0f, 0.0f),
+		Math::FVector4(a * 5.0f, 1.0f));
+}
+
+// Batch b of the vectors `vector(i)` makes.
+Batch SceneBatch(int32 b, funcptr<Math::FVector3(int32)> vector) {
+	Batch batch;
+	for (int32 i = 0; i < kLanes; ++i) batch.Set(i, vector(b * kLanes + i));
+	return batch;
+}
+
+Math::FVector3 Position(int32 i) { return WaveVector(i, 0) * 10.0f; }
+Math::FVector3 Velocity(int32 i) { return WaveVector(i, 3) * 5.0f; }
+Math::FVector3 Direction(int32 i) { return WaveVector(i, 6) + Math::FVector3(0.0f, 0.0f, 1.5f); }
+
+void FillScene(Scene& scene) {
+	for (int32 m = 0; m < 64; ++m) scene.matrices[m] = SceneMatrix(m);
+	for (int32 b = 0; b < kBatches; ++b) {
+		scene.rotations[b] = Math::AngleAxis(Wave(b, 9) * 3.14159265f, WaveVector(b, 10) + Math::FVector3(0.0f, 2.0f, 0.0f));
+		scene.eyes[b] = WaveVector(b, 30) * 4.0f;
+		scene.positions[b] = SceneBatch(b, Position);
+		scene.velocities[b] = SceneBatch(b, Velocity);
+		scene.directions[b] = SceneBatch(b, Direction);
+	}
+	scene.view.matrices = &scene.matrices[0];
+	scene.view.positions = &scene.positions[0];
+	scene.view.out = &scene.out[0];
+}
+
+// --- the kernels: each repeat shifts which matrix, rotation or partner a batch uses ------------------------
+
+void TransformPoints(Scene& scene, int32 shift) {
+	for (int32 b = 0; b < kBatches; ++b) scene.out[b] = Math::TransformPoint(scene.matrices[(b + shift) & 63], scene.positions[b]);
+}
+
+void TransformThroughPointers(Scene& scene, int32 shift) {
+	SceneView& view = scene.view;
+	for (int32 b = 0; b < kBatches; ++b) view.out[b] = Math::TransformPoint(view.matrices[(b + shift) & 63], view.positions[b]);
+}
+
+void RotateVectors(Scene& scene, int32 shift) {
+	for (int32 b = 0; b < kBatches; ++b) scene.out[b] = Math::Rotate(scene.rotations[(b + shift) & kBatchMask], scene.positions[b]);
+}
+
+void NormalizeCrosses(Scene& scene, int32 shift) {
+	for (int32 b = 0; b < kBatches; ++b) scene.out[b] = Math::Normalized(Math::Cross(scene.positions[b], scene.directions[(b + shift) & kBatchMask]));
+}
+
+// One step of falling particles: gravity, motion, a bounce off the floor and walls at +-10.
+void Integrate(Scene& scene, int32 shift) {
+	const float dt = kDt * (float)(shift % 7 + 1);
+	for (int32 b = 0; b < kBatches; ++b) {
+		Batch p = scene.positions[b];
+		Batch v = scene.velocities[b];
+		v.y = simd_muladd(simd_splat(-9.8f, 8), dt, v.y);
+		p.x = simd_muladd(v.x, dt, p.x);
+		p.y = simd_muladd(v.y, dt, p.y);
+		p.z = simd_muladd(v.z, dt, p.z);
+		p.y = simd_select(p.y < 0.0f, -p.y, p.y);
+		p.x = simd_min(simd_max(p.x, -10.0f), 10.0f);
+		p.z = simd_min(simd_max(p.z, -10.0f), 10.0f);
+		scene.out[b] = p;
+	}
+}
+
+void Distances(Scene& scene, int32 shift) {
+	for (int32 b = 0; b < kBatches; ++b) {
+		const Batch eye = Batch(scene.eyes[(b + shift) & kBatchMask]);
+		scene.out[b] = Batch(Math::Length(scene.positions[b] - eye), 0.0f, 0.0f);
+	}
+}
+
+// --- checksum, in vector order -----------------------------------------------------------------------------
+
+double Checksum(const Scene& scene) {
+	double sum = 0.0;
+	for (int32 b = 0; b < kBatches; ++b)
+		for (int32 i = 0; i < kLanes; ++i) {
+			Math::FVector3 v = scene.out[b].Get(i);
+			sum += (double)(v.x * 1.0f + v.y * 2.0f + v.z * 3.0f);
+		}
+	return sum;
+}
+
+// --- timing (the only dishonest part) ----------------------------------------------------------------------
+
+int64 Now() { int64 t = 0; QueryPerformanceCounter(&t); return t; }
+
+void Time(const char* name, funcptr<void(Scene&, int32)> kernel, Scene& scene) {
+	int64 frequency = 0;
+	QueryPerformanceFrequency(&frequency);
+	int64 start = Now();
+	for (int32 r = 0; r < kRepeats; ++r) kernel(scene, r);
+	double ms = (double)(Now() - start) * 1000.0 / (double)frequency;
+	printf("%-18s %.9e %.3f\n", name, Checksum(scene), ms);
+}
+
+int32 main() {
+	FillScene(g_scene);
+	Time("batch_transform", TransformPoints, g_scene);
+	Time("batch_pointers", TransformThroughPointers, g_scene);
+	Time("batch_rotate", RotateVectors, g_scene);
+	Time("batch_normalize", NormalizeCrosses, g_scene);
+	Time("batch_integrate", Integrate, g_scene);
+	Time("batch_distance", Distances, g_scene);
+	return 0;
+}

@@ -1,0 +1,22 @@
+// Built with -mfma (ExpectedExit.json): simd_fma rounds once, so a * b + c keeps the low bits of the product that a
+// multiply and an add would round away (D-62). main returns the failures.
+#if !SIMD_FMA || !SIMD_AVX
+#error "-mfma turns on fma and the avx it needs"
+#endif
+
+int32 main() {
+	int32 failures = 0;
+	const float a = 1.000244140625f;               // 1 + 2^-12: a * a = 1 + 2^-11 + 2^-24 needs 25 bits
+	const float product = 1.00048828125f;          // the rounded product, 1 + 2^-11
+	packed float[4] lanes = a;
+	packed float[4] fused = simd_fma(lanes, lanes, -product);
+	failures += fused[0] == 0.000000059604644775390625f && fused[3] == fused[0] ? 0 : 1;   // exactly 2^-24
+	packed float[4] separate = lanes * lanes - product;
+	failures += separate[0] == 0.0f ? 0 : 1;
+	packed double[2] d = 1.0 + 0.0000000037252902984619140625;   // 1 + 2^-28: the square needs 57 bits
+	packed double[2] fusedD = simd_fma(d, d, -(1.0 + 0.000000007450580596923828125));
+	failures += fusedD[1] == 0.000000000000000013877787807814456755295395851135 ? 0 : 1;      // 2^-56
+	packed float[8] wide = simd_fma(simd_splat(2.0f, 8), 3.0f, 1.0f);   // scalars broadcast
+	failures += wide[7] == 7.0f ? 0 : 1;
+	return failures;
+}

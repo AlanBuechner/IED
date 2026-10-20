@@ -1,0 +1,9 @@
+template<A,B>
+struct Pair { A first; B second; public void Set(A a, B b) { this.first = a; this.second = b; } }
+int32 main() {
+    Pair<int32,float> p;
+    p.Set(7, 2.5f);
+    if (p.first != 7 || p.second != 2.5f) return 1;
+    printf("F5 multi-param OK\n");
+    return 0;
+}

@@ -1,0 +1,80 @@
+// ControlFlow - Switch Tests (implementation)
+include "../Framework/Assert.ch"
+include "Switch.ch"
+
+void TestSwitch() {
+	int32 x = 2;
+	int32 result = 0;
+	
+	switch (x) {
+	case 1:
+		result = 10;
+		break;
+	case 2:
+		result = 20;
+		break;
+	case 3:
+		result = 30;
+		break;
+	default:
+		result = 0;
+		break;
+	}
+	
+	AssertEqual(20, result);
+
+	int32 fv = 1;
+	int32 fr = -1;
+	switch (fv) {
+	case 1:
+		fr = 10;
+		fallthrough;
+	case 2:
+		fr = fr + 20;
+		break;
+	case 3:
+		fr = 30;
+		fallthrough;
+	default:
+		fr = fr + 40;
+		break;
+	}
+	AssertEqual(30, fr);
+
+	fv = 3;
+	fr = -1;
+	switch (fv) {
+	case 1:
+		fr = 10;
+		fallthrough;
+	case 2:
+		fr = fr + 20;
+		break;
+	case 3:
+		fr = 30;
+		fallthrough;
+	default:
+		fr = fr + 40;
+		break;
+	}
+	AssertEqual(70, fr);
+
+	// Direct jump into a middle case: result starts at -1, no fallthrough into it.
+	fv = 2;
+	fr = -1;
+	switch (fv) {
+	case 1:
+		fr = 10;
+		fallthrough;
+	case 2:
+		fr = fr + 20;
+		break;
+	case 3:
+		fr = 30;
+		fallthrough;
+	default:
+		fr = fr + 40;
+		break;
+	}
+	AssertEqual(19, fr);
+}

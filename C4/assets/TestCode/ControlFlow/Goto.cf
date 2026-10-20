@@ -1,0 +1,14 @@
+// ControlFlow - Goto Tests (implementation)
+include "../Framework/Assert.ch"
+include "Goto.ch"
+
+void TestGoto() {
+	int32 value = 0;
+	
+	goto skip;
+	value = 1;
+	
+skip:
+	value = 2;
+	AssertEqual(2, value);
+}

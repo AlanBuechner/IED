@@ -1,0 +1,6 @@
+int32 main() {
+	const float[4] values = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] v = 0.0f;
+	simd_store(&values[0], v);
+	return 0;
+}

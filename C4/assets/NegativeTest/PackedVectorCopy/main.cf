@@ -1,0 +1,5 @@
+template<T> class Lanes {
+	public union { packed T x, y; packed T[2] data; };
+	[operator("copy")] public void Copy(const Lanes<T>& o) { data = o.data; }
+}
+int32 main() { Lanes<int32> v; Lanes<int32> w = v; return w.x; }

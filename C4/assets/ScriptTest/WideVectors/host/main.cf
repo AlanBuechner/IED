@@ -1,0 +1,43 @@
+// BUG-252: a script compiles and links for its host's target (the .c4i records it), not for the machine it runs
+// on. Built for the baseline x86-64, the host passes a 32-byte vector in two SSE registers; a script compiled for
+// AVX would return it in YMM0 and the host would read the wrong lanes. Vectors cross both ways here.
+include "scripttest.ch"
+include "lanes.ch"
+
+namespace Lanes
+{
+	packed float[8] Doubled(packed float[8] v, int32 depth) { return depth == 0 ? v * 2.0f : Doubled(v, depth - 1); }
+	packed int64[8] Negated(packed int64[8] v, int32 depth) { return depth == 0 ? -v : Negated(v, depth - 1); }
+}
+
+void CheckLanes(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	funcptr<int32()> lanes = (funcptr<int32()>)script->Address("FloatLanes");
+	checks.That(lanes != nullptr, "the script has FloatLanes");
+	if (lanes != nullptr) checks.Equal(Lanes::kHostFloatLanes, lanes(), "the script sees its host's SIMD_FLOAT_LANES");
+	funcptr<packed float[8](packed float[8])> run = (funcptr<packed float[8](packed float[8])>)script->Address("Run");
+	checks.That(run != nullptr, "the script has Run");
+	if (run == nullptr) return;
+	packed float[8] ramp = { 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+	packed float[8] result = run(ramp);
+	checks.Equal(1, (int64)result[0], "lane 0 of a vector the script returned");
+	checks.Equal(15, (int64)result[7], "lane 7 of a vector the script returned");
+	funcptr<packed int64[8](packed int64[8])> wide = (funcptr<packed int64[8](packed int64[8])>)script->Address("Wide");
+	checks.That(wide != nullptr, "the script has Wide");
+	if (wide == nullptr) return;
+	packed int64[8] counts = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	packed int64[8] back = wide(counts);
+	checks.Equal(10, back[0], "lane 0 of a 64-byte vector the script returned");
+	checks.Equal(80, back[7], "lane 7 of a 64-byte vector the script returned");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("WideVectors");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "lanes", "lanes.cf"));
+	if (script->Ok()) CheckLanes(script, checks);
+	script->Unload();
+	return checks.End("WideVectors");
+}

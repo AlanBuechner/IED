@@ -1,0 +1,138 @@
+// Core::Queue<T> and Core::Stack<T>: order, growth and wrapping, iteration, construction forms and GC
+// liveness of their buffers.
+
+include "bedrock.ch"
+
+[test("container")]
+class ContainerTests {
+	[test("queue.fifo")]
+	public static void TestQueueFifo() {
+		Core::Queue<int32> q;
+		assert_eq(0, q.Capacity(), "a zero queue allocates nothing");
+		q.Push(1); q.Push(2); q.Push(3);
+		assert_eq(3, q.Count(), "three");
+		assert_eq(1, q.Front(), "front");
+		assert_eq(3, q.Back(), "back");
+		assert_eq(1, q.Pop(), "first in, first out");
+		assert_eq(2, q.Pop(), "second");
+		assert_eq(3, q.Pop(), "third");
+		assert_eq(0, q.Pop(), "a zero value when empty");
+		assert_true(q.IsEmpty(), "empty");
+	}
+
+	[test("queue.wrap_and_grow")]
+	public static void TestQueueWrapAndGrow() {
+		Core::Queue<int32> q;
+		q.Push(10); q.Push(20); q.Push(30);
+		q.Pop(); q.Pop();
+		q.Push(40); q.Push(50); q.Push(60);   // wraps past the end of the 4-slot buffer
+		assert_eq(30, q.Front(), "front after wrapping");
+		assert_eq(60, q.Back(), "back after wrapping");
+		q.Push(70); q.Push(80);               // grows while wrapped
+		assert_eq(8, q.Capacity(), "doubled");
+		int32 expected = 30;
+		bool ordered = true;
+		while (!q.IsEmpty()) { if (q.Pop() != expected) ordered = false; expected += 10; }
+		assert_true(ordered, "order survives wrapping and growing");
+	}
+
+	[test("queue.iterate")]
+	public static void TestQueueIterate() {
+		Core::Queue<int32> q;
+		q.Push(1); q.Push(2); q.Push(3); q.Pop(); q.Push(4); q.Push(5);
+		int32 sum = 0;
+		int32 first = 0;
+		for (int32 x : q) { if (first == 0) first = x; sum += x; }
+		assert_eq(2, first, "front to back");
+		assert_eq(14, sum, "every element once");
+		for (int32& x : q) x *= 10;
+		assert_eq(20, q.Front(), "by reference writes the element");
+	}
+
+	[test("queue.copy")]
+	public static void TestQueueCopy() {
+		Core::Queue<int32> q;
+		q.Push(1); q.Push(2); q.Pop(); q.Push(3);
+		Core::Queue<int32> copy = q;
+		copy.Push(4);
+		assert_eq(2, q.Count(), "the original is unchanged");
+		assert_eq(3, copy.Count(), "the copy has its own buffer");
+		assert_eq(2, copy.Front(), "in order");
+	}
+
+	[test("queue.objects")]
+	public static void TestQueueObjects() {
+		Core::Queue<Core::String> q;
+		for (int32 i = 0; i < 10; ++i) q.Push(Core::String("item"));
+		q.Pop();
+		assert_se("item", q.Front().CStr(), "objects relocate when the buffer grows");
+		q.Clear();
+		assert_true(q.IsEmpty(), "cleared");
+	}
+
+	[test("stack.lifo")]
+	public static void TestStackLifo() {
+		Core::Stack<int32> s;
+		s.Push(1); s.Push(2); s.Push(3);
+		assert_eq(3, s.Count(), "three");
+		assert_eq(3, s.Top(), "top is the last pushed");
+		s.Top() = 30;
+		assert_eq(30, s.Pop(), "last in, first out");
+		assert_eq(2, s.Pop(), "next");
+		assert_eq(1, s.Count(), "one left");
+		s.Pop();
+		assert_eq(0, s.Pop(), "a zero value when empty");
+	}
+
+	[test("stack.iterate_and_clear")]
+	public static void TestStackIterateAndClear() {
+		Core::Stack<int32> s;
+		s.Push(1); s.Push(2); s.Push(3);
+		int32 bottom = 0;
+		for (int32 x : s) { bottom = x; break; }
+		assert_eq(1, bottom, "bottom to top");
+		s.Clear();
+		assert_true(s.IsEmpty(), "cleared");
+	}
+
+	[test("capacity_create")]
+	public static void TestCapacityCreate() {
+		Core::Queue<int32>* q = new Core::Queue<int32>(64);
+		assert_eq(64, q->Capacity(), "queue");
+		Core::Queue<int32> odd = Core::Queue<int32>(100);
+		assert_eq(128, odd.Capacity(), "rounded up to a power of two");
+		Core::Stack<int32>* s = new Core::Stack<int32>(128);
+		assert_eq(128, s->Capacity(), "stack");
+		Core::HashMap<int32, int32>* m = new Core::HashMap<int32, int32>(100);
+		assert_true(m->Capacity() >= 128, "room for 100 entries");
+	}
+
+	[test("direct_init")]
+	public static void TestDirectInit() {
+		Core::Array<int32> v(8);
+		Core::Queue<int32> q(16);
+		Core::Stack<int32> s(32);
+		assert_eq(8, v.Capacity(), "array");
+		assert_eq(16, q.Capacity(), "queue");
+		assert_eq(32, s.Capacity(), "stack");
+		q.Push(1);
+		assert_eq(1, q.Pop(), "usable at once");
+	}
+
+	[test("gc.queue")]
+	public static void TestGcQueue() {
+		Core::Queue<Core::StringBuilder*> q;
+		for (int32 i = 0; i < 6; ++i) { Core::StringBuilder* b = new Core::StringBuilder(4); b->AppendInt(i); q.Push(b); }
+		q.Pop();
+		gc_collect();
+		assert_se("1", q.Pop()->CStr(), "kept alive by the ring buffer");
+	}
+
+	[test("gc.stack")]
+	public static void TestGcStack() {
+		Core::Stack<Core::StringBuilder*> s;
+		for (int32 i = 0; i < 6; ++i) { Core::StringBuilder* b = new Core::StringBuilder(4); b->AppendInt(i); s.Push(b); }
+		gc_collect();
+		assert_se("5", s.Pop()->CStr(), "kept alive by the stack's array");
+	}
+}

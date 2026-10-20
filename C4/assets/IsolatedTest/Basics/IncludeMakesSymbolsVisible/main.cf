@@ -1,0 +1,7 @@
+// Including a header makes its type and function visible to the file.
+include "widgets.ch"
+int32 main() {
+	Widget w;
+	w.id = 1;
+	return MakeWidget() - 42 + w.id - 1;
+}

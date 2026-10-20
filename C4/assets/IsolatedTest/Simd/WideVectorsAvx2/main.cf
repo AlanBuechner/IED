@@ -1,0 +1,72 @@
+// Built with -march=x86-64-v3 (ExpectedExit.json): 256-bit vectors live in YMM registers, are returned in YMM0
+// across calls that are not inlined, and are read with aligned AVX instructions, so a container element that is
+// not 32-byte aligned faults (BUG-251). The target's macros say what it has (D-62). main returns the failures.
+include "bedrock.ch"
+
+#if !SIMD_AVX2 || !SIMD_FMA || SIMD_FLOAT_LANES != 8
+#error "x86-64-v3 has AVX2 and FMA, and its widest float register holds 8 lanes"
+#endif
+#if SIMD_AVX512F
+#error "x86-64-v3 has no AVX-512"
+#endif
+
+struct Particle { public packed float[8] position; public packed float[8] velocity; }
+
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+packed float[8] Advanced(packed float[8] position, packed float[8] velocity, float dt, int32 depth) {
+	return depth == 0 ? simd_fma(velocity, dt, position) : Advanced(position, velocity, dt, depth - 1);
+}
+packed int32[8] Mixed(packed int32[8] a, packed int32[8] b, int32 depth) {
+	return depth == 0 ? simd_shuffle(a, b, 0, 8, 1, 9, 2, 10, 3, 11) : Mixed(a, b, depth - 1);
+}
+
+int32 RegistersAcrossCalls() {
+	int32 failures = 0;
+	packed float[8] p = { 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+	packed float[8] next = Advanced(p, simd_splat(2.0f, 8), 0.5f, 3);
+	failures += next[0] == 1.0f && next[7] == 8.0f ? 0 : 1;
+	packed int32[8] a = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	packed int32[8] mixed = Mixed(a, -a, 2);
+	failures += DiffersI(mixed[0], 1) + DiffersI(mixed[1], -1) + DiffersI(mixed[7], -4);
+	return failures;
+}
+
+int32 AlignedStorage() {
+	int32 failures = 0;
+	float total = 0.0f;
+	for (int32 n = 1; n < 40; ++n) {
+		void* skew = raw_alloc((uint64)(n * 24));
+		Core::Array<Particle> particles;
+		for (int32 k = 0; k < n % 9 + 1; ++k) {
+			Particle particle;
+			particle.position = (float)k;
+			particle.velocity = 1.0f;
+			particles.Push(particle);
+		}
+		for (Particle& particle : particles) particle.position = simd_fma(particle.velocity, 0.5f, particle.position);
+		for (const Particle& particle : particles) total += simd_reduce_add(particle.position);
+		Particle* one = new Particle();
+		one->velocity = 3.0f;
+		total += simd_reduce_max(one->velocity);
+		raw_free(skew);
+	}
+	failures += total > 0.0f ? 0 : 1;
+	return failures;
+}
+
+int32 GathersAndMasks() {
+	int32 failures = 0;
+	float[32] table;
+	for (int32 i = 0; i < 32; ++i) table[i] = (float)(i * 2);
+	packed int32[8] indices = { 31, 0, 5, 5, 16, 1, 2, 30 };
+	packed float[8] gathered = simd_gather(table, indices);
+	failures += gathered[0] == 62.0f && gathered[4] == 32.0f && gathered[7] == 60.0f ? 0 : 1;
+	packed float[8] some = simd_load_masked(&table[24], indices < 10);
+	failures += some[1] == 50.0f && some[0] == 0.0f && some[7] == 0.0f ? 0 : 1;
+	return failures;
+}
+
+int32 main() {
+	return RegistersAcrossCalls() + AlignedStorage() + GathersAndMasks();
+}

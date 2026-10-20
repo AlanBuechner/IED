@@ -1,0 +1,76 @@
+// One heap: the script's allocations live while the script's globals, its thread_locals or the host hold them,
+// and the finalizers of script types run when the collector finds their objects unreachable.
+include "scripttest.ch"
+include "pool.ch"
+
+namespace Pool
+{
+	void Keep(Node* node) { g_kept.Push(node); }
+
+	void Churn(int32 count)
+	{
+		for (int32 i = 0; i < count; i++)
+		{
+			Node* garbage = new Node();
+			garbage->value = i;
+		}
+	}
+}
+
+void Collect()
+{
+	Pool::Churn(20000);
+	GC::Collect();
+	GC::Collect();
+	GC::Collect();
+}
+
+int32 Call(Scripting::Script* script, const char* name)
+{
+	funcptr<int32()> fn = (funcptr<int32()>)script->Address(name);
+	return fn == nullptr ? -1000 : fn();
+}
+
+void CallWith(Scripting::Script* script, const char* name, int32 argument)
+{
+	funcptr<void(int32)> fn = (funcptr<void(int32)>)script->Address(name);
+	if (fn != nullptr) fn(argument);
+}
+
+void CheckGc(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	CallWith(script, "Build", 1000);
+	Collect();
+	checks.Equal(499500, Call(script, "Sum"), "a script global keeps the script's list alive");
+
+	CallWith(script, "HoldOnThread", 42);
+	Collect();
+	checks.Equal(42, Call(script, "Held"), "a script thread_local keeps its object alive");
+
+	CallWith(script, "KeepInHost", 50);
+	Collect();
+	int32 total = 0;
+	for (int64 i = 0; i < Pool::g_kept.Count(); i++) total += Pool::g_kept[i]->value * Pool::g_kept[i]->Weight();
+	checks.Equal(2450, total, "the host keeps the script's objects alive (values 0..49, weight 2)");
+
+	Pool::g_finalized = 0;
+	CallWith(script, "MakeGarbage", 200);
+	Collect();
+	checks.That(Pool::g_finalized >= 190, "finalizers of the script's unreachable objects ran");
+
+	const int32 before = Pool::g_finalized;
+	CallWith(script, "Drop", 0);
+	Collect();
+	Collect();
+	checks.That(Pool::g_finalized - before >= 990, "dropping the script global frees its list");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("GC");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "gc", "gc.cf"));
+	if (script->Ok()) CheckGc(script, checks);
+	return checks.End("GC");
+}

@@ -1,0 +1,190 @@
+// Serialization::DomDoc: building a tree, reading it back, the JSON and YAML writers and the reflection
+// bridge.
+
+include "bedrock.ch"
+
+struct DomPt { public int32 x; public float y; }
+union DomTag { public int32 count; public float ratio; }
+class DomViews { public union { packed float x, y; packed float r, g; packed float[2] data; }; public DomTag tag; }
+
+Serialization::DomNode DomSample(Serialization::DomDoc& doc) {
+	Serialization::DomNode root = doc.NewObject();
+	doc.AddMember(root, "name", doc.NewString("c4"));
+	doc.AddMember(root, "version", doc.NewInt(3));
+	doc.AddMember(root, "active", doc.NewBool(true));
+	doc.AddMember(root, "pi", doc.NewFloat(3.14));
+	Serialization::DomNode tags = doc.NewArray();
+	doc.Add(tags, doc.NewString("lang"));
+	doc.Add(tags, doc.NewInt(7));
+	doc.AddMember(root, "tags", tags);
+	return root;
+}
+
+[test("dom")]
+class DomTests {
+	[test("json")]
+	public static void TestJson() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = DomSample(doc);
+		Core::StringBuilder out;
+		Serialization::WriteJson(root, &out, 0);
+		assert_se("{\"name\":\"c4\",\"version\":3,\"active\":true,\"pi\":3.14,\"tags\":[\"lang\",7]}", out.CStr(), "compact");
+		out.Clear();
+		Serialization::WriteJson(root, &out, 2);
+		assert_se("{\n  \"name\": \"c4\",\n  \"version\": 3,\n  \"active\": true,\n  \"pi\": 3.14,\n  \"tags\": [\n    \"lang\",\n    7\n  ]\n}", out.CStr(), "pretty");
+		out.Clear();
+		Serialization::DomNode empty = doc.NewObject();
+		doc.AddMember(empty, "list", doc.NewArray());
+		Serialization::WriteJson(empty, &out, 2);
+		assert_se("{\n  \"list\": []\n}", out.CStr(), "an empty array");
+	}
+
+	// BUG-165: a control character is \u and four hex digits.
+	[test("json.escapes")]
+	public static void TestJsonEscapes() {
+		Serialization::DomDoc doc;
+		Core::StringBuilder text;
+		text.Append("q\"b\\n\nt\tc");
+		text.AppendByte(1);
+		text.AppendByte(31);
+		Core::StringBuilder out;
+		Serialization::WriteJson(doc.NewString(text.View()), &out, 0);
+		assert_se("\"q\\\"b\\\\n\\nt\\tc\\u0001\\u001f\"", out.CStr(), "escaped");
+	}
+
+	// BUG-166: floats read back as the same double, as floats; NaN and the infinities are null.
+	[test("json.floats")]
+	public static void TestJsonFloats() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode values = doc.NewArray();
+		doc.Add(values, doc.NewFloat(0.1234567));
+		doc.Add(values, doc.NewFloat(1.0));
+		doc.Add(values, doc.NewFloat(1e300));
+		doc.Add(values, doc.NewFloat(-2.5e-8));
+		double zero = 0.0;
+		doc.Add(values, doc.NewFloat(zero / zero));
+		doc.Add(values, doc.NewFloat(1.0 / zero));
+		Core::StringBuilder out;
+		Serialization::WriteJson(values, &out, 0);
+		assert_se("[0.1234567,1.0,1e+300,-2.5e-08,null,null]", out.CStr(), "shortest round-trip forms");
+	}
+
+	// BUG-167: empty containers survive and an indent of 0 still nests.
+	[test("yaml")]
+	public static void TestYaml() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = DomSample(doc);
+		Core::StringBuilder out;
+		Serialization::WriteYaml(root, &out, 2);
+		assert_se("\"name\": \"c4\"\n\"version\": 3\n\"active\": true\n\"pi\": 3.14\n\"tags\":\n  - \"lang\"\n  - 7", out.CStr(), "block style");
+		out.Clear();
+		Serialization::DomNode nested = doc.NewObject();
+		Serialization::DomNode inner = doc.NewObject();
+		doc.AddMember(inner, "a", doc.NewInt(1));
+		doc.AddMember(nested, "inner", inner);
+		doc.AddMember(nested, "none", doc.NewObject());
+		doc.AddMember(nested, "list", doc.NewArray());
+		Serialization::WriteYaml(nested, &out, 0);
+		assert_se("\"inner\":\n  \"a\": 1\n\"none\": {}\n\"list\": []", out.CStr(), "indent 0 is 2; empty containers are written");
+		out.Clear();
+		Serialization::DomNode floats = doc.NewArray();
+		double zero = 0.0;
+		doc.Add(floats, doc.NewFloat(zero / zero));
+		doc.Add(floats, doc.NewFloat(-1.0 / zero));
+		doc.Add(floats, doc.NewFloat(2.0));
+		Serialization::WriteYaml(floats, &out, 2);
+		assert_se("- .nan\n- -.inf\n- 2.0", out.CStr(), "YAML floats");
+	}
+
+	[test("node_access")]
+	public static void TestNodeAccess() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode o = doc.NewObject();
+		doc.AddMember(o, "a", doc.NewInt(1));
+		doc.AddMember(o, "b", doc.NewFloat(-2.5));
+		doc.AddMember(o, "c", doc.NewString("hi"));
+		assert_true(o.Kind() == Serialization::DomKind::Object, "an object");
+		assert_eq(3, o.Count(), "three members");
+		assert_eq(1, o.Member("a").AsInt(), "int");
+		assert_feq(-2.5, o.Member("b").AsFloat(), 0.0, "float");
+		assert_eq(-2, o.Member("b").AsInt(), "a float read as an int truncates");
+		assert_se("hi", o.Member("c").AsString(), "string");
+		assert_eq(2, o.Member("c").AsView().ByteLength(), "string view");
+		assert_true(o.KeyAt(1) == Core::StringView("b"), "a key");
+		assert_eq(1, o.ValueAt(0).AsInt(), "a value by index");
+		Serialization::DomNode arr = doc.NewArray();
+		doc.Add(arr, doc.NewInt(10));
+		doc.Add(arr, doc.NewInt(20));
+		assert_eq(2, arr.Count(), "array count");
+		assert_eq(20, arr.At(1).AsInt(), "an element");
+		assert_true(!arr.At(5).IsValid() && arr.At(5).IsNull(), "past the end");
+		assert_true(!arr.Member("x").IsValid(), "a member of an array");
+	}
+
+	// BUG-164: looking up a missing member leaves the document as it was.
+	[test("missing_member")]
+	public static void TestMissingMember() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode o = doc.NewObject();
+		doc.AddMember(o, "a", doc.NewInt(1));
+		int64 nodes = doc.NodeCount();
+		for (int32 i = 0; i < 10; ++i) o.Member("nope");
+		assert_eq(nodes, doc.NodeCount(), "no node added");
+		Serialization::DomNode missing = o.Member("nope");
+		assert_true(!missing.IsValid() && missing.IsNull(), "an invalid node reads as null");
+		assert_eq(0, missing.AsInt(), "and as zero");
+		assert_se("", missing.AsString(), "and as an empty string");
+	}
+
+	[test("strings_with_nul")]
+	public static void TestStringsWithNul() {
+		Serialization::DomDoc doc;
+		Core::StringBuilder bytes;
+		bytes.Append("a");
+		bytes.AppendByte(0);
+		bytes.Append("b");
+		Serialization::DomNode s = doc.NewString(bytes.View());
+		assert_eq(3, s.AsView().ByteLength(), "every byte kept");
+		Core::StringBuilder out;
+		Serialization::WriteJson(s, &out, 0);
+		assert_se("\"a\\u0000b\"", out.CStr(), "written escaped");
+	}
+
+	// BUG-194: aliases (a second view, a lane's second name, the lane array) are not written or read.
+	[test("reflect_views")]
+	public static void TestReflectViews() {
+		Reflection::Type type = Reflection::FindType("DomViews");
+		Serialization::DomDoc doc;
+		DomViews v;
+		v.x = 1.0f; v.y = 2.0f;
+		v.tag.count = 3;
+		Core::StringBuilder out;
+		Serialization::WriteJson(doc.ReflectFrom(type, &v), &out, 0);
+		assert_se("{\"x\":1.0,\"y\":2.0,\"tag\":{\"count\":3}}", out.CStr(), "each storage once, by its first name");
+		Serialization::DomNode source = doc.NewObject();
+		doc.AddMember(source, "x", doc.NewFloat(5.0));
+		doc.AddMember(source, "r", doc.NewFloat(9.0));
+		DomViews w;
+		assert_eq(1, doc.ReflectTo(type, source, &w), "the alias is not applied");
+		assert_feq(5.0, w.x, 0.0, "x from its own name");
+	}
+
+	[test("reflect_round_trip")]
+	public static void TestReflectRoundTrip() {
+		Reflection::Type type = Reflection::FindType("DomPt");
+		Serialization::DomDoc doc;
+		DomPt p; p.x = 10; p.y = 2.5f;
+		Serialization::DomNode tree = doc.ReflectFrom(type, &p);
+		Core::StringBuilder out;
+		Serialization::WriteJson(tree, &out, 0);
+		assert_se("{\"x\":10,\"y\":2.5}", out.CStr(), "object to JSON");
+		Serialization::DomNode source = doc.NewObject();
+		doc.AddMember(source, "x", doc.NewInt(99));
+		doc.AddMember(source, "y", doc.NewFloat(-1.5));
+		DomPt q;
+		assert_eq(2, doc.ReflectTo(type, source, &q), "both fields set");
+		assert_eq(99, q.x, "x");
+		assert_feq(-1.5, q.y, 0.0, "y");
+		assert_eq(-1, doc.ReflectTo(type, doc.NewArray(), &q), "not an object");
+	}
+}

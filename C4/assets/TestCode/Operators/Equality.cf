@@ -1,0 +1,11 @@
+// Operators - Equality Tests (implementation)
+include "../Framework/Assert.ch"
+include "Equality.ch"
+
+void TestEquality() {
+	bool eq = (5 == 5);
+	AssertTrue(eq);
+	
+	bool neq = (5 != 3);
+	AssertTrue(neq);
+}

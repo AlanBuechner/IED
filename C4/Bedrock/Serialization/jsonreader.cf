@@ -1,0 +1,249 @@
+include "jsonreader.ch"
+
+namespace Serialization
+{
+	// The int64 a JSON integer's digits (an optional '-' then digits) stand for; false when it does not fit.
+	bool JsonInteger(Core::StringView digits, int64& out) {
+		bool negative = digits.ByteAt(0) == '-';
+		uint64 limit = negative ? (uint64)1 << 63 : ((uint64)1 << 63) - 1;
+		uint64 magnitude = 0;
+		for (int64 i = negative ? 1 : 0; i < digits.ByteLength(); ++i) {
+			uint64 digit = (uint64)(digits.ByteAt(i) - '0');
+			if (magnitude > (limit - digit) / 10) return false;
+			magnitude = magnitude * 10 + digit;
+		}
+		out = negative ? (int64)((uint64)0 - magnitude) : (int64)magnitude;
+		return true;
+	}
+
+	// One pass over the text. A step that fails records the first error and returns an invalid node or false,
+	// and every caller stops there.
+	class JsonReader
+	{
+		[operator("create")] public void Init(Core::StringView text, DomDoc* doc) { this.text = text; this.doc = doc; }
+
+		public ReadResult Read();
+
+	private:
+		private DomNode Value();
+		private DomNode Object();
+		private DomNode Array();
+		private DomNode Number();
+		private bool Word(const char* word);
+		private bool StringInto(Core::StringBuilder& out);    // at the opening quote
+		private bool Escape(Core::StringBuilder& out);        // after the backslash
+		private bool UnicodeEscape(Core::StringBuilder& out); // after "\u"
+		private int32 Hex4();                                 // the code unit of four hex digits, or -1
+		private bool Enter();
+		private void Leave() { depth -= 1; }
+		private void SkipSpace();
+		private void SkipDigits() { while (IsDecimalDigit(Peek())) position += 1; }
+		private int32 Peek() const { return position < text.ByteLength() ? text.ByteAt(position) : -1; }
+		private bool At(int32 byte) const { return Peek() == byte; }
+		private DomNode Fail(const char* message) { return FailAt(position, message); }
+		private DomNode FailAt(int64 offset, const char* message);
+		private bool Failed() const { return error != nullptr; }
+
+		private Core::StringView text;
+		private DomDoc* doc;
+		private int64 position;
+		private int32 depth;
+		private const char* error;
+		private int64 errorAt;
+		private Core::StringBuilder scratch;   // the string being read; one at a time
+	}
+
+	ReadResult JsonReader::Read() {
+		int64 invalid = Core::InvalidUtf8Offset(text.Data(), text.ByteLength());
+		if (invalid >= 0) return ReadFailure(text, invalid, "the text is not valid UTF-8");
+		if (text.StartsWith(Core::StringView("\xEF\xBB\xBF"))) position = 3;
+		SkipSpace();
+		DomNode root = Value();
+		SkipSpace();
+		if (!Failed() && position < text.ByteLength()) Fail("unexpected text after the value");
+		return Failed() ? ReadFailure(text, errorAt, error) : ReadSuccess(root);
+	}
+
+	DomNode JsonReader::Value() {
+		int32 c = Peek();
+		if (c == '{') return Object();
+		if (c == '[') return Array();
+		if (c == '-' || IsDecimalDigit(c)) return Number();
+		if (c == '"') {
+			scratch.Clear();
+			return StringInto(scratch) ? doc->NewString(scratch.View()) : DomNode();
+		}
+		if (c == 't') return Word("true") ? doc->NewBool(true) : DomNode();
+		if (c == 'f') return Word("false") ? doc->NewBool(false) : DomNode();
+		if (c == 'n') return Word("null") ? doc->NewNull() : DomNode();
+		return Fail(c < 0 ? "the text ends where a value should be" : "a value cannot start here");
+	}
+
+	DomNode JsonReader::Object() {
+		if (!Enter()) return DomNode();
+		position += 1;
+		DomNode object = doc->NewObject();
+		SkipSpace();
+		if (At('}')) { position += 1; Leave(); return object; }
+		for (;;) {
+			if (!At('"')) return Fail(Peek() < 0 ? "the text ends inside an object" : "a member's name must be a string");
+			scratch.Clear();
+			if (!StringInto(scratch)) return DomNode();
+			Core::String key = scratch.ToString();   // the value's own strings reuse the scratch
+			SkipSpace();
+			if (!At(':')) return Fail("expected ':' after a member's name");
+			position += 1;
+			SkipSpace();
+			DomNode value = Value();
+			if (Failed()) return DomNode();
+			doc->AddMember(object, key.View(), value);
+			SkipSpace();
+			if (At('}')) { position += 1; Leave(); return object; }
+			if (!At(',')) return Fail(Peek() < 0 ? "the text ends inside an object" : "expected ',' or '}' after a member");
+			position += 1;
+			SkipSpace();
+		}
+	}
+
+	DomNode JsonReader::Array() {
+		if (!Enter()) return DomNode();
+		position += 1;
+		DomNode array = doc->NewArray();
+		SkipSpace();
+		if (At(']')) { position += 1; Leave(); return array; }
+		for (;;) {
+			DomNode element = Value();
+			if (Failed()) return DomNode();
+			doc->Add(array, element);
+			SkipSpace();
+			if (At(']')) { position += 1; Leave(); return array; }
+			if (!At(',')) return Fail(Peek() < 0 ? "the text ends inside an array" : "expected ',' or ']' after an element");
+			position += 1;
+			SkipSpace();
+		}
+	}
+
+	DomNode JsonReader::Number() {
+		int64 start = position;
+		if (At('-')) position += 1;
+		if (!IsDecimalDigit(Peek())) return Fail("a number needs a digit here");
+		if (At('0')) {
+			position += 1;
+			if (IsDecimalDigit(Peek())) return Fail("a number cannot start with 0");
+		}
+		else SkipDigits();
+		bool integral = true;
+		if (At('.')) {
+			integral = false;
+			position += 1;
+			if (!IsDecimalDigit(Peek())) return Fail("a fraction needs a digit after '.'");
+			SkipDigits();
+		}
+		if (At('e') || At('E')) {
+			integral = false;
+			position += 1;
+			if (At('+') || At('-')) position += 1;
+			if (!IsDecimalDigit(Peek())) return Fail("an exponent needs a digit");
+			SkipDigits();
+		}
+		Core::StringView digits = text.Substring(start, position - start);
+		int64 whole = 0;
+		if (integral && JsonInteger(digits, whole)) return doc->NewInt(whole);
+		double real = 0.0;
+		parse_double(digits.Data(), digits.ByteLength(), &real);
+		return doc->NewFloat(real);
+	}
+
+	bool JsonReader::Word(const char* word) {
+		Core::StringView expected = Core::StringView(word);
+		if (!text.Substring(position, expected.ByteLength()).Equals(expected)) { Fail("a value cannot start here"); return false; }
+		position += expected.ByteLength();
+		return true;
+	}
+
+	bool JsonReader::StringInto(Core::StringBuilder& out) {
+		position += 1;
+		for (;;) {
+			int64 run = position;
+			while (position < text.ByteLength()) {
+				int32 c = text.ByteAt(position);
+				if (c == '"' || c == '\\' || c < 0x20) break;
+				position += 1;
+			}
+			out.AppendBytes(text.Data() + run, position - run);
+			int32 c = Peek();
+			if (c == '"') { position += 1; return true; }
+			if (c == '\\') { position += 1; if (!Escape(out)) return false; continue; }
+			Fail(c < 0 ? "the text ends inside a string" : "a control character in a string must be escaped");
+			return false;
+		}
+	}
+
+	bool JsonReader::Escape(Core::StringBuilder& out) {
+		int32 c = Peek();
+		position += 1;
+		switch (c) {
+			case '"': out.AppendByte('"'); return true;
+			case '\\': out.AppendByte('\\'); return true;
+			case '/': out.AppendByte('/'); return true;
+			case 'b': out.AppendByte(8); return true;
+			case 'f': out.AppendByte(12); return true;
+			case 'n': out.AppendByte(10); return true;
+			case 'r': out.AppendByte(13); return true;
+			case 't': out.AppendByte(9); return true;
+			case 'u': return UnicodeEscape(out);
+		}
+		FailAt(position - 2, c < 0 ? "the text ends inside a string" : "an unknown escape");
+		return false;
+	}
+
+	bool JsonReader::UnicodeEscape(Core::StringBuilder& out) {
+		int64 at = position - 2;
+		int32 unit = Hex4();
+		if (unit < 0) { FailAt(at, "\\u needs four hex digits"); return false; }
+		int32 point = unit;
+		if (unit >= 0xDC00 && unit <= 0xDFFF) { FailAt(at, "a low surrogate escape without a high one"); return false; }
+		if (unit >= 0xD800 && unit <= 0xDBFF) {
+			bool escaped = At('\\') && position + 1 < text.ByteLength() && text.ByteAt(position + 1) == 'u';
+			if (escaped) position += 2;
+			int32 low = escaped ? Hex4() : -1;
+			if (low < 0xDC00 || low > 0xDFFF) { FailAt(at, "a high surrogate escape without a low one"); return false; }
+			point = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
+		}
+		out.AppendCodePoint(point);
+		return true;
+	}
+
+	int32 JsonReader::Hex4() {
+		if (position + 4 > text.ByteLength()) return -1;
+		int32 unit = 0;
+		for (int32 k = 0; k < 4; ++k) {
+			int32 digit = HexDigitValue(text.ByteAt(position + k));
+			if (digit < 0) return -1;
+			unit = unit * 16 + digit;
+		}
+		position += 4;
+		return unit;
+	}
+
+	bool JsonReader::Enter() {
+		depth += 1;
+		if (depth <= kMaxJsonDepth) return true;
+		Fail("objects and arrays nest too deeply");
+		return false;
+	}
+
+	void JsonReader::SkipSpace() {
+		for (int32 c = Peek(); c == ' ' || c == '\t' || c == '\n' || c == '\r'; c = Peek()) position += 1;
+	}
+
+	DomNode JsonReader::FailAt(int64 offset, const char* message) {
+		if (!error) { error = message; errorAt = offset; }
+		return DomNode();
+	}
+
+	ReadResult ReadJson(Core::StringView text, DomDoc& doc) {
+		JsonReader reader = JsonReader(text, &doc);
+		return reader.Read();
+	}
+}

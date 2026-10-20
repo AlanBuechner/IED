@@ -1,0 +1,27 @@
+struct Vec2 {
+	int32 x; int32 y;
+	[operator("create")] public void Init(int32 a, int32 b) { this->x = a; this->y = b; }
+	[operator("+")] public Vec2 Add(const Vec2& o) { Vec2 r; r.Init(this->x + o.x, this->y + o.y); return r; }
+	[operator("-")] public Vec2 Sub(const Vec2& o) { Vec2 r; r.Init(this->x - o.x, this->y - o.y); return r; }
+	[operator("==")] public int32 Equal(const Vec2& o) { return (this->x == o.x && this->y == o.y) ? 1 : 0; }
+	[operator("!=")] public int32 NotEqual(const Vec2& o) { return (this->x != o.x || this->y != o.y) ? 1 : 0; }
+	[operator("*")] public int32 Scale(int32 f) { return (this->x + this->y) * f; }
+}
+int32 main() {
+	Vec2 a; a.Init(3, 4);
+	Vec2 b; b.Init(10, 20);
+	Vec2 s = a + b;
+	if (s.x != 13 || s.y != 24) { printf("FAIL + got %d %d\n", s.x, s.y); return 1; }
+	Vec2 d = b - a;
+	if (d.x != 7 || d.y != 16) { printf("FAIL - got %d %d\n", d.x, d.y); return 1; }
+	int32 eq = (a == a);
+	if (eq != 1) { printf("FAIL == same got %d\n", eq); return 1; }
+	int32 ne = (a == b);
+	if (ne != 0) { printf("FAIL == diff got %d\n", ne); return 1; }
+	int32 nq = (a != b);
+	if (nq != 1) { printf("FAIL != got %d\n", nq); return 1; }
+	int32 sc = a * 2;
+	if (sc != 14) { printf("FAIL * got %d\n", sc); return 1; }
+	printf("SYMBOL OPERATOR DISPATCH OK\n");
+	return 0;
+}

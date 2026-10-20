@@ -1,0 +1,34 @@
+// D-22: a by-reference capture refers to the variable itself: the lambda sees and makes changes to it.
+struct Big { public int64[32] words; }
+
+void Repeat(func<void()> f, int32 times) { for (int32 i = 0; i < times; i++) f(); }
+
+int32 main() {
+	int32 total = 0;
+	func<void(int32)> add = [&total](int32 x) { total += x; };
+	add(4);
+	add(6);
+	if (total != 10) return 1;
+
+	total = 100;
+	add(1);
+	if (total != 101) return 2;
+
+	int32 calls = 0;
+	Repeat([&calls]() { calls++; }, 5);
+	if (calls != 5) return 3;
+
+	Big big;
+	big.words[31] = 77;
+	func<int64()> last = [&big]() -> int64 { return big.words[31]; };  // no copy of the 256-byte object
+	big.words[31] = 78;
+	if (last() != 78) return 4;
+
+	int32 a = 1;
+	int32 b = 2;
+	func<void()> swap = [&a, &b]() { int32 t = a; a = b; b = t; };
+	swap();
+	if (a != 2 || b != 1) return 5;
+	printf("CAPTURE BY REFERENCE OK\n");
+	return 0;
+}

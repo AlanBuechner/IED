@@ -1,0 +1,3 @@
+class Box { public void Set(int32 x); }
+public void Box::Set(float x) { }
+int32 main() { return 0; }

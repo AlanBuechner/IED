@@ -1,0 +1,7 @@
+struct R { public int32[4] data; }
+[operator("index")] int32 Get(int32 i) extends R { return this.data[i]; }
+int32 main() {
+    R r; r.data[0]=5;
+    r[0] = 9;   // reader is by-value, no setter: must be a clear error, not a silent raw-GEP store
+    return 0;
+}

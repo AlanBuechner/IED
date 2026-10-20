@@ -1,0 +1,6 @@
+struct S { public int32 v; }
+int32 main() {
+	const S s;
+	S moved = take(s);
+	return moved.v;
+}

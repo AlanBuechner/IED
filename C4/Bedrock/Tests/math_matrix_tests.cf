@@ -1,0 +1,162 @@
+// Math matrices: column-major layout, construction, element access, products, determinants and inverses.
+
+include "math.ch"
+
+Math::Mat4 SampleMat4() {
+	return Math::Mat4(Math::FVector4(2.0f, 0.0f, 1.0f, 0.0f), Math::FVector4(1.0f, 3.0f, 0.0f, 0.0f),
+		Math::FVector4(0.0f, 1.0f, 4.0f, 0.0f), Math::FVector4(5.0f, -2.0f, 7.0f, 1.0f));
+}
+
+Math::Mat3 SampleMat3() {
+	return Math::Mat3(Math::FVector3(2.0f, 0.0f, 1.0f), Math::FVector3(1.0f, 3.0f, 0.0f), Math::FVector3(0.0f, 1.0f, 4.0f));
+}
+
+[test("math.matrix")]
+class MathMatrixTests {
+	[test("layout")]
+	public static void TestLayout() {
+		assert_eq(16, (int32)sizeof(Math::Mat2), "mat2");
+		assert_eq(36, (int32)sizeof(Math::Mat3), "mat3: three 12-byte columns");
+		assert_eq(64, (int32)sizeof(Math::Mat4), "mat4");
+		Math::Mat4 m = SampleMat4();
+		float* raw = (float*)&m;
+		assert_feq(1.0, raw[4], 0.0, "column-major: element 4 starts column 1");
+		assert_feq(5.0, raw[12], 0.0, "the translation column is last");
+		Math::Mat3 three = SampleMat3();
+		float* raw3 = (float*)&three;
+		assert_feq(4.0, raw3[8], 0.0, "mat3 columns are packed");
+	}
+
+	[test("construction")]
+	public static void TestConstruction() {
+		Math::Mat4 zero;
+		assert_true(zero == Math::Mat4::Zero, "a default matrix is zero");
+		assert_true(Math::Mat4(1.0f) == Math::Mat4::Identity, "a diagonal of one is the identity");
+		Math::Mat3 three = Math::Mat3(2.0f);
+		assert_true(three.At(1, 1) == 2.0f && three.At(0, 1) == 0.0f, "a diagonal mat3");
+		Math::Mat2 two = Math::Mat2(3.0f);
+		assert_true(two.At(1, 1) == 3.0f && two.At(1, 0) == 0.0f, "a diagonal mat2");
+		Math::Mat4 lifted = Math::Mat4(SampleMat3());
+		assert_feq(4.0, lifted.At(2, 2), 0.0, "a mat3 in the upper left");
+		assert_true(lifted.At(3, 3) == 1.0f && lifted.At(3, 0) == 0.0f && lifted.At(0, 3) == 0.0f, "the identity around it");
+		assert_true(lifted.ToMat3() == SampleMat3(), "and back");
+		assert_true(Math::Mat3::Identity * SampleMat3() == SampleMat3(), "mat3 identity");
+		assert_true(Math::Mat2::Identity.At(0, 0) == 1.0f && Math::Mat2::Zero.At(0, 0) == 0.0f, "mat2 statics");
+	}
+
+	[test("access")]
+	public static void TestAccess() {
+		Math::Mat4 m = SampleMat4();
+		assert_feq(5.0, m.At(0, 3), 0.0, "row 0, column 3");
+		assert_feq(1.0, m.At(2, 0), 0.0, "row 2, column 0");
+		assert_true(m[3] == Math::FVector4(5.0f, -2.0f, 7.0f, 1.0f), "a column by index");
+		assert_true(m.Row(0) == Math::FVector4(2.0f, 1.0f, 0.0f, 5.0f), "a row");
+		m.Set(1, 2, 9.0f);
+		assert_feq(9.0, m.columns[2].y, 0.0, "set one element");
+		m[0] = Math::FVector4::UnitW;
+		assert_feq(1.0, m.At(3, 0), 0.0, "write a column by index");
+		const Math::Mat4 fixed = SampleMat4();
+		assert_feq(3.0, fixed[1].y, 0.0, "a const matrix's column");
+	}
+
+	[test("products")]
+	public static void TestProducts() {
+		Math::Mat4 m = SampleMat4();
+		assert_true(Math::Mat4::Identity * m == m && m * Math::Mat4::Identity == m, "the identity on both sides");
+		Math::FVector4 p = m * Math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+		assert_true(p == Math::FVector4(8.0f, 2.0f, 12.0f, 1.0f), "a matrix times a vector sums the columns");
+		Math::Mat4 a = Math::Translation(Math::FVector3(1.0f, 0.0f, 0.0f));
+		Math::Mat4 b = Math::Scaling(Math::FVector3(2.0f));
+		Math::FVector3 origin = Math::FVector3(1.0f, 1.0f, 1.0f);
+		assert_true(SameVector3Of((a * b).TransformPoint(origin), 3.0f, 2.0f, 2.0f), "a * b applies b first");
+		assert_true(SameVector3Of((b * a).TransformPoint(origin), 4.0f, 2.0f, 2.0f), "products do not commute");
+		Math::Mat4 c = a;
+		c *= b;
+		assert_true(c == a * b, "*=");
+		Math::Mat4 chained = (m * a) * b;
+		assert_true(Math::NearlyEqual(chained, m * (a * b), 1e-5f), "products associate");
+		assert_true(m * 2.0f == m + m, "scale is repeated addition");
+		assert_true(m - m == Math::Mat4::Zero, "subtract");
+		assert_true(m != Math::Mat4::Identity && !(m != m), "!=");
+		Math::Mat3 three = SampleMat3();
+		assert_true(three * Math::FVector3(1.0f, 0.0f, 0.0f) == three[0], "mat3 times a unit vector is a column");
+		assert_true((three + three) == three * 2.0f && three - three == Math::Mat3::Zero, "mat3 add and subtract");
+		Math::Mat2 two = Math::Mat2(Math::FVector2(1.0f, 2.0f), Math::FVector2(3.0f, 4.0f));
+		Math::FVector2 tv = two * Math::FVector2(1.0f, 1.0f);
+		assert_true(tv.x == 4.0f && tv.y == 6.0f, "mat2 times a vector");
+		Math::Mat2 squared = two * two;
+		assert_true(squared.At(0, 0) == 7.0f && squared.At(0, 1) == 15.0f && squared.At(1, 0) == 10.0f && squared.At(1, 1) == 22.0f, "mat2 product");
+		assert_true(two + two == two * 2.0f && two - two == Math::Mat2::Zero && two != squared, "mat2 operators");
+	}
+
+	[test("points_and_directions")]
+	public static void TestPointsAndDirections() {
+		Math::Mat4 move = Math::Translation(Math::FVector3(1.0f, 2.0f, 3.0f));
+		assert_true(SameVector3Of(move.TransformPoint(Math::FVector3::Zero), 1.0f, 2.0f, 3.0f), "a point moves");
+		assert_true(move.TransformDirection(Math::FVector3::Up) == Math::FVector3::Up, "a direction does not");
+	}
+
+	[test("transpose")]
+	public static void TestTranspose() {
+		Math::Mat4 m = SampleMat4();
+		Math::Mat4 t = m.Transposed();
+		assert_feq(m.At(0, 3), t.At(3, 0), 0.0, "rows become columns");
+		assert_true(t.Transposed() == m, "twice is the original");
+		Math::Mat3 three = SampleMat3();
+		assert_feq(three.At(2, 1), three.Transposed().At(1, 2), 0.0, "mat3");
+		Math::Mat2 two = Math::Mat2(Math::FVector2(1.0f, 2.0f), Math::FVector2(3.0f, 4.0f));
+		assert_feq(2.0, two.Transposed().At(0, 1), 0.0, "mat2");
+		assert_true(Math::Mat4::Identity.Transposed() == Math::Mat4::Identity, "the identity is symmetric");
+	}
+
+	[test("determinant")]
+	public static void TestDeterminant() {
+		assert_feq(1.0, Math::Mat4::Identity.Determinant(), 0.0, "identity");
+		assert_feq(25.0, SampleMat4().Determinant(), 1e-5, "mat4 with a translation");
+		assert_feq(25.0, SampleMat3().Determinant(), 1e-5, "mat3");
+		assert_feq(-2.0, Math::Mat2(Math::FVector2(1.0f, 2.0f), Math::FVector2(3.0f, 4.0f)).Determinant(), 0.0, "mat2");
+		assert_feq(24.0, Math::Scaling(Math::FVector3(2.0f, 3.0f, 4.0f)).Determinant(), 0.0, "scale multiplies volume");
+		assert_feq(1.0, Math::Rotation(0.7f, Math::FVector3(1.0f, 2.0f, 3.0f)).Determinant(), 1e-5, "a rotation keeps volume");
+		Math::Mat4 swapped = Math::Mat4(Math::FVector4::UnitY, Math::FVector4::UnitX, Math::FVector4::UnitZ, Math::FVector4::UnitW);
+		assert_feq(-1.0, swapped.Determinant(), 0.0, "swapping axes flips the sign");
+		Math::Mat4 flat = Math::Scaling(Math::FVector3(1.0f, 0.0f, 1.0f));
+		assert_feq(0.0, flat.Determinant(), 0.0, "a flattening matrix is singular");
+	}
+
+	[test("inverse")]
+	public static void TestInverse() {
+		Math::Mat4 m = SampleMat4();
+		assert_true(Math::NearlyEqual(m * m.Inverse(), Math::Mat4::Identity, 1e-5f), "m * inverse is the identity");
+		assert_true(Math::NearlyEqual(m.Inverse() * m, Math::Mat4::Identity, 1e-5f), "on both sides");
+		Math::Mat4 world = Math::TransformMatrix(Math::FVector3(4.0f, -1.0f, 2.0f), Math::FVector3(0.3f, 1.2f, -0.4f), Math::FVector3(2.0f, 0.5f, 3.0f));
+		assert_true(Math::NearlyEqual(world * world.Inverse(), Math::Mat4::Identity, 1e-5f), "a full transform");
+		assert_true(Math::NearlyEqual(m.Inverse().Inverse(), m, 1e-4f), "the inverse of the inverse");
+		Math::Mat4 rotation = Math::Rotation(1.1f, Math::FVector3(0.0f, 1.0f, 1.0f));
+		assert_true(Math::NearlyEqual(rotation.Inverse(), rotation.Transposed(), 1e-5f), "a rotation's inverse is its transpose");
+		Math::Mat4 move = Math::Translation(Math::FVector3(1.0f, 2.0f, 3.0f));
+		assert_true(Math::NearlyEqual(move.Inverse(), Math::Translation(Math::FVector3(-1.0f, -2.0f, -3.0f)), 0.0f), "a translation's inverse");
+		Math::Mat3 three = SampleMat3();
+		assert_true(Math::NearlyEqual(three * three.Inverse(), Math::Mat3::Identity, 1e-5f), "mat3");
+		Math::Mat2 two = Math::Mat2(Math::FVector2(1.0f, 2.0f), Math::FVector2(3.0f, 4.0f));
+		Math::Mat2 back = two * two.Inverse();
+		assert_true(back.At(0, 0) == 1.0f && back.At(1, 0) == 0.0f && back.At(0, 1) == 0.0f && back.At(1, 1) == 1.0f, "mat2");
+		Math::Mat4 singular = Math::Scaling(Math::FVector3(1.0f, 0.0f, 1.0f)).Inverse();
+		float y = singular.At(1, 1);
+		assert_true(y != y || y > 1e30f || y < -1e30f, "a singular matrix gives non-finite values");
+	}
+
+	[test("nearly_equal")]
+	public static void TestNearlyEqual() {
+		Math::Mat4 m = SampleMat4();
+		Math::Mat4 nudged = m;
+		nudged.Set(2, 3, 7.0001f);
+		assert_true(Math::NearlyEqual(m, nudged, 1e-3f), "within epsilon");
+		assert_true(!Math::NearlyEqual(m, nudged, 1e-5f), "outside epsilon");
+		Math::Mat3 three = SampleMat3();
+		Math::Mat3 other = three;
+		other.Set(0, 0, 3.0f);
+		assert_true(Math::NearlyEqual(three, three, 0.0f) && !Math::NearlyEqual(three, other, 0.5f), "mat3");
+	}
+}
+
+bool SameVector3Of(Math::FVector3 v, float x, float y, float z) { return v.x == x && v.y == y && v.z == z; }

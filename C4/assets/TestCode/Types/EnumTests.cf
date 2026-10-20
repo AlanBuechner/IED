@@ -1,0 +1,14 @@
+// Types - Enum Tests (implementation)
+include "../Framework/Assert.ch"
+include "EnumTests.ch"
+
+void TestEnumValues() {
+	Color c = Red;
+	AssertEqual(0, (int32)c);
+	
+	c = Green;
+	AssertEqual(1, (int32)c);
+	
+	c = Blue;
+	AssertEqual(2, (int32)c);
+}

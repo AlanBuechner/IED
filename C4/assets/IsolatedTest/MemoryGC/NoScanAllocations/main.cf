@@ -1,0 +1,56 @@
+// An object of a pointer-free type is never scanned: an address kept in it as an integer does not keep the
+// object it names alive. An object with a pointer field does keep its target.
+include "Memory/gc.ch"
+
+const int32 kTargets = 200;
+
+struct Target {
+	public int32 value;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+struct Numbers { public uint64[4] words; public float scale; }
+
+struct Pointing { public Target* target; public int32 extra; }
+
+int32 g_finalized = 0;
+Numbers*[200] g_numbers;     // roots: the arrays hold pointers to the holder objects
+Pointing*[200] g_pointing;
+
+void Fill() {
+	for (int32 i = 0; i < kTargets; i++) {
+		Numbers* n = new Numbers;
+		n->words[0] = (uint64)new Target;    // only an integer refers to this one
+		g_numbers[i] = n;
+		Pointing* p = new Pointing;
+		p->target = new Target;
+		p->target->value = i;
+		g_pointing[i] = p;
+	}
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+int32 Sum() {
+	int32 s = 0;
+	for (int32 i = 0; i < kTargets; i++) s += g_pointing[i]->target->value;
+	return s;
+}
+
+int32 main() {
+	Fill();
+	Scrub(8);
+	GC::Collect();
+	GC::Collect();
+	if (g_finalized < kTargets - 5) return 1;   // the integer-held targets went
+	if (g_finalized > kTargets) return 2;       // the pointer-held ones stayed
+	if (Sum() != kTargets * (kTargets - 1) / 2) return 3;
+	printf("NOSCAN OK\n");
+	return 0;
+}

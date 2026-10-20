@@ -1,0 +1,54 @@
+include "boxes.ch"
+
+struct Point
+{
+	public int32 x;
+	public int32 y;
+	[operator(">")] public bool Greater(const Point& other) const { return x + y > other.x + other.y; }
+}
+
+template<T> T Sum3(T a, T b, T c) { return a + b + c; }
+
+template<T> class Pair
+{
+	public T first;
+	public T second;
+	public T Total() const { return first + second; }
+}
+
+int32 SharedInstance()
+{
+	Store::Box<int32> a;
+	Store::Box<int32> b;
+	a.Set(4);
+	b.Set(a.Get());
+	return b.Get() + Store::Largest(1, 9);
+}
+
+int32 OwnInstanceCount()
+{
+	Store::Box<float> f;
+	f.Set(2.5f);
+	Store::Box<float> g;
+	return Store::Box<float>::s_made;
+}
+
+int32 BoxOfScriptType()
+{
+	Store::Box<Point> box;
+	box.value.x = 3;
+	box.value.y = 4;
+	Point small;
+	small.x = 1;
+	small.y = 1;
+	Point larger = Store::Largest(box.Get(), small);
+	return larger.x + larger.y + Store::Box<Point>::s_made;
+}
+
+int32 ScriptTemplates()
+{
+	Pair<int64> pair;
+	pair.first = 40;
+	pair.second = 2;
+	return (int32)pair.Total() + Sum3(1, 2, 3);
+}

@@ -1,0 +1,170 @@
+include "script.ch"
+
+namespace Scripting
+{
+	bool Guard(funcptr<void(void*)> fn, void* context, Fault* fault) { return c4s_guarded_call(fn, context, (void*)fault) != 0; }
+
+	// --- options ----------------------------------------------------------------------------------------------------
+
+	void ScriptOptions::AddFile(const char* path)
+	{
+		paths.Push(Core::String(path));
+		texts.Push(Core::String(""));
+		given.Push(false);
+	}
+
+	void ScriptOptions::AddText(const char* fileName, const char* text)
+	{
+		paths.Push(Core::String(fileName));
+		texts.Push(Core::String(text));
+		given.Push(true);
+	}
+
+	void ScriptOptions::Allow(const char* projectOrPath) { allowed.Push(Core::String(projectOrPath)); }
+
+	void ScriptOptions::Define(const char* define) { defines.Push(Core::String(define)); }
+
+	// --- a script ----------------------------------------------------------------------------------------------------
+
+	void Script::Destroy()
+	{
+		if (handle == nullptr) return;
+		c4s_script_destroy(handle);
+		handle = nullptr;
+	}
+
+	bool SameText(const char* a, const char* b) { return strcmp((void*)a, (void*)b) == 0; }
+
+	Reflection::Function Script::FindFunction(const char* name) const
+	{
+		return Reflection::Function(reflect_function_in((void*)Tag(), (void*)name));
+	}
+
+	Reflection::Type Script::FindType(const char* name) const
+	{
+		Reflection::Type type = Reflection::FindType(name);
+		return type.IsValid() && SameText(type.Tag(), Tag()) ? type : Reflection::Type(nullptr);
+	}
+
+	void* Script::Address(const char* name) const
+	{
+		const char* symbol = reflect_function_symbol_in((void*)Tag(), (void*)name);
+		return symbol == nullptr ? nullptr : Find(symbol);
+	}
+
+	struct InvokeRequest
+	{
+		public const Reflection::Function* function;
+		public void* result;
+		public void** arguments;
+		public bool done;
+	}
+
+	void RunInvoke(void* context)
+	{
+		InvokeRequest* request = (InvokeRequest*)context;
+		request->done = request->function->Invoke(request->result, request->arguments);
+	}
+
+	bool Script::InvokeWith(const Reflection::Function& function, void* result, void** arguments)
+	{
+		InvokeRequest request;
+		request.function = &function;
+		request.result = result;
+		request.arguments = arguments;
+		request.done = false;
+		return Call(RunInvoke, (void*)&request) && request.done;
+	}
+
+	struct TestRun
+	{
+		public funcptr<int32(int32, char**)> tests;
+		public int32 argc;
+		public char** argv;
+		public int32 failed;
+	}
+
+	void RunScriptTests(void* context)
+	{
+		TestRun* run = (TestRun*)context;
+		run->failed = run->tests(run->argc, run->argv);
+	}
+
+	int32 Script::RunTests(const char* filter)
+	{
+		void* harness = Find("__c4_script_tests");
+		if (harness == nullptr) return -1;
+		char*[4] argv = { (char*)Tag(), (char*)"--filter", (char*)filter, nullptr };
+		TestRun run;
+		run.tests = (funcptr<int32(int32, char**)>)harness;
+		run.argc = filter == nullptr ? 1 : 3;
+		run.argv = &argv[0];
+		run.failed = 0;
+		return Call(RunScriptTests, (void*)&run) ? run.failed : -1;
+	}
+
+	// --- the host ------------------------------------------------------------------------------------------------------
+
+	Host* Host::Open() { return OpenAt(nullptr); }
+
+	Host* Host::OpenAt(const char* path)
+	{
+		Host* host = new Host();
+		char[512] reason;
+		reason[0] = 0;
+		host->handle = c4s_host_open(path, (void*)&__c4_script_table, &reason[0], 512);
+		if (host->handle == nullptr) host->error = Core::String(&reason[0]);
+		return host;
+	}
+
+	void Host::Close()
+	{
+		if (handle == nullptr) return;
+		c4s_host_close(handle);
+		handle = nullptr;
+	}
+
+	const char** FirstOf(Core::Array<const char*>& texts) { return texts.IsEmpty() ? nullptr : texts.Data(); }
+
+	// ScriptOptions as C4Script takes them; the texts stay in `options`, which must outlive the request.
+	struct CompileRequest
+	{
+		public Core::Array<const char*> paths;
+		public Core::Array<const char*> texts;
+		public Core::Array<const char*> allowed;
+		public Core::Array<const char*> defines;
+		public __C4sOptions c;
+
+		[operator("create")] public void Init(const ScriptOptions& options)
+		{
+			for (int64 i = 0; i < options.paths.Count(); i++)
+			{
+				paths.Push(options.paths[i].CStr());
+				texts.Push(options.given[i] ? options.texts[i].CStr() : nullptr);
+			}
+			for (int64 i = 0; i < options.allowed.Count(); i++) allowed.Push(options.allowed[i].CStr());
+			for (int64 i = 0; i < options.defines.Count(); i++) defines.Push(options.defines[i].CStr());
+			c.name = options.name.CStr();
+			c.paths = FirstOf(paths);
+			c.texts = FirstOf(texts);
+			c.fileCount = (uint32)paths.Count();
+			c.allow = FirstOf(allowed);
+			c.allowCount = (uint32)allowed.Count();
+			c.defines = FirstOf(defines);
+			c.defineCount = (uint32)defines.Count();
+			c.optimize = options.optimize ? 1 : 0;
+		}
+	}
+
+	Script* Host::Compile(const ScriptOptions& options)
+	{
+		CompileRequest request(options);
+		return new Script(c4s_compile(handle, &request.c), options);
+	}
+
+	Script* Host::Reload(Script* script)
+	{
+		CompileRequest request(script->Options());
+		return new Script(c4s_reload(handle, script->Handle(), &request.c), script->Options());
+	}
+}

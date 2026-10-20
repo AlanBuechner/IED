@@ -1,0 +1,27 @@
+include "condition.ch"
+
+namespace Threading
+{
+	// A notify between reading the sequence and parking changes it, so the park returns at once: no lost wakeup.
+	void ConditionVariable::Wait(Mutex& mutex) {
+		WaitFor(mutex, -1);
+	}
+
+	bool ConditionVariable::WaitFor(Mutex& mutex, int64 nanoseconds) {
+		int32 seen = atomic_load(&sequence, MemoryOrder::Relaxed);
+		mutex.Unlock();
+		const bool woken = wait_on_address((void*)&sequence, (void*)&seen, 4, nanoseconds);
+		mutex.Lock();
+		return woken;
+	}
+
+	void ConditionVariable::NotifyOne() {
+		atomic_fetch_add(&sequence, 1, MemoryOrder::Release);
+		wake_one((void*)&sequence);
+	}
+
+	void ConditionVariable::NotifyAll() {
+		atomic_fetch_add(&sequence, 1, MemoryOrder::Release);
+		wake_all((void*)&sequence);
+	}
+}

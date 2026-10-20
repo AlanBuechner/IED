@@ -1,0 +1,6 @@
+int32 main() {
+	int32[4] values;
+	packed float[4] v = 0.0f;
+	simd_store(values, v);
+	return 0;
+}

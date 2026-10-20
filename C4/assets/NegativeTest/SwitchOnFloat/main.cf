@@ -1,0 +1,1 @@
+int32 main() { float f = 1.0f; switch (f) { case 1: return 1; default: break; } return 0; }

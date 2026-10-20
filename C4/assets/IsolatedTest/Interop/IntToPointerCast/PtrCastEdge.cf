@@ -1,0 +1,45 @@
+// PtrCastEdge - regression test for integer->pointer casts producing clean 64-bit values.
+//
+// Bug fixed: `(void*)6` / `(HBRUSH)(COLOR_WINDOW+1)` stored the 32-bit int into an 8-byte
+// pointer slot WITHOUT zero-extending, leaving the upper 4 bytes as uninitialized stack
+// garbage. Foreign C then read e.g. 0x7ff700000006 for `(void*)6`, corrupting every Win32
+// handle idiom (RegisterClassExA rejected a WNDCLASSEX whose hbrBackground carried garbage
+// high bits with ERROR_INVALID_PARAMETER). The fix: HIR resolves the cast's FULL target type
+// (pointer indirection included) and codegen zero-extends sub-pointer-width ints before inttoptr.
+//
+// We verify through FOREIGN C oracles (read_ptr / read_struct_field) so we check the actual
+// 64-bit value foreign code sees, not just that C4's own deref works. Exit code = #failures.
+extern "c" include "PtrCastEdge.h"
+extern "c" source "PtrCastEdge.c"
+
+struct Holder { void* f; };
+
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) { if (!cond) { printf("FAIL: %s\n", what); g_fail++; } }
+
+int32 main() {
+	// Literal int -> pointer.
+	Check(read_ptr((void*)6) == 6, "(void*)6 -> 0x6");
+	Check(read_ptr((void*)42) == 42, "(void*)42 -> 0x2A");
+
+	// Computed (non-constant) int -> pointer.
+	int32 v = 6;
+	Check(read_ptr((void*)v) == 6, "(void*)var -> 0x6");
+	int32 sum = 5 + 1;
+	Check(read_ptr((void*)sum) == 6, "(void*)(5+1) -> 0x6");
+
+	// null stays clean.
+	Check(read_ptr(null) == 0, "null -> 0x0");
+
+	// The exact Win32 idiom: (HBRUSH)(COLOR_WINDOW+1).
+	Check(read_ptr((void*)(5 + 1)) == 6, "(void*)(COLOR_WINDOW+1) -> 0x6");
+
+	// A pointer field inside a struct (the WNDCLASSEX hbrBackground case).
+	Holder h;
+	h.f = (void*)42;
+	Check(read_struct_field(&h) == 42, "struct.f = (void*)42 -> 0x2A");
+
+	if (g_fail) { printf("PTRCASTEDGE FAILED: %d\n", g_fail); return g_fail; }
+	printf("PTRCASTEDGE OK\n");
+	return 0;
+}

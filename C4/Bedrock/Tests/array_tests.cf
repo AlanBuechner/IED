@@ -1,0 +1,380 @@
+// Core::Array<T>: growth, construction, element access, insertion and removal, sorting and searching,
+// iteration, GC liveness of the buffer and element lifetimes.
+
+include "bedrock.ch"
+
+struct ArHolder { public Core::StringBuilder* text; public int32 id; }
+struct ArPoint { public float x; public float y; }
+
+bool ArByX(ArPoint a, ArPoint b) { return a.x < b.x; }
+
+bool ArSorted(const Core::Array<int32>& values) {
+	for (int64 i = 0; i + 1 < values.Count(); ++i)
+		if (values[i] > values[i + 1]) return false;
+	return true;
+}
+
+[test("array")]
+class ArrayTests {
+	[test("zero_allocates_nothing")]
+	public static void TestZero() {
+		Core::Array<int32> v;
+		assert_true(v.IsEmpty(), "empty");
+		assert_eq(0, v.Count(), "no elements");
+		assert_eq(0, v.Capacity(), "no buffer until the first push");
+		assert_true(v.Data() == nullptr, "no data");
+	}
+
+	[test("growth")]
+	public static void TestGrowth() {
+		Core::Array<int32> v;
+		v.Push(10);
+		assert_eq(4, v.Capacity(), "the first push allocates 4");
+		v.Push(20); v.Push(30); v.Push(40);
+		assert_eq(4, v.Capacity(), "no growth while there is room");
+		v.Push(50);
+		assert_eq(8, v.Capacity(), "doubles when full");
+		assert_eq(5, v.Count(), "five elements");
+		assert_eq(10, v[0], "first");
+		assert_eq(50, v[4], "last after growing");
+		assert_eq(10, v.Front(), "front");
+		assert_eq(50, v.Back(), "back");
+		for (int32 i = 0; i < 1000; ++i) v.Push(i);
+		assert_eq(1005, v.Count(), "many pushes");
+		assert_eq(999, v.Back(), "the last pushed");
+	}
+
+	[test("capacity_create")]
+	public static void TestCapacityCreate() {
+		Core::Array<int32> v = Core::Array<int32>(16);
+		assert_eq(0, v.Count(), "empty");
+		assert_eq(16, v.Capacity(), "reserved");
+		Core::Array<int32>* heap = new Core::Array<int32>(8);
+		assert_eq(8, heap->Capacity(), "parentheses pick the capacity create, not the list");
+	}
+
+	[test("initializer_list")]
+	public static void TestInitializerList() {
+		Core::Array<int32> v = { 10, 20, 30 };
+		assert_eq(3, v.Count(), "three");
+		assert_eq(20, v[1], "middle");
+		Core::Array<int32>* heap = new Core::Array<int32>{ 1, 2, 3, 4 };
+		assert_eq(4, heap->Count(), "new with braces");
+		assert_eq(4, heap->At(3), "last");
+		Core::Array<int32> empty = {};
+		assert_true(empty.IsEmpty(), "an empty list");
+	}
+
+	[test("copy")]
+	public static void TestCopy() {
+		Core::Array<int32> a = { 1, 2, 3 };
+		Core::Array<int32> b = a;
+		b[0] = 99;
+		b.Push(4);
+		assert_eq(1, a[0], "the copy owns its buffer");
+		assert_eq(3, a.Count(), "the original keeps its count");
+		assert_eq(4, b.Count(), "the copy grew alone");
+		Core::Array<int32> none;
+		Core::Array<int32> copyOfNone = none;
+		assert_true(copyOfNone.IsEmpty(), "a copy of an empty array is empty");
+	}
+
+	[test("pop")]
+	public static void TestPop() {
+		Core::Array<int32> v = { 1, 2, 3 };
+		assert_eq(3, v.Pop(), "the last");
+		assert_eq(2, v.Count(), "one fewer");
+		v.Pop(); v.Pop();
+		assert_eq(0, v.Pop(), "a zero value when empty");
+		assert_true(v.IsEmpty(), "still empty");
+	}
+
+	[test("index_write")]
+	public static void TestIndexWrite() {
+		Core::Array<int32> v = { 1, 2, 3 };
+		v[1] = 99;
+		v.At(2) += 5;
+		assert_eq(99, v[1], "written through the index");
+		assert_eq(8, v[2], "written through At");
+		assert_eq(1, v[0], "untouched");
+	}
+
+	[test("reserve")]
+	public static void TestReserve() {
+		Core::Array<int32> v = { 1 };
+		v.Reserve(64);
+		assert_eq(64, v.Capacity(), "grew");
+		assert_eq(1, v[0], "kept the element");
+		v.Reserve(2);
+		assert_eq(64, v.Capacity(), "never shrinks");
+	}
+
+	[test("insert")]
+	public static void TestInsert() {
+		Core::Array<int32> v = { 1, 2, 4, 5 };
+		v.Insert(2, 3);
+		assert_eq(5, v.Count(), "one more");
+		assert_eq(3, v[2], "in the middle");
+		assert_eq(4, v[3], "shifted right");
+		v.Insert(0, 0);
+		assert_eq(0, v[0], "at the front");
+		v.Insert(6, 6);
+		assert_eq(6, v.Back(), "at the end");
+		v.Insert(100, 7);
+		assert_eq(7, v.Back(), "past the end appends");
+		v.Insert(1, v[0]);
+		assert_eq(0, v[1], "an element of the array itself");
+	}
+
+	[test("remove_at")]
+	public static void TestRemoveAt() {
+		Core::Array<int32> v = { 10, 20, 30, 40 };
+		v.RemoveAt(1);
+		assert_eq(3, v.Count(), "one fewer");
+		assert_eq(30, v[1], "shifted left");
+		v.RemoveAt(2);
+		assert_eq(30, v.Back(), "the last removed");
+		v.RemoveAt(5);
+		v.RemoveAt(-1);
+		assert_eq(2, v.Count(), "an index out of range removes nothing");
+	}
+
+	[test("remove_range")]
+	public static void TestRemoveRange() {
+		Core::Array<int32> v = { 1, 2, 3, 4, 5, 6, 7, 8 };
+		v.RemoveRange(2, 5);
+		assert_eq(5, v.Count(), "three removed");
+		assert_eq(2, v[1], "before the range");
+		assert_eq(6, v[2], "after the range");
+		v.RemoveRange(3, 100);
+		assert_eq(3, v.Count(), "an end past the array is clamped");
+		v.RemoveRange(2, 1);
+		assert_eq(3, v.Count(), "an empty range removes nothing");
+	}
+
+	[test("remove_swap")]
+	public static void TestRemoveSwap() {
+		Core::Array<int32> v = { 1, 2, 3, 4, 5 };
+		v.RemoveSwap(1);
+		assert_eq(4, v.Count(), "one fewer");
+		assert_eq(5, v[1], "the last takes its place");
+		v.RemoveSwap(3);
+		assert_eq(3, v.Count(), "removing the last");
+		assert_eq(3, v[2], "the others stay");
+	}
+
+	[test("append")]
+	public static void TestAppend() {
+		Core::Array<int32> a = { 1, 2 };
+		Core::Array<int32> b = { 3, 4, 5 };
+		a.Append(b);
+		assert_eq(5, a.Count(), "all appended");
+		assert_eq(3, a[2], "first appended");
+		assert_eq(3, b.Count(), "the source is unchanged");
+		a.Append(a);
+		assert_eq(10, a.Count(), "appending itself doubles");
+		assert_eq(1, a[5], "the second half starts over");
+	}
+
+	[test("const_access")]
+	public static void TestConstAccess() {
+		Core::Array<int32> v = { 0, 10, 20, 30 };
+		const Core::Array<int32>& view = v;
+		assert_eq(4, view.Count(), "count");
+		assert_eq(16, view.ByteSize(), "bytes");
+		assert_eq(20, view[2], "index");
+		assert_eq(30, view.Back(), "back");
+		int64 sum = 0;
+		for (const int32& x : view) sum += x;
+		assert_eq(60, sum, "iterates read-only");
+	}
+
+	[test("range_for")]
+	public static void TestRangeFor() {
+		Core::Array<int32> v = { 1, 2, 3, 4 };
+		int32 sum = 0;
+		for (int32 x : v) sum += x;
+		assert_eq(10, sum, "every element");
+		for (int32& x : v) x *= 2;
+		assert_eq(8, v[3], "by reference writes the element");
+		int32 first = -1;
+		for (int32 x : v) { first = x; break; }
+		assert_eq(2, first, "break stops at the first");
+	}
+
+	[test("struct_elements")]
+	public static void TestStructElements() {
+		Core::Array<ArPoint> v;
+		ArPoint a; a.x = 1.0f; a.y = 2.0f;
+		ArPoint b; b.x = 3.0f; b.y = 5.0f;
+		v.Push(a); v.Push(b);
+		v.Insert(0, b);
+		assert_feq(3.0, v[0].x, 0.0, "inserted at the front");
+		assert_feq(2.0, v[1].y, 0.0, "shifted right");
+		v.RemoveAt(0);
+		assert_feq(1.0, v[0].x, 0.0, "shifted back");
+	}
+
+	[test("gc.references")]
+	public static void TestGcReferences() {
+		Core::Array<Core::StringBuilder*> v;
+		v.Push(new Core::StringBuilder(8));
+		v.Push(new Core::StringBuilder(8));
+		v[0]->Append("first");
+		v[1]->Append("second");
+		gc_collect();
+		assert_se("first", v[0]->CStr(), "kept alive by the buffer");
+		v.RemoveAt(0);
+		gc_collect();
+		assert_se("second", v[0]->CStr(), "kept alive after a shift");
+	}
+
+	[test("gc.structs_with_references")]
+	public static void TestGcStructs() {
+		Core::Array<ArHolder> v;
+		ArHolder h; h.text = new Core::StringBuilder(8); h.id = 1;
+		h.text->Append("held");
+		v.Push(h);
+		gc_collect();
+		assert_se("held", v[0].text->CStr(), "a reference inside a struct element");
+	}
+
+	[test("sort.default")]
+	public static void TestSortDefault() {
+		Core::Array<int32> v = { 5, 3, 9, 1, 7 };
+		v.Sort();
+		assert_eq(1, v[0], "smallest");
+		assert_eq(9, v[4], "largest");
+		assert_true(ArSorted(v), "ascending");
+	}
+
+	[test("sort.edges")]
+	public static void TestSortEdges() {
+		Core::Array<int32> empty;
+		empty.Sort();
+		assert_true(empty.IsEmpty(), "empty");
+		Core::Array<int32> one = { 42 };
+		one.Sort();
+		assert_eq(42, one[0], "one element");
+		Core::Array<int32> same;
+		for (int32 i = 0; i < 500; ++i) same.Push(7);
+		same.Sort();
+		assert_eq(500, same.Count(), "all equal keep every element");
+		Core::Array<int32> ascending;
+		Core::Array<int32> descending;
+		for (int32 i = 0; i < 500; ++i) { ascending.Push(i); descending.Push(499 - i); }
+		ascending.Sort();
+		descending.Sort();
+		assert_true(ArSorted(ascending) && ArSorted(descending), "sorted and reversed input");
+		assert_eq(0, descending[0], "reversed input starts at 0");
+	}
+
+	[test("sort.by")]
+	public static void TestSortBy() {
+		Core::Array<int32> v = { 1, 2, 3, 4, 5, 6 };
+		v.SortBy([](const int32& a, const int32& b) -> bool { return a > b; });
+		assert_eq(6, v[0], "a lambda: descending");
+		assert_eq(1, v[5], "smallest last");
+		Core::Array<ArPoint> points;
+		ArPoint p; p.y = 0.0f;
+		p.x = 3.0f; points.Push(p);
+		p.x = 1.0f; p.y = 7.0f; points.Push(p);
+		p.x = 2.0f; points.Push(p);
+		points.SortBy(ArByX);
+		assert_feq(1.0, points[0].x, 0.0, "a funcptr: by a field");
+		assert_feq(7.0, points[0].y, 0.0, "the other field travels with it");
+	}
+
+	[test("sort.strings")]
+	public static void TestSortStrings() {
+		Core::Array<Core::String> names;
+		names.Push(Core::String("delta"));
+		names.Push(Core::String("alpha"));
+		names.Push(Core::String("charlie"));
+		names.Push(Core::String("bravo"));
+		names.Sort();
+		assert_se("alpha", names[0].CStr(), "first");
+		assert_se("delta", names[3].CStr(), "last");
+	}
+
+	[test("reverse")]
+	public static void TestReverse() {
+		Core::Array<int32> even = { 1, 2, 3, 4 };
+		even.Reverse();
+		assert_eq(4, even[0], "even count");
+		Core::Array<int32> odd = { 1, 2, 3, 4, 5 };
+		odd.Reverse();
+		assert_eq(3, odd[2], "the middle stays");
+		assert_eq(5, odd[0], "odd count");
+		Core::Array<int32> empty;
+		empty.Reverse();
+		assert_true(empty.IsEmpty(), "empty");
+	}
+
+	[test("bounds")]
+	public static void TestBounds() {
+		Core::Array<int32> v = { 1, 2, 2, 2, 3, 4 };
+		assert_eq(1, v.LowerBound(2), "lower bound of a run");
+		assert_eq(4, v.UpperBound(2), "upper bound of a run");
+		assert_eq(0, v.LowerBound(0), "below every element");
+		assert_eq(6, v.UpperBound(9), "above every element");
+		Core::Array<int32> gap = { 1, 3, 5 };
+		assert_eq(2, gap.LowerBound(4), "an absent value: its insertion point");
+		assert_eq(2, gap.UpperBound(4), "the same point");
+		Core::Array<int32> down = { 5, 3, 1 };
+		assert_eq(1, down.LowerBoundBy(3, [](const int32& a, const int32& b) -> bool { return a > b; }), "a custom order");
+	}
+
+	[test("index_of")]
+	public static void TestIndexOf() {
+		Core::Array<int32> v = { 4, 8, 15, 16, 23, 42 };
+		assert_eq(3, v.IndexOf(16), "found");
+		assert_eq(-1, v.IndexOf(7), "absent");
+		assert_true(v.Contains(42) && !v.Contains(0), "contains");
+	}
+
+	[test("shrink_to_fit")]
+	public static void TestShrinkToFit() {
+		Core::Array<int32> v;
+		v.Reserve(64);
+		for (int32 i = 0; i < 5; ++i) v.Push(i * 10);
+		v.ShrinkToFit();
+		assert_eq(5, v.Capacity(), "exactly the elements");
+		assert_eq(40, v[4], "kept them");
+		Core::Array<int32> empty;
+		empty.Reserve(16);
+		empty.ShrinkToFit();
+		assert_eq(0, empty.Capacity(), "an empty array lets its buffer go");
+		empty.Push(1);
+		assert_eq(1, empty[0], "and still works");
+	}
+
+	[test("swap")]
+	public static void TestSwap() {
+		Core::Array<int32> a = { 1, 2, 3 };
+		Core::Array<int32> b = { 9, 8 };
+		a.Swap(b);
+		assert_eq(2, a.Count(), "a has b's elements");
+		assert_eq(9, a[0], "a[0]");
+		assert_eq(3, b[2], "b has a's elements");
+		a.Swap(a);
+		assert_eq(9, a[0], "swapping with itself changes nothing");
+	}
+
+	[test("resize")]
+	public static void TestResize() {
+		Core::Array<int32> v = { 1, 2, 3 };
+		v.Resize(6);
+		assert_eq(6, v.Count(), "grown");
+		assert_eq(3, v[2], "kept");
+		assert_eq(0, v[5], "new elements are zero");
+		v.Resize(2);
+		assert_eq(2, v.Count(), "shrunk");
+		assert_eq(2, v[1], "the head stays");
+		v.Resize(-3);
+		assert_true(v.IsEmpty(), "a negative size is empty");
+		Core::Array<ArHolder> objects;
+		objects.Resize(3);
+		assert_true(objects[2].text == nullptr && objects[2].id == 0, "objects are default-created");
+	}
+}

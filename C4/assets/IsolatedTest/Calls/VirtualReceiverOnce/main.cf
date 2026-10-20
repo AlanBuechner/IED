@@ -1,0 +1,32 @@
+// A virtual call evaluates its receiver once: the vptr is read from the same `this` the call passes
+// (BUG-069). Interface calls and calls through a call result count too.
+interface ICount { int32 Count(); }
+struct Shape : ICount {
+	public virtual int32 Area() { return 1; }
+	public int32 Count() { return 5; }
+};
+struct Circle : Shape { public override int32 Area() { return 7; } };
+
+int32 g_made = 0;
+Shape* g_obj = null;
+
+Shape* Make() { g_made = g_made + 1; return g_obj; }
+ICount* MakeCounter() { g_made = g_made + 1; return g_obj; }
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 main() {
+	g_obj = new Circle();
+	g_made = 0;
+	Check(Make()->Area() == 7, "a virtual call on a call result dispatches");
+	Check(g_made == 1, "the receiver expression runs once");
+	g_made = 0;
+	Check(MakeCounter()->Count() == 5, "an interface call on a call result dispatches");
+	Check(g_made == 1, "the interface receiver expression runs once");
+	if (g_failures != 0) printf("VirtualReceiverOnce failures: %d\n", g_failures);
+	return g_failures;
+}

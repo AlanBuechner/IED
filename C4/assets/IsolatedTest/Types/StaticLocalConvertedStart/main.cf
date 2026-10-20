@@ -1,0 +1,41 @@
+// BUG-229: a static or thread_local local starts as a constant converted to its type: null as a pointer, a
+// string as a const pointer, an int32 literal as an int64, a float or a bool, an integer as an enum's value.
+// main returns the failures.
+enum class Level : int16 { Low = 3, High = 9 }
+
+struct Node { public int32 value; }
+
+int32 Counts() {
+	thread_local int64 hits = 0;
+	thread_local float scale = 2;
+	thread_local Node* last = null;
+	thread_local const char8* name = "tl";
+	static uint8 small = 200;
+	static double ratio = 1;
+	static bool seen = 0;
+	static Level level = Level::High;
+	int32 failures = 0;
+	hits += 1;
+	scale *= 2.0f;
+	if (last == null) {
+		last = new Node;
+		last->value = (int32)hits;
+	}
+	if (name[0] != 't' || name[1] != 'l') failures++;
+	if (small != 200 || ratio != 1.0 || seen || level != Level::High) failures++;
+	if (last->value != 1) failures++;
+	return failures;
+}
+
+int64 Hits() {
+	thread_local int64 calls = 5;
+	calls += 1;
+	return calls;
+}
+
+int32 main() {
+	int32 failures = Counts() + Counts() + Counts();
+	Hits();
+	if (Hits() != 7) failures++;
+	return failures;
+}

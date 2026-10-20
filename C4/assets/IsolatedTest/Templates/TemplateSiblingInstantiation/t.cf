@@ -1,0 +1,18 @@
+template<T> struct Box {
+    T* data; int32 n;
+    [operator("create")] public void Init(int32 cap) { this.data = (T*)raw_alloc(cap * 8); this.n = 0; }
+    [operator("delete")] public void Finalize() { raw_free(this.data); }
+    public T Get(int32 i) { return this.data[i]; }
+    public void Set(int32 i, T v) { this.data[i] = v; }
+    public void Push(T v) { this.Set(this.n, v); this.n++; }
+}
+int32 main() {
+    Box<int32>* b = new Box<int32>(4);
+    b->Push(5); b->Push(6);
+    if (b->Get(1) != 6 || b->n != 2) return 1;
+    Box<float>* f = new Box<float>(2);
+    f->Push(1.5f);
+    if (f->Get(0) != 1.5f) return 2;
+    printf("TPL SIBLING OK\n");
+    return 0;
+}

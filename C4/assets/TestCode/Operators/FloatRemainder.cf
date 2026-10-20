@@ -1,0 +1,30 @@
+include "../Framework/Assert.ch"
+include "FloatRemainder.ch"
+
+const float kFolded = 7.5f % 2.0f;
+
+void TestFloatRemainder() {
+	float a = 5.5f;
+	AssertFloatEquals(1.5f, a % 2.0f, "float % float");
+	AssertFloatEquals(-1.5f, -5.5f % 2.0f, "the remainder takes the sign of the dividend");
+	double d = 10.25;
+	Assert(d % 3.0 == 1.25, "double % double");
+	AssertFloatEquals(1.5f, kFolded, "float % folds in a constant");
+	float f = 1.5f;
+	f++;
+	++f;
+	f--;
+	AssertFloatEquals(2.5f, f, "++ and -- step a float by 1");
+	int32[4] values;
+	values[0] = 10; values[1] = 20; values[2] = 30; values[3] = 40;
+	int32* p = &values[0];
+	p++;
+	AssertIntEquals(20, *p, "p++ moves to the next element");
+	++p;
+	AssertIntEquals(30, *p, "++p too");
+	int32* before = p--;
+	AssertIntEquals(30, *before, "p-- yields the old pointer");
+	AssertIntEquals(20, *p, "and moves back one element");
+	p += 2;
+	AssertIntEquals(40, *p, "p += n moves n elements");
+}

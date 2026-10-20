@@ -1,0 +1,77 @@
+// Types - Array Indexing Tests (implementation)
+include "../Framework/Assert.ch"
+include "ArrayIndexing.ch"
+
+void TestArrayIndexing() {
+	int32[5] arr;
+	arr[0] = 100;
+	arr[1] = 200;
+	arr[2] = 300;
+	arr[3] = 400;
+	arr[4] = 500;
+	
+	int32 val = arr[2];
+	AssertEqual(300, val);
+	
+	arr[0] = 999;
+	AssertEqual(999, arr[0]);
+}
+
+// Compound assignment through an index is a read-modify-write: arr[i] op= v must store
+// (arr[i] op v), not just v. Before the shared BuildArrayIndexAssignment brick this silently
+// stored only the right-hand side (arr[0]=5; arr[0] += 2 left 2, not 7) for every base kind.
+struct CIdx {
+	int32[4] data;
+};
+[operator("index")]
+int32 CIdxGet(int32 i) extends CIdx { return this.data[i]; }
+[operator("index_assign")]
+void CIdxSet(int32 i, int32 v) extends CIdx { this.data[i] = v; }
+
+struct CIdxRef {
+	int32[4] data;
+};
+[operator("index")]
+int32& CIdxRefGet(int32 i) extends CIdxRef { return this.data[i]; }
+
+int32 CIdxIdentity(int32 v) { return v; }
+
+void TestCompoundIndexAssignment() {
+	// Primitive array: += / *= / %= / -= all read-modify-write.
+	int32[4] arr;
+	arr[0] = 5; arr[1] = 6; arr[2] = 20; arr[3] = 8;
+	arr[0] += 2;
+	AssertEqual(7, arr[0]);
+	arr[1] *= 3;
+	AssertEqual(18, arr[1]);
+	arr[2] %= 7;
+	AssertEqual(6, arr[2]);
+	arr[3] -= 3;
+	AssertEqual(5, arr[3]);
+
+	// Pointer index: the same RMW through p[i].
+	int32* p = &arr[0];
+	p[0] += 10;
+	AssertEqual(17, arr[0]);
+
+	// Object with both operators: read via [operator("index")], store via [operator("index_assign")].
+	CIdx c;
+	c.data[0] = 5;
+	c[0] += 2;
+	AssertEqual(7, c.data[0]);
+
+	// Object whose indexer returns a reference: RMW through the returned lvalue.
+	CIdxRef r;
+	r.data[0] = 5;
+	r[0] += 2;
+	AssertEqual(7, r.data[0]);
+
+	// Expression position: an index compound assignment yields the stored value (C semantics),
+	// and works as a call argument.
+	int32[4] e;
+	e[0] = 5;
+	int32 res = (e[0] += 2);
+	AssertEqual(7, res);
+	res = CIdxIdentity(e[0] += 3);
+	AssertEqual(10, res);
+}

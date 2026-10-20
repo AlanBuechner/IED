@@ -1,0 +1,7 @@
+void DoThrow(int32 v) { throw v; }
+
+int32 main() {
+	DoThrow(13);
+	printf("SHOULD NOT REACH HERE\n");
+	return 0;
+}

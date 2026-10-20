@@ -1,0 +1,23 @@
+// BUG-233: a static method's name decays to a funcptr like a free function's: unqualified inside its type,
+// qualified outside it, through a namespace, as an argument, and into a func. main returns the failures.
+struct Scale {
+	public static int32 Twice(int32 x) { return x * 2; }
+	public static int32 Thrice(int32 x) { return x * 3; }
+	public static funcptr<int32(int32)> Pick(bool big) { return big ? Thrice : Twice; }
+}
+
+namespace Ops { struct Sign { public static int32 Negate(int32 x) { return -x; } } }
+
+int32 Apply(funcptr<int32(int32)> f, int32 x) { return f(x); }
+
+int32 main() {
+	int32 failures = 0;
+	funcptr<int32(int32)> twice = Scale::Twice;
+	if (twice(4) != 8) failures++;
+	if (Scale::Pick(true)(4) != 12 || Scale::Pick(false)(4) != 8) failures++;
+	if (Apply(Ops::Sign::Negate, 5) != -5) failures++;
+	func<int32(int32)> wrapped = Scale::Thrice;
+	if (wrapped(2) != 6) failures++;
+	if (twice == null || twice != Scale::Twice) failures++;
+	return failures;
+}

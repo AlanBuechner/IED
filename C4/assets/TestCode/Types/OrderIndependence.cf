@@ -1,0 +1,22 @@
+// Types - Order Independence Tests (implementation)
+include "../Framework/Assert.ch"
+include "OrderIndependence.ch"
+
+void TestOrderIndependence() {
+	// Case 1: by-value member of a LATER-defined type. The layout must have resolved OI_B's real size,
+	// so sizeof(OI_A) == sizeof(OI_B)+sizeof(int32) and b sits at offset 0. No forward decl was written.
+	AssertIntEquals(4, sizeof(OI_B), "later type OI_B has size 4");
+	AssertIntEquals(8, sizeof(OI_A), "OI_A = { OI_B b; int32 x } is 8 bytes (b@0, x@4)");
+
+	OI_A a;
+	a.b.y = 5;   // write through the by-value member of the later-defined type
+	a.x = 1;
+	AssertIntEquals(5, a.b.y, "write/read through by-value member of later type persists");
+	AssertIntEquals(1, a.x, "second field of OI_A at offset 4");
+
+	// Case 2: template instantiated with a LATER-defined type. The instantiation resolves OI_Used's layout.
+	OI_Wrap<OI_Used> w;
+	w.val.e = 9;
+	AssertIntEquals(9, w.val.e, "template of later type: write/read persists");
+	AssertIntEquals(4, sizeof(OI_Wrap<OI_Used>), "OI_Wrap<OI_Used> is 4 bytes (one int32)");
+}

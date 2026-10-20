@@ -1,0 +1,39 @@
+// A call that returns a reference names a location - a direct call, an operator method and a funcptr call alike
+// (BUG-218): it binds a reference, is assigned through, and is read. main returns the failures.
+class Cell {
+	public int32 value;
+	[operator("dereference")] public int32& Get() { return value; }
+	[operator("[]")] public int32& At(int32 i) { return value; }
+	[operator("+=")] public Cell& AddAssign(int32 amount) { value += amount; return *this; }
+}
+
+int32 g_counter = 0;
+int32& Counter() { return g_counter; }
+int32& Same(int32& x) { return x; }
+
+int32 main() {
+	int32 failures = 0;
+	Cell c;
+	c.value = 1;
+	int32& viaOperator = *c;
+	viaOperator = 5;
+	if (c.value != 5) failures += 1;
+	*c = 6;
+	if (c.value != 6) failures += 1;
+	int32& viaIndex = c[0];
+	viaIndex = 7;
+	if (c.value != 7 || c[0] != 7) failures += 1;
+	c += 3;
+	if (c.value != 10) failures += 1;
+	funcptr<int32&(int32&)> pass = Same;
+	int32& viaPointer = pass(c.value);
+	viaPointer = 11;
+	if (c.value != 11) failures += 1;
+	pass(c.value) = 12;
+	if (pass(c.value) != 12) failures += 1;
+	Counter() = 4;
+	int32& viaCall = Counter();
+	viaCall += 1;
+	if (g_counter != 5) failures += 1;
+	return failures;
+}

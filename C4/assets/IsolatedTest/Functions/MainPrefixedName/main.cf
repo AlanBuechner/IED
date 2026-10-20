@@ -1,0 +1,3 @@
+// BUG-147: `main_helper` is not the entry point; only a file-scope `main` is.
+int32 main_helper();
+int32 main() { return main_helper() == 7 ? 0 : 1; }

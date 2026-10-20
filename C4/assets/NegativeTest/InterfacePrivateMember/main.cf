@@ -1,0 +1,4 @@
+interface IShape {
+	private float Area();
+}
+int32 main() { return 0; }

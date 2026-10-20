@@ -1,0 +1,73 @@
+// Multiple return values (D-34): a function returns a list `[T1, T2]`, written `return [a, b];`, and a
+// destructuring hands each value to a new variable, an existing location or nowhere (`_`). The right side
+// is evaluated first, an object value moves out of the list (no copy), and the list works through templates,
+// packs, methods, function pointers and lambdas.
+int32 g_failures = 0;
+void Check(bool ok, const char* what) { if (!ok) { printf("FAIL %s\n", what); g_failures++; } }
+
+[float, bool] Parse(int32 v) { return [(float)v * 0.5f, v > 0]; }
+[int32, int32, int32] Three() { return [1, 2, 3]; }
+[int64, float] Converted() { return [7, 2]; }
+
+struct Point { public int32 x; public int32 y; }
+[Point, int32] Located() { Point p; p.x = 4; p.y = 5; return [p, 9]; }
+
+struct Res
+{
+	public int32 id;
+	[operator("create")] public void Init(int32 i) { id = i; }
+	[operator("copy")] public void Copy(const Res& o) { id = o.id; g_copies = g_copies + 1; }
+	[operator("delete")] public void Delete() { if (id != 0) g_deletes = g_deletes + 1; }
+}
+int32 g_copies = 0;
+int32 g_deletes = 0;
+[Res, int32] MakeRes(int32 i) { return [Res(i), i * 2]; }
+
+struct Box
+{
+	public int32 v;
+	public [int32, int32] Pair() { return [v, v + 1]; }
+}
+
+template<T> [T, bool] Find(T value) { return [value, true]; }
+template<...Ts> [Ts...] Pack(Ts... args) { return [args...]; }
+
+int32 main()
+{
+	[float half, bool positive] = Parse(5);
+	Check(half == 2.5f && positive, "declare both");
+	float a = 0.0f;
+	[a, bool neg] = Parse(-2);
+	Check(a == -1.0f && !neg, "assign one, declare one");
+	[int32 one, _, int32 three] = Three();
+	Check(one == 1 && three == 3, "discard the middle value");
+	int32 x = 1;
+	int32 y = 2;
+	[x, y] = [y, x];
+	Check(x == 2 && y == 1, "swap: the right side is evaluated first");
+	[int64 big, float f] = Converted();
+	Check(big == 7 && f == 2.0f, "values convert to the list's types");
+	[Point p, int32 k] = Located();
+	Check(p.x == 4 && p.y == 5 && k == 9, "an object in a list");
+	{
+		[Res r, int32 twice] = MakeRes(3);
+		Check(r.id == 3 && twice == 6, "a lifecycle object moves out of the list");
+	}
+	Check(g_copies == 0, "no copies");
+	Check(g_deletes == 1, "destroyed once");
+	Box b;
+	b.v = 10;
+	[int32 lo, int32 hi] = b.Pair();
+	Check(lo == 10 && hi == 11, "a method returning a list");
+	[int32 found, bool ok] = Find(42);
+	Check(found == 42 && ok, "a template returning a list");
+	[int32 p0, float p1, int8 p2] = Pack(1, 2.5f, (int8)3);
+	Check(p0 == 1 && p1 == 2.5f && p2 == 3, "a pack expanded into a list type and value");
+	funcptr<[float, bool](int32)> fp = Parse;
+	[float h2, bool pos2] = fp(4);
+	Check(h2 == 2.0f && pos2, "through a function pointer");
+	func<[int32, int32](int32)> lam = [](int32 v) -> [int32, int32] { return [v, -v]; };
+	[int32 l0, int32 l1] = lam(6);
+	Check(l0 == 6 && l1 == -6, "a lambda returning a list");
+	return g_failures;
+}

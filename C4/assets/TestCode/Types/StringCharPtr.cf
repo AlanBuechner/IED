@@ -1,0 +1,46 @@
+include "../Framework/Assert.ch"
+include "StringCharPtr.ch"
+
+// A string literal IS a char*: no conversion to assign, return, or pass it around.
+char* Ch_ReturnsLiteral() {
+    return "hello";            // literal -> char* (the core of task #1)
+}
+
+char* Ch_ReturnsVar() {
+    char* p = "world";         // literal assigned to a char*
+    return p;
+}
+
+void Ch_TakesCharPtr(char* s, int32 expectLen) {
+    Assert(strlen(s) == expectLen, "ch: strlen of passed char*");
+}
+
+void TestCharPtrLiteral() {
+    char* a = "abcde";         // literal -> char*
+    Assert(strlen(a) == 5, "ch: strlen(literal-as-char*)");
+    Assert(strcmp(a, "abcde") == 0, "ch: strcmp(literal-as-char*)");
+
+    char* b = Ch_ReturnsLiteral();
+    Assert(strlen(b) == 5, "ch: returned literal strlen");
+    Assert(strcmp(b, "hello") == 0, "ch: returned literal content");
+
+    char* c = Ch_ReturnsVar();
+    Assert(strcmp(c, "world") == 0, "ch: returned var content");
+
+    // literal passed directly to a C variadic (printf) and a char* parameter.
+    printf("ch direct printf: %s\n", "direct");
+    Ch_TakesCharPtr("abcde", 5);
+    Ch_TakesCharPtr(a, 5);
+}
+
+void TestCharPtrReturnParam() {
+    // char* flows through the same i8* ABI as every other C4 pointer.
+    char* p = "abcde";
+    Assert(strlen(p) == 5, "ch: strlen(char*)");
+    Assert(strcmp(p, "abcde") == 0, "ch: strcmp(char*)");
+
+    // null comparison still works (pointer equality, as for any C4 pointer).
+    char* z = null;
+    Assert(z == null, "ch: null char* is null");
+    Assert(p != null, "ch: non-null char* is not null");
+}

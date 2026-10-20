@@ -1,0 +1,123 @@
+// Math transforms: translation, scale and rotation matrices, Euler rotations, cameras and decomposition.
+
+include "math.ch"
+
+bool NearPoint(Math::FVector3 v, float x, float y, float z) { return Math::NearlyEqual(v, Math::FVector3(x, y, z), 1e-5f); }
+
+// A clip-space point after the perspective divide.
+Math::FVector3 Project(const Math::Mat4& m, Math::FVector3 p) {
+	Math::FVector4 clip = m * Math::FVector4(p, 1.0f);
+	return Math::FVector3(clip) / clip.w;
+}
+
+[test("math.transform")]
+class MathTransformTests {
+	[test("translation_and_scale")]
+	public static void TestTranslationAndScale() {
+		Math::Mat4 move = Math::Translation(Math::FVector3(1.0f, -2.0f, 3.0f));
+		assert_true(NearPoint(move.TransformPoint(Math::FVector3(1.0f, 1.0f, 1.0f)), 2.0f, -1.0f, 4.0f), "translation moves points");
+		assert_true(move.TransformDirection(Math::FVector3::Right) == Math::FVector3::Right, "not directions");
+		assert_true(Math::TranslationOf(move) == Math::FVector3(1.0f, -2.0f, 3.0f), "and is read back");
+		Math::Mat4 grow = Math::Scaling(Math::FVector3(2.0f, 3.0f, -1.0f));
+		assert_true(NearPoint(grow.TransformPoint(Math::FVector3(1.0f, 1.0f, 1.0f)), 2.0f, 3.0f, -1.0f), "scaling per axis");
+		assert_true(Math::TranslationOf(grow) == Math::FVector3::Zero, "scaling has no translation");
+	}
+
+	[test("rotation")]
+	public static void TestRotation() {
+		Math::Mat4 yaw = Math::Rotation(Math::kHalfPi, Math::FVector3::Up);
+		assert_true(NearPoint(yaw.TransformDirection(Math::FVector3::Right), 0.0f, 0.0f, -1.0f), "about up, right turns to backward");
+		assert_true(NearPoint(yaw.TransformDirection(Math::FVector3::Forward), 1.0f, 0.0f, 0.0f), "and forward to right");
+		Math::Mat4 pitch = Math::Rotation(Math::kHalfPi, Math::FVector3::Right);
+		assert_true(NearPoint(pitch.TransformDirection(Math::FVector3::Up), 0.0f, 0.0f, 1.0f), "about right, up turns to forward");
+		Math::Mat4 roll = Math::Rotation(Math::kHalfPi, Math::FVector3::Forward);
+		assert_true(NearPoint(roll.TransformDirection(Math::FVector3::Right), 0.0f, 1.0f, 0.0f), "about forward, right turns to up");
+		assert_true(Math::NearlyEqual(Math::Rotation(0.6f, Math::FVector3(0.0f, 4.0f, 0.0f)), Math::Rotation(0.6f, Math::FVector3::Up), 1e-6f),
+			"the axis is normalized");
+		assert_true(Math::NearlyEqual(Math::Rotation(0.0f, Math::FVector3(1.0f, 2.0f, 3.0f)), Math::Mat4::Identity, 1e-6f), "no angle, no turn");
+		Math::FVector3 axis = Math::Normalized(Math::FVector3(1.0f, 1.0f, 1.0f));
+		assert_true(NearPoint(Math::Rotation(Math::kTau / 3.0f, axis).TransformDirection(Math::FVector3::Right), 0.0f, 1.0f, 0.0f),
+			"a third of a turn about the diagonal cycles the axes");
+		assert_true(Math::NearlyEqual(Math::Rotation(0.8f, axis), Math::ToMat4(Math::AngleAxis(0.8f, axis)), 1e-5f), "the quat agrees");
+	}
+
+	[test("euler_rotation")]
+	public static void TestEulerRotation() {
+		Math::FVector3 e = Math::FVector3(0.4f, -0.9f, 1.3f);
+		Math::Mat4 composed = Math::Rotation(e.y, Math::FVector3::Up) * Math::Rotation(e.x, Math::FVector3::Right) * Math::Rotation(e.z, Math::FVector3::Forward);
+		assert_true(Math::NearlyEqual(Math::RotationYXZ(e), composed, 1e-5f), "yaw * pitch * roll");
+		assert_true(Math::NearlyEqual(Math::RotationYXZ(Math::FVector3::Zero), Math::Mat4::Identity, 0.0f), "zero angles");
+		Math::Mat4 justYaw = Math::RotationYXZ(Math::FVector3(0.0f, 0.5f, 0.0f));
+		assert_true(Math::NearlyEqual(justYaw, Math::Rotation(0.5f, Math::FVector3::Up), 1e-6f), "one angle alone");
+	}
+
+	[test("transform_matrix")]
+	public static void TestTransformMatrix() {
+		Math::FVector3 position = Math::FVector3(10.0f, 0.0f, -5.0f);
+		Math::FVector3 rotation = Math::FVector3(0.0f, Math::kHalfPi, 0.0f);
+		Math::FVector3 scale = Math::FVector3(2.0f, 1.0f, 1.0f);
+		Math::Mat4 world = Math::TransformMatrix(position, rotation, scale);
+		assert_true(NearPoint(world.TransformPoint(Math::FVector3::Right), 10.0f, 0.0f, -7.0f), "scale, then rotate, then move");
+		assert_true(NearPoint(world.TransformPoint(Math::FVector3::Zero), 10.0f, 0.0f, -5.0f), "the origin lands on the position");
+		Math::Mat4 byQuat = Math::TransformMatrix(position, Math::FromEuler(rotation), scale);
+		assert_true(Math::NearlyEqual(world, byQuat, 1e-5f), "the quat form agrees with the Euler form");
+		Math::FVector3 e = Math::FVector3(-0.3f, 2.0f, 0.8f);
+		assert_true(Math::NearlyEqual(Math::TransformMatrix(position, e, scale), Math::TransformMatrix(position, Math::FromEuler(e), scale), 1e-5f),
+			"for every angle");
+	}
+
+	[test("look_at")]
+	public static void TestLookAt() {
+		Math::Mat4 view = Math::LookAt(Math::FVector3(0.0f, 0.0f, -5.0f), Math::FVector3::Zero, Math::FVector3::Up);
+		assert_true(NearPoint(view.TransformPoint(Math::FVector3::Zero), 0.0f, 0.0f, 5.0f), "the target is ahead on +Z");
+		assert_true(NearPoint(view.TransformPoint(Math::FVector3(0.0f, 0.0f, -5.0f)), 0.0f, 0.0f, 0.0f), "the eye is the origin");
+		assert_true(NearPoint(view.TransformPoint(Math::FVector3(1.0f, 2.0f, 0.0f)), 1.0f, 2.0f, 5.0f), "right stays right, up stays up");
+		Math::Mat4 side = Math::LookAt(Math::FVector3(3.0f, 0.0f, 0.0f), Math::FVector3::Zero, Math::FVector3::Up);
+		assert_true(NearPoint(side.TransformPoint(Math::FVector3::Zero), 0.0f, 0.0f, 3.0f), "looking down -X");
+		assert_true(NearPoint(side.TransformPoint(Math::FVector3(0.0f, 0.0f, 1.0f)), 1.0f, 0.0f, 3.0f), "turned left to face -X, world +Z is on the right");
+		assert_feq(1.0, side.Determinant(), 1e-5, "a view is a rigid motion");
+	}
+
+	[test("perspective")]
+	public static void TestPerspective() {
+		float nearZ = 0.5f;
+		float farZ = 100.0f;
+		Math::Mat4 projection = Math::Perspective(Math::kHalfPi, 2.0f, nearZ, farZ);
+		assert_feq(0.0, Project(projection, Math::FVector3(0.0f, 0.0f, nearZ)).z, 1e-6, "the near plane is depth 0");
+		assert_feq(1.0, Project(projection, Math::FVector3(0.0f, 0.0f, farZ)).z, 1e-6, "the far plane is depth 1");
+		Math::FVector3 top = Project(projection, Math::FVector3(0.0f, 10.0f, 10.0f));
+		assert_feq(1.0, top.y, 1e-6, "a 90 degree fov reaches y = z at the top edge");
+		Math::FVector3 edge = Project(projection, Math::FVector3(20.0f, 0.0f, 10.0f));
+		assert_feq(1.0, edge.x, 1e-6, "the aspect widens x");
+		assert_feq(1.0, (projection * Math::FVector4(0.0f, 0.0f, 7.0f, 1.0f)).w / 7.0f, 1e-6, "w is the view depth");
+		assert_true(Project(projection, Math::FVector3(0.0f, 0.0f, 50.0f)).z > Project(projection, Math::FVector3(0.0f, 0.0f, 5.0f)).z,
+			"farther is deeper");
+	}
+
+	[test("orthographic")]
+	public static void TestOrthographic() {
+		Math::Mat4 ortho = Math::Orthographic(-4.0f, 4.0f, -2.0f, 2.0f, 1.0f, 11.0f);
+		assert_true(NearPoint(ortho.TransformPoint(Math::FVector3(-4.0f, -2.0f, 1.0f)), -1.0f, -1.0f, 0.0f), "the near bottom left corner");
+		assert_true(NearPoint(ortho.TransformPoint(Math::FVector3(4.0f, 2.0f, 11.0f)), 1.0f, 1.0f, 1.0f), "the far top right corner");
+		assert_true(NearPoint(ortho.TransformPoint(Math::FVector3(0.0f, 0.0f, 6.0f)), 0.0f, 0.0f, 0.5f), "the middle");
+		Math::Mat4 offset = Math::Orthographic(0.0f, 10.0f, 0.0f, 5.0f, 0.0f, 1.0f);
+		assert_true(NearPoint(offset.TransformPoint(Math::FVector3(5.0f, 2.5f, 0.0f)), 0.0f, 0.0f, 0.0f), "an off-center box");
+	}
+
+	[test("decompose")]
+	public static void TestDecompose() {
+		Math::FVector3 position = Math::FVector3(1.0f, -2.0f, 3.5f);
+		Math::FVector3 rotation = Math::FVector3(0.3f, -1.1f, 0.7f);
+		Math::FVector3 scale = Math::FVector3(2.0f, 0.5f, 3.0f);
+		Math::Transform parts = Math::Decompose(Math::TransformMatrix(position, rotation, scale));
+		assert_true(NearPoint(parts.position, 1.0f, -2.0f, 3.5f), "the position");
+		assert_true(NearPoint(parts.rotation, 0.3f, -1.1f, 0.7f), "the rotation");
+		assert_true(NearPoint(parts.scale, 2.0f, 0.5f, 3.0f), "the scale");
+		Math::Transform plain = Math::Decompose(Math::Mat4::Identity);
+		assert_true(plain.position == Math::FVector3::Zero && plain.rotation == Math::FVector3::Zero && plain.scale == Math::FVector3::One,
+			"the identity");
+		Math::Transform flat = Math::Decompose(Math::Scaling(Math::FVector3(1.0f, 0.0f, 1.0f)));
+		assert_feq(0.0, flat.scale.y, 0.0, "a zero scale axis");
+		assert_true(flat.position == Math::FVector3::Zero, "keeps the rest");
+	}
+}

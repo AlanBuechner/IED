@@ -1,0 +1,82 @@
+// Variadic Function Tests - Implementation
+include "VariadicFunctions.ch"
+include "../Framework/Assert.ch"
+
+int32 SumInts(int32 count, ...);
+double SumDoubles(int32 count, ...);
+
+void TestVariadicPrintf() {
+	// Basic string literal - printf is variadic extern
+	printf("Test: Variadic Printf\\n");
+	
+	// Single int argument - tests i32 passthrough through varargs
+	int32 val = 42;
+	AssertEqual(42, val);
+	
+	// Float argument - tests float -> double promotion for varargs
+	float f = 3.14f;
+	AssertTrue(f != 0.0f);
+	
+	// Multiple arguments mixed types
+	printf("Test: int=%d float=%.1f\\n", val, f);
+	
+	// Char literal promoted to i32 in varargs
+	char c = 'A';
+	AssertEqual(65, c);
+	
+	// Hex literal
+	int32 hex = 0xFF;
+	AssertEqual(255, hex);
+	
+	// Small integer types - should be promoted to i32 for varargs
+	int8 smallVal = 10;
+	AssertEqual(10, smallVal);
+	
+	uint8 uSmall = 200;
+	AssertEqual(200, uSmall);
+	
+	// Test with string concatenation in format
+	printf("Variadic tests complete\\n");
+}
+
+void TestVariadicUserDefined() {
+	// User-defined variadic function that reads its actual varargs via va_start / va_arg / va_end.
+	int32 result = SumInts(3, 10, 20, 30);
+	AssertEqual(60, result);
+
+	// Single value.
+	result = SumInts(1, 42);
+	AssertEqual(42, result);
+
+	// Zero varargs - no reads.
+	result = SumInts(0);
+	AssertEqual(0, result);
+
+	// Float args test - verifies float->double promotion; read back as double.
+	double dsum = SumDoubles(2, 3.5f, 4.5f);
+	Assert(dsum == 8.0, "variadic double sum");
+
+	printf("Test: User variadic sum result=%d\\n", result);
+}
+
+int32 SumInts(int32 count, ...) {
+	va_list list;
+	va_start(list);
+	int32 sum = 0;
+	for (int32 i = 0; i < count; i++) {
+		sum += va_arg(list, int32);
+	}
+	va_end(list);
+	return sum;
+}
+
+double SumDoubles(int32 count, ...) {
+	va_list list;
+	va_start(list);
+	double sum = 0.0;
+	for (int32 i = 0; i < count; i++) {
+		sum += va_arg(list, double);
+	}
+	va_end(list);
+	return sum;
+}

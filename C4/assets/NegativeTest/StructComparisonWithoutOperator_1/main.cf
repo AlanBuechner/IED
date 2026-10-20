@@ -1,0 +1,2 @@
+struct A { int32 x; }
+int main() { A a; A b; return (a == b) ? 0 : 1; }

@@ -1,0 +1,84 @@
+// Platform memory rights hold: under Scripting::Guard a write to a read-only page, a read of a no-access, reserved,
+// decommitted or released page and a call into a page without execute rights each fault with the address they touched,
+// and the same accesses work once the pages allow them. Built with --script-host for the guard. main returns the failures.
+include "bedrock.ch"
+include "scripting.ch"
+
+const uint32 kAccessViolation = 3221225477;   // 0xC0000005
+const uint32 kRead = 0;
+const uint32 kWrite = 1;
+const uint32 kExecute = 8;
+const uint8 kReturn = 195;                     // x64 `ret`
+
+struct Probe
+{
+	public void* address;
+	public int32 value;
+}
+
+void ReadByte(void* context) { Probe* probe = (Probe*)context; probe->value = ((uint8*)probe->address)[0]; }
+void WriteByte(void* context) { Probe* probe = (Probe*)context; ((uint8*)probe->address)[0] = 7; }
+void Execute(void* context) { ((funcptr<void()>)((Probe*)context)->address)(); }
+
+// Whether `access` on `address` faults as an access violation of `kind` at that address.
+bool Faults(funcptr<void(void*)> access, void* address, uint32 kind) {
+	Probe probe;
+	probe.address = address;
+	Scripting::Fault fault;
+	if (Scripting::Guard(access, (void*)&probe, &fault)) return false;
+	return fault.code == kAccessViolation && fault.write == kind && fault.target == (uint64)address;
+}
+
+bool Runs(funcptr<void(void*)> access, void* address) {
+	Probe probe;
+	probe.address = address;
+	Scripting::Fault fault;
+	return Scripting::Guard(access, (void*)&probe, &fault);
+}
+
+int32 CheckReadOnly(int64 page) {
+	int32 failures = 0;
+	void* page1 = Platform::Allocate(page, Platform::Protection::Read);
+	if (!Faults(WriteByte, page1, kWrite)) failures++;
+	if (!Runs(ReadByte, page1)) failures++;
+	Platform::Protect(page1, page, Platform::Protection::ReadWrite);
+	if (!Runs(WriteByte, page1) || ((uint8*)page1)[0] != 7) failures++;
+	Platform::Release(page1);
+	return failures;
+}
+
+int32 CheckNoAccess(int64 page) {
+	int32 failures = 0;
+	void* none = Platform::Allocate(page, Platform::Protection::None);
+	if (!Faults(ReadByte, none, kRead) || !Faults(WriteByte, (void*)((uint8*)none + 100), kWrite)) failures++;
+	Platform::Release(none);
+	void* reserved = Platform::Reserve(page);
+	if (!Faults(ReadByte, reserved, kRead)) failures++;
+	Platform::Commit(reserved, page, Platform::Protection::ReadWrite);
+	if (!Runs(ReadByte, reserved)) failures++;
+	Platform::Decommit(reserved, page);
+	if (!Faults(ReadByte, reserved, kRead)) failures++;
+	Platform::Release(reserved);
+	if (!Faults(ReadByte, reserved, kRead)) failures++;
+	return failures;
+}
+
+int32 CheckExecute(int64 page) {
+	int32 failures = 0;
+	void* code = Platform::Allocate(page, Platform::Protection::ReadWrite);
+	((uint8*)code)[0] = kReturn;
+	if (!Faults(Execute, code, kExecute)) failures++;
+	Platform::Protect(code, page, Platform::Protection::ReadExecute);
+	Platform::FlushInstructionCache(code, page);
+	if (!Runs(Execute, code)) failures++;
+	if (!Faults(WriteByte, code, kWrite)) failures++;
+	Platform::Release(code);
+	return failures;
+}
+
+int32 main() {
+	int64 page = Platform::PageSize();
+	int32 failures = CheckReadOnly(page) + CheckNoAccess(page) + CheckExecute(page);
+	printf("protection faults: %d failures\n", failures);
+	return failures;
+}

@@ -1,0 +1,23 @@
+// Operators - Addition Tests (implementation)
+include "../Framework/Assert.ch"
+include "Addition.ch"
+
+void TestAddition() {
+	int32 a = 5 + 3;
+	AssertEqual(8, a);
+
+	int32 b = -10 + 20;
+	AssertEqual(10, b);
+
+	// Regression: the lexer used to append '+' and '-' to a numeric token, so `5+3` lexed as one
+	// malformed number "5+3" (silently parsed to 5) and `5-3` became "5-3". Operators must now be
+	// recognized even with no surrounding whitespace.
+	int32 c = 5+3;
+	AssertEqual(8, c);
+
+	int32 d = 10-4;
+	AssertEqual(6, d);
+
+	float e = 5.0f-1.0f;
+	AssertFloatEquals(4.0f, e, "float subtraction without spaces");
+}

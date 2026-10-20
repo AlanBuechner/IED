@@ -1,0 +1,8 @@
+struct VBag { int32 n; }
+struct VIt { int32 i; }
+[operator("begin")] VIt Begin() extends VBag { VIt it; it.i = 0; return it; }
+[operator("end")] VIt End() extends VBag { VIt it; it.i = this.n; return it; }
+[operator("notequal")] bool NotEqual(const VIt& o) extends VIt { return this.i != o.i; }
+[operator("dereference")] int32 Deref() extends VIt { return this.i; }
+[operator("increment")] VIt Inc() extends VIt { VIt it; it.i = this.i + 1; return it; }
+int32 main() { VBag b; b.n = 3; for (int32& v : b) v = 1; return 0; }

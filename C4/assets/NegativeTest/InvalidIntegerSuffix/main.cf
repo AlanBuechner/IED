@@ -1,0 +1,2 @@
+int32 g = 10q;
+int32 main() { return 0; }

@@ -1,0 +1,7 @@
+int main() {
+    int32[4] arr;
+    int32* a = &arr[0];
+    int32* b = &arr[3];
+    a -= b;
+    return 0;
+}

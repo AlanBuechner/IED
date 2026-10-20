@@ -1,0 +1,4 @@
+int32 Find(int32 v) {
+	for (int32 i = 0; i < 10; ++i) if (i == v) return i;
+}
+int32 main() { return Find(2); }

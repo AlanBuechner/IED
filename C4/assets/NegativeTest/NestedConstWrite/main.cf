@@ -1,0 +1,4 @@
+struct Inner { public int32 n; }
+struct Outer { public Inner inner; public int32[4] arr; }
+Outer gObj;
+int32 main(){ const Outer* p = &gObj; p->inner.n = 5; return 0; }

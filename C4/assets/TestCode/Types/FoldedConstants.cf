@@ -1,0 +1,29 @@
+// Types - Folded Constants Tests (implementation)
+include "../Framework/Assert.ch"
+include "FoldedConstants.ch"
+
+// BUG-190: a const global whose value is known is read as its value, yet still has storage to point at.
+const int32 kFcCount = 8;
+const int32 kFcMask = kFcCount - 1;
+const float kFcScale = 0.25f;
+const bool kFcEnabled = true;
+namespace FcLimits { const int64 kHuge = 6000000000; }
+
+int32 FcSumMasked(int32 shift) {
+	int32 sum = 0;
+	for (int32 i = 0; i < kFcCount; ++i) sum += (i + shift) & kFcMask;
+	return sum;
+}
+
+void TestFoldedConstants() {
+	AssertIntEquals(28, FcSumMasked(3), "a loop bound and a mask");
+	const int32* p = &kFcCount;
+	AssertIntEquals(8, *p, "the constant still has storage");
+	const float* scale = &kFcScale;
+	AssertFloatEquals(0.25f, *scale, "a float constant's storage");
+	int32[kFcCount] cells;
+	cells[kFcMask] = 5;
+	AssertIntEquals(5, cells[7], "an array sized by a constant");
+	Assert(kFcEnabled && FcLimits::kHuge == 6000000000, "bool and namespaced int64 constants");
+	AssertFloatEquals(2.0f, kFcScale * (float)kFcCount, "a float constant in arithmetic");
+}

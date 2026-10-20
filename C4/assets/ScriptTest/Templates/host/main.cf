@@ -1,0 +1,46 @@
+// A script instantiates host templates with host and script types: an instance the host made is the host's (its
+// code and its static data members, so the count is shared), one it never made is the script's own (section 4.3).
+// The script's own templates work as in a program.
+include "scripttest.ch"
+include "boxes.ch"
+
+namespace Store
+{
+	void MakeHostBox()
+	{
+		Box<int32> box;
+		box.Set(3);
+	}
+
+	int32 HostBoxesMade() { return Box<int32>::s_made; }
+	int32 HostLargest(int32 a, int32 b) { return Largest(a, b); }
+}
+
+int32 Call(Scripting::Script* script, const char* name)
+{
+	funcptr<int32()> fn = (funcptr<int32()>)script->Address(name);
+	return fn == nullptr ? -1000 : fn();
+}
+
+void CheckTemplates(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	Store::MakeHostBox();
+	checks.Equal(1, Store::HostBoxesMade(), "the host made one box");
+	checks.Equal(13, Call(script, "SharedInstance"), "the script uses the host's Box<int32> and Largest<int32>");
+	checks.Equal(3, Store::HostBoxesMade(), "the script's Box<int32>s count in the host's static member");
+	checks.Equal(2, Call(script, "OwnInstanceCount"), "Box<float> is the script's own, with its own count");
+	checks.Equal(8, Call(script, "BoxOfScriptType"), "a host template over a script type");
+	checks.Equal(48, Call(script, "ScriptTemplates"), "the script's own templates");
+	checks.Equal(9, Store::HostLargest(2, 9), "the host's instance still works");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Templates");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "templates", "templates.cf"));
+	if (script->Ok()) CheckTemplates(script, checks);
+	script->Unload();
+	return checks.End("Templates");
+}

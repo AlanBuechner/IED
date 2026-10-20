@@ -1,0 +1,1 @@
+int32 main() { int32 x = 1; funcptr<int32()> f = [x]() -> int32 { return x; }; return f(); }

@@ -1,0 +1,53 @@
+// MacroTest - C/C++-style macro support: #define (object + function-like), #undef,
+// include-chain inheritance, string-literal safety, and composition.
+include "MacroDefs.ch"
+include "ChainB.ch"
+
+int32 g_fail = 0;
+
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+
+// Object-like macro in expression + type position.
+MYTYPE TypePosVar() { return MAX_HP; }          // int32 ... { return 100; }
+int32 UseObjectLike() { return clamp(150, 0, MAX_HP); }  // clamp to 100
+
+// Function-like macro with 2+ params and parenthesised precedence.
+int32 UseFunctionLike() {
+	int32 a = clamp(10, 0, 5);   // -> ((10) < (0) ? (0) : ((10) > (5) ? (5) : (10))) = 5
+	int32 b = clamp(-3, 0, 5);   // -> 0
+	int32 c = clamp(3, 0, 5);    // -> 3
+	return a + b + c;            // 8
+}
+
+// Macro composition: one macro's body uses another.
+#define DOUBLE(x) (x * 2)
+int32 UseComposition() { return DOUBLE(MAX_HP / 10); }   // 2 * (100/10) = 20
+
+// #undef then redefine changes the value.
+#define DUP 1
+int32 g_dup_a = DUP;      // 1
+#undef DUP
+#define DUP 2
+int32 g_dup_b = DUP;      // 2
+
+// Macro inside a string literal is NOT expanded.
+const char* StrSafe() { return "MAX_HP stays MAX_HP"; }
+
+// Include-chain propagation: CHAIN_VAL (ChainA) and CHAIN_B (ChainB) both visible here.
+int32 UseChain() { return CHAIN_VAL + CHAIN_B; }   // 7 + 42 = 49
+
+int32 main() {
+	Check(TypePosVar() == 100, "object-like type+expr");
+	Check(UseObjectLike() == 100, "clamp high");
+	Check(UseFunctionLike() == 8, "function-like clamp sum");
+	Check(UseComposition() == 20, "macro composition");
+	Check(g_dup_a == 1 && g_dup_b == 2, "undef + redefine");
+	Check(strcmp(StrSafe(), "MAX_HP stays MAX_HP") == 0, "string literal not expanded");
+	Check(UseChain() == 49, "include-chain macro inheritance");
+
+	if (g_fail) { printf("MACRO TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("MACRO TESTS OK\n");
+	return 0;
+}

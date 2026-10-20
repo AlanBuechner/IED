@@ -1,0 +1,27 @@
+// Object template probe - does `template<T> struct Box { T value; ... }` compile today?
+template<T> struct Box {
+    T value;
+
+    [operator("create")] public void Init(T v) {
+        this.value = v;
+    }
+
+    public T Get() {
+        return this.value;
+    }
+}
+
+int32 main() {
+    Box<int32> b;
+    b.Init(41);
+    int32 x = b.Get();
+    if (x != 41) { printf("FAIL: got %d\n", x); return 1; }
+
+    Box<uint64> u;
+    u.Init(99u);
+    uint64 y = u.Get();
+    if (y != 99u) { printf("FAIL: got %llu\n", y); return 1; }
+
+    printf("OBJECT TEMPLATE OK\n");
+    return 0;
+}

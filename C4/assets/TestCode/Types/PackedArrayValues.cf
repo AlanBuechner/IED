@@ -1,0 +1,165 @@
+// Types - packed T[N] as a value type (D-36): locals, parameters, returns, fields, arithmetic with scalar
+// broadcast, lane-wise comparisons into packed bool masks, and assignment to and from a class's array view.
+include "../Framework/Assert.ch"
+include "PackedArrayValues.ch"
+
+class PAVec4 {
+	public union { packed float x, y, z, w; packed float[4] data; };
+	[operator("create")] public void Init(packed float[4] lanes) { this.data = lanes; }
+	public packed float[4] Lanes() const { return this.data; }
+}
+
+class PAColor { public union { packed float x, y, z, w; packed float r, g, b, a; }; }
+
+struct PAHolder { int32 tag; packed float[4] v; float tail; }
+
+template<T, int32 N> class PALanes {
+	public union { packed T[N] data; };
+	public T First() const { return this.data[0]; }
+}
+
+packed float[4] gPALanes = { 1.0f, 2.0f, 3.0f, 4.0f };
+
+packed float[4] PATwice(packed float[4] v) { return v * 2.0f; }
+float PALaneSum(packed float[4] v) { return v[0] + v[1] + v[2] + v[3]; }
+
+void TestPackedArrayArithmetic() {
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] b = { 4.0f, 3.0f, 2.0f, 1.0f };
+	packed float[4] s = a + b;
+	AssertFloatEquals(5.0f, s[0], "packed add lane 0");
+	AssertFloatEquals(5.0f, s[3], "packed add lane 3");
+	packed float[4] d = a - b;
+	AssertFloatEquals(-3.0f, d[0], "packed sub");
+	packed float[4] m = a * b;
+	AssertFloatEquals(6.0f, m[1], "packed mul");
+	packed float[4] q = a / b;
+	AssertFloatEquals(4.0f, q[3], "packed div");
+	packed float[4] l = 2.0f * a;
+	packed float[4] r = a * 2.0f;
+	AssertFloatEquals(6.0f, l[2], "scalar broadcast on the left");
+	AssertFloatEquals(6.0f, r[2], "scalar broadcast on the right");
+	packed float[4] w = a + 1;
+	AssertFloatEquals(2.0f, w[0], "int scalar converts to the element type");
+	packed float[4] n = -a;
+	AssertFloatEquals(-2.0f, n[1], "packed negate");
+	a += b;
+	AssertFloatEquals(5.0f, a[3], "packed compound add");
+	a *= 0.5f;
+	AssertFloatEquals(2.5f, a[3], "packed compound scalar mul");
+	AssertFloatEquals(20.0f, PALaneSum(PATwice(b)), "pass and return in a register");
+	packed double[2] dd = { 1.5, 2.5 };
+	packed double[2] dsum = dd + dd;
+	AssertFloatEquals(5.0f, (float)dsum[1], "double lanes");
+}
+
+void TestPackedArrayIndexing() {
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] partial = { 7.0f, 8.0f };
+	AssertFloatEquals(8.0f, partial[1], "braced init");
+	AssertFloatEquals(0.0f, partial[2], "missing braced lanes are zero");
+	a = { 5.0f, 6.0f, 7.0f, 8.0f };
+	AssertFloatEquals(8.0f, a[3], "braced assignment");
+	int32 i = 3;
+	a[i] = 9.0f;
+	AssertFloatEquals(9.0f, a[3], "runtime index write");
+	AssertFloatEquals(9.0f, a[i], "runtime index read");
+	packed float[4] c = a;
+	c[0] = 100.0f;
+	AssertFloatEquals(5.0f, a[0], "a copy is a separate value");
+	packed float[4]* p = &a;
+	(*p)[1] = 77.0f;
+	AssertFloatEquals(77.0f, a[1], "through a pointer to the whole vector");
+}
+
+void TestPackedArrayAliases() {
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	PAVec4 v = PAVec4(a);
+	AssertFloatEquals(1.0f, v.x, "create from a packed value x");
+	AssertFloatEquals(4.0f, v.w, "create from a packed value w");
+	packed float[4] back = v.data;
+	AssertFloatEquals(2.0f, back[1], "array view read");
+	v.data = { 9.0f, 8.0f, 7.0f, 6.0f };
+	AssertFloatEquals(9.0f, v.x, "array view write");
+	AssertFloatEquals(7.0f, v.Lanes()[2], "method returns the vector");
+	v.data[2] = 11.0f;
+	AssertFloatEquals(11.0f, v.z, "array view lane write");
+	packed float[4] rev = v.wzyx;
+	AssertFloatEquals(6.0f, rev[0], "a run is a packed value");
+	packed float[2] two = v.xw;
+	AssertFloatEquals(6.0f, two[1], "a short run is a packed value");
+	PAColor c;
+	c.r = 5.0f;
+	c.a = 2.0f;
+	AssertFloatEquals(5.0f, c.x, "lane views alias: r is x");
+	AssertFloatEquals(2.0f, c.w, "lane views alias: a is w");
+	c.y = 3.0f;
+	AssertFloatEquals(3.0f, c.g, "lane views alias: y is g");
+}
+
+void TestPackedArrayIntegers() {
+	packed uint32[4] u = { 4294967295u, 8u, 1u, 0u };
+	packed uint32[4] half = u / 2u;
+	Assert(half[0] == 2147483647u, "unsigned lanes divide unsigned");
+	packed bool[4] ug = u > 2u;
+	Assert(ug[0] && ug[1] && !ug[2] && !ug[3], "unsigned lanes compare unsigned");
+	packed uint32[4] sh = u >> 1u;
+	Assert(sh[0] == 2147483647u, "unsigned lanes shift logically");
+	packed int32[4] ints = { -8, 8, 9, 10 };
+	packed int32[4] ish = ints >> 1;
+	Assert(ish[0] == -4 && ish[1] == 4, "signed lanes shift arithmetically");
+	packed int32[4] im = 3 * ints;
+	Assert(im[3] == 30, "int broadcast on the left");
+	packed int32[4] md = ints % 3;
+	Assert(md[1] == 2 && md[2] == 0, "lane remainder");
+	packed int32[4] bits = ints & 3;
+	Assert(bits[2] == 1, "lane and");
+	packed int32[4] ors = ints | 1;
+	Assert(ors[1] == 9, "lane or");
+	packed int32[4] xr = ints ^ ints;
+	Assert(xr[2] == 0, "lane xor");
+	packed int32[4] inv = ~ints;
+	Assert(inv[1] == -9, "lane not");
+	packed int32[4] shl = ints << 2;
+	Assert(shl[1] == 32, "lane shift left");
+}
+
+void TestPackedArrayMasks() {
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed bool[4] eq = a == a;
+	Assert(eq[0] && eq[1] && eq[2] && eq[3], "lane-wise equality");
+	packed bool[4] lt = a < 2.5f;
+	Assert(lt[0] && lt[1] && !lt[2] && !lt[3], "lane-wise compare with a broadcast scalar");
+	packed bool[4] mid = (a > 1.5f) & !(a > 3.5f);
+	Assert(!mid[0] && mid[1] && mid[2] && !mid[3], "masks combine with & and !");
+	packed bool[4] either = lt | (a == 4.0f);
+	Assert(either[0] && !either[2] && either[3], "masks combine with |");
+	packed bool[4] same = mid == mid;
+	Assert(same[0] && same[3], "masks compare with ==");
+}
+
+void TestPackedArrayStorage() {
+	Assert(sizeof(packed float[4]) == 16, "packed float[4] is 16 bytes");
+	Assert(sizeof(packed double[2]) == 16, "packed double[2] is 16 bytes");
+	Assert(sizeof(packed int8[16]) == 16, "packed int8[16] is 16 bytes");
+	AssertFloatEquals(3.0f, gPALanes[2], "global packed value");
+	gPALanes[2] = 30.0f;
+	AssertFloatEquals(30.0f, gPALanes[2], "global packed lane write");
+	PAHolder h;
+	h.tag = 7;
+	h.v = { 1.0f, 2.0f, 3.0f, 4.0f };
+	h.tail = 9.0f;
+	h.v[1] = 5.0f;
+	AssertFloatEquals(5.0f, h.v[1], "field lane write");
+	Assert(h.tag == 7, "field before the vector");
+	AssertFloatEquals(9.0f, h.tail, "field after the vector");
+	Assert(sizeof(PAHolder) == 48, "a vector field is 16-byte aligned");
+	PALanes<int32, 4> t;
+	t.data = { 3, 4, 5, 6 };
+	Assert(t.First() == 3, "packed T[N] in a template");
+	packed float[4][2] arr;
+	arr[1] = { 1.0f, 2.0f, 3.0f, 4.0f };
+	arr[1][2] = 42.0f;
+	AssertFloatEquals(42.0f, arr[1][2], "array of vectors");
+	AssertFloatEquals(0.0f, arr[0][0], "array of vectors starts zeroed");
+}

@@ -1,0 +1,19 @@
+// `p is T` on a pointer to a type without virtual methods is decided by the static type: it is true for
+// the type itself and its bases and false otherwise (D-11). (This used to be a lowering error.)
+struct A { int32 x; };
+struct B : A { int32 y; };
+struct C { int32 z; };
+
+int32 main()
+{
+	B b;
+	A* pa = &b;
+	B* pb = &b;
+	int32 failures = 0;
+	if (!(pa is A)) failures++;
+	if (!(pb is A)) failures++;
+	if (!(pb is B)) failures++;
+	if (pa is C) failures++;
+	if (failures != 0) printf("IsOnNonPolymorphicPointer failures: %d\n", failures);
+	return failures;
+}

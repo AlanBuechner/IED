@@ -1,0 +1,54 @@
+// OperatorOverloads - Custom operator call tests (implementation)
+include "../Framework/Assert.ch"
+include "CustomOperatorCalls.ch"
+
+struct CoHash {
+	int32 value;
+
+	[operator("create")] public void Init(int32 v) {
+		this.value = v;
+	}
+
+	[operator("hash")] public int32 Hash() {
+		return this.value * 7;
+	}
+
+	[operator("scale")] public int32 Scale(int32 f) {
+		return this.value * f;
+	}
+}
+
+// Extension-method operator on CoHash.
+[operator("double")] int32 DoubleValue() extends CoHash {
+	return this.value * 2;
+}
+
+void TestCustomOperatorMemberMethod() {
+	CoHash a;
+	a.Init(10);
+	int32 h = a.operator_hash();
+	AssertIntEquals(70, h, "operator_hash member method");
+}
+
+void TestCustomOperatorWithParams() {
+	CoHash a;
+	a.Init(10);
+	int32 s = a.operator_scale(4);
+	AssertIntEquals(40, s, "operator_scale with parameter");
+}
+
+void TestCustomOperatorExtensionMethod() {
+	CoHash a;
+	a.Init(10);
+	int32 d = a.operator_double();
+	AssertIntEquals(20, d, "operator_double extension method");
+}
+
+void TestCustomOperatorBuiltInStillWorks() {
+	// Built-in operators on the same type must keep working alongside operator_<name> calls.
+	CoHash a;
+	a.Init(3);
+	int32 v = a.value;
+	AssertIntEquals(6, v + 3, "built-in add still works");
+	AssertIntEquals(1, v - 2, "built-in subtract still works");
+}

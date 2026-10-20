@@ -1,0 +1,30 @@
+// A C-style cast is whichever of static_cast, const_cast and reinterpret_cast converts (BUG-222): numbers, enums,
+// pointers to pointers (dropping const too), a pointer and an integer, a pointer to bool by being non-null
+// (BUG-223), and a derived object to its base. main returns the failures.
+class Base { public int32 id; }
+class Derived : Base { public int32 extra; }
+enum class Level : uint8 { High = 200 }
+
+int32 main() {
+	int32 failures = 0;
+	int64[4] values;
+	int64* p = &values[1];
+	if (!(bool)p) failures += 1;
+	int64* none = null;
+	if ((bool)none) failures += 1;
+	if ((int32)2.9 != 2 || (float)3 != 3.0f || (int32)Level::High != 200) failures += 1;
+	const int64* readOnly = p;
+	int64* writable = (int64*)readOnly;
+	*writable = 6;
+	if (values[1] != 6) failures += 1;
+	uint64 address = (uint64)p;
+	if ((int64*)address != p) failures += 1;
+	void* opaque = (void*)p;
+	if ((int64*)opaque != p) failures += 1;
+	Derived d;
+	d.id = 7;
+	Base sliced = (Base)d;
+	if (sliced.id != 7) failures += 1;
+	(void)sliced; // a cast to void discards a value
+	return failures;
+}

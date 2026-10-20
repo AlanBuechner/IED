@@ -1,0 +1,6 @@
+template<T> struct Wrapper {
+	public T value;
+	public bool Less(const Wrapper<T>& other) { return value < other.value; }
+}
+struct NoOrder { public int32 a; }
+int32 main() { Wrapper<NoOrder> a; Wrapper<NoOrder> b; return a.Less(b) ? 1 : 0; }

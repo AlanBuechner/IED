@@ -1,0 +1,24 @@
+// A script uses every C binding its host imported (they are part of the interface): the functions, structs and
+// enums of the host's C header, those the host itself calls and those it never does.
+include "scripttest.ch"
+include "native.ch"
+extern "c" source "smoke.c";
+
+void CheckInterop(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	checks.Equal(5, add(2, 3), "the host calls its C function");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "native", "native.cf"));
+	if (!script->Ok()) return;
+	funcptr<int32()> run = (funcptr<int32()>)script->Address("Run");
+	checks.Equal(7 + 14 + 18, run != nullptr ? run() : -1, "the script calls the host's C functions with its structs and enums");
+	script->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Interop");
+	CheckInterop(host, checks);
+	return checks.End("Interop");
+}

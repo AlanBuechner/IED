@@ -1,0 +1,21 @@
+// BUG-010: funcptr<...> takes the layers written after it: an array of funcptrs is a callback table, a
+// pointer to one points at a funcptr slot.
+int32 Add(int32 a, int32 b) { return a + b; }
+int32 Sub(int32 a, int32 b) { return a - b; }
+
+struct Ops { public funcptr<int32(int32, int32)>[2] table; }
+
+int32 CallThrough(funcptr<int32(int32, int32)>* slot, int32 a, int32 b) { return (*slot)(a, b); }
+
+int32 main() {
+	funcptr<int32(int32, int32)>[2] ops;
+	ops[0] = Add;
+	ops[1] = Sub;
+	if (ops[0](5, 3) != 8 || ops[1](5, 3) != 2) return 1;
+	if (sizeof(ops) != 16) return 2;
+	Ops o;
+	o.table[1] = Add;
+	if (o.table[1](2, 2) != 4) return 3;
+	if (CallThrough(&ops[1], 9, 4) != 5) return 4;
+	return 0;
+}

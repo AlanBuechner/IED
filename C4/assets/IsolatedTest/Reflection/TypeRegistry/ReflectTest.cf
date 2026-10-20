@@ -1,0 +1,119 @@
+// ReflectTest - Phase 4 reflection end-to-end test. Verifies the compiler-emitted type registry via
+// the v2 HANDLE-BASED API: acquire a handle once, query it many times (no owner+index re-lookup).
+//   - name round-trip + count
+//   - struct field names/offsets/sizes/types (absolute-offset invariant with inheritance)
+//   - base name chain
+//   - method table (name, param count, virtual flag)
+//   - enum value enumeration
+enum Color { Red = 0, Green = 5, Blue = 10 }
+
+struct Point { int32 x; int32 y; }
+
+class Base {
+public:
+	public int32 a;
+	public float f;
+	public int64 big;
+}
+
+class Derived : public Base {
+public:
+	public int32 extra;
+}
+
+class Shape {
+public:
+	public virtual int32 Area();
+	public int32 Kind() { return 1; }
+}
+
+int32 Shape::Area() { return 0; }
+
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+
+int32 main() {
+	// --- count + name round-trip ---
+	Check(reflect_count() >= 5, "reflect_count >= 5 (Point, Base, Derived, Shape, Color)");
+
+	void* pt = reflect_type("Point");
+	Check(pt != null, "reflect_type('Point') found");
+	Check(strcmp(reflect_name(pt), "Point") == 0, "name round-trip Point");
+	Check(reflect_size(pt) == 8, "Point size == 8");
+	Check(reflect_align(pt) == 4, "Point align == 4");
+
+	// --- struct fields: names, offsets, sizes, types (handle-based) ---
+	Check(reflect_field_count(pt) == 2, "Point has 2 fields");
+	void* fx = reflect_field_at(pt, 0);
+	Check(fx != null, "field[0] handle non-null");
+	Check(strcmp(reflect_field_handle_name(fx), "x") == 0, "field[0] name x");
+	Check(reflect_field_handle_offset(fx) == 0, "field[0] offset 0");
+	Check(reflect_field_handle_size(fx) == 4, "field[0] size 4");
+	Check(strcmp(reflect_field_handle_type_name(fx), "int32") == 0, "field[0] type int32");
+	void* fy = reflect_field_at(pt, 1);
+	Check(strcmp(reflect_field_handle_name(fy), "y") == 0, "field[1] name y");
+	Check(reflect_field_handle_offset(fy) == 4, "field[1] offset 4");
+
+	// --- base class fields + sizes (handle-based) ---
+	void* base = reflect_type("Base");
+	Check(base != null, "reflect_type('Base') found");
+	Check(reflect_size(base) == 16, "Base size == 16 (a@0 f@4 big@8)");
+	Check(reflect_field_count(base) == 3, "Base has 3 fields");
+	void* fa = reflect_field_at(base, 0);
+	Check(strcmp(reflect_field_handle_name(fa), "a") == 0, "Base field[0] a");
+	Check(reflect_field_handle_offset(fa) == 0, "Base a @0");
+	Check(reflect_field_handle_offset(reflect_field_at(base, 1)) == 4, "Base f @4");
+	Check(strcmp(reflect_field_handle_type_name(reflect_field_at(base, 1)), "float") == 0, "Base field[1] type float");
+	Check(reflect_field_handle_offset(reflect_field_at(base, 2)) == 8, "Base big @8");
+	Check(reflect_field_handle_size(reflect_field_at(base, 2)) == 8, "Base big size 8");
+
+	// --- inheritance: absolute offsets + base name chain (handle-based) ---
+	void* derived = reflect_type("Derived");
+	Check(derived != null, "reflect_type('Derived') found");
+	Check(strcmp(reflect_base_name(derived), "Base") == 0, "Derived base is Base");
+	Check(reflect_size(derived) == 24, "Derived size == 24 (16 base + extra, align 8)");
+	// Derived's own field table lists only its own fields, at ABSOLUTE offsets.
+	Check(reflect_field_count(derived) == 1, "Derived has 1 own field");
+	void* fe = reflect_field_at(derived, 0);
+	Check(strcmp(reflect_field_handle_name(fe), "extra") == 0, "Derived field extra");
+	Check(reflect_field_handle_offset(fe) == 16, "Derived extra @16 (absolute, past base size)");
+
+	// --- method table: names, param counts, virtual flag (handle-based) ---
+	void* shape = reflect_type("Shape");
+	Check(shape != null, "reflect_type('Shape') found");
+	Check(reflect_method_count(shape) == 2, "Shape has 2 methods");
+	void* mArea = reflect_method_at(shape, 0);
+	Check(strcmp(reflect_method_handle_name(mArea), "Area") == 0, "method[0] Area");
+	Check(reflect_method_handle_param_count(mArea) == 0, "Area takes 0 params");
+	Check(reflect_method_handle_is_virtual(mArea) == 1, "Area is virtual");
+	void* mKind = reflect_method_at(shape, 1);
+	Check(strcmp(reflect_method_handle_name(mKind), "Kind") == 0, "method[1] Kind");
+	Check(reflect_method_handle_is_virtual(mKind) == 0, "Kind is not virtual");
+	Check(reflect_is_virtual_type(shape) == 1, "Shape reports as virtual type");
+	Check(reflect_is_virtual_type(pt) == 0, "Point reports as non-virtual type");
+
+	// --- enum reflection: values enumerated in declaration order (handle-based) ---
+	void* color = reflect_type("Color");
+	Check(color != null, "reflect_type('Color') found");
+	Check(reflect_enum_count(color) == 3, "Color has 3 values");
+	void* e0 = reflect_enum_at(color, 0);
+	Check(strcmp(reflect_enum_handle_name(e0), "Red") == 0, "enum[0] Red");
+	Check(reflect_enum_handle_value(e0) == 0, "Red == 0");
+	void* e1 = reflect_enum_at(color, 1);
+	Check(strcmp(reflect_enum_handle_name(e1), "Green") == 0, "enum[1] Green");
+	Check(reflect_enum_handle_value(e1) == 5, "Green == 5");
+	void* e2 = reflect_enum_at(color, 2);
+	Check(strcmp(reflect_enum_handle_name(e2), "Blue") == 0, "enum[2] Blue");
+	Check(reflect_enum_handle_value(e2) == 10, "Blue == 10");
+
+	// --- unknown type lookup returns null (out-of-range accessors are safe) ---
+	Check(reflect_type("NoSuchType") == null, "unknown type -> null");
+	Check(reflect_field_at(pt, 99) == null, "out-of-range field -> null");
+	Check(reflect_enum_at(pt, 0) == null, "enum accessor on struct -> null");
+
+	if (g_fail) { printf("REFLECTION TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("REFLECTION TESTS OK\n");
+	return 0;
+}

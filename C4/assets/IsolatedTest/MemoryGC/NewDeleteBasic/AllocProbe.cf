@@ -1,0 +1,8 @@
+struct Foo { int32 x; };
+int32 main() {
+    Foo* p = new Foo{5};
+    if (p == nullptr) return 1;
+    int32 v = p->x;
+    delete p;
+    return v == 5 ? 0 : 2;
+}

@@ -1,0 +1,74 @@
+// `x as T&` and `dynamic_cast<T&>(x)` (D-11): the T that x is, as a location, or the prelude's BadCast thrown
+// with the asked-for type's name. The operand is evaluated once; an upcast checks nothing.
+interface IShape { int32 Corners(); }
+
+class Shape {
+	public int32 id;
+	public virtual int32 Sides() { return 0; }
+}
+class Square : Shape, IShape {
+	public int32 size;
+	public override int32 Sides() { return 4; }
+	public int32 Corners() { return 4; }
+}
+class Circle : Shape {
+	public override int32 Sides() { return 1; }
+}
+
+int32 g_failures = 0;
+int32 g_picks = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+Shape& Pick(Shape& s) { g_picks++; return s; }
+
+void Matches() {
+	Square square;
+	square.size = 3;
+	Shape& shape = square;
+	Square& asSquare = shape as Square&;
+	Check(asSquare.size == 3, "as T& reaches the object");
+	asSquare.size = 5;
+	Check(square.size == 5, "as T& is a location, not a copy");
+	dynamic_cast<Square&>(shape).size = 7;
+	Check(square.size == 7, "dynamic_cast<T&> is a location too");
+	(Pick(shape) as Square&).size += 1;
+	Check(square.size == 8 && g_picks == 1, "the operand is evaluated once");
+	IShape& corners = shape as IShape&;
+	Check(corners.Corners() == 4, "a cross-cast to an interface reference");
+	Shape& up = square as Shape&;
+	Check(up.Sides() == 4, "an upcast");
+	const Shape& readOnly = square;
+	const Square& constSquare = readOnly as const Square&;
+	Check(constSquare.size == 8, "a const object gives a const reference");
+}
+
+void Mismatches() {
+	Circle circle;
+	Shape& shape = circle;
+	bool caught = false;
+	try {
+		Square& wrong = shape as Square&;
+		Check(false, "as T& of the wrong type returned");
+		wrong.size = 1;
+	} catch (BadCast& e) {
+		caught = strcmp(e.target, "Square") == 0;
+	}
+	Check(caught, "as T& throws BadCast naming the target");
+	caught = false;
+	try {
+		dynamic_cast<IShape&>(shape).Corners();
+	} catch (const BadCast& e) {
+		caught = strcmp(e.target, "IShape") == 0;
+	}
+	Check(caught, "dynamic_cast<T&> throws BadCast naming the target");
+}
+
+int32 main() {
+	Matches();
+	Mismatches();
+	if (g_failures == 0) printf("ok\n");
+	return g_failures;
+}

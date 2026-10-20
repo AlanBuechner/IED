@@ -1,0 +1,15 @@
+// Types - constructing a namespaced template by its qualified name (BUG-169)
+include "../Framework/Assert.ch"
+include "QualifiedTemplateConstruction.ch"
+
+int32 QtcRead(QtcSpace::Box<int32> box) { return box.value; }
+
+void TestQualifiedTemplateConstruction() {
+	QtcSpace::Box<int32> box = QtcSpace::Box<int32>(4);
+	AssertEqual(4, box.value);
+	AssertEqual(9, QtcRead(QtcSpace::Box<int32>(9)));
+	AssertEqual(6, QtcSpace::Pair<int32, int64>(6, 7).key);
+	AssertEqual(3, QtcSpace::Inner::Cell<int32>(3).value);
+	QtcSpace::Box<float> inferred = QtcSpace::Box<float>(1.5f);
+	AssertFloatEquals(1.5f, inferred.value, "a float instance");
+}

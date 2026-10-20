@@ -1,0 +1,65 @@
+include "jobqueue.ch"
+
+namespace Threading
+{
+	void JobQueue::Reserve(int64 capacity) {
+		int64 size = 2;
+		while (size < capacity) size *= 2;
+		const uint64 bytes = (uint64)(size * (int64)sizeof(JobCell));
+		cells = (JobCell*)raw_alloc(bytes);
+		if (!cells) return;   // out of memory: every push fails, so jobs run where they are submitted
+		memset((void*)cells, 0, bytes);
+		for (int64 i = 0; i < size; i++) cells[i].sequence = i;
+		gc_register_region((void*)cells, bytes);
+		mask = size - 1;
+	}
+
+	void JobQueue::Delete() {
+		if (!cells) return;
+		gc_unregister_region((void*)cells);
+		raw_free((void*)cells);
+		cells = nullptr;
+	}
+
+	// A cell whose sequence equals the position is free for the producer at that position.
+	bool JobQueue::Push(const Job& job) {
+		if (!cells) return false;
+		int64 position = atomic_load(&pushAt, MemoryOrder::Relaxed);
+		while (true) {
+			JobCell* cell = &cells[position & mask];
+			const int64 turn = atomic_load(&cell->sequence, MemoryOrder::Acquire) - position;
+			if (turn == 0) {
+				if (atomic_compare_exchange_weak(&pushAt, &position, position + 1, MemoryOrder::Relaxed, MemoryOrder::Relaxed)) {
+					cell->job = job;
+					atomic_store(&cell->sequence, position + 1, MemoryOrder::Release);
+					return true;
+				}
+			}
+			else if (turn < 0) return false;
+			else position = atomic_load(&pushAt, MemoryOrder::Relaxed);
+		}
+	}
+
+	// A cell whose sequence is one past the position holds the job for the consumer at that position.
+	bool JobQueue::Pop(Job& out) {
+		if (!cells) return false;
+		int64 position = atomic_load(&popAt, MemoryOrder::Relaxed);
+		while (true) {
+			JobCell* cell = &cells[position & mask];
+			const int64 turn = atomic_load(&cell->sequence, MemoryOrder::Acquire) - (position + 1);
+			if (turn == 0) {
+				if (atomic_compare_exchange_weak(&popAt, &position, position + 1, MemoryOrder::Relaxed, MemoryOrder::Relaxed)) {
+					out = take(cell->job);
+					atomic_store(&cell->sequence, position + mask + 1, MemoryOrder::Release);
+					return true;
+				}
+			}
+			else if (turn < 0) return false;
+			else position = atomic_load(&popAt, MemoryOrder::Relaxed);
+		}
+	}
+
+	bool JobQueue::IsEmpty() const {
+		return atomic_load(&popAt, MemoryOrder::Acquire) >= atomic_load(&pushAt, MemoryOrder::Acquire);
+	}
+}

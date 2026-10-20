@@ -1,0 +1,40 @@
+// Core - Default argument expressions (B5, D-41, BUG-129): any expression, evaluated per call, with its names
+// bound where the function is declared.
+include "../Framework/Assert.ch"
+include "DefaultArgumentExpressions.ch"
+
+enum class DaMode { Fast = 3, Slow = 9 }
+struct DaPair { public int32 a; public int32 b; }
+
+int32 g_DaBase = 100;
+int32 g_DaCalls = 0;
+int32 DaNext() { g_DaCalls = g_DaCalls + 1; return g_DaCalls; }
+
+int32 DaNegative(int32 x = -1) { return x; }
+int32 DaGlobal(int32 x = g_DaBase + 1) { return x; }
+int32 DaEnum(DaMode m = DaMode::Slow) { return (int32)m; }
+int32 DaSize(int64 n = sizeof(DaPair) * 2) { return (int32)n; }
+int32 DaCall(int32 x = DaNext() * 10) { return x; }
+int32 DaChoice(int32 x = 1 > 0 ? 5 : 6) { return x; }
+
+struct DaCounter
+{
+	public int32 value;
+	[operator("create")] public void Init(int32 start = g_DaBase / 2) { value = start; }
+}
+
+void TestDefaultArgumentExpressions() {
+	AssertIntEquals(-1, DaNegative(), "a negative literal");
+	AssertIntEquals(101, DaGlobal(), "a global in an expression");
+	AssertIntEquals(9, DaEnum(), "an enum member");
+	AssertIntEquals(16, DaSize(), "sizeof(T)");
+	AssertIntEquals(5, DaChoice(), "a conditional expression");
+	AssertIntEquals(10, DaCall(), "a call");
+	AssertIntEquals(20, DaCall(), "evaluated again for every call");
+	AssertIntEquals(7, DaCall(7), "an argument replaces the default");
+	int32 g_DaBase = 5;
+	AssertIntEquals(101, DaGlobal(), "a caller's local does not shadow what the default names");
+	AssertIntEquals(6, DaGlobal(g_DaBase + 1), "the caller's own expression still sees its local");
+	DaCounter c;
+	AssertIntEquals(50, c.value, "a create default binds its names at the declaration too");
+}

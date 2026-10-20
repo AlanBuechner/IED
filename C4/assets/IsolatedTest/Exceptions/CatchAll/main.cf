@@ -1,0 +1,59 @@
+// `catch (...)` catches any exception (D-13); a typed clause before it still wins, a bare `throw;`
+// inside it rethrows the same exception, and it runs the enclosing cleanups like any handler.
+struct Marker { public int32 id; };
+
+int32 g_cleanups = 0;
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 CatchesAnything(int32 mode) {
+	try {
+		if (mode == 0) throw 5;
+		if (mode == 1) { Marker m; m.id = 3; throw m; }
+		if (mode == 2) throw 2.5;
+	}
+	catch (...) { return 100 + mode; }
+	return 0;
+}
+
+int32 TypedClauseFirst() {
+	try { throw 9; }
+	catch (int32 e) { return e; }
+	catch (...) { return -1; }
+	return -2;
+}
+
+int32 RethrowFromCatchAll() {
+	try {
+		try { throw 11; }
+		catch (...) { g_cleanups++; throw; }
+	}
+	catch (int32 e) { return e; }
+	return -1;
+}
+
+int32 CleanupRunsBeforeCatchAll() {
+	g_cleanups = 0;
+	try {
+		defer g_cleanups += 10;
+		throw 1;
+	}
+	catch (...) { return g_cleanups; }
+	return -1;
+}
+
+int32 main() {
+	Check(CatchesAnything(0) == 100, "catch (...) catches an int");
+	Check(CatchesAnything(1) == 101, "catch (...) catches an object");
+	Check(CatchesAnything(2) == 102, "catch (...) catches a double");
+	Check(CatchesAnything(3) == 0, "no throw, no handler");
+	Check(TypedClauseFirst() == 9, "a typed clause before catch (...) handles its type");
+	g_cleanups = 0;
+	Check(RethrowFromCatchAll() == 11 && g_cleanups == 1, "throw; inside catch (...) rethrows the value");
+	Check(CleanupRunsBeforeCatchAll() == 10, "cleanups run before catch (...)");
+	if (g_failures != 0) printf("CatchAll failures: %d\n", g_failures);
+	return g_failures;
+}

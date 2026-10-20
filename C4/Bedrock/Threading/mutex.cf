@@ -1,0 +1,40 @@
+include "mutex.ch"
+
+namespace Threading
+{
+	const int32 kMutexFree = 0;
+	const int32 kMutexLocked = 1;
+	const int32 kMutexSleepers = 2;   // locked, and a thread may be parked on the word
+	const int32 kMutexSpins = 100;    // a short critical section usually ends within this many tries
+
+	void Mutex::Lock() {
+		int32 expected = kMutexFree;
+		if (atomic_compare_exchange_weak(&state, &expected, kMutexLocked, MemoryOrder::Acquire, MemoryOrder::Relaxed)) return;
+		LockContended();
+	}
+
+	bool Mutex::TryLock() {
+		int32 expected = kMutexFree;
+		return atomic_compare_exchange(&state, &expected, kMutexLocked, MemoryOrder::Acquire, MemoryOrder::Relaxed);
+	}
+
+	// Spin while the holder is likely to finish soon; then mark the word as having sleepers and park on it. A thread
+	// that takes the mutex this way leaves it marked, so its Unlock wakes the next sleeper.
+	void Mutex::LockContended() {
+		for (int32 spin = 0; spin < kMutexSpins; spin++) {
+			if (atomic_load(&state, MemoryOrder::Relaxed) == kMutexFree) {
+				int32 expected = kMutexFree;
+				if (atomic_compare_exchange_weak(&state, &expected, kMutexLocked, MemoryOrder::Acquire, MemoryOrder::Relaxed)) return;
+			}
+			cpu_relax();
+		}
+		while (atomic_exchange(&state, kMutexSleepers, MemoryOrder::Acquire) != kMutexFree) {
+			int32 parked = kMutexSleepers;
+			wait_on_address((void*)&state, (void*)&parked, 4, -1);
+		}
+	}
+
+	void Mutex::Unlock() {
+		if (atomic_exchange(&state, kMutexFree, MemoryOrder::Release) == kMutexSleepers) wake_one((void*)&state);
+	}
+}

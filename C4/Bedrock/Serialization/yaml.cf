@@ -1,0 +1,43 @@
+include "yaml.ch"
+
+namespace Serialization
+{
+	bool IsBlock(const DomNode& node) {
+		DomKind kind = node.Kind();
+		return (kind == DomKind::Object || kind == DomKind::Array) && node.Count() > 0;
+	}
+
+	void WriteYamlScalar(const DomNode& node, Core::StringBuilder* out) {
+		DomKind kind = node.Kind();
+		double value = node.AsFloat();
+		if (kind == DomKind::Object) out->Append("{}");
+		else if (kind == DomKind::Array) out->Append("[]");
+		else if (kind != DomKind::Float) WriteJson(node, out, 0);
+		else if (value != value) out->Append(".nan");
+		else if (value - value != 0.0) out->Append(value > 0.0 ? ".inf" : "-.inf");
+		else WriteFloatText(value, out);
+	}
+
+	void WriteYamlIndent(Core::StringBuilder* out, int32 spaces) { for (int32 s = 0; s < spaces; ++s) out->AppendByte(' '); }
+
+	// A block node's entries, one per line at `depth`; a nested block starts on the next line one level in.
+	void WriteYamlBlock(const DomNode& node, Core::StringBuilder* out, int32 indent, int32 depth) {
+		bool array = node.Kind() == DomKind::Array;
+		for (int64 i = 0; i < node.Count(); ++i) {
+			if (i > 0) out->AppendByte('\n');
+			WriteYamlIndent(out, indent * depth);
+			if (array) out->AppendByte('-');
+			else { WriteJsonString(node.KeyAt(i), out); out->AppendByte(':'); }
+			DomNode value = array ? node.At(i) : node.ValueAt(i);
+			if (IsBlock(value)) { out->AppendByte('\n'); WriteYamlBlock(value, out, indent, depth + 1); continue; }
+			out->AppendByte(' ');
+			WriteYamlScalar(value, out);
+		}
+	}
+
+	void WriteYaml(const DomNode& node, Core::StringBuilder* out, int32 indent) {
+		if (indent < 2) indent = 2;
+		if (IsBlock(node)) WriteYamlBlock(node, out, indent, 0);
+		else WriteYamlScalar(node, out);
+	}
+}

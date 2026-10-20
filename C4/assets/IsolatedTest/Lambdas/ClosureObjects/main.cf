@@ -1,0 +1,35 @@
+// D-22: a lambda expression is a closure object: it can be called directly, copied (each copy has its own
+// captures), and a capture-less one converts to funcptr. A closure's by-value captures are destroyed with it.
+struct Tracked {
+	public int32 id;
+	[operator("copy")] void Copy(const Tracked& other) { id = other.id; }
+	[operator("delete")] void Destroy() { if (id != 0) g_destroyed++; } // a moved-from (zero) copy is not counted
+}
+
+int32 g_destroyed = 0;
+
+int32 Apply(funcptr<int32(int32)> f, int32 v) { return f(v); }
+
+int32 main() {
+	if ([](int32 a, int32 b) -> int32 { return a * b; }(6, 7) != 42) return 1;   // called where it is written
+
+	funcptr<int32(int32)> twice = [](int32 x) -> int32 { return x * 2; };
+	if (twice(21) != 42 || Apply([](int32 x) -> int32 { return x + 1; }, 41) != 42) return 2;
+
+	int32 k = 5;
+	func<int32()> one = [k]() mutable -> int32 { k++; return k; };
+	if (one() != 6) return 3;
+
+	{
+		Tracked t;
+		t.id = 9;
+		int32 destroyedBefore = g_destroyed;
+		{
+			func<int32()> holder = [t]() -> int32 { return t.id; };
+			if (holder() != 9) return 4;
+		}
+		if (g_destroyed != destroyedBefore) return 5; // the heap copy lives until the collector reclaims it
+	}
+	printf("CLOSURE OBJECTS OK\n");
+	return 0;
+}

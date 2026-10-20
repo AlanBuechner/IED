@@ -1,0 +1,4 @@
+class A { public int32 a; }
+class B { public int32 b; }
+class C : A, B { }
+int32 main() { C c; return 0; }

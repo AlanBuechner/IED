@@ -1,0 +1,72 @@
+include "pool.ch"
+
+// Finalizable objects that refer to each other are finalized one per collection, so the list's nodes are plain and
+// each carries a finalizable tag.
+class Tag
+{
+	public int32 unused = 0;
+	[operator("delete")] public void Finalize() { Pool::g_finalized++; }
+}
+
+class Leaf
+{
+	public int32 value = 0;
+	public Leaf* next = nullptr;
+	public Tag* tag = nullptr;
+}
+
+class HeavyNode : public Pool::Node
+{
+	public override int32 Weight() const { return 2; }
+}
+
+Leaf* g_list = nullptr;
+thread_local Leaf* t_held = nullptr;
+
+void Build(int32 count)
+{
+	for (int32 i = 0; i < count; i++)
+	{
+		Leaf* leaf = new Leaf();
+		leaf->value = i;
+		leaf->tag = new Tag();
+		leaf->next = g_list;
+		g_list = leaf;
+	}
+}
+
+int32 Sum()
+{
+	int32 sum = 0;
+	for (Leaf* leaf = g_list; leaf != nullptr; leaf = leaf->next) sum += leaf->value;
+	return sum;
+}
+
+void Drop(int32 unused) { g_list = nullptr; }
+
+void HoldOnThread(int32 value)
+{
+	t_held = new Leaf();
+	t_held->value = value;
+}
+
+int32 Held() { return t_held == nullptr ? -1 : t_held->value; }
+
+void KeepInHost(int32 count)
+{
+	for (int32 i = 0; i < count; i++)
+	{
+		HeavyNode* node = new HeavyNode();
+		node->value = i;
+		Pool::Keep(node);
+	}
+}
+
+void MakeGarbage(int32 count)
+{
+	for (int32 i = 0; i < count; i++)
+	{
+		Tag* garbage = new Tag();
+		garbage->unused = i;
+	}
+}

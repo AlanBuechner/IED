@@ -1,0 +1,62 @@
+// A script's globals start when it loads, in declaration order, and its static locals when control first reaches
+// them; unloading destroys them all, last started first. A global whose start faults fails the load.
+include "scripttest.ch"
+include "life.ch"
+
+namespace Life
+{
+	Core::Array<int32> g_log;
+
+	void Log(int32 entry) { g_log.Push(entry); }
+	int32 LogCount() { return (int32)g_log.Count(); }
+	int32 LogAt(int32 index) { return g_log[index]; }
+}
+
+bool LogIs(const int32* expected, int32 count)
+{
+	if (Life::LogCount() != count) return false;
+	for (int32 i = 0; i < count; i++)
+		if (Life::LogAt(i) != expected[i]) return false;
+	return true;
+}
+
+void PrintLog()
+{
+	printf("log:");
+	for (int32 i = 0; i < Life::LogCount(); i++) printf(" %d", Life::LogAt(i));
+	printf("\n");
+}
+
+void CheckLifecycle(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "life", "life.cf"));
+	if (!script->Ok()) return;
+	int32[3] started = { 1, 2, 12 };
+	checks.That(LogIs(&started[0], 3), "the globals started in declaration order as the script loaded");
+	funcptr<int32()> useStatic = (funcptr<int32()>)script->Address("UseStatic");
+	checks.Equal(3, useStatic(), "a static local starts on first use");
+	checks.Equal(3, useStatic(), "and only then");
+	checks.Equal(4, Life::LogCount(), "the static local started once");
+	script->Unload();
+	int32[7] ended = { 1, 2, 12, 3, -3, -2, -1 };
+	checks.That(LogIs(&ended[0], 7), "unloading destroyed them, last started first");
+	if (!LogIs(&ended[0], 7)) PrintLog();
+}
+
+void CheckFaultingStart(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* script = host->Compile(ScriptTest::OptionsFor(checks, "crashes-at-start", "crash_start.cf"));
+	checks.That(!script->Ok(), "a script whose global faults as it starts does not load");
+	checks.Contains(script->Diagnostics(), "faulted as they started", "the diagnostics say so");
+	checks.Contains(script->FaultText(), "0xc0000005", "and what stopped it");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Lifecycle");
+	CheckLifecycle(host, checks);
+	CheckFaultingStart(host, checks);
+	return checks.End("Lifecycle");
+}

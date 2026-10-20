@@ -1,0 +1,2 @@
+int32 F(float[3] v) { return 0; }
+int main() { float[3] f = {1.0f,2.0f,3.0f}; int32[3] i = {1,2,3}; F(i); return 0; }

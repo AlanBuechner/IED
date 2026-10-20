@@ -1,0 +1,16 @@
+// `return F();` in a void function returns F's void result (BUG-217 keeps this legal). main returns the failures.
+int32 g_calls = 0;
+
+void Note() { g_calls += 1; }
+void Forward() { return Note(); }
+void Early(bool stop) {
+	if (stop) return;
+	Note();
+}
+
+int32 main() {
+	Forward();
+	Early(true);
+	Early(false);
+	return g_calls == 2 ? 0 : 1;
+}

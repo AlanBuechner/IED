@@ -1,0 +1,2 @@
+struct Grid { public Grid[2] children; }
+int32 main() { return 0; }

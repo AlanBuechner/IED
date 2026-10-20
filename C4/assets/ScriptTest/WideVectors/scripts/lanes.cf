@@ -1,0 +1,7 @@
+include "lanes.ch"
+
+int32 FloatLanes() { return SIMD_FLOAT_LANES; }
+
+packed float[8] Run(packed float[8] v) { return Lanes::Doubled(v, 3) + 1.0f; }
+
+packed int64[8] Wide(packed int64[8] v) { return Lanes::Negated(v, 2) * -10; }

@@ -1,0 +1,5 @@
+// BUG-230: a global that starts from a constant gets the warnings a local's start gets.
+uint8 g_wrapped = 300;
+const int32 g_truncated = 2.5;
+
+int32 main() { return g_wrapped == 44 && g_truncated == 2 ? 0 : 1; }

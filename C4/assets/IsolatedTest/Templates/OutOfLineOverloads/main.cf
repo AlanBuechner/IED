@@ -1,0 +1,36 @@
+// Out-of-line definitions of overloaded template methods attach by parameter types, not by count
+// (BUG-014), and may name the template's parameters differently.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T>
+class Box {
+	public T value;
+	public int32 setBy;
+	public void Set(int32 v);
+	public void Set(float v);
+	public void Put(T v);
+	public T Get();
+}
+
+template<T> void Box::Set(int32 v) { value = (T)v; setBy = 1; }
+template<T> void Box<T>::Set(float v) { value = (T)(v * 2.0f); setBy = 2; }
+template<U> void Box<U>::Put(U v) { value = v; setBy = 3; }
+template<V> V Box<V>::Get() { return value; }
+
+int32 main() {
+	Box<float> b;
+	b.Set(3);
+	Check(b.setBy == 1 && b.value == 3.0f, "the int32 overload gets the int32 body");
+	b.Set(1.5f);
+	Check(b.setBy == 2 && b.value == 3.0f, "the float overload gets the float body");
+	b.Put(7.0f);
+	Check(b.setBy == 3 && b.Get() == 7.0f, "definitions that rename the template parameter");
+	Box<int32> i;
+	i.Put(5);
+	Check(i.Get() == 5, "every instance gets the same bodies");
+	return g_failures;
+}

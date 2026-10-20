@@ -1,0 +1,11 @@
+include "work.ch"
+
+struct Doubler
+{
+	public int32 factor = 2;
+	public int32 Apply(int32 v) const { return v * factor; }
+}
+
+Doubler g_doubler;
+
+int32 Compute(int32 v) { return Work::Base() + g_doubler.Apply(v); }

@@ -1,0 +1,2 @@
+float* Reinterpret(int32* p) { return p; }
+int32 main() { return 0; }

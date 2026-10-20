@@ -1,0 +1,24 @@
+// A base method calls a virtual method: it dispatches to the derived override. main returns the failed step.
+class Shape {
+	public virtual int32 Area() { return 0; }
+	public int32 Describe() { return this->Area(); }
+}
+class Square : Shape {
+	public float s;
+	[operator("create")] public void Init(float side) { this.s = side; }
+	public override int32 Area() { return (int32)(this.s * this.s); }
+}
+class Circle : Shape {
+	public float r;
+	[operator("create")] public void Init(float radius) { this.r = radius; }
+	public override int32 Area() { return (int32)(3.14f * this.r * this.r); }
+}
+int32 main() {
+	Shape* a = new Square{3.0f};
+	Shape* b = new Circle{2.0f};
+	if (a->Describe() != 9) return 1;
+	if (b->Describe() != 12) return 2;
+	delete a;
+	delete b;
+	return 0;
+}

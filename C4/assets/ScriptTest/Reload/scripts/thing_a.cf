@@ -1,0 +1,11 @@
+namespace Shared
+{
+	class Thing
+	{
+		public int32 version = 1;
+	}
+}
+
+Shared::Thing* MakeA() { return new Shared::Thing(); }
+
+int32 Which() { return 1; }

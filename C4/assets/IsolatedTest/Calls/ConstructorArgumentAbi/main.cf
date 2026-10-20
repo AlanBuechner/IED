@@ -1,0 +1,27 @@
+// Constructor arguments follow the calling convention (BUG-070): a large object by hidden pointer, a
+// small one in a register, an rvalue bound to a reference materialized, for `new T(...)` and `T(...)`.
+struct Big { public int64 a; public int64 b; public int64 c; };
+struct Pair { public int32 x; public int32 y; };
+
+struct Holder {
+	public int64 total;
+	[operator("create")] public void Init(Big big, Pair p, const int32& r) { total = big.a + big.b + big.c + p.x + p.y + r; }
+};
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 main() {
+	Big big; big.a = 1; big.b = 2; big.c = 3;
+	Pair p; p.x = 10; p.y = 20;
+	int32 r = 100;
+	Holder* heap = new Holder(big, p, r);
+	Check(heap->total == 136, "new T(args) passes each argument by its convention");
+	Holder local = Holder(big, p, 200);
+	Check(local.total == 236, "T(args) passes each argument; an rvalue binds to the reference");
+	if (g_failures != 0) printf("ConstructorArgumentAbi failures: %d\n", g_failures);
+	return g_failures;
+}

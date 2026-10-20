@@ -1,0 +1,6 @@
+int32 main() {
+	int64 value = 0;
+	int32 expected = 0;
+	atomic_compare_exchange(&value, &expected, 1, MemoryOrder::SeqCst, MemoryOrder::SeqCst);
+	return 0;
+}

@@ -1,0 +1,7 @@
+class Base {
+	[operator("create")] private void Init() {}
+}
+class Derived : public Base {
+	[operator("create")] public void Make() {}
+}
+int32 main() { Derived d; return 0; }

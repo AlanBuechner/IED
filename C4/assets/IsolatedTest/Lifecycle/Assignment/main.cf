@@ -1,0 +1,60 @@
+// a = b on objects (D-06): the type's `=` when declared; otherwise the new value is made first (a copy of
+// a variable, or the fresh object itself), then the old value is destroyed and the new one moved in -
+// safe when both sides are the same object.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+class Holder { public Probe probe; public int32 n; }
+
+class Counted {
+	public int32 v;
+	public int32 assigns;
+	[operator("=")] public void Assign(const Counted& other) { v = other.v; assigns = assigns + 1; }
+}
+
+int32 main() {
+	int32 live = 0;
+	Probe a = Probe(&live, 1);
+	Probe b = Probe(&live, 2);
+	b = a;
+	Check(live == 2 && b.id == 1, "assignment from a variable destroys the old value and copies the new");
+	b = Probe(&live, 3);
+	Check(live == 2 && b.id == 3, "assignment from a temporary destroys the old value and moves the new");
+	b = b;
+	Check(live == 2 && b.id == 3, "self-assignment keeps the value");
+	Holder h;
+	h.probe = a;
+	h.n = 4;
+	Check(live == 3 && h.probe.id == 1 && a.id == 1, "assigning a member copies into it");
+	Holder k;
+	k = h;
+	Check(live == 4 && k.probe.id == 1 && k.n == 4 && h.n == 4, "assigning an object assigns every member");
+	k = k;
+	Check(live == 4 && k.probe.id == 1, "member-wise self-assignment keeps the value");
+
+	Holder last;
+	last = k;
+	Check(live == 4 && last.probe.id == 1, "assigning from a variable at its last use moves it (D-05)");
+
+	Counted c; c.v = 5;
+	Counted d;
+	d = c;
+	Check(d.v == 5 && d.assigns == 1, "a declared = operator is used");
+	return g_failures;
+}

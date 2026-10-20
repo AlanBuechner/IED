@@ -1,0 +1,23 @@
+struct S { int32 a; int32 b; }
+int32 main() {
+    int32[4] arr;
+    arr[0]=10; arr[1]=20; arr[2]=30; arr[3]=40;
+    int32* p = &arr[0];
+    bool ok = true;
+    ok = ok && (*(p + 2) == 30);        // element-scaled add: arr[2]
+    ok = ok && (*(p - (-1)) == 20);     // subtract a negative: arr[1]
+    int64 d1 = (p + 3) - p;             // element count
+    int64 d2 = p - (p + 3);
+    ok = ok && d1 == 3 && d2 == -3;
+    S[3] sarr;
+    sarr[0].a=1; sarr[1].a=2; sarr[2].a=3;
+    S* sp = &sarr[0];
+    ok = ok && ((sp + 1)->a == 2);      // struct pointee scaled by sizeof(S)
+    ok = ok && ((sp + 2) - sp == 2);
+    int32* cp = &arr[0];
+    cp += 2;                             // compound: element-scaled add -> arr[2]
+    ok = ok && (*cp == 30);
+    cp -= 1;                             // compound subtract -> arr[1]
+    ok = ok && (*cp == 20);
+    return ok ? 0 : 1;
+}

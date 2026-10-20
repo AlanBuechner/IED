@@ -1,0 +1,126 @@
+// Math scalars: constants, the comparison and interpolation templates, and the float/double functions.
+
+include "math.ch"
+
+[test("math.scalar")]
+class MathScalarTests {
+	[test("constants")]
+	public static void TestConstants() {
+		assert_feq(3.14159265, Math::kPi, 1e-6, "pi");
+		assert_feq(2.0 * Math::kPi, Math::kTau, 1e-6, "tau is two pi");
+		assert_feq(Math::kPi / 2.0, Math::kHalfPi, 1e-6, "half pi");
+		assert_feq(2.7182818, Math::kE, 1e-6, "e");
+		assert_feq(Math::kPi, 180.0f * Math::kDegreesToRadians, 1e-6, "180 degrees is pi");
+		assert_feq(180.0, Math::kPi * Math::kRadiansToDegrees, 1e-4, "pi is 180 degrees");
+		assert_true(1.0f + Math::kFloatEpsilon != 1.0f, "the float epsilon is visible at 1");
+		assert_true(1.0f + Math::kFloatEpsilon * 0.25f == 1.0f, "and a quarter of it is not");
+	}
+
+	[test("min_max")]
+	public static void TestMinMax() {
+		assert_eq(2, Math::Min(2, 5), "min of ints");
+		assert_eq(5, Math::Max(2, 5), "max of ints");
+		assert_eq(-7, Math::Min(-7, -3), "min of negatives");
+		assert_eq(4, Math::Max(4, 4), "equal values");
+		assert_feq(-0.5, Math::Min(0.25f, -0.5f), 0.0, "min of floats");
+		assert_feq(1.5, Math::Max(1.5, -2.0), 0.0, "max of doubles");
+	}
+
+	[test("clamp")]
+	public static void TestClamp() {
+		assert_eq(0, Math::Clamp(-4, 0, 10), "below the range");
+		assert_eq(10, Math::Clamp(14, 0, 10), "above the range");
+		assert_eq(6, Math::Clamp(6, 0, 10), "inside the range");
+		assert_eq(0, Math::Clamp(0, 0, 10), "at the low bound");
+		assert_eq(10, Math::Clamp(10, 0, 10), "at the high bound");
+		assert_feq(1.0, Math::Clamp(1.25f, 0.0f, 1.0f), 0.0, "floats");
+		assert_feq(0.0, Math::Saturate(-0.5f), 0.0, "saturate below");
+		assert_feq(1.0, Math::Saturate(1.5f), 0.0, "saturate above");
+		assert_feq(0.25, Math::Saturate(0.25f), 0.0, "saturate inside");
+	}
+
+	[test("abs_sign")]
+	public static void TestAbsSign() {
+		assert_eq(3, Math::Abs(-3), "abs of a negative int");
+		assert_eq(0, Math::Abs(0), "abs of zero");
+		assert_feq(2.5, Math::Abs(-2.5f), 0.0, "abs of a float");
+		assert_eq(-1, Math::Sign(-5), "sign of a negative");
+		assert_eq(0, Math::Sign(0), "sign of zero");
+		assert_eq(1, Math::Sign(7), "sign of a positive");
+		assert_feq(-1.0, Math::Sign(-0.001f), 0.0, "sign of a small negative float");
+		assert_feq(0.0, Math::Sign(0.0), 0.0, "sign of a double zero");
+	}
+
+	[test("interpolation")]
+	public static void TestInterpolation() {
+		assert_feq(2.5, Math::Lerp(0.0f, 10.0f, 0.25f), 1e-6, "lerp a quarter");
+		assert_feq(10.0, Math::Lerp(0.0f, 10.0f, 1.0f), 1e-6, "lerp to the end");
+		assert_feq(20.0, Math::Lerp(0.0f, 10.0f, 2.0f), 1e-6, "lerp is not clamped");
+		assert_feq(-5.0, Math::Lerp(5.0, -5.0, 1.0), 1e-12, "lerp of doubles, downward");
+		assert_feq(0.25, Math::InverseLerp(0.0f, 10.0f, 2.5f), 1e-6, "inverse lerp");
+		assert_feq(-1.0, Math::InverseLerp(0.0f, 10.0f, -10.0f), 1e-6, "inverse lerp outside");
+		assert_feq(0.0, Math::InverseLerp(3.0f, 3.0f, 9.0f), 0.0, "an empty range gives zero");
+	}
+
+	[test("smooth_step")]
+	public static void TestSmoothStep() {
+		assert_feq(0.0, Math::SmoothStep(0.0f, 1.0f, -1.0f), 0.0, "below the first edge");
+		assert_feq(1.0, Math::SmoothStep(0.0f, 1.0f, 3.0f), 0.0, "past the second edge");
+		assert_feq(0.5, Math::SmoothStep(0.0f, 1.0f, 0.5f), 1e-6, "the midpoint");
+		assert_feq(0.15625, Math::SmoothStep(0.0f, 1.0f, 0.25f), 1e-6, "a quarter of the way");
+		assert_feq(0.84375, Math::SmoothStep(10.0, 20.0, 17.5), 1e-12, "a scaled range, double");
+		assert_feq(0.0, Math::SmoothStep(2.0f, 2.0f, 5.0f), 0.0, "equal edges give zero");
+	}
+
+	[test("angles")]
+	public static void TestAngles() {
+		assert_feq(Math::kPi, Math::Radians(180.0f), 1e-6, "radians of 180");
+		assert_feq(-Math::kHalfPi, Math::Radians(-90.0f), 1e-6, "radians of -90");
+		assert_feq(180.0, Math::Degrees(Math::kPi), 1e-4, "degrees of pi");
+		assert_feq(57.29578, Math::Degrees(1.0), 1e-5, "degrees of one radian, double");
+	}
+
+	[test("nearly_equal")]
+	public static void TestNearlyEqual() {
+		assert_true(Math::NearlyEqual(1.0f, 1.0000005f, Math::kEpsilon), "within epsilon");
+		assert_true(!Math::NearlyEqual(1.0f, 1.001f, Math::kEpsilon), "outside epsilon");
+		assert_true(Math::NearlyEqual(5, 7, 2), "ints at the bound are equal");
+		assert_true(!Math::NearlyEqual(5, 8, 2), "and one past it are not");
+		assert_true(Math::NearlyEqual(-0.0f, 0.0f, 0.0f), "signed zeros");
+	}
+
+	[test("functions")]
+	public static void TestFunctions() {
+		assert_feq(1.41421356, Math::Sqrt(2.0f), 1e-6, "float sqrt");
+		assert_feq(1.4142135623730951, Math::Sqrt(2.0), 1e-15, "double sqrt keeps double precision");
+		assert_feq(1.0, Math::Sin(Math::kHalfPi), 1e-6, "sin");
+		assert_feq(-1.0, Math::Cos(3.141592653589793), 1e-15, "cos, double");
+		assert_feq(1.0, Math::Tan(Math::kPi / 4.0f), 1e-6, "tan");
+		assert_feq(Math::kHalfPi, Math::Asin(1.0f), 1e-6, "asin");
+		assert_feq(Math::kPi, Math::Acos(-1.0f), 1e-6, "acos");
+		assert_feq(Math::kPi / 4.0f, Math::Atan(1.0f), 1e-6, "atan");
+		assert_feq(0.75 * 3.141592653589793, Math::Atan2(1.0, -1.0), 1e-15, "atan2 in the second quadrant");
+		assert_feq(-Math::kHalfPi, Math::Atan2(-1.0f, 0.0f), 1e-6, "atan2 straight down");
+		assert_feq(8.0, Math::Pow(2.0f, 3.0f), 1e-6, "pow");
+		assert_feq(Math::kE, Math::Exp(1.0f), 1e-6, "exp");
+		assert_feq(1.0, Math::Log(Math::kE), 1e-6, "log");
+	}
+
+	[test("rounding")]
+	public static void TestRounding() {
+		assert_feq(-3.0, Math::Floor(-2.5f), 0.0, "floor of a negative");
+		assert_feq(2.0, Math::Floor(2.9), 0.0, "floor of a double");
+		assert_feq(-2.0, Math::Ceil(-2.5f), 0.0, "ceil of a negative");
+		assert_feq(3.0, Math::Ceil(2.1f), 0.0, "ceil");
+		assert_feq(3.0, Math::Round(2.5f), 0.0, "round half away from zero");
+		assert_feq(-3.0, Math::Round(-2.5f), 0.0, "round a negative half");
+		assert_feq(2.0, Math::Round(2.4999), 0.0, "round down, double");
+		assert_feq(-2.0, Math::Trunc(-2.7f), 0.0, "trunc toward zero");
+		assert_feq(0.5, Math::Fract(2.5f), 0.0, "fract");
+		assert_feq(0.75, Math::Fract(-1.25f), 0.0, "fract of a negative stays in [0, 1)");
+		assert_feq(2.0, Math::Mod(-1.0f, 3.0f), 1e-6, "mod takes the divisor's sign");
+		assert_feq(1.5, Math::Mod(5.5, 2.0), 1e-12, "mod of doubles");
+		assert_feq(-2.0, Math::Mod(1.0f, -3.0f), 1e-6, "mod by a negative");
+		assert_feq(0.0, Math::Mod(6.0f, 3.0f), 0.0, "an exact multiple");
+	}
+}

@@ -1,0 +1,1 @@
+int32 main() { float a = 1.0f; float b = a & 2.0f; return 0; }

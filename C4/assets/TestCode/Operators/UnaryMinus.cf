@@ -1,0 +1,11 @@
+// Operators - Unary Minus Tests (implementation)
+include "../Framework/Assert.ch"
+include "UnaryMinus.ch"
+
+void TestUnaryMinus() {
+	int32 a = -(5);
+	AssertEqual(-5, a);
+	
+	int32 b = -(-10);
+	AssertEqual(10, b);
+}

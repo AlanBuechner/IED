@@ -1,0 +1,61 @@
+// Prototype: ProtoQueue<T> circular buffer + Stack<T>, validated with [test].
+template<T> class ProtoQueue {
+    T* data;
+    int32 count;
+    int32 capacity;
+    int32 head;
+    [operator("create")] public void Init(int32 cap) {
+        if (cap < 1) cap = 1;
+        this->data = (T*)raw_alloc(cap * sizeof(T));
+        this->count = 0; this->capacity = cap; this->head = 0;
+    }
+    [operator("delete")] public void Finalize() { raw_free(this->data); }
+    public int32 Count() { return this->count; }
+    public bool IsEmpty() { return this->count == 0; }
+    public void Push(T v) {
+        if (this->count >= this->capacity) Grow(this->capacity * 2);
+        int32 tail = (this->head + this->count) % this->capacity;
+        this->data[tail] = v;
+        this->count = this->count + 1;
+    }
+    public T Front() { return this->data[this->head]; }
+    public T Pop() {
+        if (this->count == 0) return this->data[0];
+        T v = this->data[this->head];
+        this->head = (this->head + 1) % this->capacity;
+        this->count = this->count - 1;
+        return v;
+    }
+    public void Grow(int32 newCap);
+}
+template<T>
+public void ProtoQueue::Grow(int32 newCap) {
+    if (newCap < 1) newCap = 1;
+    T* nd = (T*)raw_alloc(newCap * sizeof(T));
+    int32 i;
+    for (i = 0; i < this->count; i++) nd[i] = this->data[(this->head + i) % this->capacity];
+    raw_free(this->data);
+    this->data = nd; this->capacity = newCap; this->head = 0;
+}
+
+[test("container.queue.fifo")]
+public static void TestQueueFifo() {
+    ProtoQueue<int32>* q = new ProtoQueue<int32>(2);
+    q->Push(1); q->Push(2); q->Push(3); // forces grow
+    assert_eq(3, q->Count(), "count after 3 pushes");
+    assert_eq(1, q->Pop(), "first out is first in");
+    assert_eq(2, q->Pop(), "second out");
+    assert_eq(3, q->Pop(), "third out");
+    assert_true(q->IsEmpty(), "empty after draining");
+}
+
+[test("container.queue.wrap")]
+public static void TestQueueWrap() {
+    ProtoQueue<int32>* q = new ProtoQueue<int32>(4);
+    q->Push(10); q->Push(20); q->Pop(); q->Pop(); // head wraps
+    q->Push(30); q->Push(40);
+    assert_eq(30, q->Front(), "front after wraparound");
+    assert_eq(30, q->Pop(), "pop 30");
+    assert_eq(40, q->Pop(), "pop 40");
+}
+

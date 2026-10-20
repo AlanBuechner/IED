@@ -1,0 +1,29 @@
+// Core - Primitive Type Tests (implementation)
+include "../Framework/Assert.ch"
+include "PrimitiveTypes.ch"
+
+void TestPrimitiveTypes() {
+	int8 i8 = 127;
+	AssertEqual(127, (int32)i8);
+	
+	int16 i16 = 32767;
+	AssertEqual(32767, (int32)i16);
+	
+	int32 i32 = -1000000;
+	AssertEqual(-1000000, i32);
+	
+	int64 i64 = 9223372036854775807;
+	AssertTrue(i64 > 1000000000);
+	
+	uint8 u8 = 255;
+	AssertEqual(255, (int32)u8);
+	
+	uint16 u16 = 65535;
+	AssertEqual(65535, (int32)u16);
+	
+	uint32 u32 = 4000000000;
+	AssertTrue(u32 > 2000000000);
+	
+	char ch = 'X';
+	AssertEqual(88, (int32)ch);
+}

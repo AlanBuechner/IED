@@ -1,0 +1,45 @@
+struct Shape {
+	float x;
+	float y;
+	[operator("create")] void Init();
+	[operator("create")] void Init(float nx, float ny);
+	virtual float GetArea();
+};
+struct Circle : public Shape {
+	float radius;
+	[operator("create")] void Init();
+	[operator("create")] void Init(float cx, float cy, float r);
+	float GetArea() override;
+};
+struct Rectangle : public Shape {
+	float width;
+	float height;
+	[operator("create")] void Init();
+	[operator("create")] void Init(float x, float y, float w, float h);
+	float GetArea() override;
+};
+void Shape::Init() { x = 0.0f; y = 0.0f; }
+void Shape::Init(float nx, float ny) { x = nx; y = ny; }
+float Shape::GetArea() { return 0.0f; }
+void Circle::Init() { x = 0.0f; y = 0.0f; radius = 0.0f; }
+void Circle::Init(float cx, float cy, float r) { x = cx; y = cy; radius = r; }
+float Circle::GetArea() { return 3.14159265f * radius * radius; }
+void Rectangle::Init() { x = 0.0f; y = 0.0f; width = 0.0f; height = 0.0f; }
+void Rectangle::Init(float x, float y, float w, float h) { Shape::Init(x, y); width = w; height = h; }
+float Rectangle::GetArea() { return width * height; }
+float CalculateArea(Shape* shape) { if (shape == 0) { return 0.0f; } return shape->GetArea(); }
+int32 main() {
+	int32 failed = 0;
+	Circle c; c.Init(1.0f, 2.0f, 3.0f);
+	if (c.x != 1.0f || c.y != 2.0f || c.radius != 3.0f) failed++;
+	Rectangle r; r.Init(0.0f, 0.0f, 4.0f, 5.0f);
+	if (r.x != 0.0f || r.width != 4.0f || r.height != 5.0f) failed++;
+	float ca = c.GetArea(); if (ca != 28.274334f) failed++;
+	float ra = r.GetArea(); if (ra != 20.0f) failed++;
+	Shape s; s.Init(0.0f, 0.0f); float sa = s.GetArea(); if (sa != 0.0f) failed++;
+	float polyC = CalculateArea(&c); if (polyC != 28.274334f) failed++;
+	float polyR = CalculateArea(&r); if (polyR != 20.0f) failed++;
+	float polyNull = CalculateArea(0); if (polyNull != 0.0f) failed++;
+	if (failed == 0) printf("ALL INHERITANCE TESTS PASSED\n"); else printf("%d FAILED\n", failed);
+	return failed;
+}

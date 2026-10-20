@@ -1,0 +1,33 @@
+// Core - a const whose initializer does not fold is set at startup (04, BUG-144): an object built with
+// constructor calls, a chain from a call, and a constant over a mutable global. Constant chains fold in any order.
+include "../Framework/Assert.ch"
+include "RuntimeConstants.ch"
+
+class RcVec2 {
+	public union { packed float x, y; };
+	[operator("create")] public void Init(float a, float b) { this.x = a; this.y = b; }
+}
+struct RcMat2 {
+	RcVec2 c0;
+	RcVec2 c1;
+	public static const RcMat2 Identity = { RcVec2(1.0f, 0.0f), RcVec2(0.0f, 1.0f) };
+}
+
+int32 RcSeed() { return 41; }
+const int32 kRcSeeded = RcSeed();
+const int32 kRcNext = kRcSeeded + 1;
+int32 gRcBase = 3;
+const int32 kRcOverGlobal = gRcBase + 1;
+const int32 kRcLate = kRcEarly * 2;
+const int32 kRcEarly = kRcEarliest + 1;
+const int32 kRcEarliest = 4;
+int32[kRcLate] gRcCells;
+
+void TestRuntimeConstants() {
+	AssertFloatEquals(1.0f, RcMat2::Identity.c0.x, "a const object built with constructor calls");
+	AssertFloatEquals(1.0f, RcMat2::Identity.c1.y, "a const object's second column");
+	AssertFloatEquals(0.0f, RcMat2::Identity.c0.y, "a const object's zero lane");
+	AssertIntEquals(42, kRcNext, "a const over a call-initialized const");
+	AssertIntEquals(4, kRcOverGlobal, "a const over a mutable global");
+	AssertIntEquals(40, (int32)sizeof(gRcCells), "a constant chain folds in any order");
+}

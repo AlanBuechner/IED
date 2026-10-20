@@ -1,0 +1,185 @@
+# 13 - C and C++ interop
+
+C4 is meant to drop into existing C/C++ code and SDKs (Win32, D3D12, engine code) without
+hand-written bindings. A C4 file names a C or C++ header or source file with an `extern`
+declaration; the compiler generates C4 declarations from headers with CBind (a libclang tool),
+compiles foreign sources with the bundled clang, and links everything into one executable. The
+C4 ABI matches clang's Windows x64 ABI so calls cross the boundary directly, with no marshaling.
+
+See also: [12 - Annotations](12-annotations.md) (`[link]`, `[uuid]`),
+[compiler/04-codegen-and-abi.md](../compiler/04-codegen-and-abi.md),
+[tools/01-compiler-cli.md](../tools/01-compiler-cli.md).
+
+---
+
+## 1. extern declarations
+
+**Status:** **Implemented**
+
+```c4
+extern "c" include "native.h"            // generate C4 declarations for a C header
+extern "c" source "native.c"             // compile and link a C file
+extern "c++" include "cpp.h"             // C++ header (classes, methods, namespaces)
+extern "c++" source "cpp.cpp"            // compile and link a C++ file
+
+extern "c++" include "game.hpp" {        // optional configuration block
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
+	define("WIN32_LEAN_AND_MEAN");
+	lib("d3d12.lib"); lib("dxgi.lib"); lib("user32.lib");
+}
+```
+
+| Part | Meaning |
+|---|---|
+| `"c"` / `"c++"` | language of the foreign file (selects `-std=c11` or `-std=c++20` and C vs C++ binding rules) |
+| `include "path"` | bind a header: its declarations become visible in this file |
+| `source "path"` | compile the file with the bundled clang and link the object |
+| `define("NAME")`, `define("NAME", "VALUE")` | preprocessor define for the foreign parse/compile |
+| `include_dir("dir")` | header search directory for the foreign parse/compile |
+| `lib("x.lib")` | link an import/static library; bare names are resolved against the newest installed Windows SDK. `-l x` / `-L dir` on the command line do the same for a whole build |
+
+Rules:
+
+- `extern` declarations appear only at file scope (like `include`), and the trailing `;` is
+  optional.
+- Paths are relative to the declaring file.
+- A foreign source also sees the runtime's C headers, so native code can register with it: `#include
+  "ReflectABI.h"` gives the reflection registry (`c4_reflect_register_type`, ..., see
+  [runtime/02-reflection.md](../runtime/02-reflection.md)).
+- The interop pass runs as a text pre-pass after macro expansion, so the generated declarations
+  behave exactly like hand-written C4 declarations in the file: they follow the normal
+  include-visibility rules of the [program model](01-program-model.md). They are added after the
+  file's own text (file-scope declarations are order independent), so a diagnostic in the file keeps
+  its line number.
+- Every interop failure is a hard build error: unresolvable path, CBind missing, CBind rejecting
+  the header, or the foreign source failing to compile.
+
+---
+
+## 2. What bindings look like
+
+CBind maps foreign declarations to C4 declarations:
+
+| C / C++ | C4 binding |
+|---|---|
+| free function | declaration-only C4 function with `[link("symbol")]` |
+| struct / class layout | C4 `struct` with the same field layout |
+| C++ namespace | flattened: `mathlib::Dot` is called as `Dot` |
+| constructor | `[operator("create")]` extension method, so `new Counter(40)` works |
+| instance method | extension method on the type: `c->Add(5)` |
+| overloaded methods | the C++ name; C4 overload resolution picks one: `b->Deposit(100)`, `b->Deposit(50, 5)` |
+| `const` method | a const extension method, callable on a `const T&` |
+| static method | free function `Type_Method`: `Counter_Scale(6, 7)` |
+| static data member | `[link("<decorated name>")] public static T name;` in the type: `Counter::g_global` reads and writes the C++ variable |
+| `private` / `protected` field | the same access in C4 |
+| `int`, `unsigned int`, `long`, `unsigned long` | `int32`, `uint32` (`long` is 32-bit on Windows) |
+| `char`, `signed char`, `unsigned char` | `char` (`char8`), `int8`, `uint8` |
+| `wchar_t`, `char16_t`, `char32_t` | `char16`, `char16`, `char32`: `u"text"` passes to a wide API |
+| `const T*`, `T&`, `const T&` | `const T*`, `T*`, `const T*` (a reference is passed as its address) |
+| virtual method | extension method that calls through a generated vtable trampoline shim (compiled and linked automatically), so virtual dispatch through a base pointer works |
+| `__declspec(uuid(...))` / `MIDL_INTERFACE` | `[uuid("...")]` on the type |
+| `std::initializer_list<T>` parameter | `__init_list<T>` - pass a braced list: `SumInts({1, 2, 3})` |
+| function-pointer parameter | `funcptr<R(A...)>` - pass a C4 function: `CatchFromCallback(MyCallback, 4)` |
+| destructor | an extension method annotated `[operator("delete")]`: it runs at scope exit, on `delete`, for a member of a C4 type, during unwinding and when the collector reclaims the object |
+
+Example (from `assets/IsolatedTest/Interop/CPlusPlusInterop`):
+
+```c4
+extern "c++" include "cpp.h"
+extern "c++" source "cpp.cpp"
+
+void TestCounter() {
+	Counter* c = new Counter;
+	c->Add(5);
+	Counter* c2 = new Counter(40);
+	int32 s = Counter_Scale(6, 7);
+	delete c;
+	delete c2;
+}
+```
+
+### 2.1 Caching
+
+Generated bindings are cached as `<hash>_<header>.c4bind` files (the hash is of the header's
+absolute path). A cached binding is reused while the header, CBind.exe, the language, the defines,
+the include dirs and the build's target flags are unchanged.
+
+---
+
+## 3. Binding single symbols with `[link]`
+
+**Status:** **Implemented**
+
+A function or variable declaration without a body/initializer can name a foreign symbol
+directly. A function *definition* with `[link("sym")]` is emitted under that symbol instead, so foreign
+code calls it by that name (`[link("on_event")] void OnEvent() { ... }`):
+
+```c4
+extern "c" source "ext.c"
+
+[link("g_extern_counter")] int32 g_counter;   // reads and writes go to the C global
+
+int32 main() {
+	g_counter = 55;
+	return 0;
+}
+```
+
+This is what generated bindings use internally. A `[link]` variable has no initializer: the foreign
+definition gives its value (`'g' is the foreign variable 'sym' ([link]): it has no initializer, ...`).
+
+---
+
+## 4. ABI compatibility
+
+**Status:** **Implemented** (Windows x64)
+
+C4 lowers calls exactly as clang does for `x86_64-pc-windows-msvc`, which is what makes direct
+calls possible:
+
+- By-value aggregates of 1, 2, 4 or 8 bytes pass and return in one integer register; other sizes
+  pass by hidden pointer and return through `sret`.
+- Methods of C4 types use the MSVC member convention (`this`, then the result pointer; every object
+  result goes through it), and C4 objects have MSVC layout, vtables and RTTI. A C4 class that implements
+  an interface can therefore be handed to C++ code that calls it through the matching C++ abstract class
+  (test `Interop/CppExceptionsAndInterfaces`).
+- Exceptions cross in both directions: type descriptors carry MSVC decorated names, so a C4
+  `catch (int32 e)` catches a C++ `throw 7;`, the CBind binding of a C++ struct catches that struct, and
+  C++ `catch (int)` / `catch (const T&)` / `catch (...)` catch C4 throws.
+- References lower to pointers.
+- C vector types (`__m128`, `__m128i`, `__m256`, `__m512`, any `vector_size` vector of 2 to 16 lanes) bind as the
+  `packed T[N]` of the same lanes and pass as clang passes them for the build's target: XMM, YMM or ZMM, split when
+  the target lacks the register (tests `Interop/SimdVectorArguments`, `Interop/SimdIntrinsicsInC`). A vector C pads
+  (a 3-lane `ext_vector_type` takes 16 bytes) has no binding. Pure packed vector objects pass the same way.
+- Foreign sources compile, and CBind parses headers, with the build's `-march` / `-m` flags (D-62), so C sees the
+  same processor (`__AVX2__`) and passes vectors the same way.
+- `void*` converts to and from any pointer (and `T**` to `void**`), which covers COM out-params
+  such as `IID_PPV_ARGS` patterns.
+- Integer-to-pointer casts are allowed for handle-style APIs.
+
+Details: [compiler/04-codegen-and-abi.md](../compiler/04-codegen-and-abi.md).
+
+## 5. COM
+
+**Status:** **Implemented**
+
+COM interfaces from real SDK headers (`d3d12.h`, `dxgi`) work: CBind emits `[uuid]` on each
+interface, `__uuidof(T)` returns a pointer to a `_GUID`, interface methods are callable through
+the vtable trampolines, and `void**` coercion handles out-params. The D3D12 tests
+(`assets/IsolatedTest/Interop/Dx12*`, `assets/StressTest/Dx12Game`) need a DX12-capable GPU to run.
+
+`_GUID` is declared by the prelude ([14](14-builtins.md)); a program or a bound header that declares its own
+hides it. A type without `[uuid]` gets a name-based GUID, so `__uuidof(T)` works for every type.
+
+---
+
+## 6. Limits and planned work
+
+| Item | Status |
+|---|---|
+| Windows x64 only (MSVC ABI, Windows SDK lookup) | **Planned**: Linux with the Linux port |
+| No timeout or progress diagnostic when CBind binds a very heavy SDK header | **Planned** |
+| C++ templates, operators and overloaded operators in headers | **Partial** - not covered by tests; assume unsupported |
+| Calling C4 functions from C/C++ (exports with a stable name) | **Partial** - C4 symbols use C4 mangling (`Name_<n>`); callbacks work by passing function pointers (`Win32WindowCallback` test) |
+| Tests hard-code Windows SDK version `10.0.26100.0` | test hygiene |

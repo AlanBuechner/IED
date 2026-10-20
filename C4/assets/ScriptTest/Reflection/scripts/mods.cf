@@ -1,0 +1,20 @@
+include "registry.ch"
+
+namespace Mods
+{
+	enum Mode { Off = 0, Slow = 3, Fast = 7 }
+
+	class Booster : public Registry::Component
+	{
+		public int32 power = 5;
+		[tunable("speed")] public float speed = 1.5f;
+		public override int32 Id() const { return 77; }
+		public int32 Boost(int32 by) { return power * by; }
+	}
+
+	int32 g_level = 12;
+
+	int32 Twice(int32 v) { return v * 2; }
+
+	Registry::Component* MakeBooster() { return new Booster(); }
+}

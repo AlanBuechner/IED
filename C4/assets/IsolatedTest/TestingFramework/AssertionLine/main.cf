@@ -1,0 +1,16 @@
+// B37: a failed assertion prints its own file and line, not its test's; one inside a call in another
+// assertion's arguments keeps its own line too.
+int32 Inner() {
+	assert_true(false, "inner");
+	return 1;
+}
+
+[test("lines.two")]
+void TestTwoLines() {
+	assert_true(false, "first");
+	int32 x = 1;
+	assert_eq(2, x, "second");
+	assert_eq(1, Inner(), "outer holds");
+	assert_feq(1.0, 1.5, 0.25, "third");
+	assert_se("a", "b", "fourth");
+}

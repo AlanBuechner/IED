@@ -1,0 +1,11 @@
+// Operators - Bitwise Shift Tests (implementation)
+include "../Framework/Assert.ch"
+include "BitwiseShift.ch"
+
+void TestBitwiseShift() {
+	int32 a = 1 << 4;
+	AssertEqual(16, a);
+	
+	int32 b = 32 >> 2;
+	AssertEqual(8, b);
+}

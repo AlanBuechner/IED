@@ -1,0 +1,5 @@
+class Counter {
+	public int32 n;
+	[operator("copy")] public void CopyFrom(int32 other) { n = other; }
+}
+int32 main() { Counter c; return c.n; }

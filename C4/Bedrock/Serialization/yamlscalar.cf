@@ -1,0 +1,158 @@
+include "yamlscalar.ch"
+include "readresult.ch"
+
+namespace Serialization
+{
+	bool IsOneOf(Core::StringView text, const char* a, const char* b, const char* c) {
+		return text == Core::StringView(a) || text == Core::StringView(b) || text == Core::StringView(c);
+	}
+
+	// Digits from `start` on, each worth less than `radix`, as an int64; false when there are none, one is not
+	// a digit, or the value does not fit.
+	bool YamlDigits(Core::StringView text, int64 start, int32 radix, bool negative, int64& out) {
+		if (start >= text.ByteLength()) return false;
+		uint64 limit = negative ? (uint64)1 << 63 : ((uint64)1 << 63) - 1;
+		uint64 magnitude = 0;
+		for (int64 i = start; i < text.ByteLength(); ++i) {
+			int32 digit = HexDigitValue(text.ByteAt(i));
+			if (digit < 0 || digit >= radix) return false;
+			if (magnitude > (limit - (uint64)digit) / (uint64)radix) return false;
+			magnitude = magnitude * (uint64)radix + (uint64)digit;
+		}
+		out = negative ? (int64)((uint64)0 - magnitude) : (int64)magnitude;
+		return true;
+	}
+
+	// [-+]?[0-9]+, 0o[0-7]+ or 0x[0-9a-fA-F]+ (the core schema's int).
+	bool YamlInteger(Core::StringView text, int64& out) {
+		if (text.StartsWith(Core::StringView("0x"))) return YamlDigits(text, 2, 16, false, out);
+		if (text.StartsWith(Core::StringView("0o"))) return YamlDigits(text, 2, 8, false, out);
+		bool hasSign = text.ByteLength() > 0 && (text.ByteAt(0) == '-' || text.ByteAt(0) == '+');
+		return YamlDigits(text, hasSign ? 1 : 0, 10, hasSign && text.ByteAt(0) == '-', out);
+	}
+
+	// [-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)? (the core schema's float, beside .inf and .nan).
+	bool IsYamlFloat(Core::StringView text) {
+		int64 i = 0;
+		int64 n = text.ByteLength();
+		if (i < n && (text.ByteAt(i) == '-' || text.ByteAt(i) == '+')) ++i;
+		int64 whole = i;
+		while (i < n && IsDecimalDigit(text.ByteAt(i))) ++i;
+		bool hasWhole = i > whole;
+		bool hasFraction = false;
+		if (i < n && text.ByteAt(i) == '.') {
+			int64 fraction = ++i;
+			while (i < n && IsDecimalDigit(text.ByteAt(i))) ++i;
+			hasFraction = i > fraction;
+		}
+		if (!hasWhole && !hasFraction) return false;
+		if (i < n && (text.ByteAt(i) == 'e' || text.ByteAt(i) == 'E')) {
+			++i;
+			if (i < n && (text.ByteAt(i) == '-' || text.ByteAt(i) == '+')) ++i;
+			int64 exponent = i;
+			while (i < n && IsDecimalDigit(text.ByteAt(i))) ++i;
+			if (i == exponent) return false;
+		}
+		return i == n;
+	}
+
+	DomNode YamlSpecialFloat(Core::StringView text, DomDoc& doc) {
+		bool negative = text.StartsWith(Core::StringView("-"));
+		Core::StringView body = text.StartsWith(Core::StringView("-")) || text.StartsWith(Core::StringView("+")) ? text.Substring(1, text.ByteLength() - 1) : text;
+		double value = 0.0;
+		if (IsOneOf(body, ".inf", ".Inf", ".INF")) parse_double(negative ? "-inf" : "inf", negative ? 4 : 3, &value);
+		else if (IsOneOf(text, ".nan", ".NaN", ".NAN")) parse_double("nan", 3, &value);
+		else return DomNode();
+		return doc.NewFloat(value);
+	}
+
+	DomNode ResolveYamlPlain(Core::StringView text, DomDoc& doc) {
+		if (text.IsEmpty() || text == Core::StringView("~") || IsOneOf(text, "null", "Null", "NULL")) return doc.NewNull();
+		if (IsOneOf(text, "true", "True", "TRUE")) return doc.NewBool(true);
+		if (IsOneOf(text, "false", "False", "FALSE")) return doc.NewBool(false);
+		int64 whole = 0;
+		if (YamlInteger(text, whole)) return doc.NewInt(whole);
+		double real = 0.0;
+		if (IsYamlFloat(text) && parse_double(text.Data(), text.ByteLength(), &real) == text.ByteLength()) return doc.NewFloat(real);
+		DomNode special = YamlSpecialFloat(text, doc);
+		return special.IsValid() ? special : doc.NewString(text);
+	}
+
+	// `count` hex digits at the start of `rest` as a code point, or -1.
+	int32 HexCodePoint(Core::StringView rest, int64 count) {
+		if (rest.ByteLength() < count) return -1;
+		int32 point = 0;
+		for (int64 i = 0; i < count; ++i) {
+			int32 digit = HexDigitValue(rest.ByteAt(i));
+			if (digit < 0) return -1;
+			point = point * 16 + digit;
+		}
+		return point;
+	}
+
+	// The byte a one-character escape stands for, or -1.
+	int32 YamlShortEscape(int32 c) {
+		switch (c) {
+			case '0': return 0;
+			case 'a': return 7;
+			case 'b': return 8;
+			case 't': return 9;
+			case '\t': return 9;
+			case 'n': return 10;
+			case 'v': return 11;
+			case 'f': return 12;
+			case 'r': return 13;
+			case 'e': return 27;
+			case ' ': return ' ';
+			case '"': return '"';
+			case '/': return '/';
+			case '\\': return '\\';
+		}
+		return -1;
+	}
+
+	// \N, \_, \L and \P: the next line, no-break space, line and paragraph separators.
+	int32 YamlNamedEscape(int32 c) {
+		switch (c) {
+			case 'N': return 0x85;
+			case '_': return 0xA0;
+			case 'L': return 0x2028;
+			case 'P': return 0x2029;
+		}
+		return -1;
+	}
+
+	// A high surrogate's \u escape followed by a low one's (a JSON pair) is one code point; -1 otherwise.
+	int32 SurrogatePair(int32 high, Core::StringView after) {
+		if (after.ByteLength() < 6 || after.ByteAt(0) != '\\' || after.ByteAt(1) != 'u') return -1;
+		int32 low = HexCodePoint(after.Substring(2, 4), 4);
+		if (low < 0xDC00 || low > 0xDFFF) return -1;
+		return 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+	}
+
+	int64 AppendUnicodeEscape(Core::StringView rest, int64 digits, Core::StringBuilder& out) {
+		int32 point = HexCodePoint(rest.Substring(1, digits), digits);
+		if (point < 0 || point > 0x10FFFF || (point >= 0xDC00 && point <= 0xDFFF)) return 0;
+		if (point >= 0xD800 && point <= 0xDBFF) {
+			int32 pair = digits == 4 ? SurrogatePair(point, rest.Substring(1 + digits, rest.ByteLength())) : -1;
+			if (pair < 0) return 0;
+			out.AppendCodePoint(pair);
+			return 1 + digits + 6;
+		}
+		out.AppendCodePoint(point);
+		return 1 + digits;
+	}
+
+	int64 AppendYamlEscape(Core::StringView rest, Core::StringBuilder& out) {
+		if (rest.IsEmpty()) return 0;
+		int32 c = rest.ByteAt(0);
+		int32 shortByte = YamlShortEscape(c);
+		if (shortByte >= 0) { out.AppendByte(shortByte); return 1; }
+		int32 named = YamlNamedEscape(c);
+		if (named >= 0) { out.AppendCodePoint(named); return 1; }
+		if (c == 'x') return AppendUnicodeEscape(rest, 2, out);
+		if (c == 'u') return AppendUnicodeEscape(rest, 4, out);
+		if (c == 'U') return AppendUnicodeEscape(rest, 8, out);
+		return 0;
+	}
+}

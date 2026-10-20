@@ -1,0 +1,12 @@
+// A template instantiation used as a FIELD type inside another template: the nested instantiation's
+// layout must be computed so Outer<float> is sized correctly (4 + 4 = 8) and member access lands at
+// the right offset. Locks that nested-instantiation-as-field does not miscompute offsets.
+template<T> struct Inner { T v; };
+template<T> struct Outer { Inner<int32> a; T b; };
+
+int32 main() {
+	Outer<float> o;
+	o.a.v = 42;
+	o.b = 1.5f;
+	return ((sizeof(Outer<float>) == 8) && (o.a.v == 42)) ? 0 : 1;
+}

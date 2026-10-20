@@ -1,0 +1,26 @@
+// Core - Float Literal Tests (implementation)
+include "../Framework/Assert.ch"
+include "FloatLiterals.ch"
+
+// File-scope data symbols with LONG-decimal float literals. Before the fix these emitted a
+// 64-bit double bit pattern into a 32-bit float constant -> LLVM "floating point constant
+// invalid for type" hard error (no C4 diagnostic). The const and non-const forms both hit it,
+// so both are covered here. Values mirror the local literals below so equality proves the
+// global stored the correct rounded float32, not a mis-decoded bit pattern.
+const float g_FileScopePiOver2 = 1.5707963268f;
+float g_FileScopePi = 3.14159265f;
+const double g_FileScopeE = 2.718281828459045;
+
+void TestFloatLiterals() {
+	float f1 = 3.14f;
+	AssertTrue(f1 != 0.0f);
+	
+	double d1 = 2.718;
+	AssertTrue(d1 != 0.0);
+
+	// File-scope float globals must equal local literals of the same value (correct float32 rounding).
+	AssertTrue(g_FileScopePiOver2 == 1.5707963268f);
+	AssertTrue(g_FileScopePi == 3.14159265f);
+	// File-scope double global keeps full precision.
+	AssertTrue(g_FileScopeE == 2.718281828459045);
+}

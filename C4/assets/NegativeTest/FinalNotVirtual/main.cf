@@ -1,0 +1,4 @@
+class Shape {
+	public final void Draw() {}
+}
+int32 main() { return 0; }

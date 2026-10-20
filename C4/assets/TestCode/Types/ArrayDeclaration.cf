@@ -1,0 +1,8 @@
+// Types - Array Declaration Tests (implementation)
+include "../Framework/Assert.ch"
+include "ArrayDeclaration.ch"
+
+void TestArrayDeclaration() {
+	int32[5] arr;
+	AssertTrue(1);
+}

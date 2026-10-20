@@ -1,0 +1,211 @@
+// Platform virtual memory: reserve, commit, decommit, release, protect and query, their refusals, and code written
+// into memory and run. Faults on protected pages are IsolatedTest Platform/ProtectionFaults.
+
+include "bedrock.ch"
+
+const int64 kMebibyte = 1048576;
+const int64 kGibibyte = 1073741824;
+
+uint8* Bytes(void* address, int64 offset) { return (uint8*)address + offset; }
+
+bool IsMultiple(void* address, int64 alignment) { return (uint64)address % (uint64)alignment == 0; }
+
+bool IsPowerOfTwo(int64 value) { return value > 0 && (value & (value - 1)) == 0; }
+
+Platform::MemoryRegion RegionAt(const void* address) {
+	Platform::MemoryRegion region;
+	Platform::Query(address, region);
+	return region;
+}
+
+// Whether `count` bytes at `address` are all `value`.
+bool AllBytes(void* address, int64 count, uint8 value) {
+	for (int64 i = 0; i < count; ++i)
+		if (Bytes(address, 0)[i] != value) return false;
+	return true;
+}
+
+[test("platform.memory")]
+class VirtualMemoryTests {
+	[test("sizes")]
+	public static void TestSizes() {
+		int64 page = Platform::PageSize();
+		int64 granularity = Platform::AllocationGranularity();
+		assert_eq(4096, page, "x64 pages are 4 KiB");
+		assert_true(IsPowerOfTwo(granularity) && granularity % page == 0, "the granularity is a power of two of whole pages");
+	}
+
+	[test("refusals")]
+	public static void TestRefusals() {
+		int64 page = Platform::PageSize();
+		assert_true(Platform::Reserve(0) == nullptr, "no reservation of zero bytes");
+		assert_true(Platform::Reserve(-page) == nullptr, "nor of a negative size");
+		assert_true(Platform::ReserveAligned(page, 0) == nullptr, "an alignment of zero");
+		assert_true(Platform::ReserveAligned(page, 3 * page) == nullptr, "an alignment that is no power of two");
+		assert_true(Platform::ReserveAligned(page, -page) == nullptr, "a negative alignment");
+		assert_true(Platform::Allocate(0, Platform::Protection::ReadWrite) == nullptr, "no allocation of zero bytes");
+		void* base = Platform::Reserve(page);
+		assert_true(!Platform::Commit(nullptr, page, Platform::Protection::ReadWrite), "commit at null");
+		assert_true(!Platform::Commit(base, 0, Platform::Protection::ReadWrite), "commit of zero bytes");
+		assert_true(!Platform::Commit(base, -1, Platform::Protection::ReadWrite), "commit of a negative size");
+		assert_true(!Platform::Decommit(base, 0), "decommit of zero bytes");
+		assert_true(!Platform::Decommit(nullptr, page), "decommit at null");
+		assert_true(!Platform::Protect(base, 0, Platform::Protection::Read), "protect zero bytes");
+		assert_true(!Platform::Protect(base, page, Platform::Protection::Read), "protect pages that are not committed");
+		assert_true(!Platform::Release(nullptr), "release null");
+		assert_true(Platform::Release(base), "release the reservation");
+		assert_true(!Platform::Release(base), "release it twice");
+		assert_true(!Platform::Commit(base, page, Platform::Protection::ReadWrite), "commit addresses no longer reserved");
+	}
+
+	[test("reserve_commit_release")]
+	public static void TestReserveCommitRelease() {
+		int64 page = Platform::PageSize();
+		void* base = Platform::Reserve(4 * page);
+		assert_true(base != nullptr && IsMultiple(base, Platform::AllocationGranularity()), "a reservation starts at the granularity");
+		Platform::MemoryRegion reserved = RegionAt(base);
+		assert_true(reserved.state == Platform::RegionState::Reserved, "reserved, not committed");
+		assert_true(reserved.base == base && reserved.allocationBase == base && reserved.size == 4 * page, "the whole run");
+		assert_true(reserved.protection == Platform::Protection::None, "reserved pages have no rights");
+
+		void* second = (void*)Bytes(base, page);
+		assert_true(Platform::Commit(second, page, Platform::Protection::ReadWrite), "commit the second page");
+		assert_true(AllBytes(second, page, 0), "new pages are zero");
+		Bytes(second, 0)[17] = 99;
+		assert_eq(99, Bytes(second, 0)[17], "and hold what is written");
+		Platform::MemoryRegion committed = RegionAt(second);
+		assert_true(committed.state == Platform::RegionState::Committed && committed.protection == Platform::Protection::ReadWrite, "committed and writable");
+		assert_true(committed.base == second && committed.size == page && committed.allocationBase == base, "one page of the reservation");
+		assert_true(RegionAt(base).state == Platform::RegionState::Reserved, "the first page is still only reserved");
+
+		assert_true(Platform::Decommit(second, page), "decommit it");
+		assert_true(RegionAt(second).state == Platform::RegionState::Reserved, "its addresses stay reserved");
+		assert_true(Platform::Commit(second, page, Platform::Protection::ReadWrite), "commit it again");
+		assert_true(AllBytes(second, page, 0), "and it is zero again");
+
+		assert_true(Platform::Release(base), "release");
+		Platform::MemoryRegion free = RegionAt(base);
+		assert_true(free.state == Platform::RegionState::Free && free.allocationBase == nullptr, "the addresses are free");
+	}
+
+	[test("commit_rounds_out")]
+	public static void TestCommitRoundsOut() {
+		int64 page = Platform::PageSize();
+		void* base = Platform::Reserve(3 * page);
+		assert_true(Platform::Commit((void*)Bytes(base, page - 1), 2, Platform::Protection::ReadWrite), "two bytes across a page boundary");
+		Platform::MemoryRegion region = RegionAt(base);
+		assert_true(region.state == Platform::RegionState::Committed && region.size == 2 * page, "commit both pages whole");
+		assert_true(RegionAt((void*)Bytes(base, 2 * page)).state == Platform::RegionState::Reserved, "and no more");
+		assert_true(Platform::Decommit((void*)Bytes(base, page + 5), 1), "one byte decommits its page");
+		assert_true(RegionAt((void*)Bytes(base, page)).state == Platform::RegionState::Reserved, "the second page");
+		assert_true(RegionAt(base).state == Platform::RegionState::Committed, "and not the first");
+		Platform::Release(base);
+	}
+
+	[test("commit_again")]
+	public static void TestCommitAgain() {
+		int64 page = Platform::PageSize();
+		void* base = Platform::Reserve(page);
+		Platform::Commit(base, page, Platform::Protection::ReadWrite);
+		Bytes(base, 0)[0] = 7;
+		assert_true(Platform::Commit(base, page, Platform::Protection::Read), "commit a committed page");
+		assert_eq(7, Bytes(base, 0)[0], "it keeps its bytes");
+		assert_true(RegionAt(base).protection == Platform::Protection::Read, "and takes the new rights");
+		assert_true(Platform::Decommit(base, page) && Platform::Decommit(base, page), "decommitting twice is harmless");
+		Platform::Release(base);
+	}
+
+	[test("release_interior")]
+	public static void TestReleaseInterior() {
+		int64 page = Platform::PageSize();
+		void* base = Platform::Allocate(2 * page, Platform::Protection::ReadWrite);
+		assert_true(!Platform::Release((void*)Bytes(base, page)), "only the start of a reservation releases it");
+		assert_true(RegionAt(base).state == Platform::RegionState::Committed, "which stays whole");
+		assert_true(Platform::Release(base), "the start does");
+	}
+
+	[test("alignment")]
+	public static void TestAlignment() {
+		int64 page = Platform::PageSize();
+		void* aligned = Platform::ReserveAligned(page, 2 * kMebibyte);
+		assert_true(aligned != nullptr && IsMultiple(aligned, 2 * kMebibyte), "2 MiB aligned");
+		assert_true(RegionAt(aligned).size == page, "with only the size asked for reserved");
+		void* small = Platform::ReserveAligned(page, page);
+		assert_true(small != nullptr && IsMultiple(small, Platform::AllocationGranularity()), "a small alignment is the granularity's");
+		void* huge = Platform::ReserveAligned(page, kGibibyte);
+		assert_true(huge != nullptr && IsMultiple(huge, kGibibyte), "1 GiB aligned");
+		assert_true(Platform::Release(aligned) && Platform::Release(small) && Platform::Release(huge), "each releases");
+	}
+
+	[test("allocate")]
+	public static void TestAllocate() {
+		int64 page = Platform::PageSize();
+		void* block = Platform::Allocate(page + 1, Platform::Protection::ReadWrite);
+		Platform::MemoryRegion region = RegionAt(block);
+		assert_true(region.state == Platform::RegionState::Committed && region.size == 2 * page, "committed whole, in pages");
+		assert_true(AllBytes(block, 2 * page, 0), "zeroed");
+		Bytes(block, 0)[2 * page - 1] = 1;
+		assert_eq(1, Bytes(block, 0)[2 * page - 1], "to its last byte");
+		void* readable = Platform::Allocate(page, Platform::Protection::Read);
+		assert_true(RegionAt(readable).protection == Platform::Protection::Read && AllBytes(readable, page, 0), "read-only and zero");
+		assert_true(Platform::Release(block) && Platform::Release(readable), "both release");
+	}
+
+	[test("protect")]
+	public static void TestProtect() {
+		int64 page = Platform::PageSize();
+		void* block = Platform::Allocate(2 * page, Platform::Protection::ReadWrite);
+		Bytes(block, 0)[3] = 42;
+		assert_true(Platform::Protect(block, page, Platform::Protection::Read), "make the first page read-only");
+		assert_true(RegionAt(block).protection == Platform::Protection::Read && RegionAt(block).size == page, "only the first page");
+		assert_true(RegionAt((void*)Bytes(block, page)).protection == Platform::Protection::ReadWrite, "the second keeps its rights");
+		assert_eq(42, Bytes(block, 0)[3], "a read-only page still reads");
+		assert_true(Platform::Protect(block, page, Platform::Protection::None), "take every right");
+		assert_true(RegionAt(block).protection == Platform::Protection::None && RegionAt(block).state == Platform::RegionState::Committed, "committed with none");
+		assert_true(Platform::Protect(block, 2 * page, Platform::Protection::ReadWriteExecute), "both pages at once");
+		assert_eq(42, Bytes(block, 0)[3], "the bytes survive every change");
+		assert_true(RegionAt(block).size == 2 * page && RegionAt(block).protection == Platform::Protection::ReadWriteExecute, "one run again");
+		Platform::Release(block);
+	}
+
+	[test("query")]
+	public static void TestQuery() {
+		int64 local = 5;
+		Platform::MemoryRegion stack = RegionAt((void*)&local);
+		assert_true(stack.state == Platform::RegionState::Committed && stack.protection == Platform::Protection::ReadWrite, "the stack is writable");
+		Platform::MemoryRegion code = RegionAt((void*)Platform::PageSize);
+		assert_true(code.protection == Platform::Protection::ReadExecute, "the program's code runs and reads");
+		Platform::MemoryRegion region;
+		assert_true(Platform::Query(nullptr, region) && region.state == Platform::RegionState::Free, "address zero is never mapped");
+		assert_true(!Platform::Query((void*)0xFFFF800000000000, region), "a kernel address is outside the process");
+	}
+
+	[test("large_reservation")]
+	public static void TestLargeReservation() {
+		void* space = Platform::Reserve(64 * kGibibyte);
+		assert_true(space != nullptr, "64 GiB of addresses cost no memory");
+		void* middle = (void*)Bytes(space, 32 * kGibibyte);
+		assert_true(Platform::Commit(middle, 1, Platform::Protection::ReadWrite), "commit a page in the middle");
+		Bytes(middle, 0)[0] = 3;
+		assert_eq(3, Bytes(middle, 0)[0], "and use it");
+		assert_true(Platform::Release(space), "release it all");
+	}
+
+	[test("executable_code")]
+	public static void TestExecutableCode() {
+		int64 page = Platform::PageSize();
+		void* code = Platform::Allocate(page, Platform::Protection::ReadWrite);
+		uint8* bytes = Bytes(code, 0);
+		// mov eax, 42; ret
+		bytes[0] = 0xB8; bytes[1] = 42; bytes[2] = 0; bytes[3] = 0; bytes[4] = 0; bytes[5] = 0xC3;
+		// lea eax, [rcx + 1]; ret (the first argument is in rcx)
+		bytes[16] = 0x8D; bytes[17] = 0x41; bytes[18] = 0x01; bytes[19] = 0xC3;
+		assert_true(Platform::Protect(code, page, Platform::Protection::ReadExecute), "make it code");
+		Platform::FlushInstructionCache(code, page);
+		funcptr<int32()> answer = (funcptr<int32()>)code;
+		funcptr<int32(int32)> next = (funcptr<int32(int32)>)(void*)Bytes(code, 16);
+		assert_eq(42, answer(), "written code runs");
+		assert_eq(42, next(41), "and takes arguments");
+		Platform::Release(code);
+	}
+}

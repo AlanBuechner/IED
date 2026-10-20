@@ -1,0 +1,1 @@
+int main() { char* p = null; p = "hello"; return 0; }

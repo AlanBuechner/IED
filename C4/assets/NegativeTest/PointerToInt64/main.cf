@@ -1,0 +1,1 @@
+int32 main() { int32 x = 1; int32* p = &x; int64 w = p; return 0; }

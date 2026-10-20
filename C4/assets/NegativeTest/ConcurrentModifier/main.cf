@@ -1,0 +1,2 @@
+concurrent void Work() {}
+int32 main() { return 0; }

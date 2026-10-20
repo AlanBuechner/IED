@@ -1,0 +1,3 @@
+struct A { int32 x; }
+class C { public int32 Use(A a) { return a.x; } }
+int main() { C c; int32 n = 7; int32 r = c.Use(n); return 0; }

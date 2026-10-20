@@ -1,0 +1,34 @@
+// Core - sizeof, alignof and offsetof (B5): a type or an unevaluated expression, in code and in constants.
+include "../Framework/Assert.ch"
+include "SizeofForms.ch"
+
+struct SfInner { public int8 tag; public double value; }
+struct SfOuter { public int32 id; public SfInner inner; public int16[3] codes; }
+
+int32[5] g_SfTable;
+const int32 kSfCount = sizeof(g_SfTable) / sizeof(g_SfTable[0]);
+int32[kSfCount] g_SfCopy;
+const int32 kSfInnerOffset = offsetof(SfOuter, inner.value);
+int32 g_SfCalls = 0;
+int32 SfTouch() { g_SfCalls = g_SfCalls + 1; return g_SfCalls; }
+
+void TestSizeofForms() {
+	SfOuter o;
+	AssertIntEquals(32, (int32)sizeof(SfOuter), "sizeof(T) with padding");
+	AssertIntEquals(32, (int32)sizeof(o), "sizeof(variable)");
+	AssertIntEquals(16, (int32)sizeof o.inner, "sizeof without parentheses");
+	AssertIntEquals(4, (int32)sizeof(o.codes[1] + 1), "sizeof of an expression takes its promoted type");
+	AssertIntEquals(6, (int32)sizeof(o.codes), "an array field");
+	AssertIntEquals(8, (int32)alignof(SfOuter), "alignof(T)");
+	AssertIntEquals(2, (int32)alignof(o.codes), "alignof(expression)");
+	AssertIntEquals(24, (int32)offsetof(SfOuter, codes), "offsetof");
+	AssertIntEquals(16, kSfInnerOffset, "offsetof of a nested field, in a constant");
+	AssertIntEquals(5, kSfCount, "the element count idiom in a constant");
+	AssertIntEquals(20, (int32)sizeof(g_SfCopy), "a constant sized from it");
+	int32& r = o.id;
+	AssertIntEquals(4, (int32)sizeof(r), "a reference measures what it refers to");
+	AssertIntEquals(8, (int32)sizeof(int32*), "a pointer");
+	AssertIntEquals(3, (int32)(sizeof o.id * 2 - 5), "sizeof binds like a prefix operator");
+	AssertIntEquals(4, (int32)sizeof(SfTouch()), "sizeof of a call");
+	AssertIntEquals(0, g_SfCalls, "the operand of sizeof is never evaluated");
+}

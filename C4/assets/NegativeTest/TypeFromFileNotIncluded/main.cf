@@ -1,0 +1,5 @@
+int32 main() {
+	Widget w;
+	w.id = 1;
+	return 0;
+}

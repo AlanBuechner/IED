@@ -1,0 +1,5 @@
+int32 main() {
+	packed float[4] a = 1.0f;
+	bool r = simd_any(a);
+	return 0;
+}

@@ -1,0 +1,5 @@
+int32 main() {
+	int32 x = 1;
+	packed int32[4] r = &x;
+	return 0;
+}

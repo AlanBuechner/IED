@@ -1,0 +1,2 @@
+template<T> T Larger(T a, T b) { return a > b ? a : b; }
+int32 main() { float x = Larger(1, 2.5f); return (int32)x; }

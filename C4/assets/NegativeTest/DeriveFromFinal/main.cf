@@ -1,0 +1,3 @@
+final class Leaf {}
+class More : public Leaf {}
+int32 main() { return 0; }

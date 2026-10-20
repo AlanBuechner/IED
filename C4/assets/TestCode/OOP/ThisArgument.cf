@@ -1,0 +1,24 @@
+// OOP - `*this` passed as an argument is the object, `this` the pointer (BUG-157)
+include "../Framework/Assert.ch"
+include "ThisArgument.ch"
+
+template<E> int32 TaValueOf(const E& entity) { return entity.value; }
+template<E> int64 TaSizeOf(const E& entity) { return sizeof(E); }
+bool TaSame(const TaHolder* a, const TaHolder* b) { return a == b; }
+
+int32 TaHolder::ViaConst() const { return TaValueOf(*this); }
+int32 TaHolder::ViaMutable() { return TaValueOf(*this) + (int32)TaSizeOf(*this); }
+int32 TaHolder::ViaLambda() {
+	func<int32()> read = [this]() -> int32 { return TaValueOf(*this); };
+	return read();
+}
+bool TaHolder::PointerIsThis() { return TaSame(this, &*this); }
+
+void TestThisArgument() {
+	TaHolder h;
+	h.value = 41;
+	AssertEqual(41, h.ViaConst());
+	AssertEqual(41 + 16, h.ViaMutable());
+	AssertEqual(41, h.ViaLambda());
+	AssertTrue(h.PointerIsThis() ? 1 : 0);
+}

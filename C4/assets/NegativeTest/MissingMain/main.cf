@@ -1,0 +1,5 @@
+// A program built into a runnable executable must define lowercase `main`. Without one the old
+// behavior emitted an empty entry point that did nothing and exited 0 - a silent no-op the user
+// cannot see. This is now a clear, actionable error (same class as capital-`Main`). -test / bitcode /
+// compile-only modes are exempt because they provide their own entry point or produce no exe.
+int32 helper() { return 41; }

@@ -1,0 +1,2 @@
+struct CS { int32 i; }
+int32 main() { packed CS[4] a; return 0; }

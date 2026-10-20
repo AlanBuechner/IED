@@ -1,0 +1,21 @@
+// ControlFlow - the for step clause takes expressions separated by commas, run in order (B10, D-40).
+include "../Framework/Assert.ch"
+include "ForCommaStep.ch"
+
+void TestForCommaStep() {
+	int32 meetings = 0;
+	int32 lo = 0;
+	int32 hi = 10;
+	for (; lo < hi; ++lo, --hi)
+		meetings = meetings + 1;
+	AssertIntEquals(5, meetings, "two steps per iteration");
+	AssertIntEquals(5, lo, "the first step ran each time");
+	AssertIntEquals(5, hi, "the second step ran each time");
+
+	int32 order = 0;
+	int32 n = 0;
+	for (int32 i = 0; i < 3; i = i + 1, order = order * 10 + i)
+		n = n + 1;
+	AssertIntEquals(123, order, "steps run left to right: the second sees the first's result");
+	AssertIntEquals(3, n, "three iterations");
+}

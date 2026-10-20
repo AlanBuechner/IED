@@ -1,0 +1,5 @@
+struct S {
+	public int32 v;
+}
+int32 Read(const int32& x) { return x; }
+int32 main() { S s; return Read(s); }

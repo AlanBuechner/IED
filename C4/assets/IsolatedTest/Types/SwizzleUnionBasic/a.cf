@@ -1,0 +1,23 @@
+struct Vec3 {
+	union {
+		struct { float x; float y; float z; }
+		struct { float r; float g; float b; }
+	}
+	int32 tag;
+}
+int32 main() {
+	Vec3 v;
+	v.x = 1.0f;
+	v.y = 2.0f;
+	v.z = 3.0f;
+	if (v.r != 1.0f) return 1;
+	if (v.g != 2.0f) return 2;
+	if (v.b != 3.0f) return 3;
+	v.r = 9.5f;
+	if (v.x != 9.5f) return 4;
+	v.tag = 42;
+	if (v.tag != 42) return 5;
+	int64 sz = sizeof(Vec3);
+	printf("SWZ OK x=%f r=%f tag=%d sizeof=%lld\n", v.x, v.r, v.tag, sz);
+	return (sz == 16) ? 0 : 6;
+}

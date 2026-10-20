@@ -1,0 +1,24 @@
+// Bug C repro - separate function declarations/definitions across namespaces,
+// plus two namespaces defining the same function name.
+
+namespace Alpha {
+	int32 Value(int32 x);   // declaration only
+}
+
+namespace Beta {
+	int32 Value(int32 x);   // same name, different namespace
+}
+
+int32 Alpha::Value(int32 x) { return x + 1; }
+int32 Beta::Value(int32 x) { return x * 10; }
+
+int32 main() {
+	int32 a = Alpha::Value(5);
+	if (a != 6) { printf("FAIL alpha got %d\n", a); return 1; }
+
+	int32 b = Beta::Value(5);
+	if (b != 50) { printf("FAIL beta got %d\n", b); return 1; }
+
+	printf("CROSS NAMESPACE OK\n");
+	return 0;
+}

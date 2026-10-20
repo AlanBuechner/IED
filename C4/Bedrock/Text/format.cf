@@ -1,0 +1,89 @@
+include "format.ch"
+
+namespace Core
+{
+	// One placeholder: the argument it names, its kind letter and width, and how many bytes it spans
+	// (0 when the text at that position is not a well-formed placeholder).
+	struct FormatField {
+		public int32 index;
+		public int32 kind;
+		public int32 width;
+		public int64 length;
+	}
+
+	int32 FormatDigit(int32 c) { return c >= '0' && c <= '9' ? c - '0' : -1; }
+
+	FormatField ParseFormatField(const char* text, int64 at) {
+		FormatField field;
+		field.kind = 'd';
+		int64 p = at + 1;
+		if (FormatDigit(text[p]) < 0) return field;
+		while (FormatDigit(text[p]) >= 0) { field.index = field.index * 10 + FormatDigit(text[p]); p += 1; }
+		if (text[p] == ':') {
+			field.kind = text[p + 1];
+			p += 2;
+			if (text[p] == '.') {
+				p += 1;
+				while (FormatDigit(text[p]) >= 0) { field.width = field.width * 10 + FormatDigit(text[p]); p += 1; }
+			}
+		}
+		if (text[p] != '}' || field.index >= kFormatArgumentLimit) return field;
+		field.length = p + 1 - at;
+		return field;
+	}
+
+	bool FormatKindIsDouble(int32 kind) { return kind == 'f' || kind == 'F'; }
+
+	// The kind each argument is read as, and how many arguments the format names.
+	int32 FormatArgumentKinds(const char* text, int32* kinds) {
+		int32 count = 0;
+		for (int64 i = 0; text[i] != (char)0; ++i) {
+			if (text[i] != '{') continue;
+			if (text[i + 1] == '{') { i += 1; continue; }
+			FormatField field = ParseFormatField(text, i);
+			if (field.length == 0) continue;
+			kinds[field.index] = field.kind;
+			if (field.index + 1 > count) count = field.index + 1;
+		}
+		return count;
+	}
+
+	void AppendFormatField(StringBuilder* out, const FormatField& field, uint64 value) {
+		int32 kind = field.kind;
+		if (kind == 'D') out->AppendIntBase((int64)value, 10, field.width);
+		else if (kind == 'u') out->AppendUIntBase(value, 10, field.width);
+		else if (kind == 'x') out->AppendUIntBase(value, 16, field.width);
+		else if (kind == 'b') out->AppendUIntBase(value, 2, field.width);
+		else if (kind == 'o') out->AppendUIntBase(value, 8, field.width);
+		else if (FormatKindIsDouble(kind)) out->AppendDouble(reinterpret_cast<double>(value), field.width);
+		else if (kind == 's') out->Append((const char*)value);
+		else out->AppendIntBase((int64)(int32)value, 10, field.width);
+	}
+
+	void AppendFormatted(StringBuilder* out, const char* text, const uint64* values) {
+		int64 i = 0;
+		while (text[i] != (char)0) {
+			int32 c = text[i];
+			bool doubled = (c == '{' || c == '}') && text[i + 1] == c;
+			FormatField field = c == '{' && !doubled ? ParseFormatField(text, i) : FormatField();
+			if (field.length > 0) { AppendFormatField(out, field, values[field.index]); i += field.length; continue; }
+			out->AppendByte(c);
+			i += doubled ? 2 : 1;
+		}
+	}
+
+	void Format(StringBuilder* out, const char* format, ...) {
+		int32[16] kinds;
+		for (int32 k = 0; k < kFormatArgumentLimit; ++k) kinds[k] = 0;
+		int32 count = FormatArgumentKinds(format, &kinds[0]);
+		uint64[16] values;
+		va_list arguments;
+		va_start(arguments);
+		for (int32 k = 0; k < count; ++k) {
+			if (!FormatKindIsDouble(kinds[k])) { values[k] = va_arg(arguments, uint64); continue; }
+			values[k] = reinterpret_cast<uint64>(va_arg(arguments, double));
+		}
+		va_end(arguments);
+		AppendFormatted(out, format, &values[0]);
+	}
+}

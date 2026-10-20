@@ -1,0 +1,2 @@
+[float] F() { return [1.0f]; }
+int32 main() { return 0; }

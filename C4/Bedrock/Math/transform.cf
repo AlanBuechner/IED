@@ -1,0 +1,87 @@
+include "transform.ch"
+
+namespace Math
+{
+	Mat4 Translation(FVector3 offset) {
+		Mat4 m = Mat4::Identity;
+		m.columns[3] = FVector4(offset, 1.0f);
+		return m;
+	}
+
+	Mat4 Scaling(FVector3 factors) {
+		return Mat4(FVector4(factors.x, 0.0f, 0.0f, 0.0f), FVector4(0.0f, factors.y, 0.0f, 0.0f), FVector4(0.0f, 0.0f, factors.z, 0.0f),
+			FVector4(0.0f, 0.0f, 0.0f, 1.0f));
+	}
+
+	// Rodrigues' rotation, column by column (GLM's rotate).
+	Mat4 Rotation(float angle, FVector3 axis) {
+		float c = Cos(angle);
+		float s = Sin(angle);
+		FVector3 a = Normalized(axis);
+		FVector3 t = a * (1.0f - c);
+		return Mat4(
+			FVector4(c + t.x * a.x, t.x * a.y + s * a.z, t.x * a.z - s * a.y, 0.0f),
+			FVector4(t.y * a.x - s * a.z, c + t.y * a.y, t.y * a.z + s * a.x, 0.0f),
+			FVector4(t.z * a.x + s * a.y, t.z * a.y - s * a.x, c + t.z * a.z, 0.0f),
+			FVector4(0.0f, 0.0f, 0.0f, 1.0f));
+	}
+
+	Mat4 RotationYXZ(FVector3 radians) {
+		float cp = Cos(radians.x), sp = Sin(radians.x);
+		float cy = Cos(radians.y), sy = Sin(radians.y);
+		float cr = Cos(radians.z), sr = Sin(radians.z);
+		return Mat4(
+			FVector4(cy * cr + sy * sp * sr, sr * cp, -sy * cr + cy * sp * sr, 0.0f),
+			FVector4(-cy * sr + sy * sp * cr, cr * cp, sr * sy + cy * sp * cr, 0.0f),
+			FVector4(sy * cp, -sp, cy * cp, 0.0f),
+			FVector4(0.0f, 0.0f, 0.0f, 1.0f));
+	}
+
+	Mat4 TransformMatrix(FVector3 position, FVector3 rotation, FVector3 scale) {
+		return Translation(position) * (RotationYXZ(rotation) * Scaling(scale));
+	}
+
+	Mat4 TransformMatrix(FVector3 position, Quat rotation, FVector3 scale) {
+		return Translation(position) * (ToMat4(rotation) * Scaling(scale));
+	}
+
+	Mat4 LookAt(FVector3 eye, FVector3 target, FVector3 up) {
+		FVector3 f = Normalized(target - eye);
+		FVector3 s = Normalized(Cross(up, f));
+		FVector3 u = Cross(f, s);
+		return Mat4(
+			FVector4(s.x, u.x, f.x, 0.0f),
+			FVector4(s.y, u.y, f.y, 0.0f),
+			FVector4(s.z, u.z, f.z, 0.0f),
+			FVector4(-Dot(s, eye), -Dot(u, eye), -Dot(f, eye), 1.0f));
+	}
+
+	Mat4 Perspective(float verticalFov, float aspect, float zNear, float zFar) {
+		float tanHalf = Tan(verticalFov * 0.5f);
+		float depth = zFar / (zFar - zNear);
+		return Mat4(
+			FVector4(1.0f / (aspect * tanHalf), 0.0f, 0.0f, 0.0f),
+			FVector4(0.0f, 1.0f / tanHalf, 0.0f, 0.0f),
+			FVector4(0.0f, 0.0f, depth, 1.0f),
+			FVector4(0.0f, 0.0f, -zNear * depth, 0.0f));
+	}
+
+	Mat4 Orthographic(float left, float right, float bottom, float top, float zNear, float zFar) {
+		return Mat4(
+			FVector4(2.0f / (right - left), 0.0f, 0.0f, 0.0f),
+			FVector4(0.0f, 2.0f / (top - bottom), 0.0f, 0.0f),
+			FVector4(0.0f, 0.0f, 1.0f / (zFar - zNear), 0.0f),
+			FVector4(-(right + left) / (right - left), -(top + bottom) / (top - bottom), -zNear / (zFar - zNear), 1.0f));
+	}
+
+	Transform Decompose(const Mat4& m) {
+		Transform parts;
+		parts.position = TranslationOf(m);
+		Mat3 rotation = m.ToMat3();
+		parts.scale = FVector3(Length(rotation.columns[0]), Length(rotation.columns[1]), Length(rotation.columns[2]));
+		for (int64 c = 0; c < 3; ++c)
+			if (parts.scale[c] > 0.0f) rotation.columns[c] = rotation.columns[c] / parts.scale[c];
+		parts.rotation = ToEuler(rotation);
+		return parts;
+	}
+}

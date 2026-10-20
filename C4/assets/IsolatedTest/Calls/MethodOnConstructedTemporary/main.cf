@@ -1,0 +1,28 @@
+// BUG-103: a method call on an object made in the expression (`P(7).Get()`, `Q{9}.Get()`) works on that
+// object, whether or not its type needs destruction.
+struct P {
+	public int32 a;
+	[operator("create")] void Init(int32 v) { a = v; }
+	public int32 Get() { return a; }
+}
+
+struct Q {
+	public int32 a;
+	public int32 Get() { return a; }
+	public int32 Twice() { return Get() * 2; }
+}
+
+int32 g_destroyed = 0;
+struct R {
+	public int32 a;
+	[operator("delete")] void Done() { if (a != 0) g_destroyed++; }
+	public int32 Get() { return a; }
+}
+
+int32 main() {
+	if (P(7).Get() != 7) return 1;
+	if (Q{9}.Get() != 9 || Q{4}.Twice() != 8) return 2;
+	if (R{5}.Get() != 5) return 3;
+	if (g_destroyed != 1) return 4;
+	return 0;
+}

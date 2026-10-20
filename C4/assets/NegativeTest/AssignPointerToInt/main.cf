@@ -1,0 +1,2 @@
+int32 g = 0;
+int32 main() { int32* p = &g; g = p; return 0; }

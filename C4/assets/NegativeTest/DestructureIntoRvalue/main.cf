@@ -1,0 +1,2 @@
+[int32, bool] F() { return [1, true]; }
+int32 main() { bool b; [1, b] = F(); return 0; }

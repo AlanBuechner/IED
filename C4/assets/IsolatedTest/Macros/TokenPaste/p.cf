@@ -1,0 +1,28 @@
+// `a ## b` joins two tokens into one (docs/language/02).
+#define CAT(a, b) a ## b
+#define CAT3(a, b, c) a##b##c
+#define FIELD(name) int32 m_##name
+#define MAKE_GETTER(name) int32 Get##name() { return 40 + CAT(1, 2) - 10; }
+#define ONE 1
+
+struct Holder { public FIELD(Count); }
+
+MAKE_GETTER(Answer)
+
+[test("macros.paste.names")]
+public static void TestNames() {
+    int32 myVar = 5;
+    assert_eq(5, CAT(my, Var), "two halves of a name");
+    Holder h;
+    h.m_Count = 9;
+    assert_eq(9, h.m_Count, "a pasted field name");
+    assert_eq(42, GetAnswer(), "a pasted function name");
+}
+
+[test("macros.paste.numbers")]
+public static void TestNumbers() {
+    assert_eq(12, CAT(1, 2), "two digits make one number");
+    assert_eq(123, CAT3(1, 2, 3), "three pieces");
+    int32 ONE2 = 7;
+    assert_eq(7, CAT(ONE, 2), "the operands of ## are not expanded first");
+}

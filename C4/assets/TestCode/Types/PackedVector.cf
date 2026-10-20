@@ -1,0 +1,436 @@
+// Types - Packed SIMD Vector Tests (implementation)
+include "../Framework/Assert.ch"
+include "PackedVector.ch"
+
+// --- Language-level vector types: packed + unpacked lane views -------------------
+class PackedVec4 { public union { packed float x, y, z, w; }; }
+class PackedVec3 { public union { packed float x, y, z; }; }
+class PackedInt2 { public union { packed int32 a, b; }; }
+class UnpackedVec4 { public union { unpacked float r, g, b, a; }; }
+
+// by-value param + return in SIMD registers
+float PVSumXZ(PackedVec3 v) { return v.x + v.z; }
+float PVLaneSum4(PackedVec4 v) { return v.x + v.y + v.z + v.w; }
+PackedVec3 PVScaleY(PackedVec3 v) { v.y = v.y * 2.0f; return v; }
+
+// File-scope global vector (zero-initialized, addressable, braced-init).
+PackedVec4 gPackedGlobal = { 1.0f, 2.0f, 3.0f, 4.0f };
+
+void TestPackedVectorLanguage() {
+	// Aggregate init (positional) + scalar read/write.
+	PackedVec3 v = { 0.0f, 0.0f, 0.0f };
+	v.xz = { 1.0f, 1.0f };            // -> (1, 0, 1)
+	AssertFloatEquals(1.0f, v.x, "packed init x");
+	AssertFloatEquals(0.0f, v.y, "packed init y");
+	AssertFloatEquals(1.0f, v.z, "packed init z");
+
+	v.x = 5.0f;                        // scalar insert
+	AssertFloatEquals(5.0f, v.x, "packed scalar write x");
+	AssertFloatEquals(0.0f, v.y, "packed scalar write y untouched");
+
+	// Multi-lane read (reordered / repeated).
+	PackedVec4 q = { 9.0f, 8.0f, 7.0f, 6.0f };
+	AssertFloatEquals(6.0f, q.w, "packed basic read w");
+	AssertFloatEquals(9.0f, q.x, "packed basic read x");
+
+	// Per-lane vector write: v3.zx = src.xy (z <- 2, x <- 1 -> (1, 0, 2)).
+	PackedVec3 v3 = { 0.0f, 0.0f, 0.0f };
+	PackedVec3 src = { 2.0f, 1.0f, 0.0f };
+	v3.zx = src.xy;
+	AssertFloatEquals(1.0f, v3.x, "per-lane write x");
+	AssertFloatEquals(0.0f, v3.y, "per-lane write y untouched");
+	AssertFloatEquals(2.0f, v3.z, "per-lane write z");
+
+	// Positional multi-lane write on a Vec4.
+	q.xyz = { 9.0f, 8.0f, 7.0f };
+	AssertFloatEquals(9.0f, q.x, "positional xyz x");
+	AssertFloatEquals(8.0f, q.y, "positional xyz y");
+	AssertFloatEquals(7.0f, q.z, "positional xyz z");
+	AssertFloatEquals(6.0f, q.w, "positional xyz w untouched");
+
+	// A repeated-lane run (wwww) is read-only (D-37: NegativeTest RepeatedLaneWrite); a single lane writes alone.
+	q.w = 3.0f;
+	AssertFloatEquals(9.0f, q.x, "single lane write x untouched");
+	AssertFloatEquals(3.0f, q.w, "single lane write w");
+
+	// Braced write to a REORDERED run is HLSL destination-lane order: element[i] goes to the
+	// i-th lane named in the run (NOT to lane i). So zy={5,6} -> z=5, y=6; wx={1,2} -> w=1, x=2.
+	PackedVec4 rw = { 0.0f, 0.0f, 0.0f, 0.0f };
+	rw.zy = { 5.0f, 6.0f };
+	AssertFloatEquals(5.0f, rw.z, "reordered braced write z<-elem0");
+	AssertFloatEquals(6.0f, rw.y, "reordered braced write y<-elem1");
+	AssertFloatEquals(0.0f, rw.x, "reordered braced write x untouched");
+	rw.wx = { 1.0f, 2.0f };
+	AssertFloatEquals(1.0f, rw.w, "reordered braced write w<-elem0");
+	AssertFloatEquals(2.0f, rw.x, "reordered braced write x<-elem1");
+
+	// Repeated-lane READ is a splat: r.wwww == (w,w,w,w). Passed by value (SIMD ABI).
+	PackedVec4 r = { 1.0f, 2.0f, 3.0f, 9.0f };
+	AssertFloatEquals(36.0f, PVLaneSum4(r.wwww), "splat read sum");
+
+	// Whole-vector copy by value.
+	PackedVec3 c = v3;
+	AssertFloatEquals(1.0f, c.x, "copy x");
+	AssertFloatEquals(2.0f, c.z, "copy z");
+
+	// By-value param + return (SIMD register ABI).
+	AssertFloatEquals(3.0f, PVSumXZ(v3), "by-value param+return SumXZ");
+	PackedVec3 s = PVScaleY(PackedVec3 { 1.0f, 2.0f, 3.0f });
+	AssertFloatEquals(4.0f, s.y, "by-value return ScaleY y");
+	AssertFloatEquals(1.0f, s.x, "by-value return ScaleY x");
+
+	// Integer element type.
+	PackedInt2 iv = { 7, 9 };
+	AssertIntEquals(7, iv.a, "int vector read a");
+	AssertIntEquals(9, iv.b, "int vector read b");
+	iv.ab = { 4, 5 };
+	AssertIntEquals(4, iv.a, "int vector write a");
+	AssertIntEquals(5, iv.b, "int vector write b");
+
+	// Unpacked layout: struct-of-fields, extractvalue/insertvalue lane access.
+	UnpackedVec4 uv = { 1.0f, 2.0f, 3.0f, 4.0f };
+	AssertFloatEquals(1.0f, uv.r, "unpacked read r");
+	AssertFloatEquals(4.0f, uv.a, "unpacked read a");
+	uv.rb = { 5.0f, 6.0f };
+	AssertFloatEquals(5.0f, uv.r, "unpacked write r");
+	AssertFloatEquals(6.0f, uv.b, "unpacked write b");
+	AssertFloatEquals(2.0f, uv.g, "unpacked write g untouched");
+
+	// sizeof: a pure packed vector is the bare <N x T> (no pad), so 4xf32 = 16, 3xf32 = 12.
+	AssertIntEquals(16, sizeof(PackedVec4), "sizeof PackedVec4");
+	AssertIntEquals(12, sizeof(PackedVec3), "sizeof PackedVec3");
+
+	// Pointer access: lane read/write through a pointer.
+	PackedVec3 pv = { 1.0f, 2.0f, 3.0f };
+	PackedVec3* pp = &pv;
+	AssertFloatEquals(3.0f, pp->z, "pointer lane read");
+	pp->xy = { 10.0f, 20.0f };
+	AssertFloatEquals(10.0f, pv.x, "pointer run write x");
+	AssertFloatEquals(20.0f, pv.y, "pointer run write y");
+	AssertFloatEquals(3.0f, pv.z, "pointer run write z untouched");
+
+	// Global vector: read + lane write.
+	AssertFloatEquals(4.0f, gPackedGlobal.w, "global read w");
+	gPackedGlobal.xz = { 5.0f, 6.0f };
+	AssertFloatEquals(5.0f, gPackedGlobal.x, "global write x");
+	AssertFloatEquals(6.0f, gPackedGlobal.z, "global write z");
+	AssertFloatEquals(2.0f, gPackedGlobal.y, "global write y untouched");
+}
+
+void TestPackedVectorPointer() {
+	PackedVec3 pv = { 1.0f, 2.0f, 3.0f };
+	PackedVec3* pp = &pv;
+	AssertFloatEquals(3.0f, pp->z, "arrow swizzle read");
+	pp->xy = { 10.0f, 20.0f };
+	AssertFloatEquals(10.0f, pv.x, "arrow swizzle write x");
+	AssertFloatEquals(20.0f, pv.y, "arrow swizzle write y");
+	AssertFloatEquals(3.0f, pv.z, "arrow swizzle write z untouched");
+
+	// Address-of a lane region + cross-vector store through the pointer.
+	PackedVec4 qa = { 1.0f, 2.0f, 3.0f, 4.0f };
+	PackedVec4* qpa = &qa;
+	// Braced write to a reordered run is HLSL destination-lane order: element[i] -> the i-th
+	// lane named in the run, so wxyz={9,8,7,6} gives w=9, x=8, y=7, z=6.
+	qpa->wxyz = { 9.0f, 8.0f, 7.0f, 6.0f };
+	AssertFloatEquals(9.0f, qa.w, "arrow reordered write w");
+	AssertFloatEquals(8.0f, qa.x, "arrow reordered write x");
+}
+
+// A NON-packed struct with an anonymous union of two named-field views + a trailing tag:
+// byte-aliased fields (no SIMD), so writing one view is visible through the other.
+struct PVAVec3 {
+	union {
+		struct { float x; float y; float z; }
+		struct { float r; float g; float b; }
+	}
+	int32 tag;
+}
+
+void TestPackedVectorAggregateInit() {
+	PVAVec3 v = { 1.0f, 2.0f, 3.0f };
+	AssertFloatEquals(1.0f, v.x, "anon-union init x");
+	AssertFloatEquals(2.0f, v.y, "anon-union init y");
+	AssertFloatEquals(3.0f, v.z, "anon-union init z");
+	AssertFloatEquals(1.0f, v.r, "anon-union alias r==x");
+	AssertFloatEquals(2.0f, v.g, "anon-union alias g==y");
+	AssertFloatEquals(3.0f, v.b, "anon-union alias b==z");
+
+	// Write-through: updating x is visible through the aliased view r.
+	v.x = 7.0f;
+	AssertFloatEquals(7.0f, v.r, "anon-union write-through r==x");
+}
+
+// The user's exact generic vector design: a template class whose storage is packed SIMD
+// views (named lanes + an array view) with an [operator] overload using bare lane names.
+template<T> class TVector2 {
+	union { packed T x, y; packed T r, g; packed T[2] data; };
+
+	// Explicit `this.` lane access: the lane must resolve through the CURRENT containing type
+	// (pointer-to-this), never the shared symbol table's stale `this` entry - under a template
+	// binding that stale entry is a different instantiation and silently drops the value.
+	[operator("add")] public TVector2<T> Add(const TVector2<T>& o) {
+		TVector2<T> res;
+		res.x = this.x + o.x;
+		res.y = this.y + o.y;
+		return res;
+	}
+
+	// Bare lane access (implicit this) alongside the explicit form: both must resolve identically.
+	public TVector2<T> Scale(T s) {
+		TVector2<T> res;
+		res.x = x * s;
+		res.y = y * s;
+		return res;
+	}
+}
+
+// A game engine's pattern: a vector used THROUGH AN ALIAS, not the direct instantiation.
+alias FVec2 = TVector2<float>;
+
+void TestPackedVectorTemplate() {
+	// int32 instantiation: operator dispatch, bare lanes, array view aliasing.
+	TVector2<int32> a = { 3, 4 };
+	TVector2<int32> b = { 5, 6 };
+	TVector2<int32> sum = a + b;
+	AssertIntEquals(8, sum.x, "template int32 add x");
+	AssertIntEquals(10, sum.y, "template int32 add y");
+	AssertIntEquals(8, sum.r, "template int32 alias r==x");
+	AssertIntEquals(10, sum.data[1], "template int32 array view data[1]==y");
+
+	// float instantiation: distinct specialization coexists with the int32 one.
+	TVector2<float> fa = { 1.5f, 2.5f };
+	TVector2<float> fb = { 0.5f, 1.0f };
+	TVector2<float> fsum = fa + fb;
+	AssertFloatEquals(2.0f, fsum.x, "template float add x");
+	AssertFloatEquals(3.5f, fsum.y, "template float add y");
+
+	// The int32 instantiation is still valid after the float one was created.
+	AssertIntEquals(8, sum.x, "template coexist int32 x");
+	AssertIntEquals(10, sum.y, "template coexist int32 y");
+
+	// Bare-lane method (implicit this) on both instantiations: res = v * s.
+	TVector2<int32> si = a.Scale(2);
+	AssertIntEquals(6, si.x, "template bare-lane scale x");
+	AssertIntEquals(8, si.y, "template bare-lane scale y");
+	TVector2<float> sf = fa.Scale(2.0f);
+	AssertFloatEquals(3.0f, sf.x, "template bare-lane float scale x");
+	AssertFloatEquals(5.0f, sf.y, "template bare-lane float scale y");
+}
+
+// Lane access THROUGH AN ALIAS to a pure packed vector (a game engine's `alias FVector2 = TVector2<float>`).
+// A regression here is SILENT CORRUPTION: the base type resolves to the alias, and if HIR fails to
+// unwrap it to the value object before classifying the member access, the lane store degrades to a
+// raw field GEP at offset 0 for EVERY lane (y overwrites x) and reads back garbage.
+void TestPackedVectorAliasLanes() {
+	FVec2 a;
+	a.x = 1.5f;
+	a.y = 2.5f;
+	AssertFloatEquals(1.5f, a.x, "alias lane store/read x");
+	AssertFloatEquals(2.5f, a.y, "alias lane store/read y");
+
+	// Aliased lanes (r==x, g==y) and the array view must alias the same storage through the alias too.
+	AssertFloatEquals(1.5f, a.r, "alias lane r==x");
+	AssertFloatEquals(2.5f, a.g, "alias lane g==y");
+	AssertFloatEquals(2.5f, a.data[1], "alias array view data[1]==y");
+
+	// A second alias-typed variable stays independent (no shared storage bleed).
+	FVec2 b;
+	b.x = 9.0f;
+	b.y = 8.0f;
+	AssertFloatEquals(9.0f, b.x, "alias second var x");
+	AssertFloatEquals(1.5f, a.x, "alias independence a.x");
+}
+
+// The complete engine vector design: a namespaced template whose operator method uses a compound
+// run-op (this.xy += other.xy) and returns BY REFERENCE (*this), invoked through an alias receiver.
+// Two distinct regressions are locked here: (1) the reference-returning `return *this;` must lower
+// the deref of `this` with the current containing type, not a stale one; (2) an explicit method call
+// on an alias-typed receiver must resolve m_ContainingType through UnwrapToValue or codegen falls to
+// a broken variadic stub.
+namespace EngineMath {
+	template<T> class CVec2 {
+		union{ packed T x, y; };
+		[operator("add")] public CVec2<T>& Add(CVec2<T> other) { this.xy += other.xy; return *this; }
+		public CVec2<T> Dup(CVec2<T> other) { return *this; }
+	}
+	alias Vec2F = CVec2<float>;
+}
+
+void TestPackedVectorEngineDesign() {
+	EngineMath::Vec2F a;
+	a.x = 1.0f;
+	a.y = 2.0f;
+	EngineMath::Vec2F b;
+	b.x = 4.0f;
+	b.y = 5.0f;
+
+	// Operator dispatch through the alias: a += b via the reference-returning compound run-op.
+	a.Add(b);
+	AssertFloatEquals(5.0f, a.x, "engine op add x");
+	AssertFloatEquals(7.0f, a.y, "engine op add y");
+
+	// Explicit method call on an alias-typed receiver (by-value param, by-value return).
+	EngineMath::Vec2F c;
+	c.x = 3.0f;
+	c.y = 4.0f;
+	EngineMath::Vec2F d = c.Dup(a);
+	AssertFloatEquals(3.0f, d.x, "engine explicit call x");
+	AssertFloatEquals(4.0f, d.y, "engine explicit call y");
+}
+
+// A struct whose layout contains <N x T> vector fields (the engine's Mat4-of-Vec4 design). Before the
+// packed-member AV / return-by-value-garbage fixes this crashed on first member access and returned
+// garbage through calls. Locks in: member access, by-value return, and sret pass-through.
+struct SV_Vec2 { public union { packed float x, y; }; };
+struct SV_Outer { SV_Vec2 m0; };
+struct SV_Mat4 { PackedVec4 col0, col1, col2, col3; };
+
+SV_Outer SV_MakeOuter() {
+	SV_Outer o;
+	o.m0.x = 3.5f;
+	o.m0.y = 4.5f;
+	return o;
+}
+
+SV_Mat4 SV_Identity() {
+	SV_Mat4 m;
+	m.col0.x = 1.0f; m.col0.y = 0.0f; m.col0.z = 0.0f; m.col0.w = 0.0f;
+	m.col1.x = 0.0f; m.col1.y = 1.0f; m.col1.z = 0.0f; m.col1.w = 0.0f;
+	m.col2.x = 0.0f; m.col2.y = 0.0f; m.col2.z = 1.0f; m.col2.w = 0.0f;
+	m.col3.x = 0.0f; m.col3.y = 0.0f; m.col3.z = 0.0f; m.col3.w = 1.0f;
+	return m;
+}
+
+float SV_GetX(SV_Outer o) { return o.m0.x; }  // nested lane read in a fn body, base passed by value
+float SV_Id(float f) { return f; }            // identity: exercises a nested lane as a call argument
+
+void TestPackedVectorStructOfVectors() {
+	// Member access through a packed field (was an access violation).
+	SV_Outer a;
+	a.m0.x = 1.5f;
+	a.m0.y = 2.5f;
+	AssertFloatEquals(1.5f, a.m0.x, "sv member x");
+	AssertFloatEquals(2.5f, a.m0.y, "sv member y");
+
+	// Return the aggregate by value (was garbage).
+	SV_Outer r = SV_MakeOuter();
+	AssertFloatEquals(3.5f, r.m0.x, "sv return x");
+	AssertFloatEquals(4.5f, r.m0.y, "sv return y");
+
+	// Mat4 of Vec4: set + read every lane (was an AV / wrong layout).
+	SV_Mat4 m;
+	m.col0.x = 1.0f; m.col0.y = 2.0f; m.col0.z = 3.0f; m.col0.w = 4.0f;
+	m.col1.x = 5.0f; m.col1.y = 6.0f; m.col1.z = 7.0f; m.col1.w = 8.0f;
+	if (!(m.col0.x == 1.0f && m.col0.w == 4.0f && m.col1.y == 6.0f && m.col1.w == 8.0f)) {
+		Assert(false, "sv mat4 lanes");
+	}
+
+	// Mat4 through a call (sret path).
+	SV_Mat4 r2 = SV_Identity();
+	if (!(r2.col0.x == 1.0f && r2.col1.y == 1.0f && r2.col2.z == 1.0f && r2.col3.w == 1.0f)) {
+		Assert(false, "sv mat4 sret");
+	}
+
+	// Nested packed-lane reads in VALUE positions (was silently dropped from IR: read 0.0).
+	// The direct-compare form above survives the bug; these positions need a real SSA load and are
+	// what the fix restores. Both lanes of both members, each through local-init / call-arg / arith.
+	float nx = a.m0.x;                       // local-init read (lane x)
+	AssertFloatEquals(1.5f, nx, "sv nested local-init x");
+	float ny = a.m0.y;                       // local-init read (lane y, nonzero offset)
+	AssertFloatEquals(2.5f, ny, "sv nested local-init y");
+	AssertFloatEquals(1.5f, SV_Id(a.m0.x), "sv nested call-arg x");   // call argument
+	AssertFloatEquals(2.5f, SV_Id(a.m0.y), "sv nested call-arg y");
+	AssertFloatEquals(4.0f, a.m0.x + a.m0.y, "sv nested arith sum");  // arithmetic RHS
+	AssertFloatEquals(1.5f, SV_GetX(a), "sv nested return-from-fn x"); // read in fn body, by-value base
+	AssertFloatEquals(3.5f, r.m0.y - a.m0.x + 0.5f, "sv nested arith mix"); // 4.5 - 1.5 + 0.5
+}
+
+// --- Packed swizzle-run + scalar arithmetic (elementwise, scalar broadcasts to every lane) --------
+class PVSV3 { public union { packed float x, y, z; }; };
+class PVIV3 { public union { packed int32 a, b, c; }; };
+class PVSV4 { public union { packed float x, y, z, w; }; };   // 4-lane (the engine's TVector4 shape)
+class PVDV3 { public union { packed double a, b, c; }; };    // double lanes
+class PV64V2 { public union { packed int64 a, b; }; };       // int64 lanes
+
+void TestPackedVectorScalarArithmetic() {
+	// A multi-lane swizzle run against a numeric scalar is elementwise: the scalar splats to <N x T>
+	// and each lane applies the op. This is the engine's in-place pattern (this.xyzw *= s).
+	PVSV3 v = { 1.0f, 2.0f, 3.0f };
+
+	// compound assigns on a swizzle run (the exact engine TVector4 ScaleInto/AddInto form)
+	v.xyz *= 2.0f;
+	AssertFloatEquals(2.0f, v.x, "v.xyz*= x");
+	AssertFloatEquals(4.0f, v.y, "v.xyz*= y");
+	AssertFloatEquals(6.0f, v.z, "v.xyz*= z");
+	v.xyz += 1.0f;
+	AssertFloatEquals(3.0f, v.x, "v.xyz+= x");
+	AssertFloatEquals(7.0f, v.z, "v.xyz+= z");
+	v.xyz -= 2.0f;
+	AssertFloatEquals(1.0f, v.x, "v.xyz-= x");
+	v.xyz /= 2.0f;
+	AssertFloatEquals(0.5f, v.x, "v.xyz/= x");
+	AssertFloatEquals(1.5f, v.y, "v.xyz/= y");
+	AssertFloatEquals(2.5f, v.z, "v.xyz/= z");
+
+	// a swizzle-run * scalar result assigned back (fresh-value form, as V?F_Scale would)
+	PVSV3 w = { 5.0f, 6.0f, 7.0f };
+	w.xyz = w.xyz * 2.0f;
+	AssertFloatEquals(10.0f, w.x, "w=w*2 x");
+	AssertFloatEquals(14.0f, w.z, "w=w*2 z");
+
+	// a partial swizzle run (xy) against a scalar leaves the other lane untouched
+	PVSV3 p = { 1.0f, 2.0f, 3.0f };
+	p.xy *= 3.0f;
+	AssertFloatEquals(3.0f, p.x, "p.xy*= x");
+	AssertFloatEquals(6.0f, p.y, "p.xy*= y");
+	AssertFloatEquals(3.0f, p.z, "p.xy*= z untouched");
+
+	// integer vector: swizzle run + scalar (both compound and fresh)
+	PVIV3 iv = { 2, 4, 6 };
+	iv.abc *= 3;
+	AssertIntEquals(6, iv.a, "iv*3 a");
+	AssertIntEquals(18, iv.c, "iv*3 c");
+	iv.abc += 10;
+	AssertIntEquals(16, iv.a, "iv+10 a");
+	AssertIntEquals(28, iv.c, "iv+10 c");
+
+	// an integer scalar broadcasts into a float vector (int->float conversion per lane)
+	PVSV3 f = { 1.0f, 1.0f, 1.0f };
+	f.xyz *= 3;
+	AssertFloatEquals(3.0f, f.x, "int-scalar-into-float x");
+	AssertFloatEquals(3.0f, f.z, "int-scalar-into-float z");
+
+	// per-lane scalar (the engine's free-function form: v.x * s) still works alongside the above
+	PVSV3 g = { 2.0f, 3.0f, 4.0f };
+	AssertFloatEquals(6.0f, g.x * 3.0f, "lane*scalar x");
+	AssertFloatEquals(15.0f, g.y * 5.0f, "lane*scalar y");
+
+	// a 4-lane swizzle run (the engine's TVector4 shape) broadcasts the scalar to all four lanes
+	PVSV4 q = { 1.0f, 2.0f, 3.0f, 4.0f };
+	q.xyzw *= 2.0f;
+	AssertFloatEquals(2.0f, q.x, "q.xyzw*= x");
+	AssertFloatEquals(8.0f, q.w, "q.xyzw*= w");
+
+	// a repeated-lane swizzle (xxy) reads each lane per its position before the op
+	PVSV3 rep = { 1.0f, 2.0f, 3.0f };
+	PVSV3 rr = rep.xxy * 2.0f;   // (x,x,y)*2 = (2,2,4)
+	AssertFloatEquals(2.0f, rr.x, "xxy*2 x");
+	AssertFloatEquals(2.0f, rr.y, "xxy*2 y");
+	AssertFloatEquals(4.0f, rr.z, "xxy*2 z");
+
+	// double and int64 lane types broadcast a scalar the same way
+	PVDV3 dv = { 1.5, 2.5, 3.5 };
+	dv.abc *= 2.0;
+	AssertTrue(dv.a == 3.0);   // double lanes * scalar (a)
+	AssertTrue(dv.c == 7.0);   // double lanes * scalar (c)
+	PV64V2 l64 = { 100, 200 };
+	l64.ab += 50;
+	AssertIntEquals(150, (int32)l64.a, "int64 lanes + scalar a");
+	AssertIntEquals(250, (int32)l64.b, "int64 lanes + scalar b");
+
+	// the result composes into larger expressions like any other value
+	PVSV3 comp = { 1.0f, 2.0f, 3.0f };
+	PVSV3 cr = comp.xyz * 2.0f + comp.zyx;   // (2,4,6)+(3,2,1) = (5,6,7)
+	AssertFloatEquals(5.0f, cr.x, "composed x");
+	AssertFloatEquals(7.0f, cr.z, "composed z");
+}

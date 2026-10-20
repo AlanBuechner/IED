@@ -1,0 +1,7 @@
+class Shape {
+	public virtual float Area() = 0;
+}
+class Square : public Shape {
+	public float side;
+}
+int32 main() { Square q; return 0; }

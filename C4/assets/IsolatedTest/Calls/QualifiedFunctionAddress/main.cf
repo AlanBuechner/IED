@@ -1,0 +1,38 @@
+// BUG-263: a namespace's function decays to its address like an unqualified one (`Geo::Area`, `A::B::Leaf`), as an
+// argument, a cast to void* and a func; `&F` is the same address as `F`, qualified or not, and `&` still takes a
+// namespace variable's address. main returns the failures.
+namespace Geo
+{
+	int32 Area(int32 w, int32 h) { return w * h; }
+	int32 g_side = 6;
+}
+
+namespace A::B { int32 Leaf() { return 11; } }
+
+struct Scale { public static int32 Twice(int32 x) { return x * 2; } }
+
+int32 Plain(int32 x) { return x + 1; }
+
+int32 Apply(funcptr<int32(int32, int32)> f, int32 a, int32 b) { return f(a, b); }
+
+int32 main() {
+	int32 failures = 0;
+	funcptr<int32(int32, int32)> area = Geo::Area;
+	if (area(3, 4) != 12) failures++;
+	funcptr<int32(int32, int32)> areaAddress = &Geo::Area;
+	if (areaAddress != area) failures++;
+	if (Apply(Geo::Area, 5, 2) != 10 || Apply(&Geo::Area, 2, 2) != 4) failures++;
+	if ((void*)Geo::Area != (void*)area) failures++;
+	funcptr<int32()> leaf = &A::B::Leaf;
+	if (leaf() != 11) failures++;
+	func<int32(int32, int32)> wrapped = Geo::Area;
+	if (wrapped(6, 7) != 42) failures++;
+	funcptr<int32(int32)> plain = &Plain;
+	if (plain(1) != 2 || plain != Plain) failures++;
+	funcptr<int32(int32)> twice = &Scale::Twice;
+	if (twice(4) != 8) failures++;
+	int32* side = &Geo::g_side;
+	*side = 7;
+	if (Geo::g_side != 7) failures++;
+	return failures;
+}

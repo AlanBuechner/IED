@@ -1,0 +1,1 @@
+int32 main() { int32 x = 1; func<void()> f = [x]() { x = 2; }; f(); return x; }

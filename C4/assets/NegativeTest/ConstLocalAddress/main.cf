@@ -1,0 +1,6 @@
+int32 main() {
+	const int32 b = 2;
+	int32* p = &b;
+	*p = 5;
+	return b;
+}

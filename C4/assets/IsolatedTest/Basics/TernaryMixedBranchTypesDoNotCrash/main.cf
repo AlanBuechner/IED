@@ -1,0 +1,11 @@
+int32 main() {
+    int8 a = -7;
+    int32 b = 100;
+    bool c = true;
+    int32 r1 = (c ? a : b);      // i8/i32 -> common i32, a sign-extended: -7
+    float f = (c ? 1.5f : 4);    // float/int mix
+    int8 i8 = -3; int32 i32 = 10; int16 i16 = 7;
+    bool na = true, nb = false;
+    int32 n = (na ? (nb ? i8 : i32) : i16); // nested mixed widths: 10
+    return (r1 == -7 && f == 1.5f && n == 10) ? 0 : 1;
+}

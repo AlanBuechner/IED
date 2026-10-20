@@ -1,0 +1,6 @@
+// Each field of a braced list starts from one entry: naming a field twice is an error.
+struct Point { public int32 x; public int32 y; }
+int32 main() {
+	Point p = { x = 1, x = 2 };
+	return p.x;
+}

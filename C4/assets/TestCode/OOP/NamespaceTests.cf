@@ -1,0 +1,21 @@
+// OOP - Namespace Tests (implementation)
+include "../Framework/Assert.ch"
+include "NamespaceTests.ch"
+
+namespace Math {
+	int32 Double(int32 x) {
+		return x * 2;
+	}
+}
+
+int32 Math::Triple(int32 x) {
+	return x * 3;
+}
+
+void TestNamespace() {
+	int32 r1 = Math::Double(5);
+	AssertEqual(10, r1);
+	
+	int32 r2 = Math::Triple(7);
+	AssertEqual(21, r2);
+}

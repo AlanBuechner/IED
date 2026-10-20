@@ -1,0 +1,45 @@
+// A copy of a base sub-object is an object of the base type: it dispatches to the base's methods.
+// Assigning into an object reached through a base pointer changes its fields, never its dynamic type.
+struct Base {
+	public int32 v;
+	public virtual int32 Who() { return 1; }
+};
+struct Derived : Base {
+	public override int32 Who() { return 2; }
+};
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 WhoByValue(Base b) { return b.Who(); }
+
+void SlicedCopies() {
+	Derived d;
+	d.v = 5;
+	Base* p = &d;
+	Base copy = *p;
+	Base* cp = &copy;
+	Check(cp->Who() == 1, "a sliced copy is a Base");
+	Check(copy.v == 5, "a sliced copy keeps the fields");
+	Check(WhoByValue(*p) == 1, "a sliced argument is a Base");
+}
+
+void AssignmentKeepsDynamicType() {
+	Derived d;
+	Base* p = &d;
+	Base other;
+	other.v = 9;
+	*p = other;
+	Check(p->Who() == 2, "assignment through a base pointer keeps the Derived vtable");
+	Check(d.v == 9, "assignment through a base pointer copies the fields");
+}
+
+int32 main() {
+	SlicedCopies();
+	AssignmentKeepsDynamicType();
+	if (g_failures != 0) printf("SlicingKeepsOwnVtable failures: %d\n", g_failures);
+	return g_failures;
+}

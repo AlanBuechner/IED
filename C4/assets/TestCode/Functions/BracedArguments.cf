@@ -1,0 +1,46 @@
+// Functions - Braced Arguments Tests (implementation)
+include "../Framework/Assert.ch"
+include "BracedArguments.ch"
+
+// B36 (D-57): a braced argument builds the object or array parameter it binds.
+struct BaPoint { public int32 x; public int32 y; }
+class BaRange {
+	public int32 low;
+	public int32 high;
+	[operator("create")] public void Init(int32 a, int32 b = 100) { low = a; high = b; }
+}
+class BaList {
+	public int32 count;
+	public int32 total;
+	[operator("create")] public void Init(__init_list<int32> values) { for (int32 v : values) { count++; total += v; } }
+}
+
+int32 BaSum(BaPoint p) { return p.x + p.y; }
+int32 BaSumRef(const BaPoint& p) { return p.x * 10 + p.y; }
+int32 BaSpan(BaRange r) { return r.high - r.low; }
+int32 BaFirst(int32[3] values) { return values[0] + values[2]; }
+int32 BaNamed(BaPoint p) { return p.y; }
+
+int32 BaPick(__init_list<int32> values) { return 1; }
+int32 BaPick(BaPoint p) { return 2; }
+
+int32 BaCount(BaList list) { return list.count * 1000 + list.total; }
+
+class BaPicker { public int32 Sum(BaPoint p) const { return p.x - p.y; } }
+
+void TestBracedArguments() {
+	AssertIntEquals(7, BaSum({ 3, 4 }), "an aggregate by value");
+	AssertIntEquals(34, BaSumRef({ 3, 4 }), "an aggregate by const reference");
+	AssertIntEquals(3, BaSum({ 3 }), "fewer entries leave the rest zero");
+	AssertIntEquals(2, BaSpan({ 5, 7 }), "a create taking two arguments");
+	AssertIntEquals(95, BaSpan({ 5 }), "a create with a defaulted argument");
+	AssertIntEquals(4, BaFirst({ 1, 2, 3 }), "an array parameter");
+	AssertIntEquals(1, BaFirst({ 1 }), "an array parameter with fewer entries");
+	AssertIntEquals(9, BaNamed({ y = 9 }), "a designated entry");
+	AssertIntEquals(1, BaPick({ 1, 2 }), "an __init_list<T> parameter is preferred");
+	AssertIntEquals(3006, BaCount({ 1, 2, 3 }), "an object whose create takes the list");
+	BaPicker picker;
+	AssertIntEquals(-1, picker.Sum({ 2, 3 }), "a method's parameter");
+	funcptr<int32(BaPoint)> through = BaSum;
+	AssertIntEquals(11, through({ 5, 6 }), "through a function pointer");
+}

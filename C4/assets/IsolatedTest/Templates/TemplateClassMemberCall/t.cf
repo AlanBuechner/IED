@@ -1,0 +1,13 @@
+template<T> class C {
+    public int32 n;
+    [operator("create")] public void Init() { this->n = 0; }
+    public void SetIt(int32 v) { this->n = v; }
+    public void Use() { SetIt(5); }
+}
+int32 main() {
+    C<int32>* c = new C<int32>();
+    c->Use();
+    if (c->n != 5) return 1;
+    printf("TMPL BARE OK\n");
+    return 0;
+}

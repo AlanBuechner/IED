@@ -1,0 +1,65 @@
+// BUG-105: globals and static members start before main, in declaration order: from their initializer, else
+// by their default construction (a create, field initializers, the elements of an array). An initializer
+// finds names in the scope the variable is declared in.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int64 g_trace = 0;
+int32 Note(int32 event) { g_trace = g_trace * 10 + event; return event; }
+
+class Counter {
+	public int32 value;
+	[operator("create")] public void Init() { value = 5; Note(1); }
+}
+
+struct Defaults {
+	public int32 x = 7;
+	public float scale = 1.5f;
+}
+
+class Part {
+	public int32 tag;
+	[operator("create")] public void Init() { tag = 3; }
+}
+
+struct Pair {
+	public int32 a;
+	public int32 b = 9;
+	public Part part;
+}
+
+Counter g_counter;                     // 1
+int32 g_second = Note(2);              // runs after g_counter's create
+Defaults g_defaults;
+Part[3] g_parts;
+Pair g_pair = { 4 };                   // b from its initializer, part constructed
+int32 g_third = Note(3);
+int32 g_fromCounter = g_counter.value + 1;
+
+namespace Settings {
+	int32 Base() { return 40; }
+	int32 g_limit = Base() + 2;        // `Base` is found in Settings
+}
+
+class Registry {
+	public static int32 Seed() { return 11; }
+	public static int32 s_first = Seed();
+	public static int32 s_second = s_first * 2;
+	public static Counter s_counter;
+}
+
+int32 main() {
+	Check(g_counter.value == 5, "a global object runs its create");
+	Check(g_trace == 1231, "globals start in declaration order (g_counter, g_second, g_third, Registry::s_counter)");
+	Check(g_defaults.x == 7 && g_defaults.scale == 1.5f, "a global starts from its field initializers");
+	Check(g_parts[0].tag == 3 && g_parts[2].tag == 3, "every element of a global array is constructed");
+	Check(g_pair.a == 4 && g_pair.b == 9 && g_pair.part.tag == 3, "a braced global starts its omitted fields");
+	Check(g_fromCounter == 6, "an initializer sees an earlier global already started");
+	Check(Settings::g_limit == 42, "a namespaced initializer finds its namespace's functions");
+	Check(Registry::s_first == 11 && Registry::s_second == 22, "static members start from their initializers");
+	Check(Registry::s_counter.value == 5, "a static member object runs its create");
+	return g_failures;
+}

@@ -1,0 +1,78 @@
+// BUG-034: pin, unpin and reachability take any pointer into an object, not only its start. The pinned
+// objects are known to the program only as integers, which the collector does not treat as references.
+include "Memory/gc.ch"
+
+const int32 kObjects = 100;
+
+struct Pinned {
+	public int64 id;
+	public int64[16] payload;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+struct Garbage { public int64[8] words; }
+
+int32 g_finalized = 0;
+uint64[100] g_interior;        // integers: not roots
+bool g_reachableInCallback = false;
+
+void OnCollect(void* user) { g_reachableInCallback = GC::IsReachable((void*)g_interior[0]); }
+
+// Each object is pinned twice through a pointer into its payload; pins are counted.
+void PinAll() {
+	for (int32 i = 0; i < kObjects; i++) {
+		Pinned* p = new Pinned;
+		p->payload[15] = 99;
+		GC::Pin((void*)&p->payload[15]);
+		GC::Pin((void*)&p->payload[15]);
+		g_interior[i] = (uint64)&p->payload[15];
+	}
+}
+
+void UnpinAll(uint64 offset) {
+	for (int32 i = 0; i < kObjects; i++) GC::Unpin((void*)(g_interior[i] - offset));
+}
+
+int64 SumPayloads() {
+	int64 s = 0;
+	for (int32 i = 0; i < kObjects; i++) s += *(int64*)g_interior[i];
+	return s;
+}
+
+// Overwrites the stack below the caller, so no stale copy of a pointer survives in dead frames.
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+void CollectWithChurn() {
+	for (int32 round = 0; round < 3; round++) {
+		for (int32 k = 0; k < 1000; k++) { Garbage* g = new Garbage; g->words[0] = k; }
+		Scrub(8);
+		GC::Collect();
+	}
+}
+
+int32 main() {
+	PinAll();
+	GC::RegisterCollectionResult((void*)&g_interior, OnCollect, null);
+	CollectWithChurn();
+	if (g_finalized != 0) return 1;
+	if (SumPayloads() != 99 * kObjects) return 2;
+	if (!g_reachableInCallback) return 3;
+
+	UnpinAll(0);                 // one pin left on each
+	CollectWithChurn();
+	if (g_finalized != 0 || SumPayloads() != 99 * kObjects) return 4;
+
+	UnpinAll(8);                 // another pointer into the same objects
+	CollectWithChurn();
+	if (g_finalized < kObjects - 5) return 5; // a stale register or stack word may keep a few
+	if (g_finalized > kObjects) return 6;
+	GC::UnregisterCollectionResult((void*)&g_interior);
+	printf("INTERIOR OK\n");
+	return 0;
+}

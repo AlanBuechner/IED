@@ -1,0 +1,7 @@
+struct S { public int32 v; }
+void Reset(S& s) { s.v = 0; }
+int32 main() {
+	const S s;
+	Reset(s);
+	return 0;
+}

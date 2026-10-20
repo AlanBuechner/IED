@@ -1,0 +1,61 @@
+// `T v(args);` direct-initializes a variable anywhere (docs/language/04 section 4.10): a global, a namespace's,
+// a static member, a static local and a local. An object starts through its create; any other type starts from
+// its one argument, as `T v = arg;` would. A group that can be a parameter list stays a prototype.
+// Regression: BUG-245 (a global with arguments parsed as a function), BUG-246 (`int32 x(5);` stayed zero).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what)
+{
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+struct Tracked
+{
+	public int32 id = 0;
+	[operator("create")] public void Init(int32 i) { id = i; }
+	[operator("create")] public void Init(int32 a, int32 b) { id = a * 10 + b; }
+}
+
+int32 Seven() { return 7; }
+
+Tracked g_first(1);
+Tracked g_pair(2, 3);
+Tracked g_computed(Seven() + 1);
+int32 g_scalar(41 + 1);
+float g_float(-2.5f);
+namespace N { Tracked g_inner(4); }
+struct Holder { public static Tracked s_member(5); }
+
+int32 Twice(int32 v);                 // a prototype with a named parameter
+int32 Thrice(int32);                  // and with an unnamed one
+int32 Twice(int32 v) { return v * 2; }
+int32 Thrice(int32 v) { return v * 3; }
+
+int32 main()
+{
+	Check(g_first.id == 1, "a global with one argument");
+	Check(g_pair.id == 23, "a global with two arguments");
+	Check(g_computed.id == 8, "a global whose argument calls a function");
+	Check(g_scalar == 42, "a scalar global starts from its argument");
+	Check(g_float == -2.5f, "a float global starts from a negative argument");
+	Check(N::g_inner.id == 4, "a namespace's global");
+	Check(Holder::s_member.id == 5, "a static member");
+
+	static Tracked s_local(6);
+	Check(s_local.id == 6, "a static local");
+	static int32 s_scalar(9);
+	Check(s_scalar == 9, "a scalar static local");
+	Tracked local(1, 2);
+	Check(local.id == 12, "a local object");
+	int32 x(5);
+	Check(x == 5, "a scalar local starts from its argument");
+	int32* p(&x);
+	Check(p == &x && *p == 5, "a pointer local");
+	int32& r(x);
+	r = 6;
+	Check(x == 6, "a reference local binds to its argument");
+
+	Check(Twice(4) == 8 && Thrice(2) == 6, "prototypes stay prototypes");
+	if (g_failures == 0) printf("DIRECT INITIALIZATION OK\n");
+	return g_failures;
+}

@@ -1,0 +1,2 @@
+[operator("+")] int32 Add(int32 a, int32 b) { return a + b; }
+int32 main() { return Add(1, 2); }

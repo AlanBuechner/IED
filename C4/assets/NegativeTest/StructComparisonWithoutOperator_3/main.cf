@@ -1,0 +1,2 @@
+struct A { int32 x; } struct B { int32 y; }
+int main() { A a; B b; return (a != b) ? 0 : 1; }

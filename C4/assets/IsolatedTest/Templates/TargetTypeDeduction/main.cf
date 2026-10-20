@@ -1,0 +1,43 @@
+// A function template named where a funcptr or func is expected (D-17): the target's signature deduces its
+// arguments, from its parameter and return types, in a declaration, an assignment, a return, a braced entry
+// and a call argument (overloads pick the parameter whose signature has an instance).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T> T Identity(T v) { return v; }
+template<R, A> R Convert(A a) { return (R)a; }
+template<T> T Twice(T v) { return v + v; }
+template<T> T Add(T a, T b) { return a + b; }
+namespace Math { template<T> T Neg(T v) { return -v; } }
+
+int32 Apply(funcptr<int32(int32)> f, int32 v) { return f(v); }
+float ApplyFloat(funcptr<float(float)> f, float v) { return f(v); }
+int32 ApplyFunc(func<int32(int32)> f, int32 v) { return f(v); }
+int32 Combine(funcptr<int32(int32)> f, int32 v) { return f(v); }
+int32 Combine(funcptr<int32(int32, int32)> f, int32 v) { return f(v, v) + 1000; }
+funcptr<int32(int32)> PickTwice() { return Twice; }
+
+struct Ops { public funcptr<int32(int32)> op; }
+
+int32 main() {
+	funcptr<int32(int32)> f = Identity;
+	Check(f(7) == 7, "a declaration's type deduces T");
+	funcptr<float(int32)> c = Convert;
+	Check(c(3) == 3.0f, "the return type deduces R");
+	f = Twice;
+	Check(f(6) == 12, "an assignment's target deduces T");
+	Check(PickTwice()(5) == 10, "a return type deduces T");
+	Ops o = { Identity };
+	Check(o.op(9) == 9, "a braced entry's field type deduces T");
+	Check(Apply(Twice, 21) == 42, "a funcptr parameter deduces T");
+	Check(ApplyFloat(Twice, 1.5f) == 3.0f, "another signature is another instance");
+	Check(ApplyFunc(Twice, 4) == 8, "a func parameter takes the instance's address");
+	Check(Combine(Add, 2) == 1004, "the overload whose signature has an instance");
+	Check(Apply(Math::Neg, 3) == -3, "a qualified template name");
+	func<int32(int32)> g = Twice;
+	Check(g(2) == 4, "a func declaration");
+	return g_failures;
+}

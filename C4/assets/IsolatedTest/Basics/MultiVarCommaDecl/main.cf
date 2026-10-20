@@ -1,0 +1,8 @@
+int32 main() {
+	float x, y;
+	x = 1.0f;
+	y = 2.0f;
+	if (x != 1.0f || y != 2.0f) return 1;
+	printf("COMMA OK\n");
+	return 0;
+}

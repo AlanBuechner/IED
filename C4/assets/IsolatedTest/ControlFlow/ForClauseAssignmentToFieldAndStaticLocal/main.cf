@@ -1,0 +1,33 @@
+struct S {
+	int32 count;
+	int32 bump() {
+		for (count = 0; count < 5; count++) { }
+		return count; // expect 5
+	}
+	int32 step() {
+		count = 0;
+		for (; count < 4; count++) { }
+		return count; // expect 4
+	}
+};
+int32 f() {
+	static int32 s;
+	for (s = 0; s < 6; s++) { }
+	return s; // expect 6
+}
+int32 g() {
+	static int32 s;
+	s = 0;
+	for (; s < 3; s++) { }
+	return s; // expect 3
+}
+int32 main() {
+	S obj;
+	int32 failed = 0;
+	if (obj.bump() != 5) failed++;
+	if (obj.step() != 4) failed++;
+	if (f() != 6) failed++;
+	if (g() != 3) failed++;
+	if (failed == 0) printf("FOR CLAUSE FIELD/STATIC OK\n"); else printf("%d FAILED\n", failed);
+	return failed;
+}

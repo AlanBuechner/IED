@@ -1,0 +1,2 @@
+final interface IShape {}
+int32 main() { return 0; }

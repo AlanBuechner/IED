@@ -1,0 +1,2 @@
+int main() { printf("x=%d\n", 5); char* a = "ab"; char* b = "ab";
+return (strcmp(a, b) == 0 && strlen(a) == 2) ? 0 : 1; }

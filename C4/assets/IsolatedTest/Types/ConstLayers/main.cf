@@ -1,0 +1,66 @@
+// D-30 (BUG-007, BUG-084): a `const` qualifies the layer written after it. The leading const makes the base
+// value const; a const before a `*` makes that pointer const. `&x` of a read-only x is a pointer to const.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+const int32 kLimit = 7;
+
+int32 ReadThrough(const int32* p) { return *p; }
+void WriteThrough(int32* p) { *p = 9; }
+int32 Sum(const int32 a, const int32 b) { return a + b; }  // const parameters: read-only in the body
+
+struct Tagged {
+	public const int32 id = 3;   // a const field starts from its initializer
+	public int32 hits;
+}
+
+struct Stamped {
+	public const int32 stamp;
+	[operator("create")] public void Init(int32 s) { stamp = s; } // a create builds its object, const fields included
+}
+
+int32 main() {
+	int32 x = 1;
+	int32 y = 2;
+
+	int32 const* fixedPointer = &x;      // a const pointer to a mutable int32
+	*fixedPointer = 4;
+	Check(x == 4, "a const pointer still writes its target");
+
+	const int32* readOnlyTarget = &x;    // a mutable pointer to a const int32
+	readOnlyTarget = &y;
+	Check(*readOnlyTarget == 2, "a pointer to const can be retargeted");
+
+	const int32 const* both = &y;
+	Check(*both == 2, "a const pointer to const reads");
+
+	int32 const* inner = &x;
+	int32 const** outer = &inner;        // a mutable pointer to a const pointer
+	int32 const* other = &y;
+	outer = &other;
+	Check(**outer == 2, "the outer pointer of `int32 const**` is mutable");
+
+	int32 const*[2] slots = { &x, &y };  // an array of const pointers to mutable int32
+	*slots[0] = 5;
+	Check(x == 5, "the elements of an array of const pointers write their targets");
+
+	const int32 local = 6;
+	Check(ReadThrough(&local) == 6, "&x of a const local is a const int32*");
+	WriteThrough(&x);
+	Check(x == 9, "&x of a mutable local is an int32*");
+	Check(Sum(2, 3) == 5, "const parameters");
+	Check(ReadThrough(&kLimit) == 7, "a const global's address is a const int32*");
+
+	Tagged t;
+	t.hits = 1;
+	Check(t.id == 3 && t.hits == 1, "a const field reads; the others write");
+	Stamped s = Stamped(11);
+	Check(s.stamp == 11, "a create writes a const field");
+
+	const Tagged copy = t;
+	Check(copy.id == 3, "a const object reads");
+	return g_failures;
+}

@@ -1,0 +1,21 @@
+template<T> struct Box { T v; int32 tag; };
+alias MyBox = Box<int32>;
+alias FBox  = Box<float>;
+int32 main() {
+	// Two aliases to the SAME template, both used in one function. Before the fix the SECOND
+	// alias's member access bound the FIRST instantiation's field type (a name-scan fallback that
+	// misses alias-typed bases), so `b.v = 1.5f` was lowered as `store i32` - silent corruption
+	// (b.v read back as 0). Both aliases must resolve their OWN concrete instantiation.
+	MyBox a;
+	a.v = 5;
+	if (a.v != 5) return 1;
+	a.tag = 9;
+	if (a.tag != 9) return 2;
+	FBox b;
+	b.v = 1.5f;
+	if (b.v != 1.5f) return 3;
+	b.tag = 4;
+	if (b.tag != 4) return 4;
+	printf("ALIAS MEMBER ACCESS OK\n");
+	return 0;
+}

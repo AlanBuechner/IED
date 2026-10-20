@@ -1,0 +1,26 @@
+// BUG-110: returning a variable of pointer type by reference returns the address of the variable, so the
+// caller can retarget it - a field, a global and a reference parameter alike.
+int32* g_current = null;
+
+struct Holder {
+	public int32* target;
+	public int32*& Target() { return target; }
+}
+
+int32*& Current() { return g_current; }
+int32*& Pass(int32*& p) { return p; }
+
+int32 main() {
+	int32 a = 1;
+	int32 b = 2;
+	Holder h;
+	h.target = &a;
+	h.Target() = &b;
+	if (h.target != &b || *h.Target() != 2) return 1;
+	Current() = &a;
+	if (g_current != &a || *Current() != 1) return 2;
+	int32* local = &a;
+	Pass(local) = &b;
+	if (local != &b) return 3;
+	return 0;
+}

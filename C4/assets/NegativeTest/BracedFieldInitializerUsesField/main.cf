@@ -1,0 +1,11 @@
+// A braced list builds no object before its elements, so an omitted field's initializer cannot use the
+// object's other fields (it can in a create, which runs the initializers on the object).
+struct Sized {
+	public int32 count;
+	public int32 doubled = count * 2;
+}
+
+int32 main() {
+	Sized s = Sized{ 3 };
+	return s.doubled;
+}

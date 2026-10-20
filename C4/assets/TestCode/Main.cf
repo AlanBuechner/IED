@@ -1,0 +1,507 @@
+// ============================================================================
+// C4 Comprehensive Test Suite - Main Entry Point
+// Single program that runs ALL unit tests across multiple files and folders
+// ============================================================================
+
+// Include all test headers
+include "Framework/Assert.ch"
+
+// Core tests
+include "Core/IntegerLiterals.ch"
+include "Core/HexLiterals.ch"
+include "Core/BinaryLiterals.ch"
+include "Core/LiteralTyping.ch"
+include "Core/MacroConditions.ch"
+include "Core/DefaultArgumentExpressions.ch"
+include "Core/SizeofForms.ch"
+include "Core/BooleanLiterals.ch"
+include "Core/FloatLiterals.ch"
+include "Core/CharLiterals.ch"
+include "Core/PrimitiveTypes.ch"
+include "Core/VariadicFunctions.ch"
+include "Core/DefaultParameters.ch"
+include "Core/Macros.ch"
+include "Core/ScopeReuseTests.ch"
+include "Core/ConstEvalTests.ch"
+include "Core/ScopedConstants.ch"
+include "Core/RuntimeConstants.ch"
+
+// Operator tests
+include "Operators/Addition.ch"
+include "Operators/IntegerPromotion.ch"
+include "Operators/Subtraction.ch"
+include "Operators/Multiplication.ch"
+include "Operators/Division.ch"
+include "Operators/Modulo.ch"
+include "Operators/BitwiseShift.ch"
+include "Operators/Precedence.ch"
+include "Operators/Equality.ch"
+include "Operators/Inequality.ch"
+include "Operators/LogicalAnd.ch"
+include "Operators/Truthiness.ch"
+include "Operators/LogicalOr.ch"
+include "Operators/LogicalNot.ch"
+include "Operators/Assignment.ch"
+include "Operators/IncrementDecrement.ch"
+include "Operators/UnaryMinus.ch"
+
+// Type tests
+include "Types/ArrayDeclaration.ch"
+include "Types/LambdaMultiEntry.ch"
+include "Types/ConstExprArraySize.ch"
+include "Types/ArrayIndexing.ch"
+include "Types/NestedAggregateInit.ch"
+include "Types/ArrayWithVariableIndex.ch"
+include "Types/ArrayElementExpression.ch"
+include "Types/PointerDeclaration.ch"
+include "Types/PointerArithmetic.ch"
+include "Types/StructTests.ch"
+include "Types/EnumTests.ch"
+include "Types/ScopedEnum.ch"
+include "Types/IndexOperator.ch"
+include "Types/UnionTests.ch"
+include "Types/ObjectZeroInit.ch"
+include "Types/cp.ch"
+include "Types/ObjectAssign.ch"
+include "Types/StringCharPtr.ch"
+include "Types/EnumForward.ch"
+include "Types/StaticDataMember.ch"
+include "Types/ForwardDecl.ch"
+include "Types/NamespacedAggregateReturn.ch"
+include "Types/QualifiedMembers.ch"
+include "Types/LocalEnumMembers.ch"
+include "Operators/FloatComparisons.ch"
+include "Types/QualifiedTemplateConstruction.ch"
+include "OOP/ThisComparisons.ch"
+include "Types/StaticThroughParameter.ch"
+include "Core/RuntimeBuiltins.ch"
+include "Types/NestedInitList.ch"
+include "Types/NamespacedTemplateNames.ch"
+include "Types/NestedInTemplate.ch"
+include "Types/PackedViews.ch"
+include "Types/PackedVectorLifecycle.ch"
+include "Types/FunctionPointer.ch"
+include "Types/AliasTemplate.ch"
+include "Types/AliasFields.ch"
+include "Core/ForwardConstUse.ch"
+include "Types/BraceSlots.ch"
+include "Functions/BracedArguments.ch"
+include "Core/NestedNamespaceShorthand.ch"
+include "Types/NamedUnions.ch"
+include "Types/FoldedConstants.ch"
+include "Types/LocalAlias.ch"
+include "Types/TemplateCommaListFields.ch"
+include "Types/FunctionTemplate.ch"
+include "Types/ObjectTemplate.ch"
+include "Types/GC.ch"
+include "Types/PackedVector.ch"
+include "Types/PackedArrayValues.ch"
+include "Types/PackedLayout.ch"
+include "Types/NormalizedIntegers.ch"
+include "Types/BracedAssignment.ch"
+include "Types/NamespacedTemplate.ch"
+include "Types/CrossUnitTemplate.ch"
+include "Types/NamespacedExtensionMethod.ch"
+include "Types/NamespacedDataGlobals.ch"
+include "Types/CallResultMemberAccess.ch"
+include "Types/OrderIndependence.ch"
+include "Types/TemplateCompleteness.ch"
+include "Types/BuiltinAliases.ch"
+include "Parity/Parity.ch"
+
+// Control flow tests
+include "ControlFlow/IfStatement.ch"
+include "ControlFlow/IfElse.ch"
+include "ControlFlow/WhileLoop.ch"
+include "ControlFlow/ForLoop.ch"
+include "ControlFlow/RangeFor.ch"
+include "ControlFlow/DoWhileLoop.ch"
+include "ControlFlow/Switch.ch"
+include "ControlFlow/Break.ch"
+include "ControlFlow/Continue.ch"
+include "ControlFlow/Ternary.ch"
+include "ControlFlow/Cast.ch"
+include "ControlFlow/Goto.ch"
+include "ControlFlow/Defer.ch"
+include "ControlFlow/TryCatch.ch"
+include "ControlFlow/SwitchStackedLabels.ch"
+include "ControlFlow/ForCommaStep.ch"
+include "ControlFlow/SwitchLabels.ch"
+include "ControlFlow/ConditionTruthValues.ch"
+include "ControlFlow/RangeForReference.ch"
+
+// OOP tests
+include "OOP/FunctionTests.ch"
+include "OOP/NamespaceTests.ch"
+include "OOP/ThisArgument.ch"
+
+// Extension Method tests (new `extends` syntax)
+include "OOP/ExtensionMethodTests.ch"
+include "OOP/OverloadedExtensionCtor.ch"
+include "OOP/ProtectedFromDerived.ch"
+include "OOP/AbstractAndFinal.ch"
+include "Operators/Power.ch"
+include "Operators/FloatRemainder.ch"
+include "OperatorOverloads/UnaryTokens.ch"
+include "OperatorOverloads/ShiftAssign.ch"
+include "OperatorOverloads/ScalarLeftExtension.ch"
+include "OperatorOverloads/CallOperator.ch"
+include "Types/InjectedClassName.ch"
+include "Types/FuncPtrTables.ch"
+include "Types/RefToArrayIndex.ch"
+include "Types/AddressOfReferenceLocal.ch"
+include "Types/ConstRefConversion.ch"
+include "Core/VaListForms.ch"
+include "OOP/VirtualDispatchEdges.ch"
+include "OOP/InterfaceTests.ch"
+
+// Inheritance and Polymorphism tests
+include "OOP/InheritanceTests.ch"
+
+// Method-call-on-complex-expression-receiver tests (guards the O8 pointer-kind collapse)
+include "OOP/MethodCallOnExpressionReceiver.ch"
+include "OOP/OverloadResolution.ch"
+include "OOP/MemberAccessSpelling.ch"
+include "Operators/EvaluatedOnce.ch"
+
+// Operator Overload tests
+include "OperatorOverloads/OperatorOverloadTests.ch"
+include "OperatorOverloads/CustomOperatorCalls.ch"
+
+int32 main() {
+	printf("========================================\n");
+	printf("C4 Comprehensive Test Suite\n");
+	printf("========================================\n\n");
+	fflush(nullptr);
+	
+	printf("[DEBUG] Starting Core Tests...\n");
+	fflush(nullptr);
+	// Core Tests
+	TestIntegerLiterals();
+	TestHexLiterals();
+	TestBinaryLiterals();
+	TestBooleanLiterals();
+	TestFloatLiterals();
+	TestCharLiterals();
+	TestPrimitiveTypes();
+	TestVariadicPrintf();
+	TestVariadicUserDefined();
+	TestDefaultParameters();
+	TestMacroObjectLike();
+	TestMacroFunctionLike();
+	TestMacroUndefRedefine();
+	TestMacroStringSafety();
+	TestMacroComposition();
+	TestMacroIncludeInheritance();
+	TestSiblingScopeVariableReuse();
+	TestConstEval();
+	TestScopedConstants();
+	TestRuntimeConstants();
+TestEnumAsConstant();
+TestGlobalRuntimeInit();
+TestConstExprArraySizes();
+	TestBuiltinAliases();
+	TestLiteralTyping();
+	TestMacroConditions();
+	TestDefaultArgumentExpressions();
+	TestSizeofForms();
+	TestVirtualDispatchTemplateInheritance();
+	
+	printf("[DEBUG] Starting Operator Tests...\n");
+	fflush(nullptr);
+	// Operator Tests
+	TestAddition();
+	TestIntegerPromotion();
+	TestSubtraction();
+	TestMultiplication();
+	TestDivision();
+	TestModulo();
+	TestBitwiseShift();
+	TestPrecedence();
+	TestEquality();
+	TestInequality();
+	TestLogicalAnd();
+	TestTruthiness();
+	TestLogicalOr();
+	TestLogicalNot();
+	TestAssignment();
+	TestIncrementDecrement();
+	TestIncrementDecrementValue();
+	TestUnaryMinus();
+	
+	printf("[DEBUG] Starting Type Tests...\n");
+	fflush(nullptr);
+	// Type Tests
+	TestArrayDeclaration();
+	TestConstExprArraySize();
+	TestLambdaEntryA();
+	TestLambdaEntryB();
+	TestArrayIndexing();
+	TestCompoundIndexAssignment();
+	TestNestedAggregateInit();
+	TestArrayWithVariableIndex();
+	TestArrayElementExpressions();
+	TestPointerDeclaration();
+	TestPointerArithmetic();
+	TestPointerDifference();
+	TestStructDeclaration();
+	TestStructByValue();
+	TestObjectZeroInitLocal();
+	TestObjectZeroInitReturn();
+	TestObjectZeroInitCopyAndGlobal();
+	TestObjectExplicitInitializerWins();
+	TestCharPtrAssignUnit1();
+	TestCharPtrAssignUnit2();
+	TestObjectAssignFromRef();
+	TestObjectAssignTemplate();
+	TestCharPtrLiteral();
+TestCharPtrReturnParam();
+	TestEnumForwardRef();
+	TestEnumCrossUnit();
+	TestEnumValues();
+	TestScopedEnum();
+	TestBracketIndexOperator();
+	TestInheritedAndOffsetIndex();
+	TestStaticDataMember();
+	TestStaticDataMemberInitializer();
+	TestStaticMethod();
+	TestForwardDeclPointerOnly();
+	TestForwardDeclDefinedLater();
+	TestForwardDeclRedundantAfterDef();
+	TestNamespacedAggregateReturn();
+	TestQualifiedMembers();
+	TestLocalEnumMembers();
+	TestFloatComparisons();
+	TestQualifiedTemplateConstruction();
+	TestThisComparisons();
+	TestStaticThroughParameter();
+	TestRuntimeBuiltins();
+	TestNestedInitList();
+	TestNamespacedTemplateNames();
+	TestNestedInTemplate();
+	TestPackedViews();
+	TestPackedVectorLifecycle();
+	TestUnion();
+	TestFunctionPointer();
+	TestAliasTemplate();
+	TestAliasFields();
+	TestForwardConstUse();
+	TestBraceSlots();
+	TestBracedArguments();
+	TestNestedNamespaceShorthand();
+	TestNamedUnions();
+	TestMemberAccessSpelling();
+	TestEvaluatedOnce();
+	TestFoldedConstants();
+	TestLocalAlias();
+	TestTemplateCommaListFields();
+	TestFunctionTemplate();
+	TestObjectTemplate();
+	TestGC();
+	TestPackedVectorLanguage();
+	TestPackedVectorPointer();
+	TestPackedVectorAggregateInit();
+	TestPackedVectorTemplate();
+	TestPackedVectorAliasLanes();
+	TestPackedVectorEngineDesign();
+	TestPackedVectorStructOfVectors();
+	TestPackedVectorScalarArithmetic();
+	TestPackedArrayArithmetic();
+	TestPackedArrayIndexing();
+	TestPackedArrayAliases();
+	TestPackedArrayIntegers();
+	TestPackedArrayMasks();
+	TestPackedArrayStorage();
+	TestPackedLayoutSizes();
+	TestPackedLayoutArrays();
+	TestPackedLayoutCopies();
+	TestNormalizedFromFloat();
+	TestNormalizedToFloat();
+	TestNormalizedWideTypes();
+	TestNormalizedArithmetic();
+	TestNormalizedConstants();
+	TestBracedAssignment();
+	TestNamespacedObjectTemplate();
+	TestNamespacedGlobalTemplateCoexist();
+	TestNamespacedFunctionTemplate();
+	TestNestedNamespaceCall();
+	TestNamespacedExpressionPrefix();
+	TestCrossUnitTemplate();
+	TestNamespacedExtensionMethod();
+	TestNamespacedDataGlobals();
+	TestCallResultMemberAccess();
+	TestOrderIndependence();
+	TestTemplateCompleteness();
+	TestParity();
+	
+	printf("[DEBUG] Starting Control Flow Tests...\n");
+	fflush(nullptr);
+	// Control Flow Tests
+	TestIfStatement();
+	TestIfElse();
+	TestWhileLoop();
+	TestForLoop();
+	TestRangeForInts();
+	TestRangeForFloats();
+	TestRangeForStructs();
+	TestRangeForBreak();
+	TestRangeForContinue();
+	TestRangeForIterator();
+	TestRangeForTemplateContainer();
+	TestRangeForByValueCall();
+	TestDoWhileLoop();
+	TestSwitch();
+	TestSwitchStackedLabels();
+	TestForCommaStep();
+	TestSwitchLabels();
+	TestConditionTruthValues();
+	TestRangeForReference();
+	TestBreak();
+	TestContinue();
+	TestTernary();
+	TestCast();
+	TestGoto();
+	TestDefer();
+	TestDeferOnExplicitReturn();
+	TestDeferLifoOrder();
+	TestDeferNestedScopes();
+	// Exception handling (re-enabled: the funclet/unwind-table crash it triggered is fixed - the throw value
+	// buffer now lives in the function's entry block instead of a catchpad funclet, so mixed rethrow +
+	// value-throw constructs in one function no longer corrupt the SEH frame handler at runtime).
+	TestTryCatch();
+	TestThrowRethrowMix();
+	
+	printf("[DEBUG] Starting OOP Tests...\n");
+	fflush(nullptr);
+	// OOP Tests
+	TestFunctionCall();
+	TestMultipleFunctions();
+	TestNamespace();
+	TestThisArgument();
+	
+	printf("[DEBUG] Starting Extension Method Tests...\n");
+	fflush(nullptr);
+	// Extension Method Tests (new `extends` syntax)
+	TestExtensionMethodBasic();
+	TestExtensionMethodOperators();
+	TestExtensionMethodComparison();
+	TestExtensionMethodAssignment();
+	TestExtensionMethodBitwise();
+	TestExtensionMethodShift();
+	TestExtensionMethodIndex();
+	TestExtensionMethodUnary();
+	TestExtensionMethodLogical();
+	TestExtensionMethodCast();
+	TestExtensionMethodCreateDestroy();
+	TestExtensionMethodCopyMove();
+	TestOverloadedExtensionCtor();
+	TestProtectedFromDerived();
+	TestAbstractAndFinal();
+	TestPower();
+	TestFloatRemainder();
+	TestUnaryTokens();
+	TestShiftAssign();
+	TestScalarLeftExtension();
+	TestCallOperator();
+	TestInjectedClassName();
+	TestFuncPtrTables();
+	TestRefToArrayIndex();
+	TestAddressOfReferenceLocal();
+	TestConstRefConversion();
+	TestVaListForms();
+	TestVirtualDispatchEdges();
+	TestInterface();
+
+	printf("[DEBUG] Starting Method-Call-On-Expression-Receiver Tests...\n");
+	fflush(nullptr);
+	TestMethodCallOnExpressionReceiver();
+	TestOverloadFloatParam();
+	TestOverloadTemplateInstantiation();
+
+	printf("[DEBUG] Starting Inheritance Tests...\n");
+	fflush(nullptr);
+	// Inheritance and Polymorphism Tests
+	TestInheritanceBasic();
+	TestVirtualDispatch();
+	TestPolymorphism();
+	
+	printf("[DEBUG] Starting Operator Overload Tests...\\n");
+	// Operator Overload Tests
+	printf("[DEBUG] About to run TestArithmeticOperators...\\n");
+	TestArithmeticOperators();
+	printf("[DEBUG] TestArithmeticOperators done\\n");
+	printf("[DEBUG] About to run TestComparisonOperators...\\n");
+	TestComparisonOperators();
+	printf("[DEBUG] TestComparisonOperators done\\n");
+	printf("[DEBUG] About to run TestUnaryOperators...\\n");
+	TestUnaryOperators();
+	printf("[DEBUG] TestUnaryOperators done\\n");
+	printf("[DEBUG] About to run TestBitwiseOperators...\\n");
+	TestBitwiseOperators();
+	printf("[DEBUG] TestBitwiseOperators done\\n");
+	printf("[DEBUG] About to run TestShiftOperators...\\n");
+	TestShiftOperators();
+	printf("[DEBUG] TestShiftOperators done\\n");
+	printf("[DEBUG] About to run TestAssignmentOperators...\\n");
+	TestAssignmentOperators();
+	printf("[DEBUG] TestAssignmentOperators done\\n");
+	printf("[DEBUG] About to run TestCompoundAssignmentOperators...\\n");
+	TestCompoundAssignmentOperators();
+	printf("[DEBUG] TestCompoundAssignmentOperators done\\n");
+	TestCompoundAssignmentResolution();
+	printf("[DEBUG] TestCompoundAssignmentResolution done\\n");
+	printf("[DEBUG] About to run TestLogicalOperators...\\n");
+	TestLogicalOperators();
+	printf("[DEBUG] TestLogicalOperators done\\n");
+	printf("[DEBUG] About to run TestCastOperator...\\n");
+	TestCastOperator();
+	printf("[DEBUG] TestCastOperator done\\n");
+	printf("[DEBUG] About to run TestCreateDestroyOperators...\\n");
+	TestCreateDestroyOperators();
+	printf("[DEBUG] TestCreateDestroyOperators done\\n");
+	printf("[DEBUG] About to run TestCopyMoveOperators...\\n");
+	TestCopyMoveOperators();
+	printf("[DEBUG] TestCopyMoveOperators done\\n");
+	printf("[DEBUG] About to run TestIncrementDecrementOperators...\\n");
+	TestIncrementDecrementOperators();
+	printf("[DEBUG] TestIncrementDecrementOperators done\\n");
+	printf("[DEBUG] About to run TestIndexOperator...\\n");
+	TestIndexOperator();
+	printf("[DEBUG] TestIndexOperator done\\n");
+	printf("[DEBUG] About to run TestSyntacticArithmeticDispatch...\\n");
+	TestSyntacticArithmeticDispatch();
+	printf("[DEBUG] TestSyntacticArithmeticDispatch done\\n");
+	printf("[DEBUG] About to run TestSyntacticComparisonDispatch...\\n");
+	TestSyntacticComparisonDispatch();
+	printf("[DEBUG] TestSyntacticComparisonDispatch done\\n");
+	printf("[DEBUG] About to run TestSyntacticBitwiseDispatch...\\n");
+	TestSyntacticBitwiseDispatch();
+	printf("[DEBUG] TestSyntacticBitwiseDispatch done\\n");
+	printf("[DEBUG] About to run TestSyntacticLogicalDispatch...\\n");
+	TestSyntacticLogicalDispatch();
+	printf("[DEBUG] TestSyntacticLogicalDispatch done\\n");
+
+	printf("[DEBUG] Starting Custom Operator Call Tests...\\n");
+	// Custom operator_<name>() calls
+	TestCustomOperatorMemberMethod();
+	TestCustomOperatorWithParams();
+	TestCustomOperatorExtensionMethod();
+	TestCustomOperatorBuiltInStillWorks();
+	
+	printf("[DEBUG] All tests completed!\n");
+	printf("\n========================================\n");
+	printf("TEST RESULTS\n");
+	printf("========================================\n");
+	printf("PASSED: %d\n", GetPassed());
+	printf("FAILED: %d\n", GetFailed());
+	printf("TOTAL:  %d\n", GetPassed() + GetFailed());
+	printf("========================================\n");
+	
+	if (GetFailed() == 0) {
+		printf("ALL TESTS PASSED!\n");
+	} else {
+		printf("SOME TESTS FAILED!\n");
+	}
+	
+	return GetFailed();
+}

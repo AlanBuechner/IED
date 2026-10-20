@@ -1,0 +1,48 @@
+// Function template arguments are deduced from the call's arguments (D-17): plain, reference, pointer,
+// array (with its size), template-instance and function-pointer parameters, a prefix written explicitly
+// and the rest deduced.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T> T Identity(T v) { return v; }
+template<T> T Larger(T a, T b) { return a > b ? a : b; }
+template<T> T First(const T& v) { return v; }
+template<T> T Read(T* p) { return *p; }
+template<T, int32 N> int32 Length(T[N]& items) { return N; }
+template<T> T Decayed(T p) { return p; }
+
+template<T> struct Box { public T value; }
+template<T> T Unbox(const Box<T>& b) { return b.value; }
+struct Derived : Box<int64> { public int32 extra; }
+
+template<R, A> R Apply(funcptr<R(A)> f, A a) { return f(a); }
+int32 Twice(int32 x) { return x * 2; }
+
+template<R, A> R Convert(A a) { return (R)a; }
+template<T> int32 SizeOf(T v) { return sizeof(T); }
+
+int32 main() {
+	Check(Identity(5) == 5, "T from an int32");
+	Check(Identity(2.5f) == 2.5f, "T from a float");
+	Check(Larger(3, 9) == 9, "two arguments agree on T");
+	int32 x = 11;
+	Check(First(x) == 11, "a const T& parameter");
+	Check(Read(&x) == 11, "a T* parameter");
+	int32[7] items;
+	Check(Length(items) == 7, "an array parameter deduces its size");
+	int32* p = Decayed(items);
+	Check(p == &items[0], "a by-value T takes an array as a pointer to its element");
+	Box<float> b;
+	b.value = 1.25f;
+	Check(Unbox(b) == 1.25f, "a Box<T> parameter");
+	Derived d;
+	d.value = 40;
+	Check(Unbox(d) == 40, "a Box<T> parameter takes a type deriving from a Box instance");
+	Check(Apply(Twice, 4) == 8, "a function pointer parameter decides its return and parameter types");
+	Check(Convert<float>(3) == 3.0f, "an explicit prefix, the rest deduced");
+	Check(SizeOf(Convert<int64>(3)) == 8, "the explicit argument decides the return type");
+	return g_failures;
+}

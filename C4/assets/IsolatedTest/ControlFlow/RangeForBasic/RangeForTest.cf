@@ -1,0 +1,99 @@
+// Range-for probe - does `for (Type x : expr)` desugar and run correctly?
+
+struct Point {
+    int32 x;
+    int32 y;
+
+    [operator("create")] public void Init(int32 px, int32 py) {
+        this.x = px;
+        this.y = py;
+    }
+}
+
+int32 SumInts() {
+    int32[5] arr;
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+
+    int32 sum = 0;
+    for (int32 v : arr) {
+        sum += v;
+    }
+    return sum; // expect 15
+}
+
+float SumFloats() {
+    float[4] f;
+    f[0] = 1.5f;
+    f[1] = 2.5f;
+    f[2] = 3.0f;
+    f[3] = 3.0f;
+
+    float total = 0.0f;
+    for (float v : f) {
+        total += v;
+    }
+    return total; // expect 10.0f
+}
+
+int32 StructFields() {
+    Point[3] pts;
+    pts[0].Init(1, 10);
+    pts[1].Init(2, 20);
+    pts[2].Init(3, 30);
+
+    int32 sumX = 0;
+    int32 sumY = 0;
+    for (Point p : pts) {
+        sumX += p.x;
+        sumY += p.y;
+    }
+    return sumX * 100 + sumY; // expect 6*100 + 60 = 660
+}
+
+int32 BreakTest() {
+    int32[5] arr;
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+    arr[3] = 40;
+    arr[4] = 50;
+
+    int32 sum = 0;
+    for (int32 v : arr) {
+        if (v >= 30) break;
+        sum += v;
+    }
+    return sum; // expect 10+20 = 30
+}
+
+int32 ContinueTest() {
+    int32[6] arr;
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    arr[5] = 6;
+
+    int32 sum = 0;
+    for (int32 v : arr) {
+        if (v % 2 == 0) continue;
+        sum += v;
+    }
+    return sum; // expect 1+3+5 = 9
+}
+
+int32 main() {
+    if (SumInts() != 15) { printf("FAIL SumInts\n"); return 1; }
+    if (SumFloats() != 10.0f) { printf("FAIL SumFloats\n"); return 1; }
+    if (StructFields() != 660) { printf("FAIL StructFields\n"); return 1; }
+    if (BreakTest() != 30) { printf("FAIL BreakTest\n"); return 1; }
+    if (ContinueTest() != 9) { printf("FAIL ContinueTest\n"); return 1; }
+
+    printf("RANGE FOR OK\n");
+    return 0;
+}

@@ -1,0 +1,42 @@
+// Hot reload: unloading a source tag tells its listeners first, while its entities are still registered,
+// then removes exactly that tag's types, variables and functions; registering again brings them back.
+extern "c" include "script.h"
+extern "c" source "script.c"
+include "bedrock.ch"
+
+int32 g_heard = 0;
+int32 g_any = 0;
+int32 g_stillRegistered = 0;
+
+void OnScriptUnload(const char* tag, void* user) {
+	g_heard = g_heard + *(int32*)user;
+	g_stillRegistered = Reflection::FindType("Script::Enemy").IsValid() ? 1 : 0;
+}
+
+void OnAnyUnload(const char* tag, void* user) { g_any = g_any + 1; }
+
+int32 main() {
+	if (ScriptRegister() != 3) return 1;
+	Reflection::Type enemy = Reflection::FindType("Script::Enemy");
+	if (!enemy.IsValid() || enemy.FindAnnotation("Version").IntArg(0) != 3) return 2;
+	if (*(int32*)Reflection::FindVariable("Script::g_value").Address() != 5) return 3;
+
+	int32 weight = 10;
+	uint32 listener = Reflection::OnUnload("script", OnScriptUnload, &weight);
+	Reflection::OnUnload("", OnAnyUnload, nullptr);
+	Reflection::OnUnload("other", OnScriptUnload, &weight);
+	if (listener == 0) return 4;
+	int64 typesBefore = Reflection::TypeCount();
+	if (Reflection::UnloadSource("script") != 3) return 5;
+	if (g_heard != 10 || g_stillRegistered != 1 || g_any != 1) { printf("FAIL heard %d registered %d any %d\n", g_heard, g_stillRegistered, g_any); return 6; }
+	if (Reflection::FindType("Script::Enemy").IsValid() || Reflection::FindVariable("Script::g_value").IsValid()) return 7;
+	if (Reflection::FindFunction("Script::Tick").IsValid() || Reflection::TypeCount() != typesBefore - 1) return 8;
+
+	if (ScriptRegister() != 3 || !Reflection::FindType("Script::Enemy").IsValid()) return 9;
+	Reflection::RemoveUnloadListener(listener);
+	if (Reflection::UnloadSource("script") != 3) return 10;
+	if (g_heard != 10 || g_any != 2) return 11;
+	if (Reflection::UnloadSource("") != 0 || !Reflection::FindFunction("OnScriptUnload").IsValid()) return 12;
+	printf("UNLOAD AND REREGISTER OK\n");
+	return 0;
+}

@@ -1,0 +1,11 @@
+// Operators - Logical Or Tests (implementation)
+include "../Framework/Assert.ch"
+include "LogicalOr.ch"
+
+void TestLogicalOr() {
+	bool a = true || false;
+	AssertTrue(a);
+	
+	bool b = false || false;
+	AssertFalse(b);
+}

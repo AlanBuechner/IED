@@ -1,0 +1,9 @@
+include "live.ch"
+
+int32 Version() { return 1; }
+
+void Setup()
+{
+	Live::g_widget = new Live::Widget();
+	Live::g_widget->size = 9;
+}

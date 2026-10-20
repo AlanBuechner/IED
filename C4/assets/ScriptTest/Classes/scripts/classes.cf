@@ -1,0 +1,66 @@
+include "world.ch"
+
+class Grunt : public World::Entity
+{
+	public int32 armor = 2;
+	public override int32 Damage(int32 amount) { health -= amount - armor; return health; }
+	public override int32 Kind() const { return 2; }
+}
+
+class Ticker : public World::IUpdatable
+{
+	public int32 ticks = 0;
+	public virtual int32 Update(int32 dt) { ticks += dt; return ticks; }
+}
+
+class Hybrid : public World::Entity, public World::IUpdatable
+{
+	public override int32 Kind() const { return 3; }
+	public virtual int32 Update(int32 dt) { return dt * 100; }
+}
+
+int32 Spawn(World::Registry* registry)
+{
+	registry->Add(new Grunt());
+	registry->Add(World::MakeEntity());
+	Hybrid* hybrid = new Hybrid();
+	registry->Add(hybrid);
+	registry->AddUpdatable(new Ticker());
+	registry->AddUpdatable(hybrid);
+	return (int32)registry->entities.Count();
+}
+
+int32 CountGrunts(World::Registry* registry)
+{
+	int32 grunts = 0;
+	for (int64 i = 0; i < registry->entities.Count(); i++)
+		if (registry->entities[i] is Grunt) grunts++;
+	return grunts;
+}
+
+int32 HybridUpdate(World::Registry* registry)
+{
+	Hybrid* hybrid = registry->entities[2] as Hybrid*;
+	World::IUpdatable* updatable = registry->entities[2] as World::IUpdatable*;
+	if (hybrid == nullptr || updatable == nullptr) return -1;
+	return updatable->Update(2);
+}
+
+class Shape
+{
+	public virtual int32 Area() const { return 0; }
+}
+
+class Square : public Shape
+{
+	public int32 side = 0;
+	public override int32 Area() const { return side * side; }
+}
+
+int32 LocalHierarchy()
+{
+	Square* square = new Square();
+	square->side = 6;
+	Shape* shape = square;
+	return shape->Area() + (shape is Square ? 6 : 0);
+}

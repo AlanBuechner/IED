@@ -1,0 +1,47 @@
+namespace NsMath {
+    struct Vec3 { float x; float y; float z; }
+    struct Mat4 { Vec3 c0; Vec3 c1; Vec3 c2; Vec3 c3; }
+
+    Vec3 Vec3_Create(float x, float y, float z);
+    Vec3 Vec3_Add(Vec3 a, Vec3 b);
+    Vec3 Vec3_Cross(Vec3 a, Vec3 b);
+    float Vec3_Dot(Vec3 a, Vec3 b);
+    Mat4 Mat4_Identity();
+    Vec3 Mat4_TransformPoint(Mat4 m, Vec3 p);
+}
+NsMath::Vec3 NsMath::Vec3_Create(float x, float y, float z) { NsMath::Vec3 v; v.x = x; v.y = y; v.z = z; return v; }
+NsMath::Vec3 NsMath::Vec3_Add(NsMath::Vec3 a, NsMath::Vec3 b) { NsMath::Vec3 r; r.x = a.x+b.x; r.y = a.y+b.y; r.z = a.z+b.z; return r; }
+NsMath::Vec3 NsMath::Vec3_Cross(NsMath::Vec3 a, NsMath::Vec3 b) { NsMath::Vec3 r; r.x = a.y*b.z - a.z*b.y; r.y = a.z*b.x - a.x*b.z; r.z = a.x*b.y - a.y*b.x; return r; }
+float NsMath::Vec3_Dot(NsMath::Vec3 a, NsMath::Vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
+NsMath::Mat4 NsMath::Mat4_Identity() {
+    NsMath::Mat4 m;
+    m.c0 = NsMath::Vec3_Create(1.0f, 0.0f, 0.0f);
+    m.c1 = NsMath::Vec3_Create(0.0f, 1.0f, 0.0f);
+    m.c2 = NsMath::Vec3_Create(0.0f, 0.0f, 1.0f);
+    m.c3 = NsMath::Vec3_Create(0.0f, 0.0f, 0.0f);
+    return m;
+}
+NsMath::Vec3 NsMath::Mat4_TransformPoint(NsMath::Mat4 m, NsMath::Vec3 p) {
+    NsMath::Vec3 r;
+    r.x = m.c0.x*p.x + m.c1.x*p.y + m.c2.x*p.z + m.c3.x;
+    r.y = m.c0.y*p.x + m.c1.y*p.y + m.c2.y*p.z + m.c3.y;
+    r.z = m.c0.z*p.x + m.c1.z*p.y + m.c2.z*p.z + m.c3.z;
+    return r;
+}
+int32 main() {
+    NsMath::Vec3 ax = NsMath::Vec3_Create(1.0f, 0.0f, 0.0f);
+    NsMath::Vec3 ay = NsMath::Vec3_Create(0.0f, 1.0f, 0.0f);
+    NsMath::Vec3 c = NsMath::Vec3_Cross(ax, ay);
+    if (c.x != 0.0f || c.y != 0.0f || c.z != 1.0f) { printf("FAIL cross (%.1f,%.1f,%.1f)\n", c.x,c.y,c.z); return 1; }
+    NsMath::Vec3 s = NsMath::Vec3_Add(ax, ay);
+    if (s.x != 1.0f || s.y != 1.0f) { printf("FAIL add\n"); return 1; }
+    float d = NsMath::Vec3_Dot(s, s);
+    if (d != 2.0f) { printf("FAIL dot (%.1f)\n", d); return 1; }
+    NsMath::Mat4 m = NsMath::Mat4_Identity();
+    NsMath::Vec3 p = NsMath::Mat4_TransformPoint(m, ax);
+    if (p.x != 1.0f) { printf("FAIL mat4 (%.1f)\n", p.x); return 1; }
+    NsMath::Vec3 r = NsMath::Vec3_Add(NsMath::Vec3_Cross(ax, ay), ax);
+    if (r.z != 1.0f || r.x != 1.0f) { printf("FAIL chain\n"); return 1; }
+    printf("NS VALUE MATH (factory pattern) OK\n");
+    return 0;
+}

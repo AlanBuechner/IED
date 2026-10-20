@@ -1,0 +1,3 @@
+const int32 Zero = 0;
+int32[10 / Zero] slots;
+int32 main() { return 0; }

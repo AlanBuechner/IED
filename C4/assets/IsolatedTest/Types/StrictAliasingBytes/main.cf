@@ -1,0 +1,52 @@
+// Strict aliasing (D-64): the byte types (uint8, int8, char8) read and write any memory, and memcpy copies bits
+// between types. The pointers come from volatile variables, so the optimizer cannot see that they name the same
+// storage and has only the access types to go by. main returns the failures.
+float g_float;
+int64 g_wide;
+volatile float* g_floatPointer;
+volatile uint8* g_floatBytes;
+volatile int64* g_widePointer;
+volatile char8* g_wideText;
+volatile int8* g_wideBytes;
+
+int32 Differs(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 BytesOfAFloat() {
+	float* f = g_floatPointer;
+	uint8* bytes = g_floatBytes;
+	*f = 1.0f;                                 // 0x3F800000, little-endian
+	int32 failures = Differs(bytes[3], 63) + Differs(bytes[2], 128);
+	bytes[3] = 64;                             // 0x40800000 is 4.0f
+	return failures + (*f == 4.0f ? 0 : 1);
+}
+
+int32 CharactersOfAnInteger() {
+	int64* wide = g_widePointer;
+	char8* text = g_wideText;
+	*wide = 0;
+	text[0] = 'A';
+	text[1] = 'B';
+	int32 failures = Differs(*wide, 16961);    // 'B' * 256 + 'A'
+	int8* signedBytes = g_wideBytes;
+	signedBytes[7] = -128;
+	return failures + (*wide < 0 ? 0 : 1);
+}
+
+int32 CopiedBits() {
+	double real = -0.5;
+	uint64 bits = 0u;
+	memcpy(&bits, &real, 8u);
+	int32 failures = bits == 13826050856027422720u ? 0 : 1;   // -0.5, 0xBFE0000000000000
+	double back = 0.0;
+	memcpy(&back, &bits, 8u);
+	return failures + (back == -0.5 ? 0 : 1);
+}
+
+int32 main() {
+	g_floatPointer = &g_float;
+	g_floatBytes = (uint8*)&g_float;
+	g_widePointer = &g_wide;
+	g_wideText = (char8*)&g_wide;
+	g_wideBytes = (int8*)&g_wide;
+	return BytesOfAFloat() + CharactersOfAnInteger() + CopiedBits();
+}

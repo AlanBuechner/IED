@@ -1,0 +1,68 @@
+// Exceptions cross the C++ boundary in both directions (D-13: MSVC type names), and C++ calls methods
+// of C4 objects through interfaces laid out like C++ abstract classes (D-08: MSVC layout, vtables and
+// member calling convention - a struct result goes through a hidden pointer after `this`).
+extern "c++" include "boundary.h"
+extern "c++" source "boundary.cpp"
+
+interface IProvider { Handle Get(int32 base); int32 Count(); }
+interface ICounter { int32 Next(); }
+
+class Source : IProvider, ICounter {
+	public int32 calls;
+	public Handle Get(int32 base) { Handle h; h.value = base + 2; calls++; return h; }
+	public int32 Count() { return calls; }
+	public int32 Next() { calls++; return calls * 3; }
+}
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 ThrowsInt(int32 v) { throw v; }
+int32 ThrowsCppError(int32 v) { CppError e; e.code = v; throw e; }
+int32 ThrowsOther(int32 v) { throw 2.5; }
+int32 Returns(int32 v) { return v + 1; }
+
+void CppThrowsC4Catches() {
+	int32 got = 0;
+	try { ThrowInt(7); }
+	catch (int32 e) { got = e; }
+	Check(got == 7, "a C++ int is caught as int32");
+	got = 0;
+	try { ThrowCppError(8); }
+	catch (CppError e) { got = e.code; }
+	Check(got == 8, "a C++ struct is caught by its C4 binding");
+	got = 0;
+	try { ThrowErrorPointer(9); }
+	catch (CppError* e) { got = e->code; }
+	Check(got == 9, "a C++ struct pointer is caught as a pointer");
+	got = 0;
+	try { ThrowInt(1); }
+	catch (...) { got = 1; }
+	Check(got == 1, "catch (...) catches a C++ exception");
+}
+
+void C4ThrowsCppCatches() {
+	Check(CatchFromCallback(Returns, 4) == 5, "no throw: the callback result comes back");
+	Check(CatchFromCallback(ThrowsInt, 4) == 40, "a C4 int32 is caught by C++ catch (int)");
+	Check(CatchFromCallback(ThrowsCppError, 4) == 400, "a C4 CppError is caught by C++ catch (const CppError&)");
+	Check(CatchFromCallback(ThrowsOther, 4) == -1, "C++ catch (...) catches a C4 double");
+}
+
+void CppCallsC4Interfaces() {
+	Source* s = new Source();
+	IProvider* p = s;
+	ICounter* c = s;
+	Check(UseProvider(p) == 71, "C++ calls a C4 method returning a struct, then a second slot");
+	Check(UseCounter(c, 3) == 12, "C++ calls through the second interface (a this-adjusting thunk)");
+}
+
+int32 main() {
+	CppThrowsC4Catches();
+	C4ThrowsCppCatches();
+	CppCallsC4Interfaces();
+	if (g_failures != 0) printf("CppExceptionsAndInterfaces failures: %d\n", g_failures);
+	return g_failures;
+}

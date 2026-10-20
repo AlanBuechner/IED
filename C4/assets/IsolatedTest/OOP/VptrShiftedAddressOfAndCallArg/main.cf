@@ -1,0 +1,19 @@
+// A non-polymorphic base inside a polymorphic derived type sits after the vptr: the upcast at an address-of, as a
+// call argument and the downcast back all move by it. main returns the failed step.
+class Base { public int32 b; }
+class Derived : public Base {
+	public int32 d;
+public:
+	[operator("create")] public void Init(int32 x, int32 y) { this->b = x; this->d = y; }
+	public virtual int32 Who() { return 1; }
+}
+int32 ReadB(Base* p) { return p->b; }
+int32 main() {
+	Derived dv = Derived(42, 7);
+	Base* bp = &dv;
+	if (bp->b != 42) return 1;
+	if (ReadB(&dv) != 42) return 2;
+	Derived* back = (Derived*)bp;
+	if (back->d != 7) return 3;
+	return 0;
+}

@@ -1,0 +1,51 @@
+// Non-literal array sizes in template bodies must lay out at their TRUE element count.
+// Regression: HIR re-derives types for template bodies (semantic suppresses the recorded-type
+// cache there), and its array branch only folded LITERAL sizes - a non-type param, const name,
+// or arithmetic size silently became element count 1 (wrong alloca + wrong sizeof). Now HIR folds
+// the size with the shared ConstEvaluator, so these lay out correctly.
+
+const int32 kCount = 5;
+
+template<int N>
+int32 SumLocalArray()
+{
+    int32[N] arr;              // non-type param size
+    for (int32 i = 0; i < N; ++i)
+        arr[i] = i * 2;
+    if (sizeof(arr) != N * 4) return 10 + N;   // layout must be N elements, not 1
+    int32 total = 0;
+    for (int32 i = 0; i < N; ++i)
+        total += arr[i];
+    return total;              // 0+2+4+..+2(N-1) = N*(N-1)
+}
+
+template<int N>
+int32 SumConstBoundedArray()
+{
+    int32[kCount] arr;         // const-name size inside a template body
+    for (int32 i = 0; i < kCount; ++i)
+        arr[i] = i + N;
+    if (sizeof(arr) != kCount * 4) return 20;
+    int32 total = 0;
+    for (int32 i = 0; i < kCount; ++i)
+        total += arr[i];
+    return total;              // sum_{i=0..4}(i+N) = 10 + 5N
+}
+
+template<int N>
+struct TaggedBuf
+{
+    int32[N] data;             // non-type param size as a struct field (layout must be N elements)
+    int32 Size() { return sizeof(data); }   // sizeof of a member field in a template method
+};
+
+int32 main()
+{
+    if (SumLocalArray<4>() != 12) return 1;   // N*(N-1) = 4*3
+    if (SumLocalArray<7>() != 42) return 2;   // 7*6
+    if (SumConstBoundedArray<3>() != 25) return 3;  // 10 + 5*3
+    TaggedBuf<6> b;
+    if (b.Size() != 24) return 4;             // sizeof(member field) = 6 * 4
+    if (sizeof(TaggedBuf<6>) != 24) return 5; // single int32[6] field -> exactly 24 bytes
+    return 0;
+}

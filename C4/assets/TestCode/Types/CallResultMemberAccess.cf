@@ -1,0 +1,42 @@
+// Types - Call-Result Member Access Tests (implementation)
+include "../Framework/Assert.ch"
+include "CallResultMemberAccess.ch"
+
+// Regression lock for the user's motivating pattern: getData().someNumber. A function call result
+// is "collapsed down to a type at a memory address on the stack", so member access through it must
+// work identically whether the receiver is reached directly or via a call - no special handling per
+// return-kind. This locks READS of (nested and top-level) fields through a by-value call result:
+// the temporary must materialize with its real data in every value position. (WRITES through a
+// by-value temporary are rejected with a clear diagnostic - see NegativeTest; reference-returning
+// calls are genuine lvalues and remain writable.)
+struct CRMA_Inner { public int32 n; }
+struct CRMA_Outer { public CRMA_Inner inner; public float f; }
+
+CRMA_Outer CRMA_GetVal() { CRMA_Outer o; o.inner.n = 11; o.f = 2.5f; return o; }
+
+// The by-REFERENCE counterpart: a call returning `T&` is a genuine lvalue, so WRITES through it
+// must persist to the referent - this is the user's exact motivating pattern (getData().someNumber).
+// No special handling per return-kind: the reference collapses to "a type at a memory address on the
+// stack", so top-level, nested, and compound writes all work identically.
+CRMA_Outer gCRMA;
+CRMA_Outer& CRMA_GetRef() { return gCRMA; }
+
+void TestCallResultMemberAccess() {
+	// READ a nested field through a by-value call result: the temporary must carry real data.
+	AssertIntEquals(11, CRMA_GetVal().inner.n, "read nested field of by-value call result");
+	// READ a top-level field through a by-value call result.
+	AssertFloatEquals(2.5f, CRMA_GetVal().f, "read top-level field of by-value call result");
+	// READ the same fields again after other statements: the temporary is re-materialized each use
+	// and must not be corrupted by intervening reads (guards against a shared/leaked slot).
+	int32 probe = CRMA_GetVal().inner.n;
+	AssertIntEquals(11, probe, "by-value call-result read into a local keeps real data");
+
+	// WRITES through a by-reference call result must persist to the referent (the user's pattern).
+	CRMA_GetRef().f = 7.5f;
+	AssertFloatEquals(7.5f, gCRMA.f, "top-level write through by-ref call persists");
+	CRMA_GetRef().inner.n = 42;
+	AssertIntEquals(42, gCRMA.inner.n, "nested write through by-ref call persists");
+	// Compound assignment through the reference is a read-modify-write on the same lvalue.
+	CRMA_GetRef().inner.n += 3;
+	AssertIntEquals(45, gCRMA.inner.n, "compound assign through by-ref call persists");
+}

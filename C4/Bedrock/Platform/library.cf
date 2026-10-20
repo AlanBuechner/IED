@@ -1,0 +1,24 @@
+include "library.ch"
+
+[link("c4_library_open")] void* c4_library_open(const char* path, void* error, int64 errorCapacity);
+[link("c4_library_find")] void* c4_library_find(void* library, const char* symbol);
+[link("c4_library_close")] void c4_library_close(void* library);
+
+namespace Platform
+{
+	// The longest error text kept: the system's message and its code.
+	const int32 kLibraryErrorBytes = 512;
+
+	[operator("create")] void Library::Init(const char* path) {
+		char[kLibraryErrorBytes] text;
+		handle = c4_library_open(path, (void*)&text[0], kLibraryErrorBytes);
+		if (!handle) error = Core::String(&text[0]);
+	}
+
+	void* Library::Find(const char* symbol) const { return c4_library_find(handle, symbol); }
+
+	void Library::Close() {
+		if (handle) c4_library_close(handle);
+		handle = nullptr;
+	}
+}

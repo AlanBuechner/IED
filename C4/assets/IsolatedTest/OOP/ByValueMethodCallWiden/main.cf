@@ -1,0 +1,29 @@
+// By-value METHOD call returning an unsigned type, widened to a larger signed type, must
+// zero-extend (zext), not sign-extend (sext). Before the fix, by-value method-call HIR nodes were
+// left untyped, so codegen defaulted the missing signedness to SIGNED and emitted sext - any uint32
+// result >= 0x80000000 came out negative. Free functions of the identical shape were always correct
+// (zext), which is the oracle here: the method call must match the free function's value.
+struct Gen {
+    public uint32 v;
+    public uint32 Get() { return v; }
+};
+
+uint32 MakeId() { return 0x9C6F9293; }
+
+int32 main() {
+    Gen g;
+    g.v = 0x9C6F9293;
+
+    int64 x = (int64)g.Get();   // explicit cast of a by-value method call
+    int64 y = g.Get();          // implicit widening of a by-value method call
+    int64 f = (int64)MakeId();  // free-function control (was always zext)
+
+    if (f <= 0) return 10;      // oracle sanity: the free function must be positive
+    if (x <= 0) return 1;       // method-call explicit cast must be positive (zext, not sext)
+    if (y <= 0) return 2;       // method-call implicit widen must be positive (zext, not sext)
+    if (x != y) return 3;       // both forms must agree
+    if (x != f) return 4;       // the method call must match the free-function value
+
+    printf("ByValueMethodCallWiden OK x=%lld\n", x);
+    return 0;
+}

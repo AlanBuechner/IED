@@ -1,0 +1,75 @@
+// Parity - Phase 0 parity probe suite (implementation). See Parity.ch for the purpose.
+include "../Framework/Assert.ch"
+include "Parity.ch"
+
+// File-scope types/enums/namespaces: C3 (a type declared inside a function body) is [NEW], so these
+// must live here, not in TestParity. Prefixed Parity_ to avoid colliding with other e2e tests.
+
+// A5 - sizeof of a template instantiation folds in a const initializer (order-independent).
+template<T> struct Parity_V2 { public T x; public T y; };
+const int32 PARITY_SZ = sizeof(Parity_V2<float>);
+
+// B2 - method overloads: same name, different arity.
+struct Parity_M { public int32 F(int32 a) { return a; } public int32 F(int32 a, int32 b) { return a + b; } };
+
+// C1 - a local shadows the file-scope global of the same name.
+int32 parity_g_val = 100;
+
+// G3 - enum members are constants usable in const expressions.
+enum Parity_Color { Parity_Red = 3, Parity_Green = 6 };
+
+// A9 - pointer to a forward-declared type before its definition needs no layout.
+struct Parity_Fwd;
+struct Parity_H { public Parity_Fwd* p; };
+struct Parity_Fwd { public int32 v; };
+
+// D1 - open namespaces merge: two blocks add members without conflict.
+namespace ParityMath { int32 A() { return 1; } }
+namespace ParityMath { int32 B() { return 2; } }
+
+// E1 - virtual dispatch through a base pointer.
+class Parity_Base { public virtual int32 Kind() { return 0; } };
+class Parity_Derived : Parity_Base { public override int32 Kind() { return 7; } };
+
+// D6 - qualified access through nested namespaces.
+namespace ParityOuter { namespace ParityInner { int32 V() { return 42; } } }
+
+void TestParity() {
+	// A5 - sizeof(template instantiation) const-folds to the concrete size.
+	AssertIntEquals(8, PARITY_SZ, "A5 sizeof(V2<float>) const init folds");
+
+	// B2 - method overloads resolve by arity.
+	Parity_M m;
+	AssertIntEquals(5, m.F(5), "B2 method overload 1-arg");
+	AssertIntEquals(5, m.F(2, 3), "B2 method overload 2-arg");
+
+	// C1 - a local shadows the global inside its block; the global is untouched after it ends.
+	{
+		int32 parity_g_val = 9;
+		AssertIntEquals(9, parity_g_val, "C1 local shadow write");
+	}
+	AssertIntEquals(100, parity_g_val, "C1 global untouched after block");
+
+	// G3 - an enum member is a constant in a const expression.
+	const int32 PARITY_C = Parity_Green + 1;
+	AssertIntEquals(7, PARITY_C, "G3 enum member as const");
+
+	// A9 - pointer to a forward-declared type, used before the definition appears.
+	Parity_Fwd f;
+	f.v = 5;
+	Parity_H h;
+	h.p = &f;
+	AssertIntEquals(5, h.p->v, "A9 fwd-decl pointer before definition");
+
+	// D1 - open namespace: both members from the two blocks are visible and distinct.
+	AssertIntEquals(1, ParityMath::A(), "D1 open namespace member A");
+	AssertIntEquals(2, ParityMath::B(), "D1 open namespace member B");
+
+	// E1 - virtual dispatch through a base pointer reaches the derived override.
+	Parity_Base* d = new Parity_Derived();
+	AssertIntEquals(7, d->Kind(), "E1 virtual dispatch");
+	delete d;
+
+	// D6 - qualified access walks nested namespace layers.
+	AssertIntEquals(42, ParityOuter::ParityInner::V(), "D6 nested namespace qualified call");
+}

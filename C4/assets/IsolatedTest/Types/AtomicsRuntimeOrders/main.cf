@@ -1,0 +1,31 @@
+// The atomic intrinsics with an order known only at run time (D-60): each order a caller passes works, and one
+// the operation cannot use acts as SeqCst. main returns the failures.
+int64 LoadWith(int64* p, MemoryOrder order) { return atomic_load(p, order); }
+void StoreWith(int64* p, int64 v, MemoryOrder order) { atomic_store(p, v, order); }
+int64 AddWith(int64* p, int64 v, MemoryOrder order) { return atomic_fetch_add(p, v, order); }
+bool SwapIfWith(int64* p, int64* expected, int64 desired, MemoryOrder success, MemoryOrder failure) {
+	return atomic_compare_exchange(p, expected, desired, success, failure);
+}
+void FenceWith(MemoryOrder order) { atomic_fence(order); }
+
+MemoryOrder[5] g_orders = { MemoryOrder::Relaxed, MemoryOrder::Acquire, MemoryOrder::Release, MemoryOrder::AcqRel, MemoryOrder::SeqCst };
+
+int32 main() {
+	int32 failures = 0;
+	int64 value = 0;
+	for (int32 i = 0; i < 5; i++) {
+		MemoryOrder order = g_orders[i];
+		StoreWith(&value, i * 10, order);       // Acquire and AcqRel act as SeqCst for a store
+		if (LoadWith(&value, order) != i * 10) failures++;
+		if (AddWith(&value, 1, order) != i * 10 || value != i * 10 + 1) failures++;
+		FenceWith(order);                       // Relaxed acts as SeqCst for a fence
+		for (int32 j = 0; j < 5; j++) {
+			int64 expected = i * 10 + 1;
+			if (!SwapIfWith(&value, &expected, 7, order, g_orders[j]) || value != 7) failures++;
+			expected = 99;
+			if (SwapIfWith(&value, &expected, 8, order, g_orders[j]) || expected != 7) failures++;
+			value = i * 10 + 1;
+		}
+	}
+	return failures;
+}

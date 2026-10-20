@@ -1,0 +1,24 @@
+// `Name<Args>(...)` in an expression constructs the template instance (BUG-081).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T>
+class Box {
+	public T value;
+	public int32 creates;
+	[operator("create")] public void Init(T v) { value = v; creates = creates + 1; }
+}
+
+int32 Unbox(Box<int32> b) { return b.value; }
+
+int32 main() {
+	Box<int32> a = Box<int32>(5);
+	Check(a.value == 5 && a.creates == 1, "the instance's create runs");
+	Check(Unbox(Box<int32>(6)) == 6, "a template instance temporary as an argument");
+	Box<float> f = Box<float>(1.5f);
+	Check(f.value == 1.5f, "another instance of the same template");
+	return g_failures;
+}

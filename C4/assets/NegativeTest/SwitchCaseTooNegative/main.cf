@@ -1,0 +1,1 @@
+int32 main() { int8 i = 0; switch (i) { case -129: return 0; default: break; } return 1; }

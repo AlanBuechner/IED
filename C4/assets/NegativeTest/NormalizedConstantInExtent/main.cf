@@ -1,0 +1,3 @@
+const unorm8 kU = 4;
+int32[kU] a;
+int32 main() { return 0; }

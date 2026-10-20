@@ -1,0 +1,77 @@
+// A thrown object is caught by its own type or any unambiguous base or interface (D-13), by value or
+// by reference; a thrown object pointer is caught as a pointer to any base. The first matching clause
+// in source order handles it.
+interface IError { int32 Code(); }
+class Error { public int32 code; public virtual int32 Kind() { return 1; } }
+class IoError : Error, IError {
+	[operator("create")] public void Init(int32 c) { code = c; }
+	public override int32 Kind() { return 2; }
+	public int32 Code() { return code; }
+}
+class DiskError : IoError {
+	[operator("create")] public void Init(int32 c) { IoError::Init(c); }
+	public override int32 Kind() { return 3; }
+}
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 CatchBaseByValue() {
+	try { throw DiskError(7); }
+	catch (Error e) { return e.code; }
+	return -1;
+}
+
+int32 CatchBaseByReference() {
+	try { throw DiskError(8); }
+	catch (Error& e) { return e.Kind() * 100 + e.code; }
+	return -1;
+}
+
+int32 CatchInterfaceByReference() {
+	try { throw DiskError(9); }
+	catch (IError& e) { return e.Code(); }
+	return -1;
+}
+
+int32 FirstMatchWins() {
+	try { throw DiskError(1); }
+	catch (IoError& e) { return 10; }
+	catch (DiskError& e) { return 20; }
+	return -1;
+}
+
+int32 UnrelatedClauseSkipped() {
+	try { throw IoError(4); }
+	catch (DiskError& e) { return 30; }
+	catch (Error& e) { return 40 + e.code; }
+	return -1;
+}
+
+int32 CatchPointerByBase() {
+	DiskError* thrown = new DiskError(5);
+	try { throw thrown; }
+	catch (IError* e) { return e->Code() * 10 + ((void*)e != (void*)thrown ? 1 : 0); }
+	return -1;
+}
+
+int32 CatchPointerAsVoid() {
+	try { throw new IoError(6); }
+	catch (void* p) { return p != null ? 1 : 0; }
+	return -1;
+}
+
+int32 main() {
+	Check(CatchBaseByValue() == 7, "catch (Base) copies the base sub-object");
+	Check(CatchBaseByReference() == 308, "catch (Base&) sees the thrown object and its dynamic type");
+	Check(CatchInterfaceByReference() == 9, "catch (Interface&) gets the interface sub-object");
+	Check(FirstMatchWins() == 10, "the first matching clause handles the exception");
+	Check(UnrelatedClauseSkipped() == 44, "a clause for a more derived type does not match a base");
+	Check(CatchPointerByBase() == 51, "a thrown pointer is caught as an adjusted base pointer");
+	Check(CatchPointerAsVoid() == 1, "a thrown pointer is caught as void*");
+	if (g_failures != 0) printf("CatchByBase failures: %d\n", g_failures);
+	return g_failures;
+}

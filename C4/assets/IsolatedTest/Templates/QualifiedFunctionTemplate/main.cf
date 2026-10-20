@@ -1,0 +1,22 @@
+// A function template declared in a namespace is called by its qualified name from outside, with written or
+// deduced arguments, and by its bare name inside the namespace.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+namespace Math {
+	template<T> T Twice(T v) { return v + v; }
+	template<T> T Quad(T v) { return Twice(Twice(v)); }
+}
+
+template<T> T Twice(T v) { return v * (T)10; } // a same-named global template stays separate
+
+int32 main() {
+	Check(Math::Twice<int32>(4) == 8, "qualified, with written arguments");
+	Check(Math::Twice(2.5f) == 5.0f, "qualified, deduced");
+	Check(Math::Quad(3) == 12, "bare name inside the namespace finds the namespace's template");
+	Check(Twice(3) == 30, "the global template of the same name");
+	return g_failures;
+}

@@ -1,0 +1,7 @@
+// B22: -Werror makes a warning an error, so this build fails.
+int64 Wide() { return 70000; }
+
+int32 main() {
+	int16 narrow = Wide();
+	return narrow;
+}

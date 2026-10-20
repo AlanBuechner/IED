@@ -1,0 +1,16 @@
+struct Vec {
+	int32 x;
+	[operator("create")] public void Init(int32 v) { this->x = v; }
+	[operator("+")] public Vec Add(const Vec& o) { Vec r; r.Init(this->x + o.x); return r; }
+}
+template<T> T Sum(T a, T b) { return a + b; }
+int32 main() {
+	Vec a; a.Init(1);
+	Vec b; b.Init(2);
+	Vec s = Sum<Vec>(a, b);
+	if (s.x != 3) return 1;
+	int32 i = Sum<int32>(4, 5);
+	if (i != 9) return 2;
+	printf("TPL OPERATOR OK\n");
+	return 0;
+}

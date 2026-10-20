@@ -1,0 +1,49 @@
+// The atomic intrinsics on one thread (D-60): loads, stores, exchanges, compare-exchanges that succeed and fail,
+// read-modify-writes, fences, on integers, bools, enums, pointers and floats. main returns the failures.
+enum class Phase : uint8 { Idle, Busy = 200 }
+
+int32 main() {
+	int32 failures = 0;
+	int64 counter = 5;
+	atomic_store(&counter, 10, MemoryOrder::Release);
+	if (atomic_load(&counter, MemoryOrder::Acquire) != 10) failures += 1;
+	if (atomic_fetch_add(&counter, 5, MemoryOrder::Relaxed) != 10 || counter != 15) failures += 1;
+	if (atomic_fetch_sub(&counter, 3, MemoryOrder::SeqCst) != 15 || counter != 12) failures += 1;
+	if (atomic_exchange(&counter, 40, MemoryOrder::AcqRel) != 12 || counter != 40) failures += 1;
+
+	int64 expected = 40;
+	if (!atomic_compare_exchange(&counter, &expected, 41, MemoryOrder::SeqCst, MemoryOrder::Relaxed) || counter != 41) failures += 1;
+	expected = 7;
+	if (atomic_compare_exchange(&counter, &expected, 99, MemoryOrder::AcqRel, MemoryOrder::Acquire) || expected != 41 || counter != 41) failures += 1;
+	while (!atomic_compare_exchange_weak(&counter, &expected, expected + 1, MemoryOrder::SeqCst, MemoryOrder::SeqCst)) { }
+	if (counter != 42) failures += 1;
+
+	uint8 bits = 0b1100;
+	if (atomic_fetch_and(&bits, 0b1010, MemoryOrder::SeqCst) != 0b1100 || bits != 0b1000) failures += 1;
+	if (atomic_fetch_or(&bits, 0b0001, MemoryOrder::SeqCst) != 0b1000 || bits != 0b1001) failures += 1;
+	if (atomic_fetch_xor(&bits, 0b1111, MemoryOrder::SeqCst) != 0b1001 || bits != 0b0110) failures += 1;
+
+	bool ready = false;
+	atomic_store(&ready, true, MemoryOrder::Release);
+	if (!atomic_load(&ready, MemoryOrder::Acquire)) failures += 1;
+	bool wasReady = true;
+	if (!atomic_compare_exchange(&ready, &wasReady, false, MemoryOrder::SeqCst, MemoryOrder::SeqCst) || ready) failures += 1;
+
+	Phase phase = Phase::Idle;
+	if (atomic_exchange(&phase, Phase::Busy, MemoryOrder::SeqCst) != Phase::Idle || (int32)phase != 200) failures += 1;
+
+	int32 first = 1;
+	int32 second = 2;
+	int32* slot = &first;
+	int32* previous = atomic_exchange(&slot, &second, MemoryOrder::SeqCst);
+	if (previous != &first || *atomic_load(&slot, MemoryOrder::SeqCst) != 2) failures += 1;
+
+	float level = 1.5f;
+	if (atomic_exchange(&level, 2.5f, MemoryOrder::SeqCst) != 1.5f || atomic_load(&level, MemoryOrder::Relaxed) != 2.5f) failures += 1;
+	float guess = 2.5f;
+	if (!atomic_compare_exchange(&level, &guess, 3.5f, MemoryOrder::SeqCst, MemoryOrder::SeqCst) || level != 3.5f) failures += 1;
+
+	atomic_fence(MemoryOrder::SeqCst);
+	atomic_fence(MemoryOrder::Acquire);
+	return failures;
+}

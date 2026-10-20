@@ -1,0 +1,10 @@
+struct V2 {
+    union { struct { float x; float y; } struct { float r; float g; } float[2] data; };
+}
+int32 main() {
+    V2 v;
+    v.x = 1.0f; v.y = 2.0f;
+    if (v.r != 1.0f || v.data[1] != 2.0f) return 1;
+    printf("F4 swizzle OK\n");
+    return 0;
+}

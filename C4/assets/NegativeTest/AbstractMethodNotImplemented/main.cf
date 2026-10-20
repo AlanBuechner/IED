@@ -1,0 +1,4 @@
+class Shape {
+	public abstract float Area();
+}
+int32 main() { Shape* s = new Shape(); return 0; }

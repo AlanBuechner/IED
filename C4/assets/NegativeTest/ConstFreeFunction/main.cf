@@ -1,0 +1,2 @@
+int32 Value() const { return 1; }
+int32 main() { return Value(); }

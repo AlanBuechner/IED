@@ -1,0 +1,9 @@
+template<T> struct Box {
+	public T value;
+	public void Take(Box<T>* other);
+}
+template<T> public void Box::Take(Box<int32>* other) { }
+int32 main() {
+	Box<float> b;
+	return 0;
+}

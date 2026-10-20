@@ -1,0 +1,41 @@
+// Template parameters may have defaults (D-18): omitted trailing arguments take them, a default may name
+// an earlier parameter, and deduction leaves a parameter it cannot decide to its default.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T = int32, int32 N = 4>
+struct Buf {
+	public T[N] data;
+	public int32 Count() { return N; }
+}
+
+template<T, U = T*>
+struct Holder {
+	public T value;
+	public U link;
+}
+
+template<T = int32> T Zero() { return (T)0; }
+template<T> int32 SizeOf(T v) { return sizeof(T); }
+template<T, int32 Times = 2> T Repeat(T v) { return v * (T)Times; }
+
+int32 main() {
+	Buf<> a;
+	Check(sizeof(a) == 16 && a.Count() == 4, "every default");
+	Buf<float> b;
+	Check(sizeof(b) == 16 && b.Count() == 4, "the trailing default");
+	Buf<int64, 2> c;
+	Check(sizeof(c) == 16 && c.Count() == 2, "no default used");
+	Holder<int32> h;
+	int32 x = 9;
+	h.link = &x;
+	Check(*h.link == 9 && SizeOf(h.link) == 8, "a default names an earlier parameter");
+	Check(Zero() == 0 && SizeOf(Zero()) == 4, "a default for a parameter nothing deduces");
+	Check(Zero<float>() == 0.0f, "an explicit argument over the default");
+	Check(Repeat(4) == 8, "deduced T, defaulted Times");
+	Check(Repeat<int32, 3>(4) == 12, "both explicit");
+	return g_failures;
+}

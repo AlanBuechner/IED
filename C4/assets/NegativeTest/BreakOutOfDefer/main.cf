@@ -1,0 +1,6 @@
+int32 main() {
+	for (int32 i = 0; i < 3; i++) {
+		defer { break; }
+	}
+	return 0;
+}

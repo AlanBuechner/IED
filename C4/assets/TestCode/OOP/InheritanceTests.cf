@@ -1,0 +1,122 @@
+// Inheritance and Polymorphism Tests - Implementation
+include "InheritanceTests.ch"
+include "../Framework/Assert.ch"
+
+// Shape base class implementations
+void Shape::Init() {
+	x = 0.0f;
+	y = 0.0f;
+}
+
+void Shape::Init(float nx, float ny) {
+	x = nx;
+	y = ny;
+}
+
+float Shape::GetArea() {
+	// Base class returns 0 - should be overridden
+	return 0.0f;
+}
+
+// Circle implementations
+void Circle::Init() {
+	x = 0.0f;
+	y = 0.0f;
+	radius = 0.0f;
+}
+
+void Circle::Init(float cx, float cy, float r) {
+	x = cx;
+	y = cy;
+	radius = r;
+}
+
+float Circle::GetArea() {
+	// PI * r^2
+	return 3.14159265f * radius * radius;
+}
+
+// Rectangle implementations
+void Rectangle::Init() {
+	x = 0.0f;
+	y = 0.0f;
+	width = 0.0f;
+	height = 0.0f;
+}
+
+void Rectangle::Init(float x, float y, float w, float h) {
+	Shape::Init(x, y); // Call base constructor explicitly
+	width = w;
+	height = h;
+}
+
+float Rectangle::GetArea() {
+	return width * height;
+}
+
+// Polymorphic function - takes Shape pointer and calls virtual method
+float CalculateArea(Shape* shape) {
+	if (shape == 0) {
+		return 0.0f;
+	}
+	return shape->GetArea(); // Virtual dispatch through base pointer
+}
+
+void TestInheritanceBasic() {
+	printf("=== Inheritance Basic Tests ===\\n");
+	
+	// Test that derived class has base class fields
+	Circle c;
+	c.Init(1.0f, 2.0f, 3.0f);
+	
+	AssertFloatEquals(1.0f, c.x, "Circle inherits x from Shape");
+	AssertFloatEquals(2.0f, c.y, "Circle inherits y from Shape");
+	AssertFloatEquals(3.0f, c.radius, "Circle has own radius field");
+	
+	// Rectangle inheritance
+	Rectangle r;
+	r.Init(0.0f, 0.0f, 4.0f, 5.0f);
+	
+	AssertFloatEquals(4.0f, r.width, "Rectangle has width");
+	AssertFloatEquals(5.0f, r.height, "Rectangle has height");
+}
+
+void TestVirtualDispatch() {
+	printf("=== Virtual Dispatch Tests ===\\n");
+	
+	// Direct call on derived type - should call overridden method
+	Circle c;
+	c.Init(0.0f, 0.0f, 5.0f);
+	float circleArea = c.GetArea();
+	AssertFloatEquals(78.539816f, circleArea, "Circle::GetArea() called directly");
+	
+	Rectangle r;
+	r.Init(0.0f, 0.0f, 4.0f, 5.0f);
+	float rectArea = r.GetArea();
+	AssertFloatEquals(20.0f, rectArea, "Rectangle::GetArea() called directly");
+	
+	// Base class default returns 0
+	Shape s;
+	s.Init(0.0f, 0.0f);
+	float baseArea = s.GetArea();
+	AssertFloatEquals(0.0f, baseArea, "Shape::GetArea() returns 0");
+}
+
+void TestPolymorphism() {
+	printf("=== Polymorphism Tests ===\\n");
+	
+	// Call virtual method through base pointer - requires vtable dispatch
+	Circle c;
+	c.Init(0.0f, 0.0f, 5.0f);
+	float area = CalculateArea(&c);
+	AssertFloatEquals(78.539816f, area, "Virtual dispatch: Circle through Shape*");
+	
+	Rectangle r;
+	r.Init(0.0f, 0.0f, 4.0f, 5.0f);
+	area = CalculateArea(&r);
+	AssertFloatEquals(20.0f, area, "Virtual dispatch: Rectangle through Shape*");
+	
+	// Null pointer safety
+	float nullArea = CalculateArea(0);
+	AssertFloatEquals(0.0f, nullArea, "Null pointer returns 0");
+}

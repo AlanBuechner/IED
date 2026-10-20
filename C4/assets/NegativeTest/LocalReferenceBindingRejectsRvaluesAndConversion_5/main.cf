@@ -1,0 +1,2 @@
+struct S { public int32 x; }
+int main() { S s; const S& r = s; r.x = 9; return 0; }

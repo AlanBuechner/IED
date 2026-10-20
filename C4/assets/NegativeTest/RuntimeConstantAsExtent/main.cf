@@ -1,0 +1,4 @@
+int32 Seed() { return 4; }
+const int32 kN = Seed();
+int32[kN] arr;
+int32 main() { return 0; }

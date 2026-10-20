@@ -1,0 +1,30 @@
+int32 Apply(funcptr<int32(int32,int32)> f, int32 a, int32 b){ return f(a,b); }
+void LogIt(funcptr<void(int32)> f, int32 v){ f(v); }
+int32 main() {
+	// Plan's exact example: explicit return type.
+	funcptr<float(float,float)> add = [](float a, float b) -> float { return a + b; };
+	if ((int32)(add(2.0f, 3.0f)*10) != 50) return 1;
+
+	// int lambda via funcptr<int32(int32,int32)>.
+	funcptr<int32(int32,int32)> mul = [](int32 a, int32 b) -> int32 { return a * b; };
+	if (mul(6, 7) != 42) return 2;
+
+	// Passed as an argument to another function.
+	if (Apply(mul, 8, 9) != 72) return 3;
+
+	// void-returning lambda.
+	int32 captured = 0;
+	LogIt([](int32 v) { printf("LOG %d\n", v); }, 123);
+
+	// No-parameter lambda.
+	funcptr<int32()> fourty = []() -> int32 { return 40 + 2; };
+	if (fourty() != 42) return 4;
+
+	// Multiple lambdas in one function.
+	funcptr<int32(int32)> inc = [](int32 x) -> int32 { return x + 1; };
+	funcptr<int32(int32)> dec = [](int32 x) -> int32 { return x - 1; };
+	if (inc(5) != 6 || dec(5) != 4) return 5;
+
+	printf("LAMBDA OK\n");
+	return 0;
+}

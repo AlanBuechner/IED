@@ -1,0 +1,2 @@
+int32[1 << 64] tooWide;
+int32 main() { return 0; }

@@ -1,0 +1,4 @@
+struct Inner { public int32 n; }
+struct Outer { public Inner inner; public float f; }
+Outer G() { Outer o; o.inner.n = 11; return o; }
+int32 main(){ G().inner.n = 42; return 0; }

@@ -1,0 +1,59 @@
+// An identity registered under several tags keeps each registration (docs/runtime/04 section 5): the latest is the
+// one found, unloading its tag brings the one it hid back, unloading a tag behind it removes only that one, and a
+// script never takes a host's type away. Handles stay valid throughout.
+extern "c" include "script.h"
+extern "c" source "script.c"
+include "bedrock.ch"
+
+namespace Host { class Thing { public int32 v; } }
+
+int64 VersionOf(const char* type)
+{
+	Reflection::Type t = Reflection::FindType(type);
+	if (!t.IsValid()) return -1;
+	return t.FindAnnotation("Version").IntArg(0);
+}
+
+int64 FunctionVersion()
+{
+	Reflection::Function f = Reflection::FindFunction("Script::Tick");
+	return f.IsValid() ? f.FindAnnotation("Version").IntArg(0) : -1;
+}
+
+int32 main()
+{
+	int32 failures = 0;
+	Host::Thing thing;
+	thing.v = 1;
+
+	ScriptRegisterUnder("a", 1);
+	Reflection::Type enemy = Reflection::FindType("Script::Enemy");
+	ScriptRegisterUnder("b", 2);
+	if (VersionOf("Script::Enemy") != 2 || FunctionVersion() != 2) failures++;
+	if (enemy.FindAnnotation("Version").IntArg(0) != 2) failures++;           // the same handle sees the latest
+	if (Reflection::UnloadSource("b") != 3) failures++;
+	if (VersionOf("Script::Enemy") != 1 || FunctionVersion() != 1) failures++;  // a's came back
+	if ((int32*)Reflection::FindVariable("Script::g_value").Address() != ScriptValueOf(1)) failures++;
+	if (enemy.FindAnnotation("Version").IntArg(0) != 1) failures++;
+
+	ScriptRegisterUnder("b", 2);
+	ScriptRegisterUnder("c", 3);
+	if (Reflection::UnloadSource("b") != 0) failures++;                           // b was behind c: c still holds them
+	if (VersionOf("Script::Enemy") != 3) failures++;
+	if (Reflection::UnloadSource("c") != 3) failures++;
+	if (VersionOf("Script::Enemy") != 1) failures++;                             // b's went with b, so a's is next
+
+	ScriptRegisterUnder("a", 2);                                                 // the same tag replaces its own
+	if (VersionOf("Script::Enemy") != 2) failures++;
+	if (Reflection::UnloadSource("a") != 3) failures++;
+	if (Reflection::FindType("Script::Enemy").IsValid() || Reflection::FindFunction("Script::Tick").IsValid()) failures++;
+
+	Reflection::Type hostThing = Reflection::FindType("Host::Thing");
+	if (!hostThing.IsValid() || hostThing.FieldCount() != 1) failures++;
+	ShadowHostType("a");
+	if (Reflection::FindType("Host::Thing").FieldCount() != 0) failures++;
+	if (Reflection::UnloadSource("a") != 1) failures++;
+	if (!Reflection::FindType("Host::Thing").IsValid() || hostThing.FieldCount() != 1 || hostThing.SizeOf() != 4) failures++;
+	if (failures == 0) printf("STACKED REGISTRATIONS OK\n");
+	return failures;
+}

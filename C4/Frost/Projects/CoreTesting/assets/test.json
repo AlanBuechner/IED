@@ -1,0 +1,16 @@
+{
+	"name": "test",
+	"value": 42,
+	"enabled": true,
+	"nested": {
+		"innerValue": 3.14,
+		"innerArray": [1, 2, 3]
+	},
+	"arrayOfObjects": [
+		{"a": "hello"},
+		{"b": "world"}
+	],
+	"emptyObject": {},
+	"emptyArray": [],
+	"nilValue": null
+}

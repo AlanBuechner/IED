@@ -1,0 +1,7 @@
+class Base { public virtual int32 F() { return 1; } }
+class Derived : Base { }
+Base Make() { Base b; return b; }
+int32 main() {
+	Derived& d = Make() as Derived&;
+	return 0;
+}

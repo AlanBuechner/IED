@@ -1,0 +1,336 @@
+# Test suites
+
+The project rule (AGENTS.md, LongTermPlan item 2) is extremely thorough testing: every feature, every
+way features combine, every error path, also across C/C++ interop, with errors that are useful and never
+a compiler crash. No duplicate tests; a failing test is fixed, never deleted, commented out or weakened.
+
+All runners expect the compiler at `bin/Development-windows-x64/C4/C4.exe` (build it first, see
+[04-building-the-compiler.md](04-building-the-compiler.md)) and write scratch output under
+`assets/build-output/<suite>/` (gitignored). Nothing test-related goes in the repo root.
+
+`nuke gates` from the repository root (the folder above the C4 tree) is the one command that builds the compiler
+and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and `-O2`), IsolatedTest (`-O0` and
+`-O2`), RuntimeTest, ScriptTest (`-O0` and `-O2`), ToolsTest and Bedrock (the steps are in `C4/nuke.toml`).
+`nuke test` there runs C4Testing alone (`nuke test C4 -- --filter "Lexer.*"`).
+
+---
+
+## 1. Overview
+
+| Suite | Location | What it proves | Run |
+|---|---|---|---|
+| C4Testing | `C4Testing/src/Tests/` | C++ unit tests of the compiler library: lexer, source manager, parser, ProgramModel, overloads, HIR lowering, in-process codegen | `nuke test` (repository root), or `python Frost/Build.py -test -c Development -a x64 -p <C4 root>` |
+| TestCode (e2e) | `assets/TestCode/` | one large C4 program covering the language end to end, run at `-O0` and `-O2` | `assets/TestCode/RunTests.ps1` |
+| NegativeTest | `assets/NegativeTest/` | invalid programs fail with the exact, actionable diagnostic | `assets/NegativeTest/RunTests.ps1 [-Filter x] [-O2]` |
+| IsolatedTest | `assets/IsolatedTest/` | one folder = one feature or one historical bug, including interop | `assets/IsolatedTest/RunTests.ps1 [-Filter x] [-O2] [-DebugInfo]` |
+| RuntimeTest | `assets/RuntimeTest/` | small runtime behaviours (printf, struct-return ABI) compile and exit 0 | `assets/RuntimeTest/RunTests.ps1 [-Filter x]` |
+| StressTest | `assets/StressTest/Dx12Game/` | a large DX12 + Win32 game program compiles clean | `assets/StressTest/RunTests.ps1 [-Run]` |
+| ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2` | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2]` |
+| ToolsTest | `assets/ToolsTest/` | the install and a toolchain outside the repository, every compiler flag, `nuke toolchain install` / `nuke init` / `nuke run` | `assets/ToolsTest/RunTests.ps1` |
+| Bedrock | `Bedrock/Tests/` | the default library, through the built-in `[test]` framework | `C4.exe Bedrock\Tests -o <out>.exe -test`, then run `<out>.exe` |
+| Benchmarks | `Benchmarks/gemm/`, `Benchmarks/math/` | generated-code performance vs clang C++ at `-O2` (integer GEMM; Bedrock Math vs GLM); `-Check` only builds and compares results | `Benchmarks/<name>/run-benchmark.ps1 [-Check]` |
+
+---
+
+## 2. C4Testing
+
+- Frost UnitTesting framework; tests are discovered through Frost reflection.
+- Layout mirrors the compiler subsystems: `Lexer/`, `SourceManager/`, `Core/`,
+  `Parser/{Foundation,Expressions,Statements,Declarations,Integration}/`, `Semantic/` (ProgramModelTest,
+  OverloadResolution, ModelParity, SimulatedLowering, ProgramModelEdgeCases, HIRLowering, CodeGenTest,
+  IsolatedCorpusModelTest - the last one loads real `assets/IsolatedTest` files with the headers beside each;
+  DebugInfoTest - the `-g` metadata of a lowered module; ConstEvaluatorTest - constant folding; ScopeGuardTest;
+  AliasTagsTest - the strict-aliasing class of each access, D-64),
+  `Compiler/` (the runtime objects, the error tracker, project sets), `Protocol/` (the JSON values and framing of `C4Protocol`), `LSP/` (the language server, linked
+  through `C4LSPLib`) and `DAP/` (the debug adapter, linked through `C4DAPLib`: its pieces, and sessions of
+  programs it builds with `C4.exe -g`; those tests take up to 60 seconds, `TEST_FUNC_TIMEOUT`).
+- Filter with `--filter "Lexer.*"`.
+- The old IsoDriver end-to-end classes and the other tests written against the pre-architecture APIs were
+  retired in B26: every case still meaningful is an `assets/IsolatedTest` or `assets/NegativeTest` folder
+  (their reasons name the original test), and the rest is covered by the current classes.
+- `-testall` reports a crash exit code during ReflectionTesting teardown even when green; read the
+  `Total/Passed/Failed` lines.
+
+---
+
+## 3. TestCode (the e2e gate)
+
+`assets/TestCode/` is a single program (`Main.cf`) built from about 96 `.cf` files in category folders:
+`Core`, `Operators`, `OperatorOverloads`, `ControlFlow`, `Types`, `OOP`, `Parity`, plus `Framework/`
+(`Assert.ch`: `Assert`, `AssertIntEquals`, `AssertFloatEquals`, ...).
+
+`RunTests.ps1`:
+
+1. cleans intermediates in the test folder;
+2. builds the folder at the default `-O0` into `assets/build-output/testcode/Main.exe` and runs it;
+3. rebuilds the same folder at `-O2` and runs it again.
+
+Both runs must succeed with zero failed assertions. (The `-O2` build currently writes `Main_O2.*` into
+the test folder itself; stray `Main_O2.exe/.ll/.obj` files there are build output, not sources.)
+
+Adding a test:
+
+1. Put `Feature.ch` (declares `void TestFeature();`) and `Feature.cf` in the right category folder.
+2. `include "Category/Feature.ch"` in `Main.cf` and call `TestFeature();` from `main`.
+3. Use the `Framework/Assert.ch` helpers.
+
+---
+
+## 4. NegativeTest
+
+- One folder = one invalid program (`main.cf`).
+- Every folder must have an entry in `NegativeTests.json`:
+
+```text
+"FolderName": {
+    "expect": ["substring of the expected diagnostic"],
+    "reason": "why this must be an error and what a good message says"
+}
+```
+
+- The runner compiles each folder and requires compilation to **fail** with every expected substring.
+  A folder that compiles, a message that drifted, or an unregistered folder are all failures.
+- Substrings match literally (brackets, quotes and `?` included).
+- The manifest's `reason` fields also record known weak diagnostics (for example
+  `TestSetupMustBeStatic`, `NonConstArraySize`) that should get sharper messages.
+
+---
+
+## 5. IsolatedTest
+
+- Categories: `Basics`, `Bedrock`, `Calls`, `ControlFlow`, `Diagnostics`, `Exceptions`, `Functions`, `Interop`,
+  `Lambdas`, `Lifecycle`, `Macros`, `MemoryGC`, `Namespaces`, `OOP`, `Operators`, `Pointers`, `Reflection`,
+  `Simd`, `Templates`, `TestingFramework`, `Threads`, `Types` (see `assets/IsolatedTest/README.md`).
+- `Simd/` (D-62): one folder per intrinsic family (`LaneMath`, `Masks`, `Shuffles`, `Reductions`, `Memory`),
+  `Casts`, `Bug250ScalarBroadcast`, `ReferencesToIntegerLanes`, `WideVectors` (256- and 512-bit vectors through calls,
+  fields, globals, the heap and every container on the default target), `TargetMacros`, and the cases
+  `ExpectedExit.json` builds for another processor: `WideVectorsAvx2` (`-march=x86-64-v3`: YMM returns, aligned
+  AVX loads from containers, gathers), `FusedMultiplyAdd` (`-mfma`) and `NativeTarget` (`-march=native`, the
+  widest vectors the machine has). The C4Testing corpus sweep models each file for the target its entry names.
+- `Types/StrictAliasing*` (D-64): the punning strict aliasing allows (`Unions`: named and anonymous union members and
+  an array member; `Bytes`: `uint8`, `int8`, `char8` and `memcpy`; `BitCasts`: `reinterpret_cast` between numbers)
+  and a loop over pointers held in a struct (`StructPointers`, which also moves a pointer through a `float**`). The
+  pointers come from volatile variables, so the optimizer has only the access types to go by: a wrong tag gives a
+  stale value at `-O2`. `ExpectedIR.json` checks the tags.
+- Each folder is compiled and run on its own. `main` returns the failed-assert count; exit 0 is required
+  unless a manifest says otherwise. A program still running after 60 seconds is killed and fails its case.
+- `-DebugInfo` builds every folder with `-g`, so the debug information is checked against the whole corpus
+  (it must verify, link and change nothing the program does).
+- Manifests next to the runner:
+  - `NegativeTests.json` - folders that must fail to compile, with expected diagnostics;
+  - `ExpectedExit.json` - folders that must compile and exit with a given code (for example uncaught
+    exceptions exit 1), with `mustContain` / `mustNotContain` output checks (literal substrings) and
+    `compileFlags` (a `-march` there is also the target the corpus sweep models the file for);
+  - `ExpectedIR.json` - folders whose emitted `out.ll` must contain every `irContains` substring (for
+    features whose effect is the code itself, such as volatile accesses and thread_local storage);
+  - `SkipTests.json` - environment-dependent folders (GPU, specific Windows SDK), reported as skipped.
+- Some folders need `-test`, CBind, a DX12 GPU or the Windows SDK version hard-coded in the interop
+  tests (10.0.26100.0).
+- Every folder sits in a category (`README.md` lists them); a regression test names its bug in its first
+  comment line.
+
+Run one test by hand:
+
+```bat
+bin\Development-windows-x64\C4\C4.exe assets\IsolatedTest\Types\SwizzleLanguage -o assets\build-output\iso\SwizzleLanguage.exe
+assets\build-output\iso\SwizzleLanguage.exe
+```
+
+
+---
+
+## 6. RuntimeTest, ScriptTest, StressTest and ToolsTest
+
+- `RuntimeTest/`: `PrintfTest`, `StructReturn`. Compile and run; exit 0 required.
+- `ScriptTest/` ([runtime/04-scripting.md](../runtime/04-scripting.md)): one folder per case, `host/` (the program,
+  built with `--script-host` together with `Common/scripttest.ch`, its checks and script loading) and `scripts/`
+  (copied beside the built program). The host exits 0 when every check held; with `-O2` the host and its scripts
+  are both `-O2`. Cases: `HostCalls`, `Classes`, `Templates`, `Callbacks`, `Exceptions`, `GC`, `Reflection`,
+  `Lifecycle`, `ThreadLocals`, `Macros`, `Diagnostics`, `MultiFile`, `Reload`, `CrashIsolation`, `ScriptTests`,
+  `Concurrency`, `Interop`, `WideVectors` (BUG-252: 256- and 512-bit vectors both ways across a baseline host and
+  its script, which compiles for the host's target), `WideVectorsAvx2`. A case's `flags.txt` holds more compiler
+  flags for its host (`WideVectorsAvx2` builds for `-march=x86-64-v3`, so its script may use `simd_fma`). Output in
+  `assets/build-output/script/<O0|O2>/<case>/` (`run.log`).
+- `StressTest/Dx12Game/`: `Dx12Game.cf` with `dx12.ch`, `windows.ch`, `game.hpp`. The gate is a clean
+  compile; `-Run` executes the interactive game and needs a DX12 GPU.
+- `ToolsTest/` (each check builds its programs under `assets/build-output/toolstest/` or `%TEMP%/c4-toolstest/`):
+  - `ShippedBedrockMirrorsSource`: no missing, extra or different file in `bin/.../C4/Bedrock`.
+  - Flags: `DefineFlag`, `VersionFlag`, `UsageErrors` (no input, an unknown option, a missing value: exit 2),
+    `HelpListsEveryOption`, `OutputFlags` (`-c`, `-bc`, `--int-dir`), `GcStatsFlag`, `IncludeProject` (`-I`
+    compiles the folder it names), `LinkFlags` (`-l`, `-L`).
+  - Install: `InstallOutsideRepository` (a copy of the install in `%TEMP%` builds and runs a hello world and an
+    `extern "c"` program with its own toolchain), `HomeVariable` (a bare `C4.exe` names its missing install;
+    `C4_HOME` points it at one).
+  - `NukeToolchainProject` ([02-nuke.md](02-nuke.md)): `MakeToolchain.py` into a scratch folder, `nuke toolchain
+    install` into a scratch store (`NUKE_TOOLCHAINS`), `nuke init` outside the repository pinned to that version,
+    then `nuke run` (intermediates in `build/int`); a module with its own define (it reaches only the module) and
+    `links = ["winmm.lib"]` (they reach the program); exit codes; and a failed build (`nuke build` fails, and
+    `nuke run` neither succeeds nor runs the old executable).
+  - Projects ([language/15-projects.md](../language/15-projects.md)): `ProjectDefines` (each project's
+    defines; at `-O2` the engine function is inlined into the game) and `ProjectBoundaries` (an include and a
+    declaration across the boundary, an ambiguous path, a cycle, a misspelled key, inputs with `--projects`).
+  - `DebugInfoFlag`: `-g` writes `app.pdb`, whose symbols (read with `llvm-pdbutil`) hold the function, its
+    parameter and locals, the global and the lines of `main.cf`; a build without `-g` writes none.
+  - `FrostStaleObjects`: Frost removes the objects of a source that is gone (never a generated source's or
+    `linker.args`), and two sources with one base name are an error.
+  - Building in any folder (`FrostProbes.py` drives Frost on generated projects): `FrostLongLink` (a link whose
+    object paths pass the command-line limit goes through a response file), `FrostProjectName` (a project in a
+    folder that is no identifier takes the name its `Build.py` gives), `FrostBuildOrder` (early projects build after
+    the early projects they link), `FrostFailedCompile` (a compile that fails discards the object and dependency
+    file it may have written), and `NoIgnoredSources` (no source outside the build folders, installed packages
+    and Frost's vendored toolchain is hidden by `.gitignore`).
+  - `LspStdio`: `StdioClient.py` drives `C4LSP.exe` over real stdio: `initialize`, a malformed frame it drops,
+    `shutdown` and `exit` (exit code 0).
+  - `DapAdapter`: `StdioClient.py` drives `C4DAP.exe` over real stdio through a session of a `-g` program: its
+    breakpoint, stack and locals, its output and exit code, `disconnect`.
+  - `TargetFlags` (D-62): `-march=x86-64-v3 -mno-fma` gives the program its `SIMD_*` macros, `-march=znver4` is on
+    every function in the IR, an unknown CPU or feature is a usage error, and a foreign C source and the header
+    CBind binds both see the same processor (`__AVX2__`).
+  - `StrictAliasingFlag` (D-64): a default build's IR has alias tags and a `-fno-strict-aliasing` one has none; a
+    pointer pun the optimizer cannot see through reads what was written at `-O2 -fno-strict-aliasing`.
+
+Collector tests live in IsolatedTest `MemoryGC/` (liveness, deep lists, large objects, interior pointers,
+pins, hooks, finalizer order and exceptions, static roots, noscan, pacing, `delete`, collections while several
+threads allocate, thread_local roots). A test that asserts an
+object *was* collected allows a few survivors: a conservative collector may keep an object whose address is
+still in a register or a dead stack slot.
+
+---
+
+## 7. Bedrock tests
+
+`Bedrock/Tests/*_tests.cf` (37 files, 340 tests; also built for `-O2 -march=x86-64-v3` and `-march=native`). See
+[library/bedrock.md](../library/bedrock.md).
+The exit code of the `-test` executable is the failed-assertion count.
+
+---
+
+## 8. Benchmarks
+
+Both benchmarks build the C4 side through C4.exe and the C++ side with the vendored clang, at `-O2` with the
+same target flags; `-Check` builds them and compares results (a gate), and without it they are timed.
+
+`Benchmarks/gemm/`: a 512^3 integer GEMM in C4 (`gemm.cf`) and C++ (`gemm.cpp`), timed end to end, median
+of 7 runs.
+
+`Benchmarks/math/` (`run-benchmark.ps1`), two suites timed in process over 4096 vectors x 400 repeats, each in
+a folder of its own (C4.exe compiles a file with every source under its folder); GLM 0.9.9 is vendored in
+`Benchmarks/math/glm/` (MIT). The checksums must agree to 1e-4 relative; the times are the median of 5 runs.
+
+- `per-vector/`: seven per-frame kernels: building TRS matrices, matrix products, inverses, point transforms,
+  quaternion rotation, slerp and normalized crosses. `math.cf` uses Bedrock Math; `math.cpp` the same program over
+  GLM, built plain and with GLM's SSE paths (`GLM_FORCE_INTRINSICS` over aligned types). `-March <cpu>` builds all
+  three for that processor.
+- `batch/`: six kernels over eight vectors at a time, always for `-march=x86-64-v3`: point transforms (also through
+  pointers to the arrays held in a struct, `batch_pointers`), quaternion rotation, normalized crosses, a particle step (gravity, motion, a bounce and walls: fused multiply-adds, masks,
+  min / max) and distances. `batch.cf` keeps the vectors in Bedrock's `FVector3x8` batches; `batch.cpp` is built as
+  hand-written AVX2 intrinsics over the same structure-of-arrays batches (`BATCH_AVX2`) and as the per-vector GLM
+  loops a GLM program would write.
+
+Baselines (2026-10-19, ms; ratio < 1 means C4 is faster), per-vector at the default target and at `-March
+x86-64-v3`:
+
+| Kernel | C4 | GLM | GLM SSE | C4/GLM | C4/SSE | C4 v3 | GLM v3 | SSE v3 | C4/SSE v3 |
+|---|---|---|---|---|---|---|---|---|---|
+| build_transforms | 45.4 | 63.1 | 46.8 | 0.72 | 0.97 | 43.3 | 59.0 | 46.1 | 0.94 |
+| invert_matrices | 9.6 | 27.0 | 9.3 | 0.36 | 1.03 | 9.6 | 22.9 | 9.2 | 1.04 |
+| multiply_matrices | 4.9 | 11.3 | 5.3 | 0.43 | 0.91 | 3.9 | 8.7 | 4.3 | 0.91 |
+| normalize_crosses | 3.8 | 3.5 | 3.6 | 1.09 | 1.05 | 3.3 | 3.3 | 3.5 | 0.93 |
+| rotate_vectors | 2.6 | 3.5 | 4.0 | 0.75 | 0.67 | 2.5 | 3.0 | 3.4 | 0.72 |
+| slerp_rotations | 24.9 | 25.0 | 24.8 | 1.00 | 1.00 | 25.2 | 25.0 | 24.4 | 1.03 |
+| transform_points | 1.3 | 2.1 | 1.5 | 0.59 | 0.87 | 1.1 | 2.2 | 1.5 | 0.78 |
+| gemm (end to end) | 234 | 237 (C++) | | 0.99 | | | | | |
+
+The matrix inverse took 12.1 ms (1.28x GLM's SSE version) before B39 shuffled it the way GLM does.
+
+| Batch kernel (x86-64-v3) | C4 | GLM | AVX2 | C4/GLM | C4/AVX2 |
+|---|---|---|---|---|---|
+| batch_distance | 0.33 | 0.52 | 0.38 | 0.63 | 0.85 |
+| batch_integrate | 0.43 | 0.73 | 0.47 | 0.59 | 0.92 |
+| batch_normalize | 0.55 | 1.42 | 0.55 | 0.38 | 0.99 |
+| batch_rotate | 0.57 | 0.99 | 0.54 | 0.57 | 1.04 |
+| batch_transform | 0.51 | 0.87 | 0.50 | 0.58 | 1.01 |
+| batch_pointers (2026-10-20) | 0.49 | 2.14 | 0.55 | 0.23 | 0.89 |
+
+`batch_pointers` reads its arrays through pointers held in a struct. With strict aliasing (D-64) a vector store
+cannot change those pointers, so the loop keeps them in registers and runs as fast as `batch_transform` (0.41 ms
+against 0.46 ms with `-fno-strict-aliasing`, measured back to back). The AVX2 version reloads them after every
+store, since clang lets a `__m256` alias anything; the GLM loop is slower for the same reason through `glm::vec3`
+stores into a pointer it must reload.
+
+`Benchmarks/gc/` (B32): a live world of entities (each with a chain of components and a parent link) that stays
+reachable while every frame allocates short-lived garbage and replaces a share of the world; run on the main
+thread alone and with the frame's churn as job-system jobs. It prints frame-time percentiles, collections, the
+average and worst pause, the GC's share of the time and allocations per second; `-Check` runs a small world both
+ways and requires the same checksum.
+
+Baselines (2026-10-19; 200,000 entities, about 52 MiB live, 600 frames of 20,000 garbage objects and 200
+replacements; 16 logical processors):
+
+| Mode | Avg frame | p99 frame | Avg pause | Worst pause | Allocations/s |
+|---|---|---|---|---|---|
+| Alone, marking on one thread (before B32) | 0.84 ms | 20.6 ms | 21.5 ms | 31.5 ms | 25 M |
+| Alone, parallel marking (8 markers) | 0.55 ms | 6.4 ms | 6.2 ms | 7.4 ms | 38 M |
+| Jobs (15 workers), parallel marking | 0.19 ms | 6.5 ms | 6.5 ms | 8.3 ms | 114 M |
+
+Marking is the whole pause (the sweep takes about 0.1 ms, stopping 16 threads about 0.2 ms). It scales by
+marker count as 19.3, 9.5, 7.1, 5.7 and 5.1 ms for 1, 2, 4, 8 and 12 markers; more markers than processors
+oversubscribe (16 markers: a 31 ms worst pause), so the default stops at 8. A pause stays proportional to the live
+heap: a concurrent mark is the next step (roadmap 3.11).
+
+`Benchmarks/compile/` (B32): C4.exe end to end on a one-line program, the Bedrock tests and TestCode, at `-O0`
+and `-O2`, the median of 3 builds with each build's `--time-phases` breakdown; `-Check` builds each once.
+
+Baselines (2026-10-19, ms; phases in seconds):
+
+| Program | -O0 | -O2 | Where -O2 goes |
+|---|---|---|---|
+| hello | 142 | 147 | object 0.025, runtime and link 0.11 |
+| Bedrock tests (31 files) | 1,235 | 4,219 | preprocess 0.21, parse + model + lower 0.11, object 3.55, runtime and link 0.28 |
+| TestCode | 491 | 854 | parse + model + lower 0.07, object 0.53, runtime and link 0.17 |
+
+The front end is a small part of every build; the LLVM optimizer and object emission (`clang -c` on the written
+`.ll`) dominate at `-O2`. Emitting the object in process, without the text IR round trip, and splitting the
+module for parallel code generation are the open compile-time items (roadmap 5.1).
+
+---
+
+## 9. Gates
+
+A change is done only when all of these pass. `nuke gates` from the repository root runs items 1 to 9 (with
+NegativeTest and IsolatedTest also at `-O2`) except StressTest and IsolatedTest `-DebugInfo`; run those and the
+benchmarks (item 10) on their own.
+
+1. The compiler builds with no swallowed errors (grep the log, see the traps list).
+2. C4Testing: `nuke test` (repository root), or `python Frost/Build.py -test -c Development -a x64 -p <C4 root>`.
+3. TestCode at `-O0` and `-O2`: `assets/TestCode/RunTests.ps1`.
+4. NegativeTest: `assets/NegativeTest/RunTests.ps1`.
+5. IsolatedTest: `assets/IsolatedTest/RunTests.ps1` (and `-DebugInfo` when touching codegen or debug info).
+6. Bedrock: `C4.exe Bedrock\Tests -test` build + run, exit 0.
+7. RuntimeTest and StressTest (compile) when touching the runtime, ABI or interop.
+8. ScriptTest at `-O0` and `-O2`: `assets/ScriptTest/RunTests.ps1` and `-O2`.
+9. ToolsTest: `assets/ToolsTest/RunTests.ps1`.
+10. Benchmarks build and agree with C++: `Benchmarks/gemm/run-benchmark.ps1 -Check` and
+   `Benchmarks/math/run-benchmark.ps1 -Check`; the GC benchmark computes the same world alone and with workers
+   (`Benchmarks/gc/run-benchmark.ps1 -Check`); the compile benchmark's programs build
+   (`Benchmarks/compile/run-benchmark.ps1 -Check`).
+
+---
+
+## 10. Conventions
+
+- Every new behaviour lands with tests for the happy path, edge cases (empty, boundary values) and
+  error paths. Every new diagnostic gets a NegativeTest.
+- One concept per test folder or file; name it after what it covers, never `MoreTests` or `Test2`.
+- C++ unit tests mirror the source subsystem layout (`C4Testing/src/Tests/<Subsystem>/`).
+- Tests are independent: each sets up its own state; no order dependence or shared mutable fixtures.
+- A bug fix starts with a failing repro (usually an IsolatedTest folder), then the fix, then the test
+  is kept as a regression guard.
+- Scratch, throwaway repros and logs go to `assets/build-output/` (ignored by git); a repro worth keeping becomes
+  an IsolatedTest folder.
+
+### Coverage gaps worth filling
+
+Macro `#if` forms, `goto`, throwing objects, lambdas, multiple interfaces, GC hooks (root enumerators,
+collection callbacks, pin, disable), reflection groups/variables/functions/unload, and feature
+interactions with interop. See [status/implementation-status.md](../status/implementation-status.md).

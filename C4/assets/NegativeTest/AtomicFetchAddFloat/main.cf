@@ -1,0 +1,5 @@
+int32 main() {
+	float value = 0.0f;
+	atomic_fetch_add(&value, 1.0f, MemoryOrder::SeqCst);
+	return 0;
+}

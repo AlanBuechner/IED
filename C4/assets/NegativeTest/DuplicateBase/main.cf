@@ -1,0 +1,3 @@
+interface I { int32 F(); }
+class C : I, I { public int32 F() { return 1; } }
+int32 main() { C c; return 0; }

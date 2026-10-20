@@ -1,0 +1,1 @@
+int32 main() { func<int32(int32)> f = [](float x) -> int32 { return (int32)x; }; return f(1); }

@@ -1,0 +1,4 @@
+class Tally {
+	private static int32 total = 4;
+}
+int32 main() { return Tally::total; }

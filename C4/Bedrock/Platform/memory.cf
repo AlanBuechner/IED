@@ -1,0 +1,47 @@
+include "memory.ch"
+
+// The runtime's c4_memory_region, field for field (C4Runtime/PlatformRuntimeC.h).
+struct __C4MemoryRegion
+{
+	public void* base;
+	public int64 size;
+	public void* allocationBase;
+	public int32 state;
+	public int32 protection;
+}
+
+[link("c4_vm_reserve")] void* c4_vm_reserve(int64 size, int64 alignment);
+[link("c4_vm_allocate")] void* c4_vm_allocate(int64 size, int32 protection);
+[link("c4_vm_commit")] int32 c4_vm_commit(void* address, int64 size, int32 protection);
+[link("c4_vm_decommit")] int32 c4_vm_decommit(void* address, int64 size);
+[link("c4_vm_release")] int32 c4_vm_release(void* base);
+[link("c4_vm_protect")] int32 c4_vm_protect(void* address, int64 size, int32 protection);
+[link("c4_vm_query")] int32 c4_vm_query(const void* address, __C4MemoryRegion* region);
+
+namespace Platform
+{
+	void* Reserve(int64 size) { return c4_vm_reserve(size, 0); }
+
+	void* ReserveAligned(int64 size, int64 alignment) { return alignment > 0 ? c4_vm_reserve(size, alignment) : nullptr; }
+
+	void* Allocate(int64 size, Protection protection) { return c4_vm_allocate(size, (int32)protection); }
+
+	bool Commit(void* address, int64 size, Protection protection) { return c4_vm_commit(address, size, (int32)protection) == 0; }
+
+	bool Decommit(void* address, int64 size) { return c4_vm_decommit(address, size) == 0; }
+
+	bool Release(void* base) { return c4_vm_release(base) == 0; }
+
+	bool Protect(void* address, int64 size, Protection protection) { return c4_vm_protect(address, size, (int32)protection) == 0; }
+
+	bool Query(const void* address, MemoryRegion& region) {
+		__C4MemoryRegion raw;
+		if (c4_vm_query(address, &raw) != 0) return false;
+		region.base = raw.base;
+		region.size = raw.size;
+		region.allocationBase = raw.allocationBase;
+		region.state = (RegionState)raw.state;
+		region.protection = (Protection)raw.protection;
+		return true;
+	}
+}

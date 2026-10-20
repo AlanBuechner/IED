@@ -1,0 +1,7 @@
+int32 g;
+int32 main() {
+	goto skip;
+	defer g = 1;
+skip:
+	return g;
+}

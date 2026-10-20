@@ -1,0 +1,10 @@
+include "shapes.ch"
+
+int32 Square::Area() const { return side * side; }
+
+Square* MakeSquare(int32 side)
+{
+	Square* square = new Square();
+	square->side = side;
+	return square;
+}

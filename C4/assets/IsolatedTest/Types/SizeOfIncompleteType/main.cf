@@ -1,0 +1,6 @@
+// sizeof of a FORWARD-DECLARED (incomplete) type is not a compile-time constant: it must be a CLEAR
+// compile error, never a crash and never a silent zero. This locks the no-crash guarantee for the
+// "layout not yet known" path (the same guardrail that keeps cyclic self-references clean).
+struct Fwd;
+const int32 S = sizeof(Fwd);
+int32 main() { return S; }

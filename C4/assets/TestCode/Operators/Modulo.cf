@@ -1,0 +1,11 @@
+// Operators - Modulo Tests (implementation)
+include "../Framework/Assert.ch"
+include "Modulo.ch"
+
+void TestModulo() {
+	int32 a = 17 % 5;
+	AssertEqual(2, a);
+	
+	int32 b = 10 % 3;
+	AssertEqual(1, b);
+}

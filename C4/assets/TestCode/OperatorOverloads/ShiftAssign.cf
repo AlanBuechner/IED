@@ -1,0 +1,32 @@
+include "../Framework/Assert.ch"
+include "ShiftAssign.ch"
+
+struct Register {
+	public int32 bits;
+	public int32 writes;
+	[operator("<<=")] public void ShiftUp(int32 n) { this.bits = this.bits << n; this.writes = this.writes + 1; }
+	[operator("shift_right_assign")] public void ShiftDown(int32 n) { this.bits = this.bits >> n; this.writes = this.writes + 1; }
+}
+
+struct Lane {
+	public int32 bits;
+	[operator("<<")] public Lane Up(int32 n) const { Lane l; l.bits = this.bits << n; return l; }
+	[operator(">>")] public Lane Down(int32 n) const { Lane l; l.bits = this.bits >> n; return l; }
+}
+
+void TestShiftAssign() {
+	Register r; r.bits = 1;
+	r <<= 4;
+	AssertIntEquals(16, r.bits, "<<= runs the in-place operator");
+	r >>= 2;
+	AssertIntEquals(4, r.bits, ">>= by its name");
+	AssertIntEquals(2, r.writes, "each runs once");
+	Lane l; l.bits = 3;
+	l <<= 2;
+	AssertIntEquals(12, l.bits, "<<= falls back to <<");
+	l >>= 1;
+	AssertIntEquals(6, l.bits, ">>= falls back to >>");
+	int32 plain = 5;
+	plain <<= 3;
+	AssertIntEquals(40, plain, "<<= on an integer");
+}

@@ -1,0 +1,17 @@
+class Base {
+	public virtual int32 Id() { return 0; }
+	public virtual int32 Other() { return 100; }
+}
+template<T> class Box : Base {
+	T v;
+	public void Set(T x) { v = x; }
+	public override int32 Id() { return (int32)v; }
+}
+int32 main() {
+	Base* b = new Box<int32>();
+	((Box<int32>*)b)->Set(7);
+	if (b->Id() != 7) return 1;      // overridden virtual, dispatched through base*
+	if (b->Other() != 100) return 2; // inherited non-overridden virtual through base*
+	printf("TPL INHERIT VIRTUAL OK\n");
+	return 0;
+}

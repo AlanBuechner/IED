@@ -1,0 +1,39 @@
+// Scope Reuse Regression Tests - implementation
+include "../Framework/Assert.ch"
+include "ScopeReuseTests.ch"
+
+// Regression: a variable name reused in sibling scopes with different types
+// (8-byte int64 then 4-byte int32, then 8-byte again) must not clobber stack slots.
+void TestSiblingScopeVariableReuse() {
+	{
+		int64 v = 123456789012;
+		(void)v;
+	}
+	{
+		int32 v = 42;
+		AssertIntEquals(42, v, "int32 in sibling scope keeps its value");
+	}
+	{
+		int64 w = 9876543210;
+		Assert(w == 9876543210, "int64 reuse in third scope keeps its value");
+	}
+}
+
+// Regression: virtual dispatch through a base pointer when the derived class is
+// a template instantiation inheriting from the base.
+class ReuseBase {
+	public virtual int32 Value() { return 0; }
+}
+
+template<T> class ReuseBox : ReuseBase {
+	T v;
+	public void Set(T x) { v = x; }
+	public override int32 Value() { return (int32)v; }
+}
+
+void TestVirtualDispatchTemplateInheritance() {
+	ReuseBase* b = new ReuseBox<int32>();
+	((ReuseBox<int32>*)b)->Set(7);
+	AssertIntEquals(7, b->Value(), "virtual dispatch through base pointer on template-derived class");
+	delete b;
+}

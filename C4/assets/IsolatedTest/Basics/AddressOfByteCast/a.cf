@@ -1,0 +1,12 @@
+struct Key { int32 a; int32 b; }
+int32 Sum(Key k) { return k.a + k.b; }
+int32 main() {
+    Key k;
+    k.a = 5; k.b = 7;
+    const char* p = (const char*)&k;   // address-of local, cast to bytes
+    int32 ba = byte_at(p, 0);         // low byte of a == 5
+    int32 bb = byte_at(p, 4);         // low byte of b == 7
+    if (ba != 5 || bb != 7) return 1;
+    printf("ADDR-OF OK a=%d b=%d sum=%d sizeof=%d\n", ba, bb, Sum(k), sizeof(Key));
+    return 0;
+}

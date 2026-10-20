@@ -1,0 +1,9 @@
+// BUG-038: -test-json writes a valid JSON summary with every case, including a name that needs escaping.
+[test("json.pass")]
+void TestPass() { assert_true(1, "passes"); }
+
+[test("json.\"quoted\"")]
+void TestQuotedName() { assert_true(1, "a name with quotes is escaped"); }
+
+[test("json.fail")]
+void TestFail() { assert_true(0, "fails on purpose"); }

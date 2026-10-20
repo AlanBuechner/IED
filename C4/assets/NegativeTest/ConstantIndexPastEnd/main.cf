@@ -1,0 +1,5 @@
+int32 main() {
+	int32[4] a;
+	a[4] = 9;
+	return 0;
+}

@@ -1,0 +1,30 @@
+// Integer GEMM benchmark - C4 side. Flat int32 arrays, index = i*N + j, so the memory access
+// pattern is identical to the C++ counterpart (isolates codegen quality from array-layout idioms).
+int32[262144] gA;
+int32[262144] gB;
+int32[262144] gC;
+
+int32 main() {
+	int32 N = 512;
+	int32 i, j, k;
+	for (i = 0; i < N * N; i++) {
+		gA[i] = (i % 7) - 3;
+		gB[i] = (i % 11) - 5;
+	}
+	for (i = 0; i < N * N; i++) gC[i] = 0;
+
+	for (i = 0; i < N; i++) {
+		for (j = 0; j < N; j++) {
+			int32 acc = 0;
+			for (k = 0; k < N; k++) {
+				acc += gA[i * N + k] * gB[k * N + j];
+			}
+			gC[i * N + j] = acc;
+		}
+	}
+
+	int32 sum = 0;
+	for (i = 0; i < N * N; i++) sum += gC[i];
+	printf("GEMM %d\n", sum);
+	return 0;
+}

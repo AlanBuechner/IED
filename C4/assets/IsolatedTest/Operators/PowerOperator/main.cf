@@ -1,0 +1,9 @@
+int main() {
+	int32 r = 2 ** 3;      // expect 8
+	int32 z = 5 ** 0;      // expect 1 (a ** 0 == 1)
+	float f = 2.0f ** 3.0f; // expect 8.0
+	if (r != 8 || z != 1) { printf("FAIL int r=%d z=%d\n", r, z); return 1; }
+	if (f < 7.99f || f > 8.01f) { printf("FAIL float %.2f\n", f); return 1; }
+	printf("POWER OK\n");
+	return 0;
+}

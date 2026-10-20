@@ -1,0 +1,57 @@
+include "../Framework/Assert.ch"
+include "AbstractAndFinal.ch"
+
+abstract class Polygon {
+	public int32 sides;
+	[operator("create")] public void Init(int32 n) { this.sides = n; }
+	public abstract float Area() const;
+	public float Twice() const { return Area() * 2.0f; }
+}
+
+class Square : public Polygon {
+	public float side;
+	[operator("create")] public void Init(float s) { Polygon::Init(4); this.side = s; }
+	public float Area() const override { return this.side * this.side; }
+}
+
+final class UnitSquare : public Square {
+	[operator("create")] public void Init() { Square::Init(1.0f); }
+}
+
+interface INamed {
+	int32 Id() const;
+}
+
+class Tagged : public INamed {
+	public virtual int32 Id() const final { return 7; }
+}
+
+class Counted {
+	public virtual int32 Value() const { return 1; }
+}
+
+class Settled : public Counted {
+	public final int32 Value() const override { return 2; }
+}
+
+class Leaf : public Settled {
+	public int32 Extra() const { return Value() + 1; }
+}
+
+float AreaOf(const Polygon& p) { return p.Area(); }
+
+void TestAbstractAndFinal() {
+	Square sq(3.0f);
+	AssertFloatEquals(9.0f, AreaOf(sq), "an abstract base is used through a reference");
+	AssertFloatEquals(18.0f, sq.Twice(), "the abstract base's method calls the derived implementation");
+	Polygon* p = new Square(2.0f);
+	AssertFloatEquals(4.0f, p->Area(), "a pointer to an abstract base dispatches");
+	AssertIntEquals(4, p->sides, "the abstract base's create runs");
+	UnitSquare u;
+	AssertFloatEquals(1.0f, u.Area(), "a final class is an ordinary class");
+	Tagged t;
+	INamed& named = t;
+	AssertIntEquals(7, named.Id(), "a final method implements an interface method");
+	Leaf leaf;
+	AssertIntEquals(3, leaf.Extra(), "a final override is inherited by a derived type");
+}

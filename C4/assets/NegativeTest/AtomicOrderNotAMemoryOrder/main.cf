@@ -1,0 +1,5 @@
+int32 main() {
+	int32 value = 0;
+	int32 order = 4;
+	return atomic_load(&value, order);
+}

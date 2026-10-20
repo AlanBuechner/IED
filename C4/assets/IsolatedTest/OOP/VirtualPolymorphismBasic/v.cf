@@ -1,0 +1,26 @@
+class Shape {
+    public virtual int32 Area() { return 0; }
+    public void Describe() { printf("area=%d\n", this->Area()); }
+}
+class Square : Shape {
+    float s;
+    [operator("create")]
+    public void Init(float side) { this->s = side; }
+    public override int32 Area() { return (int32)(this->s * this->s); }
+}
+class Circle : Shape {
+    float r;
+    [operator("create")]
+    public void Init(float radius) { this->r = radius; }
+    public override int32 Area() { return (int32)(3.14f * this->r * this->r); }
+}
+int32 main() {
+    Shape* a = new Square{3.0f};
+    Shape* b = new Circle{2.0f};
+    a->Describe(); // want area=9
+    b->Describe(); // want area=12
+    delete a;
+    delete b;
+    printf("VIRTUAL POLYMORPHISM OK\n");
+    return 0;
+}

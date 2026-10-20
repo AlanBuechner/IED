@@ -1,0 +1,2 @@
+struct S { public int32 x; }
+int main() { S[4] a; a[1].x = 5; return (a[1].x == 5) ? 0 : 1; }

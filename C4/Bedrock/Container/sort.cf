@@ -1,0 +1,95 @@
+include "sort.ch"
+
+namespace Core
+{
+	const int64 kInsertionSortLimit = 16;
+
+	template<T> void SwapElements(T* items, int64 i, int64 j) {
+		if (i == j) return;
+		T held = take(items[i]);
+		relocate(&items[i], &items[j]);
+		relocate(&items[j], &held);
+	}
+
+	template<T, F> void InsertionSort(T* items, int64 first, int64 last, F before) {
+		for (int64 j = first + 1; j <= last; ++j) {
+			T held = take(items[j]);
+			int64 i = j - 1;
+			while (i >= first && before(held, items[i])) { relocate(&items[i + 1], &items[i]); i -= 1; }
+			relocate(&items[i + 1], &held);
+		}
+	}
+
+	template<T, F> void SiftDown(T* items, int64 i, int64 size, F before) {
+		while (true) {
+			int64 largest = i;
+			int64 left = 2 * i + 1;
+			int64 right = left + 1;
+			if (left < size && before(items[largest], items[left])) largest = left;
+			if (right < size && before(items[largest], items[right])) largest = right;
+			if (largest == i) return;
+			SwapElements(items, i, largest);
+			i = largest;
+		}
+	}
+
+	template<T, F> void HeapSort(T* items, int64 size, F before) {
+		for (int64 i = size / 2 - 1; i >= 0; --i) SiftDown(items, i, size, before);
+		for (int64 end = size - 1; end > 0; --end) { SwapElements(items, 0, end); SiftDown(items, 0, end, before); }
+	}
+
+	// Median-of-three pivot, so sorted and reverse-sorted input stay O(n log n); returns the pivot's place.
+	template<T, F> int64 Partition(T* items, int64 first, int64 last, F before) {
+		int64 middle = first + (last - first) / 2;
+		if (before(items[middle], items[first])) SwapElements(items, first, middle);
+		if (before(items[last], items[first])) SwapElements(items, first, last);
+		if (before(items[last], items[middle])) SwapElements(items, middle, last);
+		SwapElements(items, middle, last);
+		int64 store = first;
+		for (int64 j = first; j < last; ++j)
+			if (before(items[j], items[last])) { SwapElements(items, store, j); store += 1; }
+		SwapElements(items, store, last);
+		return store;
+	}
+
+	// Recurses into the smaller side and loops on the larger, so the stack stays O(log n).
+	template<T, F> void IntroSort(T* items, int64 first, int64 last, int64 depth, F before) {
+		while (last - first >= kInsertionSortLimit) {
+			if (depth == 0) { HeapSort(items + first, last - first + 1, before); return; }
+			depth -= 1;
+			int64 pivot = Partition(items, first, last, before);
+			if (pivot - first < last - pivot) { IntroSort(items, first, pivot - 1, depth, before); first = pivot + 1; }
+			else { IntroSort(items, pivot + 1, last, depth, before); last = pivot - 1; }
+		}
+		if (first < last) InsertionSort(items, first, last, before);
+	}
+
+	template<T, F> void Sort(T* items, int64 count, F before) {
+		if (count < 2) return;
+		int64 depth = 0;
+		for (int64 n = count; n > 1; n = n / 2) depth += 2;
+		IntroSort(items, 0, count - 1, depth, before);
+	}
+
+	template<T, F> int64 LowerBound(const T* items, int64 count, const T& value, F before) {
+		int64 low = 0;
+		int64 high = count;
+		while (low < high) {
+			int64 middle = low + (high - low) / 2;
+			if (before(items[middle], value)) low = middle + 1;
+			else high = middle;
+		}
+		return low;
+	}
+
+	template<T, F> int64 UpperBound(const T* items, int64 count, const T& value, F before) {
+		int64 low = 0;
+		int64 high = count;
+		while (low < high) {
+			int64 middle = low + (high - low) / 2;
+			if (before(value, items[middle])) high = middle;
+			else low = middle + 1;
+		}
+		return low;
+	}
+}

@@ -1,0 +1,5 @@
+struct Point {
+	public int32 x;
+}
+final int32 GetX() extends Point { return this.x; }
+int32 main() { return 0; }

@@ -1,0 +1,37 @@
+// Types - Template Completeness Tests (implementation)
+include "../Framework/Assert.ch"
+include "TemplateCompleteness.ch"
+
+// Out-of-line method on a templated class: declared in TC_Vec, DEFINED here after its first use.
+template<T> float TC_Vec<T>::Len() { return (float)x; }
+
+void TestTemplateCompleteness() {
+	// Inline functions in a templated class.
+	TC_Box<int32> b;
+	b.v = 7;
+	AssertIntEquals(7, b.Get(), "inline method in template get");
+	AssertIntEquals(10, b.Add(3), "inline method in template add");
+
+	// Scoped alias in a template: the alias names the parameter and types a field.
+	TC_Typed<float> t;
+	t.val = 2.5f;
+	AssertFloatEquals(2.5f, t.val, "scoped alias Type=T in template");
+
+	// Non-type parameter sizes an array field at instantiation (int32[N] x).
+	TC_Arr<5> a;
+	a.x[0] = 9;
+	a.x[4] = 1; // index 4 is the last lane: N == 5
+	AssertIntEquals(5, a.Count(), "non-type param method returns N");
+	AssertIntEquals(10, a.x[0] + a.x[4], "array sized by non-type param");
+	AssertIntEquals(20, sizeof(TC_Arr<5>), "sizeof of instantiation with non-type array (5*4)");
+
+	// Two distinct instantiations of the same non-type template coexist with their own sizes.
+	TC_Arr<3> small;
+	small.x[0] = 1;
+	AssertIntEquals(12, sizeof(TC_Arr<3>), "second instantiation has its own size (3*4)");
+
+	// Out-of-line method on a templated class: declared in the class, defined after first use.
+	TC_Vec<int32> v;
+	v.x = 4;
+	AssertIntEquals(4, (int32)v.Len(), "out-of-line method on template");
+}

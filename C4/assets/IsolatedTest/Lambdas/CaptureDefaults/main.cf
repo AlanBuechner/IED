@@ -1,0 +1,37 @@
+// D-22: `[=]` and `[&]` capture every enclosing local the body uses (and only those), mixed with explicit
+// exceptions; parameters, globals and the body's own locals are not captures.
+int32 g_global = 5;
+
+int32 main() {
+	int32 x = 1;
+	int32 y = 2;
+	int32 unused = 3;
+	func<int32()> byValue = [=]() -> int32 { int32 own = 10; return x + y + own + g_global; };
+	x = 100;
+	if (byValue() != 18) return 1;
+
+	func<void()> byRef = [&]() { x = 7; y = 8; };
+	byRef();
+	if (x != 7 || y != 8) return 2;
+
+	func<int32()> valueButRefY = [=, &y]() -> int32 { y = 50; return x; };
+	if (valueButRefY() != 7 || y != 50) return 3;
+
+	func<void()> refButValueX = [&, x]() { y = x + 1; };
+	x = 20;
+	refButValueX();
+	if (y != 8) return 4;
+
+	func<int32(int32)> shadow = [=](int32 x) -> int32 { return x * 2 + y; };   // the parameter x, not the local
+	if (shadow(3) != 14) return 5;
+
+	func<int32()> loopy = [=]() -> int32 {
+		int32 s = 0;
+		for (int32 i = 0; i < 3; i++) s += i + x;
+		return s;
+	};
+	if (loopy() != 63) return 6;
+	unused = 0;
+	printf("CAPTURE DEFAULTS OK\n");
+	return 0;
+}

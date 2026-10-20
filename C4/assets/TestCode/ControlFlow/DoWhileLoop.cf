@@ -1,0 +1,12 @@
+// ControlFlow - Do While Loop Tests (implementation)
+include "../Framework/Assert.ch"
+include "DoWhileLoop.ch"
+
+void TestDoWhileLoop() {
+	int32 count = 0;
+	do {
+		count++;
+	} while (count < 3);
+	
+	AssertEqual(3, count);
+}

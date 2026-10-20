@@ -1,0 +1,9 @@
+int32* Nowhere() { return nullptr; }
+
+int32 WriteNowhere()
+{
+	*Nowhere() = 1;
+	return 1;
+}
+
+int32 g_crashes = WriteNowhere();

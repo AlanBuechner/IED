@@ -1,0 +1,64 @@
+// ControlFlow - switch cases (B10, D-39): stacked empty labels share a body, and every way a case may end
+// without running into the next one.
+include "../Framework/Assert.ch"
+include "SwitchStackedLabels.ch"
+
+int32 SslClassify(int32 v) {
+	switch (v) {
+	case 1:
+	case 2:
+	case 3:
+		return 10;
+	case 4:
+		if (v > 0) return 40; else return -40;
+	case 5:
+	{
+		return 50;
+	}
+	case 6:
+		while (true) { return 60; }
+	default:
+		return 0;
+	}
+}
+
+int32 SslCount(int32 limit) {
+	int32 total = 0;
+	for (int32 i = 0; i < limit; ++i) {
+		switch (i % 3) {
+		case 0:
+			continue;
+		case 1:
+			total = total + 1;
+			fallthrough;
+		case 2:
+			total = total + 10;
+			break;
+		}
+	}
+	return total;
+}
+
+int32 SslLast(int32 v) {
+	int32 r = 0;
+	switch (v) {
+	case 1:
+		r = 1;
+		break;
+	default:
+		r = 2; // the last case may run off its end: it leaves the switch
+	}
+	return r;
+}
+
+void TestSwitchStackedLabels() {
+	AssertIntEquals(10, SslClassify(1), "stacked label 1");
+	AssertIntEquals(10, SslClassify(3), "stacked label 3");
+	AssertIntEquals(40, SslClassify(4), "both branches return");
+	AssertIntEquals(50, SslClassify(5), "a block that returns");
+	AssertIntEquals(60, SslClassify(6), "an endless loop that returns");
+	AssertIntEquals(0, SslClassify(9), "default");
+	AssertIntEquals(32, SslCount(5), "continue, explicit fallthrough and break");
+	AssertIntEquals(2, SslLast(7), "the last case ends the switch");
+	AssertIntEquals(1, SslLast(1), "break");
+}

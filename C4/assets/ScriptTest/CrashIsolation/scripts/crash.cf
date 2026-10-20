@@ -1,0 +1,20 @@
+include "crash.ch"
+
+void WritesNull(void* unused) { *(int32*)Crash::g_null = 1; }
+
+void Divides(void* out) { *(int32*)out = 10 / Crash::g_zero; }
+
+int64 Deep(int64 depth, int64 limit)
+{
+	int64[128] frame;
+	for (int32 i = 0; i < 128; i++) frame[i] = depth + i;
+	Crash::g_frame = (int64)&frame[0];
+	if (depth >= limit) return frame[3];
+	return Deep(depth + 1, limit) + frame[5];
+}
+
+void Overflows(void* out) { *(int64*)out = Deep(0, *(int64*)out); }
+
+void Fine(void* out) { *(int32*)out = 5; }
+
+void Throws(void* unused) { throw 7; }

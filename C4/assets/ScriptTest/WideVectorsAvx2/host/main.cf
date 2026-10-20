@@ -1,0 +1,33 @@
+// A host compiled with -march=x86-64-v3 records the target in its .c4i: its scripts see SIMD_AVX2 and SIMD_FMA, may
+// use simd_fma, and pass 256-bit vectors in YMM registers as the host does (D-62).
+include "scripttest.ch"
+include "fused.ch"
+
+namespace Fused
+{
+	packed float[8] Step(packed float[8] position, packed float[8] velocity, float dt, int32 depth) {
+		return depth == 0 ? simd_fma(velocity, dt, position) : Step(position, velocity, dt, depth - 1);
+	}
+}
+
+void CheckFused(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	funcptr<packed float[8](packed float[8], float)> advance = (funcptr<packed float[8](packed float[8], float)>)script->Address("Advance");
+	checks.That(advance != nullptr, "the script has Advance");
+	if (advance == nullptr) return;
+	packed float[8] start = { 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+	packed float[8] moved = advance(start, 0.5f);
+	checks.Equal(2, (int64)moved[0], "lane 0 after two steps");
+	checks.Equal(9, (int64)moved[7], "lane 7 after two steps");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("WideVectorsAvx2");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "fused", "fused.cf"));
+	if (script->Ok()) CheckFused(script, checks);
+	script->Unload();
+	return checks.End("WideVectorsAvx2");
+}

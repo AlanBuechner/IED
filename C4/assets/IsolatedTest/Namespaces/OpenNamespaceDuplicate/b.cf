@@ -1,0 +1,7 @@
+include "math.ch"
+
+namespace Math {
+	int32 Count() { return 8; } // duplicate of a.cf's definition - must be rejected
+}
+
+int32 main() { return Math::Count(); }

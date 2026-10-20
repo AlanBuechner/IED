@@ -1,0 +1,6 @@
+int32 main() {
+	packed float[4] a = 1.0f;
+	packed bool[4] m = a > 0.0f;
+	packed bool[4] r = simd_min(m, m);
+	return 0;
+}

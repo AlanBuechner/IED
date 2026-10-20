@@ -1,0 +1,2 @@
+struct S { public int32 x; }
+int main() { const S[2] a; a[0].x = 5; return 0; }

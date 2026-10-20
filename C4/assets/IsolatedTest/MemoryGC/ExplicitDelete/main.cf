@@ -1,0 +1,45 @@
+// `delete` ends an object now: its finalizer runs once, its memory is reused, any pointer into it works, a
+// pinned object can be deleted, and deleting null does nothing.
+include "Memory/gc.ch"
+
+struct Item {
+	public int64 a;
+	public int64 b;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+struct Plain { public int64[4] words; }
+
+int32 g_finalized = 0;
+
+int32 main() {
+	Item* first = new Item;
+	uint64 slot = (uint64)first;
+	delete first;
+	if (g_finalized != 1) return 1;
+	Item* second = new Item;
+	if ((uint64)second != slot) return 2;          // the freed slot is the next one handed out
+	if (second->a != 0 || second->b != 0) return 3; // and it comes back zeroed
+
+	delete (Item*)(void*)&second->b;                 // a pointer into the object ends it too
+	if (g_finalized != 2) return 4;
+
+	Item* pinned = new Item;
+	GC::Pin((void*)pinned);
+	delete pinned;
+	if (g_finalized != 3) return 5;
+	GC::Collect();
+	if (g_finalized != 3) return 6;                 // never finalized twice
+
+	Item* none = null;
+	delete none;
+	Plain* p = new Plain;
+	p->words[3] = 7;
+	delete p;
+	if (g_finalized != 3) return 7;
+	uint64 live = GC::GetStats().liveBytes;
+	for (int32 i = 0; i < 100000; i++) { Plain* q = new Plain; delete q; }
+	if (GC::GetStats().liveBytes > live + 1024) return 8;
+	printf("DELETE OK\n");
+	return 0;
+}

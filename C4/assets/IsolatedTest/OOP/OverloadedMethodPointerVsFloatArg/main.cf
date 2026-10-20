@@ -1,0 +1,17 @@
+struct S {
+	int32 x;
+	public void Set(int32* p) { this->x = *p; }
+	public void Set(float f)  { this->x = (int32)f; }
+}
+int main() {
+	int32 v = 42;
+	S s;
+	s.Set(&v);                 // pointer arg -> int32* overload, x=42
+	if (s.x != 42) return 1;
+	s.Set(7.0f);               // float arg -> float overload, x=7
+	if (s.x != 7) return 2;
+	S t;
+	t.Set(9);                  // int arg: not a pointer, but converts to float -> float overload, x=9
+	if (t.x != 9) return 3;
+	return 0;
+}

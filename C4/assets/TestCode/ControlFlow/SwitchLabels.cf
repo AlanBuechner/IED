@@ -1,0 +1,61 @@
+// ControlFlow - switch selectors and case labels (09 4): every label the selector's type holds, chars,
+// bools, enums and named constants.
+include "../Framework/Assert.ch"
+include "SwitchLabels.ch"
+
+enum class SwlShape { Circle, Square }
+enum SwlPlain { SwlA, SwlB }
+const int32 kSwlBase = 3;
+
+int32 SwlInt8(int8 v) {
+	switch (v) {
+	case -128: return 1;
+	case 127: return 2;
+	default: return 0;
+	}
+}
+
+int32 SwlUInt64(uint64 v) {
+	switch (v) {
+	case 18446744073709551615u: return 1;
+	case 0: return 2;
+	default: return 0;
+	}
+}
+
+int32 SwlShapeCode(SwlShape s) {
+	switch (s) {
+	case SwlShape::Circle: return 1;
+	case SwlShape::Square: return 2;
+	}
+	return 0;
+}
+
+int32 SwlNamed(int32 v) {
+	switch (v) {
+	case kSwlBase: return 1;
+	case kSwlBase + 1: return 2;
+	default: return 0;
+	}
+}
+
+void TestSwitchLabels() {
+	AssertIntEquals(1, SwlInt8(-128), "int8 lowest label");
+	AssertIntEquals(2, SwlInt8(127), "int8 highest label");
+	AssertIntEquals(1, SwlUInt64(18446744073709551615u), "uint64 largest label");
+	AssertIntEquals(2, SwlUInt64(0u), "uint64 zero label");
+	AssertIntEquals(2, SwlShapeCode(SwlShape::Square), "enum class members");
+	AssertIntEquals(2, SwlNamed(4), "named constant labels");
+	SwlPlain p = SwlB;
+	int32 plain = 0;
+	switch (p) { case 1: plain = 1; break; default: break; }
+	AssertIntEquals(1, plain, "a plain enum takes integer labels");
+	char8 c = 'b';
+	int32 letter = 0;
+	switch (c) { case 'a': letter = 1; break; case 'b': letter = 2; break; default: break; }
+	AssertIntEquals(2, letter, "char labels");
+	bool flag = true;
+	int32 truth = 0;
+	switch (flag) { case true: truth = 1; break; case false: truth = 2; break; }
+	AssertIntEquals(1, truth, "bool labels");
+}

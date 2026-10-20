@@ -1,0 +1,17 @@
+// Regression: a user source file whose BASENAME collides with a default-library file must not clobber
+// that library file's text. This file is deliberately named stringview.cf, like Bedrock's own
+// Text/stringview.cf. It calls StringView methods defined there, so if the preprocessed-text identity bug
+// ever returns and this file's text overwrites Bedrock's, these calls fail to link and the build fails.
+include "bedrock.ch"
+
+int32 main() {
+    Core::StringView s = Core::StringView("hello");
+    assert_eq(5, s.ByteLength(), "byte length");
+    assert_eq(5, s.CharCount(), "char count");
+    assert_eq(2, s.IndexOf('l', 0), "an out-of-line method");
+    Core::StringView t = Core::StringView("hello");
+    assert_true(s == t, "equals same content");
+    assert_true(!s.IsEmpty(), "not empty");
+    printf("STRINGVIEW NAME COLLISION OK\n");
+    return 0;
+}

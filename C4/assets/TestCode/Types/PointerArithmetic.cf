@@ -1,0 +1,37 @@
+// Types - Pointer Arithmetic Tests (implementation)
+include "../Framework/Assert.ch"
+include "PointerArithmetic.ch"
+
+struct PaPair { int32 a; int64 b; }
+
+void TestPointerArithmetic() {
+	int32[3] arr;
+	arr[0] = 10;
+	arr[1] = 20;
+	arr[2] = 30;
+	
+	int32* ptr = &arr[0];
+	AssertEqual(10, *ptr);
+	AssertEqual(30, *(ptr + 2));
+	AssertEqual(20, *(2 + ptr - 1));
+}
+
+// BUG-168: the difference of two pointers into one array counts elements, as in C.
+void TestPointerDifference() {
+	int32[8] ints;
+	int32* first = &ints[1];
+	int32* last = &ints[6];
+	AssertTrue(last - first == 5 ? 1 : 0);
+	AssertTrue(first - last == -5 ? 1 : 0);
+	AssertTrue(first - first == 0 ? 1 : 0);
+	const int32* view = first;
+	AssertTrue(last - view == 5 ? 1 : 0);
+	PaPair[4] pairs;
+	PaPair* p = &pairs[3];
+	PaPair* q = &pairs[0];
+	AssertTrue(p - q == 3 ? 1 : 0);
+	char* bytes = (char*)p;
+	AssertTrue(bytes - (char*)q == 3 * (int64)sizeof(PaPair) ? 1 : 0);
+	int64 count = p - q;
+	AssertTrue(q + count == p ? 1 : 0);
+}

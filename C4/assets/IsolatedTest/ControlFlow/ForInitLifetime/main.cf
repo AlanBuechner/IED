@@ -1,0 +1,36 @@
+// BUG-056: a value local declared in a for init clause lives for the whole loop and is destroyed once,
+// when the loop ends - by the condition failing, by break, or by return.
+int32 g_dtor;
+struct Res {
+	public int32 value;
+	[operator("create")] public void Init() { value = 5; }
+	[operator("delete")] public void Fini() { g_dtor++; }
+};
+
+int32 ConditionEnds() {
+	g_dtor = 0;
+	int32 sum = 0;
+	for (Res r; sum < 15; sum += r.value) { if (g_dtor != 0) return -1; }
+	return g_dtor == 1 ? sum : -2;
+}
+
+int32 BreakEnds() {
+	g_dtor = 0;
+	for (Res r; ; ) { if (g_dtor != 0) return -1; break; }
+	return g_dtor;
+}
+
+int32 ReturnEnds() {
+	g_dtor = 0;
+	for (Res r; ; ) { return r.value; }
+	return -1;
+}
+
+int32 main() {
+	int32 failures = 0;
+	if (ConditionEnds() != 15) failures++;
+	if (BreakEnds() != 1) failures++;
+	if (ReturnEnds() != 5 || g_dtor != 1) failures++;
+	if (failures != 0) printf("ForInitLifetime failures: %d\n", failures);
+	return failures;
+}

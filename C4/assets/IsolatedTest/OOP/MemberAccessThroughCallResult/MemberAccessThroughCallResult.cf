@@ -1,0 +1,51 @@
+// Encodes the project's core architectural thesis (the "getData().someNumber = 1" example): member
+// access and operator dispatch must work through a FUNCTION CALL RESULT whether the call returns by
+// VALUE or by REFERENCE, because a call result collapses to a type at a stack address - no special
+// handling per return-kind. Locked so this implicit behavior can't silently regress:
+//   (1) read a member through a BY-VALUE call result
+//   (2) WRITE through a BY-REFERENCE call result (write-through to the referent)
+//   (3) read a member through by-value into a local
+//   (4) operator overload dispatched ON A TEMPORARY call result - the subtle case proving operators
+//       truly collapse to function calls (a receiver that is itself a transient temp)
+//   (5) chained (two-level) member write-through through a reference call result
+struct Data { int32 num; float f; };
+Data g_data;
+struct Inner { int32 deep; };
+struct Outer { Inner in; };
+Outer g_outer;
+
+Data GetDataByValue() { return g_data; }   // returns a COPY
+Data& GetDataByRef()  { return g_data; }   // returns a reference (write-through)
+Outer& GetOuter()     { return g_outer; }
+
+struct Vec2 {
+    float x, y;
+    [operator("add")]
+    Vec2 Add(Vec2 other) { return Vec2(this->x + other.x, this->y + other.y); }
+};
+Vec2 GetVec() { return Vec2(1.0f, 2.0f); }
+
+int32 main()
+{
+    // (1) read member through a by-value call result
+    g_data.num = 7;
+    if (GetDataByValue().num != 7) return 1;
+
+    // (2) write through a by-reference call result - must reach the referent
+    GetDataByRef().num = 42;
+    if (g_data.num != 42) return 2;
+
+    // (3) read member through by-value into a local
+    int32 v = GetDataByValue().num;
+    if (v != 42) return 3;
+
+    // (4) operator overload on a TEMPORARY call result - the receiver is itself a transient
+    Vec2 r = GetVec() + Vec2(10.0f, 20.0f);   // [operator("add")] dispatch on the temp
+    if (r.x != 11.0f || r.y != 22.0f) return 4;
+
+    // (5) chained two-level write-through through a reference call result
+    GetOuter().in.deep = 99;
+    if (g_outer.in.deep != 99) return 5;
+
+    return 0;
+}

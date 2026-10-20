@@ -1,0 +1,23 @@
+class A {
+    int32 x;
+    [operator("create")] public void Init(int32 v) { this->x = v; }
+    public int32 X() { return this->x; }
+}
+class B {
+    char* data;
+    int32 len;
+    [operator("create")] public void Init(int32 size) { this->data = (char*)raw_alloc(size); this->len = size; }
+    public int32 Len() { return this->len; }
+    public char* Data() { return this->data; }
+}
+int32 main() {
+    A* a = new A{5};
+    if (a->X() != 5) { printf("FAIL A x=%d\n", a->X()); return 1; }
+    delete a;
+    B* b = new B{8};
+    set_byte((void*)b->Data(), 0, 7);
+    if (b->Len() != 8 || byte_at(b->Data(), 0) != 7) { printf("FAIL B len=%d byte=%d\n", b->Len(), byte_at(b->Data(), 0)); return 1; }
+    delete b;
+    printf("AGGREGATE+RAWALLOC OK\n");
+    return 0;
+}

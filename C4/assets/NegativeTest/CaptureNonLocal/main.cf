@@ -1,0 +1,2 @@
+int32 g_value = 3;
+int32 main() { func<int32()> f = [g_value]() -> int32 { return g_value; }; return f(); }

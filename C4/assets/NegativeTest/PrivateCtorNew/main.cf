@@ -1,0 +1,5 @@
+class Token {
+	private int32 n;
+	[operator("create")] private void Init(int32 v) { this.n = v; }
+}
+int32 main() { Token* t = new Token(5); return 0; }

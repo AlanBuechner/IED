@@ -1,0 +1,2 @@
+int32 Read(int32 count, ...) { va_list ap; va_start(ap); int16 s = va_arg(ap, int16); va_end(ap); return s; }
+int32 main() { return 0; }

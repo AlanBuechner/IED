@@ -1,0 +1,16 @@
+// EnumForward unit 2 - a SEPARATE compilation unit that includes the same shared header. The first
+// unit already fully processed the enum node, so this unit hits the IsProcessed dedup path: it must
+// still resolve the type AND its members (EngineAPI::DX12) here. Before the fix this regressed to
+// "Undefined identifier 'Engine'" because member symbols are per-unit and were skipped on reuse.
+include "../Framework/Assert.ch"
+include "EnumForward.ch"
+
+void TestEnumCrossUnit() {
+    EngineAPI::RendererAPI a = EngineAPI::DX12;      // qualified type + value from another unit's header
+    Assert((int32)a == 0, "ef xunit: DX12 == 0");
+    EngineAPI::RendererAPI b = EngineAPI::Vulkan;
+    Assert((int32)b == 1, "ef xunit: Vulkan == 1");
+    EngineAPI::Config cfg;                        // struct from the same shared header still works
+    cfg.api = (int32)EngineAPI::Vulkan;
+    Assert(cfg.api == 1, "ef xunit: struct field holds enum value");
+}

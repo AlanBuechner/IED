@@ -1,0 +1,36 @@
+// Core - constants resolve from the scope they are written in (BUG-143): a sibling in a namespace or class,
+// an array extent or lane count in a namespaced type, an enum member, and a name qualified relative to an
+// enclosing namespace.
+include "../Framework/Assert.ch"
+include "ScopedConstants.ch"
+
+namespace ScMath {
+	public static const float PI = 3.14159265f;
+	public static const float TAU = PI * 2.0f;
+	const int32 K = 4;
+	struct Row { int32[K] cells; }
+	enum Slot { First = K, Second }
+	namespace Inner { const int32 J = 2; }
+	const int32 M = Inner::J + 1;
+	packed float[K] Lanes() { packed float[K] v = { 1.0f, 2.0f, 3.0f, 4.0f }; return v; }
+	int32 Pick(int32 v) {
+		switch (v) { case K: return 1; case M: return 2; default: return 0; }
+	}
+}
+
+class ScHolder {
+	public static const int32 Q = 3;
+	public static const int32 R = Q + 1;
+	public int32[Q] cells;
+}
+
+void TestScopedConstants() {
+	AssertFloatEquals(3.14159265f * 2.0f, ScMath::TAU, "a namespace constant names its sibling");
+	AssertIntEquals(16, (int32)sizeof(ScMath::Row), "an extent names a constant of its namespace");
+	AssertIntEquals(5, (int32)ScMath::Second, "an enum member names a constant of its namespace");
+	AssertIntEquals(3, ScMath::M, "a name qualified relative to the enclosing namespace");
+	AssertFloatEquals(4.0f, ScMath::Lanes()[3], "a lane count names a constant of its namespace");
+	AssertIntEquals(2, ScMath::Pick(3), "a case label names a constant of its namespace");
+	AssertIntEquals(4, ScHolder::R, "a class constant names its sibling");
+	AssertIntEquals(12, (int32)sizeof(ScHolder), "a field extent names a class constant");
+}

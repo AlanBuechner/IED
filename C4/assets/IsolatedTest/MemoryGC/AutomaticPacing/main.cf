@@ -1,0 +1,56 @@
+// BUG-095: automatic collection follows the live heap. Garbage churn with no explicit collection triggers
+// collections and keeps the heap bounded; Disable stops them; Enable resumes; Collect works while disabled;
+// SetPercent changes how much the live heap grows before the next collection.
+include "Memory/gc.ch"
+
+const uint64 kMiB = 1048576;
+
+struct Chunk { public int64[128] words; }   // 1 KiB, pointer-free
+
+void Churn(uint64 bytes) {
+	for (uint64 done = 0; done < bytes; done += sizeof(Chunk)) {
+		Chunk* c = new Chunk;
+		c->words[0] = (int64)done;
+	}
+}
+
+const int32 kLiveChunks = 16384;
+Chunk*[16384] g_live;
+
+void KeepLive() {
+	for (int32 i = 0; i < kLiveChunks; i++) g_live[i] = new Chunk;
+}
+
+uint64 CollectionsDuring(uint64 churn) {
+	GC::Collect();   // start from a collection, so the trigger reflects the live heap
+	uint64 before = GC::GetStats().collections;
+	Churn(churn);
+	return GC::GetStats().collections - before;
+}
+
+int32 main() {
+	uint64 start = GC::GetStats().collections;
+	Churn(256 * kMiB);
+	GC::Stats churned = GC::GetStats();
+	if (churned.collections < start + 10) return 1;
+	if (churned.heapBytes > 128 * kMiB) return 2;
+
+	GC::Disable();
+	Churn(32 * kMiB);
+	if (GC::GetStats().collections != churned.collections) return 3;
+	GC::Collect();
+	if (GC::GetStats().collections != churned.collections + 1) return 4;
+	GC::Enable();
+	Churn(64 * kMiB);
+	if (GC::GetStats().collections <= churned.collections + 1) return 5;
+
+	KeepLive();                                   // 16 MiB live: the trigger now follows the percent
+	uint64 dense = CollectionsDuring(128 * kMiB);
+	if (GC::SetPercent(400) != 100) return 6;
+	uint64 sparse = CollectionsDuring(128 * kMiB);
+	if (sparse * 2 > dense) return 7;
+	if (GC::SetPercent(0) != 400) return 8;     // below 1 counts as 1
+	if (GC::SetPercent(100) != 1) return 9;
+	printf("PACING OK\n");
+	return 0;
+}

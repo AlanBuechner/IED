@@ -1,0 +1,14 @@
+// The default library is opt-in by include (BUG-085): a program that includes none of Bedrock compiles
+// none of it and may use its names for its own types and functions.
+class File { public int32 fd; }
+class String { public int32 length; }
+template<T> class Vector { public T first; }
+int32 HashBytes(int32 x) { return x * 3; }
+
+int32 main() {
+	File f; f.fd = 3;
+	String s; s.length = 4;
+	Vector<int32> v; v.first = 5;
+	if (f.fd + s.length + v.first + HashBytes(1) != 15) return 1;
+	return 0;
+}

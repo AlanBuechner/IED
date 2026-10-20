@@ -1,0 +1,4 @@
+int32 g = 7;
+int32& G() { return g; }
+int32& P(int32& v) { return v; }
+int main() { int32 x = 3; return (G() == 7 && P(x) == 3) ? 0 : 1; }

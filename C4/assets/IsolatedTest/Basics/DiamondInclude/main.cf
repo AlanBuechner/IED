@@ -1,0 +1,8 @@
+// Two headers include one shared header: its type is one type, seen through both (CompilerIncludeTest).
+include "left.ch"
+include "right.ch"
+int32 main() {
+	Shared s = MakeLeft();
+	s.value += MakeRight().value;
+	return s.value == 3 ? 0 : 1;
+}

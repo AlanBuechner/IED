@@ -1,0 +1,89 @@
+// Comprehensive language-swizzle test (plan item 1).
+// Covers: packed/unpacked, scalar + multi-lane read/write, positional and per-lane vector writes,
+// aggregate init, whole-vector copy, by-value params/returns, pointer access, sizeof.
+
+class Vec4 { public union { packed float x, y, z, w; }; }
+class Vec3 { public union { packed float x, y, z; }; }
+class Int2 { public union { packed int32 a, b; }; }
+class UVec4 { public union { unpacked float r, g, b, a; }; }
+
+// by-value param + return in SIMD registers
+float SumXZ(Vec3 v) { return v.x + v.z; }
+float LaneSum4(Vec4 v) { return v.x + v.y + v.z + v.w; }
+Vec3 ScaleY(Vec3 v) { v.y = v.y * 2.0f; return v; }
+int32 SizeOf4() { return sizeof(Vec4); }
+
+// File-scope global swizzle variable (zero-initialized, addressable).
+Vec4 gGlobal = { 1.0f, 2.0f, 3.0f, 4.0f };
+
+int32 main()
+{
+	// --- Aggregate init (positional) + scalar read/write -----------------------------
+	Vec3 v = { 0.0f, 0.0f, 0.0f };
+	v.xz = { 1.0f, 1.0f };          // -> (1, 0, 1)
+	if (v.x != 1.0f || v.y != 0.0f || v.z != 1.0f) { printf("FAIL init (%.1f,%.1f,%.1f)\n", v.x, v.y, v.z); return 1; }
+
+	v.x = 5.0f;                      // scalar insert
+	if (v.x != 5.0f || v.y != 0.0f) { printf("FAIL scalar write\n"); return 1; }
+
+	// --- Multi-lane read (reordered / repeated) -------------------------------------
+	Vec4 q = { 9.0f, 8.0f, 7.0f, 6.0f };
+	if (q.w != 6.0f || q.x != 9.0f) { printf("FAIL basic read\n"); return 1; }
+
+	// --- Per-lane vector write: v3.zx = v2  (plan example: Vec2{2,1} -> z=2, x=1) ----
+	Vec3 v3 = { 0.0f, 0.0f, 0.0f };
+	Vec3 v2src = { 2.0f, 1.0f, 0.0f }; // use Vec3 as a 2-lane-shaped source via .xy
+	v3.zx = v2src.xy;                 // z <- 2, x <- 1  -> (1, 0, 2)
+	if (v3.x != 1.0f || v3.y != 0.0f || v3.z != 2.0f) { printf("FAIL zx write (%.1f,%.1f,%.1f)\n", v3.x, v3.y, v3.z); return 1; }
+
+	// --- Positional multi-lane write on a Vec4 --------------------------------------
+	q.xyz = { 9.0f, 8.0f, 7.0f };
+	if (q.x != 9.0f || q.y != 8.0f || q.z != 7.0f || q.w != 6.0f) { printf("FAIL xyz write\n"); return 1; }
+
+	// --- A repeated-lane run (wwww) is read-only (D-37); one lane writes alone, x/y/z keep their values. ----
+	q.w = 3.0f;
+	if (q.x != 9.0f || q.y != 8.0f || q.z != 7.0f || q.w != 3.0f) { printf("FAIL w write (%.1f,%.1f,%.1f,%.1f)\n", q.x,q.y,q.z,q.w); return 1; }
+	// Repeated-lane READ is a splat: v.wwww == (w,w,w,w). Pass it by value to exercise the SIMD ABI.
+	Vec4 r = { 1.0f, 2.0f, 3.0f, 9.0f };
+	if (LaneSum4(r.wwww) != 36.0f) { printf("FAIL wwww read splat (%.1f)\n", LaneSum4(r.wwww)); return 1; }
+
+	// --- Whole-vector copy by value --------------------------------------------------
+	Vec3 c = v3;
+	if (c.x != 1.0f || c.z != 2.0f) { printf("FAIL copy\n"); return 1; }
+
+	// --- By-value param + return (SIMD register ABI) ---------------------------------
+	if (SumXZ(v3) != 3.0f) { printf("FAIL SumXZ (%.1f)\n", SumXZ(v3)); return 1; }
+	Vec3 s = ScaleY(Vec3{ 1.0f, 2.0f, 3.0f });
+	if (s.y != 4.0f || s.x != 1.0f) { printf("FAIL ScaleY\n"); return 1; }
+
+	// --- Integer element type --------------------------------------------------------
+	Int2 iv = { 7, 9 };
+	if (iv.a != 7 || iv.b != 9) { printf("FAIL int read\n"); return 1; }
+	iv.ab = { 4, 5 };
+	if (iv.a != 4 || iv.b != 5) { printf("FAIL int write\n"); return 1; }
+
+	// --- Unpacked layout -------------------------------------------------------------
+	UVec4 uv = { 1.0f, 2.0f, 3.0f, 4.0f };
+	if (uv.r != 1.0f || uv.a != 4.0f) { printf("FAIL unpacked read\n"); return 1; }
+	uv.rb = { 5.0f, 6.0f };
+	if (uv.r != 5.0f || uv.b != 6.0f || uv.g != 2.0f) { printf("FAIL unpacked write\n"); return 1; }
+
+	// --- sizeof ----------------------------------------------------------------------
+	if (SizeOf4() != 16) { printf("FAIL sizeof Vec4 = %d\n", SizeOf4()); return 1; }
+	if (sizeof(Vec3) != 12) { printf("FAIL sizeof Vec3 = %d\n", sizeof(Vec3)); return 1; }
+
+	// --- Pointer access: lane read/write through a pointer ---------------------------
+	Vec3 pv = { 1.0f, 2.0f, 3.0f };
+	Vec3* pp = &pv;
+	if (pp->z != 3.0f) { printf("FAIL ptr read\n"); return 1; }
+	pp->xy = { 10.0f, 20.0f };
+	if (pv.x != 10.0f || pv.y != 20.0f || pv.z != 3.0f) { printf("FAIL ptr write\n"); return 1; }
+
+	// --- Global swizzle variable: read + lane write ----------------------------------
+	if (gGlobal.w != 4.0f) { printf("FAIL global read\n"); return 1; }
+	gGlobal.xz = { 5.0f, 6.0f };
+	if (gGlobal.x != 5.0f || gGlobal.z != 6.0f || gGlobal.y != 2.0f) { printf("FAIL global write\n"); return 1; }
+
+	printf("SWIZZLE LANG OK\n");
+	return 0;
+}

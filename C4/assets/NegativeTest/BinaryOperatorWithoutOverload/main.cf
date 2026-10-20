@@ -1,0 +1,2 @@
+struct S { int32 v; };
+int main() { S a, b; a.v = 1; b.v = 2; S c = a + b; return 0; }

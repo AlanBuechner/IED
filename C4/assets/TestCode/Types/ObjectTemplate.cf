@@ -1,0 +1,79 @@
+// Types - Object Template Tests (implementation)
+include "../Framework/Assert.ch"
+include "ObjectTemplate.ch"
+
+template<T> struct TplBox {
+	T value;
+	T extra;
+
+	[operator("create")] public void Init(T v, T e) {
+		this.value = v;
+		this.extra = e;
+	}
+
+	public T Get() {
+		return this.value;
+	}
+
+	public T AddExtra(T other) {
+		return this.value + this.extra + other;
+	}
+}
+
+template<A,B> struct TplPair {
+	A m_X;
+	B m_Y;
+	public static int32 Sum(int32 a, int32 b) { return a + b; }
+}
+
+template<T> struct TplWrap {
+	T m_V;
+	public static int32 Tag(int32 v) { return v + 100; }
+}
+
+void TestObjectTemplate() {
+	// Instantiate with int32: fields, constructor, and two methods.
+	TplBox<int32> b;
+	b.Init(40, 2);
+	AssertIntEquals(40, b.Get(), "obj template get int32");
+	AssertIntEquals(64, b.AddExtra(22), "obj template method int32");
+
+	// Same template instantiated with uint64 (distinct instantiation coexists).
+	TplBox<uint64> u;
+	u.Init(100u, 50u);
+	AssertIntEquals(100, (int32)u.Get(), "obj template get uint64");
+	AssertIntEquals(170, (int32)u.AddExtra(20u), "obj template method uint64");
+
+	// Both instantiations remain usable after the second is created.
+	AssertIntEquals(40, b.Get(), "obj template coexist int32");
+	AssertIntEquals(100, (int32)u.Get(), "obj template coexist uint64");
+
+	// Composite literal using the INSTANTIATION as a type prefix (`TplBox<int32>{...}`), not just an
+	// alias. This is the expression-position spelling that used to fail to parse ("Undefined
+	// identifier") and, once parsed, miscompiled (init dropped + pointer-receiver field read). The
+	// concrete-class form `CBox{7}` always worked; this locks the templated form to the same path.
+	TplBox<int32> c = TplBox<int32>{5, 6};
+	AssertIntEquals(5, c.Get(), "obj template complit prefix get");
+	AssertIntEquals(17, c.AddExtra(6), "obj template complit prefix method");
+
+	// A second instantiation of the same template via its own prefix spelling coexists with `c`.
+	// AddExtra(0.0f) folds to value + extra, so this confirms BOTH fields were set by the complit.
+	TplBox<float> f = TplBox<float>{1.5f, 2.0f};
+	AssertIntEquals(3, (int32)f.AddExtra(0.0f), "obj template complit prefix float both fields");
+
+	// MULTI-ARG instantiation as a prefix (`TplPair<int32,float>`). The mangled key must be built
+	// from BOTH top-level arguments on the definition and every call site, or the composite literal
+	// / static access would not bind to the emitted body. This locks the depth-aware arg split that
+	// single-arg tests never exercised.
+	TplPair<int32,float> p = TplPair<int32,float>{7, 1.5f};
+	AssertIntEquals(7, p.m_X, "obj template multi-arg complit prefix field");
+	AssertIntEquals(7, TplPair<int32,float>::Sum(3,4), "obj template multi-arg static access");
+
+	// NESTED-ARG instantiation as a prefix (`TplWrap<TplBox<int32>>`). The argument is itself an
+	// instantiation, so its `<...>` must fold into ONE sanitized fragment (key `TplWrap_TplBoxint32`)
+	// rather than being split at the inner angle brackets. Both the complit and the static access go
+	// through the same key, so a wrong split would fail to link or run the wrong body.
+	TplWrap<TplBox<int32>> w = TplWrap<TplBox<int32>>{ TplBox<int32>{9,1} };
+	AssertIntEquals(9, w.m_V.Get(), "obj template nested-arg complit prefix field");
+	AssertIntEquals(105, TplWrap<TplBox<int32>>::Tag(5), "obj template nested-arg static access");
+}

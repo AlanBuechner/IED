@@ -1,0 +1,67 @@
+// Allocation, construction, the destructor on delete, liveness across collections, bounded memory under churn
+// and collected cycles. main returns the failed checks.
+struct Node { public int32 id; public Node* next; }
+struct Chunk { public int32 a; public int32 b; public int32 c; public int32 d; }
+int32 g_fail = 0;
+void Check(bool cond) { if (!cond) g_fail++; }
+int32 g_destroyed = 0;
+struct Widget {
+	public int32 value;
+	[operator("create")] public void Init(int32 v) { value = v * 2; }
+	[operator("delete")] public void Destroy() { g_destroyed++; }
+}
+struct Vec2 { public float x; public float y; }
+Node* g_a;
+Node* g_b;
+void MakeAndDropCycle() {
+	Node* a = new Node;
+	Node* b = new Node;
+	a->id = 100;
+	b->id = 200;
+	a->next = b;
+	b->next = a;
+	g_a = a;
+	g_b = b;
+	g_a = null;
+	g_b = null;
+}
+int32 main() {
+	Chunk* c = new Chunk;
+	Check(c != null);
+	c->a = 10; c->b = 20; c->c = 30; c->d = 40;
+	Check(c->a == 10 && c->b == 20 && c->c == 30 && c->d == 40);
+	Widget* w = new Widget(21);
+	Check(w->value == 42);
+	Vec2* v = new Vec2{ 1.5f, -2.5f };
+	Check(v->x == 1.5f && v->y == -2.5f);
+	Widget* w2 = new Widget(5);
+	Check(g_destroyed == 0);
+	delete w2;
+	Check(g_destroyed == 1);
+	uint64 allocsBefore = gc_allocs();
+	for (int32 i = 0; i < 20; ++i) {
+		Chunk* tmp = new Chunk;
+		tmp->a = i;
+		gc_collect();
+	}
+	Check(c->a == 10 && c->d == 40);
+	gc_collect();
+	Check(c->c == 30 && w->value == 42);
+	Check(gc_allocs() >= allocsBefore + 20);
+	Check(gc_collections() > 0);
+	uint64 heapStart = gc_heap_bytes();
+	for (int32 i = 0; i < 2000; ++i) {
+		Chunk* x = new Chunk;
+		x->a = i;
+	}
+	gc_collect();
+	Check(gc_heap_bytes() <= heapStart + (16 * 1024 * 1024));
+	Check(c->d == 40);
+	uint64 cycleStart = gc_heap_bytes();
+	for (int32 round = 0; round < 100; ++round) {
+		MakeAndDropCycle();
+		gc_collect();
+	}
+	Check(gc_heap_bytes() < cycleStart + (16 * 1024 * 1024)); // the heap may shrink: dead objects are collected
+	return g_fail;
+}

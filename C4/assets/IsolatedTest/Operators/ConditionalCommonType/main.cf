@@ -1,0 +1,36 @@
+// `c ? a : b` gives both branches one type: the same type, the usual arithmetic result of two numbers (an enum as its
+// underlying integer), a base object or pointer, or the pointer `null` meets (BUG-221). main returns the failures.
+class Animal { public int32 legs; public virtual int32 Sound() { return 1; } }
+class Dog : Animal { public override int32 Sound() { return 2; } }
+enum Size { Small = 1, Large = 3 }
+
+int32 Twice(int32 x) { return x * 2; }
+
+int32 main() {
+	int32 failures = 0;
+	bool yes = true;
+	bool no = false;
+	int16 narrow = 7;
+	int64 wide = yes ? narrow : 5000000000;
+	if (wide != 7) failures += 1;
+	double mixed = no ? 1 : 2.5;
+	if (mixed != 2.5) failures += 1;
+	int32 fromEnum = yes ? Large : 0;
+	if (fromEnum != 3) failures += 1;
+	Dog dog;
+	dog.legs = 4;
+	Animal* someAnimal = new Animal();
+	Animal* chosen = yes ? &dog : someAnimal;
+	if (chosen->Sound() != 2) failures += 1;
+	Animal* other = no ? someAnimal : &dog;
+	if (other->legs != 4) failures += 1;
+	int32 value = 9;
+	int32* maybe = yes ? &value : null;
+	int32* none = yes ? null : &value;
+	if (maybe == null || *maybe != 9 || none != null) failures += 1;
+	Animal copy = yes ? dog : *someAnimal;
+	if (copy.legs != 4) failures += 1;
+	funcptr<int32(int32)> f = yes ? Twice : null;
+	if (f(4) != 8) failures += 1;
+	return failures;
+}

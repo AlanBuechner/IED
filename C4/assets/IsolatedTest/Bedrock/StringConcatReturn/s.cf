@@ -1,0 +1,21 @@
+// Regression: a function that RETURNS A STRUCT BY VALUE from out-of-line code. The callee materializes
+// the result in a temporary and hands it back by value; the caller stores it into its own local. If
+// the return path drops an argument or mis-routes the sret/temp, this fails IR verification or prints
+// garbage.
+include "bedrock.ch"
+
+struct Holder { char* buf; int32 len; }
+
+Holder MakeHolder() { Holder h; h.buf = "foobar"; h.len = 6; return h; }
+Core::StringView Tail(Holder h) { return Core::StringView(h.buf + (h.len - 3), 3, 3); }
+
+int32 main() {
+    Holder h = MakeHolder();          // by-value struct return, stored to a local
+    assert_eq(6, h.len, "holder length");
+    Core::StringView t = Tail(h);     // by-value struct return of a sub-view
+    assert_eq(3, t.ByteLength(), "tail length");
+    assert_true(t == Core::StringView("bar"), "tail content");
+    assert_true(Core::StringView("foobar").Substring(3, 3) == t, "an out-of-line by-value return");
+    printf("STR BY-VALUE RETURN OK\n");
+    return 0;
+}

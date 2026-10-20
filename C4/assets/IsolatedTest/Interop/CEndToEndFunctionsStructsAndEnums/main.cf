@@ -1,0 +1,21 @@
+extern "c" include "outparam.h"
+extern "c" source "outparam.c"
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+int32 main() {
+	// Nested-pointer out-param (the Win32/DX factory pattern): pass &pBox so C can write the
+	// allocated pointer back through a Box**.
+	Box* pBox = null;
+	int32 rc = make_box(&pBox, 1234);
+	Check(rc == 0, "make_box returns success");
+	Check(pBox != null, "out-param Box* written back by C");
+	Check(pBox != null && pBox->x == 1234, "struct field set through nested out-param");
+
+	char* msg = make_message(42);
+	Check(msg != null, "C returns char*");
+	if (g_fail) { printf("OUTPARAM TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("OUTPARAM TESTS OK\n");
+	return 0;
+}

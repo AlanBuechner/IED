@@ -1,0 +1,58 @@
+// The runtime's threads (C4Runtime/ThreadRuntimeC.c): start and join, a detached thread, thread ids, the
+// processor count, sleeping, and parking on an address until another thread changes it and wakes the sleeper
+// or the timeout passes. main returns the failures.
+struct Shared {
+	public int32 flag;
+	public int32 seen;
+	public uint64 id;
+	public int32 detachedDone;
+}
+
+void WaitWhile(int32* address, int32 value) {
+	while (atomic_load(address, MemoryOrder::Acquire) == value) wait_on_address((void*)address, (void*)&value, 4, -1);
+}
+
+void Waiter(void* state) {
+	Shared* s = (Shared*)state;
+	s->id = thread_current_id();
+	WaitWhile(&s->flag, 0);
+	s->seen = atomic_load(&s->flag, MemoryOrder::Acquire);
+}
+
+void Detached(void* state) {
+	Shared* s = (Shared*)state;
+	atomic_store(&s->detachedDone, 1, MemoryOrder::Release);
+	wake_all((void*)&s->detachedDone);
+}
+
+bool TimesOut() {
+	int32 value = 5;
+	int32 same = 5;
+	for (int32 attempt = 0; attempt < 10; attempt++)
+		if (!wait_on_address((void*)&value, (void*)&same, 4, 1000000)) return true;
+	return false;
+}
+
+int32 main() {
+	int32 failures = 0;
+	Shared* s = new Shared;
+	void* waiter = thread_start(Waiter, (void*)s);
+	if (waiter == null) return 100;
+	thread_sleep_ns(2000000);
+	atomic_store(&s->flag, 7, MemoryOrder::Release);
+	wake_one((void*)&s->flag);
+	thread_join(waiter);
+	if (s->seen != 7) failures++;
+	if (s->id == 0 || s->id == thread_current_id()) failures++;
+
+	thread_detach(thread_start(Detached, (void*)s));
+	WaitWhile(&s->detachedDone, 0);
+
+	if (!TimesOut()) failures++;
+	if (thread_hardware_count() < 1) failures++;
+	thread_yield();
+	thread_sleep_ns(-5);
+	thread_join(null);
+	thread_detach(null);
+	return failures;
+}

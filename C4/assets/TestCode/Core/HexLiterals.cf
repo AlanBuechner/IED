@@ -1,0 +1,36 @@
+// Core - Hex Literal Tests (implementation)
+include "../Framework/Assert.ch"
+include "HexLiterals.ch"
+
+// A helper so the literal sits in CALL-ARGUMENT position (the shape that used to sign-extend).
+int64 IdInt64(int64 v) { return v; }
+
+void TestHexLiterals() {
+	int64 hex1 = 0xFF;
+	AssertEqual(255, (int32)hex1);
+
+	int64 hex2 = 0x1A;
+	AssertEqual(26, (int32)hex2);
+
+	// A hex constant whose value exceeds INT32_MAX must keep its full 64-bit value.
+	// Regression: it was previously emitted as a truncated i32 (-559038737), so any use of the
+	// constant (e.g. comparing a variable against it) silently compared garbage. The full-value
+	// comparison below is what catches that: before the fix hex3 held -559038737, not 3735928559.
+	int64 hex3 = 0xDEADBEEF;
+	Assert(hex3 == 0xDEADBEEF, "hex 0xDEADBEEF must keep its full 64-bit value");
+
+	// A uint64 variable holding a large hex constant must equal that same constant.
+	uint64 big = 0xDEADBEEF;
+	Assert(big == 0xDEADBEEF, "uint64 var initialized to 0xDEADBEEF must equal it");
+
+	// The largest 32-bit value (INT32_MAX + 1) is the truncation boundary.
+	int64 edge = 0x80000000;
+	Assert(edge == 0x80000000, "hex 0x80000000 must not truncate at the int32 boundary");
+
+	// Call-argument position: a hex literal above INT32_MAX passed to an int64 parameter must be
+	// ZERO-extended, not sign-extended (was -1645436146 for 0x9DECA30E). This is the exact shape of
+	// assert_eq((int64)x, 0x9DECA30E) that silently compared against a negative value.
+	Assert(IdInt64(0x9DECA30E) == 2649531150, "hex call-arg above INT32_MAX must zero-extend");
+	// Decimal literal above INT32_MAX in call-argument position (same class).
+	Assert(IdInt64(2649531150) == 2649531150, "decimal call-arg above INT32_MAX must zero-extend");
+}

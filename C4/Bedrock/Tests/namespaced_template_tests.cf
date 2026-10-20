@@ -1,0 +1,56 @@
+// Namespace-qualified types as template arguments (Core::Array<MyMath::Vec3>): the definition and every
+// call site must agree on the instance's symbols. The element types live in a namespace of the test's
+// own, so the test does not depend on Bedrock's opt-in math library.
+
+include "bedrock.ch"
+
+namespace MyMath {
+	struct Vec2 { float x; float y; }
+	struct Vec3 { float x; float y; float z; }
+}
+
+[test("namespaced.array_of_namespaced_vec3")]
+public static void TestArrayOfNamespacedVec3() {
+	Core::Array<MyMath::Vec3> v;   // value container (RAII frees the buffer at scope exit)
+	MyMath::Vec3 a; a.x = 1.0f; a.y = 2.0f; a.z = 3.0f;
+	MyMath::Vec3 b; b.x = 4.0f; b.y = 5.0f; b.z = 6.0f;
+	v.Push(a); v.Push(b);
+	assert_eq(2, v.Count(), "two vec3 elements");
+	MyMath::Vec3 first = v.At(0);
+	MyMath::Vec3 second = v.At(1);
+	assert_true(first.x == 1.0f && first.y == 2.0f && first.z == 3.0f, "index 0 round-trips");
+	assert_true(second.x == 4.0f && second.y == 5.0f && second.z == 6.0f, "index 1 round-trips");
+}
+
+// Two different namespaced element types in one binary must produce distinct mangled symbols and
+// neither may clobber the other (guards against sanitization collapsing MyMath::Vec3/MyMath::Vec2).
+[test("namespaced.two_instantiations_no_collision")]
+public static void TestTwoNamespacedInstantiations() {
+	Core::Array<MyMath::Vec3> v3;   // value containers
+	Core::Array<MyMath::Vec2> v2;
+	MyMath::Vec3 p; p.x = 10.0f; p.y = 20.0f; p.z = 30.0f;
+	MyMath::Vec2 q; q.x = 7.0f; q.y = 8.0f;
+	v3.Push(p);
+	v2.Push(q);
+	assert_eq(1, v3.Count(), "vec3 count");
+	assert_eq(1, v2.Count(), "vec2 count");
+	MyMath::Vec3 got3 = v3.At(0);
+	MyMath::Vec2 got2 = v2.At(0);
+	assert_true(got3.x == 10.0f && got3.z == 30.0f, "vec3 intact");
+	assert_true(got2.x == 7.0f && got2.y == 8.0f, "vec2 intact (no symbol collision)");
+}
+
+// A HashMap keyed on a namespaced struct type: exercises the same mangled-symbol path for a
+// different container and a non-trivial key.
+[test("namespaced.hashmap_namespaced_key")]
+public static void TestHashMapNamespacedKey() {
+	Core::HashMap<MyMath::Vec3, int32, Core::ByteKeyTraits<MyMath::Vec3>> m;   // a plain-data key hashes its bytes
+	MyMath::Vec3 k1; k1.x = 1.0f; k1.y = 1.0f; k1.z = 1.0f;
+	MyMath::Vec3 k2; k2.x = 2.0f; k2.y = 2.0f; k2.z = 2.0f;
+	m.Insert(k1, 100);
+	m.Insert(k2, 200);
+	assert_true(m.Contains(k1), "contains k1");
+	assert_true(m.Contains(k2), "contains k2");
+	assert_eq(100, m.Get(k1), "value for k1");
+	assert_eq(200, m.Get(k2), "value for k2");
+}

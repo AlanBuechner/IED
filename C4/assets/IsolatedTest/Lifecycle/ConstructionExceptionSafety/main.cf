@@ -1,0 +1,80 @@
+// A create or copy that throws destroys the parts it already built, and an initializer list that throws
+// destroys what it already filled; the unfinished object's own delete never runs (the C++ rule).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 g_ownDeletes = 0;
+
+int32 Fail() { throw 7; return 0; }
+Probe Failing() { Fail(); return Probe(null, 0); }
+
+class Pair {
+	public Probe first;
+	public Probe second;
+	[operator("create")] public void Init(int32* live, bool fail) {
+		first = Probe(live, 1);
+		if (fail) Fail();
+		second = Probe(live, 2);
+	}
+	[operator("delete")] public void Delete() { g_ownDeletes = g_ownDeletes + 1; }
+}
+
+class Base {
+	public Probe held;
+	[operator("create")] public void Init(int32* live) { held = Probe(live, 5); }
+}
+class Derived : Base {
+	[operator("create")] public void Init(int32* live) { Base::Init(live); Fail(); }
+}
+
+class Thrower {
+	public int32 x;
+	[operator("copy")] public void CopyFrom(const Thrower& other) { if (other.x == 1) Fail(); x = other.x; }
+}
+class Fragile { public Probe a; public Thrower t; }
+
+class Two { public Probe a; public Probe b; }
+
+int32 main() {
+	int32 live = 0;
+	try { Pair p = Pair(&live, true); } catch (int32 e) { }
+	Check(live == 0, "a throwing create destroys the members it built");
+	Check(g_ownDeletes == 0, "the unfinished object's own delete does not run");
+	{ Pair p = Pair(&live, false); Check(live == 2, "a finished create keeps its members"); }
+	Check(live == 0 && g_ownDeletes == 1, "a finished object is destroyed normally");
+
+	try { Derived d = Derived(&live); } catch (int32 e) { }
+	Check(live == 0, "a throwing create destroys the base it built");
+
+	Fragile f;
+	f.a = Probe(&live, 1);
+	f.t.x = 1;
+	try { Fragile g = f; } catch (int32 e) { }
+	Check(live == 1 && f.a.id == 1, "a throwing member-wise copy destroys the members it copied");
+
+	try { Two t = Two(Probe(&live, 1), Failing()); } catch (int32 e) { }
+	Check(live == 1, "a throwing aggregate argument destroys the earlier ones");
+	try { Two t = { Probe(&live, 1), Failing() }; } catch (int32 e) { }
+	Check(live == 1, "a throwing braced initializer destroys the fields it filled");
+	try { Probe[2] items = { Probe(&live, 1), Failing() }; } catch (int32 e) { }
+	Check(live == 1, "a throwing array initializer destroys the elements it filled");
+	try { Two* h = new Two{ Probe(&live, 1), Failing() }; } catch (int32 e) { }
+	Check(live == 1, "the same for new T{...}");
+	return g_failures;
+}

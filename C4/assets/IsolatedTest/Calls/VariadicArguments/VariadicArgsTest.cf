@@ -1,0 +1,57 @@
+// Variadic argument access probe - va_start / va_arg(list, T) / va_end read real varargs.
+
+int32 SumInts(int32 count, ...) {
+	va_list list;
+	va_start(list);
+	int32 sum = 0;
+	for (int32 i = 0; i < count; i++) {
+		sum += va_arg(list, int32);
+	}
+	va_end(list);
+	return sum;
+}
+
+double SumDoubles(int32 count, ...) {
+	va_list list;
+	va_start(list);
+	double sum = 0.0;
+	for (int32 i = 0; i < count; i++) {
+		sum += va_arg(list, double);
+	}
+	va_end(list);
+	return sum;
+}
+
+uint64 FirstU64(int32 count, ...) {
+	va_list list;
+	va_start(list);
+	uint64 v = 0;
+	if (count > 0) v = va_arg(list, uint64);
+	va_end(list);
+	return v;
+}
+
+int32 main() {
+	// Sum of actual int varargs.
+	int32 s = SumInts(3, 10, 20, 30);
+	if (s != 60) { printf("FAIL sum_ints got %d\n", s); return 1; }
+
+	// Single value.
+	s = SumInts(1, 42);
+	if (s != 42) { printf("FAIL single got %d\n", s); return 1; }
+
+	// Zero varargs - no reads.
+	s = SumInts(0);
+	if (s != 0) { printf("FAIL zero got %d\n", s); return 1; }
+
+	// Double promotion: float args are promoted to double on the stack.
+	double d = SumDoubles(2, 3.5f, 4.5f);
+	if (d != 8.0) { printf("FAIL sum_doubles got %f\n", d); return 1; }
+
+	// uint64 vararg.
+	uint64 u = FirstU64(1, 99u);
+	if (u != 99u) { printf("FAIL u64 got %llu\n", u); return 1; }
+
+	printf("VARIADIC ARGS OK\n");
+	return 0;
+}

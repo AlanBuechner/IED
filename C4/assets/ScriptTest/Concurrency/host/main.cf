@@ -1,0 +1,47 @@
+// Scripts compile on any thread, several at once; the host serializes their loads and unloads (section 1).
+include "scripttest.ch"
+include "work.ch"
+
+namespace Work
+{
+	int32 Base() { return 100; }
+}
+
+// Compiles, runs and unloads the script `name` `rounds` times: how many rounds gave the right answer.
+int32 CompileRounds(Scripting::Host* host, const ScriptTest::Checks& checks, const char* name, int32 rounds)
+{
+	int32 good = 0;
+	for (int32 i = 0; i < rounds; i++)
+	{
+		Scripting::Script* script = host->Compile(ScriptTest::OptionsFor(checks, name, "work.cf"));
+		funcptr<int32(int32)> compute = (funcptr<int32(int32)>)script->Address("Compute");
+		if (script->Ok() && compute != nullptr && compute(i) == 100 + i * 2) good++;
+		else printf("round %d of %s:\n%s\n", i, name, script->Diagnostics());
+		script->Unload();
+	}
+	return good;
+}
+
+void CheckConcurrency(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	int32 first = 0;
+	int32 second = 0;
+	int32 third = 0;
+	Threading::Thread a = Threading::Thread::Run([host, &checks, &first]() { first = CompileRounds(host, checks, "worker-a", 3); });
+	Threading::Thread b = Threading::Thread::Run([host, &checks, &second]() { second = CompileRounds(host, checks, "worker-b", 3); });
+	third = CompileRounds(host, checks, "worker-main", 2);
+	a.Join();
+	b.Join();
+	checks.Equal(3, first, "the first thread's scripts");
+	checks.Equal(3, second, "the second thread's scripts");
+	checks.Equal(2, third, "the main thread's scripts, compiled meanwhile");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Concurrency");
+	CheckConcurrency(host, checks);
+	return checks.End("Concurrency");
+}

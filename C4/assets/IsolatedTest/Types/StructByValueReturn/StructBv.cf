@@ -1,0 +1,19 @@
+// StructBv - pure C4 struct pass-by-value + return, exercises pack/unpack lowering
+struct P { int32 x; float y; };
+
+int32 g_fail = 0;
+
+P Make(int32 a, float b) { P r; r.x = a; r.y = b; return r; }
+
+int32 Use(P p) { return p.x * 10; }
+
+int32 main() {
+	P q; q.x = 4; q.y = 1.5f;
+	int32 v = Use(q);
+	if (v != 40) { printf("FAIL Use: %d\n", v); g_fail++; }
+	P r = Make(7, 2.0f);
+	if (r.x != 7) { printf("FAIL Make x: %d\n", r.x); g_fail++; }
+	if (g_fail) { printf("STRUCTBV FAILED\n"); return 1; }
+	printf("STRUCTBV OK\n");
+	return 0;
+}

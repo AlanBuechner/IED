@@ -1,0 +1,110 @@
+// Platform::Library: system libraries opened by name and by path, exported functions called, missing libraries and
+// symbols, files that are no library, closed and moved libraries, and two handles to one module.
+
+include "bedrock.ch"
+
+const char* kMissingLibrary = "c4_platform_no_such_library.dll";
+
+bool Contains(const char* text, const char* part) { return Core::StringView(text).IndexOf(Core::StringView(part)) >= 0; }
+
+FS::Path SystemFolder() { return FS::Path(Platform::GetEnvironmentVariable("SystemRoot").View()) / "System32"; }
+
+[test("platform.library")]
+class LibraryTests {
+	[test("system_library")]
+	public static void TestSystemLibrary() {
+		Platform::Library kernel = Platform::Library("kernel32.dll");
+		assert_true(kernel.IsOpen(), "a system library opens by name");
+		assert_se("", kernel.Error(), "with no error");
+		funcptr<uint32()> processId = (funcptr<uint32()>)kernel.Find("GetCurrentProcessId");
+		assert_true(processId != nullptr, "an exported function is found");
+		assert_eq((int64)Platform::ProcessId(), (int64)processId(), "and runs");
+		funcptr<uint64()> ticks = (funcptr<uint64()>)kernel.Find("GetTickCount64");
+		assert_true(ticks != nullptr && ticks() > 0, "another");
+	}
+
+	[test("missing")]
+	public static void TestMissing() {
+		Platform::Library none = Platform::Library(kMissingLibrary);
+		assert_true(!none.IsOpen(), "a missing library does not open");
+		assert_true(Contains(none.Error(), "(error 126)"), "and says the module was not found");
+		assert_true(none.Find("Anything") == nullptr, "a closed library finds nothing");
+		Platform::Library elsewhere = Platform::Library("c4_platform_no_such_folder/library.dll");
+		assert_true(!elsewhere.IsOpen() && !Core::StringView(elsewhere.Error()).IsEmpty(), "nor does one in a missing folder");
+	}
+
+	[test("missing_symbol")]
+	public static void TestMissingSymbol() {
+		Platform::Library kernel = Platform::Library("kernel32.dll");
+		assert_true(kernel.Find("C4PlatformNoSuchExport") == nullptr, "an absent export");
+		assert_true(kernel.Find("") == nullptr, "an empty name");
+		assert_true(kernel.Find(nullptr) == nullptr, "a null name");
+	}
+
+	[test("no_path")]
+	public static void TestNoPath() {
+		Platform::Library empty = Platform::Library("");
+		assert_true(!empty.IsOpen(), "an empty path does not open");
+		assert_se("no library path was given", empty.Error(), "and says why");
+		Platform::Library nothing = Platform::Library((const char*)nullptr);
+		assert_se("no library path was given", nothing.Error(), "a null path too");
+		char[3] notUtf8;
+		notUtf8[0] = (char)0xC3;
+		notUtf8[1] = (char)0x28;
+		notUtf8[2] = (char)0;
+		Platform::Library bad = Platform::Library(&notUtf8[0]);
+		assert_true(!bad.IsOpen() && !Core::StringView(bad.Error()).IsEmpty(), "a path that is not UTF-8 does not open");
+	}
+
+	[test("closed")]
+	public static void TestClosed() {
+		Platform::Library closed;
+		assert_true(!closed.IsOpen(), "a zero library is closed");
+		assert_se("", closed.Error(), "with no error");
+		assert_true(closed.Find("GetTickCount64") == nullptr, "and finds nothing");
+		closed.Close();
+		closed.Close();
+		assert_true(!closed.IsOpen(), "closing twice is harmless");
+		Platform::Library kernel = Platform::Library("kernel32.dll");
+		kernel.Close();
+		assert_true(!kernel.IsOpen() && kernel.Find("GetTickCount64") == nullptr, "a closed library finds nothing");
+	}
+
+	[test("by_path")]
+	public static void TestByPath() {
+		FS::Path path = SystemFolder() / "version.dll";
+		Platform::Library version = Platform::Library(path.CStr());
+		assert_true(version.IsOpen(), "a library opens by its path, '/' separators and all");
+		assert_true(version.Find("GetFileVersionInfoSizeW") != nullptr, "and exports its functions");
+	}
+
+	[test("not_a_library")]
+	public static void TestNotALibrary() {
+		FS::Path path = FS::TempDirectory() / "c4_platform_not_a_library.dll";
+		FS::File file = FS::File(path.CStr(), "wb");
+		file.Write("plain text", 10);
+		file.Close();
+		Platform::Library text = Platform::Library(path.CStr());
+		assert_true(!text.IsOpen(), "a file that is no library does not open");
+		assert_true(Contains(text.Error(), "(error 193)"), "and says it is not a valid program");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("shared_module")]
+	public static void TestSharedModule() {
+		Platform::Library first = Platform::Library("version.dll");
+		Platform::Library second = Platform::Library("version.dll");
+		void* found = first.Find("GetFileVersionInfoSizeW");
+		assert_true(found != nullptr && found == second.Find("GetFileVersionInfoSizeW"), "two handles share the module");
+		first.Close();
+		assert_true(second.Find("GetFileVersionInfoSizeW") == found, "which stays while one is open");
+	}
+
+	[test("move")]
+	public static void TestMove() {
+		Platform::Library kernel = Platform::Library("kernel32.dll");
+		Platform::Library moved = take(kernel);
+		assert_true(!kernel.IsOpen(), "take leaves a closed library");
+		assert_true(moved.IsOpen() && moved.Find("GetTickCount64") != nullptr, "and the module moves");
+	}
+}

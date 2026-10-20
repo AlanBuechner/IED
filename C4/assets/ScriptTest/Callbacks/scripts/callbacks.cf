@@ -1,0 +1,24 @@
+include "events.ch"
+
+int32 Triple(int32 v) { return v * 3; }
+
+struct Doubler
+{
+	public int32 extra = 2;
+	[operator("call")] public int32 Apply(int32 v) { return v * 2 + extra; }
+}
+
+int32 Wire(Events::Bus* bus)
+{
+	int32 bonus = 5;
+	bus->Subscribe([bonus](int32 v) -> int32 { return v + bonus; });
+	bus->Subscribe(Triple);
+	Doubler doubler;
+	bus->Subscribe(doubler);
+	func<int32(int32)> adder = Events::MakeAdder(100);
+	return Events::Apply(Triple, 2) + adder(1);
+}
+
+funcptr<int32(int32)> TripleFn() { return Triple; }
+
+func<int32(int32)> Scaler(int32 by) { return [by](int32 v) -> int32 { return v * by; }; }

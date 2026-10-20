@@ -1,0 +1,44 @@
+// Types - Namespaced Data Globals Tests (implementation)
+include "../Framework/Assert.ch"
+include "NamespacedDataGlobals.ch"
+
+// Regression lock: a namespaced DATA global whose type is not int32 was SILENTLY MISCOMPILED. The
+// definition's LLVM type fell back to i32 (the default when the resolved type is missing), and the
+// qualified read loaded it as i32 too - so a float read back its raw bit pattern (8.5f -> ~1.09e+09)
+// with zero diagnostics. int32 "worked" only by luck (default i32 == actual i32). This covers the
+// non-i32-width types in namespace scope, read back through the qualified name.
+namespace DataNs {
+	const float CF = 8.5f;        // was: miscompiled to i32 bit pattern
+	float NF = 9.5f;              // non-const namespaced float
+	double CD = 2.71828;          // const double (64-bit, a non-i32 type)
+	int32 CI = 42;                // control: was already correct
+}
+
+// BUG-186: a namespace global whose type is declared in the same namespace was "type not found".
+struct DataShadow { public int32 v; }
+namespace DataNs {
+	struct DataShadow { public int32 v; public int32 w; }
+	struct Point { public int32 x; public int32 y; }
+	alias Count = int64;
+	Point origin;
+	Count total = 6000000000;
+	DataShadow shadow;
+	namespace Inner {
+		Point corner;
+		Count inner = 3;
+	}
+}
+
+void TestNamespacedDataGlobals() {
+	AssertFloatEquals(8.5f, DataNs::CF, "ns const float");
+	AssertFloatEquals(9.5f, DataNs::NF, "ns non-const float");
+	Assert(DataNs::CD == 2.71828, "ns const double");
+	Assert(DataNs::CI == 42, "ns const int32 (control)");
+	DataNs::origin.x = 4; DataNs::origin.y = 5;
+	Assert(DataNs::origin.x + DataNs::origin.y == 9, "ns global of a ns struct");
+	Assert(DataNs::total == 6000000000, "ns global of a ns alias");
+	Assert(sizeof(DataNs::shadow) == 8, "ns global picks the ns type over the root one");
+	DataNs::Inner::corner.y = 11;
+	Assert(DataNs::Inner::corner.y == 11, "inner ns global of an outer ns struct");
+	Assert(DataNs::Inner::inner == 3, "inner ns global of an outer ns alias");
+}

@@ -1,0 +1,85 @@
+// Serialization::WriteBinary / ReadBinary: a reflected object's fields as bytes, driven by the registry.
+
+include "bedrock.ch"
+
+struct BinInner { public int32 a; public float b; }
+struct BinOuter { public int32 id; public BinInner inner; public float f; public int64 big; }
+union BinNumber { public int32 small; public double wide; }
+class BinVec { public union { packed float x, y, z; packed float r, g, b; packed float[3] data; }; }
+struct BinViews {
+	public union { struct { public int32 a; public int32 b; }; struct { public int32 c; public int32 d; }; };
+	public BinNumber number;
+	public BinVec vec;
+}
+
+[test("binary")]
+class BinaryTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		Reflection::Type type = Reflection::FindType("BinOuter");
+		BinOuter o;
+		o.id = 7; o.inner.a = -123456; o.inner.b = 3.5f; o.f = -0.25f; o.big = (int64)9 * (int64)1000000007;
+		Core::StringBuilder bytes;
+		int64 written = Serialization::WriteBinary(type, &o, &bytes);
+		assert_eq(24, written, "every field's bytes, no padding");
+		BinOuter d;
+		assert_eq(written, Serialization::ReadBinary(bytes.View(), 0, type, &d), "consumed what was written");
+		assert_eq(7, d.id, "int32");
+		assert_eq(-123456, d.inner.a, "nested int32");
+		assert_feq(3.5, d.inner.b, 0.0, "nested float");
+		assert_feq(-0.25, d.f, 0.0, "float");
+		assert_eq((int64)9 * (int64)1000000007, d.big, "int64");
+	}
+
+	[test("sequence")]
+	public static void TestSequence() {
+		Reflection::Type type = Reflection::FindType("BinInner");
+		BinInner first; first.a = 1; first.b = 1.5f;
+		BinInner second; second.a = 2; second.b = 2.5f;
+		Core::StringBuilder bytes;
+		Serialization::WriteBinary(type, &first, &bytes);
+		Serialization::WriteBinary(type, &second, &bytes);
+		BinInner a;
+		BinInner b;
+		int64 position = Serialization::ReadBinary(bytes.View(), 0, type, &a);
+		position = Serialization::ReadBinary(bytes.View(), position, type, &b);
+		assert_eq(16, position, "two objects back to back");
+		assert_eq(2, b.a, "the second object");
+	}
+
+	[test("truncated")]
+	public static void TestTruncated() {
+		Reflection::Type type = Reflection::FindType("BinOuter");
+		BinOuter o;
+		Core::StringBuilder bytes;
+		Serialization::WriteBinary(type, &o, &bytes);
+		BinOuter d;
+		assert_eq(-1, Serialization::ReadBinary(bytes.View().Substring(0, 10), 0, type, &d), "too few bytes");
+		assert_eq(-1, Serialization::ReadBinary(bytes.View(), 20, type, &d), "starting too late");
+	}
+
+	// BUG-194: a view that aliases another was written again; a union is written whole.
+	[test("views_and_unions")]
+	public static void TestViewsAndUnions() {
+		Reflection::Type type = Reflection::FindType("BinViews");
+		BinViews o;
+		o.a = 1; o.b = 2;
+		o.number.wide = 2.5;
+		o.vec.x = 1.0f; o.vec.y = 2.0f; o.vec.z = 3.0f;
+		Core::StringBuilder bytes;
+		assert_eq(28, Serialization::WriteBinary(type, &o, &bytes), "one view of each union, the number whole, three lanes");
+		BinViews d;
+		assert_eq(28, Serialization::ReadBinary(bytes.View(), 0, type, &d), "read back");
+		assert_true(d.c == 1 && d.d == 2, "the other view reads the same bytes");
+		assert_feq(2.5, d.number.wide, 0.0, "a union's later member survives");
+		assert_true(d.vec.x == 1.0f && d.vec.y == 2.0f && d.vec.z == 3.0f, "the lanes");
+	}
+
+	[test("invalid_type")]
+	public static void TestInvalidType() {
+		Reflection::Type missing = Reflection::FindType("NoSuchType_9x8y7z");
+		Core::StringBuilder bytes;
+		assert_eq(-1, Serialization::WriteBinary(missing, nullptr, &bytes), "write");
+		assert_eq(-1, Serialization::ReadBinary(bytes.View(), 0, missing, nullptr), "read");
+	}
+}

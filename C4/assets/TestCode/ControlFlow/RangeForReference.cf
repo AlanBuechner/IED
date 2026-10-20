@@ -1,0 +1,49 @@
+// ControlFlow - range-for by reference (D-54): `T&` names each element itself, `const T&` reads it without a
+// copy, over arrays, init lists and iterators whose dereference returns a reference.
+include "../Framework/Assert.ch"
+include "RangeForReference.ch"
+
+struct RfrPoint { int32 x; int32 y; }
+struct RfrBag { int32[4] items; }
+struct RfrIt { RfrBag* bag; int32 index; }
+[operator("begin")] RfrIt RfrBegin() extends RfrBag { RfrIt it; it.bag = &this; it.index = 0; return it; }
+[operator("end")] RfrIt RfrEnd() extends RfrBag { RfrIt it; it.bag = &this; it.index = 4; return it; }
+[operator("notequal")] bool RfrNotEqual(const RfrIt& o) extends RfrIt { return this.index != o.index; }
+[operator("dereference")] int32& RfrDeref() extends RfrIt { return this.bag->items[this.index]; }
+[operator("increment")] RfrIt RfrNext() extends RfrIt { RfrIt it; it.bag = this.bag; it.index = this.index + 1; return it; }
+
+int32 RfrSum(const int32[4]& values) {
+	int32 sum = 0;
+	for (const int32& v : values) sum += v;
+	return sum;
+}
+
+int32 RfrSumList(__init_list<int32> values) {
+	int32 sum = 0;
+	for (const int32& v : values) sum += v;
+	return sum;
+}
+
+void TestRangeForReference() {
+	int32[4] arr = { 1, 2, 3, 4 };
+	for (int32& v : arr) v = v * 10;
+	AssertIntEquals(30, arr[2], "a reference loop variable writes the element");
+	AssertIntEquals(100, RfrSum(arr), "a const reference reads a read-only array");
+	RfrPoint[2] points;
+	for (RfrPoint& p : points) { p.x = 5; p.y = p.x + 1; }
+	AssertIntEquals(6, points[1].y, "a reference to an object element writes its fields");
+	RfrBag bag;
+	bag.items = { 5, 6, 7, 8 };
+	for (int32& v : bag) v = v + 1;
+	AssertIntEquals(6, bag.items[0], "an iterator's reference dereference is the element");
+	AssertIntEquals(9, bag.items[3], "every element through the iterator");
+	for (int32& v : arr) {
+		if (v == 20) continue;
+		if (v == 40) break;
+		v = 0;
+	}
+	AssertIntEquals(0, arr[0], "the body ran for the first element");
+	AssertIntEquals(20, arr[1], "continue skipped the second");
+	AssertIntEquals(40, arr[3], "break stopped at the fourth");
+	AssertIntEquals(6, RfrSumList({ 1, 2, 3 }), "a const reference over an init list");
+}

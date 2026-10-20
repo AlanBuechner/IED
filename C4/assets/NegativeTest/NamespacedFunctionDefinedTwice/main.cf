@@ -1,0 +1,4 @@
+namespace Shapes { int32 Count(); }
+int32 Shapes::Count() { return 1; }
+int32 Shapes::Count() { return 2; }
+int32 main() { return Shapes::Count(); }

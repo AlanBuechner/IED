@@ -1,0 +1,5 @@
+int32 main() {
+	packed float[4] a = 1.0f;
+	packed int8[4] r = reinterpret_cast<packed int8[4]>(a > 0.0f);
+	return 0;
+}

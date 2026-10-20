@@ -1,0 +1,9 @@
+int32 main() {
+    int32 e2 = 2, e4 = 4;
+    bool a = (e2 && e4);
+    bool b = (e2 || 0);
+    int32 v = 7; int32* pv = &v;
+    bool c = (pv && e2);
+    bool d = (null || e4);
+    return (a && b && c && d) ? 0 : 1;
+}

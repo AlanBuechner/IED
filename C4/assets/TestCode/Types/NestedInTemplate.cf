@@ -1,0 +1,59 @@
+// Types - types declared in a class template's body, one per instance (BUG-179)
+include "../Framework/Assert.ch"
+include "NestedInTemplate.ch"
+
+template<T> struct NitOuter {
+	struct Inner {
+		public T value;
+		public int32 tag;
+		public static int32 Twice(int32 v) { return v * 2; }
+		public T Get() const { return value; }
+	}
+	enum class Mode { Off, On = 5 }
+	enum Flat { First = 1, Second }
+	template<U> struct Pair { public T first; public U second; }
+
+	public Inner inner;
+	public Mode mode;
+	public Pair<int8> pair;
+	public int32 SecondValue() const { return Second; }
+	public Inner Make(T v) const { Inner made; made.value = v; made.tag = 3; return made; }
+}
+
+namespace NitSpace {
+	template<T> struct Holder {
+		struct Slot { public T item; public NitSpace::Holder<T>* owner; }
+		public Slot slot;
+	}
+}
+
+int32 NitInnerTag(NitOuter<float>::Inner inner) { return inner.tag; }
+
+void TestNestedInTemplate() {
+	NitOuter<float> f;
+	f.inner.value = 2.5f;
+	AssertFloatEquals(2.5f, f.inner.Get(), "a nested struct's field has the instance's T");
+	AssertEqual(8, (int32)sizeof(NitOuter<float>::Inner));
+	AssertEqual(16, (int32)sizeof(NitOuter<double>::Inner));
+	AssertEqual(3, NitInnerTag(f.Make(1.0f)));
+	AssertEqual(10, NitOuter<float>::Inner::Twice(5));
+	NitOuter<int32>::Inner literal = NitOuter<int32>::Inner{ 7, 1 };
+	AssertEqual(7, literal.value);
+
+	f.mode = NitOuter<float>::Mode::On;
+	AssertEqual(5, (int32)f.mode);
+	AssertEqual(2, f.SecondValue());
+	AssertEqual(1, NitOuter<float>::First);
+
+	f.pair.first = 1.5f;
+	f.pair.second = 4;
+	AssertEqual(4, (int32)f.pair.second);
+	NitOuter<int16>::Pair<double> wide;
+	wide.second = 0.5;
+	AssertEqual(16, (int32)sizeof(wide));
+
+	NitSpace::Holder<int64> holder;
+	holder.slot.item = 9;
+	holder.slot.owner = &holder;
+	AssertTrue(holder.slot.owner->slot.item == 9 ? 1 : 0);
+}

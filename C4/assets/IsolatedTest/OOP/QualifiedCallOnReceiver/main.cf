@@ -1,0 +1,47 @@
+// B35: `obj.Base::F()` and `p->Base::F()` call that type's implementation on the receiver's sub-object, without
+// virtual dispatch; `obj.Base::field` reads a base's field a derived field hides.
+interface IShape { public virtual int32 Sides() { return 0; } }
+
+class Base {
+	public int32 tag = 1;
+	public virtual int32 F() { return 1; }
+}
+
+class Derived : Base, IShape {
+	public int32 tag = 2;
+	public override int32 F() { return 2 + Base::F(); }
+	public override int32 Sides() { return 4; }
+}
+
+namespace Geo {
+	class Rect : Derived {
+		public override int32 F() { return 10; }
+	}
+}
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+Geo::Rect MakeRect() { Geo::Rect r; return r; }
+
+int32 main() {
+	Geo::Rect r;
+	Derived* p = &r;
+	IShape* s = &r;
+	Check(p->F() == 10, "an unqualified call dispatches");
+	Check(r.Base::F() == 1, "obj.Base::F() runs Base's implementation");
+	Check(p->Base::F() == 1, "through a pointer");
+	Check(r.Derived::F() == 3, "an intermediate class's implementation");
+	Check(r.Geo::Rect::F() == 10, "the object's own type, namespace-qualified");
+	Check(s->Sides() == 4, "the interface call dispatches");
+	Check(s->IShape::Sides() == 0, "the interface's own body through an interface pointer");
+	Check(r.IShape::Sides() == 0, "and through the object");
+	Check(r.Base::tag == 1 && r.tag == 2, "a hidden base field");
+	r.Base::tag = 7;
+	Check(p->Base::tag == 7, "written and read through the qualifier");
+	Check(MakeRect().Base::F() == 1, "on a call result");
+	return g_failures;
+}

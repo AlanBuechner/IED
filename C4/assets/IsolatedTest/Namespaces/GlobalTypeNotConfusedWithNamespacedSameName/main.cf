@@ -1,0 +1,12 @@
+struct Vec2 {
+	int32 x; int32 y;
+	[operator("+")] public Vec2 Add(const Vec2& o) { Vec2 r; r.x = this->x + o.x; r.y = this->y + o.y; return r; }
+}
+int32 main() {
+	Vec2 a; a.x = 3; a.y = 4;
+	Vec2 b; b.x = 10; b.y = 20;
+	Vec2 s = a + b;
+	if (s.x != 13 || s.y != 24) { printf("FAIL add got %d %d\n", s.x, s.y); return 1; }
+	printf("OK\n");
+	return 0;
+}

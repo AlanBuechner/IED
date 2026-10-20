@@ -1,0 +1,9 @@
+struct First { char x; }
+struct Second { int16 x; int16 y; int16 z; };
+int32 main() {
+	Second s; s.x=10; s.y=20; s.z=30;
+	printf("Second x=%d y=%d z=%d\n", s.x, s.y, s.z);
+	if (s.x!=10||s.y!=20||s.z!=30){ printf("FIELD COLLISION BROKEN\n"); return 1; }
+	printf("FIELD COLLISION OK\n");
+	return 0;
+}

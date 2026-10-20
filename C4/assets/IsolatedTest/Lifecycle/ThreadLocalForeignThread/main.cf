@@ -1,0 +1,37 @@
+// A thread the runtime did not start (Win32 CreateThread) attaches itself before it runs C4 code: thread_attach
+// starts its thread_local objects and registers it with the collector; its objects end when it does.
+[link("CreateThread")] void* CreateThread(void* attributes, uint64 stackSize, funcptr<uint32(void*)> start, void* parameter,
+	uint32 flags, uint32* id);
+[link("WaitForSingleObject")] uint32 WaitForSingleObject(void* handle, uint32 milliseconds);
+[link("GetExitCodeThread")] int32 GetExitCodeThread(void* handle, uint32* code);
+[link("CloseHandle")] int32 CloseHandle(void* handle);
+
+const uint32 kWaitForever = 0xFFFFFFFF;
+
+struct Box {
+	public int32 value;
+	[operator("create")] public void Init() { value = 7; }
+	[operator("delete")] public void End() { atomic_fetch_add(&g_ended, 1, MemoryOrder::SeqCst); }
+}
+
+int32 g_ended = 0;
+thread_local Box t_box;
+
+uint32 Worker(void* unused) {
+	thread_attach();
+	thread_attach(); // a second attach does nothing
+	t_box.value += 1;
+	return (uint32)t_box.value;
+}
+
+int32 main() {
+	void* thread = CreateThread(null, 0, Worker, null, 0, null);
+	if (thread == null) return 10;
+	WaitForSingleObject(thread, kWaitForever);
+	uint32 code = 0;
+	GetExitCodeThread(thread, &code);
+	CloseHandle(thread);
+	if (code != 8) return 1;
+	if (atomic_load(&g_ended, MemoryOrder::SeqCst) != 1) return 2;
+	return t_box.value == 7 ? 0 : 3;
+}

@@ -1,0 +1,20 @@
+// Operators - float comparisons follow C, NaN included (BUG-173)
+include "../Framework/Assert.ch"
+include "FloatComparisons.ch"
+
+void TestFloatComparisons() {
+	double zero = 0.0;
+	double nan = zero / zero;
+	double inf = 1.0 / zero;
+	float fnan = (float)nan;
+	AssertTrue(nan != nan ? 1 : 0);
+	AssertTrue(nan == nan ? 0 : 1);
+	AssertTrue(fnan != fnan ? 1 : 0);
+	AssertTrue(nan != 1.0 ? 1 : 0);
+	AssertTrue(nan < 1.0 || nan > 1.0 || nan <= 1.0 || nan >= 1.0 ? 0 : 1);
+	AssertTrue(!(nan == 1.0) ? 1 : 0);
+	AssertTrue(inf - inf != 0.0 ? 1 : 0);
+	AssertTrue(-0.0 == 0.0 ? 1 : 0);
+	AssertTrue(-0.0 != 0.0 ? 0 : 1);
+	AssertTrue(inf > 1e308 ? 1 : 0);
+}

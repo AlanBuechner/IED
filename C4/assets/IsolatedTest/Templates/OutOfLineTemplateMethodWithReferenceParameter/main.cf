@@ -1,0 +1,16 @@
+template<T> class C {
+	int32 n;
+	[operator("create")] public void Init() { this->n = 0; }
+	public void Mutate(T& v);
+	public int32 N() { return this->n; }
+}
+template<T> void C::Mutate(T& v) { v = v + 1; this->n = this->n + 1; }
+int32 main() {
+	C<int32>* c = new C<int32>();
+	int32 x = 5;
+	c->Mutate(x);
+	if (x != 6 || c->N() != 1) return 1;
+	delete c;
+	printf("TPL OUT-OF-LINE REF OK\n");
+	return 0;
+}

@@ -1,0 +1,2 @@
+int32 Twice(int32 x) { return x * 2; }
+int32 main() { funcptr<int32(int32)> f = Twice; return f(1, 2); }

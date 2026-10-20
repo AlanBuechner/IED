@@ -1,0 +1,42 @@
+.vs/
+__pycache__
+generated/
+bin/
+bin-int/
+vendor/
+
+*.sln
+*.vcxproj
+*.vcxproj.*
+*.log
+
+# Compiler artifacts
+*.exe
+*.obj
+*.bc
+*.ll
+*.c4macro
+*.reflect.c
+*.obj.tmp
+/output*
+test_*.ch
+test_*.exe
+test_*.bc
+test_*.obj
+test_*.ll
+temp_*.ch
+temp_*.exe
+temp_*.bc
+temp_*.obj
+temp_*.ll
+
+# Frost build artifacts
+final_test*
+comprehensive_test*
+integration_test*
+braced_test*
+printf_test*
+d_test*
+
+# Test-runner scratch build output (all suites emit here; never into the repo root or source folders)
+assets/build-output/

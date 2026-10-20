@@ -1,0 +1,38 @@
+// thread_local storage (D-29): each thread has its own copy of the variable, starting from its constant.
+// A second thread (Win32 CreateThread) counts in its copy while main's copy stays as main left it.
+[link("CreateThread")] void* CreateThread(void* attributes, uint64 stackSize, funcptr<uint32(void*)> start, void* parameter,
+	uint32 flags, uint32* id);
+[link("WaitForSingleObject")] uint32 WaitForSingleObject(void* handle, uint32 milliseconds);
+[link("GetExitCodeThread")] int32 GetExitCodeThread(void* handle, uint32* code);
+[link("CloseHandle")] int32 CloseHandle(void* handle);
+
+const uint32 kWaitForever = 0xFFFFFFFF;
+
+thread_local int32 t_counter = 100;
+
+uint32 Worker(void* unused) {
+	for (int32 i = 0; i < 5; ++i) t_counter = t_counter + 1;
+	return (uint32)t_counter;
+}
+
+int32 NextCall() {
+	thread_local int32 calls = 0; // a thread_local local has static storage
+	calls = calls + 1;
+	return calls;
+}
+
+int32 main() {
+	t_counter = 1;
+	void* thread = CreateThread(null, 0, Worker, null, 0, null);
+	if (thread == null) return 10;
+	WaitForSingleObject(thread, kWaitForever);
+	uint32 code = 0;
+	GetExitCodeThread(thread, &code);
+	CloseHandle(thread);
+	if (code != 105) return 1; // the worker's copy started at 100
+	if (t_counter != 1) return 2; // main's copy is untouched
+	NextCall();
+	NextCall();
+	if (NextCall() != 3) return 3;
+	return 0;
+}

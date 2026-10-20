@@ -1,0 +1,29 @@
+include "../Framework/Assert.ch"
+include "ScalarLeftExtension.ch"
+
+struct ScalarVec {
+	public float x;
+	public float y;
+	[operator("create")] public void Init(float a, float b) { this.x = a; this.y = b; }
+	[operator("-")] public ScalarVec Minus(float k) const { return ScalarVec(this.x - k, this.y - k); }
+	[operator("*")] public ScalarVec Scale(float k) const { return ScalarVec(this.x * k, this.y * k); }
+}
+
+[operator("-")] ScalarVec MinusVec(const ScalarVec& v) extends float { return ScalarVec(*this - v.x, *this - v.y); }
+[operator("*")] ScalarVec ScaleVec(const ScalarVec& v) extends float { return ScalarVec(*this * v.x, *this * v.y); }
+[operator("**")] float PowerOf(const ScalarVec& v) extends float { return (*this) ** v.x; }
+
+void TestScalarLeftExtension() {
+	ScalarVec v(1.0f, 4.0f);
+	ScalarVec left = 10.0f - v;
+	AssertFloatEquals(9.0f, left.x, "10 - v uses the extension on float: 10 - x");
+	AssertFloatEquals(6.0f, left.y, "and 10 - y, never v - 10");
+	ScalarVec right = v - 10.0f;
+	AssertFloatEquals(-9.0f, right.x, "v - 10 uses ScalarVec's own operator");
+	ScalarVec scaled = 2.0f * v;
+	AssertFloatEquals(8.0f, scaled.y, "2 * v through the extension");
+	float k = 3.0f;
+	ScalarVec fromVar = k * v;
+	AssertFloatEquals(3.0f, fromVar.x, "a float variable on the left");
+	AssertFloatEquals(2.0f, 2.0f ** v, "an object on the right of ** through an extension");
+}

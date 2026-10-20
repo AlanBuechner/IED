@@ -1,0 +1,17 @@
+// An enum member may take any value of its underlying type, at both ends (BUG-214 rejects only values past them), and an
+// unsigned one converts and compares unsigned (BUG-220).
+// main returns the failures.
+enum class Mask : uint64 { None = 0, All = 0xFFFFFFFFFFFFFFFF }
+enum class Small : int8 { Min = -128, Max = 127 }
+enum class Byte : uint8 { Zero, Top = 255 }
+enum Plain { Low = -2147483647 - 1, High = 2147483647 }
+
+int32 main() {
+	int32 failures = 0;
+	if ((uint64)Mask::All != 0xFFFFFFFFFFFFFFFF) failures += 1;
+	if ((int32)Small::Min != -128 || (int32)Small::Max != 127) failures += 1;
+	if ((int32)Byte::Top != 255 || sizeof(Byte) != 1) failures += 1;
+	if (!(Byte::Top > Byte::Zero)) failures += 1; // compared unsigned (BUG-220)
+	if (Low != -2147483647 - 1 || High != 2147483647) failures += 1;
+	return failures;
+}

@@ -1,0 +1,5 @@
+struct Wrap {
+	public int32 v;
+	[operator("create")] public void Init(int32 x) { this.v = x; }
+}
+int32 main() { Wrap w = 5; return 0; }

@@ -1,0 +1,17 @@
+// Core - Integer Literal Tests (implementation)
+include "../Framework/Assert.ch"
+include "IntegerLiterals.ch"
+
+void TestIntegerLiterals() {
+	int32 a = 42;
+	AssertEqual(42, a);
+	
+	int32 b = 0;
+	AssertEqual(0, b);
+	
+	int32 c = -17;
+	AssertEqual(-17, c);
+	
+	int32 d = 999999;
+	AssertEqual(999999, d);
+}

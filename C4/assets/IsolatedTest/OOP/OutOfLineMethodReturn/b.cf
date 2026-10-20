@@ -1,0 +1,12 @@
+class Holder {
+    int32 v;
+    [operator("create")] public void Init() { this->v = 5; }
+    public int32 GetV();   // out-of-line, returns VALUE
+}
+int32 Holder::GetV() { return this->v; }
+int32 main() {
+    Holder* h = new Holder();
+    if (h->GetV() != 5) return 1;
+    printf("OOV RET VALUE OK\n");
+    return 0;
+}

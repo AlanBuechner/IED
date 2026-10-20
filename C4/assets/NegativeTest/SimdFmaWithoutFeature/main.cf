@@ -1,0 +1,5 @@
+int32 main() {
+	packed float[4] a = 1.0f;
+	packed float[4] r = simd_fma(a, a, a);
+	return 0;
+}

@@ -1,0 +1,17 @@
+int32 main() {
+    uint8 u = 250;
+    int32 a = -u;             // promote to i32 first: -250 (was in-width wrap to 6)
+    uint8 v = 250;
+    int32 b = ++v;            // 251 promoted (was i8 overflow to -5)
+    uint8 w = 0;
+    int32 c = w--;            // postfix old value: 0; storage wraps to 255
+    uint32 big = 0x80000000;
+    int64 x = ++big;          // zero-extended: +2147483649 (was -2147483647)
+    int8 s = -5;
+    int32 d = -s;             // signed narrow unchanged: 5
+    uint8 z = 0;
+    int32 e = ~z;             // promoted: -1
+    bool ok = (a == -250 && b == 251 && v == 251 && c == 0 && w == 255 &&
+                x == 2147483649 && d == 5 && e == -1);
+    return ok ? 0 : 1;
+}

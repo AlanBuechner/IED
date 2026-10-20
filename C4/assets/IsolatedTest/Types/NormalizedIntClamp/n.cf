@@ -1,0 +1,30 @@
+int32 main() {
+	// snorm8: domain [-1,1] scaled to i8 => clamps to [-127,127]
+	snorm8 s = 100;            // in range -> 100
+	if ((int32)s != 100) return 1;
+	s = 200;                  // out of range high -> clamp 127
+	if ((int32)s != 127) return 2;
+	s = -500;                 // out of range low -> clamp -127
+	if ((int32)s != -127) return 3;
+
+	// unorm8: domain [0,1] scaled to u8 => clamps to [0,255]
+	unorm8 u = 200;           // in range -> 200
+	if ((int32)u != 200) return 4;
+	u = 999;                  // out of range high -> clamp 255
+	if ((int32)u != 255) return 5;
+	u = -3;                   // negative -> clamp 0
+	if ((int32)u != 0) return 6;
+
+	// explicit casts into normalized types also clamp
+	snorm16 s16 = (snorm16)50000;   // > 32767 -> 32767
+	if ((int32)s16 != 32767) return 7;
+	unorm16 u16 = (unorm16)-1;      // negative -> 0
+	if ((int32)u16 != 0) return 8;
+
+	// wider snorm: snorm32 clamps to [-2^31, 2^31-1]
+	snorm32 s32 = (snorm32)5;
+	if ((int32)s32 != 5) return 9;
+
+	printf("NORM OK\n");
+	return 0;
+}

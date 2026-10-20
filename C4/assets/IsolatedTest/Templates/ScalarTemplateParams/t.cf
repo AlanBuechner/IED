@@ -1,0 +1,14 @@
+template<T, uint32 I> T GetI(){ return (T)I; }
+template<int32 A, int32 B> int32 SumAB(){ return A + B; }
+template<int32 N> int32 TimesTwoPlusOne(){ return N * 2 + 1; }
+template<float F> float GetF(){ return F * 3.0f; }
+int32 main() {
+	if (GetI<int32, 42>() != 42) return 1;
+	if ((int32)GetI<float, 7>() != 7) return 2;
+	if (GetI<uint32, 99>() != 99) return 3;
+	if (SumAB<3, 4>() != 7) return 4;
+	if (TimesTwoPlusOne<10>() != 21) return 5;
+	if ((int32)(GetF<2.5f>() * 10.0f) != 75) return 6;
+	printf("SCALAR TMPL EXT OK %d %d %d\n", SumAB<3,4>(), TimesTwoPlusOne<10>(), (int32)(GetF<2.5f>()*10.0f));
+	return 0;
+}

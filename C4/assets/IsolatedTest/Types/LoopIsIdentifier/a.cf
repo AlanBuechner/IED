@@ -1,0 +1,22 @@
+// `loop` is an ordinary identifier (D-04): it was reserved for a keyword that no longer exists.
+
+int32 Next(int32 loop) { return loop + 1; }
+int32 loop() { return 7; }
+struct Counter { public int32 loop; }
+
+[test("lexer.loop.local_and_parameter")]
+public static void TestLoopLocalAndParameter() {
+    int32 loop = 3;
+    loop += 2;
+    assert_eq(5, loop, "loop is an ordinary local name");
+    assert_eq(4, Next(3), "loop is an ordinary parameter name");
+}
+
+[test("lexer.loop.field_and_function")]
+public static void TestLoopFieldAndFunction() {
+    Counter c;
+    c.loop = 9;
+    assert_eq(9, c.loop, "loop is an ordinary field name");
+    assert_eq(7, loop(), "loop is an ordinary function name");
+}
+

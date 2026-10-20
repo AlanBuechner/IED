@@ -1,0 +1,10 @@
+class Failure {
+	public int32 code;
+	[operator("create")] public void Init(int32 c) { code = c; }
+	[operator("delete")] public void Delete() { code = 0; }
+}
+int32 main() {
+	try { throw Failure(2); }
+	catch (Failure f) { return f.code; }
+	return 0;
+}

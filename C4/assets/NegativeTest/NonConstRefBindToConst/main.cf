@@ -1,0 +1,3 @@
+struct ROuter { public int32 n; }
+const ROuter gConst;
+int32 main(){ ROuter& r = gConst; return 0; }

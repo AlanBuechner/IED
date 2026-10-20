@@ -1,0 +1,51 @@
+// finally runs on normal exit, return, break, continue, a caught throw, an exception unwinding out of the
+// try, and after a handler runs; a return value computed before the finally is kept.
+int32 g_count;
+
+int32 Mode(int32 mode) {
+	g_count = 0;
+	for (int32 i = 0; i < 2; i++) {
+		try {
+			if (mode == 0) return 50;
+			if (mode == 1) break;
+			if (mode == 2) continue;
+			if (mode == 3) throw 9;
+		}
+		catch (int32 e) { g_count += e; }
+		finally { g_count += 1; }
+	}
+	return g_count;
+}
+
+int32 Inner() {
+	try { throw 4; }
+	finally { g_count += 1; }
+	return -1;
+}
+
+int32 FinallyWhileUnwinding() {
+	g_count = 0;
+	try { Inner(); }
+	catch (int32 e) { g_count += e * 10; }
+	return g_count;
+}
+
+int32 ReturnValueKept() {
+	int32 x = 3;
+	try { return x; }
+	finally { x = 99; }
+	return -1;
+}
+
+int32 main() {
+	int32 failures = 0;
+	if (Mode(0) != 50 || g_count != 1) failures++;
+	if (Mode(1) != 1) failures++;
+	if (Mode(2) != 2) failures++;
+	if (Mode(3) != 20) failures++;
+	if (Mode(4) != 2) failures++;
+	if (FinallyWhileUnwinding() != 41) failures++;
+	if (ReturnValueKept() != 3) failures++;
+	if (failures != 0) printf("FinallyOnEveryExit failures: %d\n", failures);
+	return failures;
+}

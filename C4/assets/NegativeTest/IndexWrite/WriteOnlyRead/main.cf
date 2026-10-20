@@ -1,0 +1,7 @@
+struct W { public int32[4] data; }
+[operator("index_assign")] void Set(int32 i, int32 v) extends W { this.data[i] = v; }
+int32 main() {
+    W w;
+    int32 r = w[0];   // no reader: indexing must be a clear error, not a silent 'void' read
+    return r;
+}

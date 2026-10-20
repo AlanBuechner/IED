@@ -1,0 +1,2 @@
+const int32 kSelf = kSelf + 1;
+int32 main() { return kSelf; }

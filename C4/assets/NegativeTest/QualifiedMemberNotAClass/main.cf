@@ -1,0 +1,5 @@
+class Base { public int32 value; }
+int32 main() {
+	Base b;
+	return b.int32::value;
+}

@@ -1,0 +1,6 @@
+struct S {
+	public int32 v;
+	public void Set(int32 n) { v = n; }
+}
+void Use(const S& s) { s.Set(1); }
+int32 main() { S s; Use(s); return 0; }

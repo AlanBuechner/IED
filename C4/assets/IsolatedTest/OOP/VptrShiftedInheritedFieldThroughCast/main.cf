@@ -1,0 +1,26 @@
+// Methods of a polymorphic derived type write an inherited field of a non-polymorphic base past the vptr, and casts
+// both ways see the same values. main returns the failed step.
+class Base { public int32 b; }
+class Derived : public Base {
+	public int32 d;
+public:
+	[operator("create")] public void Init(int32 x, int32 y) { this->b = x; this->d = y; }
+	public virtual int32 Who() { return 1; }
+	public void BumpB() { b += 5; }
+	public void IncD() { d++; }
+}
+int32 main() {
+	Derived* dv = new Derived(10, 20);
+	if (dv->b != 10) return 1;
+	dv->BumpB();
+	if (dv->b != 15) return 2;
+	if (dv->d != 20) return 3;
+	dv->IncD();
+	if (dv->d != 21) return 4;
+	Base* bp = dv;
+	if (bp->b != 15) return 5;
+	Derived* back = (Derived*)bp;
+	if (back->d != 21) return 6;
+	if (back->b != 15) return 7;
+	return 0;
+}

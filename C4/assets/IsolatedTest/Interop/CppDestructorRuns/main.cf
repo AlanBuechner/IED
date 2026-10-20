@@ -1,0 +1,39 @@
+// A C++ destructor is the bound type's [operator("delete")] (BUG-013): it runs at scope exit, on delete,
+// for a member of a C4 type and when an exception unwinds the scope.
+extern "c++" include "tracker.h"
+extern "c++" source "tracker.cpp"
+
+class Holder { public Tracker inner; public int32 n; }
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+void ScopeExit() {
+	Tracker t = Tracker(1);
+	Check(LiveTrackers() == 1 && t.Id() == 1, "a value local of a C++ type is constructed");
+}
+
+void Unwind() {
+	Tracker t = Tracker(2);
+	throw 1;
+}
+
+int32 main() {
+	ScopeExit();
+	Check(LiveTrackers() == 0, "a value local's C++ destructor runs at scope exit");
+	Tracker* heap = new Tracker(3);
+	Check(LiveTrackers() == 1, "new runs the C++ constructor");
+	delete heap;
+	Check(LiveTrackers() == 0, "delete runs the C++ destructor");
+	{
+		Holder h;
+		Check(LiveTrackers() == 1, "a C++ member is default-constructed with its holder");
+	}
+	Check(LiveTrackers() == 0, "a C++ member is destroyed with its holder");
+	try { Unwind(); } catch (int32 code) { }
+	Check(LiveTrackers() == 0, "an exception unwinding the scope runs the C++ destructor");
+	return g_failures;
+}

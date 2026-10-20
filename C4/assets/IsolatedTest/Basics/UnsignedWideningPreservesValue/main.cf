@@ -1,0 +1,7 @@
+int32 main() {
+    uint32 d = 4294967295;      // wraps to max uint32
+    bool eq = (d == 4294967295); // literal is int64; d must widen as +4294967295, not -1
+    uint32 big = 0x80000000;     // 2147483648, > INT32_MAX
+    bool gt = (big > 0x7FFFFFFF); // int64 comparison: true only if zero-extended
+    return (eq && gt) ? 0 : 1;
+}

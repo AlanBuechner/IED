@@ -1,0 +1,38 @@
+// A call through a funcptr follows the same calling convention as a direct call: a large return goes
+// through a hidden result pointer (BUG-068), arguments convert to the parameter types, small objects
+// ride in a register, large ones by hidden pointer, and a reference parameter receives an address.
+struct Big { public int64 a; public int64 b; public int64 c; };
+struct Small { public int32 x; public int32 y; };
+
+Big MakeBig(int64 x) { Big r; r.a = x; r.b = x + 1; r.c = x + 2; return r; }
+Small Swap(Small s) { Small r; r.x = s.y; r.y = s.x; return r; }
+int64 SumBig(Big b) { return b.a + b.b + b.c; }
+void Bump(int32& v) { v = v + 1; }
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 main() {
+	funcptr<Big(int64)> make = MakeBig;
+	Big v = make(10);
+	Check(v.a + v.b + v.c == 33, "a large return through a funcptr");
+
+	funcptr<Small(Small)> swap = Swap;
+	Small s; s.x = 1; s.y = 2;
+	Small t = swap(s);
+	Check(t.x == 2 && t.y == 1, "a small object in and out of a funcptr call");
+
+	funcptr<int64(Big)> sum = SumBig;
+	Check(sum(v) == 33, "a large object argument through a funcptr");
+
+	funcptr<void(int32&)> bump = Bump;
+	int32 counter = 4;
+	bump(counter);
+	Check(counter == 5, "a reference parameter through a funcptr");
+
+	if (g_failures != 0) printf("FunPtrCallAbi failures: %d\n", g_failures);
+	return g_failures;
+}

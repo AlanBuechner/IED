@@ -1,0 +1,5 @@
+template<K,V> struct Map {
+	public bool Contains(const K& k);
+}
+template<K,V> public bool Map::Contains(K k) { return true; }
+int main() { return 0; }

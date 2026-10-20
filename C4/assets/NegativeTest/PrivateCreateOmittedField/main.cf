@@ -1,0 +1,8 @@
+class Token {
+	[operator("create")] private void Init() {}
+}
+struct Pair {
+	public int32 n;
+	public Token t;
+}
+int32 main() { Pair p = { 1 }; return p.n; }

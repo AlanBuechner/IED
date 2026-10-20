@@ -1,0 +1,14 @@
+// ControlFlow - Continue Tests (implementation)
+include "../Framework/Assert.ch"
+include "Continue.ch"
+
+void TestContinue() {
+	int32 sum = 0;
+	for (int32 i = 0; i < 10; i++) {
+		if (i % 2 == 0) {
+			continue;
+		}
+		sum += i;
+	}
+	AssertEqual(25, sum);
+}

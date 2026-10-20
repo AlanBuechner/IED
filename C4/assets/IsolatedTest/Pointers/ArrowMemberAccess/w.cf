@@ -1,0 +1,10 @@
+struct P { int32 a; int32 b; }
+int32 main() {
+    P p; p.a = 5; p.b = 7;
+    P* q = &p;
+    if (q->a != 5) { printf("FAIL arrow read\n"); return 1; }
+    q->b = 9;
+    if (p.b != 9) { printf("FAIL arrow write\n"); return 1; }
+    printf("ARROW OK\n");
+    return 0;
+}

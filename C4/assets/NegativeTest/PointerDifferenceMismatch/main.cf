@@ -1,0 +1,1 @@
+int32 main() { int32[4] a; int64[4] b; int32* p = &a[0]; int64* q = &b[0]; int64 n = p - q; return (int32)n; }

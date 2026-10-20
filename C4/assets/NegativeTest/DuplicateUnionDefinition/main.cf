@@ -1,0 +1,3 @@
+union Bits { int32 i; float f; }
+union Bits { int64 l; }
+int32 main() { return 0; }

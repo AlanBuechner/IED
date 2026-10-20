@@ -1,0 +1,21 @@
+include "bedrock.ch"
+template<T>
+class Box {
+    T* data;
+    int32 n;
+    [operator("create")] public void Init(int32 cap) { this.data = (T*)raw_alloc(cap * sizeof(T)); this.n = 0; }
+    [operator("delete")] public void Finalize() { raw_free(this.data); }
+    public void Push(T v) { this.data[this.n] = v; this.n++; }
+    public T At(int32 i) { return this.data[i]; }
+}
+int32 main() {
+    Box<float>* f = new Box<float>(4);
+    f->Push(1.5f); f->Push(2.5f);
+    Box<int32>* i = new Box<int32>(4);
+    i->Push(42); i->Push(7);
+    for (int32 k = 0; k < 4000; k++) { Core::StringBuilder* s = new Core::StringBuilder(4); } // GC pressure
+    gc_collect();
+    if (f->At(1) != 2.5f || i->At(0) != 42) { printf("FAIL (%.1f,%d)\n", f->At(1), i->At(0)); return 1; }
+    printf("TEMPLATE CLASS TWO-INST + FINALIZER OK\n");
+    return 0;
+}

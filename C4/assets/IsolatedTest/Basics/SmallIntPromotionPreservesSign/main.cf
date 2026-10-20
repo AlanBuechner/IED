@@ -1,0 +1,9 @@
+int32 main() {
+    int8 a = -7;
+    uint8 u = 200;
+    int32 r1 = (a + 50);   // promote to i32 signed: 43 (was 299)
+    int32 r2 = (u + 10);   // zero-extend unsigned: 210
+    int32 r3 = (a * 6);    // -42 (was 1494)
+    bool r4 = (a < 0);     // true (was false)
+    return (r1 == 43 && r2 == 210 && r3 == -42 && r4) ? 0 : 1;
+}

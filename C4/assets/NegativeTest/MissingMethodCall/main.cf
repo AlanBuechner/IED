@@ -1,0 +1,1 @@
+struct P{int32 v;} int32 main(){ P p; return p.Missing(); }

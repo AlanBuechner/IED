@@ -1,0 +1,152 @@
+// Bedrock Math: left-handed, column-major Mat4 (col0..col3, each Vec4), 0-1 NDC projection.
+namespace BkMath {
+    struct Vec2 { float x; float y; }
+    struct Vec3 { float x; float y; float z; }
+    struct Vec4 { float x; float y; float z; float w; }
+    struct Quat { float x; float y; float z; float w; }
+    struct Mat4 { Vec4 col0; Vec4 col1; Vec4 col2; Vec4 col3; }
+
+    Vec3 Vec3_Create(float x, float y, float z);
+    Vec3 Vec3_UnitX();
+    Vec3 Vec3_UnitY();
+    Vec3 Vec3_UnitZ();
+    Mat4 Mat4_Identity();
+    Vec3 Vec3_Add(Vec3 a, Vec3 b);
+    Vec3 Vec3_Sub(Vec3 a, Vec3 b);
+    Vec3 Vec3_Scale(Vec3 a, float s);
+    float Vec3_Dot(Vec3 a, Vec3 b);
+    Vec3 Vec3_Cross(Vec3 a, Vec3 b);
+    float Vec3_Length(Vec3 a);
+    Vec3 Vec3_Normalize(Vec3 a);
+    Mat4 Mat4_Multiply(Mat4 a, Mat4 b);
+    Vec3 Mat4_TransformPoint(Mat4 m, Vec3 p);
+    Mat4 Mat4_Translate(Vec3 t);
+    Quat Quat_Identity();
+    Quat Quat_FromAxisAngle(Vec3 axis, float rad);
+    Vec3 Quat_RotateVec(Quat q, Vec3 v);
+}
+
+BkMath::Vec3 BkMath::Vec3_Create(float x, float y, float z) { BkMath::Vec3 v; v.x = x; v.y = y; v.z = z; return v; }
+BkMath::Vec3 BkMath::Vec3_UnitX() { return BkMath::Vec3_Create(1.0f, 0.0f, 0.0f); }
+BkMath::Vec3 BkMath::Vec3_UnitY() { return BkMath::Vec3_Create(0.0f, 1.0f, 0.0f); }
+BkMath::Vec3 BkMath::Vec3_UnitZ() { return BkMath::Vec3_Create(0.0f, 0.0f, 1.0f); }
+
+BkMath::Mat4 BkMath::Mat4_Identity() {
+    BkMath::Mat4 m;
+    m.col0.x = 1.0f; m.col0.y = 0.0f; m.col0.z = 0.0f; m.col0.w = 0.0f;
+    m.col1.x = 0.0f; m.col1.y = 1.0f; m.col1.z = 0.0f; m.col1.w = 0.0f;
+    m.col2.x = 0.0f; m.col2.y = 0.0f; m.col2.z = 1.0f; m.col2.w = 0.0f;
+    m.col3.x = 0.0f; m.col3.y = 0.0f; m.col3.z = 0.0f; m.col3.w = 1.0f;
+    return m;
+}
+
+BkMath::Vec3 BkMath::Vec3_Add(BkMath::Vec3 a, BkMath::Vec3 b) { BkMath::Vec3 r; r.x = a.x+b.x; r.y = a.y+b.y; r.z = a.z+b.z; return r; }
+BkMath::Vec3 BkMath::Vec3_Sub(BkMath::Vec3 a, BkMath::Vec3 b) { BkMath::Vec3 r; r.x = a.x-b.x; r.y = a.y-b.y; r.z = a.z-b.z; return r; }
+BkMath::Vec3 BkMath::Vec3_Scale(BkMath::Vec3 a, float s) { BkMath::Vec3 r; r.x = a.x*s; r.y = a.y*s; r.z = a.z*s; return r; }
+float BkMath::Vec3_Dot(BkMath::Vec3 a, BkMath::Vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
+BkMath::Vec3 BkMath::Vec3_Cross(BkMath::Vec3 a, BkMath::Vec3 b) {
+    BkMath::Vec3 r;
+    r.x = a.y*b.z - a.z*b.y;
+    r.y = a.z*b.x - a.x*b.z;
+    r.z = a.x*b.y - a.y*b.x;
+    return r;
+}
+float BkMath::Vec3_Length(BkMath::Vec3 a) { return sqrtf(BkMath::Vec3_Dot(a, a)); }
+BkMath::Vec3 BkMath::Vec3_Normalize(BkMath::Vec3 a) {
+    float len = BkMath::Vec3_Length(a);
+    if (len <= 0.0f) return BkMath::Vec3_Create(0.0f, 0.0f, 0.0f);
+    return BkMath::Vec3_Scale(a, 1.0f / len);
+}
+
+BkMath::Mat4 BkMath::Mat4_Multiply(BkMath::Mat4 a, BkMath::Mat4 b) {
+    BkMath::Mat4 r;
+    r.col0.x = a.col0.x*b.col0.x + a.col1.x*b.col0.y + a.col2.x*b.col0.z + a.col3.x*b.col0.w;
+    r.col0.y = a.col0.y*b.col0.x + a.col1.y*b.col0.y + a.col2.y*b.col0.z + a.col3.y*b.col0.w;
+    r.col0.z = a.col0.z*b.col0.x + a.col1.z*b.col0.y + a.col2.z*b.col0.z + a.col3.z*b.col0.w;
+    r.col0.w = a.col0.w*b.col0.x + a.col1.w*b.col0.y + a.col2.w*b.col0.z + a.col3.w*b.col0.w;
+    r.col1.x = a.col0.x*b.col1.x + a.col1.x*b.col1.y + a.col2.x*b.col1.z + a.col3.x*b.col1.w;
+    r.col1.y = a.col0.y*b.col1.x + a.col1.y*b.col1.y + a.col2.y*b.col1.z + a.col3.y*b.col1.w;
+    r.col1.z = a.col0.z*b.col1.x + a.col1.z*b.col1.y + a.col2.z*b.col1.z + a.col3.z*b.col1.w;
+    r.col1.w = a.col0.w*b.col1.x + a.col1.w*b.col1.y + a.col2.w*b.col1.z + a.col3.w*b.col1.w;
+    r.col2.x = a.col0.x*b.col2.x + a.col1.x*b.col2.y + a.col2.x*b.col2.z + a.col3.x*b.col2.w;
+    r.col2.y = a.col0.y*b.col2.x + a.col1.y*b.col2.y + a.col2.y*b.col2.z + a.col3.y*b.col2.w;
+    r.col2.z = a.col0.z*b.col2.x + a.col1.z*b.col2.y + a.col2.z*b.col2.z + a.col3.z*b.col2.w;
+    r.col2.w = a.col0.w*b.col2.x + a.col1.w*b.col2.y + a.col2.w*b.col2.z + a.col3.w*b.col2.w;
+    r.col3.x = a.col0.x*b.col3.x + a.col1.x*b.col3.y + a.col2.x*b.col3.z + a.col3.x*b.col3.w;
+    r.col3.y = a.col0.y*b.col3.x + a.col1.y*b.col3.y + a.col2.y*b.col3.z + a.col3.y*b.col3.w;
+    r.col3.z = a.col0.z*b.col3.x + a.col1.z*b.col3.y + a.col2.z*b.col3.z + a.col3.z*b.col3.w;
+    r.col3.w = a.col0.w*b.col3.x + a.col1.w*b.col3.y + a.col2.w*b.col3.z + a.col3.w*b.col3.w;
+    return r;
+}
+
+BkMath::Vec3 BkMath::Mat4_TransformPoint(BkMath::Mat4 m, BkMath::Vec3 p) {
+    BkMath::Vec3 r;
+    r.x = m.col0.x*p.x + m.col1.x*p.y + m.col2.x*p.z + m.col3.x;
+    r.y = m.col0.y*p.x + m.col1.y*p.y + m.col2.y*p.z + m.col3.y;
+    r.z = m.col0.z*p.x + m.col1.z*p.y + m.col2.z*p.z + m.col3.z;
+    return r;
+}
+
+BkMath::Mat4 BkMath::Mat4_Translate(BkMath::Vec3 t) {
+    BkMath::Mat4 m = BkMath::Mat4_Identity();
+    m.col3.x = t.x; m.col3.y = t.y; m.col3.z = t.z;
+    return m;
+}
+
+BkMath::Quat BkMath::Quat_Identity() { BkMath::Quat q; q.x = 0.0f; q.y = 0.0f; q.z = 0.0f; q.w = 1.0f; return q; }
+BkMath::Quat BkMath::Quat_FromAxisAngle(BkMath::Vec3 axis, float rad) {
+    BkMath::Vec3 n = BkMath::Vec3_Normalize(axis);
+    float s = sinf(rad * 0.5f);
+    BkMath::Quat q;
+    q.x = n.x * s; q.y = n.y * s; q.z = n.z * s; q.w = cosf(rad * 0.5f);
+    return q;
+}
+BkMath::Vec3 BkMath::Quat_RotateVec(BkMath::Quat q, BkMath::Vec3 v) {
+    BkMath::Vec3 t;
+    t.x = 2.0f * (q.y*v.z - q.z*v.y);
+    t.y = 2.0f * (q.z*v.x - q.x*v.z);
+    t.z = 2.0f * (q.x*v.y - q.y*v.x);
+    BkMath::Vec3 c;
+    c.x = q.y*t.z - q.z*t.y;
+    c.y = q.z*t.x - q.x*t.z;
+    c.z = q.x*t.y - q.y*t.x;
+    BkMath::Vec3 r;
+    r.x = v.x + q.w*t.x + c.x;
+    r.y = v.y + q.w*t.y + c.y;
+    r.z = v.z + q.w*t.z + c.z;
+    return r;
+}
+
+int32 main() {
+    BkMath::Vec3 ax = BkMath::Vec3_UnitX();
+    BkMath::Vec3 ay = BkMath::Vec3_UnitY();
+    BkMath::Vec3 az = BkMath::Vec3_UnitZ();
+
+    BkMath::Vec3 c = BkMath::Vec3_Cross(ax, ay);
+    if (c.x != 0.0f || c.y != 0.0f || c.z != 1.0f) { printf("FAIL cross (%.1f,%.1f,%.1f)\n", c.x,c.y,c.z); return 1; }
+
+    float d = BkMath::Vec3_Dot(ax, az);
+    if (d != 0.0f) { printf("FAIL dot (%.1f)\n", d); return 1; }
+
+    BkMath::Vec3 n = BkMath::Vec3_Normalize(BkMath::Vec3_Create(0.0f, 3.0f, 4.0f));
+    if (n.y < 0.59f || n.y > 0.61f) { printf("FAIL norm (%.3f)\n", n.y); return 1; }
+
+    BkMath::Mat4 id = BkMath::Mat4_Identity();
+    BkMath::Vec3 p = BkMath::Mat4_TransformPoint(id, ax);
+    if (p.x != 1.0f || p.y != 0.0f) { printf("FAIL id-point (%.1f,%.1f)\n", p.x,p.y); return 1; }
+
+    BkMath::Mat4 tr = BkMath::Mat4_Translate(BkMath::Vec3_Create(1.0f,2.0f,3.0f));
+    BkMath::Vec3 tp = BkMath::Mat4_TransformPoint(tr, ax);
+    if (tp.x < 1.9f || tp.x > 2.1f) { printf("FAIL translate (%.2f)\n", tp.x); return 1; }
+
+    BkMath::Quat q = BkMath::Quat_FromAxisAngle(az, 1.5707963f);
+    BkMath::Vec3 rq = BkMath::Quat_RotateVec(q, ax);
+    if (rq.y < 0.99f) { printf("FAIL quat (%.2f,%.2f,%.2f)\n", rq.x,rq.y,rq.z); return 1; }
+
+    BkMath::Mat4 m = BkMath::Mat4_Multiply(id, tr);
+    BkMath::Vec3 mp = BkMath::Mat4_TransformPoint(m, ax);
+    if (mp.x < 1.9f || mp.x > 2.1f) { printf("FAIL matmul (%.2f)\n", mp.x); return 1; }
+
+    printf("BEDROCK MATH OK\n");
+    return 0;
+}

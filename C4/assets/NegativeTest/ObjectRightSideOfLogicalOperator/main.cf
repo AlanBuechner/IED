@@ -1,0 +1,2 @@
+struct A { int32 x; [operator("logical_and")] int32 LA(const A& o) extends A { return 1; } }
+int main() { A a; if (true && a) return 1; return 0; }

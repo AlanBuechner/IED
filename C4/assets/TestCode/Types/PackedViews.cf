@@ -1,0 +1,70 @@
+// Types - packed views by bare name, with a variable scalar, on a returned vector and in a struct with other
+// fields (BUG-181..BUG-184)
+include "../Framework/Assert.ch"
+include "PackedViews.ch"
+
+float PvVec2::SumBare() const { return data[0] + data[1]; }
+void PvVec2::SetBoth(float v) { data = { v, v }; }
+PvVec2 PvVec2::Swapped() const { PvVec2 out; out.data = yx; return out; }
+PvVec2 PvVec2::Times(float s) const { PvVec2 out; out.data = data * s; return out; }
+
+PvVec2 PvMake(float a, float b) { PvVec2 v; v.x = a; v.y = b; return v; }
+packed float[4] PvScale(packed float[4] v, float s) { return v * s; }
+packed int32[4] PvShift(packed int32[4] v, int32 s) { return s + v; }
+
+void TestPackedViews() {
+	PvVec2 v = PvMake(1.0f, 2.0f);
+	AssertFloatEquals(3.0f, v.SumBare(), "a bare array view in a method (BUG-181)");
+	AssertFloatEquals(1.0f, v.Swapped().y, "a bare run in a method");
+	v.SetBoth(4.0f);
+	AssertFloatEquals(4.0f, v.y, "a bare array view written");
+
+	volatile float factor = 2.5f;
+	packed float[4] lanes = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] scaled = PvScale(lanes, factor);
+	AssertFloatEquals(10.0f, scaled[3], "a vector times a variable scalar (BUG-182)");
+	packed int32[4] ints = { 1, 2, 3, 4 };
+	packed int32[4] shifted = PvShift(ints, 10);
+	AssertEqual(14, shifted[3]);
+	AssertFloatEquals(10.0f, v.Times(factor).y, "the same in a method");
+
+	AssertFloatEquals(2.0f, PvMake(1.0f, 2.0f).y, "a lane of a returned vector (BUG-183)");
+	AssertFloatEquals(1.0f, PvMake(1.0f, 2.0f).data[0], "its array view");
+	AssertFloatEquals(2.0f, PvMake(1.0f, 2.0f).yx[0], "a run of it");
+	PvHeaded runs;
+	runs.data = { 1.0f, 2.0f, 3.0f, 4.0f };
+	volatile int64 at = 0;
+	AssertFloatEquals(3.0f, runs.zyx[at], "a run indexed at run time reads its own lanes (BUG-185)");
+	runs.wz[at] = 9.0f;
+	AssertFloatEquals(9.0f, runs.w, "and writes them");
+	AssertFloatEquals(3.0f, runs.z, "leaving the others");
+	AssertFloatEquals(5.0f, v.Times(factor).r * 0.5f, "a lane of an operator's result");
+
+	PvTagged t;
+	t.x = 3.0f;
+	t.y = 4.0f;
+	t.tag = 7;
+	AssertFloatEquals(4.0f, t.y, "a lane of a struct with other fields (BUG-184)");
+	AssertEqual(7, t.tag);
+	AssertEqual(16, (int32)sizeof(PvTagged));
+	PvTagged copy = t;
+	AssertFloatEquals(3.0f, copy.x, "a copy keeps the lanes");
+
+	PvHeaded h;
+	h.head = 1;
+	h.z = 5.0f;
+	h.data[3] = 6.0f;
+	h.xy = { 1.5f, 2.5f };
+	h.tail = 9;
+	AssertEqual(1, h.head);
+	AssertFloatEquals(2.5f, h.y, "a run written in a mixed struct");
+	AssertFloatEquals(6.0f, h.w, "the array view written in a mixed struct");
+	AssertEqual(9, (int32)h.tail);
+	AssertEqual(48, (int32)sizeof(PvHeaded));
+
+	PvBox<int32> box;
+	box.before = 10;
+	box.x = 1; box.y = 2; box.z = 3;
+	AssertEqual(16, box.Total());
+	AssertEqual(16, (int32)sizeof(PvBox<int32>));
+}

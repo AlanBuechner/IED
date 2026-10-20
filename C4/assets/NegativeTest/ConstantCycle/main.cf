@@ -1,0 +1,3 @@
+const int32 kCycA = kCycB + 1;
+const int32 kCycB = kCycA + 1;
+int32 main() { return kCycA; }

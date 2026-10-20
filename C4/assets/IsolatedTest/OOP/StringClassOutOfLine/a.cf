@@ -1,0 +1,15 @@
+class MyStr {
+    char* bytes;
+    int32 byteLen;
+    [operator("create")] public void Init(char* src, int32 n);
+    [operator("delete")] public void Delete();
+    public int32 ByteLength() { return this->byteLen; }
+}
+void MyStr::Init(char* src, int32 n) { this->bytes = (char*)raw_alloc(n + 1); memcpy(this->bytes, src, n + 1); this->byteLen = n; }
+void MyStr::Delete() { raw_free(this->bytes); }
+int32 main() {
+    MyStr* s = new MyStr("hello", 5);
+    printf("E3 len=%d\n", s->ByteLength());
+    delete s;
+    return 0;
+}

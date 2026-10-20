@@ -1,0 +1,2 @@
+const char* g = "abc;
+int32 main() { return 0; }

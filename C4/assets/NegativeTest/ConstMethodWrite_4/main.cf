@@ -1,0 +1,3 @@
+struct S { public int32 x; public void F(int32 y) const; };
+void S::F(int32 y) const { this->x = y; }
+int main() { S s; s.F(1); return 0; }

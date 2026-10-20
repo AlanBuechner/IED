@@ -1,0 +1,2 @@
+extern "c" include "stdio.h";
+int32 One() { return 1; }

@@ -1,0 +1,11 @@
+// A local declared inside a braced statement body is scoped to that block (C++ semantics).
+// Using it after the closing brace is out of scope and must be a clear "Undefined identifier"
+// error, not malformed IR. Before the per-block-scope fix this compiled to an untyped load and
+// failed at LLVM with "value doesn't match function result type".
+int32 main() {
+    int32 c = 1;
+    if (c) {
+        int32 x = 5;
+    }
+    return x;
+}

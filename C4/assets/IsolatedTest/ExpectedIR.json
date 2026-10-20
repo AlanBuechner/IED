@@ -1,0 +1,64 @@
+{
+  "Types/VolatileStore": {
+    "irContains": [
+      "store volatile",
+      "load volatile"
+    ],
+    "reason": "D-29: volatile locals, globals and fields load and store with volatile operations."
+  },
+  "Types/ThreadLocalCounter": {
+    "irContains": [
+      "thread_local global"
+    ],
+    "reason": "D-29: a thread_local global or local is LLVM thread_local storage."
+  },
+  "Types/Atomics": {
+    "irContains": [
+      "load atomic i64",
+      "store atomic i8",
+      "atomicrmw add",
+      "atomicrmw xchg",
+      "cmpxchg weak",
+      "fence seq_cst"
+    ],
+    "reason": "D-60: the atomic intrinsics lower to LLVM atomic loads, stores, read-modify-writes, compare-exchanges and fences (a bool through its byte)."
+  },
+  "Simd/WideVectorsAvx2": {
+    "irContains": [
+      "\"target-cpu\"=\"x86-64-v3\"",
+      "+avx2",
+      "+fma",
+      "@llvm.fma.v8f32",
+      "@llvm.masked.gather.v8f32"
+    ],
+    "reason": "D-62: every function carries the build's target, and the intrinsics lower to LLVM's."
+  },
+  "Simd/TargetMacros": {
+    "irContains": [
+      "\"target-cpu\"=\"x86-64\"",
+      "+sse2"
+    ],
+    "reason": "D-62: without flags every function is compiled for the baseline x86-64."
+  },
+  "Types/StrictAliasingUnions": {
+    "irContains": [
+      "!{!\"C4 TBAA\"}",
+      "!{!\"bytes\", !"
+    ],
+    "reason": "D-64: loads and stores carry !tbaa tags; a member of a union of several classes is tagged bytes, which aliases every class."
+  },
+  "Types/StrictAliasingStructPointers": {
+    "irContains": [
+      "!{!\"float\", !",
+      "!{!\"pointer\", !",
+      "!{!\"int32\", !"
+    ],
+    "reason": "D-64: a float, a pointer and an int32 access each carry their own class, so a float store does not make the loop reload pointers."
+  },
+  "Types/Bug254VolatileObjectWithVptrs": {
+    "irContains": [
+      "store volatile %Widget"
+    ],
+    "reason": "BUG-254: assigning an object with vptrs to a volatile variable is a volatile store (D-29)."
+  }
+}

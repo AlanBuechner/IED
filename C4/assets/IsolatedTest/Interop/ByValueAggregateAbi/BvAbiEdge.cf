@@ -1,0 +1,93 @@
+// BvAbiEdge - exhaustive Windows x64 by-value aggregate ABI coverage across the C/C++ boundary.
+//
+// The Microsoft x64 ABI passes a by-value struct in a single integer register only when its
+// allocated size is exactly 1, 2, 4, or 8 bytes; every other size (3,5,6,7,12,16,20...) goes by a
+// hidden pointer (incoming arg) or an sret out-pointer + void return (result). C4 must emit a
+// clang-identical signature for each convention or the call silently corrupts registers/stack.
+//
+// bv.h declares one struct per size class; bv.cpp implements SumS* (exercises the incoming
+// by-value argument) and MakeS* (exercises the sret out-pointer return). This file calls every
+// function in both directions and checks the values round-trip, so any ABI mismatch surfaces as a
+// wrong value rather than a crash.
+extern "c" include "bv.h"
+extern "c" source "bv.cpp"
+
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+
+// --- Param passing: each SumS* receives a by-value struct and sums its members. -------------
+void TestParamPassing() {
+	S1 s;  s.a = 5;                       Check(SumS1(s) == 5, "SumS1 (1B reg)");
+	S2 s2; s2.a = 7;                      Check(SumS2(s2) == 7, "SumS2 (2B reg)");
+	S3 s3; s3.a = 1; s3.b = 2; s3.c = 3;  Check(SumS3(s3) == 6, "SumS3 (3B ptr)");
+	S4 s4; s4.a = 10;                     Check(SumS4(s4) == 10, "SumS4 (4B reg)");
+	S5 s5; s5.a = 1; s5.b = 2; s5.c = 3; s5.d = 4; s5.e = 5;
+	                                       Check(SumS5(s5) == 15, "SumS5 (5B ptr)");
+	S6 s6; s6.a = 1; s6.b = 2; s6.c = 3;  Check(SumS6(s6) == 6, "SumS6 (6B ptr)");
+	S7 s7; s7.a = 1; s7.b = 2; s7.c = 3; s7.d = 4; s7.e = 5; s7.f = 6; s7.g = 7;
+	                                       Check(SumS7(s7) == 28, "SumS7 (7B ptr)");
+	S8 s8; s8.a = 100;                    Check(SumS8(s8) == 100, "SumS8 (8B reg)");
+	S12 s12; s12.a = 1; s12.b = 2; s12.c = 3;   Check(SumS12(s12) == 6, "SumS12 (12B ptr)");
+	S16 s16; s16.a = 1; s16.b = 2; s16.c = 3; s16.d = 4; Check(SumS16(s16) == 10, "SumS16 (16B ptr)");
+	S20 s20; s20.a = 1; s20.b = 2; s20.c = 3; s20.d = 4; s20.e = 5; Check(SumS20(s20) == 15, "SumS20 (20B ptr)");
+}
+
+// --- Return passing: each MakeS* builds a by-value struct and returns it via the sret ptr. --
+void TestReturnPassing() {
+	S1 r1 = MakeS1(9);                    Check(r1.a == 9, "MakeS1 (1B reg)");
+	S2 r2 = MakeS2(11);                   Check(r2.a == 11, "MakeS2 (2B reg)");
+	S3 r3 = MakeS3(4);                    Check(r3.a == 4 && r3.b == 5 && r3.c == 6, "MakeS3 (3B sret)");
+	S4 r4 = MakeS4(20);                   Check(r4.a == 20, "MakeS4 (4B reg)");
+	S5 r5 = MakeS5(2);                    Check(r5.a == 2 && r5.b == 3 && r5.c == 4 && r5.d == 5 && r5.e == 6, "MakeS5 (5B sret)");
+	S6 r6 = MakeS6(3);                    Check(r6.a == 3 && r6.b == 6 && r6.c == 9, "MakeS6 (6B sret)");
+	S7 r7 = MakeS7(1);                    Check(r7.a == 1 && r7.b == 2 && r7.c == 3 && r7.d == 4 && r7.e == 5 && r7.f == 6 && r7.g == 7, "MakeS7 (7B sret)");
+	S8 r8 = MakeS8(50);                   Check(r8.a == 50, "MakeS8 (8B reg)");
+	S12 r12 = MakeS12(5);                 Check(r12.a == 5 && r12.b == 10 && r12.c == 15, "MakeS12 (12B sret)");
+	S16 r16 = MakeS16(3);                 Check(r16.a == 3 && r16.b == 6 && r16.c == 9 && r16.d == 12, "MakeS16 (16B sret)");
+	S20 r20 = MakeS20(2);                 Check(r20.a == 2 && r20.b == 4 && r20.c == 6 && r20.d == 8 && r20.e == 10, "MakeS20 (20B sret)");
+}
+
+// --- Mixed: pass a returned value straight back in, exercising both conventions at once. ----
+void TestRoundTrip() {
+	S12 a = MakeS12(2);   // a=2,b=4,c=6 via sret
+	Check(SumS12(a) == 12, "round-trip S12 (sret out -> hidden-ptr in)");
+
+	S20 b = MakeS20(3);   // a=3,b=6,c=9,d=12,e=15 via sret
+	Check(SumS20(b) == 45, "round-trip S20 (sret out -> hidden-ptr in)");
+
+	S8 c = MakeS8(7);     // register return
+	Check(SumS8(c) == 7, "round-trip S8 (reg out -> reg in)");
+}
+
+// --- Floating-point aggregates: same integer-register classes as the equal-size int structs. --
+// If C4 picked a different convention than clang (e.g. XMM vs GPR), the values would come back
+// corrupted, not just wrong-typed. Exact float/double equality proves the bits round-tripped.
+void TestFloatAggregates() {
+	F1 f1;  f1.a = 1.5f;   Check(SumF1(f1) == 1.5f, "float by-value param (i32 reg)");
+	D1 d1;  d1.a = 2.5;     Check(SumD1(d1) == 2.5, "double by-value param (i64 reg)");
+	F2 f2;  f2.a = 1.0f; f2.b = 2.25f; Check(SumF2(f2) == 3.25f, "two-float by-value param (i64 reg)");
+	M1 m1;  m1.a = 7; m1.b = 1.5f;     Check(SumM1(m1) == 7, "mixed int+float by-value param (i64 reg)");
+
+	F1 rf1 = MakeF1(4);    // a=2.0f via sret
+	Check(rf1.a == 2.0f, "MakeF1 float return (sret)");
+	D1 rd1 = MakeD1(8);    // a=2.0 via sret
+	Check(rd1.a == 2.0, "MakeD1 double return (sret)");
+	F2 rf2 = MakeF2(3);    // a=3,b=6 via sret
+	Check(SumF2(rf2) == 9.0f, "round-trip F2 (sret out -> i64 in)");
+	M1 rm1 = MakeM1(5);    // a=5,b=6 via sret
+	Check(rm1.a == 5 && rm1.b == 6.0f, "MakeM1 mixed return (sret)");
+	F4 rf4 = MakeF4(2);    // a=2,b=4,c=6,d=8 via sret (16B)
+	Check(SumF4(rf4) == 20.0f, "round-trip F4 (sret out -> hidden-ptr in, four floats)");
+}
+
+int32 main() {
+	TestParamPassing();
+	TestReturnPassing();
+	TestRoundTrip();
+	TestFloatAggregates();
+	if (g_fail) { printf("BV ABI EDGE TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("BV ABI EDGE TESTS OK\n");
+	return 0;
+}

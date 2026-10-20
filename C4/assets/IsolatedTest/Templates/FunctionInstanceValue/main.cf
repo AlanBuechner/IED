@@ -1,0 +1,35 @@
+// BUG-264: a function template's instance named with its arguments is a value, `F<int32>` or `Ns::F<int32>`, wherever
+// a comparison could not stand (before ; , ) ] } : ? == !=), while `a < b, c > d` stays two comparisons. main returns
+// the failures.
+template<T> T Larger(T a, T b) { return a > b ? a : b; }
+
+namespace Geo { template<T> T Smaller(T a, T b) { return a < b ? a : b; } }
+
+int32 Apply(funcptr<int32(int32, int32)> f, int32 a, int32 b) { return f(a, b); }
+
+int32 Count(bool first, bool second) { return (first ? 1 : 0) + (second ? 1 : 0); }
+
+funcptr<double(double, double)> g_larger = Larger<double>;
+
+int32 main() {
+	int32 failures = 0;
+	funcptr<int32(int32, int32)> larger = Larger<int32>;
+	if (larger(3, 9) != 9) failures++;
+	funcptr<int32(int32, int32)> smaller = Geo::Smaller<int32>;
+	if (smaller(3, 9) != 3) failures++;
+	if (Apply(Larger<int32>, 4, 2) != 4 || Apply(Geo::Smaller<int32>, 4, 2) != 2) failures++;
+	funcptr<int32(int32, int32)> picked = failures == 0 ? Larger<int32> : Geo::Smaller<int32>;
+	if (picked(1, 2) != 2) failures++;
+	if (larger != Larger<int32> || !(Larger<int32> == larger)) failures++;
+	funcptr<int32(int32, int32)>[2] table = { Larger<int32>, Geo::Smaller<int32> };
+	if (table[0](5, 6) != 6 || table[1](5, 6) != 5) failures++;
+	if (g_larger(1.5, 2.5) != 2.5) failures++;
+	int32 a = 1;
+	int32 b = 2;
+	int32 c = 4;
+	int32 d = 3;
+	if (Count(a < b, c > d) != 2) failures++;
+	bool chained = a < b;
+	if (!chained) failures++;
+	return failures;
+}

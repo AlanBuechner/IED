@@ -1,0 +1,3 @@
+// Scoped enum members are NOT injected into the enclosing scope. Using one unqualified is an error.
+enum class Traffic { Stop, Go };
+int32 main() { return (int32)Stop; }

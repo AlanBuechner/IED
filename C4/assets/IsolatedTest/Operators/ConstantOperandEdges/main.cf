@@ -1,0 +1,21 @@
+// Constant operands at the edge of what is defined still compile and run: a shift by the width less one, the last
+// index, a division by a nonzero constant, and a zero known only at run time (BUG-216 rejects only the written
+// mistake). main returns the failures.
+int32 Divide(int32 a, int32 b) { return b == 0 ? -1 : a / b; }
+
+int32 main() {
+	int32 failures = 0;
+	int32 one = 1;
+	if ((one << 31) != -2147483647 - 1) failures += 1;
+	int64 wide = 1;
+	if ((wide << 63) >= 0) failures += 1;
+	int32[4] a;
+	a[3] = 9;
+	if (a[3] != 9) failures += 1;
+	int32 x = 17;
+	if (x / 5 != 3 || x % 5 != 2) failures += 1;
+	if (Divide(8, 0) != -1 || Divide(8, 2) != 4) failures += 1;
+	int32 i = 3;
+	if (a[i] != 9) failures += 1;
+	return failures;
+}

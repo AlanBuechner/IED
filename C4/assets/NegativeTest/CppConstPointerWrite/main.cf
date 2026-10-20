@@ -1,0 +1,2 @@
+extern "c++" include "wide.h"
+int32 main() { char16* w = WideHello(); return 0; }

@@ -1,0 +1,63 @@
+// Types - Named Unions Tests (implementation)
+include "../Framework/Assert.ch"
+include "NamedUnions.ch"
+
+// BUG-191: a named union's members resolve in the scope the union is declared in.
+namespace NuShapes {
+	struct Span { public int32 low; public int32 high; }
+	enum class Unit { Meters, Feet }
+	union Extent { public Span span; public int64 packedSpan; public Unit unit; }
+}
+
+// BUG-192: a struct view inside a named union was dropped; its fields follow each other from offset 0.
+union NuVec2 { struct { public float x; public float y; }; public float[2] pair; }
+union NuColor { struct { public uint8 r; public uint8 g; public uint8 b; public uint8 a; }; public uint32 rgba; }
+union NuMixed { struct { public int8 tag; public double value; }; public uint8[16] raw; }
+
+class NuHolder {
+	public union Payload { public int32 count; public float ratio; }
+	public Payload payload;
+	public int32 after;
+}
+
+void TestNamedUnionScopes() {
+	NuShapes::Extent e;
+	e.span.low = 1;
+	e.span.high = 2;
+	Assert(e.packedSpan == 8589934593, "a namespace struct member shares the bytes");
+	Assert(sizeof(NuShapes::Extent) == 8, "the largest member sizes it");
+}
+
+void TestNamedUnionViews() {
+	NuVec2 v;
+	v.pair[1] = 5.0f;
+	AssertFloatEquals(5.0f, v.y, "a view field reads the array's lane");
+	v.x = 2.0f;
+	AssertFloatEquals(2.0f, v.pair[0], "and writes it");
+	Assert(sizeof(NuVec2) == 8, "two floats");
+	NuColor c;
+	c.rgba = 0x04030201u;
+	Assert(c.r == 1 && c.g == 2 && c.b == 3 && c.a == 4, "byte view of a word");
+	Assert(sizeof(NuMixed) == 16, "a padded view: int8 then an aligned double");
+	NuMixed m;
+	m.value = 1.5;
+	m.tag = 7;
+	Assert(m.raw[0] == 7, "the tag is the first byte");
+	AssertFloatEquals(1.5f, (float)m.value, "the double sits after the padding");
+}
+
+void TestNamedUnionInClass() {
+	NuHolder h;
+	h.payload.count = 3;
+	h.after = 9;
+	Assert(sizeof(NuHolder) == 8 && h.payload.count == 3 && h.after == 9, "a union field in a class");
+	NuHolder::Payload p;
+	p.ratio = 0.5f;
+	AssertFloatEquals(0.5f, p.ratio, "a union declared in a class");
+}
+
+void TestNamedUnions() {
+	TestNamedUnionScopes();
+	TestNamedUnionViews();
+	TestNamedUnionInClass();
+}

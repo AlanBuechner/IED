@@ -1,0 +1,2 @@
+[test_setup] void Prepare(int32 v) {}
+[test("a.b")] void TestRuns() {}

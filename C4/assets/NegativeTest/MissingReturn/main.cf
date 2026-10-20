@@ -1,0 +1,2 @@
+int32 Half(int32 v) { int32 h = v / 2; }
+int32 main() { return Half(4); }

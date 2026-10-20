@@ -1,0 +1,36 @@
+// Bug D repro - struct logical operators (&& / ||) must dispatch to the
+// [operator("logical_and")] / [operator("logical_or")] extension methods.
+
+struct Flag {
+	int32 on;
+};
+
+[operator("logical_and")] int32 LogicalAnd(const Flag& other) extends Flag {
+	return (this.on != 0 && other.on != 0) ? 1 : 0;
+}
+
+[operator("logical_or")] int32 LogicalOr(const Flag& other) extends Flag {
+	return (this.on != 0 || other.on != 0) ? 1 : 0;
+}
+
+int32 main() {
+	Flag zero;
+	zero.on = 0;
+	Flag nonzero;
+	nonzero.on = 1;
+
+	int32 andResult = (zero && nonzero) ? 1 : 0;
+	if (andResult != 0) { printf("FAIL logical_and got %d\n", andResult); return 1; }
+
+	andResult = (nonzero && nonzero) ? 1 : 0;
+	if (andResult != 1) { printf("FAIL logical_and nn got %d\n", andResult); return 1; }
+
+	int32 orResult = (zero || zero) ? 1 : 0;
+	if (orResult != 0) { printf("FAIL logical_or got %d\n", orResult); return 1; }
+
+	orResult = (zero || nonzero) ? 1 : 0;
+	if (orResult != 1) { printf("FAIL logical_or zn got %d\n", orResult); return 1; }
+
+	printf("STRUCT LOGICAL OK\n");
+	return 0;
+}

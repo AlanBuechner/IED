@@ -1,0 +1,4 @@
+interface Shape { public virtual float Area(); public virtual int32 Sides(); }
+abstract class Mid : public Shape { public override float Area() { return 2.0f; } }
+class Bad2 : public Mid { }
+int main() { Bad2* p = new Bad2(); delete p; return 0; }

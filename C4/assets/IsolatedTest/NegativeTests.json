@@ -1,0 +1,19 @@
+{
+  "Diagnostics/WerrorFails": {
+    "expect": ["main.cf (5:17) error: the conversion from 'int64' to 'int16' may change the value"],
+    "compileFlags": ["-Werror"],
+    "reason": "-Werror makes the narrowing warning an error, and the build fails (B22)."
+  },
+  "Types/UuidOfNegative": {
+    "expect": ["UuidOfNegative.cf (3:13) error: __uuidof: type not found: Missing"],
+    "reason": "Every type has a UUID (D-43), so __uuidof fails only for a name that is not a type, and says which"
+  },
+  "Namespaces/OpenNamespaceDuplicate": {
+    "expect": ["Duplicate definition of 'Math::Count'"],
+    "reason": "a namespace member defined in two files is a real collision and must produce a clear duplicate-definition error, not silently merge or link twice"
+  },
+  "Types/SizeOfIncompleteType": {
+    "expect": ["sizeof of incomplete type"],
+    "reason": "sizeof of a forward-declared (incomplete) type is not a compile-time constant: it must be a clear compile error, never a crash and never a silent zero"
+  }
+}

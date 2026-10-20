@@ -1,0 +1,6 @@
+int32 main() {
+L:
+	int32 a = 1;
+L:
+	return a;
+}

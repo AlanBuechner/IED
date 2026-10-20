@@ -1,0 +1,3 @@
+struct A { int32 x; }
+int32 TakeA(A a) { return a.x; }
+int main() { int32 r = TakeA(5); return 0; }

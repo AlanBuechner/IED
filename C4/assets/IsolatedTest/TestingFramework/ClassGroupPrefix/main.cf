@@ -1,0 +1,9 @@
+// BUG-021: a class's [test("math.vector")] names its methods' tests under that group.
+[test("math.vector")]
+struct VectorTests {
+	[test("addition")] public static void TestAddition() { assert_eq(3, 1 + 2, "1 + 2"); }
+	[test] public static void TestScale() { assert_eq(6, 2 * 3, "2 * 3"); }
+}
+
+[test("free.case")]
+void TestFree() { assert_true(1, "free tests keep their own group"); }

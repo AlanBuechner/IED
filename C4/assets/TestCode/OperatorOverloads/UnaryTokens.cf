@@ -1,0 +1,37 @@
+include "../Framework/Assert.ch"
+include "UnaryTokens.ch"
+
+struct Meter {
+	public float v;
+	[operator("create")] public void Init(float x) { this.v = x; }
+	[operator("-")] public Meter Negated() const { return Meter(-this.v); }
+	[operator("-")] public Meter Minus(const Meter& o) const { return Meter(this.v - o.v); }
+	[operator("+")] public Meter Rounded() const { return Meter(this.v + 0.5f); }
+	[operator("+")] public Meter Plus(const Meter& o) const { return Meter(this.v + o.v); }
+	[operator("*")] public float Value() const { return this.v; }
+	[operator("*")] public Meter Times(float k) const { return Meter(this.v * k); }
+	[operator("&")] public int32 Tag() const { return 77; }
+}
+
+struct Flags {
+	public int32 bits;
+	[operator("&", "bitwise_and")] public Flags Both(const Flags& o) const { Flags f; f.bits = this.bits & o.bits; return f; }
+	[operator("less", "greater")] public bool Differs(const Flags& o) const { return this.bits != o.bits; }
+}
+
+void TestUnaryTokens() {
+	Meter a(3.0f);
+	Meter b(1.0f);
+	AssertFloatEquals(-3.0f, (-a).v, "zero-parameter [operator(\"-\")] is negate");
+	AssertFloatEquals(2.0f, (a - b).v, "one-parameter [operator(\"-\")] is subtract");
+	AssertFloatEquals(3.5f, (+a).v, "zero-parameter [operator(\"+\")] is unary plus");
+	AssertFloatEquals(4.0f, (a + b).v, "one-parameter [operator(\"+\")] is add");
+	AssertFloatEquals(3.0f, *a, "zero-parameter [operator(\"*\")] is dereference");
+	AssertFloatEquals(6.0f, (a * 2.0f).v, "one-parameter [operator(\"*\")] is multiply");
+	AssertIntEquals(77, &a, "zero-parameter [operator(\"&\")] is address_of");
+	Flags x; x.bits = 6;
+	Flags y; y.bits = 3;
+	AssertIntEquals(2, (x & y).bits, "a token and its name in one annotation");
+	Assert(x < y, "the first of two names registers");
+	Assert(x > y, "and so does the second");
+}

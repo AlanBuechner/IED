@@ -1,0 +1,9 @@
+// A QUALIFIED enum member (E::X) used as an array size must fold to its value, like a bare member.
+// The existing const-array-size test only covered the bare form; this locks the qualified one.
+enum E { X = 3 };
+int32[E::X] g;
+
+int32 main() {
+	g[0] = 7;
+	return (g[0] == 7 && sizeof(g) == 12) ? 0 : 1;
+}

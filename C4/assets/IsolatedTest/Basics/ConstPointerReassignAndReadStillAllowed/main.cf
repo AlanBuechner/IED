@@ -1,0 +1,2 @@
+struct S { public int32 x; }
+int main() { S s; s.x = 7; const S*[4] arr; arr[0] = &s; return (arr[0]->x == 7) ? 0 : 1; }

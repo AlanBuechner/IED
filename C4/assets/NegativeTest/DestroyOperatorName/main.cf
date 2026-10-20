@@ -1,0 +1,5 @@
+class Handle {
+	public int32 id;
+	[operator("destroy")] public void Release() { id = 0; }
+}
+int32 main() { Handle h; return h.id; }

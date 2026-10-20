@@ -1,0 +1,2 @@
+include "vecns.ch"
+namespace Math { float DotV3(V3F a, V3F b) { return a.Get(0) + b.Get(1); } }

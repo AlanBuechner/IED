@@ -1,0 +1,2 @@
+enum class SC { A, B }
+int32 main() { int32 c = 0; switch (c) { case SC::A: return 1; default: break; } return 0; }

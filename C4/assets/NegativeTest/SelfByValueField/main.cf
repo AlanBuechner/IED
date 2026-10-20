@@ -1,0 +1,5 @@
+struct Node {
+	public Node next;
+	public int32 value;
+}
+int32 main() { return 0; }

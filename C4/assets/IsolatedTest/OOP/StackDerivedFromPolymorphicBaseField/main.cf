@@ -1,0 +1,23 @@
+// A stack object of a type derived from a polymorphic base: its own and inherited fields, virtual dispatch, and
+// the upcast and downcast between them. main returns the failed step.
+class Base { public int32 b; public virtual int32 Who() { return 1; } }
+class Derived : public Base {
+	public int32 d;
+public:
+	[operator("create")] public void Init(int32 x, int32 y) { this->b = x; this->d = y; }
+	public override int32 Who() { return 7; }
+}
+int32 main() {
+	Derived dv;
+	dv.d = 5;
+	if (dv.d != 5) return 1;
+	dv.b = 42;
+	if (dv.b != 42) return 2;
+	if (dv.Who() != 7) return 3;
+	Base* bp = &dv;
+	if (bp->b != 42) return 4;
+	if (bp->Who() != 7) return 5;
+	Derived* back = (Derived*)bp;
+	if (back->d != 5) return 6;
+	return 0;
+}

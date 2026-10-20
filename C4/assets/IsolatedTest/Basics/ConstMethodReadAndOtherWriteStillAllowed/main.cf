@@ -1,0 +1,4 @@
+struct S { public int32 x;
+	public int32 Get() const { return this->x; }
+	public void SetOther(S* o, int32 y) const { o->x = y; } }
+int main() { S a, b; a.x = 9; b.SetOther(&a, 5); return (a.Get()==5 && b.x==0) ? 0 : 1; }

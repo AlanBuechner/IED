@@ -1,0 +1,2 @@
+struct S { const int32 v; public void Set(int32 a) { this->v = a; } }
+int main() { S s; s.Set(1); return 0; }

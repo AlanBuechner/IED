@@ -1,0 +1,2 @@
+struct Handle { public int32 fd; [operator("delete")] void Close() { fd = 0; } }
+int32 main() { Handle h; func<int32()> f = [h]() -> int32 { return h.fd; }; return f(); }

@@ -1,0 +1,49 @@
+// D-22: func<R(A)> holds any callable of that signature - a closure, a capture-less lambda, a function, a
+// funcptr - is 16 bytes, copies freely, compares with null, lives in fields and arrays, and returns objects.
+struct Pair { public int32 a; public int32 b; public int32 c; }   // 12 bytes: returned through memory
+
+int32 Double(int32 x) { return x * 2; }
+
+struct Handler {
+	public func<int32(int32)> callback;
+	public int32 Fire(int32 v) { return callback(v); }
+}
+
+func<int32(int32)> Pick(bool doubling, int32 extra) {
+	if (doubling) return Double;
+	return [extra](int32 x) -> int32 { return x + extra; };
+}
+
+int32 main() {
+	if (sizeof(func<int32(int32)>) != 16) return 1;
+
+	func<int32(int32)> f = null;
+	if (f != null) return 2;
+	f = Double;
+	if (f == null || f(4) != 8) return 3;
+	funcptr<int32(int32)> raw = Double;
+	f = raw;
+	if (f(5) != 10) return 4;
+	f = [](int32 x) -> int32 { return -x; };
+	if (f(5) != -5) return 5;
+
+	if (Pick(true, 0)(7) != 14 || Pick(false, 3)(7) != 10) return 6;
+
+	Handler h;
+	int32 hits = 0;
+	h.callback = [&hits](int32 v) -> int32 { hits++; return v * 3; };
+	if (h.Fire(2) != 6 || hits != 1) return 7;
+
+	func<int32(int32)>[3] table;
+	table[0] = Double;
+	table[1] = [](int32 x) -> int32 { return x + 100; };
+	table[2] = h.callback;
+	if (table[0](1) + table[1](1) + table[2](1) != 106 || hits != 2) return 8;
+
+	int32 seed = 4;
+	func<Pair(int32)> make = [seed](int32 v) -> Pair { Pair p; p.a = v; p.b = seed; p.c = v + seed; return p; };
+	Pair p = make(3);
+	if (p.a != 3 || p.b != 4 || p.c != 7) return 9;
+	printf("FUNC VALUES OK\n");
+	return 0;
+}

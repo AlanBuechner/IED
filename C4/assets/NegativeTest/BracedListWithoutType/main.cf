@@ -1,0 +1,1 @@
+int32 main() { int32 x = 0; x += { 1 }; return x; }

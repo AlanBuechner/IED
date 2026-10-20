@@ -1,0 +1,206 @@
+// ControlFlow - Range-For Loop Tests (implementation)
+include "../Framework/Assert.ch"
+include "RangeFor.ch"
+
+struct RFPoint {
+	int32 x;
+	int32 y;
+
+	[operator("create")] public void Init(int32 px, int32 py) {
+		this.x = px;
+		this.y = py;
+	}
+}
+
+void TestRangeForInts() {
+	int32[5] arr;
+	arr[0] = 1;
+	arr[1] = 2;
+	arr[2] = 3;
+	arr[3] = 4;
+	arr[4] = 5;
+
+	int32 sum = 0;
+	for (int32 v : arr) {
+		sum += v;
+	}
+	AssertIntEquals(15, sum, "range-for int32 sum");
+}
+
+void TestRangeForFloats() {
+	float[4] f;
+	f[0] = 1.5f;
+	f[1] = 2.5f;
+	f[2] = 3.0f;
+	f[3] = 3.0f;
+
+	float total = 0.0f;
+	for (float v : f) {
+		total += v;
+	}
+	AssertFloatEquals(10.0f, total, "range-for float sum");
+}
+
+void TestRangeForStructs() {
+	RFPoint[3] pts;
+	pts[0].Init(1, 10);
+	pts[1].Init(2, 20);
+	pts[2].Init(3, 30);
+
+	int32 sumX = 0;
+	int32 sumY = 0;
+	for (RFPoint p : pts) {
+		sumX += p.x;
+		sumY += p.y;
+	}
+	AssertIntEquals(6, sumX, "range-for struct sumX");
+	AssertIntEquals(60, sumY, "range-for struct sumY");
+
+	// Modifying the loop variable (a per-iteration copy) must not affect the array.
+	for (RFPoint p : pts) {
+		p.x = 999;
+	}
+	AssertIntEquals(1, pts[0].x, "loop var is a copy, array unchanged");
+}
+
+void TestRangeForBreak() {
+	int32[5] arr;
+	arr[0] = 10;
+	arr[1] = 20;
+	arr[2] = 30;
+	arr[3] = 40;
+	arr[4] = 50;
+
+	int32 sum = 0;
+	for (int32 v : arr) {
+		if (v >= 30) break;
+		sum += v;
+	}
+	AssertIntEquals(30, sum, "range-for break");
+}
+
+void TestRangeForContinue() {
+	int32[6] arr;
+	arr[0] = 1;
+	arr[1] = 2;
+	arr[2] = 3;
+	arr[3] = 4;
+	arr[4] = 5;
+	arr[5] = 6;
+
+	int32 sum = 0;
+	for (int32 v : arr) {
+		if (v % 2 == 0) continue;
+		sum += v;
+	}
+	AssertIntEquals(9, sum, "range-for continue");
+}
+
+// User-defined iterator protocol: a collection exposing begin/end and an iterator
+// exposing notequal/dereference/increment. Types are declared in RangeFor.ch; data
+// lives in the global g_rfi_data array.
+void TestRangeForIterator() {
+	g_rfi_data[0] = 10;
+	g_rfi_data[1] = 20;
+	g_rfi_data[2] = 30;
+	g_rfi_data[3] = 40;
+
+	RFICollection col;
+	col.count = 4;
+
+	int32 sum = 0;
+	for (int32 v : col) {
+		sum += v;
+	}
+	AssertIntEquals(100, sum, "range-for iterator sum");
+
+	int32 first = -1;
+	for (int32 v : col) {
+		first = v;
+		break;
+	}
+	AssertIntEquals(10, first, "range-for iterator break");
+}
+
+// A template container whose begin/end return ANOTHER template by value. Under the
+// Vec<int32> binding, `It<T>` in the method signature must resolve to It<int32> (the
+// concrete instantiation), not an unsubstituted shell type - which used to be minted at
+// the wrong size and corrupt the stack on every increment call.
+template<T> struct RFITplIterator {
+	public T* items;
+	public uint32 index;
+	[operator("notequal")] public bool Noteq(const RFITplIterator<T>& o) const { return this.index != o.index; }
+	[operator("dereference")] public T Deref() const { return *(this.items + this.index); }
+	[operator("increment")] public RFITplIterator<T> Inc() { RFITplIterator<T> r; r.items = this.items; r.index = this.index + 1; return r; }
+}
+
+template<T> class RFITplContainer {
+	public T* data;
+	public uint32 n;
+	[operator("begin")] public RFITplIterator<T> Begin() { RFITplIterator<T> it; it.items = this.data; it.index = 0; return it; }
+	[operator("end")]   public RFITplIterator<T> End()   { RFITplIterator<T> it; it.items = this.data; it.index = this.n; return it; }
+}
+
+void TestRangeForTemplateContainer() {
+	int32[5] buf;
+	buf[0] = 1; buf[1] = 2; buf[2] = 3; buf[3] = 4; buf[4] = 5;
+	RFITplContainer<int32> c;
+	c.data = &buf[0];
+	c.n = 5;
+
+	int32 sum = 0;
+	for (int32 v : c) {
+		sum += v;
+	}
+	AssertIntEquals(15, sum, "range-for template container sums all elements");
+
+	int32 first = -1;
+	for (int32 v : c) {
+		first = v;
+		break;
+	}
+	AssertIntEquals(1, first, "range-for template container break yields first");
+
+	// A second instantiation must be equally correct (different element size).
+	float[3] fbuf;
+	fbuf[0] = 1.5f; fbuf[1] = 2.5f; fbuf[2] = 4.0f;
+	RFITplContainer<float> fc;
+	fc.data = &fbuf[0];
+	fc.n = 3;
+
+	float total = 0.0f;
+	for (float v : fc) {
+		total += v;
+	}
+	AssertFloatEquals(8.0f, total, "range-for template container float instantiation");
+}
+
+// The range expression of a range-for may be ANY expression, not just a variable. A by-value CALL
+// returning an aggregate (e.g. `for (...) : MakeContainer()`) used to be silently dropped: the call
+// is left untyped in HIR, so the iterator loop bailed and the whole loop vanished (sum stayed 0).
+// It must now evaluate the range expression exactly once into a loop-local temp and iterate it.
+RFITplContainer<int32> MakeRfContainer() {
+	RFITplContainer<int32> c;
+	c.data = &g_rfi_data[0];
+	g_rfi_data[0] = 7; g_rfi_data[1] = 8; g_rfi_data[2] = 9; g_rfi_data[3] = 10;
+	c.n = 4;
+	return c;
+}
+
+void TestRangeForByValueCall() {
+	int32 sum = 0;
+	for (int32 v : MakeRfContainer()) {
+		sum += v;
+	}
+	AssertIntEquals(34, sum, "range-for over a by-value call iterates all elements");
+
+	// Two independent range-fors over two calls must each see their own container (the temp is
+	// per-loop, not shared), so the second loop re-reads its own begin/end.
+	int32 first = -1;
+	for (int32 v : MakeRfContainer()) {
+		first = v;
+		break;
+	}
+	AssertIntEquals(7, first, "range-for over a by-value call yields the first element");
+}
+

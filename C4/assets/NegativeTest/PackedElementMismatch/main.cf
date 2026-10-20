@@ -1,0 +1,1 @@
+int32 main() { packed float[4] a; packed int32[4] b; packed float[4] c = a + b; return 0; }

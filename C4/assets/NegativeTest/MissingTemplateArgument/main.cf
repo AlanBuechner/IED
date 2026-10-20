@@ -1,0 +1,2 @@
+template<T> T Make() { return (T)0; }
+int32 main() { return Make(); }

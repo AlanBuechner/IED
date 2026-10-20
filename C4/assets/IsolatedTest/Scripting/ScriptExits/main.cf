@@ -1,0 +1,81 @@
+// A script's exits (C4Runtime/Script/ScriptExitsC.c): its globals' destructions run when it finishes, the last
+// registered first, after every thread's thread_locals; a thread that ends first runs its own at its end, and a
+// thread still alive at the finish has its objects destroyed then, once.
+[link("c4_script_module_create")] void* ModuleCreate();
+[link("c4_script_at_exit")] void AtExit(void* module, funcptr<void(void*)> destroy, void* object);
+[link("c4_script_thread_at_exit")] void ThreadAtExit(void* module, funcptr<void(void*)> destroy, void* object);
+[link("c4_script_module_finish")] void ModuleFinish(void* module);
+[link("c4_script_module_destroy")] void ModuleDestroy(void* module);
+
+struct Log
+{
+	public int32[16] order;
+	public int32 count;
+}
+
+Log g_log;
+int32[8] g_ids = { 0, 1, 2, 3, 10, 11, 20, 21 };
+
+void Record(void* object)
+{
+	int32 at = atomic_fetch_add(&g_log.count, 1, MemoryOrder::AcqRel);
+	g_log.order[at] = *(int32*)object;
+}
+
+struct Shared
+{
+	public void* module;
+	public int32 registered;
+	public int32 release;
+}
+
+void EndsFirst(void* state)
+{
+	Shared* s = (Shared*)state;
+	ThreadAtExit(s->module, Record, (void*)&g_ids[4]);   // 10
+	ThreadAtExit(s->module, Record, (void*)&g_ids[5]);   // 11, destroyed first
+}
+
+void Lingers(void* state)
+{
+	Shared* s = (Shared*)state;
+	ThreadAtExit(s->module, Record, (void*)&g_ids[6]);   // 20
+	ThreadAtExit(s->module, Record, (void*)&g_ids[7]);   // 21
+	atomic_store(&s->registered, 1, MemoryOrder::Release);
+	wake_all((void*)&s->registered);
+	int32 zero = 0;
+	while (atomic_load(&s->release, MemoryOrder::Acquire) == 0) wait_on_address((void*)&s->release, (void*)&zero, 4, -1);
+}
+
+int32 main()
+{
+	int32 failures = 0;
+	void* module = ModuleCreate();
+	Shared* s = new Shared;
+	s->module = module;
+	AtExit(module, Record, (void*)&g_ids[1]);
+	AtExit(module, Record, (void*)&g_ids[2]);
+
+	thread_join(thread_start(EndsFirst, (void*)s));
+	if (g_log.count != 2 || g_log.order[0] != 11 || g_log.order[1] != 10) { printf("thread end: %d entries\n", g_log.count); failures++; }
+
+	void* lingering = thread_start(Lingers, (void*)s);
+	int32 zero = 0;
+	while (atomic_load(&s->registered, MemoryOrder::Acquire) == 0) wait_on_address((void*)&s->registered, (void*)&zero, 4, -1);
+	AtExit(module, Record, (void*)&g_ids[3]);
+
+	ModuleFinish(module);
+	// The lingering thread's objects (21, 20), then the globals' (3, 2, 1).
+	int32[7] expected = { 11, 10, 21, 20, 3, 2, 1 };
+	if (g_log.count != 7) { printf("finish: %d entries\n", g_log.count); failures++; }
+	for (int32 i = 0; i < 7 && i < g_log.count; i++)
+		if (g_log.order[i] != expected[i]) { printf("entry %d is %d, not %d\n", i, g_log.order[i], expected[i]); failures++; }
+
+	AtExit(module, Record, (void*)&g_ids[1]);             // after the finish: ignored
+	atomic_store(&s->release, 1, MemoryOrder::Release);
+	wake_all((void*)&s->release);
+	thread_join(lingering);                                // its end runs nothing more
+	if (g_log.count != 7) { printf("after the thread ended: %d entries\n", g_log.count); failures++; }
+	ModuleDestroy(module);
+	return failures;
+}

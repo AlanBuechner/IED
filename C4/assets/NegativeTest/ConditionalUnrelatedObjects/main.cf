@@ -1,0 +1,9 @@
+struct A { public int32 x; }
+struct B { public float y; }
+int32 main() {
+	bool c = true;
+	A a;
+	B b;
+	A r = c ? a : b;
+	return 0;
+}

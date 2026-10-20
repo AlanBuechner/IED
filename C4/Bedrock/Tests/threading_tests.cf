@@ -1,0 +1,305 @@
+// Threading: Atomic<T>, Thread, Mutex and LockGuard, ConditionVariable, WaitGroup, Promise<T> and Future<T>, alone
+// and under contention from several threads.
+
+include "bedrock.ch"
+
+enum class Light : uint8 { Red, Green = 7 }
+
+const int32 kContenders = 4;
+const int32 kRounds = 20000;
+const int64 kMillisecond = 1000000;
+
+[test("threading.atomic")]
+class AtomicTests {
+	[test("zero_and_initial")]
+	public static void TestZeroAndInitial() {
+		Threading::Atomic<int64> zero;
+		assert_eq(0, zero.Load(), "a zero atomic holds zero");
+		Threading::Atomic<int64> five(5);
+		assert_eq(5, five.Load(MemoryOrder::Acquire), "create stores the initial value");
+		Threading::Atomic<int64> copy = five;
+		five.Store(6);
+		assert_eq(5, copy.Load(), "a copy is a snapshot");
+	}
+
+	[test("operations")]
+	public static void TestOperations() {
+		Threading::Atomic<int32> a(10);
+		a.Store(12, MemoryOrder::Release);
+		assert_eq(12, a.Exchange(20), "exchange returns the old value");
+		int32 expected = 20;
+		assert_true(a.CompareExchange(expected, 21), "compare-exchange succeeds on the expected value");
+		expected = 7;
+		assert_true(!a.CompareExchange(expected, 99, MemoryOrder::AcqRel), "and fails on another");
+		assert_eq(21, expected, "writing back what it found");
+		while (!a.CompareExchangeWeak(expected, expected + 1, MemoryOrder::Release)) { }
+		assert_eq(22, a.Load(), "a weak retry loop gets there");
+		assert_eq(22, a.FetchAdd(3), "fetch-add returns the old value");
+		assert_eq(25, a.FetchSub(5, MemoryOrder::Relaxed), "fetch-sub too");
+		assert_eq(20, a.FetchAnd(0b10100), "fetch-and");
+		assert_eq(20, a.FetchOr(0b1), "fetch-or");
+		assert_eq(21, a.FetchXor(0b11), "fetch-xor");
+		assert_eq(22, a.Load(MemoryOrder::Relaxed), "the last combination");
+	}
+
+	[test("value_kinds")]
+	public static void TestValueKinds() {
+		Threading::Atomic<bool> flag;
+		flag.Store(true);
+		assert_true(flag.Exchange(false), "a bool");
+		Threading::Atomic<Light> light;
+		light.Store(Light::Green);
+		assert_true(light.Load() == Light::Green, "an enum");
+		int32 target = 3;
+		Threading::Atomic<int32*> pointer;
+		pointer.Store(&target);
+		assert_eq(3, *pointer.Load(), "a pointer");
+		Threading::Atomic<double> level(1.5);
+		double guess = 1.5;
+		assert_true(level.CompareExchange(guess, 2.5), "a float compares its bits");
+		assert_true(level.Load() == 2.5, "and holds the new value");
+	}
+
+	[test("every_order")]
+	public static void TestEveryOrder() {
+		MemoryOrder[5] orders = { MemoryOrder::Relaxed, MemoryOrder::Acquire, MemoryOrder::Release, MemoryOrder::AcqRel, MemoryOrder::SeqCst };
+		Threading::Atomic<int64> a;
+		for (int32 i = 0; i < 5; i++) {
+			a.Store(i, orders[i]);
+			assert_eq(i, a.Load(orders[i]), "an order chosen at run time");
+			assert_eq(i, a.FetchAdd(1, orders[i]), "for every operation");
+			int64 expected = i + 1;
+			assert_true(a.CompareExchange(expected, i, orders[i]), "a failure order derived from it");
+		}
+	}
+
+	[test("contended_counter")]
+	public static void TestContendedCounter() {
+		Threading::Atomic<int64> counter;
+		Threading::Atomic<int64>* shared = &counter;
+		Threading::Thread[kContenders] threads;
+		for (int32 t = 0; t < kContenders; t++)
+			threads[t] = (Threading::Thread::Run([shared]() { for (int32 i = 0; i < kRounds; i++) shared->FetchAdd(1, MemoryOrder::Relaxed); }));
+		for (int32 t = 0; t < kContenders; t++) threads[t].Join();
+		assert_eq((int64)kContenders * kRounds, counter.Load(), "no increment is lost");
+	}
+}
+
+[test("threading.thread")]
+class ThreadTests {
+	[test("run_and_join")]
+	public static void TestRunAndJoin() {
+		int64 seen = 0;
+		uint64 id = 0;
+		Threading::Thread worker = Threading::Thread::Run([&seen, &id]() { seen = 42; id = Threading::Thread::CurrentId(); });
+		assert_true(worker.IsJoinable(), "a started thread is joinable");
+		worker.Join();
+		assert_true(!worker.IsJoinable(), "and is not after the join");
+		assert_eq(42, seen, "the body ran");
+		assert_true(id != 0 && id != Threading::Thread::CurrentId(), "on another thread");
+		worker.Join();
+		worker.Detach();
+	}
+
+	[test("destroy_joins")]
+	public static void TestDestroyJoins() {
+		int64 seen = 0;
+		{
+			Threading::Thread worker = Threading::Thread::Run([&seen]() { Threading::Thread::Sleep(2 * kMillisecond); seen = 1; });
+		}
+		assert_eq(1, seen, "leaving the scope waited for the body");
+	}
+
+	[test("move_and_detach")]
+	public static void TestMoveAndDetach() {
+		Threading::Atomic<int32> done;
+		Threading::Atomic<int32>* flag = &done;
+		Threading::Thread first = Threading::Thread::Run([flag]() { flag->Store(1); flag->Store(2); });
+		Threading::Thread moved = take(first);
+		assert_true(!first.IsJoinable() && moved.IsJoinable(), "take moves the thread");
+		moved.Detach();
+		assert_true(!moved.IsJoinable(), "a detached thread has no handle");
+		while (done.Load() != 2) Threading::Thread::Yield();
+		Threading::Thread zero;
+		assert_true(!zero.IsJoinable(), "a zero thread runs nothing");
+		zero.Join();
+	}
+
+	[test("system")]
+	public static void TestSystem() {
+		assert_true(Threading::Thread::HardwareCount() >= 1, "there is a processor");
+		Threading::Thread::Sleep(0);
+		Threading::Thread::Yield();
+	}
+}
+
+[test("threading.mutex")]
+class MutexTests {
+	[test("try_lock")]
+	public static void TestTryLock() {
+		Threading::Mutex mutex;
+		assert_true(mutex.TryLock(), "a free mutex is taken");
+		assert_true(!mutex.TryLock(), "a held one is not");
+		mutex.Unlock();
+		assert_true(mutex.TryLock(), "until it is released");
+		mutex.Unlock();
+	}
+
+	[test("guard")]
+	public static void TestGuard() {
+		Threading::Mutex mutex;
+		{
+			Threading::LockGuard guard(mutex);
+			assert_true(!mutex.TryLock(), "the guard holds the mutex");
+		}
+		assert_true(mutex.TryLock(), "and releases it at the end of its scope");
+		mutex.Unlock();
+	}
+
+	[test("contended")]
+	public static void TestContended() {
+		Threading::Mutex mutex;
+		int64 total = 0;
+		Threading::Mutex* m = &mutex;
+		int64* sum = &total;
+		Threading::Thread[kContenders] threads;
+		for (int32 t = 0; t < kContenders; t++)
+			threads[t] = (Threading::Thread::Run([m, sum]() {
+				for (int32 i = 0; i < kRounds; i++) {
+					Threading::LockGuard guard(*m);
+					*sum = *sum + 1;
+				}
+			}));
+		for (int32 t = 0; t < kContenders; t++) threads[t].Join();
+		assert_eq((int64)kContenders * kRounds, total, "every increment happened alone");
+	}
+}
+
+class Mailbox {
+	public Threading::Mutex mutex;
+	public Threading::ConditionVariable changed;
+	public int32 posted;
+	public int32 taken;
+}
+
+[test("threading.condition")]
+class ConditionTests {
+	[test("producer_consumer")]
+	public static void TestProducerConsumer() {
+		Mailbox* box = new Mailbox;
+		Threading::Thread consumer = Threading::Thread::Run([box]() {
+			for (int32 i = 0; i < 100; i++) {
+				Threading::LockGuard guard(box->mutex);
+				while (box->posted == box->taken) box->changed.Wait(box->mutex);
+				box->taken += 1;
+				box->changed.NotifyAll();
+			}
+		});
+		for (int32 i = 0; i < 100; i++) {
+			Threading::LockGuard guard(box->mutex);
+			while (box->posted != box->taken) box->changed.Wait(box->mutex);
+			box->posted += 1;
+			box->changed.NotifyOne();
+		}
+		consumer.Join();
+		assert_eq(100, box->taken, "every message was taken, one at a time");
+	}
+
+	[test("notify_all")]
+	public static void TestNotifyAll() {
+		Mailbox* box = new Mailbox;
+		Threading::Thread[kContenders] waiters;
+		for (int32 t = 0; t < kContenders; t++)
+			waiters[t] = (Threading::Thread::Run([box]() {
+				Threading::LockGuard guard(box->mutex);
+				box->taken += 1;
+				while (box->posted == 0) box->changed.Wait(box->mutex);
+			}));
+		while (true) {
+			Threading::LockGuard guard(box->mutex);
+			if (box->taken == kContenders) break;
+		}
+		{
+			Threading::LockGuard guard(box->mutex);
+			box->posted = 1;
+			box->changed.NotifyAll();
+		}
+		for (int32 t = 0; t < kContenders; t++) waiters[t].Join();
+		assert_eq(kContenders, box->taken, "one notify woke every waiter");
+	}
+
+	[test("wait_for_times_out")]
+	public static void TestWaitForTimesOut() {
+		Threading::Mutex mutex;
+		Threading::ConditionVariable never;
+		Threading::LockGuard guard(mutex);
+		bool notified = true;
+		for (int32 attempt = 0; attempt < 10 && notified; attempt++) notified = never.WaitFor(mutex, kMillisecond);
+		assert_true(!notified, "with no notify the wait ends when the time passes");
+		assert_true(!mutex.TryLock(), "holding the mutex again");
+	}
+}
+
+[test("threading.waitgroup")]
+class WaitGroupTests {
+	[test("counts")]
+	public static void TestCounts() {
+		Threading::WaitGroup group;
+		assert_true(group.IsDone(), "a zero group has nothing to wait for");
+		group.Wait();
+		group.Add(2);
+		assert_eq(2, group.Remaining(), "add counts work");
+		group.Done();
+		assert_true(!group.IsDone() && !group.WaitFor(kMillisecond), "unfinished work keeps it waiting");
+		group.Done();
+		assert_true(group.IsDone() && group.WaitFor(kMillisecond), "until the last piece is done");
+	}
+
+	[test("waits_for_threads")]
+	public static void TestWaitsForThreads() {
+		Threading::WaitGroup group;
+		Threading::WaitGroup* g = &group;
+		Threading::Atomic<int32> finished;
+		Threading::Atomic<int32>* count = &finished;
+		group.Add(kContenders);
+		Threading::Thread[kContenders] threads;
+		for (int32 t = 0; t < kContenders; t++)
+			threads[t] = (Threading::Thread::Run([g, count]() { Threading::Thread::Sleep(kMillisecond); count->FetchAdd(1); g->Done(); }));
+		group.Wait();
+		assert_eq(kContenders, finished.Load(), "wait returns once every piece is done");
+		for (int32 t = 0; t < kContenders; t++) threads[t].Join();
+	}
+}
+
+[test("threading.future")]
+class FutureTests {
+	[test("set_and_get")]
+	public static void TestSetAndGet() {
+		Threading::Promise<int32> promise;
+		Threading::Future<int32> future = promise.GetFuture();
+		Threading::Future<int32> copy = future;
+		assert_true(future.IsValid() && !future.IsReady(), "not ready before the value is set");
+		assert_true(!future.WaitFor(kMillisecond), "so a timed wait ends without it");
+		assert_true(promise.Set(42), "the first set stores the value");
+		assert_true(!promise.Set(7), "a second one is dropped");
+		assert_true(copy.IsReady(), "copies share the state");
+		assert_eq(42, copy.Get(), "and the value");
+	}
+
+	[test("across_threads")]
+	public static void TestAcrossThreads() {
+		Threading::Promise<Core::String> promise;
+		Threading::Future<Core::String> future = promise.GetFuture();
+		Threading::Promise<Core::String>* p = &promise;
+		Threading::Thread maker = Threading::Thread::Run([p]() { Threading::Thread::Sleep(kMillisecond); p->Set(Core::String("made")); });
+		assert_true(future.Get() == Core::String("made"), "get waits for the value from another thread");
+		maker.Join();
+	}
+
+	[test("zero")]
+	public static void TestZero() {
+		Threading::Future<int32> none;
+		assert_true(!none.IsValid() && !none.IsReady(), "a zero future has no state");
+		assert_true(!none.WaitFor(kMillisecond), "and is never ready");
+	}
+}

@@ -1,0 +1,5 @@
+struct Point { public int32 x; public int32 y; }
+struct Size { public int32 width; public int32 height; }
+int32 Area(Point p) { return 0; }
+int32 Area(Size s) { return s.width * s.height; }
+int32 main() { return Area({ 2, 3 }); }

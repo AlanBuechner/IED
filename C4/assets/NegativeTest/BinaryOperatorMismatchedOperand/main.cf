@@ -1,0 +1,2 @@
+struct Wrap { int32 v; [operator("add")] public int32 Add(Wrap o) { return this->v + o.v; } };
+int main() { Wrap a; a.v = 10; int32 x = 5; int32 r = x + a; return 0; }

@@ -1,0 +1,3 @@
+// A function declared in one file and defined in another is one function.
+int32 Helper(int32 x);
+int32 main() { return Helper(21) == 2100 ? 0 : 1; }

@@ -1,0 +1,34 @@
+int32 g_caught = -1;
+int32 g_log = 0;
+void Log(int32 v) { g_log = g_log * 10 + v; printf("log %d\n", v); fflush(nullptr); }
+void DoThrow(int32 v) { printf("DoThrow called\n"); fflush(nullptr); throw v; }
+int32 NestedTry() {
+	try {
+		Log(1);
+		try {
+			Log(2);
+			DoThrow(7);
+			Log(9);
+		} catch (int32 e) {
+			g_caught = e;
+			Log(3);
+		} finally {
+			Log(4);
+		}
+		Log(5);
+	} catch (int32 e) {
+		Log(6);
+	} finally {
+		Log(7);
+	}
+	return g_log;
+}
+int32 main() {
+	g_log = 0;
+	g_caught = -1;
+	int32 nested = NestedTry();
+	if (nested != 123457) { printf("FAIL NestedTry log=%d\n", nested); return 1; }
+	if (g_caught != 7) { printf("FAIL NestedTry caught=%d\n", g_caught); return 2; }
+	printf("NESTED OK\n");
+	return 0;
+}

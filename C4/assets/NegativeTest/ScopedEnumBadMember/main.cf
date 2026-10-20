@@ -1,0 +1,3 @@
+// Accessing a member that does not exist on the enum is a clear error.
+enum class Traffic { Stop, Go };
+int32 main() { return (int32)Traffic::Left; }

@@ -1,0 +1,65 @@
+// Exceptions cross the boundary both ways, by type: the host catches what the script throws (host types, the
+// script's types by their host base, plain values), the script catches what the host throws, cleanups run as an
+// exception unwinds script frames, and an exception leaving Script::Call reaches the caller (it is no fault).
+include "scripttest.ch"
+include "errors.ch"
+
+namespace Errors
+{
+	void Fail(int32 code) { throw GameError(code); }
+	void ThrowInt(int32 value) { throw value; }
+
+	int32 CallAndCatch(funcptr<void()> fn)
+	{
+		try { fn(); }
+		catch (GameError& e) { return e.code * 100 + e.Severity(); }
+		catch (int32 v) { return -v; }
+		return 0;
+	}
+}
+
+int32 CallScript(Scripting::Script* script, const char* name)
+{
+	funcptr<int32()> fn = (funcptr<int32()>)script->Address(name);
+	return fn == nullptr ? -1000 : fn();
+}
+
+int32 CatchFrom(Scripting::Script* script, const char* name)
+{
+	funcptr<void()> fn = (funcptr<void()>)script->Address(name);
+	return fn == nullptr ? -1000 : Errors::CallAndCatch(fn);
+}
+
+void RunThrowsInt(void* fn) { ((funcptr<void()>)fn)(); }
+
+void CheckExceptions(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	checks.Equal(701, CatchFrom(script, "ThrowsHostType"), "the host catches a host type the script throws");
+	checks.Equal(1109, CatchFrom(script, "ThrowsOwnType"), "the host catches the script's type by its host base");
+	checks.Equal(-13, CatchFrom(script, "ThrowsInt"), "the host catches an int32 the script throws");
+	checks.Equal(21, CallScript(script, "CatchesHost"), "the script catches a host type the host throws");
+	checks.Equal(10, CallScript(script, "CatchesHostInt"), "the script catches an int32 the host throws");
+	checks.Equal(9, CallScript(script, "CatchesOwn"), "the script catches its own type");
+	checks.Equal(4, CallScript(script, "Rethrows"), "the script rethrows a host type");
+	checks.Equal(1, CallScript(script, "CatchesAll"), "catch (...) in the script");
+	Errors::g_unwound = 0;
+	checks.Equal(-17, CatchFrom(script, "UnwindsThroughCleanups"), "an exception leaves through script cleanups");
+	checks.Equal(2, Errors::g_unwound, "both cleanups ran");
+
+	int32 caught = 0;
+	try { script->Call(RunThrowsInt, script->Address("ThrowsInt")); }
+	catch (int32 v) { caught = v; }
+	checks.Equal(13, caught, "an exception leaving Script::Call reaches its caller");
+	checks.That(!script->Faulted(), "an exception is no fault");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Exceptions");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "exceptions", "exceptions.cf"));
+	if (script->Ok()) CheckExceptions(script, checks);
+	script->Unload();
+	return checks.End("Exceptions");
+}

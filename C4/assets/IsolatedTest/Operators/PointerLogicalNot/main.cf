@@ -1,0 +1,26 @@
+// !p is true exactly when p is null (BUG-082).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 Twice(int32 x) { return x * 2; }
+
+int32 main() {
+	int32 x = 1;
+	int32* p = &x;
+	int32* none = null;
+	Check(!p == false, "!p of a valid pointer is false");
+	Check(!none == true, "!p of null is true");
+	bool reached = false;
+	if (!none) reached = true;
+	Check(reached, "if (!null) is taken");
+	if (!p) reached = false;
+	Check(reached, "if (!valid) is not taken");
+	funcptr<int32(int32)> f = Twice;
+	funcptr<int32(int32)> g = null;
+	Check(!f == false && !g == true, "!f of a function pointer");
+	Check((!p ? 1 : 2) == 2, "!p in a conditional");
+	return g_failures;
+}

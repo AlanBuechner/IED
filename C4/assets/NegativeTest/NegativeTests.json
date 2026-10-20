@@ -1,0 +1,2418 @@
+{
+    "UndefinedIdentifier": {
+        "expect": ["no variable named y"],
+        "reason": "Using an undeclared variable must name the identifier."
+    },
+    "OutOfScopeBlockVariable": {
+        "expect": ["no variable named x"],
+        "reason": "A local declared in a braced statement body is scoped to that block; using it after the closing brace must be a clear undefined-identifier error, not malformed IR."
+    },
+    "OutOfScopeBracelessVariable": {
+        "expect": ["no variable named x"],
+        "reason": "A local declared in a BRACELESS control-statement body is scoped to that statement; using it after the statement must be a clear undefined-identifier error, not malformed IR."
+    },
+    "OutOfScopeForInitVariable": {
+        "expect": ["no variable named i"],
+        "reason": "A for-loop init variable is scoped to the loop statement; using it after the loop must be a clear undefined-identifier error, not malformed IR."
+    },
+    "SameBlockLocalRedefinition": {
+        "expect": ["Variable 'x' is already declared in this block"],
+        "reason": "Declaring the same variable twice in one block is a redefinition; it must be a clear error, not silent last-wins."
+    },
+    "TestSetupMustBeStatic": {
+        "expect": ["test methods must be static: the harness calls 'Setup' without an object; write 'public static'"],
+        "reason": "Class-scoped [test_setup] hooks are static: the harness calls them without an object (BUG-022)."
+    },
+    "UnknownType": {
+        "expect": ["type not found: Widget"],
+        "reason": "Declaring a variable of an undeclared type must name the type."
+    },
+    "NotATemplate": {
+        "expect": ["not a template: Plain"],
+        "reason": "Template arguments on a non-template type must be rejected, not silently ignored."
+    },
+    "NestedWriteThroughValueCall": {
+        "expect": ["access chain is rooted in a function-call result that returns by value"],
+        "reason": "A nested member store rooted in a by-value call result must be rejected, not silently dropped into a dead temporary."
+    },
+    "IncrementThroughValueCall": {
+        "expect": ["access chain is rooted in a function-call result that returns by value"],
+        "reason": "An increment/decrement through a by-value call result (GetV().x++) must be rejected, not silently dropped into a dead temporary."
+    },
+    "InteropExternArgCount": {
+        "expect": ["main.cf (2:15) error: add takes 2 arguments, not 1"],
+        "reason": "Calling an extern C function with the wrong argument count must produce a clear error naming the callee and its arity (E2: C/C++ interop boundary invalid-code coverage)."
+    },
+    "InteropByValueStructMismatch": {
+        "expect": ["main.cf (2:24) error: argument 1 of do_thing has type 'int32' but parameter 'p' expects 'Point'"],
+        "reason": "Passing a numeric value where a by-value STRUCT parameter is expected across the C/C++ interop boundary must be a clear semantic error, not a silent field-for-field copy into the wrong layout (E2: pins that the !IsExternFunction gate does not disable object-mismatch checking for CBind bindings)."
+    },
+    "InteropUndefSymbol": {
+        "expect": ["undefined symbol: MissingSymbol"],
+        "reason": "An extern C function declared in a header but never defined in any linked source must fail the link with a clear error naming the missing symbol (E2: C/C++ interop boundary - undefined-symbol attribution at link time)."
+    },
+    "NestedConstWrite": {
+        "expect": ["it is reached through a pointer or reference to const"],
+        "reason": "A nested member store whose access chain is rooted in a const pointer/reference must be rejected, not silently mutate caller data. Locked by the parser fix: a leading const on a local 'const T*' now attaches to the referent (pointer-to-const), so DerefForAccess marks the chain constRooted and ChainBlocksWrite rejects the store."
+    },
+    "NonConstRefBindToConst": {
+        "expect": ["cannot bind a non-const reference to a const object"],
+        "reason": "A non-const reference must not bind to a const lvalue - it would let the referent be mutated (C++ requires a const reference). Locked at the binding site in the reference-local lowering."
+    },
+    "BadArgumentCount": {
+        "expect": ["main.cf (1:62) error: Add takes 2 arguments, not 1"],
+        "reason": "Calling with too few arguments must be a clear error naming the callee and how many arguments it takes."
+    },
+    "DuplicateFunctionDefinition": {
+        "expect": ["Duplicate definition of 'f'"],
+        "reason": "Defining the same free function twice with the SAME signature is a redefinition (distinct signatures are overloads, which C4 supports). Must be a clear error naming the function."
+    },
+    "MissingSemicolon": {
+        "expect": ["Expected ';' after variable declaration"],
+        "reason": "A missing semicolon must point at the construct that needs it."
+    },
+    "PrivateFieldAccess": {
+        "expect": ["Cannot access private field 'secret'"],
+        "reason": "Visibility violations must name the field and type."
+    },
+    "MissingMethodCall": {
+        "expect": ["no matching overload of Missing"],
+        "reason": "Calling a nonexistent method must be a clear error naming the member."
+    },
+    "MissingMemberAccess": {
+        "expect": ["no member 'b'"],
+        "reason": "Reading a nonexistent field must name the member."
+    },
+    "DuplicateTypeDefinition": {
+        "expect": ["b.cf (4:1) error: redefinition of type 'Pair'"],
+        "reason": "Two .cf files defining the same global type name is a redefinition (one flat global scope). Before the fix it silently merged and both methods mangled to the same symbol, so one body won by file order with no diagnostic - silent corruption. It must be a clear error naming the type."
+    },
+    "EntryPointCapitalMain": {
+        "expect": ["Entry point must be named 'main' (lowercase); you defined 'Main'"],
+        "reason": "Only lowercase 'main' is the entry point. A program that defines a global 'Main' but no 'main' used to compile cleanly and then silently do nothing - an invisible no-op. It must be an explicit, actionable error naming the fix."
+    },
+    "NonConstArraySize": {
+        "expect": ["main.cf (5:7) error: unresolved type for variable 'g': the array size 'X' is not a constant expression: 'X' is a variable: only a const with a constant initializer folds"],
+        "reason": "A runtime (non-const) variable used as an array size cannot be folded to a compile-time constant; the error names the extent."
+    },
+    "UserMainReserved": {
+        "expect": ["No entry point: the program has no 'main' function"],
+        "reason": "NOTE: the new backend emits main directly and does not rename it to user_main, so a hand-written user_main is just an ordinary function and the program fails for lacking a real main. The original reserved-name premise no longer applies; the file still fails to build (no main)."
+    },
+    "MissingMain": {
+        "expect": ["No entry point: the program has no 'main' function"],
+        "reason": "A runnable executable must define lowercase main. Without one the old behavior emitted an empty entry point that silently exited 0 (a no-op the user cannot see). Now a clear error, same class as capital-Main. -test/bitcode/compile-only are exempt."
+    },
+    "ScopedEnumBareMember": {
+        "expect": ["no variable named Stop"],
+        "reason": "Scoped enum (enum class) members are not injected into the enclosing scope; using one unqualified is an undefined identifier."
+    },
+    "ScopedEnumBadMember": {
+        "expect": ["no member 'Left' in the enum 'Traffic'"],
+        "reason": "Accessing a non-existent enum member gives a clear, actionable error naming the member and the enum."
+    },
+    "LinkVariableWithInitializer": {
+        "expect": ["'g_counter' is the foreign variable 'g_extern_counter' ([link]): it has no initializer"],
+        "reason": "A [link] variable is the foreign one, so it cannot carry its own initial value; the compiler says so at the declaration instead of failing the link with an undefined symbol (BUG-161)."
+    },
+    "ReturnTypeMismatch": {
+        "expect": ["function returns 'S'"],
+        "reason": "A return value whose type does not match the declared return type must be a clear compile-time diagnostic, never silently lowered into malformed IR."
+    },
+    "ConstPointerArraySize": {
+        "expect": ["main.cf (2:25) error: unresolved type for field 'buf' in 'S': the array size 'p ? 4 : 6' is not a constant expression: 'p' is a variable: only a const with a constant initializer folds"],
+        "reason": "A const POINTER name is reassignable (the leading const moves to the pointee), so it must NOT fold as a compile-time constant in an array size - only a name-level const folds."
+    },
+    "TentativeGlobalDefinition": {
+        "expect": ["pi.ch (1:1) error: redefinition of variable 'PI'"],
+        "reason": "C4 has no extern/tentative-definition: a 'float PI;' declaration in one unit plus a 'float PI = 3.14f;' definition in another used to silently keep the zero-initialized copy (every reader saw 0). It must be a clear error pointing at the supported pattern - define the shared global once (in the header every unit includes), or use [link] for a foreign symbol."
+    },
+    "IndexWrite/ReadOnlyPlainAssign": {
+        "expect": ["Add a setter, or make the indexer return a reference."],
+        "reason": "A plain store through a by-value-only indexer has nowhere to write: before the shared index-operator resolver it silently raw-GEP'd into the struct's memory (wrong for any non-offset-0 layout). It must be a clear error naming the missing setter. (expect avoids [ ] - the runner matches with PowerShell -like, where brackets are wildcards.)"
+    },
+    "IndexWrite/ReadOnlyCompound": {
+        "expect": ["the new value has nowhere to be stored"],
+        "reason": "A compound assignment through a by-value-only indexer cannot store its result; before the fix it silently stored only the right-hand side (arr[i] += 2 replaced, not added). It must be a clear error naming the missing setter."
+    },
+    "IndexWrite/WriteOnlyCompound": {
+        "expect": ["the current value cannot be read"],
+        "reason": "A compound assignment through a setter-only indexer cannot read the old value; before the fix it silently stored only the right-hand side. It must be a clear error naming the missing reader."
+    },
+    "IndexWrite/WriteOnlyRead": {
+        "expect": ["Cannot index into 'W'"],
+        "reason": "Reading through an object base that defines only a setter used to silently yield 'void' (surfacing later as a confusing 'Cannot assign value of type ... to void'). It must be a clear error at the index expression."
+    },
+    "RefBindToPrvalue": {
+        "expect": ["cannot bind a reference to a prvalue"],
+        "reason": "Binding a reference to a prvalue (a by-value call result) must be a clear semantic error - a reference binds to a location, not a temporary. Before the fix this stored the returned value into the pointer slot and produced malformed IR (LLVM verification: parameter type mismatch). Now rejected at the binding site."
+    },
+    "PointerDowncastAssign": {
+        "expect": ["Cannot assign value of type 'Base*' to 'Mid*'"],
+        "reason": "A base-to-derived pointer (downcast) is NOT an implicit conversion and must stay rejected on assignment. Documents that the derived->base upcast fix did not over-permit the reverse direction."
+    },
+    "PointerUnrelatedAssign": {
+        "expect": ["Cannot assign value of type 'A*' to 'B*'"],
+        "reason": "Unrelated object pointers are not assignable. Documents that the pointer-assignment compatibility check only allows a real derived->base relationship (plus null/const conversion), not arbitrary object pointers."
+    },
+    "GotoIntoNestedBlock": {
+        "expect": ["jumps into a nested block"],
+        "reason": "A goto may only target a label in its own block or an enclosing one; jumping into a nested block would skip its scope entry."
+    },
+    "GotoCrossesDeclaration": {
+        "expect": ["crosses the declaration of 'x'"],
+        "reason": "A forward goto past a declaration would leave the variable unconstructed but in scope (C++ rule)."
+    },
+    "GotoCrossesDefer": {
+        "expect": ["crosses a defer"],
+        "reason": "A forward goto past a defer would make the defer active without having been reached."
+    },
+    "GotoUndefinedLabel": {
+        "expect": ["goto to undefined label 'nowhere'"],
+        "reason": "A goto to a label that does not exist must name the label (it used to compile into a silent return)."
+    },
+    "DuplicateLabel": {
+        "expect": ["label 'L' is already defined in this function"],
+        "reason": "Labels are function-scoped and must be unique."
+    },
+    "ReturnInDefer": {
+        "expect": ["'return' is not allowed inside a defer or finally body"],
+        "reason": "Control may not leave a defer body; a return there would abandon the scope exit that is running it."
+    },
+    "ReturnInFinally": {
+        "expect": ["'return' is not allowed inside a defer or finally body"],
+        "reason": "A return in finally would silently replace the try's result or swallow an exception (C# forbids it too)."
+    },
+    "BreakOutOfDefer": {
+        "expect": ["'break' may not leave a defer or finally body"],
+        "reason": "A break that targets a loop outside the defer body would leave the cleanup half run."
+    },
+    "ContinueOutOfDefer": {
+        "expect": ["'continue' may not leave a defer or finally body"],
+        "reason": "A continue that targets a loop outside the defer body would leave the cleanup half run."
+    },
+    "GotoInDefer": {
+        "expect": ["'goto' is not allowed inside a defer or finally body"],
+        "reason": "A goto out of a defer body would abandon the scope exit that is running it."
+    },
+    "TwoClassBases": {
+        "expect": ["can have one base class, written first"],
+        "reason": "C4 has one class base plus interfaces (D-08); a second class base is an error (BUG-027)."
+    },
+    "ClassBaseAfterInterface": {
+        "expect": ["can have one base class, written first"],
+        "reason": "The class base is written first, before the interfaces (D-08)."
+    },
+    "InterfaceDerivesFromClass": {
+        "expect": ["can only derive from interfaces"],
+        "reason": "An interface derives only from interfaces (D-08)."
+    },
+    "InterfaceWithField": {
+        "expect": ["cannot have the instance field 'count'"],
+        "reason": "Interfaces have no instance fields (D-08)."
+    },
+    "DuplicateBase": {
+        "expect": ["appears twice in the base list"],
+        "reason": "A base listed twice would be two sub-objects of one type."
+    },
+    "BaseAlreadyInherited": {
+        "expect": ["'I' is already a base of 'B'"],
+        "reason": "Listing a base that another listed base already has would make every conversion to it ambiguous."
+    },
+    "NumericSafeCast": {
+        "expect": ["for a numeric conversion use a cast: (double)x"],
+        "reason": "`as` converts pointers to objects (D-11); a numeric `as` names the cast to use instead."
+    },
+    "DowncastWithoutVirtuals": {
+        "expect": ["it has no virtual methods"],
+        "reason": "A checked downcast needs run-time type information, which only polymorphic types carry."
+    },
+    "AmbiguousInheritedMethod": {
+        "expect": ["'Size' is inherited from both"],
+        "reason": "A call that names two unrelated inherited functions with one signature is ambiguous."
+    },
+    "FunPtrArgumentCount": {
+        "expect": ["the function pointer takes 1 argument(s), got 2"],
+        "reason": "A call through a funcptr checks its argument count."
+    },
+    "FunPtrArgumentType": {
+        "expect": ["argument 1 of the function pointer call has type 'S', expected 'int32'"],
+        "reason": "A call through a funcptr converts each argument to its parameter type or reports the mismatch."
+    },
+    "DestroyOperatorName": {
+        "expect": ["\"destroy\" is not a destructor; the destructor is [operator(\"delete\")]"],
+        "reason": "D-03: the destructor is [operator(\"delete\")]; \"destroy\" is an error that names it."
+    },
+    "FinalizerOperatorName": {
+        "expect": ["\"finalizer\" is not a destructor; the destructor is [operator(\"delete\")]"],
+        "reason": "D-03: \"finalizer\" is not a destructor (BUG-012); the error names [operator(\"delete\")]."
+    },
+    "MoveOperator": {
+        "expect": ["C4 has no move operator"],
+        "reason": "D-05: objects relocate; a move operator is an error that points at take(x)."
+    },
+    "CopyOperatorSignature": {
+        "expect": ["[operator(\"copy\")] takes one 'const Counter&'"],
+        "reason": "A copy operator takes one reference to its own type."
+    },
+    "DeleteOperatorParameters": {
+        "expect": ["[operator(\"delete\")] takes no parameters"],
+        "reason": "The destructor takes no parameters."
+    },
+    "CopyNonCopyable": {
+        "expect": ["'File' cannot be copied: it has [operator(\"delete\")] but no [operator(\"copy\")]"],
+        "reason": "A type with a destructor and no copy operator is not copyable (D-05); the error offers take(x)."
+    },
+    "PassNonCopyableByValue": {
+        "expect": ["'File' cannot be copied"],
+        "reason": "Passing an lvalue by value copies it; a non-copyable type must be passed by reference or moved with take(x)."
+    },
+    "NonCopyableMember": {
+        "expect": ["'File' cannot be copied"],
+        "reason": "A memberwise copy copies each member; a non-copyable member makes the owner non-copyable."
+    },
+    "BaseWithoutDefaultCreate": {
+        "expect": ["'Shape' has no create that takes no arguments; call one as the first statement of the create of 'Square'"],
+        "reason": "D-07: a base with creates but no 0-argument one must be constructed by the derived create's first statement."
+    },
+    "CatchNonCopyableByValue": {
+        "expect": ["(catch it by reference)"],
+        "reason": "A by-value catch copies the exception object; a non-copyable exception must be caught by reference."
+    },
+    "TakeOfRvalue": {
+        "expect": ["take(x) needs one variable, field or element to move from"],
+        "reason": "take(x) moves out of a location; a temporary is already moved without it."
+    },
+    "RelocateMismatchedTypes": {
+        "expect": ["relocate(dst, src) needs two pointers to the same type"],
+        "reason": "relocate moves one T into storage for a T."
+    },
+    "RelocateFromConst": {
+        "expect": ["neither pointer may point to const"],
+        "reason": "relocate leaves the source zero, so it cannot read from const storage."
+    },
+    "DestroyNonPointer": {
+        "expect": ["destroy(p) needs one pointer to the object to destroy"],
+        "reason": "destroy(p) takes the address of the object."
+    },
+    "PlacementNewNonPointer": {
+        "expect": ["'new (storage) T' needs a pointer to the storage"],
+        "reason": "Placement new builds the object at an address."
+    },
+    "NoMatchingCreate": {
+        "expect": ["no matching constructor of 'Range' with 3 argument(s)"],
+        "reason": "Construction runs one of the type's own creates; no create takes three arguments."
+    },
+    "AggregateTooManyInitializers": {
+        "expect": ["too many initializers for 'Pair'"],
+        "reason": "An aggregate takes at most one initializer per field."
+    },
+    "ConflictingDeduction": {
+        "expect": ["conflicting deductions for template parameter 'T': 'int32' and 'float'"],
+        "reason": "D-17: two arguments that decide one template parameter differently are an error naming both types."
+    },
+    "MissingTemplateArgument": {
+        "expect": ["no argument for template parameter 'T' of 'Make': write it, or give it a default"],
+        "reason": "A template parameter nothing decides (no written argument, no deduction, no default) is named."
+    },
+    "TemplateValueForType": {
+        "expect": ["template parameter 'T' of 'Box' takes a type"],
+        "reason": "Arguments bind by position (BUG-066): a value where a type parameter is."
+    },
+    "TemplateTypeForValue": {
+        "expect": ["template parameter 'N' of 'Arr' takes a constant value"],
+        "reason": "Arguments bind by position (BUG-066): a type where a value parameter is."
+    },
+    "TooManyTemplateArguments": {
+        "expect": ["template 'Box' takes 1 argument(s), got 2"],
+        "reason": "More template arguments than parameters."
+    },
+    "UsedTemplateMemberIsChecked": {
+        "expect": ["NoOrder"],
+        "reason": "D-16: an instance member is compiled when it is used, and its errors are reported then."
+    },
+    "ExtensionTemplateWrongReceiver": {
+        "expect": ["Sum"],
+        "reason": "D-21: an extension template applies only to instances of the template it extends."
+    },
+    "LambdaUncapturedLocal": {
+        "expect": ["the lambda uses 'x', a local of the enclosing function, without capturing it"],
+        "reason": "A lambda body that uses an enclosing local it does not capture is an error naming the local and the fix (D-22)."
+    },
+    "CapturingLambdaToFuncptr": {
+        "expect": ["captures variables, so it cannot become a funcptr"],
+        "reason": "Only a lambda without captures converts to funcptr; a capturing one needs func<...> (D-22)."
+    },
+    "WriteValueCaptureWithoutMutable": {
+        "expect": ["the lambda is not mutable"],
+        "reason": "A by-value capture is read-only unless the lambda is mutable (D-22)."
+    },
+    "CaptureNonLocal": {
+        "expect": ["'g_value' is not a local variable of the enclosing function"],
+        "reason": "Only locals are captured; a global is used directly (D-22)."
+    },
+    "CaptureThisOutsideMethod": {
+        "expect": ["'this' cannot be captured: the enclosing function is not a member function"],
+        "reason": "[this] needs an enclosing member function (D-22)."
+    },
+    "CaptureNonCopyable": {
+        "expect": ["'Handle' cannot be copied"],
+        "reason": "A by-value capture copies the variable, so a non-copyable one is rejected (D-22, A3)."
+    },
+    "FuncSignatureMismatch": {
+        "expect": ["cannot become 'func<int32(int32)>'"],
+        "reason": "A lambda converts only to a func of its own signature (D-22)."
+    },
+    "CallNonCallableObject": {
+        "expect": ["'Plain' cannot be called: it has no [operator(\"call\")] method"],
+        "reason": "Calling an object without a call operator names the type and the missing operator (D-23)."
+    },
+    "LocalFunctionUsesEnclosingLocal": {
+        "expect": ["no variable named b"],
+        "reason": "BUG-101: a local function is its own frame; the enclosing function's locals are not visible in it (this crashed the compiler)."
+    },
+    "BracedFieldInitializerUsesField": {
+        "expect": ["which a braced list evaluates without an object"],
+        "reason": "An omitted field's initializer in a braced list is evaluated without an object, so naming another field is an error that says why (docs/language/05)."
+    },
+    "ArrayElementInitializedTwice": {
+        "expect": ["element 1 of 'a' is initialized twice"],
+        "reason": "A braced array names each element once; a later entry does not silently replace an earlier one (docs/language/10)."
+    },
+    "FieldInitializedTwice": {
+        "expect": ["field 'x' of 'p' is initialized twice"],
+        "reason": "A braced list names each field once (docs/language/10)."
+    },
+    "RangeOfNonCopyable": {
+        "expect": ["a range entry copies its value into each element"],
+        "reason": "A range entry is evaluated once and copied into the other elements, so it needs a copyable element type."
+    },
+    "ConstLocalWrite": {
+        "expect": ["'b' is const"],
+        "reason": "BUG-084: a const local is read-only."
+    },
+    "ConstLocalAddress": {
+        "expect": ["dropping const is not allowed"],
+        "reason": "BUG-084: &x of a const local is a const int32*, which does not become an int32*."
+    },
+    "ConstPointerRetarget": {
+        "expect": ["'p' is const"],
+        "reason": "BUG-007: `int32 const* p` is a const pointer; it cannot be retargeted (D-30)."
+    },
+    "TrailingConst": {
+        "expect": ["'const' after a type must come before a '*' or '['"],
+        "reason": "BUG-007: a const with no layer after it applies to nothing; the fix-it names `T const*` (D-30)."
+    },
+    "ConstReferenceLayer": {
+        "expect": ["a reference cannot be const"],
+        "reason": "A reference is never reseated, so a const reference layer means nothing; `const T&` is the reference to const."
+    },
+    "ConstParameterWrite": {
+        "expect": ["'x' is const"],
+        "reason": "A const parameter is read-only in the body (D-30)."
+    },
+    "ConstMethodWritesField": {
+        "expect": ["'this' is const in the const method 'Reset'"],
+        "reason": "BUG-025: in a const method `this` is read-only (D-31)."
+    },
+    "NonConstMethodOnConstObject": {
+        "expect": ["'Set' is not a const method, so it cannot be called on a const object"],
+        "reason": "BUG-025: a const object calls only const methods (D-31)."
+    },
+    "NonConstOperatorOnConstObject": {
+        "expect": ["the operator '+' is not a const method"],
+        "reason": "An operator method is a method: a const left operand needs a const one (D-31)."
+    },
+    "NonConstMethodFromConstMethod": {
+        "expect": ["'Touch' is not a const method"],
+        "reason": "An unqualified call in a const method is on a const `this` (D-31)."
+    },
+    "ConstFieldWrite": {
+        "expect": ["field 'id' is const"],
+        "reason": "A const field is written only by its initializer or by a create, copy or delete of its object."
+    },
+    "ConstArrayElementWrite": {
+        "expect": ["'values' is const"],
+        "reason": "An array of const elements is a const array (D-30)."
+    },
+    "NonConstRefToConstArgument": {
+        "expect": ["cannot bind a non-const reference to a const object"],
+        "reason": "A non-const reference parameter would let the callee write a const object."
+    },
+    "ReturnMutableRefFromConstMethod": {
+        "expect": ["cannot return a non-const reference to a const object"],
+        "reason": "A const method cannot hand out a mutable reference to its object (D-31)."
+    },
+    "TakeFromConst": {
+        "expect": ["take(x) leaves x zero, but 's' is const"],
+        "reason": "take(x) writes x (it leaves it zero), so x must be writable."
+    },
+    "ReturnConstPointerAsMutable": {
+        "expect": ["dropping const is not allowed"],
+        "reason": "BUG-111: a return converts as an initialization does; a pointer to const does not become a pointer to mutable."
+    },
+    "UnrelatedPointerInit": {
+        "expect": ["cannot initialize 'float*' from 'int32*': the pointees are unrelated"],
+        "reason": "BUG-112: a declaration converts pointers as an assignment does."
+    },
+    "UnrelatedPointerReturn": {
+        "expect": ["the pointees are unrelated"],
+        "reason": "BUG-112: a return converts pointers as an assignment does."
+    },
+    "ConstFreeFunction": {
+        "expect": ["main.cf (1:1) error: 'Value' is not a method: only a method can be const"],
+        "reason": "A trailing const qualifies `this`; a free function has none."
+    },
+    "WriteThroughConstReferenceCapture": {
+        "expect": ["it is reached through a pointer or reference to const"],
+        "reason": "A reference capture of a const variable points at const."
+    },
+    "PackNotExpanded": {
+        "expect": ["the pack 'args' must be expanded with '...'"],
+        "reason": "A function parameter pack names its elements only through an expansion (D-19)."
+    },
+    "TypePackNotExpanded": {
+        "expect": ["the pack 'Ts' must be expanded with '...'"],
+        "reason": "A type pack is not one type (D-19)."
+    },
+    "PackLengthMismatch": {
+        "expect": ["in one expansion have different lengths"],
+        "reason": "Packs expanded together must have one length (D-19)."
+    },
+    "EmptyFoldWithoutInitialValue": {
+        "expect": ["is over an empty pack: give it an initial value"],
+        "reason": "Only &&, || and , have a value for an empty pack (D-19)."
+    },
+    "FoldOverAssignment": {
+        "expect": ["a fold cannot assign"],
+        "reason": "Folds take arithmetic, bitwise, comparison and logical operators and ','; assignment is applied per element with a comma fold (D-19)."
+    },
+    "FoldBothOperandsArePacks": {
+        "expect": ["both operands of the fold"],
+        "reason": "In a binary fold exactly one operand is the pack (D-19)."
+    },
+    "SizeOfPackOfNonPack": {
+        "expect": ["sizeof...(a): 'a' is not a pack"],
+        "reason": "sizeof... counts only a pack (D-19)."
+    },
+    "BracedPatternInArguments": {
+        "expect": ["a braced list is not expanded in arguments"],
+        "reason": "A braced list has no type to repeat; the expansion goes inside it (D-19)."
+    },
+    "ExpansionNotLastInSpecialization": {
+        "expect": ["a pack expansion must be the last argument"],
+        "reason": "A specialization's pack expansion ends its argument list (D-20)."
+    },
+    "SpecializationArgumentCount": {
+        "expect": ["the specialization 'Box<T, U>' gives 2 argument(s); the template 'Box' takes 1"],
+        "reason": "A specialization gives one argument per parameter of its primary (D-20)."
+    },
+    "AmbiguousSpecializations": {
+        "expect": ["ambiguous specializations of 'S'"],
+        "reason": "Two matching specializations neither more specialized than the other are an error (D-20)."
+    },
+    "SameSpecializationTwice": {
+        "expect": ["are the same specialization of 'Kind' (a top-level const is not part of a type)"],
+        "reason": "BUG-118: a top-level const is not part of a type, so the two patterns are one specialization."
+    },
+    "FunctionPartialSpecialization": {
+        "expect": ["cannot be partially specialized: overload it instead"],
+        "reason": "Function templates are overloaded, not partially specialized (D-20)."
+    },
+    "FunctionSpecializationSignature": {
+        "expect": ["the specialization 'Identity<int32>' is"],
+        "reason": "An explicit specialization has the signature of the primary for its arguments (D-20)."
+    },
+    "TemplateNameWithoutTarget": {
+        "expect": ["'Identity' is a function template: write its template arguments"],
+        "reason": "A function template's name is a value only where a funcptr or func type decides its instance (D-17)."
+    },
+    "TemplateNameSignatureMismatch": {
+        "expect": ["no instance of the template 'Identity' has the signature"],
+        "reason": "The target signature must be one the template can be instantiated to (D-17)."
+    },
+    "TemplateNameVariadicArgument": {
+        "expect": ["only a funcptr or func parameter says which instance it is"],
+        "reason": "A function template's name as an argument needs a funcptr or func parameter (D-17)."
+    },
+    "VirtualMemberTemplate": {
+        "expect": ["the member function template 'P::F' cannot be virtual"],
+        "reason": "BUG-117: a member template has an instance per argument list, so it has no vtable slot."
+    },
+    "MemberTemplateSpecializedInClass": {
+        "expect": ["'template<>' in 'P' specializes 'F': write the specialization outside the class"],
+        "reason": "BUG-117: an explicit specialization of a member template is not written in the class."
+    },
+    "ReturnListValueCount": {
+        "expect": ["the return list '[int32, bool]' has 2 values, got 1"],
+        "reason": "A value list gives each value of its return list (D-34)."
+    },
+    "DestructuringCount": {
+        "expect": ["the destructuring names 3 values, but '[int32, bool]' has 2"],
+        "reason": "A destructuring names each value of the list (D-34)."
+    },
+    "DestructuringNonList": {
+        "expect": ["only a return list destructures: 'P' is not one"],
+        "reason": "Destructuring takes the values of a return list (D-34)."
+    },
+    "ValueListAsScalar": {
+        "expect": ["a value list starts only a return list, not 'int32'"],
+        "reason": "A value list has no meaning as another type (D-34)."
+    },
+    "ValueListAsArgument": {
+        "expect": ["is only returned from a function that returns a list, or destructured"],
+        "reason": "A value list is returned or destructured (D-34)."
+    },
+    "SingleValueReturnList": {
+        "expect": ["a return list has at least two values, but '[float]' has 1"],
+        "reason": "One value is returned as itself (D-34)."
+    },
+    "VoidInReturnList": {
+        "expect": ["a return list holds values: 'void' cannot be one of them"],
+        "reason": "Every element of a return list is a value (D-34)."
+    },
+    "ReferenceDestructuredElement": {
+        "expect": ["a destructured element is a value: 'r' cannot be a reference"],
+        "reason": "A destructured element takes a value out of the list (D-34)."
+    },
+    "DestructuredNameTwice": {
+        "expect": ["Variable 'a' is already declared in this block"],
+        "reason": "Each declared element is a new variable of the block (D-34)."
+    },
+    "ConstDestructuredWrite": {
+        "expect": ["'c' is const"],
+        "reason": "A const declared element is read-only (D-30, D-34)."
+    },
+    "DestructureIntoRvalue": {
+        "expect": ["cannot assign to an rvalue"],
+        "reason": "An assigned element is a location (D-34)."
+    },
+    "SpacedCompoundOperator": {
+        "expect": ["Expected expression, got '='"],
+        "reason": "An operator is a run of adjacent characters: `a < = b` is `<` then `=`, not `<=` (BUG-119)."
+    },
+    "AliasOverloadRedefinition": {
+        "expect": ["main.cf (2:1) error: Duplicate definition of 'Twice' with signature int32 (int32)"],
+        "reason": "`int` is `int32` (D-01): Twice(int) and Twice(int32) are one function defined twice, reported at the second body with the signature (BUG-120)."
+    },
+    "LiteralTooLarge": {
+        "expect": ["integer literal '18446744073709551616' is too large"],
+        "reason": "An integer literal past the largest uint64 is an error, never a crash (BUG-006)."
+    },
+    "UnknownEscape": {
+        "expect": ["unknown escape sequence '\\q'"],
+        "reason": "An escape outside the C set (plus \\e, \\u, \\U) is an error naming it (BUG-017)."
+    },
+    "BadUniversalEscape": {
+        "expect": ["'\\u' takes exactly 4 hex digits"],
+        "reason": "\\u needs exactly four hex digits (D-02)."
+    },
+    "IntegerFloatSuffix": {
+        "expect": ["'1f' is an integer: a float literal needs a '.' or an exponent, write 1.0f"],
+        "reason": "f on an integer is an error with the fix (BUG-016)."
+    },
+    "InvalidIntegerSuffix": {
+        "expect": ["'10q' has the invalid suffix 'q'"],
+        "reason": "A suffix other than u, l, ll (and u with l or ll) is an error, not an identifier after a number (BUG-016)."
+    },
+    "InvalidOctalDigit": {
+        "expect": ["'09' is octal (it starts with 0) and cannot hold the digit '9'"],
+        "reason": "A leading 0 makes an octal literal; 8 and 9 are not octal digits."
+    },
+    "FloatLiteralOutOfRange": {
+        "expect": ["floating-point literal '1e39f' is out of range for float"],
+        "reason": "A float literal beyond FLT_MAX is an error, not infinity."
+    },
+    "MultiCharLiteral": {
+        "expect": ["a character literal holds one character"],
+        "reason": "'ab' is an error (D-02), not a silently truncated character."
+    },
+    "CharTooWideForChar8": {
+        "expect": ["U+00E9 does not fit in one char8"],
+        "reason": "A code point that needs two UTF-8 bytes is not one char8; the message names u'' and U''."
+    },
+    "UnterminatedString": {
+        "expect": ["missing the closing '\"' of a string literal on this line"],
+        "reason": "A string literal ends on its line; the lexical error is reported first."
+    },
+    "AdjacentStringPrefixes": {
+        "expect": ["adjacent string literals join only when they have the same prefix"],
+        "reason": "\"a\" \"b\" joins; pieces with different code-unit widths do not."
+    },
+    "FloatArrayExtent": {
+        "expect": ["an array extent is an integer, but '1e1' is a floating-point value"],
+        "reason": "Constant folding reads literals like lowering does: 1e1 is a double, not the integer 1 (BUG-121)."
+    },
+    "NegativeArrayExtent": {
+        "expect": ["an array extent is at least 1, but '-1' is -1"],
+        "reason": "A negative extent is an error, not a huge unsigned array (BUG-122)."
+    },
+    "ZeroArrayExtent": {
+        "expect": ["an array extent is at least 1, but '0' is 0"],
+        "reason": "A zero extent says why it is rejected (BUG-122)."
+    },
+    "UnclosedBlockComment": {
+        "expect": ["this '/*' comment has no closing '*/'"],
+        "reason": "A '/*' with no '*/' is an error, not a silently commented-out rest of the file (BUG-123)."
+    },
+    "PoundError": {
+        "expect": ["main.cf (1:1) error: #error the build stops here"],
+        "reason": "#error stops the build with its message, at its line."
+    },
+    "IfDivideByZero": {
+        "expect": ["division by zero in a #if condition"],
+        "reason": "A #if condition divides by zero only when the division is evaluated; here it is (BUG-020)."
+    },
+    "MalformedIfCondition": {
+        "expect": ["a #if condition ends early: an operand is missing"],
+        "reason": "#if has an expression grammar; a malformed condition is an error, not silently false (BUG-020)."
+    },
+    "UnterminatedIf": {
+        "expect": ["this #if has no #endif"],
+        "reason": "Every #if needs its #endif."
+    },
+    "ElseWithoutIf": {
+        "expect": ["#else with no #if before it"],
+        "reason": "A #else belongs to an open #if."
+    },
+    "UnknownDirective": {
+        "expect": ["unknown directive '#bogus'"],
+        "reason": "An unknown directive is an error naming it, not a line the parser trips over."
+    },
+    "HashInclude": {
+        "expect": ["'#include' is not a C4 directive: write include \"file.ch\""],
+        "reason": "include is a declaration in C4, not a preprocessor directive (docs/language/01)."
+    },
+    "HashLine": {
+        "expect": ["#line is not supported"],
+        "reason": "C4 keeps each file's own line numbers."
+    },
+    "MacroArgumentCount": {
+        "expect": ["the macro 'F' takes 2 arguments, but 1 was given"],
+        "reason": "A function-like macro call with the wrong number of arguments is an error."
+    },
+    "BadStringize": {
+        "expect": ["'#' in the macro 'F' must be followed by one of its parameters"],
+        "reason": "# stringizes a parameter; anything else is an error at the #define."
+    },
+    "DefineDefined": {
+        "expect": ["'defined' cannot be defined as a macro"],
+        "reason": "defined, __FILE__ and __LINE__ are reserved."
+    },
+    "OffsetofUnknownField": {
+        "expect": ["offsetof: 'P' has no field 'y'"],
+        "reason": "offsetof names a field of the type (B5)."
+    },
+    "OffsetofStaticField": {
+        "expect": ["offsetof: 'count' is a static member of 'P', which has no offset"],
+        "reason": "A static member is not part of the object (B5)."
+    },
+    "OffsetofNotAnObject": {
+        "expect": ["offsetof: 'int32' has no fields, so it has no 'y'"],
+        "reason": "Each step of an offsetof path names a field of an object (B5)."
+    },
+    "SizeofVoid": {
+        "expect": ["'void' has no size"],
+        "reason": "sizeof(void) is an error, not 0 (B5)."
+    },
+    "DefaultArgumentNamesParameter": {
+        "expect": ["no variable named a"],
+        "reason": "A default binds its names where the function is declared: another parameter is not in scope there (BUG-129)."
+    },
+    "SwitchImplicitFallthrough": {
+        "expect": ["main.cf (4:2) error: this case falls into the next one: end it with 'break;' or 'fallthrough;'"],
+        "reason": "A case may not run into the next one by accident (D-39); stacked empty labels and fallthrough; are the explicit forms."
+    },
+    "SwitchFallthroughOnOneBranch": {
+        "expect": ["this case falls into the next one"],
+        "reason": "An if with no else can complete, so the case still falls through (D-39)."
+    },
+    "FallthroughNotLast": {
+        "expect": ["'fallthrough;' must be the last statement of its case"],
+        "reason": "Statements after fallthrough; would never run."
+    },
+    "FallthroughInLastCase": {
+        "expect": ["'fallthrough;' in the last case has no case to continue into"],
+        "reason": "The last case has no next case."
+    },
+    "PrivateMethodCall": {
+        "expect": ["Cannot access private method 'Code' of type 'Vault'"],
+        "reason": "A private method is callable only from the type's own code (D-28)."
+    },
+    "ProtectedFieldOutside": {
+        "expect": ["Cannot access protected field 'level' of type 'Gear'"],
+        "reason": "A protected field is visible to the type and its derived types only (D-28)."
+    },
+    "ProtectedMethodOutside": {
+        "expect": ["Cannot access protected method 'Level' of type 'Gear'"],
+        "reason": "Deriving from the type does not make its protected methods public to outside code (D-28)."
+    },
+    "PrivateCtor": {
+        "expect": ["Cannot access private create 'Init' of type 'Token'"],
+        "reason": "A private create can only be called from the type's own code, as a factory does (D-28)."
+    },
+    "PrivateCtorNew": {
+        "expect": ["Cannot access private create 'Init' of type 'Token'"],
+        "reason": "'new T(...)' checks the create it calls like 'T v(...)' does (D-28)."
+    },
+    "PrivateDefaultCreate": {
+        "expect": ["Cannot access private create 'Init' of type 'Token'"],
+        "reason": "Default construction calls the 0-argument create, so a private one stops it outside the type (D-28)."
+    },
+    "ExtensionReadsPrivate": {
+        "expect": ["Cannot access private field 'inner' of type 'Box'"],
+        "reason": "An extension method is outside code: it sees only public members (D-28)."
+    },
+    "DerivedReadsBasePrivate": {
+        "expect": ["Cannot access private field 'secret' of type 'Base'"],
+        "reason": "Private members are not visible to derived types; protected ones are (D-28)."
+    },
+    "PrivateStaticOutside": {
+        "expect": ["Cannot access private field 'total' of type 'Tally'"],
+        "reason": "A static data member follows the same access rule as a field (D-28)."
+    },
+    "PrivateOperatorOutside": {
+        "expect": ["Cannot access private method 'Add' of type 'Money'"],
+        "reason": "An operator is a method: using it outside the type needs it to be public (D-28)."
+    },
+    "SectionMissingModifier": {
+        "expect": ["main.cf (3:2) error: member 'width' is under 'public:' but has no access modifier; write 'public'"],
+        "reason": "A section label groups members; each member under it still writes its modifier (D-28)."
+    },
+    "SectionMissingModifierMethod": {
+        "expect": ["member 'Layout' is under 'private:' but has no access modifier; write 'private'"],
+        "reason": "The section rule covers methods as well as fields (D-28)."
+    },
+    "InterfacePrivateMember": {
+        "expect": ["interface member 'Area' cannot be 'private': an interface's members are public"],
+        "reason": "An interface's members are public (D-28)."
+    },
+    "InterfaceProtectedSection": {
+        "expect": ["an interface cannot have a 'protected:' section: its members are public"],
+        "reason": "An interface's members are public, so a hidden section has nothing to hold (D-28)."
+    },
+    "UnionLaneView": {
+        "expect": ["main.cf (2:2) error: a lane view ('packed float x, y;') goes in an anonymous union inside a class; the union 'Lanes' holds fields and struct views"],
+        "reason": "A named union holds fields and struct views; a lane view in one was dropped without an error (BUG-192)."
+    },
+    "UnionInUnion": {
+        "expect": ["main.cf (3:2) error: a union inside the union 'Outer' is not supported: declare it beside 'Outer', or use a struct view"],
+        "reason": "A nested union in a named union was dropped without an error (BUG-192)."
+    },
+    "UnionStaticMember": {
+        "expect": ["main.cf (3:2) error: the union 'Counted' cannot have a static member: declare 'count' beside it"],
+        "reason": "A union's members share one storage region, so a static member has no place in it; it was dropped without an error."
+    },
+    "UnionUnresolvedMember": {
+        "expect": ["main.cf (4:3) error: unresolved type for field 'part' in the union 'Extent': type not found: Missing"],
+        "reason": "An unresolved union member is reported at the member with the reason; it was 'unresolved union member type' with no location (BUG-191)."
+    },
+    "NamespaceShorthandMissingName": {
+        "expect": ["main.cf (1:19) error: Expected a namespace name after '::', got '{'"],
+        "reason": "`namespace A::B` nests a namespace per name (B25); a `::` with no name after it is an error at the brace."
+    },
+    "QualifiedCallNotABase": {
+        "expect": ["main.cf (6:9) error: 'Other' is not 'Derived' or one of its bases"],
+        "reason": "`obj.Base::F()` names the implementation of one of the object's own types (B35)."
+    },
+    "QualifiedMemberNotAClass": {
+        "expect": ["main.cf (4:9) error: 'int32' is not a class, so it cannot qualify a member of 'Base'"],
+        "reason": "The qualifier of `obj.T::member` must be a class (B35)."
+    },
+    "BracedArgumentTooMany": {
+        "expect": ["main.cf (3:23) error: no matching overload of Sum: a braced argument binds an __init_list<T> parameter, an object parameter (by value or const T&) its entries build"],
+        "reason": "Three entries cannot build a two-field aggregate; the error says what braces bind (B36, D-57)."
+    },
+    "BracedArgumentAmbiguous": {
+        "expect": ["main.cf (5:23) error: ambiguous call - equally good overloads: int32 (Point) and int32 (Size)"],
+        "reason": "Two object parameters the same braces build are equally good, and the error names both (B36, D-57)."
+    },
+    "StaticCastUnrelated": {
+        "expect": ["main.cf (5:9) error: static_cast cannot convert 'A*' to 'B*': the types are unrelated (reinterpret_cast reinterprets the bits)"],
+        "reason": "static_cast converts pointers between related objects only (B34, D-12)."
+    },
+    "ReinterpretCastFloatToInt": {
+        "expect": ["main.cf (3:9) error: reinterpret_cast cannot convert 'float' to 'int64': reinterpret_cast keeps the bits of a number of the same size, and these are 4 and 8 bytes"],
+        "reason": "reinterpret_cast keeps a number's bits only as a number of the same size (B34, D-12, D-64)."
+    },
+    "ReinterpretCastBool": {
+        "expect": ["main.cf (3:9) error: reinterpret_cast cannot convert 'bool' to 'uint8': a bool or an enum has no bits to keep: convert it with static_cast"],
+        "reason": "A bool's bits are not a number's (D-64)."
+    },
+    "ReinterpretCastEnum": {
+        "expect": ["main.cf (4:9) error: reinterpret_cast cannot convert 'Mode' to 'int32': a bool or an enum has no bits to keep: convert it with static_cast"],
+        "reason": "An enum converts to its integer with static_cast, not reinterpret_cast (D-64)."
+    },
+    "ReinterpretCastFloatToPointer": {
+        "expect": ["main.cf (3:9) error: reinterpret_cast cannot convert 'double' to 'int32*': reinterpret_cast converts pointers to pointers, between a pointer and an integer, and keeps the bits of a number or a vector"],
+        "reason": "A float is neither a pointer nor an integer, so it never becomes a pointer (D-12, D-64)."
+    },
+    "ConstCastChangesType": {
+        "expect": ["main.cf (4:13) error: const_cast cannot convert 'const int32*' to 'int64*': const_cast only adds or removes const"],
+        "reason": "const_cast changes only const (B34, D-12)."
+    },
+    "StaticCastDropsConst": {
+        "expect": ["main.cf (4:13) error: static_cast cannot convert 'const int32*' to 'int32*': it removes const (const_cast does that)"],
+        "reason": "static_cast never removes const (B34, D-12)."
+    },
+    "ReferenceCastOfTemporary": {
+        "expect": ["main.cf (5:12) error: a cast to a reference needs a location to refer to, not a temporary"],
+        "reason": "A cast to a reference names a location; a temporary is not one (B34)."
+    },
+    "CheckedReferenceCastDropsConst": {
+        "expect": ["main.cf (6:18) error: the object is const, so a checked cast of it gives a 'const Derived&'"],
+        "reason": "A checked cast to a reference keeps the object's const (B34, D-11)."
+    },
+    "CheckedReferenceCastTemporary": {
+        "expect": ["main.cf (5:15) error: a checked cast to a reference needs a location to refer to, not a temporary"],
+        "reason": "`x as T&` names the T that x is; a temporary is not a location (B34, D-11)."
+    },
+    "PrivateCreateNested": {
+        "expect": ["main.cf (5:2) error: Cannot access private create 'Init' of type 'Token'"],
+        "reason": "Nothing runs to build a Coat (its creates are all empty), yet its base's array field still names a private create; the access is checked through the parts (BUG-188 fix)."
+    },
+    "PrivateCreateField": {
+        "expect": ["main.cf (5:2) error: Cannot access private create 'Init' of type 'Token'"],
+        "reason": "A field is default-constructed by its owner's create, which must be allowed to call it (D-28)."
+    },
+    "PrivateCreateArray": {
+        "expect": ["Cannot access private create 'Init' of type 'Token'"],
+        "reason": "Each element of an array is default-constructed, which needs the create's access (D-28)."
+    },
+    "PrivateBaseCreate": {
+        "expect": ["Cannot access private create 'Init' of type 'Base'"],
+        "reason": "A derived create runs the base's 0-argument create, so it must not be private (D-28)."
+    },
+    "PrivateCreateOmittedField": {
+        "expect": ["Cannot access private create 'Init' of type 'Token'"],
+        "reason": "A field a braced list leaves out is default-constructed where the list is written (D-28)."
+    },
+    "NewAbstract": {
+        "expect": ["cannot create a 'Shape': 'Shape' is abstract"],
+        "reason": "An abstract type is only a base: 'new' cannot create one (D-29)."
+    },
+    "AbstractValueLocal": {
+        "expect": ["'s': 'Shape' is abstract; use a pointer or a reference"],
+        "reason": "A value local of an abstract type would be an object of it (D-29)."
+    },
+    "AbstractConstructCall": {
+        "expect": ["cannot create a 'Shape': 'Shape' is abstract"],
+        "reason": "'T()' creates a T, which an abstract type forbids (D-29)."
+    },
+    "PureVirtualNotImplemented": {
+        "expect": ["'Square' is abstract: 'Area' is not implemented"],
+        "reason": "A type with a virtual method nothing implements is abstract (D-29)."
+    },
+    "AbstractMethodNotImplemented": {
+        "expect": ["'Shape' is abstract: 'Area' is not implemented"],
+        "reason": "An abstract method has no implementation, so its type is abstract (D-29)."
+    },
+    "InterfaceValueLocal": {
+        "expect": ["'s': 'IShape' is an interface"],
+        "reason": "An interface is only ever a base (D-29)."
+    },
+    "AbstractField": {
+        "expect": ["main.cf (5:2) error: field 's': 'Shape' is abstract"],
+        "reason": "A field holds a whole object, so its type cannot be abstract (D-29)."
+    },
+    "AbstractParameter": {
+        "expect": ["parameter 's' of 'Draw': 'Shape' is abstract"],
+        "reason": "A by-value parameter copies into an object of its type (D-29)."
+    },
+    "AbstractReturn": {
+        "expect": ["the return value of 'Make': 'Shape' is abstract"],
+        "reason": "A by-value return is an object of its type (D-29)."
+    },
+    "AbstractGlobal": {
+        "expect": ["'g_shape': 'Shape' is abstract"],
+        "reason": "A global holds a whole object (D-29)."
+    },
+    "AbstractArrayLocal": {
+        "expect": ["'shapes': 'Shape' is abstract"],
+        "reason": "Each element of an array is an object of its element type (D-29)."
+    },
+    "AbstractMethodWithBody": {
+        "expect": ["abstract method 'Area' cannot have a body"],
+        "reason": "An abstract method is implemented by derived types (D-29)."
+    },
+    "AbstractStaticMethod": {
+        "expect": ["abstract method 'Area' cannot be static"],
+        "reason": "A static method has no object to dispatch on (D-29)."
+    },
+    "AbstractAndFinal": {
+        "expect": ["a type cannot be both 'abstract' and 'final'"],
+        "reason": "Nothing could ever create such a type (D-29)."
+    },
+    "AbstractInterface": {
+        "expect": ["an interface is always abstract: remove 'abstract'"],
+        "reason": "The keyword would say nothing (D-29)."
+    },
+    "FinalInterface": {
+        "expect": ["an interface cannot be 'final'"],
+        "reason": "An interface exists to be implemented (D-29)."
+    },
+    "DeriveFromFinal": {
+        "expect": ["'More' cannot derive from 'Leaf': it is final"],
+        "reason": "A final class ends its hierarchy (D-29)."
+    },
+    "OverrideFinal": {
+        "expect": ["main.cf (5:2) error: 'F' overrides a final method of 'Base'"],
+        "reason": "A final method ends its overriding (D-29)."
+    },
+    "OverrideFinalWithoutKeyword": {
+        "expect": ["'F' overrides a final method of 'Mid'"],
+        "reason": "A same-signature method overrides even without 'override', so a final one cannot be matched (D-29)."
+    },
+    "FinalNotVirtual": {
+        "expect": ["'Draw' is final but not virtual"],
+        "reason": "Only a virtual method can be overridden, so only one can be final (D-29)."
+    },
+    "VirtualFreeFunction": {
+        "expect": ["main.cf (1:1) error: 'Draw' is not a method of a type: 'virtual' applies only to methods"],
+        "reason": "A free function has no type to dispatch through (D-29)."
+    },
+    "FinalExtensionMethod": {
+        "expect": ["main.cf (4:1) error: 'GetX' is not a method of a type: 'final' applies only to methods"],
+        "reason": "An extension method is not virtual, so it cannot be final (D-29)."
+    },
+    "ConcurrentModifier": {
+        "expect": ["'concurrent' is not a C4 modifier"],
+        "reason": "'concurrent' has no meaning in C4 (D-29)."
+    },
+    "ThreadLocalField": {
+        "expect": ["field 'n' cannot be thread_local"],
+        "reason": "A field lives in its object; only a static member can be thread_local (D-29)."
+    },
+    "FreeOperatorFunction": {
+        "expect": ["main.cf (1:1) error: 'Add' is a free function: operators must be methods or extension methods"],
+        "reason": "An operator belongs to a type (D-25)."
+    },
+    "ScalarLeftNoOperator": {
+        "expect": ["no operator '*' takes a 'float' on the left and a 'Vec' on the right"],
+        "reason": "Operands never swap: 2.0f * v needs an extension on float (D-25)."
+    },
+    "RightOperandNotReceiver": {
+        "expect": ["no operator '+' takes a 'Plain' on the left and a 'HasAdd' on the right"],
+        "reason": "The right operand's operator is never used for the left one (D-25)."
+    },
+    "PowerOnObject": {
+        "expect": ["no operator '**' takes a 'int32' on the left and a 'Box' on the right"],
+        "reason": "The built-in ** takes numbers (D-26)."
+    },
+    "PowerOnPointer": {
+        "expect": ["operator '**' needs numeric operands"],
+        "reason": "BUG-133: no power of a pointer."
+    },
+    "FloatBitwiseAnd": {
+        "expect": ["operator '&' needs integer operands, not 'float' and 'float'"],
+        "reason": "BUG-133: bitwise operators take integers."
+    },
+    "FloatShift": {
+        "expect": ["operator '<<' needs integer operands"],
+        "reason": "BUG-133: shifts take integers."
+    },
+    "FloatBitwiseNot": {
+        "expect": ["operator '~' needs an integer operand, not 'float'"],
+        "reason": "BUG-133: ~ takes an integer."
+    },
+    "PointerMultiply": {
+        "expect": ["operator '*' needs numeric operands, not 'int32*' and 'int32'"],
+        "reason": "BUG-133: a pointer only moves by + and -."
+    },
+    "PointerNegate": {
+        "expect": ["unary '-' needs a numeric operand, not 'int32*'"],
+        "reason": "BUG-133: a pointer has no negation."
+    },
+    "IntegerMinusPointer": {
+        "expect": ["operator '-' needs numeric operands, not 'int32' and 'int32*'"],
+        "reason": "n - p is not an address; only p - n is."
+    },
+    "IncrementBool": {
+        "expect": ["operator '++' needs a number or a pointer, not 'bool'"],
+        "reason": "A bool has no successor."
+    },
+    "NotOnObject": {
+        "expect": ["operator '!' needs a value with a truth value, not 'Box'"],
+        "reason": "An object has no truth value without an operator."
+    },
+    "EmptyArrayExtent": {
+        "expect": ["'int32[]' is not a type: an array needs an extent; use 'int32*' or 'Core::Array<int32>'"],
+        "reason": "D-33: an array always has an extent."
+    },
+    "EmptyArrayParameter": {
+        "expect": ["'int32[]' is not a type"],
+        "reason": "D-33 holds for parameters too: take a pointer and a count."
+    },
+    "EmptyArrayField": {
+        "expect": ["'float[]' is not a type"],
+        "reason": "D-33 holds for fields too."
+    },
+    "NonConstLocalArraySize": {
+        "expect": ["main.cf (3:8) error: the array size 'n + 1' is not a constant expression: 'n' is a variable: only a const with a constant initializer folds"],
+        "reason": "A local array's extent names the expression that does not fold."
+    },
+    "IntToEnumClass": {
+        "expect": ["'Mode' is an enum class: a 'int32' converts to it only with a cast"],
+        "reason": "D-32: an enum class takes no integer implicitly."
+    },
+    "EnumClassToInt": {
+        "expect": ["'Mode' is an enum class: it converts to 'int32' only with a cast"],
+        "reason": "D-32: an enum class gives no integer implicitly."
+    },
+    "IntArgumentToEnumClass": {
+        "expect": ["main.cf (3:20) error: argument 1 of Set has type 'int32' but parameter 'm' expects 'Mode'"],
+        "reason": "D-32: overload resolution does not convert an integer to an enum class."
+    },
+    "DefaultArgumentNotConvertible": {
+        "expect": ["cannot initialize 'int32' from"],
+        "reason": "BUG-131: a default argument converts like any argument."
+    },
+    "StringToInt": {
+        "expect": ["a pointer is not a number"],
+        "reason": "BUG-131: a string literal is a pointer."
+    },
+    "IntToPointer": {
+        "expect": ["an integer is not a pointer: write null for no address"],
+        "reason": "BUG-131: only the constant 0 converts to a pointer."
+    },
+    "PointerToFloat": {
+        "expect": ["cannot initialize 'float' from 'int32*': a pointer is not a number"],
+        "reason": "BUG-131."
+    },
+    "PointerToInt64": {
+        "expect": ["a pointer is not a number: cast with (int64)"],
+        "reason": "BUG-131: reading an address needs a cast."
+    },
+    "IntToObject": {
+        "expect": ["cannot initialize 'S' from 'int32': a 'int32' is not a 'S'"],
+        "reason": "BUG-131: an object does not start from a number."
+    },
+    "IntToObjectWithCreate": {
+        "expect": ["a 'int32' is not a 'Wrap': construct one with Wrap(...)"],
+        "reason": "Constructions are explicit (D-32)."
+    },
+    "ObjectToInt": {
+        "expect": ["cannot initialize 'int32' from 'S': a 'S' is not a number"],
+        "reason": "BUG-131."
+    },
+    "ObjectToIntWithCast": {
+        "expect": ["a 'Celsius' is not a number: convert it with (float)x"],
+        "reason": "A cast operator is explicit (06 6.8)."
+    },
+    "AssignIntToPointer": {
+        "expect": ["Cannot assign value of type 'int32' to 'int32*': an integer is not a pointer"],
+        "reason": "BUG-131: assignment converts like initialization."
+    },
+    "AssignPointerToInt": {
+        "expect": ["Cannot assign value of type 'int32*' to 'int32': a pointer is not a number"],
+        "reason": "BUG-131."
+    },
+    "UnrelatedObjectAssign": {
+        "expect": ["Cannot assign value of type 'B' to 'A': a 'B' is not a 'A'"],
+        "reason": "BUG-131: unrelated objects do not convert."
+    },
+    "ReturnPointerAsInt": {
+        "expect": ["return type mismatch in 'Address': got 'int32*', function returns 'int32': a pointer is not a number"],
+        "reason": "A return converts like an initialization."
+    },
+    "NonConstReferenceOtherType": {
+        "expect": ["main.cf (2:34) error: argument 1 of Bump has type 'int32' but parameter 'f' expects 'float&'"],
+        "reason": "D-32: a non-const reference names its argument, so it binds only that type."
+    },
+    "ConstReferenceNotConvertible": {
+        "expect": ["main.cf (5:33) error: argument 1 of Read has type 'S' but parameter 'x' expects 'const int32&'"],
+        "reason": "A const reference takes only what converts to its referent."
+    },
+    "VaStartNotVariadic": {
+        "expect": ["va_start(ap) opens the arguments of a variadic function: 'Read' has no '...'"],
+        "reason": "Only a variadic function has arguments to read (D-35)."
+    },
+    "VaArgFloat": {
+        "expect": ["va_arg cannot read a 'float': a variadic float arrives as a 'double'"],
+        "reason": "Variadic arguments are promoted (D-35)."
+    },
+    "VaArgSmallInteger": {
+        "expect": ["va_arg cannot read a 'int16': a variadic 'int16' arrives as an 'int32'"],
+        "reason": "Variadic arguments are promoted (D-35)."
+    },
+    "VaArgNotAList": {
+        "expect": ["va_arg(ap, T) needs a va_list variable"],
+        "reason": "va_arg reads from a va_list (D-35)."
+    },
+    "VaArgIntRemoved": {
+        "expect": ["va_arg_int"],
+        "reason": "D-35: the va_arg_int family is replaced by va_arg(ap, T)."
+    },
+    "InitListBracedScalar": {
+        "expect": ["a braced list cannot initialize 'int32' here"],
+        "reason": "A braced entry of an __init_list builds one element; a scalar element takes a value, not a list (BUG-177)."
+    },
+    "PointerDifferenceVoid": {
+        "expect": ["pointer difference needs a pointee with a size: cast the void pointers to char*"],
+        "reason": "A difference counts elements; void has no element size (BUG-168)."
+    },
+    "PointerDifferenceMismatch": {
+        "expect": ["pointer difference needs two pointers to one type, not 'int32*' and 'int64*'"],
+        "reason": "Elements of two different types cannot be counted between (BUG-168)."
+    },
+    "PointerOffsetFloat": {
+        "expect": ["pointer arithmetic needs an integral offset"],
+        "reason": "A pointer moves by whole elements."
+    },
+    "AddressOfLane": {
+        "expect": ["a lane of a packed vector has no address: copy it into a variable first, or take the address of the whole vector"],
+        "reason": "A lane lives in a SIMD register value, not at an address of its own (D-37)."
+    },
+    "AddressOfSwizzle": {
+        "expect": ["a swizzle run has no address: copy it into a 'packed' variable first"],
+        "reason": "A run is a value computed for one expression (D-37)."
+    },
+    "AddressOfVectorIndex": {
+        "expect": ["a lane of a packed vector has no address"],
+        "reason": "Indexing a packed value names a lane, which has no address (D-37)."
+    },
+    "RepeatedLaneWrite": {
+        "expect": ["this swizzle names a lane twice, so it cannot be written to: name each lane once (it can still be read, as a splat)"],
+        "reason": "A write that names a lane twice would store that lane twice (D-37)."
+    },
+    "MultiCharLaneName": {
+        "expect": ["a lane name is one character, so 'v.xx' would read lanes: rename 'xx'"],
+        "reason": "Runs are read one character per lane, so a longer lane name is ambiguous (D-37)."
+    },
+    "PackedVectorDelete": {
+        "expect": ["'Lanes' is a packed vector, which copies and goes away as one register value: it cannot have [operator(\"delete\")]"],
+        "reason": "A pure packed vector is a register value, so a delete operator could never run; it was silently ignored (BUG-189)."
+    },
+    "PackedVectorCopy": {
+        "expect": ["is a packed vector, which copies and goes away as one register value: it cannot have [operator(\"copy\")]"],
+        "reason": "A pure packed vector copies as one register move, so a copy operator (here on a template instance) could never run (BUG-189)."
+    },
+    "PackedTooWide": {
+        "expect": ["'packed double[16]' is 128 bytes: a packed vector holds at most 64 (16 floats)"],
+        "reason": "The widest SIMD register is 64 bytes (D-36)."
+    },
+    "PackedTooManyLanes": {
+        "expect": ["'packed int8[17]' is not a vector: a packed vector has 2 to 16 lanes"],
+        "reason": "A packed vector has at most 16 lanes (D-36)."
+    },
+    "PackedOneLane": {
+        "expect": ["'packed float[1]' is not a vector: a packed vector has 2 to 16 lanes"],
+        "reason": "One lane is a scalar, not a vector (D-36)."
+    },
+    "PackedWithoutArray": {
+        "expect": ["'packed' needs a lane count: write 'packed float[N]' for a vector value (a lane view, 'packed float x, y;', goes inside a union)"],
+        "reason": "A packed value is a packed array; lane views belong in a union (D-36, BUG-140)."
+    },
+    "PackedParamWithoutArray": {
+        "expect": ["'packed' needs a lane count: write 'packed float[N]'"],
+        "reason": "The same rule for a parameter (D-36)."
+    },
+    "PackedLaneViewOutsideUnion": {
+        "expect": ["'packed' needs a lane count: write 'packed float[N]' for a vector value (a lane view, 'packed float x, y;', goes inside a union)"],
+        "reason": "Outside a union, 'packed float x, y;' would be two packed fields with no lane count (D-36)."
+    },
+    "PackedPointerElement": {
+        "expect": ["'packed int32*[4]' is not a vector: the element of a packed vector is a number, not a pointer or a reference"],
+        "reason": "A lane is a number (D-36, BUG-140)."
+    },
+    "PackedNotNumber": {
+        "expect": ["'packed CS[4]' is not a vector: the element of a packed vector is a number"],
+        "reason": "A lane is a number (D-36)."
+    },
+    "PackedLaneCountNotConstant": {
+        "expect": ["main.cf (1:42) error: the lane count 'n' is not a constant expression: 'n' is a variable: only a const with a constant initializer folds"],
+        "reason": "The lane count is part of the type (D-36)."
+    },
+    "PackedVectorMismatch": {
+        "expect": ["the operands are a 'packed float[4]' and a 'packed float[2]': two packed vectors combine only with the same element and lane count"],
+        "reason": "Lane-wise operators need matching lanes (D-36)."
+    },
+    "PackedElementMismatch": {
+        "expect": ["the operands are a 'packed float[4]' and a 'packed int32[4]'"],
+        "reason": "Vectors do not convert lane types implicitly (D-36)."
+    },
+    "PackedMaskCondition": {
+        "expect": ["a 'packed bool[4]' has 4 lanes, not one truth value: test one lane, such as v[0], or combine lanes with '&' and '|'"],
+        "reason": "A mask has one answer per lane, so it is not a condition (BUG-138)."
+    },
+    "PackedMaskTernary": {
+        "expect": ["a 'packed bool[4]' has 4 lanes, not one truth value"],
+        "reason": "The ?: condition follows the same rule (BUG-138)."
+    },
+    "PackedMaskLogicalAnd": {
+        "expect": ["'&&' joins two conditions: a 'packed bool[4]' has 4 lanes, not one truth value"],
+        "reason": "&& short-circuits on one truth value; lanes combine with & (BUG-139)."
+    },
+    "PackedMaskArithmetic": {
+        "expect": ["operator '+' does not take a 'packed bool[4]': a packed bool vector is a mask, combined with '&', '|', '^' and '!' and compared with '==' and '!='"],
+        "reason": "Arithmetic on one-bit lanes would wrap; a mask is combined, not added."
+    },
+    "PackedMaskNegate": {
+        "expect": ["operator '-' does not take a 'packed bool[4]'"],
+        "reason": "The unary operators on a mask: only '!'."
+    },
+    "NotOnFloatVector": {
+        "expect": ["operator '!' needs a value with a truth value, not 'packed float[4]'"],
+        "reason": "'!' negates a truth value or the lanes of a mask, not numbers."
+    },
+    "ConditionStruct": {
+        "expect": ["a 'CS' has no truth value: a condition is a bool, a number, an enum or a pointer"],
+        "reason": "A struct is not a condition (BUG-138)."
+    },
+    "ConditionStructReference": {
+        "expect": ["a 'CS' has no truth value"],
+        "reason": "A reference is its referent, so a reference to a struct is not a condition either."
+    },
+    "ConditionArray": {
+        "expect": ["a 'int32[4]' has no truth value"],
+        "reason": "An array's address is never null, so testing it is a mistake (BUG-138)."
+    },
+    "ConditionVoid": {
+        "expect": ["a 'void' has no truth value"],
+        "reason": "A void call has no value (BUG-138)."
+    },
+    "WhileConditionStruct": {
+        "expect": ["a 'CS' has no truth value"],
+        "reason": "The while condition follows the condition rule (BUG-138)."
+    },
+    "DoWhileConditionStruct": {
+        "expect": ["a 'CS' has no truth value"],
+        "reason": "The do-while condition follows the condition rule (BUG-138)."
+    },
+    "ForConditionStruct": {
+        "expect": ["a 'CS' has no truth value"],
+        "reason": "The for condition follows the condition rule (BUG-138)."
+    },
+    "TernaryConditionStruct": {
+        "expect": ["a 'CS' has no truth value"],
+        "reason": "The ?: condition follows the condition rule (BUG-138)."
+    },
+    "LogicalOrStruct": {
+        "expect": ["'||' joins two conditions: a 'CS' has no truth value"],
+        "reason": "Without a logical_or operator a struct is not an operand of || (BUG-139)."
+    },
+    "SwitchOnStruct": {
+        "expect": ["a switch selects on an integer, a char or an enum, not a 'CS'"],
+        "reason": "BUG-141: this crashed the compiler."
+    },
+    "SwitchOnFloat": {
+        "expect": ["a switch selects on an integer, a char or an enum, not a 'float'"],
+        "reason": "BUG-141."
+    },
+    "SwitchOnPointer": {
+        "expect": ["a switch selects on an integer, a char or an enum, not a 'int32*'"],
+        "reason": "BUG-141."
+    },
+    "SwitchCaseNotInteger": {
+        "expect": ["a case label is an integer, a char or an enum constant, not a 'double'"],
+        "reason": "BUG-142: the label was truncated to 1."
+    },
+    "SwitchCaseOutOfRange": {
+        "expect": ["case value 300 does not fit in the switch's 'uint8'"],
+        "reason": "BUG-142: the label was truncated to 44 and matched it."
+    },
+    "SwitchCaseNegativeUnsigned": {
+        "expect": ["case value -1 does not fit in the switch's 'uint32'"],
+        "reason": "BUG-142: the label matched 4294967295."
+    },
+    "SwitchCaseTooNegative": {
+        "expect": ["case value -129 does not fit in the switch's 'int8'"],
+        "reason": "BUG-142."
+    },
+    "SwitchDuplicateCase": {
+        "expect": ["'case 1' is already a case of this switch"],
+        "reason": "BUG-142: this failed LLVM verification."
+    },
+    "SwitchTwoDefaults": {
+        "expect": ["a switch has one 'default': this is its second"],
+        "reason": "BUG-142: the second default won silently."
+    },
+    "SwitchEnumClassIntCase": {
+        "expect": ["the cases of a switch on the enum class 'SC' are its members, not a 'int32'"],
+        "reason": "An enum class converts from integers only through a cast (D-32, BUG-142)."
+    },
+    "SwitchIntEnumClassCase": {
+        "expect": ["'SC' is an enum class: its members are cases only of a switch on a 'SC'"],
+        "reason": "An enum class converts to integers only through a cast (D-32, BUG-142)."
+    },
+    "ConstantCycle": {
+        "expect": ["the constant 'kCycA' depends on itself: kCycA -> kCycB -> kCycA"],
+        "reason": "Constants that refer to each other in a loop have no value (BUG-144)."
+    },
+    "ConstantSelfReference": {
+        "expect": ["the constant 'kSelf' depends on itself: kSelf -> kSelf"],
+        "reason": "A constant cannot name itself (BUG-144)."
+    },
+    "RuntimeConstantAsExtent": {
+        "expect": ["main.cf (3:7) error: unresolved type for variable 'arr': the array size 'kN' is not a constant expression: 'kN' starts at runtime: 'Seed()' is not one of the forms a constant folds from"],
+        "reason": "A const set at startup is read-only but has no compile-time value (BUG-144)."
+    },
+    "UnknownNameInConstant": {
+        "expect": ["no variable named Nope"],
+        "reason": "A const that does not fold starts at runtime, where an unknown name is still reported."
+    },
+    "FloatWithoutLeadingDigit": {
+        "expect": ["'.5f' needs a digit before the '.': write 0.5f"],
+        "reason": "A float literal needs a digit before its '.' (03 3.7, BUG-146)."
+    },
+    "NormalizedIncrement": {
+        "expect": ["operator '++' does not take a 'snorm8': a normalized value is a fraction; add to it with x += 0.1f"],
+        "reason": "A step of 1 is not a fraction of a normalized value (D-38)."
+    },
+    "NormalizedBitAnd": {
+        "expect": ["operator '&' does not take a 'unorm8': a normalized value is a fraction; read its stored integer with (int32)x"],
+        "reason": "Bit operators take integers; a normalized value is a fraction (D-38)."
+    },
+    "NormalizedShift": {
+        "expect": ["operator '<<' does not take a 'unorm8'"],
+        "reason": "Shifts take integers (D-38)."
+    },
+    "NormalizedBitNot": {
+        "expect": ["operator '~' does not take a 'unorm8'"],
+        "reason": "'~' takes an integer (D-38)."
+    },
+    "NormalizedSwitch": {
+        "expect": ["a switch selects on an integer, a char or an enum, not a 'unorm8'"],
+        "reason": "A fraction has no cases (D-38)."
+    },
+    "NormalizedConstantInExtent": {
+        "expect": ["'kU' is a normalized value, a fraction the constant does not fold over"],
+        "reason": "Constants fold over numbers, not over a normalized encoding (D-38)."
+    },
+    "MissingReturn": {
+        "expect": ["main.cf (1:40) error: control reaches the end of non-void function 'Half': return a 'int32' on every path"],
+        "reason": "A function that returns a value cannot run off its end (D-55); the error points at its closing brace."
+    },
+    "MissingReturnInBranch": {
+        "expect": ["control reaches the end of non-void function 'Sign'"],
+        "reason": "An if without a final else can complete (D-55)."
+    },
+    "MissingReturnAfterLoop": {
+        "expect": ["control reaches the end of non-void function 'Find'"],
+        "reason": "A loop with a condition can end (D-55)."
+    },
+    "MissingReturnInLambda": {
+        "expect": ["control reaches the end of the lambda: return a 'int32' on every path"],
+        "reason": "A lambda that returns a value cannot run off its end either (D-55)."
+    },
+    "MissingReturnInMethod": {
+        "expect": ["control reaches the end of non-void function 'Get'"],
+        "reason": "Methods follow the same rule (D-55)."
+    },
+    "RangeForRefOverByValueDeref": {
+        "expect": ["'v' is a reference, but each element is a copy (the iterator's 'dereference' returns 'int32'): return a reference from it, or declare 'int32 v'"],
+        "reason": "A reference loop variable needs a location to name (D-54)."
+    },
+    "RangeForRefTypeMismatch": {
+        "expect": ["'v' is a 'int64&', but the elements are 'int32'"],
+        "reason": "A reference names an element of its own type (D-54)."
+    },
+    "RangeForRefConstElements": {
+        "expect": ["the elements are read-only: declare 'const int32& v'"],
+        "reason": "A mutable reference cannot name a read-only element (D-54, D-31)."
+    },
+    "BracedListWithoutType": {
+        "expect": ["main.cf (1:34) error: the braced list '{ 1 }' has no type here: write the type it builds, T{...}, or initialize a variable"],
+        "reason": "A braced list needs the type it builds; the error points at it (BUG-148)."
+    },
+    "InteropErrorLine": {
+        "expect": ["main.cf (5:"],
+        "reason": "Bindings follow the user's text, so an error after an extern include keeps its own line (BUG-088)."
+    },
+    "CppPrivateField": {
+        "expect": ["Cannot access private field 'secret' of type 'Box'"],
+        "reason": "A C++ private field stays private in C4 (BUG-150)."
+    },
+    "CppMutableMethodOnConst": {
+        "expect": ["'Poke' is not a const method, so it cannot be called on a const object"],
+        "reason": "Only the C++ const methods are const in C4 (BUG-150, D-31)."
+    },
+    "CppConstPointerWrite": {
+        "expect": ["dropping const is not allowed"],
+        "reason": "A pointer to const stays a pointer to const (BUG-150)."
+    },
+    "TestMethodNotStatic": {
+        "expect": ["test methods must be static: the harness calls 'TestRuns' without an object; write 'public static'"],
+        "reason": "The harness has no object to call a test method on (BUG-022)."
+    },
+    "TestWithParameters": {
+        "expect": ["a test takes no parameters, but 'TestArgs' takes 1"],
+        "reason": "The harness calls a test with no arguments."
+    },
+    "TestReturnsValue": {
+        "expect": ["a test returns nothing, but 'TestValue' returns 'int32'"],
+        "reason": "Nothing receives a test's result; failures are assertions."
+    },
+    "FixtureWithParameters": {
+        "expect": ["a [test_setup] takes no parameters, but 'Prepare' takes 1"],
+        "reason": "The harness calls a fixture with no arguments."
+    },
+    "SecondGlobalSetup": {
+        "expect": ["'PrepareB' is a second [test_setup] here: 'PrepareA' is already one"],
+        "reason": "A program has one global setup; a second one used to replace the first silently."
+    },
+    "AnnotationArgumentNotConstant": {
+        "expect": ["an annotation argument must be a constant number, bool or string"],
+        "reason": "A reflected annotation's arguments fold at compile time (D-42); a mutable global is not a constant."
+    },
+    "CompilerAnnotationNotLiteral": {
+        "expect": ["'group' takes string literal arguments"],
+        "reason": "The compiler's own annotations take string literals; a constant name used to be ignored silently."
+    },
+    "AnnotationWideString": {
+        "expect": ["an annotation string argument is a UTF-8 literal"],
+        "reason": "Reflection stores annotation strings as UTF-8."
+    },
+    "DotOnPointer": {
+        "expect": ["main.cf (5:2) error: Cannot use '.' on a pointer of type 'Point*'. Dereference it with '->' instead (e.g. `ptr->y`)."],
+        "reason": "BUG-200: '.' and '->' are distinct operators (the owner's rule, 1db84bf): a dot on a pointer is an error that names '->', which the LSP quickfix rewrites. `this` takes either."
+    },
+    "DotOnPointerMethodCall": {
+        "expect": ["main.cf (8:2) error: Cannot use '.' on a pointer of type 'Counter*'. Dereference it with '->' instead (e.g. `ptr->Bump`)."],
+        "reason": "BUG-200: a method call through a pointer is spelled with '->' too."
+    },
+    "ArrowOnValue": {
+        "expect": ["main.cf (4:9) error: Cannot use '->' on 'Point', which is not a pointer; use '.' instead (e.g. `value.x`)."],
+        "reason": "BUG-200: '->' dereferences a pointer; an object has no operator '->' to call."
+    },
+    "ConstantShiftOutOfRange": {
+        "expect": ["main.cf (1:7) error: unresolved type for variable 'tooWide': the array size '1 << 64' is not a constant expression: the shift count 64 is outside 0 to 63"],
+        "reason": "BUG-206: a constant shift by 64 or more is undefined in C++ and was undefined in the compiler; it does not fold, and says why."
+    },
+    "ConstantDivisionByZero": {
+        "expect": ["main.cf (2:7) error: unresolved type for variable 'slots': the array size '10 / Zero' is not a constant expression: division by zero in const expr"],
+        "reason": "BUG-206: a constant division by zero is not a constant and names the division."
+    },
+    "EnumMemberNotConstant": {
+        "expect": ["main.cf (1:1) error: unresolved enum 'Broken': member 'Second': no constant named Missing"],
+        "reason": "BUG-204/BUG-207: an enum whose member does not fold says which member and why, at the enum."
+    },
+    "ConstantCastOutOfRange": {
+        "expect": ["main.cf (1:7) error: unresolved type for variable 'slots': the array size '(int8)1e3' is not a constant expression: the value 1000 is outside the range of 'int8'"],
+        "reason": "BUG-205: a constant cast folds, and a float outside the target's range is not a constant."
+    },
+    "UnresolvedBaseClass": {
+        "expect": ["main.cf (2:16) error: unresolved base class for 'Square': type not found: Polygon"],
+        "reason": "BUG-207: an unknown base class is reported at the base, with the reason."
+    },
+    "UnknownFunctionQualifier": {
+        "expect": ["main.cf (1:1) error: unresolved signature for function 'Nowhere::Count': no namespace or type named 'Nowhere'"],
+        "reason": "BUG-207: a qualified definition whose qualifier names nothing says so, at the definition."
+    },
+    "DuplicateEnumDefinition": {
+        "expect": ["main.cf (2:1) error: redefinition of enum 'Color'"],
+        "reason": "BUG-207: a second enum of one name is reported at the second definition."
+    },
+    "DuplicateUnionDefinition": {
+        "expect": ["main.cf (2:1) error: redefinition of union 'Bits'"],
+        "reason": "BUG-207: a second union of one name is reported at the second definition."
+    },
+    "DuplicateAliasDefinition": {
+        "expect": ["main.cf (2:1) error: redefinition of alias 'Size'"],
+        "reason": "BUG-207: a second alias of one name is reported at the second definition."
+    },
+    "NamespaceNameTaken": {
+        "expect": ["main.cf (2:11) error: redeclaration of namespace 'Shapes'"],
+        "reason": "BUG-207: a namespace cannot take the name of a type; reported at the namespace."
+    },
+    "FunctionNameTaken": {
+        "expect": ["main.cf (2:1) error: redefinition of function 'Count'"],
+        "reason": "BUG-207: a function cannot take the name of a variable; reported at the function."
+    },
+    "UnresolvedMethodSignature": {
+        "expect": ["main.cf (1:16) error: unresolved method 'Take' in 'Reader': type not found: Missing"],
+        "reason": "BUG-207: a method whose signature names an unknown type says which type, at the method."
+    },
+    "OutOfLineParameterMismatch": {
+        "expect": ["main.cf (2:1) error: the definition of 'Box::Set' matches no declaration in 'Box': it is void (float); 'Box' declares void (int32)"],
+        "reason": "BUG-211: an out-of-line definition must match a declared method; one that matches none was silently added as a new method."
+    },
+    "OutOfLineReferenceMismatch": {
+        "expect": ["main.cf (2:1) error: the definition of 'Box::Set' matches no declaration in 'Box': it is void (int32); 'Box' declares void (const int32&)"],
+        "reason": "BUG-211: `int32` and `const int32&` are different parameter types."
+    },
+    "OutOfLineArityMismatch": {
+        "expect": ["main.cf (2:1) error: the definition of 'Box::Set' matches no declaration in 'Box': it is void (int32, int32); 'Box' declares void (int32)"],
+        "reason": "BUG-211: a definition with another parameter count matches no declaration."
+    },
+    "OutOfLineConstMismatch": {
+        "expect": ["main.cf (5:1) error: the definition of 'Box::Get' matches no declaration in 'Box': it is int32 (); 'Box' declares int32 () const"],
+        "reason": "BUG-211: const is part of a method's identity; the definition must repeat it."
+    },
+    "OutOfLineUndeclaredMethod": {
+        "expect": ["main.cf (2:1) error: the definition of 'Box::Reset' matches no declaration in 'Box': 'Box' declares no method named 'Reset'"],
+        "reason": "BUG-211: a method is declared in its type's body; an out-of-line definition cannot add one."
+    },
+    "TemplateOutOfLineParameterMismatch": {
+        "expect": ["main.cf (4:1) error: the definition of 'Box::Set' matches no declaration in 'Box': its parameters, return type or const differ from every 'Set' it declares"],
+        "reason": "BUG-211: a class template's out-of-line definition is checked before any instance exists; `T` can never be `float` for every T."
+    },
+    "TemplateOutOfLineReferenceMismatch": {
+        "expect": ["main.cf (4:1) error: the definition of 'Map::Contains' matches no declaration in 'Map': its parameters, return type or const differ from every 'Contains' it declares"],
+        "reason": "BUG-211: `const K&` and `K` differ for every K."
+    },
+    "TemplateOutOfLineArityMismatch": {
+        "expect": ["main.cf (4:1) error: the definition of 'Box::Set' matches no declaration in 'Box': its parameters, return type or const differ from every 'Set' it declares"],
+        "reason": "BUG-211: another parameter count matches no declaration of the template."
+    },
+    "TemplateOutOfLineMismatchAtInstance": {
+        "expect": ["main.cf (7:2) error: cannot instantiate Box: the definition of 'Box::Take' on line 5 matches no method 'Box' declares without a body"],
+        "reason": "BUG-211: a mismatch that depends on the arguments (`Box<T>*` against `Box<int32>*`) is found when an instance is made."
+    },
+    "NamespacedFunctionDefinedTwice": {
+        "expect": ["main.cf (3:1) error: Duplicate definition of 'Shapes::Count' with signature int32 () (the first body starts on line 2)"],
+        "reason": "A qualified definition `Ns::F` is checked like one written inside the namespace; a second body was silently taken."
+    },
+    "OutOfLineMethodDefinedTwice": {
+        "expect": ["main.cf (2:1) error: Duplicate definition of 'Box::Get' with signature int32 () (the first body starts on line 1)"],
+        "reason": "A method with a body in its type cannot be defined again out of line; the second body silently replaced the first."
+    },
+    "SelfByValueField": {
+        "expect": ["main.cf (1:1) error: 'Node' holds itself by value ('Node.next' holds a 'Node'), so it has no size: hold one of them by pointer"],
+        "reason": "BUG-209: a type cannot hold itself by value; it compiled, and using it crashed the compiler."
+    },
+    "MutualByValueFields": {
+        "expect": ["main.cf (1:1) error: 'A' holds itself by value ('A.b' holds a 'B', 'B.a' holds a 'A')"],
+        "reason": "BUG-209: two types holding each other by value have no size either; each declaration is reported."
+    },
+    "ByValueCycleThroughBase": {
+        "expect": ["main.cf (1:1) error: 'Base' holds itself by value ('Base.extra' holds a 'Derived', 'Derived' derives from 'Base')"],
+        "reason": "BUG-209: a base sub-object is held by value too."
+    },
+    "ByValueCycleThroughArray": {
+        "expect": ["main.cf (1:1) error: 'Grid' holds itself by value ('Grid.children' holds a 'Grid')"],
+        "reason": "BUG-209: an array field holds its elements by value."
+    },
+    "TemplateHoldsItselfByValue": {
+        "expect": ["main.cf (1:13) error: 'Chain' holds itself by value ('Chain.next' holds a 'Chain')"],
+        "reason": "BUG-209: a class template instance is checked when it is made."
+    },
+    "InheritsFromItself": {
+        "expect": ["main.cf (1:15) error: 'Loop' cannot inherit from itself"],
+        "reason": "BUG-210: a type naming itself as its base compiled."
+    },
+    "MutualInheritance": {
+        "expect": ["main.cf (2:12) error: 'B' cannot inherit from 'A': 'A' already inherits from 'B'"],
+        "reason": "BUG-210: a base that already derives from the type would make an inheritance cycle."
+    },
+    "InheritsFromNumber": {
+        "expect": ["main.cf (1:18) error: 'Counter' cannot inherit from 'int32': a base is a class, struct or interface"],
+        "reason": "A base that is not a class was silently dropped."
+    },
+    "ReferenceLocalOtherType": {
+        "expect": ["main.cf (3:2) error: cannot bind 'int32&' to a 'float': a reference names a location of its own type"],
+        "reason": "BUG-212: a reference local bound the float's bytes as an int32."
+    },
+    "ConstReferenceLocalOtherType": {
+        "expect": ["main.cf (3:2) error: cannot bind 'const int32&' to a 'float': a reference names a location of its own type"],
+        "reason": "BUG-212: a conversion would make a temporary, and a reference local cannot hold one (04 4.4)."
+    },
+    "ReferenceLocalFromPointer": {
+        "expect": ["main.cf (3:2) error: cannot bind a reference to a prvalue: 'r' must initialize from an lvalue (a location), not a temporary"],
+        "reason": "BUG-212: a pointer value was taken as the referent's address."
+    },
+    "ReturnReferenceToLocal": {
+        "expect": ["main.cf (3:2) error: cannot return a reference to the local 'v': it ends when the function returns"],
+        "reason": "BUG-213: the reference dangles as soon as the function returns."
+    },
+    "ReturnReferenceToLocalField": {
+        "expect": ["main.cf (4:2) error: cannot return a reference to the local 'p': it ends when the function returns"],
+        "reason": "BUG-213: a field of a local ends with the local."
+    },
+    "ReturnReferenceToValueParameter": {
+        "expect": ["main.cf (1:24) error: cannot return a reference to the local 'v': it ends when the function returns"],
+        "reason": "BUG-213: a by-value parameter is a local of the function."
+    },
+    "EnumMemberOutOfRange": {
+        "expect": ["main.cf (1:23) error: the enum member 'Big::Huge' is 9999999999, outside the range of its underlying type 'int32'"],
+        "reason": "BUG-214: the member silently truncated to its int32 underlying type."
+    },
+    "UnsignedEnumNegativeMember": {
+        "expect": ["main.cf (1:28) error: the enum member 'Level::Low' is -1, outside the range of its underlying type 'uint8'"],
+        "reason": "BUG-214: an unsigned underlying type holds no negative member."
+    },
+    "EnumMemberPastUInt8": {
+        "expect": ["main.cf (1:33) error: the enum member 'Level::High' is 256, outside the range of its underlying type 'uint8'"],
+        "reason": "BUG-214: a counted-on member past the range is reported too."
+    },
+    "PointerMinusAssignPointer": {
+        "expect": ["main.cf (5:2) error: '-=' cannot store its result, a 'int64', back into the 'int32*' it changes"],
+        "reason": "BUG-215: the difference of two pointers is a distance, not a pointer."
+    },
+    "IntegerPlusAssignPointer": {
+        "expect": ["main.cf (4:2) error: '+=' cannot store its result, a 'int32*', back into the 'int64' it changes"],
+        "reason": "BUG-215: an address cannot be stored back into an integer."
+    },
+    "IntegerDivisionByConstantZero": {
+        "expect": ["main.cf (1:31) error: division by zero: the right operand of '/' is the constant 0"],
+        "reason": "BUG-216: an integer division by a written 0 traps at run time."
+    },
+    "IntegerRemainderByConstantZero": {
+        "expect": ["main.cf (3:2) error: remainder by zero: the right operand of '%' is the constant 0"],
+        "reason": "BUG-216: compound assignment is checked like its operator."
+    },
+    "ShiftPastOperandWidth": {
+        "expect": ["main.cf (3:9) error: the shift count 32 is outside 0 to 31 for a 'int32'"],
+        "reason": "BUG-216: a shift by the operand's width or more is undefined."
+    },
+    "NegativeShiftCount": {
+        "expect": ["main.cf (3:9) error: the shift count -1 is outside 0 to 31 for a 'int32'"],
+        "reason": "BUG-216: a negative shift count is undefined."
+    },
+    "ConstantIndexPastEnd": {
+        "expect": ["main.cf (3:2) error: the index 4 is outside the 'int32[4]' (0 to 3)"],
+        "reason": "BUG-216: a written index past a fixed array's end writes outside it."
+    },
+    "ConstantNegativeIndex": {
+        "expect": ["main.cf (3:9) error: the index -1 is outside the 'int32[4]' (0 to 3)"],
+        "reason": "BUG-216: a negative written index reads before the array."
+    },
+    "OversizedLocalArray": {
+        "expect": ["main.cf (2:8) error: 'int32[999999999]' is 3999999996 bytes, more than the largest object (2147483647 bytes)"],
+        "reason": "BUG-208: a 4 GB local compiled to IR clang spent many minutes on."
+    },
+    "OversizedObject": {
+        "expect": ["main.cf (1:1) error: 'Huge' is 4000000000 bytes, more than the largest object (2147483647 bytes)"],
+        "reason": "BUG-208: an object's size must fit a signed 32-bit offset, as in MSVC."
+    },
+    "VoidFunctionReturnsValue": {
+        "expect": ["main.cf (1:14) error: 'Log' returns void, so 'return' cannot give it a value of type 'int32'"],
+        "reason": "BUG-217: this failed IR verification instead of naming the return."
+    },
+    "TemplateDefinitionWithoutTemplate": {
+        "expect": ["main.cf (1:1) error: the definition of 'Missing::Fill' names no class template 'Missing'"],
+        "reason": "BUG-211: a template method definition whose owner names no class template was silently dropped."
+    },
+    "ConditionalUnrelatedPointers": {
+        "expect": ["main.cf (5:13) error: the branches of '?:' have no common type: 'int32*' and 'float*'"],
+        "reason": "BUG-221: the result took the first branch's type and used the float* as an int32*."
+    },
+    "ConditionalUnrelatedObjects": {
+        "expect": ["main.cf (7:8) error: the branches of '?:' have no common type: 'A' and 'B'"],
+        "reason": "BUG-221: the error names the conditional, not an initialization."
+    },
+    "ConditionalNumberAndPointer": {
+        "expect": ["main.cf (4:13) error: the branches of '?:' have no common type: 'int32' and 'int32*'"],
+        "reason": "BUG-221: a number does not convert to a pointer; null does."
+    },
+    "CastObjectToNumber": {
+        "expect": ["main.cf (4:9) error: a cast cannot convert 'Point' to 'int32': an object converts through its [operator(\"cast\")] method"],
+        "reason": "BUG-222: the cast passed lowering and failed IR verification."
+    },
+    "CastObjectToUnrelatedObject": {
+        "expect": ["main.cf (5:8) error: a cast cannot convert 'A' to 'B': an object converts through its [operator(\"cast\")] method"],
+        "reason": "BUG-222: two unrelated objects do not convert by a cast."
+    },
+    "CastNumberToObject": {
+        "expect": ["main.cf (3:12) error: a cast cannot convert 'int32' to 'Point': construct one with Point(...)"],
+        "reason": "BUG-222: a number is never cast to an object; it is constructed."
+    },
+    "AbstractTypeInstantiation_1": {
+        "expect": ["main.cf (2:25) error: cannot create a 'Shape': 'Shape' is an interface"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAbstractTypeInstantiationIsError)."
+    },
+    "AbstractTypeInstantiation_2": {
+        "expect": ["main.cf (2:14) error: 's': 'Shape' is an interface; use a pointer or a reference"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAbstractTypeInstantiationIsError)."
+    },
+    "AbstractTypeInstantiation_3": {
+        "expect": ["main.cf (2:24) error: cannot create a 'Base': 'Base' is abstract"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAbstractTypeInstantiationIsError)."
+    },
+    "ArrayArgSizeMismatch_1": {
+        "expect": ["main.cf (2:59) error: argument 1 of Sum has type 'int32[8]' but parameter 'v' expects 'int32[4]'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestArrayArgSizeMismatchIsError)."
+    },
+    "ArrayArgSizeMismatch_2": {
+        "expect": ["main.cf (2:49) error: argument 1 of Sum has type 'int32[2]' but parameter 'v' expects 'int32[4]'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestArrayArgSizeMismatchIsError)."
+    },
+    "ArrayArgSizeMismatch_3": {
+        "expect": ["main.cf (2:69) error: argument 1 of F has type 'int32[3]' but parameter 'v' expects 'float[3]'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestArrayArgSizeMismatchIsError)."
+    },
+    "ArrayIndexOutOfBounds_1": {
+        "expect": ["main.cf (1:36) error: the index 4 is outside the 'int32[4]' (0 to 3)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestArrayIndexOutOfBoundsIsError)."
+    },
+    "ArrayIndexOutOfBounds_2": {
+        "expect": ["main.cf (1:26) error: the index -1 is outside the 'int32[4]' (0 to 3)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestArrayIndexOutOfBoundsIsError)."
+    },
+    "ArrayIndexOutOfBounds_3": {
+        "expect": ["main.cf (1:46) error: the index 9 is outside the 'int32[4]' (0 to 3)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestArrayIndexOutOfBoundsIsError)."
+    },
+    "AssignToFunctionCallResult": {
+        "expect": ["main.cf (2:19) error: cannot assign to an rvalue"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAssignToFunctionCallResultIsError)."
+    },
+    "AssignToLiteral": {
+        "expect": ["main.cf (1:14) error: cannot assign to an rvalue"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAssignToLiteralIsError)."
+    },
+    "AssignToRefReturningCall_1": {
+        "expect": ["main.cf (2:14) error: cannot assign to an rvalue"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAssignToRefReturningCallIsError)."
+    },
+    "AssignToRefReturningCall_2": {
+        "expect": ["main.cf (3:14) error: cannot write through this location: access chain is rooted in a function-call result that returns by value"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAssignToRefReturningCallIsError)."
+    },
+    "AssignToRefReturningCall_4": {
+        "expect": ["main.cf (1:29) error: cannot return a reference to the local 'v': it ends when the function returns"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestAssignToRefReturningCallIsError)."
+    },
+    "BareBinaryPrefix": {
+        "expect": ["main.cf (1:22) error: '0b' has no digits after its '0b' prefix"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestBareBinaryPrefixIsError)."
+    },
+    "BareHexPrefix": {
+        "expect": ["main.cf (1:22) error: '0x' has no digits after its '0x' prefix"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestBareHexPrefixIsError)."
+    },
+    "CallingNonFunction": {
+        "expect": ["main.cf (1:32) error: a 'int32' cannot be called: only functions, funcptrs, funcs and objects with a call operator can"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestCallingNonFunctionIsError)."
+    },
+    "CastStringToNumeric": {
+        "expect": ["main.cf (4:9) error: a cast cannot convert 'Core::String' to 'int32': an object converts through its [operator(\"cast\")] method"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestCastStringToNumericIsError)."
+    },
+    "CompoundPointerMinusPointer": {
+        "expect": ["main.cf (5:5) error: '-=' cannot store its result, a 'int64', back into the 'int32*' it changes"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestCompoundPointerMinusPointerIsError)."
+    },
+    "TestConstFieldWriteIsError": {
+        "expect": ["main.cf (1:54) error: cannot write through this location: field 'v' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstFieldWriteIsError)."
+    },
+    "ConstIndexWrite_1": {
+        "expect": ["main.cf (1:32) error: cannot write through this location: 'a' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstIndexWriteIsError)."
+    },
+    "ConstIndexWrite_2": {
+        "expect": ["main.cf (1:48) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstIndexWriteIsError)."
+    },
+    "ConstIndexWrite_3": {
+        "expect": ["main.cf (2:28) error: cannot write through this location: 'a' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstIndexWriteIsError)."
+    },
+    "ConstIndexWrite_4": {
+        "expect": ["main.cf (1:32) error: cannot write through this location: 'a' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstIndexWriteIsError)."
+    },
+    "ConstIndexWrite_5": {
+        "expect": ["main.cf (1:32) error: '++' cannot be applied: 'a' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstIndexWriteIsError)."
+    },
+    "ConstIndexWrite_6": {
+        "expect": ["main.cf (1:35) error: cannot write through this location: 'a' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstIndexWriteIsError)."
+    },
+    "ConstLocalReassign_1": {
+        "expect": ["main.cf (1:33) error: cannot write through this location: 'x' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstLocalReassignIsError)."
+    },
+    "ConstLocalReassign_2": {
+        "expect": ["main.cf (1:33) error: '++' cannot be applied: 'x' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstLocalReassignIsError)."
+    },
+    "ConstMethodWrite_1": {
+        "expect": ["main.cf (1:59) error: cannot write through this location: 'this' is const in the const method 'F'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstMethodWriteIsError)."
+    },
+    "ConstMethodWrite_2": {
+        "expect": ["main.cf (1:52) error: '++' cannot be applied: 'this' is const in the const method 'F'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstMethodWriteIsError)."
+    },
+    "ConstMethodWrite_3": {
+        "expect": ["main.cf (1:59) error: cannot write through this location: 'this' is const in the const method 'F'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstMethodWriteIsError)."
+    },
+    "ConstMethodWrite_4": {
+        "expect": ["main.cf (2:28) error: cannot write through this location: 'this' is const in the const method 'F'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstMethodWriteIsError)."
+    },
+    "ConstPointerPointeeWrite_1": {
+        "expect": ["main.cf (1:48) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstPointerPointeeWriteIsError)."
+    },
+    "ConstPointerPointeeWrite_2": {
+        "expect": ["main.cf (2:36) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstPointerPointeeWriteIsError)."
+    },
+    "ConstPointerPointeeWrite_3": {
+        "expect": ["main.cf (1:26) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstPointerPointeeWriteIsError)."
+    },
+    "ConstPointerPointeeWrite_4": {
+        "expect": ["main.cf (2:49) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstPointerPointeeWriteIsError)."
+    },
+    "ConstRefParamWrite_1": {
+        "expect": ["main.cf (1:26) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstRefParamWriteIsError)."
+    },
+    "ConstRefParamWrite_2": {
+        "expect": ["main.cf (1:26) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstRefParamWriteIsError)."
+    },
+    "ConstReferenceAndByValueConstMemberWrite_1": {
+        "expect": ["main.cf (2:22) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstReferenceAndByValueConstMemberWriteIsError)."
+    },
+    "ConstReferenceAndByValueConstMemberWrite_2": {
+        "expect": ["main.cf (2:25) error: cannot write through this location: 's' is const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestConstReferenceAndByValueConstMemberWriteIsError)."
+    },
+    "CyclicByValueTypeDependency": {
+        "expect": ["main.cf (1:1) error: 'A' holds itself by value ('A.b' holds a 'B', 'B.a' holds a 'A'), so it has no size: hold one of them by pointer"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestCyclicByValueTypeDependencyIsError)."
+    },
+    "DerivedAbstractTypeInstantiation_1": {
+        "expect": ["main.cf (3:23) error: cannot create a 'Bad': 'Bad' is abstract: 'Sides' is not implemented"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestDerivedAbstractTypeInstantiationIsError)."
+    },
+    "DerivedAbstractTypeInstantiation_2": {
+        "expect": ["main.cf (3:14) error: 'b': 'Bad' is abstract: 'Sides' is not implemented; use a pointer or a reference"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestDerivedAbstractTypeInstantiationIsError)."
+    },
+    "DerivedAbstractTypeInstantiation_3": {
+        "expect": ["main.cf (4:24) error: cannot create a 'Bad2': 'Bad2' is abstract: 'Sides' is not implemented"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestDerivedAbstractTypeInstantiationIsError)."
+    },
+    "DoubleDotNumber": {
+        "expect": ["main.cf (1:27) error: '.3f' needs a digit before the '.': write 0.3f"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestDoubleDotNumberIsError)."
+    },
+    "TestDuplicateFunctionDefinitionIsError": {
+        "expect": ["main.cf (2:1) error: Duplicate definition of 'f' with signature int32 () (the first body starts on line 1)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestDuplicateFunctionDefinitionIsError)."
+    },
+    "EnumValueOverflow": {
+        "expect": ["main.cf (1:10) error: the enum member 'E::X' is 9999999999, outside the range of its underlying type 'int32'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestEnumValueOverflowIsError)."
+    },
+    "IncompatibleAssignment": {
+        "expect": ["main.cf (1:30) error: Cannot assign value of type 'char8*' to 'float': a pointer is not a number: cast with (uint64) to read its address"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestIncompatibleAssignmentIsHardError)."
+    },
+    "IntegerDivisionByZero": {
+        "expect": ["main.cf (1:24) error: division by zero: the right operand of '/' is the constant 0"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestIntegerDivisionByZeroIsError)."
+    },
+    "IntegerModuloByZero": {
+        "expect": ["main.cf (1:24) error: remainder by zero: the right operand of '%' is the constant 0"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestIntegerModuloByZeroIsError)."
+    },
+    "LocalReferenceBindingRejectsRvaluesAndConversion_1": {
+        "expect": ["main.cf (1:14) error: cannot bind a reference to a prvalue: 'r' must initialize from an lvalue (a location), not a temporary"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestLocalReferenceBindingRejectsRvaluesAndConversion)."
+    },
+    "LocalReferenceBindingRejectsRvaluesAndConversion_2": {
+        "expect": ["main.cf (1:34) error: cannot bind a reference to a prvalue: 'r' must initialize from an lvalue (a location), not a temporary"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestLocalReferenceBindingRejectsRvaluesAndConversion)."
+    },
+    "LocalReferenceBindingRejectsRvaluesAndConversion_3": {
+        "expect": ["main.cf (2:14) error: cannot bind a reference to a prvalue: 'r' must initialize from an lvalue (a location), not a temporary"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestLocalReferenceBindingRejectsRvaluesAndConversion)."
+    },
+    "LocalReferenceBindingRejectsRvaluesAndConversion_4": {
+        "expect": ["main.cf (1:30) error: cannot bind 'int32&' to a 'float': a reference names a location of its own type"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestLocalReferenceBindingRejectsRvaluesAndConversion)."
+    },
+    "LocalReferenceBindingRejectsRvaluesAndConversion_5": {
+        "expect": ["main.cf (2:35) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestLocalReferenceBindingRejectsRvaluesAndConversion)."
+    },
+    "LocalReferenceBindingRejectsRvaluesAndConversion_6": {
+        "expect": ["main.cf (1:47) error: '++' cannot be applied: it is reached through a pointer or reference to const"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestLocalReferenceBindingRejectsRvaluesAndConversion)."
+    },
+    "MethodStringArgToNumericParam": {
+        "expect": ["main.cf (6:15) error: argument 1 of Add has type 'String' but parameter 'a' expects 'int32'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestMethodStringArgToNumericParamError)."
+    },
+    "MethodTooFewArguments": {
+        "expect": ["main.cf (2:26) error: M takes 2 arguments, not 1"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestMethodTooFewArgumentsError)."
+    },
+    "MethodTooManyArguments": {
+        "expect": ["main.cf (2:26) error: M takes 1 argument, not 3"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestMethodTooManyArgumentsError)."
+    },
+    "MismatchedParen": {
+        "expect": ["main.cf (1:24) error: Expected ')' to close parenthesized expression, got ';'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestMismatchedParenError)."
+    },
+    "TestMissingSemicolonError": {
+        "expect": ["main.cf (1:24) error: Expected ';' after variable declaration, got 'return'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestMissingSemicolonError)."
+    },
+    "NoTruthValueCondition": {
+        "expect": ["main.cf (2:41) error: a 'Vec' has no truth value: a condition is a bool, a number, an enum or a pointer"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestNoTruthValueConditionIsError)."
+    },
+    "NumberWithTrailingJunk": {
+        "expect": ["main.cf (1:22) error: '12abc' has the invalid suffix 'abc': an integer takes u, l or ll (and u with l or ll), a floating-point number takes f"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestNumberWithTrailingJunkIsError)."
+    },
+    "NumericToPointerArgument_1": {
+        "expect": ["main.cf (2:16) error: argument 1 of F has type 'int32' but parameter 'p' expects 'int32*'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestNumericToPointerArgumentIsError)."
+    },
+    "NumericToPointerArgument_2": {
+        "expect": ["main.cf (2:29) error: argument 1 of F has type 'int32' but parameter 'p' expects 'int32*'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestNumericToPointerArgumentIsError)."
+    },
+    "NumericToPointerArgument_3": {
+        "expect": ["main.cf (2:25) error: argument 1 of Set has type 'int32' but parameter 'p' expects 'int32*'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestNumericToPointerArgumentIsError)."
+    },
+    "NumericToPointerArgument_4": {
+        "expect": ["main.cf (2:16) error: argument 1 of F has type 'float' but parameter 'p' expects 'int32*'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestNumericToPointerArgumentIsError)."
+    },
+    "ObjectRightSideOfLogicalOperator": {
+        "expect": ["main.cf (2:23) error: '&&' joins two conditions: a 'A' has no truth value: a condition is a bool, a number, an enum or a pointer"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestObjectRightSideOfLogicalOperatorIsError)."
+    },
+    "OutOfLineMethodSignatureMismatch_1": {
+        "expect": ["main.cf (2:1) error: the definition of 'Box::Set' matches no declaration in 'Box': it is void (float); 'Box' declares void (int32)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestOutOfLineMethodSignatureMismatchIsError)."
+    },
+    "OutOfLineMethodSignatureMismatch_2": {
+        "expect": ["main.cf (2:1) error: the definition of 'Box::Set' matches no declaration in 'Box': it is void (int32); 'Box' declares void (const int32&)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestOutOfLineMethodSignatureMismatchIsError)."
+    },
+    "OutOfLineMethodSignatureMismatch_3": {
+        "expect": ["main.cf (2:1) error: the definition of 'Box::Set' matches no declaration in 'Box': it is void (int32, int32); 'Box' declares void (int32)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestOutOfLineMethodSignatureMismatchIsError)."
+    },
+    "OutOfLineTemplateMethodSignatureMismatch_1": {
+        "expect": ["main.cf (4:1) error: the definition of 'Box::Set' matches no declaration in 'Box': its parameters, return type or const differ from every 'Set' it declares"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestOutOfLineTemplateMethodSignatureMismatchIsError)."
+    },
+    "OutOfLineTemplateMethodSignatureMismatch_2": {
+        "expect": ["main.cf (4:1) error: the definition of 'Map::Contains' matches no declaration in 'Map': its parameters, return type or const differ from every 'Contains' it declares"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestOutOfLineTemplateMethodSignatureMismatchIsError)."
+    },
+    "OutOfLineTemplateMethodSignatureMismatch_3": {
+        "expect": ["main.cf (4:1) error: the definition of 'Box::Set' matches no declaration in 'Box': its parameters, return type or const differ from every 'Set' it declares"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestOutOfLineTemplateMethodSignatureMismatchIsError)."
+    },
+    "OversizedArray": {
+        "expect": ["main.cf (1:20) error: 'int32[999999999]' is 3999999996 bytes, more than the largest object (2147483647 bytes): allocate it in parts or hold it in a 'Core::Array'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestOversizedArrayIsError)."
+    },
+    "SelfByValueMember": {
+        "expect": ["main.cf (1:1) error: 'Node' holds itself by value ('Node.next' holds a 'Node'), so it has no size: hold one of them by pointer"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestSelfByValueMemberIsError)."
+    },
+    "SelfInheritance": {
+        "expect": ["main.cf (1:19) error: 'S' cannot inherit from itself"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestSelfInheritanceIsError)."
+    },
+    "ShiftOutOfRange": {
+        "expect": ["main.cf (1:24) error: the shift count 32 is outside 0 to 31 for a 'int32'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestShiftOutOfRangeIsError)."
+    },
+    "SizeOfCyclicByValueTypeDoesNotCrash": {
+        "expect": ["main.cf (1:1) error: 'A' holds itself by value ('A.b' holds a 'B', 'B.a' holds a 'A'), so it has no size: hold one of them by pointer"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestSizeOfCyclicByValueTypeDoesNotCrash)."
+    },
+    "StringArgToNumericParam": {
+        "expect": ["main.cf (5:18) error: argument 1 of Identity has type 'String' but parameter 'x' expects 'int32'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStringArgToNumericParamError)."
+    },
+    "StringToFloatInit": {
+        "expect": ["main.cf (1:14) error: cannot initialize 'float' from 'char8*': a pointer is not a number: cast with (uint64) to read its address"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStringToFloatInitError)."
+    },
+    "StringToIntReturn": {
+        "expect": ["main.cf (4:2) error: return type mismatch in 'Length': got 'String', function returns 'int32': a 'String' is not a number"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStringToIntReturnIsHardError)."
+    },
+    "StructArithmeticWithoutOperator_1": {
+        "expect": ["main.cf (2:21) error: no operator '+' takes a 'A' on the left and a 'int32' on the right: an operator is a method of its left operand's type"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStructArithmeticWithoutOperatorIsError)."
+    },
+    "StructArithmeticWithoutOperator_2": {
+        "expect": ["main.cf (2:21) error: no operator '*' takes a 'A' on the left and a 'int32' on the right: an operator is a method of its left operand's type"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStructArithmeticWithoutOperatorIsError)."
+    },
+    "StructComparisonWithoutOperator_1": {
+        "expect": ["main.cf (2:32) error: no operator '==' takes a 'A' on the left and a 'A' on the right: an operator is a method of its left operand's type"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStructComparisonWithoutOperatorIsError)."
+    },
+    "StructComparisonWithoutOperator_2": {
+        "expect": ["main.cf (2:23) error: no operator '==' takes a 'A' on the left and a 'int32' on the right: an operator is a method of its left operand's type"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStructComparisonWithoutOperatorIsError)."
+    },
+    "StructComparisonWithoutOperator_3": {
+        "expect": ["main.cf (2:32) error: no operator '!=' takes a 'A' on the left and a 'B' on the right: an operator is a method of its left operand's type"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStructComparisonWithoutOperatorIsError)."
+    },
+    "StructLogicalOperatorWithoutMethod_1": {
+        "expect": ["main.cf (2:23) error: '&&' joins two conditions: a 'A' has no truth value: a condition is a bool, a number, an enum or a pointer"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStructLogicalOperatorWithoutMethodIsError)."
+    },
+    "StructLogicalOperatorWithoutMethod_2": {
+        "expect": ["main.cf (2:23) error: '||' joins two conditions: a 'A' has no truth value: a condition is a bool, a number, an enum or a pointer"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestStructLogicalOperatorWithoutMethodIsError)."
+    },
+    "TernaryIncompatibleBranchTypes": {
+        "expect": ["main.cf (3:46) error: the branches of '?:' have no common type: 'A' and 'B'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestTernaryIncompatibleBranchTypesAreAnError)."
+    },
+    "TooFewArguments": {
+        "expect": ["main.cf (2:21) error: add takes 2 arguments, not 1"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestTooFewArgumentsError)."
+    },
+    "TooLargeIntegerLiteral": {
+        "expect": ["main.cf (1:24) error: integer literal '99999999999999999999' is too large: the largest is 18446744073709551615 (0xFFFFFFFFFFFFFFFF)"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestTooLargeIntegerLiteralIsError)."
+    },
+    "TooManyArguments": {
+        "expect": ["main.cf (2:21) error: f takes 1 argument, not 3"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestTooManyArgumentsError)."
+    },
+    "TestUndefinedIdentifierError": {
+        "expect": ["main.cf (1:22) error: no variable named undefined_var"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUndefinedIdentifierError)."
+    },
+    "TestUnknownTypeError": {
+        "expect": ["main.cf (1:14) error: type not found: nosuchtype"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnknownTypeError)."
+    },
+    "UnrelatedObjectArgument_1": {
+        "expect": ["main.cf (4:35) error: argument 1 of TakeA has type 'B' but parameter 'a' expects 'A'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnrelatedObjectArgumentIsError)."
+    },
+    "UnrelatedObjectArgument_2": {
+        "expect": ["main.cf (4:40) error: argument 1 of Use has type 'B' but parameter 'a' expects 'A'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnrelatedObjectArgumentIsError)."
+    },
+    "UnrelatedObjectArgument_3": {
+        "expect": ["main.cf (3:30) error: argument 1 of TakeA has type 'int32' but parameter 'a' expects 'A'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnrelatedObjectArgumentIsError)."
+    },
+    "UnrelatedObjectArgument_4": {
+        "expect": ["main.cf (3:48) error: argument 1 of Use has type 'int32' but parameter 'a' expects 'A'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnrelatedObjectArgumentIsError)."
+    },
+    "UnrelatedObjectArgument_5": {
+        "expect": ["main.cf (4:35) error: argument 1 of TakeA has type 'B*' but parameter 'a' expects 'A*'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnrelatedObjectArgumentIsError)."
+    },
+    "UnrelatedObjectArgument_6": {
+        "expect": ["main.cf (4:47) error: argument 1 of TakeA has type 'B*' but parameter 'a' expects 'A*'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnrelatedObjectArgumentIsError)."
+    },
+    "UnrelatedObjectArgument_7": {
+        "expect": ["main.cf (4:40) error: argument 1 of Use has type 'B*' but parameter 'a' expects 'A*'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestUnrelatedObjectArgumentIsError)."
+    },
+    "VoidFunctionTooManyArguments": {
+        "expect": ["main.cf (2:14) error: F takes 1 argument, not 3"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestVoidFunctionTooManyArgumentsError)."
+    },
+    "VoidReturn": {
+        "expect": ["main.cf (1:12) error: 'F' returns void, so 'return' cannot give it a value of type 'int32'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestVoidReturnIsHardError)."
+    },
+    "ZeroAndUnsizedArrayField_1": {
+        "expect": ["main.cf (1:12) error: unresolved type for field 'a' in 'S': an array extent is at least 1, but '0' is 0"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestZeroAndUnsizedArrayFieldIsError)."
+    },
+    "ZeroAndUnsizedArrayField_2": {
+        "expect": ["main.cf (1:12) error: unresolved type for field 'a' in 'S': 'int32[]' is not a type: an array needs an extent; use 'int32*' or 'Core::Array<int32>'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestZeroAndUnsizedArrayFieldIsError)."
+    },
+    "BinaryOperatorMismatchedOperand": {
+        "expect": ["main.cf (2:55) error: no operator '+' takes a 'int32' on the left and a 'Wrap' on the right: an operator is a method of its left operand's type; for a 'int32' on the left, declare it as an extension method that 'extends int32'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoOperatorDispatchTest::TestBinaryOperatorMismatchedOperandIsError)."
+    },
+    "BinaryOperatorWithoutOverload": {
+        "expect": ["main.cf (2:46) error: no operator '+' takes a 'S' on the left and a 'S' on the right: an operator is a method of its left operand's type"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoOperatorDispatchTest::TestBinaryOperatorWithoutOverloadIsError)."
+    },
+    "UnaryOperatorWithoutOverload": {
+        "expect": ["main.cf (2:38) error: unary '-' needs a numeric operand, not 'S'"],
+        "reason": "Revived from the disabled IsoDriver suite (IsoOperatorDispatchTest::TestUnaryOperatorWithoutOverloadIsError)."
+    },
+    "SelfInclude": {
+        "expect": ["self.ch (1:9) error: Cyclic include detected: 'self.ch' includes itself"],
+        "reason": "Revived from IsoNegativeTest::TestSelfIncludeIsError: a self-include used to recurse until the compiler crashed."
+    },
+    "MutualIncludeCycle": {
+        "expect": ["error: Cyclic include detected: '"],
+        "reason": "Revived from IsoNegativeTest::TestMutualIncludeCycleIsError. Which edge closes the cycle depends on parse order, so only the error is fixed."
+    },
+    "ThreeWayIncludeCycle": {
+        "expect": ["error: Cyclic include detected: '"],
+        "reason": "BUG-225: a three-file cycle went undetected; the three files waited on each other and C4.exe stopped with 0xC0000409."
+    },
+    "MainInTwoFiles": {
+        "expect": ["b.cf (1:1) error: Duplicate definition of 'main' with signature int32 ()"],
+        "reason": "Revived from IsoNegativeTest::TestMultipleMainDefinitionsAreError: one main silently won by file order."
+    },
+    "FunctionDefinedInTwoFiles": {
+        "expect": ["b.cf (1:1) error: Duplicate definition of 'Helper' with signature int32 (int32)"],
+        "reason": "Revived from IsoNegativeTest::TestDuplicateGlobalDefinitionIsError: codegen used whichever body it met first."
+    },
+    "NamespacedFunctionInTwoFiles": {
+        "expect": ["b.cf (1:19) error: Duplicate definition of 'Tools::Helper' with signature int32 (int32)"],
+        "reason": "Revived from IsoNegativeTest::TestDuplicateGlobalDefinitionIsError: the namespaced form of the same hazard."
+    },
+    "TypeFromFileNotIncluded": {
+        "expect": ["main.cf (2:2) error: type not found: Widget"],
+        "reason": "Revived from IsoNegativeTest::TestSymbolsFromNonIncludedFileAreNotVisible: a body sees only what its file includes (01)."
+    },
+    "FunctionFromFileNotIncluded": {
+        "expect": ["main.cf (1:23) error: no function named MakeWidget"],
+        "reason": "Revived from IsoNegativeTest::TestSymbolsFromNonIncludedFileAreNotVisible: functions follow the same include closure."
+    },
+    "NoSourcesWrongExtension": {
+        "expect": ["error: No C4 source files (.cf/.ch) found in"],
+        "reason": "Revived from IsoNegativeTest::TestNoC4SourcesInInputIsClearError: a folder without .cf/.ch files used to build an empty program."
+    },
+    "IncludeNotFound": {
+        "expect": ["main.cf (1:9) error: include not found: 'missing.ch'"],
+        "reason": "Revived from CompilerIncludeTest::TestUnresolvedInclude."
+    },
+    "ExternHeaderNotFound": {
+        "expect": ["error: Cannot resolve extern path 'definitely_not_a_real_header_xyz.h' referenced in main.cf"],
+        "reason": "Revived from InteropPassTest::TestUnresolvedExternPathIsAnError: the build must not go on without the declarations."
+    },
+    "ExternHeaderCBindRejects": {
+        "expect": ["error: C/C++ interop failed for 'bad.h' referenced in main.cf"],
+        "reason": "Revived from InteropPassTest::TestFailedBindingGenerationIsAnError: a header CBind cannot parse fails the build."
+    },
+    "ThisInStaticMethod": {
+        "expect": ["main.cf (3:37) error: 'this' is not available: the static method 'Get' has no object"],
+        "reason": "BUG-226: 'this' in a static method failed IR verification ('Operand is null')."
+    },
+    "FieldInStaticMethod": {
+        "expect": ["main.cf (3:37) error: 'x' is a field: the static method 'Get' has no object"],
+        "reason": "BUG-226: an unqualified field in a static method reads it through a 'this' that does not exist."
+    },
+    "InstanceCallInStaticMethod": {
+        "expect": ["main.cf (4:31) error: 'Bump' is not static: the static method 'Twice' has no object"],
+        "reason": "BUG-226: an unqualified instance method call in a static method has no receiver."
+    },
+    "StaticExtensionMethod": {
+        "expect": ["main.cf (2:1) error: 'Make' extends a type and is static: an extension method is called on an object"],
+        "reason": "BUG-227: a static extension method was accepted but could never be called."
+    },
+    "AtomicLoadWithRelease": {
+        "expect": ["main.cf (3:9) error: atomic_load cannot use MemoryOrder::Release: a load only acquires (Relaxed, Acquire or SeqCst)"],
+        "reason": "D-60: as in C++, a load cannot release."
+    },
+    "AtomicStoreWithAcquire": {
+        "expect": ["main.cf (3:2) error: atomic_store cannot use MemoryOrder::Acquire: a store only releases (Relaxed, Release or SeqCst)"],
+        "reason": "D-60: as in C++, a store cannot acquire."
+    },
+    "AtomicFetchAddFloat": {
+        "expect": ["main.cf (3:2) error: atomic_fetch_add works on an integer, not a 'float'"],
+        "reason": "D-60: the read-modify-write intrinsics combine integers."
+    },
+    "AtomicOnObject": {
+        "expect": ["main.cf (4:11) error: atomic_load works on a number, a bool, an enum or a pointer of at most 8 bytes, not a 'Pair'"],
+        "reason": "D-60: an atomic access is one machine operation."
+    },
+    "AtomicStoreThroughConstPointer": {
+        "expect": ["main.cf (4:2) error: atomic_store writes, but 'const int32*' points to const"],
+        "reason": "D-60: a pointer to const can only be loaded from."
+    },
+    "AtomicExpectedWrongType": {
+        "expect": ["main.cf (4:2) error: atomic_compare_exchange takes the expected value through a 'int64*': it writes the value it found there"],
+        "reason": "D-60: the expected value is written back on failure, so it has the value's type."
+    },
+    "AtomicFenceRelaxed": {
+        "expect": ["main.cf (2:2) error: atomic_fence cannot use MemoryOrder::Relaxed: a relaxed fence orders nothing"],
+        "reason": "D-60: a fence's order is at least Acquire."
+    },
+    "AtomicFailureOrderRelease": {
+        "expect": ["main.cf (4:2) error: atomic_compare_exchange cannot fail with MemoryOrder::Release: a failed exchange only loads"],
+        "reason": "D-60: as in C++, the failure order cannot release."
+    },
+    "AtomicNotAPointer": {
+        "expect": ["main.cf (3:9) error: atomic_load takes a pointer to the value, not a 'int32'"],
+        "reason": "D-60: the intrinsics act on a location, named by its address."
+    },
+    "GlobalEnumClassFromInt": {
+        "expect": ["main.cf (2:1) error: cannot initialize 'Mode' from 'int32': 'Mode' is an enum class"],
+        "reason": "BUG-230: a global's constant start is checked as a local's is (D-32)."
+    },
+    "GlobalPointerFromInt": {
+        "expect": ["main.cf (1:1) error: cannot initialize 'int32*' from 'int32': an integer is not a pointer"],
+        "reason": "BUG-230: only null, 0 or a string is a pointer's constant start."
+    },
+    "AtomicOrderNotAMemoryOrder": {
+        "expect": ["main.cf (4:9) error: atomic_load takes its order as a MemoryOrder, such as MemoryOrder::SeqCst"],
+        "reason": "D-60: the order is a MemoryOrder, constant or not; an integer is not one."
+    },
+    "AtomicOrderOutOfRange": {
+        "expect": ["main.cf (3:9) error: atomic_load takes a MemoryOrder, and 9 is none of its members"],
+        "reason": "D-60: a constant order is checked when the code is made."
+    },
+    "InstanceMethodAsPointer": {
+        "expect": ["main.cf (6:28) error: 'S::Inst' is a method: it has no address without an object; pass a lambda that calls it on one"],
+        "reason": "BUG-233: only a free function or a static method decays to a funcptr."
+    },
+    "PrivateStaticMethodPointer": {
+        "expect": ["main.cf (5:28) error: Cannot access private method 'Hidden' of type 'S'"],
+        "reason": "BUG-233: taking a static method's address checks its access like a call."
+    },
+    "StaticMethodOverloadsAsPointer": {
+        "expect": ["main.cf (6:28) error: 'S::Pick' names several overloads: a funcptr takes one, so pass a lambda that calls the one you mean"],
+        "reason": "BUG-233: a funcptr names one function."
+    },
+    "ScalarWithTwoArguments": {
+        "expect": ["'y' is not an object: it starts from one value, not 2"],
+        "reason": "BUG-246: direct initialization of a type that is not an object takes one value."
+    },
+    "ScalarGlobalWithTwoArguments": {
+        "expect": ["'g_value' is not an object: it starts from one value, not 2"],
+        "reason": "BUG-245: a global takes constructor arguments; one that is not an object takes one value."
+    },
+    "CastOfNegativeNeedsParentheses": {
+        "expect": ["'(Mode) -' is not a cast: a name in parentheses before '-' is its left operand; write '(Mode)(-x)' to cast"],
+        "reason": "BUG-247: a parenthesized name before an operator that is also a prefix one is its operand (C#'s rule)."
+    },
+    "SimdShapeMismatch": {
+        "expect": ["simd_min's vectors are a 'packed float[8]' and a 'packed float[4]': they combine only with the same element and lane count"],
+        "reason": "D-62: the vectors of a lane-wise intrinsic have one shape; the message names both."
+    },
+    "SimdElementMismatch": {
+        "expect": ["simd_max's vectors are a 'packed float[4]' and a 'packed int32[4]'"],
+        "reason": "D-62: vectors of different elements do not combine (convert the lanes with a cast)."
+    },
+    "SimdSqrtOfIntegers": {
+        "expect": ["simd_sqrt works on float or double lanes, not a 'packed int32[4]'"],
+        "reason": "D-62: the rounding and root intrinsics take floating-point lanes."
+    },
+    "SimdReduceAndOfFloats": {
+        "expect": ["simd_reduce_and works on integer lanes, not a 'packed float[4]'"],
+        "reason": "D-62: the bitwise reductions take integer lanes."
+    },
+    "SimdFmaWithoutFeature": {
+        "expect": ["simd_fma needs the processor's fused multiply-add: build with -mfma or -march=x86-64-v3 (or newer), or use simd_muladd"],
+        "reason": "D-62: simd_fma has no fallback on a target without fma; the message names the flags and the alternative."
+    },
+    "SimdShuffleIndexOutOfRange": {
+        "expect": ["simd_shuffle's lane index 4 is out of range: the vectors have lanes 0 to 3"],
+        "reason": "D-62: a shuffle index names a lane of its sources."
+    },
+    "SimdShuffleIndexNotConstant": {
+        "expect": ["simd_shuffle's lane index at position 1 is not a constant integer: it decides the vector's shape"],
+        "reason": "D-62: shuffle indices are constants."
+    },
+    "SimdShuffleOneLane": {
+        "expect": ["simd_shuffle picks at least two lanes: for one lane, index the vector (v[3])"],
+        "reason": "D-62: a shuffle makes a vector; one lane is an index."
+    },
+    "SimdShuffleTooManyLanes": {
+        "expect": ["simd_shuffle makes a vector of 17 lanes: 'packed float[17]' is not a vector: a packed vector has 2 to 16 lanes"],
+        "reason": "D-62: a shuffle's result is a vector of 2 to 16 lanes."
+    },
+    "SimdShuffleDifferentSources": {
+        "expect": ["simd_shuffle's two vectors are a 'packed float[4]' and a 'packed float[8]': a shuffle takes lanes from vectors of one shape"],
+        "reason": "D-62: the two sources of a shuffle have one shape."
+    },
+    "SimdConcatTooWide": {
+        "expect": ["simd_concat of two 'packed float[16]': 'packed float[32]' is not a vector"],
+        "reason": "D-62: a joined vector still holds at most 16 lanes and 64 bytes."
+    },
+    "SimdLoadLaneCountNotConstant": {
+        "expect": ["simd_load's lane count is not a constant integer: it decides the vector's shape"],
+        "reason": "D-62: the lane count of a load is a constant."
+    },
+    "SimdLoadTooManyLanes": {
+        "expect": ["simd_load: 'packed float[32]' is not a vector: a packed vector has 2 to 16 lanes"],
+        "reason": "D-62: a load makes a vector of 2 to 16 lanes."
+    },
+    "SimdLoadFromNonPointer": {
+        "expect": ["simd_load takes a pointer to the lanes in memory, not a 'float'"],
+        "reason": "D-62: the memory intrinsics take a pointer or an array."
+    },
+    "SimdStoreThroughConst": {
+        "expect": ["simd_store writes, but 'const float*' points to const"],
+        "reason": "D-62: a store needs a pointer to mutable memory."
+    },
+    "SimdStoreElementMismatch": {
+        "expect": ["simd_store cannot store 'packed float[4]' lanes through a 'int32*': the element types differ"],
+        "reason": "D-62: a store writes lanes of the pointer's element type."
+    },
+    "SimdSelectNotAMask": {
+        "expect": ["simd_select takes a mask, a 'packed bool[N]' (a comparison of vectors), not a 'packed int32[4]'"],
+        "reason": "D-62: a blend chooses by a mask of bool lanes."
+    },
+    "SimdSelectMaskLanes": {
+        "expect": ["simd_select's mask has 4 lanes and its choices 8: they need one mask lane per lane"],
+        "reason": "D-62: one mask lane per lane of the choices."
+    },
+    "SimdGatherFloatIndices": {
+        "expect": ["simd_gather takes the element indices as integer lanes, such as a 'packed int32[N]', not a 'packed float[4]'"],
+        "reason": "D-62: gather indices are integer lanes."
+    },
+    "SimdMaskedStoreMaskLanes": {
+        "expect": ["simd_store_masked's mask has 4 lanes and its vector 8: they need one mask lane per vector lane"],
+        "reason": "D-62: one mask lane per stored lane."
+    },
+    "SimdArgumentCount": {
+        "expect": ["simd_min takes 2 arguments, not 1"],
+        "reason": "D-62: each intrinsic checks its argument count."
+    },
+    "SimdScalarsOnly": {
+        "expect": ["simd_min works on packed vectors: pass at least one 'packed T[N]' (a scalar argument broadcasts)"],
+        "reason": "D-62: a scalar broadcasts only to a vector argument's shape."
+    },
+    "SimdSplatOfVector": {
+        "expect": ["simd_splat takes a scalar: to copy one lane of a vector to every lane, write simd_shuffle(v, i, i, ...)"],
+        "reason": "D-62: a splat fills lanes from a scalar; a lane broadcast is a shuffle."
+    },
+    "SimdOnBoolLanes": {
+        "expect": ["simd_min works on number lanes, not a 'packed bool[4]'"],
+        "reason": "D-62: masks are blended with simd_select, not compared with min / max."
+    },
+    "SimdAnyOfNonMask": {
+        "expect": ["simd_any takes a mask, a 'packed bool[N]' (a comparison of vectors), not a 'packed float[4]'"],
+        "reason": "D-62: any / all / bitmask test masks."
+    },
+    "PackedCastLaneCount": {
+        "expect": ["a cast converts lane by lane, so the lane counts must match (reinterpret_cast keeps the bits of a vector of the same size)"],
+        "reason": "D-62: a lane-wise cast keeps the lane count."
+    },
+    "PackedReinterpretSize": {
+        "expect": ["reinterpret_cast keeps the bits of a vector of the same size, and these are 16 and 32 bytes"],
+        "reason": "D-62: a bit cast keeps the size."
+    },
+    "PackedReinterpretMask": {
+        "expect": ["a mask's lanes have no bits to keep: convert it lane by lane, (packed int32[N])mask"],
+        "reason": "D-62: a mask has no bit layout to reinterpret."
+    },
+    "PackedCastToScalar": {
+        "expect": ["a vector does not convert to one value: read a lane, v[i]"],
+        "reason": "D-62: a vector is not cast to a scalar."
+    },
+    "PackedImplicitShape": {
+        "expect": ["a 'packed float[4]' is not a 'packed int32[4]': convert the lanes with (packed int32[4])v"],
+        "reason": "D-62: vectors of different shapes convert only by a cast; the message names it."
+    },
+    "PackedBroadcastFromPointer": {
+        "expect": ["cannot initialize 'packed int32[4]' from 'int32*': a 'int32*' is not a 'packed int32[4]'"],
+        "reason": "D-62: only a number broadcasts into a vector."
+    },
+    "PackedCastToObject": {
+        "expect": ["a cast cannot convert 'packed float[4]' to 'Vec4': construct one from the lanes, Vec4(v), or convert to its lanes' type first"],
+        "reason": "D-62: a cast does not make an object; the message names the construction (the lanes also convert to it implicitly)."
+    },
+    "TypeInstanceAsValue": {
+        "expect": ["'Box<int32>' is not a value: only a function template's instance is"],
+        "reason": "BUG-264: a template's instance named before ';' is a value only when it is a function's."
+    }
+}

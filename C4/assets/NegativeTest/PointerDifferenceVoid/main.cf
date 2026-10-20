@@ -1,0 +1,1 @@
+int32 main() { int32[4] a; void* p = (void*)&a[3]; void* q = (void*)&a[0]; int64 n = p - q; return (int32)n; }

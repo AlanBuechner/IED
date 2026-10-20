@@ -1,0 +1,58 @@
+// Operators - Increment Decrement Tests (implementation)
+include "../Framework/Assert.ch"
+include "IncrementDecrement.ch"
+
+void TestIncrementDecrement() {
+	int32 x = 5;
+	x++;
+	AssertEqual(6, x);
+	
+	--x;
+	AssertEqual(5, x);
+}
+
+// The VALUE of the expression matters too (C++ semantics): post-increment yields the OLD value,
+// pre-increment yields the NEW one. Before the fix `int32 a = x++;` returned the NEW value (post
+// behaved like pre), which corrupted any code using the result - e.g. `arr[i++] = c` indexed one slot
+// too far. The original test only used `x++` as a discarded statement, so it never caught this.
+void TestIncrementDecrementValue() {
+	// Post-increment: result is the OLD value; the variable becomes old+1.
+	int32 x = 5;
+	int32 a = x++;
+	AssertEqual(5, a);    // OLD value
+	AssertEqual(6, x);
+
+	// Pre-increment: result is the NEW value.
+	int32 y = 5;
+	int32 b = ++y;
+	AssertEqual(6, b);    // NEW value
+	AssertEqual(6, y);
+
+	// Post-decrement: result is the OLD value; the variable becomes old-1.
+	int32 z = 10;
+	int32 c = z--;
+	AssertEqual(10, c);   // OLD value
+	AssertEqual(9, z);
+
+	// Pre-decrement: result is the NEW value.
+	int32 w = 10;
+	int32 d = --w;
+	AssertEqual(9, d);    // NEW value
+	AssertEqual(9, w);
+
+	// Post-increment used as an ARRAY INDEX (the canonical use): each write lands in the next slot.
+	int32[4] seq; int32 i = 0;
+	seq[i++] = 1;
+	seq[i++] = 2;
+	seq[i++] = 3;
+	AssertEqual(1, seq[0]);
+	AssertEqual(2, seq[1]);
+	AssertEqual(3, seq[2]);
+	AssertEqual(3, i);
+
+	// Repeated post-increment in a loop accumulates correctly.
+	int32 sum = 0; int32 k = 0;
+	for (int32 n = 0; n < 5; n++) sum = sum + k++; // adds 0,1,2,3,4
+	AssertEqual(10, sum);
+	AssertEqual(5, k);
+}

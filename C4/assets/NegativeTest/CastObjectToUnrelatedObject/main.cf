@@ -1,0 +1,7 @@
+struct A { public int32 x; }
+struct B { public int32 x; }
+int32 main() {
+	A a;
+	B b = (B)a;
+	return b.x;
+}

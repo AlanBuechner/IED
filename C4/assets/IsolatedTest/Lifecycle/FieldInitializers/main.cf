@@ -1,0 +1,73 @@
+// BUG-104: a field initializer (`int32 x = 7;`) is where every construction of the object starts the field:
+// a local, `new T`, `T(...)` and `T{...}` (for fields the list leaves out), template instances, local types,
+// and inside a create, before its body (C++ order). An initializer may use earlier fields and `this`.
+const int32 kLimit = 40;
+
+int32 g_next = 0;
+int32 NextId() { return ++g_next; }
+
+struct Plain {
+	public int32 x = 7;
+	public int32 y;
+	public float scale = 1.5f;
+}
+
+struct WithCreate {
+	public int32 base = 10;
+	public int32 doubled = base * 2;          // an earlier field
+	public int32 seen;
+	[operator("create")] void Init(int32 extra) { seen = doubled + extra; } // the initializers ran first
+}
+
+struct Tracked {
+	public int32 id = NextId();               // evaluated once per object
+	public int32 limit = kLimit;
+}
+
+struct Outer {
+	public Plain inner;                       // a member's own initializers run too
+	public int32 count = 3;
+}
+
+template<T> struct Box {
+	public T value = (T)5;
+	public int32 tag = sizeof(T);
+}
+
+int32 main() {
+	Plain p;
+	if (p.x != 7 || p.y != 0 || p.scale != 1.5f) return 1;
+	Plain* q = new Plain;
+	if (q->x != 7) return 2;
+	Plain listed = Plain{ 1 };                // x given; scale from its initializer
+	if (listed.x != 1 || listed.scale != 1.5f) return 3;
+
+	WithCreate w = WithCreate(4);
+	if (w.base != 10 || w.doubled != 20 || w.seen != 24) return 4;
+
+	Tracked a;
+	Tracked b;
+	if (a.id != 1 || b.id != 2 || a.limit != kLimit) return 5;
+
+	Outer o;
+	if (o.inner.x != 7 || o.count != 3) return 6;
+
+	Box<int64> bi;
+	Box<float> bf;
+	if (bi.value != 5 || bi.tag != 8 || bf.value != 5.0f || bf.tag != 4) return 7;
+
+	struct Local { public int32 v = 99; }
+	Local l;
+	if (l.v != 99) return 8;
+
+	Plain[3] arr;
+	if (arr[2].x != 7) return 9;
+
+	Plain braced = { 1 };                     // a braced local: an omitted field starts from its initializer
+	if (braced.x != 1 || braced.scale != 1.5f) return 10;
+	Plain keyed = { y = 4 };
+	if (keyed.x != 7 || keyed.y != 4) return 11;
+	Outer nested = { { 2 } };
+	if (nested.inner.x != 2 || nested.inner.scale != 1.5f || nested.count != 3) return 12;
+	return 0;
+}

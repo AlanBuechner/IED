@@ -1,0 +1,78 @@
+include "errors.ch"
+
+class ScriptError : public Errors::GameError
+{
+	public override int32 Severity() const { return 9; }
+}
+
+struct Cleanup
+{
+	public int32 unused = 0;
+	[operator("delete")] public void Drop() { Errors::g_unwound++; }
+}
+
+void ThrowsHostType() { throw Errors::GameError(7); }
+
+void ThrowsOwnType()
+{
+	ScriptError e;
+	e.code = 11;
+	throw e;
+}
+
+void ThrowsInt() { throw 13; }
+
+int32 CatchesHost()
+{
+	try { Errors::Fail(21); }
+	catch (Errors::GameError& e) { return e.code; }
+	return 0;
+}
+
+int32 CatchesHostInt()
+{
+	try { Errors::ThrowInt(5); }
+	catch (int32 v) { return v * 2; }
+	return 0;
+}
+
+int32 CatchesOwn()
+{
+	try { ThrowsOwnType(); }
+	catch (ScriptError& e) { return e.Severity(); }
+	return 0;
+}
+
+int32 Rethrows()
+{
+	try
+	{
+		try { Errors::Fail(3); }
+		catch (Errors::GameError& e)
+		{
+			e.code = 4;
+			throw;
+		}
+	}
+	catch (Errors::GameError& e) { return e.code; }
+	return 0;
+}
+
+int32 CatchesAll()
+{
+	try { Errors::ThrowInt(1); }
+	catch (...) { return 1; }
+	return 0;
+}
+
+void Inner()
+{
+	Cleanup inner;
+	Errors::ThrowInt(17);
+}
+
+void UnwindsThroughCleanups()
+{
+	Cleanup outer;
+	Inner();
+}

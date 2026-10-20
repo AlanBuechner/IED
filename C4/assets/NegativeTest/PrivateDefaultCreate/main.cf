@@ -1,0 +1,4 @@
+class Token {
+	[operator("create")] private void Init() {}
+}
+int32 main() { Token t; return 0; }

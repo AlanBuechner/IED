@@ -1,0 +1,29 @@
+// Types - Function Template Tests (implementation)
+include "../Framework/Assert.ch"
+include "FunctionTemplate.ch"
+
+template<T> T TplIdentity(T v) { return v; }
+template<A, B> A TplAdd(A a, B b) { return a + b; }
+
+void TestFunctionTemplate() {
+	// Identity<int32>
+	AssertIntEquals(42, TplIdentity<int32>(42), "func template identity int32");
+
+	// Same template instantiated with uint64 (distinct instantiation)
+	AssertIntEquals(99, (int32)TplIdentity<uint64>(99), "func template identity uint64");
+
+	// Identity<bool>
+	Assert(TplIdentity<bool>(true), "func template identity bool true");
+
+	// Two-parameter template Add<int32,int32>
+	AssertIntEquals(42, TplAdd<int32, int32>(20, 22), "func template add int32");
+
+	// Two-parameter template Add<uint64,uint64>
+	AssertIntEquals(1500000, (int32)TplAdd<uint64, uint64>(1000000, 500000), "func template add uint64");
+
+	// Distinct instantiations coexist and both work
+	int32 a = TplIdentity<int32>(7);
+	uint64 c = TplIdentity<uint64>(8);
+	AssertIntEquals(7, a, "func template coexist int32");
+	AssertIntEquals((int32)c, 8, "func template coexist uint64");
+}

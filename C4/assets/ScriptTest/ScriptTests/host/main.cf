@@ -1,0 +1,30 @@
+// A script's [test] functions are ordinary functions, and Script::RunTests runs them with the test harness:
+// every one, or those a filter matches, each run starting from nothing; it returns the failed assertions. A
+// script without tests has no harness.
+include "scripttest.ch"
+
+void CheckTests(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "tested", "tested.cf"));
+	if (!script->Ok()) return;
+	checks.Equal(1, script->RunTests(nullptr), "every test runs: one assertion fails");
+	checks.Equal(0, script->RunTests("math.add*"), "a filter runs only what it matches");
+	checks.Equal(1, script->RunTests("math.fail*"), "the failing one alone");
+	checks.Equal(1, script->RunTests(nullptr), "a second run counts from nothing");
+	funcptr<int32()> helper = (funcptr<int32()>)script->Address("Helper");
+	checks.Equal(4, helper != nullptr ? helper() : -1, "the script's other functions are there as usual");
+	script->Unload();
+
+	Scripting::Script* plain = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "untested", "untested.cf"));
+	checks.Equal(-1, plain->RunTests(nullptr), "a script without tests has no harness");
+	plain->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("ScriptTests");
+	CheckTests(host, checks);
+	return checks.End("ScriptTests");
+}

@@ -1,0 +1,19 @@
+// Core - Binary Literal Tests (implementation)
+include "../Framework/Assert.ch"
+include "BinaryLiterals.ch"
+
+void TestBinaryLiterals() {
+	int64 bin1 = 0b1010;
+	AssertEqual(10, (int32)bin1);
+
+	int64 bin2 = 0b11111111;
+	AssertEqual(255, (int32)bin2);
+
+	int64 bin3 = 0b1000000000;
+	AssertEqual(512, (int32)bin3);
+
+	// A binary constant whose value exceeds INT32_MAX must keep its full 64-bit value.
+	// Regression: like hex, it was previously emitted as a truncated i32 and silently corrupted.
+	int64 big = 0b10000000000000000000; // 2^32
+	Assert(big == 0b10000000000000000000, "binary 2^32 must keep its full 64-bit value");
+}

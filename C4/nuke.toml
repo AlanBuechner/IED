@@ -1,0 +1,93 @@
+# The C4 compiler and its tools (C++), built by Frost (Frost/). A Development build also refreshes the "dev"
+# toolchain in the shared store, so C4 workspaces pinned to toolchain = "dev" use the compiler built here.
+[project]
+name = "C4"
+kind = "custom"
+description = "The C4 compiler, language server, debug adapter, CBind and C4Script (C++, built with Frost)"
+output = "bin/${config}-windows-x64/C4/C4.exe"
+
+[[project.steps]]
+name = "frost"
+phase = "build"
+description = "Frost: C4.exe, C4LSP, C4DAP, CBind, C4Script"
+run = ["${python}", "Frost/Build.py", "-b", "-c", "${config}", "-a", "${arch}", "-p", "${project.dir}"]
+
+[[project.steps]]
+name = "dev-toolchain"
+phase = "post-build"
+configs = ["Development"]
+description = "refresh the dev toolchain"
+run = ["${python}", "MakeToolchain.py", "--config", "${config}", "--out", "${toolchains}/c4/dev"]
+
+[[project.steps]]
+name = "unit-tests"
+phase = "test"
+description = "C4Testing (pass a filter after --: nuke test C4 -- --filter \"Lexer.*\")"
+run = ["${python}", "Frost/Build.py", "-test", "-c", "${config}", "-a", "${arch}", "-p", "${project.dir}", "${args}"]
+
+[[project.steps]]
+name = "frost-clean"
+phase = "clean"
+run = ["${python}", "Frost/Build.py", "-clean", "-c", "${config}", "-p", "${project.dir}"]
+
+# --- nuke gates: every suite the compiler must pass (docs/tools/05-test-suites.md) ---------------------------
+
+[[project.steps]]
+name = "unit-tests"
+phase = "gates"
+run = ["${python}", "Frost/Build.py", "-test", "-c", "${config}", "-a", "${arch}", "-p", "${project.dir}"]
+
+[[project.steps]]
+name = "e2e"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/TestCode/RunTests.ps1"]
+
+[[project.steps]]
+name = "negative"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/NegativeTest/RunTests.ps1"]
+
+[[project.steps]]
+name = "negative-O2"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/NegativeTest/RunTests.ps1", "-O2"]
+
+[[project.steps]]
+name = "isolated"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/IsolatedTest/RunTests.ps1"]
+
+[[project.steps]]
+name = "isolated-O2"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/IsolatedTest/RunTests.ps1", "-O2"]
+
+[[project.steps]]
+name = "runtime"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/RuntimeTest/RunTests.ps1"]
+
+[[project.steps]]
+name = "script"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ScriptTest/RunTests.ps1"]
+
+[[project.steps]]
+name = "script-O2"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ScriptTest/RunTests.ps1", "-O2"]
+
+[[project.steps]]
+name = "tools"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ToolsTest/RunTests.ps1"]
+
+[[project.steps]]
+name = "bedrock-compile"
+phase = "gates"
+run = ["bin/${config}-windows-x64/C4/C4.exe", "Bedrock/Tests", "-test", "-o", "assets/build-output/bedrock/BedrockTests.exe"]
+
+[[project.steps]]
+name = "bedrock"
+phase = "gates"
+run = ["assets/build-output/bedrock/BedrockTests.exe"]

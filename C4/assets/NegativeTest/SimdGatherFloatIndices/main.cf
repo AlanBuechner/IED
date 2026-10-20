@@ -1,0 +1,6 @@
+int32 main() {
+	float[8] values;
+	packed float[4] at = 1.0f;
+	packed float[4] r = simd_gather(values, at);
+	return 0;
+}

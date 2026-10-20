@@ -1,0 +1,2 @@
+void Bump(float& f) { f = f + 1.0f; }
+int32 main() { int32 i = 1; Bump(i); return 0; }

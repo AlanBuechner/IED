@@ -1,0 +1,33 @@
+// Reference RETURN types work: `T& f()` returns a location, usable for read AND write-through.
+// Regression lock - this was documented as a known limitation (PtrRefSuite header +
+// feature-interaction-matrix T4) that the compiler later resolved; keep it covered so it can't regress.
+
+struct Counter { int32 v; float f; };
+Counter g_c;
+
+int32& RefRet() { return g_c.v; }          // scalar reference return
+const int32& ConstRefRet() { return g_c.v; }// const reference return (read-only)
+float& MemberFloat() { return g_c.f; }      // reference to a different member
+Counter& WholeRef() { return g_c; }         // aggregate reference return
+
+int32 main()
+{
+    RefRet() = 42;                          // write through the returned reference
+    if (g_c.v != 42) return 1;
+
+    int32 k = ConstRefRet();                // read through a const reference return
+    if (k != 42) return 2;
+
+    MemberFloat() = 3.5f;                    // write through a member reference return
+    if (g_c.f != 3.5f) return 3;
+
+    Counter& c = WholeRef();                 // bind an aggregate reference return, then use it
+    c.v = 7; c.f = 9.0f;
+    if (g_c.v != 7 || g_c.f != 9.0f) return 4;
+    if (c.v != 7) return 5;                  // member access through the reference
+
+    // A reference still binds to a location: binding it to a prvalue is rejected by design
+    // (a clear semantic error, not the old crash). We can't test that rejection here because this
+    // program must compile - it is locked separately by the NegativeTest suite / manual probe.
+    return 0;
+}

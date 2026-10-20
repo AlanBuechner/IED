@@ -1,0 +1,2 @@
+template<T> public void Missing::Fill(T value) { }
+int32 main() { return 0; }

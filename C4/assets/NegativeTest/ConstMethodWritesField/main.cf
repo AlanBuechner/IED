@@ -1,0 +1,5 @@
+struct S {
+	public int32 v;
+	public void Reset() const { v = 0; }
+}
+int32 main() { S s; s.Reset(); return 0; }

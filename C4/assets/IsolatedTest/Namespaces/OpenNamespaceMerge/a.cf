@@ -1,0 +1,6 @@
+// Contributes Math::Count to the shared open namespace.
+include "math.ch"
+
+namespace Math {
+	int32 Count() { return 7; }
+}

@@ -1,0 +1,52 @@
+// OOP - Overload Resolution Regression tests (implementation)
+include "../Framework/Assert.ch"
+include "OverloadResolution.ch"
+
+// Bug A regression: an overloaded method with a FLOAT parameter must keep its float type in the
+// definition. HIR's FunctionType fallback used to match overloads by parameter NAME only, so the
+// first overload's signature (int32) was bound to every mangled definition - @S_Set_float was
+// emitted with an i32 param and call sites truncated their float args. The float overload uses its
+// param's VALUE so a width corruption changes the result.
+struct OverA {
+	int32 x;
+	void Set(int32 v) { x = v; }
+	void Set(float v) { x = (int32)(v * 10.0f); }
+	int32 Get() { return x; }
+};
+
+void TestOverloadFloatParam() {
+	OverA a; a.x = 0;
+	a.Set(42);
+	AssertIntEquals(42, a.Get(), "int32 overload binds and stores value");
+	OverA b; b.x = 0;
+	b.Set(1.5f);
+	AssertIntEquals(15, b.Get(), "float overload keeps a real float param (value flows)");
+	OverA c; c.x = 0;
+	c.Set(2.75f);
+	AssertIntEquals(27, c.Get(), "float overload value is not truncated to i32 at the call");
+}
+
+// Bug B regression: a function template instantiated TWICE whose body calls an overloaded method on
+// T. HIR's overload selection used to read arg types from semantic's expressionTypes map (keyed by
+// the SHARED AST node), which holds the LAST walk's type, so both instantiations bound the same
+// overload. It now uses the built per-instantiation arg-node types.
+struct OverB {
+	int32 x;
+	void Set(int32 v) { x = v; }
+	void Set(float v) { x = 999; }
+	int32 Get() { return x; }
+};
+
+template<T> int32 TplRun(OverB s, T n) {
+	s.Set(n);
+	return s.Get();
+}
+
+void TestOverloadTemplateInstantiation() {
+	OverB a; a.x = 0;
+	int32 r1 = TplRun<int32>(a, 5);
+	AssertIntEquals(5, r1, "int32 instantiation binds the int32 overload");
+	OverB b; b.x = 0;
+	int32 r2 = TplRun<float>(b, 7.0f);
+	AssertIntEquals(999, r2, "float instantiation binds the float overload");
+}

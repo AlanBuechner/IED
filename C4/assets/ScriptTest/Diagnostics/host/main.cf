@@ -1,0 +1,57 @@
+// A script that does not compile, link or obey its options comes back with diagnostics in the compiler's own form
+// and loads nothing; the host goes on, and the next script compiles. Warnings do not stop a script.
+include "scripttest.ch"
+include "game.ch"
+
+namespace Game
+{
+	int32 Add(int32 a, int32 b) { return a + b; }
+}
+
+// A script of `files` that must not load, with `part` in its diagnostics.
+void Refused(Scripting::Host* host, ScriptTest::Checks& checks, Scripting::ScriptOptions options, const char* part)
+{
+	Scripting::Script* script = host->Compile(options);
+	checks.That(!script->Ok(), part);
+	checks.Contains(script->Diagnostics(), part, options.name.CStr());
+	checks.That(script->Address("Anything") == nullptr, "nothing of it is loaded");
+}
+
+void CheckRefusals(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Refused(host, checks, ScriptTest::OptionsFor(checks, "syntax", "syntax.cf"), "syntax.cf (3:");
+	Refused(host, checks, ScriptTest::OptionsFor(checks, "unknown", "unknown.cf"), "Missing");
+	Refused(host, checks, ScriptTest::OptionsFor(checks, "redefines", "redefines.cf"), "a script cannot define 'Add': its host defines it");
+	Refused(host, checks, ScriptTest::OptionsFor(checks, "imports", "imports.cf"), "a script cannot import C or C++");
+	Refused(host, checks, ScriptTest::OptionsFor(checks, "missing", "no_such_file.cf"), "cannot read the script file");
+	Scripting::ScriptOptions fenced = ScriptTest::OptionsFor(checks, "fenced", "good.cf");
+	fenced.Allow("engine/");
+	Refused(host, checks, fenced, "may not include 'game.ch'");
+}
+
+void CheckGoodScripts(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::ScriptOptions allowed = ScriptTest::OptionsFor(checks, "allowed", "good.cf");
+	allowed.Allow("game.ch");
+	Scripting::Script* script = ScriptTest::Load(host, checks, allowed);
+	if (script->Ok())
+	{
+		funcptr<int32(int32)> hit = (funcptr<int32(int32)>)script->Address("Hit");
+		checks.Equal(5, hit(5), "after the failures a script compiles and runs");
+	}
+	script->Unload();
+
+	Scripting::Script* warned = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "warned", "warns.cf"));
+	checks.Contains(warned->Diagnostics(), "warning", "a warning is reported");
+	warned->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Diagnostics");
+	CheckRefusals(host, checks);
+	CheckGoodScripts(host, checks);
+	return checks.End("Diagnostics");
+}

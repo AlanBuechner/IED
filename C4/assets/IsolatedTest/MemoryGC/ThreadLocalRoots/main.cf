@@ -1,0 +1,79 @@
+// thread_local storage holding managed pointers (D-48): the collector scans every registered thread's copy, so
+// a list only a thread_local holds survives collections other threads start. main returns the failures.
+struct Node {
+	public Node* next;
+	public int64 value;
+}
+
+struct Worker {
+	public int32 index;
+	public int32 failures;
+}
+
+const int32 kWorkers = 4;
+const int32 kNodes = 300;
+
+thread_local Node* t_list = null;
+
+void Prepend(int64 value) {
+	Node* node = new Node;
+	node->value = value;
+	node->next = t_list;
+	t_list = node;
+}
+
+int64 Remembered(int64 value) {
+	thread_local Node* last = null;
+	if (last == null) {
+		last = new Node;
+		last->value = value;
+	}
+	return last->value;
+}
+
+int64 SumList() {
+	int64 total = 0;
+	for (Node* n = t_list; n != null; n = n->next) total += n->value;
+	return total;
+}
+
+void Churn() {
+	for (int32 i = 0; i < 4000; i++) {
+		Node* garbage = new Node;
+		garbage->value = i;
+	}
+}
+
+int32 Check(int64 base) {
+	int32 failures = 0;
+	for (int32 i = 0; i < kNodes; i++) Prepend(base + i);
+	Remembered(base);
+	for (int32 round = 0; round < 10; round++) {
+		Churn();
+		gc_collect();
+		if (SumList() != base * kNodes + (int64)kNodes * (kNodes - 1) / 2) failures++;
+		if (Remembered(-1) != base) failures++;
+	}
+	return failures;
+}
+
+void Run(void* state) {
+	Worker* w = (Worker*)state;
+	w->failures = Check((w->index + 1) * 10000);
+}
+
+int32 main() {
+	Worker*[kWorkers] workers;
+	void*[kWorkers] threads;
+	for (int32 i = 0; i < kWorkers; i++) {
+		workers[i] = new Worker;
+		workers[i]->index = i;
+		threads[i] = thread_start(Run, (void*)workers[i]);
+	}
+	int32 failures = Check(5);
+	for (int32 i = 0; i < kWorkers; i++) {
+		thread_join(threads[i]);
+		failures += workers[i]->failures;
+	}
+	return failures;
+}

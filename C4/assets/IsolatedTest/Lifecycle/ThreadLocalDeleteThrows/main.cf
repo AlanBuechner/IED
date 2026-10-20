@@ -1,0 +1,18 @@
+// An exception that escapes a thread_local object's delete when its thread ends stops the program: nothing can
+// catch it there.
+struct Fussy {
+	public int32 value;
+	[operator("create")] public void Init() { value = 1; }
+	[operator("delete")] public void End() { throw 7; }
+}
+
+thread_local Fussy t_fussy;
+
+void Run(void* state) { t_fussy.value = 2; }
+
+int32 main() {
+	void* t = thread_start(Run, null);
+	thread_join(t);
+	printf("SHOULD NOT REACH HERE\n");
+	return 0;
+}

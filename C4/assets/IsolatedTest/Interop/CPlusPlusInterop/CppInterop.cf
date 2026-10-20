@@ -1,0 +1,119 @@
+// CppInterop - end-to-end C++ interop test. Verifies that CBind-generated bindings for a
+// real C++ header work through every binding category:
+//   - implicit + explicit constructors ([operator("create")] extension methods)
+//   - instance methods (hidden-this ABI, by-value struct params/returns)
+//   - overloaded methods under their C++ name (BUG-086)
+//   - static methods (free functions) and static data members (BUG-087)
+//   - virtual dispatch through a base pointer (vtable trampolines) + inheritance layout
+//   - destructor via [operator("delete")] (scope exit, delete and the GC run the C++ dtor)
+extern "c++" include "cpp.h"
+extern "c++" source "cpp.cpp"
+
+int32 g_fail = 0;
+
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+
+void TestCounter() {
+	// Implicit default constructor.
+	Counter* c = new Counter;
+	Check(c != null, "C++ implicit ctor returns non-null");
+	c->Add(5);
+	c->Add(-2);
+	Check(c->Get() == 3, "C++ instance method Add/Get round-trip");
+
+	// Explicit constructor with argument (overloaded Create_N).
+	Counter* c2 = new Counter(40);
+	Check(c2 != null, "C++ explicit ctor returns non-null");
+	Check(c2->Get() == 40, "C++ explicit ctor initialized value");
+
+	// Static method.
+	Check(Counter_Scale(6, 7) == 42, "C++ static method Scale(6,7)==42");
+
+	delete c;
+	delete c2;
+}
+
+void TestStaticData() {
+	Check(Counter::g_global == 100, "C++ static data member reads the C++ variable");
+	Counter_IncrementGlobal();
+	Check(Counter::g_global == 101, "C++ code's write is visible to C4");
+	Counter::g_global = 7;
+	Counter_IncrementGlobal();
+	Check(Counter::g_global == 8, "C4's write is visible to C++ code");
+}
+
+void TestOverloads() {
+	Bank* b = new Bank;
+	Check(b != null, "Bank implicit ctor non-null");
+	int32 r1 = b->Deposit(100);
+	Check(r1 == 100, "overload Deposit(100) returns 100");
+	int32 r2 = b->Deposit(50, 5);
+	Check(r2 == 145, "overload Deposit(50, 5) returns 145 (fee applied)");
+	Check(b->Balance() == 145, "Balance reflects both deposits");
+	delete b;
+}
+
+void TestInheritanceAndVirtuals() {
+	// Inherited field access: Circle.radius and Shape.id via base.
+	Circle* circ = new Circle(9);
+	Check(circ != null, "Circle ctor non-null");
+	Check(circ->Id() == 7, "inherited Id() returns value set in C++ ctor");
+
+	// Virtual dispatch through a BASE pointer - must call Circle::Area via the vtable.
+	Shape* s = circ;
+	int32 area = s->Area();
+	Check(area == 81, "virtual Area() through Shape* dispatches to Circle (9*9)");
+
+	// Base object dispatches to the base definition.
+	Shape* plain = new Shape;
+	Check(plain != null, "Shape implicit ctor non-null");
+	Check(plain->Area() == -1, "virtual Area() on base Shape returns -1");
+	delete plain;
+	delete circ;
+}
+
+void TestConstMethods() {
+	Counter c = Counter(12);
+	const Counter& readOnly = c;
+	Check(readOnly.Get() == 12, "a const C++ method is callable on a const object");
+}
+
+void TestTypeFidelity() {
+	uint32 big = BigUnsigned();
+	Check(big > 3000000000u, "unsigned int stays unsigned");
+	Check(big / 2u == 2000000000u, "unsigned division");
+	uint8 high = HighByte();
+	Check((int32)high == 200, "unsigned char is uint8");
+	int8 low = LowByte();
+	Check((int32)low == -100, "signed char is int8");
+	const char16* wide = WideHello();
+	Check(wide[0] == u'H' && wide[1] == u'i', "wchar_t is char16");
+	Check(WideLength(u"wide") == 4, "a char16 string passes to a wchar_t parameter");
+}
+
+void TestByValueStruct() {
+	Vec2 a;
+	a.x = 3;
+	a.y = 4;
+	Vec2 b;
+	b.x = 10;
+	b.y = -2;
+	Vec2 r = AddVec(a, b);
+	Check(r.x == 13 && r.y == 2, "by-value struct param+return across C++ boundary");
+}
+
+int32 main() {
+	TestCounter();
+	TestStaticData();
+	TestOverloads();
+	TestInheritanceAndVirtuals();
+	TestByValueStruct();
+	TestConstMethods();
+	TestTypeFidelity();
+
+	if (g_fail) { printf("CPP INTEROP TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("CPP INTEROP TESTS OK\n");
+	return 0;
+}

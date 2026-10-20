@@ -1,0 +1,18 @@
+int32 main() {
+    int32 a = (int32)3.7;              // 3
+    int32 b = (int32)-3.7;             // -3 (trunc toward zero, not floor)
+    int32 c = (int32)0.99;             // 0
+    int32 d = (int32)-0.99;            // 0
+    float fa = 1.5f;
+    int32 fb = 2;
+    double r1 = fa + fb;               // float dominates: 3.5
+    int32 x = (int32)(fa + fb);        // 3.5 trunc -> 3
+    double d2 = 2.5;
+    float f2 = fa * d2;                // double wider: 3.75
+    float n = 0.0f / 0.0f;             // NaN
+    bool isNan = !(n == n);            // true
+    int32 z = (int32)(-0.0f);          // 0
+    bool ok = a == 3 && b == -3 && c == 0 && d == 0 && r1 == 3.5 && x == 3 &&
+               f2 == 3.75f && isNan && z == 0;
+    return ok ? 0 : 1;
+}

@@ -1,0 +1,71 @@
+// Virtual slots follow the MSVC rule: a derived type keeps its base's slots in order, an override
+// replaces one in place, new virtuals are appended; a slot is a name plus parameter types, so
+// overloads get their own slots. Inherited fields sit inside the base sub-object, after the vptr.
+struct Base {
+	public int32 baseValue;
+	public virtual int32 Bar() { return 1; }
+	public virtual int32 Draw(int32 x) { return 10; }
+	public virtual int32 Draw(float x) { return 20; }
+};
+
+struct Derived : Base {
+	public int32 derivedValue;
+	public virtual int32 Foo() { return 2; }
+	public override int32 Bar() { return 3; }
+	public override int32 Draw(float x) { return 21; }
+};
+
+struct MoreDerived : Derived {
+	public int32 moreValue;
+	public override int32 Foo() { return 4; }
+};
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 BarOf(Base& b) { return b.Bar(); }
+int32 BaseValueOf(const Base& b) { return b.baseValue; }
+
+void SlotOrder() {
+	Derived d;
+	Base* b = &d;
+	Check(b->Bar() == 3, "inherited slot keeps its index when a new virtual is added");
+	Check(d.Foo() == 2, "the new virtual is appended");
+	MoreDerived m;
+	Derived* pd = &m;
+	Check(pd->Foo() == 4, "an appended slot is overridden one level down");
+	Check(pd->Bar() == 3, "an inherited override survives one level down");
+	Check(BarOf(m) == 3, "a derived object binds to a base reference parameter (BUG-071)");
+	m.baseValue = 12;
+	Check(BaseValueOf(m) == 12, "a derived object binds to a const base reference");
+}
+
+void Overloads() {
+	Derived d;
+	Base* b = &d;
+	Check(b->Draw(1) == 10, "Draw(int32) keeps the base implementation");
+	Check(b->Draw(1.0f) == 21, "Draw(float) dispatches to the override");
+}
+
+void InheritedFields() {
+	MoreDerived m;
+	m.baseValue = 5;
+	m.derivedValue = 6;
+	m.moreValue = 7;
+	Base* b = &m;
+	Check(b->baseValue == 5, "base field read through a base pointer");
+	Check(b->Bar() == 3, "writing a base field leaves the vptr intact");
+	Check(m.baseValue + m.derivedValue + m.moreValue == 18, "each level's field has its own bytes");
+	Check(sizeof(MoreDerived) == 32, "MSVC layout: each base keeps its padded size (16, 24, 32)");
+}
+
+int32 main() {
+	SlotOrder();
+	Overloads();
+	InheritedFields();
+	if (g_failures != 0) printf("VirtualSlots failures: %d\n", g_failures);
+	return g_failures;
+}

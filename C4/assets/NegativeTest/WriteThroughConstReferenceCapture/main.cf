@@ -1,0 +1,6 @@
+int32 main() {
+	const int32 k = 1;
+	func<void()> f = [&k]() { k = 2; };
+	f();
+	return k;
+}

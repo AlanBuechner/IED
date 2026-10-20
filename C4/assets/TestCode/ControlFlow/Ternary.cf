@@ -1,0 +1,13 @@
+// ControlFlow - Ternary Tests (implementation)
+include "../Framework/Assert.ch"
+include "Ternary.ch"
+
+void TestTernary() {
+	int32 x = 5;
+	int32 y = 3;
+	int32 a = (x > y) ? 1 : 0;
+	AssertEqual(1, a);
+	
+	int32 b = (y > x) ? 0 : 1;
+	AssertEqual(1, b);
+}

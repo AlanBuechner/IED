@@ -1,0 +1,20 @@
+// Types - static members reached through a template parameter (BUG-172)
+include "../Framework/Assert.ch"
+include "StaticThroughParameter.ch"
+
+template<P> int32 StpRun(int32 v) { return P::Apply(v) + P::Bonus; }
+
+template<P> struct StpHolder {
+	public int32 base;
+	public int32 Run() const { return P::Apply(base) + P::Bonus; }
+}
+
+void TestStaticThroughParameter() {
+	StpDouble::Bonus = 1;
+	StpSquare::Bonus = 100;
+	AssertEqual(7, StpRun<StpDouble>(3));
+	AssertEqual(109, StpRun<StpSquare>(3));
+	StpHolder<StpSquare> holder;
+	holder.base = 4;
+	AssertEqual(116, holder.Run());
+}

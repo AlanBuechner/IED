@@ -1,0 +1,23 @@
+template<T> class Box {
+	public T val;
+public:
+	[operator("add")] public Box<T> Add(const Box<T>& o) { Box<T> r; r.val = this->val + o.val; return r; }
+}
+int32 main() {
+	// The method returns its own template type (Box<int32>). Before the self-reference fix,
+	// monomorphization minted a duplicate "Box_T" shell and this failed with:
+	//   Cannot initialize 'Box_int32' with value of type 'Box_T'
+	Box<int32> a; a.val = 1;
+	Box<int32> b; b.val = 2;
+	Box<int32> c = a + b;
+	if (c.val != 3) return 1;
+	// Chained self-returning ops and a second instantiation must both work.
+	Box<int32> d = c + a;
+	if (d.val != 4) return 2;
+	Box<float> f1; f1.val = 1.5f;
+	Box<float> f2; f2.val = 2.5f;
+	Box<float> f3 = f1 + f2;
+	if (f3.val != 4.0f) return 3;
+	printf("METHOD RETURN OWN TPL TYPE OK\n");
+	return 0;
+}

@@ -1,0 +1,14 @@
+// BUG-100: a builtin and [link] declarations of the same C function are one function and link.
+[link("c4_gc_collect")] void Collect();
+[link("c4_gc_collect")] void CollectAgain();
+[link("c4_gc_collections")] uint64 Collections();
+
+int32 main() {
+	uint64 before = gc_collections();
+	gc_collect();
+	Collect();
+	CollectAgain();
+	if (Collections() != before + 3) return 1;
+	if (gc_collections() != Collections()) return 2;
+	return 0;
+}

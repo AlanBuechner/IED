@@ -1,0 +1,11 @@
+// Operators - Division Tests (implementation)
+include "../Framework/Assert.ch"
+include "Division.ch"
+
+void TestDivision() {
+	int32 a = 20 / 4;
+	AssertEqual(5, a);
+	
+	int32 b = 7 / 2;
+	AssertEqual(3, b);
+}

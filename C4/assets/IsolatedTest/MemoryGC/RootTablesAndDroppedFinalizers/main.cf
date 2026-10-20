@@ -1,0 +1,87 @@
+// What a script host asks of the collector (C4Runtime/GC/GCApi.c): another image's root table keeps what its ranges
+// point at alive until it is removed, and the finalizers inside a code range can be dropped before that code goes.
+include "Memory/gc.ch"
+
+struct RootRange
+{
+	public void* start;
+	public uint64 size;
+}
+
+[link("c4_gc_add_root_table")] void AddRootTable(RootRange* table);
+[link("c4_gc_remove_root_table")] void RemoveRootTable(RootRange* table);
+[link("c4_gc_drop_finalizers_in")] uint64 DropFinalizersIn(void* low, void* high);
+[link("c4_gc_register_finalizer")] void RegisterFinalizer(void* object, funcptr<void(void*)> fn);
+
+const int32 kItems = 100;
+
+struct Item { public int32 value; }
+
+int32 g_counted = 0;
+int32 g_ranAnyway = 0;
+uint64[100] g_kept;   // integers: they keep nothing alive
+
+void Count(void* object) { g_counted++; }
+void MustNotRun(void* object) { g_ranAnyway++; }
+
+void Fill(void** buffer, funcptr<void(void*)> finalizer)
+{
+	for (int32 i = 0; i < kItems; i++)
+	{
+		Item* item = new Item;
+		item->value = i;
+		RegisterFinalizer((void*)item, finalizer);
+		buffer[i] = (void*)item;
+	}
+}
+
+int64 Scrub(int32 depth)
+{
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+void CollectTwice()
+{
+	Scrub(16);
+	gc_collect();
+	gc_collect();
+}
+
+int32 main()
+{
+	int32 failures = 0;
+	void** buffer = (void**)raw_alloc((uint64)kItems * 8);   // never scanned by itself
+	RootRange[2] table;
+	table[0].start = (void*)buffer;
+	table[0].size = (uint64)kItems * 8;
+	AddRootTable(&table[0]);
+	AddRootTable(&table[0]);                                // twice is once
+	Fill(buffer, Count);
+	CollectTwice();
+	if (g_counted != 0) { printf("collected through the table: %d\n", g_counted); failures++; }
+	RemoveRootTable(&table[0]);
+	CollectTwice();
+	if (g_counted < kItems - 5) { printf("after removing the table: %d of %d finalized\n", g_counted, kItems); failures++; }
+
+	// Drop every finalizer in MustNotRun's code; the others still run.
+	Fill(buffer, MustNotRun);
+	for (int32 i = 0; i < kItems; i++) g_kept[i] = (uint64)buffer[i];
+	void** kept = (void**)raw_alloc((uint64)kItems * 8);
+	Fill(kept, Count);
+	AddRootTable(&table[0]);
+	funcptr<void(void*)> doomed = MustNotRun;
+	void* low = (void*)doomed;
+	const uint64 dropped = DropFinalizersIn(low, (void*)((uint64)low + 1));
+	if (dropped != (uint64)kItems) { printf("dropped %d, not %d\n", (int32)dropped, kItems); failures++; }
+	RemoveRootTable(&table[0]);
+	const int32 countedBefore = g_counted;
+	CollectTwice();
+	if (g_ranAnyway != 0) { printf("a dropped finalizer ran %d times\n", g_ranAnyway); failures++; }
+	if (g_counted - countedBefore < kItems - 5) { printf("the other finalizers did not run: %d\n", g_counted - countedBefore); failures++; }
+	if (DropFinalizersIn(low, (void*)((uint64)low + 1)) != 0) failures++;
+	return failures;
+}

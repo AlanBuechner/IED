@@ -1,0 +1,11 @@
+// Core - Char Literal Tests (implementation)
+include "../Framework/Assert.ch"
+include "CharLiterals.ch"
+
+void TestCharLiterals() {
+	char c1 = 'A';
+	AssertEqual(65, (int32)c1);
+	
+	char c2 = 'z';
+	AssertEqual(122, (int32)c2);
+}

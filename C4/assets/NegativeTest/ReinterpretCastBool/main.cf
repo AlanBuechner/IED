@@ -1,0 +1,4 @@
+int32 main() {
+	bool b = true;
+	return reinterpret_cast<uint8>(b);
+}

@@ -1,0 +1,4 @@
+[Label(u"wide")]
+int32 Labeled() { return 1; }
+
+int32 main() { return Labeled(); }

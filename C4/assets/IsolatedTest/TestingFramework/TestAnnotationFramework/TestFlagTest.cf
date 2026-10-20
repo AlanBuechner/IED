@@ -1,0 +1,66 @@
+// TestFlagTest - Phase 5 unit-testing end-to-end.
+// Run with:  C4.exe <this folder> -test
+// The compiler emits a synthetic main that runs every [test("group.path")] function and returns
+// the failed-assert count as the exit code (0 = all pass). Verifies:
+//   - free-function tests + assert_eq / assert_true
+//   - global [test_setup]/[test_teardown] run exactly once around all tests
+//   - class-scoped STATIC [test_setup]/[test_teardown] run exactly once around the class's tests
+//     (no fixture: hooks and tests are stateless, shared state lives in file-scope globals)
+//   - deterministic ordering: free tests first (by group path), then each class's tests (by group path)
+
+int32 g_globalSetup = 0;
+int32 g_globalTeardown = 0;
+
+[test_setup]
+void GlobalSetup() { g_globalSetup++; }
+
+[test_teardown]
+void GlobalTeardown() {
+    g_globalTeardown++;
+    assert_eq(1, g_globalSetup, "GlobalSetup ran exactly once");
+}
+
+// --- Free-function tests ---
+
+[test("math.float")]
+void TestFloat() {
+    float f = 1.5f;
+    assert_true(f > 1.0f, "float comparison (no int truncation)");
+}
+
+[test("math.mul")]
+void TestMul() {
+    assert_eq(6, 2 * 3, "2 * 3 == 6");
+}
+
+// --- Class-scoped tests: per-class STATIC setup/teardown, run once around the group ---
+// [test] methods and the class hooks are all static: they run without a fixture instance, so any
+// shared state lives in file-scope globals that the hooks mutate and the tests observe.
+
+int32 g_counterSetup = 0;
+int32 g_counterTeardown = 0;
+int32 g_counterValue = 0;
+
+struct Counter {
+    [test_setup]
+    public static void Setup() { g_counterSetup++; g_counterValue = 100; }
+
+    [test_teardown]
+    public static void Teardown() {
+        g_counterTeardown++;
+        assert_eq(1, g_counterSetup, "Counter.Setup ran exactly once");
+        assert_eq(1, g_counterTeardown, "Counter.Teardown runs exactly once");
+        assert_eq(100, g_counterValue, "group state intact (tests must not leak mutations)");
+    }
+
+    // Static tests: verify the class hooks observed the right lifecycle.
+    [test("counter.local")]
+    public static void TestLocal() {
+        assert_true(g_counterSetup >= 1, "Counter.Setup had run before class tests");
+    }
+
+    [test("counter.read")]
+    public static void TestRead() {
+        assert_eq(1, g_counterSetup, "exactly one Counter setup ran for the group");
+    }
+}

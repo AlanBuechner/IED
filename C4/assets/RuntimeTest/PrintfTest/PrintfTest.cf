@@ -1,0 +1,5 @@
+// Minimal printf test: printf is a prelude builtin, no declaration needed.
+int32 main() {
+    printf("Hello from C4!\n");
+    return 0;
+}

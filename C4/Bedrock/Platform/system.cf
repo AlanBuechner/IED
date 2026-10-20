@@ -1,0 +1,66 @@
+include "system.ch"
+
+[link("c4_system_processor_info")] void c4_system_processor_info(Platform::ProcessorInfo* info);
+[link("c4_system_memory_status")] void c4_system_memory_status(Platform::MemoryStatus* status);
+[link("c4_system_process_memory")] void c4_system_process_memory(Platform::ProcessMemory* memory);
+[link("c4_system_executable_path")] int64 c4_system_executable_path(void* out, int64 capacity);
+[link("c4_system_get_environment")] int64 c4_system_get_environment(const char* name, void* out, int64 capacity);
+[link("c4_system_set_environment")] int32 c4_system_set_environment(const char* name, const char* value);
+
+namespace Platform
+{
+	// Text the runtime writes: `read(out, capacity)` gives its length (-1: none) and writes it only when it fits, so it is
+	// asked for the length first; when the text grew in between (another thread set it), it is asked again.
+	bool ReadRuntimeText(func<int64(void*, int64)> read, Core::String& text) {
+		int64 length = read(nullptr, 0);
+		while (length >= 0) {
+			char* buffer = (char*)raw_alloc((uint64)(length + 1));
+			int64 written = read((void*)buffer, length + 1);
+			if (written >= 0 && written <= length) text = Core::String(Core::StringView(buffer, written));
+			raw_free((void*)buffer);
+			if (written <= length) return written >= 0;
+			length = written;
+		}
+		return false;
+	}
+
+	ProcessorInfo GetProcessorInfo() {
+		ProcessorInfo info;
+		c4_system_processor_info(&info);
+		return info;
+	}
+
+	MemoryStatus GetMemoryStatus() {
+		MemoryStatus status;
+		c4_system_memory_status(&status);
+		return status;
+	}
+
+	ProcessMemory GetProcessMemory() {
+		ProcessMemory memory;
+		c4_system_process_memory(&memory);
+		return memory;
+	}
+
+	FS::Path ExecutablePath() {
+		Core::String text;
+		ReadRuntimeText([](void* out, int64 capacity) -> int64 { return c4_system_executable_path(out, capacity); }, text);
+		return FS::Path(text.View());
+	}
+
+	bool TryGetEnvironmentVariable(const char* name, Core::String& value) {
+		return ReadRuntimeText([name](void* out, int64 capacity) -> int64 { return c4_system_get_environment(name, out, capacity); }, value);
+	}
+
+	Core::String GetEnvironmentVariable(const char* name) {
+		Core::String value;
+		TryGetEnvironmentVariable(name, value);
+		return value;
+	}
+
+	bool SetEnvironmentVariable(const char* name, const char* value) {
+		return value != nullptr && c4_system_set_environment(name, value) == 0;
+	}
+
+	bool RemoveEnvironmentVariable(const char* name) { return c4_system_set_environment(name, nullptr) == 0; }
+}

@@ -1,0 +1,73 @@
+// Template integration - locks the full per-instantiation machinery end to end in one program.
+// Each section targets a distinct Phase 2 model-routing path and uses a value that would come out
+// WRONG (not just crash) if an instantiation bound to another's signature or type:
+//   A. per-instantiation method-signature binding (uint64 result overflows int32+uint32)
+//   B. instantiation-type resolution + member field access (large uint64 field truncates if mis-typed)
+//   C. non-type parameter array layout + sizeof of two distinct instantiations
+//   D. out-of-line method on a templated class
+//   E. scoped alias naming the template parameter
+
+template<T> struct Scale {
+    public T factor;
+    public T Times(T v) { return v * factor; }
+}
+
+template<T> struct Box {
+    public T value;
+    public int32 tag;
+}
+
+template<int N> struct Arr {
+    public int32[N] x;
+    public int32 Count() { return N; }
+}
+
+template<T> struct Vec {
+    public T x;
+    float Len();
+}
+// Out-of-line method on a templated class: declared in the class, defined here after it.
+template<T> float Vec<T>::Len() { return (float)x; }
+
+template<T> struct Typed {
+    alias Type = T;
+    public Type val;
+}
+
+int32 main() {
+    // A. Per-instantiation method-signature binding.
+    Scale<int32> si; si.factor = 10;
+    if (si.Times(7) != 70) { printf("FAIL A int32\n"); return 1; }
+    Scale<uint64> su; su.factor = 1000000000u;
+    if (su.Times(5000u) != 5000000000000u) { printf("FAIL A uint64\n"); return 1; } // 5e12 > uint32 max
+    Scale<float> sf; sf.factor = 2.5f;
+    if (sf.Times(4.0f) != 10.0f) { printf("FAIL A float\n"); return 1; }
+
+    // B. Instantiation-type resolution + member field access on the concrete type.
+    Box<int32> bi; bi.value = 42; bi.tag = 7;
+    if (bi.value != 42 || bi.tag != 7) { printf("FAIL B int32 fields\n"); return 1; }
+    Box<uint64> bu; bu.value = 5000000000u; bu.tag = 9;   // 5e9 > uint32 max: truncates if mis-typed
+    if (bu.value != 5000000000u || bu.tag != 9) { printf("FAIL B uint64 fields\n"); return 1; }
+
+    // C. Non-type parameter array layout + two distinct instantiations keep their own sizes.
+    Arr<5> a5; a5.x[0] = 1; a5.x[4] = 2;
+    if (a5.Count() != 5) { printf("FAIL C count\n"); return 1; }
+    if (sizeof(Arr<5>) != 20) { printf("FAIL C sizeof5\n"); return 1; }   // 5 * 4 bytes
+    Arr<3> a3; a3.x[0] = 5;
+    if (sizeof(Arr<3>) != 12) { printf("FAIL C sizeof3\n"); return 1; }   // 3 * 4 bytes
+
+    // D. Out-of-line method on a templated class.
+    Vec<int32> v; v.x = 4;
+    if (v.Len() != 4.0f) { printf("FAIL D out-of-line\n"); return 1; }
+    Vec<float> vf; vf.x = 2.5f;
+    if (vf.Len() != 2.5f) { printf("FAIL D float\n"); return 1; }
+
+    // E. Scoped alias naming the template parameter, used as a field type.
+    Typed<float> t; t.val = 2.5f;
+    if (t.val != 2.5f) { printf("FAIL E alias\n"); return 1; }
+    Typed<int32> ti; ti.val = 11;
+    if (ti.val != 11) { printf("FAIL E int32 alias\n"); return 1; }
+
+    printf("TEMPLATE INTEGRATION OK\n");
+    return 0;
+}

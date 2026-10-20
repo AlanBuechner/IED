@@ -1,0 +1,5 @@
+int32 main() {
+	float[32] values;
+	packed float[16] r = simd_load(values, 32);
+	return 0;
+}

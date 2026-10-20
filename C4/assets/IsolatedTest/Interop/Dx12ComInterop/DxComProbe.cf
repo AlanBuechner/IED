@@ -1,0 +1,36 @@
+// DxComProbe - verify the full COM interop path in pure C4 against REAL d3d12.h:
+//   1. nested-pointer out-param (void** ppDevice) via &dev where dev is a pointer local
+//   2. void* -> ID3D12Device* cast of the returned interface pointer
+//   3. extension-method call on the cast pointer (CreateCommandQueue via vtable trampoline)
+extern "c++" include "game.hpp" {
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
+	lib("d3d12.lib");
+}
+
+int32 main() {
+	// A nested out-param needs the ADDRESS of a pointer local: D3D12CreateDevice writes the
+	// interface pointer into *ppDevice, so ppDevice must point at real storage (not be null).
+	void* dev = null;
+	int32 hr = D3D12CreateDevice(null, D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), &dev);
+	printf("D3D12CreateDevice hr=%d\n", hr);
+	if (hr != 0) { printf("DX COM PROBE: create device failed\n"); return 1; }
+
+	ID3D12Device* pdev = (ID3D12Device*)dev;
+	printf("device ptr = %p\n", pdev);
+	if (pdev == null) { printf("DX COM PROBE: null device\n"); return 1; }
+
+	D3D12_COMMAND_QUEUE_DESC desc;
+	desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	desc.Priority = 0;
+	desc.Flags = 0;
+	desc.NodeMask = 0;
+
+	void* queue = null;
+	hr = pdev->CreateCommandQueue(&desc, __uuidof(ID3D12CommandQueue), &queue);
+	printf("CreateCommandQueue hr=%d\n", hr);
+	if (hr != 0) { printf("DX COM PROBE: create queue failed\n"); return 1; }
+
+	printf("DX COM PROBE OK\n");
+	return 0;
+}

@@ -1,0 +1,1 @@
+int32 main() { __init_list<int32> l = { { 1, 2 } }; return (int32)l.size; }

@@ -1,0 +1,7 @@
+// A global with both [link] and an initializer is an error: a linked global aliases the foreign
+// symbol, so it cannot also carry its own initial value (that would be silently contradictory).
+[link("g_extern_counter")] int32 g_counter = 5;
+
+int32 main() {
+	return g_counter;
+}

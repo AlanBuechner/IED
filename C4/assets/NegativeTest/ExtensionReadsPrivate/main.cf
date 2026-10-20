@@ -1,0 +1,5 @@
+class Box {
+	private int32 inner = 2;
+}
+int32 Peek() extends Box { return this.inner; }
+int32 main() { Box b; return b.Peek(); }

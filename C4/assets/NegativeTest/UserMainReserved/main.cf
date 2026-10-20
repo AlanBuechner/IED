@@ -1,0 +1,5 @@
+// `user_main` is reserved: the compiler renames the user's `main` to it and emits a synthetic C
+// entry wrapper that calls it. A hand-written global `user_main` collides with that wrapper (its
+// body would be shadowed by the rename). Only lowercase `main` is a valid entry point, so this must
+// be a clear error rather than a silent miscompile or no-op.
+int32 user_main() { return 0; }

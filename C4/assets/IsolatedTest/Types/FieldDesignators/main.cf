@@ -1,0 +1,30 @@
+// BUG-107: a field designator `{ name = value }` names the field it fills, in a declaration, a global, a
+// composite literal `T{...}` and a braced field of one; positional entries continue after it. Fields no entry
+// names start from their initializers.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+struct Point { public int32 x; public int32 y; public int32 z = 5; }
+struct Line { public Point from; public Point to; }
+
+Point g_point = { y = 8 };
+
+int32 Sum(Point p) { return p.x + p.y * 10 + p.z * 100; }
+
+int32 main() {
+	Point a = { y = 4 };
+	Check(a.x == 0 && a.y == 4 && a.z == 5, "a designator fills its field; the rest start as declared");
+	Point b = { z = 1, x = 2 };
+	Check(b.x == 2 && b.y == 0 && b.z == 1, "designators in any order");
+	Check(g_point.y == 8 && g_point.z == 5, "a designated global");
+	Check(Sum(Point{ y = 3 }) == 530, "a designated composite literal");
+	Line l = Line{ to = { y = 7 } };
+	Check(l.to.y == 7 && l.to.z == 5 && l.from.z == 5, "a designated braced field of a composite literal");
+	int32 x = 9;
+	Point c = { x };
+	Check(c.x == 9, "a plain name without '=' is a positional element");
+	return g_failures;
+}

@@ -1,0 +1,14 @@
+// Operators - Assignment Tests (implementation)
+include "../Framework/Assert.ch"
+include "Assignment.ch"
+
+void TestAssignment() {
+	int32 a = 10;
+	AssertEqual(10, a);
+	
+	int32 b = a;
+	AssertEqual(10, b);
+	
+	a = 20;
+	AssertEqual(20, a);
+}

@@ -1,0 +1,14 @@
+template<T> void Swap(T& a, T& b) { T t = a; a = b; b = t; }
+int32 main() {
+	int32 x = 1; int32 y = 2;
+	Swap<int32>(x, y);
+	if (x != 2 || y != 1) return 1;
+	float a = 1.5f; float b = 2.5f;
+	Swap<float>(a, b);
+	if (a != 2.5f || b != 1.5f) return 2;
+	uint64 u1 = 9u; uint64 u2 = 3u;
+	Swap<uint64>(u1, u2);
+	if (u1 != 3u || u2 != 9u) return 3;
+	printf("TPL REF PARAM OK\n");
+	return 0;
+}

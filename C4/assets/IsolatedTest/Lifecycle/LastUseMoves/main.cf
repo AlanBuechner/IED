@@ -1,0 +1,130 @@
+// D-05 / A10: a local's or by-value parameter's last use moves its object instead of copying it, when its
+// address never escaped; a drop flag keeps the moved-from variable from being destroyed again, on every path
+// (both arms of an if, an exception after the move). A use after it, a copy in a loop of a variable declared
+// outside, a taken address or a reference variable keep the copy.
+int32 g_failures = 0;
+void Check(bool ok, const char* what) { if (!ok) { printf("FAIL %s\n", what); g_failures++; } }
+
+int32 g_copies = 0;
+int32 g_deletes = 0;
+struct Res
+{
+	public int32 id;
+	[operator("create")] public void Init(int32 i) { id = i; }
+	[operator("copy")] public void Copy(const Res& o) { id = o.id; g_copies = g_copies + 1; }
+	[operator("delete")] public void Delete() { if (id != 0) g_deletes = g_deletes + 1; }
+}
+
+void Reset() { g_copies = 0; g_deletes = 0; }
+int32 Sink(Res r) { return r.id; }
+int32 Peek(const Res& r) { return r.id; }
+int32 Forward(Res r) { return Sink(r); }
+
+void LastUseInitializes()
+{
+	Res a = Res(1);
+	Res b = a;
+	Check(b.id == 1, "the moved value");
+}
+
+void LastUseArgument()
+{
+	Res a = Res(2);
+	Peek(a);
+	Sink(a);
+}
+
+void UsedAfter()
+{
+	Res a = Res(3);
+	Res b = a;
+	Peek(a);
+}
+
+void InLoop()
+{
+	Res a = Res(4);
+	for (int32 i = 0; i < 3; ++i) { Res b = a; }
+}
+
+void DeclaredInLoop()
+{
+	for (int32 i = 0; i < 3; ++i) { Res a = Res(5); Res b = a; }
+}
+
+void BothArms(bool c)
+{
+	Res a = Res(6);
+	if (c) Sink(a); else { Res b = a; }
+}
+
+void OneArm(bool c)
+{
+	Res a = Res(7);
+	if (c) Sink(a);
+}
+
+void AddressTaken()
+{
+	Res a = Res(8);
+	Res* p = &a;
+	Res b = a;
+}
+
+void ReferenceLocal()
+{
+	Res a = Res(9);
+	Res& r = a;
+	Res b = a;
+	Peek(r);
+}
+
+void ThrowLocal()
+{
+	try { Res a = Res(12); throw a; }
+	catch (const Res& r) { Check(r.id == 12, "the thrown object"); }
+}
+
+void ThrowAfterMove()
+{
+	try
+	{
+		Res a = Res(10);
+		Res b = a;
+		throw 5;
+	}
+	catch (int32 e) {}
+}
+
+int32 main()
+{
+	Reset(); LastUseInitializes();
+	Check(g_copies == 0 && g_deletes == 1, "a local's last use moves it");
+	Reset(); LastUseArgument();
+	Check(g_copies == 0 && g_deletes == 1, "a by-value argument at the last use moves");
+	Reset(); UsedAfter();
+	Check(g_copies == 1 && g_deletes == 2, "a use after keeps the copy");
+	Reset(); InLoop();
+	Check(g_copies == 3 && g_deletes == 4, "a copy in a loop of a variable declared outside it");
+	Reset(); DeclaredInLoop();
+	Check(g_copies == 0 && g_deletes == 3, "a variable declared in the loop moves each iteration");
+	Reset(); BothArms(true);
+	Check(g_copies == 0 && g_deletes == 1, "the last use in one arm moves (then)");
+	Reset(); BothArms(false);
+	Check(g_copies == 0 && g_deletes == 1, "the last use in one arm moves (else)");
+	Reset(); OneArm(false);
+	Check(g_copies == 0 && g_deletes == 1, "not moved on the other path: destroyed once by its cleanup");
+	Reset(); OneArm(true);
+	Check(g_copies == 0 && g_deletes == 1, "moved on this path: destroyed once by its new owner");
+	Reset(); AddressTaken();
+	Check(g_copies == 1 && g_deletes == 2, "an escaped address keeps the copy");
+	Reset(); ReferenceLocal();
+	Check(g_copies == 1 && g_deletes == 2, "a reference variable keeps the copy");
+	Reset(); ThrowAfterMove();
+	Check(g_copies == 0 && g_deletes == 1, "an exception after the move destroys the object once");
+	Reset(); ThrowLocal();
+	Check(g_copies == 0 && g_deletes == 1, "throwing a local at its last use moves it");
+	Reset(); { Res r = Res(11); Forward(r); }
+	Check(g_copies == 0 && g_deletes == 1, "a by-value parameter's last use moves it on");
+	return g_failures;
+}

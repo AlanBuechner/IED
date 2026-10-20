@@ -1,0 +1,225 @@
+// Math vectors: layout, construction, lanes and swizzles, operators, the statics and the free functions.
+
+include "math.ch"
+
+bool SameVector3(Math::FVector3 v, float x, float y, float z) { return v.x == x && v.y == y && v.z == z; }
+bool NearVector3(Math::FVector3 v, float x, float y, float z) { return Math::NearlyEqual(v, Math::FVector3(x, y, z), 1e-5f); }
+
+[test("math.vector")]
+class MathVectorTests {
+	[test("layout")]
+	public static void TestLayout() {
+		assert_eq(8, (int32)sizeof(Math::FVector2), "two floats");
+		assert_eq(12, (int32)sizeof(Math::FVector3), "three floats, no padding lane");
+		assert_eq(16, (int32)sizeof(Math::FVector4), "four floats");
+		assert_eq(32, (int32)sizeof(Math::DVector4), "four doubles");
+		assert_eq(12, (int32)sizeof(Math::IVector3), "three int32s");
+		Math::FVector3[2] pair;
+		pair[1] = Math::FVector3(4.0f, 5.0f, 6.0f);
+		float* raw = (float*)&pair;
+		assert_feq(4.0, raw[3], 0.0, "array elements are 12 bytes apart");
+	}
+
+	[test("construction")]
+	public static void TestConstruction() {
+		Math::FVector3 zero;
+		assert_true(zero == Math::FVector3::Zero, "a default vector is zero");
+		assert_true(SameVector3(Math::FVector3(2.0f), 2.0f, 2.0f, 2.0f), "a splat");
+		assert_true(SameVector3(Math::FVector3(1.0f, 2.0f, 3.0f), 1.0f, 2.0f, 3.0f), "per lane");
+		Math::FVector4 four = Math::FVector4(1.0f, 2.0f, 3.0f, 4.0f);
+		assert_true(SameVector3(Math::FVector3(four), 1.0f, 2.0f, 3.0f), "the first three lanes of a vector4");
+		Math::FVector2 two = Math::FVector2(four);
+		assert_true(two.x == 1.0f && two.y == 2.0f, "the first two lanes");
+		assert_true(SameVector3(Math::FVector3(two, 9.0f), 1.0f, 2.0f, 9.0f), "a vector2 and a z");
+		Math::FVector4 joined = Math::FVector4(Math::FVector2(1.0f, 2.0f), Math::FVector2(3.0f, 4.0f));
+		assert_true(joined == four, "two vector2s");
+		assert_true(Math::FVector4(Math::FVector3(1.0f, 2.0f, 3.0f), 4.0f) == four, "a vector3 and a w");
+		assert_true(Math::FVector4(two, 3.0f, 4.0f) == four, "a vector2, z and w");
+		packed float[3] lanes = { 7.0f, 8.0f, 9.0f };
+		assert_true(SameVector3(Math::FVector3(lanes), 7.0f, 8.0f, 9.0f), "from packed lanes");
+	}
+
+	[test("lanes")]
+	public static void TestLanes() {
+		Math::FVector4 v = Math::FVector4(1.0f, 2.0f, 3.0f, 4.0f);
+		assert_true(v.r == 1.0f && v.g == 2.0f && v.b == 3.0f && v.a == 4.0f, "rgba view the same lanes");
+		assert_feq(3.0, v[2], 0.0, "index reads a lane");
+		v[0] = 10.0f;
+		assert_feq(10.0, v.x, 0.0, "index writes a lane");
+		int64 i = 3;
+		assert_feq(4.0, v[i], 0.0, "a runtime index");
+		Math::FVector3 reversed = Math::FVector3(v.zyx);
+		assert_true(SameVector3(reversed, 3.0f, 2.0f, 10.0f), "a swizzle run");
+		v.xy = v.wz;
+		assert_true(v.x == 4.0f && v.y == 3.0f, "a swizzle write");
+		v.data = { 0.0f, 0.0f, 0.0f, 1.0f };
+		assert_true(v == Math::FVector4::UnitW, "the whole data array");
+	}
+
+	[test("arithmetic")]
+	public static void TestArithmetic() {
+		Math::FVector3 a = Math::FVector3(1.0f, 2.0f, 3.0f);
+		Math::FVector3 b = Math::FVector3(4.0f, 6.0f, 8.0f);
+		assert_true(SameVector3(a + b, 5.0f, 8.0f, 11.0f), "add");
+		assert_true(SameVector3(b - a, 3.0f, 4.0f, 5.0f), "subtract");
+		assert_true(SameVector3(a * b, 4.0f, 12.0f, 24.0f), "component-wise multiply");
+		assert_true(SameVector3(a * 2.0f, 2.0f, 4.0f, 6.0f), "scale");
+		assert_true(SameVector3(b / a, 4.0f, 3.0f, 8.0f / 3.0f), "component-wise divide");
+		assert_true(SameVector3(b / 2.0f, 2.0f, 3.0f, 4.0f), "divide by a scalar");
+		assert_true(SameVector3(-a, -1.0f, -2.0f, -3.0f), "negate");
+		Math::FVector3 c = a;
+		c += b;
+		assert_true(SameVector3(c, 5.0f, 8.0f, 11.0f), "+=");
+		c -= a;
+		assert_true(c == b, "-=");
+		c *= 0.5f;
+		assert_true(SameVector3(c, 2.0f, 3.0f, 4.0f), "*= a scalar");
+		c *= a;
+		assert_true(SameVector3(c, 2.0f, 6.0f, 12.0f), "*= a vector");
+		c /= 2.0f;
+		assert_true(SameVector3(c, 1.0f, 3.0f, 6.0f), "/= a scalar");
+		c /= a;
+		assert_true(SameVector3(c, 1.0f, 1.5f, 2.0f), "/= a vector");
+		assert_true(a != b && !(a != a), "!=");
+		assert_true(!(a == Math::FVector3(1.0f, 2.0f, 4.0f)), "one lane differs");
+	}
+
+	[test("statics")]
+	public static void TestStatics() {
+		assert_true(SameVector3(Math::FVector3::One, 1.0f, 1.0f, 1.0f), "one");
+		assert_true(SameVector3(Math::FVector3::UnitX, 1.0f, 0.0f, 0.0f), "unit x");
+		assert_true(Math::FVector3::Right == Math::FVector3::UnitX && Math::FVector3::Left == -Math::FVector3::Right, "right and left");
+		assert_true(Math::FVector3::Up == Math::FVector3::UnitY && Math::FVector3::Down == -Math::FVector3::Up, "up and down");
+		assert_true(Math::FVector3::Forward == Math::FVector3::UnitZ && Math::FVector3::Backward == -Math::FVector3::Forward,
+			"forward is +Z");
+		assert_true(Math::FVector2::Up.y == 1.0f && Math::FVector2::Left.x == -1.0f, "vector2 directions");
+		assert_true(Math::FVector4::UnitW.w == 1.0f && Math::FVector4::Zero.w == 0.0f, "vector4 units");
+		assert_true(Math::IVector3::One.z == 1, "int statics");
+	}
+
+	[test("products")]
+	public static void TestProducts() {
+		Math::FVector3 a = Math::FVector3(1.0f, 2.0f, 3.0f);
+		Math::FVector3 b = Math::FVector3(4.0f, -5.0f, 6.0f);
+		assert_feq(12.0, Math::Dot(a, b), 0.0, "dot of vector3s");
+		assert_feq(0.0, Math::Dot(Math::FVector3::Right, Math::FVector3::Up), 0.0, "perpendicular dot");
+		assert_feq(70.0, Math::Dot(Math::FVector4(1.0f, 2.0f, 3.0f, 4.0f), Math::FVector4(5.0f, 6.0f, 7.0f, 8.0f)), 0.0, "dot of vector4s");
+		assert_feq(11.0, Math::Dot(Math::FVector2(1.0f, 2.0f), Math::FVector2(3.0f, 4.0f)), 0.0, "dot of vector2s");
+		assert_true(Math::Cross(Math::FVector3::Right, Math::FVector3::Up) == Math::FVector3::Forward, "left-handed: right x up is forward");
+		assert_true(Math::Cross(Math::FVector3::Up, Math::FVector3::Forward) == Math::FVector3::Right, "up x forward is right");
+		Math::FVector3 ab = Math::Cross(a, b);
+		assert_true(SameVector3(ab, 27.0f, 6.0f, -13.0f), "a general cross");
+		assert_true(Math::Cross(b, a) == -ab, "cross anti-commutes");
+		assert_feq(0.0, Math::Dot(ab, a), 1e-5, "the cross is perpendicular to a");
+		assert_true(Math::Cross(a, a) == Math::FVector3::Zero, "a vector crossed with itself");
+		assert_feq(1.0, Math::Cross(Math::FVector2::Right, Math::FVector2::Up), 0.0, "2D cross is positive counter-clockwise");
+		assert_feq(-1.0, Math::Cross(Math::FVector2::Up, Math::FVector2::Right), 0.0, "and negative clockwise");
+	}
+
+	[test("lengths")]
+	public static void TestLengths() {
+		Math::FVector3 v = Math::FVector3(1.0f, 2.0f, 2.0f);
+		assert_feq(9.0, Math::LengthSquared(v), 0.0, "length squared");
+		assert_feq(3.0, Math::Length(v), 0.0, "length");
+		assert_feq(5.0, Math::Length(Math::FVector2(3.0f, 4.0f)), 0.0, "vector2 length");
+		assert_feq(2.0, Math::Length(Math::FVector4(1.0f, 1.0f, 1.0f, 1.0f)), 0.0, "vector4 length");
+		assert_feq(0.0, Math::Length(Math::FVector3::Zero), 0.0, "zero length");
+		assert_feq(25.0, Math::DistanceSquared(Math::FVector2(1.0f, 1.0f), Math::FVector2(4.0f, 5.0f)), 0.0, "distance squared");
+		assert_feq(3.0, Math::Distance(Math::FVector3::Zero, v), 0.0, "distance");
+		assert_feq(Math::Distance(v, Math::FVector3::One), Math::Distance(Math::FVector3::One, v), 0.0, "distance is symmetric");
+		assert_feq(1.7320508075688772, Math::Length(Math::DVector3(1.0, 1.0, 1.0)), 1e-15, "double length keeps double precision");
+	}
+
+	[test("normalized")]
+	public static void TestNormalized() {
+		Math::FVector3 n = Math::Normalized(Math::FVector3(3.0f, 0.0f, 4.0f));
+		assert_true(NearVector3(n, 0.6f, 0.0f, 0.8f), "a unit vector the same way");
+		assert_feq(1.0, Math::Length(Math::Normalized(Math::FVector3(-7.0f, 2.0f, 0.5f))), 1e-6, "length 1");
+		assert_true(Math::Normalized(Math::FVector3::Zero) == Math::FVector3::Zero, "zero stays zero");
+		assert_true(Math::Normalized(Math::FVector2(0.0f, -5.0f)) == Math::FVector2::Down, "vector2");
+		assert_true(Math::Normalized(Math::FVector4(0.0f, 0.0f, 0.0f, 2.0f)) == Math::FVector4::UnitW, "vector4");
+		assert_true(Math::Normalized(Math::FVector4::Zero) == Math::FVector4::Zero, "zero vector4 stays zero");
+	}
+
+	[test("angle_reflect_project")]
+	public static void TestAngleReflectProject() {
+		assert_feq(Math::kHalfPi, Math::Angle(Math::FVector3::Right, Math::FVector3(0.0f, 3.0f, 0.0f)), 1e-6, "perpendicular");
+		assert_feq(0.0, Math::Angle(Math::FVector3(2.0f, 2.0f, 0.0f), Math::FVector3(1.0f, 1.0f, 0.0f)), 1e-3, "parallel");
+		assert_feq(Math::kPi, Math::Angle(Math::FVector3::Up, Math::FVector3::Down), 1e-6, "opposite");
+		assert_feq(Math::kPi / 4.0f, Math::Angle(Math::FVector3::Right, Math::FVector3(1.0f, 1.0f, 0.0f)), 1e-6, "45 degrees");
+		assert_feq(0.0, Math::Angle(Math::FVector3::Zero, Math::FVector3::Up), 0.0, "a zero vector gives zero");
+		Math::FVector3 down = Math::FVector3(1.0f, -1.0f, 0.0f);
+		assert_true(SameVector3(Math::Reflect(down, Math::FVector3::Up), 1.0f, 1.0f, 0.0f), "reflect off the floor");
+		assert_true(Math::Reflect(Math::FVector3::Right, Math::FVector3::Up) == Math::FVector3::Right, "parallel to the plane is unchanged");
+		Math::FVector3 v = Math::FVector3(3.0f, 4.0f, 5.0f);
+		assert_true(SameVector3(Math::Project(v, Math::FVector3(0.0f, 2.0f, 0.0f)), 0.0f, 4.0f, 0.0f), "project onto a non-unit axis");
+		assert_true(Math::Project(v, Math::FVector3::Zero) == Math::FVector3::Zero, "project onto zero");
+		assert_true(NearVector3(Math::Project(v, Math::FVector3(1.0f, 1.0f, 0.0f)), 3.5f, 3.5f, 0.0f), "project onto a diagonal");
+	}
+
+	[test("component_wise")]
+	public static void TestComponentWise() {
+		Math::FVector3 a = Math::FVector3(1.0f, -5.0f, 3.0f);
+		Math::FVector3 b = Math::FVector3(2.0f, -6.0f, 3.0f);
+		assert_true(SameVector3(Math::Min(a, b), 1.0f, -6.0f, 3.0f), "min");
+		assert_true(SameVector3(Math::Max(a, b), 2.0f, -5.0f, 3.0f), "max");
+		assert_true(SameVector3(Math::Clamp(Math::FVector3(-2.0f, 0.5f, 9.0f), 0.0f, 1.0f), 0.0f, 0.5f, 1.0f), "clamp");
+		assert_true(SameVector3(Math::Abs(a), 1.0f, 5.0f, 3.0f), "abs");
+		assert_true(SameVector3(Math::Lerp(Math::FVector3::Zero, b, 0.5f), 1.0f, -3.0f, 1.5f), "lerp");
+		Math::FVector3 f = Math::FVector3(1.5f, -1.5f, 2.0f);
+		assert_true(SameVector3(Math::Floor(f), 1.0f, -2.0f, 2.0f), "floor");
+		assert_true(SameVector3(Math::Ceil(f), 2.0f, -1.0f, 2.0f), "ceil");
+		assert_true(SameVector3(Math::Round(f), 2.0f, -2.0f, 2.0f), "round");
+		assert_true(SameVector3(Math::Fract(f), 0.5f, 0.5f, 0.0f), "fract");
+		assert_true(NearVector3(Math::Radians(Math::FVector3(180.0f, 90.0f, 0.0f)), Math::kPi, Math::kHalfPi, 0.0f), "radians");
+		assert_true(NearVector3(Math::Degrees(Math::FVector3(Math::kPi, 0.0f, -Math::kHalfPi)), 180.0f, 0.0f, -90.0f), "degrees");
+		Math::FVector2 two = Math::Max(Math::FVector2(1.0f, 4.0f), Math::FVector2(3.0f, 2.0f));
+		assert_true(two.x == 3.0f && two.y == 4.0f, "vector2 max");
+		Math::FVector4 four = Math::Min(Math::FVector4(1.0f, 4.0f, -1.0f, 0.0f), Math::FVector4(3.0f, 2.0f, -2.0f, 0.0f));
+		assert_true(four == Math::FVector4(1.0f, 2.0f, -2.0f, 0.0f), "vector4 min");
+		assert_true(Math::NearlyEqual(a, a + Math::FVector3(1e-7f), 1e-5f), "nearly equal");
+		assert_true(!Math::NearlyEqual(a, b, 0.5f), "not nearly equal");
+		assert_true(Math::NearlyEqual(Math::FVector4(1.0f), Math::FVector4(1.0f, 1.0f, 1.0f, 1.25f), 0.25f), "vector4 at the bound");
+	}
+
+	// The component-wise functions run on SIMD intrinsics and keep the scalar functions' answers lane by lane.
+	[test("component_wise_as_scalar")]
+	public static void TestComponentWiseAsScalar() {
+		float zero = 0.0f;
+		float nan = zero / zero;
+		Math::FVector3 a = Math::FVector3(nan, 1.0f, -0.0f);
+		Math::FVector3 b = Math::FVector3(2.0f, nan, 0.0f);
+		Math::FVector3 low = Math::Min(a, b);
+		Math::FVector3 high = Math::Max(a, b);
+		assert_true(low.x != low.x && low.y == Math::Min(1.0f, nan) && high.y == Math::Max(1.0f, nan), "a NaN lane answers as the scalar Min / Max");
+		assert_true(1.0f / low.z < 0.0f && 1.0f / high.z < 0.0f, "Min(-0, 0) and Max(-0, 0) keep the first, as std::min / std::max");
+		assert_true(1.0f / Math::Abs(Math::FVector3(-0.0f)).x > 0.0f, "Abs clears the sign of -0");
+		Math::DVector4 d = Math::DVector4(-2.5, 2.5, -0.5, 0.49);
+		Math::DVector4 r = Math::Round(d);
+		assert_true(r.x == -3.0 && r.y == 3.0 && r.z == -1.0 && r.w == 0.0, "Round takes halves away from zero");
+		assert_true(Math::Floor(Math::FVector2(-0.5f, 7.99f)) == Math::FVector2(-1.0f, 7.0f), "Floor of a vector2");
+		assert_true(Math::FVector4(1.0f, 2.0f, 3.0f, 4.0f) != Math::FVector4(1.0f, 2.0f, 3.0f, 4.5f), "one lane decides inequality");
+		assert_true(!Math::NearlyEqual(Math::FVector3(nan), Math::FVector3(nan), 1.0f), "NaN is never nearly equal");
+		assert_feq(30.0, Math::Dot(Math::FVector4(1.0f, 2.0f, 3.0f, 4.0f), Math::FVector4(1.0f, 2.0f, 3.0f, 4.0f)), 0.0, "dot");
+		assert_feq(14.0, Math::Dot(Math::FVector3(1.0f, 2.0f, 3.0f), Math::FVector3(1.0f, 2.0f, 3.0f)), 0.0, "dot of three lanes");
+	}
+
+	[test("integer_vectors")]
+	public static void TestIntegerVectors() {
+		Math::IVector3 a = Math::IVector3(7, -7, 9);
+		Math::IVector3 b = Math::IVector3(2, 2, 3);
+		Math::IVector3 sum = a + b;
+		assert_true(sum.x == 9 && sum.y == -5 && sum.z == 12, "int add");
+		Math::IVector3 quotient = a / b;
+		assert_true(quotient.x == 3 && quotient.y == -3 && quotient.z == 3, "int division truncates");
+		assert_eq(27, Math::Dot(a, b), "int dot");
+		Math::IVector3 c = Math::Cross(Math::IVector3(1, 0, 0), Math::IVector3(0, 1, 0));
+		assert_true(c.x == 0 && c.y == 0 && c.z == 1, "int cross");
+		Math::IVector3 m = Math::Max(a, b);
+		assert_true(m.x == 7 && m.y == 2 && m.z == 9, "int max");
+		Math::IVector3 abs = Math::Abs(a);
+		assert_eq(7, abs.y, "int abs");
+		Math::UVector2 u = Math::UVector2(4000000000u, 3u) / Math::UVector2(2u, 2u);
+		assert_true(u.x == 2000000000u && u.y == 1u, "unsigned lanes divide unsigned");
+	}
+}

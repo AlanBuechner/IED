@@ -1,0 +1,67 @@
+// Lanes to and from memory (D-62): simd_load / simd_store at any element alignment, the masked forms (lanes off are
+// zero and their memory is not touched), and gathers through integer lanes of any width and signedness. Arrays
+// decay to their first element. main returns the failures.
+int32 Differs(float actual, float expected) { return actual == expected ? 0 : 1; }
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 LoadsAndStores() {
+	int32 failures = 0;
+	float[20] values;
+	for (int32 i = 0; i < 20; ++i) values[i] = (float)i;
+	packed float[8] eight = simd_load(&values[1], 8);       // only float alignment
+	failures += Differs(eight[0], 1.0f) + Differs(eight[7], 8.0f);
+	packed float[4] first = simd_load(values, 4);            // an array decays to its first element
+	failures += Differs(first[3], 3.0f);
+	simd_store(&values[11], eight * 2.0f);
+	failures += Differs(values[10], 10.0f) + Differs(values[11], 2.0f) + Differs(values[18], 16.0f) + Differs(values[19], 19.0f);
+	const int32[6] constants = { 6, 5, 4, 3, 2, 1 };
+	packed int32[3] middle = simd_load(&constants[2], 3);    // a pointer to const reads
+	failures += DiffersI(middle[0], 4) + DiffersI(middle[2], 2);
+	int64[2] pair;
+	packed int64[2] both = { -1, 7 };
+	simd_store(pair, both);
+	failures += DiffersI(pair[0], -1) + DiffersI(pair[1], 7);
+	return failures;
+}
+
+int32 MaskedAccess() {
+	int32 failures = 0;
+	float[8] values = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f };
+	packed int32[4] which = { 1, 0, 1, 0 };
+	packed bool[4] on = which == 1;
+	packed float[4] loaded = simd_load_masked(&values[4], on);
+	failures += Differs(loaded[0], 5.0f) + Differs(loaded[1], 0.0f) + Differs(loaded[2], 7.0f) + Differs(loaded[3], 0.0f);
+	simd_store_masked(values, simd_splat(-1.0f, 4), on);
+	failures += Differs(values[0], -1.0f) + Differs(values[1], 2.0f) + Differs(values[2], -1.0f) + Differs(values[3], 4.0f);
+	float[3] tail = { 10.0f, 20.0f, 30.0f };
+	packed int32[4] lane = { 0, 1, 2, 3 };
+	packed float[4] three = simd_load_masked(tail, lane < 3);   // the fourth lane, past the array, is not read
+	failures += Differs(three[2], 30.0f) + Differs(three[3], 0.0f);
+	return failures;
+}
+
+int32 Gathers() {
+	int32 failures = 0;
+	double[10] table;
+	for (int32 i = 0; i < 10; ++i) table[i] = (double)(i * i);
+	packed int32[4] indices = { 9, 0, 3, 3 };
+	packed double[4] squares = simd_gather(table, indices);
+	failures += squares[0] == 81.0 && squares[1] == 0.0 && squares[2] == 9.0 && squares[3] == 9.0 ? 0 : 1;
+	packed int64[2] wide = { 4, 8 };
+	packed double[2] fromWide = simd_gather(&table[1], wide);    // offsets from the pointer
+	failures += fromWide[0] == 25.0 && fromWide[1] == 81.0 ? 0 : 1;
+	packed uint32[2] unsignedIndex = { 2u, 7u };
+	packed double[2] fromUnsigned = simd_gather(table, unsignedIndex);
+	failures += fromUnsigned[1] == 49.0 ? 0 : 1;
+	packed int32[4] backwards = { -1, -2, -3, -4 };
+	packed double[4] behind = simd_gather(&table[9], backwards);  // signed indices reach before the pointer
+	failures += behind[0] == 64.0 && behind[3] == 25.0 ? 0 : 1;
+	packed int32[4] farAway = { 1, 100000000, 2, 100000000 };
+	packed double[4] masked = simd_gather_masked(table, farAway, farAway < 10);   // lanes off are never read
+	failures += masked[0] == 1.0 && masked[1] == 0.0 && masked[2] == 4.0 && masked[3] == 0.0 ? 0 : 1;
+	return failures;
+}
+
+int32 main() {
+	return LoadsAndStores() + MaskedAccess() + Gathers();
+}

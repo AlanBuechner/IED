@@ -1,0 +1,4 @@
+struct A { int32 x; }
+struct B { int32 y; }
+int32 TakeA(A* a) { return a->x; }
+int main() { B b; B* bp = &b; int32 r = TakeA(bp); return 0; }

@@ -1,0 +1,2 @@
+class B { int32 v; public void Set(int32 x) { v = x; } public int32 Get() { return v; } }
+int main() { int32 a = 1; B b; b.Set(a); a = 2; return (b.Get() == 1 && a == 2) ? 0 : 1; }

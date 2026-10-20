@@ -1,0 +1,44 @@
+// BUG-106: an array of objects can be copied by value inside an expression (an argument, a return) and an
+// aggregate that leaves out an array field constructs its elements; both need a loop inside the expression.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 g_copies = 0;
+int32 g_destroys = 0;
+class Item {
+	public int32 v;
+	[operator("create")] public void Init() { v = 4; }
+	[operator("copy")] public void Copy(const Item& other) { v = other.v; g_copies++; }
+	[operator("delete")] public void Delete() { if (v != 0) g_destroys++; }
+}
+
+class Holder {
+	public int32 id;
+	public Item[3] items;
+}
+
+int32 Sum(Item[3] items) { return items[0].v + items[1].v + items[2].v; }
+
+int32 main() {
+	{
+		Item[3] arr;
+		arr[1].v = 10;
+		Check(Sum(arr) == 18, "a by-value array argument is a copy of each element");
+		Check(g_copies == 3, "one copy per element");
+		Check(arr[1].v == 10, "the caller's array is untouched");
+	}
+	Check(g_destroys == 6, "the copies and the originals are each destroyed once");
+
+	g_destroys = 0;
+	{
+		Holder h = Holder(7);
+		Check(h.id == 7 && h.items[0].v == 4 && h.items[2].v == 4, "an omitted array field constructs its elements");
+		Holder* p = new Holder{ 8 };
+		Check(p->items[1].v == 4, "the same for new T{...}");
+	}
+	Check(g_destroys == 3, "the constructed elements of the local are destroyed");
+	return g_failures;
+}

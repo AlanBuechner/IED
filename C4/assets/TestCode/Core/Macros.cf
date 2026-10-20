@@ -1,0 +1,78 @@
+// Core - Macro Tests - Implementation
+include "Macros.ch"
+include "../Framework/Assert.ch"
+include "MacrosBase.ch"   // defines MACRO_CONST / MACRO_FN / MACRO_TYPE, inherited below
+
+// Local macros for this file (not visible to MacrosBase.ch).
+#define LOCAL_PI 3
+#define DOUBLE(x) ((x) * 2)
+#define TRIPLE(x) (DOUBLE(x) + (x))   // composition: uses another macro
+
+void TestMacroObjectLike() {
+	// Object-like macro in expression position.
+	int32 a = MACRO_CONST;            // 42 (inherited from MacrosBase.ch)
+	AssertIntEquals(42, a, "object-like inherited const");
+
+	int32 b = LOCAL_PI;               // 3 (local to this file)
+	AssertIntEquals(3, b, "object-like local const");
+
+	// Object-like macro in type position.
+	MACRO_TYPE t = MACRO_CONST;       // int32 t = 42
+	AssertIntEquals(42, t, "object-like type position");
+}
+
+void TestMacroFunctionLike() {
+	// Function-like macro with one param (inherited).
+	int32 a = MACRO_FN(10);           // ((10) + 1) = 11
+	AssertIntEquals(11, a, "function-like inherited");
+
+	// Function-like local macro.
+	int32 b = DOUBLE(5);              // (5 * 2) = 10
+	AssertIntEquals(10, b, "function-like double");
+
+	// Precedence: the body is parenthesised so it behaves as a unit.
+	int32 c = DOUBLE(2) + DOUBLE(3);  // 4 + 6 = 10
+	AssertIntEquals(10, c, "function-like precedence");
+}
+
+void TestMacroUndefRedefine() {
+	#define TMP 1
+	int32 a = TMP;                    // 1
+	#undef TMP
+	#define TMP 9
+	int32 b = TMP;                    // 9
+	AssertIntEquals(1, a, "undef/redefine before");
+	AssertIntEquals(9, b, "undef/redefine after");
+}
+
+void TestMacroStringSafety() {
+	// A macro name inside a string literal must NOT be expanded. Compare two literals:
+	// if "MACRO_CONST" had been expanded to 42, this would not match the plain text.
+	int32 same = strcmp("MACRO_CONST stays MACRO_CONST", "MACRO_CONST stays MACRO_CONST");
+	AssertIntEquals(0, same, "string literal not expanded");
+
+	// The macro itself still expands outside strings on the same line.
+	int32 v = MACRO_CONST;
+	AssertIntEquals(42, v, "macro outside string");
+}
+
+void TestMacroComposition() {
+	// TRIPLE uses DOUBLE internally: (DOUBLE(x) + x) = (x*2) + x = 3x.
+	int32 a = TRIPLE(4);              // 12
+	AssertIntEquals(12, a, "macro composition triple");
+
+	#define QUAD(x) (TRIPLE(x) + (x))
+	int32 b = QUAD(2);                // 6 + 2 = 8
+	AssertIntEquals(8, b, "nested macro composition");
+}
+
+void TestMacroIncludeInheritance() {
+	// All three macros come from MacrosBase.ch via the include at the top of this file.
+	int32 sum = MACRO_CONST + MACRO_FN(0);   // 42 + ((0)+1) = 43
+	AssertIntEquals(43, sum, "include-chain inheritance");
+
+	// A macro defined here is NOT visible to MacrosBase.ch (no leak into included files).
+	// MacrosBase.ch's body never used LOCAL_PI/DOUBLE; if it had, this file would have
+	// failed to compile because those names are not in its include chain.
+	AssertTrue(LOCAL_PI == 3);
+}

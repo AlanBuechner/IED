@@ -1,0 +1,10 @@
+struct V {
+	public int32 x;
+	[operator("+")] public V Add(const V& o) { V r; r.x = x + o.x; return r; }
+}
+int32 main() {
+	const V a;
+	V b;
+	V c = a + b;
+	return c.x;
+}

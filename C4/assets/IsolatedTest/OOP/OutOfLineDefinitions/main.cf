@@ -1,0 +1,49 @@
+// Out-of-line definitions find their declarations: parameter names may differ, a namespaced function written as
+// `Ns::F` is the one declared in the namespace, and two class templates of one name in different namespaces each
+// keep their own bodies (BUG-211). main returns the failures.
+class Box {
+	public int32 value;
+	public void Set(int32 amount);
+	public int32 Get() const;
+	public static int32 Twice(int32 x);
+}
+public void Box::Set(int32 renamed) { value = renamed; }
+public int32 Box::Get() const { return value; }
+public int32 Box::Twice(int32 y) { return y * 2; }
+
+namespace Shapes { int32 Sides(int32 kind); }
+int32 Shapes::Sides(int32 shape) { return shape + 2; }
+
+int32 Scale(int32 a);
+int32 Scale(int32 b) { return b * 10; }
+
+namespace First {
+	template<T> struct Holder {
+		public T item;
+		public int32 Id();
+	}
+}
+template<T> public int32 First::Holder::Id() { return 1; }
+
+template<T> struct Holder {
+	public T item;
+	public int32 Id();
+	public void Put(T thing);
+}
+template<T> public int32 Holder::Id() { return 2; }
+template<U> public void Holder::Put(U thing) { item = thing; }
+
+int32 main() {
+	int32 failures = 0;
+	Box b;
+	b.Set(4);
+	if (b.Get() != 4 || Box::Twice(5) != 10) failures += 1;
+	if (Shapes::Sides(1) != 3) failures += 1;
+	if (Scale(3) != 30) failures += 1;
+	First::Holder<int32> first;
+	Holder<int32> second;
+	if (first.Id() != 1 || second.Id() != 2) failures += 1;
+	second.Put(8);
+	if (second.item != 8) failures += 1;
+	return failures;
+}

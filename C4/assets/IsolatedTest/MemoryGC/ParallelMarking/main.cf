@@ -1,0 +1,114 @@
+// Parallel marking (B32): a heap past 8 MiB is marked by helper threads beside the collecting one. A large graph -
+// trees, cross links, pointers held only in a scan region (a Core::Array), in thread_locals and on other threads'
+// stacks - survives repeated collections intact, garbage is reclaimed, finalizers run once, and the results equal
+// those of marking on one thread. A conservative collector may keep an object a stale stack slot still names, so
+// the finalizer check allows a few survivors. main returns the failures.
+include "bedrock.ch"
+
+class Node {
+	public int64 value;
+	public Node* left;
+	public Node* right;
+	public Node* link;      // a cross link into another tree
+	public int64[3] padding;
+}
+
+class Finalized {
+	public int64 id;
+	[operator("delete")] public void End() { atomic_fetch_add(&g_finalized, 1, MemoryOrder::SeqCst); }
+}
+
+int64 g_finalized = 0;
+thread_local Node* t_tree = null;
+
+Node* Tree(int64 seed, int32 depth) {
+	Node* n = new Node;
+	n->value = seed;
+	if (depth > 0) {
+		n->left = Tree(seed * 2, depth - 1);
+		n->right = Tree(seed * 2 + 1, depth - 1);
+	}
+	return n;
+}
+
+int64 Sum(Node* n) { return n == null ? 0 : n->value + Sum(n->left) + Sum(n->right); }
+
+void Link(Node* from, Node* to, int32 depth) {
+	if (from == null || to == null || depth == 0) return;
+	from->link = to;
+	Link(from->left, to->right, depth - 1);
+	Link(from->right, to->left, depth - 1);
+}
+
+int64 SumLinks(Node* n) {
+	if (n == null) return 0;
+	return (n->link != null ? n->link->value : 0) + SumLinks(n->left) + SumLinks(n->right);
+}
+
+void Finalizable(int32 count) {
+	for (int32 i = 0; i < count; i++) {
+		Finalized* f = new Finalized;
+		f->id = i;
+	}
+}
+
+void Garbage(int32 count) {
+	for (int32 i = 0; i < count; i++) {
+		Node* g = new Node;
+		g->value = i;
+	}
+}
+
+struct Holder { public int32 failures; public int64 expected; }
+
+int32 Run(int32 markThreads) {
+	GC::SetMarkThreads(markThreads);
+	int32 failures = 0;
+	Core::Array<Node*> forest;
+	for (int32 t = 0; t < 12; t++) forest.Push(Tree(t * 100000, 14));   // 12 x 32767 nodes, about 25 MiB
+	for (int32 t = 0; t + 1 < 12; t++) Link(forest[t], forest[t + 1], 14);
+	int64 expected = 0;
+	for (int32 t = 0; t < 12; t++) expected += Sum(forest[t]);
+	int64 links = 0;
+	for (int32 t = 0; t + 1 < 12; t++) links += SumLinks(forest[t]);
+	t_tree = Tree(77, 12);
+	const int64 local = Sum(t_tree);
+	Holder* holder = new Holder;
+	Holder* h = holder;
+	Threading::Atomic<int32>* go = new Threading::Atomic<int32>;
+	Threading::Thread other = Threading::Thread::Run([h, go]() {
+		Node* mine = Tree(5, 13);                   // only this thread's stack holds it
+		h->expected = Sum(mine);
+		go->Store(1);
+		while (go->Load() == 1) Threading::Thread::Yield();
+		if (Sum(mine) != h->expected) h->failures++;
+	});
+	while (go->Load() == 0) Threading::Thread::Yield();
+	const int64 finalizedBefore = atomic_load(&g_finalized, MemoryOrder::SeqCst);
+	Finalizable(100);
+	for (int32 round = 0; round < 6; round++) {
+		Garbage(100000);
+		GC::Collect();
+		int64 sum = 0;
+		for (int32 t = 0; t < 12; t++) sum += Sum(forest[t]);
+		if (sum != expected) failures++;
+		int64 linked = 0;
+		for (int32 t = 0; t + 1 < 12; t++) linked += SumLinks(forest[t]);
+		if (linked != links) failures++;
+		if (Sum(t_tree) != local) failures++;
+	}
+	go->Store(2);
+	other.Join();
+	failures += holder->failures;
+	GC::Collect();
+	const int64 finalized = atomic_load(&g_finalized, MemoryOrder::SeqCst) - finalizedBefore;
+	if (finalized < 95 || finalized > 100) failures++;   // a stale stack slot may keep one; none ends twice
+	if (GC::GetStats().liveBytes > (uint64)64 << 20) failures++;          // the garbage went away
+	return failures;
+}
+
+int32 main() {
+	int32 failures = Run(8);
+	failures += Run(1);
+	return failures;
+}

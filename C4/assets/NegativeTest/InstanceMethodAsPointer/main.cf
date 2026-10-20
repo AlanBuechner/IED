@@ -1,0 +1,8 @@
+struct S {
+	public int32 k;
+	public int32 Inst(int32 x) { return x * k; }
+}
+int32 main() {
+	funcptr<int32(int32)> f = S::Inst;
+	return 0;
+}

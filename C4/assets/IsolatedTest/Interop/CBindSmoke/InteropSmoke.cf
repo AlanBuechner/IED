@@ -1,0 +1,33 @@
+// InteropSmoke - end-to-end C/C++ interop: extern "c" include (CBind-generated bindings) +
+// extern "c" source (foreign .c compiled and linked). Verifies function calls, struct
+// pass-by-value, struct pass-by-pointer, and enums across the language boundary.
+extern "c" include "smoke.h"
+extern "c" source "smoke.c"
+
+int32 g_fail = 0;
+
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+
+int32 main() {
+	// Function call into C.
+	Check(add(2, 3) == 5, "C function call add(2,3)");
+	Check(add(-7, 10) == 3, "C function call add(-7,10)");
+
+	// Struct pass-by-value + enum into C; result returned.
+	Point p;
+	p.x = 6;
+	p.y = 2.5f;
+	int32 r = do_thing(p, GREEN); printf("do_thing returned %d\n", r);
+	Check(r == 14, "struct-by-value + enum into C");
+
+	// Struct pass-by-pointer into C.
+	float f = scale_point(&p, 3.0f);  // p.x * 3 = 18
+	Check((int32)f == 18, "struct-by-pointer into C");
+
+	if (g_fail) { printf("INTEROP TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("INTEROP TESTS OK\n");
+	return 0;
+}
+

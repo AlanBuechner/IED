@@ -1,0 +1,58 @@
+include "file.ch"
+
+namespace FS
+{
+	[operator("create")] void File::Init(const char* path, const char* mode) { handle = file_open(path, mode); }
+
+	void File::Close() {
+		if (handle) file_close(handle);
+		handle = nullptr;
+	}
+
+	int64 File::Read(void* buffer, int64 count) {
+		if (!handle || !buffer || count <= 0) return -1;
+		return file_read(handle, buffer, count);
+	}
+
+	int64 File::Write(const void* bytes, int64 count) {
+		if (!handle || !bytes || count <= 0) return -1;
+		return file_write(handle, (void*)bytes, count);
+	}
+
+	bool File::Flush() { return handle && file_flush(handle) == 0; }
+
+	int64 File::Seek(int64 offset, SeekOrigin origin) {
+		if (!handle) return -1;
+		return file_seek_from(handle, offset, (int32)origin);
+	}
+
+	int64 File::Tell() const { return handle ? file_tell(handle) : -1; }
+
+	int64 File::ReadAll(void* buffer, int64 capacity) {
+		if (!handle || !buffer || capacity <= 0) return -1;
+		int64 total = 0;
+		while (total < capacity) {
+			int64 got = file_read(handle, (char*)buffer + total, capacity - total);
+			if (got <= 0) break;
+			total += got;
+		}
+		return total;
+	}
+
+	Core::String File::ReadText() {
+		Core::String text;
+		char[kReadTextChunkBytes] chunk;
+		while (handle) {
+			int64 got = file_read(handle, &chunk[0], kReadTextChunkBytes);
+			if (got <= 0) break;
+			text.Append(Core::StringView(&chunk[0], got));
+		}
+		return text;
+	}
+
+	bool FileExists(const char* path) { return file_exists(path) != 0; }
+
+	int64 FileSize(const char* path) { return file_size(path); }
+
+	bool RemoveFile(const char* path) { return file_delete(path) == 0; }
+}

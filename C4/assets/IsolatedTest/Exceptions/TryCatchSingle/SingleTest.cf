@@ -1,0 +1,25 @@
+int32 g_caught = -1;
+
+void Log(int32 v) { printf("log %d\n", v); fflush(nullptr); }
+
+void DoThrow(int32 v) {
+	throw v;
+}
+
+int32 main() {
+	Log(0);
+	try {
+		Log(1);
+		DoThrow(7);
+		Log(9);
+	} catch (int32 e) {
+		g_caught = e;
+		Log(3);
+	} finally {
+		Log(4);
+	}
+	Log(5);
+	if (g_caught != 7) { printf("FAIL caught=%d\n", g_caught); return 1; }
+	printf("SINGLE OK\n");
+	return 0;
+}

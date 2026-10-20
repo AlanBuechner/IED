@@ -1,0 +1,4 @@
+int32 main() {
+	defer { return; }
+	return 0;
+}

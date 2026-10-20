@@ -1,0 +1,44 @@
+// A by-value parameter is owned by the callee and destroyed when the callee returns, on every path.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 g_seen = 0;
+
+void Sink(Probe p) { g_seen = *p.live; }
+int32 EarlyReturn(Probe p, bool early) {
+	if (early) return 1;
+	return 2;
+}
+void Thrower(Probe p) { throw 9; }
+
+int32 main() {
+	int32 live = 0;
+	Sink(Probe(&live, 1));
+	Check(g_seen == 1 && live == 0, "the callee destroys a relocated temporary argument");
+	Probe kept = Probe(&live, 2);
+	Sink(kept);
+	Check(g_seen == 2 && live == 1, "the callee destroys its copy; the caller's variable stays alive");
+	Check(EarlyReturn(kept, true) == 1 && live == 1, "an early return destroys the parameter");
+	Check(EarlyReturn(kept, false) == 2 && live == 1, "a normal return destroys the parameter");
+	try { Thrower(kept); } catch (int32 e) { }
+	Check(live == 1 && kept.id == 2, "an exception leaving the callee destroys the parameter");
+	try { Thrower(kept); } catch (int32 e) { }
+	Check(live == 0, "a variable passed at its last use moves into the parameter (D-05), destroyed once");
+	return g_failures;
+}

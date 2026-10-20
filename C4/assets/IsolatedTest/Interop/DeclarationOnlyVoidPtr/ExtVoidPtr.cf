@@ -1,0 +1,32 @@
+// Regression test: pointer types in DECLARATION-ONLY interop bindings.
+//
+// Interop bindings (extern "c"/"c++" include|source) are emitted as declaration-only
+// functions carrying a [link("<foreign symbol>")] annotation. HIRBuilder used to resolve
+// their parameter/return types by BASE NAME ONLY (ResolveType(type->BaseName())), which
+// silently drops pointer indirection: `void*` resolved to bare `void`, and codegen emitted
+// invalid LLVM IR like:
+//     declare void @cbind_IMalloc_Realloc(ptr, void, i64)   // "void type only allowed for results"
+// This surfaced at real-Windows-header scale (windows.h + d3d12.h are full of void*/LPVOID).
+//
+// The fix resolves the FULL type node (ResolveFullType) so indirection layers survive, and
+// compares looked-up FunctionTypes structurally (pointer-equality rejects freshly allocated
+// GcRef/Pointer wrappers even when they denote the same type).
+//
+// Both shapes below are declaration-only (no body), exactly like generated bindings:
+//   1. an extension method with [link] and a void* return + param (the IMalloc::Realloc shape)
+//   2. a free function with [link] and void* params
+// A successful COMPILE is the assertion - it proves codegen produced valid IR for void*.
+
+struct IUnknown {}
+struct IMalloc : public IUnknown {}
+
+[link("cbind_IMalloc_Realloc")]
+void* Realloc(void* pv, uint64 cb) extends IMalloc;
+
+[link("cbind_FreeRealloc")]
+void* FreeRealloc(void* pv, uint64 cb);
+
+int32 main()
+{
+    return 0;
+}

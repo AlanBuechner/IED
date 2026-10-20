@@ -1,0 +1,2 @@
+struct Node { Node next; int x; }
+int main() { return 0; }

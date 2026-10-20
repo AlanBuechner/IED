@@ -1,0 +1,29 @@
+// Types - Function-Scope (Local) Alias Tests (implementation)
+include "../Framework/Assert.ch"
+include "LocalAlias.ch"
+
+template<T> struct LAliasPair {
+	T first, second;
+public void Init(T a, T b) { first = a; second = b; }
+public T Sum() { return first + second; }
+};
+
+// A function-scope `alias` (C++ block-scoped type alias). Before the fix this fell through
+// StmtLowerer::LowerStmt to an internal "statement not yet lowered" failure - the parser accepted it and
+// the model could register it, but HIR had no lowering case. Now it registers in the current scope layer
+// and later statements resolve through it; it dies when the block pops (ordinary C++ scoping).
+void TestLocalAlias() {
+	alias LP = LAliasPair<int32>;
+	LP p; p.Init(10, 20);
+	AssertIntEquals(30, p.Sum(), "function-scope alias used as a type");
+
+	// The alias is scoped to its block: a nested same-name alias shadows it only inside that block.
+	{
+		alias LP = LAliasPair<uint64>;   // shadows within THIS block only
+		LP q; q.Init(100u, 50u);
+		AssertIntEquals(150, (int32)q.Sum(), "nested alias shadows outer in its own block");
+	}
+	// Outer alias still resolves after the nested block popped.
+	LP p2; p2.Init(1, 2);
+	AssertIntEquals(3, p2.Sum(), "outer alias survives nested-block pop");
+}

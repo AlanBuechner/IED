@@ -1,0 +1,29 @@
+// D-22: inside a method, `[this]` (and `[=]` / `[&]` when the body uses a member) captures the object
+// pointer, so members and `this` in the body are the enclosing object's. `[*this]` captures a copy.
+class Accumulator {
+	public int32 total;
+	private int32 secret;
+	[operator("create")] public void Init() { secret = 3; }
+
+	public func<void(int32)> Adder() { return [this](int32 x) { total += x + secret; }; }
+	public func<int32()> Peek() { return [=]() -> int32 { return this->total; }; }
+	public func<void()> Reset() { return [&]() { total = 0; }; }
+	public func<int32()> Snapshot() { return [*this]() -> int32 { return total; }; }
+}
+
+int32 main() {
+	Accumulator acc;
+	acc.total = 0;
+	func<void(int32)> add = acc.Adder();
+	add(1);
+	add(2);
+	if (acc.total != 9) return 1;          // private members are reachable as in the method
+	if (acc.Peek()() != 9) return 2;
+
+	func<int32()> before = acc.Snapshot();
+	acc.Reset()();
+	if (acc.total != 0) return 3;
+	if (before() != 9) return 4;            // the copy kept the old state
+	printf("CAPTURE THIS OK\n");
+	return 0;
+}

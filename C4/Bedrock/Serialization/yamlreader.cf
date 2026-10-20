@@ -1,0 +1,608 @@
+include "yamlreader.ch"
+include "yamlscalar.ch"
+
+namespace Serialization
+{
+	bool IsYamlBlank(int32 byte) { return byte == ' ' || byte == '\t'; }
+	bool IsYamlBreak(int32 byte) { return byte == '\n' || byte == '\r'; }
+	bool IsYamlFlowIndicator(int32 byte) { return byte == ',' || byte == '[' || byte == ']' || byte == '{' || byte == '}'; }
+
+	// A block scalar's header after `|` or `>`: its chomping (`+` keep, `-` strip, 0 clip) and its explicit
+	// indentation (0 when detected from the first line).
+	struct BlockScalarHeader {
+		public int32 chomping;
+		public int32 indent;
+	}
+
+	// One pass over the text. A step that fails records the first error and returns an invalid node or false,
+	// and every caller stops there. A block construct ends with the position at the next line's content (or
+	// the end); an inline value ends at the start of the next line.
+	class YamlReader
+	{
+		[operator("create")] public void Init(Core::StringView text, DomDoc* doc) { this.text = text; this.doc = doc; }
+
+		public ReadResult Read();
+
+	private:
+		private DomNode Document();
+		private DomNode BlockNode(int32 parentIndent);
+		private DomNode BlockMapping(int32 indent);
+		private DomNode BlockSequence(int32 indent);
+		private DomNode MappingValue(int32 indent);
+		private DomNode NestedValue(int32 indent, bool sequenceAtIndent);
+		private DomNode InlineNode(int32 parentIndent);
+		private DomNode PlainScalar(int32 parentIndent);
+		private bool PlainLine(Core::StringBuilder& out);
+		private bool ContinuePlain(int32 parentIndent, Core::StringBuilder& out);
+		private bool DoubleQuoted(Core::StringBuilder& out);
+		private bool SingleQuoted(Core::StringBuilder& out);
+		private void FoldLineBreak(Core::StringBuilder& out);
+		private DomNode BlockScalar(int32 parentIndent);
+		private bool ReadBlockHeader(BlockScalarHeader& header);
+		private int32 DetectBlockIndent(int32 parentIndent) const;
+		private void BlockScalarBody(bool literal, int32 indent, int32 chomping, Core::StringBuilder& out);
+		private DomNode FlowNode();
+		private DomNode FlowSequence();
+		private DomNode FlowMapping();
+		private DomNode FlowValue();
+		private bool FlowKey(Core::String& key);
+		private bool FlowPlain(Core::StringBuilder& out);
+		private void SkipFlowSpace();
+		private bool IsMappingEntry() const;
+		private int64 QuotedEnd(int64 at) const;
+		private bool MappingKey(Core::String& key);
+		private bool EndLine();
+		private void SkipBlankLines();
+		private bool AtDocumentMarker() const;
+		private bool AtSequenceEntry() const { return At('-') && IsBlankOrEndAt(position + 1); }
+		private bool IsBlankOrEndAt(int64 at) const { int32 c = PeekAt(at); return c < 0 || IsYamlBlank(c) || IsYamlBreak(c); }
+		private int32 Column() const;
+		private bool Unsupported();
+		private bool Enter();
+		private void Leave() { depth -= 1; }
+		private void SkipInlineSpace() { while (IsYamlBlank(Peek())) position += 1; }
+		private void SkipLineBreak();
+		private int32 Peek() const { return PeekAt(position); }
+		private int32 PeekAt(int64 at) const { return at >= 0 && at < text.ByteLength() ? text.ByteAt(at) : -1; }
+		private bool At(int32 byte) const { return Peek() == byte; }
+		private bool AtEnd() const { return position >= text.ByteLength(); }
+		private DomNode Fail(const char* message) { return FailAt(position, message); }
+		private DomNode FailAt(int64 offset, const char* message);
+		private bool Failed() const { return error != nullptr; }
+
+		private Core::StringView text;
+		private DomDoc* doc;
+		private int64 position;
+		private int32 depth;
+		private const char* error;
+		private int64 errorAt;
+		private Core::StringBuilder scratch;   // the scalar being read; one at a time
+	}
+
+	// --- document and block structure ---------------------------------------------------------------------
+
+	ReadResult YamlReader::Read() {
+		int64 invalid = Core::InvalidUtf8Offset(text.Data(), text.ByteLength());
+		if (invalid >= 0) return ReadFailure(text, invalid, "the text is not valid UTF-8");
+		if (text.StartsWith(Core::StringView("\xEF\xBB\xBF"))) position = 3;
+		DomNode root = Document();
+		return Failed() ? ReadFailure(text, errorAt, error) : ReadSuccess(root);
+	}
+
+	DomNode YamlReader::Document() {
+		SkipBlankLines();
+		if (Failed()) return DomNode();
+		if (At('%')) return Fail("YAML directives are not supported");
+		if (AtDocumentMarker() && At('-')) {
+			position += 3;
+			SkipInlineSpace();
+			if (At('#') || IsYamlBreak(Peek()) || AtEnd()) {
+				if (!EndLine()) return DomNode();
+				SkipBlankLines();
+			}
+		}
+		DomNode root = AtEnd() || AtDocumentMarker() ? doc->NewNull() : BlockNode(-1);
+		if (Failed()) return DomNode();
+		SkipBlankLines();
+		if (AtDocumentMarker() && At('.')) {
+			position += 3;
+			if (!EndLine()) return DomNode();
+			SkipBlankLines();
+		}
+		if (Failed()) return DomNode();
+		if (AtDocumentMarker()) return Fail("only one YAML document is read");
+		if (!AtEnd()) return Fail("unexpected text after the document");
+		return root;
+	}
+
+	DomNode YamlReader::BlockNode(int32 parentIndent) {
+		if (Unsupported()) return DomNode();
+		int32 column = Column();
+		if (AtSequenceEntry()) return BlockSequence(column);
+		if (IsMappingEntry()) return BlockMapping(column);
+		return InlineNode(parentIndent);
+	}
+
+	DomNode YamlReader::BlockMapping(int32 indent) {
+		if (!Enter()) return DomNode();
+		DomNode mapping = doc->NewObject();
+		for (;;) {
+			if (Unsupported()) return DomNode();
+			Core::String key;
+			if (!MappingKey(key)) return DomNode();
+			DomNode value = MappingValue(indent);
+			if (Failed()) return DomNode();
+			doc->AddMember(mapping, key.View(), value);
+			SkipBlankLines();
+			if (Failed()) return DomNode();
+			if (AtEnd() || AtDocumentMarker()) break;
+			int32 column = Column();
+			if (column < indent) break;
+			if (column > indent) return Fail("this line is indented more than the mapping it is in");
+			if (AtSequenceEntry()) return Fail("a sequence entry where the mapping expects 'key: value'");
+			if (!IsMappingEntry()) return Fail("expected 'key: value'");
+		}
+		Leave();
+		return mapping;
+	}
+
+	DomNode YamlReader::BlockSequence(int32 indent) {
+		if (!Enter()) return DomNode();
+		DomNode sequence = doc->NewArray();
+		for (;;) {
+			position += 1;
+			SkipInlineSpace();
+			DomNode item = At('#') || IsYamlBreak(Peek()) || AtEnd() ? NestedValue(indent, false) : BlockNode(indent);
+			if (Failed()) return DomNode();
+			doc->Add(sequence, item);
+			SkipBlankLines();
+			if (Failed()) return DomNode();
+			if (AtEnd() || AtDocumentMarker()) break;
+			int32 column = Column();
+			if (column > indent) return Fail("this line is indented more than the sequence it is in");
+			if (column < indent || !AtSequenceEntry()) break;
+		}
+		Leave();
+		return sequence;
+	}
+
+	DomNode YamlReader::MappingValue(int32 indent) {
+		SkipInlineSpace();
+		if (At('#') || IsYamlBreak(Peek()) || AtEnd()) return NestedValue(indent, true);
+		return InlineNode(indent);
+	}
+
+	// Nothing more on the line after `key:` or `-`: the value is the more indented block below, or - for a
+	// mapping key - a sequence at the key's own indentation, or else null.
+	DomNode YamlReader::NestedValue(int32 indent, bool sequenceAtIndent) {
+		if (!EndLine()) return DomNode();
+		SkipBlankLines();
+		if (Failed()) return DomNode();
+		if (AtEnd() || AtDocumentMarker()) return doc->NewNull();
+		int32 column = Column();
+		if (column > indent) return BlockNode(indent);
+		if (sequenceAtIndent && column == indent && AtSequenceEntry()) return BlockSequence(indent);
+		return doc->NewNull();
+	}
+
+	DomNode YamlReader::InlineNode(int32 parentIndent) {
+		if (Unsupported()) return DomNode();
+		int32 c = Peek();
+		if (AtSequenceEntry()) return Fail("a block sequence cannot start on the line of another value");
+		if (c == ']' || c == '}' || c == ',') return Fail("a plain value cannot start with ',', ']' or '}'");
+		if (c == '|' || c == '>') return BlockScalar(parentIndent);
+		DomNode node;
+		if (c == '[' || c == '{') node = FlowNode();
+		else if (c == '"' || c == '\'') {
+			scratch.Clear();
+			bool read = c == '"' ? DoubleQuoted(scratch) : SingleQuoted(scratch);
+			if (read) node = doc->NewString(scratch.View());
+		}
+		else node = PlainScalar(parentIndent);
+		if (Failed() || !EndLine()) return DomNode();
+		return node;
+	}
+
+	// --- plain and quoted scalars -----------------------------------------------------------------------------
+
+	DomNode YamlReader::PlainScalar(int32 parentIndent) {
+		scratch.Clear();
+		if (!PlainLine(scratch)) return DomNode();
+		while (ContinuePlain(parentIndent, scratch)) {}
+		return Failed() ? DomNode() : ResolveYamlPlain(scratch.View(), *doc);
+	}
+
+	// A plain scalar's text up to a comment or the end of the line, trailing blanks left out.
+	bool YamlReader::PlainLine(Core::StringBuilder& out) {
+		int64 start = position;
+		int64 end = position;
+		while (!AtEnd() && !IsYamlBreak(Peek())) {
+			int32 c = Peek();
+			if (c == '#' && position > start && IsYamlBlank(text.ByteAt(position - 1))) break;
+			if (c == ':' && IsBlankOrEndAt(position + 1)) { Fail("'key: value' cannot follow another value on its line"); return false; }
+			position += 1;
+			if (!IsYamlBlank(c)) end = position;
+		}
+		out.AppendBytes(text.Data() + start, end - start);
+		position = end;
+		return true;
+	}
+
+	// The lines below a plain scalar that are more indented than its parent continue it, folded: one line
+	// break is a space, each blank line a '\n'. A comment ends it.
+	bool YamlReader::ContinuePlain(int32 parentIndent, Core::StringBuilder& out) {
+		int64 saved = position;
+		SkipInlineSpace();
+		if (!IsYamlBreak(Peek())) { position = saved; return false; }
+		SkipLineBreak();
+		int32 blankLines = 0;
+		while (!AtEnd()) {
+			SkipInlineSpace();
+			if (!IsYamlBreak(Peek())) break;
+			blankLines += 1;
+			SkipLineBreak();
+		}
+		if (AtEnd() || At('#') || Column() <= parentIndent || AtDocumentMarker()) { position = saved; return false; }
+		if (IsMappingEntry()) { Fail("a 'key: value' line is indented under a plain value"); return false; }
+		if (blankLines == 0) out.AppendByte(' ');
+		for (int32 k = 0; k < blankLines; ++k) out.AppendByte('\n');
+		return PlainLine(out);
+	}
+
+	bool YamlReader::DoubleQuoted(Core::StringBuilder& out) {
+		int64 open = position;
+		position += 1;
+		for (;;) {
+			int32 c = Peek();
+			if (c < 0) { FailAt(open, "the text ends inside a quoted scalar"); return false; }
+			if (c == '"') { position += 1; return true; }
+			if (IsYamlBreak(c)) { FoldLineBreak(out); continue; }
+			if (c != '\\') { out.AppendByte(c); position += 1; continue; }
+			if (IsYamlBreak(PeekAt(position + 1))) {   // an escaped line break joins the lines
+				position += 1;
+				SkipLineBreak();
+				SkipInlineSpace();
+				continue;
+			}
+			int64 used = AppendYamlEscape(text.Substring(position + 1, text.ByteLength() - position - 1), out);
+			if (used == 0) { Fail("an unknown or malformed escape"); return false; }
+			position += 1 + used;
+		}
+	}
+
+	bool YamlReader::SingleQuoted(Core::StringBuilder& out) {
+		int64 open = position;
+		position += 1;
+		for (;;) {
+			int32 c = Peek();
+			if (c < 0) { FailAt(open, "the text ends inside a quoted scalar"); return false; }
+			if (IsYamlBreak(c)) { FoldLineBreak(out); continue; }
+			if (c == '\'' && PeekAt(position + 1) == '\'') { out.AppendByte('\''); position += 2; continue; }
+			position += 1;
+			if (c == '\'') return true;
+			out.AppendByte(c);
+		}
+	}
+
+	// A line break inside a quoted scalar: the blanks before it are dropped, one break becomes a space and each
+	// blank line after it a '\n'; the next line's leading blanks are dropped.
+	void YamlReader::FoldLineBreak(Core::StringBuilder& out) {
+		int64 kept = out.ByteLength();
+		while (kept > 0 && IsYamlBlank(out.View().ByteAt(kept - 1))) kept -= 1;
+		out.Truncate(kept);
+		SkipLineBreak();
+		int32 blankLines = 0;
+		for (;;) {
+			SkipInlineSpace();
+			if (!IsYamlBreak(Peek())) break;
+			blankLines += 1;
+			SkipLineBreak();
+		}
+		if (blankLines == 0) out.AppendByte(' ');
+		for (int32 k = 0; k < blankLines; ++k) out.AppendByte('\n');
+	}
+
+	// --- block scalars ----------------------------------------------------------------------------------------
+
+	DomNode YamlReader::BlockScalar(int32 parentIndent) {
+		bool literal = At('|');
+		position += 1;
+		BlockScalarHeader header;
+		if (!ReadBlockHeader(header) || !EndLine()) return DomNode();
+		int32 base = parentIndent < 0 ? 0 : parentIndent;
+		int32 indent = header.indent > 0 ? base + header.indent : DetectBlockIndent(parentIndent);
+		scratch.Clear();
+		BlockScalarBody(literal, indent, header.chomping, scratch);
+		return doc->NewString(scratch.View());
+	}
+
+	bool YamlReader::ReadBlockHeader(BlockScalarHeader& header) {
+		for (int32 k = 0; k < 2; ++k) {
+			int32 c = Peek();
+			if ((c == '+' || c == '-') && header.chomping == 0) { header.chomping = c; position += 1; continue; }
+			if (c >= '1' && c <= '9' && header.indent == 0) { header.indent = c - '0'; position += 1; continue; }
+		}
+		if (IsBlankOrEndAt(position)) return true;
+		Fail("a block scalar header is '|' or '>' with an optional indentation digit and '+' or '-'");
+		return false;
+	}
+
+	// The indentation of the first line with content (blank lines before it do not count); a scalar whose next
+	// content is not more indented than its parent is empty.
+	int32 YamlReader::DetectBlockIndent(int32 parentIndent) const {
+		int64 i = position;
+		while (i < text.ByteLength()) {
+			int32 spaces = 0;
+			while (PeekAt(i) == ' ') { ++i; ++spaces; }
+			if (!IsYamlBreak(PeekAt(i)) && PeekAt(i) >= 0) return spaces > parentIndent ? spaces : parentIndent + 1;
+			if (PeekAt(i) == '\r' && PeekAt(i + 1) == '\n') ++i;
+			++i;
+		}
+		return parentIndent + 1;
+	}
+
+	// The lines indented at least `indent`, joined: literal keeps every line break, folded turns a single break
+	// between two plain lines into a space. Chomping decides the final breaks: strip none, clip one, keep all.
+	void YamlReader::BlockScalarBody(bool literal, int32 indent, int32 chomping, Core::StringBuilder& out) {
+		int32 pendingBreaks = 0;
+		bool hasContent = false;
+		bool previousIndented = false;
+		while (!AtEnd()) {
+			int64 lineStart = position;
+			int32 spaces = 0;
+			while (At(' ') && spaces < indent) { position += 1; spaces += 1; }
+			bool empty = AtEnd() || IsYamlBreak(Peek());
+			if (!empty && spaces < indent) { position = lineStart; break; }
+			if (empty) { pendingBreaks += 1; SkipLineBreak(); continue; }
+			bool indented = IsYamlBlank(Peek());
+			if (hasContent && !literal && pendingBreaks == 1 && !indented && !previousIndented) out.AppendByte(' ');
+			else {
+				int32 breaks = hasContent && !literal && !indented && !previousIndented ? pendingBreaks - 1 : pendingBreaks;
+				for (int32 k = 0; k < breaks; ++k) out.AppendByte('\n');
+			}
+			int64 contentStart = position;
+			while (!AtEnd() && !IsYamlBreak(Peek())) position += 1;
+			out.AppendBytes(text.Data() + contentStart, position - contentStart);
+			hasContent = true;
+			previousIndented = indented;
+			pendingBreaks = 0;
+			if (!AtEnd()) { SkipLineBreak(); pendingBreaks = 1; }
+		}
+		if (!hasContent || chomping == '-') return;
+		if (chomping == '+') { for (int32 k = 0; k < pendingBreaks; ++k) out.AppendByte('\n'); return; }
+		if (pendingBreaks > 0) out.AppendByte('\n');
+	}
+
+	// --- flow collections -------------------------------------------------------------------------------------
+
+	DomNode YamlReader::FlowNode() { return At('[') ? FlowSequence() : FlowMapping(); }
+
+	DomNode YamlReader::FlowSequence() {
+		if (!Enter()) return DomNode();
+		int64 open = position;
+		position += 1;
+		DomNode sequence = doc->NewArray();
+		for (;;) {
+			SkipFlowSpace();
+			if (At(']')) { position += 1; Leave(); return sequence; }
+			if (AtEnd()) return FailAt(open, "the text ends inside a flow sequence");
+			DomNode item = FlowValue();
+			if (Failed()) return DomNode();
+			doc->Add(sequence, item);
+			SkipFlowSpace();
+			if (At(',')) { position += 1; continue; }
+			if (!At(']')) return Fail(AtEnd() ? "the text ends inside a flow sequence" : "expected ',' or ']' in a flow sequence");
+		}
+	}
+
+	DomNode YamlReader::FlowMapping() {
+		if (!Enter()) return DomNode();
+		int64 open = position;
+		position += 1;
+		DomNode mapping = doc->NewObject();
+		for (;;) {
+			SkipFlowSpace();
+			if (At('}')) { position += 1; Leave(); return mapping; }
+			if (AtEnd()) return FailAt(open, "the text ends inside a flow mapping");
+			Core::String key;
+			if (!FlowKey(key)) return DomNode();
+			SkipFlowSpace();
+			DomNode value;
+			if (At(':')) {
+				position += 1;
+				SkipFlowSpace();
+				value = At(',') || At('}') ? doc->NewNull() : FlowValue();
+			}
+			else value = doc->NewNull();
+			if (Failed()) return DomNode();
+			doc->AddMember(mapping, key.View(), value);
+			SkipFlowSpace();
+			if (At(',')) { position += 1; continue; }
+			if (!At('}')) return Fail(AtEnd() ? "the text ends inside a flow mapping" : "expected ',' or '}' in a flow mapping");
+		}
+	}
+
+	bool YamlReader::FlowKey(Core::String& key) {
+		if (Unsupported()) return false;
+		int32 c = Peek();
+		if (c == '[' || c == '{') { Fail("a flow collection cannot be a mapping key"); return false; }
+		if (c == ',' || c == ':') { Fail("a flow mapping entry needs a key"); return false; }
+		scratch.Clear();
+		bool read = c == '"' ? DoubleQuoted(scratch) : c == '\'' ? SingleQuoted(scratch) : FlowPlain(scratch);
+		if (read) key = scratch.ToString();
+		return read;
+	}
+
+	DomNode YamlReader::FlowValue() {
+		if (Unsupported()) return DomNode();
+		int32 c = Peek();
+		if (c == '[' || c == '{') return FlowNode();
+		if (c == ',' || c == ']' || c == '}') return Fail("an empty entry in a flow collection");
+		scratch.Clear();
+		if (c == '"' || c == '\'') {
+			bool read = c == '"' ? DoubleQuoted(scratch) : SingleQuoted(scratch);
+			return read ? doc->NewString(scratch.View()) : DomNode();
+		}
+		return FlowPlain(scratch) ? ResolveYamlPlain(scratch.View(), *doc) : DomNode();
+	}
+
+	// A plain scalar inside a flow collection: up to an indicator, a ': ' or a comment. A line break inside it is
+	// a space.
+	bool YamlReader::FlowPlain(Core::StringBuilder& out) {
+		int64 runStart = position;
+		for (;;) {
+			int32 c = Peek();
+			bool ends = c < 0 || IsYamlFlowIndicator(c) || (c == ':' && (IsBlankOrEndAt(position + 1) || IsYamlFlowIndicator(PeekAt(position + 1))))
+				|| (c == '#' && position > runStart && IsYamlBlank(text.ByteAt(position - 1)));
+			if (ends || IsYamlBreak(c)) {
+				int64 end = position;
+				while (end > runStart && IsYamlBlank(text.ByteAt(end - 1))) end -= 1;
+				out.AppendBytes(text.Data() + runStart, end - runStart);
+				if (ends) return true;
+				int64 saved = position;
+				SkipFlowSpace();
+				int32 next = Peek();
+				if (next < 0 || IsYamlFlowIndicator(next) || next == ':' || next == '#') { position = saved; return true; }
+				out.AppendByte(' ');
+				runStart = position;
+				continue;
+			}
+			position += 1;
+		}
+	}
+
+	void YamlReader::SkipFlowSpace() {
+		for (;;) {
+			int32 c = Peek();
+			if (IsYamlBlank(c)) { position += 1; continue; }
+			if (IsYamlBreak(c)) { SkipLineBreak(); continue; }
+			if (c == '#') { while (!AtEnd() && !IsYamlBreak(Peek())) position += 1; continue; }
+			return;
+		}
+	}
+
+	// --- keys, lines and markers -----------------------------------------------------------------------------
+
+	// Whether this line's content is `key: ...` - a quoted or plain key, then ':' and a blank or the end.
+	bool YamlReader::IsMappingEntry() const {
+		int32 c = Peek();
+		if (c == '"' || c == '\'') {
+			int64 i = QuotedEnd(position);
+			if (i < 0) return false;
+			while (IsYamlBlank(PeekAt(i))) ++i;
+			return PeekAt(i) == ':' && IsBlankOrEndAt(i + 1);
+		}
+		if (c < 0 || c == '[' || c == '{' || c == '#' || IsYamlBreak(c)) return false;
+		for (int64 i = position; PeekAt(i) >= 0 && !IsYamlBreak(PeekAt(i)); ++i) {
+			if (PeekAt(i) == '#' && i > position && IsYamlBlank(PeekAt(i - 1))) return false;
+			if (PeekAt(i) == ':' && IsBlankOrEndAt(i + 1)) return true;
+		}
+		return false;
+	}
+
+	// Past the closing quote of the quoted scalar at `at`, when it closes on the same line; else -1.
+	int64 YamlReader::QuotedEnd(int64 at) const {
+		int32 quote = PeekAt(at);
+		for (int64 i = at + 1; ; ++i) {
+			int32 c = PeekAt(i);
+			if (c < 0 || IsYamlBreak(c)) return -1;
+			if (quote == '"' && c == '\\') { ++i; continue; }
+			if (c != quote) continue;
+			if (quote == '\'' && PeekAt(i + 1) == '\'') { ++i; continue; }
+			return i + 1;
+		}
+	}
+
+	bool YamlReader::MappingKey(Core::String& key) {
+		scratch.Clear();
+		int32 c = Peek();
+		if (c == '"' || c == '\'') {
+			if (!(c == '"' ? DoubleQuoted(scratch) : SingleQuoted(scratch))) return false;
+			SkipInlineSpace();
+		}
+		else {
+			int64 start = position;
+			while (!(At(':') && IsBlankOrEndAt(position + 1))) position += 1;
+			int64 end = position;
+			while (end > start && IsYamlBlank(text.ByteAt(end - 1))) end -= 1;
+			scratch.AppendBytes(text.Data() + start, end - start);
+		}
+		key = scratch.ToString();
+		position += 1;   // the ':' IsMappingEntry found
+		return true;
+	}
+
+	// Only blanks and a comment may follow on this line; then the position is the next line's start.
+	bool YamlReader::EndLine() {
+		int64 start = position;
+		SkipInlineSpace();
+		if (At('#')) {
+			bool separated = position > start || position == 0 || IsYamlBlank(text.ByteAt(position - 1)) || IsYamlBreak(text.ByteAt(position - 1));
+			if (!separated) { Fail("a comment needs a blank before '#'"); return false; }
+			while (!AtEnd() && !IsYamlBreak(Peek())) position += 1;
+		}
+		if (AtEnd()) return true;
+		if (!IsYamlBreak(Peek())) { Fail("unexpected text after a value"); return false; }
+		SkipLineBreak();
+		return true;
+	}
+
+	// Past empty, blank and comment-only lines to the next line's content. Tabs cannot indent it.
+	void YamlReader::SkipBlankLines() {
+		while (!AtEnd()) {
+			int64 lineStart = position;
+			while (IsYamlBlank(Peek())) position += 1;
+			if (At('#')) while (!AtEnd() && !IsYamlBreak(Peek())) position += 1;
+			if (AtEnd()) return;
+			if (IsYamlBreak(Peek())) { SkipLineBreak(); continue; }
+			for (int64 i = lineStart; i < position; ++i)
+				if (text.ByteAt(i) == '\t') { FailAt(i, "a tab cannot indent YAML"); return; }
+			return;
+		}
+	}
+
+	bool YamlReader::AtDocumentMarker() const {
+		if (position > 0 && !IsYamlBreak(text.ByteAt(position - 1))) return false;
+		Core::StringView rest = text.Substring(position, 3);
+		return (rest == Core::StringView("---") || rest == Core::StringView("...")) && IsBlankOrEndAt(position + 3);
+	}
+
+	int32 YamlReader::Column() const {
+		int64 start = position;
+		while (start > 0 && !IsYamlBreak(text.ByteAt(start - 1))) --start;
+		return (int32)(position - start);
+	}
+
+	// Anchors, aliases, tags, complex keys, directives and reserved indicators: errors that say what they are.
+	bool YamlReader::Unsupported() {
+		int32 c = Peek();
+		if (c == '&' || c == '*') Fail("YAML anchors and aliases are not supported");
+		else if (c == '!') Fail("YAML tags are not supported");
+		else if (c == '?' && IsBlankOrEndAt(position + 1)) Fail("complex mapping keys ('? ') are not supported");
+		else if (c == '%' && Column() == 0) Fail("YAML directives are not supported");
+		else if (c == '@' || c == '`') Fail("'@' and '`' are reserved and cannot start a value");
+		return Failed();
+	}
+
+	bool YamlReader::Enter() {
+		depth += 1;
+		if (depth <= kMaxYamlDepth) return true;
+		Fail("collections nest too deeply");
+		return false;
+	}
+
+	void YamlReader::SkipLineBreak() {
+		if (At('\r')) position += 1;
+		if (At('\n')) position += 1;
+	}
+
+	DomNode YamlReader::FailAt(int64 offset, const char* message) {
+		if (!error) { error = message; errorAt = offset; }
+		return DomNode();
+	}
+
+	ReadResult ReadYaml(Core::StringView text, DomDoc& doc) {
+		YamlReader reader = YamlReader(text, &doc);
+		return reader.Read();
+	}
+}

@@ -1,0 +1,42 @@
+// The variable of a range-for is a new copy each iteration, destroyed at the end of that iteration.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 main() {
+	int32 live = 0;
+	Probe[3] items;
+	items[0] = Probe(&live, 1);
+	items[1] = Probe(&live, 2);
+	items[2] = Probe(&live, 3);
+	int32 sum = 0;
+	int32 peak = 0;
+	for (Probe p : items) {
+		sum = sum + p.id;
+		if (live > peak) peak = live;
+		if (p.id == 2) continue;
+	}
+	Check(sum == 6, "each element is visited");
+	Check(peak == 4, "one copy is alive inside the body");
+	Check(live == 3, "every copy is destroyed, on continue too");
+	for (Probe p : items) {
+		if (p.id == 2) break;
+	}
+	Check(live == 3, "break destroys the iteration's copy");
+	return g_failures;
+}

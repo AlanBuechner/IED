@@ -1,0 +1,4 @@
+abstract class Shape {
+	public virtual float Area() { return 0.0f; }
+}
+int32 main() { float a = Shape().Area(); return 0; }

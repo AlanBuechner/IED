@@ -1,0 +1,6 @@
+class Box {
+	public int32 value;
+	public int32 Get() const;
+}
+public int32 Box::Get() { return value; }
+int32 main() { return 0; }

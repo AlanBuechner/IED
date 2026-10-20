@@ -1,0 +1,143 @@
+include "matrix.ch"
+
+namespace Math
+{
+	// --- Mat2 ---------------------------------------------------------------------------------------------
+
+	[operator("create")] void Mat2::Init(float diagonal) {
+		columns[0] = FVector2(diagonal, 0.0f);
+		columns[1] = FVector2(0.0f, diagonal);
+	}
+
+	Mat2 Mat2::Inverse() const {
+		float inverseDeterminant = 1.0f / Determinant();
+		return Mat2(FVector2(columns[1].y, -columns[0].y) * inverseDeterminant, FVector2(-columns[1].x, columns[0].x) * inverseDeterminant);
+	}
+
+	// --- Mat3 ---------------------------------------------------------------------------------------------
+
+	[operator("create")] void Mat3::Init(float diagonal) {
+		columns[0] = FVector3(diagonal, 0.0f, 0.0f);
+		columns[1] = FVector3(0.0f, diagonal, 0.0f);
+		columns[2] = FVector3(0.0f, 0.0f, diagonal);
+	}
+
+	// The scalar triple product of the columns.
+	float Mat3::Determinant() const { return Dot(columns[0], Cross(columns[1], columns[2])); }
+
+	Mat3 Mat3::Transposed() const {
+		return Mat3(FVector3(columns[0].x, columns[1].x, columns[2].x), FVector3(columns[0].y, columns[1].y, columns[2].y),
+			FVector3(columns[0].z, columns[1].z, columns[2].z));
+	}
+
+	// The adjugate's rows are the cross products of the columns, so the inverse is their transpose over the
+	// determinant.
+	Mat3 Mat3::Inverse() const {
+		FVector3 row0 = Cross(columns[1], columns[2]);
+		FVector3 row1 = Cross(columns[2], columns[0]);
+		FVector3 row2 = Cross(columns[0], columns[1]);
+		float inverseDeterminant = 1.0f / Dot(columns[0], row0);
+		return Mat3(row0 * inverseDeterminant, row1 * inverseDeterminant, row2 * inverseDeterminant).Transposed();
+	}
+
+	// --- Mat4 ---------------------------------------------------------------------------------------------
+
+	[operator("create")] void Mat4::Init(float diagonal) {
+		columns[0] = FVector4(diagonal, 0.0f, 0.0f, 0.0f);
+		columns[1] = FVector4(0.0f, diagonal, 0.0f, 0.0f);
+		columns[2] = FVector4(0.0f, 0.0f, diagonal, 0.0f);
+		columns[3] = FVector4(0.0f, 0.0f, 0.0f, diagonal);
+	}
+
+	[operator("create")] void Mat4::Init(const Mat3& m) {
+		columns[0] = FVector4(m.columns[0], 0.0f);
+		columns[1] = FVector4(m.columns[1], 0.0f);
+		columns[2] = FVector4(m.columns[2], 0.0f);
+		columns[3] = FVector4(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+
+	// The columns weighted by v's lanes, fused where the target has FMA.
+	FVector4 Mat4::Transform(FVector4 v) const {
+		return FVector4(simd_muladd(columns[3].data, v.w, simd_muladd(columns[2].data, v.z, simd_muladd(columns[1].data, v.y, columns[0].data * v.x))));
+	}
+
+	Mat4 Mat4::Mul(const Mat4& o) const {
+		return Mat4(Transform(o.columns[0]), Transform(o.columns[1]), Transform(o.columns[2]), Transform(o.columns[3]));
+	}
+
+	Mat4 Mat4::Add(const Mat4& o) const {
+		return Mat4(columns[0] + o.columns[0], columns[1] + o.columns[1], columns[2] + o.columns[2], columns[3] + o.columns[3]);
+	}
+
+	Mat4 Mat4::Sub(const Mat4& o) const {
+		return Mat4(columns[0] - o.columns[0], columns[1] - o.columns[1], columns[2] - o.columns[2], columns[3] - o.columns[3]);
+	}
+
+	bool Mat4::Equals(const Mat4& o) const {
+		return columns[0] == o.columns[0] && columns[1] == o.columns[1] && columns[2] == o.columns[2] && columns[3] == o.columns[3];
+	}
+
+	Mat4 Mat4::Transposed() const { return Mat4(Row(0), Row(1), Row(2), Row(3)); }
+
+	// Laplace expansion along the first column, the 2x2 minors of the last two columns shared (GLM's method).
+	float Mat4::Determinant() const {
+		FVector4 c0 = columns[0];
+		FVector4 c1 = columns[1];
+		FVector4 c2 = columns[2];
+		FVector4 c3 = columns[3];
+		float minor00 = c2.z * c3.w - c3.z * c2.w;
+		float minor01 = c2.y * c3.w - c3.y * c2.w;
+		float minor02 = c2.y * c3.z - c3.y * c2.z;
+		float minor03 = c2.x * c3.w - c3.x * c2.w;
+		float minor04 = c2.x * c3.z - c3.x * c2.z;
+		float minor05 = c2.x * c3.y - c3.x * c2.y;
+		FVector4 cofactors = FVector4(
+			c1.y * minor00 - c1.z * minor01 + c1.w * minor02,
+			-(c1.x * minor00 - c1.z * minor03 + c1.w * minor04),
+			c1.x * minor01 - c1.y * minor03 + c1.w * minor05,
+			-(c1.x * minor02 - c1.y * minor04 + c1.z * minor05));
+		return Dot(c0, cofactors);
+	}
+
+	// GLM's inverse, shuffled the way its SSE version is: the 2x2 minors of the last two columns, four at a time,
+	// combine with the first two columns into the adjugate's columns, which the determinant (the first column dotted
+	// with the adjugate's first row) divides.
+	Mat4 Mat4::Inverse() const {
+		const packed float[4] c0 = columns[0].data;
+		const packed float[4] c1 = columns[1].data;
+		const packed float[4] c2 = columns[2].data;
+		const packed float[4] c3 = columns[3].data;
+		const packed float[4] fac0 = InverseMinors<2, 3>(c1, c2, c3);
+		const packed float[4] fac1 = InverseMinors<1, 3>(c1, c2, c3);
+		const packed float[4] fac2 = InverseMinors<1, 2>(c1, c2, c3);
+		const packed float[4] fac3 = InverseMinors<0, 3>(c1, c2, c3);
+		const packed float[4] fac4 = InverseMinors<0, 2>(c1, c2, c3);
+		const packed float[4] fac5 = InverseMinors<0, 1>(c1, c2, c3);
+		const packed float[4] vec0 = simd_shuffle(c1, c0, 0, 4, 4, 4);   // (c1.x, c0.x, c0.x, c0.x)
+		const packed float[4] vec1 = simd_shuffle(c1, c0, 1, 5, 5, 5);
+		const packed float[4] vec2 = simd_shuffle(c1, c0, 2, 6, 6, 6);
+		const packed float[4] vec3 = simd_shuffle(c1, c0, 3, 7, 7, 7);
+		const packed float[4] signA = { 1.0f, -1.0f, 1.0f, -1.0f };
+		const packed float[4] signB = { -1.0f, 1.0f, -1.0f, 1.0f };
+		const packed float[4] inverse0 = (vec1 * fac0 - vec2 * fac1 + vec3 * fac2) * signA;
+		const packed float[4] inverse1 = (vec0 * fac0 - vec2 * fac3 + vec3 * fac4) * signB;
+		const packed float[4] inverse2 = (vec0 * fac1 - vec1 * fac3 + vec3 * fac5) * signA;
+		const packed float[4] inverse3 = (vec0 * fac2 - vec1 * fac4 + vec2 * fac5) * signB;
+		const packed float[4] row0 = simd_shuffle(simd_shuffle(inverse0, inverse1, 0, 0, 4, 4), simd_shuffle(inverse2, inverse3, 0, 0, 4, 4), 0, 2, 4, 6);
+		const float inverseDeterminant = 1.0f / simd_reduce_add(c0 * row0);
+		return Mat4(FVector4(inverse0 * inverseDeterminant), FVector4(inverse1 * inverseDeterminant), FVector4(inverse2 * inverseDeterminant),
+			FVector4(inverse3 * inverseDeterminant));
+	}
+
+	bool NearlyEqual(const Mat3& a, const Mat3& b, float epsilon) {
+		for (int64 c = 0; c < 3; ++c)
+			if (!NearlyEqual(a.columns[c], b.columns[c], epsilon)) return false;
+		return true;
+	}
+
+	bool NearlyEqual(const Mat4& a, const Mat4& b, float epsilon) {
+		for (int64 c = 0; c < 4; ++c)
+			if (!NearlyEqual(a.columns[c], b.columns[c], epsilon)) return false;
+		return true;
+	}
+}

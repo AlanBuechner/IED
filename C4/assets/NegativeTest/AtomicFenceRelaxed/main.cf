@@ -1,0 +1,4 @@
+int32 main() {
+	atomic_fence(MemoryOrder::Relaxed);
+	return 0;
+}

@@ -1,0 +1,13 @@
+struct A { int32 x; };
+struct C { int32 tag; A x; };   // x is NOT at offset 0, and another type shares its layout
+int32 main() {
+	C g;
+	g.x.x = 5;                     // chained store through a non-first field
+	if (g.tag != 0) { printf("FAIL tag clobbered: %d\n", g.tag); return 1; }
+	if (g.x.x != 5) { printf("FAIL got %d\n", g.x.x); return 2; }
+	C* p = &g;
+	p->x.x = 7;                    // same shape through a pointer
+	if (p->tag != 0 || p->x.x != 7) { printf("FAIL ptr got tag=%d xx=%d\n", p->tag, p->x.x); return 3; }
+	printf("CHAINED STORE OFFSET OK\n");
+	return 0;
+}

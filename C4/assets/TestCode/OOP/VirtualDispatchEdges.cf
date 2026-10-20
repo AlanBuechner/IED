@@ -1,0 +1,64 @@
+// OOP - Virtual Dispatch Edge Tests (implementation)
+include "../Framework/Assert.ch"
+include "VirtualDispatchEdges.ch"
+
+// These edges were all SILENT MISCOMPILES before the vtable-generation fix: a derived class whose
+// virtuals are INHERITED (it has no methods of its own) never had its LLVM type lowered before the
+// vtable pass, so it was absent from the codegen type cache and got NO vtable -> null vptr -> AV on
+// the first virtual dispatch. Parameterized virtuals exercise the same path with a non-trivial slot.
+
+struct Ev { int32 id; };
+int32 g_edge_marked = 0;
+
+// (1) Parameterized pure virtual, overridden by DerivedA.
+class EdgeBaseA {
+public virtual void Handle(Ev* e) = 0;
+};
+class EdgeDerivedA : EdgeBaseA {
+public void Handle(Ev* e) { if (e->id == 5) g_edge_marked = 1; }
+};
+
+// (2) Inherited-only virtual: BaseB has a CONCRETE parameterized virtual, DerivedB adds only a field
+// (no methods of its own). This is the exact shape that produced no vtable.
+class EdgeBaseB {
+public virtual void Ping(Ev* e) { if (e->id == 7) g_edge_marked = 2; }
+};
+class EdgeDerivedB : EdgeBaseB {
+public int32 extra;
+};
+
+void TestVirtualDispatchEdges() {
+	// (1) Parameterized virtual dispatch through a base pointer.
+	{
+		Ev evA; evA.id = 5;
+		EdgeDerivedA dA;
+		EdgeBaseA* bA = &dA;
+		bA->Handle(&evA);
+		AssertIntEquals(1, g_edge_marked, "parameterized virtual dispatch through base ptr");
+	}
+
+	// (2) Inherited-only virtuals, LOCAL derived object (no methods of its own).
+	g_edge_marked = 0;
+	{
+		Ev evB; evB.id = 7;
+		EdgeDerivedB dB;
+		dB.extra = 9;
+		EdgeBaseB* bB = &dB;
+		bB->Ping(&evB);
+		AssertIntEquals(2, g_edge_marked, "inherited-only virtual, local derived, base ptr dispatch");
+		AssertIntEquals(9, dB.extra, "derived field intact after inherited virtual dispatch");
+	}
+
+	// (3) Inherited-only virtuals, HEAP derived object via new.
+	g_edge_marked = 0;
+	{
+		Ev evC; evC.id = 7;
+		EdgeDerivedB* dC = new EdgeDerivedB();
+		dC->extra = 12;
+		EdgeBaseB* bC = dC;
+		bC->Ping(&evC);
+		AssertIntEquals(2, g_edge_marked, "inherited-only virtual, heap derived, base ptr dispatch");
+		AssertIntEquals(12, dC->extra, "heap derived field intact after inherited virtual dispatch");
+		delete dC;
+	}
+}

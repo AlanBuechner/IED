@@ -1,0 +1,158 @@
+// Threading::JobSystem: jobs and groups, priorities, the latency guarantee (a long background job never holds up
+// frame work), waits that help, nested waits, full queues, and shutdown.
+
+include "bedrock.ch"
+
+const int64 kJobMillisecond = 1000000;
+
+Threading::JobSystemDesc Workers(int32 frame, int32 background) {
+	Threading::JobSystemDesc desc;
+	desc.frameWorkers = frame;
+	desc.backgroundWorkers = background;
+	return desc;
+}
+
+// A job that holds its worker until the gate opens.
+class Gate {
+	public Threading::Atomic<int32> open;
+	public Threading::Atomic<int32> entered;
+	public void Hold() { entered.Store(1); while (open.Load() == 0) Threading::Thread::Yield(); }
+	public void WaitEntered() { while (entered.Load() == 0) Threading::Thread::Yield(); }
+}
+
+class Order {
+	public Threading::Mutex mutex;
+	public Core::Array<int32> seen;
+	public void Add(int32 tag) { Threading::LockGuard guard(mutex); seen.Push(tag); }
+}
+
+[test("threading.jobs")]
+class JobTests {
+	[test("defaults")]
+	public static void TestDefaults() {
+		Threading::JobSystem jobs;
+		assert_true(jobs.FrameWorkerCount() >= 1, "at least one frame worker");
+		assert_eq(1, jobs.BackgroundWorkerCount(), "one background worker");
+	}
+
+	[test("submit_and_wait")]
+	public static void TestSubmitAndWait() {
+		Threading::JobSystem jobs;
+		Threading::WaitGroup group;
+		Threading::Atomic<int64>* count = new Threading::Atomic<int64>;
+		for (int32 i = 0; i < 1000; i++) jobs.Submit([count]() { count->FetchAdd(1); }, Threading::JobPriority::Normal, &group);
+		jobs.Wait(group);
+		assert_eq(1000, count->Load(), "every job ran before the wait returned");
+		assert_true(group.IsDone(), "and the group is done");
+	}
+
+	[test("high_before_normal")]
+	public static void TestHighBeforeNormal() {
+		Threading::JobSystem jobs(Workers(1, 0));
+		Gate* gate = new Gate;
+		Order* order = new Order;
+		Threading::WaitGroup group;
+		jobs.Submit([gate]() { gate->Hold(); }, Threading::JobPriority::High, &group);
+		gate->WaitEntered();
+		jobs.Submit([order]() { order->Add(1); }, Threading::JobPriority::Normal, &group);
+		jobs.Submit([order]() { order->Add(2); }, Threading::JobPriority::High, &group);
+		gate->open.Store(1);
+		group.Wait();
+		assert_eq(2, order->seen.Count(), "both ran");
+		assert_eq(2, order->seen[0], "the high job first");
+	}
+
+	[test("background_never_holds_frame_work")]
+	public static void TestBackgroundNeverHoldsFrameWork() {
+		Threading::JobSystem jobs(Workers(1, 1));
+		Gate* loading = new Gate;
+		Threading::WaitGroup background;
+		jobs.Submit([loading]() { loading->Hold(); }, Threading::JobPriority::Background, &background);
+		loading->WaitEntered();
+		Threading::WaitGroup frame;
+		Threading::Atomic<int32>* ran = new Threading::Atomic<int32>;
+		for (int32 i = 0; i < 50; i++) jobs.Submit([ran]() { ran->FetchAdd(1); }, Threading::JobPriority::High, &frame);
+		jobs.Wait(frame);
+		assert_eq(50, ran->Load(), "frame jobs finished while the long job still ran");
+		assert_true(!background.IsDone(), "the background job is still going");
+		loading->open.Store(1);
+		background.Wait();
+	}
+
+	[test("wait_helps")]
+	public static void TestWaitHelps() {
+		Threading::JobSystem jobs(Workers(1, 0));
+		Gate* gate = new Gate;
+		Threading::WaitGroup held;
+		jobs.Submit([gate]() { gate->Hold(); }, Threading::JobPriority::Normal, &held);
+		gate->WaitEntered();
+		Threading::WaitGroup group;
+		uint64 main = Threading::Thread::CurrentId();
+		Threading::Atomic<int32>* onMain = new Threading::Atomic<int32>;
+		for (int32 i = 0; i < 10; i++)
+			jobs.Submit([onMain, main]() { if (Threading::Thread::CurrentId() == main) onMain->FetchAdd(1); }, Threading::JobPriority::High, &group);
+		jobs.Wait(group);
+		assert_eq(10, onMain->Load(), "with the only worker busy, the waiting thread ran the jobs itself");
+		gate->open.Store(1);
+		held.Wait();
+	}
+
+	[test("nested_wait")]
+	public static void TestNestedWait() {
+		Threading::JobSystem jobs(Workers(1, 0));
+		Threading::JobSystem* system = &jobs;
+		Threading::WaitGroup outer;
+		Threading::Atomic<int32>* leaves = new Threading::Atomic<int32>;
+		for (int32 i = 0; i < 4; i++)
+			jobs.Submit([system, leaves]() {
+				Threading::WaitGroup inner;
+				for (int32 k = 0; k < 8; k++) system->Submit([leaves]() { leaves->FetchAdd(1); }, Threading::JobPriority::High, &inner);
+				system->Wait(inner);
+			}, Threading::JobPriority::Normal, &outer);
+		jobs.Wait(outer);
+		assert_eq(32, leaves->Load(), "a job that waits for the jobs it made runs them, with one worker");
+	}
+
+	[test("more_than_a_queue_holds")]
+	public static void TestMoreThanAQueueHolds() {
+		Threading::JobSystem jobs(Workers(2, 1));
+		Threading::WaitGroup group;
+		Threading::Atomic<int64>* count = new Threading::Atomic<int64>;
+		for (int32 i = 0; i < 20000; i++) jobs.Submit([count]() { count->FetchAdd(1); }, Threading::JobPriority::Normal, &group);
+		for (int32 i = 0; i < 6000; i++) jobs.Submit([count]() { count->FetchAdd(1); }, Threading::JobPriority::Background, &group);
+		jobs.Wait(group);
+		assert_eq(26000, count->Load(), "a full queue runs or waits, and loses nothing");
+	}
+
+	[test("no_background_workers")]
+	public static void TestNoBackgroundWorkers() {
+		Threading::JobSystem jobs(Workers(1, 0));
+		Threading::WaitGroup group;
+		Threading::Atomic<int32>* ran = new Threading::Atomic<int32>;
+		jobs.Submit([ran]() { ran->Store(1); }, Threading::JobPriority::Background, &group);
+		group.Wait();
+		assert_eq(1, ran->Load(), "frame workers run background jobs when there are no background workers");
+		assert_eq(0, jobs.BackgroundWorkerCount(), "none were started");
+	}
+
+	[test("shutdown_runs_queued_jobs")]
+	public static void TestShutdownRunsQueuedJobs() {
+		Threading::Atomic<int32>* ran = new Threading::Atomic<int32>;
+		{
+			Threading::JobSystem jobs(Workers(2, 1));
+			for (int32 i = 0; i < 100; i++) jobs.Submit([ran]() { ran->FetchAdd(1); });
+			for (int32 i = 0; i < 10; i++) jobs.Submit([ran]() { ran->FetchAdd(1); }, Threading::JobPriority::Background);
+		}
+		assert_eq(110, ran->Load(), "destroying the system finished every queued job");
+	}
+
+	[test("zero_system_runs_inline")]
+	public static void TestZeroSystemRunsInline() {
+		Threading::JobSystem moved(Workers(1, 0));
+		Threading::JobSystem owner = take(moved);
+		int32 ran = 0;
+		moved.Submit([&ran]() { ran = 1; });
+		assert_eq(1, ran, "a moved-from system runs a job where it is submitted");
+		assert_eq(0, moved.FrameWorkerCount(), "and has no workers");
+	}
+}

@@ -1,0 +1,8 @@
+class Token {
+	[operator("create")] private void Init() {}
+}
+class Pocket {
+	public Token[2] tokens;
+}
+class Coat : Pocket { public int32 buttons; }
+int32 main() { Coat c; return c.buttons; }

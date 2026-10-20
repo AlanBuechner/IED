@@ -1,0 +1,2 @@
+struct S { public float[1e1] v; };
+int32 main() { return 0; }

@@ -1,0 +1,188 @@
+include "jobs.ch"
+
+namespace Threading
+{
+	const int64 kSharedQueueCapacity = 4096;
+	const int64 kWorkerQueueCapacity = 1024;
+	const int32 kIdleSpins = 2000;   // a frame's next job usually arrives within microseconds
+
+	// The frame worker the calling thread is, and of which system (-1 and null on any other thread).
+	thread_local JobWorkers* t_jobWorkers = null;
+	thread_local int32 t_frameWorker = -1;
+
+	class WorkerStart
+	{
+		public JobWorkers* workers;
+		public int32 index;          // a frame worker's index, or -1 for a background worker
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// Taking and running jobs
+
+	void RunJob(Job& job) {
+		job.run();
+		if (job.group) job.group->Done();
+	}
+
+	bool JobWorkers::TakeFrameJob(int32 self, Job& out) {
+		const int32 count = (int32)frame.Count();
+		for (int32 priority = 0; priority < 2; priority++) {
+			if (self >= 0 && (priority == 0 ? frame[self]->high.Pop(out) : frame[self]->normal.Pop(out))) return true;
+			if (shared[priority].Pop(out)) return true;
+			for (int32 k = 1; k <= count; k++) {
+				const int32 victim = (self + k + count) % count;
+				if (victim != self && (priority == 0 ? frame[victim]->high.Pop(out) : frame[victim]->normal.Pop(out))) return true;
+			}
+		}
+		return false;
+	}
+
+	bool JobWorkers::TakeBackgroundJob(Job& out) { return shared[(int32)JobPriority::Background].Pop(out); }
+
+	bool JobWorkers::HasFrameWork() const {
+		if (!shared[0].IsEmpty() || !shared[1].IsEmpty()) return true;
+		for (int64 i = 0; i < frame.Count(); i++)
+			if (!frame[i]->high.IsEmpty() || !frame[i]->normal.IsEmpty()) return true;
+		return false;
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// Parking: a worker announces itself as a sleeper before its last look at the queues, and a submit reads the
+	// sleepers after its job is queued (a full fence between), so one of them always sees the other.
+
+	bool JobWorkers::WaitForWork(bool background) {
+		const bool backgroundWork = background || backgroundCount == 0;
+		for (int32 spin = 0; spin < kIdleSpins; spin++) {
+			if (HasFrameWork() || (backgroundWork && !shared[2].IsEmpty())) return true;
+			if (atomic_load(&stopping, MemoryOrder::Acquire)) break;
+			cpu_relax();
+		}
+		int32* signal = background ? &backgroundSignal : &frameSignal;
+		int32* sleepers = background ? &backgroundSleepers : &frameSleepers;
+		atomic_fetch_add(sleepers, 1, MemoryOrder::SeqCst);
+		int32 seen = atomic_load(signal, MemoryOrder::SeqCst);
+		const bool work = HasFrameWork() || (backgroundWork && !shared[2].IsEmpty());
+		const bool stop = atomic_load(&stopping, MemoryOrder::SeqCst) != 0;
+		if (!work && !stop) wait_on_address((void*)signal, (void*)&seen, 4, -1);
+		atomic_fetch_sub(sleepers, 1, MemoryOrder::SeqCst);
+		return work || !stop || HasFrameWork() || (backgroundWork && !shared[2].IsEmpty());
+	}
+
+	void WakeOne(int32* signal, int32* sleepers) {
+		if (atomic_load(sleepers, MemoryOrder::SeqCst) == 0) return;
+		atomic_fetch_add(signal, 1, MemoryOrder::SeqCst);
+		wake_one((void*)signal);
+	}
+
+	// Frame work wakes a frame worker, or a background worker when every frame worker is busy.
+	void JobWorkers::WakeFor(JobPriority priority) {
+		atomic_fence(MemoryOrder::SeqCst);
+		if (priority == JobPriority::Background && backgroundCount > 0) { WakeOne(&backgroundSignal, &backgroundSleepers); return; }
+		if (atomic_load(&frameSleepers, MemoryOrder::SeqCst) > 0) { WakeOne(&frameSignal, &frameSleepers); return; }
+		WakeOne(&backgroundSignal, &backgroundSleepers);
+	}
+
+	void JobWorkers::WakeEveryone() {
+		atomic_fetch_add(&frameSignal, 1, MemoryOrder::SeqCst);
+		atomic_fetch_add(&backgroundSignal, 1, MemoryOrder::SeqCst);
+		wake_all((void*)&frameSignal);
+		wake_all((void*)&backgroundSignal);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// The workers
+
+	void RunFrameWorker(JobWorkers* workers, int32 self) {
+		t_jobWorkers = workers;
+		t_frameWorker = self;
+		Job job;
+		while (true) {
+			if (workers->TakeFrameJob(self, job)) { RunJob(job); continue; }
+			if (workers->backgroundCount == 0 && workers->TakeBackgroundJob(job)) { RunJob(job); continue; }
+			if (!workers->WaitForWork(false)) return;
+		}
+	}
+
+	void RunBackgroundWorker(JobWorkers* workers) {
+		t_jobWorkers = workers;
+		Job job;
+		while (true) {
+			if (workers->TakeBackgroundJob(job) || workers->TakeFrameJob(-1, job)) { RunJob(job); continue; }
+			if (!workers->WaitForWork(true)) return;
+		}
+	}
+
+	void WorkerMain(void* state) {
+		WorkerStart* start = (WorkerStart*)state;
+		if (start->index >= 0) RunFrameWorker(start->workers, start->index);
+		else RunBackgroundWorker(start->workers);
+	}
+
+	void StartWorker(JobWorkers* workers, int32 index) {
+		WorkerStart* start = new WorkerStart;
+		start->workers = workers;
+		start->index = index;
+		void* thread = thread_start(WorkerMain, (void*)start);
+		if (thread) workers->threads.Push(thread);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// The system
+
+	void JobSystem::Start(JobSystemDesc desc) {
+		const int32 spare = Thread::HardwareCount() - 1;   // the submitting thread keeps a processor
+		const int32 frameCount = desc.frameWorkers >= 1 ? desc.frameWorkers : (spare >= 1 ? spare : 1);
+		workers = new JobWorkers;
+		workers->backgroundCount = desc.backgroundWorkers >= 0 ? desc.backgroundWorkers : 1;
+		for (int32 p = 0; p < 3; p++) workers->shared[p].Reserve(kSharedQueueCapacity);
+		for (int32 i = 0; i < frameCount; i++) {
+			FrameQueues* queues = new FrameQueues;
+			queues->high.Reserve(kWorkerQueueCapacity);
+			queues->normal.Reserve(kWorkerQueueCapacity);
+			workers->frame.Push(queues);
+		}
+		for (int32 i = 0; i < frameCount; i++) StartWorker(workers, i);
+		for (int32 i = 0; i < workers->backgroundCount; i++) StartWorker(workers, -1);
+	}
+
+	void JobSystem::Delete() {
+		if (!workers) return;
+		atomic_store(&workers->stopping, 1, MemoryOrder::SeqCst);
+		workers->WakeEveryone();
+		for (int64 i = 0; i < workers->threads.Count(); i++) thread_join(workers->threads[i]);
+		for (int64 i = 0; i < workers->frame.Count(); i++) delete workers->frame[i];
+		for (int32 p = 0; p < 3; p++) workers->shared[p].Delete();
+		workers = nullptr;
+	}
+
+	// A frame worker queues its own frame jobs; everything else goes through the shared queues.
+	bool JobSystem::Enqueue(const Job& job, JobPriority priority) {
+		const bool ownQueue = priority != JobPriority::Background && t_jobWorkers == workers && t_frameWorker >= 0;
+		if (!ownQueue) return workers->shared[(int32)priority].Push(job);
+		FrameQueues* queues = workers->frame[t_frameWorker];
+		return priority == JobPriority::High ? queues->high.Push(job) : queues->normal.Push(job);
+	}
+
+	// A full queue: a frame job runs now on the submitting thread (it is short); a background one waits for room.
+	void JobSystem::Submit(func<void()> run, JobPriority priority, WaitGroup* group) {
+		if (group) group->Add(1);
+		Job job;
+		job.run = run;
+		job.group = group;
+		if (!workers) { RunJob(job); return; }
+		if (!Enqueue(job, priority)) {
+			if (priority != JobPriority::Background) { RunJob(job); return; }
+			while (!workers->shared[2].Push(job)) thread_yield();
+		}
+		workers->WakeFor(priority);
+	}
+
+	void JobSystem::Wait(WaitGroup& group) {
+		const int32 self = workers && t_jobWorkers == workers ? t_frameWorker : -1;
+		Job job;
+		while (!group.IsDone()) {
+			if (workers && workers->TakeFrameJob(self, job)) { RunJob(job); continue; }
+			group.Wait(); // the group's last jobs run elsewhere; frame jobs submitted meanwhile have workers
+		}
+	}
+}

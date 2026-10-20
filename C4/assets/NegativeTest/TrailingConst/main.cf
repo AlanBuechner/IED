@@ -1,0 +1,5 @@
+int32 main() {
+	int32 x = 1;
+	int32* const p = &x;
+	return *p;
+}

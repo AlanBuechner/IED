@@ -1,0 +1,2 @@
+static int32 Local() { return 20; }
+int32 FromB() { return Local(); }

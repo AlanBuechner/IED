@@ -1,0 +1,118 @@
+// Core - Literal typing (B2, D-02): every suffix, C's first-type-that-fits rule, character and string widths,
+// escapes and adjacent strings.
+include "../Framework/Assert.ch"
+include "LiteralTyping.ch"
+
+int32 TypeOf(int32 v) { return 1; }
+int32 TypeOf(uint32 v) { return 2; }
+int32 TypeOf(int64 v) { return 3; }
+int32 TypeOf(uint64 v) { return 4; }
+int32 TypeOf(float v) { return 5; }
+int32 TypeOf(double v) { return 6; }
+int32 TypeOf(char8 v) { return 7; }
+int32 TypeOf(char16 v) { return 8; }
+int32 TypeOf(char32 v) { return 9; }
+
+int32 PointeeOf(char8* s) { return 7; }
+int32 PointeeOf(char16* s) { return 8; }
+int32 PointeeOf(char32* s) { return 9; }
+
+void TestIntegerTypes() {
+	AssertIntEquals(1, TypeOf(10), "10 is int32");
+	AssertIntEquals(1, TypeOf(2147483647), "the largest int32 is int32");
+	AssertIntEquals(3, TypeOf(2147483648), "a decimal past int32 is int64");
+	AssertIntEquals(4, TypeOf(9223372036854775808), "a decimal past int64 is uint64");
+	AssertIntEquals(1, TypeOf(0x7FFFFFFF), "a hex int32");
+	AssertIntEquals(2, TypeOf(0xFFFFFFFF), "a hex past int32 is uint32");
+	AssertIntEquals(3, TypeOf(0x100000000), "a hex past uint32 is int64");
+	AssertIntEquals(4, TypeOf(0xFFFFFFFFFFFFFFFF), "a hex past int64 is uint64");
+	AssertIntEquals(2, TypeOf(0b11111111111111111111111111111111), "a binary past int32 is uint32");
+	AssertIntEquals(2, TypeOf(037777777777), "an octal past int32 is uint32");
+}
+
+void TestIntegerSuffixes() {
+	AssertIntEquals(2, TypeOf(10u), "u is uint32");
+	AssertIntEquals(2, TypeOf(0xFFu), "u on hex");
+	AssertIntEquals(2, TypeOf(0b1U), "U on binary");
+	AssertIntEquals(2, TypeOf(017u), "u on octal");
+	AssertIntEquals(4, TypeOf(4294967296u), "u past uint32 is uint64");
+	AssertIntEquals(3, TypeOf(10l), "l is int64");
+	AssertIntEquals(3, TypeOf(10LL), "LL is int64");
+	AssertIntEquals(4, TypeOf(0xFFFFFFFFFFFFFFFFl), "l past int64 is uint64");
+	AssertIntEquals(4, TypeOf(10ul), "ul is uint64");
+	AssertIntEquals(4, TypeOf(10LLU), "LLU is uint64");
+	AssertIntEquals(4, TypeOf(10lu), "lu is uint64");
+}
+
+void TestIntegerValues() {
+	AssertIntEquals(8, 010, "a leading 0 is octal");
+	AssertIntEquals(15, 0xF, "hex");
+	AssertIntEquals(5, 0b101, "binary");
+	AssertIntEquals(0, 0, "zero is decimal");
+	uint64 all = 0xFFFFFFFFFFFFFFFF;
+	AssertIntEquals(1, all + 1 == 0 ? 1 : 0, "0xFFFFFFFFFFFFFFFF is all ones");
+	AssertIntEquals(1, all == 18446744073709551615 ? 1 : 0, "the largest uint64 in decimal");
+	uint32 byte = 0xFFu;
+	AssertIntEquals(255, (int32)byte, "0xFFu is 255");
+	int64 wide = 2147483648;
+	AssertIntEquals(1, wide > 2147483647 ? 1 : 0, "a decimal past int32 keeps its value");
+}
+
+void TestFloatTypes() {
+	AssertIntEquals(6, TypeOf(1.5), "1.5 is double");
+	AssertIntEquals(6, TypeOf(1e3), "an exponent makes a double");
+	AssertIntEquals(5, TypeOf(1.5f), "f is float");
+	AssertIntEquals(5, TypeOf(2.5E-3F), "F with an exponent is float");
+	AssertIntEquals(1000, (int32)1e3, "1e3 is 1000");
+	AssertFloatEquals(0.0025f, 2.5E-3F, "2.5E-3F");
+}
+
+void TestCharacters() {
+	AssertIntEquals(7, TypeOf('a'), "'a' is char8");
+	AssertIntEquals(7, TypeOf(u8'a'), "u8'a' is char8");
+	AssertIntEquals(8, TypeOf(u'a'), "u'a' is char16");
+	AssertIntEquals(9, TypeOf(U'a'), "U'a' is char32");
+	AssertIntEquals(233, (int32)u'\u00e9', "u'\\u00e9'");
+	AssertIntEquals(128512, (int32)U'\U0001F600', "U'\\U0001F600'");
+	AssertIntEquals(-1, (int32)'\xFF', "char8 is signed, like C's char");
+	AssertIntEquals(65535, (int32)u'\xFFFF', "char16 is unsigned");
+	AssertIntEquals(7, (int32)'\a', "\\a");
+	AssertIntEquals(8, (int32)'\b', "\\b");
+	AssertIntEquals(12, (int32)'\f', "\\f");
+	AssertIntEquals(11, (int32)'\v', "\\v");
+	AssertIntEquals(27, (int32)'\e', "\\e");
+	AssertIntEquals(65, (int32)'\101', "an octal escape");
+	AssertIntEquals(0, (int32)'\0', "NUL");
+}
+
+void TestStrings() {
+	AssertIntEquals(7, PointeeOf("a"), "\"a\" is char8*");
+	AssertIntEquals(7, PointeeOf(u8"a"), "u8\"a\" is char8*");
+	AssertIntEquals(8, PointeeOf(u"a"), "u\"a\" is char16*");
+	AssertIntEquals(9, PointeeOf(U"a"), "U\"a\" is char32*");
+	char16* wide = u"h\u00e9!";
+	AssertIntEquals(233, (int32)wide[1], "a char16 string holds the code point");
+	AssertIntEquals(0, (int32)wide[3], "a char16 string ends in a NUL unit");
+	char16* pair = u"\U0001F600";
+	AssertIntEquals(55357, (int32)pair[0], "a char16 string encodes U+1F600 as a surrogate pair");
+	AssertIntEquals(56832, (int32)pair[1], "the low surrogate");
+	char32* full = U"\U0001F600x";
+	AssertIntEquals(128512, (int32)full[0], "a char32 string holds the code point");
+	AssertIntEquals(120, (int32)full[1], "then 'x'");
+	AssertIntEquals(2, (int32)strlen("\u00e9"), "a char8 string encodes \\u00e9 as two UTF-8 bytes");
+	AssertIntEquals(2, (int32)strlen("\x41B"), "\\x takes two hex digits in a char8 string");
+	char8* joined = "ab" "cd";
+	AssertIntEquals(4, (int32)strlen(joined), "adjacent strings join");
+	AssertIntEquals(99, (int32)joined[2], "the joined text is abcd");
+	char8* withNul = "a\0b";
+	AssertIntEquals(98, (int32)withNul[2], "a string keeps the bytes after an embedded NUL");
+}
+
+void TestLiteralTyping() {
+	TestIntegerTypes();
+	TestIntegerSuffixes();
+	TestIntegerValues();
+	TestFloatTypes();
+	TestCharacters();
+	TestStrings();
+}

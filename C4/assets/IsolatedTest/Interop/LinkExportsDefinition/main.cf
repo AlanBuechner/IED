@@ -1,0 +1,12 @@
+// A function definition with [link("sym")] is emitted under that symbol, so foreign code calls it by name.
+extern "c" include "ext.h"
+extern "c" source "ext.c"
+
+[link("c4_exported_answer")] int32 ExportedAnswer() { return 41; }
+
+int32 main() {
+	if (ExportedAnswer() != 41) return 1;
+	if (CallExported() != 42) return 2;
+	printf("LINK EXPORT OK\n");
+	return 0;
+}

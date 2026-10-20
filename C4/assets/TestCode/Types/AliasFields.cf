@@ -1,0 +1,48 @@
+// Types - Alias Fields Tests (implementation)
+include "../Framework/Assert.ch"
+include "AliasFields.ch"
+
+// BUG-187: a field whose type was named through an alias had size 0, so the fields after it overlapped it.
+template<T> class AfPair { public T first; public T second; }
+alias AfInt = int32;
+alias AfPairF = AfPair<float>;
+alias AfLater = AfEarlier;
+alias AfEarlier = int64;
+alias AfIntPtr = AfInt*;
+
+class AfCells { public AfInt[4] cells; }
+class AfTwoPairs { public AfPairF a; public AfPairF b; }
+class AfPairArray { public AfPairF[3] items; }
+class AfChain { public AfLater wide; public AfInt narrow; }
+class AfPointers { public AfIntPtr p; public AfInt v; }
+template<T> class AfBox { public AfInt tag; public T value; }
+
+void TestAliasFieldSizes() {
+	Assert(sizeof(AfCells) == 16, "alias int32 array field");
+	Assert(sizeof(AfTwoPairs) == 16, "two alias template fields");
+	Assert(sizeof(AfPairArray) == 24, "alias template array field");
+	Assert(sizeof(AfChain) == 16, "alias of a later alias");
+	Assert(sizeof(AfPointers) == 16, "alias pointer field");
+	Assert(sizeof(AfBox<double>) == 16, "alias field in a template");
+}
+
+void TestAliasFieldsDoNotOverlap() {
+	AfTwoPairs t;
+	t.a.first = 1.0f; t.a.second = 2.0f; t.b.first = 3.0f; t.b.second = 4.0f;
+	AssertFloatEquals(1.0f, t.a.first, "a.first kept");
+	AssertFloatEquals(2.0f, t.a.second, "a.second kept");
+	AssertFloatEquals(3.0f, t.b.first, "b.first kept");
+	AfPairArray arr;
+	for (int32 i = 0; i < 3; ++i) { arr.items[i].first = (float)i; arr.items[i].second = (float)(i * 10); }
+	AssertFloatEquals(2.0f, arr.items[2].first, "array element 2 first");
+	AssertFloatEquals(10.0f, arr.items[1].second, "array element 1 second");
+	AfChain c;
+	c.wide = 5000000000; c.narrow = 7;
+	Assert(c.wide == 5000000000, "int64 through an alias chain");
+	AssertIntEquals(7, c.narrow, "field after the chained alias");
+}
+
+void TestAliasFields() {
+	TestAliasFieldSizes();
+	TestAliasFieldsDoNotOverlap();
+}

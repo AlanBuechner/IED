@@ -1,0 +1,66 @@
+// #if / #ifdef / #ifndef / #elif / #else (docs/language/02 2.3): real compound conditions, nested groups,
+// and skipped groups that may hold anything.
+#define FOO 1
+#define MYDEF
+#define LEVEL 2
+
+[test("macros.if.defined")]
+public static void TestDefinedForms() {
+    int32 seen = 0;
+#if defined(FOO)
+    seen = seen + 1;
+#else
+    seen = seen + 100;
+#endif
+#ifdef MYDEF
+    seen = seen + 10;
+#endif
+#ifndef NOTTHERE
+    seen = seen + 1000;
+#endif
+    assert_eq(1011, seen, "defined(), #ifdef and #ifndef pick their branches");
+}
+
+[test("macros.if.compound")]
+public static void TestCompoundConditions() {
+    int32 both = 0;
+#if defined(FOO) && defined(MYDEF) && !defined(NOTTHERE)
+    both = 1;
+#endif
+    assert_eq(1, both, "&& of three defined tests");
+    int32 either = 0;
+#if defined(NOTTHERE) && defined(FOO)
+    either = 5;
+#elif defined(NOTTHERE) || LEVEL >= 2
+    either = 2;
+#else
+    either = 3;
+#endif
+    assert_eq(2, either, "&& is false, so #elif with || is taken");
+    int32 value = 0;
+#if FOO + LEVEL * 2 == 5 && (LEVEL << 1) == 4
+    value = 1;
+#endif
+    assert_eq(1, value, "arithmetic and comparison on macro values");
+}
+
+[test("macros.if.skipped")]
+public static void TestSkippedGroups() {
+    int32 taken = 0;
+#ifdef NOTTHERE
+    this is not valid C4 at all (((
+#else
+    taken = 1;
+#endif
+#if 0
+    also invalid )] [
+#endif
+#ifdef FOO
+    #ifndef MYDEF
+        taken = 99;
+    #else
+        taken = taken + 1;
+    #endif
+#endif
+    assert_eq(2, taken, "skipped groups are text, nested groups follow their own conditions");
+}

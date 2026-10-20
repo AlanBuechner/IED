@@ -1,0 +1,10 @@
+// An exception that escapes a thread's entry ends the process as one escaping main does: a message and exit 1,
+// not a crash.
+void Fail(void* state) { throw 3; }
+
+int32 main() {
+	void* t = thread_start(Fail, null);
+	thread_join(t);
+	printf("SHOULD NOT REACH HERE\n");
+	return 0;
+}

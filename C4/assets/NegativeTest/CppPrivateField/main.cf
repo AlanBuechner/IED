@@ -1,0 +1,2 @@
+extern "c++" include "box.h"
+int32 main() { Box* b = new Box; return b->secret; }

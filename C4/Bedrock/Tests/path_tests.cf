@@ -1,0 +1,116 @@
+// FS::Path: components, roots, joining, extensions and normalization - text only, nothing touches the disk.
+
+include "bedrock.ch"
+
+bool PathIs(const FS::Path& path, const char* expected) { return path.View() == Core::StringView(expected); }
+
+bool ViewIs(Core::StringView view, const char* expected) { return view == Core::StringView(expected); }
+
+[test("fs.path")]
+class PathTests {
+	[test("components")]
+	public static void TestComponents() {
+		FS::Path file = FS::Path("game/assets/icon.png");
+		assert_true(ViewIs(file.FileName(), "icon.png"), "file name");
+		assert_true(ViewIs(file.Stem(), "icon"), "stem");
+		assert_true(ViewIs(file.Extension(), ".png"), "extension");
+		assert_true(PathIs(file.Parent(), "game/assets"), "parent");
+		assert_true(ViewIs(file.Parent().FileName(), "assets"), "parent's name");
+		assert_true(ViewIs(FS::Path("a\\b\\c.txt").FileName(), "c.txt"), "a backslash separates too");
+		assert_true(ViewIs(FS::Path("archive.tar.gz").Extension(), ".gz"), "the last dot");
+		assert_true(ViewIs(FS::Path("archive.tar.gz").Stem(), "archive.tar"), "stem keeps the inner dots");
+	}
+
+	[test("component_edges")]
+	public static void TestComponentEdges() {
+		assert_true(ViewIs(FS::Path(".bashrc").Extension(), ""), "a leading dot is not an extension");
+		assert_true(ViewIs(FS::Path(".bashrc").Stem(), ".bashrc"), "it is the stem");
+		assert_true(ViewIs(FS::Path("..").Extension(), ""), "'..' has no extension");
+		assert_true(ViewIs(FS::Path(".").Stem(), "."), "'.' is its own stem");
+		assert_true(ViewIs(FS::Path("name.").Extension(), "."), "a trailing dot is an empty extension");
+		assert_true(ViewIs(FS::Path("dir/").FileName(), ""), "a trailing separator: no file name");
+		assert_true(PathIs(FS::Path("dir/").Parent(), "dir"), "and its parent is the directory");
+		assert_true(PathIs(FS::Path("a//b").Parent(), "a"), "repeated separators");
+		assert_true(PathIs(FS::Path("c.txt").Parent(), ""), "no parent");
+		assert_true(PathIs(FS::Path("").Parent(), ""), "the empty path");
+		assert_true(ViewIs(FS::Path("").FileName(), ""), "has no file name");
+	}
+
+	[test("roots")]
+	public static void TestRoots() {
+		assert_true(FS::Path("/usr/lib").IsAbsolute(), "a POSIX root");
+		assert_true(FS::Path("C:/Games").IsAbsolute(), "a drive root");
+		assert_true(FS::Path("c:\\Games").IsAbsolute(), "a drive root with a backslash");
+		assert_true(FS::Path("\\\\server\\share\\file").IsAbsolute(), "a UNC root");
+		assert_true(!FS::Path("C:Games").IsAbsolute(), "a drive alone is relative to that drive");
+		assert_true(!FS::Path("assets/icon.png").IsAbsolute(), "relative");
+		assert_true(!FS::Path("").IsAbsolute(), "empty");
+		assert_true(PathIs(FS::Path("/c").Parent(), "/"), "the parent of a root's child is the root");
+		assert_true(PathIs(FS::Path("/").Parent(), "/"), "a root is its own parent");
+		assert_true(PathIs(FS::Path("C:/").Parent(), "C:/"), "a drive root too");
+		assert_true(ViewIs(FS::Path("C:/").FileName(), ""), "a root has no file name");
+		assert_true(PathIs(FS::Path("\\\\server\\share\\file").Parent(), "\\\\server\\share\\"), "the UNC share is the root");
+		assert_eq(3, FS::RootLength(Core::StringView("C:/x")), "drive root length");
+		assert_eq(2, FS::RootLength(Core::StringView("C:x")), "drive-relative root length");
+		assert_eq(15, FS::RootLength(Core::StringView("\\\\server\\share\\x")), "UNC root length");
+		assert_eq(0, FS::RootLength(Core::StringView("x/y")), "no root");
+	}
+
+	[test("join")]
+	public static void TestJoin() {
+		FS::Path base = FS::Path("game");
+		assert_true(PathIs(base / "assets" / "icon.png", "game/assets/icon.png"), "one '/' between parts");
+		assert_true(PathIs(FS::Path("game/") / "assets", "game/assets"), "no doubled separator");
+		assert_true(PathIs(FS::Path("game\\") / "assets", "game\\assets"), "a trailing backslash counts");
+		assert_true(PathIs(base / "/etc", "/etc"), "a part with a root replaces the path");
+		assert_true(PathIs(base / "D:/data", "D:/data"), "a drive replaces it too");
+		assert_true(PathIs(base / "", "game"), "an empty part changes nothing");
+		assert_true(PathIs(FS::Path() / "assets", "assets"), "joining onto an empty path");
+		assert_true(PathIs(base / Core::StringView("bin/tools").Substring(0, 3), "game/bin"), "a view of part of a string");
+		assert_true(PathIs(base, "game"), "joining leaves the original alone");
+	}
+
+	[test("with_extension")]
+	public static void TestWithExtension() {
+		assert_true(PathIs(FS::Path("a/icon.png").WithExtension(Core::StringView(".dds")), "a/icon.dds"), "replaced");
+		assert_true(PathIs(FS::Path("a/icon").WithExtension(Core::StringView("dds")), "a/icon.dds"), "added, the dot optional");
+		assert_true(PathIs(FS::Path("a/icon.png").WithExtension(Core::StringView("")), "a/icon"), "removed");
+		assert_true(PathIs(FS::Path("a.b/icon").WithExtension(Core::StringView(".x")), "a.b/icon.x"), "a dot in a directory is not the file's");
+	}
+
+	[test("normalized")]
+	public static void TestNormalized() {
+		assert_true(PathIs(FS::Path("a/./b//c/../d").Normalized(), "a/b/d"), "dots, doubled separators, '..'");
+		assert_true(PathIs(FS::Path("a\\b\\..\\c").Normalized(), "a/c"), "backslashes become '/'");
+		assert_true(PathIs(FS::Path("../x/../../y").Normalized(), "../../y"), "a relative path keeps leading '..'");
+		assert_true(PathIs(FS::Path("/../x").Normalized(), "/x"), "nothing is above a root");
+		assert_true(PathIs(FS::Path("C:\\a\\..\\..\\b").Normalized(), "C:/b"), "a drive root");
+		assert_true(PathIs(FS::Path("a/..").Normalized(), "."), "nothing left is '.'");
+		assert_true(PathIs(FS::Path("").Normalized(), "."), "the empty path");
+		assert_true(PathIs(FS::Path("/").Normalized(), "/"), "a root alone");
+		assert_true(PathIs(FS::Path("dir/").Normalized(), "dir"), "a trailing separator");
+	}
+
+	[test("compare_and_hash")]
+	public static void TestCompareAndHash() {
+		assert_true(FS::Path("a/b") == FS::Path("a/b"), "equal text");
+		assert_true(!(FS::Path("a/b") == FS::Path("a\\b")), "compared as text, separators included");
+		Core::HashMap<FS::Path, int32> sizes;
+		sizes[FS::Path("a/b")] = 3;
+		assert_eq(3, sizes.Get(FS::Path("a/b")), "a path is a hash map key");
+		FS::Path copy = FS::Path("x/y");
+		FS::Path other = copy;
+		other = other / "z";
+		assert_true(PathIs(copy, "x/y"), "a copy owns its own text");
+	}
+
+	[test("process_directories")]
+	public static void TestProcessDirectories() {
+		FS::Path current = FS::CurrentDirectory();
+		assert_true(current.IsAbsolute(), "the working directory is absolute");
+		assert_true(FS::IsDirectory(current.CStr()), "and is a directory");
+		FS::Path temp = FS::TempDirectory();
+		assert_true(temp.IsAbsolute(), "the temp directory is absolute");
+		assert_true(FS::IsDirectory(temp.CStr()), "and is a directory");
+	}
+}

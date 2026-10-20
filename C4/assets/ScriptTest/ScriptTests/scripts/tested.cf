@@ -1,0 +1,7 @@
+int32 Helper() { return 2 + 2; }
+
+[test("math.add")] void AddsUp() { assert_eq(4, Helper(), "two and two"); }
+
+[test("math.fail")] void FailsOnce() { assert_eq(5, Helper(), "deliberately wrong"); }
+
+[test("other.ok")] void StaysTrue() { assert_true(Helper() > 0, "positive"); }

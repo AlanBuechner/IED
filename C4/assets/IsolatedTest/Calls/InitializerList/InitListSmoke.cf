@@ -1,0 +1,111 @@
+// Comprehensive __init_list<T> test (pure C4, no interop).
+// __init_list<T> is the built-in alias template mirroring std::initializer_list<T>: a 16-byte
+// aggregate { T* begin, T* end } that lets a braced literal {...} be passed as a call argument or
+// range-for source. .size is derived as (end - begin) / sizeof(T); list[i] indexes the buffer.
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+
+// --- int32 element: range-for over an init-list parameter ---
+int32 SumList(__init_list<int32> list) {
+	int32 s = 0;
+	for (int32 i: list) { s = s + i; }
+	return s;
+}
+
+// --- .size, indexing and .data on a local init list ---
+void TestSizeData() {
+	__init_list<int32> list = {10, 20, 30};
+	Check(list.size == 3, "list.size == 3");
+	Check(list[0] == 10, "list[0]==10");
+	Check(list[1] == 20, "list[1]==20");
+	Check(list[2] == 30, "list[2]==30");
+	// .data is a T* pointing at the first element; dereferencing through it yields the value.
+	int32* d = list.data;
+	Check(d != null, ".data non-null");
+	Check(*d == 10, "*.data == first element");
+}
+
+// --- empty list ---
+int32 CountList(__init_list<int32> list) { return (int32)list.size; }
+
+// --- float element type ---
+float SumFloats(__init_list<float> list) {
+	float s = 0.0f;
+	for (float f: list) { s = s + f; }
+	return s;
+}
+
+// --- double element type ---
+double SumDoubles(__init_list<double> list) {
+	double s = 0.0;
+	for (double d: list) { s = s + d; }
+	return s;
+}
+
+// --- char element type ---
+int32 SumChars(__init_list<char> list) {
+	int32 s = 0;
+	for (char c: list) { s = s + (int32)c; }
+	return s;
+}
+
+// --- struct element type ---
+struct Pt { int32 x; int32 y; };
+int32 SumX(__init_list<Pt> list) {
+	int32 s = 0;
+	for (Pt p: list) { s = s + p.x; }
+	return s;
+}
+
+// --- template function taking __init_list<T>, instantiated for two element types ---
+template<T> int32 TplCount(__init_list<T> list) {
+	int32 n = 0;
+	for (T t: list) { n = n + 1; }
+	return n;
+}
+
+// --- nested call: init-list-arg function used as an argument of another call ---
+int32 Outer(int32 a, int32 b) { return a + b; }
+
+// --- sizeof must match the 16-byte {ptr, ptr} ABI ---
+void TestSizeof() {
+	Check(sizeof(__init_list<int32>) == 16, "sizeof(__init_list<int32>)==16");
+	Check(sizeof(__init_list<float>) == 16, "sizeof(__init_list<float>)==16");
+}
+
+int32 main() {
+	// int32
+	Check(SumList({1, 2, 3}) == 6, "SumList({1,2,3})==6");
+	Check(SumList({42}) == 42, "single element list");
+	Check(SumList({}) == 0, "empty list sum");
+	Check(CountList({}) == 0, "empty list size 0");
+	Check(CountList({7, 8}) == 2, "two-element size 2");
+	TestSizeData();
+
+	// float / double / char / pointer
+	float fs = SumFloats({1.5f, 2.5f});
+	Check((int32)(fs * 2.0f) == 8, "float list sum 4.0");
+	double ds = SumDoubles({0.5, 1.5, 2.0});
+	Check((int32)ds == 4, "double list sum 4.0");
+	Check(SumChars({'a','b'}) == (int32)'a' + (int32)'b', "char list sum");
+
+	// struct element
+	Pt p1; p1.x = 5; p1.y = 0;
+	Pt p2; p2.x = 7; p2.y = 0;
+	Check(SumX({p1, p2}) == 12, "struct list sum x==12");
+
+	// templates (two instantiations)
+	Check(TplCount<int32>({1, 2, 3, 4}) == 4, "template fn int32 count 4");
+	Check(TplCount<float>({1.0f, 2.0f}) == 2, "template fn float count 2");
+
+	// nested call with init-list arg
+	Check(Outer(1, SumList({5, 6})) == 12, "nested call with init-list arg");
+
+	// sizeof ABI
+	TestSizeof();
+
+	printf("INITLIST SMOKE: %d failure(s)\n", g_fail);
+	return g_fail;
+}

@@ -1,0 +1,184 @@
+// Serialization::ReadYaml: the core schema, every scalar style, block and flow structure, the errors that
+// name what is not supported, and the round trip through WriteYaml.
+
+include "bedrock.ch"
+
+Serialization::ReadResult ReadYamlText(Serialization::DomDoc& doc, const char* text) {
+	return Serialization::ReadYaml(Core::StringView(text), doc);
+}
+
+// The error a text gives, or "" when it reads.
+const char* YamlError(const char* text) {
+	Serialization::DomDoc doc;
+	Serialization::ReadResult read = ReadYamlText(doc, text);
+	return read.Ok() ? "" : read.error;
+}
+
+// The text read and written back as compact JSON, or the error.
+Core::String YamlAsJson(const char* text) {
+	Serialization::DomDoc doc;
+	Serialization::ReadResult read = ReadYamlText(doc, text);
+	if (!read.Ok()) return Core::String(read.error);
+	Core::StringBuilder out;
+	Serialization::WriteJson(read.root, &out, 0);
+	return out.ToString();
+}
+
+[test("serialization.yaml.read")]
+class YamlReaderTests {
+	[test("core_schema")]
+	public static void TestCoreSchema() {
+		assert_se("[null,null,null,null,null]", YamlAsJson("- ~\n- null\n- Null\n- NULL\n-").CStr(), "nulls");
+		assert_se("[true,false,true,false]", YamlAsJson("[true, false, True, FALSE]").CStr(), "bools");
+		assert_se("[42,-7,7,31,15,0]", YamlAsJson("[42, -7, +7, 0x1F, 0o17, 0]").CStr(), "ints in every base");
+		assert_se("[1.5,-0.25,1000.0,0.5,3.0]", YamlAsJson("[1.5, -.25, 1e3, .5, 3.]").CStr(), "floats");
+		assert_se("[\"yes\",\"0x\",\"1.2.3\",\"12:30\",\"-\"]", YamlAsJson("[yes, 0x, 1.2.3, '12:30', \"-\"]").CStr(),
+			"anything else is a string");
+		assert_se("[\"true\",\"42\"]", YamlAsJson("[\"true\", '42']").CStr(), "a quoted scalar is always a string");
+		Serialization::DomDoc doc;
+		Serialization::DomNode specials = ReadYamlText(doc, "[.inf, -.Inf, .NAN]").root;
+		double inf = specials.At(0).AsFloat();
+		double nan = specials.At(2).AsFloat();
+		assert_true(inf > 1e308, ".inf");
+		assert_true(specials.At(1).AsFloat() < -1e308, "-.Inf");
+		assert_true(nan != nan, ".NAN");
+		assert_true(ReadYamlText(doc, "9223372036854775807").root.Kind() == Serialization::DomKind::Int, "INT64_MAX is an int");
+	}
+
+	[test("block_structure")]
+	public static void TestBlockStructure() {
+		assert_se("{\"name\":\"c4\",\"version\":3,\"tags\":[\"lang\",7],\"inner\":{\"a\":1,\"b\":{\"c\":null}}}",
+			YamlAsJson("name: c4\nversion: 3\ntags:\n  - lang\n  - 7\ninner:\n  a: 1\n  b:\n    c:\n").CStr(),
+			"mappings and sequences nest by indentation");
+		assert_se("{\"list\":[1,2],\"after\":true}", YamlAsJson("list:\n- 1\n- 2\nafter: true").CStr(),
+			"a sequence may sit at its key's indentation");
+		assert_se("[{\"a\":1,\"b\":2},{\"c\":3}]", YamlAsJson("- a: 1\n  b: 2\n- c: 3").CStr(), "mappings inside a sequence");
+		assert_se("[[1,2],[3]]", YamlAsJson("- - 1\n  - 2\n- - 3").CStr(), "a sequence inside a sequence");
+		assert_se("{\"a\":1}", YamlAsJson("    a: 1").CStr(), "an indented document");
+		assert_se("{\"k\":{\"x\":1},\"j\":2}", YamlAsJson("k:\n    x: 1\nj: 2").CStr(), "any deeper indentation");
+		assert_se("{\"url\":\"http://x.org/a\",\"time\":\"12:30\"}", YamlAsJson("url: http://x.org/a\ntime: 12:30").CStr(),
+			"a ':' not followed by a blank belongs to the value");
+		assert_se("{\"dup\":1,\"dup\":2}", YamlAsJson("dup: 1\ndup: 2").CStr(), "duplicate keys are kept");
+	}
+
+	[test("comments_and_markers")]
+	public static void TestCommentsAndMarkers() {
+		assert_se("{\"a\":1,\"b\":\"x # y\"}", YamlAsJson("# head\na: 1 # trailing\n\n  # indented\nb: 'x # y'\n").CStr(),
+			"comments anywhere, '#' inside quotes is text");
+		assert_se("{\"a\":1}", YamlAsJson("---\na: 1\n...\n").CStr(), "document markers");
+		assert_se("[1]", YamlAsJson("--- [1]").CStr(), "content on the '---' line");
+		assert_se("null", YamlAsJson("").CStr(), "an empty document is null");
+		assert_se("null", YamlAsJson("# only a comment\n").CStr(), "a comment-only document is null");
+		assert_se("{\"a\":\"b#c\"}", YamlAsJson("a: b#c").CStr(), "'#' without a blank before it is text");
+		assert_se("{\"a\":1}", YamlAsJson("\xEF\xBB\xBF" "a: 1").CStr(), "a byte order mark is skipped");
+		assert_se("{\"a\":1,\"b\":2}", YamlAsJson("a: 1\r\nb: 2\r\n").CStr(), "CRLF line breaks");
+	}
+
+	[test("quoted_scalars")]
+	public static void TestQuotedScalars() {
+		Serialization::DomDoc doc;
+		assert_se("it's", ReadYamlText(doc, "'it''s'").root.AsString(), "'' in single quotes");
+		assert_se("a\"b\\c\td\ne", ReadYamlText(doc, "\"a\\\"b\\\\c\\td\\ne\"").root.AsString(), "double-quoted escapes");
+		assert_se("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80", ReadYamlText(doc, "\"\\xe9\\u20ac\\U0001F600\"").root.AsString(), "\\x, \\u and \\U");
+		assert_se("\xf0\x9f\x98\x80", ReadYamlText(doc, "\"\\ud83d\\ude00\"").root.AsString(), "a JSON surrogate pair");
+		assert_se("one two\nthree", ReadYamlText(doc, "\"one  \n  two\n\n  three\"").root.AsString(), "line folding in quotes");
+		assert_se("joined", ReadYamlText(doc, "\"join\\\n   ed\"").root.AsString(), "an escaped line break joins");
+		assert_se("a b", ReadYamlText(doc, "'a\n b'").root.AsString(), "folding in single quotes");
+		assert_se("caf\xc3\xa9", ReadYamlText(doc, "caf\xc3\xa9").root.AsString(), "raw UTF-8 in a plain scalar");
+	}
+
+	[test("plain_folding")]
+	public static void TestPlainFolding() {
+		assert_se("{\"text\":\"a long line that goes on\",\"next\":1}",
+			YamlAsJson("text: a long line\n  that goes on\nnext: 1").CStr(), "a more indented line continues the value");
+		assert_se("[\"one two\",\"x\\ny\"]", YamlAsJson("- one\n  two\n- x\n\n  y").CStr(), "a blank line is a line break");
+		assert_se("{\"a\":\"b\",\"c\":1}", YamlAsJson("a: b\n# comment\nc: 1").CStr(), "a comment ends it");
+	}
+
+	[test("block_scalars")]
+	public static void TestBlockScalars() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = ReadYamlText(doc, "literal: |\n  line one\n    indented\n\n  last\nnext: 1\n").root;
+		assert_se("line one\n  indented\n\nlast\n", root.Member("literal").AsString(), "literal keeps every break");
+		assert_eq(1, root.Member("next").AsInt(), "the mapping continues after it");
+		root = ReadYamlText(doc, "folded: >\n  one\n  two\n\n  three\n    kept\n  four\n").root;
+		assert_se("one two\nthree\n  kept\nfour\n", root.Member("folded").AsString(), "folded joins lines");
+		root = ReadYamlText(doc, "a: |-\n  x\n\nb: |+\n  y\n\n\nc: >\n  z\n").root;
+		assert_se("x", root.Member("a").AsString(), "strip");
+		assert_se("y\n\n\n", root.Member("b").AsString(), "keep");
+		assert_se("z\n", root.Member("c").AsString(), "clip");
+		root = ReadYamlText(doc, "- |2\n    two\n- >\n").root;
+		assert_se("  two\n", root.At(0).AsString(), "an explicit indentation keeps the rest");
+		assert_se("", root.At(1).AsString(), "an empty block scalar");
+	}
+
+	[test("flow_collections")]
+	public static void TestFlowCollections() {
+		assert_se("{\"a\":[1,{\"b\":null,\"c\":\"d\"}],\"e\":{}}", YamlAsJson("{a: [1, {b, c: d}], e: {}}").CStr(), "nested flow");
+		assert_se("[1,2]", YamlAsJson("[1, 2, ]").CStr(), "a trailing comma");
+		assert_se("{\"k\":[1,2,3]}", YamlAsJson("k: [1,\n    2,  # two\n    3]\n").CStr(), "a flow collection over several lines");
+		assert_se("[\"a b\"]", YamlAsJson("[a\n  b]").CStr(), "a plain scalar folded in flow");
+		assert_se("{\"a\":1,\"b\":[true]}", YamlAsJson("{\"a\":1,\"b\":[true]}").CStr(), "JSON is YAML");
+		assert_se("{\"a:1\":null}", YamlAsJson("{a:1}").CStr(), "a ':' without a blank stays in a plain key");
+	}
+
+	[test("errors")]
+	public static void TestErrors() {
+		assert_se("YAML anchors and aliases are not supported", YamlError("a: &x 1\nb: *x"), "anchors");
+		assert_se("YAML tags are not supported", YamlError("a: !!str 1"), "tags");
+		assert_se("complex mapping keys ('? ') are not supported", YamlError("? a\n: b"), "complex keys");
+		assert_se("YAML directives are not supported", YamlError("%YAML 1.2\n---\na: 1"), "directives");
+		assert_se("only one YAML document is read", YamlError("a: 1\n---\nb: 2"), "a second document");
+		assert_se("a tab cannot indent YAML", YamlError("a:\n\tb: 1"), "tab indentation");
+		assert_se("a 'key: value' line is indented under a plain value", YamlError("a: 1\n  b: 2"), "a key under a plain value");
+		assert_se("this line is indented more than the mapping it is in", YamlError("a:\n  b: [1]\n    c: 2"), "an over-indented key");
+		assert_se("'key: value' cannot follow another value on its line", YamlError("a: b: c"), "two keys on a line");
+		assert_se("a block sequence cannot start on the line of another value", YamlError("a: - 1"), "a sequence after a key");
+		assert_se("the text ends inside a quoted scalar", YamlError("a: \"open"), "an unterminated quote");
+		assert_se("expected ',' or ']' in a flow sequence", YamlError("[1, 2}"), "a wrong closing bracket");
+		assert_se("the text ends inside a flow mapping", YamlError("{a: 1"), "an unterminated flow mapping");
+		assert_se("an unknown or malformed escape", YamlError("\"\\q\""), "a bad escape");
+		assert_se("unexpected text after a value", YamlError("a: \"x\" y"), "text after a quoted value");
+		assert_se("the text is not valid UTF-8", YamlError("a: \xff"), "invalid UTF-8");
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = ReadYamlText(doc, "a: 1\nb:\n  c: [1,\n  2}\n");
+		assert_eq(4, read.line, "the error's line");
+		assert_eq(4, read.column, "the error's column");
+		assert_se("[\"1 2\"]", YamlAsJson("[1 2]").CStr(), "a blank inside a flow plain scalar is text");
+	}
+
+	[test("depth")]
+	public static void TestDepth() {
+		Core::StringBuilder deep;
+		for (int32 i = 0; i <= Serialization::kMaxYamlDepth; i++) deep.AppendByte('[');
+		Serialization::DomDoc doc;
+		assert_se("collections nest too deeply", Serialization::ReadYaml(deep.View(), doc).error, "a hostile depth is refused");
+	}
+
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = doc.NewObject();
+		doc.AddMember(root, "name", doc.NewString("c4: \"quoted\"\nline"));
+		doc.AddMember(root, "version", doc.NewInt(-3));
+		doc.AddMember(root, "ratio", doc.NewFloat(1.0 / 3.0));
+		Serialization::DomNode list = doc.NewArray();
+		doc.Add(list, doc.NewBool(true));
+		doc.Add(list, doc.NewNull());
+		Serialization::DomNode inner = doc.NewObject();
+		doc.AddMember(inner, "deep", doc.NewArray());
+		doc.AddMember(inner, "empty", doc.NewObject());
+		doc.Add(list, inner);
+		doc.AddMember(root, "list", list);
+		Core::StringBuilder yaml;
+		Serialization::WriteYaml(root, &yaml, 2);
+		Serialization::DomDoc back;
+		Serialization::ReadResult read = Serialization::ReadYaml(yaml.View(), back);
+		assert_true(read.Ok(), "WriteYaml's output reads back");
+		Core::StringBuilder before;
+		Core::StringBuilder after;
+		Serialization::WriteJson(root, &before, 0);
+		Serialization::WriteJson(read.root, &after, 0);
+		assert_se(before.CStr(), after.CStr(), "the same tree");
+	}
+}

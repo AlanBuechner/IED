@@ -1,0 +1,2 @@
+class NV2 { public union { packed float xx, y; }; }
+int32 main() { NV2 v; return 0; }

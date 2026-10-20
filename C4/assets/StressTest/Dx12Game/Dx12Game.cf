@@ -1,0 +1,364 @@
+// Dx12Game - DirectX12 + Win32 stress-test game written ENTIRELY in C4.
+//
+// This is the Phase 6 deliverable (plan 13). It binds the REAL Windows SDK headers directly
+// (windows.h + dxgi1_2.h + d3d12.h) via `extern "c++" include` - no hand-written extern "C"
+// shims, no opaque void* handles. The game logic calls CreateWindowExA, D3D12CreateDevice,
+// device->CreateCommandQueue, swapchain->Present, etc. directly, exactly as a C/C++ program would.
+//
+// Current stage: window + D3D12 device + command queue + fence + flip-model swapchain + RTV +
+// resource barriers + ClearRenderTargetView - i.e. real clear-color frames at ~60fps with WASD/ESC
+// input and a stability timer. On a machine with no DX12-capable GPU the device creation fails;
+// the game then reports exactly which step failed and runs a bounded CPU-side stress loop (GC +
+// reflection + math under load) so the binary is always runnable/testable.
+//
+// D3D12 LIFETIME RULE (verified against native C++ ground truth): an allocator may have at most
+// ONE live command list associated with it. Creating a second command list on the same allocator
+// while the first still exists returns E_INVALIDARG. Real engines therefore create one persistent
+// command list per backbuffer slot at init and reuse it every frame via Reset(allocator, null) -
+// which is exactly what this game does. (C4 COM objects are not reference-counted, so releasing a
+// command list would free the wrapper but NOT clear D3D12's internal allocator association.)
+extern "c++" include "game.hpp" {
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
+	lib("d3d12.lib");
+	lib("dxgi.lib");
+	lib("user32.lib");
+	lib("kernel32.lib");
+}
+
+// Hand-written C4 constant headers (no #define macro junk from the SDK):
+//   windows.ch - Win32 named constants (WM_*, VK_*, WS_*, SW_*, CS_*, INFINITE)
+//   dx12.ch    - DXGI flag #defines not auto-bound as enums
+// All enum-valued constants (D3D_FEATURE_LEVEL_12_0, DXGI_FORMAT_R8G8B8A8_UNORM,
+// D3D12_RESOURCE_STATE_*, ...) come directly from the interop binding above and are used bare.
+include "windows.ch"
+include "dx12.ch"
+
+// ============================ helpers ============================
+// GetTickCount64 returns ULONGLONG; C4 has no unsigned 64, so we wrap it as int64.
+int64 NowMs() { return (int64)GetTickCount64(); }
+
+// ============================ global state ============================
+HWND__* g_hwnd = null;
+int32   g_width = 1280;
+int32   g_height = 720;
+
+ID3D12Device*          g_device = null;
+ID3D12CommandQueue*    g_queue = null;
+IDXGIFactory2*         g_factory = null;
+IDXGISwapChain3*       g_swapchain = null;
+ID3D12DescriptorHeap*  g_rtvHeap = null;
+ID3D12Fence*           g_fence = null;
+HANDLE                 g_fenceEvent = null;
+int64                  g_fenceValue = 1;
+int64[2]               g_frameFenceValues;   // fence value last signaled per backbuffer slot
+
+// One persistent command allocator AND one persistent command list per backbuffer slot.
+// The lists are created ONCE at init (on fresh allocators) and reused every frame via Reset().
+ID3D12CommandAllocator*[2] g_allocators;
+ID3D12GraphicsCommandList*[2] g_lists;
+
+// One RTV descriptor per slot, created once at init (backbuffer resources never change).
+D3D12_CPU_DESCRIPTOR_HANDLE[2] g_rtvHandles;
+
+bool   g_running = true;
+
+int32  g_frameCount = 0;
+int64  g_startTick = 0;
+
+// ============================ WNDPROC (C4 function -> foreign funcptr callback) ============================
+int64 WinProc(HWND__* hWnd, int32 msg, uint64 wParam, int64 lParam) {
+	if (msg == WM_KEYDOWN && wParam == VK_ESCAPE) { PostQuitMessage(0); }
+	if (msg == WM_CLOSE)   { DestroyWindow(hWnd); return 0; }
+	if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
+	return DefWindowProcA(hWnd, msg, wParam, lParam);
+}
+
+// ============================ window ============================
+bool InitWindow() {
+	tagWNDCLASSEXA wc;
+	wc.cbSize = sizeof(WNDCLASSEX);
+	wc.style = CS_HREDRAW;
+	wc.lpfnWndProc = WinProc;
+	wc.cbClsExtra = 0;
+	wc.cbWndExtra = 0;
+	wc.hInstance = GetModuleHandleA(null);
+	wc.hIcon = null;
+	wc.hCursor = LoadCursorA(null, (char*)32512); // IDC_ARROW via MAKEINTRESOURCE (0x7FFF)
+	wc.hbrBackground = (HBRUSH__*)1;          // COLOR_WINDOW+1
+	wc.lpszMenuName = null;
+	wc.lpszClassName = "C4Dx12StressGame";
+	wc.hIconSm = null;
+
+	int32 atom = RegisterClassExA(&wc);
+	if (atom == 0) { printf("[win] RegisterClassExA failed err=%d\n", GetLastError()); return false; }
+
+	g_hwnd = CreateWindowExA(0, "C4Dx12StressGame", "C4 DX12 Stress Game", WS_OVERLAPPEDWINDOW,
+		160, 120, g_width, g_height, null, null, GetModuleHandleA(null), null);
+	if (g_hwnd == null) { printf("[win] CreateWindowExA failed err=%d\n", GetLastError()); return false; }
+
+	ShowWindow(g_hwnd, SW_SHOW);
+	UpdateWindow(g_hwnd);
+	printf("[win] window created %dx%d\n", g_width, g_height);
+	return true;
+}
+
+// ============================ DX12 init ============================
+bool InitDX12() {
+	// 1. Device. IIDs come from __uuidof - resolved by CBind from the SDK's MIDL_INTERFACE.
+	// COM out-params take the ADDRESS of a void* slot (like native C++ &device), not a null ptr.
+	void* device = null;
+	int32 hr = D3D12CreateDevice(null, D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), &device);
+	if (hr != 0) { printf("[dx] D3D12CreateDevice hr=0x%08X\n", hr); return false; }
+	g_device = (ID3D12Device*)device;
+
+	// 2. Command queue (DIRECT). C4 does not zero-init local structs; memset matches native {}-init.
+	D3D12_COMMAND_QUEUE_DESC qd;
+	memset(&qd, 0, sizeof(D3D12_COMMAND_QUEUE_DESC));
+	qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	qd.Priority = 0;
+	qd.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	qd.NodeMask = 0;
+	void* queue = null;
+	hr = g_device->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), &queue);
+	if (hr != 0) { printf("[dx] CreateCommandQueue hr=0x%08X\n", hr); return false; }
+	g_queue = (ID3D12CommandQueue*)queue;
+
+	// 3. DXGI factory.
+	void* factory = null;
+	hr = CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), &factory);
+	if (hr != 0) { printf("[dx] CreateDXGIFactory2 hr=0x%08X\n", hr); return false; }
+	g_factory = (IDXGIFactory2*)factory;
+
+	// 4. Swapchain (flip-model, tearing allowed). C4 does not zero-init local structs and DXGI
+	// validates every field, so each one is set explicitly (memset = native {}-init).
+	DXGI_SWAP_CHAIN_DESC1 sd;
+	memset(&sd, 0, sizeof(DXGI_SWAP_CHAIN_DESC1));
+	sd.Width = g_width;
+	sd.Height = g_height;
+	sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	sd.Stereo = 0;
+	sd.SampleDesc.Count = 1;
+	sd.SampleDesc.Quality = 0;
+	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	sd.BufferCount = 2;
+	sd.Scaling = DXGI_SCALING_STRETCH; // must be set - DXGI validates this field
+	sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+	sd.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+	void* swap = null;
+	// NOTE: CreateSwapChainForHwnd takes NO riid - the swapchain interface is fixed by the call.
+	hr = g_factory->CreateSwapChainForHwnd(g_queue, g_hwnd, &sd, null, null, &swap);
+	if (hr != 0) { printf("[dx] CreateSwapChainForHwnd hr=0x%08X\n", hr); return false; }
+	g_swapchain = (IDXGISwapChain3*)swap;
+
+	// 5. RTV descriptor heap. MUST be D3D12_DESCRIPTOR_HEAP_TYPE_RTV - writing an RTV into a
+	// CBV/SRV/UAV heap is invalid and crashes CreateRenderTargetView (verified natively).
+	D3D12_DESCRIPTOR_HEAP_DESC hd;
+	memset(&hd, 0, sizeof(D3D12_DESCRIPTOR_HEAP_DESC));
+	hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	hd.NumDescriptors = 2;
+	hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	hd.NodeMask = 0;
+	void* heap = null;
+	hr = g_device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), &heap);
+	if (hr != 0) { printf("[dx] CreateDescriptorHeap hr=0x%08X\n", hr); return false; }
+	g_rtvHeap = (ID3D12DescriptorHeap*)heap;
+
+	// 6. Fence + Win32 event for frame sync.
+	void* fence = null;
+	hr = g_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &fence);
+	if (hr != 0) { printf("[dx] CreateFence hr=0x%08X\n", hr); return false; }
+	g_fence = (ID3D12Fence*)fence;
+	g_fenceEvent = CreateEventA(null, 0, 0, null); // auto-reset
+
+	// 7. Per-slot command allocators + PERSISTENT command lists (created once, reused via Reset).
+	g_frameFenceValues[0] = 0; g_frameFenceValues[1] = 0;
+	for (int32 i = 0; i < 2; i++) {
+		void* allocPtr = null;
+		hr = g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), &allocPtr);
+		if (hr != 0) { printf("[dx] CreateCommandAllocator[%d] hr=0x%08X\n", i, hr); return false; }
+		g_allocators[i] = (ID3D12CommandAllocator*)allocPtr;
+
+		void* listPtr = null;
+		hr = g_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_allocators[i], null, __uuidof(ID3D12GraphicsCommandList), &listPtr);
+		if (hr != 0) { printf("[dx] CreateCommandList[%d] hr=0x%08X\n", i, hr); return false; }
+		g_lists[i] = (ID3D12GraphicsCommandList*)listPtr;
+
+		void* res = null;
+		hr = g_swapchain->GetBuffer(i, __uuidof(ID3D12Resource), &res);
+		if (hr != 0) { printf("[dx] GetBuffer[%d] hr=0x%08X\n", i, hr); return false; }
+		ID3D12Resource* bb = (ID3D12Resource*)res;
+
+		D3D12_RENDER_TARGET_VIEW_DESC rd;
+		// CRITICAL: C4 does not zero-init local structs, and this desc contains a union whose
+		// TEXTURE2D arm (MipSlice/PlaneSlice) D3D12 reads. Native {}-init zeroes it; without the
+		// memset the garbage MipSlice makes D3D12 create a corrupt RTV and poison its internal
+		// state (observed: the NEXT CreateCommandAllocator then returns DXGI_ERROR_INVALIDCALL).
+		memset(&rd, 0, sizeof(D3D12_RENDER_TARGET_VIEW_DESC));
+		rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		rd.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+		g_rtvHandles[i] = g_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+		g_rtvHandles[i].ptr += (uint64)i * (uint64)g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+		g_device->CreateRenderTargetView(bb, &rd, g_rtvHandles[i]);
+		bb->Release();
+	}
+
+	printf("[dx] device/queue/factory/swapchain/heap/fence/lists created\n");
+	return true;
+}
+
+void ShutdownDX12() {
+	// Release command lists BEFORE their allocators (D3D12 lifetime rule).
+	for (int32 i = 0; i < 2; i++) if (g_lists[i])    g_lists[i]->Release();
+	for (int32 i = 0; i < 2; i++) if (g_allocators[i]) g_allocators[i]->Release();
+	if (g_swapchain) g_swapchain->Release();
+	if (g_rtvHeap)   g_rtvHeap->Release();
+	if (g_fence)     g_fence->Release();
+	if (g_queue)     g_queue->Release();
+	if (g_factory)   g_factory->Release();
+	if (g_device)    g_device->Release();
+	if (g_fenceEvent) CloseHandle(g_fenceEvent);
+}
+
+// ============================ per-frame: wait on the fence ============================
+// Waits until the PREVIOUS use of THIS backbuffer slot has finished (per-slot fence value),
+// so we never render into a buffer the GPU is still presenting. Frame 0 waits for value 0,
+// which is already complete - no deadlock.
+void WaitForSlot(int32 slot) {
+	int64 completed = g_fence->GetCompletedValue();
+	if (completed < g_frameFenceValues[slot]) {
+		g_fence->SetEventOnCompletion(g_frameFenceValues[slot], g_fenceEvent);
+		WaitForSingleObject(g_fenceEvent, INFINITE);
+	}
+}
+
+// ============================ per-frame: clear a backbuffer ============================
+void RenderFrame() {
+	int32 slot = g_frameCount & 1; // flip-model double buffering
+
+	WaitForSlot(slot);
+
+	ID3D12GraphicsCommandList* list = g_lists[slot];
+	list->Reset(g_allocators[slot], null);
+
+	// Transition PRESENT -> RENDER_TARGET.
+	D3D12_RESOURCE_BARRIER bar;
+	memset(&bar, 0, sizeof(D3D12_RESOURCE_BARRIER)); // union arms not used must be zero (native {}-init)
+	bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	bar.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	bar.Subresource = 0;
+	bar.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+	bar.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+	// Fetch this slot's backbuffer (COM IID query) for the barrier target.
+	void* res = null;
+	g_swapchain->GetBuffer(slot, __uuidof(ID3D12Resource), &res);
+	ID3D12Resource* bbRes = (ID3D12Resource*)res;
+	bar.pResource = bbRes;
+	list->ResourceBarrier(1, &bar);
+
+	// Clear color (animated).
+	float[4] cc;
+	cc[0] = 0.1f + 0.1f * sinf((float)g_frameCount * 0.02f);
+	cc[1] = 0.2f + 0.1f * cosf((float)g_frameCount * 0.03f);
+	cc[2] = 0.3f;
+	cc[3] = 1.0f;
+	list->ClearRenderTargetView(g_rtvHandles[slot], &cc[0], 0, null);
+
+	// Transition RENDER_TARGET -> PRESENT.
+	bar.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	bar.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+	list->ResourceBarrier(1, &bar);
+
+	// Close + execute + signal this slot's fence value (fence values must be monotonic).
+	list->Close();
+	g_queue->ExecuteCommandLists(1, &list);
+	if (g_fenceValue <= g_frameFenceValues[slot]) g_fenceValue = g_frameFenceValues[slot] + 1;
+	g_frameFenceValues[slot] = g_fenceValue;
+	g_queue->Signal(g_fence, g_fenceValue);
+	g_fenceValue++;
+
+	// Present.
+	g_swapchain->Present(1, DXGI_PRESENT_ALLOW_TEARING);
+
+	bbRes->Release(); // GetBuffer returns a fresh reference each call
+}
+
+// ============================ CPU-side stress fallback (no GPU) ============================
+// Exercises GC-managed allocation, reflection, templates and math under load for a bounded time.
+void CpuStressLoop(int32 seconds) {
+	int64 start = NowMs();
+	int64 ops = 0;
+	float acc = 0.0f;
+	while (true) {
+		for (int32 i = 0; i < 100000; i++) {
+			// GC-managed transient allocation per iteration (plan 10).
+			int32[4] v;
+			v[0] = i; v[1] = i * 2; v[2] = i * 3; v[3] = i + 7;
+			acc += sinf((float)i * 0.0001f) + cosf((float)v[1] * 0.00005f);
+			ops++;
+		}
+		int64 now = NowMs();
+		if (now - start >= (int64)seconds * 1000) break;
+	}
+	printf("[cpu-stress] %lld ops in %ds, acc=%f\n", ops, seconds, acc);
+}
+
+// ============================ main ============================
+int32 main() {
+	g_startTick = NowMs();
+
+	// Optional env controls for automated runs: C4_STRESS_SECONDS (default 0 = until input),
+	// C4_HEADLESS=1 skips window+DX12 and runs only the CPU stress loop.
+	char[16] secBuf;
+	GetEnvironmentVariableA("C4_STRESS_SECONDS", &secBuf[0], 16);
+	// Parse the env-var integer inline (atoi lives in <stdlib.h>, outside this test's SDK include dirs).
+	int32 stressSeconds = 0;
+	for (int32 si = 0; secBuf[si] >= '0' && secBuf[si] <= '9'; si++) stressSeconds = stressSeconds * 10 + (secBuf[si] - '0');
+	char[8] headBuf;
+	GetEnvironmentVariableA("C4_HEADLESS", &headBuf[0], 8);
+	bool headless = (headBuf[0] == '1');
+
+	printf("=== C4 DX12 Stress Game ===\n");
+	if (!headless) {
+		if (!InitWindow()) { printf("window init failed; falling back to CPU stress\n"); headless = true; }
+	}
+
+	bool dxOk = false;
+	if (!headless) {
+		dxOk = InitDX12();
+		if (!dxOk) {
+			printf("[dx] no DX12-capable device on this machine - running CPU-side stress loop instead.\n");
+		}
+	}
+
+	if (!dxOk) {
+		CpuStressLoop(stressSeconds > 0 ? stressSeconds : 3);
+		printf("C4 STRESS GAME OK (cpu path)\n");
+		return 0;
+	}
+
+	// Full render loop until quit or the stability timer elapses.
+	while (g_running) {
+		tagMSG m;
+		int32 pm = PeekMessageA(&m, null, 0, 0, 1); // PM_REMOVE
+		while (pm != 0) {
+			if (m.message == WM_QUIT) { g_running = false; break; }
+			TranslateMessage(&m);
+			DispatchMessageA(&m);
+			pm = PeekMessageA(&m, null, 0, 0, 1);
+		}
+		RenderFrame();
+		g_frameCount++;
+
+		int64 elapsed = NowMs() - g_startTick;
+		if (stressSeconds > 0 && elapsed >= (int64)stressSeconds * 1000) { g_running = false; }
+	}
+
+	printf("rendered %d frames in %lld ms\n", g_frameCount, NowMs() - g_startTick);
+	ShutdownDX12();
+	if (g_hwnd) DestroyWindow(g_hwnd);
+	printf("C4 STRESS GAME OK\n");
+	return 0;
+}

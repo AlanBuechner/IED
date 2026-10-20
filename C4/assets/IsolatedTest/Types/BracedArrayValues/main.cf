@@ -1,0 +1,22 @@
+// BUG-108: a braced list initializes an array field of a composite literal or of `T(...)` as it does in a
+// declaration: positional elements, designated elements and ranges, nested arrays.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+struct Row { public int32 id; public int32[3] cells; }
+struct Grid { public int32[2][3] rows; }
+
+int32 Total(Row r) { return r.id * 1000 + r.cells[0] * 100 + r.cells[1] * 10 + r.cells[2]; }
+
+int32 main() {
+	Check(Total(Row{ 1, { 2, 3, 4 } }) == 1234, "a braced array field of a composite literal");
+	Check(Total(Row(5, { [2] = 6 })) == 5006, "a designated element of an array argument to an aggregate");
+	Grid g = Grid{ { [1...2] = { 7, 8 } } };
+	Check(g.rows[0][0] == 0 && g.rows[1][1] == 8 && g.rows[2][0] == 7, "a range of nested array rows");
+	Row filled = Row{ id = 9, cells = { 1, 1, 1 } };
+	Check(Total(filled) == 9111, "a designated array field");
+	return g_failures;
+}

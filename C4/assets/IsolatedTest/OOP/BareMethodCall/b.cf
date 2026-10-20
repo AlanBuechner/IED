@@ -1,0 +1,15 @@
+// Implicit-this bare method call: inside a member function, another member can be called
+// without an explicit `this->`. (The field is set before it is read; C4 has no default
+// member initializers, so the value comes from SetIt.)
+class C {
+    public int32 n;
+    public void SetIt(int32 v) { this->n = v; }
+    public void Use() { SetIt(5); }   // bare call, no `this->`
+}
+int32 main() {
+    C* c = new C();
+    c->Use();
+    if (c->n != 5) return 1;
+    printf("PLAIN BARE OK n=%d\n", c->n);
+    return 0;
+}

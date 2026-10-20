@@ -1,0 +1,118 @@
+struct Shape {
+	float x;
+	float y;
+
+	[operator("create")]
+	void Init();
+
+	[operator("create")]
+	void Init(float nx, float ny);
+
+	virtual float GetArea();
+};
+
+struct Circle : public Shape {
+	float radius;
+
+	[operator("create")]
+	void Init();
+
+	[operator("create")]
+	void Init(float cx, float cy, float r);
+
+	float GetArea() override;
+};
+
+struct Rectangle : public Shape {
+	float width;
+	float height;
+
+	[operator("create")]
+	void Init();
+
+	[operator("create")]
+	void Init(float x, float y, float w, float h);
+
+	float GetArea() override;
+};
+
+void Shape::Init()
+{
+	x = 0.0f;
+	y = 0.0f;
+}
+
+void Shape::Init(float nx, float ny)
+{
+	x = nx;
+	y = ny;
+}
+
+float Shape::GetArea()
+{
+	return 0.0f;
+}
+
+void Circle::Init()
+{
+	Shape::Init();
+	radius = 1.0f;
+}
+
+void Circle::Init(float cx, float cy, float r)
+{
+	Shape::Init(cx, cy);
+	radius = r;
+}
+
+float Circle::GetArea()
+{
+	return radius * radius;
+}
+
+void Rectangle::Init()
+{
+	Shape::Init();
+	width = 1.0f;
+	height = 1.0f;
+}
+
+void Rectangle::Init(float x, float y, float w, float h)
+{
+	Shape::Init(x, y);
+	width = w;
+	height = h;
+}
+
+float Rectangle::GetArea()
+{
+	return width * height;
+}
+
+int32 main()
+{
+	int32 fails = 0;
+
+	Rectangle* r = new Rectangle(1.0f, 2.0f, 3.0f, 4.0f);
+	if (r->x != 1.0f) fails++;
+	if (r->y != 2.0f) fails++;
+	if (r->width != 3.0f) fails++;
+	if (r->height != 4.0f) fails++;
+	if (r->GetArea() != 12.0f) fails++;
+
+	Circle* c = new Circle(5.0f, 6.0f, 2.0f);
+	if (c->x != 5.0f) fails++;
+	if (c->y != 6.0f) fails++;
+	if (c->radius != 2.0f) fails++;
+	if (c->GetArea() != 4.0f) fails++;
+
+	Shape* s = new Shape(7.0f, 8.0f);
+	if (s->x != 7.0f) fails++;
+	if (s->y != 8.0f) fails++;
+
+	delete r;
+	delete c;
+	delete s;
+
+	return fails;
+}

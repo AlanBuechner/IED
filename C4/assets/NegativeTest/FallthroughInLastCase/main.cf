@@ -1,0 +1,11 @@
+int32 Pick(int32 x) {
+	int32 r = 0;
+	switch (x) {
+	case 1:
+		break;
+	default:
+		fallthrough;
+	}
+	return r;
+}
+int32 main() { return Pick(1); }

@@ -1,0 +1,30 @@
+// Types - Template Comma-List Field Tests (implementation)
+include "../Framework/Assert.ch"
+include "TemplateCommaListFields.ch"
+
+// A template struct whose fields are declared as a COMMA LIST (`T lo, hi;`). Before the fix the
+// instantiator registered only the FIRST declarator (GetNameToken), so `hi` was missing from the
+// instantiated type and any method touching it failed with "no variable named hi". Non-template structs
+// already handled comma lists (the global model path iterates GetDeclarators); the template path did not.
+template<T> struct TplComma {
+public T lo, hi;
+public void Set(T a, T b) { lo = a; hi = b; }
+public T Span() { return hi - lo; }
+};
+
+void TestTemplateCommaListFields() {
+	TplComma<int32> c;
+	c.Set(4, 9);
+	AssertIntEquals(5, c.Span(), "template comma-list: both fields registered");
+
+	// A second instantiation coexists (the fix is per-instantiation, not a one-off).
+	TplComma<uint64> u;
+	u.Set(100u, 37u);
+	AssertIntEquals(-63, (int32)u.Span(), "template comma-list: uint64 instantiation");
+
+	// Fields remain individually addressable (not just through a method).
+	TplComma<int32> c2;
+	c2.Set(1, 8);
+	AssertIntEquals(1, c2.lo, "comma-list field lo addressable");
+	AssertIntEquals(8, c2.hi, "comma-list field hi addressable");
+}

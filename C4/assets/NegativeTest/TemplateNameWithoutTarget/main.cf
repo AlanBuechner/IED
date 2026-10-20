@@ -1,0 +1,2 @@
+template<T> T Identity(T v) { return v; }
+int32 main() { int32 x = Identity; return x; }

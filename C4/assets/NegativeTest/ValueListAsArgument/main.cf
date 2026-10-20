@@ -1,0 +1,2 @@
+void G(int32 v) {}
+int32 main() { G([1, 2]); return 0; }

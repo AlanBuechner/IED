@@ -1,0 +1,12 @@
+int32 g_count = 0;
+
+void DoThrow(int32 v) {
+	g_count = g_count + 1;
+	throw v;
+}
+
+int32 main() {
+	DoThrow(13);
+	printf("REACHED count=%d\n", g_count); fflush(nullptr);
+	return 0;
+}

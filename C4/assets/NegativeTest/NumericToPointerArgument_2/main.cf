@@ -1,0 +1,2 @@
+void F(int32* p) {}
+int main() { int32 x = 1; F(x); return 0; }

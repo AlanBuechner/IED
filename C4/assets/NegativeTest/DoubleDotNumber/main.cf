@@ -1,0 +1,1 @@
+int main() { float f = 1.2.3f; return 0; }

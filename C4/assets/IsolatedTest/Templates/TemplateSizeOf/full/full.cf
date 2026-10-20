@@ -1,0 +1,17 @@
+template<T> class Box {
+    T* data;
+    int32 count;
+    [operator("create")] public void Init(int32 cap) {
+        data = (T*)raw_alloc(cap * sizeof(T));
+        count = 0;
+    }
+    [operator("delete")] public void Delete() { raw_free(data); }
+    public int32 ByteSize() { return count * sizeof(T); }
+    public int32 Count() { return count; }
+}
+int32 main() {
+    Box<int32>* b = new Box<int32>(4);
+    printf("bs=%d\n", b->ByteSize());
+    delete b;
+    return 0;
+}

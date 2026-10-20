@@ -1,0 +1,37 @@
+// BUG-089 regression: catch-all handlers that undo work and rethrow, run after an earlier exception went through
+// (and was rethrown from) another catch-all, including inside an inlined function, and a partly built array.
+int32 g_undone = 0;
+int32 g_destroyed = 0;
+
+struct Fragile {
+	int32 v;
+	[operator("create")] void Init(int32 x) { if (x < 0) throw x; this.v = x; }
+	[operator("delete")] void Done() { if (this.v != 0) g_destroyed++; } // zero is a valid, inert value (D-05)
+}
+
+void Guarded(int32 x) {
+	try { Fragile f = Fragile(x); }
+	catch (...) { g_undone++; throw; }
+}
+
+int32 BuildPair(int32 second) {
+	try {
+		Fragile[2] pair = { Fragile(1), Fragile(second) };
+		return pair[0].v + pair[1].v;
+	}
+	catch (...) { g_undone++; throw; }
+}
+
+int32 main() {
+	int32 caught = 0;
+	try { Guarded(-1); } catch (int32 e) { caught += e == -1 ? 1 : 0; }
+	try { Guarded(-2); } catch (int32 e) { caught += e == -2 ? 1 : 0; }
+	try { BuildPair(-3); } catch (int32 e) { caught += e == -3 ? 1 : 0; }
+	int32 sum = BuildPair(4);
+	if (caught != 3) { printf("FAIL caught %d\n", caught); return 1; }
+	if (g_undone != 3) { printf("FAIL undone %d\n", g_undone); return 2; }
+	if (g_destroyed != 3) { printf("FAIL destroyed %d\n", g_destroyed); return 3; }
+	if (sum != 5) { printf("FAIL sum %d\n", sum); return 4; }
+	printf("RETHROW GUARDS OK\n");
+	return 0;
+}

@@ -1,0 +1,5 @@
+template<T> struct Box {
+	public void Set(T x);
+}
+template<T> public void Box::Set(T x, T y) { }
+int32 main() { return 0; }

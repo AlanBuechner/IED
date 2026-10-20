@@ -1,0 +1,50 @@
+// OOP - Overloaded Extension Constructor Tests (implementation)
+include "../Framework/Assert.ch"
+include "OverloadedExtensionCtor.ch"
+
+// Out-of-line extension methods that OVERLOAD on the same target type. Before the fix, both
+// `Construct()` and `Construct(int32)` mangled to the single unsuffixed symbol C_Construct, so only
+// one body lowered and BOTH call sites targeted it - the default-ctor call ran the i32 body with a
+// missing argument (garbage). Now each overload carries a parameter-type suffix on both sides.
+struct OverCtorA { int32 v; }
+
+void Construct() extends OverCtorA { this.v = 111; }
+void Construct(int32 x) extends OverCtorA { this.v = x; }
+
+// The [operator("create")] form drives the `new T(...)` allocation path, which used a SEPARATE
+// mangling site (HIRBuilder_MemberAccess). It now routes through BuildMethodSymbol too, so the two
+// overloaded create ctors also get distinct symbols.
+struct OverCtorB { int32 v; }
+
+[operator("create")] void Make() extends OverCtorB { this.v = 5; }
+[operator("create")] void Make(int32 x) extends OverCtorB { this.v = x * 2; }
+
+// Non-overloaded extension ctor: a regression guard that the suffix is NOT added when there is a
+// single overload (the in-class double-registration of an extension method must not count as an
+// overload, or every single extension ctor would wrongly gain a _<paramtype> suffix).
+struct OverCtorC { int32 v; }
+
+void Build(int32 x) extends OverCtorC { this.v = x + 1; }
+
+void TestOverloadedExtensionCtor() {
+	// Direct calls to overloaded extension ctors: each must run its OWN body.
+	OverCtorA a;
+	OverCtorA b;
+	a.Construct();
+	b.Construct(42);
+	AssertIntEquals(111, a.v, "overloaded ext ctor: default body");
+	AssertIntEquals(42, b.v, "overloaded ext ctor: int32 body");
+
+	// new + [operator("create")] overloaded extension ctors (the allocation path).
+	OverCtorB* na = new OverCtorB();
+	OverCtorB* nb = new OverCtorB(10);
+	AssertIntEquals(5, (*na).v, "new: default create ext ctor");
+	AssertIntEquals(20, (*nb).v, "new: int32 create ext ctor");
+	delete na;
+	delete nb;
+
+	// Non-overloaded extension ctor still works (no bogus suffix).
+	OverCtorC c;
+	c.Build(7);
+	AssertIntEquals(8, c.v, "non-overloaded ext ctor regression guard");
+}

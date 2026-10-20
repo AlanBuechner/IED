@@ -1,0 +1,60 @@
+// A script creates host classes, derives from them and implements host interfaces; the host calls the script's
+// overrides through its own virtual calls, and type tests and checked casts work on both sides' objects.
+include "scripttest.ch"
+include "world.ch"
+
+namespace World
+{
+	void Registry::Add(Entity* entity) { entities.Push(entity); }
+	void Registry::AddUpdatable(IUpdatable* updatable) { updatables.Push(updatable); }
+
+	int32 Registry::TotalKind() const
+	{
+		int32 total = 0;
+		for (int64 i = 0; i < entities.Count(); i++) total += entities[i]->Kind();
+		return total;
+	}
+
+	int32 Registry::UpdateAll(int32 dt) const
+	{
+		int32 total = 0;
+		for (int64 i = 0; i < updatables.Count(); i++) total += updatables[i]->Update(dt);
+		return total;
+	}
+
+	Entity* MakeEntity() { return new Entity(); }
+	bool IsUpdatable(Entity* entity) { return entity is IUpdatable; }
+}
+
+void CheckClasses(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	World::Registry registry;
+	funcptr<int32(World::Registry*)> spawn = (funcptr<int32(World::Registry*)>)script->Address("Spawn");
+	checks.Equal(3, spawn(&registry), "the script added three entities");
+	checks.Equal(5, registry.TotalKind(), "the host's virtual calls reach the script's overrides");
+	checks.Equal(7, registry.entities[0]->Hit(5), "a host method calls the script's Damage");
+	checks.Equal(5, registry.entities[1]->Hit(5), "the host's own entity keeps the host's Damage");
+	checks.Equal(101, registry.UpdateAll(1), "the host calls the script's interface methods");
+	checks.That(!World::IsUpdatable(registry.entities[0]), "a Grunt is no IUpdatable to the host");
+	checks.That(World::IsUpdatable(registry.entities[2]), "the host sees the script's Hybrid implement IUpdatable");
+	World::IUpdatable* crossed = registry.entities[2] as World::IUpdatable*;
+	checks.That(crossed != nullptr && crossed->Update(3) == 300, "the host cross-casts a script object");
+	checks.That(registry.entities[1] as World::IUpdatable* == nullptr, "a host entity is no IUpdatable");
+
+	funcptr<int32(World::Registry*)> grunts = (funcptr<int32(World::Registry*)>)script->Address("CountGrunts");
+	checks.Equal(1, grunts(&registry), "the script tells its Grunt from the host's entities");
+	funcptr<int32(World::Registry*)> hybrid = (funcptr<int32(World::Registry*)>)script->Address("HybridUpdate");
+	checks.Equal(200, hybrid(&registry), "the script cross-casts its own object back from the host's type");
+	funcptr<int32()> local = (funcptr<int32()>)script->Address("LocalHierarchy");
+	checks.Equal(42, local(), "the script's own hierarchy");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Classes");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "classes", "classes.cf"));
+	if (script->Ok()) CheckClasses(script, checks);
+	return checks.End("Classes");
+}

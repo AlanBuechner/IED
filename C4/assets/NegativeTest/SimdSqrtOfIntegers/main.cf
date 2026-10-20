@@ -1,0 +1,5 @@
+int32 main() {
+	packed int32[4] a = 4;
+	packed int32[4] r = simd_sqrt(a);
+	return 0;
+}

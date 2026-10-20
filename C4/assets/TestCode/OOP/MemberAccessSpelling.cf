@@ -1,0 +1,28 @@
+// OOP - Member Access Spelling Tests (implementation)
+include "../Framework/Assert.ch"
+include "MemberAccessSpelling.ch"
+
+// BUG-200: '.' reaches a member of an object or a reference, '->' one through a pointer, and `this` takes either.
+class MasCounter {
+	public int32 n;
+	public void Add(int32 by) { this.n += by; this->n += by; n += by; }
+	public int32 Get() const { return this->n; }
+}
+
+void MasBumpByReference(MasCounter& c) { c.Add(1); }
+
+void TestMemberAccessSpelling() {
+	MasCounter c;
+	c.Add(1);
+	AssertIntEquals(3, c.n, "this.x, this->x and a bare x are one member");
+	MasCounter* p = &c;
+	p->Add(1);
+	AssertIntEquals(6, p->Get(), "a method through a pointer with '->'");
+	(*p).n = 10;
+	AssertIntEquals(10, c.n, "a dereferenced pointer is an object: '.'");
+	MasBumpByReference(c);
+	AssertIntEquals(13, c.Get(), "a reference takes '.'");
+	MasCounter** pp = &p;
+	(*pp)->n = 20;
+	AssertIntEquals(20, c.n, "a pointer read through a pointer takes '->'");
+}

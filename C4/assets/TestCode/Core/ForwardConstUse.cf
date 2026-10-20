@@ -1,0 +1,52 @@
+// Core - Forward Const Use Tests (implementation)
+include "../Framework/Assert.ch"
+include "ForwardConstUse.ch"
+include "ForwardConstUseLater.ch"
+
+// B24 (program model 1.7): a constant folds wherever it is used - in a signature, a default argument, an enum
+// value, a template argument, an alias, a field, a case label, a lane count - before or after its declaration,
+// in this file or another.
+template<T, int32 N> struct FcuBuffer { public T[N] items; }
+alias FcuRow = int32[FcuGeo::kWidth];
+enum class FcuSize : int32 { Small = kFcuEarly, Large = kFcuEarly * 4 }
+class FcuGrid {
+	public static int32[FcuGeo::kWidth * 2] s_cells;
+	public packed float[kFcuLanes] lanes;
+	public int32[kFcuLen + 1] counts;
+}
+
+const int32 kFcuEarly = kFcuLate + 1;
+
+int32 FcuSum(int32[kFcuLen] values) {
+	int32 sum = 0;
+	for (int32 i = 0; i < kFcuLen; ++i) sum += values[i];
+	return sum;
+}
+
+int32 FcuScaled(int32 v, int32 by = kFcuFactor) { return v * by; }
+
+int32 FcuClassify(int32 v) {
+	switch (v) {
+		case kFcuLate: return 1;
+		case FcuGeo::kWidth: return 2;
+		default: return 0;
+	}
+}
+
+void TestForwardConstUse() {
+	int32[kFcuLen] values = { 1, 2, 3 };
+	AssertIntEquals(6, FcuSum(values), "an array size in a signature, from another file");
+	AssertIntEquals(10, FcuScaled(2), "a default argument");
+	AssertIntEquals(44, (int32)FcuSize::Large, "an enum value from a later constant");
+	AssertIntEquals(11, kFcuEarly, "a constant from a later constant");
+	FcuBuffer<int32, kFcuLate> buffer;
+	Assert(sizeof(buffer) == 40, "a template argument");
+	FcuRow row;
+	Assert(sizeof(row) == 20, "an alias, through a namespaced chain");
+	Assert(sizeof(FcuGrid::s_cells) == 40, "a static member's size");
+	Assert(sizeof(FcuGrid) == 32, "a lane count and a field size");
+	AssertIntEquals(1, FcuClassify(10), "a case label");
+	AssertIntEquals(2, FcuClassify(FcuGeo::kWidth), "a namespaced case label");
+}
+
+const int32 kFcuLate = 10;

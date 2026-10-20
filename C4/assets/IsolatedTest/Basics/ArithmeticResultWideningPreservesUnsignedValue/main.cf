@@ -1,0 +1,11 @@
+int64 wrap(int64 v) { return v; }
+int32 main() {
+    uint32 a = 0x80000000;
+    uint32 b = 0;
+    int64 x = a + b;              // uint32 result widened: +2147483648
+    int64 y = wrap(a + b);        // same, through a call argument
+    uint32 u = 4294967295;
+    int64 z1 = u + 1;             // common type uint32: wraps to 0 (C semantics)
+    int64 z2 = u + (int64)1;      // common type int64: no wrap, 4294967296
+    return (x == 2147483648 && y == 2147483648 && z1 == 0 && z2 == 4294967296) ? 0 : 1;
+}

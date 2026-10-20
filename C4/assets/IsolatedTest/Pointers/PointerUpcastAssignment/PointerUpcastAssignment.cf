@@ -1,0 +1,45 @@
+// Derived-to-base POINTER UPCAST must be allowed on ASSIGNMENT exactly as it already was on
+// INITIALIZATION. Before the fix `Base* p = new Mid();` compiled but `p = new Mid();` failed with
+// "Cannot assign value of type 'Mid*' to 'Base*'": the assignment compatibility check had its own
+// narrower pointer rule (null + same-referent only) that was missing the upcast and const-conversion
+// rules the initialization path (AreTypesCompatible) had. That made base pointers usable only at
+// declaration - you could never reassign one to a (different) derived object, which breaks the core
+// polymorphism pattern (p = new OtherDerived();). Locked here: upcast + const-conversion on assign.
+struct Base { int32 bx; virtual int32 Get() { return this->bx; } };
+struct Mid : Base { int32 mx; virtual int32 Get() override { return this->mx + 100; } };
+struct Plain { int32 x; };
+
+int32 main()
+{
+    // (1) upcast from a new expression, via ASSIGNMENT (was the bug)
+    Base* p = new Mid();          // initializer form - always worked
+    if (p->Get() != 100) return 1;
+    delete p;
+
+    Base* q;
+    q = new Mid();                // assignment form - FAILED before the fix
+    if (q->Get() != 100) return 2;
+    delete q;
+
+    // (2) upcast from a derived POINTER VARIABLE, via assignment
+    Mid m;
+    Mid* mp = &m;
+    Base* r;
+    r = mp;                       // FAILED before the fix
+    if (r->Get() != 100) return 3;
+
+    // (3) upcast from address-of a derived local, via assignment
+    Mid md;
+    Base* s;
+    s = &md;                      // FAILED before the fix
+    if (s->Get() != 100) return 4;
+
+    // (4) const-conversion on assignment: T* -> const T* (was also missing from the assign path)
+    Plain pl;
+    Plain* sp = &pl;
+    const Plain* cs;
+    cs = sp;                      // FAILED before the fix
+    if (cs->x != 0) return 5;
+
+    return 0;
+}

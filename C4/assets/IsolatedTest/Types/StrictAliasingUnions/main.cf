@@ -1,0 +1,64 @@
+// Strict aliasing (D-64): a union member of any type reads what another member wrote, also where the optimizer
+// cannot see that two pointers name one union (they come from volatile variables). Tagged by its member's type, the
+// read would be moved above the write at -O2. main returns the failures.
+union Bits { float f; uint32 u; }
+union Lanes { float[4] f; int32[4] i; }
+struct Tagged { public int32 kind; public union { double d; int64 i; }; }
+
+Bits g_bits;
+Lanes g_lanes;
+Tagged g_tagged;
+volatile Bits* g_bitsA;
+volatile Bits* g_bitsB;
+volatile Lanes* g_lanesA;
+volatile Lanes* g_lanesB;
+volatile Tagged* g_taggedA;
+volatile Tagged* g_taggedB;
+
+int32 Differs(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 NamedUnion() {
+	Bits* a = g_bitsA;
+	Bits* b = g_bitsB;
+	a->u = 0u;
+	b->f = 1.0f;
+	return Differs(a->u, 1065353216);              // 1.0f
+}
+
+int32 AnonymousUnion() {
+	Tagged* a = g_taggedA;
+	Tagged* b = g_taggedB;
+	a->i = 0;
+	b->d = 1.0;
+	return Differs(a->i, 4607182418800017408);     // 1.0
+}
+
+int32 ArrayMember() {
+	Lanes* a = g_lanesA;
+	Lanes* b = g_lanesB;
+	for (int32 k = 0; k < 4; ++k) a->i[k] = 0;
+	for (int32 k = 0; k < 4; ++k) b->f[k] = 2.0f;
+	int32 failures = 0;
+	for (int32 k = 0; k < 4; ++k) failures += Differs(a->i[k], 1073741824);   // 2.0f
+	return failures;
+}
+
+int32 WholeUnionCopy() {
+	Bits source;
+	source.f = -2.0f;
+	Bits* a = g_bitsA;
+	Bits* b = g_bitsB;
+	a->u = 0u;
+	*b = source;
+	return Differs(a->u, 3221225472);              // -2.0f
+}
+
+int32 main() {
+	g_bitsA = &g_bits;
+	g_bitsB = &g_bits;
+	g_lanesA = &g_lanes;
+	g_lanesB = &g_lanes;
+	g_taggedA = &g_tagged;
+	g_taggedB = &g_tagged;
+	return NamedUnion() + AnonymousUnion() + ArrayMember() + WholeUnionCopy();
+}

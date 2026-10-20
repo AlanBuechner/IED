@@ -1,0 +1,33 @@
+// D-22: a template takes the closure type itself: F is deduced as the lambda's type and `f(x)` calls its
+// call operator directly. The same template works with a func, a funcptr and a function object.
+template<F> int32 ApplyTwice(F f, int32 v) { return f(f(v)); }
+template<F> void ForEach(int32[4]& items, F f) { for (int32 i = 0; i < 4; i++) f(items[i]); }
+
+struct AddN {
+	public int32 n;
+	[operator("call")] int32 Call(int32 x) { return x + n; }
+}
+
+int32 Square(int32 x) { return x * x; }
+
+int32 main() {
+	int32 bump = 3;
+	if (ApplyTwice([bump](int32 x) -> int32 { return x + bump; }, 1) != 7) return 1;
+	if (ApplyTwice([](int32 x) -> int32 { return x * 2; }, 5) != 20) return 2;
+
+	func<int32(int32)> f = [](int32 x) -> int32 { return x - 1; };
+	if (ApplyTwice(f, 10) != 8) return 3;
+	funcptr<int32(int32)> sq = Square;
+	if (ApplyTwice(sq, 3) != 81) return 4;
+	AddN add;
+	add.n = 10;
+	if (ApplyTwice(add, 1) != 21) return 5;
+
+	int32[4] items;
+	for (int32 i = 0; i < 4; i++) items[i] = i + 1;
+	int32 sum = 0;
+	ForEach(items, [&sum](int32 v) { sum += v; });
+	if (sum != 10) return 6;
+	printf("LAMBDA TEMPLATES OK\n");
+	return 0;
+}

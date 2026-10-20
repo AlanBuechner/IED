@@ -1,0 +1,67 @@
+// User-defined range-for iterator protocol test.
+// Collection exposes begin/end; Iterator exposes notequal/dereference/increment.
+// The data lives in a global array (avoids struct array-field store limits); the
+// iterator carries an index and dereferences through the global. This exercises the
+// full begin/end/notequal/dereference/increment desugaring end-to-end.
+
+int32[8] g_data;
+
+struct Collection {
+	int32 count;
+};
+
+struct CollectionIterator {
+	int32 index;
+};
+
+[operator("begin")] CollectionIterator Begin() extends Collection {
+	CollectionIterator it;
+	it.index = 0;
+	return it;
+}
+
+[operator("end")] CollectionIterator End() extends Collection {
+	CollectionIterator it;
+	it.index = this.count;
+	return it;
+}
+
+[operator("notequal")] int32 NotEqual(const CollectionIterator& other) extends CollectionIterator {
+	return (this.index != other.index) ? 1 : 0;
+}
+
+[operator("dereference")] int32 Dereference() extends CollectionIterator {
+	return g_data[this.index];
+}
+
+[operator("increment")] CollectionIterator Increment() extends CollectionIterator {
+	CollectionIterator it;
+	it.index = this.index + 1;
+	return it;
+}
+
+int32 main() {
+	g_data[0] = 10;
+	g_data[1] = 20;
+	g_data[2] = 30;
+	g_data[3] = 40;
+
+	Collection col;
+	col.count = 4;
+
+	int32 sum = 0;
+	for (int32 v : col) {
+		sum += v;
+	}
+	if (sum != 100) { printf("FAIL sum got %d\n", sum); return 1; }
+
+	int32 first = -1;
+	for (int32 v : col) {
+		first = v;
+		break;
+	}
+	if (first != 10) { printf("FAIL break got %d\n", first); return 1; }
+
+	printf("RANGE FOR ITERATOR OK\n");
+	return 0;
+}

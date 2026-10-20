@@ -1,0 +1,66 @@
+// Types - Packed Vector Lifecycle Tests (implementation)
+include "../Framework/Assert.ch"
+include "PackedVectorLifecycle.ch"
+
+// BUG-188: the default create of a pure packed vector class never ran, so `Rotation q;` stayed all zero.
+int32 g_pvlAssigns = 0;
+
+class PvlQuat {
+	public union { packed float x, y, z, w; packed float[4] data; };
+	[operator("create")] public void Init() { data = { 0.0f, 0.0f, 0.0f, 1.0f }; }
+	[operator("create")] public void Init(float s) { data = { s, s, s, s }; }
+	[operator("=")] public void Assign(PvlQuat o) { data = o.data; g_pvlAssigns = g_pvlAssigns + 1; }
+}
+
+template<T> class PvlPair {
+	public union { packed T a, b; packed T[2] data; };
+	[operator("create")] public void Init() { data = { (T)7, (T)8 }; }
+}
+
+class PvlEmpty {
+	public union { packed float x, y; packed float[2] data; };
+	[operator("create")] public void Init() {}
+	[operator("create")] public void Init(float s) { data = { s, s }; }
+}
+
+class PvlHolder { public PvlQuat[3] items; public int32 count; }
+class PvlInitialized { public PvlQuat rotation; public int32 tag = 4; }
+
+PvlQuat g_pvlGlobal;
+
+void TestPackedVectorDefaultCreate() {
+	PvlQuat q;
+	AssertFloatEquals(1.0f, q.w, "local runs its create");
+	AssertFloatEquals(0.0f, q.x, "and only sets what it sets");
+	PvlQuat[2] arr;
+	AssertFloatEquals(1.0f, arr[1].w, "array elements run it");
+	PvlHolder h;
+	AssertFloatEquals(1.0f, h.items[2].w, "an array field runs it");
+	PvlInitialized i;
+	Assert(i.rotation.w == 1.0f && i.tag == 4, "a field beside an initializer runs it");
+	AssertFloatEquals(1.0f, g_pvlGlobal.w, "a global runs it");
+	PvlPair<int32> p;
+	AssertIntEquals(15, p.a + p.b, "a template instance runs it");
+	PvlQuat made = PvlQuat();
+	AssertFloatEquals(1.0f, made.w, "T() runs it");
+	PvlQuat filled = PvlQuat(2.0f);
+	AssertFloatEquals(2.0f, filled.w, "an argument create still runs");
+	PvlEmpty e;
+	AssertFloatEquals(0.0f, e.y, "an empty create leaves the zeroed lanes");
+}
+
+void TestPackedVectorAssignOperator() {
+	g_pvlAssigns = 0;
+	PvlQuat a;
+	PvlQuat b = a;
+	AssertIntEquals(0, g_pvlAssigns, "initialization is a register move");
+	b.x = 3.0f;
+	a = b;
+	AssertIntEquals(1, g_pvlAssigns, "assignment runs the = operator");
+	AssertFloatEquals(3.0f, a.x, "and copies the lanes");
+}
+
+void TestPackedVectorLifecycle() {
+	TestPackedVectorDefaultCreate();
+	TestPackedVectorAssignOperator();
+}

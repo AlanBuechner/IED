@@ -1,0 +1,54 @@
+// Operators - Truthiness Tests (implementation)
+include "../Framework/Assert.ch"
+include "Truthiness.ch"
+
+bool s_truthinessRhsEvaluated = false;
+bool TruthinessSideEffect() { s_truthinessRhsEvaluated = true; return true; }
+
+// Non-bool types are valid boolean values when they have a well-defined truth value: scalars are
+// true when non-zero, pointers are true when non-null. These were once warned about ("Condition of
+// type 'X' is not bool"); the warning was removed because `if (ptr)` and C-API BOOL returns are
+// idioms with unambiguous semantics that codegen lowers correctly. This test locks the BEHAVIOR (the
+// truth value) so a regression to always-true/always-false is caught, and its very compilation locks
+// that no false-positive warning fires for these idiomatic forms.
+void TestTruthiness() {
+	// Integer condition: non-zero is true, zero is false.
+	int32 i = 5;
+	if (i) AssertTrue(true);
+	int32 z = 0;
+	Assert(0 == (z ? 1 : 0), "zero int must be falsy");
+
+	// Negative integer is truthy.
+	int32 n = -1;
+	Assert(n != 0, "negative int is truthy");
+
+	// Float condition: non-zero is true, zero is false.
+	float f = 0.5f;
+	if (f) AssertTrue(true);
+	float fz = 0.0f;
+	Assert(0 == (fz ? 1 : 0), "zero float must be falsy");
+
+	// Pointer condition: non-null is true, null is false. The canonical C/C++ idiom.
+	int32* p = &i;
+	if (p) AssertTrue(true);
+	int32* np = nullptr;
+	Assert(0 == (np ? 1 : 0), "null pointer must be falsy");
+
+	// Logical && / || with non-bool operands: each side takes its natural truth value.
+	bool both = (i != 0) && (p != nullptr);
+	AssertTrue(both);
+	bool either = (z == 0) || (np != nullptr);
+	AssertTrue(either);
+
+	// Short-circuit still applies: a falsy left operand must NOT evaluate the right. The helper sets
+	// a global flag; if short-circuit were broken the flag would be set and the assertion fails.
+	s_truthinessRhsEvaluated = false;
+	int32* sp = nullptr;
+	Assert(0 == ((sp != nullptr) && TruthinessSideEffect()), "falsy left short-circuits");
+	AssertFalse(s_truthinessRhsEvaluated);
+
+	// A truthy left operand DOES evaluate the right.
+	s_truthinessRhsEvaluated = false;
+	((i != 0) && TruthinessSideEffect());
+	AssertTrue(s_truthinessRhsEvaluated);
+}

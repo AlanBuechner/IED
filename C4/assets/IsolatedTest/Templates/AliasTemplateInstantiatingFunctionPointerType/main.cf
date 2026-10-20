@@ -1,0 +1,16 @@
+template<T> alias BinOp = funcptr<T(T,T)>;
+int32 AddI(int32 a, int32 b) { return a + b; }
+float SubF(float a, float b) { return a - b; }
+int32 Use(BinOp<int32> op, int32 a, int32 b) { return op(a, b); }
+float UseF(BinOp<float> op, float a, float b) { return op(a, b); }
+BinOp<int32> g_op = AddI;
+int32 main() {
+	BinOp<int32> f = AddI;
+	if (f(1, 2) != 3) return 1;
+	if (Use(AddI, 20, 22) != 42) return 2;
+	if (UseF(SubF, 5.0f, 2.0f) != 3.0f) return 3;
+	g_op = AddI;
+	if (g_op(10, 20) != 30) return 4;
+	printf("ALIAS TPL FUNPTR OK\n");
+	return 0;
+}

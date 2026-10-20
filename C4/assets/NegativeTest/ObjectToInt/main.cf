@@ -1,0 +1,4 @@
+struct S {
+	public int32 v;
+}
+int32 main() { S s; int32 x = s; return x; }

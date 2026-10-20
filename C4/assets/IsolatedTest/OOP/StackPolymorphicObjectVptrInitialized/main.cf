@@ -1,0 +1,8 @@
+class A { public int32 b; public virtual int32 Who() { return 7; } };
+int main() {
+	A a;                 // stack object, no initializer - vptr must still be set up
+	if (a.Who() != 7) return 1;   // virtual call through the initialized vtable
+	a.b = 42;
+	if (a.b != 42) return 2;      // field access alongside the vptr slot
+	return 0;
+}

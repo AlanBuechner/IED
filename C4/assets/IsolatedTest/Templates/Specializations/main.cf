@@ -1,0 +1,60 @@
+// Template specialization (D-20): full and partial specializations of object templates, the most specialized
+// match wins (C++ partial ordering, trailing packs included), an explicit specialization of a function template
+// replaces its body for those arguments, and equally good function template instances rank by ordering.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T> struct Kind { static const int32 V = 0; }
+template<T> struct Kind<T*> { static const int32 V = 1; }
+template<> struct Kind<int32> { static const int32 V = 2; }
+template<T> struct Kind<const T*> { static const int32 V = 3; }
+template<T, int32 N> struct Kind<T[N]> { static const int32 V = 4; }
+
+template<A, B> struct Pair { static const int32 V = 0; }
+template<A> struct Pair<A, A> { static const int32 V = 1; }
+template<A> struct Pair<A, int32> { static const int32 V = 2; }
+template<> struct Pair<int32, int32> { static const int32 V = 3; }
+
+template<...Ts> struct Shape { static const int32 V = 0; }
+template<T> struct Shape<T> { static const int32 V = 1; }
+template<T, ...R> struct Shape<T, R...> { static const int32 V = 2; }
+template<...R> struct Shape<int8, int8, R...> { static const int32 V = 3; }
+
+template<T> struct Store { public T value; public int32 Tag() { return 1; } }
+template<T> struct Store<T*> { public T* pointer; public int32 Tag() { return 2; } public int32 Extra() { return 7; } }
+
+template<T> T Identity(T v) { return v; }
+template<> int32 Identity<int32>(int32 v) { return v + 1000; }
+
+template<T> int32 Which(T v) { return 1; }
+template<T> int32 Which(T* v) { return 2; }
+template<T> int32 Count(T v) { return 1; }
+template<...Ts> int32 Count(Ts... v) { return 2; }
+
+int32 main() {
+	Check(Kind<float>::V == 0, "the primary when no specialization matches");
+	Check(Kind<float*>::V == 1, "a partial specialization");
+	Check(Kind<int32>::V == 2, "a full specialization");
+	Check(Kind<const float*>::V == 3, "the more specialized of two partial matches");
+	Check(Kind<int64[6]>::V == 4, "a partial specialization deducing a value");
+	Check(Pair<float, int8>::V == 0, "a two-parameter primary");
+	Check(Pair<float, float>::V == 1, "a repeated parameter");
+	Check(Pair<float, int32>::V == 2, "a written argument");
+	Check(Pair<int32, int32>::V == 3, "a full specialization beats two partial ones");
+	Check(Shape<>::V == 0, "the variadic primary");
+	Check(Shape<int32>::V == 1, "a pattern without an expansion beats one with it");
+	Check(Shape<int32, float>::V == 2, "a trailing expansion takes the rest");
+	Check(Shape<int8, int8, float>::V == 3, "written arguments before an expansion");
+	Store<int32> a;
+	Store<int32*> b;
+	Check(a.Tag() == 1 && b.Tag() == 2 && b.Extra() == 7, "a specialization has its own members");
+	Check(Identity(5) == 1005, "an explicit function specialization replaces the body");
+	Check(Identity(2.5f) == 2.5f, "other arguments use the primary");
+	int32 x = 3;
+	Check(Which(x) == 1 && Which(&x) == 2, "T* is more specialized than T");
+	Check(Count(1) == 1 && Count(1, 2) == 2 && Count() == 2, "T is more specialized than Ts...");
+	return g_failures;
+}

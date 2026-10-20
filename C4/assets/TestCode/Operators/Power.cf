@@ -1,0 +1,37 @@
+include "../Framework/Assert.ch"
+include "Power.ch"
+
+const int32 kSquares = 2 ** 8;
+int32[2 ** 3] g_eight;
+
+void TestPower() {
+	AssertIntEquals(1024, 2 ** 10, "int ** int");
+	AssertIntEquals(1, 3 ** 0, "anything ** 0 is 1");
+	AssertIntEquals(-8, (-2) ** 3, "a negative base keeps its sign for an odd exponent");
+	AssertIntEquals(16, (-2) ** 4, "and loses it for an even one");
+	AssertIntEquals(0, 2 ** -1, "a negative exponent gives 0");
+	AssertIntEquals(1, 1 ** -5, "except for a base of 1");
+	AssertIntEquals(-1, (-1) ** -3, "and -1 to an odd power");
+	AssertIntEquals(1, (-1) ** -2, "and -1 to an even power");
+	AssertIntEquals(512, 2 ** 3 ** 2, "** is right associative");
+	AssertIntEquals(-4, -2 ** 2, "** binds tighter than a prefix minus");
+	AssertIntEquals(256, kSquares, "** folds in a constant");
+	AssertIntEquals(8, (int32)(sizeof(g_eight) / sizeof(int32)), "** folds in an array extent");
+	int32 base = 3;
+	int32 exponent = 5;
+	AssertIntEquals(243, base ** exponent, "** on variables");
+	uint32 two = 2;
+	uint32 big = two ** 31;
+	Assert(big == 2147483648, "unsigned ** reaches the top bit");
+	int64 three = 3;
+	int64 wide = three ** 30;
+	Assert(wide == 205891132094649, "int64 ** does not overflow at 32 bits");
+	Assert((int64)3 ** 2 == 9, "a cast is a prefix operator: (int64)(3 ** 2)");
+	AssertFloatEquals(0.5f, 2.0f ** -1.0f, "float ** float");
+	AssertFloatEquals(1.41421354f, 2.0f ** 0.5f, "a fractional exponent");
+	double mixed = 2 ** 0.5;
+	Assert(mixed > 1.4142 && mixed < 1.4143, "int ** double converts to double");
+	float scaled = 3.0f;
+	scaled = scaled ** 2;
+	AssertFloatEquals(9.0f, scaled, "float ** int converts the exponent");
+}

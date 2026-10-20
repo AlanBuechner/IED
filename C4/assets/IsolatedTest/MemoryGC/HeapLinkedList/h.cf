@@ -1,0 +1,18 @@
+struct Node {
+    int32 v;
+    Node* next;
+}
+int32 main() {
+    Node* a = new Node();
+    a->v = 5;
+    Node* b = new Node();
+    b->v = 9;
+    Node* cur = a;
+    cur->next = b;
+    int32 sum = cur->v + cur->next->v;
+    delete a;
+    delete b;
+    if (sum != 14) return 1;
+    printf("HEAP FIELD OK\n");
+    return 0;
+}

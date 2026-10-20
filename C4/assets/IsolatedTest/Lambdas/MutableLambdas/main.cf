@@ -1,0 +1,13 @@
+// D-22: `mutable` makes by-value captures writable; the changes persist between calls of the same closure
+// and never reach the original variable.
+int32 main() {
+	int32 seed = 10;
+	func<int32()> counter = [seed]() mutable -> int32 { seed++; return seed; };
+	if (counter() != 11 || counter() != 12 || counter() != 13) return 1;
+	if (seed != 10) return 2;
+
+	func<int32()> other = counter;          // a func copy shares the closure it refers to
+	if (other() != 14 || counter() != 15) return 3;
+	printf("MUTABLE OK\n");
+	return 0;
+}

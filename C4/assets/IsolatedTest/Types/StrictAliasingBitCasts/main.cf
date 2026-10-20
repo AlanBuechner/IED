@@ -1,0 +1,37 @@
+// reinterpret_cast between numbers of the same size keeps the bits (D-64): the sanctioned way to see a float as an
+// integer, and back. main returns the failures.
+include "bedrock.ch"
+
+int32 Differs(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 FloatsAndIntegers() {
+	int32 failures = Differs(reinterpret_cast<uint32>(1.0f), 1065353216);
+	failures += Differs(reinterpret_cast<int32>(-0.0f), -2147483648);
+	failures += reinterpret_cast<float>(1078530011) == 3.14159274f ? 0 : 1;
+	failures += Differs(reinterpret_cast<int64>(1.0), 4607182418800017408);
+	failures += reinterpret_cast<double>(4611686018427387904) == 2.0 ? 0 : 1;
+	return failures;
+}
+
+int32 Integers() {
+	int32 failures = Differs(reinterpret_cast<int32>(4294967295u), -1);
+	failures += reinterpret_cast<uint16>((int16)-1) == (uint16)65535 ? 0 : 1;
+	failures += Differs(reinterpret_cast<uint8>((int8)-2), 254);
+	failures += Differs(reinterpret_cast<int16>((char16)65), 65);
+	return failures;
+}
+
+float Negate(float x) { return reinterpret_cast<float>(reinterpret_cast<uint32>(x) ^ 2147483648u); }
+
+int32 SignBit() {
+	int32 failures = Negate(2.5f) == -2.5f ? 0 : 1;
+	return failures + (Negate(-0.0f) == 0.0f && reinterpret_cast<uint32>(Negate(-0.0f)) == 0u ? 0 : 1);
+}
+
+int32 HashesOfZeros() {
+	return Core::KeyTraits<float>::Hash(0.0f) == Core::KeyTraits<float>::Hash(-0.0f) ? 0 : 1;
+}
+
+int32 main() {
+	return FloatsAndIntegers() + Integers() + SignBit() + HashesOfZeros();
+}

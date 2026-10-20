@@ -1,0 +1,31 @@
+extern "c" include "data.h"
+extern "c" source "data.c"
+int32 main() {
+	// Array passed to C by pointer (C4 array decays to its base address).
+	int32[4] a;
+	a[0] = 1; a[1] = 2; a[2] = 3; a[3] = 4;
+	if (sum_array(a, 4) != 10) { printf("FAIL sum_array\n"); return 1; }
+
+	// C writes back into the array through the pointer (out-param).
+	int32[3] b;
+	fill_ints(b, 3);
+	if (b[0] != 0 || b[1] != 1 || b[2] != 4) { printf("FAIL fill_ints\n"); return 1; }
+
+	// Array initializer list.
+	int32[4] c = { 5, 6, 7, 8 };
+	if (sum_array(c, 4) != 26) { printf("FAIL array init list\n"); return 1; }
+
+	// C returns a struct by value; field access on the result.
+	Pt p = make_pt(5, 9);
+	if (p.x != 5 || p.y != 9) { printf("FAIL struct return\n"); return 1; }
+
+	// Struct passed to C by value.
+	if (pt_x(p) != 5) { printf("FAIL struct by-value param\n"); return 1; }
+
+	// C4 string (char*-backed) passed to a const char* parameter.
+	char* s = "hello";
+	if (len_str(s) != 5) { printf("FAIL string to C\n"); return 1; }
+
+	printf("DATA INTEROP TESTS OK\n");
+	return 0;
+}

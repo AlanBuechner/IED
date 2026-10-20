@@ -1,0 +1,5 @@
+struct Celsius {
+	public float v;
+	[operator("cast")] public float ToFloat() const { return this.v; }
+}
+int32 main() { Celsius c; float f = c; return 0; }

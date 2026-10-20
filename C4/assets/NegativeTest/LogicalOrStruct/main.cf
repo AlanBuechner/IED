@@ -1,0 +1,2 @@
+struct CS { int32 i; }
+int32 main() { CS s; bool b = s || true; return 0; }

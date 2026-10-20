@@ -1,0 +1,12 @@
+// Types - Multi-entry lambda symbol tests (entry A)
+include "../Framework/Assert.ch"
+include "LambdaMultiEntry.ch"
+
+void TestLambdaEntryA() {
+	// Each entry unit in this suite is lowered by its own HIR builder. With per-builder lambda
+	// counters, the first lambda in EVERY unit would be named c4_lambda_0 - so two units' distinct
+	// lambdas collide on one symbol and codegen's first-body-wins dedup binds both calls to one
+	// body. Node-identity naming keeps them distinct. This asserts A's lambda computes x*10.
+	funcptr<int32(int32)> f = [](int32 x) -> int32 { return x * 10; };
+	AssertIntEquals(70, f(7), "entry A lambda body");
+}

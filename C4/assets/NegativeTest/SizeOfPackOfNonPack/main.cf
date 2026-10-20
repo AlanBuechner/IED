@@ -1,0 +1,2 @@
+template<T> int64 Count(T a) { return sizeof...(a); }
+int32 main() { return (int32)Count(1); }

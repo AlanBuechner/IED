@@ -1,0 +1,6 @@
+enum Mode { Off = 0, On = 1 }
+int32 main()
+{
+	Mode m = (Mode)-1;
+	return (int32)m;
+}

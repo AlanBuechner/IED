@@ -1,0 +1,6 @@
+class Token {
+	private int32 n;
+	[operator("create")] private void Init(int32 v) { this.n = v; }
+	public static Token Make() { return Token(1); }
+}
+int32 main() { Token t(5); return 0; }

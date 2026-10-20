@@ -1,0 +1,109 @@
+// Reflection of storage layouts: named unions, anonymous-union views in classes, packed lanes and the alias
+// flag the serializers read (BUG-193, BUG-194).
+
+include "bedrock.ch"
+
+[group("rl"), Wire(2)] union RlValue {
+	public int32 whole;
+	[Hint(1)] public float real;
+	struct { public int16 low; public int16 high; };
+}
+
+namespace RlGeo {
+	struct RlSpan { public int32 from; public int32 to; }
+	union RlExtent { public RlSpan span; public int64 bits; }
+}
+
+class RlColor {
+	public int32 id;
+	public union {
+		struct { public float r; public float g; public float b; };
+		struct { public float x; public float y; public float z; };
+	};
+}
+
+class RlLanes {
+	public int32 id;
+	public union { packed float x, y, z; packed float r, g, b; packed float[3] data; };
+	public int32 tail;
+}
+
+class RlVec2 {
+	public union { packed float x, y; packed float[2] data; };
+	public float Sum() const { return x + y; }
+}
+
+class RlOnlyData { public union { packed int32[4] data; }; }
+
+// "name@offset" of every field, with an `*` after an alias, joined by spaces.
+Core::String RlLayout(const char* typeName) {
+	Core::StringBuilder text;
+	for (Reflection::Field f : Reflection::FindType(typeName)) {
+		if (!text.IsEmpty()) text.Append(" ");
+		text.Append(f.Name());
+		text.Append("@");
+		text.AppendInt((int64)f.Offset());
+		if (f.IsAlias()) text.Append("*");
+	}
+	return text.ToString();
+}
+
+[test("reflect.layout")]
+class ReflectionLayoutTests {
+	[test("named_union")]
+	public static void TestNamedUnion() {
+		Reflection::Type t = Reflection::FindType("RlValue");
+		assert_true(t.IsValid(), "a named union is registered");
+		assert_true(t.Kind() == Reflection::EntityKind::Union, "as a union");
+		assert_eq(4, (int32)t.SizeOf(), "its size");
+		assert_eq(4, (int32)t.AlignOf(), "its alignment");
+		assert_se("whole@0 real@0* low@0* high@2*", RlLayout("RlValue").CStr(), "the first member is the field, the rest alias it");
+		assert_se("int16", t.FindField("high").TypeName(), "a struct view's field type");
+		assert_eq(2, t.FindAnnotation("Wire").IntArg(0), "the union's annotations");
+		assert_eq(1, t.FindField("real").FindAnnotation("Hint").IntArg(0), "a member's annotations");
+		Reflection::Group group = Reflection::Group("rl");
+		assert_eq(1, group.Count(), "its group");
+		assert_true(group.KindOf(group.Item(0)) == Reflection::EntityKind::Union, "a union in a group");
+	}
+
+	[test("namespaced_union")]
+	public static void TestNamespacedUnion() {
+		Reflection::Type t = Reflection::FindType("RlGeo::RlExtent");
+		assert_true(t.IsValid(), "a union registers under its qualified name");
+		assert_se("RlGeo::RlSpan", t.FindField("span").TypeName(), "its namespace's struct");
+		assert_eq(8, (int32)t.SizeOf(), "sized by the largest member");
+		assert_true(t.FindField("bits").IsAlias(), "the second member aliases the first");
+	}
+
+	[test("class_views")]
+	public static void TestClassViews() {
+		assert_se("id@0 r@4 g@8 b@12 x@4* y@8* z@12*", RlLayout("RlColor").CStr(), "the second struct view aliases the first");
+		assert_true(Reflection::FindType("RlColor").Kind() == Reflection::EntityKind::Object, "a class");
+	}
+
+	[test("packed_lanes")]
+	public static void TestPackedLanes() {
+		assert_se("id@0 x@4 y@8 z@12 r@4* g@8* b@12* data@4* tail@16", RlLayout("RlLanes").CStr(), "lanes of a class's packed region");
+		Reflection::Field data = Reflection::FindType("RlLanes").FindField("data");
+		assert_se("float[3]", data.TypeName(), "the whole-lane array");
+		assert_eq(12, (int32)data.SizeOf(), "three lanes wide");
+		assert_se("float", Reflection::FindType("RlLanes").FindField("y").TypeName(), "a lane is one element");
+		assert_se("data@0", RlLayout("RlOnlyData").CStr(), "an array-only region's array is its field");
+	}
+
+	[test("packed_vector")]
+	public static void TestPackedVector() {
+		Reflection::Type t = Reflection::FindType("RlVec2");
+		assert_true(t.IsValid(), "a pure packed vector is registered");
+		assert_se("x@0 y@4 data@0*", RlLayout("RlVec2").CStr(), "its lanes");
+		RlVec2 v;
+		v.x = 1.5f;
+		v.y = 2.0f;
+		float sum = 0.0f;
+		assert_true(t.FindMethod("Sum").Invoke(&v, &sum, nullptr), "its method is invokable");
+		assert_feq(3.5, sum, 0.0, "on the vector");
+		float* y = (float*)t.FindField("y").AddressIn(&v);
+		*y = 4.0f;
+		assert_feq(4.0, v.y, 0.0, "a lane's address");
+	}
+}

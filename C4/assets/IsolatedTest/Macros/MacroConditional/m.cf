@@ -1,0 +1,24 @@
+#define FOO 1
+#if defined(FOO)
+int32 a = 100;
+#else
+int32 a = 999;
+#endif
+#if !defined(BAR)
+int32 b = 200;
+#endif
+#define BASE(x) ((x) * 2)
+#define NESTED(y) BASE(y) + 1
+int32 SumAll(int32 n){ return n; }
+#define CALL(...) SumAll(__VA_ARGS__)
+int32 main() {
+	printf("ME %d %d %d\n", a, b, NESTED(5));
+	// variadic macro forwards args into a function call (the plan's real use case)
+	int32 v = CALL(41);
+	if (v != 41) return 1;
+	// trailing comma in the forwarded call must not break it
+	int32 t = CALL(9,);
+	if (t != 9) return 2;
+	printf("MACRO EXT OK\n");
+	return 0;
+}

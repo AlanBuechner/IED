@@ -1,0 +1,4 @@
+union Lanes {
+	packed float x, y;
+}
+int32 main() { return 0; }

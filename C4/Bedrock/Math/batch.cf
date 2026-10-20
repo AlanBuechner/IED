@@ -1,0 +1,58 @@
+include "batch.ch"
+
+namespace Math
+{
+	template<uint32 N> packed int32[N] StridedLanes(int32 stride) {
+		packed int32[N] lanes;
+		for (int32 i = 0; i < (int32)N; ++i) lanes[i] = i * stride;
+		return lanes;
+	}
+
+	template<T, uint32 N> TVector3Batch<T, N> Normalized(const TVector3Batch<T, N>& v) {
+		packed T[N] length = Length(v);
+		return v.ScaleEach(simd_select(length > (T)0, (T)1 / length, (T)1));
+	}
+
+	// Each output component is one row of `m` dotted with the vectors: four fused multiply-adds per component.
+	template<uint32 N> TVector4Batch<float, N> TransformVector(const Mat4& m, const TVector4Batch<float, N>& v) {
+		const FVector4 c0 = m.columns[0];
+		const FVector4 c1 = m.columns[1];
+		const FVector4 c2 = m.columns[2];
+		const FVector4 c3 = m.columns[3];
+		return TVector4Batch<float, N>(
+			simd_muladd(v.w, c3.x, simd_muladd(v.z, c2.x, simd_muladd(v.y, c1.x, v.x * c0.x))),
+			simd_muladd(v.w, c3.y, simd_muladd(v.z, c2.y, simd_muladd(v.y, c1.y, v.x * c0.y))),
+			simd_muladd(v.w, c3.z, simd_muladd(v.z, c2.z, simd_muladd(v.y, c1.z, v.x * c0.z))),
+			simd_muladd(v.w, c3.w, simd_muladd(v.z, c2.w, simd_muladd(v.y, c1.w, v.x * c0.w))));
+	}
+
+	template<uint32 N> TVector3Batch<float, N> TransformPoint(const Mat4& m, const TVector3Batch<float, N>& p) {
+		const FVector4 c0 = m.columns[0];
+		const FVector4 c1 = m.columns[1];
+		const FVector4 c2 = m.columns[2];
+		const FVector4 c3 = m.columns[3];
+		return TVector3Batch<float, N>(
+			simd_muladd(p.z, c2.x, simd_muladd(p.y, c1.x, simd_muladd(p.x, c0.x, c3.x))),
+			simd_muladd(p.z, c2.y, simd_muladd(p.y, c1.y, simd_muladd(p.x, c0.y, c3.y))),
+			simd_muladd(p.z, c2.z, simd_muladd(p.y, c1.z, simd_muladd(p.x, c0.z, c3.z))));
+	}
+
+	template<uint32 N> TVector3Batch<float, N> TransformDirection(const Mat4& m, const TVector3Batch<float, N>& d) {
+		const FVector4 c0 = m.columns[0];
+		const FVector4 c1 = m.columns[1];
+		const FVector4 c2 = m.columns[2];
+		return TVector3Batch<float, N>(
+			simd_muladd(d.z, c2.x, simd_muladd(d.y, c1.x, d.x * c0.x)),
+			simd_muladd(d.z, c2.y, simd_muladd(d.y, c1.y, d.x * c0.y)),
+			simd_muladd(d.z, c2.z, simd_muladd(d.y, c1.z, d.x * c0.z)));
+	}
+
+	// v + 2w (u x v) + 2 u x (u x v), with u the vector part (Quat::Rotate's form), fused per component.
+	template<uint32 N> TVector3Batch<float, N> Rotate(Quat q, const TVector3Batch<float, N>& v) {
+		const TVector3Batch<float, N> u = TVector3Batch<float, N>(q.Vector());
+		const TVector3Batch<float, N> uv = Cross(u, v);
+		const TVector3Batch<float, N> uuv = Cross(u, uv);
+		return TVector3Batch<float, N>(simd_muladd(simd_muladd(uv.x, q.w, uuv.x), 2.0f, v.x), simd_muladd(simd_muladd(uv.y, q.w, uuv.y), 2.0f, v.y),
+			simd_muladd(simd_muladd(uv.z, q.w, uuv.z), 2.0f, v.z));
+	}
+}

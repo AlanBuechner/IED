@@ -1,0 +1,6 @@
+include "bedrock.ch"
+int32 Identity(int32 x) { return x; }
+int32 main() {
+	Core::String s = Core::String("a");
+	return Identity(s);
+}

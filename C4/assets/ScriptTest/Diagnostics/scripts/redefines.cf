@@ -1,0 +1,2 @@
+include "game.ch"
+namespace Game { int32 Add(int32 a, int32 b) { return 0; } }

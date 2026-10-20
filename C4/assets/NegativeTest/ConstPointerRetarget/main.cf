@@ -1,0 +1,7 @@
+int32 main() {
+	int32 x = 1;
+	int32 y = 2;
+	int32 const* p = &x;
+	p = &y;
+	return *p;
+}

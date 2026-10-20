@@ -1,0 +1,15 @@
+int32 main() {
+    int32 e2 = 2, e4 = 4;
+    bool a=false,b=false,c=false,d2=false,e=false,f=false;
+    if (e2) { a = true; }
+    while (e4) { b = true; break; }
+    int32 v = 7; int32* pv = &v;
+    if (pv) { c = true; }
+    float f0 = 0.0f, fneg = -1.5f;
+    if (f0) { d2 = true; }
+    if (fneg) { e = true; }
+    int32 t1 = pv ? 100 : 200;
+    int32 t2 = e4 ? 1 : 0;
+    f = (t1 == 100 && t2 == 1);
+    return (a && b && c && !d2 && e && f) ? 0 : 1;
+}

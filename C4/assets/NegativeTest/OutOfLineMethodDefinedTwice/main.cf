@@ -1,0 +1,3 @@
+class Box { public int32 Get() { return 1; } }
+public int32 Box::Get() { return 2; }
+int32 main() { return 0; }

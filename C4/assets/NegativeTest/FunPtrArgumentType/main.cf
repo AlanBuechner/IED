@@ -1,0 +1,3 @@
+struct S { int32 v; }
+int32 Twice(int32 x) { return x * 2; }
+int32 main() { S s; funcptr<int32(int32)> f = Twice; return f(s); }

@@ -1,0 +1,6 @@
+struct S {
+	public int32 v;
+	public void Touch() { v = 1; }
+	public int32 Read() const { Touch(); return v; }
+}
+int32 main() { S s; return s.Read(); }

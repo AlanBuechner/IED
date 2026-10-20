@@ -1,0 +1,171 @@
+// Core::StringView: a non-owning view - construction, comparison, search, zero-allocation substrings,
+// UTF-8 counting, decoding and validation.
+
+include "bedrock.ch"
+
+[test("str.construct")]
+public static void TestStrConstruct() {
+	Core::StringView s = Core::StringView("hello");
+	assert_eq(5, s.ByteLength(), "byte length of 'hello'");
+	assert_eq(5, s.CharCount(), "char count of 'hello'");
+	assert_true(!s.IsEmpty(), "non-empty string is not empty");
+	assert_true(s.IsValidUtf8(), "ascii is valid utf-8");
+
+	Core::StringView e = Core::StringView("");
+	assert_true(e.IsEmpty(), "empty string is empty");
+	assert_eq(0, e.ByteLength(), "empty byte length");
+}
+
+[test("str.construct_known_len")]
+public static void TestStrKnownLen() {
+	// The (char*, int32) constructor wraps with a KNOWN length - no strlen needed. The view is
+	// length-delimited (not null-terminated), so compare length-aware, not via CStr/strcmp.
+	Core::StringView s = Core::StringView("abcdef", 4);   // view of the first 4 bytes only
+	assert_eq(4, s.ByteLength(), "known-length ctor uses n");
+	assert_true(s.Equals(Core::StringView("abcd")), "points at the source buffer with length 4");
+}
+
+[test("str.utf8_count")]
+public static void TestStrUtf8Count() {
+	// U+00E9 is 2 UTF-8 bytes and U+20AC is 3: "a" + U+00E9 + U+20AC is 1+2+3 = 6 bytes, 3 chars.
+	Core::StringView s = Core::StringView("a\u00e9\u20ac");
+	assert_eq(6, s.ByteLength(), "mixed utf-8 byte length");
+	assert_eq(3, s.CharCount(), "mixed utf-8 char count (a, U+00E9, U+20AC)");
+	assert_true(s.IsValidUtf8(), "well-formed multibyte is valid");
+}
+
+[test("str.equals")]
+public static void TestStrEquals() {
+	Core::StringView a = Core::StringView("same");
+	Core::StringView b = Core::StringView("same");
+	Core::StringView c = Core::StringView("diff");
+	assert_true(a.Equals(b), "equal strings compare equal");
+	assert_true(!a.Equals(c), "different strings differ");
+	// A sub-view equals an equal-length literal (length-based, not pointer-based).
+	Core::StringView base = Core::StringView("abcdef");
+	Core::StringView sub = base.Substring(2, 3);
+	assert_true(sub.Equals(Core::StringView("cde")), "sub-view equals matching literal");
+}
+
+[test("str.indexof")]
+public static void TestStrIndexOf() {
+	Core::StringView s = Core::StringView("banana");
+	assert_eq(2, s.IndexOf('n', 0), "first n at index 2");
+	assert_eq(4, s.IndexOf('n', 3), "second n at index 4 when starting at 3");
+	assert_eq(-1, s.IndexOf('z', 0), "absent char returns -1");
+}
+
+[test("str.contains")]
+public static void TestStrContains() {
+	Core::StringView s = Core::StringView("the quick brown fox");
+	assert_true(s.Contains(Core::StringView("quick")), "contains substring");
+	assert_true(!s.Contains(Core::StringView("dog")), "does not contain missing word");
+}
+
+[test("str.substring_zero_alloc")]
+public static void TestStrSubstring() {
+	Core::StringView s = Core::StringView("abcdef");
+	Core::StringView sub = s.Substring(1, 3);
+	// A zero-allocation sub-view is NOT null-terminated at its end (it points into the source), so
+	// content must be compared length-aware (Equals), not via CStr/strcmp - exactly like C++'s
+	// std::string_view. The pointer check below proves it shares the source buffer.
+	assert_true(sub.Equals(Core::StringView("bcd")), "substring [1,3) = bcd (length-aware)");
+	assert_eq(3, sub.ByteLength(), "sub-view length is 3");
+	assert_true(sub.Data() == s.Data() + 1, "sub-view shares the source buffer");
+
+	// Out-of-range length is clamped to the remainder.
+	Core::StringView tail = s.Substring(4, 99);
+	assert_true(tail.Equals(Core::StringView("ef")), "overlong substring clamps to end");
+}
+
+[test("str.trim_zero_alloc")]
+public static void TestStrTrim() {
+	Core::StringView s = Core::StringView("  spaced  ");
+	Core::StringView t = s.Trimmed();
+	assert_true(t.Equals(Core::StringView("spaced")), "trim removes leading/trailing spaces (length-aware)");
+	assert_true(t.Data() == s.Data() + 2, "trimmed view points into the source buffer");
+
+	Core::StringView nl = Core::StringView("\t\n tab \r\n");
+	assert_true(nl.Trimmed().Equals(Core::StringView("tab")), "trim removes tabs/newlines");
+}
+
+[test("str.byteat")]
+public static void TestStrByteAt() {
+	Core::StringView s = Core::StringView("AB");
+	assert_eq(65, s.ByteAt(0), "'A' is 65");
+	assert_eq(66, s.ByteAt(1), "'B' is 66");
+}
+
+[test("str.view_into_builder")]
+public static void TestStrViewIntoBuilder() {
+	// Str can wrap a StringBuilder's backing buffer by value; Build() is a zero-alloc view.
+	Core::StringBuilder* b = new Core::StringBuilder(8);
+	b->Append("hello ");
+	b->Append("world");
+	Core::StringView s = b->View();
+	assert_eq(11, s.ByteLength(), "built view length");
+	assert_true(s == Core::StringView("hello world"), "built view content");
+	// The view is live until the next mutation - appending invalidates it, so copy out first.
+	Core::StringView before = b->View();
+	assert_true(before == Core::StringView("hello world"), "valid before append");
+}
+
+// The bytes `values` as a view into `out`.
+Core::StringView SvBytes(Core::StringBuilder& out, Core::InitList<int32> values) {
+	out.Clear();
+	for (int64 i = 0; i < (int64)values.size; ++i) out.AppendByte(values[i]);
+	return out.View();
+}
+
+// BUG-162: well-formed UTF-8 per Unicode table 3-7, and nothing else.
+[test("str.utf8_validation")]
+public static void TestUtf8Validation() {
+	Core::StringBuilder b;
+	assert_true(SvBytes(b, { 0xC3, 0x80 }).IsValidUtf8(), "U+00C0 (C3 80) is valid");
+	assert_true(SvBytes(b, { 0xDF, 0xBF }).IsValidUtf8(), "U+07FF");
+	assert_true(SvBytes(b, { 0xE0, 0xA0, 0x80 }).IsValidUtf8(), "U+0800, the first 3-byte form");
+	assert_true(SvBytes(b, { 0xED, 0x9F, 0xBF }).IsValidUtf8(), "U+D7FF, just below the surrogates");
+	assert_true(SvBytes(b, { 0xF0, 0x9F, 0x98, 0x80 }).IsValidUtf8(), "U+1F600");
+	assert_true(SvBytes(b, { 0xF4, 0x8F, 0xBF, 0xBF }).IsValidUtf8(), "U+10FFFF, the last code point");
+	assert_true(!SvBytes(b, { 0xC0, 0xAF }).IsValidUtf8(), "overlong 2-byte (C0)");
+	assert_true(!SvBytes(b, { 0xC1, 0xBF }).IsValidUtf8(), "overlong 2-byte (C1)");
+	assert_true(!SvBytes(b, { 0xE0, 0x80, 0xAF }).IsValidUtf8(), "overlong 3-byte (E0 80)");
+	assert_true(!SvBytes(b, { 0xE0, 0x9F, 0xBF }).IsValidUtf8(), "overlong 3-byte (E0 9F)");
+	assert_true(!SvBytes(b, { 0xED, 0xA0, 0x80 }).IsValidUtf8(), "a surrogate half");
+	assert_true(!SvBytes(b, { 0xF0, 0x8F, 0xBF, 0xBF }).IsValidUtf8(), "overlong 4-byte");
+	assert_true(!SvBytes(b, { 0xF4, 0x90, 0x80, 0x80 }).IsValidUtf8(), "above U+10FFFF");
+	assert_true(!SvBytes(b, { 0xF5, 0x80, 0x80, 0x80 }).IsValidUtf8(), "lead byte F5");
+	assert_true(!SvBytes(b, { 0x80 }).IsValidUtf8(), "a lone continuation byte");
+	assert_true(!SvBytes(b, { 0xE2, 0x82 }).IsValidUtf8(), "a truncated sequence");
+	assert_true(!SvBytes(b, { 0xC3, 0x41 }).IsValidUtf8(), "a missing continuation byte");
+	assert_true(SvBytes(b, {}).IsValidUtf8(), "no bytes");
+}
+
+[test("str.code_points")]
+public static void TestCodePoints() {
+	Core::StringBuilder b;
+	Core::StringView s = SvBytes(b, { 0x61, 0xC3, 0xA9, 0xE2, 0x82, 0xAC, 0xF0, 0x9F, 0x98, 0x80 });
+	assert_eq(4, s.CharCount(), "four characters");
+	assert_eq(0x61, s.CodePointAt(0), "ASCII");
+	assert_eq(0xE9, s.CodePointAt(1), "two bytes");
+	assert_eq(0x20AC, s.CodePointAt(2), "three bytes");
+	assert_eq(0x1F600, s.CodePointAt(3), "four bytes");
+	assert_eq(-1, s.CodePointAt(4), "past the end");
+	assert_eq(-1, s.CodePointAt(-1), "negative");
+	assert_eq(-1, SvBytes(b, { 0xC0, 0xAF }).CodePointAt(0), "malformed");
+}
+
+[test("str.affixes_and_order")]
+public static void TestAffixesAndOrder() {
+	Core::StringView s = Core::StringView("prefix.body.suffix");
+	assert_true(s.StartsWith(Core::StringView("prefix")) && !s.StartsWith(Core::StringView("body")), "StartsWith");
+	assert_true(s.EndsWith(Core::StringView("suffix")) && !s.EndsWith(Core::StringView("body")), "EndsWith");
+	assert_eq(7, s.IndexOf(Core::StringView("body")), "IndexOf a view");
+	assert_eq(-1, s.IndexOf(Core::StringView("nope")), "absent");
+	assert_eq(0, s.IndexOf(Core::StringView("")), "the empty view is at 0");
+	assert_true(Core::StringView("apple") < Core::StringView("banana"), "byte order");
+	assert_true(Core::StringView("app") < Core::StringView("apple"), "a prefix comes first");
+	assert_true(!(Core::StringView("b") < Core::StringView("b")), "not less than itself");
+	assert_true(Core::StringView("same").Hash() == Core::StringView("xsame").Substring(1, 4).Hash(), "equal bytes hash alike");
+}
+

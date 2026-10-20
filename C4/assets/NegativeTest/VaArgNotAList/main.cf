@@ -1,0 +1,2 @@
+int32 Read(int32 count, ...) { int32 x = 0; return va_arg(x, int32); }
+int32 main() { return 0; }

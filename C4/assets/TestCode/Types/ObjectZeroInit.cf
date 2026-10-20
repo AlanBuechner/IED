@@ -1,0 +1,42 @@
+// Types - Object Field Zero-Initialization Regression tests (implementation)
+include "../Framework/Assert.ch"
+include "ObjectZeroInit.ch"
+
+ZS gObj;   // global object: LLVM zero-inits globals, locked here as a regression guard.
+
+void TestObjectZeroInitLocal() {
+    ZS s;              // bare declaration: every field must be initialized
+    AssertEqual(0, s.a);
+    AssertTrue(s.p == nullptr);
+}
+
+ZS MakeZS() {
+    ZS s;
+    s.a = 5;
+    return s;          // return by value: the copied object's pointer field must still be null
+}
+
+void TestObjectZeroInitReturn() {
+    ZS r = MakeZS();
+    AssertEqual(5, r.a);
+    AssertTrue(r.p == nullptr);
+}
+
+void TestObjectZeroInitCopyAndGlobal() {
+    ZS src;
+    src.a = 7;
+    ZS dst = src;      // local-to-local copy: pointer field must be null, not garbage
+    AssertEqual(7, dst.a);
+    AssertTrue(dst.p == nullptr);
+
+    gObj.a = 11;       // global object
+    AssertEqual(11, gObj.a);
+    AssertTrue(gObj.p == nullptr);
+}
+
+void TestObjectExplicitInitializerWins() {
+    ZS s;              // zeroed at declaration...
+    s.a = 3;           // ...then an explicit assignment must be preserved (the zero-init memset
+    AssertEqual(3, s.a);                       // must not clobber a later store)
+    AssertTrue(s.p == nullptr);                // and the other field stays initialized
+}

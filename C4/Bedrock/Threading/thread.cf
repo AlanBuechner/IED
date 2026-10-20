@@ -1,0 +1,29 @@
+include "thread.ch"
+
+namespace Threading
+{
+	// The body lives in a managed box the new thread holds; the runtime keeps it alive until the thread does.
+	class ThreadBody { public func<void()> run; }
+
+	Thread Thread::Run(func<void()> body) {
+		ThreadBody* box = new ThreadBody;
+		box->run = body;
+		Thread thread;
+		thread.handle = thread_start(RunBody, (void*)box);
+		return thread;
+	}
+
+	void Thread::RunBody(void* body) { ((ThreadBody*)body)->run(); }
+
+	void Thread::Join() {
+		if (!handle) return;
+		thread_join(handle);
+		handle = nullptr;
+	}
+
+	void Thread::Detach() {
+		if (!handle) return;
+		thread_detach(handle);
+		handle = nullptr;
+	}
+}

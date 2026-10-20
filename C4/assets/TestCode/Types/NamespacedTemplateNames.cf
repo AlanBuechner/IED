@@ -1,0 +1,48 @@
+// Types - names of the current namespace inside template arguments and template bodies (BUG-178)
+include "../Framework/Assert.ch"
+include "NamespacedTemplateNames.ch"
+
+namespace NtnLib {
+	template<T> struct Box { public T value; }
+	template<T, int32 C> struct Slots { public T[C] items; }
+	template<T> T Make() { T t; return t; }
+	template<T> int32 SizeOf() { return (int32)sizeof(T); }
+}
+
+namespace NtnUser {
+	struct Point { public int32 x; public int32 y; }
+	const int32 kSlots = 3;
+
+	NtnLib::Box<Point> Boxed(int32 x) { NtnLib::Box<Point> b; b.value.x = x; return b; }
+	int32 Unbox(NtnLib::Box<Point> b) { return b.value.x; }
+
+	// N's own templates see N's names in their bodies and defaults.
+	template<T> struct Tagged { public Point where; public T tag; }
+	template<T, U = Point> struct Pair { public T first; public U second; }
+
+	struct Holder { public NtnLib::Slots<int32, kSlots> slots; }
+
+	int32 Use() {
+		NtnLib::Box<Point> local = Boxed(4);
+		Tagged<int32> t;
+		t.where.y = 5;
+		Pair<int32> p;
+		p.second.x = 6;
+		Point made = NtnLib::Make<Point>();
+		return Unbox(local) + t.where.y + p.second.x + made.x + NtnLib::SizeOf<Point>() + (int32)sizeof(Holder);
+	}
+}
+
+namespace NtnOuter {
+	struct Point { public float f; }   // a different Point: each namespace's names stay its own
+	int32 SizeOfLocalPoint() { return (int32)sizeof(NtnLib::Box<Point>); }
+}
+
+void TestNamespacedTemplateNames() {
+	AssertEqual(4 + 5 + 6 + 0 + 8 + 12, NtnUser::Use());
+	AssertEqual(4, NtnOuter::SizeOfLocalPoint());
+	NtnLib::Box<NtnUser::Point> qualified;
+	qualified.value.x = 9;
+	AssertEqual(9, NtnUser::Unbox(qualified));
+	AssertEqual(8, (int32)sizeof(NtnUser::Tagged<bool>) - 4);
+}

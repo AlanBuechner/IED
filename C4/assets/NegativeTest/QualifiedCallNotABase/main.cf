@@ -1,0 +1,7 @@
+class Base { public virtual int32 F() { return 1; } }
+class Other { public int32 F() { return 2; } }
+class Derived : Base { }
+int32 main() {
+	Derived d;
+	return d.Other::F();
+}

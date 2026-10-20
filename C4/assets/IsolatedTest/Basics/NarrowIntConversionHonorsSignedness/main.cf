@@ -1,0 +1,13 @@
+struct S { int32 x; };
+int32 main() {
+    int8 neg = -5;
+    S s = { neg };                 // struct field init: expect -5
+    if (s.x != -5) return 1;
+    int16 w = 0; int16* pw = &w;
+    *pw = neg;                      // deref assignment: expect -5
+    if (w != -5) return 2;
+    S* p = new S{ neg };            // positional aggregate init: expect -5
+    if (p->x != -5) return 3;
+    delete p;
+    return 0;
+}

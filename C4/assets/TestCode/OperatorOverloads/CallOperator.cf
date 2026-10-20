@@ -1,0 +1,28 @@
+include "../Framework/Assert.ch"
+include "CallOperator.ch"
+
+struct Adder {
+	public int32 base;
+	[operator("call")] public int32 Add(int32 x) const { return this.base + x; }
+	[operator("()")] public int32 AddTwo(int32 x, int32 y) const { return this.base + x + y; }
+}
+
+struct TickCounter {
+	public int32 count;
+	[operator("call")] public void Tick() { this.count = this.count + 1; }
+}
+
+Adder MakeAdder(int32 b) { Adder a; a.base = b; return a; }
+
+void TestCallOperator() {
+	Adder add; add.base = 10;
+	AssertIntEquals(15, add(5), "x(args) calls the call operator");
+	AssertIntEquals(13, add(1, 2), "the call operator overloads by arity, either spelling");
+	AssertIntEquals(21, MakeAdder(20)(1), "a call result is callable");
+	TickCounter c;
+	c();
+	c();
+	AssertIntEquals(2, c.count, "a call operator with no arguments that changes its object");
+	Adder* p = &add;
+	AssertIntEquals(11, (*p)(1), "a dereferenced pointer is callable");
+}

@@ -1,0 +1,5 @@
+class Buffer {
+	public int32* data;
+	[operator("move")] public void MoveFrom(Buffer& other) { data = other.data; other.data = null; }
+}
+int32 main() { Buffer b; return 0; }

@@ -1,0 +1,2 @@
+template<int32 N, T> struct Arr { public T[N] items; }
+int32 main() { Arr<int32, 3> a; return 0; }

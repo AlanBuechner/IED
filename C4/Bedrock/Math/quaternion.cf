@@ -1,0 +1,127 @@
+include "quaternion.ch"
+
+namespace Math
+{
+	// The Hamilton product: this rotation applied after o.
+	Quat Quat::Mul(Quat o) const {
+		return Quat(
+			w * o.x + x * o.w + y * o.z - z * o.y,
+			w * o.y + y * o.w + z * o.x - x * o.z,
+			w * o.z + z * o.w + x * o.y - y * o.x,
+			w * o.w - x * o.x - y * o.y - z * o.z);
+	}
+
+	// v + 2w (u x v) + 2 u x (u x v), with u the vector part (GLM's form).
+	FVector3 Quat::Rotate(FVector3 v) const {
+		FVector3 u = Vector();
+		FVector3 uv = Cross(u, v);
+		FVector3 uuv = Cross(u, uv);
+		return v + (uv * w + uuv) * 2.0f;
+	}
+
+	Quat Quat::Inverse() const {
+		float lengthSquared = Dot(*this, *this);
+		return lengthSquared > 0.0f ? Conjugate().Scale(1.0f / lengthSquared) : Quat::Identity;
+	}
+
+	Quat Quat::Normalized() const {
+		float length = Length(*this);
+		return length > 0.0f ? Scale(1.0f / length) : Quat::Identity;
+	}
+
+	float Dot(Quat a, Quat b) { return simd_reduce_add(a.data * b.data); }
+
+	float Length(Quat q) { return Sqrt(Dot(q, q)); }
+
+	Quat AngleAxis(float angle, FVector3 axis) {
+		float half = angle * 0.5f;
+		return Quat(Normalized(axis) * Sin(half), Cos(half));
+	}
+
+	float Angle(Quat q) {
+		float cosine = Clamp(q.w, -1.0f, 1.0f);
+		return Acos(cosine) * 2.0f;
+	}
+
+	FVector3 Axis(Quat q) {
+		float sineSquared = 1.0f - q.w * q.w;
+		if (sineSquared <= 0.0f) return FVector3::UnitX;
+		return q.Vector() / Sqrt(sineSquared);
+	}
+
+	Quat FromEuler(FVector3 radians) {
+		FVector3 c = FVector3(Cos(radians.x * 0.5f), Cos(radians.y * 0.5f), Cos(radians.z * 0.5f));
+		FVector3 s = FVector3(Sin(radians.x * 0.5f), Sin(radians.y * 0.5f), Sin(radians.z * 0.5f));
+		return Quat(
+			s.x * c.y * c.z + c.x * s.y * s.z,
+			c.x * s.y * c.z - s.x * c.y * s.z,
+			c.x * c.y * s.z - s.x * s.y * c.z,
+			c.x * c.y * c.z + s.x * s.y * s.z);
+	}
+
+	// Yaw * pitch * roll has column 2 = (sin yaw cos pitch, -sin pitch, cos yaw cos pitch), so cos(pitch) is read
+	// from the matrix: recomputed from an asin near +-1 it stays above the lock threshold while the cosine terms
+	// beside it are already zero.
+	FVector3 ToEuler(const Mat3& rotation) {
+		FVector3 c0 = rotation.columns[0];
+		FVector3 c1 = rotation.columns[1];
+		FVector3 c2 = rotation.columns[2];
+		float cosPitch = Sqrt(c2.x * c2.x + c2.z * c2.z);
+		float pitch = Atan2(-c2.y, cosPitch);
+		if (cosPitch > kEpsilon) return FVector3(pitch, Atan2(c2.x, c2.z), Atan2(c0.y, c1.y));
+		return FVector3(pitch, Atan2(-c0.z, c0.x), 0.0f);
+	}
+
+	FVector3 ToEuler(Quat q) { return ToEuler(ToMat3(q)); }
+
+	Quat Lerp(Quat a, Quat b, float t) { return Quat(a.data + (b.data - a.data) * t); }
+
+	Quat Slerp(Quat a, Quat b, float t) {
+		Quat target = b;
+		float cosine = Dot(a, b);
+		if (cosine < 0.0f) { target = -b; cosine = -cosine; }   // the shorter arc
+		if (cosine > 1.0f - kFloatEpsilon) return Lerp(a, target, t);
+		float angle = Acos(cosine);
+		return (a * Sin((1.0f - t) * angle) + target * Sin(t * angle)) * (1.0f / Sin(angle));
+	}
+
+	Mat3 ToMat3(Quat q) {
+		float xx = q.x * q.x, yy = q.y * q.y, zz = q.z * q.z;
+		float xz = q.x * q.z, xy = q.x * q.y, yz = q.y * q.z;
+		float wx = q.w * q.x, wy = q.w * q.y, wz = q.w * q.z;
+		return Mat3(
+			FVector3(1.0f - 2.0f * (yy + zz), 2.0f * (xy + wz), 2.0f * (xz - wy)),
+			FVector3(2.0f * (xy - wz), 1.0f - 2.0f * (xx + zz), 2.0f * (yz + wx)),
+			FVector3(2.0f * (xz + wy), 2.0f * (yz - wx), 1.0f - 2.0f * (xx + yy)));
+	}
+
+	Mat4 ToMat4(Quat q) { return Mat4(ToMat3(q)); }
+
+	// The largest of w, x, y, z picks the formula, so the square root is never of a small number (GLM's quat_cast).
+	Quat FromMat3(const Mat3& m) {
+		float fourXSquaredMinus1 = m.columns[0].x - m.columns[1].y - m.columns[2].z;
+		float fourYSquaredMinus1 = m.columns[1].y - m.columns[0].x - m.columns[2].z;
+		float fourZSquaredMinus1 = m.columns[2].z - m.columns[0].x - m.columns[1].y;
+		float fourWSquaredMinus1 = m.columns[0].x + m.columns[1].y + m.columns[2].z;
+		int32 biggest = 0;
+		float biggestValue = fourWSquaredMinus1;
+		if (fourXSquaredMinus1 > biggestValue) { biggestValue = fourXSquaredMinus1; biggest = 1; }
+		if (fourYSquaredMinus1 > biggestValue) { biggestValue = fourYSquaredMinus1; biggest = 2; }
+		if (fourZSquaredMinus1 > biggestValue) { biggestValue = fourZSquaredMinus1; biggest = 3; }
+		float big = Sqrt(biggestValue + 1.0f) * 0.5f;
+		float mult = 0.25f / big;
+		FVector3 c0 = m.columns[0];
+		FVector3 c1 = m.columns[1];
+		FVector3 c2 = m.columns[2];
+		switch (biggest) {
+			case 0: return Quat((c1.z - c2.y) * mult, (c2.x - c0.z) * mult, (c0.y - c1.x) * mult, big);
+			case 1: return Quat(big, (c0.y + c1.x) * mult, (c2.x + c0.z) * mult, (c1.z - c2.y) * mult);
+			case 2: return Quat((c0.y + c1.x) * mult, big, (c1.z + c2.y) * mult, (c2.x - c0.z) * mult);
+		}
+		return Quat((c2.x + c0.z) * mult, (c1.z + c2.y) * mult, big, (c0.y - c1.x) * mult);
+	}
+
+	Quat FromMat4(const Mat4& m) { return FromMat3(m.ToMat3()); }
+
+	bool NearlyEqual(Quat a, Quat b, float epsilon) { return NearlyEqual(FVector4(a.data), FVector4(b.data), epsilon); }
+}

@@ -1,0 +1,2 @@
+void F() {}
+int32 main() { if (F()) return 1; return 0; }

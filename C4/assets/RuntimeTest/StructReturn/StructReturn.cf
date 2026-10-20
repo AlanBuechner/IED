@@ -1,0 +1,20 @@
+// Struct return test
+struct Vec2 {
+    float x;
+    float y;
+};
+
+Vec2 CreateVec2(float a, float b) {
+    Vec2 v;
+    v.x = a;
+    v.y = b;
+    return v;
+}
+
+int32 main() {
+    Vec2 v = CreateVec2(1.0f, 2.0f);
+    if (v.x == 1.0f && v.y == 2.0f) {
+        return 0;
+    }
+    return 1;
+}

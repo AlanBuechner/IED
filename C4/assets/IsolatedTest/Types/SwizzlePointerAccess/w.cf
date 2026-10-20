@@ -1,0 +1,10 @@
+class Vec3 { public union { packed float x, y, z; }; }
+int32 main() {
+    Vec3 pv = { 1.0f, 2.0f, 3.0f };
+    Vec3* pp = &pv;
+    if (pp->z != 3.0f) { printf("FAIL ptr read (%.1f)\n", pp->z); return 1; }
+    pp->xy = { 10.0f, 20.0f };
+    if (pv.x != 10.0f || pv.y != 20.0f || pv.z != 3.0f) { printf("FAIL ptr write (%.1f,%.1f,%.1f)\n", pv.x,pv.y,pv.z); return 1; }
+    printf("ARROW SWIZZLE OK\n");
+    return 0;
+}

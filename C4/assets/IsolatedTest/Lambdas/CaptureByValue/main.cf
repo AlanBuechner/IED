@@ -1,0 +1,43 @@
+// D-22: a by-value capture copies the variable when the lambda is created; later changes to the variable
+// do not reach the copy, and the copy outlives the variable's scope.
+struct Counter {
+	public int32 value;
+	[operator("copy")] void Copy(const Counter& other) { value = other.value; g_copies++; }
+	[operator("delete")] void Destroy() { g_destroyed++; }
+}
+
+int32 g_copies = 0;
+int32 g_destroyed = 0;
+
+func<int32()> MakeReader() {
+	int32 local = 41;
+	func<int32()> read = [local]() -> int32 { return local + 1; };
+	local = 1000;              // the lambda holds its own copy
+	return read;               // and outlives `local`
+}
+
+int32 main() {
+	int32 base = 10;
+	func<int32(int32)> add = [base](int32 x) -> int32 { return x + base; };
+	base = 99;
+	if (add(5) != 15) return 1;
+
+	if (MakeReader()() != 42) return 2;
+
+	float scale = 2.5f;
+	int32 offset = 3;
+	func<float(float)> affine = [scale, offset](float x) -> float { return x * scale + (float)offset; };
+	if (affine(2.0f) != 8.0f) return 3;
+
+	{
+		Counter c;
+		c.value = 7;
+		int32 copiesBefore = g_copies;
+		func<int32()> peek = [c]() -> int32 { return c.value; };
+		if (g_copies != copiesBefore + 1) return 4;   // copied once into the closure
+		c.value = 8;
+		if (peek() != 7) return 5;
+	}
+	printf("CAPTURE BY VALUE OK\n");
+	return 0;
+}

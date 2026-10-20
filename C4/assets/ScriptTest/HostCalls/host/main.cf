@@ -1,0 +1,44 @@
+// A script calls host functions and methods, small ones inlined (section 4.4), and reads and writes the host's
+// globals and static members: the same storage the host uses.
+include "scripttest.ch"
+include "game.ch"
+
+namespace Game
+{
+	int32 Add(int32 a, int32 b) { return a + b; }
+	int32 Scale(int32 v) { return v * 10; }
+	void Counter::Bump(int32 by) { count += by; }
+}
+
+void CheckCalls(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	funcptr<int32(int32)> run = (funcptr<int32(int32)>)script->Address("Run");
+	checks.That(run != nullptr, "the script has Run");
+	if (run == nullptr) return;
+	checks.Equal(52, run(4), "Run(4) through host functions and methods");
+	checks.Equal(7, Game::g_score, "the script wrote the host's global");
+	checks.Equal(2, Game::Counter::s_made, "the script's counters count in the host's static member");
+	Game::g_score = 100;
+	funcptr<int32()> read = (funcptr<int32()>)script->Address("ReadScore");
+	checks.Equal(100, read(), "the script reads what the host wrote");
+	Game::Counter mine;
+	checks.Equal(3, Game::Counter::Made(), "the host's counter counts on");
+
+	Reflection::Function scale = script->FindFunction("ScaleBy");
+	checks.That(scale.IsValid(), "reflection finds the script's ScaleBy");
+	int32 result = 0;
+	int32 by = 6;
+	checks.That(script->Invoke(scale, (void*)&result, by), "Invoke calls it");
+	checks.Equal(60, result, "ScaleBy(6) called through reflection");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("HostCalls");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "calls", "calls.cf"));
+	if (script->Ok()) CheckCalls(script, checks);
+	script->Unload();
+	return checks.End("HostCalls");
+}

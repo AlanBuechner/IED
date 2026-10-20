@@ -1,0 +1,115 @@
+// Auto-generated C4 bindings - do not edit.
+struct __vcrt_va_list_is_reference {
+};
+struct Vec2 {
+	int32 x;
+	int32 y;
+};
+struct Counter {
+	int32 value;
+};
+
+[operator("create")]
+[link("cbind_Counter_Construct_0")]
+void Construct_0() extends Counter;
+
+[operator("create")]
+[link("cbind_Counter_Construct_1")]
+void Construct_1(int32 initial) extends Counter;
+
+[operator("delete")]
+[link("cbind_Counter_Finalize")]
+void Finalize() extends Counter;
+[link("cbind_Counter_Add")]
+void Add(int32 amount) extends Counter;
+[link("cbind_Counter_Get")]
+int32 Get() extends Counter; // const
+
+[link("cbind_Counter_st_IncrementGlobal")]
+void Counter_IncrementGlobal();
+
+[link("cbind_Counter_st_Scale")]
+int32 Counter_Scale(int32 v, int32 factor);
+struct Bank {
+	int32 balance;
+};
+
+[operator("create")]
+[link("cbind_Bank_Construct")]
+void Construct() extends Bank;
+
+[operator("delete")]
+[link("cbind_Bank_Finalize")]
+void Finalize() extends Bank;
+[link("cbind_Bank_Deposit_1")]
+int32 Deposit_1(int32 amount) extends Bank;
+[link("cbind_Bank_Deposit_2")]
+int32 Deposit_2(int32 amount, int32 fee) extends Bank;
+[link("cbind_Bank_Balance")]
+int32 Balance() extends Bank; // const
+struct Shape {
+	void* __vtable; // C++ vptr placeholder - keeps field offsets aligned with the C++ class
+	int32 id;
+};
+
+[operator("create")]
+[link("cbind_Shape_Construct")]
+void Construct() extends Shape;
+
+[operator("delete")]
+[link("cbind_Shape_Finalize")]
+void Finalize() extends Shape;
+[link("cbind_Shape_Area")]
+int32 Area() extends Shape; // const
+[link("cbind_Shape_Id")]
+int32 Id() extends Shape; // const
+struct Circle : public Shape {
+	int32 radius;
+};
+
+[operator("create")]
+[link("cbind_Circle_Construct")]
+void Construct(int32 radius) extends Circle;
+
+[operator("delete")]
+[link("cbind_Circle_Finalize")]
+void Finalize() extends Circle;
+[link("cbind_Circle_Area")]
+int32 Area() extends Circle; // const
+alias size_t = uint64;
+alias __builtin_ms_va_list = char*;
+alias __builtin_va_list = char*;
+alias uintptr_t = uint64;
+alias va_list = char*;
+alias ptrdiff_t = int64;
+alias intptr_t = int64;
+alias __vcrt_bool = uint8;
+alias int8_t = char;
+alias int16_t = int16;
+alias int32_t = int32;
+alias int64_t = int64;
+alias uint8_t = char;
+alias uint16_t = uint16;
+alias uint32_t = int32;
+alias uint64_t = uint64;
+alias int_least8_t = char;
+alias int_least16_t = int16;
+alias int_least32_t = int32;
+alias int_least64_t = int64;
+alias uint_least8_t = char;
+alias uint_least16_t = uint16;
+alias uint_least32_t = int32;
+alias uint_least64_t = uint64;
+alias int_fast8_t = char;
+alias int_fast16_t = int32;
+alias int_fast32_t = int32;
+alias int_fast64_t = int64;
+alias uint_fast8_t = char;
+alias uint_fast16_t = int32;
+alias uint_fast32_t = int32;
+alias uint_fast64_t = uint64;
+alias intmax_t = int64;
+alias uintmax_t = uint64;
+
+[link("cbind_fn_AddVec")]
+Vec2 AddVec(Vec2 a, Vec2 b);

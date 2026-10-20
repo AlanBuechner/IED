@@ -1,0 +1,150 @@
+include "path.ch"
+
+namespace FS
+{
+	bool IsSeparator(int32 byte) { return byte == '/' || byte == '\\'; }
+
+	bool IsDriveLetter(int32 byte) { return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z'); }
+
+	// The index of the separator that ends the component starting at `start`, or the end of `path`.
+	int64 ComponentEnd(Core::StringView path, int64 start) {
+		int64 i = start;
+		while (i < path.ByteLength() && !IsSeparator(path.ByteAt(i))) ++i;
+		return i;
+	}
+
+	// "\\server\share\": both names and the separator after the share.
+	int64 UncRootLength(Core::StringView path) {
+		int64 share = ComponentEnd(path, 2);
+		int64 end = share < path.ByteLength() ? ComponentEnd(path, share + 1) : share;
+		return end < path.ByteLength() ? end + 1 : end;
+	}
+
+	int64 RootLength(Core::StringView path) {
+		int64 n = path.ByteLength();
+		if (n >= 2 && IsDriveLetter(path.ByteAt(0)) && path.ByteAt(1) == ':') return n >= 3 && IsSeparator(path.ByteAt(2)) ? 3 : 2;
+		if (n >= 2 && IsSeparator(path.ByteAt(0)) && IsSeparator(path.ByteAt(1))) return UncRootLength(path);
+		return n >= 1 && IsSeparator(path.ByteAt(0)) ? 1 : 0;
+	}
+
+	// Where the last component starts: after the last separator past the root.
+	int64 FileNameStart(Core::StringView path) {
+		int64 root = RootLength(path);
+		int64 i = path.ByteLength();
+		while (i > root && !IsSeparator(path.ByteAt(i - 1))) --i;
+		return i;
+	}
+
+	// Where the extension starts in a file name, or the name's length when it has none ("." and ".." have none).
+	int64 ExtensionStart(Core::StringView name) {
+		if (name == Core::StringView("..")) return name.ByteLength();
+		for (int64 i = name.ByteLength() - 1; i > 0; --i)
+			if (name.ByteAt(i) == '.') return i;
+		return name.ByteLength();
+	}
+
+	// The root with '/' for its separators.
+	Core::String NormalRoot(Core::StringView root) {
+		Core::String normal;
+		for (int64 i = 0; i < root.ByteLength(); ++i)
+			normal.Append(IsSeparator(root.ByteAt(i)) ? Core::StringView("/") : root.Substring(i, 1));
+		return normal;
+	}
+
+	void AddNormalComponent(Core::Array<Core::StringView>& parts, Core::StringView part, bool rooted) {
+		if (part.IsEmpty() || part == Core::StringView(".")) return;
+		if (part == Core::StringView("..")) {
+			if (!parts.IsEmpty() && !(parts.Back() == Core::StringView(".."))) { parts.Pop(); return; }
+			if (rooted) return;   // nothing is above a root
+		}
+		parts.Push(part);
+	}
+
+	// The components after the root, without empty and "." ones, each ".." folding away the one before it.
+	Core::Array<Core::StringView> NormalComponents(Core::StringView rest, bool rooted) {
+		Core::Array<Core::StringView> parts;
+		for (int64 start = 0; start <= rest.ByteLength(); ) {
+			int64 end = ComponentEnd(rest, start);
+			AddNormalComponent(parts, rest.Substring(start, end - start), rooted);
+			start = end + 1;
+		}
+		return parts;
+	}
+
+	bool Path::IsAbsolute() const {
+		Core::StringView view = text.View();
+		int64 root = RootLength(view);
+		return root > 0 && (IsSeparator(view.ByteAt(0)) || IsSeparator(view.ByteAt(root - 1)));
+	}
+
+	Core::StringView Path::FileName() const {
+		Core::StringView view = text.View();
+		int64 start = FileNameStart(view);
+		return view.Substring(start, view.ByteLength() - start);
+	}
+
+	Core::StringView Path::Stem() const {
+		Core::StringView name = FileName();
+		return name.Substring(0, ExtensionStart(name));
+	}
+
+	Core::StringView Path::Extension() const {
+		Core::StringView name = FileName();
+		int64 start = ExtensionStart(name);
+		return name.Substring(start, name.ByteLength() - start);
+	}
+
+	Path Path::Parent() const {
+		Core::StringView view = text.View();
+		int64 root = RootLength(view);
+		int64 end = FileNameStart(view);
+		while (end > root && IsSeparator(view.ByteAt(end - 1))) --end;
+		return Path(view.Substring(0, end));
+	}
+
+	Path Path::Join(Core::StringView part) const {
+		if (part.IsEmpty()) return *this;
+		if (text.IsEmpty() || RootLength(part) > 0) return Path(part);
+		Path joined = *this;
+		if (!IsSeparator(text.View().ByteAt(text.ByteLength() - 1))) joined.text.Append("/");
+		joined.text.Append(part);
+		return joined;
+	}
+
+	Path Path::WithExtension(Core::StringView extension) const {
+		Core::StringView view = text.View();
+		Path changed = Path(view.Substring(0, view.ByteLength() - Extension().ByteLength()));
+		if (!extension.IsEmpty() && extension.ByteAt(0) != '.') changed.text.Append(".");
+		changed.text.Append(extension);
+		return changed;
+	}
+
+	Path Path::Normalized() const {
+		Core::StringView view = text.View();
+		int64 root = RootLength(view);
+		Core::Array<Core::StringView> parts = NormalComponents(view.Substring(root, view.ByteLength() - root), root > 0);
+		Path normal;
+		normal.text = NormalRoot(view.Substring(0, root));
+		for (int64 i = 0; i < parts.Count(); ++i) {
+			if (i > 0) normal.text.Append("/");
+			normal.text.Append(parts[i]);
+		}
+		if (normal.text.IsEmpty()) normal.text.Append(".");
+		return normal;
+	}
+
+	// A path the runtime writes: `read` gives its length when asked with no room, and fills a buffer of that size.
+	Path RuntimePath(funcptr<int64(void*, int64)> read) {
+		int64 length = read(nullptr, 0);
+		if (length < 0) return Path();
+		char* buffer = (char*)raw_alloc((uint64)(length + 1));
+		Path path;
+		if (read((void*)buffer, length + 1) == length) path = Path(Core::StringView(buffer, length));
+		raw_free((void*)buffer);
+		return path;
+	}
+
+	Path CurrentDirectory() { return RuntimePath(fs_current_directory); }
+
+	Path TempDirectory() { return RuntimePath(fs_temp_directory); }
+}

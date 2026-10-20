@@ -1,0 +1,7 @@
+struct Point { public int32 x; public int32 y; }
+int32 main() {
+	Point p;
+	Point* q = &p;
+	q.y = 2;
+	return 0;
+}

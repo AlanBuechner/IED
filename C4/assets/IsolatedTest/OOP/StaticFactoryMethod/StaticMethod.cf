@@ -1,0 +1,12 @@
+class Pt {
+    float x;
+    float y;
+    [operator("create")] public void Init(float x, float y) { this.x = x; this.y = y; }
+    public static Pt* Create(float x, float y) { return new Pt(x, y); }
+    public float X() { return this.x; }
+}
+int32 main() {
+    Pt* p = Pt::Create(3.0f, 4.0f);
+    printf("Pt.Create=(%.1f)\n", p->X()); fflush(0);
+    return 0;
+}

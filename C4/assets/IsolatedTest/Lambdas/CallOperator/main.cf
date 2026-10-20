@@ -1,0 +1,22 @@
+// D-23: `[operator("call")]` (token "()") makes `x(args)` on an object call the method. It overloads like
+// any method and works on references and through `operator_call`.
+struct Multiplier {
+	public int32 factor;
+	[operator("call")] int32 Apply(int32 x) { return x * factor; }
+	[operator("()")] float Apply(float x) { return x * (float)factor; }
+	[operator("call")] int32 Apply(int32 x, int32 y) { return (x + y) * factor; }
+}
+
+int32 Use(Multiplier& m) { return m(4); }
+
+int32 main() {
+	Multiplier m;
+	m.factor = 3;
+	if (m(5) != 15) return 1;
+	if (m(2.0f) != 6.0f) return 2;
+	if (m(1, 2) != 9) return 3;
+	if (Use(m) != 12) return 4;
+	if (m.operator_call(7) != 21) return 5;
+	printf("CALL OPERATOR OK\n");
+	return 0;
+}

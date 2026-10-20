@@ -1,0 +1,29 @@
+uint32 TestHashBytes(const char* p, int32 n) {
+    uint32 h = 2166136261u;
+    for (int32 i = 0; i < n; i++) { h = h * 16777619u; h = h ^ (uint32)byte_at(p, i); }
+    return h;
+}
+bool TestBytesEqual(const char* a, const char* b, int32 n) {
+    for (int32 i = 0; i < n; i++) if (byte_at(a, i) != byte_at(b, i)) return false;
+    return true;
+}
+struct Key { int32 a; int32 b; }
+
+template<K> class Box {
+    public uint32 H(K v) { return TestHashBytes((const char*)&v, sizeof(K)); }
+    public bool Eq(K x, K y) { return TestBytesEqual((const char*)&x, (const char*)&y, sizeof(K)); }
+}
+
+int32 main() {
+    Box<Key>* b = new Box<Key>();
+    Key k; k.a = 5; k.b = 7;
+    Key k2; k2.a = 5; k2.b = 7;
+    Key k3; k3.a = 5; k3.b = 8;
+    uint32 h1 = b->H(k);
+    uint32 h2 = b->H(k2);
+    if (h1 != h2) return 1;          // equal keys hash equal
+    if (!b->Eq(k, k2)) return 2;     // equal keys compare equal
+    if (b->Eq(k, k3)) return 3;      // different keys differ
+    printf("BYTE HASH OK h=%d\n", h1);
+    return 0;
+}

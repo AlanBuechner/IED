@@ -1,0 +1,29 @@
+// The [operator("[]")] bracket-name operator: read AND write-through.
+// Regression lock - this was documented as "crashes semantic analysis" (PtrRefSuite header); it now
+// works, and a missing setter is a clear diagnostic (not a crash).
+
+struct ReadOnly {
+    int32[4] d;
+    [operator("[]")] public int32 Get(int32 i) { return this->d[i]; }
+};
+
+struct ReadWrite {
+    int32[4] d;
+    [operator("index")] public int32 Get(int32 i) { return this->d[i]; }
+    [operator("index_assign")] public void Set(int32 i, int32 v) { this->d[i] = v; }
+};
+
+int32 main()
+{
+    ReadOnly a;
+    a.d[0]=5; a.d[1]=6; a.d[2]=7; a.d[3]=8;
+    if (a[1] != 6) return 1;          // read through [operator("[]")]
+    if (a[3] != 8) return 2;
+
+    ReadWrite r;
+    r[0] = 10; r[1] = 20;             // write through index_assign
+    if (r.d[0] != 10 || r.d[1] != 20) return 3;
+    int32 v = r[1];
+    if (v != 20) return 4;            // read back through the indexer
+    return 0;
+}

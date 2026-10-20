@@ -1,0 +1,10 @@
+// B22: warnings are reported and the build still succeeds; the program runs.
+int64 Wide() { return 70000; }
+[operater("+")] int32 g_tagged = 1;
+
+int32 main() {
+	int16 narrow = Wide();
+	int32 fits = 3;
+	int8 small = 100;
+	return narrow == 4464 && fits == 3 && small == 100 ? 0 : 1;
+}

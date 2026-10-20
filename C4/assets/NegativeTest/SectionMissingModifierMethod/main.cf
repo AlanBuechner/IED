@@ -1,0 +1,5 @@
+class Panel {
+private:
+	void Layout() {}
+}
+int32 main() { return 0; }

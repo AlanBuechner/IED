@@ -1,0 +1,12 @@
+include "native.ch"
+
+int32 Run()
+{
+	Point p;
+	p.x = 6;
+	p.y = 2.5f;
+	int32 sum = add(3, 4);
+	sum += do_thing(p, GREEN);
+	sum += (int32)scale_point(&p, 3.0f);
+	return sum;
+}

@@ -1,0 +1,2 @@
+struct Box { public int32 v; }
+int32 main() { Box b; int32 x = 2 ** b; return 0; }

@@ -1,0 +1,5 @@
+class Lanes {
+	public union { packed float x, y; packed float[2] data; };
+	[operator("delete")] public void Delete() { }
+}
+int32 main() { Lanes v; return 0; }

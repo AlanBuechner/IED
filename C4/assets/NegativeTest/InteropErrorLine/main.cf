@@ -1,0 +1,7 @@
+extern "c++" include "box.h"
+int32 Use() { return Twice(2); }
+int32 main() {
+	int32 ok = Use();
+	float* bad = ok;
+	return 0;
+}

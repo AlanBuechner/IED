@@ -1,0 +1,2 @@
+template<...Ts> void Set(Ts... a) { (a = ...); }
+int32 main() { Set(1, 2); return 0; }

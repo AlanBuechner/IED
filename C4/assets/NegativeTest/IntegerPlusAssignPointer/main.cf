@@ -1,0 +1,6 @@
+int32 main() {
+	int32[4] values;
+	int64 n = 0;
+	n += &values[0];
+	return 0;
+}

@@ -1,0 +1,44 @@
+// BUG-115: a template instance's static data members are its own objects: `Counter<int32>::hits` and
+// `Counter<int64>::hits` are distinct, a constant one folds in the instance's bindings, and one that starts at
+// run time (an initializer that is not constant, or a construction) starts before main - also when the instance
+// is first made while the program's code or its global initialization is compiled.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 g_calls = 0;
+int32 Compute() { g_calls = g_calls + 1; return 40 + g_calls; }
+
+template<T> struct Counter {
+	static int32 hits;
+	static int32 start = Compute();
+	static const int64 Size = sizeof(T) * 2;
+	public static void Hit() { hits = hits + 1; }
+}
+
+struct Pool {
+	public int32 ready;
+	[operator("create")] public void Init() { ready = 7; }
+}
+template<T> struct Registry { static Pool pool; }
+
+template<T> int32 Touch() { return Counter<T>::start; }
+int32 g_touched = Touch<int16>();
+
+int32 main() {
+	Check(Counter<int32>::Size == 8, "a constant static folds in the instance's bindings");
+	Check(Counter<int64>::Size == 16, "each instance folds its own");
+	Check(Counter<int32>::start > 40, "a static with a run-time initializer starts before main");
+	Check(Counter<int16>::start > 40, "an instance first made by a global's initializer starts its statics too");
+	Counter<int32>::Hit();
+	Counter<int32>::Hit();
+	Counter<int64>::Hit();
+	Check(Counter<int32>::hits == 2, "a static member of one instance");
+	Check(Counter<int64>::hits == 1, "is not the static member of another");
+	Counter<int32>::hits = 10;
+	Check(Counter<int32>::hits == 10, "a static member is assignable through its type");
+	Check(Registry<float>::pool.ready == 7, "a static member that needs construction is constructed");
+	return g_failures;
+}

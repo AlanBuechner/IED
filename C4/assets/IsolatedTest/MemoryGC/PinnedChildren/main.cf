@@ -1,0 +1,51 @@
+// BUG-093: a pinned object is a root: what it refers to stays alive with it.
+include "Memory/gc.ch"
+
+struct Child {
+	public int64 value;
+	[operator("delete")] void Finalize() { g_childFinalized++; }
+}
+
+struct Parent { public Child* first; public Child* second; }
+
+struct Garbage { public int64[8] words; }
+
+int32 g_childFinalized = 0;
+uint64 g_parent = 0;    // an integer: the pin is the only reference
+
+void PinParent() {
+	Parent* p = new Parent;
+	p->first = new Child;
+	p->first->value = 11;
+	p->second = new Child;
+	p->second->value = 22;
+	GC::Pin((void*)p);
+	g_parent = (uint64)p;
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+int64 Values() {
+	Parent* p = (Parent*)g_parent;
+	return p->first->value + p->second->value;
+}
+
+int32 main() {
+	PinParent();
+	for (int32 round = 0; round < 4; round++) {
+		for (int32 k = 0; k < 2000; k++) { Garbage* g = new Garbage; g->words[0] = k; }
+		Scrub(8);
+		GC::Collect();
+	}
+	if (g_childFinalized != 0) return 1;
+	if (Values() != 33) return 2;
+	GC::Unpin((void*)g_parent);
+	printf("PINNED CHILDREN OK\n");
+	return 0;
+}

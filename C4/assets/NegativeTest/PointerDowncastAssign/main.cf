@@ -1,0 +1,13 @@
+// A BASE-to-DERIVED pointer (downcast) must NOT be allowed on assignment - it is unsafe (the base
+// object may not actually be a derived one). The upcast fix (derived->base) must not over-permit the
+// reverse direction. Locked so `Base* b; Mid* m = b;` stays a clear error.
+struct Base { virtual int32 Get() { return 1; } };
+struct Mid : Base { virtual int32 Get() override { return 2; } };
+
+int32 main()
+{
+    Base* b = new Base();
+    Mid* m;
+    m = b;                        // ERROR: downcast is not an implicit conversion
+    return 0;
+}

@@ -1,0 +1,7 @@
+include "bedrock.ch"
+class Counter { public int32 Add(int32 a) { return a; } }
+int32 main() {
+	Core::String s = Core::String("x");
+	Counter c;
+	return c.Add(s);
+}

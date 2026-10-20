@@ -1,0 +1,10 @@
+// Types - Pointer Declaration Tests (implementation)
+include "../Framework/Assert.ch"
+include "PointerDeclaration.ch"
+
+void TestPointerDeclaration() {
+	int32 val = 42;
+	int32* ptr = &val;
+	
+	AssertEqual(42, *ptr);
+}

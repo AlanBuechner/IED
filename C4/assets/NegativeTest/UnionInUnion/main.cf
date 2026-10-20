@@ -1,0 +1,5 @@
+union Outer {
+	public int32 whole;
+	union Inner { public int16 half; }
+}
+int32 main() { return 0; }

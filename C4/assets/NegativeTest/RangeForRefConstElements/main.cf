@@ -1,0 +1,2 @@
+int32 Sum(const int32[3]& a) { int32 s = 0; for (int32& v : a) s += v; return s; }
+int32 main() { int32[3] a; return Sum(a); }

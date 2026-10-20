@@ -1,0 +1,5 @@
+struct S {
+	public int32 v;
+	public int32& Ref() const { return v; }
+}
+int32 main() { S s; return s.Ref(); }

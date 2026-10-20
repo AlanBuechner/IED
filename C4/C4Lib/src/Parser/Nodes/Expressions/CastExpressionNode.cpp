@@ -1,0 +1,38 @@
+#include "CastExpressionNode.h"
+#include "../Declarations/QualTypeNode.h"
+#include "Core/StringFormat.h"
+
+namespace Scripting
+{
+	std::span<const Ref<AstNode>> CastExpressionNode::Children() const
+	{
+		m_Children.Clear();
+		if (m_Operand) m_Children.Push(m_Operand);
+		if (m_TargetType) m_Children.Push(m_TargetType);
+		return m_Children;
+	}
+
+	Core::String CastExpressionNode::ToString() const
+	{
+		Core::String kindName;
+		switch (m_Kind)
+		{
+			case CastKind::StaticCast:      kindName = "static_cast"; break;
+			case CastKind::DynamicCast:     kindName = "dynamic_cast"; break;
+			case CastKind::ReinterpretCast: kindName = "reinterpret_cast"; break;
+			case CastKind::ConstCast:       kindName = "const_cast"; break;
+			case CastKind::CStyle:          kindName = ""; break;
+		}
+
+		if (m_Kind == CastKind::CStyle)
+			return Core::StringFormat::Format("({0}){1}",
+				m_TargetType ? m_TargetType->ToString() : "",
+				m_Operand ? m_Operand->ToString() : "");
+
+		return Core::StringFormat::Format("{0}<{1}>({2})",
+			kindName,
+			m_TargetType ? m_TargetType->ToString() : "",
+			m_Operand ? m_Operand->ToString() : "");
+	}
+
+}

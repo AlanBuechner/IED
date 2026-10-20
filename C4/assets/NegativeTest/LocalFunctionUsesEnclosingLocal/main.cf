@@ -1,0 +1,5 @@
+int32 main() {
+	int32 b = 7;
+	int32 Inner() { return b; }
+	return Inner();
+}

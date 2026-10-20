@@ -1,0 +1,2 @@
+float g = 1f;
+int32 main() { return 0; }

@@ -1,0 +1,70 @@
+// Variadic function templates (D-19): `Ts... args` takes the remaining arguments, `sizeof...` counts a
+// pack, and `args...` / `Wrap(args)...` expand it in calls, constructions, `new` and braced lists.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<...Ts> int64 CountTypes(Ts... args) { return sizeof...(Ts); }
+template<...Ts> int64 CountArgs(Ts... args) { return sizeof...(args); }
+template<T, ...Rest> int64 CountRest(T first, Rest... rest) { return sizeof...(Rest); }
+
+int32 Digits(int32 a, int32 b, int32 c) { return a * 100 + b * 10 + c; }
+int32 Twice(int32 x) { return x * 2; }
+template<...Ts> int32 Forward(Ts... args) { return Digits(args...); }
+template<...Ts> int32 ForwardTwice(Ts... args) { return Digits(Twice(args)...); }
+template<...Ts> int32 ForwardAfter(Ts... args) { return Digits(1, args...); }
+
+struct Point {
+	public int32 x; public int32 y; public int32 z;
+	[operator("create")] public void Init(int32 a, int32 b, int32 c) { x = a; y = b; z = c; }
+}
+template<...Ts> Point MakePoint(Ts... args) { return Point(args...); }
+template<...Ts> Point* NewPoint(Ts... args) { return new Point(args...); }
+template<...Ts> Point DeclarePoint(Ts... args) { Point p(args...); return p; }
+
+struct Pair { public int32 a; public int32 b; }
+template<...Ts> Pair MakePair(Ts... args) { Pair p = { args... }; return p; }
+
+template<...Ts> int32 ArraySum(Ts... args) {
+	int32[sizeof...(Ts)] values = { args... };
+	int32 total = 0;
+	for (int32 i = 0; i < sizeof...(Ts); ++i) total = total + values[i];
+	return total;
+}
+
+int32 SumList(__init_list<int32> items) {
+	int32 total = 0;
+	for (int32 i : items) total = total + i;
+	return total;
+}
+template<...Ts> int32 ListSum(Ts... args) { return SumList({ args... }); }
+
+template<...int32 Ns> int64 CountValues() { return sizeof...(Ns); }
+template<...int32 Ns> int32 Pick() { return Digits(Ns...); }
+
+int32 main() {
+	Check(CountTypes(1, 2.0f, 3) == 3, "sizeof... counts a type pack");
+	Check(CountTypes() == 0, "an empty pack");
+	Check(CountArgs(1, 2) == 2, "sizeof... counts a function parameter pack");
+	Check(CountRest(1, 2, 3, 4) == 3, "a pack after a fixed parameter");
+	Check(CountRest(1) == 0, "an empty pack after a fixed parameter");
+	Check(Forward(1, 2, 3) == 123, "args... in call arguments");
+	Check(ForwardTwice(1, 2, 3) == 246, "a pattern is repeated per element");
+	Check(ForwardAfter(2, 3) == 123, "an expansion after a written argument");
+	Point p = MakePoint(1, 2, 3);
+	Check(p.x == 1 && p.y == 2 && p.z == 3, "an expansion in a construction");
+	Point* q = NewPoint(4, 5, 6);
+	Check(q->x == 4 && q->z == 6, "an expansion in new");
+	Point d = DeclarePoint(7, 8, 9);
+	Check(d.y == 8, "an expansion in a declaration's arguments");
+	Pair pr = MakePair(10, 20);
+	Check(pr.a == 10 && pr.b == 20, "an expansion fills an aggregate's fields");
+	Check(ArraySum(1, 2, 3, 4) == 10, "an expansion fills an array");
+	Check(ListSum(5, 6, 7) == 18, "an expansion in an init list");
+	Check(CountValues<4, 5>() == 2, "a value pack");
+	Check(Pick<3, 2, 1>() == 321, "a value pack expands to its constants");
+	CountTypes<int32, float>(1, 2.0f);
+	return g_failures;
+}

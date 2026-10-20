@@ -1,0 +1,125 @@
+// BUG-002: defers and value-local destructors run on every exit edge of their scope, LIFO, and only
+// once they have been reached; a throw caught in the same function runs only the scopes it leaves.
+int32 g_log;
+int32 g_count;
+struct Tracer {
+	public int32 id;
+	[operator("create")] public void Init(int32 i) { id = i; }
+	[operator("delete")] public void Fini() { g_log = g_log * 10 + id; }
+};
+
+int32 BreakRunsIterationDefer() {
+	g_count = 0;
+	for (int32 i = 0; i < 3; i++) {
+		defer g_count++;
+		if (i == 1) break;
+	}
+	return g_count;
+}
+
+int32 ContinueRunsIterationDefer() {
+	g_count = 0;
+	for (int32 i = 0; i < 4; i++) {
+		defer g_count += 10;
+		if (i % 2 == 0) continue;
+		g_count += 1;
+	}
+	return g_count;
+}
+
+int32 GotoOutOfScopeRunsDefer() {
+	g_count = 0;
+	{
+		defer g_count += 7;
+		if (g_count == 0) goto done;
+		g_count = 1000;
+	}
+done:
+	return g_count;
+}
+
+int32 ReturnRunsAllScopesInnerFirst() {
+	g_log = 0;
+	Tracer a(1);
+	{
+		Tracer b(2);
+		defer g_log = g_log * 10 + 3;
+		return 0;
+	}
+}
+
+int32 UnreachedDeferDoesNotRun(int32 early) {
+	g_count = 0;
+	{
+		defer g_count += 1;
+		if (early != 0) {
+			g_count += 100;
+		}
+		else {
+			return g_count;
+		}
+		defer g_count += 1000;
+	}
+	return g_count;
+}
+
+int32 CaughtThrowRunsOnlyLeftScopes() {
+	g_count = 0;
+	{
+		defer g_count += 100;
+		try {
+			defer g_count += 1;
+			throw 7;
+		}
+		catch (int32 e) { g_count += 10; }
+		if (g_count != 11) return -1;
+	}
+	return g_count;
+}
+
+void Raise(int32 v) { throw v; }
+int32 CalleeThrowRunsCallerCleanups() {
+	g_log = 0;
+	try {
+		Tracer t(4);
+		defer g_log = g_log * 10 + 5;
+		Raise(3);
+	}
+	catch (int32 e) { g_log = g_log * 10 + e; }
+	return g_log;
+}
+
+int32 BreakOutOfHandler() {
+	g_count = 0;
+	for (int32 i = 0; i < 5; i++) {
+		defer g_count += 1;
+		try { throw i; }
+		catch (int32 e) { if (e == 2) break; }
+	}
+	return g_count;
+}
+
+int32 ReturnFromHandler() {
+	g_count = 0;
+	defer g_count += 1;
+	try { throw 9; }
+	catch (int32 e) { return e; }
+	return -1;
+}
+
+int32 main() {
+	int32 failures = 0;
+	if (BreakRunsIterationDefer() != 2) failures++;
+	if (ContinueRunsIterationDefer() != 42) failures++;
+	if (GotoOutOfScopeRunsDefer() != 7) failures++;
+	ReturnRunsAllScopesInnerFirst();
+	if (g_log != 321) failures++;
+	if (UnreachedDeferDoesNotRun(0) != 0 || g_count != 1) failures++;
+	if (UnreachedDeferDoesNotRun(1) != 1101) failures++;
+	if (CaughtThrowRunsOnlyLeftScopes() != 111) failures++;
+	if (CalleeThrowRunsCallerCleanups() != 543) failures++;
+	if (BreakOutOfHandler() != 3) failures++;
+	if (ReturnFromHandler() != 9 || g_count != 1) failures++;
+	if (failures != 0) printf("DeferOnEveryExit failures: %d\n", failures);
+	return failures;
+}

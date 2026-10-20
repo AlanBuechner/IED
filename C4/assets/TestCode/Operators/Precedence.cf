@@ -1,0 +1,35 @@
+// Operators - Precedence Tests (implementation): each pair of adjacent levels, evaluated (BUG-001, D-27).
+include "../Framework/Assert.ch"
+include "Precedence.ch"
+
+void TestPrecedence() {
+	int32 a = 6;
+	int32 b = 3;
+	int32 c = 1;
+	bool t = true;
+	bool f = false;
+	AssertIntEquals(1, (f && t || t) ? 1 : 0, "&& binds tighter than ||");
+	AssertIntEquals(1, (t || f && f) ? 1 : 0, "|| takes && as its right operand");
+	AssertIntEquals(0, (f && 0 | 1) ? 1 : 0, "| binds tighter than &&");
+	AssertIntEquals(7, 6 | 3 ^ 2, "^ binds tighter than |");
+	AssertIntEquals(4, 6 ^ 3 & 2, "& binds tighter than ^");
+	AssertIntEquals(0, a & 1 == 0, "== binds tighter than &");
+	AssertIntEquals(1, (a < b == f) ? 1 : 0, "< binds tighter than ==");
+	AssertIntEquals(1, (c < 1 << 2) ? 1 : 0, "<< binds tighter than <");
+	AssertIntEquals(16, 1 << 2 + 2, "+ binds tighter than <<");
+	AssertIntEquals(7, 1 + 2 * 3, "* binds tighter than +");
+	AssertIntEquals(1, a - b - 2, "- is left associative");
+	AssertIntEquals(2, 12 / 3 / 2, "/ is left associative");
+	int32 x = 0;
+	x = t && f ? 5 : 9;
+	AssertIntEquals(9, x, "an assignment takes the whole ?:");
+	bool y = false;
+	y = t && t;
+	AssertIntEquals(1, y ? 1 : 0, "an assignment takes the whole &&");
+	int32 p = 0;
+	int32 q = 0;
+	p = q = 4;
+	AssertIntEquals(8, p + q, "= is right associative");
+	AssertIntEquals(1, t ? 1 : t ? 2 : 3, "?: is right associative");
+	AssertIntEquals(-7, -b * 2 - 1, "a prefix minus binds tighter than *");
+}

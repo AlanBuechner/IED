@@ -1,0 +1,4 @@
+int32 main() {
+	double d = 1.5;
+	return reinterpret_cast<int32*>(d) == null ? 1 : 0;
+}

@@ -1,0 +1,41 @@
+// A thread_local local whose start throws stays unstarted on that thread, and its next pass there tries again;
+// every thread has its own attempts. main returns the failures.
+struct Result { public int32 failures; }
+
+int32 Attempt(int32* attempts) {
+	*attempts += 1;
+	if (*attempts == 1) throw 5;
+	return *attempts * 10;
+}
+
+int32 Fragile() {
+	thread_local int32 attempts = 0;
+	thread_local int32 value = Attempt(&attempts);
+	return value;
+}
+
+int32 TryFragile() {
+	try {
+		return Fragile();
+	} catch (int32 code) {
+		return -code;
+	}
+}
+
+int32 Check() {
+	int32 failures = 0;
+	if (TryFragile() != -5) failures++;
+	if (TryFragile() != 20) failures++;
+	if (TryFragile() != 20) failures++;
+	return failures;
+}
+
+void Run(void* state) { ((Result*)state)->failures = Check(); }
+
+int32 main() {
+	int32 failures = Check();
+	Result* r = new Result;
+	void* t = thread_start(Run, (void*)r);
+	thread_join(t);
+	return failures + r->failures;
+}

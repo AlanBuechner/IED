@@ -1,0 +1,3 @@
+struct A { public B b; }
+struct B { public A a; }
+int32 main() { return 0; }

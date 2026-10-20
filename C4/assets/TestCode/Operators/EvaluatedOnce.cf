@@ -1,0 +1,70 @@
+// Operators - Evaluated Once Tests (implementation)
+include "../Framework/Assert.ch"
+include "EvaluatedOnce.ch"
+
+// BUG-201: a read-modify-write (`x OP= v`, `++x`, `x++`) computes what its target is made of - a call returning a
+// reference or a pointer, an index, an indexer's receiver - once.
+struct EoCell { public int32 n; }
+struct EoTally {
+	public int32 total;
+	[operator("+=")] public void AddIn(int32 v) { total += v; }
+}
+struct EoByValue { public int32[4] data; }
+[operator("index")]
+int32 EoGet(int32 i) extends EoByValue { return this.data[i]; }
+[operator("index_assign")]
+void EoSet(int32 i, int32 v) extends EoByValue { this.data[i] = v; }
+
+int32 g_eoCalls = 0;
+EoCell g_eoCell;
+EoTally g_eoTally;
+EoByValue g_eoByValue;
+
+EoCell& EoCellRef() { g_eoCalls++; return g_eoCell; }
+EoCell* EoCellPtr() { g_eoCalls++; return &g_eoCell; }
+EoTally& EoTallyRef() { g_eoCalls++; return g_eoTally; }
+EoByValue& EoByValueRef() { g_eoCalls++; return g_eoByValue; }
+
+void TestEvaluatedOnce() {
+	EoCellRef().n += 5;
+	AssertIntEquals(1, g_eoCalls, "f().x += v calls f once");
+	AssertIntEquals(5, g_eoCell.n, "f().x += v adds");
+	EoCellPtr()->n *= 3;
+	AssertIntEquals(2, g_eoCalls, "f()->x *= v calls f once");
+	AssertIntEquals(15, g_eoCell.n, "f()->x *= v multiplies");
+	++EoCellRef().n;
+	AssertIntEquals(3, g_eoCalls, "++f().x calls f once");
+	int32 old = EoCellRef().n++;
+	AssertIntEquals(4, g_eoCalls, "f().x++ calls f once");
+	AssertIntEquals(16, old, "f().x++ yields the old value");
+	AssertIntEquals(17, g_eoCell.n, "f().x++ stores the new one");
+
+	int32[4] values = { 1, 2, 3, 4 };
+	int32 i = 0;
+	values[i++] += 10;
+	AssertIntEquals(1, i, "a[i++] += v steps i once");
+	AssertIntEquals(11, values[0], "a[i++] += v writes the element it read");
+	values[i++]++;
+	AssertIntEquals(2, i, "a[i++]++ steps i once");
+	AssertIntEquals(3, values[1], "a[i++]++ increments the element it read");
+	--values[i++];
+	AssertIntEquals(3, i, "--a[i++] steps i once");
+	AssertIntEquals(2, values[2], "--a[i++] decrements the element it read");
+
+	EoTallyRef() += 7;
+	AssertIntEquals(5, g_eoCalls, "an in-place operator method on f() calls f once");
+	AssertIntEquals(7, g_eoTally.total, "the in-place operator method ran");
+
+	int32 k = 1;
+	g_eoByValue.data[1] = 40;
+	EoByValueRef()[k++] += 2;
+	AssertIntEquals(6, g_eoCalls, "a by-value indexer's receiver is computed once");
+	AssertIntEquals(2, k, "a by-value indexer's index is computed once");
+	AssertIntEquals(42, g_eoByValue.data[1], "the setter writes the element the getter read");
+
+	packed float[4] lanes = { 1.0f, 2.0f, 3.0f, 4.0f };
+	int32 lane = 2;
+	lanes[lane++] += 0.5f;
+	AssertIntEquals(3, lane, "a packed lane's index is computed once");
+	Assert(lanes[2] == 3.5f, "the packed lane it read is the one written");
+}

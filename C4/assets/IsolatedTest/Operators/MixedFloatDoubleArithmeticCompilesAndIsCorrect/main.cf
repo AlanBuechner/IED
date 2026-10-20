@@ -1,0 +1,23 @@
+int32 main() {
+    // Regression: mixed float/double binary operands used to emit illegal IR
+    // (e.g. `fmul double, float`) that clang rejected at every -O level.
+    int32 N = 1000000;
+    double acc = 0.0;
+    for (int32 j = 1; j <= N; j++)
+        acc = acc + (double)(j % 7) * 0.5;   // double op float-literal
+    if ((int32)acc != 1499999) { printf("FAIL acc got %d\n", (int32)acc); return 1; }
+
+    double d = 4.0;
+    double e = d * 0.5;                       // double variable op unqualified literal
+    if ((int32)(e * 10) != 20) { printf("FAIL e got %d\n", (int32)(e * 10)); return 1; }
+
+    float fa = 1.5f;
+    float fb = fa + 2.5f;                     // float op float (unchanged path)
+    if ((int32)(fb * 10) != 40) { printf("FAIL fb got %d\n", (int32)(fb * 10)); return 1; }
+
+    double mix = fa + 3.0;                    // float op unqualified literal -> widen to double
+    if ((int32)(mix * 10) != 45) { printf("FAIL mix got %d\n", (int32)(mix * 10)); return 1; }
+
+    printf("MIXED FLOAT OK\n");
+    return 0;
+}

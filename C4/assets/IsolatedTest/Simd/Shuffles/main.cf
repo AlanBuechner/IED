@@ -1,0 +1,62 @@
+// Lane rearranging intrinsics (D-62): simd_shuffle with one or two sources and constant indices (the result has as
+// many lanes as indices), simd_concat and simd_splat. main returns the failures.
+struct Vec4 { public union { packed float x, y, z, w; packed float[4] data; }; }
+
+int32 Differs(float actual, float expected) { return actual == expected ? 0 : 1; }
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+const int32 kLast = 3;
+
+int32 OneSource() {
+	int32 failures = 0;
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] reversed = simd_shuffle(a, kLast, 2, 1, 0);       // a folded constant is an index
+	failures += Differs(reversed[0], 4.0f) + Differs(reversed[3], 1.0f);
+	packed float[4] broadcast = simd_shuffle(a, 2, 2, 2, 2);
+	failures += Differs(broadcast[1], 3.0f) + Differs(broadcast[3], 3.0f);
+	packed float[2] high = simd_shuffle(a, 2, 3);
+	failures += Differs(high[0], 3.0f) + Differs(high[1], 4.0f);
+	packed float[8] doubled = simd_shuffle(a, 0, 0, 1, 1, 2, 2, 3, 3);
+	failures += Differs(doubled[5], 3.0f);
+	packed float[3] three = simd_shuffle(a, 1, 2, 3);
+	failures += Differs(three[2], 4.0f);
+	packed int16[16] lanes = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+	packed int16[16] rotated = simd_shuffle(lanes, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+	failures += DiffersI(rotated[0], 15) + DiffersI(rotated[15], 14);
+	return failures;
+}
+
+int32 TwoSources() {
+	int32 failures = 0;
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] b = { 5.0f, 6.0f, 7.0f, 8.0f };
+	packed float[4] low = simd_shuffle(a, b, 0, 4, 1, 5);              // interleave
+	failures += Differs(low[0], 1.0f) + Differs(low[1], 5.0f) + Differs(low[2], 2.0f) + Differs(low[3], 6.0f);
+	packed float[8] all = simd_shuffle(a, b, 7, 6, 5, 4, 3, 2, 1, 0);
+	failures += Differs(all[0], 8.0f) + Differs(all[7], 1.0f);
+	Vec4 v;
+	v.data = { 9.0f, 10.0f, 11.0f, 12.0f };
+	packed float[2] mixed = simd_shuffle(v, a, 3, 4);                 // pure packed objects are vectors too
+	failures += Differs(mixed[0], 12.0f) + Differs(mixed[1], 1.0f);
+	return failures;
+}
+
+int32 ConcatAndSplat() {
+	int32 failures = 0;
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[8] both = simd_concat(a, a * 10.0f);
+	failures += Differs(both[3], 4.0f) + Differs(both[4], 10.0f) + Differs(both[7], 40.0f);
+	packed float[16] four = simd_concat(both, both);
+	failures += Differs(four[12], 10.0f);
+	packed double[4] wideD = simd_concat(simd_splat(1.5, 2), simd_splat(2.5, 2));
+	failures += wideD[1] == 1.5 && wideD[2] == 2.5 ? 0 : 1;
+	packed int32[8] sevens = simd_splat(7, 8);
+	failures += DiffersI(sevens[0], 7) + DiffersI(sevens[7], 7);
+	packed bool[4] yes = simd_splat(true, 4);
+	failures += simd_all(yes) ? 0 : 1;
+	return failures;
+}
+
+int32 main() {
+	return OneSource() + TwoSources() + ConcatAndSplat();
+}

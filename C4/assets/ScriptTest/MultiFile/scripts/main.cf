@@ -1,0 +1,8 @@
+include "shapes.ch"
+include "generated.ch"
+
+int32 Run()
+{
+	Canvas::Shape*[2] shapes = { MakeSquare(kSide), MakeSquare(4) };
+	return Canvas::TotalArea(&shapes[0], 2) + GeneratedTwice(9);
+}

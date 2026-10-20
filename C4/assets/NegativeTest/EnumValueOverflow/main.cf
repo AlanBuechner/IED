@@ -1,0 +1,2 @@
+enum E { X = 9999999999 }
+int main() { return 0; }

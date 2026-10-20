@@ -1,0 +1,2 @@
+struct Box { public int32 v; }
+int32 main() { Box b; bool n = !b; return 0; }

@@ -1,0 +1,32 @@
+include "bedrock.ch"
+
+class Buffer {
+    char* data;
+    int32 len;
+    [operator("create")]
+    public void Init(int32 size) { this->data = (char*)raw_alloc(size); this->len = size; }
+    [operator("delete")]
+    public void Free() { gc_unregister_region((void*)this->data); raw_free(this->data); }
+    public int32 ReadByte(int32 i) { return byte_at(this->data, i); }
+    public void WriteByte(int32 i, int32 v) { set_byte((void*)this->data, i, v); }
+}
+
+class Plain {
+    char* data;
+    int32 len;
+    [operator("create")]
+    public void Init(int32 size) { this->data = (char*)raw_alloc(size); this->len = size; }
+}
+
+int32 main() {
+    Buffer* b = new Buffer{16};
+    b->WriteByte(0, 42);
+    if (b->ReadByte(0) != 42) return 1;
+    delete b; // must run Free()
+    printf("DELETE-OP OK\n");
+
+    Plain* p = new Plain{8};
+    printf("NO-DELETE new ok\n");
+    delete p; // no [operator("delete")] -> plain free
+    return 0;
+}

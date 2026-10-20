@@ -1,0 +1,2 @@
+struct CS { int32 i; }
+int32 main() { CS s; CS& r = s; if (r) return 1; return 0; }

@@ -1,0 +1,18 @@
+// The main thread's thread_local objects start after the globals and end at exit before them, the last started
+// first, as every object with static storage does.
+struct Logged {
+	public int32 order;
+	[operator("create")] public void Init() { g_started++; order = g_started; }
+	[operator("delete")] public void End() {
+		if (order == 2) g_threadLocalEnded = 1;
+		else printf(g_threadLocalEnded == 1 ? "ORDER OK\n" : "ORDER BAD\n");
+	}
+}
+
+int32 g_started = 0;
+int32 g_threadLocalEnded = 0;
+
+Logged g_global;
+thread_local Logged t_local;
+
+int32 main() { return g_global.order == 1 && t_local.order == 2 ? 0 : 1; }

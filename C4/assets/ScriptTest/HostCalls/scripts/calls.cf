@@ -1,0 +1,16 @@
+include "game.ch"
+
+int32 Run(int32 v)
+{
+	Game::g_score = 7;
+	Game::Counter a;
+	Game::Counter b;
+	a.Bump(v);
+	b.Bump(Game::kLimit);
+	int32 limitMissed = b.Get() == 99 ? 0 : 1000;
+	return Game::Add(v, Game::Scale(v)) + Game::Twice(a.Get()) + limitMissed;
+}
+
+int32 ReadScore() { return Game::g_score; }
+
+int32 ScaleBy(int32 v) { return Game::Scale(v); }

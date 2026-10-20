@@ -1,0 +1,60 @@
+// BUG-153: distinct functions never share a symbol, so each one registers with reflection and its invoke
+// thunk calls its own body.
+include "bedrock.ch"
+
+struct DsPoint { public int32 v; }
+struct DsVec { public int32 v; }
+int32 Bump() extends DsPoint { return this.v + 1; }
+int32 Bump() extends DsVec { return this.v + 2; }
+float Bump() extends float { return *this + 3.0f; }
+int32 Bump() extends int32 { return *this + 4; }
+
+namespace DsA { struct Box { public int32 Get() { return 1; } } }
+namespace DsB { struct Box { public int32 Get() { return 2; } } }
+namespace DsA { int32 Box_Get() { return 3; } }
+
+int32 DsTake(int32* p) { return 1; }
+int32 DsTake(int32& r) { return 2; }
+
+int32 DsLocalOne() {
+	struct Node { public int32 Get() { return 10; } }
+	Node n;
+	return n.Get();
+}
+int32 DsLocalTwo() {
+	struct Node { public int32 Get() { return 20; } }
+	Node n;
+	return n.Get();
+}
+
+int32 Registered(const char* name) {
+	int32 count = 0;
+	for (int64 i = 0; i < Reflection::FunctionCount(); ++i)
+		if (strcmp(Reflection::FunctionAt(i).Name(), name) == 0) count++;
+	return count;
+}
+
+int32 main() {
+	DsPoint p; p.v = 10;
+	DsVec v; v.v = 20;
+	if (p.Bump() != 11 || v.Bump() != 22) return 1;
+	if (Registered("Bump") != 4) { printf("FAIL Bump registered %d\n", Registered("Bump")); return 2; }
+	int32 r = 0;
+	if (!Reflection::FindType("DsPoint").FindMethod("Bump").Call(&p, &r) || r != 11) return 3;
+	if (!Reflection::FindType("DsVec").FindMethod("Bump").Call(&v, &r) || r != 22) return 4;
+
+	DsA::Box a;
+	DsB::Box b;
+	if (a.Get() != 1 || b.Get() != 2 || DsA::Box_Get() != 3) return 5;
+	if (!Reflection::FindType("DsA::Box").FindMethod("Get").Call(&a, &r) || r != 1) return 6;
+	if (!Reflection::FindType("DsB::Box").FindMethod("Get").Call(&b, &r) || r != 2) return 7;
+	if (!Reflection::FindFunction("DsA::Box_Get").Call(&r) || r != 3) return 8;
+
+	int32 x = 0;
+	if (DsTake(&x) != 1 || DsTake(x) != 2) return 9;
+	if (Registered("DsTake") != 2) { printf("FAIL DsTake registered %d\n", Registered("DsTake")); return 10; }
+
+	if (DsLocalOne() != 10 || DsLocalTwo() != 20) return 11;
+	printf("DISTINCT SYMBOLS OK\n");
+	return 0;
+}

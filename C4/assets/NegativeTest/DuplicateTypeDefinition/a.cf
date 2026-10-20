@@ -1,0 +1,6 @@
+// Two .cf files in one program both define a global type named 'Pair'. C4 has one flat global
+// scope, so this is a redefinition. Before the fix it was silently merged: both methods mangled to
+// Pair_Get and only one body survived, so calls resolved to the wrong body by file order with no
+// diagnostic (silent corruption). It must now be a clear error.
+class Pair { public int32 a; public int32 b; public int32 Get() { return a * 10 + b; } };
+int32 main() { Pair p; p.a = 1; p.b = 2; return p.Get(); }

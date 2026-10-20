@@ -1,0 +1,9 @@
+// ControlFlow - Cast Tests (implementation)
+include "../Framework/Assert.ch"
+include "Cast.ch"
+
+void TestCast() {
+	int64 big = 12345;
+	int32 small = (int32)big;
+	AssertEqual(12345, small);
+}

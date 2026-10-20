@@ -1,0 +1,63 @@
+// Every polymorphic object gets its vptrs wherever it lives: a global, a static local, a field of
+// another object, an array element, an interface sub-object of each of those, a stack local, a heap
+// object and a construct temporary.
+interface IValue { int32 Value(); }
+struct Shape { public virtual int32 Area() { return 1; } };
+struct Circle : Shape, IValue {
+	public override int32 Area() { return 7; }
+	public int32 Value() { return 70; }
+};
+struct Holder { public int32 pad; public Circle c; public Circle[3] row; };
+
+Circle g_circle;
+Holder g_holder;
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 FromStatic() {
+	static Circle s;
+	Shape* p = &s;
+	return p->Area();
+}
+
+void Globals() {
+	Shape* p = &g_circle;
+	IValue* v = &g_circle;
+	Check(p->Area() == 7, "a global object has its vptr");
+	Check(v->Value() == 70, "a global object's interface vptr is set");
+	Shape* q = &g_holder.row[2];
+	Check(q->Area() == 7, "an array element inside a global has its vptr");
+}
+
+void Locals() {
+	Holder h;
+	Shape* p = &h.c;
+	IValue* v = &h.row[1];
+	Check(p->Area() == 7, "a field of a local object has its vptr");
+	Check(v->Value() == 70, "an array element field has its interface vptr");
+	Check(FromStatic() == 7, "a static local has its vptr");
+	Circle[2] pair;
+	Shape* e = &pair[1];
+	Check(e->Area() == 7, "a local array element has its vptr");
+}
+
+void HeapAndTemporaries() {
+	Holder* h = new Holder();
+	Shape* p = &h->c;
+	Check(p->Area() == 7, "a field of a heap object has its vptr");
+	Circle made = Circle();
+	IValue* v = &made;
+	Check(v->Value() == 70, "a construct temporary copied into a local keeps its vptrs");
+}
+
+int32 main() {
+	Globals();
+	Locals();
+	HeapAndTemporaries();
+	if (g_failures != 0) printf("PolymorphicStorage failures: %d\n", g_failures);
+	return g_failures;
+}

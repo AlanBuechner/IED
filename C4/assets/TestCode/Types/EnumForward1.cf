@@ -1,0 +1,14 @@
+// EnumForward unit 1 - forward reference: the namespaced enum TYPE is used BEFORE its definition
+// is walked. Before the COLLECT pre-pass shelled enums this was "Unknown type 'EngineAPI::RendererAPI'"
+// while the identical struct pattern resolved (objects were already shelled).
+EngineAPI::RendererAPI g_pre;   // global of enum type, declared before the include
+
+include "../Framework/Assert.ch"
+include "EnumForward.ch"
+
+void TestEnumForwardRef() {
+    EngineAPI::RendererAPI e = g_pre;            // use the forward-referenced value
+    Assert((int32)e == 0, "ef: forward enum default is first member");
+    g_pre = EngineAPI::Vulkan;                   // qualified member resolves after include
+    Assert((int32)g_pre == 1, "ef: assign + read back forward enum");
+}

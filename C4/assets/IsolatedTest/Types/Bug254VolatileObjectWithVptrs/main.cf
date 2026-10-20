@@ -1,0 +1,15 @@
+// BUG-254: assigning an object with vptrs to a volatile variable is a volatile store (D-29). main returns 0 when the
+// stored object reads back.
+class Widget {
+	public int32 value;
+	public virtual int32 Get() { return value; }
+}
+
+volatile Widget g_widget;
+
+int32 main() {
+	Widget w;
+	w.value = 5;
+	g_widget = w;
+	return g_widget.value == 5 ? 0 : 1;
+}

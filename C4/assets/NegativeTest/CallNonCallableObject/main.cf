@@ -1,0 +1,2 @@
+struct Plain { public int32 v; }
+int32 main() { Plain p; return p(1); }

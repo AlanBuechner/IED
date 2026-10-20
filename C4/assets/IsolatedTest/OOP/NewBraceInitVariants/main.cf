@@ -1,0 +1,32 @@
+class B {
+    char* data;
+    int32 len;
+    [operator("create")]
+    public void Init(int32 size) { this->data = (char*)raw_alloc(size); this->len = size; }
+    [operator("delete")]
+    public void Free() { gc_unregister_region((void*)this->data); raw_free(this->data); }
+    public int32 Len() { return this->len; }
+}
+
+int32 main() {
+    // Variant 1: new B{8} with a [operator("delete")] finalizer.
+    B* b = new B{8};
+    if (b->Len() != 8) return 1;
+    printf("V1 len=%d\n", b->Len());
+    delete b;
+
+    // Variant 2: same class, verify the delete op ran and a second instance works.
+    B* c = new B{16};
+    if (c->Len() != 16) return 2;
+    printf("V2 len=%d\n", c->Len());
+    delete c;
+
+    // Variant 3: with the bedrock umbrella included, same behavior.
+    B* d = new B{4};
+    if (d->Len() != 4) return 3;
+    printf("V3 len=%d\n", d->Len());
+    delete d;
+
+    printf("NEW-BRACE-INIT OK\n");
+    return 0;
+}

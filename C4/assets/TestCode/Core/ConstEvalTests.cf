@@ -1,0 +1,104 @@
+// Core - Compile-Time Constant Evaluation & Global Initialization Tests
+// Regression coverage for: const-var array sizes, chained consts, enum members in
+// constant positions (array sizes + switch cases), multiple runtime-init globals
+// (llvm.global_ctors sizing), and const globals with runtime init (read-only section).
+include "../Framework/Assert.ch"
+
+const int32 CE_N = 10;
+const int32 CE_M = CE_N + 5;   // chained: 15
+const int32 CE_D = CE_M * 2;   // chained twice: 30 - folded to a static constant at lowering
+const float CE_F = 1.5f;       // float const global - folded to a static constant
+
+int32[CE_N] ce_arr;    // [10 x i32] via const var (was silently [1 x i32])
+int32[CE_M] ce_row;    // [15 x i32] via chained const
+
+enum CETestColor { CET_RED, CET_GREEN = 5, CET_BLUE };
+
+int32[CET_GREEN] ce_colors;   // [5 x i32] via enum member (was a hard error)
+
+struct CE_Pair { int32 x; int32 y; }
+
+CE_Pair CE_MakeA() { return CE_Pair{1, 2}; }
+CE_Pair CE_MakeB() { return CE_Pair{3, 4}; }
+
+// Two runtime-init globals: previously emitted invalid IR (global_ctors declared [1 x T]
+// but holding two entries). A third const one with runtime init previously AV'd writing a
+// read-only section at startup.
+CE_Pair ce_a = CE_MakeA();
+CE_Pair ce_b = CE_MakeB();
+const CE_Pair ce_c = CE_MakeB();
+
+int32 CE_Pick(int32 c) {
+	switch (c) {
+		case CET_GREEN:
+			return 7;   // a comment here used to break parsing of the following case
+		default:
+			return 0;
+	}
+}
+
+void TestConstEval() {
+	// The arrays must actually hold their folded sizes: writing a high index is only safe if
+	// the storage was allocated at that size (the old bug made them [1 x i32]).
+	ce_arr[9] = 100;
+	AssertIntEquals(100, ce_arr[9], "const-sized array holds element 9");
+	ce_row[14] = 55;
+	AssertIntEquals(55, ce_row[14], "chained-const array size is 15");
+
+	int32 a = CE_N + CE_M;   // 25
+	AssertIntEquals(25, a, "const vars fold in expressions");
+	// Chained-twice and float const globals are folded to static constants at lowering (doc 10);
+	// reading them back directly proves the folded value is correct.
+	AssertIntEquals(30, CE_D, "chained-twice const global folds to a static constant");
+	AssertFloatEquals(1.5f, CE_F, "float const global folds to a static constant");
+}
+
+void TestEnumAsConstant() {
+	ce_colors[4] = 9;
+	AssertIntEquals(9, ce_colors[4], "enum-sized array holds element 4");
+	AssertIntEquals(7, CE_Pick(CET_GREEN), "enum member matches its switch case");
+	AssertIntEquals(0, CE_Pick(99), "non-matching value falls through to default");
+	AssertIntEquals(5, CET_GREEN, "bare enum member has its value");
+}
+
+void TestGlobalRuntimeInit() {
+	AssertIntEquals(1, ce_a.x, "runtime-init global a.x");
+	AssertIntEquals(2, ce_a.y, "runtime-init global a.y");
+	AssertIntEquals(3, ce_b.x, "second runtime-init global b.x (global_ctors sizing)");
+	AssertIntEquals(4, ce_b.y, "second runtime-init global b.y");
+	AssertIntEquals(3, ce_c.x, "const + runtime-init global c.x (read-only section fix)");
+	AssertIntEquals(4, ce_c.y, "const + runtime-init global c.y");
+}
+
+// --- Constant EXPRESSIONS as array sizes (W+10, W*2-5, multi-dim) -------------
+// The user's motivating example: class { float[s_SomeVar + 10] } - a type's size
+// depends on an arithmetic expression over consts, not a single name.
+
+const int32 CE_W = 4;
+
+int32[CE_N + 10] ce_expr_arr;   // [20 x i32] from a constant expression
+
+struct CE_ExprBox { float[CE_W + 10] f; }   // class member sized by an expression (the user's example)
+
+void TestConstExprArraySizes() {
+	// Global sized by an expression: the storage must really be 20 elements.
+	ce_expr_arr[19] = 42;
+	AssertIntEquals(42, ce_expr_arr[19], "expression-sized global array holds element 19");
+
+	// Class/struct member sized by an expression (float[s_SomeVar+10]): access the last lane.
+	CE_ExprBox box;
+	box.f[13] = 7.5f;
+	AssertFloatEquals(7.5f, box.f[13], "expression-sized class member holds element 13");
+
+	// Local sized by an expression: int32[CE_M*2-5] = int32[25]; last valid index is 24.
+	int32[CE_M * 2 - 5] local;
+	local[24] = 9;
+	AssertIntEquals(9, local[24], "expression-sized local array holds element 24");
+
+	// Multi-dim where the INNER size is an expression. C4 multi-dim arrays are first-bracket-innermost:
+	// int32[2][CE_W+1] = int32[2][5] has 5 rows (second bracket) of 2 elements each (first bracket),
+	// so grid[i] is valid for i<5 and grid[i][j] for j<2. Last cell is grid[4][1].
+	int32[2][CE_W + 1] grid;
+	grid[4][1] = 17;
+	AssertIntEquals(17, grid[4][1], "multi-dim expression-sized inner dim holds [4][1]");
+}

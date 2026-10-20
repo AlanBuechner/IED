@@ -1,0 +1,58 @@
+// BUG-251: every container places its elements at their type's alignment, 32 and 64 bytes included, wherever the
+// allocator's earlier blocks left off. Code built for AVX reads such elements with aligned instructions.
+
+include "bedrock.ch"
+
+struct Wide { public packed float[8] lanes; public int32 id; }
+
+bool Aligned(void* p, uint64 alignment) { return (uint64)p % alignment == 0; }
+
+[test("container.alignment")]
+class ContainerAlignmentTests {
+	[test("array")]
+	public static void TestArray() {
+		int32 misaligned = 0;
+		for (int32 n = 1; n < 40; ++n) {
+			void* skew = raw_alloc((uint64)(n * 24));
+			Core::Array<packed float[16]> array;
+			for (int32 k = 0; k < n % 9 + 1; ++k) array.Push(simd_splat((float)k, 16));
+			for (int64 k = 0; k < array.Count(); ++k) misaligned += Aligned((void*)&array[k], 64) ? 0 : 1;
+			raw_free(skew);
+		}
+		assert_eq(0, misaligned, "64-byte elements on 64-byte boundaries");
+	}
+
+	[test("queue_list_hashmap")]
+	public static void TestOthers() {
+		int32 misaligned = 0;
+		for (int32 n = 1; n < 40; ++n) {
+			void* skew = raw_alloc((uint64)(n * 40));
+			Core::Queue<Wide> queue;
+			Wide w;
+			w.id = n;
+			queue.Push(w);
+			Core::List<Wide> list;
+			list.PushBack(w);
+			Core::HashMap<int32, Wide> map;
+			map.Insert(n, w);
+			misaligned += Aligned((void*)&queue.Front(), 32) ? 0 : 1;
+			misaligned += Aligned((void*)&list.Front(), 32) ? 0 : 1;
+			misaligned += Aligned((void*)map.Find(n), 32) ? 0 : 1;
+			raw_free(skew);
+		}
+		assert_eq(0, misaligned, "32-byte elements on 32-byte boundaries");
+	}
+
+	[test("storage")]
+	public static void TestStorage() {
+		packed double[8]* wide = Core::AllocateElements<packed double[8]>(3);
+		assert_true(Aligned((void*)wide, 64), "over-aligned storage from raw_alloc_aligned");
+		Core::FreeElements<packed double[8]>(wide);
+		int32* plain = Core::AllocateElements<int32>(5);
+		assert_true(Aligned((void*)plain, 4), "plain storage from raw_alloc");
+		Core::FreeElements<int32>(plain);
+		void* raw = raw_alloc_aligned(100, 128);
+		assert_true(Aligned(raw, 128), "raw_alloc_aligned honors any power of two");
+		raw_free_aligned(raw);
+	}
+}

@@ -1,0 +1,193 @@
+// Math batches: N vectors in structure-of-arrays form. Every operation is checked lane by lane against the same
+// operation on the vectors one at a time, at 4, 8 and 16 lanes, and Load / Store against arrays of vectors.
+
+include "math.ch"
+
+const float kBatchTolerance = 0.0001f;
+
+Math::FVector3 Sample(int32 i, float scale) {
+	return Math::FVector3(Math::Sin((float)i * 0.7f + 0.1f), Math::Cos((float)i * 1.3f - 0.4f), (float)(i % 5) - 2.0f) * scale;
+}
+
+// A batch of vectors Sample(first), Sample(first + 1), ...
+template<uint32 N> Math::TVector3Batch<float, N> SampleBatch(int32 first, float scale) {
+	Math::TVector3Batch<float, N> batch;
+	for (int32 i = 0; i < (int32)N; ++i) batch.Set(i, Sample(first + i, scale));
+	return batch;
+}
+
+template<uint32 N> bool MatchesEach(const Math::TVector3Batch<float, N>& batch, const Math::FVector3[16]& expected) {
+	for (int32 i = 0; i < (int32)N; ++i)
+		if (!Math::NearlyEqual(batch.Get(i), expected[i], kBatchTolerance)) return false;
+	return true;
+}
+
+template<uint32 N> bool MatchesEachLane(packed float[N] lanes, const float[16]& expected) {
+	for (int32 i = 0; i < (int32)N; ++i)
+		if (!Math::NearlyEqual(lanes[i], expected[i], kBatchTolerance)) return false;
+	return true;
+}
+
+template<uint32 N> int32 ArithmeticFailures() {
+	Math::TVector3Batch<float, N> a = SampleBatch<N>(0, 2.0f);
+	Math::TVector3Batch<float, N> b = SampleBatch<N>(5, 3.0f);
+	Math::FVector3[16] sums;
+	Math::FVector3[16] scaled;
+	Math::FVector3[16] products;
+	Math::FVector3[16] negated;
+	for (int32 i = 0; i < (int32)N; ++i) {
+		sums[i] = a.Get(i) + b.Get(i);
+		scaled[i] = (a.Get(i) - b.Get(i)) * 0.5f;
+		products[i] = a.Get(i) * b.Get(i);
+		negated[i] = -a.Get(i);
+	}
+	int32 failures = 0;
+	failures += MatchesEach<N>(a + b, sums) ? 0 : 1;
+	failures += MatchesEach<N>((a - b) * 0.5f, scaled) ? 0 : 1;
+	failures += MatchesEach<N>(a * b, products) ? 0 : 1;
+	failures += MatchesEach<N>(-a, negated) ? 0 : 1;
+	Math::TVector3Batch<float, N> grown = a;
+	grown += b;
+	failures += MatchesEach<N>(grown, sums) ? 0 : 1;
+	return failures;
+}
+
+template<uint32 N> int32 ProductFailures() {
+	Math::TVector3Batch<float, N> a = SampleBatch<N>(0, 2.0f);
+	Math::TVector3Batch<float, N> b = SampleBatch<N>(5, 3.0f);
+	Math::FVector3[16] crosses;
+	Math::FVector3[16] normals;
+	float[16] dots;
+	float[16] lengths;
+	for (int32 i = 0; i < (int32)N; ++i) {
+		crosses[i] = Math::Cross(a.Get(i), b.Get(i));
+		normals[i] = Math::Normalized(crosses[i]);
+		dots[i] = Math::Dot(a.Get(i), b.Get(i));
+		lengths[i] = Math::Length(a.Get(i));
+	}
+	int32 failures = 0;
+	failures += MatchesEach<N>(Math::Cross(a, b), crosses) ? 0 : 1;
+	failures += MatchesEach<N>(Math::Normalized(Math::Cross(a, b)), normals) ? 0 : 1;
+	failures += MatchesEachLane<N>(Math::Dot(a, b), dots) ? 0 : 1;
+	failures += MatchesEachLane<N>(Math::Length(a), lengths) ? 0 : 1;
+	Math::TVector3Batch<float, N> zero = Math::TVector3Batch<float, N>(Math::FVector3(0.0f));
+	failures += simd_all(Math::Length(Math::Normalized(zero)) == 0.0f) ? 0 : 1;   // a zero vector stays zero
+	return failures;
+}
+
+template<uint32 N> int32 TransformFailures() {
+	Math::Mat4 world = Math::TransformMatrix(Math::FVector3(1.0f, -2.0f, 3.0f), Math::FVector3(0.3f, -0.7f, 0.2f), Math::FVector3(2.0f, 1.0f, 0.5f));
+	Math::Quat spin = Math::AngleAxis(1.1f, Math::FVector3(0.2f, 1.0f, -0.4f));
+	Math::TVector3Batch<float, N> p = SampleBatch<N>(3, 4.0f);
+	Math::FVector3[16] points;
+	Math::FVector3[16] directions;
+	Math::FVector3[16] rotated;
+	Math::FVector3[16] fourth;
+	for (int32 i = 0; i < (int32)N; ++i) {
+		points[i] = world.TransformPoint(p.Get(i));
+		directions[i] = world.TransformDirection(p.Get(i));
+		rotated[i] = spin * p.Get(i);
+		fourth[i] = Math::FVector3(world * Math::FVector4(p.Get(i), 2.0f));
+	}
+	int32 failures = 0;
+	failures += MatchesEach<N>(Math::TransformPoint(world, p), points) ? 0 : 1;
+	failures += MatchesEach<N>(Math::TransformDirection(world, p), directions) ? 0 : 1;
+	failures += MatchesEach<N>(Math::Rotate(spin, p), rotated) ? 0 : 1;
+	failures += MatchesEach<N>(Math::TransformVector(world, Math::TVector4Batch<float, N>(p, 2.0f)).Xyz(), fourth) ? 0 : 1;
+	return failures;
+}
+
+template<uint32 N> int32 ComponentFailures() {
+	Math::TVector3Batch<float, N> a = SampleBatch<N>(0, 2.0f);
+	Math::TVector3Batch<float, N> b = SampleBatch<N>(5, 3.0f);
+	Math::FVector3[16] low;
+	Math::FVector3[16] high;
+	Math::FVector3[16] between;
+	Math::FVector3[16] chosen;
+	packed bool[N] first;
+	for (int32 i = 0; i < (int32)N; ++i) {
+		low[i] = Math::Min(a.Get(i), b.Get(i));
+		high[i] = Math::Max(a.Get(i), b.Get(i));
+		between[i] = Math::Lerp(a.Get(i), b.Get(i), 0.25f);
+		first[i] = i % 3 == 0;
+		chosen[i] = first[i] ? a.Get(i) : b.Get(i);
+	}
+	int32 failures = 0;
+	failures += MatchesEach<N>(Math::Min(a, b), low) ? 0 : 1;
+	failures += MatchesEach<N>(Math::Max(a, b), high) ? 0 : 1;
+	failures += MatchesEach<N>(Math::Lerp(a, b, 0.25f), between) ? 0 : 1;
+	failures += MatchesEach<N>(Math::Select(first, a, b), chosen) ? 0 : 1;
+	return failures;
+}
+
+template<uint32 N> int32 LoadStoreFailures() {
+	Math::FVector3[16] vectors;
+	Math::FVector4[16] wide;
+	for (int32 i = 0; i < 16; ++i) {
+		vectors[i] = Sample(i, 1.5f);
+		wide[i] = Math::FVector4(vectors[i], (float)i);
+	}
+	Math::TVector3Batch<float, N> loaded = Math::TVector3Batch<float, N>::Load(&vectors[0]);
+	int32 failures = MatchesEach<N>(loaded, vectors) ? 0 : 1;
+	Math::FVector3[16] stored;
+	(loaded * 2.0f).Store(&stored[0]);
+	for (int32 i = 0; i < (int32)N; ++i) failures += Math::NearlyEqual(stored[i], vectors[i] * 2.0f, kBatchTolerance) ? 0 : 1;
+	Math::TVector4Batch<float, N> four = Math::TVector4Batch<float, N>::Load(&wide[0]);
+	for (int32 i = 0; i < (int32)N; ++i) failures += four.Get(i) == wide[i] ? 0 : 1;
+	Math::FVector4[16] wideOut;
+	four.Store(&wideOut[0]);
+	failures += wideOut[N - 1] == wide[N - 1] ? 0 : 1;
+	return failures;
+}
+
+[test("math.batch")]
+class MathBatchTests {
+	[test("layout")]
+	public static void TestLayout() {
+		assert_eq(96, (int32)sizeof(Math::FVector3x8), "three 8-lane registers");
+		assert_eq(32, (int32)alignof(Math::FVector3x8), "aligned as an AVX register");
+		assert_eq(256, (int32)sizeof(Math::FVector4x16), "four 16-lane registers");
+		assert_eq(48, (int32)sizeof(Math::FVector3x4), "three SSE registers");
+	}
+
+	[test("construction")]
+	public static void TestConstruction() {
+		Math::FVector3x8 same = Math::FVector3x8(Math::FVector3(1.0f, 2.0f, 3.0f));
+		assert_true(same.Get(0) == Math::FVector3(1.0f, 2.0f, 3.0f) && same.Get(7) == same.Get(0), "every vector of a batch from one");
+		Math::FVector3x8 lanes = Math::FVector3x8(simd_splat(1.0f, 8), simd_splat(2.0f, 8), simd_splat(3.0f, 8));
+		assert_true(lanes.Get(5) == Math::FVector3(1.0f, 2.0f, 3.0f), "from the components' lanes");
+		lanes.Set(5, Math::FVector3(9.0f));
+		assert_true(lanes.Get(5) == Math::FVector3(9.0f) && lanes.Get(4) == Math::FVector3(1.0f, 2.0f, 3.0f), "Set writes one vector");
+	}
+
+	[test("arithmetic")]
+	public static void TestArithmetic() {
+		assert_eq(0, ArithmeticFailures<4>() + ArithmeticFailures<8>() + ArithmeticFailures<16>(), "lane i is vector i's arithmetic");
+	}
+
+	[test("products")]
+	public static void TestProducts() {
+		assert_eq(0, ProductFailures<4>() + ProductFailures<8>() + ProductFailures<16>(), "dot, cross, length and normalize per vector");
+	}
+
+	[test("transforms")]
+	public static void TestTransforms() {
+		assert_eq(0, TransformFailures<4>() + TransformFailures<8>() + TransformFailures<16>(), "points, directions and rotations per vector");
+	}
+
+	[test("components")]
+	public static void TestComponents() {
+		assert_eq(0, ComponentFailures<4>() + ComponentFailures<8>() + ComponentFailures<16>(), "min, max, lerp and select per vector");
+	}
+
+	[test("load_store")]
+	public static void TestLoadStore() {
+		assert_eq(0, LoadStoreFailures<4>() + LoadStoreFailures<8>() + LoadStoreFailures<16>(), "batches to and from arrays of vectors");
+	}
+
+	[test("strided_lanes")]
+	public static void TestStridedLanes() {
+		packed int32[8] lanes = Math::StridedLanes<8>(3);
+		assert_true(lanes[0] == 0 && lanes[1] == 3 && lanes[7] == 21, "0, 3, 6, ...");
+	}
+}

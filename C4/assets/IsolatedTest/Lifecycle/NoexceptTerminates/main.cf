@@ -1,0 +1,9 @@
+// An exception that would leave a noexcept function stops the program instead (D-13).
+void Thrower() { throw 5; }
+void Guarded() noexcept { Thrower(); }
+
+int32 main() {
+	try { Guarded(); }
+	catch (...) { printf("SHOULD NOT REACH HERE\n"); return 0; }
+	return 0;
+}

@@ -1,0 +1,10 @@
+int32 main() {
+    int32[10] arr;
+    int32* pa = &arr[0];
+    int32* pb = &arr[5];
+    bool lt = (pa < pb);
+    bool gt = (pb > pa);
+    bool le = (pa <= pb);
+    bool eq = (pa == pb);
+    return (lt && gt && le && !eq) ? 0 : 1;
+}

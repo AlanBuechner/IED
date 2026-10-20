@@ -1,0 +1,7 @@
+namespace Shapes {
+	union Extent {
+		public int32 whole;
+		public Missing part;
+	}
+}
+int32 main() { return 0; }

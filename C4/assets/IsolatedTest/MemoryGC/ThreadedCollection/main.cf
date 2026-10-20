@@ -1,0 +1,78 @@
+// Several threads allocate, link and walk managed objects while collections run on any of them (D-48): every
+// thread's registers, stack and allocation cache count, so no object a thread still holds is freed under it.
+// main returns the failures.
+struct Node {
+	public Node* next;
+	public int64 value;
+}
+
+struct Garbage { public int64[6] words; }
+
+struct Worker {
+	public int32 index;
+	public int32 failures;
+}
+
+const int32 kWorkers = 8;
+const int32 kRounds = 30;
+const int32 kNodes = 400;
+
+Node* Build(int64 seed) {
+	Node* head = null;
+	for (int32 i = 0; i < kNodes; i++) {
+		Node* node = new Node;
+		node->value = seed + i;
+		node->next = head;
+		head = node;
+	}
+	return head;
+}
+
+int64 Sum(Node* head) {
+	int64 total = 0;
+	for (Node* n = head; n != null; n = n->next) total += n->value;
+	return total;
+}
+
+int64 Expected(int64 seed) { return seed * kNodes + (int64)kNodes * (kNodes - 1) / 2; }
+
+void Churn(int32 count) {
+	for (int32 i = 0; i < count; i++) {
+		Garbage* g = new Garbage;
+		g->words[0] = i;
+	}
+}
+
+void Run(void* state) {
+	Worker* w = (Worker*)state;
+	Node* kept = Build(w->index * 1000);
+	for (int32 round = 0; round < kRounds; round++) {
+		int64 seed = w->index * 100000 + round;
+		Node* head = Build(seed);
+		Churn(3000);
+		if (round % 7 == w->index % 7) gc_collect();
+		if (Sum(head) != Expected(seed)) w->failures++;
+	}
+	if (Sum(kept) != Expected(w->index * 1000)) w->failures++;
+}
+
+int32 main() {
+	Worker*[kWorkers] workers;
+	void*[kWorkers] threads;
+	for (int32 i = 0; i < kWorkers; i++) {
+		workers[i] = new Worker;
+		workers[i]->index = i;
+		threads[i] = thread_start(Run, (void*)workers[i]);
+		if (threads[i] == null) return 100;
+	}
+	Node* mine = Build(7);
+	for (int32 i = 0; i < 20; i++) { Churn(1000); gc_collect(); }
+	int32 failures = 0;
+	for (int32 i = 0; i < kWorkers; i++) {
+		thread_join(threads[i]);
+		failures += workers[i]->failures;
+	}
+	if (Sum(mine) != Expected(7)) failures++;
+	if (gc_collections() < 20) failures++;
+	return failures;
+}

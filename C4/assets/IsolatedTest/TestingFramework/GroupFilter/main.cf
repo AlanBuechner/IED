@@ -1,0 +1,8 @@
+// --filter <glob> runs only the cases whose name matches; fixtures still bracket the run.
+int32 g_setup = 0;
+[test_setup] void Prepare() { g_setup++; }
+[test_teardown] void Finish() { assert_eq(1, g_setup, "the setup ran once"); }
+
+[test("keep.one")] void TestKeepOne() { assert_true(1, "kept"); }
+[test("keep.two")] void TestKeepTwo() { assert_true(1, "kept"); }
+[test("drop.one")] void TestDrop() { assert_true(0, "this case is filtered out and must not run"); }

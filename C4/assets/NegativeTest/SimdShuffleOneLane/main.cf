@@ -1,0 +1,5 @@
+int32 main() {
+	packed float[4] a = 1.0f;
+	float r = simd_shuffle(a, 3);
+	return 0;
+}

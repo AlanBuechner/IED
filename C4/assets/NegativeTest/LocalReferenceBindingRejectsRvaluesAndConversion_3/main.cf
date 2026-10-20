@@ -1,0 +1,2 @@
+int32 Get() { return 1; }
+int main() { int32& r = Get(); return 0; }

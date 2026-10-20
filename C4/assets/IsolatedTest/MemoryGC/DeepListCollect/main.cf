@@ -1,0 +1,36 @@
+// BUG-031 / BUG-032: marking a million-node list. A recursive mark overflows the C stack, and matching each
+// word against the whole live list takes hours; the collector marks it with an explicit stack and finds each
+// object in O(1).
+include "Memory/gc.ch"
+
+struct Node { public int64 value; public Node* next; }
+
+const int32 kNodes = 1000000;
+const uint64 kMaxPauseNs = 3000000000;
+
+Node* MakeList(int32 n) {
+	Node* head = null;
+	for (int32 i = 0; i < n; i++) {
+		Node* node = new Node;
+		node->value = i;
+		node->next = head;
+		head = node;
+	}
+	return head;
+}
+
+int64 Sum(Node* head) {
+	int64 s = 0;
+	for (Node* p = head; p != null; p = p->next) s += p->value;
+	return s;
+}
+
+int32 main() {
+	Node* list = MakeList(kNodes);
+	for (int32 round = 0; round < 3; round++) GC::Collect();
+	if (Sum(list) != (int64)kNodes * (kNodes - 1) / 2) return 1;
+	if (GC::GetStats().lastPauseNs > kMaxPauseNs) return 2;
+	if (GC::GetStats().liveBytes < (uint64)kNodes * sizeof(Node)) return 3;
+	printf("DEEP LIST OK\n");
+	return 0;
+}

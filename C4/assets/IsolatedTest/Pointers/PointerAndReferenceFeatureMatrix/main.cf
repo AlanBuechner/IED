@@ -1,0 +1,342 @@
+struct Pt { int32 x; int32 y; };
+
+[test("ptr.basic.int_store")]
+public static void P01() {
+    int32 v = 7;
+    int32* p = &v;
+    *p = 42;
+    assert_eq(42, v, "store through int32*");
+    assert_eq(42, *p, "load through int32*");
+}
+
+[test("ptr.basic.float_store")]
+public static void P02() {
+    float f = 1.5;
+    float* pf = &f;
+    *pf = 9.25;
+    assert_feq(9.25, f, 0.001, "store through float*");
+    assert_feq(9.25, *pf, 0.001, "load through float*");
+}
+
+[test("ptr.basic.char_store")]
+public static void P03() {
+    char c = 'a';
+    char* pc = &c;
+    *pc = 'z';
+    assert_eq('z', c, "store through char*");
+}
+
+[test("ptr.basic.paren_deref_store")]
+public static void P04() {
+    float something = 1.0;
+    float other = 5.5;
+    float* val = &something;
+    (*val) = other;
+    assert_feq(5.5, something, 0.001, "(*val) = other");
+}
+
+[test("ptr.double.read")]
+public static void P05() {
+    int32 x = 5;
+    int32* p = &x;
+    int32** pp = &p;
+    assert_eq(5, *(*pp), "double deref read");
+}
+
+[test("ptr.double.store")]
+public static void P06() {
+    int32 x = 1;
+    int32* p = &x;
+    int32** pp = &p;
+    *(*pp) = 9;
+    assert_eq(9, x, "double deref store");
+}
+
+[test("ptr.double.mid_single")]
+public static void P07() {
+    int32 x = 5;
+    int32* p = &x;
+    int32** pp = &p;
+    int32* q = *pp;
+    assert_eq(5, *q, "single deref of double ptr");
+}
+
+[test("ptr.compound.plus")]
+public static void P08() {
+    int32 x = 10;
+    int32* p = &x;
+    *p += 5;
+    assert_eq(15, x, "*p += 5");
+}
+
+[test("ptr.compound.minus_mul")]
+public static void P09() {
+    int32 x = 20;
+    int32* p = &x;
+    *p -= 8;
+    assert_eq(12, x, "*p -= 8");
+    *p *= 2;
+    assert_eq(24, x, "*p *= 2");
+}
+
+[test("ptr.deref_in_condition")]
+public static void P10() {
+    int32 x = 3;
+    int32* p = &x;
+    bool ok = (*p > 2);
+    assert_true(ok, "deref in comparison");
+}
+
+[test("ptr.deref_read_modify_write")]
+public static void P11() {
+    int32 x = 1;
+    int32* p = &x;
+    *p = *p + 4;
+    assert_eq(5, x, "read-modify-write via ptr");
+}
+
+[test("ptr.deref_in_arith")]
+public static void P12() {
+    int32 a = 6; int32 b = 7;
+    int32* pa = &a; int32* pb = &b;
+    int32 sum = (*pa) + (*pb);
+    assert_eq(13, sum, "deref in arithmetic");
+}
+
+[test("ptr.struct_field_addr")]
+public static void P13() {
+    Pt s; s.x = 1; s.y = 2;
+    int32* px = &s.x;
+    *px = 100;
+    assert_eq(100, s.x, "store through &struct.field");
+}
+
+[test("ptr.struct_ptr_field")]
+public static void P14() {
+    Pt s; s.x = 3; s.y = 4;
+    Pt* sp = &s;
+    sp->x = 30;
+    assert_eq(30, s.x, "struct ptr member store");
+    assert_eq(4, sp->y, "struct ptr member load");
+}
+
+void Bump(int32* p, int32 amt) { *p = *p + amt; }
+int32 ReadPtr(int32* p) { return *p; }
+
+[test("ptr.param_mutate")]
+public static void P15() {
+    int32 x = 10;
+    Bump(&x, 5);
+    assert_eq(15, x, "mutated via pointer param");
+}
+
+[test("ptr.param_read")]
+public static void P16() {
+    int32 x = 77;
+    assert_eq(77, ReadPtr(&x), "read via pointer param");
+}
+
+int32 RefRead(int32& r) { return r; }
+void RefWrite(int32& r, int32 v) { r = v; }
+void RefCompound(int32& r) { r = r + 10; }
+
+[test("ref.param_read")]
+public static void P17() {
+    int32 x = 12;
+    assert_eq(12, RefRead(x), "read through ref param");
+}
+
+[test("ref.param_write")]
+public static void P18() {
+    int32 x = 1;
+    RefWrite(x, 55);
+    assert_eq(55, x, "write through ref param");
+}
+
+[test("ref.param_compound")]
+public static void P19() {
+    int32 x = 40;
+    RefCompound(x);
+    assert_eq(50, x, "compound write through ref param");
+}
+
+int32 g_refGlobal;
+void RefWriteGlobal(int32& r) { r = 88; }
+[test("ref.param_to_global")]
+public static void P20() {
+    RefWriteGlobal(g_refGlobal);
+    assert_eq(88, g_refGlobal, "ref param bound to global");
+}
+
+int32* RetIntPtr(int32 v) { static int32 h = 0; h = v; return &h; }
+
+[test("ptr.return_int_deref")]
+public static void P21() {
+    int32* p = RetIntPtr(42);
+    assert_eq(42, *p, "deref returned int32*");
+}
+
+[test("ptr.array_index")]
+public static void P22() {
+    int32[4] arr;
+    arr[0]=1; arr[1]=2; arr[2]=3; arr[3]=4;
+    int32* p = &arr[0];
+    assert_eq(3, p[2], "index via pointer to array");
+    p[2] = 99;
+    assert_eq(99, arr[2], "store via pointer index");
+}
+
+[test("ptr.array_walk")]
+public static void P23() {
+    int32[3] a; a[0]=10; a[1]=20; a[2]=30;
+    int32* p = &a[0];
+    int32 sum = 0;
+    for (int32 i=0;i<3;i++) sum = sum + p[i];
+    assert_eq(60, sum, "walk array via pointer");
+}
+
+[test("ptr.equality")]
+public static void P24() {
+    int32 x = 1; int32 y = 2;
+    int32* px = &x; int32* py = &y; int32* px2 = &x;
+    assert_true(px == px2, "same address equal");
+    assert_true(px != py, "different addresses not equal");
+}
+
+[test("ptr.null_check")]
+public static void P25() {
+    int32* p = null;
+    assert_true(p == null, "null pointer equals null");
+    int32 x = 5;
+    int32* q = &x;
+    assert_true(q != null, "non-null pointer not equal null");
+}
+
+[test("ptr.void_cast")]
+public static void P26() {
+    int32 x = 123;
+    int32* pi = &x;
+    void* pv = (void*)pi;
+    int32* back = (int32*)pv;
+    assert_eq(123, *back, "void* round-trip");
+}
+
+template<T>
+int32 TplFirst(T* a) { return a[0]; }
+
+[test("tpl.ptr_param")]
+public static void P27() {
+    int32[3] a; a[0]=7; a[1]=8; a[2]=9;
+    assert_eq(7, TplFirst<int32>(&a[0]), "template fn with int32* param");
+}
+
+struct Buf {
+    int32* data;
+    int32 n;
+    [operator("create")] public void Init(int32 cap) { this->data = (int32*)raw_alloc(cap*4); this->n = 0; }
+    [operator("delete")] public void Free() { raw_free(this->data); this->data = null; }
+    [operator("index")] public int32 Index(int32 i) { return this->data[i]; }
+};
+
+[test("op.ptr_struct_index")]
+public static void P28() {
+    Buf* a = new Buf(4);
+    a->data[0]=1; a->data[1]=2; a->n=2;
+    assert_eq(1, a->operator_index(0), "custom index op on ptr-buffer struct");
+    assert_eq(2, a->operator_index(1), "custom index op second elem");
+    delete a;
+}
+
+[test("ptr.narrow.char")]
+public static void P29() {
+    char c = 'a';
+    char* pc = &c;
+    *pc = 'z';
+    assert_eq('z', c, "char* store coerced to i8");
+}
+
+[test("ptr.narrow.bool_uint8")]
+public static void P30() {
+    bool b = false;
+    bool* pb = &b;
+    *pb = true;
+    assert_true(b, "bool* store");
+    uint8 u = 0;
+    uint8* pu = &u;
+    *pu = 200;
+    assert_eq(200, u, "uint8* store");
+}
+
+[test("ptr.narrow.mixed_widths")]
+public static void P31() {
+    char c = 'x'; int32 v = 0; float f = 0.0;
+    char* pc = &c; int32* pi = &v; float* pf = &f;
+    *pc = 'q'; *pi = 7; *pf = 3.5;
+    assert_true(c == 'q' && v == 7, "mixed narrow/wide stores");
+    assert_feq(3.5, f, 0.001, "float store alongside narrow");
+}
+
+struct Agg { int32 x; int32 y; };
+Agg* RetAggPtr(int32 v) { static Agg s; s.x = v; s.y = 7; return &s; }
+
+[test("ptr.return_agg_static")]
+public static void P32() {
+    Agg* p = RetAggPtr(42);
+    assert_eq(42, p->x, "static-local agg field x");
+    assert_eq(7, p->y, "static-local agg field y");
+}
+
+[test("ptr.return_agg_static_second")]
+public static void P33() {
+    Agg* p = RetAggPtr(99);
+    assert_eq(99, p->x, "static-local agg updated x");
+    assert_eq(7, p->y, "static-local agg y persists");
+}
+
+Agg g_agg;
+
+[test("ptr.global_struct_field")]
+public static void P34() {
+    g_agg.x = 5;
+    g_agg.y = 6;
+    assert_eq(5, g_agg.x, "global struct field x");
+    assert_eq(6, g_agg.y, "global struct field y");
+}
+
+// Regression: a reference parameter forwarded as an argument to ANOTHER ref-parameter method used
+// to pass the address of the shadow slot, so the callee read one indirection too deep and hashed/
+// compared garbage (HashMap with const K&/const V& produced wrong results / infinite loops). Two
+// out-of-line template methods, one forwarding its ref param to the other, plus a two-ref-param
+// method that takes &param - this exact shape is what broke.
+uint32 RHash(const char* p, int32 n) { uint32 h = 2166136261u; for (int32 i = 0; i < n; i++) { h = h * 16777619u; h = h ^ (uint32)byte_at(p, i); } return h; }
+bool REq(const char* a, const char* b, int32 n) { for (int32 i = 0; i < n; i++) if (byte_at(a, i) != byte_at(b, i)) return false; return true; }
+template<K, V> class RMap {
+    K* keys; V* vals; char* st; int32 cap;
+public:
+    [operator("create")] public void Init(int32 c);
+    public bool Insert(const K& k, const V& v);   // two ref params, takes &k
+    public int32 FindSlot(const K& k);            // one ref param
+    public bool Contains(const K& k) { return FindSlot(k) >= 0; }  // forwards its ref param to FindSlot
+};
+template<K, V>
+public void RMap::Init(int32 c) { this->cap = c; this->keys = (K*)raw_alloc(c*sizeof(K)); this->vals = (V*)raw_alloc(c*sizeof(V)); this->st = (char*)raw_alloc(c); for (int32 i=0;i<c;i++) set_byte(this->st, i, 0); }
+template<K, V>
+public bool RMap::Insert(const K& k, const V& v) {
+    int32 mask = this->cap - 1; uint32 h = RHash((const char*)&k, sizeof(K)); int32 i = (int32)(h & (uint32)mask);
+    while (true) { int32 s = byte_at(this->st, i); if (s == 0) { set_byte(this->st, i, 1); this->keys[i] = k; this->vals[i] = v; return true; } i = (i + 1) & mask; }
+}
+template<K, V>
+public int32 RMap::FindSlot(const K& k) {
+    if (this->cap == 0) return -1; int32 mask = this->cap - 1; uint32 h = RHash((const char*)&k, sizeof(K)); int32 i = (int32)(h & (uint32)mask);
+    while (true) { int32 s = byte_at(this->st, i); if (s == 0) return -1; if (s == 1 && REq((const char*)&this->keys[i], (const char*)&k, sizeof(K))) return i; i = (i + 1) & mask; }
+}
+[test("ref.param_forward_to_ref_method")]
+public static void P35() {
+    RMap<int32,int32>* m = new RMap<int32,int32>(4);
+    assert_true(m->Insert(1, 10), "insert returns true");
+    assert_true(m->Contains(1), "contains finds key after insert (ref param forwarded)");
+    assert_true(m->FindSlot(1) >= 0, "findslot locates the entry");
+    assert_true(m->Insert(9, 90), "second insert ok");
+    assert_true(m->Contains(9), "second key found via forwarded ref param");
+    assert_true(m->Contains(7) == false, "absent key not found (no false positive)");
+}

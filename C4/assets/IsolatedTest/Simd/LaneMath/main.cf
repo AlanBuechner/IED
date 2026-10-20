@@ -1,0 +1,103 @@
+// The lane-wise SIMD intrinsics (D-62): min / max (the SSE rule: a NaN gives the second operand), abs, sqrt,
+// floor / ceil / round / trunc and muladd, on 2 to 16 lanes, floats, doubles and integers, with scalar arguments
+// broadcast and pure packed vector objects read as their lanes. main returns the failures.
+struct Vec4 { public union { packed float x, y, z, w; packed float[4] data; }; }
+
+int32 Differs(float actual, float expected) { return actual == expected ? 0 : 1; }
+int32 DiffersD(double actual, double expected) { return actual == expected ? 0 : 1; }
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 MinAndMax() {
+	int32 failures = 0;
+	packed float[4] a = { 1.0f, -2.0f, 3.0f, -0.5f };
+	packed float[4] b = { 0.5f, -1.0f, 4.0f, -0.5f };
+	packed float[4] low = simd_min(a, b);
+	packed float[4] high = simd_max(a, b);
+	failures += Differs(low[0], 0.5f) + Differs(low[1], -2.0f) + Differs(low[2], 3.0f) + Differs(low[3], -0.5f);
+	failures += Differs(high[0], 1.0f) + Differs(high[1], -1.0f) + Differs(high[2], 4.0f) + Differs(high[3], -0.5f);
+	packed float[4] clamped = simd_min(simd_max(a, 0.0f), 2.0f);  // scalars broadcast
+	failures += Differs(clamped[0], 1.0f) + Differs(clamped[1], 0.0f) + Differs(clamped[2], 2.0f) + Differs(clamped[3], 0.0f);
+	float zero = 0.0f;
+	float nan = zero / zero;
+	packed float[2] withNan = { nan, 1.0f };
+	packed float[2] other = { 5.0f, nan };
+	packed float[2] nanLow = simd_min(withNan, other);
+	failures += Differs(nanLow[0], 5.0f);           // a NaN in either lane gives the second operand
+	failures += nanLow[1] != nanLow[1] ? 0 : 1;
+	packed int32[4] si = { -7, 3, -2147483647 - 1, 9 };
+	packed int32[4] sj = { 2, -3, 0, 9 };
+	failures += DiffersI(simd_min(si, sj)[0], -7) + DiffersI(simd_max(si, sj)[1], 3) + DiffersI(simd_min(si, sj)[2], -2147483647 - 1);
+	packed uint32[4] ui = { 4000000000u, 1u, 7u, 0u };
+	packed uint32[4] uj = { 1u, 2u, 7u, 3000000000u };
+	failures += DiffersI(simd_max(ui, uj)[0], 4000000000) + DiffersI(simd_min(ui, uj)[0], 1) + DiffersI(simd_max(ui, uj)[3], 3000000000);
+	packed int8[16] bytes = { 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 127, -128 };
+	packed int8[16] floorOfBytes = simd_max(bytes, (int8)-2);
+	failures += DiffersI(floorOfBytes[5], -2) + DiffersI(floorOfBytes[14], 127) + DiffersI(floorOfBytes[15], -2);
+	return failures;
+}
+
+int32 AbsoluteValues() {
+	int32 failures = 0;
+	packed float[8] f = { -1.0f, 2.0f, -0.0f, -3.5f, 4.0f, -5.0f, 6.0f, -7.0f };
+	packed float[8] af = simd_abs(f);
+	failures += Differs(af[0], 1.0f) + Differs(af[3], 3.5f) + Differs(af[7], 7.0f);
+	failures += 1.0f / af[2] > 0.0f ? 0 : 1;        // -0 loses its sign
+	packed int32[4] i = { -5, 5, -2147483647 - 1, 0 };
+	packed int32[4] ai = simd_abs(i);
+	failures += DiffersI(ai[0], 5) + DiffersI(ai[1], 5) + DiffersI(ai[2], -2147483647 - 1) + DiffersI(ai[3], 0);  // the most negative stays itself
+	packed uint16[4] u = { 1, 65535, 3, 0 };
+	failures += DiffersI(simd_abs(u)[1], 65535);    // unsigned lanes are their own absolute value
+	packed double[2] d = { -2.25, 8.0 };
+	failures += DiffersD(simd_abs(d)[0], 2.25);
+	return failures;
+}
+
+int32 Rounding() {
+	int32 failures = 0;
+	packed float[8] v = { 1.5f, -1.5f, 2.5f, -2.5f, 0.49f, -0.49f, 7.0f, -7.75f };
+	packed float[8] fl = simd_floor(v);
+	packed float[8] ce = simd_ceil(v);
+	packed float[8] ro = simd_round(v);
+	packed float[8] tr = simd_trunc(v);
+	failures += Differs(fl[0], 1.0f) + Differs(fl[1], -2.0f) + Differs(fl[7], -8.0f);
+	failures += Differs(ce[0], 2.0f) + Differs(ce[1], -1.0f) + Differs(ce[4], 1.0f) + Differs(ce[7], -7.0f);
+	failures += Differs(ro[0], 2.0f) + Differs(ro[1], -2.0f) + Differs(ro[2], 3.0f) + Differs(ro[3], -3.0f);  // halves away from zero
+	failures += Differs(ro[4], 0.0f) + Differs(ro[5], 0.0f) + Differs(ro[6], 7.0f);
+	failures += Differs(tr[0], 1.0f) + Differs(tr[1], -1.0f) + Differs(tr[7], -7.0f);
+	packed double[4] d = { 2.5, -0.5, 1e15 + 0.5, -3.25 };
+	failures += DiffersD(simd_round(d)[0], 3.0) + DiffersD(simd_floor(d)[1], -1.0) + DiffersD(simd_trunc(d)[3], -3.0);
+	return failures;
+}
+
+int32 RootsAndMultiplyAdd() {
+	int32 failures = 0;
+	packed float[3] squares = { 4.0f, 9.0f, 0.25f };
+	packed float[3] roots = simd_sqrt(squares);
+	failures += Differs(roots[0], 2.0f) + Differs(roots[1], 3.0f) + Differs(roots[2], 0.5f);
+	packed double[2] dsq = { 16.0, 2.0 };
+	failures += DiffersD(simd_sqrt(dsq)[0], 4.0);
+	packed float[4] a = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] r = simd_muladd(a, 2.0f, 0.5f);
+	failures += Differs(r[0], 2.5f) + Differs(r[3], 8.5f);
+	packed float[16] wide = simd_splat(3.0f, 16);
+	packed float[16] wr = simd_muladd(wide, wide, wide);
+	failures += Differs(wr[15], 12.0f);
+	return failures;
+}
+
+int32 ObjectOperands() {
+	int32 failures = 0;
+	Vec4 a;
+	a.data = { 1.0f, -2.0f, 3.0f, -4.0f };
+	Vec4 b;
+	b.data = 0.0f;
+	packed float[4] m = simd_max(a, b);    // a pure packed vector reads as its lanes
+	failures += Differs(m[0], 1.0f) + Differs(m[1], 0.0f) + Differs(m[3], 0.0f);
+	Vec4 back = simd_abs(a);              // and the lanes convert back to the object
+	failures += Differs(back.w, 4.0f);
+	return failures;
+}
+
+int32 main() {
+	return MinAndMax() + AbsoluteValues() + Rounding() + RootsAndMultiplyAdd() + ObjectOperands();
+}

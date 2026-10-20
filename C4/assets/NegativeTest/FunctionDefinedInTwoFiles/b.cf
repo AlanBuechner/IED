@@ -1,0 +1,1 @@
+int32 Helper(int32 x) { return x * 100; }

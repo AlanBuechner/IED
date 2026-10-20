@@ -1,0 +1,41 @@
+// Regression: sizeof(expression) inside a template body where the operand is a by-value
+// aggregate parameter (or local). Two distinct defects were locked here:
+//   1. Cross-version aliasing - H<int32> emitted a call to @G_Boxint64 because every
+//      instantiation shared the original bare-param G<Box<T>>(b) call node and HIR's
+//      functionCallMangledNames held whichever key was recorded last. Fixed by substituting
+//      FunctionCallNode template args at production time (each body owns a concrete call).
+//   2. sizeof(x) -> NULL type in template bodies - semantic suppresses resolvedQualTypes
+//      recording under an active template scope, and HIR's fallback only resolved TYPE names,
+//      so a VALUE operand (param/local) resolved to null and the return lowered to `ret void`.
+//      Fixed by resolving a bare-name sizeof target as a variable when it is not a type.
+// The distinct-size assertion catches BOTH: aliasing makes r1==r2; the NULL-type bug fails to compile.
+template<T> struct Box { public T v; };
+template<T> int32 G(T x) { return sizeof(x); }
+template<T> int32 H(Box<T> b) { return G<Box<T>>(b); }
+
+// Multi-field by-value aggregate param: sizeof must be the full layout (8), not one field.
+template<T> struct Pair { public T a; public T b; }
+template<T> int32 S(Pair<T> p) { return sizeof(p); }
+
+// Local-variable sizeof in a template body (same NULL-type defect, local instead of param).
+template<T> int32 L(T t) { Box<int64> x; x.v = 1; return sizeof(x); }
+
+// Pointer param: pointer-width (8), must not unwrap to the pointee.
+template<T> int32 P(T* p) { return sizeof(p); }
+
+int32 main() {
+	Box<int32> a; a.v = 1;
+	Box<int64> c; c.v = 2;
+	int32 r1 = H<int32>(a);   // sizeof(Box<int32>) == 4
+	int32 r2 = H<int64>(c);   // sizeof(Box<int64>) == 8
+	if (r1 != 4 || r2 != 8) return 1;
+
+	Pair<int32> pr; pr.a = 0; pr.b = 0;
+	if (S<int32>(pr) != 8) return 1;
+
+	if (L<int32>(0) != 8) return 1;
+
+	int32 g = 5;
+	if (P<int32>(&g) != 8) return 1;
+	return 0;
+}

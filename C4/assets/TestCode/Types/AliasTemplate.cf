@@ -1,0 +1,26 @@
+// Types - Alias Template Tests (implementation)
+include "../Framework/Assert.ch"
+include "AliasTemplate.ch"
+
+template<T> alias TplVec = T[8];
+template<T> alias TplPtr = T*;
+
+void TestAliasTemplate() {
+	// Array-of-int32 instantiation
+	TplVec<int32> a;
+	a[0] = 10;
+	a[7] = 90;
+	AssertIntEquals(100, a[0] + a[7], "alias template vec int32");
+
+	// Same template instantiated with uint64 (distinct instantiation)
+	TplVec<uint64> b;
+	b[0] = 5;
+	b[1] = 7;
+	AssertIntEquals(12, (int32)(b[0] + b[1]), "alias template vec uint64");
+
+	// Pointer instantiation
+	int32 x = 42;
+	TplPtr<int32> p = &x;
+	*p = 7;
+	AssertIntEquals(7, x, "alias template ptr int32");
+}

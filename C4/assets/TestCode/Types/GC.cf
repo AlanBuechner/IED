@@ -1,0 +1,117 @@
+// Types - Garbage Collector (managed heap) Tests (implementation)
+// Exercises the v1 Go-style stop-the-world mark-sweep collector end-to-end:
+// allocation, [operator("create")] constructors, aggregate init, delete + finalizers,
+// liveness under churn, manual collect, stats, and bounded memory under cycle churn.
+include "../Framework/Assert.ch"
+include "GC.ch"
+
+struct GCNode { int32 id; GCNode* next; };
+struct GCChunk { int32 a; int32 b; int32 c; int32 d; };
+
+int32 g_gc_finalized = 0;
+struct GCWidget {
+	int32 value;
+	[operator("create")] void Init(int32 v) { value = v * 2; }
+	[operator("delete")] void Finalize() { g_gc_finalized++; }
+};
+
+struct GCVec2 { float x; float y; };
+
+GCNode* g_gc_a;
+GCNode* g_gc_b;
+
+void GCMkAndDropCycle() {
+	GCNode* a = new GCNode;
+	GCNode* b = new GCNode;
+	a->id = 100;
+	b->id = 200;
+	a->next = b;
+	b->next = a;
+	g_gc_a = a;
+	g_gc_b = b;
+	g_gc_a = nullptr;   // drop the only external references (inside this frame)
+	g_gc_b = nullptr;
+}
+
+void TestGC() {
+	// --- Basic alloc + field round-trip ---
+	GCChunk* c = new GCChunk;
+	Assert(c != nullptr, "gc: alloc returns non-null");
+	c->a = 10; c->b = 20; c->c = 30; c->d = 40;
+	AssertIntEquals(10, c->a, "gc: field a");
+	AssertIntEquals(20, c->b, "gc: field b");
+	AssertIntEquals(30, c->c, "gc: field c");
+	AssertIntEquals(40, c->d, "gc: field d");
+
+	// --- new T(args) runs the [operator("create")] constructor ---
+	GCWidget* w = new GCWidget(21);
+	Assert(w != nullptr, "gc: ctor alloc non-null");
+	AssertIntEquals(42, w->value, "gc: create constructor ran with arg");
+
+	// --- new T{...} aggregate init (no create constructor) ---
+	GCVec2* v = new GCVec2{ 1.5f, -2.5f };
+	Assert(v != nullptr, "gc: aggregate alloc non-null");
+	AssertFloatEquals(1.5f, v->x, "gc: aggregate x");
+	AssertFloatEquals(-2.5f, v->y, "gc: aggregate y");
+
+	// --- new <primitive> heap-allocates a scalar (regression: EmitNew used a static base->derived cast on the
+	// allocated type and dereferenced the garbage pointer for non-object types -> compiler AV). c4_alloc zeroes
+	// the storage, so a fresh primitive reads back as zero before we write it. ---
+	int32* pi = new int32;
+	Assert(pi != nullptr, "gc: primitive (int32) alloc non-null");
+	AssertIntEquals(0, *pi, "gc: fresh primitive is zeroed");
+	*pi = 1234;
+	AssertIntEquals(1234, *pi, "gc: primitive round-trip through heap");
+	delete pi;
+	float* pf = new float;
+	Assert(pf != nullptr, "gc: primitive (float) alloc non-null");
+	*pf = 2.5f;
+	AssertFloatEquals(2.5f, *pf, "gc: float round-trip through heap");
+	delete pf;
+
+	// --- delete frees and runs the finalizer exactly once ---
+	GCWidget* w2 = new GCWidget(5);
+	AssertIntEquals(0, g_gc_finalized, "gc: no finalizer before delete");
+	delete w2;
+	AssertIntEquals(1, g_gc_finalized, "gc: finalizer ran once after delete");
+
+	// --- Liveness: reachable object survives repeated collections under churn ---
+	uint64 allocsBefore = gc_allocs();
+	for (int32 i = 0; i < 20; ++i) {
+		GCChunk* tmp = new GCChunk;
+		tmp->a = i;
+		gc_collect();
+	}
+	AssertIntEquals(10, c->a, "gc: liveness field a after churn");
+	AssertIntEquals(40, c->d, "gc: liveness field d after churn");
+
+	// --- Manual trigger mid-program is safe and does not disturb live objects ---
+	gc_collect();
+	AssertIntEquals(30, c->c, "gc: manual collect leaves c intact");
+	AssertIntEquals(42, w->value, "gc: manual collect leaves w intact");
+
+	// --- Stats: allocation counter reflects the churn we performed ---
+	uint64 allocsNow = gc_allocs();
+	Assert(allocsNow >= allocsBefore + 20, "gc: allocs counts allocations");
+	Assert(gc_collections() > 0, "gc: collections recorded");
+
+	// --- Memory bounded: heavy churn keeps the committed heap within one arena ---
+	uint64 heapStart = gc_heap_bytes();
+	for (int32 i = 0; i < 2000; ++i) {
+		GCChunk* x = new GCChunk;   // dropped at end of each iteration
+		x->a = i;
+	}
+	gc_collect();
+	uint64 heapEnd = gc_heap_bytes();
+	Assert(heapEnd <= heapStart + (16 * 1024 * 1024), "gc: memory bounded after heavy churn");
+	AssertIntEquals(40, c->d, "gc: live object intact after load test");
+
+	// --- Cycles: repeated build/drop/collect does not grow the heap unboundedly ---
+	uint64 cycStart = gc_heap_bytes();
+	for (int32 round = 0; round < 100; ++round) {
+		GCMkAndDropCycle();
+		gc_collect();
+	}
+	uint64 cycEnd = gc_heap_bytes();
+	Assert(cycEnd < cycStart + (16 * 1024 * 1024), "gc: cycles do not leak unboundedly");
+}

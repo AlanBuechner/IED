@@ -1,0 +1,32 @@
+// Types - Built-in aliases (D-01, D-02): `int`, `uint` and `char` are the types `int32`, `uint32` and `char8`.
+include "../Framework/Assert.ch"
+include "BuiltinAliases.ch"
+
+int32 AliasRank(int32 v) { return 1; }
+int32 AliasRank(uint32 v) { return 2; }
+int32 AliasRank(char8 v) { return 3; }
+int32 AliasRank(int64 v) { return 4; }
+
+int SumMixed(int a, int32 b) { return a + b; }
+
+void TestBuiltinAliases() {
+	int i = -5;
+	uint u = 7;
+	char c = 'a';
+	int32* ip = &i;
+	uint32* up = &u;
+	char8* cp = &c;
+	AssertIntEquals(-5, *ip, "an int32* points at an int");
+	AssertIntEquals(7, (int32)*up, "a uint32* points at a uint");
+	AssertIntEquals(97, (int32)*cp, "a char8* points at a char");
+	AssertIntEquals(4, (int32)sizeof(int), "sizeof(int) is sizeof(int32)");
+	AssertIntEquals(4, (int32)sizeof(uint), "sizeof(uint) is sizeof(uint32)");
+	AssertIntEquals(1, (int32)sizeof(char), "sizeof(char) is sizeof(char8)");
+	AssertIntEquals(1, AliasRank(i), "an int is an exact match for int32");
+	AssertIntEquals(2, AliasRank(u), "a uint is an exact match for uint32");
+	AssertIntEquals(3, AliasRank(c), "a char is an exact match for char8");
+	AssertIntEquals(3, SumMixed(1, 2), "int and int32 parameters take the same arguments");
+	uint all = (uint)(-1);
+	uint64 wide = all;
+	AssertIntEquals(1, wide == 4294967295 ? 1 : 0, "uint is unsigned: it widens by zero extension");
+}

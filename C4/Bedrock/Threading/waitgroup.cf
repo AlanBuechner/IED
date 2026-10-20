@@ -1,0 +1,25 @@
+include "waitgroup.ch"
+
+namespace Threading
+{
+	const int32 kWaitGroupSpins = 200;   // work handed to other threads often finishes within microseconds
+
+	void WaitGroup::Done() {
+		if (atomic_fetch_sub(&remaining, 1, MemoryOrder::AcqRel) == 1) wake_all((void*)&remaining);
+	}
+
+	void WaitGroup::Wait() const { WaitFor(-1); }
+
+	bool WaitGroup::WaitFor(int64 nanoseconds) const {
+		for (int32 spin = 0; spin < kWaitGroupSpins; spin++) {
+			if (IsDone()) return true;
+			cpu_relax();
+		}
+		int64 seen = atomic_load(&remaining, MemoryOrder::Acquire);
+		while (seen > 0) {
+			if (!wait_on_address((void*)&remaining, (void*)&seen, 8, nanoseconds)) return IsDone();
+			seen = atomic_load(&remaining, MemoryOrder::Acquire);
+		}
+		return true;
+	}
+}

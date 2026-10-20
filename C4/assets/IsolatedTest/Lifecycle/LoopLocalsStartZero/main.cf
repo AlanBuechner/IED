@@ -1,0 +1,34 @@
+// A local declared in a loop body without an initializer starts zero (or default-constructed) in every
+// iteration, not with the previous iteration's value (BUG-076).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+class Counter { public int32 n; }
+class Defaulted {
+	public int32 n;
+	[operator("create")] public void Init() { n = n + 10; }
+}
+
+int32 main() {
+	int32 sum = 0;
+	for (int32 i = 0; i < 3; i++) {
+		int32 x;
+		x = x + 1;
+		sum = sum + x;
+	}
+	Check(sum == 3, "a scalar local is zero in every iteration");
+	int32 total = 0;
+	int32 j = 0;
+	while (j < 3) {
+		Counter c;
+		c.n = c.n + 1;
+		Defaulted d;
+		total = total + c.n + d.n;
+		j++;
+	}
+	Check(total == 33, "an object local is zero, then default-constructed, in every iteration");
+	return g_failures;
+}

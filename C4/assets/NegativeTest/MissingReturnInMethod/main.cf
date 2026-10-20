@@ -1,0 +1,2 @@
+struct MR { int32 v; public int32 Get() { if (this.v > 0) return this.v; } }
+int32 main() { MR m; return m.Get(); }

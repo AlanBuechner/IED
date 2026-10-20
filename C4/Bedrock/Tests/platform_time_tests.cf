@@ -1,0 +1,157 @@
+// Platform time: the counter, the wall clock, calendar fields at the epoch, before it, on leap days and at the ends of
+// an int64 of nanoseconds, round trips, fields that carry over, fixed and local offsets.
+
+include "bedrock.ch"
+
+const int64 kSecond = 1000000000;
+const int64 kHour = 3600;
+const int64 kInt64Max = 9223372036854775807;
+const int64 kInt64Min = -9223372036854775807 - 1;
+const int64 kYear2020 = 1577836800000000000;
+const int64 kYear2100 = 4102444800000000000;
+
+// Whether `time` is year-month-day hour:minute:second.nanosecond on `weekday`.
+bool IsAt(const Platform::CalendarTime& time, int32 year, int32 month, int32 day, int32 hour, int32 minute, int32 second,
+	int32 nanosecond, Platform::Weekday weekday) {
+	return time.year == year && time.month == month && time.day == day && time.hour == hour && time.minute == minute
+		&& time.second == second && time.nanosecond == nanosecond && time.weekday == weekday;
+}
+
+Platform::CalendarTime Fields(int32 year, int32 month, int32 day, int32 hour, int32 minute, int32 second, int32 nanosecond) {
+	Platform::CalendarTime time;
+	time.year = year;
+	time.month = month;
+	time.day = day;
+	time.hour = hour;
+	time.minute = minute;
+	time.second = second;
+	time.nanosecond = nanosecond;
+	return time;
+}
+
+// The instant the fields name, or kInt64Min when they name none an int64 holds.
+int64 InstantOf(const Platform::CalendarTime& time) {
+	int64 unixNs = 0;
+	return Platform::ToUnixNs(time, unixNs) ? unixNs : kInt64Min;
+}
+
+bool RoundTrips(int64 unixNs) {
+	int64 back = 0;
+	return Platform::ToUnixNs(Platform::UtcCalendar(unixNs), back) && back == unixNs;
+}
+
+[test("platform.time")]
+class TimeTests {
+	[test("counter")]
+	public static void TestCounter() {
+		int64 frequency = Platform::TickFrequency();
+		assert_true(frequency >= 1000000, "a counter of at least a microsecond's resolution");
+		int64 first = Platform::Ticks();
+		Threading::Thread::Sleep(2000000);
+		int64 second = Platform::Ticks();
+		assert_true(second - first >= frequency / 1000, "a sleep of 2 ms takes at least 1 ms of ticks");
+		assert_true(Platform::Ticks() >= second, "and the counter never goes back");
+	}
+
+	[test("wall_clock")]
+	public static void TestWallClock() {
+		int64 now = Platform::UnixTimeNs();
+		assert_true(now > kYear2020 && now < kYear2100, "now is in this century");
+		Platform::CalendarTime today = Platform::UtcCalendar(now);
+		assert_true(today.year >= 2020 && today.year < 2100, "and so is its year");
+	}
+
+	[test("epoch")]
+	public static void TestEpoch() {
+		Platform::CalendarTime epoch = Platform::UtcCalendar(0);
+		assert_true(IsAt(epoch, 1970, 1, 1, 0, 0, 0, 0, Platform::Weekday::Thursday), "1970-01-01 00:00:00, a Thursday");
+		assert_eq(0, epoch.utcOffsetSeconds, "in UTC");
+		assert_true(IsAt(Platform::UtcCalendar(-1), 1969, 12, 31, 23, 59, 59, 999999999, Platform::Weekday::Wednesday), "one nanosecond before");
+		assert_true(IsAt(Platform::UtcCalendar(-kSecond), 1969, 12, 31, 23, 59, 59, 0, Platform::Weekday::Wednesday), "one second before");
+	}
+
+	[test("dates")]
+	public static void TestDates() {
+		assert_true(IsAt(Platform::UtcCalendar(951827696789000000), 2000, 2, 29, 12, 34, 56, 789000000, Platform::Weekday::Tuesday), "a leap day");
+		assert_true(IsAt(Platform::UtcCalendar(1704067200 * kSecond), 2024, 1, 1, 0, 0, 0, 0, Platform::Weekday::Monday), "a new year");
+		assert_true(IsAt(Platform::UtcCalendar(1709164800 * kSecond), 2024, 2, 29, 0, 0, 0, 0, Platform::Weekday::Thursday), "2024's leap day");
+		assert_true(IsAt(Platform::UtcCalendar(1709164800 * kSecond + 86400 * kSecond), 2024, 3, 1, 0, 0, 0, 0, Platform::Weekday::Friday), "and the day after");
+	}
+
+	[test("limits")]
+	public static void TestLimits() {
+		assert_true(IsAt(Platform::UtcCalendar(kInt64Max), 2262, 4, 11, 23, 47, 16, 854775807, Platform::Weekday::Friday), "the last instant");
+		assert_true(IsAt(Platform::UtcCalendar(kInt64Min), 1677, 9, 21, 0, 12, 43, 145224192, Platform::Weekday::Tuesday), "the first instant");
+		assert_eq(kInt64Max, InstantOf(Fields(2262, 4, 11, 23, 47, 16, 854775807)), "the last one back");
+		assert_eq(kInt64Min, InstantOf(Fields(1677, 9, 21, 0, 12, 43, 145224192)), "the first one back");
+		int64 unixNs = 5;
+		assert_true(!Platform::ToUnixNs(Fields(2262, 4, 11, 23, 47, 16, 854775808), unixNs), "one past the last does not fit");
+		assert_true(!Platform::ToUnixNs(Fields(1677, 9, 21, 0, 12, 43, 145224191), unixNs), "one before the first neither");
+		assert_true(!Platform::ToUnixNs(Fields(30000, 1, 1, 0, 0, 0, 0), unixNs), "nor a distant year");
+		assert_true(!Platform::ToUnixNs(Fields(-30000, 1, 1, 0, 0, 0, 0), unixNs), "nor a distant past");
+		assert_eq(5, unixNs, "a refusal leaves the result alone");
+	}
+
+	[test("round_trips")]
+	public static void TestRoundTrips() {
+		assert_true(RoundTrips(0) && RoundTrips(-1) && RoundTrips(kInt64Max) && RoundTrips(kInt64Min), "the edges");
+		uint64 state = 88172645463325252;
+		int32 failures = 0;
+		for (int32 i = 0; i < 2000; ++i) {
+			state = state * 6364136223846793005 + 1442695040888963407;
+			if (!RoundTrips((int64)state)) failures++;
+		}
+		assert_eq(0, failures, "2000 instants across the whole range");
+	}
+
+	[test("carry_over")]
+	public static void TestCarryOver() {
+		assert_eq(1704067200 * kSecond, InstantOf(Fields(2023, 13, 1, 0, 0, 0, 0)), "month 13 is January of the next year");
+		assert_eq(InstantOf(Fields(2023, 12, 1, 0, 0, 0, 0)), InstantOf(Fields(2024, 0, 1, 0, 0, 0, 0)), "month 0 is December before");
+		assert_eq(InstantOf(Fields(2023, 1, 1, 0, 0, 0, 0)), InstantOf(Fields(2024, -11, 1, 0, 0, 0, 0)), "month -11 is January before");
+		assert_eq(1709164800 * kSecond, InstantOf(Fields(2024, 3, 0, 0, 0, 0, 0)), "day 0 of March is February 29");
+		assert_eq(InstantOf(Fields(2024, 1, 2, 0, 0, 0, 0)), InstantOf(Fields(2024, 1, 1, 24, 0, 0, 0)), "hour 24 is the next day");
+		assert_eq(1704067200 * kSecond - 1, InstantOf(Fields(2024, 1, 1, 0, 0, 0, -1)), "nanosecond -1 is in the second before");
+		assert_eq(1704067200 * kSecond + 2 * kSecond, InstantOf(Fields(2024, 1, 1, 0, 0, 1, 1000000000)), "a whole second of nanoseconds carries");
+	}
+
+	[test("leap_years")]
+	public static void TestLeapYears() {
+		assert_true(Platform::IsLeapYear(2000) && Platform::IsLeapYear(2024) && Platform::IsLeapYear(0), "every 4th and every 400th year");
+		assert_true(!Platform::IsLeapYear(1900) && !Platform::IsLeapYear(2023) && !Platform::IsLeapYear(2100), "but not other centuries");
+		assert_true(Platform::IsLeapYear(-4) && Platform::IsLeapYear(-400) && !Platform::IsLeapYear(-100), "before year 0 too");
+		assert_eq(29, Platform::DaysInMonth(2024, 2), "February of a leap year");
+		assert_eq(28, Platform::DaysInMonth(1900, 2), "of a century");
+		assert_eq(29, Platform::DaysInMonth(2000, 2), "of a 400th year");
+		assert_eq(30, Platform::DaysInMonth(2023, 4), "April");
+		assert_eq(31, Platform::DaysInMonth(2023, 12), "December");
+		assert_eq(0, Platform::DaysInMonth(2023, 0), "no month 0");
+		assert_eq(0, Platform::DaysInMonth(2023, 13), "nor 13");
+	}
+
+	[test("offsets")]
+	public static void TestOffsets() {
+		Platform::CalendarTime east = Platform::CalendarAtOffset(0, 3600);
+		assert_true(IsAt(east, 1970, 1, 1, 1, 0, 0, 0, Platform::Weekday::Thursday) && east.utcOffsetSeconds == 3600, "an hour ahead");
+		Platform::CalendarTime west = Platform::CalendarAtOffset(0, -5 * 3600);
+		assert_true(IsAt(west, 1969, 12, 31, 19, 0, 0, 0, Platform::Weekday::Wednesday), "five hours behind is the day before");
+		Platform::CalendarTime nepal = Platform::CalendarAtOffset(0, 20700);
+		assert_true(nepal.hour == 5 && nepal.minute == 45, "a zone of 5:45");
+		assert_eq(0, InstantOf(east), "each names the same instant");
+		assert_eq(0, InstantOf(west), "behind");
+		assert_eq(0, InstantOf(nepal), "and at a quarter hour");
+	}
+
+	[test("local")]
+	public static void TestLocal() {
+		int64 now = Platform::UnixTimeNs();
+		int32 offset = Platform::LocalOffsetSeconds(now);
+		assert_true(offset >= -14 * kHour && offset <= 14 * kHour && offset % 60 == 0, "a zone within 14 hours, in minutes");
+		Platform::CalendarTime local = Platform::LocalCalendar(now);
+		assert_eq(offset, local.utcOffsetSeconds, "the local fields carry the offset");
+		assert_eq(now, InstantOf(local), "and name now");
+		int32 first = Platform::LocalOffsetSeconds(kInt64Min);
+		int32 last = Platform::LocalOffsetSeconds(kInt64Max);
+		assert_true(first >= -14 * kHour && first <= 14 * kHour && last >= -14 * kHour && last <= 14 * kHour, "the zone at the ends of time");
+	}
+}

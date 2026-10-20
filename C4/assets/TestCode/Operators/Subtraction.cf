@@ -1,0 +1,11 @@
+// Operators - Subtraction Tests (implementation)
+include "../Framework/Assert.ch"
+include "Subtraction.ch"
+
+void TestSubtraction() {
+	int32 a = 10 - 4;
+	AssertEqual(6, a);
+	
+	int32 b = 5 - 15;
+	AssertEqual(-10, b);
+}

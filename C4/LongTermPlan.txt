@@ -1,0 +1,259 @@
+1. impelment the c4 language
+    - built in sse/avx support
+    - asm block for writing asm directly in code
+    - language swizzling there are notes on the general idea for how swizzling will work.(most of this is already impelmented it just needs the math and operator overloads, functions, etc)
+        - things like Vec3 v = {0,0,0}; v.xz = {1,1}; should work // this would result int v = { 1, 0, 1 }; at the end
+        - Vec2 v2 = {2,1}; Vec3 v3 = {0,0,0}; v3.zx = v2; // v3 should be {1,0,2} at the end
+        - math operations like v1 += v2; or v3 = v1 + v2;
+        - you get the picture. HLSL like swizzling but as a genaric language feature that can be used by a math library
+        - needs to validate the performance of it over the equivelent in c++(not just the swizzleing but the SSE/AVX math in general)
+    - more macro support
+        - #if #elif #else #define #undef
+        - nested defines
+        - #if defined(something), if !defined(something)
+        - #define SomeThing(var, var2, ...)
+        - function calls with trailing , in the parameter list. Somefunc("hello",); // this is needed for passing __VA_ARGS__ to a function with potential for a trailing , if there are no __VA_ARGS__
+    - default macros for platform and more
+        - PLATFORM_WINDOWS, PLATFORM_LINUX, etc
+        - TEST // this macro will be defined if you build to run tests thay way we can easaly remove all the tests and test helpers when we build an actual shiped build
+        - any other default macros that you can think of
+    - multiple return types
+        - [float, float, bool] GetSomeData() { return [1.0f, 2.2f, true]; }
+        - [float a, float b, bool success] = GetSomeData();
+        - float a; bool success; [a, float b, success] = GetSomeData();
+    - built in threading
+        - join
+        - promise
+        - conditional var
+        - work stealing
+    - find a way to remove lvalue and rvalue as well as expliset move semantics(https://www.youtube.com/watch?v=Klq-sNxuP2g)
+        - potential rust like barow checker that will optimize move semantics when posible but not hard error. (is this even posible. or if it is would it have enouph coverate to be useful without the invariants from hard errors)
+        - potential multiple function bodys depending on if the parameter is validated by the "barow checker"
+        - no move operator but explicet move operation that will preform a shalow copy and it is the callers responsability to enforce invariants. (would force caller to know how things are used outside of the functing braking local reasoning)
+        - any other potential ways to remove the need for move semantics
+2. SUPER DUPER EXTREAM EXTENSIVE testing convering all language features all the ways the language features can work to gether and all the posible errors that can occur.
+    - will also need to validate that all errors are useful and meningful
+    - when i say extensive i mean extensive. we should have thousends of tests for every single feature and all the ways it could be used with all the other language features.
+    - no duplicate tests the cover the same thing as another test everything should be meningful to cover the language in full
+    - everything should work with c++ interop as well
+    - more testing for macros like #if #elif #else #define. nested defines, #if defined(something), if !defined(something), #define SomeThing(var, var2, ...) etc
+    - i want to re itorate error checking. it is absoluty imparitive that errors in the code properly produce errors that are useful for finding and resolveing the issue and dont just crash the compiler
+    - performance testing to validate that everything is just as fast if not faster as well optimized c/c++
+3. default library
+    - vector
+    - hash map. should use custom operators to use operator_hash if the function is avalable
+    - string. utf8 string to replace the built in string. the language its self should NOT have a built in stirng type only using char*.
+    - stack
+    - list
+    - math library. should have complete parady with frost's math library/glm if not more. sse optimizations. it should be left handed and 0-1 ndc space.
+        - vectors
+            - swizzling(vec.xx = othervec.zy; etc)
+        - matrix
+        - quat
+        - all the math functions for useing them
+        - SSE/AVX optimixations
+    - ObjectDescription that can be used as a common data structure for unstructured data like json or yaml. it should have built support for in memory json and yaml reading and writing. file IO will come later
+4. complete re work of the reflection system to allow for full ability to collect information on properties, functions, types, etc. as well as modify properties and invoke functions
+    - will need re work of the default librarys abstractions
+    - query for types static functions and static variables
+    - get reflection information from all the paramters and functions
+    - get type info -> get function on type -> get info about function / invoke function
+    - get type info -> get paramter on type -> get info about parameter / read/write to parameter
+    - should work with operator overloads, vertuals, inharatance, templates, etc
+5. GC audit.
+    - lots more extensive testing and preformance testing with auto clean up. 
+    - will also need hooks to allow for custom allocators to split up allocations to track each object in the allocation directly
+    - also make custom desisions about if the object in the custom allocators should even be cleand up
+6. built in scripting with ORCv2(https://llvm.org/docs/ORCv2.html)
+    - scripts should be partialy sandboxed so if a script crashes then the engine wont and it can continue on normaly
+7. more default library stuff
+    - file IO
+    - sockets/networking
+    - http server
+7. c4 LSP
+8. create a new build system like frost but for c4 only
+9. re impelment the c4 language in its self
+10. impelment DAP for c4
+11. linux support
+12. work on translateing a game engine over the c4
+
+
+
+
+
+
+
+
+note on the impelmentation for the swizzeling that i got from some conversation with an AI so do validate stuff
+
+Syntax
+The swizzle Declaration
+swizzle Vec4 {
+    packed float x, y, z, w;
+};
+
+This single declaration creates a union between:
+
+The vector view — the whole value as an N-lane SIMD vector (used for arithmetic, the identity swizzle, and SIMD intrinsics)
+The scalar views — each named lane individually readable and writable
+The order of names in the declaration defines the lane index. No other mapping mechanism exists.
+
+Full Grammar
+swizzle_decl  : 'swizzle' Identifier '{' layout_kw element_type lane_list ';' '}'
+layout_kw     : 'packed' | 'unpacked'
+element_type  : 'float' | 'double' | 'int32' | 'int64' | ...  // any scalar type
+lane_list     : Identifier (',' Identifier)*
+
+Examples
+swizzle Vec4 { packed float x, y, z, w; };
+swizzle Vec3 { packed float x, y, z; };
+swizzle Color { packed float r, g, b; };
+swizzle Quat { unpacked float x, y, z, w; };
+
+// swizzle with union and template
+template<T>
+swizzle TVec3 { union { packed T x, y, z; packed T r, g, b; packed T[4] data; } };
+
+Swizzle Access Syntax
+v.xyz    // 3-lane sub-vector: (x, y, z)
+v.xxy    // 3-lane with repeat: (x, x, y)
+v.wwww   // 4-lane splat: (w, w, w, w)
+v.z      // scalar extract: lane 2
+v.x = 1  // scalar insert: write lane 0
+v.yzx = other_vec3  // multi-lane write (less common)
+
+The lexer recognizes a run of characters after . that are all valid lane names for the operand's type (looked up from the swizzle declaration). If the run is followed by an identifier-continuation character, it's a normal field access, not a swizzle. 
+
+Keyword Restrictions
+swizzle
+Rule	Detail
+Scope	Top-level only (like struct/class). Not nested, not local.
+Lane count	1–16 (matches max SIMD register width on supported targets).
+Lane names	Must be single characters (1 char each). This is what makes the dot-syntax unambiguous. Multi-char names are rejected.
+Uniqueness	Lane names within a type must be distinct.
+Element type	Must be a scalar numeric type (f32, f64, i32, i64, u32, u64). No nested vectors, no structs.
+Inheritance	swizzle types cannot inherit or be inherited from. They are leaf types.
+Methods	Allowed. The type can have methods and friends like any struct.
+Default construction	Implicitly zero-initialized (all lanes = 0).
+Copy/assign	Trivially copyable. Copy is a single register move (packed) or struct copy (unpacked).
+
+
+LLVM swizzle type specification
+
+View all
+packed
+Rule	Detail
+Storage	Lanes are contiguous, no padding. The type is alignas(N * sizeof(elem)) and sizeof == N * sizeof(elem).
+LLVM type	Lowers to <N x T> (an LLVM vector type).
+Bitcast	The compiler may bitcast to/from the raw vector type freely.
+Alignment	Must match the natural alignment of the SIMD register (16 bytes for 4×f32, 32 bytes for 4×f64, etc.).
+ABI	The type is passed in SIMD registers per the target ABI (e.g., XMM on x86, NEON on ARM).
+
+unpacked
+Rule	Detail
+Storage	Lanes are separate struct fields. Padding and alignment follow normal C++ rules.
+LLVM type	Lowers to {T, T, ..., T} (an LLVM struct type).
+Bitcast	Not allowed. The compiler cannot assume contiguity.
+Optimization	A compiler pass may prove contiguity (no padding, no interleaved fields) and insert a bitcast to enable the fast shufflevector path.
+Use case	C interop, types with non-lane fields, or when individual field addresses are needed.
+
+LLVM Implementation
+Type Lowering
+Layout	LLVM Type	Example
+packed float x, y, z, w	<4 x float>	@v = local_unnamed_addr <4 x float>
+unpacked float x, y, z, w	{float, float, float, float}	@v = local_unnamed_addr {float, float, float, float}
+
+Read: Scalar Extract (v.x)
+Packed:
+
+%x = extractelement <4 x float> %v, i32 0
+
+Unpacked:
+
+%x = extractvalue {float, float, float, float} %v, 0
+
+Read: Multi-lane Swizzle (v.yzx)
+Packed:
+
+%yzx = shufflevector <4 x float> %v, <4 x float> poison, <3 x i32> <i32 1, i32 2, i32 0>
+
+Unpacked:
+
+%y = extractvalue {float,float,float,float} %v, 1
+%z = extractvalue {float,float,float,float} %v, 2
+%x = extractvalue {float,float,float,float} %v, 0
+%yzx = insertvalue <3 x float> poison, float %y, i32 0
+%yzx = insertvalue <3 x float> %yzx, float %z, i32 1
+%yzx = insertvalue <3 x float> %yzx, float %x, i32 2
+
+Write: Scalar Insert (v.x = 1.0f)
+Since LLVM is SSA, this produces a new value and threads it through:
+
+Packed:
+
+%new_v = insertelement <4 x float> %v, float 1.0, i32 0
+; All subsequent uses of v use %new_v
+
+Unpacked:
+
+%new_v = insertvalue {float,float,float,float} %v, float 1.0, 0
+
+Write: Multi-lane (v.yzx = vec3_val)
+Packed:
+
+%y = extractelement <3 x float> %vec3_val, i32 0
+%z = extractelement <3 x float> %vec3_val, i32 1
+%x = extractelement <3 x float> %vec3_val, i32 2
+%new_v = insertelement <4 x float> %v, float %y, i32 1
+%new_v = insertelement <4 x float> %new_v, float %z, i32 2
+%new_v = insertelement <4 x float> %new_v, float %x, i32 0
+
+The poison Convention
+Modern LLVM (post-2021) uses poison as the placeholder for "don't care" lanes in shufflevector. Your compiler should emit:
+
+auto placeholder = llvm::PoisonValue::get(vecTy);
+B.createShuffleVector(src, placeholder, mask);
+
+Never use undef — it has different (weaker) semantics and will cause verifier failures or missed optimizations. 
+
+Composition Pass (Mid-End)
+A custom pass (or eager folding at IR construction) that:
+
+Composes nested swizzles: swizzle(swizzle(v, P), Q) → swizzle(v, P ∘ Q)
+Eliminates identity: swizzle(v, [0,1,2,3]) → v
+Cancels inverses: swizzle(swizzle(v, P), P⁻¹) → v
+Folds into consumers: if a shufflevector's only use is another shufflevector, compose them into one.
+This pass operates on your swizzle IR opcode before lowering to LLVM. After lowering, LLVM's own InstCombine handles any remaining shufflevector composition.
+
+The Unpacked→Packed Promotion Pass
+If an unpacked type is proven to have no padding (all fields same size, natural alignment, no interleaved members), insert a bitcast pair and use the fast path:
+
+; Before:
+%y = extractvalue {float,float,float,float} %v, 1
+%z = extractvalue {float,float,float,float} %v, 2
+%x = extractvalue {float,float,float,float} %v, 0
+
+; After (bitcast + shuffle):
+%raw = bitcast {float,float,float,float} %v to <4 x float>
+%yzx = shufflevector <4 x float> %raw, <4 x float> poison, <3 x i32> <1, 2, 0>
+
+This is a conservative pass — it only fires when it can prove the layout is bit-identical to the packed form.
+
+The Union Semantics (Critical Detail)
+The swizzle declaration implicitly creates a union. This means:
+
+The vector view and scalar views alias the same storage. Writing v.x = 1.0 modifies the vector. Reading v after that write sees the updated lane.
+In SSA, this is handled by threading. The compiler maintains a "current value" for each swizzle-typed variable. A scalar write produces a new value via insertelement/insertvalue, and all subsequent reads use the new value. 
+You cannot take the address of a single lane. &v.x is illegal. Lanes are not individually addressable (they're register lanes, not memory locations). This is the same restriction as HLSL.
+The whole vector is addressable. &v gives a pointer to the SIMD register (packed) or the struct (unpacked). This is needed for passing by reference, storing to memory, etc.
+No partial vector views as separate storage. v.yzx does not create a new object — it's a computed value (a shuffle).  It has no address, no lifetime of its own. It exists only as an SSA value in the current expression.
+What the Compiler Recognizes (Minimal Surface)
+The compiler needs to know exactly three things:
+
+Component	What it does
+swizzle keyword	Parses the declaration, builds the lane table (name→index), registers the type as swizzle-able
+packed / unpacked	Determines the LLVM type mapping and lowering strategy
+Dot-suffix lexer rule	After ., if the following chars are all valid lane names for the operand type, emit a SwizzleExpr AST node
+
+Everything else — the IR opcode, composition, cancellation, lowering, the union aliasing rules — is derived from these three. The math library just writes the swizzle declaration and the arithmetic operators.
+

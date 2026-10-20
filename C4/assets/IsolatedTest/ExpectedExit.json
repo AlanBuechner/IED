@@ -1,0 +1,133 @@
+{
+  "Exceptions/UncaughtException": {
+    "exit": 1,
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An uncaught throw must terminate the process with a non-zero exit code and never run the code after the throw."
+  },
+  "Exceptions/UncaughtExceptionCount": {
+    "exit": 1,
+    "mustNotContain": ["REACHED count="],
+    "reason": "An uncaught throw must terminate before the post-throw printf runs; a corrupted g_count or a printed REACHED line means control escaped c4_throw."
+  },
+  "MemoryGC/FinalizerException": {
+    "exit": 1,
+    "mustContain": ["an exception escaped a finalizer"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception escaping a finalizer stops the program; it never unwinds through the collector into the caller of the collection."
+  },
+  "Lifecycle/NoexceptTerminates": {
+    "exit": 1,
+    "mustContain": ["an exception left a noexcept function"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception leaving a noexcept function stops the program (D-13); the caller's catch-all never sees it."
+  },
+  "Lifecycle/ExitDestruction": {
+    "exit": 42,
+    "mustContain": ["destroyed in order 54321"],
+    "reason": "Globals, static members and static locals are destroyed after main returns, last constructed first; the first-constructed object checks the order and exits with 42."
+  },
+  "Lifecycle/StaticLocalReentry": {
+    "exit": 1,
+    "mustContain": ["reached its own declaration again"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "A static local's start that recurses into its own declaration stops the program instead of deadlocking or running twice."
+  },
+  "TestingFramework/ClassGroupPrefix": {
+    "exit": 0,
+    "mustContain": ["[TEST] math.vector.addition", "[TEST] math.vector.TestScale", "[TEST] free.case"],
+    "reason": "A class's [test(...)] prefixes its methods' groups; a bare method test is named by its function (BUG-021)."
+  },
+  "Diagnostics/WarningsDoNotFail": {
+    "exit": 0,
+    "compileMustContain": ["main.cf (6:17) warning: the conversion from 'int64' to 'int16' may change the value",
+      "main.cf (3:2) warning: unknown annotation 'operater': did you mean 'operator'?", "Warnings:            2"],
+    "reason": "Warnings are printed and the build still succeeds; constants that fit do not warn (B22)."
+  },
+  "Diagnostics/GlobalStartWarnings": {
+    "exit": 0,
+    "compileMustContain": ["main.cf (2:19) warning: the conversion from 'int32' to 'uint8' may change the value",
+      "main.cf (3:27) warning: the conversion from 'double' to 'int32' may change the value", "Warnings:            2"],
+    "reason": "BUG-230: a global that starts as a constant gets the conversion warnings a local's start gets."
+  },
+  "Lifecycle/ThreadLocalEndsBeforeGlobals": {
+    "exit": 0,
+    "mustContain": ["ORDER OK"],
+    "mustNotContain": ["ORDER BAD"],
+    "reason": "The main thread's thread_local objects start after the globals and end at exit before them."
+  },
+  "Lifecycle/ThreadLocalReentry": {
+    "exit": 1,
+    "mustContain": ["reached its own declaration again"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "A thread_local local's start that recurses into its own declaration on the same thread stops the program."
+  },
+  "Lifecycle/ThreadLocalDeleteThrows": {
+    "exit": 1,
+    "mustContain": ["an exception escaped the destruction of a global, static or thread_local object"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception escaping a thread_local's delete as its thread ends stops the program."
+  },
+  "Threads/UncaughtInThread": {
+    "exit": 1,
+    "mustContain": ["an exception was thrown and not caught"],
+    "mustNotContain": ["SHOULD NOT REACH HERE"],
+    "reason": "An exception escaping a thread's entry ends the process like one escaping main: every attached thread installs the terminate handler."
+  },
+  "TestingFramework/FailureFileLine": {
+    "exit": 1,
+    "mustContain": ["FAIL: main.cf:4: one is not two (expected 1, got 2)", "FAILED failing.case"],
+    "reason": "A failure names its assertion's file and line (B37), and the exit code is the failed-assertion count (BUG-038)."
+  },
+  "TestingFramework/AssertionLine": {
+    "exit": 5,
+    "mustContain": ["FAIL: main.cf:10: first", "FAIL: main.cf:12: second (expected 2, got 1)", "FAIL: main.cf:4: inner",
+      "FAIL: main.cf:14: third (expected 1, got 1.5, tol 0.25)", "FAIL: main.cf:15: fourth (expected \"a\", got \"b\")"],
+    "mustNotContain": ["main.cf:9:"],
+    "reason": "Each failed assertion prints its own line, including one inside a call in another assertion's arguments (B37)."
+  },
+  "TestingFramework/ThrowingTest": {
+    "exit": 1,
+    "mustContain": ["FAIL: throwing.first: an exception left the test", "ok throwing.second", "Cases:    1 passed, 1 failed (of 2)"],
+    "reason": "An exception that leaves a test fails that case and the run goes on to the next (B37)."
+  },
+  "TestingFramework/JsonSummary": {
+    "exit": 1,
+    "compileFlags": ["-test-json", "{dir}\\summary.json"],
+    "jsonFile": "summary.json",
+    "mustContain": ["Cases:    2 passed, 1 failed (of 3)"],
+    "reason": "-test-json writes a valid JSON summary with a cases array, escaping names (BUG-038)."
+  },
+  "TestingFramework/GroupFilter": {
+    "exit": 0,
+    "runArgs": ["--filter", "keep.*"],
+    "mustContain": ["[TEST] keep.one", "[TEST] keep.two", "Cases:    2 passed, 0 failed (of 2)"],
+    "mustNotContain": ["drop.one"],
+    "reason": "--filter runs only the matching cases; the fixtures still run."
+  },
+  "Simd/WideVectorsAvx2": {
+    "exit": 0,
+    "compileFlags": ["-march=x86-64-v3"],
+    "reason": "D-62: with AVX2 a 256-bit vector is returned in YMM0, read with aligned AVX loads (a misaligned container element would fault: BUG-251), gathered and masked; the macros name the target."
+  },
+  "Simd/NativeTarget": {
+    "exit": 0,
+    "compileFlags": ["-march=native"],
+    "reason": "D-62: -march=native compiles for the building machine; SIMD_FLOAT_LANES picks 16 lanes with AVX-512, 8 with AVX."
+  },
+  "Simd/FusedMultiplyAdd": {
+    "exit": 0,
+    "compileFlags": ["-mfma"],
+    "reason": "D-62: simd_fma rounds once (it needs fma, which -mfma turns on with avx)."
+  },
+  "Interop/SimdIntrinsicsInC": {
+    "exit": 0,
+    "compileFlags": ["-march=x86-64-v3"],
+    "reason": "D-62: a C source built with the same -march uses AVX2 / FMA intrinsics on 256-bit vectors C4 passes and gets back in YMM registers."
+  },
+  "Platform/ProtectionFaults": {
+    "exit": 0,
+    "compileFlags": ["--script-host"],
+    "mustContain": ["protection faults: 0 failures"],
+    "reason": "Platform page rights hold: each forbidden access faults at its address under Scripting::Guard, which needs a script host (D-63)."
+  }
+}

@@ -1,0 +1,28 @@
+// Function templates and functions share overload sets: arity and deduction pick among templates of one
+// name, and an equally good function written as it is beats a template instance (D-17).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 Pick(int32 x) { return 1; }
+template<T> int32 Pick(T x) { return 2; }
+
+template<T> T Mix(T a) { return a; }
+template<T> T Mix(T a, T b) { return a + b; }
+
+template<T> int32 Width(T v) { return sizeof(T); }
+int32 Width(int8 v) { return 100; }
+
+int32 main() {
+	Check(Pick(5) == 1, "a function beats an equally good template instance");
+	Check(Pick(5.0f) == 2, "the template when it fits better");
+	Check(Pick<int32>(5) == 2, "written template arguments name only the template");
+	Check(Mix(4) == 4 && Mix(4, 5) == 9, "templates of one name told apart by arity");
+	Check(Mix(1.5f, 2.0f) == 3.5f, "and deduced per call");
+	int8 small = 1;
+	Check(Width(small) == 100, "the function for its exact type");
+	Check(Width(3) == 4 && Width(3.0) == 8, "the template for the rest");
+	return g_failures;
+}

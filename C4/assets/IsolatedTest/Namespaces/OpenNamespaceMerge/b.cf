@@ -1,0 +1,13 @@
+// Contributes Math::Scale and uses members contributed by BOTH files plus the header's type.
+include "math.ch"
+
+namespace Math {
+	float Scale(float f) { return f * 2.0f; }
+}
+
+int32 main() {
+	if (Math::Count() != 7) return 1;              // defined in a.cf
+	if ((int32)Math::Scale(3.5f) != 7) return 2;   // defined here
+	Math::Vec2 v; v.x = 1.0f; v.y = 2.0f;          // declared in the shared header
+	return (v.x == 1.0f && v.y == 2.0f) ? 0 : 3;
+}

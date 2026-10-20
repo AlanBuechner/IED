@@ -1,0 +1,2 @@
+class B { public int32 Get() { return 1; } }
+int main() { B b; b.Get() = 5; return 0; }

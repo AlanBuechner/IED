@@ -1,0 +1,1 @@
+int32 main() { snorm8 s = 0.5f; s++; return 0; }

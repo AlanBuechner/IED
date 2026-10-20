@@ -1,0 +1,50 @@
+// Horizontal reductions (D-62). Float sums and products combine the upper half of the lanes into the lower half
+// until one lane is left (padded with the identity), so the result is the same at -O0 and -O2; integer
+// reductions are exact. main returns the failures.
+int32 Differs(float actual, float expected) { return actual == expected ? 0 : 1; }
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 FloatOrder() {
+	int32 failures = 0;
+	packed float[4] a = { 100000000.0f, 1.0f, -100000000.0f, 1.0f };
+	failures += Differs(simd_reduce_add(a), 2.0f);   // (a0 + a2) + (a1 + a3); left to right would give 1
+	packed float[3] b = { 100000000.0f, 1.0f, -100000000.0f };
+	failures += Differs(simd_reduce_add(b), 1.0f);   // (b0 + b2) + (b1 + -0)
+	packed float[8] c = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f };
+	failures += Differs(simd_reduce_add(c), 36.0f) + Differs(simd_reduce_mul(c), 40320.0f);
+	packed float[2] z = { -0.0f, -0.0f };
+	failures += 1.0f / simd_reduce_add(z) < 0.0f ? 0 : 1;   // -0 + -0 stays -0
+	packed float[5] five = { 2.0f, 3.0f, 0.5f, 4.0f, 10.0f };
+	failures += Differs(simd_reduce_mul(five), 120.0f);
+	packed double[4] d = { 0.5, 0.25, 0.125, 0.125 };
+	failures += simd_reduce_add(d) == 1.0 ? 0 : 1;
+	return failures;
+}
+
+int32 FloatExtremes() {
+	int32 failures = 0;
+	packed float[8] v = { 3.0f, -1.0f, 8.0f, 2.5f, -7.0f, 0.0f, 7.5f, 1.0f };
+	failures += Differs(simd_reduce_min(v), -7.0f) + Differs(simd_reduce_max(v), 8.0f);
+	packed float[3] three = { 4.0f, 9.0f, -2.0f };
+	failures += Differs(simd_reduce_min(three), -2.0f) + Differs(simd_reduce_max(three), 9.0f);
+	return failures;
+}
+
+int32 Integers() {
+	int32 failures = 0;
+	packed int32[4] i = { 3, -7, 12, 5 };
+	failures += DiffersI(simd_reduce_add(i), 13) + DiffersI(simd_reduce_mul(i), -1260);
+	failures += DiffersI(simd_reduce_min(i), -7) + DiffersI(simd_reduce_max(i), 12);
+	failures += DiffersI(simd_reduce_and(i), 0) + DiffersI(simd_reduce_or(i), -1) + DiffersI(simd_reduce_xor(i), -13);
+	packed uint32[4] u = { 4000000000u, 1u, 3000000000u, 2u };
+	failures += DiffersI(simd_reduce_max(u), 4000000000) + DiffersI(simd_reduce_min(u), 1);
+	packed uint8[16] bytes = { 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1 };
+	failures += DiffersI(simd_reduce_add(bytes), 242);   // wraps in the lane type: 15 * 255 + 1 = 3826, mod 256
+	packed int64[8] big = { 1, 2, 4, 8, 16, 32, 64, 128 };
+	failures += DiffersI(simd_reduce_or(big), 255) + DiffersI(simd_reduce_add(big), 255);
+	return failures;
+}
+
+int32 main() {
+	return FloatOrder() + FloatExtremes() + Integers();
+}

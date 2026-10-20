@@ -1,0 +1,12 @@
+// CharPtrAssign unit 1 - one of two separate compilation units that include cp.ch.
+include "../Framework/Assert.ch"
+include "cp.ch"
+
+void TestCharPtrAssignUnit1() {
+    CP b;                 // struct from the shared header (deduped to ONE ObjectType across units)
+    char c = 'x';
+    char* q = &c;
+    b.p = q;              // assign a char* into the shared struct's char* field
+    Assert(b.p != nullptr, "cp u1: assigned pointer non-null");
+    Assert(*q == c, "cp u1: deref round-trip");
+}

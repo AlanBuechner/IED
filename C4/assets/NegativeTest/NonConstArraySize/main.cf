@@ -1,0 +1,6 @@
+// A runtime (non-const) variable used as an array size must be a clear compile-time error,
+// not a silent zero-size or a crash. The size expression is evaluated at compile time; a name
+// that is not a const var / enum member / literal cannot fold.
+int32 X = 4;
+int32[X] g;
+int32 main() { return 0; }

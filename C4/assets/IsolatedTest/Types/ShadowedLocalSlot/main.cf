@@ -1,0 +1,18 @@
+// BUG-063: after an inner block that shadows a name ends, the name means the outer variable again - its
+// slot and its type. Catch parameters are scoped to their own clause.
+int32 main() {
+	int32 failures = 0;
+	int32 x = 1;
+	{ int32 x = 2; x = x + 10; if (x != 12) failures++; }
+	if (x != 1) failures++;
+	int32 y = 5;
+	if (y > 0) { float y = 2.5f; if (y != 2.5f) failures++; }
+	if (y != 5) failures++;
+	for (int32 i = 0; i < 2; i++) { int32 x = 7; if (x != 7) failures++; }
+	if (x != 1) failures++;
+	try { throw 3; } catch (int32 x) { if (x != 3) failures++; }
+	try { throw 4.5f; } catch (float x) { if (x != 4.5f) failures++; }
+	if (x != 1) failures++;
+	if (failures != 0) printf("ShadowedLocalSlot failures: %d\n", failures);
+	return failures;
+}

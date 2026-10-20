@@ -1,0 +1,13 @@
+struct S { int32 x; };
+S* gp;
+
+int main() {
+    S s; s.x = 7;
+    gp = &s;
+    if (gp->x != 7) return 1;      // read through the pointer global
+    gp->x = 9;                      // write through it
+    if (s.x != 9) return 2;        // reached the real object
+    if (gp->x != 9) return 3;
+    if (gp != &s) return 4;        // gp itself was not corrupted
+    return 0;
+}

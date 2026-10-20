@@ -1,0 +1,32 @@
+// Regression lock for the D2 scope leak (commit 6b799a6). A control statement with a BRACE-LESS
+// (single-statement) body enters a block scope during analysis that is never popped. Pre-fix, a
+// function's PostVisit popped a fixed count, which removed the wrong scopes and left those leaked
+// block scopes on the chain; every later file-scope global then registered into a leaked inner
+// scope, so IsLocalVariable(<global>) returned true and returning a reference to it was falsely
+// rejected with "Cannot return a reference to a local variable".
+//
+// This is ORDER-SENSITIVE by design: the leaking function (brace-less if/while) must be analyzed
+// BEFORE the global gBox and the reference-returning fn. Brace-body control statements do NOT
+// leak - only brace-less ones do - so the braces are deliberately absent below.
+
+struct Box { public int32 n; }
+
+void LeakScopes(int32 c) {
+	if (c > 0) c = c - 1;
+	while (c > 0) c = c - 1;
+}
+
+Box gBox;
+
+Box& RetGlobal() {
+	return gBox;
+}
+
+int32 main() {
+	LeakScopes(3);
+	RetGlobal().n = 57;
+	if (gBox.n != 57) return 1;
+	RetGlobal().n = 91;
+	if (gBox.n != 91) return 2;
+	return 0;
+}

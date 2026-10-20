@@ -1,0 +1,33 @@
+// Core - Nested Namespace Shorthand Tests (implementation)
+include "../Framework/Assert.ch"
+include "NestedNamespaceShorthand.ch"
+
+// B25: `namespace A::B { }` is `namespace A { namespace B { } }`.
+namespace NnOuter { const int32 kBase = 4; }
+
+namespace NnOuter::Inner {
+	struct Pair { public int32 a; public int32 b; }
+	int32 Sum(Pair p) { return p.a + p.b + kBase; }
+}
+
+namespace NnOuter::Inner::Deep {
+	int32 Twice(int32 x) { return x * 2; }
+	int32 SumTwice(Inner::Pair p) { return Twice(Sum(p)); }
+}
+
+namespace NnOuter::Inner {
+	int32 Reopened() { return Deep::Twice(5); }
+}
+
+namespace NnHost {
+	namespace Mid::Leaf { int32 Depth() { return 3; } }
+}
+
+void TestNestedNamespaceShorthand() {
+	NnOuter::Inner::Pair p;
+	p.a = 1; p.b = 2;
+	AssertIntEquals(7, NnOuter::Inner::Sum(p), "the body sees the outer namespace's names");
+	AssertIntEquals(14, NnOuter::Inner::Deep::SumTwice(p), "three levels, a sibling name unqualified");
+	AssertIntEquals(10, NnOuter::Inner::Reopened(), "the shorthand reopens a namespace");
+	AssertIntEquals(3, NnHost::Mid::Leaf::Depth(), "a shorthand inside a namespace");
+}

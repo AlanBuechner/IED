@@ -1,0 +1,60 @@
+// A templated extension method (`template<T> R F(...) extends Box<T>`) applies to every instance of the
+// extended template, its arguments deduced from the receiver (D-21); operators work the same way, and a
+// parameter the receiver does not decide is deduced from the call.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T>
+struct Pair {
+	public T first;
+	public T second;
+}
+
+template<T> T Sum() extends Pair<T> { return first + second; }
+template<T> void Swap() extends Pair<T> { T t = first; first = second; second = t; }
+
+template<T>
+struct Vec2 {
+	public T x;
+	public T y;
+}
+
+[operator("+")] template<T> Vec2<T> Add(const Vec2<T>& o) extends Vec2<T> {
+	Vec2<T> r;
+	r.x = x + o.x;
+	r.y = y + o.y;
+	return r;
+}
+
+template<T, U> U Scaled(U factor) extends Pair<T> { return (U)first * factor; }
+
+struct IntPair : Pair<int32> { }
+
+int32 Product() extends Pair<int32> { return first * second; } // an extension of one concrete instance
+
+int32 main() {
+	Pair<int32> p;
+	p.first = 2; p.second = 5;
+	Check(p.Sum() == 7, "an extension template on an int32 instance");
+	Pair<float> f;
+	f.first = 1.5f; f.second = 2.0f;
+	Check(f.Sum() == 3.5f, "and on a float instance");
+	p.Swap();
+	Check(p.first == 5 && p.second == 2, "a void extension template");
+	Vec2<int32> a; a.x = 1; a.y = 2;
+	Vec2<int32> b; b.x = 10; b.y = 20;
+	Vec2<int32> c = a + b;
+	Check(c.x == 11 && c.y == 22, "an operator extension template");
+	Vec2<float> u; u.x = 0.5f; u.y = 1.0f;
+	Vec2<float> w = u + u;
+	Check(w.x == 1.0f && w.y == 2.0f, "the operator on another instance");
+	Check(p.Scaled(2.5f) == 12.5f, "a parameter the receiver does not decide is deduced from the call");
+	IntPair d;
+	d.first = 4; d.second = 6;
+	Check(d.Sum() == 10, "a type deriving from an instance");
+	Check(p.Product() == 10, "a non-template extension of one instance");
+	return g_failures;
+}

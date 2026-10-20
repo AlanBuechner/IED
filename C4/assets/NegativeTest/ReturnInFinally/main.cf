@@ -1,0 +1,6 @@
+int32 F() {
+	try { return 1; }
+	finally { return 2; }
+	return 0;
+}
+int32 main() { return F(); }

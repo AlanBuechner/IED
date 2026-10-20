@@ -1,0 +1,5 @@
+class Panel {
+public:
+	int32 width;
+}
+int32 main() { return 0; }

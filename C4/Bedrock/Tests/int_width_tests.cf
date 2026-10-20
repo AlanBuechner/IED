@@ -1,0 +1,26 @@
+// Regression tests for signed/unsigned integer widening. A blanket zext in ApplyConversion used to
+// corrupt every negative value promoted to a wider type (int32 -7 -> int64 became 0x7FFFFFF9).
+include "bedrock.ch"
+
+int64 Widen(int32 v) { return v; }   // implicit int32 -> int64 widening
+
+[test("int.widen.negative")]
+public static void TestWidenNegative() {
+	assert_eq(-7, Widen(-7), "negative int32 widens to negative int64");
+	assert_eq(-1, Widen(-1), "-1 widens correctly");
+	int64 x = -12345;
+	assert_true(x < 0, "int64 local from negative literal is negative");
+}
+
+[test("int.widen.positive")]
+public static void TestWidenPositive() {
+	assert_eq(7, Widen(7), "positive int32 widens to positive int64");
+	assert_eq(0, Widen(0), "zero widens to zero");
+}
+
+[test("int.widen.uint_stays_unsigned")]
+public static void TestWidenUInt() {
+	uint32 u = (uint32)(-1);   // largest uint32 == 0xFFFFFFFF
+	uint64 w = u;             // must zero-extend, NOT sign-extend
+	assert_eq(4294967295u, (uint32)w, "uint32 widens by zero-extension");
+}

@@ -1,0 +1,10 @@
+struct Base { int32 v; [operator("+")] public int32 Add(Base o) { return this->v + o.v; } };
+struct Derived : Base { int32 extra; };
+int main() {
+	Derived a; a.v = 4; a.extra = 1;
+	Derived b; b.v = 6; b.extra = 2;
+	int32 r = a + b;   // inherited [operator("+")] from Base: expect 10
+	if (r != 10) { printf("FAIL got %d\n", r); return 1; }
+	printf("INHERITED OPERATOR OK\n");
+	return 0;
+}

@@ -1,0 +1,128 @@
+// Platform: the processors, the machine's and the process's memory as memory is reserved, committed and touched, the
+// process id, the executable's path, and environment variables (unset, empty, long, UTF-8, removed, invalid names).
+
+include "bedrock.ch"
+
+const int64 kSmallestMachine = 268435456;           // 256 MiB of RAM
+const int64 kSmallestAddressSpace = 1099511627776;  // 1 TiB
+const int64 kReservationBytes = 1073741824;         // 1 GiB
+const int64 kCommitBytes = 67108864;                // 64 MiB
+const int64 kMeasureSlack = 4194304;                // 4 MiB of the process's own allocations meanwhile
+
+bool IsCacheLine(int32 bytes) { return bytes >= 16 && bytes <= 256 && (bytes & (bytes - 1)) == 0; }
+
+// Writes one byte into every page of [address, address + size), so the pages enter the working set.
+void TouchPages(void* address, int64 size) {
+	for (int64 offset = 0; offset < size; offset += Platform::PageSize()) ((uint8*)address)[offset] = 1;
+}
+
+bool EnvironmentHolds(const char* name, const char* expected) {
+	Core::String value;
+	return Platform::TryGetEnvironmentVariable(name, value) && value == Core::String(expected);
+}
+
+[test("platform.system")]
+class SystemTests {
+	[test("processors")]
+	public static void TestProcessors() {
+		Platform::ProcessorInfo cpu = Platform::GetProcessorInfo();
+		assert_eq((int64)Threading::Thread::HardwareCount(), (int64)cpu.logicalProcessors, "the threads the system runs");
+		assert_true(cpu.cores >= 1 && cpu.cores <= cpu.logicalProcessors, "at least one core, no more than the threads");
+		assert_true(cpu.packages >= 1 && cpu.packages <= cpu.cores, "at least one socket");
+		assert_true(IsCacheLine(cpu.cacheLineBytes), "a cache line of 16 to 256 bytes");
+		assert_true(cpu.l1DataBytes >= 4096, "an x64 core has an L1 data cache");
+		assert_true(cpu.l2Bytes >= cpu.l1DataBytes && cpu.l3Bytes >= 0, "the larger caches");
+	}
+
+	[test("machine_memory")]
+	public static void TestMachineMemory() {
+		Platform::MemoryStatus status = Platform::GetMemoryStatus();
+		assert_true(status.totalPhysicalBytes >= kSmallestMachine, "physical memory");
+		assert_true(status.availablePhysicalBytes > 0 && status.availablePhysicalBytes <= status.totalPhysicalBytes, "some of it free");
+		assert_true(status.commitLimitBytes >= status.availableCommitBytes && status.availableCommitBytes > 0, "the commit limit");
+		assert_true(status.totalVirtualBytes >= kSmallestAddressSpace, "terabytes of address space on x64");
+		assert_true(status.availableVirtualBytes <= status.totalVirtualBytes, "of which not all is free");
+		void* space = Platform::Reserve(kReservationBytes);
+		int64 spaceLeft = Platform::GetMemoryStatus().availableVirtualBytes;
+		assert_true(status.availableVirtualBytes - spaceLeft >= kReservationBytes - 16 * kMeasureSlack, "a reservation takes address space");
+		Platform::Release(space);
+		assert_true(Platform::GetMemoryStatus().availableVirtualBytes > spaceLeft, "and its release gives it back");
+	}
+
+	[test("process_memory")]
+	public static void TestProcessMemory() {
+		Platform::ProcessMemory before = Platform::GetProcessMemory();
+		assert_true(before.workingSetBytes > 0 && before.peakWorkingSetBytes >= before.workingSetBytes, "a working set and its peak");
+		assert_true(before.privateBytes > 0 && before.peakPrivateBytes >= before.privateBytes, "private memory and its peak");
+		void* block = Platform::Allocate(kCommitBytes, Platform::Protection::ReadWrite);
+		Platform::ProcessMemory committed = Platform::GetProcessMemory();
+		assert_true(committed.privateBytes - before.privateBytes >= kCommitBytes, "committing charges the process");
+		TouchPages(block, kCommitBytes);
+		Platform::ProcessMemory touched = Platform::GetProcessMemory();
+		assert_true(touched.workingSetBytes - committed.workingSetBytes >= kCommitBytes / 2, "touched pages enter the working set");
+		assert_true(touched.peakWorkingSetBytes >= touched.workingSetBytes, "and the peak follows");
+		Platform::Release(block);
+		assert_true(Platform::GetProcessMemory().privateBytes <= touched.privateBytes - kCommitBytes + kMeasureSlack, "a release returns it");
+	}
+
+	[test("process")]
+	public static void TestProcess() {
+		assert_true(Platform::ProcessId() > 0 && Platform::ProcessId() == Platform::ProcessId(), "one id for the process");
+		FS::Path exe = Platform::ExecutablePath();
+		assert_true(exe.IsAbsolute(), "the executable's path is absolute");
+		assert_true(exe.Extension() == Core::StringView(".exe"), "and names a program");
+		assert_true(FS::FileExists(exe.CStr()), "which exists");
+	}
+
+	[test("environment")]
+	public static void TestEnvironment() {
+		const char* name = "C4_PLATFORM_TEST_VARIABLE";
+		Platform::RemoveEnvironmentVariable(name);
+		Core::String value = Core::String("untouched");
+		assert_true(!Platform::TryGetEnvironmentVariable(name, value), "an unset variable");
+		assert_se("untouched", value.CStr(), "leaves the value alone");
+		assert_true(Platform::GetEnvironmentVariable(name).IsEmpty(), "and reads as empty");
+		assert_true(Platform::SetEnvironmentVariable(name, "first"), "set");
+		assert_true(EnvironmentHolds(name, "first"), "read back");
+		assert_true(Platform::SetEnvironmentVariable(name, "second") && EnvironmentHolds(name, "second"), "replaced");
+		assert_true(Platform::SetEnvironmentVariable(name, "") && EnvironmentHolds(name, ""), "set to nothing, it is still set");
+		assert_true(Platform::RemoveEnvironmentVariable(name) && !Platform::TryGetEnvironmentVariable(name, value), "removed");
+		assert_true(Platform::RemoveEnvironmentVariable(name), "removing an unset variable is no error");
+		assert_true(Platform::TryGetEnvironmentVariable("PATH", value) && !value.IsEmpty(), "the system sets PATH");
+	}
+
+	[test("environment_text")]
+	public static void TestEnvironmentText() {
+		const char* name = "C4_PLATFORM_TEST_TEXT";
+		const char* utf8 = "caf\u00e9 \u4e16\u754c \U0001F600";
+		assert_true(Platform::SetEnvironmentVariable(name, utf8) && EnvironmentHolds(name, utf8), "UTF-8 round trips");
+		Core::StringBuilder longText;
+		for (int32 i = 0; i < 3000; ++i) longText.Append("ab\u00e9");
+		assert_true(Platform::SetEnvironmentVariable(name, longText.CStr()), "a long value");
+		Core::String read = Platform::GetEnvironmentVariable(name);
+		assert_eq(longText.ByteLength(), read.ByteLength(), "read whole");
+		assert_true(read == longText.ToString(), "and unchanged");
+		const char* wideName = "C4_PLATFORM_\u00c9T\u00c9";
+		assert_true(Platform::SetEnvironmentVariable(wideName, "x") && EnvironmentHolds(wideName, "x"), "a UTF-8 name");
+		Platform::RemoveEnvironmentVariable(wideName);
+		Platform::RemoveEnvironmentVariable(name);
+	}
+
+	[test("environment_invalid")]
+	public static void TestEnvironmentInvalid() {
+		Core::String value;
+		assert_true(!Platform::SetEnvironmentVariable("", "x"), "an empty name");
+		assert_true(!Platform::TryGetEnvironmentVariable("", value), "reads nothing");
+		assert_true(!Platform::RemoveEnvironmentVariable(""), "and removes nothing");
+		assert_true(!Platform::SetEnvironmentVariable("C4_A=B", "x"), "a name with '='");
+		assert_true(!Platform::TryGetEnvironmentVariable("C4_A=B", value), "reads nothing");
+		assert_true(!Platform::SetEnvironmentVariable(nullptr, "x") && !Platform::TryGetEnvironmentVariable(nullptr, value), "a null name");
+		assert_true(!Platform::SetEnvironmentVariable("C4_PLATFORM_TEST_NULL", nullptr), "a null value (RemoveEnvironmentVariable removes)");
+		char[3] notUtf8;
+		notUtf8[0] = (char)0xC3;
+		notUtf8[1] = (char)0x28;
+		notUtf8[2] = (char)0;
+		assert_true(!Platform::SetEnvironmentVariable("C4_PLATFORM_TEST_BAD", &notUtf8[0]), "a value that is not UTF-8");
+		assert_true(!Platform::SetEnvironmentVariable(&notUtf8[0], "x"), "a name that is not UTF-8");
+	}
+}

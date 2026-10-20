@@ -1,0 +1,131 @@
+// Bedrock String/Str tests. Run with:  C4.exe c4/Bedrock/Tests -test
+// Validates the owning UTF-8 String (the std::string role) and the code-point-aware Str view
+// (the string_view role): construction, append/grow, ToView, CharCount, and CodePointAt across
+// ASCII + multi-byte UTF-8 (2-, 3-, and 4-byte sequences). Strings are heap objects (C4 shallow-copies
+// value types, so an owning buffer is used via a pointer); views are cheap by-value handles.
+
+include "bedrock.ch"
+
+// Build the byte run A(1) + e-acute(2) + U+1F600(4) = 7 bytes / 3 code points, null-terminated.
+char* MakeUtf8Sample() {
+	char* b = (char*)raw_alloc(8);
+	set_byte(b, 0, 0x41);
+	set_byte(b, 1, 0xC3); set_byte(b, 2, 0xA9);
+	set_byte(b, 3, 0xF0); set_byte(b, 4, 0x9F); set_byte(b, 5, 0x98); set_byte(b, 6, 0x80);
+	set_byte(b, 7, 0);
+	return b;
+}
+
+[test("string.owning")]
+public static void TestStringOwning() {
+	Core::String* s = new Core::String("hello");
+	assert_eq(5, (int32)s->ByteLength(), "byteLen after ctor");
+	assert_eq(5, (int32)s->CharCount(), "charCount after ctor");
+	assert_true(!s->IsEmpty(), "not empty");
+
+	s->Append(" world");
+	assert_eq(11, (int32)s->ByteLength(), "byteLen after append");
+	assert_true(s->View().Equals(Core::StringView("hello world")), "content matches literal");
+
+	Core::String* e = new Core::String(8);            // reserved-capacity ctor (empty)
+	assert_true(e->IsEmpty(), "reserved string starts empty");
+	assert_eq(0, (int32)e->ByteLength(), "empty byteLen");
+}
+
+[test("string.view")]
+public static void TestStringView() {
+	Core::String* s = new Core::String("abcdef");
+	Core::StringView v = s->View();
+	assert_eq(6, (int32)v.ByteLength(), "view byteLen");
+	// Substring is a zero-alloc sub-view of the same buffer.
+	Core::StringView mid = v.Substring(1, 3);          // "bcd"
+	assert_true(mid.Equals(Core::StringView("bcd")), "substring content");
+	assert_eq(3, (int32)mid.ByteLength(), "substring byteLen");
+}
+
+[test("string.utf8_codepoints")]
+public static void TestStringUtf8CodePoints() {
+	char* b = MakeUtf8Sample();
+	Core::StringView u = Core::StringView(b, 7);
+	assert_eq(7, (int32)u.ByteLength(), "sample byteLen");
+	assert_eq(3, (int32)u.CharCount(), "sample code point count");
+	assert_true(u.IsValidUtf8(), "sample is valid utf8");
+
+	// Each code point decodes to its scalar value.
+	assert_eq(0x41, (int32)u.CodePointAt(0), "A");
+	assert_eq(0xE9, (int32)u.CodePointAt(1), "e-acute U+00E9");
+	assert_eq(128512, (int32)u.CodePointAt(2), "smiley U+1F600");
+	assert_eq(-1, (int32)u.CodePointAt(3), "out-of-range is -1");
+	raw_free(b);
+}
+
+[test("string.utf8_owning")]
+public static void TestStringUtf8Owning() {
+	// An owning String that holds multi-byte UTF-8: append a view, check it kept the bytes + count.
+	char* b = MakeUtf8Sample();
+	Core::StringView u = Core::StringView(b, 7);
+	Core::String* t = new Core::String(16);           // int-literal arg to an overloaded create (regression)
+	t->Append(u);
+	assert_eq(7, (int32)t->ByteLength(), "owned byteLen");
+	assert_eq(3, (int32)t->CharCount(), "owned code point count");
+	assert_eq(0x41, (int32)t->CodePointAt(0), "owned A");
+	assert_eq(0xE9, (int32)t->CodePointAt(1), "owned e-acute");
+	assert_eq(128512, (int32)t->CodePointAt(2), "owned smiley");
+	raw_free(b);
+}
+
+[test("string.copy_is_independent")]
+public static void TestStringCopyIsIndependent() {
+	Core::String a = Core::String("hello");
+	Core::String b = a;
+	b.Append(" world");
+	assert_se("hello", a.CStr(), "the original keeps its bytes");
+	assert_se("hello world", b.CStr(), "the copy owns its own buffer");
+	assert_eq(5, a.CharCount(), "the copy carries the char count");
+	b = a;
+	assert_se("hello", b.CStr(), "assignment replaces the old value with a copy");
+	b = b;
+	assert_se("hello", b.CStr(), "self-assignment keeps the value");
+}
+
+[test("string.zero_state")]
+public static void TestStringZeroState() {
+	Core::String z;
+	assert_eq(0, z.ByteLength(), "a zero String is empty");
+	assert_se("", z.CStr(), "a zero String reads as the empty string");
+	z.Clear();
+	z.Append("grown");
+	assert_se("grown", z.CStr(), "a zero String grows on the first append");
+	Core::String moved = take(z);
+	assert_se("grown", moved.CStr(), "take moves the buffer");
+	assert_se("", z.CStr(), "take leaves the source zero");
+	Core::String copyOfZero = z;
+	assert_eq(0, copyOfZero.ByteLength(), "a copy of the zero String is zero");
+}
+
+// BUG-163: appending a view appends exactly its bytes.
+[test("string.append_views")]
+public static void TestStringAppendViews() {
+	Core::String s = Core::String("start:");
+	s.Append(Core::StringView("abcdef").Substring(2, 2));
+	assert_se("start:cd", s.CStr(), "a substring view");
+	assert_eq(8, s.CharCount(), "the count follows");
+	for (int32 i = 0; i < 5; ++i) s.Append(s.View());
+	assert_eq(256, s.ByteLength(), "appending itself while growing");
+	assert_true(s.View().EndsWith(Core::StringView("start:cd")), "the bytes survive the growth");
+	Core::String fromView = Core::String(Core::StringView("xyz").Substring(1, 1));
+	assert_se("y", fromView.CStr(), "created from a view");
+}
+
+[test("string.operators")]
+public static void TestStringOperators() {
+	Core::String a = Core::String("ab");
+	Core::String b = Core::String("ab");
+	Core::String c = Core::String("abc");
+	assert_true(a == b && !(a == c), "==");
+	assert_true(a < c && !(c < a) && !(a < b), "<");
+	assert_true(a.Hash() == b.Hash(), "equal strings hash alike");
+	Core::String joined = a + Core::StringView("-") + c.View();
+	assert_se("ab-abc", joined.CStr(), "+ concatenates");
+	assert_se("ab", a.CStr(), "the operands are unchanged");
+}

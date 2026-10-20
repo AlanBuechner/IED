@@ -1,0 +1,24 @@
+include "../Framework/Assert.ch"
+include "NamespacedAggregateReturn.ch"
+
+void TestNamespacedAggregateReturn() {
+    // (a) global struct + global fn
+    GA ga = GMake(1.0f, 2.0f);
+    AssertFloatEquals(3.0f, ga.x + ga.y, "agg-return: global struct from global fn");
+
+    // (b) namespaced struct + namespaced fn (the reported crash shape)
+    NS::P2 p = NS::MakeP(1.5f, 2.5f);
+    AssertFloatEquals(4.0f, p.x + p.y, "agg-return: namespaced struct from namespaced fn");
+
+    // (c) global struct + namespaced fn
+    GA gc = NS2::GInNS(0.5f, 1.5f);
+    AssertFloatEquals(2.0f, gc.x + gc.y, "agg-return: global struct from namespaced fn");
+
+    // (d) namespaced struct + global fn (qualified name at global scope)
+    NS::P2 pd = MakePFromGlobal(3.0f, 4.0f);
+    AssertFloatEquals(7.0f, pd.x + pd.y, "agg-return: namespaced struct from global fn");
+
+    // Field stores through the returned value still work (value was actually packed, not zeroed).
+    p.x = 9.0f;
+    AssertFloatEquals(9.0f, p.x, "agg-return: field store on returned aggregate");
+}

@@ -1,0 +1,193 @@
+// Core::HashMap<K, V, Traits>: insertion, lookup, removal and tombstones, growth, iteration, key traits
+// for numbers, strings and structs, and GC liveness of the entries.
+
+include "bedrock.ch"
+
+struct HmCell { public int32 x; public int32 y; }
+
+// A key that hashes and compares itself.
+struct HmName {
+	public int32 id;
+	[operator("hash")] public uint64 Hash() const { return Core::HashInteger((uint64)id); }
+	[operator("==")] public bool Equals(const HmName& other) const { return id == other.id; }
+}
+
+// A float key: equal values compare equal however their bits differ.
+struct HmPoint { public float x; public float y; }
+struct HmPointTraits {
+	public static uint64 Hash(const HmPoint& p) { return Core::KeyTraits<float>::Hash(p.x) * 31u + Core::KeyTraits<float>::Hash(p.y); }
+	public static bool Equal(const HmPoint& a, const HmPoint& b) { return a.x == b.x && a.y == b.y; }
+}
+
+[test("hashmap")]
+class HashMapTests {
+	[test("basic")]
+	public static void TestBasic() {
+		Core::HashMap<int32, int32> m;
+		assert_true(m.IsEmpty() && m.Capacity() == 0, "a zero map allocates nothing");
+		assert_true(m.Insert(1, 10), "added");
+		assert_true(!m.Insert(1, 11), "replaced");
+		assert_eq(1, m.Count(), "one entry");
+		assert_eq(11, m.Get(1), "the new value");
+		assert_true(m.Contains(1) && !m.Contains(2), "contains");
+		assert_eq(0, m.Get(2), "a missing key reads zero");
+	}
+
+	[test("access")]
+	public static void TestAccess() {
+		Core::HashMap<int32, int32> m;
+		m[5] = 50;
+		m[5] += 1;
+		assert_eq(51, m.Get(5), "indexing adds, then writes");
+		int32* found = m.Find(5);
+		assert_true(found != nullptr && *found == 51, "Find");
+		*found = 7;
+		assert_eq(7, m[5], "through the pointer");
+		assert_true(m.Find(6) == nullptr, "Find of a missing key");
+		int32 out = -1;
+		assert_true(m.TryGet(5, out) && out == 7, "TryGet");
+		assert_true(!m.TryGet(6, out) && out == 7, "TryGet of a missing key leaves out alone");
+		const Core::HashMap<int32, int32>& view = m;
+		assert_eq(7, *view.Find(5), "const Find");
+	}
+
+	[test("remove")]
+	public static void TestRemove() {
+		Core::HashMap<int32, int32> m;
+		m.Insert(1, 10); m.Insert(2, 20); m.Insert(3, 30);
+		assert_true(m.Remove(2), "removed");
+		assert_true(!m.Contains(2), "gone");
+		assert_eq(2, m.Count(), "one fewer");
+		assert_true(!m.Remove(99), "a missing key");
+		assert_true(m.Insert(2, 21), "added again after removal");
+		assert_eq(21, m.Get(2), "the new value");
+	}
+
+	[test("collisions_and_tombstones")]
+	public static void TestCollisions() {
+		Core::HashMap<int32, int32> m;
+		for (int32 i = 0; i < 64; i++) m.Insert(i * 64, i);
+		for (int32 i = 0; i < 64; i += 2) m.Remove(i * 64);
+		bool found = true;
+		for (int32 i = 1; i < 64; i += 2) if (m.Get(i * 64) != i) found = false;
+		assert_true(found, "entries behind removed slots are found");
+		assert_eq(32, m.Count(), "half left");
+	}
+
+	[test("churn")]
+	public static void TestChurn() {
+		Core::HashMap<int32, int32> m;
+		for (int32 round = 0; round < 2000; round++) {
+			m.Insert(round, round);
+			m.Remove(round - 3);
+		}
+		assert_eq(3, m.Count(), "only the last three");
+		assert_eq(1999, m.Get(1999), "the newest");
+		assert_true(!m.Contains(1000), "an old one is gone");
+		assert_true(m.Capacity() <= 64, "removed slots are reclaimed, the table does not keep growing");
+	}
+
+	[test("grow")]
+	public static void TestGrow() {
+		Core::HashMap<int64, int64> m;
+		for (int64 i = 0; i < 10000; i++) m.Insert(i * 1000003, i);
+		assert_eq(10000, m.Count(), "all");
+		bool ok = true;
+		for (int64 i = 0; i < 10000; i += 97) if (m.Get(i * 1000003) != i) ok = false;
+		assert_true(ok, "found after many rehashes");
+		Core::HashMap<int32, int32> reserved;
+		reserved.Reserve(1000);
+		int64 capacity = reserved.Capacity();
+		for (int32 i = 0; i < 1000; i++) reserved.Insert(i, i);
+		assert_eq(capacity, reserved.Capacity(), "Reserve made room for every entry");
+	}
+
+	[test("iterate")]
+	public static void TestIterate() {
+		Core::HashMap<int32, int32> m;
+		for (int32 i = 1; i <= 5; i++) m.Insert(i * 10, i);
+		m.Remove(20);
+		int32 keys = 0;
+		int32 values = 0;
+		int32 visits = 0;
+		for (Core::KeyValue<int32, int32>& entry : m) { keys += entry.key; values += entry.value; visits += 1; entry.value *= 100; }
+		assert_eq(4, visits, "every live entry once");
+		assert_eq(130, keys, "keys");
+		assert_eq(13, values, "values");
+		assert_eq(300, m.Get(30), "written through the iterator");
+		Core::HashMap<int32, int32> empty;
+		int32 none = 0;
+		for (Core::KeyValue<int32, int32>& entry : empty) none += 1;
+		assert_eq(0, none, "an empty map");
+	}
+
+	[test("copy_and_clear")]
+	public static void TestCopyAndClear() {
+		Core::HashMap<int32, int32> a;
+		for (int32 i = 0; i < 20; i++) a.Insert(i, i);
+		a.Remove(5);
+		Core::HashMap<int32, int32> b = a;
+		b.Insert(100, 1);
+		assert_eq(19, a.Count(), "the original");
+		assert_eq(20, b.Count(), "the copy grew alone");
+		assert_true(!b.Contains(5), "the copy keeps the removal");
+		a.Clear();
+		assert_true(a.IsEmpty() && !a.Contains(1), "cleared");
+		a.Insert(1, 1);
+		assert_eq(1, a.Get(1), "usable after clearing");
+	}
+
+	[test("string_keys")]
+	public static void TestStringKeys() {
+		Core::HashMap<Core::String, int32> ages;
+		ages.Insert(Core::String("ada"), 36);
+		ages[Core::String("alan")] = 41;
+		assert_eq(36, ages.Get(Core::String("ada")), "by an equal string");
+		assert_eq(41, ages.Get(Core::String("alan")), "added by indexing");
+		assert_true(!ages.Contains(Core::String("grace")), "absent");
+		Core::HashMap<Core::StringView, int32> views;
+		views.Insert(Core::StringView("key"), 1);
+		assert_eq(1, views.Get(Core::StringView("key")), "string views hash their bytes");
+	}
+
+	[test("struct_keys")]
+	public static void TestStructKeys() {
+		Core::HashMap<HmCell, int32, Core::ByteKeyTraits<HmCell>> cells;
+		HmCell a; a.x = 1; a.y = 2;
+		HmCell b; b.x = 1; b.y = 2;
+		HmCell c; c.x = 1; c.y = 3;
+		cells.Insert(a, 100);
+		assert_eq(100, cells.Get(b), "an equal plain-data key");
+		assert_true(!cells.Contains(c), "a different key");
+		Core::HashMap<HmName, int32> names;
+		HmName n; n.id = 7;
+		names.Insert(n, 70);
+		assert_eq(70, names.Get(n), "a key with its own hash and ==");
+		Core::HashMap<HmPoint, int32, HmPointTraits> points;
+		HmPoint p; p.x = 0.0f; p.y = 1.5f;
+		HmPoint negativeZero; negativeZero.x = -0.0f; negativeZero.y = 1.5f;
+		points.Insert(p, 5);
+		assert_eq(5, points.Get(negativeZero), "custom traits: -0 is 0");
+	}
+
+	[test("float_and_pointer_keys")]
+	public static void TestFloatAndPointerKeys() {
+		Core::HashMap<double, int32> m;
+		m.Insert(0.0, 1);
+		assert_eq(1, m.Get(-0.0), "-0.0 and 0.0 are one key");
+		int32 x = 0;
+		int32 y = 0;
+		Core::HashMap<int32*, int32> pointers;
+		pointers.Insert(&x, 1);
+		pointers.Insert(&y, 2);
+		assert_eq(2, pointers.Get(&y), "pointer keys");
+	}
+
+	[test("gc")]
+	public static void TestGc() {
+		Core::HashMap<int32, Core::StringBuilder*> m;
+		for (int32 i = 0; i < 20; i++) { Core::StringBuilder* b = new Core::StringBuilder(4); b->AppendInt(i); m.Insert(i, b); }
+		gc_collect();
+		assert_se("13", m.Get(13)->CStr(), "kept alive by the entries");
+	}
+}

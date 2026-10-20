@@ -1,0 +1,27 @@
+int32 SwitchValue(int32 v) {
+	int32 result = -1;
+	switch (v) {
+	case 1:
+		result = 10;
+		fallthrough;
+	case 2:
+		result = result + 20;
+		break;
+	case 3:
+		result = 30;
+		fallthrough;
+	default:
+		result = result + 40;
+		break;
+	}
+	return result;
+}
+int32 main() {
+	int32 failed = 0;
+	if (SwitchValue(1) != 30) failed++;
+	if (SwitchValue(2) != 19) failed++;
+	if (SwitchValue(3) != 70) failed++;
+	if (SwitchValue(9) != 39) failed++;
+	if (failed == 0) printf("ALL FALLTHROUGH TESTS PASSED\n"); else printf("%d FAILED\n", failed);
+	return failed;
+}

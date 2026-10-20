@@ -1,0 +1,24 @@
+// OOP - Function Tests (implementation)
+include "../Framework/Assert.ch"
+include "FunctionTests.ch"
+
+int32 Add(int32 a, int32 b) {
+	return a + b;
+}
+
+int32 Multiply(int32 a, int32 b) {
+	return a * b;
+}
+
+void TestFunctionCall() {
+	int32 result = Add(10, 20);
+	AssertEqual(30, result);
+}
+
+void TestMultipleFunctions() {
+	int32 r1 = Add(5, 3);
+	AssertEqual(8, r1);
+	
+	int32 r2 = Multiply(4, 7);
+	AssertEqual(28, r2);
+}

@@ -1,0 +1,5 @@
+// Each element of a braced array starts from one entry: naming an element twice is an error.
+int32 main() {
+	int32[4] a = { 1, 2, [1] = 5 };
+	return a[1];
+}

@@ -1,0 +1,223 @@
+// Bedrock StringBuilder tests. Run with:  C4.exe c4/Bedrock/Tests -test
+// The builder is the OWNING mutable buffer (heap, one allocation). Build() returns a zero-alloc Str
+// view of its current contents; Append takes a Str by value.
+
+include "bedrock.ch"
+
+[test("str.builder.basic")]
+public static void TestBuilderBasic() {
+	Core::StringBuilder* b = new Core::StringBuilder(8);
+	assert_true(b->IsEmpty(), "fresh builder empty");
+	b->Append("hello ");
+	b->Append("world");
+	assert_eq(11, b->ByteLength(), "byte length after appends");
+	Core::StringView s = b->View();
+	assert_true(s == Core::StringView("hello world"), "the view of the contents");
+	assert_se("hello world", b->ToString().CStr(), "a String copy");
+}
+
+[test("str.builder.grow")]
+public static void TestBuilderGrow() {
+	Core::StringBuilder* b = new Core::StringBuilder(4);
+	for (int32 i = 0; i < 100; i++) b->AppendByte('a'); // forces many grows
+	assert_eq(100, b->ByteLength(), "length after 100 byte appends");
+}
+
+[test("str.builder.int")]
+public static void TestBuilderInt() {
+	Core::StringBuilder* b = new Core::StringBuilder(8);
+	b->AppendInt(42);
+	assert_se("42", b->CStr(), "positive int");
+	b->Clear();
+	b->AppendInt(-7);
+	assert_se("-7", b->CStr(), "negative int");
+	b->Clear();
+	b->AppendInt(0);
+	assert_se("0", b->CStr(), "zero");
+}
+
+[test("str.builder.uint")]
+public static void TestBuilderUInt() {
+	Core::StringBuilder* b = new Core::StringBuilder(8);
+	b->AppendUInt(0u);
+	assert_se("0", b->CStr(), "uint zero");
+	b->Clear();
+	b->AppendUInt(123456789u);
+	assert_se("123456789", b->CStr(), "uint value");
+}
+
+[test("str.builder.float")]
+public static void TestBuilderFloat() {
+	Core::StringBuilder* b = new Core::StringBuilder(8);
+	b->AppendFloat(3.0f, 0);
+	assert_se("3", b->CStr(), "float int part only");
+	b->Clear();
+	b->AppendFloat(1.5f, 1);
+	assert_se("1.5", b->CStr(), "one decimal");
+}
+
+[test("str.builder.str_append")]
+public static void TestBuilderStrAppend() {
+	Core::StringBuilder* b = new Core::StringBuilder(8);
+	Core::StringView a = Core::StringView("foo");
+	Core::StringView c = Core::StringView("bar");
+	b->Append(a);
+	b->AppendByte('-');
+	b->Append(c);
+	assert_se("foo-bar", b->CStr(), "Str appends (by value)");
+}
+
+[test("str.builder.hex_bin_base")]
+public static void TestBuilderHexBinBase() {
+	Core::StringBuilder* b = new Core::StringBuilder(16);
+	// Hex: 255 -> ff, 4096 -> 1000.
+	b->AppendUIntBase(255, 16, 0);
+	assert_se("ff", b->CStr(), "hex 255 = ff");
+	b->Clear();
+	b->AppendHex(4096);
+	assert_se("1000", b->CStr(), "hex 4096 = 1000");
+	b->Clear();
+	// Binary: 5 -> 101, 8 -> 1000.
+	b->AppendUIntBase(5, 2, 0);
+	assert_se("101", b->CStr(), "bin 5 = 101");
+	b->Clear();
+	b->AppendBin(8);
+	assert_se("1000", b->CStr(), "bin 8 = 1000");
+	// minWidth zero-pads the digit field: hex 255 at width 8 -> 000000ff.
+	b->Clear();
+	b->AppendUIntBase(255, 16, 8);
+	assert_se("000000ff", b->CStr(), "hex padded to width 8");
+	// minWidth wider than the value: bin 5 at width 8 -> 00000101.
+	b->Clear();
+	b->AppendUIntBase(5, 2, 8);
+	assert_se("00000101", b->CStr(), "bin padded to width 8");
+	// Octal: 8 -> 10.
+	b->Clear();
+	b->AppendUIntBase(8, 8, 0);
+	assert_se("10", b->CStr(), "octal 8 = 10");
+	// Base 7 (a non-power-of-ten base): 42 -> 60 (6*7 + 0).
+	b->Clear();
+	b->AppendUIntBase(42, 7, 0);
+	assert_se("60", b->CStr(), "base-7 of 42 = 60");
+}
+
+[test("str.builder.signed_base")]
+public static void TestBuilderSignedBase() {
+	Core::StringBuilder* b = new Core::StringBuilder(16);
+	// Negative hex: -255 -> -ff.
+	b->AppendIntBase(-255, 16, 0);
+	assert_se("-ff", b->CStr(), "signed hex -255 = -ff");
+	b->Clear();
+	// Negative binary: -5 -> -101.
+	b->AppendIntBase(-5, 2, 0);
+	assert_se("-101", b->CStr(), "signed bin -5 = -101");
+	b->Clear();
+	// Positive signed hex matches the unsigned form.
+	b->AppendIntBase(255, 16, 0);
+	assert_se("ff", b->CStr(), "signed hex positive = ff");
+}
+
+[test("str.builder.number_edges")]
+public static void TestBuilderNumberEdges() {
+	Core::StringBuilder b;
+	uint64 allOnes = (uint64)0 - (uint64)1;
+	b.AppendBin(allOnes);
+	assert_eq(64, b.ByteLength(), "binary of UINT64_MAX has 64 digits");
+	b.Clear();
+	b.AppendUInt(allOnes);
+	assert_se("18446744073709551615", b.CStr(), "UINT64_MAX in decimal");
+	b.Clear();
+	int64 lowest = (int64)((uint64)1 << 63);
+	b.AppendInt(lowest);
+	assert_se("-9223372036854775808", b.CStr(), "INT64_MIN in decimal");
+	b.Clear();
+	b.AppendInt(-42);
+	assert_se("-42", b.CStr(), "a negative int");
+	b.Clear();
+	b.AppendInt(0);
+	assert_se("0", b.CStr(), "zero");
+	b.Clear();
+	b.AppendFloat(-1.5f, 1);
+	assert_se("-1.5", b.CStr(), "a negative float keeps its sign");
+	b.Clear();
+	b.AppendDouble(-0.25, 2);
+	assert_se("-0.25", b.CStr(), "a negative double below one keeps its sign");
+}
+
+[test("str.builder.zero_state_and_copy")]
+public static void TestBuilderZeroStateAndCopy() {
+	Core::StringBuilder b;
+	assert_se("", b.CStr(), "a zero builder reads as the empty string");
+	b.Clear();
+	b.AppendByte('x');
+	assert_se("x", b.CStr(), "a zero builder grows on the first append");
+	Core::StringBuilder c = b;
+	c.Append("yz");
+	assert_se("x", b.CStr(), "the copy owns its own buffer");
+	assert_se("xyz", c.CStr(), "the copy appends independently");
+}
+
+[test("str.builder.float_formatting")]
+public static void TestBuilderFloatFormatting() {
+	Core::StringBuilder b;
+	b.AppendDouble(1.995, 2);
+	assert_se("2.00", b.CStr(), "rounded, not truncated");
+	b.Clear();
+	b.AppendFloat(2.5f, 0);
+	assert_se("2", b.CStr(), "half to even, as the C library rounds");
+	b.Clear();
+	b.AppendDouble(1e20, 1);
+	assert_se("100000000000000000000.0", b.CStr(), "beyond INT64_MAX");
+	b.Clear();
+	b.AppendDouble(0.1, -1);
+	assert_se("0.1", b.CStr(), "the shortest form that reads back");
+	b.Clear();
+	b.AppendDouble(1.0 / 3.0, -1);
+	assert_se("0.3333333333333333", b.CStr(), "seventeen significant digits at most");
+	b.Clear();
+	b.AppendDouble(1000.0, -1);
+	assert_se("1000", b.CStr(), "plain decimals, not 1e+03 (BUG-180)");
+	b.Clear();
+	b.AppendDouble(0.0001, -1);
+	assert_se("0.0001", b.CStr(), "a small value in plain decimals");
+	b.Clear();
+	b.AppendDouble(1e16, -1);
+	assert_se("1e+16", b.CStr(), "an exponent from 1e16 up");
+	b.Clear();
+	b.AppendDouble(0.000001, -1);
+	assert_se("1e-06", b.CStr(), "and below 1e-5");
+	b.Clear();
+	b.AppendDouble(123456789012345678.0, -1);
+	assert_se("1.2345678901234568e+17", b.CStr(), "seventeen digits in scientific form");
+	b.Clear();
+	b.AppendDouble(-2.5, -1);
+	assert_se("-2.5", b.CStr(), "a negative value");
+	double zero = 0.0;
+	b.Clear();
+	b.AppendDouble(1.0 / zero, 2);
+	assert_se("inf", b.CStr(), "infinity");
+	b.Clear();
+	b.AppendDouble(-1.0 / zero, -1);
+	assert_se("-inf", b.CStr(), "negative infinity");
+	b.Clear();
+	b.AppendDouble(zero / zero, 2);
+	assert_se("nan", b.CStr(), "NaN, spelled the same on every platform (BUG-174)");
+}
+
+// BUG-163: a view appends exactly its bytes, even a view of the builder's own buffer.
+[test("str.builder.append_views")]
+public static void TestBuilderAppendViews() {
+	Core::StringBuilder b;
+	b.Append(Core::StringView("abcdef").Substring(1, 2));
+	assert_se("bc", b.CStr(), "a substring view appends its own bytes");
+	for (int32 i = 0; i < 6; ++i) b.Append(b.View());
+	assert_eq(128, b.ByteLength(), "appending itself while growing");
+	assert_true(b.View().Substring(126, 2) == Core::StringView("bc"), "the bytes survive the growth");
+	Core::StringBuilder bytes;
+	bytes.AppendBytes("a", 1);
+	bytes.AppendByte(0);
+	bytes.AppendBytes("b", 1);
+	assert_eq(3, bytes.ByteLength(), "embedded zero bytes count");
+	assert_eq(3, bytes.ToString().ByteLength(), "and copy into a String");
+}
+

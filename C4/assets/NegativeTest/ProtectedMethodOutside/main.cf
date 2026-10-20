@@ -1,0 +1,7 @@
+class Gear {
+	protected int32 Level() { return 1; }
+}
+class Cog : public Gear {
+	public int32 Read() { return Level(); }
+}
+int32 main() { Cog c; return c.Level(); }

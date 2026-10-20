@@ -1,0 +1,34 @@
+// Covers out-of-line template method definitions: one where only Push is defined
+// out of line (Init inline) and one where both Init and Push are out of line.
+
+template<T> class BoxPartial {
+    T* data;
+    int32 count;
+    [operator("create")] public void Init(int32 cap) { this->data = (T*)raw_alloc(cap * sizeof(T)); this->count = 0; }
+    public int32 Count() { return this->count; }
+    public void Push(T v);
+}
+template<T> public void BoxPartial::Push(T v) { this->data[this->count] = v; this->count = this->count + 1; }
+
+template<T> class BoxFullOOL {
+    T* data;
+    int32 count;
+    [operator("create")] public void Init(int32 cap);
+    public int32 Count() { return this->count; }
+    public void Push(T v);
+}
+template<T> public void BoxFullOOL::Init(int32 cap) { this->data = (T*)raw_alloc(cap * sizeof(T)); this->count = 0; }
+template<T> public void BoxFullOOL::Push(T v) { this->data[this->count] = v; this->count = this->count + 1; }
+
+int32 main() {
+    BoxPartial<int32>* b = new BoxPartial<int32>{4};
+    b->Push(7);
+    if (b->Count() != 1) return 1;
+    printf("INLINE-OP count=%d\n", b->Count());
+
+    BoxFullOOL<int32>* c = new BoxFullOOL<int32>{4};
+    c->Push(7);
+    if (c->Count() != 1) return 2;
+    printf("OO-OP count=%d\n", c->Count());
+    return 0;
+}

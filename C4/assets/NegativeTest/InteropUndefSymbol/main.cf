@@ -1,0 +1,3 @@
+extern "c" include "smoke.h"
+extern "c" source "smoke.c"
+void main() { DefinedOne(1); MissingSymbol(2); }

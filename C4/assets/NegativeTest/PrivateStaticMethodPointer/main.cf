@@ -1,0 +1,7 @@
+struct S {
+	private static int32 Hidden(int32 x) { return x; }
+}
+int32 main() {
+	funcptr<int32(int32)> f = S::Hidden;
+	return 0;
+}

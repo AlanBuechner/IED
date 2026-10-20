@@ -1,0 +1,30 @@
+// Bug A repro - nested struct field access, pointer-deref field, cross-instance offsets.
+
+struct Inner { int32 x; };
+struct Outer { int32 a; Inner b; };
+
+int32 main() {
+	Outer o;
+	o.a = 1;
+	o.b.x = 5;
+	if (o.b.x != 5) { printf("FAIL nested read got %d\n", o.b.x); return 1; }
+
+	o.b.x = 9;
+	if (o.b.x != 9) { printf("FAIL nested write got %d\n", o.b.x); return 1; }
+
+	Outer* p = &o;
+	p->b.x = 7;
+	if (p->b.x != 7) { printf("FAIL ptr-deref read got %d\n", p->b.x); return 1; }
+	if (o.b.x != 7) { printf("FAIL ptr-deref wrote wrong instance got %d\n", o.b.x); return 1; }
+
+	Outer o2;
+	o2.a = 100;
+	o2.b.x = 200;
+	if (o.a != 1) { printf("FAIL cross a got %d\n", o.a); return 1; }
+	if (o2.a != 100) { printf("FAIL cross o2.a got %d\n", o2.a); return 1; }
+	if (o.b.x != 7) { printf("FAIL cross o.b.x got %d\n", o.b.x); return 1; }
+	if (o2.b.x != 200) { printf("FAIL cross o2.b.x got %d\n", o2.b.x); return 1; }
+
+	printf("NESTED FIELD OK\n");
+	return 0;
+}

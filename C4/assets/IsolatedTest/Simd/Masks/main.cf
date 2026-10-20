@@ -1,0 +1,56 @@
+// Masks (D-62): comparisons give `packed bool[N]`, simd_select blends by them (vectors or broadcast scalars),
+// simd_any / simd_all test them and simd_bitmask packs them, bit i for lane i, on 2 to 16 lanes. main returns the
+// failures.
+int32 Differs(float actual, float expected) { return actual == expected ? 0 : 1; }
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 Selects() {
+	int32 failures = 0;
+	packed float[4] a = { 1.0f, -2.0f, 3.0f, -4.0f };
+	packed float[4] b = { 10.0f, 20.0f, 30.0f, 40.0f };
+	packed bool[4] positive = a > 0.0f;
+	packed float[4] chosen = simd_select(positive, a, b);
+	failures += Differs(chosen[0], 1.0f) + Differs(chosen[1], 20.0f) + Differs(chosen[2], 3.0f) + Differs(chosen[3], 40.0f);
+	packed float[4] relu = simd_select(positive, a, 0.0f);
+	failures += Differs(relu[1], 0.0f) + Differs(relu[2], 3.0f);
+	packed float[4] signs = simd_select(positive, 1.0f, -1.0f);     // two scalars: the mask's lane count
+	failures += Differs(signs[0], 1.0f) + Differs(signs[3], -1.0f);
+	packed int32[8] i = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	packed int32[8] odd = simd_select((i & 1) == 1, i, -i);
+	failures += DiffersI(odd[0], 1) + DiffersI(odd[1], -2) + DiffersI(odd[7], -8);
+	packed bool[4] flipped = simd_select(positive, !positive, positive);   // masks blend too
+	failures += flipped[0] ? 1 : 0;
+	failures += flipped[1] ? 1 : 0;
+	return failures;
+}
+
+int32 Tests() {
+	int32 failures = 0;
+	packed float[4] a = { 1.0f, -2.0f, 3.0f, -4.0f };
+	failures += simd_any(a > 2.0f) ? 0 : 1;
+	failures += simd_any(a > 5.0f) ? 1 : 0;
+	failures += simd_all(a > -5.0f) ? 0 : 1;
+	failures += simd_all(a > -3.0f) ? 1 : 0;
+	packed int64[2] pair = { -1, 1 };
+	failures += simd_all(pair != 0) ? 0 : 1;
+	return failures;
+}
+
+int32 Bitmasks() {
+	int32 failures = 0;
+	packed int32[2] two = { 0, 1 };
+	failures += DiffersI(simd_bitmask(two > 0), 2);
+	packed float[4] a = { 1.0f, -2.0f, 3.0f, -4.0f };
+	failures += DiffersI(simd_bitmask(a > 0.0f), 5);
+	packed float[8] e = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, -1.0f };
+	failures += DiffersI(simd_bitmask(e < 0.0f), 128);
+	packed uint8[16] bytes = { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 255 };
+	failures += DiffersI(simd_bitmask(bytes != 0), 43690);
+	packed bool[16] none = bytes > 255;
+	failures += DiffersI(simd_bitmask(none), 0);
+	return failures;
+}
+
+int32 main() {
+	return Selects() + Tests() + Bitmasks();
+}

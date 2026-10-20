@@ -1,0 +1,94 @@
+// Bedrock Format tests. Run with:  C4.exe c4/Bedrock/Tests -test
+// Covers the Frost-style positional formatter: verbatim text, default + typed kinds, width padding,
+// float/double fraction digits, and multiple placeholders in one format string.
+
+include "bedrock.ch"
+
+[test("format.verbatim")]
+public static void TestFormatVerbatim() {
+	Core::StringBuilder* b = new Core::StringBuilder(16);
+	Core::Format(b, "hello world");           // no placeholders at all
+	assert_se("hello world", b->CStr(), "no-placeholder format copies verbatim");
+}
+
+[test("format.decimal_default")]
+public static void TestFormatDecimalDefault() {
+	Core::StringBuilder* b = new Core::StringBuilder(16);
+	Core::Format(b, "{0}", 42);               // default kind d: signed decimal int32
+	assert_se("42", b->CStr(), "default placeholder renders decimal");
+	b->Clear();
+	Core::Format(b, "n={0}", -7);
+	assert_se("n=-7", b->CStr(), "negative default decimal");
+}
+
+[test("format.kinds")]
+public static void TestFormatKinds() {
+	Core::StringBuilder* b = new Core::StringBuilder(32);
+	Core::Format(b, "{0:x}", 255u);           // hex
+	assert_se("ff", b->CStr(), "hex kind");
+	b->Clear();
+	Core::Format(b, "{0:b}", 5u);             // binary
+	assert_se("101", b->CStr(), "binary kind");
+	b->Clear();
+	Core::Format(b, "{0:o}", 8u);             // octal
+	assert_se("10", b->CStr(), "octal kind");
+	b->Clear();
+	Core::Format(b, "{0:u}", 123456789u);     // unsigned decimal (uint64)
+	assert_se("123456789", b->CStr(), "unsigned decimal kind");
+}
+
+[test("format.width_padding")]
+public static void TestFormatWidthPadding() {
+	Core::StringBuilder* b = new Core::StringBuilder(32);
+	Core::Format(b, "{0:x.8}", 255u);         // hex zero-padded to 8 digits
+	assert_se("000000ff", b->CStr(), "hex width-8 padding");
+	b->Clear();
+	Core::Format(b, "{0:d.4}", 255);          // decimal zero-padded to 4 digits
+	assert_se("0255", b->CStr(), "decimal width-4 padding");
+	b->Clear();
+	Core::Format(b, "{0:b.8}", 5u);           // binary padded to 8 bits
+	assert_se("00000101", b->CStr(), "binary width-8 padding");
+}
+
+[test("format.float_double")]
+public static void TestFormatFloatDouble() {
+	Core::StringBuilder* b = new Core::StringBuilder(32);
+	Core::Format(b, "{0:f.2}", 1.5f);         // float, 2 fraction digits
+	assert_se("1.50", b->CStr(), "float f.2");
+	b->Clear();
+	Core::Format(b, "{0:F.3}", 2.25);         // double, 3 fraction digits
+	assert_se("2.250", b->CStr(), "double F.3");
+	b->Clear();
+	Core::Format(b, "{0:f}", 3.0f);           // no width -> 0 fraction digits
+	assert_se("3", b->CStr(), "float f (no decimals)");
+}
+
+[test("format.multiple")]
+public static void TestFormatMultiple() {
+	Core::StringBuilder* b = new Core::StringBuilder(64);
+	Core::Format(b, "id={0:d.4} val={1:x.8}", 255, 4096u);   // two placeholders, mixed kinds + widths
+	assert_se("id=0255 val=00001000", b->CStr(), "two placeholders with controls");
+	b->Clear();
+	Core::Format(b, "{0:f.2} + {1:F.3}", 1.5f, 2.25);        // float then double in one string
+	assert_se("1.50 + 2.250", b->CStr(), "float and double in one format");
+}
+
+[test("format.order_and_repeat")]
+public static void TestFormatOrderAndRepeat() {
+	Core::StringBuilder b;
+	Core::Format(&b, "{1} before {0}, {1} again", 10, 20);
+	assert_se("20 before 10, 20 again", b.CStr(), "any order, any number of times");
+	b.Clear();
+	Core::Format(&b, "{2:F.1}", 1, 2.5, 3.25);
+	assert_se("3.2", b.CStr(), "an unnamed argument is skipped by its size (3.25 rounds to even)");
+}
+
+[test("format.escapes_and_strings")]
+public static void TestFormatEscapesAndStrings() {
+	Core::StringBuilder b;
+	Core::Format(&b, "{{0}} is {0:s}, }} {{", "zero");
+	assert_se("{0} is zero, } {", b.CStr(), "doubled braces are literal");
+	b.Clear();
+	Core::Format(&b, "{x} {0 {99} {0:d", 5);
+	assert_se("{x} {0 {99} {0:d", b.CStr(), "malformed placeholders are written as text");
+}

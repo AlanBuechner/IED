@@ -1,0 +1,3 @@
+struct A { B b; }
+struct B { A a; }
+int main() { return (int32)sizeof(A); }

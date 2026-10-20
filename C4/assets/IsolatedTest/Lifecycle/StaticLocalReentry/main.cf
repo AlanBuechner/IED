@@ -1,0 +1,12 @@
+// A static local whose start reaches its own declaration again (recursion) stops the program: the start can
+// neither wait for itself nor run twice.
+int32 Recurse(int32 depth) {
+	static int32 v = Recurse(depth + 1);
+	return v;
+}
+
+int32 main() {
+	Recurse(0);
+	printf("SHOULD NOT REACH HERE\n");
+	return 0;
+}

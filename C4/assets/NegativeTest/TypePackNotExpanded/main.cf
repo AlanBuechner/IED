@@ -1,0 +1,2 @@
+template<...Ts> int32 F(Ts... args) { Ts x; return 0; }
+int32 main() { return F(1); }

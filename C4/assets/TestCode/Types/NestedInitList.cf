@@ -1,0 +1,38 @@
+// Types - nested braces build the elements of an __init_list<T> (BUG-177)
+include "../Framework/Assert.ch"
+include "NestedInitList.ch"
+
+int32 NilProducts(__init_list<NilPair> pairs) {
+	int32 total = 0;
+	for (const NilPair& p : pairs) total += p.a * p.b;
+	return total;
+}
+
+void NilBag::Init(__init_list<NilPair> pairs) {
+	total = NilProducts(pairs);
+	count = (int32)pairs.size;
+}
+
+int32 NilRows(__init_list<__init_list<int32>> rows) {
+	int32 total = 0;
+	for (__init_list<int32> row : rows)
+		for (int32 v : row) total = total * 10 + v;
+	return total;
+}
+
+void TestNestedInitList() {
+	__init_list<NilPair> local = { { 2, 3 }, { 4, 5 } };
+	AssertEqual(26, NilProducts(local));
+	AssertEqual(5, NilProducts({ { 1, 1 }, { 2, 2 } }));
+	NilPair named = { 3, 3 };
+	AssertEqual(10, NilProducts({ named, { 1, 1 } }));
+	AssertEqual(4, NilProducts({ { b = 4, a = 1 } }));
+	NilBag bag = { { 1, 2 }, { 3, 4 } };
+	AssertEqual(14, bag.total);
+	AssertEqual(2, bag.count);
+	NilBag* heap = new NilBag{ { 1, 2 } };
+	AssertEqual(2, heap->total);
+	AssertEqual(123, NilRows({ { 1, 2 }, { 3 } }));
+	__init_list<double> widened = { 1, 2.5f };
+	AssertTrue(widened[0] == 1.0 && widened[1] == 2.5 ? 1 : 0);
+}

@@ -1,0 +1,18 @@
+template<T> class DeclOnly {
+    T* data;
+    int32 count;
+    public int32 Count();
+    public void Push(T v);
+}
+template<T> class HasBody {
+    T* data;
+    int32 count;
+    public int32 Count() { return count; }
+    public void Push(T v) { data[count] = v; count = count + 1; }
+}
+int32 main() {
+    DeclOnly<int32>* a = new DeclOnly<int32>{null, 4};
+    HasBody<int32>* b = new HasBody<int32>{null, 4};
+    printf("TMPL DECL OK\n");
+    return 0;
+}

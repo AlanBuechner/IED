@@ -1,0 +1,75 @@
+// Reflected annotations (D-42): every annotation the compiler does not act on, with its arguments folded.
+
+include "bedrock.ch"
+
+namespace RaLimits { const int32 kMax = 10; }
+const float kRaScale = 0.5f;
+
+[Serialize, Range(-1, RaLimits::kMax * 2)] [Tooltip("speed" "\n" "fast")]
+struct RaShip {
+	[Range(0.0, kRaScale)] public float speed;
+	[Hidden] public int32 secret;
+	[Command("go", true)] public void Go([Units("m")] float distance) { speed = distance; }
+}
+[Flags] enum class RaMode { A, B }
+[Setting("volume")] float g_raVolume = 1.0f;
+[Script::Callable] int32 RaTwice([NotZero] int32 x) { return x * 2; }
+[group("ra"), Tag(7)] int32 RaGrouped() { return 1; }
+[Declared] int32 RaSplit(int32 a);
+[Defined] int32 RaSplit(int32 a) { return a; }
+
+[test("reflect.annotations")]
+class ReflectionAnnotationTests {
+	[test("type")]
+	public static void TestType() {
+		Reflection::Type ship = Reflection::FindType("RaShip");
+		assert_eq(3, (int32)ship.AnnotationCount(), "Serialize, Range, Tooltip");
+		assert_se("Serialize", ship.AnnotationAt(0).Name(), "in source order");
+		assert_eq(0, (int32)ship.FindAnnotation("Serialize").ArgCount(), "no arguments");
+		Reflection::Annotation range = ship.FindAnnotation("Range");
+		assert_true(range.ArgKind(0) == Reflection::AnnotationArg::Int ? 1 : 0, "an integer argument");
+		assert_eq(-1, (int32)range.IntArg(0), "a negative literal folds");
+		assert_eq(20, (int32)range.IntArg(1), "a qualified constant expression folds");
+		assert_se("speed\nfast", ship.FindAnnotation("Tooltip").StringArg(0), "adjacent string literals join");
+		assert_true(!ship.FindAnnotation("Missing").IsValid() ? 1 : 0, "a missing name");
+	}
+
+	[test("members")]
+	public static void TestMembers() {
+		Reflection::Type ship = Reflection::FindType("RaShip");
+		Reflection::Annotation range = ship.FindField("speed").FindAnnotation("Range");
+		assert_true(range.ArgKind(1) == Reflection::AnnotationArg::Float ? 1 : 0, "a float argument");
+		assert_true(range.FloatArg(1) == 0.5 ? 1 : 0, "a float constant folds");
+		assert_true(ship.FindField("secret").FindAnnotation("Hidden").IsValid() ? 1 : 0, "a field annotation");
+		Reflection::Method go = ship.FindMethod("Go");
+		Reflection::Annotation command = go.FindAnnotation("Command");
+		assert_se("go", command.StringArg(0), "a string argument");
+		assert_true(command.ArgKind(1) == Reflection::AnnotationArg::Bool && command.BoolArg(1) ? 1 : 0, "a bool argument");
+		assert_se("m", go.ParamAt(0).FindAnnotation("Units").StringArg(0), "a parameter annotation");
+	}
+
+	[test("entities")]
+	public static void TestEntities() {
+		assert_true(Reflection::FindType("RaMode").FindAnnotation("Flags").IsValid() ? 1 : 0, "an enum annotation");
+		assert_se("volume", Reflection::FindVariable("g_raVolume").FindAnnotation("Setting").StringArg(0), "a variable annotation");
+		Reflection::Function twice = Reflection::FindFunction("RaTwice");
+		assert_true(twice.FindAnnotation("Script::Callable").IsValid() ? 1 : 0, "a qualified name as written");
+		assert_true(twice.ParamAt(0).FindAnnotation("NotZero").IsValid() ? 1 : 0, "a function parameter annotation");
+	}
+
+	[test("compiler_annotations_not_kept")]
+	public static void TestCompilerAnnotationsNotKept() {
+		Reflection::Function grouped = Reflection::FindFunction("RaGrouped");
+		assert_eq(1, (int32)grouped.AnnotationCount(), "only Tag");
+		assert_eq(7, (int32)grouped.AnnotationAt(0).IntArg(0), "its argument");
+		assert_eq(0, (int32)Reflection::FindType("ReflectionAnnotationTests").AnnotationCount(), "test is the compiler's");
+	}
+
+	[test("declaration_and_definition")]
+	public static void TestDeclarationAndDefinition() {
+		Reflection::Function split = Reflection::FindFunction("RaSplit");
+		assert_eq(2, (int32)split.AnnotationCount(), "the declaration's and the definition's");
+		assert_se("Declared", split.AnnotationAt(0).Name(), "declaration first");
+		assert_se("Defined", split.AnnotationAt(1).Name(), "then the definition");
+	}
+}

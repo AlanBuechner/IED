@@ -1,0 +1,7 @@
+int32 main() {
+	int32[4] values;
+	int32* a = &values[0];
+	int32* b = &values[3];
+	a -= b;
+	return 0;
+}

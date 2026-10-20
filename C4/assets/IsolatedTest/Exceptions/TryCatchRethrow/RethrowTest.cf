@@ -1,0 +1,26 @@
+int32 g_caught = -1;
+
+void DoThrow(int32 v) {
+	throw v;
+}
+
+int32 RethrowTest() {
+	int32 outer = -1;
+	try {
+		try {
+			DoThrow(21);
+		} catch (int32 e) {
+			throw;
+		}
+	} catch (int32 e) {
+		outer = e;
+	}
+	return outer;
+}
+
+int32 main() {
+	int32 rethrown = RethrowTest();
+	if (rethrown != 21) { printf("FAIL Rethrow got=%d\n", rethrown); return 1; }
+	printf("RETHROW OK\n");
+	return 0;
+}

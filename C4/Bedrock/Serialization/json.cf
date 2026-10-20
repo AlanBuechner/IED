@@ -1,0 +1,57 @@
+include "json.ch"
+
+namespace Serialization
+{
+	bool IsFinite(double value) { return value - value == 0.0; }
+
+	void WriteFloatText(double value, Core::StringBuilder* out) {
+		int64 start = out->ByteLength();
+		out->AppendDouble(value, -1);
+		Core::StringView written = out->View().Substring(start, -1);
+		if (written.IndexOf('.', 0) < 0 && written.IndexOf('e', 0) < 0 && written.IndexOf('n', 0) < 0) out->Append(".0");
+	}
+
+	void WriteJsonString(Core::StringView text, Core::StringBuilder* out) {
+		out->AppendByte('"');
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			int32 c = text.ByteAt(i);
+			if (c == '"') out->Append("\\\"");
+			else if (c == '\\') out->Append("\\\\");
+			else if (c == '\n') out->Append("\\n");
+			else if (c == '\r') out->Append("\\r");
+			else if (c == '\t') out->Append("\\t");
+			else if (c == 8) out->Append("\\b");
+			else if (c == 12) out->Append("\\f");
+			else if (c < 0x20) { out->Append("\\u"); out->AppendUIntBase((uint64)c, 16, 4); }
+			else out->AppendByte(c);
+		}
+		out->AppendByte('"');
+	}
+
+	void WriteJsonLine(Core::StringBuilder* out, int32 indent, int32 depth) {
+		if (indent <= 0) return;
+		out->AppendByte('\n');
+		for (int32 s = 0; s < indent * depth; ++s) out->AppendByte(' ');
+	}
+
+	void WriteJsonAt(const DomNode& node, Core::StringBuilder* out, int32 indent, int32 depth) {
+		DomKind kind = node.Kind();
+		if (kind == DomKind::Null) { out->Append("null"); return; }
+		if (kind == DomKind::Bool) { out->Append(node.AsBool() ? "true" : "false"); return; }
+		if (kind == DomKind::Int) { out->AppendInt(node.AsInt()); return; }
+		if (kind == DomKind::Float) { if (IsFinite(node.AsFloat())) WriteFloatText(node.AsFloat(), out); else out->Append("null"); return; }
+		if (kind == DomKind::String) { WriteJsonString(node.AsView(), out); return; }
+		bool array = kind == DomKind::Array;
+		out->AppendByte(array ? '[' : '{');
+		for (int64 i = 0; i < node.Count(); ++i) {
+			if (i > 0) out->AppendByte(',');
+			WriteJsonLine(out, indent, depth + 1);
+			if (!array) { WriteJsonString(node.KeyAt(i), out); out->Append(indent > 0 ? ": " : ":"); }
+			WriteJsonAt(array ? node.At(i) : node.ValueAt(i), out, indent, depth + 1);
+		}
+		if (node.Count() > 0) WriteJsonLine(out, indent, depth);
+		out->AppendByte(array ? ']' : '}');
+	}
+
+	void WriteJson(const DomNode& node, Core::StringBuilder* out, int32 indent) { WriteJsonAt(node, out, indent, 0); }
+}

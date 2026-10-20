@@ -1,0 +1,103 @@
+include "../Framework/Assert.ch"
+include "ProtectedFromDerived.ch"
+
+class AccessBase {
+	protected int32 hidden = 3;
+	protected static int32 counter = 10;
+	private int32 secret = 7;
+
+	[operator("create")] public void Init() {}
+	[operator("create")] protected void Init(int32 start) { this.hidden = start; }
+
+	protected int32 Twice() { return this.hidden * 2; }
+	protected static int32 Bump() { counter = counter + 1; return counter; }
+	public int32 Secret() { return this.secret; }
+	public bool SameSecret(const AccessBase& other) const { return this.secret == other.secret; }
+}
+
+class AccessDerived : public AccessBase {
+	[operator("create")] public void Init(int32 start) { AccessBase::Init(start); }
+
+	public int32 ReadHidden() { return hidden + this.hidden; }
+	public int32 CallTwice() { return Twice() + this.Twice(); }
+	public int32 CallStatic() { return AccessBase::Bump() + Bump(); }
+	public int32 ReadCounter() { return AccessBase::counter; }
+	public int32 FromLambda() {
+		func<int32()> read = [this]() -> int32 { return this.hidden + Twice(); };
+		return read();
+	}
+}
+
+class Ticket {
+	private int32 number;
+	private static const int32 kStep = 5;
+
+	[operator("create")] private void Init(int32 n) { this.number = n; }
+
+	public static Ticket Issue(int32 n) { return Ticket(n * kStep); }
+	public static Ticket* IssueOnHeap(int32 n) { return new Ticket(n); }
+	public int32 Number() const { return this.number; }
+	public int32 Scaled(int32 by = kStep) const { return this.number * by; }
+
+	public class Stub {
+		public int32 Peek(const Ticket& t) const { return t.number + kStep; }
+	}
+}
+
+class Gauge {
+	private static const int32 kStart = 40;
+	private int32 level = kStart + 2;
+	public int32 Level() const { return this.level; }
+}
+
+class Sealed {
+	public int32 tag;
+	[operator("create")] protected void Init() { this.tag = 9; }
+}
+
+class Opened : public Sealed {
+	public int32 extra = 1;
+}
+
+template<typename T>
+class Holder {
+	protected T value;
+	public void Set(T v) { this.value = v; }
+	protected T Raw() const { return this.value; }
+}
+
+class IntHolder : public Holder<int32> {
+	public int32 Doubled() const { return Raw() + this.value; }
+}
+
+void TestProtectedFromDerived() {
+	AccessDerived d(4);
+	AssertIntEquals(8, d.ReadHidden(), "derived reads a protected field");
+	AssertIntEquals(16, d.CallTwice(), "derived calls a protected method");
+	AssertIntEquals(23, d.CallStatic(), "derived calls a protected static method");
+	AssertIntEquals(12, d.ReadCounter(), "derived reads a protected static field");
+	AssertIntEquals(12, d.FromLambda(), "a lambda in a derived method sees protected members");
+	AssertIntEquals(7, d.Secret(), "a public method reads the private field");
+
+	AccessBase a;
+	AccessBase b;
+	Assert(a.SameSecret(b), "a method reads another object's private field");
+
+	Ticket t = Ticket::Issue(3);
+	AssertIntEquals(15, t.Number(), "a static method calls the private create");
+	Ticket* heap = Ticket::IssueOnHeap(9);
+	AssertIntEquals(9, heap->Number(), "new of a private create inside the type");
+	AssertIntEquals(75, t.Scaled(), "a default argument names a private constant");
+	Ticket::Stub stub;
+	AssertIntEquals(20, stub.Peek(t), "a nested type reads the outer type's private members");
+
+	Gauge g;
+	AssertIntEquals(42, g.Level(), "a field initializer names a private constant");
+
+	Opened o;
+	AssertIntEquals(10, o.tag + o.extra, "a derived type's construction runs the protected base create");
+
+	IntHolder h;
+	h.Set(21);
+	AssertIntEquals(42, h.Doubled(), "derived from a template instance uses its protected members");
+}

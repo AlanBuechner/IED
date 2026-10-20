@@ -1,0 +1,97 @@
+include "stringbuilder.ch"
+
+namespace Core
+{
+	[operator("create")] void StringBuilder::Init(int64 capacity) { Reserve(capacity); }
+
+	[operator("copy")] void StringBuilder::CopyFrom(const StringBuilder& other) {
+		if (other.length == 0) return;
+		Reserve(other.length);
+		memcpy(buffer, other.buffer, (uint64)(other.length + 1));
+		length = other.length;
+	}
+
+	[operator("delete")] void StringBuilder::Delete() {
+		raw_free(buffer);
+		buffer = nullptr;
+		length = 0;
+		capacity = 0;
+	}
+
+	void StringBuilder::Reserve(int64 bytes) {
+		if (bytes <= capacity && buffer) return;
+		int64 grown = capacity * 2 > bytes ? capacity * 2 : bytes;
+		if (grown < 31) grown = 31;
+		char* larger = (char*)raw_alloc((uint64)(grown + 1));
+		if (buffer) memcpy(larger, buffer, (uint64)(length + 1));
+		else larger[0] = (char)0;
+		raw_free(buffer);
+		buffer = larger;
+		capacity = grown;
+	}
+
+	// `bytes` may point into this builder's own buffer, which a reallocation moves: keep its offset instead.
+	void StringBuilder::AppendBytes(const char* bytes, int64 count) {
+		if (count <= 0) return;
+		bool own = buffer != nullptr && bytes >= buffer && bytes <= buffer + length;
+		int64 offset = own ? bytes - buffer : 0;
+		Reserve(length + count);
+		if (own) bytes = buffer + offset;
+		memmove(buffer + length, (void*)bytes, (uint64)count);
+		length += count;
+		buffer[length] = (char)0;
+	}
+
+	void StringBuilder::Append(StringView text) { AppendBytes(text.Data(), text.ByteLength()); }
+
+	void StringBuilder::AppendCodePoint(int32 codePoint) {
+		int32 point = codePoint;
+		if (point < 0 || point > 0x10FFFF || (point >= 0xD800 && point <= 0xDFFF)) point = 0xFFFD;
+		if (point < 0x80) { AppendByte(point); return; }
+		if (point < 0x800) { AppendByte(0xC0 | (point >> 6)); AppendByte(0x80 | (point & 0x3F)); return; }
+		if (point < 0x10000) {
+			AppendByte(0xE0 | (point >> 12));
+			AppendByte(0x80 | ((point >> 6) & 0x3F));
+			AppendByte(0x80 | (point & 0x3F));
+			return;
+		}
+		AppendByte(0xF0 | (point >> 18));
+		AppendByte(0x80 | ((point >> 12) & 0x3F));
+		AppendByte(0x80 | ((point >> 6) & 0x3F));
+		AppendByte(0x80 | (point & 0x3F));
+	}
+
+	void StringBuilder::AppendByte(int32 byte) {
+		Reserve(length + 1);
+		buffer[length] = (char)byte;
+		length += 1;
+		buffer[length] = (char)0;
+	}
+
+	void StringBuilder::AppendUIntBase(uint64 value, int32 base, int32 minWidth) {
+		if (base < 2 || base > 16) base = 10;
+		char[64] digits;   // least significant first; a uint64 has at most 64 binary digits
+		int32 count = 0;
+		do {
+			int32 digit = (int32)(value % (uint64)base);
+			digits[count] = (char)(digit < 10 ? '0' + digit : 'a' + (digit - 10));
+			value = value / (uint64)base;
+			count += 1;
+		} while (value > 0);
+		for (int32 i = count; i < minWidth; ++i) AppendByte('0');
+		for (int32 i = count - 1; i >= 0; --i) AppendByte(digits[i]);
+	}
+
+	// The magnitude is exact for the most negative int64 too.
+	void StringBuilder::AppendIntBase(int64 value, int32 base, int32 minWidth) {
+		if (value >= 0) { AppendUIntBase((uint64)value, base, minWidth); return; }
+		AppendByte('-');
+		AppendUIntBase((uint64)(-(value + 1)) + (uint64)1, base, minWidth);
+	}
+
+	void StringBuilder::AppendDouble(double value, int32 decimals) {
+		char[352] text;   // the widest fixed form: 309 integer digits, a sign, a point and 40 decimals
+		int32 written = format_double(&text[0], 352, value, decimals > 40 ? 40 : decimals);
+		if (written > 0) AppendBytes(&text[0], written);
+	}
+}

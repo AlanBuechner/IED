@@ -1,0 +1,2 @@
+int32 F(int32 x = "text") { return x; }
+int32 main() { return F(); }

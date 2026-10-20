@@ -1,0 +1,49 @@
+// A member of a class-template instance is compiled only when it is used (D-16, BUG-015): an instance
+// whose type lacks what an unused member needs still works, and a virtual member is compiled with the
+// instance's vtable.
+include "bedrock.ch"
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T>
+struct Wrapper {
+	public T value;
+	public bool Less(const Wrapper<T>& other) { return value < other.value; } // needs `<` on T
+	public int32 Size() { return sizeof(T); }
+}
+
+struct NoOrder { public int32 a; public int32 b; }
+
+class Handle {
+	public int32 fd;
+	[operator("delete")] public void Delete() { fd = 0; }
+}
+
+template<T>
+class Shape {
+	public T size;
+	public virtual T Area() { return size * size; }
+}
+
+template<T>
+class Square : Shape<T> {
+	public T Area() { return this.size * this.size * (T)4; }
+}
+
+int32 main() {
+	Wrapper<NoOrder> w;
+	Check(w.Size() == 8, "an instance whose T has no `<` works while Less is unused");
+	Wrapper<int32> x; x.value = 1;
+	Wrapper<int32> y; y.value = 2;
+	Check(x.Less(y), "the same member works for a T that has `<`");
+	Core::Array<Handle> handles;
+	handles.Resize(3);
+	Check(handles.Count() == 3, "a container of a type that cannot be copied, while nothing copies");
+	Square<int32> sq; sq.size = 3;
+	Shape<int32>* s = &sq;
+	Check(s->Area() == 36, "a virtual member of an instance is compiled with its vtable");
+	return g_failures;
+}

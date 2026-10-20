@@ -1,0 +1,61 @@
+extern "c++" include "cpp.h"
+extern "c++" source "cpp.cpp"
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+void TestCounter() {
+	Counter* c = new Counter;
+	Check(c != null, "C++ implicit ctor returns non-null");
+	c->Add(5);
+	c->Add(-2);
+	Check(c->Get() == 3, "C++ instance method Add/Get round-trip");
+	Counter* c2 = new Counter(40);
+	Check(c2 != null, "C++ explicit ctor returns non-null");
+	Check(c2->Get() == 40, "C++ explicit ctor initialized value");
+	Check(Counter_Scale(6, 7) == 42, "C++ static method Scale(6,7)==42");
+	delete c;
+	delete c2;
+}
+void TestOverloads() {
+	Bank* b = new Bank;
+	Check(b != null, "Bank implicit ctor non-null");
+	int32 r1 = b->Deposit(100);
+	Check(r1 == 100, "overload Deposit(100) returns 100");
+	int32 r2 = b->Deposit(50, 5);
+	Check(r2 == 145, "overload Deposit(50,5) returns 145 (fee applied)");
+	Check(b->Balance() == 145, "Balance reflects both deposits");
+	delete b;
+}
+void TestInheritanceAndVirtuals() {
+	Circle* circ = new Circle(9);
+	Check(circ != null, "Circle ctor non-null");
+	Check(circ->Id() == 7, "inherited Id() returns value set in C++ ctor");
+	Shape* s = circ;
+	int32 area = s->Area();
+	Check(area == 81, "virtual Area() through Shape* dispatches to Circle (9*9)");
+	Shape* plain = new Shape;
+	Check(plain != null, "Shape implicit ctor non-null");
+	Check(plain->Area() == -1, "virtual Area() on base Shape returns -1");
+	delete plain;
+	delete circ;
+}
+void TestByValueStruct() {
+	Vec2 a;
+	a.x = 3;
+	a.y = 4;
+	Vec2 b;
+	b.x = 10;
+	b.y = -2;
+	Vec2 r = AddVec(a, b);
+	Check(r.x == 13 && r.y == 2, "by-value struct param+return across C++ boundary");
+}
+int32 main() {
+	TestCounter();
+	TestOverloads();
+	TestInheritanceAndVirtuals();
+	TestByValueStruct();
+	if (g_fail) { printf("CPP INTEROP TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("CPP INTEROP TESTS OK\n");
+	return 0;
+}

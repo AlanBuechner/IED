@@ -1,0 +1,45 @@
+include "binary.ch"
+
+namespace Serialization
+{
+	// A union's bytes are copied whole: which view holds the value is not recorded anywhere.
+	bool IsNestedObject(Reflection::Field field) {
+		Reflection::Type type = field.TypeOf();
+		return type.IsValid() && type.FieldCount() > 0 && type.Kind() != Reflection::EntityKind::Union;
+	}
+
+	int64 WriteBinary(Reflection::Type type, const void* object, Core::StringBuilder* out) {
+		if (!type.IsValid()) return -1;
+		const char* base = (const char*)object;
+		int64 total = 0;
+		for (Reflection::Field field : type) {
+			if (field.IsAlias()) continue;
+			const char* at = base + field.Offset();
+			int64 written = (int64)field.SizeOf();
+			if (IsNestedObject(field)) written = WriteBinary(field.TypeOf(), at, out);
+			else out->AppendBytes(at, written);
+			if (written < 0) return -1;
+			total += written;
+		}
+		return total;
+	}
+
+	int64 ReadBinary(Core::StringView bytes, int64 position, Reflection::Type type, void* destination) {
+		if (!type.IsValid()) return -1;
+		char* base = (char*)destination;
+		for (Reflection::Field field : type) {
+			if (field.IsAlias()) continue;
+			char* at = base + field.Offset();
+			if (IsNestedObject(field)) {
+				position = ReadBinary(bytes, position, field.TypeOf(), at);
+				if (position < 0) return -1;
+				continue;
+			}
+			int64 size = (int64)field.SizeOf();
+			if (position < 0 || position + size > bytes.ByteLength()) return -1;
+			memcpy((void*)at, (void*)(bytes.Data() + position), (uint64)size);
+			position += size;
+		}
+		return position;
+	}
+}

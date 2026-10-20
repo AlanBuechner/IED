@@ -1,0 +1,197 @@
+// Bedrock reflection iterator tests. Run with:  C4.exe c4/Bedrock/Tests -test
+// Validates the Reflection wrapper's range-for iterators over a type's fields, methods, and enum values.
+// The registry is populated from this program in test mode, so locally declared types are findable by name.
+
+include "bedrock.ch"
+
+struct Point2D { public int32 x; public int32 y; }
+enum class Traffic { Stop, Slow, Go }
+class Mover {
+	public:
+		public void Nudge(int32 d) { step = step + d; }
+		public int32 GetStep() { return step; }
+	private:
+		private int32 step;
+}
+
+[test("reflect.field_iteration")]
+public static void TestFieldIteration() {
+	Reflection::Type t = Reflection::FindType("Point2D");
+	int32 count = 0;
+	uint64 totalOffset = 0;
+	for (Reflection::Field f : t) {
+		count++;
+		totalOffset = totalOffset + f.Offset();
+	}
+	assert_eq(2, count, "iterated both fields");
+	assert_eq(4, (int32)totalOffset, "x@0 + y@4");
+}
+
+[test("reflect.method_iteration")]
+public static void TestMethodIteration() {
+	Reflection::Type t = Reflection::FindType("Mover");
+	int32 count = 0;
+	for (Reflection::Method m : t.Methods()) {
+		count++;
+	}
+	assert_eq(2, count, "iterated both methods");
+}
+
+[test("reflect.enum_iteration")]
+public static void TestEnumIteration() {
+	Reflection::Type t = Reflection::FindType("Traffic");
+	int32 count = 0;
+	int64 sum = 0;
+	for (Reflection::EnumValue e : t.Enums()) {
+		count++;
+		sum = sum + e.Value();
+	}
+	assert_eq(3, count, "iterated all three enumerators");
+	assert_eq(3, (int32)sum, "Stop=0 + Slow=1 + Go=2");
+}
+
+// --- identity (D-50): qualified, argument-aware names; overloads are distinct entries --------------------
+namespace RtGeo {
+	struct Point { public int32 x; public int32 y; }
+	template<T> struct Box { public T value; }
+	enum class Shade { Dark, Light }
+	int32 Area(int32 width, int32 height) { return width * height; }
+}
+namespace RtOther { struct Point { public float u; } }
+struct RtCounter {
+	public const int32 limit = 3;
+	public static int32 s_made = 0;
+	public int32 Get() const { return limit; }
+	public static int32 Make(int32 seed) { return seed; }
+}
+int32 RtAdd(int32 a, int32 b) { return a + b; }
+float RtAdd(float a, float b) { return a + b; }
+interface IRtShape { int32 Sides(); }
+class RtBase {
+	public virtual int32 Kind() { return 0; }
+	public int32 Plain() { return 1; }
+}
+class RtDerived : RtBase, IRtShape {
+	public override int32 Kind() { return 1; }
+	public int32 Sides() { return 3; }
+}
+RtGeo::Box<int32> g_rtIntBox;
+RtGeo::Box<RtGeo::Point> g_rtPointBox;
+template<T> struct RtOuter {
+	struct Inner { public T value; }
+	enum class Mode { Off, On }
+	public Inner inner;
+	public Mode mode;
+}
+RtOuter<int16> g_rtOuterShort;
+RtOuter<double> g_rtOuterDouble;
+
+[test("reflect.identity.namespaces")]
+public static void TestNamespacedNames() {
+	assert_true(Reflection::FindType("RtGeo::Point").IsValid() ? 1 : 0, "a namespaced type is found by its qualified name");
+	assert_eq(4, (int64)Reflection::FindType("RtOther::Point").SizeOf(), "a same-named type in another namespace is its own entry");
+	assert_eq(2, (int64)Reflection::FindType("RtGeo::Shade").EnumCount(), "a namespaced enum");
+	Reflection::Function area = Reflection::FindFunction("RtGeo::Area");
+	assert_eq(2, (int64)area.ParamCount(), "a namespaced function by its qualified name");
+}
+
+[test("reflect.identity.templates")]
+public static void TestTemplateInstanceNames() {
+	assert_eq(4, (int64)Reflection::FindType("RtGeo::Box<int32>").SizeOf(), "Box<int32>");
+	Reflection::Type pointBox = Reflection::FindType("RtGeo::Box<RtGeo::Point>");
+	assert_eq(8, (int64)pointBox.SizeOf(), "Box<Point> is its own entry");
+	assert_true(pointBox.FindField("value").TypeOf().IsValid() ? 1 : 0, "a field's qualified type name resolves");
+}
+
+// BUG-179: a type declared in a class template's body is one type per instance, named after the instance.
+[test("reflect.identity.nested_in_template")]
+public static void TestNestedInTemplateNames() {
+	assert_eq(2, (int64)Reflection::FindType("RtOuter<int16>::Inner").SizeOf(), "the int16 instance's Inner");
+	assert_eq(8, (int64)Reflection::FindType("RtOuter<double>::Inner").SizeOf(), "the double instance's Inner is its own entry");
+	assert_eq(2, (int64)Reflection::FindType("RtOuter<int16>::Mode").EnumCount(), "a nested enum of an instance");
+	assert_true(Reflection::FindType("RtOuter<double>").FindField("inner").TypeOf().IsValid() ? 1 : 0, "the field's type resolves by name");
+}
+
+[test("reflect.identity.overloads")]
+public static void TestOverloadsAreDistinct() {
+	int32 adds = 0;
+	for (uint32 i = 0; i < Reflection::FunctionCount(); ++i)
+		if (strcmp(Reflection::FunctionAt(i).Name(), "RtAdd") == 0) adds++;
+	assert_eq(2, adds, "each overload registers under its own symbol");
+}
+
+[test("reflect.members.parameters")]
+public static void TestParameterNames() {
+	Reflection::Function area = Reflection::FindFunction("RtGeo::Area");
+	assert_se("width", area.ParamAt(0).Name(), "free function parameter name");
+	assert_se("int32", area.ParamAt(1).TypeName(), "free function parameter type");
+	assert_se("int32", area.ReturnTypeName(), "free function return type");
+	Reflection::Method make = Reflection::FindType("RtCounter").FindMethod("Make");
+	assert_se("seed", make.ParamAt(0).Name(), "method parameter name");
+}
+
+[test("reflect.members.flags")]
+public static void TestStoredFlags() {
+	Reflection::Type counter = Reflection::FindType("RtCounter");
+	assert_true(counter.FindField("limit").IsConst() ? 1 : 0, "a const field");
+	Reflection::Method get = counter.FindMethod("Get");
+	assert_true(get.IsConst() && !get.IsStatic() ? 1 : 0, "a const method");
+	assert_true(counter.FindMethod("Make").IsStatic() ? 1 : 0, "a static method");
+}
+
+// BUG-155: a function-local enum is named after its position, so it never replaces a global of its name.
+enum class RtShade3 { A, B, C }
+int32 RtLocalShade() {
+	enum class RtShade3 { X }
+	return (int32)RtShade3::X;
+}
+
+[test("reflect.identity.local_enum")]
+public static void TestLocalEnumIdentity() {
+	assert_eq(0, RtLocalShade(), "the local enum works");
+	assert_eq(3, (int64)Reflection::FindType("RtShade3").EnumCount(), "the global enum keeps its name");
+}
+
+struct RtLabeled { public int32 id; public Core::String label; public const int32 fixed = 4; }
+
+[test("reflect.members.field_access")]
+public static void TestFieldAccess() {
+	Reflection::Type labeled = Reflection::FindType("RtLabeled");
+	RtLabeled item;
+	assert_true(labeled.FindField("id").Set(&item, 12) ? 1 : 0, "set a scalar field");
+	assert_eq(12, item.id, "the instance changed");
+	int32 id = 0;
+	assert_true(labeled.FindField("id").Get(&item, id) ? 1 : 0, "get a scalar field");
+	assert_eq(12, id, "read back");
+	Core::String text = Core::String("tag");
+	assert_true(labeled.FindField("label").Set(&item, text) ? 1 : 0, "set an object field");
+	text.Append("!");
+	assert_se("tag", item.label.CStr(), "the field holds its own copy");
+	Core::String copy;
+	assert_true(labeled.FindField("label").Get(&item, copy) ? 1 : 0, "get an object field");
+	assert_se("tag", copy.CStr(), "copied out");
+	assert_true(!labeled.FindField("fixed").Set(&item, 9) ? 1 : 0, "a const field is not set");
+	int64 wide = 0;
+	assert_true(!labeled.FindField("id").Get(&item, wide) ? 1 : 0, "a size mismatch is refused");
+	assert_true(labeled.FindField("id").AddressIn(&item) == (void*)&item.id ? 1 : 0, "the field's address");
+}
+
+// BUG-152: virtual means dispatched through a vtable, not only written `virtual`.
+[test("reflect.members.virtual")]
+public static void TestVirtualFlags() {
+	assert_true(Reflection::FindType("RtBase").FindMethod("Kind").IsVirtual() ? 1 : 0, "declared virtual");
+	assert_true(!Reflection::FindType("RtBase").FindMethod("Plain").IsVirtual() ? 1 : 0, "a plain method");
+	assert_true(Reflection::FindType("RtDerived").FindMethod("Kind").IsVirtual() ? 1 : 0, "an override");
+	assert_true(Reflection::FindType("RtDerived").FindMethod("Sides").IsVirtual() ? 1 : 0, "an interface implementation");
+	assert_true(Reflection::FindType("IRtShape").FindMethod("Sides").IsVirtual() ? 1 : 0, "an interface method");
+}
+
+[test("reflect.members.statics")]
+public static void TestStaticDataMembers() {
+	Reflection::Type counter = Reflection::FindType("RtCounter");
+	assert_eq(1, (int64)counter.StaticVariableCount(), "one static data member");
+	Reflection::Variable made = counter.StaticVariableAt(0);
+	assert_se("RtCounter::s_made", made.Name(), "its qualified name");
+	assert_se("RtCounter", made.OwnerName(), "its owner");
+	assert_true(made.Address() != nullptr ? 1 : 0, "its live address");
+}

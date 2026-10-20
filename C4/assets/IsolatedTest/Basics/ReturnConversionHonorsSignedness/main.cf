@@ -1,0 +1,9 @@
+uint64 Wid(uint8 x) { return x; }
+int32 main() {
+    int32 bad = 0;
+    uint64 w = Wid(255);
+    if (w != 255) bad++;
+    int32 s = Wid(-1);
+    if (s != 255) bad++;
+    return bad;
+}

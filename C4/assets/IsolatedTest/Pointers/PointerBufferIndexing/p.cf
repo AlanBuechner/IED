@@ -1,0 +1,15 @@
+struct Box {
+    int32* data;
+    int32 count;
+    [operator("create")] public void Init(int32 cap) { this->data = (int32*)raw_alloc(cap * 4); this->count = 0; }
+    [operator("delete")] public void Finalize() { raw_free(this->data); }
+    public void Push(int32 v) { this->data[this->count] = v; this->count = this->count + 1; }
+    public int32 At(int32 i) { return this->data[i]; }
+}
+int32 main() {
+    Box* b = new Box(4);
+    b->Push(10); b->Push(20); b->Push(30);
+    if (b->count != 3 || b->At(2) != 30) return 1;
+    printf("PT INDEX OK count=%d at2=%d\n", b->count, b->At(2));
+    return 0;
+}

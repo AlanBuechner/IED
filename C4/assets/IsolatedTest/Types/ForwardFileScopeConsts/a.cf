@@ -1,0 +1,24 @@
+// File-scope declarations are order independent (program model): a const can be used above its
+// declaration, in a function body, a global initializer or an array extent (BUG-050).
+
+int32 UseBefore() { int32 x = s_Size; return x; }
+const int32 s_Size = 4;
+
+const int32 C = A + 10;
+struct Chained { public float[C] values; };
+const int32 A = 2;
+
+[test("model.forward_const.function_body")]
+public static void TestConstUsedAboveItsDeclaration() {
+    assert_eq(4, UseBefore(), "a function body reads a const declared below it");
+}
+
+[test("model.forward_const.chained_initializer")]
+public static void TestChainedForwardConsts() {
+    assert_eq(12, C, "C = A + 10 folds with A declared after it");
+    assert_eq(48, (int32)sizeof(Chained), "the extent C sizes the field");
+    Chained t;
+    t.values[11] = 1.5f;
+    assert_true(t.values[11] == 1.5f, "the last element exists");
+}
+

@@ -1,0 +1,19 @@
+// Variadic arguments get the C default promotions: an int8 sum, a uint8 and a char8 each arrive as an int32 with
+// their values. main returns the failed step.
+int32 Read(int32 count, int32 which, ...) {
+	va_list ap;
+	va_start(ap);
+	int32 value = 0;
+	for (int32 i = 0; i <= which; i++) value = va_arg(ap, int32);
+	va_end(ap);
+	return value;
+}
+int32 main() {
+	int8 s = 100;
+	int8 t = 50;
+	int8 sum = (int8)(s + t);
+	uint8 u = 200;
+	if (Read(2, 0, sum, u) != -106) return 1;
+	if (Read(2, 1, sum, u) != 200) return 2;
+	return 0;
+}

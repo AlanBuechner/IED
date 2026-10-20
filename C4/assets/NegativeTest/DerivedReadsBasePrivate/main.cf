@@ -1,0 +1,7 @@
+class Base {
+	private int32 secret = 1;
+}
+class Derived : public Base {
+	public int32 Read() { return secret; }
+}
+int32 main() { Derived d; return d.Read(); }

@@ -1,0 +1,62 @@
+// take(x) moves the value out of x and leaves x zero; a moved-from object is destroyed as a zero value.
+// A returned local or by-value parameter relocates to the caller; a returned field or global is copied.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+class Holder { public Probe probe; }
+
+Probe g_global;
+
+Probe ReturnLocal(int32* live) { Probe p = Probe(live, 3); return p; }
+Probe ReturnParameter(Probe p) { return p; }
+Probe ReturnField(Holder& h) { return h.probe; }
+Probe ReturnGlobal() { return g_global; }
+
+int32 main() {
+	int32 live = 0;
+	{
+		Probe a = Probe(&live, 1);
+		Probe b = take(a);
+		Check(live == 1, "take moves: no copy is made");
+		Check(b.id == 1 && a.id == 0 && a.live == null, "the source is left zero");
+	}
+	Check(live == 0, "the moved value is destroyed once, the zero source destroys nothing");
+	{
+		Probe r = ReturnLocal(&live);
+		Check(live == 1 && r.id == 3, "a returned local relocates to the caller");
+		Probe s = ReturnParameter(take(r));
+		Check(live == 1 && s.id == 3, "a returned by-value parameter relocates to the caller");
+		Holder h;
+		h.probe = Probe(&live, 4);
+		Probe f = ReturnField(h);
+		Check(live == 3 && f.id == 4, "a returned field is copied");
+	}
+	Check(live == 0, "every probe is destroyed");
+	g_global = Probe(&live, 5);
+	{
+		Probe g = ReturnGlobal();
+		Check(live == 2 && g.id == 5, "a returned global is copied");
+	}
+	Check(live == 1, "the copy of the global is destroyed");
+	{
+		Probe released = take(g_global); // the global's destroy at exit must not reach `live` after main
+	}
+	Check(live == 0 && g_global.live == null, "a global taken from is left zero");
+	return g_failures;
+}

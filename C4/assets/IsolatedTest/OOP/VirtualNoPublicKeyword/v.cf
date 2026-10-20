@@ -1,0 +1,4 @@
+class Shape {
+    virtual int32 Area() { return 0; }
+}
+int32 main() { printf("VIRT-NO-PUB PARSED\n"); return 0; }

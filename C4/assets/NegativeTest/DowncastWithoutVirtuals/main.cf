@@ -1,0 +1,3 @@
+struct Plain { int32 a; }
+struct PlainD : Plain { int32 b; }
+int32 main() { PlainD d; Plain* p = &d; PlainD* q = p as PlainD*; return q->b; }

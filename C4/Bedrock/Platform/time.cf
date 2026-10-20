@@ -1,0 +1,121 @@
+include "time.ch"
+
+namespace Platform
+{
+	const int64 kNanosecondsPerSecond = 1000000000;
+	const int64 kSecondsPerMinute = 60;
+	const int64 kSecondsPerHour = 3600;
+	const int64 kSecondsPerDay = 86400;
+	const int64 kDaysPerWeek = 7;
+	const int64 kMonthsPerYear = 12;
+	const int64 kEpochWeekday = 4;   // 1970-01-01 was a Thursday
+	const int64 kInt64Max = 9223372036854775807;
+	const int64 kInt64Min = -9223372036854775807 - 1;
+
+	// The Gregorian calendar repeats every 400 years (an era). Dates are counted in years that start on March 1, so
+	// the leap day ends a year: H. Hinnant, "chrono-Compatible Low-Level Date Algorithms".
+	const int64 kYearsPerEra = 400;
+	const int64 kDaysPerEra = 146097;
+	const int64 kDaysPerYear = 365;
+	const int64 kDaysPerFourYears = 1461;
+	const int64 kDaysPerCentury = 36524;
+	const int64 kDaysFromMarchYearZeroToEpoch = 719468;   // 0000-03-01 to 1970-01-01
+	const int64 kDaysPerFiveMonths = 153;                 // March to July, and August to December
+	const int64 kMonthsPerFiveMonths = 5;
+	const int64 kMarch = 3;
+
+	int64 FloorDivide(int64 value, int64 divisor) {
+		int64 quotient = value / divisor;
+		return quotient * divisor > value ? quotient - 1 : quotient;
+	}
+
+	int64 FloorModulo(int64 value, int64 divisor) { return value - FloorDivide(value, divisor) * divisor; }
+
+	// The month of a March-first year (0 is March) as a calendar month, and back.
+	int64 CalendarMonth(int64 marchMonth) { return marchMonth < kMonthsPerYear - kMarch + 1 ? marchMonth + kMarch : marchMonth + kMarch - kMonthsPerYear; }
+	int64 MarchMonth(int64 month) { return month >= kMarch ? month - kMarch : month - kMarch + kMonthsPerYear; }
+
+	// The days of a March-first year before the first day of `marchMonth`.
+	int64 DaysBeforeMarchMonth(int64 marchMonth) { return (kDaysPerFiveMonths * marchMonth + 2) / kMonthsPerFiveMonths; }
+
+	// The year, month and day `days` after 1970-01-01.
+	[int64, int32, int32] CivilFromDays(int64 days) {
+		int64 shifted = days + kDaysFromMarchYearZeroToEpoch;
+		int64 era = FloorDivide(shifted, kDaysPerEra);
+		int64 dayOfEra = shifted - era * kDaysPerEra;
+		int64 yearOfEra = (dayOfEra - dayOfEra / (kDaysPerFourYears - 1) + dayOfEra / kDaysPerCentury - dayOfEra / (kDaysPerEra - 1)) / kDaysPerYear;
+		int64 dayOfYear = dayOfEra - (kDaysPerYear * yearOfEra + yearOfEra / 4 - yearOfEra / 100);
+		int64 marchMonth = (kMonthsPerFiveMonths * dayOfYear + 2) / kDaysPerFiveMonths;
+		int64 month = CalendarMonth(marchMonth);
+		int64 year = yearOfEra + era * kYearsPerEra + (month < kMarch ? 1 : 0);
+		return [year, (int32)month, (int32)(dayOfYear - DaysBeforeMarchMonth(marchMonth) + 1)];
+	}
+
+	// The days from 1970-01-01 to the first of `month` (1 to 12) of `year`.
+	int64 DaysFromCivil(int64 year, int64 month) {
+		int64 marchYear = year - (month < kMarch ? 1 : 0);
+		int64 era = FloorDivide(marchYear, kYearsPerEra);
+		int64 yearOfEra = marchYear - era * kYearsPerEra;
+		int64 dayOfEra = yearOfEra * kDaysPerYear + yearOfEra / 4 - yearOfEra / 100 + DaysBeforeMarchMonth(MarchMonth(month));
+		return era * kDaysPerEra + dayOfEra - kDaysFromMarchYearZeroToEpoch;
+	}
+
+	CalendarTime CalendarAtLocalSeconds(int64 localSeconds, int32 nanosecond, int32 utcOffsetSeconds) {
+		int64 days = FloorDivide(localSeconds, kSecondsPerDay);
+		int64 secondOfDay = localSeconds - days * kSecondsPerDay;
+		[int64 year, int32 month, int32 day] = CivilFromDays(days);
+		CalendarTime time;
+		time.year = (int32)year;
+		time.month = month;
+		time.day = day;
+		time.hour = (int32)(secondOfDay / kSecondsPerHour);
+		time.minute = (int32)(secondOfDay % kSecondsPerHour / kSecondsPerMinute);
+		time.second = (int32)(secondOfDay % kSecondsPerMinute);
+		time.nanosecond = nanosecond;
+		time.weekday = (Weekday)(int32)FloorModulo(days + kEpochWeekday, kDaysPerWeek);
+		time.utcOffsetSeconds = utcOffsetSeconds;
+		return time;
+	}
+
+	CalendarTime CalendarAtOffset(int64 unixNs, int32 utcOffsetSeconds) {
+		int64 seconds = FloorDivide(unixNs, kNanosecondsPerSecond);
+		int32 nanosecond = (int32)(unixNs - seconds * kNanosecondsPerSecond);
+		return CalendarAtLocalSeconds(seconds + utcOffsetSeconds, nanosecond, utcOffsetSeconds);
+	}
+
+	CalendarTime UtcCalendar(int64 unixNs) { return CalendarAtOffset(unixNs, 0); }
+
+	CalendarTime LocalCalendar(int64 unixNs) { return CalendarAtOffset(unixNs, LocalOffsetSeconds(unixNs)); }
+
+	// seconds * 10^9 + nanosecond (0 to 10^9 - 1) into `unixNs` when it fits an int64.
+	bool CombineNanoseconds(int64 seconds, int64 nanosecond, int64& unixNs) {
+		if (seconds > kInt64Max / kNanosecondsPerSecond || seconds < kInt64Min / kNanosecondsPerSecond - 1) return false;
+		// A negative count is built from the second after it, so the product stays inside an int64.
+		int64 whole = seconds >= 0 ? seconds * kNanosecondsPerSecond : (seconds + 1) * kNanosecondsPerSecond;
+		int64 part = seconds >= 0 ? nanosecond : nanosecond - kNanosecondsPerSecond;
+		if (part > 0 && whole > kInt64Max - part) return false;
+		if (part < 0 && whole < kInt64Min - part) return false;
+		unixNs = whole + part;
+		return true;
+	}
+
+	bool ToUnixNs(const CalendarTime& time, int64& unixNs) {
+		int64 monthIndex = (int64)time.month - 1;
+		int64 year = (int64)time.year + FloorDivide(monthIndex, kMonthsPerYear);
+		int64 days = DaysFromCivil(year, FloorModulo(monthIndex, kMonthsPerYear) + 1) + (int64)time.day - 1;
+		int64 seconds = days * kSecondsPerDay + (int64)time.hour * kSecondsPerHour + (int64)time.minute * kSecondsPerMinute
+			+ (int64)time.second - (int64)time.utcOffsetSeconds + FloorDivide((int64)time.nanosecond, kNanosecondsPerSecond);
+		return CombineNanoseconds(seconds, FloorModulo((int64)time.nanosecond, kNanosecondsPerSecond), unixNs);
+	}
+
+	bool IsLeapYear(int32 year) { return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0); }
+
+	int32 DaysInMonth(int32 year, int32 month) {
+		switch (month) {
+			case 2: return IsLeapYear(year) ? 29 : 28;
+			case 4: case 6: case 9: case 11: return 30;
+			case 1: case 3: case 5: case 7: case 8: case 10: case 12: return 31;
+			default: return 0;
+		}
+	}
+}

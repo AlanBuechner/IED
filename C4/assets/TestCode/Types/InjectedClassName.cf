@@ -1,0 +1,20 @@
+include "../Framework/Assert.ch"
+include "InjectedClassName.ch"
+
+template<T> struct Amount {
+	public T v;
+	[operator("add")] public T Combine(const Amount& o) const { return this.v + o.v; }
+	public T Sum(const Amount& o) const { return this.v + o.v; }
+	public Amount Twice() const { Amount r; r.v = this.v * 2; return r; }
+	public static Amount Of(T x) { Amount r; r.v = x; return r; }
+}
+
+void TestInjectedClassName() {
+	Amount<int32> a = Amount<int32>::Of(3);
+	Amount<int32> b = Amount<int32>::Of(4);
+	AssertIntEquals(7, a.Sum(b), "a parameter of the bare template name takes the instance");
+	AssertIntEquals(7, a + b, "an operator written with the bare name");
+	AssertIntEquals(6, a.Twice().v, "a return value of the bare name");
+	Amount<float> f = Amount<float>::Of(1.5f);
+	AssertFloatEquals(3.0f, f.Twice().v, "each instance names itself");
+}

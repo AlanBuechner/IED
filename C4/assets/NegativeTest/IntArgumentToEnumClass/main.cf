@@ -1,0 +1,3 @@
+enum class Mode { Fast, Slow }
+void Set(Mode m) {}
+int32 main() { Set(1); return 0; }

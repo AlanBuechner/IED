@@ -1,0 +1,2 @@
+class Reader { public int32 Take(Missing m); }
+int32 main() { return 0; }

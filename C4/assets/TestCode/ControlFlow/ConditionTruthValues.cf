@@ -1,0 +1,27 @@
+// ControlFlow - what a condition accepts (09 2): bools, numbers, enums and pointers, read through a
+// reference as its referent.
+include "../Framework/Assert.ch"
+include "ConditionTruthValues.ch"
+
+enum CtvLevel { CtvOff, CtvOn }
+
+void TestConditionTruthValues() {
+	int32 i = 2;
+	int32& ri = i;
+	Assert(ri ? 1 : 0, "a reference to an int is its value");
+	float f = 0.0f;
+	Assert(f ? 0 : 1, "a zero float is false");
+	int32* none = null;
+	int32* some = &i;
+	Assert(!none && some, "pointers test for null");
+	int32*& rp = some;
+	Assert(rp ? 1 : 0, "a reference to a pointer is the pointer");
+	CtvLevel level = CtvOn;
+	Assert(level ? 1 : 0, "a plain enum is its integer");
+	int32 loops = 0;
+	while (ri) { ri = ri - 1; loops = loops + 1; }
+	AssertIntEquals(2, loops, "a while condition through a reference");
+	int32 down = 3;
+	do { down = down - 1; } while (down);
+	AssertIntEquals(0, down, "a do-while integer condition");
+}

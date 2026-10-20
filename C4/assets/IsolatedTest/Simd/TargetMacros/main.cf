@@ -1,0 +1,15 @@
+// Without -march or -m flags a build is for the baseline x86-64 (SSE2): no SIMD_* feature macro is defined and the
+// widest float register holds 4 lanes (D-62). Wider vectors still work, split into SSE registers. main returns the
+// failures.
+#if SIMD_SSE3 || SIMD_SSSE3 || SIMD_SSE4_1 || SIMD_SSE4_2 || SIMD_AVX || SIMD_AVX2 || SIMD_FMA || SIMD_AVX512F
+#error "the baseline target has none of these features"
+#endif
+#if SIMD_FLOAT_LANES != 4
+#error "an SSE register holds 4 floats"
+#endif
+
+int32 main() {
+	packed float[SIMD_FLOAT_LANES] lanes = 1.0f;
+	packed float[8] wider = simd_concat(lanes, lanes * 2.0f);
+	return simd_reduce_add(wider) == 12.0f ? 0 : 1;
+}

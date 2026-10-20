@@ -1,0 +1,76 @@
+// B34 (D-12): what each named cast allows, and casts to a reference, which name a location.
+interface IShape { public int32 Sides(); }
+class Base { public int32 tag = 1; public virtual int32 F() { return 1; } }
+class Derived : Base, IShape { public int32 extra = 2; public override int32 F() { return 2; } public int32 Sides() { return 4; } }
+enum class Mode : int32 { Off = 0, On = 7 }
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+void StaticCasts() {
+	Check(static_cast<int32>(2.75) == 2, "a double to an int");
+	Check(static_cast<float>(3) == 3.0f, "an int to a float");
+	Check(static_cast<int32>(Mode::On) == 7, "an enum class to an int");
+	Check(static_cast<Mode>(7) == Mode::On, "an int to an enum class");
+	Check(static_cast<uint8>(true) == 1, "a bool to a number");
+	Derived d;
+	Base* up = static_cast<Base*>(&d);
+	Check(up->F() == 2, "an upcast");
+	Derived* down = static_cast<Derived*>(up);
+	Check(down->extra == 2, "a downcast without a check");
+	IShape* shape = static_cast<IShape*>(&d);
+	Check(shape->Sides() == 4, "to an interface sub-object");
+	void* raw = static_cast<void*>(&d);
+	Check(static_cast<Derived*>(raw) == &d, "through void*");
+	const Derived* constant = static_cast<const Derived*>(&d);
+	Check(constant->extra == 2, "adding const");
+	Base copy = static_cast<Base>(d);
+	Check(copy.tag == 1, "an object to its base");
+}
+
+void ReinterpretCasts() {
+	int32 v = 0x01020304;
+	uint8* bytes = reinterpret_cast<uint8*>(&v);
+	Check(bytes[0] == 4, "a pointer to another pointer");
+	uint64 address = reinterpret_cast<uint64>(bytes);
+	Check(reinterpret_cast<uint8*>(address) == bytes, "a pointer through an integer and back");
+}
+
+void ConstCasts() {
+	int32 v = 5;
+	const int32* p = &v;
+	int32* q = const_cast<int32*>(p);
+	*q = 6;
+	Check(v == 6, "const removed");
+	const char* const* names = nullptr;
+	char** writable = const_cast<char**>(names);
+	Check(writable == nullptr, "const removed at two levels");
+}
+
+void ReferenceCasts() {
+	Derived d;
+	Base& base = static_cast<Base&>(d);
+	Check(base.F() == 2, "a reference to the base dispatches");
+	Derived& again = static_cast<Derived&>(base);
+	again.extra = 9;
+	Check(d.extra == 9, "a downcast reference names the object");
+	Base& cStyle = (Base&)d;
+	cStyle.tag = 3;
+	Check(d.tag == 3, "a C-style reference cast");
+	const Base& readOnly = static_cast<const Base&>(d);
+	Check(readOnly.tag == 3, "to a const reference");
+	int32 bits = 0x3F800000;
+	float& asFloat = reinterpret_cast<float&>(bits);
+	Check(asFloat == 1.0f, "a reinterpreting reference");
+}
+
+int32 main() {
+	StaticCasts();
+	ReinterpretCasts();
+	ConstCasts();
+	ReferenceCasts();
+	return g_failures;
+}

@@ -1,0 +1,21 @@
+// Types - Scoped Enum (enum class) tests (implementation).
+include "../Framework/Assert.ch"
+include "ScopedEnum.ch"
+
+void TestScopedEnum() {
+	// Qualified access returns the member's value.
+	AssertEqual(0, (int32)Traffic::Stop);
+	AssertEqual(1, (int32)Traffic::Go);
+	AssertEqual(2, (int32)Traffic::Caution);
+
+	// Underlying type is honored (uint8).
+	AssertEqual(1, (int32)Priority::Low);
+	AssertEqual(9, (int32)Priority::High);
+
+	// Two enums may share a member name without collision (scoped members are not injected).
+	AssertEqual(10, (int32)SameNameA::X + (int32)SameNameB::X);
+
+	// Plain enum members are also usable qualified.
+	AssertEqual(5, (int32)UnscopedPlain::U1);
+	AssertEqual(6, (int32)UnscopedPlain::U2);
+}

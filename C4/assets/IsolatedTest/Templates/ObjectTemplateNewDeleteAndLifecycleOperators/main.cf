@@ -1,0 +1,22 @@
+int32 g_cleaned = 0;
+template<T> class Counter {
+	T value;
+	[operator("create")] public void Init(T v) { this->value = v; }
+	[operator("delete")] public void Cleanup() { g_cleaned = g_cleaned + 1; }
+	public T Get() { return this->value; }
+	public void Bump(T d) { this->value = this->value + d; }
+}
+int32 main() {
+	Counter<int32>* c = new Counter<int32>(5);
+	c->Bump(10);
+	if (c->Get() != 15) return 1;
+	delete c;
+	if (g_cleaned != 1) return 2;
+	Counter<uint64>* u = new Counter<uint64>(100u);
+	u->Bump(50u);
+	if (u->Get() != 150u) return 3;
+	delete u;
+	if (g_cleaned != 2) return 4;
+	printf("OBJ TPL NEW/DELETE OK\n");
+	return 0;
+}

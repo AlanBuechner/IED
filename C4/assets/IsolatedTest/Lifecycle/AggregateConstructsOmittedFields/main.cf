@@ -1,0 +1,24 @@
+// An aggregate initialization that leaves fields out still constructs them (their 0-argument create).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 g_creates = 0;
+class Part {
+	public int32 tag;
+	[operator("create")] public void Init() { tag = 5; g_creates = g_creates + 1; }
+}
+class Holder { public int32 a; public int32 b; public Part part; }
+
+int32 main() {
+	Holder h = Holder(1);
+	Check(h.a == 1 && h.b == 0 && h.part.tag == 5, "omitted fields are zero or default-constructed");
+	Holder* p = new Holder{ 2, 3 };
+	Check(p->a == 2 && p->b == 3 && p->part.tag == 5, "the same for new T{...}");
+	Holder braced = { 4 };
+	Check(braced.a == 4 && braced.part.tag == 5, "the same for a braced local");
+	Check(g_creates == 3, "each omitted part is constructed once");
+	return g_failures;
+}

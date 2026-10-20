@@ -1,0 +1,5 @@
+int32 main() {
+	packed float[4] a = 1.0f;
+	packed int32[8] r = (packed int32[8])a;
+	return 0;
+}

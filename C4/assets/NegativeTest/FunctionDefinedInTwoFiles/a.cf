@@ -1,0 +1,2 @@
+int32 Helper(int32 x) { return x * 2; }
+int32 main() { return Helper(1); }

@@ -1,0 +1,2 @@
+const char* g = "a" u"b";
+int32 main() { return 0; }

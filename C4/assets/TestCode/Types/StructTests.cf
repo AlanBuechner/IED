@@ -1,0 +1,23 @@
+// Types - Struct Tests (implementation)
+include "../Framework/Assert.ch"
+include "StructTests.ch"
+
+void TestStructDeclaration() {
+	TestPoint p;
+	p.x = 10;
+	p.y = 20;
+	
+	AssertEqual(10, p.x);
+	AssertEqual(20, p.y);
+}
+
+void TestStructByValue() {
+	TestPoint p1;
+	p1.x = 5;
+	p1.y = 6;
+	
+	TestPoint p2 = p1;
+	
+	AssertEqual(5, p2.x);
+	AssertEqual(6, p2.y);
+}

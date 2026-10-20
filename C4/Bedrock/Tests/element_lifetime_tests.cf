@@ -1,0 +1,241 @@
+// Bedrock container element lifetimes. Run with:  C4.exe c4/Bedrock/Tests -test
+// Every container constructs, copies, moves and destroys its elements itself: a Probe counts its live
+// instances in a counter owned by the test, so a leak, a double destroy or a lost copy shows up as a
+// wrong count.
+
+include "bedrock.ch"
+
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+bool ProbeBefore(Probe a, Probe b) { return a.id < b.id; }
+
+// ---------------------------------------------------------------------------------------------------
+// Array
+// ---------------------------------------------------------------------------------------------------
+
+[test("container.lifetime.array_push_pop_clear")]
+public static void TestArrayPushPopClear() {
+	int32 live = 0;
+	{
+		Core::Array<Probe> v;
+		v.Push(Probe(&live, 1));
+		v.Push(Probe(&live, 2));
+		v.Push(Probe(&live, 3));
+		assert_eq(3, live, "three pushed probes are alive");
+		{
+			Probe last = v.Pop();
+			assert_eq(3, last.id, "Pop moves the last element out");
+			assert_eq(3, live, "Pop moves, it does not copy");
+		}
+		assert_eq(2, live, "the popped probe is destroyed by its new owner");
+		v.Clear();
+		assert_eq(0, live, "Clear destroys every element");
+		v.Push(Probe(&live, 4));
+	}
+	assert_eq(0, live, "the array's delete destroys its elements");
+}
+
+[test("container.lifetime.array_remove_insert")]
+public static void TestArrayRemoveInsert() {
+	int32 live = 0;
+	Core::Array<Probe> v;
+	for (int32 i = 0; i < 6; i++) v.Push(Probe(&live, i));
+	v.RemoveAt(0);
+	assert_eq(5, live, "RemoveAt destroys the element");
+	assert_eq(1, v.At(0).id, "RemoveAt shifts the rest down");
+	v.RemoveRange(0, 2);
+	assert_eq(3, live, "RemoveRange destroys the range");
+	v.RemoveSwap(0);
+	assert_eq(2, live, "RemoveSwap destroys the element");
+	assert_eq(5, v.At(0).id, "RemoveSwap moves the last element into the gap");
+	v.Insert(1, Probe(&live, 9));
+	assert_eq(3, live, "Insert constructs one element");
+	assert_eq(9, v.At(1).id, "Insert lands at the index");
+	assert_eq(4, v.At(2).id, "Insert shifts the rest up");
+	v.Clear();
+	assert_eq(0, live, "no element leaked");
+}
+
+[test("container.lifetime.array_push_own_element")]
+public static void TestArrayPushOwnElement() {
+	int32 live = 0;
+	Core::Array<Probe> v = Core::Array<Probe>(1);
+	v.Push(Probe(&live, 7));
+	v.Push(v.At(0)); // grows while the argument refers into the old buffer
+	assert_eq(2, (int32)v.Count(), "two elements");
+	assert_eq(7, v.At(1).id, "the pushed copy kept its value across the growth");
+	v.Insert(0, v.At(1)); // the same for Insert
+	assert_eq(7, v.At(0).id, "the inserted copy kept its value");
+	assert_eq(3, live, "three live probes");
+	v.Clear();
+	assert_eq(0, live, "no element leaked");
+}
+
+[test("container.lifetime.array_copy")]
+public static void TestArrayCopy() {
+	int32 live = 0;
+	Core::Array<Probe> a;
+	a.Push(Probe(&live, 1));
+	a.Push(Probe(&live, 2));
+	{
+		Core::Array<Probe> b = a;
+		assert_eq(4, live, "the copy copies every element");
+		b.At(0).id = 10;
+		assert_eq(1, a.At(0).id, "the copy is independent");
+	}
+	assert_eq(2, live, "the copy's elements are destroyed with it");
+	Core::Array<Probe> c = take(a);
+	assert_eq(2, live, "take moves the array, no element is copied");
+	assert_eq(0, (int32)a.Count(), "take leaves the source empty");
+	a.Push(Probe(&live, 3)); // a zero array is usable
+	assert_eq(3, live, "the emptied array grows again");
+}
+
+[test("container.lifetime.array_sort_resize")]
+public static void TestArraySortResize() {
+	int32 live = 0;
+	Core::Array<Probe> v;
+	for (int32 i = 0; i < 40; i++) v.Push(Probe(&live, (i * 17) % 40));
+	v.SortBy(ProbeBefore);
+	assert_eq(40, live, "sorting moves elements, it neither leaks nor drops one");
+	bool ordered = true;
+	for (uint32 k = 1; k < v.Count(); k++) if (v.At(k - 1).id > v.At(k).id) ordered = false;
+	assert_true(ordered, "sorted by id");
+	v.Reverse();
+	assert_eq(39, v.At(0).id, "Reverse moves elements");
+	v.Resize(10);
+	assert_eq(10, live, "shrinking destroys the tail");
+	v.Resize(12);
+	assert_eq(10, live, "growing default-constructs zero probes (no create runs)");
+	assert_true(v.At(11).live == null, "a new element is zero");
+	v.Clear();
+	assert_eq(0, live, "no element leaked");
+}
+
+[test("container.lifetime.array_of_string")]
+public static void TestArrayOfString() {
+	Core::Array<Core::String> names;
+	names.Push(Core::String("ada"));
+	names.Push(Core::String("grace"));
+	Core::Array<Core::String> copy = names;
+	copy.At(0).Append("!");
+	assert_se("ada", names.At(0).CStr(), "the copied array owns its own strings");
+	assert_se("ada!", copy.At(0).CStr(), "the copy changed");
+	Core::String last = names.Pop();
+	assert_se("grace", last.CStr(), "Pop moves the string out");
+	assert_eq(1, (int32)names.Count(), "one string left");
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Queue and Stack
+// ---------------------------------------------------------------------------------------------------
+
+[test("container.lifetime.queue")]
+public static void TestQueueLifetime() {
+	int32 live = 0;
+	{
+		Core::Queue<Probe> q = Core::Queue<Probe>(2);
+		q.Push(Probe(&live, 1));
+		q.Push(Probe(&live, 2));
+		{ Probe first = q.Pop(); assert_eq(1, first.id, "FIFO order"); }
+		q.Push(Probe(&live, 3));
+		q.Push(Probe(&live, 4)); // grows with the head in the middle of the buffer
+		assert_eq(3, live, "three live probes");
+		assert_eq(2, q.Front().id, "the order survives the growth");
+		Core::Queue<Probe> copy = q;
+		assert_eq(6, live, "the copy copies every element");
+		assert_eq(2, copy.Pop().id, "the copy keeps the order");
+		assert_eq(3, copy.Pop().id, "the copy keeps the order");
+		assert_eq(4, copy.Pop().id, "the copy keeps the order");
+		assert_eq(0, copy.Pop().id, "an empty queue pops a zero value");
+		q.Clear();
+		assert_eq(0, live, "Clear destroys every element");
+		q.Push(Probe(&live, 5));
+	}
+	assert_eq(0, live, "the queue's delete destroys its elements");
+}
+
+[test("container.lifetime.stack")]
+public static void TestStackLifetime() {
+	int32 live = 0;
+	{
+		Core::Stack<Probe> s = Core::Stack<Probe>(1);
+		s.Push(Probe(&live, 1));
+		s.Push(Probe(&live, 2));
+		{ Probe top = s.Pop(); assert_eq(2, top.id, "LIFO order"); }
+		assert_eq(1, live, "the popped probe is destroyed by its new owner");
+		Core::Stack<Probe> copy = s;
+		assert_eq(2, live, "the copy copies every element");
+		assert_eq(1, copy.Top().id, "the copy keeps the elements");
+		assert_eq(0, Core::Stack<Probe>().Pop().id, "an empty stack pops a zero value");
+		s.Push(Probe(&live, 3));
+	}
+	assert_eq(0, live, "the stack's delete destroys its elements");
+}
+
+// ---------------------------------------------------------------------------------------------------
+// HashMap
+// ---------------------------------------------------------------------------------------------------
+
+[test("container.lifetime.hashmap")]
+public static void TestHashMapLifetime() {
+	int32 live = 0;
+	{
+		Core::HashMap<int32, Probe> m;
+		for (int32 k = 0; k < 20; k++) m.Insert(k, Probe(&live, k)); // several rehashes
+		assert_eq(20, live, "a rehash moves the values, it neither copies nor drops one");
+		assert_eq(13, m.Get(13).id, "values survive the rehash");
+		m.Insert(13, Probe(&live, 99));
+		assert_eq(20, live, "replacing a value destroys the old one");
+		assert_eq(99, m.Get(13).id, "the value is replaced");
+		m.Remove(13);
+		assert_eq(19, live, "Remove destroys the entry");
+		Core::HashMap<int32, Probe> copy = m;
+		assert_eq(38, live, "the copy copies every entry");
+		assert_eq(7, m.Get(7).id, "the original keeps its entries");
+		assert_eq(7, copy.Get(7).id, "the copy finds every key");
+		assert_true(!copy.Contains(13), "the copy keeps the removal");
+	}
+	assert_eq(0, live, "the maps' delete destroys every entry");
+}
+
+[test("container.lifetime.hashmap_access")]
+public static void TestHashMapAccess() {
+	int32 live = 0;
+	{
+		Core::HashMap<int32, Probe> m;
+		m.Insert(1, Probe(&live, 1));
+		Probe& added = m[2];
+		assert_eq(1, live, "indexing adds a default value: a zero probe runs no create");
+		added = Probe(&live, 2);
+		assert_eq(2, live, "assigning through the reference");
+		assert_eq(2, m.Find(2)->id, "Find sees the assigned value");
+		Probe out = Probe(&live, 0);
+		assert_true(m.TryGet(1, out) && out.id == 1, "TryGet copies the value");
+		assert_eq(3, live, "TryGet assigns into the caller's probe");
+		assert_true(!m.TryGet(9, out) && out.id == 1, "a missing key leaves out untouched");
+		m.Clear();
+		assert_eq(1, live, "Clear destroys every entry");
+	}
+	assert_eq(0, live, "nothing leaked");
+}
+
+[test("container.lifetime.hashmap_get_missing")]
+public static void TestHashMapGetMissing() {
+	Core::HashMap<int32, int32> m;
+	for (int32 k = 0; k < 100; k++) m.Insert(k, 77);
+	assert_eq(0, m.Get(-1), "a missing key reads a zero value");
+	assert_true(m.Find(-1) == nullptr, "and finds nothing");
+}

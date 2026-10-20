@@ -1,0 +1,10 @@
+include "box.ch"
+template<T>
+public void Box::Bump(int32 i) { this->n = this->n + 1; }
+int32 main() {
+    Box<int32>* b = new Box<int32>(4);
+    b->Bump(0);
+    if (b->Count() != 1) return 1;
+    printf("OOV MIN OK\n");
+    return 0;
+}

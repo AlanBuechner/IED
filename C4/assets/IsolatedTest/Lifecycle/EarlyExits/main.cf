@@ -1,0 +1,48 @@
+// Locals are destroyed on every way out of their scope: falling off the end, return, break, continue and
+// an exception passing through.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 ReturnFromNested(int32* live) {
+	Probe outer = Probe(live, 1);
+	{
+		Probe inner = Probe(live, 2);
+		if (*live == 2) return *live;
+	}
+	return 0;
+}
+
+void ThrowThrough(int32* live) {
+	Probe held = Probe(live, 1);
+	throw 3;
+}
+
+int32 main() {
+	int32 live = 0;
+	Check(ReturnFromNested(&live) == 2 && live == 0, "return destroys the locals of every enclosing scope");
+	for (int32 i = 0; i < 3; i++) {
+		Probe step = Probe(&live, i);
+		if (i == 0) continue;
+		if (i == 1) break;
+	}
+	Check(live == 0, "break and continue destroy the body's locals");
+	try { ThrowThrough(&live); } catch (int32 code) { Check(code == 3, "the exception arrives"); }
+	Check(live == 0, "an exception passing through destroys the locals it unwinds");
+	return g_failures;
+}

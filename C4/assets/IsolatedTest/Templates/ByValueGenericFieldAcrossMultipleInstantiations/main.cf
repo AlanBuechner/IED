@@ -1,0 +1,13 @@
+template<T> class Box {
+	T value;
+	[operator("create")] public void Init(T v) { this.value = v; }
+	public T Get() { return this.value; }
+}
+int32 main() {
+	Box<int32>* b = new Box<int32>(41);
+	Box<float>* f = new Box<float>(2.5f);
+	if (b->Get() != 41) { printf("FAIL int %d\n", b->Get()); return 1; }
+	if (f->Get() != 2.5f) { printf("FAIL float %.4f\n", f->Get()); return 1; }
+	printf("BY-VALUE GENERIC FIELD OK\n");
+	return 0;
+}

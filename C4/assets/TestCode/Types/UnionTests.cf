@@ -1,0 +1,9 @@
+// Types - Union Tests (implementation)
+include "../Framework/Assert.ch"
+include "UnionTests.ch"
+
+void TestUnion() {
+	Value v;
+	v.intValue = 42;
+	AssertEqual(42, v.intValue);
+}

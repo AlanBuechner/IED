@@ -1,0 +1,2 @@
+int32* Unwrap(const int32* p) { return p; }
+int32 main() { int32 x = 1; return *Unwrap(&x); }

@@ -1,0 +1,57 @@
+// Diagnostic: replicate the game's init loop with hex dumps to find what CreateRenderTargetView corrupts.
+extern "c++" include "game.hpp" {
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
+	lib("d3d12.lib"); lib("dxgi.lib"); lib("user32.lib");
+}
+include "windows.ch"
+include "dx12.ch"
+ID3D12Device* g_dev = null;
+IDXGIFactory2* g_fac = null;
+IDXGISwapChain3* g_sc = null;
+ID3D12DescriptorHeap* g_heap = null;
+
+int32 main() {
+	int32 hr;
+	hr = D3D12CreateDevice(null, D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), &g_dev);
+	if (hr) return 1;
+	D3D12_COMMAND_QUEUE_DESC qd; qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT; qd.Flags = 0; qd.NodeMask = 0; qd.Priority = 0;
+	ID3D12CommandQueue* gq=null; g_dev->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), &gq);
+	CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), &g_fac);
+	tagWNDCLASSEXA wc; wc.cbSize = sizeof(WNDCLASSEX); wc.style=0; wc.lpfnWndProc=(funcptr<int64(HWND__*,int32,uint64,int64)>)(uint64)DefWindowProcA; wc.cbClsExtra=0; wc.cbWndExtra=0; wc.hInstance=GetModuleHandleA(null); wc.hIcon=null; wc.hCursor=null; wc.hbrBackground=null; wc.lpszMenuName=null; wc.lpszClassName="t"; wc.hIconSm=null;
+	RegisterClassExA(&wc);
+	HWND__* hwnd = CreateWindowExA(0,"t","t",0x16000000,0,0,640,480,null,null,GetModuleHandleA(null),null);
+	ShowWindow(hwnd,5);
+	DXGI_SWAP_CHAIN_DESC1 sd; sd.Width=640; sd.Height=480; sd.Format=DXGI_FORMAT_R8G8B8A8_UNORM; sd.Stereo=0; sd.SampleDesc.Count=1; sd.SampleDesc.Quality=0; sd.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT; sd.BufferCount=2; sd.Scaling=DXGI_SCALING_STRETCH; sd.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD; sd.Flags=DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING; sd.AlphaMode=DXGI_ALPHA_MODE_UNSPECIFIED;
+	g_fac->CreateSwapChainForHwnd(gq,hwnd,&sd,null,null,&g_sc);
+	D3D12_DESCRIPTOR_HEAP_DESC hd; hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV; hd.NumDescriptors=2; hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_NONE; hd.NodeMask=0;
+	g_dev->CreateDescriptorHeap(&hd,__uuidof(ID3D12DescriptorHeap),&g_heap);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE base = g_heap->GetCPUDescriptorHandleForHeapStart();
+	int32 inc = g_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	printf("base=%p inc=%d dev=%p\n", (void*)base.ptr, inc, (void*)g_dev);
+
+	for (int32 i = 0; i < 2; i++) {
+		printf("iter %d BEFORE: dev=%p\n", i, (void*)g_dev);
+		void* a=null; int32 ra = g_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,__uuidof(ID3D12CommandAllocator),&a);
+		printf("  alloc 0x%08X %p\n", ra, (void*)a); if (ra) return 1;
+
+		void* bbv=null; g_sc->GetBuffer(i,__uuidof(ID3D12Resource),&bbv);
+		ID3D12Resource* bb=(ID3D12Resource*)bbv;
+		printf("  buffer %p\n", (void*)bb);
+
+		D3D12_RENDER_TARGET_VIEW_DESC rd;
+		memset(&rd, 0, sizeof(D3D12_RENDER_TARGET_VIEW_DESC));
+		rd.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+		rd.ViewDimension=D3D12_RTV_DIMENSION_TEXTURE2D;
+		D3D12_CPU_DESCRIPTOR_HANDLE h = g_heap->GetCPUDescriptorHandleForHeapStart();
+		h.ptr += (uint64)i * (uint64)inc;
+		printf("  handle=%p (expect %p)\n", (void*)h.ptr, (void*)(base.ptr + (uint64)i*(uint64)inc));
+
+		g_dev->CreateRenderTargetView(bb,&rd,h);
+		printf("iter %d AFTER rtv: dev=%p\n", i, (void*)g_dev);
+		bb->Release();
+	}
+	printf("DONE\n");
+	return 0;
+}

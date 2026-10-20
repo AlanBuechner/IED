@@ -1,0 +1,100 @@
+include "../Framework/Assert.ch"
+include "StaticDataMember.ch"
+
+// Exercises EVERY static-data-member access form and asserts they share ONE global:
+//   bare read/write in a method, bare compound (+=), qualified dot read, qualified dot write.
+// Delta-based so it is independent of any prior value the shared global holds.
+void TestStaticDataMember() {
+    Tally t;                        // instance must NOT contain the statics (layout excludes them)
+
+    Tally.total = 100;              // qualified dot WRITE
+    Assert((int32)Tally.total == 100, "sdm: qualified write then read");
+
+    int32 before = (int32)Tally.total;     // qualified dot READ
+    t.Inc();                                // bare read+write in method: total += 1
+    Assert((int32)Tally.total == before + 1, "sdm: bare Inc() in method");
+
+    t.Add(5);                               // bare compound in method: total += 5
+    Assert((int32)Tally.total == before + 6, "sdm: bare Add(5) compound in method");
+
+    int32 g = t.Get();                      // bare read returned by value from a method
+    Assert(g == before + 6, "sdm: Get() returns the shared static");
+
+    Tally.other = 7;                        // second independent static member
+    Assert((int32)Tally.other == 7, "sdm: second static member is independent");
+}
+
+// Static data members WITH an initializer (a game engine's `TVector3::Zero` / `Mat4::Identity()`
+// constant pattern). Before the fix these were rejected: a non-zero scalar ("non-zero constant ...
+// not implemented yet") and a composite literal ("must be a compile-time constant"), and a
+// self-typed static triggered a FALSE "infinite size" error. Now the initializer is stored in the
+// type's backing global, so reads return the declared value.
+struct SDM_V3 { public float x, y, z; };
+
+struct SDM_Scalar {
+    public static int32 MaxCount = 8;             // non-zero scalar static
+};
+
+// A name-level CONST static member with a constant-expression initializer is folded to a static
+// LLVM constant at lowering (doc 10 on-demand const-eval), not a startup init. The initializer may
+// chain through other consts, resolved against the completed model.
+const int32 SDM_Base = 4;
+struct SDM_ConstChained {
+    public static const int32 V = SDM_Base * 3 + 2;   // 14 - folded constant expression
+};
+
+struct SDM_Composite {
+    public static SDM_V3 Zero = { 0.0f, 1.5f, -2.5f };   // composite literal init
+};
+
+// Self-typed static: statics do not contribute to the enclosing type's layout, so this is legal
+// (was a false "infinite size" error). It has no initializer, so it is zero-initialized.
+struct SDM_Node { public int32 v; public static SDM_Node origin; };
+
+void TestStaticDataMemberInitializer() {
+    // Non-zero scalar static reads its declared value (not 0).
+    Assert(SDM_Scalar.MaxCount == 8, "sdm-init: non-zero scalar static");
+
+    // Const static member with a chained constant-expression initializer folds to a static constant.
+    AssertIntEquals(14, SDM_ConstChained.V, "sdm-init: const static member folds its const expr");
+
+    // Composite-init static: each lane holds the declared value.
+    Assert(SDM_Composite.Zero.x == 0.0f, "sdm-init: composite x");
+    AssertFloatEquals(1.5f, SDM_Composite.Zero.y, "sdm-init: composite y");
+    AssertFloatEquals(-2.5f, SDM_Composite.Zero.z, "sdm-init: composite z");
+
+    // Self-typed static compiles and is zero-initialized (no false infinite-size error).
+	SDM_Node n;
+	n.v = 7;
+	Assert(SDM_Node.origin.v == 0, "sdm-init: self-typed static is zero-init");
+}
+
+// Static METHOD calls. Two historically-broken shapes are locked here:
+//   (1) a template instantiation used as the base (`TBox<int32>::MakeVal`) - the base spelling has
+//       angle brackets so it is not a symbol-table name; it must resolve through the type facade and
+//       emit the mangled method symbol, or the link fails with an undefined `TBox<int32>_MakeVal`.
+//   (2) OVERLOADED static methods (concrete or templated). Before the fix every static overload
+//       collapsed onto one unsuffixed Type_Method symbol: only one body was lowered and both call
+//       sites bound to it, so `CBox::MakeVal(5, 100)` silently ran the single-arg body. Now each
+//       overload gets its per-signature suffix on BOTH the definition and every call site.
+template<T> class SDM_TBox {
+	public int32 m_X;
+	public static int32 MakeVal(int32 v) { return v * 10; }
+	public static int32 MakeVal(int32 v, int32 k) { return v * 10 + k; }
+}
+
+class SDM_CBox {
+	public int32 m_X;
+	public static int32 MakeVal(int32 v) { return v * 10; }
+	public static int32 MakeVal(int32 v, int32 k) { return v * 10 + k; }
+}
+
+void TestStaticMethod() {
+	// (1) instantiation-prefix static access: single-arg and two-arg overloads.
+	AssertIntEquals(50, SDM_TBox<int32>::MakeVal(5), "sm: template prefix static single-arg");
+	AssertIntEquals(150, SDM_TBox<int32>::MakeVal(5, 100), "sm: template prefix static two-arg");
+
+	// (2) concrete-class static access: single-arg and two-arg overloads.
+	AssertIntEquals(60, SDM_CBox::MakeVal(6), "sm: concrete static single-arg");
+	AssertIntEquals(160, SDM_CBox::MakeVal(6, 100), "sm: concrete static two-arg");
+}

@@ -1,0 +1,3 @@
+class Box { public int32 v; }
+Box Make() { Box b; b.v = 1; return b; }
+int32 main() { Box b = take(Make()); return b.v; }

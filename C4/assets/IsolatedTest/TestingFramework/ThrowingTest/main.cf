@@ -1,0 +1,14 @@
+// B37: an exception that leaves a test fails that case, and the run goes on to the next case.
+struct Oops { public int32 code; }
+
+[test("throwing.first")]
+void TestThrows() {
+	Oops o;
+	o.code = 3;
+	throw o;
+}
+
+[test("throwing.second")]
+void TestRunsAfter() {
+	assert_true(true, "still runs");
+}

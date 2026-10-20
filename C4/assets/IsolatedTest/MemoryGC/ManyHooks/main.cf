@@ -1,0 +1,82 @@
+// BUG-035: root enumerators and collection callbacks have no fixed limit. 200 of each are registered; every
+// enumerator keeps its own object alive, every callback runs once per collection, and unregistering lets the
+// objects go.
+include "Memory/gc.ch"
+
+const int32 kHooks = 200;
+
+struct Item {
+	public int32 value;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+struct Garbage { public int64[8] words; }
+
+int32 g_finalized = 0;
+int32 g_enumerated = 0;
+int32 g_callbacks = 0;
+uint64[200] g_items;     // integers: the enumerators are the only references
+int32[200] g_keys;       // one registration key per hook
+
+void Enumerate(void* user, GC::VisitRoot visit, void* ctx) {
+	g_enumerated++;
+	visit(ctx, (void*)g_items[(int32)(uint64)user]);
+}
+
+void OnCollect(void* user) { g_callbacks++; }
+
+void Register() {
+	for (int32 i = 0; i < kHooks; i++) {
+		Item* item = new Item;
+		item->value = i;
+		g_items[i] = (uint64)item;
+		GC::RegisterRootEnumerator((void*)&g_keys[i], Enumerate, (void*)(uint64)i);
+		GC::RegisterCollectionResult((void*)&g_keys[i], OnCollect, null);
+	}
+}
+
+void Unregister() {
+	for (int32 i = 0; i < kHooks; i++) {
+		GC::UnregisterRootEnumerator((void*)&g_keys[i]);
+		GC::UnregisterCollectionResult((void*)&g_keys[i]);
+	}
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+void CollectWithChurn() {
+	for (int32 k = 0; k < 2000; k++) { Garbage* g = new Garbage; g->words[0] = k; }
+	Scrub(8);
+	GC::Collect();
+}
+
+int32 Sum() {
+	int32 s = 0;
+	for (int32 i = 0; i < kHooks; i++) s += ((Item*)g_items[i])->value;
+	return s;
+}
+
+int32 main() {
+	Register();
+	CollectWithChurn();
+	CollectWithChurn();
+	if (g_enumerated != 2 * kHooks) return 1;
+	if (g_callbacks != 2 * kHooks) return 2;
+	if (g_finalized != 0) return 3;
+	if (Sum() != kHooks * (kHooks - 1) / 2) return 4;
+	if (GC::GetStats().collections < 2) return 5;
+
+	Unregister();
+	CollectWithChurn();
+	CollectWithChurn();
+	if (g_enumerated != 2 * kHooks || g_callbacks != 2 * kHooks) return 6;
+	if (g_finalized < kHooks - 5) return 7; // a stale stack word may keep a few
+	printf("HOOKS OK\n");
+	return 0;
+}

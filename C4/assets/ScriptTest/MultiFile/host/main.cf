@@ -1,0 +1,35 @@
+// A script is several files compiled together: its files include each other (a file given as text too) and any
+// host header the allow-list permits. Each file may define what another declares.
+include "scripttest.ch"
+include "canvas.ch"
+
+namespace Canvas
+{
+	int32 TotalArea(Shape** shapes, int32 count)
+	{
+		int32 total = 0;
+		for (int32 i = 0; i < count; i++) total += shapes[i]->Area();
+		return total;
+	}
+}
+
+void CheckMultiFile(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::ScriptOptions options = ScriptTest::OptionsFor(checks, "shapes", "shapes.ch;square.cf;main.cf");
+	options.AddText("generated.ch", "const int32 kSide = 3;\nint32 GeneratedTwice(int32 v);\n");
+	options.AddText("generated.cf", "include \"generated.ch\"\nint32 GeneratedTwice(int32 v) { return v * 2; }\n");
+	Scripting::Script* script = ScriptTest::Load(host, checks, options);
+	if (!script->Ok()) return;
+	funcptr<int32()> run = (funcptr<int32()>)script->Address("Run");
+	checks.Equal(9 + 16 + 18, run != nullptr ? run() : -1, "the files of one script work together");
+	script->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("MultiFile");
+	CheckMultiFile(host, checks);
+	return checks.End("MultiFile");
+}

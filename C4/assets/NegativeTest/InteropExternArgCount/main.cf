@@ -1,0 +1,2 @@
+extern "c" include "smoke.h"
+void main() { add(1); }

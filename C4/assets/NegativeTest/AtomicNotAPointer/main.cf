@@ -1,0 +1,4 @@
+int32 main() {
+	int32 value = 0;
+	return atomic_load(value, MemoryOrder::SeqCst);
+}

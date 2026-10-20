@@ -1,0 +1,155 @@
+// GC pause and throughput under game-like churn (B32). A live world of entities, each with a chain of components
+// and a parent link, stays reachable while every frame allocates short-lived garbage (events, paths, temporary
+// lists) and replaces a share of the world. With workers, the frame's churn runs as frame jobs on the job system.
+// Prints one line of results; the checksum must not depend on the timing.
+//     gc.exe [entities] [frames] [garbagePerFrame] [replacedPerFrame] [workers] [markThreads]
+include "bedrock.ch"
+
+[link("strtol")] int32 strtol(const char8* text, char8** end, int32 base);
+
+struct Component {
+	public float[6] data;
+	public Component* next;
+}
+
+class Entity {
+	public int64 id;
+	public Component* components;
+	public Entity* parent;
+}
+
+struct Settings {
+	public int32 entities;
+	public int32 frames;
+	public int32 garbage;    // short-lived objects per frame
+	public int32 replaced;   // world entities replaced per frame
+	public int32 workers;    // 0: everything on the main thread
+}
+
+const int32 kComponents = 4;
+const int32 kSlices = 16;   // a frame's churn in this many pieces, the same with or without workers
+
+Entity* MakeEntity(int64 id, Entity* parent) {
+	Entity* e = new Entity;
+	e->id = id;
+	e->parent = parent;
+	for (int32 i = 0; i < kComponents; i++) {
+		Component* c = new Component;
+		c->data[0] = (float)(id % 97) + i;
+		c->next = e->components;
+		e->components = c;
+	}
+	return e;
+}
+
+int64 Weigh(Entity* e) {
+	int64 total = e->id;
+	for (Component* c = e->components; c != null; c = c->next) total += (int64)c->data[0];
+	return total;
+}
+
+// Garbage the way a frame makes it: a path of nodes, an event list, a scratch array, all dropped at the end.
+int64 Churn(int64 seed, int32 count) {
+	int64 total = 0;
+	Component* path = null;
+	for (int32 i = 0; i < count; i++) {
+		Component* node = new Component;
+		node->data[0] = (float)((seed + i) % 13);
+		node->next = path;
+		path = (i % 64 == 63) ? null : node;
+		total += (int64)node->data[0];
+	}
+	return total;
+}
+
+int64 ReplaceSome(Core::Array<Entity*>& world, int64 frame, int32 count, int64 start) {
+	int64 total = 0;
+	for (int32 i = 0; i < count; i++) {
+		const int64 slot = (start + i) % world.Count();
+		Entity* parent = world[(slot * 7 + 1) % world.Count()];
+		world[slot] = MakeEntity(frame * 1000003 + slot, parent);
+		total += Weigh(world[slot]);
+	}
+	return total;
+}
+
+int64 WeighWorld(const Core::Array<Entity*>& world, int64 stride) {
+	int64 total = 0;
+	for (int64 i = 0; i < world.Count(); i += stride) total += Weigh(world[i]);
+	return total;
+}
+
+int32 ArgOr(int32 argc, char8** argv, int32 index, int32 fallback) {
+	return argc > index ? (int32)strtol(argv[index], null, 10) : fallback;
+}
+
+int64 RunFrameAlone(Core::Array<Entity*>& world, const Settings& s, int64 frame) {
+	int64 total = 0;
+	for (int32 j = 0; j < kSlices; j++) total += Churn(frame * 64 + j, s.garbage / kSlices);
+	return total + ReplaceSome(world, frame, s.replaced, frame * s.replaced);
+}
+
+// The frame's churn as jobs; the world's replacements stay on the main thread, which owns the array.
+int64 RunFrameWithJobs(Threading::JobSystem& jobs, Core::Array<Entity*>& world, const Settings& s, int64 frame) {
+	Threading::WaitGroup group;
+	Threading::Atomic<int64>* sum = new Threading::Atomic<int64>;
+	const int32 share = s.garbage / kSlices;
+	for (int32 j = 0; j < kSlices; j++) {
+		const int64 seed = frame * 64 + j;
+		jobs.Submit([sum, seed, share]() { sum->FetchAdd(Churn(seed, share), MemoryOrder::Relaxed); }, Threading::JobPriority::High, &group);
+	}
+	const int64 replaced = ReplaceSome(world, frame, s.replaced, frame * s.replaced);
+	jobs.Wait(group);
+	return sum->Load() + replaced;
+}
+
+int32 main(int32 argc, char8** argv) {
+	Settings s;
+	s.entities = ArgOr(argc, argv, 1, 200000);
+	s.frames = ArgOr(argc, argv, 2, 600);
+	s.garbage = ArgOr(argc, argv, 3, 20000);
+	s.replaced = ArgOr(argc, argv, 4, 200);
+	s.workers = ArgOr(argc, argv, 5, 0);
+	GC::SetMarkThreads(ArgOr(argc, argv, 6, -1));
+
+	Core::Array<Entity*> world;
+	for (int32 i = 0; i < s.entities; i++) world.Push(MakeEntity(i, i > 0 ? world[i / 2] : null));
+	GC::Collect();
+	const GC::Stats before = GC::GetStats();
+
+	Threading::JobSystemDesc desc;
+	desc.frameWorkers = s.workers > 0 ? s.workers : 1;
+	desc.backgroundWorkers = 0;
+	Threading::JobSystem jobs(desc);
+
+	Core::Array<int64> frameTimes;
+	int64 checksum = 0;
+	int64 worstPause = 0;
+	uint64 collections = before.collections;
+	const int64 start = clock_now_ns();
+	for (int32 frame = 0; frame < s.frames; frame++) {
+		const int64 frameStart = clock_now_ns();
+		checksum += s.workers > 0 ? RunFrameWithJobs(jobs, world, s, frame) : RunFrameAlone(world, s, frame);
+		frameTimes.Push(clock_now_ns() - frameStart);
+		const GC::Stats now = GC::GetStats();
+		if (now.collections != collections && (int64)now.lastPauseNs > worstPause) worstPause = (int64)now.lastPauseNs;
+		collections = now.collections;
+	}
+	const int64 total = clock_now_ns() - start;
+	checksum += WeighWorld(world, 97);
+	const GC::Stats after = GC::GetStats();
+
+	frameTimes.Sort();
+	const int64 count = frameTimes.Count();
+	const double ms = 1000000.0;
+	printf("checksum=%lld frames=%d avg_frame_ms=%.3f p50_ms=%.3f p99_ms=%.3f worst_frame_ms=%.3f collections=%llu "
+		"gc_ms=%.1f avg_pause_ms=%.3f worst_pause_ms=%.3f gc_share=%.1f%% live_mb=%.1f heap_mb=%.1f allocs_per_s=%.0f\n",
+		checksum, s.frames, (double)total / count / ms, (double)frameTimes[count / 2] / ms, (double)frameTimes[count * 99 / 100] / ms,
+		(double)frameTimes[count - 1] / ms, after.collections - before.collections,
+		(double)(after.pauseNs - before.pauseNs) / ms,
+		after.collections > before.collections ? (double)(after.pauseNs - before.pauseNs) / (double)(after.collections - before.collections) / ms : 0.0,
+		(double)worstPause / ms, 100.0 * (double)(after.pauseNs - before.pauseNs) / (double)total,
+		(double)after.liveBytes / 1048576.0, (double)after.heapBytes / 1048576.0,
+		(double)(after.allocs - before.allocs) / ((double)total / 1000000000.0));
+	return 0;
+}

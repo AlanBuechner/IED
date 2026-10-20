@@ -1,0 +1,6 @@
+struct Vec4 { public union { packed float x, y, z, w; packed float[4] data; }; }
+int32 main() {
+	packed float[4] a = 1.0f;
+	Vec4 v = (Vec4)a;
+	return 0;
+}

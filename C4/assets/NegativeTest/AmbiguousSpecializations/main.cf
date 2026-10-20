@@ -1,0 +1,4 @@
+template<...Ts> struct S { static const int32 V = 0; }
+template<T> struct S<T> { static const int32 V = 1; }
+template<...R> struct S<int8, R...> { static const int32 V = 2; }
+int32 main() { return S<int8>::V; }

@@ -1,0 +1,11 @@
+// A thread_local local whose start reaches its own declaration again on the same thread stops the program.
+int32 Recurse(int32 depth) {
+	thread_local int32 v = Recurse(depth + 1);
+	return v;
+}
+
+int32 main() {
+	Recurse(0);
+	printf("SHOULD NOT REACH HERE\n");
+	return 0;
+}

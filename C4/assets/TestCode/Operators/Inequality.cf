@@ -1,0 +1,12 @@
+// Operators - Inequality Tests (implementation)
+include "../Framework/Assert.ch"
+include "Inequality.ch"
+
+void TestInequality() {
+	AssertTrue(3 < 10);
+	AssertTrue(10 > 3);
+	AssertTrue(5 <= 5);
+	AssertTrue(5 >= 5);
+	AssertFalse(10 < 3);
+	AssertFalse(3 > 10);
+}

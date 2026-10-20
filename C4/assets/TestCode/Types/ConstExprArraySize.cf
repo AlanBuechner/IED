@@ -1,0 +1,105 @@
+// Types - Const-Expression Array Size Tests (implementation)
+include "../Framework/Assert.ch"
+include "ConstExprArraySize.ch"
+
+const int32 ROWS = 4;
+enum Step { STEP = 3 };
+
+int32[ROWS] gGlobal;
+
+// D3b: a const declared AFTER its use in an array size must still fold (order-independent).
+struct FwdRow { public float[FWD_COLS + 2] data; };
+const int32 FWD_COLS = 4;
+
+// D3: sizeof() used as an array size. The element count is derived from the size of another type,
+// so it only folds once that type's layout is known (the completed model).
+struct SzPoint { public float x, y; };              // 8 bytes -> /4 == 2 lanes
+struct SzVec   { public float[sizeof(SzPoint)/4] x, y; };  // two float[2] fields -> 16 bytes
+struct SzPrim  { public float[sizeof(float)] a; };          // float[4] -> 16 bytes
+
+// D3: sizeof() of an ARRAY type (sizeof(int32[4]) == 16) and of a TEMPLATE instantiation.
+template<T> class TBox { public T v; };
+struct SzArr   { public int32[sizeof(int32[4])/4] a; };     // 16/4 == 4 lanes -> int32[4] -> 16 bytes
+struct SzTpl   { public int32[sizeof(TBox<float>)/4] a; };  // TBox<float> is 4 bytes -> /4 == 1 lane -> 4 bytes
+
+// D3: chained - sizeof feeds a const global, which then sizes an array (const-eval against the
+// completed model, order-independent).
+struct SzChainSrc { public float x, y, z; };   // 12 bytes
+const int32 SZ_CHAIN_N = sizeof(SzChainSrc);    // 12
+struct SzChain { public float[SZ_CHAIN_N/4] a; };  // float[3] -> 12 bytes
+
+void TestConstExprArraySize() {
+	// Local array sized by a const variable: HIR must trust semantic's resolved size, not
+	// fall back to a literal-only re-derivation (which allocated [1 x i32] and overflowed).
+	int32[ROWS] local;
+	local[0] = 1;
+	local[1] = 2;
+	local[2] = 3;
+	local[3] = 4;
+	int32 sum = 0;
+	for (int32 i = 0; i < ROWS; i++) {
+		sum += local[i];
+	}
+	AssertIntEquals(10, sum, "const-var-sized local array");
+
+	// Global sized by the same const variable.
+	gGlobal[0] = 5;
+	gGlobal[3] = 6;
+	AssertIntEquals(11, gGlobal[0] + gGlobal[3], "const-var-sized global array");
+
+	// Array sized by an enum member (also a compile-time constant).
+	int32[STEP] fromEnum;
+	fromEnum[0] = 7;
+	fromEnum[2] = 8;
+	AssertIntEquals(15, fromEnum[0] + fromEnum[2], "enum-sized array");
+
+	// Literal sizes must keep working (the common path).
+	int32[3] literal;
+	literal[0] = 1;
+	literal[2] = 2;
+	AssertIntEquals(3, literal[0] + literal[2], "literal-sized array");
+
+	// Forward reference: the const FWD_COLS is declared AFTER FwdRow. The array size must fold
+	// order-independently (COLLECT pre-registers file-scope consts before the walk). sizeof proves
+	// the layout used the real size; element access proves the field sits at the right offset.
+	FwdRow row;
+	row.data[0] = 1.5f;
+	row.data[5] = 2.5f; // index 5 is valid: FWD_COLS + 2 == 6 lanes
+	AssertFloatEquals(4.0f, row.data[0] + row.data[5], "forward-ref sized struct array");
+	AssertIntEquals(24, sizeof(FwdRow), "sizeof of forward-ref sized struct (6 x float)");
+
+	// D3: sizeof() in an array size is a compile-time constant. The element count derives from the
+	// SIZE OF ANOTHER TYPE (a user type and a primitive), folded against the completed model. This
+	// used to fail with "Array size is not a compile-time constant".
+	SzVec vec;      // x,y each float[sizeof(SzPoint)/4] = float[2]; sizeof(SzVec) == 16
+	vec.x[0] = 1.0f;
+	vec.y[1] = 2.0f; // index 1 is the last lane: sizeof(SzPoint)/4 == 2 lanes
+	AssertFloatEquals(3.0f, vec.x[0] + vec.y[1], "sizeof-of-user-type sized array");
+	AssertIntEquals(16, sizeof(SzVec), "sizeof of struct with sizeof-sized arrays (2 x float[2])");
+
+	SzPrim prim;    // a is float[sizeof(float)] = float[4]; sizeof(SzPrim) == 16
+	prim.a[0] = 5.0f;
+	AssertFloatEquals(5.0f, prim.a[0], "sizeof-of-primitive sized array");
+	AssertIntEquals(16, sizeof(SzPrim), "sizeof of struct with sizeof(primitive)-sized array (float[4])");
+
+	// D3: sizeof() of an ARRAY type - sizeof(int32[4]) == 16 is a constant, so /4 == 4 lanes.
+	SzArr arr;
+	arr.a[0] = 1;
+	arr.a[3] = 2; // index 3 is the last lane: sizeof(int32[4])/4 == 4 lanes
+	AssertIntEquals(3, arr.a[0] + arr.a[3], "sizeof-of-array-type sized array");
+	AssertIntEquals(16, sizeof(SzArr), "sizeof of struct with sizeof(array)-sized array (int32[4])");
+
+	// D3: sizeof() of a TEMPLATE instantiation - the instantiated type's layout is known.
+	SzTpl tpl;
+	tpl.a[0] = 9; // single lane: sizeof(TBox<float>)/4 == 1
+	AssertIntEquals(9, tpl.a[0], "sizeof-of-template-instantiation sized array");
+	AssertIntEquals(4, sizeof(SzTpl), "sizeof of struct with sizeof(TBox<float>)-sized array (int32[1])");
+
+	// D3: chained - sizeof feeds a const global, which sizes an array. Both folds happen against the
+	// completed model; element access proves the layout used the folded value end to end.
+	SzChain chain;
+	chain.a[0] = 1.0f;
+	chain.a[2] = 2.0f; // index 2 is the last lane: SZ_CHAIN_N/4 == 3 lanes
+	AssertFloatEquals(3.0f, chain.a[0] + chain.a[2], "sizeof->const->array-size chained");
+	AssertIntEquals(12, sizeof(SzChain), "sizeof of struct sized by a sizeof-derived const (float[3])");
+}

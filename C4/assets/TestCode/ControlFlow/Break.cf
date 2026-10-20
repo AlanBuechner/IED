@@ -1,0 +1,14 @@
+// ControlFlow - Break Tests (implementation)
+include "../Framework/Assert.ch"
+include "Break.ch"
+
+void TestBreak() {
+	int32 count = 0;
+	for (int32 i = 0; i < 100; i++) {
+		if (i == 5) {
+			break;
+		}
+		count++;
+	}
+	AssertEqual(5, count);
+}

@@ -1,0 +1,38 @@
+struct V4 { float x; float y; float z; float w; }
+struct M4 { V4 c0; V4 c1; V4 c2; V4 c3; }
+V4 V4_Make(float a, float b, float c, float d);
+M4 M4_Identity();
+V4 M4_TransformVector(M4 m, V4 v);   // nested struct BY VALUE arg + return
+M4 M4_Multiply(M4 a, M4 b);          // two nested by-value args + nested return
+V4 V4_Make(float a, float b, float c, float d) { V4 r; r.x=a; r.y=b; r.z=c; r.w=d; return r; }
+M4 M4_Identity() {
+    M4 m;
+    m.c0 = V4_Make(1,0,0,0); m.c1 = V4_Make(0,1,0,0); m.c2 = V4_Make(0,0,1,0); m.c3 = V4_Make(0,0,0,1);
+    return m;
+}
+V4 M4_TransformVector(M4 m, V4 v) {
+    return V4_Make(m.c0.x*v.x + m.c1.x*v.y + m.c2.x*v.z + m.c3.x*v.w,
+                   m.c0.y*v.x + m.c1.y*v.y + m.c2.y*v.z + m.c3.y*v.w,
+                   m.c0.z*v.x + m.c1.z*v.y + m.c2.z*v.z + m.c3.z*v.w,
+                   m.c0.w*v.x + m.c1.w*v.y + m.c2.w*v.z + m.c3.w*v.w);
+}
+M4 M4_Multiply(M4 a, M4 b) {
+    M4 r;
+    r.c0 = M4_TransformVector(a, b.c0);
+    r.c1 = M4_TransformVector(a, b.c1);
+    r.c2 = M4_TransformVector(a, b.c2);
+    r.c3 = M4_TransformVector(a, b.c3);
+    return r;
+}
+int32 main() {
+    M4 id = M4_Identity();
+    V4 p = M4_TransformVector(id, V4_Make(1,2,3,1));
+    if (p.x != 1.0f || p.y != 2.0f || p.z != 3.0f) { printf("FAIL id (%.1f,%.1f,%.1f)\n", p.x,p.y,p.z); return 1; }
+    M4 mm = M4_Multiply(id, id);
+    if (mm.c2.z != 1.0f || mm.c3.w != 1.0f) { printf("FAIL mul\n"); return 1; }
+    // chained nested-by-value calls
+    V4 q = M4_TransformVector(M4_Multiply(id, id), V4_Make(5,6,7,1));
+    if (q.x != 5.0f || q.y != 6.0f || q.z != 7.0f) { printf("FAIL chain (%.1f,%.1f,%.1f)\n", q.x,q.y,q.z); return 1; }
+    printf("NESTED BY-VALUE OK\n");
+    return 0;
+}

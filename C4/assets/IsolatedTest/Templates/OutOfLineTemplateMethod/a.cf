@@ -1,0 +1,11 @@
+template<T> class Box {
+    T* data;
+    int32 count;
+    public int32 ByteSize();
+}
+template<T> public int32 Box::ByteSize() { return count * sizeof(T); }
+int32 main() {
+    Box<int32>* b = new Box<int32>;
+    printf("BARE-FIELD=%d\n", b->ByteSize());
+    return 0;
+}

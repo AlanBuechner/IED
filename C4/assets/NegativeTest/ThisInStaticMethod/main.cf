@@ -1,0 +1,5 @@
+struct S3 {
+	public float x;
+	public static float Get() { return this.x; }
+}
+int32 main() { return 0; }

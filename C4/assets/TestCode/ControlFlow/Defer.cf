@@ -1,0 +1,74 @@
+// ControlFlow - Defer Tests (implementation)
+include "../Framework/Assert.ch"
+include "Defer.ch"
+
+void TestDefer() {
+	int32 flag = 0;
+	
+	{
+		defer flag = 1;
+		flag = 0;
+	}
+	
+	AssertEqual(1, flag);
+}
+
+// A function-scope defer must run before an EXPLICIT return - on every exit path (C++ RAII). Before the
+// fix these never fired because EmitBlock only ran defers when control fell off the end.
+int32 g_deferCount = 0;
+void DeferBump() { g_deferCount = g_deferCount + 1; }
+
+int32 DeferWithReturn(int32 cond) {
+	defer DeferBump();
+	if (cond) return 42;   // early-return path: defer must still run first
+	return 7;              // normal-return path: defer must still run first
+}
+
+void TestDeferOnExplicitReturn() {
+	g_deferCount = 0;
+	int32 a = DeferWithReturn(1);   // takes the early-return path
+	AssertEqual(42, a);
+	AssertEqual(1, g_deferCount);    // defer ran exactly once before the return
+
+	g_deferCount = 0;
+	int32 b = DeferWithReturn(0);   // takes the normal-return path
+	AssertEqual(7, b);
+	AssertEqual(1, g_deferCount);    // defer ran exactly once before the return
+}
+
+// LIFO within one scope: last declared runs first. Count via a global (explicit increment - the post-
+// increment operator is covered separately).
+int32[4] g_lifo; int32 g_lifoIdx = 0;
+void DeferTag(int32 t) { if (g_lifoIdx < 4) { g_lifo[g_lifoIdx] = t; g_lifoIdx = g_lifoIdx + 1; } }
+void LifoScope() {
+	g_lifoIdx = 0;
+	defer DeferTag(1);
+	defer DeferTag(2);
+	defer DeferTag(3);
+}
+
+void TestDeferLifoOrder() {
+	LifoScope();
+	AssertEqual(3, g_lifo[0]);   // last declared ran first
+	AssertEqual(2, g_lifo[1]);
+	AssertEqual(1, g_lifo[2]);   // first declared ran last
+}
+
+// Nested scopes: the innermost scope's defer runs before the enclosing one's.
+int32[2] g_nested; int32 g_nestedIdx = 0;
+void NestedTag(int32 t) { if (g_nestedIdx < 2) { g_nested[g_nestedIdx] = t; g_nestedIdx = g_nestedIdx + 1; } }
+void NestedScopes() {
+	g_nestedIdx = 0;
+	{
+		defer NestedTag(10);   // outer scope
+		{
+			defer NestedTag(20); // inner scope - runs first
+		}
+	}
+}
+
+void TestDeferNestedScopes() {
+	NestedScopes();
+	AssertEqual(20, g_nested[0]);
+	AssertEqual(10, g_nested[1]);
+}

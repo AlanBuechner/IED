@@ -1,0 +1,124 @@
+// Reflection invoke (D-50): every function reflection registers that has code is called through its thunk.
+
+include "bedrock.ch"
+
+int32 RiAdd(int32 a, int32 b) { return a + b; }
+int32 g_riValue = 3;
+int32& RiSlot() { return g_riValue; }
+void RiIncrement(int32& v) { v = v + 1; }
+void RiStore(int32 v) { g_riValue = v; }
+struct RiPoint { public int32 x; public int32 y; }
+RiPoint RiMake(int32 x, int32 y) { RiPoint p; p.x = x; p.y = y; return p; }
+Core::String RiGreeting() { return Core::String("hi"); }
+int32 RiAppendLength(Core::String s) { s.Append("!!"); return (int32)s.ByteLength(); }
+
+interface IRiArea { int32 Area(); }
+class RiAnimal {
+	public int32 base = 1;
+	public virtual int32 Legs() { return 0; }
+	public void Bump(int32 by) { base = base + by; }
+	public static int32 Twice(int32 v) { return v * 2; }
+}
+class RiBird : RiAnimal, IRiArea {
+	public int32 side = 3;
+	public override int32 Legs() { return 2; }
+	public int32 Area() { return side * side; }
+}
+
+[test("reflect.invoke")]
+class ReflectionInvokeTests {
+	[test("free")]
+	public static void TestFree() {
+		Reflection::Function add = Reflection::FindFunction("RiAdd");
+		assert_true(add.IsInvokable(), "a function with a body has a thunk");
+		int32 r = 0;
+		assert_true(add.Call(&r, 2, 3), "typed call");
+		assert_eq(5, r, "2 + 3");
+		int32 a = 40;
+		int32 b = 2;
+		void*[2] arguments = { (void*)&a, (void*)&b };
+		assert_true(add.Invoke(&r, &arguments[0]), "raw invoke");
+		assert_eq(42, r, "40 + 2");
+	}
+
+	[test("void_result")]
+	public static void TestVoidResult() {
+		assert_true(Reflection::FindFunction("RiStore").Call(nullptr, 17), "a void function takes no result");
+		assert_eq(17, g_riValue, "the call ran");
+		g_riValue = 3;
+	}
+
+	[test("static_method")]
+	public static void TestStaticMethod() {
+		Reflection::Method twice = Reflection::FindType("RiAnimal").FindMethod("Twice");
+		int32 r = 0;
+		assert_true(twice.Call(nullptr, &r, 21), "a static method needs no object");
+		assert_eq(42, r, "21 * 2");
+	}
+
+	[test("instance_method")]
+	public static void TestInstanceMethod() {
+		RiAnimal animal;
+		assert_true(Reflection::FindType("RiAnimal").FindMethod("Bump").Call(&animal, nullptr, 9), "called on the object");
+		assert_eq(10, animal.base, "the object changed");
+	}
+
+	[test("virtual_method")]
+	public static void TestVirtualMethod() {
+		RiBird bird;
+		int32 legs = 0;
+		assert_true(Reflection::FindType("RiAnimal").FindMethod("Legs").Call(&bird, &legs), "base method on a derived object");
+		assert_eq(2, legs, "dispatches to the override");
+		IRiArea* area = &bird;
+		int32 value = 0;
+		assert_true(Reflection::FindType("IRiArea").FindMethod("Area").Call((void*)area, &value), "interface method on its sub-object");
+		assert_eq(9, value, "dispatches to the implementation");
+	}
+
+	[test("results")]
+	public static void TestResults() {
+		int32* slot = nullptr;
+		assert_true(Reflection::FindFunction("RiSlot").Call(&slot), "reference result");
+		assert_true(slot == &g_riValue, "a reference result stores the referent's address");
+		RiPoint p;
+		assert_true(Reflection::FindFunction("RiMake").Call(&p, 7, 8), "struct result");
+		assert_eq(7, p.x, "x");
+		assert_eq(8, p.y, "y");
+		Core::String greeting;
+		assert_true(Reflection::FindFunction("RiGreeting").Call(&greeting), "object result");
+		assert_true(strcmp(greeting.CStr(), "hi") == 0, "built in the result storage");
+	}
+
+	[test("arguments")]
+	public static void TestArguments() {
+		int32 x = 5;
+		void*[1] arguments = { (void*)&x };
+		assert_true(Reflection::FindFunction("RiIncrement").Invoke(nullptr, &arguments[0]), "reference parameter");
+		assert_eq(6, x, "binds the argument's object");
+		assert_true(Reflection::FindFunction("RiIncrement").Call(nullptr, x), "typed reference parameter");
+		assert_eq(7, x, "the typed call binds the caller's object too");
+		Core::String text = Core::String("abc");
+		int32 length = 0;
+		assert_true(Reflection::FindFunction("RiAppendLength").Call(&length, text), "by-value object parameter");
+		assert_eq(5, length, "the function sees its own copy");
+		assert_eq(3, text.ByteLength(), "the argument is unchanged");
+	}
+
+	[test("refused")]
+	public static void TestRefused() {
+		int32 r = 0;
+		assert_true(!Reflection::FindFunction("RiAdd").Call(&r, 1), "wrong argument count");
+		assert_true(!Reflection::FindType("RiAnimal").FindMethod("Bump").Call(nullptr, nullptr, 1), "an instance method without an object");
+		Reflection::Function format = Reflection::FindFunction("Core::Format");
+		assert_true(format.IsValid(), "a variadic function is registered");
+		assert_true(!format.IsInvokable(), "but has no thunk");
+		assert_true(!Reflection::FindFunction("RiMissing").Invoke(&r, nullptr), "an invalid handle");
+	}
+
+	// BUG-151: the compiler's builtins are the runtime's functions, not the program's.
+	[test("builtins_not_registered")]
+	public static void TestBuiltinsNotRegistered() {
+		assert_true(!Reflection::FindFunction("printf").IsValid(), "printf");
+		assert_true(!Reflection::FindFunction("reflect_type").IsValid(), "reflect_type");
+	}
+}

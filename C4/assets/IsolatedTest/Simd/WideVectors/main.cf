@@ -1,0 +1,97 @@
+// 256- and 512-bit vectors on the default target (D-62): `packed float[8]`, `packed int32[8]`, `packed double[4]`,
+// `packed float[16]` and `packed int64[8]` are split into SSE registers by the compiler but keep their size, their
+// alignment (the largest power of two dividing the size) and their values through locals, fields, arrays, globals,
+// the managed heap, calls that are not inlined and Bedrock's containers (BUG-251). main returns the failures.
+include "bedrock.ch"
+
+struct Holder { public int32 head; public packed float[8] lanes; public int8 tail; }
+struct Big { public packed float[16] lanes; public packed int64[8] counts; }
+
+packed float[8] g_ramp = { 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+packed double[4][3] g_rows;
+
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+// Recursion keeps these out of line, so the vectors cross real calls.
+packed float[8] Scaled(packed float[8] v, int32 depth) { return depth == 0 ? v : Scaled(v * 2.0f, depth - 1); }
+packed int32[8] Summed(packed int32[8] a, packed int32[8] b, int32 depth) { return depth == 0 ? a + b : Summed(a, b, depth - 1); }
+packed double[4] Squared(packed double[4] v, int32 depth) { return depth == 0 ? v * v : Squared(v, depth - 1); }
+packed float[16] Negated(packed float[16] v, int32 depth) { return depth == 0 ? -v : Negated(v, depth - 1); }
+packed int64[8] Shifted(packed int64[8] v, int32 depth) { return depth == 0 ? v << 1 : Shifted(v, depth - 1); }
+
+bool Aligned(void* p, uint64 alignment) { return (uint64)p % alignment == 0; }
+
+int32 Layout() {
+	int32 failures = 0;
+	failures += DiffersI(sizeof(packed float[8]), 32) + DiffersI(alignof(packed float[8]), 32);
+	failures += DiffersI(sizeof(packed int32[8]), 32) + DiffersI(sizeof(packed double[4]), 32);
+	failures += DiffersI(sizeof(packed float[16]), 64) + DiffersI(alignof(packed float[16]), 64);
+	failures += DiffersI(sizeof(packed int64[8]), 64) + DiffersI(alignof(packed int64[8]), 64);
+	failures += DiffersI(alignof(Holder), 32) + DiffersI(sizeof(Holder), 96) + DiffersI(offsetof(Holder, lanes), 32);
+	failures += DiffersI(sizeof(Big), 128) + DiffersI(offsetof(Big, counts), 64);
+	failures += DiffersI(sizeof(packed float[8][3]), 96);
+	return failures;
+}
+
+int32 Calls() {
+	int32 failures = 0;
+	packed float[8] s = Scaled(g_ramp, 3);
+	failures += s[1] == 8.0f && s[7] == 56.0f ? 0 : 1;
+	packed int32[8] a = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	packed int32[8] sum = Summed(a, a * 10, 2);
+	failures += DiffersI(sum[0], 11) + DiffersI(sum[7], 88);
+	packed double[4] d = { 1.5, -2.0, 3.0, 0.5 };
+	packed double[4] sq = Squared(d, 2);
+	failures += sq[0] == 2.25 && sq[1] == 4.0 && sq[3] == 0.25 ? 0 : 1;
+	packed float[16] wide = simd_concat(g_ramp, g_ramp + 8.0f);
+	packed float[16] neg = Negated(wide, 2);
+	failures += neg[0] == 0.0f && neg[15] == -15.0f ? 0 : 1;
+	packed int64[8] counts = { 1, 2, 3, 4, 5, 6, 7, 1099511627776 };
+	packed int64[8] shifted = Shifted(counts, 1);
+	failures += DiffersI(shifted[0], 2) + DiffersI(shifted[7], 2199023255552);
+	return failures;
+}
+
+int32 Storage() {
+	int32 failures = 0;
+	Holder local;
+	local.lanes = g_ramp;
+	failures += Aligned((void*)&local.lanes, 32) ? 0 : 1;
+	Holder* heap = new Holder();
+	heap->lanes = g_ramp * 3.0f;
+	failures += Aligned((void*)&heap->lanes, 32) && heap->lanes[7] == 21.0f ? 0 : 1;
+	Big* big = new Big();
+	failures += Aligned((void*)&big->lanes, 64) && Aligned((void*)&big->counts, 64) ? 0 : 1;
+	g_rows[2] = simd_splat(4.0, 4);
+	failures += Aligned((void*)&g_rows[1], 32) && g_rows[2][3] == 4.0 ? 0 : 1;
+	packed float[8][4] locals;
+	for (int32 i = 0; i < 4; ++i) locals[i] = g_ramp + (float)i;
+	failures += Aligned((void*)&locals[3], 32) && locals[3][7] == 10.0f ? 0 : 1;
+	return failures;
+}
+
+int32 Containers() {
+	int32 failures = 0;
+	for (int32 n = 1; n < 24; ++n) {
+		void* skew = raw_alloc((uint64)(n * 24));   // shifts where the next blocks land
+		Core::Array<packed float[8]> array;
+		for (int32 k = 0; k < n; ++k) array.Push(g_ramp * (float)k);
+		Core::Queue<packed int64[8]> queue;
+		queue.Push(simd_splat((int64)n, 8));
+		Core::List<packed float[16]> list;
+		list.PushBack(simd_splat((float)n, 16));
+		Core::HashMap<int32, packed double[4]> map;
+		map.Insert(n, simd_splat((double)n, 4));
+		failures += Aligned((void*)&array[n - 1], 32) && array[n - 1][7] == 7.0f * (float)(n - 1) ? 0 : 1;
+		failures += Aligned((void*)&queue.Front(), 64) && queue.Front()[7] == (int64)n ? 0 : 1;
+		failures += Aligned((void*)&list.Front(), 64) && list.Front()[15] == (float)n ? 0 : 1;
+		packed double[4] found;
+		failures += map.TryGet(n, found) && found[3] == (double)n ? 0 : 1;
+		raw_free(skew);
+	}
+	return failures;
+}
+
+int32 main() {
+	return Layout() + Calls() + Storage() + Containers();
+}

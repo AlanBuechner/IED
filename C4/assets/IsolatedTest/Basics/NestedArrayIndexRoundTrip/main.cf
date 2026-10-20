@@ -1,0 +1,1 @@
+int main() { int32[2][3] a; int32 i=0,j=1; a[i][j]=5; return (a[i][j]==5) ? 0 : 1; }

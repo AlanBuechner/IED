@@ -1,0 +1,4 @@
+struct Buffer {
+	public float[] samples;
+}
+int32 main() { return 0; }

@@ -1,0 +1,5 @@
+interface IA { int32 Size(); }
+interface IB { int32 Size(); }
+class C : IA, IB { public int32 Other() { return 0; } }
+int32 Use(C* c) { return c->Size(); }
+int32 main() { return 0; }

@@ -1,0 +1,5 @@
+int32 main() {
+	float f = 2.0f;
+	const int32& r = f;
+	return r;
+}

@@ -1,0 +1,5 @@
+int32 main() {
+	defer { goto out; }
+out:
+	return 0;
+}

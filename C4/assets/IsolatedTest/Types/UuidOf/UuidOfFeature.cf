@@ -1,0 +1,53 @@
+// __uuidof() language feature - compile-time COM GUID query (C/C++ interop).
+//
+// Verifies that __uuidof(T) returns a pointer to a constant _GUID whose 16 bytes match the
+// __declspec(uuid("...")) / MIDL_INTERFACE attribute on T (extracted by CBind from the real
+// header and emitted as [uuid("...")]). Also verifies sizeof(_GUID) == 16.
+//
+// IFoo carries uuid 905db94b-a00c-4140-9df5-2b64ca9ea357 (the real IID_ID3D12Device).
+
+extern "c++" include "mini.hpp"
+
+// _GUID layout matches the SDK (guiddef.h): { int Data1; short Data2; short Data3; unsigned char Data4[8]; }
+struct _GUID {
+	int32  Data1;
+	uint16 Data2;
+	uint16 Data3;
+	char[8] Data4;
+};
+
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) { if (!cond) { printf("FAIL %s\n", what); g_fail++; } }
+
+// Read the 16 GUID bytes and compare against the known IID_ID3D12Device value.
+void TestUuidOf() {
+	_GUID* g = __uuidof(IFoo);
+	Check(g != null, "__uuidof(IFoo) non-null");
+	if (!g) return;
+
+	// 905db94b-a00c-4140-9df5-2b64ca9ea357
+	// Data1 = 0x905db94b (big-endian in the string, stored as a little-endian int32 field)
+	Check(g->Data1 == -0x6fa246b5, "Data1 == 0x905db94b"); // two's complement of 0x905db94b
+	Check((uint16)g->Data2 == 0xa00c, "Data2 == 0xa00c");
+	Check((uint16)g->Data3 == 0x4140, "Data3 == 0x4140");
+	// Data4 = 9d f5 2b 64 ca 9e a3 57
+	Check(g->Data4[0] == (char)0x9d, "Data4[0]==0x9d");
+	Check(g->Data4[1] == (char)0xf5, "Data4[1]==0xf5");
+	Check(g->Data4[2] == (char)0x2b, "Data4[2]==0x2b");
+	Check(g->Data4[3] == (char)0x64, "Data4[3]==0x64");
+	Check(g->Data4[4] == (char)0xca, "Data4[4]==0xca");
+	Check(g->Data4[5] == (char)0x9e, "Data4[5]==0x9e");
+	Check(g->Data4[6] == (char)0xa3, "Data4[6]==0xa3");
+	Check(g->Data4[7] == (char)0x57, "Data4[7]==0x57");
+}
+
+void TestGuidSize() {
+	Check(sizeof(_GUID) == 16, "sizeof(_GUID)==16");
+}
+
+int32 main() {
+	TestUuidOf();
+	TestGuidSize();
+	printf("__uuidof test: %d failure(s)\n", g_fail);
+	return g_fail;
+}

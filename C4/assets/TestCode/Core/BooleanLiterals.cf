@@ -1,0 +1,13 @@
+// Core - Boolean Literal Tests (implementation)
+include "../Framework/Assert.ch"
+include "BooleanLiterals.ch"
+
+void TestBooleanLiterals() {
+	bool t = true;
+	printf("[DEBUG] t = %d\n", t);
+	AssertTrue(t);
+	
+	bool f = false;
+	printf("[DEBUG] f = %d\n", f);
+	AssertFalse(f);
+}

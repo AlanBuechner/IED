@@ -1,0 +1,8 @@
+class Base { public virtual int32 F() { return 1; } }
+class Derived : Base { }
+int32 main() {
+	Derived d;
+	const Base& b = d;
+	Derived& back = dynamic_cast<Derived&>(b);
+	return 0;
+}

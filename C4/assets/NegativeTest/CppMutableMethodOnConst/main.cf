@@ -1,0 +1,3 @@
+extern "c++" include "box.h"
+void Touch(const Box& b) { b.Poke(2); }
+int32 main() { return 0; }

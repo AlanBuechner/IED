@@ -1,0 +1,20 @@
+include "../Framework/Assert.ch"
+include "ObjectAssign.ch"
+
+void TestObjectAssignFromRef() {
+    OA src; src.a = 7; src.f = 2;
+    OA dst; dst.a = 0; dst.f = 0;
+    dst = OA_Ref(src);            // bare object lvalue <- const OA& (was a false "S to S" error)
+    Assert(dst.a == 7, "oa: plain copy-assign from ref, field a");
+    Assert(dst.f == 2, "oa: plain copy-assign from ref, field f");
+}
+
+void TestObjectAssignTemplate() {
+    OABox<OA> b;
+    b.data = (OA*)raw_alloc(sizeof(OA) * 4);
+    OA src; src.a = 11; src.f = 5;
+    b.Put(0, src);                // data[0] (bare T) <- const T& param v  (the Vector<T>::Set shape)
+    OA back = b.At(0);            // copy-init from the index reference
+    Assert(back.a == 11, "oa: template copy-assign via index, field a");
+    Assert(back.f == 5, "oa: template copy-assign via index, field f");
+}

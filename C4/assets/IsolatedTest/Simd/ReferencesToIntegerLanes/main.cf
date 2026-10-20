@@ -1,0 +1,23 @@
+// A reference to a packed vector of integer lanes, returned from a template (Core::Queue<packed int64[8]>::Front),
+// stays an address: the conversion of its address to the reference is not read as a lane conversion. main returns
+// the failures.
+template<T> struct Ring { public T* data; public int64 head; public T& Front() { return data[head & 3]; } }
+
+int32 main() {
+	int32 failures = 0;
+	packed int32[2][4] storage;
+	Ring<packed int32[2]> ring;
+	ring.data = &storage[0];
+	ring.head = 5;
+	ring.Front() = 7;
+	failures += storage[1][0] == 7 && storage[1][1] == 7 ? 0 : 1;
+	packed int64[8][2] wide;
+	Ring<packed int64[8]> wideRing;
+	wideRing.data = &wide[0];
+	wideRing.Front() = simd_splat((int64)-3, 8);
+	failures += wide[0][7] == -3 ? 0 : 1;
+	packed uint8[16]& bytes = *(packed uint8[16]*)&wide[1];   // a reference local through a pointer cast
+	bytes = 255;
+	failures += wide[1][0] == -1 ? 0 : 1;
+	return failures;
+}

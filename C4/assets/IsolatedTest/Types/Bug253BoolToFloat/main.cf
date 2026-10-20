@@ -1,0 +1,20 @@
+// BUG-253: a bool converted to a float or a double was -1 for true (a signed one-bit conversion). main returns the
+// failures.
+float AsFloat(bool b) { return (float)b; }
+double AsDouble(bool b) { return b; }
+
+int32 main() {
+	int32 failures = 0;
+	failures += AsFloat(true) == 1.0f ? 0 : 1;
+	failures += AsFloat(false) == 0.0f ? 0 : 1;
+	failures += AsDouble(true) == 1.0 ? 0 : 1;
+	bool yes = true;
+	float sum = yes + 0.5f;
+	failures += sum == 1.5f ? 0 : 1;
+	packed float[4] f = { 1.0f, -1.0f, 2.0f, 0.0f };
+	packed float[4] asFloats = (packed float[4])(f > 0.5f);
+	failures += asFloats[0] == 1.0f && asFloats[1] == 0.0f && asFloats[2] == 1.0f ? 0 : 1;
+	packed double[2] asDoubles = (packed double[2])(simd_shuffle(f, 0, 1) < 0.0f);
+	failures += asDoubles[1] == 1.0 ? 0 : 1;
+	return failures;
+}

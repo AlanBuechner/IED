@@ -1,0 +1,57 @@
+// A create that wants a base create with arguments calls it as its first statement (`Base::Init(x);`),
+// which replaces the implicit 0-argument base create; otherwise the base's 0-argument create runs (D-07).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+class Base {
+	public int32 value;
+	public int32 creates;
+	[operator("create")] public void Init() { value = 1; creates = creates + 1; }
+	[operator("create")] public void Init(int32 v) { value = v; creates = creates + 1; }
+}
+class Derived : Base {
+	public int32 extra;
+	[operator("create")] public void Init(int32 v) { Base::Init(v * 10); extra = v; }
+	[operator("create")] public void Init() { extra = -1; }
+}
+class OnlyArgs {
+	public int32 v;
+	[operator("create")] public void Init(int32 x) { v = x; }
+}
+class FromOnlyArgs : OnlyArgs {
+	public int32 own;
+	[operator("create")] public void Init() { OnlyArgs::Init(5); own = 6; }
+}
+class Graded {
+	public int32 level = 3;
+	[operator("create")] public void Init(int32 x) { level = x; }
+}
+class Course : Graded {
+	public int32 hours;
+}
+class Plain : OnlyArgs {
+	public int32 more;
+}
+class Grand : Derived {
+	[operator("create")] public void Init() { Derived::Init(2); }
+}
+
+int32 main() {
+	Derived d = Derived(4);
+	Check(d.value == 40 && d.extra == 4, "the first statement constructs the base with arguments");
+	Check(d.creates == 1, "the base is constructed exactly once");
+	Derived e;
+	Check(e.value == 1 && e.extra == -1 && e.creates == 1, "otherwise the base's 0-argument create runs");
+	FromOnlyArgs f;
+	Check(f.v == 5 && f.own == 6, "a base with only argument creates is constructed by the first statement");
+	Grand g;
+	Check(g.value == 20 && g.extra == 2 && g.creates == 1, "each level picks its base's create");
+	Course c;
+	Check(c.level == 3 && c.hours == 0, "BUG-132: a type without a create builds an argument-only base like 'Base b;'");
+	Plain p;
+	Check(p.v == 0 && p.more == 0, "BUG-132: an argument-only base with nothing to start stays zero");
+	return g_failures;
+}

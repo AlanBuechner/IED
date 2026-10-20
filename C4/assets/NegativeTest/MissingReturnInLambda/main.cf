@@ -1,0 +1,1 @@
+int32 main() { func<int32(int32)> f = [](int32 v) -> int32 { if (v > 0) return v; }; return f(1); }

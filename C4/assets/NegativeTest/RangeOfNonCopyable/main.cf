@@ -1,0 +1,9 @@
+// A range entry copies its value into each element, so the element type must be copyable.
+class File {
+	public int32 fd;
+	[operator("delete")] public void Close() { fd = 0; }
+}
+int32 main() {
+	File[3] files = { [0...2] = File() };
+	return files[0].fd;
+}

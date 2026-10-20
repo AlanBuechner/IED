@@ -1,0 +1,54 @@
+// Bedrock method-overload tests. Run with:  C4.exe c4/Bedrock/Tests -test
+// Validates same-name methods with different parameter types (int vs float, int32 vs uint32) get
+// distinct symbols and dispatch to the right overload by argument type. Mutation is exercised via a
+// Set helper (C4 does not support assigning through a reference-returning call: `b->At(i) = v`).
+
+include "bedrock.ch"
+
+class OvlBox {
+public:
+	[operator("create")] public void Init();
+	// Same name, different param types -> distinct overloads.
+	public int32 At(uint32 i) { return items[i]; }
+	public float At(float f) { return 9.5f; }
+	public int32 Get(int32 i) { return items[i]; }   // int32 vs uint32 overloads
+	public int32 Get(uint32 i) { return items[i] * 100; }
+	public void Set(uint32 i, const int32& v) { items[i] = v; }
+private:
+	private int32* items;
+}
+
+public void OvlBox::Init() {
+	// raw_alloc takes BYTES (like every other Bedrock container), so 4 elements of int32 is 4*sizeof(int32).
+	items = (int32*)raw_alloc(4 * sizeof(int32));
+	items[0] = 10; items[1] = 20; items[2] = 30; items[3] = 40;
+}
+
+[test("overload.int_float")]
+public static void TestOverloadIntFloat() {
+	OvlBox* b = new OvlBox();
+	assert_eq(20, b->At(1), "uint32 overload -> items[1]");
+	assert_feq(9.5, b->At(3.0f), 0.0, "float overload -> 9.5");
+	// mutation via Set (lvalue-from-call is unsupported in C4)
+	b->Set(1, 77);
+	assert_eq(77, b->At(1), "set then read back via uint32 overload");
+}
+
+[test("overload.int32_uint32")]
+public static void TestOverloadInt32Uint32() {
+	OvlBox* b = new OvlBox();
+	assert_eq(20, b->Get((int32)1), "int32 overload -> items[1]");
+	assert_eq(2000, b->Get((uint32)1), "uint32 overload -> items[1]*100");
+}
+
+[test("overload.mixed_args")]
+public static void TestOverloadMixedArgs() {
+	OvlBox* b = new OvlBox();
+	uint32 idx = 2;
+	int32 sidx = 3;
+	float fidx = 1.0f;
+	assert_eq(30, b->At(idx), "uint32 var -> items[2]");
+	assert_eq(40, b->Get(sidx), "int32 var -> items[3]");
+	assert_eq(4000, b->Get((uint32)sidx), "cast to uint32 -> *100");
+	assert_feq(9.5, b->At(fidx), 0.0, "float var -> 9.5");
+}

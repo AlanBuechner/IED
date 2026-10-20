@@ -1,0 +1,14 @@
+template<T> void Fill(T* p) {
+	int32 n = 3;
+	for (int32 i = 0; i < n; i++) { p[i] = i + 1; }
+}
+int32 main() {
+	int32[3] a;
+	Fill<int32>(a);
+	if (a[0] != 1 || a[1] != 2 || a[2] != 3) { printf("FAIL int %d %d %d\n", a[0],a[1],a[2]); return 1; }
+	float[3] f;
+	Fill<float>(f);
+	if (f[0] != 1.0f || f[1] != 2.0f || f[2] != 3.0f) { printf("FAIL float %f %f %f\n", f[0],f[1],f[2]); return 1; }
+	printf("GENERIC PTR INDEX OK\n");
+	return 0;
+}

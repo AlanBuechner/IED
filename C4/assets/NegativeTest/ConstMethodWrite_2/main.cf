@@ -1,0 +1,2 @@
+struct S { public int32 x; public void F() const { this->x++; } }
+int main() { S s; s.F(); return 0; }

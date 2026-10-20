@@ -1,0 +1,2 @@
+char g = '\u00e9';
+int32 main() { return 0; }

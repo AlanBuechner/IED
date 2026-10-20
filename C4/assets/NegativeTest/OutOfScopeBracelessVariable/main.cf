@@ -1,0 +1,9 @@
+// A local declared in a BRACELESS control-statement body (if/while/for/do-while) is scoped to that
+// statement, not the whole function. Using it after the statement must be a clear undefined-identifier
+// error, not malformed IR. Before the braceless-body scoping fix this compiled to an untyped load and
+// failed at LLVM with "value doesn't match function result type" / "expected value token".
+int32 main() {
+    int32 c = 1;
+    if (c) int32 x = 5;
+    return x;
+}

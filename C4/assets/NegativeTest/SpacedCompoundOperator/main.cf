@@ -1,0 +1,7 @@
+int32 main()
+{
+	int32 a = 1;
+	int32 b = 2;
+	bool c = a < = b;
+	return c ? 0 : 1;
+}

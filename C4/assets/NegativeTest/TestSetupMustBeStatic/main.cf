@@ -1,0 +1,12 @@
+// Class-scoped [test_setup] hooks are stateless static functions: the harness calls them without
+// a fixture instance (and a static test body could not reach instance state anyway). An instance
+// hook must be a clear error, not called with a dangling receiver.
+struct Fixture {
+    int32 value;
+
+    [test_setup]
+    void Setup() { this.value = 1; }
+}
+
+[test("fixture.setup")]
+public static void TestRuns() {}

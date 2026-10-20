@@ -1,0 +1,31 @@
+// StructPtrInterop - regression test: passing &struct by pointer to foreign C must land on the
+// real field data, for BOTH value-only structs AND structs containing pointer fields (the
+// WNDCLASSEX shape). Guards against any change that would make C4 local struct storage carry a
+// hidden prefix/descriptor that offsets foreign reads. Verified via FOREIGN C readers so we check
+// exactly what the callee sees at each offset. Exit code = #failures.
+extern "c" include "StructPtrInterop.h"
+extern "c" source "StructPtrInterop.c"
+
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) { if (!cond) { printf("FAIL: %s\n", what); g_fail++; } }
+
+int32 main() {
+	// (a) value-only struct - like InteropSmoke's Point (known-good baseline).
+	Simple s;
+	s.a = 0x11111111;
+	s.b = 0x22222222;
+	Check(read_simple(&s) == 0x11111111, "value-only struct: C reads p->a (offset 0)");
+	Check(read_simple_b(&s) == 0x22222222, "value-only struct: C reads p->b (offset 4)");
+
+	// (b) struct WITH pointer fields - like WNDCLASSEX. first@0, ptrField@8, second@16.
+	WithPtr w;
+	w.first = 0x33333333;
+	w.ptrField = null;
+	w.second = 0x44444444;
+	Check(read_withptr(&w) == 0x33333333, "with-ptr struct: C reads p->first (offset 0)");
+	Check(read_withptr_second(&w) == 0x44444444, "with-ptr struct: C reads p->second (offset 16)");
+
+	if (g_fail) { printf("STRUCTPTRINTEROP FAILED: %d\n", g_fail); return g_fail; }
+	printf("STRUCTPTRINTEROP OK\n");
+	return 0;
+}

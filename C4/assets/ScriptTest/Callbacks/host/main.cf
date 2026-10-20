@@ -1,0 +1,48 @@
+// Lambdas, func<R(A)> and function pointers pass both ways: the host stores and calls the script's closures and
+// functions, and the script calls the host's.
+include "scripttest.ch"
+include "events.ch"
+
+namespace Events
+{
+	void Bus::Subscribe(func<int32(int32)> handler) { handlers.Push(handler); }
+
+	int32 Bus::Fire(int32 value) const
+	{
+		int32 total = 0;
+		for (int64 i = 0; i < handlers.Count(); i++) total += handlers[i](value);
+		return total;
+	}
+
+	int32 Apply(funcptr<int32(int32)> fn, int32 value) { return fn(value); }
+	func<int32(int32)> MakeAdder(int32 base) { return [base](int32 v) -> int32 { return v + base; }; }
+}
+
+void CheckCallbacks(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	Events::Bus bus;
+	funcptr<int32(Events::Bus*)> wire = (funcptr<int32(Events::Bus*)>)script->Address("Wire");
+	checks.Equal(107, wire(&bus), "the script calls a host closure and hands the host its function");
+	checks.Equal(3, (int32)bus.handlers.Count(), "the script subscribed three handlers");
+	GC::Collect(); // the script's closure is kept by the host's func
+	checks.Equal(45 + 22, bus.Fire(10), "the host calls the script's closures and function");
+
+	funcptr<funcptr<int32(int32)>()> tripleFn = (funcptr<funcptr<int32(int32)>()>)script->Address("TripleFn");
+	funcptr<int32(int32)> triple = tripleFn();
+	checks.Equal(21, triple(7), "a funcptr to a script function, called by the host");
+
+	funcptr<func<int32(int32)>(int32)> scaler = (funcptr<func<int32(int32)>(int32)>)script->Address("Scaler");
+	func<int32(int32)> byFour = scaler(4);
+	GC::Collect();
+	checks.Equal(20, byFour(5), "a script closure returned to the host outlives its maker");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Callbacks");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "callbacks", "callbacks.cf"));
+	if (script->Ok()) CheckCallbacks(script, checks);
+	return checks.End("Callbacks");
+}

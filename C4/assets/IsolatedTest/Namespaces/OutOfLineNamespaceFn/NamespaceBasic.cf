@@ -1,0 +1,28 @@
+// Isolated namespace test: out-of-line namespace function
+namespace Math {
+	int32 Double(int32 x);
+	int32 Triple(int32 x);
+}
+
+int32 Math::Double(int32 x) {
+	return x * 2;
+}
+
+int32 Math::Triple(int32 x) {
+	return x * 3;
+}
+
+int32 main() {
+	int32 r1 = Math::Double(5);
+	if (r1 != 10) {
+		printf("FAIL Double: %d\n", r1);
+		return 1;
+	}
+	int32 r2 = Math::Triple(7);
+	if (r2 != 21) {
+		printf("FAIL Triple: %d\n", r2);
+		return 1;
+	}
+	printf("ALL NAMESPACE TESTS PASSED\n");
+	return 0;
+}

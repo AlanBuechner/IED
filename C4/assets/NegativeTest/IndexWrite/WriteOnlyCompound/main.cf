@@ -1,0 +1,7 @@
+struct W { public int32[4] data; }
+[operator("index_assign")] void Set(int32 i, int32 v) extends W { this.data[i] = v; }
+int32 main() {
+    W w; w.data[0]=5;
+    w[0] += 2;   // setter only, no reader: compound cannot read the current value
+    return 0;
+}

@@ -1,0 +1,20 @@
+struct Vec3 {
+	union {
+		struct { float x; float y; float z; }
+		struct { float r; float g; float b; }
+	}
+	int32 tag;
+}
+int32 main() {
+	Vec3 v = { 1.0f, 2.0f, 3.0f };
+	if (v.x != 1.0f) return 1;
+	if (v.y != 2.0f) return 2;
+	if (v.z != 3.0f) return 3;
+	if (v.r != 1.0f) return 4;
+	if (v.g != 2.0f) return 5;
+	if (v.b != 3.0f) return 6;
+	v.x = 7.0f;
+	if (v.r != 7.0f) return 7;
+	printf("AGG INIT OK x=%f y=%f z=%f r=%f tag=%d\n", v.x, v.y, v.z, v.r, v.tag);
+	return 0;
+}

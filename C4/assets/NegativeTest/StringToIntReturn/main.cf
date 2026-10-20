@@ -1,0 +1,6 @@
+include "bedrock.ch"
+int32 Length() {
+	Core::String s = Core::String("a");
+	return s;
+}
+int32 main() { return Length(); }

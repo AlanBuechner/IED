@@ -1,0 +1,2 @@
+struct P { template<U> public int32 F(U u) { return 1; } template<> public int32 F<int32>(int32 u) { return 2; } }
+int32 main() { P p; return p.F(1); }

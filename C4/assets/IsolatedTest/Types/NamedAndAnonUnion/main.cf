@@ -1,0 +1,23 @@
+union U { int32 a; float b; }
+
+struct P {
+    union {
+        int32 i;
+        float f;
+    };
+}
+
+int32 main() {
+    // Named union: direct member access.
+    U u;
+    u.a = 7;
+    if (u.a != 7) return 1;
+    printf("NAMED UNION OK\n");
+
+    // Anonymous union inside a struct: members promoted to the outer scope.
+    P p;
+    p.i = 42;
+    if (p.i != 42) return 2;
+    printf("ANON UNION OK i=%d\n", p.i);
+    return 0;
+}

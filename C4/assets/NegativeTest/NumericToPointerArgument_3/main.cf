@@ -1,0 +1,2 @@
+class B { public void Set(int32* p) {} }
+int main() { B b; b.Set(5); return 0; }

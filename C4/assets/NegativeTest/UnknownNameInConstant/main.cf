@@ -1,0 +1,2 @@
+const int32 kU = Nope + 1;
+int32 main() { return kU; }

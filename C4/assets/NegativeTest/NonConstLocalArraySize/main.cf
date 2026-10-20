@@ -1,0 +1,5 @@
+int32 main() {
+	int32 n = 3;
+	int32[n + 1] values;
+	return 0;
+}

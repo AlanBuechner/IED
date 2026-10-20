@@ -1,0 +1,63 @@
+include "../Framework/Assert.ch"
+include "ConstRefConversion.ch"
+
+struct ConvBase { public int32 a; }
+struct ConvDerived : public ConvBase { public int64[16] big; public int32 tail; }
+enum ConvColor { ConvRed, ConvGreen, ConvBlue }
+enum class ConvMode { Fast, Slow }
+
+float ConvHalf(const float& f) { return f / 2.0f; }
+double ConvSum(const double& a, const double& b) { return a + b; }
+int32 ConvFirst(const ConvBase& b) { return b.a; }
+const ConvBase* ConvAddress(const ConvBase& b) { return &b; }
+int32 ConvByValue(ConvBase b) { return b.a; }
+ConvBase ConvSliced(const ConvDerived& d) { return d; }
+int32 ConvColorIndex(ConvColor c) { return c; }
+int32 ConvListSum(__init_list<int32>* list) { int32 s = 0; for (int32 v : *list) s += v; return s; }
+
+void TestConstRefConversion() {
+	AssertFloatEquals(1.5f, ConvHalf(3), "an int binds a const float& through a temporary");
+	int32 i = 2;
+	float f = 0.5f;
+	Assert(ConvSum(i, f) == 2.5, "each argument converts into its own temporary");
+
+	ConvDerived d;
+	d.a = 7;
+	d.tail = 99;
+	for (int32 k = 0; k < 16; ++k) d.big[k] = 1;
+	AssertIntEquals(7, ConvFirst(d), "a derived object binds a const base& as itself");
+	Assert(ConvAddress(d) == (ConvBase*)&d, "with no temporary");
+	int32 guard = 1234;
+	ConvBase b = d;
+	int32 guard2 = 5678;
+	AssertIntEquals(7, b.a, "initializing a base from a derived object copies the base part (BUG-135)");
+	AssertIntEquals(1234, guard, "and writes nothing past it");
+	AssertIntEquals(5678, guard2, "on either side");
+	d.a = 8;
+	b = d;
+	AssertIntEquals(8, b.a, "assigning a derived object to a base variable copies the base part");
+	AssertIntEquals(8, ConvByValue(d), "a by-value base parameter takes the base part");
+	AssertIntEquals(8, ConvSliced(d).a, "and so does a by-value base return");
+	AssertIntEquals(99, d.tail, "the derived object is untouched");
+
+	ConvColor c = 2;
+	AssertIntEquals(2, c, "a plain enum takes its underlying integer and converts back");
+	AssertIntEquals(1, ConvColorIndex(1), "an integer argument for a plain enum parameter");
+	ConvMode m = (ConvMode)1;
+	AssertIntEquals(1, (int32)m, "an enum class converts through a cast");
+
+	bool two = 2;
+	Assert(two, "a non-zero integer is true (BUG-136)");
+	bool half = 0.5f;
+	Assert(half, "a non-zero float is true");
+	bool zero = 0;
+	Assert(!zero, "zero is false");
+	int32* nothing = 0;
+	Assert(nothing == null, "the constant 0 is a null pointer");
+	int32* somewhere = &i;
+	bool set = somewhere;
+	Assert(set, "a pointer converts to its truth value");
+	bool unset = nothing;
+	Assert(!unset, "a null pointer is false");
+	AssertIntEquals(6, ConvListSum({1, 2, 3}), "a braced list passes to an __init_list<T>* as a temporary's address");
+}

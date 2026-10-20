@@ -1,0 +1,7 @@
+// Regression: the entry point must forward the real OS command line into a user main that takes
+// (int32 argc, char** argv). Before the fix the wrapper called user_main() with NO arguments, so
+// argc was 0 - flag-parsing ports were impossible. The harness runs this with no extra args, so a
+// correctly-forwarded argc is exactly 1. Returns non-zero if that invariant is violated.
+int32 main(int32 argc, char** argv) {
+	return (argc == 1) ? 0 : 1;   // was: argc==0 before the fix -> returned 1 (FAIL)
+}

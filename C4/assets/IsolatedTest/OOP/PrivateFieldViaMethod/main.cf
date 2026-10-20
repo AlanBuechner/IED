@@ -1,0 +1,29 @@
+// Covers that a private field is accessible from member methods regardless of
+// the relative declaration order of field and methods within the class.
+
+class FieldAfterMethods {
+    public void Set(int32 v) { this.priv = v; }
+    public int32 Get() { return this->priv; }
+    int32 priv;
+}
+
+class FieldBeforeMethods {
+    int32 priv;
+    public void Set(int32 v) { this.priv = v; }
+    public int32 Get() { return this->priv; }
+}
+
+int32 main() {
+    FieldAfterMethods* a = new FieldAfterMethods();
+    a->Set(9);
+    if (a->Get() != 9) return 1;
+    printf("F1 OK\n");
+    delete a;
+
+    FieldBeforeMethods* b = new FieldBeforeMethods();
+    b->Set(5);
+    if (b->Get() != 5) return 2;
+    printf("F2 OK\n");
+    delete b;
+    return 0;
+}

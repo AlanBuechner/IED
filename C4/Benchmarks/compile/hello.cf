@@ -1,0 +1,5 @@
+// The smallest program: what a build costs before the program adds anything (B32 compile times).
+int32 main() {
+	printf("hello\n");
+	return 0;
+}

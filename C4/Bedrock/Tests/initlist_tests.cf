@@ -1,0 +1,50 @@
+// Core::InitList<T>, the public name of __init_list<T>: braced arguments, members, iteration and the
+// containers that take one.
+
+include "bedrock.ch"
+
+int64 InitListSum(Core::InitList<int64> values) {
+	int64 sum = 0;
+	for (int64 v : values) sum += v;
+	return sum;
+}
+
+int32 InitListLast(Core::InitList<int32> values) { return values.size == 0 ? -1 : values[(int64)values.size - 1]; }
+
+int32 InitListPick(__init_list<int32> values, int32 i) { return values[i]; }
+
+struct InitListPair { public int32 a; public int32 b; }
+
+int32 InitListPairs(Core::InitList<InitListPair> pairs) {
+	int32 total = 0;
+	for (const InitListPair& p : pairs) total += p.a * p.b;
+	return total;
+}
+
+[test("core.initlist")]
+class InitListTests {
+	[test("braced_argument")]
+	public static void TestBracedArgument() {
+		assert_true(InitListSum({ 1, 2, 3 }) == 6, "a braced list binds an InitList parameter");
+		assert_true(InitListSum({}) == 0, "an empty list");
+		assert_eq(9, InitListLast({ 7, 8, 9 }), "indexing and size");
+		assert_eq(-1, InitListLast({}), "size of an empty list");
+		Core::InitList<int32> named = { 4, 5 };
+		assert_eq(5, InitListPick(named, 1), "an InitList is the same type as __init_list");
+		assert_eq(2, (int32)named.size, "size");
+		assert_eq(4, named.data[0], "data");
+		assert_eq(26, InitListPairs({ { 2, 3 }, { 4, 5 } }), "braced elements build objects");
+	}
+
+	[test("containers")]
+	public static void TestContainers() {
+		Core::Array<int32> array = { 3, 1, 2 };
+		Core::List<int32> list = { 3, 1, 2 };
+		Core::Array<int32>* heap = new Core::Array<int32>{ 5, 6 };
+		assert_eq(3, array.Count(), "an Array from a braced list");
+		assert_eq(3, list.Count(), "a List from a braced list");
+		assert_eq(6, heap->Back(), "new with braces");
+		Core::Array<Core::String> words = { Core::String("a"), Core::String("b") };
+		assert_se("b", words[1].CStr(), "elements that own memory are copied in");
+	}
+}

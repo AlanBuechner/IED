@@ -1,0 +1,13 @@
+include "macros.ch"
+
+#define LOCAL_TWICE(x) ((x) + (x))
+
+#ifdef BONUS
+int32 Bonus(int32 unused) { return BONUS; }
+#else
+int32 Bonus(int32 unused) { return 0; }
+#endif
+
+int32 UseMacros(int32 v) { return SQUARE(v) + SCALE + LOCAL_TWICE(v) + Macros::Scaled(v); }
+
+const char* Name() { return HOST_NAME; }

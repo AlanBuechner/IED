@@ -1,0 +1,6 @@
+struct Plain { public int32 v; }
+struct HasAdd {
+	public int32 v;
+	[operator("add")] public HasAdd Add(const Plain& p) const { return *this; }
+}
+int32 main() { Plain p; HasAdd h; HasAdd r = p + h; return 0; }

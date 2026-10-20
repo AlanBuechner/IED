@@ -1,0 +1,101 @@
+// OOP - Interface (abstract type) Tests (implementation)
+include "../Framework/Assert.ch"
+include "InterfaceTests.ch"
+
+// An `interface` is an abstract object type: its methods may be pure virtual (= 0) or concrete. A class
+// implements it by inheriting with ':' and overriding the pure virtuals; dispatch through an interface
+// pointer goes through the vtable exactly like a base-class pointer. ObjectKind::Interface had parser/model/
+// codegen support but NO regression coverage before this file.
+
+// (1) Pure-virtual interface, single method.
+interface IfaceShape {
+public virtual int32 Area() = 0;
+};
+class IfaceSquare : IfaceShape {
+	int32 side;
+public void SetSide(int32 s) { side = s; }
+public override int32 Area() { return side * side; }
+};
+class IfaceCircle : IfaceShape {
+	int32 r;
+public void SetRadius(int32 x) { r = x; }
+	// Integer-exact "area" with pi=3: A = 3 * r * r.
+public override int32 Area() { return 3 * r * r; }
+};
+
+// (2) Interface with MULTIPLE pure-virtual methods.
+interface IfaceComparable {
+public virtual bool Less(IfaceComparable* other) = 0;
+public virtual int32 Rank() = 0;
+};
+class IfaceBox : IfaceComparable {
+	int32 r;
+public void SetRank(int32 x) { r = x; }
+public override bool Less(IfaceComparable* other) { return this->r < ((IfaceBox*)other)->r; }
+public override int32 Rank() { return r; }
+};
+
+// (3) Interface with a CONCRETE virtual (a default implementation the implementer may keep or override).
+interface IfaceNamed {
+public virtual int32 Kind() { return 0; } // default: "unknown"
+};
+class IfaceGadget : IfaceNamed {
+public override int32 Kind() { return 42; }
+};
+class IfacePlain : IfaceNamed {}; // keeps the concrete default (no override)
+
+void TestInterface() {
+	// (1) Pure-virtual dispatch through an interface pointer, LOCAL implementer.
+	{
+		IfaceSquare sq;
+		sq.SetSide(5);
+		IfaceShape* s = &sq;
+		AssertIntEquals(25, s->Area(), "pure-virtual interface dispatch (local impl)");
+	}
+
+	// (1b) Same, HEAP implementer via new/delete.
+	{
+		IfaceSquare* sq = new IfaceSquare();
+		sq->SetSide(7);
+		IfaceShape* s = sq;
+		AssertIntEquals(49, s->Area(), "pure-virtual interface dispatch (heap impl)");
+		delete sq;
+	}
+
+	// (2) Multiple pure-virtual methods dispatched through one interface pointer.
+	{
+		IfaceBox a; a.SetRank(3);
+		IfaceBox b; b.SetRank(10);
+		IfaceComparable* ca = &a;
+		IfaceComparable* cb = &b;
+		AssertIntEquals(3, ca->Rank(), "interface method Rank");
+		AssertIntEquals(1, (int32)ca->Less(cb), "interface Less true when smaller");
+		AssertIntEquals(0, (int32)cb->Less(ca), "interface Less false when larger");
+	}
+
+	// (3) Concrete virtual: an implementer that does NOT override keeps the interface's default.
+	{
+		IfacePlain p;
+		IfaceNamed* n = &p;
+		AssertIntEquals(0, n->Kind(), "concrete-virtual default kept when not overridden");
+	}
+
+	// (3b) Concrete virtual that IS overridden.
+	{
+		IfaceGadget g;
+		IfaceNamed* n = &g;
+		AssertIntEquals(42, n->Kind(), "concrete-virtual override reached through interface ptr");
+	}
+
+	// (4) Two different implementers behind the SAME interface pointer type: dispatch must reach each one's
+	// own override (the vtable is per-concrete-type, not shared).
+	{
+		IfaceCircle c; c.SetRadius(4);
+		IfaceSquare sq; sq.SetSide(6);
+		IfaceShape*[2] arr;
+		arr[0] = &c;
+		arr[1] = &sq;
+		AssertIntEquals(3 * 4 * 4, arr[0]->Area(), "impl A (IfaceCircle) override via shared interface ptr");
+		AssertIntEquals(6 * 6, arr[1]->Area(), "impl B (IfaceSquare) override via shared interface ptr");
+	}
+}

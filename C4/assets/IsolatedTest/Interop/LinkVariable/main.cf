@@ -1,0 +1,15 @@
+// [link] on a variable declaration aliases the named foreign symbol (compiled+linked here via
+// extern "c" source). Before the fix this annotation was parsed but silently ignored, so the
+// program read its OWN zero-initialized storage instead of the extern. This test proves the
+// binding works end to end: the read must see the C global's value and a write must go through.
+extern "c" source "ext.c"
+
+[link("g_extern_counter")] int32 g_counter;
+
+int32 main() {
+	if (g_counter != 123) { printf("FAIL: expected 123, got %d\n", g_counter); return 1; }
+	g_counter = 55;   // write through the alias -> the foreign symbol
+	if (g_counter != 55) { printf("FAIL: write-through got %d\n", g_counter); return 2; }
+	printf("LINK-VAR OK\n");
+	return 0;
+}

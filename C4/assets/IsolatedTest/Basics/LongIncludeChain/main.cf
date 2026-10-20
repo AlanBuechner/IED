@@ -1,0 +1,3 @@
+// A chain of 40 headers, each including the next, resolves in order (CompilerIncludeTest).
+include "h0.ch"
+int32 main() { return Level0() == 40 ? 0 : 1; }

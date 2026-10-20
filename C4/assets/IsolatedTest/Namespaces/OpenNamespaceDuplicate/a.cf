@@ -1,0 +1,5 @@
+include "math.ch"
+
+namespace Math {
+	int32 Count() { return 7; }
+}

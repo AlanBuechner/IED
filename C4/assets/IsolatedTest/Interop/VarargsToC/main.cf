@@ -1,0 +1,22 @@
+// Variadic calls across the C boundary (D-35): C4 calls C variadic functions, and C calls a C4 variadic
+// function through a pointer; both sides read the same 8-byte argument slots.
+extern "c" include "native.h"
+extern "c" source "native.c"
+
+int64 C4Sum(int32 count, ...) {
+	va_list ap;
+	va_start(ap);
+	int64 sum = 0;
+	for (int32 i = 0; i < count; ++i) sum += va_arg(ap, int32);
+	va_end(ap);
+	return sum;
+}
+
+int32 main() {
+	if (c_sum(3, 1, 2, 3) != 6) return 1;
+	if (c_average(2, 1.0, 3.0) != 2.0) return 2;
+	float narrow = 4.0f;
+	if (c_average(2, narrow, 6.0) != 5.0) return 3; // a float argument arrives as a double
+	if (c_calls_back((void*)C4Sum) != 105) return 4;
+	return 0;
+}

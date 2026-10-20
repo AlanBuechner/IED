@@ -1,0 +1,6 @@
+struct Pair { public int32 a; public int32 b; }
+int32& Second() {
+	Pair p;
+	return p.b;
+}
+int32 main() { return Second(); }

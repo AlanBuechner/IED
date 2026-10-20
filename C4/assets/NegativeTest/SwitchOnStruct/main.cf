@@ -1,0 +1,2 @@
+struct CS { int32 i; }
+int32 main() { CS s; switch (s) { case 1: return 1; default: break; } return 0; }

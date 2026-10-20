@@ -1,0 +1,2 @@
+#include "x.ch"
+int32 main() { return 0; }

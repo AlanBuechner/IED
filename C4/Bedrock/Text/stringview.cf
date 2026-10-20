@@ -1,0 +1,140 @@
+include "stringview.ch"
+
+namespace Core
+{
+	[operator("create")] void StringView::Init(const char* text) {
+		bytes = text;
+		byteLength = text ? (int64)strlen(text) : 0;
+		charCount = Utf8CharCount(bytes, byteLength);
+	}
+
+	[operator("create")] void StringView::Init(const char* bytes, int64 byteLength) {
+		this.bytes = bytes;
+		this.byteLength = byteLength;
+		charCount = Utf8CharCount(bytes, byteLength);
+	}
+
+	[operator("create")] void StringView::Init(const char* bytes, int64 byteLength, int64 charCount) {
+		this.bytes = bytes;
+		this.byteLength = byteLength;
+		this.charCount = charCount;
+	}
+
+	int64 StringView::IndexOf(char c, int64 start) const {
+		const char* p = bytes;
+		for (int64 i = start < 0 ? 0 : start; i < byteLength; ++i)
+			if (p[i] == c) return i;
+		return -1;
+	}
+
+	int64 StringView::IndexOf(StringView part) const {
+		if (part.byteLength == 0) return 0;
+		const char* p = bytes;
+		for (int64 i = 0; i + part.byteLength <= byteLength; ++i)
+			if (p[i] == part.bytes[0] && memcmp(p + i, part.bytes, (uint64)part.byteLength) == 0) return i;
+		return -1;
+	}
+
+	bool StringView::StartsWith(StringView prefix) const {
+		return prefix.byteLength <= byteLength && memcmp(bytes, prefix.bytes, (uint64)prefix.byteLength) == 0;
+	}
+
+	bool StringView::EndsWith(StringView suffix) const {
+		return suffix.byteLength <= byteLength &&
+			memcmp(bytes + (byteLength - suffix.byteLength), suffix.bytes, (uint64)suffix.byteLength) == 0;
+	}
+
+	bool StringView::Equals(StringView other) const {
+		return byteLength == other.byteLength && memcmp(bytes, other.bytes, (uint64)byteLength) == 0;
+	}
+
+	bool StringView::Less(StringView other) const {
+		int64 shared = byteLength < other.byteLength ? byteLength : other.byteLength;
+		int32 order = memcmp(bytes, other.bytes, (uint64)shared);
+		return order < 0 || (order == 0 && byteLength < other.byteLength);
+	}
+
+	StringView StringView::Substring(int64 start, int64 length) const {
+		if (start < 0) start = 0;
+		if (start > byteLength) start = byteLength;
+		if (length < 0 || length > byteLength - start) length = byteLength - start;
+		return StringView(bytes + start, length);
+	}
+
+	StringView StringView::Trimmed() const {
+		int64 first = 0;
+		while (first < byteLength && IsSpace(ByteAt(first))) ++first;
+		int64 last = byteLength;
+		while (last > first && IsSpace(ByteAt(last - 1))) --last;
+		return Substring(first, last - first);
+	}
+
+	// The length of the sequence a lead byte starts; 0 for a continuation or invalid byte.
+	int32 Utf8SequenceLength(int32 lead) {
+		if (lead < 0x80) return 1;
+		if (lead >= 0xC2 && lead <= 0xDF) return 2;
+		if (lead >= 0xE0 && lead <= 0xEF) return 3;
+		if (lead >= 0xF0 && lead <= 0xF4) return 4;
+		return 0;
+	}
+
+	int32 StringView::CodePointAt(int64 charIndex) const {
+		if (charIndex < 0) return -1;
+		int64 i = 0;
+		for (int64 c = 0; c < charIndex && i < byteLength; ++c) {
+			int32 length = Utf8SequenceLength(ByteAt(i));
+			if (length == 0) return -1;
+			i += length;
+		}
+		if (i >= byteLength) return -1;
+		int32 lead = ByteAt(i);
+		int32 length = Utf8SequenceLength(lead);
+		if (length == 0 || i + length > byteLength || !Core::IsValidUtf8(bytes + i, length)) return -1;
+		if (length == 1) return lead;
+		int32 point = lead & (0x7F >> length);
+		for (int32 k = 1; k < length; ++k) point = (point << 6) | (ByteAt(i + k) & 0x3F);
+		return point;
+	}
+
+	int64 Utf8CharCount(const char* bytes, int64 byteLength) {
+		const uint8* p = (const uint8*)bytes;
+		int64 count = 0;
+		for (int64 i = 0; i < byteLength; ++i)
+			if ((p[i] & 0xC0) != 0x80) ++count;
+		return count;
+	}
+
+	// The range of the second byte after `lead`; the third and fourth are always 80..BF.
+	bool SecondByteFits(int32 lead, int32 second) {
+		if (lead == 0xE0) return second >= 0xA0 && second <= 0xBF;
+		if (lead == 0xED) return second >= 0x80 && second <= 0x9F;
+		if (lead == 0xF0) return second >= 0x90 && second <= 0xBF;
+		if (lead == 0xF4) return second >= 0x80 && second <= 0x8F;
+		return second >= 0x80 && second <= 0xBF;
+	}
+
+	bool IsValidUtf8(const char* bytes, int64 byteLength) { return InvalidUtf8Offset(bytes, byteLength) < 0; }
+
+	// Whether the sequence of `length` bytes at `p` (its lead byte's length) is well-formed.
+	bool SequenceFits(const uint8* p, int32 length) {
+		if (length > 1 && !SecondByteFits(p[0], p[1])) return false;
+		for (int32 k = 2; k < length; ++k)
+			if ((p[k] & 0xC0) != 0x80) return false;
+		return true;
+	}
+
+	int64 InvalidUtf8Offset(const char* bytes, int64 byteLength) {
+		const uint8* p = (const uint8*)bytes;
+		int64 i = 0;
+		while (i < byteLength) {
+			int32 length = Utf8SequenceLength(p[i]);
+			if (length == 0 || i + length > byteLength || !SequenceFits(p + i, length)) return i;
+			i += length;
+		}
+		return -1;
+	}
+
+	bool IsSpace(int32 byte) {
+		return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == '\v' || byte == '\f';
+	}
+}

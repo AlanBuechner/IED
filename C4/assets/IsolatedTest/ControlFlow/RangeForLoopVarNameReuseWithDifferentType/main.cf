@@ -1,0 +1,17 @@
+struct Holder { int32[4] items; }
+int32 main() {
+	Holder h;
+	h.items[0]=1; h.items[1]=2; h.items[2]=3; h.items[3]=4;
+	int32 sum = 0;
+	for (int32 v : h.items) { sum += v; }
+	if (sum != 10) { printf("FAIL sum %d\n", sum); return 1; }
+	{
+		int64 v = 9876543210;   // same name, different (wider) type in a sibling scope
+		if (v != 9876543210) { printf("FAIL reuse %lld\n", v); return 1; }
+	}
+	int32 w = 5;
+	for (int32 w : h.items) { sum += w; }   // second range-for reusing 'w'
+	if (sum != 20) { printf("FAIL second %d\n", sum); return 1; }
+	printf("RANGE FOR VAR REUSE OK\n");
+	return 0;
+}

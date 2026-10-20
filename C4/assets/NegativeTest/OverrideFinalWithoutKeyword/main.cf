@@ -1,0 +1,10 @@
+class Base {
+	public virtual int32 F() { return 1; }
+}
+class Mid : public Base {
+	public final int32 F() override { return 2; }
+}
+class Leaf : public Mid {
+	public int32 F() { return 3; }
+}
+int32 main() { return 0; }

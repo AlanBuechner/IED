@@ -1,0 +1,26 @@
+// Types - members of an enum declared in a function body (BUG-159)
+include "../Framework/Assert.ch"
+include "LocalEnumMembers.ch"
+
+int32 LemScoped() {
+	enum class Mode { P, Q, R }
+	Mode m = Mode::R;
+	return (int32)m;
+}
+
+int32 LemShadowsGlobal() {
+	enum class LemShade { Only = 7 }
+	return (int32)LemShade::Only;
+}
+
+int32 LemUnscoped() {
+	enum Step { First = 3, Second }
+	return Step::Second + Second;
+}
+
+void TestLocalEnumMembers() {
+	AssertEqual(2, LemScoped());
+	AssertEqual(7, LemShadowsGlobal());
+	AssertEqual(1, (int32)LemShade::Light);
+	AssertEqual(8, LemUnscoped());
+}

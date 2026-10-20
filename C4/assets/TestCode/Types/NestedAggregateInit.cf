@@ -1,0 +1,58 @@
+// Types - Nested Aggregate Initialization Tests (implementation)
+include "../Framework/Assert.ch"
+include "NestedAggregateInit.ch"
+
+struct NAI_Pt { int32 x, y; };
+struct NAI_Outer { NAI_Pt pt; int32 tag; }; // a struct containing a struct
+
+void TestNestedAggregateInit() {
+	// 2D scalar array: nested braces fill row by row.
+	int32[2][2] m = {{1, 2}, {3, 4}};
+	AssertEqual(1, m[0][0]);
+	AssertEqual(2, m[0][1]);
+	AssertEqual(3, m[1][0]);
+	AssertEqual(4, m[1][1]);
+
+	// Array of structs: each element is a nested struct initializer.
+	NAI_Pt[3] pts = {{1, 2}, {3, 4}, {5, 6}};
+	AssertEqual(1, pts[0].x);
+	AssertEqual(2, pts[0].y);
+	AssertEqual(3, pts[1].x);
+	AssertEqual(4, pts[1].y);
+	AssertEqual(5, pts[2].x);
+	AssertEqual(6, pts[2].y);
+
+	// Range-for over the initialized array sees every element.
+	int32 sum = 0;
+	for (NAI_Pt p : pts) sum = sum + p.x + p.y;
+	AssertEqual(21, sum);
+
+	// A struct containing a struct: the inner field is itself a nested aggregate.
+	NAI_Outer o = {{7, 8}, 9};
+	AssertEqual(7, o.pt.x);
+	AssertEqual(8, o.pt.y);
+	AssertEqual(9, o.tag);
+
+	// 3D scalar array: nested braces three levels deep.
+	int32[2][2][2] cube = {{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}};
+	AssertEqual(1, cube[0][0][0]);
+	AssertEqual(2, cube[0][0][1]);
+	AssertEqual(4, cube[0][1][1]);
+	AssertEqual(5, cube[1][0][0]);
+	AssertEqual(8, cube[1][1][1]);
+
+	// A type declared INSIDE a function body (doc 06) with a comma-list of fields: every field must be
+	// registered and the local struct laid out for codegen. Before the fixes these failed with "no member
+	// 'y'" / "Cannot allocate unsized type" / "too many initializers".
+	struct Local { int32 a, b; };
+	Local l = {4, 5};
+	AssertEqual(4, l.a);
+	AssertEqual(5, l.b);
+
+	// A local struct containing a nested aggregate.
+	struct LocalOuter { NAI_Pt pt; int32 tag; };
+	LocalOuter lo = {{10, 11}, 12};
+	AssertEqual(10, lo.pt.x);
+	AssertEqual(11, lo.pt.y);
+	AssertEqual(12, lo.tag);
+}

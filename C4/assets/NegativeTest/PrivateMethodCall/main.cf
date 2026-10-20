@@ -1,0 +1,5 @@
+class Vault {
+	private int32 Code() { return 1; }
+	public int32 Open() { return Code(); }
+}
+int32 main() { Vault v; return v.Code(); }

@@ -1,0 +1,2 @@
+class Pair { public int32 a; public int32 b; }
+int32 main() { Pair p = Pair(1, 2, 3); return p.a; }

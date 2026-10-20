@@ -1,0 +1,25 @@
+// D-22: a lambda inside a lambda captures from the enclosing lambda's scope: its parameters, locals and
+// captures.
+int32 main() {
+	int32 base = 100;
+	func<func<int32(int32)>(int32)> makeAdder = [base](int32 step) -> func<int32(int32)> {
+		int32 local = step * 2;
+		return [base, step, local](int32 x) -> int32 { return base + step + local + x; };
+	};
+	func<int32(int32)> adder = makeAdder(5);
+	if (adder(1) != 116) return 1;
+
+	int32 counter = 0;
+	func<void()> outer = [&counter]() {
+		func<void()> inner = [&counter]() { counter += 10; };
+		inner();
+		inner();
+	};
+	outer();
+	if (counter != 20) return 2;
+
+	func<int32()> deep = [=]() -> int32 { return [=]() -> int32 { return base + counter; }(); };
+	if (deep() != 120) return 3;
+	printf("NESTED OK\n");
+	return 0;
+}

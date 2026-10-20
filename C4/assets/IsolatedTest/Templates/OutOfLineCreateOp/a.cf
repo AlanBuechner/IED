@@ -1,0 +1,12 @@
+template<T> class Box {
+    T* data;
+    int32 count;
+    [operator("create")] public void Init(int32 cap);
+    public int32 Count() { return this->count; }
+}
+template<T> public void Box::Init(int32 cap) { this->data = (T*)raw_alloc(cap * sizeof(T)); this->count = cap; }
+int32 main() {
+    Box<int32>* b = new Box<int32>{4};
+    printf("OO-CREATE count=%d\n", b->Count());
+    return 0;
+}

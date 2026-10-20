@@ -1,0 +1,50 @@
+// A name in parentheses before `+ - * ** & &&` is that operator's left operand (docs/language/10 section 4), so
+// the usual macro bodies work on variables; built-in types and types with more to them still cast.
+// Regression: BUG-247 (`(v) * (v)` was read as a cast to a type named v).
+#define SQUARE(x) ((x) * (x))
+#define DOUBLE(x) ((x) * 2)
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what)
+{
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+enum Mode { Off = 0, On = 1, Back = -1 }
+namespace N { int32 g_scale = 5; }
+
+template<T> T MinusOne() { return (T)-1; }                    // a type parameter casts, as a built-in type does
+template<int32 K> int32 TimesK(int32 v) { return (K) * v; }  // a value parameter is an operand
+template<T> class Range
+{
+	public T low;
+	public T Lowered() const { return (T)-low; }
+}
+
+int32 main()
+{
+	int32 v = 3;
+	bool yes = true;
+	Check((v) * (v) == 9, "(v) * (v) multiplies");
+	Check(SQUARE(v) == 9 && DOUBLE(v) == 6, "macro bodies with parenthesized arguments");
+	Check((v) - 1 == 2 && (v) + 1 == 4, "(v) - 1 and (v) + 1");
+	Check(((v) & 1) == 1, "(v) & 1");
+	Check((v) ** 2 == 9, "(v) ** 2");
+	Check(((yes) && v == 3), "(b) && c");
+	Check((N::g_scale) * 2 == 10, "a qualified name in parentheses");
+
+	int32* p = &v;
+	Check((int32)-v == -3, "(int32)-v still casts");
+	Check((float)*p == 3.0f, "(float)*p still casts");
+	Check((int32*)&v == p, "(int32*)&v still casts");
+	Check((Mode)(-1) == Mode::Back, "(Mode)(-1) casts a parenthesized operand");
+	Check((int64)v + 1 == 4, "(int64)v + 1 casts, then adds");
+	Check(MinusOne<int32>() == -1 && MinusOne<float>() == -1.0f, "(T)-1 in a function template casts");
+	Check(TimesK<4>(3) == 12, "(K) * v with a value parameter multiplies");
+	Range<int64> range;
+	range.low = 7;
+	Check(range.Lowered() == -7, "(T)-x in a class template's method casts");
+	if (g_failures == 0) printf("PARENTHESIZED OPERANDS OK\n");
+	return g_failures;
+}

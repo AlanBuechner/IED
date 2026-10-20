@@ -1,0 +1,53 @@
+// BUG-117: function templates declared in a class. They are called on an object, through the type (static),
+// unqualified from the class's methods, and with written arguments; their bodies may be out of line
+// (`template<U> R P::F(U u)`, and for a class template `template<T> template<U> R S<T>::F(U u)`).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+struct Plain {
+	public int32 k;
+	template<U> public static int32 Kind(U u) { return sizeof(U); }
+	template<U> public U Scale(U u) { return u * (U)k; }
+	template<U> public U Offset(U u);
+	template<...Us> public int64 Count(Us... us) { return sizeof...(Us); }
+	public int32 FromInside() { return Scale(4) + Kind(1.0f); }
+}
+template<V> V Plain::Offset(V v) { return v + (V)k; }
+
+template<T> struct Holder {
+	public T base;
+	template<U> public static int64 SizeOf(U u) { return sizeof(U) + sizeof(T); }
+	template<U> public T Plus(U u) { return base + (T)u; }
+	template<U> public U Later(U u);
+	template<U> public int32 Twice(U u) { return Helper(u) * 2; }
+	template<U> public int32 Helper(U u) { return (int32)u; }
+}
+template<X> template<U> U Holder<X>::Later(U u) { return u + (U)base; }
+
+struct Base { template<U> public U Same(U u) { return u; } }
+struct Derived : Base { public int32 extra; }
+
+int32 main() {
+	Plain p;
+	p.k = 5;
+	Check(Plain::Kind(1) == 4, "a static member template called through its type");
+	Check(p.Scale(2) == 10, "a member template on an object");
+	Check(p.Scale(1.5f) == 7.5f, "another instance for another argument");
+	Check(p.Scale<int64>(3) == 15, "written template arguments");
+	Check(p.Offset(1) == 6, "an out-of-line definition naming its parameter differently");
+	Check(p.Count(1, 2, 3) == 3, "a variadic member template");
+	Check(p.FromInside() == 24, "unqualified calls from a method");
+	Holder<int32> h;
+	h.base = 10;
+	Check(Holder<int32>::SizeOf(1.0) == 12, "a static member template of a class template");
+	Check(h.Plus(2.7f) == 12, "the class template's parameter in a member template");
+	Check(h.Plus<float>(1) == 11, "written arguments on a class template's member template");
+	Check(h.Later(4) == 14, "an out-of-line definition with both headers");
+	Check(h.Twice(3) == 6, "a member template calling another");
+	Derived d;
+	Check(d.Same(9) == 9, "an inherited member template");
+	return g_failures;
+}

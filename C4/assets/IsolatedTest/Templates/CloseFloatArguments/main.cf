@@ -1,0 +1,14 @@
+// Close float template arguments are distinct instances (BUG-235): the instance key kept six decimals.
+template<float F> float Scale() { return F; }
+template<double D> class Fixed { public double Value() { return D; } }
+
+int32 main()
+{
+	int32 failures = 0;
+	if (!(Scale<0.0000001f>() < Scale<0.0000002f>())) failures++;
+	Fixed<1.0000000001> a;
+	Fixed<1.0000000002> b;
+	if (!(a.Value() < b.Value())) failures++;
+	if (Scale<2.5f>() != 2.5f) failures++;
+	return failures;
+}

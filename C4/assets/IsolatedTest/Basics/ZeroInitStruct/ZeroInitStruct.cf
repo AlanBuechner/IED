@@ -1,0 +1,9 @@
+// Isolate: which form crashes? (a) plain decl, (b) = {} , (c) field access after each
+struct P { int32 a; float b; uint16 c; };
+int32 main() {
+	P p;            // (a) plain declaration
+	printf("plain a=%d\n", p.a);
+	P q = {};       // (b) empty-brace init
+	printf("brace a=%d\n", q.a);
+	return 0;
+}

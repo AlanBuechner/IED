@@ -1,0 +1,42 @@
+// A braced array starts its elements in index order: an element no entry names is default-constructed,
+// and a range entry evaluates its value once, into its first element, then copies it into the rest.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int64 g_trace = 0;
+int32 g_copies = 0;
+
+class Tracked {
+	public int32 id;
+	[operator("create")] public void Init() { id = 7; g_trace = g_trace * 10 + 7; }
+	[operator("create")] public void Init(int32 i) { id = i; g_trace = g_trace * 10 + i; }
+	[operator("copy")] public void Copy(const Tracked& other) { id = other.id; g_copies++; }
+}
+
+int32 g_calls = 0;
+int32 Next() { g_calls++; return 40 + g_calls; }
+
+int32 main() {
+	Tracked[4] some = { Tracked(1) };
+	Check(some[0].id == 1 && some[1].id == 7 && some[3].id == 7, "elements no entry names are default-constructed");
+	Check(g_trace == 1777, "in index order");
+
+	g_trace = 0;
+	Tracked[3] designated = { [2] = Tracked(2), [0] = Tracked(3) };
+	Check(designated[0].id == 3 && designated[1].id == 7 && designated[2].id == 2, "designated elements land on their index");
+	Check(g_trace == 372, "elements start in index order, not in the order written");
+
+	int32[6] range = { [1...4] = Next() };
+	Check(g_calls == 1, "a range evaluates its value once");
+	Check(range[0] == 0 && range[1] == 41 && range[4] == 41 && range[5] == 0, "and copies it into each element");
+
+	Tracked[3] copied = { [0...2] = Tracked(5) };
+	Check(copied[0].id == 5 && copied[2].id == 5 && g_copies == 2, "an object range copies its first element");
+
+	Tracked[1000] large = { [1...998] = Tracked(4) };
+	Check(large[0].id == 7 && large[500].id == 4 && large[999].id == 7, "a large range is a loop, not one store per element");
+	return g_failures;
+}

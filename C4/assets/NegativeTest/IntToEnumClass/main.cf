@@ -1,0 +1,2 @@
+enum class Mode { Fast, Slow }
+int32 main() { Mode m = 1; return 0; }

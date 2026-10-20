@@ -1,0 +1,17 @@
+// Types - members named through a qualifier of two or more parts (BUG-156)
+include "../Framework/Assert.ch"
+include "QualifiedMembers.ch"
+
+int32 QmColorIndex(QmSpace::Color c) { return (int32)c; }
+
+void TestQualifiedMembers() {
+	QmSpace::Color c = QmSpace::Color::Blue;
+	AssertEqual(2, (int32)c);
+	AssertTrue(c == QmSpace::Color::Blue ? 1 : 0);
+	AssertEqual(1, QmColorIndex(QmSpace::Color::Green));
+	AssertEqual(9, QmSpace::Counter::kLimit);
+	QmSpace::Counter::s_count = QmSpace::Counter::s_count + 1;
+	AssertEqual(5, QmSpace::Counter::s_count);
+	QmSpace::Deep::Level level = QmSpace::Deep::Level::High;
+	AssertEqual(1, (int32)level);
+}

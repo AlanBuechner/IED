@@ -1,0 +1,73 @@
+// Emulated thread storage for script code (C4Runtime/Script/ScriptTlsC.c, LLVM's emutls ABI): each thread gets its
+// own object, made on its first use from the initial bytes (or zero), the same object on every later use; the
+// objects are GC roots; releasing a variable frees every thread's object and its next use makes a fresh one.
+struct Control
+{
+	public uint64 size;
+	public uint64 align;
+	public uint64 index;
+	public void* value;
+}
+
+[link("__emutls_get_address")] void* TlsAddress(Control* control);
+[link("c4_script_tls_release")] void TlsRelease(Control** controls, uint32 count);
+
+class Payload
+{
+	public int32 value;
+}
+
+int64 g_initial = 42;
+Control g_counter = { 8, 8, 0, (void*)&g_initial };
+Control g_zeroed = { 16, 16, 0, null };
+Control g_holder = { 8, 8, 0, null };
+
+struct Seen
+{
+	public void* address;
+	public int64 start;
+	public int64 after;
+}
+
+void OtherThread(void* state)
+{
+	Seen* seen = (Seen*)state;
+	int64* counter = (int64*)TlsAddress(&g_counter);
+	seen->address = (void*)counter;
+	seen->start = *counter;
+	*counter = *counter + 100;
+	seen->after = *(int64*)TlsAddress(&g_counter);
+}
+
+int32 main()
+{
+	int32 failures = 0;
+	int64* mine = (int64*)TlsAddress(&g_counter);
+	if (*mine != 42) failures++;
+	*mine = 7;
+	if (TlsAddress(&g_counter) != (void*)mine || *mine != 7) failures++;
+	if (g_counter.index == 0) failures++;
+
+	Seen* seen = new Seen;
+	thread_join(thread_start(OtherThread, (void*)seen));
+	if (seen->address == (void*)mine || seen->start != 42 || seen->after != 142) failures++;
+	if (*mine != 7) failures++;                                  // the other thread's object was its own
+
+	int64* zeroed = (int64*)TlsAddress(&g_zeroed);
+	if (zeroed[0] != 0 || zeroed[1] != 0 || ((uint64)zeroed & 15) != 0) failures++;
+
+	// A managed object kept only in thread storage survives a collection.
+	Payload** holder = (Payload**)TlsAddress(&g_holder);
+	*holder = new Payload;
+	(*holder)->value = 9;
+	gc_collect();
+	gc_collect();
+	if ((*holder)->value != 9) failures++;
+
+	Control*[3] all = { &g_counter, &g_zeroed, &g_holder };
+	TlsRelease(&all[0], 3);
+	if (g_counter.index != 0) failures++;
+	int64* fresh = (int64*)TlsAddress(&g_counter);
+	if (*fresh != 42) failures++;                                // a fresh object from the initial bytes
+	return failures;
+}

@@ -1,0 +1,74 @@
+#pragma once
+#include "Core/Core.h"
+#include "Compiler/CpuTarget.h"
+#include "Script/HostInterface.h"
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+
+namespace llvm
+{
+	class LLVMContext;
+	class Module;
+	class TargetMachine;
+	namespace orc { class LLJIT; }
+}
+
+namespace Scripting
+{
+	/// The addresses of a host's symbols under the interface's names (docs/runtime/04 section 6.1).
+	class HostSymbolTable
+	{
+	public:
+		/// The table compiled into the host image (`__c4_script_table`), paired with `host`'s names. Empty, with the
+		/// reason, when the build ids or the counts differ (the interface is another build's).
+		static std::optional<HostSymbolTable> Read(const HostInterface& host, const void* table, std::string* error);
+
+		/// The address of `name`, or null when the host has no such symbol.
+		void* Find(const std::string& name) const;
+		template <typename F> F Function(const std::string& name) const { return reinterpret_cast<F>(Find(name)); }
+
+	private:
+		std::unordered_map<std::string, void*> m_Addresses;
+	};
+
+	/// The memory a linked script's code and data occupy: its image base is `low`.
+	struct ScriptImage
+	{
+		uintptr_t low = 0;
+		uintptr_t high = 0;
+	};
+
+	/// One script linked into the running program, with its own JIT: destroying it frees exactly its code and
+	/// data, removes its unwind tables and its image.
+	class LinkedScript
+	{
+	public:
+		LinkedScript(std::unique_ptr<llvm::orc::LLJIT> jit, std::shared_ptr<ScriptImage> image);
+		~LinkedScript();
+		LinkedScript(const LinkedScript&) = delete;
+		LinkedScript& operator=(const LinkedScript&) = delete;
+
+		/// The address of the script's symbol `name`, or null when it has none.
+		void* Find(const std::string& name) const;
+		const ScriptImage& Image() const { return *m_Image; }
+
+	private:
+		std::unique_ptr<llvm::orc::LLJIT> m_Jit;
+		std::shared_ptr<ScriptImage> m_Image;
+	};
+
+	/// The target machine scripts are compiled for, the one the JIT generates code with: the host's processor
+	/// (`target`, D-62), so host and script pass vectors alike, with emulated thread storage (a JIT image has no PE
+	/// TLS directory).
+	std::unique_ptr<llvm::TargetMachine> ScriptTargetMachine(const CpuTarget& target, std::string* error);
+
+	/// Links `module` into the running program (docs/runtime/04 section 6): one block per object, its `.pdata`
+	/// registered against the block's base, an in-image personality routine, and its undefined names resolved through
+	/// the host table, then the compiler's support functions (memcpy, __chkstk, the math functions), then the
+	/// exports of the process's DLLs. Every definition is generated before it returns. Empty, with the reason, when it
+	/// does not link.
+	std::unique_ptr<LinkedScript> LinkScript(std::unique_ptr<llvm::LLVMContext> context, std::unique_ptr<llvm::Module> module,
+		const HostSymbolTable& host, const CpuTarget& target, std::string* error);
+} // namespace Scripting

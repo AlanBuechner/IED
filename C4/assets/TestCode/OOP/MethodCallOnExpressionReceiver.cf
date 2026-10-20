@@ -1,0 +1,27 @@
+// MethodCallOnExpressionReceiver tests - implementation.
+// The receiver of a method call is a COMPLEX EXPRESSION (a template-container accessor) that
+// returns T& or T*, and the whole call is nested as an argument to another function - the exact
+// shape Bedrock's GC-container tests use. Both shapes must bind to the object's real method
+// definition (TagVal_Equals) instead of falling to a broken variadic stub.
+
+include "Framework/Assert.ch"
+include "MethodCallOnExpressionReceiver.ch"
+
+template<T>
+T& Box<T>::GetAt(uint32 i) { return data[i]; }
+template<T>
+T* Box<T>::GetPtr(uint32 i) { return &data[i]; }
+
+void TestMethodCallOnExpressionReceiver() {
+	Box<TagVal> b;
+	b.data[0].n = 7;
+	b.data[1].n = 9;
+
+	// Reference-returning receiver, call nested as an argument (the Bedrock shape).
+	AssertIntEquals(b.GetAt(0).Equals(&b.data[0]), 1, "ref-return receiver: matching value");
+	AssertIntEquals(b.GetAt(1).Equals(&b.data[0]), 0, "ref-return receiver: differing value");
+
+	// Pointer-returning receiver.
+	AssertIntEquals(b.GetPtr(0)->Equals(&b.data[0]), 1, "ptr-return receiver: matching value");
+	AssertIntEquals(b.GetPtr(1)->Equals(&b.data[0]), 0, "ptr-return receiver: differing value");
+}

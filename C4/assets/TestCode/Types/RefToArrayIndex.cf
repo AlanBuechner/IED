@@ -1,0 +1,22 @@
+include "../Framework/Assert.ch"
+include "RefToArrayIndex.ch"
+
+int32[4] g_slots;
+
+int32[4]& Slots() { return g_slots; }
+
+void TestRefToArrayIndex() {
+	for (int32 i = 0; i < 4; ++i) g_slots[i] = i + 1;
+	int32 at = 2;
+	AssertIntEquals(3, Slots()[at], "reading through the returned reference");
+	Slots()[1] = 20;
+	AssertIntEquals(20, g_slots[1], "writing through it reaches the array");
+	Slots()[at] += 5;
+	AssertIntEquals(8, g_slots[2], "a compound assignment reads and writes the same element");
+	int32[4]& view = Slots();
+	view[3] = 40;
+	AssertIntEquals(40, g_slots[3], "a reference local to the array");
+	int32 sum = 0;
+	for (int32 v : Slots()) sum += v;
+	AssertIntEquals(69, sum, "range-for over the returned reference");
+}

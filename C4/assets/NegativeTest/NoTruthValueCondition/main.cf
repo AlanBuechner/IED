@@ -1,0 +1,2 @@
+struct Vec { float x; }
+int32 main() { Vec v; bool b=false; if (v) { b = true; } return 0; }

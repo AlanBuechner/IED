@@ -1,0 +1,15 @@
+template<T> class Box {
+	T v;
+	public void Set(T x) { v = x; }
+	public int32 Get() { return (int32)v; }
+}
+int32 main() {
+	Box<float>* f = new Box<float>();
+	((Box<float>*)f)->Set(2.5f);
+	if (((Box<float>*)f)->Get() != 2) { printf("FAIL float %d\n", ((Box<float>*)f)->Get()); return 1; }
+	Box<int32>* i = new Box<int32>();
+	((Box<int32>*)i)->Set(9);
+	if (((Box<int32>*)i)->Get() != 9) { printf("FAIL int %d\n", ((Box<int32>*)i)->Get()); return 1; }
+	printf("CAST DISPATCH OK\n");
+	return 0;
+}

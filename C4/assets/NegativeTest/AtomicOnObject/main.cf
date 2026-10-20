@@ -1,0 +1,6 @@
+struct Pair { public int32 a; public int32 b; }
+int32 main() {
+	Pair p;
+	Pair q = atomic_load(&p, MemoryOrder::SeqCst);
+	return q.a;
+}

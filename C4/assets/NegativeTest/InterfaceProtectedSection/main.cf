@@ -1,0 +1,5 @@
+interface IShape {
+protected:
+	protected float Area();
+}
+int32 main() { return 0; }

@@ -1,0 +1,402 @@
+// ============================================================================
+// Comprehensive Pointer & Reference Test Suite  (C4)
+// ----------------------------------------------------------------------------
+// Exercises every context where a pointer or reference can appear and that is
+// currently supported by the compiler. Each [test] uses the built-in testing
+// annotations; run with:
+//     bin/.../C4.exe assets/IsolatedTest/PtrRefSuite -test -o .../PtrRefSuite.exe
+// then execute the exe - exit code == number of failed assertions (0 = all pass).
+//
+// Coverage: address-of, dereference load/store, parenthesized deref-store,
+// double pointers, compound assignment through a pointer, deref in conditions /
+// arithmetic / read-modify-write, struct fields via pointer, pointer params,
+// reference params (read + write-back), returned pointers, array indexing via
+// pointer, pointer equality/null, void* casts, template functions with T* params,
+// and operator overloads on types that hold pointers.
+//
+// RESOLVED (verified 2026-09-30; now covered - keep them working):
+//   * Reference RETURN types (`int32& f()`) work: read + write-through, scalar/aggregate/
+//     member/const forms. Locked by IsolatedTest/ReferenceReturn.
+//   * Binding a reference to a prvalue (`const int32& r = f();`) is now REJECTED with a clear
+//     semantic error (was: stored the value into the pointer slot -> garbage-pointer AV). C4 makes
+//     references bind to lvalues only, by design. Locked by NegativeTest/RefBindToPrvalue.
+//   * Member access THROUGH a reference-return works (`Box& b = GetBoxRef(); b.v = 9;`).
+//   * `[operator("[]")]` (bracket-name operator) works: read + write-through (write needs
+//     `[operator("index_assign")]`; a missing setter is a clear diagnostic, not the old crash).
+//     Locked by IsolatedTest/BracketOperator.
+//   * Template fn with T* param + for-loop: the "Undefined identifier" failure is TEMPLATE-ARGUMENT
+//     INFERENCE, not loops - an IMPLICIT call `SumArray(arr, n)` fails to infer T from a local array
+//     (with or without a loop); EXPLICIT `SumArray<int32>(arr, n)` works. Subsumed by the template
+//     instantiation rework (09-complex-cases A1/A10 family) - do not patch piecemeal.
+//   * Vector<T*&> (pointer-to-reference element) is not supported.
+//
+// FIXED THIS SESSION (now covered by P29-P34):
+//   * Narrow-pointee deref stores (`*pc = 'z'` into char*/bool*/uint8*) wrote the
+//     C4-promoted i32 and overflowed the stack -> AV; value is now coerced to the
+//     pointee width before storing.
+//   * Static LOCAL of an AGGREGATE type returned by pointer (`S* f(){ static S s;
+//     s.x=7; return &s; }`) read back 0 (field stores hit a by-value copy); now
+//     field stores GEP into the real storage in place.
+//   * File-scope GLOBAL struct field store (`g.x = v` for a struct global) also hit
+//     a by-value copy; now resolved in place via GetObjectPointer.
+// ============================================================================
+
+struct Pt { int32 x; int32 y; };
+
+// ---------------------------------------------------------------------------
+// 1. Address-of + dereference load/store across pointee types
+// ---------------------------------------------------------------------------
+[test("ptr.basic.int_store")]
+public static void P01() {
+    int32 v = 7;
+    int32* p = &v;
+    *p = 42;                                  // store through pointer
+    assert_eq(42, v, "store through int32*");
+    assert_eq(42, *p, "load through int32*");
+}
+
+[test("ptr.basic.float_store")]
+public static void P02() {
+    float f = 1.5;
+    float* pf = &f;
+    *pf = 9.25;
+    assert_feq(9.25, f, 0.001, "store through float*");
+    assert_feq(9.25, *pf, 0.001, "load through float*");
+}
+
+[test("ptr.basic.char_store")]
+public static void P03() {
+    char c = 'a';
+    char* pc = &c;
+    *pc = 'z';
+    assert_eq('z', c, "store through char*");
+}
+
+// The user's exact example: float* val = &something; (*val) = other;
+[test("ptr.basic.paren_deref_store")]
+public static void P04() {
+    float something = 1.0;
+    float other = 5.5;
+    float* val = &something;
+    (*val) = other;                           // parenthesized deref-store
+    assert_feq(5.5, something, 0.001, "(*val) = other");
+}
+
+// ---------------------------------------------------------------------------
+// 2. Double pointers (nested indirection): read + store at each level
+// ---------------------------------------------------------------------------
+[test("ptr.double.read")]
+public static void P05() {
+    int32 x = 5;
+    int32* p = &x;
+    int32** pp = &p;
+    assert_eq(5, *(*pp), "double deref read");
+}
+
+[test("ptr.double.store")]
+public static void P06() {
+    int32 x = 1;
+    int32* p = &x;
+    int32** pp = &p;
+    *(*pp) = 9;                               // store through double pointer
+    assert_eq(9, x, "double deref store");
+}
+
+[test("ptr.double.mid_single")]
+public static void P07() {
+    int32 x = 5;
+    int32* p = &x;
+    int32** pp = &p;
+    int32* q = *pp;                           // deref once -> int32*
+    assert_eq(5, *q, "single deref of double ptr");
+}
+
+// ---------------------------------------------------------------------------
+// 3. Compound assignment through a pointer
+// ---------------------------------------------------------------------------
+[test("ptr.compound.plus")]
+public static void P08() {
+    int32 x = 10;
+    int32* p = &x;
+    *p += 5;
+    assert_eq(15, x, "*p += 5");
+}
+
+[test("ptr.compound.minus_mul")]
+public static void P09() {
+    int32 x = 20;
+    int32* p = &x;
+    *p -= 8;
+    assert_eq(12, x, "*p -= 8");
+    *p *= 2;
+    assert_eq(24, x, "*p *= 2");
+}
+
+// ---------------------------------------------------------------------------
+// 4. Dereference in other expression positions
+// ---------------------------------------------------------------------------
+[test("ptr.deref_in_condition")]
+public static void P10() {
+    int32 x = 3;
+    int32* p = &x;
+    bool ok = (*p > 2);
+    assert_true(ok, "deref in comparison");
+}
+
+[test("ptr.deref_read_modify_write")]
+public static void P11() {
+    int32 x = 1;
+    int32* p = &x;
+    *p = *p + 4;                              // read-modify-write through ptr
+    assert_eq(5, x, "read-modify-write via ptr");
+}
+
+[test("ptr.deref_in_arith")]
+public static void P12() {
+    int32 a = 6; int32 b = 7;
+    int32* pa = &a; int32* pb = &b;
+    int32 sum = (*pa) + (*pb);
+    assert_eq(13, sum, "deref in arithmetic");
+}
+
+// ---------------------------------------------------------------------------
+// 5. Struct fields accessed through a pointer
+// ---------------------------------------------------------------------------
+[test("ptr.struct_field_addr")]
+public static void P13() {
+    Pt s; s.x = 1; s.y = 2;
+    int32* px = &s.x;                         // address-of a struct field
+    *px = 100;
+    assert_eq(100, s.x, "store through &struct.field");
+}
+
+[test("ptr.struct_ptr_field")]
+public static void P14() {
+    Pt s; s.x = 3; s.y = 4;
+    Pt* sp = &s;                              // pointer to whole struct
+    sp->x = 30;                               // member access through ptr
+    assert_eq(30, s.x, "struct ptr member store");
+    assert_eq(4, sp->y, "struct ptr member load");
+}
+
+// ---------------------------------------------------------------------------
+// 6. Pointer parameters (mutate / read the caller's storage)
+// ---------------------------------------------------------------------------
+void Bump(int32* p, int32 amt) { *p = *p + amt; }
+int32 ReadPtr(int32* p) { return *p; }
+
+[test("ptr.param_mutate")]
+public static void P15() {
+    int32 x = 10;
+    Bump(&x, 5);
+    assert_eq(15, x, "mutated via pointer param");
+}
+
+[test("ptr.param_read")]
+public static void P16() {
+    int32 x = 77;
+    assert_eq(77, ReadPtr(&x), "read via pointer param");
+}
+
+// ---------------------------------------------------------------------------
+// 7. Reference parameters (read + write back to caller) - the key fix
+// ---------------------------------------------------------------------------
+int32 RefRead(int32& r) { return r; }
+void RefWrite(int32& r, int32 v) { r = v; }
+void RefCompound(int32& r) { r = r + 10; }
+
+[test("ref.param_read")]
+public static void P17() {
+    int32 x = 12;
+    assert_eq(12, RefRead(x), "read through ref param");
+}
+
+[test("ref.param_write")]
+public static void P18() {
+    int32 x = 1;
+    RefWrite(x, 55);
+    assert_eq(55, x, "write through ref param");
+}
+
+[test("ref.param_compound")]
+public static void P19() {
+    int32 x = 40;
+    RefCompound(x);
+    assert_eq(50, x, "compound write through ref param");
+}
+
+int32 g_refGlobal;
+void RefWriteGlobal(int32& r) { r = 88; }
+[test("ref.param_to_global")]
+public static void P20() {
+    RefWriteGlobal(g_refGlobal);
+    assert_eq(88, g_refGlobal, "ref param bound to global");
+}
+
+// ---------------------------------------------------------------------------
+// 8. Functions returning pointers (caller dereferences the result)
+//    (static LOCAL of a primitive type is supported; aggregate static locals are not - see header)
+// ---------------------------------------------------------------------------
+int32* RetIntPtr(int32 v) { static int32 h = 0; h = v; return &h; }
+
+[test("ptr.return_int_deref")]
+public static void P21() {
+    int32* p = RetIntPtr(42);
+    assert_eq(42, *p, "deref returned int32*");
+}
+
+// ---------------------------------------------------------------------------
+// 9. Array indexing through a pointer (pointer to first element)
+// ---------------------------------------------------------------------------
+[test("ptr.array_index")]
+public static void P22() {
+    int32[4] arr;
+    arr[0]=1; arr[1]=2; arr[2]=3; arr[3]=4;
+    int32* p = &arr[0];
+    assert_eq(3, p[2], "index via pointer to array");
+    p[2] = 99;
+    assert_eq(99, arr[2], "store via pointer index");
+}
+
+[test("ptr.array_walk")]
+public static void P23() {
+    int32[3] a; a[0]=10; a[1]=20; a[2]=30;
+    int32* p = &a[0];
+    int32 sum = 0;
+    for (int32 i=0;i<3;i++) sum = sum + p[i];
+    assert_eq(60, sum, "walk array via pointer");
+}
+
+// ---------------------------------------------------------------------------
+// 10. Pointer equality / inequality / null checks
+// ---------------------------------------------------------------------------
+[test("ptr.equality")]
+public static void P24() {
+    int32 x = 1; int32 y = 2;
+    int32* px = &x; int32* py = &y; int32* px2 = &x;
+    assert_true(px == px2, "same address equal");
+    assert_true(px != py, "different addresses not equal");
+}
+
+[test("ptr.null_check")]
+public static void P25() {
+    int32* p = null;
+    assert_true(p == null, "null pointer equals null");
+    int32 x = 5;
+    int32* q = &x;
+    assert_true(q != null, "non-null pointer not equal null");
+}
+
+// ---------------------------------------------------------------------------
+// 11. void* casts (generic pointer round-trips)
+// ---------------------------------------------------------------------------
+[test("ptr.void_cast")]
+public static void P26() {
+    int32 x = 123;
+    int32* pi = &x;
+    void* pv = (void*)pi;                     // upcast to void*
+    int32* back = (int32*)pv;                 // downcast back
+    assert_eq(123, *back, "void* round-trip");
+}
+
+// ---------------------------------------------------------------------------
+// 12. Template functions with pointer parameters (no-loop body)
+// ---------------------------------------------------------------------------
+template<T>
+int32 TplFirst(T* a) { return a[0]; }
+
+[test("tpl.ptr_param")]
+public static void P27() {
+    int32[3] a; a[0]=7; a[1]=8; a[2]=9;
+    assert_eq(7, TplFirst<int32>(&a[0]), "template fn with int32* param");
+}
+
+// ---------------------------------------------------------------------------
+// 13. Operator overloads on types that hold pointers (named index operator)
+//     a[0] on a POINTER receiver is pointer indexing (yields the pointee), not operator dispatch -
+//     [] dispatch applies to value receivers (see TestIndexOperator). Here we call the named op explicitly.
+// ---------------------------------------------------------------------------
+struct Buf {
+    int32* data;
+    int32 n;
+    [operator("create")] public void Init(int32 cap) { this->data = (int32*)raw_alloc(cap*4); this->n = 0; }
+    [operator("delete")] public void Free() { raw_free(this->data); this->data = null; }
+    [operator("index")] public int32 Index(int32 i) { return this->data[i]; }
+};
+
+[test("op.ptr_struct_index")]
+public static void P28() {
+    Buf* a = new Buf(4);
+    a->data[0]=1; a->data[1]=2; a->n=2;
+    assert_eq(1, a->operator_index(0), "named index op on ptr-buffer struct");
+    assert_eq(2, a->operator_index(1), "named index op second elem");
+    delete a;
+}
+
+// ---------------------------------------------------------------------------
+// 14. FIXED: narrow-pointee deref stores (value coerced to pointee width)
+//     Before the fix these wrote a 4-byte i32 into a 1-byte slot -> stack AV.
+// ---------------------------------------------------------------------------
+[test("ptr.narrow.char")]
+public static void P29() {
+    char c = 'a';
+    char* pc = &c;
+    *pc = 'z';
+    assert_eq('z', c, "char* store coerced to i8");
+}
+
+[test("ptr.narrow.bool_uint8")]
+public static void P30() {
+    bool b = false;
+    bool* pb = &b;
+    *pb = true;
+    assert_true(b, "bool* store");
+    uint8 u = 0;
+    uint8* pu = &u;
+    *pu = 200;
+    assert_eq(200, u, "uint8* store");
+}
+
+[test("ptr.narrow.mixed_widths")]
+public static void P31() {
+    char c = 'x'; int32 v = 0; float f = 0.0;
+    char* pc = &c; int32* pi = &v; float* pf = &f;
+    *pc = 'q'; *pi = 7; *pf = 3.5;
+    assert_true(c == 'q' && v == 7, "mixed narrow/wide stores");
+    assert_feq(3.5, f, 0.001, "float store alongside narrow");
+}
+
+// ---------------------------------------------------------------------------
+// 15. FIXED: static LOCAL of an aggregate returned by pointer (field stores
+//     now GEP into the real storage instead of a by-value copy).
+// ---------------------------------------------------------------------------
+struct Agg { int32 x; int32 y; };
+Agg* RetAggPtr(int32 v) { static Agg s; s.x = v; s.y = 7; return &s; }
+
+[test("ptr.return_agg_static")]
+public static void P32() {
+    Agg* p = RetAggPtr(42);
+    assert_eq(42, p->x, "static-local agg field x");
+    assert_eq(7, p->y, "static-local agg field y");
+}
+
+[test("ptr.return_agg_static_second")]
+public static void P33() {
+    Agg* p = RetAggPtr(99);
+    assert_eq(99, p->x, "static-local agg updated x");
+    assert_eq(7, p->y, "static-local agg y persists");
+}
+
+// ---------------------------------------------------------------------------
+// 16. FIXED: file-scope GLOBAL struct field store (in place, not by-value copy).
+// ---------------------------------------------------------------------------
+Agg g_agg;
+
+[test("ptr.global_struct_field")]
+public static void P34() {
+    g_agg.x = 5;
+    g_agg.y = 6;
+    assert_eq(5, g_agg.x, "global struct field x");
+    assert_eq(6, g_agg.y, "global struct field y");
+}
+

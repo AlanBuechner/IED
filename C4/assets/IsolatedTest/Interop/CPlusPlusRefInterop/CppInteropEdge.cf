@@ -1,0 +1,43 @@
+// CppInteropEdge - C++ interop edge cases beyond the base CppInterop suite.
+// Currently verifies pass-by-reference (const T& read-only + T& in-out), a very common C++ idiom
+// that previously produced no binding at all (the type mapper had no ReferenceType case).
+extern "c++" include "ref.h"
+extern "c++" source "ref.cpp"
+
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) {
+	if (!cond) { printf("FAIL %s\n", what); g_fail++; }
+}
+
+void TestConstRefReadOnly() {
+	RefOps* r = new RefOps;
+	Check(r != null, "RefOps ctor non-null");
+
+	Pt p;
+	p.x = 3;
+	p.y = 4;
+	int32 s = r->Sum(&p);   // binding exposes const Pt& as Pt*; pass the address of a local
+	Check(s == 7, "const-ref param read (Sum(3,4)==7)");
+
+	// Read-only: the callee must not have mutated p.
+	Check(p.x == 3 && p.y == 4, "const-ref did not mutate caller");
+	delete r;
+}
+
+void TestInOutRef() {
+	RefOps* r = new RefOps;
+	Pt p;
+	p.x = 2;
+	p.y = 5;
+	r->Scale(&p, 3);        // in-out ref: modifies the caller's value
+	Check(p.x == 6 && p.y == 15, "in-out ref mutated caller (2*3, 5*3)");
+	delete r;
+}
+
+int32 main() {
+	TestConstRefReadOnly();
+	TestInOutRef();
+	if (g_fail) { printf("CPP INTEROP EDGE TESTS FAILED: %d\n", g_fail); return 1; }
+	printf("CPP INTEROP EDGE TESTS OK\n");
+	return 0;
+}

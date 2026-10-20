@@ -1,0 +1,9 @@
+// Declaring the same variable twice in one block is a redefinition, not an assignment. The second
+// declaration must be a clear error (previously it was silently dropped while its initializer still
+// ran as a write - last-wins with no diagnostic). Sibling for-loop init vars and nested-block
+// shadowing are separate scopes and remain legal (covered by the e2e suite).
+int32 main() {
+    int32 x = 1;
+    int32 x = 2;
+    return x;
+}

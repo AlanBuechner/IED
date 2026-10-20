@@ -1,0 +1,9 @@
+extern "c" include "native.h"
+extern "c" source "native.c"
+
+int32 main() {
+    int64_t s = native_add(40, 2);
+    if (s != 42) return 1;
+    printf("INTEROP OK sum=%d\n", (int32)s);
+    return 0;
+}

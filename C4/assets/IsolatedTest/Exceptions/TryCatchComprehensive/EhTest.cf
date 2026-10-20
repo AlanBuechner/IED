@@ -1,0 +1,100 @@
+int32 g_caught = -1;
+int32 g_log = 0;
+
+void Log(int32 v) { g_log = g_log * 10 + v; }
+
+void DoThrow(int32 v) {
+	throw v;
+}
+
+int32 NestedTry() {
+	// Inner try catches, outer never sees the exception.
+	try {
+		Log(1);
+		try {
+			Log(2);
+			DoThrow(7);
+			Log(9); // unreachable
+		} catch (int32 e) {
+			g_caught = e;
+			Log(3);
+		} finally {
+			Log(4);
+		}
+		Log(5);
+	} catch (int32 e) {
+		Log(6); // must not run - inner try handled it
+	} finally {
+		Log(7);
+	}
+	return g_log;
+}
+
+int32 RethrowTest() {
+	int32 outer = -1;
+	try {
+		try {
+			DoThrow(21);
+		} catch (int32 e) {
+			throw; // rethrow - should escape the inner try and hit the outer catch
+		}
+	} catch (int32 e) {
+		outer = e;
+	}
+	return outer;
+}
+
+int32 MultiCatchTest() {
+	int32 which = 0;
+	try {
+		DoThrow(5);
+	} catch (double f) {
+		which = 1;
+	} catch (int32 i) {
+		which = 2;
+		g_caught = i;
+	} finally {
+		Log(8);
+	}
+	return which;
+}
+
+int32 ReturnInTryTest() {
+	try {
+		Log(9);
+		return 42;
+	} catch (int32 e) {
+		Log(10); // must not run
+	} finally {
+		Log(11); // must run before the return completes
+	}
+	return -1; // unreachable
+}
+
+int32 main() {
+	int32 failures = 0;
+
+	g_log = 0;
+	g_caught = -1;
+	int32 nested = NestedTry();
+	if (nested != 123457) { printf("FAIL NestedTry log=%d\n", nested); failures = failures + 1; }
+	if (g_caught != 7) { printf("FAIL NestedTry caught=%d\n", g_caught); failures = failures + 1; }
+
+	int32 rethrown = RethrowTest();
+	if (rethrown != 21) { printf("FAIL Rethrow got=%d\n", rethrown); failures = failures + 1; }
+
+	g_log = 0;
+	g_caught = -1;
+	int32 which = MultiCatchTest();
+	if (which != 2) { printf("FAIL MultiCatch which=%d\n", which); failures = failures + 1; }
+	if (g_caught != 5) { printf("FAIL MultiCatch caught=%d\n", g_caught); failures = failures + 1; }
+
+	g_log = 0;
+	int32 retVal = ReturnInTryTest();
+	if (retVal != 42) { printf("FAIL ReturnInTry got=%d\n", retVal); failures = failures + 1; }
+	if (g_log != 101) { printf("FAIL ReturnInTry log=%d\n", g_log); failures = failures + 1; }
+
+	if (failures == 0)
+		printf("ALL EH TESTS PASSED\n");
+	return failures;
+}

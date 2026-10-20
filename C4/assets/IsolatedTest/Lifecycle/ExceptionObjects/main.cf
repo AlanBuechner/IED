@@ -1,0 +1,44 @@
+// A thrown object is relocated into the exception; a by-value handler gets a copy (its copy operator),
+// a by-reference handler the exception itself, and the exception object is destroyed once the handler
+// is done with it.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 main() {
+	int32 live = 0;
+	try { throw Probe(&live, 7); }
+	catch (Probe caught) {
+		Check(caught.id == 7, "the by-value handler sees the value");
+		Check(live == 2, "a by-value handler holds a copy of the exception object");
+	}
+	Check(live == 0, "the handler's copy and the exception object are destroyed");
+	try { throw Probe(&live, 8); }
+	catch (Probe& caught) {
+		Check(caught.id == 8 && live == 1, "a by-reference handler sees the exception object itself");
+	}
+	Check(live == 0, "the exception object is destroyed after the handler");
+	Probe thrown = Probe(&live, 9);
+	try { throw thrown; }
+	catch (const Probe& caught) { Check(live == 2 && caught.id == 9, "throwing a variable copies it"); }
+	Check(live == 1 && thrown.id == 9, "only the variable is left");
+	try { throw thrown; }
+	catch (const Probe& caught) { Check(live == 1 && caught.id == 9, "throwing a variable at its last use moves it (D-05)"); }
+	Check(live == 0, "the moved exception object is destroyed once");
+	return g_failures;
+}

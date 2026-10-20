@@ -1,0 +1,1 @@
+int main() { int32 a = 1, b = 2; int32& r = a + b; return 0; }

@@ -1,0 +1,16 @@
+// CharPtrAssign unit 2 - the CROSS-UNIT case. This is a separate compilation unit from cp1.cf;
+// both include cp.ch, so CP (deduped to ONE ObjectType by definition-node identity) has its field
+// char* built from whichever unit processed it first. THIS unit's `b.p = &c` compares that field's
+// char* against a char* over THIS unit's own `char`. Pre-canonical-interning those were two distinct
+// char instances -> "Cannot assign value of type 'char*' to 'char*'". Now they are the same instance.
+include "../Framework/Assert.ch"
+include "cp.ch"
+
+void TestCharPtrAssignUnit2() {
+    CP b;
+    char c = 'q';
+    b.p = &c;             // cross-unit: field char* (first unit's char) vs &c (this unit's char)
+    char* r = b.p;        // read the field back
+    Assert(r != nullptr, "cp u2: assigned pointer non-null");
+    Assert(*r == c, "cp u2: deref round-trip");
+}

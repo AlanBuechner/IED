@@ -1,0 +1,7 @@
+class Base { public int32 b; }
+class Derived : Base { public int32 d; }
+Derived Make() { Derived d; return d; }
+int32 main() {
+	Base& r = static_cast<Base&>(Make());
+	return r.b;
+}

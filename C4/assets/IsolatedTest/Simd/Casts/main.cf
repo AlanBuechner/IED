@@ -1,0 +1,93 @@
+// Casts of packed vectors (D-62): `(packed U[N])v` and static_cast convert lane by lane as the scalar cast does
+// (floats truncate toward zero, bools give 0 / 1), a number cast to a vector fills every lane, and
+// reinterpret_cast keeps the bits of a vector of the same size; a pure packed vector object casts as its lanes.
+// main returns the failures.
+alias Lanes4 = packed float[4];
+
+struct Vec4 { public union { packed float x, y, z, w; packed float[4] data; }; }
+
+int32 Differs(float actual, float expected) { return actual == expected ? 0 : 1; }
+int32 DiffersI(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+
+int32 LaneConversions() {
+	int32 failures = 0;
+	packed float[4] f = { 1.75f, -2.75f, 3.5f, -0.25f };
+	packed int32[4] i = (packed int32[4])f;
+	failures += DiffersI(i[0], 1) + DiffersI(i[1], -2) + DiffersI(i[2], 3) + DiffersI(i[3], 0);
+	packed int32[4] s = static_cast<packed int32[4]>(f);
+	failures += DiffersI(s[1], -2);
+	packed double[4] d = (packed double[4])f;
+	failures += d[1] == -2.75 ? 0 : 1;
+	packed float[4] back = (packed float[4])d;
+	failures += Differs(back[2], 3.5f);
+	packed int64[4] wide = (packed int64[4])i;
+	failures += DiffersI(wide[1], -2);                 // signed lanes sign-extend
+	packed uint8[4] narrow = (packed uint8[4])(i + 256);
+	failures += DiffersI(narrow[0], 1);                // narrowing keeps the low bits
+	packed uint16[4] u = { 65535, 1, 2, 3 };
+	packed int32[4] fromUnsigned = (packed int32[4])u;
+	failures += DiffersI(fromUnsigned[0], 65535);      // unsigned lanes zero-extend
+	packed float[4] fromU = (packed float[4])u;
+	failures += Differs(fromU[0], 65535.0f);
+	Lanes4 aliased = (Lanes4)i;
+	failures += Differs(aliased[1], -2.0f);
+	return failures;
+}
+
+int32 Masks() {
+	int32 failures = 0;
+	packed float[4] f = { 1.0f, -1.0f, 2.0f, 0.0f };
+	packed int32[4] ones = (packed int32[4])(f > 0.5f);
+	failures += DiffersI(ones[0], 1) + DiffersI(ones[1], 0) + DiffersI(ones[2], 1) + DiffersI(ones[3], 0);
+	packed bool[4] nonzero = (packed bool[4])f;        // a number lane is true when it is not zero
+	failures += simd_bitmask(nonzero) == 7u ? 0 : 1;
+	packed float[4] asFloats = (packed float[4])(f < 0.0f);
+	failures += Differs(asFloats[1], 1.0f) + Differs(asFloats[0], 0.0f);
+	return failures;
+}
+
+int32 Broadcasts() {
+	int32 failures = 0;
+	packed float[8] sevens = (packed float[8])7;
+	failures += Differs(sevens[0], 7.0f) + Differs(sevens[7], 7.0f);
+	packed int16[8] small = static_cast<packed int16[8]>(3.9);
+	failures += DiffersI(small[5], 3);
+	return failures;
+}
+
+int32 Bits() {
+	int32 failures = 0;
+	packed float[4] one = simd_splat(1.0f, 4);
+	packed int32[4] bits = reinterpret_cast<packed int32[4]>(one);
+	failures += DiffersI(bits[0], 1065353216) + DiffersI(bits[3], 1065353216);
+	packed uint32[4] signMask = simd_splat(2147483647u, 4);
+	packed float[4] negative = { -1.5f, 2.0f, -0.0f, -8.0f };
+	packed float[4] magnitude = reinterpret_cast<packed float[4]>(reinterpret_cast<packed uint32[4]>(negative) & signMask);
+	failures += Differs(magnitude[0], 1.5f) + Differs(magnitude[3], 8.0f);
+	packed int32[4] i = { 1, 2, 3, 4 };
+	packed int16[8] halves = reinterpret_cast<packed int16[8]>(i);
+	failures += DiffersI(halves[0], 1) + DiffersI(halves[1], 0) + DiffersI(halves[6], 4);
+	packed double[2] asDoubles = reinterpret_cast<packed double[2]>(i);
+	packed int32[4] roundTrip = reinterpret_cast<packed int32[4]>(asDoubles);
+	failures += DiffersI(roundTrip[3], 4);
+	return failures;
+}
+
+int32 ObjectLanes() {
+	int32 failures = 0;
+	Vec4 v;
+	v.data = { 1.5f, -2.5f, 3.0f, 4.0f };
+	packed int32[4] converted = (packed int32[4])v;
+	failures += DiffersI(converted[0], 1) + DiffersI(converted[1], -2) + DiffersI(converted[3], 4);
+	packed float[4] same = (packed float[4])v;
+	failures += Differs(same[2], 3.0f);
+	packed int32[4] bits = reinterpret_cast<packed int32[4]>(v);
+	failures += DiffersI(bits[3], 1082130432);   // 4.0f
+	packed double[4] wide = static_cast<packed double[4]>(v);
+	failures += wide[1] == -2.5 ? 0 : 1;
+	return failures;
+}
+
+int32 main() {
+	return LaneConversions() + Masks() + Broadcasts() + Bits() + ObjectLanes();
+}

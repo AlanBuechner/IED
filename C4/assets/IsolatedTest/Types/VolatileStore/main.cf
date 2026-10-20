@@ -1,0 +1,21 @@
+// volatile variables and fields (D-29): every load and store of one is volatile, so the optimizer keeps
+// each of them; ExpectedIR.json checks the emitted IR has volatile loads and stores.
+struct Port {
+	public volatile int32 status;
+	public int32 plain;
+}
+
+volatile int32 g_ticks = 0;
+
+int32 main() {
+	volatile int32 spins = 0;
+	for (int32 i = 0; i < 10; ++i) spins = spins + 1;
+	g_ticks = g_ticks + 2;
+	Port p;
+	p.status = 7;
+	p.plain = 1;
+	if (spins != 10) return 1;
+	if (g_ticks != 2) return 2;
+	if (p.status != 7 || p.plain != 1) return 3;
+	return 0;
+}

@@ -1,0 +1,66 @@
+include "string.ch"
+
+namespace Core
+{
+	[operator("create")] void String::Init(const char* text) { Append(StringView(text)); }
+
+	[operator("create")] void String::Init(StringView text) { Append(text); }
+
+	[operator("create")] void String::Init(int64 reserve) { Reserve(reserve); }
+
+	[operator("copy")] void String::CopyFrom(const String& other) {
+		if (other.length == 0) return;
+		Reserve(other.length);
+		memcpy(buffer, other.buffer, (uint64)(other.length + 1));
+		length = other.length;
+		chars = other.chars;
+	}
+
+	[operator("delete")] void String::Delete() {
+		raw_free(buffer);
+		buffer = nullptr;
+		length = 0;
+		capacity = 0;
+		chars = 0;
+	}
+
+	void String::Reserve(int64 bytes) {
+		if (bytes <= capacity && buffer) return;
+		int64 grown = capacity * 2 > bytes ? capacity * 2 : bytes;
+		if (grown < 15) grown = 15;
+		char* larger = (char*)raw_alloc((uint64)(grown + 1));
+		if (buffer) memcpy(larger, buffer, (uint64)(length + 1));
+		else larger[0] = (char)0;
+		raw_free(buffer);
+		buffer = larger;
+		capacity = grown;
+	}
+
+	// `text` may view this string's own bytes, which a reallocation moves: keep its offset instead.
+	void String::Append(StringView text) {
+		int64 added = text.ByteLength();
+		if (added == 0) return;
+		const char* source = text.Data();
+		bool own = buffer != nullptr && source >= buffer && source <= buffer + length;
+		int64 offset = own ? source - buffer : 0;
+		Reserve(length + added);
+		if (own) source = buffer + offset;
+		memmove(buffer + length, (void*)source, (uint64)added);
+		length += added;
+		buffer[length] = (char)0;
+		chars += text.CharCount();
+	}
+
+	void String::Clear() {
+		if (buffer) buffer[0] = (char)0;
+		length = 0;
+		chars = 0;
+	}
+
+	String String::Concat(StringView other) const {
+		String joined = String(length + other.ByteLength());
+		joined.Append(View());
+		joined.Append(other);
+		return joined;
+	}
+}

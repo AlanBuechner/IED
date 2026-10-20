@@ -1,0 +1,18 @@
+// Built with -march=x86-64-v3 (ExpectedExit.json): C compiled with AVX2 and FMA intrinsics takes and returns 256-bit
+// vectors in YMM registers, as C4 code for the same target does, and C4's packed vectors are its __m256 (D-62).
+// main returns the failures.
+extern "c" include "lanes.h"
+extern "c" source "lanes.c"
+
+int32 main() {
+	int32 failures = 0;
+	packed float[8] position = { 0.0f, 1.0f, 2.0f, 3.0f, -4.0f, 5.0f, -6.0f, 7.0f };
+	packed float[8] moved = FusedStep(position, simd_splat(2.0f, 8), 0.5f);
+	failures += moved[0] == 1.0f && moved[7] == 8.0f ? 0 : 1;
+	packed int64[4] mask = MaskOfNegatives(position);
+	packed int32[8] lanes = reinterpret_cast<packed int32[8]>(mask);
+	failures += lanes[4] == -1 && lanes[6] == -1 && lanes[5] == 0 ? 0 : 1;
+	failures += CountNegatives(position) == 2 ? 0 : 1;
+	failures += simd_bitmask(position < 0.0f) == 80u ? 0 : 1;   // lanes 4 and 6, as the C movemask sees them
+	return failures;
+}

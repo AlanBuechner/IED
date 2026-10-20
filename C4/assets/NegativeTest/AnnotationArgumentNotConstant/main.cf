@@ -1,0 +1,6 @@
+int32 g_limit = 5;
+
+[Range(0, g_limit)]
+struct Gauge { public int32 value; }
+
+int32 main() { Gauge g; return g.value; }

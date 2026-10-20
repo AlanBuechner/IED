@@ -1,0 +1,18 @@
+// BUG-061: temporaries (sret buffers, by-value aggregate arguments, T(...) temps, init lists) are entry
+// allocas, so millions of loop iterations do not grow the stack.
+struct Big { public int64 a; public int64 b; public int64 c; };
+Big Make(int64 i) { Big r; r.a = i; r.b = i + 1; r.c = i + 2; return r; }
+int64 Sum(Big v) { return v.a + v.b + v.c; }
+int64 SumList(__init_list<int64> l) { int64 s = 0; for (int64 x : l) s += x; return s; }
+
+int32 main() {
+	int64 total = 0;
+	for (int64 i = 0; i < 3000000; i++) {
+		Big b = Make(i);
+		total += b.c - b.a;
+		total += Sum(Make(1)) - 6;
+		total += SumList({ 1, 2, 3 }) - 6;
+	}
+	if (total != 6000000) { printf("LoopTemporariesStack total=%lld\n", total); return 1; }
+	return 0;
+}

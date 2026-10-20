@@ -1,0 +1,2 @@
+template<...Ts> int32 Sum(Ts... a) { return (a + ... + a); }
+int32 main() { return Sum(1, 2); }

@@ -1,0 +1,93 @@
+// A hardware fault in a script stops the guarded call that reached it (section 7): the call returns false, the
+// script is faulted and says what happened and where, and it refuses further calls; the host goes on and compiles
+// other scripts. Scripting::Guard does the same for any code. A C4 exception is no fault.
+include "scripttest.ch"
+include "crash.ch"
+
+const uint32 kAccessViolation = 3221225477;   // 0xC0000005
+const uint32 kDivideByZero = 3221225620;      // 0xC0000094
+const uint32 kStackOverflow = 3221225725;     // 0xC00000FD
+
+// The script's function `function` called guarded: whether the call returned.
+bool CallGuarded(Scripting::Script* script, const char* function, void* context)
+{
+	funcptr<void(void*)> fn = (funcptr<void(void*)>)script->Address(function);
+	return fn != nullptr && script->Call(fn, context);
+}
+
+void CheckFault(Scripting::Host* host, ScriptTest::Checks& checks, const char* name, const char* function, const char* code)
+{
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, name, "crash.cf"));
+	if (!script->Ok()) return;
+	int64 out = 1000000000;
+	checks.That(!CallGuarded(script, function, (void*)&out), "the faulting call returns false");
+	checks.That(script->Faulted(), "the script is faulted");
+	checks.Contains(script->FaultText(), code, "the fault names its code");
+	int32 fine = 0;
+	checks.That(!CallGuarded(script, "Fine", (void*)&fine) && fine == 0, "a faulted script refuses calls");
+	script->Unload();
+}
+
+void CheckScriptFaults(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	CheckFault(host, checks, "nullwrite", "WritesNull", "0xc0000005");
+	CheckFault(host, checks, "divide", "Divides", "0xc0000094");
+	CheckFault(host, checks, "overflow", "Overflows", "0xc00000fd");
+
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "details", "crash.cf"));
+	if (!script->Ok()) return;
+	checks.That(!CallGuarded(script, "WritesNull", nullptr), "a null write");
+	checks.Contains(script->FaultText(), "writing 0x0", "the fault says it wrote address 0");
+	checks.Contains(script->FaultText(), "at script+", "and where in the script it was");
+	script->Unload();
+
+	Scripting::Script* after = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "after", "crash.cf"));
+	int32 fine = 0;
+	checks.That(CallGuarded(after, "Fine", (void*)&fine) && fine == 5, "after the faults a new script runs");
+	int32 caught = 0;
+	try { CallGuarded(after, "Throws", nullptr); }
+	catch (int32 e) { caught = e; }
+	checks.Equal(7, caught, "an exception through a guarded call reaches the host");
+	checks.That(after->Ok(), "and is no fault");
+	after->Unload();
+}
+
+void HostWritesNull(void* context) { *(int32*)Crash::g_null = 1; }
+void HostDivides(void* context) { *(int32*)context = 10 / Crash::g_zero; }
+
+int64 HostDeep(int64 depth, int64 limit)
+{
+	int64[128] frame;
+	for (int32 i = 0; i < 128; i++) frame[i] = depth + i;
+	Crash::g_frame = (int64)&frame[0];
+	if (depth >= limit) return frame[3];
+	return HostDeep(depth + 1, limit) + frame[5];
+}
+
+void HostOverflows(void* context) { *(int64*)context = HostDeep(0, *(int64*)context); }
+void HostFine(void* context) { *(int32*)context = 5; }
+
+void CheckGuard(ScriptTest::Checks& checks)
+{
+	Scripting::Fault fault;
+	checks.That(!Scripting::Guard(HostWritesNull, nullptr, &fault), "Guard stops a null write");
+	checks.That(fault.code == kAccessViolation && fault.write == 1 && fault.target == 0, "and reports it");
+	int32 zero = 0;
+	checks.That(!Scripting::Guard(HostDivides, (void*)&zero, &fault) && fault.code == kDivideByZero, "a division by zero");
+	int64 limit = 1000000000;
+	checks.That(!Scripting::Guard(HostOverflows, (void*)&limit, &fault) && fault.code == kStackOverflow, "a stack overflow");
+	limit = 1000000000;
+	checks.That(!Scripting::Guard(HostOverflows, (void*)&limit, &fault) && fault.code == kStackOverflow, "and another: the guard page came back");
+	int32 value = 0;
+	checks.That(Scripting::Guard(HostFine, (void*)&value, &fault) && value == 5, "a call that does not fault");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("CrashIsolation");
+	CheckScriptFaults(host, checks);
+	CheckGuard(checks);
+	return checks.End("CrashIsolation");
+}

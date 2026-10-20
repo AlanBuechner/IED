@@ -1,0 +1,41 @@
+// A by-reference clause names the exception object itself: a change made in the handler is visible
+// to an outer handler after `throw;`. A by-value clause works on its own copy.
+struct Report { public int32 hits; };
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 ReferenceSharesTheObject() {
+	try {
+		try { Report r; r.hits = 1; throw r; }
+		catch (Report& e) { e.hits = e.hits + 10; throw; }
+	}
+	catch (const Report& e) { return e.hits; }
+	return -1;
+}
+
+int32 ValueIsACopy() {
+	try {
+		try { Report r; r.hits = 1; throw r; }
+		catch (Report e) { e.hits = e.hits + 10; throw; }
+	}
+	catch (Report& e) { return e.hits; }
+	return -1;
+}
+
+int32 ReferenceToScalar() {
+	try { throw 41; }
+	catch (int32& e) { e = e + 1; return e; }
+	return -1;
+}
+
+int32 main() {
+	Check(ReferenceSharesTheObject() == 11, "catch (T&) changes the in-flight exception");
+	Check(ValueIsACopy() == 1, "catch (T) changes only its copy");
+	Check(ReferenceToScalar() == 42, "catch (int32&) reads and writes the thrown int");
+	if (g_failures != 0) printf("CatchByReference failures: %d\n", g_failures);
+	return g_failures;
+}

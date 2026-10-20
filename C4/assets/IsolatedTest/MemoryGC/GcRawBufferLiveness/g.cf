@@ -1,0 +1,21 @@
+// Does an object ref stored in a raw-backed Array survive GC when the array is its only holder? The
+// payload is a StringBuilder, a default-library heap type with a [operator("delete")] finalizer. The
+// conservative collector must scan the array's raw buffer to keep these alive; without registration they dangle.
+include "bedrock.ch"
+
+int32 main() {
+    Core::Array<Core::StringBuilder*>* v = new Core::Array<Core::StringBuilder*>(4);
+    // Create builders and store ONLY in the vector (no other live refs).
+    v->Push(new Core::StringBuilder(8));
+    v->Push(new Core::StringBuilder(8));
+    v->Push(new Core::StringBuilder(8));
+    // Force a collection. If the GC doesn't scan the raw buffer, these should be collected.
+    gc_collect();
+    int32 ok = 1;
+    for (int64 i = 0; i < v->Count(); i++) {
+        Core::StringBuilder* b = v->At(i);
+        if (b == nullptr || b->ByteLength() != 0) { ok = 0; break; }
+    }
+    printf("GC CONTAINER %s (count=%lld)\n", ok ? "OK" : "DANGLING/LOST", v->Count());
+    return ok ? 0 : 1;
+}

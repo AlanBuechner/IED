@@ -1,0 +1,15 @@
+extern "c" include "callback.h"
+extern "c" source "callback.c"
+int32 g_sum = 0;
+int32 mul(int32 a, int32 b) { return a * b; }
+void add_to_sum(int32 i) { g_sum += i; }
+int32 main() {
+	// C calls back into C4 through a function pointer (qsort-comparator pattern).
+	int32 r = apply_op(mul, 6, 7);
+	if (r != 42) { printf("FAIL apply_op r=%d\n", r); return 1; }
+	// Void callback invoked repeatedly by C.
+	for_each(5, add_to_sum);
+	if (g_sum != 10) { printf("FAIL for_each sum=%d\n", g_sum); return 1; }
+	printf("CALLBACK TESTS OK\n");
+	return 0;
+}

@@ -1,0 +1,1 @@
+int32 main() { int32[3] a; for (int64& v : a) v = 1; return 0; }

@@ -1,0 +1,13 @@
+// Unrelated pointer types must NOT be assignable (A* -> B*). Documents that the upcast fix did not
+// loosen the check into accepting arbitrary object pointers - only a real derived->base relationship
+// (or null/const conversion) is allowed. Locked so `B* b = a;` for unrelated A/B stays an error.
+struct A { int32 x; };
+struct B { int32 y; };
+
+int32 main()
+{
+    A* a = new A();
+    B* b;
+    b = a;                        // ERROR: A and B are unrelated types
+    return 0;
+}

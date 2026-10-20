@@ -1,0 +1,6 @@
+int32 main() {
+	goto skip;
+	int32 x = 5;
+skip:
+	return x;
+}

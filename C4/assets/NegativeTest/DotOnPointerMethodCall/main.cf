@@ -1,0 +1,10 @@
+struct Counter {
+	public int32 n;
+	public void Bump() { n++; }
+}
+int32 main() {
+	Counter c;
+	Counter* p = &c;
+	p.Bump();
+	return 0;
+}

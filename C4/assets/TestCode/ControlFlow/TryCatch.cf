@@ -1,0 +1,243 @@
+// ControlFlow - Exception Handling Tests (implementation)
+include "../Framework/Assert.ch"
+include "TryCatch.ch"
+
+int32 EhCaught = -1;
+int32 EhLog = 0;
+
+void EhLogDigit(int32 v) {
+	EhLog = EhLog * 10 + v;
+}
+
+void EhThrowValue(int32 v) {
+	throw v;
+}
+
+void TestTryCatch() {
+	// --- basic try/catch: caught value is delivered to the handler ---
+	EhCaught = -1;
+	try {
+		EhThrowValue(42);
+	} catch (int32 e) {
+		EhCaught = e;
+	}
+	AssertEqual(42, EhCaught);
+
+	// --- no exception: try body completes normally, catch is skipped ---
+	EhCaught = -1;
+	int32 normal = 0;
+	try {
+		normal = 7;
+	} catch (int32 e) {
+		EhCaught = e;
+	}
+	AssertEqual(7, normal);
+	AssertEqual(-1, EhCaught);
+
+	// --- finally runs on both the normal and the exception path ---
+	int32 finNormal = 0;
+	try {
+		finNormal = 1;
+	} finally {
+		finNormal = finNormal + 10;
+	}
+	AssertEqual(11, finNormal);
+
+	int32 finThrown = 0;
+	try {
+		EhThrowValue(5);
+	} catch (int32 e) {
+		finThrown = e;
+	} finally {
+		finThrown = finThrown + 10;
+	}
+	AssertEqual(15, finThrown);
+
+	// --- nested try: inner handler catches before the outer one sees it ---
+	EhCaught = -1;
+	int32 outerSeen = -1;
+	try {
+		try {
+			EhThrowValue(9);
+		} catch (int32 e) {
+			EhCaught = e;
+		} finally {
+			EhLogDigit(4);
+		}
+	} catch (int32 e) {
+		outerSeen = e;
+	} finally {
+		EhLogDigit(7);
+	}
+	AssertEqual(9, EhCaught);
+	AssertEqual(-1, outerSeen);
+
+	// --- nested try: unhandled by the inner handler propagates to the outer ---
+	EhCaught = -1;
+	try {
+		try {
+			EhThrowValue(21);
+		} catch (int32 e) {
+			// deliberately does not handle: rethrow outward
+			throw;
+		}
+	} catch (int32 e) {
+		EhCaught = e;
+	}
+	AssertEqual(21, EhCaught);
+
+	// --- bare rethrow from a catch propagates the original value outward ---
+	EhCaught = -1;
+	try {
+		try {
+			EhThrowValue(33);
+		} catch (int32 e) {
+			throw;
+		}
+	} catch (int32 e) {
+		EhCaught = e;
+	}
+	AssertEqual(33, EhCaught);
+
+	// --- multiple catch clauses: the first matching clause wins ---
+	int32 which = 0;
+	try {
+		throw 1;
+	} catch (int32 e) {
+		which = 1;
+	} catch (float f) {
+		which = 2;
+	}
+	AssertEqual(1, which);
+
+	// --- throw inside a finally propagates outward to the enclosing handler ---
+	EhCaught = -1;
+	try {
+		try {
+			EhThrowValue(1);
+		} catch (int32 e) {
+			throw 99;
+		} finally {
+			EhLogDigit(4);
+		}
+	} catch (int32 e) {
+		EhCaught = e;
+	}
+	AssertEqual(99, EhCaught);
+}
+
+void TestThrowRethrowMix() {
+	// A single function body that contains BOTH a bare `throw;` rethrow AND value `throw N;` throws across
+	// nested/overlapping try structures. This is the exact pattern that crashed at runtime (0xC000005) before the
+	// entry-block throw-buffer fix: the SEH frame handler corrupted the stack while dispatching the rethrow because
+	// the value buffer lived in a catchpad funclet instead of the function's entry block. Catch parameters share the
+	// function-body scope here, so every result and handler binding below uses a distinct name.
+
+	// Pattern A: bare rethrow in an inner handler + a separate value-throw in an outer sibling handler.
+	int32 rvA = 0;
+	try {
+		try {
+			EhThrowValue(21);
+		} catch (int32 ca) {
+			throw; // bare rethrow of the in-flight exception
+		}
+	} catch (int32 cb) {
+		rvA = cb;
+	}
+	AssertEqual(21, rvA);
+
+	int32 rvB = 0;
+	try {
+		try {
+			EhThrowValue(1);
+		} catch (int32 cc) {
+			throw 99; // value-throw from inside a handler (a NEW exception)
+		}
+	} catch (int32 cd) {
+		rvB = cd;
+	}
+	AssertEqual(99, rvB);
+
+	// Pattern B: BOTH forms in the SAME function, interleaved across two independent try chains - the precise v1 shape.
+	int32 rvC = 0;
+	try {
+		try {
+			EhThrowValue(5);
+		} catch (int32 ce) {
+			throw; // bare rethrow
+		}
+	} catch (int32 cf) {
+		rvC = cf;
+	}
+	int32 rvD = 0;
+	try {
+		try {
+			EhThrowValue(6);
+		} catch (int32 cg) {
+			throw 60 + cg; // value-throw from a handler
+		}
+	} catch (int32 ch) {
+		rvD = ch;
+	}
+	AssertEqual(5, rvC);
+	AssertEqual(66, rvD);
+
+	// Pattern C: a deep rethrow chain where each enclosing handler re-throws a NEW value, so several value-throw
+	// buffers and one bare-rethrow path share the function. 1 -> +10 = 11 -> +100 = 111.
+	int32 rvE = 0;
+	try {
+		try {
+			try {
+				throw 1;
+			} catch (int32 ci) {
+				throw ci + 10;
+			}
+		} catch (int32 cj) {
+			throw cj + 100;
+		}
+	} catch (int32 ck) {
+		rvE = ck;
+	}
+	AssertEqual(111, rvE);
+
+	// Pattern D: a bare rethrow and a value-throw nested in the SAME outer try's two sibling handlers.
+	int32 rvF = 0;
+	try {
+		try {
+			EhThrowValue(7);
+		} catch (int32 cl) {
+			throw; // inner rethrows outward
+		}
+	} catch (int32 cm) {
+		rvF = cm;
+	}
+	AssertEqual(7, rvF);
+	int32 rvG = 0;
+	try {
+		try {
+			EhThrowValue(8);
+		} catch (int32 cn) {
+			throw 80 + cn; // inner throws a new value outward
+		}
+	} catch (int32 co) {
+		rvG = co;
+	}
+	AssertEqual(88, rvG);
+
+	// Pattern E: rethrow that must traverse TWO enclosing handler frames before being caught.
+	int32 rvH = 0;
+	try {
+		try {
+			try {
+				EhThrowValue(3);
+			} catch (int32 cp) {
+				throw; // passes through the middle handler untouched
+			}
+		} catch (int32 cq) {
+			throw; // ...and through this one too
+		}
+	} catch (int32 cr) {
+		rvH = cr;
+	}
+	AssertEqual(3, rvH);
+}

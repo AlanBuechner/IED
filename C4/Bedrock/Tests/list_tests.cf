@@ -1,0 +1,175 @@
+// Core::List<T>: order, node handles, relinking, copies, iteration, element lifetimes and GC liveness.
+
+include "bedrock.ch"
+
+class ListProbe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const ListProbe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 ListSum(const Core::List<int32>& list) {
+	int32 sum = 0;
+	for (int32 n : list) sum = sum * 10 + n;
+	return sum;
+}
+
+int32 ListBackwards(const Core::List<int32>& list) {
+	int32 digits = 0;
+	for (const Core::ListNode<int32>* node = list.Last(); node; node = node->previous) digits = digits * 10 + node->value;
+	return digits;
+}
+
+[test("container.list")]
+class ListTests {
+	[test("zero")]
+	public static void TestZero() {
+		Core::List<int32> list;
+		assert_true(list.IsEmpty(), "a zero list is empty");
+		assert_true(list.First() == nullptr && list.Last() == nullptr, "and has no nodes");
+		assert_eq(0, list.PopFront(), "an empty list pops a zero value");
+		assert_eq(0, list.PopBack(), "from either end");
+		list.Clear();
+		list.Reverse();
+		assert_eq(0, list.Count(), "clearing or reversing nothing is harmless");
+	}
+
+	[test("push_pop")]
+	public static void TestPushPop() {
+		Core::List<int32> list;
+		list.PushBack(2);
+		list.PushFront(1);
+		list.PushBack(3);
+		assert_eq(3, list.Count(), "three");
+		assert_eq(123, ListSum(list), "front to back");
+		assert_eq(321, ListBackwards(list), "the back links mirror the front links");
+		assert_eq(1, list.Front(), "front");
+		assert_eq(3, list.Back(), "back");
+		assert_eq(1, list.PopFront(), "pop front");
+		assert_eq(3, list.PopBack(), "pop back");
+		assert_eq(2, list.PopBack(), "the last element");
+		assert_true(list.IsEmpty() && list.First() == nullptr && list.Last() == nullptr, "empty again");
+	}
+
+	[test("insert_and_remove")]
+	public static void TestInsertAndRemove() {
+		Core::List<int32> list = { 1, 4 };
+		Core::ListNode<int32>* four = list.Last();
+		Core::ListNode<int32>* two = list.InsertBefore(four, 2);
+		list.InsertAfter(two, 3);
+		list.InsertAfter(four, 5);
+		list.InsertBefore(nullptr, 6);
+		list.InsertAfter(nullptr, 0);
+		assert_eq(123456, ListSum(list), "inserted around nodes and at both ends");
+		assert_eq(6543210, ListBackwards(list), "both directions stay linked");
+		list.Remove(four);
+		list.Remove(list.First());
+		list.Remove(list.Last());
+		list.Remove(nullptr);
+		assert_eq(1235, ListSum(list), "removed from the middle and both ends");
+		assert_eq(5321, ListBackwards(list), "and still linked backwards");
+		assert_eq(2, two->value, "other nodes stay valid");
+	}
+
+	[test("relink")]
+	public static void TestRelink() {
+		Core::List<int32> list = { 1, 2, 3, 4 };
+		Core::ListNode<int32>* three = list.Find(3);
+		list.MoveToFront(three);
+		assert_eq(3124, ListSum(list), "to the front");
+		list.MoveToBack(list.First());
+		assert_eq(1243, ListSum(list), "to the back");
+		list.MoveToFront(list.First());
+		list.MoveToBack(list.Last());
+		assert_eq(1243, ListSum(list), "moving an end to itself changes nothing");
+		assert_eq(3, three->value, "the node is the same element");
+		list.Reverse();
+		assert_eq(3421, ListSum(list), "reversed");
+		assert_eq(1243, ListBackwards(list), "reversed backwards");
+		assert_eq(3, list.Front(), "front after reversing");
+		assert_eq(1, list.Back(), "back after reversing");
+	}
+
+	[test("find")]
+	public static void TestFind() {
+		Core::List<Core::String> names;
+		names.PushBack(Core::String("ada"));
+		names.PushBack(Core::String("alan"));
+		assert_true(names.Contains(Core::String("alan")), "found by ==");
+		assert_true(!names.Contains(Core::String("grace")), "absent");
+		assert_true(names.Find(Core::String("ada")) == names.First(), "the first match");
+		const Core::List<Core::String>& view = names;
+		assert_true(view.Find(Core::String("alan")) == view.Last(), "through a const list");
+	}
+
+	[test("copy_and_iterate")]
+	public static void TestCopyAndIterate() {
+		Core::List<int32> list = { 1, 2, 3 };
+		Core::List<int32> copy = list;
+		copy.PushBack(4);
+		assert_eq(123, ListSum(list), "the original is unchanged");
+		assert_eq(1234, ListSum(copy), "the copy owns its own nodes");
+		for (int32& n : copy) n *= 2;
+		assert_eq(2, copy.Front(), "by reference writes the element");
+		assert_eq(1, list.Front(), "not the original's");
+		Core::List<int32> empty;
+		Core::List<int32> emptyCopy = empty;
+		assert_true(emptyCopy.IsEmpty(), "an empty copy");
+	}
+
+	[test("lifetime")]
+	public static void TestLifetime() {
+		int32 live = 0;
+		{
+			Core::List<ListProbe> list;
+			list.PushBack(ListProbe(&live, 1));
+			Core::ListNode<ListProbe>* two = list.PushBack(ListProbe(&live, 2));
+			list.PushFront(ListProbe(&live, 0));
+			assert_eq(3, live, "three probes");
+			{
+				ListProbe first = list.PopFront();
+				assert_eq(0, first.id, "pop moves the element out");
+				assert_eq(3, live, "without a copy");
+			}
+			assert_eq(2, live, "the popped probe is destroyed by its new owner");
+			list.Remove(two);
+			assert_eq(1, live, "Remove destroys the element");
+			Core::List<ListProbe> copy = list;
+			assert_eq(2, live, "a copy copies every element");
+			list.MoveToBack(list.First());
+			list.Reverse();
+			assert_eq(2, live, "relinking copies nothing");
+			copy.Clear();
+			assert_eq(1, live, "Clear destroys every element");
+		}
+		assert_eq(0, live, "the list's delete destroys its elements");
+	}
+
+	[test("gc_liveness")]
+	public static void TestGcLiveness() {
+		Core::List<Core::StringBuilder*> list;
+		for (int32 i = 0; i < 8; i++) {
+			Core::StringBuilder* b = new Core::StringBuilder(4);
+			b->AppendInt(i);
+			list.PushBack(b);
+		}
+		gc_collect();
+		int32 index = 0;
+		bool intact = true;
+		for (Core::StringBuilder* b : list) {
+			Core::StringBuilder expected;
+			expected.AppendInt(index);
+			if (!(b->View() == expected.View())) intact = false;
+			index++;
+		}
+		assert_true(intact, "objects referenced only from list nodes survive a collection");
+	}
+}

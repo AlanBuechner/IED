@@ -1,0 +1,5 @@
+enum Mode { Off, On }
+int32 main() {
+	Mode m = Mode::On;
+	return reinterpret_cast<int32>(m);
+}

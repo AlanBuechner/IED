@@ -1,0 +1,4 @@
+int32 main() {
+	float f = 1.5f;
+	return reinterpret_cast<int64>(f) == 0 ? 1 : 0;
+}

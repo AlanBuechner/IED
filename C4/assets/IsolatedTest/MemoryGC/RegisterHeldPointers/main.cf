@@ -1,0 +1,33 @@
+// BUG-003: under -O2 live pointers sit in callee-saved registers across a collection. The collector captures
+// the register file before scanning, so objects reachable only from registers survive.
+struct Node { public int64 value; public Node* next; };
+
+Node* MakeChain(int32 n) {
+	Node* head = null;
+	for (int32 i = 0; i < n; i++) {
+		Node* node = new Node;
+		node->value = i;
+		node->next = head;
+		head = node;
+	}
+	return head;
+}
+
+int64 SumChain(Node* head) {
+	int64 s = 0;
+	for (Node* p = head; p != null; p = p->next) s += p->value;
+	return s;
+}
+
+int32 main() {
+	Node* a = MakeChain(100);
+	Node* b = MakeChain(200);
+	Node* c = MakeChain(300);
+	for (int32 round = 0; round < 50; round++) {
+		for (int32 k = 0; k < 200; k++) { Node* garbage = new Node; garbage->value = k; }
+		gc_collect();
+	}
+	int64 total = SumChain(a) + SumChain(b) + SumChain(c);
+	if (total != 4950 + 19900 + 44850) { printf("RegisterHeldPointers total=%lld\n", total); return 1; }
+	return 0;
+}

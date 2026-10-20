@@ -1,0 +1,11 @@
+int32 main() {
+    int32 x = 10;
+    int32 r = (x++);
+    int32 y = 5;
+    int32 s = (--y);
+    int32 z = 8;
+    int32 t = (z--);
+    int32 w = 3;
+    int32 u = (++w);
+    return (r == 10 && x == 11 && s == 4 && y == 4 && t == 8 && z == 7 && u == 4 && w == 4) ? 0 : 1;
+}

@@ -1,0 +1,2 @@
+class C { public int M(int a, int b) { return a + b; } }
+int main() { C c; return c.M(1); }

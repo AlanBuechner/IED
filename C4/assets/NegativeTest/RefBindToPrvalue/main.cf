@@ -1,0 +1,10 @@
+// Binding a reference to a prvalue (a by-value call result) must be rejected with a clear
+// semantic error - a reference binds to a LOCATION, not a temporary. Regression lock: this used
+// to crash (garbage-pointer AV); it is now a clean diagnostic.
+int32 GetFive() { return 5; }
+
+int32 main()
+{
+    const int32& r = GetFive();   // ERROR: cannot bind a reference to a temporary
+    return r;
+}

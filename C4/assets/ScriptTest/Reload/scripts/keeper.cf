@@ -1,0 +1,17 @@
+include "live.ch"
+
+class Kept
+{
+	public int32 value = 0;
+	[operator("delete")] public void Finalize() { Live::g_finalized++; }
+}
+
+void Keep(int32 count)
+{
+	for (int32 i = 0; i < count; i++)
+	{
+		Kept* kept = new Kept();
+		kept->value = i;
+		Live::Hold((void*)kept);
+	}
+}

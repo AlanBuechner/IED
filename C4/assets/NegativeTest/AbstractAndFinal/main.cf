@@ -1,0 +1,2 @@
+abstract final class Shape {}
+int32 main() { return 0; }

@@ -1,0 +1,2 @@
+void Read(int32 count) { va_list ap; va_start(ap); }
+int32 main() { return 0; }

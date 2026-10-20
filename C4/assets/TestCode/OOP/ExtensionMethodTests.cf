@@ -1,0 +1,409 @@
+// Extension Method Tests - Implementation
+// `this` is implicit - no explicit self parameter
+
+include "Framework/Assert.ch"
+include "ExtensionMethodTests.ch"
+
+// ============================================
+// Counter Constructors (as extension methods since defined outside struct)
+// ============================================
+
+[operator("create")]
+void Construct() extends Counter {
+	this.value = 0;
+}
+
+[operator("create")]
+void Construct(int32 initial) extends Counter {
+	this.value = initial;
+}
+
+// ============================================
+// Non-Operator Extension Methods
+// ============================================
+
+float Length() extends Point {
+	float len = sqrtf(this.x * this.x + this.y * this.y);
+	return len;
+}
+
+void SetXY(float nx, float ny) extends Point {
+	this.x = nx;
+	this.y = ny;
+}
+
+Point Normalized() extends Point {
+	float len = sqrtf(this.x * this.x + this.y * this.y);
+	if (len > 0.0f) {
+		return Point(this.x / len, this.y / len);
+	}
+	return Point(0.0f, 0.0f);
+}
+
+int32 GetValue() extends Counter {
+	return this.value;
+}
+
+void IncrementValue() extends Counter {
+	this.value += 1;
+}
+
+// ============================================
+// Arithmetic Operators as Extension Methods
+// ============================================
+
+[operator("add")]
+Point Add(const Point& other) extends Point {
+	return Point(this.x + other.x, this.y + other.y);
+}
+
+[operator("subtract")]
+Point Subtract(const Point& other) extends Point {
+	return Point(this.x - other.x, this.y - other.y);
+}
+
+[operator("multiply")]
+Point Multiply(float s) extends Point {
+	return Point(this.x * s, this.y * s);
+}
+
+[operator("divide")]
+Point Divide(float s) extends Point {
+	return Point(this.x / s, this.y / s);
+}
+
+// ============================================
+// Comparison Operators as Extension Methods
+// ============================================
+
+[operator("equal")]
+int32 Equals(const Point& other) extends Point {
+	return this.x == other.x && this.y == other.y;
+}
+
+[operator("notequal")]
+int32 NotEquals(const Point& other) extends Point {
+	return this.x != other.x || this.y != other.y;
+}
+
+[operator("less")]
+int32 LessThan(const Point& other) extends Point {
+	return this.x < other.x || (this.x == other.x && this.y < other.y);
+}
+
+[operator("greater")]
+int32 GreaterThan(const Point& other) extends Point {
+	return this.x > other.x || (this.x == other.x && this.y > other.y);
+}
+
+// ============================================
+// Unary Operators as Extension Methods
+// ============================================
+
+[operator("negate")]
+Point Negate() extends Point {
+	return Point(-this.x, -this.y);
+}
+
+[operator("unary_plus")]
+Point UnaryPlus() extends Point {
+	return Point(+this.x, +this.y);
+}
+
+// ============================================
+// Assignment Operators as Extension Methods
+// ============================================
+
+[operator("assign")]
+void Assign(const Point& other) extends Point {
+	this.x = other.x;
+	this.y = other.y;
+}
+
+[operator("add_assign")]
+void AddAssign(const Point& other) extends Point {
+	this.x += other.x;
+	this.y += other.y;
+}
+
+[operator("subtract_assign")]
+void SubtractAssign(const Point& other) extends Point {
+	this.x -= other.x;
+	this.y -= other.y;
+}
+
+// ============================================
+// Bitwise Operators as Extension Methods on IPoint
+// ============================================
+
+[operator("bitwise_and")]
+IPoint BitwiseAnd(const IPoint& other) extends IPoint {
+	return IPoint(this.x & other.x, this.y & other.y);
+}
+
+[operator("bitwise_or")]
+IPoint BitwiseOr(const IPoint& other) extends IPoint {
+	return IPoint(this.x | other.x, this.y | other.y);
+}
+
+[operator("bitwise_xor")]
+IPoint BitwiseXor(const IPoint& other) extends IPoint {
+	return IPoint(this.x ^ other.x, this.y ^ other.y);
+}
+
+[operator("bitwise_not")]
+IPoint BitwiseNot() extends IPoint {
+	return IPoint(~this.x, ~this.y);
+}
+
+// ============================================
+// Shift Operators as Extension Methods
+// ============================================
+
+[operator("shift_left")]
+IPoint ShiftLeft(int32 bits) extends IPoint {
+	return IPoint(this.x << bits, this.y << bits);
+}
+
+[operator("shift_right")]
+IPoint ShiftRight(int32 bits) extends IPoint {
+	return IPoint(this.x >> bits, this.y >> bits);
+}
+
+// ============================================
+// Increment/Decrement as Extension Methods
+// ============================================
+
+[operator("increment")]
+void Increment() extends Point {
+	this.x += 1.0f;
+	this.y += 1.0f;
+}
+
+[operator("decrement")]
+void Decrement() extends Point {
+	this.x -= 1.0f;
+	this.y -= 1.0f;
+}
+
+// ============================================
+// Index Operators as Extension Methods
+// ============================================
+
+[operator("index")]
+float GetIndex(int32 i) extends Point {
+	if (i == 0) return this.x;
+	return this.y;
+}
+
+[operator("index_assign")]
+void SetIndex(int32 i, float v) extends Point {
+	if (i == 0) this.x = v;
+	else this.y = v;
+}
+
+// ============================================
+// Logical Operators as Extension Methods
+// ============================================
+
+[operator("logical_and")]
+int32 LogicalAnd(const Point& other) extends Point {
+	return (this.x != 0.0f && this.y != 0.0f) && (other.x != 0.0f && other.y != 0.0f);
+}
+
+[operator("logical_or")]
+int32 LogicalOr(const Point& other) extends Point {
+	return (this.x != 0.0f || this.y != 0.0f) || (other.x != 0.0f || other.y != 0.0f);
+}
+
+// ============================================
+// Cast Operator as Extension Method
+// ============================================
+
+[operator("cast")]
+float ToFloat() extends Point {
+	return this.x + this.y;
+}
+
+// ============================================
+// Destructor and copy as extension methods
+// ============================================
+
+[operator("delete")]
+void Destroy() extends Counter {
+	this.value = 0;
+}
+
+[operator("copy")]
+void CopyFrom(const Counter& other) extends Counter {
+	this.value = other.value;
+}
+
+// ============================================
+// Test Functions
+// ============================================
+
+void TestExtensionMethodBasic() {
+	// Test non-operator extension methods called as member functions
+	Point p = Point(3.0f, 4.0f);
+	
+	float len = p.Length();
+	AssertFloatEquals(len, 5.0f, "Point.Length() extension method");
+	
+	p.SetXY(6.0f, 8.0f);
+	len = p.Length();
+	AssertFloatEquals(len, 10.0f, "Point.SetXY() then Length()");
+	
+	Counter c = Counter(42);
+	int32 val = c.GetValue();
+	AssertIntEquals(val, 42, "Counter.GetValue() extension method");
+	
+	c.IncrementValue();
+	val = c.GetValue();
+	AssertIntEquals(val, 43, "Counter.IncrementValue() extension method");
+}
+
+void TestExtensionMethodOperators() {
+	// Test arithmetic operators via extension methods
+	Point a = Point(1.0f, 2.0f);
+	Point b = Point(3.0f, 4.0f);
+	
+	Point sum = a + b;
+	AssertFloatEquals(sum.x, 4.0f, "Point + Point x");
+	AssertFloatEquals(sum.y, 6.0f, "Point + Point y");
+	
+	Point diff = a - b;
+	AssertFloatEquals(diff.x, -2.0f, "Point - Point x");
+	AssertFloatEquals(diff.y, -2.0f, "Point - Point y");
+	
+	Point prod = a * 2.0f;
+	AssertFloatEquals(prod.x, 2.0f, "Point * float x");
+	AssertFloatEquals(prod.y, 4.0f, "Point * float y");
+	
+	Point quot = b / 2.0f;
+	AssertFloatEquals(quot.x, 1.5f, "Point / float x");
+	AssertFloatEquals(quot.y, 2.0f, "Point / float y");
+}
+
+void TestExtensionMethodComparison() {
+	Point a = Point(1.0f, 2.0f);
+	Point b = Point(1.0f, 2.0f);
+	Point c = Point(3.0f, 4.0f);
+	
+	AssertIntEquals(a == b, 1, "Point == Point (equal)");
+	AssertIntEquals(a != c, 1, "Point != Point (not equal)");
+	AssertIntEquals(a < c, 1, "Point < Point");
+	AssertIntEquals(c > a, 1, "Point > Point");
+}
+
+void TestExtensionMethodAssignment() {
+	Point a = Point(1.0f, 2.0f);
+	Point b = Point(3.0f, 4.0f);
+	
+	a = b;
+	AssertFloatEquals(a.x, 3.0f, "Point assign x");
+	AssertFloatEquals(a.y, 4.0f, "Point assign y");
+	
+	a += Point(1.0f, 1.0f);
+	AssertFloatEquals(a.x, 4.0f, "Point += x");
+	AssertFloatEquals(a.y, 5.0f, "Point += y");
+	
+	a -= Point(2.0f, 2.0f);
+	AssertFloatEquals(a.x, 2.0f, "Point -= x");
+	AssertFloatEquals(a.y, 3.0f, "Point -= y");
+}
+
+void TestExtensionMethodBitwise() {
+	IPoint a = IPoint(12, 10);  // 1100, 1010
+	IPoint b = IPoint(10, 6);   // 1010, 0110
+	
+	IPoint andResult = a & b;
+	AssertIntEquals(andResult.x, 8, "IPoint & x");  // 1000
+	AssertIntEquals(andResult.y, 2, "IPoint & y");  // 0010
+	
+	IPoint orResult = a | b;
+	AssertIntEquals(orResult.x, 14, "IPoint | x");   // 1110
+	AssertIntEquals(orResult.y, 14, "IPoint | y");   // 1110
+	
+	IPoint xorResult = a ^ b;
+	AssertIntEquals(xorResult.x, 6, "IPoint ^ x");   // 0110
+	AssertIntEquals(xorResult.y, 12, "IPoint ^ y");  // 1100
+	
+	IPoint notResult = ~a;
+	AssertIntEquals(notResult.x, -13, "IPoint ~ x");
+}
+
+void TestExtensionMethodShift() {
+	IPoint a = IPoint(3, 5);
+	
+	IPoint shifted = a << 2;
+	AssertIntEquals(shifted.x, 12, "IPoint << x");
+	AssertIntEquals(shifted.y, 20, "IPoint << y");
+	
+	shifted = a >> 1;
+	AssertIntEquals(shifted.x, 1, "IPoint >> x");
+	AssertIntEquals(shifted.y, 2, "IPoint >> y");
+}
+
+void TestExtensionMethodIndex() {
+	Point p = Point(3.0f, 4.0f);
+	
+	float val = p[0];
+	AssertFloatEquals(val, 3.0f, "Point index [0]");
+	
+	val = p[1];
+	AssertFloatEquals(val, 4.0f, "Point index [1]");
+	
+	p.SetIndex(0, 5.0f);
+	AssertFloatEquals(p.x, 5.0f, "Point index assign [0]");
+	
+	p.SetIndex(1, 6.0f);
+	AssertFloatEquals(p.y, 6.0f, "Point index assign [1]");
+}
+
+void TestExtensionMethodUnary() {
+	Point p = Point(3.0f, 4.0f);
+	
+	Point neg = -p;
+	AssertFloatEquals(neg.x, -3.0f, "Point negate x");
+	AssertFloatEquals(neg.y, -4.0f, "Point negate y");
+	
+	Point pos = +p;
+	AssertFloatEquals(pos.x, 3.0f, "Point unary plus x");
+	AssertFloatEquals(pos.y, 4.0f, "Point unary plus y");
+}
+
+void TestExtensionMethodLogical() {
+	Point a = Point(1.0f, 2.0f);
+	Point b = Point(3.0f, 4.0f);
+	Point zero = Point(0.0f, 0.0f);
+	
+	// Test logical operators with scalar values (struct logical ops require method dispatch)
+	AssertIntEquals(a.x != 0.0f && a.y != 0.0f, 1, "scalar && both non-zero");
+	AssertIntEquals(zero.x != 0.0f || zero.y != 0.0f, 0, "scalar || both zero");
+}
+
+void TestExtensionMethodCast() {
+	Point p = Point(3.0f, 4.0f);
+	float sum = (float)p;
+	AssertFloatEquals(sum, 7.0f, "Point cast to float");
+}
+
+void TestExtensionMethodCreateDestroy() {
+	Counter c = Counter();
+	int32 val = c.GetValue();
+	AssertIntEquals(val, 0, "Counter default create");
+	
+	c.Destroy();
+	val = c.GetValue();
+	AssertIntEquals(val, 0, "Counter destroy resets value");
+}
+
+void TestExtensionMethodCopyMove() {
+	Counter original = Counter(42);
+	Counter copy = original;
+	AssertIntEquals(copy.GetValue(), 42, "Counter copy-initialization runs the copy extension method");
+	Counter moved = take(original);
+	AssertIntEquals(moved.GetValue(), 42, "take() relocates the value");
+	AssertIntEquals(original.GetValue(), 0, "take() leaves the source zero");
+}

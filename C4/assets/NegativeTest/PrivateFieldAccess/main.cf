@@ -1,0 +1,1 @@
+class A { int32 secret; public int32 Get(){return this.secret;} } int32 main(){ A a; return a.secret; }

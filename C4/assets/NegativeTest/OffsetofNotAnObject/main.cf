@@ -1,0 +1,3 @@
+struct P { public int32 x; }
+const int64 g = offsetof(P, x.y);
+int32 main() { return 0; }

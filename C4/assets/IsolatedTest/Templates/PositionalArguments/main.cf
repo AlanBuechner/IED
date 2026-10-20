@@ -1,0 +1,39 @@
+// Template arguments bind to parameters by position, whatever mix of type and value parameters a template
+// declares (BUG-066); a value argument may be any constant expression.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+const int32 kSize = 5;
+
+template<int32 N, T>
+struct Arr {
+	public T[N] items;
+	public int32 Count() { return N; }
+}
+
+template<T, int32 N, U>
+struct Triple {
+	public T first;
+	public U last;
+	public int32 Middle() { return N; }
+}
+
+template<int32 N, T> T Scale(T v) { return v * (T)N; }
+
+int32 main() {
+	Arr<3, int32> a;
+	Check(sizeof(a) == 12 && a.Count() == 3, "a value parameter before a type parameter");
+	Arr<2 + 2, float> b;
+	Check(sizeof(b) == 16 && b.Count() == 4, "a value argument is a constant expression");
+	Arr<kSize, int64> c;
+	Check(c.Count() == 5 && sizeof(c) == 40, "a value argument may name a constant");
+	Triple<int32, 7, float> t;
+	t.first = 1; t.last = 2.5f;
+	Check(t.Middle() == 7 && t.last == 2.5f, "type, value, type");
+	Check(Scale<3, int32>(2) == 6, "a function template with a value parameter first");
+	Check(Scale<2, float>(1.5f) == 3.0f, "the same with another type");
+	return g_failures;
+}

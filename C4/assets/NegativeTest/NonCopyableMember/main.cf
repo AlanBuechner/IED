@@ -1,0 +1,6 @@
+class File {
+	public int32 fd;
+	[operator("delete")] public void Close() { fd = 0; }
+}
+class Logger { public File out; public int32 level; }
+int32 main() { Logger a; Logger b = a; return b.level; }

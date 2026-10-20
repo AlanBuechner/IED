@@ -1,0 +1,2 @@
+enum class Broken : int32 { First, Second = Missing + 1 }
+int32 main() { return 0; }

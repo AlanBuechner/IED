@@ -1,0 +1,44 @@
+// BUG-105: globals, static members and static locals that need destruction are destroyed at exit, after
+// main returns, in the reverse order of their construction (a static local counts from its first pass).
+// The first-constructed object is destroyed last: it checks the order and ends the process with 42.
+[link("fflush")] int32 FlushAll(void* stream);
+[link("_Exit")] void ExitNow(int32 code);
+
+int64 g_trace = 0;
+
+class Tracked {
+	public int32 id;
+	[operator("create")] public void Init() { }
+	[operator("delete")] public void Delete() {
+		g_trace = g_trace * 10 + id;
+		if (id == 1) {
+			printf("destroyed in order %lld\n", g_trace);
+			FlushAll(null);
+			ExitNow(g_trace == 54321 ? 42 : 43);
+		}
+	}
+}
+
+class Labeled {
+	public Tracked t;
+	[operator("create")] public void Init(int32 id) { t.id = id; }
+}
+
+Tracked g_first;
+class Holder { public static Tracked s_second; }
+Labeled g_third = Labeled(3);
+
+void TouchStatics() {
+	static Labeled fourth = Labeled(4);
+	static Tracked[2] fifth;
+	fifth[0].id = 5;
+	fifth[1].id = 0;
+}
+
+int32 main() {
+	g_first.id = 1;
+	Holder::s_second.id = 2;
+	TouchStatics();
+	TouchStatics();
+	return 0;
+}

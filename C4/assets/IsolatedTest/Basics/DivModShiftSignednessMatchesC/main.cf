@@ -1,0 +1,16 @@
+int32 main() {
+    int32 a = -7; int32 b = 2;
+    bool d1 = (a / b) == -3;              // SDiv trunc toward zero
+    uint32 u = 0x80000000;
+    int64 d2 = u / 2;                      // UDiv: +1073741824 (SDiv would give -1073741824)
+    uint32 m = 0xFFFFFFFF; int32 n = -1;
+    int64 d3 = (int64)(m / n);             // common type uint32: 0xFFFFFFFF/0xFFFFFFFF = 1
+    bool r1 = (a % b) == -1;               // SRem: sign of dividend
+    uint32 s1 = ((uint32)1) << 31;          // logical shift: 0x80000000
+    int64 s2 = (int64)s1;                  // zero-extend: +2147483648
+    uint32 s3 = 0x80000000 >> 31;          // logical shift: 1
+    int32 t = -8; int64 s4 = (t >> 1);     // arithmetic shift: -4
+    bool ok = d1 && d2 == 1073741824 && d3 == 1 && r1 && s1 == 0x80000000 &&
+               s2 == 2147483648 && s3 == 1 && s4 == -4;
+    return ok ? 0 : 1;
+}

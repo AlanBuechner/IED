@@ -1,0 +1,6 @@
+// BUG-264: `Name<args>` before ';' is an instance used as a value, which only a function template's instance can be.
+template<T> struct Box { public T value; }
+int32 main() {
+	Box<int32>;
+	return 0;
+}

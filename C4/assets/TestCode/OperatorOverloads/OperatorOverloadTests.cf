@@ -1,0 +1,647 @@
+include "../Framework/Assert.ch"
+include "OperatorOverloadTests.ch"
+
+// ============================================
+// OpVec2 Arithmetic Operator Implementations
+// ============================================
+
+[operator("add")]
+OpVec2 Add(const OpVec2& other) extends OpVec2 {
+	return OpVec2(this.x + other.x, this.y + other.y);
+}
+
+[operator("subtract")]
+OpVec2 Subtract(const OpVec2& other) extends OpVec2 {
+	return OpVec2(this.x - other.x, this.y - other.y);
+}
+
+[operator("multiply")]
+OpVec2 Multiply(float s) extends OpVec2 {
+	return OpVec2(this.x * s, this.y * s);
+}
+
+[operator("divide")]
+OpVec2 Divide(float s) extends OpVec2 {
+	return OpVec2(this.x / s, this.y / s);
+}
+
+// ============================================
+// OpIVec2 Arithmetic Operator Implementations
+// ============================================
+
+[operator("add")]
+OpIVec2 Add(const OpIVec2& other) extends OpIVec2 {
+	return OpIVec2(this.x + other.x, this.y + other.y);
+}
+
+[operator("subtract")]
+OpIVec2 Subtract(const OpIVec2& other) extends OpIVec2 {
+	return OpIVec2(this.x - other.x, this.y - other.y);
+}
+
+[operator("modulo")]
+OpIVec2 Modulo(const OpIVec2& other) extends OpIVec2 {
+	return OpIVec2(this.x % other.x, this.y % other.y);
+}
+
+// ============================================
+// OpVec2 Comparison Operator Implementations
+// ============================================
+
+[operator("equal")]
+int32 Equals(const OpVec2& other) extends OpVec2 {
+	return (int32)(this.x == other.x && this.y == other.y);
+}
+
+[operator("notequal")]
+int32 NotEquals(const OpVec2& other) extends OpVec2 {
+	return (int32)(this.x != other.x || this.y != other.y);
+}
+
+[operator("less")]
+int32 LessThan(const OpVec2& other) extends OpVec2 {
+	return (int32)(this.x < other.x && this.y < other.y);
+}
+
+[operator("greater")]
+int32 GreaterThan(const OpVec2& other) extends OpVec2 {
+	return (int32)(this.x > other.x && this.y > other.y);
+}
+
+[operator("less_equal")]
+int32 LessEqual(const OpVec2& other) extends OpVec2 {
+	return (int32)(this.x <= other.x && this.y <= other.y);
+}
+
+[operator("greater_equal")]
+int32 GreaterEqual(const OpVec2& other) extends OpVec2 {
+	return (int32)(this.x >= other.x && this.y >= other.y);
+}
+
+// ============================================
+// OpVec2 Unary Operator Implementations
+// ============================================
+
+[operator("negate")]
+OpVec2 Negate() extends OpVec2 {
+	return OpVec2(-this.x, -this.y);
+}
+
+[operator("unary_plus")]
+OpVec2 UnaryPlus() extends OpVec2 {
+	return OpVec2(+this.x, +this.y);
+}
+
+[operator("logical_not")]
+int32 LogicalNot() extends OpVec2 {
+	return (int32)(!(this.x != 0.0f || this.y != 0.0f));
+}
+
+// ============================================
+// OpIVec2 Bitwise Operator Implementations
+// ============================================
+
+[operator("bitwise_and")]
+OpIVec2 BitwiseAnd(const OpIVec2& other) extends OpIVec2 {
+	return OpIVec2(this.x & other.x, this.y & other.y);
+}
+
+[operator("bitwise_or")]
+OpIVec2 BitwiseOr(const OpIVec2& other) extends OpIVec2 {
+	return OpIVec2(this.x | other.x, this.y | other.y);
+}
+
+[operator("bitwise_xor")]
+OpIVec2 BitwiseXor(const OpIVec2& other) extends OpIVec2 {
+	return OpIVec2(this.x ^ other.x, this.y ^ other.y);
+}
+
+[operator("bitwise_not")]
+OpIVec2 BitwiseNot() extends OpIVec2 {
+	return OpIVec2(~this.x, ~this.y);
+}
+
+// ============================================
+// OpIVec2 Shift Operator Implementations
+// ============================================
+
+[operator("shift_left")]
+OpIVec2 ShiftLeft(int32 bits) extends OpIVec2 {
+	return OpIVec2(this.x << bits, this.y << bits);
+}
+
+[operator("shift_right")]
+OpIVec2 ShiftRight(int32 bits) extends OpIVec2 {
+	return OpIVec2(this.x >> bits, this.y >> bits);
+}
+
+// ============================================
+// OpVec2 Assignment Operator Implementations
+// ============================================
+
+[operator("assign")]
+void Assign(const OpVec2& other) extends OpVec2 {
+	this.x = other.x;
+	this.y = other.y;
+}
+
+// ============================================
+// OpVec2 Compound Assignment Operator Implementations
+// ============================================
+
+[operator("add_assign")]
+void AddAssign(const OpVec2& other) extends OpVec2 {
+	this.x += other.x;
+	this.y += other.y;
+}
+
+[operator("subtract_assign")]
+void SubtractAssign(const OpVec2& other) extends OpVec2 {
+	this.x -= other.x;
+	this.y -= other.y;
+}
+
+[operator("multiply_assign")]
+void MultiplyAssign(float s) extends OpVec2 {
+	this.x *= s;
+	this.y *= s;
+}
+
+[operator("divide_assign")]
+void DivideAssign(float s) extends OpVec2 {
+	this.x /= s;
+	this.y /= s;
+}
+
+// ============================================
+// OpIVec2 Compound Assignment Operator Implementations
+// ============================================
+
+[operator("modulo_assign")]
+void ModuloAssign(const OpIVec2& other) extends OpIVec2 {
+	this.x %= other.x;
+	this.y %= other.y;
+}
+
+[operator("and_assign")]
+void AndAssign(const OpIVec2& other) extends OpIVec2 {
+	this.x &= other.x;
+	this.y &= other.y;
+}
+
+[operator("or_assign")]
+void OrAssign(const OpIVec2& other) extends OpIVec2 {
+	this.x |= other.x;
+	this.y |= other.y;
+}
+
+[operator("xor_assign")]
+void XorAssign(const OpIVec2& other) extends OpIVec2 {
+	this.x ^= other.x;
+	this.y ^= other.y;
+}
+
+// ============================================
+// OpVec2 Logical Operator Implementations
+// ============================================
+
+[operator("logical_and")]
+int32 LogicalAnd(const OpVec2& other) extends OpVec2 {
+	int32 thisNonZero = (int32)(this.x != 0.0f || this.y != 0.0f);
+	int32 otherNonZero = (int32)(other.x != 0.0f || other.y != 0.0f);
+	return (int32)((thisNonZero != 0) && (otherNonZero != 0));
+}
+
+[operator("logical_or")]
+int32 LogicalOr(const OpVec2& other) extends OpVec2 {
+	int32 thisNonZero = (int32)(this.x != 0.0f || this.y != 0.0f);
+	int32 otherNonZero = (int32)(other.x != 0.0f || other.y != 0.0f);
+	return (int32)((thisNonZero != 0) || (otherNonZero != 0));
+}
+
+// ============================================
+// Cast Operator Implementations
+// ============================================
+
+[operator("cast")]
+float ToFloat() extends OpVec2 {
+	return this.x + this.y;
+}
+
+[operator("cast")]
+OpIVec2 ToIVec2() extends float {
+	float val = *this;
+	return OpIVec2((int32)val, (int32)(val * 2.0f));
+}
+
+// ============================================
+// OpCounter Destroy Implementation
+// ============================================
+
+[operator("delete")]
+void Destroy() extends OpCounter {
+	this.value = -999;
+}
+
+// ============================================
+// OpCounter copy (extension method)
+// ============================================
+
+[operator("copy")]
+void CopyFrom(const OpCounter& other) extends OpCounter {
+	this.value = other.value;
+}
+
+// ============================================
+// OpVec2 Increment/Decrement Implementations
+// ============================================
+
+[operator("increment")]
+void Increment() extends OpVec2 {
+	this.x += 1.0f;
+	this.y += 1.0f;
+}
+
+[operator("decrement")]
+void Decrement() extends OpVec2 {
+	this.x -= 1.0f;
+	this.y -= 1.0f;
+}
+
+// ============================================
+// OpVec2 Index/Subscript Operator Implementations
+// ============================================
+
+[operator("index")]
+float GetIndex(int32 i) extends OpVec2 {
+	if (i == 0) return this.x;
+	return this.y;
+}
+
+[operator("index_assign")]
+void SetIndex(int32 i, float v) extends OpVec2 {
+	if (i == 0) this.x = v;
+	else this.y = v;
+}
+
+// ============================================
+// Non-Operator Extension Methods
+// ============================================
+
+float Length() extends OpVec2 {
+	return sqrtf(this.x * this.x + this.y * this.y);
+}
+
+// ========== TEST FUNCTIONS ==========
+
+void TestArithmeticOperators() {
+	OpVec2 a = OpVec2(1.0f, 2.0f);
+	OpVec2 b = OpVec2(3.0f, 4.0f);
+	OpVec2 sum = a + b;
+	Assert(sum.x == 4.0f, "Add operator: x component should be 4.0");
+	Assert(sum.y == 6.0f, "Add operator: y component should be 6.0");
+
+	OpVec2 diff = a - b;
+	Assert(diff.x == -2.0f, "Subtract operator: x component should be -2.0");
+	Assert(diff.y == -2.0f, "Subtract operator: y component should be -2.0");
+
+	OpVec2 prod = a * 2.0f;
+	Assert(prod.x == 2.0f, "Multiply operator: x component should be 2.0");
+	Assert(prod.y == 4.0f, "Multiply operator: y component should be 4.0");
+
+	OpVec2 quot = b / 2.0f;
+	Assert(quot.x == 1.5f, "Divide operator: x component should be 1.5");
+	Assert(quot.y == 2.0f, "Divide operator: y component should be 2.0");
+
+	OpIVec2 ia = OpIVec2(10, 20);
+	OpIVec2 ib = OpIVec2(5, 15);
+	OpIVec2 isum = ia + ib;
+	Assert(isum.x == 15, "OpIVec2 add: x component should be 15");
+	Assert(isum.y == 35, "OpIVec2 add: y component should be 35");
+
+	OpIVec2 idiff = ia - ib;
+	Assert(idiff.x == 5, "OpIVec2 subtract: x component should be 5");
+	Assert(idiff.y == 5, "OpIVec2 subtract: y component should be 5");
+}
+
+void TestComparisonOperators() {
+	OpVec2 a = OpVec2(1.0f, 2.0f);
+	OpVec2 b = OpVec2(3.0f, 4.0f);
+	OpVec2 c = OpVec2(1.0f, 2.0f);
+
+	Assert(a == c, "Equal operator: a should equal c");
+	Assert(!(a == b), "Equal operator: a should not equal b");
+
+	Assert(a != b, "NotEqual operator: a should not equal b");
+	Assert(!(a != c), "NotEqual operator: a should equal c");
+
+	Assert(a < b, "Less operator: a should be less than b");
+	Assert(!(b < a), "Less operator: b should not be less than a");
+
+	Assert(b > a, "Greater operator: b should be greater than a");
+	Assert(!(a > b), "Greater operator: a should not be greater than b");
+
+	Assert(a <= c, "LessEqual operator: a should be less than or equal to c");
+	Assert(a <= b, "LessEqual operator: a should be less than or equal to b");
+
+	Assert(b >= a, "GreaterEqual operator: b should be greater than or equal to a");
+	Assert(c >= a, "GreaterEqual operator: c should be greater than or equal to a");
+}
+
+void TestUnaryOperators() {
+	OpVec2 a = OpVec2(1.0f, 2.0f);
+
+	OpVec2 neg = -a;
+	Assert(neg.x == -1.0f, "Negate operator: x should be -1.0");
+	Assert(neg.y == -2.0f, "Negate operator: y should be -2.0");
+
+	OpVec2 pos = +a;
+	Assert(pos.x == 1.0f, "UnaryPlus operator: x should be 1.0");
+	Assert(pos.y == 2.0f, "UnaryPlus operator: y should be 2.0");
+
+	OpVec2 zero = OpVec2(0.0f, 0.0f);
+	Assert(!zero, "LogicalNot operator: zero vec should be true when negated");
+	Assert(!(a) == 0, "LogicalNot operator: non-zero vec should return 0 when negated");
+
+	OpIVec2 iv = OpIVec2(0, 0);
+	OpIVec2 inv = ~iv;
+	Assert(inv.x == -1, "BitwiseNot operator: ~0 should be -1");
+	Assert(inv.y == -1, "BitwiseNot operator: ~0 should be -1");
+
+	OpIVec2 iv2 = OpIVec2(15, 30);
+	OpIVec2 inv2 = ~iv2;
+	Assert(inv2.x == -16, "BitwiseNot operator: ~15 should be -16");
+	Assert(inv2.y == -31, "BitwiseNot operator: ~30 should be -31");
+}
+
+void TestBitwiseOperators() {
+	OpIVec2 a = OpIVec2(12, 10);
+	OpIVec2 b = OpIVec2(10, 6);
+
+	OpIVec2 result_and = a & b;
+	Assert(result_and.x == 8, "BitwiseAnd: 12 & 10 should be 8");
+	Assert(result_and.y == 2, "BitwiseAnd: 10 & 6 should be 2");
+
+	OpIVec2 result_or = a | b;
+	Assert(result_or.x == 14, "BitwiseOr: 12 | 10 should be 14");
+	Assert(result_or.y == 14, "BitwiseOr: 10 | 6 should be 14");
+
+	OpIVec2 result_xor = a ^ b;
+	Assert(result_xor.x == 6, "BitwiseXor: 12 ^ 10 should be 6");
+	Assert(result_xor.y == 12, "BitwiseXor: 10 ^ 6 should be 12");
+}
+
+void TestShiftOperators() {
+	OpIVec2 a = OpIVec2(3, 5);
+
+	OpIVec2 shifted_left = a << 1;
+	Assert(shifted_left.x == 6, "ShiftLeft: 3 << 1 should be 6");
+	Assert(shifted_left.y == 10, "ShiftLeft: 5 << 1 should be 10");
+
+	OpIVec2 shifted_right = a >> 1;
+	Assert(shifted_right.x == 1, "ShiftRight: 3 >> 1 should be 1");
+	Assert(shifted_right.y == 2, "ShiftRight: 5 >> 1 should be 2");
+}
+
+void TestAssignmentOperators() {
+	OpVec2 a = OpVec2(1.0f, 2.0f);
+	OpVec2 b = OpVec2(3.0f, 4.0f);
+
+	a = b;
+	Assert(a.x == 3.0f, "Assign operator: x should be 3.0");
+	Assert(a.y == 4.0f, "Assign operator: y should be 4.0");
+}
+
+void TestCompoundAssignmentOperators() {
+	OpVec2 a = OpVec2(1.0f, 2.0f);
+	OpVec2 b = OpVec2(3.0f, 4.0f);
+	a += b;
+	Assert(a.x == 4.0f, "AddAssign: x should be 4.0");
+	Assert(a.y == 6.0f, "AddAssign: y should be 6.0");
+
+	OpVec2 c = OpVec2(5.0f, 10.0f);
+	c -= b;
+	Assert(c.x == 2.0f, "SubtractAssign: x should be 2.0");
+	Assert(c.y == 6.0f, "SubtractAssign: y should be 6.0");
+
+	OpVec2 d = OpVec2(1.0f, 2.0f);
+	d.MultiplyAssign(3.0f);
+	Assert(d.x == 3.0f, "MultiplyAssign: x should be 3.0");
+	Assert(d.y == 6.0f, "MultiplyAssign: y should be 6.0");
+
+	OpVec2 e = OpVec2(10.0f, 20.0f);
+	e.DivideAssign(2.0f);
+	Assert(e.x == 5.0f, "DivideAssign: x should be 5.0");
+	Assert(e.y == 10.0f, "DivideAssign: y should be 10.0");
+
+	OpIVec2 ia = OpIVec2(17, 23);
+	OpIVec2 ib = OpIVec2(5, 7);
+	ia %= ib;
+	Assert(ia.x == 2, "ModuloAssign: 17 % 5 should be 2");
+	Assert(ia.y == 2, "ModuloAssign: 23 % 7 should be 2");
+
+	OpIVec2 ic = OpIVec2(15, 30);
+	OpIVec2 id = OpIVec2(7, 12);
+	ic &= id;
+	Assert(ic.x == 7, "AndAssign: 15 & 7 should be 7");
+	Assert(ic.y == 12, "AndAssign: 30 & 12 should be 12");
+
+	OpIVec2 ie = OpIVec2(10, 5);
+	OpIVec2 if_ = OpIVec2(6, 9);
+	ie |= if_;
+	Assert(ie.x == 14, "OrAssign: 10 | 6 should be 14");
+	Assert(ie.y == 13, "OrAssign: 5 | 9 should be 13");
+
+	OpIVec2 ig = OpIVec2(15, 30);
+	OpIVec2 ih = OpIVec2(7, 12);
+	ig ^= ih;
+	Assert(ig.x == 8, "XorAssign: 15 ^ 7 should be 8");
+	Assert(ig.y == 18, "XorAssign: 30 ^ 12 should be 18");
+}
+
+void TestLogicalOperators() {
+	OpVec2 zero = OpVec2(0.0f, 0.0f);
+	OpVec2 nonzero = OpVec2(1.0f, 2.0f);
+
+	Assert(!(zero && nonzero), "LogicalAnd: zero && nonzero should be false");
+	Assert(nonzero && nonzero, "LogicalAnd: nonzero && nonzero should be true");
+	Assert(!(zero && zero), "LogicalAnd: zero && zero should be false");
+
+	Assert(!(zero || zero), "LogicalOr: zero || zero should be false");
+	Assert(zero || nonzero, "LogicalOr: zero || nonzero should be true");
+	Assert(nonzero || zero, "LogicalOr: nonzero || zero should be true");
+}
+
+void TestCastOperator() {
+	OpVec2 a = OpVec2(3.0f, 4.0f);
+
+	float result = (float)a;
+	Assert(result == 7.0f, "Cast operator: OpVec2(3,4) cast to float should be 7.0");
+
+	OpIVec2 iv = (OpIVec2)5.5f;
+	Assert(iv.x == 5, "Cast operator: float cast to OpIVec2 x should be 5");
+	Assert(iv.y == 11, "Cast operator: float cast to OpIVec2 y should be 11");
+}
+
+void TestCreateDestroyOperators() {
+	OpCounter c;
+	Assert(c.value == 0, "Default create: value should be 0");
+
+	OpCounter c2 = OpCounter(42);
+	Assert(c2.value == 42, "Parameterized create: value should be 42");
+
+	OpCounter c3 = OpCounter(100);
+	c3.Destroy();
+	Assert(c3.value == -999, "Destroy operator: value should be -999 after destruction");
+}
+
+void TestCopyMoveOperators() {
+	OpCounter original = OpCounter(42);
+
+	OpCounter copy = original;
+	Assert(copy.value == 42, "Copy operator: copy-initialization copies the value");
+
+	OpCounter moved = take(original);
+	Assert(moved.value == 42, "take(): the value moves");
+	Assert(original.value == 0, "take(): the source is left zero");
+}
+
+void TestIncrementDecrementOperators() {
+	OpVec2 a = OpVec2(1.0f, 2.0f);
+
+	++a;
+	Assert(a.x == 2.0f, "Increment: x should be 2.0 after ++");
+	Assert(a.y == 3.0f, "Increment: y should be 3.0 after ++");
+
+	--a;
+	Assert(a.x == 1.0f, "Decrement: x should be 1.0 after --");
+	Assert(a.y == 2.0f, "Decrement: y should be 2.0 after --");
+
+	OpVec2 b = OpVec2(5.0f, 10.0f);
+	b++;
+	Assert(b.x == 6.0f, "Postfix increment: x should be 6.0");
+	Assert(b.y == 11.0f, "Postfix increment: y should be 11.0");
+
+	b--;
+	Assert(b.x == 5.0f, "Postfix decrement: x should be 5.0");
+	Assert(b.y == 10.0f, "Postfix decrement: y should be 10.0");
+}
+
+void TestIndexOperator() {
+	OpVec2 a = OpVec2(3.14f, 2.72f);
+
+	float xVal = a[0];
+	Assert(xVal == 3.14f, "Index operator: a[0] should be 3.14");
+
+	float yVal = a[1];
+	Assert(yVal == 2.72f, "Index operator: a[1] should be 2.72");
+
+	a[0] = 9.99f;
+	Assert(a.x == 9.99f, "IndexAssign: a[0] = 9.99 should update x");
+
+	a[1] = 8.88f;
+	Assert(a.y == 8.88f, "IndexAssign: a[1] = 8.88 should update y");
+}
+
+void TestSyntacticArithmeticDispatch() {
+	OpVec2 a = OpVec2(1.0f, 1.0f);
+	OpVec2 b = OpVec2(2.0f, 2.0f);
+
+	OpVec2 result_add = a + b;
+	Assert(result_add.x == 3.0f, "Syntactic dispatch: vec + vec add x should be 3.0");
+	Assert(result_add.y == 3.0f, "Syntactic dispatch: vec + vec add y should be 3.0");
+
+	OpVec2 result_sub = b - a;
+	Assert(result_sub.x == 1.0f, "Syntactic dispatch: vec - vec subtract x should be 1.0");
+	Assert(result_sub.y == 1.0f, "Syntactic dispatch: vec - vec subtract y should be 1.0");
+
+	OpVec2 result_mul = a * 5.0f;
+	Assert(result_mul.x == 5.0f, "Syntactic dispatch: vec * float multiply x should be 5.0");
+	Assert(result_mul.y == 5.0f, "Syntactic dispatch: vec * float multiply y should be 5.0");
+
+	OpVec2 result_div = b / 2.0f;
+	Assert(result_div.x == 1.0f, "Syntactic dispatch: vec / float divide x should be 1.0");
+	Assert(result_div.y == 1.0f, "Syntactic dispatch: vec / float divide y should be 1.0");
+}
+
+void TestSyntacticComparisonDispatch() {
+	OpVec2 a = OpVec2(1.0f, 2.0f);
+	OpVec2 b = OpVec2(3.0f, 4.0f);
+	OpVec2 c = OpVec2(1.0f, 2.0f);
+
+	Assert(a == c, "Syntactic dispatch: vec == vec should be true for equal vectors");
+	Assert(a != b, "Syntactic dispatch: vec != vec should be true for different vectors");
+	Assert(a < b, "Syntactic dispatch: vec < vec should be true when a is less than b");
+	Assert(b > a, "Syntactic dispatch: vec > vec should be true when b is greater than a");
+	Assert(a <= c, "Syntactic dispatch: vec <= vec should be true for equal vectors");
+	Assert(b >= a, "Syntactic dispatch: vec >= vec should be true when b is greater than a");
+}
+
+void TestSyntacticBitwiseDispatch() {
+	OpIVec2 a = OpIVec2(12, 10);
+	OpIVec2 b = OpIVec2(10, 6);
+
+	OpIVec2 result_and = a & b;
+	Assert(result_and.x == 8, "Syntactic dispatch: OpIVec2 & OpIVec2 x should be 8");
+	Assert(result_and.y == 2, "Syntactic dispatch: OpIVec2 & OpIVec2 y should be 2");
+
+	OpIVec2 result_or = a | b;
+	Assert(result_or.x == 14, "Syntactic dispatch: OpIVec2 | OpIVec2 x should be 14");
+	Assert(result_or.y == 14, "Syntactic dispatch: OpIVec2 | OpIVec2 y should be 14");
+
+	OpIVec2 result_xor = a ^ b;
+	Assert(result_xor.x == 6, "Syntactic dispatch: OpIVec2 ^ OpIVec2 x should be 6");
+	Assert(result_xor.y == 12, "Syntactic dispatch: OpIVec2 ^ OpIVec2 y should be 12");
+
+	OpIVec2 result_not = ~a;
+	Assert(result_not.x == -13, "Syntactic dispatch: ~OpIVec2 x should be -13");
+	Assert(result_not.y == -11, "Syntactic dispatch: ~OpIVec2 y should be -11");
+}
+
+void TestSyntacticLogicalDispatch() {
+	OpVec2 zero = OpVec2(0.0f, 0.0f);
+	OpVec2 nonzero = OpVec2(1.0f, 2.0f);
+
+	Assert(!(zero && zero), "Syntactic dispatch: zero && zero should be false");
+	Assert(nonzero && nonzero, "Syntactic dispatch: nonzero && nonzero should be true");
+	Assert(zero || nonzero, "Syntactic dispatch: zero || nonzero should be true");
+}
+
+// --- Compound-assignment resolution: in-place <op>_assign vs plain fallback ---
+[operator("multiply_assign")]
+void AssignOnlyMul(int32 s) extends OpAssignOnly {
+	this.n = this.n * 10 + s;   // distinctive so a wrong dispatch is obvious (4*10+3=43, not 12)
+}
+
+[operator("multiply")]
+OpPlainOnly PlainOnlyMul(int32 s) extends OpPlainOnly {
+	OpPlainOnly r;
+	r.n = this.n * s;
+	return r;
+}
+
+void TestCompoundAssignmentResolution() {
+	// A type defining ONLY the in-place form: `v *= s` must dispatch to it (no plain operator exists,
+	// so a semantic/HIR disagreement would reject it or fall through to a raw object binary op).
+	OpAssignOnly a;
+	a.n = 4;
+	a *= 3;
+	Assert(a.n == 43, "Compound assign: _assign-only type dispatches the in-place form");
+
+	// A type defining ONLY the plain operator: `v *= s` falls back to `v = v * s`.
+	OpPlainOnly p;
+	p.n = 4;
+	p *= 3;
+	Assert(p.n == 12, "Compound assign: plain-only type falls back to v = v * s");
+
+	// The same fallback must hold for an object-typed FIELD (the MemberAccess path), not just a variable.
+	OpFieldOuter o;
+	o.inner.n = 4;
+	o.inner *= 3;
+	Assert(o.inner.n == 12, "Compound assign: plain-only operator on an object field stores back");
+
+	// When BOTH forms exist the in-place form wins (it mutates and returns void).
+	OpVec2 v = OpVec2(4.0f, 4.0f);
+	v *= 3.0f;   // uses MultiplyAssign(float), not Multiply(float)
+	Assert(v.x == 12.0f, "Compound assign: in-place form takes priority when both are defined");
+}

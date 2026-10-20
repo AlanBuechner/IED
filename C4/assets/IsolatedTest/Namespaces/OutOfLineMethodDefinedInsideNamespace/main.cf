@@ -1,0 +1,14 @@
+namespace Ns {
+	int32 Helper(int32 x) { return x * 2; }
+	class C { int32 v; public void Set(int32 x); public int32 Get(); }
+	void C::Set(int32 x) { this.v = x; }
+	int32 C::Get() { return this.v; }
+}
+int32 main() {
+	Ns::C* c = new Ns::C();
+	c->Set(5);
+	if (c->Get() != 5) { printf("FAIL method %d\n", c->Get()); return 1; }
+	if (Ns::Helper(21) != 42) { printf("FAIL helper %d\n", Ns::Helper(21)); return 1; }
+	printf("NS OUT-OF-LINE METHOD OK\n");
+	return 0;
+}

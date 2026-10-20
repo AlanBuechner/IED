@@ -1,0 +1,31 @@
+// Function-pointer NULL handling: initializing a funcptr with `null` must work, mirroring C++'s
+// `FuncType f = nullptr;`. Before this fix the INIT path rejected it ("Cannot initialize ... 'void*'")
+// while the ASSIGNMENT (`f = null`) and COMPARISON (`f == null`) paths both worked - a divergence of
+// the same class as the pointer-assignment upcast bug (one code path missing a rule its siblings have).
+// Locked so the init/assign/compare forms stay consistent.
+int32 Add(int32 a, int32 b) { return a + b; }
+int32 Mul(int32 a, int32 b) { return a * b; }
+
+int32 main()
+{
+    // (1) initialize with null - the previously-broken form
+    funcptr<int32(int32,int32)> f = null;
+    if (f != null) return 1;          // must be null after init
+
+    // (2) assign a real function, call through it
+    f = Add;
+    if (f(2, 3) != 5) return 2;
+
+    // (3) reassign to null again, guard idiom still works
+    f = null;
+    if (f != null) return 3;
+    f = Mul;
+    if (f(3, 4) != 12) return 4;
+
+    // (4) a second funptr initialized non-null from the start (control)
+    funcptr<int32(int32,int32)> g = Add;
+    if (g == null) return 5;
+    if (g(1, 1) != 2) return 6;
+
+    return 0;
+}

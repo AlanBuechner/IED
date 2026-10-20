@@ -1,0 +1,3 @@
+[test_setup] void PrepareA() {}
+[test_setup] void PrepareB() {}
+[test("a.b")] void TestRuns() {}

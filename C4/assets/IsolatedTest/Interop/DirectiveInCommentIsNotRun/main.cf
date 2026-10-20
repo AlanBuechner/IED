@@ -1,0 +1,3 @@
+// A directive mentioned in a comment is not one: extern "c" include "nowhere.h" must not run (InteropPassTest).
+/* extern "c" include "also_nowhere.h" */
+int32 main() { return 0; }

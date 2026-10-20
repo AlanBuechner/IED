@@ -1,0 +1,51 @@
+include "tls.ch"
+
+struct PerThread
+{
+	public int32 id = 0;
+	[operator("create")] public void Init() { id = Tls::NextStart(); }
+	[operator("delete")] public void Drop() { Tls::NoteEnd(); }
+}
+
+struct Risky
+{
+	public int32 value = 0;
+	[operator("create")] public void Init()
+	{
+		if (Tls::NextAttempt() == 1) throw 5;
+		value = 9;
+	}
+}
+
+thread_local PerThread t_state;
+thread_local int32 t_counter = 5;
+thread_local Risky t_risky;
+thread_local int32 t_base = Seed();
+thread_local int32 t_chained = t_base + 1;
+
+int32 Seed() { return 3; }
+
+int32 StateId() { return t_state.id; }
+
+int32 Bump()
+{
+	t_counter++;
+	return t_counter;
+}
+
+int32 HostFrames()
+{
+	Tls::t_hostFrames++;
+	return Tls::t_hostFrames;
+}
+
+int32 FramesInCatch()
+{
+	try { Tls::Fail(3); }
+	catch (int32 e) { return Tls::t_hostFrames + e; }
+	return 0;
+}
+
+int32 RiskyValue() { return t_risky.value; }
+
+int32 Chained() { return t_chained; }

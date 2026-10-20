@@ -1,0 +1,8 @@
+struct Tagged {
+	public const int32 id = 3;
+}
+int32 main() {
+	Tagged t;
+	t.id = 4;
+	return t.id;
+}

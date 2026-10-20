@@ -1,0 +1,9 @@
+include "bedrock.ch"
+
+class B {
+    int32 x;
+    [operator("create")]
+    public void Init(int32 v) { this->x = v; }
+    public int32 Get() { return this->x; }
+}
+int32 main() { B* b = new B{5}; printf("WITH-BEDROCK x=%d\n", b->Get()); delete b; return 0; }

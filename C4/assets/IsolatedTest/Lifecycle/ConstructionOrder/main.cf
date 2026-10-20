@@ -1,0 +1,59 @@
+// Construction runs the base create, then the members' creates in declaration order, then the own
+// create body; destruction runs the own delete body, then the members' deletes in reverse order, then
+// the base's (D-07). A type with no create / delete of its own still constructs and destroys its parts.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int64 g_trace = 0;
+void Note(int32 event) { g_trace = g_trace * 10 + event; }
+
+class Part {
+	[operator("create")] public void Init() { Note(2); }
+	[operator("delete")] public void Delete() { Note(7); }
+}
+class Other {
+	[operator("create")] public void Init() { Note(3); }
+	[operator("delete")] public void Delete() { Note(6); }
+}
+class Base {
+	[operator("create")] public void Init() { Note(1); }
+	[operator("delete")] public void Delete() { Note(9); }
+}
+class Whole : Base {
+	public Part part;
+	public int32 plain;
+	public Other other;
+	[operator("create")] public void Init() { Note(4); }
+	[operator("delete")] public void Delete() { Note(5); }
+}
+class Holder { public Part p; public Other o; }
+class Many { public Part[3] parts; }
+class DerivedHolder : Holder { }
+
+void LocalWhole() { Whole w; }
+void LocalHolder() { Holder h; }
+void LocalMany() { Many m; }
+void LocalDerivedHolder() { DerivedHolder d; }
+
+int32 main() {
+	LocalWhole();
+	Check(g_trace == 12345679, "local: base, members in order, body; then body, members reversed, base");
+	g_trace = 0;
+	LocalHolder();
+	Check(g_trace == 2367, "no own create/delete: the members are still constructed and destroyed");
+	g_trace = 0;
+	LocalMany();
+	Check(g_trace == 222777, "an array member constructs and destroys every element");
+	g_trace = 0;
+	LocalDerivedHolder();
+	Check(g_trace == 2367, "a derived type with nothing of its own constructs and destroys its base");
+	g_trace = 0;
+	Whole* heap = new Whole();
+	Check(g_trace == 1234, "new runs the same construction");
+	delete heap;
+	Check(g_trace == 12345679, "delete runs the same destruction");
+	return g_failures;
+}

@@ -1,0 +1,3 @@
+struct Base { public Derived extra; }
+struct Derived : Base { public int32 x; }
+int32 main() { return 0; }

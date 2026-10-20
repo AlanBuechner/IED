@@ -1,0 +1,5 @@
+struct Money {
+	public int32 cents;
+	[operator("+")] private Money Add(const Money& other) { Money m; m.cents = this.cents + other.cents; return m; }
+}
+int32 main() { Money a; Money b; Money c = a + b; return c.cents; }

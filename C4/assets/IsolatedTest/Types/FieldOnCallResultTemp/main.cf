@@ -1,0 +1,43 @@
+// Regression lock for the RESOLVED [CRITICAL] "field access on a by-value struct temporary" bug
+// (WORK.md t216/t217/t219). Reading a field of a call-result temporary - used directly as a call
+// argument, or assigned to a local - must produce correct values at -O0 and -O2. Before the fix this
+// was an access violation (as a call arg) or silent garbage (assigned to a local); only materializing
+// the temporary into a named local first worked.
+
+namespace Math {
+	template<T> class TVector2 { public T[2] data; }
+	alias V2F = TVector2<float>;
+	V2F V2F_Make(float x, float y) { V2F v; v.data[0]=x; v.data[1]=y; return v; }
+	V2F V2F_Sub(V2F a, V2F b) { V2F r; r.data[0]=a.data[0]-b.data[0]; r.data[1]=a.data[1]-b.data[1]; return r; }
+	// Plain (non-template) struct control: the trigger was not specific to packed/template types.
+	struct P2 { float x, y; }
+	P2 P_Sub(P2 a, P2 b) { P2 r; r.x=a.x-b.x; r.y=a.y-b.y; return r; }
+}
+
+int32 CheckClose(float v, float want) { return (v < want-0.001f || v > want+0.001f) ? 1 : 0; }
+
+int32 main() {
+	Math::V2F a = Math::V2F_Make(1.0f, 2.0f);
+	Math::V2F b = Math::V2F_Make(3.0f, 4.0f);
+
+	// t217: field of the CALL-RESULT temporary used directly as a CALL ARGUMENT (was an AV).
+	if (CheckClose(Math::V2F_Sub(a,b).data[0], -2.0f) != 0) return 10;
+	if (CheckClose(Math::V2F_Sub(a,b).data[1], -2.0f) != 0) return 11;
+
+	// t216: field of the CALL-RESULT temporary assigned to a LOCAL, then used (was silent garbage).
+	float dx = Math::V2F_Sub(a,b).data[0];
+	float dy = Math::V2F_Sub(a,b).data[1];
+	if (CheckClose(dx, -2.0f) != 0) return 20;
+	if (CheckClose(dy, -2.0f) != 0) return 21;
+
+	// t219: add a plain-struct control to prove it is not template/packed-specific.
+	Math::P2 p1; p1.x = 1.0f; p1.y = 5.0f;
+	Math::P2 p2; p2.x = 0.5f; p2.y = 3.0f;
+	if (CheckClose(Math::P_Sub(p1, p2).x, 0.5f) != 0) return 30;
+	if (CheckClose(Math::P_Sub(p1, p2).y, 2.0f) != 0) return 31;
+
+	// Control: materialize into a named local first (the historical workaround) still works.
+	Math::V2F sub = Math::V2F_Sub(a,b);
+	if (CheckClose(sub.data[0], -2.0f) != 0) return 40;
+	return 0;
+}

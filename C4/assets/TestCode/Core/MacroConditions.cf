@@ -1,0 +1,54 @@
+// Core - #if conditions (B4, BUG-020): C's integer constant expressions over macro values.
+include "../Framework/Assert.ch"
+include "MacroConditions.ch"
+
+#define MC_ZERO 0
+#define MC_SIX 6
+#define MC_FEATURES (1 << 2 | 1)
+#define MC_HAS(feature) ((MC_FEATURES & (feature)) != 0)
+
+#if MC_ZERO
+#define MC_ZERO_IS_TRUE 1
+#endif
+
+#if MC_SIX * 2 == 12 && MC_SIX % 4 == 2 && -MC_SIX < 0
+#define MC_ARITHMETIC 1
+#endif
+
+#if MC_HAS(4) && !MC_HAS(2)
+#define MC_FEATURE_FOUR 1
+#endif
+
+#if defined MC_SIX && defined(MC_ZERO) && !defined(MC_NOPE) && MC_NOPE == 0
+#define MC_DEFINED_FORMS 1
+#endif
+
+#if MC_SIX > 10
+#define MC_BAND 3
+#elif MC_SIX > 5
+#define MC_BAND 2
+#else
+#define MC_BAND 1
+#endif
+
+#if (MC_SIX ? 0x10 : 0b1) == 16 && 'A' == 65 && 010 == 8
+#define MC_LITERALS 1
+#endif
+
+#if 0 && (1 / MC_ZERO)
+#define MC_SHORT_CIRCUIT_FAILED 1
+#endif
+
+void TestMacroConditions() {
+#ifdef MC_ZERO_IS_TRUE
+	AssertIntEquals(0, 1, "#define X 0 then #if X is false");
+#endif
+	AssertIntEquals(1, MC_ARITHMETIC, "arithmetic, remainder and negation in #if");
+	AssertIntEquals(1, MC_FEATURE_FOUR, "a function-like macro in #if");
+	AssertIntEquals(1, MC_DEFINED_FORMS, "defined X, defined(X), and an undefined name is 0");
+	AssertIntEquals(2, MC_BAND, "#elif picks the first true branch");
+	AssertIntEquals(1, MC_LITERALS, "?:, hex, binary, octal and character literals");
+#ifdef MC_SHORT_CIRCUIT_FAILED
+	AssertIntEquals(0, 1, "&& skips its right side");
+#endif
+}

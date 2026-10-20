@@ -1,0 +1,24 @@
+// Inside a class-template method, the class's parameters may be written as arguments of a function
+// template (`Hash<K>(k)` in a `Map<K, V>`).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<T> uint32 Hash(const T& v) { return (uint32)sizeof(T) * 31u; }
+
+template<K, V>
+class Map {
+	public K key;
+	public V value;
+	public uint32 KeyHash() { return Hash<K>(key); }
+	public uint32 ValueHash() { return Hash(value); }
+}
+
+int32 main() {
+	Map<int64, int8> m;
+	Check(m.KeyHash() == 8u * 31u, "a written argument naming the class parameter");
+	Check(m.ValueHash() == 31u, "a deduced argument of the class parameter's type");
+	return g_failures;
+}

@@ -1,0 +1,41 @@
+// A host header's macros reach the script files that include it, a script defines its own, and the host's
+// ScriptOptions.Define reaches the script's conditionals.
+include "scripttest.ch"
+include "macros.ch"
+
+namespace Macros
+{
+	int32 Scaled(int32 v) { return v * SCALE; }
+}
+
+int32 CallWith(Scripting::Script* script, const char* name, int32 v)
+{
+	funcptr<int32(int32)> fn = (funcptr<int32(int32)>)script->Address(name);
+	return fn == nullptr ? -1000 : fn(v);
+}
+
+void CheckMacros(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::ScriptOptions options = ScriptTest::OptionsFor(checks, "macros", "macros.cf");
+	options.Define("BONUS=10");
+	Scripting::Script* script = ScriptTest::Load(host, checks, options);
+	if (!script->Ok()) return;
+	checks.Equal(19 + 12, CallWith(script, "UseMacros", 3), "the host's macros and the script's own");
+	checks.Equal(10, CallWith(script, "Bonus", 0), "a define from the options");
+	funcptr<const char*()> name = (funcptr<const char*()>)script->Address("Name");
+	checks.That(name != nullptr && ScriptTest::SameText(name(), "game"), "a string macro of the host");
+	script->Unload();
+
+	Scripting::Script* plain = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "macros-plain", "macros.cf"));
+	if (plain->Ok()) checks.Equal(0, CallWith(plain, "Bonus", 0), "without the define");
+	plain->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Macros");
+	CheckMacros(host, checks);
+	return checks.End("Macros");
+}

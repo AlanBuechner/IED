@@ -1,0 +1,51 @@
+// BUG-060: every call - including the constructor inside new, allocation and delete - carries the
+// handler's funclet and unwinds to the enclosing try.
+struct Box {
+	public int32 v;
+	[operator("create")] public void Init(int32 x) { if (x < 0) throw x; v = x; }
+};
+
+int32 NewInsideCatch() {
+	int32 r = 0;
+	try { throw 5; }
+	catch (int32 e) {
+		Box* b = new Box(e);
+		r = b->v;
+		delete b;
+	}
+	return r;
+}
+
+int32 ThrowingCtorThroughNew() {
+	int32 r = 0;
+	try { Box* b = new Box(-7); r = b->v; }
+	catch (int32 e) { r = e; }
+	return r;
+}
+
+int32 ThrowingCtorTemporary() {
+	int32 r = 0;
+	try { Box b = Box(-8); r = b.v; }
+	catch (int32 e) { r = e; }
+	return r;
+}
+
+int32 NestedTryInsideHandler() {
+	int32 r = 0;
+	try { throw 1; }
+	catch (int32 a) {
+		try { Box* b = new Box(-2); r = 100; }
+		catch (int32 b) { r = a + b * 10; }
+	}
+	return r;
+}
+
+int32 main() {
+	int32 failures = 0;
+	if (NewInsideCatch() != 5) failures++;
+	if (ThrowingCtorThroughNew() != -7) failures++;
+	if (ThrowingCtorTemporary() != -8) failures++;
+	if (NestedTryInsideHandler() != -19) failures++;
+	if (failures != 0) printf("CallsInsideHandlers failures: %d\n", failures);
+	return failures;
+}

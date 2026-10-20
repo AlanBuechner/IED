@@ -1,0 +1,6 @@
+const int32 kGroup = 3;
+
+[group(kGroup)]
+int32 Grouped() { return 1; }
+
+int32 main() { return Grouped(); }

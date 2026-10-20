@@ -1,0 +1,64 @@
+include "queue.ch"
+include "hash.ch"
+
+// The `count` elements from `head`, wrapping, are live objects; the other slots are raw storage.
+
+namespace Core
+{
+	template<T>
+	public void Queue::CopyFrom(const Queue<T>& other) {
+		Reserve(other.count);
+		for (int64 k = 0; k < other.count; ++k) new (&data[k]) T(other.data[(other.head + k) & (other.capacity - 1)]);
+		count = other.count;
+	}
+
+	template<T>
+	public void Queue::Delete() {
+		Clear();
+		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data); }
+		data = nullptr;
+		capacity = 0;
+	}
+
+	template<T>
+	public void Queue::Clear() {
+		for (int64 k = 0; k < count; ++k) destroy(&data[(head + k) & (capacity - 1)]);
+		count = 0;
+		head = 0;
+	}
+
+	// Moves the live elements, in order, to the start of a buffer of the new capacity.
+	template<T>
+	public void Queue::Reserve(int64 wanted) {
+		int64 grown = NextPowerOfTwo(wanted);
+		if (grown <= capacity) return;
+		T* larger = AllocateElements<T>(grown);
+		gc_register_region((void*)larger, (uint64)(grown * (int64)sizeof(T)));
+		int64 first = capacity - head < count ? capacity - head : count;   // from head to the old buffer's end
+		if (count > 0) {
+			memcpy((void*)larger, (void*)&data[head], (uint64)(first * (int64)sizeof(T)));
+			memcpy((void*)&larger[first], (void*)data, (uint64)((count - first) * (int64)sizeof(T)));
+		}
+		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data); }
+		data = larger;
+		capacity = grown;
+		head = 0;
+	}
+
+	template<T>
+	public void Queue::Push(const T& value) {
+		T held = value;   // value may be an element of this queue: copy it before the buffer moves
+		if (count == capacity) Reserve(capacity < 4 ? 4 : capacity * 2);
+		new (&data[(head + count) & (capacity - 1)]) T(take(held));
+		count += 1;
+	}
+
+	template<T>
+	public T Queue::Pop() {
+		if (count == 0) { T none; return none; }
+		T front = take(data[head]);
+		head = (head + 1) & (capacity - 1);
+		count -= 1;
+		return front;
+	}
+}

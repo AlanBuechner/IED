@@ -1,0 +1,21 @@
+// `#param` turns a macro argument into a string literal as written (docs/language/02).
+#define STR(x) #x
+#define XSTR(x) STR(x)
+#define VERSION 3
+#define NAMED(var) "var=" #var
+
+[test("macros.stringize.as_written")]
+public static void TestAsWritten() {
+    assert_true(strcmp(STR(hello), "hello") == 0, "a name");
+    assert_true(strcmp(STR(a   +    b), "a + b") == 0, "spaces collapse to one");
+    assert_true(strcmp(STR(VERSION), "VERSION") == 0, "the argument is not expanded first");
+    assert_true(strcmp(XSTR(VERSION), "3") == 0, "two levels expand it first");
+    assert_true(strcmp(STR(), "") == 0, "an empty argument");
+}
+
+[test("macros.stringize.literals")]
+public static void TestLiteralsInArguments() {
+    assert_true(strcmp(STR("q"), "\"q\"") == 0, "quotes are escaped");
+    assert_true(strcmp(STR('\n'), "'\\n'") == 0, "a backslash in a literal is escaped");
+    assert_true(strcmp(NAMED(count), "var=count") == 0, "a parameter name inside a literal of the body is not replaced");
+}

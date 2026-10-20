@@ -1,0 +1,192 @@
+// Math quaternions: rotation of vectors, composition, inverses, Euler angles, interpolation and matrices.
+
+include "math.ch"
+
+bool NearRotation(const Math::Mat3& a, const Math::Mat3& b) { return Math::NearlyEqual(a, b, 1e-5f); }
+bool NearVec3(Math::FVector3 v, Math::FVector3 expected) { return Math::NearlyEqual(v, expected, 1e-5f); }
+// q and -q are the same rotation.
+bool SameRotation(Math::Quat a, Math::Quat b) { return Math::NearlyEqual(a, b, 1e-5f) || Math::NearlyEqual(a, -b, 1e-5f); }
+
+Math::Quat YawPitchRoll(Math::FVector3 e) {
+	return Math::AngleAxis(e.y, Math::FVector3::Up) * Math::AngleAxis(e.x, Math::FVector3::Right) * Math::AngleAxis(e.z, Math::FVector3::Forward);
+}
+
+[test("math.quaternion")]
+class MathQuaternionTests {
+	[test("identity")]
+	public static void TestIdentity() {
+		assert_eq(16, (int32)sizeof(Math::Quat), "four floats");
+		Math::Quat q;
+		assert_true(q == Math::Quat::Identity, "a default quat is the identity");
+		assert_feq(1.0, q.w, 0.0, "w is last");
+		Math::FVector3 v = Math::FVector3(1.0f, 2.0f, 3.0f);
+		assert_true(q * v == v, "the identity rotates nothing");
+		assert_true(Math::ToMat3(q) == Math::Mat3::Identity, "its matrix is the identity");
+		assert_true(Math::Quat(Math::FVector3(1.0f, 2.0f, 3.0f), 4.0f) == Math::Quat(1.0f, 2.0f, 3.0f, 4.0f), "a vector and a w");
+		assert_true(Math::Quat(1.0f, 2.0f, 3.0f, 4.0f).Vector() == v, "the vector part");
+	}
+
+	[test("angle_axis")]
+	public static void TestAngleAxis() {
+		Math::Quat turn = Math::AngleAxis(Math::kHalfPi, Math::FVector3::Up);
+		assert_true(NearVec3(turn * Math::FVector3::Right, Math::FVector3::Backward), "a quarter turn about up takes right to backward");
+		assert_true(NearVec3(turn * Math::FVector3::Forward, Math::FVector3::Right), "and forward to right");
+		assert_true(NearVec3(turn * Math::FVector3::Up, Math::FVector3::Up), "the axis stays");
+		Math::Quat scaledAxis = Math::AngleAxis(Math::kHalfPi, Math::FVector3(0.0f, 5.0f, 0.0f));
+		assert_true(SameRotation(scaledAxis, turn), "the axis is normalized");
+		assert_feq(1.0, Math::Length(scaledAxis), 1e-6, "so the quat is unit length");
+		Math::Quat half = Math::AngleAxis(Math::kPi, Math::FVector3::Forward);
+		assert_true(NearVec3(half * Math::FVector3::Right, Math::FVector3::Left), "a half turn");
+		assert_true(NearRotation(Math::ToMat3(turn), Math::Rotation(Math::kHalfPi, Math::FVector3::Up).ToMat3()), "the same as the matrix rotation");
+	}
+
+	[test("angle_and_axis_of")]
+	public static void TestAngleAndAxisOf() {
+		Math::FVector3 axis = Math::Normalized(Math::FVector3(1.0f, 2.0f, -2.0f));
+		Math::Quat q = Math::AngleAxis(1.25f, axis);
+		assert_feq(1.25, Math::Angle(q), 1e-5, "the angle back");
+		assert_true(NearVec3(Math::Axis(q), axis), "the axis back");
+		assert_feq(0.0, Math::Angle(Math::Quat::Identity), 0.0, "the identity has no angle");
+		assert_true(Math::Axis(Math::Quat::Identity) == Math::FVector3::UnitX, "and +X as its axis");
+		assert_feq(Math::kTau, Math::Angle(Math::Quat(0.0f, 0.0f, 0.0f, -1.0f)), 1e-5, "-1 is a full turn");
+	}
+
+	[test("composition")]
+	public static void TestComposition() {
+		Math::Quat a = Math::AngleAxis(0.4f, Math::FVector3::Up);
+		Math::Quat b = Math::AngleAxis(-1.3f, Math::FVector3(1.0f, 1.0f, 0.0f));
+		Math::FVector3 v = Math::FVector3(0.5f, -2.0f, 3.0f);
+		assert_true(NearVec3((a * b) * v, a * (b * v)), "a * b rotates by b, then a");
+		assert_true(NearRotation(Math::ToMat3(a * b), Math::ToMat3(a) * Math::ToMat3(b)), "it matches the matrix product");
+		Math::Quat sum = Math::AngleAxis(0.3f, Math::FVector3::Up) * Math::AngleAxis(0.5f, Math::FVector3::Up);
+		assert_true(SameRotation(sum, Math::AngleAxis(0.8f, Math::FVector3::Up)), "turns about one axis add");
+		assert_true(!SameRotation(a * b, b * a), "composition does not commute");
+	}
+
+	[test("inverse")]
+	public static void TestInverse() {
+		Math::Quat q = Math::AngleAxis(0.9f, Math::FVector3(0.0f, 1.0f, 1.0f));
+		assert_true(SameRotation(q * q.Inverse(), Math::Quat::Identity), "q * inverse is the identity");
+		assert_true(Math::NearlyEqual(q.Inverse(), q.Conjugate(), 1e-6f), "for a unit quat the inverse is the conjugate");
+		Math::FVector3 v = Math::FVector3(1.0f, 2.0f, 3.0f);
+		assert_true(NearVec3(q.Inverse() * (q * v), v), "undoes the rotation");
+		Math::Quat longer = q * 3.0f;
+		assert_true(SameRotation(longer * longer.Inverse(), Math::Quat::Identity), "a non-unit quat inverts too");
+		assert_true(Math::Quat(0.0f, 0.0f, 0.0f, 0.0f).Inverse() == Math::Quat::Identity, "zero gives the identity");
+		assert_true(Math::Quat(1.0f, 2.0f, 3.0f, 4.0f).Conjugate() == Math::Quat(-1.0f, -2.0f, -3.0f, 4.0f), "conjugate");
+	}
+
+	[test("length")]
+	public static void TestLength() {
+		Math::Quat q = Math::Quat(1.0f, 2.0f, 2.0f, 4.0f);
+		assert_feq(25.0, Math::Dot(q, q), 0.0, "dot");
+		assert_feq(5.0, Math::Length(q), 0.0, "length");
+		assert_true(Math::NearlyEqual(q.Normalized(), Math::Quat(0.2f, 0.4f, 0.4f, 0.8f), 1e-6f), "normalized");
+		assert_true(Math::Quat(0.0f, 0.0f, 0.0f, 0.0f).Normalized() == Math::Quat::Identity, "zero normalizes to the identity");
+	}
+
+	[test("operators")]
+	public static void TestOperators() {
+		Math::Quat a = Math::Quat(1.0f, 2.0f, 3.0f, 4.0f);
+		Math::Quat b = Math::Quat(0.5f, 0.5f, 0.5f, 0.5f);
+		assert_true(a + b == Math::Quat(1.5f, 2.5f, 3.5f, 4.5f), "add");
+		assert_true(a - b == Math::Quat(0.5f, 1.5f, 2.5f, 3.5f), "subtract");
+		assert_true(-a == Math::Quat(-1.0f, -2.0f, -3.0f, -4.0f), "negate");
+		assert_true(a * 2.0f == a + a, "scale");
+		assert_true(a != b && !(a != a), "!=");
+		Math::Quat i = Math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+		Math::Quat j = Math::Quat(0.0f, 1.0f, 0.0f, 0.0f);
+		assert_true(i * j == Math::Quat(0.0f, 0.0f, 1.0f, 0.0f), "Hamilton: i j = k");
+		assert_true(j * i == Math::Quat(0.0f, 0.0f, -1.0f, 0.0f), "j i = -k");
+		assert_true(i * i == Math::Quat(0.0f, 0.0f, 0.0f, -1.0f), "i i = -1");
+	}
+
+	[test("euler")]
+	public static void TestEuler() {
+		Math::FVector3 e = Math::FVector3(0.3f, -1.1f, 0.7f);
+		Math::Quat q = Math::FromEuler(e);
+		assert_true(SameRotation(q, YawPitchRoll(e)), "yaw * pitch * roll");
+		assert_true(NearRotation(Math::ToMat3(q), Math::RotationYXZ(e).ToMat3()), "the same rotation as RotationYXZ");
+		assert_true(NearVec3(Math::ToEuler(q), e), "and back");
+		assert_feq(0.3, Math::Pitch(q), 1e-5, "pitch");
+		assert_feq(-1.1, Math::Yaw(q), 1e-5, "yaw");
+		assert_feq(0.7, Math::Roll(q), 1e-5, "roll");
+		assert_true(NearVec3(Math::ToEuler(Math::RotationYXZ(e).ToMat3()), e), "Euler angles of a matrix");
+		assert_true(Math::FromEuler(Math::FVector3::Zero) == Math::Quat::Identity, "zero angles are the identity");
+		Math::FVector3 wide = Math::FVector3(-1.2f, 2.9f, -3.0f);
+		assert_true(NearVec3(Math::ToEuler(Math::FromEuler(wide)), wide), "angles past a quarter turn");
+		assert_true(NearVec3(Math::FromEuler(Math::FVector3(0.0f, Math::kHalfPi, 0.0f)) * Math::FVector3::Forward, Math::FVector3::Right),
+			"yaw a quarter turns forward to right");
+	}
+
+	[test("euler_gimbal_lock")]
+	public static void TestEulerGimbalLock() {
+		Math::FVector3 up = Math::FVector3(Math::kHalfPi, 0.4f, 0.0f);
+		Math::FVector3 back = Math::ToEuler(Math::FromEuler(up));
+		assert_feq(Math::kHalfPi, back.x, 1e-3, "pitch straight up");
+		assert_feq(0.4, back.y, 1e-3, "yaw holds the turn");
+		assert_feq(0.0, back.z, 0.0, "roll is zero");
+		Math::FVector3 down = Math::FVector3(-Math::kHalfPi, -0.6f, 0.0f);
+		Math::FVector3 backDown = Math::ToEuler(Math::FromEuler(down));
+		assert_feq(-Math::kHalfPi, backDown.x, 1e-3, "pitch straight down");
+		assert_feq(-0.6, backDown.y, 1e-3, "yaw keeps its sign looking down");
+		Math::Quat rolled = Math::FromEuler(Math::FVector3(Math::kHalfPi, 0.4f, 0.25f));
+		Math::FVector3 folded = Math::ToEuler(rolled);
+		assert_feq(0.0, folded.z, 0.0, "a locked roll folds into yaw");
+		assert_true(NearRotation(Math::ToMat3(Math::FromEuler(folded)), Math::ToMat3(rolled)), "and is the same rotation");
+	}
+
+	[test("interpolation")]
+	public static void TestInterpolation() {
+		Math::Quat a = Math::Quat::Identity;
+		Math::Quat b = Math::AngleAxis(Math::kHalfPi, Math::FVector3::Up);
+		assert_true(Math::NearlyEqual(Math::Slerp(a, b, 0.0f), a, 1e-6f), "slerp starts at a");
+		assert_true(Math::NearlyEqual(Math::Slerp(a, b, 1.0f), b, 1e-6f), "and ends at b");
+		Math::Quat mid = Math::Slerp(a, b, 0.5f);
+		assert_true(SameRotation(mid, Math::AngleAxis(Math::kPi / 4.0f, Math::FVector3::Up)), "halfway is half the angle");
+		assert_feq(1.0, Math::Length(mid), 1e-6, "and stays unit length");
+		assert_true(SameRotation(Math::Slerp(a, -b, 0.5f), mid), "the shorter arc when the signs disagree");
+		Math::Quat third = Math::Slerp(a, b, 1.0f / 3.0f);
+		assert_feq(Math::kPi / 6.0f, Math::Angle(third), 1e-5, "constant speed");
+		Math::Quat close = Math::AngleAxis(0.0001f, Math::FVector3::Up);
+		assert_true(Math::NearlyEqual(Math::Slerp(a, close, 0.5f), Math::Lerp(a, close, 0.5f), 1e-6f), "nearly equal rotations lerp");
+		assert_true(Math::Lerp(a, b, 0.0f) == a, "lerp starts at a");
+		Math::Quat lerped = Math::Lerp(Math::Quat(0.0f, 0.0f, 0.0f, 2.0f), Math::Quat(2.0f, 0.0f, 0.0f, 0.0f), 0.5f);
+		assert_true(lerped == Math::Quat(1.0f, 0.0f, 0.0f, 1.0f), "lerp is component-wise and not normalized");
+	}
+
+	[test("matrices")]
+	public static void TestMatrices() {
+		Math::Quat q = Math::AngleAxis(2.2f, Math::Normalized(Math::FVector3(-1.0f, 0.5f, 2.0f)));
+		Math::FVector3 v = Math::FVector3(1.0f, -3.0f, 0.5f);
+		assert_true(NearVec3(Math::ToMat3(q) * v, q * v), "the matrix rotates like the quat");
+		Math::Mat4 m4 = Math::ToMat4(q);
+		assert_true(NearVec3(m4.TransformPoint(v), q * v), "mat4 too");
+		assert_true(m4.At(3, 3) == 1.0f && m4.At(0, 3) == 0.0f, "with no translation");
+		assert_true(SameRotation(Math::FromMat3(Math::ToMat3(q)), q), "and back");
+		assert_true(SameRotation(Math::FromMat4(m4), q), "from a mat4");
+		assert_true(SameRotation(Math::FromMat3(Math::Mat3::Identity), Math::Quat::Identity), "the identity matrix");
+	}
+
+	// FromMat3 picks its formula by the largest of w, x, y, z: half turns about each axis reach every branch.
+	[test("from_matrix_branches")]
+	public static void TestFromMatrixBranches() {
+		Math::FVector3[3] axes = { Math::FVector3::Right, Math::FVector3::Up, Math::FVector3::Forward };
+		for (int32 i = 0; i < 3; ++i) {
+			Math::Quat half = Math::AngleAxis(Math::kPi, axes[i]);
+			assert_true(SameRotation(Math::FromMat3(Math::ToMat3(half)), half), "a half turn about one axis");
+			Math::Quat most = Math::AngleAxis(2.8f, axes[i] + Math::FVector3(0.1f));
+			assert_true(SameRotation(Math::FromMat3(Math::ToMat3(most)), most), "close to a half turn");
+		}
+		Math::Quat small = Math::AngleAxis(0.2f, Math::FVector3(1.0f, 1.0f, 1.0f));
+		assert_true(SameRotation(Math::FromMat3(Math::ToMat3(small)), small), "a small turn takes the w branch");
+	}
+
+	[test("nearly_equal")]
+	public static void TestNearlyEqual() {
+		Math::Quat a = Math::Quat(0.0f, 0.0f, 0.0f, 1.0f);
+		assert_true(Math::NearlyEqual(a, Math::Quat(0.0f, 0.0f, 1e-7f, 1.0f), 1e-6f), "within epsilon");
+		assert_true(!Math::NearlyEqual(a, Math::Quat(0.0f, 0.1f, 0.0f, 1.0f), 1e-3f), "outside epsilon");
+		assert_true(!Math::NearlyEqual(a, -a, 1e-3f), "lane-wise: -q is not near q");
+	}
+}

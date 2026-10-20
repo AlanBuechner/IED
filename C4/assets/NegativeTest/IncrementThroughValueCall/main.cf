@@ -1,0 +1,4 @@
+struct Data { public int32 x; }
+Data gD;
+Data GetV() { return gD; }
+int32 main(){ GetV().x++; return 0; }

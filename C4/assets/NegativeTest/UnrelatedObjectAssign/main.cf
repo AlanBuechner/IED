@@ -1,0 +1,7 @@
+struct A {
+	public int32 v;
+}
+struct B {
+	public int32 v;
+}
+int32 main() { A a; B b; a = b; return 0; }

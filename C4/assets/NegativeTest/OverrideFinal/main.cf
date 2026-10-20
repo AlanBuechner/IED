@@ -1,0 +1,7 @@
+class Base {
+	public virtual int32 F() final { return 1; }
+}
+class Derived : public Base {
+	public int32 F() override { return 2; }
+}
+int32 main() { return 0; }

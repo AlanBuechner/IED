@@ -1,0 +1,57 @@
+// The reflection registry from several threads (D-48): readers look up, count and iterate the program's own
+// entities and groups while the main thread unloads and registers a script source again and again. Every
+// lookup of an entity that is never unloaded finds it. main returns the failures.
+extern "c" include "script.h"
+extern "c" source "script.c"
+include "bedrock.ch"
+
+[group("stable")] struct Player { public int32 hp; public float speed; }
+[group("stable")] int32 g_score = 0;
+[group("stable")] void Tick() { }
+
+struct Reader {
+	public int32 failures;
+	public int32 done;
+}
+
+const int32 kReaders = 4;
+const int32 kReloads = 300;
+
+int32 LookUp() {
+	int32 failures = 0;
+	Reflection::Type player = Reflection::FindType("Player");
+	if (!player.IsValid() || player.FieldCount() != 2) failures++;
+	if (!Reflection::FindVariable("g_score").IsValid() || !Reflection::FindFunction("Tick").IsValid()) failures++;
+	if (Reflection::TypeCount() < 1) failures++;
+	int64 seen = 0;
+	for (int64 i = 0; i < Reflection::TypeCount(); i++) if (Reflection::TypeAt(i).IsValid()) seen++;
+	if (seen < 1) failures++;
+	Reflection::FindType("Script::Enemy");
+	return failures;
+}
+
+void Read(void* state) {
+	Reader* r = (Reader*)state;
+	while (atomic_load(&r->done, MemoryOrder::Acquire) == 0) r->failures += LookUp();
+	r->failures += LookUp();
+}
+
+int32 main() {
+	Reader*[kReaders] readers;
+	void*[kReaders] threads;
+	for (int32 i = 0; i < kReaders; i++) {
+		readers[i] = new Reader;
+		threads[i] = thread_start(Read, (void*)readers[i]);
+	}
+	int32 failures = 0;
+	for (int32 i = 0; i < kReloads; i++) {
+		if (ScriptRegister() != 3) failures++;
+		if (Reflection::UnloadSource("script") != 3) failures++;
+	}
+	for (int32 i = 0; i < kReaders; i++) atomic_store(&readers[i]->done, 1, MemoryOrder::Release);
+	for (int32 i = 0; i < kReaders; i++) {
+		thread_join(threads[i]);
+		failures += readers[i]->failures;
+	}
+	return failures;
+}

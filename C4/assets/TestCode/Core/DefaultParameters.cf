@@ -1,0 +1,38 @@
+// Core - Default Parameter Tests (implementation)
+include "../Framework/Assert.ch"
+include "DefaultParameters.ch"
+
+// Regression: default parameters are a documented feature (SKILL.md "default arguments", doc 05
+// "default args filled at resolution"), but the call lowerer never filled omitted trailing args with
+// their declared defaults - so `F(1)` for `F(int32 a, int32 b = 5)` passed too few operands and
+// codegen emitted a NULL operand -> "IR verification failed: Operand is null". The default expression
+// now lives on the FunctionRecord (paramDefaults) and is re-lowered in the caller's context at each
+// call site, per C++ semantics.
+
+int32 DpAdd(int32 a, int32 b = 5) { return a + b; }
+int32 DpPow(int32 base, int32 exp = 2) { int32 r = 1; for (int32 i = 0; i < exp; ++i) r *= base; return r; }
+int32 DpThree(int32 a = 1, int32 b = 2, int32 c = 3) { return a + b + c; }
+
+struct DpBox { public int32 v; };
+int32 DpMethodDefault(DpBox box, int32 add = 10) { return box.v + add; }
+
+void TestDefaultParameters() {
+	// One default: omitted trailing arg uses the declared value.
+	AssertIntEquals(6, DpAdd(1), "default param: F(1) with b=5");
+	// Explicit arg overrides the default.
+	AssertIntEquals(3, DpAdd(1, 2), "default param: explicit arg wins over default");
+
+	// Default used in a real computation (not just an identity).
+	AssertIntEquals(25, DpPow(5), "default param: pow(5) = 5^2 via default exp=2");
+	AssertIntEquals(8, DpPow(2, 3), "default param: pow(2,3) explicit overrides default");
+
+	// Multiple defaults, all omitted.
+	AssertIntEquals(6, DpThree(), "default param: all-omitted trailing defaults");
+	// Partially omitted (fill only the tail).
+	AssertIntEquals(9, DpThree(4), "default param: fill b,c after one provided");
+
+	// A method parameter with a default (class-scoped record path).
+	DpBox box; box.v = 5;
+	AssertIntEquals(15, DpMethodDefault(box), "default param: method default arg");
+	AssertIntEquals(8, DpMethodDefault(box, 3), "default param: method explicit arg");
+}

@@ -1,0 +1,3 @@
+class Box { public int32 value; }
+public void Box::Reset() { value = 0; }
+int32 main() { return 0; }

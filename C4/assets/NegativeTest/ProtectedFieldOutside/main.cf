@@ -1,0 +1,4 @@
+class Gear {
+	protected int32 level = 1;
+}
+int32 main() { Gear g; return g.level; }

@@ -1,0 +1,2 @@
+class NV { public union { packed float x, y, z, w; }; }
+int32 main() { NV v; void* p = &v.xy; return 0; }

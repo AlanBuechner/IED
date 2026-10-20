@@ -1,0 +1,152 @@
+include "array.ch"
+
+// Elements [0, count) are live objects; [count, capacity) is raw storage. Moving the buffer copies bytes:
+// objects are trivially relocatable (docs/language/06).
+
+namespace Core
+{
+	template<T>
+	private void Array::Reallocate(int64 newCapacity) {
+		T* old = data;
+		data = newCapacity > 0 ? AllocateElements<T>(newCapacity) : nullptr;
+		if (data) gc_register_region((void*)data, (uint64)(newCapacity * (int64)sizeof(T)));
+		if (count > 0) memcpy((void*)data, (void*)old, (uint64)(count * (int64)sizeof(T)));
+		if (old) { gc_unregister_region((void*)old); FreeElements<T>(old); }
+		capacity = newCapacity;
+	}
+
+	template<T>
+	private void Array::Grow(int64 needed) {
+		int64 grown = capacity < 2 ? 4 : capacity * 2;
+		Reallocate(needed > grown ? needed : grown);
+	}
+
+	template<T>
+	public void Array::Init(InitList<T> items) {
+		Reserve((int64)items.size);
+		for (int64 k = 0; k < (int64)items.size; ++k) new (&data[k]) T(items[k]);
+		count = (int64)items.size;
+	}
+
+	template<T>
+	public void Array::CopyFrom(const Array<T>& other) {
+		Reserve(other.count);
+		for (int64 k = 0; k < other.count; ++k) new (&data[k]) T(other.data[k]);
+		count = other.count;
+	}
+
+	template<T>
+	public void Array::Delete() {
+		Clear();
+		Reallocate(0);
+	}
+
+	template<T>
+	public void Array::Clear() {
+		for (int64 k = 0; k < count; ++k) destroy(&data[k]);
+		count = 0;
+	}
+
+	template<T>
+	public void Array::Reserve(int64 wanted) {
+		if (wanted > capacity) Reallocate(wanted);
+	}
+
+	template<T>
+	public void Array::Push(const T& value) {
+		if (count < capacity) {
+			new (&data[count]) T(value);
+			count += 1;
+			return;
+		}
+		T held = value;   // value may be an element of this array: copy it before the buffer moves
+		Grow(count + 1);
+		new (&data[count]) T(take(held));
+		count += 1;
+	}
+
+	template<T>
+	public T Array::Pop() {
+		if (count == 0) { T none; return none; }
+		count -= 1;
+		return take(data[count]);
+	}
+
+	template<T>
+	public void Array::Insert(int64 index, const T& value) {
+		if (index > count) index = count;
+		T held = value;   // value may be an element of this array: copy it before the elements move
+		if (count == capacity) Grow(count + 1);
+		memmove((void*)&data[index + 1], (void*)&data[index], (uint64)((count - index) * (int64)sizeof(T)));
+		new (&data[index]) T(take(held));
+		count += 1;
+	}
+
+	template<T>
+	public void Array::Append(const Array<T>& other) {
+		if (&other == this) { Array<T> copy = other; Append(copy); return; }
+		Reserve(count + other.count);
+		for (int64 k = 0; k < other.count; ++k) new (&data[count + k]) T(other.data[k]);
+		count += other.count;
+	}
+
+	template<T>
+	public void Array::RemoveAt(int64 index) {
+		if (index < 0 || index >= count) return;
+		destroy(&data[index]);
+		memmove((void*)&data[index], (void*)&data[index + 1], (uint64)((count - index - 1) * (int64)sizeof(T)));
+		count -= 1;
+	}
+
+	template<T>
+	public void Array::RemoveRange(int64 first, int64 end) {
+		if (first < 0) first = 0;
+		if (end > count) end = count;
+		if (first >= end) return;
+		for (int64 k = first; k < end; ++k) destroy(&data[k]);
+		memmove((void*)&data[first], (void*)&data[end], (uint64)((count - end) * (int64)sizeof(T)));
+		count -= end - first;
+	}
+
+	template<T>
+	public void Array::RemoveSwap(int64 index) {
+		if (index < 0 || index >= count) return;
+		destroy(&data[index]);
+		count -= 1;
+		if (index != count) relocate(&data[index], &data[count]);
+	}
+
+	// Growing default-creates each new element (zero for plain data); shrinking destroys the tail.
+	template<T>
+	public void Array::Resize(int64 newCount) {
+		if (newCount < 0) newCount = 0;
+		Reserve(newCount);
+		for (int64 k = count; k < newCount; ++k) new (&data[k]) T();
+		for (int64 k = newCount; k < count; ++k) destroy(&data[k]);
+		count = newCount;
+	}
+
+	template<T>
+	public void Array::ShrinkToFit() {
+		if (count < capacity) Reallocate(count);
+	}
+
+	template<T>
+	public void Array::Swap(Array<T>& other) {
+		T* d = data; data = other.data; other.data = d;
+		int64 c = count; count = other.count; other.count = c;
+		int64 cap = capacity; capacity = other.capacity; other.capacity = cap;
+	}
+
+	template<T>
+	public int64 Array::IndexOf(const T& value) const {
+		for (int64 k = 0; k < count; ++k)
+			if (data[k] == value) return k;
+		return -1;
+	}
+
+	template<T>
+	public void Array::Reverse() {
+		for (int64 i = 0, j = count - 1; i < j; ++i, --j) SwapElements(data, i, j);
+	}
+}

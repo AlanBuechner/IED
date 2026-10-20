@@ -1,0 +1,31 @@
+include "vector.ch"
+
+namespace Math
+{
+	template<T> TVector2<T> Normalized(TVector2<T> v) {
+		T length = Length(v);
+		return length > (T)0 ? v * ((T)1 / length) : v;
+	}
+
+	template<T> TVector3<T> Normalized(TVector3<T> v) {
+		T length = Length(v);
+		return length > (T)0 ? v * ((T)1 / length) : v;
+	}
+
+	template<T> TVector4<T> Normalized(TVector4<T> v) {
+		T length = Length(v);
+		return length > (T)0 ? v * ((T)1 / length) : v;
+	}
+
+	template<T> T Angle(TVector3<T> a, TVector3<T> b) {
+		T lengths = Length(a) * Length(b);
+		if (lengths <= (T)0) return (T)0;
+		return Acos(Clamp(Dot(a, b) / lengths, (T)-1, (T)1));
+	}
+
+	template<T> TVector3<T> Project(TVector3<T> v, TVector3<T> onto) {
+		T square = Dot(onto, onto);
+		return square > (T)0 ? onto * (Dot(v, onto) / square) : TVector3<T>((T)0);
+	}
+
+}

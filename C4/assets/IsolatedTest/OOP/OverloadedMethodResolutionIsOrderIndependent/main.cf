@@ -1,0 +1,22 @@
+class Base { public int32 tag; virtual int32 Who() { return 1; } };
+class Derived : public Base { public int32 extra; virtual int32 Who() { return 2; } };
+class HolderIntFirst {
+	public int32 Probe(int32 x) { return x + 100; }
+	public int32 Probe(Base* b) { return b->tag; }
+};
+class HolderPtrFirst {
+	public int32 Probe(Base* b) { return b->tag; }
+	public int32 Probe(int32 x) { return x + 100; }
+};
+int main() {
+	Derived d;
+	d.extra = 7;
+	d.tag = 99;
+	HolderIntFirst a;
+	if (a.Probe(5) != 105) return 1;    // exact int32 overload
+	if (a.Probe(&d) != 99) return 2;    // Base* overload, vptr-shifted arg
+	HolderPtrFirst b;
+	if (b.Probe(5) != 105) return 3;    // reversed declaration order: int32 still wins
+	if (b.Probe(&d) != 99) return 4;    // Base* still resolves with the shift
+	return 0;
+}

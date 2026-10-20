@@ -1,0 +1,49 @@
+// ExtMethodCollision - regression test: a user free function whose name collides with an
+// interop EXTENSION METHOD (a COM method bound from the SDK headers) must still resolve to the
+// user's free function when called bare.
+//
+// Before the fix, `SetGuid` (a user free fn) collided with ICreateTypeInfo::SetGuid /
+// ICreateTypeLib::SetGuid (OLE extension methods auto-bound from windows.h). The extension method
+// won the global symbol slot, so a bare call was mis-mangled to `ICreateTypeInfo_SetGuid` - a
+// signature mismatch that crashed codegen (AV in ExprLowering::LowerFunctionCall). The same class
+// of bug also hit `Render`/`Update`/`Init`. This test reproduces the exact shape: a wide, mixed-
+// width param list including an interop struct pointer, a callee body that writes interop struct
+// fields, and a cross-function call. Exit code = number of failed assertions (0 = pass).
+
+extern "c++" include "game.hpp" {
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um");
+	include_dir("C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared");
+	lib("ole32.lib");
+}
+
+// User free function named `SetGuid` - collides with ICreateTypeInfo::SetGuid / ICreateTypeLib::SetGuid.
+void SetGuid(_GUID* g, int32 d1, uint16 d2, uint16 d3,
+             char b0, char b1, char b2, char b3, char b4, char b5, char b6, char b7) {
+	g->Data1 = d1;
+	g->Data2 = d2;
+	g->Data3 = d3;
+	g->Data4[0] = b0; g->Data4[1] = b1; g->Data4[2] = b2; g->Data4[3] = b3;
+	g->Data4[4] = b4; g->Data4[5] = b5; g->Data4[6] = b6; g->Data4[7] = b7;
+}
+
+// Cross-function caller (this is the call that used to mis-resolve and crash).
+void IidTest(_GUID* g) { SetGuid(g, 0x12345678, 0xABCD, 0xEF01, 1, 2, 3, 4, 5, 6, 7, 8); }
+
+// Another colliding name: `Render` (IPicture::Render is an OLE extension method).
+int32 Render(int32 a, int32 b) { return a * 2 + b; }
+
+int32 main() {
+	int32 fails = 0;
+	_GUID g;
+	IidTest(&g);
+	if (g.Data1 != 0x12345678) { printf("FAIL Data1=0x%X\n", g.Data1); fails++; }
+	if (g.Data2 != 0xABCD)     { printf("FAIL Data2=0x%X\n", g.Data2); fails++; }
+	if (g.Data3 != 0xEF01)     { printf("FAIL Data3=0x%X\n", g.Data3); fails++; }
+	if (g.Data4[0] != 1 || g.Data4[7] != 8) { printf("FAIL Data4\n"); fails++; }
+
+	int32 r = Render(10, 5);   // collides with IPicture::Render
+	if (r != 25) { printf("FAIL Render=%d\n", r); fails++; }
+
+	if (fails == 0) printf("EXT-METHOD-COLLISION TESTS OK\n");
+	return fails;
+}

@@ -1,0 +1,57 @@
+// BUG-250: a scalar initializing, assigned to, passed as or returned as a `packed T[N]` used to fill only lane 0.
+// It broadcasts to every lane after converting to the element (D-62), like an operand of an operator. A scalar
+// overload of the same function still wins. main returns the failures.
+packed float[4] g_start = 2.5f;
+packed int32[8] g_fromInt = 9;
+
+packed float[4] Twice(packed float[4] v) { return v * 2.0f; }
+packed float[4] Ones() { return 1.0f; }
+int32 Which(float value) { return 1; }
+int32 Which(packed float[4] lanes) { return 4; }
+
+struct Particle { public packed float[4] velocity; public int32 id; }
+
+int32 Differs(float actual, float expected) { return actual == expected ? 0 : 1; }
+
+int32 Locals() {
+	int32 failures = 0;
+	packed float[4] f = 2.0f;
+	failures += Differs(f[0], 2.0f) + Differs(f[3], 2.0f);
+	f = 3.0f;
+	failures += Differs(f[1], 3.0f) + Differs(f[3], 3.0f);
+	packed float[4] fromInt = 4;
+	failures += Differs(fromInt[2], 4.0f);
+	packed double[2] fromFloat = 0.5f;
+	failures += fromFloat[1] == 0.5 ? 0 : 1;
+	int32 calls = 0;
+	packed int32[4] once = ++calls;          // the scalar is evaluated once
+	failures += once[0] == 1 && once[3] == 1 && calls == 1 ? 0 : 1;
+	packed bool[4] allTrue = true;
+	failures += simd_all(allTrue) ? 0 : 1;
+	return failures;
+}
+
+int32 ArgumentsAndReturns() {
+	int32 failures = 0;
+	packed float[4] t = Twice(1.5f);
+	failures += Differs(t[0], 3.0f) + Differs(t[3], 3.0f);
+	failures += Differs(Ones()[2], 1.0f);
+	failures += Which(1.0f) == 1 ? 0 : 1;   // the scalar overload is the better match
+	packed float[4] lanes = 0.0f;
+	failures += Which(lanes) == 4 ? 0 : 1;
+	return failures;
+}
+
+int32 FieldsAndGlobals() {
+	int32 failures = 0;
+	Particle p;
+	p.velocity = -1.0f;
+	failures += Differs(p.velocity[3], -1.0f);
+	failures += Differs(g_start[0], 2.5f) + Differs(g_start[3], 2.5f);
+	failures += g_fromInt[7] == 9 ? 0 : 1;
+	return failures;
+}
+
+int32 main() {
+	return Locals() + ArgumentsAndReturns() + FieldsAndGlobals();
+}

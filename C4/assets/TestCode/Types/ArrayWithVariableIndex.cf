@@ -1,0 +1,14 @@
+// Types - Array Variable Index Tests (implementation)
+include "../Framework/Assert.ch"
+include "ArrayWithVariableIndex.ch"
+
+void TestArrayWithVariableIndex() {
+	int32[4] arr;
+	arr[0] = 10;
+	arr[1] = 20;
+	arr[2] = 30;
+	arr[3] = 40;
+	
+	int32 idx = 3;
+	AssertEqual(40, arr[idx]);
+}

@@ -1,0 +1,5 @@
+struct Vec {
+	public float x;
+	[operator("*")] public Vec Scale(float k) const { Vec v; v.x = this.x * k; return v; }
+}
+int32 main() { Vec v; Vec w = 2.0f * v; return 0; }

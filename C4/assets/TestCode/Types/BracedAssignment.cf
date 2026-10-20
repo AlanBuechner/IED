@@ -1,0 +1,22 @@
+// Types - a braced list on the right of `=` builds a value of the target's type (BUG-148).
+include "../Framework/Assert.ch"
+include "BracedAssignment.ch"
+
+struct BaPair { int32 x; int32 y; }
+struct BaHolder { int32[3] cells; }
+
+void TestBracedAssignment() {
+	BaPair p;
+	p = { 3, 4 };
+	AssertIntEquals(7, p.x + p.y, "braces assigned to a struct");
+	int32[3] a;
+	a = { 7, 8, 9 };
+	AssertIntEquals(9, a[2], "braces assigned to an array");
+	BaHolder h;
+	h.cells = { 1, 2 };
+	AssertIntEquals(2, h.cells[1], "braces assigned to an array field");
+	AssertIntEquals(0, h.cells[2], "the elements no entry names are zero");
+	p = { y = 1 };
+	AssertIntEquals(0, p.x, "designated braces start the other fields over");
+	AssertIntEquals(1, p.y, "and fill the named one");
+}

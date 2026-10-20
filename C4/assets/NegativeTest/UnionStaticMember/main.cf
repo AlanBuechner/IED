@@ -1,0 +1,5 @@
+union Counted {
+	public int32 value;
+	public static int32 count;
+}
+int32 main() { return 0; }

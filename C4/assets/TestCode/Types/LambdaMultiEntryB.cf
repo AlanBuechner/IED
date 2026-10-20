@@ -1,0 +1,11 @@
+// Types - Multi-entry lambda symbol tests (entry B)
+include "../Framework/Assert.ch"
+include "LambdaMultiEntry.ch"
+
+void TestLambdaEntryB() {
+	// Entry B's first lambda: a DIFFERENT body than entry A's. Under per-builder counters both
+	// units' first lambda would be c4_lambda_0 and one body would silently win for both calls;
+	// this asserts B's own body (y+100) is the one actually bound.
+	funcptr<int32(int32)> g = [](int32 y) -> int32 { return y + 100; };
+	AssertIntEquals(105, g(5), "entry B lambda body");
+}

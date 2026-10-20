@@ -1,0 +1,131 @@
+// Math library benchmark - C4 side. The Bedrock Math kernels a frame leans on, each timed in process over the
+// same generated scene; math.cpp is the same program over GLM, and run-benchmark.ps1 checks both checksums.
+
+include "math.ch"
+
+[link("QueryPerformanceCounter")] int32 QueryPerformanceCounter(int64* count);
+[link("QueryPerformanceFrequency")] int32 QueryPerformanceFrequency(int64* frequency);
+
+const int32 kCount = 4096;
+const int32 kMask = kCount - 1;
+const int32 kRepeats = 400;
+
+struct Scene {
+	public Math::FVector3* positions;
+	public Math::FVector3* angles;
+	public Math::FVector3* scales;
+	public Math::Quat* rotations;
+	public Math::Mat4* matrices;
+}
+
+struct Outputs {
+	public Math::Mat4* matrices;
+	public Math::FVector3* vectors;
+	public Math::Quat* rotations;
+}
+
+// --- the scene ---------------------------------------------------------------------------------------------
+
+float Wave(int32 i, int32 lane) { return Math::Sin((float)(i * 7 + lane * 13) * 0.01f); }
+
+Math::FVector3 WaveVector(int32 i, int32 lane) { return Math::FVector3(Wave(i, lane), Wave(i, lane + 1), Wave(i, lane + 2)); }
+
+void FillScene(Scene& scene) {
+	for (int32 i = 0; i < kCount; ++i) {
+		scene.positions[i] = WaveVector(i, 0) * 10.0f;
+		scene.angles[i] = WaveVector(i, 3) * Math::kPi;
+		scene.scales[i] = WaveVector(i, 6) * 0.5f + Math::FVector3(1.0f);
+		scene.rotations[i] = Math::AngleAxis(Wave(i, 9) * Math::kPi, WaveVector(i, 10) + Math::FVector3(0.0f, 2.0f, 0.0f));
+		scene.matrices[i] = Math::TransformMatrix(scene.positions[i], scene.angles[i], scene.scales[i]);
+	}
+}
+
+// --- the kernels: each repeat shifts its inputs by one, so no repeat is the same as the one before ----------
+
+void BuildTransforms(const Scene& scene, Outputs& out, int32 shift) {
+	for (int32 i = 0; i < kCount; ++i) {
+		int32 j = (i + shift) & kMask;
+		out.matrices[i] = Math::TransformMatrix(scene.positions[j], scene.angles[i], scene.scales[i]);
+	}
+}
+
+void MultiplyMatrices(const Scene& scene, Outputs& out, int32 shift) {
+	for (int32 i = 0; i < kCount; ++i) out.matrices[i] = scene.matrices[i] * scene.matrices[(i + shift) & kMask];
+}
+
+void InvertMatrices(const Scene& scene, Outputs& out, int32 shift) {
+	for (int32 i = 0; i < kCount; ++i) out.matrices[i] = scene.matrices[(i + shift) & kMask].Inverse();
+}
+
+void TransformPoints(const Scene& scene, Outputs& out, int32 shift) {
+	for (int32 i = 0; i < kCount; ++i) out.vectors[i] = scene.matrices[(i + shift) & 63].TransformPoint(scene.positions[i]);
+}
+
+void RotateVectors(const Scene& scene, Outputs& out, int32 shift) {
+	for (int32 i = 0; i < kCount; ++i) out.vectors[i] = scene.rotations[(i + shift) & kMask] * scene.positions[i];
+}
+
+void SlerpRotations(const Scene& scene, Outputs& out, int32 shift) {
+	for (int32 i = 0; i < kCount; ++i) out.rotations[i] = Math::Slerp(scene.rotations[i], scene.rotations[(i + shift + 1) & kMask], 0.3f);
+}
+
+void NormalizeCrosses(const Scene& scene, Outputs& out, int32 shift) {
+	for (int32 i = 0; i < kCount; ++i) out.vectors[i] = Math::Normalized(Math::Cross(scene.positions[i], scene.angles[(i + shift) & kMask]));
+}
+
+// --- checksums ---------------------------------------------------------------------------------------------
+
+double MatrixSum(const Outputs& out) {
+	double sum = 0.0;
+	for (int32 i = 0; i < kCount; ++i)
+		for (int32 c = 0; c < 4; ++c) sum += (double)Math::Dot(out.matrices[i].columns[c], Math::FVector4(1.0f, 2.0f, 3.0f, 4.0f));
+	return sum;
+}
+
+double VectorSum(const Outputs& out) {
+	double sum = 0.0;
+	for (int32 i = 0; i < kCount; ++i) sum += (double)Math::Dot(out.vectors[i], Math::FVector3(1.0f, 2.0f, 3.0f));
+	return sum;
+}
+
+double RotationSum(const Outputs& out) {
+	double sum = 0.0;
+	for (int32 i = 0; i < kCount; ++i) sum += (double)Math::Dot(out.rotations[i], Math::Quat(1.0f, 2.0f, 3.0f, 4.0f));
+	return sum;
+}
+
+// --- timing (the only dishonest part) ----------------------------------------------------------------------
+
+int64 Now() { int64 t = 0; QueryPerformanceCounter(&t); return t; }
+
+void Time(const char* name, funcptr<void(const Scene&, Outputs&, int32)> kernel, funcptr<double(const Outputs&)> checksum,
+	const Scene& scene, Outputs& out) {
+	int64 frequency = 0;
+	QueryPerformanceFrequency(&frequency);
+	int64 start = Now();
+	for (int32 r = 0; r < kRepeats; ++r) kernel(scene, out, r);
+	double ms = (double)(Now() - start) * 1000.0 / (double)frequency;
+	printf("%-18s %.9e %.3f\n", name, checksum(out), ms);
+}
+
+int32 main() {
+	Scene scene;
+	scene.positions = (Math::FVector3*)raw_alloc(sizeof(Math::FVector3) * kCount);
+	scene.angles = (Math::FVector3*)raw_alloc(sizeof(Math::FVector3) * kCount);
+	scene.scales = (Math::FVector3*)raw_alloc(sizeof(Math::FVector3) * kCount);
+	scene.rotations = (Math::Quat*)raw_alloc(sizeof(Math::Quat) * kCount);
+	scene.matrices = (Math::Mat4*)raw_alloc(sizeof(Math::Mat4) * kCount);
+	Outputs out;
+	out.matrices = (Math::Mat4*)raw_alloc(sizeof(Math::Mat4) * kCount);
+	out.vectors = (Math::FVector3*)raw_alloc(sizeof(Math::FVector3) * kCount);
+	out.rotations = (Math::Quat*)raw_alloc(sizeof(Math::Quat) * kCount);
+	FillScene(scene);
+	Time("build_transforms", BuildTransforms, MatrixSum, scene, out);
+	Time("multiply_matrices", MultiplyMatrices, MatrixSum, scene, out);
+	Time("invert_matrices", InvertMatrices, MatrixSum, scene, out);
+	Time("transform_points", TransformPoints, VectorSum, scene, out);
+	Time("rotate_vectors", RotateVectors, VectorSum, scene, out);
+	Time("slerp_rotations", SlerpRotations, RotationSum, scene, out);
+	Time("normalize_crosses", NormalizeCrosses, VectorSum, scene, out);
+	return 0;
+}

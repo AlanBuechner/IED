@@ -1,0 +1,68 @@
+// D-31 (BUG-025): in a const method `this` is read-only; a const object, a `const T&` and a `const T*` call
+// only const methods. A method can have a const twin with the same parameters: a read-only receiver calls the
+// const one, a writable receiver the other. A lambda's call operator is const unless it is `mutable`.
+include "bedrock.ch"
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+class Counter {
+	public int32 value;
+	public int32 reads;
+	public int32 Get() const { return value; }
+	public void Add(int32 n) { value = value + n; }
+	public int32 Twice() const;                     // defined out of line, const there too
+	public int32& Slot() { reads = reads + 1; return value; }
+	public const int32& Slot() const { return value; }
+}
+
+int32 Counter::Twice() const { return Get() * 2; }   // an unqualified call in a const method is on a const this
+
+class Shape {
+	public virtual int32 Sides() const { return 0; }
+}
+class Square : Shape {
+	public override int32 Sides() const { return 4; }
+}
+
+int32 ReadRef(const Counter& c) { return c.Get() + c.Twice(); }
+int32 ReadPointer(const Counter* c) { return c->Get(); }
+int32 Count(const Shape& s) { return s.Sides(); }
+
+template<F> int32 Apply(const F& f, int32 v) { return f(v); }
+
+int32 SumAll(const Core::Array<int32>& values) {
+	int32 total = 0;
+	for (int32 v : values) total += v;           // a const Array<T> iterates through its const begin / end
+	return total + values[0] - values.At(0);     // and indexes through its const At
+}
+
+int32 main() {
+	Counter c;
+	c.Add(5);
+	Check(ReadRef(c) == 15 && ReadPointer(&c) == 5, "const methods through const references and pointers");
+
+	c.Slot() = 8;
+	Check(c.value == 8 && c.reads == 1, "a writable receiver calls the non-const twin");
+	const Counter& view = c;
+	Check(view.Slot() == 8 && c.reads == 1, "a read-only receiver calls the const twin");
+
+	const Counter fixed = c;
+	Check(fixed.Get() == 8, "a const object calls a const method");
+
+	Square sq;
+	Check(Count(sq) == 4, "a const virtual method dispatches");
+
+	int32 offset = 10;
+	Check(Apply([offset](int32 v) -> int32 { return v + offset; }, 1) == 11, "a lambda is called through a const reference");
+	func<int32()> counter = [n = 0]() mutable -> int32 { n = n + 1; return n; };
+	counter();
+	Check(counter() == 2, "a mutable lambda writes its copies");
+
+	Core::Array<int32> values = { 1, 2, 3 };
+	Check(SumAll(values) == 6, "a const Array reads, iterates and indexes");
+	return g_failures;
+}

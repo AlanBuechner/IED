@@ -1,0 +1,2 @@
+namespace Outer:: { int32 x = 1; }
+int32 main() { return 0; }

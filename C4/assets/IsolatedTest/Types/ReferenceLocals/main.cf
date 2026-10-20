@@ -1,0 +1,29 @@
+// A reference local names a location of its own type or a base of it (04 4.4); a reference returned by a call is
+// one. main returns the failures.
+class Base { public int32 a; }
+class Derived : Base { public int32 b; }
+
+int32 g_value = 7;
+int32& Value() { return g_value; }
+
+int32 main() {
+	int32 failures = 0;
+	Derived d;
+	d.a = 3;
+	Base& asBase = d;
+	const Base& readOnly = d;
+	asBase.a = 4;
+	if (d.a != 4 || readOnly.a != 4) failures += 1;
+	int32& global = Value();
+	global = 9;
+	if (g_value != 9) failures += 1;
+	int32 x = 4;
+	const int32& view = x;
+	x = 5;
+	if (view != 5) failures += 1;
+	int32[3] row;
+	int32& middle = row[1];
+	middle = 6;
+	if (row[1] != 6) failures += 1;
+	return failures;
+}

@@ -1,0 +1,12 @@
+// ControlFlow - If Else Tests (implementation)
+include "../Framework/Assert.ch"
+include "IfElse.ch"
+
+void TestIfElse() {
+	int32 x = 3;
+	if (x > 5) {
+		AssertFalse(1);
+	} else {
+		AssertTrue(1);
+	}
+}

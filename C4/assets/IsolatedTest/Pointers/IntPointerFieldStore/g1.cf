@@ -1,0 +1,11 @@
+struct S { int32 x; };
+
+[test("t.sanity_int_ptr")]
+public static void T1() {
+    S s; s.x = 5;
+    int32* p = &s.x;
+    *p = 42;
+    assert_eq(42, s.x, "int32 ptr store via field");
+    assert_eq(42, *p, "int32 ptr load");
+}
+

@@ -1,0 +1,178 @@
+// Serialization::ReadJson: every JSON value, strictness, errors with their position, and the round trip
+// through WriteJson.
+
+include "bedrock.ch"
+
+Serialization::ReadResult ReadText(Serialization::DomDoc& doc, const char* text) {
+	return Serialization::ReadJson(Core::StringView(text), doc);
+}
+
+// The error a text gives, or "" when it reads.
+const char* JsonError(const char* text) {
+	Serialization::DomDoc doc;
+	Serialization::ReadResult read = ReadText(doc, text);
+	return read.Ok() ? "" : read.error;
+}
+
+bool JsonFails(const char* text) {
+	Serialization::DomDoc doc;
+	return !ReadText(doc, text).Ok();
+}
+
+Core::String JsonRoundTrip(const char* text) {
+	Serialization::DomDoc doc;
+	Serialization::ReadResult read = ReadText(doc, text);
+	Core::StringBuilder out;
+	if (read.Ok()) Serialization::WriteJson(read.root, &out, 0);
+	return out.ToString();
+}
+
+[test("serialization.json.read")]
+class JsonReaderTests {
+	[test("scalars")]
+	public static void TestScalars() {
+		Serialization::DomDoc doc;
+		assert_true(ReadText(doc, "null").root.IsNull(), "null");
+		assert_true(ReadText(doc, " true ").root.AsBool(), "true, with spaces around");
+		assert_true(!ReadText(doc, "false").root.AsBool(), "false");
+		Serialization::DomNode n = ReadText(doc, "-42").root;
+		assert_true(n.Kind() == Serialization::DomKind::Int && n.AsInt() == -42, "an integer is an Int");
+		n = ReadText(doc, "9223372036854775807").root;
+		assert_true(n.Kind() == Serialization::DomKind::Int && n.AsInt() == 9223372036854775807, "INT64_MAX");
+		n = ReadText(doc, "-9223372036854775808").root;
+		assert_true(n.Kind() == Serialization::DomKind::Int && n.AsInt() == (int64)((uint64)1 << 63), "INT64_MIN");
+		n = ReadText(doc, "9223372036854775808").root;
+		assert_true(n.Kind() == Serialization::DomKind::Float, "past int64 is a Float");
+		n = ReadText(doc, "2.5e-3").root;
+		assert_true(n.Kind() == Serialization::DomKind::Float && n.AsFloat() == 0.0025, "a fraction and exponent");
+		n = ReadText(doc, "1E2").root;
+		assert_true(n.Kind() == Serialization::DomKind::Float && n.AsFloat() == 100.0, "an exponent alone is a Float");
+		n = ReadText(doc, "-0.0").root;
+		assert_true(n.Kind() == Serialization::DomKind::Float && n.AsFloat() == 0.0, "negative zero");
+		assert_se("hi", ReadText(doc, "\"hi\"").root.AsString(), "a string");
+	}
+
+	[test("strings")]
+	public static void TestStrings() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode s = ReadText(doc, "\"a\\\"b\\\\c\\/d\\b\\f\\n\\r\\t\"").root;
+		assert_true(s.AsView() == Core::StringView("a\"b\\c/d\b\f\n\r\t"), "every short escape");
+		s = ReadText(doc, "\"\\u0041\\u00e9\\u20ac\"").root;
+		assert_se("A\xc3\xa9\xe2\x82\xac", s.AsString(), "\\u escapes become UTF-8");
+		s = ReadText(doc, "\"\\ud83d\\ude00\"").root;
+		assert_se("\xf0\x9f\x98\x80", s.AsString(), "a surrogate pair is one code point");
+		s = ReadText(doc, "\"\\u0000x\"").root;
+		assert_eq(2, s.AsView().ByteLength(), "an escaped NUL is kept");
+		s = ReadText(doc, "\"caf\xc3\xa9\"").root;
+		assert_se("caf\xc3\xa9", s.AsString(), "raw UTF-8 passes through");
+		assert_se("", ReadText(doc, "\"\"").root.AsString(), "the empty string");
+	}
+
+	[test("containers")]
+	public static void TestContainers() {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = ReadText(doc, "{ \"name\": \"c4\", \"tags\": [1, 2.5, \"x\", null, [], {}], \"nested\": { \"deep\": true } }");
+		assert_true(read.Ok(), "a document reads");
+		Serialization::DomNode root = read.root;
+		assert_eq(3, root.Count(), "three members");
+		assert_true(root.KeyAt(0) == Core::StringView("name"), "members keep their order");
+		assert_se("c4", root.Member("name").AsString(), "a string member");
+		Serialization::DomNode tags = root.Member("tags");
+		assert_eq(6, tags.Count(), "six elements");
+		assert_eq(1, tags.At(0).AsInt(), "an Int element");
+		assert_true(tags.At(1).AsFloat() == 2.5, "a Float element");
+		assert_true(tags.At(3).IsNull(), "a null element");
+		assert_eq(0, tags.At(4).Count(), "an empty array");
+		assert_true(tags.At(5).Kind() == Serialization::DomKind::Object && tags.At(5).Count() == 0, "an empty object");
+		assert_true(root.Member("nested").Member("deep").AsBool(), "nested objects");
+		Serialization::DomNode dup = ReadText(doc, "{\"k\": 1, \"k\": 2}").root;
+		assert_eq(2, dup.Count(), "duplicate names are kept");
+		assert_eq(1, dup.Member("k").AsInt(), "Member finds the first");
+	}
+
+	[test("whitespace_and_bom")]
+	public static void TestWhitespaceAndBom() {
+		Serialization::DomDoc doc;
+		assert_true(ReadText(doc, " \t\r\n[ 1 ,\n2 ]\n").Ok(), "spaces, tabs and line breaks between tokens");
+		assert_true(ReadText(doc, "\xEF\xBB\xBF{\"a\": 1}").Ok(), "a UTF-8 byte order mark is skipped");
+	}
+
+	[test("strictness")]
+	public static void TestStrictness() {
+		assert_true(JsonFails(""), "empty text");
+		assert_true(JsonFails("   "), "only spaces");
+		assert_true(JsonFails("[1, 2,]"), "a trailing comma in an array");
+		assert_true(JsonFails("{\"a\": 1,}"), "a trailing comma in an object");
+		assert_true(JsonFails("{'a': 1}"), "single quotes");
+		assert_true(JsonFails("{a: 1}"), "an unquoted name");
+		assert_true(JsonFails("01"), "a leading zero");
+		assert_true(JsonFails("+1"), "a leading plus");
+		assert_true(JsonFails(".5"), "no digit before the point");
+		assert_true(JsonFails("1."), "no digit after the point");
+		assert_true(JsonFails("1e"), "an empty exponent");
+		assert_true(JsonFails("NaN"), "NaN");
+		assert_true(JsonFails("Infinity"), "Infinity");
+		assert_true(JsonFails("tru"), "a cut-off literal");
+		assert_true(JsonFails("True"), "a capitalized literal");
+		assert_true(JsonFails("[1] [2]"), "two values");
+		assert_true(JsonFails("// comment\n1"), "comments");
+		assert_true(JsonFails("\"tab\there\""), "a raw control character in a string");
+		assert_true(JsonFails("\"\\x41\""), "an unknown escape");
+		assert_true(JsonFails("\"\\u12\""), "a short \\u escape");
+		assert_true(JsonFails("\"\\ud83d\""), "a lone high surrogate");
+		assert_true(JsonFails("\"\\ude00\""), "a lone low surrogate");
+		assert_true(JsonFails("\"\\ud83d\\u0041\""), "a high surrogate before a non-surrogate");
+		assert_true(JsonFails("\"abc"), "an unterminated string");
+		assert_true(JsonFails("[1, 2"), "an unterminated array");
+		assert_true(JsonFails("{\"a\" 1}"), "a missing ':'");
+		assert_true(JsonFails("\"\xc3\""), "invalid UTF-8");
+	}
+
+	[test("error_positions")]
+	public static void TestErrorPositions() {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = ReadText(doc, "{\n  \"a\": 1,\n  \"b\": tru\n}");
+		assert_true(!read.Ok(), "fails");
+		assert_eq(3, read.line, "on the third line");
+		assert_eq(8, read.column, "at the start of the broken value");
+		assert_se("a value cannot start here", read.error, "with a message");
+		read = ReadText(doc, "[1, 2");
+		assert_se("the text ends inside an array", read.error, "the end of the text is named");
+		assert_eq(5, read.offset, "at the end");
+		assert_true(!read.root.IsValid(), "a failed read has no root");
+		assert_se("a member's name must be a string", JsonError("{1: 2}"), "a message for a bad member name");
+	}
+
+	[test("depth")]
+	public static void TestDepth() {
+		Core::StringBuilder deep;
+		for (int32 i = 0; i < Serialization::kMaxJsonDepth; i++) deep.AppendByte('[');
+		for (int32 i = 0; i < Serialization::kMaxJsonDepth; i++) deep.AppendByte(']');
+		Serialization::DomDoc doc;
+		assert_true(Serialization::ReadJson(deep.View(), doc).Ok(), "nesting up to the limit");
+		Core::StringBuilder deeper;
+		for (int32 i = 0; i <= Serialization::kMaxJsonDepth; i++) deeper.AppendByte('[');
+		Serialization::DomDoc other;
+		Serialization::ReadResult read = Serialization::ReadJson(deeper.View(), other);
+		assert_se("objects and arrays nest too deeply", read.error, "one level more is refused, not a stack overflow");
+	}
+
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		assert_se("{\"a\":[1,2.5,\"x\",null,true],\"b\":{}}", JsonRoundTrip("{ \"a\" : [ 1 , 2.5 , \"x\" , null , true ] , \"b\" : { } }").CStr(),
+			"read then written compactly");
+		assert_se("[0.1,1e+300,-2.0]", JsonRoundTrip("[0.1, 1e300, -2.0]").CStr(), "floats keep their value");
+		assert_se("\"\\u0001\\n\\\"\"", JsonRoundTrip("\"\\u0001\\n\\\"\"").CStr(), "escapes are written back");
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = doc.NewObject();
+		doc.AddMember(root, "text", doc.NewString("line\nbreak \xe2\x82\xac"));
+		doc.AddMember(root, "value", doc.NewFloat(1.0 / 3.0));
+		Core::StringBuilder written;
+		Serialization::WriteJson(root, &written, 2);
+		Serialization::DomDoc back;
+		Serialization::ReadResult read = Serialization::ReadJson(written.View(), back);
+		assert_true(read.Ok(), "an indented document reads back");
+		assert_true(read.root.Member("text").AsView() == Core::StringView("line\nbreak \xe2\x82\xac"), "strings survive");
+		assert_true(read.root.Member("value").AsFloat() == 1.0 / 3.0, "doubles survive exactly");
+	}
+}

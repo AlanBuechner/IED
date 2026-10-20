@@ -1,0 +1,8 @@
+// A non-type template parameter must be usable in a METHOD BODY (not only as an array size).
+// C<5>::Val() returns 5*2 = 10, proving N is bound and substituted into the instantiated body.
+template<int N> struct C { int32 Val() { return N * 2; } };
+
+int32 main() {
+	C<5> c;
+	return (c.Val() == 10) ? 0 : 1;
+}

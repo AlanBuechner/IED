@@ -1,0 +1,43 @@
+// Strict aliasing (D-64) lets a loop that stores floats through a pointer held in a struct keep the struct's
+// pointers in registers. Pointers of every type still alias each other: a pointer stored through a float** in the
+// loop (a slot read from a volatile, so only the access types tell) is read again. main returns the failures.
+struct View {
+	public float* out;
+	public const float* in;
+	public int32 count;
+}
+
+View g_view;
+float[8] g_first;
+float[8] g_second;
+float[8] g_input;
+volatile float** g_outSlot;
+
+void Scale(View& view, float factor) {
+	for (int32 i = 0; i < view.count; ++i) view.out[i] = view.in[i] * factor;
+}
+
+// Halfway through, the view's output moves to g_second.
+void ScaleAndMove(View& view, float factor) {
+	float** slot = g_outSlot;
+	for (int32 i = 0; i < view.count; ++i) {
+		if (i == 4) *slot = &g_second[0];
+		view.out[i] = view.in[i] * factor;
+	}
+}
+
+int32 main() {
+	for (int32 i = 0; i < 8; ++i) g_input[i] = (float)(i + 1);
+	g_view.out = &g_first[0];
+	g_view.in = &g_input[0];
+	g_view.count = 8;
+	g_outSlot = &g_view.out;
+	Scale(g_view, 2.0f);
+	int32 failures = 0;
+	for (int32 i = 0; i < 8; ++i) failures += g_first[i] == (float)(2 * (i + 1)) ? 0 : 1;
+	for (int32 i = 0; i < 8; ++i) g_first[i] = 0.0f;
+	ScaleAndMove(g_view, 3.0f);
+	for (int32 i = 0; i < 4; ++i) failures += g_first[i] == (float)(3 * (i + 1)) ? 0 : 1;
+	for (int32 i = 4; i < 8; ++i) failures += g_second[i] == (float)(3 * (i + 1)) && g_first[i] == 0.0f ? 0 : 1;
+	return failures;
+}

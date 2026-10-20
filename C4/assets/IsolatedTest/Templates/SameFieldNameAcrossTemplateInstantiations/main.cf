@@ -1,0 +1,25 @@
+template<T> class Box {
+	public T val;
+public:
+	[operator("create")] public void Init(T v) { this->val = v; }   // this->field write (tier-2 path)
+	public T Get() { return this->val; }                            // this->field read
+	public void Add(T x) { this->val += x; }                        // compound on this->field
+}
+int32 main() {
+	// Two instantiations share the field name `val` but have different field types.
+	Box<int32>* a = new Box<int32>(7);
+	(*a).val += 1;              // deref compound write (assignment path)
+	if ((*a).val != 8) return 1; // deref read
+	a->Add(5);                  // this->field compound inside method
+	if (a->Get() != 13) return 2; // this->field read via getter
+	Box<float>* b = new Box<float>(1.5f);
+	(*b).val += 0.5f;           // deref compound write, float field
+	if ((*b).val != 2.0f) return 3;
+	b->Add(0.25f);
+	if (b->Get() != 2.25f) return 4;
+	// Arrow form on both instantiations.
+	a->val += 1; if (a->val != 14) return 5;
+	b->val += 0.5f; if (b->val != 2.75f) return 6;
+	printf("SAME FIELD ACROSS INST OK\n");
+	return 0;
+}

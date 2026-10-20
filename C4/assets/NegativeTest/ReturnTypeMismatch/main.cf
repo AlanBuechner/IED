@@ -1,0 +1,5 @@
+// A return value whose type does not match the function's declared return type must be a clear
+// compile-time diagnostic, never silently lowered into malformed IR.
+struct S { int32 a, b; }
+S Foo() { return 5; }
+int32 main(){ return 0; }

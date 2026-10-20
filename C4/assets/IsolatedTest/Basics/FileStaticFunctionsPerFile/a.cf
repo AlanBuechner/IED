@@ -1,0 +1,4 @@
+// A file-scope static function belongs to its file: two files may each define one of one name.
+static int32 Local() { return 10; }
+int32 FromB();
+int32 main() { return Local() == 10 && FromB() == 20 ? 0 : 1; }

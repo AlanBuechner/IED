@@ -1,0 +1,11 @@
+include "fused.ch"
+
+#if !SIMD_AVX2 || !SIMD_FMA
+#error "a script compiles for its host's target"
+#endif
+
+// Two steps of 2.0 per second: one in the host, one here.
+packed float[8] Advance(packed float[8] position, float dt) {
+	packed float[8] velocity = 2.0f;
+	return simd_fma(velocity, dt, Fused::Step(position, velocity, dt, 2));
+}

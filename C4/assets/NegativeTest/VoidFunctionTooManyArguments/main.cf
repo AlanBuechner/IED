@@ -1,0 +1,2 @@
+void F(int a) { }
+int main() { F(1, 2, 3); return 0; }

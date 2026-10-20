@@ -1,0 +1,86 @@
+// Core - the number-text, byte and math builtins of the C runtime (BUG-174, BUG-175)
+include "../Framework/Assert.ch"
+include "RuntimeBuiltins.ch"
+
+bool RbFormats(double value, int32 decimals, const char* expected) {
+	char[64] text;
+	int32 written = format_double(&text[0], 64, value, decimals);
+	return written == (int32)strlen((void*)expected) && strcmp((void*)&text[0], (void*)expected) == 0;
+}
+
+void TestFormatDouble() {
+	double zero = 0.0;
+	AssertTrue(RbFormats(zero / zero, 2, "nan") ? 1 : 0);
+	AssertTrue(RbFormats(-(zero / zero), -1, "nan") ? 1 : 0);
+	AssertTrue(RbFormats(1.0 / zero, 3, "inf") ? 1 : 0);
+	AssertTrue(RbFormats(-1.0 / zero, -1, "-inf") ? 1 : 0);
+	AssertTrue(RbFormats(2.675, 2, "2.67") ? 1 : 0);
+	AssertTrue(RbFormats(0.1, -1, "0.1") ? 1 : 0);
+	AssertTrue(RbFormats(-0.0, -1, "-0") ? 1 : 0);
+	AssertTrue(RbFormats(1e300, -1, "1e+300") ? 1 : 0);
+	char[4] small;
+	AssertEqual(-1, format_double(&small[0], 4, 12345.0, 0));
+	AssertEqual(-1, format_double(&small[0], 0, 1.0, 0));
+}
+
+void TestParseDouble() {
+	double value = 0.0;
+	AssertTrue(parse_double("2.5e3", 5, &value) == 5 && value == 2500.0 ? 1 : 0);
+	AssertTrue(parse_double("-7,8", 4, &value) == 2 && value == -7.0 ? 1 : 0);
+	value = 9.0;
+	AssertTrue(parse_double("x1", 2, &value) == 0 && value == 9.0 ? 1 : 0);
+	AssertTrue(parse_double("1", 0, &value) == 0 ? 1 : 0);
+	AssertTrue(parse_double("12345", 2, &value) == 2 && value == 12.0 ? 1 : 0);
+
+	int64 length = 700;
+	char* digits = (char*)raw_alloc((uint64)length);
+	digits[0] = '1';
+	digits[1] = '.';
+	digits[2] = '5';
+	for (int64 i = 3; i < length; ++i) digits[i] = '0';
+	AssertTrue(parse_double(digits, length, &value) == length ? 1 : 0);
+	AssertTrue(value == 1.5 ? 1 : 0);
+	raw_free((void*)digits);
+}
+
+void TestByteHelpers() {
+	char[16] bytes;
+	for (int32 i = 0; i < 16; ++i) bytes[i] = (char)('a' + i);
+	int64 far = 9;
+	AssertEqual((int32)'j', byte_at((void*)&bytes[0], far));
+	set_byte((void*)&bytes[0], far, (int32)'Z');
+	AssertEqual((int32)'Z', byte_at((void*)&bytes[0], far));
+	byte_move((void*)&bytes[0], (void*)&bytes[0], 4, 2, 0);
+	AssertEqual((int32)'a', byte_at((void*)&bytes[0], 2));
+	AssertEqual((int32)'d', byte_at((void*)&bytes[0], 5));
+	byte_copy((void*)&bytes[0], (void*)"XY", 2, 14, 0);
+	AssertEqual((int32)'Y', byte_at((void*)&bytes[0], 15));
+	memmove((void*)&bytes[1], (void*)&bytes[0], 6);
+	AssertEqual((int32)'a', byte_at((void*)&bytes[0], 1));
+	AssertEqual((int32)'b', byte_at((void*)&bytes[0], 4));
+}
+
+bool RbNear(double a, double b) { return fabs(a - b) < 0.0001; }
+
+// The C math builtins, float and double forms, against known values.
+void TestMathBuiltins() {
+	volatile float f = 0.5f;
+	volatile double d = 0.5;
+	AssertTrue(RbNear(asinf(f), 0.5235988) && RbNear(asin(d), 0.5235988) ? 1 : 0);
+	AssertTrue(RbNear(acosf(f), 1.0471976) && RbNear(acos(d), 1.0471976) ? 1 : 0);
+	AssertTrue(RbNear(atanf(f), 0.4636476) && RbNear(atan(d), 0.4636476) ? 1 : 0);
+	AssertTrue(RbNear(atan2f(f, -f), 2.3561945) && RbNear(atan2(-d, -d), -2.3561945) ? 1 : 0);
+	AssertTrue(RbNear(sinhf(f), 0.5210953) && RbNear(cosh(d), 1.1276260) && RbNear(tanhf(f), 0.4621172) ? 1 : 0);
+	AssertTrue(roundf(2.5f) == 3.0f && round(-2.5) == -3.0 && roundf(2.4f) == 2.0f ? 1 : 0);
+	AssertTrue(truncf(-2.7f) == -2.0f && trunc(2.7) == 2.0 ? 1 : 0);
+	AssertTrue(log2f(8.0f) == 3.0f && log10(1000.0) == 3.0 ? 1 : 0);
+	AssertTrue(fmodf(-7.5f, 2.0f) == -1.5f && fmod(7.5, -2.0) == 1.5 ? 1 : 0);
+	AssertTrue(fabsf(-f) == 0.5f && sqrt(d * 8.0) == 2.0 ? 1 : 0);
+}
+
+void TestRuntimeBuiltins() {
+	TestFormatDouble();
+	TestParseDouble();
+	TestByteHelpers();
+	TestMathBuiltins();
+}

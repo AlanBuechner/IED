@@ -1,0 +1,1 @@
+int32 main() { bool b = false; b++; return 0; }

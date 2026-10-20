@@ -1,0 +1,98 @@
+// Hot reload (section 5): Host::Reload compiles a script's files again; when the new one compiles, the old one
+// unloads (its listeners run) and the new one loads, and when it does not, the old one stays. Unloading drops the
+// finalizers of the script's objects still alive and says how many; a host class's object the script made keeps
+// working. Reflection keeps every registration of a name: the latest wins, and unloading it brings the earlier one
+// back.
+include "scripttest.ch"
+include "live.ch"
+
+namespace Live
+{
+	Core::Array<void*> g_held;
+	void Hold(void* object) { g_held.Push(object); }
+}
+
+void OnUnload(const char* tag, void* user) { Live::g_unloads++; }
+
+void Install(const char* version)
+{
+	Core::String from("scripts/");
+	from.Append(version);
+	FS::File source(from.CStr(), "r");
+	Core::String text = source.ReadText();
+	FS::File live("scripts/live.cf", "w");
+	live.Write((void*)text.CStr(), text.ByteLength());
+}
+
+int32 VersionOf(Scripting::Script* script)
+{
+	funcptr<int32()> version = (funcptr<int32()>)script->Address("Version");
+	return version == nullptr ? -1 : version();
+}
+
+Scripting::Script* CheckReload(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Install("live_v1.cf");
+	Scripting::Script* first = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "live", "live.cf"));
+	checks.Equal(1, VersionOf(first), "the first version");
+	funcptr<void()> setup = (funcptr<void()>)first->Address("Setup");
+	if (setup != nullptr) setup();
+
+	Install("live_v2.cf");
+	Scripting::Script* second = host->Reload(first);
+	checks.That(second->Ok(), "the second version compiles");
+	checks.Equal(2, VersionOf(second), "the second version runs");
+	checks.That(!first->Ok(), "the first version is unloaded");
+	checks.Equal(1, Live::g_unloads, "its unload listener ran");
+	checks.That(Live::g_widget != nullptr && Live::g_widget->Size() == 9, "a host object the first version made keeps its vtable");
+
+	Install("live_broken.cf");
+	Scripting::Script* third = host->Reload(second);
+	checks.That(!third->Ok(), "a broken version does not load");
+	checks.Contains(third->Diagnostics(), "live.cf", "and says where");
+	checks.That(second->Ok() && VersionOf(second) == 2, "the loaded version stays");
+	return second;
+}
+
+void CheckDroppedFinalizers(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* keeper = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "keeper", "keeper.cf"));
+	funcptr<void(int32)> keep = (funcptr<void(int32)>)keeper->Address("Keep");
+	if (keep != nullptr) keep(5);
+	checks.Equal(5, keeper->Unload(), "unloading drops the finalizers of its live objects");
+	GC::Collect();
+	checks.Equal(0, Live::g_finalized, "and they never run");
+}
+
+void CheckStackedRegistrations(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* a = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "a", "thing_a.cf"));
+	Scripting::Script* b = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "b", "thing_b.cf"));
+	Reflection::Type thing = Reflection::FindType("Shared::Thing");
+	checks.That(thing.IsValid() && ScriptTest::SameText(thing.Tag(), "b"), "the latest registration wins");
+	funcptr<int32()> whichA = (funcptr<int32()>)a->Address("Which");
+	funcptr<int32()> whichB = (funcptr<int32()>)b->Address("Which");
+	checks.That(whichA != nullptr && whichA() == 1, "the hidden script still reaches its own function");
+	checks.That(whichB != nullptr && whichB() == 2, "and the latest its own");
+	checks.That(!a->FindFunction("Which").IsValid() && b->FindFunction("Which").IsValid(), "reflection shows the latest");
+	b->Unload();
+	thing = Reflection::FindType("Shared::Thing");
+	checks.That(thing.IsValid() && ScriptTest::SameText(thing.Tag(), "a"), "unloading it brings the earlier one back");
+	a->Unload();
+	checks.That(!Reflection::FindType("Shared::Thing").IsValid(), "and then none");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Reload");
+	uint32 listener = Reflection::OnUnload("live", OnUnload, nullptr);
+	Scripting::Script* live = CheckReload(host, checks);
+	live->Unload();
+	checks.Equal(2, Live::g_unloads, "the second version's unload listener ran");
+	Reflection::RemoveUnloadListener(listener);
+	CheckDroppedFinalizers(host, checks);
+	CheckStackedRegistrations(host, checks);
+	return checks.End("Reload");
+}

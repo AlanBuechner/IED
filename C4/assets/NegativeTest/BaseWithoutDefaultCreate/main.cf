@@ -1,0 +1,8 @@
+class Shape {
+	public int32 sides;
+	[operator("create")] public void Init(int32 s) { sides = s; }
+}
+class Square : Shape {
+	[operator("create")] public void Init() { sides = 4; }
+}
+int32 main() { Square s; return s.sides; }

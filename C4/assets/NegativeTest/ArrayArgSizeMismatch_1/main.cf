@@ -1,0 +1,2 @@
+int32 Sum(int32[4] v) { int32 s = 0; for (int32 i = 0; i < 4; i++) { s = s + v[i]; } return s; }
+int main() { int32[8] big = {1,2,3,4,5,6,7,8}; return Sum(big); }

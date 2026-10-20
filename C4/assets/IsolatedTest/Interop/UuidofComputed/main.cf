@@ -1,0 +1,25 @@
+// __uuidof(T) for a type without [uuid] is the version 5 UUID of "c4:" + its qualified name in the URL namespace
+// (D-43): Python's uuid.uuid5(uuid.NAMESPACE_URL, "c4:UcPlain").bytes_le gives the bytes below. _GUID comes from the
+// prelude.
+struct UcPlain { int32 v; }
+namespace Uc { struct Space { int32 v; } }
+template<T> struct UcBox { T value; }
+[uuid("01234567-89ab-cdef-0123-456789abcdef")] struct UcWritten { int32 v; }
+
+int32 g_failures = 0;
+
+void Expect(_GUID* g, uint8[16] bytes, const char* what) {
+	for (int32 i = 0; i < 16; ++i)
+		if (byte_at(g, i) != (int32)bytes[i]) { printf("FAIL %s byte %d\n", what, i); g_failures++; return; }
+}
+
+int32 main() {
+	Expect(__uuidof(UcPlain), { 232, 128, 243, 125, 39, 220, 16, 87, 170, 92, 13, 65, 7, 210, 216, 191 }, "UcPlain");
+	Expect(__uuidof(Uc::Space), { 144, 183, 10, 27, 248, 113, 235, 85, 162, 188, 244, 119, 146, 28, 55, 38 }, "Uc::Space");
+	Expect(__uuidof(UcBox<int32>), { 253, 197, 127, 109, 52, 210, 191, 89, 141, 172, 30, 17, 255, 231, 167, 198 }, "UcBox<int32>");
+	Expect(__uuidof(int32), { 239, 249, 77, 1, 18, 186, 25, 80, 160, 196, 74, 212, 154, 235, 219, 20 }, "int32");
+	Expect(__uuidof(UcWritten), { 103, 69, 35, 1, 171, 137, 239, 205, 1, 35, 69, 103, 137, 171, 205, 239 }, "a written [uuid]");
+	if (__uuidof(UcPlain) != __uuidof(UcPlain)) { printf("FAIL one GUID per type\n"); g_failures++; }
+	if (sizeof(_GUID) != 16) { printf("FAIL sizeof(_GUID)\n"); g_failures++; }
+	return g_failures;
+}

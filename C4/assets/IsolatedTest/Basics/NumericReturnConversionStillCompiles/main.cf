@@ -1,0 +1,2 @@
+int F() { return 3.5f; }
+int main() { return F() == 3 ? 0 : 1; }

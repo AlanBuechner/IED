@@ -1,0 +1,53 @@
+// sizeof() language feature - compile-time type size query.
+// Verifies sizeof(T) for primitives, user structs (with padding), enums, pointers,
+// arrays, and nested/derived objects against C4's actual layout semantics.
+//
+// C4 layout notes:
+//   - bool is 1 byte (C-style), char is 1 byte.
+//   - Structs do NOT get tail padding (Packed{u16,u16,char} == 6, not 8).
+//   - All pointers are 8 bytes on x64.
+
+struct Vec3 { float x; float y; float z; };                 // 12
+struct Packed { uint16 a; uint16 b; char c; };              // 6 (no tail padding)
+struct Big { double d; int32 i; };                          // 16 (double align 8)
+struct Nested { Vec3 v; int32 i; };                         // 16 (Vec3@0, i@12)
+enum Color { Red, Green, Blue };                            // underlying int32 -> 4
+
+struct Base { int32 a; int32 b; };                          // 8
+struct Derived : Base { float f; };                         // 12 (Base@0, f@8; align 4, no tail pad)
+
+int32 main() {
+	int32 fails = 0;
+
+	// Primitives
+	if (sizeof(int32) != 4)   { printf("int32=%d\n", sizeof(int32)); fails++; }
+	if (sizeof(uint16) != 2)  { printf("uint16\n"); fails++; }
+	if (sizeof(char) != 1)    { printf("char\n"); fails++; }
+	if (sizeof(bool) != 1)    { printf("bool=%d\n", sizeof(bool)); fails++; }
+	if (sizeof(float) != 4)   { printf("float\n"); fails++; }
+	if (sizeof(double) != 8)  { printf("double\n"); fails++; }
+	if (sizeof(int64) != 8)   { printf("int64\n"); fails++; }
+
+	// Pointers (all pointer widths are 8 on x64)
+	int32* p = null;
+	if (sizeof(int32*) != 8)  { printf("int32*=%d\n", sizeof(int32*)); fails++; }
+	if (sizeof(void*) != 8)   { printf("void*\n"); fails++; }
+
+	// User structs with padding
+	if (sizeof(Vec3) != 12)   { printf("Vec3=%d\n", sizeof(Vec3)); fails++; }
+	if (sizeof(Packed) != 6)  { printf("Packed=%d\n", sizeof(Packed)); fails++; }
+	if (sizeof(Big) != 16)    { printf("Big=%d\n", sizeof(Big)); fails++; }
+	if (sizeof(Nested) != 16) { printf("Nested=%d\n", sizeof(Nested)); fails++; }
+	if (sizeof(Base) != 8)    { printf("Base=%d\n", sizeof(Base)); fails++; }
+	if (sizeof(Derived) != 12){ printf("Derived=%d\n", sizeof(Derived)); fails++; }
+
+	// Enum underlying size
+	if (sizeof(Color) != 4)   { printf("Color=%d\n", sizeof(Color)); fails++; }
+
+	// sizeof result is a usable constant expression (compile-time int64)
+	int64 s = sizeof(Vec3);
+	if (s != 12) { printf("s=%d\n", (int32)s); fails++; }
+
+	printf("sizeof test: %d failure(s)\n", fails);
+	return fails;
+}

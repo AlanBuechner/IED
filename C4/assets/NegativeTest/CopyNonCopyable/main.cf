@@ -1,0 +1,6 @@
+class File {
+	public int32 fd;
+	[operator("create")] public void Open(int32 f) { fd = f; }
+	[operator("delete")] public void Close() { fd = 0; }
+}
+int32 main() { File a = File(3); File b = a; return b.fd; }

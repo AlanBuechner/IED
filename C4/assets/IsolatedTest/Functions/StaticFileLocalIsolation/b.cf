@@ -1,0 +1,5 @@
+int32 tag_b = 0;
+[test("staticiso.b")]
+public static void Probe() { tag_b = 1; }
+[test("staticiso.b.check")]
+public static void CheckB() { assert_true(tag_b == 1, "b body ran"); }

@@ -1,0 +1,2 @@
+struct S { public int32 x; }
+int main() { S s; const S*[4] arr; arr[0] = &s; arr[0]->x = 9; return 0; }

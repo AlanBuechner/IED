@@ -1,0 +1,3 @@
+int32 G(int32 a) { return a; }
+template<...Ts> int32 F(Ts... args) { return G(args); }
+int32 main() { return F(1); }

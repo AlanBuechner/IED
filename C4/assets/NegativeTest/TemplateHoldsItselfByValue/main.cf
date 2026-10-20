@@ -1,0 +1,8 @@
+template<T> struct Chain {
+	public T value;
+	public Chain<T> next;
+}
+int32 main() {
+	Chain<int32> c;
+	return 0;
+}

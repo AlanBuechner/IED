@@ -1,0 +1,5 @@
+int32 main() {
+	int32 value = 0;
+	atomic_store(&value, 1, MemoryOrder::Acquire);
+	return value;
+}

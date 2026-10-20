@@ -1,0 +1,21 @@
+union U { float f; int32 i; }
+struct P {
+	int32 a;
+	U u;
+	float b;
+}
+int32 main() {
+	P p;
+	p.a = 1;
+	p.b = 2.5f;
+	if (p.a != 1) return 1;
+	if (p.b != 2.5f) return 2;
+	U u;
+	u.f = 3.5f;
+	if (u.f != 3.5f) return 3;
+	// Writing one union member overwrites the shared storage: the int view now
+	// sees the float's bit pattern, not its old value.
+	if (u.i != 0x40600000) return 4;
+	printf("UNION ALIASING OK a=%d b=%f f=%f i=0x%08X\n", p.a, p.b, u.f, u.i);
+	return 0;
+}

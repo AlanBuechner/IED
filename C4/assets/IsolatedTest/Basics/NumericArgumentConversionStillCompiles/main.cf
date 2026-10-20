@@ -1,0 +1,2 @@
+float f(float x) { return x; }
+int main() { return (f(5) == 5.0f) ? 0 : 1; }

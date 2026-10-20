@@ -1,0 +1,28 @@
+include "life.ch"
+
+struct Tracked
+{
+	public int32 id = 0;
+	[operator("create")] public void Init(int32 i)
+	{
+		id = i;
+		Life::Log(i);
+	}
+	[operator("delete")] public void Drop() { Life::Log(-id); }
+}
+
+Tracked g_first(1);
+Tracked g_second(2);
+int32 g_computed = LogNext();
+
+int32 LogNext()
+{
+	Life::Log(10 + Life::LogCount());
+	return Life::LogCount();
+}
+
+int32 UseStatic()
+{
+	static Tracked s_local(3);
+	return s_local.id;
+}

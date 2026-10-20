@@ -1,0 +1,6 @@
+class Range {
+	public int32 lo;
+	public int32 hi;
+	[operator("create")] public void Init(int32 l, int32 h) { lo = l; hi = h; }
+}
+int32 main() { Range r = Range(1, 2, 3); return r.lo; }

@@ -1,0 +1,3 @@
+struct S { int32 x; };
+S GetS() { S s; s.x = 1; return s; }
+int main() { GetS().x = 5; return 0; }

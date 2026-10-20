@@ -1,0 +1,159 @@
+#include "Script/ScriptSources.h"
+#include "Compiler/CompilerInstance.h"
+#include "Compiler/Projects.h"
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+
+namespace Scripting
+{
+	namespace fs = std::filesystem;
+
+	namespace
+	{
+		std::string FolderPath(uint32 folder) { return std::string(kInterfaceRoot) + "/f" + std::to_string(folder); }
+		std::string LibraryPath() { return std::string(kInterfaceRoot) + "/lib"; }
+		std::string TextFolder() { return std::string(kInterfaceRoot) + "/script"; }
+
+		std::string InterfacePath(const InterfaceFile& file)
+		{
+			if (file.library) return LibraryPath() + "/" + file.path;
+			if (file.folder >= 0) return FolderPath(static_cast<uint32>(file.folder)) + "/" + file.path;
+			return std::string(kInterfaceRoot) + "/text/" + file.path; // a host source the host was given as text
+		}
+
+		std::string Normalized(const fs::path& path)
+		{
+			std::string text = path.lexically_normal().string();
+			std::replace(text.begin(), text.end(), '\\', '/');
+			return text;
+		}
+
+		// "script", or "script<n>" when the host has a project of that name.
+		std::string ScriptProjectName(const HostInterface& host)
+		{
+			auto taken = [&](const std::string& name) {
+				return std::any_of(host.projects.begin(), host.projects.end(), [&](const InterfaceProject& p) { return p.name == name; });
+			};
+			std::string name = "script";
+			for (uint32 n = 1; taken(name); ++n) name = "script" + std::to_string(n);
+			return name;
+		}
+
+		ProjectList Projects(const HostInterface& host, const std::vector<std::string>& scriptFolders, const std::map<std::string, std::string>& defines)
+		{
+			ProjectList list;
+			for (const InterfaceProject& written : host.projects)
+			{
+				Project project;
+				project.name = written.name;
+				for (uint32 folder : written.folders) project.sources.push_back(FolderPath(folder));
+				for (uint32 used : written.dependencies) project.depends.push_back(host.projects[used].name);
+				list.projects.push_back(std::move(project));
+			}
+			Project script;
+			script.name = ScriptProjectName(host);
+			script.sources.push_back(TextFolder());
+			for (const std::string& folder : scriptFolders) script.sources.push_back(folder);
+			script.defines = defines;
+			script.depends.push_back(host.projects[host.rootProject].name);
+			list.root = script.name;
+			list.projects.push_back(std::move(script));
+			return list;
+		}
+
+		MacroTable TableOf(const std::vector<MacroDefinition>& macros)
+		{
+			MacroTable table;
+			for (const MacroDefinition& macro : macros)
+			{
+				if (macro.isFunctionLike) table.DefineFunction(macro.name, macro.params, macro.body);
+				else table.Define(macro.name, macro.body);
+			}
+			return table;
+		}
+
+		bool ReadText(const std::string& path, std::string& text)
+		{
+			std::ifstream file(path, std::ios::binary);
+			if (!file) return false;
+			text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			return true;
+		}
+
+		bool Fail(std::string* error, const std::string& why)
+		{
+			if (error) *error = why;
+			return false;
+		}
+
+		bool RegisterInterface(SourceManager& sources, const HostInterface& host, ScriptUnits& units, std::string* error)
+		{
+			for (uint32 p = 0; p < host.projects.size(); ++p)
+				for (uint32 folder : host.projects[p].folders) sources.AddFolder(FolderPath(folder), p);
+			uint32 prelude = 0;
+			for (const InterfaceFile& file : host.files)
+			{
+				const uint32 id = sources.RegisterVirtual(InterfacePath(file), file.path, file.text, file.project, file.library);
+				if (id != file.unitId)
+					return Fail(error, "the interface's file '" + file.path + "' is unit " + std::to_string(file.unitId) + " of its host but registered as " +
+						std::to_string(id) + " (a damaged interface)");
+				if (file.prelude) prelude = id;
+				if (file.folder < 0 && !file.library) sources.GetInfo(id).byName = true; // given as text: found by its name, as in the host
+				if (!file.macros.empty()) units.interfaceMacros[id] = TableOf(file.macros);
+			}
+			sources.SetLibrary(LibraryPath(), prelude);
+			units.interfaceUnits = static_cast<uint32>(host.files.size());
+			return true;
+		}
+
+		bool RegisterScript(SourceManager& sources, const std::vector<ScriptFile>& files, ScriptUnits& units, std::string* error)
+		{
+			for (const ScriptFile& file : files)
+			{
+				std::string text;
+				std::string absPath = Normalized(fs::path(TextFolder()) / file.path);
+				if (file.text) text = *file.text;
+				else if (!ReadText(file.path, text)) return Fail(error, "cannot read the script file " + file.path);
+				else absPath = Normalized(fs::absolute(file.path));
+				const uint32 id = sources.RegisterVirtual(absPath, fs::path(file.path).filename().string(), text, units.scriptProject, false);
+				if (!id) return Fail(error, "the script names " + file.path + " twice");
+				units.scriptUnits.push_back(id);
+			}
+			return true;
+		}
+	}
+
+	std::optional<ScriptUnits> RegisterScriptSources(CompilerInstance& compiler, const HostInterface& host, const std::string& name,
+		const std::vector<ScriptFile>& files, const std::map<std::string, std::string>& defines, std::string* error)
+	{
+		if (host.projects.empty() || host.rootProject >= host.projects.size())
+		{
+			Fail(error, "the interface describes no root project (a damaged interface)");
+			return std::nullopt;
+		}
+		std::vector<std::string> scriptFolders;
+		for (const ScriptFile& file : files)
+			if (!file.text)
+			{
+				const std::string folder = Normalized(fs::absolute(file.path).parent_path());
+				if (std::find(scriptFolders.begin(), scriptFolders.end(), folder) == scriptFolders.end()) scriptFolders.push_back(folder);
+			}
+		ProjectSetResult checked = ProjectSet::Check(Projects(host, scriptFolders, defines));
+		if (!checked.set)
+		{
+			Fail(error, "the script '" + name + "' cannot be laid out over its host's projects: " + checked.error);
+			return std::nullopt;
+		}
+		SourceManager& sources = compiler.GetSourceManager();
+		sources.SetProjects(std::move(*checked.set));
+		ScriptUnits units;
+		units.scriptProject = static_cast<uint32>(host.projects.size());
+		if (!RegisterInterface(sources, host, units, error)) return std::nullopt;
+		for (const std::string& folder : scriptFolders) sources.AddFolder(folder, units.scriptProject);
+		sources.AddFolder(TextFolder(), units.scriptProject);
+		if (!RegisterScript(sources, files, units, error)) return std::nullopt;
+		return units;
+	}
+} // namespace Scripting

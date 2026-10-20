@@ -1,0 +1,6 @@
+int32 main() {
+	int32 value = 0;
+	const int32* view = &value;
+	atomic_store(view, 1, MemoryOrder::SeqCst);
+	return value;
+}

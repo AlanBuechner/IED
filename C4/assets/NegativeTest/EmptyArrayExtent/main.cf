@@ -1,0 +1,4 @@
+int32 main() {
+	int32[] values;
+	return 0;
+}

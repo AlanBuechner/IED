@@ -1,0 +1,2 @@
+extern "c" include "definitely_not_a_real_header_xyz.h"
+int32 main() { return 0; }

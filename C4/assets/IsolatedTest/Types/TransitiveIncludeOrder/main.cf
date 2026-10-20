@@ -1,0 +1,3 @@
+include "z_def.ch"
+include "a_user.ch"
+int32 main() { int32 r = MakeUser(); if (r == 7) return 0; return 1; }

@@ -1,0 +1,80 @@
+include "directory.ch"
+
+namespace FS
+{
+	[operator("create")] void Directory::Init(const char* path) { handle = fs_directory_open(path); }
+
+	void Directory::Close() {
+		if (handle) fs_directory_close(handle);
+		handle = nullptr;
+	}
+
+	bool Directory::Next(DirectoryEntry& entry) {
+		if (!handle) return false;
+		char[kMaxEntryNameBytes] name;
+		int32 kind = 0;
+		int32 length = fs_directory_next(handle, &name[0], kMaxEntryNameBytes, &kind);
+		if (length <= 0) return false;
+		entry.name = Core::String(Core::StringView(&name[0], (int64)length));
+		entry.kind = (EntryKind)kind;
+		return true;
+	}
+
+	DirectoryIterator Directory::Begin() {
+		DirectoryIterator it;
+		it.directory = this;
+		it.done = !Next(it.entry);
+		return it;
+	}
+
+	DirectoryIterator DirectoryIterator::Next() {
+		DirectoryIterator next = *this;
+		next.done = !directory->Next(next.entry);
+		return next;
+	}
+
+	bool IsDirectory(const char* path) { return fs_is_directory(path) != 0; }
+
+	bool IsLink(const char* path) { return fs_is_link(path) != 0; }
+
+	bool MakeDirectory(const char* path) { return fs_make_directory(path) == 0; }
+
+	bool MakeDirectories(const char* path) {
+		if (IsDirectory(path)) return true;
+		Path target = Path(path);
+		Path parent = target.Parent();
+		if (!parent.IsEmpty() && !(parent == target) && !MakeDirectories(parent.CStr())) return false;
+		return MakeDirectory(path) || IsDirectory(path);
+	}
+
+	bool RemoveEmptyDirectory(const char* path) { return fs_remove_directory(path) == 0; }
+
+	bool Rename(const char* from, const char* to) { return fs_rename(from, to) == 0; }
+
+	// The paths of a directory's entries, read before any is removed.
+	Core::Array<Path> EntryPaths(const char* directory) {
+		Core::Array<Path> paths;
+		Directory listing = Directory(directory);
+		DirectoryEntry entry;
+		while (listing.Next(entry)) paths.Push(Path(directory) / entry.name.View());
+		return paths;
+	}
+
+	int64 RemoveTree(const char* path) {
+		int64 removed = 0;
+		Core::Array<Path> children = EntryPaths(path);
+		for (const Path& child : children) {
+			int64 count = RemoveAll(child.CStr());
+			if (count < 0) return -1;
+			removed += count;
+		}
+		return RemoveEmptyDirectory(path) ? removed + 1 : -1;
+	}
+
+	int64 RemoveAll(const char* path) {
+		if (IsLink(path)) return RemoveEmptyDirectory(path) || RemoveFile(path) ? 1 : -1;
+		if (IsDirectory(path)) return RemoveTree(path);
+		if (!FileExists(path)) return 0;
+		return RemoveFile(path) ? 1 : -1;
+	}
+}

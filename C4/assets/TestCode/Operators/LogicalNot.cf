@@ -1,0 +1,11 @@
+// Operators - Logical Not Tests (implementation)
+include "../Framework/Assert.ch"
+include "LogicalNot.ch"
+
+void TestLogicalNot() {
+	bool a = !true;
+	AssertFalse(a);
+	
+	bool b = !false;
+	AssertTrue(b);
+}

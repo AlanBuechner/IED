@@ -1,0 +1,4 @@
+struct A { int32 x; }
+struct B { int32 y; }
+class C { public int32 Use(A* a) { return a->x; } }
+int main() { C c; B b; int32 r = c.Use(&b); return 0; }

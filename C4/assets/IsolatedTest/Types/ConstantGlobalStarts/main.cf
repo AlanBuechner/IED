@@ -1,0 +1,38 @@
+// BUG-230: a global or static member that starts from a constant holds it converted to its own type, as a
+// local would: other constants fold over the converted value, and null or a string starts a pointer.
+// main returns the failures.
+struct Node { public int32 value; }
+
+template<T> struct Scales { public static const float half = 1; }
+
+const float g_one = 1;
+const float g_half = g_one / 2;
+const double g_ratio = 3;
+const double g_threeHalves = g_ratio / 2;
+const bool g_on = 1;
+const int32 g_fromBool = (int32)g_on * 5;
+const char8 g_letter = 65;
+const int64 g_wide = 2000000000;
+const int64 g_doubled = g_wide * 2;
+Node* g_head = null;
+const char8* g_name = "abc";
+thread_local Node* t_head = null;
+thread_local const char8* t_name = "tl";
+int32* g_none = 0;
+
+int32 main() {
+	int32 failures = 0;
+	if (g_half != 0.5f) failures++;
+	if (g_threeHalves != 1.5) failures++;
+	if (g_fromBool != 5) failures++;
+	if (g_letter != 'A') failures++;
+	if (g_doubled != 4000000000) failures++;
+	if (Scales<int32>::half / 2 != 0.5f) failures++;
+	if (g_head != null || t_head != null || g_none != null) failures++;
+	if (g_name[2] != 'c' || t_name[1] != 'l') failures++;
+	g_head = new Node;
+	t_head = g_head;
+	t_head->value = 4;
+	if (g_head->value != 4) failures++;
+	return failures;
+}

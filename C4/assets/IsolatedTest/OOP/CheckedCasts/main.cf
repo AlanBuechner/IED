@@ -1,0 +1,71 @@
+// `is`, `as` and `dynamic_cast` read the run-time type information (D-10, D-11): a downcast or a
+// cross-cast between interfaces yields the target sub-object, or null when the dynamic type is not a
+// target; `is` is the same test as a bool. A null operand gives null / false.
+interface IA { int32 A(); }
+interface IB { int32 B(); }
+
+class Animal {
+	public int32 legs;
+	public virtual int32 Speak() { return 0; }
+}
+class Dog : Animal, IA, IB {
+	[operator("create")] public void Init() { legs = 4; }
+	public override int32 Speak() { return 1; }
+	public int32 A() { return 10; }
+	public int32 B() { return 20; }
+}
+class Cat : Animal, IA {
+	[operator("create")] public void Init() { legs = 4; }
+	public int32 A() { return 30; }
+}
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+void Downcasts() {
+	Animal* a = new Dog();
+	Dog* d = a as Dog*;
+	Check(d != null && d->B() == 20, "a downcast to the dynamic type succeeds");
+	Check((a as Cat*) == null, "a downcast to an unrelated derived type is null");
+	Check(dynamic_cast<Dog*>(a) == d, "dynamic_cast is the same check");
+	Check(a is Dog, "is: the dynamic type");
+	Check(a is Animal, "is: a base of the dynamic type");
+	Check(!(a is Cat), "is: an unrelated type");
+}
+
+void CrossCasts() {
+	Dog* dog = new Dog();
+	IA* ia = dog;
+	IB* ib = ia as IB*;
+	Check(ib != null && ib->B() == 20, "a cross-cast reaches the other interface");
+	Check((ia as Dog*) == dog, "an interface downcasts to the complete object");
+	Check(ia is IB, "is: an interface the object implements");
+	IA* catA = new Cat();
+	Check((catA as IB*) == null, "a cross-cast to an interface the object lacks is null");
+	Check(!(catA is IB), "is: an interface the object lacks");
+	Check((catA as Animal*)->legs == 4, "an interface casts back to the class base");
+}
+
+void NullOperands() {
+	Animal* none = null;
+	Check((none as Dog*) == null, "a null operand casts to null");
+	Check(!(none is Dog), "a null operand is nothing");
+}
+
+void StaticAnswers() {
+	Dog d;
+	Check(d is Animal, "a non-pointer operand is decided by its static type");
+	Check(!(d is Cat), "a non-pointer operand is not an unrelated type");
+}
+
+int32 main() {
+	Downcasts();
+	CrossCasts();
+	NullOperands();
+	StaticAnswers();
+	if (g_failures != 0) printf("CheckedCasts failures: %d\n", g_failures);
+	return g_failures;
+}

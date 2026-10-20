@@ -1,0 +1,187 @@
+// FS::File: open/write/read round-trips, ReadAll, Seek/Tell, ReadText and the path helpers (FileSize,
+// FileExists, RemoveFile). Files are value locals, so they close at the end of their scope; one test uses a
+// heap pointer for the GC-finalizer close path. Each test writes a file in the temp directory and removes it.
+
+include "bedrock.ch"
+
+FS::Path ScratchFile(const char* name) { return FS::TempDirectory() / name; }
+
+[test("fs.file.write_read")]
+public static void TestFileWriteRead() {
+	// Write 5 bytes as a value local (auto-closes at scope exit).
+	FS::File w(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "w");
+	assert_true(w.IsOpen(), "opened for writing");
+	char* buf = (char*)raw_alloc(5);
+	set_byte(buf, 0, 0x48); set_byte(buf, 1, 0x69); set_byte(buf, 2, 0x21); // "Hi!"
+	set_byte(buf, 3, 0x0A); set_byte(buf, 4, 0xFF);                          // newline + 0xFF (binary)
+	assert_eq(5, w.Write(buf, 5), "wrote all 5 bytes");
+	w.Close();
+
+	// Read them back into a fresh buffer.
+	FS::File r(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "r");
+	assert_true(r.IsOpen(), "opened for reading");
+	char* out = (char*)raw_alloc(8);
+	int64 got = r.Read(out, 8);
+	assert_eq(5, got, "read back the 5 bytes");
+	assert_eq(0x48, byte_at(out, 0), "byte 0");
+	assert_eq(0x69, byte_at(out, 1), "byte 1");
+	assert_eq(0x21, byte_at(out, 2), "byte 2");
+	assert_eq(0x0A, byte_at(out, 3), "byte 3");
+	assert_eq(0xFF, byte_at(out, 4), "byte 4 (non-text)");
+	// A second read at EOF returns 0.
+	assert_eq(0, r.Read(out, 8), "EOF read is 0");
+	r.Close();
+
+	raw_free(buf); raw_free(out);
+	FS::RemoveFile(ScratchFile("c4_bedrock_file_test.tmp").CStr());
+}
+
+[test("fs.file.read_all")]
+public static void TestFileReadAll() {
+	// Write a 10-byte file.
+	FS::File w(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "w");
+	char* buf = (char*)raw_alloc(10);
+	for (int32 i = 0; i < 10; i++) set_byte(buf, i, (i * 7));
+	assert_eq(10, w.Write(buf, 10), "wrote 10 bytes");
+	w.Close();
+
+	// ReadAll pulls the whole file in one call.
+	FS::File r(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "r");
+	char* out = (char*)raw_alloc(16);
+	int64 got = r.ReadAll(out, 16);
+	assert_eq(10, got, "ReadAll got all 10 bytes");
+	bool match = true;
+	for (int32 i = 0; i < 10; i++) if (byte_at(out, i) != (i * 7)) match = false;
+	assert_true(match, "ReadAll content matches");
+	r.Close();
+
+	raw_free(buf); raw_free(out);
+	FS::RemoveFile(ScratchFile("c4_bedrock_file_test.tmp").CStr());
+}
+
+[test("fs.file.seek_tell")]
+public static void TestFileSeekTell() {
+	FS::File w(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "w");
+	char* buf = (char*)raw_alloc(4);
+	set_byte(buf, 0, 1); set_byte(buf, 1, 2); set_byte(buf, 2, 3); set_byte(buf, 3, 4);
+	w.Write(buf, 4);
+	w.Close();
+
+	FS::File r(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "r");
+	assert_eq(0, r.Tell(), "starts at 0");
+	char* out = (char*)raw_alloc(1);
+	r.Read(out, 1);               // consume byte 0
+	assert_eq(1, r.Tell(), "tell after reading 1");
+	assert_eq(2, r.Seek(2), "seek to 2");
+	assert_eq(2, r.Tell(), "tell reflects seek");
+	r.Read(out, 1);               // now at offset 2 -> byte value 3
+	assert_eq(3, byte_at(out, 0), "byte after seek");
+	r.Close();
+
+	raw_free(buf); raw_free(out);
+	FS::RemoveFile(ScratchFile("c4_bedrock_file_test.tmp").CStr());
+}
+
+[test("fs.file.path_helpers")]
+public static void TestFilePathHelpers() {
+	// Fresh file: write 6 bytes.
+	FS::File w(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "w");
+	char* buf = (char*)raw_alloc(6);
+	for (int32 i = 0; i < 6; i++) set_byte(buf, i, 9);
+	w.Write(buf, 6);
+	w.Close();
+
+	assert_true(FS::FileExists(ScratchFile("c4_bedrock_file_test.tmp").CStr()), "exists after write");
+	assert_eq(6, FS::FileSize(ScratchFile("c4_bedrock_file_test.tmp").CStr()), "size is 6");
+	assert_true(FS::RemoveFile(ScratchFile("c4_bedrock_file_test.tmp").CStr()), "removed");
+	assert_true(!FS::FileExists(ScratchFile("c4_bedrock_file_test.tmp").CStr()), "gone after remove");
+	assert_eq(-1, FS::FileSize(ScratchFile("c4_bedrock_file_test.tmp").CStr()), "size of missing file is -1");
+
+	raw_free(buf);
+}
+
+[test("fs.file.invalid")]
+public static void TestFileInvalid() {
+	// Opening a nonexistent file for reading fails cleanly (no crash, IsOpen false).
+	FS::File r(ScratchFile("c4_bedrock_no_such_file_xyz.tmp").CStr(), "r");
+	assert_true(!r.IsOpen(), "missing file is not open");
+	char* buf = (char*)raw_alloc(4);
+	assert_eq(-1, r.Read(buf, 4), "read on closed file is -1");
+	assert_eq(-1, r.Tell(), "tell on closed file is -1");
+	assert_true(!r.Flush(), "flush on closed file is false");
+
+	// A default-constructed (closed) File behaves the same.
+	FS::File c;
+	assert_true(!c.IsOpen(), "default file is closed");
+	assert_eq(-1, c.Write(buf, 4), "write on closed file is -1");
+
+	raw_free(buf);
+}
+
+[test("fs.file.heap")]
+public static void TestFileHeap() {
+	// Heap-allocated File: closed via the GC finalizer (or explicitly). Covers the new-T path.
+	FS::File* w = new FS::File(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "w");
+	assert_true(w->IsOpen(), "heap file open");
+	char* buf = (char*)raw_alloc(3);
+	set_byte(buf, 0, 'a'); set_byte(buf, 1, 'b'); set_byte(buf, 2, 'c');
+	assert_eq(3, w->Write(buf, 3), "heap write");
+	w->Close();
+	assert_true(!w->IsOpen(), "closed after Close");
+
+	FS::File* r = new FS::File(ScratchFile("c4_bedrock_file_test.tmp").CStr(), "r");
+	char* out = (char*)raw_alloc(4);
+	assert_eq(3, r->Read(out, 4), "heap read back");
+	assert_eq('a', byte_at(out, 0), "byte a");
+	r->Close();
+
+	raw_free(buf); raw_free(out);
+	FS::RemoveFile(ScratchFile("c4_bedrock_file_test.tmp").CStr());
+}
+
+// BUG-039: positions are 64-bit; Seek works from the start, the current position and the end.
+[test("file.seek_64_and_origins")]
+public static void TestFileSeek64AndOrigins() {
+	FS::File w = FS::File(ScratchFile("c4_bedrock_seek_test.tmp").CStr(), "wb");
+	w.Write("0123456789", 10);
+	int64 far = (int64)3000000000;
+	assert_eq(far, w.Seek(far), "a position past 2 GiB, without writing there");
+	assert_eq(far, w.Tell(), "and Tell reports it");
+	w.Close();
+	assert_eq(10, FS::FileSize(ScratchFile("c4_bedrock_seek_test.tmp").CStr()), "seeking past the end wrote nothing");
+	FS::File r = FS::File(ScratchFile("c4_bedrock_seek_test.tmp").CStr(), "rb");
+	char[4] one;
+	assert_eq(7, r.Seek(-3, FS::SeekOrigin::End), "from the end");
+	r.Read(&one[0], 1);
+	assert_eq('7', one[0], "reads there");
+	assert_eq(5, r.Seek(-3, FS::SeekOrigin::Current), "from the current position");
+	r.Read(&one[0], 1);
+	assert_eq('5', one[0], "reads there");
+	assert_eq(-1, r.Seek(-100, FS::SeekOrigin::Start), "before the start is an error");
+	r.Close();
+	FS::RemoveFile(ScratchFile("c4_bedrock_seek_test.tmp").CStr());
+}
+
+[test("file.read_text")]
+public static void TestFileReadText() {
+	FS::File w = FS::File(ScratchFile("c4_bedrock_text_test.tmp").CStr(), "wb");
+	Core::StringBuilder text;
+	for (int32 i = 0; i < 2000; ++i) text.Append("line ");
+	w.Write(text.CStr(), text.ByteLength());
+	w.Close();
+	FS::File r = FS::File(ScratchFile("c4_bedrock_text_test.tmp").CStr(), "rb");
+	Core::String read = r.ReadText();
+	assert_eq(10000, read.ByteLength(), "more than one read chunk");
+	assert_true(read.View().StartsWith(Core::StringView("line line")), "the bytes");
+	assert_true(r.ReadText().IsEmpty(), "nothing is left");
+	r.Close();
+	FS::RemoveFile(ScratchFile("c4_bedrock_text_test.tmp").CStr());
+	FS::File closed;
+	assert_true(closed.ReadText().IsEmpty(), "a closed file has no text");
+}
+
+[test("file.directory_is_not_a_file")]
+public static void TestDirectoryIsNotAFile() {
+	assert_true(!FS::FileExists("."), "a directory is not a regular file");
+	assert_eq(-1, FS::FileSize("."), "and has no file size");
+}

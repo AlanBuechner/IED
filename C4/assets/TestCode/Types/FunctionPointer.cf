@@ -1,0 +1,32 @@
+// Types - Function Pointer Tests (implementation)
+include "../Framework/Assert.ch"
+include "FunctionPointer.ch"
+include "../OOP/FunctionTests.ch"
+
+int32 ApplyOp(funcptr<int32(int32, int32)> op, int32 a, int32 b) {
+	return op(a, b);
+}
+
+funcptr<int32(int32, int32)> g_op = Add;
+
+void TestFunctionPointer() {
+	// Local funptr initialized with a function address, then called.
+	funcptr<int32(int32, int32)> f = Add;
+	AssertIntEquals(5, f(2, 3), "funptr local add");
+
+	// Reassign to a different function and call again.
+	f = Multiply;
+	AssertIntEquals(20, f(4, 5), "funptr local multiply");
+
+	// Pass the function pointer as a parameter and call from the callee.
+	AssertIntEquals(13, ApplyOp(Add, 6, 7), "funptr param add");
+	AssertIntEquals(42, ApplyOp(Multiply, 6, 7), "funptr param multiply");
+
+	// Global funptr initialized with a function address.
+	AssertIntEquals(30, g_op(10, 20), "funptr global add");
+	g_op = Multiply;
+	AssertIntEquals(12, g_op(3, 4), "funptr global multiply");
+
+	// Bare function name used directly as a value in an argument position.
+	AssertIntEquals(72, ApplyOp(Multiply, 8, 9), "funptr bare function arg");
+}

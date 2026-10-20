@@ -1,0 +1,54 @@
+// The garbage collector (docs/runtime/01-memory-and-gc.md): collection control, statistics, pins, scan
+// regions and the hooks an engine uses for handle-based storage. Every function is the C runtime's
+// c4_gc_* entry point of the same meaning.
+
+namespace GC
+{
+	struct Stats
+	{
+		public uint64 allocs;        // allocations so far
+		public uint64 collections;   // collections so far
+		public uint64 heapBytes;     // memory the heap holds from the OS
+		public uint64 freeBytes;     // heap memory not holding objects
+		public uint64 pauseNs;       // total collection time
+		public uint64 liveBytes;     // bytes of live objects
+		public uint64 lastPauseNs;   // the last collection's time
+	}
+
+	// visit(visitContext, object) reports one live object; an enumerator gets it with its user data.
+	alias VisitRoot = funcptr<void(void*, void*)>;
+	alias RootEnumerator = funcptr<void(void*, VisitRoot, void*)>;
+	alias CollectionCallback = funcptr<void(void*)>;
+
+	[link("c4_gc_collect")] void Collect();
+	[link("c4_gc_get_stats")] Stats GetStats();
+
+	// Automatic collection starts when the live heap has grown by `percent` since the last collection
+	// (default 100, at least 4 MiB). Returns the previous value.
+	[link("c4_gc_set_percent")] int32 SetPercent(int32 percent);
+
+	// The threads that mark a heap past 8 MiB, the collecting one included: -1 (default) picks by the processors,
+	// up to 8; 1 marks alone. Returns the previous value.
+	[link("c4_gc_set_mark_threads")] int32 SetMarkThreads(int32 threads);
+
+	// Suppress / resume automatic collection (not counted). Collect() still works while disabled.
+	[link("c4_gc_disable")] void Disable();
+	[link("c4_gc_enable")] void Enable();
+
+	// Keep an object alive while native code holds it (counted: one Unpin per Pin). Any pointer into it works.
+	[link("c4_gc_pin")] void Pin(void* object);
+	[link("c4_gc_unpin")] void Unpin(void* object);
+
+	// Whether `object` points into a live object; meaningful in a collection callback.
+	[link("c4_gc_is_reachable")] bool IsReachable(void* object);
+
+	// Raw memory that may hold managed pointers.
+	[link("c4_gc_register_region")] void RegisterRegion(void* start, uint64 size);
+	[link("c4_gc_unregister_region")] void UnregisterRegion(void* start);
+
+	[link("c4_gc_register_root_enumerator")] void RegisterRootEnumerator(void* key, RootEnumerator enumerate, void* userData);
+	[link("c4_gc_unregister_root_enumerator")] void UnregisterRootEnumerator(void* key);
+
+	[link("c4_gc_register_collection_result")] void RegisterCollectionResult(void* key, CollectionCallback callback, void* userData);
+	[link("c4_gc_unregister_collection_result")] void UnregisterCollectionResult(void* key);
+}

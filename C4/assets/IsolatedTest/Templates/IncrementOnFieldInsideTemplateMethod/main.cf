@@ -1,0 +1,40 @@
+template<T> class Box {
+	public T val;
+public:
+	[operator("create")] public void Init(T v) { this->val = v; }
+	public T TakeOld() { return this->val++; }   // postfix: returns OLD value, then increments
+	public void Add(T x) { this->val += x; }     // compound op on a field
+	public void Dec() { this->val--; }           // postfix decrement on a field
+}
+// Bare-identifier compound on a NON-first field (read side must match the store side's offset).
+template<T> class Tagged {
+	public int32 tag;
+	public T val;
+	[operator("create")] public void Init(T v) { this->val = v; }
+	public void Add(T x) { val += x; }
+}
+int32 main() {
+	// int field in a template method
+	Box<int32>* b = new Box<int32>(10);
+	int32 old = b->TakeOld();                    // 10, val -> 11
+	if (old != 10) return 1;
+	if (b->val != 11) return 2;
+	b->Add(5);                                   // val -> 16
+	if (b->val != 16) return 3;
+	int32 old2 = b->TakeOld();                   // 16, val -> 17
+	if (old2 != 16) return 4;
+	b->Dec();                                    // val -> 16
+	if (b->val != 16) return 5;
+	// float field in a template method
+	Box<float>* f = new Box<float>(1.5f);
+	f->Add(0.25f);                               // val -> 1.75f
+	if (f->val != 1.75f) return 6;
+	// Bare-identifier compound on a NON-first field: the read side must use the same resolved
+	// field/offset as the store side, or tag gets clobbered and val reads offset 0.
+	Tagged<int32>* t = new Tagged<int32>(10);
+	t->Add(5);                                    // val -> 15, tag untouched
+	if (t->val != 15) return 7;
+	if (t->tag != 0) return 8;
+	printf("TPL FIELD INCREMENT OK\n");
+	return 0;
+}

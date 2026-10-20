@@ -1,0 +1,60 @@
+#pragma once
+#include "Core/Core.h"
+
+#if defined(PLATFORM_WINDOWS)
+
+// target Windows 10 or later
+#define _WIN32_WINNT 0x0A00
+
+#include <sdkddkver.h>
+
+// define FULL_WINTARD if you are a full retard
+#ifndef FULL_WINTARD
+#define NOGDICAPMASKS
+#define NOSYSMETRICS
+#define NOMENUS
+#define NOICONS
+#define NOSYSCOMMANDS
+#define NORASTEROPS
+#define OEMRESOURCE
+#define NOATOM
+//#define NOCOLOR
+//#define NOCTLMGR
+#define NODRAWTEXT
+#define NOKERNEL
+//#define NONLS
+#define NOMEMMGR
+#define NOMETAFILE
+#define NOOPENFILE
+#define NOSCROLL
+#define NOSERVICE
+#define NOSOUND
+#define NOTEXTMETRIC
+#define NOWH
+#define NOCOMM
+#define NOKANJI
+#define NOHELP
+#define NOPROFILER
+#define NODEFERWINDOWPOS
+#define NOMCX
+#define NORPC
+#define NOPROXYSTUB
+#define NOIMAGE
+#define NOTAPE
+#endif
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+
+#include <Windows.h>
+#include <comdef.h>
+#include <string>
+
+std::wstring TranslateError(HRESULT hr);
+
+#define CORE_ASSERT_HANDEL(x, ...) CORE_ASSERT((x) != INVALID_HANDLE_VALUE, __VA_ARGS__);
+#define CORE_ASSERT_HRESULT(x, msg) {HRESULT hr__LINE__ = (x); if(FAILED(hr__LINE__)) { \
+std::wstring err__LINE__ = TranslateError(hr__LINE__);\
+CORE_ERROR("HRESULT Assertion Failed: {0} \n{1}", msg, ::Core::GetStr(err__LINE__)); __debugbreak();}}
+
+#endif

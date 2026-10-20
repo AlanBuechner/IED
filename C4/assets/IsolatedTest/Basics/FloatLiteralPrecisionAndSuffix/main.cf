@@ -1,0 +1,9 @@
+int32 main() {
+    double d = 4294967295.0;   // exact in double
+    if (d != 4294967295.0) return 1;
+    float f = 1.5f;            // f-suffix: float32
+    if (f != 1.5f) return 2;
+    double small = 0.1 + 0.2;  // unqualified -> double precision
+    if (small == 0.3) return 3;
+    return 0;
+}

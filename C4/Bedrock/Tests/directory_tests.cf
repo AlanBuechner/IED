@@ -1,0 +1,143 @@
+// FS::Directory and the tree functions, in a scratch folder under the temp directory that each test makes and
+// removes itself. Paths are UTF-8 on every platform (BUG-176).
+
+include "bedrock.ch"
+
+FS::Path ScratchFolder(const char* test) {
+	FS::Path folder = FS::TempDirectory() / "c4_bedrock_fs" / test;
+	FS::RemoveAll(folder.CStr());
+	FS::MakeDirectories(folder.CStr());
+	return folder;
+}
+
+bool WriteText(const FS::Path& path, const char* text) {
+	FS::File file = FS::File(path.CStr(), "wb");
+	return file.IsOpen() && file.Write(text, (int64)strlen((void*)text)) == (int64)strlen((void*)text);
+}
+
+// The names in a listing, sorted, joined by ','; directories marked with a '/'.
+Core::String ListingOf(const FS::Path& folder) {
+	Core::Array<Core::String> names;
+	for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr())) {
+		Core::String name = entry.name;
+		if (entry.kind == FS::EntryKind::Directory) name.Append("/");
+		names.Push(name);
+	}
+	names.Sort();
+	Core::String joined;
+	for (int64 i = 0; i < names.Count(); ++i) {
+		if (i > 0) joined.Append(",");
+		joined.Append(names[i].View());
+	}
+	return joined;
+}
+
+[test("fs.directory")]
+class DirectoryTests {
+	[test("list")]
+	public static void TestList() {
+		FS::Path folder = ScratchFolder("list");
+		assert_se("", ListingOf(folder).CStr(), "a new folder lists nothing (no '.' or '..')");
+		assert_true(WriteText(folder / "b.txt", "bee"), "write a file");
+		assert_true(WriteText(folder / "a.txt", "ay"), "write another");
+		assert_true(FS::MakeDirectory((folder / "sub").CStr()), "make a directory");
+		assert_se("a.txt,b.txt,sub/", ListingOf(folder).CStr(), "every entry once, with its kind");
+		FS::Directory listing = FS::Directory(folder.CStr());
+		FS::DirectoryEntry entry;
+		int32 count = 0;
+		while (listing.Next(entry)) count++;
+		assert_eq(3, count, "Next reads the same entries");
+		assert_true(!listing.Next(entry), "and stays at the end");
+		listing.Close();
+		listing.Close();
+		assert_true(!listing.IsOpen(), "closing twice is harmless");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("missing")]
+	public static void TestMissing() {
+		FS::Path folder = ScratchFolder("missing");
+		FS::Directory none = FS::Directory((folder / "nope").CStr());
+		assert_true(!none.IsOpen(), "a missing directory does not open");
+		FS::DirectoryEntry entry;
+		assert_true(!none.Next(entry), "and lists nothing");
+		assert_true(WriteText(folder / "file.txt", "x"), "a file");
+		assert_true(!FS::Directory((folder / "file.txt").CStr()).IsOpen(), "a file is not a directory");
+		assert_true(!FS::Directory("").IsOpen(), "the empty path");
+		FS::Directory closed;
+		assert_true(!closed.IsOpen() && !closed.Next(entry), "a zero listing is closed");
+		int32 visits = 0;
+		for (FS::DirectoryEntry& e : closed) visits++;
+		assert_eq(0, visits, "and range-for visits nothing");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("make_and_remove")]
+	public static void TestMakeAndRemove() {
+		FS::Path folder = ScratchFolder("make");
+		FS::Path deep = folder / "x" / "y" / "z";
+		assert_true(!FS::MakeDirectory(deep.CStr()), "one level needs its parent");
+		assert_true(FS::MakeDirectories(deep.CStr()), "every missing parent");
+		assert_true(FS::IsDirectory(deep.CStr()), "it exists");
+		assert_true(FS::MakeDirectories(deep.CStr()), "an existing directory is fine");
+		assert_true(!FS::MakeDirectory(deep.CStr()), "but not for MakeDirectory");
+		assert_true(FS::MakeDirectories((folder / "trailing/").CStr()), "a trailing separator");
+		assert_true(!FS::RemoveEmptyDirectory((folder / "x").CStr()), "a directory with entries is not empty");
+		assert_true(FS::RemoveEmptyDirectory(deep.CStr()), "an empty one");
+		assert_true(!FS::IsDirectory(deep.CStr()), "gone");
+		assert_true(WriteText(folder / "f.txt", "x"), "a file");
+		assert_true(!FS::IsDirectory((folder / "f.txt").CStr()), "a file is not a directory");
+		assert_true(!FS::MakeDirectories((folder / "f.txt" / "below").CStr()), "a file in the way");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("remove_all")]
+	public static void TestRemoveAll() {
+		FS::Path folder = ScratchFolder("remove_all");
+		FS::Path tree = folder / "tree";
+		FS::MakeDirectories((tree / "a" / "b").CStr());
+		WriteText(tree / "one.txt", "1");
+		WriteText(tree / "a" / "two.txt", "2");
+		WriteText(tree / "a" / "b" / "three.txt", "3");
+		assert_eq(6, FS::RemoveAll(tree.CStr()), "three files and three directories");
+		assert_true(!FS::IsDirectory(tree.CStr()), "the tree is gone");
+		assert_eq(0, FS::RemoveAll(tree.CStr()), "nothing left to remove");
+		WriteText(folder / "single.txt", "s");
+		assert_eq(1, FS::RemoveAll((folder / "single.txt").CStr()), "a single file");
+		assert_true(!FS::FileExists((folder / "single.txt").CStr()), "removed");
+		assert_eq(1, FS::RemoveAll(folder.CStr()), "the empty scratch folder");
+	}
+
+	[test("rename")]
+	public static void TestRename() {
+		FS::Path folder = ScratchFolder("rename");
+		WriteText(folder / "old.txt", "content");
+		assert_true(FS::Rename((folder / "old.txt").CStr(), (folder / "new.txt").CStr()), "rename a file");
+		assert_true(!FS::FileExists((folder / "old.txt").CStr()) && FS::FileExists((folder / "new.txt").CStr()), "moved");
+		WriteText(folder / "other.txt", "replaced");
+		assert_true(FS::Rename((folder / "other.txt").CStr(), (folder / "new.txt").CStr()), "onto an existing file");
+		FS::File file = FS::File((folder / "new.txt").CStr(), "rb");
+		assert_se("replaced", file.ReadText().CStr(), "the file at the target is replaced");
+		file.Close();
+		FS::MakeDirectory((folder / "d1").CStr());
+		assert_true(FS::Rename((folder / "d1").CStr(), (folder / "d2").CStr()), "rename a directory");
+		assert_true(FS::IsDirectory((folder / "d2").CStr()), "moved");
+		assert_true(!FS::Rename((folder / "absent").CStr(), (folder / "x").CStr()), "a missing source");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	// BUG-176: names are UTF-8 for every call, so a non-ASCII name round-trips.
+	[test("utf8_names")]
+	public static void TestUtf8Names() {
+		FS::Path folder = ScratchFolder("utf8");
+		FS::Path file = folder / "caf\xc3\xa9 \xe2\x82\xac.txt";
+		assert_true(WriteText(file, "euro"), "create a file with a non-ASCII name");
+		assert_true(FS::FileExists(file.CStr()), "it exists by that name");
+		assert_eq(4, FS::FileSize(file.CStr()), "its size");
+		assert_se("caf\xc3\xa9 \xe2\x82\xac.txt", ListingOf(folder).CStr(), "the listing gives the same UTF-8 name");
+		FS::Path sub = folder / "\xe6\x97\xa5\xe6\x9c\xac";
+		assert_true(FS::MakeDirectory(sub.CStr()) && FS::IsDirectory(sub.CStr()), "a non-ASCII directory");
+		assert_true(FS::RemoveFile(file.CStr()), "remove it by that name");
+		assert_eq(2, FS::RemoveAll(folder.CStr()), "the folder and its directory");
+	}
+}

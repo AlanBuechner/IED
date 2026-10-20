@@ -1,0 +1,20 @@
+// A body-local `T name(params) { ... }` is a local function; `T name(args);` is a direct-initialized
+// value local. Both shapes in one body must parse and behave (regression: the direct-init parse used to
+// swallow local functions).
+struct Counter {
+	public int32 value;
+	[operator("create")] public void Init(int32 start) { value = start; }
+};
+
+int32 main() {
+	int32 failures = 0;
+	int32 helper(int32 a) { return a + 1; }
+	int32 twice(int32 a, int32 b) { return (a + b) * 2; }
+	Counter c(41);
+	if (helper(4) != 5) failures++;
+	if (twice(1, 2) != 6) failures++;
+	if (c.value != 41) failures++;
+	Counter d(helper(c.value));
+	if (d.value != 42) failures++;
+	return failures;
+}

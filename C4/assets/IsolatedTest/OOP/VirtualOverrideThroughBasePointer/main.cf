@@ -1,0 +1,25 @@
+struct Shape {
+	float x;
+	float y;
+	[operator("create")] void Init();
+	virtual float GetArea();
+};
+struct Circle : public Shape {
+	float radius;
+	[operator("create")] void Init(float cx, float cy, float r);
+	float GetArea() override;
+};
+void Shape::Init() { x = 0.0f; y = 0.0f; }
+float Shape::GetArea() { return 0.0f; }
+void Circle::Init(float cx, float cy, float r) { x = cx; y = cy; radius = r; }
+float Circle::GetArea() { return 3.14159265f * radius * radius; }
+float CalculateArea(Shape* shape) { if (shape == 0) { return 0.0f; } return shape->GetArea(); }
+int32 main() {
+	int32 failed = 0;
+	Circle c; c.Init(0.0f, 0.0f, 5.0f);
+	float direct = c.GetArea(); if (direct != 78.539816f) failed++;
+	float poly = CalculateArea(&c); if (poly != 78.539816f) failed++;
+	Shape s; s.Init(); float base = s.GetArea(); if (base != 0.0f) failed++;
+	if (failed == 0) printf("ALL VIRTUAL TESTS PASSED\n"); else printf("%d FAILED\n", failed);
+	return failed;
+}

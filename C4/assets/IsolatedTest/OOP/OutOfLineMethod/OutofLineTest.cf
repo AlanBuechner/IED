@@ -1,0 +1,14 @@
+struct A {
+	int32 v;
+	void Set(int32 x);
+};
+
+void A::Set(int32 x) {
+	v = x;
+}
+
+int32 main() {
+	A a;
+	a.Set(42);
+	return a.v == 42 ? 0 : 1;
+}

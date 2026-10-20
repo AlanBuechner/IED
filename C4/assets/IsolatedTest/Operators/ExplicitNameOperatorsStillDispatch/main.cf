@@ -1,0 +1,15 @@
+struct V {
+	int32 x;
+	[operator("create")] public void Init(int32 v) { this->x = v; }
+	[operator("add")] public V Add(const V& o) { V r; r.Init(this->x + o.x); return r; }
+	[operator("equal")] public int32 Eq(const V& o) { return (this->x == o.x) ? 1 : 0; }
+}
+int32 main() {
+	V a; a.Init(1); V b; b.Init(2);
+	V s = a + b;
+	if (s.x != 3) { printf("FAIL add got %d\n", s.x); return 1; }
+	int32 e = (a == a);
+	if (e != 1) { printf("FAIL eq got %d\n", e); return 1; }
+	printf("EXPLICIT NAMES OK\n");
+	return 0;
+}

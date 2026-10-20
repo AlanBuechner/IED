@@ -1,0 +1,161 @@
+// Types - Namespaced Object Template Tests (implementation)
+include "../Framework/Assert.ch"
+include "NamespacedTemplate.ch"
+
+// A template class declared inside a namespace, used through an alias - a game engine's vector
+// pattern. Two instantiations of different element types must coexist and stay independent.
+// A plain function in the SAME namespace guards that the template's presence does not corrupt
+// qualified resolution of its siblings (scope-chain balance).
+namespace Geometry {
+	template<T> class Cube { public T v; public int32 tag; }
+	alias ICube = Cube<int32>;
+	alias FCube = Cube<float>;
+	int32 Plain() { return 42; }
+}
+
+void TestNamespacedObjectTemplate() {
+	// Alias to an int32 instantiation: member read/write through the qualified alias.
+	Geometry::ICube ib;
+	ib.v = 7;
+	ib.tag = 9;
+	AssertIntEquals(7, ib.v, "ns obj tmpl int v");
+	AssertIntEquals(9, ib.tag, "ns obj tmpl int tag");
+
+	// A distinct float instantiation coexists with the int32 one.
+	Geometry::FCube fb;
+	fb.v = 1.5f;
+	fb.tag = 3;
+	AssertFloatEquals(1.5f, fb.v, "ns obj tmpl float v");
+	AssertIntEquals(3, fb.tag, "ns obj tmpl float tag");
+
+	// The int32 instantiation is still valid after the float one was created.
+	AssertIntEquals(7, ib.v, "ns obj tmpl coexist int v");
+	AssertIntEquals(9, ib.tag, "ns obj tmpl coexist int tag");
+
+	// DIRECT qualified use (no alias): `Geometry::Cube<int32>` must trigger instantiation and
+	// behave identically to the aliased form. Template args live on the FINAL segment of a
+	// qualified name, so the type accessors read them from there - a regression here silently
+	// reports "Unknown type 'Geometry::Cube'".
+	Geometry::Cube<int32> dc;
+	dc.v = 5;
+	dc.tag = 6;
+	AssertIntEquals(5, dc.v, "ns obj tmpl direct qualified v");
+	AssertIntEquals(6, dc.tag, "ns obj tmpl direct qualified tag");
+	AssertIntEquals(8, sizeof(Geometry::Cube<float>), "ns obj tmpl direct qualified sizeof");
+
+	// sizeof: a Cube<int32> holds an int32 + int32 = 8 bytes; no namespace overhead.
+	AssertIntEquals(8, sizeof(Geometry::ICube), "ns obj tmpl sizeof ICube");
+
+	// A plain function in the same namespace as the template still resolves by qualified name.
+	AssertIntEquals(42, Geometry::Plain(), "ns plain fn alongside template");
+}
+
+// A namespaced template and a GLOBAL template of the SAME base name must coexist: a bare reference
+// from inside the namespace binds the NAMESPACED one (innermost scope wins), while global code binds
+// the global one. A regression here silently resolves both to the global instantiation.
+template<T> class Wedge { public T v; }
+namespace Weld {
+	template<T> class Wedge { public T v; public int32 tag; }
+	alias IWedge = Wedge<int32>;
+	// From INSIDE the namespace, bare `Wedge<int32>` must be the namespaced one (it has a `tag`).
+	int32 InnerTag() { Wedge<int32> w; w.v = 7; w.tag = 9; return w.tag + w.v; }
+}
+
+void TestNamespacedGlobalTemplateCoexist() {
+	// The namespaced one (has a `tag` field) used through its alias from global scope.
+	Weld::IWedge w;
+	w.v = 7;
+	w.tag = 9;
+	AssertIntEquals(7, w.v, "coexist ns wedge v");
+	AssertIntEquals(9, w.tag, "coexist ns wedge tag");
+
+	// The GLOBAL one (no `tag` field) is still independently usable.
+	Wedge<int32> g;
+	g.v = 4;
+	AssertIntEquals(4, g.v, "coexist global wedge v");
+
+	// They are distinct types: different sizes prove they are not the same instantiation.
+	AssertIntEquals(8, sizeof(Weld::IWedge), "coexist ns wedge size (T+tag)");
+	AssertIntEquals(4, sizeof(Wedge<int32>), "coexist global wedge size (T only)");
+
+	// A bare reference from INSIDE the namespace binds the namespaced template (has tag), not the
+	// global one: InnerTag() would fail to compile if `Wedge` resolved to the global (no tag field).
+	AssertIntEquals(16, Weld::InnerTag(), "coexist in-ns bare ref is namespaced");
+}
+
+// A function template declared inside a namespace is instantiated by BARE name from within the
+// namespace. This locks two things: (1) the feature works, and (2) a pruned function-template
+// shell does NOT over-pop scopes in PostVisit - that bug ate the enclosing namespace frame and
+// corrupted every later lookup in it (sibling functions, qualified calls). If the scope chain
+// were corrupted, Id<int32>/UseBox<float> below would not resolve at all (compile error), so a
+// green build of this test proves the namespace survived the template shell. A regression here
+// silently breaks every namespaced function template.
+namespace FuncNs {
+	class Box { public int32 v; }
+	template<T> T Id(T v) { return v; }
+	template<T> T UseBox(Box b, T v) { b.v = (int32)v; return b.v; }
+	int32 Plain() { return 42; }
+
+	int32 InNs() {
+		Box b; b.v = 0;
+		int32 a = Id<int32>(5);          // bare namespaced template call, in-ns
+		int32 c = (int32)UseBox<float>(b, 7.5f);// in-ns template using an in-ns type
+		return a + c;                    // 5 + 7 = 12
+	}
+}
+
+void TestNamespacedFunctionTemplate() {
+	AssertIntEquals(12, FuncNs::InNs(), "ns func tmpl bare calls, scope intact");
+	// A plain function in the SAME namespace as the template still resolves by qualified name -
+	// the exact sibling-corruption scenario the scope over-pop used to break.
+	AssertIntEquals(42, FuncNs::Plain(), "ns plain fn alongside func template");
+}
+
+// A free function declared in a NESTED namespace (Outer::Inner) must be callable by its full
+// qualified name, and a BARE call from within the namespace must link against the same mangled
+// symbol. This locks: semantic's LookupQualified walks every namespace segment; HIR emits the
+// declaration with the accumulated Outer_Inner_ prefix; and semantic records each free function's
+// mangled symbol name (SymbolEntry::mangledSymbolName) so a bare in-namespace call resolves to the
+// SAME symbol as its declaration instead of emitting just "Deep" and failing to link.
+namespace NsOuter { namespace NsInner {
+	int32 Deep() { return 7; }
+	int32 UsesDeep() { return Deep() + 5; }   // bare in-ns call (bug a)
+} }
+
+void TestNestedNamespaceCall() {
+	AssertIntEquals(7, NsOuter::NsInner::Deep(), "nested ns qualified call");
+	AssertIntEquals(12, NsOuter::NsInner::UsesDeep(), "bare in-nested-ns call links");
+}
+
+// A QUALIFIED instantiation used as an EXPRESSION prefix must resolve exactly like type position:
+// `ExprPrefix::Quad<float>{...}` (composite literal) and `ExprPrefix::Quad<float>::Tag(...)`
+// (static access). Before the fix the parser only committed an instantiation base for a BARE
+// identifier followed by '<', so any namespace-qualified spelling failed to parse ("Expected
+// expression, got '::'") while the identical spelling in type position worked - the same name
+// resolving differently by position. The parser now collects the qualified run and commits it as
+// a qualified-name base ONLY when some segment carries template args (a plain `A::B` chain has
+// none and keeps its existing static-access path), leaving any trailing `::member` in the stream
+// for ParsePostfix to re-chain onto.
+namespace ExprPrefix {
+	template<T> class Quad {
+		public T m_V;
+		public static int32 Tag(int32 v) { return v + 100; }
+	}
+}
+
+namespace NsA { namespace NsB {
+	template<T> class Duo { public T m_V; }
+} }
+
+void TestNamespacedExpressionPrefix() {
+	// Single-level namespace: composite-literal prefix.
+	ExprPrefix::Quad<float> q = ExprPrefix::Quad<float>{3.5f};
+	AssertFloatEquals(3.5f, q.m_V, "ns expr prefix complit");
+
+	// Single-level namespace: static-access base (the `::Tag` chain is re-parsed onto the base).
+	AssertIntEquals(105, ExprPrefix::Quad<float>::Tag(5), "ns expr prefix static");
+
+	// Two-level namespace chain before the templated segment.
+	NsA::NsB::Duo<float> d = NsA::NsB::Duo<float>{2.5f};
+	AssertFloatEquals(2.5f, d.m_V, "ns expr prefix nested-ns complit");
+}

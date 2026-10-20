@@ -1,0 +1,1 @@
+int32 main() { unorm8 u = 0.5f; switch (u) { case 1: return 1; default: break; } return 0; }

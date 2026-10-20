@@ -1,0 +1,70 @@
+// Types - packed vector layout (BUG-145): a vector is N * sizeof(T) bytes aligned to the largest power of two
+// dividing that size, and whole-object copies, arrays and pointer steps agree with it.
+include "../Framework/Assert.ch"
+include "PackedLayout.ch"
+
+class PlVec3 { public union { packed float x, y, z; }; }
+class PlVec2 { public union { packed float x, y; }; }
+class PlBytes { public union { packed int8 a, b, c, d; }; }
+struct PlPoint { PlVec3 p; float t; }
+struct PlSix { float a; packed float[6] v; float b; }
+struct PlTagged { int8 a; PlBytes v; int8 b; }
+struct PlPair { float a; PlVec2 v; float b; }
+struct PlWide { float a; packed float[8] v; float b; }
+
+PlSix PlMakeSix(float seed) {
+	PlSix r;
+	r.a = seed;
+	r.v = { seed + 1.0f, seed + 2.0f, seed + 3.0f, seed + 4.0f, seed + 5.0f, seed + 6.0f };
+	r.b = seed + 7.0f;
+	return r;
+}
+
+void TestPackedLayoutSizes() {
+	AssertIntEquals(12, (int32)sizeof(PlVec3), "Vec3 has no padding");
+	AssertIntEquals(16, (int32)sizeof(PlPoint), "a float after a Vec3 sits at 12");
+	AssertIntEquals(40, (int32)sizeof(PlSix), "a 24-byte vector aligns to 8");
+	AssertIntEquals(12, (int32)sizeof(PlTagged), "a 4-byte vector aligns to 4");
+	AssertIntEquals(24, (int32)sizeof(PlPair), "an 8-byte vector aligns to 8");
+	AssertIntEquals(96, (int32)sizeof(PlWide), "a 32-byte vector aligns to 32");
+}
+
+void TestPackedLayoutArrays() {
+	PlVec3[3] vs;
+	vs[1].x = 1.0f;
+	vs[1].z = 3.0f;
+	vs[2].x = 5.0f;
+	PlVec3 copy = vs[1];
+	AssertFloatEquals(3.0f, copy.z, "an array of Vec3 has a 12-byte stride");
+	AssertFloatEquals(5.0f, vs[2].x, "the next element starts after 12 bytes");
+	PlVec3* p = &vs[0];
+	p = p + 2;
+	AssertFloatEquals(5.0f, p->x, "a pointer steps by sizeof(Vec3)");
+	PlSix[2] six;
+	six[1] = PlMakeSix(10.0f);
+	six[0].b = 3.0f;
+	AssertFloatEquals(11.0f, six[1].v[0], "an array element holding a 6-lane vector");
+	AssertFloatEquals(17.0f, six[1].b, "the field after it");
+	AssertFloatEquals(3.0f, six[0].b, "the element before it is untouched");
+}
+
+void TestPackedLayoutCopies() {
+	PlPoint[2] points;
+	points[1].p.z = 2.0f;
+	points[1].t = 4.0f;
+	points[0].t = 1.0f;
+	PlPoint moved = points[1];
+	AssertFloatEquals(4.0f, moved.t, "a whole-struct copy keeps the field after a Vec3");
+	AssertFloatEquals(2.0f, moved.p.z, "and the Vec3 itself");
+	AssertFloatEquals(1.0f, points[0].t, "the first element is untouched");
+	PlTagged tagged;
+	tagged.a = 1;
+	tagged.v.d = 4;
+	tagged.b = 6;
+	PlTagged tcopy = tagged;
+	Assert(tcopy.a == 1 && tcopy.v.d == 4 && tcopy.b == 6, "a byte vector between bytes copies whole");
+	PlSix six = PlMakeSix(0.0f);
+	PlSix scopy = six;
+	AssertFloatEquals(6.0f, scopy.v[5], "a 6-lane vector copies whole");
+	AssertFloatEquals(7.0f, scopy.b, "the field after it copies too");
+}

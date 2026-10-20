@@ -1,0 +1,1 @@
+int32 main() { unorm8 u = 0.5f; unorm8 v = ~u; return 0; }

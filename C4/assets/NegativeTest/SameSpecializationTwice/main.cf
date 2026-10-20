@@ -1,0 +1,4 @@
+template<T> struct Kind { static const int32 V = 0; }
+template<T> struct Kind<T*> { static const int32 V = 1; }
+template<T> struct Kind<T const*> { static const int32 V = 2; }
+int32 main() { return Kind<int32*>::V; }

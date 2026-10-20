@@ -1,0 +1,28 @@
+// The predefined macros (docs/language/02 2.5). This case has [test] functions, so it builds with -test.
+
+[test("macros.predefined.build")]
+public static void TestBuildMacros() {
+#ifdef TEST
+    int32 test = TEST;
+#else
+    int32 test = 0;
+#endif
+    assert_eq(1, test, "TEST is 1 under -test");
+    assert_eq(1, PLATFORM_WINDOWS, "the platform");
+    assert_eq(1, ARCH_X64, "the architecture");
+    assert_true(C4_VERSION >= 100, "C4_VERSION is major * 10000 + minor * 100 + patch");
+#if !defined(PLATFORM_WINDOWS) || !defined(ARCH_X64)
+    assert_true(false, "the platform macros are defined for #if too");
+#endif
+}
+
+[test("macros.predefined.location")]
+public static void TestLocationMacros() {
+    assert_eq(21, __LINE__, "__LINE__ is the line it is written on");
+    assert_true(strcmp(__FILE__, "p.cf") == 0, "__FILE__ is the file's name");
+#if defined(__FILE__) && defined(__LINE__) && __LINE__ == 23
+    assert_true(true, "__LINE__ in a condition");
+#else
+    assert_true(false, "__LINE__ in a condition");
+#endif
+}

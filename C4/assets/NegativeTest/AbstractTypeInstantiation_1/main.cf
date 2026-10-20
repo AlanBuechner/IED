@@ -1,0 +1,2 @@
+interface Shape { public virtual float Area(); }
+int main() { Shape* p = new Shape(); delete p; return 0; }

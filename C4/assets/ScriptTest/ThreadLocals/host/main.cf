@@ -1,0 +1,74 @@
+// A script's thread_locals are per thread: one whose start runs code starts on its first use on each thread (a
+// start that throws is tried again on the next use), and each is destroyed when its thread ends or the script
+// unloads. A host thread_local reached from a script is the calling thread's.
+include "scripttest.ch"
+include "tls.ch"
+
+namespace Tls
+{
+	int32 NextStart() { return ++g_starts; }
+	void NoteEnd() { g_ends++; }
+	int32 NextAttempt() { return ++g_attempts; }
+	void Fail(int32 value) { throw value; }
+}
+
+int32 Call(Scripting::Script* script, const char* name)
+{
+	funcptr<int32()> fn = (funcptr<int32()>)script->Address(name);
+	return fn == nullptr ? -1000 : fn();
+}
+
+void CheckMainThread(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	checks.Equal(0, Tls::g_starts, "loading started no thread_local that runs code");
+	checks.Equal(1, Call(script, "StateId"), "the first use started this thread's object");
+	checks.Equal(1, Call(script, "StateId"), "and only the first");
+	checks.Equal(6, Call(script, "Bump"), "a thread_local with a constant start");
+	checks.Equal(7, Call(script, "Bump"), "keeps its value on the thread");
+	checks.Equal(1, Call(script, "HostFrames"), "the host's thread_local, this thread's");
+	checks.Equal(2, Call(script, "HostFrames"), "counted on");
+	checks.Equal(5, Call(script, "FramesInCatch"), "the host's thread_local inside a catch (BUG-242)");
+
+	int32 thrown = 0;
+	try { Call(script, "RiskyValue"); }
+	catch (int32 e) { thrown = e; }
+	checks.Equal(5, thrown, "a start that throws reaches the user");
+	checks.Equal(9, Call(script, "RiskyValue"), "the next use starts it again");
+	checks.Equal(9, Call(script, "RiskyValue"), "once it started, it stays");
+	checks.Equal(4, Call(script, "Chained"), "a start that uses another thread_local starts that one first");
+}
+
+void CheckOtherThread(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	int32 state = 0;
+	int32 bumped = 0;
+	int32 frames = 0;
+	Threading::Thread worker = Threading::Thread::Run([script, &state, &bumped, &frames]() {
+		state = Call(script, "StateId");
+		bumped = Call(script, "Bump");
+		frames = Call(script, "HostFrames");
+	});
+	worker.Join();
+	checks.Equal(2, state, "another thread starts its own object");
+	checks.Equal(6, bumped, "and has its own copy of the constant one");
+	checks.Equal(1, frames, "and its own host thread_local");
+	checks.Equal(1, Tls::g_ends, "the thread's object was destroyed when it ended");
+	checks.Equal(3, Call(script, "HostFrames"), "this thread's host thread_local is untouched");
+	checks.Equal(8, Call(script, "Bump"), "and so is its script thread_local");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("ThreadLocals");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "tls", "tls.cf"));
+	if (script->Ok())
+	{
+		CheckMainThread(script, checks);
+		CheckOtherThread(script, checks);
+		script->Unload();
+		checks.Equal(2, Tls::g_ends, "unloading destroyed the main thread's object");
+	}
+	return checks.End("ThreadLocals");
+}

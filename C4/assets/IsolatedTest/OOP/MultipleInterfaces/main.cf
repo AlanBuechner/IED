@@ -1,0 +1,84 @@
+// One class base plus several interfaces (D-08). Each interface is its own sub-object with its own
+// vptr; calls through any interface pointer reach the class's implementation (a this-adjusting
+// thunk), upcasts move the pointer to the sub-object, and a null pointer stays null.
+interface IArea { int32 Area(); }
+interface INamed { int32 NameLength(); int32 Tag(); }
+
+class Shape {
+	public int32 id;
+	public virtual int32 Sides() { return 0; }
+	public int32 Id() { return id; }
+}
+
+class Square : Shape, IArea, INamed {
+	public int32 side;
+	[operator("create")] public void Init(int32 s) { side = s; id = 40; }
+	public override int32 Sides() { return 4; }
+	public int32 Area() { return side * side; }
+	public int32 NameLength() { return 6; }
+	public int32 Tag() { return side + id; }
+}
+
+class Cube : Square {
+	[operator("create")] public void Init(int32 s) { Square::Init(s); id = 50; }
+	public int32 Area() { return 6 * side * side; }
+	public int32 FaceArea() { return Square::Area(); }
+}
+
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 AreaOf(IArea* a) { return a->Area(); }
+int32 TagOf(INamed& n) { return n.Tag(); }
+
+void DispatchThroughEachInterface() {
+	Square* sq = new Square(3);
+	IArea* a = sq;
+	INamed* n = sq;
+	Check(a->Area() == 9, "first interface dispatches to Square::Area");
+	Check(n->NameLength() == 6, "second interface dispatches to Square::NameLength");
+	Check(n->Tag() == 43, "a thunk hands the implementation the whole Square");
+	Check(AreaOf(sq) == 9, "an argument converts to the interface sub-object");
+	Check(TagOf(*sq) == 43, "a reference binds to the interface sub-object");
+	Check(sq->Sides() == 4, "the class base keeps its own vtable");
+}
+
+void PointersMoveToSubobjects() {
+	Square* sq = new Square(2);
+	IArea* a = sq;
+	INamed* n = sq;
+	Shape* s = sq;
+	Check((void*)s == (void*)sq, "the class base is at offset 0");
+	Check((void*)a != (void*)sq, "an interface sub-object has its own address");
+	Check((void*)a != (void*)n, "two interfaces are two sub-objects");
+	Square* nullSquare = null;
+	IArea* nullArea = nullSquare;
+	Check(nullArea == null, "a null pointer upcasts to null");
+}
+
+void OverrideOneLevelDown() {
+	Cube* c = new Cube(2);
+	IArea* a = c;
+	INamed* n = c;
+	Square* sq = c;
+	Check(a->Area() == 24, "the interface reaches the most derived override");
+	Check(sq->Area() == 24, "the class pointer reaches it too");
+	Check(n->Tag() == 52, "an inherited implementation keeps working");
+}
+
+void QualifiedCallIsDirect() {
+	Cube* c = new Cube(2);
+	Check(c->FaceArea() == 4, "Type::Method() calls that implementation without dispatch");
+}
+
+int32 main() {
+	DispatchThroughEachInterface();
+	PointersMoveToSubobjects();
+	OverrideOneLevelDown();
+	QualifiedCallIsDirect();
+	if (g_failures != 0) printf("MultipleInterfaces failures: %d\n", g_failures);
+	return g_failures;
+}

@@ -1,0 +1,73 @@
+// Framework - Assertion implementations (implementation)
+include "Assert.ch"
+
+int32 g_Passed = 0;
+int32 g_Failed = 0;
+
+void Assert(int32 condition, const char* message) {
+	if (condition == 0) {
+		g_Failed++;
+		printf("FAIL: %s\n", message);
+		fflush(nullptr);
+	} else {
+		g_Passed++;
+	}
+}
+
+void AssertEqual(int32 expected, int32 actual) {
+	if (expected != actual) {
+		g_Failed++;
+		printf("FAIL: AssertEqual(%d, %d)\n", expected, actual);
+		fflush(nullptr);
+	} else {
+		g_Passed++;
+	}
+}
+
+void AssertTrue(int32 condition) {
+	printf("[DEBUG] AssertTrue called with condition=%d\n", condition);
+	if (condition == 0) {
+		g_Failed++;
+		printf("FAIL: AssertTrue(0)\n");
+		fflush(nullptr);
+	} else {
+		g_Passed++;
+	}
+}
+
+void AssertFalse(int32 condition) {
+	if (condition != 0) {
+		g_Failed++;
+		printf("FAIL: AssertFalse(%d)\n", condition);
+	} else {
+		g_Passed++;
+	}
+}
+
+int32 GetPassed() {
+	return g_Passed;
+}
+
+int32 GetFailed() {
+	return g_Failed;
+}
+
+void AssertFloatEquals(float expected, float actual, const char* message) {
+	if (expected != actual) {
+		g_Failed++;
+		printf("FAIL: %s (expected %f, got %f)\n", message, expected, actual);
+		fflush(nullptr);
+	} else {
+		g_Passed++;
+	}
+}
+
+void AssertIntEquals(int32 expected, int32 actual, const char* message) {
+	if (expected != actual) {
+		g_Failed++;
+		printf("FAIL: %s (expected %d, got %d)\n", message, expected, actual);
+		fflush(nullptr);
+	} else {
+		g_Passed++;
+	}
+}

@@ -1,0 +1,28 @@
+// Large locals start zeroed on every call and compile quickly: they are cleared with one memset, not a store per
+// element (BUG-208). main returns the failures.
+struct Grid {
+	public int32[20000] cells;
+	public int64 tag;
+}
+
+int32 SumThenFill(int32 count) {
+	int32[50000] values;
+	int32 total = 0;
+	for (int32 i = 0; i < count; i++) {
+		total += values[i];
+		values[i] = i + 1;
+	}
+	return total;
+}
+
+int32 main() {
+	int32 failures = 0;
+	Grid g;
+	if (g.cells[0] != 0 || g.cells[19999] != 0 || g.tag != 0) failures += 1;
+	g.cells[19999] = 3;
+	if (SumThenFill(50000) != 0) failures += 1;
+	if (SumThenFill(50000) != 0) failures += 1;
+	Grid* heap = new Grid();
+	if (heap->cells[12345] != 0) failures += 1;
+	return failures;
+}

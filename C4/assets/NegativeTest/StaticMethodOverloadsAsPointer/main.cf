@@ -1,0 +1,8 @@
+struct S {
+	public static int32 Pick(int32 x) { return x; }
+	public static int32 Pick(int32 x, int32 y) { return x + y; }
+}
+int32 main() {
+	funcptr<int32(int32)> f = S::Pick;
+	return 0;
+}

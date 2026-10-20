@@ -1,0 +1,5 @@
+struct Huge {
+	public uint8[2000000000] first;
+	public uint8[2000000000] second;
+}
+int32 main() { return 0; }

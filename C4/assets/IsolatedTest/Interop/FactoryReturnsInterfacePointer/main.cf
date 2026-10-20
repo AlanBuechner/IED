@@ -1,0 +1,13 @@
+extern "c++" include "factory.h"
+extern "c++" source "factory.cpp"
+int32 main() {
+	// Factory returns an interface pointer (the CreateDXGIFactory shape).
+	IShape* s = CreateShape(0, 9);
+	if (s == null) { printf("FAIL factory returned null\n"); return 1; }
+	// Virtual method call through the factory-returned pointer dispatches to Circle.
+	int32 area = s->Area();
+	if (area != 81) { printf("FAIL virtual Area through factory ptr: %d\n", area); return 1; }
+	ReleaseShape(s);
+	printf("FACTORY TESTS OK\n");
+	return 0;
+}

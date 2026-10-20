@@ -1,0 +1,6 @@
+struct S3 {
+	public float x;
+	public void Bump() { x += 1.0f; }
+	public static void Twice() { Bump(); }
+}
+int32 main() { return 0; }

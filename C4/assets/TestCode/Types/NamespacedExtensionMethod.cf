@@ -1,0 +1,53 @@
+// Types - Namespaced Extension Method Tests (implementation)
+include "../Framework/Assert.ch"
+include "NamespacedExtensionMethod.ch"
+
+// An extension method written INSIDE the same namespace as its target type. Before the fix, the
+// implicit `this` was typed through a flat name lookup that could not see a bare name registered in
+// an enclosing namespace scope, so `this.v` failed with "Undefined identifier 'this'". The receiver
+// is passed implicitly (extension methods take no explicit self parameter), so this also locks the
+// call-site dispatch of a namespaced extension method.
+namespace ExtNs {
+	struct Counter { int32 value; }
+
+	void Increment(int32 by) extends Counter { this.value = this.value + by; }
+	int32 Get() extends Counter { return this.value; }
+
+	int32 DriveTwo() {
+		Counter a;
+		a.Increment(5);
+		a.Increment(7);
+		Counter b;
+		b.Increment(3);
+		// Two independent receivers must keep their own state.
+		return a.Get() * 10 + b.Get();
+	}
+}
+
+// Case B: the target type lives in its OWN namespace and the extension method is declared OUTSIDE
+// it, targeting the type by QUALIFIED name. The receiver at the call site is also named by
+// qualified name, so both sides must resolve to the SAME type instance for the method to be found.
+namespace CrossNsTarget {
+	struct Box { int32 v; }
+}
+
+void SetBox(int32 x) extends CrossNsTarget::Box { this.v = x; }
+
+namespace CrossNs {
+	int32 Drive() {
+		CrossNsTarget::Box b;
+		b.SetBox(42);
+		return b.v;
+	}
+}
+
+void TestNamespacedExtensionMethod() {
+	// a = 5+7 = 12, b = 3  ->  12*10 + 3 = 123
+	AssertIntEquals(123, ExtNs::DriveTwo(), "namespaced extension method via this");
+
+	// Case B: an extension method declared OUTSIDE the target's namespace, targeting it by QUALIFIED
+	// name, called from outside. Before the fix, registration re-derived the target by bare-name
+	// match (which a namespaced type never satisfies), so the method was silently never attached and
+	// the call site reported "Member 'SetQ' not found in type 'Q'".
+	AssertIntEquals(42, CrossNs::Drive(), "cross-namespace qualified extension method");
+}

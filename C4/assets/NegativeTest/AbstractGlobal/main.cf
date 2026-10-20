@@ -1,0 +1,5 @@
+abstract class Shape {
+	public virtual float Area() { return 0.0f; }
+}
+Shape g_shape;
+int32 main() { return 0; }

@@ -1,0 +1,29 @@
+include "../Framework/Assert.ch"
+include "ForwardDecl.ch"
+
+void TestForwardDeclPointerOnly() {
+    WindowRef r;
+    r.handle = nullptr;
+    r.id = 42;
+    Assert(r.id == 42, "fwd: pointer-only incomplete type stores a value");
+}
+
+void TestForwardDeclDefinedLater() {
+    EngineConfig cfg;
+    cfg.engine = nullptr;
+    cfg.count = 3;
+
+    Engine e;                 // full definition is now available: instantiate by value
+    e.SetId(7);               // method on the (same) type resolves through the fwd-decl name
+    Assert(e.GetId() == 7, "fwd: method works after the later definition");
+
+    cfg.engine = &e;          // pointer field holds the address of the by-value instance
+    Assert(cfg.engine->GetId() == 7, "fwd: pointer to the defined type reaches the value");
+    Assert(cfg.count == 3, "fwd: sibling plain field is unaffected");
+}
+
+void TestForwardDeclRedundantAfterDef() {
+    Done d;
+    d.x = 9;
+    Assert(d.x == 9, "fwd: redundant post-definition fwd-decl does not break the type");
+}

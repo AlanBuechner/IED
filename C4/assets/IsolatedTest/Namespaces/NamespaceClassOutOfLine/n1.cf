@@ -1,0 +1,6 @@
+namespace Ns {
+    class C { int32 v; public void Set(int32 x); public int32 Get(); }
+    void C::Set(int32 x) { this.v = x; }
+    int32 C::Get() { return this.v; }
+}
+int32 main() { Ns::C* c = new Ns::C(); c->Set(5); if (c->Get()!=5) return 1; printf("N1 OK\n"); return 0; }

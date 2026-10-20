@@ -1,0 +1,26 @@
+// D-22: init captures `[n = expr]` add a member initialized from any expression; `[&r = lvalue]` binds a
+// reference. The expression is evaluated once, when the lambda is created.
+int32 g_evaluations = 0;
+
+int32 Next() { g_evaluations++; return 40; }
+
+struct Point { public int32 x; public int32 y; }
+
+int32 main() {
+	func<int32()> answer = [n = Next() + 2]() -> int32 { return n; };
+	if (answer() != 42 || answer() != 42) return 1;
+	if (g_evaluations != 1) return 2;
+
+	Point p;
+	p.x = 3;
+	p.y = 4;
+	func<void()> moveRight = [&px = p.x]() { px += 10; };
+	moveRight();
+	if (p.x != 13) return 3;
+
+	int32 base = 5;
+	func<int32(int32)> scaled = [factor = base * 2, base](int32 v) -> int32 { return v * factor + base; };
+	if (scaled(3) != 35) return 4;
+	printf("INIT CAPTURES OK\n");
+	return 0;
+}

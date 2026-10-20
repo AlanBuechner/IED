@@ -1,0 +1,6 @@
+class Box { public int32 v; }
+int32 main() {
+	int32 x = 0;
+	Box* b = new (x) Box();
+	return b->v;
+}

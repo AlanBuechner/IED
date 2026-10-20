@@ -1,0 +1,6 @@
+int32 main() {
+	int32 v = 3;
+	const int32* p = &v;
+	int64* q = const_cast<int64*>(p);
+	return 0;
+}

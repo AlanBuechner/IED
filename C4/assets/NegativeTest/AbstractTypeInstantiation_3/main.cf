@@ -1,0 +1,2 @@
+abstract class Base { public virtual void Run(); }
+int main() { Base* p = new Base(); delete p; return 0; }

@@ -1,0 +1,3 @@
+template<T> T Identity(T v) { return v; }
+int32 Sum(int32 n, ...) { return n; }
+int32 main() { return Sum(1, Identity); }

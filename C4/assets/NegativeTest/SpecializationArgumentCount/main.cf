@@ -1,0 +1,3 @@
+template<T> struct Box {}
+template<T, U> struct Box<T, U> {}
+int32 main() { Box<int32> b; return 0; }

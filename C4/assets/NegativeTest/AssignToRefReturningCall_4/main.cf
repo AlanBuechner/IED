@@ -1,0 +1,2 @@
+int32& Bad() { int32 v = 5; return v; }
+int main() { int32 x = Bad(); return 0; }

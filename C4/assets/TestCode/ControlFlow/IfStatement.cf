@@ -1,0 +1,10 @@
+// ControlFlow - If Statement Tests (implementation)
+include "../Framework/Assert.ch"
+include "IfStatement.ch"
+
+void TestIfStatement() {
+	int32 x = 10;
+	if (x > 5) {
+		AssertTrue(1);
+	}
+}

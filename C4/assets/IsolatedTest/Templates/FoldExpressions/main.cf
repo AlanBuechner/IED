@@ -1,0 +1,63 @@
+// Fold expressions (D-19): `(args op ...)` folds from the right, `(... op args)` from the left, a written
+// initial value is the innermost operand, `,` runs each copy in order, `&&` / `||` stop early, and an empty
+// pack folds `&&` to true, `||` to false and `,` to nothing.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+template<...Ts> int32 Sum(Ts... args) { return (args + ...); }
+template<...Ts> int32 SumLeft(Ts... args) { return (... + args); }
+template<...Ts> int32 SumFrom(Ts... args) { return (args + ... + 100); }
+template<...Ts> int32 SumInto(Ts... args) { return (100 + ... + args); }
+template<...Ts> int32 MinusRight(Ts... args) { return (args - ...); }
+template<...Ts> int32 MinusLeft(Ts... args) { return (... - args); }
+template<...Ts> int32 Product(Ts... args) { return (args * ... * 1); }
+template<...Ts> bool All(Ts... args) { return (args && ...); }
+template<...Ts> bool Any(Ts... args) { return (args || ...); }
+template<...Ts> int32 Bits(Ts... args) { return (args | ...); }
+template<...Ts> bool Equal(Ts... args) { return (args == ...); }
+template<...Ts> int32 SquareSum(Ts... args) { return ((args * args) + ...); }
+
+int32 g_order = 0;
+void Record(int32 v) { g_order = g_order * 10 + v; }
+template<...Ts> void Each(Ts... args) { (Record(args), ...); }
+template<...Ts> void EachFrom(Ts... args) { (Record(9), ..., Record(args)); }
+template<...Ts> int32 Last(Ts... args) { return (args, ...); }
+
+int32 g_calls = 0;
+bool Counted(bool v) { g_calls = g_calls + 1; return v; }
+template<...Ts> bool AllCounted(Ts... args) { return (Counted(args) && ...); }
+
+template<...int32 Ns> int32 SumValues() { return (Ns + ... + 0); }
+
+int32 main() {
+	Check(Sum(1, 2, 3, 4) == 10, "a right fold");
+	Check(SumLeft(1, 2, 3) == 6, "a left fold");
+	Check(SumFrom() == 100, "a right fold of an empty pack is its initial value");
+	Check(SumFrom(1, 2) == 103, "a right fold with an initial value");
+	Check(SumInto(1, 2) == 103, "a left fold with an initial value");
+	Check(MinusRight(10, 3, 2) == 9, "a right fold nests to the right: 10 - (3 - 2)");
+	Check(MinusLeft(10, 3, 2) == 5, "a left fold nests to the left: (10 - 3) - 2");
+	Check(Product(2, 3, 4) == 24, "a product with an initial value");
+	Check(Sum(7) == 7, "a one-element fold is that element");
+	Check(All(true, true), "&& of trues");
+	Check(!All(true, false), "&& with a false");
+	Check(All(), "&& of an empty pack is true");
+	Check(!Any(), "|| of an empty pack is false");
+	Check(Any(false, true), "|| with a true");
+	Check(Bits(1, 2, 4) == 7, "a bitwise fold");
+	Check(Equal(3, 3), "a comparison fold");
+	Check(SquareSum(1, 2, 3) == 14, "a parenthesized pattern");
+	Each(1, 2, 3);
+	Check(g_order == 123, "a comma fold runs each copy in order");
+	g_order = 0;
+	EachFrom(1, 2);
+	Check(g_order == 912, "a left comma fold runs its initial value first");
+	Each();
+	Check(Last(4, 5, 6) == 6, "a comma fold's value is its last copy");
+	Check(!AllCounted(true, false, true) && g_calls == 2, "&& stops at the first false");
+	Check(SumValues<1, 2, 3>() == 6, "a fold over a value pack");
+	return g_failures;
+}

@@ -1,0 +1,7 @@
+struct Pt { int32 x; int32 y; };
+Pt gp = Pt{3, 4};
+int32 main() {
+	if (gp.x != 3 || gp.y != 4) { printf("FAIL global (%d,%d)\n", gp.x,gp.y); return 1; }
+	printf("GLOBAL AGG OK\n");
+	return 0;
+}

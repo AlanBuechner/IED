@@ -1,0 +1,2 @@
+namespace Math { class Plain { public int32 x; } }
+int32 main(){ Math::Plain<float> v; return 0; }

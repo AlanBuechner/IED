@@ -1,0 +1,33 @@
+// Multi-instantiation method dispatch - locks per-instantiation method-signature binding end to end.
+//
+// The hazard this guards: when several instantiations of one template share a method name (Times),
+// each must bind to ITS OWN concrete signature. If Scale<int32>::Times were bound to Scale<uint64>'s
+// signature (or vice versa) the arithmetic would run in the wrong type and produce a wrong value -
+// not a crash, so only a value check catches it. The uint64 case is chosen to overflow BOTH int32 and
+// uint32 range (5,000,000,000,000 > 2^32-1), so a cross-bound narrower computation wraps and disagrees.
+template<T> struct Scale {
+    T factor;
+    public T Times(T v) { return v * factor; }
+}
+
+int32 main() {
+    // int32 instantiation: 7 * 10 == 70.
+    Scale<int32> si; si.factor = 10;
+    if (si.Times(7) != 70) { printf("FAIL int32 dispatch\n"); return 1; }
+
+    // uint64 instantiation: 5000 * 1,000,000,000 == 5,000,000,000,000 - exceeds uint32 max, so a
+    // cross-bound int32/uint32 multiply would wrap around and disagree. This is the discriminating case.
+    Scale<uint64> su; su.factor = 1000000000u;
+    if (su.Times(5000u) != 5000000000000u) { printf("FAIL uint64 dispatch\n"); return 1; }
+
+    // float instantiation: exact binary-float math, 4.0 * 2.5 == 10.0.
+    Scale<float> sf; sf.factor = 2.5f;
+    if (sf.Times(4.0f) != 10.0f) { printf("FAIL float dispatch\n"); return 1; }
+
+    // A second int32 instantiation with a different factor confirms each instance keeps its own state.
+    Scale<int32> si2; si2.factor = 100;
+    if (si2.Times(3) != 300) { printf("FAIL second int32 instance\n"); return 1; }
+
+    printf("MULTI INSTANTIATION METHOD DISPATCH OK\n");
+    return 0;
+}

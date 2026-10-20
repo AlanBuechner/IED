@@ -1,0 +1,38 @@
+// Reflection lists the functions the program wrote, not the lifecycle functions the compiler writes (BUG-238),
+// and registers before the program's globals start, so a global's start can use it.
+include "bedrock.ch"
+
+class Resource
+{
+	public int32 id;
+	[operator("delete")] public void Release() { id = 0; }
+}
+
+class Holder
+{
+	public Resource resource;   // a heap Holder needs a compiler-written finalizer
+}
+
+int32 CountFunctions() { return (int32)Reflection::FunctionCount(); }
+
+int32 g_functionsAtStart = CountFunctions();
+
+int32 main()
+{
+	int32 failures = 0;
+	Holder* holder = new Holder();
+	holder->resource.id = 3;
+	for (int64 i = 0; i < Reflection::FunctionCount(); i++)
+	{
+		const char* name = Reflection::FunctionAt(i).Name();
+		if (strncmp((void*)name, (void*)"__c4_", 5) == 0)
+		{
+			printf("compiler-written function registered: %s\n", name);
+			failures++;
+		}
+	}
+	if (!Reflection::FindFunction("CountFunctions").IsValid()) failures++;
+	if (!Reflection::FindType("Holder").IsValid()) failures++;
+	if (g_functionsAtStart != CountFunctions()) { printf("registered after the globals started: %d vs %d\n", g_functionsAtStart, CountFunctions()); failures++; }
+	return failures;
+}

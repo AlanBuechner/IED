@@ -1,0 +1,2 @@
+template<T> struct Box { public T value; }
+int32 main() { Box<3> b; return 0; }

@@ -1,0 +1,48 @@
+// CppInteropEdge (part 2) ? NAMESPACED C++ interop. Verifies the binding generator descends into
+// namespaces (top-level AND nested), emits unique wrapper symbols, and produces a compiling shim.
+extern "c++" include "ns.h"
+extern "c++" source "ns.cpp"
+
+int32 g_fail = 0;
+void Check(int32 cond, const char* what) { if (!cond) { printf("FAIL %s\n", what); g_fail++; } }
+
+// Free function in namespace mathlib (mangled by C++ ? wrapped).
+void TestFreeFn() {
+	Vec3 a; a.x = 1; a.y = 2; a.z = 3;
+	Vec3 b; b.x = 4; b.y = 5; b.z = 6;
+	Check(Dot(a, b) == 32, "mathlib::Dot(1,2,3 ? 4,5,6)==32");
+}
+
+// Class in the namespace: instance method + static method.
+void TestClass() {
+	Matrix* m = new Matrix;
+	Check(m != null, "namespaced class ctor non-null");
+	Check(m->Trace() == 42, "Matrix.Trace()==42");
+	Check(Matrix_IdentitySize() == 3, "static Matrix::IdentitySize()==3");
+	Check(m->Rank() == 0, "base Matrix.Rank()==0");
+	delete m;
+}
+
+// Virtual dispatch through a base pointer across the namespace boundary.
+void TestVirtual() {
+	DiagMatrix* dm = new DiagMatrix(7);
+	Matrix* base = dm;   // derived?base upcast
+	Check(base->Rank() == 7, "virtual Rank via Matrix* dispatches to DiagMatrix (7)");
+	delete dm;
+}
+
+// Nested namespace (mathlib::detail): free function + struct.
+void TestNestedNs() {
+	Check(DefaultMaxIter() == 100, "nested ns detail::DefaultMaxIter()==100");
+	Config c;
+	c.maxIter = 5;
+	Check(c.maxIter == 5, "nested ns Config field round-trip");
+}
+
+int32 main() {
+	TestFreeFn();
+	if (g_fail) return 1;
+	return 0;
+}
+
+

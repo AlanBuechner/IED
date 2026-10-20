@@ -1,0 +1,37 @@
+// OOP - `this` comparisons (BUG-170) and `*this` beside a dereference operator (BUG-171)
+include "../Framework/Assert.ch"
+include "ThisComparisons.ch"
+
+bool TcNode::IsSame(const TcNode& other) const { return &other == this; }
+bool TcNode::IsOther(const TcNode* other) const { return this != other && other != nullptr; }
+
+TcCursor TcCursor::Next() const {
+	TcCursor next = *this;
+	next.index += 1;
+	return next;
+}
+
+int32 TcCursor::CopyThenRead() const {
+	TcCursor copy = *this;
+	return *copy;
+}
+
+void TestThisComparisons() {
+	TcNode a;
+	TcNode b;
+	AssertTrue(a.IsSame(a) ? 1 : 0);
+	AssertFalse(a.IsSame(b) ? 1 : 0);
+	AssertTrue(a.IsOther(&b) ? 1 : 0);
+	AssertFalse(a.IsOther(&a) ? 1 : 0);
+	AssertFalse(a.IsOther(nullptr) ? 1 : 0);
+	int32[3] items;
+	items[0] = 5; items[1] = 6; items[2] = 7;
+	TcCursor c;
+	c.items = &items[0];
+	c.index = 0;
+	AssertEqual(5, *c);
+	AssertEqual(6, *c.Next());
+	AssertEqual(7, *c.Next().Next());
+	AssertEqual(0, c.index);
+	AssertEqual(5, c.CopyThenRead());
+}

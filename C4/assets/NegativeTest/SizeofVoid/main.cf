@@ -1,0 +1,1 @@
+int32 main() { int64 n = sizeof(void); return (int32)n; }

@@ -1,0 +1,5 @@
+// __uuidof of a name that is not a type is a compile-time error that names it (every type has a UUID, D-43).
+int32 main() {
+	_GUID* g = __uuidof(Missing);
+	return 0;
+}

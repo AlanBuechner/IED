@@ -1,0 +1,2 @@
+include "game.ch"
+int32 Hit(int32 v) { Game::g_hits++; return Game::Add(v, 0); }

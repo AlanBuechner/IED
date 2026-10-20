@@ -1,0 +1,76 @@
+// The script registers its types, enums, globals and functions under its tag; the host finds them as its own,
+// calls them, and the host's entities are not registered again. Unloading removes them, after the listeners.
+include "scripttest.ch"
+include "registry.ch"
+
+void OnUnload(const char* tag, void* user) { Registry::g_unloads++; }
+
+void CheckTypes(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	Reflection::Type booster = script->FindType("Mods::Booster");
+	checks.That(booster.IsValid(), "the script's class is registered");
+	if (!booster.IsValid()) return;
+	checks.That(ScriptTest::SameText(booster.Tag(), "reflect"), "under the script's tag");
+	checks.That(ScriptTest::SameText(booster.BaseName(), "Registry::Component"), "with its host base");
+	Reflection::Field power = booster.FindField("power");
+	checks.That(power.IsValid(), "its field");
+	Reflection::Field speed = booster.FindField("speed");
+	Reflection::Annotation tunable = speed.FindAnnotation("tunable");
+	checks.That(tunable.IsValid() && ScriptTest::SameText(tunable.StringArg(0), "speed"), "a field's annotation");
+
+	funcptr<Registry::Component*()> make = (funcptr<Registry::Component*()>)script->Address("Mods::MakeBooster");
+	Registry::Component* component = make();
+	checks.Equal(77, component->Id(), "the host calls the script's override");
+	int32 value = 0;
+	checks.Equal(5, power.Get((void*)component, value) ? value : -1, "the host reads a script field through reflection");
+	Reflection::Method boost = booster.FindMethod("Boost");
+	int32 result = 0;
+	int32 by = 4;
+	checks.That(boost.IsValid() && boost.Call((void*)component, (void*)&result, by), "the host calls a script method through reflection");
+	checks.Equal(20, result, "Boost(4)");
+
+	Reflection::Type mode = script->FindType("Mods::Mode");
+	checks.Equal(3, mode.IsValid() ? mode.EnumCount() : -1, "the script's enum and its values");
+	checks.Equal(7, mode.IsValid() && mode.EnumCount() == 3 ? mode.EnumAt(2).Value() : -1, "an enum value");
+}
+
+void CheckGlobalsAndFunctions(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	Reflection::Variable level = Reflection::FindVariable("Mods::g_level");
+	checks.That(level.IsValid() && ScriptTest::SameText(level.Tag(), "reflect"), "the script's global is registered");
+	checks.Equal(12, level.IsValid() ? *(int32*)level.Address() : -1, "and its storage is the script's");
+	Reflection::Function twice = script->FindFunction("Mods::Twice");
+	int32 result = 0;
+	int32 v = 21;
+	checks.That(twice.IsValid() && script->Invoke(twice, (void*)&result, v), "the host invokes a script function");
+	checks.Equal(42, result, "Twice(21)");
+
+	Reflection::Type component = Reflection::FindType("Registry::Component");
+	checks.That(component.IsValid() && ScriptTest::SameText(component.Tag(), ""), "the host's class stays the host's");
+	checks.That(!script->FindType("Registry::Component").IsValid(), "the script did not register it again");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Reflection");
+	const int64 types = Reflection::TypeCount();
+	const int64 functions = Reflection::FunctionCount();
+	uint32 listener = Reflection::OnUnload("reflect", OnUnload, nullptr);
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "reflect", "mods.cf"));
+	if (script->Ok())
+	{
+		CheckTypes(script, checks);
+		CheckGlobalsAndFunctions(script, checks);
+	}
+	checks.That(Reflection::TypeCount() > types, "the script added types");
+	script->Unload();
+	checks.Equal(1, Registry::g_unloads, "the unload listener ran");
+	checks.That(!Reflection::FindType("Mods::Booster").IsValid(), "unloading removed the script's types");
+	checks.That(!Reflection::FindVariable("Mods::g_level").IsValid(), "and its globals");
+	checks.Equal(types, Reflection::TypeCount(), "the host's types are as before");
+	checks.Equal(functions, Reflection::FunctionCount(), "the host's functions are as before");
+	Reflection::RemoveUnloadListener(listener);
+	return checks.End("Reflection");
+}

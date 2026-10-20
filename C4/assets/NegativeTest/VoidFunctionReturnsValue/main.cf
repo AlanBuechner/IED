@@ -1,0 +1,5 @@
+void Log() { return 42; }
+int32 main() {
+	Log();
+	return 0;
+}

@@ -1,0 +1,2 @@
+struct P { public int32 x; public int32 y; }
+int32 main() { P p; [int32 a, int32 b] = p; return a; }

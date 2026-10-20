@@ -1,0 +1,7 @@
+class Token {
+	[operator("create")] private void Init() {}
+}
+class Wallet {
+	public Token t;
+}
+int32 main() { Wallet w; return 0; }

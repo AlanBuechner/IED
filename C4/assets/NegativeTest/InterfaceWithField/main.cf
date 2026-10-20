@@ -1,0 +1,2 @@
+interface I { int32 count; int32 F(); }
+int32 main() { return 0; }

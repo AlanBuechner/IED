@@ -1,0 +1,82 @@
+// BUG-105: a static local starts the first time control reaches its declaration, and only then: its
+// initializer, its create, its field initializers, its braced list. A start that throws is tried again on the
+// next pass, from zero storage. Temporaries of the start end with it, once.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 g_creates = 0;
+class Counter {
+	public int32 value;
+	[operator("create")] public void Init() { value = 100; g_creates++; }
+}
+
+int32 g_calls = 0;
+int32 Compute() { g_calls++; return 7; }
+
+struct Defaults {
+	public int32 x = 7;
+	public int32 hits;
+}
+
+struct Pair { public int32 a; public int32 b = 9; }
+
+int32 g_tempDestroys = 0;
+class Temp {
+	public int32 v;
+	[operator("create")] public void Init(int32 x) { v = x; }
+	[operator("delete")] public void Delete() { if (v != 0) g_tempDestroys++; }
+}
+int32 Read(const Temp& t) { return t.v; }
+
+int32 g_attempts = 0;
+class Fragile {
+	public int32 value;
+	public int32 extra;
+	[operator("create")] public void Init() {
+		g_attempts++;
+		value = value + 1;
+		if (g_attempts == 1) throw 5;
+		extra = 2;
+	}
+}
+
+int32 Counted() { static Counter c; c.value++; return c.value; }
+int32 FromCall() { static int32 n = Compute(); n++; return n; }
+int32 Constant() { static int32 n = 10; n++; return n; }
+int32 FieldStart() { static Defaults d; d.hits++; return d.x * 100 + d.hits; }
+int32 BracedOnce() { static Pair p = { 1 }; p.a++; return p.a * 10 + p.b; }
+int32 WithTemporary() { static int32 v = Read(Temp(6)); return v; }
+int32 Elements() { static Counter[3] parts; parts[1].value++; return parts[0].value + parts[1].value; }
+int32 SharedName() { static int32 n = 1; return n; }
+int32 SharedNameToo() { static int32 n = 2; return n; }
+int32 Referenced() { static int32 target = 3; static int32& bound = target; bound++; return target; }
+
+int32 TryFragile() {
+	try {
+		static Fragile f;
+		return f.value * 10 + f.extra;
+	} catch (int32 code) {
+		return -code;
+	}
+	return 0;
+}
+
+int32 main() {
+	Check(Counted() == 101 && Counted() == 102 && Counted() == 103, "a static local's create runs once");
+	Check(g_creates == 1, "one create for three calls");
+	Check(FromCall() == 8 && FromCall() == 9 && g_calls == 1, "the initializer runs once");
+	Check(Constant() == 11 && Constant() == 12, "a constant start keeps its value across calls");
+	Check(FieldStart() == 701 && FieldStart() == 702, "field initializers start a static local once");
+	Check(BracedOnce() == 29 && BracedOnce() == 39, "a braced static is filled once, not on every pass");
+	Check(WithTemporary() == 6 && WithTemporary() == 6 && g_tempDestroys == 1, "the start's temporary ends once");
+	Check(Elements() == 201 && Elements() == 202 && g_creates == 4, "each element of a static array is constructed once");
+	Check(SharedName() == 1 && SharedNameToo() == 2, "two functions' statics of one name are separate");
+	Check(Referenced() == 4 && Referenced() == 5, "a static reference binds once");
+	Check(TryFragile() == -5, "a start that throws leaves the static unstarted");
+	Check(TryFragile() == 12 && g_attempts == 2, "the next pass starts it again, from zero");
+	Check(TryFragile() == 12 && g_attempts == 2, "once started it stays started");
+	return g_failures;
+}

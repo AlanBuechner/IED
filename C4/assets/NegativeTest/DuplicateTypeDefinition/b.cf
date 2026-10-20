@@ -1,0 +1,4 @@
+// Second definition of the SAME global type 'Pair' from a different file (see a.cf). This is the
+// other half of the redefinition: its Get() body differs, so before the fix the two silently
+// merged and one body won by file order. Must be flagged as a duplicate type definition.
+class Pair { public int32 x; public int32 y; public int32 Get() { return x + y; } };

@@ -1,0 +1,32 @@
+// An exception escaping a finalizer stops the program (it must not unwind through the collector).
+include "Memory/gc.ch"
+
+struct Throws {
+	public int32 value;
+	[operator("delete")] void Finalize() { throw value; }
+}
+
+void Drop() {
+	for (int32 i = 0; i < 100; i++) { Throws* t = new Throws; t->value = i; }
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+int32 main() {
+	Drop();
+	Scrub(8);
+	try {
+		GC::Collect();
+	} catch (...) {
+		printf("SHOULD NOT REACH HERE: the exception reached the caller of the collection\n");
+		return 2;
+	}
+	printf("SHOULD NOT REACH HERE: no finalizer ran\n");
+	return 3;
+}

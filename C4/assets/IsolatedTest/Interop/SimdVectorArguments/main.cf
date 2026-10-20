@@ -1,0 +1,26 @@
+// C vector types (vector_size: clang's __m128 / __m128i / __m256 / __m512) bind as packed vectors of the
+// same lanes and cross the C boundary both ways in the registers clang uses, 128 to 512 bits (D-62). The default
+// target splits the 256- and 512-bit ones into SSE registers on both sides. main returns the failures.
+extern "c" include "vectors.h"
+extern "c" source "vectors.c"
+
+int32 main() {
+	int32 failures = 0;
+	packed float[4] four = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] twice = Twice4(four);
+	failures += twice[0] == 2.0f && twice[3] == 8.0f ? 0 : 1;
+	packed int64[2] a = { 10, -20 };
+	packed int64[2] sum = AddPairs(a, a);
+	failures += sum[0] == 20 && sum[1] == -40 ? 0 : 1;
+	packed float[8] eight = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f };
+	packed float[8] scaled = Scale8(eight, 0.5f);
+	failures += scaled[0] == 0.5f && scaled[7] == 4.0f ? 0 : 1;
+	packed double[4] d = { 1.5, -2.0, 3.0, 0.25 };
+	packed double[4] squares = Square4(d);
+	failures += squares[0] == 2.25 && squares[3] == 0.0625 ? 0 : 1;
+	packed float[16] sixteen = simd_concat(eight, eight * 2.0f);
+	packed float[16] negated = Negate16(sixteen);
+	failures += negated[0] == -1.0f && negated[15] == -16.0f ? 0 : 1;
+	failures += SumThrough(&eight) == 36.0f ? 0 : 1;
+	return failures;
+}

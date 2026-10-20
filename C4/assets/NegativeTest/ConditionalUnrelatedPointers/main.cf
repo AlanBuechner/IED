@@ -1,0 +1,7 @@
+int32 main() {
+	bool c = true;
+	int32 v = 1;
+	float f = 2.0f;
+	int32* r = c ? &v : &f;
+	return *r;
+}

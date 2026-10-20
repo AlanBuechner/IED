@@ -1,0 +1,39 @@
+// Constants in every position that needs one fold casts, `~`, enum members that name the members before them, and
+// integer edges with the run time's values (BUG-204, BUG-205, BUG-206). main returns the failures.
+enum class Size : int32 { One = 1, Two, Count }
+enum class Step : int32 { A = 1, B = A * 4, C, D = C + B }
+enum Bit { Low = 1, High = Low << 3, Both = Low | High }
+
+const int32 Mask = ~0x0F;
+const int64 Min = -9223372036854775807 - 1;
+const int64 MinOverMinusOne = Min / -1;
+const uint8 Wrapped = (uint8)300;
+
+int32[(int32)Size::Count] slots;
+int32[static_cast<int32>(Step::D) - 5] steps;
+int32[(int32)Both] bits;
+
+template<T, int32 N> int32 Lanes() { return N; }
+
+int32 Classify(int32 value) {
+	switch (value) {
+	case ~0: return 1;
+	case (int32)Step::C: return 2;
+	case (int32)2.9: return 3;
+	default: return 0;
+	}
+}
+
+int32 main() {
+	int32 failures = 0;
+	if (sizeof(slots) != 3 * sizeof(int32)) failures += 1;
+	if ((int32)Step::B != 4 || (int32)Step::C != 5 || (int32)Step::D != 9) failures += 1;
+	if (sizeof(steps) != 4 * sizeof(int32)) failures += 1;
+	if (High != 8 || Both != 9 || sizeof(bits) != 9 * sizeof(int32)) failures += 1;
+	if (Mask != -16) failures += 1;
+	if (MinOverMinusOne != Min) failures += 1;
+	if (Wrapped != 44) failures += 1;
+	if (Lanes<float, (int32)Size::Two * 2>() != 4) failures += 1;
+	if (Classify(-1) != 1 || Classify(5) != 2 || Classify(2) != 3 || Classify(7) != 0) failures += 1;
+	return failures;
+}

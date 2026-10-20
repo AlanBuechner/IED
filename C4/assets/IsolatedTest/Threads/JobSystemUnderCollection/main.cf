@@ -1,0 +1,61 @@
+// The job system while the collector runs (D-48, D-61): jobs allocate, and their closures hold managed objects that
+// live only in queue cells until a worker takes them, so a collection must keep them. Frame jobs nest and wait;
+// background jobs churn garbage meanwhile. main returns the failures.
+include "bedrock.ch"
+
+class Payload {
+	public int64[4] values;
+	public Payload* next;
+}
+
+Payload* Chain(int64 seed, int32 length) {
+	Payload* head = null;
+	for (int32 i = 0; i < length; i++) {
+		Payload* p = new Payload;
+		p->values[0] = seed + i;
+		p->next = head;
+		head = p;
+	}
+	return head;
+}
+
+int64 SumChain(Payload* head) {
+	int64 total = 0;
+	for (Payload* p = head; p != null; p = p->next) total += p->values[0];
+	return total;
+}
+
+int64 Expected(int64 seed, int32 length) { return seed * length + (int64)length * (length - 1) / 2; }
+
+int32 main() {
+	Threading::JobSystemDesc desc;
+	desc.frameWorkers = 3;
+	desc.backgroundWorkers = 1;
+	Threading::JobSystem jobs(desc);
+	Threading::JobSystem* system = &jobs;
+	Threading::Atomic<int32>* failures = new Threading::Atomic<int32>;
+	Threading::WaitGroup churn;
+	for (int32 i = 0; i < 8; i++)
+		jobs.Submit([]() { for (int32 k = 0; k < 20000; k++) Chain(k, 2); }, Threading::JobPriority::Background, &churn);
+	for (int32 round = 0; round < 40; round++) {
+		Threading::WaitGroup frame;
+		for (int32 j = 0; j < 16; j++) {
+			Payload* owned = Chain(round * 1000 + j, 50);   // only the closure holds it once submitted
+			int64 seed = round * 1000 + j;
+			jobs.Submit([system, owned, seed, failures]() {
+				Threading::WaitGroup inner;
+				for (int32 k = 0; k < 4; k++)
+					system->Submit([owned, seed, failures]() {
+						Chain(seed, 20);
+						if (SumChain(owned) != Expected(seed, 50)) failures->FetchAdd(1);
+					}, Threading::JobPriority::High, &inner);
+				system->Wait(inner);
+			}, Threading::JobPriority::Normal, &frame);
+		}
+		if (round % 8 == 0) gc_collect();
+		jobs.Wait(frame);
+	}
+	jobs.Wait(churn);
+	if (gc_collections() < 2) failures->FetchAdd(1);
+	return failures->Load();
+}

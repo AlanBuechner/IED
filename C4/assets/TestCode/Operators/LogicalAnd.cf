@@ -1,0 +1,14 @@
+// Operators - Logical And Tests (implementation)
+include "../Framework/Assert.ch"
+include "LogicalAnd.ch"
+
+void TestLogicalAnd() {
+	bool a = true && true;
+	AssertTrue(a);
+	
+	bool b = true && false;
+	AssertFalse(b);
+	
+	bool c = false && true;
+	AssertFalse(c);
+}

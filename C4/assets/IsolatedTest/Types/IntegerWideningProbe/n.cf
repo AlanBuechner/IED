@@ -1,0 +1,11 @@
+void P(int64 v, int32 tag) {
+    printf("tag=%d v_neg=%d v_as_u32=%u\n", tag, (v < 0) ? 1 : 0, (uint32)v);
+}
+int32 main() {
+    P(-7, 1);              // literal -7 straight into int64 param
+    int64 a = -7;          // via local
+    P(a, 2);
+    int32 b = -7;          // int32 then widen
+    P(b, 3);
+    return 0;
+}

@@ -1,0 +1,4 @@
+int32 main() {
+	int32 one = 8;
+	return one >> -1;
+}

@@ -1,0 +1,52 @@
+// Objects are copied by [operator("copy")], or member by member when the type has none; temporaries and
+// returned locals relocate instead of copying (D-05).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+
+int32 g_copies = 0;
+
+class Tracked {
+	public int32 v;
+	[operator("create")] public void Init(int32 x) { v = x; }
+	[operator("copy")] public void CopyFrom(const Tracked& other) { v = other.v; g_copies = g_copies + 1; }
+}
+class Pair { public Tracked a; public int32 n; public Tracked b; }
+class Plain { public int32 x; public int32 y; }
+
+Tracked Make(int32 v) { Tracked t = Tracked(v); return t; }
+int32 ValueOf(Tracked t) { return t.v; }
+int32 ValueOfRef(const Tracked& t) { return t.v; }
+
+int32 main() {
+	Tracked x = Tracked(1);
+	Check(g_copies == 0, "a constructed temporary relocates into the variable");
+	Tracked y = x;
+	Check(g_copies == 1 && y.v == 1, "copy-initialization from a variable runs the copy operator");
+	Tracked z = Make(5);
+	Check(g_copies == 1 && z.v == 5, "a returned local relocates, it is not copied");
+	Check(ValueOf(x) == 1 && g_copies == 2, "passing a variable by value copies it");
+	Check(ValueOf(Tracked(9)) == 9 && g_copies == 2, "passing a temporary by value relocates it");
+	Check(ValueOfRef(x) == 1 && g_copies == 2, "passing by reference copies nothing");
+	bool pickFirst = true;
+	Tracked t = pickFirst ? x : y;
+	Check(g_copies == 3 && t.v == 1 && x.v == 1 && y.v == 1, "an object ?: copies the chosen variable once");
+	Tracked last = y;
+	Check(g_copies == 3 && last.v == 1, "initializing from a variable at its last use moves it (D-05)");
+
+	g_copies = 0;
+	Pair p;
+	p.a.v = 2; p.n = 7; p.b.v = 3;
+	Pair q = p;
+	Check(g_copies == 2, "a type without a copy operator copies member by member");
+	Check(q.a.v == 2 && q.n == 7 && q.b.v == 3, "every member is copied");
+	q.a.v = 99;
+	Check(p.a.v == 2, "the copy is independent");
+
+	Plain a; a.x = 1; a.y = 2;
+	Plain b = a;
+	Check(b.x == 1 && b.y == 2, "a plain type copies its bytes");
+	return g_failures;
+}

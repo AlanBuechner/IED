@@ -1,0 +1,11 @@
+// Operators - Multiplication Tests (implementation)
+include "../Framework/Assert.ch"
+include "Multiplication.ch"
+
+void TestMultiplication() {
+	int32 a = 7 * 6;
+	AssertEqual(42, a);
+	
+	int32 b = -3 * 5;
+	AssertEqual(-15, b);
+}

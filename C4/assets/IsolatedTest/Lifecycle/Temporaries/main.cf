@@ -1,0 +1,53 @@
+// A temporary lives until the end of the full expression that created it: the end of its statement, or,
+// for a condition or loop step, as soon as that is computed (before the body or branch runs).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+class Probe {
+	public int32* live;
+	public int32 id;
+	[operator("create")] public void Init(int32* counter, int32 i) { live = counter; id = i; *live = *live + 1; }
+	[operator("copy")] public void CopyFrom(const Probe& other) {
+		live = other.live; id = other.id;
+		if (live) *live = *live + 1;
+	}
+	[operator("delete")] public void Delete() {
+		if (live) *live = *live - 1;
+		live = null;
+	}
+}
+
+int32 Id(const Probe& p) { return p.id; }
+
+int32 main() {
+	int32 live = 0;
+	int32 v = Probe(&live, 3).id;
+	Check(v == 3 && live == 0, "a temporary used for a member access is destroyed at the end of the statement");
+	int32 w = Id(Probe(&live, 4));
+	Check(w == 4 && live == 0, "a temporary bound to a const reference is destroyed at the end of the statement");
+	Probe(&live, 5);
+	Check(live == 0, "a discarded temporary is destroyed");
+	int32 iterations = 0;
+	int32 peak = 0;
+	while (Probe(&live, iterations).id < 3) {
+		if (live > peak) peak = live;
+		iterations = iterations + 1;
+	}
+	Check(iterations == 3 && peak == 0 && live == 0, "a loop condition's temporary is destroyed before the body runs");
+	for (int32 i = Probe(&live, 0).id; i < Probe(&live, 2).id; i = i + Probe(&live, 1).id) {
+		if (live > peak) peak = live;
+	}
+	Check(peak == 0 && live == 0, "for-loop init, condition and step temporaries are destroyed as each is computed");
+	int32 j = 0;
+	do { if (live > peak) peak = live; j = j + 1; } while (j < Probe(&live, 2).id);
+	Check(j == 2 && peak == 0 && live == 0, "a do-while condition's temporary is destroyed before the next pass");
+	if (Probe(&live, 1).id == 1) { Check(live == 0, "an if condition's temporary is destroyed before the branch"); }
+	switch (Probe(&live, 2).id) {
+		case 2: Check(live == 0, "a switch value's temporary is destroyed before the case runs"); break;
+		default: Check(false, "the switch value is 2"); break;
+	}
+	Check(live == 0, "nothing is left alive");
+	return g_failures;
+}

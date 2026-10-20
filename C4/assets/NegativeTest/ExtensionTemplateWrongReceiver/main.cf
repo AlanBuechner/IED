@@ -1,0 +1,4 @@
+template<T> struct Pair { public T first; public T second; }
+template<T> struct Box { public T value; }
+template<T> T Sum() extends Pair<T> { return first + second; }
+int32 main() { Box<int32> b; return b.Sum(); }
