@@ -6,7 +6,11 @@ Drives any server over its `/ws` endpoint and checks the behavior `docs/10` prom
 python -I tools/conformance/run_conformance.py                                # spawns the mock on a free port
 python -I tools/conformance/run_conformance.py --url ws://127.0.0.1:8765/ws   # any running server
 python -I tools/conformance/run_conformance.py -k resume -v                   # a subset, verbose
+python -I tools/conformance/run_conformance.py --server <ied-server.exe>       # starts it, signs in with its launch token
 ```
+
+A server that authenticates (`docs/11`) wants its session cookie on every socket: `--server` spends the token from the
+server's `OPEN` line and sends the cookie it gets; with `--url`, pass `--cookie name=value`.
 
 Every frame the server sends is validated against `shared/host-api/protocol/frames.v1.schema.json`; any invalid frame fails the test that received it.
 

@@ -4,7 +4,7 @@
 #   nuke test             C4Testing unit tests
 #   nuke gates            every C4 test suite (run before calling compiler work done)
 #   nuke install-c4       install the compiler as a numbered, immutable toolchain other workspaces can pin
-#   nuke build ied-server the IED server (src/), with the "dev" toolchain; `nuke conformance` checks it
+#   nuke build ied-server the IED server (src/), with the "dev" toolchain; `nuke conformance` checks it (protocol + security)
 [workspace]
 name = "IED"
 toolchain = "dev"
@@ -26,9 +26,10 @@ steps = [
 ]
 
 [commands.conformance]
-description = "Build the IED server, then run the protocol v1 conformance suite against it (tools/conformance)"
+description = "Build the IED server, then run the protocol v1 conformance suite (tools/conformance) and the security suite (tools/security) against it"
 requires = ["build"]
 projects = ["ied-server"]
 steps = [
 	{ name = "conformance", run = ["${python}", "-I", "tools/conformance/run_conformance.py", "--server", "${bin.root}/ied-server/ied-server.exe"] },
+	{ name = "security", run = ["${python}", "-I", "tools/security/run_security.py", "--server", "${bin.root}/ied-server/ied-server.exe"] },
 ]

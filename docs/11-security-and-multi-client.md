@@ -27,6 +27,61 @@ Out of scope for v1: a compromised OS user account (anything running as the owne
 6. **TLS:** v1 recommends a private overlay (Tailscale/WireGuard) for anything beyond the LAN; Tailscale's HTTPS certificates give real TLS without IED managing certs. Built-in self-signed TLS with a per-install CA is P2. Cookies get `Secure` whenever the request arrived over TLS.
 7. **CSP** on the app: `default-src 'self'`; scripts only from the server; `connect-src 'self'`; frames only from the port-forward prefix and `blob:`. Plugin UI modules are served from the same origin (they are trusted code once enabled - see below).
 
+## Authentication on the wire (v1)
+
+The access defaults above, as the server implements them (M1).
+
+**Data folder.** The server keeps its own state under `--data <dir>` (default `%LOCALAPPDATA%\IED`; with `--test-hooks` a fresh temporary folder unless `--data` is given):
+
+| File | Holds |
+|---|---|
+| `auth/owner.json` | the owner password as an Argon2id PHC string (RFC 9106's second recommended costs: 64 MiB, 3 passes, 4 lanes) |
+| `auth/devices.json` | device sessions: id, name, kind (`token` or `password`), created, last seen, and the SHA-256 of the cookie value - never the value |
+| `logs/security.log` | the audit log below: one JSON object per line, appended |
+
+Files are written whole under a temporary name and renamed over the old one, so a crash leaves the old file or the new one, never half of one.
+
+**Launch token.** At start the server prints one as its second line on stdout, after `LISTENING http://<host>:<port>`: `OPEN http://<host>:<port>/?t=<token>`. Later ones come from the named pipe (`ied open`). A token is 32 random bytes as 64 hex digits, single use, and dies after 60 s.
+
+**Exchange.** `GET <path>?t=<token>` with a live token spends it, creates a device session (kind `token`, named from the `User-Agent`) and answers `303 See Other` to the path without the query, setting the session cookie. A spent, expired or unknown token is treated like no cookie.
+
+**Session cookie.** `ied-<port>=<64 hex digits>; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`, plus `Secure` over TLS. The port is in the name because cookies ignore ports: two servers on one machine must not overwrite each other's session. Sessions slide: each authenticated request moves the expiry to 30 days from then, and the server re-sends the cookie at most once a day so the browser's copy follows.
+
+**What needs a session.**
+
+- `/ws`: 401 before the upgrade.
+- `/api/*` other than `/api/auth/*`: 401 with `{"error": "unauthenticated"}`.
+- The web client's files: a GET without a session gets `login.html` from the static folder with status 401. `/login.html`, `/login.js`, `/css/*` and `/favicon.ico` are served to anyone, so the login page can load.
+- `/healthz` stays open: it shows only the version and the session epoch.
+
+HTML responses carry the CSP above plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` (a launch token in a URL must not leak through a referrer).
+
+**Auth endpoints.** These need no session. Origin is checked, and request and response bodies are JSON.
+
+| Request | Answer |
+|---|---|
+| `GET /api/auth/state` | `{"authenticated": bool, "passwordSet": bool, "device": {...} or null}` |
+| `POST /api/auth/login` `{"password": "...", "device": "name"?}` | Success: 200, the cookie and `{"device": {...}}`. A wrong password: 401 `{"error": "wrong-password"}`. No password set: 409 `{"error": "no-password"}`. Locked out: 429 `{"error": "locked", "retryAfterS": n}` with a `Retry-After` header. |
+| `POST /api/auth/logout` | 200; the device session is deleted and the cookie cleared |
+
+A device object is `{"id", "name", "kind", "created", "lastSeen"}`, with times in Unix milliseconds.
+
+**Rate limit.** Five failed logins from one IP within a minute lock that IP out for a minute; each further lockout in a row doubles that, up to an hour, and a success resets it. A login attempt during a lockout is answered 429 without the password being checked, so a locked-out guesser learns nothing.
+
+**Methods** (protocol v1; the socket's device session is the caller):
+
+| Method | Does |
+|---|---|
+| `auth.setPassword {current?, password}` | Sets the owner password: at least 12 characters. Once one exists, `current` must match it (`forbidden` otherwise). |
+| `auth.devices` | `{"devices": [device..., with "current": bool]}` |
+| `auth.revoke {deviceId}` | Deletes the device session; its sockets get `bye {"reason": "auth-revoked"}` and close |
+
+**LAN bind.** A `--host` that is not a loopback address is refused at start unless an owner password exists; set one from a loopback session first.
+
+**Test hook.** `testhooks.mintToken {ttlMs}` returns `{"token"}`, a launch token that dies after `ttlMs` (security tests).
+
+**Audit events** (`logs/security.log`): `start` (bind address), `token-exchanged`, `login`, `login-failed`, `locked-out`, `logout`, `device-revoked`, `password-set`.
+
 ## Trust layers
 
 Three independent switches, each with a narrow meaning:

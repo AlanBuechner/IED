@@ -3,11 +3,19 @@
 import asyncio
 import itertools
 import json
+import os
 import secrets
 
 import ws
 
 DEFAULT_TIMEOUT = 5.0
+COOKIE_ENV = "IED_CONFORMANCE_COOKIE"
+
+
+def auth_headers():
+	"""The session cookie a server that authenticates wants on every socket (docs/11); none for the mock."""
+	cookie = os.environ.get(COOKIE_ENV)
+	return {"Cookie": cookie} if cookie else {}
 
 
 class RpcFailure(Exception):
@@ -63,8 +71,8 @@ class Client:
 		self.reader = None
 
 	@classmethod
-	async def connect(cls, url, checker, client_id=None, device_id=None, device_class="desktop", resume=None, proto=1, timeout=DEFAULT_TIMEOUT):
-		sock = await ws.connect(url, timeout=timeout)
+	async def connect(cls, url, checker, client_id=None, device_id=None, device_class="desktop", resume=None, proto=1, timeout=DEFAULT_TIMEOUT, headers=None):
+		sock = await ws.connect(url, headers=auth_headers() if headers is None else headers, timeout=timeout)
 		client = cls(sock, checker, client_id or new_id("c"), device_id or new_id("d"))
 		hello = {"t": "hello", "proto": proto, "clientId": client.client_id, "deviceId": client.device_id, "deviceClass": device_class}
 		if resume is not None:

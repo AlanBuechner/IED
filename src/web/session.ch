@@ -42,6 +42,7 @@ namespace Ied
 		public Server* server;
 		public Http::WebSocket* socket;
 		public Core::String peer;
+		public Core::String authDevice;   // the device session the socket was opened with (docs/11)
 		public Core::String clientId;
 		public DeviceInfo device;
 		public Outbox outbox;

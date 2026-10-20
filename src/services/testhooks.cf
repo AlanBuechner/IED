@@ -21,6 +21,7 @@ namespace Ied
 		server->rpc.Register("testhooks.restart", [self](Call& call, const Params& params) -> Core::String { return self->Restart(call, params); });
 		server->rpc.Register("testhooks.scratch", [self](Call& call, const Params& params) -> Core::String { return self->Scratch(call, params); });
 		server->rpc.Register("testhooks.serverEdit", [self](Call& call, const Params& params) -> Core::String { return self->ServerEdit(call, params); });
+		server->rpc.Register("testhooks.mintToken", [self](Call& call, const Params& params) -> Core::String { return self->MintToken(call, params); });
 	}
 
 	Core::String TestHooks::Info(Call& call, const Params& params) {
@@ -186,6 +187,16 @@ namespace Ied
 		json.IntField("sleptMs", ms);
 		json.RawField("result", resultJson.View());
 		json.IntField("execution", execution);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// A launch token that dies after `ttlMs` (docs/11), for the security tests.
+	Core::String TestHooks::MintToken(Call& call, const Params& params) {
+		Core::String token = server->auth->MintLaunchToken(params.Int("ttlMs", kLaunchTokenMs));
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("token", token.View());
 		json.EndObject();
 		return json.ToString();
 	}

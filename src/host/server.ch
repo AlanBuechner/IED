@@ -8,6 +8,7 @@ include "../services/workspaces.ch"
 include "../services/documents.ch"
 include "../services/testhooks.ch"
 include "../services/blobs.ch"
+include "../auth/auth.ch"
 
 namespace Ied
 {
@@ -26,6 +27,7 @@ namespace Ied
 		public Threading::Mutex lock;
 		public Threading::ConditionVariable changed;   // an opId's first run finished
 		public ServerConfig config;
+		public int32 port;   // the port it listens on, once it does
 		public Core::String epoch;
 		public Hub hub;
 		public Rpc rpc;
@@ -35,6 +37,7 @@ namespace Ied
 		public Documents* documents;
 		public TestHooks* testHooks;
 		public Blobs* blobs;
+		public Auth* auth;
 	}
 
 	// "e-" and 12 random hex digits.

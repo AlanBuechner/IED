@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED - sign in</title>
+	<link rel="stylesheet" href="/css/theme.css">
+	<link rel="stylesheet" href="/css/login.css">
+	<script src="/login.js" defer></script>
+</head>
+<body>
+	<main class="login">
+		<h1 class="login-title">IED</h1>
+		<p class="login-hint" id="hint">Sign in with the owner password.</p>
+		<form class="login-form" id="form">
+			<label for="password">Password</label>
+			<input id="password" type="password" autocomplete="current-password" required autofocus>
+			<label for="device">Device name</label>
+			<input id="device" type="text" autocomplete="off" placeholder="this browser">
+			<button type="submit" id="submit">Sign in</button>
+			<p class="login-error" id="error" role="alert" hidden></p>
+		</form>
+		<p class="login-note">On the machine IED runs on, open the link the server printed (<code>OPEN ...</code>) instead: it signs this browser in without a password.</p>
+	</main>
+</body>
+</html>

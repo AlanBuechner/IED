@@ -12,6 +12,7 @@ URL_ENV = "IED_CONFORMANCE_URL"
 
 class ProtocolTest(unittest.IsolatedAsyncioTestCase):
 	async def asyncSetUp(self):
+		asyncio.get_running_loop().slow_callback_duration = 60   # debug mode need not report slow test steps
 		self.url = os.environ.get(URL_ENV)
 		if not self.url:
 			self.fail("%s is not set; run tools/conformance/run_conformance.py" % URL_ENV)

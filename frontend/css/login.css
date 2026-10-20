@@ -1,0 +1,108 @@
+/* The login page (docs/11): one dense panel, theme tokens only. */
+
+html, body {
+	height: 100%;
+	margin: 0;
+	background: var(--bg-0);
+	color: var(--text-0);
+	font-family: var(--font-ui);
+	font-size: var(--font-size-ui);
+}
+
+[hidden] {
+	display: none !important;
+}
+
+body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+::selection {
+	background: var(--selection-active);
+}
+
+.login {
+	box-sizing: border-box;
+	width: 320px;
+	max-width: calc(100% - 32px);
+	padding: 20px;
+	background: var(--bg-1);
+	border: 1px solid var(--border-0);
+	border-radius: var(--radius-2);
+}
+
+.login-title {
+	margin: 0 0 4px;
+	font-size: var(--font-size-xl);
+	font-weight: var(--font-weight-semibold);
+}
+
+.login-hint, .login-note {
+	margin: 0 0 12px;
+	color: var(--text-1);
+}
+
+.login-note {
+	margin: 16px 0 0;
+	font-size: var(--font-size-sm);
+	color: var(--text-2);
+}
+
+.login-form {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.login-form label {
+	margin-top: 6px;
+	color: var(--text-1);
+	font-size: var(--font-size-sm);
+}
+
+.login-form input {
+	height: var(--row-h);
+	padding: 0 6px;
+	background: var(--bg-3);
+	color: var(--text-0);
+	border: 1px solid var(--border-1);
+	border-radius: var(--radius-1);
+	font: inherit;
+}
+
+.login-form input:focus {
+	outline: 1px solid var(--focus);
+	outline-offset: -1px;
+}
+
+.login-form button {
+	margin-top: 12px;
+	height: calc(var(--row-h) + 4px);
+	background: var(--inverse-bg);
+	color: var(--inverse-text);
+	border: none;
+	border-radius: var(--radius-1);
+	font: inherit;
+	font-weight: var(--font-weight-semibold);
+	cursor: pointer;
+}
+
+.login-form button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.login-error {
+	margin: 8px 0 0;
+	padding: 4px 6px;
+	background: var(--tint-error);
+	color: var(--text-0);
+	border-left: 2px solid var(--accent-error);
+}
+
+code {
+	font-family: var(--font-mono);
+	font-size: var(--font-size-sm);
+}

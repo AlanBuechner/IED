@@ -36,6 +36,7 @@ namespace Ied
 		private Core::String Scratch(Call& call, const Params& params);
 		private Core::String ServerEdit(Call& call, const Params& params);
 		private Core::String Info(Call& call, const Params& params);
+		private Core::String MintToken(Call& call, const Params& params);
 		private void RegisterMethods();
 
 		private Server* server;

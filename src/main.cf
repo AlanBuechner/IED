@@ -1,4 +1,5 @@
-// ied-server: the IED server (docs/01). Its first line on stdout is "LISTENING http://<host>:<port>".
+// ied-server: the IED server (docs/01). Its first line on stdout is "LISTENING http://<host>:<port>", its second
+// "OPEN http://<host>:<port>/?t=<token>": a launch token that signs a browser in once, within a minute (docs/11).
 
 include "host/server.ch"
 include "web/front.ch"
@@ -29,6 +30,47 @@ static void Fail(Core::StringView why) {
 	Platform::WriteError(text.View());
 }
 
+// The address a browser opens: the bind address, or loopback when the server listens on every interface.
+static Core::String BrowserHost(const Ied::ServerConfig& config) {
+	Core::StringView host = config.host.View();
+	if (host == "0.0.0.0" || host.IsEmpty()) return Core::String("127.0.0.1");
+	if (host == "::") return Core::String("[::1]");
+	return host.IndexOf(':', 0) >= 0 ? Core::String("[") + host + "]" : Core::String(host);
+}
+
+static void Announce(const char* what, const Ied::ServerConfig& config, int32 port, Core::StringView suffix) {
+	Core::StringBuilder line;
+	line.Append(what);
+	line.Append(" http://");
+	line.Append(BrowserHost(config).View());
+	line.AppendByte(':');
+	line.AppendInt(port);
+	line.Append(suffix);
+	line.AppendByte('\n');
+	Platform::WriteOutput(line.View());
+}
+
+// Loads the server's state; false, having said why, when it cannot run.
+static bool Prepare(Ied::Server* server, const Net::Address& at) {
+	Core::String error;
+	Threading::LockGuard guard(server->lock);
+	if (!server->auth->Load(error)) {
+		Fail(error.View());
+		return false;
+	}
+	if (!at.IsLoopback() && !server->auth->HasPassword()) {
+		Fail(Core::StringView("listening beyond this machine needs an owner password: set one from a loopback session first (docs/11)"));
+		return false;
+	}
+	server->auth->Record("start", (Core::String("\"address\":") + Ied::JsonString(at.ToString().View()).View()).View());
+	return true;
+}
+
+static Core::String LaunchSuffix(Ied::Server* server) {
+	Threading::LockGuard guard(server->lock);
+	return Core::String("/?t=") + server->auth->MintLaunchToken(Ied::kLaunchTokenMs).View();
+}
+
 int32 main(int32 argc, char8** argv) {
 	Ied::ServerConfig config = Ied::DefaultConfig();
 	Core::String error;
@@ -42,19 +84,16 @@ int32 main(int32 argc, char8** argv) {
 		return 2;
 	}
 	Ied::Server* server = new Ied::Server(config);
+	if (!Prepare(server, at)) return 2;
 	Ied::Front* front = new Ied::Front(server);
 	Http::Server http;
 	if (!http.Listen(at)) {
 		Fail(Core::StringView(http.Error()));
 		return 1;
 	}
-	Core::StringBuilder listening;
-	listening.Append("LISTENING http://");
-	listening.Append(config.host.View());
-	listening.AppendByte(':');
-	listening.AppendInt(http.LocalAddress().port);
-	listening.AppendByte('\n');
-	Platform::WriteOutput(listening.View());
+	server->port = http.LocalAddress().port;
+	Announce("LISTENING", config, server->port, Core::StringView(""));
+	Announce("OPEN", config, server->port, LaunchSuffix(server).View());
 	http.Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
 	return 0;
 }

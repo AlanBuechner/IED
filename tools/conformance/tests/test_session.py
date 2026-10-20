@@ -5,7 +5,7 @@ import json
 
 import ws
 from harness import ProtocolTest
-from iedclient import Client
+from iedclient import Client, auth_headers
 
 
 class SessionTests(ProtocolTest):
@@ -26,7 +26,7 @@ class SessionTests(ProtocolTest):
 		await client.wait_closed()
 
 	async def test_first_frame_must_be_hello(self):
-		sock = await ws.connect(self.url)
+		sock = await ws.connect(self.url, headers=auth_headers())
 		await sock.send_text(json.dumps({"t": "ping", "ts": 1}))
 		with self.assertRaises(ws.ConnectionClosed):
 			while True:

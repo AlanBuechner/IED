@@ -4,6 +4,9 @@ include "../host/server.ch"
 namespace Ied
 {
 	const int64 kMaxUploadBytes = 67108864;
+	const char* kContentPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+		"font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; "
+		"frame-ancestors 'self'";
 
 	static void Answer(Http::Response& response, int32 status, Core::StringView text) {
 		response.status = status;
@@ -46,6 +49,13 @@ namespace Ied
 		if (extension == ".wasm") return "application/wasm";
 		if (extension == ".txt" || extension == ".md") return "text/plain; charset=utf-8";
 		return "application/octet-stream";
+	}
+
+	// docs/11: nothing sniffed, no referrer (a launch token in a URL must not leak), and on a page the content policy.
+	static void SecureHeaders(Http::Response& response, bool page) {
+		response.headers.Set(Core::StringView("X-Content-Type-Options"), Core::StringView("nosniff"));
+		response.headers.Set(Core::StringView("Referrer-Policy"), Core::StringView("no-referrer"));
+		if (page) response.headers.Set(Core::StringView("Content-Security-Policy"), Core::StringView(kContentPolicy));
 	}
 
 	static bool IsWildcardBind(Core::StringView host) { return host.IsEmpty() || host == "0.0.0.0" || host == "::"; }
@@ -97,22 +107,49 @@ namespace Ied
 			return;
 		}
 		Core::StringView path = request.path.View();
-		if (path == "/ws") WebSocket(request, response);
-		else if (path == "/healthz") Health(response);
+		if (path == "/healthz") Health(response);
+		else if (path.StartsWith(Core::StringView("/api/auth/")) && request.method.View() != "GET" && !OriginAllowed(request))
+			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+		else if (path.StartsWith(Core::StringView("/api/auth/"))) gate.Api(path, request, response);
+		else if (request.method.View() == "GET" && gate.Exchange(request, response)) {}
+		else {
+			Device* device = gate.DeviceOf(request, response);
+			if (device) Route(path, request, response, device);
+			else Unauthenticated(path, request, response);
+		}
+	}
+
+	void Front::Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device) {
+		if (path == "/ws") WebSocket(request, response, device);
 		else if (path == "/api/upload") Upload(request, response);
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
 		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
 		else StaticFile(path, response);
 	}
 
-	void Front::WebSocket(const Http::Request& request, Http::Response& response) {
+	// Without a session: the login page for a page, 401 for the rest.
+	void Front::Unauthenticated(Core::StringView path, const Http::Request& request, Http::Response& response) {
+		const bool get = request.method.View() == "GET";
+		if (get && gate.IsPublic(path)) StaticFile(path, response);
+		else if (path.StartsWith(Core::StringView("/api/"))) AnswerJson(response, 401, Core::StringView("{\"error\":\"unauthenticated\"}"));
+		else if (!get || path == "/ws" || server->config.staticDir.IsEmpty())
+			Answer(response, 401, Core::StringView("sign in first: open the link the server printed (OPEN ...)"));
+		else {
+			StaticFile(Core::StringView("/login.html"), response);
+			if (response.status == 200) response.status = 401;
+		}
+	}
+
+	void Front::WebSocket(const Http::Request& request, Http::Response& response, Device* device) {
 		if (!OriginAllowed(request)) {
 			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
 			return;
 		}
 		Server* shared = server;
-		Http::AcceptWebSocket(request, response, [shared](Http::WebSocket& socket) {
+		Core::String deviceId = device->id;
+		Http::AcceptWebSocket(request, response, [shared, deviceId](Http::WebSocket& socket) {
 			Session* session = new Session(shared, &socket, Core::StringView("client"));
+			session->authDevice = deviceId;
 			session->Run();
 		});
 	}
@@ -196,5 +233,6 @@ namespace Ied
 		FS::File opened = FS::File(file.CStr(), "rb");
 		Core::String text = opened.ReadText();
 		response.SetText(Core::StringView(ContentTypeOf(file.Extension())), text.View());
+		SecureHeaders(response, file.Extension() == ".html");
 	}
 }

@@ -13,12 +13,14 @@ namespace Ied
 
 	void Server::Init(ServerConfig config) {
 		this.config = config;
+		this.config.dataDir = DataFolder(config);
 		epoch = NewEpoch();
 		Server* self = this;
 		presence = new Presence(self);
 		workspaces = new Workspaces(self);
 		documents = new Documents(self);
 		blobs = new Blobs();
+		auth = new Auth(self);
 		if (config.testHooks) testHooks = new TestHooks(self);
 	}
 

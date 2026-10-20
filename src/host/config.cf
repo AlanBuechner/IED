@@ -15,14 +15,11 @@ namespace Ied
 		return config;
 	}
 
+	// A count small enough that any unit it is multiplied by still fits.
 	static bool ParseCount(Core::StringView text, int64& value) {
-		if (text.IsEmpty()) return false;
+		const int64 kMostCount = 1000000000;
 		int64 parsed = 0;
-		for (int64 i = 0; i < text.ByteLength(); ++i) {
-			const int32 c = text.ByteAt(i);
-			if (c < '0' || c > '9') return false;
-			parsed = parsed * 10 + (c - '0');
-		}
+		if (!Core::ParseInt64(text, parsed) || parsed < 0 || parsed > kMostCount) return false;
 		value = parsed;
 		return true;
 	}
@@ -47,6 +44,7 @@ namespace Ied
 		int64 number = 0;
 		if (option == "--host") config.host = Core::String(value);
 		else if (option == "--static") config.staticDir = Core::String(value);
+		else if (option == "--data") config.dataDir = Core::String(value);
 		else if (option == "--workspace") config.workspaces.Push(Core::String(value));
 		else if (option == "--allow-origin") config.allowOrigins.Push(Core::String(value));
 		else if (option == "--allow-host") config.allowHosts.Push(Core::String(value));
@@ -63,5 +61,19 @@ namespace Ied
 		for (int64 i = 0; i < arguments.Count(); ++i)
 			if (!ParseOption(arguments, i, config, error)) return false;
 		return true;
+	}
+
+	static Core::String RandomHex(int32 bytes) {
+		uint8[16] random;
+		Platform::RandomBytes((void*)&random[0], bytes);
+		Core::StringBuilder text;
+		for (int32 i = 0; i < bytes; ++i) text.AppendUIntBase((uint64)random[i], 16, 2);
+		return text.ToString();
+	}
+
+	Core::String DataFolder(const ServerConfig& config) {
+		if (!config.dataDir.IsEmpty()) return config.dataDir;
+		if (config.testHooks) return Core::String((FS::TempDirectory() / (Core::String("ied-data-") + RandomHex(6).View()).View()).View());
+		return Core::String((FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED").View());
 	}
 }
