@@ -1399,6 +1399,15 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   or object). The S7 probe: `__OPTIMIZE__` set at `-O2`, both objects reused on the next build, recompiled at
   `-O0`.
 
+#### B60 - UTF-16 helpers; threads and exceptions
+- **Design:** [Bedrock 4](../library/bedrock.md#utf-16-utf16ch), [Bedrock 10](../library/bedrock.md#10-threading-threading).
+  **Status:** Done.
+- **Done notes:** `Bedrock/Text/utf16` (`ToUtf16`, `FromUtf16`, `Utf16Length`, `Utf16OffsetOfByte`,
+  `ByteOffsetOfUtf16`) - IED readiness item 4, and the offsets an LSP client maps positions with. The Threading
+  section states what an exception leaving a thread does and how a native thread attaches (readiness item 9).
+- **Tests:** `utf16_tests.cf` (3: every width, surrogates, ill-formed input both ways, every offset of a mixed
+  string). Bedrock passes 467 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1916,7 +1925,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

@@ -1,0 +1,75 @@
+include "utf16.ch"
+include "stringbuilder.ch"
+
+namespace Core
+{
+	const int32 kReplacementCharacter = 0xFFFD;
+
+	// The UTF-16 units of a code point: 2 past the Basic Multilingual Plane.
+	static int64 UnitsOf(int32 point) { return point > 0xFFFF ? (int64)2 : (int64)1; }
+
+	Array<char16> ToUtf16(StringView text, bool terminate) {
+		Array<char16> units;
+		units.Reserve(text.ByteLength() + 1);
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int32 width = 0;
+			const int32 point = DecodeUtf8(text.Data(), text.ByteLength(), at, width);
+			at += width;
+			if (point <= 0xFFFF) units.Push((char16)point);
+			else {
+				const int32 rest = point - 0x10000;
+				units.Push((char16)(0xD800 + (rest >> 10)));
+				units.Push((char16)(0xDC00 + (rest & 0x3FF)));
+			}
+		}
+		if (terminate) units.Push((char16)0);
+		return units;
+	}
+
+	String FromUtf16(const char16* units, int64 count) {
+		StringBuilder text;
+		int64 i = 0;
+		while (i < count) {
+			const int32 unit = (int32)units[i];
+			i += 1;
+			const bool high = unit >= 0xD800 && unit <= 0xDBFF;
+			const int32 next = i < count ? (int32)units[i] : (int32)0;
+			if (high && next >= 0xDC00 && next <= 0xDFFF) {
+				text.AppendCodePoint(0x10000 + ((unit - 0xD800) << 10) + (next - 0xDC00));
+				i += 1;
+			}
+			else if (unit >= 0xD800 && unit <= 0xDFFF) text.AppendCodePoint(kReplacementCharacter);
+			else text.AppendCodePoint(unit);
+		}
+		return text.ToString();
+	}
+
+	int64 Utf16Length(StringView text) { return Utf16OffsetOfByte(text, text.ByteLength()); }
+
+	int64 Utf16OffsetOfByte(StringView text, int64 byteOffset) {
+		int64 units = 0;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int32 width = 0;
+			const int32 point = DecodeUtf8(text.Data(), text.ByteLength(), at, width);
+			if (at + width > byteOffset) return units;
+			units += UnitsOf(point);
+			at += width;
+		}
+		return units;
+	}
+
+	int64 ByteOffsetOfUtf16(StringView text, int64 units) {
+		int64 counted = 0;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int32 width = 0;
+			const int32 point = DecodeUtf8(text.Data(), text.ByteLength(), at, width);
+			if (counted + UnitsOf(point) > units) return at;
+			counted += UnitsOf(point);
+			at += width;
+		}
+		return at;
+	}
+}

@@ -1,0 +1,51 @@
+// Core's UTF-16: ASCII, two- and three-byte characters, characters past the Basic Multilingual Plane (surrogate
+// pairs), ill-formed input both ways, a round trip of every kind, and offsets between bytes and UTF-16 units as an
+// LSP client maps positions.
+
+include "bedrock.ch"
+
+// "a" + U+00E9 (2 bytes) + U+20AC (3 bytes) + U+1F600 (4 bytes, a surrogate pair) + "z".
+static Core::StringView Mixed() { return Core::StringView("a\xC3\xA9\xE2\x82\xAC\xF0\x9F\x98\x80z"); }
+
+[test("text.utf16")]
+class Utf16Tests {
+	[test("to_utf16")]
+	public static void TestToUtf16() {
+		Core::Array<char16> units = Core::ToUtf16(Mixed());
+		assert_eq((int64)6, units.Count(), "a, e acute, euro, two surrogates, z");
+		assert_true(units[0] == (char16)'a' && units[1] == (char16)0xE9 && units[2] == (char16)0x20AC, "one unit each in the BMP");
+		assert_true(units[3] == (char16)0xD83D && units[4] == (char16)0xDE00, "a surrogate pair past it");
+		Core::Array<char16> terminated = Core::ToUtf16(Core::StringView("ab"), true);
+		assert_true(terminated.Count() == 3 && terminated[2] == (char16)0, "null-terminated on request");
+		Core::StringBuilder broken;
+		broken.Append("x");
+		broken.AppendByte(0xFF);
+		Core::Array<char16> replaced = Core::ToUtf16(broken.View());
+		assert_true(replaced.Count() == 2 && replaced[1] == (char16)0xFFFD, "a byte that is not UTF-8 is U+FFFD");
+	}
+
+	[test("from_utf16")]
+	public static void TestFromUtf16() {
+		Core::Array<char16> units = Core::ToUtf16(Mixed());
+		Core::String back = Core::FromUtf16(units.Data(), units.Count());
+		assert_true(back.View() == Mixed(), "a round trip of every width");
+		char16[3] lone = { (char16)'a', (char16)0xD800, (char16)'b' };
+		assert_true(Core::FromUtf16(&lone[0], 3).View() == "a\xEF\xBF\275b", "an unpaired high surrogate is U+FFFD");
+		char16[2] low = { (char16)0xDC00, (char16)'c' };
+		assert_true(Core::FromUtf16(&low[0], 2).View() == "\xEF\xBF\275c", "a low surrogate alone too");
+		assert_true(Core::FromUtf16(&lone[0], 0).View().IsEmpty(), "nothing");
+	}
+
+	[test("offsets")]
+	public static void TestOffsets() {
+		const Core::StringView text = Mixed();
+		assert_eq((int64)6, Core::Utf16Length(text), "the length in units");
+		const int64[7] bytes = { 0, 1, 3, 6, 6, 10, 11 };
+		for (int64 units = 0; units < 7; ++units)
+			assert_eq(bytes[units], Core::ByteOffsetOfUtf16(text, units), "the byte where each unit's character starts");
+		assert_eq((int64)11, Core::ByteOffsetOfUtf16(text, 50), "past the end: the byte length");
+		const int64[12] unitsOfByte = { 0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 5, 6 };
+		for (int64 byte = 0; byte <= 11; ++byte)
+			assert_eq(unitsOfByte[byte], Core::Utf16OffsetOfByte(text, byte), "the units before each byte's character");
+	}
+}

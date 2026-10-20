@@ -263,6 +263,15 @@ if (problem.Search(line, found))
 	Report(found.Group(problem.GroupIndex(Core::StringView("file"))), found.Group(2), found.Group(6));
 ```
 
+### UTF-16 (`utf16.ch`)
+
+For the Win32 W functions and for protocols that count text in UTF-16 units (an LSP position's `character`):
+`Core::ToUtf16(text, terminate = false)` gives an `Array<char16>` (null-terminated on request),
+`Core::FromUtf16(units, count)` a `String`, `Core::Utf16Length(text)` the units, and `Core::Utf16OffsetOfByte(text,
+byte)` / `Core::ByteOffsetOfUtf16(text, units)` convert offsets (an offset inside a character, or on the second unit
+of a surrogate pair, maps to that character's start; past the end to the end). Ill-formed input - UTF-8 that is not,
+an unpaired surrogate - becomes U+FFFD.
+
 ### Base64 (`base64.ch`)
 
 `Core::Base64Encode(bytes, count)` gives RFC 4648 base64 (the standard alphabet, `=` padding) as a `String`;
@@ -578,6 +587,14 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
   jobs after their frame work); destroying it finishes the queued jobs and joins them. A zero (moved-from)
   system runs a submitted job at once on the submitting thread.
 - An exception that escapes a job ends the process, as one escaping a thread's entry does.
+
+**Threads and exceptions; threads C4 did not start.** An exception that leaves a `Thread::Run` body, a job or an
+event loop's `Run` called on its own thread ends the process (`C4: fatal: an exception was thrown and not caught`),
+as in C++. Long-running servers wrap each entry: `Thread::Run([]() { try { Serve(); } catch (...) { Report(); } })`,
+and keep a callback's own failures inside it. A thread that native code started (a Win32 callback thread, a
+library's worker) must call `thread_attach()` before it touches C4 objects - the collector then scans it and its
+thread_locals start - and `thread_detach` it before it ends ([runtime/01](../runtime/01-memory-and-gc.md#3-what-c4-code-can-reach));
+a thread C4 started is attached already.
 - `Submit(func<void()> job, JobPriority priority, WaitGroup* group)`: `High` and `Normal` are frame work, short
   jobs that must finish this frame; `Background` is work that may take long (loading, decompression,
   pathfinding). A frame worker runs only frame work, `High` before `Normal`; a background worker runs
@@ -895,11 +912,11 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 48 files, 464 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 49 files, 467 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
