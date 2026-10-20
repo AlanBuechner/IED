@@ -1,0 +1,88 @@
+# Downloaded dependencies: what setup.bat fetches, pinned and checksummed. Nothing here is committed to git;
+# sources that are git repositories are submodules instead (.gitmodules). Bump a version by changing its url
+# and sha256 together, then run `setup.bat --only <name> --force`.
+#
+# group: core   = needed to build the C4 compiler and run Nuke (always installed)
+#        ied    = the IED web client's libraries (installed by default; --without ied skips them)
+#        extras = optional, for later milestones (--with extras)
+
+[packages.llvm]
+group = "core"
+version = "22.1.0"
+description = "clang, lld and the LLVM headers and libraries the C4 compiler is built with and links"
+url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.0/clang+llvm-22.1.0-x86_64-pc-windows-msvc.tar.xz"
+sha256 = "2dd6a6c990865f98766dec58cce1cbfba48e5affc0098e5b1fff96c2f1d23e81"
+dest = "C4/Frost/vendor/Compiler"
+strip = 1
+probe = "bin/clang.exe"
+share-with-worktrees = true          # git worktrees junction the main checkout's copy (4 GB)
+
+[packages.monaco-editor]
+group = "ied"
+version = "0.57.0"
+description = "the editor core (editor plugin)"
+url = "https://registry.npmjs.org/monaco-editor/-/monaco-editor-0.57.0.tgz"
+sha256 = "3ea1712fbacd3290cf4751007e3a5b57cc279767607812d4c3e57925fb0b05c2"
+dest = "vendor/web/monaco-editor"
+strip = 1
+probe = "package.json"
+
+[packages.xterm]
+group = "ied"
+version = "6.0.0"
+description = "terminal renderer (terminal plugin, output window)"
+url = "https://registry.npmjs.org/@xterm/xterm/-/xterm-6.0.0.tgz"
+sha256 = "908e66e04af6c8dc6b00dd3b54de088e2e81e5ed866284fd6c2fb3c2d1c7a3f6"
+dest = "vendor/web/xterm"
+strip = 1
+probe = "package.json"
+
+[packages.xterm-addon-fit]
+group = "ied"
+version = "0.11.0"
+description = "xterm.js fit addon"
+url = "https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-0.11.0.tgz"
+sha256 = "26003b4517a132b64e4ff228fd88a5fda3fff5e606c76093f6dcff772e9ecec0"
+dest = "vendor/web/xterm-addon-fit"
+strip = 1
+probe = "package.json"
+
+[packages.xterm-addon-web-links]
+group = "ied"
+version = "0.12.0"
+description = "xterm.js web-links addon"
+url = "https://registry.npmjs.org/@xterm/addon-web-links/-/addon-web-links-0.12.0.tgz"
+sha256 = "bf463cfff1af4bb1903509830c62ed06bcd0589039f15ea5fba71d7bae5a86da"
+dest = "vendor/web/xterm-addon-web-links"
+strip = 1
+probe = "package.json"
+
+[packages.webview2]
+group = "extras"
+version = "1.0.4258.31"
+description = "WebView2 SDK headers and libs (the optional desktop window, docs/01)"
+url = "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4258.31/microsoft.web.webview2.1.0.4258.31.nupkg"
+sha256 = "56f7f4b8bf9aee4b8efefbbdd4f67d5f74ebd1b100ed0806da71bf76af481aa9"
+dest = "vendor/webview2"
+format = "zip"
+probe = "build/native/include/WebView2.h"
+
+[packages.searxng]
+group = "extras"
+version = "d47cb96bfb79240d487bdb2336886d0dc59f2f30"
+description = "the bundled metasearcher for AI web search (docs/21); a tarball because 4 of its files have names Windows cannot create"
+url = "https://codeload.github.com/searxng/searxng/tar.gz/d47cb96bfb79240d487bdb2336886d0dc59f2f30"
+sha256 = "e0a721c5e47982c3a59111c905c36e27872db0feeeb945a0161412f788afc944"
+dest = "vendor/searxng"
+format = "tgz"
+strip = 1
+probe = "searx/__init__.py"
+
+[packages.tracy-profiler]
+group = "extras"
+version = "0.12.0"
+description = "the Tracy profiler GUI, for viewing traces of the compiler's own C++ support libraries"
+url = "https://github.com/wolfpld/tracy/releases/download/v0.12.0/windows-0.12.0.zip"
+sha256 = "ee5074cc33ec93b4955f4fc6d2737d7731e736337763f1f53773b26fa31fdf29"
+dest = "vendor/tracy-profiler"
+probe = "tracy-profiler.exe"

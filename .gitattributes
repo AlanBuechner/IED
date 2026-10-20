@@ -1,0 +1,18 @@
+# Text is stored with LF and checked out with the platform's line endings.
+* text=auto
+
+# Windows scripts keep CRLF (cmd mis-parses labels and goto in LF batch files); POSIX scripts keep LF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+bin/nuke text eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.lib binary
+*.pdb binary
+*.zip binary

@@ -1,16 +1,20 @@
-# build outputs (Nuke layout: build/{bin,int}/{config}-{system}-{arc}/{proj})
+# Build output (Nuke's layout: build/{bin,int}/{config}-{system}-{arch}/{project})
 build/
 bin-int/
 
-# per-machine local state inside the committed .ied folder
+# Installed by setup.bat, never committed (pins and checksums: tools/setup/deps.toml)
+vendor/
+toolchains/
+
+# Per-machine state inside the committed .ied/ folder
 .ied/local/
 
-# user/editor noise
+# Agent worktrees, editors and OS noise
+.claude/worktrees/
+.claude/settings.local.json
+.vs/
 *.user
 Thumbs.db
 __pycache__/
+*.pyc
 .cache/
-.echo/
-
-# vendored third-party dependencies (reproduce with: powershell tools/fetch-deps.ps1)
-third_party/
