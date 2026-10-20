@@ -1,0 +1,7 @@
+// {name} - entry point.
+include "bedrock.ch"
+
+int32 main() {{
+	printf("{name}\n");
+	return 0;
+}}

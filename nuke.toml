@@ -1,0 +1,25 @@
+# This repository is a Nuke workspace (Nuke/README.md). C4/ holds the language; its compiler is a custom
+# project built by Frost. Common commands:
+#   nuke build            build the C4 compiler and tools, refresh the "dev" toolchain
+#   nuke test             C4Testing unit tests
+#   nuke gates            every C4 test suite (run before calling compiler work done)
+#   nuke install-c4       install the compiler as a numbered, immutable toolchain other workspaces can pin
+[workspace]
+name = "IED"
+toolchain = "dev"
+default-project = "C4"
+projects = ["C4"]
+
+[commands.gates]
+description = "Build the C4 compiler, then run every C4 test suite (unit, e2e, negative, isolated, runtime, script, tools, Bedrock)"
+requires = ["build"]
+projects = ["C4"]
+
+[commands.install-c4]
+description = "Build the C4 compiler and install it as a numbered toolchain (version from C4/C4Lib/src/Compiler/Version.h)"
+requires = ["build"]
+projects = ["C4"]
+steps = [
+	{ name = "image", run = ["${python}", "C4/MakeToolchain.py", "--config", "${config}", "--out", "${int.root}/C4/toolchain"] },
+	{ name = "install", run = ["${python}", "${nuke}", "toolchain", "install", "${int.root}/C4/toolchain"] },
+]

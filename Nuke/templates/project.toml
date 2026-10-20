@@ -1,0 +1,5 @@
+# Nuke project manifest (reference: Nuke/README.md in the IED repository).
+[project]
+name = "{name}"
+kind = "{kind}"
+# depends = ["Engine"]
