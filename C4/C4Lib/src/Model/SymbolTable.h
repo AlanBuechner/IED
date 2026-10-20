@@ -158,6 +158,9 @@ namespace Scripting
 		Scope(Kind kind, const Core::String& name) : m_Kind(kind), m_Name(name) {}
 
 		Kind GetKind() const { return m_Kind; }
+		/// A file or a namespace: where a `static` free function is the file's own (internal linkage, D4), the
+		/// namespace being shared by every file that opens it (BUG-289).
+		bool HoldsFileStatics() const { return m_Kind == Kind::File || m_Kind == Kind::Namespace; }
 		const Core::String& GetName() const { return m_Name; }
 		Scope* GetParent() const { return m_Parent; }
 

@@ -3,8 +3,24 @@
 
 include "bedrock.ch"
 
+static int64 SumOfConstQueue(const Core::Queue<int32>& queue) {
+	int64 total = 0;
+	for (const int32& value : queue) total = total * 10 + value;
+	return total;
+}
+
 [test("container")]
 class ContainerTests {
+	[test("queue.const_iteration")]
+	public static void TestQueueConstIteration() {
+		Core::Queue<int32> q;
+		for (int32 i = 1; i <= 8; ++i) q.Push(i);
+		q.Pop();
+		q.Pop();
+		q.Push(9);
+		assert_eq((int64)3456789, SumOfConstQueue(q), "a const queue visits front to back, across the wrap");
+	}
+
 	[test("queue.fifo")]
 	public static void TestQueueFifo() {
 		Core::Queue<int32> q;

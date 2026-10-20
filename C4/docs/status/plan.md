@@ -1481,6 +1481,24 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   `MemoryGC/ManyHooks` disables automatic collection so its counts hold under that environment.
   `Benchmarks/gc/` reports both modes: alone, p99 frame 1.1 ms and worst 1.6 ms (stop-the-world 5.2 and 7.5).
 
+#### B65 - What the IED server needed (BUG-289, BUG-290)
+- **Closes:** BUG-289, BUG-290. **Status:** Done.
+- **Done notes:** found while writing the IED server (`src/`, protocol v1): a file-scope `static` function inside a
+  namespace was one symbol for every file (BUG-289), now each file's own like one outside a namespace
+  (`Scope::HoldsFileStatics`, used by the resolver, the per-unit symbol suffix and internal linkage); a script binds to
+  such a host function through the host table, so its declaration in the script is external (`UseHostDefinitions`;
+  every ScriptTest case caught it). Bedrock:
+  `Platform::WriteOutput` / `WriteError` (`console.ch`, over the runtime's `c4_console_write`: a program could not
+  write to standard error), const iteration of `Core::HashMap` and `Core::Queue`, `String + const char*`, and
+  `Http::WebSocket::LastReceivedNs` (a pong counts, for a server's idle check). The gates' concurrent-GC step then
+  caught `GC::Disable` letting a concurrent cycle under way complete while disabled (BUG-290): Disable now finishes
+  it first, and the collector's own thread never waits for itself (a finalizer it runs may call Collect or Disable).
+- **Tests:** IsolatedTest `MemoryGC/DisableSettlesCycle` (80 disabled windows beside a churning thread: 30 to 60 saw
+  a collection before the fix; finalizers on the collector's thread call Collect and Disable), `MemoryGC/AutomaticPacing`
+  reads the count after Disable; IsolatedTest `Namespaces/Bug289StaticsPerFileInNamespaces` (two files' namespaced static functions and
+  variables, at `-O0` and `-O2`); Bedrock `hashmap.const_iteration`, `container.queue.const_iteration`,
+  `string.operators`, `platform.system.console`, `websocket.connection.last_received`. Bedrock passes 494 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1998,7 +2016,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

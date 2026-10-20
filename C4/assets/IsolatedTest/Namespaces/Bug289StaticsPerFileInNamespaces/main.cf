@@ -1,0 +1,11 @@
+int32 FromA();
+int32 FromB();
+int32 CountA();
+int32 CountB();
+
+int32 main() {
+	if (FromA() != 2 || FromB() != 3) return 1;   // each file's call reaches its own static function
+	if (CountA() != 11 || CountB() != 21 || CountA() != 12) return 2;   // and its own static variable
+	printf("STATICS PER FILE OK\n");
+	return 0;
+}

@@ -236,16 +236,24 @@ void c4_gc_register_finalizer(void* obj, void (*fn)(void*))
 	gc_os_unlock();
 }
 
+// Ends a concurrent cycle under way. The collector's own thread (a finalizer it runs) never waits for itself: a cycle
+// another thread asks for meanwhile starts once it is back.
+static void settle_cycle(GCState* gc, GCThread* self)
+{
+	if (gc->concurrent.thread != self) gc_concurrent_finish_now(gc);
+}
+
 void c4_gc_collect(void)
 {
 	GCThread* self = this_thread();
 	GCState* gc = ready_collector();
 	for (;;)
 	{
-		gc_concurrent_finish_now(gc);
+		settle_cycle(gc, self);
 		after_collection();
 		gc_os_lock();
-		const int busy = gc_concurrent_busy(gc); // another thread asked for a cycle meanwhile: finish that one too
+		// another thread asked for a cycle meanwhile: finish that one too
+		const int busy = gc->concurrent.thread != self && gc_concurrent_busy(gc);
 		if (!busy) gc_collect(gc, self);
 		gc_os_unlock();
 		if (!busy) break;
@@ -285,7 +293,16 @@ static void collector_thread(void* unused)
 
 static int start_collector_thread(void) { return gc_os_start_helper(collector_thread, NULL); }
 
-void c4_gc_disable(void) { gc_os_lock(); collector()->disabled = 1; gc_os_unlock(); }
+// A concurrent cycle under way finishes first (BUG-290), so none completes while collection is disabled.
+void c4_gc_disable(void)
+{
+	GCThread* self = this_thread();
+	GCState* gc = ready_collector();
+	gc_os_lock();
+	gc->disabled = 1;
+	gc_os_unlock();
+	settle_cycle(gc, self);
+}
 void c4_gc_enable(void) { gc_os_lock(); collector()->disabled = 0; gc_os_unlock(); }
 
 int32_t c4_gc_set_mark_threads(int32_t threads)

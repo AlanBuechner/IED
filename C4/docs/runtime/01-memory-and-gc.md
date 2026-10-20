@@ -157,7 +157,8 @@ These exist so an engine can use custom allocators and handle-based storage with
 - **Pinning**: keeps an object, and what it refers to, alive while native code holds a raw pointer across a
   GC window. Pins are counted.
 - **Disable windows**: `c4_gc_disable()` / `c4_gc_enable()` stop automatic collection during a
-  latency-critical section; an explicit collection still runs inside the window.
+  latency-critical section; an explicit collection still runs inside the window. `c4_gc_disable` first finishes a
+  concurrent cycle under way, so no automatic collection completes inside the window.
 - **Pools** (D-78): a block a custom allocator divides into objects of one size, which the collector tracks one by
   one. The allocator occupies and vacates slots; the pool's pages are spans of 512 slots each (`GC_SPAN_POOL`), so
   finding and marking a pool object is finding and marking any object, and a pointer into a slot keeps that object

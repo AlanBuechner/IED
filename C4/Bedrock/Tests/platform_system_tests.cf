@@ -144,4 +144,10 @@ class SystemTests {
 		large.Resize(1 << 20);
 		assert_true(Platform::RandomBytes((void*)large.Data(), large.Count()), "a megabyte at once");
 	}
+
+	[test("console")]
+	public static void TestConsole() {
+		assert_true(Platform::WriteOutput(Core::StringView("")), "nothing to standard output");
+		assert_true(Platform::WriteError(Core::StringView("[platform.system.console] standard error works\n")), "a line to standard error");
+	}
 }

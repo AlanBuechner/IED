@@ -31,6 +31,17 @@ namespace Core
 		[operator("increment")] public HashMapIterator<K, V> Next();
 	}
 
+	// The same over a const map: the entries read only.
+	template<K, V> struct ConstHashMapIterator {
+		public const KeyValue<K, V>* entries;
+		public const uint8* states;
+		public int64 index;
+		public int64 end;
+		[operator("notequal")] public bool NotEqual(const ConstHashMapIterator<K, V>& other) const { return index != other.index; }
+		[operator("dereference")] public const KeyValue<K, V>& Element() const { return entries[index]; }
+		[operator("increment")] public ConstHashMapIterator<K, V> Next();
+	}
+
 	template<K, V, Traits = KeyTraits<K>> class HashMap
 	{
 	public:
@@ -63,6 +74,8 @@ namespace Core
 
 		[operator("begin")] public HashMapIterator<K, V> Begin();
 		[operator("end")] public HashMapIterator<K, V> End();
+		[operator("begin")] public ConstHashMapIterator<K, V> Begin() const;
+		[operator("end")] public ConstHashMapIterator<K, V> End() const;
 
 	private:
 		private int64 Slot(const K& key) const;         // the live slot holding key, or -1

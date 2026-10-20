@@ -216,7 +216,7 @@ namespace Scripting
 		// same-named statics in different files are distinct; internal linkage then keeps each one from leaking
 		// into the exported symbol table and matches C's `static` semantics exactly.
 		bool fileStatic = rec.isStatic && !rec.containingType && !rec.primitiveReceiverType &&
-			rec.scope && rec.scope->GetKind() == Scope::Kind::File;
+			rec.scope && rec.scope->HoldsFileStatics();
 		llvm::Function* fn = llvm::Function::Create(fty,
 			fileStatic ? llvm::Function::InternalLinkage : llvm::Function::ExternalLinkage,
 			rec.mangledName.c_str(), m_Module);

@@ -168,6 +168,7 @@ namespace Http
 			const int64 got = stream.Receive((void*)&buffer[0], kWebSocketReceiveBytes, slice);
 			if (got > 0) {
 				pending.Append(&buffer[0], got);
+				lastReceivedNs = clock_now_ns();
 				return true;
 			}
 			if (got == Net::kTimedOut) continue;

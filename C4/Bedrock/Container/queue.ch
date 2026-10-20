@@ -16,6 +16,15 @@ namespace Core
 		[operator("increment")] public QueueIterator<T> Next() { QueueIterator<T> next = *this; next.position += 1; return next; }
 	}
 
+	template<T> struct ConstQueueIterator {
+		public const T* items;
+		public int64 mask;
+		public int64 position;
+		[operator("notequal")] public bool NotEqual(const ConstQueueIterator<T>& other) const { return position != other.position; }
+		[operator("dereference")] public const T& Element() const { return items[position & mask]; }
+		[operator("increment")] public ConstQueueIterator<T> Next() { ConstQueueIterator<T> next = *this; next.position += 1; return next; }
+	}
+
 	template<T> class Queue
 	{
 	public:
@@ -39,6 +48,8 @@ namespace Core
 
 		[operator("begin")] public QueueIterator<T> Begin() { QueueIterator<T> it; it.items = data; it.mask = capacity - 1; it.position = head; return it; }
 		[operator("end")] public QueueIterator<T> End() { QueueIterator<T> it; it.items = data; it.mask = capacity - 1; it.position = head + count; return it; }
+		[operator("begin")] public ConstQueueIterator<T> Begin() const { ConstQueueIterator<T> it; it.items = data; it.mask = capacity - 1; it.position = head; return it; }
+		[operator("end")] public ConstQueueIterator<T> End() const { ConstQueueIterator<T> it; it.items = data; it.mask = capacity - 1; it.position = head + count; return it; }
 
 	private:
 		private T* data;

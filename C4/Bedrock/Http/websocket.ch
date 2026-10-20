@@ -64,6 +64,9 @@ namespace Http
 		public const char* CloseReason() const { return closeReason.CStr(); }
 		public const char* Error() const { return error.CStr(); }
 		public bool TimedOut() const { return timedOut; }
+		// When bytes last came from the peer (clock_now_ns), a message or not: a pong to Ping counts, so a server can
+		// tell a quiet client from a gone one. 0 before the first.
+		public int64 LastReceivedNs() const { return lastReceivedNs; }
 		public void SetMaxMessageBytes(int64 bytes) { maxMessageBytes = bytes; }
 
 		private bool Send(Opcode opcode, const void* bytes, int64 count);
@@ -86,6 +89,7 @@ namespace Http
 		private Core::String error;
 		private bool timedOut;
 		private int64 maxMessageBytes;        // 0: kDefaultMaxMessageBytes
+		private int64 lastReceivedNs;
 	}
 
 	// Whether `request` asks to become a WebSocket: a GET over HTTP/1.1 with Upgrade: websocket, Connection: upgrade,

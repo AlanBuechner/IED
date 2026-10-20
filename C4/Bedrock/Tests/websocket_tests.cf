@@ -352,6 +352,20 @@ class WsConnectionTests {
 		rig.Finish();
 	}
 
+	[test("last_received")]
+	public static void TestLastReceived() {
+		WsRig rig;
+		rig.Start(WsEchoSession);
+		Http::WebSocket socket = Http::WebSocket::Connect(rig.Url("ws://", "/ws").View(), kWsWaitMs);
+		const int64 afterHandshake = socket.LastReceivedNs();
+		Http::WebSocketMessage message;
+		Threading::Thread::Sleep(2000000);
+		assert_true(socket.Ping(WsText("p")) && !socket.Receive(message, 200) && socket.TimedOut(), "a ping, and no message comes back");
+		assert_true(socket.LastReceivedNs() > afterHandshake, "but its pong counts as something received");
+		socket.Close(1000, WsText(""));
+		rig.Finish();
+	}
+
 	[test("timeout")]
 	public static void TestTimeout() {
 		WsRig rig;

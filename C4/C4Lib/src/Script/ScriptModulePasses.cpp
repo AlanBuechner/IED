@@ -95,6 +95,9 @@ namespace Scripting
 	{
 		for (llvm::Function& f : module)
 		{
+			// A host's file-static function (internal in the host, BUG-289) is only declared here, and binds to the
+			// host table's entry by name: a declaration cannot be internal.
+			if (f.isDeclaration() && f.hasLocalLinkage()) f.setLinkage(llvm::GlobalValue::ExternalLinkage);
 			if (f.isDeclaration() || !hostSymbols.count(f.getName().str())) continue;
 			f.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
 			f.setVisibility(llvm::GlobalValue::DefaultVisibility);

@@ -1,0 +1,8 @@
+namespace Shared
+{
+	static int32 Pick(int32 x) { return x + 2; }
+	static int32 g_count = 20;
+}
+
+int32 FromB() { return Shared::Pick(1); }
+int32 CountB() { Shared::g_count += 1; return Shared::g_count; }

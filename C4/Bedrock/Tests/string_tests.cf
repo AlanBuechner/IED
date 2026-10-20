@@ -133,5 +133,7 @@ public static void TestStringOperators() {
 	assert_true(a.Hash() == b.Hash(), "equal strings hash alike");
 	Core::String joined = a + Core::StringView("-") + c.View();
 	assert_se("ab-abc", joined.CStr(), "+ concatenates");
+	Core::String withLiteral = a + "-x";
+	assert_se("ab-x", withLiteral.CStr(), "+ takes a literal too");
 	assert_se("ab", a.CStr(), "the operands are unchanged");
 }

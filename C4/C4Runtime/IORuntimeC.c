@@ -159,3 +159,15 @@ int32_t file_delete(const char* path)
 	if (!path) return -1;
 	return RemovePath(path) == 0 ? 0 : -1;
 }
+
+// Writes `count` bytes to the process's standard output (stream 1) or error (stream 2) and flushes them, through the
+// C runtime's own FILE, so they stay in order with printf. Returns the bytes written, or -1 for another stream or a
+// failed write.
+int64_t c4_console_write(int32_t stream, const void* bytes, int64_t count)
+{
+	FILE* f = stream == 1 ? stdout : stream == 2 ? stderr : NULL;
+	if (!f || count < 0 || (count > 0 && !bytes)) return -1;
+	const size_t written = count ? fwrite(bytes, 1, (size_t)count, f) : 0;
+	if (fflush(f) != 0 || written != (size_t)count) return -1;
+	return (int64_t)written;
+}

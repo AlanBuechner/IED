@@ -125,7 +125,7 @@ element is removed: the handle an LRU cache keeps. Each node is one allocation r
 | Create / delete | `Init()` (allocates nothing), `Init(int64 capacity)`, copy, `Delete()` |
 | Size | `Count()`, `Capacity()`, `IsEmpty()` |
 | Use | `Insert(k, v)` -> `true` when added, `false` when the value was replaced; `At(k)` and `m[k]` -> `V&` (default-creates an absent key); `Find(k)` -> `V*` or null (valid until the map changes); `TryGet(k, out)`; `Get(k)` (a copy, zero `V` when absent); `Contains(k)`; `Remove(k)`; `Clear()`; `Reserve(n)` |
-| Iteration | range-for yields `Core::KeyValue<K, V>&` (`key`, `value`) in table order; do not change a key through it |
+| Iteration | range-for yields `Core::KeyValue<K, V>&` (`key`, `value`) in table order; do not change a key through it. A const map yields `const KeyValue<K, V>&` |
 
 Linear probing over a power-of-two table; live plus removed slots stay at most 3/4 of it, so every probe
 ends at an empty slot. `Traits` is a type with `static uint64 Hash(const K&)` and
@@ -146,7 +146,7 @@ protocols that require it (the WebSocket handshake; not for anything that must r
 
 - `Queue<T>`: first in, first out, over a power-of-two ring buffer. `Init()`, `Init(int64 capacity)`,
   copy, `Delete`, `Count`, `Capacity`, `IsEmpty`, `Push`, `Pop` (moves the front out), `Front`, `Back`
-  (references), `Clear`, `Reserve`. Range-for visits front to back.
+  (references), `Clear`, `Reserve`. Range-for visits front to back (`const T&` over a const queue).
 - `Stack<T>`: last in, first out, over an `Array<T>`. `Push`, `Pop`, `Top`, `Count`, `Capacity`,
   `IsEmpty`, `Clear`. Range-for visits bottom to top.
 
@@ -191,8 +191,8 @@ null-terminated buffer and keeps its character count current; a zero `String` is
 
 `Init(const char*)`, `Init(StringView)`, `Init(int64 reserve)`, copy, `Delete`, `ByteLength`,
 `CharCount`, `Capacity`, `IsEmpty`, `CStr()`, `View()`, `CodePointAt`, `==`, `!=`, `<`, `>`, `<=`, `>=` (`==` and `!=`
-also against a `StringView` or a `const char*`: `s == "ab"`), `hash`, `+`
-(a new `String`), `Append(StringView)` and `Append(const char*)` (safe with a view of itself), `Clear`,
+also against a `StringView` or a `const char*`: `s == "ab"`), `hash`, `+` with a `StringView` or a
+`const char*` (a new `String`), `Append(StringView)` and `Append(const char*)` (safe with a view of itself), `Clear`,
 `Reserve`.
 
 ### `Core::StringBuilder` (`stringbuilder.ch`)
@@ -772,6 +772,7 @@ never scans this memory: `GC::RegisterRegion` a range that holds managed pointer
 | `GetEnvironmentVariable(name)` | empty when it is not set |
 | `SetEnvironmentVariable(name, value)`, `RemoveEnvironmentVariable(name)` | for this process and the processes it starts; removing an unset variable succeeds. A name is not empty and has no `=`; names and values must be UTF-8 |
 | `RandomBytes(out, count)` | bytes from the system's cryptographically secure generator (keys, nonces, masks); false when it fails |
+| `WriteOutput(text)`, `WriteError(text)` (`console.ch`) | the text to standard output or standard error, whole and flushed, in order with `printf`; false when the stream is closed or the write failed |
 
 Setting a variable changes the system's block, not a copy the C runtime's `getenv` may hold.
 
@@ -916,7 +917,8 @@ if (got.ok) printf("%d\n", got.response.status);
   `WebSocket::Connect("ws://host:port/path", timeoutMs)`. `Receive(message, timeoutMs)` waits for a whole message
   (`kind` Text or Binary, `data`, `Text()`): fragments are joined, pings answered, the peer's close answered, and it
   is false when the connection closed (`CloseCode()`, `CloseReason()`), failed (`Error()`) or the wait timed out
-  (`TimedOut()`; still open). `SendText`, `SendBinary`, `Ping` and `Close(code, reason)` are safe from any thread
+  (`TimedOut()`; still open). `LastReceivedNs()` is when bytes last came from the peer, a pong included, so a server
+  can tell a quiet client from a gone one. `SendText`, `SendBinary`, `Ping` and `Close(code, reason)` are safe from any thread
   while another receives - a server can push from anywhere. Bad frames close the connection with the RFC's code:
   1002 (an unmasked client frame, reserved bits, an unknown opcode, a length not in its shortest form, a fragmented
   or long control frame, a stray continuation), 1007 (text that is not UTF-8), 1009 (over `SetMaxMessageBytes`, 16
@@ -989,7 +991,7 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 51 files, 490 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 51 files, 494 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,

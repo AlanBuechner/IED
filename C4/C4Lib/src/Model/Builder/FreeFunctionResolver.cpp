@@ -46,7 +46,7 @@ namespace Scripting
 		// distinct symbols, so only a declaration and definition in one file merge.
 		bool IsFileStatic(const FunctionDefinitionNode& fn, const Scope* scope)
 		{
-			return fn.IsStatic() && !fn.IsExtensionMethod() && scope && scope->GetKind() == Scope::Kind::File;
+			return fn.IsStatic() && !fn.IsExtensionMethod() && scope && scope->HoldsFileStatics();
 		}
 
 		template<typename Pending, typename Settle>
@@ -202,7 +202,7 @@ namespace Scripting
 		rec.isBuiltin = f.unitId == m_Ctx.model->PreludeUnit();
 		rec.mangledName = FunctionSymbol(f.scope, f.name, *sig.type);
 		// Same-named file-scope statics in different files must not share one symbol.
-		if (fn.IsStatic() && f.scope->GetKind() == Scope::Kind::File) rec.mangledName += "_u" + std::to_string(f.unitId);
+		if (IsFileStatic(fn, f.scope)) rec.mangledName += "_u" + std::to_string(f.unitId);
 		if (Core::String link = LinkSymbolOf(fn.GetAnnotations()); !link.empty())
 		{
 			rec.mangledName = link;

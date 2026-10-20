@@ -10,6 +10,14 @@ namespace Core
 		return next;
 	}
 
+	template<K, V>
+	public ConstHashMapIterator<K, V> ConstHashMapIterator::Next() {
+		ConstHashMapIterator<K, V> next = *this;
+		next.index += 1;
+		while (next.index < end && states[next.index] != kLiveSlot) next.index += 1;
+		return next;
+	}
+
 	template<K, V, Traits>
 	public void HashMap::CopyFrom(const HashMap<K, V, Traits>& other) {
 		Reserve(other.count);
@@ -173,6 +181,27 @@ namespace Core
 	template<K, V, Traits>
 	public HashMapIterator<K, V> HashMap::End() {
 		HashMapIterator<K, V> it;
+		it.entries = entries;
+		it.states = states;
+		it.end = capacity;
+		it.index = capacity;
+		return it;
+	}
+
+	template<K, V, Traits>
+	public ConstHashMapIterator<K, V> HashMap::Begin() const {
+		ConstHashMapIterator<K, V> it;
+		it.entries = entries;
+		it.states = states;
+		it.end = capacity;
+		it.index = 0;
+		while (it.index < capacity && states[it.index] != kLiveSlot) it.index += 1;
+		return it;
+	}
+
+	template<K, V, Traits>
+	public ConstHashMapIterator<K, V> HashMap::End() const {
+		ConstHashMapIterator<K, V> it;
 		it.entries = entries;
 		it.states = states;
 		it.end = capacity;

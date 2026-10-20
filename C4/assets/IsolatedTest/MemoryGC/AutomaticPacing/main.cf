@@ -35,14 +35,15 @@ int32 main() {
 	if (churned.collections < start + 10) return 1;
 	if (churned.heapBytes > 128 * kMiB) return 2;
 
-	GC::Disable();
+	GC::Disable();                                // a concurrent cycle under way ends here (BUG-290)
+	uint64 disabled = GC::GetStats().collections;
 	Churn(32 * kMiB);
-	if (GC::GetStats().collections != churned.collections) return 3;
+	if (GC::GetStats().collections != disabled) return 3;
 	GC::Collect();
-	if (GC::GetStats().collections != churned.collections + 1) return 4;
+	if (GC::GetStats().collections != disabled + 1) return 4;
 	GC::Enable();
 	Churn(64 * kMiB);
-	if (GC::GetStats().collections <= churned.collections + 1) return 5;
+	if (GC::GetStats().collections <= disabled + 1) return 5;
 
 	KeepLive();                                   // 16 MiB live: the trigger now follows the percent
 	uint64 dense = CollectionsDuring(128 * kMiB);

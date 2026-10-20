@@ -110,7 +110,8 @@ part of the language today.
 **Status:** **Implemented**
 
 A file-scope `static` function has internal linkage: two files may each define `static void Probe()`
-and they are distinct functions, and a call in each file reaches its own.
+and they are distinct functions, and a call in each file reaches its own. The same holds inside a namespace, which
+every file that opens it shares: `namespace N { static int32 Pick(int32 x); }` in two files is two functions (BUG-289).
 
 ```c4
 // a.cf

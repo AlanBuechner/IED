@@ -1,0 +1,79 @@
+// BUG-290: GC::Disable finishes a concurrent cycle under way, so no collection completes while collection is disabled
+// though another thread keeps allocating. And the collector's own thread may call Collect and Disable from a
+// finalizer it runs, while other threads ask for cycles, without waiting for itself.
+include "bedrock.ch"
+
+const uint64 kMiB = 1048576;
+const int32 kRounds = 80;
+
+struct Chunk { public int64[128] words; }   // 1 KiB, pointer-free
+
+Threading::Atomic<int32> g_stop;
+Threading::Atomic<int32> g_inFinalizer;
+Threading::Atomic<int64> g_finalizerCollects;
+Threading::Atomic<int32> g_makeCollecting;
+
+struct Collecting {
+	public int64 id;
+	[operator("delete")] void Finalize() {
+		int32 idle = 0;
+		if (!g_inFinalizer.CompareExchange(idle, 1)) return;
+		GC::Collect();
+		GC::Disable();
+		GC::Enable();
+		g_finalizerCollects.FetchAdd(1);
+		g_inFinalizer.Store(0);
+	}
+}
+
+void Churn(uint64 bytes) {
+	for (uint64 done = 0; done < bytes; done += sizeof(Chunk)) {
+		Chunk* c = new Chunk;
+		c->words[0] = (int64)done;
+	}
+}
+
+void Background() {
+	int64 made = 0;
+	while (g_stop.Load() == 0) {
+		Churn(256 * 1024);
+		if (g_makeCollecting.Load() != 0) {
+			Collecting* c = new Collecting;
+			c->id = made++;
+		}
+	}
+}
+
+int32 DisabledRounds() {
+	int32 violations = 0;
+	for (int32 round = 0; round < kRounds; ++round) {
+		GC::Enable();
+		Churn(2 * kMiB);
+		GC::Disable();
+		uint64 settled = GC::GetStats().collections;
+		Threading::Thread::Sleep(1000000);
+		if (GC::GetStats().collections != settled) violations++;
+	}
+	GC::Enable();
+	return violations;
+}
+
+int32 main() {
+	GC::SetConcurrent(0);
+	GC::SetPercent(10);
+	Threading::Thread background = Threading::Thread::Run([]() { Background(); });
+	const uint64 before = GC::GetStats().collections;
+	const int32 violations = DisabledRounds();
+	const uint64 cycles = GC::GetStats().collections - before;
+	g_makeCollecting.Store(1);
+	Churn(256 * kMiB);
+	g_stop.Store(1);
+	background.Join();
+	GC::Collect();
+	printf("%llu collections, %d disabled windows with a collection, %lld collections from finalizers\n", cycles, violations, g_finalizerCollects.Load());
+	if (violations != 0) return 1;
+	if (cycles < 10) return 2;   // the rounds must have run concurrent cycles
+	if (g_finalizerCollects.Load() == 0) return 3;
+	printf("DISABLE OK\n");
+	return 0;
+}

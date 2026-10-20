@@ -37,7 +37,8 @@ namespace GC
 	// Checks every concurrent mark against a fresh mark from the roots; a missed object is a fatal error (tests; slow).
 	[link("c4_gc_set_verify")] void SetVerify(bool on);
 
-	// Suppress / resume automatic collection (not counted). Collect() still works while disabled.
+	// Suppress / resume automatic collection (not counted). Collect() still works while disabled. Disable finishes a
+	// concurrent cycle under way first, so no automatic collection completes until Enable.
 	[link("c4_gc_disable")] void Disable();
 	[link("c4_gc_enable")] void Enable();
 

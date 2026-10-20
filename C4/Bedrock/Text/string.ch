@@ -38,6 +38,7 @@ namespace Core
 		[operator(">=")] public bool GreaterOrEqual(const String& other) const { return View() >= other.View(); }
 		[operator("hash")] public uint64 Hash() const { return View().Hash(); }
 		[operator("+")] public String Concat(StringView other) const;
+		[operator("+")] public String ConcatText(const char* other) const { return Concat(StringView(other)); }
 
 		public void Append(StringView text);
 		public void Append(const char* text) { Append(StringView(text)); }

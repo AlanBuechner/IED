@@ -1,0 +1,9 @@
+// BUG-289: a file-scope static function inside a namespace is the file's own, like one outside any namespace.
+namespace Shared
+{
+	static int32 Pick(int32 x) { return x + 1; }
+	static int32 g_count = 10;
+}
+
+int32 FromA() { return Shared::Pick(1); }
+int32 CountA() { Shared::g_count += 1; return Shared::g_count; }
