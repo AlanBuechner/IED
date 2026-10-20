@@ -32,6 +32,7 @@ setup.bat --only llvm --force     re-download and re-extract one package
 - Downloads land in `vendor/` (gitignored; the archives in `vendor/_downloads/` are deleted after extraction unless `--keep-downloads`), except LLVM, which Frost expects at `C4/Frost/vendor/Compiler` (gitignored by `C4/.gitignore`).
 - In a linked **git worktree**, packages marked `share-with-worktrees` (LLVM, 4 GB) become a directory junction to the main checkout's copy instead of a second download; `--force` replaces the junction, never the main copy.
 - Sources that are git repositories are **submodules** instead (`.gitmodules`): `third_party/codicons`, `third_party/libgit2`, `third_party/quickjs-ng`, and the compiler's `C4/Frost/Projects/Profiling/tracy` and `C4/Frost/Projects/Core/Modules/yaml/yaml-cpp`.
+- setup updates submodules with `core.longpaths=true` (yaml-cpp's bundled gtest and other fixtures pass Windows' 260-character limit when the checkout is in a deep folder), which is why the README clones without `--recursive` and lets setup do it.
 - `third_party/libgit2` is not checked out by a clone or by setup (`update = none`): nothing uses it yet, and its test fixtures exceed Windows' 260-character path limit in deep folders. Fetch it when needed with `git -c core.longpaths=true submodule update --init --checkout third_party/libgit2`.
 
 ## Dependencies and why (as of 2026-10-20)

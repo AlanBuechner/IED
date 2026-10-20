@@ -222,7 +222,9 @@ def update_submodules():
 		log("not a git checkout; skipping submodules")
 		return
 	log("updating git submodules")
-	if subprocess.run(["git", "-C", ROOT, "submodule", "update", "--init", "--recursive", "--jobs", "4"]).returncode != 0:
+	# core.longpaths: some submodules carry test fixtures past Windows' 260-character limit in deep folders.
+	command = ["git", "-c", "core.longpaths=true", "-C", ROOT, "submodule", "update", "--init", "--recursive", "--jobs", "4"]
+	if subprocess.run(command).returncode != 0:
 		raise SetupError("git submodule update failed")
 
 

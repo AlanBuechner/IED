@@ -28,7 +28,7 @@ Prerequisites: git, and the Visual Studio C++ build tools / Windows SDK (Frost c
 the MSVC headers and libraries).
 
 ```bat
-git clone --recursive https://github.com/AlanBuechner/IED.git
+git clone https://github.com/AlanBuechner/IED.git
 cd IED
 setup.bat                 :: private Python, git submodules, LLVM 22.1.0, web libraries (nothing large is committed)
 nuke build                :: build the C4 compiler and tools; installs the "dev" C4 toolchain
