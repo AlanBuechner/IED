@@ -176,7 +176,8 @@ malformed), `IndexOf(char, start)`, `IndexOf(StringView)`, `Contains`, `StartsWi
 `<`, `>`, `<=`, `>=` (byte order; `==` and `!=` also against a `const char*`: `view == "ab"`), `hash`,
 `Substring(start, length)` (clamped, no allocation), `Trimmed()`. Free functions:
 `Core::Utf8CharCount`, `Core::IsValidUtf8`, `Core::InvalidUtf8Offset` (where the first ill-formed sequence
-starts, or -1), `Core::IsSpace`.
+starts, or -1), `Core::DecodeUtf8(bytes, byteLength, at, width)` (the code point at byte `at` and its length;
+U+FFFD of width 1 for a byte that starts no well-formed sequence, -1 at the end), `Core::IsSpace`.
 
 ### `Core::String` - owning UTF-8 string (`string.ch`)
 
@@ -228,6 +229,36 @@ Core::Format(&b, "id={0:d.4} val={1:x.8} again={0}", 255, 4096);   // "id=0255 v
 ```
 
 A malformed placeholder is written as text.
+
+### Regular expressions (`regex.ch`)
+
+**Status:** **Implemented** (B55, D-71). `Core::Regex(pattern)` compiles once (`IsValid()`, else `Error()` and
+`ErrorOffset()`, a byte offset into the pattern) and matches in time linear in the text: it runs as a Pike VM, so
+no pattern can take exponential time, and there are no backreferences or lookaround. The syntax is RE2's: literals
+and escapes (`\n \t \r \f \v \a`, `\xHH`, `\x{HHHH}`, escaped punctuation), `.` (no line break unless `(?s)`),
+classes `[abc]` `[^a-z]` `[[:alpha:]]` and `\d \w \s \D \W \S` (ASCII), anchors `^ $` (the text's ends, lines under
+`(?m)`), `\A \z \b \B`, groups `(x)` `(?:x)` `(?P<name>x)` `(?<name>x)`, alternation, `* + ? {n} {n,} {n,m}` (at
+most 1000) and their lazy forms, and flags `(?i)` `(?m)` `(?s)` (for the rest of the group) or `(?i:x)`; `i` folds
+ASCII letters. Text is UTF-8: `.` and classes match whole code points, and a byte that is not UTF-8 matches `.` and
+nothing else.
+
+| Member | Meaning |
+|---|---|
+| `Matches(text)`, `Match(text, match)` | the whole text |
+| `Search(text, match, from = 0)`, `Contains(text)` | the leftmost match at or after byte `from`: alternatives and lazy or greedy repetition chosen as a backtracking engine would (leftmost-first) |
+| `FindAll(text)` | every match, left to right, not overlapping; after an empty match the search moves a character on |
+| `Replace(text, replacement)` | every match replaced; `$0`-`$9`, `${n}` and `${name}` are groups' texts, `$$` a `$` |
+| `GroupCount()`, `GroupIndex(name)` | `(?:x)` takes no number |
+
+A `RegexMatch` holds `Start(g)`, `End(g)` (byte offsets, -1 for a group that took no part), `Matched(g)` and
+`Group(g)`, a view of the text searched - which must outlive it.
+
+```c4
+Core::Regex problem = Core::Regex("^(?P<file>[^(]+)\\((\\d+),(\\d+)\\): (error|warning) (\\w+): (.*)$");
+Core::RegexMatch found;
+if (problem.Search(line, found))
+	Report(found.Group(problem.GroupIndex(Core::StringView("file"))), found.Group(2), found.Group(6));
+```
 
 ### Base64 (`base64.ch`)
 
@@ -843,11 +874,11 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 46 files, 447 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 47 files, 457 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -868,6 +899,7 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Array (`std::vector`) | **Implemented** |
 | Hash map that uses `operator_hash` when the key type defines `[operator("hash")]` | **Implemented** (`KeyTraits<K>`) |
 | UTF-8 string replacing a built-in string | **Implemented** (`StringView`, `String`, `StringBuilder`) |
+| Regular expressions | **Implemented** (section 4, B55): RE2 syntax, linear time |
 | Stack and Queue, with range-for | **Implemented** |
 | Consistent index type across containers | **Implemented** (`int64`) |
 | List (linked list) | **Implemented** |

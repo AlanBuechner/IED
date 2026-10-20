@@ -1,0 +1,181 @@
+include "regexcompile.ch"
+
+namespace Core
+{
+	static RegexRange Bounds(int32 low, int32 high) {
+		RegexRange range;
+		range.low = low;
+		range.high = high;
+		return range;
+	}
+
+	// Sorted, with overlapping and adjacent ranges joined.
+	static Array<RegexRange> Merged(Array<RegexRange> set) {
+		set.Sort();
+		Array<RegexRange> merged;
+		for (const RegexRange& range : set) {
+			if (!merged.IsEmpty() && range.low <= merged.Back().high + 1) {
+				if (range.high > merged.Back().high) merged.Back().high = range.high;
+			}
+			else merged.Push(range);
+		}
+		return merged;
+	}
+
+	// The other case of every ASCII letter in `set`, added.
+	static void AddOtherCase(Array<RegexRange>& set) {
+		const int64 count = set.Count();
+		for (int64 i = 0; i < count; ++i) {
+			const RegexRange range = set[i];
+			const int32 upperLow = range.low > 'A' ? range.low : (int32)'A';
+			const int32 upperHigh = range.high < 'Z' ? range.high : (int32)'Z';
+			if (upperLow <= upperHigh) set.Push(Bounds(upperLow + 32, upperHigh + 32));
+			const int32 lowerLow = range.low > 'a' ? range.low : (int32)'a';
+			const int32 lowerHigh = range.high < 'z' ? range.high : (int32)'z';
+			if (lowerLow <= lowerHigh) set.Push(Bounds(lowerLow - 32, lowerHigh - 32));
+		}
+	}
+
+	static Array<RegexRange> Complement(const Array<RegexRange>& sorted) {
+		Array<RegexRange> outside;
+		int32 next = 0;
+		for (const RegexRange& range : sorted) {
+			if (range.low > next) outside.Push(Bounds(next, range.low - 1));
+			next = range.high + 1;
+		}
+		if (next <= kRegexMaxCodePoint) outside.Push(Bounds(next, kRegexMaxCodePoint));
+		return outside;
+	}
+
+	int32 RegexCompiler::Emit(RegexOp op, int32 x, int32 y) {
+		if (program.Count() >= (int64)kRegexMaxProgram) tooLarge = true;
+		RegexInst inst;
+		inst.op = op;
+		inst.x = x;
+		inst.y = y;
+		program.Push(inst);
+		return (int32)program.Count() - 1;
+	}
+
+	void RegexCompiler::Node(int32 index) {
+		if (tooLarge) return;
+		const RegexNode node = tree->nodes[index];
+		if (node.kind == RegexNodeKind::Literal) Literal(node);
+		else if (node.kind == RegexNodeKind::Class) Class(node);
+		else if (node.kind == RegexNodeKind::Any) Emit(node.value != 0 ? RegexOp::Any : RegexOp::AnyButNewline, 0, 0);
+		else if (node.kind == RegexNodeKind::Assert) Emit((RegexOp)node.value, 0, 0);
+		else if (node.kind == RegexNodeKind::Concat)
+			for (int32 i = 0; i < node.count; ++i) Node(tree->children[node.first + i]);
+		else if (node.kind == RegexNodeKind::Alternate) Alternation(node);
+		else if (node.kind == RegexNodeKind::Repeat) Repeat(node);
+		else if (node.kind == RegexNodeKind::Group) Group(node);
+	}
+
+	// A letter under (?i) is a class of both its cases.
+	void RegexCompiler::Literal(const RegexNode& node) {
+		const int32 c = node.value;
+		const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+		if (!node.foldCase || !letter) {
+			Emit(RegexOp::Char, c, 0);
+			return;
+		}
+		Array<RegexRange> both;
+		both.Push(Bounds(c, c));
+		AddOtherCase(both);
+		EmitClass(Merged(both));
+	}
+
+	void RegexCompiler::Class(const RegexNode& node) {
+		Array<RegexRange> set;
+		for (int32 i = 0; i < node.count; ++i) set.Push(tree->ranges[node.first + i]);
+		if (node.foldCase) AddOtherCase(set);
+		Array<RegexRange> merged = Merged(set);
+		if (node.negated) EmitClass(Complement(merged));
+		else EmitClass(merged);
+	}
+
+	void RegexCompiler::EmitClass(const Array<RegexRange>& set) {
+		Emit(RegexOp::Class, (int32)ranges.Count(), (int32)set.Count());
+		ranges.Append(set);
+	}
+
+	// Each branch but the last behind a Split that prefers it; each jumps to the end.
+	void RegexCompiler::Alternation(const RegexNode& node) {
+		Array<int32> exits;
+		for (int32 i = 0; i < node.count; ++i) {
+			const int32 child = tree->children[node.first + i];
+			if (i == node.count - 1) {
+				Node(child);
+				break;
+			}
+			const int32 split = Emit(RegexOp::Split, 0, 0);
+			program[split].x = Here();
+			Node(child);
+			exits.Push(Emit(RegexOp::Jump, 0, 0));
+			program[split].y = Here();
+		}
+		for (int32 exit : exits) program[exit].x = Here();
+	}
+
+	// The body `least` times, then either a loop or `most - least` optional copies, each able to skip to the end.
+	void RegexCompiler::Repeat(const RegexNode& node) {
+		for (int32 i = 0; i < node.value; ++i) Node(node.first);
+		if (node.most < 0) {
+			const int32 loop = Emit(RegexOp::Split, 0, 0);
+			Node(node.first);
+			Emit(RegexOp::Jump, loop, 0);
+			Prefer(loop, node.greedy);
+			return;
+		}
+		Array<int32> splits;
+		for (int32 i = node.value; i < node.most && !tooLarge; ++i) {
+			splits.Push(Emit(RegexOp::Split, 0, 0));
+			Node(node.first);
+		}
+		for (int32 split : splits) Prefer(split, node.greedy);
+	}
+
+	// A Split that enters the body after it, or skips to here: greedy tries the body first.
+	void RegexCompiler::Prefer(int32 split, bool greedy) {
+		program[split].x = greedy ? split + 1 : Here();
+		program[split].y = greedy ? Here() : split + 1;
+	}
+
+	void RegexCompiler::Group(const RegexNode& node) {
+		if (node.value >= 0) Emit(RegexOp::Save, node.value * 2, 0);
+		Node(node.first);
+		if (node.value >= 0) Emit(RegexOp::Save, node.value * 2 + 1, 0);
+	}
+
+	// The bytes every match starts with: the characters the program must match before anything else.
+	static String LiteralPrefix(const Array<RegexInst>& program) {
+		StringBuilder prefix;
+		for (int64 pc = 1; pc < program.Count() && program[pc].op == RegexOp::Char; ++pc) prefix.AppendCodePoint(program[pc].x);
+		return prefix.ToString();
+	}
+
+	void Regex::Compile(StringView pattern) {
+		RegexParser parser = RegexParser(pattern);
+		const int32 root = parser.Parse();
+		if (root < 0) {
+			error = parser.error;
+			errorOffset = parser.errorOffset;
+			return;
+		}
+		RegexCompiler compiler = RegexCompiler(parser);
+		compiler.Emit(RegexOp::Save, 0, 0);
+		compiler.Node(root);
+		compiler.Emit(RegexOp::Save, 1, 0);
+		compiler.Emit(RegexOp::Match, 0, 0);
+		if (compiler.tooLarge) {
+			error = String("the pattern is too large: its repetitions make more than 200000 instructions");
+			errorOffset = 0;
+			return;
+		}
+		program = take(compiler.program);
+		ranges = take(compiler.ranges);
+		names = take(parser.names);
+		groups = parser.groups;
+		prefix = LiteralPrefix(program);
+	}
+}

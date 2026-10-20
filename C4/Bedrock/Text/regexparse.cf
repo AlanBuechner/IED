@@ -1,0 +1,461 @@
+include "regexparse.ch"
+
+namespace Core
+{
+	static RegexRange Span(int32 low, int32 high) {
+		RegexRange range;
+		range.low = low;
+		range.high = high;
+		return range;
+	}
+
+	static bool IsAsciiAlnum(int32 c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+	static int32 HexValue(int32 c) {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	}
+
+	// `ranges` (sorted, not overlapping) turned inside out over every code point.
+	static void AddComplement(const Array<RegexRange>& sorted, Array<RegexRange>& into) {
+		int32 next = 0;
+		for (const RegexRange& range : sorted) {
+			if (range.low > next) into.Push(Span(next, range.low - 1));
+			next = range.high + 1;
+		}
+		if (next <= kRegexMaxCodePoint) into.Push(Span(next, kRegexMaxCodePoint));
+	}
+
+	// --- building nodes ---------------------------------------------------------------------------------------------
+
+	int32 RegexParser::Add(RegexNode node) {
+		nodes.Push(node);
+		return (int32)nodes.Count() - 1;
+	}
+
+	int32 RegexParser::AddList(RegexNodeKind kind, const Array<int32>& items) {
+		if (items.Count() == 1) return items[0];
+		RegexNode node;
+		node.kind = items.IsEmpty() ? RegexNodeKind::Empty : kind;
+		node.first = (int32)children.Count();
+		node.count = (int32)items.Count();
+		children.Append(items);
+		return Add(node);
+	}
+
+	int32 RegexParser::AddClass(const Array<RegexRange>& items, bool negated) {
+		RegexNode node;
+		node.kind = RegexNodeKind::Class;
+		node.first = (int32)ranges.Count();
+		node.count = (int32)items.Count();
+		node.negated = negated;
+		node.foldCase = foldCase;
+		ranges.Append(items);
+		return Add(node);
+	}
+
+	int32 RegexParser::Fail(const char* why, int64 offset) {
+		if (error.IsEmpty()) {
+			error = String(why);
+			errorOffset = offset;
+		}
+		return -1;
+	}
+
+	int32 RegexParser::Next() {
+		int32 width = 0;
+		const int32 point = DecodeUtf8(pattern.Data(), pattern.ByteLength(), at, width);
+		at += width;
+		return point;
+	}
+
+	// --- structure --------------------------------------------------------------------------------------------------
+
+	int32 RegexParser::Parse() {
+		names.Push(String());   // group 0: the whole match
+		const int32 root = Alternation();
+		if (root < 0) return -1;
+		if (!AtEnd()) return Fail("a ')' that closes no group", at);
+		return root;
+	}
+
+	int32 RegexParser::Alternation() {
+		Array<int32> branches;
+		while (true) {
+			const int32 branch = Concatenation();
+			if (branch < 0) return -1;
+			branches.Push(branch);
+			if (Peek() != '|') return AddList(RegexNodeKind::Alternate, branches);
+			at += 1;
+		}
+		return -1;
+	}
+
+	int32 RegexParser::Concatenation() {
+		Array<int32> items;
+		while (!AtEnd() && Peek() != '|' && Peek() != ')') {
+			const int32 item = Repetition();
+			if (item < 0) return -1;
+			items.Push(item);
+		}
+		return AddList(RegexNodeKind::Concat, items);
+	}
+
+	// An atom and at most one quantifier after it.
+	int32 RegexParser::Repetition() {
+		const int32 item = Atom();
+		if (item < 0) return -1;
+		int32 least = 0;
+		int32 most = -1;
+		const int32 c = Peek();
+		const int64 quantifier = at;
+		if (c == '*' || c == '+' || c == '?') {
+			at += 1;
+			least = c == '+' ? 1 : 0;
+			most = c == '?' ? 1 : -1;
+		}
+		else if (c != '{' || !Count(least, most)) return item;
+		if (!error.IsEmpty()) return -1;
+		RegexNode node;
+		node.kind = RegexNodeKind::Repeat;
+		node.value = least;
+		node.most = most;
+		node.greedy = true;
+		node.first = item;
+		if (Peek() == '?') {
+			at += 1;
+			node.greedy = false;
+		}
+		const int32 next = Peek();
+		int32 a = 0;
+		int32 b = 0;
+		const int64 after = at;
+		if (next == '*' || next == '+' || next == '?' || (next == '{' && Count(a, b))) return Fail("a repetition cannot be repeated: put it in a group", after);
+		return Add(node);
+	}
+
+	int32 RegexParser::Atom() {
+		const int64 start = at;
+		const int32 c = Peek();
+		if (c == '(') return Group();
+		if (c == '[') return Class();
+		if (c == '\\') return Escape();
+		int32 least = 0;
+		int32 most = 0;
+		if (c == '*' || c == '+' || c == '?' || (c == '{' && Count(least, most))) return Fail("nothing to repeat", start);
+		RegexNode node;
+		if (c == '.' || c == '^' || c == '$') {
+			at += 1;
+			node.kind = c == '.' ? RegexNodeKind::Any : RegexNodeKind::Assert;
+			if (c == '.') node.value = dotAll ? 1 : 0;
+			else if (c == '^') node.value = multiLine ? (int32)RegexOp::LineStart : (int32)RegexOp::TextStart;
+			else node.value = multiLine ? (int32)RegexOp::LineEnd : (int32)RegexOp::TextEnd;
+			return Add(node);
+		}
+		node.kind = RegexNodeKind::Literal;
+		node.value = Next();
+		node.foldCase = foldCase;
+		return Add(node);
+	}
+
+	// (x), (?:x), (?P<name>x), (?<name>x), (?flags) and (?flags:x).
+	int32 RegexParser::Group() {
+		const int64 start = at;
+		at += 1;
+		if (depth >= kRegexMaxDepth) return Fail("groups nested too deeply", start);
+		const bool outerFold = foldCase;
+		const bool outerMultiLine = multiLine;
+		const bool outerDotAll = dotAll;
+		int32 number = -1;
+		if (Peek() != '?') {
+			groups += 1;
+			number = groups;
+			names.Push(String());
+		}
+		else {
+			at += 1;
+			if (Peek() == 'P' || Peek() == '<') {
+				number = GroupName();
+				if (number < 0) return -1;
+			}
+			else if (Peek() == ':') at += 1;
+			else if (!Flags(start)) return -1;
+			else if (Peek() == ')') {
+				at += 1;
+				RegexNode empty;
+				empty.kind = RegexNodeKind::Empty;
+				return Add(empty);   // the flags hold for the rest of the enclosing group
+			}
+			else at += 1;   // ':'
+		}
+		depth += 1;
+		const int32 inner = Alternation();
+		depth -= 1;
+		if (inner < 0) return -1;
+		if (Peek() != ')') return Fail("a '(' that is never closed", start);
+		at += 1;
+		foldCase = outerFold;
+		multiLine = outerMultiLine;
+		dotAll = outerDotAll;
+		RegexNode node;
+		node.kind = RegexNodeKind::Group;
+		node.value = number;
+		node.first = inner;
+		return Add(node);
+	}
+
+	// <name> after (?P or (?: the group's number.
+	int32 RegexParser::GroupName() {
+		const int64 start = at;
+		if (Peek() == 'P') at += 1;
+		if (Peek() != '<') return Fail("a named group is (?P<name>x) or (?<name>x)", start);
+		at += 1;
+		const int64 nameStart = at;
+		while (!AtEnd() && (IsAsciiAlnum(Peek()) || Peek() == '_')) at += 1;
+		if (at == nameStart || Peek() != '>') return Fail("a group name is letters, digits and '_', then '>'", nameStart);
+		String name = String(pattern.Substring(nameStart, at - nameStart));
+		at += 1;
+		for (const String& taken : names)
+			if (taken == name) return Fail("two groups have the same name", nameStart);
+		groups += 1;
+		names.Push(name);
+		return groups;
+	}
+
+	// i, m and s, turned off after a '-', up to a ':' or ')'.
+	bool RegexParser::Flags(int64 start) {
+		bool on = true;
+		bool any = false;
+		while (!AtEnd() && Peek() != ':' && Peek() != ')') {
+			const int32 c = Peek();
+			at += 1;
+			if (c == '-' && on) on = false;
+			else if (c == 'i') foldCase = on;
+			else if (c == 'm') multiLine = on;
+			else if (c == 's') dotAll = on;
+			else {
+				Fail("an unknown flag: the flags are i, m and s", at - 1);
+				return false;
+			}
+			any = any || c != '-';
+		}
+		if (AtEnd()) Fail("a '(' that is never closed", start);
+		else if (!any) Fail("a '(?' with no flags", start);
+		return error.IsEmpty();
+	}
+
+	// --- classes ----------------------------------------------------------------------------------------------------
+
+	int32 RegexParser::Class() {
+		const int64 start = at;
+		at += 1;
+		bool negated = false;
+		if (Peek() == '^') {
+			negated = true;
+			at += 1;
+		}
+		Array<RegexRange> items;
+		bool first = true;
+		while (true) {
+			if (AtEnd()) return Fail("a '[' that is never closed", start);
+			if (Peek() == ']' && !first) {
+				at += 1;
+				return AddClass(items, negated);
+			}
+			first = false;
+			if (!ClassItem(items)) return -1;
+		}
+		return -1;
+	}
+
+	// A character, a range a-z, an escape (\d, \n, \]) or [:name:].
+	bool RegexParser::ClassItem(Array<RegexRange>& into) {
+		const int64 start = at;
+		if (Peek() == '[' && at + 1 < pattern.ByteLength() && pattern.ByteAt(at + 1) == ':') return NamedClass(into);
+		int32 low = 0;
+		if (Peek() == '\\') {
+			at += 1;
+			if (ShorthandClass(Peek(), into)) {
+				at += 1;
+				return true;
+			}
+			low = EscapedPoint(start);
+		}
+		else low = Next();
+		if (low < 0) return false;
+		int32 high = low;
+		if (Peek() == '-' && at + 1 < pattern.ByteLength() && pattern.ByteAt(at + 1) != ']') {
+			at += 1;
+			const int64 end = at;
+			if (Peek() == '\\') {
+				at += 1;
+				high = EscapedPoint(end);
+			}
+			else high = Next();
+			if (high < 0) return false;
+			if (high < low) {
+				Fail("a range whose end comes before its start", start);
+				return false;
+			}
+		}
+		into.Push(Span(low, high));
+		return true;
+	}
+
+	// [:alpha:], [:^alpha:]: the POSIX classes, over ASCII.
+	bool RegexParser::NamedClass(Array<RegexRange>& into) {
+		const int64 start = at;
+		at += 2;
+		bool negated = false;
+		if (Peek() == '^') {
+			negated = true;
+			at += 1;
+		}
+		const int64 nameStart = at;
+		while (!AtEnd() && Peek() >= 'a' && Peek() <= 'z') at += 1;
+		const StringView name = pattern.Substring(nameStart, at - nameStart);
+		if (Peek() != ':' || at + 1 >= pattern.ByteLength() || pattern.ByteAt(at + 1) != ']') {
+			Fail("a class name is [:name:]", start);
+			return false;
+		}
+		at += 2;
+		Array<RegexRange> named;
+		if (name == "alnum" || name == "digit" || name == "xdigit" || name == "word") named.Push(Span('0', '9'));
+		if (name == "alnum" || name == "alpha" || name == "upper" || name == "word") named.Push(Span('A', 'Z'));
+		if (name == "xdigit") named.Push(Span('A', 'F'));
+		if (name == "word") named.Push(Span('_', '_'));
+		if (name == "alnum" || name == "alpha" || name == "lower" || name == "word") named.Push(Span('a', 'z'));
+		if (name == "xdigit") named.Push(Span('a', 'f'));
+		if (name == "ascii") named.Push(Span(0, 127));
+		if (name == "blank") { named.Push(Span(9, 9)); named.Push(Span(' ', ' ')); }
+		if (name == "space") { named.Push(Span(9, 13)); named.Push(Span(' ', ' ')); }
+		if (name == "cntrl") { named.Push(Span(0, 31)); named.Push(Span(127, 127)); }
+		if (name == "graph" || name == "print") named.Push(Span(name == "print" ? ' ' : '!', '~'));
+		if (name == "punct") { named.Push(Span('!', '/')); named.Push(Span(':', '@')); named.Push(Span('[', '`')); named.Push(Span('{', '~')); }
+		if (named.IsEmpty()) {
+			Fail("an unknown class name", nameStart);
+			return false;
+		}
+		named.Sort();
+		if (negated) AddComplement(named, into);
+		else into.Append(named);
+		return true;
+	}
+
+	// \d \w \s and their complements \D \W \S, over ASCII; false for any other letter.
+	bool RegexParser::ShorthandClass(int32 letter, Array<RegexRange>& into) {
+		const int32 lower = letter >= 'A' && letter <= 'Z' ? letter + 32 : letter;
+		if (lower != 'd' && lower != 'w' && lower != 's') return false;
+		Array<RegexRange> set;
+		if (lower == 's') { set.Push(Span(9, 13)); set.Push(Span(' ', ' ')); }
+		else set.Push(Span('0', '9'));
+		if (lower == 'w') { set.Push(Span('A', 'Z')); set.Push(Span('_', '_')); set.Push(Span('a', 'z')); }
+		if (letter == lower) into.Append(set);
+		else AddComplement(set, into);
+		return true;
+	}
+
+	// --- escapes ----------------------------------------------------------------------------------------------------
+
+	int32 RegexParser::Escape() {
+		const int64 start = at;
+		at += 1;
+		if (AtEnd()) return Fail("a '\\' at the end of the pattern", start);
+		const int32 letter = Peek();
+		Array<RegexRange> shorthand;
+		if (ShorthandClass(letter, shorthand)) {
+			at += 1;
+			const bool fold = foldCase;
+			foldCase = false;
+			const int32 node = AddClass(shorthand, false);
+			foldCase = fold;
+			return node;
+		}
+		RegexNode node;
+		node.kind = RegexNodeKind::Assert;
+		node.value = -1;
+		if (letter == 'b') node.value = (int32)RegexOp::WordBoundary;
+		if (letter == 'B') node.value = (int32)RegexOp::NotWordBoundary;
+		if (letter == 'A') node.value = (int32)RegexOp::TextStart;
+		if (letter == 'z') node.value = (int32)RegexOp::TextEnd;
+		if (node.value >= 0) {
+			at += 1;
+			return Add(node);
+		}
+		node.kind = RegexNodeKind::Literal;
+		node.value = EscapedPoint(start);
+		node.foldCase = foldCase;
+		return node.value < 0 ? (int32)-1 : Add(node);
+	}
+
+	// The code point an escape stands for, `at` just past its backslash: \n \t \r \f \v \a, \xHH, \x{H...}, or a
+	// punctuation character as itself.
+	int32 RegexParser::EscapedPoint(int64 start) {
+		if (AtEnd()) return Fail("a '\\' at the end of the pattern", start);
+		const int32 letter = Next();
+		if (letter == 'n') return 10;
+		if (letter == 't') return 9;
+		if (letter == 'r') return 13;
+		if (letter == 'f') return 12;
+		if (letter == 'v') return 11;
+		if (letter == 'a') return 7;
+		if (letter == 'x') return HexEscape(start);
+		if (letter < 128 && !IsAsciiAlnum(letter)) return letter;
+		return Fail("an escape that means nothing here", start);
+	}
+
+	// HH or {H...} after \x.
+	int32 RegexParser::HexEscape(int64 start) {
+		const bool braced = Peek() == '{';
+		if (braced) at += 1;
+		int32 value = 0;
+		int32 digits = 0;
+		while (!AtEnd() && HexValue(Peek()) >= 0 && (braced || digits < 2)) {
+			value = value * 16 + HexValue(Peek());
+			digits += 1;
+			at += 1;
+			if (value > kRegexMaxCodePoint) return Fail("a code point above U+10FFFF", start);
+		}
+		if (braced && Peek() == '}' && digits > 0) at += 1;
+		else if (braced || digits != 2) return Fail("\\x takes two hex digits, or hex digits in braces", start);
+		if (value >= 0xD800 && value <= 0xDFFF) return Fail("a surrogate is not a code point", start);
+		return value;
+	}
+
+	// {n}, {n,} or {n,m}: true with the counts (or `error` when they are out of range); false, `at` left, for a '{'
+	// that is not a count and so is itself.
+	bool RegexParser::Count(int32& least, int32& most) {
+		const int64 start = at;
+		at += 1;
+		const int32 a = Number();
+		int32 b = a;
+		if (a >= 0 && Peek() == ',') {
+			at += 1;
+			b = Peek() == '}' ? (int32)-1 : Number();
+			if (b < 0 && Peek() != '}') b = -2;
+		}
+		if (a < 0 || b == -2 || Peek() != '}') {
+			at = start;
+			return false;
+		}
+		at += 1;
+		if (a > kRegexMaxCount || b > kRegexMaxCount) Fail("a count above 1000", start);
+		else if (b >= 0 && b < a) Fail("a count range whose end comes before its start", start);
+		least = a;
+		most = b;
+		return true;
+	}
+
+	// Decimal digits; -1 when there are none.
+	int32 RegexParser::Number() {
+		if (Peek() < '0' || Peek() > '9') return -1;
+		int32 value = 0;
+		while (Peek() >= '0' && Peek() <= '9') {
+			if (value <= kRegexMaxCount) value = value * 10 + (Peek() - '0');
+			at += 1;
+		}
+		return value;
+	}
+}

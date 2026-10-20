@@ -148,6 +148,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-68 | Child processes (roadmap 7) | Bedrock `Process::` over a small runtime C API (`ProcessRuntimeC.h`, `Process/*Win32.c`), the D-65 pattern. A child starts suspended and joins its own job object before it runs, so `Kill` ends the tree and closing the handle does too (`killOnClose`, the default). The parent's pipe ends are overlapped named pipes (timeouts on every read, write and wait); only the child's ends are inherited (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), so concurrent starts cannot leak pipes into each other. `ReadAny` follows stdout and stderr from one thread with zero-byte reads (no reader thread per stream). Arguments are quoted for `CommandLineToArgvW`; batch files are refused (cmd's own parsing makes quoting unsafe); the environment is changes on the inherited one or a whole replacement, merged and sorted in the runtime with the OS's name comparison. Terminals are ConPTY pseudo consoles, looked up at run time. `Process::Run` captures a program's output with a deadline. | [Bedrock 15](../library/bedrock.md#15-processes-process) |
 | D-69 | File information and watching (roadmap 7) | Bedrock `FS::` grows `GetInfo` / `FileInfo` (kind, read-only, size, times as Unix nanoseconds), `SetModifiedTime`, `SetReadOnly`, `CopyFile`, `CopyTree` (in C4, links neither followed nor copied, never into itself), `AbsolutePath` and `CanonicalPath` over a runtime C API (`FileSystemRuntimeC.h`, `FileSystem/*Win32.c`); paths the system makes come back in its own form. `FS::Watcher` is `ReadDirectoryChangesW` with a request always pending (two buffers: the next request starts before the last one's records are handed out), one change per `Next`, renames paired, and an `Overflow` change instead of silently lost ones; raw changes, coalescing left to the caller. A link is a symbolic link or a junction, nothing else (BUG-276). | [Bedrock 5](../library/bedrock.md#5-files-paths-and-directories-fs) |
 | D-70 | Event loop (roadmap 7) | `Net::EventLoop` in plain C4 over `Net::Poll`: a readiness loop, not completion ports. Each turn polls the watched sockets and a loopback UDP socket that posting threads write one byte to (only when none is on its way), then runs ready sockets' callbacks, due timers (a binary heap keyed by monotonic due time and id; a periodic timer re-arms before its callback and runs once for a late turn) and the work posted before the turn. Only `Post` and `Stop` cross threads; blocking work (processes, file watching, DNS) runs on other threads and posts its result, so the loop needs no completion-port integration. A callback that throws ends the turn with the loop consistent. `WSAPoll` is linear in the sockets watched, fine for an IDE server's connections (tested with 1000). | [Bedrock 13](../library/bedrock.md#13-networking-net) |
+| D-71 | Regular expressions | `Core::Regex` in plain C4: a parser to a tree (`regexparse`), a compiler to a Thompson program (`regexcompile`: Char, Class over sorted code-point ranges, Split / Jump, Save, assertions; counted repetition written out, at most 200000 instructions) and a Pike VM (`regexvm`) with threads in priority order, so matches are leftmost-first like a backtracking engine but always linear in the text. RE2 syntax and limits: no backreferences or lookaround; case folding and `\d \w \s` are ASCII. Text is UTF-8, matched by code point; a byte that is not UTF-8 matches only `.`. A pattern's literal prefix is found with a substring search before the VM starts. Needed for the IDE's problem matchers and search. | [Bedrock 4](../library/bedrock.md#regular-expressions-regexch) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1336,6 +1337,14 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   `-O2`, 30 runs in a row; NegativeTest `TemplateBodyErrorNamesItsUse`; IsolatedTest
   `Calls/Bug278AddressArgumentToConstRef`; Bedrock passes 447 tests.
 
+#### B55 - Regular expressions
+- **Design:** D-71, [Bedrock 4](../library/bedrock.md#regular-expressions-regexch). **Status:** Done.
+- **Done notes:** `Bedrock/Text/regex` (`Regex`, `RegexMatch`), `regexparse`, `regexcompile`, `regexvm`;
+  `Core::DecodeUtf8` in `stringview`.
+- **Tests:** `regex_tests.cf` (10: every piece of the syntax, leftmost-first choices, groups, flags, UTF-8, FindAll
+  and Replace, malformed patterns with their offsets, patterns that are exponential for a backtracking engine over
+  20000 characters, an MSVC error line) at `-O0` and `-O2`; Bedrock passes 457 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1853,7 +1862,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

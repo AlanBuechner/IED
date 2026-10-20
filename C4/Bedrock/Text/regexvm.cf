@@ -1,0 +1,169 @@
+include "regexvm.ch"
+
+namespace Core
+{
+	void RegexThreads::Begin(int64 programSize) {
+		if (seen.Count() != programSize) {
+			seen.Resize(programSize);
+			for (int64 i = 0; i < programSize; ++i) seen[i] = -1;
+		}
+		stamp += 1;
+		pcs.Clear();
+		bounds.Clear();
+	}
+
+	void RegexThreads::Swap(RegexThreads& other) {
+		pcs.Swap(other.pcs);
+		bounds.Swap(other.bounds);
+		seen.Swap(other.seen);
+		const int64 kept = stamp;
+		stamp = other.stamp;
+		other.stamp = kept;
+	}
+
+	static bool IsWordByte(int32 c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
+
+	static bool IsAssertion(RegexOp op) { return (int32)op >= (int32)RegexOp::LineStart; }
+
+	// Whether the assertion holds at byte `at`.
+	static bool Holds(RegexOp op, StringView text, int64 at) {
+		const int64 length = text.ByteLength();
+		if (op == RegexOp::TextStart) return at == 0;
+		if (op == RegexOp::TextEnd) return at == length;
+		if (op == RegexOp::LineStart) return at == 0 || text.ByteAt(at - 1) == '\n';
+		if (op == RegexOp::LineEnd) return at == length || text.ByteAt(at) == '\n';
+		const bool before = at > 0 && IsWordByte(text.ByteAt(at - 1));
+		const bool after = at < length && IsWordByte(text.ByteAt(at));
+		return (op == RegexOp::WordBoundary) == (before != after);
+	}
+
+	// Whether code point `c` is in a class's ranges (sorted): a binary search.
+	static bool InClass(const Array<RegexRange>& ranges, int32 first, int32 count, int32 c) {
+		int32 low = first;
+		int32 high = first + count - 1;
+		while (low <= high) {
+			const int32 middle = (low + high) / 2;
+			if (c < ranges[middle].low) high = middle - 1;
+			else if (c > ranges[middle].high) low = middle + 1;
+			else return true;
+		}
+		return false;
+	}
+
+	[operator("create")] void RegexVm::Init(const Array<RegexInst>& program, const Array<RegexRange>& ranges, StringView text, int64 slots) {
+		this.program = &program;
+		this.ranges = &ranges;
+		this.text = text;
+		this.slots = slots;
+		scratch.Resize(slots);
+	}
+
+	void RegexVm::Visit(int32 pc) {
+		RegexFrame frame;
+		frame.pc = pc;
+		frame.slot = -1;
+		walk.Push(frame);
+	}
+
+	void RegexVm::AddThread(RegexThreads& list, int32 pc, int64 at) {
+		Visit(pc);
+		while (!walk.IsEmpty()) {
+			const RegexFrame frame = walk.Pop();
+			if (frame.slot >= 0) {
+				scratch[frame.slot] = frame.value;
+				continue;
+			}
+			if (list.seen[frame.pc] == list.stamp) continue;
+			list.seen[frame.pc] = list.stamp;
+			const RegexInst inst = (*program)[frame.pc];
+			if (inst.op == RegexOp::Jump) Visit(inst.x);
+			else if (inst.op == RegexOp::Split) {
+				Visit(inst.y);   // the stack runs x's whole walk first
+				Visit(inst.x);
+			}
+			else if (inst.op == RegexOp::Save) {
+				RegexFrame restore;
+				restore.slot = inst.x;
+				restore.value = scratch[inst.x];
+				walk.Push(restore);
+				scratch[inst.x] = at;
+				Visit(frame.pc + 1);
+			}
+			else if (IsAssertion(inst.op)) {
+				if (Holds(inst.op, text, at)) Visit(frame.pc + 1);
+			}
+			else {
+				list.pcs.Push(frame.pc);
+				list.bounds.Append(scratch.Data(), slots);
+			}
+		}
+	}
+
+	void RegexVm::Start(RegexThreads& list, int64 at) {
+		for (int64 i = 0; i < slots; ++i) scratch[i] = -1;
+		AddThread(list, 0, at);
+	}
+
+	void RegexVm::Load(const RegexThreads& from, int64 i) {
+		for (int64 k = 0; k < slots; ++k) scratch[k] = from.bounds[i * slots + k];
+	}
+
+	bool RegexVm::Takes(const RegexInst& inst, int32 c) const {
+		if (c < 0) return false;
+		if (inst.op == RegexOp::Char) return c == inst.x;
+		if (inst.op == RegexOp::Class) return InClass(*ranges, inst.x, inst.y, c);
+		if (inst.op == RegexOp::Any) return true;
+		return inst.op == RegexOp::AnyButNewline && c != '\n';
+	}
+
+	// The first place at or after `at` that `prefix` starts, or -1.
+	static int64 NextCandidate(StringView text, const String& prefix, int64 at) {
+		if (prefix.IsEmpty()) return at;
+		if (at >= text.ByteLength()) return -1;
+		const int64 found = text.Substring(at, text.ByteLength() - at).IndexOf(prefix.View());
+		return found < 0 ? found : at + found;
+	}
+
+	// The leftmost-first match starting at byte `from` or (unless `whole`) later, into `bounds`. With `whole` the match
+	// must also end at the text's end.
+	bool Regex::Run(StringView text, int64 from, bool whole, Array<int64>& bounds) const {
+		const int64 length = text.ByteLength();
+		RegexVm vm = RegexVm(program, ranges, text, (int64)(groups + 1) * 2);
+		RegexThreads current;
+		RegexThreads next;
+		int64 at = whole ? from : NextCandidate(text, prefix, from);
+		if (at < 0) return false;
+		current.Begin(program.Count());
+		vm.Start(current, at);
+		bool matched = false;
+		while (true) {
+			int32 width = 0;
+			int32 c = at < length ? DecodeUtf8(text.Data(), length, at, width) : (int32)-1;
+			if (c == 0xFFFD && width == 1) c = kRegexInvalidByte;
+			next.Begin(program.Count());
+			for (int64 i = 0; i < current.pcs.Count(); ++i) {
+				const RegexInst inst = program[current.pcs[i]];
+				if (inst.op == RegexOp::Match) {
+					if (whole && at != length) continue;
+					bounds.Clear();
+					bounds.Append(current.bounds.Data() + i * vm.slots, vm.slots);
+					matched = true;
+					break;   // the threads after this one rank lower
+				}
+				if (!vm.Takes(inst, c)) continue;
+				vm.Load(current, i);
+				vm.AddThread(next, current.pcs[i] + 1, at + width);
+			}
+			if (at >= length) return matched;
+			at += width;
+			if (next.pcs.IsEmpty() && (matched || whole)) return matched;
+			if (!matched && !whole) {
+				if (next.pcs.IsEmpty()) at = NextCandidate(text, prefix, at);
+				if (at < 0) return false;
+				vm.Start(next, at);
+			}
+			current.Swap(next);
+		}
+		return matched;
+	}
+}

@@ -8,10 +8,10 @@ When you fix something on this page, delete its row here and remove the matching
 implementation" note on the feature's page. Planned work and open design questions live in
 [roadmap.md](roadmap.md).
 
-Last recorded gate results (2026-10-20, after B54): TestCode e2e 1505 assertions / 0 failures at `-O0` and `-O2`
+Last recorded gate results (2026-10-20, after B55): TestCode e2e 1505 assertions / 0 failures at `-O0` and `-O2`
 (also with the program split into 8 partitions); NegativeTest 644 at `-O0` and `-O2`; IsolatedTest 430 at `-O0` and
 `-O2` (also 4 partitions with `-g`); RuntimeTest, ScriptTest (19 cases at `-O0` and `-O2`), ToolsTest (29 checks),
-DifferentialTest (150 programs against clang) and the benchmark checks pass; Bedrock 447 tests (2288 assertions) at
+DifferentialTest (150 programs against clang) and the benchmark checks pass; Bedrock 457 tests (2364 assertions) at
 `-O0` and `-O2`, also built for `-O2 -march=x86-64-v3`; C4Testing 1089. See [../tools/05-test-suites.md](../tools/05-test-suites.md).
 
 ---
@@ -112,6 +112,7 @@ DifferentialTest (150 programs against clang) and the benchmark checks pass; Bed
 | Bedrock `Http` (D-66, D-67): HTTP/1.1 server and client, WebSockets; `Core::Sha1`, `Core::Base64*` | **Implemented** | Plain http and ws; no TLS | [Bedrock](../library/bedrock.md#14-http-http) |
 | Bedrock `Process` (D-68): child processes with pipes, job objects, terminals | **Implemented** | Windows 10 1809+ for terminals | [Bedrock](../library/bedrock.md#15-processes-process) |
 | Bedrock `FS` information, copies, canonical paths, `Watcher` (D-69) | **Implemented** | No file locking or memory-mapped files yet | [Bedrock](../library/bedrock.md#5-files-paths-and-directories-fs) |
+| Bedrock `Core::Regex` (D-71): RE2 syntax, linear-time Pike VM | **Implemented** | No backreferences or lookaround; ASCII case folding | [Bedrock](../library/bedrock.md#regular-expressions-regexch) |
 | Streaming reads | **Planned** | | [Bedrock](../library/bedrock.md) |
 
 ### Tools and platform

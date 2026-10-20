@@ -23,7 +23,7 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 | Child processes with pipes, job objects, env vars | **exists** | `Process::Child` / `Process::Run` (C4 B52): pipes with timeouts, `ReadAny`, job objects (kill the tree, kill on close), environment changes; env get/set in `Platform::` (B40) |
 | ConPTY | **exists** | `Process::StartInfo::terminal` (B52): keyboard in, VT screen out, `Resize` |
 | Wall-clock time / dates | **exists** | `Platform::UnixTimeNs`, calendars and UTC offsets (B40) |
-| Regex | **missing** | needed for problem matchers, search, `when` expressions |
+| Regex | **exists** | `Core::Regex` (C4 B55): RE2 syntax, linear-time Pike VM, groups, `FindAll`, `Replace` |
 | C interop | **exists with sharp edges** | see suspected bugs below |
 | Compiling bundled C sources | **exists, slow** | `extern "c" source` is compiled without `-O` and recompiled every build; prebuilt `.lib` works |
 | DLL output / loading C4 DLLs | **missing / not designed** | GC has process-global state; native plugins as C4 DLLs are not a path (hence `docs/02`: built-ins compiled in, others JS or process) |
@@ -74,7 +74,7 @@ Implementation of `src/` starts when all of these are true. Each item is a work 
 2. [x] `Process::` spawn/pipes/job objects/env + ConPTY, with tests (spawn `cmd /c`, kill tree, PTY round trip). Done in C4 B52 (D-68).
 3. [x] `FS::Watch`, stat/mtime, copy, canonical paths. Done in C4 B53 (D-69) as `FS::Watcher`, `FS::GetInfo`, `CopyFile` / `CopyTree`, `CanonicalPath`.
 4. [ ] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake). Wall clock (`Platform::`, B40), base64 and SHA-1 (B51) done; UTF-16 helpers still runtime-internal.
-5. [ ] Regex engine available to C4 code.
+5. [x] Regex engine available to C4 code. Done in C4 B55 (D-71).
 6. [ ] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide).
 7. [ ] Suspected bugs S1-S7 verified; confirmed ones fixed (or the C-shim-only policy formally adopted and S1-S6 deprioritized).
 8. [ ] **Scale test:** a synthetic 50k-line, 200-file, multi-threaded C4 program compiles at -O0 and -O2, runs a 24 h soak under load without GC or threading faults; compile time measured.

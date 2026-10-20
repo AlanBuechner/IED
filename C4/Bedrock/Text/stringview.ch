@@ -56,5 +56,8 @@ namespace Core
 	bool IsValidUtf8(const char* bytes, int64 byteLength);
 	// Where the first ill-formed UTF-8 sequence starts, or -1 when the bytes are well-formed.
 	int64 InvalidUtf8Offset(const char* bytes, int64 byteLength);
+	// The code point of the UTF-8 sequence at byte `at`, its length into `width`: U+FFFD of width 1 for a byte that
+	// does not start a well-formed sequence, -1 (width 0) at or past the end.
+	int32 DecodeUtf8(const char* bytes, int64 byteLength, int64 at, int32& width);
 	bool IsSpace(int32 byte);
 }

@@ -134,6 +134,20 @@ namespace Core
 		return -1;
 	}
 
+	int32 DecodeUtf8(const char* bytes, int64 byteLength, int64 at, int32& width) {
+		width = 0;
+		if (at < 0 || at >= byteLength) return -1;
+		const uint8* p = (const uint8*)bytes + at;
+		const int32 length = Utf8SequenceLength((int32)p[0]);
+		width = 1;
+		if (length == 0 || at + length > byteLength || !SequenceFits(p, length)) return 0xFFFD;
+		width = length;
+		if (length == 1) return (int32)p[0];
+		int32 point = (int32)p[0] & (0x7F >> length);
+		for (int32 k = 1; k < length; ++k) point = (point << 6) | ((int32)p[k] & 0x3F);
+		return point;
+	}
+
 	bool IsSpace(int32 byte) {
 		return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == '\v' || byte == '\f';
 	}

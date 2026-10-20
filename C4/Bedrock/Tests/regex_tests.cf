@@ -1,0 +1,163 @@
+// Core::Regex: every piece of the syntax, the leftmost-first match a backtracking engine would give, groups named and
+// numbered, UTF-8, FindAll and Replace, malformed patterns with their offsets, patterns that take exponential time in
+// a backtracking engine running in linear time here, and a compiler's error line read the way the IDE reads build
+// output.
+
+include "bedrock.ch"
+
+// The text of group `group` of the first match of `pattern` in `text`, or "<none>" when there is none.
+static Core::String FirstMatch(const char* pattern, const char* text, int32 group = 0) {
+	Core::Regex regex = Core::Regex(pattern);
+	Core::RegexMatch match;
+	if (!regex.Search(Core::StringView(text), match)) return Core::String("<none>");
+	return Core::String(match.Group(group));
+}
+
+static bool WholeMatch(const char* pattern, const char* text) { return Core::Regex(pattern).Matches(Core::StringView(text)); }
+
+// The error for a pattern that should not compile, as "offset: message".
+static Core::String ErrorOf(const char* pattern) {
+	Core::Regex regex = Core::Regex(pattern);
+	if (regex.IsValid()) return Core::String("<valid>");
+	Core::StringBuilder text;
+	text.AppendInt(regex.ErrorOffset());
+	text.Append(": ");
+	text.Append(regex.Error());
+	return text.ToString();
+}
+
+[test("text.regex")]
+class RegexTests {
+	[test("pieces")]
+	public static void TestPieces() {
+		assert_se("abc", FirstMatch("abc", "xxabcxx").CStr(), "a literal, found anywhere");
+		assert_se("a-c", FirstMatch("a.c", "zza-c").CStr(), "any character");
+		assert_se("<none>", FirstMatch("a.c", "a\nc").CStr(), "but a line break");
+		assert_se("a\nc", FirstMatch("(?s)a.c", "a\nc").CStr(), "(?s): a line break too");
+		assert_se("def", FirstMatch("[^a-c]+", "abcdef").CStr(), "a negated range");
+		assert_se("123", FirstMatch("[[:digit:]]+", "ab123").CStr(), "a POSIX class");
+		assert_se("555-1234", FirstMatch("\\d{3}-\\d{4}", "call 555-1234 now").CStr(), "\\d and counts");
+		assert_se("foo_1", FirstMatch("\\w+", "  foo_1 bar").CStr(), "\\w");
+		assert_se(" \t", FirstMatch("\\s+", "a \tb").CStr(), "\\s");
+		assert_se("x.y", FirstMatch("x\\.y", "xzy x.y").CStr(), "an escaped dot is a dot");
+		assert_se("a{", FirstMatch("a{", "a{").CStr(), "a '{' that is not a count is itself");
+		assert_se("AB", FirstMatch("\\x41\\x{42}", "zAB").CStr(), "hex escapes");
+		assert_true(WholeMatch("a|b|c", "b") && !WholeMatch("a|b|c", "ab"), "alternation; Matches takes the whole text");
+	}
+
+	[test("anchors_and_boundaries")]
+	public static void TestAnchors() {
+		assert_se("<none>", FirstMatch("^b", "a\nb").CStr(), "^ is the text's start");
+		assert_se("b", FirstMatch("(?m)^b", "a\nb").CStr(), "(?m): a line's start");
+		assert_se("a", FirstMatch("(?m)a$", "a\nb").CStr(), "(?m): a line's end");
+		assert_se("<none>", FirstMatch("a$", "a\nb").CStr(), "$ is the text's end");
+		Core::RegexMatch match;
+		assert_true(Core::Regex("\\bfoo\\b").Search(Core::StringView("a foo b food"), match) && match.Start() == 2, "word boundaries");
+		assert_se("food", FirstMatch("\\bfoo\\B\\w", "a foo b food").CStr(), "\\B");
+		assert_true(Core::Regex("\\Aab\\z").Matches(Core::StringView("ab")), "\\A and \\z");
+	}
+
+	[test("leftmost_first")]
+	public static void TestLeftmostFirst() {
+		assert_se("a", FirstMatch("a|ab", "ab").CStr(), "the first alternative that matches, not the longest");
+		assert_se("aaa", FirstMatch("a*", "aaa").CStr(), "greedy");
+		assert_se("", FirstMatch("a*?", "aaa").CStr(), "lazy");
+		assert_se("aaaa", FirstMatch("(a+)(a*)", "aaaa", 1).CStr(), "a greedy group takes all it can");
+		assert_se("a", FirstMatch("(a+?)(a*)", "aaaa", 1).CStr(), "a lazy one as little");
+		assert_se("<b>", FirstMatch("<.+?>", "<b>x</b>").CStr(), "lazy up to the first '>'");
+		assert_se("<b>x</b>", FirstMatch("<.+>", "<b>x</b>").CStr(), "greedy to the last");
+		assert_se("ababab", FirstMatch("(ab){2,3}", "abababab").CStr(), "a counted range, greedy up to its most");
+		assert_se("ab", FirstMatch("(ab){1,3}?", "abababab").CStr(), "and its lazy form");
+		assert_se("", FirstMatch("x*", "abc").CStr(), "an empty match at the start beats a later one");
+	}
+
+	[test("groups")]
+	public static void TestGroups() {
+		Core::Regex date = Core::Regex("(?P<year>\\d{4})-(?<month>\\d\\d)(?:-(\\d\\d))?");
+		assert_true(date.IsValid() && date.GroupCount() == 3, "three groups: (?:) takes no number");
+		assert_true(date.GroupIndex(Core::StringView("year")) == 1 && date.GroupIndex(Core::StringView("month")) == 2, "named");
+		assert_eq(-1, date.GroupIndex(Core::StringView("day")), "no such name");
+		Core::RegexMatch match;
+		assert_true(date.Search(Core::StringView("on 2026-10"), match), "found");
+		assert_true(match.Group(1) == "2026" && match.Group(2) == "10" && match.Start() == 3 && match.End() == 10, "bounds and texts");
+		assert_true(!match.Matched(3) && match.Start(3) == -1 && match.Group(3).IsEmpty(), "an optional group that took no part");
+		assert_true(!match.Matched(9) && match.Group(-1).IsEmpty(), "groups past the last are not there");
+		assert_se("b", FirstMatch("(a)|(b)", "b", 2).CStr(), "the alternative that matched");
+	}
+
+	[test("case_and_flags")]
+	public static void TestCaseAndFlags() {
+		assert_true(WholeMatch("(?i)hello", "HeLLo"), "(?i)");
+		assert_true(WholeMatch("(?i:a)b", "Ab") && !WholeMatch("(?i:a)b", "AB"), "(?i:x) for x alone");
+		assert_true(WholeMatch("(?i)[a-c]+", "AbC"), "classes fold too");
+		assert_true(WholeMatch("a(?i)b|c", "aB") && WholeMatch("a(?i)b|c", "C"), "flags hold for the rest of the group, other branches too");
+		assert_true(WholeMatch("(?i)(?-i)a", "a") && !WholeMatch("(?i)(?-i)a", "A"), "turned off again");
+	}
+
+	[test("utf8")]
+	public static void TestUtf8() {
+		assert_se("\xC3\xA9\xC3\xA9", FirstMatch("\xC3\xA9+", "x\xC3\xA9\xC3\xA9y").CStr(), "a repeated character that is two bytes");
+		assert_se("\xE2\x82\xAC", FirstMatch(".", "\xE2\x82\xAC").CStr(), "'.' is a whole code point");
+		assert_se("\xCE\xBB", FirstMatch("[\xCE\xB1-\xCF\x89]+", "\xCE\xBBx").CStr(), "a range of Greek letters");
+		assert_se("\xF0\x9F\x98\x80", FirstMatch("[^a]", "\xF0\x9F\x98\x80").CStr(), "four bytes in a negated class");
+		Core::StringBuilder broken;
+		broken.Append("a");
+		broken.AppendByte(0xFF);
+		broken.Append("b");
+		assert_true(Core::Regex("a.b").Matches(broken.View()) && !Core::Regex("a[^x]b").Matches(broken.View()), "a byte that is not UTF-8 matches '.' and nothing else");
+	}
+
+	[test("find_all_and_replace")]
+	public static void TestFindAllAndReplace() {
+		Core::Regex digits = Core::Regex("\\d+");
+		Core::Array<Core::RegexMatch> found = digits.FindAll(Core::StringView("a1b22c333"));
+		assert_true(found.Count() == 3 && found[1].Group() == "22" && found[2].Start() == 6, "every match, left to right");
+		assert_eq((int64)3, Core::Regex("x*").FindAll(Core::StringView("ab")).Count(), "empty matches step a character on");
+		Core::Regex mail = Core::Regex("(?P<user>\\w+)@(\\w+)");
+		assert_se("home:alice work:bob", mail.Replace(Core::StringView("alice@home bob@work"), Core::StringView("$2:$1")).CStr(), "numbered groups");
+		assert_se("[alice] [bob]", mail.Replace(Core::StringView("alice@home bob@work"), Core::StringView("[${user}]")).CStr(), "a named group");
+		assert_se("$1 costs $$", Core::Regex("x").Replace(Core::StringView("x costs $$"), Core::StringView("$$1")).CStr(), "$$ is '$'");
+		assert_se("--", Core::Regex("a(b)?").Replace(Core::StringView("aa"), Core::StringView("-$1$9")).CStr(), "a group that took no part is empty");
+		assert_se("caf\xC3\xA9!", Core::Regex("$").Replace(Core::StringView("caf\xC3\xA9"), Core::StringView("!")).CStr(), "an empty match at the end");
+	}
+
+	[test("malformed")]
+	public static void TestMalformed() {
+		assert_se("0: a '(' that is never closed", ErrorOf("(ab").CStr(), "unclosed group");
+		assert_se("1: a ')' that closes no group", ErrorOf("a)").CStr(), "stray ')'");
+		assert_se("0: nothing to repeat", ErrorOf("*a").CStr(), "a quantifier first");
+		assert_se("0: a '[' that is never closed", ErrorOf("[ab").CStr(), "unclosed class");
+		assert_se("1: a count range whose end comes before its start", ErrorOf("a{2,1}").CStr(), "{2,1}");
+		assert_se("1: a count above 1000", ErrorOf("a{1001}").CStr(), "too many");
+		assert_se("2: a repetition cannot be repeated: put it in a group", ErrorOf("a**").CStr(), "a**");
+		assert_se("0: an escape that means nothing here", ErrorOf("\\q").CStr(), "an unknown escape");
+		assert_se("2: an unknown flag: the flags are i, m and s", ErrorOf("(?x)").CStr(), "an unknown flag");
+		assert_se("1: a range whose end comes before its start", ErrorOf("[z-a]").CStr(), "a range backwards");
+		assert_se("12: two groups have the same name", ErrorOf("(?P<n>a)(?P<n>b)").CStr(), "a name twice");
+		assert_true(ErrorOf("((a{100}){100}){100}").View().Contains(Core::StringView("too large")), "a pattern that would be a million instructions");
+		Core::Regex none;
+		assert_true(!none.IsValid() && !none.Matches(Core::StringView("")), "a zero Regex matches nothing");
+	}
+
+	[test("linear_time")]
+	public static void TestLinearTime() {
+		Core::StringBuilder text;
+		for (int32 i = 0; i < 20000; ++i) text.Append("a");
+		const int64 start = clock_now_ns();
+		assert_true(!Core::Regex("(a*)*b").Contains(text.View()), "(a*)*b on 20000 a's: no match");
+		assert_true(!Core::Regex("(a|aa)+$x").Contains(text.View()), "(a|aa)+ that must fail at the end");
+		assert_true(Core::Regex("(x+x+)+y|a+").Matches(text.View()), "every a, after an alternative that blows up a backtracking engine");
+		assert_true((clock_now_ns() - start) / 1000000 < 5000, "each in time linear in the text, not exponential");
+	}
+
+	[test("problem_matcher")]
+	public static void TestProblemMatcher() {
+		Core::Regex msvc = Core::Regex("^(?P<file>[^(]+)\\((\\d+),(\\d+)\\): (error|warning) (\\w+): (.*)$");
+		Core::RegexMatch problem;
+		Core::StringView line = Core::StringView("src/main.cpp(12,5): error C2065: 'x': undeclared identifier");
+		assert_true(msvc.Search(line, problem), "an MSVC error line");
+		assert_true(problem.Group(msvc.GroupIndex(Core::StringView("file"))) == "src/main.cpp", "the file");
+		assert_true(problem.Group(2) == "12" && problem.Group(3) == "5" && problem.Group(4) == "error" && problem.Group(5) == "C2065", "line, column, severity, code");
+		assert_true(problem.Group(6) == "'x': undeclared identifier", "the message");
+	}
+}
