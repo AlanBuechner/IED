@@ -151,7 +151,7 @@ They are declared in the prelude (`Bedrock/Prelude/prelude.ch` in the C4 install
 - GC and reflection builtins (`raw_alloc`, `gc_collect`, `reflect_*`, ...) exist too - see the c4-garbage-collector and c4-reflection skills.
 
 ## Bedrock (default library)
-Bedrock's names live in one-level namespaces: `Core` (containers `Array<T>`, `HashMap<K,V>`, `Queue<T>`, `Stack<T>`, `Sort`; UTF-8 text `StringView`, `String`, `StringBuilder`, `Format`), `FS` (`File`), `Serialization` (DOM, JSON, YAML, binary), `Reflection` and `GC`. Counts and indices are `int64`, element access is unchecked, and a zero container is empty and allocates nothing. Its sources are always compiled into your program, but it is opt-in per file: `include "bedrock.ch"` to bring its declarations into scope. Full reference: docs/library/bedrock.md.
+Bedrock's names live in one-level namespaces: `Core` (containers `Array<T>`, `HashMap<K,V>`, `Queue<T>`, `Stack<T>`, `Sort`; UTF-8 text `StringView`, `String`, `StringBuilder`, `Format`), `FS` (`File`, `Path`, `Directory`), `Serialization` (DOM, JSON, YAML, binary), `Reflection`, `GC`, `Threading` (threads, atomics, locks, futures, jobs), `Platform` (virtual memory, the machine, libraries, time) and `Net` (addresses, TCP streams and listeners, UDP, `Poll`; blocking calls with millisecond timeouts). Counts and indices are `int64`, element access is unchecked, and a zero container is empty and allocates nothing. Its sources are always compiled into your program, but it is opt-in per file: `include "bedrock.ch"` to bring its declarations into scope. Full reference: docs/library/bedrock.md.
 
     include "bedrock.ch"
     Core::Array<int32> numbers = { 3, 1, 2 };

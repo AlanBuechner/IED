@@ -1,0 +1,33 @@
+include "udp.ch"
+include "sockets.ch"
+
+namespace Net
+{
+	bool UdpSocket::Open(const Address& at) {
+		Close();
+		char[kErrorBytes] why;
+		const int64 socket = last.Record(c4_net_udp_open(&at, &why[0], kErrorBytes), &why[0]);
+		if (socket < 0) return false;
+		slot = socket + 1;
+		return true;
+	}
+
+	int64 UdpSocket::SendTo(const void* bytes, int64 count, const Address& to, int32 timeoutMs) {
+		if (!IsOpen()) return last.Fail("the socket is closed");
+		char[kErrorBytes] why;
+		return last.Record(c4_net_send(Socket(), bytes, count, &to, timeoutMs, &why[0], kErrorBytes), &why[0]);
+	}
+
+	int64 UdpSocket::ReceiveFrom(void* buffer, int64 capacity, Address& from, int32 timeoutMs) {
+		if (!IsOpen()) return last.Fail("the socket is closed");
+		char[kErrorBytes] why;
+		return last.Record(c4_net_receive(Socket(), buffer, capacity, &from, timeoutMs, &why[0], kErrorBytes), &why[0]);
+	}
+
+	Address UdpSocket::LocalAddress() const { return LocalAddressOf(Socket()); }
+
+	void UdpSocket::Close() {
+		if (slot != 0) c4_net_close(Socket());
+		slot = 0;
+	}
+}

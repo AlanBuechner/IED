@@ -1,0 +1,107 @@
+include "tcp.ch"
+include "sockets.ch"
+
+namespace Net
+{
+	// --- TcpStream ------------------------------------------------------------------------------------------------------
+
+	TcpStream TcpStream::Connect(const Address& to, int32 timeoutMs) {
+		TcpStream stream;
+		char[kErrorBytes] why;
+		const int64 socket = stream.last.Record(c4_net_tcp_connect(&to, timeoutMs, &why[0], kErrorBytes), &why[0]);
+		if (socket >= 0) stream.slot = socket + 1;
+		return stream;
+	}
+
+	TcpStream TcpStream::FromSocket(int64 socket) {
+		TcpStream stream;
+		if (socket >= 0) stream.slot = socket + 1;
+		return stream;
+	}
+
+	int64 TcpStream::Send(const void* bytes, int64 count, int32 timeoutMs) {
+		if (!IsOpen()) return last.Fail("the stream is closed");
+		char[kErrorBytes] why;
+		return last.Record(c4_net_send(Socket(), bytes, count, nullptr, timeoutMs, &why[0], kErrorBytes), &why[0]);
+	}
+
+	bool TcpStream::SendAll(const void* bytes, int64 count, int32 timeoutMs) {
+		if (!IsOpen()) {
+			last.Fail("the stream is closed");
+			return false;
+		}
+		const uint8* next = (const uint8*)bytes;
+		int64 left = count;
+		while (left > 0) {
+			const int64 sent = Send((const void*)next, left, timeoutMs);
+			if (sent <= 0) return false;
+			next = next + sent;
+			left -= sent;
+		}
+		return true;
+	}
+
+	int64 TcpStream::Receive(void* buffer, int64 capacity, int32 timeoutMs) {
+		if (!IsOpen()) return last.Fail("the stream is closed");
+		char[kErrorBytes] why;
+		return last.Record(c4_net_receive(Socket(), buffer, capacity, nullptr, timeoutMs, &why[0], kErrorBytes), &why[0]);
+	}
+
+	bool TcpStream::ReceiveAll(void* buffer, int64 count, int32 timeoutMs) {
+		if (!IsOpen()) {
+			last.Fail("the stream is closed");
+			return false;
+		}
+		uint8* next = (uint8*)buffer;
+		int64 left = count;
+		while (left > 0) {
+			const int64 received = Receive((void*)next, left, timeoutMs);
+			if (received == 0) last.Fail("the connection closed before every byte arrived");
+			if (received <= 0) return false;
+			next = next + received;
+			left -= received;
+		}
+		return true;
+	}
+
+	bool TcpStream::SetNoDelay(bool on) { return IsOpen() && c4_net_set_no_delay(Socket(), on ? 1 : 0) == 0; }
+
+	void TcpStream::Shutdown(Net::Shutdown side) {
+		if (IsOpen()) c4_net_shutdown(Socket(), (int32)side);
+	}
+
+	Address TcpStream::LocalAddress() const { return LocalAddressOf(Socket()); }
+	Address TcpStream::PeerAddress() const { return PeerAddressOf(Socket()); }
+
+	void TcpStream::Close() {
+		if (slot != 0) c4_net_close(Socket());
+		slot = 0;
+	}
+
+	// --- TcpListener ----------------------------------------------------------------------------------------------------
+
+	bool TcpListener::Listen(const Address& at, int32 backlog) {
+		Close();
+		char[kErrorBytes] why;
+		const int64 socket = last.Record(c4_net_tcp_listen(&at, backlog, &why[0], kErrorBytes), &why[0]);
+		if (socket < 0) return false;
+		slot = socket + 1;
+		return true;
+	}
+
+	TcpStream TcpListener::Accept(int32 timeoutMs) {
+		if (!IsOpen()) {
+			last.Fail("the listener is not listening");
+			return TcpStream();
+		}
+		char[kErrorBytes] why;
+		return TcpStream::FromSocket(last.Record(c4_net_tcp_accept(Socket(), timeoutMs, nullptr, &why[0], kErrorBytes), &why[0]));
+	}
+
+	Address TcpListener::LocalAddress() const { return LocalAddressOf(Socket()); }
+
+	void TcpListener::Close() {
+		if (slot != 0) c4_net_close(Socket());
+		slot = 0;
+	}
+}

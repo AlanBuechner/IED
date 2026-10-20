@@ -8,6 +8,7 @@
 //   GC             the garbage collector
 //   Threading      threads, atomics, locks, futures and the job system
 //   Platform       virtual memory, the machine and the process, loaded libraries, wall-clock time
+//   Net            addresses and name resolution, TCP connections and listeners, UDP, waiting on many sockets
 // Namespaces are open: a program may add its own members to any of them, as long as names do not collide.
 
 include "Container/initlist.ch"
@@ -44,3 +45,7 @@ include "Platform/memory.ch"
 include "Platform/system.ch"
 include "Platform/library.ch"
 include "Platform/time.ch"
+include "Net/address.ch"
+include "Net/tcp.ch"
+include "Net/udp.ch"
+include "Net/poll.ch"

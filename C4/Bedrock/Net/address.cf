@@ -1,0 +1,79 @@
+include "address.ch"
+include "../Container/hash.ch"
+
+[link("c4_net_resolve")] int32 c4_net_resolve(const char* host, int32 port, Net::Address* out, int32 capacity, char* error, int64 errorCapacity);
+[link("c4_net_address_text")] int64 c4_net_address_text(const Net::Address* address, char* out, int64 capacity);
+[link("c4_net_parse_address")] int32 c4_net_parse_address(const char* text, Net::Address* out);
+
+namespace Net
+{
+	// How many addresses one Resolve keeps.
+	const int32 kMaxResolved = 32;
+	// The longest address text: "[", an IPv6 address with its scope, "]:", a port.
+	const int32 kAddressTextBytes = 80;
+
+	Address Address::IPv4(uint8 a, uint8 b, uint8 c, uint8 d, int32 port) {
+		Address address;
+		address.family = Family::IPv4;
+		address.port = port;
+		address.bytes[0] = a;
+		address.bytes[1] = b;
+		address.bytes[2] = c;
+		address.bytes[3] = d;
+		return address;
+	}
+
+	Address Address::LoopbackV6(int32 port) {
+		Address address = AnyV6(port);
+		address.bytes[15] = 1;
+		return address;
+	}
+
+	Address Address::AnyV6(int32 port) {
+		Address address;
+		address.family = Family::IPv6;
+		address.port = port;
+		return address;
+	}
+
+	Address Address::WithPort(int32 newPort) const {
+		Address copy = *this;
+		copy.port = newPort;
+		return copy;
+	}
+
+	Core::String Address::ToString() const {
+		char[kAddressTextBytes] text;
+		if (!IsValid() || c4_net_address_text(this, &text[0], kAddressTextBytes) >= kAddressTextBytes) return Core::String();
+		return Core::String(&text[0]);
+	}
+
+	bool Address::Equals(const Address& other) const {
+		if (family != other.family || port != other.port || scope != other.scope) return false;
+		for (int32 i = 0; i < 16; ++i)
+			if (bytes[i] != other.bytes[i]) return false;
+		return true;
+	}
+
+	uint64 Address::Hash() const { return Core::HashBytes((const char*)this, (int64)sizeof(Address)); }
+
+	Address ParseAddress(const char* text) {
+		Address address;
+		if (c4_net_parse_address(text, &address) != 0) return Address();
+		return address;
+	}
+
+	Resolution Resolve(const char* host, int32 port) {
+		Resolution result;
+		Address[kMaxResolved] found;
+		char[kErrorBytes] error;
+		const int32 count = c4_net_resolve(host, port, &found[0], kMaxResolved, &error[0], kErrorBytes);
+		if (count < 0) {
+			result.error = Core::String(&error[0]);
+			return result;
+		}
+		for (int32 i = 0; i < count; ++i) result.addresses.Push(found[i]);
+		if (count == 0) result.error = Core::String("the name has no IPv4 or IPv6 address");
+		return result;
+	}
+}

@@ -1,0 +1,9 @@
+include "poll.ch"
+include "sockets.ch"
+
+namespace Net
+{
+	int32 Poll(Core::Array<PollEntry>& entries, int32 timeoutMs) {
+		return c4_net_poll(entries.Data(), (int32)entries.Count(), timeoutMs);
+	}
+}

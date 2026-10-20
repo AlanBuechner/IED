@@ -1,0 +1,268 @@
+// Net (D-65): addresses parsed, printed, compared and resolved; TCP connections on loopback - a round trip, timeouts
+// on accept, receive and connect, a refused connection, shutdown, a large transfer from another thread, a port in
+// use, closed sockets and IPv6; UDP datagrams; and Poll. Every port is chosen by the system (port 0).
+
+include "bedrock.ch"
+
+const int32 kNetWaitMs = 3000;   // generous for a loaded machine: loopback answers in microseconds
+
+static bool NetContains(const char* text, const char* part) { return Core::StringView(text).IndexOf(Core::StringView(part)) >= 0; }
+
+// A listener on loopback and a connected client and server pair.
+struct NetPair {
+	public Net::TcpListener listener;
+	public Net::TcpStream client;
+	public Net::TcpStream server;
+}
+
+static void Connect(NetPair& pair, const Net::Address& at) {
+	pair.listener.Listen(at);
+	pair.client = Net::TcpStream::Connect(pair.listener.LocalAddress(), kNetWaitMs);
+	pair.server = pair.listener.Accept(kNetWaitMs);
+}
+
+[test("net.address")]
+class NetAddressTests {
+	[test("parse_ipv4")]
+	public static void TestParseIPv4() {
+		Net::Address a = Net::ParseAddress("127.0.0.1:8080");
+		assert_true(a.IsValid() && a.family == Net::Family::IPv4, "an IPv4 address with a port");
+		assert_eq(8080, a.port, "the port");
+		assert_true(a == Net::Address::Loopback(8080), "equals the loopback address built from parts");
+		assert_se("127.0.0.1:8080", a.ToString().CStr(), "and prints back");
+		Net::Address bare = Net::ParseAddress("10.1.2.3");
+		assert_true(bare.IsValid() && bare.port == 0 && bare == Net::Address::IPv4(10, 1, 2, 3, 0), "without a port: port 0");
+	}
+
+	[test("parse_ipv6")]
+	public static void TestParseIPv6() {
+		Net::Address a = Net::ParseAddress("[::1]:443");
+		assert_true(a.IsValid() && a.family == Net::Family::IPv6 && a.port == 443, "a bracketed IPv6 address with a port");
+		assert_true(a == Net::Address::LoopbackV6(443), "equals ::1");
+		assert_se("[::1]:443", a.ToString().CStr(), "and prints back");
+		assert_true(Net::ParseAddress("::1") == Net::Address::LoopbackV6(0), "a bare IPv6 address");
+		Net::Address scoped = Net::ParseAddress("[fe80::1%3]:80");
+		assert_true(scoped.IsValid() && scoped.scope == 3, "a link-local address keeps its interface");
+		assert_se("[fe80::1%3]:80", scoped.ToString().CStr(), "and prints it");
+	}
+
+	[test("parse_rejects")]
+	public static void TestParseRejects() {
+		const char*[11] bad = { "", "1.2.3", "1.2.3.4.5", "256.1.1.1", "1.2.3.4:65536", "1.2.3.4:", "1.2.3.4:8x",
+			"[::1", "[::1]x", "localhost", "[1.2.3.4]:80" };
+		for (int32 i = 0; i < 11; ++i) assert_true(!Net::ParseAddress(bad[i]).IsValid(), bad[i]);
+		assert_true(!Net::ParseAddress(nullptr).IsValid(), "no text");
+		assert_true(!Net::Address().IsValid(), "a zero address is not valid");
+		assert_true(Net::Address().ToString().IsEmpty(), "and prints as nothing");
+		assert_true(Net::ParseAddress("1.2.3.4:65535").port == 65535, "the highest port");
+	}
+
+	[test("compare_and_hash")]
+	public static void TestCompareAndHash() {
+		Net::Address a = Net::Address::Loopback(80);
+		assert_true(a != a.WithPort(81) && a.WithPort(81).port == 81, "WithPort changes only the port");
+		assert_true(a != Net::Address::LoopbackV6(80), "families differ");
+		assert_true(a.Hash() == Net::Address::Loopback(80).Hash(), "equal addresses hash alike");
+		Core::HashMap<Net::Address, int32> seen;
+		seen[a] = 1;
+		seen[a.WithPort(81)] = 2;
+		assert_eq(1, seen.Get(Net::Address::Loopback(80)), "an address is a hash map key");
+		assert_eq((int64)28, (int64)sizeof(Net::Address), "the runtime's layout");
+	}
+
+	[test("resolve")]
+	public static void TestResolve() {
+		Net::Resolution local = Net::Resolve("localhost", 80);
+		assert_true(local.Found(), "localhost resolves");
+		bool loopback = false;
+		for (const Net::Address& address : local.addresses)
+			if (address == Net::Address::Loopback(80) || address == Net::Address::LoopbackV6(80)) loopback = true;
+		assert_true(loopback, "to a loopback address with the port");
+		assert_true(Net::Resolve("127.0.0.1", 7).addresses[0] == Net::Address::Loopback(7), "a numeric address resolves to itself");
+		Net::Resolution none = Net::Resolve("c4-no-such-host.invalid", 80);
+		assert_true(!none.Found() && !none.error.IsEmpty(), "a name that does not exist: an error");
+		assert_true(!Net::Resolve("", 80).Found() && !Net::Resolve("localhost", 70000).Found(), "no name, a port out of range");
+	}
+}
+
+[test("net.tcp")]
+class NetTcpTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		NetPair pair;
+		Connect(pair, Net::Address::Loopback(0));
+		assert_true(pair.listener.IsOpen() && pair.listener.LocalAddress().port != 0, "listening on a port the system chose");
+		assert_true(pair.client.IsOpen() && pair.server.IsOpen(), "connected and accepted");
+		assert_true(pair.client.PeerAddress() == pair.listener.LocalAddress(), "the client's peer is the listener");
+		assert_true(pair.server.PeerAddress() == pair.client.LocalAddress(), "the server's peer is the client");
+		assert_true(pair.client.SendText(Core::StringView("ping")), "the client sends");
+		char[4] got;
+		assert_true(pair.server.ReceiveAll((void*)&got[0], 4, kNetWaitMs), "the server receives every byte");
+		assert_true(Core::StringView(&got[0], 4) == "ping", "in order");
+		assert_true(pair.server.SendText(Core::StringView("pong!")), "and answers");
+		char[8] reply;
+		assert_eq((int64)5, pair.client.Receive((void*)&reply[0], 8, kNetWaitMs), "the client receives what was sent");
+		assert_se("", pair.client.Error(), "with no error");
+	}
+
+	[test("accept_times_out")]
+	public static void TestAcceptTimesOut() {
+		Net::TcpListener listener;
+		listener.Listen(Net::Address::Loopback(0));
+		Net::TcpStream none = listener.Accept(30);
+		assert_true(!none.IsOpen() && listener.TimedOut(), "no client: a closed stream, and the listener timed out");
+		assert_true(!listener.Accept(0).IsOpen() && listener.TimedOut(), "a zero timeout only checks");
+	}
+
+	[test("receive_times_out")]
+	public static void TestReceiveTimesOut() {
+		NetPair pair;
+		Connect(pair, Net::Address::Loopback(0));
+		char[8] buffer;
+		assert_eq(Net::kTimedOut, pair.client.Receive((void*)&buffer[0], 8, 30), "nothing to read within the timeout");
+		assert_true(pair.client.TimedOut() && pair.client.IsOpen(), "the stream says so and stays open");
+		assert_true(!pair.client.ReceiveAll((void*)&buffer[0], 8, 30) && pair.client.TimedOut(), "ReceiveAll gives up too");
+	}
+
+	[test("refused")]
+	public static void TestRefused() {
+		Net::TcpListener listener;
+		listener.Listen(Net::Address::Loopback(0));
+		Net::Address gone = listener.LocalAddress();
+		listener.Close();
+		Net::TcpStream stream = Net::TcpStream::Connect(gone, kNetWaitMs);
+		assert_true(!stream.IsOpen() && !stream.TimedOut(), "no one listens: refused, not timed out");
+		assert_true(NetContains(stream.Error(), "(error 10061)"), "with the system's reason");
+		assert_true(!Net::TcpStream::Connect(Net::Address(), kNetWaitMs).IsOpen(), "an address that is not valid");
+		assert_true(!Net::TcpStream::Connect(Net::Address::Loopback(0), kNetWaitMs).IsOpen(), "port 0 is no one's");
+	}
+
+	[test("shutdown_reads_zero")]
+	public static void TestShutdownReadsZero() {
+		NetPair pair;
+		Connect(pair, Net::Address::Loopback(0));
+		pair.client.SendText(Core::StringView("last"));
+		pair.client.Shutdown(Net::Shutdown::Send);
+		char[8] buffer;
+		assert_true(pair.server.ReceiveAll((void*)&buffer[0], 4, kNetWaitMs), "what was sent before still arrives");
+		assert_eq((int64)0, pair.server.Receive((void*)&buffer[0], 8, kNetWaitMs), "then the peer's end reads as 0");
+		assert_true(pair.server.SendText(Core::StringView("ok")), "the other direction still works");
+		assert_eq((int64)2, pair.client.Receive((void*)&buffer[0], 8, kNetWaitMs), "after a send shutdown");
+		pair.server.Close();
+		assert_true(!pair.client.ReceiveAll((void*)&buffer[0], 8, kNetWaitMs), "a closed peer ends ReceiveAll");
+		assert_true(NetContains(pair.client.Error(), "closed before every byte"), "saying so");
+	}
+
+	[test("large_transfer")]
+	public static void TestLargeTransfer() {
+		NetPair pair;
+		Connect(pair, Net::Address::Loopback(0));
+		const int64 size = 4 * 1024 * 1024;
+		Core::Array<uint8> sent;
+		for (int64 i = 0; i < size; ++i) sent.Push((uint8)(i * 7 + (i >> 9)));
+		bool sentAll = false;
+		Net::TcpStream* writer = &pair.client;
+		Threading::Thread sender = Threading::Thread::Run([writer, &sent, &sentAll]() { sentAll = writer->SendAll((const void*)sent.Data(), sent.Count(), kNetWaitMs); });
+		Core::Array<uint8> got;
+		for (int64 i = 0; i < size; ++i) got.Push((uint8)0);
+		const bool received = pair.server.ReceiveAll((void*)got.Data(), size, kNetWaitMs);
+		sender.Join();
+		assert_true(sentAll && received, "4 MiB sent from another thread and received");
+		bool same = true;
+		for (int64 i = 0; i < size; ++i)
+			if (got[i] != sent[i]) same = false;
+		assert_true(same, "every byte in order");
+	}
+
+	[test("port_in_use")]
+	public static void TestPortInUse() {
+		Net::TcpListener first;
+		first.Listen(Net::Address::Loopback(0));
+		Net::TcpListener second;
+		assert_true(!second.Listen(first.LocalAddress()) && !second.IsOpen(), "a second listener on a busy port fails");
+		assert_true(NetContains(second.Error(), "(error 100"), "with the system's reason");
+		assert_true(!second.Listen(Net::Address()), "an address that is not valid");
+	}
+
+	[test("closed")]
+	public static void TestClosed() {
+		Net::TcpStream stream;
+		char[4] buffer;
+		assert_true(!stream.IsOpen() && stream.Socket() == -1, "a zero stream is closed");
+		assert_eq(Net::kError, stream.Send((const void*)"x", 1), "sending fails");
+		assert_se("the stream is closed", stream.Error(), "saying why");
+		assert_eq(Net::kError, stream.Receive((void*)&buffer[0], 4), "so does receiving");
+		assert_true(!stream.SendText(Core::StringView("x")) && !stream.ReceiveAll((void*)&buffer[0], 4), "and the whole forms");
+		assert_true(!stream.SetNoDelay(true) && !stream.LocalAddress().IsValid(), "and the rest");
+		stream.Close();
+		stream.Close();
+		Net::TcpListener listener;
+		assert_true(!listener.Accept(0).IsOpen() && NetContains(listener.Error(), "not listening"), "a closed listener accepts nothing");
+	}
+
+	[test("moved")]
+	public static void TestMoved() {
+		NetPair pair;
+		Connect(pair, Net::Address::Loopback(0));
+		Net::TcpStream moved = take(pair.client);
+		assert_true(moved.IsOpen() && !pair.client.IsOpen(), "take() moves the connection");
+		assert_true(moved.SetNoDelay(true) && moved.SendText(Core::StringView("hi")), "and it still works");
+		char[2] got;
+		assert_true(pair.server.ReceiveAll((void*)&got[0], 2, kNetWaitMs), "end to end");
+	}
+
+	[test("ipv6")]
+	public static void TestIPv6() {
+		NetPair pair;
+		Connect(pair, Net::Address::LoopbackV6(0));
+		assert_true(pair.server.IsOpen() && pair.server.PeerAddress().family == Net::Family::IPv6, "a connection over ::1");
+		pair.client.SendText(Core::StringView("v6"));
+		char[2] got;
+		assert_true(pair.server.ReceiveAll((void*)&got[0], 2, kNetWaitMs), "carries bytes");
+	}
+}
+
+[test("net.udp")]
+class NetUdpTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		Net::UdpSocket a;
+		Net::UdpSocket b;
+		assert_true(a.Open(Net::Address::Loopback(0)) && b.Open(Net::Address::Loopback(0)), "two sockets on loopback");
+		assert_eq((int64)5, a.SendTo((const void*)"hello", 5, b.LocalAddress()), "a datagram goes out whole");
+		char[16] got;
+		Net::Address from;
+		assert_eq((int64)5, b.ReceiveFrom((void*)&got[0], 16, from, kNetWaitMs), "and arrives whole");
+		assert_true(from == a.LocalAddress(), "from its sender");
+		assert_eq(Net::kTimedOut, b.ReceiveFrom((void*)&got[0], 16, from, 30), "nothing more within the timeout");
+		a.SendTo((const void*)"a longer datagram", 17, b.LocalAddress());
+		assert_eq(Net::kError, b.ReceiveFrom((void*)&got[0], 4, from, kNetWaitMs), "one larger than the buffer is an error");
+		Net::UdpSocket closed;
+		assert_eq(Net::kError, closed.SendTo((const void*)"x", 1, b.LocalAddress()), "a closed socket sends nothing");
+	}
+}
+
+[test("net.poll")]
+class NetPollTests {
+	[test("readiness")]
+	public static void TestReadiness() {
+		NetPair pair;
+		pair.listener.Listen(Net::Address::Loopback(0));
+		Core::Array<Net::PollEntry> watched;
+		watched.Push(Net::PollEntry::For(pair.listener.Socket(), Net::kReadable));
+		assert_eq(0, Net::Poll(watched, 0), "an idle listener is not ready");
+		pair.client = Net::TcpStream::Connect(pair.listener.LocalAddress(), kNetWaitMs);
+		assert_eq(1, Net::Poll(watched, kNetWaitMs), "a waiting connection makes it readable");
+		assert_true((watched[0].ready & Net::kReadable) != 0, "readable");
+		pair.server = pair.listener.Accept(0);
+		Core::Array<Net::PollEntry> streams;
+		streams.Push(Net::PollEntry::For(pair.server.Socket(), Net::kReadable));
+		streams.Push(Net::PollEntry::For(pair.client.Socket(), Net::kWritable));
+		assert_eq(1, Net::Poll(streams, kNetWaitMs), "the client can write; the server has nothing to read");
+		assert_true(streams[0].ready == 0 && (streams[1].ready & Net::kWritable) != 0, "each entry says which");
+		pair.client.SendText(Core::StringView("x"));
+		assert_true(Net::Poll(streams, kNetWaitMs) == 2 && (streams[0].ready & Net::kReadable) != 0, "data makes the server readable");
+		Core::Array<Net::PollEntry> nothing;
+		assert_eq(0, Net::Poll(nothing, 5), "with no entries Poll only waits");
+	}
+}

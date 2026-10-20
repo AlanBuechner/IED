@@ -604,13 +604,60 @@ Covered by `Bedrock/Tests/platform_*_tests.cf` and, for faults on protected page
 
 ---
 
-## 13. Tests
+## 13. Networking (`Net/`)
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 37 files, 340 tests (array, list, initlist,
+**Status:** **Implemented** (B49, D-65): TCP and UDP over IPv4 and IPv6, name resolution and waiting on many sockets,
+through a small C API in the runtime (`C4Runtime/NetRuntimeC.h`, `C4Runtime/Net/SocketsWin32.c` over Winsock 2).
+HTTP is next (`Http::`, B50).
+
+```c4
+Net::TcpListener server;
+server.Listen(Net::Address::Loopback(0));                         // port 0: the system picks a free port
+Net::TcpStream client = Net::TcpStream::Connect(server.LocalAddress(), 2000);
+Net::TcpStream accepted = server.Accept(2000);                     // a closed stream when none comes in time
+client.SendText(Core::StringView("ping"));
+char[4] reply;
+if (!accepted.ReceiveAll((void*)&reply[0], 4, 2000)) printf("%s\n", accepted.Error());
+```
+
+- **Addresses** (`address.ch`): `Net::Address` is a value - `family` (`Family::IPv4`, `IPv6`, or `None` for a zero
+  address), `port`, 16 address `bytes` in network order and an IPv6 `scope` - built with `IPv4(a, b, c, d, port)`,
+  `Loopback`, `LoopbackV6`, `Any`, `AnyV6`, `WithPort`; compared with `==`, hashed (a map key) and printed with
+  `ToString()` (`"127.0.0.1:80"`, `"[::1]:80"`, `"[fe80::1%3]:80"`). `Net::ParseAddress(text)` reads a numeric address
+  with an optional port and never looks a name up; `Net::Resolve(host, port)` does, returning a `Resolution`
+  (`addresses`, in the order the system prefers them, or `error`).
+- **TCP** (`tcp.ch`): `TcpListener::Listen(address, backlog)`, `Accept(timeoutMs)`; `TcpStream::Connect(address,
+  timeoutMs)`, `Send` (some bytes), `SendAll` / `SendText` (every byte), `Receive` (some bytes; 0 once the peer has
+  closed its side), `ReceiveAll` (exactly a count), `SetNoDelay`, `Shutdown(Shutdown::Send / Receive / Both)`,
+  `LocalAddress`, `PeerAddress`, `Close`. Each owns its socket and closes it on delete; neither can be copied (move
+  one with `take()`), and a zero one is closed.
+- **UDP** (`udp.ch`): `UdpSocket::Open(address)`, `SendTo(bytes, count, to)`, `ReceiveFrom(buffer, capacity, from,
+  timeoutMs)` - a datagram arrives whole; one larger than the buffer is an error.
+- **Waiting** (`poll.ch`): `Net::Poll(entries, timeoutMs)` over `PollEntry::For(socket, kReadable | kWritable)`
+  entries (`TcpStream::Socket()`, `TcpListener::Socket()`, `UdpSocket::Socket()`); each entry's `ready` says what it
+  found, including `kClosed` and `kFailed`. A listener is readable when a connection waits to be accepted.
+- **Timeouts and errors**: a call that waits takes milliseconds, `0` to only check or `Net::kWaitForever`. `Send` and
+  `Receive` return a byte count, `Net::kTimedOut` or `Net::kError`; a socket keeps why its last call failed
+  (`Error()`: the system's message and code, empty after a success) and whether it gave up waiting (`TimedOut()`).
+  `Connect` and `Accept` return a closed stream when they fail - the stream's (for `Connect`) or the listener's (for
+  `Accept`) `Error()` and `TimedOut()` say why.
+- Sockets are not inherited by processes the program starts. A listener takes its port exclusively. Windows answers
+  a connection refused on this machine after about 2 seconds of retries.
+
+Covered by `Bedrock/Tests/net_tests.cf`: parsing and printing every address form and rejecting malformed ones,
+resolution (also of a name that does not exist), a TCP round trip over IPv4 and IPv6, timeouts on accept, receive and
+`ReceiveAll`, a refused connection, shutdown, a 4 MiB transfer from another thread, a port in use, closed and moved
+streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams.
+
+---
+
+## 14. Tests
+
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 38 files, 358 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -622,7 +669,7 @@ The exit code is the number of failed assertions. The `GC` namespace is covered 
 
 ---
 
-## 14. Missing versus the plan
+## 15. Missing versus the plan
 
 From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 
@@ -640,7 +687,7 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Streaming reads (decode a large file while it is still being read) | **Planned** |
 | Paths, directory listing, create, remove, rename | **Implemented** |
 | `Core::InitList<T>` | **Implemented** |
-| Sockets / networking | **Planned** |
-| HTTP server | **Planned** |
+| Sockets / networking | **Implemented** (section 13, B49) |
+| HTTP server | **Planned** (B50) |
 | Threading primitives (join, promise, condition variable, work stealing) | **Implemented** (section 10, B29) |
 | `Platform::`: virtual memory, system and process information, environment variables, libraries, wall-clock time | **Implemented** (section 12, B40) |
