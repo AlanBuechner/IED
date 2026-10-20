@@ -1,6 +1,35 @@
 # src/ - IED server (C4)
 
-The native half of IED: a **standalone background server that owns all state**. The web client (`frontend/`) is only a view (`docs/01`). C4 sources arrive when the compiler and Bedrock can support them (`docs/17` readiness checklist); `ai/prompts/` already holds data the server will ship.
+The native half of IED: a **standalone background server that owns all state**. The web client (`frontend/`) is only a view (`docs/01`). `ai/prompts/` holds data the server will ship.
+
+## Build, run, check
+
+```bat
+nuke build ied-server
+build\bin\Development-windows-x64\ied-server\ied-server.exe --static frontend --workspace .
+nuke conformance
+```
+
+The first stdout line is `LISTENING http://<host>:<port>`; options: `--host` (default 127.0.0.1), `--port` (0: a free one),
+`--static <dir>`, `--workspace <dir>` (repeatable), `--test-hooks` (the conformance suite's `testhooks.*`, never in
+normal use), `--idle-timeout <s>`, `--outbound-budget-mb`, `--coalesce-kb`, `--allow-origin`, `--allow-host`, `--quiet`.
+`nuke conformance` builds the server and runs `tools/conformance` against it (all 46 checks pass).
+
+## What exists (M1, in progress)
+
+| Folder | Files | What |
+|---|---|---|
+| `host/` | `config`, `server` | command line; the shared state under one lock (epoch, hub, methods, sessions, services); simulated restart |
+| `web/` | `json`, `frames`, `hub`, `outbox`, `rpc`, `rpcerror`, `params`, `session`, `front` | protocol v1 (`docs/10`): frames and their checks, topics with seq and rings, per-client outbox (budget, coalescing, gaps), methods with typed params, stable errors, opId idempotency and cancellation, the WebSocket session (hello/resume, sub/unsub, liveness, a writer thread), HTTP (Host/Origin checks, `/ws`, `/healthz`, uploads and blobs, static files) |
+| `services/` | `presence`, `workspaces`, `documents`, `testhooks`, `blobs` | the `server` topic and notifications; folders with `fs.*` and revision checks; server-owned documents with lease and rebase; the conformance hooks |
+| `fs/` | `textedit` | line/column (UTF-16) edits, their rebase, applying them |
+
+Methods run holding the server lock, as the mock's single thread does, and release it only to wait (`Call::Sleep`); each
+request runs on a thread of its own, so responses overtake each other; each socket has a writer thread, so a slow
+client never holds up a producer.
+
+Still to come in M1 (`docs/18`): auth (loopback token, owner password), settings tiers, the plugin host (built-in and
+declarative), file watching, single instance and the named-pipe CLI, persistence and the IED output source.
 
 ```
 src/

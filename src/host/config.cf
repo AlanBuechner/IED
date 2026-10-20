@@ -1,0 +1,67 @@
+include "config.ch"
+
+namespace Ied
+{
+	const int64 kKilobyte = 1024;
+
+	ServerConfig DefaultConfig() {
+		ServerConfig config;
+		config.version = Core::String("0.1.0");
+		config.host = Core::String("127.0.0.1");
+		config.port = 8765;
+		config.idleTimeoutMs = 60000;
+		config.outboundBudget = 4 * kKilobyte * kKilobyte;
+		config.coalesceBytes = 256 * kKilobyte;
+		return config;
+	}
+
+	static bool ParseCount(Core::StringView text, int64& value) {
+		if (text.IsEmpty()) return false;
+		int64 parsed = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c < '0' || c > '9') return false;
+			parsed = parsed * 10 + (c - '0');
+		}
+		value = parsed;
+		return true;
+	}
+
+	static bool Fail(Core::String& error, Core::StringView option, const char* why) {
+		Core::StringBuilder text;
+		text.Append(option);
+		text.Append(": ");
+		text.Append(why);
+		error = text.ToString();
+		return false;
+	}
+
+	// One option and its value (when it takes one) at `i`; `i` moves past them.
+	static bool ParseOption(const Core::Array<Core::String>& arguments, int64& i, ServerConfig& config, Core::String& error) {
+		Core::StringView option = arguments[i].View();
+		if (option == "--test-hooks") { config.testHooks = true; return true; }
+		if (option == "--quiet") { config.quiet = true; return true; }
+		if (i + 1 >= arguments.Count()) return Fail(error, option, "needs a value (or is unknown)");
+		i += 1;
+		Core::StringView value = arguments[i].View();
+		int64 number = 0;
+		if (option == "--host") config.host = Core::String(value);
+		else if (option == "--static") config.staticDir = Core::String(value);
+		else if (option == "--workspace") config.workspaces.Push(Core::String(value));
+		else if (option == "--allow-origin") config.allowOrigins.Push(Core::String(value));
+		else if (option == "--allow-host") config.allowHosts.Push(Core::String(value));
+		else if (!ParseCount(value, number)) return Fail(error, option, "is unknown, or its value is not a count");
+		else if (option == "--port" && number <= 65535) config.port = (int32)number;
+		else if (option == "--idle-timeout") config.idleTimeoutMs = number * 1000;
+		else if (option == "--outbound-budget-mb") config.outboundBudget = number * kKilobyte * kKilobyte;
+		else if (option == "--coalesce-kb") config.coalesceBytes = number * kKilobyte;
+		else return Fail(error, option, "is unknown or out of range");
+		return true;
+	}
+
+	bool ParseArguments(const Core::Array<Core::String>& arguments, ServerConfig& config, Core::String& error) {
+		for (int64 i = 0; i < arguments.Count(); ++i)
+			if (!ParseOption(arguments, i, config, error)) return false;
+		return true;
+	}
+}

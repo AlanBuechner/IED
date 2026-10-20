@@ -1,0 +1,41 @@
+include "rpcerror.ch"
+include "json.ch"
+
+namespace Ied
+{
+	const char* ErrorCodeName(ErrorCode code) {
+		switch (code) {
+			case ErrorCode::BadRequest: return "bad_request";
+			case ErrorCode::NotFound: return "not_found";
+			case ErrorCode::Forbidden: return "forbidden";
+			case ErrorCode::Untrusted: return "untrusted";
+			case ErrorCode::Conflict: return "conflict";
+			case ErrorCode::Busy: return "busy";
+			case ErrorCode::Cancelled: return "cancelled";
+			case ErrorCode::Timeout: return "timeout";
+			case ErrorCode::Unavailable: return "unavailable";
+			case ErrorCode::Internal: return "internal";
+			case ErrorCode::PluginError: return "plugin_error";
+		}
+		return "internal";
+	}
+
+	bool ParseErrorCode(Core::StringView name, ErrorCode& code) {
+		for (int32 i = 0; i < kErrorCodeCount; ++i) {
+			if (name != ErrorCodeName((ErrorCode)i)) continue;
+			code = (ErrorCode)i;
+			return true;
+		}
+		return false;
+	}
+
+	Core::String RpcError::ToJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("code", ErrorCodeName(code));
+		json.Field("message", message.View());
+		if (!data.IsEmpty()) json.RawField("data", data.View());
+		json.EndObject();
+		return json.ToString();
+	}
+}

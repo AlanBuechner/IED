@@ -1,0 +1,333 @@
+include "workspaces.ch"
+include "../host/server.ch"
+
+namespace Ied
+{
+	static RpcError BadPath(Core::StringView path) {
+		Core::StringBuilder message;
+		message.Append("path must be workspace-relative without '.' or '..': '");
+		message.Append(path);
+		message.Append("'");
+		return RpcError(ErrorCode::BadRequest, message.View());
+	}
+
+	static RpcError Missing(const char* what, Core::StringView path) {
+		Core::StringBuilder message;
+		message.Append("no ");
+		message.Append(what);
+		message.Append(" '");
+		message.Append(path);
+		message.Append("'");
+		return RpcError(ErrorCode::NotFound, message.View());
+	}
+
+	static RpcError Changed(int64 revision) {
+		JsonWriter data;
+		data.BeginObject();
+		data.IntField("revision", revision);
+		data.EndObject();
+		return RpcError(ErrorCode::Conflict, "the file changed since that revision", data.View());
+	}
+
+	Core::String NormalizePath(Core::StringView path) {
+		if (path.ByteLength() >= 2 && path.ByteAt(1) == ':') throw BadPath(path);
+		Core::StringBuilder clean;
+		int64 at = 0;
+		while (at < path.ByteLength()) {
+			int64 end = at;
+			while (end < path.ByteLength() && path.ByteAt(end) != '/' && path.ByteAt(end) != '\\') end += 1;
+			Core::StringView part = path.Substring(at, end - at);
+			if (part == "." || part == "..") throw BadPath(path);
+			if (!part.IsEmpty()) {
+				if (!clean.IsEmpty()) clean.AppendByte('/');
+				clean.Append(part);
+			}
+			at = end + 1;
+		}
+		return clean.ToString();
+	}
+
+	FS::Path Workspace::At(Core::StringView path) const { return path.IsEmpty() ? root : root / path; }
+
+	Core::String Workspace::SummaryJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", wsId.View());
+		json.Field("name", name.View());
+		json.Field("root", root.View());
+		json.BoolField("trusted", trusted);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Workspaces::Init(Server* server) {
+		this.server = server;
+		RegisterMethods();
+		for (int64 i = 0; i < server->config.workspaces.Count(); ++i) Open(FS::AbsolutePath(server->config.workspaces[i].CStr()));
+		if (items.IsEmpty() && server->config.testHooks) {
+			FS::Path scratch = FS::TempDirectory() / (Core::String("ied-test-") + server->epoch.View()).View();
+			FS::MakeDirectories(scratch.CStr());
+			Open(scratch);
+		}
+	}
+
+	Workspace* Workspaces::Open(const FS::Path& folder) {
+		Workspace* ws = new Workspace();
+		Core::StringBuilder id;
+		id.Append("w");
+		id.AppendInt(items.Count() + 1);
+		ws->wsId = id.ToString();
+		ws->name = Core::String(folder.FileName());
+		ws->root = folder;
+		ws->trusted = true;
+		items.Push(ws);
+		Workspaces* self = this;
+		Core::String topic = Core::String("ws:") + ws->wsId.View();
+		server->hub.Add(topic.View(), [self, ws]() -> Core::String { return self->Snapshot(ws); });
+		return ws;
+	}
+
+	Workspace* Workspaces::Get(Core::StringView wsId) const {
+		for (int64 i = 0; i < items.Count(); ++i)
+			if (items[i]->wsId.View() == wsId) return items[i];
+		throw Missing("workspace", wsId);
+	}
+
+	Core::String Workspaces::SummariesJson() const {
+		JsonWriter json;
+		json.BeginArray();
+		for (int64 i = 0; i < items.Count(); ++i) json.Raw(items[i]->SummaryJson().View());
+		json.EndArray();
+		return json.ToString();
+	}
+
+	Core::String Workspaces::Snapshot(const Workspace* ws) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", ws->wsId.View());
+		json.Field("name", ws->name.View());
+		json.Field("root", ws->root.View());
+		json.BoolField("trusted", ws->trusted);
+		json.Field("kind", "folder");
+		json.RawField("roots", Core::StringView("[\".\"]"));
+		json.RawField("plugins", Core::StringView("[]"));
+		json.RawField("chats", Core::StringView("[]"));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Workspaces::TreeChanged(Workspace* ws, Core::StringView path, const char* change) {
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("changes"));
+		data.BeginArray();
+		data.BeginObject();
+		data.Field("path", path);
+		data.Field("change", change);
+		data.EndObject();
+		data.EndArray();
+		data.EndObject();
+		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
+	}
+
+	Core::String Workspaces::Read(Workspace* ws, Core::StringView path) const {
+		FS::Path file = ws->At(path);
+		if (!FS::FileExists(file.CStr())) throw Missing("file", path);
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
+	int64 Workspaces::Revision(Workspace* ws, Core::StringView path) {
+		if (!FS::FileExists(ws->At(path).CStr())) return 0;
+		int64* known = ws->revisions.Find(Core::String(path));
+		if (known) return *known;
+		ws->revisions.Insert(Core::String(path), 1);
+		return 1;
+	}
+
+	int64 Workspaces::Write(Workspace* ws, Core::StringView path, Core::StringView text, int64 expectedRevision) {
+		const int64 current = Revision(ws, path);
+		if (expectedRevision >= 0 && expectedRevision != current) throw Changed(current);
+		FS::Path file = ws->At(path);
+		if (FS::IsDirectory(file.CStr())) throw RpcError(ErrorCode::BadRequest, "that path is a directory");
+		FS::MakeDirectories(file.Parent().CStr());
+		FS::File opened = FS::File(file.CStr(), "wb");
+		const bool written = opened.IsOpen() && (text.IsEmpty() || opened.Write((const void*)text.Data(), text.ByteLength()) == text.ByteLength());
+		opened.Close();
+		if (!written) throw RpcError(ErrorCode::Unavailable, "the file could not be written");
+		ws->revisions.At(Core::String(path)) = current + 1;
+		TreeChanged(ws, path, current ? "changed" : "created");
+		return current + 1;
+	}
+
+	// --- Methods -----------------------------------------------------------------------------------------------------
+
+	struct ListedEntry
+	{
+		public Core::String name;
+		public bool directory;
+	}
+
+	static int32 LowerAscii(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	// Directories first, then by name without regard to ASCII case.
+	static bool ListedBefore(const ListedEntry& a, const ListedEntry& b) {
+		if (a.directory != b.directory) return a.directory;
+		Core::StringView x = a.name.View();
+		Core::StringView y = b.name.View();
+		for (int64 i = 0; i < x.ByteLength() && i < y.ByteLength(); ++i)
+			if (LowerAscii(x.ByteAt(i)) != LowerAscii(y.ByteAt(i))) return LowerAscii(x.ByteAt(i)) < LowerAscii(y.ByteAt(i));
+		return x.ByteLength() < y.ByteLength();
+	}
+
+	Core::String Workspaces::ListMethod(Call& call, const Params& params) {
+		Workspace* ws = Get(params.Str("wsId").View());
+		Core::String path = NormalizePath(params.Str("path", Core::StringView("")).View());
+		FS::Directory folder = FS::Directory(ws->At(path.View()).CStr());
+		if (!folder.IsOpen()) throw Missing("directory", path.View());
+		Core::Array<ListedEntry> entries;
+		for (FS::DirectoryEntry& entry : folder) {
+			ListedEntry listed;
+			listed.name = entry.name;
+			listed.directory = entry.kind == FS::EntryKind::Directory;
+			entries.Push(listed);
+		}
+		entries.SortBy(ListedBefore);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", path.View());
+		json.Key(Core::StringView("entries"));
+		json.BeginArray();
+		for (int64 i = 0; i < entries.Count(); ++i) {
+			Core::String full = path.IsEmpty() ? entries[i].name : path + "/" + entries[i].name.View();
+			json.BeginObject();
+			json.Field("name", entries[i].name.View());
+			json.Field("path", full.View());
+			json.Field("kind", entries[i].directory ? "dir" : "file");
+			if (!entries[i].directory) {
+				json.IntField("size", FS::FileSize(ws->At(full.View()).CStr()));
+				json.IntField("revision", Revision(ws, full.View()));
+			}
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Workspaces::ReadMethod(Call& call, const Params& params) {
+		Workspace* ws = Get(params.Str("wsId").View());
+		Core::String path = NormalizePath(params.Str("path").View());
+		Core::String text = Read(ws, path.View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", path.View());
+		json.Field("text", text.View());
+		json.IntField("revision", Revision(ws, path.View()));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Workspaces::WriteMethod(Call& call, const Params& params) {
+		Workspace* ws = Get(params.Str("wsId").View());
+		Core::String path = NormalizePath(params.Str("path").View());
+		Core::String text = params.Str("text");
+		const int64 revision = Write(ws, path.View(), text.View(), params.Int("expectedRevision", -1));
+		server->documents->OnDiskWrite(ws, path.View(), text.View(), revision);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", path.View());
+		json.IntField("revision", revision);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Workspaces::DeleteMethod(Call& call, const Params& params) {
+		Workspace* ws = Get(params.Str("wsId").View());
+		Core::String path = NormalizePath(params.Str("path").View());
+		const int64 current = Revision(ws, path.View());
+		if (!current) throw Missing("file", path.View());
+		const int64 expected = params.Int("expectedRevision", -1);
+		if (expected >= 0 && expected != current) throw Changed(current);
+		if (!FS::RemoveFile(ws->At(path.View()).CStr())) throw RpcError(ErrorCode::Unavailable, "the file could not be deleted");
+		ws->revisions.Remove(path);
+		TreeChanged(ws, path.View(), "deleted");
+		return Core::String("{}");
+	}
+
+	Core::String Workspaces::MakeDirectoryMethod(Call& call, const Params& params) {
+		Workspace* ws = Get(params.Str("wsId").View());
+		Core::String path = NormalizePath(params.Str("path").View());
+		FS::Path folder = ws->At(path.View());
+		if (FS::FileExists(folder.CStr())) throw RpcError(ErrorCode::Conflict, "that path is a file");
+		if (!FS::IsDirectory(folder.CStr())) {
+			if (!FS::MakeDirectories(folder.CStr())) throw RpcError(ErrorCode::Unavailable, "the directory could not be made");
+			TreeChanged(ws, path.View(), "created");
+		}
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", path.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Workspaces::RenameMethod(Call& call, const Params& params) {
+		Workspace* ws = Get(params.Str("wsId").View());
+		Core::String source = NormalizePath(params.Str("from").View());
+		Core::String target = NormalizePath(params.Str("to").View());
+		const int64 revision = Revision(ws, source.View());
+		if (!revision) throw Missing("file", source.View());
+		FS::Path to = ws->At(target.View());
+		if (FS::FileExists(to.CStr()) || FS::IsDirectory(to.CStr())) throw RpcError(ErrorCode::Conflict, "the target already exists");
+		FS::MakeDirectories(to.Parent().CStr());
+		if (!FS::Rename(ws->At(source.View()).CStr(), to.CStr())) throw RpcError(ErrorCode::Unavailable, "the file could not be renamed");
+		ws->revisions.Remove(source);
+		ws->revisions.At(target) = revision;
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("changes"));
+		data.BeginArray();
+		data.BeginObject();
+		data.Field("path", source.View());
+		data.Field("change", "deleted");
+		data.EndObject();
+		data.BeginObject();
+		data.Field("path", target.View());
+		data.Field("change", "created");
+		data.EndObject();
+		data.EndArray();
+		data.EndObject();
+		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", target.View());
+		json.IntField("revision", revision);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Workspaces::SetTrustMethod(Call& call, const Params& params) {
+		Workspace* ws = Get(params.Str("wsId").View());
+		ws->trusted = params.Bool("trusted", ws->trusted);
+		JsonWriter data;
+		data.BeginObject();
+		data.BoolField("trusted", ws->trusted);
+		data.EndObject();
+		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "trust.changed", data.View());
+		return data.ToString();
+	}
+
+	void Workspaces::RegisterMethods() {
+		Workspaces* self = this;
+		server->rpc.Register("ws.list", [self](Call& call, const Params& params) -> Core::String {
+			return (Core::String("{\"workspaces\":") + self->SummariesJson().View()) + "}";
+		});
+		server->rpc.Register("ws.setTrust", [self](Call& call, const Params& params) -> Core::String { return self->SetTrustMethod(call, params); });
+		server->rpc.Register("fs.list", [self](Call& call, const Params& params) -> Core::String { return self->ListMethod(call, params); });
+		server->rpc.Register("fs.read", [self](Call& call, const Params& params) -> Core::String { return self->ReadMethod(call, params); });
+		server->rpc.Register("fs.write", [self](Call& call, const Params& params) -> Core::String { return self->WriteMethod(call, params); });
+		server->rpc.Register("fs.delete", [self](Call& call, const Params& params) -> Core::String { return self->DeleteMethod(call, params); });
+		server->rpc.Register("fs.mkdir", [self](Call& call, const Params& params) -> Core::String { return self->MakeDirectoryMethod(call, params); });
+		server->rpc.Register("fs.rename", [self](Call& call, const Params& params) -> Core::String { return self->RenameMethod(call, params); });
+	}
+}

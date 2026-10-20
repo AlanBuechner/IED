@@ -1,0 +1,224 @@
+include "textedit.ch"
+include "../web/json.ch"
+
+namespace Ied
+{
+	bool PosBefore(const Pos& a, const Pos& b) { return a.line < b.line || (a.line == b.line && a.col < b.col); }
+	bool PosAtOrBefore(const Pos& a, const Pos& b) { return !PosBefore(b, a); }
+
+	static Pos MakePos(int64 line, int64 col) {
+		Pos pos;
+		pos.line = line;
+		pos.col = col;
+		return pos;
+	}
+
+	// --- Parsing -----------------------------------------------------------------------------------------------------
+
+	static bool ParsePos(const Serialization::DomNode& node, Pos& pos) {
+		Serialization::DomNode line = node.Member("line");
+		Serialization::DomNode col = node.Member("col");
+		if (line.Kind() != Serialization::DomKind::Int || col.Kind() != Serialization::DomKind::Int) return false;
+		if (line.AsInt() < 0 || col.AsInt() < 0) return false;
+		pos = MakePos(line.AsInt(), col.AsInt());
+		return true;
+	}
+
+	static bool ParseChange(const Serialization::DomNode& item, Change& change, Core::String& error) {
+		Serialization::DomNode range = item.Member("range");
+		Serialization::DomNode text = item.Member("text");
+		if (!ParsePos(range.Member("start"), change.start) || !ParsePos(range.Member("end"), change.end)) {
+			error = Core::String("a change is {range: {start: {line, col}, end: {line, col}}, text}, line and col non-negative integers");
+			return false;
+		}
+		if (text.Kind() != Serialization::DomKind::String) {
+			error = Core::String("change text must be a string");
+			return false;
+		}
+		if (PosBefore(change.end, change.start)) {
+			error = Core::String("range end is before start");
+			return false;
+		}
+		change.text = Core::String(text.AsView());
+		return true;
+	}
+
+	bool ParseChanges(const Serialization::DomNode& list, Core::Array<Change>& changes, Core::String& error) {
+		if (list.Kind() != Serialization::DomKind::Array) {
+			error = Core::String("changes must be an array");
+			return false;
+		}
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Change change;
+			if (!ParseChange(list.At(i), change, error)) return false;
+			changes.Push(take(change));
+		}
+		return true;
+	}
+
+	static void WritePos(JsonWriter& json, const char* key, const Pos& pos) {
+		json.Key(Core::StringView(key));
+		json.BeginObject();
+		json.IntField("line", pos.line);
+		json.IntField("col", pos.col);
+		json.EndObject();
+	}
+
+	Core::String ChangesJson(const Core::Array<Change>& changes) {
+		JsonWriter json;
+		json.BeginArray();
+		for (int64 i = 0; i < changes.Count(); ++i) {
+			json.BeginObject();
+			json.Key(Core::StringView("range"));
+			json.BeginObject();
+			WritePos(json, "start", changes[i].start);
+			WritePos(json, "end", changes[i].end);
+			json.EndObject();
+			json.Field("text", changes[i].text.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	// --- Rebase ------------------------------------------------------------------------------------------------------
+
+	static int64 LastLineStart(Core::StringView text, int64& newlines) {
+		int64 start = 0;
+		newlines = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.ByteAt(i) == '\n') { newlines += 1; start = i + 1; }
+		return start;
+	}
+
+	Pos EndPosition(Core::StringView text) {
+		int64 newlines = 0;
+		const int64 start = LastLineStart(text, newlines);
+		return MakePos(newlines, Core::Utf16Length(text.Substring(start, -1)));
+	}
+
+	// Where text inserted at `start` ends.
+	static Pos AfterInsert(const Pos& start, Core::StringView text) {
+		int64 newlines = 0;
+		const int64 lastStart = LastLineStart(text, newlines);
+		const int64 lastUnits = Core::Utf16Length(text.Substring(lastStart, -1));
+		return newlines == 0 ? MakePos(start.line, start.col + lastUnits) : MakePos(start.line + newlines, lastUnits);
+	}
+
+	// A position after `applied` replaced the text before it.
+	static Pos Shift(const Pos& pos, const Change& applied) {
+		const Pos after = AfterInsert(applied.start, applied.text.View());
+		if (pos.line == applied.end.line) return MakePos(after.line, after.col + pos.col - applied.end.col);
+		return MakePos(pos.line + after.line - applied.end.line, pos.col);
+	}
+
+	// `change` moved over `applied`; false when their ranges overlap.
+	static bool Transform(Change& change, const Change& applied) {
+		if (PosAtOrBefore(applied.end, change.start)) {
+			change.start = Shift(change.start, applied);
+			change.end = Shift(change.end, applied);
+			return true;
+		}
+		return PosAtOrBefore(change.end, applied.start);
+	}
+
+	// One change set as the edits it was applied as: last position first, so each leaves the positions before it alone.
+	static Core::Array<Change> Sequential(const Core::Array<Change>& set) {
+		Core::Array<int64> order;
+		for (int64 i = 0; i < set.Count(); ++i) order.Push(i);
+		order.SortBy([&set](int64 a, int64 b) -> bool {
+			if (PosBefore(set[b].start, set[a].start) || PosBefore(set[a].start, set[b].start)) return PosBefore(set[b].start, set[a].start);
+			if (PosBefore(set[b].end, set[a].end) || PosBefore(set[a].end, set[b].end)) return PosBefore(set[b].end, set[a].end);
+			return b < a;
+		});
+		Core::Array<Change> steps;
+		for (int64 i = 0; i < order.Count(); ++i) steps.Push(set[order[i]]);
+		return steps;
+	}
+
+	bool RebaseChanges(const Core::Array<Change>& changes, const Core::Array<Core::Array<Change>>& history, Core::Array<Change>& rebased) {
+		Core::Array<Change> steps;
+		for (int64 h = 0; h < history.Count(); ++h) steps.Append(Sequential(history[h]));
+		for (int64 i = 0; i < changes.Count(); ++i) {
+			Change change = changes[i];
+			for (int64 s = 0; s < steps.Count(); ++s)
+				if (!Transform(change, steps[s])) return false;
+			rebased.Push(take(change));
+		}
+		return true;
+	}
+
+	// --- Applying ----------------------------------------------------------------------------------------------------
+
+	static bool Disjoint(const Core::Array<Change>& changes) {
+		Core::Array<Change> sorted = changes;
+		sorted.SortBy([](const Change& a, const Change& b) -> bool {
+			return PosBefore(a.start, b.start) || (!PosBefore(b.start, a.start) && PosBefore(a.end, b.end));
+		});
+		for (int64 i = 1; i < sorted.Count(); ++i)
+			if (PosBefore(sorted[i].start, sorted[i - 1].end)) return false;
+		return true;
+	}
+
+	static Core::Array<int64> LineStarts(Core::StringView text) {
+		Core::Array<int64> starts;
+		starts.Push(0);
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.ByteAt(i) == '\n') starts.Push(i + 1);
+		return starts;
+	}
+
+	// The byte a position is at; -1 when it is outside the text or splits a character.
+	static int64 ByteOf(Core::StringView text, const Core::Array<int64>& starts, const Pos& pos) {
+		if (pos.line >= starts.Count()) return -1;
+		const int64 begin = starts[pos.line];
+		const int64 end = pos.line + 1 < starts.Count() ? starts[pos.line + 1] - 1 : text.ByteLength();
+		Core::StringView line = text.Substring(begin, end - begin);
+		if (pos.col > Core::Utf16Length(line)) return -1;
+		const int64 byte = Core::ByteOffsetOfUtf16(line, pos.col);
+		if (Core::Utf16OffsetOfByte(line, byte) != pos.col) return -1;
+		return begin + byte;
+	}
+
+	struct Span
+	{
+		public int64 begin;
+		public int64 end;
+		public int64 index;
+	}
+
+	bool ApplyChanges(Core::StringView text, const Core::Array<Change>& changes, Core::String& result, Core::String& error) {
+		if (!Disjoint(changes)) {
+			error = Core::String("changes in one edit must not overlap");
+			return false;
+		}
+		Core::Array<int64> starts = LineStarts(text);
+		Core::Array<Span> spans;
+		for (int64 i = 0; i < changes.Count(); ++i) {
+			Span span;
+			span.begin = ByteOf(text, starts, changes[i].start);
+			span.end = ByteOf(text, starts, changes[i].end);
+			span.index = i;
+			if (span.begin < 0 || span.end < 0) {
+				error = Core::String("a position is outside the document or splits a character");
+				return false;
+			}
+			spans.Push(span);
+		}
+		spans.SortBy([](const Span& a, const Span& b) -> bool {
+			if (a.begin != b.begin) return a.begin < b.begin;
+			if (a.end != b.end) return a.end < b.end;
+			return a.index < b.index;
+		});
+		Core::StringBuilder out;
+		int64 cursor = 0;
+		for (int64 i = 0; i < spans.Count(); ++i) {
+			out.Append(text.Substring(cursor, spans[i].begin - cursor));
+			out.Append(changes[spans[i].index].text.View());
+			cursor = spans[i].end;
+		}
+		out.Append(text.Substring(cursor, -1));
+		result = out.ToString();
+		return true;
+	}
+}

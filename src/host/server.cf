@@ -1,0 +1,56 @@
+include "server.ch"
+
+namespace Ied
+{
+	Core::String NewEpoch() {
+		uint8[6] bytes;
+		Platform::RandomBytes((void*)&bytes[0], 6);
+		Core::StringBuilder text;
+		text.Append("e-");
+		for (int32 i = 0; i < 6; ++i) text.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return text.ToString();
+	}
+
+	void Server::Init(ServerConfig config) {
+		this.config = config;
+		epoch = NewEpoch();
+		Server* self = this;
+		presence = new Presence(self);
+		workspaces = new Workspaces(self);
+		documents = new Documents(self);
+		blobs = new Blobs();
+		if (config.testHooks) testHooks = new TestHooks(self);
+	}
+
+	void Server::Log(Core::StringView line) {
+		if (config.quiet) return;
+		Core::StringBuilder text;
+		text.Append("[ied] ");
+		text.Append(line);
+		text.AppendByte('\n');
+		Platform::WriteError(text.View());
+	}
+
+	void Server::RemoveSession(Session* session) {
+		for (int64 i = 0; i < sessions.Count(); ++i)
+			if (sessions[i] == session) { sessions.RemoveAt(i); return; }
+	}
+
+	void Server::Restart() {
+		Core::Array<Session*> closing;
+		{
+			Threading::LockGuard guard(lock);
+			if (testHooks) testHooks->OnRestart();
+			epoch = NewEpoch();
+			hub.ClearRings();
+			rpc.ClearOps();
+			closing = sessions;
+			for (int64 i = 0; i < closing.Count(); ++i) closing[i]->Push(ByeFrame("server-restart").View());
+		}
+		for (int64 i = 0; i < closing.Count(); ++i) closing[i]->FlushAndClose(1001, "server-restart");
+		Core::StringBuilder line;
+		line.Append("simulated restart; new epoch ");
+		line.Append(epoch.View());
+		Log(line.View());
+	}
+}

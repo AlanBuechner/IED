@@ -1,0 +1,334 @@
+include "session.ch"
+include "../host/server.ch"
+
+namespace Ied
+{
+	const int64 kPingIntervalNs = 20000000000;
+	const int32 kReadSliceMs = 1000;
+	const int64 kFlushWaitNs = 2000000000;
+	const int32 kWriterSliceMs = 500;
+
+	int64 CursorOf(const Serialization::DomNode& cursors, Core::StringView key) {
+		for (int64 i = 0; i < cursors.Count(); ++i)
+			if (cursors.KeyAt(i) == key) return cursors.ValueAt(i).AsInt();
+		return -1;
+	}
+
+	void Session::Init(Server* server, Http::WebSocket* socket, Core::StringView peer) {
+		this.server = server;
+		this.socket = socket;
+		this.peer = Core::String(peer);
+		outbox.Configure(server->config.outboundBudget, server->config.coalesceBytes);
+		idleTimeoutMs = server->config.idleTimeoutMs;
+		startedNs = clock_now_ns();
+	}
+
+	// --- The connection's thread -------------------------------------------------------------------------------------
+
+	void Session::Run() {
+		Session* self = this;
+		writer = Threading::Thread::Run([self]() { self->WriteLoop(); });
+		Serialization::DomNode hello;
+		if (AwaitHello(hello) && Start(hello)) ServeFrames();
+		{
+			Threading::LockGuard guard(server->lock);
+			Cleanup();
+		}
+		if (socket->IsOpen()) Close(closeCode ? closeCode : 1001, closeCode ? "invalid frame" : "session ended");
+		outbox.Close();
+		writer.Join();
+	}
+
+	void Session::Close(int32 code, const char* reason) {
+		server->Log(Core::StringView(reason));
+		socket->Close(code, Core::StringView(reason));
+	}
+
+	bool Session::AwaitHello(Serialization::DomNode& hello) {
+		FrameRead read = ReadFrame(hello, (int32)idleTimeoutMs);
+		if (read != FrameRead::Frame) return false;
+		if (hello.Member("t").AsView() != "hello") {
+			Close(1002, "first frame must be hello");
+			return false;
+		}
+		if (hello.Member("proto").AsInt() == kProtocolVersion) return true;
+		outbox.PushControl(ByeFrame("protocol-mismatch").View());
+		FlushAndClose(1002, "protocol-mismatch");
+		return false;
+	}
+
+	bool Session::Start(const Serialization::DomNode& hello) {
+		Threading::LockGuard guard(server->lock);
+		clientId = Core::String(hello.Member("clientId").AsView());
+		device.deviceId = Core::String(hello.Member("deviceId").AsView());
+		device.deviceClass = Core::String(hello.Member("deviceClass").AsView());
+		device.deviceName = Core::String(hello.Member("deviceName").AsView());
+		Welcome(hello);
+		started = true;
+		server->sessions.Push(this);
+		server->presence->Connected(this);
+		return true;
+	}
+
+	void Session::Welcome(const Serialization::DomNode& hello) {
+		Serialization::DomNode resume = hello.Member("resume");
+		const bool sameEpoch = resume.Member("sessionEpoch").AsView() == server->epoch.View();
+		Serialization::DomNode cursors = resume.Member("cursors");
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("t", "welcome");
+		json.IntField("proto", kProtocolVersion);
+		json.Field("serverVersion", server->config.version.View());
+		json.Field("sessionEpoch", server->epoch.View());
+		json.Field("clientId", clientId.View());
+		Core::Array<Topic*> topics;
+		Core::Array<Core::String> statuses;
+		if (resume.IsValid()) {
+			json.Key(Core::StringView("resume"));
+			json.BeginObject();
+			for (int64 i = 0; i < cursors.Count(); ++i) {
+				Topic* topic = server->hub.Find(cursors.KeyAt(i));
+				if (!topic) continue;
+				Core::String status = sameEpoch ? ResumeStatus(topic, cursors.ValueAt(i).AsInt()) : Core::String("snapshot");
+				json.Field(topic->key.CStr(), status.View());
+				topics.Push(topic);
+				statuses.Push(status);
+			}
+			json.EndObject();
+		}
+		json.EndObject();
+		Push(json.View());
+		for (int64 i = 0; i < topics.Count(); ++i) Attach(topics[i], statuses[i].View(), CursorOf(cursors, topics[i]->key.View()));
+	}
+
+	bool Session::Idle(int64 nowNs) const {
+		const int64 last = socket->LastReceivedNs() > startedNs ? socket->LastReceivedNs() : startedNs;
+		return nowNs - last > idleTimeoutMs * 1000000;
+	}
+
+	void Session::ServeFrames() {
+		int64 lastPing = clock_now_ns();
+		for (;;) {
+			Serialization::DomNode frame;
+			FrameRead read = ReadFrame(frame, kReadSliceMs);
+			if (read == FrameRead::Closed) return;
+			if (read == FrameRead::Frame) {
+				Threading::LockGuard guard(server->lock);
+				closeCode = Dispatch(frame);
+			}
+			if (closeCode) return;
+			const int64 now = clock_now_ns();
+			if (Idle(now)) {
+				Close(1001, "idle timeout");
+				return;
+			}
+			if (now - lastPing >= kPingIntervalNs) {
+				socket->Ping(Core::StringView("ied"));
+				lastPing = now;
+			}
+		}
+	}
+
+	// A frame, parsed and checked. An invalid req with an integer id is answered bad_request and reads as Idle; any
+	// other invalid frame closes the socket (decision 1).
+	FrameRead Session::ReadFrame(Serialization::DomNode& frame, int32 timeoutMs) {
+		Http::WebSocketMessage message;
+		if (!socket->Receive(message, timeoutMs)) return socket->TimedOut() ? FrameRead::Idle : FrameRead::Closed;
+		if (message.kind == Http::MessageKind::Binary) {
+			Close(1003, "binary frames are reserved for protocol v1.1");
+			return FrameRead::Closed;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(message.Text(), *doc);
+		if (!parsed.Ok()) {
+			Close(1007, "frame is not valid JSON");
+			return FrameRead::Closed;
+		}
+		frame = parsed.root;
+		Core::String problem = FrameProblem(frame);
+		if (problem.IsEmpty()) return FrameRead::Frame;
+		Serialization::DomNode id = frame.Member("id");
+		if (frame.Member("t").AsView() == "req" && id.Kind() == Serialization::DomKind::Int) {
+			Threading::LockGuard guard(server->lock);
+			PushError(id.AsInt(), RpcError(ErrorCode::BadRequest, problem.View()));
+			return FrameRead::Idle;
+		}
+		Close(1002, "invalid frame");
+		return FrameRead::Closed;
+	}
+
+	// --- Frames (the server lock is held) -----------------------------------------------------------------------------
+
+	int32 Session::Dispatch(const Serialization::DomNode& frame) {
+		Core::StringView t = frame.Member("t").AsView();
+		if (t == "req") OnRequest(frame);
+		else if (t == "cancel") OnCancel(frame.Member("id").AsInt());
+		else if (t == "sub") OnSubscribe(frame);
+		else if (t == "unsub") OnUnsubscribe(frame.Member("topics"));
+		else if (t == "ping") Push(PongFrame(frame.Member("ts")).View());
+		else if (t == "hello") return 1002;
+		return 0;
+	}
+
+	void Session::OnRequest(const Serialization::DomNode& frame) {
+		const int64 id = frame.Member("id").AsInt();
+		if (inflight.Contains(id)) {
+			Core::StringBuilder message;
+			message.Append("request id ");
+			message.AppendInt(id);
+			message.Append(" is already in flight");
+			PushError(id, RpcError(ErrorCode::BadRequest, message.View()));
+			return;
+		}
+		CancelToken* token = new CancelToken();
+		inflight.Insert(id, token);
+		Session* self = this;
+		Serialization::DomNode request = frame;
+		Threading::Thread::Run([self, request, token]() { self->ServeRequest(request, token); }).Detach();
+	}
+
+	// On the request's own thread.
+	void Session::ServeRequest(Serialization::DomNode frame, CancelToken* token) {
+		Threading::LockGuard guard(server->lock);
+		Call call;
+		call.server = server;
+		call.session = this;
+		call.requestId = frame.Member("id").AsInt();
+		call.opId = Core::String(frame.Member("opId").AsView());
+		call.cancel = token;
+		Outcome outcome = server->rpc.Run(call, frame.Member("method").AsView(), Params(frame.Member("params")));
+		inflight.Remove(call.requestId);
+		Push(ResultFrame(call.requestId, outcome.ok, outcome.json.View()).View());
+	}
+
+	void Session::OnCancel(int64 id) {
+		CancelToken** running = inflight.Find(id);
+		if (running) {
+			(*running)->Cancel();
+			return;
+		}
+		CancelToken** stream = streams.Find(id);
+		if (!stream) return;
+		(*stream)->Cancel();
+		streams.Remove(id);
+	}
+
+	Core::String Session::ResumeStatus(const Topic* topic, int64 cursor) {
+		if (cursor < 0 || !topic->CanReplayFrom(cursor)) return Core::String("snapshot");
+		const bool fits = topic->ReplayBytes(cursor) <= outbox.Budget() - outbox.Bytes();
+		return Core::String(fits ? "ok" : "snapshot");
+	}
+
+	void Session::OnSubscribe(const Serialization::DomNode& frame) {
+		Serialization::DomNode topics = frame.Member("topics");
+		Serialization::DomNode from = frame.Member("from");
+		Core::Array<Topic*> found;
+		Core::Array<Core::String> statuses;
+		JsonWriter result;
+		result.BeginObject();
+		result.Key(Core::StringView("topics"));
+		result.BeginObject();
+		for (int64 i = 0; i < topics.Count(); ++i) {
+			Core::StringView key = topics.At(i).AsView();
+			Topic* topic = server->hub.Find(key);
+			Core::String status = topic ? ResumeStatus(topic, CursorOf(from, key)) : Core::String("not_found");
+			result.Key(key);
+			result.String(status.View());
+			if (!topic) continue;
+			found.Push(topic);
+			statuses.Push(status);
+		}
+		result.EndObject();
+		result.EndObject();
+		Push(ResultFrame(frame.Member("id").AsInt(), true, result.View()).View());
+		for (int64 i = 0; i < found.Count(); ++i) Attach(found[i], statuses[i].View(), CursorOf(from, found[i]->key.View()));
+	}
+
+	void Session::Attach(Topic* topic, Core::StringView status, int64 cursor) {
+		outbox.DropTopic(topic->key.View());
+		subs.At(topic->key) = false;
+		topic->Subscribe(this);
+		if (status != "ok") {
+			Push(topic->SnapshotFrame().View());
+			return;
+		}
+		Core::Array<Event*> events = topic->EventsAfter(cursor);
+		for (int64 i = 0; i < events.Count() && !subs.Get(topic->key); ++i) PushEvent(topic, events[i]);
+	}
+
+	void Session::OnUnsubscribe(const Serialization::DomNode& topics) {
+		for (int64 i = 0; i < topics.Count(); ++i) {
+			Core::StringView key = topics.At(i).AsView();
+			subs.Remove(Core::String(key));
+			Topic* topic = server->hub.Find(key);
+			if (topic) topic->Unsubscribe(this);
+			outbox.DropTopic(key);
+		}
+	}
+
+	void Session::Deliver(Topic* topic, const Event* event) {
+		const bool* gapped = subs.Find(topic->key);
+		if (gapped && !*gapped) PushEvent(topic, event);
+	}
+
+	void Session::PushEvent(Topic* topic, const Event* event) {
+		if (closed) return;
+		Gap gap = outbox.PushEvent(topic->key.View(), event);
+		if (!gap.dropped) return;
+		subs.At(gap.topic) = true;
+		Push(GapFrame(gap.topic.View(), gap.first, gap.last).View());
+	}
+
+	void Session::Forget(Core::StringView topic) { subs.Remove(Core::String(topic)); }
+
+	void Session::Push(Core::StringView frame) {
+		if (!closed) outbox.PushControl(frame);
+	}
+
+	void Session::PushError(int64 id, const RpcError& error) {
+		Core::String body = error.ToJson();
+		Push(ResultFrame(id, false, body.View()).View());
+	}
+
+	Core::String Session::ClientJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("deviceId", device.deviceId.View());
+		json.Field("deviceClass", device.deviceClass.View());
+		if (!device.deviceName.IsEmpty()) json.Field("deviceName", device.deviceName.View());
+		json.Field("clientId", clientId.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Session::Cleanup() {
+		closed = true;
+		for (Core::KeyValue<Core::String, bool>& entry : subs) {
+			Topic* topic = server->hub.Find(entry.key.View());
+			if (topic) topic->Unsubscribe(this);
+		}
+		subs.Clear();
+		streams.Clear();
+		if (!started) return;
+		server->RemoveSession(this);
+		server->presence->Disconnected(this);
+	}
+
+	// --- The writer thread -------------------------------------------------------------------------------------------
+
+	void Session::WriteLoop() {
+		for (;;) {
+			Core::String text;
+			if (outbox.Next(text, kWriterSliceMs)) {
+				if (!socket->SendText(text.View())) return;
+			}
+			else if (outbox.IsClosed()) return;
+		}
+	}
+
+	void Session::FlushAndClose(int32 code, const char* reason) {
+		const int64 deadline = clock_now_ns() + kFlushWaitNs;
+		while (!outbox.IsEmpty() && socket->IsOpen() && clock_now_ns() < deadline) Threading::Thread::Sleep(10000000);
+		Close(code, reason);
+	}
+}

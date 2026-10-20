@@ -1,0 +1,257 @@
+include "testhooks.ch"
+include "../host/server.ch"
+
+namespace Ied
+{
+	void TestHooks::Init(Server* server) {
+		this.server = server;
+		RegisterMethods();
+	}
+
+	void TestHooks::RegisterMethods() {
+		TestHooks* self = this;
+		server->rpc.Register("testhooks.info", [self](Call& call, const Params& params) -> Core::String { return self->Info(call, params); });
+		server->rpc.Register("testhooks.configure", [self](Call& call, const Params& params) -> Core::String { return self->Configure(call, params); });
+		server->rpc.Register("testhooks.topic", [self](Call& call, const Params& params) -> Core::String { return self->NewTopic(call, params); });
+		server->rpc.Register("testhooks.emit", [self](Call& call, const Params& params) -> Core::String { return self->Emit(call, params); });
+		server->rpc.Register("testhooks.stream", [self](Call& call, const Params& params) -> Core::String { return self->Stream(call, params); });
+		server->rpc.Register("testhooks.delay", [self](Call& call, const Params& params) -> Core::String { return self->Delay(call, params); });
+		server->rpc.Register("testhooks.counter", [self](Call& call, const Params& params) -> Core::String { return self->Count(call, params); });
+		server->rpc.Register("testhooks.fail", [self](Call& call, const Params& params) -> Core::String { return self->Fail(call, params); });
+		server->rpc.Register("testhooks.restart", [self](Call& call, const Params& params) -> Core::String { return self->Restart(call, params); });
+		server->rpc.Register("testhooks.scratch", [self](Call& call, const Params& params) -> Core::String { return self->Scratch(call, params); });
+		server->rpc.Register("testhooks.serverEdit", [self](Call& call, const Params& params) -> Core::String { return self->ServerEdit(call, params); });
+	}
+
+	Core::String TestHooks::Info(Call& call, const Params& params) {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.Key(Core::StringView("methods"));
+		json.BeginArray();
+		Core::Array<Core::String> names = server->rpc.Names();
+		for (int64 i = 0; i < names.Count(); ++i)
+			if (names[i].View().StartsWith(Core::StringView("testhooks."))) json.String(names[i].View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TestHooks::Configure(Call& call, const Params& params) {
+		Session* session = call.session;
+		const int64 budget = params.Int("outboundBudget", session->outbox.Budget());
+		const int64 coalesce = params.Int("coalesceBytes", session->outbox.CoalesceBytes());
+		session->outbox.Configure(budget, coalesce);
+		session->idleTimeoutMs = params.Int("idleTimeoutMs", session->idleTimeoutMs);
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("outboundBudget", budget);
+		json.IntField("coalesceBytes", coalesce);
+		json.IntField("idleTimeoutMs", session->idleTimeoutMs);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String TestSnapshot(const TestTopic* topic) {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("events", topic->events);
+		json.IntField("lastIndex", topic->events);
+		json.IntField("textLength", topic->textLength);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TestHooks::NewTopic(Call& call, const Params& params) {
+		TestTopic* topic = new TestTopic();
+		Core::StringBuilder key;
+		key.Append("testhooks/stream:");
+		key.AppendInt(topics.Count() + 1);
+		topic->key = key.ToString();
+		TopicLimits limits = Hub::DefaultLimits(topic->key.View());
+		const int64 ringEvents = params.Int("ringEvents", 0);
+		const int64 ringBytes = params.Int("ringBytes", 0);
+		if (ringEvents > 0) limits.events = ringEvents;
+		if (ringBytes > 0) limits.bytes = ringBytes;
+		limits.coalescible = params.Bool("coalescible", false);
+		topics.Insert(topic->key, topic);
+		TestTopic* created = topic;
+		server->hub.Add(topic->key.View(), [created]() -> Core::String { return TestSnapshot(created); }, limits);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("topic", topic->key.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	TestTopic* TestHooks::TopicParam(const Params& params) const {
+		TestTopic* topic = nullptr;
+		if (topics.TryGet(params.Str("topic"), topic)) return topic;
+		throw RpcError(ErrorCode::NotFound, "no such test topic (create one with testhooks.topic)");
+	}
+
+	// "tick" {i, text: `size` x's}, or "output" {text: "<i>|<size x's>\n"} (coalescible).
+	void TestHooks::Publish(TestTopic* topic, Core::StringView kind, int64 size) {
+		topic->events += 1;
+		Core::StringBuilder pad;
+		for (int64 i = 0; i < size; ++i) pad.AppendByte('x');
+		if (kind == "output") {
+			Merge merge;
+			merge.field = Core::String("text");
+			Core::StringBuilder text;
+			text.AppendInt(topic->events);
+			text.AppendByte('|');
+			text.Append(pad.View());
+			text.AppendByte('\n');
+			merge.text = text.ToString();
+			topic->textLength += merge.text.ByteLength();
+			server->hub.PublishMergeable(topic->key.View(), "output", merge);
+			return;
+		}
+		JsonWriter data;
+		data.BeginObject();
+		data.IntField("i", topic->events);
+		data.Field("text", pad.View());
+		data.EndObject();
+		topic->textLength += size;
+		server->hub.Publish(topic->key.View(), "tick", data.View());
+	}
+
+	Core::String TestHooks::Emit(Call& call, const Params& params) {
+		TestTopic* topic = TopicParam(params);
+		const int64 count = params.Int("count", 1);
+		Core::String kind = params.Str("kind", Core::StringView("tick"));
+		const int64 size = params.Int("size", 0);
+		const int64 first = topic->events + 1;
+		for (int64 i = 0; i < count; ++i) Publish(topic, kind.View(), size);
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("first", first);
+		json.IntField("last", topic->events);
+		json.IntField("seq", server->hub.Find(topic->key.View())->seq);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// On the stream's own thread.
+	void TestHooks::RunStream(TestTopic* topic, int64 count, int64 intervalMs, int64 size, CancelToken* token) {
+		Threading::LockGuard guard(server->lock);
+		int64 emitted = 0;
+		for (; emitted < count && !token->IsCancelled(); ++emitted) {
+			const int64 deadline = clock_now_ns() + intervalMs * 1000000;
+			for (int64 left = deadline - clock_now_ns(); left > 0 && !token->IsCancelled(); left = deadline - clock_now_ns())
+				token->wake.WaitFor(server->lock, left);
+			if (token->IsCancelled()) break;
+			Publish(topic, Core::StringView("tick"), size);
+		}
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("reason", token->IsCancelled() ? "cancelled" : "done");
+		data.IntField("emitted", emitted);
+		data.EndObject();
+		server->hub.Publish(topic->key.View(), "stream.end", data.View());
+	}
+
+	Core::String TestHooks::Stream(Call& call, const Params& params) {
+		TestTopic* topic = TopicParam(params);
+		const int64 count = params.Int("count");
+		const int64 intervalMs = params.Int("intervalMs", 10);
+		const int64 size = params.Int("size", 0);
+		CancelToken* token = new CancelToken();
+		streams.Push(token);
+		call.OpenStream(token);
+		TestHooks* self = this;
+		Threading::Thread::Run([self, topic, count, intervalMs, size, token]() { self->RunStream(topic, count, intervalMs, size, token); }).Detach();
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("topic", topic->key.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void TestHooks::OnRestart() {
+		for (int64 i = 0; i < streams.Count(); ++i) streams[i]->Cancel();
+		streams.Clear();
+	}
+
+	Core::String TestHooks::Delay(Call& call, const Params& params) {
+		const int64 ms = params.Int("ms");
+		delays += 1;
+		const int64 execution = delays;
+		Serialization::DomNode result = params.Field("result");
+		Core::String resultJson = result.IsValid() ? NodeJson(result) : Core::String("null");
+		call.Sleep(ms);
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("sleptMs", ms);
+		json.RawField("result", resultJson.View());
+		json.IntField("execution", execution);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TestHooks::Count(Call& call, const Params& params) {
+		Core::String name = params.Str("name", Core::StringView("default"));
+		int64& value = counters.At(name);
+		value += 1;
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("name", name.View());
+		json.IntField("value", value);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TestHooks::Fail(Call& call, const Params& params) {
+		Core::String name = params.Str("code");
+		ErrorCode code;
+		if (!ParseErrorCode(name.View(), code)) throw RpcError(ErrorCode::BadRequest, "unknown error code");
+		Core::String message = params.Str("message", Core::StringView("requested failure"));
+		Serialization::DomNode data = params.Field("data");
+		if (data.IsValid()) throw RpcError(code, message.View(), NodeJson(data).View());
+		throw RpcError(code, message.View());
+	}
+
+	Core::String TestHooks::Restart(Call& call, const Params& params) {
+		Server* restarting = server;
+		Threading::Thread::Run([restarting]() { restarting->Restart(); }).Detach();
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("previousEpoch", server->epoch.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TestHooks::Scratch(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->First();
+		if (!ws) throw RpcError(ErrorCode::Unavailable, "no workspace is open");
+		scratchFiles += 1;
+		Core::StringBuilder path;
+		path.Append("scratch/conformance-");
+		path.AppendInt(scratchFiles);
+		path.Append(".txt");
+		Core::StringBuilder text;
+		const int64 lines = params.Int("lines", 5);
+		for (int64 i = 0; i < lines; ++i) {
+			text.Append("line ");
+			text.AppendInt(i);
+			text.AppendByte('\n');
+		}
+		const int64 revision = server->workspaces->Write(ws, path.View(), text.View(), -1);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", ws->wsId.View());
+		json.Field("path", path.View());
+		json.Field("text", text.View());
+		json.IntField("revision", revision);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TestHooks::ServerEdit(Call& call, const Params& params) {
+		Document* doc = server->documents->Get(params.Str("docId").View());
+		Core::Array<Change> changes = ChangesParam(params);
+		Core::String origin = params.Str("origin", Core::StringView("ai:testhooks"));
+		return server->documents->ApplyEdit(doc, params.Int("baseVersion", doc->version), changes, origin.View(), Core::StringView(""));
+	}
+}

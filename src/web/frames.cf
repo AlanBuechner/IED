@@ -1,0 +1,154 @@
+include "frames.ch"
+
+namespace Ied
+{
+	static bool IsLower(int32 c) { return c >= 'a' && c <= 'z'; }
+	static bool IsNameByte(int32 c) { return IsLower(c) || (c >= '0' && c <= '9') || c == '-'; }
+	static bool IsSpace(int32 c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 12 || c == 11; }
+
+	// "[a-z][a-z0-9-]*(\.[a-z0-9-]+)*", the plugin prefix before '/'.
+	static bool IsPluginName(Core::StringView name) {
+		if (name.IsEmpty() || !IsLower(name.ByteAt(0))) return false;
+		bool afterDot = false;
+		for (int64 i = 1; i < name.ByteLength(); ++i) {
+			const int32 c = name.ByteAt(i);
+			if (c == '.') {
+				if (afterDot) return false;
+				afterDot = true;
+				continue;
+			}
+			if (!IsNameByte(c)) return false;
+			afterDot = false;
+		}
+		return !afterDot;
+	}
+
+	bool IsTopicKey(Core::StringView key) {
+		int64 slash = -1;
+		for (int64 i = 0; i < key.ByteLength() && key.ByteAt(i) != ':'; ++i)
+			if (key.ByteAt(i) == '/') slash = i;
+		if (slash >= 0 && !IsPluginName(key.Substring(0, slash))) return false;
+		int64 at = slash + 1;
+		const int64 kindStart = at;
+		while (at < key.ByteLength() && IsLower(key.ByteAt(at))) at += 1;
+		if (at == kindStart) return false;
+		if (at == key.ByteLength()) return true;
+		if (key.ByteAt(at) != ':' || at + 1 == key.ByteLength()) return false;
+		for (int64 i = at + 1; i < key.ByteLength(); ++i)
+			if (IsSpace(key.ByteAt(i))) return false;
+		return true;
+	}
+
+	static bool IsKind(const Serialization::DomNode& node, Serialization::DomKind kind) { return node.IsValid() && node.Kind() == kind; }
+
+	static Core::String Problem(const char* text) { return Core::String(text); }
+
+	static Core::String CursorsProblem(const Serialization::DomNode& cursors) {
+		if (!IsKind(cursors, Serialization::DomKind::Object)) return Problem("cursors must be an object");
+		for (int64 i = 0; i < cursors.Count(); ++i) {
+			Serialization::DomNode value = cursors.ValueAt(i);
+			if (!IsKind(value, Serialization::DomKind::Int) || value.AsInt() < 0) return Problem("a cursor must be a non-negative integer");
+		}
+		return Core::String();
+	}
+
+	static Core::String TopicsProblem(const Serialization::DomNode& topics) {
+		if (!IsKind(topics, Serialization::DomKind::Array)) return Problem("topics must be an array");
+		for (int64 i = 0; i < topics.Count(); ++i)
+			if (!IsKind(topics.At(i), Serialization::DomKind::String) || !IsTopicKey(topics.At(i).AsView())) return Problem("a topic must be a topic key");
+		return Core::String();
+	}
+
+	static bool IsDeviceClass(Core::StringView name) { return name == "desktop" || name == "tablet" || name == "phone"; }
+
+	static Core::String HelloProblem(const Serialization::DomNode& frame) {
+		if (!IsKind(frame.Member("proto"), Serialization::DomKind::Int)) return Problem("hello needs an integer proto");
+		if (!IsKind(frame.Member("clientId"), Serialization::DomKind::String)) return Problem("hello needs a clientId");
+		if (!IsKind(frame.Member("deviceId"), Serialization::DomKind::String)) return Problem("hello needs a deviceId");
+		Serialization::DomNode deviceClass = frame.Member("deviceClass");
+		if (!IsKind(deviceClass, Serialization::DomKind::String) || !IsDeviceClass(deviceClass.AsView())) return Problem("deviceClass must be desktop, tablet or phone");
+		Serialization::DomNode name = frame.Member("deviceName");
+		if (name.IsValid() && !IsKind(name, Serialization::DomKind::String)) return Problem("deviceName must be a string");
+		Serialization::DomNode resume = frame.Member("resume");
+		if (!resume.IsValid()) return Core::String();
+		if (!IsKind(resume, Serialization::DomKind::Object) || !IsKind(resume.Member("sessionEpoch"), Serialization::DomKind::String))
+			return Problem("resume needs a sessionEpoch");
+		return CursorsProblem(resume.Member("cursors"));
+	}
+
+	static Core::String ReqProblem(const Serialization::DomNode& frame) {
+		Serialization::DomNode id = frame.Member("id");
+		if (!IsKind(id, Serialization::DomKind::Int) || id.AsInt() < 1) return Problem("req needs an id of at least 1");
+		if (!IsKind(frame.Member("method"), Serialization::DomKind::String)) return Problem("req needs a method");
+		Serialization::DomNode params = frame.Member("params");
+		if (params.IsValid() && !IsKind(params, Serialization::DomKind::Object)) return Problem("params must be an object");
+		Serialization::DomNode opId = frame.Member("opId");
+		if (opId.IsValid() && !IsKind(opId, Serialization::DomKind::String)) return Problem("opId must be a string");
+		return Core::String();
+	}
+
+	static Core::String SubProblem(const Serialization::DomNode& frame) {
+		if (!IsKind(frame.Member("id"), Serialization::DomKind::Int)) return Problem("sub needs an integer id");
+		Core::String topics = TopicsProblem(frame.Member("topics"));
+		if (!topics.IsEmpty()) return topics;
+		Serialization::DomNode from = frame.Member("from");
+		return from.IsValid() ? CursorsProblem(from) : Core::String();
+	}
+
+	Core::String FrameProblem(const Serialization::DomNode& frame) {
+		if (!IsKind(frame, Serialization::DomKind::Object) || !IsKind(frame.Member("t"), Serialization::DomKind::String))
+			return Problem("a frame is an object with a string t");
+		Core::StringView t = frame.Member("t").AsView();
+		if (t == "hello") return HelloProblem(frame);
+		if (t == "req") return ReqProblem(frame);
+		if (t == "sub") return SubProblem(frame);
+		if (t == "cancel") return IsKind(frame.Member("id"), Serialization::DomKind::Int) ? Core::String() : Problem("cancel needs an integer id");
+		if (t == "unsub") return TopicsProblem(frame.Member("topics"));
+		if (t == "ack") return CursorsProblem(frame.Member("cursors"));
+		if (t == "ping") {
+			Serialization::DomNode ts = frame.Member("ts");
+			return !ts.IsValid() || IsKind(ts, Serialization::DomKind::Int) ? Core::String() : Problem("ping ts must be an integer");
+		}
+		return Problem("unknown client frame type");
+	}
+
+	Core::String PongFrame(const Serialization::DomNode& ts) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("t", "pong");
+		if (ts.IsValid()) json.IntField("ts", ts.AsInt());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ByeFrame(const char* reason) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("t", "bye");
+		json.Field("reason", reason);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ResultFrame(int64 id, bool ok, Core::StringView body) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("t", "res");
+		json.IntField("id", id);
+		json.BoolField("ok", ok);
+		json.RawField(ok ? "result" : "error", body);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String GapFrame(Core::StringView topic, int64 first, int64 last) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("t", "gap");
+		json.Field("topic", topic);
+		json.IntField("from", first);
+		json.IntField("to", last);
+		json.EndObject();
+		return json.ToString();
+	}
+}

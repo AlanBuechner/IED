@@ -1,0 +1,8 @@
+# The IED server (docs/01): owns every workspace, document, chat, build and terminal; the web client is a view.
+[project]
+name = "ied-server"
+kind = "executable"
+description = "The IED server: HTTP, the protocol v1 WebSocket hub (docs/10), workspaces and documents"
+sources = ["."]
+links = ["ws2_32"]
+working-dir = ".."

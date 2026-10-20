@@ -1,6 +1,7 @@
 """Runs the protocol v1 conformance suite against a server.
 
 	python -I tools/conformance/run_conformance.py                       # spawns the mock server on a free port
+	python -I tools/conformance/run_conformance.py --server build/bin/Development-windows-x64/ied-server/ied-server.exe
 	python -I tools/conformance/run_conformance.py --url ws://127.0.0.1:8765/ws
 	python -I tools/conformance/run_conformance.py -k resume -v
 
@@ -22,16 +23,24 @@ sys.path.insert(0, str(HERE))
 from harness import URL_ENV  # noqa: E402
 
 
-def spawn_mock(verbose):
-	argv = [sys.executable, "-I", str(TOOLS / "mock-server" / "mock_server.py"), "--port", "0", "--time-scale", "0"]
+def spawn(argv, verbose):
+	"""Starts a server that prints "LISTENING http://<host>:<port>" first; the process and its /ws URL."""
 	if not verbose:
 		argv.append("--quiet")
 	process = subprocess.Popen(argv, stdout=subprocess.PIPE, text=True)
 	line = process.stdout.readline().strip()
 	if not line.startswith("LISTENING "):
 		process.kill()
-		raise RuntimeError("mock server did not start (got %r)" % line)
+		raise RuntimeError("the server did not start (got %r)" % line)
 	return process, line.split(" ", 1)[1].replace("http://", "ws://") + "/ws"
+
+
+def spawn_mock(verbose):
+	return spawn([sys.executable, "-I", str(TOOLS / "mock-server" / "mock_server.py"), "--port", "0", "--time-scale", "0"], verbose)
+
+
+def spawn_server(executable, verbose):
+	return spawn([executable, "--port", "0", "--test-hooks"], verbose)
 
 
 def run_suite(url, pattern, verbosity):
@@ -47,10 +56,16 @@ def run_suite(url, pattern, verbosity):
 def main(argv):
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--url", help="ws:// URL of the server's /ws endpoint (default: spawn the mock server)")
+	parser.add_argument("--server", help="an ied-server executable to start with --test-hooks on a free port")
 	parser.add_argument("-k", dest="pattern", help="only run tests whose name contains this")
 	parser.add_argument("-v", dest="verbose", action="store_true")
 	args = parser.parse_args(argv)
-	process, url = (None, args.url) if args.url else spawn_mock(args.verbose)
+	if args.url:
+		process, url = None, args.url
+	elif args.server:
+		process, url = spawn_server(args.server, args.verbose)
+	else:
+		process, url = spawn_mock(args.verbose)
 	try:
 		sys.stdout.write("conformance against %s\n" % url)
 		return run_suite(url, args.pattern, 2 if args.verbose else 1)

@@ -1,0 +1,200 @@
+include "front.ch"
+include "../host/server.ch"
+
+namespace Ied
+{
+	const int64 kMaxUploadBytes = 67108864;
+
+	static void Answer(Http::Response& response, int32 status, Core::StringView text) {
+		response.status = status;
+		Core::StringBuilder body;
+		body.Append(text);
+		body.AppendByte('\n');
+		response.SetText(Core::StringView("text/plain; charset=utf-8"), body.View());
+	}
+
+	static int32 HexValue(int32 c) {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	}
+
+	bool PercentDecode(Core::StringView text, Core::String& decoded) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c != '%') { out.AppendByte(c); continue; }
+			if (i + 2 >= text.ByteLength() || HexValue(text.ByteAt(i + 1)) < 0 || HexValue(text.ByteAt(i + 2)) < 0) return false;
+			out.AppendByte(HexValue(text.ByteAt(i + 1)) * 16 + HexValue(text.ByteAt(i + 2)));
+			i += 2;
+		}
+		decoded = out.ToString();
+		return true;
+	}
+
+	const char* ContentTypeOf(Core::StringView extension) {
+		if (extension == ".html") return "text/html; charset=utf-8";
+		if (extension == ".js" || extension == ".mjs") return "text/javascript; charset=utf-8";
+		if (extension == ".css") return "text/css; charset=utf-8";
+		if (extension == ".json" || extension == ".map") return "application/json";
+		if (extension == ".svg") return "image/svg+xml";
+		if (extension == ".png") return "image/png";
+		if (extension == ".ico") return "image/x-icon";
+		if (extension == ".woff2") return "font/woff2";
+		if (extension == ".ttf") return "font/ttf";
+		if (extension == ".wasm") return "application/wasm";
+		if (extension == ".txt" || extension == ".md") return "text/plain; charset=utf-8";
+		return "application/octet-stream";
+	}
+
+	static bool IsWildcardBind(Core::StringView host) { return host.IsEmpty() || host == "0.0.0.0" || host == "::"; }
+
+	static int32 LowerAscii(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static bool SameIgnoringCase(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i)
+			if (LowerAscii(a.ByteAt(i)) != LowerAscii(b.ByteAt(i))) return false;
+		return true;
+	}
+
+	// The name part of a Host header: "[::1]" of "[::1]:8765", "localhost" of "localhost:8765".
+	static Core::StringView HostName(Core::StringView host) {
+		if (host.StartsWith(Core::StringView("["))) {
+			const int64 close = host.IndexOf(']', 0);
+			return close < 0 ? host : host.Substring(0, close + 1);
+		}
+		const int64 colon = host.IndexOf(':', 0);
+		return colon < 0 ? host : host.Substring(0, colon);
+	}
+
+	bool Front::HostAllowed(const Http::Request& request) const {
+		if (IsWildcardBind(server->config.host.View())) return true;
+		const Core::String* host = request.headers.Find(Core::StringView("Host"));
+		Core::StringView name = HostName(host ? host->View() : Core::StringView(""));
+		if (SameIgnoringCase(name, Core::StringView("localhost")) || name == "127.0.0.1" || name == "[::1]") return true;
+		if (SameIgnoringCase(name, server->config.host.View())) return true;
+		for (int64 i = 0; i < server->config.allowHosts.Count(); ++i)
+			if (SameIgnoringCase(name, server->config.allowHosts[i].View())) return true;
+		return false;
+	}
+
+	bool Front::OriginAllowed(const Http::Request& request) const {
+		const Core::String* origin = request.headers.Find(Core::StringView("Origin"));
+		if (!origin) return true;
+		const Core::String* host = request.headers.Find(Core::StringView("Host"));
+		Core::StringView hostText = host ? host->View() : Core::StringView("");
+		if (origin->View() == (Core::String("http://") + hostText).View() || origin->View() == (Core::String("https://") + hostText).View()) return true;
+		for (int64 i = 0; i < server->config.allowOrigins.Count(); ++i)
+			if (origin->View() == server->config.allowOrigins[i].View()) return true;
+		return false;
+	}
+
+	void Front::Handle(const Http::Request& request, Http::Response& response) {
+		if (!HostAllowed(request)) {
+			Answer(response, 403, Core::StringView("that Host is not allowed (DNS rebinding protection; see --allow-host)"));
+			return;
+		}
+		Core::StringView path = request.path.View();
+		if (path == "/ws") WebSocket(request, response);
+		else if (path == "/healthz") Health(response);
+		else if (path == "/api/upload") Upload(request, response);
+		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
+		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
+		else StaticFile(path, response);
+	}
+
+	void Front::WebSocket(const Http::Request& request, Http::Response& response) {
+		if (!OriginAllowed(request)) {
+			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+			return;
+		}
+		Server* shared = server;
+		Http::AcceptWebSocket(request, response, [shared](Http::WebSocket& socket) {
+			Session* session = new Session(shared, &socket, Core::StringView("client"));
+			session->Run();
+		});
+	}
+
+	void Front::Health(Http::Response& response) {
+		JsonWriter json;
+		json.BeginObject();
+		json.BoolField("ok", true);
+		json.Field("serverVersion", server->config.version.View());
+		{
+			Threading::LockGuard guard(server->lock);
+			json.Field("sessionEpoch", server->epoch.View());
+		}
+		json.EndObject();
+		response.SetText(Core::StringView("application/json"), json.View());
+	}
+
+	void Front::Upload(const Http::Request& request, Http::Response& response) {
+		if (request.method.View() != "PUT") {
+			Answer(response, 405, Core::StringView("use PUT"));
+			return;
+		}
+		if (!OriginAllowed(request)) {
+			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
+			return;
+		}
+		if (request.body.Count() > kMaxUploadBytes) {
+			Answer(response, 413, Core::StringView("an upload is at most 64 MiB"));
+			return;
+		}
+		const Core::String* type = request.headers.Find(Core::StringView("Content-Type"));
+		Core::String id = server->blobs->Put(type ? type->View() : Core::StringView("application/octet-stream"), request.body);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("blobId", id.View());
+		json.IntField("size", request.body.Count());
+		json.EndObject();
+		response.status = 201;
+		response.SetText(Core::StringView("application/json"), json.View());
+	}
+
+	void Front::Blob(Core::StringView id, const Http::Request& request, Http::Response& response) {
+		if (request.method.View() != "GET") {
+			Answer(response, 405, Core::StringView("use GET"));
+			return;
+		}
+		Ied::Blob* blob = server->blobs->Get(id);
+		if (!blob) {
+			Answer(response, 404, Core::StringView("no such blob"));
+			return;
+		}
+		response.body = blob->bytes;
+		response.headers.Set(Core::StringView("Content-Type"), blob->contentType.View());
+	}
+
+	void Front::StaticFile(Core::StringView path, Http::Response& response) {
+		if (server->config.staticDir.IsEmpty()) {
+			Answer(response, 404, Core::StringView("no web client is served (see --static)"));
+			return;
+		}
+		Core::String decoded;
+		if (!PercentDecode(path, decoded)) {
+			Answer(response, 400, Core::StringView("malformed path"));
+			return;
+		}
+		Core::String relative;
+		try {
+			relative = NormalizePath(decoded.View());
+		}
+		catch (RpcError& error) {
+			Answer(response, 403, Core::StringView("that path escapes the web client's folder"));
+			return;
+		}
+		FS::Path file = FS::Path(server->config.staticDir.View());
+		if (!relative.IsEmpty()) file = file / relative.View();
+		if (FS::IsDirectory(file.CStr())) file = file / "index.html";
+		if (!FS::FileExists(file.CStr())) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		response.SetText(Core::StringView(ContentTypeOf(file.Extension())), text.View());
+	}
+}

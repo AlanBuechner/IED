@@ -1,0 +1,60 @@
+// ied-server: the IED server (docs/01). Its first line on stdout is "LISTENING http://<host>:<port>".
+
+include "host/server.ch"
+include "web/front.ch"
+
+static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
+	Core::Array<Core::String> arguments;
+	for (int32 i = 1; i < argc; ++i) arguments.Push(Core::String((const char*)argv[i]));
+	return arguments;
+}
+
+static Net::Address BindAddress(const Ied::ServerConfig& config) {
+	if (config.host.View() == "localhost") return Net::Address::Loopback(config.port);
+	Core::StringBuilder text;
+	const bool v6 = config.host.View().IndexOf(':', 0) >= 0;
+	if (v6) text.AppendByte('[');
+	text.Append(config.host.View());
+	if (v6) text.AppendByte(']');
+	text.AppendByte(':');
+	text.AppendInt(config.port);
+	return Net::ParseAddress(text.CStr());
+}
+
+static void Fail(Core::StringView why) {
+	Core::StringBuilder text;
+	text.Append("ied-server: ");
+	text.Append(why);
+	text.AppendByte('\n');
+	Platform::WriteError(text.View());
+}
+
+int32 main(int32 argc, char8** argv) {
+	Ied::ServerConfig config = Ied::DefaultConfig();
+	Core::String error;
+	if (!Ied::ParseArguments(Arguments(argc, argv), config, error)) {
+		Fail(error.View());
+		return 2;
+	}
+	Net::Address at = BindAddress(config);
+	if (!at.IsValid()) {
+		Fail(Core::StringView("--host is not an address"));
+		return 2;
+	}
+	Ied::Server* server = new Ied::Server(config);
+	Ied::Front* front = new Ied::Front(server);
+	Http::Server http;
+	if (!http.Listen(at)) {
+		Fail(Core::StringView(http.Error()));
+		return 1;
+	}
+	Core::StringBuilder listening;
+	listening.Append("LISTENING http://");
+	listening.Append(config.host.View());
+	listening.AppendByte(':');
+	listening.AppendInt(http.LocalAddress().port);
+	listening.AppendByte('\n');
+	Platform::WriteOutput(listening.View());
+	http.Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
+	return 0;
+}

@@ -1,0 +1,224 @@
+include "documents.ch"
+include "../host/server.ch"
+
+namespace Ied
+{
+	static const char* LanguageOf(Core::StringView path) {
+		FS::Path file = FS::Path(path);
+		Core::StringView extension = file.Extension();
+		if (extension == ".c" || extension == ".h") return "c";
+		if (extension == ".md") return "markdown";
+		if (extension == ".json") return "json";
+		return "plaintext";
+	}
+
+	static void Conflict(const char* message, int64 version, const char* reason) {
+		JsonWriter data;
+		data.BeginObject();
+		data.IntField("version", version);
+		data.Field("reason", reason);
+		data.EndObject();
+		throw RpcError(ErrorCode::Conflict, message, data.View());
+	}
+
+	Core::Array<Change> ChangesParam(const Params& params) {
+		Core::Array<Change> changes;
+		Core::String error;
+		if (!ParseChanges(params.List("changes"), changes, error)) throw RpcError(ErrorCode::BadRequest, error.View());
+		return changes;
+	}
+
+	void Documents::Init(Server* server) {
+		this.server = server;
+		Documents* self = this;
+		server->rpc.Register("doc.open", [self](Call& call, const Params& params) -> Core::String { return self->OpenMethod(call, params); });
+		server->rpc.Register("doc.edit", [self](Call& call, const Params& params) -> Core::String { return self->EditMethod(call, params); });
+		server->rpc.Register("doc.takeLease", [self](Call& call, const Params& params) -> Core::String { return self->TakeLeaseMethod(call, params); });
+		server->rpc.Register("doc.save", [self](Call& call, const Params& params) -> Core::String { return self->SaveMethod(call, params); });
+	}
+
+	Document* Documents::Get(Core::StringView docId) const {
+		Document* doc = nullptr;
+		if (byId.TryGet(Core::String(docId), doc)) return doc;
+		throw RpcError(ErrorCode::NotFound, "no such document");
+	}
+
+	Core::String Documents::Snapshot(const Document* doc) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("docId", doc->docId.View());
+		json.Field("wsId", doc->ws->wsId.View());
+		json.Field("path", doc->path.View());
+		json.Field("text", doc->text.View());
+		json.IntField("version", doc->version);
+		json.Key(Core::StringView("lease"));
+		json.BeginObject();
+		json.Key(Core::StringView("holder"));
+		if (doc->holder.IsEmpty()) json.Null();
+		else json.String(doc->holder.View());
+		json.EndObject();
+		json.BoolField("dirty", doc->dirty);
+		json.Field("languageId", LanguageOf(doc->path.View()));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Document* Documents::Open(Workspace* ws, Core::StringView path) {
+		Core::String key = (ws->wsId + "/") + path;
+		Document* doc = nullptr;
+		if (byPath.TryGet(key, doc)) return doc;
+		doc = new Document();
+		opened += 1;
+		Core::StringBuilder id;
+		id.Append("d");
+		id.AppendInt(opened);
+		doc->docId = id.ToString();
+		doc->ws = ws;
+		doc->path = Core::String(path);
+		doc->text = server->workspaces->Read(ws, path);
+		doc->version = 1;
+		byId.Insert(doc->docId, doc);
+		byPath.Insert(key, doc);
+		Documents* self = this;
+		Document* created = doc;
+		server->hub.Add(doc->Topic().View(), [self, created]() -> Core::String { return self->Snapshot(created); });
+		return doc;
+	}
+
+	Core::Array<Change> Documents::Rebase(const Document* doc, int64 baseVersion, const Core::Array<Change>& changes) const {
+		if (baseVersion == doc->version) return changes;
+		if (doc->version - baseVersion > doc->history.Count()) Conflict("baseVersion is too old to rebase", doc->version, "too-old");
+		Core::Array<Core::Array<Change>> sets;
+		for (VersionChanges* step : doc->history)
+			if (step->version > baseVersion) sets.Push(step->changes);
+		Core::Array<Change> rebased;
+		if (!RebaseChanges(changes, sets, rebased)) Conflict("the edit overlaps a change made since its base version", doc->version, "overlap");
+		return rebased;
+	}
+
+	Core::String Documents::ApplyEdit(Document* doc, int64 baseVersion, const Core::Array<Change>& changes, Core::StringView origin, Core::StringView opId) {
+		if (baseVersion > doc->version || baseVersion < 1) throw RpcError(ErrorCode::BadRequest, "baseVersion is not a version of this document");
+		Core::Array<Change> rebased = Rebase(doc, baseVersion, changes);
+		Core::String text;
+		Core::String error;
+		if (!ApplyChanges(doc->text.View(), rebased, text, error)) throw RpcError(ErrorCode::BadRequest, error.View());
+		doc->text = take(text);
+		doc->version += 1;
+		VersionChanges* step = new VersionChanges();
+		step->version = doc->version;
+		step->changes = rebased;
+		doc->history.Push(step);
+		while (doc->history.Count() > kDocumentHistoryVersions) doc->history.Pop();
+		doc->dirty = origin != "disk";
+		Core::String changesJson = ChangesJson(rebased);
+		const bool wasRebased = baseVersion != doc->version - 1;
+		JsonWriter event;
+		event.BeginObject();
+		event.Field("docId", doc->docId.View());
+		event.IntField("version", doc->version);
+		event.RawField("changes", changesJson.View());
+		event.Field("origin", origin);
+		if (wasRebased) event.IntField("rebasedFrom", baseVersion);
+		if (!opId.IsEmpty()) event.Field("opId", opId);
+		event.EndObject();
+		server->hub.Publish(doc->Topic().View(), "doc.edit", event.View());
+		JsonWriter result;
+		result.BeginObject();
+		result.IntField("version", doc->version);
+		result.RawField("changes", changesJson.View());
+		result.BoolField("rebased", wasRebased);
+		result.EndObject();
+		return result.ToString();
+	}
+
+	void Documents::OnDiskWrite(Workspace* ws, Core::StringView path, Core::StringView text, int64 revision) {
+		Document* doc = nullptr;
+		if (!byPath.TryGet((ws->wsId + "/") + path, doc) || doc->text.View() == text) return;
+		if (doc->dirty) {
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("docId", doc->docId.View());
+			data.IntField("revision", revision);
+			data.EndObject();
+			server->hub.Publish(doc->Topic().View(), "doc.diskChanged", data.View());
+			return;
+		}
+		Change all;
+		all.end = EndPosition(doc->text.View());
+		all.text = Core::String(text);
+		Core::Array<Change> changes;
+		changes.Push(all);
+		ApplyEdit(doc, doc->version, changes, Core::StringView("disk"), Core::StringView(""));
+	}
+
+	void Documents::Grant(Document* doc, Core::StringView clientId) {
+		doc->holder = Core::String(clientId);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->docId.View());
+		data.Field("holder", clientId);
+		data.EndObject();
+		server->hub.Publish(doc->Topic().View(), "doc.lease", data.View());
+	}
+
+	Core::String Documents::OpenMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		Core::String path = NormalizePath(params.Str("path").View());
+		Document* doc = Open(ws, path.View());
+		if (doc->holder.IsEmpty()) Grant(doc, call.ClientId());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("docId", doc->docId.View());
+		json.IntField("version", doc->version);
+		json.Field("holder", doc->holder.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Documents::EditMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		if (doc->holder.View() != call.ClientId()) {
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("reason", "lease");
+			data.Key(Core::StringView("holder"));
+			if (doc->holder.IsEmpty()) data.Null();
+			else data.String(doc->holder.View());
+			data.EndObject();
+			throw RpcError(ErrorCode::Forbidden, "only the lease holder may edit", data.View());
+		}
+		Core::Array<Change> changes = ChangesParam(params);
+		Core::String origin = Core::String("user:") + call.ClientId();
+		return ApplyEdit(doc, params.Int("baseVersion"), changes, origin.View(), call.opId.View());
+	}
+
+	Core::String Documents::TakeLeaseMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		if (doc->holder.View() != call.ClientId()) Grant(doc, call.ClientId());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("holder", doc->holder.View());
+		json.IntField("version", doc->version);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Documents::SaveMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		const int64 revision = server->workspaces->Write(doc->ws, doc->path.View(), doc->text.View(), -1);
+		doc->dirty = false;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->docId.View());
+		data.IntField("version", doc->version);
+		data.IntField("revision", revision);
+		data.EndObject();
+		server->hub.Publish(doc->Topic().View(), "doc.saved", data.View());
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", doc->version);
+		json.IntField("revision", revision);
+		json.EndObject();
+		return json.ToString();
+	}
+}
