@@ -100,7 +100,7 @@ DifferentialTest (150 programs against clang), the concurrent-GC step (Bedrock, 
 | Feature | Status | Notes | Page |
 |---|---|---|---|
 | `extern "c"` / `"c++"` include + source, CBind, `[link]`, COM | **Implemented** | Exceptions, destructors and C4 interfaces cross the boundary; overloads, const methods, static data members, access and signedness bind as in C++; CBind ships in every install and every toolchain | [interop](../language/13-interop.md) |
-| Garbage collector | **Implemented** | Conservative, non-moving, stop-the-world over every registered thread, per-thread allocation caches (D-48); Windows only; `-gc-stats` prints the statistics after each collection | [memory and GC](../runtime/01-memory-and-gc.md) |
+| Garbage collector | **Implemented** | Conservative, non-moving, over every registered thread, per-thread allocation caches (D-48); heaps past 16 MiB live marked concurrently with stops under ~1 ms (D-79), smaller ones stop-the-world; pools for custom allocators (D-78); Windows only; `-gc-stats` prints the statistics after each collection | [memory and GC](../runtime/01-memory-and-gc.md) |
 | Reflection query API, qualified identity, annotations, unload listeners | **Implemented** | Thread-safe registry; a source must not be unloaded while other threads read its handles | [reflection](../runtime/02-reflection.md) |
 | Reflection invoke / field get-set | **Implemented** | | [reflection](../runtime/02-reflection.md#32-calling-functions-and-methods) |
 | Unit testing | **Implemented** | Failures report the test's line, not the assertion's; an exception in a test ends the run | [testing](../runtime/03-testing.md) |
@@ -114,7 +114,7 @@ DifferentialTest (150 programs against clang), the concurrent-GC step (Bedrock, 
 | Bedrock `FS` information, copies, canonical paths, `Watcher` (D-69) | **Implemented** | No file locking or memory-mapped files yet | [Bedrock](../library/bedrock.md#5-files-paths-and-directories-fs) |
 | Bedrock serialization through reflection (D-72): strings, arrays, maps, enums, objects to and from JSON and YAML; `nameof` | **Implemented** | New array and map elements start zero, not created | [Bedrock](../library/bedrock.md#6-serialization-serialization) |
 | Bedrock `Core::Regex` (D-71): RE2 syntax, linear-time Pike VM | **Implemented** | No backreferences or lookaround; ASCII case folding | [Bedrock](../library/bedrock.md#regular-expressions-regexch) |
-| Streaming reads | **Planned** | | [Bedrock](../library/bedrock.md) |
+| Streaming reads (D-77): `FS::ChunkReader`, `Serialization::JsonStream` / `JsonFileStream`, `BinaryStream` | **Implemented** | | [Bedrock](../library/bedrock.md#6-serialization-serialization) |
 
 ### Tools and platform
 | Feature | Status | Notes | Page |
