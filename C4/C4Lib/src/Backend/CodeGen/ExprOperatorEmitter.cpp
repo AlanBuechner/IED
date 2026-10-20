@@ -60,8 +60,10 @@ namespace Scripting
 			case IntrinsicOp::Negate:  return isFloat ? B.CreateFNeg(lhs) : B.CreateNeg(lhs);
 			case IntrinsicOp::BitNot:  return B.CreateNot(lhs);
 			// Logical NOT yields a boolean (i1): !x is true exactly when x IS zero, compared at the operand's own
-			// width. A pointer's zero is the null pointer: `!p` is `p == null`.
+			// width. A pointer's zero is the null pointer: `!p` is `p == null`; a func's is a null code pointer
+			// (BUG-275: `s && f` negates its right operand twice and compared the func's { code, environment }).
 			case IntrinsicOp::BoolNot:
+				if (lhs->getType()->isStructTy()) return B.CreateNot(IRContext::AsBool(B, lhs));
 				if (lhs->getType()->isFloatTy() || lhs->getType()->isDoubleTy())
 					return B.CreateFCmpOEQ(lhs, llvm::ConstantFP::get(lhs->getType(), 0.0));
 				if (lhs->getType()->isPointerTy())

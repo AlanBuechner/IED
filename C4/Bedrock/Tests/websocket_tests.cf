@@ -1,0 +1,382 @@
+// Http::WebSocket (D-67, RFC 6455): frames written and read at every length form, masked and not, and every rule a
+// frame can break; close payloads; the handshake (RFC 6455's own key and answer, requests that are not one); and a
+// server and client on loopback - echo of text and binary, fragments with a ping between them, the close codes a
+// server answers bad frames with, a close from either side, the server stopping, pushes from several threads,
+// timeouts, and connections that fail.
+
+include "bedrock.ch"
+
+const int32 kWsWaitMs = 3000;
+
+static Core::StringView WsText(const char* text) { return Core::StringView(text); }
+
+static void WsEchoSession(Http::WebSocket& socket) {
+	Http::WebSocketMessage message;
+	while (socket.Receive(message, Net::kWaitForever)) {
+		if (message.kind == Http::MessageKind::Text) socket.SendText(message.Text());
+		else socket.SendBinary((const void*)message.data.Data(), message.data.Count());
+	}
+}
+
+// What a session saw when its connection closed.
+struct WsSeen {
+	public Threading::Atomic<int32> closeCode;
+	public Core::String closeReason;
+	public Threading::Atomic<bool> ended;
+}
+
+// A server on loopback whose /ws accepts WebSockets into `session`, and anything else gets 404.
+struct WsRig {
+	public Http::Server server;
+	public Threading::Thread serving;
+
+	public void Start(func<void(Http::WebSocket&)> session) {
+		server.Listen(Net::Address::Loopback(0));
+		Http::Server* running = &server;
+		serving = Threading::Thread::Run([running, session]() {
+			running->Serve([session](const Http::Request& request, Http::Response& response) {
+				if (request.path == "/ws") Http::AcceptWebSocket(request, response, session);
+				else response.status = 404;
+			});
+		});
+	}
+
+	public Core::String Url(const char* scheme, const char* path) const {
+		return Core::String(scheme) + server.LocalAddress().ToString().View() + Core::StringView(path);
+	}
+
+	public void Finish() {
+		server.Stop();
+		serving.Join();
+	}
+}
+
+// A client by hand: the handshake written out, then frames written with WriteFrame and read with ParseFrame.
+struct WsRaw {
+	public Net::TcpStream stream;
+	public Core::Array<uint8> pending;
+
+	public bool Open(const Net::Address& at, const char* version) {
+		stream = Net::TcpStream::Connect(at, kWsWaitMs);
+		Core::StringBuilder head;
+		head.Append("GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: ");
+		head.Append(version);
+		head.Append("\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n");
+		stream.SendText(head.View());
+		Http::Response answer;
+		Core::String why;
+		const int64 length = Http::ReadSwitchHead(stream, pending, kWsWaitMs, answer, why);
+		if (length < 0 || answer.status != 101) return false;
+		pending.RemoveRange(0, length);
+		return true;
+	}
+
+	public bool Send(bool fin, Http::Opcode opcode, const void* bytes, int64 count, bool masked) {
+		uint8[4] mask = { (uint8)1, (uint8)2, (uint8)3, (uint8)4 };
+		Core::Array<uint8> frame;
+		Http::WriteFrame(frame, fin, opcode, bytes, count, masked ? &mask[0] : nullptr);
+		return stream.SendAll((const void*)frame.Data(), frame.Count());
+	}
+
+	public bool SendText(bool fin, Http::Opcode opcode, const char* text) { return Send(fin, opcode, (const void*)text, Core::StringView(text).ByteLength(), true); }
+
+	// The next frame the server sends, or false when the connection ends first.
+	public bool Read(Http::Frame& frame) {
+		while (true) {
+			const Http::FrameParse parsed = Http::ParseFrame(Core::StringView((const char*)pending.Data(), pending.Count()), false, 1 << 24, frame);
+			if (parsed.status == Http::ParseStatus::Complete) {
+				pending.RemoveRange(0, parsed.length);
+				return true;
+			}
+			if (parsed.status != Http::ParseStatus::Incomplete) return false;
+			uint8[4096] buffer;
+			const int64 n = stream.Receive((void*)&buffer[0], 4096, kWsWaitMs);
+			if (n <= 0) return false;
+			pending.Append(&buffer[0], n);
+		}
+	}
+
+	// The code of the close frame the server sends (other frames skipped), or -1.
+	public int32 CloseCode() {
+		Http::Frame frame;
+		while (Read(frame)) {
+			if (frame.opcode != Http::Opcode::Close) continue;
+			int32 code = -1;
+			Core::String reason;
+			Http::ReadClosePayload(frame.payload, code, reason);
+			return code;
+		}
+		return -1;
+	}
+}
+
+[test("websocket.frames")]
+class WsFrameTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		const int64[6] sizes = { 0, 1, 125, 126, 65535, 65536 };
+		Core::Array<uint8> payload;
+		for (int64 i = 0; i < 65536; ++i) payload.Push((uint8)(i * 13));
+		uint8[4] mask = { (uint8)9, (uint8)200, (uint8)3, (uint8)77 };
+		for (int32 s = 0; s < 6; ++s)
+			for (int32 masked = 0; masked < 2; ++masked) {
+				Core::Array<uint8> out;
+				Http::WriteFrame(out, true, Http::Opcode::Binary, (const void*)payload.Data(), sizes[s], masked == 1 ? &mask[0] : nullptr);
+				Http::Frame frame;
+				Core::StringView all = Core::StringView((const char*)out.Data(), out.Count());
+				const Http::FrameParse parsed = Http::ParseFrame(all, masked == 1, 1 << 20, frame);
+				assert_true(parsed.status == Http::ParseStatus::Complete && parsed.length == out.Count(), "written and read back whole");
+				assert_true(frame.fin && frame.opcode == Http::Opcode::Binary && frame.payload.Count() == sizes[s], "fin, opcode, length");
+				bool same = true;
+				for (int64 i = 0; i < sizes[s]; ++i)
+					if (frame.payload[i] != payload[i]) same = false;
+				assert_true(same, "the payload, unmasked");
+				Http::Frame partial;
+				assert_true(Http::ParseFrame(all.Substring(0, out.Count() - 1), masked == 1, 1 << 20, partial).status == Http::ParseStatus::Incomplete,
+					"one byte short: incomplete");
+			}
+		Core::Array<uint8> header;
+		Http::WriteFrame(header, true, Http::Opcode::Text, (const void*)"", 0, nullptr);
+		assert_true(header.Count() == 2 && header[0] == (uint8)0x81 && header[1] == (uint8)0, "FIN and the text opcode, length 0");
+	}
+
+	[test("rules")]
+	public static void TestRules() {
+		uint8[4] mask = { (uint8)1, (uint8)2, (uint8)3, (uint8)4 };
+		Core::Array<uint8> plain;
+		Http::WriteFrame(plain, true, Http::Opcode::Text, (const void*)"x", 1, nullptr);
+		Core::Array<uint8> masked;
+		Http::WriteFrame(masked, true, Http::Opcode::Text, (const void*)"x", 1, &mask[0]);
+		Http::Frame frame;
+		Http::FrameParse unmasked = Http::ParseFrame(Core::StringView((const char*)plain.Data(), plain.Count()), true, 100, frame);
+		assert_true(unmasked.status == Http::ParseStatus::Malformed && unmasked.closeCode == 1002, "a client frame must be masked");
+		assert_true(Http::ParseFrame(Core::StringView((const char*)masked.Data(), masked.Count()), false, 100, frame).closeCode == 1002, "a server frame must not be");
+		const char*[6] bad = { "\xC1\x01x", "\x83\x01x", "\x82\x7E\x00\x05xxxxx", "\x82\x7F\x00\x00\x00\x00\x00\x00\x01\x2C", "\x09\x01p", "\x89\x7E\x00\x7E" };
+		const int64[6] lengths = { 3, 3, 9, 10, 3, 4 };
+		for (int32 i = 0; i < 6; ++i)
+			assert_true(Http::ParseFrame(Core::StringView(bad[i], lengths[i]), false, 1 << 20, frame).closeCode == 1002,
+				"a reserved bit, an unknown opcode, lengths not in their shortest form, a fragmented ping, a 126-byte ping");
+		Core::Array<uint8> large;
+		Core::Array<uint8> bytes;
+		bytes.Resize(200);
+		Http::WriteFrame(large, true, Http::Opcode::Binary, (const void*)bytes.Data(), 200, nullptr);
+		Http::FrameParse over = Http::ParseFrame(Core::StringView((const char*)large.Data(), large.Count()), false, 100, frame);
+		assert_true(over.status == Http::ParseStatus::TooLarge && over.closeCode == 1009, "a payload over the limit: 1009");
+	}
+
+	[test("close_payload")]
+	public static void TestClosePayload() {
+		int32 code = 0;
+		Core::String reason;
+		assert_true(Http::ReadClosePayload(Http::ClosePayload(1000, WsText("bye")), code, reason) && code == 1000 && reason == "bye", "a code and a reason");
+		Core::Array<uint8> empty;
+		assert_true(Http::ReadClosePayload(empty, code, reason) && code == 1005, "no payload: no code (1005)");
+		Core::Array<uint8> one;
+		one.Push((uint8)3);
+		assert_true(!Http::ReadClosePayload(one, code, reason), "one byte");
+		const int32[5] badCodes = { 999, 1004, 1005, 1006, 5000 };
+		for (int32 i = 0; i < 5; ++i) assert_true(!Http::ReadClosePayload(Http::ClosePayload(badCodes[i], WsText("")), code, reason), "a code no one may send");
+		Core::Array<uint8> notText = Http::ClosePayload(1000, WsText(""));
+		notText.Push((uint8)0xC3);
+		assert_true(!Http::ReadClosePayload(notText, code, reason), "a reason that is not UTF-8");
+		Core::StringBuilder longReason;
+		for (int32 i = 0; i < 100; ++i) longReason.Append("é");
+		Core::Array<uint8> cut = Http::ClosePayload(1000, longReason.View());
+		assert_true(cut.Count() <= 125 && Http::ReadClosePayload(cut, code, reason), "a long reason is cut to fit, at a whole character");
+	}
+}
+
+[test("websocket.handshake")]
+class WsHandshakeTests {
+	[test("accept_key")]
+	public static void TestAcceptKey() {
+		assert_se("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", Http::WebSocketAccept(WsText("dGhlIHNhbXBsZSBub25jZQ==")).CStr(), "RFC 6455 section 1.3's example");
+	}
+
+	[test("requests")]
+	public static void TestRequests() {
+		Http::Request request;
+		request.method = Core::String("GET");
+		request.minorVersion = 1;
+		request.headers.Set(WsText("Upgrade"), WsText("WebSocket"));
+		request.headers.Set(WsText("Connection"), WsText("keep-alive, Upgrade"));
+		request.headers.Set(WsText("Sec-WebSocket-Version"), WsText("13"));
+		request.headers.Set(WsText("Sec-WebSocket-Key"), WsText("dGhlIHNhbXBsZSBub25jZQ=="));
+		assert_true(Http::IsWebSocketRequest(request), "a handshake, tokens in any case and in lists");
+		Http::Request post = request;
+		post.method = Core::String("POST");
+		Http::Request noUpgrade = request;
+		noUpgrade.headers.Remove(WsText("Upgrade"));
+		Http::Request keepAlive = request;
+		keepAlive.headers.Set(WsText("Connection"), WsText("keep-alive"));
+		Http::Request oldVersion = request;
+		oldVersion.headers.Set(WsText("Sec-WebSocket-Version"), WsText("8"));
+		Http::Request shortKey = request;
+		shortKey.headers.Set(WsText("Sec-WebSocket-Key"), WsText("Zm9v"));
+		assert_true(!Http::IsWebSocketRequest(post) && !Http::IsWebSocketRequest(noUpgrade) && !Http::IsWebSocketRequest(keepAlive), "not GET, no Upgrade, no Connection: upgrade");
+		assert_true(!Http::IsWebSocketRequest(oldVersion) && !Http::IsWebSocketRequest(shortKey), "another version, a key that is not 16 bytes");
+		Http::Response refused;
+		assert_true(!Http::AcceptWebSocket(oldVersion, refused, WsEchoSession) && refused.status == 426, "another version is answered 426");
+		assert_true(*refused.headers.Find(WsText("Sec-WebSocket-Version")) == "13", "naming the version spoken");
+	}
+}
+
+[test("websocket.connection")]
+class WsConnectionTests {
+	[test("echo")]
+	public static void TestEcho() {
+		WsRig rig;
+		rig.Start(WsEchoSession);
+		Http::WebSocket socket = Http::WebSocket::Connect(rig.Url("ws://", "/ws").View(), kWsWaitMs);
+		assert_true(socket.IsOpen(), "connected");
+		assert_se("", socket.Error(), "with no error");
+		Http::WebSocketMessage message;
+		assert_true(socket.SendText(WsText("hello")) && socket.Receive(message, kWsWaitMs), "a text message goes and comes back");
+		assert_true(message.kind == Http::MessageKind::Text && message.Text() == "hello", "as text");
+		Core::Array<uint8> big;
+		for (int32 i = 0; i < 100000; ++i) big.Push((uint8)(i * 7));
+		assert_true(socket.SendBinary((const void*)big.Data(), big.Count()) && socket.Receive(message, kWsWaitMs), "100 KB of binary");
+		bool same = message.kind == Http::MessageKind::Binary && message.data.Count() == big.Count();
+		for (int64 i = 0; same && i < big.Count(); ++i) same = message.data[i] == big[i];
+		assert_true(same, "come back byte for byte");
+		assert_true(socket.Ping(WsText("p")) && socket.SendText(WsText("after ping")) && socket.Receive(message, kWsWaitMs) && message.Text() == "after ping",
+			"the pong is taken in by Receive");
+		socket.Close(1000, WsText("bye"));
+		assert_true(!socket.IsOpen() && socket.CloseCode() == 1000, "closed normally, the server answering");
+		rig.Finish();
+	}
+
+	[test("fragments_and_ping")]
+	public static void TestFragmentsAndPing() {
+		WsRig rig;
+		rig.Start(WsEchoSession);
+		WsRaw raw;
+		assert_true(raw.Open(rig.server.LocalAddress(), "13"), "a hand-written handshake");
+		raw.SendText(false, Http::Opcode::Text, "Hel");
+		raw.SendText(true, Http::Opcode::Ping, "p");
+		raw.SendText(true, Http::Opcode::Continuation, "lo");
+		Http::Frame frame;
+		assert_true(raw.Read(frame) && frame.opcode == Http::Opcode::Pong && Core::StringView((const char*)frame.payload.Data(), 1) == "p",
+			"a ping between fragments is answered at once, with its payload");
+		assert_true(raw.Read(frame) && frame.opcode == Http::Opcode::Text && Core::StringView((const char*)frame.payload.Data(), 5) == "Hello",
+			"the fragments come back as one message");
+		raw.SendText(true, Http::Opcode::Close, "");
+		assert_true(raw.Read(frame) && frame.opcode == Http::Opcode::Close, "a close is answered with a close");
+		rig.Finish();
+	}
+
+	[test("bad_frames")]
+	public static void TestBadFrames() {
+		WsRig rig;
+		rig.Start(WsEchoSession);
+		WsRaw notText;
+		notText.Open(rig.server.LocalAddress(), "13");
+		uint8[2] invalid = { (uint8)0xC3, (uint8)0x28 };
+		notText.Send(true, Http::Opcode::Text, (const void*)&invalid[0], 2, true);
+		assert_eq(1007, notText.CloseCode(), "text that is not UTF-8: 1007");
+		WsRaw unmasked;
+		unmasked.Open(rig.server.LocalAddress(), "13");
+		unmasked.Send(true, Http::Opcode::Text, (const void*)"x", 1, false);
+		assert_eq(1002, unmasked.CloseCode(), "an unmasked client frame: 1002");
+		WsRaw stray;
+		stray.Open(rig.server.LocalAddress(), "13");
+		stray.SendText(true, Http::Opcode::Continuation, "x");
+		assert_eq(1002, stray.CloseCode(), "a continuation with no message: 1002");
+		rig.Finish();
+	}
+
+	[test("too_big")]
+	public static void TestTooBig() {
+		WsRig rig;
+		rig.Start([](Http::WebSocket& socket) {
+			socket.SetMaxMessageBytes(10);
+			WsEchoSession(socket);
+		});
+		WsRaw raw;
+		raw.Open(rig.server.LocalAddress(), "13");
+		raw.SendText(false, Http::Opcode::Text, "123456");
+		raw.SendText(true, Http::Opcode::Continuation, "78901");
+		assert_eq(1009, raw.CloseCode(), "fragments adding up past the limit: 1009");
+		rig.Finish();
+	}
+
+	[test("close_from_client")]
+	public static void TestCloseFromClient() {
+		WsRig rig;
+		WsSeen seen;
+		WsSeen* record = &seen;
+		rig.Start([record](Http::WebSocket& socket) {
+			Http::WebSocketMessage message;
+			while (socket.Receive(message, Net::kWaitForever)) {}
+			record->closeReason = Core::String(socket.CloseReason());
+			record->closeCode.Store(socket.CloseCode());
+			record->ended.Store(true);
+		});
+		Http::WebSocket socket = Http::WebSocket::Connect(rig.Url("ws://", "/ws").View(), kWsWaitMs);
+		socket.Close(4000, WsText("done"));
+		rig.Finish();
+		assert_true(seen.ended.Load() && seen.closeCode.Load() == 4000 && seen.closeReason == "done", "the session sees the client's code and reason");
+	}
+
+	[test("server_stops")]
+	public static void TestServerStops() {
+		WsRig rig;
+		rig.Start(WsEchoSession);
+		Http::WebSocket socket = Http::WebSocket::Connect(rig.Url("ws://", "/ws").View(), kWsWaitMs);
+		rig.Finish();
+		Http::WebSocketMessage message;
+		assert_true(!socket.Receive(message, kWsWaitMs) && socket.CloseCode() == 1001, "a server that stops closes its sessions: going away");
+	}
+
+	[test("push_from_threads")]
+	public static void TestPushFromThreads() {
+		WsRig rig;
+		rig.Start([](Http::WebSocket& socket) {
+			Http::WebSocket* shared = &socket;
+			Threading::Thread[4] pushers;
+			for (int32 t = 0; t < 4; ++t)
+				pushers[t] = Threading::Thread::Run([shared]() {
+					for (int32 i = 0; i < 25; ++i) shared->SendText(Core::StringView("push"));
+				});
+			for (int32 t = 0; t < 4; ++t) pushers[t].Join();
+			Http::WebSocketMessage message;
+			while (socket.Receive(message, Net::kWaitForever)) {}
+		});
+		Http::WebSocket socket = Http::WebSocket::Connect(rig.Url("ws://", "/ws").View(), kWsWaitMs);
+		int32 received = 0;
+		Http::WebSocketMessage message;
+		while (received < 100 && socket.Receive(message, kWsWaitMs))
+			if (message.Text() == "push") received += 1;
+		assert_eq(100, received, "4 threads sending 25 messages each: every message arrives whole");
+		socket.Close(1000, WsText(""));
+		rig.Finish();
+	}
+
+	[test("timeout")]
+	public static void TestTimeout() {
+		WsRig rig;
+		rig.Start(WsEchoSession);
+		Http::WebSocket socket = Http::WebSocket::Connect(rig.Url("ws://", "/ws").View(), kWsWaitMs);
+		Http::WebSocketMessage message;
+		assert_true(!socket.Receive(message, 30) && socket.TimedOut() && socket.IsOpen(), "no message within the timeout: still open");
+		assert_true(socket.SendText(WsText("later")) && socket.Receive(message, kWsWaitMs) && message.Text() == "later", "and still works");
+		socket.Close(1000, WsText(""));
+		rig.Finish();
+	}
+
+	[test("connect_failures")]
+	public static void TestConnectFailures() {
+		WsRig rig;
+		rig.Start(WsEchoSession);
+		assert_true(!Http::WebSocket::Connect(rig.Url("http://", "/ws").View(), kWsWaitMs).IsOpen(), "an http:// URL");
+		Http::WebSocket notFound = Http::WebSocket::Connect(rig.Url("ws://", "/nope").View(), kWsWaitMs);
+		assert_true(!notFound.IsOpen() && Core::StringView(notFound.Error()).IndexOf(WsText("did not switch")) >= 0, "a path that does not upgrade");
+		Http::FetchResult plain = Http::Get(rig.Url("http://", "/ws").View(), kWsWaitMs);
+		assert_true(plain.ok && plain.response.status == 400, "a plain GET to the WebSocket path: 400");
+		WsRaw old;
+		assert_true(!old.Open(rig.server.LocalAddress(), "8"), "another version is refused");
+		rig.Finish();
+		Http::WebSocket refused = Http::WebSocket::Connect(rig.Url("ws://", "/ws").View(), kWsWaitMs);
+		assert_true(!refused.IsOpen() && !Core::StringView(refused.Error()).IsEmpty(), "no server: refused");
+	}
+}

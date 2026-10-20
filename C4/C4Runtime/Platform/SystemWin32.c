@@ -6,6 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <psapi.h>
+#include <bcrypt.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -154,4 +155,23 @@ int32_t c4_system_set_environment(const char* name, const char* value)
 	free(wideValue);
 	free(wideName);
 	return set ? 0 : -1;
+}
+
+#pragma comment(lib, "bcrypt.lib")
+
+// BCryptGenRandom takes a ULONG count: larger requests go in pieces of this size.
+enum { kRandomChunkBytes = 1 << 30 };
+
+int32_t c4_system_random_bytes(void* out, int64_t count)
+{
+	if (count < 0 || (count > 0 && !out)) return -1;
+	unsigned char* next = (unsigned char*)out;
+	while (count > 0)
+	{
+		const ULONG chunk = count > kRandomChunkBytes ? (ULONG)kRandomChunkBytes : (ULONG)count;
+		if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, next, chunk, BCRYPT_USE_SYSTEM_PREFERRED_RNG))) return -1;
+		next += chunk;
+		count -= chunk;
+	}
+	return 0;
 }

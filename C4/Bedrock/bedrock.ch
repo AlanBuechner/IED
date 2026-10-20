@@ -9,11 +9,12 @@
 //   Threading      threads, atomics, locks, futures and the job system
 //   Platform       virtual memory, the machine and the process, loaded libraries, wall-clock time
 //   Net            addresses and name resolution, TCP connections and listeners, UDP, waiting on many sockets
-//   Http           HTTP/1.1 messages, a threaded server and a one-request client
+//   Http           HTTP/1.1 messages, a threaded server, a one-request client and WebSockets
 // Namespaces are open: a program may add its own members to any of them, as long as names do not collide.
 
 include "Container/initlist.ch"
 include "Container/hash.ch"
+include "Container/sha1.ch"
 include "Container/sort.ch"
 include "Container/array.ch"
 include "Container/queue.ch"
@@ -24,6 +25,7 @@ include "Text/stringview.ch"
 include "Text/string.ch"
 include "Text/stringbuilder.ch"
 include "Text/format.ch"
+include "Text/base64.ch"
 include "FS/file.ch"
 include "FS/path.ch"
 include "FS/directory.ch"
@@ -54,3 +56,5 @@ include "Http/message.ch"
 include "Http/parse.ch"
 include "Http/server.ch"
 include "Http/client.ch"
+include "Http/frames.ch"
+include "Http/websocket.ch"

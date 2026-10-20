@@ -1,0 +1,31 @@
+// BUG-275: a func as the right operand of && or || (negated twice to make it a bool) compared its { code,
+// environment } with an integer, which LLVM refused. Every form, a func on either side, empty and set.
+alias F = func<void(int32)>;
+
+void Nothing(int32 x) {}
+
+int32 main() {
+	F empty;
+	F set = [](int32 x) {};
+	funcptr<void(int32)> pointer = Nothing;
+	int32 s = 1;
+	int32 failures = 0;
+	if ((s == 1 && empty) != false) failures++;
+	if ((s == 1 && set) != true) failures++;
+	if ((s == 1 || empty) != true) failures++;
+	if ((s == 0 || set) != true) failures++;
+	if ((s == 0 || empty) != false) failures++;
+	if ((set && empty) != false) failures++;
+	if ((empty || set) != true) failures++;
+	if ((set && set) != true) failures++;
+	if ((empty && s == 1) != false) failures++;
+	if (!empty != true || !set != false) failures++;
+	if (!!set != true || !!empty != false) failures++;
+	if ((set ? 1 : 0) != 1 || (empty ? 1 : 0) != 0) failures++;
+	bool all = set && s == 1 && set;
+	if (!all) failures++;
+	if ((s == 1 && pointer) != true) failures++;
+	while (s == 1 && set) { s = 2; }
+	if (s != 2) failures++;
+	return failures;
+}

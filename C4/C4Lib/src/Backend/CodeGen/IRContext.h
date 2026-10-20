@@ -34,14 +34,15 @@ namespace Scripting
 		llvm::IRBuilder<>& builder() { return *m_B; }
 		void SetInsertPoint(llvm::BasicBlock* blk) { if (m_B) m_B->SetInsertPoint(blk); }
 
-		// The ONE truthiness rule: i1 passes through; a float is != 0.0; a pointer is non-null (compared with
-		// the null POINTER); a func is non-null when its code is; any other integer is != 0 in its own width.
+		// The ONE truthiness rule: i1 passes through; a float is != 0.0 (unordered, so NaN is true, as in C); a
+		// pointer is non-null (compared with the null POINTER); a func is non-null when its code is; any other
+		// integer is != 0 in its own width.
 		static llvm::Value* AsBool(llvm::IRBuilder<>& B, llvm::Value* cond)
 		{
 			if (cond->getType() == llvm::Type::getInt1Ty(B.getContext())) return cond;
 			if (cond->getType()->isStructTy()) cond = B.CreateExtractValue(cond, { 0 }); // func: { code, environment }
 			if (cond->getType()->isFloatingPointTy())
-				return B.CreateFCmpONE(cond, llvm::ConstantFP::get(cond->getType(), 0.0));
+				return B.CreateFCmpUNE(cond, llvm::ConstantFP::get(cond->getType(), 0.0));
 			if (cond->getType()->isPointerTy())
 				return B.CreateICmpNE(cond, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(cond->getType())));
 			return B.CreateICmpNE(cond, llvm::ConstantInt::get(cond->getType(), 0));

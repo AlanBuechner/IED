@@ -21,17 +21,23 @@ namespace Http
 		public Core::String error;
 	}
 
-	// The parts of "http://host[:port][/path][?query]"; `valid` is false for anything else (another scheme, no host,
-	// a bad port). An IPv6 host is written in brackets: "http://[::1]:8080/".
+	// The parts of "http://host[:port][/path][?query]" or a ws:// URL; `valid` is false for anything else (another
+	// scheme, no host, a bad port). An IPv6 host is written in brackets: "http://[::1]:8080/".
 	struct Url
 	{
 		public bool valid;
+		public bool webSocket;        // ws:// rather than http://
 		public Core::String host;     // without brackets
 		public int32 port;            // 80 when the URL gives none
 		public Core::String target;   // "/path?query"; "/" when the URL has no path
 	}
 
 	Url ParseUrl(Core::StringView text);
+	// The Host header for `url`: its host, in brackets when IPv6, and its port unless it is 80.
+	Core::String HostHeader(const Url& url);
+	// Reads a response head off `stream` into `response`: where its body starts in `received`, or -1 with `why`.
+	// Interim 1xx responses are skipped, but a 101 (the switch a WebSocket asked for) is returned.
+	int64 ReadSwitchHead(Net::TcpStream& stream, Core::Array<uint8>& received, int32 timeoutMs, Response& response, Core::String& why);
 
 	// Sends `request` - its method, target, headers and body (Host defaults to the address) - to `at` and reads the
 	// response, skipping interim 1xx ones. Every wait is bounded by `timeoutMs`.

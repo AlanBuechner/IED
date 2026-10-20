@@ -1,0 +1,116 @@
+include "frames.ch"
+
+namespace Http
+{
+	const uint8 kFinBit = 0x80;
+	const uint8 kReservedBits = 0x70;
+	const uint8 kOpcodeBits = 0x0F;
+	const uint8 kMaskBit = 0x80;
+	const uint8 kLengthBits = 0x7F;
+	const int64 kLength16 = 126;   // the 7-bit length that says a 16-bit length follows
+	const int64 kLength64 = 127;   // ... a 64-bit one
+
+	FrameParse FrameResult(ParseStatus status, int64 length, const char* error, int32 closeCode) {
+		FrameParse result;
+		result.status = status;
+		result.length = length;
+		result.error = Core::String(error);
+		result.closeCode = closeCode;
+		return result;
+	}
+
+	FrameParse ProtocolError(const char* why) { return FrameResult(ParseStatus::Malformed, 0, why, kCloseProtocolError); }
+
+	bool IsKnownOpcode(int32 opcode) { return opcode == 0 || opcode == 1 || opcode == 2 || opcode == 8 || opcode == 9 || opcode == 10; }
+
+	uint64 BigEndian(const uint8* bytes, int32 count) {
+		uint64 value = 0u;
+		for (int32 i = 0; i < count; ++i) value = (value << 8u) | (uint64)bytes[i];
+		return value;
+	}
+
+	FrameParse ParseFrame(Core::StringView bytes, bool fromClient, int64 maxPayload, Frame& frame) {
+		const uint8* data = (const uint8*)bytes.Data();
+		const int64 available = bytes.ByteLength();
+		if (available < 2) return FrameResult(ParseStatus::Incomplete, 0, "", 0);
+		const int32 opcode = (int32)(data[0] & kOpcodeBits);
+		const bool masked = (data[1] & kMaskBit) != 0;
+		if ((data[0] & kReservedBits) != 0) return ProtocolError("a reserved bit is set");
+		if (!IsKnownOpcode(opcode)) return ProtocolError("an unknown opcode");
+		if (masked != fromClient) return ProtocolError(fromClient ? "a client frame must be masked" : "a server frame must not be masked");
+		int64 header = 2;
+		int64 length = (int64)(data[1] & kLengthBits);
+		if (length == kLength16 || length == kLength64) {
+			const int32 extra = length == kLength16 ? 2 : 8;
+			if (available < header + extra) return FrameResult(ParseStatus::Incomplete, 0, "", 0);
+			const uint64 wide = BigEndian(data + header, extra);
+			const uint64 shortest = length == kLength16 ? (uint64)kLength16 : 65536u;
+			if (wide < shortest || wide > 0x7FFFFFFFFFFFFFFFu) return ProtocolError("a length not in its shortest form");
+			length = (int64)wide;
+			header += extra;
+		}
+		const bool control = opcode >= 8;
+		if (control && ((data[0] & kFinBit) == 0 || length > kMaxControlPayload)) return ProtocolError("a control frame is fragmented or longer than 125 bytes");
+		if (length > maxPayload) return FrameResult(ParseStatus::TooLarge, 0, "the message is larger than the limit", kCloseTooBig);
+		const int64 maskAt = header;
+		if (masked) header += 4;
+		if (available < header + length) return FrameResult(ParseStatus::Incomplete, 0, "", 0);
+		frame.fin = (data[0] & kFinBit) != 0;
+		frame.opcode = (Opcode)opcode;
+		frame.payload.Clear();
+		frame.payload.Append(data + header, length);
+		if (masked)
+			for (int64 i = 0; i < length; ++i) frame.payload[i] = (uint8)(frame.payload[i] ^ data[maskAt + i % 4]);
+		return FrameResult(ParseStatus::Complete, header + length, "", 0);
+	}
+
+	void WriteFrame(Core::Array<uint8>& out, bool fin, Opcode opcode, const void* payload, int64 count, const uint8* mask) {
+		const uint8 maskBit = mask ? kMaskBit : (uint8)0;
+		out.Push((uint8)((fin ? kFinBit : (uint8)0) | (uint8)opcode));
+		if (count < kLength16) out.Push((uint8)(maskBit | (uint8)count));
+		else if (count <= 65535) {
+			out.Push((uint8)(maskBit | (uint8)kLength16));
+			out.Push((uint8)(count >> 8));
+			out.Push((uint8)count);
+		}
+		else {
+			out.Push((uint8)(maskBit | (uint8)kLength64));
+			for (int32 shift = 56; shift >= 0; shift -= 8) out.Push((uint8)((uint64)count >> (uint64)shift));
+		}
+		const int64 start = out.Count();
+		if (mask) out.Append(mask, 4);
+		const int64 at = out.Count();
+		out.Append((const uint8*)payload, count);
+		if (mask)
+			for (int64 i = 0; i < count; ++i) out[at + i] = (uint8)(out[at + i] ^ out[start + i % 4]);
+	}
+
+	// The codes an endpoint may send (RFC 6455 section 7.4): the defined ones, then 3000 to 4999.
+	bool IsSendableCloseCode(int32 code) {
+		return (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1011) || (code >= 3000 && code <= 4999);
+	}
+
+	bool ReadClosePayload(const Core::Array<uint8>& payload, int32& code, Core::String& reason) {
+		if (payload.Count() == 0) {
+			code = kCloseNoCode;
+			reason = Core::String();
+			return true;
+		}
+		if (payload.Count() == 1) return false;
+		code = (int32)BigEndian(payload.Data(), 2);
+		const Core::StringView text = Core::StringView((const char*)payload.Data() + 2, payload.Count() - 2);
+		if (!IsSendableCloseCode(code) || !text.IsValidUtf8()) return false;
+		reason = Core::String(text);
+		return true;
+	}
+
+	Core::Array<uint8> ClosePayload(int32 code, Core::StringView reason) {
+		Core::Array<uint8> payload;
+		payload.Push((uint8)(code >> 8));
+		payload.Push((uint8)code);
+		int64 length = reason.ByteLength() < kMaxControlPayload - 2 ? reason.ByteLength() : kMaxControlPayload - 2;
+		while (length > 0 && length < reason.ByteLength() && ((uint8)reason.Data()[length] & 0xC0u) == 0x80u) length -= 1;
+		payload.Append((const uint8*)reason.Data(), length);
+		return payload;
+	}
+}

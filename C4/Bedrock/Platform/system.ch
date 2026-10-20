@@ -53,4 +53,8 @@ namespace Platform
 	bool SetEnvironmentVariable(const char* name, const char* value);
 	// True also when it was not set; false for an invalid name.
 	bool RemoveEnvironmentVariable(const char* name);
+
+	// `count` bytes from the system's cryptographically secure generator (keys, nonces, masks); false when it fails.
+	[link("c4_system_random_bytes")] int32 c4_system_random_bytes(void* out, int64 count);
+	bool RandomBytes(void* out, int64 count) { return c4_system_random_bytes(out, count) == 0; }
 }

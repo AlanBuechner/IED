@@ -99,6 +99,8 @@ int64_t c4_system_get_environment(const char* name, char* out, int64_t capacity)
 // Sets the variable for this process and the processes it starts; a null `value` removes it. 0 or -1 (an empty
 // name, one with an '=', text that is not UTF-8).
 int32_t c4_system_set_environment(const char* name, const char* value);
+// `count` bytes from the system's cryptographically secure generator. 0 or -1.
+int32_t c4_system_random_bytes(void* out, int64_t count);
 
 // --- libraries (Platform/LibraryWin32.c) --------------------------------------------------------------
 // Loads a library (a DLL) and what it needs; null on failure, with the reason in `error` (truncated to fit). A path

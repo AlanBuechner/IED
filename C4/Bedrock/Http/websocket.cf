@@ -1,0 +1,282 @@
+include "websocket.ch"
+include "client.ch"
+include "../Container/sha1.ch"
+include "../Platform/system.ch"
+include "../Text/base64.ch"
+include "../Text/stringbuilder.ch"
+
+namespace Http
+{
+	// RFC 6455 section 1.3: appended to the client's key before it is hashed.
+	const char* kWebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+	const int64 kWebSocketKeyBytes = 16;
+	// The longest a receive waits before it looks at the server's stop flag again.
+	const int32 kWebSocketSliceMs = 50;
+	const int64 kWebSocketReceiveBytes = 16 * 1024;
+	const int64 kHandshakeHeadBytes = 16 * 1024;
+
+	// --- the handshake --------------------------------------------------------------------------------------------------
+
+	Core::String WebSocketAccept(Core::StringView key) {
+		Core::Sha1Builder hash;
+		hash.Add((const void*)key.Data(), key.ByteLength());
+		hash.Add((const void*)kWebSocketGuid, 36);
+		const Core::Sha1Digest digest = hash.Finish();
+		return Core::Base64Encode((const void*)&digest.bytes[0], 20);
+	}
+
+	// The Sec-WebSocket-Key: 16 bytes in base64.
+	bool IsWebSocketKey(const Core::String* key) {
+		Core::Array<uint8> bytes;
+		return key && Core::Base64Decode(key->View(), bytes) && bytes.Count() == kWebSocketKeyBytes;
+	}
+
+	bool IsWebSocketRequest(const Request& request) {
+		const Core::String* version = request.headers.Find(Core::StringView("Sec-WebSocket-Version"));
+		return request.method == "GET" && request.minorVersion >= 1 && ListsToken(request.headers.Find(Core::StringView("Upgrade")), "websocket") &&
+			ListsToken(request.headers.Find(Core::StringView("Connection")), "upgrade") && version && *version == "13" &&
+			IsWebSocketKey(request.headers.Find(Core::StringView("Sec-WebSocket-Key")));
+	}
+
+	bool AcceptWebSocket(const Request& request, Response& response, func<void(WebSocket&)> session) {
+		if (!IsWebSocketRequest(request)) {
+			const Core::String* version = request.headers.Find(Core::StringView("Sec-WebSocket-Version"));
+			response.status = version && *version != "13" ? 426 : 400;
+			if (response.status == 426) response.headers.Set(Core::StringView("Sec-WebSocket-Version"), Core::StringView("13"));
+			response.SetText(Core::StringView("text/plain; charset=utf-8"), Core::StringView("not a WebSocket handshake"));
+			return false;
+		}
+		response.status = 101;
+		response.headers.Set(Core::StringView("Upgrade"), Core::StringView("websocket"));
+		response.headers.Set(Core::StringView("Connection"), Core::StringView("Upgrade"));
+		response.headers.Set(Core::StringView("Sec-WebSocket-Accept"), WebSocketAccept(request.headers.Find(Core::StringView("Sec-WebSocket-Key"))->View()).View());
+		response.takeover = [session](Net::TcpStream& stream, Core::Array<uint8>& received, const Threading::Atomic<bool>* stopping) {
+			WebSocket socket = WebSocket::Adopt(stream, received, stopping);
+			session(socket);
+			if (socket.IsOpen()) socket.Close(kCloseNormal, Core::StringView(""));
+		};
+		return true;
+	}
+
+	WebSocket WebSocket::Adopt(Net::TcpStream& stream, Core::Array<uint8>& received, const Threading::Atomic<bool>* stopping) {
+		WebSocket socket;
+		socket.stream = take(stream);
+		socket.pending = take(received);
+		socket.stopping = stopping;
+		return socket;
+	}
+
+	// The handshake request a client sends, and the key it chose.
+	Core::String WriteHandshake(const Url& url, Core::StringBuilder& head) {
+		uint8[16] nonce;
+		Platform::RandomBytes((void*)&nonce[0], kWebSocketKeyBytes);
+		const Core::String key = Core::Base64Encode((const void*)&nonce[0], kWebSocketKeyBytes);
+		head.Append("GET ");
+		head.Append(url.target.View());
+		head.Append(" HTTP/1.1\r\nHost: ");
+		head.Append(HostHeader(url).View());
+		head.Append("\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ");
+		head.Append(key.View());
+		head.Append("\r\n\r\n");
+		return key;
+	}
+
+	// The server's answer to the handshake; why it is not a valid 101, or empty.
+	Core::String CheckAnswer(const Response& response, const Core::String& key) {
+		if (response.status != 101) return Core::String("the server did not switch protocols");
+		if (!ListsToken(response.headers.Find(Core::StringView("Upgrade")), "websocket") ||
+			!ListsToken(response.headers.Find(Core::StringView("Connection")), "upgrade")) return Core::String("the server's answer does not upgrade to websocket");
+		const Core::String* accept = response.headers.Find(Core::StringView("Sec-WebSocket-Accept"));
+		if (!accept || *accept != WebSocketAccept(key.View())) return Core::String("the server's Sec-WebSocket-Accept does not match the key");
+		return Core::String();
+	}
+
+	WebSocket WebSocket::Connect(Core::StringView text, int32 timeoutMs) {
+		WebSocket socket;
+		socket.client = true;
+		const Url url = ParseUrl(text);
+		const Net::Resolution found = url.valid && url.webSocket ? Net::Resolve(url.host.CStr(), url.port) : Net::Resolution();
+		if (!url.valid || !url.webSocket) socket.error = Core::String("not a ws://host[:port]/path URL");
+		else if (!found.Found()) socket.error = found.error;
+		if (!socket.error.IsEmpty()) return socket;
+		socket.stream = Net::TcpStream::Connect(found.addresses[0], timeoutMs);
+		Core::StringBuilder head;
+		const Core::String key = WriteHandshake(url, head);
+		if (!socket.stream.IsOpen() || !socket.stream.SendText(head.View(), timeoutMs)) {
+			socket.error = Core::String(socket.stream.Error());
+			socket.stream.Close();
+			return socket;
+		}
+		Response answer;
+		const int64 headLength = ReadSwitchHead(socket.stream, socket.pending, timeoutMs, answer, socket.error);
+		if (headLength >= 0) socket.error = CheckAnswer(answer, key);
+		if (headLength < 0 || !socket.error.IsEmpty()) {
+			socket.stream.Close();
+			return socket;
+		}
+		socket.pending.RemoveRange(0, headLength);
+		socket.stream.SetNoDelay(true);
+		return socket;
+	}
+
+	// --- sending --------------------------------------------------------------------------------------------------------
+
+	bool WebSocket::Send(Opcode opcode, const void* bytes, int64 count) {
+		Threading::LockGuard guard(sending);
+		if (!stream.IsOpen() || (closeSent && opcode != Opcode::Close)) return false;
+		uint8[4] mask;
+		if (client) Platform::RandomBytes((void*)&mask[0], 4);
+		Core::Array<uint8> frame;
+		WriteFrame(frame, true, opcode, bytes, count, client ? &mask[0] : nullptr);
+		if (opcode == Opcode::Close) closeSent = true;
+		return stream.SendAll((const void*)frame.Data(), frame.Count());
+	}
+
+	bool WebSocket::Ping(Core::StringView payload) {
+		if (payload.ByteLength() > kMaxControlPayload) return false;
+		return Send(Opcode::Ping, (const void*)payload.Data(), payload.ByteLength());
+	}
+
+	bool WebSocket::SendClose(int32 code, Core::StringView reason) {
+		const Core::Array<uint8> payload = ClosePayload(code, reason);
+		return Send(Opcode::Close, (const void*)payload.Data(), payload.Count());
+	}
+
+	void WebSocket::CloseStream() {
+		Threading::LockGuard guard(sending);
+		stream.Close();
+	}
+
+	// --- receiving ------------------------------------------------------------------------------------------------------
+
+	// More bytes onto `pending` by `deadlineNs` (-1: no deadline), in slices so the server stopping is noticed. False
+	// when the connection ended (closed abnormally), failed, the server stopped, or the deadline passed (`timedOut`).
+	bool WebSocket::ReceiveMore(int64 deadlineNs) {
+		uint8[kWebSocketReceiveBytes] buffer;
+		while (stream.IsOpen()) {
+			if (stopping && stopping->Load()) {
+				Fail(kCloseGoingAway, Core::StringView("the server is stopping"));
+				return false;
+			}
+			const int64 now = clock_now_ns();
+			if (deadlineNs >= 0 && now >= deadlineNs) {
+				timedOut = true;
+				return false;
+			}
+			const int64 leftMs = deadlineNs < 0 ? (int64)kWebSocketSliceMs : (deadlineNs - now) / 1000000 + 1;
+			const int32 slice = stopping || deadlineNs >= 0 ? (int32)(leftMs < (int64)kWebSocketSliceMs ? leftMs : (int64)kWebSocketSliceMs) : Net::kWaitForever;
+			const int64 got = stream.Receive((void*)&buffer[0], kWebSocketReceiveBytes, slice);
+			if (got > 0) {
+				pending.Append(&buffer[0], got);
+				return true;
+			}
+			if (got == Net::kTimedOut) continue;
+			if (got == 0) closeCode = kCloseAbnormal;
+			else error = Core::String(stream.Error());
+			CloseStream();
+			return false;
+		}
+		return false;
+	}
+
+	// Ends the connection for a fault: a close frame with `code`, then the stream.
+	void WebSocket::Fail(int32 code, Core::StringView why) {
+		error = Core::String(why);
+		SendClose(code, why);
+		closeCode = code;
+		CloseStream();
+	}
+
+	Receipt WebSocket::Take(Frame& frame, WebSocketMessage& message, bool& assembling) {
+		const int64 limit = maxMessageBytes > 0 ? maxMessageBytes : kDefaultMaxMessageBytes;
+		if (frame.opcode == Opcode::Ping) {
+			Send(Opcode::Pong, (const void*)frame.payload.Data(), frame.payload.Count());
+			return Receipt::Continue;
+		}
+		if (frame.opcode == Opcode::Pong) return Receipt::Continue;
+		if (frame.opcode == Opcode::Close) {
+			int32 code = 0;
+			Core::String reason;
+			if (!ReadClosePayload(frame.payload, code, reason)) {
+				Fail(kCloseProtocolError, Core::StringView("a malformed close frame"));
+				return Receipt::Ended;
+			}
+			closeCode = code;
+			closeReason = reason;
+			SendClose(code == kCloseNoCode ? kCloseNormal : code, Core::StringView(""));
+			CloseStream();
+			return Receipt::Ended;
+		}
+		const bool starts = frame.opcode != Opcode::Continuation;
+		if (starts == assembling) {
+			Fail(kCloseProtocolError, starts ? Core::StringView("a new message inside a fragmented one") : Core::StringView("a continuation with no message"));
+			return Receipt::Ended;
+		}
+		if (starts) {
+			message.kind = frame.opcode == Opcode::Text ? MessageKind::Text : MessageKind::Binary;
+			message.data.Clear();
+		}
+		if (message.data.Count() + frame.payload.Count() > limit) {
+			Fail(kCloseTooBig, Core::StringView("the message is larger than the limit"));
+			return Receipt::Ended;
+		}
+		message.data.Append(frame.payload);
+		assembling = !frame.fin;
+		if (assembling) return Receipt::Continue;
+		if (message.kind == MessageKind::Text && !message.Text().IsValidUtf8()) {
+			Fail(kCloseInvalidPayload, Core::StringView("a text message that is not UTF-8"));
+			return Receipt::Ended;
+		}
+		return Receipt::Message;
+	}
+
+	bool WebSocket::Receive(WebSocketMessage& message, int32 timeoutMs) {
+		Threading::LockGuard guard(receiving);
+		timedOut = false;
+		const int64 deadline = timeoutMs < 0 ? -1 : clock_now_ns() + (int64)timeoutMs * 1000000;
+		const int64 limit = maxMessageBytes > 0 ? maxMessageBytes : kDefaultMaxMessageBytes;
+		bool assembling = false;
+		while (stream.IsOpen()) {
+			Frame frame;
+			const FrameParse parsed = ParseFrame(Core::StringView((const char*)pending.Data(), pending.Count()), !client, limit, frame);
+			if (parsed.status == ParseStatus::Incomplete) {
+				if (!ReceiveMore(deadline)) return false;
+				continue;
+			}
+			if (parsed.status != ParseStatus::Complete) {
+				Fail(parsed.closeCode, parsed.error.View());
+				return false;
+			}
+			pending.RemoveRange(0, parsed.length);
+			const Receipt receipt = Take(frame, message, assembling);
+			if (receipt != Receipt::Continue) return receipt == Receipt::Message;
+		}
+		return false;
+	}
+
+	// Reads frames until the peer's close arrives or `deadlineNs` passes; what else comes is dropped.
+	void WebSocket::Drain(int64 deadlineNs) {
+		WebSocketMessage dropped;
+		bool assembling = false;
+		while (stream.IsOpen() && clock_now_ns() < deadlineNs) {
+			Frame frame;
+			const FrameParse parsed = ParseFrame(Core::StringView((const char*)pending.Data(), pending.Count()), !client, kDefaultMaxMessageBytes, frame);
+			if (parsed.status == ParseStatus::Incomplete) {
+				if (!ReceiveMore(deadlineNs)) return;
+				continue;
+			}
+			if (parsed.status != ParseStatus::Complete) return;
+			pending.RemoveRange(0, parsed.length);
+			if (frame.opcode == Opcode::Close || Take(frame, dropped, assembling) == Receipt::Ended) return;
+		}
+	}
+
+	void WebSocket::Close(int32 code, Core::StringView reason) {
+		SendClose(code, reason);
+		if (closeCode == 0) closeCode = code;
+		if (!receiving.TryLock()) return;   // the receiving thread takes the peer's answer
+		Drain(clock_now_ns() + (int64)kCloseWaitMs * 1000000);
+		CloseStream();
+		receiving.Unlock();
+	}
+}

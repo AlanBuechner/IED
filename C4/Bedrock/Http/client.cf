@@ -50,17 +50,28 @@ namespace Http
 		return !host.IsEmpty() && url.port > 0;
 	}
 
+	// How long the scheme ("http://", "ws://") at the start of `text` is, or 0.
+	int64 SchemeLength(Core::StringView text, bool& webSocket) {
+		const Core::StringView http = Core::StringView("http://");
+		const Core::StringView ws = Core::StringView("ws://");
+		webSocket = text.ByteLength() > ws.ByteLength() && EqualsIgnoringCase(text.Substring(0, ws.ByteLength()), ws);
+		if (webSocket) return ws.ByteLength();
+		return text.ByteLength() > http.ByteLength() && EqualsIgnoringCase(text.Substring(0, http.ByteLength()), http) ? http.ByteLength() : 0;
+	}
+
 	Url ParseUrl(Core::StringView text) {
 		Url url;
-		const Core::StringView scheme = Core::StringView("http://");
-		if (text.ByteLength() <= scheme.ByteLength() || !EqualsIgnoringCase(text.Substring(0, scheme.ByteLength()), scheme)) return url;
-		const Core::StringView rest = text.Substring(scheme.ByteLength(), text.ByteLength() - scheme.ByteLength());
+		const int64 schemeLength = SchemeLength(text, url.webSocket);
+		if (schemeLength == 0) return Url();
+		const Core::StringView rest = text.Substring(schemeLength, text.ByteLength() - schemeLength);
 		int64 end = rest.ByteLength();
 		const int64 slash = rest.IndexOf('/', 0);
 		const int64 mark = rest.IndexOf('?', 0);
 		if (slash >= 0 && slash < end) end = slash;
 		if (mark >= 0 && mark < end) end = mark;
+		const bool webSocket = url.webSocket;
 		if (!ParseAuthority(rest.Substring(0, end), url)) return Url();
+		url.webSocket = webSocket;
 		const Core::StringView target = rest.Substring(end, rest.ByteLength() - end);
 		url.target = target.IsEmpty() ? Core::String("/") : target.StartsWith(Core::StringView("?")) ? Core::String("/") + target : Core::String(target);
 		url.valid = true;
@@ -110,12 +121,12 @@ namespace Http
 		return Core::StringView((const char*)received.Data() + from, received.Count() - from);
 	}
 
-	// The final head (past interim 1xx ones) into `response`; where its body starts, or -1 with `why`.
-	int64 ReadResponseHead(Net::TcpStream& stream, Core::Array<uint8>& received, int32 timeoutMs, Response& response, Core::String& why) {
+	// The final head (past interim 1xx ones, but a 101 when `switching`) into `response`; where its body starts, or -1.
+	int64 ReadFinalHead(Net::TcpStream& stream, Core::Array<uint8>& received, int32 timeoutMs, bool switching, Response& response, Core::String& why) {
 		int64 start = 0;
 		while (true) {
 			const HeadParse head = ParseResponseHead(Received(received, start), kMaxFetchHeadBytes, response);
-			if (head.status == ParseStatus::Complete && response.status >= 200) return start + head.length;
+			if (head.status == ParseStatus::Complete && (response.status >= 200 || (switching && response.status == 101))) return start + head.length;
 			if (head.status == ParseStatus::Complete) {
 				start += head.length;
 				continue;
@@ -177,30 +188,38 @@ namespace Http
 			return Failed(stream.Error());
 		FetchResult result;
 		Core::Array<uint8> received;
-		const int64 bodyStart = ReadResponseHead(stream, received, timeoutMs, result.response, result.error);
+		const int64 bodyStart = ReadFinalHead(stream, received, timeoutMs, false, result.response, result.error);
 		if (bodyStart < 0) return result;
 		const BodyFraming framing = ResponseFraming(result.response.headers, result.response.status, request.method.View());
 		result.ok = ReadResponseBody(stream, received, bodyStart, framing, timeoutMs, result.response, result.error);
 		return result;
 	}
 
+	int64 ReadSwitchHead(Net::TcpStream& stream, Core::Array<uint8>& received, int32 timeoutMs, Response& response, Core::String& why) {
+		return ReadFinalHead(stream, received, timeoutMs, true, response, why);
+	}
+
+	Core::String HostHeader(const Url& url) {
+		Core::StringBuilder host;
+		const bool bracketed = url.host.View().IndexOf(':', 0) >= 0;   // an IPv6 address
+		if (bracketed) host.Append("[");
+		host.Append(url.host.View());
+		if (bracketed) host.Append("]");
+		if (url.port != kDefaultHttpPort) {
+			host.Append(":");
+			host.AppendInt(url.port);
+		}
+		return host.ToString();
+	}
+
 	// The request for `url` with `method` and `body`, sent to the first address its host resolves to.
 	FetchResult FetchUrl(Core::StringView url, Request& request, int32 timeoutMs) {
 		const Url parsed = ParseUrl(url);
-		if (!parsed.valid) return Failed("not an http://host[:port]/path URL");
+		if (!parsed.valid || parsed.webSocket) return Failed("not an http://host[:port]/path URL");
 		const Net::Resolution found = Net::Resolve(parsed.host.CStr(), parsed.port);
 		if (!found.Found()) return Failed(found.error.CStr());
 		request.target = parsed.target;
-		Core::StringBuilder host;
-		const bool bracketed = parsed.host.View().IndexOf(':', 0) >= 0;   // an IPv6 address
-		if (bracketed) host.Append("[");
-		host.Append(parsed.host.View());
-		if (bracketed) host.Append("]");
-		if (parsed.port != kDefaultHttpPort) {
-			host.Append(":");
-			host.AppendInt(parsed.port);
-		}
-		request.headers.Set(Core::StringView("Host"), host.View());
+		request.headers.Set(Core::StringView("Host"), HostHeader(parsed).View());
 		return Fetch(found.addresses[0], request, timeoutMs);
 	}
 

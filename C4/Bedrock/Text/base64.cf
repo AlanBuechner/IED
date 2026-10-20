@@ -1,0 +1,61 @@
+include "base64.ch"
+include "stringbuilder.ch"
+
+namespace Core
+{
+	const char* kBase64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+	String Base64Encode(const void* bytes, int64 count) {
+		const uint8* in = (const uint8*)bytes;
+		StringBuilder text((count + 2) / 3 * 4 + 1);
+		int64 i = 0;
+		while (i + 3 <= count) {
+			const uint32 group = ((uint32)in[i] << 16u) | ((uint32)in[i + 1] << 8u) | (uint32)in[i + 2];
+			for (int32 shift = 18; shift >= 0; shift -= 6) text.AppendByte((int32)kBase64Alphabet[(group >> (uint32)shift) & 63u]);
+			i += 3;
+		}
+		const int64 left = count - i;
+		if (left > 0) {
+			const uint32 group = ((uint32)in[i] << 16u) | (left == 2 ? (uint32)in[i + 1] << 8u : 0u);
+			text.AppendByte((int32)kBase64Alphabet[(group >> 18u) & 63u]);
+			text.AppendByte((int32)kBase64Alphabet[(group >> 12u) & 63u]);
+			text.AppendByte(left == 2 ? (int32)kBase64Alphabet[(group >> 6u) & 63u] : (int32)'=');
+			text.AppendByte((int32)'=');
+		}
+		return text.ToString();
+	}
+
+	// A character's six bits, or -1 outside the alphabet.
+	int32 Base64Value(char c) {
+		if (c >= 'A' && c <= 'Z') return (int32)(c - 'A');
+		if (c >= 'a' && c <= 'z') return (int32)(c - 'a') + 26;
+		if (c >= '0' && c <= '9') return (int32)(c - '0') + 52;
+		if (c == '+') return 62;
+		if (c == '/') return 63;
+		return -1;
+	}
+
+	bool Base64Decode(StringView text, Array<uint8>& out) {
+		const int64 length = text.ByteLength();
+		if (length % 4 != 0) return false;
+		const char* in = text.Data();
+		const int64 padding = length == 0 ? 0 : (in[length - 1] == '=' ? (in[length - 2] == '=' ? 2 : 1) : 0);
+		const int64 kept = out.Count();
+		for (int64 i = 0; i < length; i += 4) {
+			const bool last = i + 4 == length;
+			int32[4] six;
+			for (int32 k = 0; k < 4; ++k) {
+				const bool padded = last && k >= 4 - padding;
+				six[k] = padded ? 0 : Base64Value(in[i + k]);
+				if (six[k] < 0) {
+					out.Resize(kept);
+					return false;
+				}
+			}
+			const uint32 group = ((uint32)six[0] << 18u) | ((uint32)six[1] << 12u) | ((uint32)six[2] << 6u) | (uint32)six[3];
+			const int64 bytes = last ? 3 - padding : 3;
+			for (int64 b = 0; b < bytes; ++b) out.Push((uint8)(group >> (uint32)(16 - b * 8)));
+		}
+		return true;
+	}
+}

@@ -132,7 +132,10 @@ ends at an empty slot. `Traits` is a type with `static uint64 Hash(const K&)` an
 - `Core::ByteKeyTraits<K>` hashes and compares a key's bytes: for plain-data structs without padding.
 
 `hash.ch` also has `Core::HashBytes(bytes, length)` (FNV-1a, 64-bit), `Core::HashInteger(uint64)`
-(the splitmix64 finalizer) and `Core::NextPowerOfTwo(int64)`.
+(the splitmix64 finalizer) and `Core::NextPowerOfTwo(int64)`. `sha1.ch` has the SHA-1 digest (FIPS 180-4) for
+protocols that require it (the WebSocket handshake; not for anything that must resist a forger):
+`Core::Sha1(bytes, count)` or a `Core::Sha1Builder` fed in pieces (`Add`, then `Finish` once), giving a
+`Sha1Digest` (`bytes[20]`, `ToHex()`, `==`, `!=`).
 
 ### `Core::Queue<T>` and `Core::Stack<T>` (`queue.ch`, `stack.ch`)
 
@@ -223,6 +226,12 @@ Core::Format(&b, "id={0:d.4} val={1:x.8} again={0}", 255, 4096);   // "id=0255 v
 ```
 
 A malformed placeholder is written as text.
+
+### Base64 (`base64.ch`)
+
+`Core::Base64Encode(bytes, count)` gives RFC 4648 base64 (the standard alphabet, `=` padding) as a `String`;
+`Core::Base64Decode(text, out)` appends the bytes to an `Array<uint8>` and returns false, leaving `out` as it was,
+for text that is not padded base64.
 
 ---
 
@@ -573,6 +582,7 @@ never scans this memory: `GC::RegisterRegion` a range that holds managed pointer
 | `TryGetEnvironmentVariable(name, value)` | false when it is not set; a variable set to `""` is set |
 | `GetEnvironmentVariable(name)` | empty when it is not set |
 | `SetEnvironmentVariable(name, value)`, `RemoveEnvironmentVariable(name)` | for this process and the processes it starts; removing an unset variable succeeds. A name is not empty and has no `=`; names and values must be UTF-8 |
+| `RandomBytes(out, count)` | bytes from the system's cryptographically secure generator (keys, nonces, masks); false when it fails |
 
 Setting a variable changes the system's block, not a copy the C runtime's `getenv` may hold.
 
@@ -653,9 +663,9 @@ streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners an
 
 ## 14. HTTP (`Http/`)
 
-**Status:** **Implemented** (B50, D-66): HTTP/1.1 messages, a server that answers each connection on a thread of its
-own, and a client for one request at a time, all plain C4 over `Net::`. Plain http only: no TLS. WebSockets are
-next (the IDE's server pushes to the browser through them).
+**Status:** **Implemented** (B50, D-66; WebSockets B51, D-67): HTTP/1.1 messages, a server that answers each
+connection on a thread of its own, a client for one request at a time, and WebSockets both ways, all plain C4 over
+`Net::`. Plain http and ws only: no TLS.
 
 ```c4
 Http::Server server;
@@ -694,21 +704,40 @@ if (got.ok) printf("%d\n", got.response.status);
   timeoutMs)` and `Post(url, contentType, body, timeoutMs)` take an `http://host[:port]/path?query` URL
   (`ParseUrl`; an IPv6 host in brackets). A `FetchResult` is `ok` with the `response`, or not, with `error`.
 
+- **WebSockets** (`websocket.ch`, `frames.ch`; RFC 6455): in a handler, `Http::AcceptWebSocket(request, response,
+  session)` answers the handshake (101; 400 for a request that is not one, 426 for another version) and the session
+  runs with the connection's `WebSocket` on the connection's thread once the 101 is out; the connection closes when
+  the session returns, and a server that stops closes its sessions with 1001. A client connects with
+  `WebSocket::Connect("ws://host:port/path", timeoutMs)`. `Receive(message, timeoutMs)` waits for a whole message
+  (`kind` Text or Binary, `data`, `Text()`): fragments are joined, pings answered, the peer's close answered, and it
+  is false when the connection closed (`CloseCode()`, `CloseReason()`), failed (`Error()`) or the wait timed out
+  (`TimedOut()`; still open). `SendText`, `SendBinary`, `Ping` and `Close(code, reason)` are safe from any thread
+  while another receives - a server can push from anywhere. Bad frames close the connection with the RFC's code:
+  1002 (an unmasked client frame, reserved bits, an unknown opcode, a length not in its shortest form, a fragmented
+  or long control frame, a stray continuation), 1007 (text that is not UTF-8), 1009 (over `SetMaxMessageBytes`, 16
+  MiB by default). The frame layer is pure functions too (`ParseFrame`, `WriteFrame`, `ReadClosePayload`,
+  `ClosePayload`, `WebSocketAccept`, `IsWebSocketRequest`). `Response::takeover` is the general hook underneath:
+  after a 101 the server hands it the connection.
+
 Covered by `Bedrock/Tests/http_tests.cf` (26 tests): heads (every malformed form, the limits, CRLF or LF, absolute
 targets), framing, chunked bodies fed whole and a byte at a time, URLs, headers; the server's GET and POST, three
 pipelined requests on one connection, a chunked request, HEAD, Expect: 100-continue, HTTP/1.0, the refusals, a
 handler that throws, 8 concurrent clients and Stop from a handler; the client's chunked, until-close and interim
-responses and its failures.
+responses and its failures. `websocket_tests.cf` (16): frames at every length form, masked and not, every rule a
+frame can break, close payloads, RFC 6455's own handshake example, and on loopback the echo of text and 100 KB of
+binary, fragments with a ping between them, the 1002 / 1007 / 1009 closes, a close from either side, the server
+stopping, 100 pushes from 4 threads, timeouts and failed connections. `encoding_tests.cf` covers SHA-1 (FIPS 180
+vectors, a million bytes, pieces against whole) and Base64 (RFC 4648 vectors, every byte, malformed text).
 
 ---
 
 ## 15. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 39 files, 385 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 41 files, 405 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, http). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, http, websocket, encoding). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -739,6 +768,6 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | Paths, directory listing, create, remove, rename | **Implemented** |
 | `Core::InitList<T>` | **Implemented** |
 | Sockets / networking | **Implemented** (section 13, B49) |
-| HTTP server | **Implemented** (section 14, B50); WebSockets planned |
+| HTTP server | **Implemented** (section 14, B50), with WebSockets (B51) |
 | Threading primitives (join, promise, condition variable, work stealing) | **Implemented** (section 10, B29) |
 | `Platform::`: virtual memory, system and process information, environment variables, libraries, wall-clock time | **Implemented** (section 12, B40) |

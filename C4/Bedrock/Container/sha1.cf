@@ -1,0 +1,110 @@
+include "sha1.ch"
+include "../Text/stringbuilder.ch"
+
+namespace Core
+{
+	const int64 kSha1BlockBytes = 64;
+	// Where the message length goes in the last block: the final 8 bytes.
+	const int64 kSha1LengthOffset = 56;
+
+	uint32 RotateLeft(uint32 value, int32 bits) { return (value << (uint32)bits) | (value >> (uint32)(32 - bits)); }
+
+	uint32 BigEndian32(const uint8* bytes) {
+		return ((uint32)bytes[0] << 24u) | ((uint32)bytes[1] << 16u) | ((uint32)bytes[2] << 8u) | (uint32)bytes[3];
+	}
+
+	void Sha1Builder::Compress(const uint8* data) {
+		uint32[80] w;
+		for (int32 t = 0; t < 16; ++t) w[t] = BigEndian32(data + t * 4);
+		for (int32 t = 16; t < 80; ++t) w[t] = RotateLeft(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16], 1);
+		uint32 a = state[0];
+		uint32 b = state[1];
+		uint32 c = state[2];
+		uint32 d = state[3];
+		uint32 e = state[4];
+		for (int32 t = 0; t < 80; ++t) {
+			uint32 f = 0u;
+			uint32 k = 0u;
+			if (t < 20) { f = (b & c) | (~b & d); k = 0x5A827999u; }
+			else if (t < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1u; }
+			else if (t < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDCu; }
+			else { f = b ^ c ^ d; k = 0xCA62C1D6u; }
+			const uint32 next = RotateLeft(a, 5) + f + e + k + w[t];
+			e = d;
+			d = c;
+			c = RotateLeft(b, 30);
+			b = a;
+			a = next;
+		}
+		state[0] += a;
+		state[1] += b;
+		state[2] += c;
+		state[3] += d;
+		state[4] += e;
+	}
+
+	// The initial hash value (FIPS 180-4 section 5.3.1), set before the first byte.
+	void Sha1Start(uint32* state) {
+		state[0] = 0x67452301u;
+		state[1] = 0xEFCDAB89u;
+		state[2] = 0x98BADCFEu;
+		state[3] = 0x10325476u;
+		state[4] = 0xC3D2E1F0u;
+	}
+
+	void Sha1Builder::Add(const void* bytes, int64 count) {
+		if (!started) {
+			Sha1Start(&state[0]);
+			started = true;
+		}
+		const uint8* next = (const uint8*)bytes;
+		totalBytes += (uint64)count;
+		int64 i = 0;
+		while (i < count) {
+			if (blockBytes == 0 && count - i >= kSha1BlockBytes) {
+				Compress(next + i);
+				i += kSha1BlockBytes;
+				continue;
+			}
+			block[blockBytes] = next[i];
+			blockBytes += 1;
+			i += 1;
+			if (blockBytes == kSha1BlockBytes) {
+				Compress(&block[0]);
+				blockBytes = 0;
+			}
+		}
+	}
+
+	Sha1Digest Sha1Builder::Finish() {
+		const uint64 bits = totalBytes * 8u;
+		uint8[1] marker = { (uint8)0x80 };
+		uint8[1] zero = { (uint8)0 };
+		Add((const void*)&marker[0], 1);
+		while (blockBytes != kSha1LengthOffset) Add((const void*)&zero[0], 1);
+		uint8[8] length;
+		for (int32 i = 0; i < 8; ++i) length[i] = (uint8)(bits >> (uint64)(56 - i * 8));
+		Add((const void*)&length[0], 8);
+		Sha1Digest digest;
+		for (int32 i = 0; i < 20; ++i) digest.bytes[i] = (uint8)(state[i / 4] >> (uint32)(24 - (i % 4) * 8));
+		return digest;
+	}
+
+	Sha1Digest Sha1(const void* bytes, int64 count) {
+		Sha1Builder builder;
+		builder.Add(bytes, count);
+		return builder.Finish();
+	}
+
+	String Sha1Digest::ToHex() const {
+		StringBuilder text;
+		for (int32 i = 0; i < 20; ++i) text.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return text.ToString();
+	}
+
+	bool Sha1Digest::Equals(const Sha1Digest& other) const {
+		for (int32 i = 0; i < 20; ++i)
+			if (bytes[i] != other.bytes[i]) return false;
+		return true;
+	}
+}

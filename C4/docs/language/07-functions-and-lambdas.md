@@ -306,7 +306,8 @@ func<int32(int32)>[4] table;                // in fields, arrays, parameters and
 
 - A func holds any callable of its signature: a closure, a function, a `funcptr`, or any object with a call
   operator of that signature. It is 16 bytes, `{ code, environment }`, copies freely, compares with `null`
-  (`f == null`, `!f`, `if (f)`) and is called like a function.
+  (`f == null`, `!f`, `if (f)`, either side of `&&` and `||`, a `?:` condition) and is called like a function. As
+  in C++, the test is contextual: `bool b = f;` is an error.
 - A func made from a closure that captures values holds a garbage-collected copy of the closure, so the
   func can outlive the function that made it; copying the func shares that copy (a `mutable` lambda's state
   is shared by all copies of the func). A closure whose only capture is one pointer (`[this]`, `[&x]`) needs

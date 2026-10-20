@@ -5,8 +5,10 @@
 //     response.headers.Set("Cache-Control", "no-store");
 
 include "../Container/array.ch"
+include "../Net/tcp.ch"
 include "../Text/string.ch"
 include "../Text/stringview.ch"
+include "../Threading/atomic.ch"
 
 namespace Http
 {
@@ -18,6 +20,8 @@ namespace Http
 
 	// ASCII letters compared without case: header names, methods' tokens and codings are ASCII.
 	bool EqualsIgnoringCase(Core::StringView a, Core::StringView b);
+	// Whether a comma-separated header value (Connection, Upgrade) lists `token`, without regard to case. False for null.
+	bool ListsToken(const Core::String* list, const char* token);
 
 	// A message's headers in their order; names compare without regard to case.
 	class Headers
@@ -52,6 +56,11 @@ namespace Http
 		public void SetBody(Core::StringView text);
 	}
 
+	// A protocol a connection switches to (WebSocket, AcceptWebSocket): after a 101 response the server calls it on the
+	// connection's thread with the connection's stream, the bytes received after the request, and the server's stop flag,
+	// and closes the connection when it returns.
+	alias Takeover = func<void(Net::TcpStream&, Core::Array<uint8>&, const Threading::Atomic<bool>*)>;
+
 	class Response
 	{
 		[operator("create")] public void Init() { status = 200; }
@@ -59,6 +68,7 @@ namespace Http
 		public int32 status;
 		public Headers headers;
 		public Core::Array<uint8> body;
+		public Takeover takeover;   // with status 101
 
 		public Core::StringView BodyText() const { return Core::StringView((const char*)body.Data(), body.Count()); }
 		// The body, and a Content-Type saying what it is.

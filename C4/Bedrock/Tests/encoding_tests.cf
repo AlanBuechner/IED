@@ -1,0 +1,81 @@
+// Core::Sha1 (FIPS 180 test vectors, a million bytes, pieces against whole across block boundaries) and Core::Base64
+// (RFC 4648's vectors both ways, every byte value, malformed text refused with the output left as it was).
+
+include "bedrock.ch"
+
+static Core::String Sha1Hex(const char* text) { return Core::Sha1((const void*)text, Core::StringView(text).ByteLength()).ToHex(); }
+
+static Core::String Base64Of(const char* text) { return Core::Base64Encode((const void*)text, Core::StringView(text).ByteLength()); }
+
+[test("encoding.sha1")]
+class Sha1Tests {
+	[test("vectors")]
+	public static void TestVectors() {
+		assert_se("da39a3ee5e6b4b0d3255bfef95601890afd80709", Sha1Hex("").CStr(), "the empty message");
+		assert_se("a9993e364706816aba3e25717850c26c9cd0d89d", Sha1Hex("abc").CStr(), "abc");
+		assert_se("84983e441c3bd26ebaae4aa1f95129e5e54670f1", Sha1Hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq").CStr(), "two blocks");
+		Core::Sha1Builder million;
+		uint8[1000] a;
+		for (int32 i = 0; i < 1000; ++i) a[i] = (uint8)'a';
+		for (int32 i = 0; i < 1000; ++i) million.Add((const void*)&a[0], 1000);
+		assert_se("34aa973cd4c4daa4f61eeb2bdbad27316534016f", million.Finish().ToHex().CStr(), "a million a's in pieces");
+	}
+
+	[test("pieces")]
+	public static void TestPieces() {
+		Core::Array<uint8> data;
+		for (int32 i = 0; i < 200; ++i) data.Push((uint8)(i * 31 + 7));
+		const int32[7] sizes = { 0, 1, 55, 56, 63, 64, 65 };
+		for (int32 s = 0; s < 7; ++s) {
+			const int64 size = (int64)sizes[s] + 64;
+			const Core::Sha1Digest whole = Core::Sha1((const void*)data.Data(), size);
+			Core::Sha1Builder bytewise;
+			for (int64 i = 0; i < size; ++i) bytewise.Add((const void*)(data.Data() + i), 1);
+			assert_true(bytewise.Finish() == whole, "a byte at a time equals all at once, around the padding boundaries");
+		}
+		assert_true(Core::Sha1((const void*)"a", 1) != Core::Sha1((const void*)"b", 1), "different input, different digest");
+	}
+}
+
+[test("encoding.base64")]
+class Base64Tests {
+	[test("vectors")]
+	public static void TestVectors() {
+		const char*[7] plain = { "", "f", "fo", "foo", "foob", "fooba", "foobar" };
+		const char*[7] coded = { "", "Zg==", "Zm8=", "Zm9v", "Zm9vYg==", "Zm9vYmE=", "Zm9vYmFy" };
+		for (int32 i = 0; i < 7; ++i) {
+			assert_se(coded[i], Base64Of(plain[i]).CStr(), "RFC 4648 section 10, encoded");
+			Core::Array<uint8> back;
+			assert_true(Core::Base64Decode(Core::StringView(coded[i]), back), "and decoded");
+			assert_true(Core::StringView((const char*)back.Data(), back.Count()) == plain[i], coded[i]);
+		}
+	}
+
+	[test("every_byte")]
+	public static void TestEveryByte() {
+		Core::Array<uint8> all;
+		for (int32 i = 0; i < 256; ++i) all.Push((uint8)i);
+		Core::String text = Core::Base64Encode((const void*)all.Data(), all.Count());
+		assert_eq((int64)344, text.ByteLength(), "4 characters for every 3 bytes, padded");
+		Core::Array<uint8> back;
+		assert_true(Core::Base64Decode(text.View(), back) && back.Count() == 256, "decodes back");
+		bool same = true;
+		for (int32 i = 0; i < 256; ++i)
+			if (back[i] != (uint8)i) same = false;
+		assert_true(same, "every byte value");
+	}
+
+	[test("malformed")]
+	public static void TestMalformed() {
+		const char*[7] bad = { "Zg=", "Z===", "Zm9v!A==", "=Zm9", "Zg==Zg==", "Zm9", "Z m9v" };
+		for (int32 i = 0; i < 7; ++i) {
+			Core::Array<uint8> out;
+			out.Push((uint8)42);
+			assert_true(!Core::Base64Decode(Core::StringView(bad[i]), out), bad[i]);
+			assert_true(out.Count() == 1 && out[0] == 42, "the output is left as it was");
+		}
+		Core::Array<uint8> appended;
+		appended.Push((uint8)1);
+		assert_true(Core::Base64Decode(Core::StringView("Zm8="), appended) && appended.Count() == 3 && appended[1] == (uint8)'f', "decoding appends");
+	}
+}

@@ -36,19 +36,6 @@ namespace Http
 	// No body may follow a 1xx, 204 or 304 status line.
 	bool StatusHasBody(int32 status) { return status >= 200 && status != 204 && status != 304; }
 
-	bool ListsToken(const Core::String* list, const char* token) {
-		if (!list) return false;
-		Core::StringView text = list->View();
-		int64 start = 0;
-		while (start <= text.ByteLength()) {
-			const int64 comma = text.IndexOf(',', start);
-			const int64 end = comma < 0 ? text.ByteLength() : comma;
-			if (EqualsIgnoringCase(text.Substring(start, end - start).Trimmed(), Core::StringView(token))) return true;
-			start = end + 1;
-		}
-		return false;
-	}
-
 	// HTTP/1.1 stays open unless either side says close; HTTP/1.0 only when the client asked for keep-alive.
 	bool KeepsAlive(const Request& request, const Response& response) {
 		const Core::String* asked = request.headers.Find(Core::StringView("Connection"));
@@ -56,8 +43,8 @@ namespace Http
 		return request.minorVersion >= 1 || ListsToken(asked, "keep-alive");
 	}
 
-	// The status line, the handler's headers (but the framing, which the server writes), Content-Length, and
-	// Connection: close when the connection ends after this response.
+	// The status line, the handler's headers (but the framing, which the server writes - except a 101's Connection:
+	// Upgrade), Content-Length, and Connection: close when the connection ends after this response.
 	void WriteHead(Core::StringBuilder& head, const Response& response, bool closing) {
 		head.Append("HTTP/1.1 ");
 		head.AppendInt(response.status);
@@ -68,7 +55,7 @@ namespace Http
 			const Header& header = response.headers.At(i);
 			if (EqualsIgnoringCase(header.name.View(), Core::StringView("Content-Length")) ||
 				EqualsIgnoringCase(header.name.View(), Core::StringView("Transfer-Encoding")) ||
-				EqualsIgnoringCase(header.name.View(), Core::StringView("Connection"))) continue;
+				(response.status != 101 && EqualsIgnoringCase(header.name.View(), Core::StringView("Connection")))) continue;
 			head.Append(header.name.View());
 			head.Append(": ");
 			head.Append(header.value.View());
@@ -218,6 +205,10 @@ namespace Http
 		c.pending.RemoveRange(0, used);
 		Response response;
 		RunHandler(handler, request, response);
+		if (response.status == 101 && response.takeover) {
+			if (Send(c, response, false, false)) response.takeover(c.stream, c.pending, &stopping);
+			return false;
+		}
 		const bool keep = KeepsAlive(request, response) && !stopping.Load();
 		return Send(c, response, !keep, request.method == "HEAD") && keep;
 	}

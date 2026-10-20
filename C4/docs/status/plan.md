@@ -144,6 +144,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-64 | Strict aliasing (roadmap 5.2) | **C++'s rule, on by default.** A value in memory is read and written only as its own type, where every integer of one size is one type (signed, unsigned, normalized, a character, an enum of that underlying type), an alias is its target, an array is its elements and a `packed T[N]` is its `T` lanes; as a byte type (`int8`, `uint8`, `char8`, `snorm8`, `unorm8`), which reads and writes any memory; through a union member (named or anonymous, or an element of an array member), which reads any member's bytes, so punning through a union works as in C; or as part of an object that contains it (a copy reads every field). Pointers, references, `funcptr` and `func` values are one type. Anything else, such as reading a `float` through an `int32*`, is undefined: the optimizer assumes it does not happen and may reorder or drop such accesses. A value's bits are read with `reinterpret_cast<uint32>(f)` (a number to another number of the same size, as D-62 does for vectors), a union, or a byte copy (`memcpy`, a `uint8*`). Unlike clang, which lets a vector type read anything, a `packed T[N]` reads only `T` memory: otherwise a loop storing vectors could not keep pointers it read in registers; `simd_load` from a `T*` or a `reinterpret_cast` of the vector covers what a C cast to `__m128i*` does. The compiler tells LLVM with type-based alias metadata (`!tbaa`, one node per class under a root `C4 TBAA`) on the program's loads and stores; `-fno-strict-aliasing` turns the rule off for a program (no metadata: any access may touch any memory, as MSVC compiles). Scripts follow the rule. Foreign C/C++ sources are separate objects compiled by clang, so interop is unchanged. | [types 4.14](../language/04-types.md#414-strict-aliasing), [expressions 4](../language/10-expressions.md#4-unary-expressions) |
 | D-65 | Networking (roadmap 7) | Bedrock's `Net` namespace is a thin layer over a small C API in the runtime (`C4Runtime/NetRuntimeC.h`, one implementation file per OS: `Net/SocketsWin32.c` over Winsock 2), like D-63. Sockets are **blocking with per-call timeouts** (milliseconds, `0` to only check, `kWaitForever`), plus `Net::Poll` over many sockets: no callbacks or async runtime - threads (`Threading::`) and `Poll` compose into servers. `Net::Address` is a value (family, port, 16 bytes, IPv6 scope) with the runtime's layout; `ParseAddress` never looks a name up, `Resolve` does. `TcpStream`, `TcpListener` and `UdpSocket` own their socket (closed on delete, moved with `take()`, a zero one closed), return a byte count, `kTimedOut` or `kError`, and keep the last call's error text and timeout (`Net::Outcome`); `Connect` and `Accept` return a closed stream on failure. Sockets are not inherited by child processes; a listener takes its port exclusively. | [Bedrock 13](../library/bedrock.md#13-networking-net) |
 | D-66 | HTTP (roadmap 7) | Bedrock's `Http` namespace is plain C4 over `Net::` (D-65), HTTP/1.1 only and plain http (no TLS). Parsing is pure functions over bytes (heads, framing, a resumable `ChunkedDecoder`) shared by the server and the client; lines may end in CRLF or LF, but folded header lines, control characters and both framings at once are refused. `Http::Server` serves on the calling thread until `Stop()`, a thread per connection, keep-alive and pipelining, with limits (`ServerLimits`) and answers 400 / 408 / 413 / 431 / 501 / 505 for what it refuses and 500 when a handler throws; it owns the framing (`Content-Length`, `Connection: close`) and handles `Expect: 100-continue` and HEAD. `Http::Fetch` / `Get` / `Post` send one request per connection. WebSockets follow (the IDE server pushes to the browser through them). | [Bedrock 14](../library/bedrock.md#14-http-http) |
+| D-67 | WebSockets (roadmap 7) | RFC 6455 in plain C4 over `Http::` (D-66). A handler accepts with `AcceptWebSocket(request, response, session)`; the server writes the 101 and hands the connection to `Response::takeover`, a protocol-neutral hook (the stream, the bytes after the request, the stop flag), on the connection's thread. `WebSocket::Receive` returns whole messages (fragments joined, pings and the close handshake answered) for one receiving thread; sends and `Close` are safe from any thread (a send lock, which also guards closing the stream). Frames are pure functions; violations close with the RFC's codes (1002, 1007, 1009); no extensions or subprotocols. Clients mask with `Platform::RandomBytes`. | [Bedrock 14](../library/bedrock.md#14-http-http) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1273,6 +1274,21 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 - **Tests:** `Bedrock/Tests/http_tests.cf` (26), `array_tests.cf` `append_pointer`, `append_grows_geometrically`
   (BUG-274); Bedrock passes 385 tests at `-O0`, `-O2` and `-O2 -march=x86-64-v3`, twice each.
 
+#### B51 - WebSockets (roadmap 7)
+- **Closes:** BUG-275. **Design:** D-67, [Bedrock 14](../library/bedrock.md#14-http-http). **Depends on:** B50.
+  **Status:** Done.
+- **Done notes:** `Bedrock/Http/frames` and `websocket` (`AcceptWebSocket`, `WebSocket::Connect`, `Receive`,
+  `SendText`, `SendBinary`, `Ping`, `Close`), `Response::takeover` and the server handing a 101's connection over
+  (keeping its `Connection: Upgrade`, passing its stop flag); `Http::ListsToken`, `HostHeader`, `ReadSwitchHead` and
+  ws:// URLs. New in Core: `Sha1` / `Sha1Builder` (`Container/sha1`) and `Base64Encode` / `Base64Decode`
+  (`Text/base64`); in Platform: `RandomBytes` (`c4_system_random_bytes`, BCryptGenRandom). Found and fixed:
+  BUG-275 - a `func` as the right operand of `&&` or `||` (negated twice to make it a bool) compared its `{ code,
+  environment }` struct with an integer and failed IR verification; `!` on a func now uses the one truthiness rule.
+  `AsBool` compares floats unordered (NaN is true, as in C) - not reachable from C4 code today, but now right.
+- **Tests:** `websocket_tests.cf` (16), `encoding_tests.cf` (5), `platform_system_tests.cf` `random_bytes`;
+  IsolatedTest `Lambdas/Bug275FuncInLogicalOperators`, `Operators/NaNIsTrue`. Bedrock passes 405 tests at `-O0`,
+  `-O2` and `-O2 -march=x86-64-v3`, twice each.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1790,7 +1806,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

@@ -125,4 +125,23 @@ class SystemTests {
 		assert_true(!Platform::SetEnvironmentVariable("C4_PLATFORM_TEST_BAD", &notUtf8[0]), "a value that is not UTF-8");
 		assert_true(!Platform::SetEnvironmentVariable(&notUtf8[0], "x"), "a name that is not UTF-8");
 	}
+
+	[test("random_bytes")]
+	public static void TestRandomBytes() {
+		uint8[32] first;
+		uint8[32] second;
+		assert_true(Platform::RandomBytes((void*)&first[0], 32) && Platform::RandomBytes((void*)&second[0], 32), "two draws");
+		bool differ = false;
+		bool anySet = false;
+		for (int32 i = 0; i < 32; ++i) {
+			if (first[i] != second[i]) differ = true;
+			if (first[i] != 0) anySet = true;
+		}
+		assert_true(differ && anySet, "that differ and are not all zero");
+		assert_true(Platform::RandomBytes(nullptr, 0), "no bytes asked for");
+		assert_true(!Platform::RandomBytes((void*)&first[0], -1) && !Platform::RandomBytes(nullptr, 4), "a negative count or no buffer");
+		Core::Array<uint8> large;
+		large.Resize(1 << 20);
+		assert_true(Platform::RandomBytes((void*)large.Data(), large.Count()), "a megabyte at once");
+	}
 }

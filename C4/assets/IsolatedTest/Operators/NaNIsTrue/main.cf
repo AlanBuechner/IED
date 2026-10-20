@@ -1,0 +1,15 @@
+// NaN is true wherever a condition is tested, as in C (it compares unequal to 0), and !NaN is false.
+int32 Truthiness(double n, float f) {
+	int32 r = 0;
+	if (n) r += 1;
+	if (!n) r += 10;
+	if (n && true) r += 100;
+	while (n) { r += 1000; break; }
+	r += n ? 10000 : 0;
+	if (f) r += 100000;
+	return r;
+}
+int32 main() {
+	double z = 0.0;
+	return Truthiness(z / z, (float)(z / z)) == 111101 ? 0 : 1;
+}
