@@ -1,9 +1,11 @@
 #include "BindingGenerator.h"
 #include "C4TypeMapper.h"
+#include "MacroConstants.h"
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
+#include "clang/Lex/Preprocessor.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Tooling.h"
 
@@ -29,6 +31,7 @@ namespace
 		std::vector<std::string> defines;
 		std::vector<std::string> includeDirs;
 		std::vector<std::string> targetFlags; // -march=<cpu>, -m<feature>, -mno-<feature>: the C4 build's processor
+		std::vector<std::string> clangArgs;   // what clang parses the header with (main builds it)
 	};
 
 	CBindArgs g_args; // set in main() before the tool runs; read by the default-constructed action
@@ -52,6 +55,8 @@ namespace
 		class BindingConsumer : public ASTConsumer
 	{
 	public:
+		explicit BindingConsumer(const Preprocessor& pp) : m_Preprocessor(pp) {}
+
 		void HandleTranslationUnit(ASTContext& ctx) override
 		{
 			BindingOptions opts;
@@ -61,6 +66,7 @@ namespace
 
 			BindingGenerator gen(opts);
 			std::string text = gen.Generate(ctx);
+			text += ConstantDeclarations(ConstantCandidates(m_Preprocessor), gen.BoundNames(), g_args.header, g_args.clangArgs, g_args.language == "c++");
 
 			fs::path outPath(g_args.outFile);
 			if (outPath.has_parent_path())
@@ -70,27 +76,34 @@ namespace
 
 			// C++ virtual dispatch: emit a companion C++ shim with one vtable trampoline per
 			// virtual method. InteropPass compiles it as a foreign object and links it in.
+			// A C header's shim is C (BUG-283): it forwards the header's static and inline functions. A shim left from an
+			// earlier run of either language goes first, so the compiler never links a stale one.
 			std::string shim = gen.GenerateShim(ctx);
+			const bool cxx = g_args.language == "c++";
+			const std::string stem = (outPath.parent_path() / outPath.filename().stem()).string();
+			std::error_code ignored;
+			fs::remove(stem + ".cbind_shim.cpp", ignored);
+			fs::remove(stem + ".cbind_shim.c", ignored);
 			if (!shim.empty())
 			{
-				fs::path shimPath(outPath.filename().stem().string() + ".cbind_shim.cpp");
-				shimPath = outPath.parent_path() / shimPath;
-			std::ofstream sf(shimPath, std::ios::trunc);
-			// <new> is required for placement new in ctor wrappers; the user's header may not pull it in.
-			sf << "#define _CRT_SECURE_NO_WARNINGS\n";
-			sf << "#include <new>\n";
-			sf << "#include \"" + fs::absolute(g_args.header).filename().string() + "\"\n";
+				std::ofstream sf(stem + (cxx ? ".cbind_shim.cpp" : ".cbind_shim.c"), std::ios::trunc);
+				sf << "#define _CRT_SECURE_NO_WARNINGS\n";
+				if (cxx) sf << "#include <new>\n"; // placement new in constructor wrappers; the header may not include it
+				sf << "#include \"" + fs::absolute(g_args.header).filename().string() + "\"\n";
 				sf << shim;
 			}
 		}
+
+	private:
+		const Preprocessor& m_Preprocessor;   // the header's macros, read once the parse is done
 	};
 
 	class BindingAction : public ASTFrontendAction
 	{
 	public:
-		virtual std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance&, llvm::StringRef)
+		virtual std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& compiler, llvm::StringRef)
 		{
-			return std::make_unique<BindingConsumer>();
+			return std::make_unique<BindingConsumer>(compiler.getPreprocessor());
 		}
 	};
 }
@@ -129,6 +142,7 @@ int main(int argc, char** argv)
 
 	g_args = args; // action reads these at run time
 	g_args.header = headerPath.string();
+	g_args.clangArgs = cmdLine;
 
 	auto db = std::make_unique<FixedCompilationDatabase>(dir, cmdLine);
 	ClangTool tool(*db, {headerPath.string()});

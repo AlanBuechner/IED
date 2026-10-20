@@ -35,6 +35,24 @@ namespace CBind
 
 	bool IsCxx(const BindingOptions& opts) { return opts.language == "c++"; }
 
+	FunctionBinding HowToBind(const clang::FunctionDecl* fn, const clang::ASTContext& ctx, const BindingOptions& opts)
+	{
+		const clang::FunctionDecl* definition = fn->getDefinition();
+		const bool definedHere = definition && IsMainFile(definition, ctx);
+		const bool forwardable = definedHere && !fn->isVariadic();
+		if (!fn->isExternallyVisible()) return forwardable ? FunctionBinding::Wrapper : FunctionBinding::None;
+		if (IsCxx(opts) && !HasCLanguageLinkage(fn))
+			return IsExternalFreeFunction(fn) || forwardable ? FunctionBinding::Wrapper : FunctionBinding::None;
+		const bool inlineOnly = definition && definition->isInlined() &&
+			(ctx.getLangOpts().CPlusPlus || !definition->isInlineDefinitionExternallyVisible());
+		return inlineOnly && forwardable ? FunctionBinding::Wrapper : FunctionBinding::Direct;
+	}
+
+	bool HasLayout(const clang::RecordDecl* rec)
+	{
+		return rec->isCompleteDefinition() && !rec->isInvalidDecl() && !rec->isDependentType();
+	}
+
 	/// Normalize a GUID string to lowercase canonical 8-4-4-4-12 form. If the text is not
 	/// exactly 32 hex digits (ignoring dashes) it is returned unchanged so C4's parser can
 	/// report a clear "[uuid(...)] is not a valid GUID" error instead of silently mangling it.

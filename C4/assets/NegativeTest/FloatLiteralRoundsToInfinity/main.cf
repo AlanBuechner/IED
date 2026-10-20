@@ -1,0 +1,4 @@
+int32 main() {
+	const float tooLarge = 3.4028236e38f;
+	return 0;
+}

@@ -117,56 +117,6 @@ namespace CBind
 		return overloads > 1 ? name + "_" + std::to_string(index) : name;
 	}
 
-	// Emit a record's fields in C4 source, flattening anonymous union/struct containers so
-	// their named members appear inline. Win32/DX12 lean heavily on anonymous unions (e.g.
-	// D3D12_RESOURCE_BARRIER.Transition.{pResource,StateBefore,StateAfter}); dropping them would
-	// make those structs unusable from C4. An anonymous container is a FieldDecl with an empty
-	// name whose type is an (unnamed) RecordDecl - reachable via getAsTagDecl() since Clang
-	// still creates the tag decl for anonymous records. Named members are emitted at their own
-	// offset, which matches the C/C++ layout of the enclosing struct exactly.
-	void EmitFlattenedFields(const clang::RecordDecl* rec, C4TypeMapper& mapper, std::string& out)
-	{
-		auto emitField = [&](const clang::FieldDecl* f) {
-			std::string ty;
-			if (!mapper.Map(f->getType(), ty))
-				ty = "void*"; // opaque fallback - ABI-correct, keeps the binding buildable
-			out += "\n\t" + AccessOf(f->getAccess()) + ty + " " + f->getNameAsString() + ";";
-		};
-
-		std::function<void(const clang::RecordDecl*)> walk = [&](const clang::RecordDecl* r) {
-			for (const auto* field : r->fields())
-			{
-				if (!field->getNameAsString().empty())
-				{
-					emitField(field); // named member - typed field, supports nested access (desc.SampleDesc.Count)
-					continue;
-				}
-				// Anonymous union/struct container. C4 has no unions and a union's arms overlap in
-				// memory, so we expose the FIRST arm's fields (the primary case, e.g.
-				// D3D12_RESOURCE_BARRIER.Transition) - they sit at the union's offset 0, matching
-				// the C/C++ layout for that arm. Other arms are not exposed (documented limitation);
-				// passing such a struct by pointer and using only the first arm is ABI-safe because
-				// the callee reads only the active arm's fields.
-				const clang::TagDecl* td = field->getType()->getAsTagDecl();
-				if (!td) continue;
-				const auto* subRec = dyn_cast<clang::RecordDecl>(td);
-				if (!subRec) continue;
-				const clang::FieldDecl* firstArm = nullptr;
-				for (const auto* f : subRec->fields()) { firstArm = f; break; }
-				if (!firstArm) continue;
-				const clang::TagDecl* armTd = firstArm->getType()->getAsTagDecl();
-				if (armTd)
-				{
-					if (const auto* armRec = dyn_cast<clang::RecordDecl>(armTd))
-						walk(armRec); // first arm is a record -> flatten its fields
-				}
-				else if (!firstArm->getNameAsString().empty())
-					emitField(firstArm); // first arm is a plain scalar member
-			}
-		};
-		walk(rec);
-	}
-
 	// A static data member is the C++ variable itself, linked by its decorated symbol and read and written in place.
 	void EmitStaticData(const clang::CXXRecordDecl* rec, C4TypeMapper& mapper, clang::ASTContext& ctx, std::string& out)
 	{

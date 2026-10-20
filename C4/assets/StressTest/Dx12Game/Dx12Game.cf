@@ -26,13 +26,9 @@ extern "c++" include "game.hpp" {
 	lib("kernel32.lib");
 }
 
-// Hand-written C4 constant headers (no #define macro junk from the SDK):
-//   windows.ch - Win32 named constants (WM_*, VK_*, WS_*, SW_*, CS_*, INFINITE)
-//   dx12.ch    - DXGI flag #defines not auto-bound as enums
-// All enum-valued constants (D3D_FEATURE_LEVEL_12_0, DXGI_FORMAT_R8G8B8A8_UNORM,
-// D3D12_RESOURCE_STATE_*, ...) come directly from the interop binding above and are used bare.
+// The SDK's enums and its #define constants (WM_*, WS_*, SW_*, CS_*, INFINITE, DXGI_PRESENT_*, ...) come from the
+// interop binding above and are used bare; windows.ch adds the letter keys, which the SDK does not define.
 include "windows.ch"
-include "dx12.ch"
 
 // ============================ helpers ============================
 // GetTickCount64 returns ULONGLONG; C4 has no unsigned 64, so we wrap it as int64.
@@ -247,15 +243,15 @@ void RenderFrame() {
 	memset(&bar, 0, sizeof(D3D12_RESOURCE_BARRIER)); // union arms not used must be zero (native {}-init)
 	bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	bar.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-	bar.Subresource = 0;
-	bar.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-	bar.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	bar.Transition.Subresource = 0;
+	bar.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+	bar.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
 
 	// Fetch this slot's backbuffer (COM IID query) for the barrier target.
 	void* res = null;
 	g_swapchain->GetBuffer(slot, __uuidof(ID3D12Resource), &res);
 	ID3D12Resource* bbRes = (ID3D12Resource*)res;
-	bar.pResource = bbRes;
+	bar.Transition.pResource = bbRes;
 	list->ResourceBarrier(1, &bar);
 
 	// Clear color (animated).
@@ -267,8 +263,8 @@ void RenderFrame() {
 	list->ClearRenderTargetView(g_rtvHandles[slot], &cc[0], 0, null);
 
 	// Transition RENDER_TARGET -> PRESENT.
-	bar.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-	bar.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+	bar.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	bar.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
 	list->ResourceBarrier(1, &bar);
 
 	// Close + execute + signal this slot's fence value (fence values must be monotonic).

@@ -1,0 +1,9 @@
+// BUG-287: a float literal that rounds to FLT_MAX - '3.40282347e+38f', how FLT_MAX prints - was refused as out of
+// range, because the check compared the literal's double value with FLT_MAX instead of asking where it rounds.
+int32 main() {
+	const float largest = 3.40282347e+38f;
+	const float spelledShorter = 3.4028235e38f;
+	if (largest != spelledShorter) return 1;
+	if ((double)largest != 3.4028234663852886e+38) return 2;
+	return 0;
+}

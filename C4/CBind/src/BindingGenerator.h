@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace clang
@@ -41,8 +42,11 @@ namespace CBind
 		/// when no wrappers are needed (C mode).
 		std::string GenerateShim(clang::ASTContext& ctx);
 
+		/// Every C4 name Generate bound: types, enumerators, aliases and functions.
+		const std::unordered_set<std::string>& BoundNames() const { return m_Bound; }
+
 	private:
-		bool EmitRecord(const clang::RecordDecl* rec, const std::string& c4Name, C4TypeMapper& mapper, std::string& out);
+		bool EmitRecord(const clang::RecordDecl* rec, const std::string& c4Name, C4TypeMapper& mapper, clang::ASTContext& ctx, std::string& out);
 		bool EmitEnum(const clang::EnumDecl* en, const std::string& c4Name, std::string& out);
 		// cxxPrefix is the enclosing C++ namespace path ("a::b::", "" at global scope). It is used
 		// to fully-qualify class references in the generated shim and to make wrapper symbols unique
@@ -51,5 +55,6 @@ namespace CBind
 		bool EmitClass(const clang::CXXRecordDecl* rec, const std::string& c4Name, C4TypeMapper& mapper, clang::ASTContext& ctx, std::string& out, const std::string& cxxPrefix = "");
 
 		const BindingOptions& m_Opts;
+		std::unordered_set<std::string> m_Bound;
 	};
 }

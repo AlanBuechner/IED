@@ -5,7 +5,6 @@ extern "c++" include "game.hpp" {
 	lib("d3d12.lib"); lib("dxgi.lib"); lib("user32.lib");
 }
 include "windows.ch"
-include "dx12.ch"
 ID3D12Device* g_dev = null;
 IDXGIFactory2* g_fac = null;
 IDXGISwapChain3* g_sc = null;

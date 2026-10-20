@@ -23,9 +23,6 @@ namespace CBind
 {
 	std::string BindingGenerator::GenerateShim(clang::ASTContext& ctx)
 	{
-		if (m_Opts.language != "c++")
-			return "";
-
 		const auto* tu = ctx.getTranslationUnitDecl();
 		std::string out;
 		bool emittedAny = false;
@@ -89,27 +86,26 @@ namespace CBind
 			std::string name = fn->getNameAsString();
 			if (!IsBindableFreeFunctionName(name) || fnSeen.count(name))
 				return;
-			// Only wrap EXTERNAL functions (declared without a body) so the wrapper never pulls
-			// inline header bodies / unlinked symbols into the shim (matches EmitFunction).
-			if (!IsExternalFreeFunction(fn))
-				return;
-			// C-language-linkage functions (extern "C" - all Windows/DX APIs) are bound directly
-			// to their unmangled symbol in EmitFunction, so no wrapper is emitted or needed.
-			// Wrapping them produced ~5,600 bodies whose dllimport/intrinsic refs can't link.
-			if (HasCLanguageLinkage(fn))
+			// Exactly the functions EmitFunction binds to a wrapper (BUG-283): a C++-linkage function, or one with no
+			// symbol of its own that the bound header defines. A C-linkage export is reached at its own symbol.
+			if (HowToBind(fn, ctx, m_Opts) != FunctionBinding::Wrapper)
 				return;
 			fnSeen.insert(name);
 				recordNs(prefix);
 				std::string ret = typeStr(fn->getReturnType());
 				std::string params, names;
 				params = paramList(fn, names);
-				out += "// free-function wrapper for " + prefix + name + "\nextern \"C\" "
+				const bool cxx = IsCxx(m_Opts);
+				const bool returns = !fn->getReturnType()->isVoidType();
+				out += "// free-function wrapper for " + prefix + name + "\n" + (cxx ? "extern \"C\" " : "")
 					+ ret + " cbind_fn_" + name + "(";
-				if (!params.empty()) out += params;
-				out += ") {\n\treturn " + prefix + name + "(" + names + ");\n}\n\n";
+				out += params.empty() && !cxx ? "void" : params;
+				out += ") {\n\t" + std::string(returns ? "return " : "") + prefix + name + "(" + names + ");\n}\n\n";
 				emittedAny = true;
 				return;
 			}
+			if (!IsCxx(m_Opts))
+				return; // a C header's records have no methods to forward
 
 			const auto* rec = dyn_cast<clang::CXXRecordDecl>(d);
 			if (!rec || !rec->isCompleteDefinition() || rec->getNameAsString().empty())
@@ -224,7 +220,7 @@ namespace CBind
 		// wrappers that use them; Source.cpp already prepends the #include lines.
 		std::string result;
 		for (const auto& ns : usingNs)
-			result += "using namespace " + ns + ";\n";
+			if (IsCxx(m_Opts)) result += "using namespace " + ns + ";\n";
 		return result + out;
 	}
 } // namespace CBind

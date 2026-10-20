@@ -63,8 +63,18 @@ CBind maps foreign declarations to C4 declarations:
 
 | C / C++ | C4 binding |
 |---|---|
-| free function | declaration-only C4 function with `[link("symbol")]` |
-| struct / class layout | C4 `struct` with the same field layout |
+| free function | declaration-only C4 function with `[link("symbol")]`; a C-linkage function is reached at its own symbol, body or not |
+| `static` or `inline` function the bound header defines | reached through a wrapper CBind writes into a shim (`cbind_fn_<name>`, a C shim for a C header), so its body is compiled; a system header's own inline helpers are not bound |
+| object-like `#define` that is a constant | a C4 constant of C's type: `#define WM_CLOSE 0x0010` is `const int32 WM_CLOSE = 16;`, unsigned macros `uint32` / `uint64`, 64-bit ones `int64`, floats `float` / `double`, narrow strings `const char*`. Each is evaluated by clang, so `(A | B)` and casts fold; a macro that is not such a constant (a type, a statement, `{0}`), a function-like one, or one named like a bound declaration or starting with `_` is left out. Two bindings in one file declare a constant once |
+| struct / class layout | C4 `struct` with clang's layout, byte for byte (B57); see below for what has no C4 spelling |
+| union | C4 `union` of every member; an anonymous struct inside it is a struct view |
+| anonymous union in a struct | a C4 anonymous union of every arm (`overlapped.Pointer`, `barrier.Transition.pResource`), struct arms as struct views |
+| anonymous struct in a struct, or (Microsoft) a named struct embedded without a field name | its members are the owner's |
+| field of an anonymous record type | that type, named after its owner and field: `in_addr.S_un` is an `in_addr_S_un` |
+| struct defined inside another | bound under its own name |
+| bitfields | the integers that store them, named after the run: `uint32 __bits_a_b_c` (C4 has no bitfields: read with shifts and masks) |
+| a member C4 cannot spell (`__int128`) or place (a member of a `#pragma pack` record that is not aligned) | its bytes, under its name: `uint8[16] big` |
+| flexible array member | left out (it has no size); the record keeps C's size |
 | C++ namespace | flattened: `mathlib::Dot` is called as `Dot` |
 | constructor | `[operator("create")]` extension method, so `new Counter(40)` works |
 | instance method | extension method on the type: `c->Add(5)` |
@@ -153,7 +163,9 @@ calls possible:
   the target lacks the register (tests `Interop/SimdVectorArguments`, `Interop/SimdIntrinsicsInC`). A vector C pads
   (a 3-lane `ext_vector_type` takes 16 bytes) has no binding. Pure packed vector objects pass the same way.
 - Foreign sources compile, and CBind parses headers, with the build's `-march` / `-m` flags (D-62), so C sees the
-  same processor (`__AVX2__`) and passes vectors the same way.
+  same processor (`__AVX2__`) and passes vectors the same way. Foreign sources and shims also take the build's `-O`
+  level and `-g` (B59), and an object is kept from one build to the next while its source, every header clang read
+  for it, its flags and clang itself are unchanged.
 - `void*` converts to and from any pointer (and `T**` to `void**`), which covers COM out-params
   such as `IID_PPV_ARGS` patterns.
 - Integer-to-pointer casts are allowed for handle-style APIs.

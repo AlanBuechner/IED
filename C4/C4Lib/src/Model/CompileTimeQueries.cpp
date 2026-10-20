@@ -1,6 +1,7 @@
 #include "Model/CompileTimeQueries.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/ObjectType.h"
+#include "Model/Types/UnionType.h"
 #include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
 
 namespace Scripting
@@ -38,6 +39,37 @@ namespace Scripting
 		return QueryResult<int64>::Success(static_cast<int64>(measured.value->GetAlignment()));
 	}
 
+	namespace
+	{
+		struct FieldStep
+		{
+			int64 offset = 0;
+			const Type* type = nullptr;
+		};
+
+		// One name of offsetof's path: where it is in an object or a union (BUG-286), and its type.
+		QueryResult<FieldStep> StepInto(const Type* container, const Core::String& name)
+		{
+			if (const auto* object = dynamic_cast<const ObjectType*>(container))
+			{
+				const ObjectType::FieldInfo* field = object->GetFieldByName(name);
+				if (!field)
+					return QueryResult<FieldStep>::Fail(QueryError::NotFound, "offsetof: '" + object->GetName() + "' has no field '" + name + "'");
+				if (field->m_IsStatic)
+					return QueryResult<FieldStep>::Fail(QueryError::NotAValue,
+						"offsetof: '" + name + "' is a static member of '" + object->GetName() + "', which has no offset");
+				return QueryResult<FieldStep>::Success({ object->GetFieldOffset(name), field->m_Type });
+			}
+			if (const auto* un = dynamic_cast<const UnionType*>(container))
+			{
+				for (const ObjectType::FieldInfo& field : un->GetFields())
+					if (field.mName == name) return QueryResult<FieldStep>::Success({ un->GetFieldOffset(name), field.m_Type });
+				return QueryResult<FieldStep>::Fail(QueryError::NotFound, "offsetof: '" + un->GetName() + "' has no field '" + name + "'");
+			}
+			return QueryResult<FieldStep>::Fail(QueryError::NotAValue, "offsetof: '" + container->GetName() + "' has no fields, so it has no '" + name + "'");
+		}
+	}
+
 	QueryResult<int64> OffsetOfField(const Type* type, const Core::Vector<Token>& path)
 	{
 		int64 offset = 0;
@@ -46,19 +78,10 @@ namespace Scripting
 		{
 			auto measured = Measured(current);
 			if (!measured.Ok()) return QueryResult<int64>::Fail(measured.error, measured.message);
-			const auto* object = dynamic_cast<const ObjectType*>(measured.value);
-			const Core::String& name = path[i].GetText();
-			if (!object)
-				return QueryResult<int64>::Fail(QueryError::NotAValue,
-					"offsetof: '" + measured.value->GetName() + "' has no fields, so it has no '" + name + "'");
-			const ObjectType::FieldInfo* field = object->GetFieldByName(name);
-			if (!field)
-				return QueryResult<int64>::Fail(QueryError::NotFound, "offsetof: '" + object->GetName() + "' has no field '" + name + "'");
-			if (field->m_IsStatic)
-				return QueryResult<int64>::Fail(QueryError::NotAValue,
-					"offsetof: '" + name + "' is a static member of '" + object->GetName() + "', which has no offset");
-			offset += object->GetFieldOffset(name);
-			current = field->m_Type;
+			auto step = StepInto(measured.value, path[i].GetText());
+			if (!step.Ok()) return QueryResult<int64>::Fail(step.error, step.message);
+			offset += step.value.offset;
+			current = step.value.type;
 		}
 		return QueryResult<int64>::Success(offset);
 	}

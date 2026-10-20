@@ -150,6 +150,9 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-70 | Event loop (roadmap 7) | `Net::EventLoop` in plain C4 over `Net::Poll`: a readiness loop, not completion ports. Each turn polls the watched sockets and a loopback UDP socket that posting threads write one byte to (only when none is on its way), then runs ready sockets' callbacks, due timers (a binary heap keyed by monotonic due time and id; a periodic timer re-arms before its callback and runs once for a late turn) and the work posted before the turn. Only `Post` and `Stop` cross threads; blocking work (processes, file watching, DNS) runs on other threads and posts its result, so the loop needs no completion-port integration. A callback that throws ends the turn with the loop consistent. `WSAPoll` is linear in the sockets watched, fine for an IDE server's connections (tested with 1000). | [Bedrock 13](../library/bedrock.md#13-networking-net) |
 | D-71 | Regular expressions | `Core::Regex` in plain C4: a parser to a tree (`regexparse`), a compiler to a Thompson program (`regexcompile`: Char, Class over sorted code-point ranges, Split / Jump, Save, assertions; counted repetition written out, at most 200000 instructions) and a Pike VM (`regexvm`) with threads in priority order, so matches are leftmost-first like a backtracking engine but always linear in the text. RE2 syntax and limits: no backreferences or lookaround; case folding and `\d \w \s` are ASCII. Text is UTF-8, matched by code point; a byte that is not UTF-8 matches only `.`. A pattern's literal prefix is found with a substring search before the VM starts. Needed for the IDE's problem matchers and search. | [Bedrock 4](../library/bedrock.md#regular-expressions-regexch) |
 | D-72 | Serialization through reflection; `nameof` | Values are read and written by what their reflected type names say (`Core::String`, `Core::Array<T>`, `T[N]`, `Core::HashMap<Core::String, V>`, enums, objects), at the layouts reflection reports (field offsets, the `KeyValue` type of a map) - no per-type code. Arrays and maps are built through type-erased layouts that live beside the containers (`ArrayLayout` / `ResizeEmptyArray`, `HashMapLayout`), because a template member is compiled only when used (D-16) and reflection cannot call `Resize` on an instance nobody resizes; their new elements start zero, so the codec serves types whose zero is valid. `nameof(T)` / `nameof(expr)` - a compile-time query like `sizeof`, a string constant of the D-50 qualified name - lets generic code find its argument's reflection: `ToJson<T>` / `FromJson<T>`. | [Bedrock 6](../library/bedrock.md#6-serialization-serialization), [10](../language/10-expressions.md) |
+| D-73 | Record layouts in CBind | CBind writes a record's members from clang's `ASTRecordLayout` so that C4's natural layout reproduces it byte for byte: unions as `union`, anonymous unions as C4 anonymous unions of every arm (struct arms as views; one inside a view as bytes), bitfield runs as the integers that store them, members C4 cannot spell or place as named bytes, explicit padding wherever C4 would not place a member itself (always before a record-typed member, whose C4 alignment may be smaller), and tail padding only where C4's rounding falls short. Record types that fields need but no file-scope declaration names are bound too (anonymous ones named owner_field). C4 has no packing, alignment overrides or bitfields, so those are reproduced in layout only. Template patterns (no layout) are not bound. | [13](../language/13-interop.md) |
+| D-74 | Header functions and macro constants in CBind | Every external C-linkage function is bound with `[link]` to its own symbol, body or not. A function with no symbol of its own (`static`, or inline with no external definition) is bound only when the bound header itself defines it, through a forwarding wrapper in a shim CBind writes (C for a C header, C++ as before); a system header's thousands of inline helpers are not compiled. Object-like macros are bound as constants by a second clang parse of the header that declares `static const __typeof__((NAME)) __cbind_NAME = NAME;` for each candidate (filtered to tokens that cannot derail the parse) and evaluates it: integers keep C's width and signedness, floats their precision, narrow strings become `const char*`. A constant two bindings in one file both declare is kept once (`InteropPass`). | [13](../language/13-interop.md) |
+| D-75 | Foreign objects follow the build and are reused | A foreign source or shim compiles with the program's `-O<n>` and `-g`, and clang writes a depfile beside the object (`-MD -MF <obj>.d`). After a compile, `<obj>.key` records an FNV key of the compiler (path, size, time), the flags, the defines and include folders, and the bytes of every file the depfile lists (the source and each header); the next build reuses the object while the key is the same. Content, not times, so a checkout that only touches files rebuilds nothing. | [13](../language/13-interop.md) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1358,6 +1361,44 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   `HashMap` itself, the DOM bridge); IsolatedTest `Types/NameOf`; NegativeTest `NameOfUnknownType`. Bedrock passes
   464 tests.
 
+#### B57 - Record layouts in CBind
+- **Closes:** BUG-279, BUG-280, BUG-281, BUG-282, BUG-286. **Design:** D-73, [13](../language/13-interop.md).
+  **Status:** Done.
+- **Done notes:** `CBind/src/RecordText` replaces the field flattening (`C4Text`'s `EmitFlattenedFields`);
+  `BindingGenerator` binds unions as unions, claims the record types fields need (`in_addr_S_un`) and writes them
+  before their owners, and skips template patterns (`HasLayout`; CBind crashed asking for their layout). Breaking
+  for code that used the old flattening: an anonymous union's struct arm is reached through its field, as in C
+  (`barrier.Transition.Subresource`; StressTest `Dx12Game` updated). BUG-286: `offsetof` steps into named unions
+  (`CompileTimeQueries`).
+- **Tests:** IsolatedTest `Interop/Bug279RecordLayouts` (25 sizes and offsets against C's, values written on one
+  side read on the other through unions, struct views and bitfields), `Types/Bug286OffsetOfUnion`; the real
+  `winsock2.h` binds `sockaddr_in` and `in_addr` at C's sizes; StressTest compiles.
+
+#### B58 - Header functions and macro constants in CBind
+- **Closes:** BUG-283, BUG-284, BUG-287. **Design:** D-74, [13](../language/13-interop.md). **Status:** Done.
+- **Done notes:** `CBind/src/DeclFacts` (`HowToBind`: none, direct, wrapper), `BindingGenerator::EmitFunction`,
+  `BindingShim` (C shims), `Source.cpp` (`.cbind_shim.c` or `.cpp`, stale ones removed), `MacroConstants`
+  (`ConstantCandidates`, `ConstantDeclarations`); `InteropPass` compiles a C shim and keeps a file's constants
+  unique. `<windows.h>` with `<winsock2.h>` binds 18239 constants. Breaking for code that wrote a bound header's
+  constants by hand: they are now redefinitions (IsolatedTests `Dx12DeviceInit`, `Win32WindowCallback` and
+  StressTest `Dx12Game` dropped theirs; `dx12.ch` is gone). Found on the way: BUG-287 - a float literal that rounds
+  to `FLT_MAX` (`3.40282347e+38f`, how `FLT_MAX` prints, which CBind writes) was refused as out of range, the check
+  comparing the double value with `FLT_MAX`; it now refuses what rounds to infinity (`Model/Literals.cpp`).
+- **Tests:** IsolatedTests `Interop/Bug283HeaderFunctions` (C `static inline`, C99 `inline` with an external
+  definition, C++ `inline` and `static`, void and double results), `Interop/Bug284MacroConstants` (every integer
+  width and signedness, the most negative int32, expressions, casts, characters, floats, `FLT_MAX`, an escaped
+  string, non-constants left out), `Types/Bug287FloatMaxLiteral`; NegativeTest `FloatLiteralRoundsToInfinity`.
+
+#### B59 - Foreign objects at the build's level, and reused
+- **Closes:** BUG-285. **Design:** D-75, [13](../language/13-interop.md). **Status:** Done.
+- **Done notes:** `CompileForeignSource` takes the build's `-O` / `-g` (from `src/Source.cpp`) and writes a depfile;
+  `Interop/ForeignCache` (`ForeignObjectIsCurrent`, `RecordForeignObject`, `DepfileInputs`) keys and reuses objects;
+  `InteropPass::CompileForeign` asks it first and says so under `-v`.
+- **Tests:** C4Testing `Compiler.ForeignCache` (4: the depfile syntax, an object current until its source or an
+  included header changes or a header is gone, flags, defines and the compiler in the key, a missing record, depfile
+  or object). The S7 probe: `__OPTIMIZE__` set at `-O2`, both objects reused on the next build, recompiled at
+  `-O0`.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1875,7 +1916,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

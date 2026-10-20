@@ -1,4 +1,5 @@
 #include "InteropPass.h"
+#include "Interop/ForeignCache.h"
 #include "Compiler/BuildUtils.h"
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/Toolchain.h"
@@ -8,6 +9,7 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -33,6 +35,30 @@ namespace Scripting
 			std::ostringstream ss;
 			ss << f.rdbuf();
 			return ss.str();
+		}
+
+		// A binding's macro constants (BUG-284) that an earlier binding in the same file already declared, left out: two
+		// headers that both include <stdint.h> each bind INT32_MAX. Constants follow CBind's marker, one per line as
+		// `const <type> <name> = <value>;`.
+		std::string WithoutRepeatedConstants(const std::string& binding, std::unordered_set<std::string>& declared)
+		{
+			std::istringstream lines(binding);
+			std::string out;
+			std::string line;
+			bool constants = false;
+			while (std::getline(lines, line))
+			{
+				if (line.rfind("// Constants from the header's object-like macros", 0) == 0) constants = true;
+				else if (constants && line.rfind("const ", 0) == 0)
+				{
+					std::istringstream words(line);
+					std::string keyword, type, name;
+					words >> keyword >> type >> name;
+					if (!declared.insert(name).second) continue;
+				}
+				out += line + "\n";
+			}
+			return out;
 		}
 
 		std::string FindCBindExe()
@@ -375,18 +401,26 @@ namespace Scripting
 		for (const auto& d : fo.defines) defines.Push(d);
 		for (const auto& inc : fo.includeDirs) includeDirs.Push(inc);
 		includeDirs.Push(Core::String(RuntimeFolder().c_str())); // native code registers with the runtime through its C API (ReflectABI.h)
-		if (!CompileForeignSource(fo.srcPath, fo.objPath, fo.language, defines, includeDirs, fo.targetFlags, verbose))
+		// An object whose source, headers and flags are unchanged is kept (BUG-285).
+		const std::string compiler = ClangPath();
+		if (ForeignObjectIsCurrent(fo, compiler))
+		{
+			if (verbose) CORE_INFO("Interop: {0} is up to date", fo.srcPath);
+			return true;
+		}
+		if (!CompileForeignSource(fo.srcPath, fo.objPath, fo.language, defines, includeDirs, fo.targetFlags, fo.compileFlags, verbose))
 		{
 			CORE_WARN("Interop: failed to compile foreign source {0}", fo.srcPath);
 			return false;
 		}
+		RecordForeignObject(fo, compiler);
 		return true;
 	}
 
 	InteropPass::Result InteropPass::RunFolder(const std::vector<std::string>& rootFolders,
 		const std::vector<InteropFileInput>& files,
 		const std::vector<std::string>& cliIncludeDirs, const std::string& objDir, const std::vector<std::string>& targetFlags, bool verbose,
-		bool declarationsOnly)
+		bool declarationsOnly, const std::vector<std::string>& compileFlags)
 	{
 		Result result;
 		std::string cbindExe = FindCBindExe();
@@ -401,6 +435,7 @@ namespace Scripting
 			std::string fileDir = Norm(fs::path(f.absPath).parent_path().string());
 
 			std::string transformed = text;
+			std::unordered_set<std::string> boundConstants;
 			bool changed = false;
 			size_t dirOffset = SIZE_MAX; // offset of the first directive whose bindings were appended
 
@@ -458,23 +493,26 @@ namespace Scripting
 					// Append: file-scope declarations are order independent (docs/language/01 1.7), and after the
 					// user's text no user line moves, so diagnostics keep their lines. Record the first bound
 					// directive's offset so the LSP can map F12 on a generated symbol to it.
-					transformed = transformed + "\n" + ReadFileText(outFile);
+					transformed = transformed + "\n" + WithoutRepeatedConstants(ReadFileText(outFile), boundConstants);
 					if (dirOffset == SIZE_MAX) dirOffset = d.offset;
 					changed = true;
 
 					// C++ virtual dispatch: CBind emits a companion shim (one vtable trampoline per
 					// virtual method). Compile it as a foreign object and link it in so [link]
 					// references to the trampolines resolve.
-					fs::path shimPath = fs::path(outFile);
-					shimPath = shimPath.parent_path() / (shimPath.stem().string() + ".cbind_shim.cpp");
+					// A C header's shim is C: it forwards the header's static and inline functions (BUG-283).
+					const fs::path shimStem = fs::path(outFile).parent_path() / fs::path(outFile).stem();
+					const bool cxxShim = fs::exists(shimStem.string() + ".cbind_shim.cpp");
+					const fs::path shimPath = shimStem.string() + (cxxShim ? ".cbind_shim.cpp" : ".cbind_shim.c");
 					if (!declarationsOnly && fs::exists(shimPath))
 					{
 						ForeignObject fo;
 						fo.srcPath = Norm(shimPath.string());
 						fo.objPath = Norm(objDir + "/" + PathTag(absPath) + ".shim.obj");
-						fo.language = "c++";
+						fo.language = cxxShim ? "c++" : "c";
 						fo.defines = d.defines;
 						fo.targetFlags = targetFlags;
+						fo.compileFlags = compileFlags;
 						// The shim #includes the header by filename - make sure its directory is on
 						// the include path even when no explicit include_dirs were given.
 						std::string headerDir = Norm(fs::path(absPath).parent_path().string());
@@ -487,7 +525,7 @@ namespace Scripting
 						fo.includeDirs.insert(fo.includeDirs.end(), d.includeDirs.begin(), d.includeDirs.end());
 						if (!CompileForeign(fo, verbose))
 							result.errors.push_back(
-								"Failed to compile the generated C++ shim for '" + d.path +
+								"Failed to compile the generated shim for '" + d.path +
 								"' referenced in " + name + ".");
 						if (fs::exists(fo.objPath))
 							result.objects.push_back(fo);
@@ -503,6 +541,7 @@ namespace Scripting
 					fo.defines = d.defines;
 					fo.includeDirs = d.includeDirs;
 					fo.targetFlags = targetFlags;
+					fo.compileFlags = compileFlags;
 					if (!declarationsOnly)
 					{
 						if (!CompileForeign(fo, verbose))

@@ -157,7 +157,7 @@ assets\build-output\iso\SwizzleLanguage.exe
   its script, which compiles for the host's target), `WideVectorsAvx2`. A case's `flags.txt` holds more compiler
   flags for its host (`WideVectorsAvx2` builds for `-march=x86-64-v3`, so its script may use `simd_fma`). Output in
   `assets/build-output/script/<O0|O2>/<case>/` (`run.log`).
-- `StressTest/Dx12Game/`: `Dx12Game.cf` with `dx12.ch`, `windows.ch`, `game.hpp`. The gate is a clean
+- `StressTest/Dx12Game/`: `Dx12Game.cf` with `windows.ch`, `game.hpp`. The gate is a clean
   compile; `-Run` executes the interactive game and needs a DX12 GPU.
 - `ToolsTest/` (each check builds its programs under `assets/build-output/toolstest/` or `%TEMP%/c4-toolstest/`):
   - `ShippedBedrockMirrorsSource`: no missing, extra or different file in `bin/.../C4/Bedrock`.

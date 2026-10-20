@@ -21,11 +21,20 @@ namespace CBind
 	bool IsMainFile(const clang::Decl* d, const clang::ASTContext& ctx);
 	const clang::TagDecl* UnderlyingTag(const clang::TypedefNameDecl* td);
 	bool IsCxx(const BindingOptions& opts);
+	/// A record clang can lay out: defined, valid and not a template pattern (whose layout depends on its arguments).
+	bool HasLayout(const clang::RecordDecl* rec);
 	std::string CanonicalizeGuidString(const std::string& raw);
 	std::string GetRecordUuid(const clang::RecordDecl* rec);
 	bool IsBindableFreeFunctionName(const std::string& name);
 	bool IsExternalFreeFunction(const clang::FunctionDecl* fn);
 	bool HasCLanguageLinkage(const clang::FunctionDecl* fn);
+	/// How C4 reaches a free function (BUG-283): not at all, at its own symbol, or through a wrapper the shim compiles
+	/// from its body (`cbind_fn_<name>`). A function with no symbol of its own - `static`, or inline in the bound
+	/// header - gets a wrapper when the bound header itself defines it (a system header's hundreds of inline helpers
+	/// are not all compiled); a C++-linkage function gets one when it is external or the bound header defines it; any
+	/// other C-linkage function is reached at its symbol, which a library exports.
+	enum class FunctionBinding { None, Direct, Wrapper };
+	FunctionBinding HowToBind(const clang::FunctionDecl* fn, const clang::ASTContext& ctx, const BindingOptions& opts);
 	bool HasOwnVirtuals(const clang::CXXRecordDecl* rec);
 	bool BaseHasVirtuals(const clang::CXXRecordDecl* rec);
 

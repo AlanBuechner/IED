@@ -1,0 +1,43 @@
+// BUG-279 to BUG-282: CBind bound a named union as a struct, a field it could not type as `void*`, only the first
+// arm of an anonymous union (and the first member of an anonymous struct), and each bitfield as a whole integer,
+// so sizes and offsets differed from C's. Every record here must have C's layout, and values cross both ways.
+extern "c" include "layouts.h"
+extern "c" source "layouts.c"
+
+int32 main() {
+	const int64[25] c4 = {
+		sizeof(U), offsetof(U, d),
+		sizeof(HasU), offsetof(HasU, after),
+		sizeof(Small1st), offsetof(Small1st, after),
+		sizeof(Ovl), offsetof(Ovl, hEvent),
+		sizeof(LI), offsetof(LI, QuadPart),
+		sizeof(InAddr), sizeof(SockAddrIn), offsetof(SockAddrIn, zero),
+		sizeof(Outer), offsetof(Outer, z),
+		sizeof(Flex),
+		sizeof(Wide), offsetof(Wide, after),
+		sizeof(Bits), offsetof(Bits, d), offsetof(Bits, g),
+		sizeof(Packed), offsetof(Packed, c),
+		sizeof(AnonStruct), offsetof(AnonStruct, z)
+	};
+	for (int32 i = 0; i < 25; ++i)
+		if (c4[i] != CLayout(i)) {
+			printf("layout %d: C %lld, C4 %lld\n", i, CLayout(i), c4[i]);
+			return 1;
+		}
+	LI li;
+	FillLI(&li);
+	if (li.HighPart != 0x11223344 || li.LowPart != (uint32)0x55667788 || li.u.HighPart != 0x11223344) return 2;
+	Bits bits;
+	FillBits(&bits);
+	if ((bits.__bits_a_b_c & 0xF) != 5 || ((bits.__bits_a_b_c >> 4) & 0xFFF) != 17 || (bits.__bits_a_b_c >> 16) != 1000) return 3;
+	if (bits.d != 77 || bits.g != (uint16)500 || (bits.__bits_e_f & 7) != 3 || (bits.__bits_e_f >> 3) != 9) return 4;
+	Ovl ovl;
+	ovl.Pointer = (void*)0x123456789;
+	if (ReadOvlOffset(&ovl) != (uint32)0x23456789) return 5;
+	SockAddrIn address;
+	address.addr.S_un.S_addr = (uint32)0x04030201;
+	if (ReadSecondByte(&address) != (uint8)2 || address.addr.S_un.S_un_w.w1 != (uint16)0x0201) return 6;
+	Outer outer;
+	outer.inner.y = 9;
+	return outer.inner.y == 9 ? 0 : 7;
+}

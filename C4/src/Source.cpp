@@ -335,7 +335,11 @@ namespace
 			}
 			const std::string objDir = interopFolder.string();
 
-			m_Interop = Scripting::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target.Flags(), m_Options.verbose);
+			// Foreign sources build at the program's optimization level, with its debug information (BUG-285).
+			std::vector<std::string> foreignFlags = { "-O" + std::to_string(m_Options.optLevel) };
+			if (m_Options.debugInfo) foreignFlags.push_back("-g");
+			m_Interop = Scripting::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target.Flags(), m_Options.verbose,
+				false, foreignFlags);
 
 			// A broken foreign C/C++ file (unresolvable path, CBind rejection, failed compile) must fail
 			// the build rather than silently produce a binary missing its declarations/objects. The exact

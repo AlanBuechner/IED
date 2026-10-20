@@ -1,0 +1,19 @@
+// BUG-286: offsetof on a named union said it had no fields. Every member of a union is at 0, a struct view's
+// members follow each other, and a path goes through a union inside a struct.
+union Value {
+	int32 i;
+	double d;
+	struct { int32 low; int32 high; };
+};
+
+struct Holder {
+	int32 tag;
+	Value value;
+};
+
+int32 main() {
+	if (offsetof(Value, i) != 0 || offsetof(Value, d) != 0) return 1;
+	if (offsetof(Value, high) != 4) return 2;
+	if (offsetof(Holder, value.high) != 12) return 3;
+	return 0;
+}

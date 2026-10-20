@@ -2,9 +2,11 @@
 #include "C4TypeMapper.h"
 #include "C4Text.h"
 #include "DeclFacts.h"
+#include "RecordText.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/RecordLayout.h"
 #include "clang/AST/Type.h"
 #include "clang/AST/Attr.h"
 #include "clang/Basic/Linkage.h"
@@ -23,16 +25,18 @@
 
 namespace CBind
 {
-	bool BindingGenerator::EmitRecord(const clang::RecordDecl* rec, const std::string& c4Name, C4TypeMapper& mapper, std::string& out)
+	bool BindingGenerator::EmitRecord(const clang::RecordDecl* rec, const std::string& c4Name, C4TypeMapper& mapper, clang::ASTContext& ctx, std::string& out)
 	{
-		if (!rec->isCompleteDefinition())
-			return false; // forward declaration only
+		if (!HasLayout(rec))
+			return false; // a forward declaration, or a template pattern clang lays out only per instance
 
 		const std::string uuid = GetRecordUuid(rec);
 		if (!uuid.empty())
 			out += "[uuid(\"" + uuid + "\")]\n";
-		out += "struct " + c4Name + " {";
-		EmitFlattenedFields(rec, mapper, out);
+		RecordText text(ctx, mapper, out);
+		out += (rec->isUnion() ? "union " : "struct ") + c4Name + " {";
+		if (rec->isUnion()) text.UnionBody(rec);
+		else text.StructBody(rec, 0);
 		out += "\n};\n";
 		return true;
 	}
@@ -50,6 +54,7 @@ namespace CBind
 			if (!first) out += ",";
 			first = false;
 			out += "\n\t" + c->getNameAsString();
+			m_Bound.insert(c->getNameAsString());
 			llvm::SmallString<32> val;
 			c->getInitVal().toString(val, 10);
 			out += " = " + std::string(val.str());
@@ -61,14 +66,8 @@ namespace CBind
 	bool BindingGenerator::EmitFunction(const clang::Decl* decl, clang::ASTContext& ctx, C4TypeMapper& mapper, std::string& out, const std::string& cxxPrefix)
 	{
 		const auto* fn = cast<clang::FunctionDecl>(decl);
-		// Bind only EXTERNAL free functions (declared without a body) - UNLESS they have C
-		// language linkage. A C-linkage function with an inline body in the header (e.g.
-		// CreateDXGIFactory2, which forwards to CreateDXGIFactory1) is still a real DLL export:
-		// we bind it directly to its unmangled symbol and never compile its body into the shim
-		// (GenerateShim skips C-linkage fns), so the inline definition is harmless. Only CXX-
-		// linkage defined helpers must be skipped, because those get a forwarding wrapper whose
-		// body would pull in unlinked symbols.
-		if (!IsExternalFreeFunction(fn) && !HasCLanguageLinkage(fn))
+		const FunctionBinding binding = HowToBind(fn, ctx, m_Opts);
+		if (binding == FunctionBinding::None)
 			return false;
 		const auto* proto = dyn_cast<clang::FunctionProtoType>(fn->getType()->getAs<clang::FunctionType>());
 		if (!proto)
@@ -81,25 +80,17 @@ namespace CBind
 		std::string params;
 		if (!MapParams(fn, mapper, params))
 			return false;
-		// A variadic function keeps its `...`; one with C++ linkage cannot be forwarded by the shim, so it is not bound.
+		// A variadic function keeps its `...`; a wrapper cannot forward one, so such a function is not bound.
 		if (proto->isVariadic())
 		{
-			if (IsCxx(m_Opts) && !HasCLanguageLinkage(fn)) return false;
+			if (binding == FunctionBinding::Wrapper) return false;
 			params += params.empty() ? "..." : ", ...";
 		}
 
-		// In C++ mode a free function is mangled by the C++ compiler, so a direct C4 declaration
-		// wouldn't link - UNLESS it has C language linkage (extern "C"), which Windows/DX APIs do.
-		// C-linkage functions are bound directly to their unmangled symbol (same as C mode); only
-		// CXX-linkage functions get a [link] to an extern "C" wrapper (see GenerateShim) that
-		// forwards to the real function. The symbol stays bare (C4 has no namespaces).
-		if (IsCxx(m_Opts) && !HasCLanguageLinkage(fn))
-			out += "\n[link(\"cbind_fn_" + fn->getNameAsString() + "\")]\n";
-		else if (!fn->hasBody())
-			// C-mode / C-linkage declaration: the target symbol is the function's own (unmangled) name.
-			// Without this [link] the compiler mangles the C4 declaration and the link fails with an
-			// undefined-symbol for the mangled name while the foreign object exports the bare one.
-			out += "\n[link(\"" + fn->getNameAsString() + "\")]\n";
+		// Always a [link]: C4 would mangle the declaration's own name. A wrapper's symbol is the shim's extern "C"
+		// forwarder (GenerateShim); the symbol stays bare (C4 has no namespaces).
+		const std::string symbol = binding == FunctionBinding::Wrapper ? "cbind_fn_" + fn->getNameAsString() : fn->getNameAsString();
+		out += "\n[link(\"" + symbol + "\")]\n";
 
 		out += ret + " " + fn->getNameAsString() + "(" + params + ");\n";
 		return true;
@@ -108,8 +99,8 @@ namespace CBind
 	bool BindingGenerator::EmitClass(const clang::CXXRecordDecl* rec, const std::string& className,
 		C4TypeMapper& mapper, clang::ASTContext& ctx, std::string& out, const std::string& cxxPrefix)
 	{
-		if (!rec->isCompleteDefinition())
-			return false; // forward declaration only
+		if (!HasLayout(rec))
+			return false; // a forward declaration, or a template pattern clang lays out only per instance
 
 		// 1. Struct with the data members. Layout matches C++ exactly: when this class or any base
 		// has virtual functions, C++ places a vptr at offset 0. C4's ObjectType::CalculateLayout
@@ -143,7 +134,9 @@ namespace CBind
 		out += declHead + " {";
 		if (emitVptr)
 			out += "\n\tvoid* __vtable; // C++ vptr placeholder - keeps field offsets aligned with the C++ class";
-		EmitFlattenedFields(rec, mapper, out);
+		// The bases and the vtable pointer come first in C4 as in C++: the class's own fields start where clang's do.
+		const clang::ASTRecordLayout& layout = ctx.getASTRecordLayout(rec);
+		RecordText(ctx, mapper, out).StructBody(rec, rec->field_empty() ? static_cast<uint64_t>(layout.getSize().getQuantity()) : layout.getFieldOffset(0) / 8);
 		EmitStaticData(rec, mapper, ctx, out);
 		out += "\n};\n";
 
@@ -279,6 +272,39 @@ namespace CBind
 					claimTag(tag, td->getNameAsString());
 			}
 		});
+		// Record types fields need that no file-scope declaration names (BUG-280): a struct defined inside another (C
+		// puts it at file scope, clang inside its owner) keeps its name, an anonymous one is named after its owner and
+		// field (`in_addr_S_un`). Each is written just before its owner.
+		std::unordered_set<const clang::TagDecl*> claimed;
+		for (auto& [name, tag] : tagByName) claimed.insert(tag);
+		std::unordered_map<const clang::TagDecl*, std::vector<const clang::RecordDecl*>> innerTypes;
+		std::function<void(const clang::RecordDecl*, const clang::RecordDecl*, const std::string&)> claimFieldTypes =
+			[&](const clang::RecordDecl* owner, const clang::RecordDecl* rec, const std::string& prefix) {
+				for (const auto* field : rec->fields())
+				{
+					const clang::RecordDecl* inner = ctx.getBaseElementType(field->getType())->getAsRecordDecl();
+					if (!inner || !HasLayout(inner)) continue;
+					if (field->getNameAsString().empty())
+					{
+						claimFieldTypes(owner, inner, prefix);
+						continue;
+					}
+					const std::string name = inner->getNameAsString().empty() ? prefix + "_" + field->getNameAsString() : inner->getNameAsString();
+					if (claimed.count(inner) || tagByName.count(name)) continue;
+					claimTag(inner, name);
+					claimed.insert(inner);
+					innerTypes[owner].push_back(inner);
+					claimFieldTypes(inner, inner, name);
+				}
+			};
+		WalkDecls(tu, "", [&](const clang::Decl* d, const std::string&) {
+			const clang::RecordDecl* rec = dyn_cast<clang::RecordDecl>(d);
+			if (const auto* td = dyn_cast<clang::TypedefNameDecl>(d)) rec = dyn_cast_or_null<clang::RecordDecl>(UnderlyingTag(td));
+			if (!rec || !rec->isCompleteDefinition()) return;
+			for (auto& [name, tag] : tagByName)
+				if (tag == rec) return claimFieldTypes(rec, rec, name);
+		});
+
 		std::unordered_map<const clang::TagDecl*, std::string> tagNames;
 		for (auto& [name, tag] : tagByName)
 		{
@@ -331,12 +357,21 @@ namespace CBind
 			if (emittedTypes.count(name)) return; // this C4 name was already emitted
 			emittedTypes.insert(name);
 
+			std::function<void(const clang::TagDecl*)> emitInner = [&](const clang::TagDecl* owner) {
+				for (const clang::RecordDecl* inner : innerTypes[owner])
+				{
+					if (!emittedTypes.insert(tagNames[inner]).second) continue;
+					emitInner(inner);
+					EmitRecord(inner, tagNames[inner], mapper, ctx, out);
+				}
+			};
+			emitInner(tag);
 			if (const auto* rec = dyn_cast<clang::RecordDecl>(tag))
 			{
 				if (IsCxx(m_Opts) && isa<clang::CXXRecordDecl>(rec))
 					EmitClass(static_cast<const clang::CXXRecordDecl*>(rec), name, mapper, ctx, out);
 				else
-					EmitRecord(rec, name, mapper, out);
+					EmitRecord(rec, name, mapper, ctx, out);
 			}
 			else if (const auto* en = dyn_cast<clang::EnumDecl>(tag))
 				EmitEnum(en, name, out);
@@ -383,6 +418,9 @@ namespace CBind
 			}
 		});
 
+		m_Bound.insert(emittedTypes.begin(), emittedTypes.end());
+		m_Bound.insert(aliasSeen.begin(), aliasSeen.end());
+		m_Bound.insert(emittedFns.begin(), emittedFns.end());
 		return out;
 	}
 }

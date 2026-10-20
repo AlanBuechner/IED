@@ -1,0 +1,15 @@
+// BUG-284: CBind bound no #define constant, so programs wrote Win32 constants (WM_CLOSE, ...) by hand. The
+// object-like macros that are integer, floating-point or string constants now bind as C4 constants of C's type.
+extern "c" include "constants.h"
+
+int32 main() {
+	if (SMALL != 42 || NEGATIVE != -7 || HEX_FLAGS != 512 || COMBINED != 554 || CAST_LONG != 84) return 1;
+	if (UNSIGNED_MAX != 4294967295u || BIG != 9000000000 || BIG_UNSIGNED != 18446744073709551615ull) return 2;
+	if (MOST_NEGATIVE != -2147483647 - 1 || CHARACTER != 65 || ENABLED != 1) return 3;
+	if (RATIO != 0.125 || SCALE != 1.5f || (double)LARGEST_FLOAT != 3.4028234663852886e+38) return 4;
+	const char* expected = "hello \"c4\"\n";
+	for (int32 i = 0; i < 12; ++i)
+		if (GREETING[i] != expected[i]) return 5;
+	if (sizeof(SMALL) != 4 || sizeof(BIG) != 8 || sizeof(SCALE) != 4 || sizeof(RATIO) != 8) return 6;
+	return NAMED_LIKE_A_FUNCTION == 5 ? 0 : 7;
+}

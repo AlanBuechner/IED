@@ -17,6 +17,7 @@ namespace Scripting
 		std::vector<std::string> defines;
 		std::vector<std::string> includeDirs;
 		std::vector<std::string> targetFlags; // the build's -march / -m flags (D-62)
+		std::vector<std::string> compileFlags; // the build's -O and -g (BUG-285)
 	};
 
 	/// How CBind parses a foreign header: what its bindings are cached by.
@@ -85,7 +86,8 @@ namespace Scripting
 		static Result RunFolder(const std::vector<std::string>& rootFolders,
 			const std::vector<InteropFileInput>& files,
 			const std::vector<std::string>& cliIncludeDirs,
-			const std::string& objDir, const std::vector<std::string>& targetFlags, bool verbose, bool declarationsOnly = false);
+			const std::string& objDir, const std::vector<std::string>& targetFlags, bool verbose, bool declarationsOnly = false,
+			const std::vector<std::string>& compileFlags = {});
 
 	private:
 		static bool ResolveForeignHeader(const std::string& headerPath, const std::string& fileDir,

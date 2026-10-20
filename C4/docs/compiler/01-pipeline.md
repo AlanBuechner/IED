@@ -101,7 +101,9 @@ extern "c" source "helpers.c";
   timestamps. C++ headers also get a generated shim with an `extern "C"` wrapper for every bound
   constructor, destructor, method and C++-linkage function, compiled and linked as a foreign object, so
   C4 calls them (virtuals dispatch through a typed pointer in the wrapper).
-- `source`: compiles the C/C++ file with the bundled clang (`-std=c11` / `-std=c++20`) and links the object. The
+- `source`: compiles the C/C++ file with the bundled clang (`-std=c11` / `-std=c++20`, the build's `-O` and `-g`) and
+  links the object, which is reused while a key of its source, the headers its depfile (`-MD`) lists, its flags and
+  clang is unchanged (`Interop/ForeignCache`). The
   bindings, shims and objects go to the build's own `<int>/<output name>.interop/` folder (`--int-dir`, else beside
   the output), each named after a hash of its file's absolute path and the file's name: two programs built at
   once, two same-named files in different folders, and `util.c` beside `util.cpp` never share an output.

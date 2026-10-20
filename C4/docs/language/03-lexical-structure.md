@@ -125,7 +125,8 @@ The type is C's: the first type in the list that holds the value.
 
 - A float needs a digit before its `.`: `.5` is the error `'.5' needs a digit before the '.': write 0.5`.
   `1.` is `1` then `.`.
-- A value out of range is an error (`1e39f` for `float`, `1e999` for `double`).
+- A value out of range is an error (`1e39f` for `float`, `1e999` for `double`). A literal is out of range when it
+  rounds to infinity: `3.40282347e+38f`, how `FLT_MAX` prints, rounds to `FLT_MAX` and is fine (BUG-287).
 
 ## 3.8 Character literals
 

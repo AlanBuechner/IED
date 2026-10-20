@@ -248,15 +248,17 @@ namespace Scripting
 
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,
 		const Core::String& language, const Core::Vector<Core::String>& defines,
-		const Core::Vector<Core::String>& includeDirs, const std::vector<std::string>& targetFlags, bool verbose)
+		const Core::Vector<Core::String>& includeDirs, const std::vector<std::string>& targetFlags,
+		const std::vector<std::string>& compileFlags, bool verbose)
 	{
 		const std::string clangPath = ClangPath();
 		if (clangPath.empty()) return false;
 
 		std::vector<std::string> args = {
-			clangPath, "-c", "-target", "x86_64-pc-windows-msvc", "-mstackrealign"
+			clangPath, "-c", "-target", "x86_64-pc-windows-msvc", "-mstackrealign", "-MD", "-MF", std::string(objPath.c_str()) + ".d"
 		};
 		args.insert(args.end(), targetFlags.begin(), targetFlags.end());
+		args.insert(args.end(), compileFlags.begin(), compileFlags.end());
 		args.push_back(language == "c++" ? "-std=c++20" : "-std=c11");
 
 		for (const auto& d : defines)

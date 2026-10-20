@@ -63,10 +63,12 @@ namespace Scripting
 	std::string ClangPath();
 
 	// Compile a foreign C/C++ source file to an object file using the bundled clang.
-	// language is "c" or "c++"; defines/includeDirs are passed as -D / -I flags, targetFlags as written (D-62).
+	// language is "c" or "c++"; defines/includeDirs are passed as -D / -I flags, targetFlags (D-62) and compileFlags (the
+	// build's -O and -g, BUG-285) as written. clang also writes the headers it read to `<objPath>.d`.
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,
 		const Core::String& language, const Core::Vector<Core::String>& defines,
-		const Core::Vector<Core::String>& includeDirs, const std::vector<std::string>& targetFlags, bool verbose);
+		const Core::Vector<Core::String>& includeDirs, const std::vector<std::string>& targetFlags,
+		const std::vector<std::string>& compileFlags, bool verbose);
 
 	// Run an external tool directly (no shell), inheriting stdout/stderr so its output streams live.
 	bool RunTool(const std::vector<std::string>& args);

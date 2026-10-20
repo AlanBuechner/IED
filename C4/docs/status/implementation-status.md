@@ -8,11 +8,11 @@ When you fix something on this page, delete its row here and remove the matching
 implementation" note on the feature's page. Planned work and open design questions live in
 [roadmap.md](roadmap.md).
 
-Last recorded gate results (2026-10-20, after B56): TestCode e2e 1505 assertions / 0 failures at `-O0` and `-O2`
-(also with the program split into 8 partitions); NegativeTest 645 at `-O0` and `-O2`; IsolatedTest 431 at `-O0` and
+Last recorded gate results (2026-10-20, after B59): TestCode e2e 1505 assertions / 0 failures at `-O0` and `-O2`
+(also with the program split into 8 partitions); NegativeTest 646 at `-O0` and `-O2`; IsolatedTest 436 at `-O0` and
 `-O2` (also 4 partitions with `-g`); RuntimeTest, ScriptTest (19 cases at `-O0` and `-O2`), ToolsTest (29 checks),
 DifferentialTest (150 programs against clang) and the benchmark checks pass; Bedrock 464 tests (2396 assertions) at
-`-O0` and `-O2`, also built for `-O2 -march=x86-64-v3`; C4Testing 1089. See [../tools/05-test-suites.md](../tools/05-test-suites.md).
+`-O0` and `-O2`, also built for `-O2 -march=x86-64-v3`; C4Testing 1093. See [../tools/05-test-suites.md](../tools/05-test-suites.md).
 
 ---
 

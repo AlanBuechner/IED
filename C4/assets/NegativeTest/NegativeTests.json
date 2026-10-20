@@ -2582,5 +2582,9 @@
     "NameOfUnknownType": {
         "expect": ["main.cf (2:28) error: no variable named NoSuchType"],
         "reason": "nameof takes a type or an expression; a name that is neither is reported, as sizeof reports it."
+    },
+    "FloatLiteralRoundsToInfinity": {
+        "expect": ["floating-point literal '3.4028236e38f' is out of range for float"],
+        "reason": "A float literal past FLT_MAX plus half its last place rounds to infinity: refused, while one that rounds to FLT_MAX is not (BUG-287)."
     }
 }

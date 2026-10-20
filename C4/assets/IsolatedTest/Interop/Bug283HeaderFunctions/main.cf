@@ -1,0 +1,18 @@
+// BUG-283: CBind bound no function a header defines: a static inline one (no symbol of its own) was missing, and a
+// C99 inline one with an external definition was bound without [link], so C4 mangled its name and the link failed.
+// Both now work: a header's own static and inline functions are forwarded by a shim CBind writes (C or C++).
+extern "c" include "header.h"
+extern "c" source "header.c"
+extern "c++" include "cxx.hpp"
+
+int32 main() {
+	if (Twice(21) != 42) return 1;
+	int32 stored = 0;
+	Store(&stored, 7);
+	if (stored != 7) return 2;
+	if (Half(5.0) != 2.5) return 3;
+	if (Square(6) != 36) return 4;
+	if (Add(40, 2) != 42) return 5;
+	if (Triple(4) != 12 || Negate(3) != -3 || Cube(3) != 27) return 6;
+	return 0;
+}

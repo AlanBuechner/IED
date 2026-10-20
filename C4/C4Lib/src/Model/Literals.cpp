@@ -52,13 +52,17 @@ namespace Scripting
 				"integer literal '" + std::string(spelling) + "' does not fit any type its suffix allows");
 		}
 
+		// FLT_MAX plus half its last place: a float literal at or past it rounds to infinity; one below rounds to at most
+		// FLT_MAX, as `3.40282347e+38f` (how FLT_MAX prints) does (BUG-287).
+		constexpr double kFloatOverflow = 3.4028235677973366e+38;
+
 		QueryResult<NumericLiteral> Float(std::string_view spelling, const NumberSpelling& parts)
 		{
 			double value = 0.0;
 			const char* end = parts.digits.data() + parts.digits.size();
 			const auto parsed = std::from_chars(parts.digits.data(), end, value);
 			const bool isSingle = parts.suffix == "f" || parts.suffix == "F";
-			const bool outOfRange = parsed.ec == std::errc::result_out_of_range || (isSingle && value > FLT_MAX);
+			const bool outOfRange = parsed.ec == std::errc::result_out_of_range || (isSingle && value >= kFloatOverflow);
 			if (outOfRange)
 				return QueryResult<NumericLiteral>::Fail(QueryError::NotAValue,
 					"floating-point literal '" + std::string(spelling) + "' is out of range for " + (isSingle ? "float" : "double"));

@@ -24,8 +24,8 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 | ConPTY | **exists** | `Process::StartInfo::terminal` (B52): keyboard in, VT screen out, `Resize` |
 | Wall-clock time / dates | **exists** | `Platform::UnixTimeNs`, calendars and UTC offsets (B40) |
 | Regex | **exists** | `Core::Regex` (C4 B55): RE2 syntax, linear-time Pike VM, groups, `FindAll`, `Replace` |
-| C interop | **exists with sharp edges** | see suspected bugs below |
-| Compiling bundled C sources | **exists, slow** | `extern "c" source` is compiled without `-O` and recompiled every build; prebuilt `.lib` works |
+| C interop | **exists** | the suspected bugs below were confirmed and fixed (C4 B57-B59): records keep C's layout, header functions and `#define` constants bind |
+| Compiling bundled C sources | **exists** | `extern "c" source` compiles at the build's `-O` with its `-g` and is reused while unchanged (C4 B59) |
 | DLL output / loading C4 DLLs | **missing / not designed** | GC has process-global state; native plugins as C4 DLLs are not a path (hence `docs/02`: built-ins compiled in, others JS or process) |
 | async/await | **missing** | not required: an event-loop + worker-thread design works without it |
 | Profiler hooks | **partial** | `GC::GetStats`, collection callbacks, monotonic clock, CodeView PDBs; no zone API, no allocation hooks |
@@ -34,7 +34,7 @@ GC facts that shape server design: stop-the-world, conservative, non-moving; pau
 
 ## Suspected C4 bugs found during research (verify, then file + fix per AGENTS.md)
 
-Found by reading CBind source, **not yet confirmed with probes**. Per `AGENTS.md`: confirm each with a minimal `sizeof`/offset probe, record confirmed ones in `C4/docs/status/known-bugs.md`, fix, validate with the C4 gates, then remove the entry.
+Found by reading CBind source. **Status (2026-10-20): every one was confirmed with a probe and fixed** - S1-S4 as BUG-279 to BUG-282 (C4 B57, CBind now writes records from clang's layout), S5-S6 as BUG-283 and BUG-284 (B58), S7's missing optimization and cache as BUG-285 (B59; its same-stem collision was BUG-272). The table is kept as the record of what was suspected.
 
 | # | Suspected bug | Where (per reading) | Impact on IED |
 |---|---|---|---|
@@ -46,7 +46,7 @@ Found by reading CBind source, **not yet confirmed with probes**. Per `AGENTS.md
 | S6 | `#define` constants are not bound | interop test defines `WM_CLOSE` by hand | every Win32 constant (`AF_INET`, `INVALID_SOCKET`, ...) |
 | S7 | Bundled C sources compiled without optimization and without an object cache; two sources with the same file stem collide | `BuildUtils.cpp:223-264`, `InteropPass.cpp:494-511` | QuickJS/sqlite builds slow and unoptimized |
 
-Until S1-S6 are fixed, **IED's policy is: every native API goes through a small hand-written C shim with opaque handles and plain scalar/pointer signatures** (no struct layouts cross the boundary). This is a good discipline anyway (one tested seam per subsystem) and removes the dependency on CBind's struct fidelity.
+With S1-S6 fixed, IED may bind native headers directly. **IED's policy stays: OS services come through Bedrock (`Net::`, `Process::`, `FS::`), and a third-party native library goes through a small C shim with opaque handles and plain scalar/pointer signatures** - not because of CBind any more, but because one tested seam per subsystem is easier to own.
 
 ## Recommended path: what goes where
 
@@ -76,7 +76,7 @@ Implementation of `src/` starts when all of these are true. Each item is a work 
 4. [ ] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake). Wall clock (`Platform::`, B40), base64 and SHA-1 (B51) done; UTF-16 helpers still runtime-internal.
 5. [x] Regex engine available to C4 code. Done in C4 B55 (D-71).
 6. [x] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide). Done in C4 B56 (D-72): DTOs need no hand-written codecs.
-7. [ ] Suspected bugs S1-S7 verified; confirmed ones fixed (or the C-shim-only policy formally adopted and S1-S6 deprioritized).
+7. [x] Suspected bugs S1-S7 verified; confirmed ones fixed (or the C-shim-only policy formally adopted and S1-S6 deprioritized). All confirmed and fixed in C4 B57-B59 (BUG-279 to BUG-285): named and anonymous unions, unmappable fields, bitfields, header functions, `#define` constants, foreign-source optimization and caching.
 8. [ ] **Scale test:** a synthetic 50k-line, 200-file, multi-threaded C4 program compiles at -O0 and -O2, runs a 24 h soak under load without GC or threading faults; compile time measured. C4's `assets/ScaleTest` (60k lines, 401 files) compiles in 4.4 s at -O0 and 15.0 s at -O2 and ran 60 s on 4 threads without a wrong result; the 24 h soak is still to run (`python C4/assets/ScaleTest/run.py --seconds 86400 --levels O2`).
 9. [ ] Exceptions-at-thread-boundary policy documented (catch-all wrappers), `thread_attach` documented for native callbacks.
 10. [ ] Incremental or at least per-module compilation planned (roadmap 5.3), because a 20 s full rebuild for every IED server change is a heavy tax.

@@ -15,12 +15,7 @@ extern "c" include "windows.h" {
 	lib("kernel32.lib");
 }
 
-// #define constants from Windows headers (not in the AST - defined here).
-const int32 WM_CLOSE   = 0x0010;
-const int32 WM_DESTROY = 0x0002;
-const int32 WM_CREATE  = 0x0001;
-const int32 CS_HREDRAW = 0x0002;
-const int32 SW_SHOW    = 5;
+// The headers' #define constants (WM_CLOSE, CS_HREDRAW, SW_SHOW) come with the binding (BUG-284).
 
 // WNDPROC-compatible callback. A C4 free function address is stored in the foreign
 // funcptr field (wc.lpfnWndProc); Windows calls it with (HWND, UINT, WPARAM, LPARAM)

@@ -24,6 +24,5 @@ namespace CBind
 	bool MapReturn(const clang::FunctionDecl* fn, C4TypeMapper& mapper, std::string& out);
 	std::string AccessOf(clang::AccessSpecifier access);
 	std::string OverloadSymbol(const std::string& name, size_t index, size_t overloads);
-	void EmitFlattenedFields(const clang::RecordDecl* rec, C4TypeMapper& mapper, std::string& out);
 	void EmitStaticData(const clang::CXXRecordDecl* rec, C4TypeMapper& mapper, clang::ASTContext& ctx, std::string& out);
 } // namespace CBind
