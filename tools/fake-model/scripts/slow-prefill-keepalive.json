@@ -1,0 +1,37 @@
+{
+	"description": "A 90 s prefill that sends an SSE keepalive comment every 10 s, then answers.",
+	"stopClass": "none",
+	"harness": "Negative test: each keepalive extends the prefill deadline, so no stop is classified and nothing is retried.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"stall": 90,
+					"keepalive": 10
+				},
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Long prompt processed."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"comments": 8,
+				"maxSilence": 10,
+				"text": "Long prompt processed."
+			}
+		}
+	]
+}

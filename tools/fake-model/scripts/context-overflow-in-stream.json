@@ -1,0 +1,31 @@
+{
+	"description": "HTTP 200, then an in-stream SSE error object about the context, then end of body.",
+	"stopClass": "context_overflow",
+	"harness": "An error object inside the stream is classified like the HTTP error (context_overflow here), not as malformed output.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"headers": true
+				},
+				{
+					"error": {
+						"status": 400,
+						"body": {
+							"error": {
+								"code": 400,
+								"message": "context size exceeded",
+								"type": "exceed_context_size_error",
+								"n_ctx": "{n_ctx}"
+							}
+						}
+					}
+				}
+			],
+			"wire": {
+				"transport": "eof",
+				"errorIncludes": "context size exceeded"
+			}
+		}
+	]
+}

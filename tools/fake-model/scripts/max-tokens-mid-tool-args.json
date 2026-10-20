@@ -1,0 +1,68 @@
+{
+	"description": "A native tool call whose arguments are cut by finish_reason=length; the second request sends the full call.",
+	"stopClass": "max_tokens",
+	"harness": "The cut happened inside tool-call arguments: drop the partial call and ask for the call again (never execute truncated arguments).",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "write_file",
+						"arguments": "{\"path\": \"src/game/player.c\", \"text\": \"void player_upd"
+					}
+				},
+				{
+					"finish": "length"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "length",
+				"toolCalls": [
+					{
+						"name": "write_file",
+						"argumentsValid": false
+					}
+				]
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "write_file",
+						"arguments": {
+							"path": "src/game/player.c",
+							"text": "void player_update(void) {}\n"
+						}
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "write_file",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}

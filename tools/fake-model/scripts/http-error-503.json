@@ -1,0 +1,70 @@
+{
+	"description": "HTTP 503 twice, then success.",
+	"stopClass": "http_error",
+	"harness": "http_error(503): retry with backoff and jitter; after 2 failures switch to the fallback model if one is configured; this script succeeds on the third attempt.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"error": {
+						"status": 503,
+						"body": {
+							"error": {
+								"message": "server overloaded",
+								"type": "server_error"
+							}
+						}
+					}
+				}
+			],
+			"wire": {
+				"transport": "http_error",
+				"status": 503,
+				"errorIncludes": "overloaded"
+			}
+		},
+		{
+			"steps": [
+				{
+					"error": {
+						"status": 503,
+						"body": {
+							"error": {
+								"message": "server overloaded",
+								"type": "server_error"
+							}
+						}
+					}
+				}
+			],
+			"wire": {
+				"transport": "http_error",
+				"status": 503
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Third time lucky."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Third time lucky."
+			}
+		}
+	]
+}

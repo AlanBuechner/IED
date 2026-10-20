@@ -1,0 +1,63 @@
+{
+	"description": "About 200 tokens of text, then 120 s of silence, then the rest. The second request answers at once.",
+	"stopClass": "stalled_stream",
+	"harness": "The idle watchdog (60 s local, 120 s cloud) fires; cancel and continue from the partial text like a disconnect; at most 2 per step.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. The renderer owns the frame loop: it polls the window, advances the simulation by a fixed step and presents. Player movement is integrated with explicit Euler in player_update, so the position changes by velocity times dt. ",
+					"chunk": 12,
+					"delayMs": 5
+				},
+				{
+					"stall": 120
+				},
+				{
+					"text": "and that is all."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"minSilence": 120,
+				"textIncludes": "explicit Euler"
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Continuing where I stopped."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Continuing where I stopped."
+			}
+		}
+	]
+}

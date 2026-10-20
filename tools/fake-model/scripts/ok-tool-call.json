@@ -1,0 +1,46 @@
+{
+	"description": "A native tool call streamed OpenAI-style (id and name on the first delta, arguments in pieces).",
+	"stopClass": "none",
+	"harness": "Baseline. The harness executes read_file and continues the loop.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "I'll read it."
+				},
+				{
+					"toolCall": {
+						"name": "read_file",
+						"arguments": {
+							"path": "src/main.c"
+						},
+						"id": "call_ok_1"
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"text": "I'll read it.",
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}

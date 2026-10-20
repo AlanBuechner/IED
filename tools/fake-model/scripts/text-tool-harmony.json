@@ -1,0 +1,41 @@
+{
+	"description": "The tool call arrives as text in content: harmony <|channel|>commentary to=functions.name ... <|call|>; finish_reason=stop.",
+	"stopClass": "unparsed_tool_call",
+	"harness": "The text fallback parser recognizes the harmony dialect, executes the call as a normal tool call and marks the dialect so later steps parse proactively; the UI renders a tool card, not prose.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "I'll read the file.\n\n"
+				},
+				{
+					"textToolCall": {
+						"name": "read_file",
+						"arguments": {
+							"path": "src/main.c"
+						},
+						"dialect": "harmony"
+					}
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"textIncludes": "src/main.c",
+				"toolCalls": []
+			}
+		}
+	]
+}

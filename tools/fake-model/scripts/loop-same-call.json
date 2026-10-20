@@ -1,0 +1,38 @@
+{
+	"description": "Every request returns the same read_file call on a missing file.",
+	"stopClass": "loop_detected",
+	"harness": "After the same call + same error 3 times, pause with loop_detected and an explanation (never 'done').",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "read_file",
+						"arguments": {
+							"path": "src/missing.c"
+						}
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}

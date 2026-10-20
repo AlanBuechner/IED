@@ -1,0 +1,40 @@
+{
+	"description": "Reasoning arrives in the 'reasoning' and then the 'thinking' field instead of reasoning_content.",
+	"stopClass": "none",
+	"harness": "Negative test: all three field names normalize into one thinking segment.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"reasoning": "First via reasoning. ",
+					"field": "reasoning"
+				},
+				{
+					"reasoning": "Then via thinking.",
+					"field": "thinking"
+				},
+				{
+					"text": "Answer."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"reasoningIncludes": "First via reasoning. Then via thinking.",
+				"text": "Answer."
+			}
+		}
+	]
+}

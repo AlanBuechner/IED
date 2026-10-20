@@ -1,0 +1,40 @@
+{
+	"description": "One tool call whose id and name repeat on every argument delta.",
+	"stopClass": "none",
+	"harness": "Negative test: repeated ids and names must not create extra calls or duplicate the name.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "read_file",
+						"arguments": {
+							"path": "src/main.c"
+						},
+						"idOn": "every",
+						"nameOn": "every"
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}

@@ -1,0 +1,57 @@
+{
+	"description": "HTTP 200 headers arrive at once, then 120 s without a chunk.",
+	"stopClass": "stalled_prefill",
+	"harness": "Same as stall-prefill: headers are not a first token; the prefill watchdog still applies (Echo's header timeout was the bug).",
+	"responses": [
+		{
+			"steps": [
+				{
+					"stall": 120
+				},
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Late."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"minSilence": 120
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Answer after the retry."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Answer after the retry."
+			}
+		}
+	]
+}

@@ -1,0 +1,35 @@
+{
+	"description": "reasoning_content deltas followed by the answer.",
+	"stopClass": "none",
+	"harness": "Baseline. Reasoning becomes a thinking segment; the answer a text segment.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"reasoning": "The user wants the entry point; main.c has it."
+				},
+				{
+					"text": "The entry point is main in src/main.c."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"reasoningIncludes": "entry point",
+				"text": "The entry point is main in src/main.c."
+			}
+		}
+	]
+}

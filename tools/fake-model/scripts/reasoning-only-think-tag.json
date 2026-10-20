@@ -1,0 +1,28 @@
+{
+	"description": "Content that is only an unclosed <think> block.",
+	"stopClass": "reasoning_only",
+	"harness": "Normalize <think> into a thinking segment; an unclosed <think> with nothing after it is reasoning_only.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "<think>\nThe user asked about movement. I should read src/game/player.c first and then"
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"textIncludes": "<think>"
+			}
+		}
+	]
+}

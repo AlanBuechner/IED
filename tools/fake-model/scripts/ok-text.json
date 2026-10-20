@@ -1,0 +1,31 @@
+{
+	"description": "Plain streamed answer: role chunk, text, finish stop, usage, [DONE].",
+	"stopClass": "none",
+	"harness": "Baseline. The turn ends normally (Ask mode) with stop 'finished'.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "Hello from the fake model."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": "Hello from the fake model."
+			}
+		}
+	]
+}

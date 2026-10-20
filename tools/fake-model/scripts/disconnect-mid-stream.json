@@ -1,0 +1,48 @@
+{
+	"description": "Streams part of an answer, then resets the connection. The second request continues.",
+	"stopClass": "disconnected_mid_stream",
+	"harness": "Keep the partial text; continue (prefix continuation if the dialect supports it, else re-request with the partial text as an assistant message plus a 'continue exactly where you stopped' note); at most 2 per step.",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": "The player moves with explicit Euler integration: each frame the position"
+				},
+				{
+					"cut": "now"
+				}
+			],
+			"wire": {
+				"transport": "reset",
+				"textIncludes": "explicit Euler"
+			}
+		},
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"text": " advances by velocity times dt."
+				},
+				{
+					"finish": "stop"
+				},
+				{
+					"usage": true
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "stop",
+				"text": " advances by velocity times dt."
+			}
+		}
+	]
+}
