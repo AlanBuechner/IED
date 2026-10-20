@@ -1161,6 +1161,23 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   `ReferenceFieldMissingEntry`, `ReferenceFieldFromTemporary`, `ReferenceFieldBracedList`, `ReferenceFieldConstLocation`;
   C4Testing `Semantic.OperatorTable` (`=` is `assign`).
 
+#### B44 - Differential testing against C (roadmap 2)
+- **Closes:** BUG-269, BUG-270. **Design:** [test suites](../tools/05-test-suites.md). **Depends on:** none.
+  **Status:** Done.
+- **Done notes:** `assets/DifferentialTest/` generates random programs as one tree rendered to C4 and to C (every
+  primitive type, C's usual arithmetic conversions, all arithmetic, bitwise, shift, comparison and logical operators,
+  casts, `?:`, globals, arrays, structs passed and returned by value, pointers to locals, `if`, `for`, `while`,
+  `do`/`while`, `switch`, `break`, `continue`), keeps C free of undefined behaviour (signed arithmetic runs unsigned,
+  guarded division, masked shifts, clamped float-to-integer conversions, counted loops, pure functions in
+  expressions), and compares the C4 build at `-O0` and `-O2` with clang's line by line. 150 seeds are a gate
+  (`nuke gates` step `differential`); 900 larger programs passed after the fixes. Found and fixed: BUG-269 (`(a[i]) &
+  x` parsed as a cast of `&x` to an array type: a parenthesized subscript is now an operand, `PrattCastsAndFolds`)
+  and BUG-270 (a bool converted to a one-byte integer was passed through as its `i1`: conversions compare the
+  widths of the IR values, not of their storage, `ExprOperatorEmitter::EmitConvert`). Frost gained `-asan` (separate
+  `<config>-asan` folders) for an AddressSanitizer build of the compiler.
+- **Tests:** the DifferentialTest gate; IsolatedTest `Operators/Bug269SubscriptInParentheses`,
+  `Types/Bug270BoolToByteConversion`.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1678,7 +1695,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

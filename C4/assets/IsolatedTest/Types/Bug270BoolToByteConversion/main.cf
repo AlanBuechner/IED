@@ -1,0 +1,25 @@
+// BUG-270: converting a bool to a one-byte integer widens its 1-bit value (the conversion compared storage sizes,
+// found both one byte, and passed the bool through, so a call taking a uint8 got an i1 and failed to verify).
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+int32 TakeUnsigned(uint8 v) { return v; }
+int32 TakeSigned(int8 v) { return v; }
+uint8 Give(double d) { return (uint8)(d < 2.0); }
+
+int32 main() {
+	double d = 1.0;
+	uint64 u = 5;
+	Check(TakeUnsigned((uint8)(d != u)) == 1, "a uint8 argument from a comparison");
+	Check(TakeSigned((int8)(d > 3.0)) == 0, "an int8 argument from a comparison");
+	Check(Give(d) == 1, "a uint8 return from a comparison");
+	bool flag = true;
+	uint8 stored = (uint8)flag;
+	int8 signedStored = (int8)flag;
+	Check(stored == 1 && signedStored == 1, "a bool stored as a byte is 1");
+	uint8[2] bytes = { (uint8)(d == 1.0), (uint8)(d == 0.0) };
+	Check(bytes[0] == 1 && bytes[1] == 0, "array elements");
+	return g_failures;
+}

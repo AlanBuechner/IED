@@ -100,11 +100,20 @@ namespace Scripting
 
 	namespace
 	{
-		// `(v)` that names something a value could be: a plain or qualified name that is not a built-in type or a
-		// template's type parameter.
+		// Only subscripts after the name: `(a[i])` is an element as readily as an array type, and nothing is cast
+		// to an array type.
+		bool OnlySubscripts(const QualTypeNode& type)
+		{
+			for (const IndirectionLayer& layer : type.GetIndirections())
+				if (layer.indirectionToken != TokenType::OpenBracket || !layer.arraySizeExpr || layer.isConst) return false;
+			return true;
+		}
+
+		// `(v)` that names something a value could be: a plain or qualified name, possibly subscripted, that is not a
+		// built-in type or a template's type parameter.
 		bool CouldBeAValue(const ParserState& state, const QualTypeNode& type)
 		{
-			if (type.IsLeadingConst() || type.IsPacked() || type.IndirectionCount() > 0 || type.HasTemplateArgs() ||
+			if (type.IsLeadingConst() || type.IsPacked() || !OnlySubscripts(type) || type.HasTemplateArgs() ||
 				type.FuncPtrType() || type.IsReturnList() || !type.BaseName())
 				return false;
 			const auto& segments = type.BaseName()->GetSegments();

@@ -46,6 +46,7 @@ Living document. Update it at every checkpoint commit.
 - Retake the mock screenshots (`python -I frontend/mocks/build.py shots`): most still show the old sample names.
 - Decide a LICENSE before making the repository public (none is committed; without one it is all rights reserved).
 - The clang 22.1.0 build crashes intermittently on this machine under the parallel build (access violations in clang/libclang, a different file each time, never reproducible); Frost retries crashed compiles twice. If it persists, check the machine's memory stability (a DDR5 EXPO profile is a common cause) or try a newer LLVM.
+- **Memory hardware (2026-10-20):** the machine blue-screened three times in five days with memory bugchecks - 0x12B FAULTY_HARDWARE_CORRUPTED_PAGE (10-16), 0xBE (10-19) and 0x1A MEMORY_MANAGEMENT 0x41790 (10-20, under a parallel ASan build plus a differential test run) - and C4.exe once failed an STL heap check that never reproduced in 180 reruns. Test the RAM (MemTest86 or TestMem5) or run without the EXPO/XMP profile; until then builds and test runs keep their parallelism moderate (DifferentialTest defaults to 4 jobs).
 - Old local checkouts of C4 can be deleted once this repository is pushed; game projects move their `Project.py` to `nuke.toml` and pin a toolchain (`docs/23`).
 
 **Then M1-M11** per `docs/18` once the readiness checklist in `docs/17` is green.

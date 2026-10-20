@@ -44,6 +44,7 @@ parser.add_argument('-c', type=str, help='the configuration (Release, Debug, Dis
 parser.add_argument('-a', type=str, help='the architecture (x64)') # architecture
 parser.add_argument('-s', type=str, help='the system (windows)') # system
 parser.add_argument('-ci', action='store_true', help='print compile time information per file and folder after build') # compile info
+parser.add_argument('-asan', action='store_true', help='build with AddressSanitizer into separate <config>-asan output folders')
 parser.add_argument('-test', action='store_true', help='run unit tests for the specified project') # run tests
 parser.add_argument('-benchmark', action='store_true', help='run benchmarks for the specified project') # run benchmarks
 parser.add_argument('-testall', action='store_true', help='discover and run all unit test projects') # run all tests
@@ -139,6 +140,12 @@ if(args.p != None):
 
 if(args.ci):
 	Config.printCompileInfo = True
+
+if(args.asan):
+	# Sanitized objects never share a folder with plain ones (freshness is by source content, not by flags).
+	Config.useAsan = True
+	Config.binDir = Config.binDir.replace("{config}-", "{config}-asan-", 1)
+	Config.intDir = Config.intDir.replace("{config}-", "{config}-asan-", 1)
 
 
 # --------------------- Load Project Scripts --------------------- #

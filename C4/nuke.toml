@@ -83,6 +83,11 @@ phase = "gates"
 run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ToolsTest/RunTests.ps1"]
 
 [[project.steps]]
+name = "differential"
+phase = "gates"
+run = ["${python}", "assets/DifferentialTest/run.py"]
+
+[[project.steps]]
 name = "bedrock-compile"
 phase = "gates"
 run = ["bin/${config}-windows-x64/C4/C4.exe", "Bedrock/Tests", "-test", "-o", "assets/build-output/bedrock/BedrockTests.exe"]

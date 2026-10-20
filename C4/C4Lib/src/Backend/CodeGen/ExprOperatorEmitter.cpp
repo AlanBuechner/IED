@@ -175,10 +175,13 @@ namespace Scripting
 			if (llvm::Value* normalized = NormalizedConversion::Emit(B, src, from, to)) return normalized;
 		if (fromInt && toInt)
 		{
-			// Widening: a bool is 0/1 and must zero-extend (a sign-extend of i1 true yields -1, not 1).
+			// The widths of the values, not of their storage: a bool is an i1 stored in a byte. Widening: a bool is
+			// 0/1 and must zero-extend (a sign-extend of i1 true yields -1, not 1).
+			const uint32_t srcBits = src->getType()->getScalarSizeInBits();
+			const uint32_t dstBits = target->getScalarSizeInBits();
 			bool zext = (from->GetKind() == TypeKind::Bool) || IsUnsignedInt(from);
-			if (tb > fb) return zext ? B.CreateZExt(src, target) : B.CreateSExt(src, target);
-			if (tb < fb) return B.CreateTrunc(src, target);
+			if (dstBits > srcBits) return zext ? B.CreateZExt(src, target) : B.CreateSExt(src, target);
+			if (dstBits < srcBits) return B.CreateTrunc(src, target);
 			return src; // same width
 		}
 		bool fromFloat = from && from->IsFloatingPoint();

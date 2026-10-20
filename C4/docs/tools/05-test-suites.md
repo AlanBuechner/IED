@@ -28,6 +28,7 @@ and runs every gate suite in turn: C4Testing, TestCode, NegativeTest (`-O0` and 
 | ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2` | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2]` |
 | ToolsTest | `assets/ToolsTest/` | the install and a toolchain outside the repository, every compiler flag, `nuke toolchain install` / `nuke init` / `nuke run` | `assets/ToolsTest/RunTests.ps1` |
 | Bedrock | `Bedrock/Tests/` | the default library, through the built-in `[test]` framework | `C4.exe Bedrock\Tests -o <out>.exe -test`, then run `<out>.exe` |
+| DifferentialTest | `assets/DifferentialTest/` | random programs (every primitive type, operators, conversions, control flow, struct parameters and results, pointers) print the same as the same program compiled as C by clang, at `-O0` and `-O2` | `python assets/DifferentialTest/run.py [--start n --count n --size x]` |
 | Benchmarks | `Benchmarks/gemm/`, `Benchmarks/math/` | generated-code performance vs clang C++ at `-O2` (integer GEMM; Bedrock Math vs GLM); `-Check` only builds and compares results | `Benchmarks/<name>/run-benchmark.ps1 [-Check]` |
 
 ---
@@ -297,9 +298,9 @@ module for parallel code generation are the open compile-time items (roadmap 5.1
 
 ## 9. Gates
 
-A change is done only when all of these pass. `nuke gates` from the repository root runs items 1 to 9 (with
+A change is done only when all of these pass. `nuke gates` from the repository root runs items 1 to 10 (with
 NegativeTest and IsolatedTest also at `-O2`) except StressTest and IsolatedTest `-DebugInfo`; run those and the
-benchmarks (item 10) on their own.
+benchmarks (item 11) on their own.
 
 1. The compiler builds with no swallowed errors (grep the log, see the traps list).
 2. C4Testing: `nuke test` (repository root), or `python Frost/Build.py -test -c Development -a x64 -p <C4 root>`.
@@ -310,7 +311,9 @@ benchmarks (item 10) on their own.
 7. RuntimeTest and StressTest (compile) when touching the runtime, ABI or interop.
 8. ScriptTest at `-O0` and `-O2`: `assets/ScriptTest/RunTests.ps1` and `-O2`.
 9. ToolsTest: `assets/ToolsTest/RunTests.ps1`.
-10. Benchmarks build and agree with C++: `Benchmarks/gemm/run-benchmark.ps1 -Check` and
+10. DifferentialTest: `python assets/DifferentialTest/run.py` (150 seeds at `-O0` and `-O2`); after codegen or
+   conversion changes also a long run (`--start 1000 --count 5000 --size 1.5`).
+11. Benchmarks build and agree with C++: `Benchmarks/gemm/run-benchmark.ps1 -Check` and
    `Benchmarks/math/run-benchmark.ps1 -Check`; the GC benchmark computes the same world alone and with workers
    (`Benchmarks/gc/run-benchmark.ps1 -Check`); the compile benchmark's programs build
    (`Benchmarks/compile/run-benchmark.ps1 -Check`).

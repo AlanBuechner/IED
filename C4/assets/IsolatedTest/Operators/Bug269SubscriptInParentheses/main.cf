@@ -1,0 +1,22 @@
+// BUG-269: a parenthesized subscript followed by `&`, `*`, `+`, `-` or `**` is an operand of that operator, as a
+// parenthesized name is (C#'s rule): `(a[i]) & x` is a bitwise and, not a cast of `&x` to an array type.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+uint32[4] g_bits = { 12, 10, 7, 3 };
+int32[2][2] g_grid = { { 1, 2 }, { 3, 4 } };
+
+int32 main() {
+	uint32 mask = 6;
+	Check(((g_bits[0]) & mask) == 4, "(a[i]) & x");
+	Check(((g_bits[1]) * 2) == 20, "(a[i]) * x");
+	Check(((g_bits[2]) - 2) == 5, "(a[i]) - x");
+	Check(((g_bits[3]) + 1) == 4, "(a[i]) + x");
+	Check(((g_grid[1][0]) * (g_grid[0][1])) == 6, "(a[i][j]) * (a[k][l])");
+	int32 i = 1;
+	Check(((g_grid[i][i]) & 1) == 0, "subscripts with variables");
+	Check((int32)(g_bits[0]) == 12, "a cast of a parenthesized element still casts");
+	return g_failures;
+}
