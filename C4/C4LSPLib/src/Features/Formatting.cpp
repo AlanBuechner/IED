@@ -23,30 +23,8 @@ namespace C4LSP::Features
 
 		bool IsWordLike(TokenType t)
 		{
-			switch (t)
-			{
-			case TokenType::Identifier: case TokenType::Number:
-			case TokenType::Char:       case TokenType::Text:
-			case TokenType::True:       case TokenType::False:  case TokenType::Null:
-			case TokenType::Namespace:  case TokenType::Class:    case TokenType::Struct:
-			case TokenType::Interface:  case TokenType::Enum:     case TokenType::Union:
-			case TokenType::Alias:      case TokenType::FunPtr:   case TokenType::Template:
-			case TokenType::Extern:     case TokenType::Public:   case TokenType::Private:
-			case TokenType::Protected:  case TokenType::Virtual:  case TokenType::Override:
-			case TokenType::Const:      case TokenType::Static:
-			case TokenType::If:         case TokenType::Else:     case TokenType::Switch:
-			case TokenType::Case:       case TokenType::Default:  case TokenType::Fallthrough:
-			case TokenType::For:        case TokenType::While:    case TokenType::Do:
-			case TokenType::Break:      case TokenType::Continue:
-			case TokenType::Return:     case TokenType::Defer:    case TokenType::Goto:
-			case TokenType::Try:        case TokenType::Catch:    case TokenType::Finally:
-			case TokenType::Throw:      case TokenType::Delete:   case TokenType::New:
-			case TokenType::This:       case TokenType::Is:       case TokenType::As:
-			case TokenType::Extends:
-				return true;
-			default:
-				return false;
-			}
+			return t == TokenType::Identifier || t == TokenType::Number || t == TokenType::Char || t == TokenType::Text ||
+				Scripting::Token::IsKeyword(t);
 		}
 
 		bool IsControlKeyword(TokenType t)

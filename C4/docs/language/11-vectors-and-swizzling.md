@@ -215,7 +215,7 @@ semantic rules (section 3) and lowering rules (section 4) still apply.
 | Lane views lower to LLVM vector types; LLVM selects SSE/AVX instructions | **Implemented** |
 | The processor a build targets (`-march`, `-m<feature>`) and its `SIMD_*` macros | **Implemented** - section 8 (D-62) |
 | SIMD intrinsics (`simd_min`, `simd_shuffle`, `simd_fma`, `simd_gather`, ...) | **Implemented** - section 9, [builtins section 11](14-builtins.md#11-simd-intrinsics) |
-| `asm` blocks | **Planned** (not in the lexer yet) |
+| `asm` blocks | **Implemented**: [16 - Inline assembly](16-inline-assembly.md) (`xmm`, `ymm` and `zmm` operands hold packed vectors) |
 | Wider lane counts (AVX 8 x float, AVX-512 16 x float) | **Implemented** - alignment, calls and containers tested on every target (section 8) |
 | Performance validation of vector math vs equivalent C++ (benchmarks in `Benchmarks/`) | **Implemented** - `Benchmarks/math/` times Bedrock Math against GLM (plain and with its SSE paths) and checks both compute the same results |
 | Math library (vec/mat/quat, left-handed, 0-1 NDC, GLM parity) | **Implemented** - `Math::` in `Bedrock/Math/`, opt-in through `include "math.ch"` (D-46); see [library/bedrock.md](../library/bedrock.md#9-math-math-include-mathch) |

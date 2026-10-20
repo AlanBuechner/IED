@@ -1,4 +1,5 @@
 #include "Backend/CodeGen/CodeGenDriver.h"
+#include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Backend/CodeGen/DebugInfo.h"
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include "Backend/CodeGen/GcRoots.h"
@@ -319,6 +320,7 @@ namespace Scripting
 	{
 		setvbuf(stderr, nullptr, _IONBF, 0); // unbuffered so EH debug markers survive a crash
 		LowerTypes(model);
+		EmitFileAssembly(model);
 		if (m_Script)
 			m_MCtx.StartThreadLocalsOnFirstUse([this, &model](const SymbolInfo& sym) { return !IsHostStorage(sym) && StartsWithCode(model, sym); });
 		Core::Vector<const FunctionRecord*> records;
@@ -332,6 +334,20 @@ namespace Scripting
 		if (!EmitReflection(model, errorMessage)) return false;
 		FinishModule(model);
 		return Verify(errorMessage);
+	}
+
+	void CodeGenDriver::EmitFileAssembly(const ProgramModel& model)
+	{
+		// Intel syntax unless the block says att_syntax; each block switches back so the next one starts in AT&T,
+		// the module assembler's own default.
+		for (const AsmStatementNode* block : model.FileAssembly())
+		{
+			const bool att = !block->GetOptions().Empty();
+			std::string text = att ? "" : ".intel_syntax noprefix\n";
+			for (const Core::String& line : block->GetLines()) text += std::string(line.c_str()) + "\n";
+			if (!att) text += ".att_syntax prefix\n";
+			m_MCtx.module().appendModuleInlineAsm(text);
+		}
 	}
 
 	void CodeGenDriver::LowerTypes(ProgramModel& model)

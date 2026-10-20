@@ -136,6 +136,7 @@ namespace Scripting
 		// Control Flow - Misc
 		Return,
 		Defer,
+		Asm,
 		Goto,
 		Try,
 		Catch,
@@ -286,6 +287,8 @@ namespace Scripting
 
 		/// An identifier that spells a keyword becomes that keyword's token.
 		void PromoteKeyword();
+		/// Whether `type` is a keyword's token (`if`, `class`, `true`, `asm`, ...): the one list is the keyword table.
+		static bool IsKeyword(TokenType type);
 
 	private:
 		TokenType m_Type;

@@ -2454,5 +2454,121 @@
     "ReferenceFieldConstLocation": {
         "expect": ["cannot bind a non-const reference to a const object: 'target'"],
         "reason": "A non-const reference field cannot bind a const location (BUG-268)."
+    },
+    "AsmUnknownOption": {
+        "expect": ["'fast' is not an asm option"],
+        "reason": "Options are a fixed set; a typo names the valid ones."
+    },
+    "AsmNomemAndReadonly": {
+        "expect": ["'nomem' (it touches no memory) or 'readonly'"],
+        "reason": "nomem and readonly contradict each other."
+    },
+    "AsmPureWithoutMemoryOption": {
+        "expect": ["a 'pure' asm block also says what it does to memory"],
+        "reason": "pure needs nomem or readonly."
+    },
+    "AsmPureWithoutOutput": {
+        "expect": ["a 'pure' asm block needs an output"],
+        "reason": "A pure block without outputs would be removed."
+    },
+    "AsmNoreturnWithOutput": {
+        "expect": ["a 'noreturn' asm block never finishes, so it cannot have outputs"],
+        "reason": "noreturn and outputs contradict."
+    },
+    "AsmTemplateUnknownOperand": {
+        "expect": ["the asm template names '{c}', which is not an operand"],
+        "reason": "Every operand the template names is declared."
+    },
+    "AsmTemplatePositionPastOperands": {
+        "expect": ["the asm template names '{3}', which is not an operand"],
+        "reason": "A positional reference stays within the operands."
+    },
+    "AsmTemplateBadModifier": {
+        "expect": ["'z' in '{a:z}' is not an x86 operand modifier"],
+        "reason": "Operand modifiers are the x86 set."
+    },
+    "AsmTemplateUnclosedBrace": {
+        "expect": ["a '{' in an asm template is not closed"],
+        "reason": "A brace opens an operand reference or is doubled."
+    },
+    "AsmTemplateStrayBrace": {
+        "expect": ["a '}' in an asm template closes nothing"],
+        "reason": "A lone closing brace is doubled."
+    },
+    "AsmFloatInGeneralRegister": {
+        "expect": ["a 'float' goes in an xmm register"],
+        "reason": "The register class matches the value kind."
+    },
+    "AsmIntegerInVectorRegister": {
+        "expect": ["a 'int32' goes in a general register"],
+        "reason": "The register class matches the value kind."
+    },
+    "AsmVectorTooWideForClass": {
+        "expect": ["is 32 bytes: a xmm register holds 16"],
+        "reason": "A 32-byte vector needs a ymm register."
+    },
+    "AsmUnknownRegister": {
+        "expect": ["'eaxx' is not an x86-64 register"],
+        "reason": "An explicit register exists on x86-64."
+    },
+    "AsmRegisterKindMismatch": {
+        "expect": ["the register 'xmm1' holds floats and vectors, not a 'int32'"],
+        "reason": "An explicit register holds the value kind."
+    },
+    "AsmUnknownRegisterClass": {
+        "expect": ["'gpr' is not an asm register class"],
+        "reason": "Register classes are reg, xmm, ymm and zmm."
+    },
+    "AsmOutputNotALocation": {
+        "expect": ["needs a location to store into, not a value"],
+        "reason": "An output is stored into a location."
+    },
+    "AsmOutputConstLocation": {
+        "expect": ["fixed"],
+        "reason": "An output cannot write a read-only location."
+    },
+    "AsmDuplicateOperandName": {
+        "expect": ["the asm block has two operands named 'a'"],
+        "reason": "Operand names are unique within a block."
+    },
+    "AsmConstantNotConstant": {
+        "expect": ["the asm constant 'n' is a compile-time integer"],
+        "reason": "A const operand folds at compile time."
+    },
+    "AsmClobberMemoryWithNomem": {
+        "expect": ["cannot clobber \"memory\""],
+        "reason": "nomem contradicts a memory clobber."
+    },
+    "AsmClobberUnknownRegister": {
+        "expect": ["'rxx' is not an x86-64 register"],
+        "reason": "A clobber names a register, memory or flags."
+    },
+    "AsmClobberOperandRegister": {
+        "expect": ["'rax' is an operand's register in this block, so it is not a clobber"],
+        "reason": "An operand register is not also a clobber."
+    },
+    "AsmClobberAbiUnknown": {
+        "expect": ["clobber_abi names the calling convention"],
+        "reason": "Only the C ABI exists."
+    },
+    "AsmUnexpectedItem": {
+        "expect": ["'mov' is not part of an asm block"],
+        "reason": "Instructions are strings; other words are not asm items."
+    },
+    "AsmMissingBlock": {
+        "expect": ["an asm block is written 'asm { \"instruction\"; ... }'"],
+        "reason": "An asm statement has a block."
+    },
+    "AsmFileScopeOperands": {
+        "expect": ["a file-scope asm block adds its lines to the program as they are"],
+        "reason": "File-scope asm takes no operands."
+    },
+    "AsmFileScopeOption": {
+        "expect": ["a file-scope asm block takes only the option 'att_syntax'"],
+        "reason": "File-scope asm takes only att_syntax."
+    },
+    "AsmIsAKeyword": {
+        "expect": ["'asm' is a keyword: it cannot name a variable, parameter or function"],
+        "reason": "asm is a keyword and cannot name a variable."
     }
 }

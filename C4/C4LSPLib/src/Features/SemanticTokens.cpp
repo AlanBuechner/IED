@@ -44,56 +44,7 @@ namespace C4LSP::Features
 		// --- Keyword classification for the lexical pass ------------------------
 		bool IsKeywordToken(Scripting::TokenType t)
 		{
-			switch (t)
-			{
-			case Scripting::TokenType::Namespace:
-			case Scripting::TokenType::Class:
-			case Scripting::TokenType::Struct:
-			case Scripting::TokenType::Enum:
-			case Scripting::TokenType::Union:
-			case Scripting::TokenType::Interface:
-			case Scripting::TokenType::Alias:
-			case Scripting::TokenType::FunPtr:
-			case Scripting::TokenType::Template:
-			case Scripting::TokenType::Extern:
-			case Scripting::TokenType::Public:
-			case Scripting::TokenType::Private:
-			case Scripting::TokenType::Protected:
-			case Scripting::TokenType::Virtual:
-			case Scripting::TokenType::Override:
-			case Scripting::TokenType::Const:
-			case Scripting::TokenType::Static:
-			case Scripting::TokenType::If:
-			case Scripting::TokenType::Else:
-			case Scripting::TokenType::Switch:
-			case Scripting::TokenType::Case:
-			case Scripting::TokenType::Default:
-			case Scripting::TokenType::Fallthrough:
-			case Scripting::TokenType::For:
-			case Scripting::TokenType::While:
-			case Scripting::TokenType::Do:
-			case Scripting::TokenType::Break:
-			case Scripting::TokenType::Continue:
-			case Scripting::TokenType::Return:
-			case Scripting::TokenType::Defer:
-			case Scripting::TokenType::Goto:
-			case Scripting::TokenType::Try:
-			case Scripting::TokenType::Catch:
-			case Scripting::TokenType::Finally:
-			case Scripting::TokenType::Throw:
-			case Scripting::TokenType::Delete:
-			case Scripting::TokenType::New:
-			case Scripting::TokenType::This:
-			case Scripting::TokenType::Is:
-			case Scripting::TokenType::As:
-			case Scripting::TokenType::Extends:
-			case Scripting::TokenType::True:
-			case Scripting::TokenType::False:
-			case Scripting::TokenType::Null:
-				return true;
-			default:
-				return false;
-			}
+			return Scripting::Token::IsKeyword(t);
 		}
 
 		uint32 KeywordKind(Scripting::TokenType t)

@@ -28,6 +28,11 @@ namespace Scripting
 	{
 	public:
 		explicit ExprLowerer(LoweringContext& ctx) : m_Ctx(ctx) {}
+		// Walk an lvalue chain (field/deref/indexop) reporting the first node that makes a WRITE illegal:
+		// ephemeral (rooted in a by-value call temp - the store would be discarded) or read-only (ReadOnlyReason;
+		// through a `const T*`). Returns true and fills `why` when a store must be rejected; false means the
+		// location is writable. Reads are never blocked - only stores call this.
+		bool ChainBlocksWrite(const LValue* lv, Core::String& why) const;
 
 		QueryResult<Value> ResolveExpr(const AstNode* node);
 		/// `node` as the value of a `target`: where a funcptr or func is expected, a function template's name is
@@ -188,11 +193,6 @@ namespace Scripting
 		QueryResult<Value> ResolveArrayIndex(const ArrayIndexNode* n);
 		QueryResult<Value> ResolveTypeCheck(const TypeCheckNode* n);
 		QueryResult<Value> ResolveSafeCast(const SafeCastNode* n);
-		// Walk an lvalue chain (field/deref/indexop) reporting the first node that makes a WRITE illegal:
-		// ephemeral (rooted in a by-value call temp - the store would be discarded) or read-only (ReadOnlyReason;
-		// through a `const T*`). Returns true and fills `why` when a store must be rejected; false means the
-		// location is writable. Reads are never blocked - only stores call this.
-		bool ChainBlocksWrite(const LValue* lv, Core::String& why) const;
 		/// How a receiver may be used (D-31): a read-only location calls only const methods.
 		ReceiverAccess AccessOf(const Value& v) const;
 		ReceiverAccess ImplicitReceiverAccess() const;

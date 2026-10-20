@@ -89,6 +89,7 @@ namespace Scripting
 		BreakStatement,
 		ContinueStatement,
 		DeferStatement,
+		AsmStatement,
 		FallthroughStatement,
 		GotoStatement,
 		LabelStatement,

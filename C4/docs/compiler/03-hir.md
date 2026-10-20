@@ -109,7 +109,9 @@ slot), `Throw` (value or rethrow; carries the exception object's copy and destro
 scope-exit cleanup; `exceptionalOnly` runs it only when an exception unwinds the block), `Once` (a region
 that runs the first time control reaches it, once per program, threads waiting for it; an exception
 abandons it so the next pass runs it again), `AtExit` (registers an object with static storage to be
-destroyed at exit: its delete, an element count and stride).
+destroyed at exit: its delete, an element count and stride), `Asm` (inline assembly, `AsmLowerer`: LLVM's template
+and constraint string, the input values, and the slots its output registers are read into; the statements after it
+store each slot into its operand's location, converted from the register's type).
 
 Slots have a class: `Param`, `Local`, `Temp`, `Static` (static locals become module globals in codegen; a
 static slot whose `initial` constant is set starts holding it).

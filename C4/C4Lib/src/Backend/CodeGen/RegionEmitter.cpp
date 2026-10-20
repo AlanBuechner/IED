@@ -1,4 +1,5 @@
 #include "Backend/CodeGen/RegionEmitter.h"
+#include "Backend/CodeGen/AsmEmitter.h"
 #include "Backend/CodeGen/EhTables.h"
 #include "Backend/CodeGen/StaticStorage.h"
 #include <llvm/IR/Constants.h>
@@ -214,6 +215,9 @@ namespace Scripting
 		case HIRNode::Kind::Throw:     EmitThrow(static_cast<const ThrowNode*>(s)); return;
 		case HIRNode::Kind::Once:      EmitOnce(static_cast<const OnceNode*>(s)); return;
 		case HIRNode::Kind::AtExit:    EmitAtExit(static_cast<const AtExitNode*>(s)); return;
+		case HIRNode::Kind::Asm:
+			if (!AsmEmitter(m_Ctx, m_Expr).Emit(static_cast<const AsmNode*>(s))) ContinueAfterTerminator();
+			return;
 		default: return;
 		}
 	}

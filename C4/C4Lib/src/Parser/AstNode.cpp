@@ -58,6 +58,7 @@ namespace Scripting
 		case NodeType::BreakStatement:           return "BreakStatement";
 		case NodeType::ContinueStatement:        return "ContinueStatement";
 		case NodeType::DeferStatement:           return "DeferStatement";
+		case NodeType::AsmStatement:             return "AsmStatement";
 		case NodeType::FallthroughStatement:     return "FallthroughStatement";
 		case NodeType::GotoStatement:            return "GotoStatement";
 		case NodeType::LabelStatement:           return "LabelStatement";

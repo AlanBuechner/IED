@@ -99,6 +99,8 @@ private:
 		void RegisterVariable(Context& ctx, const VariableDefinitionNode& var);
 		void RegisterFunction(Context& ctx, const FunctionDefinitionNode& fn);
 		void RegisterUnion(Context& ctx, const UnionDefinitionNode& un);
+		/// A file-scope `asm` block: assembly added to the program as it is, so it takes no operands.
+		void RegisterFileAssembly(Context& ctx, const AsmStatementNode& block);
 		void ReportUnionMembersItCannotHold(const Context& ctx, const UnionDefinitionNode& un);
 		void ReportUnresolvedUnion(const Context& ctx, const PendingUnion& u);
 		Core::String QualifiedWhy(const Context& ctx, const PendingQualifiedFunc& f) const;

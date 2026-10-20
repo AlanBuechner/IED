@@ -1,0 +1,57 @@
+// asm register classes: reg for integers, bools, enums and pointers; xmm for float, double and 16-byte packed
+// vectors (also a pure packed vector object); explicit registers of both kinds.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+enum class Color : uint8 { Red = 1, Green = 2, Blue = 4 }
+struct Vec4 { public union { packed float x, y, z, w; }; }
+
+int32 main() {
+	bool zero;
+	int32 value = 0;
+	asm(pure, nomem) { "test {v}, {v}"; "sete {z:b}"; out(reg) z = zero; in(reg) v = value; }
+	Check(zero, "a bool output is true for a non-zero register");
+	bool flag = true;
+	int64 asNumber;
+	asm(pure, nomem) { "movzx {n}, {f}"; out(reg) n = asNumber; in(reg) f = flag; }
+	Check(asNumber == 1, "a bool input is 1");
+
+	Color c = Color::Green;
+	Color doubled;
+	asm(pure, nomem) { "mov {d}, {c}"; "add {d}, {d}"; out(reg) d = doubled; in(reg) c; }
+	Check(doubled == Color::Blue, "an enum");
+
+	int32[2] pair = { 3, 4 };
+	int32* pointer = &pair[0];
+	int32 second;
+	asm(pure, readonly) { "mov {s}, dword ptr [{p} + 4]"; out(reg) s = second; in(reg) p = pointer; }
+	Check(second == 4, "a pointer read through with readonly");
+
+	float f = 2.25f;
+	float fs = f;
+	asm(pure, nomem) { "addss {r}, {r}"; inout(xmm) r = fs; }
+	Check(fs == 4.5f, "a float in xmm");
+	double d = 1.5;
+	double ds;
+	asm(pure, nomem) { "movsd {o}, {i}"; "mulsd {o}, {i}"; out(xmm) o = ds; in(xmm) i = d; }
+	Check(ds == 2.25, "a double in xmm");
+
+	packed float[4] lanes = { 1.0f, 2.0f, 3.0f, 4.0f };
+	packed float[4] summed;
+	asm(pure, nomem) { "movaps {o}, {i}"; "addps {o}, {i}"; out(xmm) o = summed; in(xmm) i = lanes; }
+	Check(summed[0] == 2.0f && summed[3] == 8.0f, "a packed vector in xmm");
+	Vec4 v = { 1.0f, 1.0f, 1.0f, 1.0f };
+	Vec4 scaled;
+	asm(pure, nomem) { "movaps {o}, {i}"; "addps {o}, {o}"; out(xmm) o = scaled; in(xmm) i = v; }
+	Check(scaled.x == 2.0f && scaled.w == 2.0f, "a pure packed vector object in xmm");
+
+	int64 fromRcx;
+	asm(pure, nomem) { "mov rcx, 77"; "mov {o}, rcx"; out(reg) o = fromRcx; clobber("rcx"); }
+	Check(fromRcx == 77, "a clobbered register");
+	float fromXmm3;
+	asm(pure, nomem) { "movss xmm3, {i}"; out("xmm3") o = fromXmm3; in(xmm) i = f; }
+	Check(fromXmm3 == 2.25f, "an explicit xmm register");
+	return g_failures;
+}

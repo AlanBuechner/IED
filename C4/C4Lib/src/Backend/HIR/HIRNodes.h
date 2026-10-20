@@ -3,6 +3,7 @@
 #include "Model/SymbolTable.h" // FunctionRecord
 #include <memory>
 #include <deque>
+#include <string>
 
 namespace Scripting
 {
@@ -21,7 +22,7 @@ namespace Scripting
 			// rvalue-producing (a quantity)
 			Constant, Load, Call, IntrinsicOp, Convert, New, Delete, Construct, AddressOf, AddressArithmetic, Ternary, InitList, FunctionAddress, VectorBuild, Sequence, DynamicCast, Relocate, MakeFunc, FuncCode, Transfer, Va, Atomic, Simd,
 			// statements / regions
-			Block, If, While, For, Switch, Break, Continue, Jump, Goto, Label, Return, ExprStmt, LocalDecl, Store, TryCatch, Throw, Defer, Once, AtExit
+			Block, If, While, For, Switch, Break, Continue, Jump, Goto, Label, Return, ExprStmt, LocalDecl, Store, TryCatch, Throw, Defer, Once, AtExit, Asm
 		};
 
 		Kind kind;
@@ -444,6 +445,24 @@ namespace Scripting
 	};
 
 	// Write an rvalue into an lvalue. Also the emission form of assignment / compound-assign result.
+	// Inline assembly (docs/language/16): LLVM's template and constraint string, the slots each output register is
+	// read into (in the order of the outputs; the lowerer copies them to their locations after this statement), and
+	// the input values in constraint order. `memory` is what the block may do to memory.
+	struct AsmNode : HIRNode
+	{
+		enum class Memory { Any, Read, None };
+		std::string text;
+		std::string constraints;
+		std::vector<const LValue*> outputs;
+		std::vector<const HIRNode*> inputs;
+		Memory memory = Memory::Any;
+		bool sideEffects = true;
+		bool alignStack = true;
+		bool intel = true;
+		bool noReturn = false;
+		AsmNode() : HIRNode(Kind::Asm, nullptr) {}
+	};
+
 	struct StoreNode : HIRNode
 	{
 		const LValue* target; // where to write

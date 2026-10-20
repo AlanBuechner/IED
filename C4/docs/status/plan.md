@@ -1178,6 +1178,23 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 - **Tests:** the DifferentialTest gate; IsolatedTest `Operators/Bug269SubscriptInParentheses`,
   `Types/Bug270BoolToByteConversion`.
 
+#### B45 - Inline assembly (roadmap 1b)
+- **Design:** [inline assembly](../language/16-inline-assembly.md) (Rust's `asm!` model: Intel syntax, named operands,
+  explicit directions and register classes, conservative defaults). **Depends on:** none. **Status:** Done.
+- **Done notes:** the `asm` keyword (`Token::IsKeyword` is now the one keyword list: the LSP's semantic tokens and
+  formatter read it); `Parser/Nodes/Statements/AsmStatementNode` (lines, `in` / `out` / `inout` / `const` operands,
+  options, `clobber`, `clobber_abi`), a statement in blocks and braceless bodies and a declaration at file scope
+  (`NamespaceNode` now tries a table of declaration parsers). HIR: `AsmLowerer` (operands classified into register
+  kinds and LLVM constraints, `out` early-clobber, `inout` tied, bools through a byte, packed vector objects as
+  their lanes), `AsmTemplate` (`{name}` / `{name:m}` / `{N}` to `${N}`), `AsmRegisters` (x86-64 names, families,
+  the Windows x64 caller-saved set); the `Asm` node stores outputs into slots and copies them to their locations.
+  Codegen: `AsmEmitter` (`llvm::InlineAsm`, memory effects for `nomem` / `readonly`, `unreachable` after
+  `noreturn`); file-scope blocks are module assembly (`CodeGenDriver::EmitFileAssembly`). A keyword used as a name
+  now says so (`Parser/UnexpectedToken`). Follow-up in 5.1: an assembler error should name the C4 source line
+  (needs in-process object emission to read the inline asm's `srcloc`).
+- **Tests:** IsolatedTest `Asm/Operands`, `Asm/RegisterClasses`, `Asm/Options`, `Asm/FileScope`, `Asm/ClobberAbiCall`;
+  29 NegativeTests `Asm*`; C4Testing `Parser.Statements.Asm` (6) and `Semantic.Asm` (5).
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1695,7 +1712,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

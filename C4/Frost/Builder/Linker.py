@@ -34,7 +34,12 @@ def LinkObjects(intDir, links, projDir, outputFile, linkerArgs, buildType, needs
 		args.extend(["-fuse-ld=lld"])
 		if(Config.configuration != "Dist" or Config.useDistPDBs == True):
 			args.extend(["-g"])
-	if(Config.useAsan == True):
+	elif(buildType == Config.BuildType.STATIC_LIBRARY):
+		args.extend(["-fuse-ld=llvm-lib"])
+	elif(buildType == Config.BuildType.DYNAMIC_LIBRARY):
+		args.extend(["-shared", "-fPIC"])
+	# An archive only collects objects; executables and DLLs link the sanitizer runtime.
+	if(Config.useAsan == True and buildType != Config.BuildType.STATIC_LIBRARY):
 		args.append("-fsanitize=address")
 		args.append("-fno-sanitize-address-use-odr-indicator")
 		asanLibDir = Config.GetClangLibDir()
@@ -44,11 +49,6 @@ def LinkObjects(intDir, links, projDir, outputFile, linkerArgs, buildType, needs
 			args.append(f"/LIBPATH:{asanLibDir}")
 			args.append(f"-Xlinker")
 			args.append(f"/WHOLEARCHIVE:{thunkLib}")
-	elif(buildType == Config.BuildType.STATIC_LIBRARY):
-		args.extend(["-fuse-ld=llvm-lib"])
-	elif(buildType == Config.BuildType.DYNAMIC_LIBRARY):
-		#args.extend(["-fuse-ld=llvm-lib", "-fPIC", "-shared"])
-		args.extend(["-shared", "-fPIC"])
 
 	args.extend(["-o", outputFile])
 	files = Utils.ResolveFiles([f"{intDir}/**.obj"], intDir)

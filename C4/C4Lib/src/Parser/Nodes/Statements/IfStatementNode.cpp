@@ -1,4 +1,5 @@
 #include "IfStatementNode.h"
+#include "AsmStatementNode.h"
 #include "CodeBlockNode.h"
 #include "ExpressionStatementNode.h"
 #include "EmptyStatementNode.h"
@@ -48,6 +49,7 @@ namespace Scripting
 		TRY_PARSE_STMT(BreakStatementNode);
 		TRY_PARSE_STMT(ContinueStatementNode);
 		TRY_PARSE_STMT(DeferStatementNode);
+		TRY_PARSE_STMT(AsmStatementNode);
 		TRY_PARSE_STMT(FallthroughStatementNode);
 		TRY_PARSE_STMT(GotoStatementNode);
 		TRY_PARSE_STMT(ThrowStatementNode);

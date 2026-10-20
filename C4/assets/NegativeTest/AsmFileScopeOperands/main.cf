@@ -1,0 +1,3 @@
+int32 g_value = 1;
+asm { "nop"; in(reg) g_value; }
+int32 main() { return 0; }

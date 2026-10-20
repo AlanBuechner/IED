@@ -9,6 +9,7 @@ compile live in `assets/NegativeTest`; the large mixed suite is `assets/TestCode
 ## Layout
 
 ```
+Asm/               inline assembly: operands, register classes, options, clobber_abi calls, file-scope asm
 Basics/            core constructs, conversions, promotions, multi-file programs and includes
 Bedrock/           the default library through `include "bedrock.ch"`
 Calls/             calls, function pointers, variadics, references returned by calls

@@ -1,4 +1,5 @@
 #include "NamespaceNode.h"
+#include "Parser/UnexpectedToken.h"
 #include "IncludeDeclarationNode.h"
 #include "ExternDeclarationNode.h"
 #include "AnnotationNode.h"
@@ -10,10 +11,42 @@
 #include "AliasDefinitionNode.h"
 #include "../Expressions/LiteralNode.h"
 #include "../Statements/CodeBlockNode.h"
+#include "../Statements/AsmStatementNode.h"
+#include <vector>
 #include "Core/StringFormat.h"
 
 namespace Scripting
 {
+	namespace
+	{
+		struct DeclarationParser
+		{
+			Ref<AstNode> (*parse)(ParserState& state);
+			bool rootOnly;
+		};
+
+		template <typename Node> Ref<AstNode> Parse(ParserState& state) { return Node::TryParse(state); }
+
+		// What a namespace body may hold, tried in this order; includes and extern blocks only at a file's root.
+		const std::vector<DeclarationParser>& DeclarationParsers()
+		{
+			static const std::vector<DeclarationParser> parsers = {
+				{ &Parse<IncludeDeclarationNode>, true },
+				{ &Parse<ExternDeclarationNode>, true },
+				{ &Parse<NamespaceNode>, false },
+				{ &Parse<ObjectDefinitionNode>, false },
+				{ &Parse<EnumDefinitionNode>, false },
+				{ &Parse<UnionDefinitionNode>, false },
+				{ &Parse<AliasDefinitionNode>, false },
+				{ &Parse<AsmStatementNode>, false },
+				{ &Parse<FunctionDefinitionNode>, false },
+				{ &Parse<VariableDefinitionNode>, false },
+				{ &Parse<CodeBlockNode>, false },
+				{ &Parse<LiteralNode>, false },
+			};
+			return parsers;
+		}
+	}
 
 	Ref<NamespaceNode> NamespaceNode::TryParse(ParserState& state)
 	{
@@ -139,71 +172,15 @@ namespace Scripting
 				break;
 
 			bool matched = false;
-
-			if (m_IsRoot)
+			for (const DeclarationParser& parser : DeclarationParsers())
 			{
-				auto node = IncludeDeclarationNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-			if (!matched && m_IsRoot)
-			{
-				auto node = ExternDeclarationNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-			if (!matched)
-			{
-				auto node = NamespaceNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-			if (!matched)
-			{
-				auto node = ObjectDefinitionNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-			if (!matched)
-			{
-				auto node = EnumDefinitionNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-		if (!matched)
-		{
-			auto node = UnionDefinitionNode::TryParse(state);
-			if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-		}
-
-			if (!matched)
-			{
-				auto node = AliasDefinitionNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-		if (!matched)
-		{
-			auto node = FunctionDefinitionNode::TryParse(state);
-			if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-		}
-
-			if (!matched)
-			{
-				auto node = VariableDefinitionNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-			if (!matched)
-			{
-				auto node = CodeBlockNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
-			}
-
-			if (!matched)
-			{
-				auto node = LiteralNode::TryParse(state);
-				if(node != nullptr) { m_ChildNodes.Push(node); matched = true; }
+				if (parser.rootOnly && !m_IsRoot) continue;
+				if (auto node = parser.parse(state))
+				{
+					m_ChildNodes.Push(node);
+					matched = true;
+					break;
+				}
 			}
 
 			if (matched)
@@ -211,7 +188,7 @@ namespace Scripting
 
 			errorTracker.AddError(
 				token.GetStartLocation(),
-				Core::StringFormat::Format("Unexpected token '{0}'", token.GetText()),
+				UnexpectedTokenMessage(lexer),
 				ErrorSeverity::Error);
 			lexer.NextCompoundToken();
 		}

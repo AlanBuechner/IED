@@ -30,6 +30,8 @@ system = systems[0] # default to windows
 globalDefines: list[str] = []
 
 useAsan = False
+# Parallel compiles: 0 is one per processor. `-j N` or the FROST_JOBS environment variable sets it.
+jobs = int(os.environ.get("FROST_JOBS", "0") or "0")
 useDistPDBs = False
 printCompileInfo = False
 

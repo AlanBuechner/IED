@@ -325,7 +325,7 @@ class ObjectBuilder:
 
 def BuildObjects(objects, jobs = 0):
 	if(jobs == 0):
-		jobs = multiprocessing.cpu_count()
+		jobs = Config.jobs or multiprocessing.cpu_count()
 	pool = concurrent.futures.ThreadPoolExecutor(max_workers=jobs)
 	futures = []
 	for o in objects:

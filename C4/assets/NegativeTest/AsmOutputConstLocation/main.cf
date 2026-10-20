@@ -1,0 +1,5 @@
+int32 main() {
+	const int32 fixed = 3;
+	asm { "mov {fixed}, 1"; out(reg) fixed; }
+	return 0;
+}

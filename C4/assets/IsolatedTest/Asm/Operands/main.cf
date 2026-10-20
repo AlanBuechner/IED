@@ -1,0 +1,55 @@
+// asm operands (docs/language/16): in, out and inout by name, `name = expr` inputs and `name = location` outputs, a
+// const, positional {0}, outputs into fields, elements and through pointers, and operands used by no template line.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+struct Pair { int64 first; int64 second; }
+
+int32 main() {
+	int32 a = 5;
+	int32 b = 7;
+	int32 sum;
+	asm(pure, nomem) { "lea {sum}, [{a} + {b}]"; out(reg) sum; in(reg) a; in(reg) b; }
+	Check(sum == 12, "in and out by name");
+
+	int64 x = 3;
+	asm(pure, nomem) { "imul {x}, {x}"; inout(reg) x; }
+	Check(x == 9, "inout");
+
+	int32 r;
+	asm(pure, nomem) { "mov {r}, {value}"; out(reg) r; in(reg) value = a * 10 + 1; }
+	Check(r == 51, "a named expression input");
+
+	int64 shifted;
+	asm(pure, nomem) { "mov {s}, {v}"; "shl {s}, {n}"; out(reg) s = shifted; in(reg) v = x; const n = 4; }
+	Check(shifted == 144, "a named output location and a const");
+
+	int32 positional;
+	asm(pure, nomem) { "mov {1}, {0}"; in(reg) a; out(reg) positional; }
+	Check(positional == 5, "operands by position");
+
+	Pair p = { 0, 0 };
+	int64[4] cells = { 0, 0, 0, 0 };
+	Pair* through = &p;
+	asm(pure, nomem) { "mov {f}, 11"; "mov {e}, 22"; "mov {t}, 33"; out(reg) f = p.first; out(reg) e = cells[2]; out(reg) t = through->second; }
+	Check(p.first == 11 && cells[2] == 22 && p.second == 33, "outputs into a field, an element and through a pointer");
+
+	uint64 low;
+	uint64 high;
+	asm(nomem, nostack) { "rdtsc"; out("eax") low; out("edx") high; }
+	Check(high < 0x100000000 && low < 0x100000000, "explicit registers no template line names");
+
+	int8 small = -3;
+	int16 medium = -300;
+	int64 widened;
+	asm(pure, nomem) { "movsx {w}, {s}"; out(reg) w = widened; in(reg) s = small; }
+	Check(widened == -3, "an 8-bit input");
+	asm(pure, nomem) { "movsx {w}, {m}"; out(reg) w = widened; in(reg) m = medium; }
+	Check(widened == -300, "a 16-bit input");
+	int32 thirtyTwo;
+	asm(pure, nomem) { "mov {t:k}, {v:k}"; out(reg) t = thirtyTwo; in(reg) v = x; }
+	Check(thirtyTwo == 9, "operand modifiers");
+	return g_failures;
+}

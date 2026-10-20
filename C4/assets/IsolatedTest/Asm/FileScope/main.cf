@@ -1,0 +1,44 @@
+// File-scope asm adds its lines to the program: functions (called through [link]) and data, in Intel syntax by
+// default or AT&T with att_syntax; a block inside a namespace is file-scope too.
+int32 g_failures = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+asm {
+	".text";
+	".globl c4_fs_answer";
+	"c4_fs_answer:";
+	"mov eax, 42";
+	"ret";
+}
+asm(att_syntax) {
+	".globl c4_fs_add";
+	"c4_fs_add:";
+	"leal (%rcx,%rdx), %eax";
+	"ret";
+}
+namespace Tables {
+	asm {
+		".data";
+		".globl c4_fs_table";
+		"c4_fs_table:";
+		".long 10, 20, 30";
+		".text";
+		".globl c4_fs_table_address";
+		"c4_fs_table_address:";
+		"lea rax, [rip + c4_fs_table]";
+		"ret";
+	}
+}
+[link("c4_fs_answer")] int32 Answer();
+[link("c4_fs_add")] int32 Add(int32 a, int32 b);
+[link("c4_fs_table_address")] int32* TableAddress();
+
+int32 main() {
+	Check(Answer() == 42, "an Intel-syntax function");
+	Check(Add(2, 3) == 5, "an AT&T-syntax function with arguments");
+	int32* table = TableAddress();
+	Check(table[0] == 10 && table[2] == 30, "data");
+	return g_failures;
+}

@@ -1,4 +1,6 @@
 #include "Backend/HIR/StmtLowerer.h"
+#include "Backend/HIR/AsmLowerer.h"
+#include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Backend/HIR/CaseLabels.h"
 #include "Backend/HIR/Reachability.h"
@@ -76,6 +78,7 @@ namespace Scripting
 		case NodeType::TryCatch:            return ExceptionLowerer(m_Ctx, *this).LowerTryCatch(dynamic_cast<const TryCatchNode*>(node), block);
 		case NodeType::ThrowStatement:      return ExceptionLowerer(m_Ctx, *this).LowerThrow(dynamic_cast<const ThrowStatementNode*>(node), block);
 		case NodeType::DeferStatement:      return ExceptionLowerer(m_Ctx, *this).LowerDefer(dynamic_cast<const DeferStatementNode*>(node), block);
+		case NodeType::AsmStatement:        return AsmLowerer(m_Ctx).Lower(dynamic_cast<const AsmStatementNode*>(node), block);
 		case NodeType::EmptyStatement:      return QueryResult<void>::Success();
 		default:
 			return QueryResult<void>::Fail(QueryError::Unsupported, "statement not yet lowered");

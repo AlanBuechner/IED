@@ -1,0 +1,37 @@
+// asm options: AT&T syntax, nomem / readonly / pure, preserves_flags, nostack, and noreturn (a block control never
+// returns from, on a path this program does not take). A block with no options may write memory: values the compiler
+// held in registers are read again after it.
+int32 g_failures = 0;
+int32 g_cell = 1;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+void Trap(bool now) {
+	if (now) asm(noreturn, nomem, nostack) { "ud2"; }
+}
+
+int32 main() {
+	int32 a = 6;
+	int32 att;
+	asm(att_syntax, pure, nomem) { "movl {a}, {o}"; "addl $1, {o}"; out(reg) o = att; in(reg) a; }
+	Check(att == 7, "AT&T syntax");
+
+	int32* cell = &g_cell;
+	g_cell = 5;
+	asm { "mov dword ptr [{p}], 9"; in(reg) p = cell; }
+	Check(g_cell == 9, "a block without options writes memory the compiler sees");
+
+	int32 read;
+	asm(readonly, nostack) { "mov {r}, dword ptr [{p}]"; out(reg) r = read; in(reg) p = cell; }
+	Check(read == 9, "readonly reads memory");
+
+	int32 flags = 0;
+	asm(nomem, preserves_flags) { "mov {f}, 3"; out(reg) f = flags; }
+	Check(flags == 3, "preserves_flags");
+	int32 twice = 0;
+	for (int32 i = 0; i < 2; i++) asm(pure, nomem) { "lea {t}, [{i} + {i}]"; out(reg) t = twice; in(reg) i; }
+	Check(twice == 2, "a pure block in a loop");
+	Trap(false);
+	return g_failures;
+}

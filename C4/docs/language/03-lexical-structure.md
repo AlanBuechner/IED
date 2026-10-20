@@ -30,6 +30,7 @@ Reserved words (cannot be used as identifiers):
 | Methods | `virtual` `override` `extends` |
 | Storage | `const` `static` |
 | Control flow | `if` `else` `switch` `case` `default` `fallthrough` `for` `while` `do` `break` `continue` `return` `defer` `goto` `try` `catch` `finally` `throw` |
+| Assembly | `asm` ([16](16-inline-assembly.md)) |
 | Objects / memory | `new` `delete` `this` |
 | Type operators | `is` `as` |
 | Literals | `true` `false` `null` `nullptr` (`nullptr` is a synonym for `null`) |

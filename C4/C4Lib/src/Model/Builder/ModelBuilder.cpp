@@ -1,4 +1,5 @@
 #include "Model/Builder/ModelBuilder.h"
+#include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Model/Templates/MemberTemplates.h"
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/ValueContainment.h"
@@ -267,8 +268,20 @@ namespace Scripting
 		case NodeType::UnionDefinition:  RegisterUnion(ctx, *static_cast<const UnionDefinitionNode*>(node)); break;
 		case NodeType::VariableDefinition: RegisterVariable(ctx, *static_cast<const VariableDefinitionNode*>(node)); break;
 		case NodeType::FunctionDefinition: RegisterFunction(ctx, *static_cast<const FunctionDefinitionNode*>(node)); break;
+		case NodeType::AsmStatement:     RegisterFileAssembly(ctx, *static_cast<const AsmStatementNode*>(node)); break;
 		default: break; // includes, externs, etc. carry no model facts of their own
 		}
+	}
+
+	void ModelBuilder::RegisterFileAssembly(Context& ctx, const AsmStatementNode& block)
+	{
+		if (!block.GetOperands().Empty() || !block.GetClobbers().Empty() || block.ClobbersCallerSaved())
+			return ErrorAt(ctx, &block, "a file-scope asm block adds its lines to the program as they are: it takes no operands or clobbers "
+				"(write them in an asm statement inside a function)");
+		for (const Token& option : block.GetOptions())
+			if (option.GetText() != "att_syntax")
+				return ErrorAt(ctx, &block, "a file-scope asm block takes only the option 'att_syntax', not '" + option.GetText() + "'");
+		ctx.model->m_FileAssembly.Push(&block);
 	}
 
 	namespace

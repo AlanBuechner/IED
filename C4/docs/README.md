@@ -59,6 +59,7 @@ been checked against the compiler.
 | [13-interop.md](language/13-interop.md) | `extern "c"` / `extern "c++"`, CBind, `[link]`, COM |
 | [14-builtins.md](language/14-builtins.md) | Functions available without an include |
 | [15-projects.md](language/15-projects.md) | Several projects in one build: their defines, includes and boundaries |
+| [16-inline-assembly.md](language/16-inline-assembly.md) | `asm` statements with named operands, register classes and options; file-scope `asm` |
 
 ### Runtime - `runtime/`
 | Page | Contents |

@@ -1,0 +1,28 @@
+// clobber_abi("C") lets a block call a function: every register a call may change is clobbered, except those an
+// operand names (the result in eax). Without nostack the stack is 16-byte aligned at the block, so reserving the
+// call's 32 bytes of shadow space keeps it aligned at the call.
+int32 g_failures = 0;
+int32 g_calls = 0;
+
+void Check(bool ok, const char* what) {
+	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
+}
+int32 Triple(int32 x) { g_calls++; return x * 3; }
+
+int32 main() {
+	funcptr<int32(int32)> target = Triple;
+	int64 keep = 1234;
+	int32 result;
+	asm {
+		"sub rsp, 32";
+		"mov ecx, 14";
+		"call {f}";
+		"add rsp, 32";
+		in(reg) f = target;
+		out("eax") result;
+		clobber_abi("C");
+	}
+	Check(result == 42 && g_calls == 1, "a call from asm");
+	Check(keep == 1234, "values live across the block survive");
+	return g_failures;
+}

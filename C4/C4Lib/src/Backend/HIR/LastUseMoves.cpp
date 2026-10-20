@@ -122,6 +122,13 @@ namespace Scripting
 				case HIRNode::Kind::LocalDecl: Declaration(static_cast<const LocalDeclNode*>(n), at); return;
 				case HIRNode::Kind::Once: Walk(static_cast<const OnceNode*>(n)->body); return;
 				case HIRNode::Kind::AtExit: Location(static_cast<const AtExitNode*>(n)->object); return;
+				case HIRNode::Kind::Asm:
+				{
+					const auto* asmNode = static_cast<const AsmNode*>(n);
+					All(asmNode->inputs);
+					for (const LValue* output : asmNode->outputs) Location(output);
+					return;
+				}
 				case HIRNode::Kind::Store: Walk(static_cast<const StoreNode*>(n)->value); Location(static_cast<const StoreNode*>(n)->target); return;
 				case HIRNode::Kind::TryCatch: Try(*static_cast<const TryNode*>(n)); return;
 				case HIRNode::Kind::Throw: Walk(static_cast<const ThrowNode*>(n)->value); return;

@@ -22,6 +22,7 @@
 
 namespace Scripting
 {
+	struct AsmStatementNode;
 	class TemplateDefinitionNode; // template parameter list (parser node)
 	class ObjectDefinitionNode;    // object template body
 	class FunctionDefinitionNode;  // function template body
@@ -260,6 +261,8 @@ namespace Scripting
 		const Core::Vector<const ObjectType*>& ObjectTypes() const;
 		const Core::Vector<const EnumType*>& EnumTypes() const;
 		const Core::Vector<const UnionType*>& UnionTypes() const { return m_UnionTypes; }
+		/// The `asm` blocks written at file scope (docs/language/16 section 2), in the order the program declares them.
+		const Core::Vector<const AsmStatementNode*>& FileAssembly() const { return m_FileAssembly; }
 		/// A source file's name as diagnostics print it (relative to its folder or library root); empty for an
 		/// unknown id.
 		Core::String SourceName(uint32 unitId) const { auto it = m_SourceNames.find(unitId); return it != m_SourceNames.end() ? it->second : Core::String(); }
@@ -367,6 +370,7 @@ namespace Scripting
 		mutable Core::Vector<const ObjectType*> m_ObjectTypes; // mutable: template instantiation registers new types lazily
 		mutable Core::Vector<const EnumType*> m_EnumTypes; // mutable: a class template instance's nested enums join lazily
 		Core::Vector<const UnionType*> m_UnionTypes;
+		Core::Vector<const AsmStatementNode*> m_FileAssembly;
 		std::unordered_map<uint32, Core::String> m_SourceNames;
 		CpuTarget m_Target;
 		uint32 m_PreludeUnit = 0;

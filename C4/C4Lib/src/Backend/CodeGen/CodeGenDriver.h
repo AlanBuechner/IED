@@ -85,6 +85,7 @@ namespace Scripting
 	private:
 		// The assembly steps of Lower, in order (docs/compiler/04-codegen-and-abi.md).
 		void LowerTypes(ProgramModel& model);
+		void EmitFileAssembly(const ProgramModel& model);
 		void DeclareWrittenFunctions(const Core::Vector<const FunctionRecord*>& records);
 		bool EmitEntryPoint(const Core::Vector<const FunctionRecord*>& records, const Core::String& entryName, std::string* errorMessage);
 		void EmitMainWrapper(const FunctionRecord& entry);

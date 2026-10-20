@@ -196,9 +196,17 @@ namespace Scripting
 				{ "nullptr", TokenType::Null }, { "this", TokenType::This }, { "funcptr", TokenType::FunPtr },
 				{ "alias", TokenType::Alias }, { "template", TokenType::Template }, { "extern", TokenType::Extern },
 				{ "is", TokenType::Is }, { "as", TokenType::As }, { "extends", TokenType::Extends },
+				{ "asm", TokenType::Asm },
 			};
 			return table;
 		}
+	}
+
+	bool Token::IsKeyword(TokenType type)
+	{
+		for (const auto& entry : Keywords())
+			if (entry.second == type) return true;
+		return false;
 	}
 
 	void Token::PromoteKeyword()

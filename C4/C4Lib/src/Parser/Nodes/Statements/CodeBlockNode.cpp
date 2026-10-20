@@ -1,4 +1,6 @@
 #include "CodeBlockNode.h"
+#include "Parser/UnexpectedToken.h"
+#include "AsmStatementNode.h"
 #include "DestructuringNode.h"
 #include "EmptyStatementNode.h"
 #include "ExpressionStatementNode.h"
@@ -101,6 +103,7 @@ namespace Scripting
 		TRY_PARSE_STATEMENT(BreakStatementNode);
 		TRY_PARSE_STATEMENT(ContinueStatementNode);
 		TRY_PARSE_STATEMENT(DeferStatementNode);
+		TRY_PARSE_STATEMENT(AsmStatementNode);
 		TRY_PARSE_STATEMENT(FallthroughStatementNode);
 		TRY_PARSE_STATEMENT(GotoStatementNode);
 		TRY_PARSE_STATEMENT(ThrowStatementNode);
@@ -127,7 +130,7 @@ namespace Scripting
 			// No parser matched - report an error, then skip the token.
 			errorTracker.AddError(
 				token.GetStartLocation(),
-				Core::StringFormat::Format("Unexpected token '{0}'", token.GetText()),
+				UnexpectedTokenMessage(lexer),
 				ErrorSeverity::Error);
 			lexer.NextCompoundToken();
 		}
