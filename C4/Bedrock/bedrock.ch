@@ -3,6 +3,7 @@
 //   Core           containers (Array, List, Queue, Stack, HashMap), text (StringView, String, StringBuilder,
 //                  Format), hashing and sorting
 //   FS             files, paths and directories
+//   Crypto         SHA-256, HMAC, Blake2b, Argon2 password hashing, comparing secrets
 //   Serialization  the DOM, JSON and YAML read and written, and the binary form of reflected objects
 //   Reflection     the runtime reflection registry
 //   GC             the garbage collector
@@ -28,6 +29,13 @@ include "Text/format.ch"
 include "Text/base64.ch"
 include "Text/regex.ch"
 include "Text/utf16.ch"
+include "Text/integer.ch"
+include "Crypto/compare.ch"
+include "Crypto/sha256.ch"
+include "Crypto/hmac.ch"
+include "Crypto/blake2b.ch"
+include "Crypto/argon2.ch"
+include "Crypto/password.ch"
 include "FS/file.ch"
 include "FS/path.ch"
 include "FS/directory.ch"

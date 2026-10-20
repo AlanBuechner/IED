@@ -20,10 +20,12 @@
 
 // 64-bit stream positions: `long` is 32 bits on Windows, so fseek/ftell stop at 2 GiB.
 #ifdef _WIN32
+#include <io.h>
 #define c4_fseek _fseeki64
 #define c4_ftell _ftelli64
 typedef struct _stat64 c4_stat_t;
 #else
+#include <unistd.h>
 #define c4_fseek fseeko
 #define c4_ftell ftello
 typedef struct stat c4_stat_t;
@@ -100,6 +102,18 @@ int32_t file_flush(void* h)
 	if (!f) return -1;
 	int r = fflush(f);
 	return (r == 0) ? 0 : -1;
+}
+
+// Flush the file's buffers, then have the system write its data to the disk. Returns 0 on success or -1 on error.
+int32_t c4_file_sync(void* h)
+{
+	FILE* f = handle((FILE**)&h);
+	if (!f || fflush(f) != 0) return -1;
+#ifdef _WIN32
+	return _commit(_fileno(f)) == 0 ? 0 : -1;
+#else
+	return fsync(fileno(f)) == 0 ? 0 : -1;
+#endif
 }
 
 // Close the file, flushing first. Returns 0 on success or -1 on error.

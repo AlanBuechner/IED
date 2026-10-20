@@ -1,0 +1,246 @@
+// Crypto: SHA-256 (FIPS 180 vectors, a million bytes, pieces against whole), HMAC-SHA256 (RFC 4231), Blake2b (RFC 7693
+// and keyed digests of every size class), Argon2 (RFC 9106's vectors for all three types, the reference tool's PHC
+// string) and the password strings HashPassword makes and VerifyPassword checks.
+
+include "bedrock.ch"
+
+static Core::String Hex(const uint8* bytes, int64 count) {
+	Core::StringBuilder text;
+	for (int64 i = 0; i < count; ++i) text.AppendUIntBase((uint64)bytes[i], 16, 2);
+	return text.ToString();
+}
+
+static Core::String Sha256Hex(const char* text) { return Crypto::Sha256((const void*)text, Core::StringView(text).ByteLength()).ToHex(); }
+
+static Core::String HmacHex(const uint8* key, int64 keyCount, const char* text) {
+	return Crypto::HmacSha256((const void*)key, keyCount, (const void*)text, Core::StringView(text).ByteLength()).ToHex();
+}
+
+static Core::String Blake2bHex(const uint8* bytes, int64 count, int32 digestBytes, const uint8* key, int64 keyCount) {
+	uint8[64] digest;
+	Crypto::Blake2bBuilder builder;
+	builder.Start(digestBytes, (const void*)key, keyCount);
+	builder.Add((const void*)bytes, count);
+	builder.Finish((void*)&digest[0]);
+	return Hex(&digest[0], digestBytes);
+}
+
+static void Fill(uint8* bytes, int64 count, uint8 value) {
+	for (int64 i = 0; i < count; ++i) bytes[i] = value;
+}
+
+// RFC 9106 section 5: 32 KiB, 3 passes, 4 lanes, a 32-byte tag, and every input set.
+static Core::String RfcTag(Crypto::Argon2Type type) {
+	uint8[32] password;
+	uint8[16] salt;
+	uint8[8] secret;
+	uint8[12] associated;
+	Fill(&password[0], 32, (uint8)1);
+	Fill(&salt[0], 16, (uint8)2);
+	Fill(&secret[0], 8, (uint8)3);
+	Fill(&associated[0], 12, (uint8)4);
+	Crypto::Argon2Params params;
+	params.type = type;
+	params.memoryKiB = 32;
+	params.passes = 3;
+	params.lanes = 4;
+	params.tagBytes = 32;
+	Crypto::Argon2Input input;
+	input.password = (const void*)&password[0];
+	input.passwordBytes = 32;
+	input.salt = (const void*)&salt[0];
+	input.saltBytes = 16;
+	input.secret = (const void*)&secret[0];
+	input.secretBytes = 8;
+	input.associated = (const void*)&associated[0];
+	input.associatedBytes = 12;
+	uint8[32] tag;
+	if (!Crypto::Argon2(params, input, (void*)&tag[0])) return Core::String("refused");
+	return Hex(&tag[0], 32);
+}
+
+static Crypto::Argon2Params SmallParams() {
+	Crypto::Argon2Params params = Crypto::DefaultArgon2Params();
+	params.memoryKiB = 64;
+	params.passes = 1;
+	params.lanes = 1;
+	return params;
+}
+
+[test("crypto.sha256")]
+class Sha256Tests {
+	[test("vectors")]
+	public static void TestVectors() {
+		assert_se("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Sha256Hex("").CStr(), "the empty message");
+		assert_se("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Sha256Hex("abc").CStr(), "abc");
+		assert_se("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1", Sha256Hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq").CStr(), "two blocks");
+		Crypto::Sha256Builder million;
+		uint8[1000] a;
+		Fill(&a[0], 1000, (uint8)'a');
+		for (int32 i = 0; i < 1000; ++i) million.Add((const void*)&a[0], 1000);
+		assert_se("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0", million.Finish().ToHex().CStr(), "a million a's in pieces");
+	}
+
+	[test("pieces")]
+	public static void TestPieces() {
+		Core::Array<uint8> data;
+		for (int32 i = 0; i < 200; ++i) data.Push((uint8)(i * 31 + 7));
+		const int32[7] sizes = { 0, 1, 55, 56, 63, 64, 65 };
+		for (int32 s = 0; s < 7; ++s) {
+			const int64 size = (int64)sizes[s] + 64;
+			const Crypto::Sha256Digest whole = Crypto::Sha256((const void*)data.Data(), size);
+			Crypto::Sha256Builder bytewise;
+			for (int64 i = 0; i < size; ++i) bytewise.Add((const void*)(data.Data() + i), 1);
+			assert_true(bytewise.Finish() == whole, "a byte at a time equals all at once, around the padding boundaries");
+		}
+		assert_true(Crypto::Sha256((const void*)"a", 1) != Crypto::Sha256((const void*)"b", 1), "different input, different digest");
+	}
+}
+
+[test("crypto.hmac")]
+class HmacTests {
+	[test("rfc4231")]
+	public static void TestRfc4231() {
+		uint8[131] key;
+		Fill(&key[0], 20, (uint8)0x0b);
+		assert_se("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7", HmacHex(&key[0], 20, "Hi There").CStr(), "case 1");
+		assert_se("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+			HmacHex((const uint8*)"Jefe", 4, "what do ya want for nothing?").CStr(), "case 2: a key shorter than the digest");
+		Fill(&key[0], 131, (uint8)0xaa);
+		assert_se("60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54",
+			HmacHex(&key[0], 131, "Test Using Larger Than Block-Size Key - Hash Key First").CStr(), "case 6: a key longer than a block is hashed first");
+	}
+}
+
+[test("crypto.blake2b")]
+class Blake2bTests {
+	[test("vectors")]
+	public static void TestVectors() {
+		assert_se("ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923",
+			Blake2bHex((const uint8*)"abc", 3, 64, nullptr, 0).CStr(), "RFC 7693 appendix A");
+		assert_se("786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce",
+			Blake2bHex(nullptr, 0, 64, nullptr, 0).CStr(), "the empty message");
+		assert_se("bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319", Blake2bHex((const uint8*)"abc", 3, 32, nullptr, 0).CStr(),
+			"a 32-byte digest is its own hash, not a prefix");
+		uint8[64] key;
+		for (int32 i = 0; i < 64; ++i) key[i] = (uint8)i;
+		assert_se("10ebb67700b1868efb4417987acf4690ae9d972fb7a590c2f02871799aaa4786b5e996e8f0f4eb981fc214b005f42d2ff4233499391653df7aefcbc13fc51568",
+			Blake2bHex(nullptr, 0, 64, &key[0], 64).CStr(), "keyed, with an empty message: the key block is the last");
+		uint8[256] counting;
+		for (int32 i = 0; i < 256; ++i) counting[i] = (uint8)i;
+		assert_se("6e350170bfb6c4ba331ba6d3c25db40395af2916", Blake2bHex(&counting[0], 256, 20, &key[0], 64).CStr(), "keyed, 20 bytes");
+	}
+
+	[test("block_boundaries")]
+	public static void TestBlockBoundaries() {
+		uint8[300] data;
+		for (int32 i = 0; i < 300; ++i) data[i] = (uint8)(i * 31 + 7);
+		const int64[9] sizes = { 0, 1, 127, 128, 129, 255, 256, 257, 300 };
+		const char*[9] prefixes = { "786a02f742015903", "dc19b62fbd4e480a", "3dd556bc15bb8a1c", "88134c9c2bda5481", "458471021bb1880b",
+			"ea9d73087e808d78", "8055742fadd993ad", "63f5c18ab71397ea", "833b2333ad776e94" };
+		for (int32 s = 0; s < 9; ++s) {
+			Core::String whole = Blake2bHex(&data[0], sizes[s], 64, nullptr, 0);
+			assert_true(whole.View().StartsWith(Core::StringView(prefixes[s])), "a message ending on, before and after a block's end");
+			uint8[64] bytewise;
+			Crypto::Blake2bBuilder builder;
+			builder.Start(64);
+			for (int64 i = 0; i < sizes[s]; ++i) builder.Add((const void*)&data[i], 1);
+			builder.Finish((void*)&bytewise[0]);
+			assert_se(whole.CStr(), Hex(&bytewise[0], 64).CStr(), "a byte at a time equals all at once");
+		}
+	}
+
+	[test("start_refuses")]
+	public static void TestStartRefuses() {
+		Crypto::Blake2bBuilder builder;
+		uint8[65] key;
+		assert_true(!builder.Start(0), "a digest of no bytes");
+		assert_true(!builder.Start(65), "a digest past 64 bytes");
+		assert_true(!builder.Start(32, (const void*)&key[0], 65), "a key past 64 bytes");
+		assert_true(builder.Start(1), "one byte is a digest");
+	}
+}
+
+[test("crypto.argon2")]
+class Argon2Tests {
+	[test("rfc9106")]
+	public static void TestRfc9106() {
+		assert_se("512b391b6f1162975371d30919734294f868e3be3984f3c1a13a4db9fabe4acb", RfcTag(Crypto::Argon2Type::D).CStr(), "Argon2d");
+		assert_se("c814d9d1dc7f37aa13f0d77f2494bda1c8de6b016dd388d29952a4c4672b6ce8", RfcTag(Crypto::Argon2Type::I).CStr(), "Argon2i");
+		assert_se("0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659", RfcTag(Crypto::Argon2Type::Id).CStr(), "Argon2id");
+	}
+
+	[test("reference_string")]
+	public static void TestReferenceString() {
+		Core::StringView encoded = Core::StringView("$argon2i$v=19$m=65536,t=2,p=4$c29tZXNhbHQ$RdescudvJCsgt3ub+b+dWRWJTmaaJObG");
+		assert_true(Crypto::VerifyPassword(Core::StringView("password"), encoded), "the reference tool's example (64 MiB, 2 passes, 4 lanes, 24-byte tag)");
+		assert_true(!Crypto::VerifyPassword(Core::StringView("Password"), encoded), "another password");
+	}
+
+	[test("refuses")]
+	public static void TestRefuses() {
+		uint8[16] salt;
+		uint8[32] tag;
+		Crypto::Argon2Input input;
+		input.password = (const void*)"x";
+		input.passwordBytes = 1;
+		input.salt = (const void*)&salt[0];
+		input.saltBytes = 16;
+		input.secret = nullptr;
+		input.secretBytes = 0;
+		input.associated = nullptr;
+		input.associatedBytes = 0;
+		Crypto::Argon2Params params = SmallParams();
+		params.memoryKiB = 7;
+		assert_true(!Crypto::Argon2(params, input, (void*)&tag[0]), "less than 8 KiB a lane");
+		params = SmallParams();
+		params.passes = 0;
+		assert_true(!Crypto::Argon2(params, input, (void*)&tag[0]), "no pass");
+		params = SmallParams();
+		params.tagBytes = 3;
+		assert_true(!Crypto::Argon2(params, input, (void*)&tag[0]), "a tag under 4 bytes");
+		input.saltBytes = 7;
+		assert_true(!Crypto::Argon2(SmallParams(), input, (void*)&tag[0]), "a salt under 8 bytes");
+	}
+}
+
+[test("crypto.password")]
+class PasswordTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		Core::String stored = Crypto::HashPassword(Core::StringView("correct horse battery staple"), SmallParams());
+		assert_true(stored.View().StartsWith(Core::StringView("$argon2id$v=19$m=64,t=1,p=1$")), "the PHC form, with the costs");
+		assert_true(Crypto::VerifyPassword(Core::StringView("correct horse battery staple"), stored.View()), "the password matches");
+		assert_true(!Crypto::VerifyPassword(Core::StringView("correct horse battery stapler"), stored.View()), "another does not");
+		assert_true(!Crypto::VerifyPassword(Core::StringView(""), stored.View()), "nor does none");
+		Core::String again = Crypto::HashPassword(Core::StringView("correct horse battery staple"), SmallParams());
+		assert_true(stored.View() != again.View(), "a fresh salt each time");
+	}
+
+	[test("malformed")]
+	public static void TestMalformed() {
+		Core::StringView password = Core::StringView("pw");
+		Core::String good = Crypto::HashPassword(password, SmallParams());
+		assert_true(Crypto::VerifyPassword(password, good.View()), "the string as made");
+		const char*[10] bad = {
+			"", "argon2id$v=19$m=64,t=1,p=1$c29tZXNhbHQ$AAAAAAAAAAAAAAAAAAAAAA", "$argon2x$v=19$m=64,t=1,p=1$c29tZXNhbHQ$AAAAAA",
+			"$argon2id$v=16$m=64,t=1,p=1$c29tZXNhbHQ$AAAAAA", "$argon2id$v=19$t=1,m=64,p=1$c29tZXNhbHQ$AAAAAA",
+			"$argon2id$v=19$m=64,t=0,p=1$c29tZXNhbHQ$AAAAAA", "$argon2id$v=19$m=9999999999,t=1,p=1$c29tZXNhbHQ$AAAAAA",
+			"$argon2id$v=19$m=64,t=1,p=1$c29tZXNhbHQ=$AAAAAA", "$argon2id$v=19$m=64,t=1,p=1$c29tZXNhbHQ$A",
+			"$argon2id$v=19$m=64,t=1,p=1$c29tZXNhbHQ$AAAAAA$"
+		};
+		for (int32 i = 0; i < 10; ++i) assert_true(!Crypto::VerifyPassword(password, Core::StringView(bad[i])), bad[i]);
+		Core::StringBuilder tampered;
+		tampered.Append(good.View().Substring(0, good.View().ByteLength() - 1));
+		tampered.AppendByte(good.View().ByteAt(good.View().ByteLength() - 1) == 'A' ? 'B' : 'A');
+		assert_true(!Crypto::VerifyPassword(password, tampered.View()), "a changed tag");
+	}
+
+	[test("compare")]
+	public static void TestCompare() {
+		assert_true(Crypto::ConstantTimeEquals((const void*)"abcd", (const void*)"abcd", 4), "equal runs");
+		assert_true(!Crypto::ConstantTimeEquals((const void*)"abcd", (const void*)"abce", 4), "the last byte differs");
+		assert_true(!Crypto::ConstantTimeEquals((const void*)"xbcd", (const void*)"abcd", 4), "the first byte differs");
+		assert_true(Crypto::ConstantTimeEquals((const void*)"a", (const void*)"b", 0), "no bytes are equal");
+	}
+}

@@ -1,4 +1,6 @@
 include "file.ch"
+include "../Platform/system.ch"
+include "../Text/stringbuilder.ch"
 
 namespace FS
 {
@@ -20,6 +22,33 @@ namespace FS
 	}
 
 	bool File::Flush() { return handle && file_flush(handle) == 0; }
+
+	[link("c4_file_sync")] int32 c4_file_sync(void* file);
+	[link("c4_fs_replace")] int32 c4_fs_replace(const char* from, const char* to);
+
+	bool File::Sync() { return handle && c4_file_sync(handle) == 0; }
+
+	// "<path>.tmp-<8 random hex digits>": two writers of one file never share a temporary.
+	static Core::String TemporaryBeside(const char* path) {
+		uint8[4] bytes;
+		Platform::RandomBytes((void*)&bytes[0], 4);
+		Core::StringBuilder name;
+		name.Append(path);
+		name.Append(".tmp-");
+		for (int32 i = 0; i < 4; ++i) name.AppendUIntBase((uint64)bytes[i], 16, 2);
+		return name.ToString();
+	}
+
+	bool WriteFileAtomically(const char* path, const void* bytes, int64 count) {
+		Core::String temporary = TemporaryBeside(path);
+		File out = File(temporary.CStr(), "wb");
+		if (!out.IsOpen()) return false;
+		const bool written = (count == 0 || out.Write(bytes, count) == count) && out.Sync();
+		out.Close();
+		if (written && c4_fs_replace(temporary.CStr(), path) == 0) return true;
+		RemoveFile(temporary.CStr());
+		return false;
+	}
 
 	int64 File::Seek(int64 offset, SeekOrigin origin) {
 		if (!handle) return -1;

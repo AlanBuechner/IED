@@ -1,5 +1,5 @@
 // Core::StringView: a non-owning view - construction, comparison, search, zero-allocation substrings,
-// UTF-8 counting, decoding and validation.
+// UTF-8 counting, decoding and validation; Core::ParseInt64.
 
 include "bedrock.ch"
 
@@ -199,4 +199,20 @@ public static void TestViewsCostNothingToMake() {
 	assert_eq((int64)1000000, big.View().Substring(5, 1000000).CharCount(), "the characters are still counted when asked");
 	Core::StringView partial = Core::StringView("a\xC3\xA9\xE2\x82\xACz").Substring(1, 5);
 	assert_eq((int64)2, partial.CharCount(), "a substring counts its own characters");
+}
+
+[test("text.integer")]
+class IntegerTests {
+	[test("parse")]
+	public static void TestParse() {
+		int64 value = 5;
+		assert_true(Core::ParseInt64(Core::StringView("0"), value) && value == 0, "zero");
+		assert_true(Core::ParseInt64(Core::StringView("-42"), value) && value == -42, "negative");
+		assert_true(Core::ParseInt64(Core::StringView("9223372036854775807"), value) && value == 9223372036854775807, "the largest");
+		assert_true(Core::ParseInt64(Core::StringView("-9223372036854775808"), value) && value == (int64)((uint64)1 << 63), "the smallest");
+		value = 5;
+		const char*[8] bad = { "", "-", "+1", " 1", "1 ", "1x", "9223372036854775808", "-9223372036854775809" };
+		for (int32 i = 0; i < 8; ++i) assert_true(!Core::ParseInt64(Core::StringView(bad[i]), value), bad[i]);
+		assert_true(value == 5, "a refused text leaves the value as it was");
+	}
 }

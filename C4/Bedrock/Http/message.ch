@@ -48,6 +48,7 @@ namespace Http
 		public Core::String target;   // as sent: "/files/a.txt?x=1"
 		public Core::String path;     // the target before any '?', not percent-decoded: "/files/a.txt"
 		public Core::String query;    // after the '?', without it: "x=1"
+		public Net::Address peer;     // where the connection came from (Http::Server); not valid on a parsed head alone
 		public int32 minorVersion;    // HTTP/1.<minorVersion>: 1, or 0 for an HTTP/1.0 client
 		public Headers headers;
 		public Core::Array<uint8> body;

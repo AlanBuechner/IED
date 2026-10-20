@@ -280,6 +280,11 @@ an unpaired surrogate - becomes U+FFFD.
 `Core::Base64Decode(text, out)` appends the bytes to an `Array<uint8>` and returns false, leaving `out` as it was,
 for text that is not padded base64.
 
+### Integers (`integer.ch`)
+
+`Core::ParseInt64(text, value)` reads decimal text - an optional `-` and at least one digit, nothing around them - and
+returns false, leaving `value` as it was, for anything else or a number outside `int64`. The JSON readers use it.
+
 ---
 
 ## 5. Files, paths and directories (`FS/`)
@@ -294,12 +299,15 @@ RAII; it cannot be copied. Positions are 64-bit.
 - `Init()` (closed), `Init(const char* path, const char* mode)` (closed when it cannot open; modes are C
   mode strings `r`, `w`, `a`, `rb`, `wb`, `ab`), `Delete()`, `Close()` (idempotent), `IsOpen`
 - `Read(void* buffer, int64 count)`, `Write(const void* bytes, int64 count)`: bytes moved, `0` at the end
-  of the file, `-1` on an error or a closed file; `Flush`
+  of the file, `-1` on an error or a closed file; `Flush`; `Sync` (flush, then have the system write the data to the
+  disk, so it outlives a power loss)
 - `Seek(offset)` (from the start), `Seek(offset, FS::SeekOrigin::Start | Current | End)`: the new
   position or `-1`; `Tell()`
 - `ReadAll(void* buffer, int64 capacity)`, `ReadText()` -> the rest of the file as a `Core::String`
 - Free functions: `FS::FileExists(path)` (an existing regular file, not a directory), `FS::FileSize(path)`
-  (`-1` when there is none), `FS::RemoveFile(path)`
+  (`-1` when there is none), `FS::RemoveFile(path)`, `FS::WriteFileAtomically(path, bytes, count)` (the whole content
+  written under a temporary name beside the file, synced, then renamed over it on the disk: a crash or a power loss
+  leaves the old content or the new one, never part of either; false, with the old file as it was, when a step fails)
 
 ### `FS::Path` (`path.ch`)
 
@@ -652,6 +660,7 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
 | `Thread` | `Thread::Run(func<void()> body)` starts a thread (attached: the collector scans it, its thread_locals start); `Join()`, `Detach()`, `IsJoinable()`; destroying a joinable thread joins it; not copyable (move it with `take`). Static: `CurrentId()`, `HardwareCount()`, `Yield()`, `Sleep(int64 ns)`. |
 | `Mutex` | one word: free, locked, or locked with sleepers. `Lock` spins briefly, then parks; `TryLock`; `Unlock` wakes one sleeper only when there is one. Not copyable. |
 | `LockGuard` | locks a `Mutex` for its scope. |
+| `UnlockGuard` | lets go of a `Mutex` the thread holds for its scope and takes it back at the end, an exception's included: slow work inside a locked region that touches nothing the mutex guards. |
 | `ConditionVariable` | `Wait(Mutex&)`, `WaitFor(Mutex&, int64 ns)`, `NotifyOne()`, `NotifyAll()`; a sequence word sleepers park on. Waits may wake early: check the condition in a loop. |
 | `WaitGroup` | a count of unfinished work: `Add(n)`, `Done()`, `Wait()`, `IsDone()`. |
 | `Promise<T>`, `Future<T>` | one value handed from one thread to others: `Promise<T>::Set(value)` once; `Future<T>::IsReady()`, `Wait()`, `WaitFor(ns)`, `Get()`. Copies share the state. |
@@ -822,7 +831,7 @@ if (!accepted.ReceiveAll((void*)&reply[0], 4, 2000)) printf("%s\n", accepted.Err
 
 - **Addresses** (`address.ch`): `Net::Address` is a value - `family` (`Family::IPv4`, `IPv6`, or `None` for a zero
   address), `port`, 16 address `bytes` in network order and an IPv6 `scope` - built with `IPv4(a, b, c, d, port)`,
-  `Loopback`, `LoopbackV6`, `Any`, `AnyV6`, `WithPort`; compared with `==`, hashed (a map key) and printed with
+  `Loopback`, `LoopbackV6`, `Any`, `AnyV6`, `WithPort`; `IsLoopback()` (127.0.0.0/8, `::1`, or `::ffff:127.x`); compared with `==`, hashed (a map key) and printed with
   `ToString()` (`"127.0.0.1:80"`, `"[::1]:80"`, `"[fe80::1%3]:80"`). `Net::ParseAddress(text)` reads a numeric address
   with an optional port and never looks a name up; `Net::Resolve(host, port)` does, returning a `Resolution`
   (`addresses`, in the order the system prefers them, or `error`).
@@ -857,7 +866,8 @@ loop.Every(1000, []() { printf("tick\n"); });
 loop.Run();
 ```
 
-Covered by `Bedrock/Tests/net_tests.cf`: parsing and printing every address form and rejecting malformed ones,
+Covered by `Bedrock/Tests/net_tests.cf`: parsing and printing every address form and rejecting malformed ones, which
+addresses are loopback,
 resolution (also of a name that does not exist), a TCP round trip over IPv4 and IPv6, timeouts on accept, receive and
 `ReceiveAll`, a refused connection, shutdown, a 4 MiB transfer from another thread, a port in use, closed and moved
 streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams. `loop_tests.cf` covers the
@@ -886,7 +896,8 @@ if (got.ok) printf("%d\n", got.response.status);
 ```
 
 - **Messages** (`message.ch`): `Request` (`method`, `target` as sent, `path` and `query` split at the `?` and not
-  percent-decoded, `minorVersion`, `headers`, `body` bytes with `BodyText()`), `Response` (`status`, 200 unless set;
+  percent-decoded, `minorVersion`, `headers`, `body` bytes with `BodyText()`, and `peer`, the address the connection
+  came from, which the server sets), `Response` (`status`, 200 unless set;
   `headers`; `body`; `SetText(contentType, text)`). `Headers` keeps the order headers came in and finds them without
   regard to case: `Find`, `Has`, `Set` (replaces every one of the name), `Add` (keeps the others, as Set-Cookie
   needs), `Remove`, `Count`, `At`. `ReasonPhrase(status)`.
@@ -926,8 +937,9 @@ if (got.ok) printf("%d\n", got.response.status);
   `ClosePayload`, `WebSocketAccept`, `IsWebSocketRequest`). `Response::takeover` is the general hook underneath:
   after a 101 the server hands it the connection.
 
-Covered by `Bedrock/Tests/http_tests.cf` (26 tests): heads (every malformed form, the limits, CRLF or LF, absolute
-targets), framing, chunked bodies fed whole and a byte at a time, URLs, headers; the server's GET and POST, three
+Covered by `Bedrock/Tests/http_tests.cf` (27 tests): heads (every malformed form, the limits, CRLF or LF, absolute
+targets), framing, chunked bodies fed whole and a byte at a time, URLs, headers; the server's GET and POST, the
+client's address a handler sees, three
 pipelined requests on one connection, a chunked request, HEAD, Expect: 100-continue, HTTP/1.0, the refusals, a
 handler that throws, 8 concurrent clients and Stop from a handler; the client's chunked, until-close and interim
 responses and its failures. `websocket_tests.cf` (16): frames at every length form, masked and not, every rule a
@@ -989,13 +1001,35 @@ typed to, resized, and exiting with the code it was told.
 
 ---
 
-## 16. Tests
+## 16. Cryptography (`Crypto/`)
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 51 files, 494 tests (array, list, initlist,
+**Status:** **Implemented** (B66). Plain C4, checked against the standards' own test vectors. No ciphers and no TLS.
+
+| Header | Gives |
+|---|---|
+| `sha256.ch` | `Crypto::Sha256(bytes, count)` or a `Sha256Builder` fed in pieces (`Add`, then `Finish` once): a `Sha256Digest` (`bytes[32]`, `ToHex()`, `==` and `!=` in constant time) - content hashes, stored digests of secrets |
+| `hmac.ch` | `Crypto::HmacSha256(key, keyCount, message, count)` (RFC 2104): a tag only a holder of the key can make |
+| `blake2b.ch` | `Crypto::Blake2b(out, digestBytes, bytes, count)` (RFC 7693) with a digest of 1 to 64 bytes, or a `Blake2bBuilder` (`Start(digestBytes, key, keyCount)`, false for a size or key out of range; `Add`; `Finish(out)`) |
+| `argon2.ch` | `Crypto::Argon2(params, input, tag)` (RFC 9106): `Argon2Params` (`type` D, I or Id, `memoryKiB`, `passes`, `lanes`, `tagBytes`; `DefaultArgon2Params()` is RFC 9106's second recommendation, Argon2id at 64 MiB, 3 passes, 4 lanes, 32 bytes) and `Argon2Input` (password, salt of at least 8 bytes, optional secret and associated data). The lanes run one after another. False for costs out of range or no memory. |
+| `password.ch` | `Crypto::HashPassword(password, params)`: a PHC string, `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<tag>`, with a fresh 16-byte salt; `Crypto::VerifyPassword(password, encoded)` checks one (any Argon2 type; false for a malformed string or one asking for more than 4 GiB) |
+| `compare.ch` | `Crypto::ConstantTimeEquals(a, b, count)`: takes the same time wherever the bytes differ, for checking secrets |
+
+Argon2id at the default costs takes about 110 ms built with `-O2`, so a server can check a password per login but an
+attacker pays the same for each guess. Covered by `Bedrock/Tests/crypto_tests.cf`: SHA-256 (FIPS 180 vectors, a
+million bytes, pieces against whole around the padding), HMAC (RFC 4231 cases 1, 2 and 6), Blake2b (RFC 7693, keyed,
+32-byte and 20-byte digests, every block boundary a byte at a time, the refusals), Argon2 (RFC 9106's vectors for all
+three types, the reference tool's example string at 64 MiB, the refusals) and password strings (a round trip, fresh
+salts, ten malformed strings, a changed tag).
+
+---
+
+## 17. Tests
+
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 52 files, 512 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -1007,7 +1041,7 @@ The exit code is the number of failed assertions. The `GC` namespace is covered 
 
 ---
 
-## 17. Missing versus the plan
+## 18. Missing versus the plan
 
 From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 

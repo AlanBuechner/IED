@@ -185,3 +185,51 @@ public static void TestDirectoryIsNotAFile() {
 	assert_true(!FS::FileExists("."), "a directory is not a regular file");
 	assert_eq(-1, FS::FileSize("."), "and has no file size");
 }
+
+[test("file.sync")]
+public static void TestSync() {
+	FS::File w = FS::File(ScratchFile("c4_bedrock_sync_test.tmp").CStr(), "wb");
+	assert_eq(4, w.Write((const void*)"sync", 4), "written");
+	assert_true(w.Sync(), "flushed and on the disk");
+	assert_eq(4, FS::FileSize(ScratchFile("c4_bedrock_sync_test.tmp").CStr()), "the size shows before closing");
+	w.Close();
+	assert_true(!w.Sync(), "a closed file cannot sync");
+	FS::RemoveFile(ScratchFile("c4_bedrock_sync_test.tmp").CStr());
+}
+
+static Core::String FileText(const FS::Path& path) {
+	FS::File r = FS::File(path.CStr(), "rb");
+	return r.ReadText();
+}
+
+// Temporaries WriteFileAtomically left in `folder`.
+static int32 Leftovers(const FS::Path& folder) {
+	int32 count = 0;
+	FS::Directory listing = FS::Directory(folder.CStr());
+	FS::DirectoryEntry entry;
+	while (listing.Next(entry))
+		if (entry.name.View().Contains(Core::StringView(".tmp-"))) count++;
+	return count;
+}
+
+[test("file.write_atomically")]
+public static void TestWriteAtomically() {
+	FS::Path folder = ScratchFile("c4_bedrock_atomic_test");
+	FS::RemoveAll(folder.CStr());
+	FS::MakeDirectories(folder.CStr());
+	FS::Path file = folder / "state.json";
+	assert_true(FS::WriteFileAtomically(file.CStr(), (const void*)"{\"v\":1}", 7), "a new file");
+	assert_se("{\"v\":1}", FileText(file).CStr(), "has the bytes");
+	assert_true(FS::WriteFileAtomically(file.CStr(), (const void*)"{\"v\":22}", 8), "replacing it");
+	assert_se("{\"v\":22}", FileText(file).CStr(), "the new bytes, whole");
+	assert_true(FS::WriteFileAtomically(file.CStr(), (const void*)"", 0), "no bytes");
+	assert_eq(0, FS::FileSize(file.CStr()), "an empty file");
+	assert_eq(0, Leftovers(folder), "no temporary is left behind");
+	FS::Path missing = folder / "no-such-folder" / "x.json";
+	assert_true(!FS::WriteFileAtomically(missing.CStr(), (const void*)"x", 1), "a folder that is not there");
+	assert_true(!FS::FileExists(missing.CStr()), "writes nothing");
+	FS::MakeDirectory((folder / "taken").CStr());
+	assert_true(!FS::WriteFileAtomically((folder / "taken").CStr(), (const void*)"x", 1), "a directory in the way");
+	assert_eq(0, Leftovers(folder), "and a failed write cleans up after itself");
+	FS::RemoveAll(folder.CStr());
+}

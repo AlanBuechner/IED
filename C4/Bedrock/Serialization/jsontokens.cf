@@ -1,21 +1,8 @@
 include "jsontokens.ch"
+include "../Text/integer.ch"
 
 namespace Serialization
 {
-	// The int64 a JSON integer's digits (an optional '-' then digits) stand for; false when it does not fit.
-	static bool JsonInteger(Core::StringView digits, int64& out) {
-		bool negative = digits.ByteAt(0) == '-';
-		uint64 limit = negative ? (uint64)1 << 63 : ((uint64)1 << 63) - 1;
-		uint64 magnitude = 0;
-		for (int64 i = negative ? 1 : 0; i < digits.ByteLength(); ++i) {
-			uint64 digit = (uint64)(digits.ByteAt(i) - '0');
-			if (magnitude > (limit - digit) / 10) return false;
-			magnitude = magnitude * 10 + digit;
-		}
-		out = negative ? (int64)((uint64)0 - magnitude) : (int64)magnitude;
-		return true;
-	}
-
 	static bool Fault(JsonFault& fault, int64 at, const char* error) {
 		fault.error = error;
 		fault.at = at;
@@ -117,7 +104,7 @@ namespace Serialization
 			SkipDigits(text, at);
 		}
 		Core::StringView digits = text.Substring(start, at - start);
-		if (number.integral && JsonInteger(digits, number.integer)) return true;
+		if (number.integral && Core::ParseInt64(digits, number.integer)) return true;
 		number.integral = false;
 		number.real = 0.0;
 		parse_double(digits.Data(), digits.ByteLength(), &number.real);

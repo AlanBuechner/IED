@@ -48,6 +48,19 @@ namespace Net
 		return Core::String(&text[0]);
 	}
 
+	static bool ZeroBytes(const uint8* bytes, int32 count) {
+		for (int32 i = 0; i < count; ++i)
+			if (bytes[i] != 0) return false;
+		return true;
+	}
+
+	bool Address::IsLoopback() const {
+		if (family == Family::IPv4) return bytes[0] == 127;
+		if (family != Family::IPv6) return false;
+		if (ZeroBytes(&bytes[0], 10) && bytes[10] == 255 && bytes[11] == 255) return bytes[12] == 127;
+		return ZeroBytes(&bytes[0], 15) && bytes[15] == 1;
+	}
+
 	bool Address::Equals(const Address& other) const {
 		if (family != other.family || port != other.port || scope != other.scope) return false;
 		for (int32 i = 0; i < 16; ++i)

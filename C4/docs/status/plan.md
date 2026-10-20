@@ -1499,6 +1499,21 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   variables, at `-O0` and `-O2`); Bedrock `hashmap.const_iteration`, `container.queue.const_iteration`,
   `string.operators`, `platform.system.console`, `websocket.connection.last_received`. Bedrock passes 494 tests.
 
+#### B66 - What IED's authentication needs (docs/11 in the IED tree)
+- **Status:** Done.
+- **Done notes:** Bedrock `Crypto::` (`Crypto/`), plain C4: SHA-256, HMAC-SHA256, Blake2b (keyed, 1 to 64 bytes),
+  Argon2 d / i / id (RFC 9106; lanes one after another; 64 MiB over 64 KiB pages from `Platform::Allocate`), PHC
+  password strings (`HashPassword`, `VerifyPassword`, unpadded base64, at most 4 GiB on a check) and
+  `ConstantTimeEquals`. Argon2id at RFC 9106's second recommended costs (64 MiB, 3 passes, 4 lanes) takes about
+  110 ms at `-O2`. Also `Core::ParseInt64` (the JSON tokenizer's integer reading moved there), `FS::File::Sync` and
+  `FS::WriteFileAtomically` (temporary beside the file, synced, renamed over it with `MOVEFILE_WRITE_THROUGH`, or
+  `rename` plus a sync of the folder on POSIX: the runtime's `c4_file_sync`, `c4_fs_replace`),
+  `Net::Address::IsLoopback`, `Http::Request::peer` (the server sets it) and `Threading::UnlockGuard`.
+- **Tests:** Bedrock `crypto.*` (12: the standards' vectors - FIPS 180, RFC 4231, RFC 7693, RFC 9106 for all three
+  Argon2 types, the reference tool's 64 MiB example string - plus refusals, malformed strings and pieces against
+  whole), `text.integer.parse`, `threading.mutex.unlock_guard`, `http.server.peer`, `net.address.loopback`,
+  `file.sync`, `file.write_atomically`. Bedrock passes 512 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -2016,7 +2031,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65 B66
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

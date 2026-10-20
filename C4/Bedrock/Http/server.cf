@@ -200,6 +200,7 @@ namespace Http
 		Request request;
 		int64 headLength = 0;
 		if (!ReadHead(c, limits, stopping, request, headLength)) return false;
+		request.peer = c.stream.PeerAddress();
 		const int64 used = ReadBody(c, limits, headLength, request);
 		if (used < 0) return false;
 		c.pending.RemoveRange(0, used);

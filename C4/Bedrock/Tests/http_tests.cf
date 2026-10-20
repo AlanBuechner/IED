@@ -253,6 +253,22 @@ class HttpServerTests {
 		rig.Finish();
 	}
 
+	[test("peer")]
+	public static void TestPeer() {
+		HttpRig rig;
+		rig.Start([](const Http::Request& request, Http::Response& response) {
+			Core::StringBuilder text;
+			text.Append(request.peer.ToString().View());
+			text.Append(request.peer.IsLoopback() ? " loopback" : " remote");
+			response.SetText(HttpText("text/plain"), text.View());
+		});
+		Net::TcpStream stream = Net::TcpStream::Connect(rig.At(), kHttpWaitMs);
+		Core::String expected = stream.LocalAddress().ToString() + " loopback";
+		stream.SendText(HttpText("GET /who HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
+		assert_true(HttpContains(HttpReadToClose(stream).View(), expected.CStr()), "the handler sees the client's address and port");
+		rig.Finish();
+	}
+
 	[test("keep_alive")]
 	public static void TestKeepAlive() {
 		HttpRig rig;

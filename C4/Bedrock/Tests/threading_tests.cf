@@ -1,4 +1,4 @@
-// Threading: Atomic<T>, Thread, Mutex and LockGuard, ConditionVariable, WaitGroup, Promise<T> and Future<T>, alone
+// Threading: Atomic<T>, Thread, Mutex, LockGuard and UnlockGuard, ConditionVariable, WaitGroup, Promise<T> and Future<T>, alone
 // and under contention from several threads.
 
 include "bedrock.ch"
@@ -154,6 +154,27 @@ class MutexTests {
 		}
 		assert_true(mutex.TryLock(), "and releases it at the end of its scope");
 		mutex.Unlock();
+	}
+
+	[test("unlock_guard")]
+	public static void TestUnlockGuard() {
+		Threading::Mutex mutex;
+		Threading::LockGuard held(mutex);
+		{
+			Threading::UnlockGuard released(mutex);
+			assert_true(mutex.TryLock(), "the mutex is free in the unlock guard's scope");
+			mutex.Unlock();
+		}
+		assert_true(!mutex.TryLock(), "and held again after it");
+		bool caught = false;
+		try {
+			Threading::UnlockGuard released(mutex);
+			throw 7;
+		}
+		catch (...) {
+			caught = true;
+		}
+		assert_true(caught && !mutex.TryLock(), "leaving by an exception takes it back too");
 	}
 
 	[test("contended")]

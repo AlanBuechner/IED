@@ -1,0 +1,290 @@
+include "argon2.ch"
+include "blake2b.ch"
+include "../Platform/memory.ch"
+
+namespace Crypto
+{
+	const int32 kArgon2BlockWords = 128;
+	const int64 kArgon2BlockBytes = 1024;
+	const int32 kArgon2SyncPoints = 4;    // segments per lane
+	const int32 kArgon2Version = 19;      // 0x13
+	const int64 kArgon2MinSaltBytes = 8;
+	const int32 kArgon2MaxLanes = 16777215;
+
+	// A block is an 8x8 grid of 16-byte registers; P mixes each row, then each column (RFC 9106 section 3.6). The
+	// words of the first column, offset by 2 for each further one:
+	const uint8[16] kArgon2ColumnWords = { 0, 1, 16, 17, 32, 33, 48, 49, 64, 65, 80, 81, 96, 97, 112, 113 };
+
+	Argon2Params DefaultArgon2Params() {
+		Argon2Params params;
+		params.type = Argon2Type::Id;
+		params.memoryKiB = 65536;
+		params.passes = 3;
+		params.lanes = 4;
+		params.tagBytes = 32;
+		return params;
+	}
+
+	// The memory as `lanes` rows of `laneLength` blocks, each row cut into 4 segments.
+	struct Argon2Shape
+	{
+		public Argon2Type type;
+		public int32 passes;
+		public int32 lanes;
+		public int64 segmentLength;
+		public int64 laneLength;
+		public int64 blocks;
+	}
+
+	// The pseudo-random numbers of data-independent addressing, 128 to a block (RFC 9106 section 3.4.1.2).
+	struct Argon2Addresses
+	{
+		public uint64[128] input;
+		public uint64[128] numbers;
+		public uint64[128] zero;
+	}
+
+	static uint64 RotateRight(uint64 value, int32 bits) { return (value >> (uint64)bits) | (value << (uint64)(64 - bits)); }
+
+	// BlaMka's multiplication: twice the product of the low 32 bits.
+	static uint64 LowProduct(uint64 x, uint64 y) { return 2u * (x & 0xFFFFFFFFu) * (y & 0xFFFFFFFFu); }
+
+	static void Mix(uint64* v, int32 a, int32 b, int32 c, int32 d) {
+		v[a] = v[a] + v[b] + LowProduct(v[a], v[b]);
+		v[d] = RotateRight(v[d] ^ v[a], 32);
+		v[c] = v[c] + v[d] + LowProduct(v[c], v[d]);
+		v[b] = RotateRight(v[b] ^ v[c], 24);
+		v[a] = v[a] + v[b] + LowProduct(v[a], v[b]);
+		v[d] = RotateRight(v[d] ^ v[a], 16);
+		v[c] = v[c] + v[d] + LowProduct(v[c], v[d]);
+		v[b] = RotateRight(v[b] ^ v[c], 63);
+	}
+
+	static void Permute(uint64* v) {
+		Mix(v, 0, 4, 8, 12);
+		Mix(v, 1, 5, 9, 13);
+		Mix(v, 2, 6, 10, 14);
+		Mix(v, 3, 7, 11, 15);
+		Mix(v, 0, 5, 10, 15);
+		Mix(v, 1, 6, 11, 12);
+		Mix(v, 2, 7, 8, 13);
+		Mix(v, 3, 4, 9, 14);
+	}
+
+	static void PermuteColumn(uint64* r, int32 column) {
+		uint64[16] v;
+		for (int32 k = 0; k < 16; ++k) v[k] = r[column * 2 + (int32)kArgon2ColumnWords[k]];
+		Permute(&v[0]);
+		for (int32 k = 0; k < 16; ++k) r[column * 2 + (int32)kArgon2ColumnWords[k]] = v[k];
+	}
+
+	// next = G(prev, ref); with `xorInto` (passes after the first) next ^= G(prev, ref).
+	static void FillBlock(const uint64* prev, const uint64* ref, uint64* next, bool xorInto) {
+		uint64[128] r;
+		uint64[128] keep;
+		for (int32 i = 0; i < kArgon2BlockWords; ++i) {
+			r[i] = prev[i] ^ ref[i];
+			keep[i] = xorInto ? r[i] ^ next[i] : r[i];
+		}
+		for (int32 row = 0; row < 8; ++row) Permute(&r[row * 16]);
+		for (int32 column = 0; column < 8; ++column) PermuteColumn(&r[0], column);
+		for (int32 i = 0; i < kArgon2BlockWords; ++i) next[i] = keep[i] ^ r[i];
+	}
+
+	static void PutLe32(uint8* out, int64 value) {
+		for (int32 i = 0; i < 4; ++i) out[i] = (uint8)((uint64)value >> (uint64)(i * 8));
+	}
+
+	static void AddLe32(Blake2bBuilder& builder, int64 value) {
+		uint8[4] bytes;
+		PutLe32(&bytes[0], value);
+		builder.Add((const void*)&bytes[0], 4);
+	}
+
+	static void AddPiece(Blake2bBuilder& builder, const void* bytes, int64 count) {
+		AddLe32(builder, count);
+		if (count > 0) builder.Add(bytes, count);
+	}
+
+	// H' (RFC 9106 section 3.3): a digest of any length, chained from 64-byte Blake2b digests of which each gives its
+	// first half, the last one whole.
+	static void LongHash(uint8* out, int32 outBytes, const uint8* input, int64 inputBytes) {
+		Blake2bBuilder first;
+		first.Start(outBytes < kBlake2bMaxBytes ? outBytes : kBlake2bMaxBytes);
+		AddLe32(first, outBytes);
+		first.Add((const void*)input, inputBytes);
+		if (outBytes <= kBlake2bMaxBytes) {
+			first.Finish((void*)out);
+			return;
+		}
+		uint8[64] v;
+		first.Finish((void*)&v[0]);
+		for (int32 i = 0; i < 32; ++i) out[i] = v[i];
+		int32 written = 32;
+		while (outBytes - written > kBlake2bMaxBytes) {
+			Blake2b((void*)&v[0], kBlake2bMaxBytes, (const void*)&v[0], kBlake2bMaxBytes);
+			for (int32 i = 0; i < 32; ++i) out[written + i] = v[i];
+			written += 32;
+		}
+		Blake2b((void*)(out + written), outBytes - written, (const void*)&v[0], kBlake2bMaxBytes);
+	}
+
+	// H0: the costs and every input, which the first blocks of each lane grow from.
+	static void InitialHash(const Argon2Params& params, const Argon2Input& input, uint8* h0) {
+		Blake2bBuilder builder;
+		builder.Start(kBlake2bMaxBytes);
+		AddLe32(builder, params.lanes);
+		AddLe32(builder, params.tagBytes);
+		AddLe32(builder, params.memoryKiB);
+		AddLe32(builder, params.passes);
+		AddLe32(builder, kArgon2Version);
+		AddLe32(builder, (int64)(int32)params.type);
+		AddPiece(builder, input.password, input.passwordBytes);
+		AddPiece(builder, input.salt, input.saltBytes);
+		AddPiece(builder, input.secret, input.secretBytes);
+		AddPiece(builder, input.associated, input.associatedBytes);
+		builder.Finish((void*)h0);
+	}
+
+	static uint64* BlockAt(uint64* memory, int64 index) { return memory + index * (int64)kArgon2BlockWords; }
+
+	static void LoadBlock(const uint8* bytes, uint64* words) {
+		for (int32 i = 0; i < kArgon2BlockWords; ++i) {
+			uint64 word = 0u;
+			for (int32 b = 7; b >= 0; --b) word = (word << 8u) | (uint64)bytes[i * 8 + b];
+			words[i] = word;
+		}
+	}
+
+	static void StoreBlock(const uint64* words, uint8* bytes) {
+		for (int32 i = 0; i < kArgon2BlockWords; ++i)
+			for (int32 b = 0; b < 8; ++b) bytes[i * 8 + b] = (uint8)(words[i] >> (uint64)(b * 8));
+	}
+
+	// The first two blocks of each lane: H'(H0 || column || lane).
+	static void FirstBlocks(const Argon2Shape& shape, const uint8* h0, uint64* memory) {
+		uint8[72] seed;
+		for (int32 i = 0; i < 64; ++i) seed[i] = h0[i];
+		uint8[1024] bytes;
+		for (int32 lane = 0; lane < shape.lanes; ++lane) {
+			for (int32 column = 0; column < 2; ++column) {
+				PutLe32(&seed[64], column);
+				PutLe32(&seed[68], lane);
+				LongHash(&bytes[0], (int32)kArgon2BlockBytes, &seed[0], 72);
+				LoadBlock(&bytes[0], BlockAt(memory, lane * shape.laneLength + column));
+			}
+		}
+	}
+
+	static Argon2Shape ShapeOf(const Argon2Params& params) {
+		Argon2Shape shape;
+		shape.type = params.type;
+		shape.passes = params.passes;
+		shape.lanes = params.lanes;
+		shape.segmentLength = (int64)params.memoryKiB / ((int64)params.lanes * kArgon2SyncPoints);
+		shape.laneLength = shape.segmentLength * kArgon2SyncPoints;
+		shape.blocks = shape.laneLength * params.lanes;
+		return shape;
+	}
+
+	static bool IndependentAddressing(Argon2Type type, int32 pass, int32 slice) {
+		return type == Argon2Type::I || (type == Argon2Type::Id && pass == 0 && slice < kArgon2SyncPoints / 2);
+	}
+
+	static void StartAddresses(Argon2Addresses& addresses, const Argon2Shape& shape, int32 pass, int32 lane, int32 slice) {
+		for (int32 i = 0; i < kArgon2BlockWords; ++i) {
+			addresses.input[i] = 0u;
+			addresses.zero[i] = 0u;
+		}
+		addresses.input[0] = (uint64)pass;
+		addresses.input[1] = (uint64)lane;
+		addresses.input[2] = (uint64)slice;
+		addresses.input[3] = (uint64)shape.blocks;
+		addresses.input[4] = (uint64)shape.passes;
+		addresses.input[5] = (uint64)(int32)shape.type;
+	}
+
+	static void NextAddresses(Argon2Addresses& addresses) {
+		addresses.input[6] += 1u;
+		FillBlock(&addresses.zero[0], &addresses.input[0], &addresses.numbers[0], false);
+		FillBlock(&addresses.zero[0], &addresses.numbers[0], &addresses.numbers[0], false);
+	}
+
+	// Where in its lane the block at `index` of a segment refers to, from the low half of its random number
+	// (RFC 9106 section 3.4.2): a spot among the blocks already made, skewed towards the recent ones.
+	static int64 ReferenceIndex(const Argon2Shape& shape, int32 pass, int32 slice, int64 index, uint64 random, bool sameLane) {
+		int64 area = 0;
+		if (pass == 0 && slice == 0) area = index - 1;
+		else {
+			const int64 finished = pass == 0 ? slice * shape.segmentLength : shape.laneLength - shape.segmentLength;
+			area = sameLane ? finished + index - 1 : finished + (index == 0 ? -1 : 0);
+		}
+		const uint64 low = random & 0xFFFFFFFFu;
+		const uint64 skewed = (low * low) >> 32u;
+		const int64 relative = area - 1 - (int64)(((uint64)area * skewed) >> 32u);
+		const int64 start = pass == 0 || slice == kArgon2SyncPoints - 1 ? 0 : (slice + 1) * shape.segmentLength;
+		return (start + relative) % shape.laneLength;
+	}
+
+	static void FillSegment(const Argon2Shape& shape, uint64* memory, int32 pass, int32 lane, int32 slice) {
+		const bool independent = IndependentAddressing(shape.type, pass, slice);
+		Argon2Addresses addresses;
+		if (independent) StartAddresses(addresses, shape, pass, lane, slice);
+		const int64 first = pass == 0 && slice == 0 ? 2 : 0;
+		if (independent && first != 0) NextAddresses(addresses);
+		const int64 laneStart = lane * shape.laneLength;
+		for (int64 i = first; i < shape.segmentLength; ++i) {
+			const int64 column = slice * shape.segmentLength + i;
+			const int64 previous = laneStart + (column == 0 ? shape.laneLength - 1 : column - 1);
+			uint64 random = 0u;
+			if (independent) {
+				if (i % kArgon2BlockWords == 0) NextAddresses(addresses);
+				random = addresses.numbers[i % kArgon2BlockWords];
+			}
+			else random = BlockAt(memory, previous)[0];
+			const int64 refLane = pass == 0 && slice == 0 ? (int64)lane : (int64)((random >> 32u) % (uint64)shape.lanes);
+			const int64 refIndex = ReferenceIndex(shape, pass, slice, i, random, refLane == lane);
+			FillBlock(BlockAt(memory, previous), BlockAt(memory, refLane * shape.laneLength + refIndex), BlockAt(memory, laneStart + column), pass > 0);
+		}
+	}
+
+	// The lanes of a slice only refer to finished slices of other lanes, so they could fill at once; here they take turns.
+	static void FillMemory(const Argon2Shape& shape, uint64* memory) {
+		for (int32 pass = 0; pass < shape.passes; ++pass)
+			for (int32 slice = 0; slice < kArgon2SyncPoints; ++slice)
+				for (int32 lane = 0; lane < shape.lanes; ++lane) FillSegment(shape, memory, pass, lane, slice);
+	}
+
+	// H' of the lanes' last blocks XORed together.
+	static void FinalTag(const Argon2Shape& shape, uint64* memory, int32 tagBytes, void* tag) {
+		uint64[128] last;
+		for (int32 i = 0; i < kArgon2BlockWords; ++i) last[i] = 0u;
+		for (int32 lane = 0; lane < shape.lanes; ++lane) {
+			const uint64* block = BlockAt(memory, lane * shape.laneLength + shape.laneLength - 1);
+			for (int32 i = 0; i < kArgon2BlockWords; ++i) last[i] ^= block[i];
+		}
+		uint8[1024] bytes;
+		StoreBlock(&last[0], &bytes[0]);
+		LongHash((uint8*)tag, tagBytes, &bytes[0], kArgon2BlockBytes);
+	}
+
+	static bool InRange(const Argon2Params& params, const Argon2Input& input) {
+		return params.lanes >= 1 && params.lanes <= kArgon2MaxLanes && params.passes >= 1 && params.tagBytes >= 4
+			&& (int64)params.memoryKiB >= 8 * (int64)params.lanes && input.saltBytes >= kArgon2MinSaltBytes
+			&& input.passwordBytes >= 0 && input.secretBytes >= 0 && input.associatedBytes >= 0;
+	}
+
+	bool Argon2(const Argon2Params& params, const Argon2Input& input, void* tag) {
+		if (!InRange(params, input)) return false;
+		const Argon2Shape shape = ShapeOf(params);
+		uint64* memory = (uint64*)Platform::Allocate(shape.blocks * kArgon2BlockBytes, Platform::Protection::ReadWrite);
+		if (memory == nullptr) return false;
+		uint8[64] h0;
+		InitialHash(params, input, &h0[0]);
+		FirstBlocks(shape, &h0[0], memory);
+		FillMemory(shape, memory);
+		FinalTag(shape, memory, params.tagBytes, tag);
+		Platform::Release((void*)memory);
+		return true;
+	}
+}

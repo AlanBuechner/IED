@@ -57,6 +57,15 @@ class NetAddressTests {
 		assert_true(Net::ParseAddress("1.2.3.4:65535").port == 65535, "the highest port");
 	}
 
+	[test("loopback")]
+	public static void TestLoopback() {
+		const char*[5] local = { "127.0.0.1", "127.255.3.9:80", "::1", "[::1]:443", "::ffff:127.0.0.1" };
+		for (int32 i = 0; i < 5; ++i) assert_true(Net::ParseAddress(local[i]).IsLoopback(), local[i]);
+		const char*[6] other = { "10.0.0.1", "0.0.0.0", "::", "::2", "::ffff:10.0.0.1", "[fe80::1%3]:80" };
+		for (int32 i = 0; i < 6; ++i) assert_true(!Net::ParseAddress(other[i]).IsLoopback(), other[i]);
+		assert_true(!Net::Address().IsLoopback(), "no address is not this machine");
+	}
+
 	[test("compare_and_hash")]
 	public static void TestCompareAndHash() {
 		Net::Address a = Net::Address::Loopback(80);

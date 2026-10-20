@@ -29,6 +29,8 @@ namespace Net
 
 		public bool IsValid() const { return (family == Family::IPv4 || family == Family::IPv6) && port >= 0 && port <= kMaxPort; }
 		public Address WithPort(int32 newPort) const;
+		// This machine: 127.0.0.0/8, ::1, or an IPv4 loopback address mapped into IPv6 (::ffff:127.0.0.1).
+		public bool IsLoopback() const;
 		// "127.0.0.1:80", "[::1]:80", "[fe80::1%3]:80"; empty when not valid.
 		public Core::String ToString() const;
 

@@ -82,6 +82,17 @@ int32_t c4_fs_rename(const char* from, const char* to)
 	return moved ? 0 : -1;
 }
 
+// A rename over `to` in the same folder that is on the disk when it returns (FS::WriteFileAtomically).
+int32_t c4_fs_replace(const char* from, const char* to)
+{
+	wchar_t* source = c4_utf8_to_wide(from);
+	wchar_t* target = c4_utf8_to_wide(to);
+	BOOL moved = source && target && MoveFileExW(source, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+	free(source);
+	free(target);
+	return moved ? 0 : -1;
+}
+
 int64_t c4_fs_current_directory(char* out, int64_t cap)
 {
 	DWORD units = GetCurrentDirectoryW(0, NULL);
@@ -170,6 +181,7 @@ void c4_fs_directory_close(void* handle)
 
 #else
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -191,6 +203,23 @@ int32_t c4_fs_make_directory(const char* path) { return path && mkdir(path, 0777
 int32_t c4_fs_remove_directory(const char* path) { return path && rmdir(path) == 0 ? 0 : -1; }
 
 int32_t c4_fs_rename(const char* from, const char* to) { return from && to && rename(from, to) == 0 ? 0 : -1; }
+
+// The rename, then the folder that holds `to` synced, so the new name is on the disk when it returns.
+int32_t c4_fs_replace(const char* from, const char* to)
+{
+	if (!from || !to || rename(from, to) != 0) return -1;
+	const char* slash = strrchr(to, '/');
+	char folder[4096];
+	size_t length = slash ? (size_t)(slash - to) : 0;
+	if (length >= sizeof(folder)) return -1;
+	memcpy(folder, to, length);
+	folder[length] = 0;
+	int fd = open(length ? folder : ".", O_RDONLY);
+	if (fd < 0) return -1;
+	int synced = fsync(fd);
+	close(fd);
+	return synced == 0 ? 0 : -1;
+}
 
 static int64_t TextToOut(const char* text, char* out, int64_t cap)
 {

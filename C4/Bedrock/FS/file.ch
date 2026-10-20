@@ -21,6 +21,8 @@ namespace FS
 		public int64 Read(void* buffer, int64 count);
 		public int64 Write(const void* bytes, int64 count);
 		public bool Flush();
+		// Flush, then have the system write the data to the disk: it outlives a power loss.
+		public bool Sync();
 		public void Close();   // idempotent
 
 		// The new position from the start, or -1 on an error.
@@ -38,6 +40,10 @@ namespace FS
 	bool FileExists(const char* path);   // an existing regular file
 	int64 FileSize(const char* path);    // bytes, -1 when there is no such file
 	bool RemoveFile(const char* path);
+	// The file's whole content: written under a temporary name beside it, synced, then renamed over `path`, so a
+	// crash or a power loss leaves the old content or the new one, never part of either. False, with the old file as it
+	// was, when a step fails.
+	bool WriteFileAtomically(const char* path, const void* bytes, int64 count);
 
 	const int64 kReadTextChunkBytes = 4096;   // how much ReadText reads at a time
 }

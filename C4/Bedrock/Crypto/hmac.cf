@@ -1,0 +1,34 @@
+include "hmac.ch"
+
+namespace Crypto
+{
+	const int32 kHmacBlockBytes = 64;
+
+	// The key as one block: itself when it fits, else its digest, then zeros.
+	static void KeyBlock(const void* key, int64 keyCount, uint8* block) {
+		for (int32 i = 0; i < kHmacBlockBytes; ++i) block[i] = (uint8)0;
+		if (keyCount > (int64)kHmacBlockBytes) {
+			const Sha256Digest digest = Sha256(key, keyCount);
+			for (int32 i = 0; i < kSha256Bytes; ++i) block[i] = digest.bytes[i];
+			return;
+		}
+		const uint8* bytes = (const uint8*)key;
+		for (int64 i = 0; i < keyCount; ++i) block[i] = bytes[i];
+	}
+
+	static Sha256Digest PaddedHash(const uint8* keyBlock, uint8 pad, const void* message, int64 count) {
+		uint8[64] padded;
+		for (int32 i = 0; i < kHmacBlockBytes; ++i) padded[i] = (uint8)(keyBlock[i] ^ pad);
+		Sha256Builder builder;
+		builder.Add((const void*)&padded[0], kHmacBlockBytes);
+		builder.Add(message, count);
+		return builder.Finish();
+	}
+
+	Sha256Digest HmacSha256(const void* key, int64 keyCount, const void* message, int64 count) {
+		uint8[64] keyBlock;
+		KeyBlock(key, keyCount, &keyBlock[0]);
+		const Sha256Digest inner = PaddedHash(&keyBlock[0], (uint8)0x36, message, count);
+		return PaddedHash(&keyBlock[0], (uint8)0x5c, (const void*)&inner.bytes[0], kSha256Bytes);
+	}
+}

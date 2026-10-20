@@ -1,0 +1,12 @@
+include "compare.ch"
+
+namespace Crypto
+{
+	bool ConstantTimeEquals(const void* a, const void* b, int64 count) {
+		const uint8* x = (const uint8*)a;
+		const uint8* y = (const uint8*)b;
+		uint32 difference = 0u;
+		for (int64 i = 0; i < count; ++i) difference |= (uint32)(x[i] ^ y[i]);
+		return difference == 0u;
+	}
+}
