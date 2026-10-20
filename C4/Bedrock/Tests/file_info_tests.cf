@@ -1,0 +1,167 @@
+// FS::GetInfo, SetModifiedTime, SetReadOnly, CopyFile, CopyTree, AbsolutePath, CanonicalPath and RemoveAll's
+// read-only files, in scratch folders under the temp directory. Links are junctions made with cmd's mklink /J,
+// which needs no privilege.
+
+include "bedrock.ch"
+
+static FS::Path InfoScratch(const char* test) {
+	FS::Path folder = FS::TempDirectory() / "c4_bedrock_fs_info" / test;
+	FS::RemoveAll(folder.CStr());
+	FS::MakeDirectories(folder.CStr());
+	return folder;
+}
+
+static bool WriteFileText(const FS::Path& path, const char* text) {
+	FS::File file = FS::File(path.CStr(), "wb");
+	const int64 length = Core::StringView(text).ByteLength();
+	return file.IsOpen() && file.Write(text, length) == length;
+}
+
+static Core::String ReadFileText(const FS::Path& path) {
+	FS::File file = FS::File(path.CStr(), "rb");
+	return file.ReadText();
+}
+
+// A junction at `link` to the directory `target`.
+static bool MakeJunction(const FS::Path& link, const FS::Path& target) {
+	Process::StartInfo info;
+	info.program = Core::String("cmd");
+	const char*[3] words = { "/c", "mklink", "/J" };
+	for (int32 i = 0; i < 3; ++i) info.arguments.Push(Core::String(words[i]));
+	info.arguments.Push(Core::String(FS::AbsolutePath(link.CStr()).CStr()));
+	info.arguments.Push(Core::String(FS::AbsolutePath(target.CStr()).CStr()));
+	return Process::Run(info, 20000).exitCode == 0;
+}
+
+static int64 Distance(int64 a, int64 b) { return a > b ? a - b : b - a; }
+
+const int64 kSecondNs = 1000000000;
+
+[test("fs.info")]
+class FileInfoTests {
+	[test("file_and_directory")]
+	public static void TestFileAndDirectory() {
+		FS::Path folder = InfoScratch("kinds");
+		FS::Path file = folder / "hello.txt";
+		assert_true(WriteFileText(file, "hello"), "written");
+		FS::FileInfo info;
+		assert_true(FS::GetInfo(file.CStr(), info), "a file");
+		assert_true(info.kind == FS::EntryKind::File && info.size == 5 && !info.readOnly, "its kind, size and attributes");
+		assert_true(Distance(info.modifiedNs, Platform::UnixTimeNs()) < 60 * kSecondNs, "modified just now, on the wall clock");
+		assert_true(info.createdNs > 0 && info.accessedNs > 0, "created and accessed times");
+		assert_true(FS::GetInfo(folder.CStr(), info) && info.kind == FS::EntryKind::Directory && info.size == 0, "a directory");
+		assert_true(!FS::GetInfo((folder / "missing.txt").CStr(), info), "nothing there");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("set_times_and_read_only")]
+	public static void TestSetTimesAndReadOnly() {
+		FS::Path folder = InfoScratch("set");
+		FS::Path file = folder / "file.txt";
+		WriteFileText(file, "x");
+		const int64 when = (int64)1600000000123456700;
+		assert_true(FS::SetModifiedTime(file.CStr(), when), "set");
+		FS::FileInfo info;
+		FS::GetInfo(file.CStr(), info);
+		assert_eq(when, info.modifiedNs, "read back to the 100 ns the system keeps");
+		assert_true(FS::SetModifiedTime(folder.CStr(), when) && FS::GetInfo(folder.CStr(), info) && info.modifiedNs == when, "a directory's too");
+		assert_true(FS::SetReadOnly(file.CStr(), true) && FS::GetInfo(file.CStr(), info) && info.readOnly, "read-only");
+		assert_true(!FS::RemoveFile(file.CStr()), "RemoveFile refuses a read-only file, as the system does");
+		assert_eq((int64)2, FS::RemoveAll(folder.CStr()), "RemoveAll removes it anyway (git's objects are read-only)");
+		assert_true(!FS::SetModifiedTime(file.CStr(), when) && !FS::SetReadOnly(file.CStr(), false), "nothing there to change");
+	}
+
+	[test("links")]
+	public static void TestLinks() {
+		FS::Path folder = InfoScratch("links");
+		FS::Path target = folder / "target";
+		FS::MakeDirectory(target.CStr());
+		WriteFileText(target / "inside.txt", "inside");
+		FS::Path junction = folder / "junction";
+		assert_true(MakeJunction(junction, target), "mklink /J");
+		FS::FileInfo info;
+		assert_true(FS::GetInfo(junction.CStr(), info) && info.kind == FS::EntryKind::Directory, "followed: a directory");
+		assert_true(FS::GetInfo(junction.CStr(), info, false) && info.kind == FS::EntryKind::Link, "itself: a link");
+		assert_true(FS::IsLink(junction.CStr()), "IsLink");
+		assert_true(FS::GetInfo((junction / "inside.txt").CStr(), info) && info.size == 6, "through it");
+		assert_true(FS::CanonicalPath(junction.CStr()) == FS::CanonicalPath(target.CStr()), "its canonical path is its target's");
+		assert_eq((int64)1, FS::RemoveAll(junction.CStr()), "RemoveAll removes the link");
+		assert_true(FS::GetInfo((target / "inside.txt").CStr(), info), "and not what it pointed to");
+		FS::RemoveAll(folder.CStr());
+	}
+}
+
+[test("fs.copy")]
+class FileCopyTests {
+	[test("file")]
+	public static void TestFile() {
+		FS::Path folder = InfoScratch("copy_file");
+		FS::Path from = folder / "from.txt";
+		FS::Path to = folder / "to.txt";
+		WriteFileText(from, "first");
+		const int64 when = (int64)1500000000000000000;
+		FS::SetModifiedTime(from.CStr(), when);
+		assert_true(FS::CopyFile(from.CStr(), to.CStr()), "copied");
+		FS::FileInfo info;
+		assert_true(ReadFileText(to).View() == "first" && FS::GetInfo(to.CStr(), info) && info.modifiedNs == when, "the bytes and the modification time");
+		WriteFileText(from, "second");
+		assert_true(!FS::CopyFile(from.CStr(), to.CStr(), false) && ReadFileText(to).View() == "first", "replace false keeps what is there");
+		assert_true(FS::CopyFile(from.CStr(), to.CStr(), true) && ReadFileText(to).View() == "second", "replace true replaces it");
+		assert_true(!FS::CopyFile((folder / "missing.txt").CStr(), to.CStr()), "nothing to copy");
+		assert_true(!FS::CopyFile(from.CStr(), (folder / "no" / "such" / "folder.txt").CStr()), "nowhere to copy to");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("tree")]
+	public static void TestTree() {
+		FS::Path folder = InfoScratch("copy_tree");
+		FS::Path from = folder / "from";
+		FS::MakeDirectories((from / "a" / "b").CStr());
+		WriteFileText(from / "top.txt", "top");
+		WriteFileText(from / "a" / "middle.txt", "middle");
+		WriteFileText(from / "a" / "b" / "deep.txt", "deep");
+		FS::MakeDirectory((from / "empty").CStr());
+		FS::Path outside = folder / "outside";
+		FS::MakeDirectory(outside.CStr());
+		MakeJunction(from / "link", outside);
+		FS::Path to = folder / "to";
+		assert_eq((int64)6, FS::CopyTree(from.CStr(), to.CStr()), "3 files and 3 directories; the link is not copied");
+		assert_true(ReadFileText(to / "a" / "b" / "deep.txt").View() == "deep" && ReadFileText(to / "top.txt").View() == "top", "the contents");
+		assert_true(FS::IsDirectory((to / "empty").CStr()) && !FS::IsDirectory((to / "link").CStr()), "the empty directory, not the link");
+		WriteFileText(from / "top.txt", "changed");
+		assert_eq((int64)6, FS::CopyTree(from.CStr(), to.CStr()), "again, over the first copy");
+		assert_true(ReadFileText(to / "top.txt").View() == "changed", "replacing its files");
+		assert_eq((int64)-1, FS::CopyTree(from.CStr(), (from / "a" / "inside").CStr()), "not into itself");
+		assert_true(!FS::IsDirectory((from / "a" / "inside").CStr()), "and nothing was made");
+		assert_eq((int64)-1, FS::CopyTree((from / "top.txt").CStr(), to.CStr()), "a file is not a tree");
+		assert_eq((int64)-1, FS::CopyTree((folder / "missing").CStr(), to.CStr()), "nothing to copy");
+		FS::RemoveAll(folder.CStr());
+	}
+}
+
+[test("fs.paths")]
+class FilePathTests {
+	[test("absolute")]
+	public static void TestAbsolute() {
+		FS::Path here = FS::CurrentDirectory();
+		Core::StringBuilder expected;
+		expected.Append(here.View());
+		expected.Append("\\b");
+		assert_se(expected.CStr(), FS::AbsolutePath("a/../b").CStr(), "against the working directory, '..' folded");
+		assert_se("C:\\x\\z", FS::AbsolutePath("C:/x/./y/../z").CStr(), "an absolute path folded, as the system writes it");
+		assert_se("C:\\no\\such\\thing", FS::AbsolutePath("C:/no/such/thing").CStr(), "without reading the file system");
+		assert_true(FS::AbsolutePath("").IsEmpty(), "nothing to make absolute");
+	}
+
+	[test("canonical")]
+	public static void TestCanonical() {
+		FS::Path folder = InfoScratch("canonical");
+		FS::MakeDirectory((folder / "Mixed").CStr());
+		WriteFileText(folder / "Mixed" / "Case.txt", "x");
+		FS::Path canonical = FS::CanonicalPath((folder / "mixed" / "." / "CASE.TXT").CStr());
+		assert_true(canonical.View().EndsWith(Core::StringView("\\canonical\\Mixed\\Case.txt")), canonical.CStr());
+		assert_true(canonical.IsAbsolute(), "absolute");
+		assert_true(FS::CanonicalPath((folder / "missing").CStr()).IsEmpty(), "nothing there");
+		FS::RemoveAll(folder.CStr());
+	}
+}

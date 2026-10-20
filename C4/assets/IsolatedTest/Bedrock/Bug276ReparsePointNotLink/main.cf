@@ -1,0 +1,28 @@
+// BUG-276: every reparse point counted as a link, so a cloud placeholder or a deduplicated file was listed as a Link
+// and FS::IsLink was true for it. Only symbolic links and junctions are links now: this file carries a third-party
+// reparse tag and must read as the file it is.
+include "bedrock.ch"
+extern "c" include "reparse.h"
+extern "c" source "reparse.c"
+
+static bool ListedAsFile(const FS::Path& folder, const char* name) {
+	for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr()))
+		if (entry.name == name) return entry.kind == FS::EntryKind::File;
+	return false;
+}
+
+int32 main() {
+	Core::StringBuilder name;
+	Core::Format(&name, "c4-bug276-{0}", (int64)Platform::ProcessId());
+	FS::Path folder = FS::TempDirectory() / name.View();
+	if (!FS::MakeDirectories(folder.CStr())) return 1;
+	FS::Path file = folder / "tagged.txt";
+	if (MakeTaggedFile(file.CStr()) != 0) return 2;
+	int32 result = 0;
+	FS::FileInfo info;
+	if (FS::IsLink(file.CStr())) result = 3;
+	else if (!ListedAsFile(folder, "tagged.txt")) result = 4;
+	else if (!FS::GetInfo(file.CStr(), info, false) || info.kind != FS::EntryKind::File) result = 5;
+	if (FS::RemoveAll(folder.CStr()) < 0 && result == 0) result = 6;
+	return result;
+}

@@ -146,6 +146,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-66 | HTTP (roadmap 7) | Bedrock's `Http` namespace is plain C4 over `Net::` (D-65), HTTP/1.1 only and plain http (no TLS). Parsing is pure functions over bytes (heads, framing, a resumable `ChunkedDecoder`) shared by the server and the client; lines may end in CRLF or LF, but folded header lines, control characters and both framings at once are refused. `Http::Server` serves on the calling thread until `Stop()`, a thread per connection, keep-alive and pipelining, with limits (`ServerLimits`) and answers 400 / 408 / 413 / 431 / 501 / 505 for what it refuses and 500 when a handler throws; it owns the framing (`Content-Length`, `Connection: close`) and handles `Expect: 100-continue` and HEAD. `Http::Fetch` / `Get` / `Post` send one request per connection. WebSockets follow (the IDE server pushes to the browser through them). | [Bedrock 14](../library/bedrock.md#14-http-http) |
 | D-67 | WebSockets (roadmap 7) | RFC 6455 in plain C4 over `Http::` (D-66). A handler accepts with `AcceptWebSocket(request, response, session)`; the server writes the 101 and hands the connection to `Response::takeover`, a protocol-neutral hook (the stream, the bytes after the request, the stop flag), on the connection's thread. `WebSocket::Receive` returns whole messages (fragments joined, pings and the close handshake answered) for one receiving thread; sends and `Close` are safe from any thread (a send lock, which also guards closing the stream). Frames are pure functions; violations close with the RFC's codes (1002, 1007, 1009); no extensions or subprotocols. Clients mask with `Platform::RandomBytes`. | [Bedrock 14](../library/bedrock.md#14-http-http) |
 | D-68 | Child processes (roadmap 7) | Bedrock `Process::` over a small runtime C API (`ProcessRuntimeC.h`, `Process/*Win32.c`), the D-65 pattern. A child starts suspended and joins its own job object before it runs, so `Kill` ends the tree and closing the handle does too (`killOnClose`, the default). The parent's pipe ends are overlapped named pipes (timeouts on every read, write and wait); only the child's ends are inherited (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), so concurrent starts cannot leak pipes into each other. `ReadAny` follows stdout and stderr from one thread with zero-byte reads (no reader thread per stream). Arguments are quoted for `CommandLineToArgvW`; batch files are refused (cmd's own parsing makes quoting unsafe); the environment is changes on the inherited one or a whole replacement, merged and sorted in the runtime with the OS's name comparison. Terminals are ConPTY pseudo consoles, looked up at run time. `Process::Run` captures a program's output with a deadline. | [Bedrock 15](../library/bedrock.md#15-processes-process) |
+| D-69 | File information and watching (roadmap 7) | Bedrock `FS::` grows `GetInfo` / `FileInfo` (kind, read-only, size, times as Unix nanoseconds), `SetModifiedTime`, `SetReadOnly`, `CopyFile`, `CopyTree` (in C4, links neither followed nor copied, never into itself), `AbsolutePath` and `CanonicalPath` over a runtime C API (`FileSystemRuntimeC.h`, `FileSystem/*Win32.c`); paths the system makes come back in its own form. `FS::Watcher` is `ReadDirectoryChangesW` with a request always pending (two buffers: the next request starts before the last one's records are handed out), one change per `Next`, renames paired, and an `Overflow` change instead of silently lost ones; raw changes, coalescing left to the caller. A link is a symbolic link or a junction, nothing else (BUG-276). | [Bedrock 5](../library/bedrock.md#5-files-paths-and-directories-fs) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1299,6 +1300,21 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   names itself in a redirected log.
 - **Tests:** `process_tests.cf` (18) at `-O0` and `-O2`; Bedrock passes 423 tests.
 
+#### B53 - File information, copies and watching (roadmap 7)
+- **Closes:** BUG-276, BUG-277. **Design:** D-69, [Bedrock 5](../library/bedrock.md#5-files-paths-and-directories-fs).
+  **Depends on:** B52 (the tests make junctions with `mklink /J`). **Status:** Done.
+- **Done notes:** runtime `FileSystemRuntimeC.h` (the entry kinds moved there from `FileSystemRuntimeC.c`),
+  `FileSystem/InfoWin32.c` (information, times, read-only, copies, absolute and canonical paths) and
+  `FileSystem/WatchWin32.c`; Bedrock `FS/info` and `FS/watch`. Found and fixed: BUG-276 - every reparse point
+  counted as a link, so cloud placeholders and deduplicated files were listed as `Link` and `IsLink` was true for
+  them; only `IO_REPARSE_TAG_SYMLINK` and `IO_REPARSE_TAG_MOUNT_POINT` are links now. BUG-277 - `RemoveAll`
+  stopped at a read-only file (git's objects are read-only, so a clone could not be removed) and, deciding by
+  `FileExists`, skipped files it could not open; it now goes by what each entry itself is and clears read-only
+  first.
+- **Tests:** `file_info_tests.cf` (7), `watch_tests.cf` (6) at `-O0` and `-O2`; IsolatedTest
+  `Bedrock/Bug276ReparsePointNotLink` (a C helper sets a third-party reparse tag, no privilege needed). Bedrock
+  passes 436 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -1816,7 +1832,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)

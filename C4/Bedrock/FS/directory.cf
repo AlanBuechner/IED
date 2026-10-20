@@ -1,4 +1,5 @@
 include "directory.ch"
+include "info.ch"
 
 namespace FS
 {
@@ -71,10 +72,18 @@ namespace FS
 		return RemoveEmptyDirectory(path) ? removed + 1 : -1;
 	}
 
+	// A read-only file is made writable first, as a tool's own files often are (git's objects).
+	static bool RemoveAnyFile(const char* path, bool readOnly) {
+		if (readOnly) SetReadOnly(path, false);
+		return RemoveFile(path);
+	}
+
+	// By what the entry itself is: a link goes, not what it points to.
 	int64 RemoveAll(const char* path) {
-		if (IsLink(path)) return RemoveEmptyDirectory(path) || RemoveFile(path) ? 1 : -1;
-		if (IsDirectory(path)) return RemoveTree(path);
-		if (!FileExists(path)) return 0;
-		return RemoveFile(path) ? 1 : -1;
+		FileInfo info;
+		if (!GetInfo(path, info, false)) return 0;
+		if (info.kind == EntryKind::Link) return RemoveEmptyDirectory(path) || RemoveFile(path) ? 1 : -1;
+		if (info.kind == EntryKind::Directory) return RemoveTree(path);
+		return RemoveAnyFile(path, info.readOnly) ? 1 : -1;
 	}
 }

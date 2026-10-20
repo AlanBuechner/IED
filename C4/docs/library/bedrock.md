@@ -288,14 +288,55 @@ for (FS::DirectoryEntry& entry : FS::Directory("assets"))
 | Function | Meaning |
 |---|---|
 | `IsDirectory(path)` | a directory (a link to one counts) |
-| `IsLink(path)` | a symbolic link or junction |
+| `IsLink(path)` | a symbolic link or junction; any other reparse point (a cloud placeholder, a deduplicated file) is the file or directory it stands for |
 | `MakeDirectory(path)` | one directory; false when it exists or its parent does not |
 | `MakeDirectories(path)` | with every missing parent; true when `path` is a directory at the end |
 | `RemoveEmptyDirectory(path)` | |
-| `RemoveAll(path)` | a file, a link (never what it points to) or a whole tree; the number of entries removed, 0 when there is nothing, -1 on a failure |
+| `RemoveAll(path)` | a file, a link (never what it points to) or a whole tree, read-only files too; the number of entries removed, 0 when there is nothing, -1 on a failure |
 | `Rename(from, to)` | moves a file or directory; a file at `to` is replaced |
 
 An entry name is at most `FS::kMaxEntryNameBytes` bytes of UTF-8.
+
+### File information, copies and real paths (`info.ch`)
+
+**Status:** **Implemented** (B53, D-69), over the runtime's `FileSystemRuntimeC.h`. Times are Unix time in
+nanoseconds, the clock of `Platform::UnixTimeNs`. Paths the system makes come back as it writes them (`\` on
+Windows).
+
+| Function | Meaning |
+|---|---|
+| `GetInfo(path, info, followLinks = true)` | a `FileInfo` (`kind`, `readOnly`, `size`, `modifiedNs`, `createdNs`, `accessedNs`); false when nothing is there. A link is followed unless `followLinks` is false, then it is described itself (kind `Link`) |
+| `SetModifiedTime(path, unixNs)` | a file's or directory's modification time, kept to 100 ns on Windows |
+| `SetReadOnly(path, readOnly)` | the read-only attribute: `RemoveFile` and writes fail on a read-only file |
+| `CopyFile(from, to, replace = true)` | the bytes, attributes and modification time; with `replace` false it fails when `to` exists |
+| `CopyTree(from, to)` | a directory and everything in it into `to` (made when missing), replacing files there; links are neither followed nor copied. The files and directories copied, -1 when one could not be (the rest is copied), `from` is not a directory, or `to` is inside it (then nothing is made) |
+| `AbsolutePath(path)` | against the working directory, `.` and `..` folded, without reading the file system |
+| `CanonicalPath(path)` | the path the file system resolves to: absolute, links followed, each name in its stored case; empty when nothing is there |
+
+### Watching a directory (`watch.ch`)
+
+`FS::Watcher(path)` watches a directory and everything under it (`FS::Watcher(path, false)`: its own entries
+only); it closes on delete and cannot be copied (move it with `take()`). `Next(change, timeoutMs)` waits for the
+next `Change`: `kind` (`Added`, `Removed`, `Modified`, `Renamed`, `Overflow`), `path` relative to the watched
+directory as the system writes it, and `oldPath` for a rename. It is false when none comes in time (`TimedOut()`)
+or watching failed (`Error()`: the directory was removed, or the watcher is closed). Every change made after the
+watcher opened comes out of `Next`, or an `Overflow` in its place when too many came at once to keep: then look at
+the directory again. Changes come as the system reports them: saving a file is often several `Modified`, and an
+editor's safe save a `Renamed` or a `Removed` and an `Added`, so coalesce them before acting. A watched directory
+can still be removed; it goes once the watcher closes.
+
+```c4
+FS::Watcher assets = FS::Watcher("game/assets");
+FS::Change change;
+while (assets.Next(change, 500))
+	if (change.kind == FS::ChangeKind::Modified) Reload(change.path);
+```
+
+Covered by `Bedrock/Tests/file_info_tests.cf` (7 tests: kinds, sizes and times, setting times and read-only,
+junctions followed and not, copies of files and trees, absolute and canonical paths) and `watch_tests.cf` (6:
+added, written, renamed and removed files, recursion, timeouts, a burst of 3000 files, the watched directory
+removed, failures and moves), and `assets/IsolatedTest/Bedrock/Bug276ReparsePointNotLink` (a third-party reparse
+point is a file, not a link).
 
 ---
 
@@ -784,11 +825,11 @@ typed to, resized, and exiting with the code it was told.
 
 ## 16. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 42 files, 423 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 44 files, 436 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, http, websocket, encoding, process). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, http, websocket, encoding, process, file_info, watch). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -817,6 +858,7 @@ From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 | ObjectDescription with in-memory JSON and YAML read and write | **Implemented** (one YAML document; no anchors or tags) |
 | Streaming reads (decode a large file while it is still being read) | **Planned** |
 | Paths, directory listing, create, remove, rename | **Implemented** |
+| File information and times, copies of files and trees, absolute and canonical paths, watching a directory | **Implemented** (section 5, B53) |
 | `Core::InitList<T>` | **Implemented** |
 | Sockets / networking | **Implemented** (section 13, B49) |
 | HTTP server | **Implemented** (section 14, B50), with WebSockets (B51) |

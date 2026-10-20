@@ -16,8 +16,8 @@ Resolve `docs/99` #5 as far as research can: **what exactly must exist in C4 / B
 | Threads, mutex, condvar, atomics, futures, job system | **exists** | `C4/Bedrock/Threading/*`; JobSystem is game-tuned, not I/O-aware |
 | JSON parse/serialize | **exists** (DOM) | No streaming parser; reflection-driven serialization handles only scalars + nested structs (no `String`, `Array`, `HashMap`, enum names) |
 | UTF-8 strings | **exists** | UTF-8 <-> UTF-16 helpers exist only inside the runtime; Win32 `W` APIs need them exposed |
-| File system basics | **partial** | read/write/list/mkdir/remove/rename/exists/size; **missing** stat/mtime, copy, canonicalize, locking, mmap |
-| File watching | **missing** | `ReadDirectoryChangesW` |
+| File system basics | **exists** | read/write/list/mkdir/remove/rename/exists/size, `FS::GetInfo` (kind, size, times), copies of files and trees, absolute and canonical paths (C4 B53); **missing** locking, mmap |
+| File watching | **exists** | `FS::Watcher` over `ReadDirectoryChangesW` (B53): recursive, renames paired, `Overflow` when changes were dropped |
 | TCP sockets, event loop (IOCP), timers | **partial** | `Net::` TCP, UDP, resolution, `Poll`, blocking calls with timeouts (C4 B49); no event loop or timers yet |
 | HTTP/1.1, WebSocket, SHA-1, base64, TLS | **exists** except TLS | `Http::` server (thread per connection) and client (B50), WebSockets (B51), `Core::Sha1`, `Core::Base64*` |
 | Child processes with pipes, job objects, env vars | **exists** | `Process::Child` / `Process::Run` (C4 B52): pipes with timeouts, `ReadAny`, job objects (kill the tree, kill on close), environment changes; env get/set in `Platform::` (B40) |
@@ -72,7 +72,7 @@ Implementation of `src/` starts when all of these are true. Each item is a work 
 
 1. [ ] `Net::` sockets + event loop + timers, with tests (echo server, 1k concurrent connections, timers under load).
 2. [x] `Process::` spawn/pipes/job objects/env + ConPTY, with tests (spawn `cmd /c`, kill tree, PTY round trip). Done in C4 B52 (D-68).
-3. [ ] `FS::Watch`, stat/mtime, copy, canonical paths.
+3. [x] `FS::Watch`, stat/mtime, copy, canonical paths. Done in C4 B53 (D-69) as `FS::Watcher`, `FS::GetInfo`, `CopyFile` / `CopyTree`, `CanonicalPath`.
 4. [ ] `Time::` wall clock; UTF-16 helpers exposed; base64 + SHA-1 (WebSocket handshake). Wall clock (`Platform::`, B40), base64 and SHA-1 (B51) done; UTF-16 helpers still runtime-internal.
 5. [ ] Regex engine available to C4 code.
 6. [ ] Reflection serialization for String/Array/HashMap/enum (or IED writes DTO codecs by hand - decide).

@@ -1,0 +1,111 @@
+include "info.ch"
+
+namespace FS
+{
+	// The runtime's c4_fs_file_info.
+	struct InfoRecord
+	{
+		public int32 kind;
+		public int32 readOnly;
+		public int64 size;
+		public int64 modifiedNs;
+		public int64 createdNs;
+		public int64 accessedNs;
+	}
+
+	const int32 kCopyErrorBytes = 512;
+	// The longest path the runtime hands back, in UTF-8 bytes: 32767 UTF-16 units of up to 3 bytes.
+	const int64 kMaxPathBytes = 98304;
+}
+
+[link("c4_fs_info")] int32 c4_fs_info(const char* path, int32 followLinks, FS::InfoRecord* out);
+[link("c4_fs_set_modified")] int32 c4_fs_set_modified(const char* path, int64 unixNs);
+[link("c4_fs_set_read_only")] int32 c4_fs_set_read_only(const char* path, int32 readOnly);
+[link("c4_fs_copy_file")] int32 c4_fs_copy_file(const char* from, const char* to, int32 replace, char* error, int64 errorCapacity);
+[link("c4_fs_absolute")] int64 c4_fs_absolute(const char* path, char* out, int64 capacity);
+[link("c4_fs_canonical")] int64 c4_fs_canonical(const char* path, char* out, int64 capacity);
+
+namespace FS
+{
+	bool GetInfo(const char* path, FileInfo& info, bool followLinks) {
+		InfoRecord record;
+		if (c4_fs_info(path, followLinks ? 1 : 0, &record) != 0) return false;
+		info.kind = (EntryKind)record.kind;
+		info.readOnly = record.readOnly != 0;
+		info.size = record.size;
+		info.modifiedNs = record.modifiedNs;
+		info.createdNs = record.createdNs;
+		info.accessedNs = record.accessedNs;
+		return true;
+	}
+
+	bool SetModifiedTime(const char* path, int64 unixNs) { return c4_fs_set_modified(path, unixNs) == 0; }
+	bool SetReadOnly(const char* path, bool readOnly) { return c4_fs_set_read_only(path, readOnly ? 1 : 0) == 0; }
+
+	bool CopyFile(const char* from, const char* to, bool replace) {
+		char[kCopyErrorBytes] why;
+		return c4_fs_copy_file(from, to, replace ? 1 : 0, &why[0], kCopyErrorBytes) == 0;
+	}
+
+	// A path the runtime writes into a buffer: `write` gives the length it needs, and writes only when that fits.
+	static Path PathFromRuntime(const char* path, funcptr<int64(const char*, char*, int64)> write) {
+		char[1024] small;
+		const int64 length = write(path, &small[0], 1024);
+		if (length < 0) return Path();
+		if (length < 1024) return Path(Core::StringView(&small[0], length));
+		Core::Array<char> large;
+		large.Resize(length + 1);
+		if (write(path, large.Data(), length + 1) != length) return Path();
+		return Path(Core::StringView(large.Data(), length));
+	}
+
+	Path AbsolutePath(const char* path) { return PathFromRuntime(path, c4_fs_absolute); }
+	Path CanonicalPath(const char* path) { return PathFromRuntime(path, c4_fs_canonical); }
+
+	// Whether `inner` is `outer` or under it; both canonical.
+	static bool IsWithin(Core::StringView inner, Core::StringView outer) {
+		if (!inner.StartsWith(outer)) return false;
+		return inner.ByteLength() == outer.ByteLength() || IsSeparator(inner.ByteAt(outer.ByteLength()));
+	}
+
+	static int64 CopyEntries(const Path& from, const Path& to) {
+		int64 copied = 0;
+		bool failed = false;
+		for (DirectoryEntry& entry : Directory(from.CStr())) {
+			const Path source = from / entry.name.View();
+			const Path target = to / entry.name.View();
+			if (entry.kind == EntryKind::File) {
+				if (CopyFile(source.CStr(), target.CStr(), true)) copied += 1;
+				else failed = true;
+			}
+			else if (entry.kind == EntryKind::Directory) {
+				const int64 inner = MakeDirectories(target.CStr()) ? CopyEntries(source, target) : (int64)-1;
+				if (inner >= 0) copied += inner + 1;
+				else failed = true;
+			}
+		}
+		return failed ? (int64)-1 : copied;
+	}
+
+	// The deepest directory at or above `path` that exists, canonical; empty when there is none.
+	static Path ExistingAncestor(const char* path) {
+		Path at = AbsolutePath(path);
+		FileInfo info;
+		while (!at.IsEmpty() && !GetInfo(at.CStr(), info, true)) {
+			const Path parent = at.Parent();
+			if (parent == at) return Path();
+			at = parent;
+		}
+		return at.IsEmpty() ? at : CanonicalPath(at.CStr());
+	}
+
+	int64 CopyTree(const char* from, const char* to) {
+		FileInfo info;
+		if (!GetInfo(from, info, false) || info.kind != EntryKind::Directory) return -1;
+		const Path source = CanonicalPath(from);
+		const Path ancestor = ExistingAncestor(to);
+		if (source.IsEmpty() || ancestor.IsEmpty() || IsWithin(ancestor.View(), source.View())) return -1;
+		if (!MakeDirectories(to)) return -1;
+		return CopyEntries(source, Path(to));
+	}
+}

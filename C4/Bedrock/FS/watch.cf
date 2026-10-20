@@ -1,0 +1,54 @@
+include "watch.ch"
+
+namespace FS
+{
+	// The runtime's c4_fs_change.
+	struct ChangeRecord
+	{
+		public int32 kind;
+		public const char* path;
+		public const char* oldPath;
+	}
+
+	const int32 kWatchErrorBytes = 512;
+	const int32 kWatchTimedOut = -2;
+}
+
+[link("c4_fs_watch_open")] void* c4_fs_watch_open(const char* path, int32 recursive, char* error, int64 errorCapacity);
+[link("c4_fs_watch_next")] int32 c4_fs_watch_next(void* watch, int32 timeoutMs, FS::ChangeRecord* out, char* error, int64 errorCapacity);
+[link("c4_fs_watch_close")] void c4_fs_watch_close(void* watch);
+
+namespace FS
+{
+	void Watcher::Open(const char* path, bool recursive) {
+		char[kWatchErrorBytes] why;
+		handle = c4_fs_watch_open(path, recursive ? 1 : 0, &why[0], kWatchErrorBytes);
+		if (!handle) error = Core::String(&why[0]);
+	}
+
+	bool Watcher::Next(Change& change, int32 timeoutMs) {
+		timedOut = false;
+		if (!handle) {
+			error = Core::String("the watcher is closed");
+			return false;
+		}
+		ChangeRecord record;
+		char[kWatchErrorBytes] why;
+		const int32 result = c4_fs_watch_next(handle, timeoutMs, &record, &why[0], kWatchErrorBytes);
+		timedOut = result == kWatchTimedOut;
+		error.Clear();
+		if (result == 1) {
+			change.kind = (ChangeKind)record.kind;
+			change.path = Core::String(record.path);
+			change.oldPath = Core::String(record.oldPath);
+			return true;
+		}
+		if (!timedOut) error = Core::String(&why[0]);
+		return false;
+	}
+
+	void Watcher::Close() {
+		if (handle) c4_fs_watch_close(handle);
+		handle = nullptr;
+	}
+}

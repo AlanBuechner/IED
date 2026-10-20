@@ -1,0 +1,149 @@
+// FS::Watcher on scratch folders under the temp directory: files added, written, renamed and removed, folders and
+// what is in them with and without recursion, timeouts, a burst of changes (every one seen or an Overflow), the
+// watched folder removed, and failures.
+
+include "bedrock.ch"
+
+const int32 kWatchWaitMs = 10000;
+
+static FS::Path WatchScratch(const char* test) {
+	FS::Path folder = FS::TempDirectory() / "c4_bedrock_fs_watch" / test;
+	FS::RemoveAll(folder.CStr());
+	FS::MakeDirectories(folder.CStr());
+	return folder;
+}
+
+static bool WriteWatchedFile(const FS::Path& path, const char* text) {
+	FS::File file = FS::File(path.CStr(), "wb");
+	const int64 length = Core::StringView(text).ByteLength();
+	return file.IsOpen() && file.Write(text, length) == length;
+}
+
+// Reads changes until one of `kind` at `path` (and `oldPath` for a rename) comes; false when none comes in time.
+static bool WaitForChange(FS::Watcher& watcher, FS::ChangeKind kind, const char* path, const char* oldPath) {
+	const int64 start = clock_now_ns();
+	FS::Change change;
+	while ((clock_now_ns() - start) / 1000000 < (int64)kWatchWaitMs) {
+		if (!watcher.Next(change, 200)) {
+			if (!watcher.TimedOut()) return false;
+			continue;
+		}
+		if (change.kind == kind && change.path == path && change.oldPath == oldPath) return true;
+	}
+	return false;
+}
+
+// Whether any change at `path` comes within `waitMs`.
+static bool AnyChangeAt(FS::Watcher& watcher, const char* path, int32 waitMs) {
+	FS::Change change;
+	while (watcher.Next(change, waitMs))
+		if (change.path == path) return true;
+	return false;
+}
+
+[test("fs.watch")]
+class WatchTests {
+	[test("files")]
+	public static void TestFiles() {
+		FS::Path folder = WatchScratch("files");
+		FS::Watcher watcher = FS::Watcher(folder.CStr());
+		assert_true(watcher.IsOpen(), watcher.Error());
+		WriteWatchedFile(folder / "a.txt", "one");
+		assert_true(WaitForChange(watcher, FS::ChangeKind::Added, "a.txt", ""), "added");
+		WriteWatchedFile(folder / "a.txt", "two, longer");
+		assert_true(WaitForChange(watcher, FS::ChangeKind::Modified, "a.txt", ""), "written");
+		FS::Rename((folder / "a.txt").CStr(), (folder / "b.txt").CStr());
+		assert_true(WaitForChange(watcher, FS::ChangeKind::Renamed, "b.txt", "a.txt"), "renamed: the new name and the old");
+		FS::RemoveFile((folder / "b.txt").CStr());
+		assert_true(WaitForChange(watcher, FS::ChangeKind::Removed, "b.txt", ""), "removed");
+		watcher.Close();
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("recursion")]
+	public static void TestRecursion() {
+		FS::Path folder = WatchScratch("recursion");
+		FS::MakeDirectory((folder / "sub").CStr());
+		FS::Watcher all = FS::Watcher(folder.CStr());
+		FS::Watcher top = FS::Watcher(folder.CStr(), false);
+		WriteWatchedFile(folder / "sub" / "inner.txt", "x");
+		assert_true(WaitForChange(all, FS::ChangeKind::Added, "sub\\inner.txt", ""), "a file in a subfolder, by its relative path");
+		assert_true(!AnyChangeAt(top, "sub\\inner.txt", 300), "not seen without recursion");
+		FS::MakeDirectory((folder / "made").CStr());
+		assert_true(WaitForChange(top, FS::ChangeKind::Added, "made", ""), "the folder's own entries are");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("timeout")]
+	public static void TestTimeout() {
+		FS::Path folder = WatchScratch("timeout");
+		FS::Watcher watcher = FS::Watcher(folder.CStr());
+		FS::Change change;
+		const int64 start = clock_now_ns();
+		assert_true(!watcher.Next(change, 100) && watcher.TimedOut(), "nothing changed");
+		assert_true(watcher.Error()[0] == 0 && watcher.IsOpen(), "not an error; still watching");
+		assert_true((clock_now_ns() - start) / 1000000 < 5000, "gave up on time");
+		WriteWatchedFile(folder / "late.txt", "x");
+		assert_true(WaitForChange(watcher, FS::ChangeKind::Added, "late.txt", ""), "a change after a timeout still comes");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("burst")]
+	public static void TestBurst() {
+		FS::Path folder = WatchScratch("burst");
+		FS::Watcher watcher = FS::Watcher(folder.CStr());
+		const int32 count = 3000;
+		for (int32 i = 0; i < count; ++i) {
+			Core::StringBuilder name;
+			Core::Format(&name, "f{0}.txt", (int64)i);
+			FS::File file = FS::File((folder / name.View()).CStr(), "wb");
+		}
+		Core::HashMap<Core::String, bool> seen;
+		bool overflowed = false;
+		FS::Change change;
+		while (watcher.Next(change, 1000)) {
+			if (change.kind == FS::ChangeKind::Overflow) overflowed = true;
+			else if (change.kind == FS::ChangeKind::Added) seen.Insert(change.path, true);
+		}
+		assert_true(watcher.TimedOut(), "it ends quiet, not failed");
+		assert_true(overflowed || seen.Count() == (int64)count, "every file seen, or an Overflow said some were not");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("folder_removed")]
+	public static void TestFolderRemoved() {
+		FS::Path parent = WatchScratch("removed");
+		FS::Path folder = parent / "watched";
+		FS::MakeDirectory(folder.CStr());
+		WriteWatchedFile(folder / "x.txt", "x");
+		FS::Watcher watcher = FS::Watcher(folder.CStr());
+		assert_true(FS::RemoveAll(folder.CStr()) == 2, "the watched folder can be removed while it is watched");
+		FS::Change change;
+		bool failed = false;
+		const int64 start = clock_now_ns();
+		while (!failed && (clock_now_ns() - start) / 1000000 < (int64)kWatchWaitMs)
+			failed = !watcher.Next(change, 500) && !watcher.TimedOut();
+		assert_true(failed && watcher.Error()[0] != 0, "then watching fails, with why");
+		watcher.Close();
+		assert_true(!FS::IsDirectory(folder.CStr()), "and the folder is gone once the watcher closes");
+		FS::RemoveAll(parent.CStr());
+	}
+
+	[test("failures")]
+	public static void TestFailures() {
+		FS::Watcher missing = FS::Watcher("C:/c4-no-such-folder/anywhere");
+		assert_true(!missing.IsOpen() && missing.Error()[0] != 0, "no such folder");
+		FS::Watcher closed;
+		FS::Change change;
+		assert_true(!closed.Next(change, 0) && !closed.TimedOut() && closed.Error()[0] != 0, "a closed watcher");
+		FS::Path folder = WatchScratch("moved");
+		FS::Watcher first = FS::Watcher(folder.CStr());
+		FS::Watcher moved = take(first);
+		assert_true(!first.IsOpen() && moved.IsOpen(), "moved with take()");
+		WriteWatchedFile(folder / "m.txt", "x");
+		assert_true(WaitForChange(moved, FS::ChangeKind::Added, "m.txt", ""), "the moved watcher watches");
+		moved.Close();
+		moved.Close();
+		FS::RemoveAll(folder.CStr());
+	}
+}

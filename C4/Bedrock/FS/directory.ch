@@ -53,8 +53,9 @@ namespace FS
 	// The directory and every missing parent; true when `path` is a directory at the end.
 	bool MakeDirectories(const char* path);
 	bool RemoveEmptyDirectory(const char* path);
-	// A file, a link (not what it points to), or a directory with everything in it. The number of entries
-	// removed, 0 when there is nothing at `path`; -1 when one could not be (what could be removed is gone).
+	// A file, a link (not what it points to), or a directory with everything in it, read-only files too. The
+	// number of entries removed, 0 when there is nothing at `path`; -1 when one could not be (what could be
+	// removed is gone).
 	int64 RemoveAll(const char* path);
 	// Moves a file or directory; a file already at `to` is replaced.
 	bool Rename(const char* from, const char* to);

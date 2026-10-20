@@ -1,17 +1,14 @@
 // Directories, rename and the current directory behind the fs_* builtins (Bedrock's FS::Directory and
 // friends). Paths are UTF-8 on every platform; on Windows they go to the wide API (PathRuntimeC.h).
 
+#include "FileSystemRuntimeC.h"
 #include "PathRuntimeC.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Bedrock's FS::EntryKind. A link (a symbolic link or a junction) is never followed.
-enum { kEntryFile = 0, kEntryDirectory = 1, kEntryLink = 2 };
-
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include "FileSystem/FileSystemWin32.h"
 
 wchar_t* c4_utf8_to_wide(const char* text)
 {
@@ -48,16 +45,15 @@ int32_t c4_fs_is_directory(const char* path)
 	return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
 }
 
+// A symbolic link or a junction; any other reparse point is the file or folder it stands for (BUG-276).
 int32_t c4_fs_is_link(const char* path)
 {
 	DWORD attributes = Attributes(path);
-	return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
-}
-
-static int32_t KindOf(DWORD attributes)
-{
-	if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return kEntryLink;
-	return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? kEntryDirectory : kEntryFile;
+	if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
+	wchar_t* wide = c4_utf8_to_wide(path);
+	const DWORD tag = wide && !wcspbrk(wide, L"*?") ? c4_fs_win32_reparse_tag(wide) : 0;
+	free(wide);
+	return c4_fs_win32_kind(attributes, tag) == kEntryLink ? 1 : 0;
 }
 
 int32_t c4_fs_make_directory(const char* path)
@@ -158,7 +154,7 @@ int32_t c4_fs_directory_next(void* handle, char* name, int32_t cap, int32_t* kin
 		int bytes = WideCharToMultiByte(CP_UTF8, 0, dir->data.cFileName, -1, NULL, 0, NULL, NULL);
 		if (bytes <= 0 || bytes > cap) return -1;
 		WideCharToMultiByte(CP_UTF8, 0, dir->data.cFileName, -1, name, cap, NULL, NULL);
-		if (kind) *kind = KindOf(dir->data.dwFileAttributes);
+		if (kind) *kind = c4_fs_win32_kind(dir->data.dwFileAttributes, dir->data.dwReserved0);
 		dir->pending = 0;
 		return bytes - 1;
 	}
