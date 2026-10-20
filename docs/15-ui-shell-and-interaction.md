@@ -150,4 +150,4 @@ Codicons (vendored) for UI glyphs. File-type icons: a VS-like set in `shared/ui-
 5. Git activity: graph + commit details.
 6. Profiler: timeline in thread view and by-task view.
 
-Each gets a static HTML mock against `theme.css` (no server needed) and screenshots at 1920x1080, 1366x768, 390x844 - the first frontend deliverable (`docs/18`, M1).
+Each gets a static HTML mock against `theme.css` (no server needed) and screenshots at 1920x1080, 1366x768, 390x844 - the first frontend deliverable (`docs/18`, M0). Built: `frontend/mocks/` (open `index.html`; screenshots in `frontend/mocks/screenshots/`).

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED M0 review mocks</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<script defer src="js/mock.js"></script>
+	<style>
+		html, body { overflow: auto; height: auto; }
+		.page { max-width: 1500px; margin: 0 auto; padding: var(--space-7); }
+		h1 { font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); margin: 0 0 var(--space-2); }
+		.intro { color: var(--text-1); margin: 0 0 var(--space-7); max-width: 980px; }
+		.screen { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: var(--space-6); padding: var(--space-6) 0; border-top: var(--border-width) solid var(--border-0); }
+		.screen h2 { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin: 0 0 var(--space-3); }
+		.screen p { color: var(--text-1); margin: 0 0 var(--space-4); font-size: var(--font-size-sm); }
+		.links { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+		.links a { display: inline-flex; align-items: center; gap: var(--space-2); height: 24px; padding: 0 var(--space-4); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); color: var(--text-0); font-size: var(--font-size-sm); background: var(--bg-3); }
+		.thumbs { display: flex; gap: var(--space-4); align-items: flex-start; overflow: hidden; }
+		.thumbs a { display: block; flex: none; border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); overflow: hidden; }
+		.thumbs img { display: block; height: 190px; width: auto; }
+		.thumbs .cap { font-size: var(--font-size-xs); color: var(--text-2); padding: var(--space-1) var(--space-3); background: var(--bg-1); }
+		.q { margin: 0; padding-left: var(--space-6); color: var(--text-1); line-height: 1.7; }
+		.q b { color: var(--text-0); font-weight: var(--font-weight-semibold); }
+		@media (max-width: 1099px) { .screen { grid-template-columns: minmax(0, 1fr); } .thumbs { overflow-x: auto; } .page { padding: var(--space-5); } }
+	</style>
+</head>
+<body>
+<div class="page">
+	<h1>IED M0 review mocks</h1>
+	<p class="intro">Static HTML against <span class="mono">frontend/css/theme.css</span>; no server, no framework. Open any page straight from disk and resize the window: below 720 px each page switches to its phone layout. Content is real Claymore/C4 code and a realistic "Port logging" agent run. Screenshots at 1920x1080, 1366x768 and 390x844 are in <span class="mono">screenshots/</span>.</p>
+
+	<section class="screen">
+		<div><h2>0. Theme tokens</h2><p>Every token with its live value: ramp, accents, both syntax palettes on the same code, ANSI, identity colors, status bar states.</p><div class="links"><a href="00-tokens.html">Open</a></div></div>
+		<div class="thumbs"><a href="screenshots/00-tokens-1920x1080.png"><img src="screenshots/00-tokens-1920x1080.png" alt="tokens"><div class="cap">1920</div></a></div>
+	</section>
+	<section class="screen">
+		<div><h2>1. Editor activity</h2><p>Solution Explorer, two documents (bound header/source split), map-mode scrollbar, CodeLens, ghost text, squiggles, Output (source dropdown) + Error List, terminal dock open. Phone: read-mostly code with build/run bar.</p><div class="links"><a href="01-editor.html">Open</a><a href="01-editor.html?syntax=grayscale">Grayscale syntax</a></div></div>
+		<div class="thumbs"><a href="screenshots/01-editor-1920x1080.png"><img src="screenshots/01-editor-1920x1080.png" alt=""><div class="cap">1920</div></a><a href="screenshots/01-editor-1366x768.png"><img src="screenshots/01-editor-1366x768.png" alt=""><div class="cap">1366</div></a><a href="screenshots/01-editor-390x844.png"><img src="screenshots/01-editor-390x844.png" alt=""><div class="cap">390</div></a></div>
+	</section>
+	<section class="screen">
+		<div><h2>2. Chat activity mid-run</h2><p>Tabs with state glyphs, thinking, tool cards, sub-agents, harness notes, an injected steer, the approval card, queued message, selectors, telemetry bar, and the breakdown panel (context, tasks, files, sub-agents, scratchpad).</p><div class="links"><a href="02-chat.html">Open</a></div></div>
+		<div class="thumbs"><a href="screenshots/02-chat-1920x1080.png"><img src="screenshots/02-chat-1920x1080.png" alt=""><div class="cap">1920</div></a><a href="screenshots/02-chat-1366x768.png"><img src="screenshots/02-chat-1366x768.png" alt=""><div class="cap">1366</div></a><a href="screenshots/02-chat-390x844.png"><img src="screenshots/02-chat-390x844.png" alt=""><div class="cap">390</div></a></div>
+	</section>
+	<section class="screen">
+		<div><h2>3. Diff review from a notification</h2><p>Phone: notification center &rarr; changes list &rarr; inline diff with the pending approval. Desktop: the same review as a document beside the notification center.</p><div class="links"><a href="03-diff-review.html">Desktop</a><a href="03-diff-review.html?step=notification">Phone 1</a><a href="03-diff-review.html?step=changes">Phone 2</a><a href="03-diff-review.html?step=diff">Phone 3</a></div></div>
+		<div class="thumbs"><a href="screenshots/03-diff-review-1920x1080.png"><img src="screenshots/03-diff-review-1920x1080.png" alt=""><div class="cap">1920</div></a><a href="screenshots/03-diff-review-1-notification-390x844.png"><img src="screenshots/03-diff-review-1-notification-390x844.png" alt=""><div class="cap">phone 1</div></a><a href="screenshots/03-diff-review-2-changes-390x844.png"><img src="screenshots/03-diff-review-2-changes-390x844.png" alt=""><div class="cap">phone 2</div></a><a href="screenshots/03-diff-review-3-diff-390x844.png"><img src="screenshots/03-diff-review-3-diff-390x844.png" alt=""><div class="cap">phone 3</div></a></div>
+	</section>
+	<section class="screen">
+		<div><h2>4. Settings: Model Groups</h2><p>VS Options-style tree, tier selector, roles grid with privacy badges and live model status, a validation warning, the selected role's editor and a routing preview.</p><div class="links"><a href="04-settings-model-groups.html">Open</a></div></div>
+		<div class="thumbs"><a href="screenshots/04-settings-model-groups-1920x1080.png"><img src="screenshots/04-settings-model-groups-1920x1080.png" alt=""><div class="cap">1920</div></a><a href="screenshots/04-settings-model-groups-1366x768.png"><img src="screenshots/04-settings-model-groups-1366x768.png" alt=""><div class="cap">1366</div></a><a href="screenshots/04-settings-model-groups-390x844.png"><img src="screenshots/04-settings-model-groups-390x844.png" alt=""><div class="cap">390</div></a></div>
+	</section>
+	<section class="screen">
+		<div><h2>5. Git activity</h2><p>Fork-style refs pane (branches, remotes, tags, stashes, agent worktrees), commit graph with AI co-authored markers, commit details and diff.</p><div class="links"><a href="05-git.html">Open</a></div></div>
+		<div class="thumbs"><a href="screenshots/05-git-1920x1080.png"><img src="screenshots/05-git-1920x1080.png" alt=""><div class="cap">1920</div></a><a href="screenshots/05-git-1366x768.png"><img src="screenshots/05-git-1366x768.png" alt=""><div class="cap">1366</div></a><a href="screenshots/05-git-390x844.png"><img src="screenshots/05-git-390x844.png" alt=""><div class="cap">390</div></a></div>
+	</section>
+	<section class="screen">
+		<div><h2>6. Profiler timeline</h2><p>Thread view: renamed worker segments tinted with the task name at the boundary. By-task view: lanes rebuilt per task, a strip under each slice shows which OS thread ran it. GC pause band, GPU queues with submit links, messages, plot, statistics.</p><div class="links"><a href="06-profiler.html?view=threads">Threads</a><a href="06-profiler.html?view=tasks">Tasks</a></div></div>
+		<div class="thumbs"><a href="screenshots/06-profiler-threads-1920x1080.png"><img src="screenshots/06-profiler-threads-1920x1080.png" alt=""><div class="cap">threads 1920</div></a><a href="screenshots/06-profiler-tasks-1920x1080.png"><img src="screenshots/06-profiler-tasks-1920x1080.png" alt=""><div class="cap">tasks 1920</div></a><a href="screenshots/06-profiler-threads-390x844.png"><img src="screenshots/06-profiler-threads-390x844.png" alt=""><div class="cap">threads 390</div></a></div>
+	</section>
+
+	<section class="screen">
+		<div><h2>Owner sign-off questions</h2><p>Defaults chosen in these mocks that are the owner's call.</p></div>
+		<ol class="q">
+			<li><b>Primary buttons are inverted grayscale</b> (light fill, dark text), not blue. VS uses blue.</li>
+			<li><b>Start button is grayscale</b>; VS colors the play glyph green.</li>
+			<li><b>Status bar states are tints</b> of the dark bar (blue building, rose debugging, red failed), not solid VS blue/orange.</li>
+			<li><b>Identity colors</b>: file-type icons, git lanes and profiler threads use the restrained <span class="mono">--filetype-*</span> and <span class="mono">--series-*</span> hues.</li>
+			<li><b>Phone editor wraps long lines</b> (read-mostly view); desktop never wraps by default.</li>
+			<li><b>Code uses the Visual Assist X palette</b> (owner, 2026-10-19); Grayscale stays available per user.</li>
+		</ol>
+	</section>
+</div>
+</body>
+</html>

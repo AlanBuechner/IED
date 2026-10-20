@@ -27,9 +27,9 @@ The bottom sidebar icon opens Settings as a **docked view** (not a modal), style
 
 ## Theme
 
-**Dark only.** Grayscale base; color only where it carries meaning; every color is a token in `frontend/css/theme.css`. Plugins must use tokens - raw hex values in plugin CSS or color contributions are rejected at validation (the `semanticTokenColors` contribution maps token types to `--syntax-*` names, never to colors).
+**Dark only.** Grayscale base; color only where it carries meaning; every color is a token in `frontend/css/theme.css`, which is authoritative for the values below. Plugins must use tokens - raw hex values in plugin CSS or color contributions are rejected at validation (the `semanticTokenColors` contribution maps token types to `--syntax-*` names, never to colors). The values were checked on the M0 static mocks (`frontend/mocks/`, screenshots at 1920x1080, 1366x768 and 390x844); `frontend/mocks/00-tokens.html` shows every token with its live value.
 
-### Grayscale ramp (proposed values; tune on the M0 mocks)
+### Grayscale ramp
 
 | Token | Value | Use |
 |---|---|---|
@@ -46,10 +46,11 @@ The bottom sidebar icon opens Settings as a **docked view** (not a modal), style
 | `--text-3` | `#565656` | disabled |
 | `--focus` | `#d0d0d0` | focus ring (grayscale; 1 px) |
 | `--selection` | `#3a3a3a` | text selection background |
+| `--selection-active` | `#474747` | selected row in the focused list |
 
 ### Semantic accents (the only UI colors)
 
-| Token | Value (proposed) | Meaning |
+| Token | Value | Meaning |
 |---|---|---|
 | `--accent-saved` | `#5aa65a` | changed and saved (margin), success, passed tests |
 | `--accent-unsaved` | `#d4b13c` | unsaved changes (margin, tab dot) |
@@ -59,15 +60,52 @@ The bottom sidebar icon opens Settings as a **docked view** (not a modal), style
 | `--accent-ai` | `#9a85cf` | AI-originated content (AI edit markers, thinking headers), used sparingly |
 | `--accent-debug` | `#c0679a` | debugging state (status bar while debugging, current-statement marker) |
 
-Accents are used at low area (thin bars, dots, icons, 1-2 px markers), never as large fills, so the UI reads grayscale with meaning "delicately" highlighted as the plan asks.
+Accents are used at low area (thin bars, dots, icons, 1-2 px markers), never as large fills, so the UI reads grayscale with meaning "delicately" highlighted as the plan asks. Derived backgrounds (`--tint-*`, diff backgrounds, status bar states) are `color-mix()` tints of the accents, never new hues. Primary buttons are inverted grayscale (`--inverse-bg` / `--inverse-text`), not blue.
 
 ### Syntax tokens
 
-Syntax colors carry meaning (token kinds), so they are a sanctioned palette - restrained and owner-selectable (`docs/99` O4):
+Syntax colors carry meaning (token kinds), so they are a sanctioned palette (`docs/99` #16). Every kind has a color token plus `-weight` and `-style` companions (`--syntax-keyword`, `--syntax-keyword-weight`, `--syntax-keyword-style`, ...), and `--syntax-plain` colors untokenized text.
 
-`--syntax-keyword`, `--syntax-control`, `--syntax-type`, `--syntax-function`, `--syntax-variable`, `--syntax-parameter`, `--syntax-member`, `--syntax-constant`, `--syntax-namespace`, `--syntax-macro`, `--syntax-string`, `--syntax-number`, `--syntax-comment`, `--syntax-operator`, `--syntax-invalid`.
+Two palettes ship:
 
-Two palettes ship: **Muted** (desaturated hues in the Visual Assist tradition, which C4Assist users know) and **Grayscale** (luminance, weight and italics only). Language plugins map their semantic token legend onto these names (C4 example in `shared/host-api/examples/c4-plugin/ied-plugin.json`). Monaco's theme, the xterm/ANSI palette and the Output window are generated from the same tokens, so editor, terminal and chat cannot drift.
+- **Visual Assist X** - the default (owner decision, 2026-10-19). Values are C4Assist's `c4-visual-assist-dark` theme (`C4/C4Assist/plugin/echo-plugin.json`), so C4 code looks the way it did with C4Assist:
+
+| Token | Value | Kind |
+|---|---|---|
+| `--syntax-keyword` | `#569cd6` | keywords and built-in types (`int32`, `string`) |
+| `--syntax-control` | `#d8a0df` | control flow (`if`, `for`, `return`) |
+| `--syntax-type` | `#ffd700` | user types (class, struct, enum, type parameter) |
+| `--syntax-function` | `#ff8000` | functions and methods |
+| `--syntax-variable` | `#bdb76b` | variables |
+| `--syntax-parameter` | `#bdb76b` | parameters |
+| `--syntax-member` | `#bdb76b` | fields and properties |
+| `--syntax-constant` | `#b8d7a3` | enum members, constants (VS dark value; C4Assist leaves it to the base theme) |
+| `--syntax-namespace` | `#b5cea8` | namespaces |
+| `--syntax-macro` | `#bd63c5` | macros, attributes, `include` |
+| `--syntax-string` | `#d69d85` | strings |
+| `--syntax-number` | `#b5cea8` | numbers |
+| `--syntax-comment` | `#57a64a` | comments |
+| `--syntax-operator`, `--syntax-plain` | `#b4b4b4` | operators, plain text |
+| `--syntax-invalid` | `var(--accent-error)` | invalid tokens |
+
+- **Grayscale** - luminance, weight and italics only; a per-user choice (`data-syntax="grayscale"` on the root or on any subtree).
+
+Language plugins map their semantic token legend onto these names (C4 example in `shared/host-api/examples/c4-plugin/ied-plugin.json`). Monaco's theme, the xterm/ANSI palette and the Output window are generated from the same tokens, so editor, terminal and chat cannot drift. Tokens a generator reads (syntax, ANSI, terminal) are plain hex or `var()` of plain hex; `color-mix()` is only for CSS-only tints.
+
+### Other token groups
+
+`frontend/css/theme.css` holds these too; the names are the contract, values are tuned there.
+
+| Group | Tokens | Notes |
+|---|---|---|
+| Editor surfaces and markers | `--editor-bg`, `--gutter-bg`, `--line-number(-active)`, `--current-line(-border)`, `--indent-guide(-active)`, `--ref-highlight`, `--find-match(-border)`, `--ghost-text`, `--squiggle-error/warn/info/spell`, `--marker-saved/unsaved/ai/breakpoint/current` | breakpoints use `--accent-error` (VS convention), the current statement `--accent-debug`, AI-edited lines `--accent-ai` |
+| Diff | `--diff-add-bg`, `--diff-del-bg`, `--diff-add-word`, `--diff-del-word`, `--diff-add-gutter`, `--diff-del-gutter`, `--diff-filler` | tints of saved and error |
+| Terminal and Output | `--ansi-*` (16 colors), `--terminal-bg`, `--terminal-fg`, `--terminal-cursor` | red/green/yellow/blue are the accents; magenta and cyan are the only extra hues |
+| Identity | `--filetype-source/header/data/doc/script/shader/media/folder/project`, `--series-1` .. `--series-8` | meaning = which thing (file type, git lane, profiler thread, chart series); small areas only |
+| Profiler | `--prof-zone-0..3` (grayscale by depth), `--prof-zone-border`, `--prof-rename-tint-a/b`, `--prof-rename-edge`, `--prof-frame-bar/over/spike`, `--prof-budget-line`, `--prof-selection`, `--prof-gc` | renamed thread segments are a neutral tint with the name at the boundary |
+| Status bar | `--status-idle-bg`, `--status-building-bg`, `--status-debugging-bg`, `--status-failed-bg` | tints of the dark bar (F-SHL-6) |
+| Surfaces | `--veil`, `--scroll-thumb(-hover)`, `--map-viewport`, `--inverse-bg`, `--inverse-text`, `--shadow-popup`, `--scrim`, `--link` | |
+| Type, spacing, metrics | `--font-ui`, `--font-mono`, `--font-size-xs/sm/ui/lg/xl/code`, `--line-height-code`, `--space-1..8`, `--radius-1..3`, `--row-h`, `--tab-h`, `--sidebar-w`, `--menubar-h`, `--toolbar-h`, `--statusbar-h`, `--panel-header-h`, `--input-h`, `--icon-size`, `--motion-fast/normal` | one `max-width: 719px` block overrides sizes for phones |
 
 ### Typography and density
 
@@ -81,5 +119,5 @@ Thin left activity sidebar; menu bar and project toolbar on top; VS-shaped edito
 
 ## Open items
 
-- Final hex values and the two syntax palettes are tuned on the M0 static mocks with screenshots at three viewports.
+- Owner sign-off on the M0 mocks (`frontend/mocks/index.html` lists the open look questions: inverted grayscale primary buttons, grayscale Start button, tinted status bar states, identity colors, wrapped lines in the phone editor). Ramp and accent values held through the mock review; the syntax palette is decided (Visual Assist X).
 - Signature "explosion" identity moment (`docs/99` O9).

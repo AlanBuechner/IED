@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>IED mock 0 - Theme tokens</title>
+	<link rel="stylesheet" href="../css/theme.css">
+	<link rel="stylesheet" href="css/codicons.css">
+	<link rel="stylesheet" href="css/shell.css">
+	<link rel="stylesheet" href="css/code.css">
+	<script defer src="js/mock.js"></script>
+	<style>
+		html, body { overflow: auto; height: auto; }
+		body { background: var(--bg-0); }
+		.board { max-width: 1840px; margin: 0 auto; padding: var(--space-7); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-7); }
+		.board h1 { grid-column: 1 / -1; font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); margin: 0; }
+		.board h1 .muted { font-size: var(--font-size-ui); font-weight: var(--font-weight-normal); margin-left: var(--space-4); }
+		.card { background: var(--bg-1); border: var(--border-width) solid var(--border-0); border-radius: var(--radius-3); padding: var(--space-5); min-width: 0; }
+		.card.full { grid-column: 1 / -1; }
+		.card h2 { font-size: var(--font-size-ui); font-weight: var(--font-weight-semibold); margin: 0 0 var(--space-4); display: flex; gap: var(--space-4); align-items: baseline; }
+		.card h2 .muted { font-weight: var(--font-weight-normal); font-size: var(--font-size-sm); }
+		.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-3); }
+		.sw-item { display: grid; grid-template-columns: 34px 1fr; gap: 0 var(--space-4); align-items: center; font-size: var(--font-size-sm); }
+		.sw-item .chipc { grid-row: span 2; width: 34px; height: 34px; border-radius: var(--radius-2); border: var(--border-width) solid var(--border-1); }
+		.sw-item .tn { font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--text-0); }
+		.sw-item .tv { font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--text-2); }
+		.sw-item .use { grid-column: 2; font-size: var(--font-size-xs); color: var(--text-1); }
+		.pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+		.pair .code { border: var(--border-width) solid var(--border-0); border-radius: var(--radius-2); padding: var(--space-2) 0; }
+		.pair .cap { font-size: var(--font-size-sm); color: var(--text-1); margin-bottom: var(--space-2); }
+		.ansi { display: grid; grid-template-columns: repeat(8, 1fr); gap: var(--space-2); font-family: var(--font-mono); font-size: var(--font-size-sm); }
+		.ansi span { background: var(--terminal-bg); border: var(--border-width) solid var(--border-0); border-radius: var(--radius-1); padding: var(--space-2) var(--space-3); }
+		.states .statusbar { height: var(--statusbar-h); margin-bottom: var(--space-3); border: var(--border-width) solid var(--border-0); }
+		.row-demo { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; margin-bottom: var(--space-4); }
+		.icons { display: flex; flex-wrap: wrap; gap: var(--space-6); font-size: var(--font-size-sm); }
+		.icons span { display: inline-flex; align-items: center; gap: var(--space-3); }
+		.rules { margin: 0; padding-left: var(--space-6); color: var(--text-1); font-size: var(--font-size-sm); line-height: 1.6; }
+		.rules b { color: var(--text-0); font-weight: var(--font-weight-semibold); }
+		@media (max-width: 1099px) { .board { grid-template-columns: minmax(0, 1fr); padding: var(--space-5); } .pair { grid-template-columns: minmax(0, 1fr); } }
+	</style>
+</head>
+<body>
+<div class="board">
+	<h1>IED theme tokens <span class="muted">frontend/css/theme.css &middot; values below are read live from the stylesheet</span></h1>
+
+	<section class="card">
+		<h2>Grayscale ramp <span class="muted">the whole UI is built from these</span></h2>
+		<div class="swatches" data-tokens="bg-0:app chrome, sidebar|bg-1:panels, tool windows|bg-2:editor, documents|bg-3:hover, inputs|bg-4:inactive selection|border-0:separators|border-1:input borders|text-0:primary text|text-1:secondary text|text-2:tertiary, line numbers|text-3:disabled|focus:focus ring|selection:text selection|selection-active:selected row"></div>
+	</section>
+
+	<section class="card">
+		<h2>Semantic accents <span class="muted">the only UI colors; thin bars, dots, icons, never large fills</span></h2>
+		<div class="swatches" data-tokens="accent-saved:changed and saved, success|accent-unsaved:unsaved changes|accent-error:errors, failures|accent-warn:warnings, needs attention|accent-info:info, links, building|accent-ai:AI-originated, sparingly|accent-debug:debugging state"></div>
+		<div style="height:12px"></div>
+		<div class="row-demo">
+			<span class="chip ok"><i class="ci ci-pass"></i>passed</span>
+			<span class="chip warn"><i class="ci ci-warning"></i>2 warnings</span>
+			<span class="chip err"><i class="ci ci-error"></i>1 error</span>
+			<span class="chip info"><i class="ci ci-info"></i>building</span>
+			<span class="chip ai"><i class="ci ci-sparkle"></i>agent</span>
+			<span class="dot unsaved"></span><span class="muted">unsaved</span>
+			<span class="btn primary"><i class="ci ci-check"></i>Primary (inverted, no hue)</span>
+			<span class="btn">Secondary</span>
+			<span class="btn danger"><i class="ci ci-trash"></i>Destructive</span>
+		</div>
+	</section>
+
+	<section class="card full">
+		<h2>Syntax palettes <span class="muted">left: Visual Assist X (default, C4Assist values) &middot; right: Grayscale (luminance, weight, italics)</span></h2>
+		<div class="pair">
+			<div><div class="cap">Visual Assist X</div><div class="code" data-first="27" data-saved="31" data-unsaved="32">
+<pre>
+	`com:// Ring&lt;T&gt; overwrites the oldest record when full`
+	[`mac:operator`(`str:"create"`)] `kw:public` `kw:void` `fn:Init`(`kw:int64` `par:capacity`) { `mem:m_Records`.`fn:Reserve`(`par:capacity`); }
+	`kw:void` `ty:RingSink`::`fn:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`)
+	{
+		`ctl:if` (`par:record`.`mem:level` `op:&lt;` `ty:LogLevel`.`con:Warn` `op:&amp;&amp;` `var:s_Quiet`) `ctl:return`;
+		`mem:m_Dropped` `op:+=` `mem:m_Records`.`fn:Overwrote`() ? `num:1` : `num:0`;
+		`ns:Core`::`fn:Format`(`str:"[{}] {}"`, `fn:LevelName`(`par:record`.`mem:level`), `par:record`.`mem sq-err:categry`);
+	}
+</pre>
+			</div></div>
+			<div data-syntax="grayscale"><div class="cap">Grayscale</div><div class="code" data-first="27" data-saved="31" data-unsaved="32">
+<pre>
+	`com:// Ring&lt;T&gt; overwrites the oldest record when full`
+	[`mac:operator`(`str:"create"`)] `kw:public` `kw:void` `fn:Init`(`kw:int64` `par:capacity`) { `mem:m_Records`.`fn:Reserve`(`par:capacity`); }
+	`kw:void` `ty:RingSink`::`fn:Write`(`kw:const` `ty:LogRecord`&amp; `par:record`)
+	{
+		`ctl:if` (`par:record`.`mem:level` `op:&lt;` `ty:LogLevel`.`con:Warn` `op:&amp;&amp;` `var:s_Quiet`) `ctl:return`;
+		`mem:m_Dropped` `op:+=` `mem:m_Records`.`fn:Overwrote`() ? `num:1` : `num:0`;
+		`ns:Core`::`fn:Format`(`str:"[{}] {}"`, `fn:LevelName`(`par:record`.`mem:level`), `par:record`.`mem sq-err:categry`);
+	}
+</pre>
+			</div></div>
+		</div>
+		<div style="height:12px"></div>
+		<div class="swatches" data-tokens="syntax-keyword:keyword, built-in type|syntax-control:control flow|syntax-type:user type|syntax-function:function, method|syntax-variable:variable|syntax-parameter:parameter|syntax-member:field, property|syntax-constant:enum member, constant|syntax-namespace:namespace|syntax-macro:macro, attribute|syntax-string:string|syntax-number:number|syntax-comment:comment|syntax-operator:operator|syntax-plain:plain text"></div>
+	</section>
+
+	<section class="card">
+		<h2>Terminal and Output ANSI <span class="muted">generated into xterm and the Output window</span></h2>
+		<div class="ansi">
+			<span class="a-black">black</span><span class="a-red">red</span><span class="a-green">green</span><span class="a-yellow">yellow</span><span class="a-blue">blue</span><span class="a-magenta">magenta</span><span class="a-cyan">cyan</span><span class="a-white">white</span>
+			<span class="a-gray">br.black</span><span class="a-bred">br.red</span><span class="a-bgreen">br.green</span><span class="a-byellow">br.yellow</span><span class="a-bblue">br.blue</span><span class="a-bmagenta">br.magenta</span><span class="a-bcyan">br.cyan</span><span class="a-bwhite">br.white</span>
+		</div>
+	</section>
+
+	<section class="card">
+		<h2>Identity colors <span class="muted">meaning = which thing (file type, branch, thread)</span></h2>
+		<div class="icons">
+			<span><i class="ci ci-file-code ft-source"></i>.cf source</span>
+			<span><i class="ci ci-file-code ft-header"></i>.ch header</span>
+			<span><i class="ci ci-json ft-data"></i>.json</span>
+			<span><i class="ci ci-markdown ft-doc"></i>.md</span>
+			<span><i class="ci ci-python ft-script"></i>.py / .bat</span>
+			<span><i class="ci ci-symbol-color ft-shader"></i>.hlsl</span>
+			<span><i class="ci ci-file-media ft-media"></i>image</span>
+			<span><i class="ci ci-folder ft-folder"></i>folder</span>
+			<span><i class="ci ci-project ft-project"></i>project</span>
+		</div>
+		<div style="height:12px"></div>
+		<div class="swatches" data-tokens="series-1:lane / thread 1|series-2:lane / thread 2|series-3:lane / thread 3|series-4:series 4|series-5:series 5|series-6:series 6|series-7:series 7|series-8:series 8"></div>
+	</section>
+
+	<section class="card states">
+		<h2>Status bar states <span class="muted">idle gray, building blue, debugging accent, failed red</span></h2>
+		<footer class="statusbar"><span class="st">Ready</span><span class="st"><i class="ci ci-pass c-saved"></i>Build succeeded</span><span class="st grow"></span><span class="st">Ln 25, Col 17</span></footer>
+		<footer class="statusbar" data-state="building"><span class="st"><i class="ci ci-loading c-info"></i>Building Game (Development)... 7/12</span><span class="st grow"></span><span class="st">Ln 25, Col 17</span></footer>
+		<footer class="statusbar" data-state="debugging"><span class="st"><i class="ci ci-debug-alt c-debug"></i>Debugging Game.exe &middot; paused at Log.cf:37</span><span class="st grow"></span><span class="st">Ln 37, Col 3</span></footer>
+		<footer class="statusbar" data-state="failed"><span class="st"><i class="ci ci-error c-error"></i>Build failed &middot; 1 error</span><span class="st grow"></span><span class="st">Ln 32, Col 46</span></footer>
+	</section>
+
+	<section class="card">
+		<h2>Type, spacing, density</h2>
+		<div class="swatches" data-tokens="font-size-ui:UI text (15 px on phone)|font-size-code:code|row-h:list rows (40 px on phone)|tab-h:document tabs|sidebar-w:activity sidebar|statusbar-h:status bar|radius-2:default radius|space-4:base spacing" data-plain></div>
+		<ul class="rules">
+			<li><b>Dark only</b>; the base is the grayscale ramp, hue only where it carries meaning.</li>
+			<li><b>Plugins</b> use these tokens; raw colors in plugin CSS are rejected at validation.</li>
+			<li><b>Shadows</b> only on menus and popups; 1 px borders; 2-4 px radii; minimal motion.</li>
+		</ul>
+	</section>
+</div>
+<script>
+	(window.Mock = window.Mock || { hooks: [] }).hooks.push(() => {
+		const root = getComputedStyle(document.documentElement);
+		for (const box of document.querySelectorAll("[data-tokens]")) {
+			const plain = box.hasAttribute("data-plain");
+			box.innerHTML = box.dataset.tokens.split("|").map((entry) => {
+				const [name, use] = entry.split(":");
+				const value = root.getPropertyValue("--" + name).trim();
+				const chip = plain ? `<span class="chipc" style="display:grid;place-items:center;font-size:11px;color:var(--text-1)">${value}</span>` : `<span class="chipc" style="background:var(--${name})"></span>`;
+				return `<div class="sw-item">${chip}<span class="tn">--${name}</span><span class="tv">${plain ? use : value}</span>${plain ? "" : `<span class="use">${use}</span>`}</div>`;
+			}).join("");
+		}
+	});
+</script>
+</body>
+</html>

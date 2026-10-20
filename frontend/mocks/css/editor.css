@@ -21,7 +21,8 @@
 .bottom-dock { height: clamp(150px, 26vh, 300px); display: flex; flex: none; min-height: 0; }
 .bottom-dock .tw-group.out { flex: 56 1 0; }
 .bottom-dock .tw-group.err { flex: 44 1 0; }
-.terminal-dock .term-body { height: clamp(76px, 13vh, 152px); }
+.terminal-dock { --term-lines: 8; }
+@media (max-height: 900px) { .terminal-dock { --term-lines: 4; } }
 
 .out-body {
 	flex: 1;

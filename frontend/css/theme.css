@@ -241,8 +241,9 @@
 	--motion-normal: 140ms;
 }
 
-/* ---------- syntax: Grayscale palette (luminance, weight and italics only) ---------- */
-:root[data-syntax="grayscale"] {
+/* ---------- syntax: Grayscale palette (luminance, weight and italics only) ----------
+	Opt in on the root or on any subtree (custom properties inherit). */
+:root[data-syntax="grayscale"], [data-syntax="grayscale"] {
 	--syntax-keyword: #a3a3a3;
 	--syntax-control: #c6c6c6;
 	--syntax-type: #e2e2e2;

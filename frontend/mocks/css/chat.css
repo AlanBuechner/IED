@@ -8,7 +8,7 @@
 .tab .spin { color: var(--accent-info); width: 13px; height: 13px; }
 
 .transcript { flex: 1; padding: var(--space-5) 0 var(--space-6); }
-.col { max-width: 1000px; margin: 0 auto; padding: 0 var(--space-7); }
+.col { max-width: 1060px; margin: 0 auto; padding: 0 var(--space-7); }
 
 .turn-head { display: flex; align-items: center; gap: var(--space-3); height: 24px; color: var(--text-1); font-size: var(--font-size-sm); }
 .turn-head b { color: var(--text-0); font-weight: var(--font-weight-semibold); }

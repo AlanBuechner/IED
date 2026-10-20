@@ -123,7 +123,7 @@ Today: launch, line breakpoints, thrown/uncaught exception filters, continue/ste
 
 C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (see `shared/host-api/examples/c4-plugin/ied-plugin.json`):
 
-- Language definition + Monarch grammar; semantic token mapping to `--syntax-*` tokens (VAX-style palette as one option).
+- Language definition + Monarch grammar; semantic token mapping to `--syntax-*` tokens (IED's default palette is the Visual Assist X one C4Assist ships, `docs/07`).
 - LSP profile (staged launch, byte positions, integer ids, refetch-on-diagnostics, client-side code-action filtering) and DAP provider.
 - Problem matchers (`c4`, `c4-test`), test provider (`c4-test-json`), Nuke task preset, project templates, header/source pairs.
 - Feature toggles become plugin settings + `when` clauses (no code).
