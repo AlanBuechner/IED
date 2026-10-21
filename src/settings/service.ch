@@ -17,17 +17,25 @@ namespace Ied
 		public void Load();
 		// A workspace opened: its solution tier and topic.
 		public void Opened(Workspace* ws);
+		// A solution's projects were read (again): one project tier per project, and its local plugins' settings.
+		public void SolutionChanged(Workspace* ws);
+		// A workspace's trust changed: its local plugins' settings come or go.
+		public void TrustChanged(Workspace* ws);
 		// A file of a workspace changed on disk (from its watcher): the tier file is read again if it is one.
 		public void WorkspaceFileChanged(Workspace* ws, Core::StringView path);
 		// The app tier file changed on disk.
 		public void AppFileChanged();
-		// The effective value of `key` for `ws` (null: the app tier alone), JSON.
-		public Core::String Effective(Workspace* ws, Core::StringView key);
+		// The effective value of `key` for `ws` (null: the app tier alone) and a project of it (empty: none), JSON.
+		public Core::String Effective(Workspace* ws, Core::StringView project, Core::StringView key);
 
 	private:
+		private SettingsCatalog* CatalogFor(Workspace* ws);
+		private void Rebuild(Workspace* ws);
+		private void Recheck(Workspace* ws);
 		private TierFile* SolutionTier(Workspace* ws) const;
+		private TierFile* ProjectTier(Workspace* ws, Core::StringView project) const;
 		private TierFile* TierFor(Core::StringView tier, const Params& params);
-		private Core::String Snapshot(Workspace* ws);
+		private Core::String Snapshot(Workspace* ws, Core::StringView project);
 		private void Publish(Workspace* ws);
 		private void PublishAll();
 		private Core::String SchemaMethod(Call& call, const Params& params);
@@ -37,11 +45,15 @@ namespace Ied
 		private Core::String Edit(TierFile* file, Core::StringView key, Core::StringView valueJson, const Params& params);
 
 		private Server* server;
-		private SettingsCatalog catalog;
+		private SettingsCatalog catalog;                                // the global plugins' settings: the app tier
+		private Core::HashMap<Core::String, SettingsCatalog*> catalogs;   // wsId -> with its local plugins' settings too
 		private TierFile* app;
 		private Core::HashMap<Core::String, TierFile*> solutions;   // wsId -> its solution tier
+		private Core::HashMap<Core::String, TierFile*> projects;    // "<wsId>/<project>" -> its project tier
 	}
 
 	// "<root>/.ied/solution.json": a workspace's solution tier (a folder workspace's too).
 	const char* kSolutionSettings = ".ied/solution.json";
+	// "<root>/.ied/projects/<Name>.json": a project's tier.
+	const char* kProjectSettings = ".ied/projects/";
 }

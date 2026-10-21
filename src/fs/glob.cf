@@ -1,0 +1,88 @@
+include "glob.ch"
+
+namespace Ied
+{
+	const int64 kMostGlobFiles = 100000;
+
+	static int32 Folded(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static bool IsSeparator(int32 c) { return c == '/' || c == '\\'; }
+
+	static Core::Array<Core::StringView> Segments(Core::StringView text) {
+		Core::Array<Core::StringView> parts;
+		int64 start = 0;
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			if (i < text.ByteLength() && !IsSeparator(text.ByteAt(i))) continue;
+			if (i > start) parts.Push(text.Substring(start, i - start));
+			start = i + 1;
+		}
+		return parts;
+	}
+
+	// One segment against a pattern with '*' and '?': the last '*' is where a mismatch backs up to.
+	static bool SegmentMatch(Core::StringView pattern, Core::StringView text) {
+		int64 p = 0;
+		int64 t = 0;
+		int64 star = -1;
+		int64 resume = 0;
+		while (t < text.ByteLength()) {
+			const int32 c = p < pattern.ByteLength() ? pattern.ByteAt(p) : -1;
+			if (c == '*') {
+				star = p;
+				resume = t;
+				p += 1;
+			}
+			else if (c == '?' || (c >= 0 && Folded(c) == Folded(text.ByteAt(t)))) {
+				p += 1;
+				t += 1;
+			}
+			else if (star >= 0) {
+				p = star + 1;
+				resume += 1;
+				t = resume;
+			}
+			else return false;
+		}
+		while (p < pattern.ByteLength() && pattern.ByteAt(p) == '*') p += 1;
+		return p == pattern.ByteLength();
+	}
+
+	static bool SegmentsMatch(const Core::Array<Core::StringView>& pattern, int64 i, const Core::Array<Core::StringView>& path, int64 j) {
+		if (i == pattern.Count()) return j == path.Count();
+		if (pattern[i] == "**") {
+			for (int64 k = j; k <= path.Count(); ++k)
+				if (SegmentsMatch(pattern, i + 1, path, k)) return true;
+			return false;
+		}
+		return j < path.Count() && SegmentMatch(pattern[i], path[j]) && SegmentsMatch(pattern, i + 1, path, j + 1);
+	}
+
+	bool GlobMatch(Core::StringView pattern, Core::StringView path) { return SegmentsMatch(Segments(pattern), 0, Segments(path), 0); }
+
+	bool IsGlob(Core::StringView pattern) { return pattern.IndexOf('*', 0) >= 0 || pattern.IndexOf('?', 0) >= 0; }
+
+	static void Walk(const FS::Path& folder, Core::StringView relative, Core::StringView pattern, Core::Array<Core::String>& found) {
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			if (found.Count() >= kMostGlobFiles) return;
+			Core::String path = relative.IsEmpty() ? entry.name : (Core::String(relative) + "/") + entry.name.View();
+			if (entry.kind == FS::EntryKind::Directory && entry.name.View() != ".git") Walk(folder / entry.name.View(), path.View(), pattern, found);
+			else if (entry.kind == FS::EntryKind::File && GlobMatch(pattern, path.View())) found.Push(path);
+		}
+	}
+
+	// Only the folder named by the pattern's leading plain segments is searched.
+	Core::Array<Core::String> ExpandGlob(const FS::Path& root, Core::StringView pattern) {
+		Core::Array<Core::StringView> parts = Segments(pattern);
+		Core::StringBuilder prefix;
+		for (int64 i = 0; i + 1 < parts.Count() && !IsGlob(parts[i]) && parts[i] != "**"; ++i) {
+			if (!prefix.IsEmpty()) prefix.AppendByte('/');
+			prefix.Append(parts[i]);
+		}
+		Core::Array<Core::String> found;
+		FS::Path start = prefix.IsEmpty() ? root : root / prefix.View();
+		if (FS::IsDirectory(start.CStr())) Walk(start, prefix.View(), pattern, found);
+		found.Sort();
+		return found;
+	}
+}

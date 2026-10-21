@@ -23,6 +23,19 @@ Fields: `version`, `name`, **`root`** (code root relative to the project file - 
 
 Because `root` is explicit, a solution can keep every `.ied.proj` under `build/ied/` (generated, gitignored) while code folders stay clean. The Solution Explorer shows each project's files from its `root`, grouped by the solution's `groups`. Task grammar and the build-system seam: `docs/06`.
 
+## The server as built (M1)
+
+`src/solutions/` reads a solution, and `src/services/workspaces` opens one:
+
+- **Opening.** `ied path\MyGame.ied.sln`, the control pipe's `open`, or `--workspace` opens a solution as a workspace of kind `solution`, rooted at the file's folder and named after the solution. Opening it again gives the same workspace. A folder opens as kind `folder`, and a file as kind `file` (its folder).
+- **Validation.** The solution and each project file are JSONC, validated against `solution.v1` and `project.v1`.
+- **Projects.** `projects[].file` may be a glob (`*`, `?`, `**`; `src/fs/glob`). An entry that finds no file is a problem unless it is `optional`. Each project's `root` is resolved against its own file, and a root that is not a folder is a problem; so are two projects with one name.
+- **Problems** are listed per file with JSON pointers. A broken project stays listed with its problems.
+- **The model** (`name, file, problems, groups, items, generator, localPlugins, projects: [{name, file, root, kind, problems, data}]`) is in the `ws:<wsId>` snapshot as `solution`.
+- **Live.** When the solution or a project file changes, or a project file appears or goes, the model is read again and `solution.changed {solution}` is published.
+- **The project settings tier** is `.ied/projects/<Name>.json`, one per project (`docs/07`).
+- **Local plugins** (`localPlugins`) load only while the workspace is trusted, and the manifest's id must be the one the solution names (`docs/02`).
+
 ## The `.ied/` folder (at the solution root)
 
 Committed, so deleting generated files never loses configuration ("if we delete the generated files the settings and skills will not be lost" - IDEplan):

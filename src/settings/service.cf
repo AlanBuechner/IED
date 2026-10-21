@@ -5,15 +5,44 @@ namespace Ied
 {
 	static Core::String TopicOf(Workspace* ws) { return ws ? Core::String("settings:") + ws->wsId.View() : Core::String("settings:app"); }
 
+	static Core::String ProjectKey(const Workspace* ws, Core::StringView project) { return (ws->wsId + "/") + project; }
+
 	void Settings::Init(Server* server) {
 		this.server = server;
 		app = new TierFile(Core::StringView("app"), FS::Path(server->config.appDataDir.View()) / "settings.json");
 		Settings* self = this;
-		server->hub.Add(Core::StringView("settings:app"), [self]() -> Core::String { return self->Snapshot(nullptr); });
+		server->hub.Add(Core::StringView("settings:app"), [self]() -> Core::String { return self->Snapshot(nullptr, Core::StringView("")); });
 		server->rpc.Register("settings.schema", [self](Call& call, const Params& params) -> Core::String { return self->SchemaMethod(call, params); });
 		server->rpc.Register("settings.get", [self](Call& call, const Params& params) -> Core::String { return self->GetMethod(call, params); });
 		server->rpc.Register("settings.set", [self](Call& call, const Params& params) -> Core::String { return self->SetMethod(call, params); });
 		server->rpc.Register("settings.reset", [self](Call& call, const Params& params) -> Core::String { return self->ResetMethod(call, params); });
+	}
+
+	// --- Catalogs and tier files ---------------------------------------------------------------------------------------
+
+	// The app tier knows the global plugins' settings; a workspace's tiers also know its loaded local plugins'.
+	SettingsCatalog* Settings::CatalogFor(Workspace* ws) {
+		SettingsCatalog* found = nullptr;
+		if (ws && catalogs.TryGet(ws->wsId, found)) return found;
+		return &catalog;
+	}
+
+	void Settings::Rebuild(Workspace* ws) {
+		SettingsCatalog* built = new SettingsCatalog();
+		Core::Array<Core::String> problems;
+		built->Build(server->plugins->LoadedFor(ws), problems);
+		for (const Core::String& problem : problems) server->Log(problem.View());
+		catalogs.At(ws->wsId) = built;
+	}
+
+	// A workspace's solution and project tiers checked again against its catalog.
+	void Settings::Recheck(Workspace* ws) {
+		SettingsCatalog* known = CatalogFor(ws);
+		TierFile* solution = SolutionTier(ws);
+		if (solution) solution->Reload(*known, true);
+		Core::String prefix = ws->wsId + "/";
+		for (const Core::KeyValue<Core::String, TierFile*>& entry : projects)
+			if (entry.key.View().StartsWith(prefix.View())) entry.value->Reload(*known, true);
 	}
 
 	void Settings::Load() {
@@ -21,21 +50,54 @@ namespace Ied
 		catalog.Build(server->plugins->All(), problems);
 		for (const Core::String& problem : problems) server->Log(problem.View());
 		app->Reload(catalog, true);
-		for (const Core::KeyValue<Core::String, TierFile*>& entry : solutions) entry.value->Reload(catalog, true);
+		for (const Core::KeyValue<Core::String, TierFile*>& entry : solutions) {
+			Workspace* ws = server->workspaces->Get(entry.key.View());
+			Rebuild(ws);
+			Recheck(ws);
+		}
 		PublishAll();
 	}
 
 	void Settings::Opened(Workspace* ws) {
+		Rebuild(ws);
 		TierFile* file = new TierFile(Core::StringView("solution"), ws->root / kSolutionSettings);
-		file->Reload(catalog, true);
+		file->Reload(*CatalogFor(ws), true);
 		solutions.Insert(ws->wsId, file);
 		Settings* self = this;
-		server->hub.Add(TopicOf(ws).View(), [self, ws]() -> Core::String { return self->Snapshot(ws); });
+		server->hub.Add(TopicOf(ws).View(), [self, ws]() -> Core::String { return self->Snapshot(ws, Core::StringView("")); });
+	}
+
+	void Settings::SolutionChanged(Workspace* ws) {
+		Core::Array<Core::String> stale;
+		Core::String prefix = ws->wsId + "/";
+		for (const Core::KeyValue<Core::String, TierFile*>& entry : projects)
+			if (entry.key.View().StartsWith(prefix.View()) && !ws->solution->Project(entry.key.View().Substring(prefix.View().ByteLength(), entry.key.View().ByteLength())))
+				stale.Push(entry.key);
+		for (const Core::String& key : stale) projects.Remove(key);
+		for (ProjectModel* project : ws->solution->projects) {
+			Core::String key = ProjectKey(ws, project->name.View());
+			if (!projects.Contains(key))
+				projects.Insert(key, new TierFile(Core::StringView("project"), ws->root / ((Core::String(kProjectSettings) + project->name.View()) + ".json").View()));
+		}
+		Rebuild(ws);
+		Recheck(ws);
+		Publish(ws);
+	}
+
+	void Settings::TrustChanged(Workspace* ws) {
+		Rebuild(ws);
+		Recheck(ws);
+		Publish(ws);
 	}
 
 	void Settings::WorkspaceFileChanged(Workspace* ws, Core::StringView path) {
-		TierFile* file = SolutionTier(ws);
-		if (file && path == kSolutionSettings && file->Reload(catalog, false)) Publish(ws);
+		TierFile* file = nullptr;
+		if (path == kSolutionSettings) file = SolutionTier(ws);
+		else if (path.StartsWith(Core::StringView(kProjectSettings)) && path.EndsWith(Core::StringView(".json"))) {
+			const int64 prefix = Core::StringView(kProjectSettings).ByteLength();
+			file = ProjectTier(ws, path.Substring(prefix, path.ByteLength() - prefix - Core::StringView(".json").ByteLength()));
+		}
+		if (file && file->Reload(*CatalogFor(ws), false)) Publish(ws);
 	}
 
 	void Settings::AppFileChanged() {
@@ -48,14 +110,20 @@ namespace Ied
 		return file;
 	}
 
+	TierFile* Settings::ProjectTier(Workspace* ws, Core::StringView project) const {
+		TierFile* file = nullptr;
+		if (ws && !project.IsEmpty()) projects.TryGet(ProjectKey(ws, project), file);
+		return file;
+	}
+
 	// --- Effective values ----------------------------------------------------------------------------------------------
 
 	// The default, then each tier that sets the key, by its merge kind; `source` is the last tier that did.
-	static Core::String Resolve(const SettingInfo* setting, TierFile* app, TierFile* solution, Core::String& source) {
+	static Core::String Resolve(const SettingInfo* setting, TierFile* app, TierFile* solution, TierFile* project, Core::String& source) {
 		Core::String value = setting->defaultJson;
 		source = Core::String("default");
-		TierFile*[2] tiers = { app, solution };
-		for (int32 i = 0; i < 2; ++i) {
+		TierFile*[3] tiers = { app, solution, project };
+		for (int32 i = 0; i < 3; ++i) {
 			Core::String set;
 			if (!tiers[i] || !tiers[i]->values.TryGet(setting->key, set)) continue;
 			value = MergeJson(value.View(), set.View(), setting->merge);
@@ -64,15 +132,17 @@ namespace Ied
 		return value;
 	}
 
-	Core::String Settings::Effective(Workspace* ws, Core::StringView key) {
-		SettingInfo* setting = catalog.Get(key);
+	Core::String Settings::Effective(Workspace* ws, Core::StringView project, Core::StringView key) {
+		SettingInfo* setting = CatalogFor(ws)->Get(key);
 		if (!setting) return Core::String("null");
 		Core::String source;
-		return Resolve(setting, app, SolutionTier(ws), source);
+		return Resolve(setting, app, SolutionTier(ws), ProjectTier(ws, project), source);
 	}
 
-	Core::String Settings::Snapshot(Workspace* ws) {
+	// The tiers' states (every project's tier with a workspace's) and the values for `project` (empty: the workspace's).
+	Core::String Settings::Snapshot(Workspace* ws, Core::StringView project) {
 		TierFile* solution = SolutionTier(ws);
+		TierFile* projectTier = ProjectTier(ws, project);
 		JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("tiers"));
@@ -80,11 +150,19 @@ namespace Ied
 		json.RawField("app", app->StateJson().View());
 		if (solution) json.RawField("solution", solution->StateJson().View());
 		json.EndObject();
+		json.Key(Core::StringView("projects"));
+		json.BeginObject();
+		if (ws && ws->solution)
+			for (ProjectModel* model : ws->solution->projects) {
+				TierFile* file = ProjectTier(ws, model->name.View());
+				if (file) json.RawField(model->name.CStr(), file->StateJson().View());
+			}
+		json.EndObject();
 		json.Key(Core::StringView("values"));
 		json.BeginObject();
-		for (SettingInfo* setting : catalog.All()) {
+		for (SettingInfo* setting : CatalogFor(ws)->All()) {
 			Core::String source;
-			Core::String value = Resolve(setting, app, solution, source);
+			Core::String value = Resolve(setting, app, solution, projectTier, source);
 			json.Key(setting->key.View());
 			json.BeginObject();
 			json.RawField("value", value.View());
@@ -96,7 +174,7 @@ namespace Ied
 		return json.ToString();
 	}
 
-	void Settings::Publish(Workspace* ws) { server->hub.Publish(TopicOf(ws).View(), "settings.changed", Snapshot(ws).View()); }
+	void Settings::Publish(Workspace* ws) { server->hub.Publish(TopicOf(ws).View(), "settings.changed", Snapshot(ws, Core::StringView("")).View()); }
 
 	void Settings::PublishAll() {
 		Publish(nullptr);
@@ -105,16 +183,27 @@ namespace Ied
 
 	// --- Methods -------------------------------------------------------------------------------------------------------
 
-	Core::String Settings::SchemaMethod(Call& call, const Params& params) { return catalog.SchemaJson(); }
+	static Workspace* WorkspaceParam(Server* server, const Params& params) {
+		return params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
+	}
+
+	Core::String Settings::SchemaMethod(Call& call, const Params& params) { return CatalogFor(WorkspaceParam(server, params))->SchemaJson(); }
 
 	Core::String Settings::GetMethod(Call& call, const Params& params) {
-		return Snapshot(params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr);
+		Workspace* ws = WorkspaceParam(server, params);
+		Core::String project = params.Str("project", Core::StringView(""));
+		if (!project.IsEmpty() && !ProjectTier(ws, project.View())) throw RpcError(ErrorCode::NotFound, (Core::String("no project ") + project.View()).View());
+		return Snapshot(ws, project.View());
 	}
 
 	TierFile* Settings::TierFor(Core::StringView tier, const Params& params) {
 		if (tier == "app") return app;
-		if (tier != "solution") throw RpcError(ErrorCode::BadRequest, (Core::String("no tier '") + tier + "' (app or solution)").View());
-		return SolutionTier(server->workspaces->Get(params.Str("wsId").View()));
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		if (tier == "solution") return SolutionTier(ws);
+		if (tier != "project") throw RpcError(ErrorCode::BadRequest, (Core::String("no tier '") + tier + "' (app, solution or project)").View());
+		TierFile* file = ProjectTier(ws, params.Str("project").View());
+		if (!file) throw RpcError(ErrorCode::NotFound, (Core::String("no project ") + params.Str("project").View()).View());
+		return file;
 	}
 
 	static RpcError Refused(Core::StringView message, const Core::Array<Core::String>& problems) {
@@ -130,8 +219,10 @@ namespace Ied
 
 	// Writes the file with `key` set to `valueJson` (or removed when it is empty), revision-checked, and tells.
 	Core::String Settings::Edit(TierFile* file, Core::StringView key, Core::StringView valueJson, const Params& params) {
+		Workspace* ws = file == app ? nullptr : WorkspaceParam(server, params);
+		SettingsCatalog* known = CatalogFor(ws);
 		const int64 expected = params.Int("expectedRevision", -1);
-		file->Reload(catalog, false);
+		file->Reload(*known, false);
 		if (expected >= 0 && expected != file->revision) {
 			JsonWriter data;
 			data.BeginObject();
@@ -143,12 +234,9 @@ namespace Ied
 		Core::String error;
 		const bool done = valueJson.IsEmpty() ? RemoveMember(file->text.View(), key, edited, error) : SetMember(file->text.View(), key, valueJson, edited, error);
 		if (!done) throw RpcError(ErrorCode::Conflict, (Core::String("the settings file cannot be edited: ") + error.View()).View());
-		if (!file->Write(catalog, edited.View(), error)) throw RpcError(ErrorCode::Unavailable, error.View());
-		if (file == app) PublishAll();
-		else {
-			for (const Core::KeyValue<Core::String, TierFile*>& entry : solutions)
-				if (entry.value == file) Publish(server->workspaces->Get(entry.key.View()));
-		}
+		if (!file->Write(*known, edited.View(), error)) throw RpcError(ErrorCode::Unavailable, error.View());
+		if (ws) Publish(ws);
+		else PublishAll();
 		JsonWriter json;
 		json.BeginObject();
 		json.IntField("revision", file->revision);
@@ -160,13 +248,14 @@ namespace Ied
 		Core::String tier = params.Str("tier");
 		Core::String key = params.Str("key");
 		TierFile* file = TierFor(tier.View(), params);
-		SettingInfo* setting = catalog.Get(key.View());
+		SettingsCatalog* known = file == app ? &catalog : CatalogFor(WorkspaceParam(server, params));
+		SettingInfo* setting = known->Get(key.View());
 		Core::Array<Core::String> problems;
 		if (!setting) throw Refused((Core::String("unknown setting ") + key.View()).View(), problems);
-		if (!catalog.AllowedIn(setting, tier.View())) throw Refused((((Core::String(key) + " cannot be set in the ") + tier.View()) + " tier").View(), problems);
+		if (!known->AllowedIn(setting, tier.View())) throw Refused((((Core::String(key) + " cannot be set in the ") + tier.View()) + " tier").View(), problems);
 		Serialization::DomNode value = params.Field("value");
 		if (!value.IsValid()) throw RpcError(ErrorCode::BadRequest, "set needs a value (reset removes one)");
-		problems = catalog.Check(setting, value);
+		problems = known->Check(setting, value);
 		if (!problems.IsEmpty()) throw Refused((Core::String("the value does not fit ") + key.View()).View(), problems);
 		return Edit(file, key.View(), NodeJson(value).View(), params);
 	}

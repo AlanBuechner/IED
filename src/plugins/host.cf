@@ -8,6 +8,7 @@ namespace Ied
 		if (state == PluginState::Disabled) return "disabled";
 		if (state == PluginState::NeedsApproval) return "needsApproval";
 		if (state == PluginState::Overridden) return "overridden";
+		if (state == PluginState::Untrusted) return "untrusted";
 		return "failed";
 	}
 
@@ -56,7 +57,7 @@ namespace Ied
 		for (FS::DirectoryEntry& entry : listing) {
 			FS::Path candidate = folder / entry.name.View();
 			if (entry.kind == FS::EntryKind::Directory && FS::FileExists((candidate / kManifestFile).CStr()))
-				found.Push(ReadManifest(candidate, source, *schemas, schemaName.View()));
+				found.Push(ReadManifest(candidate, source, *server->schemas.registry, server->schemas.Name(kManifestSchema).View()));
 		}
 	}
 
@@ -144,12 +145,7 @@ namespace Ied
 
 	void PluginHost::Load() {
 		ReadChoices();
-		schemas = new Serialization::SchemaRegistry();
 		FS::Path home = FS::Path(HomeFolder(server->config).View());
-		FS::Path schema = home / "shared" / "host-api" / "schemas" / "plugin-manifest.v1.schema.json";
-		schemaName = Core::String(schema.View());
-		Core::String error;
-		if (!schemas->Load(schemaName.View(), error)) server->Log((Core::String("plugins cannot be validated: ") + error.View()).View());
 		Core::Array<Manifest*> found;
 		Discover(home.IsEmpty() ? FS::Path() : home / "plugins", PluginSource::BuiltIn, found);
 		Discover(FS::Path(AppDataFolder(server->config).View()) / "plugins", PluginSource::App, found);
@@ -240,7 +236,59 @@ namespace Ied
 
 	void PluginHost::Changed() { server->hub.Publish(Core::StringView("plugins"), "plugins.changed", Snapshot().View()); }
 
-	Core::String PluginHost::ListMethod(Call& call, const Params& params) { return Snapshot(); }
+	static Workspace* WorkspaceParam(Server* server, const Params& params) {
+		return params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
+	}
+
+	// One local plugin: the solution's expected id must be the manifest's.
+	static Plugin* ReadLocalPlugin(Server* server, LocalPlugin* local, bool trusted, const Core::HashMap<Core::String, bool>& disabled) {
+		Plugin* plugin = new Plugin();
+		plugin->manifest = ReadManifest(local->folder, PluginSource::Project, *server->schemas.registry, server->schemas.Name(kManifestSchema).View());
+		Manifest* manifest = plugin->manifest;
+		if (!local->id.IsEmpty() && manifest->problems.IsEmpty() && manifest->id.View() != local->id.View())
+			manifest->problems.Push((((Core::String("the solution expects id ") + local->id.View()) + ", the manifest says ") + manifest->id.View()));
+		if (!manifest->problems.IsEmpty()) plugin->state = PluginState::Failed;
+		else if (!trusted) plugin->state = PluginState::Untrusted;
+		else if (!local->enabled || disabled.Contains(manifest->id)) plugin->state = PluginState::Disabled;
+		else plugin->state = PluginState::Loaded;
+		return plugin;
+	}
+
+	Core::Array<Plugin*> PluginHost::LocalFor(Workspace* ws) {
+		Core::Array<Plugin*> local;
+		if (!ws || !ws->solution) return local;
+		for (LocalPlugin* entry : ws->solution->localPlugins) local.Push(ReadLocalPlugin(server, entry, ws->trusted, disabled));
+		return local;
+	}
+
+	Core::Array<Plugin*> PluginHost::LoadedFor(Workspace* ws) {
+		Core::Array<Plugin*> local = LocalFor(ws);
+		Core::Array<Plugin*> loaded;
+		for (Plugin* plugin : plugins) {
+			if (plugin->state != PluginState::Loaded) continue;
+			bool overridden = false;
+			for (Plugin* mine : local)
+				if (mine->state == PluginState::Loaded && mine->manifest->id.View() == plugin->manifest->id.View()) overridden = true;
+			if (!overridden) loaded.Push(plugin);
+		}
+		for (Plugin* mine : local)
+			if (mine->state == PluginState::Loaded) loaded.Push(mine);
+		return loaded;
+	}
+
+	Core::String PluginHost::ListMethod(Call& call, const Params& params) {
+		Workspace* ws = WorkspaceParam(server, params);
+		if (!ws) return Snapshot();
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("plugins"));
+		json.BeginArray();
+		for (Plugin* plugin : plugins) json.Raw(plugin->SummaryJson().View());
+		for (Plugin* plugin : LocalFor(ws)) json.Raw(plugin->SummaryJson().View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
 
 	static Plugin* Known(PluginHost* host, Core::StringView id) {
 		Plugin* plugin = host->Get(id);
@@ -276,8 +324,7 @@ namespace Ied
 		json.BeginObject();
 		json.Key(Core::StringView("plugins"));
 		json.BeginArray();
-		for (Plugin* plugin : plugins) {
-			if (plugin->state != PluginState::Loaded) continue;
+		for (Plugin* plugin : LoadedFor(WorkspaceParam(server, params))) {
 			json.BeginObject();
 			json.Field("id", plugin->manifest->id.View());
 			json.Field("source", PluginSourceName(plugin->manifest->source));

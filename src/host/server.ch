@@ -11,6 +11,7 @@ include "../services/blobs.ch"
 include "../auth/auth.ch"
 include "../plugins/host.ch"
 include "trust.ch"
+include "schemas.ch"
 include "appdata.ch"
 include "../settings/service.ch"
 
@@ -44,6 +45,7 @@ namespace Ied
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;
+		public HostSchemas schemas;
 		public Settings* settings;
 		public AppDataWatch appWatch;
 	}

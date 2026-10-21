@@ -59,7 +59,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | Topic kind | Examples of event kinds | Snapshot contains |
 |---|---|---|
 | `server` | `workspace.opened`, `notification`, `device.connected` | open workspaces, notifications (unread), devices |
-| `ws:<wsId>` | `tree.changed`, `trust.changed` | workspace summary, trust |
+| `ws:<wsId>` | `tree.changed`, `trust.changed`, `solution.changed` | workspace summary (`kind` folder, file or solution), trust, the solution model (`docs/03`) |
 | `settings:app`, `settings:<wsId>` | `settings.changed` | tier files (revision, problems) and every setting's effective value with its source (`docs/07`) |
 | `plugins` | `plugins.changed` | every plugin's summary and state (`docs/02`) |
 | `layout:<wsId>:<deviceClass>` | `layout.changed` | layout tree for that device class |

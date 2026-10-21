@@ -1,5 +1,6 @@
 include "workspaces.ch"
 include "../host/server.ch"
+include "../host/trust.ch"
 
 namespace Ied
 {
@@ -58,6 +59,7 @@ namespace Ied
 		json.BeginObject();
 		json.Field("wsId", wsId.View());
 		json.Field("name", name.View());
+		json.Field("kind", kind.View());
 		json.Field("root", root.View());
 		json.BoolField("trusted", trusted);
 		json.EndObject();
@@ -67,7 +69,12 @@ namespace Ied
 	void Workspaces::Init(Server* server) {
 		this.server = server;
 		RegisterMethods();
-		for (int64 i = 0; i < server->config.workspaces.Count(); ++i) Open(FS::AbsolutePath(server->config.workspaces[i].CStr()));
+		Core::String relative;
+		for (int64 i = 0; i < server->config.workspaces.Count(); ++i) {
+			FS::Path given = FS::CanonicalPath(server->config.workspaces[i].CStr());
+			if (given.IsEmpty()) server->Log((Core::String("no such workspace: ") + server->config.workspaces[i].View()).View());
+			else OpenFor(given, relative);
+		}
 		if (items.IsEmpty() && server->config.testHooks) {
 			FS::Path scratch = FS::TempDirectory() / (Core::String("ied-test-") + server->epoch.View()).View();
 			FS::MakeDirectories(scratch.CStr());
@@ -94,13 +101,52 @@ namespace Ied
 	}
 
 	Workspace* Workspaces::OpenFor(const FS::Path& target, Core::String& relative) {
+		if (IsSolutionFile(target.View())) {
+			relative = Core::String(target.FileName());
+			for (Workspace* ws : items)
+				if (ws->solution && TrustKey(ws->solution->file.View()).View() == TrustKey(target.View()).View()) return ws;
+			return OpenSolution(target);
+		}
 		for (Workspace* ws : items)
 			if (RelativeTo(ws->root.View(), target.View(), relative)) return ws;
 		const bool folder = FS::IsDirectory(target.CStr());
 		Workspace* opened = Open(folder ? target : target.Parent());
 		relative = folder ? Core::String() : Core::String(target.FileName());
+		if (!folder) opened->kind = Core::String("file");
 		server->hub.Publish(Core::StringView("server"), "workspace.opened", opened->SummaryJson().View());
 		return opened;
+	}
+
+	Workspace* Workspaces::OpenSolution(const FS::Path& file) {
+		Workspace* ws = Open(file.Parent());
+		ws->kind = Core::String("solution");
+		ws->solution = ReadSolution(file, server->schemas);
+		ws->name = ws->solution->name;
+		server->settings->SolutionChanged(ws);
+		server->hub.Publish(Core::StringView("server"), "workspace.opened", ws->SummaryJson().View());
+		return ws;
+	}
+
+	// A solution file or a project file changed, appeared or went: the model is read again and told.
+	void Workspaces::ReadSolutionAgain(Workspace* ws) {
+		ws->solution = ReadSolution(ws->solution->file, server->schemas);
+		ws->name = ws->solution->name;
+		server->settings->SolutionChanged(ws);
+		JsonWriter data;
+		data.BeginObject();
+		data.RawField("solution", ws->solution->ToJson().View());
+		data.EndObject();
+		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "solution.changed", data.View());
+	}
+
+	static bool TouchesSolution(const Workspace* ws, const ChangeBatch& batch) {
+		if (!ws->solution) return false;
+		for (const TreeChange& change : batch.Changes()) {
+			if (change.path.View().EndsWith(Core::StringView(".ied.proj")) || IsSolutionFile(change.path.View())) return true;
+			for (const Core::String& watched : ws->solution->watched)
+				if (watched.View() == change.path.View()) return true;
+		}
+		return batch.Overflowed();
 	}
 
 	Workspace* Workspaces::Open(const FS::Path& folder) {
@@ -112,6 +158,7 @@ namespace Ied
 		FS::Path canonical = FS::CanonicalPath(folder.CStr());
 		ws->root = canonical.IsEmpty() ? folder : canonical;
 		ws->name = Core::String(ws->root.FileName());
+		ws->kind = Core::String("folder");
 		ws->trusted = server->trust.IsTrusted(ws->root);
 		items.Push(ws);
 		Workspaces* self = this;
@@ -154,7 +201,8 @@ namespace Ied
 		json.Field("name", ws->name.View());
 		json.Field("root", ws->root.View());
 		json.BoolField("trusted", ws->trusted);
-		json.Field("kind", "folder");
+		json.Field("kind", ws->kind.View());
+		json.RawField("solution", ws->solution ? ws->solution->ToJson().View() : Core::StringView("null"));
 		json.RawField("roots", Core::StringView("[\".\"]"));
 		json.RawField("plugins", Core::StringView("[]"));
 		json.RawField("chats", Core::StringView("[]"));
@@ -221,6 +269,7 @@ namespace Ied
 		if (batch.Overflowed())
 			for (const Core::String& path : server->documents->OpenPaths(ws)) ExternalWrite(ws, path.View());
 		if (!published.IsEmpty() || batch.Overflowed()) PublishTree(ws, published, batch.Overflowed());
+		if (TouchesSolution(ws, batch)) ReadSolutionAgain(ws);
 	}
 
 	// Whether a change is someone else's; it updates what the server knows of the path either way.
@@ -437,6 +486,7 @@ namespace Ied
 		const bool trusted = params.Bool("trusted", ws->trusted);
 		if (!server->trust.Set(ws->root, trusted)) throw RpcError(ErrorCode::Unavailable, "the trust choice could not be saved");
 		ws->trusted = trusted;
+		server->settings->TrustChanged(ws);
 		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();

@@ -29,7 +29,7 @@ Rules:
 - `x-ied-tiers` (the tiers it may be set in; default all);
 - `x-ied-merge`: `replace` (the default), `merge` (objects are merged member by member, deeper tiers winning) or `append` (lists are concatenated, app first).
 
-A key claimed by two plugins belongs to the first one loaded; the second gets a plugin problem.
+A key claimed by two plugins belongs to the first one loaded; the second gets a plugin problem. The app tier knows the settings of global plugins (built-in and app). A workspace's tiers also know those of its loaded project-local plugins, so a repository's language plugin brings its settings with it once the workspace is trusted.
 
 **Tier files.** Each is a JSONC object of `"<key>": value` members:
 
@@ -57,11 +57,20 @@ An invalid value is ignored and the last valid value from the same file stays in
 | Method | Does |
 |---|---|
 | `settings.schema` | `{settings: {<key>: {plugin, schema, default, tiers, merge, page?}}}` |
-| `settings.get {wsId?}` | the snapshot of `settings:<wsId>`, or `settings:app` without a `wsId` |
-| `settings.set {tier, wsId?, key, value, expectedRevision?}` | `{revision}`; `bad_request` for an unknown key, a tier the key does not allow, or a value its schema refuses |
-| `settings.reset {tier, wsId?, key, expectedRevision?}` | `{revision}`: the member is removed from that tier's file |
+| `settings.schema {wsId?}` | the same, for a workspace's catalog |
+| `settings.get {wsId?, project?}` | the snapshot of `settings:<wsId>`, or `settings:app` without a `wsId`; with `project`, the values that project's files get (its tier last) |
+| `settings.set {tier, wsId?, project?, key, value, expectedRevision?}` | `{revision}`; `tier` is `app`, `solution` or `project` (with `project`). `bad_request` for an unknown key, a tier the key does not allow, or a value its schema refuses. |
+| `settings.reset {tier, wsId?, project?, key, expectedRevision?}` | `{revision}`: the member is removed from that tier's file |
 
-Topics are `settings:app` and `settings:<wsId>`. The snapshot is `{tiers: {<tier>: {file, revision, problems: [{line, key?, message}]}}, values: {<key>: {value, source}}}`, where `source` is `default` or the tier that last set the key. `settings.changed` carries the same.
+Topics are `settings:app` and `settings:<wsId>`. The snapshot is:
+
+```
+{tiers: {app, solution: {file, revision, problems: [{line, key?, message}]}},
+ projects: {<Name>: <tier state>},
+ values: {<key>: {value, source}}}
+```
+
+`source` is `default` or the tier that last set the key. `settings.changed` carries the same.
 
 ## The settings window
 

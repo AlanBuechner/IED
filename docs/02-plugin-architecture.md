@@ -47,7 +47,13 @@ Validation failures appear in Settings > Plugins and the *IED* output source - n
 
 `src/plugins/` loads `builtin` and `declarative` plugins. `js` and `process` manifests are read and validated, then refused with "cannot load yet" until M11.
 
-**Where plugins come from.** Built-ins live in `<home>/plugins/<folder>/ied-plugin.json`, where `<home>` is the install: the nearest folder above `ied-server.exe` that holds `shared/host-api/schemas/`, or `--home`. App plugins live in `<app data>/plugins/<folder>/` (`%APPDATA%\IED`, or `--app-data`). Project-local plugins come with solutions. A folder without `ied-plugin.json` is not a plugin.
+**Where plugins come from.**
+
+- Built-ins live in `<home>/plugins/<folder>/ied-plugin.json`, where `<home>` is the install: the nearest folder above `ied-server.exe` that holds `shared/host-api/schemas/`, or `--home`.
+- App plugins live in `<app data>/plugins/<folder>/` (`%APPDATA%\IED`, or `--app-data`). Changes there reload the plugins without a restart.
+- Project-local plugins are a solution's `localPlugins`. They are read per workspace, are `untrusted` until the workspace is trusted, and fail when their manifest's id is not the one the solution names.
+
+A folder without `ied-plugin.json` is not a plugin.
 
 **Checks.** Each manifest is JSONC, validated against `plugin-manifest.v1.schema.json` with Bedrock's `Serialization::ValidateJson`; problems carry the JSON pointer. The host then checks:
 
@@ -57,7 +63,7 @@ Validation failures appear in Settings > Plugins and the *IED* output source - n
 
 Problems go to the server log; the IED output source comes later.
 
-**States.** `loaded`, `disabled` (the owner's switch), `failed` (with its problems), `needsApproval`, or `overridden` (another plugin with the id won; `overriddenBy` names its source).
+**States.** `loaded`, `disabled` (the owner's switch, or the solution's `enabled: false`), `failed` (with its problems), `needsApproval`, `untrusted` (a local plugin of an untrusted workspace), or `overridden` (another plugin with the id won; `overriddenBy` names its source).
 
 **Approval.** An app plugin loads only once the owner approved the SHA-256 of its folder: every file's path and bytes, in name order. A changed file needs approval again, and approvals go to the security log.
 
@@ -67,8 +73,8 @@ Problems go to the server log; the IED output source comes later.
 
 | Method | Does |
 |---|---|
-| `plugins.list` | `{plugins: [{id, name, version, kind, source, state, overriddenBy?, problems, permissions, contributes: [point names]}]}` (also the `plugins` topic's snapshot; `plugins.changed` carries the same) |
-| `plugins.contributions` | `{plugins: [{id, source, contributes}]}` for the loaded ones: what the web client builds menus, commands, keybindings and languages from |
+| `plugins.list {wsId?}` | `{plugins: [{id, name, version, kind, source, state, overriddenBy?, problems, permissions, contributes: [point names]}]}`, with a workspace's local plugins when `wsId` is given (without it, also the `plugins` topic's snapshot; `plugins.changed` carries the same) |
+| `plugins.contributions {wsId?}` | `{plugins: [{id, source, contributes}]}` for the loaded ones: what the web client builds menus, commands, keybindings and languages from. With `wsId`, a loaded local plugin replaces a global one of its id. |
 | `plugins.setEnabled {id, enabled}` | the plugin's summary after the change |
 | `plugins.approve {id}` | approves the app plugin's current content |
 | `plugins.reload` | reads every plugin folder again |

@@ -7,6 +7,7 @@
 
 include "../web/rpc.ch"
 include "../fs/watching.ch"
+include "../solutions/model.ch"
 
 namespace Ied
 {
@@ -15,6 +16,8 @@ namespace Ied
 		public Core::String wsId;
 		public Core::String name;
 		public FS::Path root;
+		public Core::String kind;          // "folder", "file" (opened for one file) or "solution"
+		public SolutionModel* solution;    // a solution workspace's model; null otherwise
 		public bool trusted;
 		public Core::HashMap<Core::String, int64> revisions;        // relative path -> revision
 		public Core::HashMap<Core::String, Core::String> digests;   // relative path -> SHA-256 of the text the server last wrote or read; "" once it deleted the file
@@ -42,9 +45,11 @@ namespace Ied
 		// Writes a file (its folders made), checking `expectedRevision` unless it is -1; the new revision.
 		public int64 Write(Workspace* ws, Core::StringView path, Core::StringView text, int64 expectedRevision);
 		public Workspace* Open(const FS::Path& folder);
-		// The workspace `target` (a canonical path) belongs to, opening its folder (or the file's folder) when none does;
-		// `relative` is the path inside it.
+		// The workspace `target` (a canonical path) belongs to, opening it when none does: a .ied.sln as a solution, a
+		// folder as itself, another file in its folder; `relative` is the path inside it.
 		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);
+		// A .ied.sln (a canonical path) as a solution workspace rooted at its folder.
+		public Workspace* OpenSolution(const FS::Path& file);
 		// What the watcher saw, less what the server did itself: published and passed to the open documents.
 		public void ApplyExternal(Workspace* ws, const ChangeBatch& batch);
 
@@ -52,6 +57,7 @@ namespace Ied
 		private Core::String Snapshot(const Workspace* ws) const;
 		private void TreeChanged(Workspace* ws, Core::StringView path, const char* change);
 		private void PublishTree(Workspace* ws, const Core::Array<TreeChange>& changes, bool overflow);
+		private void ReadSolutionAgain(Workspace* ws);
 		private bool External(Workspace* ws, const TreeChange& change);
 		private bool ExternalWrite(Workspace* ws, Core::StringView path);
 		private bool ExternalDelete(Workspace* ws, Core::StringView path);
