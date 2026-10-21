@@ -1,0 +1,13 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Terminal settings",
+	"type": "object",
+	"properties": {
+		"terminal.shell": {
+			"type": ["string", "array"],
+			"items": { "type": "string" },
+			"default": "",
+			"description": "The program a new terminal runs: a name or path, or an argv. Empty: PowerShell 7, else Windows PowerShell, else cmd."
+		}
+	}
+}

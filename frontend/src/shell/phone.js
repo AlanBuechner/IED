@@ -8,6 +8,7 @@ import { wellsOf, groupsOf } from "./layouttree.js";
 import { initials } from "./workspaces.js";
 import { banners } from "./banners.js";
 import { ToolbarItems } from "./toolbaritems.js";
+import { PanelDock } from "./paneldock.js";
 
 const SLOTS = 4;
 
@@ -20,7 +21,8 @@ export class PhoneChrome {
 		this.nav = h("nav.phone-nav", { "aria-label": "Panes" });
 		this.strip = h("div.phone-toolbar", { role: "toolbar" });
 		this.toolbarItems = new ToolbarItems(shell);
-		this.app = h("div.app.phone", null, this.head, this.banners, this.area, this.strip, this.nav);
+		this.panel = new PanelDock(shell, true, () => {});
+		this.app = h("div.app.phone", null, this.head, this.banners, this.area, this.strip, this.nav, this.panel.el);
 		this.state = "connecting";
 		this.shown = null;
 		replace(root, this.app);
@@ -30,6 +32,7 @@ export class PhoneChrome {
 	dispose() {
 		this.stopContext();
 		this.toolbarItems.release();
+		this.panel.release();
 		this.app.remove();
 	}
 
@@ -40,6 +43,8 @@ export class PhoneChrome {
 		this.renderStrip();
 		this.renderNav(pane);
 		this.renderBanners();
+		this.panel.mount();
+		this.panel.render();
 	}
 
 	renderStrip() {
@@ -70,6 +75,9 @@ export class PhoneChrome {
 		this.toolbarItems.release();
 		this.stripDrawn = null;
 		this.renderStrip();
+		this.panel.release();
+		this.panel.mount();
+		this.panel.render();
 	}
 
 	chord() {}
@@ -163,6 +171,7 @@ export class PhoneChrome {
 	showMore(at, more) {
 		const shell = this.shell;
 		const rows = more.map((slot) => ({ kind: "item", label: slot.title, icon: slot.icon, base: slot.base, enabled: true, run: slot.run }));
+		if (this.panel.mounted) rows.push({ kind: "item", label: this.panel.title(), icon: "$(terminal)", base: "/", enabled: true, run: () => this.panel.setOpen(true) });
 		if (rows.length) rows.push({ kind: "separator" });
 		for (const [command, title] of [["shell.commandPalette", "Command Palette"], ["shell.showNotifications", "Notifications"], ["shell.switchWorkspace", "Switch Workspace"], ["shell.plugins", "Plugins"], ["shell.keyboardShortcuts", "Keyboard Shortcuts"], ["shell.resetLayout", "Reset Layout"], ["shell.about", "About IED"]]) {
 			const definition = shell.commands.get(command);

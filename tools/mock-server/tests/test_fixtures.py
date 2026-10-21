@@ -156,17 +156,18 @@ class TerminalLayoutFsTests(MockCase):
 	async def test_terminal_echo_commands_and_lease(self):
 		owner, phone = await self.client(), await self.client(device_class="phone")
 		term = await owner.request("term.create", {"wsId": "w1", "cols": 80, "rows": 24})
-		snap = await self.subscribed(owner, term["topic"])
+		topic = "term:" + term["termId"]
+		snap = await self.subscribed(owner, topic)
 		self.assertIn("mock", snap["scrollback"])
 		await owner.request("term.input", {"termId": term["termId"], "data": "echo hi\r"})
-		frames = await owner.wait_for(term["topic"], lambda f: "hi\r\n" in f["data"].get("data", "") and f["data"]["data"] != "i")
+		frames = await owner.wait_for(topic, lambda f: "hi\r\n" in f["data"].get("data", "") and f["data"]["data"] != "i")
 		self.assertTrue(frames)
 		with self.assertRaises(RpcFailure) as caught:
 			await phone.request("term.input", {"termId": term["termId"], "data": "x"})
 		self.assertEqual("forbidden", caught.exception.code)
 		await phone.request("term.takeLease", {"termId": term["termId"]})
 		await phone.request("term.input", {"termId": term["termId"], "data": "exit\r"})
-		end = (await owner.wait_for(term["topic"], lambda f: f.get("kind") == "exit"))[-1]["data"]
+		end = (await owner.wait_for(topic, lambda f: f.get("kind") == "exit"))[-1]["data"]
 		self.assertEqual(0, end["code"])
 
 	async def test_layouts_start_empty_for_every_device_class(self):

@@ -119,6 +119,7 @@
 				"keybindings": { "type": "array", "items": { "$ref": "#/$defs/keybinding" } },
 				"statusBarItems": { "type": "array", "items": { "$ref": "#/$defs/statusBarItem" } },
 				"toolbarItems": { "type": "array", "items": { "$ref": "#/$defs/toolbarItem" } },
+				"panels": { "type": "array", "items": { "$ref": "#/$defs/panel" } },
 				"outputSources": {
 					"type": "array",
 					"items": {
@@ -340,6 +341,18 @@
 				"view": { "type": "string" },
 				"priority": { "type": "number", "description": "Higher comes first." },
 				"when": { "$ref": "#/$defs/when" }
+			}
+		},
+		"panel": {
+			"type": "object",
+			"required": ["id", "title", "view"],
+			"additionalProperties": false,
+			"description": "A UI module's view in the full-width dock under every activity, collapsible to its header row (the terminal dock; the first loaded plugin's).",
+			"properties": {
+				"id": { "type": "string" },
+				"title": { "type": "string" },
+				"icon": { "type": "string" },
+				"view": { "type": "string" }
 			}
 		},
 		"statusBarItem": {

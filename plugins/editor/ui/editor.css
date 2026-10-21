@@ -189,7 +189,7 @@
 .lv-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lv-type { flex: 0 0 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbg-head .lv-name { padding-left: 20px; }
-.tb-start { width: auto !important; gap: var(--space-2); padding: 0 var(--space-3); }
+.tb-start { display: inline-flex; align-items: center; width: auto !important; gap: var(--space-2); padding: 0 var(--space-3); }
 
 @media (max-width: 719px) {
 	.lv-type { display: none; }

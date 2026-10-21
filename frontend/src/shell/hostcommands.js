@@ -42,6 +42,7 @@ const COMMANDS = [
 	{ id: "shell.nextTab", title: "Next Tab", category: "Window", run: (shell) => stepTab(shell, 1) },
 	{ id: "shell.previousTab", title: "Previous Tab", category: "Window", run: (shell) => stepTab(shell, -1) },
 	{ id: "shell.resetLayout", title: "Reset Window Layout", category: "Window", run: (shell) => shell.resetLayout() },
+	{ id: "shell.togglePanel", title: "Show or Hide the Panel", category: "View", icon: "$(layout-panel)", run: (shell) => shell.chrome && shell.chrome.panel && shell.chrome.panel.mounted && shell.chrome.panel.setOpen(!shell.chrome.panel.isOpen()) },
 	{ id: "shell.showNotifications", title: "Notifications", category: "View", icon: "$(bell)", run: (shell, args) => showNotificationCenter(shell, args && args.at) },
 	{ id: "shell.clearNotifications", title: "Clear All Notifications", category: "View", run: (shell) => Promise.all(shell.server.notifications.map((n) => shell.client.request("server.dismiss", { id: n.id }))) },
 	{ id: "shell.switchWorkspace", title: "Switch Workspace...", category: "File", run: (shell, args) => showWorkspaceSwitcher(shell, args && args.at) },
@@ -94,6 +95,7 @@ const KEYS = [
 	{ command: "shell.closeTab", key: "ctrl+f4" },
 	{ command: "shell.nextTab", key: "ctrl+alt+pagedown" },
 	{ command: "shell.previousTab", key: "ctrl+alt+pageup" },
+	{ command: "shell.togglePanel", key: "ctrl+`" },
 ];
 
 export function registerShellCommands(shell) {

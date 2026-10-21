@@ -737,6 +737,70 @@ def debug_on_a_phone(run):
 	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": []})
 
 
+def terminal_text(page):
+	"""What the shown terminal's screen says (xterm's rows)."""
+	return page.evaluate("[...document.querySelectorAll('.term-view:not([hidden]) .xterm-rows > div')].map((r) => r.textContent).join('\n')")
+
+
+def type_in_terminal(page, text):
+	page.click(".term-view:not([hidden]) .xterm-screen")
+	page.keyboard.type(text)
+	page.keyboard.press("Enter")
+
+
+@scenario(viewports=("desktop",))
+def terminal_dock(run):
+	"""The terminal dock under every activity (docs/15): New Terminal opens it with a shell on the server, typed commands
+	run, another window shows the same screen and takes over typing, Ctrl+` collapses it to its header, Kill ends it."""
+	page = run.open()
+	page.wait_for_selector(".panel-dock .term-head")
+	check(page.query_selector(".panel-dock.collapsed") is not None, "collapsed to its header at first")
+	page.click(".term-head button[aria-label='New Terminal']")
+	page.wait_for_selector(".panel-dock:not(.collapsed) .term-tab.on")
+	page.wait_for_selector(".term-view:not([hidden]) .xterm-screen")
+	marker = "ied-e2e-" + run.viewport
+	type_in_terminal(page, "echo " + marker)
+	page.wait_for_function("(m) => [...document.querySelectorAll('.term-view:not([hidden]) .xterm-rows > div')].filter((r) => r.textContent.includes(m)).length >= 2", arg=marker, timeout=30000)
+	run.shot("typed")
+	other = run.open(fresh=False)
+	other.wait_for_selector(".term-tab")
+	other.click(".term-tab")
+	other.wait_for_function("(m) => [...document.querySelectorAll('.term-view:not([hidden]) .xterm-rows > div')].some((r) => r.textContent.includes(m))", arg=marker, timeout=20000)
+	other.wait_for_selector(".term-view:not([hidden]) .term-bar:not([hidden])")
+	other.click(".term-view:not([hidden]) .term-bar button")
+	other.wait_for_selector(".term-view:not([hidden]) .term-bar", state="hidden")
+	page.wait_for_selector(".term-view:not([hidden]) .term-bar:not([hidden])", timeout=10000)
+	run.page = page
+	page.bring_to_front()
+	page.click(".term-head")
+	page.keyboard.press("Control+`")
+	page.wait_for_selector(".panel-dock.collapsed")
+	page.keyboard.press("Control+`")
+	page.wait_for_selector(".panel-dock:not(.collapsed)")
+	page.click(".term-head button[aria-label='Kill Terminal']")
+	page.wait_for_selector(".term-tab", state="detached", timeout=10000)
+	check(page.is_visible(".term-empty"), "says how to open one")
+
+
+@scenario(viewports=("phone",), targets=("mock",))
+def terminal_on_a_phone(run):
+	"""On a phone the terminal is a slide-up drawer from More, with a row of the keys a phone keyboard lacks."""
+	page = run.open()
+	page.tap(".phone-nav button[aria-label='More']")
+	page.tap(".menu [role='menuitem']:has-text('Terminal')")
+	page.wait_for_selector(".panel-dock.drawer.shown")
+	page.tap(".term-head button[aria-label='New Terminal']")
+	page.wait_for_selector(".term-view:not([hidden]) .xterm-screen")
+	page.wait_for_selector(".term-keys button:has-text('Tab')")
+	type_in_terminal(page, "echo from-the-phone")
+	page.wait_for_function("[...document.querySelectorAll('.term-view:not([hidden]) .xterm-rows > div')].filter((r) => r.textContent.includes('from-the-phone')).length >= 2", timeout=20000)
+	run.shot("drawer")
+	page.tap(".term-head button[aria-label='Kill Terminal']")
+	page.wait_for_selector(".term-tab", state="detached", timeout=10000)
+	page.tap(".term-head button[aria-label='Hide the panel']")
+	page.wait_for_selector(".panel-dock.drawer.shown", state="detached")
+
+
 @scenario(viewports=("phone",), targets=("mock",))
 def build_from_the_phone_strip(run):
 	"""On a phone the toolbar views sit in a strip above the bottom nav (docs/15 "Phone"), colored like the status bar:

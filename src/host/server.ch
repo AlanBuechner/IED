@@ -13,6 +13,7 @@ include "services/layouts.ch"
 include "services/trash.ch"
 include "services/search.ch"
 include "services/diagnostics.ch"
+include "services/terminals.ch"
 include "auth/auth.ch"
 include "plugins/host.ch"
 include "trust.ch"
@@ -61,6 +62,7 @@ namespace Ied
 		public Diagnostics* diagnostics;
 		public LspPool* lsp;
 		public Tasks* tasks;
+		public Terminals* terminals;
 		public Breakpoints* breakpoints;
 		public Debugger* debugger;
 		public Auth* auth;

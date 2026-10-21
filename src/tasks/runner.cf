@@ -147,18 +147,6 @@ namespace Ied
 		public Core::Array<MatcherState*> states;
 	}
 
-	// How many bytes of `bytes` end at a whole UTF-8 character: a sequence cut by the read waits for the next one.
-	static int64 WholeCharacters(Core::StringView bytes) {
-		int64 end = bytes.ByteLength();
-		for (int64 back = 1; back <= 3 && back <= end; ++back) {
-			const int32 c = bytes.ByteAt(end - back) & 0xFF;
-			if ((c & 0xC0) == 0x80) continue;
-			const int64 length = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
-			return length > back ? end - back : end;
-		}
-		return end;
-	}
-
 	// The lock is held: one whole line of a step's output through its matchers.
 	static void FeedLine(Server* server, TaskRun* run, int64 step, StreamReader* reader, Core::StringView line) {
 		if (line.EndsWith(Core::StringView("\r"))) line = line.Substring(0, line.ByteLength() - 1);

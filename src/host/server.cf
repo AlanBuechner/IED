@@ -38,6 +38,7 @@ namespace Ied
 		diagnostics = new Diagnostics(self);
 		lsp = new LspPool(self);
 		tasks = new Tasks(self);
+		terminals = new Terminals(self);
 		breakpoints = new Breakpoints(self);
 		debugger = new Debugger(self);
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });

@@ -28,15 +28,16 @@ a { color: var(--link); text-decoration: none; }
 	height: 100vh;
 	height: 100dvh;
 	grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-	grid-template-rows: var(--menubar-h) var(--toolbar-h) auto minmax(0, 1fr) var(--statusbar-h);
+	grid-template-rows: var(--menubar-h) var(--toolbar-h) auto minmax(0, 1fr) auto var(--statusbar-h);
 	grid-template-areas:
 		"side menu"
 		"side tool"
 		"side banner"
 		"side main"
+		"side panel"
 		"status status";
 }
-.app.desktop.no-toolbar { grid-template-rows: var(--menubar-h) 0 auto minmax(0, 1fr) var(--statusbar-h); }
+.app.desktop.no-toolbar { grid-template-rows: var(--menubar-h) 0 auto minmax(0, 1fr) auto var(--statusbar-h); }
 .app.desktop.no-toolbar .toolbar { visibility: hidden; border: 0; }
 .sidebar { grid-area: side; }
 .menubar { grid-area: menu; }
@@ -44,6 +45,16 @@ a { color: var(--link); text-decoration: none; }
 .banners { grid-area: banner; }
 .activity-area { grid-area: main; min-width: 0; min-height: 0; position: relative; background: var(--bg-1); }
 .statusbar { grid-area: status; }
+
+/* ---------- the panel dock (docs/15 "Terminal dock"): full width under the activity, collapsible to its header ---------- */
+.panel-dock { grid-area: panel; position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); border-top: var(--border-width) solid var(--border-0); }
+.panel-dock[hidden] { display: none; }
+.panel-resize { position: absolute; left: 0; right: 0; top: -3px; height: 6px; cursor: row-resize; z-index: 5; }
+.panel-dock.collapsed .panel-resize { display: none; }
+.panel-host, .panel-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.panel-dock.collapsed .panel-body { display: none; }
+.panel-dock.drawer { position: absolute; left: 0; right: 0; bottom: calc(58px + env(safe-area-inset-bottom)); height: 62%; z-index: 30; border-top: var(--border-width) solid var(--border-1); box-shadow: var(--shadow-popup); transform: translateY(110%); transition: transform 0.18s ease-out; }
+.panel-dock.drawer.shown { transform: none; }
 
 /* ---------- sidebar ---------- */
 .sidebar {
@@ -327,6 +338,7 @@ dl.facts dd { margin: 0; }
 
 /* ---------- phone (< 720): header, one pane, bottom nav ---------- */
 .app.phone {
+	position: relative;
 	display: grid;
 	height: 100vh;
 	height: 100dvh;

@@ -53,5 +53,7 @@ namespace Ied
 	// `tail` with `text` added, cut to its last `limit` bytes at a line start - or, when those bytes hold no line break
 	// (one long line), at a character start.
 	Core::String Bounded(Core::StringView tail, Core::StringView text, int64 limit);
+	// How many bytes of `bytes` end at a whole UTF-8 character: a sequence cut by a read waits for the next one.
+	int64 WholeCharacters(Core::StringView bytes);
 	Core::String OutputTopic(const Workspace* ws, Core::StringView sourceId);
 }

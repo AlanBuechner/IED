@@ -17,6 +17,17 @@ namespace Ied
 		return Core::String(kept.Substring(start, kept.ByteLength()));
 	}
 
+	int64 WholeCharacters(Core::StringView bytes) {
+		int64 end = bytes.ByteLength();
+		for (int64 back = 1; back <= 3 && back <= end; ++back) {
+			const int32 c = bytes.ByteAt(end - back) & 0xFF;
+			if ((c & 0xC0) == 0x80) continue;
+			const int64 length = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+			return length > back ? end - back : end;
+		}
+		return end;
+	}
+
 	Core::String OutputTopic(const Workspace* ws, Core::StringView sourceId) { return ((Core::String("out:") + ws->wsId.View()) + ":") + sourceId; }
 
 	void Outputs::Init(Server* server) {

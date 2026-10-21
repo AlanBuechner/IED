@@ -1,4 +1,5 @@
-"""Echo terminals: 'term:<termId>' topics with a tiny line discipline and a few built-in commands."""
+"""Echo terminals (docs/10 "Terminals"): 'term:<termId>' topics with a tiny line discipline and a few built-in commands,
+and each workspace's list on 'terms:<wsId>'."""
 
 import asyncio
 
@@ -11,9 +12,10 @@ FLOOD_YIELD_EVERY = 100
 
 
 class Terminal:
-	def __init__(self, term_id, ws_id, cols, rows, holder):
+	def __init__(self, term_id, ws_id, cols, rows, holder, title):
 		self.term_id = term_id
 		self.ws_id = ws_id
+		self.title = title
 		self.cols = cols
 		self.rows = rows
 		self.holder = holder
@@ -27,18 +29,24 @@ class Terminal:
 		return "term:" + self.term_id
 
 	def summary(self):
-		return {"termId": self.term_id, "wsId": self.ws_id, "alive": self.alive, "topic": self.topic}
+		return {"termId": self.term_id, "wsId": self.ws_id, "title": self.title, "kind": "shell", "alive": self.alive, "exitCode": self.exit_code, "holder": self.holder}
 
 
 class Terminals:
 	def __init__(self, server):
 		self.server = server
 		self.items = {}
-		for name in ("term.create", "term.input", "term.resize", "term.takeLease", "term.close", "term.list"):
+		self.made = 0
+		for name in ("term.create", "term.input", "term.resize", "term.takeLease", "term.rename", "term.close", "term.list"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
+		for ws_id in server.workspace.items:
+			server.hub.add("terms:" + ws_id, lambda ws_id=ws_id: {"terminals": [t.summary() for t in self.items.values() if t.ws_id == ws_id]})
 
 	def snapshot(self, term):
-		return dict(term.summary(), cols=term.cols, rows=term.rows, exitCode=term.exit_code, lease={"holder": term.holder}, scrollback=term.scrollback)
+		return {"terminal": term.summary(), "cols": term.cols, "rows": term.rows, "scrollback": term.scrollback}
+
+	def changed(self, term, kind):
+		self.server.hub.publish("terms:" + term.ws_id, kind, term.summary())
 
 	def get(self, term_id, alive=True):
 		term = self.items.get(term_id)
@@ -56,6 +64,7 @@ class Terminals:
 		term.alive = False
 		term.exit_code = code
 		self.server.hub.publish(term.topic, "exit", {"code": code, "reason": reason})
+		self.changed(term, "term.changed")
 
 	def on_restart(self):
 		for term in self.items.values():
@@ -64,9 +73,11 @@ class Terminals:
 
 	async def m_term_create(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
-		term = Terminal("t%d" % (len(self.items) + 1), ws_id, p.int("cols", 120, required=False), p.int("rows", 30, required=False), call.client_id)
+		self.made += 1
+		term = Terminal("term%d" % self.made, ws_id, p.int("cols", 120, required=False), p.int("rows", 30, required=False), call.client_id, p.str("title", "", required=False) or "mock")
 		self.items[term.term_id] = term
 		self.server.hub.add(term.topic, lambda: self.snapshot(term))
+		self.changed(term, "term.added")
 		self._out(term, BANNER + PROMPT)
 		return term.summary()
 
@@ -77,7 +88,7 @@ class Terminals:
 	async def m_term_input(self, call, p):
 		term = self.get(p.str("termId"))
 		if term.holder != call.client_id:
-			raise RpcError("forbidden", "only the lease holder may type", {"reason": "lease", "holder": term.holder})
+			raise RpcError("forbidden", "another window is typing in this terminal", {"reason": "lease", "holder": term.holder})
 		data = p.str("data")
 		if data.startswith("\x1b"):
 			return {}
@@ -136,17 +147,32 @@ class Terminals:
 
 	async def m_term_resize(self, call, p):
 		term = self.get(p.str("termId"))
+		if term.holder != call.client_id or (term.cols, term.rows) == (p.int("cols"), p.int("rows")):
+			return {}
 		term.cols, term.rows = p.int("cols"), p.int("rows")
 		self.server.hub.publish(term.topic, "resize", {"cols": term.cols, "rows": term.rows})
 		return {}
 
 	async def m_term_takeLease(self, call, p):
-		term = self.get(p.str("termId"))
+		term = self.get(p.str("termId"), alive=False)
 		term.holder = call.client_id
 		self.server.hub.publish(term.topic, "lease", {"holder": term.holder})
+		self.changed(term, "term.changed")
 		return {"holder": term.holder}
 
+	async def m_term_rename(self, call, p):
+		term = self.get(p.str("termId"), alive=False)
+		title = p.str("title").strip()
+		if not title:
+			raise RpcError("bad_request", "a terminal needs a title")
+		term.title = title
+		self.changed(term, "term.changed")
+		return term.summary()
+
 	async def m_term_close(self, call, p):
-		term = self.get(p.str("termId"))
-		self._exit(term, 0, "closed")
+		term = self.get(p.str("termId"), alive=False)
+		term.alive = False
+		del self.items[term.term_id]
+		self.changed(term, "term.removed")
+		self.server.hub.remove(term.topic)
 		return {}

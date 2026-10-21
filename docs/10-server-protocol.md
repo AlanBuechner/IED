@@ -70,8 +70,9 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |
 | `run:<runId>` | `step.start`, `output` (source, text), `step.end`, `run.end` | task run state + output tail |
 | `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
-| `term:<termId>` | `data`, `resize`, `exit`, `lease` | screen state (serialized via xterm headless) + scrollback tail |
-| `dbg:<sessionId>` | `stopped`, `continued`, `threads`, `breakpoints`, `output`, `terminated` | session state (threads, current frame) |
+| `terms:<wsId>` | `term.added`, `term.changed`, `term.removed` (a terminal's summary) | `{terminals: [summary]}`: the workspace's terminals, in the order they were made; a summary is `{termId, wsId, title, kind, alive, exitCode, holder}` |
+| `term:<termId>` | `data {data}` (coalescible), `resize {cols, rows}`, `exit {code}`, `lease {holder}` | `{terminal: summary, cols, rows, scrollback}`: `scrollback` is the last 256 KB of output, replayed by a client to rebuild the screen |
+| `dbg:<wsId>`, `dbg:<wsId>:<sessionId>`, `bp:<wsId>` | the debugger's (`docs/25` "The server as built") | the workspace's debug sessions, one session's stop, the breakpoints |
 | `prof:<captureId>` | `stats`, `progress` | capture summary (timeline data is fetched via requests/blobs) |
 | `git:<repoId>` | `status.changed`, `refs.changed`, `op.progress` | status + refs |
 
@@ -129,6 +130,22 @@ Paths are workspace-relative with `/` separators. Every file has a `revision` (1
 **Files outside the workspace** are shown read-only: a library's or a toolchain's sources, system headers, the standard library of a language - wherever go to definition, references, Go To All or a debugger's stack leads. `doc.open {wsId, uri}` with a `file:` URI opens one as a document like any other (`{docId, version, holder: null, readOnly: true}`; its snapshot has `readOnly: true` and the URI as `path`), on the language server that named it, so its own hover and navigation work. Only a file a process of the workspace named can be opened this way: the host keeps, per workspace, every `file:` URI outside the workspace that a language server or debug adapter put in a result it passed to a client (`forbidden` for any other; `docs/11`). Such a document takes no lease and no edit (`doc.edit` answers `forbidden` with reason `read_only`), is never saved, and is not watched: opening it again after it was closed reads it again.
 
 **Trash** (F-OPS-13): nothing a person or an AI deletes through the server is lost at once. A deleted file or folder moves to `<data>/trash/<id>/` (the server's data folder, `%LOCALAPPDATA%/IED/` by default) with an `entry.json` saying where it came from; `trash.restore` puts it back, `trash.purge` removes it. When the trash holds more than 4 GB the oldest entries are purged. Watchers see a trash move as a delete and a restore as a create, like any change.
+
+## Terminals
+
+A terminal is a shell (or any program) under a pseudo console on the server (ConPTY), so it outlives the browser: closing every tab leaves it running, and any device reopens it with its screen rebuilt from the scrollback.
+
+| Method | Params | Answer |
+|---|---|---|
+| `term.create` | `wsId, cols?, rows?, title?, cwd?` (a workspace path), `argv?` (default: the `terminal.shell` setting, else PowerShell 7, Windows PowerShell or `cmd`) | the summary; the caller holds the lease |
+| `term.list` | `wsId` | `{terminals: [summary]}` |
+| `term.input` | `termId, data` | `{}`; only the lease holder types (`forbidden` with reason `lease` and the holder otherwise) |
+| `term.takeLease` | `termId` | `{holder}`: this client types from now on (the others see the `lease` event) |
+| `term.resize` | `termId, cols, rows` | `{}`; the lease holder's size wins (a client that does not hold it is ignored) |
+| `term.rename` | `termId, title` | the summary |
+| `term.close` | `termId` | `{}`: the program's tree is ended; the terminal leaves the list |
+
+A terminal's program runs in the workspace folder (or `cwd`) with the server's environment and `TERM_PROGRAM=IED`. When it exits the terminal stays in the list, `alive: false` with its `exitCode`, until closed. An untrusted workspace still gets terminals: the person typing is the one deciding what runs (`docs/11`).
 
 ## Document editing protocol
 

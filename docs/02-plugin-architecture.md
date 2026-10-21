@@ -108,7 +108,7 @@ Grouped; full shapes in the schema.
 
 | Group | Points |
 |---|---|
-| Shell | `activities` (sidebar icons + views), `toolWindows`, `commands`, `menus`, `keybindings`, `statusBarItems`, `toolbarItems` (a view rendered in the toolbar after its commands: the task toolbar's dropdowns and buttons), `outputSources` |
+| Shell | `activities` (sidebar icons + views), `toolWindows`, `commands`, `menus`, `keybindings`, `statusBarItems`, `toolbarItems` (a view rendered in the toolbar after its commands: the task toolbar's dropdowns and buttons), `panels` (`{id, title, icon, view}`: the full-width dock under every activity, collapsible to its view's header row - the terminal dock; the first loaded plugin's), `outputSources` |
 | Editor | `languages` (extensions, comments, brackets, auto-close, indentation, Monarch grammar, task comments), `semanticTokenColors` (token -> `--syntax-*` theme token; raw colors rejected), `fileIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries`, `fileOpener` (`{command}`: the command the shell runs with `{path, line, col}`, 1-based, for a file a launch URL names; the last loaded plugin's wins) |
 | Build / debug | `lspProfiles`, `dapProviders`, `problemMatchers`, `testProviders`, `taskPresets` (toolbar presets), `projectTemplates` |
 | AI | `toolCalls`, `toolGroups`, `skills`, `systemMessageSections`, `agentModes`, `mcpServers`, `modelProviders`, `chatSlashCommands` |

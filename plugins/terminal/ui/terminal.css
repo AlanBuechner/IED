@@ -1,0 +1,25 @@
+/* terminal.css - the terminal dock (docs/15): the header's tabs and buttons, the screens, the lease bar and the phone's
+   key row. Tokens only (docs/07). */
+
+.term-head { display: flex; align-items: center; gap: var(--space-1); height: 30px; padding: 0 var(--space-2); flex: none; background: var(--bg-0); border-bottom: var(--border-width) solid var(--border-0); }
+.panel-dock.collapsed .term-head { border-bottom: 0; }
+.term-tabs { display: flex; align-items: stretch; height: 100%; min-width: 0; overflow-x: auto; }
+.term-tab { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap; border-bottom: 2px solid transparent; }
+.term-tab:hover { color: var(--text-0); background: var(--veil); }
+.term-tab.on { color: var(--text-0); border-bottom-color: var(--focus); }
+.term-tab.exited span { color: var(--text-3); }
+.term-tab .ci { width: 14px; height: 14px; }
+.term-rename { height: 20px; width: 140px; font-size: var(--font-size-sm); }
+.term-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.term-screens { position: relative; flex: 1; min-height: 0; }
+.term-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.term-view[hidden] { display: none; }
+.term-host { flex: 1; min-height: 0; padding: var(--space-1) 0 0 var(--space-3); background: var(--bg-1); }
+.term-host .xterm { height: 100%; }
+.term-host .xterm-viewport { background: var(--bg-1) !important; }
+.term-bar { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--bg-3); color: var(--text-1); font-size: var(--font-size-sm); flex: none; }
+.term-bar[hidden] { display: none; }
+.term-empty { padding: var(--space-4); font-size: var(--font-size-sm); }
+.term-empty[hidden] { display: none; }
+.term-keys { display: flex; gap: var(--space-2); padding: var(--space-2); overflow-x: auto; background: var(--bg-0); border-top: var(--border-width) solid var(--border-0); flex: none; }
+.term-keys .btn { min-width: 44px; height: 36px; }

@@ -8,6 +8,7 @@ import * as T from "./layouttree.js";
 import { initials, kindIcon } from "./workspaces.js";
 import { StatusBar } from "./statusbar.js";
 import { ToolbarItems } from "./toolbaritems.js";
+import { PanelDock } from "./paneldock.js";
 import { banners } from "./banners.js";
 
 export class DesktopChrome {
@@ -20,7 +21,8 @@ export class DesktopChrome {
 		this.area = h("main.activity-area");
 		this.status = new StatusBar(shell);
 		this.toolbarItems = new ToolbarItems(shell);
-		this.app = h("div.app.desktop", null, this.sidebar, this.menubar, this.toolbar, this.banners, this.area, this.status.el);
+		this.panel = new PanelDock(shell, false);
+		this.app = h("div.app.desktop", null, this.sidebar, this.menubar, this.toolbar, this.banners, this.area, this.panel.el, this.status.el);
 		this.docks = new Map();
 		this.state = "connecting";
 		this.message = null;
@@ -33,6 +35,7 @@ export class DesktopChrome {
 	dispose() {
 		this.stopContext();
 		this.toolbarItems.release();
+		this.panel.release();
 		this.status.dispose();
 		for (const dock of this.docks.values()) dock.container.remove();
 		this.docks.clear();
@@ -45,6 +48,8 @@ export class DesktopChrome {
 		this.renderToolbar();
 		this.renderBanners();
 		this.renderActivity();
+		this.panel.mount();
+		this.panel.render();
 		this.status.render();
 	}
 
@@ -70,6 +75,9 @@ export class DesktopChrome {
 		this.toolbarItems.release();
 		this.toolbarDrawn = null;
 		this.renderToolbar();
+		this.panel.release();
+		this.panel.mount();
+		this.panel.render();
 		this.status.contributionsChanged();
 	}
 

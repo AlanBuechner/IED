@@ -1,0 +1,42 @@
+// The terminal dock (docs/15 "Terminal dock", docs/10 "Terminals"): the server's terminals - shells under a pseudo
+// console that outlive every browser - as tabs in the panel under every activity (a slide-up drawer on a phone, with a
+// row of the keys a phone keyboard lacks). One window types at a time; the others watch and can take over.
+{
+	"manifestVersion": 1,
+	"id": "ied.terminal",
+	"name": "Terminal",
+	"version": "0.1.0",
+	"description": "Terminals on the server: the terminal dock, shared by every window and device.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
+	"permissions": ["terminal", "process.spawn"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Terminal" },
+		"panels": [
+			{ "id": "ied.terminal.panel", "title": "Terminal", "icon": "$(terminal)", "view": "TerminalPanel" }
+		],
+		"commands": [
+			{ "id": "ied.terminal.new", "title": "New Terminal", "category": "Terminal", "icon": "$(add)" },
+			{ "id": "ied.terminal.kill", "title": "Kill Terminal", "category": "Terminal", "icon": "$(trash)" },
+			{ "id": "ied.terminal.rename", "title": "Rename Terminal...", "category": "Terminal", "icon": "$(edit)" },
+			{ "id": "ied.terminal.show", "title": "Terminal", "category": "View", "icon": "$(terminal)" },
+			{ "id": "ied.terminal.openHere", "title": "Open in Terminal", "category": "Solution Explorer", "icon": "$(terminal)" }
+		],
+		"menus": {
+			"menubar/view": [
+				{ "command": "ied.terminal.show", "group": "3_panel" }
+			],
+			"explorer/context": [
+				{ "command": "ied.terminal.openHere", "group": "6_terminal", "when": "explorerItemKind == 'folder' || explorerItemKind == 'project'" }
+			],
+			"terminal/context": [
+				{ "command": "ied.terminal.rename", "group": "1_edit" },
+				{ "command": "ied.terminal.kill", "group": "2_kill" }
+			]
+		},
+		"keybindings": [
+			{ "command": "ied.terminal.new", "key": "ctrl+shift+`" }
+		]
+	}
+}
