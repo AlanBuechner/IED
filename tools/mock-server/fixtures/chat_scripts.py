@@ -80,8 +80,15 @@ LONG = [
 	("end", "finished", {}),
 ]
 
-SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG}
-KEYWORDS = [("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
+SNAP = [
+	("tool", {"name": "game_snap", "args": {}, "result": {"preview": "the game's screen, 320x180\n[image shots/screen.png]", "images": [{"mime": "image/png", "path": "shots/screen.png"}]},
+		"ms": 41, "source": "plugin game.snap"}),
+	("text", "The screen shows a red rectangle at the top left and a blue circle on the right.\n"),
+	("end", "finished", {}),
+]
+
+SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP}
+KEYWORDS = [("screen", "snap"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
 	("long", "long"), ("essay", "long"), ("error", "error"), ("fail", "error")]
 
 SEED_TURNS = [

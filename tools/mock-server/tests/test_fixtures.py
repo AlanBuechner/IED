@@ -25,6 +25,14 @@ class ChatTests(MockCase):
 		again = await client.request("chat.send", {"chatId": "c1", "text": "how does the player move?"}, op_id="op-1")
 		self.assertEqual(result, again, "a retried send with the same opId is not sent twice")
 
+	async def test_a_tool_shows_an_image(self):
+		client = await self.client()
+		await self.subscribed(client, "chat:c1")
+		await client.request("chat.send", {"chatId": "c1", "text": "what is on the screen?"})
+		frames = await client.wait_for("chat:c1", lambda f: f.get("kind") == "turn.end")
+		done = [f["data"] for f in frames if f.get("kind") == "tool.state" and f["data"]["state"] == "ok"][0]
+		self.assertEqual([{"mime": "image/png", "path": "shots/screen.png"}], done["result"]["images"])
+
 	async def test_snapshot_mid_stream_plus_later_deltas_rebuilds_the_text(self):
 		client = await self.client()
 		await client.sub(["chat:c2"])
@@ -287,6 +295,12 @@ class HttpTests(MockCase):
 		upgrade = b"GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nOrigin: %s\r\n\r\n"
 		self.assertEqual(403, (await self.http(upgrade % b"http://evil.example"))[0])
 		self.assertEqual(101, (await self.http(upgrade % b"http://127.0.0.1:9999", head_only=True))[0])
+
+	async def test_a_workspace_image_and_nothing_else(self):
+		status, body = await self.http(b"GET /w/w1/files/shots/screen.png HTTP/1.1\r\nHost: localhost\r\n\r\n")
+		self.assertEqual((200, b"\x89PNG"), (status, body[:4]))
+		for path in (b"/w/w1/files/README.md", b"/w/w9/files/shots/screen.png", b"/w/w1/files/shots/missing.png"):
+			self.assertEqual(404, (await self.http(b"GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n" % path))[0], path)
 
 	async def test_static_root_cannot_be_escaped(self):
 		status, _ = await self.http(b"GET /_mock/../state.py HTTP/1.1\r\nHost: localhost\r\n\r\n")

@@ -108,6 +108,7 @@ namespace Ai
 		message->role = Core::String("tool");
 		message->toolCallId = Core::String(modelId);
 		message->content = outcome.content.ByteLength() <= kRunKeptToolResultBytes ? outcome.content : Core::String(outcome.content.View().Substring(0, kRunKeptToolResultBytes)) + "\n[result truncated]";
+		message->images = outcome.images;
 		turn->messages.Push(message);
 		TrackLoop(call, outcome);
 		if (malformed > kRunMalformedBound) Pause(Core::StringView("malformed_tool_call"), Core::StringView("the model kept sending tool arguments that do not fit the tool's schema"));
@@ -343,6 +344,7 @@ namespace Ai
 		segment->plus = outcome.plus;
 		segment->minus = outcome.minus;
 		segment->source = outcome.source.IsEmpty() ? Core::String("built-in") : outcome.source;
+		segment->images = outcome.images;
 		IED::JsonWriter data;
 		data.BeginObject();
 		data.Field("callId", segment->callId.View());
@@ -355,6 +357,7 @@ namespace Ai
 		data.BeginObject();
 		data.Field("preview", segment->preview.View());
 		data.BoolField("isError", segment->isError);
+		if (!segment->images.IsEmpty()) WriteToolImages(data, segment->images);
 		data.EndObject();
 		data.EndObject();
 		chats->Publish(chat, "tool.state", data.View());

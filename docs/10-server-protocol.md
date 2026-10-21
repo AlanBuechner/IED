@@ -182,6 +182,7 @@ Language servers receive changes from the server's document store (the server is
 { "t":"evt","topic":"chat:42","seq":1099,"kind":"turn.end","data":{"turnId":"u7","stop":"finished","recoveries":[],"tokensIn":18233,"tokensOut":911,"ttftMs":1400,"genMs":23800,"endedMs":1792586000000} }
 ```
 
+- A tool's `result` may carry `images` (`[{mime, path}]`, files in the workspace a tool showed the model, `docs/13` "Images in tool results"); the card shows them from `GET /w/<wsId>/files/<path>`.
 - Deltas go out as the model server streams them; a client that falls behind gets a segment's queued deltas merged into one (`chat:*` is coalescible, "Backpressure" above), so a phone on a slow link gets fewer, larger frames.
 - `stop` is `finished`, `user_cancelled`, `no_model`, `interrupted` or the stop reason that paused the chat (`docs/12` taxonomy); the recoveries say what the harness did on the way ("Chats" below).
 
@@ -200,7 +201,7 @@ A chat belongs to a workspace and to the server: a turn runs on the server until
 | `chat.approve` | `chatId, approvalId, decision` (`allow`, `deny`, `chat`), `message?` (a denial's reason, given to the model) | `{decision}`. `chat` allows the call and adds the approval's `subject` rule to the chat's own allow rules ("Allow for this chat"). "Always allow" is the client's: it adds the rule to `ai.permissions.allow` with `settings.set` (app tier), then answers `allow`. `conflict {decision, by}` when another device answered first, `not_found` when the approval is gone |
 | `chat.answer` | `chatId, questionId, answer` | `{}`: the `ask_user` question's answer; `conflict` when answered already |
 | `chat.history` | `chatId, before?, limit?` (20) | `{turns, hasMore}`: the turns before `before` (a turnId; the newest without it) |
-| `ai.probe` | `wsId, model` (an `ai.models` name) or `wsId, profile` (an entry not saved yet) | `{ok, error?, server, models, modelServed, contextWindow, trainContext, slots, ms}`: what the model's server says of itself - `GET <endpoint>/models` (the ids; vLLM's `max_model_len`, llama.cpp's `meta.n_ctx`) and `GET <root>/props` (llama.cpp: the slot context and the slots, `server` "llama.cpp"). A saved model's window is kept for its turns (`docs/12` "Truth about the model's context window") |
+| `ai.probe` | `wsId, model` (an `ai.models` name) or `wsId, profile` (an entry not saved yet) | `{ok, error?, server, models, modelServed, contextWindow, trainContext, slots, vision, ms}`: what the model's server says of itself - `GET <endpoint>/models` (the ids; vLLM's `max_model_len`, llama.cpp's `meta.n_ctx`) and `GET <root>/props` (llama.cpp: the slot context, the slots and whether it takes images, `modalities.vision`; `server` "llama.cpp"). A saved model's window is kept for its turns (`docs/12` "Truth about the model's context window") |
 | `chat.delete` | `chatId` | `{}`; `conflict` while a turn runs. Its files go too (`.ied/local/chats/<chatId>/`) |
 
 | Topic | Events | Snapshot |

@@ -1,5 +1,6 @@
 include "api/plugin.ch"
 include "chat.ch"
+include "images.ch"
 
 namespace Ai
 {
@@ -43,6 +44,27 @@ namespace Ai
 
 	// --- Segments and messages ---------------------------------------------------------------------------------------
 
+	void WriteToolImages(IED::JsonWriter& json, const Core::Array<IED::ToolImage>& images) {
+		json.Key(Core::StringView("images"));
+		json.BeginArray();
+		for (const IED::ToolImage& image : images) {
+			json.BeginObject();
+			json.Field("mime", image.mime.View());
+			json.Field("path", image.path.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void ReadToolImages(const Serialization::DomNode& list, Core::Array<IED::ToolImage>& images) {
+		for (int64 i = 0; i < list.Count(); ++i) {
+			IED::ToolImage image;
+			image.mime = Core::String(list.At(i).Member("mime").AsView());
+			image.path = Core::String(list.At(i).Member("path").AsView());
+			images.Push(image);
+		}
+	}
+
 	void Segment::WriteJson(IED::JsonWriter& json) const {
 		json.BeginObject();
 		WriteFields(json);
@@ -68,6 +90,7 @@ namespace Ai
 				json.BeginObject();
 				json.Field("preview", preview.View());
 				json.BoolField("isError", isError);
+				if (!images.IsEmpty()) WriteToolImages(json, images);
 				json.EndObject();
 			}
 		}
@@ -93,6 +116,7 @@ namespace Ai
 		minus = node.Member("minus").AsInt();
 		preview = Core::String(node.Member("result").Member("preview").AsView());
 		isError = node.Member("result").Member("isError").AsBool();
+		ReadToolImages(node.Member("result").Member("images"), images);
 		tokens = node.Member("tokens").AsInt();
 	}
 
@@ -100,6 +124,17 @@ namespace Ai
 		json.BeginObject();
 		json.Field("role", role.View());
 		json.Field("content", content.View());
+		if (!toolCalls.IsEmpty()) json.RawField("tool_calls", toolCalls.View());
+		if (!toolCallId.IsEmpty()) json.Field("tool_call_id", toolCallId.View());
+		if (!images.IsEmpty()) WriteToolImages(json, images);
+		json.EndObject();
+	}
+
+	void ModelMessage::WriteRequest(IED::JsonWriter& json, bool vision) const {
+		json.BeginObject();
+		json.Field("role", role.View());
+		Core::String text = vision ? content : content + ImagesAsText(images).View();
+		json.Field("content", text.View());
 		if (!toolCalls.IsEmpty()) json.RawField("tool_calls", toolCalls.View());
 		if (!toolCallId.IsEmpty()) json.Field("tool_call_id", toolCallId.View());
 		json.EndObject();
@@ -110,6 +145,7 @@ namespace Ai
 		content = Core::String(node.Member("content").AsView());
 		if (node.Member("tool_calls").IsValid()) toolCalls = IED::NodeJson(node.Member("tool_calls"));
 		toolCallId = Core::String(node.Member("tool_call_id").AsView());
+		ReadToolImages(node.Member("images"), images);
 	}
 
 	// --- Turns -------------------------------------------------------------------------------------------------------

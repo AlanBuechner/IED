@@ -966,7 +966,8 @@ def phone_panes(run):
 	page.wait_for_selector(".phone-pane .tree-row")
 	page.click(".phone-nav .pn[aria-label='More']")
 	page.wait_for_selector(".menu.sheet")
-	check("Keyboard Shortcuts" in run.texts(".menu.sheet .menu-item .label"), "More lists the rest")
+	more = run.texts(".menu.sheet .menu-item .label")
+	check("Keyboard Shortcuts" in more and "Settings" in more, "More lists the rest, Settings among it (no gear on a phone)")
 	run.shot("more")
 
 
@@ -1018,6 +1019,18 @@ def chat_turn_with_approval(run):
 	if not run.phone:
 		check(page.is_visible(".chat-panel .chat-sec-row.file"), "the changed file is listed in the panel")
 	run.shot("finished")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def chat_tool_image(run):
+	"""A tool's result shows an image (docs/13 "Images in tool results"): the card shows it, open or closed. The real
+	server's side is a server check (test_chat), which needs a plugin with code."""
+	page = open_chat(run)
+	send(page, "what is on the screen?")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=20000)
+	page.wait_for_function("(() => { const i = document.querySelector('.chat-tool-images img'); return i && i.complete && i.naturalWidth === 320; })()", timeout=10000)
+	check(page.get_attribute(".chat-tool-images a", "title") == "shots/screen.png", "the image's path on hover")
+	run.shot("image")
 
 
 @scenario(viewports=("desktop",))

@@ -17,11 +17,20 @@ namespace IED
 		public bool Cancelled() const { return cancelled && *cancelled; }
 	}
 
+	// An image the result shows the model: a file in the call's workspace. A model that sees images is sent it; one that
+	// does not is told its path.
+	class ToolImage
+	{
+		public Core::String mime;   // image/png, image/jpeg, image/webp or image/gif
+		public Core::String path;   // relative to the workspace root (an absolute path inside it is accepted)
+	}
+
 	class ToolResult
 	{
 		public Core::String content;   // what the model is told
 		public Core::String preview;   // what the tool card shows; the content when empty
 		public bool isError;
+		public Core::Array<ToolImage> images;
 	}
 
 	ToolResult ToolText(Core::StringView content);

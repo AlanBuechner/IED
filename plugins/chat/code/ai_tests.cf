@@ -215,6 +215,9 @@ class ProbeTests {
 		assert_eq((int64)65536, probe.contextWindow, "the slot context wins over the model's");
 		assert_eq((int64)4, probe.slots, "slots");
 		assert_true(probe.models.Count() == 1 && probe.models[0].View() == "qwen", "the ids");
+		assert_true(!probe.vision, "no modalities: no images");
+		Ai::ReadProps(View("{\"default_generation_settings\": {\"n_ctx\": 8192}, \"modalities\": {\"vision\": true, \"audio\": false}}"), probe);
+		assert_true(probe.vision, "a vision projector loaded");
 	}
 
 	[test("vllm_max_model_len")]

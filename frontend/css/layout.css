@@ -344,6 +344,8 @@ dl.facts dd { margin: 0; }
 	display: grid;
 	height: 100vh;
 	height: 100dvh;
+	overflow: hidden;   /* the collapsed drawer waits below the nav; clip, so focus cannot scroll the shell to it */
+	overflow: clip;
 	grid-template-columns: minmax(0, 1fr);
 	grid-template-rows: auto auto minmax(0, 1fr) auto auto;
 	grid-template-areas: "phead" "banner" "main" "pstrip" "pnav";

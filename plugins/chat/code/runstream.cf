@@ -1,9 +1,11 @@
 include "api/plugin.ch"
 include "run.ch"
+include "images.ch"
 
 namespace Ai
 {
 	const char* kTrimmedNote = "\n[trimmed to save context; call the tool again if you need it]";
+	const char* kImagesTrimmedNote = "\n[its images were left out to save context; call the tool again if you need them]";
 	const int64 kTrimmedKeepBytes = 300;
 	const int64 kTrimBelowBytes = 600;
 	const int64 kRecentMessagesKept = 4;
@@ -19,8 +21,28 @@ namespace Ai
 		json.Raw(text.View());
 	}
 
-	Core::String TurnRun::RequestBody() {
+	// The messages as a request sends them: after a step's results, the images they name in a user message, to a model
+	// that sees images (images.ch). The bytes of base64 written.
+	static int64 WriteMessages(IED::JsonWriter& json, Core::StringView root, const Core::Array<ModelMessage*>& messages, bool vision) {
+		int64 encoded = 0;
+		Core::Array<ModelMessage*> shown;
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			ModelMessage* message = messages[i];
+			message->WriteRequest(json, vision);
+			if (vision && !message->images.IsEmpty()) shown.Push(message);
+			const bool resultsEnd = i + 1 == messages.Count() || messages[i + 1]->role != "tool";
+			if (resultsEnd && !shown.IsEmpty()) {
+				encoded += WriteImagesMessage(json, root, shown);
+				shown.Clear();
+			}
+		}
+		return encoded;
+	}
+
+	Core::String TurnRun::RequestBody(int64& promptTokens) {
 		ModelProfile* profile = candidates[candidate];
+		int64 encoded = 0;
+		int64 images = 0;
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("model", profile->model.View());
@@ -31,8 +53,10 @@ namespace Ai
 		json.Field("content", system.View());
 		json.EndObject();
 		for (Turn* each : chat->turns)
-			if (!each->compressed)
-				for (ModelMessage* message : each->messages) message->WriteJson(json);
+			if (!each->compressed) {
+				encoded += WriteMessages(json, ws.root.View(), each->messages, profile->vision);
+				if (profile->vision) images += CountImages(each->messages);
+			}
 		json.EndArray();
 		json.RawField("tools", tools->RequestTools(chat->mode).View());
 		json.BoolField("stream", true);
@@ -43,7 +67,9 @@ namespace Ai
 		if (role.hasTemperature) WriteTemperature(json, role.temperature);
 		if (profile->maxOutput > 0) json.IntField("max_tokens", profile->maxOutput);
 		json.EndObject();
-		return json.ToString();
+		Core::String body = json.ToString();
+		promptTokens = (body.ByteLength() - encoded) / 4 + images * kToolImageTokens;
+		return body;
 	}
 
 	StepRequest TurnRun::Request() {
@@ -52,12 +78,11 @@ namespace Ai
 		request.url = profile->CompletionsUrl();
 		Core::String key;
 		if (!profile->apiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile->apiKeyEnv.CStr(), key)) request.headers.Push(Core::String("Authorization: Bearer ") + key.View());
-		request.body = RequestBody();
+		request.body = RequestBody(request.promptTokens);
 		double rate = profile->prefillRate;
 		chats->prefillRates.TryGet(profile->name, rate);
-		const int64 promptTokens = request.body.ByteLength() / 4;
 		request.connectMs = profile->connectMs;
-		request.prefillMs = profile->prefillBaseMs + (int64)((double)promptTokens * 2000.0 / rate);
+		request.prefillMs = profile->prefillBaseMs + (int64)((double)request.promptTokens * 2000.0 / rate);
 		request.prefillExtendMs = profile->prefillBaseMs;
 		request.idleMs = profile->idleMs;
 		request.capMs = profile->stepCapMs;
@@ -200,7 +225,7 @@ namespace Ai
 		int64 bytes = system.ByteLength();
 		for (Turn* each : chat->turns)
 			if (!each->compressed)
-				for (ModelMessage* message : each->messages) bytes += message->content.ByteLength() + message->toolCalls.ByteLength();
+				for (ModelMessage* message : each->messages) bytes += message->content.ByteLength() + message->toolCalls.ByteLength() + message->images.Count() * kToolImageTokens * 4;
 		return bytes / 4;
 	}
 
@@ -217,7 +242,7 @@ namespace Ai
 		for (Turn* each : chat->turns)
 			if (!each->compressed)
 				for (ModelMessage* message : each->messages) {
-					if (message->role == "tool") results += message->content.ByteLength();
+					if (message->role == "tool") results += message->content.ByteLength() + message->images.Count() * kToolImageTokens * 4;
 					else messages += message->content.ByteLength() + message->toolCalls.ByteLength();
 				}
 		IED::JsonWriter json;
@@ -267,7 +292,13 @@ namespace Ai
 			for (int64 i = 0; i < each->messages.Count(); ++i) {
 				ModelMessage* message = each->messages[i];
 				if (each == turn && i >= each->messages.Count() - kRecentMessagesKept) continue;
-				if (message->role != "tool" || message->content.ByteLength() < kTrimBelowBytes) continue;
+				if (message->role != "tool") continue;
+				if (!message->images.IsEmpty()) {
+					message->images.Clear();
+					message->content = message->content + kImagesTrimmedNote;
+					changed = true;
+				}
+				if (message->content.ByteLength() < kTrimBelowBytes) continue;
 				message->content = Core::String(message->content.View().Substring(0, kTrimmedKeepBytes)) + kTrimmedNote;
 				changed = true;
 			}

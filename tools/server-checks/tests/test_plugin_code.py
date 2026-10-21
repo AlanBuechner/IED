@@ -149,8 +149,8 @@ class PluginCodeTests(ServerTestCase):
 	def builtin(self, body, code):
 		return self.add(os.path.join(self.home, "plugins", body["id"]), body, code)
 
-	def start(self):
-		self.server = IedServer(extra=("--home", self.home, "--workspace", self.repo))
+	def start(self, data=None):
+		self.server = IedServer(data=data, extra=("--home", self.home, "--workspace", self.repo))
 		self.assertTrue(self.server.started, self.server.error)
 		self.cookie = self.server.sign_in()
 
@@ -298,6 +298,23 @@ class PluginCodeTests(ServerTestCase):
 		self.assertIn("previous one runs", code.get("problem", ""))
 		self.assertIn("missing_name", code["problem"])
 		self.assertEqual(2, (await self.echo("v"))["version"], "the build that compiled still answers")
+
+	async def test_a_restart_links_the_kept_build(self):
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "5")})
+		data = os.path.join(self.root, "data")
+		self.start(data)
+		await self.connect()
+		code = await self.settled("test.probe")
+		self.assertEqual("active", code["state"], code)
+		self.assertNotIn("cached", code, "the first start compiles")
+		self.assertTrue(os.listdir(os.path.join(data, "script-cache")), "and keeps the build")
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.start(data)
+		await self.connect()
+		code = await self.settled("test.probe")
+		self.assertEqual(("active", True), (code["state"], code.get("cached")), code)
+		self.assertEqual(5, (await self.echo("x"))["version"], "the kept build runs")
 
 	async def test_the_example_plugin_compiles(self):
 		shutil.copytree(os.path.join(REPO, "shared", "host-api", "examples", "markup-plugin"), os.path.join(self.home, "plugins", "dialogue"))

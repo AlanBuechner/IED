@@ -30,6 +30,7 @@ The first stdout line is `LISTENING http://<host>:<port>`. Every frame the mock 
 | `PUT /api/upload` -> `GET /api/blob/<id>` | attachment blobs (in memory) |
 | `GET /_mock/` | debug console: hello/resume with cursors in sessionStorage, subscribe, send requests, drop and resume the socket |
 | `GET /plugins/<id>/<path>`, `GET /w/<wsId>/plugins/<id>/<path>` | a loaded built-in plugin's files (the repository's `plugins/`), as the real server serves them |
+| `GET /w/<wsId>/files/<path>` | a workspace image (`fixtures/workspace_files.py` `IMAGES`: `shots/screen.png`, not in the tree since the mock's files are text); image types only, with `nosniff` and a sandboxing CSP |
 | `GET /ui-kit/<path>`, `GET /codicons/<name>.svg` | `shared/ui-kit/`, and one codicon from `third_party/codicons` |
 | `GET /*` | files from `--static`, else a redirect to `/_mock/` |
 
@@ -85,7 +86,7 @@ Params are objects; ids such as `w1`, `c1`, `d1`, `r1`, `t1` come from the fixtu
 | `chat.stop`, `chat.history`, `chat.approve` | `chatId` / `chatId, before?, limit?` / `chatId, approvalId, decision: allow\|deny` (first answer wins; later ones get `conflict {decision, by}`) |
 | `testhooks.*` | see `tools/conformance/README.md` |
 
-Chat scripts (`fixtures/chat_scripts.py`) are picked by `mockScript` or by a keyword in the text: `approv`/`run `/`test` -> `approval`, `long`/`essay` -> `long`, `error`/`fail` -> `error`, else `default` (thinking, two tool calls, tasks, markdown answer). Seeded chats: `c1` (two finished turns), `c2` (empty).
+Chat scripts (`fixtures/chat_scripts.py`) are picked by `mockScript` or by a keyword in the text: `screen` -> `snap` (a plugin tool whose result shows `shots/screen.png`), `approv`/`run `/`test` -> `approval`, `long`/`essay` -> `long`, `error`/`fail` -> `error`, else `default` (thinking, two tool calls, tasks, markdown answer). Seeded chats: `c1` (two finished turns), `c2` (empty).
 
 ## Protocol decisions the mock had to make
 

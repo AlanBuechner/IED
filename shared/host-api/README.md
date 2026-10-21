@@ -12,7 +12,7 @@ Versioned definitions that the server, the web client and every plugin code agai
 | `protocol/frames.v1.schema.json` | WebSocket frames | v1 draft, ready | `docs/10` |
 | `examples/` | A game-shaped solution + project (`MyGame.ied.sln`, `Game.ied.proj`), and `markup-plugin`: a project's own language as a plugin with C4 code (`docs/26`) | illustrative; the plugin's code compiles in the server checks | - |
 
-Validate the examples after any schema change (a minimal validator is enough; the schemas use only: type, required, properties, additionalProperties, items, enum, const, pattern, oneOf, minItems, local and cross-file `$ref`).
+Validate the examples after any schema change. The schemas use a draft 2020-12 subset: the assertions type, required, properties, additionalProperties, items, enum, const, pattern, minLength, maxLength, minimum, maximum, minItems, maxItems, uniqueItems, oneOf, anyOf and local or cross-file `$ref`, with annotations (title, description, default, format, `$defs`, `x-` keys). `tools/pylib/minischema.py` and Bedrock's `Serialization::ValidateJson` implement exactly that dialect (and a few more assertions: exclusiveMinimum, exclusiveMaximum, allOf, not) and reject any other keyword, so a schema cannot rely on one they ignore.
 
 ## Conventions shared by all formats
 

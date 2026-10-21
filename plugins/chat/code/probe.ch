@@ -19,6 +19,7 @@ namespace Ai
 		public int64 contextWindow;                   // per slot; 0 when the server does not say
 		public int64 trainContext;
 		public int64 slots;
+		public bool vision;                           // llama.cpp's /props says it takes images
 		public int64 ms;
 
 		public Core::String JsonText() const;

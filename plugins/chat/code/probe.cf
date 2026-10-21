@@ -48,6 +48,7 @@ namespace Ai
 		probe.server = Core::String("llama.cpp");
 		probe.contextWindow = Count(slotContext);
 		probe.slots = Count(props.Member("total_slots"));
+		probe.vision = props.Member("modalities").Member("vision").AsBool();
 	}
 
 	// A GET's status and body; false with `error` when nothing usable came back in time.
@@ -117,6 +118,7 @@ namespace Ai
 		json.IntField("contextWindow", contextWindow);
 		json.IntField("trainContext", trainContext);
 		json.IntField("slots", slots);
+		json.BoolField("vision", vision);
 		json.IntField("ms", ms);
 		json.EndObject();
 		return json.ToString();

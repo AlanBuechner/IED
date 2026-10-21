@@ -1,5 +1,6 @@
 include "api/plugin.ch"
 include "codetools.ch"
+include "images.ch"
 
 namespace Ai
 {
@@ -29,6 +30,26 @@ namespace Ai
 		return plan;
 	}
 
+	// The result's images a request can send; the others named in its text, with why. The card names them all.
+	static void AttachImages(ToolOutcome& outcome, const IED::Workspace& ws, const Core::Array<IED::ToolImage>& images) {
+		if (images.IsEmpty()) return;
+		Core::Array<Core::String> notes;
+		outcome.images = AcceptedImages(ws, images, notes);
+		Core::StringBuilder shown;
+		shown.Append(outcome.preview.IsEmpty() ? outcome.content.View() : outcome.preview.View());
+		for (const IED::ToolImage& image : outcome.images) {
+			shown.Append("\n[image ");
+			shown.Append(image.path.View());
+			shown.Append("]");
+		}
+		for (const Core::String& note : notes) {
+			shown.Append("\n");
+			shown.Append(note.View());
+			outcome.content = (outcome.content + "\n") + note.View();
+		}
+		outcome.preview = shown.ToString();
+	}
+
 	static ToolOutcome CodeToolRun(const CodeToolEntry* entry, const ToolInvocation& call) {
 		const int64 started = clock_now_ns();
 		IED::ToolCall request;
@@ -40,6 +61,7 @@ namespace Ai
 		IED::ToolResult result = IED::RunPluginTool(entry->pluginId.View(), entry->entry, request, entry->seconds);
 		ToolOutcome outcome = ToolResult(result.content.View(), result.preview.View());
 		outcome.isError = result.isError;
+		AttachImages(outcome, call.ws, result.images);
 		outcome.source = (Core::String("plugin ") + entry->pluginId.View());
 		outcome.ms = (clock_now_ns() - started) / 1000000;
 		outcome.timed = true;

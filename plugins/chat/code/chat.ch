@@ -38,6 +38,7 @@ namespace Ai
 		public int64 plus;                 // lines a write added and removed
 		public int64 minus;
 		public Core::String source;        // where the tool ran ("built-in", "Output: AI")
+		public Core::Array<IED::ToolImage> images;   // what the result showed the model, for the card
 		public int64 tokens;
 
 		public void WriteJson(IED::JsonWriter& json) const;
@@ -46,6 +47,9 @@ namespace Ai
 		public void Read(const Serialization::DomNode& node);
 	}
 
+	// `images` as the chat keeps them and the card gets them: [{mime, path}].
+	void WriteToolImages(IED::JsonWriter& json, const Core::Array<IED::ToolImage>& images);
+
 	// One message as the model is sent it: role "user", "assistant" or "tool".
 	class ModelMessage
 	{
@@ -53,8 +57,12 @@ namespace Ai
 		public Core::String content;
 		public Core::String toolCalls;     // an assistant's calls, the JSON array of the request format; empty for none
 		public Core::String toolCallId;    // a tool result's call
+		public Core::Array<IED::ToolImage> images;   // a tool result's images (images.ch)
 
+		// As the chat keeps it.
 		public void WriteJson(IED::JsonWriter& json) const;
+		// As a request sends it: the images named in the text to a model that does not see them.
+		public void WriteRequest(IED::JsonWriter& json, bool vision) const;
 		public void Read(const Serialization::DomNode& node);
 	}
 

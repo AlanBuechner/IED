@@ -1,4 +1,8 @@
-"""The fake workspace: a small, language-neutral C project (tree, documents, diagnostics targets)."""
+"""The fake workspace: a small, language-neutral C project (tree, documents, diagnostics targets) and an image a tool
+shows."""
+
+import struct
+import zlib
 
 WORKSPACE = {"wsId": "w1", "name": "demo", "root": "C:/mock/demo"}
 
@@ -116,6 +120,27 @@ FILES = {
 }
 
 DIRECTORIES = ["scratch"]
+
+
+def _png(width, height, pixel):
+	"""An RGB PNG of `pixel(x, y)`."""
+	rows = b"".join(b"\x00" + b"".join(bytes(pixel(x, y)) for x in range(width)) for y in range(height))
+
+	def chunk(kind, data):
+		return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+	return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b"")
+
+
+def _screen(x, y):
+	if 20 <= x < 140 and 30 <= y < 90:
+		return (200, 60, 60)
+	if (x - 230) ** 2 + (y - 110) ** 2 < 40 ** 2:
+		return (60, 140, 220)
+	return (30 + x * 40 // 320, 30 + y * 40 // 180, 50)
+
+
+# Images served from /w/<wsId>/files/ (not in the tree: the mock's files are text).
+IMAGES = {"shots/screen.png": _png(320, 180, _screen)}
 
 
 def generated_files(count):

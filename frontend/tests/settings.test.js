@@ -54,6 +54,7 @@ test("settings: a model profile from its form", () => {
 	assertThrows(() => profileFrom({ name: "", endpoint: "http://a/v1", model: "", contextWindow: "", maxOutput: "", privacy: "local", apiKeyEnv: "" }), Error, "a name");
 	assertThrows(() => profileFrom({ name: "x", endpoint: "http://a/v1", model: "", contextWindow: "1.5", maxOutput: "", privacy: "local", apiKeyEnv: "" }), Error, "a whole window");
 	assertEqual(probeLine({ ok: true, server: "llama.cpp", slots: 4, contextWindow: 262144, models: ["qwen"], ms: 12 }), "llama.cpp \u00b7 4 slots \u00b7 262k context \u00b7 serves qwen \u00b7 12 ms");
+	assertEqual(probeLine({ ok: true, server: "llama.cpp", slots: 1, contextWindow: 0, vision: true, models: ["gemma"], ms: 5 }), "llama.cpp \u00b7 1 slot \u00b7 takes images \u00b7 serves gemma \u00b7 5 ms");
 	assertEqual(probeLine({ ok: false, error: "connection refused", models: [] }), "Not reachable: connection refused");
 });
 

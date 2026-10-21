@@ -50,7 +50,8 @@ namespace Ai
 		private bool Sleep(int64 ms);
 
 		// --- runstream.cf: requests and streaming ---
-		private Core::String RequestBody();
+		// The request's JSON; `promptTokens` its estimate, images counted as images.
+		private Core::String RequestBody(int64& promptTokens);
 		private StepRequest Request();
 		private void OnEvent(StepEventKind kind, Core::StringView text, int64 call);
 		private Segment* NewSegment(const char* type);

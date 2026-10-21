@@ -18,6 +18,9 @@ CODICONS_DIR = REPO / "third_party" / "codicons" / "src" / "icons"
 CODICON_MAPPING = REPO / "third_party" / "codicons" / "src" / "template" / "mapping.json"
 CODICON_FILE = re.compile(r"^[a-z0-9-]+\.svg$")
 WORKSPACE_PLUGIN = re.compile(r"^/w/([^/]+)/plugins/(.*)$")
+WORKSPACE_FILE = re.compile(r"^/w/([^/]+)/files/(.*)$")
+# The image types a workspace file is served as (src/web/front.cf IsServedImage): none that is markup.
+SERVED_IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".ico": "image/x-icon"}
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]"}
 WILDCARD_BINDS = {"0.0.0.0", "::", ""}
 MAX_UPLOAD = 64 * 1024 * 1024
@@ -133,6 +136,9 @@ class Front:
 		match = WORKSPACE_PLUGIN.match(path)
 		if match:
 			return self._plugin_file(match.group(1), match.group(2))
+		match = WORKSPACE_FILE.match(path)
+		if match:
+			return self._workspace_image(match.group(1), urllib.parse.unquote(match.group(2)))
 		if path.startswith("/ui-kit/"):
 			return _file(UI_KIT_DIR, path[len("/ui-kit"):])
 		if path.startswith("/codicons/"):
@@ -152,6 +158,14 @@ class Front:
 		if target is None:
 			raise HttpError(404, "not found")
 		return Response(200, target.read_bytes(), CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream"))
+
+	def _workspace_image(self, ws_id, rel):
+		ws = self.server.workspace.items.get(ws_id)
+		content_type = SERVED_IMAGES.get(pathlib.PurePosixPath(rel).suffix.lower())
+		data = ws.images.get(rel) if ws and content_type else None
+		if data is None:
+			raise HttpError(404, "not found")
+		return Response(200, data, content_type, {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox"})
 
 	def _codicon(self, name):
 		target = CODICONS_DIR / name

@@ -1,6 +1,6 @@
 // modelsettings.js - Settings > AI > Models (docs/04 "Model profiles"): each ai.models profile with its endpoint, model,
-// window and privacy, a form to add or change one, and Test connection (ai.probe), which asks the server what it serves:
-// its models, its context per slot and its slots. Profiles live in the app tier (the User settings file), never in a
+// window, privacy and whether it sees images, a form to add or change one, and Test connection (ai.probe), which asks
+// the server what it serves: its models, its context per slot, its slots and whether it takes images. Profiles live in the app tier (the User settings file), never in a
 // repository; a key is only ever named by its environment variable.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
@@ -15,6 +15,7 @@ export function probeLine(probe) {
 	const parts = [probe.server];
 	if (probe.slots) parts.push(probe.slots + (probe.slots === 1 ? " slot" : " slots"));
 	if (probe.contextWindow) parts.push(compact(probe.contextWindow) + " context");
+	if (probe.vision) parts.push("takes images");
 	parts.push(probe.models.length ? "serves " + probe.models.join(", ") : "serves no model");
 	parts.push(probe.ms + " ms");
 	return parts.join(" \u00b7 ");
@@ -34,6 +35,7 @@ export function profileFrom(fields) {
 		profile[key] = value;
 	}
 	profile.privacy = fields.privacy;
+	if (fields.vision) profile.vision = true;
 	if (fields.apiKeyEnv.trim()) profile.apiKey = { env: fields.apiKeyEnv.trim() };
 	return { name, profile };
 }
@@ -78,6 +80,7 @@ export class ModelsPage {
 			h("div.set-model-facts", null,
 				h("span.mono", null, profile.endpoint), h("span", null, "model " + (profile.model || name)),
 				h("span", null, profile.contextWindow ? compact(profile.contextWindow) + " context" : "context: asked from the server"),
+				profile.vision ? h("span", null, "sees images") : null,
 				profile.apiKey ? h("span", null, "key from %" + profile.apiKey.env + "%") : null),
 			probe ? h("div.set-probe" + (probe.ok ? (probe.modelServed || !probe.models.length ? ".ok" : ".warn") : ".bad"), null,
 				icon(probe.ok ? "pass" : "error"), probeLine(probe),
@@ -92,11 +95,12 @@ export class ModelsPage {
 		};
 		const fields = {};
 		const privacy = h("select.input-field", { "aria-label": "Privacy" }, ...PRIVACY.map((p) => h("option", Object.assign({ value: p }, (profile.privacy || "local") === p ? { selected: true } : {}), p)));
+		const vision = h("input", Object.assign({ type: "checkbox", "aria-label": "Sees images" }, profile.vision ? { checked: true } : {}));
 		const message = h("div.set-message", { hidden: true });
 		const result = h("div.set-probe", { hidden: true });
 		const read = () => profileFrom({
 			name: fields.name.value, endpoint: fields.endpoint.value, model: fields.model.value, contextWindow: fields.contextWindow.value,
-			maxOutput: fields.maxOutput.value, privacy: privacy.value, apiKeyEnv: fields.apiKeyEnv.value,
+			maxOutput: fields.maxOutput.value, privacy: privacy.value, vision: vision.checked, apiKeyEnv: fields.apiKeyEnv.value,
 		});
 		const fail = (e) => {
 			message.textContent = e.message;
@@ -115,7 +119,7 @@ export class ModelsPage {
 			if (made.name !== name && models[made.name]) return fail(new Error("there is a model " + made.name + " already"));
 			const kept = Object.assign({}, models[name] || {}, made.profile);
 			if (!made.profile.apiKey) delete kept.apiKey;
-			for (const key of ["model", "contextWindow", "maxOutput"]) if (made.profile[key] === undefined) delete kept[key];
+			for (const key of ["model", "contextWindow", "maxOutput", "vision"]) if (made.profile[key] === undefined) delete kept[key];
 			if (name && name !== made.name) delete models[name];
 			models[made.name] = kept;
 			const error = await this.settings.set("ai.models", models, "app");
@@ -139,6 +143,7 @@ export class ModelsPage {
 			result.className = "set-probe " + (probe.ok ? "ok" : "bad");
 			replace(result, icon(probe.ok ? "pass" : "error"), probeLine(probe));
 			if (probe.ok && probe.contextWindow && !fields.contextWindow.value) fields.contextWindow.placeholder = "server says " + probe.contextWindow;
+			if (probe.ok && probe.vision && !vision.checked) vision.checked = true;
 			return null;
 		};
 		return h("div.set-model.editing", { dataset: { model: name || "new" } },
@@ -149,6 +154,7 @@ export class ModelsPage {
 				field("Context window", "contextWindow", profile.contextWindow, { placeholder: "asked from the server", inputmode: "numeric" }),
 				field("Max output", "maxOutput", profile.maxOutput, { placeholder: "the server's default", inputmode: "numeric" }),
 				h("label.set-field", null, h("span", null, "Privacy"), privacy),
+				h("label.set-field.set-check-field", null, h("span", null, "Sees images"), h("span", null, vision, " tool results' images are sent to it")),
 				field("API key variable", "apiKeyEnv", profile.apiKey ? profile.apiKey.env : "", { placeholder: "none (an environment variable's name)" })),
 			message, result,
 			h("div.set-bar", null,

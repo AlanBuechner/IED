@@ -177,6 +177,7 @@ namespace Ied
 		private bool Wants(CodeInstance* instance, Workspace* ws) const;
 		private void Loop(CodeInstance* instance);
 		private Scripting::Host* ScriptHost(Core::String& problem);
+		private void UseScriptCache();
 
 		private Core::Array<CodeInstance*> instances;
 		private Scripting::Host* host;

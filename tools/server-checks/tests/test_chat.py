@@ -3,6 +3,7 @@ stop class recovered as docs/12's policy says - streamed segments, tool calls wi
 calls written as text, retries, continuations, nudges, pauses - and chats survive a restart."""
 
 import asyncio
+import base64
 import json
 import os
 import shutil
@@ -61,7 +62,8 @@ CODE_PLUGIN = {
 		"toolCalls": [
 			{"name": "demo_shout", "description": "Shout a file's first line.", "class": "read", "function": "DemoCode::Shout",
 				"inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
-			{"name": "demo_count", "description": "Count calls.", "class": "read", "binding": "demo.count", "inputSchema": {"type": "object"}}]}}
+			{"name": "demo_count", "description": "Count calls.", "class": "read", "binding": "demo.count", "inputSchema": {"type": "object"}},
+			{"name": "demo_snap", "description": "Show the screen.", "class": "read", "function": "DemoCode::Snap", "inputSchema": {"type": "object"}}]}}
 
 CODE_PLUGIN_SOURCE = r'''include "api/plugin.ch"
 
@@ -81,6 +83,20 @@ namespace DemoCode
 		out.Append(call.workspace.name.View());
 		out.Append(")");
 		return IED::ToolText(out.View());
+	}
+
+	IED::ToolResult Snap(const IED::ToolCall& call)
+	{
+		IED::ToolResult result = IED::ToolText(Core::StringView("the screen"));
+		IED::ToolImage shot;
+		shot.mime = Core::String("image/png");
+		shot.path = Core::String("shots/screen.png");
+		result.images.Push(shot);
+		IED::ToolImage elsewhere;
+		elsewhere.mime = Core::String("image/png");
+		elsewhere.path = Core::String("../outside.png");
+		result.images.Push(elsewhere);
+		return result;
 	}
 
 	Core::String Section(const IED::Workspace& ws)
@@ -284,6 +300,38 @@ class ChatTests(ServerTestCase):
 		self.assertEqual({"calls": 2}, json.loads(results["c3"]), "a binding tool keeps its plugin's state")
 		tool = self.segments(await self.last_turn(chat_id), "tool")[0]
 		self.assertEqual(("demo_shout", "ok", "plugin demo.code"), (tool["tool"], tool["state"], tool.get("source")))
+
+	async def test_a_tools_images_reach_a_model_that_sees_them(self):
+		png = b"\x89PNG\r\n\x1a\n" + bytes(range(24))
+		os.makedirs(os.path.join(self.repo, "shots"))
+		with open(os.path.join(self.repo, "shots", "screen.png"), "wb") as out:
+			out.write(png)
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("demo_snap", {}, "c1"), text_step("A screen."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		result = [m for m in sent if m["role"] == "tool"][0]
+		self.assertIn("[image shots/screen.png (image/png): this model is not sent images]", result["content"], "a model without vision is told the path")
+		self.assertIn("[image ../outside.png left out:", result["content"], "an image outside the workspace is never sent")
+		self.assertEqual("tool", sent[-1]["role"], "no image message for it")
+		tool = self.segments(await self.last_turn(chat_id), "tool")[0]
+		self.assertIn("[image shots/screen.png]", tool["result"]["preview"], "the card names the image")
+		self.assertEqual([{"mime": "image/png", "path": "shots/screen.png"}], tool["result"]["images"], "and shows it")
+		shown = self.server.request("GET", "/w/w1/files/shots/screen.png", headers={"Cookie": self.cookie})
+		self.assertEqual((200, png), (shown.status, shown.body), "from the workspace's files")
+
+		await self.use_model({"vision": True})
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("demo_snap", {}, "c2"), text_step("A screen."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		self.assertEqual(["system", "user", "assistant", "tool", "user"], [m["role"] for m in sent], "the images follow the step's results")
+		self.assertTrue(sent[3]["content"].startswith("the screen\n[image ../outside.png left out:"), sent[3]["content"])
+		self.assertNotIn("this model is not sent images", sent[3]["content"], "a model that sees images is not told it does not")
+		parts = sent[4]["content"]
+		self.assertEqual(["text", "image_url"], [p["type"] for p in parts])
+		self.assertIn("call c2, shots/screen.png", parts[0]["text"])
+		self.assertEqual("data:image/png;base64," + base64.b64encode(png).decode(), parts[1]["image_url"]["url"], "the file's bytes")
 
 	# --- Tools -------------------------------------------------------------------------------------------------------
 

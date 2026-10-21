@@ -37,7 +37,7 @@ const CODE_CHIPS = { active: "ok", compiling: "info", idle: "", failed: "err" };
 function codeRow(code) {
 	if (!code) return null;
 	return h("div.plugin-code", null,
-		h("span.chip" + (CODE_CHIPS[code.state] ? "." + CODE_CHIPS[code.state] : ""), { title: "Built " + code.builds + " time(s)" }, "code " + code.state),
+		h("span.chip" + (CODE_CHIPS[code.state] ? "." + CODE_CHIPS[code.state] : ""), { title: "Built " + code.builds + " time(s)" + (code.cached ? "; this build was linked from the compiled-script cache" : "") }, "code " + code.state),
 		code.problem ? h("pre.plugin-code-problem" + (code.state === "failed" ? ".c-error" : ".c-warn"), null, code.problem) : null);
 }
 

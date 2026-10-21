@@ -11,6 +11,7 @@
 				"contextWindow": { "type": "integer", "minimum": 0, "description": "Tokens; 0 when unknown (a context error reveals it)." },
 				"maxOutput": { "type": "integer", "minimum": 0, "description": "Tokens a reply may take; 0 leaves it to the server." },
 				"privacy": { "enum": ["local", "lan", "cloud"], "default": "local" },
+				"vision": { "type": "boolean", "default": false, "description": "It takes images: the images tool results show are sent to it (a vision model; llama.cpp with its projector). Test connection says whether a llama.cpp server does." },
 				"apiKey": {
 					"type": "object",
 					"properties": { "env": { "type": "string", "minLength": 1, "description": "The environment variable that holds the key. Keys never live in settings files." } },

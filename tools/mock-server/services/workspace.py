@@ -20,13 +20,14 @@ class File:
 
 
 class Workspace:
-	def __init__(self, ws_id, name, root, files, directories):
+	def __init__(self, ws_id, name, root, files, directories, images=None):
 		self.ws_id = ws_id
 		self.name = name
 		self.root = root
 		self.trusted = True
 		self.files = {path: File(text) for path, text in files.items()}
 		self.directories = set(directories)
+		self.images = dict(images or {})
 
 	def summary(self):
 		return {"wsId": self.ws_id, "name": self.name, "root": self.root, "trusted": self.trusted}
@@ -63,7 +64,7 @@ class Workspaces:
 		self.server = server
 		files = dict(workspace_files.FILES, **workspace_files.generated_files(server.config.tree_files))
 		fixture = workspace_files.WORKSPACE
-		ws = Workspace(fixture["wsId"], fixture["name"], fixture["root"], files, workspace_files.DIRECTORIES)
+		ws = Workspace(fixture["wsId"], fixture["name"], fixture["root"], files, workspace_files.DIRECTORIES, workspace_files.IMAGES)
 		self.items = {ws.ws_id: ws}
 		server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
 		self.trash = {}

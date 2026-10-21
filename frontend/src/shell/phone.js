@@ -173,7 +173,7 @@ export class PhoneChrome {
 		const rows = more.map((slot) => ({ kind: "item", label: slot.title, icon: slot.icon, base: slot.base, enabled: true, run: slot.run }));
 		if (this.panel.mounted) rows.push({ kind: "item", label: this.panel.title(), icon: "$(terminal)", base: "/", enabled: true, run: () => this.panel.setOpen(true) });
 		if (rows.length) rows.push({ kind: "separator" });
-		for (const [command, title] of [["shell.commandPalette", "Command Palette"], ["shell.showNotifications", "Notifications"], ["shell.switchWorkspace", "Switch Workspace"], ["shell.plugins", "Plugins"], ["shell.keyboardShortcuts", "Keyboard Shortcuts"], ["shell.resetLayout", "Reset Layout"], ["shell.about", "About IED"]]) {
+		for (const [command, title] of [["shell.commandPalette", "Command Palette"], ["shell.showNotifications", "Notifications"], ["shell.switchWorkspace", "Switch Workspace"], ["shell.plugins", "Plugins"], ["shell.settings", "Settings"], ["shell.keyboardShortcuts", "Keyboard Shortcuts"], ["shell.resetLayout", "Reset Layout"], ["shell.about", "About IED"]]) {
 			const definition = shell.commands.get(command);
 			rows.push({ kind: "item", label: title, icon: definition ? definition.icon : null, base: "/", enabled: true, run: () => shell.commands.run(command) });
 		}

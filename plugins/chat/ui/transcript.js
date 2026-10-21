@@ -187,7 +187,17 @@ export class TranscriptView {
 				segment.ms !== undefined && segment.state !== "running" && segment.state !== "streaming" ? h("span", null, duration(segment.ms)) : null,
 				icon(open ? "chevron-down" : "chevron-right")));
 		const out = open ? this.toolResult(segment, result) : null;
-		return h("div.chat-tool" + (segment.state === "error" ? ".failed" : ""), { dataset: { call: segment.callId, state: segment.state || "" } }, head, out);
+		return h("div.chat-tool" + (segment.state === "error" ? ".failed" : ""), { dataset: { call: segment.callId, state: segment.state || "" } }, head, this.toolImages(result), out);
+	}
+
+	// The images the result showed the model (docs/13 "Images in tool results"), from the workspace; open or closed.
+	toolImages(result) {
+		if (!result || !result.images || !result.images.length || !this.model.summary) return null;
+		const base = "/w/" + encodeURIComponent(this.model.summary.wsId) + "/files/";
+		return h("div.chat-tool-images", null, ...result.images.map((image) => {
+			const url = base + image.path.split("/").map(encodeURIComponent).join("/");
+			return h("a", { href: url, target: "_blank", rel: "noopener", title: image.path }, h("img", { src: url, alt: image.path, loading: "lazy" }));
+		}));
 	}
 
 	toolResult(segment, result) {

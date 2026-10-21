@@ -31,6 +31,7 @@ namespace Ai
 		public Core::String source;     // where it ran, for the card ("built-in", "Output: AI")
 		public int64 ms;                // how long it ran, without the wait for an approval, when `timed`
 		public bool timed;
+		public Core::Array<IED::ToolImage> images;   // what the result shows the model (images.ch)
 	}
 
 	// What a call would do: what the permission check and the approval card see.

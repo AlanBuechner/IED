@@ -320,12 +320,30 @@ namespace Ied
 			hostTried = true;
 			host = Scripting::Host::Open();
 			if (!host->IsOpen()) hostProblem = Core::String("the server cannot run plugin code: ") + host->Error();
+			else UseScriptCache();
 		}
 		if (!hostProblem.IsEmpty()) {
 			problem = hostProblem;
 			return nullptr;
 		}
 		return host;
+	}
+
+	// Compiled scripts are kept in the data folder: a plugin whose code did not change since it last compiled links
+	// what was kept (C4/docs/runtime/04 section 4.6).
+	void CodeRuntime::UseScriptCache() {
+		FS::Path folder = FS::Path(server->config.dataDir.View()) / "script-cache";
+		FS::MakeDirectories(folder.CStr());
+		if (!host->UseCache(folder.CStr())) server->Log(((Core::String("plugin code: the compiled-script cache in ") + folder.View()) + " cannot be used; code compiles on every start").View());
+	}
+
+	// A script's name is its reflection tag: unique among the loaded scripts (a new build loads before the running one
+	// retires; a project plugin runs once per workspace), and the same for the same build after a restart, which the
+	// cache's key includes.
+	static Core::String ScriptName(const CodeInstance* instance) {
+		Core::String name = instance->pluginId;
+		if (instance->IsProject()) name = (name + "@") + instance->wsId.View();
+		return (name + "#") + Number(instance->builds).View();
 	}
 
 	void CodeRuntime::RetryFailed() {
@@ -369,7 +387,7 @@ namespace Ied
 			scripts = ScriptHost(problem);
 			digest = BuildDigest(instance->folder, instance->entry.View(), instance->sources);
 			instance->builds += 1;
-			options.name = ((instance->pluginId + "#") + Number(instance->builds).View());
+			options.name = ScriptName(instance);
 			for (const Core::String& file : CodeFilesOf(instance)) options.AddFile(file.CStr());
 			if (options.paths.IsEmpty() && problem.IsEmpty()) problem = Core::String("its sources hold no .cf file");
 		}
@@ -423,7 +441,7 @@ namespace Ied
 		line.Append(instance->pluginId.View());
 		line.Append(problem.IsEmpty() ? ": code started" : ": code did not start");
 		if (compileMs >= 0) {
-			line.Append(" (compiled in ");
+			line.Append(instance->script->Cached() ? " (linked from the cache in " : " (compiled in ");
 			line.AppendInt(compileMs);
 			line.Append(" ms)");
 		}
@@ -626,6 +644,7 @@ namespace Ied
 		json.Field("state", CodeStateName(instance->state));
 		if (!instance->problem.IsEmpty()) json.Field("problem", instance->problem.View());
 		json.IntField("builds", instance->builds);
+		if (!instance->builtin && instance->script && instance->script->Cached()) json.BoolField("cached", true);
 		json.EndObject();
 		return json.ToString();
 	}
