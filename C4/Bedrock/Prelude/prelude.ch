@@ -64,6 +64,12 @@
 [link("c4_raw_free")] void raw_free(void* p);
 [link("c4_raw_alloc_aligned")] void* raw_alloc_aligned(uint64 size, uint64 align);
 [link("c4_raw_free_aligned")] void raw_free_aligned(void* p);
+// A buffer that grows in place once past 1 MiB; the owner passes back the size it asked for last (GCRuntimeC.h).
+[link("c4_buffer_resize")] void* buffer_resize(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes);
+[link("c4_buffer_free")] void buffer_free(void* buffer, uint64 bytes);
+// The same for a buffer the collector scans for pointers, registered as a scan region at its whole size.
+[link("c4_buffer_resize_scanned")] void* buffer_resize_scanned(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes);
+[link("c4_buffer_free_scanned")] void buffer_free_scanned(void* buffer, uint64 bytes);
 [link("c4_gc_collect")] void gc_collect();
 [link("c4_gc_register_region")] void gc_register_region(void* start, uint64 size);
 [link("c4_gc_unregister_region")] void gc_unregister_region(void* start);
@@ -83,6 +89,8 @@
 [link("c4_thread_yield")] void thread_yield();
 [link("c4_cpu_relax")] void cpu_relax();
 [link("c4_thread_sleep_ns")] void thread_sleep_ns(int64 ns);
+[link("c4_thread_set_name")] int32 thread_set_name(const char* name);
+[link("c4_thread_name")] int32 thread_name(char* out, int32 cap);
 [link("c4_wait_on_address")] bool wait_on_address(void* address, void* expected, uint64 size, int64 timeoutNs);
 [link("c4_wake_one")] void wake_one(void* address);
 [link("c4_wake_all")] void wake_all(void* address);

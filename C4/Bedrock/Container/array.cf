@@ -1,7 +1,7 @@
 include "array.ch"
 
 // Elements [0, count) are live objects; [count, capacity) is raw storage. Moving the buffer copies bytes:
-// objects are trivially relocatable (docs/language/06).
+// objects are trivially relocatable (docs/language/06). Past 1 MiB the buffer grows in place instead.
 
 namespace Core
 {
@@ -10,16 +10,8 @@ namespace Core
 		if (layout->count != 0 || count < 0) return false;
 		if (count == 0) return true;
 		const uint64 bytes = (uint64)(count * elementBytes);
-		const bool aligned = (uint64)elementAlign > kRawAllocAlignment;
-		void* storage = aligned ? raw_alloc_aligned(bytes, (uint64)elementAlign) : raw_alloc(bytes);
-		memset(storage, 0, bytes);
-		gc_register_region(storage, bytes);
-		if (layout->data) {
-			gc_unregister_region(layout->data);
-			if (aligned) raw_free_aligned(layout->data);
-			else raw_free(layout->data);
-		}
-		layout->data = storage;
+		layout->data = ResizeScannedBytes(layout->data, (uint64)(layout->capacity * elementBytes), 0u, bytes, (uint64)elementAlign);
+		memset(layout->data, 0, bytes);
 		layout->count = count;
 		layout->capacity = count;
 		return true;
@@ -27,11 +19,7 @@ namespace Core
 
 	template<T>
 	private void Array::Reallocate(int64 newCapacity) {
-		T* old = data;
-		data = newCapacity > 0 ? AllocateElements<T>(newCapacity) : nullptr;
-		if (data) gc_register_region((void*)data, (uint64)(newCapacity * (int64)sizeof(T)));
-		if (count > 0) memcpy((void*)data, (void*)old, (uint64)(count * (int64)sizeof(T)));
-		if (old) { gc_unregister_region((void*)old); FreeElements<T>(old); }
+		data = ResizeScannedElements<T>(data, capacity, count, newCapacity);
 		capacity = newCapacity;
 	}
 

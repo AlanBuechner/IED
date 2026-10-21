@@ -86,6 +86,9 @@ keeps the sign of its first argument.
 | `raw_free` | `void raw_free(void* p)` | |
 | `raw_alloc_aligned` | `void* raw_alloc_aligned(uint64 size, uint64 align)` | unmanaged memory aligned to `align`, a power of two (`raw_alloc` gives 16): for elements such as a `packed float[8]` |
 | `raw_free_aligned` | `void raw_free_aligned(void* p)` | frees what `raw_alloc_aligned` gave, and only that |
+| `buffer_resize` | `void* buffer_resize(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes)` | a buffer that grows: heap memory below 1 MiB; from 1 MiB up, reserved address space whose pages are committed as it grows, so it grows in place (the reservation holds 8 times the size, at least 64 MiB) and moves only when it outgrows that. `oldBytes` is the size asked for last (0 with a null `buffer`): it alone says which kind the buffer is. Keeps the first `keepBytes`; null for `newBytes` 0, and null with `buffer` untouched when memory runs out. StringBuilder's text and Array's elements live in these |
+| `buffer_free` | `void buffer_free(void* buffer, uint64 bytes)` | frees a `buffer_resize` buffer of `bytes` (the size asked for last) |
+| `buffer_resize_scanned`, `buffer_free_scanned` | as `buffer_resize` and `buffer_free` | for a buffer the collector scans for pointers: it is a scan region at its whole size, the region never covers memory given back, and the contents stay in a registered region while they move |
 | `gc_collect` | `void gc_collect()` | force a collection (works even while auto-collection is disabled) |
 | `gc_register_region` | `void gc_register_region(void* start, uint64 size)` | conservatively scan this raw memory for GC pointers (how containers keep `T*` elements alive) |
 | `gc_unregister_region` | `void gc_unregister_region(void* start)` | call before freeing the region |

@@ -144,6 +144,29 @@ public static void TestBuilderNumberEdges() {
 	assert_se("-0.25", b.CStr(), "a negative double below one keeps its sign");
 }
 
+// Decimals of 8, 9, 16 and 17 digits, each with text after it, and zero padding before one.
+[test("str.builder.decimal_words")]
+public static void TestBuilderDecimalWords() {
+	Core::StringBuilder b;
+	b.Append("a");
+	b.AppendUInt(99999999u);
+	b.Append("b");
+	b.AppendUInt(100000000u);
+	b.Append("c");
+	b.AppendUInt(9999999999999999u);
+	b.Append("d");
+	b.AppendUInt(10000000000000000u);
+	b.Append("e");
+	b.AppendInt(-7);
+	b.Append("f");
+	assert_se("a99999999b100000000c9999999999999999d10000000000000000e-7f", b.CStr(), "8, 9, 16 and 17 digits, then one");
+	b.Clear();
+	b.AppendIntBase(-42, 10, 12);
+	b.AppendByte(',');
+	b.AppendIntBase(123456789, 10, 12);
+	assert_se("-000000000042,000123456789", b.CStr(), "zero padding before the digit words");
+}
+
 [test("str.builder.zero_state_and_copy")]
 public static void TestBuilderZeroStateAndCopy() {
 	Core::StringBuilder b;

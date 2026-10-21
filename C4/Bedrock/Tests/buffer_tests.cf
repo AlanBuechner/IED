@@ -1,0 +1,78 @@
+// Buffers that grow in place once past 1 MiB (buffer_resize, C4Runtime/BufferRuntimeC.c): StringBuilder's text, Array
+// elements the collector scans, and the runtime calls themselves.
+
+include "bedrock.ch"
+
+class BfPayload { public int64 value; }
+
+// Objects allocated after a collection take the place of any it wrongly freed.
+void BfOverwrite() {
+	for (int32 i = 0; i < 100000; ++i) {
+		BfPayload* junk = new BfPayload();
+		junk->value = -1;
+	}
+}
+
+int32 BfWrongValues(const Core::Array<BfPayload*>& items) {
+	int32 wrong = 0;
+	for (int64 i = 0; i < items.Count(); ++i)
+		if (items[i]->value != i) wrong += 1;
+	return wrong;
+}
+
+[test("buffer")]
+class BufferTests {
+	[test("stringbuilder_past_a_mebibyte")]
+	public static void TestStringBuilderPastAMebibyte() {
+		Core::StringBuilder text;
+		for (int32 i = 0; i < 400000; ++i) text.Append("0123456789");
+		assert_eq(4000000, text.ByteLength(), "every append");
+		const char* at = text.CStr();
+		int32 misplaced = 0;
+		for (int64 i = 0; i < text.ByteLength(); i += 997)
+			if (at[i] != (char)('0' + i % 10)) misplaced += 1;
+		assert_eq(0, misplaced, "the text survives growing in place");
+		assert_true(at[4000000] == (char)0, "still terminated");
+		Core::StringBuilder copy = text;
+		assert_eq(4000000, copy.ByteLength(), "a copy of a large builder");
+		text.Truncate(3);
+		text.Append("x");
+		assert_se("012x", text.CStr(), "a large builder truncated and appended to");
+	}
+
+	[test("array_of_references_past_a_mebibyte")]
+	public static void TestArrayOfReferencesPastAMebibyte() {
+		Core::Array<BfPayload*> items;
+		for (int32 i = 0; i < 300000; ++i) {
+			BfPayload* payload = new BfPayload();
+			payload->value = i;
+			items.Push(payload);
+			if (i % 60000 == 0) { gc_collect(); BfOverwrite(); }
+		}
+		gc_collect();
+		BfOverwrite();
+		assert_eq(0, BfWrongValues(items), "every object kept alive by the buffer as it grew in place");
+		while (items.Count() > 1000) items.Pop();
+		items.ShrinkToFit();
+		gc_collect();
+		BfOverwrite();
+		assert_eq(0, BfWrongValues(items), "kept alive after shrinking below 1 MiB");
+	}
+
+	// Only the first bytes are written, so the large sizes commit memory but touch none of it.
+	[test("resize_kinds")]
+	public static void TestResizeKinds() {
+		const uint64 mib = 1048576u;
+		char* first = (char*)buffer_resize(nullptr, 0u, 0u, 2u * mib);
+		memcpy((void*)first, (void*)"kept", 5u);
+		char* grown = (char*)buffer_resize((void*)first, 2u * mib, 5u, 60u * mib);
+		assert_true(grown == first, "growth inside the reservation stays in place");
+		char* moved = (char*)buffer_resize((void*)grown, 60u * mib, 5u, 200u * mib);
+		assert_true(moved != grown, "growth past the reservation moves");
+		assert_se("kept", moved, "the kept bytes move with it");
+		char* small = (char*)buffer_resize((void*)moved, 200u * mib, 5u, 64u);
+		assert_se("kept", small, "back below 1 MiB, still kept");
+		assert_true(buffer_resize((void*)small, 64u, 5u, 0u) == nullptr, "resized to nothing, it is freed");
+		buffer_free(nullptr, 5u * mib);
+	}
+}

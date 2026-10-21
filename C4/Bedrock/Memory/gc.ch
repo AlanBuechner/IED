@@ -23,6 +23,18 @@ namespace GC
 	[link("c4_gc_collect")] void Collect();
 	[link("c4_gc_get_stats")] Stats GetStats();
 
+	// One stop of the program by a collection, in nanoseconds of the system's high-resolution counter
+	// (Platform::Ticks() scaled by 1e9 / Platform::TickFrequency()).
+	struct Pause
+	{
+		public uint64 startNs;
+		public uint64 endNs;
+	}
+	// The stops of the last collection into `out` (room for `capacity`), oldest first: how many there were. One for
+	// a stop-the-world collection; a concurrent cycle stops the program to copy its roots, again for each pass that
+	// copies them anew, and once to finish.
+	[link("c4_gc_last_pauses")] int32 LastPauses(Pause* out, int32 capacity);
+
 	// Automatic collection starts when the live heap has grown by `percent` since the last collection
 	// (default 100, at least 4 MiB). Returns the previous value.
 	[link("c4_gc_set_percent")] int32 SetPercent(int32 percent);

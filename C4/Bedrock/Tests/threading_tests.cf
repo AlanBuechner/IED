@@ -125,6 +125,27 @@ class ThreadTests {
 		zero.Join();
 	}
 
+	// On a thread of its own, so the runner's thread keeps its name.
+	[test("names")]
+	public static void TestNames() {
+		Core::String before;
+		Core::String after;
+		Core::String renamed;
+		bool named = false;
+		Threading::Thread worker = Threading::Thread::Run([&before, &after, &renamed, &named]() {
+			before = Threading::Thread::CurrentName();
+			named = Threading::Thread::SetCurrentName("Job Worker 3");
+			after = Threading::Thread::CurrentName();
+			Threading::Thread::SetCurrentName("Renderer");
+			renamed = Threading::Thread::CurrentName();
+		});
+		worker.Join();
+		assert_se("", before.CStr(), "a new thread has no name");
+		assert_true(named, "the system names threads");
+		assert_se("Job Worker 3", after.CStr(), "the name reads back");
+		assert_se("Renderer", renamed.CStr(), "a thread renamed later has the new name");
+	}
+
 	[test("system")]
 	public static void TestSystem() {
 		assert_true(Threading::Thread::HardwareCount() >= 1, "there is a processor");

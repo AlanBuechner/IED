@@ -480,6 +480,15 @@ static c4_gc_stats locked_stats(void)
 }
 
 c4_gc_stats c4_gc_get_stats(void) { return locked_stats(); }
+
+int32_t c4_gc_last_pauses(c4_gc_pause* out, int32_t capacity)
+{
+	gc_os_lock();
+	const GCStops stops = collector()->lastStops;
+	gc_os_unlock();
+	for (int32_t i = 0; out && i < capacity && i < (int32_t)stops.count; ++i) out[i] = stops.stops[i];
+	return (int32_t)stops.count;
+}
 uint64_t c4_gc_allocs(void) { return locked_stats().allocs; }
 uint64_t c4_gc_collections(void) { return locked_stats().collections; }
 uint64_t c4_gc_heap_bytes(void) { return locked_stats().heapBytes; }

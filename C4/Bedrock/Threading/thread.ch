@@ -4,6 +4,8 @@
 //     Threading::Thread worker = Threading::Thread::Run([&total]() { total = Sum(); });
 //     worker.Join();
 
+include "Text/string.ch"
+
 namespace Threading
 {
 	class Thread
@@ -26,6 +28,10 @@ namespace Threading
 		// Gives the rest of this thread's time slice to another thread that is ready to run.
 		public static void Yield() { thread_yield(); }
 		public static void Sleep(int64 nanoseconds) { thread_sleep_ns(nanoseconds); }
+		// Names the calling thread for debuggers, profilers and crash dumps; false when the system cannot.
+		public static bool SetCurrentName(const char* name) { return thread_set_name(name) == 0; }
+		// The calling thread's name, "" when it has none.
+		public static Core::String CurrentName();
 
 		private static void RunBody(void* body);
 

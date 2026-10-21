@@ -68,6 +68,16 @@ void gc_reclaim(GCState* gc)
 	gc->nextCollection = next_collection(gc_heap_live_bytes(&gc->heap), gc->percent, gc->minTrigger);
 }
 
+void gc_stops_record(GCStops* stops, uint64_t startNs, uint64_t endNs)
+{
+	if (stops->count == GC_RECORDED_STOPS)
+	{
+		stops->stops[GC_RECORDED_STOPS - 1].endNs = endNs;
+		return;
+	}
+	stops->stops[stops->count++] = (c4_gc_pause){ startNs, endNs };
+}
+
 void gc_collect(GCState* gc, GCThread* self)
 {
 	if (gc->collecting) return;
@@ -79,7 +89,10 @@ void gc_collect(GCState* gc, GCThread* self)
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs); // what an enumerator allocated meanwhile
 	gc_reclaim(gc);
 	gc_threads_resume(&gc->threads, self);
-	gc->lastPauseNs = gc_os_now_ns() - start;
+	const uint64_t end = gc_os_now_ns();
+	gc->lastPauseNs = end - start;
+	gc->lastStops.count = 0;
+	gc_stops_record(&gc->lastStops, start, end);
 	gc->pauseNs += gc->lastPauseNs;
 	gc->collecting = 0;
 	gc->collected = 1;

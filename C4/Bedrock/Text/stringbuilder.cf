@@ -12,21 +12,20 @@ namespace Core
 	}
 
 	[operator("delete")] void StringBuilder::Delete() {
-		raw_free(buffer);
+		buffer_free(buffer, (uint64)(capacity + 1));
 		buffer = nullptr;
 		length = 0;
 		capacity = 0;
 	}
 
+	// Past 1 MiB the text grows in place: the pages after it are committed instead of the text being copied.
 	void StringBuilder::Reserve(int64 bytes) {
 		if (bytes <= capacity && buffer) return;
 		int64 grown = capacity * 2 > bytes ? capacity * 2 : bytes;
 		if (grown < 31) grown = 31;
-		char* larger = (char*)raw_alloc((uint64)(grown + 1));
-		if (buffer) memcpy(larger, buffer, (uint64)(length + 1));
-		else larger[0] = (char)0;
-		raw_free(buffer);
-		buffer = larger;
+		const bool fresh = buffer == nullptr;
+		buffer = (char*)buffer_resize(buffer, fresh ? 0u : (uint64)(capacity + 1), (uint64)(length + 1), (uint64)(grown + 1));
+		if (fresh) buffer[0] = (char)0;
 		capacity = grown;
 	}
 

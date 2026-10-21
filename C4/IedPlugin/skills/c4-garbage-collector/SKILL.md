@@ -38,13 +38,15 @@ an object alive while a stale copy of its address sits in a register or dead sta
 "was collected" must allow a few survivors.
 
 ## Everyday builtins (no include)
-`raw_alloc(size)` / `raw_free(ptr)`; `gc_collect()`; `gc_register_region(start, size)` /
+`raw_alloc(size)` / `raw_free(ptr)`; `buffer_resize` / `buffer_free` (a buffer that grows in place past 1 MiB;
+`_scanned` forms keep a scan region over it, as Array's elements); `gc_collect()`; `gc_register_region(start, size)` /
 `gc_unregister_region(start)`; `gc_allocs()`, `gc_collections()`, `gc_heap_bytes()`, `gc_free_bytes()`.
 Build with `-gc-stats` and the program prints `[GC] allocs=... collections=... heapBytes=...` to stderr after each collection.
 
 ## Bedrock `GC` namespace (`include "Memory/gc.ch"`)
 `GC::Collect`, `GC::GetStats` (`{ allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes,
-lastPauseNs }`), `GC::SetPercent` (growth before the next automatic collection, default 100, minimum
+lastPauseNs }`), `GC::LastPauses(out, capacity)` (the last collection's stops as `{ startNs, endNs }` on the
+QueryPerformanceCounter clock: one for `Collect`, several for a concurrent cycle), `GC::SetPercent` (growth before the next automatic collection, default 100, minimum
 trigger 4 MiB), `GC::Disable` / `GC::Enable`, `GC::Pin` / `GC::Unpin` (counted, interior pointers fine),
 `GC::IsReachable`, `GC::RegisterRegion`, `GC::RegisterRootEnumerator(key, fn(user, visit, visitContext),
 user)`, `GC::RegisterCollectionResult(key, fn(user), user)` and their unregister forms. No hook table has a

@@ -153,7 +153,9 @@ static void resume(GCState* gc, GCThread* self, uint64_t since)
 {
 	gc_threads_resume(&gc->threads, self);
 	gc->collecting = 0;
-	gc->concurrent.pauseNs += gc_os_now_ns() - since;
+	const uint64_t now = gc_os_now_ns();
+	gc->concurrent.pauseNs += now - since;
+	gc_stops_record(&gc->cycleStops, since, now);
 	gc_os_unlock();
 }
 
@@ -216,8 +218,11 @@ static void final_stop(GCState* gc, GCThread* self, CycleTrace* trace)
 	gc_finalize_select(&c->marker, &gc->finalizers, &gc->ready);
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs);
 	gc_reclaim(gc);
-	trace->finalNs = gc_os_now_ns() - start;
+	const uint64_t end = gc_os_now_ns();
+	trace->finalNs = end - start;
 	trace->stops++;
+	gc_stops_record(&gc->cycleStops, start, end);
+	gc->lastStops = gc->cycleStops;
 	gc->lastPauseNs = c->pauseNs + trace->finalNs;
 	gc->pauseNs += gc->lastPauseNs;
 	gc->collected = 1;
@@ -262,6 +267,7 @@ void gc_concurrent_serve(GCState* gc, GCThread* self)
 	while (__atomic_load_n(&c->state, __ATOMIC_ACQUIRE) != GC_CYCLE_ASKED) gc_os_park(&c->state, GC_CYCLE_IDLE);
 	CycleTrace trace = { 0 };
 	trace.startNs = gc_os_now_ns();
+	gc->cycleStops.count = 0; // the program reads only lastStops, under the lock
 	forget_writes(gc);
 	snapshot_stop(gc, self, &trace);
 	mark_beside(gc, self, &trace);

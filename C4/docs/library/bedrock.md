@@ -55,9 +55,13 @@ int32 main() {
 - Iteration uses `[operator("begin")]` / `[operator("end")]` plus iterator `notequal`, `dereference` and
   `increment`. Indexing uses `[operator("index")]`.
 - Containers allocate element storage with `raw_alloc` and register it as a GC scan region, so a
-  `Core::Array<T*>` keeps its elements alive. They construct, copy, relocate and destroy their elements
-  with the lifecycle intrinsics ([14.1](../language/14-builtins.md#1-compiler-intrinsics)), so element
-  types with a create, copy or delete work as in C++ (`Core::Array<Core::String>`).
+  `Core::Array<T*>` keeps its elements alive. `Array` and `StringBuilder` keep their buffers in `buffer_resize`
+  memory ([builtins 4](../language/14-builtins.md#4-memory-and-gc)): past 1 MiB a buffer grows in place, its pages
+  committed after it instead of the whole buffer copied, so pushing to a large array or appending to a large text
+  costs no copies until the buffer outgrows its reservation (8 times its size, at least 64 MiB). They construct,
+  copy, relocate and destroy their elements with the lifecycle intrinsics
+  ([14.1](../language/14-builtins.md#1-compiler-intrinsics)), so element types with a create, copy or delete work
+  as in C++ (`Core::Array<Core::String>`).
 - **Owning types are values.** `Array`, `List`, `Queue`, `Stack`, `HashMap`, `String` and `StringBuilder` have a
   copy operator: a copy owns its own buffer. `FS::File`, `Serialization::DomDoc`, `Threading::Thread` and
   `Platform::Library` own a handle and cannot be copied: pass them by reference or move them with `take(x)`. `Mutex`,
@@ -652,6 +656,7 @@ as `[link]` declarations, with no wrappers.
 |---|---|
 | `Collect()` | collect now (also while disabled) |
 | `GetStats()` | `GC::Stats { allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes, lastPauseNs }` |
+| `LastPauses(Pause* out, int32 capacity)` | the last collection's stops of the program, oldest first, as `GC::Pause { startNs, endNs }` in nanoseconds of the high-resolution counter (`Platform::Ticks()` scaled by 1e9 / `TickFrequency()`); returns how many there were: one for a stop-the-world collection, one per root copy and one to finish for a concurrent cycle. Read it in a collection callback for exact GC lanes in a profiler |
 | `SetPercent(int32)` | live-heap growth that starts the next automatic collection (default 100); returns the previous value |
 | `SetMarkThreads(int32)` | threads that mark a heap past 8 MiB, the collecting one included (-1 default: the processors, up to 8; 1: alone); returns the previous value |
 | `Disable()`, `Enable()` | suppress / resume automatic collection |
@@ -777,7 +782,7 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
 | Type | Meaning |
 |---|---|
 | `Atomic<T>` | one value of an integer, `bool`, enum, pointer or float type: `Load`, `Store`, `Exchange`, `CompareExchange(expected&, desired)`, `CompareExchangeWeak`, and for integers `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr`, `FetchXor`; each takes a `MemoryOrder` (default `SeqCst`). A copy is an atomic snapshot. |
-| `Thread` | `Thread::Run(func<void()> body)` starts a thread (attached: the collector scans it, its thread_locals start); `Join()`, `Detach()`, `IsJoinable()`; destroying a joinable thread joins it; not copyable (move it with `take`). Static: `CurrentId()`, `HardwareCount()`, `Yield()`, `Sleep(int64 ns)`. |
+| `Thread` | `Thread::Run(func<void()> body)` starts a thread (attached: the collector scans it, its thread_locals start); `Join()`, `Detach()`, `IsJoinable()`; destroying a joinable thread joins it; not copyable (move it with `take`). Static: `CurrentId()`, `HardwareCount()`, `Yield()`, `Sleep(int64 ns)`, `SetCurrentName(const char*)` (names the calling thread for debuggers, profilers and crash dumps; false when the system cannot) and `CurrentName()` (`""` when it has none). |
 | `Mutex` | one word: free, locked, or locked with sleepers. `Lock` spins briefly, then parks; `TryLock`; `Unlock` wakes one sleeper only when there is one. Not copyable. |
 | `LockGuard` | locks a `Mutex` for its scope. |
 | `UnlockGuard` | lets go of a `Mutex` the thread holds for its scope and takes it back at the end, an exception's included: slow work inside a locked region that touches nothing the mutex guards. |

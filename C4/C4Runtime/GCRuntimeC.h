@@ -131,6 +131,18 @@ typedef struct c4_gc_stats
 } c4_gc_stats;
 
 c4_gc_stats c4_gc_get_stats(void);
+
+// One stop of the program by a collection, in nanoseconds of the system's high-resolution counter
+// (QueryPerformanceCounter scaled to nanoseconds).
+typedef struct c4_gc_pause
+{
+	uint64_t startNs;
+	uint64_t endNs;
+} c4_gc_pause;
+// The stops of the last collection into `out` (room for `capacity`), oldest first: how many there were. One for a
+// stop-the-world collection; a concurrent cycle stops the program to copy its roots, again for each pass that copies
+// them anew, and once to finish.
+int32_t c4_gc_last_pauses(c4_gc_pause* out, int32_t capacity);
 uint64_t c4_gc_allocs(void);
 uint64_t c4_gc_collections(void);
 uint64_t c4_gc_heap_bytes(void);
@@ -150,6 +162,17 @@ void c4_raw_free(void* ptr);
 // Unmanaged memory aligned to `align` (a power of two), for over-aligned elements; freed with c4_raw_free_aligned.
 void* c4_raw_alloc_aligned(size_t size, size_t align);
 void c4_raw_free_aligned(void* ptr);
+// A buffer that grows (a StringBuilder's text, an Array's elements): heap memory while small; from 1 MiB up, address
+// space reserved for growth whose pages are committed as it grows, so growing moves nothing until the reservation is
+// outgrown. The owner passes back the size it asked for last, which alone says which kind of memory the buffer is.
+// `buffer` (null with `oldBytes` 0) resized to `newBytes` with its first `keepBytes` kept; null when `newBytes` is 0,
+// and null with `buffer` untouched when memory runs out. Aligned to 16.
+void* c4_buffer_resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes);
+void c4_buffer_free(void* buffer, size_t bytes);
+// The same for a buffer the collector scans for pointers (an Array's elements): a scan region of its whole size,
+// never left registered over memory it gives back, and the elements always in a registered region as they move.
+void* c4_buffer_resize_scanned(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes);
+void c4_buffer_free_scanned(void* buffer, size_t bytes);
 
 // --- Compiler interface ---------------------------------------------------------------------------
 // Every global, static member and static local that may hold a managed pointer, as {address, size};

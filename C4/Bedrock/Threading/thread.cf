@@ -2,6 +2,15 @@ include "thread.ch"
 
 namespace Threading
 {
+	// Room for any name SetCurrentName gives in a debugger's thread list.
+	const int32 kLongestThreadName = 1024;
+
+	Core::String Thread::CurrentName() {
+		char[kLongestThreadName] name;
+		const int32 length = thread_name(&name[0], kLongestThreadName);
+		return Core::String(length > 0 ? &name[0] : "");
+	}
+
 	// The body lives in a managed box the new thread holds; the runtime keeps it alive until the thread does.
 	class ThreadBody { public func<void()> run; }
 

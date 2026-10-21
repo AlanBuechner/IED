@@ -1,0 +1,41 @@
+// GC::LastPauses: a concurrent cycle reports each time it stopped the program (the root copy, any copy again, the
+// final stop), in order and each one ending after it starts; a forced collection reports its one stop.
+include "bedrock.ch"
+
+class Cell {
+	public Cell* next;
+	public int64[6] payload;
+}
+
+int32 g_key = 0;
+Threading::Atomic<int32> g_cycles;
+Threading::Atomic<int32> g_misordered;
+
+// Runs on the collector's thread after a concurrent cycle, on the collecting thread after any other collection.
+static void OnCollection(void* user) {
+	GC::Pause[8] pauses;
+	const int32 count = GC::LastPauses(&pauses[0], 8);
+	if (count < 2) return;   // a stop-the-world collection
+	g_cycles.FetchAdd(1);
+	for (int32 i = 0; i < count && i < 8; ++i) {
+		if (pauses[i].endNs <= pauses[i].startNs) g_misordered.FetchAdd(1);
+		if (i > 0 && pauses[i].startNs < pauses[i - 1].endNs) g_misordered.FetchAdd(1);
+	}
+}
+
+int32 main() {
+	GC::SetConcurrent(1);
+	GC::RegisterCollectionResult((void*)&g_key, OnCollection, null);
+	Cell* kept = null;
+	for (int32 i = 0; i < 4000000 && g_cycles.Load() < 3; ++i) {
+		Cell* cell = new Cell();
+		if (i % 16 == 0) { cell->next = kept; kept = cell; }
+	}
+	if (g_cycles.Load() == 0) return 1;
+	if (g_misordered.Load() != 0) return 2;
+	GC::UnregisterCollectionResult((void*)&g_key);
+	GC::Collect();
+	GC::Pause[8] pauses;
+	if (GC::LastPauses(&pauses[0], 8) != 1) return 3;
+	return kept != null ? 0 : 4;
+}

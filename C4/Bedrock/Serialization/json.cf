@@ -5,11 +5,20 @@ namespace Serialization
 {
 	bool IsFinite(double value) { return value - value == 0.0; }
 
+	// A sign and digits only: no point, exponent, `nan` or `inf`.
+	static bool IsIntegerText(Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if ((c < '0' || c > '9') && c != '-') return false;
+		}
+		return true;
+	}
+
+	// A float reads back as one: `.0` goes after a value written as an integer.
 	void WriteFloatText(double value, Core::StringBuilder* out) {
 		int64 start = out->ByteLength();
 		out->AppendDouble(value, -1);
-		Core::StringView written = out->View().Substring(start, -1);
-		if (written.IndexOf('.', 0) < 0 && written.IndexOf('e', 0) < 0 && written.IndexOf('n', 0) < 0) out->Append(".0");
+		if (IsIntegerText(out->View().Substring(start, -1))) out->Append(".0");
 	}
 
 	// One byte a JSON string cannot hold as it is: a quote, a backslash or a control character.

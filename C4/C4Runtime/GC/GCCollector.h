@@ -15,6 +15,16 @@
 #define GC_PARALLEL_MARK_BYTES ((size_t)8 << 20)   // a smaller heap marks faster alone than it wakes helpers
 #define GC_DEFAULT_MARK_HELPERS 7u                  // at most, by default: memory bandwidth limits more
 #define GC_DEFAULT_CONCURRENT_BYTES ((int64_t)16 << 20) // a smaller heap's stop-the-world pause is already short
+#define GC_RECORDED_STOPS 8                         // more than a concurrent cycle makes; a further one extends the last
+
+// The stops of one collection, oldest first.
+typedef struct GCStops
+{
+	uint32_t count;
+	c4_gc_pause stops[GC_RECORDED_STOPS];
+} GCStops;
+
+void gc_stops_record(GCStops* stops, uint64_t startNs, uint64_t endNs);
 
 typedef struct GCState
 {
@@ -39,6 +49,8 @@ typedef struct GCState
 	uint64_t allocs;
 	uint64_t pauseNs;
 	uint64_t lastPauseNs;
+	GCStops cycleStops;                 // the running collection's stops so far
+	GCStops lastStops;                  // the last finished collection's
 	size_t nextCollection;              // live bytes that start the next automatic collection
 	size_t minTrigger;                  // at least this (C4_GC_MIN_TRIGGER lowers it for tests)
 	int32_t percent;

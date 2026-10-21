@@ -114,6 +114,29 @@ static DWORD milliseconds(int64_t ns)
 
 void c4_thread_sleep_ns(int64_t ns) { Sleep(milliseconds(ns < 0 ? 0 : ns)); }
 
+int32_t c4_thread_set_name(const char* name)
+{
+	if (!name) return -1;
+	const int wideLength = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1, NULL, 0);
+	if (wideLength <= 0) return -1;
+	wchar_t* wide = (wchar_t*)malloc(sizeof(wchar_t) * (size_t)wideLength);
+	if (!wide) return -1;
+	MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, wideLength);
+	const HRESULT named = SetThreadDescription(GetCurrentThread(), wide);
+	free(wide);
+	return SUCCEEDED(named) ? 0 : -1;
+}
+
+int32_t c4_thread_name(char* out, int32_t cap)
+{
+	if (!out || cap <= 0) return -1;
+	PWSTR wide = NULL;
+	if (FAILED(GetThreadDescription(GetCurrentThread(), &wide))) return -1;
+	const int length = WideCharToMultiByte(CP_UTF8, 0, wide, -1, out, cap, NULL, NULL);
+	LocalFree(wide);
+	return length > 0 ? length - 1 : -1;
+}
+
 // Blocks while the `size` bytes at `address` equal those at `expected`, until a wake or `timeoutNs` (negative:
 // none); false when the timeout passed. It may also return early, so callers check their condition again.
 bool c4_wait_on_address(void* address, void* expected, uint64_t size, int64_t timeoutNs)

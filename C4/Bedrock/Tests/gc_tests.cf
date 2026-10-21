@@ -1,0 +1,33 @@
+// GC: a collection's statistics and the stops it made.
+
+include "bedrock.ch"
+
+[test("gc")]
+class GcTests {
+	[test("collect_counts_and_pauses")]
+	public static void TestCollectCountsAndPauses() {
+		const GC::Stats before = GC::GetStats();
+		GC::Collect();
+		const GC::Stats after = GC::GetStats();
+		assert_true(after.collections == before.collections + 1u, "one more collection");
+		GC::Pause[4] pauses;
+		const int32 count = GC::LastPauses(&pauses[0], 4);
+		assert_eq(1, count, "a stop-the-world collection stops the program once");
+		assert_true(pauses[0].endNs > pauses[0].startNs, "the stop ends after it starts");
+		assert_true(pauses[0].endNs - pauses[0].startNs == after.lastPauseNs, "the stop is the collection's pause");
+		assert_eq(1, GC::LastPauses(nullptr, 0), "the count, given no room");
+	}
+
+	[test("pauses_follow_the_clock")]
+	public static void TestPausesFollowTheClock() {
+		const int64 ticksBefore = Platform::Ticks();
+		GC::Collect();
+		const int64 ticksAfter = Platform::Ticks();
+		GC::Pause[1] pause;
+		GC::LastPauses(&pause[0], 1);
+		const double nsPerTick = 1e9 / (double)Platform::TickFrequency();
+		const double startTick = (double)pause[0].startNs / nsPerTick;
+		const double endTick = (double)pause[0].endNs / nsPerTick;
+		assert_true(startTick >= (double)ticksBefore - 1.0 && endTick <= (double)ticksAfter + 1.0, "the stop lies within the call, on Platform's clock");
+	}
+}

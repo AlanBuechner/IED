@@ -22,6 +22,12 @@ void c4_thread_yield(void);
 // A spin-wait hint: lets the core's other hardware thread run and saves power while a loop waits.
 void c4_cpu_relax(void);
 void c4_thread_sleep_ns(int64_t ns);
+// The calling thread's name as debuggers, profilers and crash dumps show it (UTF-8): 0, or -1 when the system cannot
+// name it.
+int32_t c4_thread_set_name(const char* name);
+// The calling thread's name into `out` (capacity `cap`, terminated; "" when it has none): its length, or -1 when it does
+// not fit or the system cannot read it.
+int32_t c4_thread_name(char* out, int32_t cap);
 
 bool c4_wait_on_address(void* address, void* expected, uint64_t size, int64_t timeoutNs);
 void c4_wake_one(void* address);
