@@ -20,6 +20,7 @@ namespace Ied
 		query.caseSensitive = params.Bool("caseSensitive", false);
 		query.include = Strings(params.Field("include"));
 		query.exclude = params.Has("exclude") ? Strings(params.Field("exclude")) : DefaultSearchExcludes();
+		query.useIgnoreFiles = params.Bool("useIgnoreFiles", true);
 		const int64 most = params.Int("maxResults", kSearchDefaultResults);
 		query.maxResults = most < 1 ? 1 : most > kSearchMostResults ? kSearchMostResults : most;
 		LineMatcher matcher = LineMatcher(query);

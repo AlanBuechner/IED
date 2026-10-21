@@ -85,6 +85,12 @@ class SearchTests {
 		assert_se("a.txt", result.matches[0].path.CStr(), "in path order, the open document first");
 		assert_se("needle unsaved", result.matches[0].preview.CStr(), "searched as it is open, not as on disk");
 		assert_se("sub/c.txt", result.matches[2].path.CStr(), "a folder's files");
+		Write(root / ".gitignore", "*.skip\n");
+		Write(root / "sub" / "x.skip", "needle ignored\n");
+		query.useIgnoreFiles = true;
+		assert_eq(3, Ied::SearchFolder(root, query, open, nullptr).matches.Count(), "what .gitignore ignores is skipped");
+		query.useIgnoreFiles = false;
+		assert_eq(4, Ied::SearchFolder(root, query, open, nullptr).matches.Count(), "unless the query says otherwise");
 		FS::RemoveAll(root.CStr());
 	}
 }

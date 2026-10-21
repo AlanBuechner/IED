@@ -3,7 +3,7 @@
 // disk. The first match of each line is reported, its column in UTF-16 units. Everything here is honest: the caller
 // gathers what to search, so a worker thread can run it without the server lock.
 
-include "glob.ch"
+include "ignore.ch"
 
 namespace Ied
 {
@@ -18,6 +18,7 @@ namespace Ied
 		public bool caseSensitive;
 		public Core::Array<Core::String> include;   // globs on the workspace-relative path; empty: every file
 		public Core::Array<Core::String> exclude;   // globs; a folder they match is not entered
+		public bool useIgnoreFiles;                 // .gitignore files skip what they ignore
 		public int64 maxResults;
 	}
 
@@ -45,8 +46,13 @@ namespace Ied
 		public const char* Error() const { return pattern.Error(); }
 		// The UTF-16 column of the first match in `line`, or -1 for none.
 		public int64 Find(Core::StringView line) const;
+		// Whether `text` can hold a match at all: a literal query is looked for in the whole text at once, so a file
+		// without it is passed over without reading it line by line.
+		public bool MayMatch(Core::StringView text) const;
 
 		private Core::Regex pattern;
+		private Core::String literal;   // the query when it is not a regex, ASCII-folded when not case-sensitive
+		private bool folded;
 	}
 
 	// The folders searched by default when a query names no exclusions: a repository's own, and the ones that hold
@@ -59,7 +65,8 @@ namespace Ied
 	// The matches of `text` (the file at `path`) added to `result`, until it holds `limit`.
 	void SearchText(Core::StringView path, Core::StringView text, const LineMatcher& matcher, int64 limit, SearchResult& result);
 	// Every searched file under `root` in path order, an open document's text (`open`: path -> text) instead of the
-	// file's; it stops at the query's limit, or soon after `cancel` is set.
+	// file's, what .gitignore files ignore skipped when the query says so; it stops at the query's limit, or soon after
+	// `cancel` is set.
 	SearchResult SearchFolder(const FS::Path& root, const SearchQuery& query, const Core::HashMap<Core::String, Core::String>& open,
 		const Threading::Atomic<bool>* cancel);
 }

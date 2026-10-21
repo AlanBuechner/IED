@@ -119,7 +119,7 @@ Paths are workspace-relative with `/` separators. Every file has a `revision` (1
 | `fs.mkdir` | `wsId, path` | `{path}` |
 | `fs.rename` | `wsId, from, to` (a file or a folder) | `{path, revision?}`; open documents follow (`doc.renamed`) |
 | `fs.delete` | `wsId, path, expectedRevision?, recursive?` (a folder needs `recursive`) | `{trashId}`: the file or folder is moved to the trash |
-| `fs.search` | `wsId, query, regex?, caseSensitive?, include?, exclude?, maxResults?` | `{matches: [{path, line, col, preview}], truncated}`: the first match of each line, `col` in UTF-16 units, `preview` the line trimmed to 200 characters; `include` / `exclude` are globs on the path |
+| `fs.search` | `wsId, query, regex?, caseSensitive?, include?, exclude?, useIgnoreFiles?, maxResults?` | `{matches: [{path, line, col, preview}], truncated}`: the first match of each line, `col` in UTF-16 units, `preview` the line trimmed to 200 characters; `include` / `exclude` are globs on the path (without `exclude`: `.git`, `node_modules`, `build`, `bin`, `bin-int`, `toolchains`, `vendor`, `third_party`, `__pycache__`); what `.gitignore` files ignore is skipped unless `useIgnoreFiles` is false; binary files (a NUL in the first 8000 bytes) and files over 4 MB are skipped |
 | `trash.list` | `wsId?` (only that workspace's) | `{entries: [{id, root, path, kind, deletedMs, bytes}], bytes}`, newest first |
 | `trash.restore` | `id` | `{wsId?, path}`: moved back where it was (`conflict` when something is there now) |
 | `trash.purge` | `id` or `all: true` | `{}`: deleted for good |

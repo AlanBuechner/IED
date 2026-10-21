@@ -2,10 +2,36 @@ include "search.ch"
 
 namespace Ied
 {
+	static int32 FoldAscii(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static Core::String Folded(Core::StringView text) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) out.AppendByte(FoldAscii(text.ByteAt(i)));
+		return out.ToString();
+	}
+
 	void LineMatcher::Init(const SearchQuery& query) {
 		Core::String body = query.regex ? query.text : EscapeRegex(query.text.View());
 		pattern = Core::Regex((query.caseSensitive ? body : Core::String("(?i)") + body.View()).View());
+		folded = !query.caseSensitive;
+		if (!query.regex) literal = folded ? Folded(query.text.View()) : query.text;
 	}
+
+	// Whether `needle` (folded already when `fold`) occurs in `text`, folding the text's ASCII letters as it goes.
+	static bool Contains(Core::StringView text, Core::StringView needle, bool fold) {
+		const int64 last = text.ByteLength() - needle.ByteLength();
+		if (needle.IsEmpty()) return true;
+		const int32 first = needle.ByteAt(0);
+		for (int64 at = 0; at <= last; ++at) {
+			if ((fold ? FoldAscii(text.ByteAt(at)) : text.ByteAt(at)) != first) continue;
+			int64 i = 1;
+			while (i < needle.ByteLength() && (fold ? FoldAscii(text.ByteAt(at + i)) : text.ByteAt(at + i)) == needle.ByteAt(i)) i += 1;
+			if (i == needle.ByteLength()) return true;
+		}
+		return false;
+	}
+
+	bool LineMatcher::MayMatch(Core::StringView text) const { return literal.IsEmpty() || Contains(text, literal.View(), folded); }
 
 	int64 LineMatcher::Find(Core::StringView line) const {
 		Core::RegexMatch found;
@@ -54,6 +80,7 @@ namespace Ied
 	}
 
 	void SearchText(Core::StringView path, Core::StringView text, const LineMatcher& matcher, int64 limit, SearchResult& result) {
+		if (!matcher.MayMatch(text)) return;
 		int64 start = 0;
 		for (int64 number = 0; start <= text.ByteLength(); ++number) {
 			int64 end = text.IndexOf('\n', start);
@@ -77,50 +104,87 @@ namespace Ied
 		}
 	}
 
-	static bool IsBinary(Core::StringView text) {
-		const int64 probe = text.ByteLength() < kSearchBinaryProbeBytes ? text.ByteLength() : kSearchBinaryProbeBytes;
-		for (int64 i = 0; i < probe; ++i)
-			if (text.ByteAt(i) == 0) return true;
+	static bool HasNul(Core::StringView bytes) {
+		for (int64 i = 0; i < bytes.ByteLength(); ++i)
+			if (bytes.ByteAt(i) == 0) return true;
 		return false;
 	}
 
-	// The text a search reads for a file: an open document's, else the file's when it is small and not binary; false
-	// to skip it.
+	// The text a search reads for a file: an open document's, else the file's when it is small and its first bytes say
+	// it is text; false to skip it.
 	static bool TextToSearch(const FS::Path& file, Core::StringView path, const Core::HashMap<Core::String, Core::String>& open, Core::String& text) {
 		if (open.TryGet(Core::String(path), text)) return true;
 		FS::FileInfo info;
 		if (!FS::GetInfo(file.CStr(), info) || info.size > kSearchFileLimitBytes) return false;
 		FS::File opened = FS::File(file.CStr(), "rb");
 		if (!opened.IsOpen()) return false;
+		char[kSearchBinaryProbeBytes] probe;
+		const int64 got = opened.Read((void*)&probe[0], kSearchBinaryProbeBytes);
+		if (got < 0 || HasNul(Core::StringView(&probe[0], got))) return false;
+		opened.Seek(0);
 		text = opened.ReadText();
-		return !IsBinary(text.View());
+		return true;
 	}
 
-	// The files under `folder` (workspace-relative; empty: the root) searched in name order, folders the query excludes
-	// not entered.
-	static void Walk(const FS::Path& root, Core::StringView folder, const SearchQuery& query, const LineMatcher& matcher,
-		const Core::HashMap<Core::String, Core::String>& open, const Threading::Atomic<bool>* cancel, SearchResult& result) {
-		Core::Array<FS::DirectoryEntry> entries;
-		for (FS::DirectoryEntry& entry : FS::Directory((folder.IsEmpty() ? root : root / folder).CStr())) entries.Push(entry);
-		entries.SortBy([](const FS::DirectoryEntry& a, const FS::DirectoryEntry& b) -> bool { return a.name.View() < b.name.View(); });
-		for (const FS::DirectoryEntry& entry : entries) {
-			if (result.truncated || (cancel && cancel->Load())) return;
-			Core::String path = folder.IsEmpty() ? entry.name : (Core::String(folder) + "/") + entry.name.View();
-			if (entry.kind == FS::EntryKind::Directory) {
-				if (!MatchesAny(query.exclude, path.View())) Walk(root, path.View(), query, matcher, open, cancel, result);
-				continue;
+	// One search's walk over a folder tree: the query, what it found, and the ignore files of the folders it is in.
+	class FolderSearch
+	{
+		public FS::Path root;
+		public SearchQuery query;
+		public LineMatcher matcher;
+		public Core::HashMap<Core::String, Core::String> open;
+		public const Threading::Atomic<bool>* cancel;
+		public SearchResult result;
+
+		// The files under `folder` (workspace-relative; empty: the root) in name order; folders the query excludes or
+		// the ignore files ignore are not entered.
+		public void Folder(Core::StringView folder, Core::Array<IgnoreFile*> ignores) {
+			FS::Path place = folder.IsEmpty() ? root : root / folder;
+			if (query.useIgnoreFiles) AddIgnoreFile(place, folder, ignores);
+			for (const FS::DirectoryEntry& entry : SortedEntries(place)) {
+				if (result.truncated || (cancel && cancel->Load())) return;
+				Core::String path = folder.IsEmpty() ? entry.name : (Core::String(folder) + "/") + entry.name.View();
+				const bool directory = entry.kind == FS::EntryKind::Directory;
+				if (IsIgnored(ignores, path.View(), directory)) continue;
+				if (directory) {
+					if (!MatchesAny(query.exclude, path.View())) Folder(path.View(), ignores);
+				}
+				else if (entry.kind == FS::EntryKind::File) File(path.View());
 			}
+		}
+
+		private void File(Core::StringView path) {
 			Core::String text;
-			if (entry.kind == FS::EntryKind::File && IsSearched(path.View(), query) && TextToSearch(root / path.View(), path.View(), open, text))
-				SearchText(path.View(), text.View(), matcher, query.maxResults, result);
+			if (IsSearched(path, query) && TextToSearch(root / path, path, open, text)) SearchText(path, text.View(), matcher, query.maxResults, result);
+		}
+
+		private static void AddIgnoreFile(const FS::Path& place, Core::StringView folder, Core::Array<IgnoreFile*>& ignores) {
+			FS::Path file = place / ".gitignore";
+			if (!FS::FileExists(file.CStr())) return;
+			FS::File opened = FS::File(file.CStr(), "rb");
+			IgnoreFile* ignore = new IgnoreFile();
+			ignore->folder = Core::String(folder);
+			ignore->rules = ParseIgnoreRules(opened.ReadText().View());
+			ignores.Push(ignore);
+		}
+
+		private static Core::Array<FS::DirectoryEntry> SortedEntries(const FS::Path& place) {
+			Core::Array<FS::DirectoryEntry> entries;
+			for (FS::DirectoryEntry& entry : FS::Directory(place.CStr())) entries.Push(entry);
+			entries.SortBy([](const FS::DirectoryEntry& a, const FS::DirectoryEntry& b) -> bool { return a.name.View() < b.name.View(); });
+			return entries;
 		}
 	}
 
 	SearchResult SearchFolder(const FS::Path& root, const SearchQuery& query, const Core::HashMap<Core::String, Core::String>& open,
 		const Threading::Atomic<bool>* cancel) {
-		SearchResult result;
-		LineMatcher matcher = LineMatcher(query);
-		if (matcher.IsValid()) Walk(root, Core::StringView(""), query, matcher, open, cancel, result);
-		return result;
+		FolderSearch search;
+		search.root = root;
+		search.query = query;
+		search.matcher = LineMatcher(query);
+		search.open = open;
+		search.cancel = cancel;
+		if (search.matcher.IsValid()) search.Folder(Core::StringView(""), Core::Array<IgnoreFile*>());
+		return search.result;
 	}
 }
