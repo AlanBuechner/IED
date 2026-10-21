@@ -1,0 +1,304 @@
+include "work.ch"
+include "files.ch"
+include "host/server.ch"
+include "fs/search.ch"
+
+namespace Ied
+{
+	const int32 kShellPollMs = 250;
+	const int64 kShellDrainMs = 1000;
+	const int64 kShellKeptBytes = 256 * 1024;
+
+	static int64 WorkNowMs() { return clock_now_ns() / 1000000; }
+
+	Core::String TailOf(Core::StringView text, int64 lines, int64 bytes) {
+		int64 start = text.ByteLength();
+		int64 seen = 0;
+		while (start > 0 && seen <= lines && text.ByteLength() - start < bytes) {
+			start -= 1;
+			if (text.ByteAt(start) == '\n' && start < text.ByteLength() - 1) seen += 1;
+		}
+		if (seen > lines || text.ByteLength() - start >= bytes) {
+			const int64 lineEnd = text.IndexOf('\n', start);
+			start = lineEnd < 0 ? start : lineEnd + 1;
+		}
+		return Core::String(text.Substring(start, text.ByteLength() - start));
+	}
+
+	// --- search_text -------------------------------------------------------------------------------------------------
+
+	static ToolPlan SearchPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = (Core::String("fs.read(") + (call.args.Member("glob").IsValid() ? call.args.Member("glob").AsView() : Core::StringView("**"))) + ")";
+		plan.summary = Core::String("Search for ") + call.args.Member("pattern").AsView();
+		return plan;
+	}
+
+	static ToolOutcome SearchRun(const ToolInvocation& call) {
+		SearchQuery query;
+		query.text = Core::String(call.args.Member("pattern").AsView());
+		query.regex = call.args.Member("regex").AsBool();
+		query.caseSensitive = call.args.Member("case_sensitive").AsBool();
+		if (call.args.Member("glob").IsValid()) query.include.Push(Core::String(call.args.Member("glob").AsView()));
+		query.exclude = DefaultSearchExcludes();
+		query.useIgnoreFiles = true;
+		query.maxResults = kSearchToolMatches;
+		LineMatcher matcher = LineMatcher(query);
+		if (!matcher.IsValid()) return ToolError((Core::String("search_text: the pattern is not a valid regex: ") + matcher.Error()).View());
+		Core::HashMap<Core::String, Core::String> open;
+		{
+			Threading::LockGuard guard(call.server->lock);
+			for (const Core::String& path : call.server->documents->OpenPaths(call.ws)) open.Insert(path, call.server->documents->Find(call.ws, path.View())->text);
+		}
+		Threading::Atomic<bool> never;
+		SearchResult result = SearchFolder(call.ws->root, query, open, &never);
+		Core::StringBuilder out;
+		for (const SearchMatch& match : result.matches) {
+			out.Append(match.path.View());
+			out.Append(":");
+			out.AppendInt(match.line + 1);
+			out.Append(": ");
+			out.Append(match.preview.View().Trimmed());
+			out.Append("\n");
+		}
+		if (result.truncated) out.Append("[stopped at 100 matches; narrow the pattern or add a glob]\n");
+		if (result.matches.IsEmpty()) out.Append("[no matches]\n");
+		Core::StringBuilder preview;
+		preview.AppendInt(result.matches.Count());
+		preview.Append(result.matches.Count() == 1 ? " match" : " matches");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	// --- shell_run ---------------------------------------------------------------------------------------------------
+
+	static ToolPlan ShellPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = (Core::String("shell(") + call.args.Member("command").AsView()) + ")";
+		plan.summary = (Core::String("Run `") + call.args.Member("command").AsView()) + "`";
+		if (!call.ws->trusted) plan.error = Core::String("shell_run: the workspace is not trusted, so nothing may run in it; ask the owner to trust it");
+		return plan;
+	}
+
+	static void ShellOutput(const ToolInvocation& call, Core::StringView text) {
+		Threading::LockGuard guard(call.server->lock);
+		call.server->outputs->Append(call.ws, Core::StringView(kAiOutputSource), text);
+	}
+
+	// Reads the child's output until it and what it started close it, the time is up or the run is stopped; the code
+	// it ended with, or -1 when it had to be stopped.
+	static int64 Drain(const ToolInvocation& call, Process::Child& child, int64 seconds, Core::String& kept, Core::String& stopped) {
+		const int64 deadline = WorkNowMs() + seconds * 1000;
+		int64 exitedAt = -1;
+		char8[16384] buffer;
+		while (child.HasOutput()) {
+			if (*call.cancelled || WorkNowMs() > deadline) {
+				stopped = Core::String(*call.cancelled ? "stopped with the run" : "ran out of time and was stopped");
+				child.Kill();
+				break;
+			}
+			if (exitedAt < 0 && child.Wait(0) != Process::kTimedOut) exitedAt = WorkNowMs();
+			if (exitedAt >= 0 && WorkNowMs() - exitedAt > kShellDrainMs) break;
+			Process::Stream from;
+			const int64 got = child.ReadAny((void*)&buffer[0], 16384, from, kShellPollMs);
+			if (got > 0) {
+				Core::StringView text = Core::StringView(&buffer[0], got);
+				kept = Bounded(kept.View(), text, kShellKeptBytes);
+				ShellOutput(call, text);
+			}
+			else if (got != Process::kTimedOut && got != 0) break;
+		}
+		const int64 code = child.Wait(5000);
+		return stopped.IsEmpty() ? code : -1;
+	}
+
+	static ToolOutcome ShellRun(const ToolInvocation& call) {
+		Core::String command = Core::String(call.args.Member("command").AsView());
+		Core::String cwd = NormalizePath(call.args.Member("cwd").AsView());
+		int64 seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : kShellDefaultSeconds;
+		if (seconds < 1 || seconds > kShellMostSeconds) seconds = kShellMostSeconds;
+		ShellOutput(call, ((Core::String("> ") + command.View()) + "\n").View());
+		Process::StartInfo info;
+		info.shellCommand = command;
+		info.workingDirectory = Core::String(call.ws->At(cwd.View()).View());
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child child = Process::Child::Start(info);
+		if (!child.IsOpen()) return ToolError((Core::String("shell_run: the command did not start: ") + child.Error()).View());
+		Core::String kept;
+		Core::String stopped;
+		const int64 code = Drain(call, child, seconds, kept, stopped);
+		Core::StringBuilder said;
+		said.Append(stopped.IsEmpty() ? "exit " : "the command ");
+		if (stopped.IsEmpty()) said.AppendInt(code);
+		else said.Append(stopped.View());
+		said.Append("\n");
+		said.Append(TailOf(kept.View(), kShellTailLines, kShellTailBytes).View());
+		ShellOutput(call, ((Core::String("[") + said.View().Substring(0, said.View().IndexOf('\n', 0))) + "]\n").View());
+		ToolOutcome outcome = ToolResult(said.View(), TailOf(kept.View(), 12, 2048).View());
+		outcome.isError = code != 0;
+		outcome.source = Core::String("Output: AI");
+		return outcome;
+	}
+
+	// --- problems ----------------------------------------------------------------------------------------------------
+
+	static const char* SeverityName(int64 severity) {
+		if (severity == 1) return "error";
+		return severity == 2 ? "warning" : "info";
+	}
+
+	Core::String ProblemLines(const Serialization::DomNode& files, Core::StringView under, bool errorsOnly, int64 most, int64& errors, int64& warnings) {
+		Core::StringBuilder out;
+		int64 shown = 0;
+		for (int64 f = 0; files.Kind() == Serialization::DomKind::Object && f < files.Count(); ++f) {
+			Core::StringView path = files.KeyAt(f);
+			if (!under.IsEmpty() && !path.StartsWith(under)) continue;
+			Serialization::DomNode sources = files.ValueAt(f);
+			for (int64 s = 0; s < sources.Count(); ++s)
+				for (int64 i = 0; i < sources.ValueAt(s).Count(); ++i) {
+					Serialization::DomNode item = sources.ValueAt(s).At(i);
+					const int64 severity = item.Member("severity").IsValid() ? item.Member("severity").AsInt() : 1;
+					if (severity > 2 || (errorsOnly && severity != 1)) continue;
+					if (severity == 1) errors += 1;
+					else warnings += 1;
+					if (shown >= most) continue;
+					shown += 1;
+					out.Append(path);
+					out.Append(":");
+					out.AppendInt(item.Member("range").Member("start").Member("line").AsInt() + 1);
+					out.Append(":");
+					out.AppendInt(item.Member("range").Member("start").Member("character").AsInt() + 1);
+					out.Append(": ");
+					out.Append(SeverityName(severity));
+					out.Append(": ");
+					out.Append(item.Member("message").AsView());
+					out.Append("\n");
+				}
+		}
+		if (errors + warnings > shown) out.Append("[more problems than shown; filter by path or severity]\n");
+		return out.ToString();
+	}
+
+	static ToolPlan ProblemsPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = Core::String("problems()");
+		plan.summary = Core::String("List problems");
+		return plan;
+	}
+
+	static Serialization::DomNode ParsedObject(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json, *doc).root;
+	}
+
+	static ToolOutcome ProblemsRun(const ToolInvocation& call) {
+		Core::String snapshot;
+		{
+			Threading::LockGuard guard(call.server->lock);
+			snapshot = call.server->diagnostics->Snapshot(call.ws);
+		}
+		int64 errors = 0;
+		int64 warnings = 0;
+		Core::String lines = ProblemLines(ParsedObject(snapshot.View()).Member("files"), call.args.Member("path").AsView(), call.args.Member("severity").AsView() == "error", kProblemsMost, errors, warnings);
+		Core::StringBuilder preview;
+		preview.AppendInt(errors);
+		preview.Append(errors == 1 ? " error, " : " errors, ");
+		preview.AppendInt(warnings);
+		preview.Append(warnings == 1 ? " warning" : " warnings");
+		if (lines.IsEmpty()) lines = Core::String("[no problems]\n");
+		return ToolResult(lines.View(), preview.View());
+	}
+
+	// --- build_run ---------------------------------------------------------------------------------------------------
+
+	static ToolPlan BuildPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		Core::String task = call.args.Member("task").IsValid() ? Core::String(call.args.Member("task").AsView()) : Core::String("build");
+		plan.subject = (Core::String("task(") + task.View()) + ")";
+		plan.summary = (Core::String("Run the ") + task.View()) + " task";
+		if (call.args.Member("project").IsValid()) plan.summary = (plan.summary + " of ") + call.args.Member("project").AsView();
+		if (!call.ws->trusted) plan.error = Core::String("build_run: the workspace is not trusted, so nothing may run in it; ask the owner to trust it");
+		return plan;
+	}
+
+	// A run's problems ("<source>\n<path>" -> items) as a diag snapshot's files.
+	static Core::String RunProblemFiles(const TaskRun* run) {
+		JsonWriter json;
+		json.BeginObject();
+		for (const Core::KeyValue<Core::String, Core::String>& entry : run->problems) {
+			const int64 cut = entry.key.View().IndexOf('\n', 0);
+			json.Key(entry.key.View().Substring(cut + 1, entry.key.ByteLength() - cut - 1));
+			json.BeginObject();
+			json.Key(entry.key.View().Substring(0, cut));
+			json.Raw(entry.value.View());
+			json.EndObject();
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static ToolOutcome BuildRun(const ToolInvocation& call) {
+		Threading::LockGuard guard(call.server->lock);
+		Core::String task = call.args.Member("task").IsValid() ? Core::String(call.args.Member("task").AsView()) : Core::String("");
+		TaskRun* run = call.server->tasks->RunTask(call.ws, call.args.Member("project").AsView(), task.View(), task.IsEmpty() ? Core::StringView("build") : Core::StringView(""), Serialization::DomNode());
+		const bool succeeded = call.server->tasks->AwaitEnd(run);
+		int64 errors = 0;
+		int64 warnings = 0;
+		Core::String problems = ProblemLines(ParsedObject(RunProblemFiles(run).View()), Core::StringView(""), false, kProblemsMost, errors, warnings);
+		Core::StringBuilder said;
+		said.Append(run->label.View());
+		said.Append(succeeded ? " succeeded" : run->status == RunStatus::Cancelled ? " was cancelled" : " failed");
+		said.Append(" in ");
+		said.AppendInt((run->endedMs - run->startedMs) / 1000);
+		said.Append(" s (");
+		said.AppendInt(errors);
+		said.Append(" errors, ");
+		said.AppendInt(warnings);
+		said.Append(" warnings)\n");
+		said.Append(problems.View());
+		if (!succeeded && errors == 0) said.Append(TailOf(run->tail.View(), 40, 4096).View());
+		ToolOutcome outcome = ToolResult(said.View(), said.View().Substring(0, said.View().IndexOf('\n', 0)));
+		outcome.isError = !succeeded;
+		outcome.source = Core::String("Output: Build");
+		return outcome;
+	}
+
+	static ToolSpec* WorkSpec(const char* name, const char* description, const char* parameters, ToolClass toolClass, bool inPlan) {
+		ToolSpec* spec = new ToolSpec();
+		spec->name = Core::String(name);
+		spec->description = Core::String(description);
+		spec->parameters = Core::String(parameters);
+		spec->toolClass = toolClass;
+		spec->parallelSafe = toolClass == ToolClass::Read;
+		spec->inPlan = inPlan;
+		return spec;
+	}
+
+	void AddWorkTools(ToolRegistry& registry) {
+		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for text (or a regex), skipping build output; returns path:line: text. Example: search_text({\"pattern\": \"RingSink\", \"glob\": \"src/**/*.cf\"})",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+			ToolClass::Read, true);
+		search->plan = SearchPlan;
+		search->run = SearchRun;
+		registry.Add(search);
+		ToolSpec* shell = WorkSpec("shell_run", "Run a shell command (cmd on Windows) in the workspace; returns the exit code and the output's tail. The owner sees the output in Output > AI. Example: shell_run({\"command\": \"git status --short\"})",
+			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}}, \"required\": [\"command\"], \"additionalProperties\": false}",
+			ToolClass::Exec, false);
+		shell->plan = ShellPlan;
+		shell->run = ShellRun;
+		registry.Add(shell);
+		ToolSpec* build = WorkSpec("build_run", "Build with the project's build task (as the toolbar's Build does) and return the result with its errors and warnings. Example: build_run({}) or build_run({\"project\": \"Game\"})",
+			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\"}, \"task\": {\"type\": \"string\", \"description\": \"another task than build, by its key\"}}, \"additionalProperties\": false}",
+			ToolClass::Exec, false);
+		build->plan = BuildPlan;
+		build->run = BuildRun;
+		registry.Add(build);
+		ToolSpec* problems = WorkSpec("problems_list", "The Error List: errors and warnings from builds and language servers, as path:line:col: severity: message. Example: problems_list({\"severity\": \"error\", \"path\": \"src/\"})",
+			"{\"type\": \"object\", \"properties\": {\"severity\": {\"enum\": [\"error\", \"warning\"]}, \"path\": {\"type\": \"string\", \"description\": \"only files under this path\"}}, \"additionalProperties\": false}",
+			ToolClass::Read, true);
+		problems->plan = ProblemsPlan;
+		problems->run = ProblemsRun;
+		registry.Add(problems);
+	}
+}

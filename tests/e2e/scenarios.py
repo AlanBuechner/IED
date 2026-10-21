@@ -260,10 +260,12 @@ def disable_and_enable_a_plugin(run):
 	page.wait_for_selector(".plugin-card[data-plugin='ied.editor'] button:has-text('Disable')")
 	page.click(".plugin-card[data-plugin='ied.editor'] button:has-text('Disable')")
 	page.wait_for_selector('.sb-act[data-activity="ied.editor"]', state="detached")
-	page.wait_for_selector('.sb-act[data-activity="shell.home"].on')
+	page.wait_for_selector('.sb-act[data-activity="shell.home"]')
+	page.wait_for_selector('.sb-act[data-activity="ied.chat"].on')
 	page.wait_for_selector(".panel-title:has-text('Solution Explorer')", state="hidden")
 	run.shot("disabled")
-	page.click(".hint:has-text('Manage Plugins')")
+	page.click("button.mi:has-text('Extensions')")
+	page.click(".menu .menu-item:has-text('Manage Plugins')")
 	page.wait_for_selector(".plugin-card[data-plugin='ied.editor'] button:has-text('Enable')")
 	page.click(".plugin-card[data-plugin='ied.editor'] button:has-text('Enable')")
 	page.wait_for_selector('.sb-act[data-activity="ied.editor"]')
@@ -945,7 +947,7 @@ def server_edits_while_typing(run):
 def phone_panes(run):
 	page = run.open()
 	slots = run.texts(".phone-nav .pn > span:not(.ci)")
-	check(slots[:3] == ["Editor", "Solution Explorer", "Output"] and slots[-1] == "More", "the slots: %s" % slots)
+	check(slots[:4] == ["Chat", "Editor", "Solution Explorer", "Output"] and slots[-1] == "More", "the slots: %s" % slots)
 	page.wait_for_selector(".phone-pane .tree-row:has-text('README.md')")
 	run.shot("explorer")
 	page.click(".phone-nav .pn[data-pane='ied.output']")
@@ -963,3 +965,91 @@ def phone_panes(run):
 	page.wait_for_selector(".menu.sheet")
 	check("Keyboard Shortcuts" in run.texts(".menu.sheet .menu-item .label"), "More lists the rest")
 	run.shot("more")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Chat (docs/10 "Chats"): the mock plays its scripted turns; the real server talks to tools/fake-model.
+
+def model_script(*steps):
+	return {"description": "e2e", "stopClass": "none", "harness": "-", "responses": [{"chunkDelayMs": 20, "steps": [{"role": "assistant"}] + list(steps) + [{"usage": True}, {"done": True}]}]}
+
+
+def open_chat(run):
+	"""The Chat activity on a new Ask chat, picked by its tab; on the real server with the fake model."""
+	page = run.open()
+	if run.target.kind == "real":
+		run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}}})
+	ws_id = page.evaluate("ied_shell.wsId")
+	created = run.request("chat.create", {"wsId": ws_id, "mode": "ask"})
+	run.show_activity("ied.chat")
+	page.click(".chat-tab[data-chat='%s']" % created["chatId"])
+	page.wait_for_selector(".chat-tab.on[data-chat='%s']" % created["chatId"])
+	return page
+
+
+def streaming(page):
+	page.wait_for_function("(document.querySelector('.chat-turn:last-child .chat-text') || {textContent: ''}).textContent.length > 40", timeout=20000)
+
+
+def send(page, text):
+	page.fill(".chat-input", text)
+	page.press(".chat-input", "Enter")
+
+
+@scenario(viewports=("desktop", "phone"))
+def chat_turn_with_approval(run):
+	page = open_chat(run)
+	if run.target.kind == "real":
+		edit = {"path": "src/main.c", "edits": [{"old": "int main(void)", "new": "/* the entry point */\nint main(void)"}]}
+		run.target.queue_model(
+			model_script({"text": "I'll document the entry point:", "chunk": 6}, {"toolCall": {"name": "fs_edit", "arguments": edit}}, {"finish": "tool_calls"}),
+			model_script({"text": "Done: `main` is documented.", "chunk": 6}, {"finish": "stop"}))
+	send(page, "clamp the velocity")
+	page.wait_for_selector(".chat-approval .chat-diff .dl.add", timeout=20000)
+	check(page.is_visible(".chat-tab .glyph.attn") or run.phone, "the tab says the chat waits on its owner")
+	run.shot("approval")
+	page.click(".chat-approval .btn.primary")
+	page.wait_for_selector(".chat-foot:has-text('Finished')", timeout=30000)
+	states = page.eval_on_selector_all(".chat-tool, .chat-finish", "els => els.map(e => e.dataset.state || 'finish')")
+	check("ok" in states and "awaiting_approval" not in states, "the edit ran: %s" % states)
+	if not run.phone:
+		check(page.is_visible(".chat-panel .chat-sec-row.file"), "the changed file is listed in the panel")
+	run.shot("finished")
+
+
+@scenario(viewports=("desktop",))
+def chat_reload_mid_turn(run):
+	page = open_chat(run)
+	text = " ".join("Sentence %d of a long answer." % i for i in range(1, 301))
+	if run.target.kind == "real":
+		run.target.queue_model(model_script({"text": text, "chunk": 8, "delayMs": 15}, {"finish": "stop"}))
+	send(page, "write a long essay")
+	streaming(page)
+	page.reload()
+	run.wait_ready()
+	page.wait_for_selector(".chat-act", timeout=20000)
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=60000)
+	if run.target.kind == "real":
+		run.wait_text(".chat-turn:last-child .chat-text", "Sentence 300 of a long answer.")
+	else:
+		page.wait_for_function("document.querySelectorAll('.chat-turn:last-child .chat-text li').length === 40", timeout=10000)
+	run.shot("finished")
+
+
+@scenario(viewports=("desktop",))
+def chat_stop_and_queue(run):
+	page = open_chat(run)
+	if run.target.kind == "real":
+		run.target.queue_model(model_script({"text": "word " * 2000, "chunk": 5, "delayMs": 20}, {"finish": "stop"}), model_script({"text": "The queued answer.", "chunk": 6}, {"finish": "stop"}))
+	send(page, "write a long essay")
+	streaming(page)
+	send(page, "and then summarize it")
+	page.wait_for_selector(".chat-queued:has-text('and then summarize it')")
+	run.shot("queued")
+	page.click(".chat-row2 .btn:has-text('Stop')")
+	page.wait_for_selector(".chat-foot:has-text('Stopped')", timeout=20000)
+	check(page.is_visible(".chat-queued"), "a stopped turn leaves the queue for the owner")
+	run.shot("stopped")
+	page.click(".chat-queued button[aria-label='Send the queued message now']")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	check(not page.is_visible(".chat-queued") and "and then summarize it" in run.texts(".chat-turn:last-child .chat-user"), "the queued message was sent")

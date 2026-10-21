@@ -1,0 +1,33 @@
+// The chat activity (docs/04, docs/12, docs/15 "Chat"): the server's chats - turns that run on the server whatever the
+// browsers do - as tabs with streaming segments, tool cards, approval cards and harness notes, a composer that sends,
+// queues, injects and stops, and a right panel with the context, the task list and the files the AI changed. The AI
+// runtime itself is the host's (src/ai); this plugin is its UI and declares its settings.
+{
+	"manifestVersion": 1,
+	"id": "ied.chat",
+	"name": "Chat",
+	"version": "0.1.0",
+	"description": "AI chats: streaming turns, tool and approval cards, steering, tasks and context.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
+	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "AI" },
+		"activities": [
+			{ "id": "ied.chat", "title": "Chat", "icon": "$(comment-discussion)", "order": 0, "phoneSlot": true, "view": "ChatActivity" }
+		],
+		"statusBarItems": [
+			{ "id": "ied.chat.status", "alignment": "left", "priority": 40, "view": "ChatStatus", "command": "ied.chat.show" }
+		],
+		"commands": [
+			{ "id": "ied.chat.new", "title": "New Chat", "category": "Chat", "icon": "$(add)" },
+			{ "id": "ied.chat.show", "title": "Chat", "category": "View", "icon": "$(comment-discussion)" },
+			{ "id": "ied.chat.stop", "title": "Stop the Turn", "category": "Chat", "icon": "$(debug-stop)" }
+		],
+		"keybindings": [
+			{ "command": "ied.chat.show", "key": "ctrl+alt+i" },
+			{ "command": "ied.chat.new", "key": "ctrl+alt+n" }
+		]
+	}
+}

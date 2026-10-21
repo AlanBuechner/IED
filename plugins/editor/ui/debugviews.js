@@ -47,7 +47,7 @@ export class CallStack {
 		replace(this.list, ...frames.map((frame, i) => h("div.row.cs-row.cs-grid" + (frame === this.debug.frame ? ".sel" : "") + (i === 0 ? ".top" : ""), {
 			role: "row",
 			on: { click: () => this.open(frame) },
-		}, h("span.cs-arrow", null, frame === this.debug.frame ? "▶" : ""), h("span.cs-name", null, frame.name), h("span.cs-where.muted", null, frameWhere(frame)))));
+		}, h("span.cs-arrow", null, frame === this.debug.frame ? "\u25b6" : ""), h("span.cs-name", null, frame.name), h("span.cs-where.muted", null, frameWhere(frame)))));
 	}
 
 	open(frame) {
@@ -212,7 +212,7 @@ export class Threads {
 		const shown = this.debug.threadShown();
 		replace(this.list, ...threads.map((thread) => h("div.row.cs-row.cs-grid" + (thread.id === shown ? ".sel" : ""), {
 			role: "row", on: { click: () => this.debug.selectThread(thread.id) },
-		}, h("span.cs-arrow", null, thread.id === shown ? "▶" : ""), h("span.cs-name", null, thread.name || "Thread " + thread.id), h("span.cs-where.muted", null, String(thread.id)))));
+		}, h("span.cs-arrow", null, thread.id === shown ? "\u25b6" : ""), h("span.cs-name", null, thread.name || "Thread " + thread.id), h("span.cs-where.muted", null, String(thread.id)))));
 		return null;
 	}
 

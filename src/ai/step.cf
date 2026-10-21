@@ -1,0 +1,230 @@
+include "step.ch"
+include "wire/post.ch"
+include "wire/sse.ch"
+include "wire/dialect.ch"
+
+namespace Ied
+{
+	const int32 kStepPollMs = 250;
+	const int64 kStepHeldBytes = 48;          // the text tail held back in case it opens a tool call
+	const int64 kStepErrorBodyMs = 5000;
+	const int64 kStepErrorBodyBytes = 16384;
+
+	static int64 StepNowMs() { return clock_now_ns() / 1000000; }
+
+	// What a step's stream has handed out so far, and the clocks its watchdogs read.
+	class StepStream
+	{
+		public StepResult* result;
+		public const StepEvents* events;
+		public ThinkSplitter splitter;
+		public Core::String visible;      // the prose so far, <think> blocks out
+		public int64 released;            // bytes of `visible` handed out as Text
+		public bool callOpened;           // a text tool call opened: what follows is withheld
+		public int64 startMs;
+		public int64 lastByteMs;
+		public int64 prefillDeadlineMs;
+		public int64 prefillExtendMs;     // what a keepalive comment adds before the first token
+	}
+
+	// Never cuts a UTF-8 sequence: the end moves back to the start of the code point it falls in.
+	static int64 CharacterBoundary(Core::StringView text, int64 end) {
+		while (end > 0 && end < text.ByteLength() && ((uint8)text.ByteAt(end) & 0xC0) == 0x80) end -= 1;
+		return end;
+	}
+
+	static void Release(StepStream& stream, bool all) {
+		if (!stream.callOpened) {
+			const int64 from = stream.released > kStepHeldBytes ? stream.released - kStepHeldBytes : 0;
+			const int64 opener = TextToolCallStart(stream.visible.View().Substring(from, stream.visible.ByteLength() - from));
+			if (opener >= 0) stream.callOpened = true;
+			const int64 limit = opener >= 0 ? from + opener : all ? stream.visible.ByteLength() : stream.visible.ByteLength() - kStepHeldBytes;
+			const int64 end = CharacterBoundary(stream.visible.View(), limit);
+			if (end > stream.released) {
+				(*stream.events)(StepEventKind::Text, stream.visible.View().Substring(stream.released, end - stream.released), -1);
+				stream.released = end;
+			}
+		}
+	}
+
+	static void TakeContent(StepStream& stream, Core::StringView text) {
+		Core::String thinking;
+		Core::String visible;
+		stream.splitter.Feed(text, thinking, visible);
+		if (!thinking.IsEmpty()) {
+			stream.result->thinking.Append(thinking.View());
+			(*stream.events)(StepEventKind::Thinking, thinking.View(), -1);
+		}
+		stream.visible.Append(visible.View());
+		Release(stream, false);
+	}
+
+	static void TakeDelta(StepStream& stream, const CompletionDelta& delta, int64& knownCalls) {
+		if (stream.result->ttftMs < 0) stream.result->ttftMs = StepNowMs() - stream.startMs;
+		if (delta.kind == DeltaKind::Content) TakeContent(stream, delta.text.View());
+		else if (delta.kind == DeltaKind::Reasoning) {
+			stream.result->thinking.Append(delta.text.View());
+			(*stream.events)(StepEventKind::Thinking, delta.text.View(), -1);
+		}
+		else {
+			if (delta.call >= knownCalls) {
+				knownCalls = delta.call + 1;
+				Release(stream, true);
+				(*stream.events)(StepEventKind::CallStarted, stream.result->completion->calls[delta.call]->name.View(), delta.call);
+			}
+			if (!delta.text.IsEmpty()) (*stream.events)(StepEventKind::CallArguments, delta.text.View(), delta.call);
+		}
+	}
+
+	static void TakeEvent(StepStream& stream, const SseEvent& event, int64& knownCalls) {
+		if (event.kind == SseKind::Comment) {
+			stream.result->keepalives += 1;
+			const int64 extended = StepNowMs() + stream.prefillExtendMs;
+			if (stream.result->ttftMs < 0 && extended > stream.prefillDeadlineMs) stream.prefillDeadlineMs = extended;
+			return;
+		}
+		Core::Array<CompletionDelta> deltas;
+		stream.result->completion->Take(event.data.View(), deltas);
+		for (const CompletionDelta& delta : deltas) TakeDelta(stream, delta, knownCalls);
+	}
+
+	// The end of the stream: held text out, and calls written as text taken from the prose.
+	static void Finish(StepStream& stream) {
+		Core::String thinking;
+		Core::String visible;
+		stream.splitter.Flush(thinking, visible);
+		stream.result->thinking.Append(thinking.View());
+		stream.visible.Append(visible.View());
+		Release(stream, true);
+		StepResult* result = stream.result;
+		for (ToolCallDraft* call : result->completion->calls) result->calls.Push(call);
+		result->text = stream.visible;
+		if (!result->calls.IsEmpty()) return;
+		Core::String rest;
+		Core::Array<TextToolCall> found = ParseTextToolCalls(stream.visible.View(), rest);
+		for (int64 i = 0; i < found.Count(); ++i) {
+			ToolCallDraft* call = new ToolCallDraft();
+			call->name = found[i].name;
+			call->arguments = found[i].arguments;
+			call->index = i;
+			result->calls.Push(call);
+		}
+		result->textCalls = !found.IsEmpty();
+		if (result->textCalls) result->text = rest;
+		else result->unparsedCall = stream.callOpened;
+	}
+
+	static int64 RetryAfterMs(const Http::Response& head) {
+		const Core::String* value = head.headers.Find(Core::StringView("retry-after"));
+		if (!value) return 0;
+		int64 seconds = 0;
+		for (int64 i = 0; i < value->ByteLength() && value->View().ByteAt(i) >= '0' && value->View().ByteAt(i) <= '9'; ++i) seconds = seconds * 10 + (value->View().ByteAt(i) - '0');
+		return seconds * 1000;
+	}
+
+	// A refused request's body, bounded: the server says why there.
+	static Core::String ErrorBody(StreamingPost& post) {
+		Core::String body;
+		const int64 until = StepNowMs() + kStepErrorBodyMs;
+		while (StepNowMs() < until && body.ByteLength() < kStepErrorBodyBytes) {
+			const PostRead read = post.Read(body, kStepPollMs);
+			if (read == PostRead::Ended || read == PostRead::Failed) break;
+		}
+		return body;
+	}
+
+	static bool AwaitHead(StreamingPost& post, StepStream& stream, const bool* cancelled) {
+		for (;;) {
+			if (*cancelled) {
+				stream.result->end = WireEnd::Cancelled;
+				return false;
+			}
+			const PostRead read = post.ReadHead(kStepPollMs);
+			if (read == PostRead::Bytes) return true;
+			if (read == PostRead::Failed) {
+				stream.result->end = WireEnd::ConnectFailed;
+				stream.result->error = Core::String(post.Error());
+				return false;
+			}
+			if (StepNowMs() > stream.prefillDeadlineMs) {
+				stream.result->end = WireEnd::StalledPrefill;
+				return false;
+			}
+		}
+	}
+
+	// Whether the stream's silence has outlasted its watchdog; sets the end when it has.
+	static bool Stalled(StepStream& stream, const StepRequest& request) {
+		const int64 now = StepNowMs();
+		if (now - stream.startMs > request.capMs) stream.result->end = WireEnd::StepCap;
+		else if (stream.result->ttftMs < 0 && now > stream.prefillDeadlineMs) stream.result->end = WireEnd::StalledPrefill;
+		else if (stream.result->ttftMs >= 0 && now - stream.lastByteMs > request.idleMs) stream.result->end = WireEnd::StalledStream;
+		else return false;
+		return true;
+	}
+
+	static void ReadEvents(StreamingPost& post, StepStream& stream, const StepRequest& request, const bool* cancelled) {
+		SseReader sse;
+		SseEvent event;
+		int64 knownCalls = 0;
+		for (;;) {
+			if (*cancelled) {
+				stream.result->end = WireEnd::Cancelled;
+				return;
+			}
+			Core::String bytes;
+			const PostRead read = post.Read(bytes, kStepPollMs);
+			if (!bytes.IsEmpty()) {
+				stream.lastByteMs = StepNowMs();
+				sse.Feed(bytes.View());
+				while (sse.Next(event)) TakeEvent(stream, event, knownCalls);
+				if (stream.result->completion->done) {
+					stream.result->end = WireEnd::Completed;
+					return;
+				}
+			}
+			if (read == PostRead::Ended || read == PostRead::Failed) {
+				if (sse.Flush(event)) TakeEvent(stream, event, knownCalls);
+				const bool ended = stream.result->completion->done || !stream.result->completion->finishReason.IsEmpty();
+				stream.result->end = ended ? WireEnd::Completed : WireEnd::Disconnected;
+				if (!ended && read == PostRead::Failed) stream.result->error = Core::String(post.Error());
+				return;
+			}
+			if (read == PostRead::Waiting && Stalled(stream, request)) return;
+		}
+	}
+
+	StepResult* RunStep(const StepRequest& request, const StepEvents& events, const bool* cancelled) {
+		StepStream stream;
+		stream.result = new StepResult();
+		stream.events = &events;
+		stream.startMs = StepNowMs();
+		stream.lastByteMs = stream.startMs;
+		stream.prefillDeadlineMs = stream.startMs + request.prefillMs;
+		stream.prefillExtendMs = request.prefillExtendMs;
+		StreamingPost post;
+		Core::String error;
+		if (!post.Send(request.url.View(), request.headers, request.body.View(), request.connectMs, error)) {
+			stream.result->end = WireEnd::ConnectFailed;
+			stream.result->error = error;
+		}
+		else if (AwaitHead(post, stream, cancelled)) {
+			stream.result->httpStatus = post.Status();
+			if (post.Status() != 200) {
+				stream.result->end = WireEnd::HttpError;
+				stream.result->retryAfterMs = RetryAfterMs(post.Head());
+				stream.result->error = ErrorBody(post);
+			}
+			else ReadEvents(post, stream, request, cancelled);
+		}
+		post.Close();
+		Finish(stream);
+		stream.result->ms = StepNowMs() - stream.startMs;
+		return stream.result;
+	}
+
+	const char* WireEndName(WireEnd end) {
+		const char*[8] names = { "completed", "connect_failed", "http_error", "disconnected_mid_stream", "stalled_prefill", "stalled_stream", "step_cap", "user_cancelled" };
+		return names[(int32)end];
+	}
+}

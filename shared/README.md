@@ -13,6 +13,7 @@ Shared web components used by the shell and every plugin UI module, built only o
 - `menu.js` - popup menus (context menus, menu bar, dropdowns; bottom sheets on phones), keyboard driven
 - `tree.js` - a virtualized tree view with lazy children, VS keys and type-ahead
 - `textedits.js` - the document protocol's edits applied to text (UTF-16 columns)
+- `markdown.js` - GitHub-flavored Markdown to elements, text always as text nodes (the editor's preview, chat replies)
 - `ui-kit.css` - their styles, plus buttons, chips, badges, inputs and list rows
 
 Planned:

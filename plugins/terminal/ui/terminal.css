@@ -1,5 +1,5 @@
-/* terminal.css - the terminal dock (docs/15): the header's tabs and buttons, the screens, the lease bar and the phone's
-   key row. Tokens only (docs/07). */
+/* terminal.css - the terminal dock (docs/15): the header's tabs and buttons, the screens, the lease bar and the */
+/* phone's key row. Tokens only (docs/07). */
 
 .term-head { display: flex; align-items: center; gap: var(--space-1); height: 30px; padding: 0 var(--space-2); flex: none; background: var(--bg-0); border-bottom: var(--border-width) solid var(--border-0); }
 .panel-dock.collapsed .term-head { border-bottom: 0; }

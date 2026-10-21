@@ -22,5 +22,6 @@ import "./tasks.test.js";
 import "./diagnostics.test.js";
 import "./debug.test.js";
 import "./outputlinks.test.js";
+import "./chat.test.js";
 
 run(document.getElementById("results"));

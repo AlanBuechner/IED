@@ -1,0 +1,391 @@
+include "run.ch"
+include "host/server.ch"
+include "web/params.ch"
+
+namespace Ied
+{
+	const int64 kPreviewBytes = 4000;
+
+	static int64 ToolNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	static Core::String ModelCallId(Chat* chat) {
+		chat->counter += 1;
+		Core::StringBuilder id;
+		id.Append("call");
+		id.AppendIntBase(chat->counter, 10, 5);
+		return id.ToString();
+	}
+
+	void TurnRun::RecordAssistant(const StepResult* result, bool withCalls) {
+		ModelMessage* message = new ModelMessage();
+		message->role = Core::String("assistant");
+		message->content = result->text;
+		if (withCalls && !result->calls.IsEmpty()) {
+			JsonWriter calls;
+			calls.BeginArray();
+			for (ToolCallDraft* call : result->calls) {
+				if (call->id.IsEmpty()) call->id = ModelCallId(chat);
+				calls.BeginObject();
+				calls.Field("id", call->id.View());
+				calls.Field("type", "function");
+				calls.Key(Core::StringView("function"));
+				calls.BeginObject();
+				calls.Field("name", call->name.View());
+				calls.Field("arguments", call->arguments.IsEmpty() ? Core::StringView("{}") : call->arguments.View());
+				calls.EndObject();
+				calls.EndObject();
+			}
+			calls.EndArray();
+			message->toolCalls = calls.ToString();
+		}
+		if (message->content.IsEmpty() && message->toolCalls.IsEmpty()) return;
+		turn->messages.Push(message);
+	}
+
+	void TurnRun::ExecuteCalls(StepResult* result) {
+		{
+			Threading::LockGuard guard(server->lock);
+			for (int64 i = callSegments.Count(); i < result->calls.Count(); ++i) {
+				Segment* segment = NewSegment("tool");
+				segment->tool = result->calls[i]->name;
+				segment->callId = chat->NextId("k");
+				segment->argsText = result->calls[i]->arguments;
+				segment->state = Core::String("streaming");
+				callSegments.Push(Begin(segment));
+				Close(segment);
+			}
+		}
+		for (int64 i = 0; i < result->calls.Count() && !ending; ++i) ExecuteCall(result->calls[i], callSegments[i], result->calls[i]->id.View());
+		Threading::LockGuard guard(server->lock);
+		CloseOpenCalls(turn, Core::StringView("The call did not run: an earlier call in the same reply ended the turn."));
+		SaveRunning();
+	}
+
+	static Core::String Joined(const Core::Array<Core::String>& items, const char* separator) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < items.Count(); ++i) {
+			if (i > 0) out.Append(separator);
+			out.Append(items[i].View());
+		}
+		return out.ToString();
+	}
+
+	void TurnRun::ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId) {
+		const int64 started = ToolNowMs();
+		ToolOutcome outcome;
+		ToolSpec* spec = chats->tools->Find(call->name.View());
+		Serialization::DomNode args;
+		if (!spec || !chats->tools->Offered(spec, chat->mode)) {
+			Core::Array<Core::String> values;
+			values.Push(Core::String("name"));
+			values.Push(call->name);
+			values.Push(Core::String("suggestions"));
+			values.Push(Joined(chats->tools->Suggest(call->name.View(), chat->mode), " or "));
+			outcome = ToolError(chats->prompts.Note("unknown_tool", values).View());
+		}
+		else {
+			Core::Array<Core::String> problems;
+			if (!ReadToolArguments(call->arguments.View(), args)) problems.Push(Core::String("the arguments are not a JSON object"));
+			else problems = chats->tools->Check(spec, args);
+			if (problems.IsEmpty()) {
+				malformed = 0;
+				outcome = RunCall(spec, call, segment, args);
+			}
+			else {
+				malformed += 1;
+				Core::Array<Core::String> values;
+				values.Push(Core::String("tool"));
+				values.Push(call->name);
+				values.Push(Core::String("error"));
+				values.Push(Joined(problems, "; "));
+				values.Push(Core::String("schema_excerpt"));
+				values.Push(spec->parameters);
+				outcome = ToolError(chats->prompts.Note("invalid_tool_args", values).View());
+			}
+		}
+		Threading::LockGuard guard(server->lock);
+		Resolve(segment, outcome, outcome.timed ? outcome.ms : ToolNowMs() - started);
+		ModelMessage* message = new ModelMessage();
+		message->role = Core::String("tool");
+		message->toolCallId = Core::String(modelId);
+		message->content = outcome.content.ByteLength() <= kRunKeptToolResultBytes ? outcome.content : Core::String(outcome.content.View().Substring(0, kRunKeptToolResultBytes)) + "\n[result truncated]";
+		turn->messages.Push(message);
+		TrackLoop(call, outcome);
+		if (malformed > kRunMalformedBound) Pause(Core::StringView("malformed_tool_call"), Core::StringView("the model kept sending tool arguments that do not fit the tool's schema"));
+		SaveRunning();
+	}
+
+	ToolOutcome TurnRun::RunCall(ToolSpec* spec, ToolCallDraft* call, Segment* segment, const Serialization::DomNode& args) {
+		if (!spec->run) return RunMeta(spec, segment, args);
+		ToolInvocation invocation;
+		invocation.server = server;
+		invocation.ws = ws;
+		invocation.chat = chat;
+		invocation.callId = segment->callId;
+		invocation.args = args;
+		invocation.cancelled = &run->cancelled;
+		try {
+			ToolPlan plan = spec->plan(invocation);
+			if (!plan.error.IsEmpty()) return ToolError(plan.error.View());
+			Core::String why;
+			Permit permit = Permit::Allow;
+			{
+				Threading::LockGuard guard(server->lock);
+				permit = Decide(chat->permission, spec->toolClass, rules, chat->allowed, plan.subject.View(), why);
+			}
+			if (permit == Permit::Deny) {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("tool"));
+				values.Push(spec->name);
+				values.Push(Core::String("why"));
+				values.Push(why);
+				ToolOutcome refused = ToolError(chats->prompts.Note("refused_call", values).View());
+				refused.denied = true;
+				return refused;
+			}
+			if (permit == Permit::Ask) {
+				ToolOutcome refused;
+				if (!AwaitApproval(spec, segment, plan, why.View(), args, refused)) return refused;
+			}
+			{
+				Threading::LockGuard guard(server->lock);
+				ToolState(segment, "running");
+			}
+			const int64 ran = ToolNowMs();
+			ToolOutcome outcome = spec->run(invocation);
+			outcome.ms = ToolNowMs() - ran;
+			outcome.timed = true;
+			if (spec->toolClass == ToolClass::Write && !outcome.isError) {
+				Threading::LockGuard guard(server->lock);
+				TrackModified(NormalizePath(args.Member("path").AsView()).View(), outcome.plus, outcome.minus);
+			}
+			return outcome;
+		}
+		catch (RpcError& error) {
+			return ToolError(((spec->name + ": ") + error.message.View()).View());
+		}
+	}
+
+	ToolOutcome TurnRun::RunMeta(ToolSpec* spec, Segment* segment, const Serialization::DomNode& args) {
+		if (spec->name == "ask_user") return AskUser(segment, args);
+		Threading::LockGuard guard(server->lock);
+		ToolState(segment, "running");
+		if (spec->name == "tasks_set") return SetTasks(args);
+		if (spec->name == "task_update") return UpdateTask(args);
+		return FinishCall(args);
+	}
+
+	// --- Waiting for the owner ---------------------------------------------------------------------------------------
+
+	bool TurnRun::AwaitApproval(ToolSpec* spec, Segment* segment, const ToolPlan& plan, Core::StringView why, const Serialization::DomNode& args, ToolOutcome& refused) {
+		Threading::LockGuard guard(server->lock);
+		Approval* approval = new Approval();
+		approval->approvalId = chat->NextId("a");
+		approval->callId = segment->callId;
+		approval->tool = spec->name;
+		approval->args = NodeJson(args);
+		approval->summary = plan.summary;
+		approval->why = (Core::String(ChatModeName(chat->mode)) + " mode, ") + why;
+		approval->subject = ChatAllowRule(plan.subject.View());
+		approval->diff = plan.diff;
+		approval->plus = plan.plus;
+		approval->minus = plan.minus;
+		chat->approvals.Push(approval);
+		chat->state = ChatState::AwaitingApproval;
+		ToolState(segment, "awaiting_approval");
+		JsonWriter data;
+		approval->WriteJson(data);
+		chats->Publish(chat, "approval.request", data.View());
+		chats->Changed(chat);
+		SaveRunning();
+		while (approval->decision.IsEmpty() && !run->cancelled) run->wake.Wait(server->lock);
+		chat->state = ChatState::Running;
+		chats->Changed(chat);
+		if (approval->decision.IsEmpty()) {
+			refused = ToolError(Core::StringView("The run was stopped before the user answered."));
+			refused.denied = true;
+			return false;
+		}
+		if (approval->decision == "deny") {
+			Core::Array<Core::String> values;
+			values.Push(Core::String("tool"));
+			values.Push(spec->name);
+			values.Push(Core::String("message"));
+			values.Push(approval->message.IsEmpty() ? Core::String() : Core::String(" Their reason: ") + approval->message.View());
+			refused = ToolError(chats->prompts.Note("denied_by_user", values).View());
+			refused.denied = true;
+			return false;
+		}
+		if (approval->decision == "chat") {
+			bool known = false;
+			for (const Core::String& rule : chat->allowed) known = known || rule == approval->subject;
+			if (!known) chat->allowed.Push(approval->subject);
+		}
+		return true;
+	}
+
+	ToolOutcome TurnRun::AskUser(Segment* segment, const Serialization::DomNode& args) {
+		Threading::LockGuard guard(server->lock);
+		ToolState(segment, "awaiting_answer");
+		Question* question = new Question();
+		question->questionId = chat->NextId("q");
+		question->callId = segment->callId;
+		question->question = Core::String(args.Member("question").AsView());
+		Serialization::DomNode options = args.Member("options");
+		for (int64 i = 0; i < options.Count(); ++i) question->options.Push(Core::String(options.At(i).AsView()));
+		question->allowText = question->options.IsEmpty() || args.Member("allow_text").AsBool();
+		chat->question = question;
+		chat->state = ChatState::AwaitingAnswer;
+		JsonWriter data;
+		question->WriteJson(data);
+		chats->Publish(chat, "question.request", data.View());
+		chats->Changed(chat);
+		SaveRunning();
+		while (!question->answered && !run->cancelled) run->wake.Wait(server->lock);
+		chat->question = nullptr;
+		chat->state = ChatState::Running;
+		chats->Changed(chat);
+		if (!question->answered) return ToolError(Core::StringView("The run was stopped before the user answered."));
+		Core::Array<Core::String> values;
+		values.Push(Core::String("answer"));
+		values.Push(question->answer);
+		return ToolResult(chats->prompts.Note("user_answer", values).View(), question->answer.View());
+	}
+
+	// --- The run's own tools -----------------------------------------------------------------------------------------
+
+	static Core::String TaskLines(const Chat* chat) {
+		Core::StringBuilder out;
+		for (ChatTask* task : chat->tasks) {
+			out.Append(task->id.View());
+			out.Append(" ");
+			out.Append(task->title.View());
+			out.Append(" (");
+			out.Append(task->status.View());
+			out.Append(")\n");
+		}
+		return out.ToString();
+	}
+
+	static void PublishTasks(Chats* chats, Chat* chat) {
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("items"));
+		chat->WriteTasks(data);
+		data.EndObject();
+		chats->Publish(chat, "tasks.changed", data.View());
+		chats->Changed(chat);
+	}
+
+	ToolOutcome TurnRun::SetTasks(const Serialization::DomNode& args) {
+		chat->tasks.Clear();
+		Serialization::DomNode items = args.Member("items");
+		for (int64 i = 0; i < items.Count(); ++i) {
+			ChatTask* task = new ChatTask();
+			Core::StringBuilder id;
+			id.Append("t");
+			id.AppendInt(i + 1);
+			task->id = id.ToString();
+			task->title = Core::String(items.At(i).Member("title").AsView());
+			task->status = items.At(i).Member("status").IsValid() ? Core::String(items.At(i).Member("status").AsView()) : Core::String("pending");
+			chat->tasks.Push(task);
+		}
+		PublishTasks(chats, chat);
+		Core::StringBuilder preview;
+		preview.AppendInt(chat->tasks.Count());
+		preview.Append(" tasks");
+		return ToolResult((Core::String("The task list is now:\n") + TaskLines(chat).View()).View(), preview.View());
+	}
+
+	ToolOutcome TurnRun::UpdateTask(const Serialization::DomNode& args) {
+		for (ChatTask* task : chat->tasks) {
+			if (task->id.View() != args.Member("id").AsView()) continue;
+			task->status = Core::String(args.Member("status").AsView());
+			if (args.Member("note").IsValid()) task->note = Core::String(args.Member("note").AsView());
+			PublishTasks(chats, chat);
+			return ToolResult(((task->id + " is now ") + task->status.View()).View(), ((task->title + ": ") + task->status.View()).View());
+		}
+		return ToolError(((Core::String("task_update: there is no task ") + args.Member("id").AsView()) + "; the tasks are:\n" + TaskLines(chat).View()).View());
+	}
+
+	ToolOutcome TurnRun::FinishCall(const Serialization::DomNode& args) {
+		Core::Array<Core::String> open;
+		for (ChatTask* task : chat->tasks)
+			if (task->status == "pending" || task->status == "in_progress") open.Push(task->title);
+		if (!open.IsEmpty() && !finishNudged) {
+			finishNudged = true;
+			Core::Array<Core::String> values;
+			values.Push(Core::String("tasks"));
+			values.Push(Joined(open, ", "));
+			return ToolError(chats->prompts.Note("open_tasks_on_finish", values).View());
+		}
+		Finish(Core::StringView("finished"));
+		return ToolResult(Core::StringView("The turn is finished."), args.Member("summary").AsView());
+	}
+
+	// --- Cards -------------------------------------------------------------------------------------------------------
+
+	void TurnRun::ToolState(Segment* segment, const char* state) {
+		segment->state = Core::String(state);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("callId", segment->callId.View());
+		data.Field("state", state);
+		data.EndObject();
+		chats->Publish(chat, "tool.state", data.View());
+	}
+
+	void TurnRun::Resolve(Segment* segment, const ToolOutcome& outcome, int64 ms) {
+		segment->state = Core::String(outcome.denied ? "denied" : outcome.isError ? "error" : "ok");
+		Core::StringView shown = outcome.preview.IsEmpty() ? outcome.content.View() : outcome.preview.View();
+		segment->preview = Core::String(shown.Substring(0, shown.ByteLength() < kPreviewBytes ? shown.ByteLength() : kPreviewBytes));
+		segment->isError = outcome.isError;
+		segment->ms = outcome.denied ? 0 : ms;
+		segment->plus = outcome.plus;
+		segment->minus = outcome.minus;
+		segment->source = outcome.source.IsEmpty() ? Core::String("built-in") : outcome.source;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("callId", segment->callId.View());
+		data.Field("state", segment->state.View());
+		if (!outcome.denied) data.IntField("ms", ms);
+		if (segment->plus > 0) data.IntField("plus", segment->plus);
+		if (segment->minus > 0) data.IntField("minus", segment->minus);
+		data.Field("source", segment->source.View());
+		data.Key(Core::StringView("result"));
+		data.BeginObject();
+		data.Field("preview", segment->preview.View());
+		data.BoolField("isError", segment->isError);
+		data.EndObject();
+		data.EndObject();
+		chats->Publish(chat, "tool.state", data.View());
+	}
+
+	void TurnRun::TrackLoop(ToolCallDraft* call, const ToolOutcome& outcome) {
+		Core::String key = ((call->name + "\n") + call->arguments.View() + "\n") + outcome.content.View();
+		if (outcome.isError && key == lastCallKey) sameErrors += 1;
+		else sameErrors = outcome.isError ? 1 : 0;
+		lastCallKey = key;
+		if (sameErrors >= kRunSameErrorBound) Pause(Core::StringView("loop_detected"), ((Core::String("the same call (") + call->name.View()) + ") failed the same way 3 times in a row").View());
+	}
+
+	void TurnRun::TrackModified(Core::StringView path, int64 plus, int64 minus) {
+		ModifiedFile* file = nullptr;
+		for (ModifiedFile* each : chat->modified)
+			if (each->path.View() == path) file = each;
+		if (!file) {
+			file = new ModifiedFile();
+			file->path = Core::String(path);
+			chat->modified.Push(file);
+		}
+		file->plus += plus;
+		file->minus += minus;
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("files"));
+		chat->WriteModified(data);
+		data.EndObject();
+		chats->Publish(chat, "files.changed", data.View());
+		SaveChatHeader(ws->root, chat);
+	}
+}

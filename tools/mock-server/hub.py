@@ -10,8 +10,16 @@ RING_LIMITS = {
 	"term": (1000000, 5 * MB),
 }
 DEFAULT_RING = (2000, 4 * MB)
-COALESCIBLE_KINDS = ("out", "run", "term")
-MERGE_FIELD = {"output": "text", "append": "text", "data": "data"}
+COALESCIBLE_KINDS = ("out", "run", "term", "chat")
+MERGE_FIELDS = {"output": ("text",), "append": ("text",), "data": ("data",), "segment.delta": ("text", "argsText")}
+
+
+def merge_field(kind, data):
+	"""The growing string member of an event that merges (docs/10 "Backpressure"), or None."""
+	for field in MERGE_FIELDS.get(kind, ()):
+		if isinstance(data, dict) and field in data:
+			return field
+	return None
 
 
 def encode(frame):
@@ -72,7 +80,7 @@ class Topic:
 		self.held_bytes = 0
 
 	def mergeable(self, kind):
-		return self.coalescible and kind in MERGE_FIELD
+		return self.coalescible and kind in MERGE_FIELDS
 
 
 class Hub:

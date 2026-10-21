@@ -69,7 +69,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `diag:<wsId>` | `diag.set {path, source, items}` (LSP diagnostics, UTF-16 ranges; `docs/24`) | all current diagnostics, `{files: {<path>: {<source>: [diagnostic]}}}` |
 | `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |
 | `run:<runId>` | `step.start`, `output` (source, text), `step.end`, `run.end` | task run state + output tail |
-| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
+| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`), the `ai` source (the AI's `shell_run` commands and their output, `docs/13`) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
 | `terms:<wsId>` | `term.added`, `term.changed`, `term.removed` (a terminal's summary) | `{terminals: [summary]}`: the workspace's terminals, in the order they were made; a summary is `{termId, wsId, title, kind, alive, exitCode, holder}` |
 | `term:<termId>` | `data {data}` (coalescible), `resize {cols, rows}`, `exit {code}`, `lease {holder}` | `{terminal: summary, cols, rows, scrollback}`: `scrollback` is the last 256 KB of output, replayed by a client to rebuild the screen |
 | `dbg:<wsId>`, `dbg:<wsId>:<sessionId>`, `bp:<wsId>` | the debugger's (`docs/25` "The server as built") | the workspace's debug sessions, one session's stop, the breakpoints |
@@ -97,7 +97,7 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 ## Backpressure and floods
 
 - The server keeps a per-client outbound queue with a byte budget (default 4 MB). Producers never block on a slow client.
-- When a client's queue for a **coalescible** topic (`out:*`, `run:*`, `term:*`) passes a threshold, the server merges pending `output`/`data` events into one larger event (fewer frames, same bytes).
+- When a client's queue for a **coalescible** topic (`out:*`, `run:*`, `term:*`, `chat:*`) passes a threshold, the server merges pending growing-text events (`append`, `data`, a segment's `segment.delta`) into one larger event (fewer frames, same bytes).
 - When the budget is exceeded, the server drops that client's pending events for the heaviest topic and sends a `gap`; the client re-subscribes with a snapshot request. Nothing is silently lost.
 - Clients subscribe only to what is visible (plus the always-on `server`/`ws` topics); hidden panes unsubscribe after a grace period. Phones therefore never receive terminal floods for a collapsed drawer.
 
@@ -171,19 +171,69 @@ Language servers receive changes from the server's document store (the server is
 ## Chat streaming detail
 
 ```jsonc
-{ "t":"evt","topic":"chat:42","seq":1001,"kind":"turn.start","data":{"turnId":"u7","mode":"agent","group":"default"} }
-{ "t":"evt","topic":"chat:42","seq":1002,"kind":"segment.start","data":{"turnId":"u7","segId":"s1","type":"thinking","model":"qwen3.8-27b@spark"} }
+{ "t":"evt","topic":"chat:42","seq":1001,"kind":"turn.start","data":{"turnId":"u7","mode":"agent","group":"plan-claude/impl-local","model":"qwen3.8-27b@spark","user":{"text":"Port the logger"},"startedMs":1792585000000} }
+{ "t":"evt","topic":"chat:42","seq":1002,"kind":"segment.start","data":{"turnId":"u7","segId":"s1","type":"thinking","done":false,"model":"qwen3.8-27b@spark","text":""} }
 { "t":"evt","topic":"chat:42","seq":1003,"kind":"segment.delta","data":{"segId":"s1","text":"Let me look at"} }
 { "t":"evt","topic":"chat:42","seq":1040,"kind":"segment.end","data":{"segId":"s1","tokens":212,"ms":4100} }
-{ "t":"evt","topic":"chat:42","seq":1041,"kind":"segment.start","data":{"segId":"s2","type":"tool","tool":"lsp_definition","callId":"k1"} }
-{ "t":"evt","topic":"chat:42","seq":1042,"kind":"segment.delta","data":{"segId":"s2","argsText":"{\"symbol\":\"Ri"} }
+{ "t":"evt","topic":"chat:42","seq":1041,"kind":"segment.start","data":{"turnId":"u7","segId":"s2","type":"tool","done":false,"tool":"fs_read","callId":"k1","argsText":"","state":"streaming"} }
+{ "t":"evt","topic":"chat:42","seq":1042,"kind":"segment.delta","data":{"segId":"s2","argsText":"{\"path\":\"src/Ri"} }
 { "t":"evt","topic":"chat:42","seq":1050,"kind":"tool.state","data":{"callId":"k1","state":"running"} }
-{ "t":"evt","topic":"chat:42","seq":1051,"kind":"tool.state","data":{"callId":"k1","state":"ok","ms":38,"result":{"preview":"..."}} }
-{ "t":"evt","topic":"chat:42","seq":1099,"kind":"turn.end","data":{"turnId":"u7","stop":"finished","tokensIn":18233,"tokensOut":911} }
+{ "t":"evt","topic":"chat:42","seq":1051,"kind":"tool.state","data":{"callId":"k1","state":"ok","ms":38,"source":"built-in","result":{"preview":"src/Ring.ch (120 lines)","isError":false}} }
+{ "t":"evt","topic":"chat:42","seq":1099,"kind":"turn.end","data":{"turnId":"u7","stop":"finished","recoveries":[],"tokensIn":18233,"tokensOut":911,"ttftMs":1400,"genMs":23800,"endedMs":1792586000000} }
 ```
 
-- Delta frames are batched server-side every ~30 ms (or 512 bytes) to keep frame counts sane on phones.
-- `stop` reasons are an enum shared with the UI (`finished`, `user_cancelled`, `max_tokens_continued`, `stalled_retried`, `nudged`, `budget_paused`, `error`, `interrupted`, `awaiting_approval`, `awaiting_answer`) - see `docs/12`.
+- Deltas go out as the model server streams them; a client that falls behind gets a segment's queued deltas merged into one (`chat:*` is coalescible, "Backpressure" above), so a phone on a slow link gets fewer, larger frames.
+- `stop` is `finished`, `user_cancelled`, `no_model`, `interrupted` or the stop reason that paused the chat (`docs/12` taxonomy); the recoveries say what the harness did on the way ("Chats" below).
+
+## Chats
+
+A chat belongs to a workspace and to the server: a turn runs on the server until it ends, whatever the browsers do, and every device sees the same chat (`docs/12`). The runtime is `src/ai/` (`docs/04` "As built"); its model settings come from `ai.models` and `ai.groups`.
+
+| Method | Params | Answer |
+|---|---|---|
+| `chat.list` | `wsId` | `{chats: [summary]}`: a summary is `{chatId, wsId, title, mode, permission, group, state, stateReason?, turnCount, updatedMs, tasksDone, tasksTotal, approvalsWaiting}`; `state` is `idle`, `running`, `awaiting_approval`, `awaiting_answer`, `paused` (`stateReason` says why: a stop reason, or `interrupted`); `group` is the chat's own choice, empty for the default |
+| `chat.create` | `wsId, title?, mode?` (`ask`, `plan`, `agent`; default `agent`), `permission?` (`plan`, `ask`, `acceptEdits`, `auto`; default `plan` in Plan mode, else `ask`), `group?` | the summary. A chat titled "New chat" takes its first message's first line as its title |
+| `chat.set` | `chatId`, any of `title, mode, permission, group` | the summary (a mode, permission or group change applies from the next step) |
+| `chat.send` | `chatId, text, as?` (`message` default, `queue`, `inject`) | `{turnId}` when it starts a turn (from `idle` or `paused`); while a turn runs, `message` and `queue` hold it for the next turn (`{queued: n}`, `queue.changed`) and `inject` gives it to the running turn at its next step (`{injected: true}`, `docs/12` "Steering"). A turn that ends `finished` starts the first queued message as the next turn |
+| `chat.unqueue` | `chatId, index` | `{queued}`: the queued message at `index` taken off the queue (to edit it, send it now or drop it) |
+| `chat.stop` | `chatId` | `{state}`; the turn ends with `user_cancelled` (a running shell command is killed) |
+| `chat.approve` | `chatId, approvalId, decision` (`allow`, `deny`, `chat`), `message?` (a denial's reason, given to the model) | `{decision}`. `chat` allows the call and adds the approval's `subject` rule to the chat's own allow rules ("Allow for this chat"). "Always allow" is the client's: it adds the rule to `ai.permissions.allow` with `settings.set` (app tier), then answers `allow`. `conflict {decision, by}` when another device answered first, `not_found` when the approval is gone |
+| `chat.answer` | `chatId, questionId, answer` | `{}`: the `ask_user` question's answer; `conflict` when answered already |
+| `chat.history` | `chatId, before?, limit?` (20) | `{turns, hasMore}`: the turns before `before` (a turnId; the newest without it) |
+| `chat.delete` | `chatId` | `{}`; `conflict` while a turn runs. Its files go too (`.ied/local/chats/<chatId>/`) |
+
+| Topic | Events | Snapshot |
+|---|---|---|
+| `chats:<wsId>` | `chat.created`, `chat.changed` (a summary), `chat.deleted {chatId}` | `{chats: [summary]}` |
+| `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `approval.resolved`, `question.request`, `question.resolved`, `tasks.changed`, `queue.changed`, `files.changed`, `context.changed`, `turn.stats`, `turn.end`, `chat.changed` | `{...summary, model, groupInUse, tasks, queued, modified, context, hasMore, turns: [the last 20], pendingApprovals, pendingQuestion}`: `model` and `groupInUse` are what a turn would use now |
+
+A turn is `{turnId, user: {text}, mode, model, group, segments, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, startedMs, endedMs}`: `stop` is null while it runs; `tokensIn` is the last request's prompt, `tokensOut` every request's completion, `ttftMs` the last time to first token and `genMs` the time spent generating after it (tokens per second = `tokensOut / genMs`).
+
+A segment is `{segId, type, done, model?, tokens?}` plus by type:
+
+- `text`, `thinking`: `text`. Thinking comes from the reasoning fields and `<think>` blocks (`docs/12` "Dialect normalization"); a tool call a model wrote as text never shows as prose.
+- `tool`: `tool`, `callId`, `argsText` (streamed), and once known `state` (`streaming`, `awaiting_approval`, `awaiting_answer`, `running`, `ok`, `error`, `denied`, `interrupted`), `ms` (the run, without the wait for an approval), `plus` / `minus` (lines a write added and removed), `source` (`built-in`, `Output: AI`, `Output: Build`) and `result {preview, isError}`. A write's preview is its unified diff.
+- `harness`: `text` and `kind` - a note IED gave the model (`continue_after_max_tokens`, `empty`, `agent_no_finish`, ...), or one it shows only (`paused`, `routing`, `no_model`): `docs/12` "Transparency".
+- `steering`: `text`, a message a person injected.
+
+Events:
+
+| Event | Data |
+|---|---|
+| `turn.start` | `{turnId, mode, group, model, user: {text}, startedMs}` |
+| `segment.start` | `{turnId, ...the segment as it starts}` (a note's text, a tool's name and call) |
+| `segment.delta` | `{segId, text}` or `{segId, argsText}`: text to append |
+| `segment.end` | `{segId, tokens, ms}` |
+| `tool.state` | `{callId, state, ms?, plus?, minus?, source?, result?}` |
+| `approval.request` | `{approvalId, callId, tool, args, summary, why, subject, diff?, plus?, minus?}`: `why` names the mode and rule that asked; `subject` is the rule "Allow for this chat" would add (`fs.write(src/core/**)`, `shell(nuke *)`) |
+| `approval.resolved` | `{approvalId, decision, by?}`; `withdrawn` when the turn ended first |
+| `question.request` / `question.resolved` | `{questionId, callId, question, options, allowText}` / `{questionId, answer, by}` |
+| `tasks.changed` | `{items: [{id, title, status, note?}]}`; `status` is `pending`, `in_progress`, `done`, `skipped` |
+| `queue.changed` | `{queued: [text]}` |
+| `files.changed` | `{files: [{path, plus, minus}]}`: what the AI wrote in this chat |
+| `context.changed` | `{window, used, parts: [{name, tokens}]}`: the last request's prompt by part against the model's window (0 when unknown) |
+| `turn.stats` | `{turnId, tokensIn, tokensOut, ttftMs, genMs}` after each request |
+| `turn.end` | `{turnId, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, endedMs}`: `stop` is `finished`, `user_cancelled`, `no_model`, `interrupted` or the stop reason that paused the chat (`docs/12` taxonomy); `recoveries` the recovery actions taken, in order ("retried after http_error 503 (1x)") |
 
 ## Liveness
 

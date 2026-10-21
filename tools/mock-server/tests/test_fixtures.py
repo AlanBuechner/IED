@@ -10,16 +10,18 @@ class ChatTests(MockCase):
 	async def test_default_script_streams_segments_tools_and_ends_finished(self):
 		client = await self.client()
 		snap = await self.subscribed(client, "chat:c1")
-		self.assertEqual(2, len(snap["turns"]))
+		self.assertEqual((2, "mock-model@local", "mock-group"), (len(snap["turns"]), snap["model"], snap["groupInUse"]))
 		result = await client.request("chat.send", {"chatId": "c1", "text": "how does the player move?"}, op_id="op-1")
 		frames = await client.wait_for("chat:c1", lambda f: f.get("kind") == "turn.end")
 		kinds = self.kinds(frames)
 		self.assertEqual("turn.start", kinds[0])
-		for kind in ("segment.start", "segment.delta", "segment.end", "tool.state", "tasks.changed"):
+		for kind in ("segment.start", "segment.delta", "segment.end", "tool.state", "tasks.changed", "context.changed", "turn.stats"):
 			self.assertIn(kind, kinds)
 		self.assertEqual({"turnId": result["turnId"], "stop": "finished"}, {k: frames[-1]["data"][k] for k in ("turnId", "stop")})
 		text = "".join(f["data"].get("text", "") for f in frames if f.get("kind") == "segment.delta")
 		self.assertIn("explicit Euler integration", text)
+		tools = [f["data"] for f in frames if f.get("kind") == "segment.start" and f["data"]["type"] == "tool"]
+		self.assertEqual(["fs_list", "fs_read"], [t["tool"] for t in tools])
 		again = await client.request("chat.send", {"chatId": "c1", "text": "how does the player move?"}, op_id="op-1")
 		self.assertEqual(result, again, "a retried send with the same opId is not sent twice")
 
@@ -28,7 +30,7 @@ class ChatTests(MockCase):
 		await client.sub(["chat:c2"])
 		self.server.clock.scale = 1.0
 		await client.request("chat.send", {"chatId": "c2", "text": "write a long essay", "mockScript": "long"})
-		await client.wait_for("chat:c2", lambda f: f.get("kind") == "segment.delta" and f["data"]["segId"] != "s1" and len(f["data"]["text"]) > 0 and f["seq"] > 30, timeout=10)
+		await client.wait_for("chat:c2", lambda f: f.get("kind") == "segment.delta" and f["data"].get("text") and f["seq"] > 30, timeout=10)
 		late = await self.client(device_class="phone")
 		await late.sub(["chat:c2"])
 		snap = (await late.next_frame("chat:c2"))["data"]
@@ -44,46 +46,84 @@ class ChatTests(MockCase):
 				texts[frame["data"]["segId"]] += frame["data"]["text"]
 		self.assertEqual(40, list(texts.values())[-1].count("The render loop owns the frame"))
 
-	async def test_busy_while_running_and_stop_cancels(self):
+	async def test_a_message_sent_while_running_is_queued_and_runs_next(self):
 		client = await self.client()
 		await client.sub(["chat:c2"])
 		await client.request("chat.send", {"chatId": "c2", "text": "x", "mockScript": "long"})
-		with self.assertRaises(RpcFailure) as caught:
-			await client.request("chat.send", {"chatId": "c2", "text": "y"})
-		self.assertEqual("busy", caught.exception.code)
+		queued = await client.request("chat.send", {"chatId": "c2", "text": "how does the player move?"})
+		self.assertEqual({"queued": 1}, queued)
+		injected = await client.request("chat.send", {"chatId": "c2", "text": "use tabs", "as": "inject"})
+		self.assertEqual({"injected": True}, injected)
+		self.server.clock.scale = 0.0
+		frames = await client.wait_for("chat:c2", lambda f: f.get("kind") == "turn.end" and f["data"]["turnId"] != "u1" and f["data"]["stop"] == "finished", timeout=20)
+		starts = [f["data"]["user"]["text"] for f in frames if f.get("kind") == "turn.start"]
+		self.assertEqual(["x", "how does the player move?"], starts, "the queued message is the next turn")
+		steering = [f["data"]["text"] for f in frames if f.get("kind") == "segment.start" and f["data"]["type"] == "steering"]
+		self.assertEqual(["use tabs"], steering)
+
+	async def test_stop_cancels_and_a_stopped_turn_leaves_the_queue(self):
+		client = await self.client()
+		await client.sub(["chat:c2"])
+		await client.request("chat.send", {"chatId": "c2", "text": "x", "mockScript": "long"})
+		await client.request("chat.send", {"chatId": "c2", "text": "later", "as": "queue"})
 		await client.request("chat.stop", {"chatId": "c2"})
 		frames = await client.wait_for("chat:c2", lambda f: f.get("kind") == "turn.end")
 		self.assertEqual("user_cancelled", frames[-1]["data"]["stop"])
-
-	async def test_cancel_frame_on_the_send_request_stops_the_turn(self):
-		client = await self.client()
-		await client.sub(["chat:c2"])
-		req_id, future, _ = client.start_request("chat.send", {"chatId": "c2", "text": "x", "mockScript": "long"})
-		await asyncio.wait_for(future, 5)
-		await client.send({"t": "cancel", "id": req_id})
-		frames = await client.wait_for("chat:c2", lambda f: f.get("kind") == "turn.end")
-		self.assertEqual("user_cancelled", frames[-1]["data"]["stop"])
+		summary = [c for c in (await client.request("chat.list", {"wsId": "w1"}))["chats"] if c["chatId"] == "c2"][0]
+		self.assertEqual("idle", summary["state"])
 
 	async def test_approval_is_answered_once_across_devices(self):
 		desktop, phone = await self.client(), await self.client(device_class="phone")
 		for client in (desktop, phone):
 			await self.subscribed(client, "chat:c1")
-		await desktop.request("chat.send", {"chatId": "c1", "text": "please run the tests"})
+		await desktop.request("chat.send", {"chatId": "c1", "text": "clamp the velocity"})
 		request = (await phone.wait_for("chat:c1", lambda f: f.get("kind") == "approval.request"))[-1]["data"]
-		await phone.request("chat.approve", {"chatId": "c1", "approvalId": request["approvalId"], "decision": "allow"})
+		self.assertEqual(("fs_edit", "fs.write(src/game/**)"), (request["tool"], request["subject"]))
+		self.assertIn("+\tplayer->velocity", request["diff"])
+		await phone.request("chat.approve", {"chatId": "c1", "approvalId": request["approvalId"], "decision": "chat"})
 		with self.assertRaises(RpcFailure) as caught:
 			await desktop.request("chat.approve", {"chatId": "c1", "approvalId": request["approvalId"], "decision": "deny"})
-		self.assertEqual(("conflict", "allow", phone.client_id), (caught.exception.code, caught.exception.data["decision"], caught.exception.data["by"]))
+		self.assertEqual(("conflict", "chat", phone.client_id), (caught.exception.code, caught.exception.data["decision"], caught.exception.data["by"]))
 		frames = await desktop.wait_for("chat:c1", lambda f: f.get("kind") == "turn.end")
 		states = [f["data"]["state"] for f in frames if f.get("kind") == "tool.state"]
-		self.assertEqual(["awaiting_approval", "running", "ok"], states)
+		self.assertEqual(["awaiting_approval", "running", "ok", "running", "error"], states)
+		files = [f["data"]["files"] for f in frames if f.get("kind") == "files.changed"][-1]
+		self.assertEqual([{"path": "src/game/player.c", "plus": 1, "minus": 0}], files)
+		self.assertEqual(["continued after max_tokens (1x)"], frames[-1]["data"]["recoveries"])
 
-	async def test_error_script_ends_with_error_and_reason(self):
+	async def test_a_question_waits_for_its_answer(self):
+		client = await self.client()
+		await self.subscribed(client, "chat:c2")
+		await client.request("chat.send", {"chatId": "c2", "text": "decide with me"})
+		question = (await client.wait_for("chat:c2", lambda f: f.get("kind") == "question.request"))[-1]["data"]
+		self.assertEqual(["Keep it", "Slow down"], question["options"])
+		await client.request("chat.answer", {"chatId": "c2", "questionId": question["questionId"], "answer": "Keep it"})
+		with self.assertRaises(RpcFailure) as twice:
+			await client.request("chat.answer", {"chatId": "c2", "questionId": question["questionId"], "answer": "Slow down"})
+		self.assertEqual("not_found", twice.exception.code)
+		end = (await client.wait_for("chat:c2", lambda f: f.get("kind") == "turn.end"))[-1]["data"]
+		self.assertEqual("finished", end["stop"])
+
+	async def test_error_script_pauses_with_its_reason(self):
 		client = await self.client()
 		await client.sub(["chat:c2"])
 		await client.request("chat.send", {"chatId": "c2", "text": "this will fail"})
 		end = (await client.wait_for("chat:c2", lambda f: f.get("kind") == "turn.end"))[-1]["data"]
-		self.assertEqual(("error", "http_error"), (end["stop"], end["error"]["reason"]))
+		self.assertEqual("http_error 500", end["stop"])
+		summary = (await client.wait_for("chat:c2", lambda f: f.get("kind") == "chat.changed" and f["data"]["state"] == "paused"))[-1]["data"]
+		self.assertEqual("http_error 500", summary["stateReason"])
+
+	async def test_create_set_and_delete(self):
+		client = await self.client()
+		await client.sub(["chats:w1"])
+		await client.next_frame("chats:w1")
+		created = await client.request("chat.create", {"wsId": "w1", "mode": "plan"})
+		self.assertEqual(("New chat", "plan", "plan"), (created["title"], created["mode"], created["permission"]))
+		changed = await client.request("chat.set", {"chatId": created["chatId"], "title": "Plans", "permission": "auto"})
+		self.assertEqual(("Plans", "auto"), (changed["title"], changed["permission"]))
+		await client.request("chat.delete", {"chatId": created["chatId"]})
+		kinds = self.kinds(await client.wait_for("chats:w1", lambda f: f.get("kind") == "chat.deleted"))
+		self.assertEqual(["chat.created", "chat.changed", "chat.deleted"], kinds)
 
 	async def test_history_pages_older_turns(self):
 		client = await self.client()
@@ -98,7 +138,7 @@ class ChatTests(MockCase):
 		await self.server.restart()
 		again = await self.client()
 		snap = await self.subscribed(again, "chat:c2")
-		self.assertEqual("interrupted", snap["turns"][-1]["stop"])
+		self.assertEqual(("interrupted", "paused", "interrupted"), (snap["turns"][-1]["stop"], snap["state"], snap["stateReason"]))
 
 
 class TaskTests(MockCase):

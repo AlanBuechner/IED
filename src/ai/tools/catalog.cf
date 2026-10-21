@@ -1,0 +1,41 @@
+include "catalog.ch"
+
+namespace Ied
+{
+	static ToolPlan MetaPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = Core::String("meta()");
+		return plan;
+	}
+
+	static void AddRunTool(ToolRegistry& registry, const char* name, const char* description, const char* parameters, bool inPlan, bool agentOnly) {
+		ToolSpec* spec = new ToolSpec();
+		spec->name = Core::String(name);
+		spec->description = Core::String(description);
+		spec->parameters = Core::String(parameters);
+		spec->toolClass = ToolClass::Meta;
+		spec->inPlan = inPlan;
+		spec->agentOnly = agentOnly;
+		spec->plan = MetaPlan;
+		registry.Add(spec);
+	}
+
+	ToolRegistry* CoreTools() {
+		ToolRegistry* registry = new ToolRegistry();
+		AddFileTools(*registry);
+		AddWorkTools(*registry);
+		AddRunTool(*registry, "tasks_set", "Replace the chat's task list (the owner sees it). Keep exactly one task in_progress. Example: tasks_set({\"items\": [{\"title\": \"Port Log.h\", \"status\": \"in_progress\"}, {\"title\": \"Tests\"}]})",
+			"{\"type\": \"object\", \"properties\": {\"items\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"title\": {\"type\": \"string\", \"minLength\": 1}, \"status\": {\"enum\": [\"pending\", \"in_progress\", \"done\", \"skipped\"]}}, \"required\": [\"title\"], \"additionalProperties\": false}}}, \"required\": [\"items\"], \"additionalProperties\": false}",
+			true, false);
+		AddRunTool(*registry, "task_update", "Change one task's status, with a note when it is skipped. Example: task_update({\"id\": \"t2\", \"status\": \"done\"})",
+			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}, \"status\": {\"enum\": [\"pending\", \"in_progress\", \"done\", \"skipped\"]}, \"note\": {\"type\": \"string\"}}, \"required\": [\"id\", \"status\"], \"additionalProperties\": false}",
+			true, false);
+		AddRunTool(*registry, "ask_user", "Ask the owner a question and wait for the answer; only for decisions that are theirs or when you are blocked. Example: ask_user({\"question\": \"Keep the old API?\", \"options\": [\"Keep it\", \"Remove it\"]})",
+			"{\"type\": \"object\", \"properties\": {\"question\": {\"type\": \"string\", \"minLength\": 1}, \"options\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"allow_text\": {\"type\": \"boolean\"}}, \"required\": [\"question\"], \"additionalProperties\": false}",
+			true, false);
+		AddRunTool(*registry, "finish", "End the turn: what was done and how it was verified (build and tests run, results seen). Only call it when the work is complete and verified. Example: finish({\"summary\": \"Ported Log\", \"verification\": \"nuke build: 0 warnings; engine.log.* tests pass\"})",
+			"{\"type\": \"object\", \"properties\": {\"summary\": {\"type\": \"string\", \"minLength\": 1}, \"verification\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"summary\", \"verification\"], \"additionalProperties\": false}",
+			false, true);
+		return registry;
+	}
+}

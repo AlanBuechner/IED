@@ -59,7 +59,7 @@ class IedServer:
 		self.open_line = self.process.stdout.readline().strip()
 		if not self.listening.startswith("LISTENING "):
 			self.process.wait(10)
-			self.error = self.process.stderr.read()
+			self.error = "exit %s, first line %r: %s" % (self.process.returncode, self.listening, self.process.stderr.read())
 			self.port = None
 			return
 		self.error = ""

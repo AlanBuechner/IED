@@ -23,6 +23,7 @@ include "settings/service.ch"
 include "lsp/pool.ch"
 include "tasks/service.ch"
 include "dap/service.ch"
+include "ai/service.ch"
 
 namespace Ied
 {
@@ -65,6 +66,7 @@ namespace Ied
 		public Terminals* terminals;
 		public Breakpoints* breakpoints;
 		public Debugger* debugger;
+		public Chats* chats;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;

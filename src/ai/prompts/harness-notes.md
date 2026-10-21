@@ -43,3 +43,15 @@ You have used {percent}% of this run's {budget} budget. Wrap up: finish the curr
 
 ## context_compressed
 Earlier parts of this conversation were summarized to save space. Use history_search or history_read if you need exact details from them.
+
+## unparsed_tool_call
+Your reply wrote a tool call as text that could not be read. Call the tool again in the tool-calling format, with complete JSON arguments.
+
+## refused_call
+The permission rules refused {tool}: {why}. Do not retry it; continue another way, or ask the user with ask_user.
+
+## denied_by_user
+The user denied {tool}.{message} Do not retry it unchanged; continue another way, or ask the user what they want.
+
+## user_answer
+The user answered: {answer}

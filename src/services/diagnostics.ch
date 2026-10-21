@@ -23,9 +23,10 @@ namespace Ied
 		public void Forget(Workspace* ws, Core::StringView path);
 		// Every path's diagnostics from `source`, gone (a new build of what it checked).
 		public void ClearSource(Workspace* ws, Core::StringView source);
+		// The diag:<wsId> snapshot: {files: {<path>: {<source>: [items]}}}.
+		public Core::String Snapshot(Workspace* ws) const;
 
 	private:
-		private Core::String Snapshot(Workspace* ws) const;
 
 		private Server* server;
 		private Core::HashMap<Core::String, FileDiagnostics*> files;   // "<wsId>/<path>"

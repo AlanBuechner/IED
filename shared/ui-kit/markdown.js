@@ -1,8 +1,9 @@
-// markdown.js - Markdown to elements for the preview (F-EDT-91): the GitHub-flavored blocks (headings, paragraphs,
-// lists with task items, quotes, fenced and indented code, tables, rules) and inlines (code, emphasis, strikethrough,
-// links, images, autolinks, hard breaks). Text becomes text nodes and never markup, so a document cannot inject any.
-// Every block element carries `data-line`, its first source line (0-based), and a task item's checkbox `data-task`,
-// the line of its `[ ]` / `[x]`, so the preview can scroll with the editor and tick a box in the source.
+// markdown.js - Markdown to elements for the editor's preview (F-EDT-91) and chat replies: the GitHub-flavored blocks
+// (headings, paragraphs, lists with task items, quotes, fenced and indented code, tables, rules) and inlines (code,
+// emphasis, strikethrough, links, images, autolinks, hard breaks). Text becomes text nodes and never markup, so a
+// document cannot inject any. Every block element carries `data-line`, its first source line (0-based), and a task
+// item's checkbox `data-task`, the line of its `[ ]` / `[x]`, so the preview can scroll with the editor and tick a box in
+// the source.
 
 import { h } from "/ui-kit/dom.js";
 

@@ -6,7 +6,7 @@
 import { h, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
 import { applyChanges } from "/ui-kit/textedits.js";
-import { renderMarkdown, toggleTask } from "./markdown.js";
+import { renderMarkdown, toggleTask } from "/ui-kit/markdown.js";
 import { isFileUri } from "./fileuris.js";
 import { themeName } from "./monaco.js";
 

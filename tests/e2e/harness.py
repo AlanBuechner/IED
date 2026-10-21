@@ -67,7 +67,14 @@ class Run:
 		if fresh:
 			page.evaluate(RESET_LAYOUTS, ["desktop", "tablet", "phone"])
 			self.reload()
+			self.show_activity("ied.editor")
 		return page
+
+	def show_activity(self, activity):
+		"""A fresh layout opens on the first activity (Chat); most scenarios work in another."""
+		self.page.evaluate("(id) => ied_shell.showActivity(id)", activity)
+		self.page.wait_for_selector(".phone-nav .pn" if self.phone else (".chat-act:visible" if activity == "ied.chat" else ".dock-group:visible"), timeout=20000)
+		self.page.wait_for_function("!ied_shell.layout.dirty && !ied_shell.layout.saving", timeout=10000)
 
 	def goto(self):
 		self.page.goto(self.target.url + "/")
@@ -79,7 +86,7 @@ class Run:
 
 	def wait_ready(self):
 		self.page.wait_for_function("document.documentElement.dataset.ready === '1' && window.ied_shell && ied_shell.layout && ied_shell.client.state === 'live'", timeout=20000)
-		self.page.wait_for_selector(".phone-nav .pn" if self.phone else ".dock-group", timeout=20000)
+		self.page.wait_for_selector(".phone-nav .pn" if self.phone else ".dock-group:visible, .chat-act:visible", timeout=20000)
 		time.sleep(0.3)
 
 	def request(self, method, params=None):

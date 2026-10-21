@@ -1,0 +1,111 @@
+include "tool.ch"
+include "web/json.ch"
+
+namespace Ied
+{
+	void ToolRegistry::Add(ToolSpec* spec) {
+		Core::String error;
+		if (!schemas->Add((Core::String("tool/") + spec->name.View()).View(), spec->parameters.View(), error)) problems.Push(((Core::String("the schema of the tool ") + spec->name.View()) + " does not load: ") + error.View());
+		tools.Push(spec);
+	}
+
+	ToolSpec* ToolRegistry::Find(Core::StringView name) const {
+		for (ToolSpec* spec : tools)
+			if (spec->name.View() == name) return spec;
+		return nullptr;
+	}
+
+	bool ToolRegistry::Offered(const ToolSpec* spec, ChatMode mode) const {
+		if (spec->agentOnly && mode != ChatMode::Agent) return false;
+		return mode != ChatMode::Plan || spec->inPlan;
+	}
+
+	Core::String ToolRegistry::RequestTools(ChatMode mode) const {
+		JsonWriter json;
+		json.BeginArray();
+		for (ToolSpec* spec : tools) {
+			if (!Offered(spec, mode)) continue;
+			json.BeginObject();
+			json.Field("type", "function");
+			json.Key(Core::StringView("function"));
+			json.BeginObject();
+			json.Field("name", spec->name.View());
+			json.Field("description", spec->description.View());
+			json.RawField("parameters", spec->parameters.View());
+			json.EndObject();
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	Core::Array<Core::String> ToolRegistry::Check(const ToolSpec* spec, const Serialization::DomNode& args) const {
+		Core::Array<Core::String> problems;
+		Core::String name = Core::String("tool/") + spec->name.View();
+		for (const Serialization::SchemaProblem& problem : Serialization::ValidateJson(*schemas, name.View(), Core::StringView(""), args))
+			problems.Push((problem.path.IsEmpty() ? Core::String("arguments") : problem.path) + ": " + problem.message.View());
+		return problems;
+	}
+
+	// Letters of `a` found in order in `b`, plus a bonus for a shared word.
+	static int64 Likeness(Core::StringView a, Core::StringView b) {
+		int64 score = 0;
+		int64 at = 0;
+		for (int64 i = 0; i < a.ByteLength() && at < b.ByteLength(); ++i) {
+			const int64 found = b.IndexOf((char8)a.ByteAt(i), at);
+			if (found < 0) continue;
+			score += 1;
+			at = found + 1;
+		}
+		const int64 underscore = a.IndexOf('_', 0);
+		if (underscore > 0 && b.Contains(a.Substring(underscore, a.ByteLength() - underscore))) score += 4;
+		return score;
+	}
+
+	Core::Array<Core::String> ToolRegistry::Suggest(Core::StringView name, ChatMode mode) const {
+		Core::Array<Core::String> best;
+		int64 top = 0;
+		for (ToolSpec* spec : tools) {
+			if (!Offered(spec, mode)) continue;
+			const int64 score = Likeness(name, spec->name.View());
+			if (score > top) {
+				top = score;
+				best.Clear();
+			}
+			if (score == top && score > 0) best.Push(spec->name);
+		}
+		return best;
+	}
+
+	static Core::StringView WithoutFence(Core::StringView text) {
+		Core::StringView trimmed = text.Trimmed();
+		if (!trimmed.StartsWith(Core::StringView("```")) || !trimmed.EndsWith(Core::StringView("```")) || trimmed.ByteLength() < 6) return trimmed;
+		const int64 lineEnd = trimmed.IndexOf('\n', 0);
+		if (lineEnd < 0) return trimmed;
+		return trimmed.Substring(lineEnd + 1, trimmed.ByteLength() - lineEnd - 4).Trimmed();
+	}
+
+	bool ReadToolArguments(Core::StringView text, Serialization::DomNode& args) {
+		Core::StringView json = WithoutFence(text);
+		if (json.IsEmpty()) json = Core::StringView("{}");
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) return false;
+		args = read.root;
+		return true;
+	}
+
+	ToolOutcome ToolError(Core::StringView message) {
+		ToolOutcome outcome;
+		outcome.content = Core::String(message);
+		outcome.isError = true;
+		return outcome;
+	}
+
+	ToolOutcome ToolResult(Core::StringView content, Core::StringView preview) {
+		ToolOutcome outcome;
+		outcome.content = Core::String(content);
+		outcome.preview = Core::String(preview);
+		return outcome;
+	}
+}

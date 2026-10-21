@@ -1,0 +1,398 @@
+include "run.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	static int64 RunNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	void StartRun(Server* server, Chats* chats, Chat* chat, Workspace* ws) {
+		TurnRun* runner = new TurnRun();
+		runner->server = server;
+		runner->chats = chats;
+		runner->chat = chat;
+		runner->run = chat->run;
+		runner->turn = chat->run->turn;
+		runner->ws = ws;
+		Threading::Thread::Run([runner]() { runner->Execute(); }).Detach();
+	}
+
+	void TurnRun::Execute() {
+		if (Prepare())
+			while (!ending) Step();
+		End();
+	}
+
+	// --- Preparing ---------------------------------------------------------------------------------------------------
+
+	static Core::String SettingString(Server* server, Workspace* ws, const char* key) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String json = server->settings->Effective(ws, Core::StringView(""), Core::StringView(key));
+		return Core::String(Serialization::ReadJson(json.View(), *doc).root.AsView());
+	}
+
+	static Core::String AgentsMd(Workspace* ws) {
+		FS::Path file = ws->root / "AGENTS.md";
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
+	static Core::String WorkspaceSummary(Workspace* ws) {
+		Core::StringBuilder out;
+		out.Append("Name: ");
+		out.Append(ws->name.View());
+		out.Append(" (a ");
+		out.Append(ws->kind.View());
+		out.Append(" workspace)\nRoot: ");
+		out.Append(ws->root.View());
+		out.Append("\nPaths in tools are relative to the root, with / separators.");
+		if (ws->solution && !ws->solution->projects.IsEmpty()) {
+			out.Append("\nProjects:");
+			for (ProjectModel* project : ws->solution->projects) {
+				out.Append(" ");
+				out.Append(project->name.View());
+				out.Append(" (");
+				out.Append(project->kind.View());
+				out.Append(")");
+			}
+		}
+		if (!ws->trusted) out.Append("\nThe workspace is not trusted: commands and builds cannot run until the owner trusts it.");
+		return out.ToString();
+	}
+
+	bool TurnRun::Prepare() {
+		Threading::LockGuard guard(server->lock);
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.models")).View(), problems);
+		for (const Core::String& problem : problems) server->Log(problem.View());
+		Core::String groups = server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.groups"));
+		candidates = RoleCandidates(models, groups.View(), turn->group.View(), Core::StringView("primary"), role);
+		rules = ReadPermissionRules(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.permissions")).View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		maxSteps = Serialization::ReadJson(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.maxSteps")).View(), *doc).root.AsInt();
+		if (maxSteps <= 0) maxSteps = kChatDefaultMaxSteps;
+		if (candidates.IsEmpty()) {
+			UiNote(Core::StringView("no_model"), Core::StringView("No model is set up for this chat: add one to ai.models (an OpenAI-compatible endpoint) and, optionally, a group to ai.groups, in Settings."));
+			Finish(Core::StringView("no_model"));
+			return false;
+		}
+		system = chats->prompts.System(chat->mode, AgentsMd(ws).View(), WorkspaceSummary(ws).View());
+		return true;
+	}
+
+	// --- A step ------------------------------------------------------------------------------------------------------
+
+	void TurnRun::Step() {
+		StepRequest request;
+		int64 estimate = 0;
+		{
+			Threading::LockGuard guard(server->lock);
+			if (run->cancelled) {
+				Finish(Core::StringView("user_cancelled"));
+				return;
+			}
+			if (steps >= maxSteps) {
+				Pause(Core::StringView("budget"), Core::StringView("the turn used its step budget (ai.maxSteps); send a message to continue"));
+				return;
+			}
+			if (steps == maxSteps * 8 / 10 && steps > 0) {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("percent"));
+				values.Push(Core::String("80"));
+				values.Push(Core::String("budget"));
+				values.Push(Core::String("steps"));
+				HarnessNote(Core::StringView("budget_warning"), chats->prompts.Note("budget_warning", values).View());
+			}
+			DeliverSteering();
+			if (Window() > 0 && EstimateTokens() * 100 > Window() * kRunCompressAtPercent && Compress()) turn->recoveries.Push(Core::String("compressed the context at 85%"));
+			request = Request();
+			estimate = request.body.ByteLength() / 4;
+			SaveRunning();
+		}
+		steps += 1;
+		TurnRun* self = this;
+		StepEvents events = [self](StepEventKind kind, Core::StringView delta, int64 call) { self->OnEvent(kind, delta, call); };
+		StepResult* result = RunStep(request, events, &run->cancelled);
+		{
+			Threading::LockGuard guard(server->lock);
+			CloseStreaming();
+			Account(result, estimate);
+		}
+		Handle(Classify(*result), result);
+		callSegments.Clear();
+	}
+
+	// Whether every call's arguments are JSON: a reply cut by max_tokens after its calls were complete.
+	static bool CallsComplete(const StepResult* result) {
+		if (result->calls.IsEmpty()) return false;
+		for (ToolCallDraft* call : result->calls) {
+			Serialization::DomNode args;
+			if (!ReadToolArguments(call->arguments.View(), args)) return false;
+		}
+		return true;
+	}
+
+	static bool IsTransport(StepVerdict verdict) { return verdict == StepVerdict::ConnectFailed || verdict == StepVerdict::HttpError; }
+
+	static bool IsCut(StepVerdict verdict) {
+		return verdict == StepVerdict::Disconnected || verdict == StepVerdict::StalledPrefill || verdict == StepVerdict::StalledStream || verdict == StepVerdict::StepCap;
+	}
+
+	void TurnRun::Handle(StepVerdict verdict, StepResult* result) {
+		if (verdict == StepVerdict::ToolCalls || (verdict == StepVerdict::MaxTokens && CallsComplete(result))) {
+			{
+				Threading::LockGuard guard(server->lock);
+				Progress();
+				RecordAssistant(result, true);
+			}
+			ExecuteCalls(result);
+			return;
+		}
+		if (IsTransport(verdict)) {
+			Transport(verdict, result);
+			return;
+		}
+		Threading::LockGuard guard(server->lock);
+		if (verdict == StepVerdict::Cancelled) {
+			RecordAssistant(result, false);
+			Finish(Core::StringView("user_cancelled"));
+		}
+		else if (verdict == StepVerdict::Answer) {
+			Progress();
+			RecordAssistant(result, false);
+			if (chat->mode != ChatMode::Agent) Finish(Core::StringView("finished"));
+			else NoProgress();
+		}
+		else if (verdict == StepVerdict::AnnouncedNoAction) {
+			RecordAssistant(result, false);
+			Core::String action;
+			AnnouncesAction(result->text.View(), action);
+			Core::Array<Core::String> values;
+			values.Push(Core::String("action"));
+			values.Push(action);
+			Nudge("announced_no_action", 2, chats->prompts.Note("announced_no_action", values).View());
+		}
+		else if (verdict == StepVerdict::Empty) Nudge("empty", 2, chats->prompts.Note("empty_reply").View());
+		else if (verdict == StepVerdict::ReasoningOnly) Nudge("reasoning_only", 2, chats->prompts.Note("reasoning_only").View());
+		else if (verdict == StepVerdict::MaxTokens) {
+			RecordAssistant(result, false);
+			if (result->calls.IsEmpty()) Nudge("max_tokens", 3, chats->prompts.Note("continue_after_max_tokens").View());
+			else {
+				Core::Array<Core::String> values;
+				values.Push(Core::String("tool"));
+				values.Push(result->calls[result->calls.Count() - 1]->name);
+				Nudge("max_tokens", 3, chats->prompts.Note("retry_tool_call_after_cut", values).View());
+			}
+		}
+		else if (verdict == StepVerdict::UnparsedToolCall) {
+			RecordAssistant(result, false);
+			Nudge("unparsed_tool_call", 2, chats->prompts.Note("unparsed_tool_call").View());
+		}
+		else if (IsCut(verdict)) Retry(verdict, result, 2);
+		else Overflow(result);
+	}
+
+	// --- Recovery ----------------------------------------------------------------------------------------------------
+
+	void TurnRun::Progress() {
+		counts.Clear();
+		attempts = 0;
+	}
+
+	static Core::String Counted(Core::StringView what, int64 count) {
+		Core::StringBuilder text;
+		text.Append(what);
+		text.Append(" (");
+		text.AppendInt(count);
+		text.Append("x)");
+		return text.ToString();
+	}
+
+	// One more recovery of `reason` this step: the note goes to the model, or the chat pauses past `bound`.
+	bool TurnRun::Nudge(const char* reason, int64 bound, Core::StringView note) {
+		Core::String key = Core::String(reason);
+		int64 count = 0;
+		counts.TryGet(key, count);
+		count += 1;
+		counts.At(key) = count;
+		if (count > bound) {
+			Pause(Core::StringView(reason), ((Core::String("the model kept stopping the same way (") + reason) + ") after the harness's notes").View());
+			return false;
+		}
+		const bool continuing = key == "max_tokens" || key == "disconnected_mid_stream" || key == "stalled_stream" || key == "stalled_prefill" || key == "step_cap";
+		HarnessNote(Core::StringView(reason), note);
+		turn->recoveries.Push(Counted(((Core::String(continuing ? "continued after " : "nudged after ") + reason)).View(), count));
+		return true;
+	}
+
+	void TurnRun::NoProgress() {
+		noProgress += 1;
+		if (noProgress > kRunNoProgressBound) {
+			Pause(Core::StringView("no_progress"), Core::StringView("the model replied several times without a tool call or finish"));
+			return;
+		}
+		HarnessNote(Core::StringView("agent_no_finish"), chats->prompts.Note("agent_no_finish").View());
+		turn->recoveries.Push(Counted(Core::StringView("nudged to act or finish"), noProgress));
+	}
+
+	void TurnRun::Retry(StepVerdict verdict, StepResult* result, int64 bound) {
+		const char* reason = VerdictName(verdict);
+		if (!result->text.View().Trimmed().IsEmpty()) {
+			RecordAssistant(result, false);
+			Nudge(reason, bound, chats->prompts.Note("continue_after_disconnect").View());
+			return;
+		}
+		Core::String key = Core::String(reason);
+		int64 count = 0;
+		counts.TryGet(key, count);
+		counts.At(key) = count + 1;
+		if (count + 1 > bound) Pause(Core::StringView(reason), Core::StringView("the model server stopped answering"));
+		else turn->recoveries.Push(Counted((Core::String("retried after ") + reason).View(), count + 1));
+	}
+
+	static int64 Backoff(int64 attempt, int64 retryAfterMs) {
+		if (retryAfterMs > 0) return retryAfterMs < kRunMostBackoffMs ? retryAfterMs : kRunMostBackoffMs;
+		const int64 base = (int64)1000 << (attempt - 1 < 5 ? attempt - 1 : 5);
+		return base + (Platform::UnixTimeNs() / 1000) % (base / 4 + 1);
+	}
+
+	static Core::String TransportReason(StepVerdict verdict, const StepResult* result) {
+		if (verdict == StepVerdict::ConnectFailed) return Core::String("connect_failed");
+		Core::StringBuilder reason;
+		reason.Append("http_error ");
+		reason.AppendInt(result->httpStatus);
+		return reason.ToString();
+	}
+
+	void TurnRun::Transport(StepVerdict verdict, StepResult* result) {
+		int64 waitMs = 0;
+		{
+			Threading::LockGuard guard(server->lock);
+			Core::String reason = TransportReason(verdict, result);
+			Core::String error = result->completion->errored ? result->completion->errorMessage : result->error;
+			const bool retryable = verdict == StepVerdict::ConnectFailed || result->httpStatus == 429 || result->httpStatus >= 500 || result->httpStatus == 200;
+			if (!retryable) {
+				Pause(reason.View(), ((reason + ": ") + error.View().Substring(0, error.ByteLength() < 400 ? error.ByteLength() : 400)).View());
+				return;
+			}
+			attempts += 1;
+			if (attempts >= kRunTransportAttempts) {
+				Pause(reason.View(), ((reason + " after retries: ") + error.View().Substring(0, error.ByteLength() < 400 ? error.ByteLength() : 400)).View());
+				return;
+			}
+			if (attempts >= kRunFallbackAfter && candidate + 1 < candidates.Count()) {
+				candidate += 1;
+				turn->model = candidates[candidate]->name;
+				Core::String switched = ((Core::String("switched to ") + candidates[candidate]->name.View()) + " after ") + reason.View();
+				UiNote(Core::StringView("routing"), switched.View());
+				turn->recoveries.Push(switched);
+				return;
+			}
+			turn->recoveries.Push(Counted((Core::String("retried after ") + reason.View()).View(), attempts));
+			waitMs = Backoff(attempts, result->retryAfterMs);
+		}
+		Sleep(waitMs);
+	}
+
+	void TurnRun::Overflow(StepResult* result) {
+		Core::String error = result->completion->errored ? result->completion->errorMessage : result->error;
+		const int64 limit = ContextLimitIn(error.View());
+		if (limit > 0) chats->windows.At(candidates[candidate]->name) = limit;
+		Core::String key = Core::String("context_overflow");
+		int64 count = 0;
+		counts.TryGet(key, count);
+		counts.At(key) = count + 1;
+		if (count + 1 > 3) {
+			Pause(key.View(), Core::StringView("the conversation does not fit the model's context, even compressed"));
+			return;
+		}
+		if (Compress()) {
+			turn->recoveries.Push(Counted(Core::StringView("compressed after context_overflow"), count + 1));
+			return;
+		}
+		if (limit > 0 && EstimateTokens() < limit) {
+			turn->recoveries.Push(Counted(Core::StringView("retried after context_overflow"), count + 1));
+			return;
+		}
+		Pause(key.View(), Core::StringView("the conversation does not fit the model's context and nothing is left to compress"));
+	}
+
+	// Waits `ms` unless the run is stopped first; the lock is not held.
+	bool TurnRun::Sleep(int64 ms) {
+		Threading::LockGuard guard(server->lock);
+		const int64 until = RunNowMs() + ms;
+		while (!run->cancelled && RunNowMs() < until) run->wake.WaitFor(server->lock, (until - RunNowMs()) * 1000000);
+		return !run->cancelled;
+	}
+
+	// --- Ending ------------------------------------------------------------------------------------------------------
+
+	void TurnRun::Pause(Core::StringView reason, Core::StringView why) {
+		if (ending) return;
+		ending = true;
+		pausing = true;
+		stop = Core::String(reason);
+		pauseWhy = Core::String(why);
+	}
+
+	// A turn about to finish with steering waiting goes on: the next step gives it to the model. The lock is held.
+	void TurnRun::Finish(Core::StringView reason) {
+		if (ending || (reason == "finished" && !chat->injected.IsEmpty())) return;
+		ending = true;
+		stop = Core::String(reason);
+	}
+
+	void TurnRun::End() {
+		Threading::LockGuard guard(server->lock);
+		CloseStreaming();
+		for (Approval* approval : chat->approvals) {
+			if (!approval->decision.IsEmpty()) continue;
+			approval->decision = Core::String("withdrawn");
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("approvalId", approval->approvalId.View());
+			data.Field("decision", "withdrawn");
+			data.EndObject();
+			chats->Publish(chat, "approval.resolved", data.View());
+		}
+		chat->approvals.Clear();
+		chat->question = nullptr;
+		if (!chat->injected.IsEmpty()) {
+			for (const Core::String& steering : chat->injected) chat->queued.Push(steering);
+			chat->injected.Clear();
+			JsonWriter queue;
+			queue.BeginObject();
+			queue.Key(Core::StringView("queued"));
+			chat->WriteQueued(queue);
+			queue.EndObject();
+			chats->Publish(chat, "queue.changed", queue.View());
+		}
+		if (pausing) UiNote(Core::StringView("paused"), ((Core::String("Paused (") + stop.View()) + "): " + pauseWhy.View() + ". Send a message to continue.").View());
+		CloseOpenCalls(turn, Core::StringView("The call did not run: the turn ended first."));
+		turn->stop = stop;
+		turn->endedMs = RunNowMs();
+		chat->run = nullptr;
+		chat->state = pausing ? ChatState::Paused : ChatState::Idle;
+		chat->stateReason = pausing ? stop : Core::String();
+		chat->updatedMs = turn->endedMs;
+		AppendTurn(ws->root, chat, turn);
+		ForgetRunningTurn(ws->root, chat);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", turn->turnId.View());
+		data.Field("stop", stop.View());
+		data.Key(Core::StringView("recoveries"));
+		data.BeginArray();
+		for (const Core::String& recovery : turn->recoveries) data.String(recovery.View());
+		data.EndArray();
+		data.IntField("tokensIn", turn->tokensIn);
+		data.IntField("tokensOut", turn->tokensOut);
+		data.IntField("ttftMs", turn->ttftMs);
+		data.IntField("genMs", turn->genMs);
+		data.IntField("endedMs", turn->endedMs);
+		data.EndObject();
+		chats->Publish(chat, "turn.end", data.View());
+		chats->Changed(chat);
+		chats->TurnEnded(chat);
+	}
+}

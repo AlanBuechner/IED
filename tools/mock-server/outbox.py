@@ -3,7 +3,7 @@
 import asyncio
 import collections
 
-from hub import MERGE_FIELD, encode
+from hub import encode, merge_field
 
 MAX_MERGED_BYTES = 1024 * 1024
 
@@ -59,8 +59,8 @@ class Outbox:
 		tail = self.items[-1] if self.items else None
 		if tail is None or tail.topic != key or tail.kind != event.kind or tail.nbytes + event.nbytes > MAX_MERGED_BYTES:
 			return False
-		field = MERGE_FIELD[event.kind]
-		if not _same_except(tail.data, event.data, field):
+		field = merge_field(event.kind, event.data)
+		if field is None or not _same_except(tail.data, event.data, field):
 			return False
 		data = dict(tail.data)
 		data[field] = tail.data[field] + event.data[field]

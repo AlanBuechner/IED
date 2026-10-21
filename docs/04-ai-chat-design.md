@@ -121,3 +121,33 @@ Only the active window of each chat stays in server memory; older turns load laz
 ## Attachments and @-mentions
 
 Drag-drop, paste and picker attachments (images/videos to vision-capable models; others become file references read on demand). `@` opens fuzzy suggestions: files and folders, symbols (`@#Name`), open documents, terminals, output sources, Error List, `@diff`, other chats; mentions become structured references resolved at call time.
+
+## As built (M4, first slice, 2026-10-21)
+
+The runtime lives in `src/ai/` (host infrastructure; the `ied.chat` plugin is its UI and declares its settings):
+
+| Part | Files | Does |
+|---|---|---|
+| Wire | `wire/sse`, `wire/post`, `wire/completion`, `wire/dialect` | SSE events and comments; a streaming POST over Bedrock `Net::`/`Http::`; a completion put together from chunks (reasoning fields, calls merged by id then index, usage and llama.cpp timings, errors in the stream, malformed chunks counted and skipped); `<think>` blocks split from content across chunks and calls written as text in six dialects |
+| Step | `step` | one request under the watchdogs, text released with a held tail so a call's markup never shows as prose |
+| Classification | `classify` | the stop taxonomy of `docs/12`, `announced_no_action` from the reply's last sentence |
+| Models | `models` | profiles (`ai.models`) and a group's role candidates (`ai.groups`): the role's model, then its fallbacks |
+| Permissions | `permissions` | `ai.permissions` rules and the chat's mode (`docs/11`) |
+| Tools | `tools/` | the core toolset (`docs/13` "As built") |
+| Prompts | `prompts` | the system message from `src/ai/prompts/` (base, style, mode, the workspace's `AGENTS.md`, a workspace summary) and the harness notes by name |
+| Run | `run`, `runstream`, `runtools` | the loop of `docs/12` on a thread per turn |
+| Chats | `chat`, `chatstore`, `service` | the model, persistence and `chat.*` (`docs/10` "Chats") |
+
+**Settings** (declared by `plugins/chat/settings.schema.json`):
+
+| Key | Tiers | Value |
+|---|---|---|
+| `ai.models` | app | `{<name>: {endpoint, model?, contextWindow?, maxOutput?, privacy?, apiKey?: {env}, watchdog?: {connectS, prefillBaseS, prefillRate, idleS, stepCapS}}}`: an OpenAI-compatible endpoint (`http://host:port/v1`); a key is only ever named by its environment variable |
+| `ai.groups` | app | `{<group>: {<role>: {model, temperature?, effort?, fallback?: [names]}}}`; a turn uses the role `primary` |
+| `ai.defaultGroup` | app, solution | the group of a chat that names none; empty: the first group; with no group at all, the first model |
+| `ai.permissions` | app | `{allow, confirm, deny}`: lists of `kind(pattern)` rules |
+| `ai.maxSteps` | app, solution | model requests per turn before it pauses (100) |
+
+**Persistence:** per chat under `<workspace>/.ied/local/chats/<chatId>/`: `chat.json` (title, mode, permission, group, tasks, queued messages, the rules allowed for the chat, the files the AI changed), `turns.jsonl` (each finished turn with the messages the model was sent) and `running.json` (the turn in flight, written at every step and tool boundary). A `running.json` found at start is a turn a restart interrupted: it ends `interrupted`, a call it had running gets a result saying its effect is unknown, and the chat waits paused for the next message.
+
+**Not yet:** the Anthropic and Claude Code providers, context discovery (`/props`, `/api/show`), the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), skills, MCP, attachments and @-mentions, sub-agents, checkpoints and rewind, the trajectory files.

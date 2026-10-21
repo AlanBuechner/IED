@@ -1,0 +1,88 @@
+// The AI's tools (docs/13): each declares its name, description, JSON Schema, class (for permissions, docs/11) and
+// whether it may run beside others, and has a planner - what a call would do, before the permission check: its
+// subject, the card's summary and a write's diff - and a runner. Tools run on the chat's run thread without the
+// server lock and take it for what they touch of the server's state. A tool with no runner (tasks_set, task_update,
+// ask_user, finish) is the run's own (docs/12).
+
+include "ai/chat.ch"
+include "ai/permissions.ch"
+
+namespace Ied
+{
+	// A call as a tool gets it.
+	class ToolInvocation
+	{
+		public Server* server;
+		public Workspace* ws;
+		public Chat* chat;
+		public Core::String callId;
+		public Serialization::DomNode args;
+		public const bool* cancelled;
+	}
+
+	class ToolOutcome
+	{
+		public Core::String content;    // what the model is told
+		public Core::String preview;    // what the card shows; the content when empty
+		public bool isError;
+		public bool denied;             // refused by a rule or by the owner: it did not run
+		public int64 plus;              // lines a write added and removed
+		public int64 minus;
+		public Core::String source;     // where it ran, for the card ("built-in", "Output: AI")
+		public int64 ms;                // how long it ran, without the wait for an approval, when `timed`
+		public bool timed;
+	}
+
+	// What a call would do: what the permission check and the approval card see.
+	class ToolPlan
+	{
+		public Core::String subject;    // "fs.write(src/a.cf)"
+		public Core::String summary;    // "Edit src/a.cf"
+		public Core::String diff;       // a write's change as a unified diff
+		public int64 plus;
+		public int64 minus;
+		public Core::String error;      // the call cannot work as asked: it fails without asking
+	}
+
+	alias ToolPlanner = func<ToolPlan(const ToolInvocation& call)>;
+	alias ToolRunner = func<ToolOutcome(const ToolInvocation& call)>;
+
+	class ToolSpec
+	{
+		public Core::String name;
+		public Core::String description;
+		public Core::String parameters;   // the JSON Schema of the arguments
+		public ToolClass toolClass;
+		public bool parallelSafe;
+		public bool inPlan;               // offered in Plan mode (docs/13 "Mode presets")
+		public bool agentOnly;            // offered only in Agent mode (finish)
+		public ToolPlanner plan;
+		public ToolRunner run;            // null: the run handles the call itself
+	}
+
+	class ToolRegistry
+	{
+		[operator("create")] public void Init() { schemas = new Serialization::SchemaRegistry(); }
+
+		public void Add(ToolSpec* spec);
+		public ToolSpec* Find(Core::StringView name) const;
+		public bool Offered(const ToolSpec* spec, ChatMode mode) const;
+		// The request's "tools" array for a chat in `mode`.
+		public Core::String RequestTools(ChatMode mode) const;
+		// The problems of `args` against the tool's schema, "<pointer>: <message>" each.
+		public Core::Array<Core::String> Check(const ToolSpec* spec, const Serialization::DomNode& args) const;
+		// The offered tools whose names look like `name`, best first.
+		public Core::Array<Core::String> Suggest(Core::StringView name, ChatMode mode) const;
+
+		public Core::Array<ToolSpec*> tools;
+		public Core::Array<Core::String> problems;   // tools whose schema did not load
+		private Serialization::SchemaRegistry* schemas;
+	}
+
+	// A call's arguments read as JSON, repaired the ways models get it wrong (an empty string, a fence around it);
+	// false when it still is not a JSON object.
+	bool ReadToolArguments(Core::StringView text, Serialization::DomNode& args);
+	// A tool error that teaches (docs/13 rule 4).
+	ToolOutcome ToolError(Core::StringView message);
+	ToolOutcome ToolResult(Core::StringView content, Core::StringView preview);
+}

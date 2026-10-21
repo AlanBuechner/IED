@@ -1,0 +1,357 @@
+include "service.ch"
+include "run.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	const char* kInterruptedNote = "This call was interrupted by a server restart; its effect is unknown. Check the current state before retrying it.";
+	const int64 kTitleMostBytes = 48;
+
+	Core::String ChatsTopic(const Workspace* ws) { return Core::String("chats:") + ws->wsId.View(); }
+
+	void Chats::Init(Server* server) {
+		this.server = server;
+		tools = CoreTools();
+		for (const Core::String& problem : tools->problems) server->Log(problem.View());
+		Core::Array<Core::String> problems;
+		prompts.Load(FS::Path(server->config.homeDir.View()) / "src" / "ai" / "prompts", problems);
+		for (const Core::String& problem : problems) server->Log(problem.View());
+		Chats* self = this;
+		server->rpc.Register("chat.list", [self](Call& call, const Params& params) -> Core::String { return self->ListMethod(call, params); });
+		server->rpc.Register("chat.create", [self](Call& call, const Params& params) -> Core::String { return self->CreateMethod(call, params); });
+		server->rpc.Register("chat.set", [self](Call& call, const Params& params) -> Core::String { return self->SetMethod(call, params); });
+		server->rpc.Register("chat.send", [self](Call& call, const Params& params) -> Core::String { return self->SendMethod(call, params); });
+		server->rpc.Register("chat.unqueue", [self](Call& call, const Params& params) -> Core::String { return self->UnqueueMethod(call, params); });
+		server->rpc.Register("chat.stop", [self](Call& call, const Params& params) -> Core::String { return self->StopMethod(call, params); });
+		server->rpc.Register("chat.approve", [self](Call& call, const Params& params) -> Core::String { return self->ApproveMethod(call, params); });
+		server->rpc.Register("chat.answer", [self](Call& call, const Params& params) -> Core::String { return self->AnswerMethod(call, params); });
+		server->rpc.Register("chat.history", [self](Call& call, const Params& params) -> Core::String { return self->HistoryMethod(call, params); });
+		server->rpc.Register("chat.delete", [self](Call& call, const Params& params) -> Core::String { return self->DeleteMethod(call, params); });
+	}
+
+	void Chats::WorkspaceOpened(Workspace* ws) {
+		Chats* self = this;
+		server->hub.Add(ChatsTopic(ws).View(), [self, ws]() -> Core::String { return self->ListSnapshot(ws); });
+		Core::Array<Core::String> problems;
+		for (Chat* chat : LoadChats(ws->root, ws->wsId.View(), Core::StringView(kInterruptedNote), problems)) {
+			chats.Push(chat);
+			AddTopic(chat);
+		}
+		for (const Core::String& problem : problems) server->Log(problem.View());
+	}
+
+	Chat* Chats::Get(Core::StringView chatId) const {
+		for (Chat* chat : chats)
+			if (chat->chatId.View() == chatId) return chat;
+		throw RpcError(ErrorCode::NotFound, (Core::String("no chat ") + chatId).View());
+	}
+
+	Workspace* Chats::WorkspaceOf(const Chat* chat) const { return server->workspaces->Get(chat->wsId.View()); }
+
+	void Chats::Publish(Chat* chat, const char* kind, Core::StringView data) { server->hub.Publish(chat->Topic().View(), kind, data); }
+
+	void Chats::PublishMergeable(Chat* chat, const char* kind, const Merge& merge) { server->hub.PublishMergeable(chat->Topic().View(), kind, merge); }
+
+	void Chats::Changed(Chat* chat) {
+		Core::String summary = chat->SummaryJson();
+		Publish(chat, "chat.changed", summary.View());
+		server->hub.Publish(ChatsTopic(WorkspaceOf(chat)).View(), "chat.changed", summary.View());
+		SaveChatHeader(WorkspaceOf(chat)->root, chat);
+	}
+
+	// The chat's group: its own, else ai.defaultGroup, else the first group.
+	static Core::String GroupOf(Server* server, const Chat* chat, Workspace* ws) {
+		if (!chat->group.IsEmpty()) return chat->group;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String fallback = Core::String(Serialization::ReadJson(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.defaultGroup")).View(), *doc).root.AsView());
+		if (!fallback.IsEmpty()) return fallback;
+		Core::Array<Core::String> names = GroupNames(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.groups")).View());
+		return names.IsEmpty() ? Core::String() : names[0];
+	}
+
+	Core::String Chats::ModelOf(const Chat* chat) const {
+		Workspace* ws = WorkspaceOf(chat);
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models = ReadModels(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.models")).View(), problems);
+		RoleModel role;
+		Core::Array<ModelProfile*> candidates = RoleCandidates(models, server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.groups")).View(), GroupOf(server, chat, ws).View(), Core::StringView("primary"), role);
+		return candidates.IsEmpty() ? Core::String() : candidates[0]->name;
+	}
+
+	Core::String Chats::Snapshot(Chat* chat) { return chat->SnapshotJson(ModelOf(chat).View(), GroupOf(server, chat, WorkspaceOf(chat)).View(), kChatSnapshotTurns); }
+
+	Core::String Chats::ListSnapshot(Workspace* ws) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("chats"));
+		json.BeginArray();
+		for (Chat* chat : chats) {
+			if (chat->wsId != ws->wsId) continue;
+			json.BeginObject();
+			chat->WriteSummary(json);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Chats::AddTopic(Chat* chat) {
+		Chats* self = this;
+		server->hub.Add(chat->Topic().View(), [self, chat]() -> Core::String { return self->Snapshot(chat); });
+	}
+
+	// --- Turns -------------------------------------------------------------------------------------------------------
+
+	static Core::String TitleFrom(Core::StringView text) {
+		Core::StringView line = text.Trimmed();
+		const int64 lineEnd = line.IndexOf('\n', 0);
+		if (lineEnd >= 0) line = line.Substring(0, lineEnd).Trimmed();
+		if (line.ByteLength() <= kTitleMostBytes) return Core::String(line);
+		int64 cut = kTitleMostBytes;
+		while (cut > 0 && ((uint8)line.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+		return Core::String(line.Substring(0, cut)) + "...";
+	}
+
+	void Chats::StartTurn(Chat* chat, Core::StringView text) {
+		Workspace* ws = WorkspaceOf(chat);
+		Turn* turn = new Turn();
+		turn->turnId = chat->NextId("u");
+		turn->userText = Core::String(text);
+		turn->mode = chat->mode;
+		turn->group = GroupOf(server, chat, ws);
+		turn->model = ModelOf(chat);
+		turn->startedMs = ChatNowMs();
+		ModelMessage* message = new ModelMessage();
+		message->role = Core::String("user");
+		message->content = Core::String(text);
+		turn->messages.Push(message);
+		chat->turns.Push(turn);
+		if (chat->title == kNewChatTitle) chat->title = TitleFrom(text);
+		chat->run = new ChatRun();
+		chat->run->turn = turn;
+		chat->state = ChatState::Running;
+		chat->stateReason = Core::String();
+		chat->updatedMs = turn->startedMs;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", turn->turnId.View());
+		data.Field("mode", ChatModeName(turn->mode));
+		data.Field("group", turn->group.View());
+		data.Field("model", turn->model.View());
+		data.Key(Core::StringView("user"));
+		data.BeginObject();
+		data.Field("text", text);
+		data.EndObject();
+		data.IntField("startedMs", turn->startedMs);
+		data.EndObject();
+		Publish(chat, "turn.start", data.View());
+		Changed(chat);
+		StartRun(server, this, chat, ws);
+	}
+
+	void Chats::TurnEnded(Chat* chat) {
+		if (chat->queued.IsEmpty() || chat->Current()->stop != "finished") return;
+		Core::String next = chat->queued[0];
+		chat->queued.RemoveAt(0);
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("queued"));
+		chat->WriteQueued(data);
+		data.EndObject();
+		Publish(chat, "queue.changed", data.View());
+		StartTurn(chat, next.View());
+	}
+
+	// --- Methods -----------------------------------------------------------------------------------------------------
+
+	Core::String Chats::ListMethod(Call& call, const Params& params) { return ListSnapshot(server->workspaces->Get(params.Str("wsId").View())); }
+
+	static void ReadSettings(Chat* chat, const Params& params) {
+		if (params.Has("title")) chat->title = params.Str("title");
+		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->mode)) throw RpcError(ErrorCode::BadRequest, "mode must be ask, plan or agent");
+		if (params.Has("permission") && !ReadPermissionMode(params.Str("permission").View(), chat->permission)) throw RpcError(ErrorCode::BadRequest, "permission must be plan, ask, acceptEdits or auto");
+		if (params.Has("group")) chat->group = params.Str("group");
+	}
+
+	Core::String Chats::CreateMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		Chat* chat = new Chat();
+		Core::StringBuilder id;
+		id.Append("c");
+		id.AppendHex((uint64)(Platform::UnixTimeNs() / 1000));
+		chat->chatId = id.ToString();
+		chat->wsId = ws->wsId;
+		chat->title = Core::String(kNewChatTitle);
+		chat->mode = ChatMode::Agent;
+		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->mode)) throw RpcError(ErrorCode::BadRequest, "mode must be ask, plan or agent");
+		chat->permission = DefaultPermission(chat->mode);
+		ReadSettings(chat, params);
+		chat->createdMs = ChatNowMs();
+		chat->updatedMs = chat->createdMs;
+		chats.Push(chat);
+		AddTopic(chat);
+		SaveChatHeader(ws->root, chat);
+		Core::String summary = chat->SummaryJson();
+		server->hub.Publish(ChatsTopic(ws).View(), "chat.created", summary.View());
+		return summary;
+	}
+
+	Core::String Chats::SetMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		ReadSettings(chat, params);
+		Changed(chat);
+		return chat->SummaryJson();
+	}
+
+	Core::String Chats::SendMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		Core::String text = params.Str("text");
+		if (text.View().Trimmed().IsEmpty()) throw RpcError(ErrorCode::BadRequest, "text is empty");
+		Core::String delivery = params.Str("as", Core::StringView("message"));
+		if (delivery != "message" && delivery != "queue" && delivery != "inject") throw RpcError(ErrorCode::BadRequest, "as must be message, queue or inject");
+		JsonWriter json;
+		json.BeginObject();
+		if (!chat->run) {
+			StartTurn(chat, text.View());
+			json.Field("turnId", chat->Current()->turnId.View());
+		}
+		else if (delivery == "inject") {
+			chat->injected.Push(text);
+			json.BoolField("injected", true);
+		}
+		else {
+			chat->queued.Push(text);
+			JsonWriter data;
+			data.BeginObject();
+			data.Key(Core::StringView("queued"));
+			chat->WriteQueued(data);
+			data.EndObject();
+			Publish(chat, "queue.changed", data.View());
+			SaveChatHeader(WorkspaceOf(chat)->root, chat);
+			json.IntField("queued", chat->queued.Count());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::UnqueueMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		const int64 index = params.Int("index");
+		if (index < 0 || index >= chat->queued.Count()) throw RpcError(ErrorCode::NotFound, "no queued message at that index");
+		chat->queued.RemoveAt(index);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("queued"));
+		chat->WriteQueued(json);
+		json.EndObject();
+		Publish(chat, "queue.changed", json.View());
+		SaveChatHeader(WorkspaceOf(chat)->root, chat);
+		return json.ToString();
+	}
+
+	Core::String Chats::StopMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		if (chat->run) {
+			chat->run->cancelled = true;
+			chat->run->wake.NotifyAll();
+		}
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("state", ChatStateName(chat->state));
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::ApproveMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		Core::String approvalId = params.Str("approvalId");
+		Core::String decision = params.Str("decision");
+		if (decision != "allow" && decision != "deny" && decision != "chat") throw RpcError(ErrorCode::BadRequest, "decision must be allow, deny or chat");
+		Approval* approval = nullptr;
+		for (Approval* each : chat->approvals)
+			if (each->approvalId == approvalId) approval = each;
+		if (!approval) throw RpcError(ErrorCode::NotFound, (Core::String("no approval ") + approvalId.View() + " is waiting").View());
+		if (!approval->decision.IsEmpty()) {
+			JsonWriter answered;
+			answered.BeginObject();
+			answered.Field("decision", approval->decision.View());
+			answered.Field("by", approval->by.View());
+			answered.EndObject();
+			throw RpcError(ErrorCode::Conflict, "another device answered first", answered.View());
+		}
+		approval->decision = decision;
+		approval->message = params.Str("message", Core::StringView(""));
+		approval->by = Core::String(call.ClientId());
+		chat->run->wake.NotifyAll();
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("approvalId", approvalId.View());
+		data.Field("decision", decision.View());
+		data.Field("by", approval->by.View());
+		data.EndObject();
+		Publish(chat, "approval.resolved", data.View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("decision", decision.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::AnswerMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		Core::String questionId = params.Str("questionId");
+		Question* question = chat->question;
+		if (!question || question->questionId != questionId) throw RpcError(ErrorCode::NotFound, (Core::String("no question ") + questionId.View() + " is waiting").View());
+		if (question->answered) throw RpcError(ErrorCode::Conflict, "another device answered first");
+		question->answer = params.Str("answer");
+		question->answered = true;
+		chat->run->wake.NotifyAll();
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("questionId", questionId.View());
+		data.Field("answer", question->answer.View());
+		data.Field("by", call.ClientId());
+		data.EndObject();
+		Publish(chat, "question.resolved", data.View());
+		return Core::String("{}");
+	}
+
+	Core::String Chats::HistoryMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		Core::String before = params.Str("before", Core::StringView(""));
+		const int64 limit = params.Int("limit", kChatSnapshotTurns);
+		int64 end = chat->turns.Count();
+		for (int64 i = 0; i < chat->turns.Count(); ++i)
+			if (chat->turns[i]->turnId == before) end = i;
+		const int64 start = end - limit > 0 ? end - limit : 0;
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("turns"));
+		json.BeginArray();
+		for (int64 i = start; i < end; ++i) chat->turns[i]->WriteJson(json, false);
+		json.EndArray();
+		json.BoolField("hasMore", start > 0);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Chats::DeleteMethod(Call& call, const Params& params) {
+		Chat* chat = Get(params.Str("chatId").View());
+		if (chat->run) throw RpcError(ErrorCode::Conflict, "the chat is running a turn: stop it first");
+		Workspace* ws = WorkspaceOf(chat);
+		for (int64 i = 0; i < chats.Count(); ++i)
+			if (chats[i] == chat) {
+				chats.RemoveAt(i);
+				break;
+			}
+		DeleteChatFiles(ws->root, chat->chatId.View());
+		server->hub.Remove(chat->Topic().View());
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("chatId", chat->chatId.View());
+		data.EndObject();
+		server->hub.Publish(ChatsTopic(ws).View(), "chat.deleted", data.View());
+		return Core::String("{}");
+	}
+}

@@ -1,6 +1,7 @@
 """The servers the end-to-end tests drive (docs/19): the mock (tools/mock-server) and the real ied-server, each serving
 frontend/, and how a browser context signs in to each."""
 
+import json
 import os
 import secrets
 import shutil
@@ -8,11 +9,13 @@ import subprocess
 import sys
 import tempfile
 import urllib.parse
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 FRONTEND = os.path.join(REPO, "frontend")
 MOCK = os.path.join(REPO, "tools", "mock-server", "mock_server.py")
+FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
 FIXTURE = os.path.join(HERE, "fixture", "workspace")
 
 
@@ -64,8 +67,12 @@ class RealTarget(Target):
 		self.executable = os.path.abspath(executable)
 		self.root = None
 		self.launch_url = None
+		self.model = None
+		self.model_url = None
 
 	def start(self):
+		self.model = subprocess.Popen([sys.executable, "-I", FAKE_MODEL, "--port", "0", "--time-scale", "0.05"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+		self.model_url = self.model.stdout.readline().strip().split(" ", 1)[1]
 		self.root = tempfile.mkdtemp(prefix="ied-e2e-")
 		workspace = os.path.join(self.root, "e2e")
 		shutil.copytree(FIXTURE, workspace)
@@ -92,7 +99,16 @@ class RealTarget(Target):
 		page.close()
 		return context
 
+	def queue_model(self, *scripts):
+		"""Scripts for the fake model's next requests (tools/fake-model/README.md)."""
+		request = urllib.request.Request(self.model_url + "/_fake/queue", data=json.dumps({"scripts": list(scripts)}).encode(), headers={"Content-Type": "application/json"})
+		urllib.request.urlopen(request, timeout=10).read()
+
 	def stop(self):
 		super().stop()
+		if self.model:
+			self.model.kill()
+			self.model.wait(10)
+			self.model.stdout.close()
 		if self.root:
 			shutil.rmtree(self.root, ignore_errors=True)

@@ -1,0 +1,63 @@
+// index.js - the chat plugin's UI module (docs/04, docs/15 "Chat"): the Chat activity, the status bar's "AI: 1 running,
+// 1 needs approval" (from chats:<wsId>), and the commands that open the activity, start a chat and stop the turn.
+
+import { h, icon, replace } from "/ui-kit/dom.js";
+import { ChatActivityView } from "./activity.js";
+import { ChatList } from "./chatmodel.js";
+
+const views = new Set();
+
+function last() {
+	return [...views].pop() || null;
+}
+
+export function activate(ied) {
+	if (!document.querySelector("link[href='" + ied.plugin.base + "ui/chat.css']")) document.head.append(h("link", { rel: "stylesheet", href: ied.plugin.base + "ui/chat.css" }));
+	ied.commands.handle("ied.chat.show", () => ied.commands.run("shell.showActivity", { id: "ied.chat" }));
+	ied.commands.handle("ied.chat.new", async () => {
+		await ied.commands.run("shell.showActivity", { id: "ied.chat" });
+		if (last()) last().newChat();
+	});
+	ied.commands.handle("ied.chat.stop", () => last() && last().stop());
+}
+
+export function ChatActivity(ctx) {
+	const view = new ChatActivityView(ctx);
+	views.add(view);
+	return { dispose: () => {
+		views.delete(view);
+		view.dispose();
+	} };
+}
+
+// What the status bar says of the workspace's chats: the running ones and those waiting on the owner.
+export function chatStatusText(chats) {
+	const running = chats.filter((c) => c.state === "running").length;
+	const waiting = chats.filter((c) => c.state === "awaiting_approval" || c.state === "awaiting_answer").length;
+	if (!running && !waiting) return null;
+	const parts = [];
+	if (running) parts.push(running + " running");
+	if (waiting) parts.push(waiting + (waiting === 1 ? " needs you" : " need you"));
+	return { text: "AI: " + parts.join(", "), attention: waiting > 0 };
+}
+
+export function ChatStatus(ctx) {
+	const list = new ChatList();
+	const render = () => {
+		const status = chatStatusText(list.chats);
+		ctx.el.hidden = !status;
+		if (status) replace(ctx.el, icon("sparkle", "c-ai"), h("span" + (status.attention ? ".c-warn" : ""), null, status.text));
+	};
+	const stop = ctx.ied.client.subscribe("chats:" + ctx.wsId, {
+		snap: (data) => {
+			list.snapshot(data);
+			render();
+		},
+		evt: (kind, data) => {
+			list.event(kind, data);
+			render();
+		},
+	});
+	render();
+	return { dispose: stop };
+}

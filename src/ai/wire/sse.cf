@@ -1,0 +1,51 @@
+include "sse.ch"
+
+namespace Ied
+{
+	void SseReader::Feed(Core::StringView bytes) { pending.Append(bytes); }
+
+	bool SseReader::Next(SseEvent& event) {
+		for (;;) {
+			const int64 end = pending.View().IndexOf('\n', 0);
+			if (end < 0) return false;
+			Core::StringView line = pending.View().Substring(0, end);
+			if (line.EndsWith(Core::StringView("\r"))) line = line.Substring(0, line.ByteLength() - 1);
+			const Core::String kept = Core::String(line);
+			pending = Core::String(pending.View().Substring(end + 1, pending.ByteLength() - end - 1));
+			if (Line(kept.View(), event)) return true;
+		}
+	}
+
+	// One line: true when it completes an event (a blank line after data) or is a comment.
+	bool SseReader::Line(Core::StringView line, SseEvent& event) {
+		if (line.IsEmpty()) {
+			if (!hasData) return false;
+			event.kind = SseKind::Data;
+			event.data = data;
+			data = Core::String();
+			hasData = false;
+			return true;
+		}
+		if (line.ByteAt(0) == ':') {
+			event.kind = SseKind::Comment;
+			event.data = Core::String(line.Substring(1, line.ByteLength() - 1));
+			return true;
+		}
+		if (!line.StartsWith(Core::StringView("data:"))) return false;
+		Core::StringView value = line.Substring(5, line.ByteLength() - 5);
+		if (value.StartsWith(Core::StringView(" "))) value = value.Substring(1, value.ByteLength() - 1);
+		if (hasData) data.Append("\n");
+		data.Append(value);
+		hasData = true;
+		return false;
+	}
+
+	bool SseReader::Flush(SseEvent& event) {
+		if (!pending.IsEmpty()) {
+			const Core::String last = pending;
+			pending = Core::String();
+			if (Line(last.View(), event)) return true;
+		}
+		return Line(Core::StringView(""), event);
+	}
+}

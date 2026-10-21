@@ -55,6 +55,7 @@ namespace Ied
 		Add(outputs, "run", "Run");
 		Add(outputs, "test", "Tests");
 		Add(outputs, "debug", "Debug");
+		Add(outputs, "ai", "AI");
 		Add(outputs, kServerLogSource, "IED")->tail = logTail;
 	}
 

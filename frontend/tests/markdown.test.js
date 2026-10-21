@@ -3,7 +3,7 @@
 // in the source.
 
 import { test, assertEqual } from "./harness.js";
-import { renderMarkdown, safeUrl, toggleTask } from "/plugins/ied.editor/ui/markdown.js";
+import { renderMarkdown, safeUrl, toggleTask } from "/ui-kit/markdown.js";
 import { resolveRelative } from "/plugins/ied.editor/ui/mdpreview.js";
 
 function html(text, options) {

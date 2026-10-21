@@ -40,6 +40,8 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 
 ## Chat activity
 
+**As built (M4, first slice):** the `chat` plugin's activity (`docs/05` "chat"), checked by screenshot at 1366x768 and 375x812 against mockup 02: a running turn with an approval card and the right panel, the same card at phone width as a bottom-stacked button grid, and the resume path: a page reloaded mid-turn gets the turn's text so far from the snapshot and keeps streaming to the end (e2e `chat_reload_mid_turn`), and after a server restart the chats come back from disk (a turn the restart cut off ends `interrupted` and its chat waits paused: server checks). A turn against a real local model (llama.cpp) streamed its thinking, ran its tool calls and finished.
+
 ```
 +----+-------------------------------------------------------------------------+------------------+
 |    | [Port logging *] [Fix test 3/7] [General]  [+]                           | v Context  62%   |

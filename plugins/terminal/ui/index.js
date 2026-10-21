@@ -6,7 +6,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { TerminalView } from "./terminalview.js";
 
 const panels = new Set();
-const PHONE_KEYS = [["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["←", "\x1b[D"], ["→", "\x1b[C"]];
+const PHONE_KEYS = [["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["\u2191", "\x1b[A"], ["\u2193", "\x1b[B"], ["\u2190", "\x1b[D"], ["\u2192", "\x1b[C"]];
 
 function last() {
 	return [...panels].pop() || null;

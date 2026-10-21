@@ -14,7 +14,7 @@ namespace Ied
 		return key.Substring(start, end - start);
 	}
 
-	static bool IsCoalescibleKind(Core::StringView kind) { return kind == "out" || kind == "run" || kind == "term"; }
+	static bool IsCoalescibleKind(Core::StringView kind) { return kind == "out" || kind == "run" || kind == "term" || kind == "chat"; }
 
 	TopicLimits Hub::DefaultLimits(Core::StringView key) {
 		Core::StringView kind = TopicKind(key);

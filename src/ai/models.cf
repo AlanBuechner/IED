@@ -1,0 +1,107 @@
+include "models.ch"
+
+namespace Ied
+{
+	static Serialization::DomNode ParseValue(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+		return read.Ok() ? read.root : Serialization::DomNode();
+	}
+
+	static int32 SecondsAsMs(const Serialization::DomNode& node, int32 otherwise) {
+		return node.IsValid() && node.AsFloat() > 0 ? (int32)(node.AsFloat() * 1000.0) : otherwise;
+	}
+
+	static bool ReadPrivacy(Core::StringView text, Privacy& privacy) {
+		if (text.IsEmpty() || text == "local") privacy = Privacy::Local;
+		else if (text == "lan") privacy = Privacy::Lan;
+		else if (text == "cloud") privacy = Privacy::Cloud;
+		else return false;
+		return true;
+	}
+
+	static ModelProfile* ReadModel(Core::StringView name, const Serialization::DomNode& entry, Core::Array<Core::String>& problems) {
+		ModelProfile* profile = new ModelProfile();
+		profile->name = Core::String(name);
+		profile->endpoint = Core::String(entry.Member("endpoint").AsView());
+		if (!profile->endpoint.View().StartsWith(Core::StringView("http://"))) {
+			problems.Push((Core::String("ai.models.") + name) + ": endpoint must be an http:// URL");
+			return nullptr;
+		}
+		while (profile->endpoint.View().EndsWith(Core::StringView("/"))) profile->endpoint = Core::String(profile->endpoint.View().Substring(0, profile->endpoint.ByteLength() - 1));
+		profile->model = entry.Member("model").Kind() == Serialization::DomKind::String ? Core::String(entry.Member("model").AsView()) : Core::String(name);
+		profile->contextWindow = entry.Member("contextWindow").AsInt();
+		profile->maxOutput = entry.Member("maxOutput").AsInt();
+		if (!ReadPrivacy(entry.Member("privacy").AsView(), profile->privacy)) {
+			problems.Push((Core::String("ai.models.") + name) + ": privacy must be local, lan or cloud");
+			return nullptr;
+		}
+		profile->apiKeyEnv = Core::String(entry.Member("apiKey").Member("env").AsView());
+		Serialization::DomNode watchdog = entry.Member("watchdog");
+		profile->connectMs = SecondsAsMs(watchdog.Member("connectS"), kModelConnectMs);
+		profile->prefillBaseMs = SecondsAsMs(watchdog.Member("prefillBaseS"), kModelPrefillBaseMs);
+		profile->prefillRate = watchdog.Member("prefillRate").AsFloat() > 0 ? watchdog.Member("prefillRate").AsFloat() : kModelPrefillRate;
+		profile->idleMs = SecondsAsMs(watchdog.Member("idleS"), profile->privacy == Privacy::Cloud ? kModelIdleCloudMs : kModelIdleLocalMs);
+		profile->stepCapMs = watchdog.Member("stepCapS").AsFloat() > 0 ? (int64)(watchdog.Member("stepCapS").AsFloat() * 1000.0) : kModelStepCapMs;
+		return profile;
+	}
+
+	Core::Array<ModelProfile*> ReadModels(Core::StringView json, Core::Array<Core::String>& problems) {
+		Core::Array<ModelProfile*> models;
+		Serialization::DomNode root = ParseValue(json);
+		for (int64 i = 0; root.Kind() == Serialization::DomKind::Object && i < root.Count(); ++i) {
+			ModelProfile* profile = ReadModel(root.KeyAt(i), root.ValueAt(i), problems);
+			if (profile) models.Push(profile);
+		}
+		return models;
+	}
+
+	ModelProfile* FindModel(const Core::Array<ModelProfile*>& models, Core::StringView name) {
+		for (ModelProfile* profile : models)
+			if (profile->name.View() == name) return profile;
+		return nullptr;
+	}
+
+	bool ReadRole(Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& into) {
+		Core::String groupName = Core::String(group);
+		Core::String roleName = Core::String(role);
+		Serialization::DomNode entry = ParseValue(groupsJson).Member(groupName.CStr()).Member(roleName.CStr());
+		if (entry.Member("model").Kind() != Serialization::DomKind::String) return false;
+		into.model = Core::String(entry.Member("model").AsView());
+		into.hasTemperature = entry.Member("temperature").IsValid();
+		into.temperature = entry.Member("temperature").AsFloat();
+		into.effort = Core::String(entry.Member("effort").AsView());
+		Serialization::DomNode fallback = entry.Member("fallback");
+		for (int64 i = 0; fallback.Kind() == Serialization::DomKind::Array && i < fallback.Count(); ++i) into.fallback.Push(Core::String(fallback.At(i).AsView()));
+		return true;
+	}
+
+	Core::Array<ModelProfile*> RoleCandidates(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& chosen) {
+		Core::Array<ModelProfile*> candidates;
+		if (!ReadRole(groupsJson, group, role, chosen)) {
+			if (!models.IsEmpty()) candidates.Push(models[0]);
+			return candidates;
+		}
+		ModelProfile* first = FindModel(models, chosen.model.View());
+		if (first) candidates.Push(first);
+		for (const Core::String& name : chosen.fallback) {
+			ModelProfile* fallback = FindModel(models, name.View());
+			if (fallback) candidates.Push(fallback);
+		}
+		return candidates;
+	}
+
+	Core::Array<Core::String> GroupNames(Core::StringView groupsJson) {
+		Core::Array<Core::String> names;
+		Serialization::DomNode root = ParseValue(groupsJson);
+		for (int64 i = 0; root.Kind() == Serialization::DomKind::Object && i < root.Count(); ++i) names.Push(Core::String(root.KeyAt(i)));
+		return names;
+	}
+
+	Core::String ModelProfile::CompletionsUrl() const { return endpoint + "/chat/completions"; }
+
+	const char* PrivacyName(Privacy privacy) {
+		if (privacy == Privacy::Lan) return "lan";
+		return privacy == Privacy::Cloud ? "cloud" : "local";
+	}
+}
