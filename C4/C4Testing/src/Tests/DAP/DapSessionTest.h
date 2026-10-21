@@ -25,6 +25,8 @@ namespace Testing
 		TEST_FUNC_TIMEOUT(Dap.Session, 60)
 		void ALineWithoutCodeBindsToTheNextLine();
 		TEST_FUNC_TIMEOUT(Dap.Session, 60)
+		void ACallThatFirstNeedsACleanupKeepsItsLine();
+		TEST_FUNC_TIMEOUT(Dap.Session, 60)
 		void ATemplateBreakpointStopsInEveryInstance();
 		TEST_FUNC_TIMEOUT(Dap.Session, 60)
 		void ALambdaBodyStops();

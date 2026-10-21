@@ -174,6 +174,37 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// The first call that may throw past a local with a destructor makes the local's cleanup pad; the cleanup's
+	// statements must not lend the call their line, or a breakpoint on it moves to the next line (BUG-307).
+	void DapSessionTest::ACallThatFirstNeedsACleanupKeepsItsLine()
+	{
+		const char* const source =
+			"int32 g_deleted = 0;\n"
+			"class Holder {\n"
+			"\tpublic int32 value;\n"
+			"\t[operator(\"delete\")] public void Delete() { g_deleted += 1; }\n"
+			"}\n"
+			"void Touch(Holder& held) { held.value += 1; }\n"
+			"int32 main() {\n"
+			"\tHolder held; // held-declared\n"
+			"\tTouch(held); // first-call\n"
+			"\treturn held.value - 1; // after-call\n"
+			"}\n";
+		const DebugProgram program = BuildProgram("cleanupline", source);
+		TEST_ASSERT(program.built);
+		DapClient client;
+		const Json::Value stop = client.Start(program, { Dap::LineOf(source, "first-call") });
+		TEST_ASSERT(!stop.IsNull());
+		const Json::Value frames = client.Request("stackTrace", Object({ { "threadId", Num(ThreadOf(stop)) } })).Member("body").Member("stackFrames");
+		TEST_ASSERT_EQ(LineOf(frames.At(0)), int64(Dap::LineOf(source, "first-call")));
+		const Json::Value next = StepAndWait(client, "next", ThreadOf(stop));
+		const Json::Value after = client.Request("stackTrace", Object({ { "threadId", Num(ThreadOf(next)) } })).Member("body").Member("stackFrames");
+		TEST_ASSERT_EQ(LineOf(after.At(0)), int64(Dap::LineOf(source, "after-call")));
+		client.Request("continue", Object({ { "threadId", Num(ThreadOf(next)) } }));
+		TEST_ASSERT_EQ(client.WaitEvent("exited").Member("body").Member("exitCode").GetInt(), int64(0));
+		TEST_PASSED();
+	}
+
 	void DapSessionTest::ALineWithoutCodeBindsToTheNextLine()
 	{
 		const char* const source =
