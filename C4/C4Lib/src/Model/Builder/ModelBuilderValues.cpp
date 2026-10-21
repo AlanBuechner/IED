@@ -121,7 +121,7 @@ namespace Scripting
 			info.kind = SymbolKind::Function;
 			info.definingUnit = ctx.unitId;
 			info.declNode = &fn;
-			if (!ctx.scope->Register(firstName, info)) ErrorAt(ctx, &fn, "redefinition of function '" + firstName + "'");
+			if (!ctx.scope->Register(firstName, info)) ErrorAt(ctx, &fn, Redefinition(ctx, "function", firstName));
 
 			// A body-less declaration in a HEADER: the entry may already exist with a different visibility
 			// unit (a definition in another file was visited first). Re-point it to THIS declaration's file so

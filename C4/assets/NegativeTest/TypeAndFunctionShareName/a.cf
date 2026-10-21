@@ -1,0 +1,7 @@
+// BUG-291: a namespace's type and another file's function share a name. C4 has one name per scope, so this is a
+// redefinition - and the error must say what the name already is and where, since the other side is another file.
+namespace N
+{
+	class Widget { public int32 size; }
+}
+int32 main() { return 0; }

@@ -1,0 +1,5 @@
+// The other side of BUG-291 (see a.cf): a function in the same namespace with the type's name.
+namespace N
+{
+	static int32 Widget(int32 x) { return x + 1; }
+}

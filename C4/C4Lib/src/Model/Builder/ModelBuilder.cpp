@@ -31,6 +31,29 @@ namespace Scripting
 		if (ctx.errors) ctx.errors->AddError(where ? where->startLocation : SourceLocation(), message, ErrorSeverity::Error);
 	}
 
+	static const char* SymbolKindPhrase(SymbolKind kind)
+	{
+		switch (kind)
+		{
+			case SymbolKind::Type: return "a type";
+			case SymbolKind::Function: return "a function";
+			case SymbolKind::Variable: return "a variable";
+			default: return "a namespace";
+		}
+	}
+
+	Core::String ModelBuilder::Redefinition(const Context& ctx, const char* what, const Core::String& name) const
+	{
+		Core::String message = "redefinition of " + Core::String(what) + " '" + name + "'";
+		const SymbolInfo* existing = ctx.scope->Find(name);
+		if (!existing) return message;
+		message += ": it is already " + Core::String(SymbolKindPhrase(existing->kind));
+		const Core::String file = ctx.model->SourceName(existing->definingUnit);
+		if (existing->declNode && !file.empty())
+			message += " (" + file + ":" + Core::String(std::to_string(existing->declNode->startLocation.line)) + ")";
+		return message;
+	}
+
 	Core::String ModelBuilder::Why(const Context& ctx, const AstNode* type, uint32 unitId, const Scope* scope) const
 	{
 		// The failure of resolving `type` again, after every declaration has had its chance.

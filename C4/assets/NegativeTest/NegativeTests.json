@@ -83,6 +83,10 @@
         "expect": ["no member 'b'"],
         "reason": "Reading a nonexistent field must name the member."
     },
+    "TypeAndFunctionShareName": {
+        "expect": ["redefinition of", "'Widget': it is already a"],
+        "reason": "A type and a function of one namespace share a name across files (BUG-291). The error must say what the name already is and in which file, not just 'redefinition of type' at a declaration that looks fine on its own."
+    },
     "DuplicateTypeDefinition": {
         "expect": ["b.cf (4:1) error: redefinition of type 'Pair'"],
         "reason": "Two .cf files defining the same global type name is a redefinition (one flat global scope). Before the fix it silently merged and both methods mangled to the same symbol, so one body won by file order with no diagnostic - silent corruption. It must be a clear error naming the type."

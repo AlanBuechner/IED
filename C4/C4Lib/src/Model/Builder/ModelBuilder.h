@@ -51,6 +51,9 @@ namespace Scripting
 		void VisitPrelude(Context& ctx, CompilerInstance& compiler);
 		static std::unordered_map<uint32, uint32> ProjectOfEachUnit(const SourceManager& sources);
 		void ErrorAt(const Context& ctx, const AstNode* where, const Core::String& message);
+		/// "redefinition of <what> 'X': it is already a function (b.cf:12)" - what the name already is in the scope, and
+		/// where, so a clash across files names both sides (BUG-291).
+		Core::String Redefinition(const Context& ctx, const char* what, const Core::String& name) const;
 		/// `: <reason>` when `type` (a QualTypeNode) does not resolve in `scope`, else empty.
 		Core::String Why(const Context& ctx, const AstNode* type, uint32 unitId, const Scope* scope) const;
 		void ReportUnresolved(const Context& ctx, const AstNode* declaration, const Core::String& what, const AstNode* type, uint32 unitId,

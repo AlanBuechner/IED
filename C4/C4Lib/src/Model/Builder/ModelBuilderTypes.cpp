@@ -108,7 +108,7 @@ namespace Scripting
 				info.definingUnit = ctx.unitId;
 				info.declNode = &obj;
 				{ Core::Vector<Core::String> gs; for (const auto& ga : obj.GetAnnotations()) CollectGroupAnnotations(ga.Get(), gs); raw->SetGroups(gs); } // reflection groups (plan 14)
-				if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &obj, "redefinition of type '" + name + "'");
+				if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &obj, Redefinition(ctx, "type", name));
 				ctx.model->m_ObjectTypes.Push(static_cast<const ObjectType*>(raw));
 				return;
 		}
@@ -123,7 +123,7 @@ namespace Scripting
 				info.definingUnit = ctx.unitId;
 				info.declNode = &obj;
 				{ Core::Vector<Core::String> gs; for (const auto& ga : obj.GetAnnotations()) CollectGroupAnnotations(ga.Get(), gs); raw->SetGroups(gs); } // reflection groups (plan 14)
-				if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &obj, "redefinition of type '" + name + "'");
+				if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &obj, Redefinition(ctx, "type", name));
 				createdNew = true;
 		}
 
