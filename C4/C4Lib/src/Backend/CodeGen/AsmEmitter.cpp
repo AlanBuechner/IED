@@ -22,8 +22,7 @@ namespace Scripting
 		llvm::LLVMContext& c = m_Ctx.mctx().context();
 		call->setMetadata("srcloc", llvm::MDNode::get(c, llvm::ConstantAsMetadata::get(
 			llvm::ConstantInt::get(llvm::Type::getInt64Ty(c), LocationCookie(n->origin)))));
-		if (n->memory == AsmNode::Memory::None) call->setMemoryEffects(llvm::MemoryEffects::none());
-		else if (n->memory == AsmNode::Memory::Read) call->setMemoryEffects(llvm::MemoryEffects::readOnly());
+		SetMemoryEffects(n, call);
 		for (size_t i = 0; i < n->outputs.size(); ++i)
 		{
 			llvm::Value* value = n->outputs.size() == 1 ? static_cast<llvm::Value*>(call) : B.CreateExtractValue(call, static_cast<unsigned>(i));
@@ -32,6 +31,20 @@ namespace Scripting
 		if (!n->noReturn) return true;
 		B.CreateUnreachable();
 		return false;
+	}
+
+	// As Rust lowers asm options: only a pure block is a value LLVM may merge, hoist or drop. A block with effects that
+	// touches no memory may still not be moved across another, so it owns memory nothing else reaches.
+	void AsmEmitter::SetMemoryEffects(const AsmNode* n, llvm::CallInst* call)
+	{
+		if (n->sideEffects)
+		{
+			if (n->memory == AsmNode::Memory::None) call->setMemoryEffects(llvm::MemoryEffects::inaccessibleMemOnly());
+			return;
+		}
+		if (n->memory == AsmNode::Memory::None) call->setMemoryEffects(llvm::MemoryEffects::none());
+		else if (n->memory == AsmNode::Memory::Read) call->setMemoryEffects(llvm::MemoryEffects::readOnly());
+		call->addFnAttr(llvm::Attribute::WillReturn);
 	}
 
 	namespace

@@ -26,7 +26,14 @@ bool ProgramOutput::Write(llvm::Module& module)
 	if (!MakeOutputFolder()) return false;
 	const std::string base = IntermediateBase();
 	if (base.empty()) return false;
-	if (!PrepareScriptHost(module)) return false; // the output folder exists: <out>.c4i goes there
+	std::optional<Scripting::HostInterface> host;
+	if (!PrepareScriptHost(module, host)) return false;
+	if (!WriteProgram(module, base)) return false;
+	return !host || WriteScriptInterface(*host); // only beside the program it describes: a failed link keeps the old pair
+}
+
+bool ProgramOutput::WriteProgram(llvm::Module& module, const std::string& base)
+{
 	if (m_In.options.emitBitcode) return WriteBitcode(module, base + ".bc");
 	if (m_In.options.emitIR) return WriteIR(module, base + ".ll"); // -S: the module as text, and nothing else
 	const bool optimizePartitions = m_In.options.incremental && m_In.options.optLevel > 0; // -O0 optimizes nothing to cache
@@ -180,7 +187,14 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
 	Core::Vector<Core::String> libraries;
 	for (const auto& lib : m_In.interop.libraries) libraries.Push(Core::String(lib.c_str()));
 	for (const auto& argument : m_In.options.linkArguments) libraries.Push(argument);
-	if (m_In.options.debugInfo) libraries.Push("-Wl,/DEBUG"); // the .pdb beside the executable
+	const DebugInfoPaths debugInfo = DebugInfoPathsFor(out);
+	if (m_In.options.debugInfo)
+	{
+		// Linked under another name, so a link that fails keeps the old program's .pdb; the program names the final one.
+		libraries.Push("-Wl,/DEBUG");
+		libraries.Push(Core::String(("-Wl,/PDB:" + debugInfo.partial.string()).c_str()));
+		libraries.Push(Core::String(("-Wl,/PDBALTPATH:" + debugInfo.final.string()).c_str()));
+	}
 	const fs::path scriptHost = m_In.options.scriptHost ? Scripting::Toolchain::ScriptHost() : fs::path();
 	if (m_In.options.scriptHost)
 	{
@@ -196,18 +210,39 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
 	}
 	if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.subsystem, m_In.options.verbose))
 	{
+		std::error_code ec;
+		fs::remove(debugInfo.partial, ec);
 		m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
 		return false;
 	}
 	CORE_INFO("Linked {0}", out);
+	if (m_In.options.debugInfo && !PlaceDebugInfo(debugInfo)) return false;
 	if (m_In.options.scriptHost && !ShipScriptHost(scriptHost)) return false;
 	Timed("runtime+link", start);
 	return true;
 }
 
-// --script-host (docs/runtime/04 section 3): the thread_local accessors, the symbol table and <out>.c4i. A program that
-// uses the scripting API without it has no table to link against: an error that says what to do.
-bool ProgramOutput::PrepareScriptHost(llvm::Module& module)
+ProgramOutput::DebugInfoPaths ProgramOutput::DebugInfoPathsFor(const Core::String& program)
+{
+	const fs::path final = fs::absolute(fs::path(program.c_str())).replace_extension(".pdb");
+	return { final, fs::path(final.string() + ".partial") };
+}
+
+// The new .pdb over the old one, now that the program it describes is in place.
+bool ProgramOutput::PlaceDebugInfo(const DebugInfoPaths& paths)
+{
+	std::error_code ec;
+	fs::rename(paths.partial, paths.final, ec);
+	if (!ec) return true;
+	fs::remove(paths.partial, ec);
+	m_In.result.AddBackendError(Core::String(("cannot replace " + paths.final.string() + " (is a debugger holding it?)").c_str()));
+	return false;
+}
+
+// --script-host (docs/runtime/04 section 3): the thread_local accessors, the symbol table, and the interface `host` that
+// goes beside the program once it is built. A program that uses the scripting API without it has no table to link
+// against: an error that says what to do.
+bool ProgramOutput::PrepareScriptHost(llvm::Module& module, std::optional<Scripting::HostInterface>& host)
 {
 	if (!m_In.options.scriptHost)
 	{
@@ -233,14 +268,20 @@ bool ProgramOutput::PrepareScriptHost(llvm::Module& module)
 	build.symbols = Scripting::HostSymbols(module, *listed);
 	build.inlineBodies = Scripting::InlineBodies(module, build.symbols);
 	build.reflectedTypes = Scripting::ReflectedTypeNames(model);
-	std::optional<Scripting::HostInterface> host = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(build), &error);
+	host = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(build), &error);
 	if (!host || !Scripting::EmitHostTable(module, host->symbols, host->buildId, &error))
 	{
 		m_In.result.AddBackendError(Core::String(error.c_str()));
 		return false;
 	}
+	return true;
+}
+
+bool ProgramOutput::WriteScriptInterface(const Scripting::HostInterface& host)
+{
 	const std::string interfacePath = fs::path(m_In.options.outputFile.c_str()).replace_extension(".c4i").string();
-	if (!Scripting::WriteInterface(*host, interfacePath, &error))
+	std::string error;
+	if (!Scripting::WriteInterface(host, interfacePath, &error))
 	{
 		m_In.result.AddBackendError(Core::String(error.c_str()));
 		return false;

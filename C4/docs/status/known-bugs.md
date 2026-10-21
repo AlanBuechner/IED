@@ -43,8 +43,6 @@ Next ID: **BUG-324**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
-| BUG-323 | A non-pure nomem asm block is merged or hoisted at -O2 | Codegen | High |
-| BUG-322 | A failed relink leaves the old program beside a new .c4i and .pdb | Tools | Medium |
 
 ---
 
@@ -54,36 +52,8 @@ Next ID: **BUG-324**
 
 ## HIR and codegen
 
-### BUG-323 A non-pure nomem asm block is merged or hoisted at -O2
-- **Area:** Codegen
-- **Severity:** High
-- **Status:** Open
-- **Found:** 2026-10-21
-- **Symptom:** an `asm(nomem)` block without `pure` (docs/language/16 section 1's `rdtsc` example) runs once where
-  the program reaches it twice: two reads of the timestamp counter at -O2 return the same value.
-- **Repro:** `ReadTsc()` with `asm(nomem, nostack) { "rdtsc"; out("eax") low; out("edx") high; }`, called before and
-  after a sleep: the delta is 0 at -O2.
-- **Where:** `Backend/CodeGen/AsmEmitter.cpp` marks every `nomem` call `memory(none)`, which lets LLVM treat it as a
-  value whatever its `sideeffect` flag says.
-- **Notes:** as Rust lowers it: `memory(none)` / `memory(read)` and `willreturn` only with `pure`; a non-pure
-  `nomem` block touches inaccessible memory only.
-
 ## Interop, runtime and Bedrock
 
 ## Tools
-
-### BUG-322 A failed relink leaves the old program beside a new .c4i and .pdb
-- **Area:** Tools
-- **Severity:** Medium
-- **Status:** Open
-- **Found:** 2026-10-21
-- **Symptom:** a `--script-host` build writes `<out>.c4i` before linking, and lld writes `<out>.pdb` before it
-  commits the executable. When the link then fails (the old program is still running, so its file is locked), the
-  folder holds the old executable with the new interface and debug info: the host refuses every script ("the
-  interface is another build's") and a debugger rejects the PDB.
-- **Repro:** run an IED server built with `--script-host`, change a source, rebuild it.
-- **Where:** `src/ProgramOutput.cpp` (PrepareScriptHost writes the interface), `Compiler/BuildUtils.cpp` (LinkWithLLD)
-- **Notes:** write the interface only after the link succeeds; link the PDB under a temporary name (with
-  `/PDBALTPATH` naming the final one) and rename it into place once the executable is.
 
 ## Diagnostics and tests

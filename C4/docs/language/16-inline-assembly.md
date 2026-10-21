@@ -83,7 +83,7 @@ register: write in(xmm) f`). A `bool` goes in as 0 or 1 and comes out as `true` 
 | Option | Meaning |
 |---|---|
 | `att_syntax` | the template is AT&T syntax (the default is Intel: `mov dst, src`, no `%` or `$` prefixes) |
-| `nomem` | the block reads and writes no memory (no memory clobber; the optimizer may keep values in registers across it) |
+| `nomem` | the block reads and writes no memory (no memory clobber; the optimizer may keep values in registers across it). Without `pure` it still runs each time it is reached, in order with the program's other effects |
 | `readonly` | the block reads memory but writes none |
 | `pure` | the block has no effect but its outputs: it may be removed when they are unused, or merged with an identical block. Needs `nomem` or `readonly`, and at least one output |
 | `nostack` | the block pushes nothing on the stack (no stack realignment around it) |

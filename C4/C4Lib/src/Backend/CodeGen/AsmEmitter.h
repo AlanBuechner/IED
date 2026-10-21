@@ -1,6 +1,8 @@
 #pragma once
 #include "Backend/CodeGen/IRContext.h"
 
+namespace llvm { class CallInst; }
+
 namespace Scripting
 {
 	class ExprEmitter;
@@ -22,6 +24,7 @@ namespace Scripting
 
 	private:
 		llvm::Type* ResultType(const AsmNode* n);
+		static void SetMemoryEffects(const AsmNode* n, llvm::CallInst* call);
 
 		IRContext& m_Ctx;
 		ExprEmitter& m_Expr;

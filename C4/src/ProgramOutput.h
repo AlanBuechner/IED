@@ -6,8 +6,10 @@
 #include "Compiler/ObjectEmission.h"
 #include "Interop/InteropPass.h"
 #include "Macro/MacroTable.h"
+#include "Script/HostInterface.h"
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -36,8 +38,16 @@ public:
 	bool Write(llvm::Module& module);
 
 private:
+	// The .pdb a link writes, and the name it is written under until the program is in place.
+	struct DebugInfoPaths
+	{
+		std::filesystem::path final;
+		std::filesystem::path partial;
+	};
+
 	bool MakeOutputFolder();
 	std::string IntermediateBase();
+	bool WriteProgram(llvm::Module& module, const std::string& base);
 	bool WriteIR(const llvm::Module& module, const std::string& path);
 	bool WriteBitcode(const llvm::Module& module, const std::string& path);
 	bool Optimize(llvm::Module& module, const Scripting::ObjectSettings& settings);
@@ -47,7 +57,10 @@ private:
 	std::vector<std::string> Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& cache);
 	void Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics);
 	bool Link(const std::vector<std::string>& programObjects);
-	bool PrepareScriptHost(llvm::Module& module);
+	static DebugInfoPaths DebugInfoPathsFor(const Core::String& program);
+	bool PlaceDebugInfo(const DebugInfoPaths& paths);
+	bool PrepareScriptHost(llvm::Module& module, std::optional<Scripting::HostInterface>& host);
+	bool WriteScriptInterface(const Scripting::HostInterface& host);
 	bool ShipScriptHost(const std::filesystem::path& scriptHost);
 	void Timed(const char* phase, std::chrono::steady_clock::time_point since);
 

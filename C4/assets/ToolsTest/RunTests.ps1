@@ -191,6 +191,39 @@ function Test-ScriptHostFlag {
     return $failures
 }
 
+# A relink that fails because the program is running (Windows keeps its file locked) leaves the program's .c4i and
+# .pdb as they were, so the three still match; once the program stops, the relink replaces all three (BUG-322).
+function Test-FailedRelinkKeepsTheProgramsFiles {
+    $wait = "include ""bedrock.ch""`nint32 main() {`n`tfor (int32 i = 0; i < 1200 && !FS::FileExists(""stop""); ++i) Threading::Thread::Sleep(50000000);`n`treturn 0;`n}"
+    $dir = New-Sources "relink" @{ "main.cf" = $wait }
+    $exe = Join-Path $dir "host.exe"
+    $flags = @($dir, "-o", $exe, "--script-host", "-g")
+    $first = Invoke-Compiler $compiler $flags
+    if ($first.exit -ne 0) { return @("the first build failed: $($first.output)") }
+    $interface = Join-Path $dir "host.c4i"
+    $pdb = Join-Path $dir "host.pdb"
+    if (-not (Test-Path $interface) -or -not (Test-Path $pdb)) { return @("the first build wrote no host.c4i or host.pdb") }
+    $interfaceBefore = (Get-FileHash $interface).Hash
+    $pdbBefore = (Get-FileHash $pdb).Hash
+    $failures = @()
+    $running = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -WindowStyle Hidden
+    try {
+        Add-Content -Path (Join-Path $dir "main.cf") -Value "int32 Added() { return 1; }"
+        $locked = Invoke-Compiler $compiler $flags
+        if ($locked.exit -eq 0) { $failures += "relinking the running program succeeded, so nothing was tested" }
+        if ((Get-FileHash $interface).Hash -ne $interfaceBefore) { $failures += "a failed relink replaced host.c4i" }
+        if ((Get-FileHash $pdb).Hash -ne $pdbBefore) { $failures += "a failed relink replaced host.pdb" }
+        if (Test-Path "$pdb.partial") { $failures += "a failed relink left host.pdb.partial behind" }
+    } finally {
+        Set-Content -Path (Join-Path $dir "stop") -Value "" -Encoding ascii
+        if (-not $running.WaitForExit(30000)) { $running.Kill() }
+    }
+    $relinked = Invoke-Compiler $compiler $flags
+    if ($relinked.exit -ne 0) { $failures += "the relink after the program stopped failed: $($relinked.output)" }
+    elseif ((Get-FileHash $interface).Hash -eq $interfaceBefore -or (Get-FileHash $pdb).Hash -eq $pdbBefore) { $failures += "the relink kept the old host.c4i or host.pdb" }
+    elseif (Test-Path "$pdb.partial") { $failures += "a relink left host.pdb.partial behind" }
+    return $failures
+}
 # -I compiles the folder it names with the program: its headers resolve and its sources link (BUG-041 notes, B38).
 function Test-IncludeProject {
     $dir = New-Sources "project" @{
@@ -806,7 +839,7 @@ int32 main()
 }
 
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
-    "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
+    "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag",
     "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-FrostCompileDatabase", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
 $passed = 0

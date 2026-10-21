@@ -7,6 +7,13 @@ int32 g_cell = 1;
 void Check(bool ok, const char* what) {
 	if (!ok) { printf("FAIL %s\n", what); g_failures++; }
 }
+// Without pure a block runs each time it is reached, nomem or not: two reads of the timestamp counter differ (BUG-323).
+uint64 ReadTimestamp() {
+	uint64 low;
+	uint64 high;
+	asm(nomem, nostack) { "rdtsc"; out("eax") low; out("edx") high; }
+	return (high << 32) | low;
+}
 void Trap(bool now) {
 	if (now) asm(noreturn, nomem, nostack) { "ud2"; }
 }
@@ -32,6 +39,9 @@ int32 main() {
 	int32 twice = 0;
 	for (int32 i = 0; i < 2; i++) asm(pure, nomem) { "lea {t}, [{i} + {i}]"; out(reg) t = twice; in(reg) i; }
 	Check(twice == 2, "a pure block in a loop");
+	const uint64 first = ReadTimestamp();
+	const uint64 second = ReadTimestamp();
+	Check(second != first, "a nomem block without pure runs every time it is reached");
 	Trap(false);
 	return g_failures;
 }
