@@ -142,6 +142,7 @@ export class CodeEditor {
 	// The lease, the bar, saving
 
 	focused() {
+		this.ied.context.set("editorLanguage", this.sync.languageId);
 		this.editors.touch(this);
 		this.editors.visited(this);
 		if (this.sync.docId && this.sync.holder === null && !this.sync.readOnly) this.sync.takeLease().catch((e) => this.ied.report("the lease: " + e.message, e));

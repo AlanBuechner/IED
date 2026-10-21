@@ -558,6 +558,20 @@ function Test-FrostFailedCompile {
     return $failures
 }
 
+# Every build merges each source's driver-form compile command into compile_commands.json, keeping other files'
+# entries; clangd and the clang driver can use them (Frost/docs/BuildSystem.md "Compile Database").
+function Test-FrostCompileDatabase {
+    $dir = Join-Path $scratch "frost_compile_database"
+    Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+    $lines = @(python (Join-Path $root "FrostProbes.py") compile-database $dir)
+    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 3) { return @("the Frost probe did not run: $lines") }
+    $failures = @()
+    if ($lines[0] -ne "other.cpp,probe.c,probe.cpp") { $failures += "the database holds $($lines[0])" }
+    if ($lines[1] -ne "driver,-isystem,no-O,c-as-c") { $failures += "the entries' flags: $($lines[1])" }
+    if ($lines[2] -ne "0") { $failures += "the clang driver rejected the recorded arguments (exit $($lines[2]))" }
+    return $failures
+}
+
 # Frost builds every early project after the early projects it links, whatever order they loaded in, so a clean tree
 # builds with plain -b (BUG-265).
 function Test-FrostBuildOrder {
@@ -775,7 +789,7 @@ int32 main()
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-DebugInfoFlag",
-    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
+    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-FrostCompileDatabase", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

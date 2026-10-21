@@ -14,4 +14,12 @@ class FrontTests {
 		assert_true(!Codicon("../x.svg") && !Codicon("a/b.svg") && !Codicon("a\b.svg"), "no paths");
 		assert_true(!Codicon("Add.svg") && !Codicon("a b.svg") && !Codicon("a_b.svg") && !Codicon("a.b.svg"), "lowercase letters, digits and '-' only");
 	}
+
+	[test("content_types")]
+	public static void TestContentTypes() {
+		assert_se("image/png", Ied::ContentTypeOf(Core::StringView(".PNG")), "any case");
+		assert_se("image/jpeg", Ied::ContentTypeOf(Core::StringView(".Jpeg")), "jpeg");
+		assert_se("text/javascript; charset=utf-8", Ied::ContentTypeOf(Core::StringView(".js")), "a script");
+		assert_se("application/octet-stream", Ied::ContentTypeOf(Core::StringView(".exe")), "anything else");
+	}
 }

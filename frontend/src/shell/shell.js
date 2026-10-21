@@ -3,6 +3,7 @@
 // the chrome for the device class (desktop and tablet, or phone). The server owns all state; this is a view of it.
 
 import { ProtocolClient } from "../ws/client.js";
+import { parseOpenFragment } from "./launch.js";
 import { resolveIdentity, deviceClassOf } from "../ws/identity.js";
 import { MenuHost } from "/ui-kit/menu.js";
 import { isTextInput } from "/ui-kit/dom.js";
@@ -43,6 +44,7 @@ export class Shell {
 		this.client = null;
 		this.server = { workspaces: [], clients: [], notifications: [] };
 		this.wsId = null;
+		this.pendingOpen = parseOpenFragment(location.hash);
 		this.workspace = workspaceInfo();
 		this.layout = null;
 		this.doc = emptyDocument();
@@ -144,7 +146,8 @@ export class Shell {
 		catch {
 			remembered = null;
 		}
-		return [asked, remembered, ids[0]].find((id) => id && ids.includes(id)) || null;
+		const launched = this.pendingOpen ? this.pendingOpen.wsId : null;
+		return [launched, asked, remembered, ids[0]].find((id) => id && ids.includes(id)) || null;
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -224,6 +227,19 @@ export class Shell {
 		this.doc = doc;
 		this.render();
 		this.releaseUnused();
+		this.openLaunched();
+	}
+
+	// The file a launch URL names (`ied open`, docs/10), shown once its workspace's layout is in place by the command of
+	// the last loaded plugin that contributes `fileOpener`, with {path, line, col} (1-based, 0 when absent).
+	openLaunched() {
+		const open = this.pendingOpen;
+		if (!open || open.wsId !== this.wsId) return;
+		this.pendingOpen = null;
+		history.replaceState(null, "", location.pathname + location.search);
+		const opener = this.contributions.plugins.flatMap((p) => (p.contributes.fileOpener ? [p.contributes.fileOpener] : [])).pop();
+		if (opener) this.commands.run(opener.command, { path: open.path, line: open.line, col: open.col });
+		else this.toasts.show("No plugin opens files, so " + open.path + " is not shown.", "warn");
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------

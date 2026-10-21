@@ -4,6 +4,9 @@ generated/
 bin/
 bin-int/
 vendor/
+# The compile database every build writes (Frost/docs/BuildSystem.md) and clangd's index beside it.
+/compile_commands.json
+.cache/
 
 *.sln
 *.vcxproj

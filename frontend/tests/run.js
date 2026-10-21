@@ -16,5 +16,7 @@ import "./headersource.test.js";
 import "./gotoall.test.js";
 import "./linediff.test.js";
 import "./fileuris.test.js";
+import "./markdown.test.js";
+import "./launch.test.js";
 
 run(document.getElementById("results"));

@@ -46,7 +46,7 @@ export class Explorer {
 			label: (node) => node.name,
 			open: (node, options) => this.open(node, options),
 			menu: (node, at) => this.menu(node, at),
-			select: (node) => this.ied.context.set("explorerItemKind", node.kind),
+			select: (node) => this.selectedNode(node),
 		});
 		this.stopWorkspace = this.ied.workspace.on(() => this.refresh());
 		this.stopTopic = this.ied.client.subscribe("ws:" + ctx.wsId, { evt: (kind, data) => this.workspaceEvent(kind, data) });
@@ -163,8 +163,15 @@ export class Explorer {
 	}
 
 	menu(node, at) {
-		this.ied.context.set("explorerItemKind", node.kind);
+		this.selectedNode(node);
 		this.ied.menus.show("explorer/context", at, { path: node.path, kind: node.kind });
+	}
+
+	// The context keys of the selected item: its kind, and a file's extension (".md") for menus that fit its type.
+	selectedNode(node) {
+		this.ied.context.set("explorerItemKind", node.kind);
+		const name = node.kind === "file" && node.path ? baseName(node.path) : "";
+		this.ied.context.set("explorerItemExtension", name.lastIndexOf(".") > 0 ? name.slice(name.lastIndexOf(".")).toLowerCase() : "");
 	}
 
 	selected() {

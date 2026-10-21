@@ -7,6 +7,10 @@
 #                                          order
 #   FrostProbes.py failed-compile <folder> compiles a broken file whose object and dependency file a crashed compile
 #                                          left (BUG-255); prints the exit code and whether they are gone
+#   FrostProbes.py compile-database <folder> records a C and a C++ source into a database that has another file's
+#                                          entry and a stale one of the C++ source; prints the files it holds, the
+#                                          C++ entry's flags of note, and the exit code of the clang driver checking
+#                                          the C++ source with the recorded arguments
 import contextlib
 import io
 import os
@@ -21,6 +25,8 @@ import Config
 import ProjectManager
 from Builder.Linker import LinkObjects
 from Builder.ObjectBuilder import ObjectBuilder
+import Utils.CompileDatabase as CompileDatabase
+import json
 
 OBJECTS = 400
 WINDOWS_COMMAND_LIMIT = 32767
@@ -104,5 +110,35 @@ def FailedCompile(folder):
 	print("kept" if os.path.exists(builder.objFile) or os.path.exists(builder.treeFile) else "gone")
 
 
+def CompileDatabaseProbe(folder):
+	include = os.path.join(folder, "include")
+	os.makedirs(include, exist_ok=True)
+	with open(os.path.join(include, "probe.h"), "w") as f:
+		f.write("#pragma once\n#include <vector>\ninline int Probe() { return PROBE_VALUE; }\n")
+	with open(os.path.join(folder, "probe.cpp"), "w") as f:
+		f.write('#include "probe.h"\nstd::vector<int> g_values = { Probe() };\n')
+	with open(os.path.join(folder, "probe.c"), "w") as f:
+		f.write("int c_probe(void) { return 1; }\n")
+	other = os.path.join(folder, "other.cpp").replace("\\", "/")
+	stale = {"directory": folder, "file": os.path.join(folder, "probe.cpp").replace("\\", "/"), "arguments": ["stale"]}
+	with open(os.path.join(folder, "compile_commands.json"), "w") as f:
+		json.dump([{"directory": folder, "file": other, "arguments": ["other"]}, stale], f)
+	from Utils.Utils import GetSysIncludes
+	CompileDatabase.Record(folder, "probe.cpp", [include], GetSysIncludes(), ["PROBE_VALUE=7"], ["-O0"])
+	CompileDatabase.Record(folder, "probe.c", [], GetSysIncludes(), [], [])
+	CompileDatabase.Write(folder)
+	with open(os.path.join(folder, "compile_commands.json"), encoding="utf-8") as f:
+		entries = json.load(f)
+	print(",".join(os.path.basename(e["file"]) for e in entries))
+	cpp = next(e for e in entries if e["file"].endswith("probe.cpp"))["arguments"]
+	c = next(e for e in entries if e["file"].endswith("probe.c"))["arguments"]
+	notes = ["cc1" if "-cc1" in cpp else "driver", "-isystem" if "-isystem" in cpp else "no-isystem", "-O0" if "-O0" in cpp else "no-O",
+		"c-as-c" if "-x" in c and c[c.index("-x") + 1] == "c" and "-fcxx-exceptions" not in c else "c-wrong"]
+	print(",".join(notes))
+	check = [arg for arg in cpp if arg != "-c"] + ["-fsyntax-only"]
+	print(subprocess.run(check, cwd=folder, capture_output=True, text=True).returncode)
+
+
 if __name__ == "__main__":
-	{"long-link": LongLink, "project-name": ProjectName, "build-order": BuildOrder, "failed-compile": FailedCompile}[sys.argv[1]](sys.argv[2] if len(sys.argv) > 2 else "")
+	{"long-link": LongLink, "project-name": ProjectName, "build-order": BuildOrder, "failed-compile": FailedCompile,
+		"compile-database": CompileDatabaseProbe}[sys.argv[1]](sys.argv[2] if len(sys.argv) > 2 else "")

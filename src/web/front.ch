@@ -28,6 +28,8 @@ namespace Ied
 		private void StaticFile(Core::StringView path, Http::Response& response);
 		private void FolderFile(const FS::Path& root, Core::StringView path, Http::Response& response);
 		private void PluginFile(Core::StringView wsId, Core::StringView path, Http::Response& response);
+		// "/w/<wsId>/files/<path>": a workspace's image for a preview (docs/10); 404 for any other type.
+		private void WorkspaceImage(Core::StringView wsId, Core::StringView path, Http::Response& response);
 		private void Codicon(Core::StringView file, Http::Response& response);
 		private void VendorFile(Core::StringView path, Http::Response& response);
 		private void SendFile(const FS::Path& file, Http::Response& response);
@@ -38,6 +40,7 @@ namespace Ied
 
 	// A path's percent escapes decoded; false for a malformed one.
 	bool PercentDecode(Core::StringView text, Core::String& decoded);
+	// The Content-Type of a file by its extension, in any case.
 	const char* ContentTypeOf(Core::StringView extension);
 	// "<name>.svg" with a name of lowercase letters, digits and '-': a codicon file name.
 	bool IsCodiconFile(Core::StringView file);

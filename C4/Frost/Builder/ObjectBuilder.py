@@ -7,6 +7,7 @@ from pathlib import Path
 
 from Utils.Windows import *
 from Utils.Utils import *
+import Utils.CompileDatabase as CompileDatabase
 import ProjectManager
 import Config
 
@@ -423,6 +424,7 @@ def BuildSources(sources, projDir, intDir, includes, sysIncludes, defines, compi
 		env.defines.extend(Config.globalDefines)
 
 		buildActions.append(env)
+		CompileDatabase.Record(projDir, file, includes, sysIncludes, env.defines, compilerArgs)
 
 	# build objs
 	result = BuildObjects(buildActions)

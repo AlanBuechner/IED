@@ -14,6 +14,7 @@ Status: **design v1, ready for implementation.** Machine-readable frame schema: 
 | `GET /ui-kit/<path>`, `GET /codicons/<name>.svg`, `GET /vendor/<library>/<path>` | the components shared by the shell and plugin UI modules (`shared/ui-kit/`), one codicon each (`third_party/codicons`), and the install's web libraries (`vendor/web/`: Monaco, xterm.js), cacheable for a day |
 | `POST /api/auth/*` | login, logout, token exchange (`docs/11`) |
 | `GET /api/blob/<id>` | large binary payloads (images, trace chunks, file downloads), referenced from frames by id |
+| `GET /w/<wsId>/files/<path>` | a workspace's image (PNG, JPEG, GIF, WebP, BMP, ICO) for previews (a Markdown document's pictures): never another type, so a repository's HTML or SVG cannot run script on IED's origin; sent with `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy` |
 | `PUT /api/upload` | attachments and file uploads (streamed, returns a blob id) |
 | `GET /ws` | **one WebSocket per browser tab**, all real-time traffic |
 | `/w/<ws>/port/<n>/...` | port-forward proxy (F-SRV-50) |
@@ -186,7 +187,7 @@ The pipe name is the single-instance lock: the server claims it before anything 
 | Method | Result |
 |---|---|
 | `url` | `{url}`: `http://<host>:<port>/?t=<launch token>`, which signs a browser in once (`docs/11`) |
-| `open {path, line?, col?}` | `{wsId, path, url}`. `path` is absolute. A folder becomes a workspace unless one holds it already. A file opens in the workspace that holds it, else its folder becomes one; `path` in the result is workspace-relative, and the server topic gets `workspace.opened`. The URL ends in `#open=<wsId>/<path>[:<line>[:<col>]]`, which the web client reads once it has signed in. |
+| `open {path, line?, col?}` | `{wsId, path, url}`. `path` is absolute. A folder becomes a workspace unless one holds it already. A file opens in the workspace that holds it, else its folder becomes one; `path` in the result is workspace-relative, and the server topic gets `workspace.opened`. The URL ends in `#open=<wsId>/<path>[:<line>[:<col>]]`, which the web client reads once it has signed in: it shows that workspace and, once its layout is in place, runs the `fileOpener` command (`docs/02`), the editor's showing the file at the place and a Markdown file's preview beside it. |
 | `status` | `{serverVersion, pid, url (without a token), workspaces, clients}` |
 | `stop` | `{}`, then every socket gets `bye {reason: "shutdown"}`, the pipe closes and the process ends |
 | (later) `open {wait: true}` | blocks until the document closes (git's editor) |

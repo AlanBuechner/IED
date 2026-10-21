@@ -36,13 +36,28 @@ namespace Ied
 		return true;
 	}
 
-	const char* ContentTypeOf(Core::StringView extension) {
+	static Core::String Lowered(Core::StringView text) {
+		Core::StringBuilder lower;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			lower.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return lower.ToString();
+	}
+
+	const char* ContentTypeOf(Core::StringView fileExtension) {
+		Core::String lowered = Lowered(fileExtension);
+		Core::StringView extension = lowered.View();
 		if (extension == ".html") return "text/html; charset=utf-8";
 		if (extension == ".js" || extension == ".mjs") return "text/javascript; charset=utf-8";
 		if (extension == ".css") return "text/css; charset=utf-8";
 		if (extension == ".json" || extension == ".map") return "application/json";
 		if (extension == ".svg") return "image/svg+xml";
 		if (extension == ".png") return "image/png";
+		if (extension == ".jpg" || extension == ".jpeg") return "image/jpeg";
+		if (extension == ".gif") return "image/gif";
+		if (extension == ".webp") return "image/webp";
+		if (extension == ".bmp") return "image/bmp";
 		if (extension == ".ico") return "image/x-icon";
 		if (extension == ".woff2") return "font/woff2";
 		if (extension == ".ttf") return "font/ttf";
@@ -119,16 +134,23 @@ namespace Ied
 		}
 	}
 
-	// "/w/<wsId>/plugins/<id>/<path>": true, with the workspace's id and "<id>/<path>".
-	static bool WorkspacePluginPath(Core::StringView path, Core::StringView& wsId, Core::StringView& rest) {
+	// "/w/<wsId>/<area>/<rest>": true, with the workspace's id and <rest>.
+	static bool WorkspacePath(Core::StringView path, Core::StringView area, Core::StringView& wsId, Core::StringView& rest) {
 		if (!path.StartsWith(Core::StringView("/w/"))) return false;
 		const int64 slash = path.IndexOf('/', 3);
 		if (slash < 0) return false;
 		Core::StringView after = path.Substring(slash + 1, path.ByteLength());
-		if (!after.StartsWith(Core::StringView("plugins/"))) return false;
+		if (!after.StartsWith(area) || after.ByteLength() <= area.ByteLength() || after.ByteAt(area.ByteLength()) != '/') return false;
 		wsId = path.Substring(3, slash - 3);
-		rest = after.Substring(8, after.ByteLength());
+		rest = after.Substring(area.ByteLength() + 1, after.ByteLength());
 		return true;
+	}
+
+	// The image types a workspace file is served as: none that is markup, so nothing a repository holds runs script here.
+	static bool IsServedImage(Core::StringView extension) {
+		Core::String lowered = Lowered(extension);
+		Core::StringView e = lowered.View();
+		return e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".gif" || e == ".webp" || e == ".bmp" || e == ".ico";
 	}
 
 	void Front::Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device) {
@@ -139,7 +161,8 @@ namespace Ied
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
 		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
 		else if (path.StartsWith(Core::StringView("/plugins/"))) PluginFile(Core::StringView(), path.Substring(9, path.ByteLength()), response);
-		else if (WorkspacePluginPath(path, wsId, pluginPath)) PluginFile(wsId, pluginPath, response);
+		else if (WorkspacePath(path, Core::StringView("plugins"), wsId, pluginPath)) PluginFile(wsId, pluginPath, response);
+		else if (WorkspacePath(path, Core::StringView("files"), wsId, pluginPath)) WorkspaceImage(wsId, pluginPath, response);
 		else if (path.StartsWith(Core::StringView("/ui-kit/"))) FolderFile(FS::Path(server->config.homeDir.View()) / "shared" / "ui-kit", path.Substring(7, path.ByteLength()), response);
 		else if (path.StartsWith(Core::StringView("/codicons/"))) Codicon(path.Substring(10, path.ByteLength()), response);
 		else if (path.StartsWith(Core::StringView("/vendor/"))) VendorFile(path.Substring(7, path.ByteLength()), response);
@@ -242,6 +265,35 @@ namespace Ied
 		}
 		if (file.IsEmpty()) Answer(response, 404, Core::StringView("not found"));
 		else SendFile(file, response);
+	}
+
+	void Front::WorkspaceImage(Core::StringView wsId, Core::StringView path, Http::Response& response) {
+		Core::String decoded;
+		Core::String relative;
+		if (!PercentDecode(path, decoded)) {
+			Answer(response, 400, Core::StringView("malformed path"));
+			return;
+		}
+		try {
+			relative = NormalizePath(decoded.View());
+		}
+		catch (RpcError& error) {
+			Answer(response, 403, Core::StringView("that path escapes the workspace"));
+			return;
+		}
+		FS::Path file;
+		{
+			Threading::LockGuard guard(server->lock);
+			Workspace* ws = server->workspaces->Find(wsId);
+			if (ws && !relative.IsEmpty()) file = ws->At(relative.View());
+		}
+		if (file.IsEmpty() || !IsServedImage(Core::StringView(file.Extension())) || !FS::FileExists(file.CStr())) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		SendFile(file, response);
+		response.headers.Set(Core::StringView("Content-Security-Policy"), Core::StringView("default-src 'none'; sandbox"));
+		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("no-cache"));
 	}
 
 	// /codicons/<name>.svg: one codicon from the install's third_party/codicons.

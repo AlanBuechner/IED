@@ -109,7 +109,7 @@ Grouped; full shapes in the schema.
 | Group | Points |
 |---|---|
 | Shell | `activities` (sidebar icons + views), `toolWindows`, `commands`, `menus`, `keybindings`, `statusBarItems`, `outputSources` |
-| Editor | `languages` (extensions, comments, brackets, auto-close, indentation, Monarch grammar, task comments), `semanticTokenColors` (token -> `--syntax-*` theme token; raw colors rejected), `fileIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries` |
+| Editor | `languages` (extensions, comments, brackets, auto-close, indentation, Monarch grammar, task comments), `semanticTokenColors` (token -> `--syntax-*` theme token; raw colors rejected), `fileIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries`, `fileOpener` (`{command}`: the command the shell runs with `{path, line, col}`, 1-based, for a file a launch URL names; the last loaded plugin's wins) |
 | Build / debug | `lspProfiles`, `dapProviders`, `problemMatchers`, `testProviders`, `taskPresets` (toolbar presets), `projectTemplates` |
 | AI | `toolCalls`, `toolGroups`, `skills`, `systemMessageSections`, `agentModes`, `mcpServers`, `modelProviders`, `chatSlashCommands` |
 | Infra | `settings` (JSON Schema with tier hints), `bindings` (provides/consumes), `sandboxProviders`, `sourceControlProviders`, `profilerImporters` |

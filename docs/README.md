@@ -36,6 +36,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [22-gpu-debugger](22-gpu-debugger.md) | GPU debugger: PIX/RenderDoc/Nsight comparison, architecture, RenderDoc vs own (Flashbang) backend, views, capture flow, AI, phases |
 | [23-nuke-build-system](23-nuke-build-system.md) | Nuke's design: TOML manifests, phases/steps/commands, the versioned toolchain store, the fix-and-continue loop; reference in `Nuke/README.md` |
 | [24-language-servers](24-language-servers.md) | The LSP pool: profiles and selection, lifecycle (lazy, staged, restarts), document sync, position encodings, diagnostics, `lsp.*` methods and topics |
+| [25-debug-adapters](25-debug-adapters.md) | The DAP pool: adapters from plugins, launch configurations, server-owned sessions with revision-checked controls, breakpoints per workspace, `dbg.*` / `bp.*` methods and topics |
 
 ## Doc conventions
 

@@ -16,6 +16,7 @@ All commands run from the **Frost** directory using `python Build.py`.
   - [ObjectBuilder](#objectbuilder)
     - [Stale Intermediate File Cleanup](#stale-intermediate-file-cleanup)
   - [Linker](#linker)
+  - [Compile Database](#compile-database)
 - [Build Info & Metrics](#build-info--metrics)
   - [Metrics Data Model](#metrics-data-model)
   - [Saving and Loading Build Info](#saving-and-loading-build-info)
@@ -272,6 +273,10 @@ The linker takes every `.obj` in the intermediate directory, so the object of a 
 A compile that fails (a non-zero exit, or success without an object) deletes the `.obj` and `.d` it may have written, so the next build compiles the file again: a compiler that crashed after writing its object would otherwise leave an object newer than the source, which the next build would link.
 
 An object is named after its source's base name, so two sources with the same base name in one project would overwrite each other's object. `SharedObjectNames(sources)` finds them and the build fails with an error naming both.
+
+### Compile Database
+
+Every build writes `compile_commands.json` at the root project's folder (`Utils/CompileDatabase.py`), so clangd (IED's C/C++ plugin, an editor's) knows each source's flags. The cc1 flags Frost compiles with mean nothing to such a tool, so an entry is the clang driver's form of the same compile: `--target`, the language and standard, the Microsoft compatibility and exception flags, the include folders (system ones as `-isystem`), the defines, and the project's own `-W`/`-f`/`-m`/`-D`/`-U` flags. `ObjectBuilder.BuildSources` records each source it is given (compiled or up to date); when the build process ends the entries are merged into the file, replacing those of the same sources and keeping the rest, so building one project leaves the others' entries. The file and clangd's `.cache/` are ignored by git.
 
 ### Linker
 

@@ -584,6 +584,49 @@ def file_outside_the_workspace(run):
 	check("Ln 1, Col 5" in run.texts(".statusbar .st")[2], "at its place: %s" % run.texts(".statusbar .st"))
 
 
+@scenario(viewports=("desktop", "phone"))
+def markdown_preview_ticks_a_task(run):
+	"""The preview of a Markdown file shows its tasks, tables and code; ticking a box writes "[x]" into the document
+	(J10, F-EDT-91/92)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	path = "docs/tasks-%s.md" % run.viewport
+	run.request("fs.write", {"wsId": ws, "path": path, "text": "# Tasks\n\n- [ ] write the preview\n- [x] test it\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```c\nint x;\n```\n"})
+	page.evaluate("(path) => ied_shell.commands.run('ied.markdown.preview', { path })", path)
+	page.wait_for_selector(".md-preview input[data-task='2']")
+	check(page.query_selector(".md-preview table td") is not None and page.query_selector(".md-preview pre") is not None, "the table and the code block")
+	run.shot("preview")
+	page.click(".md-preview input[data-task='2']")
+	doc = "ied_shell.views.entries.get('mdpreview:' + path).instance.sync"
+	page.wait_for_function("(path) => " + doc + ".pending === 0 && " + doc + ".dirty", arg=path, timeout=10000)
+	page.wait_for_selector(".md-preview input[data-task='2'][checked]")
+	page.evaluate("(path) => " + doc + ".save()", path)
+	check("- [x] write the preview" in run.request("fs.read", {"wsId": ws, "path": path})["text"], "the box is ticked in the file")
+	run.request("fs.delete", {"wsId": ws, "path": path})
+
+
+@scenario(viewports=("desktop",))
+def launched_markdown_opens_with_its_preview(run):
+	"""A launch URL's #open= (what `ied open notes.md` gives, docs/10): the file opens at its place with its preview
+	beside it, where a box is ticked into the file (J10)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	path = "docs/launched.md"
+	run.request("fs.write", {"wsId": ws, "path": path, "text": "# Notes\n\n- [ ] call back\n"})
+	page.goto(run.target.url + "/#open=" + ws + "/" + path + ":3")
+	run.reload()
+	page.wait_for_selector(".tab:has-text('Preview launched.md')")
+	page.wait_for_function("(path) => { const e = ied_shell.views.entries.get('doc:' + path); return !!(e && e.instance && e.instance.model); }", arg=path, timeout=20000)
+	check(page.evaluate("location.hash") == "", "the fragment is read once")
+	page.click(".tab:has-text('Preview launched.md')")
+	page.click(".md-preview input[data-task='2']")
+	sync = "ied_shell.views.entries.get('mdpreview:' + path).instance.sync"
+	page.wait_for_function("(path) => " + sync + ".pending === 0 && " + sync + ".dirty", arg=path, timeout=10000)
+	page.evaluate("(path) => " + sync + ".save()", path)
+	check(run.request("fs.read", {"wsId": ws, "path": path})["text"] == "# Notes\n\n- [x] call back\n", "ticked in the file")
+	run.request("fs.delete", {"wsId": ws, "path": path})
+
+
 def restore(run, page, original):
 	"""Puts main.c back as it was (through the server, so every window follows) and saves it."""
 	sync = "ied_shell.views.entries.get('doc:src/main.c').instance.sync"

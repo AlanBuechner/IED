@@ -165,6 +165,13 @@
 						}
 					}
 				},
+				"fileOpener": {
+					"type": "object",
+					"required": ["command"],
+					"additionalProperties": false,
+					"description": "The command the shell runs with {path, line, col} (1-based) for a file a launch URL names; the last loaded plugin's wins.",
+					"properties": { "command": { "type": "string" } }
+				},
 				"fileNesting": {
 					"type": "object",
 					"description": "Parent pattern to child patterns, e.g. {'*.cf': ['${basename}.ch']}.",
