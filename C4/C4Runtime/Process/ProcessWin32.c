@@ -1,7 +1,8 @@
 // Child processes for Bedrock's Process namespace (ProcessRuntimeC.h). Only the child's ends of its pipes are
 // inherited (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), so two children started at once never hold each other's pipes open.
-// A child starts suspended and joins a job object before it runs, so killing the job ends whatever it started too. A
-// terminal is a pseudo console (ConPTY, Windows 10 1809), whose functions are looked up at run time.
+// A child is created inside a job object (PROC_THREAD_ATTRIBUTE_JOB_LIST), so killing the job ends whatever it started
+// too, and a parent that dies while starting it never leaves it outside the job or suspended. A terminal is a pseudo
+// console (ConPTY, Windows 10 1809), whose functions are looked up at run time.
 
 #include "ProcessWin32.h"
 #include "PathRuntimeC.h"
@@ -17,18 +18,23 @@ typedef void (WINAPI* ClosePseudoConsoleFn)(HANDLE);
 #ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
 #define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)   // not in every SDK
 #endif
+#ifndef PROC_THREAD_ATTRIBUTE_JOB_LIST
+#define PROC_THREAD_ATTRIBUTE_JOB_LIST ProcThreadAttributeValue(13, FALSE, TRUE, FALSE)        // Windows 10
+#endif
 
 enum { kDefaultColumns = 80, kDefaultRows = 25 };
 
 static FARPROC Kernel32(const char* name) { return GetProcAddress(GetModuleHandleW(L"kernel32.dll"), name); }
 
 // What CreateProcessW needs besides the text: the child's ends of its streams, or the console's ends of a terminal's
-// pipes, and the attribute list naming them. The parent closes all of it once the child has started.
+// pipes, the job it is created in, and the attribute list naming them. The parent closes all of it but the job once
+// the child has started.
 typedef struct Launch
 {
 	HANDLE childEnds[3];
 	HANDLE consoleInput;
 	HANDLE consoleOutput;
+	HANDLE job;
 	LPPROC_THREAD_ATTRIBUTE_LIST attributes;
 } Launch;
 
@@ -132,18 +138,20 @@ static DWORD InheritedHandles(const Launch* launch, HANDLE* inherited)
 	return count;
 }
 
+// The child's job, and its pseudo console or the handles it inherits.
 static bool CreateAttributes(Launch* launch, HANDLE* inherited, DWORD inheritedCount, HANDLE console)
 {
 	SIZE_T size = 0;
-	InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+	InitializeProcThreadAttributeList(NULL, 2, 0, &size);
 	launch->attributes = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(size);
 	if (!launch->attributes) return false;
-	if (!InitializeProcThreadAttributeList(launch->attributes, 1, 0, &size))
+	if (!InitializeProcThreadAttributeList(launch->attributes, 2, 0, &size))
 	{
 		free(launch->attributes);
 		launch->attributes = NULL;
 		return false;
 	}
+	if (!UpdateProcThreadAttribute(launch->attributes, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, &launch->job, sizeof(HANDLE), NULL, NULL)) return false;
 	if (console) return UpdateProcThreadAttribute(launch->attributes, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, console, sizeof(console), NULL, NULL);
 	if (inheritedCount == 0) return true;
 	return UpdateProcThreadAttribute(launch->attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, inheritedCount * sizeof(HANDLE), NULL, NULL);
@@ -156,6 +164,7 @@ static bool Spawn(const c4_process_options* start, const wchar_t* program, wchar
 {
 	HANDLE inherited[3];
 	const DWORD inheritedCount = start->terminal ? 0 : InheritedHandles(launch, inherited);
+	launch->job = out->job;
 	if (!CreateAttributes(launch, inherited, inheritedCount, out->console)) return false;
 	STARTUPINFOEXW info;
 	memset(&info, 0, sizeof(info));
@@ -166,20 +175,10 @@ static bool Spawn(const c4_process_options* start, const wchar_t* program, wchar
 	info.StartupInfo.hStdError = launch->childEnds[kProcessStderr];
 	info.lpAttributeList = launch->attributes;
 	const bool sharesConsole = start->stdinMode == kProcessInherit || start->stdoutMode == kProcessInherit || start->stderrMode == kProcessInherit;
-	DWORD flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
+	DWORD flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
 	if (!start->terminal && !sharesConsole) flags |= CREATE_NO_WINDOW;
 	PROCESS_INFORMATION started;
 	if (!CreateProcessW(program, line, NULL, NULL, inheritedCount > 0, flags, environment, folder, &info.StartupInfo, &started)) return false;
-	if (!AssignProcessToJobObject(out->job, started.hProcess))
-	{
-		const DWORD why = GetLastError();
-		TerminateProcess(started.hProcess, 1);
-		CloseHandle(started.hThread);
-		CloseHandle(started.hProcess);
-		SetLastError(why);
-		return false;
-	}
-	ResumeThread(started.hThread);
 	CloseHandle(started.hThread);
 	out->process = started.hProcess;
 	out->id = started.dwProcessId;

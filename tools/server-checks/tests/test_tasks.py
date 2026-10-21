@@ -67,15 +67,19 @@ class TaskTests(ServerTestCase):
 			"clean": {"label": "Clean it", "steps": [{"run": python("print('project clean')")}]},
 			"check": {"steps": [{"run": python("import sys; print('src/a.c (2:5) error: no b'); print('src/missing.c (1:1) warning: gone'); sys.stderr.write('src/a.c (3:1) warning: c\\n')"), "problemMatcher": "fake"}]},
 			"checkSrc": {"steps": [{"run": python("print('a.c:3: named from src')"), "problemMatcher": "fake-src"}]},
-			"shell": {"steps": [{"run": ".\hello.cmd \"big world\"& echo \"kept & quoted\""}]},
+			"shell": {"steps": [{"run": ".\\hello.cmd \"big world\"& echo \"kept & quoted\""}]},
 			"chain": {"steps": [
 				{"run": python("import sys; print('first'); sys.exit(3)")},
 				{"run": python("print('skipped')")},
 				{"run": python("print('cleanup')"), "onlyIf": "always"},
 				{"task": "clean", "onlyIf": "always"}]},
 			"forever": {"concurrency": "single", "steps": [{"run": python(grandchild)}]},
+			"sleepy": {"concurrency": "parallel", "steps": [{"run": python("import time; time.sleep(60)  # " + self.orphan_marker())}]},
 			"typo": {"steps": [{"run": python("print('${nope}')")}]},
 			"show": {"steps": [{"run": python("print(open('src/a.c').read())")}]}}
+
+	def orphan_marker(self):
+		return "ied-step-" + os.path.basename(self.root)
 
 	def tearDown(self):
 		self.server.stop()
@@ -83,6 +87,9 @@ class TaskTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
+		await self.connect()
+
+	async def connect(self):
 		self.cookie = self.server.sign_in()
 		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
@@ -198,6 +205,42 @@ class TaskTests(ServerTestCase):
 				break
 			await asyncio.sleep(0.1)
 		self.assertNotIn(str(grandchild), listed, "the step's own child died with it")
+
+	def steps_alive(self):
+		"""The ids of the sleepy task's steps still on the system, suspended ones too."""
+		query = "Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Where-Object { $_.CommandLine -like '*" + self.orphan_marker() + "*' } | ForEach-Object { $_.ProcessId }"
+		listed = subprocess.run(["powershell", "-NoProfile", "-Command", query], capture_output=True, text=True).stdout
+		return [int(line) for line in listed.split() if line.strip().isdigit()]
+
+	async def test_a_server_killed_while_starting_steps_leaves_none_behind(self):
+		"""BUG-309: a step's process is created inside its job, so a server that dies while it starts steps takes every
+		one of them along; none is left suspended or running on its own."""
+		try:
+			for round in range(16):
+				if round:
+					self.client.abort()
+					self.server.stop()
+					self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.ied.sln")))
+					self.assertTrue(self.server.started, self.server.error)
+					await self.connect()
+				starts = [asyncio.ensure_future(self.client.request("task.run", {"wsId": "w1", "task": "sleepy"})) for _ in range(24)]
+				for _ in range(3):
+					await asyncio.sleep(0)
+				sent = time.perf_counter()
+				while time.perf_counter() - sent < 0.002 * round:
+					pass
+				self.server.process.kill()
+				self.server.process.wait(10)
+				await asyncio.gather(*starts, return_exceptions=True)
+				for _ in range(50):
+					alive = self.steps_alive()
+					if not alive:
+						break
+					await asyncio.sleep(0.1)
+				self.assertEqual([], alive, "round %d: the steps died with the server" % round)
+		finally:
+			for pid in self.steps_alive():
+				subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
 
 	async def test_unknown_variables_and_untrusted_workspaces_are_refused(self):
 		with self.assertRaises(RpcFailure) as refused:
