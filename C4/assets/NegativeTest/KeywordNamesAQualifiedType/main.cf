@@ -1,0 +1,4 @@
+int32 main() {
+	Core::String alias = Core::String("x");
+	return 0;
+}

@@ -28,5 +28,8 @@ namespace Testing
 
 		TEST_FUNC(Parser.Statements.CodeBlock.Negative)
 		void TestNoOpenBraceReturnsNullptr();
+
+		TEST_FUNC(Parser.Statements.CodeBlock.KeywordNames)
+		void TestKeywordNamesOneErrorEach();
 	};
 }

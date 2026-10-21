@@ -7,6 +7,7 @@
 #include "../Expressions/LiteralNode.h"
 #include "../Expressions/IdentifierExpressionNode.h"
 #include "Parser/PrattParser.h"
+#include "Parser/UnexpectedToken.h"
 #include "Core/StringFormat.h"
 
 namespace Scripting
@@ -239,13 +240,20 @@ namespace Scripting
 		}
 
 	// 5. Declarator list: identifier ('=' expression)? (',' identifier ('=' expression)?) *
-	Token nameToken = lexer.PeekCompound();
-	if (nameToken.GetType() == TokenType::Identifier)
+	// A keyword where a name goes is still that declarator's name: one error, not one per token (BUG-306).
+	auto takeName = [&](Token& name) -> bool
 	{
-		m_NameToken = nameToken;
+		name = lexer.PeekCompound();
+		if (name.GetType() != TokenType::Identifier && !KeywordNamesAVariable(lexer))
+			return false;
+		if (name.GetType() != TokenType::Identifier)
+			errorTracker.AddError(name.GetStartLocation(), KeywordNameMessage(name), ErrorSeverity::Error);
 		lexer.NextCompoundToken();
-	}
-	else
+		return true;
+	};
+
+	Token nameToken;
+	if (!takeName(nameToken))
 	{
 		errorTracker.AddError(
 			nameToken.GetStartLocation(),
@@ -253,6 +261,7 @@ namespace Scripting
 			ErrorSeverity::Error);
 		return;
 	}
+	m_NameToken = nameToken;
 
 	m_Declarators.Clear();
 	auto parseDeclaratorInit = [&](Declarator& d)
@@ -314,8 +323,8 @@ namespace Scripting
 	while (lexer.PeekCompound().GetType() == TokenType::Comma)
 	{
 		lexer.NextCompoundToken();
-		Token n2 = lexer.PeekCompound();
-		if (n2.GetType() != TokenType::Identifier)
+		Token n2;
+		if (!takeName(n2))
 		{
 			errorTracker.AddError(
 				n2.GetStartLocation(),
@@ -323,7 +332,6 @@ namespace Scripting
 				ErrorSeverity::Error);
 			break;
 		}
-		lexer.NextCompoundToken();
 		Declarator d;
 		d.m_NameToken = n2;
 		parseDeclaratorInit(d);

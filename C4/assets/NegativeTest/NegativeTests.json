@@ -2579,6 +2579,10 @@
         "expect": ["'asm' is a keyword: it cannot name a variable, parameter or function"],
         "reason": "asm is a keyword and cannot name a variable."
     },
+    "KeywordNamesAQualifiedType": {
+        "expect": ["main.cf (2:15) error: 'alias' is a keyword: it cannot name a variable, parameter or function"],
+        "reason": "A keyword naming a variable of a qualified type says so at the name (BUG-306)."
+    },
     "TemplateBodyErrorNamesItsUse": {
         "expect": ["main.cf (4:36) error: cannot initialize 'Owner' from 'Owner'", "(in 'Box<Owner>::Put', used at main.cf (14:2))"],
         "reason": "An error inside a body made from a template names the instance and the first place the program uses it, not only the template's line."

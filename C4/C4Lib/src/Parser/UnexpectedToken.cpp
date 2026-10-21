@@ -18,7 +18,19 @@ namespace Scripting
 		const Token& token = lexer.PeekCompound();
 		const Token& name = lexer.PeekCompound(1);
 		if (token.GetType() == TokenType::Identifier && Token::IsKeyword(name.GetType()) && EndsAName(lexer.PeekCompound(2).GetType()))
-			return Core::StringFormat::Format("'{0}' is a keyword: it cannot name a variable, parameter or function", name.GetText());
+			return KeywordNameMessage(name);
 		return Core::StringFormat::Format("Unexpected token '{0}'", token.GetText());
+	}
+
+	bool KeywordNamesAVariable(const Lexer& lexer)
+	{
+		const TokenType after = lexer.PeekCompound(1).GetType();
+		return Token::IsKeyword(lexer.PeekCompound().GetType()) &&
+			(after == TokenType::Equal || after == TokenType::SemiColon || after == TokenType::Comma);
+	}
+
+	Core::String KeywordNameMessage(const Token& name)
+	{
+		return Core::StringFormat::Format("'{0}' is a keyword: it cannot name a variable, parameter or function", name.GetText());
 	}
 }
