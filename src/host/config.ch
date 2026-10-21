@@ -1,6 +1,6 @@
 // The server's settings from its command line.
-//     ied-server [--host 127.0.0.1] [--port 8765] [--static frontend] [--data <folder>] [--control <name>]
-//                [--workspace <folder>]... [--test-hooks]
+//     ied-server [--host 127.0.0.1] [--port 8765] [--home <folder>] [--static frontend] [--data <folder>]
+//                [--app-data <folder>] [--control <name>] [--workspace <folder>]... [--test-hooks]
 //                [--idle-timeout <s>] [--outbound-budget-mb <n>] [--coalesce-kb <n>] [--allow-origin <o>]...
 //                [--allow-host <h>]... [--quiet]
 
@@ -14,7 +14,9 @@ namespace Ied
 		public Core::String host;
 		public int32 port;
 		public bool portGiven;                         // --port was given: no other port will do
-		public Core::String staticDir;                 // the web client's files; empty: none
+		public Core::String homeDir;                   // the install: frontend/, plugins/, shared/; empty: HomeFolder's search
+		public Core::String staticDir;                 // the web client's files; empty: <home>/frontend
+		public Core::String appDataDir;                // app-tier settings and plugins (docs/07); empty: AppDataFolder's default
 		public Core::String dataDir;                   // the server's own state (docs/11); empty: DataFolder's default
 		public Core::String controlName;               // the control channel's pipe (docs/10); empty: ControlName's default
 		public Core::Array<Core::String> workspaces;   // folders to open
@@ -30,6 +32,12 @@ namespace Ied
 	ServerConfig DefaultConfig();
 	// --data, or %LOCALAPPDATA%\IED; with --test-hooks a fresh temporary folder.
 	Core::String DataFolder(const ServerConfig& config);
+	// --home, or the nearest folder above this program that holds shared/host-api/schemas; empty when none does.
+	Core::String HomeFolder(const ServerConfig& config);
+	// --static, or <home>/frontend.
+	Core::String StaticFolder(const ServerConfig& config);
+	// --app-data, or %APPDATA%\IED; with --test-hooks <data>/app.
+	Core::String AppDataFolder(const ServerConfig& config);
 	// --control, or "ied-<user>" (the single-instance lock); with --test-hooks one of its own.
 	Core::String ControlName(const ServerConfig& config);
 	// The host a browser opens: the bind address, or loopback when the server listens on every interface.

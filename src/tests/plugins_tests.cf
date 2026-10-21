@@ -1,0 +1,32 @@
+// plugins/manifest: version ranges, as dependencies and "ied.api" use them.
+
+include "../plugins/manifest.ch"
+
+static bool In(const char* version, const char* range) { return Ied::VersionInRange(Core::StringView(version), Core::StringView(range)); }
+
+[test("server.plugins")]
+class PluginTests {
+	[test("caret")]
+	public static void TestCaret() {
+		assert_true(In("1.0.0", "^1") && In("1.9.3", "^1") && !In("2.0.0", "^1"), "^1: any 1.x");
+		assert_true(In("1.2.0", "^1.2") && In("1.7.1", "^1.2") && !In("1.1.9", "^1.2"), "^1.2: at least 1.2, below 2");
+		assert_true(In("0.3.5", "^0.3") && !In("0.4.0", "^0.3"), "^0.3: below 1.0, the minor is the family");
+	}
+
+	[test("tilde_exact_and_floors")]
+	public static void TestTildeExactAndFloors() {
+		assert_true(In("1.2.3", "~1.2.3") && In("1.2.9", "~1.2.3") && !In("1.3.0", "~1.2.3"), "~1.2.3: the same minor");
+		assert_true(In("1.2.3", "1.2.3") && !In("1.2.4", "1.2.3"), "an exact version");
+		assert_true(In("1.4.0", "1.x") && In("1.4.0", "1") && !In("2.0.0", "1.x"), "1.x and 1");
+		assert_true(In("1.2.7", "1.2") && !In("1.3.0", "1.2"), "1.2: that minor");
+		assert_true(In("5.0.0", ">=1.2") && !In("1.1.0", ">=1.2"), ">=");
+		assert_true(In("0.0.1", "*") && In("3.1.4", ""), "anything");
+	}
+
+	[test("refused")]
+	public static void TestRefused() {
+		assert_true(!In("1.2", "^1") && !In("one", "^1"), "a version has three numbers");
+		assert_true(!In("1.0.0", "^banana") && !In("1.0.0", "^-1"), "a range that is not one");
+		assert_true(In("1.2.3-beta.1", "^1.2"), "a pre-release counts as its version");
+	}
+}

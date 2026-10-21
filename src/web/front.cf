@@ -122,6 +122,7 @@ namespace Ied
 	void Front::Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device) {
 		if (path == "/ws") WebSocket(request, response, device);
 		else if (path == "/api/upload") Upload(request, response);
+		else if (path.StartsWith(Core::StringView("/plugins/")) && request.method.View() == "GET") PluginFile(path.Substring(9, path.ByteLength()), response);
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
 		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
 		else StaticFile(path, response);
@@ -203,6 +204,31 @@ namespace Ied
 		}
 		response.body = blob->bytes;
 		response.headers.Set(Core::StringView("Content-Type"), blob->contentType.View());
+	}
+
+	// /plugins/<id>/<path>: a loaded plugin's file (grammars, icons, UI modules), never one outside its folder.
+	void Front::PluginFile(Core::StringView path, Http::Response& response) {
+		Core::String decoded;
+		const int64 slash = path.IndexOf('/', 0);
+		if (!PercentDecode(path, decoded) || slash < 0) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		Core::StringView text = decoded.View();
+		const int64 split = text.IndexOf('/', 0);
+		FS::Path file;
+		{
+			Threading::LockGuard guard(server->lock);
+			file = server->plugins->FileOf(text.Substring(0, split), text.Substring(split + 1, text.ByteLength()));
+		}
+		if (file.IsEmpty()) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String body = opened.ReadText();
+		response.SetText(Core::StringView(ContentTypeOf(file.Extension())), body.View());
+		SecureHeaders(response, file.Extension() == ".html");
 	}
 
 	void Front::StaticFile(Core::StringView path, Http::Response& response) {

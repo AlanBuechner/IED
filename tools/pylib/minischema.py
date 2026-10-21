@@ -1,7 +1,8 @@
 """A small JSON Schema (draft 2020-12 subset) validator for shared/host-api.
 
-Supports exactly the keywords listed in KEYWORDS; any other keyword in a schema is a SchemaError,
-so a schema can never silently rely on something this validator ignores. Regex patterns use
+Supports exactly the keywords listed in KEYWORDS (and "x-" annotations, such as x-ied-tiers); any other
+keyword in a schema is a SchemaError, so a schema can never silently rely on something this validator
+ignores. Bedrock's Serialization::ValidateJson (C4, B68) implements the same dialect and checks. Regex patterns use
 Python's re with re.ASCII (ECMA-262 \\d and \\w are ASCII-only).
 """
 
@@ -10,7 +11,10 @@ import re
 
 import jsonc
 
-ANNOTATIONS = {"$schema", "$id", "$defs", "$comment", "title", "description", "default", "examples", "deprecated"}
+ANNOTATIONS = {
+	"$schema", "$id", "$defs", "$comment", "title", "description", "default", "examples", "deprecated",
+	"readOnly", "writeOnly", "format", "markdownDescription", "enumDescriptions",
+}
 ASSERTIONS = {
 	"type", "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
 	"exclusiveMinimum", "exclusiveMaximum", "required", "properties", "additionalProperties",
@@ -112,7 +116,7 @@ def check_schema(schema, where, pointer=""):
 	if not isinstance(schema, dict):
 		raise SchemaError("%s#%s: schema must be an object or boolean" % (where, pointer))
 	for key, value in schema.items():
-		if key not in KEYWORDS:
+		if key not in KEYWORDS and not key.startswith("x-"):
 			raise SchemaError("%s#%s: unsupported keyword %r" % (where, pointer, key))
 		for sub_pointer, sub in _subschemas(key, value, pointer):
 			check_schema(sub, where, sub_pointer)

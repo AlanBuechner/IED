@@ -26,6 +26,7 @@ namespace Ied
 		private void Upload(const Http::Request& request, Http::Response& response);
 		private void Blob(Core::StringView id, const Http::Request& request, Http::Response& response);
 		private void StaticFile(Core::StringView path, Http::Response& response);
+		private void PluginFile(Core::StringView path, Http::Response& response);
 
 		private Server* server;
 		private AuthGate gate;

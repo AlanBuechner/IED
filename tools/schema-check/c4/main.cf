@@ -1,0 +1,23 @@
+// schemacheck <schema> <instance>: the problems Serialization::ValidateJson finds, one "<path>\t<message>" per line.
+include "bedrock.ch"
+
+int32 main(int32 argc, char8** argv) {
+	if (argc != 3) return 2;
+	Serialization::SchemaRegistry registry;
+	Core::String error;
+	if (!registry.Load(Core::StringView((const char*)argv[1]), error)) {
+		printf("SCHEMA ERROR\t%s\n", error.CStr());
+		return 3;
+	}
+	FS::File file = FS::File((const char*)argv[2], "rb");
+	Core::String text = file.ReadText();
+	Serialization::DomDoc doc;
+	Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), doc);
+	if (!read.Ok()) {
+		printf("JSON ERROR\t%s\n", read.error);
+		return 4;
+	}
+	for (const Serialization::SchemaProblem& problem : Serialization::ValidateJson(registry, Core::StringView((const char*)argv[1]), Core::StringView(""), read.root))
+		printf("%s\t%s\n", problem.path.CStr(), problem.message.CStr());
+	return 0;
+}

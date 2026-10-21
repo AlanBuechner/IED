@@ -1,0 +1,7 @@
+# schemacheck: Bedrock's JSON Schema validator on the command line, so tools/schema-check/crosscheck.py can compare it
+# with tools/pylib/minischema.py.
+[project]
+name = "schemacheck"
+kind = "executable"
+description = "Validates a JSON(C) file against a schema with Serialization::ValidateJson; prints each problem"
+sources = ["."]

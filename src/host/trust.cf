@@ -1,0 +1,50 @@
+include "trust.ch"
+include "../web/json.ch"
+
+namespace Ied
+{
+	Core::String TrustKey(Core::StringView root) {
+		Core::StringBuilder key;
+		for (int64 i = 0; i < root.ByteLength(); ++i) {
+			const int32 c = root.ByteAt(i);
+			key.AppendByte(c == '\\' ? '/' : c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		Core::StringView text = key.View();
+		int64 length = text.ByteLength();
+		while (length > 1 && text.ByteAt(length - 1) == '/') length -= 1;
+		return Core::String(text.Substring(0, length));
+	}
+
+	void TrustStore::Load(Core::StringView file, Core::String& error) {
+		this.file = Core::String(file);
+		roots.Clear();
+		if (!FS::FileExists(this.file.CStr())) return;
+		FS::File opened = FS::File(this.file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		Serialization::DomNode trusted = read.Ok() ? read.root.Member("trusted") : Serialization::DomNode();
+		if (trusted.Kind() != Serialization::DomKind::Array) {
+			error = Core::String("ignoring ") + file + ": not a trust file";
+			return;
+		}
+		for (int64 i = 0; i < trusted.Count(); ++i) roots.At(TrustKey(trusted.At(i).AsView())) = true;
+	}
+
+	bool TrustStore::IsTrusted(const FS::Path& root) const { return roots.Contains(TrustKey(root.View())); }
+
+	bool TrustStore::Set(const FS::Path& root, bool trusted) {
+		if (trusted) roots.At(TrustKey(root.View())) = true;
+		else roots.Remove(TrustKey(root.View()));
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.Key(Core::StringView("trusted"));
+		json.BeginArray();
+		for (const Core::KeyValue<Core::String, bool>& entry : roots) json.String(entry.key.View());
+		json.EndArray();
+		json.EndObject();
+		FS::MakeDirectories(FS::Path(file.View()).Parent().CStr());
+		return FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+}

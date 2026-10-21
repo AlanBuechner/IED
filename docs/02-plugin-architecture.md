@@ -43,6 +43,38 @@ disable/unload: unregister contributions, deactivate(), stop process, drop JS ru
 
 Validation failures appear in Settings > Plugins and the *IED* output source - never silent. Hot reload (non-built-ins) re-runs the lifecycle for one plugin without restarting the server.
 
+## The host as built (M1)
+
+`src/plugins/` loads `builtin` and `declarative` plugins. `js` and `process` manifests are read and validated, then refused with "cannot load yet" until M11.
+
+**Where plugins come from.** Built-ins live in `<home>/plugins/<folder>/ied-plugin.json`, where `<home>` is the install: the nearest folder above `ied-server.exe` that holds `shared/host-api/schemas/`, or `--home`. App plugins live in `<app data>/plugins/<folder>/` (`%APPDATA%\IED`, or `--app-data`). Project-local plugins come with solutions. A folder without `ied-plugin.json` is not a plugin.
+
+**Checks.** Each manifest is JSONC, validated against `plugin-manifest.v1.schema.json` with Bedrock's `Serialization::ValidateJson`; problems carry the JSON pointer. The host then checks:
+
+- `ied.api` against the host API version (1.0.0) with semver ranges (`^`, `~`, `>=`, `1.x`, exact);
+- the runtime kind: `builtin` only from the install;
+- required dependencies: loaded and in range, with no cycles. A plugin whose dependency fails fails too.
+
+Problems go to the server log; the IED output source comes later.
+
+**States.** `loaded`, `disabled` (the owner's switch), `failed` (with its problems), `needsApproval`, or `overridden` (another plugin with the id won; `overriddenBy` names its source).
+
+**Approval.** An app plugin loads only once the owner approved the SHA-256 of its folder: every file's path and bytes, in name order. A changed file needs approval again, and approvals go to the security log.
+
+**Precedence.** Of the plugins with one id, the one from the strongest source that can load wins: project, then app, then built-in. An app plugin that awaits approval therefore leaves the built-in serving.
+
+**The owner's choices** (disabled ids, approved digests) are kept in `<app data>/plugins.json`, written atomically.
+
+| Method | Does |
+|---|---|
+| `plugins.list` | `{plugins: [{id, name, version, kind, source, state, overriddenBy?, problems, permissions, contributes: [point names]}]}` (also the `plugins` topic's snapshot; `plugins.changed` carries the same) |
+| `plugins.contributions` | `{plugins: [{id, source, contributes}]}` for the loaded ones: what the web client builds menus, commands, keybindings and languages from |
+| `plugins.setEnabled {id, enabled}` | the plugin's summary after the change |
+| `plugins.approve {id}` | approves the app plugin's current content |
+| `plugins.reload` | reads every plugin folder again |
+
+`GET /plugins/<id>/<path>` serves a loaded plugin's files (grammars, icons, UI modules) to a signed-in client, never one outside the plugin's folder.
+
 ## Contribution points
 
 Grouped; full shapes in the schema.

@@ -45,6 +45,8 @@ namespace Ied
 		if (option == "--host") config.host = Core::String(value);
 		else if (option == "--static") config.staticDir = Core::String(value);
 		else if (option == "--data") config.dataDir = Core::String(value);
+		else if (option == "--home") config.homeDir = Core::String(value);
+		else if (option == "--app-data") config.appDataDir = Core::String(value);
 		else if (option == "--control") config.controlName = Core::String(value);
 		else if (option == "--workspace") config.workspaces.Push(Core::String(value));
 		else if (option == "--allow-origin") config.allowOrigins.Push(Core::String(value));
@@ -79,6 +81,27 @@ namespace Ied
 		if (!config.dataDir.IsEmpty()) return config.dataDir;
 		if (config.testHooks) return Core::String((FS::TempDirectory() / (Core::String("ied-data-") + RandomHex(6).View()).View()).View());
 		return Core::String((FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED").View());
+	}
+
+	Core::String HomeFolder(const ServerConfig& config) {
+		if (!config.homeDir.IsEmpty()) return config.homeDir;
+		for (FS::Path at = Platform::ExecutablePath().Parent(); !at.IsEmpty(); at = at.Parent()) {
+			if (FS::FileExists((at / "shared" / "host-api" / "schemas" / "plugin-manifest.v1.schema.json").CStr())) return Core::String(at.View());
+			if (at.Parent().View() == at.View()) break;
+		}
+		return Core::String();
+	}
+
+	Core::String StaticFolder(const ServerConfig& config) {
+		if (!config.staticDir.IsEmpty()) return config.staticDir;
+		Core::String home = HomeFolder(config);
+		return home.IsEmpty() ? home : Core::String((FS::Path(home.View()) / "frontend").View());
+	}
+
+	Core::String AppDataFolder(const ServerConfig& config) {
+		if (!config.appDataDir.IsEmpty()) return config.appDataDir;
+		if (config.testHooks) return Core::String((FS::Path(DataFolder(config).View()) / "app").View());
+		return Core::String((FS::Path(Platform::GetEnvironmentVariable("APPDATA").View()) / "IED").View());
 	}
 
 	Core::String ControlName(const ServerConfig& config) {

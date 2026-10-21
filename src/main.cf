@@ -52,6 +52,7 @@ static bool Prepare(Ied::Server* server, const Net::Address& at) {
 		Fail(Core::StringView("listening beyond this machine needs an owner password: set one from a loopback session first (docs/11)"));
 		return false;
 	}
+	server->plugins->Load();
 	server->auth->Record("start", (Core::String("\"address\":") + Ied::JsonString(at.ToString().View()).View()).View());
 	return true;
 }

@@ -112,7 +112,7 @@ namespace Ied
 		FS::Path canonical = FS::CanonicalPath(folder.CStr());
 		ws->root = canonical.IsEmpty() ? folder : canonical;
 		ws->name = Core::String(ws->root.FileName());
-		ws->trusted = true;
+		ws->trusted = server->trust.IsTrusted(ws->root);
 		items.Push(ws);
 		Workspaces* self = this;
 		Core::String topic = Core::String("ws:") + ws->wsId.View();
@@ -431,7 +431,10 @@ namespace Ied
 
 	Core::String Workspaces::SetTrustMethod(Call& call, const Params& params) {
 		Workspace* ws = Get(params.Str("wsId").View());
-		ws->trusted = params.Bool("trusted", ws->trusted);
+		const bool trusted = params.Bool("trusted", ws->trusted);
+		if (!server->trust.Set(ws->root, trusted)) throw RpcError(ErrorCode::Unavailable, "the trust choice could not be saved");
+		ws->trusted = trusted;
+		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();
 		data.BoolField("trusted", ws->trusted);

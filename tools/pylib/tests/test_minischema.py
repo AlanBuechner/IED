@@ -112,7 +112,12 @@ class KeywordTests(unittest.TestCase):
 
 	def test_unknown_keyword_is_a_schema_error(self):
 		with self.assertRaises(minischema.SchemaError):
-			validator_for({"properties": {"a": {"format": "uri"}}}, self.tmp.name)
+			validator_for({"properties": {"a": {"patternProperties": {}}}}, self.tmp.name)
+
+	def test_annotations_and_x_keywords_are_accepted(self):
+		schema = {"properties": {"a": {"type": "integer", "format": "int32", "x-ied-tiers": ["app"], "x-ied-merge": "replace"}}}
+		self.assertFalse(self.problems(schema, {"a": 1}))
+		self.assertTrue(self.problems(schema, {"a": "1"}))
 
 	def test_dangling_ref_is_a_schema_error(self):
 		path = os.path.join(self.tmp.name, "s.json")

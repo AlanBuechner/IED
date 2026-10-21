@@ -9,6 +9,8 @@ include "../services/documents.ch"
 include "../services/testhooks.ch"
 include "../services/blobs.ch"
 include "../auth/auth.ch"
+include "../plugins/host.ch"
+include "trust.ch"
 
 namespace Ied
 {
@@ -38,6 +40,8 @@ namespace Ied
 		public TestHooks* testHooks;
 		public Blobs* blobs;
 		public Auth* auth;
+		public PluginHost* plugins;
+		public TrustStore trust;
 	}
 
 	// "e-" and 12 random hex digits.

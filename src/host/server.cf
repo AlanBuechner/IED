@@ -14,6 +14,11 @@ namespace Ied
 	void Server::Init(ServerConfig config) {
 		this.config = config;
 		this.config.dataDir = DataFolder(config);
+		this.config.staticDir = StaticFolder(this.config);
+		this.config.appDataDir = AppDataFolder(this.config);
+		Core::String trustError;
+		trust.Load((FS::Path(this.config.appDataDir.View()) / "trust.json").View(), trustError);
+		if (!trustError.IsEmpty()) Log(trustError.View());
 		epoch = NewEpoch();
 		Server* self = this;
 		presence = new Presence(self);
@@ -21,6 +26,7 @@ namespace Ied
 		documents = new Documents(self);
 		blobs = new Blobs();
 		auth = new Auth(self);
+		plugins = new PluginHost(self);
 		if (config.testHooks) testHooks = new TestHooks(self);
 	}
 
