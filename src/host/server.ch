@@ -11,6 +11,8 @@ include "../services/blobs.ch"
 include "../auth/auth.ch"
 include "../plugins/host.ch"
 include "trust.ch"
+include "appdata.ch"
+include "../settings/service.ch"
 
 namespace Ied
 {
@@ -42,6 +44,8 @@ namespace Ied
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;
+		public Settings* settings;
+		public AppDataWatch appWatch;
 	}
 
 	// "e-" and 12 random hex digits.

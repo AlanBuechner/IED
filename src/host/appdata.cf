@@ -1,0 +1,27 @@
+include "appdata.ch"
+include "server.ch"
+
+namespace Ied
+{
+	bool TouchesSettings(const ChangeBatch& batch) {
+		for (const TreeChange& change : batch.Changes())
+			if (change.path.View() == "settings.json") return true;
+		return batch.Overflowed();
+	}
+
+	bool TouchesPlugins(const ChangeBatch& batch) {
+		for (const TreeChange& change : batch.Changes())
+			if (change.path.View() == "plugins" || change.path.View().StartsWith(Core::StringView("plugins/"))) return true;
+		return batch.Overflowed();
+	}
+
+	bool AppDataWatch::Start(Server* server, Core::String& error) {
+		FS::Path folder = FS::Path(server->config.appDataDir.View());
+		FS::MakeDirectories(folder.CStr());
+		return watch.Start(folder, [server](const ChangeBatch& batch) {
+			Threading::LockGuard guard(server->lock);
+			if (TouchesPlugins(batch)) server->plugins->Load();
+			else if (TouchesSettings(batch)) server->settings->AppFileChanged();
+		}, error);
+	}
+}

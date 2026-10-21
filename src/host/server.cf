@@ -22,6 +22,7 @@ namespace Ied
 		epoch = NewEpoch();
 		Server* self = this;
 		presence = new Presence(self);
+		settings = new Settings(self);
 		workspaces = new Workspaces(self);
 		documents = new Documents(self);
 		blobs = new Blobs();

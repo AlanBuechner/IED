@@ -1,0 +1,133 @@
+include "catalog.ch"
+include "../web/json.ch"
+include "../web/params.ch"
+
+namespace Ied
+{
+	const char* MergeKindName(MergeKind kind) {
+		if (kind == MergeKind::Merge) return "merge";
+		if (kind == MergeKind::Append) return "append";
+		return "replace";
+	}
+
+	Core::String PropertyPointer(Core::StringView key) {
+		Core::StringBuilder pointer;
+		pointer.Append("/properties/");
+		for (int64 i = 0; i < key.ByteLength(); ++i) {
+			const int32 c = key.ByteAt(i);
+			if (c == '~') pointer.Append("~0");
+			else if (c == '/') pointer.Append("~1");
+			else pointer.AppendByte(c);
+		}
+		return pointer.ToString();
+	}
+
+	static MergeKind MergeOf(Core::StringView name) {
+		if (name == "merge") return MergeKind::Merge;
+		if (name == "append") return MergeKind::Append;
+		return MergeKind::Replace;
+	}
+
+	static SettingInfo* Info(Plugin* plugin, Core::StringView schemaName, Core::StringView key, const Serialization::DomNode& property, Core::StringView page) {
+		SettingInfo* setting = new SettingInfo();
+		setting->key = Core::String(key);
+		setting->plugin = plugin->manifest->id;
+		setting->schemaName = Core::String(schemaName);
+		setting->pointer = PropertyPointer(key);
+		Serialization::DomNode fallback = property.Member("default");
+		setting->defaultJson = fallback.IsValid() ? NodeJson(fallback) : Core::String("null");
+		Serialization::DomNode tiers = property.Member("x-ied-tiers");
+		for (int32 i = 0; i < 3; ++i) {
+			bool listed = !tiers.IsValid();
+			for (int64 j = 0; j < tiers.Count(); ++j)
+				if (tiers.At(j).AsView() == kSettingTiers[i]) listed = true;
+			if (listed) setting->tiers.Push(Core::String(kSettingTiers[i]));
+		}
+		setting->merge = MergeOf(property.Member("x-ied-merge").AsView());
+		setting->page = Core::String(page);
+		return setting;
+	}
+
+	// One plugin's settings schema: its top-level properties become settings; a key already declared is a problem.
+	bool SettingsCatalog::Declare(Plugin* plugin, Core::String& problem) {
+		Serialization::DomNode settingsPoint = plugin->manifest->contributes.Member("settings");
+		if (!settingsPoint.IsValid()) return true;
+		FS::Path file = plugin->manifest->folder / settingsPoint.Member("schema").AsView();
+		Core::String error;
+		if (!registry->Load(file.View(), error)) {
+			problem = (Core::String("settings schema: ") + error.View());
+			return false;
+		}
+		Core::String name = registry->Find(file.View());
+		Serialization::DomNode properties;
+		registry->At(name.View(), Core::StringView("/properties"), properties);
+		for (int64 i = 0; i < properties.Count(); ++i) {
+			Core::StringView key = properties.KeyAt(i);
+			SettingInfo* taken = nullptr;
+			if (settings.TryGet(Core::String(key), taken)) {
+				problem = (((Core::String("setting ") + key) + " is declared by ") + taken->plugin.View()) + " already";
+				return false;
+			}
+			SettingInfo* setting = Info(plugin, name.View(), key, properties.ValueAt(i), settingsPoint.Member("page").AsView());
+			settings.Insert(setting->key, setting);
+			order.Push(setting);
+		}
+		return true;
+	}
+
+	void SettingsCatalog::Build(const Core::Array<Plugin*>& plugins, Core::Array<Core::String>& problems) {
+		registry = new Serialization::SchemaRegistry();
+		settings.Clear();
+		order.Clear();
+		for (Plugin* plugin : plugins) {
+			Core::String problem;
+			if (plugin->state == PluginState::Loaded && !Declare(plugin, problem))
+				problems.Push(((Core::String("plugin ") + plugin->manifest->id.View()) + ": ") + problem.View());
+		}
+	}
+
+	SettingInfo* SettingsCatalog::Get(Core::StringView key) const {
+		SettingInfo* setting = nullptr;
+		settings.TryGet(Core::String(key), setting);
+		return setting;
+	}
+
+	bool SettingsCatalog::AllowedIn(const SettingInfo* setting, Core::StringView tier) const {
+		for (const Core::String& allowed : setting->tiers)
+			if (allowed.View() == tier) return true;
+		return false;
+	}
+
+	Core::Array<Core::String> SettingsCatalog::Check(const SettingInfo* setting, const Serialization::DomNode& value) {
+		Core::Array<Core::String> problems;
+		for (const Serialization::SchemaProblem& problem : Serialization::ValidateJson(*registry, setting->schemaName.View(), setting->pointer.View(), value))
+			problems.Push((Core::String(problem.path.IsEmpty() ? Core::StringView("/") : problem.path.View()) + ": ") + problem.message.View());
+		return problems;
+	}
+
+	Core::String SettingsCatalog::SchemaJson() {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("settings"));
+		json.BeginObject();
+		for (SettingInfo* setting : order) {
+			Serialization::DomNode schema;
+			registry->At(setting->schemaName.View(), setting->pointer.View(), schema);
+			json.Key(setting->key.View());
+			json.BeginObject();
+			json.Field("plugin", setting->plugin.View());
+			json.RawField("schema", NodeJson(schema).View());
+			json.RawField("default", setting->defaultJson.View());
+			json.Key(Core::StringView("tiers"));
+			json.BeginArray();
+			for (const Core::String& tier : setting->tiers) json.String(tier.View());
+			json.EndArray();
+			json.Field("merge", MergeKindName(setting->merge));
+			if (!setting->page.IsEmpty()) json.Field("page", setting->page.View());
+			json.EndObject();
+		}
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+}

@@ -21,6 +21,48 @@ Rules:
 - Settings files are watched (git pull, hand edits apply live) and written preserving comments.
 - **Secrets never live in settings files**: settings reference `{ "secret": "<name>" }` (Windows Credential Manager) or `{ "env": "VAR" }`.
 
+### Settings on the wire (M1)
+
+**Where settings are declared.** A plugin's `contributes.settings.schema` names a JSON Schema in the plugin. Each of that schema's top-level `properties` is one setting, keyed by its full dotted name (`"editor.tabSize"`). A property carries its own schema plus:
+
+- `default`;
+- `x-ied-tiers` (the tiers it may be set in; default all);
+- `x-ied-merge`: `replace` (the default), `merge` (objects are merged member by member, deeper tiers winning) or `append` (lists are concatenated, app first).
+
+A key claimed by two plugins belongs to the first one loaded; the second gets a plugin problem.
+
+**Tier files.** Each is a JSONC object of `"<key>": value` members:
+
+| Tier | File |
+|---|---|
+| `app` | `<app data>/settings.json` |
+| `solution` | `<workspace root>/.ied/solution.json` (a folder workspace's tier too) |
+| `project` | `<solution root>/.ied/projects/<Name>.json` (with solutions) |
+
+**The effective value** of a key for a workspace starts from its `default`, then applies app, solution and project in that order, each by the key's merge kind.
+
+**Problems** are kept per tier file, each with its line:
+
+- not JSONC;
+- an unknown key;
+- a key set in a tier its `x-ied-tiers` leaves out;
+- a value its schema refuses.
+
+An invalid value is ignored and the last valid value from the same file stays in effect. It is never silently defaulted.
+
+**Live.** Tier files are watched: the app file by its own watcher, a workspace's by the workspace's. A change re-reads the file, bumps its revision and publishes `settings.changed`.
+
+**Writing** edits the file's text in place: a member's value is replaced, a new member goes after the last one, and a reset removes the member with its comma. The file's comments and layout survive. Writes are revision-checked: a write naming an old revision gets `conflict {revision}`.
+
+| Method | Does |
+|---|---|
+| `settings.schema` | `{settings: {<key>: {plugin, schema, default, tiers, merge, page?}}}` |
+| `settings.get {wsId?}` | the snapshot of `settings:<wsId>`, or `settings:app` without a `wsId` |
+| `settings.set {tier, wsId?, key, value, expectedRevision?}` | `{revision}`; `bad_request` for an unknown key, a tier the key does not allow, or a value its schema refuses |
+| `settings.reset {tier, wsId?, key, expectedRevision?}` | `{revision}`: the member is removed from that tier's file |
+
+Topics are `settings:app` and `settings:<wsId>`. The snapshot is `{tiers: {<tier>: {file, revision, problems: [{line, key?, message}]}}, values: {<key>: {value, source}}}`, where `source` is `default` or the tier that last set the key. `settings.changed` carries the same.
+
 ## The settings window
 
 The bottom sidebar icon opens Settings as a **docked view** (not a modal), styled like Visual Studio's *Tools > Options*: a tree on the left (Environment, Keyboard, Text Editor > per language, Projects and Solutions, Build and Run, Debugging, AI > Models / Groups / Routing / Privacy / Prompts / Skills / MCP, Web and Egress, Source Control, Terminal, Sandbox, Profiler, Plugins, Accounts, Remote Access, Diagnostics), a tier selector (User / Solution / Project) at the top, search, and "edit as JSON" per tier. Every row shows the effective value, which tier set it, and override/reset actions. Pages render from plugin JSON Schemas; dedicated editors exist for model groups, keybindings, plugins and remote access.

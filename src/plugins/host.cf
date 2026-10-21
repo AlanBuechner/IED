@@ -159,6 +159,7 @@ namespace Ied
 			for (const Core::String& problem : plugin->manifest->problems)
 				server->Log((((Core::String("plugin ") + plugin->manifest->id.View()) + ": ") + problem.View()).View());
 		Changed();
+		server->settings->Load();
 	}
 
 	Plugin* PluginHost::Get(Core::StringView id) const {

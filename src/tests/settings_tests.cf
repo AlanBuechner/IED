@@ -1,0 +1,27 @@
+// settings/merge and catalog helpers: tiers merged per key, and setting keys as JSON pointers.
+
+include "../settings/merge.ch"
+
+static Core::String Merged(const char* base, const char* over, Ied::MergeKind kind) {
+	return Ied::MergeJson(Core::StringView(base), Core::StringView(over), kind);
+}
+
+[test("server.settings")]
+class SettingsUnitTests {
+	[test("merge")]
+	public static void TestMerge() {
+		assert_se("[3]", Merged("[1,2]", "[3]", Ied::MergeKind::Replace).CStr(), "replace");
+		assert_se("{\"a\":1,\"b\":{\"x\":1,\"y\":2},\"c\":3}", Merged("{\"a\":1,\"b\":{\"x\":1}}", "{\"b\":{\"y\":2},\"c\":3}", Ied::MergeKind::Merge).CStr(), "objects merged deeply");
+		assert_se("{\"a\":[9]}", Merged("{\"a\":[1]}", "{\"a\":[9]}", Ied::MergeKind::Merge).CStr(), "a list inside a merge is replaced");
+		assert_se("[1,2,3]", Merged("[1,2]", "[3]", Ied::MergeKind::Append).CStr(), "lists appended");
+		assert_se("5", Merged("{\"a\":1}", "5", Ied::MergeKind::Merge).CStr(), "a merge of different kinds replaces");
+		assert_se("{\"b\":2}", Merged("[1]", "{\"b\":2}", Ied::MergeKind::Append).CStr(), "an append of different kinds replaces");
+		assert_se("{\"a\":1}", Merged("null", "{\"a\":1}", Ied::MergeKind::Merge).CStr(), "over no default");
+	}
+
+	[test("pointer")]
+	public static void TestPointer() {
+		assert_se("/properties/editor.tabSize", Ied::PropertyPointer(Core::StringView("editor.tabSize")).CStr(), "a dotted key");
+		assert_se("/properties/a~1b~0c", Ied::PropertyPointer(Core::StringView("a/b~c")).CStr(), "escapes");
+	}
+}

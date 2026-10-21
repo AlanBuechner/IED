@@ -94,6 +94,7 @@ int32 main(int32 argc, char8** argv) {
 		return 1;
 	}
 	server->port = http->LocalAddress().port;
+	if (!server->appWatch.Start(server, error)) server->Log((Core::String("app data is not watched: ") + error.View()).View());
 	control->Start();
 	Announce("LISTENING", ListeningUrl(config, server->port).View());
 	Announce("OPEN", Ied::LaunchUrl(config, server->port, LaunchToken(server).View(), Core::StringView("")).View());
