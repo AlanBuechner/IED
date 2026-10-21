@@ -301,6 +301,22 @@ class ChatTests(ServerTestCase):
 		tool = self.segments(await self.last_turn(chat_id), "tool")[0]
 		self.assertEqual(("demo_shout", "ok", "plugin demo.code"), (tool["tool"], tool["state"], tool.get("source")))
 
+	async def test_the_prompt_read_so_far_keeps_the_watchdog_off_and_reaches_the_clients(self):
+		chat_id, topic = await self.chat()
+		# five reports a second apart (scaled), past the 2 s prefill watchdog: each one extends it, as llama.cpp's do
+		self.model.queue(inline({"progress": 5, "delayMs": 50000}, {"text": "Read it all."}, {"finish": "stop"}))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "Hello"})
+		seen = (await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.progress" and (f["data"]["prefill"] or {}).get("processed", 0) > 0, timeout=20))[-1]["data"]
+		self.assertTrue(0 < seen["prefill"]["processed"] <= seen["prefill"]["total"], seen)
+		turn = await self.last_turn(chat_id)
+		self.assertIn("prefill", turn, "a client that joins now sees how far the prompt is read")
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=TURN_SECONDS)
+		self.assertEqual("finished", frames[-1]["data"]["stop"], "no stalled_prefill while the server reports progress")
+		progress = [f["data"]["prefill"] for f in frames if f.get("kind") == "turn.progress"]
+		self.assertIsNone(progress[-1], "cleared when the reply starts")
+		self.assertNotIn("prefill", await self.last_turn(chat_id))
+		self.assertIs(True, self.model.requests()[-1]["body"].get("return_progress"), "a llama.cpp server is asked for it")
+
 	async def test_a_tools_images_reach_a_model_that_sees_them(self):
 		png = b"\x89PNG\r\n\x1a\n" + bytes(range(24))
 		os.makedirs(os.path.join(self.repo, "shots"))

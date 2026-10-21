@@ -82,6 +82,7 @@ namespace Ai
 		public int64 genMs;                           // time spent generating after the first token, summed
 		public int64 startedMs;
 		public int64 endedMs;
+		public Core::String prefill;                  // while a request's prompt is read: its server's progress, JSON
 		public Core::Array<ModelMessage*> messages;   // what the model is sent of this turn, in order
 		public bool compressed;                       // left out of requests to fit the context (kept on disk)
 

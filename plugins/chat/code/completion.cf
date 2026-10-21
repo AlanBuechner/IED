@@ -30,6 +30,8 @@ namespace Ai
 			if (errorMessage.IsEmpty()) errorMessage = IED::NodeJson(error);
 			return;
 		}
+		Serialization::DomNode progress = read.root.Member("prompt_progress");
+		if (progress.Kind() == Serialization::DomKind::Object) deltas.Push(Delta(DeltaKind::Progress, IED::NodeJson(progress).View(), -1));
 		Serialization::DomNode choices = read.root.Member("choices");
 		for (int64 i = 0; choices.Kind() == Serialization::DomKind::Array && i < choices.Count(); ++i) TakeChoice(choices.At(i), deltas);
 		TakeUsage(read.root);

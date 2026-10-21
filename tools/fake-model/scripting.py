@@ -3,7 +3,7 @@
 import json
 import pathlib
 
-OPS = {"headers", "role", "text", "reasoning", "toolCall", "textToolCall", "stall", "cut", "malformed", "raw", "finish", "usage", "done", "error"}
+OPS = {"headers", "role", "text", "reasoning", "toolCall", "textToolCall", "stall", "cut", "malformed", "raw", "finish", "usage", "done", "error", "progress"}
 OPTIONS = {"chunk", "delayMs", "field", "keepalive"}
 SCRIPT_KEYS = {"description", "stopClass", "harness", "responses"}
 RESPONSE_KEYS = {"steps", "wire", "headers", "chunkDelayMs", "note"}

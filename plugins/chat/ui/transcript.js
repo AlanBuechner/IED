@@ -59,6 +59,7 @@ export class TranscriptView {
 			return;
 		}
 		replace(existing.agentHead, ...this.agentHeadParts(turn));
+		this.showPrefill(existing.prefill, turn);
 		replace(existing.foot, ...this.footParts(turn));
 		existing.foot.hidden = !turn.stop;
 	}
@@ -101,14 +102,27 @@ export class TranscriptView {
 			this.fill(el, segment);
 			body.append(el);
 		}
+		const prefill = h("div.chat-prefill");
+		this.showPrefill(prefill, turn);
 		const foot = h("div.chat-foot");
 		replace(foot, ...this.footParts(turn));
 		foot.hidden = !turn.stop;
 		const el = h("section.chat-turn", { dataset: { turn: turn.turnId } },
 			h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(turn.startedMs))),
-			user, agentHead, body, foot);
-		this.turnEls.set(turn.turnId, { el, agentHead, body, foot });
+			user, agentHead, body, prefill, foot);
+		this.turnEls.set(turn.turnId, { el, agentHead, body, prefill, foot });
 		return el;
+	}
+
+	// While the model's server reads the prompt (llama.cpp's progress, docs/12 "Watchdogs"): how much, of how many tokens
+	// (the cached ones were not read again), and for how long.
+	showPrefill(el, turn) {
+		const progress = !turn.stop && turn.prefill;
+		el.hidden = !progress;
+		if (!progress) return;
+		const percent = progress.total > 0 ? Math.min(100, Math.floor(progress.processed * 100 / progress.total)) : 0;
+		replace(el, icon("loading", "spin"), h("span", null, "Reading the prompt"), h("span.chat-bar", null, h("i", { style: { width: percent + "%" } })), h("b", null, percent + "%"),
+			h("span.meta", null, compact(progress.processed) + " of " + compact(progress.total) + " tokens" + (progress.cache ? " (" + compact(progress.cache) + " cached)" : "") + " \u00b7 " + duration(progress.time_ms || 0)));
 	}
 
 	agentHeadParts(turn) {

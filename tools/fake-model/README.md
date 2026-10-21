@@ -78,6 +78,7 @@ Steps run in order; each has exactly one op:
 | `{"toolCall": {"name", "arguments", "id", "index", "idOn", "nameOn", "argChunk"}}` | native `tool_calls` deltas. `arguments` is an object or a raw (possibly broken) string; `idOn`/`nameOn`: `first` (default), `every`, `none` (id only); `index` defaults to the call's position |
 | `{"textToolCall": {"dialect", "name", "arguments"}}` | the call as content text: `hermes`, `qwen`, `mistral`, `mistral-args`, `fenced-json`, `harmony` (see `dialects.py`) |
 | `{"stall": 120, "keepalive": 10}` | silence for N seconds; with `keepalive`, an SSE comment every K seconds |
+| `{"progress": 4, "delayMs": 200}` | llama.cpp's prompt progress (`prompt_progress {total, cache, processed, time_ms}` on an empty assistant delta, content null): N+1 reports from 0 to the prompt's tokens, `delayMs` apart - only when the request has `"return_progress": true`, as llama.cpp |
 | `{"cut": "now"}` / `{"cut": "before-headers"}` | reset the TCP connection (RST) |
 | `{"malformed": true}` or `{"malformed": "raw"}` | one `data:` line that is not JSON |
 | `{"raw": "..."}` | bytes written as is |

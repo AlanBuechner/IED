@@ -60,6 +60,9 @@ namespace Ai
 		json.EndArray();
 		json.RawField("tools", tools->RequestTools(chat->mode).View());
 		json.BoolField("stream", true);
+		bool progressing = false;
+		chats->progressing.TryGet(profile->name, progressing);
+		if (progressing) json.BoolField("return_progress", true);
 		json.Key(Core::StringView("stream_options"));
 		json.BeginObject();
 		json.BoolField("include_usage", true);
@@ -101,6 +104,7 @@ namespace Ai
 
 	// The segment joins the turn: segment.start carries it as it starts (a note's text, a tool's name and call).
 	Segment* TurnRun::Begin(Segment* segment) {
+		Prefill(Core::StringView(""));
 		turn->segments.Push(segment);
 		openedMs = StreamNowMs();
 		IED::JsonWriter data;
@@ -171,10 +175,27 @@ namespace Ai
 			segment->state = Core::String("streaming");
 			callSegments.Push(Begin(segment));
 		}
+		else if (kind == StepEventKind::Progress) Prefill(delta);
 		else if (call >= 0 && call < callSegments.Count()) {
 			callSegments[call]->argsText.Append(delta);
 			PublishDelta(chats, chat, callSegments[call], "argsText", delta);
 		}
+	}
+
+	void TurnRun::Prefill(Core::StringView progress) {
+		if (progress.IsEmpty() && turn->prefill.IsEmpty()) return;
+		turn->prefill = Core::String(progress);
+		const int64 now = StreamNowMs();
+		if (!progress.IsEmpty() && now - progressMs < kRunProgressEveryMs) return;
+		progressMs = now;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", turn->turnId.View());
+		data.Key(Core::StringView("prefill"));
+		if (progress.IsEmpty()) data.Null();
+		else data.Raw(progress);
+		data.EndObject();
+		chats->Publish(chat, "turn.progress", data.View());
 	}
 
 	// --- Notes -------------------------------------------------------------------------------------------------------

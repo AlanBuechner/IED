@@ -114,6 +114,13 @@ export class ChatModel {
 			case "context.changed":
 				this.context = data;
 				return { context: true };
+			case "turn.progress": {
+				const turn = this.turn(data.turnId);
+				if (!turn) return {};
+				if (data.prefill) turn.prefill = data.prefill;
+				else delete turn.prefill;
+				return { turn };
+			}
 			case "turn.stats":
 			case "turn.end": {
 				const turn = this.turn(data.turnId);

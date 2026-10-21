@@ -232,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
 	def _run(self, body, response, number, prompt_tokens):
 		scale = float(self.headers.get("X-Fake-Time-Scale", self.state.config.time_scale))
 		ctx = {"completion_id": "chatcmpl-fake-%d" % number, "created": int(time.time()), "model": body.get("model") or self.state.config.model,
-			"time_scale": scale, "request": number, "prompt_tokens": prompt_tokens}
+			"time_scale": scale, "request": number, "prompt_tokens": prompt_tokens, "return_progress": body.get("return_progress") is True}
 		sink = streaming.StreamSink(self, response.get("headers") == "lazy") if body.get("stream") else streaming.CollectSink(self)
 		with self.state.slot_gate:
 			with self.state.lock:

@@ -77,6 +77,17 @@ class CompletionTests {
 		assert_true(deltas[0].kind == Ai::DeltaKind::Reasoning && deltas[2].kind == Ai::DeltaKind::Content, "kinds");
 	}
 
+	[test("prompt_progress")]
+	public static void TestProgress() {
+		Ai::Completion completion;
+		Core::Array<Ai::CompletionDelta> deltas;
+		completion.Take(View("{\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null}}],\"object\":\"chat.completion.chunk\",\"prompt_progress\":{\"total\":655,\"cache\":0,\"processed\":139,\"time_ms\":313}}"), deltas);
+		assert_eq((int64)1, deltas.Count(), "llama.cpp's progress, and no content from a null one");
+		assert_true(deltas[0].kind == Ai::DeltaKind::Progress, "a progress delta");
+		assert_true(deltas[0].text.View().Contains(View("\"processed\":139")) && deltas[0].text.View().Contains(View("\"total\":655")), "its object as it came");
+		assert_true(completion.content.IsEmpty(), "nothing said yet");
+	}
+
 	[test("malformed_chunk_is_skipped")]
 	public static void TestMalformed() {
 		Ai::Completion completion;

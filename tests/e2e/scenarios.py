@@ -1041,6 +1041,19 @@ def chat_turn_with_approval(run):
 
 
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
+def chat_shows_the_prompt_read(run):
+	"""While the model's server reads a long prompt the turn shows how far (llama.cpp's progress, turn.progress), and
+	the bar goes once the reply streams. The real server's side is a server check (test_chat)."""
+	page = open_chat(run)
+	send(page, "read this big prompt")
+	page.wait_for_selector(".chat-turn:last-child .chat-prefill:not([hidden]) .chat-bar", timeout=20000)
+	check("Reading the prompt" in run.texts(".chat-turn:last-child .chat-prefill")[0], "it says what is happening")
+	run.shot("prefill")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	check(page.is_hidden(".chat-turn:last-child .chat-prefill"), "gone once the reply came")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
 def chat_tool_image(run):
 	"""A tool's result shows an image (docs/13 "Images in tool results"): the card shows it, open or closed. The real
 	server's side is a server check (test_chat), which needs a plugin with code."""
@@ -1355,3 +1368,57 @@ def editor_keys_and_keyboard_page(run):
 	page.fill(".kb-search", "duplicate")
 	page.click(".kb-row[data-command='ied.editor.duplicate'] button:has-text('Reset')")
 	page.wait_for_function("ied_shell.keybindings.labelFor('ied.editor.duplicate') === 'Ctrl+D'")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The browser (docs/27)
+
+BROWSER_DEMO = """<!doctype html>
+<html><head><title>E2E page</title></head>
+<body style="margin:0;font:16px sans-serif">
+<input id="field" aria-label="Field" style="position:absolute;left:20px;top:60px;width:200px;height:30px">
+<button id="go" style="position:absolute;left:20px;top:120px;width:120px;height:40px" onclick="document.title = 'Went ' + document.getElementById('field').value">Go</button>
+<script>
+	document.getElementById('field').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.title = 'Got ' + e.target.value; });
+	console.error('e2e boom');
+</script>
+</body></html>
+"""
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def browser_tab(run):
+	"""A web page that lives on the server, in a Browser tab (docs/27): View in Browser shows a workspace file, a click and
+	typed keys reach the page, its console lists the page's error, and what the AI does in the page is drawn over it."""
+	site = os.path.join(run.target.workspace, "site")
+	os.makedirs(site, exist_ok=True)
+	with open(os.path.join(site, "demo.html"), "w", encoding="utf-8") as f:
+		f.write(BROWSER_DEMO)
+	page = run.open()
+	page.evaluate("() => ied_shell.commands.run('ied.browser.openFile', { path: 'site/demo.html' })")
+	page.wait_for_selector(".browser-view .browser-frame:not([hidden])", timeout=30000)
+	titles = ".phone-head" if run.phone else ".tab .name"
+	run.wait_text(titles, "E2E page", timeout=30000)
+	frame = page.query_selector(".browser-frame").bounding_box()
+	page.mouse.click(frame["x"] + 60, frame["y"] + 75)
+	page.keyboard.type("hello")
+	page.keyboard.press("Enter")
+	run.wait_text(titles, "Got hello", timeout=20000)
+	run.shot("typed")
+	page.click(".browser-toolbar button[aria-label='Console']")
+	run.wait_text(".browser-console-list", "e2e boom", timeout=20000)
+	run.shot("console")
+	ws = page.evaluate("() => ied_shell.wsId")
+	tab = page.evaluate("() => ied_shell.context.get('activeTab')") or ""
+	pages = run.request("browser.pages", {"wsId": ws})["pages"]
+	demo = [p["pageId"] for p in pages if "browser:" + p["pageId"] == tab and p["url"].endswith("/site/demo.html")]
+	check(len(demo) == 1, "the tab's page (%s) is the workspace's: %s" % (tab, pages))
+	tree = run.request("plugins.call", {"name": "browser.snapshot", "args": {"wsId": ws, "args": {"page": demo[0]}}})["result"]["text"]
+	go = [line for line in tree.splitlines() if 'button "Go"' in line]
+	check(go and "[ref=" in go[0], "the snapshot names the button with a ref: %s" % tree)
+	ref = go[0].split("[ref=")[1].rstrip("]")
+	run.request("plugins.call", {"name": "browser.act", "args": {"wsId": ws, "args": {"page": demo[0], "action": "click", "ref": ref}}})
+	page.wait_for_selector(".browser-box:not([hidden])", timeout=10000)
+	run.wait_text(".browser-caption", 'AI: click button "Go"')
+	run.shot("ai-action")
+	run.wait_text(titles, "Went hello", timeout=20000)

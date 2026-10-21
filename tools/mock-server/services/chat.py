@@ -52,6 +52,7 @@ class Turn:
 		self.tokens_out = 0
 		self.started_ms = now_ms()
 		self.ended_ms = 0
+		self.prefill = None   # while the prompt is read: llama.cpp's prompt_progress
 
 	def to_dict(self):
 		out = {
@@ -61,6 +62,8 @@ class Turn:
 		}
 		if self.ended_ms:
 			out["endedMs"] = self.ended_ms
+		if self.prefill:
+			out["prefill"] = dict(self.prefill)
 		return out
 
 	def tool(self, call_id):
@@ -371,12 +374,23 @@ class Chats:
 			self.publish(chat, "context.changed", op[1])
 		elif kind == "pause":
 			await self.server.clock.sleep(op[1])
+		elif kind == "progress":
+			await self._prefill(chat, turn, *op[1:])
 		elif kind == "end":
 			extra = dict(op[2])
 			paused = extra.pop("paused", False)
 			self._end(chat, turn, op[1], extra)
 			return paused
 		return False
+
+	async def _prefill(self, chat, turn, total, steps, seconds):
+		"""The prompt read in `steps` reports over `seconds` (llama.cpp's prompt_progress), then cleared as a reply starts."""
+		for step in range(1, steps + 1):
+			turn.prefill = {"total": total, "cache": 0, "processed": total * step // steps, "time_ms": int(seconds * 1000 * step / steps)}
+			self.publish(chat, "turn.progress", {"turnId": turn.turn_id, "prefill": dict(turn.prefill)})
+			await self.server.clock.sleep(seconds / steps)
+		turn.prefill = None
+		self.publish(chat, "turn.progress", {"turnId": turn.turn_id, "prefill": None})
 
 	async def _stream_segment(self, chat, turn, segment, text, field):
 		turn.segments.append(segment)

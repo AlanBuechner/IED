@@ -6,7 +6,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 
 | # | Question | Decision | Where |
 |---|---|---|---|
-| 1 | UI delivery model | Split server + served web client; WebView2 desktop wrapper is optional later (P2) | `docs/01`, `docs/21` |
+| 1 | UI delivery model | Split server + served web client; plus the desktop app (owner, 2026-10-21): `ied-desktop`, a C4 WebView2 window on the same web client that starts the server | `docs/01`, `docs/21`, `docs/27` |
 | 2 | Server <-> client protocol v1 | One WS per tab; req/res + topic events with seq + snapshots + gaps; ring-buffer resume; backpressure; idempotent `opId`; doc lease + rebase | `docs/10`, `shared/host-api/protocol/` |
 | 3 | Plugin manifest v1 | Drafted as JSON Schema with four runtimes (builtin, declarative, js, process) and 40+ contribution points; frozen after owner review | `docs/02`, `shared/host-api/schemas/plugin-manifest.v1.schema.json` |
 | 4 | Project/solution schemas + toolbar grammar | Drafted as JSON Schema; variables use `${name}`; tasks = steps (run/task/debug/binding) with `onlyIf`/`when`, output targets, matchers; federations added | `docs/03`, `docs/06`, `shared/host-api/schemas/` |
@@ -25,7 +25,9 @@ Decide open items during design, then **move the answer into the relevant doc an
 | 17 | GPU debugger look | Owner: PIX's layout and styling, not RenderDoc's - capture as a document with view tabs, timing timeline on top, events grid, Pipeline state tree beside a resource viewer, docked grids; RenderDoc stays a backend and a capability reference | `docs/22`, `frontend/mocks/07-09` |
 | 18 | Where C4 and Nuke live | Owner: in this repository (`C4/`, `Nuke/`), versioned together with IED so an agent can fix the compiler or the IDE and continue; Frost folded in; old history dropped | `README.md`, `AGENTS.md` |
 | 19 | Nuke's project format and extensibility | Owner: declarative TOML `nuke.toml` plus optional Python (`scripts`, `python =` steps); every command has pre-/post- phases for project steps; workspaces add commands; commands chain (`nuke build run dev`) | `docs/23`, `Nuke/README.md` |
+| 21 | The browser engine for the desktop app, the AI's browser tools and the in-IDE browser | Owner, 2026-10-21: one engine, Edge's - WebView2 in the desktop app, Edge headless over CDP on the server for pages the AI and people share; the Browser tab is server-rendered (pulled frames, forwarded input), so it works on phones and shows the AI's pages live; everything in C4 (the desktop's COM callbacks too) | `docs/27` |
 | 20 | How projects get the compiler | One shared store of immutable, versioned C4 toolchains in this checkout (`toolchains/c4/<version>`, plus `dev` = the in-tree build); workspaces pin a version; nothing vendors Nuke or C4 | `docs/23` N-7 |
+| 21 | Prefill-progress signals (was D4) | Verified 2026-10-21 against llama.cpp b10222: `"return_progress": true` on a streamed `/v1/chat/completions` request makes it send, before the first token, chunks with `prompt_progress {total, cache, processed, time_ms}` (and an empty assistant delta, content null). The chat asks for it from servers its probe found to be llama.cpp; each report extends the prefill watchdog and the clients see the prompt read so far (`turn.progress`). vLLM and Ollama send nothing before the first token: the estimate and SSE keepalives cover them | `docs/12` "Watchdogs", `docs/10` |
 
 ## Open - owner's call
 
@@ -49,7 +51,6 @@ Decide open items during design, then **move the answer into the relevant doc an
 | D1 | Reflection-based JSON serialization in Bedrock (needs String/Array/HashMap/enum support) vs hand-written DTO codecs in IED | Depends on Bedrock timeline (`docs/17` checklist item 6) |
 | D2 | Binary WS frames for terminal/profiler bulk | Measure in M1/M9 before adding |
 | D3 | Embeddings for skills/history search: which local embedding model/endpoint by default | P2; BM25 first |
-| D4 | Exact prefill-progress signals available from llama.cpp/vLLM/Ollama streams | Verify field names during M4; the estimate-based watchdog works without them |
 | D5 | Spell-check dictionary source and license (SCOWL-based Hunspell en_US) | Check before bundling |
 | D6 | Whether Nuke should read `.ied.proj` directly someday | No for v1 (Nuke stays authoritative; `nuke init --ied` generates IED files) |
 

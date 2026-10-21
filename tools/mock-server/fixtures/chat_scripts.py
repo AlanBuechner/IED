@@ -1,7 +1,7 @@
 """Scripted assistant turns for the mock chat (docs/10 "Chats").
 
 Ops: ("thinking", text) | ("text", text) | ("tool", spec) | ("ask", question) | ("tasks", items) | ("harness", kind, text)
-| ("context", data) | ("pause", seconds) | ("end", stop, extra).
+| ("context", data) | ("pause", seconds) | ("progress", total, steps, seconds) (the prompt read: turn.progress) | ("end", stop, extra).
 A tool spec has name, args, result {preview, isError?}, ms, and optionally approval {summary, why, subject, diff} (waits for
 chat.approve), plus / minus (a write's lines) and path (the file it changed). A question has question, options, allowText.
 """
@@ -87,8 +87,14 @@ SNAP = [
 	("end", "finished", {}),
 ]
 
-SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP}
-KEYWORDS = [("screen", "snap"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
+PREFILL = [
+	("progress", 98304, 20, 40.0),
+	("text", "I read all of it: the renderer owns the frame, and the player moves by a fixed step.\n"),
+	("end", "finished", {}),
+]
+
+SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP, "prefill": PREFILL}
+KEYWORDS = [("screen", "snap"), ("big prompt", "prefill"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
 	("long", "long"), ("essay", "long"), ("error", "error"), ("fail", "error")]
 
 SEED_TURNS = [

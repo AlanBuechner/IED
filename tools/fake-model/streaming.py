@@ -269,6 +269,20 @@ class Runner:
 			if every and remaining > 0:
 				self.sink.comment("keepalive")
 
+	def op_progress(self, step):
+		"""llama.cpp's prompt progress: `progress` reports over `delayMs` each, only when the request asked for them."""
+		if not self.ctx.get("return_progress"):
+			return
+		count = int(step["progress"])
+		total = self.ctx["prompt_tokens"]
+		delay = step.get("delayMs", self.delay * 1000) / 1000.0
+		for i in range(count + 1):
+			done = total * i // count
+			extra = {"prompt_progress": {"total": total, "cache": 0, "processed": done, "time_ms": int(delay * 1000 * i)}}
+			self.sink.data(self.chunk({"role": "assistant", "content": None}, extra=extra))
+			if i < count:
+				self.sleep(delay)
+
 	def op_cut(self, step):
 		if step["cut"] == "before-headers" and self.sink.headers_sent:
 			raise ValueError("cut 'before-headers' after headers were sent")
@@ -308,5 +322,5 @@ OPS = {
 	"headers": "op_headers", "role": "op_role", "text": "op_text", "reasoning": "op_reasoning",
 	"toolCall": "op_tool_call", "textToolCall": "op_text_tool_call", "stall": "op_stall", "cut": "op_cut",
 	"malformed": "op_malformed", "raw": "op_raw", "finish": "op_finish", "usage": "op_usage", "done": "op_done",
-	"error": "op_error",
+	"error": "op_error", "progress": "op_progress",
 }

@@ -191,6 +191,7 @@ namespace Ai
 		if (genMs > 0) json.IntField("genMs", genMs);
 		json.IntField("startedMs", startedMs);
 		if (endedMs > 0) json.IntField("endedMs", endedMs);
+		if (!prefill.IsEmpty() && !withMessages) json.RawField("prefill", prefill.View());
 		if (withMessages) {
 			json.Key(Core::StringView("messages"));
 			json.BeginArray();

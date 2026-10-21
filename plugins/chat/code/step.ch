@@ -11,10 +11,11 @@ namespace Ai
 	// How the request ended on the wire (docs/12 taxonomy, the transport and stall rows).
 	enum class WireEnd { Completed, ConnectFailed, HttpError, Disconnected, StalledPrefill, StalledStream, StepCap, Cancelled }
 
-	enum class StepEventKind { Thinking, Text, CallStarted, CallArguments }
+	enum class StepEventKind { Thinking, Text, CallStarted, CallArguments, Progress }
 
 	// What streams out of a step as it happens: thinking and text deltas, a native call starting (`text` its name, `call`
-	// its index in the step's calls) and its argument deltas. Called on the step's thread.
+	// its index in the step's calls) and its argument deltas, and before the first token the prompt read so far (`text`
+	// llama.cpp's prompt_progress object). Called on the step's thread.
 	alias StepEvents = func<void(StepEventKind kind, Core::StringView text, int64 call)>;
 
 	class StepRequest

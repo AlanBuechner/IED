@@ -24,7 +24,7 @@ namespace Ai
 		public int64 startMs;
 		public int64 lastByteMs;
 		public int64 prefillDeadlineMs;
-		public int64 prefillExtendMs;     // what a keepalive comment adds before the first token
+		public int64 prefillExtendMs;     // what a keepalive comment or a progress report adds before the first token
 	}
 
 	// Never cuts a UTF-8 sequence: the end moves back to the start of the code point it falls in.
@@ -59,7 +59,18 @@ namespace Ai
 		Release(stream, false);
 	}
 
+	// The server is still at work before the first token: the prefill watchdog waits longer.
+	static void ExtendPrefill(StepStream& stream) {
+		const int64 extended = StepNowMs() + stream.prefillExtendMs;
+		if (stream.result->ttftMs < 0 && extended > stream.prefillDeadlineMs) stream.prefillDeadlineMs = extended;
+	}
+
 	static void TakeDelta(StepStream& stream, const CompletionDelta& delta, int64& knownCalls) {
+		if (delta.kind == DeltaKind::Progress) {
+			ExtendPrefill(stream);
+			if (stream.result->ttftMs < 0) (*stream.events)(StepEventKind::Progress, delta.text.View(), -1);
+			return;
+		}
 		if (stream.result->ttftMs < 0) stream.result->ttftMs = StepNowMs() - stream.startMs;
 		if (delta.kind == DeltaKind::Content) TakeContent(stream, delta.text.View());
 		else if (delta.kind == DeltaKind::Reasoning) {
@@ -79,8 +90,7 @@ namespace Ai
 	static void TakeEvent(StepStream& stream, const SseEvent& event, int64& knownCalls) {
 		if (event.kind == SseKind::Comment) {
 			stream.result->keepalives += 1;
-			const int64 extended = StepNowMs() + stream.prefillExtendMs;
-			if (stream.result->ttftMs < 0 && extended > stream.prefillDeadlineMs) stream.prefillDeadlineMs = extended;
+			ExtendPrefill(stream);
 			return;
 		}
 		Core::Array<CompletionDelta> deltas;

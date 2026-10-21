@@ -19,6 +19,7 @@ namespace Ai
 	const int64 kRunMalformedBound = 3;
 	const int64 kRunKeptToolResultBytes = 16 * 1024;
 	const int64 kRunCompressAtPercent = 85;
+	const int64 kRunProgressEveryMs = 250;   // turn.progress at most this often
 
 	class TurnRun
 	{
@@ -54,6 +55,8 @@ namespace Ai
 		private Core::String RequestBody(int64& promptTokens);
 		private StepRequest Request();
 		private void OnEvent(StepEventKind kind, Core::StringView text, int64 call);
+		// The prompt read so far (`progress` llama.cpp's object; empty: reading ended), for the clients.
+		private void Prefill(Core::StringView progress);
 		private Segment* NewSegment(const char* type);
 		private Segment* Begin(Segment* segment);
 		private void Close(Segment* segment);
@@ -114,6 +117,7 @@ namespace Ai
 		private Segment* text;
 		private Core::Array<Segment*> callSegments;
 		private int64 openedMs;
+		private int64 progressMs;   // when turn.progress last went out
 	}
 
 	// Starts `chat`'s current turn on a thread of its own; inside the host lock.
