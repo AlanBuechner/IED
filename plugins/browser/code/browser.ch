@@ -81,6 +81,8 @@ namespace Browser
 		private void EnsureEngine();
 		private Core::String ContextFor(Core::StringView wsId);
 		private void Viewport(Page* page);
+		private void Attach(Page* page, Core::StringView targetId, Core::StringView navigateTo);
+		private void Adopt(Page* parent, Core::StringView targetId, Core::StringView url);
 		private bool StartScreencast(Page* page);
 		private void Changed(IED::Events& events, Page* page);
 		private void Persist(Core::StringView wsId);
@@ -98,6 +100,7 @@ namespace Browser
 		private void NetworkEvent(Page* page, const CdpEvent& event);
 		private void FrameEvent(Page* page, const CdpEvent& event);
 		private void TitleReported(Page* page, const CdpEvent& event);
+		private void Opened(const CdpEvent& event);
 		private void Unloaded(Page* page);
 
 		private Threading::Mutex starting;

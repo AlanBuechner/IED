@@ -3,7 +3,7 @@
 
 import { test, assertEqual } from "./harness.js";
 import { fitted, toPage, modifiersOf, typedUrl } from "/plugins/ied.browser/ui/browserview.js";
-import { fileUrl } from "/plugins/ied.browser/ui/index.js";
+import { fileUrl, newPageNotice } from "/plugins/ied.browser/ui/index.js";
 
 test("browser: a picture fits the pane, centered, its aspect kept", () => {
 	assertEqual(fitted(1280, 800, 640, 400), { left: 0, top: 0, width: 640, height: 400 }, "the same aspect fills it");
@@ -33,6 +33,12 @@ test("browser: what a typed address opens", () => {
 	assertEqual(typedUrl("  https://example.com/a  "), "https://example.com/a", "as written");
 	assertEqual(typedUrl("file:///C:/site/index.html"), "file:///C:/site/index.html");
 	assertEqual(typedUrl(""), "about:blank");
+});
+
+test("browser: which new pages are told, and how", () => {
+	assertEqual(newPageNotice({ opener: "ai", url: "http://localhost:5173/" }), "The AI opened http://localhost:5173/");
+	assertEqual(newPageNotice({ opener: "user", parent: "pg-1", url: "https://example.com/" }), "A page opened https://example.com/", "a link's new page");
+	assertEqual(newPageNotice({ opener: "user", parent: "" }), null, "a person's own page is in their tab already");
 });
 
 test("browser: a workspace file as a file: URL", () => {

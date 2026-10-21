@@ -79,6 +79,8 @@ A page is server state with an id (`pg-` and 12 hex digits), owned by a workspac
 
 Loading a page makes a target at `about:blank`, attaches, enables `Page`, `Runtime`, `Network`, `Log` and `Inspector`, adds the title reporter, sets the viewport (`Emulation.setDeviceMetricsOverride`), then navigates, so no event of the page's own load is missed. Headless browsers do not tell when a script sets `document.title`: a small script added to every document (`Page.addScriptToEvaluateOnNewDocument`) reports the top document's title through a CDP binding (`Runtime.addBinding`, `Runtime.bindingCalled`), and the worker reads it again after each load. JavaScript dialogs are accepted (the console says so); a crashed renderer unloads the page, which loads again when next shown.
 
+A page a page opens (a `target="_blank"` link, `window.open`) becomes a page of its own in the same workspace (`Target.targetCreated` with an opener of ours): attached, with its opener's viewport and `opener`, its `parent` naming the page that opened it; `page.added` tells every window, which offers it in a toast with Show.
+
 A page nobody has looked at (pulled a frame) and nobody has used (an AI tool, a person's input) for `browser.unloadAfterSeconds` (600; 0: never) leaves the browser: it stays listed and loads again at its last address when shown or used, its in-page state gone. The browser stops once no page has been loaded for that long, and starts again on the next use.
 
 URLs allowed: `http`, `https`, `about:blank`, and `file:` inside the workspace's folder (no `..`); a bare host gets `http://` when it is local (`localhost:5173`, `127.0.0.1`) and `https://` otherwise; anything else (`javascript:`, `chrome:`, ...) is refused.
@@ -128,5 +130,5 @@ The plugin's `toolCalls` (`docs/13` T-BRW, as built), C4 functions that call the
 - One process for every window of the user (a second `ied-desktop` hands its request to the running one).
 - Full DevTools for a server page in the desktop app (Edge serves its DevTools front end on the CDP port).
 - The egress policy (`docs/04`) for the browser: `--proxy-server` to IED's egress proxy in secure mode.
-- Pages a page opens (`window.open`, `target=_blank`) as pages of their own; downloads; file uploads (`DOM.setFileInputFiles`).
+- Downloads; file uploads (`DOM.setFileInputFiles`).
 - A jump list of recent workspaces, start on login.

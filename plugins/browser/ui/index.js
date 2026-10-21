@@ -18,7 +18,7 @@ export function activate(ied) {
 		if (args && args.path && root) openPage(ied, fileUrl(root, args.path));
 	});
 	ied.commands.handle("ied.browser.pages", () => pickPage(ied));
-	watchAiPages(ied);
+	watchNewPages(ied);
 }
 
 // A workspace file as a file: URL ("C:\\site" + "pages/a b.html" -> "file:///C:/site/pages/a%20b.html").
@@ -54,8 +54,17 @@ async function pickPage(ied) {
 	});
 }
 
-// The AI's new pages, told as they open: the page renders whether or not anyone looks, and Show puts it in a tab.
-function watchAiPages(ied) {
+// What a new page's toast says: the AI's pages and pages a page opened (target="_blank", window.open) render whether
+// or not anyone looks, so they are told as they open; a person's own new page is already in their tab.
+export function newPageNotice(page) {
+	const where = page.url || "a page";
+	if (page.opener === "ai") return "The AI opened " + where;
+	if (page.parent) return "A page opened " + where;
+	return null;
+}
+
+// New pages that open without a tab, told as they open; Show puts one in a tab.
+function watchNewPages(ied) {
 	let stop = null;
 	const follow = () => {
 		if (stop) stop();
@@ -65,8 +74,8 @@ function watchAiPages(ied) {
 		stop = ied.client.subscribe("browser:" + wsId, {
 			snap: () => {},
 			evt: (kind, data) => {
-				if (kind !== "page.added" || data.opener !== "ai") return;
-				ied.toast("The AI opened " + (data.url || "a page"), { action: { label: "Show", run: () => ied.tabs.open("browser:" + data.pageId, { preview: false }) } });
+				const notice = kind === "page.added" ? newPageNotice(data) : null;
+				if (notice) ied.toast(notice, { action: { label: "Show", run: () => ied.tabs.open("browser:" + data.pageId, { preview: false }) } });
 			},
 		});
 	};

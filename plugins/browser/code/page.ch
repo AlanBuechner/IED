@@ -48,6 +48,7 @@ namespace Browser
 		public Core::String url;
 		public Core::String title;
 		public Core::String opener;   // "user" or "ai"
+		public Core::String parent;   // the page that opened it (window.open, target="_blank"); "" for none
 		public bool loading;
 		public bool canGoBack;
 		public bool canGoForward;
@@ -78,7 +79,7 @@ namespace Browser
 		public int64 loads;           // load events seen
 
 		public Core::String Topic() const { return Core::String("page:") + pageId.View(); }
-		// {pageId, wsId, url, title, loading, canGoBack, canGoForward, width, height, scale, opener, live}
+		// {pageId, wsId, url, title, loading, canGoBack, canGoForward, width, height, scale, opener, parent, live}
 		public Core::String SummaryJson() const;
 		// {page, console, network, lastAction}
 		public Core::String SnapshotJson() const;

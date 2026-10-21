@@ -172,7 +172,14 @@ namespace Browser
 		params.AppendByte('}');
 		CdpReply created = engine.cdp->Call(Core::StringView(""), Core::StringView("Target.createTarget"), params.View());
 		if (!created.ok) throw Unavailable((Core::String("the browser made no page: ") + created.error.View()).View());
-		Core::String targetId = Core::String(created.result.Member("targetId").AsView());
+		Attach(page, created.result.Member("targetId").AsView(), url.View());
+	}
+
+	// Under `starting`: the page on the target `targetId` - attached, its domains on, its title reported, its viewport
+	// set - then at `navigateTo` unless that is "" or about:blank.
+	void Browsers::Attach(Page* page, Core::StringView target, Core::StringView navigateTo) {
+		Core::String targetId = Core::String(target);
+		Core::String url = Core::String(navigateTo);
 		CdpReply attached = engine.cdp->Call(Core::StringView(""), Core::StringView("Target.attachToTarget"),
 			(Core::String("{\"flatten\":true,\"targetId\":") + JsonText(targetId.View()).View() + "}").View());
 		if (!attached.ok) throw Unavailable((Core::String("the browser's page did not attach: ") + attached.error.View()).View());
@@ -201,7 +208,40 @@ namespace Browser
 		engine.cdp->Call(sessionId.View(), Core::StringView("Page.addScriptToEvaluateOnNewDocument"),
 			(Core::String("{\"source\":") + JsonText(Core::StringView(kTitleReporter)).View() + "}").View());
 		Viewport(page);
-		if (url.View() != "about:blank") engine.cdp->Call(sessionId.View(), Core::StringView("Page.navigate"), (Core::String("{\"url\":") + JsonText(url.View()).View() + "}").View());
+		if (!url.IsEmpty() && url.View() != "about:blank")
+			engine.cdp->Call(sessionId.View(), Core::StringView("Page.navigate"), (Core::String("{\"url\":") + JsonText(url.View()).View() + "}").View());
+	}
+
+	// A page another page opened (a target="_blank" link, window.open): a page of its own in the same workspace, with
+	// the opener's viewport and opener, told as added with its parent.
+	void Browsers::Adopt(Page* parent, Core::StringView targetId, Core::StringView url) {
+		Page* page = new Page();
+		page->pageId = NewPageId();
+		page->url = Core::String(url);
+		{
+			IED::HostLock lock(*context);
+			page->wsId = parent->wsId;
+			page->opener = parent->opener;
+			page->parent = parent->pageId;
+			page->width = parent->width;
+			page->height = parent->height;
+			page->scalePercent = parent->scalePercent;
+		}
+		Browsers* self = this;
+		context->TopicFrom(page->Topic().View(), [page]() -> Core::String { return page->SnapshotJson(); });
+		context->Atomically([self, page](IED::Events& events) {
+			self->pages.Push(page);
+			events.Publish(BrowserTopic(page->wsId.View()).View(), "page.added", page->SummaryJson().View());
+		});
+		Persist(page->wsId.View());
+		{
+			Threading::LockGuard guard(starting);
+			if (!engine.Running()) return;
+			Attach(page, targetId, Core::StringView(""));
+		}
+		// It may have loaded before it was attached: its address and title are asked of it.
+		RefreshState(page);
+		Persist(page->wsId.View());
 	}
 
 	CdpReply Browsers::Call(Page* page, Core::StringView method, Core::StringView paramsJson) {
@@ -548,17 +588,20 @@ namespace Browser
 		CdpReply history = Call(page, Core::StringView("Page.getNavigationHistory"), Core::StringView(""));
 		const int64 index = history.result.Member("currentIndex").AsInt();
 		const int64 count = history.result.Member("entries").Count();
+		Core::String url = Core::String(history.result.Member("entries").At(index).Member("url").AsView());
 		CdpReply titled = Call(page, Core::StringView("Runtime.evaluate"), Core::StringView("{\"expression\":\"document.title\",\"returnByValue\":true}"));
 		Core::String title = Core::String(titled.result.Member("result").Member("value").AsView());
 		Browsers* self = this;
-		context->Atomically([self, page, index, count, title](IED::Events& events) {
+		context->Atomically([self, page, index, count, title, url](IED::Events& events) {
 			const bool back = index > 0;
 			const bool forward = index + 1 < count;
 			const bool named = !title.IsEmpty() && title.View() != page->title.View();
-			if (back == page->canGoBack && forward == page->canGoForward && !named) return;
+			const bool moved = !url.IsEmpty() && url.View() != page->url.View();
+			if (back == page->canGoBack && forward == page->canGoForward && !named && !moved) return;
 			page->canGoBack = back;
 			page->canGoForward = forward;
 			if (named) page->title = title;
+			if (moved) page->url = url;
 			self->Changed(events, page);
 		});
 	}

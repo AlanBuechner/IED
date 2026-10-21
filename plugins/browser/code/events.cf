@@ -8,6 +8,10 @@ namespace Browser
 	static bool Is(const CdpEvent& event, const char* method) { return event.method.View() == method; }
 
 	void Browsers::Event(const CdpEvent& event) {
+		if (event.sessionId.IsEmpty() && Is(event, "Target.targetCreated")) {
+			Opened(event);
+			return;
+		}
 		if (event.sessionId.IsEmpty()) {
 			Page* page = null;
 			Core::StringView targetId = Is(event, "Target.targetInfoChanged") ? event.params.Member("targetInfo").Member("targetId").AsView()
@@ -55,6 +59,23 @@ namespace Browser
 		page->frameWidth = (int32)metadata.Member("deviceWidth").AsFloat();
 		page->frameHeight = (int32)metadata.Member("deviceHeight").AsFloat();
 		frameArrived.NotifyAll();
+	}
+
+	// A target a page of ours opened: adopted (on the worker, which may ask the browser) as a page of its own.
+	void Browsers::Opened(const CdpEvent& event) {
+		Serialization::DomNode info = event.params.Member("targetInfo");
+		if (info.Member("type").AsView() != "page" || info.Member("openerId").AsView().IsEmpty()) return;
+		Page* parent = null;
+		Core::String targetId = Core::String(info.Member("targetId").AsView());
+		{
+			Threading::LockGuard routes(frames);
+			if (byTarget.Contains(targetId)) return;
+			byTarget.TryGet(Core::String(info.Member("openerId").AsView()), parent);
+		}
+		if (parent == null) return;
+		Core::String url = Core::String(info.Member("url").AsView());
+		Browsers* self = this;
+		Later([self, parent, targetId, url]() { self->Adopt(parent, targetId.View(), url.View()); });
 	}
 
 	void Browsers::TitleReported(Page* page, const CdpEvent& event) {

@@ -37,6 +37,7 @@ namespace Browser
 		json.IntField("height", height);
 		json.RawField("scale", ScaleText(scalePercent).View());
 		json.Field("opener", opener.View());
+		json.Field("parent", parent.View());
 		json.BoolField("live", live);
 		json.EndObject();
 		return json.ToString();

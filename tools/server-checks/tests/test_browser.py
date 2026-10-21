@@ -25,6 +25,7 @@ PAGE = """<!doctype html>
 <input id="name" aria-label="Name" style="position:absolute;left:20px;top:120px;width:200px;height:30px">
 <button id="go" style="position:absolute;left:20px;top:200px;width:200px;height:60px"
 	onclick="document.title = 'Clicked ' + document.getElementById('name').value; console.log('clicked', document.getElementById('name').value)">Go</button>
+<a id="pop" href="/index.html?opened=1" target="_blank" style="position:absolute;left:20px;top:300px">Pop</a>
 <img src="/missing.png" alt="">
 <script>console.warn('fixture ready'); setTimeout(() => { throw new Error('fixture boom'); }, 0);</script>
 </body></html>
@@ -223,6 +224,21 @@ class BrowserTests(ServerTestCase):
 		frame = await self.client.request("browser.frame", {"pageId": page, "after": 0}, timeout=LOAD_SECONDS)
 		self.assertGreater(frame["seq"], 0, "looking at it loads it again")
 		self.assertTrue((await self.client.request("browser.pages", {"wsId": self.ws}))["pages"][0]["live"])
+
+	async def test_a_page_a_page_opens_is_a_page_of_its_own(self):
+		page = await self.open()
+		await self.titled(page, "Fixture")
+		await self.client.sub(["browser:" + self.ws])
+		await self.client.next_frame("browser:" + self.ws)
+		await self.call("browser.act", page=page, action="click", selector="#pop")
+		added = (await self.client.wait_for("browser:" + self.ws, lambda f: f.get("kind") == "page.added", timeout=LOAD_SECONDS))[-1]["data"]
+		self.assertEqual((page, "user"), (added["parent"], added["opener"]), added)
+		child = added["pageId"]
+		await self.client.sub(["page:" + child])
+		await self.client.next_frame("page:" + child)
+		await self.titled(child, "Fixture")
+		listed = (await self.client.request("browser.pages", {"wsId": self.ws}))["pages"]
+		self.assertTrue([p for p in listed if p["pageId"] == child and p["url"].endswith("/index.html?opened=1") and p["live"]], listed)
 
 	async def test_closing_removes_the_page(self):
 		page = await self.open()
