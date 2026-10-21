@@ -55,6 +55,10 @@ const TOKEN_RULES = [
 	["operator", "syntax-operator"], ["keyword.directive", "syntax-macro"], ["annotation", "syntax-macro"], ["constant", "syntax-constant"],
 	["predefined", "syntax-function"], ["namespace", "syntax-namespace"], ["invalid", "syntax-invalid"], ["tag", "syntax-keyword"],
 	["attribute.name", "syntax-variable"], ["attribute.value", "syntax-string"], ["variable", "syntax-variable"], ["metatag", "syntax-macro"],
+	// language servers' semantic token types (LSP's standard names)
+	["class", "syntax-type"], ["struct", "syntax-type"], ["enum", "syntax-type"], ["interface", "syntax-type"], ["typeParameter", "syntax-type"],
+	["function", "syntax-function"], ["method", "syntax-function"], ["parameter", "syntax-parameter"], ["property", "syntax-member"],
+	["event", "syntax-member"], ["enumMember", "syntax-constant"], ["macro", "syntax-macro"], ["decorator", "syntax-macro"], ["modifier", "syntax-keyword"],
 ];
 
 const COLORS = {

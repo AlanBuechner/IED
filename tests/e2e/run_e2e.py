@@ -90,7 +90,7 @@ def main(argv):
 		return subprocess.run([other, "-I", os.path.abspath(__file__)] + argv).returncode
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--server", help="the ied-server executable; without it only the mock runs")
-	parser.add_argument("-k", dest="pattern", help="only scenarios whose name contains this")
+	parser.add_argument("-k", dest="pattern", help="only scenarios whose name contains this (\"unit\": the unit tests only)")
 	parser.add_argument("--headed", action="store_true")
 	args = parser.parse_args(argv)
 	from playwright.sync_api import sync_playwright
@@ -102,7 +102,7 @@ def main(argv):
 			target.start()
 			try:
 				print("== %s at %s" % (target.kind, target.url))
-				if target.kind == "mock" and not args.pattern:
+				if target.kind == "mock" and (not args.pattern or args.pattern == "unit"):
 					failures += unit_tests(browser, target)
 				failures += run_scenarios(browser, target, args.pattern)
 			finally:

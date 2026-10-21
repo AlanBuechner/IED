@@ -10,10 +10,16 @@ import { CodeEditor } from "./editorview.js";
 import { Editors } from "./editors.js";
 import { loadMonaco } from "./monaco.js";
 import { fileIconSpec } from "./fileicons.js";
+import { Diagnostics } from "./diagnostics.js";
+import { LanguageFeatures } from "./language.js";
+import { ErrorList as ErrorListView } from "./errorlist.js";
 
 const explorers = new Set();
 const outputs = new Set();
+const errorLists = new Set();
 const editors = new Editors();
+let diagnostics = null;
+let features = null;
 
 function last(set) {
 	return [...set].pop() || null;
@@ -25,6 +31,7 @@ function baseName(path) {
 
 export function activate(ied) {
 	addStylesheet(ied.plugin.base + "ui/editor.css");
+	diagnostics = new Diagnostics(ied);
 	ied.tabs.kind("doc", { view: "TextDocument", title: baseName, icon: fileIconSpec, resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
 	ied.commands.handle("ied.explorer.open", (args) => {
@@ -42,6 +49,16 @@ export function activate(ied) {
 		return editor ? editor.save() : undefined;
 	});
 	ied.commands.handle("ied.editor.saveAll", () => Promise.all(editors.all().filter((e) => e.sync.dirty).map((e) => e.save())));
+	ied.commands.handle("ied.editor.goTo", (args) => goTo(ied, args));
+}
+
+// Opens a document at a place: {path, line, col} (0-based, UTF-16).
+async function goTo(ied, args) {
+	if (!args || !args.path) return;
+	const ref = "doc:" + args.path;
+	ied.tabs.open(ref, { preview: false });
+	const editor = await editors.whenReady(ref);
+	if (args.line !== undefined) editor.reveal({ lineNumber: args.line + 1, column: (args.col || 0) + 1 });
 }
 
 export function SolutionExplorer(ctx) {
@@ -52,12 +69,17 @@ export function Output(ctx) {
 	return new OutputView(ctx, outputs);
 }
 
+export function ErrorList(ctx) {
+	return new ErrorListView(ctx, diagnostics, errorLists);
+}
+
 // Monaco when it loads; otherwise the read-only view, saying why.
 export async function TextDocument(ctx) {
 	const path = ctx.ref.slice("doc:".length);
 	try {
 		const monaco = await loadMonaco(ctx.ied);
-		return new CodeEditor(ctx, path, monaco, editors);
+		if (!features) features = new LanguageFeatures(ctx.ied, monaco, editors, diagnostics);
+		return new CodeEditor(ctx, path, monaco, editors, features);
 	}
 	catch (e) {
 		ctx.ied.report("the code editor is not available, so " + path + " opens read-only: " + e.message, e);

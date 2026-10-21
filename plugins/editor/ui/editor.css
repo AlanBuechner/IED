@@ -1,5 +1,6 @@
 /*
-	editor.css - the editor plugin's views: Solution Explorer, Output, the read-only document view. Theme tokens only.
+	editor.css - the editor plugin's views: Solution Explorer, Output, the Error List, the read-only document view. Theme
+	tokens only.
 */
 
 .ft-source { color: var(--filetype-source); }
@@ -78,3 +79,46 @@
 .ed-bar > span:not(.ci) { flex: 1; }
 .ed-bar > .ci { color: var(--accent-info); }
 .st-part + .st-part { margin-left: var(--space-5); }
+
+/* Error List */
+.el-toggle { gap: var(--space-2); display: inline-flex; align-items: center; }
+.el-toggle:not(.on) { color: var(--text-3); }
+.el-toggle:not(.on) .ci { opacity: 0.5; }
+.el-toggle.on { background: var(--bg-4); color: var(--text-0); }
+.el-search { width: 220px; }
+.el-head, .el-row {
+	display: grid;
+	grid-template-columns: 22px 90px minmax(160px, 1fr) 160px 56px 110px;
+	align-items: center;
+	gap: var(--space-3);
+	padding: 0 var(--space-3);
+	font-size: var(--font-size-sm);
+}
+.el-head { height: 24px; color: var(--text-2); border-bottom: var(--border-width) solid var(--border-0); flex: none; }
+.el-rows { position: absolute; inset: 0; overflow: auto; outline: none; }
+.el-row { height: var(--row-h); color: var(--text-0); cursor: default; }
+.el-row:hover { background: var(--veil); }
+.el-row.sel { background: var(--bg-4); }
+.el-rows:focus .el-row.sel { outline: var(--border-width) solid var(--focus); outline-offset: -1px; }
+.el-line { text-align: right; color: var(--text-1); }
+.el-code, .el-source, .el-file { color: var(--text-1); }
+.el-more { padding: var(--space-3) var(--space-4); font-size: var(--font-size-sm); }
+
+@media (max-width: 719px) {
+	.el-head { display: none; }
+	.el-search { width: auto; flex: 1; min-width: 0; }
+	.el-row {
+		grid-template-columns: 22px 1fr auto;
+		grid-template-areas: "icon text text" "icon file code";
+		height: auto;
+		min-height: var(--row-h-touch);
+		padding: var(--space-2) var(--space-3);
+		row-gap: 0;
+	}
+	.el-row .el-icon { grid-area: icon; align-self: start; padding-top: 2px; }
+	.el-row .el-text { grid-area: text; white-space: normal; }
+	.el-row .el-file { grid-area: file; }
+	.el-row .el-code { grid-area: code; }
+	.el-row .el-line, .el-row .el-source { display: none; }
+	.el-row .el-file::after { content: ""; }
+}

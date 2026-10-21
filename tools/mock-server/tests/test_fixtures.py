@@ -119,14 +119,14 @@ class TaskTests(MockCase):
 		mirrored = await client.wait_for("out:w1:build", lambda f: "Build succeeded" in f.get("data", {}).get("text", ""))
 		self.assertEqual("clear", self.kinds(mirrored)[0])
 		diag = (await client.wait_for("diag:w1", lambda f: f.get("kind") == "diag.set" and f["data"]["items"]))[-1]["data"]
-		self.assertEqual(("src/engine/render.c", "warning", 8), (diag["path"], diag["items"][0]["severity"], diag["items"][0]["range"]["start"]["line"]))
+		self.assertEqual(("src/engine/render.c", 2, 8), (diag["path"], diag["items"][0]["severity"], diag["items"][0]["range"]["start"]["line"]))
 
 	async def test_broken_build_fails_with_an_error_diagnostic(self):
 		client = await self.client()
 		await self.subscribed(client, "diag:w1")
 		frames = await self.run_task(client, "build-broken")
 		self.assertEqual(("failed", 1), (frames[-1]["data"]["status"], frames[-1]["data"]["exitCode"]))
-		errors = await client.wait_for("diag:w1", lambda f: f.get("kind") == "diag.set" and any(i["severity"] == "error" for i in f["data"]["items"]))
+		errors = await client.wait_for("diag:w1", lambda f: f.get("kind") == "diag.set" and any(i["severity"] == 1 for i in f["data"]["items"]))
 		self.assertEqual("src/game/player.c", errors[-1]["data"]["path"])
 
 	async def test_flood_task_delivers_every_line(self):

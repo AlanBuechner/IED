@@ -9,5 +9,6 @@ import "./client.test.js";
 import "./textedits.test.js";
 import "./keybindings.test.js";
 import "./docsync.test.js";
+import "./lspconvert.test.js";
 
 run(document.getElementById("results"));

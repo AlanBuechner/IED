@@ -9,6 +9,7 @@ from rpc import RpcError
 
 DIAGNOSTIC = re.compile(r"^(?:\x1b\[\d+m)?(?P<path>[\w./-]+)\((?P<line>\d+),(?P<col>\d+)\): (?P<severity>error|warning) (?P<code>\w+): (?P<message>.*?)(?:\x1b\[0m)?\r?\n?$")
 TAIL_CHARS = 64 * 1024
+SEVERITIES = {"error": 1, "warning": 2}
 FLOOD_YIELD_EVERY = 100
 
 
@@ -133,8 +134,8 @@ class Tasks:
 	def _diagnostic(self, ws_id, match):
 		line, col = int(match["line"]) - 1, int(match["col"]) - 1
 		item = {
-			"range": {"start": {"line": line, "col": col}, "end": {"line": line, "col": col + 1}},
-			"severity": match["severity"], "message": match["message"], "code": match["code"],
+			"range": {"start": {"line": line, "character": col}, "end": {"line": line, "character": col + 1}},
+			"severity": SEVERITIES[match["severity"]], "message": match["message"], "code": match["code"], "source": "build",
 		}
 		files = self.server.outputs.diagnostics[ws_id]
 		existing = files.get(match["path"], {}).get("build", [])

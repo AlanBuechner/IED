@@ -1,6 +1,6 @@
-// The Visual Studio-style IDE (plugins/README.md, docs/05). M1 brings its first views: Solution Explorer over the
-// workspace's files and solution model, the Output window over the output sources, and a read-only text view of a
-// server document; Monaco, LSP, builds and debugging follow from M2.
+// The Visual Studio-style IDE (plugins/README.md, docs/05): Solution Explorer over the workspace's files and solution
+// model, the Output window over the output sources, server documents in Monaco with the language servers' features
+// (docs/24), and the Error List of their diagnostics; builds and debugging follow.
 {
 	"manifestVersion": 1,
 	"id": "ied.editor",
@@ -17,7 +17,8 @@
 		],
 		"toolWindows": [
 			{ "id": "ied.explorer", "title": "Solution Explorer", "icon": "$(list-tree)", "view": "SolutionExplorer", "defaultDock": "left" },
-			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "bottom" }
+			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "bottom" },
+			{ "id": "ied.errors", "title": "Error List", "icon": "$(error)", "view": "ErrorList", "defaultDock": "bottom" }
 		],
 		"statusBarItems": [
 			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" }
@@ -31,7 +32,8 @@
 			{ "id": "ied.output.clear", "title": "Clear All", "category": "Output", "icon": "$(clear-all)" },
 			{ "id": "ied.output.toggleWrap", "title": "Toggle Word Wrap", "category": "Output", "icon": "$(word-wrap)" },
 			{ "id": "ied.editor.save", "title": "Save", "category": "File", "icon": "$(save)" },
-			{ "id": "ied.editor.saveAll", "title": "Save All", "category": "File", "icon": "$(save-all)" }
+			{ "id": "ied.editor.saveAll", "title": "Save All", "category": "File", "icon": "$(save-all)" },
+			{ "id": "ied.editor.goTo", "title": "Go To Place", "category": "Editor" }
 		],
 		"menus": {
 			"menubar/file": [
@@ -57,7 +59,8 @@
 			{ "command": "ied.editor.save", "key": "ctrl+s" },
 			{ "command": "ied.editor.saveAll", "key": "ctrl+shift+s" },
 			{ "command": "shell.showView", "key": "ctrl+alt+l", "args": { "id": "ied.explorer" } },
-			{ "command": "shell.showView", "key": "ctrl+alt+o", "args": { "id": "ied.output" } }
+			{ "command": "shell.showView", "key": "ctrl+alt+o", "args": { "id": "ied.output" } },
+			{ "command": "shell.showView", "key": "ctrl+\\ ctrl+e", "args": { "id": "ied.errors" } }
 		]
 	}
 }

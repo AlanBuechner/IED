@@ -1,7 +1,8 @@
 // editorview.js - a server document in Monaco ("doc:<path>" tabs; F-EDT-1, docs/10): DocumentSync keeps the text with
 // the server, the lease decides who types (a bar offers "Edit Here" to the others), typing pins a preview tab, the tab
-// shows unsaved changes, and Ctrl+S saves. A file mixing line endings opens read-only: Monaco would make them one kind
-// and the positions it reports would no longer be the server's.
+// shows unsaved changes, and Ctrl+S saves. Language features come from the language servers (language.js). A file
+// mixing line endings opens read-only: Monaco would make them one kind and the positions it reports would no longer be
+// the server's.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
@@ -10,13 +11,15 @@ import { themeName } from "./monaco.js";
 const NOTICE_MS = 8000;
 
 export class CodeEditor {
-	// `editors`: the page's open editors (editors.js).
-	constructor(ctx, path, monaco, editors) {
+	// `editors`: the page's open editors (editors.js); `features`: the language servers' (language.js).
+	constructor(ctx, path, monaco, editors, features) {
 		this.ctx = ctx;
 		this.ied = ctx.ied;
 		this.path = path;
 		this.monaco = monaco;
 		this.editors = editors;
+		this.features = features;
+		this.detach = null;
 		this.model = null;
 		this.applying = false;
 		this.mixedEndings = false;
@@ -33,6 +36,7 @@ export class CodeEditor {
 
 	dispose() {
 		this.editors.delete(this);
+		if (this.detach) this.detach();
 		this.sync.dispose();
 		this.editor.dispose();
 		if (this.model) this.model.dispose();
@@ -56,16 +60,39 @@ export class CodeEditor {
 	setText(text) {
 		this.mixedEndings = /\r\n/.test(text) && /(^|[^\r])\n/.test(text);
 		this.applying = true;
-		if (!this.model) {
-			const uri = this.monaco.Uri.from({ scheme: "ied", authority: this.ctx.wsId, path: "/" + this.path });
-			this.model = this.monaco.editor.createModel(text, this.sync.languageId, uri);
-			this.model.updateOptions({ bracketColorizationOptions: { enabled: false, independentColorPoolPerBracketType: false } });
-			this.model.onDidChangeContent((event) => this.edited(event));
-			this.editor.setModel(this.model);
-		}
+		const first = !this.model;
+		if (first) this.model = this.takeModel(text);
 		else this.model.setValue(text);
 		this.applying = false;
 		this.setReadOnly(!this.sync.holdsLease);
+		if (!first) return;
+		this.detach = this.features.attach(this);
+		this.editors.ready(this);
+	}
+
+	// The document's model: a new one, or the one a peek made of the file (language.js).
+	takeModel(text) {
+		const uri = this.monaco.Uri.from({ scheme: "ied", authority: this.ctx.wsId, path: "/" + this.path });
+		let model = this.monaco.editor.getModel(uri);
+		if (model) {
+			model.setValue(text);
+			this.monaco.editor.setModelLanguage(model, this.sync.languageId);
+		}
+		else model = this.monaco.editor.createModel(text, this.sync.languageId, uri);
+		model.updateOptions({ bracketColorizationOptions: { enabled: false, independentColorPoolPerBracketType: false } });
+		model.onDidChangeContent((event) => this.edited(event));
+		this.editor.setModel(model);
+		return model;
+	}
+
+	// Shows a place: a position or a range (Monaco's), centered when it is out of view.
+	reveal(selection) {
+		if (!selection) return;
+		const range = selection.startLineNumber !== undefined ? selection
+			: { startLineNumber: selection.lineNumber, startColumn: selection.column, endLineNumber: selection.lineNumber, endColumn: selection.column };
+		this.editor.setSelection({ selectionStartLineNumber: range.startLineNumber, selectionStartColumn: range.startColumn, positionLineNumber: range.startLineNumber, positionColumn: range.startColumn });
+		this.editor.revealRangeInCenterIfOutsideViewport(range);
+		this.editor.focus();
 	}
 
 	applyRemote(changes) {
@@ -200,5 +227,6 @@ function editorOptions(monaco) {
 		smoothScrolling: false,
 		readOnly: true,
 		bracketPairColorization: { enabled: false },
+		"semanticHighlighting.enabled": true,
 	};
 }

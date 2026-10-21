@@ -1,4 +1,5 @@
-"""Output window sources ('out:<wsId>:<sourceId>') and diagnostics ('diag:<wsId>')."""
+"""Output window sources ('out:<wsId>:<sourceId>') and diagnostics ('diag:<wsId>': LSP diagnostics with UTF-16 ranges and
+numeric severities, by path and source, as docs/24 has them)."""
 
 from rpc import RpcError
 
@@ -34,8 +35,8 @@ class Outputs:
 
 	def _add_diagnostics(self, ws_id):
 		files = {"src/engine/render.c": {"mock.language": [{
-			"range": {"start": {"line": 8, "col": 7}, "end": {"line": 8, "col": 12}},
-			"severity": "hint", "message": "'scale' is assigned but never used", "code": "unused",
+			"range": {"start": {"line": 8, "character": 7}, "end": {"line": 8, "character": 12}},
+			"severity": 4, "message": "'scale' is assigned but never used", "code": "unused", "tags": [1],
 		}]}}
 		self.diagnostics[ws_id] = files
 		self.server.hub.add("diag:" + ws_id, lambda: {"files": files})
