@@ -5,7 +5,8 @@ namespace Desktop
 	const char* Usage() {
 		return "usage: ied-desktop [<path>[:<line>[:<col>]]]   a window on a folder or file (default: IED's home)\n"
 			"options: --control <name> (another server's pipe), --data <dir> (the app's state elsewhere),\n"
-			"         --debug-port <n> (the window's DevTools protocol on a loopback port)\n";
+			"         --debug-port <n> (the window's DevTools protocol on a loopback port),\n"
+			"         --register / --unregister (IED in your Start menu, or not)\n";
 	}
 
 	static bool TakeValue(const Core::Array<Core::String>& arguments, int64& i, Core::String& value, Core::String& error) {
@@ -33,6 +34,11 @@ namespace Desktop
 		Core::String value;
 		if (option == "--help" || option == "-h") {
 			options.help = true;
+			return true;
+		}
+		if (option == "--register" || option == "--unregister") {
+			options.registering = option == "--register";
+			options.unregistering = option == "--unregister";
 			return true;
 		}
 		if (option != "--control" && option != "--data" && option != "--debug-port") {

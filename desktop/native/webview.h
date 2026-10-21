@@ -7,4 +7,5 @@
 #include <objbase.h>
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 #include "WebView2.h"

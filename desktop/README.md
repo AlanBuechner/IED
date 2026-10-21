@@ -13,6 +13,8 @@ ied C:\game                      the CLI opens folders here when ied-desktop.exe
 
 Options: `--control <name>` (another server's pipe), `--data <dir>` (the app's window placement and WebView2 profile;
 default `%LOCALAPPDATA%\IED\desktop`), `--debug-port <n>` (the windows' DevTools protocol on loopback, for tests).
+`--register` / `--unregister` put this program in the user's Start menu as IED, or take it out (`shortcut`);
+`nuke install-ied` installs IED into `%LOCALAPPDATA%\Programs\IED` and registers that copy (`docs/21`).
 
 | File | What |
 |---|---|
@@ -23,6 +25,7 @@ default `%LOCALAPPDATA%\IED\desktop`), `--debug-port <n>` (the windows' DevTools
 | `watch` | the thread that starts the server again (at most three times a minute) |
 | `pages` | where navigations go, the page's `window.iedDesktop` script, the app's own status pages |
 | `placement`, `options` | `window.json`; the command line |
+| `shortcut` | the Start menu's `IED.lnk` (`IShellLinkW`, `IPersistFile`) |
 | `native.ch`, `native/webview.h` | what CBind binds: `<windows.h>`, COM, DWM, the WebView2 SDK (`vendor/webview2`, from `setup.bat`) |
 | `resources/` | the icon (`ied.svg`, rendered to `ied.ico` by `make_icon.py`), version and manifest, compiled into the exe |
 | `tests/` | the parts that need no window (`nuke test ied-desktop`) |

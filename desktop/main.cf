@@ -2,6 +2,7 @@
 // ied-server is started when none runs, and again when it dies while windows are open.
 
 include "app.ch"
+include "shortcut.ch"
 
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	Core::Array<Core::String> arguments;
@@ -17,12 +18,23 @@ static int32 Tell(Core::StringView text, bool failed) {
 	return failed ? 2 : 0;
 }
 
+// --register / --unregister: the Start menu's shortcut to this program. No message box: a script runs these, and gets
+// the exit code and, on a stderr it handed over, why.
+static int32 Registered(const Desktop::Options& options) {
+	Core::String error;
+	Core::String appData = Platform::GetEnvironmentVariable("APPDATA");
+	const bool done = options.registering ? Desktop::Register(Platform::ExecutablePath(), appData.View(), error) : Desktop::Unregister(appData.View(), error);
+	if (!done) Platform::WriteError((Core::String("ied-desktop: ") + error.View() + "\n").View());
+	return done ? 0 : 1;
+}
+
 int32 main(int32 argc, char8** argv) {
 	Desktop::Options options;
 	Core::String error;
 	if (!Desktop::ParseOptions(Arguments(argc, argv), options, error))
 		return Tell((Core::String("ied-desktop: ") + error.View() + "\n\n" + Desktop::Usage()).View(), true);
 	if (options.help) return Tell(Core::StringView(Desktop::Usage()), false);
+	if (options.registering || options.unregistering) return Registered(options);
 	Desktop::App* app = new Desktop::App(options);
 	return app->Run();
 }

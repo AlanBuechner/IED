@@ -39,6 +39,12 @@ nuke gates                :: every C4 test suite
 `setup.bat` offers to put `bin/` on your PATH so `nuke` works in any folder (or pass `--add-to-path`;
 without it, use `nuke.bat` here). `setup.bat --toolchain` does the setup and the first build in one go.
 
+IED itself, as an app in your Start menu (Windows key, "ied"):
+
+```bat
+nuke install-ied          :: build the server, the CLI and the desktop app; install into %LOCALAPPDATA%\Programs\IED
+```
+
 A new C4 program anywhere on the machine:
 
 ```bat

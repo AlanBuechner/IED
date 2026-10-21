@@ -3,6 +3,7 @@
 //     --control <name>                          another server's control pipe (tests)
 //     --data <dir>                              the app's state and WebView2 profile elsewhere (tests)
 //     --debug-port <n>                          the WebView2's DevTools protocol on loopback port n (tests)
+//     --register | --unregister                 put IED in the user's Start menu, or take it out, and exit
 
 include "launcher.ch"
 
@@ -17,6 +18,8 @@ namespace Desktop
 		public Core::String dataDir;   // empty: <LOCALAPPDATA>\IED\desktop
 		public int32 debugPort;        // 0: none
 		public bool help;
+		public bool registering;       // --register
+		public bool unregistering;     // --unregister
 	}
 
 	// `options` from the arguments after the program's name; false with `error` saying what is wrong.

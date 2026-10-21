@@ -12,6 +12,10 @@ Resolve `docs/99` #8 (SearXNG packaging) and define how IED is installed, what i
   - `IED-Setup-<ver>.exe` - a small installer. Recommended: written in C4 itself (dogfooding; it only unpacks, registers, and creates shortcuts). Fallback if that is not ready: Inno Setup script built by a Nuke step.
 - **Updates (P2):** release feed + signed packages; the server downloads in the background and swaps on the owner's restart (running work is never interrupted by an update).
 
+### As built: `nuke install-ied`
+
+Until the zip and the installer exist, a checkout installs itself: `nuke install-ied` (`nuke install-ied dist` for an optimized build) builds `ied-server`, `ied` and `ied-desktop`, then `tools/install/install_ied.py` copies them into `%LOCALAPPDATA%\Programs\IED\` with what the server serves and loads, in the source tree's layout (the server finds its home as the folder above it holding `shared/host-api/schemas`, and serves `frontend\` from there). Only changed files are copied and files gone from the checkout are removed; a program that is running is renamed aside (`*.old`, removed by the next install) and replaced, so an open IED keeps running until it is restarted. `install.json` names the commit and the build it came from. Last, `ied-desktop --register` puts IED in the user's Start menu: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\IED.lnk` (target, working folder, icon, description; `IShellLinkW` from C4, no registry write), and `ied-desktop --unregister` takes it out. `--to <folder>` installs elsewhere and `--no-register` leaves the Start menu alone (`nuke install-ied -- --no-register`). The PATH entry, context menus and associations are still to come.
+
 ## On-disk layout
 
 ```
@@ -21,8 +25,11 @@ Resolve `docs/99` #8 (SearXNG packaging) and define how IED is installed, what i
   ied-server.exe                         the server, a C4 script host
   ied-server.c4i                         its interface: what plugin code compiles against (docs/26 section 2)
   C4Script.dll                           C4's script compiler and JIT, beside the exe (the exe does not start without it)
-  web\                                   frontend assets, Monaco, xterm, codicons, fonts
+  install.json                           the commit and build installed (nuke install-ied)
+  frontend\                              the web client (served as is: no bundling step)
   plugins\                               built-in plugins: manifests, UI modules, C4 code (code\), Nuke drivers (nuke\)
+  shared\host-api\schemas\, shared\ui-kit\   the host API's schemas (how the server finds this folder), the ui-kit
+  vendor\web\, third_party\codicons\     Monaco, xterm and the other web libraries; the codicons
   services\
     searxng\    python\ (embeddable CPython) + site-packages\ + searxng\ + settings.yml template
     tor\        tor.exe + geoip files (Tor Expert Bundle)

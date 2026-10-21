@@ -17,6 +17,7 @@ STAGES = [
 	("mock-server fixtures", PY + ["-m", "unittest", "discover", "-s", str(TOOLS / "mock-server" / "tests"), "-t", str(TOOLS / "mock-server" / "tests")]),
 	("conformance vs mock server", PY + [str(TOOLS / "conformance" / "run_conformance.py")]),
 	("fake-model scripts", PY + ["-m", "unittest", "discover", "-s", str(TOOLS / "fake-model" / "tests"), "-t", str(TOOLS / "fake-model" / "tests")]),
+	("installer", PY + ["-m", "unittest", "discover", "-s", str(TOOLS / "install" / "tests"), "-t", str(TOOLS / "install" / "tests")]),
 ]
 
 

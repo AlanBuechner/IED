@@ -20,10 +20,11 @@ ied-desktop.exe  (C4, one process, many windows)
   +- watch                  a thread that notices the server is gone and starts it again
 ```
 
-Command line: `ied-desktop [<path>[:<line>[:<col>]]] [--control <name>] [--data <dir>] [--debug-port <n>]`.
+Command line: `ied-desktop [<path>[:<line>[:<col>]]] [--control <name>] [--data <dir>] [--debug-port <n>]`, or `ied-desktop --register` / `--unregister`.
 
 - With a path, the window opens it as `ied <path>` does (the control pipe's `open`); without one, it asks for `url` and opens IED's home.
 - `--control` names another server's pipe (tests); `--data` moves the app's own state and the WebView2 profile (tests); `--debug-port` opens the WebView2's CDP port on loopback so a test can drive and screenshot the window (Playwright's `connect_over_cdp`).
+- `--register` puts IED in the user's Start menu, a shortcut to this program (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\IED.lnk`, made with `IShellLinkW` and saved through `IPersistFile`), so Windows key, "ied", Enter opens it; `--unregister` removes it. Both open no window and answer with the exit code (0 done, 1 not). `nuke install-ied` installs IED and registers the installed copy (`docs/21` "As built").
 
 ### Starting the server
 
@@ -120,7 +121,8 @@ The plugin's `toolCalls` (`docs/13` T-BRW, as built), C4 functions that call the
 
 ## Tests
 
-- `launcher/tests`, `desktop/tests` (`nuke test launcher ied-desktop`): locations, the control channel's lines, which URLs may leave IED; the desktop's command line, placement, navigation targets, its own pages and script, the restart budget.
+- `launcher/tests`, `desktop/tests` (`nuke test launcher ied-desktop`): locations, the control channel's lines, which URLs may leave IED; the desktop's command line, placement, navigation targets, its own pages and script, the restart budget, the Start menu's options and shortcut path.
+- `tools/install/tests` (in `tools/selftest.py`): the installer's mirror (changed files copied, skipped folders left out, files gone removed) and a running program renamed aside and replaced.
 - `tools/server-checks/tests/test_browser.py` (real Edge; skipped without one): a page's title, console and failed requests; frames and input; the AI's bindings end to end (snapshot refs, type, click, the action event, eval, screenshot, console, network); URL rules; pages across a restart; closing; and the tools in a chat turn against the fake model, the screenshot reaching a model that sees images as an `image_url` part.
 - `tools/server-checks/tests/test_desktop.py` (with `--desktop` and `--cli`, in `nuke conformance`): `ied-desktop` with no server running starts one and its window signs in on the folder it was given (checked over the app's `--debug-port`); a killed server is started again and the page reconnects.
 - `tests/e2e` `browser_tab` (real server, desktop and phone): View in Browser, a click and keys reaching the page, its console, an AI action drawn over it. `frontend/tests/browser.test.js`: fitting, page coordinates, modifiers, typed addresses, file URLs.
@@ -131,4 +133,5 @@ The plugin's `toolCalls` (`docs/13` T-BRW, as built), C4 functions that call the
 - Full DevTools for a server page in the desktop app (Edge serves its DevTools front end on the CDP port).
 - The egress policy (`docs/04`) for the browser: `--proxy-server` to IED's egress proxy in secure mode.
 - Downloads; file uploads (`DOM.setFileInputFiles`).
+- Opening a folder from the desktop app: a window with no path shows IED's home, which says to run `ied <folder>`, and the install does not put `ied` on PATH yet (`docs/21`).
 - A jump list of recent workspaces, start on login.
