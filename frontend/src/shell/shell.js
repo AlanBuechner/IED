@@ -9,6 +9,7 @@ import { MenuHost } from "/ui-kit/menu.js";
 import { isTextInput } from "/ui-kit/dom.js";
 import { ContextKeys } from "./context.js";
 import { Commands } from "./commands.js";
+import { Bindings } from "./bindings.js";
 import { Keybindings } from "./keybindings.js";
 import { Menus } from "./menus.js";
 import { ViewHost } from "./views.js";
@@ -41,6 +42,10 @@ export class Shell {
 		this.contributions = new Contributions(this);
 		this.modules = new Map();
 		this.apis = new Map();
+		this.bindings = new Bindings((id) => {
+			const plugin = this.contributions.plugins.find((p) => p.id === id);
+			return plugin ? plugin.contributes.bindings || {} : null;
+		});
 		this.client = null;
 		this.server = { workspaces: [], clients: [], notifications: [] };
 		this.wsId = null;
@@ -64,11 +69,13 @@ export class Shell {
 		this.identity = await resolveIdentity(window);
 		this.client = new ProtocolClient({ url: socketUrl(), identity: this.identity, onLeave: (reason) => this.leave(reason) });
 		this.client.onState((state) => this.connectionChanged(state));
+		// The width again: the window may have been resized while the identity was read, before anything listened.
+		this.deviceClass = deviceClassOf(window.innerWidth);
+		window.addEventListener("resize", () => this.resized());
 		this.context.set("deviceClass", this.deviceClass);
 		this.context.set("connected", false);
 		this.mountChrome();
 		window.addEventListener("keydown", (event) => this.keybindings.handle(event), true);
-		window.addEventListener("resize", () => this.resized());
 		document.addEventListener("focusin", (event) => this.context.set("inputFocus", isTextInput(event.target)));
 		this.client.subscribe("server", { snap: (data) => this.serverSnapshot(data), evt: (kind, data) => this.serverEvent(kind, data) });
 		this.client.subscribe("plugins", { evt: (kind) => kind === "plugins.changed" && this.reloadContributions() });
@@ -461,6 +468,11 @@ export class Shell {
 				},
 			},
 			commands: { handle: (id, fn) => shell.commands.handle(id, fn), run: (id, args) => shell.commands.run(id, args) },
+			bindings: {
+				provide: (name, fn) => shell.bindings.provide(plugin.id, name, fn),
+				call: (name, args) => shell.bindings.call(plugin.id, name, args),
+				has: (name) => shell.bindings.has(name),
+			},
 			tabs: {
 				kind: (kind, spec) => shell.views.registerKind(kind, Object.assign({}, spec, { plugin: plugin.id === "shell" ? null : plugin.id })),
 				open: (ref, options) => shell.openTab(ref, options),

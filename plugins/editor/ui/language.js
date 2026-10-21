@@ -6,6 +6,7 @@
 
 import * as C from "./lspconvert.js";
 import { canonicalFileUri } from "./fileuris.js";
+import { LEGEND, SemanticMapper, rulesFor } from "./semanticcolors.js";
 
 const QUIET = new Set(["cancelled", "not_found", "unavailable"]);
 const REPORT_EVERY_MS = 30000;
@@ -102,7 +103,7 @@ export class LanguageFeatures {
 		if (known && known.text === text) return;
 		if (known) known.disposables.forEach((d) => d.dispose());
 		const selector = [{ language: languageId, scheme: "ied" }, { language: languageId, scheme: "file" }];
-		this.bundles.set(key, { text, disposables: this.register(selector, info.capabilities || {}) });
+		this.bundles.set(key, { text, disposables: this.register(selector, info.capabilities || {}, languageId) });
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -149,7 +150,7 @@ export class LanguageFeatures {
 	// ---------------------------------------------------------------------------------------------------------------
 	// Providers
 
-	register(selector, caps) {
+	register(selector, caps, languageId) {
 		const L = this.monaco.languages;
 		const M = this.monaco;
 		const at = (position) => ({ position: C.toLspPosition(position) });
@@ -187,12 +188,13 @@ export class LanguageFeatures {
 			provideFoldingRanges: async (model, context, token) => C.foldingRangesOf(M, await this.ask(model, "textDocument/foldingRange", {}, token)),
 		}));
 		const tokens = caps.semanticTokensProvider;
+		const mapper = tokens && tokens.legend ? new SemanticMapper(tokens.legend, rulesFor(this.ied.contributions("semanticTokenColors"), languageId)) : null;
 		add(tokens && tokens.full && tokens.legend, () => L.registerDocumentSemanticTokensProvider(selector, {
 			onDidChange: this.refreshes.tokens.event,
-			getLegend: () => tokens.legend,
+			getLegend: () => LEGEND,
 			provideDocumentSemanticTokens: async (model, lastResultId, token) => {
 				const result = await this.ask(model, "textDocument/semanticTokens/full", {}, token);
-				return result && result.data ? { data: Uint32Array.from(result.data), resultId: result.resultId } : null;
+				return result && result.data ? { data: mapper.remap(result.data), resultId: result.resultId } : null;
 			},
 			releaseDocumentSemanticTokens: () => {},
 		}));

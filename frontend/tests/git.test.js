@@ -4,7 +4,7 @@
 import { test, assertEqual } from "./harness.js";
 import { layoutGraph } from "/plugins/ied.git/ui/graph.js";
 import { RepoModel, labelsByOid, shortDate, statusClass, syncText } from "/plugins/ied.git/ui/model.js";
-import { numbered, sideBySide } from "/plugins/ied.git/ui/diffview.js";
+import { numbered, sideBySide, sides } from "/plugins/ied.git/ui/diffview.js";
 import { wholeFileDiff } from "/plugins/ied.git/ui/diffpane.js";
 import { branchProblem } from "/plugins/ied.git/ui/activity.js";
 import { gitStatusText } from "/plugins/ied.git/ui/index.js";
@@ -79,6 +79,8 @@ test("git: diff lines, pairs and a whole file", () => {
 	const whole = wholeFileDiff("n.txt", "one\ntwo\n");
 	assertEqual([whole.hunks[0].header, whole.hunks[0].lines], ["@@ -0,0 +1,2 @@", ["+one", "+two"]]);
 	assertEqual(wholeFileDiff("e.txt", "").hunks, []);
+	const both = sides({ hunks: [hunk] });
+	assertEqual([both.old.lines, both.old.keys, both.new.lines, both.new.keys], [["a", "b", "c", "d"], ["0:0", "0:1", "0:2", "0:4"], ["a", "B", "d", "e"], ["0:0", "0:3", "0:4", "0:5"]], "each side to color, context on both");
 });
 
 test("git: branch names and the status bar", () => {

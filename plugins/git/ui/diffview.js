@@ -1,6 +1,7 @@
-// diffview.js - one file's diff (git.diff's hunks), unified as Fork shows it or side by side. In local changes each
-// hunk carries Stage or Unstage (and Discard for the work tree), and changed lines can be picked - a click, Shift for a
-// range - to stage or unstage only those (git.stagePatch's `lines`).
+// diffview.js - one file's diff (git.diff's hunks), unified as Fork shows it or side by side, in the editor's syntax
+// colors once they come (setColors). In local changes each hunk carries Stage or Unstage (and Discard for the work
+// tree), and changed lines can be picked - a click, Shift for a range - to stage or unstage only those
+// (git.stagePatch's `lines`).
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 
@@ -19,6 +20,23 @@ export function numbered(hunk) {
 		if (kind === " " || kind === "+") row.newNo = newNo++;
 		return row;
 	});
+}
+
+// The texts to color for each side of `diff`: {old: {lines, keys}, new: {lines, keys}}, a key "hunk:line" per line -
+// removed lines and context on the old side, added lines and context on the new.
+export function sides(diff) {
+	const out = { old: { lines: [], keys: [] }, new: { lines: [], keys: [] } };
+	diff.hunks.forEach((hunk, h) => numbered(hunk).forEach((line) => {
+		if (line.kind === " " || line.kind === "-") {
+			out.old.lines.push(line.text);
+			out.old.keys.push(h + ":" + line.index);
+		}
+		if (line.kind === " " || line.kind === "+") {
+			out.new.lines.push(line.text);
+			out.new.keys.push(h + ":" + line.index);
+		}
+	}));
+	return out;
 }
 
 // The hunk side by side: [{left, right}], a run of removed lines beside the added run after it; context on both.
@@ -50,6 +68,7 @@ export class DiffView {
 		this.options = {};
 		this.picked = new Map();   // hunk index -> Set of line indexes
 		this.anchor = null;
+		this.colors = null;        // "hunk:line" -> {old, new} HTML from the editor's colorizer
 	}
 
 	show(diff, options) {
@@ -57,7 +76,26 @@ export class DiffView {
 		this.options = options || {};
 		this.picked = new Map();
 		this.anchor = null;
+		this.colors = null;
 		this.render();
+	}
+
+	// The lines' HTML (sides() keys to {old, new}) for the diff shown now; the view keeps its scroll.
+	setColors(colors) {
+		this.colors = colors;
+		const scroll = this.el.scrollTop;
+		this.render();
+		this.el.scrollTop = scroll;
+	}
+
+	// A line's text, colored when the colors are in: the removed side's for a removed line, the added side's otherwise.
+	text(hunkIndex, line, side) {
+		const colored = this.colors && this.colors.get(hunkIndex + ":" + line.index);
+		const html = colored && (side === "old" || line.kind === "-" ? colored.old : colored.new);
+		if (html === undefined || html === null) return h("span.tx", null, line.text);
+		const span = h("span.tx");
+		span.innerHTML = html;
+		return span;
 	}
 
 	render() {
@@ -69,7 +107,7 @@ export class DiffView {
 		replace(this.el,
 			diff.hunks.map((hunk, index) => h("div.hunk" + (split ? ".split" : ""), { dataset: { hunk: String(index) } },
 				this.hunkHead(hunk, index),
-				split ? sideBySide(hunk).map((row) => this.splitLine(row)) : numbered(hunk).map((line) => this.line(line, index)))),
+				split ? sideBySide(hunk).map((row) => this.splitLine(row, index)) : numbered(hunk).map((line) => this.line(line, index)))),
 			diff.truncated ? h("div.git-diff-note", null, "The diff is too large to show whole") : null);
 	}
 
@@ -97,14 +135,14 @@ export class DiffView {
 			h("span.no", null, line.oldNo === null ? "" : String(line.oldNo)),
 			h("span.no", null, line.newNo === null ? "" : String(line.newNo)),
 			h("span.sg", null, line.kind === "\\" ? "" : line.kind),
-			h("span.tx", null, line.text));
+			line.kind === "\\" ? h("span.tx", null, line.text) : this.text(hunkIndex, line, "new"));
 	}
 
-	splitLine(row) {
+	splitLine(row, hunkIndex) {
 		const side = (line, which) => {
 			if (!line) return h("div.side.empty");
 			const kind = line.kind === " " ? ".ctx" : which === "left" ? ".del" : ".add";
-			return h("div.side" + kind, null, h("span.no", null, String(which === "left" ? line.oldNo : line.newNo)), h("span.tx", null, line.text));
+			return h("div.side" + kind, null, h("span.no", null, String(which === "left" ? line.oldNo : line.newNo)), this.text(hunkIndex, line, which === "left" ? "old" : "new"));
 		};
 		return h("div.dl.pair", null, side(row.left, "left"), side(row.right, "right"));
 	}

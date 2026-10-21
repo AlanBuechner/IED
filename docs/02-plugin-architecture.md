@@ -109,7 +109,7 @@ Grouped; full shapes in the schema.
 | Group | Points |
 |---|---|
 | Shell | `activities` (sidebar icons + views), `toolWindows`, `commands`, `menus`, `keybindings`, `statusBarItems`, `toolbarItems` (a view rendered in the toolbar after its commands: the task toolbar's dropdowns and buttons), `panels` (`{id, title, icon, view}`: the full-width dock under every activity, collapsible to its view's header row - the terminal dock; the first loaded plugin's), `settingsPages` (`{id, page, title, view, keys}`: a view that edits some settings, under its page in the settings window instead of the generic rows - `docs/07` "The settings window as built"), `outputSources` |
-| Editor | `languages` (extensions, comments, brackets, auto-close, indentation, Monarch grammar, task comments), `semanticTokenColors` (token -> `--syntax-*` theme token; raw colors rejected), `fileIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries`, `fileOpener` (`{command}`: the command the shell runs with `{path, line, col}`, 1-based, for a file a launch URL names; the last loaded plugin's wins) |
+| Editor | `languages` (extensions, comments, brackets, auto-close, indentation, Monarch grammar, task comments), `semanticTokenColors` (`{languageId, label, rules}`: a server's token selector - a type, or a type and modifiers, `class.deduced` - to a `--syntax-*` theme token, raw colors rejected; the editor maps every semantic token of the language through the rule naming its type and the most of its modifiers, over LSP's standard names, and leaves a token no rule names to the grammar's color), `fileIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries`, `fileOpener` (`{command}`: the command the shell runs with `{path, line, col}`, 1-based, for a file a launch URL names; the last loaded plugin's wins) |
 | Build / debug | `lspProfiles`, `dapProviders`, `problemMatchers`, `testProviders`, `taskPresets` (toolbar presets), `projectTemplates` |
 | AI | `toolCalls`, `toolGroups`, `skills`, `systemMessageSections`, `agentModes`, `mcpServers`, `modelProviders`, `chatSlashCommands` |
 | Infra | `settings` (JSON Schema with tier hints), `bindings` (provides/consumes), `sandboxProviders`, `sourceControlProviders`, `profilerImporters` |
@@ -128,6 +128,16 @@ A binding is a **named, versioned, schema-typed function or event** that one plu
 - `orc.createGoal { workspace, title, ... }` - cross-workspace handoff (`docs/features/16`).
 
 Rules: a consumer never imports a provider's internals; a missing *required* binding is a load error, a missing *optional* one degrades the feature visibly; events flow through the same registry. Bindings marked `aiExposed` can surface as AI tools; any binding can be a task step (`{ "binding": "..." }`) and a command handler. This is how the C4 plugin, a game-engine plugin and IED's built-ins cooperate without knowing about each other.
+
+### Client bindings as built
+
+A binding with `side: "client"` lives in the browser: the providing plugin's UI module implements it, any plugin's UI module calls it. The plugin API (`ied` in `activate`, `ctx.ied` in a view) has `ied.bindings`:
+
+- `provide(name, fn)`: `fn(args)` answers a call (a value or a promise). Only a name the plugin's manifest lists under `bindings.provides` with `side: "client"`; anything else throws.
+- `call(name, args)`: a promise of the provider's answer. Only a name the caller's manifest lists under `bindings.consumes`; it rejects with `not provided` when no enabled plugin provides it (the caller degrades: an optional binding's feature goes without).
+- `has(name)`: whether a provider is there now.
+
+The first one: `editor.colorize {path, lines}` -> `[html]`, from the editor plugin (Monaco's tokenizers and the theme's colors), consumed optionally by the git plugin's diffs.
 
 ## Skills and AI tools
 

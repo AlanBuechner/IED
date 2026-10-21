@@ -3,6 +3,8 @@
 // beside one, and guesses without one. Debugging through LLDB: CodeLLDB's adapter (the vscode-lldb extension's
 // adapter/codelldb.exe), which connects back to IED's port (transport tcp, docs/25); a launch configuration's type is
 // "lldb", with CodeLLDB's arguments (program, args, cwd, env, stopOnEntry).
+// clangd's semantic tokens map onto the syntax colors Visual Assist style: `auto` (a deduced type) reads as a keyword and
+// code a preprocessor condition leaves out (clangd's `comment`) gray, like the directives.
 {
 	"manifestVersion": 1,
 	"id": "ied.cpp",
@@ -15,6 +17,62 @@
 	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C/C++" },
+		"semanticTokenColors": [
+			{
+				"languageId": "c",
+				"label": "Visual Assist style",
+				"rules": {
+					"namespace": "--syntax-namespace",
+					"type": "--syntax-type",
+					"class": "--syntax-type",
+					"interface": "--syntax-type",
+					"enum": "--syntax-type",
+					"typeParameter": "--syntax-type",
+					"concept": "--syntax-type",
+					"type.deduced": "--syntax-keyword",
+					"class.deduced": "--syntax-keyword",
+					"interface.deduced": "--syntax-keyword",
+					"enum.deduced": "--syntax-keyword",
+					"typeParameter.deduced": "--syntax-keyword",
+					"function": "--syntax-function",
+					"method": "--syntax-function",
+					"variable": "--syntax-variable",
+					"parameter": "--syntax-parameter",
+					"property": "--syntax-member",
+					"enumMember": "--syntax-constant",
+					"macro": "--syntax-macro",
+					"modifier": "--syntax-keyword",
+					"comment": "--syntax-preprocessor"
+				}
+			},
+			{
+				"languageId": "cpp",
+				"label": "Visual Assist style",
+				"rules": {
+					"namespace": "--syntax-namespace",
+					"type": "--syntax-type",
+					"class": "--syntax-type",
+					"interface": "--syntax-type",
+					"enum": "--syntax-type",
+					"typeParameter": "--syntax-type",
+					"concept": "--syntax-type",
+					"type.deduced": "--syntax-keyword",
+					"class.deduced": "--syntax-keyword",
+					"interface.deduced": "--syntax-keyword",
+					"enum.deduced": "--syntax-keyword",
+					"typeParameter.deduced": "--syntax-keyword",
+					"function": "--syntax-function",
+					"method": "--syntax-function",
+					"variable": "--syntax-variable",
+					"parameter": "--syntax-parameter",
+					"property": "--syntax-member",
+					"enumMember": "--syntax-constant",
+					"macro": "--syntax-macro",
+					"modifier": "--syntax-keyword",
+					"comment": "--syntax-preprocessor"
+				}
+			}
+		],
 		"lspProfiles": [
 			{
 				"id": "clangd",

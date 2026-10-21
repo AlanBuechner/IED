@@ -2,6 +2,8 @@
 // made from the theme tokens (docs/07, F-SHL-50), and the plugins' `languages` contributions registered with their
 // comment tokens, brackets and Monarch grammars.
 
+import { SYNTAX_KINDS } from "./semanticcolors.js";
+
 const BASE = "/vendor/monaco-editor/min/vs";
 const THEME = "ied-dark";
 
@@ -48,17 +50,22 @@ function hex(name) {
 	return /^#[0-9a-fA-F]{3,8}$/.test(value) ? value : null;
 }
 
+// Grammars that name each keyword ("keyword.return.cpp" - Monaco's C and C++): these read as control flow.
+const CONTROL_KEYWORDS = ["if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "goto", "try",
+	"catch", "throw", "co_await", "co_return", "co_yield"];
+
+// Grammar (Monarch) tokens, then a rule per syntax kind for language servers' tokens (semanticcolors.js puts every
+// server's legend onto those kinds, per language).
 const TOKEN_RULES = [
 	["", "syntax-plain"], ["comment", "syntax-comment"], ["string", "syntax-string"], ["string.escape", "syntax-constant"],
 	["regexp", "syntax-string"], ["keyword", "syntax-keyword"], ["keyword.flow", "syntax-control"], ["number", "syntax-number"],
 	["type", "syntax-type"], ["type.identifier", "syntax-type"], ["identifier", "syntax-plain"], ["delimiter", "syntax-operator"],
-	["operator", "syntax-operator"], ["keyword.directive", "syntax-macro"], ["annotation", "syntax-macro"], ["constant", "syntax-constant"],
+	["operator", "syntax-operator"], ["keyword.directive", "syntax-preprocessor"], ["keyword.directive.include.begin", "syntax-string"],
+	["keyword.directive.include.end", "syntax-string"], ["annotation", "syntax-macro"], ["constant", "syntax-constant"],
 	["predefined", "syntax-function"], ["namespace", "syntax-namespace"], ["invalid", "syntax-invalid"], ["tag", "syntax-keyword"],
 	["attribute.name", "syntax-variable"], ["attribute.value", "syntax-string"], ["variable", "syntax-variable"], ["metatag", "syntax-macro"],
-	// language servers' semantic token types (LSP's standard names)
-	["class", "syntax-type"], ["struct", "syntax-type"], ["enum", "syntax-type"], ["interface", "syntax-type"], ["typeParameter", "syntax-type"],
-	["function", "syntax-function"], ["method", "syntax-function"], ["parameter", "syntax-parameter"], ["property", "syntax-member"],
-	["event", "syntax-member"], ["enumMember", "syntax-constant"], ["macro", "syntax-macro"], ["decorator", "syntax-macro"], ["modifier", "syntax-keyword"],
+	...CONTROL_KEYWORDS.map((word) => ["keyword." + word, "syntax-control"]),
+	...SYNTAX_KINDS.map((kind) => ["syntax-" + kind, "syntax-" + kind]),
 ];
 
 const COLORS = {

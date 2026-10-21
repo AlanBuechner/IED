@@ -138,7 +138,8 @@ Two palettes ship:
 | `--syntax-member` | `#bdb76b` | fields and properties |
 | `--syntax-constant` | `#b8d7a3` | enum members, constants (VS dark value; C4Assist leaves it to the base theme) |
 | `--syntax-namespace` | `#b5cea8` | namespaces |
-| `--syntax-macro` | `#bd63c5` | macros, attributes, `include` |
+| `--syntax-macro` | `#bd63c5` | macro names where defined and where used (`SOME_MACRO` in `#define SOME_MACRO`), C4 attributes |
+| `--syntax-preprocessor` | `#9b9b9b` | directives: `#define`, `#include`, `#if`, C4's `include` (Visual Studio's preprocessor keyword gray; owner choice 2026-10-21); code a preprocessor condition leaves out |
 | `--syntax-string` | `#d69d85` | strings |
 | `--syntax-number` | `#b5cea8` | numbers |
 | `--syntax-comment` | `#57a64a` | comments |
@@ -147,7 +148,7 @@ Two palettes ship:
 
 - **Grayscale** - luminance, weight and italics only; a per-user choice (`data-syntax="grayscale"` on the root or on any subtree).
 
-Language plugins map their semantic token legend onto these names (C4 example in `shared/host-api/examples/c4-plugin/ied-plugin.json`). Monaco's theme, the xterm/ANSI palette and the Output window are generated from the same tokens, so editor, terminal and chat cannot drift. Tokens a generator reads (syntax, ANSI, terminal) are plain hex or `var()` of plain hex; `color-mix()` is only for CSS-only tints.
+Language plugins map their server's semantic token legend onto these names with `semanticTokenColors` (`docs/02`; the C4 plugin's in `C4/IedPlugin/ied-plugin.json`, clangd's in `plugins/cpp`, rust-analyzer's in `plugins/rust`). Grammar (Monarch) tokens map by name: `keyword.directive` is the preprocessor gray, an `#include`'s path a string, a grammar's per-keyword control-flow names (`keyword.return`) the control color. Monaco's theme, the xterm/ANSI palette and the Output window are generated from the same tokens, so editor, terminal and chat cannot drift. Tokens a generator reads (syntax, ANSI, terminal) are plain hex or `var()` of plain hex; `color-mix()` is only for CSS-only tints.
 
 ### Other token groups
 

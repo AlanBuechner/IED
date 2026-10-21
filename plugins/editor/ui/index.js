@@ -9,6 +9,7 @@ import { DocumentView } from "./document.js";
 import { CodeEditor } from "./editorview.js";
 import { Editors } from "./editors.js";
 import { loadMonaco } from "./monaco.js";
+import { colorize } from "./colorize.js";
 import { fileIconSpec } from "./fileicons.js";
 import { Diagnostics } from "./diagnostics.js";
 import { LanguageFeatures } from "./language.js";
@@ -58,6 +59,7 @@ export function activate(ied) {
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => fileIconSpec(fileName(path)), resource: (path) => path });
 	ied.tabs.kind("mdpreview", { view: "MarkdownPreview", title: (path) => "Preview " + fileName(path), icon: () => "$(open-preview)", resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
+	ied.bindings.provide("editor.colorize", (args) => colorize(ied, args));
 	ied.commands.handle("ied.explorer.open", (args) => {
 		const path = pathOf(args);
 		if (path) ied.tabs.open("doc:" + path, { preview: false });

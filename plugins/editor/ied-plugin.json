@@ -12,6 +12,19 @@
 	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
 	"permissions": ["fs.read", "fs.write", "fs.watch", "ui.clipboard"],
 	"contributes": {
+		"bindings": {
+			"provides": [
+				{
+					"name": "editor.colorize",
+					"version": "1",
+					"kind": "function",
+					"side": "client",
+					"description": "Lines of a file colored as the editor colors them: HTML per line (docs/02 \"Client bindings as built\").",
+					"params": { "type": "object", "required": ["path", "lines"], "properties": { "path": { "type": "string" }, "lines": { "type": "array", "items": { "type": "string" } } } },
+					"result": { "type": "array", "items": { "type": "string" } }
+				}
+			]
+		},
 		"activities": [
 			{ "id": "ied.editor", "title": "Editor", "icon": "$(code)", "order": 10, "phoneSlot": true }
 		],

@@ -28,7 +28,7 @@ Mock.onReady = Mock.onReady || ((fn) => Mock.hooks.push(fn));
 		return set;
 	}
 
-	const SYNTAX = new Set(["kw", "ctl", "ty", "fn", "var", "par", "mem", "con", "ns", "mac", "str", "num", "com", "op", "bad"]);
+	const SYNTAX = new Set(["kw", "ctl", "ty", "fn", "var", "par", "mem", "con", "ns", "mac", "pp", "str", "num", "com", "op", "bad"]);
 
 	function tokenClass(kinds) {
 		return kinds.split(" ").filter(Boolean).map((k) => (SYNTAX.has(k) ? "tok-" + k : k)).join(" ");

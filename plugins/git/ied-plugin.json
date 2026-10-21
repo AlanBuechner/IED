@@ -12,6 +12,9 @@
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
 	"contributes": {
+		"bindings": {
+			"consumes": [ { "name": "editor.colorize", "version": "1", "optional": true } ]
+		},
 		"settings": { "schema": "settings.schema.json", "page": "Source Control" },
 		"activities": [
 			{ "id": "ied.git", "title": "Git", "icon": "$(source-control)", "order": 20, "phoneSlot": true, "view": "GitActivity" }

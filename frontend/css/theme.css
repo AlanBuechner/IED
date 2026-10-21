@@ -96,7 +96,7 @@
 	/* ---------- syntax: Visual Assist X palette (default; owner choice 2026-10-19) ----------
 	   Values are C4Assist's c4-visual-assist-dark theme:
 	   gold user types, blue keywords and built-in types, orange functions, olive variables/fields/params,
-	   purple macros, pink control flow, green comments, salmon strings. */
+	   purple macro names, gray directives, pink control flow, green comments, salmon strings. */
 	--syntax-keyword: #569cd6;
 	--syntax-control: #d8a0df;
 	--syntax-type: #ffd700;
@@ -106,7 +106,8 @@
 	--syntax-member: #bdb76b;
 	--syntax-constant: #b8d7a3;
 	--syntax-namespace: #b5cea8;
-	--syntax-macro: #bd63c5;
+	--syntax-macro: #bd63c5;          /* macro names, where defined and where used */
+	--syntax-preprocessor: #9b9b9b;   /* directives: #define, #include, #if, C4's include (Visual Studio's preprocessor keyword) */
 	--syntax-string: #d69d85;
 	--syntax-number: #b5cea8;
 	--syntax-comment: #57a64a;
@@ -124,6 +125,7 @@
 	--syntax-constant-weight: 400; --syntax-constant-style: normal;
 	--syntax-namespace-weight: 400; --syntax-namespace-style: normal;
 	--syntax-macro-weight: 400;    --syntax-macro-style: normal;
+	--syntax-preprocessor-weight: 400; --syntax-preprocessor-style: normal;
 	--syntax-string-weight: 400;   --syntax-string-style: normal;
 	--syntax-number-weight: 400;   --syntax-number-style: normal;
 	--syntax-comment-weight: 400;  --syntax-comment-style: normal;
@@ -254,6 +256,7 @@
 	--syntax-constant: #d8d8d8;
 	--syntax-namespace: #969696;
 	--syntax-macro: #b3b3b3;
+	--syntax-preprocessor: #8a8a8a;
 	--syntax-string: #9c9c9c;
 	--syntax-number: #c2c2c2;
 	--syntax-comment: #6e6e6e;

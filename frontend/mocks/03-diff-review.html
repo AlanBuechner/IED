@@ -78,10 +78,10 @@
 -`com:// ``com w-del:TODO: port from RefEngine`
 +`com:// ``com w-add:Sinks receive formatted records; RingSink keeps the last N for the in-game console.`
 
- `mac:include` `str:"bedrock.ch"`
- `mac:include` `str:"Core/Log.ch"`
-+`mac:include` `str:"Core/Ring.ch"`
- `mac:include` `str:"Core/Time.ch"`
+ `pp:include` `str:"bedrock.ch"`
+ `pp:include` `str:"Core/Log.ch"`
++`pp:include` `str:"Core/Ring.ch"`
+ `pp:include` `str:"Core/Time.ch"`
 </pre>
 					</div>
 					<div class="hunk-head pending"><span>@@ -21,8 +21,6 @@ void RingSink::Write</span><span class="tag">proposed by fs_edit &middot; awaiting approval 2m 08s</span><span class="grow"></span><span class="btn">Deny&hellip;</span><span class="btn primary"><i class="ci ci-check"></i>Allow</span></div>
@@ -135,7 +135,7 @@
 <pre>
 @@ -0,0 +1,12 @@
 +`com:// Log - declarations (port of RefEngine Core::Log). Implementation in Log.cf.`
-+`mac:include` `str:"Core/Ring.ch"`
++`pp:include` `str:"Core/Ring.ch"`
 +
 +`kw:namespace` `ns:Engine`
 +{
@@ -209,9 +209,9 @@
 -`com:// TODO: port from RefEngine`
 +`com:// Sinks receive formatted records; RingSink keeps the last N.`
 
- `mac:include` `str:"Core/Log.ch"`
-+`mac:include` `str:"Core/Ring.ch"`
- `mac:include` `str:"Core/Time.ch"`
+ `pp:include` `str:"Core/Log.ch"`
++`pp:include` `str:"Core/Ring.ch"`
+ `pp:include` `str:"Core/Time.ch"`
 </pre>
 				</div>
 				<div class="hunk-head pending"><span>@@ -21,8 +21,6 @@</span><span class="grow"></span><span class="tag">awaiting approval</span></div>

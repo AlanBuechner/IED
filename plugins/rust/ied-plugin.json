@@ -14,6 +14,29 @@
 	"permissions": ["process.spawn", "lsp", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Rust" },
+		"semanticTokenColors": [
+			{
+				"languageId": "rust",
+				"label": "Visual Assist style",
+				"rules": {
+					"keyword.controlFlow": "--syntax-control",
+					"builtinType": "--syntax-keyword",
+					"boolean": "--syntax-keyword",
+					"selfKeyword": "--syntax-keyword",
+					"selfTypeKeyword": "--syntax-keyword",
+					"typeAlias": "--syntax-type",
+					"union": "--syntax-type",
+					"generic": "--syntax-type",
+					"constParameter": "--syntax-parameter",
+					"attribute": "--syntax-macro",
+					"builtinAttribute": "--syntax-macro",
+					"derive": "--syntax-macro",
+					"macroBang": "--syntax-macro",
+					"escapeSequence": "--syntax-constant",
+					"character": "--syntax-string"
+				}
+			}
+		],
 		"lspProfiles": [
 			{
 				"id": "rust-analyzer",

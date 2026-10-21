@@ -46,6 +46,7 @@
 .tok-con { color: var(--syntax-constant); font-weight: var(--syntax-constant-weight); font-style: var(--syntax-constant-style); }
 .tok-ns { color: var(--syntax-namespace); font-weight: var(--syntax-namespace-weight); font-style: var(--syntax-namespace-style); }
 .tok-mac { color: var(--syntax-macro); font-weight: var(--syntax-macro-weight); font-style: var(--syntax-macro-style); }
+.tok-pp { color: var(--syntax-preprocessor); font-weight: var(--syntax-preprocessor-weight); font-style: var(--syntax-preprocessor-style); }
 .tok-str { color: var(--syntax-string); font-weight: var(--syntax-string-weight); font-style: var(--syntax-string-style); }
 .tok-num { color: var(--syntax-number); font-weight: var(--syntax-number-weight); font-style: var(--syntax-number-style); }
 .tok-com { color: var(--syntax-comment); font-weight: var(--syntax-comment-weight); font-style: var(--syntax-comment-style); }

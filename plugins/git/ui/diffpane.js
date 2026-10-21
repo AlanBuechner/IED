@@ -1,9 +1,10 @@
 // diffpane.js - the lower right of the Git activity (mockup 05): the chosen file's diff with its path, Inline or Side by
 // side (this device's choice), and Open file. A commit's file is diffed against its first parent; a local change
-// against the index (unstaged) or HEAD (staged), with the hunk and line actions; an untracked file shows whole.
+// against the index (unstaged) or HEAD (staged), with the hunk and line actions; an untracked file shows whole. Its
+// lines take the editor's syntax colors when the editor plugin provides them (the `editor.colorize` binding).
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { DiffView } from "./diffview.js";
+import { DiffView, sides } from "./diffview.js";
 
 // An untracked file as one hunk of added lines.
 export function wholeFileDiff(path, text) {
@@ -56,6 +57,28 @@ export class DiffPane {
 		this.note.textContent = note;
 		this.last = { diff, options };
 		this.view.show(diff, Object.assign({}, options, { mode: this.mode }));
+		this.colorize(path, diff);
+	}
+
+	// Both sides of `diff` colored by the editor, each as one text so a construct over several lines tokenizes whole.
+	async colorize(path, diff) {
+		if (diff.binary || !diff.hunks.length || !this.ied.bindings.has("editor.colorize")) return;
+		const both = sides(diff);
+		let colored;
+		try {
+			colored = await Promise.all([both.old, both.new].map((side) => this.ied.bindings.call("editor.colorize", { path, lines: side.lines })));
+		}
+		catch {
+			return;
+		}
+		if (!this.last || this.last.diff !== diff) return;
+		const colors = new Map();
+		[both.old, both.new].forEach((side, s) => side.keys.forEach((key, i) => {
+			const entry = colors.get(key) || { old: null, new: null };
+			entry[s ? "new" : "old"] = colored[s][i];
+			colors.set(key, entry);
+		}));
+		this.view.setColors(colors);
 	}
 
 	async showCommit(repoId, oid, file) {
