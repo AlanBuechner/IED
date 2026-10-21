@@ -126,16 +126,23 @@ namespace Scripting
 	};
 
 	/// RAII insert-point guard: moves the builder to `blk` and restores the previous block on destruction.
+	/// Emits into another block meanwhile; then the builder is back where it was, at the line it was on (what the other
+	/// block emits, a cleanup's statements say, must not lend the next instruction its line: BUG-307).
 	class InsertGuard
 	{
 	public:
-		InsertGuard(llvm::IRBuilder<>& b, llvm::BasicBlock* blk) : m_B(b), m_Prev(b.GetInsertBlock())
+		InsertGuard(llvm::IRBuilder<>& b, llvm::BasicBlock* blk) : m_B(b), m_Prev(b.GetInsertBlock()), m_Line(b.getCurrentDebugLocation())
 		{
 			if (blk) b.SetInsertPoint(blk);
 		}
-		~InsertGuard() { if (m_Prev) m_B.SetInsertPoint(m_Prev); }
+		~InsertGuard()
+		{
+			if (m_Prev) m_B.SetInsertPoint(m_Prev);
+			m_B.SetCurrentDebugLocation(m_Line);
+		}
 	private:
 		llvm::IRBuilder<>& m_B;
 		llvm::BasicBlock* m_Prev;
+		llvm::DebugLoc m_Line;
 	};
 } // namespace Scripting
