@@ -212,7 +212,9 @@ delay-loads it), so one shipped without the DLL still starts, and `Host::Open` r
 7. **Load**: register the script's reflection, its GC roots and its exit lists, then start its globals, inside a
    guard (section 7).
 
-Errors at any step come back as diagnostics, in the same form the compiler prints; nothing is loaded.
+Errors at any step come back as diagnostics, in the same form the compiler prints; nothing is loaded. A script file
+is named in them by its path from the folder all the script's files on disk are in (`ui/menu.cf`); a file given as
+text outside it by the name it was given.
 
 ### 4.1 Names that must agree
 

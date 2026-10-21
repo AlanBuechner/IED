@@ -109,7 +109,30 @@ namespace Scripting
 			return true;
 		}
 
-		bool RegisterScript(SourceManager& sources, const std::vector<ScriptFile>& files, ScriptUnits& units, std::string* error)
+		// The folder every one of `folders` is in: the script's own folder.
+		std::string CommonFolder(const std::vector<std::string>& folders)
+		{
+			if (folders.empty()) return "";
+			fs::path common(folders.front());
+			for (const std::string& folder : folders)
+				while (!common.empty() && Normalized(fs::path(folder).lexically_relative(common)).rfind("..", 0) == 0) common = common.parent_path();
+			return Normalized(common);
+		}
+
+		// How diagnostics name a script file: by its path from the script's folder (`ui/menu.cf`), as its author knows
+		// it; a file given as text outside that folder by the name it was given.
+		std::string DisplayName(const ScriptFile& file, const std::string& absPath, const std::string& scriptFolder)
+		{
+			if (!scriptFolder.empty())
+			{
+				const std::string relative = Normalized(fs::path(absPath).lexically_relative(scriptFolder));
+				if (!relative.empty() && relative != "." && relative.rfind("..", 0) != 0) return relative;
+			}
+			return file.text ? Normalized(file.path) : absPath;
+		}
+
+		bool RegisterScript(SourceManager& sources, const std::vector<ScriptFile>& files, const std::string& scriptFolder, ScriptUnits& units,
+			std::string* error)
 		{
 			for (const ScriptFile& file : files)
 			{
@@ -118,7 +141,7 @@ namespace Scripting
 				if (file.text) text = *file.text;
 				else if (!ReadText(file.path, text)) return Fail(error, "cannot read the script file " + file.path);
 				else absPath = Normalized(fs::absolute(file.path));
-				const uint32 id = sources.RegisterVirtual(absPath, fs::path(file.path).filename().string(), text, units.scriptProject, false);
+				const uint32 id = sources.RegisterVirtual(absPath, DisplayName(file, absPath, scriptFolder), text, units.scriptProject, false);
 				if (!id) return Fail(error, "the script names " + file.path + " twice");
 				units.scriptUnits.push_back(id);
 			}
@@ -154,7 +177,7 @@ namespace Scripting
 		if (!RegisterInterface(sources, host, units, error)) return std::nullopt;
 		for (const std::string& folder : scriptFolders) sources.AddFolder(folder, units.scriptProject);
 		sources.AddFolder(TextFolder(), units.scriptProject);
-		if (!RegisterScript(sources, files, units, error)) return std::nullopt;
+		if (!RegisterScript(sources, files, CommonFolder(scriptFolders), units, error)) return std::nullopt;
 		return units;
 	}
 } // namespace Scripting

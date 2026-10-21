@@ -1,0 +1,2 @@
+// A syntax error in a file of a subfolder: diagnostics name it by its path from the script's folder.
+int32 Broken( { return 2; }

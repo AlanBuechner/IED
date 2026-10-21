@@ -20,6 +20,7 @@ void Refused(Scripting::Host* host, ScriptTest::Checks& checks, Scripting::Scrip
 void CheckRefusals(Scripting::Host* host, ScriptTest::Checks& checks)
 {
 	Refused(host, checks, ScriptTest::OptionsFor(checks, "syntax", "syntax.cf"), "syntax.cf (3:");
+	Refused(host, checks, ScriptTest::OptionsFor(checks, "nested", "menu_main.cf;ui/broken.cf"), "ui/broken.cf (2:"); // named from the script's folder
 	Refused(host, checks, ScriptTest::OptionsFor(checks, "unknown", "unknown.cf"), "Missing");
 	Refused(host, checks, ScriptTest::OptionsFor(checks, "redefines", "redefines.cf"), "a script cannot define 'Add': its host defines it");
 	Refused(host, checks, ScriptTest::OptionsFor(checks, "imports", "imports.cf"), "a script cannot import C or C++");
