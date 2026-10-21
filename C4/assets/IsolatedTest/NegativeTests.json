@@ -1,4 +1,12 @@
 {
+  "Types/PointerLayerConstAddedUnderMutable": {
+    "expect": ["main.cf (5:2) error: cannot initialize 'const int32**' from 'int32**': const is added to a pointer's pointee only when every pointer above it points to const too"],
+    "reason": "BUG-321: adding const below a mutable layer would let a pointer to const be stored as mutable; the error spells each layer's const and says why"
+  },
+  "Types/PointerLayerConstDropped": {
+    "expect": ["main.cf (9:2) error: cannot initialize 'const Box**' from 'Box const**': dropping const is not allowed"],
+    "reason": "BUG-321: a const map's Find gives a pointer to a const Box*; dropping that const is refused, and the two types print differently (they used to both print 'const Box**')"
+  },
   "Platform/SubsystemUnknown": {
     "expect": ["--subsystem takes console or windows, not 'gui'"],
     "compileFlags": ["--subsystem", "gui"],

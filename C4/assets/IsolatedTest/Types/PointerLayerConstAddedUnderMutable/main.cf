@@ -1,0 +1,7 @@
+int32 main() {
+	int32 value = 3;
+	int32* pointer = &value;
+	int32** layers = &pointer;
+	const int32** sneaky = layers;
+	return **sneaky;
+}

@@ -129,6 +129,11 @@ both work.
   pointee, `null`, and a derived-to-base upcast. A pointer to const never becomes a pointer to mutable
   (`dropping const is not allowed`) except through `void*`; unrelated pointees are an error (`the pointees
   are unrelated`), and a base-to-derived conversion needs `as`.
+- A pointer to a pointer keeps every layer's const and may add const at a layer when every layer above it is
+  const, as C++'s qualification conversion does: `Box const**` (a pointer to a const pointer to `Box`, what a
+  const map's `Find` returns for `Box*` values) converts to `const Box const**`, and `int32**` to
+  `int32 const**` or `const int32 const**`, but not to `const int32**`, through which a pointer to const could
+  be stored as a pointer to mutable. Diagnostics spell every layer's const the same way.
 - Pointers and integers are truthy in conditions (`if (p)`).
 - `&r` of a reference (a local, a parameter or a field) is the address of its referent, as in C++.
 

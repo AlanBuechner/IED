@@ -1,0 +1,25 @@
+// BUG-321: a pointer converts to one that adds const at a lower layer when every layer above it is const (C++'s
+// qualification conversion): a const map's Find result, a pointer to its const `Box*`, reads as a pointer to a const
+// pointer to const Box. main returns the failures.
+include "bedrock.ch"
+
+class Box { public int32 v; }
+
+int32 main() {
+	Core::HashMap<int32, Box*> map;
+	Box* box = new Box();
+	box->v = 5;
+	map.Insert(1, box);
+	const Core::HashMap<int32, Box*>& view = map;
+	int32 failures = 0;
+	Box const** exact = view.Find(1);               // a pointer to the map's const Box*
+	failures += exact != nullptr && (*exact)->v == 5 ? 0 : 1;
+	const Box const** readOnly = view.Find(1);       // const added under a const layer
+	failures += readOnly != nullptr && (*readOnly)->v == 5 ? 0 : 1;
+	int32 value = 3;
+	int32* pointer = &value;
+	int32 const** toConst = &pointer;                // const added at the top layer
+	const int32 const** bothConst = &pointer;        // and below it
+	failures += **toConst == 3 && **bothConst == 3 ? 0 : 1;
+	return failures;
+}

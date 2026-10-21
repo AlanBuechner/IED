@@ -21,10 +21,31 @@ namespace Scripting
 			return t && t->GetKind() == TypeKind::Pointer && IsVoid(static_cast<const PointerType*>(t)->GetPointeeType());
 		}
 
-		QueryResult<void> PointeeConverts(const Type* from, const Type* to)
+		// A layer below the top (`Box const**` to `const Box const**`): const is never dropped, and is added only where every
+		// layer above is const (C++'s qualification conversion), so nothing const can be stored through it as mutable.
+		QueryResult<void> LayerConverts(const PointerType* from, const PointerType* to, bool everyLayerAboveConst)
+		{
+			if (from->IsConstReferent() && !to->IsConstReferent())
+				return QueryResult<void>::Fail(QueryError::NotAValue, "dropping const is not allowed");
+			if (!from->IsConstReferent() && to->IsConstReferent() && !everyLayerAboveConst)
+				return QueryResult<void>::Fail(QueryError::NotAValue, "const is added to a pointer's pointee only when every pointer above it "
+					"points to const too: a pointer to const could otherwise be stored through it as mutable");
+			const Type* fromPointee = TypeHandle::UnwrapToValue(from->GetPointeeType());
+			const Type* toPointee = TypeHandle::UnwrapToValue(to->GetPointeeType());
+			if (fromPointee == toPointee) return QueryResult<void>::Success();
+			const auto* fromInner = dynamic_cast<const PointerType*>(fromPointee);
+			const auto* toInner = dynamic_cast<const PointerType*>(toPointee);
+			if (fromInner && toInner) return LayerConverts(fromInner, toInner, everyLayerAboveConst && to->IsConstReferent());
+			return QueryResult<void>::Fail(QueryError::NotAValue, "the pointees are unrelated");
+		}
+
+		QueryResult<void> PointeeConverts(const Type* from, const Type* to, bool constPointee)
 		{
 			// `void*` is universal, and so is `void**` against any `T**` (COM out-parameters).
 			if (from == to || IsVoid(from) || IsVoid(to) || IsVoidPointer(from) || IsVoidPointer(to)) return QueryResult<void>::Success();
+			const auto* fromLayer = dynamic_cast<const PointerType*>(TypeHandle::UnwrapToValue(from));
+			const auto* toLayer = dynamic_cast<const PointerType*>(TypeHandle::UnwrapToValue(to));
+			if (fromLayer && toLayer) return LayerConverts(fromLayer, toLayer, constPointee);
 			const auto* derived = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(from));
 			const auto* base = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(to));
 			if (derived && base && ClassHierarchy::DerivesFrom(base, derived))
@@ -50,10 +71,9 @@ namespace Scripting
 				: QueryResult<void>::Fail(QueryError::NotAValue, "a function pointer converts only to void*");
 		if (from->GetKind() != TypeKind::Pointer) return QueryResult<void>::Success();
 		const auto* fromPointer = static_cast<const PointerType*>(from);
-		if (auto pointees = PointeeConverts(fromPointer->GetPointeeType(), toPointer->GetPointeeType()); !pointees.Ok()) return pointees;
 		// `void*` is the universal handle (C interop takes `const char*` through it); every other target keeps const.
 		if (fromPointer->IsConstReferent() && !toPointer->IsConstReferent() && !IsVoid(toPointer->GetPointeeType()))
 			return QueryResult<void>::Fail(QueryError::NotAValue, "dropping const is not allowed");
-		return QueryResult<void>::Success();
+		return PointeeConverts(fromPointer->GetPointeeType(), toPointer->GetPointeeType(), toPointer->IsConstReferent());
 	}
 } // namespace Scripting

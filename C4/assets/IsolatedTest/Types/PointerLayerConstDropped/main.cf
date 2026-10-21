@@ -1,0 +1,11 @@
+include "bedrock.ch"
+
+class Box { public int32 v; }
+
+int32 main() {
+	Core::HashMap<int32, Box*> map;
+	map.Insert(1, new Box());
+	const Core::HashMap<int32, Box*>& view = map;
+	const Box** found = view.Find(1);
+	return found != nullptr ? 0 : 1;
+}
