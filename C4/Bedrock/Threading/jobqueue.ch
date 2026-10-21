@@ -11,6 +11,7 @@ namespace Threading
 	{
 		public func<void()> run;
 		public WaitGroup* group;   // told Done when the job ends, or null
+		public const char* name;   // what a job observer calls it, or null
 	}
 
 	struct JobCell

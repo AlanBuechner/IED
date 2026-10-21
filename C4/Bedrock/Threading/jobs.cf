@@ -1,4 +1,5 @@
 include "jobs.ch"
+include "Text/stringbuilder.ch"
 
 namespace Threading
 {
@@ -13,14 +14,30 @@ namespace Threading
 	class WorkerStart
 	{
 		public JobWorkers* workers;
-		public int32 index;          // a frame worker's index, or -1 for a background worker
+		public int32 index;          // a frame worker's index, or -1 - n for background worker n
 	}
 
 	// ---------------------------------------------------------------------------------------------------------
 	// Taking and running jobs
 
+	// The process-wide observer (SetJobObserver), or null: published whole, so a worker never sees half of one. A
+	// worker that loaded an older one keeps it alive on its stack until its job ends.
+	JobObserver* g_jobObserver = null;
+
+	void SetJobObserver(JobObserver observer) {
+		JobObserver* published = null;
+		if (observer.begin != null || observer.end != null) {
+			published = new JobObserver;
+			*published = observer;
+		}
+		atomic_store(&g_jobObserver, published, MemoryOrder::Release);
+	}
+
 	void RunJob(Job& job) {
+		JobObserver* observer = atomic_load(&g_jobObserver, MemoryOrder::Acquire);
+		const uint64 token = observer != null && observer->begin != null ? observer->begin(job.name) : 0u;
 		job.run();
+		if (observer != null && observer->end != null) observer->end(token);
 		if (job.group) job.group->Done();
 	}
 
@@ -112,10 +129,24 @@ namespace Threading
 		}
 	}
 
+	// A worker's thread is named for debuggers and profilers: "Job Worker 3", "Background Worker 0".
+	void NameWorker(const char* kind, int32 number) {
+		Core::StringBuilder name;
+		name.Append(kind);
+		name.AppendByte(' ');
+		name.AppendInt(number);
+		Thread::SetCurrentName(name.CStr());
+	}
+
 	void WorkerMain(void* state) {
 		WorkerStart* start = (WorkerStart*)state;
-		if (start->index >= 0) RunFrameWorker(start->workers, start->index);
-		else RunBackgroundWorker(start->workers);
+		if (start->index >= 0) {
+			NameWorker("Job Worker", start->index);
+			RunFrameWorker(start->workers, start->index);
+			return;
+		}
+		NameWorker("Background Worker", -1 - start->index);
+		RunBackgroundWorker(start->workers);
 	}
 
 	void StartWorker(JobWorkers* workers, int32 index) {
@@ -142,7 +173,7 @@ namespace Threading
 			workers->frame.Push(queues);
 		}
 		for (int32 i = 0; i < frameCount; i++) StartWorker(workers, i);
-		for (int32 i = 0; i < workers->backgroundCount; i++) StartWorker(workers, -1);
+		for (int32 i = 0; i < workers->backgroundCount; i++) StartWorker(workers, -1 - i);
 	}
 
 	void JobSystem::Delete() {
@@ -164,11 +195,12 @@ namespace Threading
 	}
 
 	// A full queue: a frame job runs now on the submitting thread (it is short); a background one waits for room.
-	void JobSystem::Submit(func<void()> run, JobPriority priority, WaitGroup* group) {
+	void JobSystem::Submit(func<void()> run, JobPriority priority, WaitGroup* group, const char* name) {
 		if (group) group->Add(1);
 		Job job;
 		job.run = run;
 		job.group = group;
+		job.name = name;
 		if (!workers) { RunJob(job); return; }
 		if (!Enqueue(job, priority)) {
 			if (priority != JobPriority::Background) { RunJob(job); return; }

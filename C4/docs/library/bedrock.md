@@ -796,7 +796,12 @@ Nothing in it takes an OS lock: a blocked thread parks on an address and is woke
 - `JobSystem(JobSystemDesc desc)` starts `desc.frameWorkers` frame workers (default: the processors minus one,
   at least 1) and `desc.backgroundWorkers` background workers (default 1; with 0, frame workers run background
   jobs after their frame work); destroying it finishes the queued jobs and joins them. A zero (moved-from)
-  system runs a submitted job at once on the submitting thread.
+  system runs a submitted job at once on the submitting thread. Each worker names its thread ("Job Worker 0",
+  "Background Worker 0"), which debuggers, crash dumps and the profiler show.
+- `SetJobObserver(JobObserver)` tells a profiler of every job in the process: `begin(name)` on the worker before a
+  job runs, `end(token)` with what `begin` returned once it has; a null function is not called, and an empty observer
+  stops it. `Submit(job, priority, group, name)` gives the job the name the observer sees (a literal, or text that
+  outlives the job). A profiler installs one as it starts, so each job is a task in its timeline.
 - An exception that escapes a job ends the process, as one escaping a thread's entry does.
 
 **Threads and exceptions; threads C4 did not start.** An exception that leaves a `Thread::Run` body, a job or an

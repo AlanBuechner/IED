@@ -1,0 +1,14 @@
+// BUG-326: the shim CBind writes forwards what the header declares, deprecated or not, and compiles without warnings
+// (ExpectedExit.json): the header's deprecations are for its callers, not for a binding that mirrors it. main returns
+// the failures.
+extern "c++" include "legacy.h"
+extern "c++" source "legacy.cpp"
+
+int32 main() {
+	int32 failures = 0;
+	ILegacy* legacy = MakeLegacy(21);
+	failures += legacy->Value() == 21 ? 0 : 1;
+	failures += Twice(legacy->Value()) == 42 ? 0 : 1;
+	FreeLegacy(legacy);
+	return failures;
+}

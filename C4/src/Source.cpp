@@ -137,10 +137,12 @@ namespace
 				m_Result.errors.Push(e);
 		}
 
+		// The context and the driver (the lowered HIR, the module) are never freed: the process ends with the build, and
+		// freeing them object by object takes a second on a large program (clang's -disable-free does the same).
 		bool RunBackend()
 		{
-			llvm::LLVMContext ctx;
-			Scripting::CodeGenDriver driver(ctx);
+			llvm::LLVMContext& ctx = *new llvm::LLVMContext;
+			Scripting::CodeGenDriver& driver = *new Scripting::CodeGenDriver(ctx);
 
 			// The entry point the generated main calls: a -test run drives the test harness (the compiler
 			// emits a synthetic main that runs every [test] function), otherwise the user's main.
@@ -466,5 +468,5 @@ int main(int argc, char** argv)
 		std::cerr << "error: no input: give the folders or files to compile (C4.exe -h lists the options)" << std::endl;
 		return kUsageError;
 	}
-	return CompilerDriver(opts).Run();
+	return (new CompilerDriver(opts))->Run(); // the program and its model go with the process, as the backend's do
 }

@@ -26,8 +26,65 @@ class Order {
 	public void Add(int32 tag) { Threading::LockGuard guard(mutex); seen.Push(tag); }
 }
 
+// What the test's job observer saw: jobs begun and ended, and the names they had.
+Threading::Atomic<int32> g_observedBegins;
+Threading::Atomic<int32> g_observedEnds;
+Threading::Atomic<int32> g_observedNamed;
+
+uint64 ObserveBegin(const char* name) {
+	g_observedBegins.FetchAdd(1);
+	if (name != nullptr && strcmp((void*)name, (void*)"step") == 0) g_observedNamed.FetchAdd(1);
+	return 77u;
+}
+
+void ObserveEnd(uint64 token) {
+	if (token == 77u) g_observedEnds.FetchAdd(1);
+}
+
+// The name of the thread a job ran on.
+class RanOn {
+	public Threading::Mutex mutex;
+	public Core::String name;
+	public void Record() { Threading::LockGuard guard(mutex); name = Threading::Thread::CurrentName(); }
+}
+
 [test("threading.jobs")]
 class JobTests {
+	[test("observer")]
+	public static void TestObserver() {
+		Threading::JobSystem jobs(Workers(2, 1));
+		Threading::JobObserver observer;
+		observer.begin = ObserveBegin;
+		observer.end = ObserveEnd;
+		Threading::SetJobObserver(observer);
+		Threading::WaitGroup group;
+		for (int32 i = 0; i < 10; i++) jobs.Submit([]() {}, Threading::JobPriority::Normal, &group, "step");
+		jobs.Submit([]() {}, Threading::JobPriority::Background, &group);
+		group.Wait();
+		assert_eq(11, g_observedBegins.Load(), "the observer is told each job begins");
+		assert_eq(11, g_observedEnds.Load(), "and ends, with what begin returned");
+		assert_eq(10, g_observedNamed.Load(), "by the name it was submitted with");
+		Threading::JobObserver none;
+		Threading::SetJobObserver(none);
+		Threading::WaitGroup after;
+		jobs.Submit([]() {}, Threading::JobPriority::Normal, &after, "step");
+		after.Wait();
+		assert_eq(11, g_observedBegins.Load(), "an empty observer is told nothing");
+	}
+
+	[test("worker_names")]
+	public static void TestWorkerNames() {
+		Threading::JobSystem jobs(Workers(1, 1));
+		RanOn* frame = new RanOn;
+		RanOn* background = new RanOn;
+		Threading::WaitGroup group;
+		jobs.Submit([frame]() { frame->Record(); }, Threading::JobPriority::High, &group);
+		jobs.Submit([background]() { background->Record(); }, Threading::JobPriority::Background, &group);
+		group.Wait();
+		assert_se("Job Worker 0", frame->name.CStr(), "a frame worker's thread is named for it");
+		assert_se("Background Worker 0", background->name.CStr(), "and a background worker's");
+	}
+
 	[test("defaults")]
 	public static void TestDefaults() {
 		Threading::JobSystem jobs;

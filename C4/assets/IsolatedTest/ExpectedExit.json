@@ -1,4 +1,9 @@
 {
+  "Interop/Bug326DeprecatedInHeader": {
+    "exit": 0,
+    "compileMustNotContain": ["warning"],
+    "reason": "BUG-326: the shim CBind writes forwards a header's deprecated declarations without the header's deprecation warnings."
+  },
   "Interop/Bug319AbstractInterfaces": {
     "exit": 0,
     "compileMustNotContain": ["warning"],

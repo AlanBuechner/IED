@@ -90,6 +90,9 @@ namespace
 				sf << "#define _CRT_SECURE_NO_WARNINGS\n";
 				if (cxx) sf << "#include <new>\n"; // placement new in constructor wrappers; the header may not include it
 				sf << "#include \"" + fs::absolute(g_args.header).filename().string() + "\"\n";
+				// The shim forwards what the header declares, deprecated or not (BUG-326): its deprecations are for the
+				// header's callers.
+				sf << "#pragma clang diagnostic ignored \"-Wdeprecated-declarations\"\n";
 				sf << shim;
 			}
 		}

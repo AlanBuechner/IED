@@ -63,7 +63,9 @@ namespace Threading
 		public void Submit(func<void()> job) { Submit(job, JobPriority::Normal, nullptr); }
 		public void Submit(func<void()> job, JobPriority priority) { Submit(job, priority, nullptr); }
 		// `group`, when given, counts the job until it ends.
-		public void Submit(func<void()> job, JobPriority priority, WaitGroup* group);
+		public void Submit(func<void()> job, JobPriority priority, WaitGroup* group) { Submit(job, priority, group, nullptr); }
+		// `name`, when given, is what a job observer (SetJobObserver) calls the job: a literal, or text that outlives it.
+		public void Submit(func<void()> job, JobPriority priority, WaitGroup* group, const char* name);
 		// Runs frame jobs on this thread until `group` is done.
 		public void Wait(WaitGroup& group);
 
@@ -75,4 +77,16 @@ namespace Threading
 
 		private JobWorkers* workers;
 	}
+
+	// What a profiler is told of each job: begin(name) on the worker before the job runs, then end(token) with what
+	// begin returned once it has. A function left null is not called.
+	struct JobObserver
+	{
+		public funcptr<uint64(const char*)> begin;
+		public funcptr<void(uint64)> end;
+	}
+
+	// The observer every JobSystem in the process tells of its jobs: a profiler sets it as it starts and sets an empty
+	// one as it stops. Process-wide, because the job systems a program makes are not the profiler's to reach.
+	void SetJobObserver(JobObserver observer);
 }
