@@ -91,7 +91,7 @@ def main(argv):
 		if args.cookie:
 			os.environ[COOKIE_ENV] = args.cookie
 	elif args.server:
-		process, url = spawn_server(args.server, args.verbose)
+		process, url = spawn_server(os.path.abspath(args.server), args.verbose)
 	else:
 		process, url = spawn_mock(args.verbose)
 	try:
