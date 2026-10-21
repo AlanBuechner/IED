@@ -1,0 +1,48 @@
+// The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar, and C4LSP - one server per
+// project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project). Ships in
+// every toolchain as <toolchain>/ied/ (MakeToolchain.py); a solution names it in its localPlugins.
+{
+	"manifestVersion": 1,
+	"id": "c4",
+	"name": "C4 Language",
+	"version": "0.1.0",
+	"description": "C4 sources: the language, its grammar and C4LSP (diagnostics, completion, navigation, formatting, refactoring).",
+	"publisher": "C4",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"contributes": {
+		"languages": [
+			{
+				"id": "c4",
+				"aliases": ["C4"],
+				"extensions": [".cf", ".ch"],
+				"lineComment": "//",
+				"blockComment": ["/*", "*/"],
+				"brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
+				"autoClosingPairs": [["{", "}"], ["[", "]"], ["(", ")"], ["\"", "\""], ["'", "'"]],
+				"indentation": { "increasePattern": "^.*\\{[^}\"']*$", "decreasePattern": "^\\s*\\}" },
+				"grammar": "grammars/c4.monarch.json",
+				"taskComments": ["TODO", "HACK", "FIXME", "NOTE"]
+			}
+		],
+		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C4" },
+		"lspProfiles": [
+			{
+				"id": "c4-language-server",
+				"label": "C4LSP",
+				"command": "${pluginDir}/../tools/C4LSP/C4LSP.exe",
+				"env": { "C4_HOME": "${pluginDir}/.." },
+				"selector": { "languages": ["c4"] },
+				"scope": "project",
+				"initializationOptionsFile": "${workspaceDir}/.ied/local/lsp-options/${projectName}.json",
+				"launchMode": "staged",
+				"positionEncoding": "bytes",
+				"requestIds": "integer",
+				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
+				"codeActionsNeedClientFilter": true,
+				"when": "config.c4.languageServer"
+			}
+		]
+	}
+}

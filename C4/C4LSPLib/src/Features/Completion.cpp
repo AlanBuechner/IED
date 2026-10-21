@@ -52,12 +52,11 @@ namespace C4LSP::Features
 			{
 				// `a.` / `a->` (+ optional typed prefix): offer the base object's members. Resolve the base type
 				// from its OWN enclosing scope chain first (position-aware - never another function's same-named
-				// local), then fall back to a name-based lookup when no node exists at the caret yet.
-				const Scripting::Type* baseType = ResolveBaseType(session, sourceId, unit->GetRootAST(), baseEnd);
-				if (!baseType)
-					baseType = ResolveBaseTypeByName(resolver, located.path, BaseIdentifierAt(text, offset));
-				if (baseType)
-					CollectMembersOf(baseType, candidates);
+				// local), then by name when that finds no members: a dangling accessor inside brackets
+				// (`Take(b->)`) locates the enclosing call, whose type has none.
+				CollectMembersOf(ResolveBaseType(session, sourceId, unit->GetRootAST(), baseEnd), candidates);
+				if (candidates.Count() == 0)
+					CollectMembersOf(ResolveBaseTypeByName(resolver, located.path, BaseIdentifierAt(text, offset)), candidates);
 			}
 			else
 			{
@@ -75,7 +74,9 @@ namespace C4LSP::Features
 				CollectMembersOf(baseType, candidates);
 		}
 
-		CollectGlobalSymbols(resolver, candidates);
+		// After an accessor only the base's members fit; anywhere else the globals do too.
+		if (baseEnd == std::string::npos)
+			CollectGlobalSymbols(resolver, candidates);
 
 		return Filter(candidates, prefix);
 	}
@@ -117,6 +118,16 @@ namespace C4LSP::Features
 		return std::min(offset + position.character, text.size());
 	}
 
+	// Whether the identifier starting at `start` is itself reached through an accessor (`a.b`, `a->b`, `N::b`): such a
+	// base needs the whole chain's type, which these text-level lookups do not have.
+	static bool IsChainedBase(const std::string& text, size_t start)
+	{
+		if (start == 0)
+			return false;
+		const char before = text[start - 1];
+		return before == '.' || before == ':' || (before == '>' && start >= 2 && text[start - 2] == '-');
+	}
+
 	size_t Completion::FindMemberAccessBaseEnd(const std::string& text, size_t offset)
 	{
 		if (offset == 0 || offset > text.size())
@@ -137,8 +148,8 @@ namespace C4LSP::Features
 			return std::string::npos;
 		size_t baseEnd = k; // byte index of the base's last character
 		while (k > 0 && IsIdentChar(text[k - 1])) --k; // walk to the start of that identifier
-		if (k > 0 && !std::isspace(static_cast<unsigned char>(text[k - 1])))
-			return std::string::npos; // part of a longer word (`foo_bar.` -> bar is not the base)
+		if (IsChainedBase(text, k))
+			return std::string::npos;
 		return baseEnd;
 	}
 
@@ -164,8 +175,8 @@ namespace C4LSP::Features
 			return {}; // base must end in an identifier (`(x + y).` unsupported by this fallback)
 		size_t baseEnd = k;
 		while (k > 0 && IsIdentChar(text[k - 1])) --k;
-		if (k > 0 && !std::isspace(static_cast<unsigned char>(text[k - 1])))
-			return {}; // part of a longer word (`foo_bar.` -> bar is not the base)
+		if (IsChainedBase(text, k))
+			return {};
 		return text.substr(k, baseEnd - k + 1);
 	}
 
@@ -237,8 +248,12 @@ namespace C4LSP::Features
 				AddCandidate(out, member.mName, Kind::Enum, type->ToString());
 			break;
 		}
+		case Scripting::TypeKind::Pointer:
+			// `p->`: the pointee's members.
+			CollectMembersOf(Deref(static_cast<const Scripting::PointerType*>(type)->GetPointeeType()), out);
+			break;
 		default:
-			break; // scalars / pointers to non-objects have no members
+			break; // scalars have no members
 		}
 	}
 

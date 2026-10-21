@@ -1,5 +1,7 @@
 #include "LspFeaturesTest.h"
+#include <algorithm>
 #include <string>
+#include <vector>
 
 using namespace C4LSP::Server;
 using namespace C4LSP::Features;
@@ -355,6 +357,50 @@ int32 main() {
 		for (const auto& item : items)
 			if (item.label == "count") hasCount = true; // the enclosing class field
 		TEST_ASSERT(hasCount);
+		TEST_PASSED();
+	}
+
+	void LspFeaturesTest::TestCompletionMemberAccessAfterPunctuationListsOnlyMembers()
+	{
+		// BUG-296/297: a base right after `(` or `!` was refused as "part of a longer word", a pointer's `->` listed
+		// nothing, and member lists were padded with every global. The accessors are dangling inside closed
+		// brackets, as an editor that closes pairs sends them on the keystroke.
+		const char* program =
+			R"(struct Box {
+	int32 size;
+	bool Empty() { return size == 0; }
+};
+
+void Take(int32 n) {}
+
+void Use(Box* b, Box c) {
+	Take(b->);
+	if (!c.) {}
+	int32 n = 2+b->;
+}
+)";
+		auto session = Testing::Lsp::MakeSession("Punct.cf", program);
+		auto uri = Testing::Lsp::UriFor("Punct.cf");
+		auto labels = [](const Core::Vector<CompletionItem>& items) {
+			std::vector<std::string> sorted;
+			for (const auto& item : items)
+				sorted.push_back(item.label);
+			std::sort(sorted.begin(), sorted.end());
+			std::string joined;
+			for (const auto& label : sorted)
+				joined += (joined.empty() ? "" : ",") + label;
+			return joined;
+		};
+		auto arrow = Testing::Lsp::PositionOf(program, "b->", 1);
+		arrow.character += 3;
+		auto dot = Testing::Lsp::PositionOf(program, "c.", 1);
+		dot.character += 2;
+		auto sum = Testing::Lsp::PositionOf(program, "b->", 2);
+		sum.character += 3;
+		// After `(` (and no `Take`/`Use`/`Box`), after `!`, after an operator.
+		const std::string found = labels(Completion::At(session, uri, arrow)) + " | " + labels(Completion::At(session, uri, dot)) + " | " +
+			labels(Completion::At(session, uri, sum));
+		TEST_ASSERT_EQ(found, std::string("Empty,size | Empty,size | Empty,size"));
 		TEST_PASSED();
 	}
 

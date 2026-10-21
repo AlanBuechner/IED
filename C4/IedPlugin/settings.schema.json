@@ -1,0 +1,12 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "C4 language settings",
+	"type": "object",
+	"properties": {
+		"c4.languageServer": {
+			"type": "boolean",
+			"default": true,
+			"description": "Run C4LSP for C4 sources: diagnostics, completion, navigation, formatting and refactoring."
+		}
+	}
+}

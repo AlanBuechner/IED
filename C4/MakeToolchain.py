@@ -10,6 +10,7 @@
 #     tools/C4LSP/  tools/C4DAP/                  language server (+ the LLVM dlls it loads), debug adapter
 #     docs/                 the user-facing language, library, runtime and build docs
 #     skills/               the AI skills for this version of the language
+#     ied/                  the IED plugin for this version of the language (IedPlugin/)
 #
 # The folder is mirrored: unchanged files are not copied again and files gone from the build are removed.
 # C4/nuke.toml runs this after every Development build to refresh the "dev" toolchain.
@@ -35,7 +36,7 @@ TOOLS = {
 }
 LSP_DLLS = ("libclang.dll", "LLVM-C.dll", "LTO.dll")
 REQUIRED = ["C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe",
-	"CBind/CBind.exe", "C4Script/C4Script.dll"]
+	"CBind/CBind.exe", "C4Script/C4Script.dll", "ied/ied-plugin.json"]
 DOCS = [
 	"01-what-is-c4.md",
 	"language/01-program-model.md", "language/02-preprocessor.md", "language/03-lexical-structure.md",
@@ -90,6 +91,8 @@ def plan(build, repo):
 			files[os.path.join("docs", *doc.split("/"))] = source
 	for rel in files_below(os.path.join(repo, "skills")):
 		files[os.path.join("skills", rel)] = os.path.join(repo, "skills", rel)
+	for rel in files_below(os.path.join(repo, "IedPlugin")):
+		files[os.path.join("ied", rel)] = os.path.join(repo, "IedPlugin", rel)
 	return {os.path.normpath(k): v for k, v in files.items()}
 
 

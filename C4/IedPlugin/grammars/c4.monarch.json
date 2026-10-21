@@ -1,0 +1,64 @@
+{
+	"defaultToken": "",
+	"tokenPostfix": ".c4",
+	"keywords": [
+		"namespace", "class", "struct", "interface", "enum", "union", "public", "private", "protected", "virtual", "override",
+		"const", "static", "extern", "alias", "template", "extends", "is", "as", "new", "delete", "this", "true", "false",
+		"null", "nullptr", "funcptr", "func", "asm", "sizeof", "static_cast", "reinterpret_cast", "volatile", "mutable",
+		"thread_local", "typedef", "using", "auto"
+	],
+	"controlKeywords": [
+		"if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "defer", "goto",
+		"fallthrough", "try", "catch", "finally", "throw"
+	],
+	"typeKeywords": [
+		"void", "bool", "char", "char8", "char16", "char32", "byte", "int", "uint", "int8", "int16", "int32", "int64",
+		"uint8", "uint16", "uint32", "uint64", "float", "double", "float32", "float64", "size_t",
+		"unorm8", "unorm16", "unorm32", "unorm64", "snorm8", "snorm16", "snorm32", "snorm64"
+	],
+	"operators": [
+		"=", ">", "<", "!", "~", "?", ":", "==", "<=", ">=", "!=", "&&", "||", "++", "--", "+", "-", "*", "/", "&", "|",
+		"^", "%", "<<", ">>", "+=", "-=", "*=", "/=", "&=", "|=", "^=", "%=", "<<=", ">>=", "->", "::"
+	],
+	"symbols": "[=><!~?:&|+\\-*\\/\\^%]+",
+	"escapes": "\\\\(?:[abfnrtv0\\\\\"']|x[0-9A-Fa-f]{1,8}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})",
+	"tokenizer": {
+		"root": [
+			["^\\s*#\\s*[a-z]+", "keyword.directive"],
+			["^\\s*include\\b", "keyword.directive"],
+			["^\\s*\\[\\s*[a-zA-Z_]\\w*", "annotation"],
+			["[a-zA-Z_]\\w*", { "cases": { "@typeKeywords": "type", "@controlKeywords": "keyword.flow", "@keywords": "keyword", "@default": "identifier" } }],
+			{ "include": "@whitespace" },
+			["[{}()\\[\\]]", "@brackets"],
+			["@symbols", { "cases": { "@operators": "operator", "@default": "" } }],
+			["\\d+\\.\\d*([eE][\\-+]?\\d+)?[fF]?", "number.float"],
+			["\\.\\d+([eE][\\-+]?\\d+)?[fF]?", "number.float"],
+			["\\d+[eE][\\-+]?\\d+[fF]?", "number.float"],
+			["0[xX][0-9a-fA-F]+[uUlL]*", "number.hex"],
+			["0[bB][01]+[uUlL]*", "number.binary"],
+			["\\d+[uUlLfF]*", "number"],
+			["[;,.]", "delimiter"],
+			["\"([^\"\\\\]|\\\\.)*$", "string.invalid"],
+			["\"", "string", "@string"],
+			["'[^\\\\']'", "string"],
+			["(')(@escapes)(')", ["string", "string.escape", "string"]],
+			["'", "string.invalid"]
+		],
+		"whitespace": [
+			["[ \\t\\r\\n]+", ""],
+			["\\/\\*", "comment", "@comment"],
+			["\\/\\/.*$", "comment"]
+		],
+		"comment": [
+			["[^\\/*]+", "comment"],
+			["\\*\\/", "comment", "@pop"],
+			["[\\/*]", "comment"]
+		],
+		"string": [
+			["[^\\\\\"]+", "string"],
+			["@escapes", "string.escape"],
+			["\\\\.", "string.escape.invalid"],
+			["\"", "string", "@pop"]
+		]
+	}
+}

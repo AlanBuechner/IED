@@ -124,35 +124,51 @@ namespace C4LSP::Features
 			return out;
 		}
 
+		void Push(C4LSP::Features::SemanticTokensResult& out, uint32 line, uint32 character, uint32 length, uint32 kind, uint32 modifiers)
+		{
+			if (length == 0)
+				return; // nothing to highlight (empty / EOF token)
+			SemanticToken st;
+			st.startLine = line;
+			st.startCharacter = character;
+			st.length = length;
+			st.kindId = kind;
+			st.modifiers = modifiers;
+			out.tokens.push_back(st);
+		}
+
+		// A line's length (1-based line) without its line break.
+		uint32 LineLength(const Scripting::Source* source, uint32 line)
+		{
+			Core::String text = source->GetLineText(line);
+			size_t size = text.size();
+			while (size > 0 && (text[size - 1] == '\n' || text[size - 1] == '\r'))
+				--size;
+			return static_cast<uint32>(size);
+		}
+
+		// Lengths are byte spans (C4 sources are treated as bytes). A token over several lines - a block comment, or
+		// a line comment the lexer ends at the next line's start - becomes one token per line: an LSP token never
+		// crosses a line unless the client says it takes multiline tokens, and IED does not.
 		void Emit(C4LSP::Features::SemanticTokensResult& out, const Scripting::Token& tok, uint32 kind, uint32 modifiers,
 		           const Scripting::Source* source)
 		{
 			const auto& s = tok.GetStartLocation();
 			const auto& e = tok.GetEndLocation();
-			SemanticToken st;
-			st.startLine = (s.line > 0) ? s.line - 1 : 0;
-			st.startCharacter = (s.column > 0) ? s.column - 1 : 0;
-
-			// Length in UTF-16 code units. For a single-line token this is the byte span (C4 sources
-			// are treated as bytes); for a multi-line token (a block comment) it is the sum of each
-			// covered line's text, which matches how the client counts characters across newlines.
-			if (e.line == s.line || e.line <= 0)
-				st.length = (e.byteOffset >= s.byteOffset) ? static_cast<uint32>(e.byteOffset - s.byteOffset) : 0;
-			else if (source)
+			const uint32 line = (s.line > 0) ? s.line - 1 : 0;
+			const uint32 column = (s.column > 0) ? s.column - 1 : 0;
+			if (e.line == s.line || e.line <= 0 || s.line <= 0 || !source)
 			{
-				uint32 total = 0;
-				for (uint32 line = s.line; line <= e.line && line > 0; ++line)
-					total += static_cast<uint32>(source->GetLineText(line).size());
-				st.length = total;
+				Push(out, line, column, (e.byteOffset >= s.byteOffset) ? static_cast<uint32>(e.byteOffset - s.byteOffset) : 0, kind, modifiers);
+				return;
 			}
-			else
-				st.length = (e.byteOffset >= s.byteOffset) ? static_cast<uint32>(e.byteOffset - s.byteOffset) : 0;
-
-			if (st.length == 0)
-				return; // nothing to highlight (empty / EOF token)
-			st.kindId = kind;
-			st.modifiers = modifiers;
-			out.tokens.push_back(st);
+			for (uint32 at = s.line; at <= static_cast<uint32>(e.line); ++at)
+			{
+				const uint32 from = at == static_cast<uint32>(s.line) ? column : 0;
+				const uint32 length = LineLength(source, at);
+				const uint32 end = at == static_cast<uint32>(e.line) ? std::min(length, (e.column > 0) ? static_cast<uint32>(e.column - 1) : 0) : length;
+				Push(out, at - 1, from, end > from ? end - from : 0, kind, modifiers);
+			}
 		}
 	}
 

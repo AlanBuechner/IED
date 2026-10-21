@@ -86,6 +86,9 @@ namespace Testing
 	TEST_FUNC(Lsp.Features.Completion)
 	void TestCompletionMemberAccessDoesNotLeakSiblingFunctionLocal();
 
+	TEST_FUNC(Lsp.Features.Completion)
+	void TestCompletionMemberAccessAfterPunctuationListsOnlyMembers();
+
 
 	// --- Document symbols ---
 	TEST_FUNC(Lsp.Features.DocumentSymbols)

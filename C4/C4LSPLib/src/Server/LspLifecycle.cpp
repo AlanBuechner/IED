@@ -262,9 +262,10 @@ namespace C4LSP::Server
 
 	Json::Value LspServer::BuildTriggerCharacters() const
 	{
+		// The character that completes an accessor: `.`, and the `>` of `->` (Completion finds the `-` before it).
 		Json::Value array = Json::Value::MakeArray();
 		array.Append(Json::Value::String(Core::String(".")));
-		array.Append(Json::Value::String(Core::String("-")));
+		array.Append(Json::Value::String(Core::String(">")));
 		return array;
 	}
 } // namespace C4LSP::Server

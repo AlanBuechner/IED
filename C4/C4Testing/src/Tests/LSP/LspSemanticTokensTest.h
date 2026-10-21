@@ -71,6 +71,9 @@ namespace Testing
 		void TestCommentIsCommentKind();
 
 		TEST_FUNC(Lsp.Features.SemanticTokens)
+		void TestTokensNeverCrossALine();
+
+		TEST_FUNC(Lsp.Features.SemanticTokens)
 		void TestStringLiteralIsStringKind();
 
 		TEST_FUNC(Lsp.Features.SemanticTokens)

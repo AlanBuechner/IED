@@ -2,13 +2,13 @@
 
 C4's editor integration targets **IED**, the project's own IDE. IED has no built-in C4 knowledge: all
 coloring, navigation and diagnostics come from the C4 language server, and debugging from the C4 debug
-adapter, through a C4 plugin for IED (planned; it replaces the plugin written for the previous editor,
+adapter, through the C4 plugin for IED (`IedPlugin/`; it replaces the plugin written for the previous editor,
 which was retired). The server and the adapter speak plain LSP and DAP, so any client can use them.
 
 | Piece | Location | Status |
 |---|---|---|
 | C4LSP - language server | `C4LSPLib/` (the server), `C4LSP/` (the executable) | **Implemented** (rebuilt after the ProgramModel rework, validated in the previous editor, unit tested in C4Testing) |
-| C4 plugin for IED | IED, outside the C4 tree | **Planned** |
+| C4 plugin for IED | `IedPlugin/`, shipped in every toolchain as `ied/` | **Implemented** for the language and C4LSP; the C4DAP part waits for IED's debugger |
 | C4DAP - debug adapter | `C4DAPLib/` (the adapter), `C4DAP/` (the executable) | **Implemented** (unit tested in C4Testing and over stdio in ToolsTest) |
 
 ---
@@ -52,9 +52,9 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 | Lifecycle | `initialize`, `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration` |
 | Sync | `didOpen`, `didChange`, `didClose`, `publishDiagnostics` |
 | Navigation | `definition`, `declaration`, `typeDefinition`, `implementation`, `references`, `documentHighlight` |
-| Information | `hover`, `signatureHelp`, `completion` |
+| Information | `hover`, `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members) |
 | Symbols | `documentSymbol`, `workspace/symbol` |
-| Presentation | `semanticTokens/full` (20 token types: the 19 standard ones plus a C4 `controlFlow` kind; modifiers include `builtin`, used for primitives), `foldingRange` |
+| Presentation | `semanticTokens/full` (20 token types: the 19 standard ones plus a C4 `controlFlow` kind; modifiers include `builtin`, used for primitives; a token never crosses a line - a block comment is one token per line), `foldingRange` |
 | Edits | `rename`, `prepareRename`, `formatting`, `rangeFormatting` |
 | Code actions | quick fixes, create-definition, tidy |
 
@@ -91,12 +91,27 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 
 ---
 
-## 2. The C4 plugin for IED (planned)
+## 2. The C4 plugin for IED
 
-The plugin belongs to the IDE and will live outside the C4 tree. Its job: run C4LSP for `.cf` / `.ch` files
-with the build-derived LSP options file as its initialization options, map its settings to the live options
-above, color C4LSP's semantic tokens, and launch C4DAP for debugging. The server and the adapter are
-tested here without an editor (C4Testing `Lsp.*` and `Dap.*`, ToolsTest).
+`IedPlugin/` is a declarative IED plugin (no code: a manifest, a grammar and a settings schema). `MakeToolchain.py`
+copies it into every toolchain as `<toolchain>/ied/`, so a workspace gets the plugin of the C4 it builds with: the
+solution `nuke init --ied` writes names it in its `localPlugins` (IED loads local plugins in trusted workspaces).
+
+- **The language** `c4` for `.cf` and `.ch`: comments, brackets, closing pairs, indentation, and a Monarch grammar
+  (`grammars/c4.monarch.json`) that colors a file until C4LSP's semantic tokens arrive.
+- **C4LSP** (`lspProfiles`, IED `docs/24`): one server per project of the solution (`scope: project`), each with
+  the options Nuke writes for that project (`.ied/local/lsp-options/<project>.json`) as its initialization options,
+  so it compiles what the build compiles. It runs from a staged copy of `tools/C4LSP/` (rebuilding the toolchain
+  never fights a running server), with `C4_HOME` naming the toolchain so the copy still finds Bedrock. Its quirks
+  are declared rather than worked around in IED: byte columns (`positionEncoding: bytes`), integer request ids,
+  semantic tokens and folding fetched again after each diagnostics publish (it sends no refresh requests yet), and
+  code actions cut to the requested range by the client (it returns them all).
+- **Settings**: `c4.languageServer` (on) turns C4LSP off for a workspace.
+- **Still to come**: C4DAP as a debug provider (with IED's debugger), the problem matchers and the Nuke task preset
+  (with IED's tasks), and the semantic token colors as plugin data (IED's theme maps the standard types today).
+
+The server and the adapter are tested here without an editor (C4Testing `Lsp.*` and `Dap.*`, ToolsTest); IED's
+server checks drive its language server pool with a fake server.
 
 ---
 

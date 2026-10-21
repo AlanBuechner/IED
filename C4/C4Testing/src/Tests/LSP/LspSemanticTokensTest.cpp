@@ -1,5 +1,6 @@
 #include "LspSemanticTokensTest.h"
 #include <string>
+#include <vector>
 
 using C4LSP::Features::SemanticTokenKind;
 using C4LSP::Features::SemanticTokenModifiers;
@@ -348,6 +349,33 @@ int32 b = 2;
 		auto block = TokenAt(result, program, "/*", 1);
 		TEST_ASSERT(block.found);
 		TEST_ASSERT_EQ(block.kind, (uint32)SemanticTokenKind::Comment);
+		TEST_PASSED();
+	}
+
+	void LspSemanticTokensTest::TestTokensNeverCrossALine()
+	{
+		// BUG-298: a line comment was one token through the next line (its length that line's and the next one's),
+		// and a block comment one token over all its lines - clients refuse tokens that end past their line.
+		const std::string program = "// one\r\n// second\r\nint32 a = 1;\r\n/* block\r\n   end */ int32 b = 2;\r\n";
+		auto session = Make("Lines.cf", program);
+		auto uri = Testing::Lsp::UriFor("Lines.cf");
+		auto result = SemanticTokens::ForDocument(session, uri);
+		std::vector<uint32> lengths; // each line's length without its "\r\n"
+		for (size_t at = 0; at < program.size();)
+		{
+			size_t end = program.find("\r\n", at);
+			lengths.push_back(static_cast<uint32>(end - at));
+			at = end + 2;
+		}
+		std::vector<uint32> commentLines;
+		for (const auto& token : result.tokens)
+		{
+			TEST_ASSERT(token.startLine < lengths.size());
+			TEST_ASSERT(token.startCharacter + token.length <= lengths[token.startLine]);
+			if (token.kindId == (uint32)SemanticTokenKind::Comment)
+				commentLines.push_back(token.startLine);
+		}
+		TEST_ASSERT(commentLines == std::vector<uint32>({ 0, 1, 3, 4 })); // each line comment, and the block on both lines
 		TEST_PASSED();
 	}
 

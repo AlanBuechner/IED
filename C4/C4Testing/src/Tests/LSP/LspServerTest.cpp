@@ -137,6 +137,12 @@ namespace Testing
 		TEST_ASSERT_EQ(caps.Member("documentSymbolProvider").GetBool(), true);
 		TEST_ASSERT(caps.HasMember("completionProvider"));
 		TEST_ASSERT(caps.HasMember("textDocumentSync"));
+		// BUG-295: completion triggers on the character that ends an accessor - `>` of `->`, never `-` (subtraction).
+		const Value& triggers = caps.Member("completionProvider").Member("triggerCharacters");
+		std::vector<std::string> trigger;
+		for (uint32 i = 0; i < triggers.Size(); ++i)
+			trigger.push_back(triggers.At(i).GetString());
+		TEST_ASSERT(trigger == std::vector<std::string>({ ".", ">" }));
 		TEST_PASSED();
 	}
 
