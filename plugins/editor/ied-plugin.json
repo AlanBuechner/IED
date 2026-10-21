@@ -29,6 +29,10 @@
 			{ "id": "ied.explorer.collapseAll", "title": "Collapse All", "category": "Solution Explorer", "icon": "$(collapse-all)" },
 			{ "id": "ied.explorer.copyPath", "title": "Copy Full Path", "category": "Solution Explorer" },
 			{ "id": "ied.explorer.copyRelativePath", "title": "Copy Relative Path", "category": "Solution Explorer" },
+			{ "id": "ied.explorer.newFile", "title": "New File...", "category": "Solution Explorer", "icon": "$(new-file)" },
+			{ "id": "ied.explorer.newFolder", "title": "New Folder", "category": "Solution Explorer", "icon": "$(new-folder)" },
+			{ "id": "ied.explorer.rename", "title": "Rename", "category": "Solution Explorer", "icon": "$(edit)" },
+			{ "id": "ied.explorer.delete", "title": "Delete", "category": "Solution Explorer", "icon": "$(trash)" },
 			{ "id": "ied.output.clear", "title": "Clear All", "category": "Output", "icon": "$(clear-all)" },
 			{ "id": "ied.output.toggleWrap", "title": "Toggle Word Wrap", "category": "Output", "icon": "$(word-wrap)" },
 			{ "id": "ied.editor.save", "title": "Save", "category": "File", "icon": "$(save)" },
@@ -46,6 +50,10 @@
 			],
 			"explorer/context": [
 				{ "command": "ied.explorer.open", "group": "1_open", "when": "explorerItemKind == 'file'" },
+				{ "command": "ied.explorer.newFile", "group": "2_new", "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
+				{ "command": "ied.explorer.newFolder", "group": "2_new", "order": 1, "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
+				{ "command": "ied.explorer.rename", "group": "4_edit", "when": "explorerItemKind == 'file' || explorerItemKind == 'folder'" },
+				{ "command": "ied.explorer.delete", "group": "4_edit", "order": 1, "when": "explorerItemKind == 'file' || explorerItemKind == 'folder'" },
 				{ "command": "ied.explorer.copyPath", "group": "5_copy" },
 				{ "command": "ied.explorer.copyRelativePath", "group": "5_copy", "order": 1 },
 				{ "command": "ied.explorer.refresh", "group": "9_refresh" }
@@ -57,6 +65,8 @@
 		},
 		"keybindings": [
 			{ "command": "ied.editor.save", "key": "ctrl+s" },
+			{ "command": "ied.explorer.rename", "key": "f2", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
+			{ "command": "ied.explorer.delete", "key": "delete", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
 			{ "command": "ied.editor.saveAll", "key": "ctrl+shift+s" },
 			{ "command": "shell.showView", "key": "ctrl+alt+l", "args": { "id": "ied.explorer" } },
 			{ "command": "shell.showView", "key": "ctrl+alt+o", "args": { "id": "ied.output" } },

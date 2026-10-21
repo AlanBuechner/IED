@@ -1,7 +1,7 @@
 """A language server for the checks (docs/24): speaks LSP over stdio, takes UTF-8 positions when the client offers them,
 publishes a diagnostic on every "bad" of an open document, answers hover with the position it got and definition with
 another file, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
-first argument."""
+first argument - after a {"argv": [...]} line with the arguments that follow it."""
 
 import json
 import sys
@@ -87,6 +87,8 @@ def notified(message):
 def main():
 	sys.stderr.write("fake-lsp started\n")
 	sys.stderr.flush()
+	LOG.write(json.dumps({"argv": sys.argv[2:]}) + "\n")
+	LOG.flush()
 	while True:
 		message = read_message()
 		if message is None:

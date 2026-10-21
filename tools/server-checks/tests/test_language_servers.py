@@ -125,6 +125,17 @@ class LanguageServerTests(ServerTestCase):
 		status = await self.client.request("lsp.status", {"wsId": "w1"})
 		self.assertEqual(("running", 1), (status["servers"][0]["state"], status["servers"][0]["restarts"]))
 
+	async def test_a_renamed_document_moves_on_its_server(self):
+		await self.open("a.fk")
+		await self.diagnostics("a.fk")
+		await self.client.request("fs.rename", {"wsId": "w1", "from": "a.fk", "to": "c.fk"})
+		cleared = await self.diagnostics("a.fk")
+		self.assertEqual([], cleared["items"], "the old path's diagnostics go")
+		self.assertEqual(1, len((await self.diagnostics("c.fk"))["items"]), "the server got the document under its new name")
+		closed = self.received("textDocument/didClose")[-1]["params"]["textDocument"]["uri"]
+		reopened = self.received("textDocument/didOpen")[-1]["params"]["textDocument"]["uri"]
+		self.assertEqual((True, True), (closed.endswith("/a.fk"), reopened.endswith("/c.fk")))
+
 	async def test_restart(self):
 		await self.open("a.fk")
 		await self.diagnostics("a.fk")
@@ -136,4 +147,70 @@ class LanguageServerTests(ServerTestCase):
 		self.assertEqual(1, len(self.received("shutdown")))
 		with self.assertRaises(RpcFailure) as refused:
 			await self.client.request("lsp.restart", {"wsId": "w1", "profile": "nope"})
+		self.assertEqual("not_found", refused.exception.code)
+
+
+class ProjectScopeTests(ServerTestCase):
+	"""A project-scoped profile in a solution: one server per project, named by ${projectName} and ${projectDir}, and a
+	workspace-wide one for documents in no project."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-lsp-projects-")
+		self.home = os.path.join(self.root, "home")
+		self.repo = os.path.join(self.root, "Repo")
+		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
+		plugin = os.path.join(self.home, "plugins", "fake")
+		os.makedirs(plugin)
+		shutil.copy(os.path.join(HERE, "fake_lsp.py"), plugin)
+		self.logs = os.path.join(self.root, "logs")
+		os.makedirs(self.logs)
+		write(os.path.join(plugin, "ied-plugin.json"), {
+			"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+			"contributes": {
+				"languages": [{"id": "fake", "extensions": [".fk"]}],
+				"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "scope": "project", "selector": {"languages": ["fake"]},
+					"args": ["-I", "${pluginDir}/fake_lsp.py", os.path.join(self.logs, "log-${projectName}.jsonl"), "${projectName}", "${projectDir}"]}]}})
+		for name in ("Game", "Tool"):
+			write(os.path.join(self.repo, "build", "ied", name + ".ied.proj"), {"version": 1, "name": name, "root": "../../src/" + name.lower(), "kind": "executable"})
+			write(os.path.join(self.repo, "src", name.lower(), "main.fk"), "bad\n")
+		write(os.path.join(self.repo, "loose.fk"), "fine\n")
+		write(os.path.join(self.repo, "Repo.ied.sln"), {"version": 1, "name": "Repo", "projects": [{"file": "build/ied/*.ied.proj"}]})
+		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Repo.ied.sln")))
+		self.assertTrue(self.server.started, self.server.error)
+
+	def tearDown(self):
+		self.server.stop()
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	async def asyncSetUp(self):
+		await super().asyncSetUp()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await self.client.sub(["diag:w1"])
+		await self.client.next_frame("diag:w1")
+
+	async def asyncTearDown(self):
+		self.assertEqual([], self.client.violations)
+		self.client.abort()
+
+	async def test_one_server_per_project_and_one_for_the_rest(self):
+		for path in ("src/game/main.fk", "src/tool/main.fk", "loose.fk"):
+			await self.client.request("doc.open", {"wsId": "w1", "path": path})
+		sources = {}
+		while len(sources) < 3:
+			frame = (await self.client.wait_for("diag:w1", lambda f: f["t"] == "evt", timeout=20))[-1]["data"]
+			sources[frame["path"]] = frame["source"]
+		self.assertEqual({"src/game/main.fk": "fake-lsp/Game", "src/tool/main.fk": "fake-lsp/Tool", "loose.fk": "fake-lsp"}, sources)
+		status = await self.client.request("lsp.status", {"wsId": "w1"})
+		self.assertEqual(["", "Game", "Tool"], sorted(s["project"] for s in status["servers"]))
+		for name, folder in (("Game", "game"), ("Tool", "tool")):
+			with open(os.path.join(self.logs, "log-%s.jsonl" % name), encoding="utf-8") as f:
+				argv = json.loads(f.readline())["argv"]
+			self.assertEqual(name, argv[0])
+			self.assertTrue(os.path.normcase(argv[1]).endswith(os.path.normcase(os.path.join("src", folder))), argv[1])
+		with open(os.path.join(self.logs, "log-.jsonl"), encoding="utf-8") as f:
+			self.assertEqual(["", ""], json.loads(f.readline())["argv"], "the workspace-wide server has no project")
+		restarted = await self.client.request("lsp.restart", {"wsId": "w1", "profile": "fake-lsp", "project": "Tool"})
+		self.assertEqual("starting", [s for s in restarted["servers"] if s["project"] == "Tool"][0]["state"])
+		with self.assertRaises(RpcFailure) as refused:
+			await self.client.request("lsp.restart", {"wsId": "w1", "profile": "fake-lsp", "project": "Nope"})
 		self.assertEqual("not_found", refused.exception.code)

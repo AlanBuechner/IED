@@ -16,6 +16,15 @@ namespace Ied
 
 	static Core::String DocumentIedUri(const Document* doc) { return IedUriOf(doc->ws->wsId.View(), doc->path.View()); }
 
+	// The project whose server serves `path` under `profile`: the owning project, for a project-scoped profile in a
+	// solution; else none (the workspace-wide server).
+	static ProjectModel* ProjectFor(const Workspace* ws, const LspProfile* profile, Core::StringView path) {
+		if (!profile->perProject || !ws->solution) return nullptr;
+		return ws->solution->Owning(ws->At(path));
+	}
+
+	static Core::String NameOf(const ProjectModel* project) { return project ? project->name : Core::String(); }
+
 	void LspPool::Init(Server* server) {
 		this.server = server;
 		LspPool* self = this;
@@ -61,20 +70,26 @@ namespace Ied
 		return holds;
 	}
 
-	LanguageServer* LspPool::Find(Workspace* ws, Core::StringView profileId) const {
+	LanguageServer* LspPool::Find(Workspace* ws, Core::StringView profileId, Core::StringView project) const {
 		for (LanguageServer* language : languages)
-			if (language->ws == ws && language->profile->id.View() == profileId) return language;
+			if (language->ws == ws && language->profile->id.View() == profileId && language->project.View() == project) return language;
 		return nullptr;
+	}
+
+	LanguageServer* LspPool::Create(Workspace* ws, LspProfile* profile, const ProjectModel* project) {
+		LanguageServer* language = new LanguageServer(server, ws, profile, NameOf(project).View(), project ? project->root : FS::Path());
+		languages.Push(language);
+		return language;
 	}
 
 	LanguageServer* LspPool::Serving(Document* doc, bool start) {
 		Core::String languageId = server->plugins->LanguageOf(doc->ws, doc->path.View());
 		LspProfile* profile = ProfileServing(ProfilesFor(doc->ws), languageId.View(), doc->path.View());
 		if (!profile) return nullptr;
-		LanguageServer* language = Find(doc->ws, profile->id.View());
+		ProjectModel* project = ProjectFor(doc->ws, profile, doc->path.View());
+		LanguageServer* language = Find(doc->ws, profile->id.View(), NameOf(project).View());
 		if (language || !start) return language;
-		language = new LanguageServer(server, doc->ws, profile);
-		languages.Push(language);
+		language = Create(doc->ws, profile, project);
 		language->Start();
 		return language;
 	}
@@ -156,6 +171,24 @@ namespace Ied
 		}
 	}
 
+	void LspPool::DocumentRenamed(Document* doc, Core::StringView oldPath) {
+		Core::String old = Core::String(oldPath);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("textDocument"));
+		json.BeginObject();
+		json.Field("uri", FileUriOf(doc->ws->At(oldPath).View()).View());
+		json.EndObject();
+		json.EndObject();
+		for (LanguageServer* language : languages) {
+			if (language->ws != doc->ws || !language->documents.Contains(old)) continue;
+			language->documents.Remove(old);
+			if (language->state == LspState::Running) language->Notify(Core::StringView("textDocument/didClose"), json.View());
+		}
+		ForgetDiagnostics(doc->ws, oldPath);
+		DocumentOpened(doc);
+	}
+
 	void LspPool::TrustChanged(Workspace* ws) {
 		Core::Array<LspProfile*> profiles = ProfilesFor(ws);
 		for (int64 i = languages.Count() - 1; i >= 0; --i) {
@@ -178,7 +211,8 @@ namespace Ied
 		Core::Array<LspProfile*> profiles = ProfilesFor(ws);
 		for (const Core::String& path : server->documents->OpenPaths(ws)) {
 			LspProfile* profile = ProfileServing(profiles, server->plugins->LanguageOf(ws, path.View()).View(), path.View());
-			if (profile && profile->id.View() == language->profile->id.View()) OpenOn(language, server->documents->Find(ws, path.View()));
+			if (!profile || profile->id.View() != language->profile->id.View()) continue;
+			if (NameOf(ProjectFor(ws, profile, path.View())).View() == language->project.View()) OpenOn(language, server->documents->Find(ws, path.View()));
 		}
 	}
 
@@ -187,6 +221,7 @@ namespace Ied
 		JsonWriter data;
 		data.BeginObject();
 		data.Field("profile", language->profile->id.View());
+		data.Field("project", language->project.View());
 		data.Field("state", LspStateName(language->state));
 		data.Field("problem", language->problem.View());
 		data.EndObject();
@@ -203,7 +238,7 @@ namespace Ied
 			if (!line.Trimmed().IsEmpty()) {
 				lines.Append(LogStamp(Platform::UnixTimeNs()).View());
 				lines.Append("[");
-				lines.Append(language->profile->id.View());
+				lines.Append(language->Source().View());
 				lines.Append("] ");
 				lines.Append(line.Trimmed());
 				lines.Append("\n");
@@ -258,10 +293,11 @@ namespace Ied
 		return Core::String("null");
 	}
 
-	Core::String LspPool::InitializationOptions(Workspace* ws, const LspProfile* profile) {
+	Core::String LspPool::InitializationOptions(const LanguageServer* language) {
+		const LspProfile* profile = language->profile;
 		if (profile->initializationOptionsFile.IsEmpty()) return profile->initializationOptions;
-		FS::Path file = FS::Path(ExpandProfileVariables(profile->initializationOptionsFile.View(), VariablesOf(profile, ws)).View());
-		if (!file.IsAbsolute()) file = ws->root / file.View();
+		FS::Path file = FS::Path(ExpandProfileVariables(profile->initializationOptionsFile.View(), language->Variables()).View());
+		if (!file.IsAbsolute()) file = language->ws->root / file.View();
 		if (!FS::FileExists(file.CStr())) return profile->initializationOptions;
 		FS::File opened = FS::File(file.CStr(), "rb");
 		Core::String text = opened.ReadText();
@@ -284,7 +320,9 @@ namespace Ied
 		Serialization::DomNode list = params.Member("diagnostics");
 		lineCache.Clear();
 		Core::String items = list.Kind() == Serialization::DomKind::Array ? RewriteJson(list, RewriteFor(language, params.Member("uri").AsView(), false)) : Core::String("[]");
-		SetDiagnostics(ws, path.View(), language->profile->id.View(), items.View());
+		SetDiagnostics(ws, path.View(), language->Source().View(), items.View());
+		if (items.View() == "[]") language->published.Remove(path);
+		else language->published.Insert(path, true);
 		if (!language->profile->refetch.IsEmpty()) Refresh(ws, path.View(), language->profile->refetch);
 	}
 
@@ -309,11 +347,20 @@ namespace Ied
 
 	// A server that failed or stopped no longer vouches for what it published.
 	void LspPool::ClearDiagnostics(LanguageServer* language) {
-		Core::String prefix = language->ws->wsId + "/";
 		Core::Array<Core::String> paths;
-		for (const Core::KeyValue<Core::String, FileDiagnostics*>& entry : diagnostics)
-			if (entry.key.View().StartsWith(prefix.View()) && entry.value->bySource.Contains(language->profile->id)) paths.Push(Core::String(entry.key.View().Substring(prefix.ByteLength(), entry.key.ByteLength() - prefix.ByteLength())));
-		for (const Core::String& path : paths) SetDiagnostics(language->ws, path.View(), language->profile->id.View(), Core::StringView("[]"));
+		for (const Core::KeyValue<Core::String, bool>& entry : language->published) paths.Push(entry.key);
+		language->published.Clear();
+		for (const Core::String& path : paths) SetDiagnostics(language->ws, path.View(), language->Source().View(), Core::StringView("[]"));
+	}
+
+	void LspPool::ForgetDiagnostics(Workspace* ws, Core::StringView path) {
+		FileDiagnostics* file = nullptr;
+		if (!diagnostics.TryGet(DiagnosticsKey(ws, path), file)) return;
+		Core::Array<Core::String> sources;
+		for (const Core::KeyValue<Core::String, Core::String>& entry : file->bySource) sources.Push(entry.key);
+		for (const Core::String& source : sources) SetDiagnostics(ws, path, source.View(), Core::StringView("[]"));
+		for (LanguageServer* language : languages)
+			if (language->ws == ws) language->published.Remove(Core::String(path));
 	}
 
 	void LspPool::Refresh(Workspace* ws, Core::StringView path, const Core::Array<Core::String>& kinds) {
@@ -362,6 +409,7 @@ namespace Ied
 			json.Field("profile", language->profile->id.View());
 			json.Field("label", language->profile->label.View());
 			json.Field("plugin", language->profile->pluginId.View());
+			json.Field("project", language->project.View());
 			json.Field("state", LspStateName(language->state));
 			json.IntField("pid", (int64)language->pid);
 			json.IntField("restarts", (int64)language->restarts);
@@ -513,14 +561,16 @@ namespace Ied
 	Core::String LspPool::RestartMethod(Call& call, const Params& params) {
 		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
 		Core::String id = params.Str("profile");
-		LanguageServer* language = Find(ws, id.View());
+		Core::String projectName = params.Str("project", Core::StringView(""));
+		LanguageServer* language = Find(ws, id.View(), projectName.View());
 		if (!language) {
 			LspProfile* profile = nullptr;
 			for (LspProfile* candidate : ProfilesFor(ws))
 				if (candidate->id.View() == id.View()) profile = candidate;
 			if (!profile) throw RpcError(ErrorCode::NotFound, (Core::String("no language server profile ") + id.View()).View());
-			language = new LanguageServer(server, ws, profile);
-			languages.Push(language);
+			ProjectModel* project = projectName.IsEmpty() || !ws->solution ? nullptr : ws->solution->Project(projectName.View());
+			if (!projectName.IsEmpty() && (!profile->perProject || !project)) throw RpcError(ErrorCode::NotFound, (Core::String("no project ") + projectName.View() + " for " + id.View()).View());
+			language = Create(ws, profile, project);
 		}
 		language->Relaunch();
 		return StatusSnapshot(ws);

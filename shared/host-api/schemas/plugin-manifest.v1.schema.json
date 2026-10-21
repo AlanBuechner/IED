@@ -413,6 +413,7 @@
 					"description": "Plugin setting key to initializationOptions/didChangeConfiguration path, pushed live.",
 					"additionalProperties": { "type": "string" }
 				},
+				"scope": { "enum": ["workspace", "project"], "default": "workspace", "description": "project = one server per project of a solution (the document's owning project); ${projectName} and ${projectDir} then name it (docs/24)." },
 				"launchMode": { "enum": ["direct", "staged"], "default": "direct", "description": "staged = run a cached copy and restart when the source binary changes." },
 				"positionEncoding": { "enum": ["negotiate", "utf-16", "utf-8", "bytes"], "default": "negotiate" },
 				"requestIds": { "enum": ["any", "integer"], "default": "any" },

@@ -70,7 +70,7 @@ Rules:
 
 ## How this maps to Nuke
 
-Nuke reads `nuke.toml` manifests (a `[workspace]` at the root, a `[project]` per project; `Nuke/README.md`) and owns *how to build*. IED's files are the IDE-facing index of *what exists and where*. `nuke init --ied` (work item N2, `docs/17`) will write the solution, generated project files under `build/ied/`, and the `.ied/` scaffold (today `nuke init` already copies the toolchain's skills into `.ied/skills/` and gitignores `.ied/local/`); the project's `buildSystem.projectName` is what tasks pass as `-p`. Nuke stays authoritative; IED never re-derives build inputs (`docs/99` D6), though it may read the declarative manifests for display.
+Nuke reads `nuke.toml` manifests (a `[workspace]` at the root, a `[project]` per project; `Nuke/README.md`) and owns *how to build*. IED's files are the IDE-facing index of *what exists and where*. `nuke init --ied` (`Nuke/README.md` "IED solution") writes the solution with the toolchain's `c4` plugin pinned in `localPlugins`, generated project files under `build/ied/`, and the `.ied/` scaffold (skills, `.ied/local/` gitignored); running it again follows added and removed projects and leaves hand-edited files alone. The project's `buildSystem.projectName` is what tasks pass as `-p`, and what a project-scoped language server profile sees as `${projectName}` (`docs/24`). Nuke stays authoritative; IED never re-derives build inputs (`docs/99` D6), though it may read the declarative manifests for display.
 
 ## Legacy workspace folders
 

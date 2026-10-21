@@ -62,6 +62,29 @@ def process_sample(pid):
 		kernel32.CloseHandle(handle)
 
 
+class JobLimits(ctypes.Structure):
+	"""JOBOBJECT_EXTENDED_LIMIT_INFORMATION; only LimitFlags is set."""
+	_fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64), ("LimitFlags", ctypes.wintypes.DWORD),
+		("MinimumWorkingSetSize", ctypes.c_size_t), ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.wintypes.DWORD),
+		("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.wintypes.DWORD), ("SchedulingClass", ctypes.wintypes.DWORD),
+		("IoCounters", ctypes.c_uint64 * 6), ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+		("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+
+def bind_to_this_process(child):
+	"""Puts `child` in a job that ends it when this script ends, however it ends (a killed soak left its server
+	running before). Returns the job handle, which must stay open."""
+	kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+	kernel32.CreateJobObjectW.restype = ctypes.wintypes.HANDLE
+	job = kernel32.CreateJobObjectW(None, None)
+	limits = JobLimits()
+	limits.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits))  # JobObjectExtendedLimitInformation
+	if not kernel32.AssignProcessToJobObject(job, ctypes.wintypes.HANDLE(child._handle)):
+		raise SystemExit("the server could not be bound to this script (error %d)" % ctypes.get_last_error())
+	return job
+
+
 class Soak:
 	def __init__(self, args):
 		self.args = args
@@ -69,6 +92,7 @@ class Soak:
 		self.samples = []
 		self.failures = []
 		self.process = None
+		self.job = None
 		self.clients = []
 
 	def start_server(self):
@@ -79,6 +103,7 @@ class Soak:
 		argv = [executable, "--host", "127.0.0.1", "--port", "0", "--data", os.path.join(self.root, "data"), "--control", "ied-soak-%d" % os.getpid(),
 			"--home", REPO, "--static", os.path.join(REPO, "frontend"), "--quiet", "--workspace", workspace]
 		self.process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+		self.job = bind_to_this_process(self.process)
 		listening = self.process.stdout.readline().strip()
 		opening = self.process.stdout.readline().strip()
 		if not listening.startswith("LISTENING ") or not opening.startswith("OPEN "):

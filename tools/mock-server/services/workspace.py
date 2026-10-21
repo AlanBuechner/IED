@@ -139,11 +139,25 @@ class Workspaces:
 	async def m_fs_delete(self, call, p):
 		ws = self.get(p.str("wsId"))
 		path = normalize(p.str("path"))
+		if path and path not in ws.files and ws.is_dir(path):
+			return self._delete_folder(ws, path, p.bool("recursive", False, required=False))
 		entry = self.file(ws, path)
 		expected = p.int("expectedRevision", required=False)
 		if expected is not None and expected != entry.revision:
 			raise RpcError("conflict", "file changed since revision %d" % expected, {"revision": entry.revision})
 		del ws.files[path]
+		self.server.docs.on_disk_delete(ws.ws_id, path)
+		self._tree_changed(ws, path, "deleted")
+		return {}
+
+	def _delete_folder(self, ws, path, recursive):
+		if not recursive:
+			raise RpcError("bad_request", "the path is a folder: pass recursive to delete it with everything in it")
+		prefix = path + "/"
+		for gone in [f for f in ws.files if f.startswith(prefix)]:
+			del ws.files[gone]
+			self.server.docs.on_disk_delete(ws.ws_id, gone)
+		ws.directories = {d for d in ws.directories if d != path and not d.startswith(prefix)}
 		self._tree_changed(ws, path, "deleted")
 		return {}
 
@@ -160,14 +174,37 @@ class Workspaces:
 	async def m_fs_rename(self, call, p):
 		ws = self.get(p.str("wsId"))
 		source, target = normalize(p.str("from")), normalize(p.str("to"))
+		if not source or not target:
+			raise RpcError("bad_request", "the workspace's own folder cannot be renamed")
+		if source not in ws.files and ws.is_dir(source):
+			return self._rename_folder(ws, source, target)
 		entry = self.file(ws, source)
 		if target in ws.files or ws.is_dir(target):
 			raise RpcError("conflict", "%r already exists" % target)
 		ws.files[target] = ws.files.pop(source)
+		self.server.docs.renamed(ws.ws_id, source, target)
+		self._moved(ws, source, target)
+		return {"path": target, "revision": entry.revision}
+
+	def _rename_folder(self, ws, source, target):
+		if target.startswith(source + "/"):
+			raise RpcError("bad_request", "a folder cannot move into itself")
+		if target in ws.files or ws.is_dir(target):
+			raise RpcError("conflict", "%r already exists" % target)
+		prefix = source + "/"
+		for old in [f for f in ws.files if f.startswith(prefix)]:
+			new = target + old[len(source):]
+			ws.files[new] = ws.files.pop(old)
+			self.server.docs.renamed(ws.ws_id, old, new)
+		ws.directories = {(target + d[len(source):]) if d == source or d.startswith(prefix) else d for d in ws.directories}
+		ws.directories.add(target)
+		self._moved(ws, source, target)
+		return {"path": target}
+
+	def _moved(self, ws, source, target):
 		self.server.hub.publish("ws:" + ws.ws_id, "tree.changed", {"changes": [
 			{"path": source, "change": "deleted"}, {"path": target, "change": "created"},
 		]})
-		return {"path": target, "revision": entry.revision}
 
 	async def m_fs_search(self, call, p):
 		ws = self.get(p.str("wsId"))

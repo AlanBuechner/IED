@@ -114,7 +114,7 @@ class LspTests {
 			"{\"id\": \"clangd\", \"command\": \"clangd\", \"selector\": {\"languages\": [\"c\", \"cpp\"]}},"
 			"{\"id\": \"c4\", \"command\": \"${pluginDir}/../tools/C4LSP/C4LSP.exe\", \"args\": [\"--root\", \"${solutionDir}\"],"
 			" \"env\": {\"C4_HOME\": \"${pluginDir}\"}, \"selector\": {\"extensions\": [\".cf\", \".ch\"], \"globs\": [\"**/*.c4x\"]},"
-			" \"launchMode\": \"staged\", \"positionEncoding\": \"bytes\", \"requestIds\": \"integer\","
+			" \"launchMode\": \"staged\", \"scope\": \"project\", \"positionEncoding\": \"bytes\", \"requestIds\": \"integer\","
 			" \"refetchOnDiagnostics\": [\"semanticTokens\"], \"codeActionsNeedClientFilter\": true, \"when\": \"workspaceTrusted\","
 			" \"initializationOptions\": {\"tidy\": true}}"
 			"]}"), *doc).root;
@@ -122,8 +122,8 @@ class LspTests {
 		Ied::ReadLspProfiles(contributes, Core::StringView("c4"), FS::Path("C:/tc/ied"), profiles);
 		assert_eq(2, profiles.Count(), "two profiles");
 		Ied::LspProfile* c4 = profiles[1];
-		assert_true(c4->staged && !c4->negotiate && c4->encoding == Ied::PositionEncoding::Utf8 && c4->integerIds && c4->filterCodeActions, "the quirks");
-		assert_true(profiles[0]->negotiate && !profiles[0]->staged && profiles[0]->initializationOptions == "{}", "the defaults");
+		assert_true(c4->staged && c4->perProject && !c4->negotiate && c4->encoding == Ied::PositionEncoding::Utf8 && c4->integerIds && c4->filterCodeActions, "the quirks");
+		assert_true(profiles[0]->negotiate && !profiles[0]->staged && !profiles[0]->perProject && profiles[0]->initializationOptions == "{}", "the defaults");
 		assert_se("{\"tidy\":true}", c4->initializationOptions.CStr(), "initialization options as JSON");
 		assert_se("C4_HOME=${pluginDir}", c4->environment[0].CStr(), "the environment");
 		assert_true(Ied::ProfileServing(profiles, Core::StringView("c4"), Core::StringView("src/a.CF")) == c4, "by extension, any case");
@@ -136,6 +136,10 @@ class LspTests {
 		assert_se("C:/tc/ied/../tools/C4LSP/C4LSP.exe", Ied::ExpandProfileVariables(c4->command.View(), variables).CStr(), "pluginDir");
 		assert_se("D:/game", Ied::ExpandProfileVariables(c4->args[1].View(), variables).CStr(), "solutionDir");
 		assert_se("a ${setting:x} b${", Ied::ExpandProfileVariables(Core::StringView("a ${setting:x} b${"), variables).CStr(), "others are left");
+		assert_se("/lsp-options/.json", Ied::ExpandProfileVariables(Core::StringView("${projectDir}/lsp-options/${projectName}.json"), variables).CStr(), "no project: empty");
+		variables.projectName = Core::String("Game");
+		variables.projectDir = Core::String("D:/game/src");
+		assert_se("D:/game/src/lsp-options/Game.json", Ied::ExpandProfileVariables(Core::StringView("${projectDir}/lsp-options/${projectName}.json"), variables).CStr(), "a project");
 	}
 
 	[test("rewrite")]

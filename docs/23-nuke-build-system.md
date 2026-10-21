@@ -40,7 +40,6 @@ Why Nuke is built the way it is, what it guarantees, and what is left to do. The
 
 ## Not done yet (tracked in WORK.md)
 
-- `nuke init --ied` generating IED solution/project files (`.ied.sln`/`.ied.proj`, `docs/03`, item N2 in `docs/17`).
 - `--diagnostics-json` with absolute paths (N5) needs compiler support; until then IED's problem matcher reads
   the text output (`06`).
 - Parallel builds of independent projects; today projects build one after another (each C4 compile is

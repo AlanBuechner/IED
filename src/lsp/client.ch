@@ -12,7 +12,6 @@ namespace Ied
 	enum class LspState { Starting, Running, Failed, Stopped }
 
 	const char* LspStateName(LspState state);
-	ProfileVariables VariablesOf(const LspProfile* profile, const Workspace* ws);
 
 	const int64 kLspStartTimeoutMs = 20000;
 	const int64 kLspRequestTimeoutMs = 30000;
@@ -31,17 +30,21 @@ namespace Ied
 	class LanguageServer
 	{
 		[operator("create")] public void Init() {}
-		[operator("create")] public void Init(Server* server, Workspace* ws, LspProfile* profile);
+		// `project` empty: the workspace-wide server of `profile`.
+		[operator("create")] public void Init(Server* server, Workspace* ws, LspProfile* profile, Core::StringView project, const FS::Path& projectDir);
 
 		public Workspace* ws;
 		public LspProfile* profile;
+		public Core::String project;
+		public FS::Path projectDir;
 		public LspState state;
 		public Core::String problem;
 		public PositionEncoding encoding;
 		public Core::String capabilities;                     // the server's, after initialize; "{}" before
 		public uint32 pid;
 		public int32 restarts;
-		public Core::HashMap<Core::String, bool> documents;   // paths it has open (or opens once running)
+		public Core::HashMap<Core::String, bool> documents;   // paths it has open
+		public Core::HashMap<Core::String, bool> published;   // paths it published diagnostics for
 
 		// Starts the process (again) and sends initialize; Failed with `problem` when it cannot start.
 		public void Start();
@@ -55,6 +58,10 @@ namespace Ied
 		public void Stop();
 		// Stops it if it runs and starts it again, its exits forgotten (lsp.restart).
 		public void Relaunch();
+		// What its profile's ${...} variables stand for.
+		public ProfileVariables Variables() const;
+		// The source of its diagnostics: the profile id, "/<project>" added for a project's server.
+		public Core::String Source() const;
 
 	private:
 		private Core::String ProgramToRun(Core::String& error) const;

@@ -10,5 +10,6 @@ import "./textedits.test.js";
 import "./keybindings.test.js";
 import "./docsync.test.js";
 import "./lspconvert.test.js";
+import "./tree.test.js";
 
 run(document.getElementById("results"));

@@ -45,6 +45,8 @@ namespace Ied
 		public void OnDiskWrite(Workspace* ws, Core::StringView path, Core::StringView text, int64 revision);
 		// A file deleted behind an open document: it is told (doc.diskChanged with revision 0) and keeps its text.
 		public void OnDiskDeleted(Workspace* ws, Core::StringView path);
+		// A file moved by the server (fs.rename): its open document follows, and is told (doc.renamed {docId, path}).
+		public void Renamed(Workspace* ws, Core::StringView from, Core::StringView to);
 		public bool IsOpen(Workspace* ws, Core::StringView path) const;
 		public Core::Array<Core::String> OpenPaths(Workspace* ws) const;
 

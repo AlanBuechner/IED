@@ -26,6 +26,8 @@ namespace Ied
 		public void DocumentOpened(Document* doc);
 		public void DocumentChanged(Document* doc);
 		public void DocumentSaved(Document* doc);
+		// `doc` was at `oldPath`: closed there on the servers that had it, opened where it is now.
+		public void DocumentRenamed(Document* doc, Core::StringView oldPath);
 		// IED stops: shutdown and exit to every server.
 		public void StopAll();
 
@@ -36,14 +38,15 @@ namespace Ied
 		public void Notification(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params);
 		// The result's JSON for a request the server made.
 		public Core::String ServerRequest(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params);
-		// The profile's initializationOptions with its initializationOptionsFile merged over them (the file's keys win).
-		public Core::String InitializationOptions(Workspace* ws, const LspProfile* profile);
+		// Its profile's initializationOptions with its initializationOptionsFile merged over them (the file's keys win).
+		public Core::String InitializationOptions(const LanguageServer* language);
 
 	private:
 		// The profiles of the plugins loaded for `ws` whose `when` holds, in load order.
 		private Core::Array<LspProfile*> ProfilesFor(Workspace* ws);
 		private bool Allowed(Workspace* ws, const LspProfile* profile);
-		private LanguageServer* Find(Workspace* ws, Core::StringView profileId) const;
+		private LanguageServer* Find(Workspace* ws, Core::StringView profileId, Core::StringView project) const;
+		private LanguageServer* Create(Workspace* ws, LspProfile* profile, const ProjectModel* project);
 		// The server that serves `doc` - created and started, with `start`, when there is none yet - or null.
 		private LanguageServer* Serving(Document* doc, bool start);
 		private LanguageServer* Ready(Call& call, Document* doc);
@@ -51,6 +54,8 @@ namespace Ied
 		private void Diagnostics(LanguageServer* language, const Serialization::DomNode& params);
 		private void SetDiagnostics(Workspace* ws, Core::StringView path, Core::StringView source, Core::StringView items);
 		private void ClearDiagnostics(LanguageServer* language);
+		// Every source's diagnostics of a path, gone (its file is not there any more).
+		private void ForgetDiagnostics(Workspace* ws, Core::StringView path);
 		// lsp.refresh: clients fetch `kinds` again for `path` (empty: every document).
 		private void Refresh(Workspace* ws, Core::StringView path, const Core::Array<Core::String>& kinds);
 		private Core::String DiagnosticsSnapshot(Workspace* ws) const;

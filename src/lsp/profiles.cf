@@ -29,6 +29,7 @@ namespace Ied
 		profile->initializationOptions = options.Kind() == Serialization::DomKind::Object ? NodeJson(options) : Core::String("{}");
 		profile->initializationOptionsFile = Core::String(node.Member("initializationOptionsFile").AsView());
 		profile->staged = node.Member("launchMode").AsView() == "staged";
+		profile->perProject = node.Member("scope").AsView() == "project";
 		Core::StringView encoding = node.Member("positionEncoding").AsView();
 		profile->negotiate = encoding.IsEmpty() || encoding == "negotiate";
 		profile->encoding = PositionEncoding::Utf16;
@@ -75,6 +76,8 @@ namespace Ied
 		if (name == "pluginDir") out.Append(variables.pluginDir.View());
 		else if (name == "workspaceDir") out.Append(variables.workspaceDir.View());
 		else if (name == "solutionDir") out.Append(variables.solutionDir.View());
+		else if (name == "projectName") out.Append(variables.projectName.View());
+		else if (name == "projectDir") out.Append(variables.projectDir.View());
 		else return false;
 		return true;
 	}

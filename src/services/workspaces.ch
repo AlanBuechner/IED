@@ -59,6 +59,10 @@ namespace Ied
 	private:
 		private Core::String Snapshot(const Workspace* ws) const;
 		private void TreeChanged(Workspace* ws, Core::StringView path, const char* change);
+		// tree.changed for a move: `from` deleted, `to` created.
+		private void Moved(Workspace* ws, Core::StringView from, Core::StringView to);
+		private Core::String DeleteFolder(Workspace* ws, Core::StringView path, bool recursive);
+		private Core::String RenameFolder(Workspace* ws, Core::StringView from, Core::StringView to);
 		private void PublishTree(Workspace* ws, const Core::Array<TreeChange>& changes, bool overflow);
 		private void ReadSolutionAgain(Workspace* ws);
 		private bool External(Workspace* ws, const TreeChange& change);

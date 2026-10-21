@@ -64,7 +64,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `settings:app`, `settings:<wsId>` | `settings.changed` | tier files (revision, problems) and every setting's effective value with its source (`docs/07`) |
 | `plugins` | `plugins.changed` | every plugin's summary and state (`docs/02`) |
 | `layout:<wsId>:<deviceClass>` | `layout.changed {revision, layout, by}` | `{revision, layout}`: the layout document the client last stored for the workspace and device class (`docs/15`), verbatim; revision 0 with `layout: null` until one is. `layout.set {wsId, deviceClass, layout, expectedRevision}` stores one (an object up to 256 KB, or null to forget it) and answers `{revision}`; an old `expectedRevision` gets `conflict {revision}`. Kept in `.ied/local/layout/<deviceClass>.json` of a solution, and for a folder or a file in `<app data>/workspaces/<key>/layout/`, `key` the first 16 hex digits of the SHA-256 of the workspace folder's canonical path |
-| `doc:<docId>` | `doc.edit`, `doc.saved`, `doc.lease`, `doc.diskChanged` | text + version + lease holder + dirty |
+| `doc:<docId>` | `doc.edit`, `doc.saved`, `doc.lease`, `doc.diskChanged`, `doc.renamed` | text + version + lease holder + dirty |
 | `diag:<wsId>` | `diag.set {path, source, items}` (LSP diagnostics, UTF-16 ranges; `docs/24`) | all current diagnostics, `{files: {<path>: {<source>: [diagnostic]}}}` |
 | `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |
 | `run:<runId>` | `step.start`, `output` (source, text), `step.end`, `run.end` | task run state + output tail |
@@ -81,6 +81,7 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 - `tree.changed {changes: [{path, change: created|changed|deleted}], overflow?: true}`. Changes are gathered until the folder has been quiet for 100 ms, at most a second, and folded per path: created then deleted is nothing, a rename is a delete and a create. `overflow` means the system dropped changes, so the client lists the folder again. The repository folder (`.git/`) is not reported.
 - The server's own writes are reported once, by the method that made them; a change from outside moves the file's revision, so a write based on the old revision gets `conflict`.
 - An open document whose file changes reloads when it is clean (a `doc.edit` with origin `disk`) and gets `doc.diskChanged {docId, revision}` when it is dirty. When its file is deleted it gets `doc.diskChanged` with revision 0 and keeps its text.
+- `fs.rename` moves open documents with their files (a folder's too): the document keeps its docId, text, version and lease, and gets `doc.renamed {docId, path}`; clients show it under the new path (`doc.open` of the new path answers the same docId). `fs.delete` takes a folder only with `recursive: true`, and documents open under it get `doc.diskChanged` with revision 0.
 
 ## Resume
 

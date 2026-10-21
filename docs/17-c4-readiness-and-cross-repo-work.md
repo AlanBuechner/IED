@@ -98,7 +98,7 @@ Today: stdio, full sync, standard features (completion, hover, signature help, d
 | L5 | `codeAction` honoring the request range/context | Removes client-side filtering |
 | L6 | `completionItem/resolve`, MarkupContent hovers (markdown) | Richer IntelliSense |
 | L7 | Inlay hints, call hierarchy, codeLens (tests: "Run / Debug"), `workspace/willRenameFiles` | VS parity features (F-EDT-21, F-BLD-43) |
-| L8 | Read config from IED's `.ied/local/lsp-options/c4.json` (via `initializationOptionsFile` - no LSP change needed) | Bridge retarget |
+| L8 | **Done 2026-10-20** without a C4LSP change: the `c4` plugin's profile reads `.ied/local/lsp-options/${projectName}.json` (`initializationOptionsFile`, one server per project, `docs/24` "Scope") | Bridge retarget |
 | L9 | Incremental re-analysis (already on the C4 roadmap) | Latency on large projects (IED itself) |
 
 ### C4DAP (`C4/C4DAP/`)
@@ -110,7 +110,7 @@ Today: launch, line breakpoints, thrown/uncaught exception filters, continue/ste
 | # | Item | Why |
 |---|---|---|
 | N1 | **Done 2026-10-20** (`Nuke/nuke/c4/ide_bridge.py`, `docs/23` N-11): `IEDConfig.py`: write `.ied/local/lsp-options/<proj>.json` after each successful build (same content as the `c4-lsp.json` it writes today for the predecessor IDE: includePaths, defines, c4Home, projects) | LSP/build sync (`docs/06`) |
-| N2 | `nuke init --ied`: write `<Name>.ied.sln`, generated `.ied.proj` files under `build/ied/`, `.ied/` scaffold (skills, solution.json), and the local plugin pin - idempotent, never clobbering hand edits | J7, F-WSP-60 |
+| N2 | **Done 2026-10-20** (`Nuke/nuke/ied_files.py`, `Nuke/README.md` "IED solution"): `nuke init --ied`: write `<Name>.ied.sln`, generated `.ied.proj` files under `build/ied/`, `.ied/` scaffold (skills), and the local plugin pin - idempotent, never clobbering hand edits | J7, F-WSP-60 |
 | N3 | **Done 2026-10-20** (compiler output streams line by line): **Stream compiler output** instead of printing it after the compile finishes | Live Build output |
 | N4 | **Done 2026-10-20** (`nuke test --filter GLOB`; every harness writes `<int>/tests/results.json`): Pass `-test-json <path>` and `--filter <glob>` through `nuke test` (`--json-results`, `--filter`) | Test Explorer (F-BLD-40) |
 | N5 | Machine-readable diagnostics: `--diagnostics-json <path>` (file, line, col, severity, message, code) **with absolute paths** - today names are relative to their owning source root and can collide | Error List without regex guessing (F-BLD-33) |

@@ -161,6 +161,27 @@ select.input-field { padding-right: var(--space-2); }
 }
 .popup.sheet .menu-item { height: var(--row-h-touch); font-size: var(--font-size-lg); }
 
+/* ---------- dialogs (dialog.js) ---------- */
+.dialog-veil { position: fixed; inset: 0; background: var(--scrim); z-index: 50; }
+.popup.dialog {
+	left: 50%;
+	top: 30%;
+	transform: translate(-50%, -30%);
+	width: min(420px, calc(100vw - 32px));
+	padding: var(--space-6) var(--space-6) var(--space-5);
+	outline: none;
+	z-index: 51;
+}
+.popup.dialog.sheet { transform: none; width: auto; }
+.dialog-title { font-weight: var(--font-weight-semibold); color: var(--text-0); margin-bottom: var(--space-3); }
+.dialog-message { color: var(--text-1); overflow-wrap: anywhere; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-6); }
+.popup.dialog.sheet .dialog-buttons .btn { height: var(--row-h-touch); flex: 1; }
+.btn.danger { background: var(--accent-error); border-color: var(--accent-error); color: var(--inverse-text); font-weight: var(--font-weight-semibold); }
+
+/* ---------- a name typed in place (tree.js) ---------- */
+.tree-edit { height: calc(var(--row-h) - 4px); padding: 0 var(--space-2); min-width: 160px; flex: 1; }
+
 /* ---------- list rows ---------- */
 .row {
 	display: flex;

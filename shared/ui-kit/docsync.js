@@ -91,6 +91,10 @@ export class DocumentSync {
 			this.diskChanged = null;
 		}
 		else if (kind === "doc.diskChanged") this.diskChanged = data.revision === 0 ? "deleted" : "changed";
+		else if (kind === "doc.renamed") {
+			this.state({ renamed: data.path });
+			return;
+		}
 		this.state({});
 	}
 

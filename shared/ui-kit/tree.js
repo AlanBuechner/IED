@@ -31,6 +31,8 @@ export class TreeView {
 		this.resizeObserver = new ResizeObserver(() => this.draw());
 		this.resizeObserver.observe(this.scroller);
 		this.roots = [];
+		this.editing = null;     // {id, node, parentId, input, resolve} while a name is typed in place
+		this.redrawing = false;
 	}
 
 	dispose() {
@@ -45,8 +47,17 @@ export class TreeView {
 	async refresh() {
 		this.cache.clear();
 		this.roots = await this.provider.roots();
-		await Promise.all([...this.expanded].map((id) => this.loadChildren(this.findNode(id))));
+		await this.loadOpen(this.roots);
 		this.rebuild();
+	}
+
+	// The children of the open nodes among `nodes`, then of the open ones among those: a node is known only once
+	// its parent's children are.
+	async loadOpen(nodes) {
+		const open = nodes.filter((node) => this.expanded.has(node.id));
+		await Promise.all(open.map((node) => this.loadChildren(node)));
+		const next = open.flatMap((node) => this.cache.get(node.id) || []);
+		if (next.length) await this.loadOpen(next);
 	}
 
 	// Forgets a node's children and reads them again when it is open.
@@ -102,16 +113,22 @@ export class TreeView {
 	// The visible rows, flattened: [{node, depth}].
 	rebuild() {
 		const rows = [];
-		const visit = (nodes, depth) => {
+		const pending = this.editing && this.editing.parentId !== undefined ? this.editing : null;
+		if (pending && pending.parentId === null) rows.push({ node: pending.node, depth: 0 });
+		const visitPending = (node, depth) => {
+			if (pending && pending.parentId === node.id) rows.push({ node: pending.node, depth: depth + 1 });
+		};
+		const visitAll = (nodes, depth) => {
 			for (const node of nodes) {
 				rows.push({ node, depth });
 				if (!this.expanded.has(node.id)) continue;
+				visitPending(node, depth);
 				const kids = this.cache.get(node.id);
-				if (kids) visit(kids, depth + 1);
+				if (kids) visitAll(kids, depth + 1);
 				else if (this.loading.has(node.id)) rows.push({ node: { id: node.id + "\u0000loading", loading: true }, depth: depth + 1 });
 			}
 		};
-		visit(this.roots, 0);
+		visitAll(this.roots, 0);
 		this.rows = rows;
 		if (this.selected && !rows.some((r) => r.node.id === this.selected)) this.selected = null;
 		this.draw();
@@ -125,7 +142,10 @@ export class TreeView {
 		const last = Math.min(this.rows.length, Math.ceil((this.scroller.scrollTop + height) / this.rowHeight) + OVERSCAN);
 		this.spacer.style.height = this.rows.length * this.rowHeight + "px";
 		this.window.style.transform = "translateY(" + first * this.rowHeight + "px)";
+		this.redrawing = true;
 		replace(this.window, ...this.rows.slice(first, last).map((row, i) => this.rowElement(row, first + i)));
+		this.redrawing = false;
+		if (this.editing && this.editing.input.isConnected && document.activeElement !== this.editing.input) this.editing.input.focus({ preventScroll: true });
 		const active = this.selected ? "tree-row-" + cssId(this.selected) : null;
 		if (active) this.scroller.setAttribute("aria-activedescendant", active);
 		else this.scroller.removeAttribute("aria-activedescendant");
@@ -151,7 +171,53 @@ export class TreeView {
 			},
 		}, h("span.tw", { on: { click: (event) => { event.stopPropagation(); this.toggle(node); } } }, node.expandable ? chevron(open) : null));
 		this.provider.render(node, el);
+		if (this.editing && this.editing.id === node.id) {
+			const name = el.querySelector(".name");
+			if (name) name.replaceWith(this.editing.input);
+			else el.append(this.editing.input);
+		}
 		return el;
+	}
+
+	// A name typed in place (VS rename and new item): in place of `node`'s label, or - with `parent` (null: the
+	// top) and `template`, a node to draw the row with - in a new row first under that parent, opened. Resolves
+	// with the text on Enter or when the field loses the focus, null on Escape or when it is empty or unchanged.
+	async editLabel({ node, parent, template, value = "", select }) {
+		this.finishEditing(null);
+		if (parent && !this.expanded.has(parent.id)) await this.toggle(parent, true);
+		return new Promise((resolve) => {
+			const input = h("input.input-field.tree-edit", { value, spellcheck: "false", "aria-label": "Name" });
+			const editing = node ? { id: node.id, node, input, resolve } : { id: template.id, node: template, parentId: parent ? parent.id : null, input, resolve };
+			input.addEventListener("keydown", (event) => {
+				event.stopPropagation();
+				if (event.key === "Enter") this.finishEditing(input.value);
+				else if (event.key === "Escape") this.finishEditing(null);
+				else return;
+				event.preventDefault();
+			});
+			input.addEventListener("blur", () => {
+				if (this.editing === editing && !this.redrawing) this.finishEditing(input.value);
+			});
+			for (const kind of ["click", "dblclick", "mousedown", "contextmenu"]) input.addEventListener(kind, (event) => event.stopPropagation());
+			this.editing = editing;
+			this.rebuild();
+			const index = this.rows.findIndex((row) => row.node.id === editing.id);
+			if (index >= 0) this.reveal(index);
+			this.draw();
+			input.focus({ preventScroll: true });
+			const range = select || [0, value.length];
+			input.setSelectionRange(range[0], range[1]);
+		});
+	}
+
+	finishEditing(value) {
+		const editing = this.editing;
+		if (!editing) return;
+		this.editing = null;
+		this.rebuild();
+		this.scroller.focus({ preventScroll: true });
+		const text = value === null ? "" : value.trim();
+		editing.resolve(text && text !== (editing.node.name || "") ? text : null);
 	}
 
 	click(node, event) {

@@ -242,6 +242,39 @@ namespace Ied
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
 	}
 
+	void Workspaces::Moved(Workspace* ws, Core::StringView from, Core::StringView to) {
+		JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("changes"));
+		data.BeginArray();
+		data.BeginObject();
+		data.Field("path", from);
+		data.Field("change", "deleted");
+		data.EndObject();
+		data.BeginObject();
+		data.Field("path", to);
+		data.Field("change", "created");
+		data.EndObject();
+		data.EndArray();
+		data.EndObject();
+		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
+	}
+
+	// The paths under `folder` ("a/b" holds "a/b/c", not "a/bc") among `paths`.
+	static Core::Array<Core::String> Under(const Core::Array<Core::String>& paths, Core::StringView folder) {
+		Core::String prefix = Core::String(folder) + "/";
+		Core::Array<Core::String> under;
+		for (const Core::String& path : paths)
+			if (path.View().StartsWith(prefix.View())) under.Push(path);
+		return under;
+	}
+
+	static Core::Array<Core::String> KnownPaths(const Workspace* ws) {
+		Core::Array<Core::String> paths;
+		for (const Core::KeyValue<Core::String, int64>& entry : ws->revisions) paths.Push(entry.key);
+		return paths;
+	}
+
 	Core::String Workspaces::Read(Workspace* ws, Core::StringView path) {
 		FS::Path file = ws->At(path);
 		if (!FS::FileExists(file.CStr())) throw Missing("file", path);
@@ -433,6 +466,7 @@ namespace Ied
 	Core::String Workspaces::DeleteMethod(Call& call, const Params& params) {
 		Workspace* ws = Get(params.Str("wsId").View());
 		Core::String path = NormalizePath(params.Str("path").View());
+		if (!path.IsEmpty() && FS::IsDirectory(ws->At(path.View()).CStr())) return DeleteFolder(ws, path.View(), params.Bool("recursive", false));
 		const int64 current = Revision(ws, path.View());
 		if (!current) throw Missing("file", path.View());
 		const int64 expected = params.Int("expectedRevision", -1);
@@ -442,6 +476,49 @@ namespace Ied
 		ws->digests.At(path) = Core::String();
 		TreeChanged(ws, path.View(), "deleted");
 		return Core::String("{}");
+	}
+
+	// A folder with everything in it, when `recursive` says so: the files known under it are forgotten and the
+	// documents open on them told.
+	Core::String Workspaces::DeleteFolder(Workspace* ws, Core::StringView path, bool recursive) {
+		if (!recursive) throw RpcError(ErrorCode::BadRequest, "the path is a folder: pass recursive to delete it with everything in it");
+		const bool removed = FS::RemoveAll(ws->At(path).CStr()) >= 0;
+		for (const Core::String& known : Under(KnownPaths(ws), path)) {
+			if (FS::FileExists(ws->At(known.View()).CStr())) continue;
+			ws->revisions.Remove(known);
+			ws->digests.At(known) = Core::String();
+		}
+		for (const Core::String& open : Under(server->documents->OpenPaths(ws), path))
+			if (!FS::FileExists(ws->At(open.View()).CStr())) server->documents->OnDiskDeleted(ws, open.View());
+		TreeChanged(ws, path, "deleted");
+		if (!removed) throw RpcError(ErrorCode::Unavailable, "some of the folder could not be deleted");
+		return Core::String("{}");
+	}
+
+	// A folder moved with what is in it: revisions and digests follow, and so do the documents open under it.
+	Core::String Workspaces::RenameFolder(Workspace* ws, Core::StringView source, Core::StringView target) {
+		if (target.StartsWith((Core::String(source) + "/").View())) throw RpcError(ErrorCode::BadRequest, "a folder cannot move into itself");
+		FS::Path to = ws->At(target);
+		if (FS::FileExists(to.CStr()) || FS::IsDirectory(to.CStr())) throw RpcError(ErrorCode::Conflict, "the target already exists");
+		FS::MakeDirectories(to.Parent().CStr());
+		if (!FS::Rename(ws->At(source).CStr(), to.CStr())) throw RpcError(ErrorCode::Unavailable, "the folder could not be renamed");
+		const int64 cut = source.ByteLength();
+		for (const Core::String& known : Under(KnownPaths(ws), source)) {
+			Core::String moved = Core::String(target) + known.View().Substring(cut, known.ByteLength() - cut);
+			ws->revisions.At(moved) = ws->revisions.Get(known);
+			ws->digests.At(moved) = ws->digests.Get(known);
+			ws->revisions.Remove(known);
+			ws->digests.At(known) = Core::String();
+		}
+		ws->ownDirectories.At(Core::String(target)) = true;
+		for (const Core::String& open : Under(server->documents->OpenPaths(ws), source))
+			server->documents->Renamed(ws, open.View(), (Core::String(target) + open.View().Substring(cut, open.ByteLength() - cut)).View());
+		Moved(ws, source, target);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", target);
+		json.EndObject();
+		return json.ToString();
 	}
 
 	Core::String Workspaces::MakeDirectoryMethod(Call& call, const Params& params) {
@@ -465,6 +542,8 @@ namespace Ied
 		Workspace* ws = Get(params.Str("wsId").View());
 		Core::String source = NormalizePath(params.Str("from").View());
 		Core::String target = NormalizePath(params.Str("to").View());
+		if (source.IsEmpty() || target.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "the workspace's own folder cannot be renamed");
+		if (FS::IsDirectory(ws->At(source.View()).CStr())) return RenameFolder(ws, source.View(), target.View());
 		const int64 revision = Revision(ws, source.View());
 		if (!revision) throw Missing("file", source.View());
 		FS::Path to = ws->At(target.View());
@@ -476,21 +555,8 @@ namespace Ied
 		ws->digests.At(source) = Core::String();
 		FS::File moved = FS::File(to.CStr(), "rb");
 		ws->digests.At(target) = TextDigest(moved.ReadText().View());
-		JsonWriter data;
-		data.BeginObject();
-		data.Key(Core::StringView("changes"));
-		data.BeginArray();
-		data.BeginObject();
-		data.Field("path", source.View());
-		data.Field("change", "deleted");
-		data.EndObject();
-		data.BeginObject();
-		data.Field("path", target.View());
-		data.Field("change", "created");
-		data.EndObject();
-		data.EndArray();
-		data.EndObject();
-		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
+		server->documents->Renamed(ws, source.View(), target.View());
+		Moved(ws, source.View(), target.View());
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("path", target.View());

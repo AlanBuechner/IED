@@ -87,7 +87,7 @@ export class ErrorList {
 			on: { click: () => this.select(index), dblclick: () => this.open(index) },
 		},
 		h("span.el-icon", null, icon(kind.glyph, kind.cls)),
-		h("span.el-code.ellip", null, item.code === undefined ? "" : String(item.code)),
+		h("span.el-code.ellip", null, item.code === undefined || item.code === null ? "" : String(item.code)),
 		h("span.el-text.ellip", null, item.message),
 		h("span.el-file.ellip", { title: row.path }, baseName(row.path)),
 		h("span.el-line", null, String(line)),
@@ -123,5 +123,5 @@ function baseName(path) {
 }
 
 function describe(row) {
-	return [row.item.code, row.item.message, row.path, row.item.source || row.source].filter((part) => part !== undefined).join(" ");
+	return [row.item.code, row.item.message, row.path, row.item.source || row.source].filter((part) => part !== undefined && part !== null).join(" ");
 }

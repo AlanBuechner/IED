@@ -1,9 +1,11 @@
 // explorer.js - Solution Explorer (F-WSP, docs/15): a solution shows its groups, projects (each its root folder) and
 // Solution Items; a folder or file workspace shows its folder. Folders load when opened; tree.changed keeps them
-// current. A click opens a file in a preview tab, a double click or Enter keeps it open (VS).
+// current. A click opens a file in a preview tab, a double click or Enter keeps it open (VS). New files and folders
+// and renames are named in place; a delete asks first.
 
 import { h, icon } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
+import { confirmDialog } from "/ui-kit/dialog.js";
 import { fileIcon, folderIcon } from "./fileicons.js";
 
 function parentOf(path) {
@@ -167,6 +169,65 @@ export class Explorer {
 
 	selected() {
 		return this.tree.selectedNode();
+	}
+
+	// Where a new item goes: into the selected folder or project, beside the selected file, or at the top of a folder
+	// workspace. {parent: the tree node to add the row under (null: the top), path}; null in a solution's own nodes.
+	targetOf(node) {
+		if (!node) return this.ied.workspace.kind === "solution" ? null : { parent: null, path: "" };
+		if (node.kind === "folder" || (node.kind === "project" && node.path !== null)) return { parent: node, path: node.path };
+		if (node.kind !== "file") return null;
+		const parentId = node.id.slice(0, node.id.lastIndexOf("/"));
+		const parent = this.tree.findNode(parentId);
+		if (parent && parent.kind === "items") return null;
+		return { parent, path: parentOf(node.path) };
+	}
+
+	async create(kind) {
+		const target = this.targetOf(this.selected());
+		if (!target) {
+			this.ied.report("Choose a folder or a project to add a " + kind + " to.");
+			return;
+		}
+		const name = await this.tree.editLabel({ parent: target.parent, template: { id: "\u0000new", kind, name: "", expandable: false } });
+		if (!name) return;
+		const path = target.path ? target.path + "/" + name : name;
+		const request = kind === "folder" ? ["fs.mkdir", { wsId: this.ctx.wsId, path }] : ["fs.write", { wsId: this.ctx.wsId, path, text: "", expectedRevision: 0 }];
+		try {
+			await this.ied.client.request(request[0], request[1]);
+			if (kind === "file") this.ied.tabs.open("doc:" + path, { preview: false });
+		}
+		catch (e) {
+			this.ied.report(e.code === "conflict" ? "'" + path + "' already exists." : "Could not create '" + path + "': " + e.message, e);
+		}
+	}
+
+	async rename(node) {
+		if (!node || (node.kind !== "file" && node.kind !== "folder")) return;
+		const dot = node.kind === "file" ? node.name.lastIndexOf(".") : -1;
+		const name = await this.tree.editLabel({ node, value: node.name, select: [0, dot > 0 ? dot : node.name.length] });
+		if (!name) return;
+		const folder = parentOf(node.path);
+		const to = folder ? folder + "/" + name : name;
+		try {
+			await this.ied.client.request("fs.rename", { wsId: this.ctx.wsId, from: node.path, to });
+		}
+		catch (e) {
+			this.ied.report(e.code === "conflict" ? "'" + to + "' already exists." : "Could not rename '" + node.path + "': " + e.message, e);
+		}
+	}
+
+	async remove(node) {
+		if (!node || (node.kind !== "file" && node.kind !== "folder")) return;
+		const what = node.kind === "folder" ? "'" + node.name + "' and everything in it" : "'" + node.name + "'";
+		const sure = await confirmDialog({ title: "Delete", message: what + " will be deleted permanently.", confirm: "Delete", danger: true });
+		if (!sure) return;
+		try {
+			await this.ied.client.request("fs.delete", { wsId: this.ctx.wsId, path: node.path, recursive: node.kind === "folder" });
+		}
+		catch (e) {
+			this.ied.report("Could not delete '" + node.path + "': " + e.message, e);
+		}
 	}
 
 	workspaceEvent(kind, data) {

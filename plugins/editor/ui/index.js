@@ -42,6 +42,11 @@ export function activate(ied) {
 	ied.commands.handle("ied.explorer.collapseAll", () => explorers.forEach((e) => e.tree.collapseAll()));
 	ied.commands.handle("ied.explorer.copyPath", (args) => copy(fullPath(ied, pathOf(args))));
 	ied.commands.handle("ied.explorer.copyRelativePath", (args) => copy(pathOf(args) || ""));
+	const explorer = () => last(explorers);
+	ied.commands.handle("ied.explorer.newFile", () => explorer() && explorer().create("file"));
+	ied.commands.handle("ied.explorer.newFolder", () => explorer() && explorer().create("folder"));
+	ied.commands.handle("ied.explorer.rename", () => explorer() && explorer().rename(explorer().selected()));
+	ied.commands.handle("ied.explorer.delete", () => explorer() && explorer().remove(explorer().selected()));
 	ied.commands.handle("ied.output.clear", () => last(outputs) && last(outputs).clear());
 	ied.commands.handle("ied.output.toggleWrap", () => last(outputs) && last(outputs).toggleWrap());
 	ied.commands.handle("ied.editor.save", () => {

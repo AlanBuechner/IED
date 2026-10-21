@@ -187,11 +187,13 @@ export class Shell {
 		this.workspaceChanged();
 	}
 
+	// Only what changes the workspace's description: a tree.changed is for the views that show files.
 	workspaceEvent(kind, data) {
 		if (kind === "trust.changed") this.workspace.trusted = data.trusted !== false;
 		else if (kind === "solution.changed") this.workspace.solution = data.solution || null;
+		else return;
 		this.workspaceChanged();
-		if (kind === "trust.changed" || kind === "solution.changed") this.reloadContributions();
+		this.reloadContributions();
 	}
 
 	workspaceChanged() {

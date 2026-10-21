@@ -158,7 +158,7 @@ export function markersOf(monaco, items) {
 	return (items || []).map((d) => {
 		const marker = Object.assign({ severity: monaco.MarkerSeverity[SEVERITIES[d.severity] || "Error"], message: d.message }, fromLspRange(d.range));
 		if (d.source) marker.source = d.source;
-		if (d.code !== undefined) marker.code = d.codeDescription ? { value: String(d.code), target: monaco.Uri.parse(d.codeDescription.href) } : String(d.code);
+		if (d.code !== undefined && d.code !== null) marker.code = d.codeDescription ? { value: String(d.code), target: monaco.Uri.parse(d.codeDescription.href) } : String(d.code);
 		if (d.tags) marker.tags = d.tags.filter((t) => t === 1 || t === 2);
 		if (d.relatedInformation) {
 			marker.relatedInformation = d.relatedInformation.map((r) => Object.assign({ resource: monaco.Uri.parse(r.location.uri), message: r.message }, fromLspRange(r.location.range)));

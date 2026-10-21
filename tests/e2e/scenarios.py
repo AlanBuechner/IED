@@ -274,6 +274,103 @@ def disable_and_enable_a_plugin(run):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# Solution Explorer file operations
+
+def exists(run, path):
+	try:
+		run.request("fs.read", {"wsId": run.page.evaluate("ied_shell.wsId"), "path": path})
+		return True
+	except Exception:
+		return False
+
+
+@scenario()
+def explorer_file_operations(run):
+	page = run.open()
+	name = "made-" + run.viewport
+	page.click(".tree-row:has-text('src')", button="right")
+	page.click(".menu-item:has-text('New File...')")
+	page.wait_for_selector(".tree-edit")
+	run.shot("naming")
+	page.keyboard.type(name + ".c")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".tree-row:has-text('%s.c')" % name)
+	page.wait_for_selector(".tab:has-text('%s.c')" % name)
+	check(exists(run, "src/%s.c" % name), "the new file is on disk")
+	page.click(".tree-row:has-text('%s.c')" % name)
+	page.keyboard.press("F2")
+	page.wait_for_selector(".tree-edit")
+	check(page.evaluate("(() => { const i = document.querySelector('.tree-edit'); return [i.selectionStart, i.selectionEnd]; })()") == [0, len(name)], "the name is selected, not its extension")
+	page.keyboard.type(name + "-renamed")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".tree-row:has-text('%s-renamed.c')" % name)
+	check(exists(run, "src/%s-renamed.c" % name) and not exists(run, "src/%s.c" % name), "renamed on disk")
+	page.click(".tree-row:has-text('%s-renamed.c')" % name)
+	page.keyboard.press("Delete")
+	page.wait_for_selector(".popup.dialog")
+	run.shot("confirm-delete")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".popup.dialog", state="detached")
+	check(exists(run, "src/%s-renamed.c" % name), "Escape keeps the file")
+	page.keyboard.press("Delete")
+	page.click(".popup.dialog button:has-text('Delete')")
+	page.wait_for_selector(".tree-row:has-text('%s-renamed.c')" % name, state="detached")
+	check(not exists(run, "src/%s-renamed.c" % name), "deleted on disk")
+	page.click(".tree-row:has-text('src')", button="right")
+	page.click(".menu-item:has-text('New Folder')")
+	page.keyboard.type(name + "-dir")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".tree-edit", state="detached")
+	check(not page.is_visible(".tree-row:has-text('%s-dir')" % name), "Escape makes nothing")
+	page.click(".tree-row:has-text('src')", button="right")
+	page.click(".menu-item:has-text('New Folder')")
+	page.keyboard.type(name + "-dir")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".tree-row:has-text('%s-dir')" % name)
+	run.shot("folder")
+	page.click(".tree-row:has-text('%s-dir')" % name)
+	page.keyboard.press("F2")
+	page.keyboard.type(name + "-moved")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".tree-row:has-text('%s-moved')" % name)
+	page.click(".tree-row:has-text('%s-moved')" % name)
+	page.keyboard.press("Delete")
+	check("everything in it" in page.text_content(".popup.dialog"), "a folder's delete says it takes its contents")
+	page.click(".popup.dialog button:has-text('Delete')")
+	page.wait_for_selector(".tree-row:has-text('%s-moved')" % name, state="detached")
+
+
+@scenario(viewports=("desktop",))
+def renamed_document_follows(run):
+	"""A file renamed while it is open: its tab moves to the new name with the unsaved text (docs/10)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	run.request("fs.write", {"wsId": ws, "path": "src/follow.c", "text": "int x;\n", "expectedRevision": 0})
+	page.click(".tree-row:has-text('src')")
+	page.wait_for_selector(".tree-row:has-text('follow.c')")
+	page.dblclick(".tree-row:has-text('follow.c')")
+	page.wait_for_function("ied_shell.views.entries.get('doc:src/follow.c') && ied_shell.views.entries.get('doc:src/follow.c').instance && ied_shell.views.entries.get('doc:src/follow.c').instance.model", timeout=30000)
+	page.click(".monaco-editor .view-lines")
+	page.keyboard.press("Control+End")
+	page.keyboard.type("int y;")
+	page.wait_for_selector(".tab:has-text('follow.c') .dirty")
+	page.wait_for_function("ied_shell.views.entries.get('doc:src/follow.c').instance.sync.pending === 0", timeout=10000)
+	run.request("fs.rename", {"wsId": ws, "from": "src/follow.c", "to": "src/followed.c"})
+	page.wait_for_selector(".tab:has-text('followed.c')")
+	page.wait_for_selector(".tab:has-text('follow.c')", state="detached")
+	page.wait_for_function("ied_shell.views.entries.get('doc:src/followed.c') && ied_shell.views.entries.get('doc:src/followed.c').instance && ied_shell.views.entries.get('doc:src/followed.c').instance.model", timeout=30000)
+	text = page.evaluate("ied_shell.views.entries.get('doc:src/followed.c').instance.model.getValue()")
+	check(text == "int x;\nint y;", "the unsaved text came along: %r" % text)
+	page.wait_for_selector(".tab:has-text('followed.c') .dirty")
+	run.shot("followed")
+	page.keyboard.press("Control+S")
+	page.wait_for_selector(".tab:has-text('followed.c') .dirty", state="detached")
+	check(run.request("fs.read", {"wsId": ws, "path": "src/followed.c"})["text"] == "int x;\nint y;", "saved under the new name")
+	check(not exists(run, "src/follow.c"), "nothing written back to the old name")
+	run.request("fs.delete", {"wsId": ws, "path": "src/followed.c"})
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # Editing (Monaco on server documents)
 
 def open_main_c(run, page):

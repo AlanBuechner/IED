@@ -88,6 +88,20 @@ class Documents:
 		except textedit.Conflict:
 			raise RpcError("conflict", "edit overlaps a change made since version %d" % base_version, {"version": doc.version, "reason": "overlap"})
 
+	def renamed(self, ws_id, source, target):
+		"""fs.rename moved a file: its open document follows (doc.renamed)."""
+		doc = self.by_path.pop((ws_id, source), None)
+		if doc is None:
+			return
+		doc.path = target
+		self.by_path[(ws_id, target)] = doc
+		self.server.hub.publish(doc.topic, "doc.renamed", {"docId": doc.doc_id, "path": target})
+
+	def on_disk_delete(self, ws_id, path):
+		doc = self.by_path.get((ws_id, path))
+		if doc is not None:
+			self.server.hub.publish(doc.topic, "doc.diskChanged", {"docId": doc.doc_id, "revision": 0})
+
 	def on_disk_write(self, ws_id, path, text, revision):
 		doc = self.by_path.get((ws_id, path))
 		if doc is None or doc.text == text:

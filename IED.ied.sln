@@ -1,0 +1,31 @@
+{
+	"version": 1,
+	"name": "IED",
+	"projects": [
+		{
+			"file": "build/ied/*.ied.proj",
+			"optional": true
+		}
+	],
+	"items": [
+		"README.md",
+		"AGENTS.md",
+		"nuke.toml"
+	],
+	"localPlugins": [
+		{
+			"id": "c4",
+			"path": "toolchains/c4/dev/ied"
+		}
+	],
+	"generator": {
+		"run": [
+			"nuke",
+			"init",
+			"--ied"
+		],
+		"generatedPaths": [
+			"build/ied/"
+		]
+	}
+}

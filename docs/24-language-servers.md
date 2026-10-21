@@ -6,7 +6,9 @@ How IED runs language servers (F-EDT-10..24, `docs/05` `src/lsp`): the server is
 
 ## Profiles and selection
 
-A profile names its server (`command`, `args`, `env`, `cwd`; `${pluginDir}`, `${solutionDir}`, `${workspaceDir}` expand), which documents it serves (`selector`: language ids, extensions, globs), how it starts (`launchMode`), and its quirks (`positionEncoding`, `requestIds`, `refetchOnDiagnostics`, `codeActionsNeedClientFilter`). A document is served by the last loaded plugin's profile whose selector matches it (language id from `docs/10`, else extension, else glob) and whose `when` holds for the workspace (`workspaceTrusted`, `config.<setting>`).
+A profile names its server (`command`, `args`, `env`, `cwd`; `${pluginDir}`, `${solutionDir}`, `${workspaceDir}`, `${projectName}`, `${projectDir}` expand), which documents it serves (`selector`: language ids, extensions, globs), how many servers it runs (`scope`), how it starts (`launchMode`), and its quirks (`positionEncoding`, `requestIds`, `refetchOnDiagnostics`, `codeActionsNeedClientFilter`). A document is served by the last loaded plugin's profile whose selector matches it (language id from `docs/10`, else extension, else glob) and whose `when` holds for the workspace (`workspaceTrusted`, `workspaceKind`, `config.<setting>`).
+
+**Scope.** `workspace` (the default) runs one server per workspace and profile. `project` runs one per project of a solution workspace (`docs/03`): a document goes to the server of the project whose code root holds it (the deepest), and `${projectName}` / `${projectDir}` name that project in `command`, `args`, `env`, `cwd` and `initializationOptionsFile`. Documents in no project - every document of a folder workspace - share one workspace-wide server with those variables empty. A compiler that analyzes one program per process (C4LSP: its options name one program's build description) needs `project`.
 
 ## Lifecycle
 
@@ -28,7 +30,7 @@ Positions are found wherever LSP puts them: any object with numeric `line` and `
 
 ## Diagnostics
 
-`textDocument/publishDiagnostics` lands on the `diag:<wsId>` topic: the snapshot is `{files: {<path>: {<source>: [diagnostic]}}}` and each publish is `diag.set {path, source, items}` with `source` the profile id and every range in UTF-16. A server that lacks `*/refresh` requests and names kinds in `refetchOnDiagnostics` makes the host publish `lsp.refresh {path, kinds}` on `lsp:<wsId>` after diagnostics, so clients fetch semantic tokens and folding again.
+`textDocument/publishDiagnostics` lands on the `diag:<wsId>` topic: the snapshot is `{files: {<path>: {<source>: [diagnostic]}}}` and each publish is `diag.set {path, source, items}` with `source` the profile id (`<profile>/<project>` for a project's server) and every range in UTF-16. A server that lacks `*/refresh` requests and names kinds in `refetchOnDiagnostics` makes the host publish `lsp.refresh {path, kinds}` on `lsp:<wsId>` after diagnostics, so clients fetch semantic tokens and folding again.
 
 ## Methods and topics
 
@@ -36,8 +38,8 @@ Positions are found wherever LSP puts them: any object with numeric `line` and `
 |---|---|
 | `lsp.request {docId, method, params}` | sends a request about a document to its server: `params` without `textDocument` (the host adds it), positions UTF-16; the result comes back with positions UTF-16 and workspace URIs as `ied://`. `not_found` when no server serves the document, `unavailable` while it starts or after it failed, the server's own error as `plugin_error {code, message}`. A `cancel` frame sends `$/cancelRequest`. With `codeActionsNeedClientFilter`, the code actions of `textDocument/codeAction` are cut to those whose diagnostics meet the requested range. |
 | `lsp.capabilities {docId}` | `{profile, state, capabilities}`: the serving profile and the server's capabilities, waiting for the server to start (20 s at most); `{profile: null}` when no server serves the document |
-| `lsp.status {wsId}`, `lsp.restart {wsId, profile}` | `{servers: [{profile, plugin, state: starting\|running\|failed\|stopped, pid, restarts, problem}]}`; a restart starts it again |
-| topic `lsp:<wsId>` | snapshot `{servers}`; events `lsp.state {profile, state, problem}`, `lsp.refresh {path, kinds}` (`path` null: every document, after a server's `workspace/<kind>/refresh`) |
+| `lsp.status {wsId}`, `lsp.restart {wsId, profile, project?}` | `{servers: [{profile, label, plugin, project, state: starting\|running\|failed\|stopped, pid, restarts, problem}]}` (`project` empty for a workspace-wide server); a restart starts it again |
+| topic `lsp:<wsId>` | snapshot `{servers}`; events `lsp.state {profile, project, state, problem}`, `lsp.refresh {path, kinds}` (`path` null: every document, after a server's `workspace/<kind>/refresh`) |
 | topic `diag:<wsId>` | as above |
 
 Server-initiated requests are answered by the host: `workspace/configuration` with a null per item (until `settingsBindings` are bound), `workspace/workspaceFolders` with the workspace folder, `workspace/<kind>/refresh` by publishing `lsp.refresh`, `workspace/applyEdit` refused (`applied: false`) for now, and anything else (registrations, `window/workDoneProgress/create`) with null. `window/logMessage`, `window/showMessage` and the beginning and end of `$/progress` go to the workspace's IED output.
@@ -47,5 +49,6 @@ Server-initiated requests are answered by the host: `workspace/configuration` wi
 - Incremental `didChange` for servers that ask for it (C4LSP takes full text).
 - `workspace/applyEdit` through the document store as the server's own edit (`origin: lsp`).
 - Profiles whose `when` names `config.*` are chosen again when settings change (today: when a document opens and when trust changes).
+- A project's server is not stopped when its project leaves the solution; it serves on until IED restarts or `lsp.restart`.
 - `settingsBindings` pushed with `didChangeConfiguration`; the `initializationOptionsFile` watched (restart on change).
 - `tcp` transport.

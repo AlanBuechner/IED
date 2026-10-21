@@ -1,19 +1,23 @@
-"""init: scaffold a new workspace (outside any workspace) or a new project (inside one)."""
+"""init: scaffold a new workspace (outside any workspace) or a new project (inside one), and with --ied the workspace's
+IED solution and project files (ied_files.py)."""
 
 import argparse
 import os
 import shutil
 
-from .. import fsutil
+from .. import fsutil, ied_files
+from .. import workspace as workspaces
 from ..errors import NukeError
 from ..manifest import KINDS, MANIFEST_NAME, PROJECT_NAME
 from . import base
 
 TEMPLATES = fsutil.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "templates")
 NUKE_SKILLS = fsutil.join(os.path.dirname(TEMPLATES), "skills")
-USAGE = """nuke init [NAME] [--kind executable|module|custom] [--toolchain VERSION]
+USAGE = """nuke init [NAME] [--kind executable|module|custom] [--toolchain VERSION] [--ied]
   outside a workspace: make the current folder a new workspace with one project (NAME defaults to the folder)
-  inside a workspace:  create the project NAME in ./NAME (or here with --here)"""
+  inside a workspace:  create the project NAME in ./NAME (or here with --here)
+  --ied:               also write (or refresh) the IED solution <Workspace>.ied.sln and build/ied/*.ied.proj;
+                       inside a workspace, `nuke init --ied` alone does only that"""
 
 
 class Init(base.Command):
@@ -31,11 +35,15 @@ class Init(base.Command):
 			return 0
 		cwd = cli.cwd
 		if cli.workspace is None:
-			return create_workspace(cli, cwd, options)
+			create_workspace(cli, cwd, options)
+			return ied_solution(cli, workspaces.load_workspace(cwd)) if options.ied else 0
+		if options.ied and not options.here and not options.name:
+			return ied_solution(cli, cli.workspace)
 		folder = cwd if options.here else os.path.join(cwd, options.name or "")
 		if not options.here and not options.name:
 			raise NukeError(f"inside workspace {cli.workspace.name}: name the new project (nuke init NAME)")
-		return create_project(cli, folder, options)
+		create_project(cli, folder, options)
+		return ied_solution(cli, workspaces.load_workspace(cli.workspace.dir)) if options.ied else 0
 
 
 def _parse(args):
@@ -44,6 +52,7 @@ def _parse(args):
 	parser.add_argument("--kind", default="executable", choices=KINDS)
 	parser.add_argument("--toolchain")
 	parser.add_argument("--here", action="store_true")
+	parser.add_argument("--ied", action="store_true")
 	parser.add_argument("-h", "--help", action="store_true")
 	try:
 		options = parser.parse_args(args)
@@ -98,6 +107,21 @@ def create_project(cli, folder, options):
 	cli.log.note(f"created project {name} in {relative}")
 	if cli.workspace.spec.projects is not None:
 		cli.log.note(f"add \"{relative}\" to [workspace].projects in {cli.workspace.spec.file}")
+	return 0
+
+
+def ied_solution(cli, workspace):
+	"""The workspace's IED solution and project files, its .gitignore and skills as `nuke init` makes them."""
+	toolchain = None
+	try:
+		toolchain = cli.store.resolve(workspace.spec.toolchain, workspace.dir)
+	except NukeError as error:
+		cli.log.warn(f"no toolchain, so no C4 plugin in the solution: {error}")
+	changed = ied_files.generate(workspace, toolchain, cli.log)
+	_ensure_gitignore(workspace.dir)
+	_copy_skills(cli, workspace.dir, workspace.spec.toolchain)
+	path = os.path.relpath(ied_files.solution_path(workspace), cli.cwd).replace("\\", "/")
+	cli.log.note(f"IED solution {path}: {len(workspace.projects)} project(s), {changed} file(s) written or removed")
 	return 0
 
 

@@ -141,6 +141,21 @@ namespace Ied
 		return paths;
 	}
 
+	void Documents::Renamed(Workspace* ws, Core::StringView from, Core::StringView to) {
+		Document* doc = nullptr;
+		if (!byPath.TryGet(PathKey(ws, from), doc)) return;
+		byPath.Remove(PathKey(ws, from));
+		doc->path = Core::String(to);
+		byPath.Insert(PathKey(ws, to), doc);
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("docId", doc->docId.View());
+		data.Field("path", to);
+		data.EndObject();
+		server->hub.Publish(doc->Topic().View(), "doc.renamed", data.View());
+		server->lsp->DocumentRenamed(doc, from);
+	}
+
 	void Documents::OnDiskDeleted(Workspace* ws, Core::StringView path) {
 		Document* doc = nullptr;
 		if (!byPath.TryGet(PathKey(ws, path), doc)) return;

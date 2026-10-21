@@ -130,6 +130,7 @@ export class CodeEditor {
 	}
 
 	stateChanged(state) {
+		if (state.renamed && state.renamed !== this.path) this.moveTo(state.renamed);
 		this.ctx.tab.setDirty(state.dirty);
 		if (state.notice) this.notice(state.notice);
 		if (state.error) this.problem(state.error);
@@ -157,6 +158,15 @@ export class CodeEditor {
 			this.noticeText = null;
 			this.showBar();
 		}, NOTICE_MS);
+	}
+
+	// The file was renamed: the document now lives at `path`, so its tab does - once this editor's edits are on the
+	// server, so the new tab's snapshot has them.
+	moveTo(path) {
+		this.sync.settled().then(() => {
+			this.ied.tabs.open("doc:" + path, { preview: false });
+			this.ctx.tab.close();
+		});
 	}
 
 	takeOver() {

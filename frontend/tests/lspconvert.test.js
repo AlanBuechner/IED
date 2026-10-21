@@ -97,6 +97,7 @@ test("lspconvert: diagnostics as markers", () => {
 	assertEqual([error.relatedInformation[0].resource.text, error.relatedInformation[0].startLineNumber], ["ied://w1/b.c", 3]);
 	assertEqual([hint.severity, hint.tags], [1, [1]]);
 	assertEqual(C.markersOf(monaco, [{ range: range(0, 0, 0, 0), message: "no severity" }])[0].severity, 8, "an error when it does not say");
+	assertEqual(C.markersOf(monaco, [{ range: range(0, 0, 0, 0), message: "x", code: null }])[0].code, undefined, "a null code is none");
 });
 
 test("lspconvert: ranges meet when they share a position", () => {

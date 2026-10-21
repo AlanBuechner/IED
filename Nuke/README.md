@@ -48,7 +48,7 @@ a **project** of the workspace. Commands run in order and each (command, project
 | `rebuild` | `clean`, then `build` |
 | `list` | the workspace's projects (`--json`: name, kind, folder, manifest, depends, tests, default, output) |
 | `info` | workspace, configuration, toolchain, output folders and commands (`--json`) |
-| `init` | a new workspace here, or a new project inside the current workspace (`nuke init --help`) |
+| `init` | a new workspace here, or a new project inside the current workspace (`nuke init --help`); with `--ied` also the workspace's IED solution (below) |
 | `toolchain` | `list`, `which`, `install`, `remove`, `use` (section 8) |
 | `help` | every command, including the workspace's own; `nuke help COMMAND` |
 
@@ -301,6 +301,15 @@ if any failed. Custom projects test with `phase = "test"` steps.
 (the `-m...` compiler arguments) - the exact input the compiler saw, so the language server in IED agrees with
 the build. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine-local; `nuke init` adds it to
 `.gitignore`.
+
+**IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.ied.sln` at the root
+and a project file per project under `build/ied/` (`root` the project's folder, `kind` executable / library /
+other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`), and pins the toolchain's IED plugin
+(`<toolchain>/ied`, which `C4/MakeToolchain.py` ships) in the solution's `localPlugins` - relative when the toolchain
+store is inside the workspace, as it is by default. Run it again after adding or removing projects: files it wrote
+are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
+is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). It also adds `.ied/local/` to
+`.gitignore` and copies the skills, as `nuke init` does for a new workspace.
 
 ## 10. This repository as a workspace
 

@@ -22,6 +22,7 @@ namespace Ied
 		public Core::String initializationOptions;      // JSON text, "{}" without any
 		public Core::String initializationOptionsFile;
 		public bool staged;
+		public bool perProject;                         // scope "project": one server per project of a solution
 		public bool negotiate;                          // offer utf-16 and utf-8 and take what the server picks
 		public PositionEncoding encoding;               // when not negotiated
 		public bool integerIds;
@@ -36,6 +37,8 @@ namespace Ied
 		public Core::String pluginDir;
 		public Core::String workspaceDir;
 		public Core::String solutionDir;   // the workspace folder when it is no solution
+		public Core::String projectName;   // empty for a workspace-wide server
+		public Core::String projectDir;
 	}
 
 	// The profiles of one plugin's `contributes`, in order.
@@ -44,6 +47,7 @@ namespace Ied
 	bool ProfileSelects(const LspProfile* profile, Core::StringView languageId, Core::StringView path);
 	// The last of `profiles` whose selector names the document, or null.
 	LspProfile* ProfileServing(const Core::Array<LspProfile*>& profiles, Core::StringView languageId, Core::StringView path);
-	// `text` with ${pluginDir}, ${workspaceDir} and ${solutionDir} expanded; any other ${...} is left as it is.
+	// `text` with ${pluginDir}, ${workspaceDir}, ${solutionDir}, ${projectName} and ${projectDir} expanded; any other
+	// ${...} is left as it is.
 	Core::String ExpandProfileVariables(Core::StringView text, const ProfileVariables& variables);
 }
