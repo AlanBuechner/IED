@@ -53,6 +53,7 @@ export class Shell {
 		this.shellApi = this.makeApi({ id: "shell", base: "/" });
 		this.wsTopic = null;
 		this.serverListeners = new Set();
+		this.views.onChange((entry) => this.chrome && this.chrome.tabChanged(entry));
 	}
 
 	async start() {
@@ -285,7 +286,7 @@ export class Shell {
 		this.layout.update((doc) => {
 			const before = treeOf(doc, activityId, this.contributions.toolsOf(activityId).map((t) => ({ id: t.id, dock: t.dock })));
 			const after = fn(before);
-			return after === before && doc.activities && doc.activities[activityId] ? doc : withTree(doc, activityId, after);
+			return after === before ? doc : withTree(doc, activityId, after);
 		});
 	}
 
@@ -437,6 +438,9 @@ export class Shell {
 				request: (method, params, options) => shell.client.request(method, params, options),
 				subscribe: (topic, handler) => shell.client.subscribe(topic, handler),
 				newOpId: () => shell.client.newOpId(),
+				get clientId() {
+					return shell.client.clientId;
+				},
 			},
 			commands: { handle: (id, fn) => shell.commands.handle(id, fn), run: (id, args) => shell.commands.run(id, args) },
 			tabs: {
@@ -444,6 +448,11 @@ export class Shell {
 				open: (ref, options) => shell.openTab(ref, options),
 			},
 			context: { set: (key, value) => shell.context.set(key, value), get: (key) => shell.context.get(key) },
+			contributions: (point) => shell.contributions.plugins.flatMap((p) => {
+				const value = p.contributes[point];
+				if (value === undefined) return [];
+				return (Array.isArray(value) ? value : [value]).map((entry) => ({ plugin: { id: p.id, base: p.base }, value: entry }));
+			}),
 			menus: { show: (menuId, at, args) => shell.showMenu(menuId, at, args) },
 			get workspace() {
 				return shell.workspace;

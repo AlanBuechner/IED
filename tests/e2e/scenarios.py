@@ -1,6 +1,7 @@
 """The shell's interactions, end to end (docs/15, docs/19): each scenario drives the page the way a person does and
 screenshots the states that matter. Both servers run every scenario unless it names one."""
 
+import json
 import time
 
 from harness import check
@@ -52,8 +53,7 @@ def preview_and_pinned_tabs(run):
 	page = run.open()
 	page.click(".tree-row:has-text('README.md')")
 	page.wait_for_selector(".tab.preview:has-text('README.md')")
-	run.wait_text(".doc-line .tx", "workspace" if run.target.kind == "real" else "fixture")
-	check(page.is_visible(".chip:has-text('Read-only')"), "the document says it is read-only")
+	run.wait_text(".monaco-editor .view-lines", "workspace" if run.target.kind == "real" else "fixture", timeout=30000)
 	page.click(".tree-row:has-text('src')")
 	page.wait_for_selector(".tree-row:has-text('main.c')")
 	page.click(".tree-row:has-text('main.c')")
@@ -213,7 +213,7 @@ def resume_after_server_restart(run):
 	page.wait_for_selector(".banner[data-banner='connection']", state="detached")
 	check(run.request("server.info")["sessionEpoch"] != epoch, "a new epoch")
 	check(page.is_visible(".tab:has-text('README.md')"), "the tab is still there")
-	run.wait_text(".doc-line .tx", "workspace" if run.target.kind == "real" else "fixture")
+	run.wait_text(".monaco-editor .view-lines", "workspace" if run.target.kind == "real" else "fixture", timeout=30000)
 	run.shot("resumed")
 
 
@@ -274,6 +274,130 @@ def disable_and_enable_a_plugin(run):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# Editing (Monaco on server documents)
+
+def open_main_c(run, page):
+	page.click(".tree-row:has-text('src')")
+	page.wait_for_selector(".tree-row:has-text('main.c')")
+	page.dblclick(".tree-row:has-text('main.c')")
+	page.wait_for_selector(".monaco-editor .view-lines", timeout=30000)
+	page.wait_for_function("ied_shell.views.entries.get('doc:src/main.c') && ied_shell.views.entries.get('doc:src/main.c').instance && ied_shell.views.entries.get('doc:src/main.c').instance.sync.version > 0", timeout=20000)
+
+
+def take_over(page):
+	"""Edit Here, when a window of an earlier scenario still holds the lease (it lasts until two minutes idle, docs/11)."""
+	if page.is_visible(".ed-bar button:has-text('Edit Here')"):
+		page.click(".ed-bar button:has-text('Edit Here')")
+		page.wait_for_selector(".ed-bar", state="hidden")
+
+
+def editor_text(page):
+	return page.evaluate("ied_shell.views.entries.get('doc:src/main.c').instance.model.getValue()")
+
+
+def server_text(run):
+	return run.request("fs.read", {"wsId": run.page.evaluate("ied_shell.wsId"), "path": "src/main.c"})["text"]
+
+
+def settled(page):
+	page.wait_for_function("ied_shell.views.entries.get('doc:src/main.c').instance.sync.pending === 0", timeout=10000)
+
+
+@scenario()
+def edit_and_save(run):
+	page = run.open()
+	open_main_c(run, page)
+	take_over(page)
+	page.click(".monaco-editor .view-lines")
+	page.keyboard.press("Control+Home")
+	page.keyboard.type("// edited in IED\n")
+	page.wait_for_selector(".tab:has-text('main.c') .dirty")
+	run.shot("typed")
+	page.keyboard.press("Control+S")
+	page.wait_for_selector(".tab:has-text('main.c') .dirty", state="detached")
+	check(server_text(run).startswith("// edited in IED\n"), "saved to disk: %r" % server_text(run)[:40])
+	check("Ln 2, Col 1" in run.texts(".statusbar .st")[2], "the status bar has the cursor: %s" % run.texts(".statusbar .st"))
+	run.reload()
+	open_main_c(run, page)
+	take_over(page)
+	check(editor_text(page).startswith("// edited in IED\n"), "the saved text after a reload")
+	page.click(".monaco-editor .view-lines")
+	page.keyboard.press("Control+Home")
+	for _ in range(len("// edited in IED\n")):
+		page.keyboard.press("Delete")
+	settled(page)
+	page.keyboard.press("Control+S")
+	page.wait_for_selector(".tab:has-text('main.c') .dirty", state="detached")
+	check(not server_text(run).startswith("// edited"), "the file is as it was")
+
+
+def restore(run, page, original):
+	"""Puts main.c back as it was (through the server, so every window follows) and saves it."""
+	sync = "ied_shell.views.entries.get('doc:src/main.c').instance.sync"
+	settled(page)
+	current = editor_text(page)
+	lines = current.split("\n")
+	whole = {"range": {"start": {"line": 0, "col": 0}, "end": {"line": len(lines) - 1, "col": len(lines[-1])}}, "text": original}
+	run.request("testhooks.serverEdit", {"docId": page.evaluate(sync + ".docId"), "changes": [whole]})
+	page.wait_for_function("ied_shell.views.entries.get('doc:src/main.c').instance.model.getValue() === " + json.dumps(original), timeout=10000)
+	page.evaluate(sync + ".save()")
+	check(server_text(run) == original, "main.c is back as it was")
+
+
+@scenario(viewports=("desktop",))
+def two_windows_share_a_document(run):
+	first = run.open()
+	open_main_c(run, first)
+	take_over(first)
+	original = editor_text(first)
+	first.click(".monaco-editor .view-lines")
+	first.keyboard.press("Control+Home")
+	first.keyboard.type("A")
+	second = run.open(fresh=False)
+	open_main_c(run, second)
+	second.wait_for_selector(".ed-bar:has-text('another window is editing')")
+	run.shot("read-only")
+	first.keyboard.type("B")
+	second.wait_for_function("ied_shell.views.entries.get('doc:src/main.c').instance.model.getValue().startsWith('AB')", timeout=10000)
+	second.click(".ed-bar button:has-text('Edit Here')")
+	second.wait_for_selector(".ed-bar", state="hidden")
+	first.wait_for_selector(".ed-bar:has-text('another window is editing')")
+	second.click(".monaco-editor .view-lines")
+	second.keyboard.press("Control+Home")
+	second.keyboard.press("End")
+	second.keyboard.type("C")
+	first.wait_for_function("ied_shell.views.entries.get('doc:src/main.c').instance.model.getValue().split('\\n')[0].endsWith('C')", timeout=10000)
+	run.page = first
+	run.shot("mirrored")
+	settled(second)
+	check(editor_text(first) == editor_text(second), "both windows show the same text")
+	restore(run, second, original)
+
+
+@scenario(viewports=("desktop",))
+def server_edits_while_typing(run):
+	page = run.open()
+	open_main_c(run, page)
+	take_over(page)
+	original = editor_text(page)
+	doc_id = page.evaluate("ied_shell.views.entries.get('doc:src/main.c').instance.sync.docId")
+	page.click(".monaco-editor .view-lines")
+	page.keyboard.press("Control+End")
+	for word in ("one ", "two ", "three "):
+		page.keyboard.type(word)
+		run.request("testhooks.serverEdit", {"docId": doc_id, "changes": [{"range": {"start": {"line": 0, "col": 0}, "end": {"line": 0, "col": 0}}, "text": "// ai\n"}]})
+	settled(page)
+	time.sleep(0.5)
+	text = editor_text(page)
+	check(text.count("// ai\n") == 3 and text.rstrip().endswith("one two three"), "both writers' text: %r" % text[-80:])
+	page.keyboard.press("Control+S")
+	page.wait_for_selector(".tab:has-text('main.c') .dirty", state="detached")
+	check(server_text(run) == editor_text(page), "the editor and the server agree")
+	run.shot("merged")
+	restore(run, page, original)
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # Phone
 
 @scenario(viewports=("phone",))
@@ -288,7 +412,7 @@ def phone_panes(run):
 	run.shot("output")
 	page.click(".phone-nav .pn[data-pane='ied.explorer']")
 	page.click(".phone-pane .tree-row:has-text('README.md')")
-	page.wait_for_selector(".phone-pane .doc-line")
+	page.wait_for_selector(".phone-pane .monaco-editor .view-lines", timeout=30000)
 	check(page.is_visible(".phone-head button[aria-label='Back']"), "a back button")
 	check("README.md" in run.texts(".phone-head .t b"), "the pane title")
 	run.shot("document")

@@ -103,6 +103,7 @@ export class ViewHost {
 	}
 
 	changeEntry(entry, change) {
+		if (Object.entries(change).every(([key, value]) => entry[key] === value)) return;
 		Object.assign(entry, change);
 		for (const fn of [...this.listeners]) fn(entry);
 	}

@@ -71,6 +71,10 @@ export class DesktopChrome {
 		this.status.chord(text, transient);
 	}
 
+	tabChanged(entry) {
+		for (const dock of this.docks.values()) dock.updateTab(entry);
+	}
+
 	noWorkspace() {
 		this.message = "No workspace is open. Open one on the server: ied <folder or .ied.sln>";
 		replace(this.area, h("div.empty-area", null, icon("folder-opened", "lg"), h("p", null, this.message)));

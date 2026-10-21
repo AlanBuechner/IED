@@ -1,5 +1,5 @@
 // The HTTP side (docs/10, docs/11): GET /ws becomes a protocol session; /healthz; uploads and blobs; the web client's
-// files, plugin files, /ui-kit/ and /codicons/; /api/auth/*. Every request's Host must be a loopback name or the bind
+// files, plugin files, /ui-kit/, /codicons/ and /vendor/; /api/auth/*. Every request's Host must be a loopback name or the bind
 // address (DNS rebinding), unless the server listens on every interface; /ws, uploads and auth POSTs also check Origin.
 // Everything but /healthz, /api/auth/* and the login page's files needs a session (AuthGate).
 
@@ -29,6 +29,7 @@ namespace Ied
 		private void FolderFile(const FS::Path& root, Core::StringView path, Http::Response& response);
 		private void PluginFile(Core::StringView wsId, Core::StringView path, Http::Response& response);
 		private void Codicon(Core::StringView file, Http::Response& response);
+		private void VendorFile(Core::StringView path, Http::Response& response);
 		private void SendFile(const FS::Path& file, Http::Response& response);
 
 		private Server* server;

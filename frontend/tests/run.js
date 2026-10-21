@@ -8,5 +8,6 @@ import "./ansi.test.js";
 import "./client.test.js";
 import "./textedits.test.js";
 import "./keybindings.test.js";
+import "./docsync.test.js";
 
 run(document.getElementById("results"));

@@ -153,3 +153,20 @@ class PluginTests(ServerTestCase):
 		self.assertEqual(401, self.server.request("GET", "/plugins/ied.sample/grammars/x.json").status, "files need a session")
 		for path in ("/plugins/ied.sample/../off/a.txt", "/plugins/ied.sample/%2e%2e/off/a.txt", "/plugins/off/a.txt", "/plugins/ied.sample/missing.json", "/plugins/ied.sample/"):
 			self.assertEqual(404, self.server.request("GET", path, headers=cookie).status, path)
+
+	async def test_a_documents_language_comes_from_the_plugins(self):
+		languages = {"languages": [{"id": "fancy", "extensions": [".FY"]}, {"id": "build", "fileNames": ["Buildfile"]}]}
+		self.add("builtin", "langs", manifest("langs", contributes=languages))
+		self.start()
+		client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		try:
+			seen = {}
+			for path in ("src/a.fy", "Buildfile", "notes.txt"):
+				await client.request("fs.write", {"wsId": "w1", "path": path, "text": "x\n"})
+				doc = await client.request("doc.open", {"wsId": "w1", "path": path})
+				topic = "doc:" + doc["docId"]
+				await client.sub([topic])
+				seen[path] = (await client.wait_for(topic, lambda f: f["t"] == "snap"))[-1]["data"]["languageId"]
+			self.assertEqual({"src/a.fy": "fancy", "Buildfile": "build", "notes.txt": "plaintext"}, seen, "the plugins decide; the host knows no language")
+		finally:
+			client.abort()

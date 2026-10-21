@@ -38,3 +38,69 @@ export function applyChanges(text, changes) {
 	}
 	return out + text.slice(at);
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Rebasing (the server's rule, src/fs/textedit.cf, and its mirror for a client with edits of its own in flight)
+
+export class OverlapError extends EditError {}
+
+function before(a, b) {
+	return a.line < b.line || (a.line === b.line && a.col < b.col);
+}
+
+function atOrBefore(a, b) {
+	return !before(b, a);
+}
+
+// Where text inserted at `start` ends.
+function afterInsert(start, text) {
+	const lines = text.split("\n");
+	if (lines.length === 1) return { line: start.line, col: start.col + text.length };
+	return { line: start.line + lines.length - 1, col: lines[lines.length - 1].length };
+}
+
+// `pos` (at or after `applied`'s end) moved over `applied`.
+function shift(pos, applied) {
+	const after = afterInsert(applied.range.start, applied.text || "");
+	if (pos.line === applied.range.end.line) return { line: after.line, col: after.col + pos.col - applied.range.end.col };
+	return { line: pos.line + after.line - applied.range.end.line, col: pos.col };
+}
+
+function moved(change, applied) {
+	return { range: { start: shift(change.range.start, applied), end: shift(change.range.end, applied) }, text: change.text };
+}
+
+// One change set as the steps it was applied as: last position first, so each leaves the positions before it alone.
+export function sequential(changes) {
+	return changes.map((change, index) => ({ change, index })).sort((a, b) => {
+		const s = a.change.range.start;
+		const t = b.change.range.start;
+		if (before(s, t) || before(t, s)) return before(s, t) ? 1 : -1;
+		const e = a.change.range.end;
+		const f = b.change.range.end;
+		if (before(e, f) || before(f, e)) return before(e, f) ? 1 : -1;
+		return b.index - a.index;
+	}).map((entry) => entry.change);
+}
+
+// `change`, made concurrently with `applied`, as it applies after it - the server's rule: `applied` goes first where
+// the two meet. Throws OverlapError when the ranges overlap.
+export function transformAfter(change, applied) {
+	if (atOrBefore(applied.range.end, change.range.start)) return moved(change, applied);
+	if (atOrBefore(change.range.end, applied.range.start)) return change;
+	throw new OverlapError("a change overlaps one made meanwhile");
+}
+
+// The mirror, for a change the server applied before `local` (a change this client made but the server has not yet):
+// `change` goes first where the two meet, so both sides end with the same text.
+export function transformBefore(change, local) {
+	if (atOrBefore(change.range.end, local.range.start)) return change;
+	if (atOrBefore(local.range.end, change.range.start)) return moved(change, local);
+	throw new OverlapError("a change overlaps one made meanwhile");
+}
+
+// Each of `changes` moved over every step of the change sets `sets` (oldest first), with `rule`.
+export function rebase(changes, sets, rule) {
+	const steps = sets.flatMap((set) => sequential(set));
+	return changes.map((change) => steps.reduce((c, step) => rule(c, step), change));
+}

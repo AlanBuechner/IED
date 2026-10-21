@@ -87,11 +87,12 @@ A plugin's `runtime.ui` names an ES module in its folder; `plugins.contributions
 
 | Member of `ied` | |
 |---|---|
-| `client` | the protocol client: `request(method, params, {opId}) -> Promise`, `subscribe(topic, {snap, evt}) -> unsubscribe` (resubscribed after a resume or gap, `snap` called again) |
+| `client` | the protocol client: `request(method, params, {opId, signal}) -> Promise`, `subscribe(topic, {snap, evt, gone}) -> unsubscribe` (resubscribed after a resume or gap, `snap` called again), `newOpId()`, `clientId` (this tab, as leases and `by` fields name it) |
 | `commands.handle(id, fn)` | `fn(args)` runs a contributed command; `commands.run(id, args)` runs any command |
 | `tabs.kind(kind, {view, title(arg), icon(arg), resource(arg)})` | a tab kind: refs `<kind>:<arg>` render with the module's export `view`; `resource` names the workspace file a tab shows (the context keys `resourcePath`, `resourceExtname`) |
 | `tabs.open(ref, {preview})` | opens or focuses a tab in the current activity's well; `preview` is the VS preview tab (replaced by the next preview, kept once edited or double-clicked) |
 | `context.set(key, value)`, `context.get(key)` | context keys for when-clauses |
+| `contributions(point)` | every loaded plugin's entries of a contribution point, in load order: `[{plugin: {id, base}, value}]` (the editor reads `languages` this way) |
 | `menus.show(menuId, at, args)` | shows a contributed menu (e.g. `explorer/context`) at a mouse event or element; its commands get `args` |
 | `workspace` | `{wsId, name, kind, root, trusted}` of the shown workspace; `workspace.on(fn)` for changes |
 | `notify(text, level)` | a notification for every device (`server.notify`) |

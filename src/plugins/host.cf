@@ -277,6 +277,12 @@ namespace Ied
 		return loaded;
 	}
 
+	Core::String PluginHost::LanguageOf(Workspace* ws, Core::StringView path) {
+		Core::Array<Serialization::DomNode> contributes;
+		for (Plugin* plugin : LoadedFor(ws)) contributes.Push(plugin->manifest->contributes);
+		return LanguageFor(contributes, path);
+	}
+
 	Core::String PluginHost::ListMethod(Call& call, const Params& params) {
 		Workspace* ws = WorkspaceParam(server, params);
 		if (!ws) return Snapshot();

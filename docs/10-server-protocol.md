@@ -11,7 +11,7 @@ Status: **design v1, ready for implementation.** Machine-readable frame schema: 
 | Channel | Used for |
 |---|---|
 | `GET /` and static paths | the web app (HTML/JS/CSS, plugin UI modules under `/plugins/<id>/ui/...`, Monaco, xterm) |
-| `GET /ui-kit/<path>`, `GET /codicons/<name>.svg` | the components shared by the shell and plugin UI modules (`shared/ui-kit/`), and one codicon each (`third_party/codicons`) |
+| `GET /ui-kit/<path>`, `GET /codicons/<name>.svg`, `GET /vendor/<library>/<path>` | the components shared by the shell and plugin UI modules (`shared/ui-kit/`), one codicon each (`third_party/codicons`), and the install's web libraries (`vendor/web/`: Monaco, xterm.js), cacheable for a day |
 | `POST /api/auth/*` | login, logout, token exchange (`docs/11`) |
 | `GET /api/blob/<id>` | large binary payloads (images, trace chunks, file downloads), referenced from frames by id |
 | `PUT /api/upload` | attachments and file uploads (streamed, returns a blob id) |
@@ -117,6 +117,13 @@ Server-owned buffers (F-EDT-1) with a simple, sufficient scheme:
 - Server-side writers (AI tools, refactors, replace-in-files, file reload) apply as the server itself and are broadcast like any edit, tagged with `origin` (`ai:<chatId>`, `lsp`, `disk`, `user:<clientId>`) for margin coloring and undo grouping.
 
 Language servers receive changes from the server's document store (the server is the LSP client), so every device sees the same diagnostics.
+
+**The client side as built** (`shared/ui-kit/docsync.js`, unit-tested against a model of the server with seeded random interleavings):
+
+- The holder sends one `doc.edit` at a time, so the server applies its edits in order; edits made meanwhile wait in a queue. An edit is acknowledged by its own `doc.edit` event (matched by `opId`), never by the response: events come in order, so no other writer's edit can be passed over.
+- Another writer's edit arrives in the server's coordinates, before this client's pending edits. The client moves it over them with the mirror of the server's rule (where both insert at one point, the server's edit goes first; overlapping ranges cannot be placed) and applies it; the pending edits move over it with the server's rule. The edit in flight is rebased by the server, and its moved form stays the client's reference for the next remote edit.
+- When an edit cannot be placed (overlap, `conflict`, a lost lease), the client subscribes again and starts over from the snapshot, passing over events until it arrives, and tells the person.
+- The languageId of a snapshot comes from the loaded plugins' `languages` contributions (file names, then extensions; the plugin loaded last wins), else `plaintext`: the host knows no language itself.
 
 ## Chat streaming detail
 

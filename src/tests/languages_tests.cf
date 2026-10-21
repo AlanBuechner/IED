@@ -1,0 +1,40 @@
+// plugins/languages: a file's language from the plugins' `languages` contributions.
+
+include "plugins/languages.ch"
+
+static Serialization::DomNode Contributes(const char* json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJsonc(Core::StringView(json), *doc).root;
+}
+
+static Core::String Of(const Core::Array<Serialization::DomNode>& contributes, const char* path) { return Ied::LanguageFor(contributes, Core::StringView(path)); }
+
+[test("server.languages")]
+class LanguageTests {
+	[test("extensions_and_names")]
+	public static void TestExtensionsAndNames() {
+		Core::Array<Serialization::DomNode> contributes;
+		contributes.Push(Contributes("{\"languages\": [{\"id\": \"c\", \"extensions\": [\".c\", \".h\"]}, {\"id\": \"docker\", \"fileNames\": [\"Dockerfile\"]}]}"));
+		assert_se("c", Of(contributes, "src/main.c").CStr(), "by extension");
+		assert_se("c", Of(contributes, "src/MAIN.H").CStr(), "extensions fold case");
+		assert_se("docker", Of(contributes, "tools/Dockerfile").CStr(), "by file name");
+		assert_se("plaintext", Of(contributes, "tools/dockerfile").CStr(), "file names keep their case");
+		assert_se("plaintext", Of(contributes, "notes.txt").CStr(), "nobody's: plain text");
+		assert_se("plaintext", Of(contributes, "Makefile").CStr(), "no extension");
+		assert_se("plaintext", Of(contributes, ".h").CStr(), "a leading dot is a name, not an extension");
+		assert_se("c", Of(contributes, "a.b.c").CStr(), "the last dot");
+		assert_se("c", Of(contributes, "dir.x\\file.c").CStr(), "either separator");
+	}
+
+	[test("later_plugins_win")]
+	public static void TestLaterPluginsWin() {
+		Core::Array<Serialization::DomNode> contributes;
+		contributes.Push(Contributes("{\"languages\": [{\"id\": \"c\", \"extensions\": [\".h\"]}, {\"id\": \"text\", \"fileNames\": [\"x.h\"]}]}"));
+		contributes.Push(Contributes("{\"languages\": [{\"id\": \"cpp\", \"extensions\": [\".h\"]}]}"));
+		contributes.Push(Contributes("{\"commands\": []}"));
+		assert_se("cpp", Of(contributes, "a.h").CStr(), "the plugin loaded last");
+		assert_se("text", Of(contributes, "x.h").CStr(), "a file name wins over any extension");
+		Core::Array<Serialization::DomNode> none;
+		assert_se("plaintext", Of(none, "a.h").CStr(), "no plugins");
+	}
+}

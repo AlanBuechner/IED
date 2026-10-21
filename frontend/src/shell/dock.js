@@ -20,10 +20,24 @@ export class DockView {
 		replace(container, this.root);
 	}
 
+	// Builds the tree again; views keep their elements, and the one with the focus keeps it.
 	render(tree) {
 		this.tree = tree;
+		const focused = document.activeElement;
 		const el = this.node(tree, []) || this.emptyWellGroup();
 		replace(this.root, el);
+		if (focused && focused !== document.activeElement && this.root.contains(focused)) focused.focus({ preventScroll: true });
+	}
+
+	// A tab's title or unsaved state changed: its tabs say so, without building the tree again.
+	updateTab(entry) {
+		for (const tab of this.root.querySelectorAll(".tab, .tw-tab")) {
+			if (tab.dataset.ref !== entry.ref) continue;
+			tab.querySelector(".name").textContent = entry.title;
+			const dot = tab.querySelector(".dirty");
+			if (entry.dirty && !dot && tab.classList.contains("tab")) tab.querySelector(".name").after(h("span.dirty", { title: "Unsaved changes" }));
+			else if (!entry.dirty && dot) dot.remove();
+		}
 	}
 
 	node(node, path) {

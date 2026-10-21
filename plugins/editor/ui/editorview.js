@@ -1,0 +1,204 @@
+// editorview.js - a server document in Monaco ("doc:<path>" tabs; F-EDT-1, docs/10): DocumentSync keeps the text with
+// the server, the lease decides who types (a bar offers "Edit Here" to the others), typing pins a preview tab, the tab
+// shows unsaved changes, and Ctrl+S saves. A file mixing line endings opens read-only: Monaco would make them one kind
+// and the positions it reports would no longer be the server's.
+
+import { h, icon, replace } from "/ui-kit/dom.js";
+import { DocumentSync } from "/ui-kit/docsync.js";
+import { themeName } from "./monaco.js";
+
+const NOTICE_MS = 8000;
+
+export class CodeEditor {
+	// `editors`: the page's open editors (editors.js).
+	constructor(ctx, path, monaco, editors) {
+		this.ctx = ctx;
+		this.ied = ctx.ied;
+		this.path = path;
+		this.monaco = monaco;
+		this.editors = editors;
+		this.model = null;
+		this.applying = false;
+		this.mixedEndings = false;
+		this.bar = h("div.ed-bar", { hidden: true });
+		this.host = h("div.ed-fill.code-host");
+		ctx.el.append(this.bar, this.host);
+		this.editor = monaco.editor.create(this.host, editorOptions(monaco));
+		this.editor.onDidFocusEditorText(() => this.focused());
+		this.editor.onDidChangeCursorPosition(() => this.changed());
+		this.sync = new DocumentSync(this.ied.client, this.target(), { onState: (state) => this.stateChanged(state) });
+		editors.add(this);
+		this.sync.open(ctx.wsId, path).catch((e) => this.problem(e.code === "not_found" ? "There is no file " + path + "." : "The document could not be opened: " + e.message));
+	}
+
+	dispose() {
+		this.editors.delete(this);
+		this.sync.dispose();
+		this.editor.dispose();
+		if (this.model) this.model.dispose();
+	}
+
+	focus() {
+		this.editor.focus();
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// What DocumentSync drives
+
+	target() {
+		return {
+			setText: (text) => this.setText(text),
+			applyRemote: (changes) => this.applyRemote(changes),
+			setReadOnly: (readOnly) => this.setReadOnly(readOnly),
+		};
+	}
+
+	setText(text) {
+		this.mixedEndings = /\r\n/.test(text) && /(^|[^\r])\n/.test(text);
+		this.applying = true;
+		if (!this.model) {
+			const uri = this.monaco.Uri.from({ scheme: "ied", authority: this.ctx.wsId, path: "/" + this.path });
+			this.model = this.monaco.editor.createModel(text, this.sync.languageId, uri);
+			this.model.updateOptions({ bracketColorizationOptions: { enabled: false, independentColorPoolPerBracketType: false } });
+			this.model.onDidChangeContent((event) => this.edited(event));
+			this.editor.setModel(this.model);
+		}
+		else this.model.setValue(text);
+		this.applying = false;
+		this.setReadOnly(!this.sync.holdsLease);
+	}
+
+	applyRemote(changes) {
+		this.applying = true;
+		this.model.applyEdits(changes.map((change) => ({ range: toRange(this.monaco, change.range), text: change.text })));
+		this.applying = false;
+		this.changed();
+	}
+
+	setReadOnly(readOnly) {
+		this.editor.updateOptions({ readOnly: readOnly || this.mixedEndings, readOnlyMessage: { value: this.readOnlyReason() } });
+		this.showBar();
+	}
+
+	// The person typed: Monaco's changes refer to the text before them, as the protocol's do.
+	edited(event) {
+		if (this.applying) return;
+		this.sync.localEdit(event.changes.map((change) => ({ range: fromRange(change.range), text: change.text })));
+		this.ctx.tab.pin();
+		this.changed();
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// The lease, the bar, saving
+
+	focused() {
+		this.editors.touch(this);
+		if (this.sync.docId && this.sync.holder === null) this.sync.takeLease().catch((e) => this.ied.report("the lease: " + e.message, e));
+		this.changed();
+	}
+
+	readOnlyReason() {
+		if (this.mixedEndings) return "This file mixes line endings (CRLF and LF); it opens read-only until they are one kind.";
+		return "Another window is editing this document. Use Edit Here to take over.";
+	}
+
+	stateChanged(state) {
+		this.ctx.tab.setDirty(state.dirty);
+		if (state.notice) this.notice(state.notice);
+		if (state.error) this.problem(state.error);
+		this.showBar();
+	}
+
+	showBar() {
+		if (this.noticeText) return;
+		const sync = this.sync;
+		if (this.mixedEndings) this.setBar("warning", "This file mixes line endings (CRLF and LF), so it is read-only here.", null);
+		else if (sync.docId && sync.holder && !sync.holdsLease) this.setBar("lock", "Read-only: another window is editing this document.", h("button.btn", { on: { click: () => this.takeOver() } }, "Edit Here"));
+		else if (sync.diskChanged) this.setBar("warning", sync.diskChanged === "deleted" ? "The file was deleted on disk; saving writes it again." : "The file changed on disk while you edit it here; saving replaces it.", null);
+		else this.bar.hidden = true;
+	}
+
+	setBar(glyph, text, action) {
+		replace(this.bar, icon(glyph), h("span", null, text), action);
+		this.bar.hidden = false;
+	}
+
+	notice(text) {
+		this.noticeText = text;
+		this.setBar("info", text, null);
+		setTimeout(() => {
+			this.noticeText = null;
+			this.showBar();
+		}, NOTICE_MS);
+	}
+
+	takeOver() {
+		this.sync.takeLease().then(() => this.editor.focus(), (e) => this.ied.report("taking over the document: " + e.message, e));
+	}
+
+	save() {
+		return this.sync.save().catch((e) => this.ied.report("saving " + this.path + ": " + e.message, e));
+	}
+
+	problem(message) {
+		replace(this.host, h("div.ed-problem", null, message));
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// For the status bar
+
+	position() {
+		const at = this.editor.getPosition();
+		return at ? { line: at.lineNumber, col: at.column } : null;
+	}
+
+	describe() {
+		const model = this.model;
+		if (!model) return null;
+		const options = model.getOptions();
+		return {
+			position: this.position(),
+			eol: model.getEOL() === "\r\n" ? "CRLF" : "LF",
+			indent: options.insertSpaces ? "Spaces: " + options.tabSize : "Tabs",
+			language: this.sync.languageId,
+			readOnly: this.editor.getOption(this.monaco.editor.EditorOption.readOnly),
+		};
+	}
+
+	changed() {
+		this.editors.changed();
+	}
+}
+
+function toRange(monaco, range) {
+	return new monaco.Range(range.start.line + 1, range.start.col + 1, range.end.line + 1, range.end.col + 1);
+}
+
+function fromRange(range) {
+	return { start: { line: range.startLineNumber - 1, col: range.startColumn - 1 }, end: { line: range.endLineNumber - 1, col: range.endColumn - 1 } };
+}
+
+// VS defaults (docs/15, F-EDT-30): tabs, indentation guides, the map scrollbar (not on a phone, F-SHL-44); fonts from
+// the theme tokens.
+function editorOptions(monaco) {
+	const style = getComputedStyle(document.documentElement);
+	const phone = window.matchMedia("(max-width: 719px)").matches;
+	return {
+		theme: themeName(),
+		automaticLayout: true,
+		fixedOverflowWidgets: true,
+		fontFamily: style.getPropertyValue("--font-mono").trim(),
+		fontSize: parseInt(style.getPropertyValue("--font-size-code"), 10) || 13,
+		lineHeight: parseInt(style.getPropertyValue("--line-height-code"), 10) || 18,
+		insertSpaces: false,
+		detectIndentation: true,
+		tabSize: 4,
+		guides: { indentation: true },
+		minimap: { enabled: !phone, renderCharacters: false, showSlider: "always" },
+		renderWhitespace: "none",
+		scrollBeyondLastLine: false,
+		smoothScrolling: false,
+		readOnly: true,
+		bracketPairColorization: { enabled: false },
+	};
+}

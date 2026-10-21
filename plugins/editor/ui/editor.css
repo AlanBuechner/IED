@@ -61,3 +61,20 @@
 .doc-line .ln { width: 56px; padding-right: var(--space-5); text-align: right; color: var(--line-number); flex: none; user-select: none; background: var(--gutter-bg); }
 .doc-line .tx { color: var(--syntax-plain); padding-right: var(--space-7); user-select: text; }
 .doc-note { display: flex; align-items: center; gap: var(--space-3); }
+
+/* code editor (Monaco) */
+.code-host { overflow: hidden; }
+.ed-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-4);
+	min-height: 28px;
+	padding: var(--space-1) var(--space-4);
+	background: var(--tint-info);
+	border-bottom: var(--border-width) solid var(--border-0);
+	font-size: var(--font-size-sm);
+	flex: none;
+}
+.ed-bar > span:not(.ci) { flex: 1; }
+.ed-bar > .ci { color: var(--accent-info); }
+.st-part + .st-part { margin-left: var(--space-5); }

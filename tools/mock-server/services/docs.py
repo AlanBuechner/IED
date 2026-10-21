@@ -1,14 +1,12 @@
 """Server-owned documents: 'doc:<docId>' topics, lease, versioned edits with rebase, save, disk reload."""
 
 import collections
-import posixpath
 
 from rpc import RpcError
 from services import textedit
 from services.workspace import normalize
 
 HISTORY_VERSIONS = 1000
-LANGUAGES = {".c": "c", ".h": "c", ".md": "markdown", ".json": "json", ".txt": "plaintext"}
 
 
 class Doc:
@@ -39,7 +37,7 @@ class Documents:
 		return {
 			"docId": doc.doc_id, "wsId": doc.ws_id, "path": doc.path, "text": doc.text, "version": doc.version,
 			"lease": {"holder": doc.holder}, "dirty": doc.dirty,
-			"languageId": LANGUAGES.get(posixpath.splitext(doc.path)[1], "plaintext"),
+			"languageId": self.server.plugins.language_of(doc.path),
 		}
 
 	def get(self, doc_id):

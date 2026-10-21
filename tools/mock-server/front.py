@@ -13,6 +13,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 CONSOLE_DIR = HERE / "console"
 REPO = HERE.parents[1]
 UI_KIT_DIR = REPO / "shared" / "ui-kit"
+VENDOR_DIR = REPO / "vendor" / "web"
 CODICONS_DIR = REPO / "third_party" / "codicons" / "src" / "icons"
 CODICON_FILE = re.compile(r"^[a-z0-9-]+\.svg$")
 WORKSPACE_PLUGIN = re.compile(r"^/w/([^/]+)/plugins/(.*)$")
@@ -135,6 +136,10 @@ class Front:
 			return _file(UI_KIT_DIR, path[len("/ui-kit"):])
 		if path.startswith("/codicons/"):
 			return self._codicon(path[len("/codicons/"):])
+		if path.startswith("/vendor/"):
+			response = _file(VENDOR_DIR, path[len("/vendor"):])
+			response.headers["Cache-Control"] = "max-age=86400"
+			return response
 		if self.static_root is None:
 			return Response(302, "", headers={"Location": "/_mock/"})
 		return _file(self.static_root, path)

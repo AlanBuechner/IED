@@ -142,6 +142,7 @@ namespace Ied
 		else if (WorkspacePluginPath(path, wsId, pluginPath)) PluginFile(wsId, pluginPath, response);
 		else if (path.StartsWith(Core::StringView("/ui-kit/"))) FolderFile(FS::Path(server->config.homeDir.View()) / "shared" / "ui-kit", path.Substring(7, path.ByteLength()), response);
 		else if (path.StartsWith(Core::StringView("/codicons/"))) Codicon(path.Substring(10, path.ByteLength()), response);
+		else if (path.StartsWith(Core::StringView("/vendor/"))) VendorFile(path.Substring(7, path.ByteLength()), response);
 		else StaticFile(path, response);
 	}
 
@@ -265,6 +266,13 @@ namespace Ied
 			if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
 		}
 		return true;
+	}
+
+	// /vendor/<library>/<path>: the install's vendor/web libraries (Monaco, xterm.js), the same for every version of a
+	// library, so browsers may keep them a day.
+	void Front::VendorFile(Core::StringView path, Http::Response& response) {
+		FolderFile(FS::Path(server->config.homeDir.View()) / "vendor" / "web", path, response);
+		if (response.status == 200) response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("max-age=86400"));
 	}
 
 	void Front::StaticFile(Core::StringView path, Http::Response& response) {

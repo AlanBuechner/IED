@@ -19,6 +19,9 @@
 			{ "id": "ied.explorer", "title": "Solution Explorer", "icon": "$(list-tree)", "view": "SolutionExplorer", "defaultDock": "left" },
 			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "bottom" }
 		],
+		"statusBarItems": [
+			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" }
+		],
 		"commands": [
 			{ "id": "ied.explorer.open", "title": "Open", "category": "Solution Explorer", "icon": "$(go-to-file)" },
 			{ "id": "ied.explorer.refresh", "title": "Refresh", "category": "Solution Explorer", "icon": "$(refresh)" },
@@ -26,9 +29,19 @@
 			{ "id": "ied.explorer.copyPath", "title": "Copy Full Path", "category": "Solution Explorer" },
 			{ "id": "ied.explorer.copyRelativePath", "title": "Copy Relative Path", "category": "Solution Explorer" },
 			{ "id": "ied.output.clear", "title": "Clear All", "category": "Output", "icon": "$(clear-all)" },
-			{ "id": "ied.output.toggleWrap", "title": "Toggle Word Wrap", "category": "Output", "icon": "$(word-wrap)" }
+			{ "id": "ied.output.toggleWrap", "title": "Toggle Word Wrap", "category": "Output", "icon": "$(word-wrap)" },
+			{ "id": "ied.editor.save", "title": "Save", "category": "File", "icon": "$(save)" },
+			{ "id": "ied.editor.saveAll", "title": "Save All", "category": "File", "icon": "$(save-all)" }
 		],
 		"menus": {
+			"menubar/file": [
+				{ "command": "ied.editor.save", "group": "5_save" },
+				{ "command": "ied.editor.saveAll", "group": "5_save", "order": 1 }
+			],
+			"toolbar/main": [
+				{ "command": "ied.editor.save", "group": "1_file" },
+				{ "command": "ied.editor.saveAll", "group": "1_file", "order": 1 }
+			],
 			"explorer/context": [
 				{ "command": "ied.explorer.open", "group": "1_open", "when": "explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.copyPath", "group": "5_copy" },
@@ -41,6 +54,8 @@
 			]
 		},
 		"keybindings": [
+			{ "command": "ied.editor.save", "key": "ctrl+s" },
+			{ "command": "ied.editor.saveAll", "key": "ctrl+shift+s" },
 			{ "command": "shell.showView", "key": "ctrl+alt+l", "args": { "id": "ied.explorer" } },
 			{ "command": "shell.showView", "key": "ctrl+alt+o", "args": { "id": "ied.output" } }
 		]

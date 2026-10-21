@@ -57,12 +57,12 @@ export class Keybindings {
 		if (isTextInput(event.target) && belongsToTextField(key)) return false;
 		if (this.holding((b) => b.keys.length === 2 && b.keys[0] === key)) {
 			this.startChord(key);
-			event.preventDefault();
+			consume(event);
 			return true;
 		}
 		const binding = this.holding((b) => b.keys.length === 1 && b.keys[0] === key);
 		if (!binding) return false;
-		event.preventDefault();
+		consume(event);
 		this.commands.run(binding.command, binding.args);
 		return true;
 	}
@@ -86,7 +86,7 @@ export class Keybindings {
 	secondKey(event, key) {
 		const first = this.pending;
 		this.endChord();
-		event.preventDefault();
+		consume(event);
 		if (key === "escape") return true;
 		const binding = this.holding((b) => b.keys.length === 2 && b.keys[0] === first && b.keys[1] === key);
 		if (binding) this.commands.run(binding.command, binding.args);
@@ -99,4 +99,11 @@ export class Keybindings {
 		this.pending = null;
 		this.onChord(null);
 	}
+}
+
+// A key the shell takes: the browser does nothing with it, and neither does an editor in the page (the shell listens
+// first, at the window, as the event goes down).
+function consume(event) {
+	event.preventDefault();
+	if (event.stopPropagation) event.stopPropagation();
 }

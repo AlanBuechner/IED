@@ -3,15 +3,6 @@ include "host/server.ch"
 
 namespace Ied
 {
-	static const char* LanguageOf(Core::StringView path) {
-		FS::Path file = FS::Path(path);
-		Core::StringView extension = file.Extension();
-		if (extension == ".c" || extension == ".h") return "c";
-		if (extension == ".md") return "markdown";
-		if (extension == ".json") return "json";
-		return "plaintext";
-	}
-
 	static void Conflict(const char* message, int64 version, const char* reason) {
 		JsonWriter data;
 		data.BeginObject();
@@ -58,7 +49,7 @@ namespace Ied
 		else json.String(doc->holder.View());
 		json.EndObject();
 		json.BoolField("dirty", doc->dirty);
-		json.Field("languageId", LanguageOf(doc->path.View()));
+		json.Field("languageId", server->plugins->LanguageOf(doc->ws, doc->path.View()).View());
 		json.EndObject();
 		return json.ToString();
 	}

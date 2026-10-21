@@ -1,0 +1,42 @@
+// Basic languages: ids, file extensions, comment tokens and brackets for common languages, so documents get a
+// language without a dedicated plugin. The ids are Monaco's, whose built-in tokenizers color them until a language
+// plugin brings a grammar and semantic tokens. A language plugin that names the same extension later wins.
+{
+	"manifestVersion": 1,
+	"id": "ied.languages",
+	"name": "Basic Languages",
+	"version": "0.1.0",
+	"description": "Language ids, extensions, comments and brackets for common languages.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "c", "aliases": ["C"], "extensions": [".c", ".h"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "cpp", "aliases": ["C++"], "extensions": [".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++", ".inl", ".ipp"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "csharp", "aliases": ["C#"], "extensions": [".cs", ".csx"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "python", "aliases": ["Python"], "extensions": [".py", ".pyw", ".pyi"], "lineComment": "#", "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "javascript", "aliases": ["JavaScript"], "extensions": [".js", ".mjs", ".cjs", ".jsx"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "typescript", "aliases": ["TypeScript"], "extensions": [".ts", ".mts", ".cts", ".tsx"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "json", "aliases": ["JSON"], "extensions": [".json", ".jsonc", ".sln", ".proj"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"]] },
+			{ "id": "markdown", "aliases": ["Markdown"], "extensions": [".md", ".markdown"] },
+			{ "id": "html", "aliases": ["HTML"], "extensions": [".html", ".htm"], "blockComment": ["<!--", "-->"] },
+			{ "id": "css", "aliases": ["CSS"], "extensions": [".css"], "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "scss", "aliases": ["SCSS"], "extensions": [".scss"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "xml", "aliases": ["XML"], "extensions": [".xml", ".xaml", ".csproj", ".vcxproj", ".props", ".targets", ".svg"], "blockComment": ["<!--", "-->"] },
+			{ "id": "yaml", "aliases": ["YAML"], "extensions": [".yaml", ".yml"], "lineComment": "#" },
+			{ "id": "ini", "aliases": ["TOML", "INI"], "extensions": [".toml", ".ini", ".cfg", ".editorconfig"], "lineComment": "#" },
+			{ "id": "shell", "aliases": ["Shell"], "extensions": [".sh", ".bash", ".zsh"], "lineComment": "#" },
+			{ "id": "powershell", "aliases": ["PowerShell"], "extensions": [".ps1", ".psm1", ".psd1"], "lineComment": "#", "blockComment": ["<#", "#>"] },
+			{ "id": "bat", "aliases": ["Batch"], "extensions": [".bat", ".cmd"], "lineComment": "rem" },
+			{ "id": "go", "aliases": ["Go"], "extensions": [".go"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "rust", "aliases": ["Rust"], "extensions": [".rs"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "java", "aliases": ["Java"], "extensions": [".java"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "lua", "aliases": ["Lua"], "extensions": [".lua"], "lineComment": "--", "blockComment": ["--[[", "]]"] },
+			{ "id": "sql", "aliases": ["SQL"], "extensions": [".sql"], "lineComment": "--", "blockComment": ["/*", "*/"] },
+			{ "id": "hlsl", "aliases": ["HLSL"], "extensions": [".hlsl", ".hlsli", ".fx", ".usf", ".ush"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "dockerfile", "aliases": ["Dockerfile"], "fileNames": ["Dockerfile"], "lineComment": "#" },
+			{ "id": "plaintext", "aliases": ["Plain Text"], "extensions": [".txt", ".log"], "fileNames": [".gitignore", ".gitattributes", "LICENSE"] }
+		]
+	}
+}

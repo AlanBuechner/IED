@@ -89,6 +89,21 @@ class Plugins:
 	def changed(self):
 		self.server.hub.publish("plugins", "plugins.changed", self.snapshot())
 
+	def language_of(self, path):
+		"""The language the loaded plugins give a file (as src/plugins/languages.ch): a file name wins over an extension,
+		the plugin loaded last wins, extensions fold case."""
+		name = path.replace("\\", "/").rsplit("/", 1)[-1]
+		dot = name.rfind(".")
+		extension = name[dot:].lower() if dot > 0 else ""
+		by_name = by_extension = None
+		for plugin in self.loaded():
+			for language in plugin.manifest.get("contributes", {}).get("languages", []):
+				if name in language.get("fileNames", []):
+					by_name = language["id"]
+				if extension and extension in [e.lower() for e in language.get("extensions", [])]:
+					by_extension = language["id"]
+		return by_name or by_extension or "plaintext"
+
 	def file_of(self, plugin_id, rel):
 		plugin = next((p for p in self.loaded() if p.id == plugin_id), None)
 		if plugin is None:

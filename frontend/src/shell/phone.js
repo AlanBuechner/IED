@@ -52,6 +52,10 @@ export class PhoneChrome {
 
 	chord() {}
 
+	tabChanged(entry) {
+		if (entry.ref === this.shown) this.renderHead(this.paneRef());
+	}
+
 	noWorkspace() {
 		replace(this.area, h("div.empty-area", null, icon("folder-opened", "lg"), h("p", null, "No workspace is open. Open one on the server: ied <folder or .ied.sln>")));
 	}

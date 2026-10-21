@@ -6,6 +6,7 @@
 // the server lock held.
 
 include "manifest.ch"
+include "languages.ch"
 include "web/rpc.ch"
 
 namespace Ied
@@ -37,6 +38,8 @@ namespace Ied
 		public const Core::Array<Plugin*>& All() const { return plugins; }
 		// A workspace's project-local plugins, read now: untrusted unless the workspace is trusted.
 		public Core::Array<Plugin*> LocalFor(Workspace* ws);
+		// The language of a file of `ws` (plugins/languages.ch).
+		public Core::String LanguageOf(Workspace* ws, Core::StringView path);
 		// The plugins loaded for a workspace (null: none): the global ones, less those a loaded local plugin overrides,
 		// and the loaded local ones.
 		public Core::Array<Plugin*> LoadedFor(Workspace* ws);
