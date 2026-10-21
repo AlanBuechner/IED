@@ -1,0 +1,111 @@
+include "engine.ch"
+
+namespace Browser
+{
+	static FS::Path Under(const char* variable, const char* rest) {
+		Core::String root;
+		if (!Platform::TryGetEnvironmentVariable(variable, root) || root.IsEmpty()) return FS::Path();
+		return FS::Path(root.View()) / rest;
+	}
+
+	FS::Path FindBrowser(Core::StringView configured) {
+		if (!configured.IsEmpty()) {
+			Core::String path = Core::String(configured);
+			return FS::FileExists(path.CStr()) ? FS::Path(configured) : FS::Path();
+		}
+		Core::Array<FS::Path> candidates;
+		candidates.Push(Under("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"));
+		candidates.Push(Under("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"));
+		candidates.Push(Under("LOCALAPPDATA", "Microsoft/Edge/Application/msedge.exe"));
+		candidates.Push(Under("ProgramFiles", "Google/Chrome/Application/chrome.exe"));
+		candidates.Push(Under("ProgramFiles(x86)", "Google/Chrome/Application/chrome.exe"));
+		candidates.Push(Under("LOCALAPPDATA", "Google/Chrome/Application/chrome.exe"));
+		for (const FS::Path& candidate : candidates)
+			if (!candidate.IsEmpty() && FS::FileExists(candidate.CStr())) return candidate;
+		return FS::Path();
+	}
+
+	Core::Array<Core::String> BrowserArguments(Core::StringView profile) {
+		Core::Array<Core::String> arguments;
+		arguments.Push(Core::String("--headless=new"));
+		arguments.Push(Core::String("--remote-debugging-port=0"));
+		arguments.Push(Core::String("--remote-debugging-address=127.0.0.1"));
+		arguments.Push(Core::String("--user-data-dir=") + profile);
+		arguments.Push(Core::String("--no-first-run"));
+		arguments.Push(Core::String("--no-default-browser-check"));
+		arguments.Push(Core::String("--disable-extensions"));
+		arguments.Push(Core::String("--disable-sync"));
+		arguments.Push(Core::String("--disable-background-networking"));
+		arguments.Push(Core::String("--mute-audio"));
+		arguments.Push(Core::String("about:blank"));
+		return arguments;
+	}
+
+	Core::String EndpointFromActivePort(Core::StringView text) {
+		const int64 newline = text.IndexOf('\n', 0);
+		if (newline <= 0) return Core::String();
+		int64 port = 0;
+		if (!Core::ParseInt64(text.Substring(0, newline).Trimmed(), port) || port < 1 || port > 65535) return Core::String();
+		Core::StringView path = text.Substring(newline + 1, text.ByteLength() - newline - 1).Trimmed();
+		if (!path.StartsWith(Core::StringView("/devtools/browser/"))) return Core::String();
+		Core::StringBuilder url;
+		url.Append("ws://127.0.0.1:");
+		url.AppendInt(port);
+		url.Append(path);
+		return url.ToString();
+	}
+
+	static Core::String ReadText(const FS::Path& file) {
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.IsOpen() ? opened.ReadText() : Core::String();
+	}
+
+	bool Engine::Start(const FS::Path& executable, const FS::Path& profile, Core::String& error) {
+		FS::MakeDirectories(profile.CStr());
+		FS::Path activePort = profile / "DevToolsActivePort";
+		FS::RemoveFile(activePort.CStr());
+		Process::StartInfo info;
+		info.program = Core::String(executable.View());
+		info.arguments = BrowserArguments(profile.View());
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) {
+			error = Core::String("the browser did not start: ") + started.Error();
+			return false;
+		}
+		process = new Process::Child(take(started));
+		const int64 deadline = clock_now_ns() + kEngineStartNs;
+		Core::String endpoint;
+		while (endpoint.IsEmpty() && clock_now_ns() < deadline) {
+			if (process->Wait(100) != Process::kTimedOut) {
+				error = Core::String("the browser exited as it started (another program may hold its profile: ") + profile.View() + ")";
+				return false;
+			}
+			endpoint = EndpointFromActivePort(ReadText(activePort).View());
+		}
+		if (endpoint.IsEmpty()) {
+			error = Core::String("the browser did not open its DevTools port");
+			Stop();
+			return false;
+		}
+		cdp = new CdpConnection();
+		if (!cdp->Connect(endpoint.View(), error)) {
+			Stop();
+			return false;
+		}
+		return true;
+	}
+
+	void Engine::Stop() {
+		if (cdp != null) cdp->Close();
+		if (process != null) {
+			process->Kill();
+			process->Close();
+		}
+		cdp = null;
+		process = null;
+	}
+}

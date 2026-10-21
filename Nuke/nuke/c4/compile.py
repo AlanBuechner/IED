@@ -53,6 +53,8 @@ def plan(session, project, test=False):
 		argv += ["-D", f"{name}={value}"]
 	for link in collect_links(session, project):
 		argv += ["-l", link]
+	if project.subsystem != "console" and not test:
+		argv += ["--subsystem", project.subsystem]
 	argv += compiler_args(project, configuration)
 	argv += ["--int-dir", int_dir, "-o", output]
 	tracked = description.tracked_files(modules) + _toolchain_files(toolchain)

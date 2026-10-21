@@ -1,0 +1,131 @@
+// The browser (docs/27): web pages that live on the server, in Edge's engine run headless - the AI renders, reads and
+// drives them with its browser tools, and any window shows them in a Browser tab (frames pulled from the server, input
+// sent back), the AI's actions drawn over them. Its server code (code/) is compiled into the server: the browser.*
+// methods, the browser: and page: topics, the browser.* bindings and the AI tools.
+{
+	"manifestVersion": 1,
+	"id": "ied.browser",
+	"name": "Browser",
+	"version": "0.1.0",
+	"description": "Web pages on the server: a Browser tab for people and browser tools for the AI, in Edge's engine.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "Browser::Activate", "ui": "ui/index.js" },
+	"permissions": ["process.spawn", "net.egress", "ai.tools"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Browser" },
+		"skills": ["skills"],
+		"bindings": {
+			"provides": [
+				{ "name": "browser.openPage", "version": "1", "kind": "function", "description": "Opens a page for the AI in workspace wsId and waits for it to load: {wsId, args: {url, width?, height?}} -> {text}." },
+				{ "name": "browser.navigatePage", "version": "1", "kind": "function", "description": "{wsId, args: {page, url}} -> {text}" },
+				{ "name": "browser.snapshot", "version": "1", "kind": "function", "description": "The page as an accessibility tree with element refs, as text or as HTML: {wsId, args: {page, mode}} -> {text}" },
+				{ "name": "browser.screenshot", "version": "1", "kind": "function", "description": "A PNG of the page under .ied/local/browser/shots: {wsId, args: {page, full_page?}} -> {text, image}" },
+				{ "name": "browser.act", "version": "1", "kind": "function", "description": "click, type, press, select, scroll or hover on an element: {wsId, args: {page, action, ref?, selector?, text?}} -> {text}" },
+				{ "name": "browser.console", "version": "1", "kind": "function", "description": "Console messages, or failed requests with network: {wsId, args: {page, since?, network?}} -> {text}" },
+				{ "name": "browser.eval", "version": "1", "kind": "function", "description": "{wsId, args: {page, js}} -> {text, isError}" },
+				{ "name": "browser.closePage", "version": "1", "kind": "function", "description": "{wsId, args: {page}} -> {text}" }
+			]
+		},
+		"commands": [
+			{ "id": "ied.browser.open", "title": "Web Browser", "category": "View", "icon": "$(globe)" },
+			{ "id": "ied.browser.pages", "title": "Browser Pages...", "category": "View", "icon": "$(browser)" },
+			{ "id": "ied.browser.openFile", "title": "View in Browser", "category": "Solution Explorer", "icon": "$(globe)" }
+		],
+		"menus": {
+			"menubar/view": [
+				{ "command": "ied.browser.open", "group": "4_browser" },
+				{ "command": "ied.browser.pages", "group": "4_browser" }
+			],
+			"explorer/context": [
+				{ "command": "ied.browser.openFile", "group": "1_open", "when": "explorerItemKind == 'file' && (explorerItemExtension == '.html' || explorerItemExtension == '.htm' || explorerItemExtension == '.svg')" }
+			]
+		},
+		"keybindings": [
+			{ "command": "ied.browser.open", "key": "ctrl+alt+r" }
+		],
+		"systemMessageSections": [
+			{ "id": "browser", "text": "You can render web pages in a headless browser on the server: browser_open a URL (the workspace's dev server on localhost, a file of the workspace, or the web), then browser_snapshot to read it with element refs, browser_act to click and type, browser_screenshot to see it, browser_console for its errors. The user can watch your pages live. Read the browser skill for the workflow." }
+		],
+		"toolCalls": [
+			{
+				"name": "browser_open",
+				"description": "Open a web page in the server's headless browser and wait for it to load: a URL on the web, the workspace's dev server (http://localhost:5173), or a file of the workspace (file:///...). Returns the page id the other browser tools take, its title and any console errors. The user can watch the page in a Browser tab.",
+				"class": "net",
+				"group": "browser",
+				"inputSchema": { "type": "object", "properties": { "url": { "type": "string" }, "width": { "type": "integer", "minimum": 200, "maximum": 8192 }, "height": { "type": "integer", "minimum": 150, "maximum": 8192 } }, "required": ["url"], "additionalProperties": false },
+				"function": "Browser::OpenTool",
+				"timeoutSeconds": 60
+			},
+			{
+				"name": "browser_navigate",
+				"description": "Load another URL in an open page and wait for it to load.",
+				"class": "net",
+				"group": "browser",
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "url": { "type": "string" } }, "required": ["page", "url"], "additionalProperties": false },
+				"function": "Browser::NavigateTool",
+				"timeoutSeconds": 60
+			},
+			{
+				"name": "browser_snapshot",
+				"description": "Read a page. mode a11y (default): the accessibility tree, one element per line - role, name, value, states - with refs like [ref=e12] that browser_act takes. mode text: the visible text. mode dom: the HTML.",
+				"class": "read",
+				"group": "browser",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "mode": { "enum": ["a11y", "text", "dom"] } }, "required": ["page"], "additionalProperties": false },
+				"function": "Browser::SnapshotTool",
+				"resultBudgetTokens": 16000
+			},
+			{
+				"name": "browser_screenshot",
+				"description": "A PNG of the page's viewport (or the whole page with full_page), saved under .ied/local/browser/shots; models that see images get the image.",
+				"class": "read",
+				"group": "browser",
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "full_page": { "type": "boolean" } }, "required": ["page"], "additionalProperties": false },
+				"function": "Browser::ScreenshotTool"
+			},
+			{
+				"name": "browser_act",
+				"description": "Act on a page as a person would: click, hover, type (text into a field), press (a key: Enter, Tab, Escape, ArrowDown, a character), select (an option's value) or scroll (to an element, or the page with text up/down/pixels). Name the element by a ref from browser_snapshot or a CSS selector. The user sees each action drawn on the page.",
+				"class": "net",
+				"group": "browser",
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "action": { "enum": ["click", "type", "press", "select", "scroll", "hover"] }, "ref": { "type": "string" }, "selector": { "type": "string" }, "text": { "type": "string" } }, "required": ["page", "action"], "additionalProperties": false },
+				"function": "Browser::ActTool"
+			},
+			{
+				"name": "browser_console",
+				"description": "A page's console messages and uncaught errors, each with its seq; since=<seq> gives only newer ones.",
+				"class": "read",
+				"group": "browser",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "since": { "type": "integer", "minimum": 0 } }, "required": ["page"], "additionalProperties": false },
+				"function": "Browser::ConsoleTool"
+			},
+			{
+				"name": "browser_network",
+				"description": "A page's failed requests: network errors and responses of status 400 and up, each with its seq; since=<seq> gives only newer ones.",
+				"class": "read",
+				"group": "browser",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "since": { "type": "integer", "minimum": 0 } }, "required": ["page"], "additionalProperties": false },
+				"function": "Browser::NetworkTool"
+			},
+			{
+				"name": "browser_eval",
+				"description": "Run JavaScript in a page and get its value as JSON (promises are awaited), or the exception it threw.",
+				"class": "exec",
+				"group": "browser",
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "js": { "type": "string" } }, "required": ["page", "js"], "additionalProperties": false },
+				"function": "Browser::EvalTool"
+			},
+			{
+				"name": "browser_close",
+				"description": "Close a page you opened.",
+				"class": "meta",
+				"group": "browser",
+				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" } }, "required": ["page"], "additionalProperties": false },
+				"function": "Browser::CloseTool"
+			}
+		]
+	}
+}

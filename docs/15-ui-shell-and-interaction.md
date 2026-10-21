@@ -109,7 +109,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 Browser constraint: in a normal browser tab, **Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+T, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PageUp/PageDown** are reserved by the browser and cannot be intercepted. F5, Ctrl+S, Ctrl+P, Ctrl+F, Ctrl+H, Ctrl+G, Ctrl+K chords, F-keys and most others can (`preventDefault` on keydown). Consequences:
 
 - The default scheme avoids depending on reserved keys; where VS uses one (Ctrl+F4 close document is fine; Ctrl+Tab window switcher is not), IED binds an alternate (`Ctrl+Alt+Tab`... configurable) and shows a one-time tip.
-- The **installed PWA** (Chrome/Edge "Install app") and the **desktop wrapper** (F-OPS-26) receive more shortcuts; the keymap marks bindings "full in app window" vs "browser tab".
+- The **installed PWA** (Chrome/Edge "Install app") and the **desktop app** (F-OPS-26, `ied-desktop`, `docs/27`: browser accelerator keys off, so F5, Ctrl+R, Ctrl+F, Ctrl+P, F12, Ctrl+W/T/N and Ctrl+Tab reach the web client) receive more shortcuts; the keymap marks bindings "full in app window" vs "browser tab".
 
 Default bindings (subset; full table generated from the command registry):
 

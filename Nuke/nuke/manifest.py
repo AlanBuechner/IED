@@ -11,6 +11,7 @@ from .errors import NukeError
 
 MANIFEST_NAME = "nuke.toml"
 KINDS = ("executable", "module", "library", "custom")   # library: a non-C4 language's (a C4 one is a module)
+SUBSYSTEMS = ("console", "windows")                     # a C4 executable's (C4.exe --subsystem)
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 COMMAND_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -61,6 +62,7 @@ class ProjectSpec:
 	defines: dict = field(default_factory=dict)
 	links: tuple = ()
 	compiler_args: tuple = ()
+	subsystem: str = "console"      # a C4 executable's: "console", or "windows" for a windowed program (no console)
 	tests: object = "auto"          # "auto", True or False
 	output: str = None              # custom kind: the file `nuke run` starts
 	working_dir: str = "."
@@ -328,6 +330,7 @@ def _project(t, folder, path):
 		defines=t.string_map("defines"),
 		links=t.strings("links"),
 		compiler_args=t.strings("compiler-args"),
+		subsystem=t.string("subsystem", "console"),
 		tests=tests,
 		output=t.string("output"),
 		working_dir=t.string("working-dir", "."),
@@ -340,6 +343,10 @@ def _project(t, folder, path):
 	t.done()
 	if kind != "custom" and spec.output:
 		raise NukeError(f"{path}: project.output is only for kind = \"custom\" (C4 projects build {name}.exe)")
+	if spec.subsystem not in SUBSYSTEMS:
+		raise NukeError(f"{path}: project.subsystem must be one of {', '.join(SUBSYSTEMS)} (got '{spec.subsystem}')")
+	if spec.subsystem != "console" and not (kind == "executable" and spec.language == "c4"):
+		raise NukeError(f"{path}: project.subsystem is for C4 executables (a {kind} in {spec.language or 'no language'} links no program)")
 	if kind == "module" and spec.language != "c4":
 		raise NukeError(f"{path}: a module is C4 source; a library in {spec.language} is kind = \"library\"")
 	if kind == "library" and spec.language in ("", "c4"):

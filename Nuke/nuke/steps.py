@@ -67,6 +67,7 @@ def run_step(session, step, project=None):
 		session.log.note(f"{label}: up to date")
 		return
 	session.log.note(f"{label}{' - ' + step.description if step.description else ''}")
+	_make_output_folders(outputs, base)
 	with session.timed(label):
 		code = _execute(session, step, project, variables, command, cwd, env)
 	if code:
@@ -112,6 +113,16 @@ def _in_folder(folder, function, context):
 		return function(context)
 	finally:
 		os.chdir(previous)
+
+
+def _make_output_folders(outputs, base):
+	"""A step writes its outputs into folders that exist: each output's folder (the part before a glob) is made first."""
+	for output in outputs:
+		cut = min((i for i, c in enumerate(output) if c in "*?["), default=len(output))
+		prefix = output[:cut]
+		folder = prefix if cut < len(output) and prefix.endswith(("/", "\\")) else os.path.dirname(prefix)
+		if folder:
+			os.makedirs(_path(folder, base), exist_ok=True)
 
 
 def _path(path, base):

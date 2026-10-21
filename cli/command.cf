@@ -3,38 +3,10 @@ include "command.ch"
 namespace Cli
 {
 	const char* Usage() {
-		return "usage: ied [<path>[:<line>[:<col>]]]   open a folder or file in the browser (default: this folder)\n"
+		return "usage: ied [<path>[:<line>[:<col>]]]   open a folder or file in IED (default: this folder)\n"
 			"       ied status | url | stop\n"
-			"options: --control <name> (another server's pipe), --no-browser (print the URL)\n";
-	}
-
-	// The number after the last ':' of `text`, with `text` cut before it; false when there is none.
-	static bool TakeNumber(Core::StringView& text, int64& number) {
-		int64 colon = -1;
-		for (int64 i = text.ByteLength() - 1; i >= 0 && colon < 0; --i)
-			if (text.ByteAt(i) == ':') colon = i;
-		if (colon < 2) return false;
-		int64 parsed = 0;
-		if (!Core::ParseInt64(text.Substring(colon + 1, text.ByteLength() - colon - 1), parsed) || parsed < 1) return false;
-		number = parsed;
-		text = text.Substring(0, colon);
-		return true;
-	}
-
-	void SplitLocation(Core::StringView text, Core::String& path, int64& line, int64& col) {
-		line = 0;
-		col = 0;
-		Core::StringView rest = text;
-		int64 last = 0;
-		if (TakeNumber(rest, last)) {
-			int64 before = 0;
-			if (TakeNumber(rest, before)) {
-				line = before;
-				col = last;
-			}
-			else line = last;
-		}
-		path = Core::String(rest);
+			"options: --control <name> (another server's pipe), --no-browser (print the URL),\n"
+			"         --browser (the default browser, not the desktop app)\n";
 	}
 
 	static Verb VerbOf(Core::StringView word, bool& known) {
@@ -53,6 +25,7 @@ namespace Cli
 		for (int64 i = 0; i < arguments.Count(); ++i) {
 			Core::StringView argument = arguments[i].View();
 			if (argument == "--no-browser") command.noBrowser = true;
+			else if (argument == "--browser") command.browser = true;
 			else if (argument == "--control" && i + 1 < arguments.Count()) command.control = arguments[++i];
 			else if (argument.StartsWith(Core::StringView("--")) && argument != "--help") {
 				error = Core::String("unknown option ") + argument;
@@ -66,7 +39,7 @@ namespace Cli
 				positional = true;
 				bool known = false;
 				command.verb = VerbOf(argument, known);
-				if (!known) SplitLocation(argument, command.path, command.line, command.col);
+				if (!known) Launch::SplitLocation(argument, command.path, command.line, command.col);
 			}
 		}
 		if (command.verb == Verb::Open && command.path.IsEmpty()) command.path = Core::String(".");

@@ -33,7 +33,7 @@ ied-server.exe                   one per user; background; single instance (name
 +- spell         code-aware spell service (diagnostics)
 +- profiler      ITP capture server, trace storage/indexes, analysis queries
 +- sandbox       container / WSL / SSH providers
-+- supervisor    child processes: LSP/DAP/MCP servers, SearXNG, tor, Edge (CDP), claude CLI bridge, plugin backends
++- supervisor    child processes: LSP/DAP/MCP servers, SearXNG, tor, Edge (CDP, plugins/browser, docs/27), claude CLI bridge, plugin backends
 ```
 
 Everything that needs OS access, performance or long-lived processes lives here. It keeps running with zero connected clients - that is the point. The C4 capabilities this requires (sockets, processes, ConPTY, file watching...) are tracked in `docs/17`.
@@ -61,9 +61,9 @@ A plugin is a package (`docs/26`): C4 code compiled into the server (built-ins) 
 
 Details: `docs/03`, `docs/21`.
 
-## Desktop wrapper (optional, later)
+## Desktop app
 
-A WebView2 window pointed at the local server gives an app feel and receives browser-reserved shortcuts (Ctrl+W/T/N/Tab). Not required for any feature (`docs/15`, `docs/21`).
+`ied-desktop.exe` (`desktop/`, `docs/27`): a native window per IED view with the same web client in WebView2 (the Edge engine Windows ships), starting the user's server when none runs and again if it dies while windows are open. It receives browser-reserved shortcuts (Ctrl+W/T/N/Tab). It is a view like any browser tab; no feature depends on it. The same engine runs on the server, headless, for the AI's browser tools and the Browser tab (`plugins/browser`).
 
 ## What deliberately does NOT exist in the host
 

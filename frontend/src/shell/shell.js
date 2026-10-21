@@ -39,6 +39,7 @@ export class Shell {
 		this.menus = new Menus(this.commands, this.context, this.keybindings);
 		this.menuHost = new MenuHost(document.body);
 		this.views = new ViewHost(this);
+		this.tabCloseHandlers = new Map();
 		this.contributions = new Contributions(this);
 		this.modules = new Map();
 		this.apis = new Map();
@@ -399,12 +400,37 @@ export class Shell {
 			return;
 		}
 		const activityId = this.activityOf(ref);
-		if (activityId) this.changeTree(activityId, (tree) => T.closeTab(tree, ref));
+		if (activityId) this.closeTabsBy(activityId, (tree) => T.closeTab(tree, ref));
 	}
 
 	closeGroupTabs(ref, including) {
 		const activityId = this.activityOf(ref);
-		if (activityId) this.changeTree(activityId, (tree) => T.closeGroupTabs(tree, ref, including));
+		if (activityId) this.closeTabsBy(activityId, (tree) => T.closeGroupTabs(tree, ref, including));
+	}
+
+	// A change that closes tabs, then the plugins' onClose handlers for each tab closed here (by this window's person;
+	// another window's views just go when its layout loses the tab).
+	closeTabsBy(activityId, fn) {
+		const before = T.refsOf(this.treeOf(activityId));
+		const after = new Set(T.refsOf(fn(this.treeOf(activityId))));
+		this.changeTree(activityId, fn);
+		for (const ref of before) {
+			if (after.has(ref)) continue;
+			for (const handler of this.tabCloseHandlers.get(ref.split(":")[0]) || []) {
+				try {
+					handler(ref);
+				}
+				catch (e) {
+					this.report("A tab's close handler failed: " + e.message, e);
+				}
+			}
+		}
+	}
+
+	onTabClose(kind, fn) {
+		if (!this.tabCloseHandlers.has(kind)) this.tabCloseHandlers.set(kind, new Set());
+		this.tabCloseHandlers.get(kind).add(fn);
+		return () => this.tabCloseHandlers.get(kind).delete(fn);
 	}
 
 	pinTab(ref) {
@@ -501,6 +527,8 @@ export class Shell {
 			tabs: {
 				kind: (kind, spec) => shell.views.registerKind(kind, Object.assign({}, spec, { plugin: plugin.id === "shell" ? null : plugin.id })),
 				open: (ref, options) => shell.openTab(ref, options),
+				// `fn(ref)` when the person closes a tab of `kind` in this window.
+				onClose: (kind, fn) => shell.onTabClose(kind, fn),
 			},
 			context: { set: (key, value) => shell.context.set(key, value), get: (key) => shell.context.get(key) },
 			contributions: (point) => shell.contributions.of(point),

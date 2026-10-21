@@ -1,0 +1,135 @@
+include "cdp.ch"
+
+namespace Browser
+{
+	Core::String JsonText(Core::StringView text) {
+		Core::StringBuilder quoted;
+		Serialization::WriteJsonString(text, &quoted);
+		return quoted.ToString();
+	}
+
+	bool CdpConnection::Connect(Core::StringView url, Core::String& error) {
+		socket = Http::WebSocket::Connect(url, 5000);
+		if (!socket.IsOpen()) {
+			error = Core::String("the browser's DevTools endpoint did not answer: ") + socket.Error();
+			return false;
+		}
+		socket.SetMaxMessageBytes(kCdpMessageBytes);
+		open.Store(true);
+		return true;
+	}
+
+	int64 CdpConnection::Post(Core::StringView sessionId, Core::StringView method, Core::StringView paramsJson, CdpWaiter* waiter) {
+		int64 id = 0;
+		{
+			Threading::LockGuard guard(mutex);
+			nextId += 1;
+			id = nextId;
+			if (waiter != null) waiting.Insert(id, waiter);
+		}
+		Core::StringBuilder message;
+		message.Append("{\"id\":");
+		message.AppendInt(id);
+		message.Append(",\"method\":");
+		message.Append(JsonText(method).View());
+		if (!sessionId.IsEmpty()) {
+			message.Append(",\"sessionId\":");
+			message.Append(JsonText(sessionId).View());
+		}
+		message.Append(",\"params\":");
+		message.Append(paramsJson.IsEmpty() ? Core::StringView("{}") : paramsJson);
+		message.AppendByte('}');
+		if (!socket.SendText(message.View())) return -id;
+		return id;
+	}
+
+	void CdpConnection::Send(Core::StringView sessionId, Core::StringView method, Core::StringView paramsJson) {
+		if (open.Load()) Post(sessionId, method, paramsJson, null);
+	}
+
+	CdpReply CdpConnection::Call(Core::StringView sessionId, Core::StringView method, Core::StringView paramsJson, int32 timeoutMs) {
+		CdpWaiter* waiter = new CdpWaiter();
+		if (!open.Load()) {
+			waiter->reply.error = Core::String("the browser is not running");
+			return waiter->reply;
+		}
+		const int64 id = Post(sessionId, method, paramsJson, waiter);
+		Threading::LockGuard guard(mutex);
+		if (id < 0) {
+			waiting.Remove(-id);
+			waiter->reply.error = Core::String("the browser connection closed");
+			return waiter->reply;
+		}
+		const int64 deadline = clock_now_ns() + (int64)timeoutMs * 1000000;
+		while (!waiter->done) {
+			const int64 left = deadline - clock_now_ns();
+			if (left <= 0) {
+				waiting.Remove(id);
+				waiter->reply.error = Core::String("the browser did not answer ") + method + " in time";
+				return waiter->reply;
+			}
+			answered.WaitFor(mutex, left);
+		}
+		return waiter->reply;
+	}
+
+	void CdpConnection::Answer(int64 id, const CdpReply& reply) {
+		Threading::LockGuard guard(mutex);
+		CdpWaiter* waiter = null;
+		if (!waiting.TryGet(id, waiter)) return;
+		waiting.Remove(id);
+		waiter->reply = reply;
+		waiter->done = true;
+		answered.NotifyAll();
+	}
+
+	void CdpConnection::FailAll(Core::StringView why) {
+		Threading::LockGuard guard(mutex);
+		for (Core::KeyValue<int64, CdpWaiter*>& entry : waiting) {
+			entry.value->reply.error = Core::String(why);
+			entry.value->done = true;
+		}
+		waiting.Clear();
+		answered.NotifyAll();
+	}
+
+	void CdpConnection::ReadLoop(CdpEventHandler onEvent, CdpClosedHandler onClosed) {
+		Http::WebSocketMessage message;
+		while (open.Load()) {
+			if (!socket.Receive(message, 1000)) {
+				if (socket.TimedOut()) continue;
+				break;
+			}
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::ReadResult parsed = Serialization::ReadJson(message.Text(), *doc);
+			if (!parsed.Ok()) continue;
+			Serialization::DomNode id = parsed.root.Member("id");
+			if (id.IsValid()) {
+				CdpReply reply;
+				reply.doc = doc;
+				Serialization::DomNode failure = parsed.root.Member("error");
+				reply.ok = !failure.IsValid();
+				if (reply.ok) reply.result = parsed.root.Member("result");
+				else reply.error = Core::String(failure.Member("message").AsView());
+				Answer(id.AsInt(), reply);
+				continue;
+			}
+			CdpEvent event;
+			event.method = Core::String(parsed.root.Member("method").AsView());
+			event.sessionId = Core::String(parsed.root.Member("sessionId").AsView());
+			event.doc = doc;
+			event.params = parsed.root.Member("params");
+			onEvent(event);
+		}
+		open.Store(false);
+		Core::String why = socket.Error()[0] != 0 ? Core::String("the browser connection closed: ") + socket.Error() : Core::String("the browser connection closed");
+		FailAll(why.View());
+		onClosed(why.View());
+	}
+
+	void CdpConnection::Close() {
+		if (!open.Exchange(false)) return;
+		socket.Close(1000, Core::StringView("closing"));
+		FailAll(Core::StringView("the browser connection closed"));
+	}
+}

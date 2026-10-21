@@ -65,6 +65,8 @@ IED/
 +- setup.bat             installs what is not committed (tools/setup/deps.toml pins it)
 +- nuke.toml             this repository as a Nuke workspace (builds the C4 compiler; later the IED server)
 +- nuke.bat, bin/        the nuke launcher (bin/ goes on PATH)
++- cli/, launcher/       `ied`, the command line, and what it shares with the desktop app (the control pipe, starting the server)
++- desktop/              `ied-desktop`, the desktop app: the web client in WebView2 windows, written in C4 (docs/27)
 +- docs/                 numbered planning docs + features/ (the full feature catalog)
 +- shared/
 |  +- host-api/          THE CONTRACT: JSON Schemas (plugin manifest, solution, project, federation, agent mode),

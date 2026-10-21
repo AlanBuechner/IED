@@ -30,5 +30,6 @@ import "./bindings.test.js";
 import "./editorsettings.test.js";
 import "./keyboard.test.js";
 import "./fileicons.test.js";
+import "./browser.test.js";
 
 run(document.getElementById("results"));

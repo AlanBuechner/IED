@@ -1,0 +1,70 @@
+include "com.ch"
+
+namespace Desktop
+{
+	int32 Hresult(void* argument) { return (int32)(int64)argument; }
+
+	bool SameGuid(const _GUID* a, const _GUID* b) {
+		if (a->Data1 != b->Data1 || a->Data2 != b->Data2 || a->Data3 != b->Data3) return false;
+		for (int32 i = 0; i < 8; ++i)
+			if (a->Data4[i] != b->Data4[i]) return false;
+		return true;
+	}
+
+	// IUnknown's {00000000-0000-0000-C000-000000000046}.
+	static bool IsUnknown(const _GUID* iid) {
+		if (iid->Data1 != 0 || iid->Data2 != 0 || iid->Data3 != 0 || iid->Data4[0] != 0xC0) return false;
+		for (int32 i = 1; i < 7; ++i)
+			if (iid->Data4[i] != 0) return false;
+		return iid->Data4[7] == 0x46;
+	}
+
+	int32 CallbackQuery(void* self, const _GUID* iid, void** out) {
+		Callback* callback = (Callback*)self;
+		if (IsUnknown(iid) || SameGuid(iid, &callback->iid)) {
+			*out = self;
+			callback->references += 1;
+			return kOk;
+		}
+		*out = null;
+		return kNoInterface;
+	}
+
+	// The owner's set keeps the object; counting only keeps COM's bookkeeping honest.
+	uint32 CallbackAddRef(void* self) {
+		Callback* callback = (Callback*)self;
+		callback->references += 1;
+		return (uint32)callback->references;
+	}
+
+	uint32 CallbackRelease(void* self) {
+		Callback* callback = (Callback*)self;
+		if (callback->references > 1) callback->references -= 1;
+		return (uint32)callback->references;
+	}
+
+	// Nothing C4 throws may unwind into WebView2's frames.
+	int32 CallbackInvoke(void* self, void* first, void* second) {
+		Callback* callback = (Callback*)self;
+		try {
+			return callback->invoked(first, second);
+		}
+		catch (...) {
+			return kFailed;
+		}
+	}
+
+	Callback* CallbackSet::Add(const _GUID* iid, Invoked invoked) {
+		Callback* callback = new Callback();
+		callback->own.QueryInterface = CallbackQuery;
+		callback->own.AddRef = CallbackAddRef;
+		callback->own.Release = CallbackRelease;
+		callback->own.Invoke = CallbackInvoke;
+		callback->table = &callback->own;
+		callback->iid = *iid;
+		callback->references = 1;
+		callback->invoked = invoked;
+		items.Push(callback);
+		return callback;
+	}
+}

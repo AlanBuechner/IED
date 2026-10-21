@@ -1,0 +1,45 @@
+// The launcher: locations with lines and columns, the control channel's lines, and which URLs may leave IED.
+
+include "launcher.ch"
+
+[test("launcher")]
+class LauncherTests {
+	[test("locations")]
+	public static void TestLocations() {
+		Core::String path;
+		int64 line = 0;
+		int64 col = 0;
+		Launch::SplitLocation(Core::StringView("C:\\src\\a.cf:42:3"), path, line, col);
+		assert_true(path.View() == "C:\\src\\a.cf" && line == 42 && col == 3, "a line and a column");
+		Launch::SplitLocation(Core::StringView("src/a.cf:7"), path, line, col);
+		assert_true(path.View() == "src/a.cf" && line == 7 && col == 0, "a line");
+		Launch::SplitLocation(Core::StringView("C:\\src"), path, line, col);
+		assert_true(path.View() == "C:\\src" && line == 0, "a drive's colon stays");
+		Launch::SplitLocation(Core::StringView("notes:draft.txt"), path, line, col);
+		assert_true(path.View() == "notes:draft.txt" && line == 0, "a colon not before a number stays");
+		Launch::SplitLocation(Core::StringView("a.cf:0"), path, line, col);
+		assert_true(path.View() == "a.cf:0" && line == 0, "line 0 is not a line");
+	}
+
+	[test("request_and_reply")]
+	public static void TestRequestAndReply() {
+		assert_se("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"status\"}\n", Launch::RequestLine(Core::StringView("status"), Core::StringView("")).CStr(), "without params");
+		Launch::Reply good = Launch::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"url\":\"http://x/\"}}"));
+		assert_true(good.ok, "a result");
+		assert_se("http://x/", Launch::ResultField(good, "url").CStr(), "a result's field");
+		assert_true(Launch::ResultField(good, "missing").IsEmpty(), "a field it lacks");
+		Launch::Reply bad = Launch::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"no such file\"}}"));
+		assert_true(!bad.ok && bad.error.View() == "no such file", "an error's message");
+		assert_true(!Launch::ParseReply(Core::StringView("garbage")).ok, "not JSON");
+	}
+
+	[test("external_urls")]
+	public static void TestExternalUrls() {
+		assert_true(Launch::IsExternalUrl(Core::StringView("https://example.com/a")), "https");
+		assert_true(Launch::IsExternalUrl(Core::StringView("HTTP://127.0.0.1:8765/?t=1")), "http in capitals");
+		assert_true(Launch::IsExternalUrl(Core::StringView("mailto:someone@example.com")), "mailto");
+		assert_true(!Launch::IsExternalUrl(Core::StringView("file:///C:/Windows/System32/calc.exe")), "a file is no external URL");
+		assert_true(!Launch::IsExternalUrl(Core::StringView("ms-settings:")), "another scheme");
+		assert_true(!Launch::IsExternalUrl(Core::StringView("http://")), "a scheme alone");
+	}
+}

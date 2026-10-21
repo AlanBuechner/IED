@@ -49,6 +49,20 @@ class C4BuildTests(WorkspaceTest):
 		self.assertIn("-march=x86-64-v3", args)
 		self.assertEqual(args[-2:], ["-o", self.bin("Game", "Game.exe").replace("\\", "/")])
 
+	def test_windows_subsystem_reaches_the_program_not_its_tests(self):
+		self.files({"Game/nuke.toml": "[project]\nsubsystem = \"windows\"\n", "Game/src/tests/t.cf": "\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		args = self.compiles()[0]
+		self.assertEqual(args[args.index("--subsystem") + 1], "windows")
+		from nuke import workspace as workspaces, configs
+		from nuke.session import Session
+		from nuke.c4 import compile as c4compile
+		from nuke.log import Log
+		ws = workspaces.load_workspace(self.root)
+		session = Session(ws, configs.BUILT_IN[1], "x64", "windows", Log(), self.store)
+		self.assertNotIn("--subsystem", c4compile.plan(session, ws.project("Game"), test=True).argv)
+
 	def test_configuration_flags_and_overrides(self):
 		self.nuke("build", "dist")
 		args = self.compiles()[0]

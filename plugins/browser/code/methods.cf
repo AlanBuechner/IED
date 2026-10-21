@@ -1,0 +1,97 @@
+// The browser.* protocol methods (docs/27 "Protocol"), each on its request's thread.
+
+include "browser.ch"
+include "actions.ch"
+
+namespace Browser
+{
+	alias BrowserMethod = func<Core::String(Browsers* browsers, const IED::Params& params)>;
+
+	static Core::String PageJson(Page* page) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("pageId", page->pageId.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static int32 ScaleParam(const IED::Params& params) {
+		Serialization::DomNode scale = params.Field("scale");
+		return scale.IsValid() ? (int32)(scale.AsFloat() * 100.0 + 0.5) : 100;
+	}
+
+	static Core::String OpenMethod(Browsers* browsers, const IED::Params& params) {
+		Page* page = browsers->Open(params.Str("wsId").View(), params.Str("url", Core::StringView("about:blank")).View(), (int32)params.Int("width", 0),
+			(int32)params.Int("height", 0), ScaleParam(params), Core::StringView("user"));
+		return PageJson(page);
+	}
+
+	static Core::String NavigateMethod(Browsers* browsers, const IED::Params& params) {
+		browsers->Navigate(browsers->Find(params.Str("pageId").View()), params.Str("url").View());
+		return Core::String("{}");
+	}
+
+	static Core::String BackMethod(Browsers* browsers, const IED::Params& params) {
+		browsers->Back(browsers->Find(params.Str("pageId").View()), -1);
+		return Core::String("{}");
+	}
+
+	static Core::String ForwardMethod(Browsers* browsers, const IED::Params& params) {
+		browsers->Back(browsers->Find(params.Str("pageId").View()), 1);
+		return Core::String("{}");
+	}
+
+	static Core::String ReloadMethod(Browsers* browsers, const IED::Params& params) {
+		browsers->Reload(browsers->Find(params.Str("pageId").View()));
+		return Core::String("{}");
+	}
+
+	static Core::String StopMethod(Browsers* browsers, const IED::Params& params) {
+		browsers->StopLoading(browsers->Find(params.Str("pageId").View()));
+		return Core::String("{}");
+	}
+
+	static Core::String ResizeMethod(Browsers* browsers, const IED::Params& params) {
+		browsers->Resize(browsers->Find(params.Str("pageId").View()), (int32)params.Int("width"), (int32)params.Int("height"), ScaleParam(params));
+		return Core::String("{}");
+	}
+
+	static Core::String InputMethod(Browsers* browsers, const IED::Params& params) {
+		DispatchInput(browsers, browsers->Find(params.Str("pageId").View()), params.List("events"));
+		return Core::String("{}");
+	}
+
+	static Core::String FrameMethod(Browsers* browsers, const IED::Params& params) {
+		return browsers->Frame(browsers->Find(params.Str("pageId").View()), params.Int("after", 0));
+	}
+
+	static Core::String CloseMethod(Browsers* browsers, const IED::Params& params) {
+		browsers->Close(browsers->Find(params.Str("pageId").View()));
+		return Core::String("{}");
+	}
+
+	static Core::String PagesMethod(Browsers* browsers, const IED::Params& params) {
+		IED::HostLock lock(*browsers->context);
+		return browsers->ListJson(params.Str("wsId").View());
+	}
+
+	static void Register(Browsers* browsers, const char* name, BrowserMethod method) {
+		Core::String problem;
+		if (!browsers->context->Method(Core::StringView(name), [browsers, method](const IED::Request& request) -> Core::String { return method(browsers, request.params); }, problem))
+			browsers->context->Log(problem.View());
+	}
+
+	void RegisterMethods(Browsers* browsers) {
+		Register(browsers, "browser.open", OpenMethod);
+		Register(browsers, "browser.navigate", NavigateMethod);
+		Register(browsers, "browser.back", BackMethod);
+		Register(browsers, "browser.forward", ForwardMethod);
+		Register(browsers, "browser.reload", ReloadMethod);
+		Register(browsers, "browser.stop", StopMethod);
+		Register(browsers, "browser.resize", ResizeMethod);
+		Register(browsers, "browser.input", InputMethod);
+		Register(browsers, "browser.frame", FrameMethod);
+		Register(browsers, "browser.close", CloseMethod);
+		Register(browsers, "browser.pages", PagesMethod);
+	}
+}

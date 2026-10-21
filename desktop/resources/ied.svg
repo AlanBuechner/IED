@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+	<!-- IED's mark: a spark on the app's chrome tile (theme.css --bg-1 tile, --border-1 edge, --text-0 spark) -->
+	<rect x="9" y="9" width="238" height="238" rx="48" fill="#141414" stroke="#363636" stroke-width="10"/>
+	<polygon fill="#e8e8e8" points="128.0,30.0 135.7,109.5 164.8,91.2 146.5,120.3 226.0,128.0 146.5,135.7 164.8,164.8 135.7,146.5 128.0,226.0 120.3,146.5 91.2,164.8 109.5,135.7 30.0,128.0 109.5,120.3 91.2,91.2 120.3,109.5"/>
+</svg>

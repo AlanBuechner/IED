@@ -3,8 +3,9 @@
 //     ied status | url | stop
 //     ied --control <name> ...          another server's control pipe (tests)
 //     ied --no-browser ...              print the URL instead of opening it
+//     ied --browser ...                 open it in the default browser, not the desktop app
 
-include "bedrock.ch"
+include "launcher.ch"
 
 namespace Cli
 {
@@ -18,11 +19,10 @@ namespace Cli
 		public int64 col;
 		public Core::String control;   // empty: this user's server
 		public bool noBrowser;
+		public bool browser;           // the default browser even when the desktop app is beside ied
 	}
 
 	// `command` from the arguments after the program's name; false with `error` saying what is wrong.
 	bool ParseCommand(const Core::Array<Core::String>& arguments, Command& command, Core::String& error);
-	// "C:\src\a.cf:42:3" to the path, line and column; a Windows drive's colon stays in the path.
-	void SplitLocation(Core::StringView text, Core::String& path, int64& line, int64& col);
 	const char* Usage();
 }

@@ -1,0 +1,31 @@
+// The desktop app's commands (docs/27 "The page and its keys"): inside ied-desktop, whose window.iedDesktop this UI module
+// finds, the `desktopApp` context key is set and Window > New Window and Help > Developer Tools appear; in a browser they
+// stay hidden.
+{
+	"manifestVersion": 1,
+	"id": "ied.desktop",
+	"name": "Desktop App",
+	"version": "0.1.0",
+	"description": "New windows and developer tools in IED's desktop app.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative", "ui": "ui/index.js" },
+	"contributes": {
+		"commands": [
+			{ "id": "ied.desktop.newWindow", "title": "New Window", "category": "Window", "icon": "$(empty-window)" },
+			{ "id": "ied.desktop.devTools", "title": "Developer Tools", "category": "Help", "icon": "$(tools)" }
+		],
+		"menus": {
+			"menubar/window": [
+				{ "command": "ied.desktop.newWindow", "group": "0_window", "when": "desktopApp" }
+			],
+			"menubar/help": [
+				{ "command": "ied.desktop.devTools", "group": "8_tools", "when": "desktopApp" }
+			]
+		},
+		"keybindings": [
+			{ "command": "ied.desktop.newWindow", "key": "ctrl+shift+n", "when": "desktopApp" },
+			{ "command": "ied.desktop.devTools", "key": "ctrl+shift+i", "when": "desktopApp" }
+		]
+	}
+}

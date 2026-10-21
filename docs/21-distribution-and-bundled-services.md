@@ -16,7 +16,8 @@ Resolve `docs/99` #8 (SearXNG packaging) and define how IED is installed, what i
 
 ```
 %LOCALAPPDATA%\Programs\IED\            (install, read-only at runtime)
-  ied.exe                                CLI + launcher (talks to the server over the named pipe)
+  ied.exe                                CLI + launcher (talks to the server over the named pipe; opens folders in ied-desktop)
+  ied-desktop.exe                        the desktop app: the web client in WebView2, starting the server (docs/27)
   ied-server.exe                         the server, a C4 script host
   ied-server.c4i                         its interface: what plugin code compiles against (docs/26 section 2)
   C4Script.dll                           C4's script compiler and JIT, beside the exe (the exe does not start without it)
@@ -46,7 +47,8 @@ Per workspace: `.ied/` (committed) and `.ied/local/` (gitignored) as in `docs/03
 | ripgrep | **bundled** | fast search is core; single exe, permissive license |
 | SearXNG | **bundled** with an embeddable Python (see below) | plan: "packaged with this application" |
 | tor | **bundled** (Tor Expert Bundle) | small, self-contained; managed process |
-| Headless browser for AI browser tools | **detected**: Microsoft Edge (always present on Windows 10/11) driven over CDP; Chrome as alternative | no 150 MB Chromium bundle needed |
+| Headless browser for AI browser tools and the Browser tab | **detected**: Microsoft Edge (always present on Windows 10/11) driven over CDP; Chrome as alternative (`browser.executable`) | no 150 MB Chromium bundle needed (`docs/27`) |
+| WebView2 Runtime (the desktop app's engine) | **detected**: part of Windows 10/11 (Evergreen); without it `ied-desktop` offers the default browser | the SDK's static loader is linked into `ied-desktop.exe` |
 | Video frame extraction | **Media Foundation** through a C shim (built into Windows); ffmpeg optional if the owner points to one | avoids an 80 MB bundle and LGPL packaging work |
 | Window capture | Windows Graphics Capture API (shim) | built into Windows |
 | RenderDoc (GPU debugger `rdc` backend) | **bundled**, pinned version: `renderdoc.dll` + the IED adapter process (`docs/22`); an installed RenderDoc is never required | MIT license; replay API is C++, so no Python ships with it |

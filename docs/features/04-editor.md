@@ -109,8 +109,8 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 | F-EDT-90 | AI change review in the editor: AI-modified regions highlighted (accent-ai), per-hunk accept/reject, "accept all for this file" | P0 | US-INL-1, US-CHT-12 | plugins/editor |
 | F-EDT-91 | Markdown preview (side-by-side or tab): GFM, tables, task lists, code highlighting, mermaid diagrams, relative images/links, scroll sync | P1 | US-EDT-9 | plugins/editor |
 | F-EDT-92 | Interactive markdown: clicking a checkbox (list or table cell) edits the source via the document store (undoable); links open in the editor or browser pane | P1 | US-EDT-9 | plugins/editor |
-| F-EDT-93 | Browser pane: iframe for same-origin/proxied content (F-SRV-50) with URL bar, reload, devtools-lite console (from the page via proxy-injected script) | P1 | US-EDT-10 | plugins/editor |
-| F-EDT-94 | Remote-render browser mode: server-side headless Chromium (Edge via CDP on Windows) screencast into the pane, for sites that refuse framing; shared with the AI browser tools | P2 | US-EDT-10, US-TOOL-5 | src/browser |
+| F-EDT-93 | ~~Browser pane: iframe for same-origin/proxied content (F-SRV-50)~~ superseded by F-EDT-94 for every page (owner, 2026-10-21; `docs/27`): URL bar, reload, viewport presets, console | P1 | US-EDT-10 | plugins/browser |
+| F-EDT-94 | Browser tab: server-side headless Edge via CDP, frames pulled into the tab and input forwarded, for every site and every client (phones too); shared with the AI browser tools, whose actions are drawn over the page (built 2026-10-21, `docs/27`) | P1 | US-EDT-10, US-TOOL-5 | plugins/browser |
 | F-EDT-95 | Image viewer (zoom, pixel grid, alpha checkerboard, info: size/format), video and audio players | P1 | US-EDT-11 | plugins/editor |
 | F-EDT-96 | Hex viewer for binary files; "open with..." chooser listing all viewers that accept the file | P1 | US-EDT-11 | plugins/editor |
 | F-EDT-97 | Custom editors/viewers contributed by plugins for file patterns (profiler traces, `.c4scene`, etc.) (gen) | P1 | US-EDT-11 | plugins/editor |

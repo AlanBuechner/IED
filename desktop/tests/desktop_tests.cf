@@ -1,0 +1,95 @@
+// The desktop app's decisions that need no window: its command line, where windows open, where navigations go, its
+// own pages and script, and how often the server is started again.
+
+include "app.ch"
+
+static Desktop::Options Parsed(const char* first, const char* second, const char* third, bool& ok, Core::String& error) {
+	Core::Array<Core::String> arguments;
+	if (first) arguments.Push(Core::String(first));
+	if (second) arguments.Push(Core::String(second));
+	if (third) arguments.Push(Core::String(third));
+	Desktop::Options options;
+	ok = Desktop::ParseOptions(arguments, options, error);
+	return options;
+}
+
+[test("desktop")]
+class DesktopTests {
+	[test("command_line")]
+	public static void TestCommandLine() {
+		bool ok = false;
+		Core::String error;
+		Desktop::Options home = Parsed(nullptr, nullptr, nullptr, ok, error);
+		assert_true(ok && home.path.IsEmpty() && home.debugPort == 0, "no arguments: IED's home");
+		Desktop::Options file = Parsed("C:\\game\\main.cf:12:4", "--control", "test-pipe", ok, error);
+		assert_true(ok && file.path.View() == "C:\\game\\main.cf" && file.line == 12 && file.col == 4, "a location");
+		assert_true(file.control.View() == "test-pipe", "another server's pipe");
+		Desktop::Options debug = Parsed("--debug-port", "9333", nullptr, ok, error);
+		assert_true(ok && debug.debugPort == 9333, "a DevTools port");
+		Parsed("--debug-port", "http", nullptr, ok, error);
+		assert_true(!ok && error.View().Contains(Core::StringView("not a port")), "a port that is no number");
+		Parsed("--data", nullptr, nullptr, ok, error);
+		assert_true(!ok && error.View().Contains(Core::StringView("needs a value")), "an option without its value");
+		Parsed("a", "b", nullptr, ok, error);
+		assert_true(!ok, "two paths");
+		Parsed("--bogus", nullptr, nullptr, ok, error);
+		assert_true(!ok, "an unknown option");
+		assert_true(Parsed("--help", nullptr, nullptr, ok, error).help && ok, "help");
+		Desktop::Options moved = Parsed("--data", "C:\\ied-test\\desktop", nullptr, ok, error);
+		assert_se("C:\\ied-test\\desktop", Desktop::DataFolder(moved).CStr(), "the data folder it was given");
+	}
+
+	[test("placement")]
+	public static void TestPlacement() {
+		Desktop::Placement kept = Desktop::ParsePlacement(Core::StringView("{\"x\":-1900,\"y\":40,\"width\":1600,\"height\":1000,\"maximized\":true}"));
+		assert_true(kept.known && kept.x == -1900 && kept.y == 40 && kept.width == 1600 && kept.height == 1000 && kept.maximized, "read back");
+		Desktop::Placement again = Desktop::ParsePlacement(Desktop::PlacementJson(kept).View());
+		assert_true(again.known && again.x == kept.x && again.height == kept.height && again.maximized, "written and read again");
+		assert_true(!Desktop::ParsePlacement(Core::StringView("{\"x\":1,\"y\":1,\"width\":20,\"height\":20}")).known, "too small to be a window");
+		assert_true(!Desktop::ParsePlacement(Core::StringView("not json")).known, "not JSON");
+		assert_true(!Desktop::ParsePlacement(Core::StringView("{}")).known, "no size");
+		Desktop::Placement next = Desktop::Cascaded(kept);
+		assert_true(next.x == kept.x + Desktop::kCascadeStep && next.y == kept.y + Desktop::kCascadeStep && next.width == kept.width, "cascaded");
+	}
+
+	[test("navigation")]
+	public static void TestNavigation() {
+		Core::StringView server = Core::StringView("http://127.0.0.1:8765");
+		assert_se("http://127.0.0.1:8765", Desktop::OriginOf(Core::StringView("http://127.0.0.1:8765/?t=abc#open=w1/a.cf")).CStr(), "an origin");
+		assert_se("http://127.0.0.1:8765", Desktop::OriginOf(Core::StringView("blob:http://127.0.0.1:8765/5d1c")).CStr(), "a blob's origin");
+		assert_true(Desktop::OriginOf(Core::StringView("about:blank")).IsEmpty(), "about: has none");
+		assert_true(Desktop::NavigationTarget(Core::StringView("http://127.0.0.1:8765/login.html"), server) == Desktop::Destination::Here, "the server's page");
+		assert_true(Desktop::NavigationTarget(Core::StringView("HTTP://127.0.0.1:8765/"), server) == Desktop::Destination::Here, "the server in capitals");
+		assert_true(Desktop::NavigationTarget(Core::StringView("data:text/html,<p>x</p>"), server) == Desktop::Destination::Here, "the app's own page");
+		assert_true(Desktop::NavigationTarget(Core::StringView("http://127.0.0.1:8766/"), server) == Desktop::Destination::External, "another port leaves");
+		assert_true(Desktop::NavigationTarget(Core::StringView("https://example.com/"), server) == Desktop::Destination::External, "the web leaves");
+		assert_true(Desktop::NavigationTarget(Core::StringView("file:///C:/Windows/notepad.exe"), server) == Desktop::Destination::Refused, "a file is refused");
+		assert_true(Desktop::NavigationTarget(Core::StringView("http://127.0.0.1:8765.evil.example/"), server) == Desktop::Destination::External, "a lookalike host");
+		assert_true(Desktop::NewWindowTarget(Core::StringView("http://127.0.0.1:8765/"), server) == Desktop::Destination::NewWindow, "a new IED window");
+		assert_true(Desktop::NewWindowTarget(Core::StringView("https://example.com/"), server) == Desktop::Destination::External, "the web in the default browser");
+		assert_true(Desktop::NewWindowTarget(Core::StringView("ms-settings:"), server) == Desktop::Destination::Refused, "another scheme");
+		assert_true(Desktop::NewWindowTarget(Core::StringView("http://127.0.0.1:8765/"), Core::StringView("")) == Desktop::Destination::External, "no server yet");
+	}
+
+	[test("own_pages")]
+	public static void TestOwnPages() {
+		assert_se("&lt;b a=&quot;1&quot;&gt;&amp;&#39;", Desktop::EscapeHtml(Core::StringView("<b a=\"1\">&'")).CStr(), "escaped");
+		Core::String page = Desktop::StatusPage(Core::StringView("IED could not start"), Core::StringView("<script>x</script>"), true);
+		assert_true(page.View().Contains(Core::StringView("&lt;script&gt;")) && !page.View().Contains(Core::StringView("<script>")), "the detail is text");
+		assert_true(page.View().Contains(Core::StringView("Retry")), "a retry button");
+		assert_true(!Desktop::StatusPage(Core::StringView("t"), Core::StringView("d"), false).View().Contains(Core::StringView("<button")), "none without retry");
+		Core::String script = Desktop::BridgeScript(Core::StringView("0.1.0"));
+		assert_true(script.View().Contains(Core::StringView("version: \"0.1.0\"")) && script.View().Contains(Core::StringView("devTools")), "the bridge");
+	}
+
+	[test("restart_budget")]
+	public static void TestRestartBudget() {
+		Desktop::RestartBudget budget;
+		const int64 second = 1000000000;
+		assert_true(budget.Allow(0) && budget.Allow(10 * second) && budget.Allow(20 * second), "three in a minute");
+		assert_true(!budget.Allow(30 * second), "not a fourth");
+		assert_true(budget.Allow(61 * second), "the first fell out of the minute");
+		budget.Reset();
+		assert_true(budget.Allow(62 * second) && budget.Allow(62 * second), "a fresh budget");
+	}
+}

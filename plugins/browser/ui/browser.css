@@ -1,0 +1,33 @@
+/* browser.css - a Browser tab (docs/27): the toolbar in the editor's density, the page's picture, the AI's actions drawn */
+/* over it, and the console. Tokens only (docs/07). */
+
+.browser-view { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg-2); }
+.browser-toolbar { display: flex; align-items: center; gap: var(--space-1); height: 30px; padding: 0 var(--space-2); flex: none; background: var(--bg-1); border-bottom: var(--border-width) solid var(--border-0); }
+.browser-address { flex: 1; min-width: 80px; height: var(--input-h); padding: 0 var(--space-3); margin: 0 var(--space-2); background: var(--bg-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); color: var(--text-0); font-size: var(--font-size-sm); }
+.browser-address:focus { outline: none; border-color: var(--focus); }
+.browser-viewport { height: var(--input-h); max-width: 160px; background: var(--bg-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); color: var(--text-1); font-size: var(--font-size-sm); }
+.browser-ai { padding: 0 var(--space-3); border: var(--border-width) solid var(--accent-ai); border-radius: var(--radius-2); color: var(--accent-ai); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); line-height: 16px; }
+.browser-toolbar .ib.on { background: var(--bg-4); color: var(--text-0); }
+.browser-errors { position: absolute; right: -2px; top: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent-error); color: var(--bg-0); font-size: 9px; line-height: 14px; text-align: center; }
+.browser-caption { padding: var(--space-1) var(--space-4); background: var(--tint-ai); color: var(--accent-ai); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+.browser-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--bg-0); outline: none; touch-action: none; }
+.browser-frame { position: absolute; display: block; user-select: none; -webkit-user-drag: none; }
+.browser-message { position: absolute; left: var(--space-4); top: var(--space-4); font-size: var(--font-size-sm); }
+.browser-keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; overflow: hidden; }
+.browser-box { position: absolute; border: 2px solid var(--accent-ai); background: var(--tint-ai); pointer-events: none; }
+.browser-ring { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border: 2px solid var(--accent-ai); border-radius: 50%; pointer-events: none; }
+.browser-ring.pulse { animation: browser-pulse 0.6s ease-out 2; }
+@keyframes browser-pulse { from { transform: scale(0.4); opacity: 1; } to { transform: scale(1.4); opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) { .browser-ring.pulse { animation: none; } }
+.browser-console { display: flex; flex-direction: column; height: 30%; min-height: 80px; flex: none; background: var(--bg-1); border-top: var(--border-width) solid var(--border-0); }
+.browser-console-head { display: flex; align-items: center; height: 24px; padding: 0 var(--space-2) 0 var(--space-4); color: var(--text-2); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em; flex: none; }
+.browser-console-list { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); }
+.browser-entry { display: flex; gap: var(--space-4); padding: var(--space-1) var(--space-4); border-bottom: var(--border-width) solid var(--border-0); color: var(--text-1); }
+.browser-entry-text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.browser-entry-where { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-entry.error { color: var(--accent-error); background: var(--tint-error); }
+.browser-entry.warning { color: var(--accent-warn); background: var(--tint-warn); }
+.browser-entry.debug { color: var(--text-2); }
+.app.phone .browser-toolbar { height: 44px; }
+.app.phone .browser-viewport { display: none; }
+.app.phone .browser-entry-where { display: none; }

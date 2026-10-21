@@ -1,0 +1,21 @@
+include "external.ch"
+
+namespace Launch
+{
+	static bool HasScheme(Core::StringView url, const char* scheme) {
+		Core::StringView wanted = Core::StringView(scheme);
+		return url.ByteLength() > wanted.ByteLength() && Http::EqualsIgnoringCase(url.Substring(0, wanted.ByteLength()), wanted);
+	}
+
+	bool IsExternalUrl(Core::StringView url) { return HasScheme(url, "http://") || HasScheme(url, "https://") || HasScheme(url, "mailto:"); }
+
+	bool OpenExternal(Core::StringView url) {
+		if (!IsExternalUrl(url)) return false;
+		Process::StartInfo info;
+		info.program = Core::String("rundll32");
+		info.arguments.Push(Core::String("url.dll,FileProtocolHandler"));
+		info.arguments.Push(Core::String(url));
+		Process::Child child = Process::Child::Start(info);
+		return child.IsOpen();
+	}
+}

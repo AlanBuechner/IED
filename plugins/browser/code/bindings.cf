@@ -1,0 +1,190 @@
+// The browser.* bindings (docs/27 "AI tools"): what the AI's browser tools do, provided as server bindings so other
+// plugins can drive pages too. Each takes {wsId, args} - the workspace the call is for and the tool's arguments - and
+// answers {text, image?, isError?}: what to tell the model, and the workspace-relative path of a screenshot.
+
+include "browser.ch"
+include "actions.ch"
+
+namespace Browser
+{
+	alias BrowserBinding = func<Core::String(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws)>;
+
+	static Core::String Told(Core::StringView text) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("text", text);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// The page `args.page` names, which must be the workspace's.
+	static Page* PageOf(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Core::StringView pageId = args.Member("page").AsView();
+		if (pageId.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "name the page: the id browser_open gave (pg-...)");
+		Page* page = browsers->Find(pageId);
+		if (page->wsId.View() != ws.id.View()) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no page ") + pageId + " in this workspace").View());
+		browsers->Load(page);
+		return page;
+	}
+
+	// The console's errors since `since`, as a line to add to a result ("" when none).
+	static Core::String NewErrors(Browsers* browsers, Page* page, int64 since) {
+		int64 last = 0;
+		Core::String lines = ConsoleLines(browsers, page, since, false, last);
+		int64 errors = 0;
+		Core::StringView rest = lines.View();
+		while (!rest.IsEmpty()) {
+			const int64 end = rest.IndexOf('\n', 0);
+			Core::StringView line = end < 0 ? rest : rest.Substring(0, end);
+			if (line.Contains(Core::StringView("] error: "))) errors += 1;
+			rest = end < 0 ? Core::StringView("") : rest.Substring(end + 1, rest.ByteLength() - end - 1);
+		}
+		if (errors == 0) return Core::String();
+		Core::StringBuilder text;
+		text.Append("\nConsole errors since: ");
+		text.AppendInt(errors);
+		text.Append(" (browser_console shows them).");
+		return text.ToString();
+	}
+
+	// After the load event, the moment until the page stops loading (its last frames and requests), at most a second.
+	static void Settle(Browsers* browsers, Page* page) {
+		for (int32 i = 0; i < 20; ++i) {
+			{
+				IED::HostLock lock(*browsers->context);
+				if (!page->loading) return;
+			}
+			Threading::Thread::Sleep(50000000);
+		}
+	}
+
+	static int64 ConsoleMark(Browsers* browsers, Page* page) {
+		IED::HostLock lock(*browsers->context);
+		return page->consoleSeq;
+	}
+
+	static Core::String OpenBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Page* page = browsers->Open(ws.id.View(), args.Member("url").AsView(), (int32)args.Member("width").AsInt(), (int32)args.Member("height").AsInt(),
+			100, Core::StringView("ai"));
+		const bool loaded = browsers->AwaitLoad(page, 0, kLoadWaitNs);
+		Settle(browsers, page);
+		Core::String text = Core::String("Opened ") + Described(browsers, page).View() + (loaded ? "" : " - it had not finished loading after 30 s") +
+			NewErrors(browsers, page, 0).View() + "\nNext: browser_snapshot to read it, browser_screenshot to see it.";
+		return Told(text.View());
+	}
+
+	static Core::String NavigateBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Page* page = PageOf(browsers, args, ws);
+		const int64 loads = browsers->Loads(page);
+		const int64 mark = ConsoleMark(browsers, page);
+		browsers->Navigate(page, args.Member("url").AsView());
+		const bool loaded = browsers->AwaitLoad(page, loads, kLoadWaitNs);
+		Settle(browsers, page);
+		Core::String text = Core::String("Now at ") + Described(browsers, page).View() + (loaded ? "" : " - it had not finished loading after 30 s") +
+			NewErrors(browsers, page, mark).View();
+		return Told(text.View());
+	}
+
+	static Core::String SnapshotBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Page* page = PageOf(browsers, args, ws);
+		Core::StringView mode = args.Member("mode").AsView();
+		Core::String body = Snapshot(browsers, page, mode.IsEmpty() ? Core::StringView("a11y") : mode);
+		return Told((Described(browsers, page) + "\n" + body.View()).View());
+	}
+
+	static Core::String ScreenshotBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Page* page = PageOf(browsers, args, ws);
+		int64 width = 0;
+		int64 height = 0;
+		Core::String path = Screenshot(browsers, page, ws, args.Member("full_page").AsBool(), width, height);
+		Core::StringBuilder text;
+		text.Append("Screenshot of ");
+		text.Append(Described(browsers, page).View());
+		text.Append(" (");
+		text.AppendInt(width);
+		text.AppendByte('x');
+		text.AppendInt(height);
+		text.Append(" CSS pixels): ");
+		text.Append(path.View());
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("text", text.View());
+		json.Field("image", path.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String ActBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Page* page = PageOf(browsers, args, ws);
+		const int64 mark = ConsoleMark(browsers, page);
+		Core::String done = Act(browsers, page, args.Member("action").AsView(), args.Member("ref").AsView(), args.Member("selector").AsView(),
+			args.Member("text").AsView());
+		// Whatever the action set off (a navigation, a script) gets a moment to show in the page and its console.
+		Threading::Thread::Sleep(400000000);
+		Core::String text = Core::String("Done: ") + done.View() + ".\nThe page: " + Described(browsers, page).View() + NewErrors(browsers, page, mark).View();
+		return Told(text.View());
+	}
+
+	static Core::String ConsoleBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Page* page = PageOf(browsers, args, ws);
+		const bool network = args.Member("network").AsBool();
+		int64 last = 0;
+		Core::String lines = ConsoleLines(browsers, page, args.Member("since").AsInt(), network, last);
+		Core::StringBuilder text;
+		text.Append(network ? "Failed requests" : "Console");
+		text.Append(" of ");
+		text.Append(Described(browsers, page).View());
+		text.Append(lines.IsEmpty() ? Core::StringView(": none.") : Core::StringView(":\n"));
+		text.Append(lines.View());
+		if (!lines.IsEmpty()) {
+			text.Append("(since=");
+			text.AppendInt(last);
+			text.Append(" shows only what comes after these.)");
+		}
+		return Told(text.View());
+	}
+
+	static Core::String EvalBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Page* page = PageOf(browsers, args, ws);
+		bool failed = false;
+		Core::String value = Evaluate(browsers, page, args.Member("js").AsView(), failed);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("text", ((failed ? Core::String("It threw: ") : Core::String("Value: ")) + value.View()).View());
+		json.BoolField("isError", failed);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String CloseBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
+		Core::StringView pageId = args.Member("page").AsView();
+		Page* page = browsers->Find(pageId);
+		if (page->wsId.View() != ws.id.View()) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no page ") + pageId + " in this workspace").View());
+		browsers->Close(page);
+		return Told((Core::String("Closed ") + pageId + ".").View());
+	}
+
+	static void Bind(Browsers* browsers, const char* name, BrowserBinding body) {
+		browsers->context->Provide(Core::StringView(name), [browsers, body](const Serialization::DomNode& call) -> IED::Result {
+			IED::Workspace ws;
+			if (!IED::FindWorkspace(call.Member("wsId").AsView(), ws)) return IED::Refusal(Core::StringView("no such workspace"));
+			try {
+				return IED::Answer(body(browsers, call.Member("args"), ws).View());
+			}
+			catch (IED::RpcError failed) {
+				return IED::Refusal(failed.message.View());
+			}
+		});
+	}
+
+	void ProvideBindings(Browsers* browsers) {
+		Bind(browsers, "browser.openPage", OpenBinding);
+		Bind(browsers, "browser.navigatePage", NavigateBinding);
+		Bind(browsers, "browser.snapshot", SnapshotBinding);
+		Bind(browsers, "browser.screenshot", ScreenshotBinding);
+		Bind(browsers, "browser.act", ActBinding);
+		Bind(browsers, "browser.console", ConsoleBinding);
+		Bind(browsers, "browser.eval", EvalBinding);
+		Bind(browsers, "browser.closePage", CloseBinding);
+	}
+}

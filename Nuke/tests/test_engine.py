@@ -184,6 +184,15 @@ class IncrementalStepTests(WorkspaceTest):
 		self.nuke("build")
 		self.assertIn("cooking", self.nuke("build", "debug")[1])
 
+	def test_output_folders_exist_before_the_step_runs(self):
+		self.files({"App/nuke.toml": "[project]\nkind = \"custom\"\n[[project.steps]]\nphase = \"build\"\nname = \"write\"\n"
+			"run = [\"${python}\", \"write.py\", \"${int}/deep/out.txt\"]\noutputs = [\"${int}/deep/out.txt\", \"${int}/glob/**\"]\n",
+			"App/write.py": "import sys\nopen(sys.argv[1], 'w').write('x')\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertTrue(os.path.isfile(self.path("build", "int", "Development-windows-x64", "App", "deep", "out.txt")))
+		self.assertTrue(os.path.isdir(self.path("build", "int", "Development-windows-x64", "App", "glob")))
+
 
 if __name__ == "__main__":
 	unittest.main()

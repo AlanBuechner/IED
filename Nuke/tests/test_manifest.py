@@ -58,6 +58,16 @@ class ProjectManifestTests(unittest.TestCase):
 			parse({"project": {"output": "x.exe"}})
 		self.assertEqual(parse({"project": {"kind": "custom", "output": "x.exe"}}).project.output, "x.exe")
 
+	def test_subsystem_is_console_or_windows_for_c4_executables(self):
+		self.assertEqual(parse({"project": {}}).project.subsystem, "console")
+		self.assertEqual(parse({"project": {"subsystem": "windows"}}).project.subsystem, "windows")
+		with self.assertRaisesRegex(NukeError, "subsystem must be one of console, windows"):
+			parse({"project": {"subsystem": "gui"}})
+		with self.assertRaisesRegex(NukeError, "subsystem is for C4 executables"):
+			parse({"project": {"kind": "module", "subsystem": "windows"}})
+		with self.assertRaisesRegex(NukeError, "subsystem is for C4 executables"):
+			parse({"project": {"kind": "custom", "subsystem": "windows"}})
+
 	def test_needs_a_table(self):
 		with self.assertRaisesRegex(NukeError, r"needs a \[workspace\] or a \[project\]"):
 			parse({})

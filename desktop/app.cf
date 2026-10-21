@@ -1,0 +1,253 @@
+include "app.ch"
+
+namespace Desktop
+{
+	const char* kRuntimeLink = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
+
+	static HICON__* LoadAppIcon(HINSTANCE__* instance, int32 size) {
+		// The icon is resource 1 of the exe (ied.rc).
+		return (HICON__*)LoadImageW(instance, (const char16*)(void*)(int64)1, (uint32)IMAGE_ICON, size, size, 0);
+	}
+
+	bool App::RegisterClasses() {
+		Core::Array<char16> windowClass = Wide(Core::StringView(kWindowClass));
+		tagWNDCLASSEXW window;
+		window.cbSize = 80;
+		window.style = (uint32)(CS_HREDRAW | CS_VREDRAW);
+		window.lpfnWndProc = WindowProcedure;
+		window.hInstance = instance;
+		window.hCursor = LoadCursorW(null, (const char16*)(void*)(int64)32512);
+		window.hbrBackground = CreateSolidBrush(0x000E0E0E);
+		window.hIcon = LoadAppIcon(instance, GetSystemMetrics(SM_CXICON));
+		window.hIconSm = LoadAppIcon(instance, GetSystemMetrics(SM_CXSMICON));
+		window.lpszClassName = windowClass.Data();
+		if (RegisterClassExW(&window) == 0) return false;
+		Core::Array<char16> messageClass = Wide(Core::StringView(kMessageClass));
+		tagWNDCLASSEXW quiet;
+		quiet.cbSize = 80;
+		quiet.lpfnWndProc = MessageProcedure;
+		quiet.hInstance = instance;
+		quiet.lpszClassName = messageClass.Data();
+		return RegisterClassExW(&quiet) != 0;
+	}
+
+	bool App::RuntimeInstalled() {
+		char16* version = null;
+		const int32 asked = GetAvailableCoreWebView2BrowserVersionString(null, &version);
+		Core::String text = TakeWide(version);
+		return asked == kOk && !text.IsEmpty();
+	}
+
+	// No WebView2 Runtime: say so, and offer the default browser.
+	int32 App::OpenInBrowserInstead() {
+		Core::String text = Core::String("IED's desktop window needs the Microsoft Edge WebView2 Runtime, which is not installed (") + kRuntimeLink +
+			").\n\nOpen IED in your default browser instead?";
+		Core::Array<char16> body = Wide(text.View());
+		Core::Array<char16> caption = Wide(Core::StringView("IED"));
+		if (MessageBoxW(null, body.Data(), caption.Data(), (uint32)(MB_YESNO | MB_ICONWARNING)) != IDYES) return 1;
+		Core::String error;
+		Net::LocalStream stream = EnsureServer(error);
+		if (!stream.IsOpen()) return 1;
+		Launch::Reply reply = options.path.IsEmpty() ? Launch::Ask(stream, Core::StringView("url"), Core::StringView(""))
+			: Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(options.path.View(), options.line, options.col).View());
+		return reply.ok && Launch::OpenExternal(Launch::ResultField(reply, "url").View()) ? 0 : 1;
+	}
+
+	void App::CreateEnvironment() {
+		App* self = this;
+		Callback* done = callbacks.Add(__uuidof(ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler),
+			[self](void* error, void* created) -> int32 {
+				self->EnvironmentReady(Hresult(error), created);
+				return kOk;
+			});
+		Core::Array<char16> profile = Wide((data / "webview").View());
+		const int32 started = CreateCoreWebView2EnvironmentWithOptions(null, profile.Data(), null,
+			(ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*)(void*)done);
+		if (started != kOk) Report(Core::StringView("the WebView2 environment could not be created"), started);
+	}
+
+	void App::EnvironmentReady(int32 error, void* created) {
+		if (error != kOk || created == null) {
+			Report(Core::StringView("the WebView2 environment could not be created"), error);
+			return;
+		}
+		environment = (ICoreWebView2Environment*)created;
+		environment->AddRef();
+		for (int64 i = 0; i < windows.Count(); ++i)
+			if (windows[i]->controller == null) windows[i]->Attach(environment);
+	}
+
+	// The WebView2's browser process ended: a new environment, and each window asks for its page again.
+	void App::BrowserExited() {
+		if (environment == null) return;
+		environment = null;
+		CreateEnvironment();
+		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), false);
+	}
+
+	void App::Report(Core::StringView what, int32 hresult) {
+		Core::StringBuilder text;
+		text.Append("IED's desktop window failed: ");
+		text.Append(what);
+		text.Append(" (HRESULT ");
+		text.AppendInt(hresult);
+		text.Append(").");
+		Core::Array<char16> body = Wide(text.View());
+		Core::Array<char16> caption = Wide(Core::StringView("IED"));
+		MessageBoxW(null, body.Data(), caption.Data(), (uint32)MB_ICONERROR);
+	}
+
+	Window* App::NewWindow() {
+		Placement placement = windows.IsEmpty() ? LoadPlacement(data) : Cascaded(windows[windows.Count() - 1]->CurrentPlacement());
+		Window* window = new Window(this);
+		if (!window->Create(instance, placement)) return null;
+		windows.Push(window);
+		if (environment != null) window->Attach(environment);
+		return window;
+	}
+
+	void App::OpenHome() {
+		Window* window = NewWindow();
+		if (window != null) Resolve(window, Core::StringView("url"), Core::StringView(""), false);
+	}
+
+	void App::OpenLocation(Core::StringView path, int64 line, int64 col) {
+		Window* window = NewWindow();
+		if (window != null) Resolve(window, Core::StringView("open"), Launch::OpenParams(path, line, col).View(), false);
+	}
+
+	void App::OpenUrl(Core::StringView url) {
+		Window* window = NewWindow();
+		if (window != null) window->Show(url);
+	}
+
+	Net::LocalStream App::EnsureServer(Core::String& error) {
+		Threading::LockGuard guard(startLock);
+		return Launch::Reach(options.control.View(), error);
+	}
+
+	void App::Resolve(Window* window, Core::StringView method, Core::StringView params, bool onlyIfMoved) {
+		App* self = this;
+		Core::String asked = Core::String(method);
+		Core::String with = Core::String(params);
+		Threading::Thread::Run([self, window, asked, with, onlyIfMoved]() {
+			Core::String url;
+			Core::String error;
+			Net::LocalStream stream = self->EnsureServer(error);
+			if (stream.IsOpen()) {
+				Launch::Reply reply = Launch::Ask(stream, asked.View(), with.View());
+				if (reply.ok) url = Launch::ResultField(reply, "url");
+				else error = reply.error;
+			}
+			{
+				Threading::LockGuard guard(self->lock);
+				window->resolvedUrl = url;
+				window->resolveError = error;
+				window->resolveOnlyIfMoved = onlyIfMoved;
+			}
+			if (window->hwnd != null) PostMessageW(window->hwnd, kResolvedMessage, 0, 0);
+		}).Detach();
+	}
+
+	void App::DeliverResolved(Window* window) {
+		Core::String url;
+		Core::String error;
+		bool onlyIfMoved = false;
+		{
+			Threading::LockGuard guard(lock);
+			url = window->resolvedUrl;
+			error = window->resolveError;
+			onlyIfMoved = window->resolveOnlyIfMoved;
+			window->resolvedUrl = Core::String();
+			window->resolveError = Core::String();
+		}
+		window->Resolved(url.View(), error.View(), onlyIfMoved);
+		if (!url.IsEmpty()) watch.Start(this);
+	}
+
+	void App::Closing(Window* window) {
+		Placement placement = window->CurrentPlacement();
+		if (placement.known) SavePlacement(data, placement);
+	}
+
+	void App::Closed(Window* window, HWND__* hwnd) {
+		Core::Array<Window*> open;
+		for (int64 i = 0; i < windows.Count(); ++i)
+			if (windows[i] != window) open.Push(windows[i]);
+		windows = open;
+		if (windows.IsEmpty() && !quitting) {
+			quitting = true;
+			PostQuitMessage(0);
+		}
+	}
+
+	void App::Retry() {
+		watch.Reset();
+		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), false);
+	}
+
+	void App::ServerBack() {
+		if (messages != null) PostMessageW(messages, kServerBackMessage, 0, 0);
+	}
+
+	void App::ServerFailed(Core::StringView why) {
+		{
+			Threading::LockGuard guard(lock);
+			watchError = Core::String(why);
+		}
+		if (messages != null) PostMessageW(messages, kServerFailedMessage, 0, 0);
+	}
+
+	bool App::Handle(uint32 message) {
+		if (message == kServerBackMessage) {
+			for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), true);
+			return true;
+		}
+		if (message == kServerFailedMessage) {
+			Core::String why;
+			{
+				Threading::LockGuard guard(lock);
+				why = watchError;
+			}
+			for (int64 i = 0; i < windows.Count(); ++i) windows[i]->ShowStatus(Core::StringView("The IED server stopped"), why.View());
+			return true;
+		}
+		return false;
+	}
+
+	int64 MessageProcedure(HWND__* hwnd, uint32 message, uint64 wParam, int64 lParam) {
+		if (message == (uint32)WM_NCCREATE) {
+			const tagCREATESTRUCTW* creating = (const tagCREATESTRUCTW*)(void*)lParam;
+			SetWindowLongPtrW(hwnd, GWLP_USERDATA, (int64)creating->lpCreateParams);
+		}
+		App* app = (App*)(void*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+		if (app != null && app->Handle(message)) return 0;
+		return DefWindowProcW(hwnd, message, wParam, lParam);
+	}
+
+	int32 App::Run() {
+		OleInitialize(null);
+		instance = GetModuleHandleW(null);
+		if (!RegisterClasses()) return 1;
+		if (!RuntimeInstalled()) return OpenInBrowserInstead();
+		Core::Array<char16> messageClass = Wide(Core::StringView(kMessageClass));
+		messages = CreateWindowExW(0, messageClass.Data(), null, 0, 0, 0, 0, 0, (HWND__*)(void*)(int64)-3, null, instance, (void*)this);
+		if (options.debugPort > 0) {
+			Core::StringBuilder arguments;
+			arguments.Append("--remote-debugging-port=");
+			arguments.AppendInt(options.debugPort);
+			Platform::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments.ToString().CStr());
+		}
+		CreateEnvironment();
+		if (options.path.IsEmpty()) OpenHome();
+		else OpenLocation(options.path.View(), options.line, options.col);
+		if (windows.IsEmpty()) return 1;
+		tagMSG message;
+		while (GetMessageW(&message, null, 0, 0) > 0) {
+			TranslateMessage(&message);
+			DispatchMessageW(&message);
+		}
+		watch.Stop();
+		return 0;
+	}
+}

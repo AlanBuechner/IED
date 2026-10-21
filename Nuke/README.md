@@ -129,6 +129,8 @@ includes = ["third_party/include"] # further include folders
 defines = { GAME_EDITOR = "1" }    # this project's own macros (modules keep theirs)
 links = ["user32", "winmm.lib"]    # system libraries; a module's links reach every program it is compiled into
 compiler-args = ["-march=x86-64-v3"]
+subsystem = "console"              # a C4 executable: "console", or "windows" for a windowed program (no console window;
+                                   # C4.exe --subsystem; test harnesses stay console)
 tests = "auto"                     # "auto": a tests/ folder with .cf/.ch under a source folder; or true/false
 working-dir = "."                  # where `nuke run` and the tests start, relative to the project
 scripts = ["nuke_ext.py"]          # extensions whose steps default to this project
@@ -192,7 +194,8 @@ configs = ["Development", "Dist"]  # run only in these configurations
 ```
 
 Workspace-level steps go in `[[workspace.steps]]` with the same fields. A step that exits non-zero (or a
-Python step that returns non-zero or raises) stops the invocation.
+Python step that returns non-zero or raises) stops the invocation. The folders of a step's `outputs` (the part
+before a glob) are made before it runs, so a pre-build step can write into `${int}` of a project never built.
 
 ## 5. Commands of your own
 

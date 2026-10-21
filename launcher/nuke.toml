@@ -1,0 +1,8 @@
+# launcher: what `ied` and `ied-desktop` share (docs/27): the control channel to the user's ied-server (docs/10
+# "Local control channel"), finding and starting that server, locations, and the system's default browser.
+[project]
+name = "launcher"
+kind = "module"
+description = "Reaches the user's ied-server over its control pipe, starting it when none runs; shared by ied and ied-desktop"
+sources = ["."]
+working-dir = ".."

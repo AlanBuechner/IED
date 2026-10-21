@@ -38,6 +38,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [24-language-servers](24-language-servers.md) | The LSP pool: profiles and selection, lifecycle (lazy, staged, restarts), document sync, position encodings, diagnostics, `lsp.*` methods and topics |
 | [25-debug-adapters](25-debug-adapters.md) | The DAP pool: adapters from plugins, launch configurations, server-owned sessions with revision-checked controls, breakpoints per workspace, `dbg.*` / `bp.*` methods and topics |
 | [26-plugin-packages-and-languages](26-plugin-packages-and-languages.md) | A plugin is a package (C4 code in the script host, configuration, a Python Nuke driver, browser UI, skills, prompts, tool calls); the plugin API; one plugin per language; builds native first, Nuke opt-in |
+| [27-desktop-and-browser](27-desktop-and-browser.md) | The desktop app (`ied-desktop`, a C4 WebView2 window that starts the server) and the browser (`plugins/browser`): server-side pages in headless Edge over CDP, the Browser tab, the AI's browser tools |
 
 ## Doc conventions
 
