@@ -1,0 +1,56 @@
+include "radixsort.ch"
+
+namespace Core
+{
+	// Below this many elements the passes over 256 counters cost more than the comparisons they save.
+	const int64 kRadixSortMinimum = 512;
+	const int32 kRadixDigits = 256;
+
+	// One histogram per key byte, counted in a single pass over the input.
+	template<T> static void CountDigits(const T* items, int64 count, int64* counts) {
+		for (int64 i = 0; i < count; ++i) {
+			uint64 key = RadixKey<T>::Of(items[i]);
+			for (int32 b = 0; b < RadixKey<T>::Bytes(); ++b) counts[b * kRadixDigits + (int32)((key >> (b * 8)) & 255u)] += 1;
+		}
+	}
+
+	// A byte every key shares orders nothing: its pass is skipped.
+	static bool SharedByte(const int64* counts, int64 count) {
+		for (int32 d = 0; d < kRadixDigits; ++d)
+			if (counts[d] != 0) return counts[d] == count;
+		return true;
+	}
+
+	// Stable: elements with the same byte keep their order, so each pass keeps what the passes before it sorted.
+	template<T> static void Scatter(const T* from, T* to, int64 count, int32 byte, int64* counts) {
+		int64 offset = 0;
+		for (int32 d = 0; d < kRadixDigits; ++d) {
+			int64 here = counts[d];
+			counts[d] = offset;
+			offset += here;
+		}
+		for (int64 i = 0; i < count; ++i) {
+			int32 digit = (int32)((RadixKey<T>::Of(from[i]) >> (byte * 8)) & 255u);
+			to[counts[digit]] = from[i];
+			counts[digit] += 1;
+		}
+	}
+
+	template<T> void RadixSort(T* items, int64 count) {
+		if (count < kRadixSortMinimum) { Core::Sort(items, count, Ascending<T>()); return; }
+		int64[2048] counts;   // kRadixDigits a byte, up to 8 bytes
+		CountDigits(items, count, &counts[0]);
+		T* scratch = (T*)raw_alloc((uint64)(count * (int64)sizeof(T)));
+		T* from = items;
+		T* to = scratch;
+		for (int32 b = 0; b < RadixKey<T>::Bytes(); ++b) {
+			if (SharedByte(&counts[b * kRadixDigits], count)) continue;
+			Scatter(from, to, count, b, &counts[b * kRadixDigits]);
+			T* held = from;
+			from = to;
+			to = held;
+		}
+		if (from != items) memcpy((void*)items, (void*)from, (uint64)(count * (int64)sizeof(T)));
+		raw_free((void*)scratch);
+	}
+}

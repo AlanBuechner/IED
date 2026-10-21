@@ -8,13 +8,11 @@
 #include "Macro/PredefinedMacros.h"
 #include "Parser/Nodes/Declarations/ExternDeclarationNode.h"
 #include "Parser/Nodes/Declarations/IncludeDeclarationNode.h"
+#include "Script/InlineImport.h"
 #include "Script/ScriptModulePasses.h"
-#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Linker/Linker.h>
 #include <llvm/Passes/PassBuilder.h>
-#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Target/TargetMachine.h>
 
 namespace Scripting
@@ -97,28 +95,6 @@ namespace Scripting
 			for (const llvm::GlobalVariable& g : module.globals())
 				if (g.isThreadLocal() && !g.isDeclaration()) names.push_back(g.getName().str());
 			return names;
-		}
-
-		// The host's bodies of the functions the script calls, kept only for inlining (docs/runtime/04 section 3.3).
-		bool ImportInlineBodies(llvm::Module& module, const std::string& bitcode, std::string& error)
-		{
-			if (bitcode.empty()) return true;
-			auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(bitcode, "inline bodies"), module.getContext());
-			if (!parsed)
-			{
-				error = "the interface's inline bodies do not read: " + llvm::toString(parsed.takeError());
-				return false;
-			}
-			std::unique_ptr<llvm::Module> bodies = std::move(*parsed);
-			for (llvm::Function& f : *bodies)
-				if (!f.isDeclaration()) f.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
-			if (llvm::Linker::linkModules(module, std::move(bodies), llvm::Linker::Flags::LinkOnlyNeeded))
-			{
-				error = "the interface's inline bodies do not link into the script";
-				return false;
-			}
-			UseScriptRuntime(module); // a host body that throws or registers an exit goes through the script's runtime too
-			return true;
 		}
 
 		void Optimize(llvm::Module& module, llvm::TargetMachine& machine, bool optimize)
@@ -214,12 +190,14 @@ namespace Scripting
 			module = driver.TakeModule();
 		}
 		out.threadLocals = ThreadLocals(*module);
-		if (!ImportInlineBodies(*module, host.inlineBodies, error))
+		// The host's bodies are only for inlining (docs/runtime/04 section 3.3): an unoptimized script takes none.
+		if (options.optimize && !ImportInlineBodies(*module, host.inlineBodies, error))
 		{
 			out.diagnostics += "error: " + error + "\n";
 			return out;
 		}
 		Optimize(*module, machine, options.optimize);
+		KeepImageOffsetsInImage(*module);
 		out.module = std::move(module);
 		return out;
 	}

@@ -1,0 +1,74 @@
+// Core::LruCache<K, V>: lookups mark use, Put drops the least recently used when full, Peek leaves the order alone,
+// replacing, removing, resizing, copies and value lifetimes.
+
+include "bedrock.ch"
+
+static Core::String LcOrder(const Core::LruCache<int32, int32>& cache) {
+	Core::StringBuilder text;
+	for (const Core::KeyValue<int32, int32>& entry : cache) text.AppendInt(entry.key);
+	return text.ToString();
+}
+
+[test("lru_cache")]
+class LruCacheTests {
+	[test("evicts_least_recent")]
+	public static void TestEvictsLeastRecent() {
+		Core::LruCache<int32, int32> cache(3);
+		assert_true(!cache.Put(1, 10) && !cache.Put(2, 20) && !cache.Put(3, 30), "room for three");
+		assert_se("321", LcOrder(cache).CStr(), "most recent first");
+		assert_true(cache.Find(1) != nullptr && *cache.Find(1) == 10, "found");
+		assert_se("132", LcOrder(cache).CStr(), "a lookup marks use");
+		assert_true(cache.Put(4, 40), "a fourth drops one");
+		assert_true(!cache.Contains(2), "the least recently used went");
+		assert_se("413", LcOrder(cache).CStr(), "the new one first");
+		assert_true(cache.Find(2) == nullptr, "a dropped key is gone");
+	}
+
+	[test("peek_replace_remove")]
+	public static void TestPeekReplaceRemove() {
+		Core::LruCache<int32, int32> cache(3);
+		cache.Put(1, 10); cache.Put(2, 20); cache.Put(3, 30);
+		assert_eq(10, *cache.Peek(1), "peek reads");
+		assert_se("321", LcOrder(cache).CStr(), "and leaves the order");
+		assert_true(!cache.Put(2, 21), "replacing drops nothing");
+		assert_eq(21, *cache.Find(2), "the new value");
+		assert_se("231", LcOrder(cache).CStr(), "and marks use");
+		assert_true(cache.Remove(3) && !cache.Remove(3), "removed once");
+		assert_eq((int64)2, cache.Count(), "two left");
+		cache.Clear();
+		assert_true(cache.IsEmpty() && cache.Find(1) == nullptr, "cleared");
+	}
+
+	[test("resize_and_copy")]
+	public static void TestResizeAndCopy() {
+		Core::LruCache<int32, int32> cache(5);
+		for (int32 i = 1; i <= 5; ++i) cache.Put(i, i);
+		cache.Resize(2);
+		assert_se("54", LcOrder(cache).CStr(), "shrinking drops the least recently used");
+		Core::LruCache<int32, int32> copy = cache;
+		copy.Put(9, 9);
+		assert_se("95", LcOrder(copy).CStr(), "a copy keeps the order and the capacity");
+		assert_se("54", LcOrder(cache).CStr(), "the original is its own");
+		Core::LruCache<int32, int32> zero(0);
+		zero.Put(1, 1);
+		zero.Put(2, 2);
+		assert_eq((int64)1, zero.Count(), "a capacity below one holds one");
+	}
+
+	[test("string_values")]
+	public static void TestStringValues() {
+		Core::LruCache<Core::String, Core::String> cache(100);
+		Core::StringBuilder text;
+		for (int32 i = 0; i < 1000; ++i) {
+			text.Clear();
+			text.AppendInt(i);
+			cache.Put(text.ToString(), text.ToString());
+		}
+		assert_eq((int64)100, cache.Count(), "the last hundred");
+		Core::String* found = cache.Find(Core::String("999"));
+		assert_true(found != nullptr && *found == "999", "the newest is there");
+		assert_true(cache.Find(Core::String("899")) == nullptr, "an old one is gone");
+		gc_collect();
+		assert_true(*cache.Find(Core::String("950")) == "950", "values survive a collection");
+	}
+}

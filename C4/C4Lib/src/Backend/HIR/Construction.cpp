@@ -33,7 +33,7 @@ namespace Scripting
 			{
 				ScopeGuard frame = ctx.queries().PushScope(Scope::Kind::Function, "__field_initializer");
 				LoweringContext::FailureNote why(ctx, " (in the initializer of '" + field.mName + "', which a braced list evaluates without an object)");
-				auto value = ExprLowerer(ctx).ResolveExpr(field.m_Initializer);
+				auto value = ExprLowerer(ctx).ResolveFor(field.m_Initializer, field.m_Type);
 				result = value.Ok() ? ctx.Fail(field.m_Initializer, InitialValue(ctx, value.value, field.m_Type))
 					: QueryResult<const HIRNode*>::Fail(value.error, value.message);
 			}

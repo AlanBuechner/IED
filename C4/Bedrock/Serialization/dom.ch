@@ -17,17 +17,19 @@ namespace Serialization
 
 	enum class DomKind { Null, Bool, Int, Float, String, Object, Array }
 
-	// One node of the arena. String: `offset` and `count` are its bytes in the pool. Object: `count` members,
-	// `children` holds [key offset, key length, value index] per member. Array: `count` elements, `children`
-	// holds their indices. Bool, Int and Float: `bits` holds the value (a float's bits).
+	// One node of the arena. String: `count` bytes at `first` in the pool. Object: `count` members at `first` in the
+	// document's children - [key offset, key length, value index] each - with room for `capacity` ints there. Array:
+	// `count` element indices at `first`. Bool, Int and Float: `bits` holds the value (a float's bits).
 	struct DomRecord {
-		public DomKind kind;
 		public int64 bits;
-		public int32 offset;
+		public DomKind kind;
+		public int32 first;
 		public int32 count;
-		public int32* children;
-		public int32 childCapacity;   // ints
+		public int32 capacity;
 	}
+
+	// The ints of one object member in the children: the key's offset and length in the pool, the value's index.
+	const int32 kMemberInts = 3;
 
 	// A handle to one node. An invalid node (a missing member, an index out of range) reads as Null.
 	struct DomNode {
@@ -69,6 +71,13 @@ namespace Serialization
 		public void AddMember(const DomNode& object, Core::StringView key, const DomNode& value);
 		public void Add(const DomNode& array, const DomNode& value);
 
+		// A whole container at once, for a reader that collects the children while it reads them: an object of
+		// `count` members, [Key(name), name length, value index] each, or an array of `count` element indices.
+		public DomNode NewObjectOf(const int32* members, int64 count);
+		public DomNode NewArrayOf(const int32* elements, int64 count);
+		// A member's name in the pool, for NewObjectOf: its offset.
+		public int32 Key(Core::StringView name) { return Intern(name); }
+
 		public int64 NodeCount() const { return recordCount; }
 		// Every node gone (their handles become invalid); the arena keeps its memory for the nodes that follow.
 		public void Clear();
@@ -79,19 +88,28 @@ namespace Serialization
 		public DomNode ReflectFrom(Reflection::Type type, const void* object);
 		public int32 ReflectTo(Reflection::Type type, const DomNode& object, void* destination);
 
-		// The arena, read by DomNode (C4 has no friend).
+		// The arena, read by DomNode (C4 has no friend). Every container's children are ints in one block, so a document
+		// of any size is three allocations.
 		public DomRecord* records;
 		public int32 recordCount;
 		public char* pool;
+		public int32* children;
 
 	private:
 		private DomNode Append(DomKind kind, int64 bits);
 		private int32 Intern(Core::StringView text);   // the bytes, null-terminated, into the pool; their offset
 		private void ReserveRecords(int64 count);
-		private void ReserveChildren(DomRecord* record, int64 ints);
+		private void ReservePool(int64 bytes);
+		private void ReserveChildArena(int64 ints);
+		// Room for `ints` children ints in `record`'s block: grown where it ends the arena, else moved to its end.
+		private void ReserveChildren(int32 index, int64 ints);
+		// `count` ints appended to the arena: their first.
+		private int32 AppendChildren(const int32* ints, int64 count);
 
 		private int32 recordCapacity;
 		private int32 poolLength;
 		private int32 poolCapacity;
+		private int32 childLength;
+		private int32 childCapacity;
 	}
 }

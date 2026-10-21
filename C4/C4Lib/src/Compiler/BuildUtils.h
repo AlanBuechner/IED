@@ -12,6 +12,10 @@ namespace fs = std::filesystem;
 
 namespace Scripting
 {
+	/// The Windows subsystem an executable runs in: a console program, or a windowed one that gets no console (its
+	/// entry is still `main`).
+	enum class Subsystem { Console, Windows };
+
 	// Common CLI options for the C4 compiler
 	struct CompileOptions
 	{
@@ -22,6 +26,7 @@ namespace Scripting
 	Core::Vector<Core::String> includeDirs;
 	Core::String projectsFile; // --projects <file>: the build description (docs/language/15-projects.md)
 	bool debugInfo = false; // -g: CodeView in the objects, a .pdb beside the executable
+	Subsystem subsystem = Subsystem::Console; // --subsystem
 	std::vector<MacroDefine> defines; // -D NAME / -D NAME=VALUE: predefined macros for every file
 	bool compileOnly = false;
 	bool emitIR = false;
@@ -75,10 +80,10 @@ namespace Scripting
 	bool RunTool(const std::vector<std::string>& args);
 
 
-	// Link the objects (the program's, the runtime's and foreign ones) and the libraries (.lib paths, bare names or
-	// -l / -L arguments) into an executable with clang and lld.
+	// Link the objects (the program's, the runtime's and foreign ones) and the libraries (.lib and .res paths, bare names
+	// or -l / -L arguments) into an executable for `subsystem` with clang and lld.
 	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
-		const Core::String& outputPath, bool verbose);
+		const Core::String& outputPath, Subsystem subsystem, bool verbose);
 
 	// Run an executable, streaming its output live and returning its exit code (no error noise - a
 	// non-zero exit is expected for failing test runs). Returns false only if it couldn't be started.

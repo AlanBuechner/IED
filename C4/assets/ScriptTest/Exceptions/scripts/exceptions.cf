@@ -22,6 +22,15 @@ void ThrowsOwnType()
 
 void ThrowsInt() { throw 13; }
 
+void ThrowsRefusal() { throw Errors::Refusal(7, Core::StringView("refused")); }
+
+int32 CatchesRefusal()
+{
+	try { ThrowsRefusal(); }
+	catch (Errors::Refusal& r) { return r.code + (int32)r.message.ByteLength(); }
+	return 0;
+}
+
 int32 CatchesHost()
 {
 	try { Errors::Fail(21); }

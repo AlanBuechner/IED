@@ -74,7 +74,7 @@ namespace Scripting
 	{
 		// The field starts from its initializer, evaluated in the create before its body (C++ order).
 		const size_t mark = m_Ctx.pendingTemporaries.size();
-		auto value = ExprLowerer(m_Ctx).ResolveExpr(info.m_Initializer);
+		auto value = ExprLowerer(m_Ctx).ResolveFor(info.m_Initializer, info.m_Type);
 		if (!value.Ok()) return m_Ctx.Fail(info.m_Initializer, QueryResult<void>::Fail(value.error, value.message));
 		auto initial = InitialValue(m_Ctx, value.value, info.m_Type);
 		if (!initial.Ok()) return m_Ctx.Fail(info.m_Initializer, QueryResult<void>::Fail(initial.error, initial.message));

@@ -1,0 +1,11 @@
+1 VERSIONINFO
+FILEVERSION 1,2,3,4
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "ProductName", "C4 resource test"
+    END
+  END
+END

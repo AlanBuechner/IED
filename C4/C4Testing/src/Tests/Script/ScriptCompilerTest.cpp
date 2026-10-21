@@ -24,6 +24,9 @@ namespace Testing
 			"\tthread_local int32 t_frames = 0;\n"
 			"\tint32 g_score = 0;\n"
 			"\tint32 Add(int32 a, int32 b);\n"
+			"\tclass Failure { public int32 code; [operator(\"delete\")] public void Drop() { code = 0; } }\n"
+			"\tvoid Fail(int32 code);\n"
+			"\tint32 First(int32 v);\n"
 			"}\n";
 
 		const char* kGameSource =
@@ -32,8 +35,13 @@ namespace Testing
 			"{\n"
 			"\tint32 Entity::Damage(int32 amount) { hp -= amount; return hp; }\n"
 			"\tint32 Add(int32 a, int32 b) { return a + b; }\n"
+			"\tvoid Fail(int32 code) { if (code != 0) throw Failure(); }\n"
+			"\tint32 Fourth(int32 v) { return v + 4; }\n"
+			"\tint32 Third(int32 v) { return Fourth(v) + 3; }\n"
+			"\tint32 Second(int32 v) { return Third(v) + 2; }\n"
+			"\tint32 First(int32 v) { return Second(v) + 1; }\n"
 			"}\n"
-			"int32 main() { Game::Box<int32> b; b.v = Game::Add(1, 2); Game::t_frames = b.Get(); return 0; }\n";
+			"int32 main() { Game::Box<int32> b; b.v = Game::Add(1, 2); Game::t_frames = b.Get() + Game::First(1); return 0; }\n";
 
 		const TestHost& Host()
 		{
@@ -92,6 +100,30 @@ namespace Testing
 		}
 
 		bool Lists(const std::vector<std::string>& names, const char* name) { return std::find(names.begin(), names.end(), name) != names.end(); }
+
+		// Whether an image-relative offset (`sub (ptrtoint f), (ptrtoint __ImageBase)`) names a function the module has
+		// no code for.
+		bool AnOffsetLeavesTheImage(const llvm::Module& module)
+		{
+			const llvm::GlobalVariable* base = module.getNamedGlobal("__ImageBase");
+			if (!base) return false;
+			for (const llvm::Function& f : module)
+			{
+				if (!f.isDeclaration() && !f.hasAvailableExternallyLinkage()) continue;
+				for (const llvm::User* address : f.users())
+					for (const llvm::User* use : address->users())
+						if (const auto* offset = llvm::dyn_cast<llvm::ConstantExpr>(use); offset && offset->getOpcode() == llvm::Instruction::Sub)
+							if (const auto* from = llvm::dyn_cast<llvm::ConstantExpr>(offset->getOperand(1)); from && from->getOperand(0) == base) return true;
+			}
+			return false;
+		}
+
+		bool HasImageThunk(const llvm::Module& module)
+		{
+			for (const llvm::Function& f : module)
+				if (f.getName().starts_with("c4.image.") && !f.isDeclaration()) return true;
+			return false;
+		}
 	}
 
 	void ScriptCompilerTest::AScriptCallsItsHost()
@@ -304,6 +336,35 @@ namespace Testing
 		CompiledScript script = CompileScript(Host().interface, *Host().index, options, *machine);
 		TEST_ASSERT(script.module == nullptr);
 		TEST_ASSERT(Has(script.diagnostics, "cannot read the script file"));
+		TEST_PASSED();
+	}
+
+	// BUG-315: a thrown host type's destructor is the host's code, which an offset from the script's base cannot reach:
+	// the throw information names a thunk in the script's image instead.
+	void ScriptCompilerTest::ImageOffsetsNameOnlyTheImage()
+	{
+		for (bool optimize : { false, true })
+		{
+			CompiledScript script = CompileTestScript(Host(),
+				"include \"game.ch\"\nvoid Refuse(int32 code) { if (code != 0) throw Game::Failure(); }\n", optimize);
+			TEST_ASSERT(Compiled(script));
+			TEST_ASSERT(HasImageThunk(*script.module));
+			TEST_ASSERT(!AnOffsetLeavesTheImage(*script.module));
+		}
+		TEST_PASSED();
+	}
+
+	// A script takes the host's inline bodies two calls deep (docs/runtime/04 section 3.3): First and Second inline
+	// into it, Third stays a call into the host.
+	void ScriptCompilerTest::InlineBodiesComeTwoCallsDeep()
+	{
+		CompiledScript script = CompileTestScript(Host(), "include \"game.ch\"\nint32 UsesFirst(int32 v) { return Game::First(v); }\n", true);
+		TEST_ASSERT(Compiled(script));
+		const llvm::Function* uses = script.module->getFunction("UsesFirst_1int32");
+		TEST_ASSERT(uses != nullptr);
+		TEST_ASSERT(!Calls(*uses, "Game_First_1int32"));
+		TEST_ASSERT(!Calls(*uses, "Game_Second_1int32"));
+		TEST_ASSERT(Calls(*uses, "Game_Third_1int32"));
 		TEST_PASSED();
 	}
 } // namespace Testing

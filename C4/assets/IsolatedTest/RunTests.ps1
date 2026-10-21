@@ -134,7 +134,7 @@ foreach ($f in $folders) {
     # reason unrelated to its current source. Tests must not depend on leftover build state.
     if (Test-Path $sub) { Remove-Item $sub -Recurse -Force }
     New-Item -ItemType Directory -Force $sub | Out-Null
-    Get-ChildItem $f.FullName -File | Where-Object { $_.Extension -in ".cf",".ch",".c",".cpp",".h",".hpp" } | ForEach-Object { Copy-Item $_.FullName (Join-Path $sub $_.Name) -Force }
+    Get-ChildItem $f.FullName -File | Where-Object { $_.Extension -in ".cf",".ch",".c",".cpp",".h",".hpp",".res" } | ForEach-Object { Copy-Item $_.FullName (Join-Path $sub $_.Name) -Force }
     Remove-Item (Join-Path $sub "out.exe") -Force -ErrorAction SilentlyContinue
 
     $exe = Join-Path $sub "out.exe"

@@ -1,14 +1,14 @@
 // Bedrock: the C4 default library. `include "bedrock.ch"` gives all of it except the math library
 // (`include "math.ch"`). Its names live in one-level namespaces (D-58):
-//   Core           containers (Array, List, Queue, Stack, HashMap, HashSet, BitSet), random numbers, text
-//                  (StringView, String, StringBuilder, Format), hashing and sorting
+//   Core           containers (Array, List, Queue, Stack, HashMap, HashSet, BitSet, PriorityQueue, LruCache), random
+//                  numbers, UUIDs, text (StringView, String, StringBuilder, Format), hashing, checksums and sorting
 //   FS             files, paths and directories
 //   Crypto         SHA-256, HMAC, Blake2b, Argon2 password hashing, comparing secrets
 //   Serialization  the DOM, JSON (and JSONC) and YAML read and written, the binary form of reflected objects, JSON Schema
 //   Reflection     the runtime reflection registry
 //   GC             the garbage collector
 //   Threading      threads, atomics, locks, futures and the job system
-//   Platform       virtual memory, the machine and the process, loaded libraries, wall-clock time
+//   Platform       virtual memory, the machine and the process, loaded libraries, wall-clock time, stopwatches
 //   Net            addresses and name resolution, TCP connections and listeners, UDP, waiting on many sockets,
 //                  local connections between one user's processes
 //   Http           HTTP/1.1 messages, a threaded server, a one-request client and WebSockets
@@ -25,7 +25,11 @@ include "Container/list.ch"
 include "Container/hashmap.ch"
 include "Container/hashset.ch"
 include "Container/bitset.ch"
+include "Container/priorityqueue.ch"
+include "Container/lrucache.ch"
+include "Container/crc32.ch"
 include "Random/random.ch"
+include "Text/uuid.ch"
 include "Text/stringview.ch"
 include "Text/string.ch"
 include "Text/stringbuilder.ch"
@@ -74,6 +78,7 @@ include "Platform/memory.ch"
 include "Platform/system.ch"
 include "Platform/library.ch"
 include "Platform/time.ch"
+include "Platform/stopwatch.ch"
 include "Platform/console.ch"
 include "Net/address.ch"
 include "Net/tcp.ch"

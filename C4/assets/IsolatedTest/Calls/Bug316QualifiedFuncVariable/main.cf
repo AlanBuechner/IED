@@ -1,0 +1,32 @@
+// BUG-316: a call through a qualified name calls a variable's value, as a plain name does: a namespace's func and
+// funcptr variables, a nested namespace's, and a type's static func field. main returns the failures.
+namespace Api
+{
+	alias Handler = func<int32(int32)>;
+	Handler registered;
+	funcptr<int32(int32)> raw;
+	namespace Inner { Handler deep; }
+	int32 Plain(int32 v) { return v + 100; }
+}
+
+class Registry
+{
+	public static func<int32(int32)> handler;
+}
+
+int32 Twice(int32 v) { return v * 2; }
+
+int32 main()
+{
+	Api::registered = [](int32 v) -> int32 { return v + 1; };
+	Api::raw = Twice;
+	Api::Inner::deep = [](int32 v) -> int32 { return v * 10; };
+	Registry::handler = [](int32 v) -> int32 { return v - 1; };
+	int32 failures = 0;
+	failures += Api::registered(4) == 5 ? 0 : 1;
+	failures += Api::raw(4) == 8 ? 0 : 1;
+	failures += Api::Inner::deep(4) == 40 ? 0 : 1;
+	failures += Registry::handler(4) == 3 ? 0 : 1;
+	failures += Api::Plain(4) == 104 ? 0 : 1;          // a function of the namespace is still called directly
+	return failures;
+}

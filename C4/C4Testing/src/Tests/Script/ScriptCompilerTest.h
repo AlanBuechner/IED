@@ -48,5 +48,9 @@ namespace Testing
 		void ASyntaxErrorGivesDiagnosticsAndNoModule();
 		TEST_FUNC(Script.Compiler)
 		void AMissingFileIsAnError();
+		TEST_FUNC(Script.Compiler)
+		void ImageOffsetsNameOnlyTheImage();
+		TEST_FUNC(Script.Compiler)
+		void InlineBodiesComeTwoCallsDeep();
 	};
 } // namespace Testing

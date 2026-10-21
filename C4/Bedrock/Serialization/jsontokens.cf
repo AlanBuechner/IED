@@ -62,15 +62,44 @@ namespace Serialization
 		return Fault(fault, at - 2, c < 0 ? "the text ends inside a string" : "an unknown escape");
 	}
 
+	const int64 kGroupBytes = 16;
+	const uint8 kFirstPrintable = 32;
+	const uint8 kQuote = 34;
+	const uint8 kBackslash = 92;
+
+	static bool Plain(uint8 c) { return c >= kFirstPrintable && c != kQuote && c != kBackslash; }
+
+	int64 PlainStringRunEnd(const char* bytes, int64 at, int64 end) {
+		const uint8* p = (const uint8*)bytes;
+		while (at + kGroupBytes <= end) {
+			packed uint8[16] group = simd_load(p + at, 16);
+			uint32 stops = simd_bitmask(group < kFirstPrintable) | simd_bitmask(group == kQuote) | simd_bitmask(group == kBackslash);
+			if (stops != 0u) return at + (int64)bit_trailing_zeros(stops);
+			at += kGroupBytes;
+		}
+		while (at < end && Plain(p[at])) at += 1;
+		return at;
+	}
+
+	bool ReadJsonStringView(Core::StringView text, int64& at, Core::StringBuilder& scratch, Core::StringView& out, JsonFault& fault) {
+		int64 begin = at + 1;
+		int64 end = PlainStringRunEnd(text.Data(), begin, text.ByteLength());
+		if (end < text.ByteLength() && text.ByteAt(end) == '"') {
+			out = text.Substring(begin, end - begin);
+			at = end + 1;
+			return true;
+		}
+		scratch.Clear();
+		if (!ReadJsonString(text, at, scratch, fault)) return false;
+		out = scratch.View();
+		return true;
+	}
+
 	bool ReadJsonString(Core::StringView text, int64& at, Core::StringBuilder& out, JsonFault& fault) {
 		at += 1;
 		for (;;) {
 			int64 run = at;
-			while (at < text.ByteLength()) {
-				int32 c = text.ByteAt(at);
-				if (c == '"' || c == '\\' || c < 0x20) break;
-				at += 1;
-			}
+			at = PlainStringRunEnd(text.Data(), at, text.ByteLength());
 			out.AppendBytes(text.Data() + run, at - run);
 			int32 c = ByteAt(text, at);
 			if (c == '"') { at += 1; return true; }

@@ -24,11 +24,13 @@ struct __C4sOptions
 
 [link("c4s_host_open")] void* c4s_host_open(const char* interfacePath, void* table, char* error, uint64 errorSize);
 [link("c4s_host_close")] void c4s_host_close(void* host);
+[link("c4s_host_use_cache")] int32 c4s_host_use_cache(void* host, const char* folder);
 [link("c4s_compile")] void* c4s_compile(void* host, __C4sOptions* options);
 [link("c4s_reload")] void* c4s_reload(void* host, void* old, __C4sOptions* options);
 [link("c4s_script_ok")] int32 c4s_script_ok(void* script);
 [link("c4s_script_diagnostics")] const char* c4s_script_diagnostics(void* script);
 [link("c4s_script_tag")] const char* c4s_script_tag(void* script);
+[link("c4s_script_cached")] int32 c4s_script_cached(void* script);
 [link("c4s_script_faulted")] int32 c4s_script_faulted(void* script);
 [link("c4s_script_fault")] const char* c4s_script_fault(void* script);
 [link("c4s_script_find")] void* c4s_script_find(void* script, const char* symbol);
@@ -91,6 +93,8 @@ namespace Scripting
 		public bool Faulted() const { return c4s_script_faulted(handle) != 0; }
 		public const char* Diagnostics() const { return c4s_script_diagnostics(handle); }
 		public const char* Tag() const { return c4s_script_tag(handle); }
+		// It was linked from the host's cache (Host::UseCache), not compiled.
+		public bool Cached() const { return c4s_script_cached(handle) != 0; }
 		// What stopped the call that faulted ("" when none did).
 		public const char* FaultText() const { return c4s_script_fault(handle); }
 
@@ -141,6 +145,9 @@ namespace Scripting
 		public bool IsOpen() const { return handle != nullptr; }
 		// Why it did not open.
 		public const char* Error() const { return error.CStr(); }
+		// Keeps compiled scripts in `folder` from now on (docs/runtime/04 section 4.6): a script compiled again with the
+		// same files, options, host build and compiler links the machine code kept from before. False when it cannot.
+		public bool UseCache(const char* folder) { return c4s_host_use_cache(handle, folder) != 0; }
 		// Compiles, links and loads a script; Ok() and Diagnostics() say how it went.
 		public Script* Compile(const ScriptOptions& options);
 		// Compiles `script`'s options again to replace it (docs/runtime/04 section 5): when the new one compiles, `script`

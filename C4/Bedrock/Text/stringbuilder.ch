@@ -41,6 +41,8 @@ namespace Core
 		public StringView View() const { return StringView(CStr(), length); }   // valid until the next change
 		public String ToString() const { return String(View()); }
 
+		private void AppendDecimal(uint64 value, int32 minWidth);
+
 		private char* buffer;   // null-terminated at [length]; null for the zero builder
 		private int64 length;
 		private int64 capacity; // the terminator excluded

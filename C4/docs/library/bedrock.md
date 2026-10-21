@@ -204,12 +204,40 @@ numbers, so a run replays from its seed. `Core::RandomSeed()` reads a seed from 
 | `Shuffle(items, count)`, `Shuffle(array)` | Fisher-Yates: every order equally likely; elements relocate, never copied |
 | `Split()` | this generator jumps 2^128 steps ahead and the returned one starts where it was: one independent generator per thread or job |
 
-### Sorting (`sort.ch`)
+### Sorting (`sort.ch`, `radixsort.ch`)
 
 `Core::Sort(T* items, int64 count, F before)` is introsort (quicksort with a depth budget, heapsort when
 it runs out, insertion sort for short ranges): O(n log n) worst case, not stable, elements relocated and
 never copied. `Core::LowerBound` / `Core::UpperBound(items, count, value, before)` are the binary
 searches. `Core::Ascending<T>` orders by `<`.
+
+`Array::Sort()` and `Core::SortAscending(items, count)` go through `Core::AscendingSorter<T>`: introsort for any
+`T`, and for the integers, characters, `float` and `double` an LSD radix sort (`Core::RadixSort`): a byte a pass
+over keys that order as the numbers do (`Core::RadixKey<T>`: a signed integer's sign bit flipped, a negative
+float's bits all flipped), one counting pass for every byte, and the passes whose byte all keys share skipped.
+Linear in the count, stable, with a scratch buffer of the same size; below 512 elements introsort does it. Two
+million `int32` sort in about a tenth of `std::sort`'s time ([test suites 8](../tools/05-test-suites.md#8-benchmarks)).
+
+### `Core::PriorityQueue<T, Before = Ascending<T>>` (`priorityqueue.ch`)
+
+A binary heap over an `Array` (`std::priority_queue`): `Push(v)` (as `Array::Push`), `Pop()` (moves out the element
+no other comes before: the smallest with the default order; a zero `T` when empty), `Top()`, `Count`, `Capacity`,
+`IsEmpty`, `Clear`, `Reserve`. `Before` is any type with `[operator("call")] bool(const T&, const T&)`;
+`Init(Before order)` takes one with state. Range-for visits the elements in heap order.
+
+### `Core::LruCache<K, V>` (`lrucache.ch`)
+
+A map of at most `Capacity()` entries that drops the least recently used one to make room: a `HashMap` of nodes in
+a `List` kept from the most to the least recently used, so every operation is O(1) and entries never move.
+`Init(capacity)` (a capacity below one holds one), copy, `Find(k)` -> `V*` (marks it used), `Peek(k)` (does not),
+`Contains`, `Put(k, v)` -> `true` when an entry was dropped, `Remove`, `Clear`, `Resize(capacity)`, `Count`,
+`IsEmpty`. Range-for visits the entries from the most to the least recently used.
+
+### Checksums (`crc32.ch`)
+
+`Core::Crc32(data, count)` and `Core::Crc32Builder` (`Add` pieces, then `Value()`; any split gives the same value):
+CRC-32 as zlib, gzip, PNG and ZIP compute it (IEEE 802.3, reflected polynomial `0xEDB88320`), eight bytes a step
+by slicing-by-8 tables. For accidental changes only; `Crypto/` resists forgers.
 
 ---
 
@@ -312,6 +340,15 @@ Core::RegexMatch found;
 if (problem.Search(line, found))
 	Report(found.Group(problem.GroupIndex(Core::StringView("file"))), found.Group(2), found.Group(6));
 ```
+
+### UUIDs (`uuid.ch`)
+
+`Core::Uuid` (`bytes[16]` in text order) is a 128-bit identifier as RFC 9562 defines it. `Uuid::NewV4(random)` is
+random; `Uuid::NewV7(unixMilliseconds, random)` starts with the time, so they sort by creation and keep database
+indexes compact. Making one takes the `Core::Random` (and the time), so tests can replay them. `Uuid::Parse(text,
+out)` reads the 36-character `8-4-4-4-12` form in either case, with or without braces; `AppendTo(builder)` and
+`ToString()` write it lowercase; `Version()`, `IsNil()`, `==`, `!=`, `<` (byte order: version 7 by time) and
+`hash`.
 
 ### UTF-16 (`utf16.ch`)
 
@@ -461,10 +498,13 @@ for (Core::StringView chunk = file.Next(); !chunk.IsEmpty(); chunk = file.Next()
 ## 6. Serialization (`Serialization/`)
 
 - **DOM** (`dom.ch`): an in-memory tree for unstructured data such as JSON or YAML.
-  - `Serialization::DomDoc` is an arena (records, string pool, per-container child buffers):
-    `NewNull`, `NewBool`, `NewInt(int64)`, `NewFloat(double)`, `NewString(const char*` or
-    `StringView)` (copied into the pool), `NewObject`, `NewArray`, `AddMember(object, key, value)`,
-    `Add(array, value)`, `NodeCount()`.
+  - `Serialization::DomDoc` is an arena of three buffers - 24-byte records, a string pool and one block of every
+    container's children (a container that grows where it does not end the block moves to its end) - so a
+    document of any size is three allocations: `NewNull`, `NewBool`, `NewInt(int64)`, `NewFloat(double)`,
+    `NewString(const char*` or `StringView)` (copied into the pool), `NewObject`, `NewArray`,
+    `AddMember(object, key, value)`, `Add(array, value)`, `NodeCount()`. A reader that collects a container's
+    children while it reads them makes it whole: `NewObjectOf(members, count)` (`[Key(name), name length, value
+    index]` per member) and `NewArrayOf(elements, count)`.
   - `Serialization::DomNode` is a `{doc, index}` handle: `IsValid`, `Kind`
     (`enum class DomKind { Null, Bool, Int, Float, String, Object, Array }`), `IsNull`, `AsInt`,
     `AsFloat`, `AsBool`, `AsString`, `AsView`, `Count`, `Member(key)`, `KeyAt(i)`, `ValueAt(i)`, `At(i)`.
@@ -784,9 +824,9 @@ script host: build it with --script-host`).
 
 | Type | Meaning |
 |---|---|
-| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open). `Compile(options)` compiles, links and loads a script; `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). Closed on delete. |
+| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open). `Compile(options)` compiles, links and loads a script; `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). `UseCache(folder)` keeps compiled scripts in `folder`: a script compiled again with the same files, options, host and compiler links the machine code kept from before (docs/runtime/04 section 4.6). Closed on delete. |
 | `ScriptOptions` | `name` (the script's name and reflection tag), `optimize` (`-O2`, default; false for `-O0`), `AddFile(path)`, `AddText(fileName, text)` (a file given whole; other files include it by that name), `Allow(projectOrPath)` (the host headers it may include; none: all), `Define("NAME=VALUE")`. |
-| `Script` | `Ok()`, `Diagnostics()` (the compiler's messages, warnings too), `Tag()`, `Faulted()`, `FaultText()`; `Find(symbol)`, `Address(name)` (a function's address for a `funcptr`), `FindFunction(name)`, `FindType(name)` (the script's own, by reflection); `Call(fn, context)` runs `fn(context)` guarded, `Invoke(function, result, args...)` calls a reflected function guarded; `RunTests(filter)` runs the script's `[test]` functions with the harness (the failed assertions; -1 when it has none or a test faulted); `Unload()` (how many finalizers of its live objects it dropped); `Options()`. Unloads on delete. |
+| `Script` | `Ok()`, `Diagnostics()` (the compiler's messages, warnings too), `Tag()`, `Cached()` (linked from the host's cache), `Faulted()`, `FaultText()`; `Find(symbol)`, `Address(name)` (a function's address for a `funcptr`), `FindFunction(name)`, `FindType(name)` (the script's own, by reflection); `Call(fn, context)` runs `fn(context)` guarded, `Invoke(function, result, args...)` calls a reflected function guarded; `RunTests(filter)` runs the script's `[test]` functions with the harness (the failed assertions; -1 when it has none or a test faulted); `Unload()` (how many finalizers of its live objects it dropped); `Options()`. Unloads on delete. |
 | `Fault`, `Guard(fn, context, fault)` | runs any `fn(context)` under the structured-exception guard: false, with the fault's code, instruction and touched address, when a hardware fault stopped it. |
 
 ```c4
@@ -882,7 +922,9 @@ a file that is no library). Opening one library twice gives the same module, whi
 | `ToUnixNs(time, unixNs)` | back to an instant, through the fields' own offset; fields out of range carry over (month 13, day 0, hour 24, a negative nanosecond); false when the instant does not fit an int64 |
 | `IsLeapYear(year)`, `DaysInMonth(year, month)` | `DaysInMonth` is 0 for a month outside 1 to 12 |
 
-Durations are measured with the prelude's `clock_now_ns()`. The calendar arithmetic is plain C4 (H. Hinnant's
+Durations are measured with the prelude's `clock_now_ns()`, or a `Platform::Stopwatch` (`stopwatch.ch`): it
+starts when made; `Restart()`, `ElapsedTicks()`, `Seconds()`, `Milliseconds()`, `Nanoseconds()` (exact for any
+span an int64 holds) and `Lap()` (the seconds since the last lap, which starts the next: a frame's delta time). The calendar arithmetic is plain C4 (H. Hinnant's
 days-from-civil algorithms); only the local offset comes from the system.
 
 Covered by `Bedrock/Tests/platform_*_tests.cf` and, for faults on protected pages, `assets/IsolatedTest/Platform/`.
@@ -1114,11 +1156,11 @@ salts, ten malformed strings, a changed tag).
 
 ## 17. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 58 files, 561 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 63 files, 574 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

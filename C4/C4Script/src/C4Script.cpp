@@ -88,6 +88,11 @@ extern "C"
 
 	void c4s_host_close(c4s_host* host) { delete host; }
 
+	int32_t c4s_host_use_cache(c4s_host* host, const char* folder)
+	{
+		return host && folder && *folder && host->host->UseCache(folder) ? 1 : 0;
+	}
+
 	c4s_script* c4s_compile(c4s_host* host, const c4s_options* options)
 	{
 		auto* result = new c4s_script();
@@ -114,6 +119,8 @@ extern "C"
 	}
 
 	const char* c4s_script_tag(const c4s_script* script) { return script ? script->tag.c_str() : ""; }
+
+	int32_t c4s_script_cached(const c4s_script* script) { return script && script->script && script->script->Cached() ? 1 : 0; }
 
 	int32_t c4s_script_faulted(const c4s_script* script) { return script && script->script && script->script->Faulted() ? 1 : 0; }
 

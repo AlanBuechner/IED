@@ -107,11 +107,16 @@ namespace Scripting
 		return target;
 	}
 
+	bool ExprLowerer::NamesVariable(const Core::String& name)
+	{
+		auto variable = m_Ctx.queries().QueryVariable(name, nullptr, m_Ctx.unitId, m_Ctx.enclosingType, m_Ctx.scope);
+		return variable.Ok() && variable.value.type;
+	}
+
 	// `op(a, b)` where `op` is a variable calls its value; otherwise the name is a function's.
 	QueryResult<ExprLowerer::CallTarget> ExprLowerer::NamedCallTarget(const IdentifierExpressionNode* id)
 	{
-		auto variable = m_Ctx.queries().QueryVariable(id->GetName(), nullptr, m_Ctx.unitId, m_Ctx.enclosingType, m_Ctx.scope);
-		if (variable.Ok() && variable.value.type) return ValueCallTarget(id);
+		if (NamesVariable(id->GetName())) return ValueCallTarget(id);
 		CallTarget target;
 		target.name = id->GetName();
 		return target;
@@ -160,7 +165,8 @@ namespace Scripting
 			target.name = sa->GetMemberNameToken().GetText();
 			return target;
 		}
-		if (QualifiedCallName(sa, target.name)) return target;
+		// `Ns::handler(x)` with `handler` a variable calls its value, as the plain name does (BUG-316).
+		if (QualifiedCallName(sa, target.name)) return NamesVariable(target.name) ? ValueCallTarget(sa) : target;
 		// The base is a type (`TBox<int32>::MakeVal(...)`, `Outer<int32>::Inner::Make(...)`): the member is one of its
 		// methods. A static method has no implicit this, so the type as receiver finds it and passes no object.
 		target.name.clear();
@@ -169,6 +175,7 @@ namespace Scripting
 		if (!owner.value) return m_Ctx.Fail(sa, QueryResult<CallTarget>::Fail(QueryError::NotCallable, "call target is not a name or member"));
 		target.receiverType = owner.value;
 		target.name = sa->GetMemberNameToken().GetText();
+		if (IsCallableField(owner.value, target.name)) return ValueCallTarget(sa); // `T::handler(x)`: a static field's value
 		return target;
 	}
 } // namespace Scripting

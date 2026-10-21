@@ -1,0 +1,14 @@
+// --subsystem windows: the executable is a windowed program - its PE header names the Windows GUI subsystem, 2 - and
+// main is still its entry, so this runs and returns the subsystem it finds (ExpectedExit.json: 2).
+[link("__ImageBase")] uint8 __ImageBase;
+
+const int32 kNtHeadersOffset = 0x3C;     // e_lfanew, in the DOS header
+const int32 kOptionalHeader = 24;        // after the "PE\0\0" signature and the file header
+const int32 kSubsystemInOptional = 68;   // IMAGE_OPTIONAL_HEADER64.Subsystem
+
+int32 main()
+{
+	const uint8* image = &__ImageBase;
+	const int32 headers = *(const int32*)(image + kNtHeadersOffset);
+	return (int32)*(const uint16*)(image + headers + kOptionalHeader + kSubsystemInOptional);
+}

@@ -1,5 +1,6 @@
 # Bedrock against the C++ standard library: hash maps, arrays, sorting and number text (bedrock.cf, bedrock.cpp).
 # Both are built at -O2 with the vendored clang. Every kernel prints its time and a checksum; the checksums must agree.
+# Kernels only the C4 side has (JSON: the C++ standard library has none) are timed without a ratio.
 # -Check builds both and compares the checksums once (the gate); without it each side runs 5 times and the median
 # time of every kernel is reported with the C4/C++ ratio (below 1: Bedrock is faster).
 param([switch]$Check)
@@ -39,6 +40,7 @@ $c4Run = Run $c4Exe $runs
 $cppRun = Run $cppExe $runs
 $failed = 0
 foreach ($kernel in $c4Run.order) {
+	if (-not $cppRun.sums.ContainsKey($kernel)) { continue }   # a C4-only kernel (json_*): nothing to compare
 	if ($c4Run.sums[$kernel] -ne $cppRun.sums[$kernel]) {
 		Write-Host ("CHECKSUM MISMATCH {0}: c4={1} cpp={2}" -f $kernel, $c4Run.sums[$kernel], $cppRun.sums[$kernel]); $failed++
 	}
@@ -49,7 +51,9 @@ if ($Check) { Write-Host ("Bedrock benchmark: {0} kernels build and match C++." 
 
 Write-Host ("{0,-20} {1,10} {2,10} {3,8}" -f "kernel", "C4 ms", "C++ ms", "C4/C++")
 foreach ($kernel in $c4Run.order) {
-	$a = Median $c4Run.times[$kernel]; $b = Median $cppRun.times[$kernel]
+	$a = Median $c4Run.times[$kernel]
+	if (-not $cppRun.times.ContainsKey($kernel)) { Write-Host ("{0,-20} {1,10:N2} {2,10} {3,8}" -f $kernel, $a, "-", "-"); continue }
+	$b = Median $cppRun.times[$kernel]
 	$ratio = if ($b -gt 0) { [math]::Round($a / $b, 2) } else { 0 }
 	Write-Host ("{0,-20} {1,10:N2} {2,10:N2} {3,8}" -f $kernel, $a, $b, $ratio)
 }

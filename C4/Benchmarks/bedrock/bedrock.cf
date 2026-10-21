@@ -166,6 +166,47 @@ void ParseDoubles()
 	Report("text_parse_double", clock, (uint64)sum);
 }
 
+// A document of `count` records, each an object of a name, numbers, a flag, a nested object and an array.
+void BuildRecords(Serialization::DomDoc& doc, Serialization::DomNode records, int64 count) {
+	Random random;
+	random.state = 6;
+	Core::StringBuilder text;
+	for (int64 i = 0; i < count; ++i) {
+		Serialization::DomNode record = doc.NewObject();
+		text.Clear();
+		text.Append("entity \"");
+		text.AppendInt(i);
+		text.Append("\" of the world, with a longer description to scan through");
+		doc.AddMember(record, "name", doc.NewString(text.View()));
+		doc.AddMember(record, "id", doc.NewInt(i));
+		doc.AddMember(record, "health", doc.NewFloat((double)(random.Next() >> 11) / 9007199254740992.0 * 100.0));
+		doc.AddMember(record, "alive", doc.NewBool((i & 1) == 0));
+		Serialization::DomNode position = doc.NewObject();
+		doc.AddMember(position, "x", doc.NewFloat((double)(int64)(random.Next() >> 40) / 1000.0));
+		doc.AddMember(position, "y", doc.NewFloat((double)(int64)(random.Next() >> 40) / 1000.0));
+		doc.AddMember(record, "position", position);
+		Serialization::DomNode tags = doc.NewArray();
+		for (int32 t = 0; t < 3; ++t) doc.Add(tags, doc.NewString("tag"));
+		doc.AddMember(record, "tags", tags);
+		doc.Add(records, record);
+	}
+}
+
+// C4 alone: C++'s standard library has no JSON to compare against.
+void Json() {
+	Serialization::DomDoc source;
+	Serialization::DomNode records = source.NewArray();
+	BuildRecords(source, records, 50000);
+	Clock write;
+	Core::StringBuilder text;
+	Serialization::WriteJson(records, &text, 0);
+	Report("json_write", write, (uint64)text.ByteLength());
+	Clock read;
+	Serialization::DomDoc parsed;
+	Serialization::ReadResult result = Serialization::ReadJson(text.View(), parsed);
+	Report("json_read", read, (uint64)parsed.NodeCount());
+}
+
 int32 main()
 {
 	IntegerMap();
@@ -175,5 +216,6 @@ int32 main()
 	BuildText();
 	FormatDoubles();
 	ParseDoubles();
+	Json();
 	return 0;
 }

@@ -1,0 +1,98 @@
+// The compiled-script cache (docs/runtime/04 section 4.6): the same inputs compiled again link the machine code kept
+// from before, which runs as the compiled code does (its globals start, its thread_locals, its exceptions unwind
+// through a host destructor, its warnings stay); changed text compiles again and replaces the entry; a damaged entry
+// compiles again.
+include "scripttest.ch"
+
+const char* kFolder = "script-cache";
+
+const char* kFirst =
+	"include \"bedrock.ch\"\n"
+	"class Refused { public int32 code = 0; public Core::String why; }\n"
+	"Core::String g_name = Core::String(\"forty-two\");\n"
+	"thread_local int32 t_calls = 0;\n"
+	"int16 Narrow(int64 v) { return v; }\n"
+	"int32 Answer() { return (int32)g_name.ByteLength() + 33; }\n"
+	"int32 Calls() { t_calls++; return t_calls; }\n"
+	"int32 Caught() {\n"
+	"	try { Refused r; r.code = 7; r.why = Core::String(\"no\"); throw r; }\n"
+	"	catch (Refused& r) { return r.code; }\n"
+	"	return 0;\n"
+	"}\n";
+
+const char* kChanged = "int32 Answer() { return 43; }\n";
+
+int32 Call(Scripting::Script* script, const char* name)
+{
+	funcptr<int32()> fn = (funcptr<int32()>)script->Address(name);
+	return fn == nullptr ? -1000 : fn();
+}
+
+Scripting::ScriptOptions Given(const ScriptTest::Checks& checks, const char* text)
+{
+	Scripting::ScriptOptions options;
+	options.name = Core::String("cached");
+	options.optimize = checks.optimize;
+	options.AddText("cached.cf", text);
+	return options;
+}
+
+// The folder's entries, each as its path.
+Core::Array<Core::String> Entries()
+{
+	Core::Array<Core::String> entries;
+	for (FS::DirectoryEntry& entry : FS::Directory(kFolder))
+		if (Core::StringView(entry.name.CStr()).EndsWith(Core::StringView(".c4so")))
+		{
+			Core::String path(kFolder);
+			path.Append("/");
+			path.Append(entry.name.View());
+			entries.Push(path);
+		}
+	return entries;
+}
+
+void CheckFirstAndAgain(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* first = ScriptTest::Load(host, checks, Given(checks, kFirst));
+	checks.That(!first->Cached(), "the first compile compiles");
+	checks.Equal(42, Call(first, "Answer"), "the compiled script runs");
+	checks.Equal(1, Entries().Count(), "the compile is kept");
+	first->Unload();
+
+	Scripting::Script* again = ScriptTest::Load(host, checks, Given(checks, kFirst));
+	checks.That(again->Cached(), "the same inputs link the kept code");
+	checks.Equal(42, Call(again, "Answer"), "its globals start");
+	checks.Equal(1, Call(again, "Calls"), "its thread_local starts");
+	checks.Equal(2, Call(again, "Calls"), "and keeps its value");
+	checks.Equal(7, Call(again, "Caught"), "its exceptions unwind");
+	checks.Contains(again->Diagnostics(), "warning", "its warnings are kept");
+	again->Unload();
+}
+
+void CheckChangedAndDamaged(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	Scripting::Script* changed = ScriptTest::Load(host, checks, Given(checks, kChanged));
+	checks.That(!changed->Cached(), "changed text compiles again");
+	checks.Equal(43, Call(changed, "Answer"), "and runs the change");
+	checks.Equal(1, Entries().Count(), "its entry replaces the old one");
+	changed->Unload();
+
+	for (Core::String& entry : Entries()) FS::WriteFileAtomically(entry.CStr(), (const void*)"junk", 4);
+	Scripting::Script* damaged = ScriptTest::Load(host, checks, Given(checks, kChanged));
+	checks.That(!damaged->Cached(), "a damaged entry compiles again");
+	checks.Equal(43, Call(damaged, "Answer"), "and runs");
+	damaged->Unload();
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("Cache");
+	FS::RemoveAll(kFolder);
+	checks.That(host->UseCache(kFolder), "the host keeps compiled scripts");
+	CheckFirstAndAgain(host, checks);
+	CheckChangedAndDamaged(host, checks);
+	return checks.End("Cache");
+}

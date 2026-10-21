@@ -38,6 +38,9 @@ def LinkObjects(intDir, links, projDir, outputFile, linkerArgs, buildType, needs
 		args.extend(["-fuse-ld=llvm-lib"])
 	elif(buildType == Config.BuildType.DYNAMIC_LIBRARY):
 		args.extend(["-shared", "-fPIC"])
+		# A DLL gets its .pdb as an executable does, so a debugger or profiler sees its functions (C4Script.dll).
+		if(Config.configuration != "Dist" or Config.useDistPDBs == True):
+			args.extend(["-g"])
 	# An archive only collects objects; executables and DLLs link the sanitizer runtime (the clang driver adds the
 	# runtime and its thunk library itself).
 	if(Config.useAsan == True and buildType != Config.BuildType.STATIC_LIBRARY):

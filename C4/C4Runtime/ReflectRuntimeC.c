@@ -74,15 +74,23 @@ const c4_type_info* c4_reflect_register_type(const char* tag, const c4_type_info
     return registered;
 }
 
+// Whether a record registered again under its symbol takes another name: only then does the name index change, as the
+// record keeps its place in the table (rebuilding it for every function a script registers again was quadratic).
+static int renamed(const char* before, const char* after)
+{
+    return before != after && (!before || !after || strcmp(before, after) != 0);
+}
+
 static const c4_variable_info* register_variable(rt_registry* r, const char* tag, const c4_variable_info* info, void* address)
 {
     rt_variable* v = (rt_variable*)rt_index_find(&r->varBySymbol, &r->vars, info->symbol);
     if (v)
     {
+        const int rename = renamed(v->base.name, info->name);
         if (strcmp(v->tag, tag) != 0) rt_shadow_variable(v, &r->groups);
         else { rt_variable* behind = v->shadow; rt_release_variable(v, &r->groups); v->shadow = behind; }
         rt_fill_variable(v, &r->groups, tag, info, address);
-        rt_index_rebuild(&r->varByName, &r->vars);
+        if (rename) rt_index_rebuild(&r->varByName, &r->vars);
         return &v->base;
     }
     v = (rt_variable*)calloc(1, sizeof(rt_variable));
@@ -108,10 +116,11 @@ static const c4_function_info* register_function(rt_registry* r, const char* tag
     rt_function* f = (rt_function*)rt_index_find(&r->fnBySymbol, &r->fns, info->symbol);
     if (f)
     {
+        const int rename = renamed(f->base.name, info->name);
         if (strcmp(f->tag, tag) != 0) rt_shadow_function(f, &r->groups);
         else { rt_function* behind = f->shadow; rt_release_function(f, &r->groups); f->shadow = behind; }
         rt_fill_function(f, &r->groups, tag, info);
-        rt_index_rebuild(&r->fnByName, &r->fns);
+        if (rename) rt_index_rebuild(&r->fnByName, &r->fns);
         return &f->base;
     }
     f = (rt_function*)calloc(1, sizeof(rt_function));

@@ -1,0 +1,106 @@
+// Core::PriorityQueue<T, Before>: smallest first by default, any order through Before (with state), objects moved in
+// and out, interleaved pushes and pops, and the zero queue.
+
+include "bedrock.ch"
+
+// Largest first, by a comparator object.
+struct PqDescending {
+	[operator("call")] public bool Before(const int32& a, const int32& b) const { return a > b; }
+}
+
+// By distance from a point the comparator holds.
+struct PqNearest {
+	public int32 target;
+	[operator("call")] public bool Before(const int32& a, const int32& b) const {
+		int32 da = a > target ? a - target : target - a;
+		int32 db = b > target ? b - target : target - b;
+		return da < db;
+	}
+}
+
+struct PqTask { public int32 priority; public Core::String name; }
+struct PqByPriority {
+	[operator("call")] public bool Before(const PqTask& a, const PqTask& b) const { return a.priority < b.priority; }
+}
+
+[test("priority_queue")]
+class PriorityQueueTests {
+	[test("ascending")]
+	public static void TestAscending() {
+		Core::PriorityQueue<int32> q;
+		assert_true(q.IsEmpty(), "a zero queue is empty");
+		assert_eq(0, q.Pop(), "popping an empty queue gives a zero element");
+		int32[10] values = { 5, 3, 9, 1, 7, 3, 8, 0, 6, 2 };
+		for (int32 i = 0; i < 10; ++i) q.Push(values[i]);
+		assert_eq((int64)10, q.Count(), "ten in");
+		assert_eq(0, q.Top(), "the smallest is on top");
+		bool sorted = true;
+		int32 last = -1;
+		while (!q.IsEmpty()) { int32 v = q.Pop(); if (v < last) sorted = false; last = v; }
+		assert_true(sorted, "pops come in ascending order, duplicates included");
+	}
+
+	[test("custom_order")]
+	public static void TestCustomOrder() {
+		Core::PriorityQueue<int32, PqDescending> big;
+		for (int32 i = 0; i < 100; ++i) big.Push((i * 37) % 101);
+		assert_eq(100, big.Pop(), "the largest first");
+		assert_eq(99, big.Pop(), "then the next");
+		PqNearest near;
+		near.target = 50;
+		Core::PriorityQueue<int32, PqNearest> close(near);
+		close.Push(10); close.Push(90); close.Push(48); close.Push(53);
+		assert_eq(48, close.Pop(), "a comparator with state");
+		assert_eq(53, close.Pop(), "the next nearest");
+	}
+
+	[test("objects")]
+	public static void TestObjects() {
+		Core::PriorityQueue<PqTask, PqByPriority> tasks;
+		for (int32 i = 0; i < 50; ++i) {
+			PqTask task;
+			task.priority = (i * 7) % 50;
+			Core::StringBuilder name;
+			name.Append("task");
+			name.AppendInt(task.priority);
+			task.name = name.ToString();
+			tasks.Push(take(task));
+		}
+		bool ok = true;
+		for (int32 expected = 0; expected < 50; ++expected) {
+			PqTask task = tasks.Pop();
+			Core::StringBuilder name;
+			name.Append("task");
+			name.AppendInt(expected);
+			if (task.priority != expected || task.name != name.View()) ok = false;
+		}
+		assert_true(ok, "objects keep their contents through the heap");
+	}
+
+	[test("interleaved")]
+	public static void TestInterleaved() {
+		Core::PriorityQueue<int64> q;
+		Core::Random random(5);
+		Core::Array<int64> mirror;
+		bool ok = true;
+		for (int32 round = 0; round < 2000; ++round) {
+			if (random.Chance(0.6) || q.IsEmpty()) {
+				int64 v = random.Range(0, 1000);
+				q.Push(v);
+				mirror.Push(v);
+			} else {
+				mirror.Sort();
+				int64 expected = mirror[0];
+				mirror.RemoveAt(0);
+				if (q.Pop() != expected) ok = false;
+			}
+		}
+		assert_true(ok, "every pop is the smallest of what is in");
+		assert_eq(mirror.Count(), q.Count(), "the same count");
+		int64 visited = 0;
+		for (const int64& v : q) visited += 1;
+		assert_eq(q.Count(), visited, "range-for visits every element");
+		q.Clear();
+		assert_true(q.IsEmpty(), "cleared");
+	}
+}

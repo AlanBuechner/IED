@@ -40,6 +40,7 @@
 #include "Model/Types/QualifiedName.h"
 #include "Backend/HIR/PackedViews.h"
 #include "Model/TypeHandle.h"
+#include "Model/Types/ArrayType.h"
 
 namespace Scripting
 {
@@ -281,6 +282,9 @@ namespace Scripting
 		if (const TemplateNameType* named = signature ? TemplateNameOf(node) : nullptr) return TemplateAddress(node, *named, *signature);
 		// `p = { 3, 4 }`, `arr = { 1, 2, 3 }`: the braces build a value of the target's type.
 		if (const auto* brace = dynamic_cast<const BracedInitializerNode*>(node); brace && target) return ResolveBracedAs(brace, target);
+		const auto* text = dynamic_cast<const LiteralNode*>(node);
+		const auto* array = dynamic_cast<const ArrayType*>(TypeHandle::UnwrapToValue(target));
+		if (text && array && text->GetKind() == LiteralNode::LiteralKind::String) return ResolveTextAs(text, array);
 		return ResolveExpr(node);
 	}
 

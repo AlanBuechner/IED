@@ -1,0 +1,16 @@
+// `-l <file>.res` links a compiled resource file as it is: the executable gets a resource directory (its icons and
+// version information would live there). main returns 0 when the PE header's resource directory is there.
+[link("__ImageBase")] uint8 __ImageBase;
+
+const int32 kNtHeadersOffset = 0x3C;      // e_lfanew, in the DOS header
+const int32 kOptionalHeader = 24;         // after the "PE\0\0" signature and the file header
+const int32 kResourceDirectory = 128;     // IMAGE_OPTIONAL_HEADER64.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE]
+
+int32 main()
+{
+	const uint8* image = &__ImageBase;
+	const int32 headers = *(const int32*)(image + kNtHeadersOffset);
+	const uint32 rva = *(const uint32*)(image + headers + kOptionalHeader + kResourceDirectory);
+	const uint32 size = *(const uint32*)(image + headers + kOptionalHeader + kResourceDirectory + 4);
+	return rva != 0u && size != 0u ? 0 : 1;
+}

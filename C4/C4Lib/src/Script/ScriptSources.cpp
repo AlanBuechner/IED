@@ -41,6 +41,9 @@ namespace Scripting
 			return name;
 		}
 
+		// The projects name only the script's folders on disk as sources: the interface's folders and the script given
+		// as text are in memory, where RegisterInterface and RegisterScriptSources add them (a project set asks the
+		// file system about its sources, and "//c4i" is a network path to Windows).
 		ProjectList Projects(const HostInterface& host, const std::vector<std::string>& scriptFolders, const std::map<std::string, std::string>& defines)
 		{
 			ProjectList list;
@@ -48,13 +51,11 @@ namespace Scripting
 			{
 				Project project;
 				project.name = written.name;
-				for (uint32 folder : written.folders) project.sources.push_back(FolderPath(folder));
 				for (uint32 used : written.dependencies) project.depends.push_back(host.projects[used].name);
 				list.projects.push_back(std::move(project));
 			}
 			Project script;
 			script.name = ScriptProjectName(host);
-			script.sources.push_back(TextFolder());
 			for (const std::string& folder : scriptFolders) script.sources.push_back(folder);
 			script.defines = defines;
 			script.depends.push_back(host.projects[host.rootProject].name);

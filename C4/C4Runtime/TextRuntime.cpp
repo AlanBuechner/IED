@@ -1,7 +1,9 @@
 // Number <-> text conversion behind the format_double / parse_double builtins (Bedrock's StringBuilder and the JSON /
 // YAML readers and writers). The digits come from the C++ library's charconv: correctly rounded, and the shortest form
-// is Ryu's, so neither depends on the C library's printf or locale.
+// is Ryu's, so neither depends on the C library's printf or locale. Ordinary decimals parse on the Eisel-Lemire fast
+// path (DecimalToDouble.h); the rest through charconv, and strtod's own syntax through strtod.
 
+#include "DecimalToDouble.h"
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -165,6 +167,7 @@ extern "C" int64_t c4_parse_double(const char* text, int64_t length, double* out
 {
 	if (!text || !out || length <= 0) return 0;
 	if (NeedsStrtod(text, length)) return ParseWithStrtod(text, length, out);
+	if (const int64_t taken = ParseDecimalFast(text, length, out)) return taken;
 	double value = 0;
 	const std::from_chars_result read = std::from_chars(text, text + length, value);
 	if (read.ec == std::errc::result_out_of_range) return ParseWithStrtod(text, length, out); // strtod's infinity or zero

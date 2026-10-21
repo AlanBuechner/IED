@@ -1,0 +1,19 @@
+include "stopwatch.ch"
+
+namespace Platform
+{
+
+	// Whole seconds and the remainder apart, so ticks * 10^9 never overflows.
+	int64 Stopwatch::Nanoseconds() const {
+		const int64 ticks = ElapsedTicks();
+		const int64 frequency = TickFrequency();
+		return (ticks / frequency) * kNanosecondsPerSecond + (ticks % frequency) * kNanosecondsPerSecond / frequency;
+	}
+
+	double Stopwatch::Lap() {
+		const int64 now = Ticks();
+		const double seconds = (double)(now - start) / (double)TickFrequency();
+		start = now;
+		return seconds;
+	}
+}

@@ -89,7 +89,62 @@ namespace Scripting
 		}
 	}
 
+	namespace
+	{
+		bool OutsideImage(const llvm::Function& f) { return f.isDeclaration() || f.hasAvailableExternallyLinkage(); }
+
+		// The offsets of `f` from the image base: `sub (ptrtoint f), base` (PeTables::ImageRelative).
+		std::vector<llvm::ConstantExpr*> ImageOffsetsOf(llvm::Function& f, const llvm::Constant* base)
+		{
+			std::vector<llvm::ConstantExpr*> offsets;
+			for (llvm::User* user : f.users())
+			{
+				auto* address = llvm::dyn_cast<llvm::ConstantExpr>(user);
+				if (!address || address->getOpcode() != llvm::Instruction::PtrToInt) continue;
+				for (llvm::User* use : address->users())
+					if (auto* offset = llvm::dyn_cast<llvm::ConstantExpr>(use);
+						offset && offset->getOpcode() == llvm::Instruction::Sub && offset->getOperand(0) == address && offset->getOperand(1) == base)
+						offsets.push_back(offset);
+			}
+			return offsets;
+		}
+
+		// A private function of the image that passes its arguments on to `target`.
+		llvm::Function* Thunk(llvm::Module& module, llvm::Function* target)
+		{
+			auto* thunk = llvm::Function::Create(target->getFunctionType(), llvm::GlobalValue::PrivateLinkage, "c4.image." + target->getName(), module);
+			thunk->setCallingConv(target->getCallingConv());
+			llvm::IRBuilder<> B(llvm::BasicBlock::Create(module.getContext(), "entry", thunk));
+			std::vector<llvm::Value*> arguments;
+			for (llvm::Argument& argument : thunk->args()) arguments.push_back(&argument);
+			llvm::CallInst* call = B.CreateCall(target, arguments);
+			call->setCallingConv(target->getCallingConv());
+			call->setTailCall();
+			if (call->getType()->isVoidTy()) B.CreateRetVoid();
+			else B.CreateRet(call);
+			return thunk;
+		}
+	}
+
 	std::string ThreadLocalAccessor(const std::string& symbol) { return "__c4_tls_" + symbol; }
+
+	void KeepImageOffsetsInImage(llvm::Module& module)
+	{
+		llvm::GlobalVariable* imageBase = module.getNamedGlobal("__ImageBase");
+		if (!imageBase) return;
+		auto* i64 = llvm::Type::getInt64Ty(module.getContext());
+		llvm::Constant* base = llvm::ConstantExpr::getPtrToInt(imageBase, i64);
+		std::vector<llvm::Function*> outside;
+		for (llvm::Function& f : module)
+			if (OutsideImage(f)) outside.push_back(&f);
+		for (llvm::Function* f : outside)
+		{
+			const std::vector<llvm::ConstantExpr*> offsets = ImageOffsetsOf(*f, base);
+			if (offsets.empty()) continue;
+			llvm::Constant* thunk = llvm::ConstantExpr::getPtrToInt(Thunk(module, f), i64);
+			for (llvm::ConstantExpr* offset : offsets) offset->handleOperandChange(offset->getOperand(0), thunk);
+		}
+	}
 
 	void UseHostDefinitions(llvm::Module& module, const std::unordered_set<std::string>& hostSymbols)
 	{

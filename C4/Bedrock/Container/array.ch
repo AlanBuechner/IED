@@ -8,7 +8,7 @@
 //     for (int32 n : numbers) printf("%d\n", n);
 
 include "initlist.ch"
-include "sort.ch"
+include "radixsort.ch"
 include "storage.ch"
 
 namespace Core
@@ -73,7 +73,7 @@ namespace Core
 		public int64 IndexOf(const T& value) const;
 		public bool Contains(const T& value) const { return IndexOf(value) >= 0; }
 
-		public void Sort() { Core::Sort(data, count, Ascending<T>()); }
+		public void Sort() { AscendingSorter<T>::Sort(data, count); }   // a radix sort for numbers
 		template<F> public void SortBy(F before) { Core::Sort(data, count, before); }
 		public void Reverse();
 		// Binary searches of a sorted array (std::lower_bound / upper_bound).

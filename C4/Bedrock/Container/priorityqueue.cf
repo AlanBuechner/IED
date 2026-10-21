@@ -1,0 +1,55 @@
+include "priorityqueue.ch"
+
+namespace Core
+{
+	template<T, Before>
+	private void PriorityQueue::SwapAt(int64 a, int64 b) {
+		T* data = items.Data();
+		T held = take(data[a]);
+		relocate(&data[a], &data[b]);
+		relocate(&data[b], &held);
+	}
+
+	template<T, Before>
+	private void PriorityQueue::SiftUp(int64 index) {
+		T* data = items.Data();
+		while (index > 0) {
+			const int64 parent = (index - 1) / 2;
+			if (!before(data[index], data[parent])) return;
+			SwapAt(index, parent);
+			index = parent;
+		}
+	}
+
+	template<T, Before>
+	private void PriorityQueue::SiftDown(int64 index) {
+		T* data = items.Data();
+		const int64 count = items.Count();
+		while (true) {
+			int64 first = index;
+			const int64 left = index * 2 + 1;
+			const int64 right = left + 1;
+			if (left < count && before(data[left], data[first])) first = left;
+			if (right < count && before(data[right], data[first])) first = right;
+			if (first == index) return;
+			SwapAt(index, first);
+			index = first;
+		}
+	}
+
+	template<T, Before>
+	public void PriorityQueue::Push(T value) {
+		items.Push(take(value));
+		SiftUp(items.Count() - 1);
+	}
+
+	template<T, Before>
+	public T PriorityQueue::Pop() {
+		if (items.IsEmpty()) { T none; return none; }
+		const int64 last = items.Count() - 1;
+		if (last > 0) SwapAt(0, last);
+		T first = items.Pop();
+		if (!items.IsEmpty()) SiftDown(0);
+		return first;
+	}
+}

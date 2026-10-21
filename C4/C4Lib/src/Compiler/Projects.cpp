@@ -120,6 +120,7 @@ namespace Scripting
 				result.error = "project '" + set.m_Projects[i].name + "' is described, but the root '" + set.m_Projects[set.m_Root].name + "' does not use it";
 				return result;
 			}
+		set.FindSearchFolders();
 		result.set = std::move(set);
 		return result;
 	}
@@ -132,6 +133,7 @@ namespace Scripting
 		program.sources = std::move(sources);
 		set.m_Projects.push_back(std::move(program));
 		set.m_Uses.push_back({ 0 });
+		set.FindSearchFolders();
 		return set;
 	}
 
@@ -149,12 +151,14 @@ namespace Scripting
 		return std::find(uses.begin(), uses.end(), used) != uses.end();
 	}
 
-	std::vector<fs::path> ProjectSet::SearchFolders(uint32_t project) const
+	void ProjectSet::FindSearchFolders()
 	{
-		std::vector<fs::path> folders;
-		for (const fs::path& source : m_Projects[project].sources)
-			folders.push_back(fs::is_directory(source) ? source : source.parent_path());
-		for (const fs::path& include : m_Projects[project].includes) folders.push_back(include);
-		return folders;
+		m_SearchFolders.clear();
+		for (const Project& project : m_Projects)
+		{
+			std::vector<fs::path>& folders = m_SearchFolders.emplace_back();
+			for (const fs::path& source : project.sources) folders.push_back(fs::is_directory(source) ? source : source.parent_path());
+			for (const fs::path& include : project.includes) folders.push_back(include);
+		}
 	}
 }

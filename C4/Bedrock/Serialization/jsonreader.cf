@@ -17,7 +17,11 @@ namespace Serialization
 		private DomNode Array();
 		private DomNode Number();
 		private bool Word(const char* word);
-		private bool StringInto(Core::StringBuilder& out);   // at the opening quote
+		// The string at the opening quote, as a view of the text or of `scratch` (when it has escapes).
+		private bool StringAt(Core::StringView& out);
+		// The container whose children were pushed on `pending` from `start` on, made and taken off the stack.
+		private DomNode CloseObject(int64 start);
+		private DomNode CloseArray(int64 start);
 		private bool Enter();
 		private void Leave() { depth -= 1; }
 		private void SkipSpace();
@@ -33,7 +37,8 @@ namespace Serialization
 		private int32 depth;
 		private const char* error;
 		private int64 errorAt;
-		private Core::StringBuilder scratch;   // the string being read; one at a time
+		private Core::StringBuilder scratch;   // an escaped string being read; one at a time
+		private Core::Array<int32> pending;    // the children of the open containers, innermost last
 	}
 
 	ReadResult JsonReader::Read() {
@@ -53,8 +58,8 @@ namespace Serialization
 		if (c == '[') return Array();
 		if (c == '-' || IsDecimalDigit(c)) return Number();
 		if (c == '"') {
-			scratch.Clear();
-			return StringInto(scratch) ? doc->NewString(scratch.View()) : DomNode();
+			Core::StringView value;
+			return StringAt(value) ? doc->NewString(value) : DomNode();
 		}
 		if (c == 't') return Word("true") ? doc->NewBool(true) : DomNode();
 		if (c == 'f') return Word("false") ? doc->NewBool(false) : DomNode();
@@ -65,23 +70,24 @@ namespace Serialization
 	DomNode JsonReader::Object() {
 		if (!Enter()) return DomNode();
 		position += 1;
-		DomNode object = doc->NewObject();
+		const int64 start = pending.Count();
 		SkipSpace();
-		if (At('}')) { position += 1; Leave(); return object; }
+		if (At('}')) { position += 1; Leave(); return CloseObject(start); }
 		for (;;) {
 			if (!At('"')) return Fail(Peek() < 0 ? "the text ends inside an object" : "a member's name must be a string");
-			scratch.Clear();
-			if (!StringInto(scratch)) return DomNode();
-			Core::String key = scratch.ToString();   // the value's own strings reuse the scratch
+			Core::StringView name;
+			if (!StringAt(name)) return DomNode();
+			pending.Push(doc->Key(name));   // into the pool now: the value's own strings reuse the scratch
+			pending.Push((int32)name.ByteLength());
 			SkipSpace();
 			if (!At(':')) return Fail("expected ':' after a member's name");
 			position += 1;
 			SkipSpace();
 			DomNode value = Value();
 			if (Failed()) return DomNode();
-			doc->AddMember(object, key.View(), value);
+			pending.Push(value.index);
 			SkipSpace();
-			if (At('}')) { position += 1; Leave(); return object; }
+			if (At('}')) { position += 1; Leave(); return CloseObject(start); }
 			if (!At(',')) return Fail(Peek() < 0 ? "the text ends inside an object" : "expected ',' or '}' after a member");
 			position += 1;
 			SkipSpace();
@@ -91,15 +97,15 @@ namespace Serialization
 	DomNode JsonReader::Array() {
 		if (!Enter()) return DomNode();
 		position += 1;
-		DomNode array = doc->NewArray();
+		const int64 start = pending.Count();
 		SkipSpace();
-		if (At(']')) { position += 1; Leave(); return array; }
+		if (At(']')) { position += 1; Leave(); return CloseArray(start); }
 		for (;;) {
 			DomNode element = Value();
 			if (Failed()) return DomNode();
-			doc->Add(array, element);
+			pending.Push(element.index);
 			SkipSpace();
-			if (At(']')) { position += 1; Leave(); return array; }
+			if (At(']')) { position += 1; Leave(); return CloseArray(start); }
 			if (!At(',')) return Fail(Peek() < 0 ? "the text ends inside an array" : "expected ',' or ']' after an element");
 			position += 1;
 			SkipSpace();
@@ -120,11 +126,23 @@ namespace Serialization
 		return true;
 	}
 
-	bool JsonReader::StringInto(Core::StringBuilder& out) {
+	bool JsonReader::StringAt(Core::StringView& out) {
 		JsonFault fault;
-		if (ReadJsonString(text, position, out, fault)) return true;
+		if (ReadJsonStringView(text, position, scratch, out, fault)) return true;
 		FailAt(fault.at, fault.error);
 		return false;
+	}
+
+	DomNode JsonReader::CloseObject(int64 start) {
+		DomNode object = doc->NewObjectOf(pending.Data() + start, (pending.Count() - start) / kMemberInts);
+		pending.RemoveRange(start, pending.Count());
+		return object;
+	}
+
+	DomNode JsonReader::CloseArray(int64 start) {
+		DomNode array = doc->NewArrayOf(pending.Data() + start, pending.Count() - start);
+		pending.RemoveRange(start, pending.Count());
+		return array;
 	}
 
 	bool JsonReader::Enter() {

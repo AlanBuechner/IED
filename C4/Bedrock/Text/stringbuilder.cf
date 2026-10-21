@@ -76,27 +76,47 @@ namespace Core
 	const int32 kFixedDoubleBytes = 352;
 	const int32 kMostDecimals = 40;
 
+	// 10^0 to 10^19: where a uint64's count of decimal digits changes.
+	const uint64[20] kPowersOfTen = { 1u, 10u, 100u, 1000u, 10000u, 100000u, 1000000u, 10000000u, 100000000u, 1000000000u, 10000000000u, 100000000000u, 1000000000000u, 10000000000000u, 100000000000000u, 1000000000000000u, 10000000000000000u, 100000000000000000u, 1000000000000000000u, 10000000000000000000u };
+	// "00" to "99": two decimal digits a lookup.
+	const char const* kDigitPairs = "00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899";
+
 	static char DigitChar(int32 digit) { return (char)(digit < 10 ? '0' + digit : 'a' + (digit - 10)); }
 
-	// Two decimal digits a step: one division by the constant 100 instead of two by a variable base.
-	static int32 DecimalDigitsBackward(uint64 value, char* digits) {
-		int32 at = kMostDigits;
-		while (value >= 100) {
-			int32 pair = (int32)(value % 100);
-			value = value / 100;
-			at -= 2;
-			digits[at] = DigitChar(pair / 10);
-			digits[at + 1] = DigitChar(pair % 10);
+	// How many decimal digits `value` has (1 for 0): its bit length times log10(2), corrected by one comparison.
+	static int32 DecimalDigitCount(uint64 value) {
+		if (value < 10u) return 1;
+		const int32 guess = ((64 - bit_leading_zeros(value)) * 1233) >> 12;
+		return guess + (value >= kPowersOfTen[guess] ? 1 : 0);
+	}
+
+	// `value`'s digits, ending just before `end`: two a step, one division by the constant 100 each.
+	static void WriteDecimalBackward(uint64 value, char* end) {
+		while (value >= 100u) {
+			const int32 pair = (int32)(value % 100u) * 2;
+			value = value / 100u;
+			end -= 2;
+			end[0] = kDigitPairs[pair];
+			end[1] = kDigitPairs[pair + 1];
 		}
-		if (value >= 10) {
-			at -= 2;
-			digits[at] = DigitChar((int32)value / 10);
-			digits[at + 1] = DigitChar((int32)value % 10);
-			return at;
+		if (value >= 10u) {
+			const int32 pair = (int32)value * 2;
+			end[-2] = kDigitPairs[pair];
+			end[-1] = kDigitPairs[pair + 1];
+			return;
 		}
-		at -= 1;
-		digits[at] = DigitChar((int32)value);
-		return at;
+		end[-1] = DigitChar((int32)value);
+	}
+
+	// Sized first, then written in place: no digits are copied.
+	void StringBuilder::AppendDecimal(uint64 value, int32 minWidth) {
+		const int32 digits = DecimalDigitCount(value);
+		const int32 width = digits > minWidth ? digits : minWidth;
+		Reserve(length + width);
+		if (width > digits) memset((void*)(buffer + length), '0', (uint64)(width - digits));
+		WriteDecimalBackward(value, buffer + length + width);
+		length += width;
+		buffer[length] = (char)0;
 	}
 
 	static int32 BaseDigitsBackward(uint64 value, int32 base, char* digits) {
@@ -110,9 +130,9 @@ namespace Core
 	}
 
 	void StringBuilder::AppendUIntBase(uint64 value, int32 base, int32 minWidth) {
-		if (base < 2 || base > 16) base = 10;
+		if (base < 2 || base > 16 || base == 10) { AppendDecimal(value, minWidth); return; }
 		char[64] digits;   // filled from the end: the number is digits[first, kMostDigits)
-		int32 first = base == 10 ? DecimalDigitsBackward(value, &digits[0]) : BaseDigitsBackward(value, base, &digits[0]);
+		int32 first = BaseDigitsBackward(value, base, &digits[0]);
 		for (int32 i = kMostDigits - first; i < minWidth; ++i) AppendByte('0');
 		AppendBytes(&digits[first], kMostDigits - first);
 	}

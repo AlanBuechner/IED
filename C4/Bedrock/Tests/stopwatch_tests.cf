@@ -1,0 +1,22 @@
+// Platform::Stopwatch measures forward, in ticks, seconds and nanoseconds, and laps restart it.
+
+include "bedrock.ch"
+
+[test("stopwatch")]
+class StopwatchTests {
+	[test("measures")]
+	public static void TestMeasures() {
+		Platform::Stopwatch watch;
+		uint64 spin = 0u;
+		for (int32 i = 0; i < 1000000; ++i) spin += (uint64)i * 3u;
+		assert_true(spin > 0u, "work");
+		assert_true(watch.ElapsedTicks() >= 0 && watch.Seconds() >= 0.0, "forward");
+		int64 nanoseconds = watch.Nanoseconds();
+		assert_true(nanoseconds > 0 && nanoseconds < 10000000000, "between nothing and ten seconds");
+		double first = watch.Lap();
+		double second = watch.Lap();
+		assert_true(first >= 0.0 && second >= 0.0 && second < 1.0, "laps restart");
+		watch.Restart();
+		assert_true(watch.Milliseconds() < 1000.0, "restarted");
+	}
+}

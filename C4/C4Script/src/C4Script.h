@@ -45,6 +45,9 @@ typedef struct c4s_options
 // (`table`, the program's __c4_script_table). Null on failure, with the reason in `error` (up to errorSize bytes).
 C4SCRIPT_API c4s_host* c4s_host_open(const char* interfacePath, const void* table, char* error, uint64_t errorSize);
 C4SCRIPT_API void c4s_host_close(c4s_host* host);
+// Keeps compiled scripts in `folder` from now on (docs/runtime/04 section 4.6): a script compiled again with the same
+// files, options, host build and compiler links the machine code kept from before. 0 when it cannot.
+C4SCRIPT_API int32_t c4s_host_use_cache(c4s_host* host, const char* folder);
 
 // Compiles, links and loads a script. Never null: c4s_script_ok says whether it worked, the diagnostics why not.
 C4SCRIPT_API c4s_script* c4s_compile(c4s_host* host, const c4s_options* options);
@@ -54,6 +57,8 @@ C4SCRIPT_API c4s_script* c4s_reload(c4s_host* host, c4s_script* old, const c4s_o
 C4SCRIPT_API int32_t c4s_script_ok(const c4s_script* script);
 C4SCRIPT_API const char* c4s_script_diagnostics(const c4s_script* script);
 C4SCRIPT_API const char* c4s_script_tag(const c4s_script* script);
+// Whether the script was linked from the host's cache (c4s_host_use_cache) instead of compiled.
+C4SCRIPT_API int32_t c4s_script_cached(const c4s_script* script);
 // Whether a guarded call into the script faulted, and what stopped it ("" when nothing did).
 C4SCRIPT_API int32_t c4s_script_faulted(const c4s_script* script);
 C4SCRIPT_API const char* c4s_script_fault(c4s_script* script);

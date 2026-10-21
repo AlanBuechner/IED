@@ -177,8 +177,11 @@ a declaration is all a script needs of a non-template function.
 To keep script code as fast as host code, small host functions are inlined into scripts across the boundary.
 The build writes the lowered (not yet optimized) IR of every host function that is small enough (at most
 `kInlineBodyLimit`, 160, instructions) and refers only to what a script can name (table symbols, intrinsics and
-private constants, which are copied with it) and no `thread_local`, as one bitcode module (`Script/InlineBodies`). A script imports a body as `available_externally` when it calls the function: the optimizer may
-inline it, and every call it does not inline goes to the host's code. Template instances the host made need no
+private constants, which are copied with it) and no `thread_local`, as one bitcode module (`Script/InlineBodies`). An optimized script imports a body as `available_externally` when it calls the function, and the bodies those
+call, two calls deep (`kInlineImportDepth`, `Script/InlineImport`): the optimizer may inline them, and every call
+it does not inline goes to the host's code. Only the imported bodies are read from the bitcode; importing every
+body a script reaches transitively made a 78-line IED plugin carry thousands of host functions through the
+optimizer for the same machine code. An unoptimized script imports none. Template instances the host made need no
 bitcode: the script lowers their bodies from the template (section 4.3).
 
 ### 3.4 What the build ships
@@ -200,9 +203,10 @@ scripts' own files are the program's data.
    include. A script file with an `extern "c"` / `extern "c++"` directive is an error (section 2).
 3. **Parse and build the model**, as for a program. The allow-list (section 4.5) is checked as includes resolve.
 4. **Lower in script mode** (section 4.2), with no entry point, for the host's target (its macros in step 2 too).
-5. **Import inline bodies** (section 3.3), then optimize at the requested level (`-O0` or `-O2`, the same pipeline
-   as the host's build).
-6. **Link** into the script's own JIT library (section 6), resolving every undefined name through the host's
+5. **Import inline bodies** (section 3.3) when optimizing, then optimize at the requested level (`-O0` or `-O2`,
+   the same pipeline as the host's build).
+6. **Link** into the script's own JIT library (section 6), its machine code generated at the script's level (the
+   fast instruction selector for `-O0`), resolving every undefined name through the host's
    table, then the C functions of the DLLs the process has loaded (for `[link]` declarations only).
 7. **Load**: register the script's reflection, its GC roots and its exit lists, then start its globals, inside a
    guard (section 7).
@@ -254,6 +258,18 @@ The script is optimized as a whole program would be, with the host's small funct
 outside them is a compile error: `a script may not include 'x': it is not on the allow-list`. No entry allows
 every host header. Bedrock is always allowed.
 
+### 4.6 The compiled-script cache
+
+`Host::UseCache(folder)` (`c4s_host_use_cache`) keeps every script the host compiles from then on in `folder`
+(`Script/ScriptCache`): its machine code (the COFF object the JIT generated), its warnings and its `thread_local`
+names. A later compile whose inputs are the same links that object instead of compiling: steps 1 to 5 are
+skipped, and step 6 links the object as it is. The inputs are everything that decides the code: each script file's
+path and text, the script's name (its reflection tag), the optimization level, the allow-list, the defines, the
+host's build id, and the compiler's own build (the path, size and time of `C4Script.dll`, so a rebuilt compiler
+never runs code an older one made). An entry is a file `<name>.<O0|O2>-<digest>.c4so`; writing one removes the
+script's other entries at that level, so the folder holds one per script and level. A missing, damaged or
+unlinkable entry is compiled again; a folder that cannot be written only makes compiles slower.
+
 ---
 
 ## 5. Reload and unload
@@ -300,6 +316,9 @@ MSVC exception tables are image-relative. The script image gets:
   names the personality by an image-relative offset;
 - a throw (`c4_script_throw`) that raises the C++ exception with the script image's base as the base of its throw
   information (what `_CxxThrowException` takes from `RtlPcToFileHeader`, which knows no JIT image).
+- a thunk in the image for each host function its tables name image-relatively (a thrown host type's destructor
+  and copy, `c4.image.<symbol>`, `KeepImageOffsetsInImage`): an offset from the script's base cannot reach the
+  host's code, and the runtime would jump into the script's data when it destroys or copies the exception object.
 
 A host function that throws into a script must be able to unwind: a C or C++ function compiled as `extern "C"`
 with `-fexternc-nounwind` (Frost's default) has no unwind table, and an exception crossing it skips the frames

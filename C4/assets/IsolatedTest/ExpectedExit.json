@@ -1,4 +1,14 @@
 {
+  "Platform/WindowsSubsystem": {
+    "exit": 2,
+    "compileFlags": ["--subsystem", "windows"],
+    "reason": "--subsystem windows links a windowed program: its PE header names the GUI subsystem (2), and main is still its entry, so it runs and returns the value it reads."
+  },
+  "Platform/ResourceFile": {
+    "exit": 0,
+    "compileFlags": ["-l{dir}/app.res"],
+    "reason": "-l with a .res file links the compiled resources as they are: the executable has a resource directory (app.res is llvm-rc's output for app.rc)."
+  },
   "Exceptions/UncaughtException": {
     "exit": 1,
     "mustNotContain": ["SHOULD NOT REACH HERE"],

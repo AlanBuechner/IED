@@ -32,6 +32,42 @@ int32 CatchFrom(Scripting::Script* script, const char* name)
 
 void RunThrowsInt(void* fn) { ((funcptr<void()>)fn)(); }
 
+class Run
+{
+	public funcptr<int32()> fn;
+	public int32 result = 0;
+}
+
+void RunForResult(void* run) { ((Run*)run)->result = ((Run*)run)->fn(); }
+
+void RunCatchingRefusal(void* run)
+{
+	try { ((Run*)run)->fn(); }
+	catch (Errors::Refusal& r) { ((Run*)run)->result = r.code; }
+}
+
+// BUG-315: a thrown type with a destructor, thrown by the script and caught by it, by the host inside a guarded call,
+// and outside one; each exception object is destroyed once, and none of it is a fault.
+void CheckRefusals(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	Errors::g_refusalsDropped = 0;
+	checks.Equal(14, CallScript(script, "CatchesRefusal"), "the script catches its own throw of a host type with a destructor");
+	Run own;
+	own.fn = (funcptr<int32()>)script->Address("CatchesRefusal");
+	checks.That(script->Call(RunForResult, (void*)&own), "the script catches it inside a guarded call");
+	checks.Equal(14, own.result, "and returns what it caught");
+	Run host;
+	host.fn = (funcptr<int32()>)script->Address("ThrowsRefusal");
+	checks.That(script->Call(RunCatchingRefusal, (void*)&host), "the host catches it inside a guarded call");
+	checks.Equal(7, host.result, "the host's handler sees the object");
+	int32 caught = 0;
+	try { script->Call(RunThrowsInt, script->Address("ThrowsRefusal")); }
+	catch (Errors::Refusal& r) { caught = r.code; }
+	checks.Equal(7, caught, "it leaves a guarded call to the host's handler");
+	checks.Equal(4, Errors::g_refusalsDropped, "each exception object is destroyed once");
+	checks.That(!script->Faulted(), "none of it is a fault");
+}
+
 void CheckExceptions(Scripting::Script* script, ScriptTest::Checks& checks)
 {
 	checks.Equal(701, CatchFrom(script, "ThrowsHostType"), "the host catches a host type the script throws");
@@ -60,6 +96,7 @@ int32 main(int32 argc, char** argv)
 	if (!host->IsOpen()) return checks.End("Exceptions");
 	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "exceptions", "exceptions.cf"));
 	if (script->Ok()) CheckExceptions(script, checks);
+	if (script->Ok()) CheckRefusals(script, checks);
 	script->Unload();
 	return checks.End("Exceptions");
 }

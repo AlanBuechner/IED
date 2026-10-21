@@ -123,10 +123,17 @@ namespace Core
 		return true;
 	}
 
+	const int64 kAsciiGroup = 16;
+	const uint8 kFirstNonAscii = 128;
+
+	// Sixteen bytes below 0x80: always well-formed, checked in one compare.
+	static bool AsciiGroup(const uint8* p) { return simd_bitmask(simd_load(p, 16) >= kFirstNonAscii) == 0u; }
+
 	int64 InvalidUtf8Offset(const char* bytes, int64 byteLength) {
 		const uint8* p = (const uint8*)bytes;
 		int64 i = 0;
 		while (i < byteLength) {
+			if (i + kAsciiGroup <= byteLength && AsciiGroup(p + i)) { i += kAsciiGroup; continue; }
 			int32 length = Utf8SequenceLength(p[i]);
 			if (length == 0 || i + length > byteLength || !SequenceFits(p + i, length)) return i;
 			i += length;

@@ -27,6 +27,12 @@ namespace Scripting
 	/// again (after the host's inline bodies come in) redirects what they named too.
 	void UseScriptRuntime(llvm::Module& module);
 
+	/// An image-relative reference (an EH or RTTI table's offset from `__ImageBase`, as a thrown type's destructor and
+	/// copy) can name only what the script's image holds: one naming a function the image has no code for - the
+	/// host's, declared or kept only for inlining - names a private thunk in the image that jumps to it instead (BUG-315).
+	/// Runs last, on the module the JIT generates.
+	void KeepImageOffsetsInImage(llvm::Module& module);
+
 	/// The global the loader stores the script's c4_script_module in.
 	inline constexpr const char* kScriptModuleSymbol = "__c4_script_module";
 } // namespace Scripting

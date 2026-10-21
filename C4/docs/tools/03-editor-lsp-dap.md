@@ -99,18 +99,28 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 copies it into every toolchain as `<toolchain>/ied/`, so a workspace gets the plugin of the C4 it builds with: the
 solution `nuke init --ied` writes names it in its `localPlugins` (IED loads local plugins in trusted workspaces).
 
-- **The language** `c4` for `.cf` and `.ch`: comments, brackets, closing pairs, indentation, and a Monarch grammar
-  (`grammars/c4.monarch.json`) that colors a file until C4LSP's semantic tokens arrive.
+- **The language** `c4` for `.cf` and `.ch`: comments, brackets, closing pairs, indentation, task comments, and a
+  Monarch grammar (`grammars/c4.monarch.json`) that colors a file until C4LSP's semantic tokens arrive. Its files and
+  projects show a teal "C4" (a header an "h"), and `.ch` / `.cf` pair as header and source.
+- **Semantic token colors** (`semanticTokenColors`): C4LSP's token types mapped onto IED's syntax theme tokens in the
+  Visual Assist style (`controlFlow` pink, `preprocessor` gray), never raw colors.
 - **C4LSP** (`lspProfiles`, IED `docs/24`): one server per project of the solution (`scope: project`), each with
   the options Nuke writes for that project (`.ied/local/lsp-options/<project>.json`) as its initialization options,
   so it compiles what the build compiles. It runs from a staged copy of `tools/C4LSP/` (rebuilding the toolchain
-  never fights a running server), with `C4_HOME` naming the toolchain so the copy still finds Bedrock. Its quirks
-  are declared rather than worked around in IED: byte columns (`positionEncoding: bytes`), integer request ids,
-  semantic tokens and folding fetched again after each diagnostics publish (it sends no refresh requests yet), and
-  code actions cut to the requested range by the client (it returns them all).
+  never fights a running server), with `C4_HOME` naming the toolchain so the copy still finds Bedrock. It agrees
+  the position encoding with the client (`utf-8` when offered, else `utf-16`) and answers string or number request
+  ids as sent. Two quirks are declared rather than worked around in IED: semantic tokens and folding are fetched
+  again after each diagnostics publish (`refetchOnDiagnostics`: it sends no refresh requests yet), and code actions
+  are cut to the requested range by the client (`codeActionsNeedClientFilter`: it returns them all).
+- **C4DAP** (`dapProviders`): the debug adapter for type `c4` (section 3), staged like the server, in trusted
+  workspaces.
+- **Build output**: the problem matchers `c4` (`file (line:col) error: ...`) and `c4-test` (`FAIL: file:line: ...`),
+  with output links for both shapes, so errors and failed tests land in IED's error list and open at their line.
+- **The task preset** `c4.nuke` (`taskPresets`): IED's `nuke` preset for a folder with a `nuke.toml`, with C4's
+  matchers and a `Launch` debug configuration (C4DAP on the project's output, built first).
+- **AI**: the skills of this version of the language (`skills/`, read before writing C4 or its tests) and a system
+  message section for workspaces that hold C4.
 - **Settings**: `c4.languageServer` (on) turns C4LSP off for a workspace.
-- **Still to come**: C4DAP as a debug provider (with IED's debugger), the problem matchers and the Nuke task preset
-  (with IED's tasks), and the semantic token colors as plugin data (IED's theme maps the standard types today).
 
 The server and the adapter are tested here without an editor (C4Testing `Lsp.*` and `Dap.*`, ToolsTest); IED's
 server checks drive its language server pool with a fake server.

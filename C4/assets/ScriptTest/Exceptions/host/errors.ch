@@ -1,3 +1,5 @@
+include "bedrock.ch"
+
 namespace Errors
 {
 	class GameError
@@ -10,6 +12,18 @@ namespace Errors
 	}
 
 	int32 g_unwound = 0;
+	int32 g_refusalsDropped = 0;
+
+	// An error that owns memory: the exception object is destroyed, by its host destructor, when its last handler is
+	// done with it (BUG-315).
+	class Refusal
+	{
+		public int32 code = 0;
+		public Core::String message;
+		[operator("create")] public void Init() {}
+		[operator("create")] public void Init(int32 c, Core::StringView m) { code = c; message = Core::String(m); }
+		[operator("delete")] public void Drop() { g_refusalsDropped++; }
+	}
 
 	void Fail(int32 code);
 	void ThrowInt(int32 value);

@@ -1,4 +1,17 @@
 {
+  "Platform/SubsystemUnknown": {
+    "expect": ["--subsystem takes console or windows, not 'gui'"],
+    "compileFlags": ["--subsystem", "gui"],
+    "reason": "--subsystem names one of the two subsystems; anything else is a clear command-line error, never a console build"
+  },
+  "Types/CharArrayStringTooLong": {
+    "expect": ["main.cf (2:18) error: the string has 4 characters: more than 'char8[3]' holds"],
+    "reason": "a string literal starts a character array only when its characters fit (BUG-314); a longer one is an error naming both sizes, never a silent cut"
+  },
+  "Types/CharArrayStringWidth": {
+    "expect": ["main.cf (2:19) error: a string of 'char8' units starts only a 'char8' array, not 'char16[4]'"],
+    "reason": "a string literal's unit width must match the array's character type (BUG-314): a plain literal does not start a char16 array"
+  },
   "Diagnostics/WerrorFails": {
     "expect": ["main.cf (5:17) error: the conversion from 'int64' to 'int16' may change the value"],
     "compileFlags": ["-Werror"],

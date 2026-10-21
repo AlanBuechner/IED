@@ -1,0 +1,38 @@
+// Core::Crc32 against the standard check values, split input and every alignment.
+
+include "bedrock.ch"
+
+[test("crc32")]
+class Crc32Tests {
+	[test("check_values")]
+	public static void TestCheckValues() {
+		assert_true(Core::Crc32((const void*)"123456789", 9) == 0xCBF43926u, "the standard check value");
+		assert_true(Core::Crc32((const void*)"", 0) == 0u, "nothing");
+		assert_true(Core::Crc32((const void*)"a", 1) == 0xE8B7BE43u, "one byte");
+		assert_true(Core::Crc32((const void*)"The quick brown fox jumps over the lazy dog", 43) == 0x414FA339u, "a sentence");
+	}
+
+	[test("pieces_and_alignment")]
+	public static void TestPiecesAndAlignment() {
+		uint8[300] data;
+		for (int32 i = 0; i < 300; ++i) data[i] = (uint8)(i * 31 + 7);
+		uint32 whole = Core::Crc32((const void*)&data[0], 300);
+		bool same = true;
+		for (int32 split = 0; split <= 300; split += 13) {
+			Core::Crc32Builder pieces;
+			pieces.Add((const void*)&data[0], split);
+			pieces.Add((const void*)&data[split], 300 - split);
+			if (pieces.Value() != whole) same = false;
+		}
+		assert_true(same, "any split gives the whole's value");
+		bool bytewise = true;
+		for (int32 start = 0; start < 8; ++start) {
+			Core::Crc32Builder fast;
+			fast.Add((const void*)&data[start], 200);
+			Core::Crc32Builder slow;
+			for (int32 i = 0; i < 200; ++i) slow.Add((const void*)&data[start + i], 1);
+			if (fast.Value() != slow.Value()) bytewise = false;
+		}
+		assert_true(bytewise, "eight at a time equals one at a time, from any alignment");
+	}
+}

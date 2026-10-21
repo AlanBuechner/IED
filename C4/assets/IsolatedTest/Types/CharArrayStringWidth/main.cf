@@ -1,0 +1,4 @@
+int32 main() {
+	char16[4] wide = "ab";
+	return wide[0];
+}

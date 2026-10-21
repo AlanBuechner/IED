@@ -2,6 +2,8 @@
 #include "Script/ScriptModulePasses.h"
 #include <llvm/TargetParser/Host.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
+#include <llvm/ExecutionEngine/ObjectCache.h>
+#include <llvm/ExecutionEngine/Orc/CompileUtils.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h>
 #include <llvm/ExecutionEngine/SectionMemoryManager.h>
@@ -176,10 +178,33 @@ namespace Scripting
 			});
 		}
 
-		llvm::orc::JITTargetMachineBuilder MachineBuilder(const CpuTarget& target)
+		// Keeps the machine code the JIT generates from a module, for a script cache.
+		class KeptObject : public llvm::ObjectCache
+		{
+		public:
+			explicit KeptObject(std::string* into) : m_Into(into) {}
+			void notifyObjectCompiled(const llvm::Module*, llvm::MemoryBufferRef object) override
+			{
+				if (m_Into) m_Into->assign(object.getBufferStart(), object.getBufferSize());
+			}
+			std::unique_ptr<llvm::MemoryBuffer> getObject(const llvm::Module*) override { return nullptr; }
+
+		private:
+			std::string* m_Into;
+		};
+
+		llvm::Error AddCode(llvm::orc::LLJIT& jit, ScriptCode code)
+		{
+			if (!code.module) return jit.addObjectFile(llvm::MemoryBuffer::getMemBufferCopy(code.object, "cached script"));
+			AddPersonalityThunk(*code.module);
+			return jit.addIRModule(llvm::orc::ThreadSafeModule(std::move(code.module), std::move(code.context)));
+		}
+
+		llvm::orc::JITTargetMachineBuilder MachineBuilder(const CpuTarget& target, bool optimize)
 		{
 			InitializeTarget();
 			llvm::orc::JITTargetMachineBuilder builder{ llvm::Triple(llvm::sys::getProcessTriple()) };
+			builder.setCodeGenOptLevel(optimize ? llvm::CodeGenOptLevel::Default : llvm::CodeGenOptLevel::None);
 			builder.setCPU(target.Cpu());
 			builder.getFeatures().AddFeature(target.LlvmFeatures()); // the whole `+a,-b` list, as clang passes it
 			builder.getOptions().EmulatedTLS = true;
@@ -240,7 +265,7 @@ namespace Scripting
 
 	std::unique_ptr<llvm::TargetMachine> ScriptTargetMachine(const CpuTarget& target, std::string* error)
 	{
-		auto machine = MachineBuilder(target).createTargetMachine();
+		auto machine = MachineBuilder(target, true).createTargetMachine();
 		if (!machine)
 		{
 			Fail(error, "no target machine: " + llvm::toString(machine.takeError()));
@@ -249,14 +274,20 @@ namespace Scripting
 		return std::move(*machine);
 	}
 
-	std::unique_ptr<LinkedScript> LinkScript(std::unique_ptr<llvm::LLVMContext> context, std::unique_ptr<llvm::Module> module, const HostSymbolTable& host,
-		const CpuTarget& target, std::string* error)
+	std::unique_ptr<LinkedScript> LinkScript(ScriptCode code, const HostSymbolTable& host, const CpuTarget& target, std::string* generated,
+		std::string* error)
 	{
 		auto image = std::make_shared<ScriptImage>();
 		const ImageFn add = host.Function<ImageFn>("c4_script_image_add");
 		const ImageRemoveFn remove = host.Function<ImageRemoveFn>("c4_script_image_remove");
+		KeptObject kept(generated);
 		auto jit = llvm::orc::LLJITBuilder()
-			.setJITTargetMachineBuilder(MachineBuilder(target))
+			.setJITTargetMachineBuilder(MachineBuilder(target, code.optimize))
+			.setCompileFunctionCreator([&kept](llvm::orc::JITTargetMachineBuilder builder) -> llvm::Expected<std::unique_ptr<llvm::orc::IRCompileLayer::IRCompiler>> {
+				auto machine = builder.createTargetMachine();
+				if (!machine) return machine.takeError();
+				return std::make_unique<llvm::orc::TMOwningSimpleCompiler>(std::move(*machine), &kept);
+			})
 			.setObjectLinkingLayerCreator([&](llvm::orc::ExecutionSession& session) -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
 				auto layer = std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(session, [image, add, remove](const llvm::MemoryBuffer&) {
 					return std::make_unique<ScriptMemoryManager>(image, add, remove);
@@ -275,17 +306,16 @@ namespace Scripting
 		if (!process) { Fail(error, llvm::toString(process.takeError())); return nullptr; }
 		library.addGenerator(std::move(*process));
 
-		AddPersonalityThunk(*module);
-		if (auto added = (*jit)->addIRModule(llvm::orc::ThreadSafeModule(std::move(module), std::move(context))))
+		if (auto added = AddCode(**jit, std::move(code)))
 		{
 			Fail(error, "the script does not link: " + llvm::toString(std::move(added)));
 			return nullptr;
 		}
 		// Every script defines its module record: looking it up generates the whole module, resolving every name it uses.
-		auto generated = (*jit)->lookup(kScriptModuleSymbol);
-		if (!generated)
+		auto record = (*jit)->lookup(kScriptModuleSymbol);
+		if (!record)
 		{
-			const std::string why = llvm::toString(generated.takeError());
+			const std::string why = llvm::toString(record.takeError());
 			Fail(error, "the script does not link: " + (sessionErrors->empty() ? why : *sessionErrors));
 			return nullptr;
 		}

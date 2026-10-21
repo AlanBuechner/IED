@@ -5,6 +5,8 @@
 
 namespace Platform
 {
+	const int64 kNanosecondsPerSecond = 1000000000;
+
 	// The processor's high-resolution counter: monotonic, TickFrequency() ticks per second. The cheapest timestamp.
 	[link("c4_time_ticks")] int64 Ticks();
 	[link("c4_time_tick_frequency")] int64 TickFrequency();

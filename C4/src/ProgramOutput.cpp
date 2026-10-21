@@ -191,7 +191,7 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
 		}
 		libraries.Push(Core::String((scriptHost / "C4Script.lib").string().c_str()));
 	}
-	if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.verbose))
+	if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.subsystem, m_In.options.verbose))
 	{
 		m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
 		return false;

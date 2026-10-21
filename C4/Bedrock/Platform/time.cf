@@ -2,7 +2,6 @@ include "time.ch"
 
 namespace Platform
 {
-	const int64 kNanosecondsPerSecond = 1000000000;
 	const int64 kSecondsPerMinute = 60;
 	const int64 kSecondsPerHour = 3600;
 	const int64 kSecondsPerDay = 86400;

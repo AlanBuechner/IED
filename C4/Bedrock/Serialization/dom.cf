@@ -3,8 +3,6 @@ include "reflectvalue.ch"
 
 namespace Serialization
 {
-	const int32 kMemberInts = 3;   // key offset, key length, value index
-
 	// ---- DomNode -------------------------------------------------------------------------------------
 
 	bool DomNode::IsValid() const { return doc != nullptr && index >= 0 && index < doc->recordCount; }
@@ -27,11 +25,11 @@ namespace Serialization
 
 	bool DomNode::AsBool() const { return Kind() == DomKind::Bool && doc->records[index].bits != 0; }
 
-	const char* DomNode::AsString() const { return Kind() == DomKind::String ? doc->pool + doc->records[index].offset : ""; }
+	const char* DomNode::AsString() const { return Kind() == DomKind::String ? doc->pool + doc->records[index].first : ""; }
 
 	Core::StringView DomNode::AsView() const {
 		if (Kind() != DomKind::String) return Core::StringView("");
-		return Core::StringView(doc->pool + doc->records[index].offset, (int64)doc->records[index].count);
+		return Core::StringView(doc->pool + doc->records[index].first, (int64)doc->records[index].count);
 	}
 
 	int64 DomNode::Count() const {
@@ -50,64 +48,114 @@ namespace Serialization
 
 	Core::StringView DomNode::KeyAt(int64 i) const {
 		if (Kind() != DomKind::Object || i < 0 || i >= Count()) return Core::StringView("");
-		const int32* member = doc->records[index].children + i * kMemberInts;
+		const int32* member = doc->children + doc->records[index].first + i * kMemberInts;
 		return Core::StringView(doc->pool + member[0], (int64)member[1]);
 	}
 
 	DomNode DomNode::ValueAt(int64 i) const {
 		DomNode value;
 		value.doc = doc;
-		if (Kind() == DomKind::Object && i >= 0 && i < Count()) value.index = doc->records[index].children[i * kMemberInts + 2];
+		if (Kind() == DomKind::Object && i >= 0 && i < Count()) value.index = doc->children[doc->records[index].first + i * kMemberInts + 2];
 		return value;
 	}
 
 	DomNode DomNode::At(int64 i) const {
 		DomNode element;
 		element.doc = doc;
-		if (Kind() == DomKind::Array && i >= 0 && i < Count()) element.index = doc->records[index].children[i];
+		if (Kind() == DomKind::Array && i >= 0 && i < Count()) element.index = doc->children[doc->records[index].first + i];
 		return element;
 	}
 
 	// ---- DomDoc: the arena ------------------------------------------------------------------------------
 
+	const int32 kFirstRecords = 16;
+	const int32 kFirstPoolBytes = 256;
+	const int32 kFirstChildInts = 64;
+	const int32 kFirstChildBlock = 4;
+
 	[operator("delete")] void DomDoc::Delete() {
-		for (int32 i = 0; i < recordCount; ++i) raw_free((void*)records[i].children);
 		raw_free((void*)records);
 		raw_free((void*)pool);
+		raw_free((void*)children);
 		records = nullptr;
 		pool = nullptr;
+		children = nullptr;
 		recordCount = 0;
 		recordCapacity = 0;
 		poolLength = 0;
 		poolCapacity = 0;
+		childLength = 0;
+		childCapacity = 0;
 	}
 
 	void DomDoc::Clear() {
-		for (int32 i = 0; i < recordCount; ++i) raw_free((void*)records[i].children);
 		recordCount = 0;
 		poolLength = 0;
+		childLength = 0;
+	}
+
+	// Doubles from `first` until `needed` fits: the capacity a growing buffer moves to.
+	static int64 GrownTo(int64 capacity, int64 first, int64 needed) {
+		int64 grown = capacity < first ? first : capacity * 2;
+		while (grown < needed) grown *= 2;
+		return grown;
 	}
 
 	void DomDoc::ReserveRecords(int64 count) {
 		if (count <= recordCapacity) return;
-		int32 grown = recordCapacity < 16 ? 16 : recordCapacity * 2;
-		while (grown < count) grown *= 2;
+		int64 grown = GrownTo(recordCapacity, kFirstRecords, count);
 		DomRecord* larger = (DomRecord*)raw_alloc((uint64)grown * sizeof(DomRecord));
 		if (recordCount > 0) memcpy((void*)larger, (void*)records, (uint64)recordCount * sizeof(DomRecord));
 		raw_free((void*)records);
 		records = larger;
-		recordCapacity = grown;
+		recordCapacity = (int32)grown;
 	}
 
-	void DomDoc::ReserveChildren(DomRecord* record, int64 ints) {
-		if (ints <= record->childCapacity) return;
-		int32 grown = record->childCapacity < 4 ? 4 : record->childCapacity * 2;
-		while (grown < ints) grown *= 2;
+	void DomDoc::ReservePool(int64 bytes) {
+		if (bytes <= poolCapacity) return;
+		int64 grown = GrownTo(poolCapacity, kFirstPoolBytes, bytes);
+		char* larger = (char*)raw_alloc((uint64)grown);
+		if (poolLength > 0) memcpy((void*)larger, (void*)pool, (uint64)poolLength);
+		raw_free((void*)pool);
+		pool = larger;
+		poolCapacity = (int32)grown;
+	}
+
+	void DomDoc::ReserveChildArena(int64 ints) {
+		if (ints <= childCapacity) return;
+		int64 grown = GrownTo(childCapacity, kFirstChildInts, ints);
 		int32* larger = (int32*)raw_alloc((uint64)grown * sizeof(int32));
-		if (record->childCapacity > 0) memcpy((void*)larger, (void*)record->children, (uint64)record->childCapacity * sizeof(int32));
-		raw_free((void*)record->children);
-		record->children = larger;
-		record->childCapacity = grown;
+		if (childLength > 0) memcpy((void*)larger, (void*)children, (uint64)childLength * sizeof(int32));
+		raw_free((void*)children);
+		children = larger;
+		childCapacity = (int32)grown;
+	}
+
+	int32 DomDoc::AppendChildren(const int32* ints, int64 count) {
+		ReserveChildArena(childLength + count);
+		int32 first = childLength;
+		if (count > 0) memcpy((void*)(children + first), (void*)ints, (uint64)count * sizeof(int32));
+		childLength += (int32)count;
+		return first;
+	}
+
+	// A block that ends the arena grows in place; any other moves to the end, leaving its old ints unused.
+	void DomDoc::ReserveChildren(int32 index, int64 ints) {
+		DomRecord* record = &records[index];
+		if (ints <= record->capacity) return;
+		int64 grown = GrownTo(record->capacity, kFirstChildBlock, ints);
+		if (record->capacity > 0 && record->first + record->capacity == childLength) {
+			ReserveChildArena((int64)childLength + grown - record->capacity);
+			childLength += (int32)(grown - record->capacity);
+			records[index].capacity = (int32)grown;
+			return;
+		}
+		ReserveChildArena(childLength + grown);
+		int32 used = record->kind == DomKind::Object ? record->count * kMemberInts : record->count;
+		if (used > 0) memcpy((void*)(children + childLength), (void*)(children + record->first), (uint64)used * sizeof(int32));
+		records[index].first = childLength;
+		records[index].capacity = (int32)grown;
+		childLength += (int32)grown;
 	}
 
 	DomNode DomDoc::Append(DomKind kind, int64 bits) {
@@ -115,10 +163,9 @@ namespace Serialization
 		DomRecord* record = &records[recordCount];
 		record->kind = kind;
 		record->bits = bits;
-		record->offset = 0;
+		record->first = 0;
 		record->count = 0;
-		record->children = nullptr;
-		record->childCapacity = 0;
+		record->capacity = 0;
 		DomNode node;
 		node.doc = this;
 		node.index = recordCount;
@@ -127,36 +174,27 @@ namespace Serialization
 	}
 
 	int32 DomDoc::Intern(Core::StringView text) {
-		int64 needed = poolLength + text.ByteLength() + 1;
-		if (needed > poolCapacity) {
-			int32 grown = poolCapacity < 256 ? 256 : poolCapacity * 2;
-			while (grown < needed) grown *= 2;
-			char* larger = (char*)raw_alloc((uint64)grown);
-			if (poolLength > 0) memcpy((void*)larger, (void*)pool, (uint64)poolLength);
-			raw_free((void*)pool);
-			pool = larger;
-			poolCapacity = grown;
-		}
+		ReservePool(poolLength + text.ByteLength() + 1);
 		int32 offset = poolLength;
 		memcpy((void*)(pool + offset), (void*)text.Data(), (uint64)text.ByteLength());
 		pool[offset + text.ByteLength()] = (char)0;
-		poolLength = (int32)needed;
+		poolLength += (int32)text.ByteLength() + 1;
 		return offset;
 	}
 
 	DomNode DomDoc::NewString(Core::StringView text) {
 		int32 offset = Intern(text);
 		DomNode node = Append(DomKind::String, 0);
-		records[node.index].offset = offset;
+		records[node.index].first = offset;
 		records[node.index].count = (int32)text.ByteLength();
 		return node;
 	}
 
 	void DomDoc::AddMember(const DomNode& object, Core::StringView key, const DomNode& value) {
 		int32 keyOffset = Intern(key);
+		ReserveChildren(object.index, (records[object.index].count + 1) * kMemberInts);
 		DomRecord* record = &records[object.index];
-		ReserveChildren(record, (record->count + 1) * kMemberInts);
-		int32* member = record->children + record->count * kMemberInts;
+		int32* member = children + record->first + record->count * kMemberInts;
 		member[0] = keyOffset;
 		member[1] = (int32)key.ByteLength();
 		member[2] = value.index;
@@ -164,10 +202,28 @@ namespace Serialization
 	}
 
 	void DomDoc::Add(const DomNode& array, const DomNode& value) {
+		ReserveChildren(array.index, records[array.index].count + 1);
 		DomRecord* record = &records[array.index];
-		ReserveChildren(record, record->count + 1);
-		record->children[record->count] = value.index;
+		children[record->first + record->count] = value.index;
 		record->count += 1;
+	}
+
+	DomNode DomDoc::NewObjectOf(const int32* members, int64 count) {
+		int32 first = AppendChildren(members, count * kMemberInts);
+		DomNode node = Append(DomKind::Object, 0);
+		records[node.index].first = first;
+		records[node.index].count = (int32)count;
+		records[node.index].capacity = (int32)(count * kMemberInts);
+		return node;
+	}
+
+	DomNode DomDoc::NewArrayOf(const int32* elements, int64 count) {
+		int32 first = AppendChildren(elements, count);
+		DomNode node = Append(DomKind::Array, 0);
+		records[node.index].first = first;
+		records[node.index].count = (int32)count;
+		records[node.index].capacity = (int32)count;
+		return node;
 	}
 
 	// ---- reflection bridge -----------------------------------------------------------------------------

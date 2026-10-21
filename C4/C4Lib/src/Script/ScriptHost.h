@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 #include "Script/HostInterface.h"
+#include "Script/ScriptCache.h"
 #include "Script/ScriptCompiler.h"
 #include "Script/ScriptJit.h"
 #include <memory>
@@ -54,6 +55,8 @@ namespace Scripting
 		bool Ok() const { return m_Linked && !m_Faulted; }
 		bool Faulted() const { return m_Faulted; }
 		const std::string& Diagnostics() const { return m_Diagnostics; }
+		/// It was linked from the host's script cache (section 4.6), not compiled.
+		bool Cached() const { return m_Cached; }
 		const std::string& Tag() const { return m_Tag; }
 		/// What stopped the call that faulted: the code, the instruction (as an offset into the script when it is
 		/// one of its) and what it touched.
@@ -85,6 +88,7 @@ namespace Scripting
 		const void* m_Roots = nullptr;     // its __c4_gc_roots
 		std::vector<void*> m_TlsControls;  // its thread_locals' __emutls_v controls
 		bool m_Faulted = false;
+		bool m_Cached = false;
 		ScriptFault m_Fault;
 	};
 
@@ -102,6 +106,10 @@ namespace Scripting
 		/// when it does not, `old` stays loaded and the result has the diagnostics.
 		std::unique_ptr<Script> Reload(Script& old, const ScriptCompileOptions& options);
 
+		/// Keeps compiled scripts in `folder` from now on (section 4.6): a compile whose inputs are an earlier one's
+		/// links that compile's machine code. False, with nothing kept, when the compiler's own file cannot be named.
+		bool UseCache(const std::string& folder);
+
 		const HostInterface& Interface() const { return m_Interface; }
 
 	private:
@@ -115,6 +123,11 @@ namespace Scripting
 			std::vector<std::string> threadLocals;
 		};
 		Built Build(const ScriptCompileOptions& options);
+		Built NewBuilt(const ScriptCompileOptions& options) const;
+		/// Links an earlier compile's machine code; nothing linked when it does not link.
+		Built LinkCached(const ScriptCompileOptions& options, CachedScript cached);
+		/// Compiles and links; `generated`, when given, gets the machine code.
+		Built CompileAndLink(const ScriptCompileOptions& options, std::string* generated);
 		static void LoadOrUndo(Script& script, std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
 
 		HostInterface m_Interface;
@@ -122,6 +135,7 @@ namespace Scripting
 		HostSymbolTable m_Table;
 		HostRuntime m_Runtime;
 		GuardedCall m_Guard;
+		std::optional<ScriptCache> m_Cache;
 		std::shared_ptr<std::recursive_mutex> m_Loading = std::make_shared<std::recursive_mutex>(); // an exit may compile
 	};
 } // namespace Scripting

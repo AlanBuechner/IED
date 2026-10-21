@@ -1,0 +1,37 @@
+// BUG-314: a string literal starts a character array, as in C: its units in order, a terminator where there is
+// room, zeros after it. main returns the failures.
+const char[20] kPairs = "00010203040506070809";
+
+struct Tagged {
+	public char8[8] tag = "hey";
+	public int32 id;
+}
+
+int32 Length(const char* text) {
+	int32 n = 0;
+	while (text[n] != 0) n += 1;
+	return n;
+}
+
+int32 main() {
+	int32 failures = 0;
+	char[16] name = "abc";
+	failures += name[0] == 'a' && name[2] == 'c' && name[3] == 0 && name[15] == 0 ? 0 : 1;
+	failures += Length(&name[0]) == 3 ? 0 : 1;
+	char[3] exact = "xyz";                                  // no room for the terminator: none is kept
+	failures += exact[0] == 'x' && exact[2] == 'z' ? 0 : 1;
+	failures += kPairs[0] == '0' && kPairs[7] == '3' && kPairs[19] == '9' ? 0 : 1;
+	char16[4] wide = u"ét";
+	failures += wide[0] == 0xe9 && wide[1] == 't' && wide[2] == 0 ? 0 : 1;
+	char32[3] points = U"\U0001F600";
+	failures += points[0] == 0x1F600 && points[1] == 0 ? 0 : 1;
+	char[6] joined = "ab" "cd";
+	failures += joined[3] == 'd' && joined[4] == 0 ? 0 : 1;
+	Tagged t;
+	failures += t.tag[0] == 'h' && t.tag[2] == 'y' && t.tag[3] == 0 ? 0 : 1;
+	Tagged braced = { "go", 4 };
+	failures += braced.tag[0] == 'g' && braced.tag[2] == 0 && braced.id == 4 ? 0 : 1;
+	name = "zz";
+	failures += name[0] == 'z' && name[1] == 'z' && name[2] == 0 && name[3] == 0 ? 0 : 1;
+	return failures;
+}

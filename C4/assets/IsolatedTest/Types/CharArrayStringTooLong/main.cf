@@ -1,0 +1,4 @@
+int32 main() {
+	char[3] small = "four";
+	return small[0];
+}

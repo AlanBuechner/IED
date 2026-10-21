@@ -48,6 +48,16 @@ namespace Scripting
 			return 0;
 		}
 
+		void ParseSubsystem(const std::string& v, CompileOptions& o)
+		{
+			if (v == "console") o.subsystem = Subsystem::Console;
+			else if (v == "windows") o.subsystem = Subsystem::Windows;
+			else o.error = "--subsystem takes console or windows, not '" + v + "'";
+		}
+
+		// A compiled resource file (llvm-rc or rc.exe output) goes to the linker as it is.
+		bool IsResourceFile(const std::string& v) { return fs::path(v).extension() == ".res"; }
+
 		const std::vector<Option>& Options()
 		{
 			static const std::vector<Option> options = {
@@ -74,8 +84,11 @@ namespace Scripting
 					[](CompileOptions& o, const std::string&) { o.strictAliasing = false; } },
 				{ { "--int-dir" }, "<dir>", "Write the intermediates (.obj, .ll, .bc) here, not next to the output", [](CompileOptions& o, const std::string& v) {
 					o.intermediateDir = v; } },
-				{ { "-l" }, "<lib>", "Link the library <lib> (<lib>.lib)", [](CompileOptions& o, const std::string& v) { o.linkArguments.Push("-l" + v); }, true },
+				{ { "-l" }, "<lib>", "Link the library <lib> (<lib>.lib), or a compiled resource file (<file>.res: icons, version information)",
+					[](CompileOptions& o, const std::string& v) { o.linkArguments.Push(IsResourceFile(v) ? v : "-l" + v); }, true },
 				{ { "-L" }, "<dir>", "Look for -l libraries in <dir>", [](CompileOptions& o, const std::string& v) { o.linkArguments.Push("-L" + v); }, true },
+				{ { "--subsystem" }, "<console|windows>", "The executable's subsystem: console (default), or windows for a windowed program that gets no console window (main is still its entry)",
+					[](CompileOptions& o, const std::string& v) { ParseSubsystem(v, o); } },
 				{ { "-g" }, nullptr, "Debug information: CodeView in the object and a .pdb beside the executable", [](CompileOptions& o, const std::string&) {
 					o.debugInfo = true; } },
 				{ { "-c" }, nullptr, "Compile to an object (<output base>.obj) and stop: no runtime, no link", [](CompileOptions& o, const std::string&) { o.compileOnly = true; } },
@@ -296,7 +309,7 @@ namespace Scripting
 	}
 
 	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
-		const Core::String& outputPath, bool verbose)
+		const Core::String& outputPath, Subsystem subsystem, bool verbose)
 	{
 		const std::string clangPath = ClangPath();
 		if (clangPath.empty()) return false;
@@ -311,7 +324,12 @@ namespace Scripting
 		args.push_back("-o");
 		args.push_back(outputPath);
 		args.push_back("-mstackrealign");
-		args.push_back("-Wl,/SUBSYSTEM:CONSOLE");
+		if (subsystem == Subsystem::Windows)
+		{
+			args.push_back("-Wl,/SUBSYSTEM:WINDOWS");
+			args.push_back("-Wl,/ENTRY:mainCRTStartup"); // the C runtime's console entry, which calls main, not WinMain
+		}
+		else args.push_back("-Wl,/SUBSYSTEM:CONSOLE");
 
 		if (verbose)
 		{

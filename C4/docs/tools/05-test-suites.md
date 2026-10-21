@@ -338,6 +338,14 @@ The front end is a small part of every build. The object is now emitted in proce
 assembled in parallel partitions (B47); at `-O2` the single-threaded LLVM optimizer is now most of the time, and at
 `-O0` code generation. Caching the objects of unchanged partitions is the next compile-time item (roadmap 5.3).
 
+Script compiles (2026-10-21, `Host::Compile` of IED's 78-line Go plugin against the IED server's 4.9 MB interface,
+compile and link; before in parentheses): `-O2` 0.26 s (4.6 s the first time, 2.3 s after), `-O0` 0.20 s (1.75 s).
+The time went to rebuilding the reflection registry's name index for every function a script registers, a
+file-system check of the interface's virtual `//c4i` folders on every include lookup (a network path to Windows),
+reading and optimizing every host inline body the script reached transitively (4,783 bodies; now two calls deep,
+read lazily, none at `-O0`), and full code generation for `-O0` scripts (now the fast instruction selector).
+With the compiled-script cache (`Host::UseCache`, docs/runtime/04 section 4.6) the same script loads in 4 ms.
+
 `Benchmarks/bedrock/` (`run-benchmark.ps1`): Bedrock against the C++ standard library at `-O2`, the same kernels
 over the same pseudo-random data in `bedrock.cf` and `bedrock.cpp`, each timed in process (median of 5 runs) with a
 checksum both sides must print alike: `HashMap` (1M `int64` keys: insert, hits, misses, removes; 200k text keys:
@@ -356,14 +364,18 @@ Baselines (2026-10-21, ms; ratio < 1 means Bedrock is faster):
 | map_text_insert | 22.3 | 40.9 | 0.55 |
 | map_text_find | 32.1 | 50.9 | 0.63 |
 | array_push_sum | 16.5 | 21.9 | 0.75 |
-| sort_int32 | 96.7 | 106.2 | 0.91 |
-| text_append_int | 16.9 | 12.6 | 1.34 |
-| text_format_double | 34.8 | 34.2 | 1.02 |
-| text_parse_double | 77.3 | 73.7 | 1.05 |
+| sort_int32 | 9.6 | 106.0 | 0.09 |
+| text_append_int | 13.3 | 14.0 | 0.95 |
+| text_format_double | 36.0 | 36.5 | 0.99 |
+| text_parse_double | 21.3 | 73.8 | 0.29 |
+| json_write (C4 only, 10 MB) | 21.4 | - | - |
+| json_read (C4 only, 10 MB) | 27.7 | - | - |
 
 Before the Swiss-style table and the wyhash-style byte hash (linear probing over a separate state byte per slot,
-FNV-1a), the map kernels took 32.4, 8.9, 11.5, 3.3, 41.4 and 41.1 ms. The shortest double form took 4,851 ms for the
-million doubles before the number text moved to `<charconv>`
+FNV-1a), the map kernels took 32.4, 8.9, 11.5, 3.3, 41.4 and 41.1 ms. Before the radix sort `sort_int32` took 104.3 ms (introsort);
+before the Eisel-Lemire fast path `text_parse_double` took 77.3 ms (`from_chars`); before the DOM's single child block
+and string views of the source `json_read` took 72.2 ms and `json_write` 28.4 ms. The shortest double form took
+4,851 ms for the million doubles before the number text moved to `<charconv>`
 (it printed and read back up to 17 times per number), and the integers 31.4 ms before they were written two digits
 at a time.
 

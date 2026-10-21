@@ -1,0 +1,88 @@
+include "uuid.ch"
+
+namespace Core
+{
+	const int64 kUuidTextLength = 36;
+
+	// The four bits of byte 6 that say the version, and the two of byte 8 that say the RFC 9562 variant (10).
+	static void Stamp(Uuid& id, int32 version) {
+		id.bytes[6] = (uint8)((id.bytes[6] & 15) | (version << 4));
+		id.bytes[8] = (uint8)((id.bytes[8] & 63) | 128);
+	}
+
+	static void FillRandom(Uuid& id, int32 from, Random& random) {
+		for (int32 i = from; i < 16; i += 8) {
+			uint64 bits = random.Next();
+			for (int32 k = 0; k < 8 && i + k < 16; ++k) id.bytes[i + k] = (uint8)(bits >> (k * 8));
+		}
+	}
+
+	Uuid Uuid::NewV4(Random& random) {
+		Uuid id;
+		FillRandom(id, 0, random);
+		Stamp(id, 4);
+		return id;
+	}
+
+	Uuid Uuid::NewV7(int64 unixMilliseconds, Random& random) {
+		Uuid id;
+		FillRandom(id, 6, random);
+		for (int32 i = 0; i < 6; ++i) id.bytes[i] = (uint8)((uint64)unixMilliseconds >> ((5 - i) * 8));
+		Stamp(id, 7);
+		return id;
+	}
+
+	bool Uuid::IsNil() const {
+		for (int32 i = 0; i < 16; ++i)
+			if (bytes[i] != 0) return false;
+		return true;
+	}
+
+	// Where the text has a '-': after the 4th, 6th, 8th and 10th byte.
+	static bool DashBefore(int32 byteIndex) { return byteIndex == 4 || byteIndex == 6 || byteIndex == 8 || byteIndex == 10; }
+
+	void Uuid::AppendTo(StringBuilder& out) const {
+		for (int32 i = 0; i < 16; ++i) {
+			if (DashBefore(i)) out.AppendByte('-');
+			out.AppendUIntBase((uint64)bytes[i], 16, 2);
+		}
+	}
+
+	String Uuid::ToString() const {
+		StringBuilder text(kUuidTextLength);
+		AppendTo(text);
+		return text.ToString();
+	}
+
+	static int32 HexValue(int32 c) {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	}
+
+	static StringView WithoutBraces(StringView text) {
+		if (text.ByteLength() == kUuidTextLength + 2 && text.ByteAt(0) == '{' && text.ByteAt(kUuidTextLength + 1) == '}') return text.Substring(1, kUuidTextLength);
+		return text;
+	}
+
+	bool Uuid::Parse(StringView text, Uuid& out) {
+		StringView digits = WithoutBraces(text);
+		if (digits.ByteLength() != kUuidTextLength) return false;
+		Uuid id;
+		int64 at = 0;
+		for (int32 i = 0; i < 16; ++i) {
+			if (DashBefore(i)) {
+				if (digits.ByteAt(at) != '-') return false;
+				at += 1;
+			}
+			int32 high = HexValue(digits.ByteAt(at));
+			int32 low = HexValue(digits.ByteAt(at + 1));
+			if (high < 0 || low < 0) return false;
+			id.bytes[i] = (uint8)(high * 16 + low);
+			at += 2;
+		}
+		out = id;
+		return true;
+	}
+}

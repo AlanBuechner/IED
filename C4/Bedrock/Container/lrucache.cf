@@ -1,0 +1,73 @@
+include "lrucache.ch"
+
+namespace Core
+{
+	// The entries are put again from the least to the most recently used, so the copy keeps the order.
+	template<K, V>
+	public void LruCache::CopyFrom(const LruCache<K, V>& other) {
+		limit = other.limit;
+		slots.Reserve(limit);
+		for (const ListNode<KeyValue<K, V>>* node = other.order.Last(); node; node = node->previous) Put(node->value.key, node->value.value);
+	}
+
+	template<K, V>
+	public V* LruCache::Find(const K& key) {
+		ListNode<KeyValue<K, V>>** node = slots.Find(key);
+		if (!node) return nullptr;
+		order.MoveToFront(*node);
+		return &(*node)->value.value;
+	}
+
+	template<K, V>
+	public const V* LruCache::Peek(const K& key) const {
+		ListNode<KeyValue<K, V>>* node = nullptr;
+		return slots.TryGet(key, node) ? &node->value.value : nullptr;
+	}
+
+	template<K, V>
+	public bool LruCache::Put(K key, V value) {
+		ListNode<KeyValue<K, V>>** found = slots.Find(key);
+		if (found) {
+			(*found)->value.value = take(value);
+			order.MoveToFront(*found);
+			return false;
+		}
+		const bool dropped = order.Count() >= Capacity();
+		if (dropped) DropLeastRecent();
+		KeyValue<K, V> entry;
+		entry.key = key;
+		entry.value = take(value);
+		slots.Insert(take(key), order.PushFront(take(entry)));
+		return dropped;
+	}
+
+	template<K, V>
+	public bool LruCache::Remove(const K& key) {
+		ListNode<KeyValue<K, V>>** node = slots.Find(key);
+		if (!node) return false;
+		ListNode<KeyValue<K, V>>* held = *node;
+		slots.Remove(key);
+		order.Remove(held);
+		return true;
+	}
+
+	template<K, V>
+	public void LruCache::Clear() {
+		slots.Clear();
+		order.Clear();
+	}
+
+	template<K, V>
+	public void LruCache::Resize(int64 capacity) {
+		limit = capacity < 1 ? 1 : capacity;
+		while (order.Count() > Capacity()) DropLeastRecent();
+	}
+
+	template<K, V>
+	private void LruCache::DropLeastRecent() {
+		ListNode<KeyValue<K, V>>* last = order.Last();
+		if (!last) return;
+		slots.Remove(last->value.key);
+		order.Remove(last);
+	}
+}

@@ -164,6 +164,11 @@ const char* joined = "ab" "cd";      // adjacent strings join: "abcd"
   from the library (`Core::String`, `Core::StringView`, `Core::StringBuilder` in
   [../library/bedrock.md](../library/bedrock.md)).
 - An embedded `\0` is kept: `"a\0b"` is three units and a terminator.
+- A string literal starts a character array of its unit type, as in C: `char[16] name = "abc";` holds the
+  units in order, a terminator where there is room and zeros after it (`char[3] code = "xyz";` keeps no
+  terminator). A string longer than the array, or of another unit width (`char16[4] w = "ab";`), is an
+  error. It works wherever a value of the array's type starts: a variable, a field's initializer, a braced
+  entry, an assignment.
 - Adjacent string literals join, as in C, when they have the same prefix (none and `u8` are the same).
 - A literal ends on its line: a newline before the closing quote is the error
   `missing the closing '"' of a string literal on this line`.

@@ -21,6 +21,12 @@ namespace Serialization
 	// The string whose opening quote is at `at`, its escapes decoded (surrogate pairs into one character), appended
 	// to `out`.
 	bool ReadJsonString(Core::StringView text, int64& at, Core::StringBuilder& out, JsonFault& fault);
+	// The same string as a view: of `text` itself when it has no escape (nothing is copied), else of `scratch`, which
+	// it is decoded into. Valid until `scratch` changes.
+	bool ReadJsonStringView(Core::StringView text, int64& at, Core::StringBuilder& scratch, Core::StringView& out, JsonFault& fault);
+	// The first byte at or after `at` that a JSON string cannot hold as it is - '"', '\' or a control character - or
+	// `end`; sixteen bytes are checked at a time.
+	int64 PlainStringRunEnd(const char* bytes, int64 at, int64 end);
 	// The number that starts at `at` (a '-' or a digit). It ends where the grammar does: "1.5.3" reads 1.5.
 	bool ReadJsonNumber(Core::StringView text, int64& at, JsonNumber& number, JsonFault& fault);
 }

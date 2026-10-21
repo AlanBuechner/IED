@@ -1,4 +1,5 @@
 include "json.ch"
+include "jsontokens.ch"
 
 namespace Serialization
 {
@@ -11,19 +12,29 @@ namespace Serialization
 		if (written.IndexOf('.', 0) < 0 && written.IndexOf('e', 0) < 0 && written.IndexOf('n', 0) < 0) out->Append(".0");
 	}
 
+	// One byte a JSON string cannot hold as it is: a quote, a backslash or a control character.
+	static void WriteJsonEscape(int32 c, Core::StringBuilder* out) {
+		if (c == '"') out->Append("\\\"");
+		else if (c == '\\') out->Append("\\\\");
+		else if (c == '\n') out->Append("\\n");
+		else if (c == '\r') out->Append("\\r");
+		else if (c == '\t') out->Append("\\t");
+		else if (c == 8) out->Append("\\b");
+		else if (c == 12) out->Append("\\f");
+		else { out->Append("\\u"); out->AppendUIntBase((uint64)c, 16, 4); }
+	}
+
+	// The runs of bytes that need no escape are found sixteen at a time and appended whole.
 	void WriteJsonString(Core::StringView text, Core::StringBuilder* out) {
 		out->AppendByte('"');
-		for (int64 i = 0; i < text.ByteLength(); ++i) {
-			int32 c = text.ByteAt(i);
-			if (c == '"') out->Append("\\\"");
-			else if (c == '\\') out->Append("\\\\");
-			else if (c == '\n') out->Append("\\n");
-			else if (c == '\r') out->Append("\\r");
-			else if (c == '\t') out->Append("\\t");
-			else if (c == 8) out->Append("\\b");
-			else if (c == 12) out->Append("\\f");
-			else if (c < 0x20) { out->Append("\\u"); out->AppendUIntBase((uint64)c, 16, 4); }
-			else out->AppendByte(c);
+		const char* bytes = text.Data();
+		const int64 end = text.ByteLength();
+		for (int64 at = 0; at < end;) {
+			const int64 run = PlainStringRunEnd(bytes, at, end);
+			out->AppendBytes(bytes + at, run - at);
+			if (run == end) break;
+			WriteJsonEscape(text.ByteAt(run), out);
+			at = run + 1;
 		}
 		out->AppendByte('"');
 	}

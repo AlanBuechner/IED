@@ -1,0 +1,46 @@
+// Core::Uuid: versions 4 and 7, the variant, text both ways, ordering and hashing.
+
+include "bedrock.ch"
+
+[test("uuid")]
+class UuidTests {
+	[test("versions")]
+	public static void TestVersions() {
+		Core::Random random(3);
+		Core::Uuid a = Core::Uuid::NewV4(random);
+		Core::Uuid b = Core::Uuid::NewV4(random);
+		assert_eq(4, a.Version(), "version 4");
+		assert_true((a.bytes[8] & 192) == 128, "the RFC 9562 variant");
+		assert_true(a != b, "two differ");
+		Core::Uuid early = Core::Uuid::NewV7(1700000000000, random);
+		Core::Uuid late = Core::Uuid::NewV7(1700000000001, random);
+		assert_eq(7, early.Version(), "version 7");
+		assert_true(early < late, "version 7 sorts by time");
+		assert_true(early.bytes[0] == 0x01 && early.bytes[5] == 0x00, "the milliseconds first, big-endian (0x018bcfe56800)");
+		Core::Uuid nil;
+		assert_true(nil.IsNil() && !a.IsNil(), "the nil UUID");
+	}
+
+	[test("text")]
+	public static void TestText() {
+		Core::Uuid id;
+		assert_true(Core::Uuid::Parse(Core::StringView("f47ac10b-58cc-4372-a567-0e02b2c3d479"), id), "parsed");
+		assert_eq(4, id.Version(), "its version");
+		assert_se("f47ac10b-58cc-4372-a567-0e02b2c3d479", id.ToString().CStr(), "written back");
+		Core::Uuid upper;
+		assert_true(Core::Uuid::Parse(Core::StringView("{F47AC10B-58CC-4372-A567-0E02B2C3D479}"), upper) && upper == id, "upper case in braces");
+		Core::Uuid untouched = id;
+		assert_true(!Core::Uuid::Parse(Core::StringView("f47ac10b58cc4372a5670e02b2c3d479"), untouched), "no dashes");
+		assert_true(!Core::Uuid::Parse(Core::StringView("f47ac10b-58cc-4372-a567-0e02b2c3d47"), untouched), "too short");
+		assert_true(!Core::Uuid::Parse(Core::StringView("g47ac10b-58cc-4372-a567-0e02b2c3d479"), untouched), "not hex");
+		assert_true(!Core::Uuid::Parse(Core::StringView("f47ac10b-58cc+4372-a567-0e02b2c3d479"), untouched), "a wrong separator");
+		assert_true(untouched == id, "a failed parse leaves the value");
+		Core::Random random(8);
+		Core::Uuid made = Core::Uuid::NewV4(random);
+		Core::Uuid back;
+		assert_true(Core::Uuid::Parse(made.ToString().View(), back) && back == made, "round trip");
+		Core::HashSet<Core::Uuid> ids;
+		for (int32 i = 0; i < 1000; ++i) ids.Add(Core::Uuid::NewV4(random));
+		assert_eq((int64)1000, ids.Count(), "hashable, and a thousand are distinct");
+	}
+}

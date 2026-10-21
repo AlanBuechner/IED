@@ -159,10 +159,48 @@ namespace Scripting
 		return std::unique_ptr<ScriptHost>(new ScriptHost(std::move(host), std::move(*symbols), *runtime, guard));
 	}
 
+	bool ScriptHost::UseCache(const std::string& folder)
+	{
+		const std::string compiler = ScriptCompilerIdentity();
+		if (compiler.empty()) return false;
+		m_Cache.emplace(folder, compiler);
+		return true;
+	}
+
 	ScriptHost::Built ScriptHost::Build(const ScriptCompileOptions& options)
+	{
+		const std::string entry = m_Cache ? m_Cache->EntryFor(m_Interface, options) : "";
+		if (std::optional<CachedScript> cached = entry.empty() ? std::nullopt : m_Cache->Read(entry))
+			if (Built built = LinkCached(options, std::move(*cached)); built.linked) return built;
+		std::string generated;
+		Built built = CompileAndLink(options, entry.empty() ? nullptr : &generated);
+		if (built.linked && !generated.empty()) m_Cache->Write(entry, { std::move(generated), built.script->m_Diagnostics, built.threadLocals });
+		return built;
+	}
+
+	ScriptHost::Built ScriptHost::NewBuilt(const ScriptCompileOptions& options) const
 	{
 		Built built;
 		built.script.reset(new Script(m_Runtime, m_Guard, m_Loading, options.name));
+		return built;
+	}
+
+	ScriptHost::Built ScriptHost::LinkCached(const ScriptCompileOptions& options, CachedScript cached)
+	{
+		Built built = NewBuilt(options);
+		ScriptCode code;
+		code.object = std::move(cached.object);
+		std::string error;
+		built.linked = LinkScript(std::move(code), m_Table, m_Index.target, nullptr, &error);
+		built.script->m_Cached = true;
+		built.script->m_Diagnostics = std::move(cached.diagnostics);
+		built.threadLocals = std::move(cached.threadLocals);
+		return built;
+	}
+
+	ScriptHost::Built ScriptHost::CompileAndLink(const ScriptCompileOptions& options, std::string* generated)
+	{
+		Built built = NewBuilt(options);
 		std::string error;
 		std::unique_ptr<llvm::TargetMachine> machine = ScriptTargetMachine(m_Index.target, &error);
 		if (!machine)
@@ -173,7 +211,11 @@ namespace Scripting
 		CompiledScript compiled = CompileScript(m_Interface, m_Index, options, *machine);
 		built.script->m_Diagnostics = compiled.diagnostics;
 		if (!compiled.module) return built;
-		built.linked = LinkScript(std::move(compiled.context), std::move(compiled.module), m_Table, m_Index.target, &error);
+		ScriptCode code;
+		code.context = std::move(compiled.context);
+		code.module = std::move(compiled.module);
+		code.optimize = options.optimize;
+		built.linked = LinkScript(std::move(code), m_Table, m_Index.target, generated, &error);
 		if (!built.linked) built.script->m_Diagnostics += "error: " + error + "\n";
 		built.threadLocals = std::move(compiled.threadLocals);
 		return built;

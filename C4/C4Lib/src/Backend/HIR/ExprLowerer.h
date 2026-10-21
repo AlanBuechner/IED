@@ -15,6 +15,7 @@ namespace Scripting
 	struct StaticAccessNode; struct NewExpressionNode; struct BracedInitializerNode;
 	struct TypeOfExpressionNode; struct LambdaNode; struct PackExpansionNode; struct ValueListNode;
 	struct NamespaceQualifiedNameNode; struct TemplateArgumentListNode;
+	class ArrayType;
 
 	// =====================================================================
 	// EXPRESSION LOWERER (05, expression rows) - one method per AST node type. Every method:
@@ -53,6 +54,9 @@ namespace Scripting
 		/// A braced list that initializes a value of type `target`: an __init_list, a construction of an object
 		/// type (`T{...}`), or an array.
 		QueryResult<Value> ResolveBracedAs(const BracedInitializerNode* brace, const Type* target);
+		/// A string literal that initializes the character array `array`: its units in order, a terminator where
+		/// there is room (C's rule), zeros after it.
+		QueryResult<Value> ResolveTextAs(const LiteralNode* text, const ArrayType* array);
 		QueryResult<void> MaterializeBracedArguments(const std::vector<const BracedInitializerNode*>& braced,
 			const Core::Vector<const Type*>& params, std::vector<const HIRNode*>& argNodes);
 		/// The arguments of a construction in order, each pack expansion standing for its copies.
@@ -135,6 +139,8 @@ namespace Scripting
 		QueryResult<CallTarget> MemberCallTarget(const MemberAccessNode* ma);
 		QueryResult<CallTarget> StaticCallTarget(const StaticAccessNode* sa);
 		QueryResult<CallTarget> ValueCallTarget(const AstNode* callee);
+		/// Whether `name` (plain or qualified) names a variable here: a call of it calls the variable's value.
+		bool NamesVariable(const Core::String& name);
 		QueryResult<void> CallThrough(const AstNode* callee, const Value& value, CallTarget& target);
 		/// `Ns::Fn` (or `A::B::C`) from the static-access chain a qualified call target parses as.
 		static bool QualifiedCallName(const StaticAccessNode* sa, Core::String& out);
