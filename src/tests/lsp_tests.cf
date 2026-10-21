@@ -1,0 +1,202 @@
+// lsp/: message framing, positions between UTF-16 and UTF-8, URIs, and the pool's message helpers.
+
+include "lsp/framing.ch"
+include "lsp/positions.ch"
+include "lsp/uris.ch"
+include "lsp/profiles.ch"
+include "lsp/rewrite.ch"
+include "lsp/pool.ch"
+
+static int64 Col(const char* line, int64 col, Ied::PositionEncoding from, Ied::PositionEncoding to) { return Ied::ConvertColumn(Core::StringView(line), col, from, to); }
+
+// "a.c" holds an e-acute (two bytes, one unit) then " = 1;", and a second line "ok"; "b.c" is ASCII. Server URIs are
+// file:///x/..., client URIs ied://w1/....
+static Ied::LineIndex* gA = new Ied::LineIndex(Core::StringView("\xc3\xa9 = 1;\nok"));
+
+static Ied::Rewrite ToClient() {
+	Ied::Rewrite rewrite;
+	rewrite.from = Ied::PositionEncoding::Utf8;
+	rewrite.to = Ied::PositionEncoding::Utf16;
+	rewrite.lines = [](Core::StringView uri) -> const Ied::LineIndex* { return uri == "file:///x/a.c" ? gA : nullptr; };
+	rewrite.mapUri = [](Core::StringView uri) -> Core::String { return uri.StartsWith(Core::StringView("file:///x/")) ? Core::String("ied://w1/") + uri.Substring(10, uri.ByteLength() - 10) : Core::String(uri); };
+	rewrite.uri = Core::String("file:///x/a.c");
+	return rewrite;
+}
+
+static Core::String Rewritten(const char* json, const Ied::Rewrite& rewrite) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Ied::RewriteJson(Serialization::ReadJson(Core::StringView(json), *doc).root, rewrite);
+}
+
+[test("server.lsp")]
+class LspTests {
+	[test("framing")]
+	public static void TestFraming() {
+		Ied::FrameReader reader;
+		Core::String body;
+		Core::String framed = Ied::FrameMessage(Core::StringView("{\"id\":1}"));
+		assert_se("Content-Length: 8\r\n\r\n{\"id\":1}", framed.CStr(), "a framed message");
+		reader.Feed(framed.View().Substring(0, 10));
+		assert_true(!reader.Next(body), "not yet: half a header");
+		reader.Feed(framed.View().Substring(10, framed.ByteLength() - 12));
+		assert_true(!reader.Next(body), "not yet: two bytes short");
+		reader.Feed(framed.View().Substring(framed.ByteLength() - 2, 2));
+		reader.Feed(Core::StringView("content-length: 2\r\nContent-Type: application/vscode-jsonrpc\r\n\r\n{}Content-Length: 0\r\n\r\n"));
+		assert_true(reader.Next(body) && body == "{\"id\":1}", "the first message whole");
+		assert_true(reader.Next(body) && body == "{}", "header names fold case; other headers are passed over");
+		assert_true(reader.Next(body) && body.IsEmpty(), "an empty body");
+		assert_true(!reader.Next(body) && !reader.Failed(), "nothing more");
+	}
+
+	[test("framing_refused")]
+	public static void TestFramingRefused() {
+		Ied::FrameReader reader;
+		Core::String body;
+		reader.Feed(Core::StringView("Content-Type: x\r\n\r\n{}"));
+		assert_true(!reader.Next(body) && reader.Failed(), "no Content-Length");
+		reader.Feed(Core::StringView("Content-Length: 2\r\n\r\n{}"));
+		assert_true(!reader.Next(body), "nothing after a failure");
+		assert_eq(-1, Ied::ContentLengthOf(Core::StringView("Content-Length: -3")), "negative");
+		assert_eq(-1, Ied::ContentLengthOf(Core::StringView("Content-Length: x")), "not a number");
+		assert_eq(-1, Ied::ContentLengthOf(Core::StringView("Content-Length: 99999999999")), "too large");
+		assert_eq(12, Ied::ContentLengthOf(Core::StringView("X: 1\r\nContent-Length:  12 ")), "spaces around the number");
+	}
+
+	[test("positions")]
+	public static void TestPositions() {
+		const Ied::PositionEncoding u16 = Ied::PositionEncoding::Utf16;
+		const Ied::PositionEncoding u8 = Ied::PositionEncoding::Utf8;
+		assert_eq(3, Col("abcdef", 3, u16, u8), "ASCII is the same");
+		assert_eq(3, Col("a\xc3\xa9" "b", 2, u16, u8), "an e-acute is two bytes and one unit");
+		assert_eq(2, Col("a\xc3\xa9" "b", 3, u8, u16), "back");
+		assert_eq(5, Col("a\xf0\x9f\x8e\xae" "b", 3, u16, u8), "an emoji is four bytes and two units");
+		assert_eq(3, Col("a\xf0\x9f\x8e\xae" "b", 5, u8, u16), "back");
+		assert_eq(5, Col("a\xf0\x9f\x8e\xae" "b", 2, u16, u8), "half a surrogate pair moves to the character's end");
+		assert_eq(3, Col("a\xf0\x9f\x8e\xae" "b", 3, u8, u16), "a byte inside a sequence too");
+		assert_eq(6, Col("a\xc3\xa9", 5, u16, u8), "past the end stays past it by as much (2 units, 3 bytes, then 3 more)");
+		assert_eq(5, Col("a\xf0\x9f\x8e\xae", 2, u16, u8), "inside the last character: its end");
+		assert_eq(0, Col("", 0, u16, u8), "an empty line");
+		Ied::PositionEncoding parsed = u16;
+		assert_true(Ied::ParsePositionEncoding(Core::StringView("bytes"), parsed) && parsed == u8, "bytes is UTF-8");
+		assert_true(!Ied::ParsePositionEncoding(Core::StringView("utf-32"), parsed), "utf-32 is not offered");
+	}
+
+	[test("line_index")]
+	public static void TestLineIndex() {
+		Ied::LineIndex lines = Ied::LineIndex(Core::StringView("one\r\ntwo\n\nlast"));
+		assert_eq(4, lines.Count(), "four lines");
+		assert_true(lines.Line(0) == "one\r", "a \\r stays part of its line");
+		assert_true(lines.Line(2).IsEmpty() && lines.Line(3) == "last" && lines.Line(9).IsEmpty(), "empty, last, past the end");
+	}
+
+	[test("uris")]
+	public static void TestUris() {
+		assert_se("file:///C:/Work/My%20Game/a.c", Ied::FileUriOf(Core::StringView("C:\\Work\\My Game\\a.c")).CStr(), "a Windows path");
+		assert_se("file:///home/x/%C3%A9.c", Ied::FileUriOf(Core::StringView("/home/x/\xc3\xa9.c")).CStr(), "UTF-8 byte by byte");
+		assert_se("file:///C:/a%23b%25.c", Ied::FileUriOf(Core::StringView("C:/a#b%.c")).CStr(), "reserved characters");
+		Core::String path;
+		assert_true(Ied::PathOfFileUri(Core::StringView("file:///C:/Work/My%20Game/a.c"), path) && path == "C:\\Work\\My Game\\a.c", "back");
+		assert_true(Ied::PathOfFileUri(Core::StringView("file:///c%3A/x.c"), path) && path == "c:\\x.c", "an encoded drive colon");
+		assert_true(Ied::PathOfFileUri(Core::StringView("file:///home/x/%C3%A9.c"), path) && path == "/home/x/\xc3\xa9.c", "a POSIX path");
+		assert_true(!Ied::PathOfFileUri(Core::StringView("http://x/a.c"), path) && !Ied::PathOfFileUri(Core::StringView("file:///a%2"), path), "another scheme, a bad escape");
+		assert_se("ied://w1/src/my%20main.c", Ied::IedUriOf(Core::StringView("w1"), Core::StringView("src/my main.c")).CStr(), "an ied URI");
+		Core::String wsId;
+		Core::String relative;
+		assert_true(Ied::ParseIedUri(Core::StringView("ied://w1/src/my%20main.c"), wsId, relative) && wsId == "w1" && relative == "src/my main.c", "parsed");
+		assert_true(!Ied::ParseIedUri(Core::StringView("ied:///x"), wsId, relative) && !Ied::ParseIedUri(Core::StringView("file:///x"), wsId, relative), "no workspace, another scheme");
+	}
+
+	[test("profiles")]
+	public static void TestProfiles() {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode contributes = Serialization::ReadJsonc(Core::StringView(
+			"{\"lspProfiles\": ["
+			"{\"id\": \"clangd\", \"command\": \"clangd\", \"selector\": {\"languages\": [\"c\", \"cpp\"]}},"
+			"{\"id\": \"c4\", \"command\": \"${pluginDir}/../tools/C4LSP/C4LSP.exe\", \"args\": [\"--root\", \"${solutionDir}\"],"
+			" \"env\": {\"C4_HOME\": \"${pluginDir}\"}, \"selector\": {\"extensions\": [\".cf\", \".ch\"], \"globs\": [\"**/*.c4x\"]},"
+			" \"launchMode\": \"staged\", \"positionEncoding\": \"bytes\", \"requestIds\": \"integer\","
+			" \"refetchOnDiagnostics\": [\"semanticTokens\"], \"codeActionsNeedClientFilter\": true, \"when\": \"workspaceTrusted\","
+			" \"initializationOptions\": {\"tidy\": true}}"
+			"]}"), *doc).root;
+		Core::Array<Ied::LspProfile*> profiles;
+		Ied::ReadLspProfiles(contributes, Core::StringView("c4"), FS::Path("C:/tc/ied"), profiles);
+		assert_eq(2, profiles.Count(), "two profiles");
+		Ied::LspProfile* c4 = profiles[1];
+		assert_true(c4->staged && !c4->negotiate && c4->encoding == Ied::PositionEncoding::Utf8 && c4->integerIds && c4->filterCodeActions, "the quirks");
+		assert_true(profiles[0]->negotiate && !profiles[0]->staged && profiles[0]->initializationOptions == "{}", "the defaults");
+		assert_se("{\"tidy\":true}", c4->initializationOptions.CStr(), "initialization options as JSON");
+		assert_se("C4_HOME=${pluginDir}", c4->environment[0].CStr(), "the environment");
+		assert_true(Ied::ProfileServing(profiles, Core::StringView("c4"), Core::StringView("src/a.CF")) == c4, "by extension, any case");
+		assert_true(Ied::ProfileServing(profiles, Core::StringView("plaintext"), Core::StringView("x/y/z.c4x")) == c4, "by glob");
+		assert_true(Ied::ProfileServing(profiles, Core::StringView("cpp"), Core::StringView("a.hpp")) == profiles[0], "by language");
+		assert_true(Ied::ProfileServing(profiles, Core::StringView("python"), Core::StringView("a.py")) == nullptr, "none");
+		Ied::ProfileVariables variables;
+		variables.pluginDir = Core::String("C:/tc/ied");
+		variables.solutionDir = Core::String("D:/game");
+		assert_se("C:/tc/ied/../tools/C4LSP/C4LSP.exe", Ied::ExpandProfileVariables(c4->command.View(), variables).CStr(), "pluginDir");
+		assert_se("D:/game", Ied::ExpandProfileVariables(c4->args[1].View(), variables).CStr(), "solutionDir");
+		assert_se("a ${setting:x} b${", Ied::ExpandProfileVariables(Core::StringView("a ${setting:x} b${"), variables).CStr(), "others are left");
+	}
+
+	[test("rewrite")]
+	public static void TestRewrite() {
+		Ied::Rewrite toClient = ToClient();
+		assert_se("{\"line\":0,\"character\":1}", Rewritten("{\"line\":0,\"character\":2}", toClient).CStr(), "a position of the message's document");
+		assert_se("{\"uri\":\"ied://w1/a.c\",\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":1}}}",
+			Rewritten("{\"uri\":\"file:///x/a.c\",\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":2}}}", toClient).CStr(), "a Location");
+		assert_se("[{\"uri\":\"ied://w1/b.c\",\"range\":{\"start\":{\"line\":0,\"character\":2}}}]",
+			Rewritten("[{\"uri\":\"file:///x/b.c\",\"range\":{\"start\":{\"line\":0,\"character\":2}}}]", toClient).CStr(), "another document: its own lines (unknown here, so unchanged)");
+		assert_se("{\"originSelectionRange\":{\"start\":{\"line\":0,\"character\":1}},\"targetUri\":\"ied://w1/b.c\",\"targetRange\":{\"start\":{\"line\":0,\"character\":2}}}",
+			Rewritten("{\"originSelectionRange\":{\"start\":{\"line\":0,\"character\":2}},\"targetUri\":\"file:///x/b.c\",\"targetRange\":{\"start\":{\"line\":0,\"character\":2}}}", toClient).CStr(),
+			"a LocationLink: the origin range is the message's document");
+		assert_se("{\"changes\":{\"ied://w1/a.c\":[{\"range\":{\"start\":{\"line\":0,\"character\":1}},\"newText\":\"x\"}]}}",
+			Rewritten("{\"changes\":{\"file:///x/a.c\":[{\"range\":{\"start\":{\"line\":0,\"character\":2}},\"newText\":\"x\"}]}}", toClient).CStr(), "a WorkspaceEdit's changes");
+		assert_se("{\"label\":\"x\",\"data\":{\"line\":0,\"character\":2}}", Rewritten("{\"label\":\"x\",\"data\":{\"line\":0,\"character\":2}}", toClient).CStr(), "opaque data is left");
+		assert_se("{\"startLine\":0,\"startCharacter\":1,\"endLine\":1,\"endCharacter\":2}",
+			Rewritten("{\"startLine\":0,\"startCharacter\":2,\"endLine\":1,\"endCharacter\":2}", toClient).CStr(), "a folding range");
+		Ied::Rewrite toServer = toClient;
+		toServer.from = Ied::PositionEncoding::Utf16;
+		toServer.to = Ied::PositionEncoding::Utf8;
+		assert_se("{\"position\":{\"line\":0,\"character\":4}}", Rewritten("{\"position\":{\"line\":0,\"character\":3}}", toServer).CStr(), "and back");
+	}
+
+	[test("semantic_tokens")]
+	public static void TestSemanticTokens() {
+		Core::Array<int64> data;
+		int64[15] raw = { 0, 0, 2, 1, 0, 0, 3, 1, 2, 0, 1, 0, 2, 3, 0 };
+		for (int64 n : raw) data.Push(n);
+		Core::Array<int64> converted = Ied::RewriteSemanticTokens(data, *gA, Ied::PositionEncoding::Utf8, Ied::PositionEncoding::Utf16);
+		Core::Array<int64> expected;
+		int64[15] want = { 0, 0, 1, 1, 0, 0, 2, 1, 2, 0, 1, 0, 2, 3, 0 };
+		for (int64 n : want) expected.Push(n);
+		assert_eq(expected.Count(), converted.Count(), "as many numbers");
+		bool same = true;
+		for (int64 i = 0; i < expected.Count(); ++i) same = same && expected[i] == converted[i];
+		assert_true(same, "the e-acute token is one unit long, the next starts a unit earlier; the next line's are unchanged");
+	}
+
+	[test("text_document")]
+	public static void TestTextDocument() {
+		assert_se("{\"position\":{\"line\":1,\"character\":2},\"textDocument\":{\"uri\":\"ied://w1/a.c\"}}",
+			Ied::WithTextDocument(Core::StringView("{\"position\":{\"line\":1,\"character\":2}}"), Core::StringView("ied://w1/a.c")).CStr(), "added after the params");
+		assert_se("{\"textDocument\":{\"uri\":\"ied://w1/a.c\"}}",
+			Ied::WithTextDocument(Core::StringView("{\"textDocument\":{\"uri\":\"elsewhere\",\"version\":3}}"), Core::StringView("ied://w1/a.c")).CStr(), "one the client sent is replaced");
+		assert_se("{\"textDocument\":{\"uri\":\"ied://w1/a.c\"}}", Ied::WithTextDocument(Core::StringView("null"), Core::StringView("ied://w1/a.c")).CStr(), "no params");
+	}
+
+	[test("code_action_filter")]
+	public static void TestCodeActionFilter() {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode actions = Serialization::ReadJson(Core::StringView(
+			"[{\"title\":\"on line 1\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":1,\"character\":0},\"end\":{\"line\":1,\"character\":4}}}]},"
+			"{\"title\":\"on line 5\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":5,\"character\":0},\"end\":{\"line\":5,\"character\":4}}}]},"
+			"{\"title\":\"refactor\"}]"), *doc).root;
+		Serialization::DomNode cursor = Serialization::ReadJson(Core::StringView("{\"start\":{\"line\":1,\"character\":4},\"end\":{\"line\":1,\"character\":4}}"), *doc).root;
+		Core::String kept = Ied::FilterCodeActions(actions, cursor);
+		assert_true(kept.View().Contains(Core::StringView("on line 1")), "a diagnostic the cursor touches at its end");
+		assert_true(!kept.View().Contains(Core::StringView("on line 5")), "a diagnostic elsewhere");
+		assert_true(kept.View().Contains(Core::StringView("refactor")), "an action without diagnostics");
+		Serialization::DomNode none = Serialization::ReadJson(Core::StringView("null"), *doc).root;
+		assert_se("null", Ied::FilterCodeActions(none, cursor).CStr(), "no actions");
+	}
+}

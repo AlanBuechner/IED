@@ -1,0 +1,100 @@
+include "uris.ch"
+
+namespace Ied
+{
+	static bool Unreserved(int32 c) {
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~' || c == '/' || c == ':';
+	}
+
+	static const char* kHex = "0123456789ABCDEF";
+
+	static void AppendEncoded(Core::StringBuilder& out, Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i) & 0xFF;
+			if (Unreserved(c)) out.AppendByte(c);
+			else {
+				out.AppendByte('%');
+				out.AppendByte(kHex[c >> 4]);
+				out.AppendByte(kHex[c & 15]);
+			}
+		}
+	}
+
+	Core::String FileUriOf(Core::StringView path) {
+		Core::StringBuilder slashes;
+		for (int64 i = 0; i < path.ByteLength(); ++i) slashes.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		Core::StringView forward = slashes.View();
+		Core::StringBuilder uri;
+		uri.Append("file://");
+		if (!forward.StartsWith(Core::StringView("/"))) uri.AppendByte('/');
+		AppendEncoded(uri, forward);
+		return uri.ToString();
+	}
+
+	static int32 HexValue(int32 c) {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	}
+
+	bool PercentDecodeUri(Core::StringView text, Core::String& decoded) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c != '%') {
+				out.AppendByte(c);
+				continue;
+			}
+			if (i + 2 >= text.ByteLength()) return false;
+			const int32 high = HexValue(text.ByteAt(i + 1));
+			const int32 low = HexValue(text.ByteAt(i + 2));
+			if (high < 0 || low < 0) return false;
+			out.AppendByte(high * 16 + low);
+			i += 2;
+		}
+		decoded = out.ToString();
+		return true;
+	}
+
+	static bool HasDriveLetter(Core::StringView path) {
+		if (path.ByteLength() < 2 || path.ByteAt(1) != ':') return false;
+		const int32 c = path.ByteAt(0);
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+	}
+
+	bool PathOfFileUri(Core::StringView uri, Core::String& path) {
+		if (!uri.StartsWith(Core::StringView("file://"))) return false;
+		Core::StringView rest = uri.Substring(7, uri.ByteLength() - 7);
+		Core::String decoded;
+		if (!PercentDecodeUri(rest, decoded)) return false;
+		Core::StringView view = decoded.View();
+		if (view.StartsWith(Core::StringView("/")) && HasDriveLetter(view.Substring(1, view.ByteLength() - 1))) view = view.Substring(1, view.ByteLength() - 1);
+		if (!HasDriveLetter(view)) {
+			path = Core::String(view);
+			return true;
+		}
+		Core::StringBuilder windows;
+		for (int64 i = 0; i < view.ByteLength(); ++i) windows.AppendByte(view.ByteAt(i) == '/' ? '\\' : view.ByteAt(i));
+		path = windows.ToString();
+		return true;
+	}
+
+	Core::String IedUriOf(Core::StringView wsId, Core::StringView relativePath) {
+		Core::StringBuilder uri;
+		uri.Append("ied://");
+		uri.Append(wsId);
+		uri.AppendByte('/');
+		AppendEncoded(uri, relativePath);
+		return uri.ToString();
+	}
+
+	bool ParseIedUri(Core::StringView uri, Core::String& wsId, Core::String& relativePath) {
+		if (!uri.StartsWith(Core::StringView("ied://"))) return false;
+		Core::StringView rest = uri.Substring(6, uri.ByteLength() - 6);
+		const int64 slash = rest.IndexOf('/', 0);
+		if (slash <= 0) return false;
+		wsId = Core::String(rest.Substring(0, slash));
+		return PercentDecodeUri(rest.Substring(slash + 1, rest.ByteLength() - slash - 1), relativePath);
+	}
+}

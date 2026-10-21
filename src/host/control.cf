@@ -181,6 +181,7 @@ namespace Ied
 			Threading::LockGuard guard(server->lock);
 			closing = server->sessions;
 			for (Session* session : closing) session->Push(ByeFrame("shutdown").View());
+			server->lsp->StopAll();
 		}
 		for (Session* session : closing) session->FlushAndClose(1001, "shutdown");
 		server->Log(Core::StringView("stopped by the control channel"));

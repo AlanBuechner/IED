@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-294**
+Next ID: **BUG-295**
 
 ## Rules for this file
 
@@ -43,6 +43,7 @@ Next ID: **BUG-294**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
+| BUG-294 | A redefined variable, enum, union or alias does not say where the name already is | Diagnostics | Low |
 
 ---
 
@@ -57,4 +58,15 @@ Next ID: **BUG-294**
 ## Tools
 
 ## Diagnostics and tests
+
+### BUG-294 A redefined variable, enum, union or alias does not say where the name already is
+- **Area:** Diagnostics
+- **Severity:** Low
+- **Status:** Open
+- **Found:** 2026-10-20
+- **Symptom:** two files of a module that both define `const int32 kSlice = 1;` in one namespace fail with
+  `redefinition of variable 'kSlice'` and nothing more; the other definition has to be searched for. Types and
+  functions say `it is already a type (other.cf:3)` since BUG-291.
+- **Where:** `ModelBuilderValues.cpp` (variables), `ModelBuilderTypes.cpp` (enums, aliases),
+  `ModelBuilderUnions.cpp` (unions): they build the message themselves instead of `ModelBuilder::Redefinition`.
 

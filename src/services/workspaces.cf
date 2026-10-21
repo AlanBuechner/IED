@@ -175,6 +175,7 @@ namespace Ied
 		server->settings->Opened(ws);
 		server->outputs->Opened(ws);
 		server->layouts->Opened(ws);
+		server->lsp->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;
@@ -504,6 +505,7 @@ namespace Ied
 		if (!server->trust.Set(ws->root, trusted)) throw RpcError(ErrorCode::Unavailable, "the trust choice could not be saved");
 		ws->trusted = trusted;
 		server->settings->TrustChanged(ws);
+		server->lsp->TrustChanged(ws);
 		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();

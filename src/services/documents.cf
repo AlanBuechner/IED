@@ -34,6 +34,12 @@ namespace Ied
 		throw RpcError(ErrorCode::NotFound, "no such document");
 	}
 
+	Document* Documents::Find(Workspace* ws, Core::StringView path) const {
+		Document* doc = nullptr;
+		byPath.TryGet((ws->wsId + "/") + path, doc);
+		return doc;
+	}
+
 	Core::String Documents::Snapshot(const Document* doc) const {
 		JsonWriter json;
 		json.BeginObject();
@@ -73,6 +79,7 @@ namespace Ied
 		Documents* self = this;
 		Document* created = doc;
 		server->hub.Add(doc->Topic().View(), [self, created]() -> Core::String { return self->Snapshot(created); });
+		server->lsp->DocumentOpened(doc);
 		return doc;
 	}
 
@@ -113,6 +120,7 @@ namespace Ied
 		if (!opId.IsEmpty()) event.Field("opId", opId);
 		event.EndObject();
 		server->hub.Publish(doc->Topic().View(), "doc.edit", event.View());
+		server->lsp->DocumentChanged(doc);
 		JsonWriter result;
 		result.BeginObject();
 		result.IntField("version", doc->version);
@@ -227,6 +235,7 @@ namespace Ied
 		data.IntField("revision", revision);
 		data.EndObject();
 		server->hub.Publish(doc->Topic().View(), "doc.saved", data.View());
+		server->lsp->DocumentSaved(doc);
 		JsonWriter json;
 		json.BeginObject();
 		json.IntField("version", doc->version);

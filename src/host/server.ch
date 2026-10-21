@@ -16,6 +16,7 @@ include "trust.ch"
 include "schemas.ch"
 include "appdata.ch"
 include "settings/service.ch"
+include "lsp/pool.ch"
 
 namespace Ied
 {
@@ -50,6 +51,7 @@ namespace Ied
 		public Blobs* blobs;
 		public Outputs* outputs;
 		public Layouts* layouts;
+		public LspPool* lsp;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;

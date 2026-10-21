@@ -1,0 +1,31 @@
+include "queue.ch"
+
+namespace Ied
+{
+	void MessageQueue::Push(Core::StringView message) {
+		Threading::LockGuard guard(lock);
+		if (closed) return;
+		messages.Push(Core::String(message));
+		ready.NotifyOne();
+	}
+
+	bool MessageQueue::Next(Core::String& message, int64 timeoutMs) {
+		Threading::LockGuard guard(lock);
+		if (messages.IsEmpty() && !closed) ready.WaitFor(lock, timeoutMs * 1000000);
+		if (messages.IsEmpty()) return false;
+		message = messages[0];
+		messages.RemoveAt(0);
+		return true;
+	}
+
+	void MessageQueue::Close() {
+		Threading::LockGuard guard(lock);
+		closed = true;
+		ready.NotifyAll();
+	}
+
+	bool MessageQueue::IsClosed() {
+		Threading::LockGuard guard(lock);
+		return closed;
+	}
+}

@@ -1,0 +1,404 @@
+include "client.ch"
+include "framing.ch"
+include "uris.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	const int64 kLspReadBytes = 65536;
+	const int64 kLspWaitSliceNs = 50000000;
+	const int64 kLspWriterSliceMs = 200;
+	// The capabilities after `general` (ClientCapabilities).
+	const char* kTextDocumentCapabilities =
+		"\"textDocument\":{\"synchronization\":{\"didSave\":true},\"completion\":{\"completionItem\":{\"snippetSupport\":true,\"documentationFormat\":[\"markdown\",\"plaintext\"],\"resolveSupport\":{\"properties\":[\"documentation\",\"detail\"]}},\"contextSupport\":true},\"hover\":{\"contentFormat\":[\"markdown\",\"plaintext\"]},\"signatureHelp\":{\"signatureInformation\":{\"documentationFormat\":[\"markdown\",\"plaintext\"],\"parameterInformation\":{\"labelOffsetSupport\":true}}},\"definition\":{\"linkSupport\":true},\"declaration\":{\"linkSupport\":true},\"typeDefinition\":{\"linkSupport\":true},\"implementation\":{\"linkSupport\":true},\"references\":{},\"documentHighlight\":{},\"documentSymbol\":{\"hierarchicalDocumentSymbolSupport\":true},\"codeAction\":{\"codeActionLiteralSupport\":{\"codeActionKind\":{\"valueSet\":[\"\",\"quickfix\",\"refactor\",\"refactor.extract\",\"refactor.inline\",\"refactor.rewrite\",\"source\",\"source.organizeImports\"]}},\"isPreferredSupport\":true},\"formatting\":{},\"rangeFormatting\":{},\"rename\":{\"prepareSupport\":true},\"publishDiagnostics\":{\"relatedInformation\":true,\"tagSupport\":{\"valueSet\":[1,2]},\"versionSupport\":true},\"foldingRange\":{\"lineFoldingOnly\":false},\"semanticTokens\":{\"requests\":{\"full\":true},\"formats\":[\"relative\"],\"tokenTypes\":[\"namespace\",\"type\",\"class\",\"enum\",\"interface\",\"struct\",\"typeParameter\",\"parameter\",\"variable\",\"property\",\"enumMember\",\"event\",\"function\",\"method\",\"macro\",\"keyword\",\"modifier\",\"comment\",\"string\",\"number\",\"regexp\",\"operator\",\"decorator\"],\"tokenModifiers\":[\"declaration\",\"definition\",\"readonly\",\"static\",\"deprecated\",\"abstract\",\"async\",\"modification\",\"documentation\",\"defaultLibrary\"]},\"inlayHint\":{}},\"workspace\":{\"workspaceFolders\":true,\"configuration\":true,\"applyEdit\":true,\"symbol\":{},\"semanticTokens\":{\"refreshSupport\":true}},\"window\":{\"workDoneProgress\":true}";
+
+	const char* LspStateName(LspState state) {
+		if (state == LspState::Starting) return "starting";
+		if (state == LspState::Running) return "running";
+		if (state == LspState::Failed) return "failed";
+		return "stopped";
+	}
+
+	// What IED takes from a server (docs/24 "Lifecycle"): the encodings the profile allows, and the features the editor
+	// renders.
+	static Core::String ClientCapabilities(const LspProfile* profile) {
+		Core::StringBuilder json;
+		json.Append("{\"general\":{\"positionEncodings\":");
+		if (profile->negotiate) json.Append("[\"utf-16\",\"utf-8\"]");
+		else {
+			json.Append("[\"");
+			json.Append(PositionEncodingName(profile->encoding));
+			json.Append("\"]");
+		}
+		json.Append("},");
+		json.Append(kTextDocumentCapabilities);
+		json.Append("}");
+		return json.ToString();
+	}
+
+	// A server's error object as plugin_error {code, message}.
+	static RpcError ServerError(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode error = Serialization::ReadJson(json, *doc).root;
+		Core::StringView message = error.Member("message").AsView();
+		return RpcError(ErrorCode::PluginError, message.IsEmpty() ? Core::StringView("the language server failed") : message, json);
+	}
+
+	void LanguageServer::Init(Server* server, Workspace* ws, LspProfile* profile) {
+		this.server = server;
+		this.ws = ws;
+		this.profile = profile;
+		this.state = LspState::Stopped;
+		this.capabilities = Core::String("{}");
+		this.encoding = PositionEncoding::Utf16;
+		this.nextId = 1;
+		this.run = 0;
+	}
+
+	// --- Starting ----------------------------------------------------------------------------------------------------
+
+	ProfileVariables VariablesOf(const LspProfile* profile, const Workspace* ws) {
+		ProfileVariables variables;
+		variables.pluginDir = Core::String(profile->pluginDir.View());
+		variables.workspaceDir = Core::String(ws->root.View());
+		variables.solutionDir = Core::String(ws->root.View());
+		return variables;
+	}
+
+	// The program to start: the profile's command, or with launchMode staged a copy of its folder (keyed by the
+	// program's size and time, so a rebuilt server gets a new copy and the original stays free to rebuild).
+	Core::String LanguageServer::ProgramToRun(Core::String& error) const {
+		Core::String command = ExpandProfileVariables(profile->command.View(), VariablesOf(profile, ws));
+		FS::Path program = FS::AbsolutePath(command.CStr());
+		if (!profile->staged) return command;
+		FS::FileInfo info;
+		if (!FS::GetInfo(program.CStr(), info)) {
+			error = Core::String("no program ") + command.View();
+			return Core::String();
+		}
+		Core::StringBuilder key;
+		key.AppendInt(info.size);
+		key.Append("-");
+		key.AppendInt(info.modifiedNs);
+		FS::Path stage = FS::Path(server->config.dataDir.View()) / "lsp-stage" / profile->id.View() / key.View();
+		FS::Path staged = stage / program.FileName();
+		if (!FS::FileExists(staged.CStr()) && FS::CopyTree(program.Parent().CStr(), stage.CStr()) < 0) {
+			error = Core::String("cannot stage ") + program.Parent().View() + " in " + stage.View();
+			return Core::String();
+		}
+		return Core::String(staged.View());
+	}
+
+	Process::StartInfo LanguageServer::StartInfoFor(Core::StringView program) const {
+		Process::StartInfo info;
+		info.program = Core::String(program);
+		ProfileVariables variables = VariablesOf(profile, ws);
+		for (const Core::String& arg : profile->args) info.arguments.Push(ExpandProfileVariables(arg.View(), variables));
+		for (const Core::String& entry : profile->environment) info.environment.Push(ExpandProfileVariables(entry.View(), variables));
+		info.workingDirectory = profile->cwd.IsEmpty() ? Core::String(ws->root.View()) : ExpandProfileVariables(profile->cwd.View(), variables);
+		info.input = Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		return info;
+	}
+
+	void LanguageServer::Start() {
+		Core::String error;
+		Core::String program = ProgramToRun(error);
+		if (program.IsEmpty()) {
+			Fail(error.View());
+			return;
+		}
+		Process::Child started = Process::Child::Start(StartInfoFor(program.View()));
+		if (!started.IsOpen()) {
+			Fail(((Core::String("cannot start ") + program.View()) + ": " + started.Error()).View());
+			return;
+		}
+		run += 1;
+		const int64 thisRun = run;
+		child = new Process::Child(take(started));
+		pid = child->Id();
+		outgoing = new MessageQueue();
+		state = LspState::Starting;
+		problem = Core::String();
+		capabilities = Core::String("{}");
+		documents.Clear();
+		LanguageServer* self = this;
+		Process::Child* process = child;
+		MessageQueue* queue = outgoing;
+		Threading::Thread::Run([self, process, queue]() { self->WriteLoop(process, queue); }).Detach();
+		Threading::Thread::Run([self, process, thisRun]() { self->ReadLoop(process, thisRun); }).Detach();
+		Threading::Thread::Run([self, process, thisRun]() { self->ErrorLoop(process, thisRun); }).Detach();
+		initializeId = Ask(Core::StringView("initialize"), InitializeParams().View(), nullptr);
+		server->lsp->StateChanged(this);
+	}
+
+	Core::String LanguageServer::InitializeParams() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("processId", (int64)Platform::ProcessId());
+		json.Key(Core::StringView("clientInfo"));
+		json.BeginObject();
+		json.Field("name", "IED");
+		json.Field("version", server->config.version.View());
+		json.EndObject();
+		Core::String root = FileUriOf(ws->root.View());
+		json.Field("rootUri", root.View());
+		json.Field("rootPath", ws->root.View());
+		json.Key(Core::StringView("workspaceFolders"));
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("uri", root.View());
+		json.Field("name", ws->name.View());
+		json.EndObject();
+		json.EndArray();
+		json.RawField("initializationOptions", server->lsp->InitializationOptions(ws, profile).View());
+		json.RawField("capabilities", ClientCapabilities(profile).View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	bool LanguageServer::AwaitRunning(Call& call, int64 timeoutMs) {
+		const int64 deadline = clock_now_ns() + timeoutMs * 1000000;
+		while (state == LspState::Starting && !call.cancel->IsCancelled() && clock_now_ns() < deadline) call.cancel->wake.WaitFor(server->lock, kLspWaitSliceNs);
+		if (call.cancel->IsCancelled()) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+		return state == LspState::Running;
+	}
+
+	// --- Talking -----------------------------------------------------------------------------------------------------
+
+	void LanguageServer::Send(Core::StringView json) {
+		if (outgoing) outgoing->Push(FrameMessage(json).View());
+	}
+
+	int64 LanguageServer::Ask(Core::StringView method, Core::StringView params, CancelToken* wake) {
+		const int64 id = nextId;
+		nextId += 1;
+		LspAnswer* answer = new LspAnswer();
+		answer->wake = wake;
+		answers.Insert(id, answer);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.IntField("id", id);
+		json.Field("method", method);
+		json.RawField("params", params);
+		json.EndObject();
+		Send(json.View());
+		return id;
+	}
+
+	Core::String LanguageServer::Request(Call& call, Core::StringView method, Core::StringView params, int64 timeoutMs) {
+		if (state != LspState::Running) throw RpcError(ErrorCode::Unavailable, (Core::String("the language server ") + profile->id.View() + " is " + LspStateName(state)).View());
+		const int64 id = Ask(method, params, call.cancel);
+		const int64 deadline = clock_now_ns() + timeoutMs * 1000000;
+		LspAnswer* answer = *answers.Find(id);
+		while (!answer->done && !call.cancel->IsCancelled() && clock_now_ns() < deadline) call.cancel->wake.WaitFor(server->lock, kLspWaitSliceNs);
+		answers.Remove(id);
+		if (answer->done && answer->ok) return answer->json;
+		if (answer->done) throw ServerError(answer->json.View());
+		JsonWriter cancel;
+		cancel.BeginObject();
+		cancel.IntField("id", id);
+		cancel.EndObject();
+		Notify(Core::StringView("$/cancelRequest"), cancel.View());
+		if (call.cancel->IsCancelled()) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+		throw RpcError(ErrorCode::Timeout, (Core::String(method) + " took longer than the language server's time").View());
+	}
+
+	void LanguageServer::Notify(Core::StringView method, Core::StringView params) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.Field("method", method);
+		json.RawField("params", params);
+		json.EndObject();
+		Send(json.View());
+	}
+
+	// A running server is asked to shut down and exit, and given kLspExitGraceMs to; any other is killed.
+	void LanguageServer::Stop() {
+		const bool running = state == LspState::Running;
+		if (running) {
+			Ask(Core::StringView("shutdown"), Core::StringView("null"), nullptr);
+			Notify(Core::StringView("exit"), Core::StringView("null"));
+		}
+		state = LspState::Stopped;
+		run += 1;
+		if (outgoing) outgoing->Close();
+		Process::Child* process = child;
+		if (process && running) Threading::Thread::Run([process]() { if (process->Wait(kLspExitGraceMs) == Process::kTimedOut) process->Kill(); }).Detach();
+		else if (process) process->Kill();
+		server->lsp->StateChanged(this);
+	}
+
+	void LanguageServer::Relaunch() {
+		if (state == LspState::Running || state == LspState::Starting) Stop();
+		exitTimes.Clear();
+		Start();
+	}
+
+	// --- What the server sends ----------------------------------------------------------------------------------------
+
+	void LanguageServer::Dispatch(Core::StringView body) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(body, *doc);
+		if (!read.Ok()) {
+			server->lsp->Log(this, (Core::String("a message that is not JSON: ") + body.Substring(0, 200)).View());
+			return;
+		}
+		Serialization::DomNode message = read.root;
+		Serialization::DomNode id = message.Member("id");
+		Serialization::DomNode method = message.Member("method");
+		if (method.Kind() == Serialization::DomKind::String && id.IsValid()) {
+			Core::String result = server->lsp->ServerRequest(this, method.AsView(), message.Member("params"));
+			JsonWriter json;
+			json.BeginObject();
+			json.Field("jsonrpc", "2.0");
+			json.RawField("id", NodeJson(id).View());
+			json.RawField("result", result.View());
+			json.EndObject();
+			Send(json.View());
+		}
+		else if (method.Kind() == Serialization::DomKind::String) server->lsp->Notification(this, method.AsView(), message.Member("params"));
+		else if (id.Kind() == Serialization::DomKind::Int) Answered(id.AsInt(), message);
+	}
+
+	void LanguageServer::Answered(int64 id, const Serialization::DomNode& message) {
+		LspAnswer** found = answers.Find(id);
+		if (!found) return;
+		LspAnswer* answer = *found;
+		answer->done = true;
+		answer->ok = !message.Member("error").IsValid();
+		answer->json = NodeJson(answer->ok ? message.Member("result") : message.Member("error"));
+		if (answer->json.IsEmpty()) answer->json = Core::String("null");
+		if (id == initializeId) {
+			answers.Remove(id);
+			Initialized(answer);
+		}
+		else if (!answer->wake) answers.Remove(id);
+		else answer->wake->wake.NotifyAll();
+	}
+
+	void LanguageServer::Initialized(const LspAnswer* answer) {
+		if (!answer->ok) {
+			Fail((Core::String("initialize was refused: ") + answer->json.View()).View());
+			return;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode result = Serialization::ReadJson(answer->json.View(), *doc).root;
+		capabilities = NodeJson(result.Member("capabilities"));
+		if (capabilities.IsEmpty()) capabilities = Core::String("{}");
+		encoding = profile->negotiate ? PositionEncoding::Utf16 : profile->encoding;
+		if (profile->negotiate) ParsePositionEncoding(result.Member("capabilities").Member("positionEncoding").AsView(), encoding);
+		Notify(Core::StringView("initialized"), Core::StringView("{}"));
+		state = LspState::Running;
+		server->lsp->Running(this);
+		server->lsp->StateChanged(this);
+	}
+
+	// --- Ending ------------------------------------------------------------------------------------------------------
+
+	void LanguageServer::Fail(Core::StringView why) {
+		state = LspState::Failed;
+		problem = Core::String(why);
+		server->lsp->Log(this, why);
+		server->lsp->StateChanged(this);
+	}
+
+	// The process ended (lock held): pending requests fail; it starts again after a pause, unless it ended too often.
+	void LanguageServer::Exited() {
+		for (const Core::KeyValue<int64, LspAnswer*>& entry : answers) {
+			entry.value->done = true;
+			entry.value->ok = false;
+			entry.value->json = Core::String("{\"code\":-32099,\"message\":\"the language server exited\"}");
+			if (entry.value->wake) entry.value->wake->wake.NotifyAll();
+		}
+		answers.Clear();
+		documents.Clear();
+		if (outgoing) outgoing->Close();
+		if (state == LspState::Stopped) return;
+		const int64 now = clock_now_ns();
+		exitTimes.Push(now);
+		while (!exitTimes.IsEmpty() && now - exitTimes[0] > kLspRestartWindowNs) exitTimes.RemoveAt(0);
+		if (exitTimes.Count() >= kLspMostRestarts) {
+			Fail(Core::StringView("the language server exited three times in five minutes; restart it from the status"));
+			return;
+		}
+		restarts += 1;
+		state = LspState::Starting;
+		problem = Core::String("the language server exited; starting it again");
+		server->lsp->Log(this, problem.View());
+		server->lsp->StateChanged(this);
+		const int64 pauseNs = (int64)1000000000 << (exitTimes.Count() - 1);
+		const int64 thisRun = run;
+		LanguageServer* self = this;
+		Server* host = server;
+		Threading::Thread::Run([self, host, pauseNs, thisRun]() {
+			Threading::Thread::Sleep(pauseNs);
+			Threading::LockGuard guard(host->lock);
+			self->Restart(thisRun);
+		}).Detach();
+	}
+
+	void LanguageServer::Restart(int64 previous) {
+		if (run == previous && state == LspState::Starting) Start();
+	}
+
+	// --- The threads -------------------------------------------------------------------------------------------------
+
+	void LanguageServer::WriteLoop(Process::Child* process, MessageQueue* queue) {
+		Core::String message;
+		while (queue->Next(message, kLspWriterSliceMs) || !queue->IsClosed()) {
+			if (!message.IsEmpty() && !process->WriteText(message.View())) return;
+			message = Core::String();
+		}
+	}
+
+	void LanguageServer::ReadLoop(Process::Child* process, int64 thisRun) {
+		FrameReader frames;
+		char[kLspReadBytes] buffer;
+		for (;;) {
+			const int64 got = process->Read(Process::Stream::Output, (void*)&buffer[0], kLspReadBytes);
+			if (got <= 0) break;
+			frames.Feed(Core::StringView(&buffer[0], got));
+			Core::String body;
+			while (frames.Next(body)) {
+				Threading::LockGuard guard(server->lock);
+				if (run == thisRun) Dispatch(body.View());
+			}
+			if (frames.Failed()) {
+				Threading::LockGuard guard(server->lock);
+				if (run == thisRun) server->lsp->Log(this, frames.Failure());
+				process->Kill();
+				break;
+			}
+		}
+		process->Wait();
+		Threading::LockGuard guard(server->lock);
+		if (run == thisRun) Exited();
+	}
+
+	void LanguageServer::ErrorLoop(Process::Child* process, int64 thisRun) {
+		char[kLspReadBytes] buffer;
+		Core::String partial;
+		for (;;) {
+			const int64 got = process->Read(Process::Stream::Errors, (void*)&buffer[0], kLspReadBytes);
+			if (got <= 0) break;
+			partial.Append(Core::StringView(&buffer[0], got));
+			Core::StringView text = partial.View();
+			const int64 end = text.ByteLength() > 0 ? text.ByteLength() - 1 : 0;
+			int64 cut = -1;
+			for (int64 i = end; i >= 0; --i)
+				if (text.ByteAt(i) == '\n') {
+					cut = i;
+					break;
+				}
+			if (cut < 0) continue;
+			Core::String lines = Core::String(text.Substring(0, cut));
+			partial = Core::String(text.Substring(cut + 1, text.ByteLength() - cut - 1));
+			Threading::LockGuard guard(server->lock);
+			if (run == thisRun) server->lsp->Log(this, lines.View());
+		}
+	}
+}

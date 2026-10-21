@@ -37,6 +37,8 @@ namespace Ied
 		[operator("create")] public void Init(Server* server);
 
 		public Document* Get(Core::StringView docId) const;
+		// The open document of a file, or null.
+		public Document* Find(Workspace* ws, Core::StringView path) const;
 		// Applies an edit made against `baseVersion` as `origin`, rebased when the document moved on; the edit's result.
 		public Core::String ApplyEdit(Document* doc, int64 baseVersion, const Core::Array<Change>& changes, Core::StringView origin, Core::StringView opId);
 		// A file written behind an open document: a clean one reloads, a dirty one is told.
