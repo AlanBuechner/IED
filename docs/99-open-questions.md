@@ -11,7 +11,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 | 3 | Plugin manifest v1 | Drafted as JSON Schema with four runtimes (builtin, declarative, js, process) and 40+ contribution points; frozen after owner review | `docs/02`, `shared/host-api/schemas/plugin-manifest.v1.schema.json` |
 | 4 | Project/solution schemas + toolbar grammar | Drafted as JSON Schema; variables use `${name}`; tasks = steps (run/task/debug/binding) with `onlyIf`/`when`, output targets, matchers; federations added | `docs/03`, `docs/06`, `shared/host-api/schemas/` |
 | 5 | C4 compiler readiness | Gap analysis done; readiness checklist of 10 items; C4-tree work packages P-1..P-7 | `docs/17` |
-| 6 | JS plugin runtime | QuickJS-ng kept for in-process JS logic (behind a C shim because of CBind union issues), plus out-of-process plugins over `ied-plugin-rpc/1` for anything heavy or native; built-ins compiled into the server because C4 has no DLL output | `docs/02`, `docs/17` |
+| 6 | Plugin code runtime | Owner, 2026-10-21: plugin server logic is C4 code, compiled and loaded by the server's C4 script host (built-ins compiled in); QuickJS-ng and `ied-plugin-rpc/1` process plugins are dropped; AI tool calls are C4 functions or commands; Nuke drivers are Python, UI modules JavaScript | `docs/26` |
 | 7 | Context compression details | Ledger + tiered compression (mechanical first, then `summarizer` role); cache-aware (append-only between large compressions); 70% warn / 85% compress defaults; history tools | `docs/04`, `docs/12` |
 | 8 | SearXNG packaging | Bundled with embeddable Python + waitress (spike in M0 to confirm on Windows); fallback isolated auto-install (WSL/Docker); tor bundled | `docs/21` |
 | 9 | Profiler trace format | ITP v1: chunked varint event stream, explicit string interning, timestamped thread renames, task events, GPU calibration, streamed to `.iedtrace` | `docs/16` |
@@ -55,7 +55,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 
 ## Later (v2+ candidates)
 
-- Out-of-process isolation for *all* third-party plugin logic (v1: JS in-process with permissions, process plugins isolated).
+- Out-of-process isolation for third-party plugin logic (plugin C4 code runs in the server; the boundary is trust, `docs/26` section 2).
 - Linux/macOS IED server builds (after C4 targets them).
 - Light theme (plan says no).
 - Plugin marketplace / sharing.

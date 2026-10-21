@@ -79,4 +79,4 @@ Egress: SearXNG's outgoing requests are pointed at IED's egress proxy, so secure
 
 ## Licenses
 
-Bundled third-party components are listed with their licenses in `licenses\` and in Help > About: Monaco (MIT), xterm.js (MIT), codicons (CC-BY-4.0 / MIT), ripgrep (MIT/Unlicense), SearXNG (AGPL-3.0 - shipped unmodified as a separate local process with its source location listed; confirm the obligations before any public release), Python (PSF), tor (BSD-3), QuickJS-ng (MIT), fonts (OFL). Re-check before the first public release.
+Bundled third-party components are listed with their licenses in `licenses\` and in Help > About: Monaco (MIT), xterm.js (MIT), codicons (CC-BY-4.0 / MIT), ripgrep (MIT/Unlicense), SearXNG (AGPL-3.0 - shipped unmodified as a separate local process with its source location listed; confirm the obligations before any public release), Python (PSF), tor (BSD-3), fonts (OFL). Re-check before the first public release.

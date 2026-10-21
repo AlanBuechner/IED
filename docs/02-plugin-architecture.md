@@ -4,20 +4,11 @@
 
 Define how IED is extended, because "the main parts of the project will be implemented as plugins" (IDEplan). The contract is frozen in `shared/host-api/schemas/plugin-manifest.v1.schema.json`; this doc explains the model behind it. Feature list: `docs/features/13-plugins.md`.
 
-## Four runtimes, one contribution model
+## A plugin is a package
 
-C4 cannot produce or safely load DLLs (process-global GC state, no DLL output - `docs/17`), so "native C4 plugins loaded at runtime" is not a v1 option. Plugins come in four kinds, all using the same manifest and contribution points:
+Every feature is a plugin, and a plugin is a package: C4 code for its server logic (compiled and loaded by the server's C4 script host, built-ins compiled in), configuration, Python for its Nuke build driver, JavaScript UI modules for the browser, skills and system-message sections, and AI tool calls that are C4 functions or commands. The design, the plugin API, language plugins and the native-first build rules are in `docs/26`; it replaces the four runtimes (`builtin`, `declarative`, `js`, `process`) planned here before: the QuickJS-ng and `ied-plugin-rpc/1` runtimes are dropped.
 
-| Kind | Code runs | Used for | Isolation |
-|---|---|---|---|
-| `builtin` | compiled into `ied-server` (C4 modules) | the default plugins: chat, editor, git, terminal, sandbox, profiler | none (trusted, but declare permissions and can be disabled) |
-| `declarative` | nowhere - manifest + data files only | language plugins (C4!), task presets, problem matchers, LSP/DAP profiles, skills, snippets, templates, token color maps, system-message sections | n/a |
-| `js` | QuickJS-ng on the server, one runtime per plugin | glue logic: bindings, AI tools, small services | own heap + interrupt handler; host API permission-checked |
-| `process` | a separate executable speaking `ied-plugin-rpc/1` (JSON-RPC over stdio) | heavy or native logic in any language - including a C4 program built by Nuke | OS process; crash restart + quarantine |
-
-Every plugin may also ship **UI modules** (ES modules served by the server, executed in the browser) that render activities, tool windows, viewers and status items using `shared/ui-kit` and theme tokens. Plugin *logic* always runs server-side (work continues with no browser open); UI is only a view.
-
-Most third-party language/engine support should need **no code at all**: the C4 language plugin (C4Assist rewrite) is fully declarative - see `shared/host-api/examples/c4-plugin/ied-plugin.json`.
+Plugin *logic* always runs server-side (work continues with no browser open); UI modules (ES modules served by the server, executed in the browser) render activities, tool windows, viewers and status items using `shared/ui-kit` and theme tokens, and are only a view. A package with no code is a declarative plugin, which most of a language's support still is (its grammar, icons, LSP profile).
 
 ## Locations and trust
 
@@ -25,9 +16,9 @@ Most third-party language/engine support should need **no code at all**: the C4 
 |---|---|---|
 | Built-in | inside `ied-server` + `plugins/` assets in the install | always (disable-able) |
 | App (global) | `%APPDATA%/IED/plugins/<id>/` | owner approved the plugin's content hash and permissions |
-| Project-local | path referenced by the solution's `localPlugins` | the workspace is **trusted** (`docs/11`) |
+| Project-local | `.ied/plugins/<id>/` in the workspace (planned, `docs/26`), and paths the solution's `localPlugins` name | the workspace is **trusted** (`docs/11`) |
 
-If ids clash: project-local (trusted) > app > built-in, with a visible "overridden by" note in Settings > Plugins. That is how a repo pins *its* version of a language plugin (a C4 project vendors its plugin under `Nuke/tools/ied`, a game engine can ship a shader-language or GPU-debugger plugin).
+If ids clash: project-local (trusted) > app > built-in, with a visible "overridden by" note in Settings > Plugins. That is how a repo pins *its* version of a language plugin (a C4 workspace pins its toolchain's plugin, `toolchains/c4/<version>/ied`; a game engine can ship a shader-language or GPU-debugger plugin).
 
 ## Lifecycle
 
@@ -45,7 +36,7 @@ Validation failures appear in Settings > Plugins and the *IED* output source - n
 
 ## The host as built (M1)
 
-`src/plugins/` loads `builtin` and `declarative` plugins. `js` and `process` manifests are read and validated, then refused with "cannot load yet" until M11.
+`src/plugins/` loads `builtin` and `declarative` plugins; `js` and `process` manifests are refused with "cannot load yet" (those runtimes are dropped for C4 code, `docs/26`).
 
 **Where plugins come from.**
 
@@ -155,4 +146,5 @@ Declared in the manifest (`fs.read`, `fs.write`, `fs.watch`, `process.spawn`, `t
 ## Open items
 
 - Freeze the manifest schema after owner review (M0).
-- Typings generation (`ied.d.ts`) from `shared/host-api` (M11).
+- Typings generation (`ied.d.ts`) for UI modules from `shared/host-api` (M11).
+- The package model, the C4 plugin API and the language plugins: `docs/26`.

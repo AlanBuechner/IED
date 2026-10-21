@@ -129,9 +129,20 @@ C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes,
 - LSP profile (staged launch, byte positions, integer ids, refetch-on-diagnostics, client-side code-action filtering) and DAP provider.
 - Problem matchers (`c4`, `c4-test`), test provider (`c4-test-json`), Nuke task preset, project templates, header/source pairs.
 - Feature toggles become plugin settings + `when` clauses (no code).
-- Skills: the five Nuke-shipped skills (`c4-language`, `nuke-build-system`, `c4-testing`, `c4-reflection`, `c4-garbage-collector`) move to the plugin's `skills/`.
+- Skills: the C4 skills move to the plugin's `skills/` and the Nuke skill to the built-in `ied.nuke` plugin; `nuke init` stops copying them into `.ied/skills/` (`docs/26` section 8).
 - `kitStatus` becomes a status bar item fed by a binding the host already has (file exists + LSP state); `formatDocument` is the LSP's formatting (no separate tool).
 - Port C4Assist's 17 Playwright e2e specs to IED's frontend e2e harness (`docs/19`).
+
+### The script host for IED plugins (`docs/26`)
+
+Plugin server logic is C4 code the server compiles and loads through C4's scripting (`C4/docs/runtime/04-scripting.md`, done in C4). What IED needs on top:
+
+| # | Item | Why |
+|---|---|---|
+| P1 | Build `ied-server` with `--script-host` (a Nuke project setting) and ship `ied-server.c4i` and `C4Script.dll` in the install (`docs/21`) | Plugins compile against the server's interface |
+| P2 | A compiled-script cache in `C4Script`: keep a script's linked object keyed by its sources' digest, the interface's build id and the options, and load it without compiling | No JIT compile of every plugin on every start |
+| P3 | Debug information for script code (C4's "later") | Debugging a plugin without compiling it into the server |
+| P4 | Nuke language drivers (`docs/26` section 6): `[languages]` pins, non-C4 projects by `language`, `nuke init --ied` giving each project its language's preset and pinning its package | Native-first builds in mixed workspaces |
 
 ### Bedrock profiler hooks (`C4/Bedrock/`)
 

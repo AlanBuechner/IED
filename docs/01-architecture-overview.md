@@ -22,7 +22,7 @@ Consequences (load-bearing):
 ied-server.exe                   one per user; background; single instance (named-pipe handoff from `ied`)
 +- host          lifecycle, workspaces, settings tiers, trust, notifications, persistence helpers
 +- web           static assets, HTTP API, auth, WS hub (topics, ring buffers, resume, backpressure), port-forward proxy
-+- plugins       manifest validation, built-in plugins (compiled in), declarative plugins, QuickJS-ng JS logic, process plugins
++- plugins       manifest validation, plugin packages: built-in code compiled in, other plugins' C4 code in the script host (docs/26)
 +- fs            document store (server-owned buffers, leases, rebase), file watching, search (ripgrep), trash
 +- tasks         task/step runner (toolbar buttons, F5, templates), problem matchers, output sources
 +- terminal      ConPTY supervisor (bottom terminal, AI terminals, task processes), job objects
@@ -48,7 +48,7 @@ Served by the server; one multiplexed WebSocket per tab (+ HTTP for blobs/upload
 
 ## Plugin runtimes
 
-Built-in (compiled into the server), declarative (manifest only), JS (QuickJS-ng on the server) and process (JSON-RPC executables) - all with the same contribution model; UI modules run in the browser. Why four and not "C4 DLLs": `docs/02`, `docs/17`.
+A plugin is a package (`docs/26`): C4 code compiled into the server (built-ins) or compiled and loaded by the server's C4 script host (app and project plugins), configuration, a Python Nuke driver, browser UI modules, skills and prompt sections - all with the same contribution model. C4 scripts share the server's GC, types and reflection, which C4 DLLs could not (`docs/17`).
 
 ## Storage
 

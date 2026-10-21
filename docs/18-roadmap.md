@@ -108,7 +108,7 @@ Bundled SearXNG + tor + proxy profiles and per-workspace egress policy; web_fetc
 
 ## M11 - Ecosystem and distribution
 
-JS plugin runtime (QuickJS-ng behind a C shim) and process plugins; install/approval/update for third-party plugins; typings + plugin template + authoring skill; federations + cross-workspace handoff; installer + Explorer integration + first-run; desktop wrapper (WebView2); self-update.
+The C4 plugin host (plugin code in the server's C4 script host, `docs/26` P3-P4); install/approval/update for third-party plugins; typings + plugin template + authoring skill; federations + cross-workspace handoff; installer + Explorer integration + first-run; desktop wrapper (WebView2); self-update.
 
 **Exit:** J7, J14; a third-party-style sample plugin built only from public docs.
 

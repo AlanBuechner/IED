@@ -8,8 +8,8 @@ Owner: `src/plugins` (host) + `frontend/` (client-side contribution loader) + `s
 |---|---|---|---|
 | F-PLG-1 | **Built-in plugins** (the six defaults) are C4 modules compiled into the server (C4 has no DLL output, `docs/17`), registered through the same manifest + contribution API as any other plugin, individually disable-able | P0 | US-PLG-1 |
 | F-PLG-2 | **Declarative plugins**: manifest-only contributions (languages, LSP profiles, DAP providers, problem matchers, toolbar presets, skills, snippets, themes-as-token-maps, system-message sections, templates) - no code at all; this covers most of what C4Assist does today | P0 | US-PLG-1, US-XRP-1 |
-| F-PLG-3 | **JS plugin logic** in QuickJS-ng on the server (one runtime per plugin, own heap, interrupt handler for runaway scripts, async host calls via promises) | P1 | US-PLG-1 |
-| F-PLG-4 | **Process plugins** ("backends"): any executable (C4, Go, Rust, Python...) speaking JSON-RPC 2.0 over stdio (`ied-plugin-rpc/1`); lazy start, restart with backoff, crash quarantine | P1 | US-PLG-1 |
+| F-PLG-3 | **C4 plugin code** compiled and loaded by the server's C4 script host (`docs/26`): the plugin API in `src/api/`, activation events, hot reload, a fault isolated per call; built-ins compiled in | P1 | US-PLG-1 |
+| F-PLG-4 | **Plugin packages**: C4 code, configuration, a Python Nuke driver, browser UI, skills, prompt sections and tool calls (C4 functions or commands) in one folder; one plugin per language (`docs/26`) | P1 | US-PLG-1 |
 | F-PLG-5 | **UI modules**: ES modules served by the server and loaded into the web client; render into host-provided containers using `shared/ui-kit` and theme tokens; talk to their logic only through the host API | P0 (built-ins), P1 (third party) | US-PLG-1 |
 
 ## Contribution points (full list in `docs/02`)
@@ -35,7 +35,7 @@ Owner: `src/plugins` (host) + `frontend/` (client-side contribution loader) + `s
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-PLG-30 | Discovery: built-ins, app-tier plugins dir, project-local pins in the solution; precedence when ids clash: project-local (trusted) > app > built-in, with a visible "overridden" note | P0 | US-PLG-2 |
+| F-PLG-30 | Discovery: built-ins, app-tier plugins dir, project-local `.ied/plugins/` and pins in the solution; precedence when ids clash: project-local (trusted) > app > built-in, with a visible "overridden" note | P0 | US-PLG-2 |
 | F-PLG-31 | Validation against the manifest schema, API version range (`ied.api: "^1"`), permissions; errors shown in Settings > Plugins and the IED output source | P0 | US-PLG-4 |
 | F-PLG-32 | Permissions declared and enforced at each host API call (`fs.read`, `fs.write`, `process.spawn`, `net.egress`, `ai.invoke`, `ai.tools`, `terminal`, `secrets`, `ui.notifications`, ...); shown before enabling; a permission increase on update requires re-approval | P0 (declare/show), P1 (enforce everywhere) | US-PLG-7 |
 | F-PLG-33 | Project-local plugins load only in trusted workspaces; app-tier plugins need one-time owner approval (content hash) | P0 | US-PLG-2 |
