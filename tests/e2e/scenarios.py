@@ -369,6 +369,30 @@ def find_in_files(run):
 	run.request("fs.delete", {"wsId": ws, "path": "src/find-%s.c" % run.viewport})
 
 
+@scenario()
+def go_to_all(run):
+	"""Ctrl+, finds a file by a few letters of its name and opens it (docs/10 fs.files); Escape closes the picker."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	name = "gotoall%s%d.c" % (run.viewport, int(time.time()))
+	run.request("fs.write", {"wsId": ws, "path": "src/deep/%s" % name, "text": "int x;\n"})
+	page.click(".tree-row:has-text('README.md')")
+	page.keyboard.press("Control+Comma")
+	page.wait_for_selector(".picker .palette-input")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".picker", state="detached")
+	page.keyboard.press("Control+Comma")
+	page.wait_for_selector(".picker .palette-input")
+	page.keyboard.type("gtall" + name[7:-2])
+	page.wait_for_selector(".picker .menu-item.sel:has-text('%s')" % name)
+	check("src/deep" in page.text_content(".picker .menu-item.sel"), "the folder beside the name")
+	run.shot("picker")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".tab:has-text('%s')" % name)
+	check(page.query_selector(".picker") is None, "the picker closes on a pick")
+	run.request("fs.delete", {"wsId": ws, "path": "src/deep/%s" % name})
+
+
 def active_tab(page):
 	return page.evaluate("ied_shell.context.get('activeTab')")
 
@@ -497,6 +521,49 @@ def edit_and_save(run):
 	page.keyboard.press("Control+S")
 	page.wait_for_selector(".tab:has-text('main.c') .dirty", state="detached")
 	check(not server_text(run).startswith("// edited"), "the file is as it was")
+
+
+@scenario(viewports=("desktop",))
+def undo_to_saved_is_clean(run):
+	"""Typing marks the tab unsaved; undoing back to the file's text clears the mark (docs/10 "dirty")."""
+	page = run.open()
+	open_main_c(run, page)
+	take_over(page)
+	before = server_text(run)
+	page.click(".monaco-editor .view-lines")
+	page.keyboard.press("Control+Home")
+	page.keyboard.type("xy")
+	page.wait_for_selector(".tab:has-text('main.c') .dirty")
+	page.keyboard.press("Control+Z")
+	page.wait_for_selector(".tab:has-text('main.c') .dirty", state="detached")
+	check(editor_text(page) == before and server_text(run) == before, "the text is the file's, which was not written")
+
+
+@scenario(viewports=("desktop",))
+def track_changes_margin(run):
+	"""A typed line is marked unsaved, then saved once saved; undone and saved again, the file is as it was and
+	nothing is marked (docs/10 doc.baseline)."""
+	page = run.open()
+	open_main_c(run, page)
+	take_over(page)
+	before = editor_text(page)
+	page.click(".monaco-editor .view-lines")
+	page.keyboard.press("Control+Home")
+	page.keyboard.type("// margin\n")
+	page.wait_for_selector(".monaco-editor .tc-unsaved")
+	run.shot("unsaved")
+	page.keyboard.press("Control+S")
+	page.wait_for_selector(".monaco-editor .tc-saved")
+	check(page.query_selector(".monaco-editor .tc-unsaved") is None, "saved: no line is unsaved")
+	run.shot("saved")
+	for _ in range(20):
+		if editor_text(page) == before:
+			break
+		page.keyboard.press("Control+Z")
+	settled(page)
+	page.keyboard.press("Control+S")
+	page.wait_for_selector(".monaco-editor .tc-saved", state="detached")
+	check(page.query_selector(".monaco-editor .tc-unsaved") is None and server_text(run) == before, "the file is as it was")
 
 
 def restore(run, page, original):

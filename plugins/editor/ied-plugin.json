@@ -40,6 +40,7 @@
 			{ "id": "ied.editor.saveAll", "title": "Save All", "category": "File", "icon": "$(save-all)" },
 			{ "id": "ied.editor.goTo", "title": "Go To Place", "category": "Editor" },
 			{ "id": "ied.find.inFiles", "title": "Find in Files", "category": "Edit", "icon": "$(search)" },
+			{ "id": "ied.editor.goToAll", "title": "Go To All", "category": "Edit", "icon": "$(go-to-file)" },
 			{ "id": "ied.editor.toggleHeader", "title": "Toggle Header / Code File", "category": "Edit" },
 			{ "id": "ied.editor.action", "title": "Editor Action", "category": "Edit" },
 			{ "id": "ied.navigate.back", "title": "Navigate Backward", "category": "View", "icon": "$(arrow-left)" },
@@ -47,7 +48,8 @@
 		],
 		"menus": {
 			"menubar/edit": [
-				{ "command": "ied.find.inFiles", "group": "3_find" }
+				{ "command": "ied.find.inFiles", "group": "3_find" },
+				{ "command": "ied.editor.goToAll", "group": "4_go" }
 			],
 			"menubar/view": [
 				{ "command": "ied.navigate.back", "group": "1_navigate" },
@@ -84,6 +86,8 @@
 			{ "command": "ied.explorer.delete", "key": "delete", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
 			{ "command": "ied.editor.saveAll", "key": "ctrl+shift+s" },
 			{ "command": "ied.find.inFiles", "key": "ctrl+shift+f" },
+			{ "command": "ied.editor.goToAll", "key": "ctrl+t" },
+			{ "command": "ied.editor.goToAll", "key": "ctrl+," },
 			{ "command": "ied.editor.toggleHeader", "key": "ctrl+k ctrl+o", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+c", "args": { "id": "editor.action.addCommentLine" }, "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+u", "args": { "id": "editor.action.removeCommentLine" }, "when": "activeTabKind == 'doc'" },

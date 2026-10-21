@@ -15,6 +15,7 @@ import { LanguageFeatures } from "./language.js";
 import { ErrorList as ErrorListView } from "./errorlist.js";
 import { FindInFiles as FindInFilesView } from "./findinfiles.js";
 import { findCounterpart } from "./headersource.js";
+import { showGoToAll } from "./gotoall.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -59,6 +60,7 @@ export function activate(ied) {
 	ied.commands.handle("ied.editor.saveAll", () => Promise.all(editors.all().filter((e) => e.sync.dirty).map((e) => e.save())));
 	ied.commands.handle("ied.editor.goTo", (args) => goTo(ied, args));
 	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
+	ied.commands.handle("ied.editor.goToAll", () => showGoToAll(ied, (target) => goTo(ied, target)));
 	ied.commands.handle("ied.editor.toggleHeader", () => toggleHeader(ied));
 	ied.commands.handle("ied.editor.action", (args) => runEditorAction(ied, args));
 	ied.commands.handle("ied.navigate.back", () => goTo(ied, editors.navigation.back()));

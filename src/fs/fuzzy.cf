@@ -1,0 +1,77 @@
+include "fuzzy.ch"
+
+namespace Ied
+{
+	const int64 kInNameBonus = 1000;
+	const int64 kNamePrefixBonus = 200;
+	const int64 kRunBonus = 8;
+	const int64 kWordStartBonus = 6;
+	const int64 kPathLengthDivisor = 16;
+
+	static int32 Fold(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+	static bool IsWordStart(Core::StringView text, int64 at) {
+		if (at == 0) return true;
+		const int32 before = text.ByteAt(at - 1);
+		const int32 here = text.ByteAt(at);
+		if (before == '/' || before == '_' || before == '-' || before == '.' || before == ' ') return true;
+		return before >= 'a' && before <= 'z' && here >= 'A' && here <= 'Z';
+	}
+
+	// The query matched greedily from the left in `text`: its bonuses, or -1 when it does not fit.
+	static int64 MatchIn(Core::StringView query, Core::StringView text) {
+		int64 score = 0;
+		int64 at = 0;
+		int64 previous = -2;
+		for (int64 q = 0; q < query.ByteLength(); ++q) {
+			const int32 wanted = Fold(query.ByteAt(q));
+			while (at < text.ByteLength() && Fold(text.ByteAt(at)) != wanted) at += 1;
+			if (at == text.ByteLength()) return -1;
+			score += 1;
+			if (at == previous + 1) score += kRunBonus;
+			if (IsWordStart(text, at)) score += kWordStartBonus;
+			previous = at;
+			at += 1;
+		}
+		return score;
+	}
+
+	static bool StartsWithFolded(Core::StringView text, Core::StringView prefix) {
+		if (prefix.ByteLength() > text.ByteLength()) return false;
+		for (int64 i = 0; i < prefix.ByteLength(); ++i)
+			if (Fold(text.ByteAt(i)) != Fold(prefix.ByteAt(i))) return false;
+		return true;
+	}
+
+	int64 FuzzyScore(Core::StringView query, Core::StringView path) {
+		int64 slash = -1;
+		for (int64 i = 0; i < path.ByteLength(); ++i)
+			if (path.ByteAt(i) == '/') slash = i;
+		Core::StringView name = path.Substring(slash + 1, path.ByteLength() - slash - 1);
+		const int64 penalty = path.ByteLength() / kPathLengthDivisor;
+		const int64 inName = MatchIn(query, name);
+		if (inName >= 0) return kInNameBonus + inName + (StartsWithFolded(name, query) ? kNamePrefixBonus : 0) - penalty;
+		const int64 inPath = MatchIn(query, path);
+		return inPath < 0 ? -1 : inPath - penalty < 0 ? 0 : inPath - penalty;
+	}
+
+	static bool Better(const FileMatch& a, const FileMatch& b) { return a.score > b.score || (a.score == b.score && a.path.View() < b.path.View()); }
+
+	Core::Array<FileMatch> FindFiles(FileWalk& walk, Core::StringView query, int64 most) {
+		Core::Array<FileMatch>* found = new Core::Array<FileMatch>();
+		Core::String* asked = new Core::String(query);
+		walk.Run([found, asked](Core::StringView path) -> bool {
+			const int64 score = FuzzyScore(asked->View(), path);
+			if (score >= 0) {
+				FileMatch match;
+				match.path = Core::String(path);
+				match.score = score;
+				found->Push(match);
+			}
+			return true;
+		});
+		found->SortBy([](const FileMatch& a, const FileMatch& b) -> bool { return Better(a, b); });
+		while (found->Count() > most) found->RemoveAt(found->Count() - 1);
+		return *found;
+	}
+}

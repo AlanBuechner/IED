@@ -105,6 +105,15 @@ class LanguageServerTests(ServerTestCase):
 		capabilities = await self.client.request("lsp.capabilities", {"docId": doc})
 		self.assertEqual(("fake-lsp", "running", True), (capabilities["profile"], capabilities["state"], capabilities["capabilities"]["hoverProvider"]))
 
+	async def test_workspace_symbols(self):
+		await self.open("a.fk")
+		await self.diagnostics("a.fk")
+		symbols = (await self.client.request("lsp.workspaceSymbols", {"wsId": "w1", "query": "ba"}))["symbols"]
+		self.assertEqual(1, len(symbols))
+		self.assertEqual(("bad", "fake-lsp", "ied://w1/a.fk"), (symbols[0]["name"], symbols[0]["source"], symbols[0]["location"]["uri"]))
+		self.assertEqual({"line": 0, "character": 2}, symbols[0]["location"]["range"]["start"], "UTF-8 column 3 is UTF-16 2")
+		self.assertEqual([], (await self.client.request("lsp.workspaceSymbols", {"wsId": "w1", "query": "zz"}))["symbols"])
+
 	async def test_documents_no_server_serves(self):
 		doc = await self.open("notes.txt")
 		with self.assertRaises(RpcFailure) as refused:

@@ -1,0 +1,43 @@
+include "walk.ch"
+
+namespace Ied
+{
+	bool MatchesAny(const Core::Array<Core::String>& globs, Core::StringView path) {
+		for (const Core::String& glob : globs)
+			if (GlobMatch(glob.View(), path)) return true;
+		return false;
+	}
+
+	static void AddIgnoreFile(const FS::Path& place, Core::StringView folder, Core::Array<IgnoreFile*>& ignores) {
+		FS::Path file = place / ".gitignore";
+		if (!FS::FileExists(file.CStr())) return;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		IgnoreFile* ignore = new IgnoreFile();
+		ignore->folder = Core::String(folder);
+		ignore->rules = ParseIgnoreRules(opened.ReadText().View());
+		ignores.Push(ignore);
+	}
+
+	static Core::Array<FS::DirectoryEntry> SortedEntries(const FS::Path& place) {
+		Core::Array<FS::DirectoryEntry> entries;
+		for (FS::DirectoryEntry& entry : FS::Directory(place.CStr())) entries.Push(entry);
+		entries.SortBy([](const FS::DirectoryEntry& a, const FS::DirectoryEntry& b) -> bool { return a.name.View() < b.name.View(); });
+		return entries;
+	}
+
+	bool FileWalk::Folder(Core::StringView folder, Core::Array<IgnoreFile*> ignores, const FileVisitor& visit) {
+		FS::Path place = folder.IsEmpty() ? root : root / folder;
+		if (useIgnoreFiles) AddIgnoreFile(place, folder, ignores);
+		for (const FS::DirectoryEntry& entry : SortedEntries(place)) {
+			if (cancel && cancel->Load()) return false;
+			Core::String path = folder.IsEmpty() ? entry.name : (Core::String(folder) + "/") + entry.name.View();
+			const bool directory = entry.kind == FS::EntryKind::Directory;
+			if (IsIgnored(ignores, path.View(), directory) || MatchesAny(exclude, path.View())) continue;
+			if (directory) {
+				if (!Folder(path.View(), ignores, visit)) return false;
+			}
+			else if (entry.kind == FS::EntryKind::File && !visit(path.View())) return false;
+		}
+		return true;
+	}
+}

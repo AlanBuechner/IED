@@ -53,6 +53,30 @@ class DocumentTests(ProtocolTest):
 		event = (await viewer.wait_for(topic, lambda f: f.get("kind") == "doc.saved"))[-1]["data"]
 		self.assertEqual(saved["revision"], event["revision"])
 
+	async def test_editing_back_to_the_saved_text_is_clean(self):
+		owner = await self.client()
+		_, doc = await self.open_scratch(owner)
+		topic = "doc:" + doc["docId"]
+		await owner.sub([topic])
+		await owner.next_frame(topic)
+		typed = await owner.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "x")]})
+		event = (await owner.wait_for(topic, lambda f: f.get("kind") == "doc.edit"))[-1]["data"]
+		self.assertTrue(event["dirty"])
+		await owner.request("doc.edit", {"docId": doc["docId"], "baseVersion": typed["version"], "changes": [change(0, 0, 0, 1, "")]})
+		event = (await owner.wait_for(topic, lambda f: f.get("kind") == "doc.edit" and f["data"]["version"] == typed["version"] + 1))[-1]["data"]
+		self.assertFalse(event["dirty"], "the text is the file's again")
+		self.assertFalse((await self.text_of(await self.client(), doc["docId"]))["dirty"])
+
+	async def test_baseline_has_the_opened_and_the_saved_text(self):
+		owner = await self.client()
+		_, doc = await self.open_scratch(owner, lines=2)
+		opened = "line 0\nline 1\n"
+		typed = await owner.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "a")]})
+		await owner.request("doc.save", {"docId": doc["docId"]})
+		await owner.request("doc.edit", {"docId": doc["docId"], "baseVersion": typed["version"], "changes": [change(1, 0, 1, 0, "b")]})
+		baseline = await owner.request("doc.baseline", {"docId": doc["docId"]})
+		self.assertEqual((opened, "aline 0\nline 1\n", typed["version"] + 1), (baseline["opened"], baseline["saved"], baseline["version"]))
+
 	async def test_take_lease_moves_the_lease_and_notifies_everyone(self):
 		owner, phone = await self.client(), await self.client(device_class="phone")
 		_, doc = await self.open_scratch(owner)

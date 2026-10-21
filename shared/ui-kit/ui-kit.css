@@ -254,3 +254,8 @@ select.input-field { padding-right: var(--space-2); }
 .tree-row { user-select: none; }
 .tree-row .ci { width: 16px; height: 16px; }
 .tree:focus .tree-row.sel { background: var(--selection-active); }
+
+/* ---------- quick pick (picker.js; the palette's look) ---------- */
+.picker-status { font-size: var(--font-size-sm); padding: var(--space-2) var(--space-2) 0; }
+.picker-status:empty { display: none; }
+.picker-detail { max-width: 55%; overflow: hidden; text-overflow: ellipsis; }

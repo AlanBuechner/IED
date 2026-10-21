@@ -1,6 +1,6 @@
 """A language server for the checks (docs/24): speaks LSP over stdio, takes UTF-8 positions when the client offers them,
 publishes a diagnostic on every "bad" of an open document, answers hover with the position it got and definition with
-another file, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
+another file, answers workspace/symbol with every "bad" of its open documents, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
 first argument - after a {"argv": [...]} line with the arguments that follow it."""
 
 import json
@@ -59,7 +59,7 @@ def answer(message):
 	if method == "initialize":
 		offered = params["capabilities"].get("general", {}).get("positionEncodings", [])
 		encoding = "utf-8" if "utf-8" in offered else "utf-16"
-		return {"capabilities": {"positionEncoding": encoding, "textDocumentSync": {"openClose": True, "change": 1, "save": True}, "hoverProvider": True, "definitionProvider": True}, "serverInfo": {"name": "fake"}}
+		return {"capabilities": {"positionEncoding": encoding, "textDocumentSync": {"openClose": True, "change": 1, "save": True}, "hoverProvider": True, "definitionProvider": True, "workspaceSymbolProvider": True}, "serverInfo": {"name": "fake"}}
 	if method == "textDocument/hover":
 		position = params["position"]
 		end = dict(position, character=position["character"] + 3)
@@ -67,6 +67,15 @@ def answer(message):
 	if method == "textDocument/definition":
 		uri = params["textDocument"]["uri"].rsplit("/", 1)[0] + "/b.fk"
 		return [{"uri": uri, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}}]
+	if method == "workspace/symbol":
+		symbols = []
+		for uri, text in documents.items():
+			for number, line in enumerate(text.split("\n")):
+				at = line.find("bad")
+				if at >= 0 and params.get("query", "") in "bad":
+					start = {"line": number, "character": column(line, at)}
+					symbols.append({"name": "bad", "kind": 13, "location": {"uri": uri, "range": {"start": start, "end": dict(start, character=column(line, at + 3))}}})
+		return symbols
 	if method == "fake/crash":
 		sys.exit(3)
 	return None

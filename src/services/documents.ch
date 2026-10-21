@@ -25,7 +25,9 @@ namespace Ied
 		public Core::String text;
 		public int64 version;
 		public Core::String holder;   // the client that holds the lease; empty for none
-		public bool dirty;
+		public bool dirty;            // the text differs from `saved`
+		public Core::String saved;    // the file's text as last read, saved or seen changed on disk
+		public Core::String opened;   // the text when the server opened it: the track-changes margin's baseline
 		public Core::Queue<VersionChanges*> history;
 
 		public Core::String Topic() const { return Core::String("doc:") + docId.View(); }
@@ -59,6 +61,7 @@ namespace Ied
 		private Core::String EditMethod(Call& call, const Params& params);
 		private Core::String TakeLeaseMethod(Call& call, const Params& params);
 		private Core::String SaveMethod(Call& call, const Params& params);
+		private Core::String BaselineMethod(Call& call, const Params& params);
 
 		private Server* server;
 		private Core::HashMap<Core::String, Document*> byId;

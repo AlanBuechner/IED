@@ -26,6 +26,7 @@ namespace Ied
 		server->rpc.Register("doc.edit", [self](Call& call, const Params& params) -> Core::String { return self->EditMethod(call, params); });
 		server->rpc.Register("doc.takeLease", [self](Call& call, const Params& params) -> Core::String { return self->TakeLeaseMethod(call, params); });
 		server->rpc.Register("doc.save", [self](Call& call, const Params& params) -> Core::String { return self->SaveMethod(call, params); });
+		server->rpc.Register("doc.baseline", [self](Call& call, const Params& params) -> Core::String { return self->BaselineMethod(call, params); });
 	}
 
 	Document* Documents::Get(Core::StringView docId) const {
@@ -73,6 +74,8 @@ namespace Ied
 		doc->ws = ws;
 		doc->path = Core::String(path);
 		doc->text = server->workspaces->Read(ws, path);
+		doc->saved = doc->text;
+		doc->opened = doc->text;
 		doc->version = 1;
 		byId.Insert(doc->docId, doc);
 		byPath.Insert(key, doc);
@@ -107,7 +110,8 @@ namespace Ied
 		step->changes = rebased;
 		doc->history.Push(step);
 		while (doc->history.Count() > kDocumentHistoryVersions) doc->history.Pop();
-		doc->dirty = origin != "disk";
+		if (origin == "disk") doc->saved = doc->text;
+		doc->dirty = doc->text.View() != doc->saved.View();
 		Core::String changesJson = ChangesJson(rebased);
 		const bool wasRebased = baseVersion != doc->version - 1;
 		JsonWriter event;
@@ -116,6 +120,7 @@ namespace Ied
 		event.IntField("version", doc->version);
 		event.RawField("changes", changesJson.View());
 		event.Field("origin", origin);
+		event.BoolField("dirty", doc->dirty);
 		if (wasRebased) event.IntField("rebasedFrom", baseVersion);
 		if (!opId.IsEmpty()) event.Field("opId", opId);
 		event.EndObject();
@@ -171,6 +176,7 @@ namespace Ied
 		Document* doc = nullptr;
 		if (!byPath.TryGet((ws->wsId + "/") + path, doc) || doc->text.View() == text) return;
 		if (doc->dirty) {
+			doc->saved = Core::String(text);
 			JsonWriter data;
 			data.BeginObject();
 			data.Field("docId", doc->docId.View());
@@ -242,6 +248,7 @@ namespace Ied
 	Core::String Documents::SaveMethod(Call& call, const Params& params) {
 		Document* doc = Get(params.Str("docId").View());
 		const int64 revision = server->workspaces->Write(doc->ws, doc->path.View(), doc->text.View(), -1);
+		doc->saved = doc->text;
 		doc->dirty = false;
 		JsonWriter data;
 		data.BeginObject();
@@ -255,6 +262,17 @@ namespace Ied
 		json.BeginObject();
 		json.IntField("version", doc->version);
 		json.IntField("revision", revision);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Documents::BaselineMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", doc->version);
+		json.Field("opened", doc->opened.View());
+		json.Field("saved", doc->saved.View());
 		json.EndObject();
 		return json.ToString();
 	}

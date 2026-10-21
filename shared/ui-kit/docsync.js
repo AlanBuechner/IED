@@ -75,12 +75,14 @@ export class DocumentSync {
 		this.wakeWaiters();
 		this.target.setText(data.text);
 		this.leaseChanged();
-		this.state({});
+		this.state({ baselineMoved: true });
 	}
 
 	// Events before the snapshot a resync waits for describe the text it is about to replace: they are passed over.
+	// `baselineMoved` in the state says the file's text moved (a save, a reload from disk): the server's baselines did.
 	event(kind, data) {
 		if (this.resyncing) return;
+		const baselineMoved = kind === "doc.saved" || (kind === "doc.edit" && data.origin === "disk");
 		if (kind === "doc.edit") this.edited(data);
 		else if (kind === "doc.lease") {
 			this.holder = data.holder || null;
@@ -95,12 +97,14 @@ export class DocumentSync {
 			this.state({ renamed: data.path });
 			return;
 		}
-		this.state({});
+		this.state(baselineMoved ? { baselineMoved } : {});
 	}
 
+	// The server says whether its text differs from the file's; with edits of this client still on the way it does.
 	edited(data) {
 		if (this.inflight && data.opId === this.inflight.opId) {
 			this.acknowledged(data.version);
+			this.dirty = this.pending > 0 || data.dirty;
 			return;
 		}
 		if (data.version <= this.version) return;
@@ -113,8 +117,7 @@ export class DocumentSync {
 			return;
 		}
 		this.version = data.version;
-		if (data.origin !== "disk") this.dirty = true;
-		else if (this.pending === 0) this.dirty = false;
+		this.dirty = this.pending > 0 || data.dirty;
 	}
 
 	// Another writer's changes, made on the server before this client's pending ones: moved over those for the editor,

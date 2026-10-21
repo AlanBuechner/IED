@@ -68,7 +68,7 @@ class Workspaces:
 		server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
 		self.trash = {}
 		self.trash_made = 0
-		for name in ("ws.list", "ws.setTrust", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search",
+		for name in ("ws.list", "ws.setTrust", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search", "fs.files",
 				"trash.list", "trash.restore", "trash.purge"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
@@ -256,6 +256,15 @@ class Workspaces:
 			{"path": source, "change": "deleted"}, {"path": target, "change": "created"},
 		]})
 
+	async def m_fs_files(self, call, p):
+		"""docs/10 "Files": paths by fuzzy score, best first, ties in path order."""
+		ws = self.get(p.str("wsId"))
+		query = p.str("query", "", required=False)
+		most = max(1, min(500, p.int("maxResults", 50, required=False)))
+		scored = [(fuzzy_score(query, path), path) for path in ws.files if _searched(path, [], SEARCH_EXCLUDES)]
+		ranked = sorted((pair for pair in scored if pair[0] >= 0), key=lambda pair: (-pair[0], pair[1]))[:most]
+		return {"files": [{"path": path, "score": score} for score, path in ranked]}
+
 	async def m_fs_search(self, call, p):
 		"""docs/10 "Files": the first match of each line, open documents as they are, files in path order."""
 		ws = self.get(p.str("wsId"))
@@ -279,6 +288,31 @@ class Workspaces:
 					return {"matches": matches, "truncated": True}
 				matches.append({"path": path, "line": number, "col": hit, "preview": line.strip()[:200]})
 		return {"matches": matches, "truncated": False}
+
+
+def fuzzy_score(query, path):
+	"""src/fs/fuzzy.cf's FuzzyScore: the query's characters in order, any case; the name first, runs and word starts."""
+	def match_in(text):
+		score, at, previous = 0, 0, -2
+		lowered = text.lower()
+		for wanted in query.lower():
+			at = lowered.find(wanted, at)
+			if at < 0:
+				return -1
+			score += 1
+			if at == previous + 1:
+				score += 8
+			if at == 0 or text[at - 1] in "/_-. " or (text[at - 1].islower() and text[at].isupper()):
+				score += 6
+			previous, at = at, at + 1
+		return score
+	name = path.rsplit("/", 1)[-1]
+	penalty = len(path.encode("utf-8")) // 16
+	in_name = match_in(name)
+	if in_name >= 0:
+		return 1000 + in_name + (200 if name.lower().startswith(query.lower()) else 0) - penalty
+	in_path = match_in(path)
+	return -1 if in_path < 0 else max(0, in_path - penalty)
 
 
 def _glob_regex(glob):

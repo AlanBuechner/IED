@@ -13,5 +13,7 @@ import "./lspconvert.test.js";
 import "./tree.test.js";
 import "./navigation.test.js";
 import "./headersource.test.js";
+import "./gotoall.test.js";
+import "./linediff.test.js";
 
 run(document.getElementById("results"));

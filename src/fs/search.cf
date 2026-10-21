@@ -57,12 +57,6 @@ namespace Ied
 		return out.ToString();
 	}
 
-	static bool MatchesAny(const Core::Array<Core::String>& globs, Core::StringView path) {
-		for (const Core::String& glob : globs)
-			if (GlobMatch(glob.View(), path)) return true;
-		return false;
-	}
-
 	bool IsSearched(Core::StringView path, const SearchQuery& query) {
 		if (MatchesAny(query.exclude, path)) return false;
 		return query.include.IsEmpty() || MatchesAny(query.include, path);
@@ -126,65 +120,23 @@ namespace Ied
 		return true;
 	}
 
-	// One search's walk over a folder tree: the query, what it found, and the ignore files of the folders it is in.
-	class FolderSearch
-	{
-		public FS::Path root;
-		public SearchQuery query;
-		public LineMatcher matcher;
-		public Core::HashMap<Core::String, Core::String> open;
-		public const Threading::Atomic<bool>* cancel;
-		public SearchResult result;
-
-		// The files under `folder` (workspace-relative; empty: the root) in name order; folders the query excludes or
-		// the ignore files ignore are not entered.
-		public void Folder(Core::StringView folder, Core::Array<IgnoreFile*> ignores) {
-			FS::Path place = folder.IsEmpty() ? root : root / folder;
-			if (query.useIgnoreFiles) AddIgnoreFile(place, folder, ignores);
-			for (const FS::DirectoryEntry& entry : SortedEntries(place)) {
-				if (result.truncated || (cancel && cancel->Load())) return;
-				Core::String path = folder.IsEmpty() ? entry.name : (Core::String(folder) + "/") + entry.name.View();
-				const bool directory = entry.kind == FS::EntryKind::Directory;
-				if (IsIgnored(ignores, path.View(), directory)) continue;
-				if (directory) {
-					if (!MatchesAny(query.exclude, path.View())) Folder(path.View(), ignores);
-				}
-				else if (entry.kind == FS::EntryKind::File) File(path.View());
-			}
-		}
-
-		private void File(Core::StringView path) {
-			Core::String text;
-			if (IsSearched(path, query) && TextToSearch(root / path, path, open, text)) SearchText(path, text.View(), matcher, query.maxResults, result);
-		}
-
-		private static void AddIgnoreFile(const FS::Path& place, Core::StringView folder, Core::Array<IgnoreFile*>& ignores) {
-			FS::Path file = place / ".gitignore";
-			if (!FS::FileExists(file.CStr())) return;
-			FS::File opened = FS::File(file.CStr(), "rb");
-			IgnoreFile* ignore = new IgnoreFile();
-			ignore->folder = Core::String(folder);
-			ignore->rules = ParseIgnoreRules(opened.ReadText().View());
-			ignores.Push(ignore);
-		}
-
-		private static Core::Array<FS::DirectoryEntry> SortedEntries(const FS::Path& place) {
-			Core::Array<FS::DirectoryEntry> entries;
-			for (FS::DirectoryEntry& entry : FS::Directory(place.CStr())) entries.Push(entry);
-			entries.SortBy([](const FS::DirectoryEntry& a, const FS::DirectoryEntry& b) -> bool { return a.name.View() < b.name.View(); });
-			return entries;
-		}
-	}
-
 	SearchResult SearchFolder(const FS::Path& root, const SearchQuery& query, const Core::HashMap<Core::String, Core::String>& open,
 		const Threading::Atomic<bool>* cancel) {
-		FolderSearch search;
-		search.root = root;
-		search.query = query;
-		search.matcher = LineMatcher(query);
-		search.open = open;
-		search.cancel = cancel;
-		if (search.matcher.IsValid()) search.Folder(Core::StringView(""), Core::Array<IgnoreFile*>());
-		return search.result;
+		SearchResult* result = new SearchResult();
+		LineMatcher* matcher = new LineMatcher(query);
+		if (!matcher->IsValid()) return *result;
+		FileWalk walk;
+		walk.root = root;
+		walk.exclude = query.exclude;
+		walk.useIgnoreFiles = query.useIgnoreFiles;
+		walk.cancel = cancel;
+		const SearchQuery* asked = &query;
+		const Core::HashMap<Core::String, Core::String>* texts = &open;
+		walk.Run([result, matcher, asked, texts, root](Core::StringView path) -> bool {
+			Core::String text;
+			if (IsSearched(path, *asked) && TextToSearch(root / path, path, *texts, text)) SearchText(path, text.View(), *matcher, asked->maxResults, *result);
+			return !result->truncated;
+		});
+		return *result;
 	}
 }

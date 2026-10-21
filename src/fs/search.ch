@@ -3,7 +3,7 @@
 // disk. The first match of each line is reported, its column in UTF-16 units. Everything here is honest: the caller
 // gathers what to search, so a worker thread can run it without the server lock.
 
-include "ignore.ch"
+include "walk.ch"
 
 namespace Ied
 {

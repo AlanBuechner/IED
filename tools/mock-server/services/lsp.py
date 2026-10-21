@@ -14,6 +14,7 @@ class LanguageServers:
 		server.rpc.register("lsp.capabilities", self.m_capabilities)
 		server.rpc.register("lsp.status", self.m_status)
 		server.rpc.register("lsp.restart", self.m_restart)
+		server.rpc.register("lsp.workspaceSymbols", self.m_workspace_symbols)
 
 	async def m_request(self, call, p):
 		self.server.docs.get(p.str("docId"))
@@ -26,6 +27,10 @@ class LanguageServers:
 	async def m_status(self, call, p):
 		self.server.workspace.get(p.str("wsId"))
 		return {"servers": []}
+
+	async def m_workspace_symbols(self, call, p):
+		self.server.workspace.get(p.str("wsId"))
+		return {"symbols": []}
 
 	async def m_restart(self, call, p):
 		self.server.workspace.get(p.str("wsId"))

@@ -120,6 +120,7 @@ Paths are workspace-relative with `/` separators. Every file has a `revision` (1
 | `fs.rename` | `wsId, from, to` (a file or a folder) | `{path, revision?}`; open documents follow (`doc.renamed`) |
 | `fs.delete` | `wsId, path, expectedRevision?, recursive?` (a folder needs `recursive`) | `{trashId}`: the file or folder is moved to the trash |
 | `fs.search` | `wsId, query, regex?, caseSensitive?, include?, exclude?, useIgnoreFiles?, maxResults?` | `{matches: [{path, line, col, preview}], truncated}`: the first match of each line, `col` in UTF-16 units, `preview` the line trimmed to 200 characters; `include` / `exclude` are globs on the path (without `exclude`: `.git`, `node_modules`, `build`, `bin`, `bin-int`, `toolchains`, `vendor`, `third_party`, `__pycache__`); what `.gitignore` files ignore is skipped unless `useIgnoreFiles` is false; binary files (a NUL in the first 8000 bytes) and files over 4 MB are skipped |
+| `fs.files` | `wsId, query, maxResults?` (50; at most 500) | `{files: [{path, score}]}`: the files whose paths hold the query's characters in order (any case), best first - a match in the file's own name, runs and word starts score higher, shorter paths win ties; skips what `fs.search` skips |
 | `trash.list` | `wsId?` (only that workspace's) | `{entries: [{id, root, path, kind, deletedMs, bytes}], bytes}`, newest first |
 | `trash.restore` | `id` | `{wsId?, path}`: moved back where it was (`conflict` when something is there now) |
 | `trash.purge` | `id` or `all: true` | `{}`: deleted for good |
@@ -132,6 +133,8 @@ Server-owned buffers (F-EDT-1) with a simple, sufficient scheme:
 
 - Each `doc` has an integer `version`. The **lease holder** sends `doc.edit { docId, baseVersion, changes: [ {range, text} ... ], opId }`.
 - If `baseVersion == version`, the server applies, increments, and broadcasts `doc.edit` to all subscribers (including the sender, who uses it as the ack).
+- A document is **dirty** while its text differs from its file's as last read, saved, or seen changed on disk: every `doc.edit` event carries `dirty`, so undoing back to the saved text makes it clean again (as VS does). Clients take it when none of their own edits are still on the way.
+- `doc.baseline {docId}` answers `{version, opened, saved}`: the text when the server opened the document and the file's text as last read, saved or seen changed on disk. The track-changes margin marks lines that differ from `saved` (unsaved, yellow) and those that differ only from `opened` (saved since, green); a client asks again after `doc.saved` and after an edit with origin `disk`.
 - If not (an AI edit or file reload slipped in), the server **rebases** the client's changes over the intervening changes (operational transform on line/column ranges - only one concurrent writer class at a time makes this cheap), applies, and broadcasts. If rebase is ambiguous (overlapping ranges), it returns `conflict` and the client re-syncs.
 - Non-holders are read-only replicas. `doc.takeLease` transfers the lease (the previous holder's pending edits are flushed first).
 - Server-side writers (AI tools, refactors, replace-in-files, file reload) apply as the server itself and are broadcast like any edit, tagged with `origin` (`ai:<chatId>`, `lsp`, `disk`, `user:<clientId>`) for margin coloring and undo grouping.

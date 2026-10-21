@@ -51,6 +51,7 @@ namespace Ied
 		this.server = server;
 		Search* self = this;
 		server->rpc.Register("fs.search", [self](Call& call, const Params& params) -> Core::String { return self->SearchMethod(call, params); });
+		server->rpc.Register("fs.files", [self](Call& call, const Params& params) -> Core::String { return self->FilesMethod(call, params); });
 	}
 
 	Core::HashMap<Core::String, Core::String> Search::OpenTexts(Workspace* ws) const {
@@ -74,8 +75,49 @@ namespace Ied
 			job->done = true;
 			cancel->wake.NotifyAll();
 		}).Detach();
+		Await(call, job);
+		return SearchResultJson(job->result);
+	}
+
+	void Search::Await(Call& call, SearchJob* job) {
 		while (!job->done && !call.cancel->IsCancelled()) call.cancel->wake.WaitFor(server->lock, kSearchWaitSliceNs);
 		if (!job->done) throw RpcError(ErrorCode::Cancelled, "request cancelled");
-		return SearchResultJson(job->result);
+	}
+
+	Core::String Search::FilesMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		Core::String query = params.Str("query", Core::StringView(""));
+		const int64 asked = params.Int("maxResults", kFilesDefaultResults);
+		const int64 most = asked < 1 ? 1 : asked > kFilesMostResults ? kFilesMostResults : asked;
+		SearchJob* job = new SearchJob();
+		FS::Path root = ws->root;
+		CancelToken* cancel = call.cancel;
+		Server* host = server;
+		Threading::Thread::Run([job, root, query, most, cancel, host]() {
+			FileWalk walk;
+			walk.root = root;
+			walk.exclude = DefaultSearchExcludes();
+			walk.useIgnoreFiles = true;
+			walk.cancel = &cancel->cancelled;
+			Core::Array<FileMatch> files = FindFiles(walk, query.View(), most);
+			Threading::LockGuard guard(host->lock);
+			job->files = files;
+			job->done = true;
+			cancel->wake.NotifyAll();
+		}).Detach();
+		Await(call, job);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("files"));
+		json.BeginArray();
+		for (const FileMatch& match : job->files) {
+			json.BeginObject();
+			json.Field("path", match.path.View());
+			json.IntField("score", match.score);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
 	}
 }

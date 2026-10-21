@@ -18,6 +18,8 @@ class Doc:
 		self.version = 1
 		self.holder = None
 		self.dirty = False
+		self.saved = text  # the file's text as last read, saved or seen changed on disk
+		self.opened = text  # the text when the server opened it: the track-changes margin's baseline
 		self.history = collections.deque(maxlen=HISTORY_VERSIONS)
 
 	@property
@@ -30,7 +32,7 @@ class Documents:
 		self.server = server
 		self.by_id = {}
 		self.by_path = {}
-		for name in ("doc.open", "doc.edit", "doc.takeLease", "doc.save"):
+		for name in ("doc.open", "doc.edit", "doc.takeLease", "doc.save", "doc.baseline"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def snapshot(self, doc):
@@ -67,8 +69,10 @@ class Documents:
 			raise RpcError("bad_request", str(e))
 		doc.version += 1
 		doc.history.append((doc.version, rebased))
-		doc.dirty = origin != "disk"
-		event = {"docId": doc.doc_id, "version": doc.version, "changes": textedit.to_wire(rebased), "origin": origin}
+		if origin == "disk":
+			doc.saved = doc.text
+		doc.dirty = doc.text != doc.saved
+		event = {"docId": doc.doc_id, "version": doc.version, "changes": textedit.to_wire(rebased), "origin": origin, "dirty": doc.dirty}
 		if base_version != doc.version - 1:
 			event["rebasedFrom"] = base_version
 		if op_id:
@@ -107,6 +111,7 @@ class Documents:
 		if doc is None or doc.text == text:
 			return
 		if doc.dirty:
+			doc.saved = text
 			self.server.hub.publish(doc.topic, "doc.diskChanged", {"docId": doc.doc_id, "revision": revision})
 			return
 		replace_all = textedit.Change(textedit.Pos(0, 0), textedit.end_position(doc.text), text)
@@ -138,10 +143,15 @@ class Documents:
 		doc.holder = client_id
 		self.server.hub.publish(doc.topic, "doc.lease", {"docId": doc.doc_id, "holder": client_id})
 
+	async def m_doc_baseline(self, call, p):
+		doc = self.get(p.str("docId"))
+		return {"version": doc.version, "opened": doc.opened, "saved": doc.saved}
+
 	async def m_doc_save(self, call, p):
 		doc = self.get(p.str("docId"))
 		ws = self.server.workspace.get(doc.ws_id)
 		revision = self.server.workspace.write(ws, doc.path, doc.text)
+		doc.saved = doc.text
 		doc.dirty = False
 		self.server.hub.publish(doc.topic, "doc.saved", {"docId": doc.doc_id, "version": doc.version, "revision": revision})
 		return {"version": doc.version, "revision": revision}

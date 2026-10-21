@@ -7,8 +7,11 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
 import { themeName } from "./monaco.js";
+import { ChangeMargin } from "./changemargin.js";
 
 const NOTICE_MS = 8000;
+// Narrower than this an editor is not laid out yet (a hidden or just-opened tab).
+const MIN_REVEAL_WIDTH = 40;
 
 export class CodeEditor {
 	// `editors`: the page's open editors (editors.js); `features`: the language servers' (language.js).
@@ -27,6 +30,7 @@ export class CodeEditor {
 		this.host = h("div.ed-fill.code-host");
 		ctx.el.append(this.bar, this.host);
 		this.editor = monaco.editor.create(this.host, editorOptions(monaco));
+		this.margin = new ChangeMargin(this.editor, this.ied.client, (message, e) => this.ied.report(message, e));
 		this.editor.onDidFocusEditorText(() => this.focused());
 		this.editor.onDidChangeCursorPosition((event) => {
 			this.changed();
@@ -40,6 +44,7 @@ export class CodeEditor {
 	dispose() {
 		this.editors.delete(this);
 		if (this.detach) this.detach();
+		this.margin.dispose();
 		this.sync.dispose();
 		this.editor.dispose();
 		if (this.model) this.model.dispose();
@@ -88,14 +93,26 @@ export class CodeEditor {
 		return model;
 	}
 
-	// Shows a place: a position or a range (Monaco's), centered when it is out of view.
+	// Shows a place: a position or a range (Monaco's), centered when it is out of view. An editor not laid out yet (a
+	// tab just opened) would scroll sideways to fit the place into no width, so it shows the place again once it has one.
 	reveal(selection) {
 		if (!selection) return;
 		const range = selection.startLineNumber !== undefined ? selection
 			: { startLineNumber: selection.lineNumber, startColumn: selection.column, endLineNumber: selection.lineNumber, endColumn: selection.column };
 		this.editor.setSelection({ selectionStartLineNumber: range.startLineNumber, selectionStartColumn: range.startColumn, positionLineNumber: range.startLineNumber, positionColumn: range.startColumn });
-		this.editor.revealRangeInCenterIfOutsideViewport(range);
+		this.editor.layout();
+		if (this.editor.getLayoutInfo().contentWidth > MIN_REVEAL_WIDTH) this.editor.revealRangeInCenterIfOutsideViewport(range);
+		else this.revealOnLayout(range);
 		this.editor.focus();
+	}
+
+	revealOnLayout(range) {
+		const waiting = this.editor.onDidLayoutChange((layout) => {
+			if (layout.contentWidth <= MIN_REVEAL_WIDTH) return;
+			waiting.dispose();
+			this.editor.setScrollLeft(0);
+			this.editor.revealRangeInCenterIfOutsideViewport(range);
+		});
 	}
 
 	applyRemote(changes) {
@@ -103,6 +120,7 @@ export class CodeEditor {
 		this.model.applyEdits(changes.map((change) => ({ range: toRange(this.monaco, change.range), text: change.text })));
 		this.applying = false;
 		this.changed();
+		this.margin.changed();
 	}
 
 	setReadOnly(readOnly) {
@@ -116,6 +134,7 @@ export class CodeEditor {
 		this.sync.localEdit(event.changes.map((change) => ({ range: fromRange(change.range), text: change.text })));
 		this.ctx.tab.pin();
 		this.changed();
+		this.margin.changed();
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -135,6 +154,7 @@ export class CodeEditor {
 
 	stateChanged(state) {
 		if (state.renamed && state.renamed !== this.path) this.moveTo(state.renamed);
+		if (state.baselineMoved) this.margin.refresh(this.sync.docId);
 		this.ctx.tab.setDirty(state.dirty);
 		if (state.notice) this.notice(state.notice);
 		if (state.error) this.problem(state.error);

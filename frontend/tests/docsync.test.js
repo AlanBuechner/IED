@@ -128,6 +128,7 @@ class ModelServer {
 		this.history = new Map();
 		this.events = [];
 		this.holder = "me";
+		this.saved = text;
 	}
 
 	// Applies an edit made at `baseVersion` as the server does: rebased over what came since, then published.
@@ -138,7 +139,7 @@ class ModelServer {
 		this.text = applyChanges(this.text, rebased);
 		this.version += 1;
 		this.history.set(this.version, rebased);
-		this.events.push({ kind: "doc.edit", data: { version: this.version, changes: rebased, origin, opId } });
+		this.events.push({ kind: "doc.edit", data: { version: this.version, changes: rebased, origin, opId, dirty: this.text !== this.saved } });
 	}
 }
 
@@ -272,6 +273,19 @@ test("docsync: edits go one at a time and are acknowledged by their event", asyn
 	client.serveOne();
 	client.deliver();
 	assertEqual([server.text, target.text, sync.pending], ["hello!?\n", "hello!?\n", 0]);
+});
+
+test("docsync: undoing back to the saved text is clean, once the server says so", async () => {
+	const { client, target, sync } = await opened("hello\n");
+	target.type(sync, [change(0, 5, 0, 5, "!")]);
+	assertEqual(sync.dirty, true, "dirty as the person types");
+	target.type(sync, [change(0, 5, 0, 6, "")]);
+	client.serveOne();
+	client.deliver();
+	assertEqual(sync.dirty, true, "the undo is still on the way");
+	client.serveOne();
+	client.deliver();
+	assertEqual([target.text, sync.dirty], ["hello\n", false], "the server has the file's text again");
 });
 
 test("docsync: another writer's edit while this client's are in flight and waiting", async () => {

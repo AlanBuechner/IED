@@ -32,6 +32,7 @@ namespace Ied
 		server->rpc.Register("lsp.capabilities", [self](Call& call, const Params& params) -> Core::String { return self->CapabilitiesMethod(call, params); });
 		server->rpc.Register("lsp.status", [self](Call& call, const Params& params) -> Core::String { return self->StatusMethod(call, params); });
 		server->rpc.Register("lsp.restart", [self](Call& call, const Params& params) -> Core::String { return self->RestartMethod(call, params); });
+		server->rpc.Register("lsp.workspaceSymbols", [self](Call& call, const Params& params) -> Core::String { return self->WorkspaceSymbolsMethod(call, params); });
 	}
 
 	void LspPool::WorkspaceOpened(Workspace* ws) {
@@ -574,6 +575,59 @@ namespace Ied
 		}
 		language->Relaunch();
 		return StatusSnapshot(ws);
+	}
+
+	static bool OffersWorkspaceSymbols(const LanguageServer* language) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode provider = Serialization::ReadJson(language->capabilities.View(), *doc).root.Member("workspaceSymbolProvider");
+		return provider.Kind() == Serialization::DomKind::Object || (provider.Kind() == Serialization::DomKind::Bool && provider.AsBool());
+	}
+
+	// Every running server of the workspace that offers workspace symbols is asked; one that fails or times out is left
+	// out rather than failing the rest.
+	Core::String LspPool::WorkspaceSymbolsMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		Core::String query = params.Str("query", Core::StringView(""));
+		Core::Array<LanguageServer*> asked;
+		for (LanguageServer* language : languages)
+			if (language->ws == ws && language->state == LspState::Running && OffersWorkspaceSymbols(language)) asked.Push(language);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("symbols"));
+		json.BeginArray();
+		for (LanguageServer* language : asked) SymbolsOf(call, language, query.View(), json);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void LspPool::SymbolsOf(Call& call, LanguageServer* language, Core::StringView query, JsonWriter& json) {
+		JsonWriter asked;
+		asked.BeginObject();
+		asked.Field("query", query);
+		asked.EndObject();
+		Core::String result;
+		try {
+			result = language->Request(call, Core::StringView("workspace/symbol"), asked.View(), kLspRequestTimeoutMs);
+		}
+		catch (RpcError& failed) {
+			if (failed.code == ErrorCode::Cancelled) throw failed;
+			Log(language, (Core::String("workspace/symbol failed: ") + failed.message.View()).View());
+			return;
+		}
+		lineCache.Clear();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode symbols = Serialization::ReadJson(RewriteText(result.View(), RewriteFor(language, Core::StringView(""), false)).View(), *doc).root;
+		for (int64 i = 0; i < symbols.Count(); ++i) {
+			Serialization::DomNode symbol = symbols.At(i);
+			json.BeginObject();
+			for (int64 m = 0; m < symbol.Count(); ++m) {
+				json.Key(symbol.KeyAt(m));
+				json.Raw(NodeJson(symbol.ValueAt(m)).View());
+			}
+			json.Field("source", language->Source().View());
+			json.EndObject();
+		}
 	}
 
 	// --- Message helpers ---------------------------------------------------------------------------------------------

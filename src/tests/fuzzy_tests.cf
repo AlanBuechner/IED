@@ -1,0 +1,47 @@
+// fs/fuzzy: file names found by the query's characters in order - in the name before the path, word starts and runs
+// first, shorter paths on ties - and the best few of a folder tree.
+
+include "fs/fuzzy.ch"
+
+static int64 Score(const char* query, const char* path) { return Ied::FuzzyScore(Core::StringView(query), Core::StringView(path)); }
+
+static void Write(const FS::Path& file) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::File opened = FS::File(file.CStr(), "wb");
+	opened.Write((const void*)"x", 1);
+}
+
+[test("server.fuzzy")]
+class FuzzyTests {
+	[test("scores")]
+	public static void TestScores() {
+		assert_eq(-1, Score("zzz", "src/lsp/pool.cf"), "not there");
+		assert_eq(-1, Score("loop", "src/lsp/pool.cf"), "the characters, but not in order");
+		assert_true(Score("POOL", "src/lsp/pool.cf") > 0, "any case");
+		assert_true(Score("pool", "src/lsp/pool.cf") > Score("pool", "src/lsp/pool/x.cf"), "in the name beats in the path");
+		assert_true(Score("pool", "src/lsp/pool.cf") > Score("pool", "src/services/a/b/pool.cf"), "a shorter path on a tie");
+		assert_true(Score("pool", "a/pool.cf") > Score("pool", "a/spool.cf"), "the name's start");
+		assert_true(Score("dc", "a/doc_client.cf") > Score("dc", "a/xdxcx.cf"), "word starts count");
+		assert_true(Score("lspcf", "src/lsp/client.cf") > 0, "across the path");
+		assert_true(Score("", "a.cf") > 0, "an empty query matches everything");
+	}
+
+	[test("find")]
+	public static void TestFind() {
+		FS::Path root = FS::TempDirectory() / "ied-fuzzy-test";
+		FS::RemoveAll(root.CStr());
+		Write(root / "src" / "pool.cf");
+		Write(root / "src" / "deep" / "inner" / "pool.ch");
+		Write(root / "src" / "other.cf");
+		Write(root / "build" / "pool.obj");
+		Ied::FileWalk walk;
+		walk.root = root;
+		walk.exclude.Push(Core::String("**/build"));
+		Core::Array<Ied::FileMatch> found = Ied::FindFiles(walk, Core::StringView("pool"), 5);
+		assert_eq(2, found.Count(), "two files, the excluded folder skipped");
+		assert_se("src/pool.cf", found[0].path.CStr(), "the shorter path first");
+		Core::Array<Ied::FileMatch> one = Ied::FindFiles(walk, Core::StringView("pool"), 1);
+		assert_eq(1, one.Count(), "at most `most`");
+		FS::RemoveAll(root.CStr());
+	}
+}

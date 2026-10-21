@@ -70,6 +70,9 @@ namespace Ied
 		private Core::String CapabilitiesMethod(Call& call, const Params& params);
 		private Core::String StatusMethod(Call& call, const Params& params);
 		private Core::String RestartMethod(Call& call, const Params& params);
+		private Core::String WorkspaceSymbolsMethod(Call& call, const Params& params);
+		// The symbols one server answers for `query`, for clients: positions in UTF-16, workspace files as ied: URIs.
+		private void SymbolsOf(Call& call, LanguageServer* language, Core::StringView query, JsonWriter& json);
 
 		private Server* server;
 		private Core::Array<LanguageServer*> languages;
