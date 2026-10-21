@@ -252,6 +252,8 @@ a { color: var(--link); text-decoration: none; }
 .hint { display: flex; justify-content: space-between; gap: var(--space-7); padding: var(--space-2) var(--space-4); border-radius: var(--radius-2); color: var(--text-2); text-align: left; }
 .hint:hover { background: var(--veil); color: var(--text-1); }
 .empty-area { position: absolute; inset: 0; display: flex; flex-direction: column; gap: var(--space-4); align-items: center; justify-content: center; color: var(--text-2); padding: var(--space-7); text-align: center; }
+.empty-area p { margin: 0; }
+.empty-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: center; }
 
 /* ---------- status bar ---------- */
 .statusbar {

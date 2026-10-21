@@ -5,7 +5,7 @@ import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { MENUBAR } from "./menus.js";
 import { DockView } from "./dock.js";
 import * as T from "./layouttree.js";
-import { initials, kindIcon } from "./workspaces.js";
+import { initials, kindIcon, noWorkspaceView } from "./workspaces.js";
 import { StatusBar } from "./statusbar.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -25,7 +25,6 @@ export class DesktopChrome {
 		this.app = h("div.app.desktop", null, this.sidebar, this.menubar, this.toolbar, this.banners, this.area, this.panel.el, this.status.el);
 		this.docks = new Map();
 		this.state = "connecting";
-		this.message = null;
 		replace(root, this.app);
 		this.stopContext = shell.context.onChange(() => this.renderToolbar());
 		this.renderSidebar();
@@ -90,8 +89,7 @@ export class DesktopChrome {
 	}
 
 	noWorkspace() {
-		this.message = "No workspace is open. Open one on the server: ied <folder or .ied.sln>";
-		replace(this.area, h("div.empty-area", null, icon("folder-opened", "lg"), h("p", null, this.message)));
+		replace(this.area, noWorkspaceView(this.shell));
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------

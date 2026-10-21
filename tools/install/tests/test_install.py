@@ -1,5 +1,6 @@
 """The installer (tools/install/install_ied.py): a mirror copies what changed, leaves out what it skips and removes what
-is gone; a program in use is renamed aside and replaced, and the next install removes the old copy."""
+is gone; a program in use is renamed aside and replaced, and the next install removes the old copy; the PATH gains the
+folder once and loses only it; an uninstall removes the folder whole or, while a program in it runs, not at all."""
 
 import os
 import shutil
@@ -54,6 +55,20 @@ class MirrorTests(unittest.TestCase):
 		self.assertFalse(os.path.exists(os.path.join(self.target, "src", "stale")), "an emptied folder goes too")
 
 
+class PathTests(unittest.TestCase):
+	FOLDER = r"C:\Users\me\AppData\Local\Programs\IED"
+
+	def test_the_folder_goes_last_once(self):
+		self.assertEqual(r"C:\a;C:\b;" + self.FOLDER, install_ied.with_folder(r"C:\a;C:\b;", self.FOLDER))
+		self.assertEqual(self.FOLDER, install_ied.with_folder("", self.FOLDER))
+		self.assertIsNone(install_ied.with_folder(r"C:\a;c:\users\ME\appdata\local\programs\ied\;C:\b", self.FOLDER), "there already, in other case")
+		self.assertIsNone(install_ied.with_folder('"%s"' % self.FOLDER, self.FOLDER), "there already, quoted")
+
+	def test_only_the_folder_goes(self):
+		self.assertEqual(r"C:\a;%USERPROFILE%\bin", install_ied.without_folder(r"C:\a;" + self.FOLDER + r";%USERPROFILE%\bin", self.FOLDER))
+		self.assertIsNone(install_ied.without_folder(r"C:\a;C:\b", self.FOLDER), "nothing to take out")
+
+
 @unittest.skipUnless(os.name == "nt", "Windows: a running program's file")
 class ProgramInUseTests(unittest.TestCase):
 	def setUp(self):
@@ -88,6 +103,28 @@ class ProgramInUseTests(unittest.TestCase):
 		self.process.wait(10)
 		install_ied.remove_old(self.root)
 		self.assertEqual([], [name for name in os.listdir(self.root) if name.endswith(".old")], "the next install removes it")
+
+	def test_an_uninstall_leaves_a_running_install_whole(self):
+		installed = os.path.join(self.root, "IED")
+		os.makedirs(os.path.join(installed, "frontend"))
+		write(os.path.join(installed, "frontend", "index.html"), "<p>IED</p>")
+		write(os.path.join(installed, "install.json"), "{}")
+		shutil.copy2(os.path.join(os.environ["SystemRoot"], "System32", "PING.EXE"), os.path.join(installed, "ied-server.exe"))
+		self.process = subprocess.Popen([os.path.join(installed, "ied-server.exe"), "-n", "30", "127.0.0.1"], stdout=subprocess.DEVNULL)
+		time.sleep(0.5)
+		with self.assertRaises(SystemExit):
+			install_ied.remove_install(installed)
+		self.assertTrue(os.path.isfile(os.path.join(installed, "frontend", "index.html")), "nothing removed while it runs")
+		self.process.kill()
+		self.process.wait(10)
+		install_ied.remove_install(installed)
+		self.assertEqual([], os.listdir(self.root), "all of it once it stopped")
+
+	def test_a_folder_that_is_no_install_is_left_alone(self):
+		write(os.path.join(self.root, "notes.txt"), "mine")
+		with self.assertRaises(SystemExit):
+			install_ied.remove_install(self.root)
+		self.assertTrue(os.path.isfile(os.path.join(self.root, "notes.txt")))
 
 
 if __name__ == "__main__":

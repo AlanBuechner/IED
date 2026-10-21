@@ -3,6 +3,7 @@
 // watch runs on the UI thread; what those threads hand over goes through `lock` and a posted message.
 
 include "window.ch"
+include "folder.ch"
 include "watch.ch"
 include "options.ch"
 
@@ -26,6 +27,8 @@ namespace Desktop
 		public void OpenLocation(Core::StringView path, int64 line, int64 col);
 		// A window straight on a URL of the server (the profile is signed in already).
 		public void OpenUrl(Core::StringView url);
+		// File > Open Folder: the folder the person picks, opened on the server and shown in `window`.
+		public void OpenFolder(Window* window);
 
 		// From windows (UI thread).
 		public void DeliverResolved(Window* window);
@@ -52,9 +55,8 @@ namespace Desktop
 		private void CreateEnvironment();
 		private void EnvironmentReady(int32 error, void* created);
 		private Window* NewWindow();
-		// Asks the server for the window's URL on a thread of its own; `onlyIfMoved`: show it only when the server's
-		// origin changed or the window shows a status page.
-		private void Resolve(Window* window, Core::StringView method, Core::StringView params, bool onlyIfMoved);
+		// Asks the server for the window's URL on a thread of its own; `arrival` says what the window does with it.
+		private void Resolve(Window* window, Core::StringView method, Core::StringView params, Arrival arrival);
 
 		private HINSTANCE__* instance;
 		private HWND__* messages;

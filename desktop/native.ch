@@ -8,4 +8,5 @@ namespace Desktop
 	const int32 kOk = 0;                      // S_OK
 	const int32 kFailed = -2147467259;        // E_FAIL
 	const int32 kNoInterface = -2147467262;   // E_NOINTERFACE
+	const int32 kCancelled = -2147023673;     // HRESULT_FROM_WIN32(ERROR_CANCELLED): the person closed a dialog
 }

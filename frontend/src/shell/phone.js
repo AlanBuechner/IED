@@ -5,7 +5,7 @@
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { wellsOf, groupsOf } from "./layouttree.js";
-import { initials } from "./workspaces.js";
+import { initials, noWorkspaceView } from "./workspaces.js";
 import { banners } from "./banners.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -87,7 +87,7 @@ export class PhoneChrome {
 	}
 
 	noWorkspace() {
-		replace(this.area, h("div.empty-area", null, icon("folder-opened", "lg"), h("p", null, "No workspace is open. Open one on the server: ied <folder or .ied.sln>")));
+		replace(this.area, noWorkspaceView(this.shell));
 	}
 
 	renderBanners() {

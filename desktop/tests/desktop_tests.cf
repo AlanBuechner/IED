@@ -93,6 +93,7 @@ class DesktopTests {
 		assert_true(!Desktop::StatusPage(Core::StringView("t"), Core::StringView("d"), false).View().Contains(Core::StringView("<button")), "none without retry");
 		Core::String script = Desktop::BridgeScript(Core::StringView("0.1.0"));
 		assert_true(script.View().Contains(Core::StringView("version: \"0.1.0\"")) && script.View().Contains(Core::StringView("devTools")), "the bridge");
+		assert_true(script.View().Contains(Core::StringView("openFolder: () => post(\"openFolder\")")), "File > Open Folder");
 	}
 
 	[test("restart_budget")]

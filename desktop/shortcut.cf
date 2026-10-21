@@ -21,15 +21,6 @@ namespace Desktop
 		return id;
 	}
 
-	static Core::String Failed(const char* what, int32 hresult) {
-		Core::StringBuilder text;
-		text.Append(what);
-		text.Append(" (HRESULT ");
-		text.AppendInt(hresult);
-		text.AppendByte(')');
-		return text.ToString();
-	}
-
 	bool Register(const FS::Path& program, Core::StringView appData, Core::String& error) {
 		FS::Path folder = StartMenuFolder(appData);
 		if (!FS::MakeDirectories(folder.CStr())) {
@@ -41,7 +32,7 @@ namespace Desktop
 		void* made = null;
 		int32 hr = CoCreateInstance((const void*)&shellLink, null, (uint32)CLSCTX_INPROC_SERVER, (const void*)__uuidof(IShellLinkW), &made);
 		if (hr != kOk || made == null) {
-			error = Failed("the shell made no shortcut", hr);
+			error = Failure(Core::StringView("the shell made no shortcut"), hr);
 			return false;
 		}
 		IShellLinkW* link = (IShellLinkW*)made;
@@ -61,7 +52,7 @@ namespace Desktop
 		}
 		link->Release();
 		if (hr != kOk) {
-			error = Failed("the shortcut was not saved", hr);
+			error = Failure(Core::StringView("the shortcut was not saved"), hr);
 			return false;
 		}
 		return true;

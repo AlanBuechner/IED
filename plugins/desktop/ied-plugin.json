@@ -1,6 +1,6 @@
-// The desktop app's commands (docs/27 "The page and its keys"): inside ied-desktop, whose window.iedDesktop this UI module
+// The desktop app's commands (docs/27 "The page and its keys"): inside ied-desktop, whose window.iedDesktop the shell
 // finds, the `desktopApp` context key is set and Window > New Window and Help > Developer Tools appear; in a browser they
-// stay hidden.
+// stay hidden. File > Open Folder is the shell's: it is needed where no workspace (and so no plugin) is loaded.
 {
 	"manifestVersion": 1,
 	"id": "ied.desktop",

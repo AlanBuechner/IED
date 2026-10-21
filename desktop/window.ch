@@ -8,7 +8,12 @@ include "pages.ch"
 
 namespace Desktop
 {
-	const uint32 kResolvedMessage = 0x8001;   // WM_APP + 1: a resolver thread left a URL or an error
+	const uint32 kResolvedMessage = 0x8001;     // WM_APP + 1: a resolver thread left a URL or an error
+	const uint32 kOpenFolderMessage = 0x8004;   // WM_APP + 4: the page asked for File > Open Folder
+
+	// Why a window asked the server for a URL: its first page; the server back after the watch started it again (the
+	// page stays unless the server's origin moved); or a folder the person picked (a failure is told, the page stays).
+	enum class Arrival { First, ServerBack, Folder }
 
 	class Window
 	{
@@ -23,9 +28,11 @@ namespace Desktop
 		public void Show(Core::StringView url);
 		// A status page in place of the web client (the server is unreachable).
 		public void ShowStatus(Core::StringView title, Core::StringView detail);
-		// What a resolver thread left: a URL to show, or why there is none; `onlyIfMoved` keeps the page when the server
-		// came back where it was (the web client reconnects by itself).
-		public void Resolved(Core::StringView url, Core::StringView error, bool onlyIfMoved);
+		// What a resolver thread left: a URL to show, or why there is none. When the server came back where it was, the
+		// page stays (the web client reconnects by itself).
+		public void Resolved(Core::StringView url, Core::StringView error, Arrival arrival);
+		// A message box over this window.
+		public void Alert(Core::StringView text);
 		public Placement CurrentPlacement() const;
 		public void Close();
 
@@ -39,7 +46,7 @@ namespace Desktop
 		public Core::String origin;        // the server's origin this window shows
 		public Core::String resolvedUrl;   // a resolver thread's result, under the app's lock
 		public Core::String resolveError;
-		public bool resolveOnlyIfMoved;
+		public Arrival resolveArrival;
 
 	private:
 		private void ControllerReady(int32 error, void* created);
@@ -63,6 +70,8 @@ namespace Desktop
 
 	// Win32's string for `text`, null-terminated.
 	Core::Array<char16> Wide(Core::StringView text);
-	// A string WebView2 allocated, as UTF-8; it is freed.
+	// A string WebView2 or the shell allocated, as UTF-8; it is freed.
 	Core::String TakeWide(char16* text);
+	// "<what> (HRESULT <n>)".
+	Core::String Failure(Core::StringView what, int32 hresult);
 }

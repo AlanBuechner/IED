@@ -56,6 +56,7 @@ export class Shell {
 		this.client = null;
 		this.server = { workspaces: [], clients: [], notifications: [] };
 		this.wsId = null;
+		this.showingNoWorkspace = false;   // the server has no workspace to show (not merely none chosen yet)
 		this.pendingOpen = parseOpenFragment(location.hash);
 		this.workspace = workspaceInfo();
 		this.layout = null;
@@ -81,6 +82,8 @@ export class Shell {
 		window.addEventListener("resize", () => this.resized());
 		this.context.set("deviceClass", this.deviceClass);
 		this.context.set("connected", false);
+		// Inside IED's desktop app (docs/27), which adds window.iedDesktop before the page's scripts.
+		this.context.set("desktopApp", Boolean(window.iedDesktop));
 		this.mountChrome();
 		window.addEventListener("keydown", (event) => this.keybindings.handle(event), true);
 		document.addEventListener("focusin", (event) => this.context.set("inputFocus", isTextInput(event.target)));
@@ -183,7 +186,11 @@ export class Shell {
 		catch {
 			// a window without storage forgets the choice
 		}
+		this.showingNoWorkspace = !wsId;
 		if (!wsId) {
+			// The workspace shown before is described no more: not in the title, not on the sidebar's button.
+			Object.assign(this.workspace, { wsId: null, name: "", kind: null, root: "", trusted: true, solution: null });
+			this.workspaceChanged();
 			this.chrome.noWorkspace();
 			return;
 		}
@@ -274,6 +281,8 @@ export class Shell {
 		if (this.chrome) this.chrome.dispose();
 		this.chrome = this.deviceClass === "phone" ? new PhoneChrome(this, this.root) : new DesktopChrome(this, this.root);
 		this.chrome.connection(this.client ? this.client.state : "connecting");
+		// A chrome made for a new width shows what the old one did: a workspace is rendered by render(), none is shown here.
+		if (this.showingNoWorkspace) this.chrome.noWorkspace();
 	}
 
 	resized() {

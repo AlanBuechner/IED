@@ -1,5 +1,7 @@
 // hostcommands.js - the shell's own commands, their menu places and keys (docs/15 "Shell commands"). Commands about a
-// tab take {ref}; without it they act on the tab with the focus.
+// tab take {ref}; without it they act on the tab with the focus. Open Folder exists only inside IED's desktop app
+// (`desktopApp`, docs/27), which shows the system's folder picker and opens the folder on the server; a browser has no
+// way to pick a folder of the server's.
 
 import * as T from "./layouttree.js";
 import { showPalette } from "./palette.js";
@@ -45,6 +47,7 @@ const COMMANDS = [
 	{ id: "shell.togglePanel", title: "Show or Hide the Panel", category: "View", icon: "$(layout-panel)", run: (shell) => shell.chrome && shell.chrome.panel && shell.chrome.panel.mounted && shell.chrome.panel.setOpen(!shell.chrome.panel.isOpen()) },
 	{ id: "shell.showNotifications", title: "Notifications", category: "View", icon: "$(bell)", run: (shell, args) => showNotificationCenter(shell, args && args.at) },
 	{ id: "shell.clearNotifications", title: "Clear All Notifications", category: "View", run: (shell) => Promise.all(shell.server.notifications.map((n) => shell.client.request("server.dismiss", { id: n.id }))) },
+	{ id: "shell.openFolder", title: "Open Folder...", category: "File", icon: "$(folder-opened)", run: () => window.iedDesktop && window.iedDesktop.openFolder() },
 	{ id: "shell.switchWorkspace", title: "Switch Workspace...", category: "File", run: (shell, args) => showWorkspaceSwitcher(shell, args && args.at) },
 	{ id: "shell.trustWorkspace", title: "Trust Workspace", category: "File", enablement: "!workspaceTrusted", run: (shell) => shell.client.request("ws.setTrust", { wsId: shell.wsId, trusted: true }) },
 	{ id: "shell.keyboardShortcuts", title: "Keyboard Shortcuts", category: "Help", icon: "$(record-keys)", run: (shell) => shell.openSettings("custom:shell.keyboard") },
@@ -55,6 +58,7 @@ const COMMANDS = [
 
 const MENUS = {
 	"menubar/file": [
+		{ command: "shell.openFolder", group: "0_open", when: "desktopApp" },
 		{ command: "shell.switchWorkspace", group: "1_workspace" },
 		{ command: "shell.trustWorkspace", group: "1_workspace", order: 1, when: "!workspaceTrusted" },
 	],
@@ -81,6 +85,10 @@ const MENUS = {
 		{ command: "shell.resetLayout", group: "3_layout" },
 		{ command: "shell.about", group: "9_about" },
 	],
+	// The ways to open a workspace: buttons where none is open, rows of the workspace switcher.
+	"shell/openWorkspace": [
+		{ command: "shell.openFolder", group: "1_open", when: "desktopApp" },
+	],
 	"tab/context": [
 		{ command: "shell.closeTab", group: "1_close" },
 		{ command: "shell.closeOtherTabs", group: "1_close", order: 1 },
@@ -98,6 +106,7 @@ const KEYS = [
 	{ command: "shell.nextTab", key: "ctrl+alt+pagedown" },
 	{ command: "shell.previousTab", key: "ctrl+alt+pageup" },
 	{ command: "shell.togglePanel", key: "ctrl+`" },
+	{ command: "shell.openFolder", key: "ctrl+shift+alt+o", when: "desktopApp" },
 ];
 
 export function registerShellCommands(shell) {

@@ -82,7 +82,7 @@ namespace Desktop
 		if (environment == null) return;
 		environment = null;
 		CreateEnvironment();
-		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), false);
+		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), Arrival::First);
 	}
 
 	void App::Report(Core::StringView what, int32 hresult) {
@@ -109,12 +109,20 @@ namespace Desktop
 
 	void App::OpenHome() {
 		Window* window = NewWindow();
-		if (window != null) Resolve(window, Core::StringView("url"), Core::StringView(""), false);
+		if (window != null) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::First);
 	}
 
 	void App::OpenLocation(Core::StringView path, int64 line, int64 col) {
 		Window* window = NewWindow();
-		if (window != null) Resolve(window, Core::StringView("open"), Launch::OpenParams(path, line, col).View(), false);
+		if (window != null) Resolve(window, Core::StringView("open"), Launch::OpenParams(path, line, col).View(), Arrival::First);
+	}
+
+	void App::OpenFolder(Window* window) {
+		Core::String folder;
+		Core::String error;
+		if (PickFolder(window->hwnd, folder, error))
+			Resolve(window, Core::StringView("open"), Launch::OpenParams(folder.View(), 0, 0).View(), Arrival::Folder);
+		else if (!error.IsEmpty()) window->Alert((Core::String("IED could not open a folder: ") + error.View()).View());
 	}
 
 	void App::OpenUrl(Core::StringView url) {
@@ -127,11 +135,11 @@ namespace Desktop
 		return Launch::Reach(options.control.View(), error);
 	}
 
-	void App::Resolve(Window* window, Core::StringView method, Core::StringView params, bool onlyIfMoved) {
+	void App::Resolve(Window* window, Core::StringView method, Core::StringView params, Arrival arrival) {
 		App* self = this;
 		Core::String asked = Core::String(method);
 		Core::String with = Core::String(params);
-		Threading::Thread::Run([self, window, asked, with, onlyIfMoved]() {
+		Threading::Thread::Run([self, window, asked, with, arrival]() {
 			Core::String url;
 			Core::String error;
 			Net::LocalStream stream = self->EnsureServer(error);
@@ -144,7 +152,7 @@ namespace Desktop
 				Threading::LockGuard guard(self->lock);
 				window->resolvedUrl = url;
 				window->resolveError = error;
-				window->resolveOnlyIfMoved = onlyIfMoved;
+				window->resolveArrival = arrival;
 			}
 			if (window->hwnd != null) PostMessageW(window->hwnd, kResolvedMessage, 0, 0);
 		}).Detach();
@@ -153,16 +161,16 @@ namespace Desktop
 	void App::DeliverResolved(Window* window) {
 		Core::String url;
 		Core::String error;
-		bool onlyIfMoved = false;
+		Arrival arrival = Arrival::First;
 		{
 			Threading::LockGuard guard(lock);
 			url = window->resolvedUrl;
 			error = window->resolveError;
-			onlyIfMoved = window->resolveOnlyIfMoved;
+			arrival = window->resolveArrival;
 			window->resolvedUrl = Core::String();
 			window->resolveError = Core::String();
 		}
-		window->Resolved(url.View(), error.View(), onlyIfMoved);
+		window->Resolved(url.View(), error.View(), arrival);
 		if (!url.IsEmpty()) watch.Start(this);
 	}
 
@@ -184,7 +192,7 @@ namespace Desktop
 
 	void App::Retry() {
 		watch.Reset();
-		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), false);
+		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), Arrival::First);
 	}
 
 	void App::ServerBack() {
@@ -201,7 +209,7 @@ namespace Desktop
 
 	bool App::Handle(uint32 message) {
 		if (message == kServerBackMessage) {
-			for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), true);
+			for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), Arrival::ServerBack);
 			return true;
 		}
 		if (message == kServerFailedMessage) {

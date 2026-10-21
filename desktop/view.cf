@@ -117,9 +117,10 @@ namespace Desktop
 		}
 	}
 
-	void Window::Resolved(Core::StringView url, Core::StringView error, bool onlyIfMoved) {
-		if (!url.IsEmpty() && onlyIfMoved && !showingStatus && OriginOf(url).View() == origin.View()) return;
+	void Window::Resolved(Core::StringView url, Core::StringView error, Arrival arrival) {
+		if (!url.IsEmpty() && arrival == Arrival::ServerBack && !showingStatus && OriginOf(url).View() == origin.View()) return;
 		if (!url.IsEmpty()) Show(url);
+		else if (arrival == Arrival::Folder) Alert((Core::String("IED could not open the folder: ") + error).View());
 		else ShowStatus(Core::StringView("IED could not start its server"), error);
 	}
 
@@ -186,6 +187,8 @@ namespace Desktop
 		}
 		if (NavigationTarget(source.View(), origin.View()) != Destination::Here || OriginOf(source.View()).IsEmpty()) return kOk;
 		if (type == "devTools") webview->OpenDevToolsWindow();
+		// The picker is modal: it runs from the window's own message, not inside WebView2's event.
+		else if (type == "openFolder") PostMessageW(hwnd, kOpenFolderMessage, 0, 0);
 		else if (type == "openExternal") Launch::OpenExternal(parsed.root.Member("url").AsView());
 		else if (type == "newWindow") {
 			Core::StringView url = parsed.root.Member("url").AsView();

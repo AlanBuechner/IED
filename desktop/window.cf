@@ -21,6 +21,15 @@ namespace Desktop
 		return utf8;
 	}
 
+	Core::String Failure(Core::StringView what, int32 hresult) {
+		Core::StringBuilder text;
+		text.Append(what);
+		text.Append(" (HRESULT ");
+		text.AppendInt(hresult);
+		text.AppendByte(')');
+		return text.ToString();
+	}
+
 	static void DarkFrame(HWND__* hwnd) {
 		int32 dark = 1;
 		DwmSetWindowAttribute(hwnd, (uint32)DWMWA_USE_IMMERSIVE_DARK_MODE, (const void*)&dark, 4);
@@ -92,6 +101,12 @@ namespace Desktop
 		if (hwnd != null) PostMessageW(hwnd, (uint32)WM_CLOSE, 0, 0);
 	}
 
+	void Window::Alert(Core::StringView text) {
+		Core::Array<char16> body = Wide(text);
+		Core::Array<char16> caption = Wide(Core::StringView("IED"));
+		MessageBoxW(hwnd, body.Data(), caption.Data(), (uint32)MB_ICONERROR);
+	}
+
 	bool Window::Handle(uint32 message, uint64 wParam, int64 lParam, int64& result) {
 		result = 0;
 		if (message == (uint32)WM_SIZE) {
@@ -123,6 +138,10 @@ namespace Desktop
 		}
 		if (message == kResolvedMessage) {
 			app->DeliverResolved(this);
+			return true;
+		}
+		if (message == kOpenFolderMessage) {
+			app->OpenFolder(this);
 			return true;
 		}
 		if (message == (uint32)WM_CLOSE) {
