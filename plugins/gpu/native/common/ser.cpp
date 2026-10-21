@@ -33,7 +33,10 @@ namespace fb
 		else {
 			size = reader_->Get<u64>();
 			data = reader_->View((size_t)size);
-			if (!data) size = 0;
+			if (!data || !size) {
+				data = nullptr;
+				size = 0;
+			}
 		}
 		if (json_) {
 			json_->BeginObject(name);

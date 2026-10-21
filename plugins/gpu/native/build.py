@@ -119,6 +119,8 @@ def build_target(name, kind, folders, libs, options, pool):
 		"-DFB_CONFIG_" + options.config.upper(), "-DVK_USE_PLATFORM_WIN32_KHR", "-DVK_NO_PROTOTYPES"]
 	stamp = json.dumps([options.clang, flags, defines])
 	sources = sources_of(folders)
+	if not sources:
+		return True
 	jobs = []
 	objects = []
 	for source in sources:

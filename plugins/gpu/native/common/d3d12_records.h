@@ -383,7 +383,7 @@ namespace fb::d3d12
 	struct StencilRefsArgs { UINT front; UINT back; };
 	struct DepthBiasArgs { FLOAT bias; FLOAT clamp; FLOAT slopeScaled; };
 	struct StripCutArgs { D3D12_INDEX_BUFFER_STRIP_CUT_VALUE value; };
-	struct UnsupportedArgs { std::string name; };
+	struct UnsupportedArgs { const char* name; };
 
 	// --- Serialization ----------------------------------------------------------------------------------------------
 

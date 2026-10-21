@@ -1,0 +1,28 @@
+# The GPU debugger's native parts (docs/22): the capture library flashbang.dll with its Vulkan layer manifest, the
+# replayer flashbang-replay.exe, the sample programs and the tests, built by native/build.py with the toolchain's
+# clang. `nuke build flashbang`; `nuke test flashbang` runs the unit tests, then captures the samples and replays them
+# (on a machine with a GPU).
+[project]
+name = "flashbang"
+kind = "custom"
+language = "cpp"
+description = "The GPU debugger's capture library, replayer and samples (C++)"
+output = "${bin}/flashbang-replay.exe"
+
+[[project.steps]]
+name = "native"
+phase = "build"
+description = "flashbang.dll, flashbang-replay.exe, the samples and the tests"
+run = ["${python}", "-I", "native/build.py", "--config", "${config}", "--bin", "${bin}", "--int", "${int}", "--clang", "${toolchain.dir}/toolchain/bin/clang.exe"]
+
+[[project.steps]]
+name = "unit-tests"
+phase = "test"
+description = "flashbang-tests: the serializer, the capture container, formats, JSON, PNG"
+run = ["${bin}/flashbang-tests.exe"]
+
+[[project.steps]]
+name = "capture-replay"
+phase = "test"
+description = "capture the samples and replay them (skipped without a GPU)"
+run = ["${python}", "-I", "native/tests/test_flashbang.py", "--bin", "${bin}"]

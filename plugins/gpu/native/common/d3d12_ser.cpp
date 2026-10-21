@@ -1334,7 +1334,7 @@ namespace fb::d3d12
 				return;
 			}
 			case Cmd::IASetIndexBufferStripCutValue: s.Field("IBStripCutValue", ((StripCutArgs*)raw)->value); return;
-			case Cmd::Unsupported: s.Text("Method", ((UnsupportedArgs*)raw)->name); return;
+			case Cmd::Unsupported: s.Str("Method", ((UnsupportedArgs*)raw)->name); return;
 			default: return;
 		}
 	}

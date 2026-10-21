@@ -11,7 +11,7 @@
 name = "IED"
 toolchain = "dev"
 default-project = "C4"
-projects = ["C4", "src", "cli", "launcher", "desktop", "tools/schema-check/c4"]
+projects = ["C4", "src", "cli", "launcher", "desktop", "tools/schema-check/c4", "plugins/gpu"]
 
 [commands.gates]
 description = "Build the C4 compiler, then run every C4 test suite (unit, e2e, negative, isolated, runtime, script, tools, Bedrock)"
