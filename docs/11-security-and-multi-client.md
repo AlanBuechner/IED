@@ -136,7 +136,7 @@ Not solvable in general; IED limits the blast radius:
 
 ## Plugin permissions
 
-Declared in the manifest (`docs/02`), shown before enabling, enforced at the host API boundary for JS and process plugins. Built-in plugins are trusted code but still declare permissions (documentation + future isolation). **UI modules run in the page with full client privileges** (they can send any WS request the user can) - so a UI module is exactly as trusted as its plugin. Third-party UI that should not be fully trusted must use the sandboxed-iframe view type (`view.kind: "iframe"`), which talks through a narrow postMessage bridge (the predecessor IDE's model). v1 ships both; built-ins use in-page modules.
+Declared in the manifest (`docs/02`), shown before enabling, enforced at the plugin API boundary (`src/api/`) for plugin C4 code - a courtesy for code that runs in the server's process, not isolation (`docs/26`). Built-in plugins are trusted code but still declare permissions (documentation + future isolation). **UI modules run in the page with full client privileges** (they can send any WS request the user can) - so a UI module is exactly as trusted as its plugin. Third-party UI that should not be fully trusted must use the sandboxed-iframe view type (`view.kind: "iframe"`), which talks through a narrow postMessage bridge (the predecessor IDE's model). v1 ships both; built-ins use in-page modules.
 
 ## Secrets
 

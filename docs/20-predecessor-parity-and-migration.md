@@ -38,7 +38,7 @@ From the predecessor's own code and docs: harness stop causes (`docs/12` table);
 
 | Predecessor feature | IED placement |
 |---|---|
-| ComfyUI image/video generation tools | optional plugin (MCP or process plugin) |
+| ComfyUI image/video generation tools | optional plugin (MCP, or a plugin's C4 tool calls) |
 | Fossil and Perforce | `sourceControlProviders` plugins (P2) |
 | `restart` self-development tool | F-OPS-27 (rebuild-relaunch with resume) |
 | Calculator/Notes/Bookmarks plugins | Bookmarks is core editor (F-EDT-52); scratchpad replaces Notes |

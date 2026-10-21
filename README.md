@@ -63,22 +63,23 @@ IED/
 +- AGENTS.md             working agreements and hard rules
 +- WORK.md               living state: what exists, what is next, decisions log
 +- setup.bat             installs what is not committed (tools/setup/deps.toml pins it)
-+- nuke.toml             this repository as a Nuke workspace (builds the C4 compiler; later the IED server)
++- nuke.toml             this repository as a Nuke workspace (the C4 compiler, the IED server, the CLI, the desktop app)
 +- nuke.bat, bin/        the nuke launcher (bin/ goes on PATH)
 +- cli/, launcher/       `ied`, the command line, and what it shares with the desktop app (the control pipe, starting the server)
 +- desktop/              `ied-desktop`, the desktop app: the web client in WebView2 windows, written in C4 (docs/27)
 +- docs/                 numbered planning docs + features/ (the full feature catalog)
 +- shared/
 |  +- host-api/          THE CONTRACT: JSON Schemas (plugin manifest, solution, project, federation, agent mode),
-|  |                     WS frame schema, process-plugin RPC, skill format, examples (incl. the C4 plugin)
+|  |                     WS frame schema, skill format, examples (a solution, a project, a plugin with C4 code)
 |  +- ui-kit/            shared web components (tree, tabs, ANSI console, menus, dropdowns, icons)
-+- src/                  IED server (C4, when the compiler is ready); plugins/chat/prompts/ already holds the shipped prompt texts
++- src/                  IED server (C4): the host's concepts (workspaces, documents, tasks, language servers, ...) and the plugin API (src/api/, docs/26)
 +- frontend/             web client (html/css/js): theme tokens, static mocks, shell, docking, WS client
-+- plugins/              built-in plugins: chat, editor, git, terminal, sandbox, profiler, gpu
++- plugins/              built-in plugins: one per language (cpp, rust, go, python, web, ...) and the features (chat, editor, git, terminal, browser, markdown, nuke, profiler, gpu, sandbox)
 +- C4/                   the C4 language (compiler sources, Bedrock, runtime, LSP, DAP, tests, docs, Frost)
 +- Nuke/                 the build system (Python, stdlib only) + its tests
-+- tools/                setup, mock server, conformance suite, fake model server, schema check
-+- third_party/          git submodules (codicons, libgit2, quickjs-ng)
++- tests/                e2e: the web client in Playwright against the mock and the real server, desktop and phone
++- tools/                setup, mock server, conformance suite, fake model server, server checks, schema check, soak
++- third_party/          git submodules (codicons, libgit2; quickjs-ng, unused since plugins run C4 code - docs/99 #6)
 +- .ied/                 IED's own committed solution folder (skills); .ied/local/ is gitignored
 +- vendor/, toolchains/, build/   created by setup and builds; gitignored
 ```
