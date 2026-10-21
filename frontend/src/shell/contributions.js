@@ -17,6 +17,7 @@ export class Contributions {
 		this.activities = [];
 		this.toolWindows = [];
 		this.statusItems = [];
+		this.toolbarItems = [];
 	}
 
 	// Reads the contributions of `wsId` and registers them; resolves once every UI module is imported and activated.
@@ -39,6 +40,7 @@ export class Contributions {
 		this.activities = [];
 		this.toolWindows = [];
 		this.statusItems = [];
+		this.toolbarItems = [];
 		for (const plugin of this.plugins) {
 			const c = plugin.contributes;
 			for (const spec of c.commands || []) commands.define(spec, plugin.id, plugin.base);
@@ -47,6 +49,7 @@ export class Contributions {
 			for (const a of c.activities || []) this.activities.push(Object.assign({ plugin, order: 100 }, a));
 			for (const t of c.toolWindows || []) this.toolWindows.push(Object.assign({ plugin, activity: "ied.editor" }, t, { dock: DOCKS.has(t.defaultDock) ? t.defaultDock : "bottom" }));
 			for (const s of c.statusBarItems || []) this.statusItems.push(Object.assign({ plugin, priority: 0 }, s));
+			for (const t of c.toolbarItems || []) this.toolbarItems.push(Object.assign({ plugin, priority: 0 }, t));
 		}
 		if (!this.activities.some((a) => !a.view)) this.activities.push(HOME_ACTIVITY);
 		this.activities.sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));

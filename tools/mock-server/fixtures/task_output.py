@@ -10,9 +10,9 @@ EXE = "build/bin/Development-windows-x64/demo/demo.exe"
 COMPILE_UNITS = ["src/engine/math.h", "src/engine/render.c", "src/game/player.c", "src/main.c", "tests/test_math.c"]
 
 
-def _compile_lines(error):
+def _compile_lines(error, params):
 	total = len(COMPILE_UNITS) + 1
-	yield 0.05, "stdout", "%s==> Build demo | Development | x64%s\r\n" % (BOLD, RESET)
+	yield 0.05, "stdout", "%s==> Build demo | %s | %s%s\r\n" % (BOLD, params.get("config", "Development"), params.get("arch", "x64"), RESET)
 	for i, unit in enumerate(COMPILE_UNITS, 1):
 		yield 0.25, "stdout", "[%d/%d] %scompile%s %s\r\n" % (i, total, CYAN, RESET, unit)
 		if unit == "src/engine/render.c":
@@ -27,12 +27,12 @@ def _compile_lines(error):
 	return 0
 
 
-def build_step():
-	return "Build demo", "nuke build dev", _compile_lines(False)
+def build_step(params):
+	return "Build demo", "nuke build dev", _compile_lines(False, params)
 
 
-def failing_build_step():
-	return "Build demo", "nuke build dev", _compile_lines(True)
+def failing_build_step(params):
+	return "Build demo", "nuke build dev", _compile_lines(True, params)
 
 
 def _test_lines():
@@ -73,11 +73,18 @@ def flood_step(count):
 
 
 TASKS = {
-	"build": {"label": "Build", "slot": "build", "steps": lambda params: [build_step()]},
-	"build-broken": {"label": "Build (with an error)", "slot": None, "steps": lambda params: [failing_build_step()]},
-	"test": {"label": "Test", "slot": "test", "steps": lambda params: [test_step()]},
-	"run": {"label": "Run", "slot": "run", "steps": lambda params: [build_step(), run_step()]},
-	"flood": {"label": "Flood (50k lines)", "slot": None, "steps": lambda params: [flood_step(params.get("lines", 50000))]},
+	"build": {"label": "Build", "slot": "build", "icon": "$(gear)", "steps": lambda params: [build_step(params)]},
+	"build-broken": {"label": "Build (with an error)", "slot": None, "icon": "", "steps": lambda params: [failing_build_step(params)]},
+	"test": {"label": "Test", "slot": "test", "icon": "$(beaker)", "steps": lambda params: [test_step()]},
+	"run": {"label": "Run", "slot": "run", "icon": "$(run)", "steps": lambda params: [build_step(params), run_step()]},
+	"flood": {"label": "Flood (50k lines)", "slot": None, "icon": "", "steps": lambda params: [flood_step(params.get("lines", 50000))]},
 }
+
+# The demo project's variables and toolbar (docs/06 "Protocol and state"), as the c4.nuke preset offers them.
+VARIABLES = [
+	{"key": "config", "kind": "dropdown", "label": "Configuration", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution"},
+	{"key": "arch", "kind": "dropdown", "label": "Platform", "values": ["x64"], "default": "x64", "scope": "solution"},
+]
+TOOLBAR = ["config", "arch", "|", "run", "build", "test"]
 
 OUTPUT_SOURCE = {"build": "build", "build-broken": "build", "test": "test", "run": "run", "flood": "build"}

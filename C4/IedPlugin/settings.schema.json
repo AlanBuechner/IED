@@ -7,6 +7,11 @@
 			"type": "boolean",
 			"default": true,
 			"description": "Run C4LSP for C4 sources: diagnostics, completion, navigation, formatting and refactoring."
+		},
+		"c4.nuke.command": {
+			"type": "string",
+			"default": "nuke",
+			"description": "How the Nuke tasks start Nuke: a name on PATH or the path of nuke.cmd (bin/ in the IED repository)."
 		}
 	}
 }

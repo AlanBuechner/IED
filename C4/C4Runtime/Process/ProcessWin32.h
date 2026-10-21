@@ -10,7 +10,10 @@
 // The program's full path (malloc'd): a path as it is, a bare name looked for as the system does. Null with `error`
 // when there is none, or it is a batch file (cmd.exe reads arguments its own way: run it through "cmd.exe /c").
 wchar_t* c4_process_win32_program(const char* program, char* error, int64_t errorCapacity);
-// The program and the arguments, quoted for CommandLineToArgvW (malloc'd); null when out of memory or not UTF-8.
+// The system's shell (malloc'd): %ComSpec%, else cmd.exe in the system folder. Null with `error` when there is none.
+wchar_t* c4_process_win32_shell(char* error, int64_t errorCapacity);
+// The program and the arguments, quoted for CommandLineToArgvW, or the shell and its command as written (malloc'd);
+// null when out of memory or not UTF-8.
 wchar_t* c4_process_win32_command_line(const c4_process_options* start, const wchar_t* program);
 // The child's environment block (malloc'd), or null to inherit this one unchanged; `*failed` for an entry that is
 // not UTF-8 or names nothing.

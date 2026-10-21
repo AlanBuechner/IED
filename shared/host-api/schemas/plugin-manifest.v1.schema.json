@@ -118,6 +118,7 @@
 				},
 				"keybindings": { "type": "array", "items": { "$ref": "#/$defs/keybinding" } },
 				"statusBarItems": { "type": "array", "items": { "$ref": "#/$defs/statusBarItem" } },
+				"toolbarItems": { "type": "array", "items": { "$ref": "#/$defs/toolbarItem" } },
 				"outputSources": {
 					"type": "array",
 					"items": {
@@ -329,6 +330,18 @@
 				"args": {}
 			}
 		},
+		"toolbarItem": {
+			"type": "object",
+			"required": ["id", "view"],
+			"additionalProperties": false,
+			"description": "A UI module's view rendered in the toolbar after its commands (dropdowns, live buttons).",
+			"properties": {
+				"id": { "type": "string" },
+				"view": { "type": "string" },
+				"priority": { "type": "number", "description": "Higher comes first." },
+				"when": { "$ref": "#/$defs/when" }
+			}
+		},
 		"statusBarItem": {
 			"type": "object",
 			"required": ["id", "alignment"],
@@ -450,6 +463,9 @@
 				"label": { "type": "string" },
 				"command": { "type": "string" },
 				"args": { "type": "array", "items": { "type": "string" } },
+				"env": { "type": "object", "additionalProperties": { "type": "string" } },
+				"cwd": { "type": "string" },
+				"when": { "$ref": "#/$defs/when" },
 				"transport": { "enum": ["stdio", "tcp"], "default": "stdio" },
 				"languages": { "type": "array", "items": { "type": "string" } },
 				"launchMode": { "enum": ["direct", "staged"], "default": "direct" },

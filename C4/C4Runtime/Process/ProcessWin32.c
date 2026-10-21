@@ -223,12 +223,18 @@ int32_t c4_process_start(const c4_process_options* start, c4_process* out, char*
 {
 	memset(out, 0, sizeof(*out));
 	c4_copy_text("", error, errorCapacity);
-	if (!start || !start->program || !*start->program)
+	const bool shell = start && start->shellCommand && *start->shellCommand;
+	if (!start || (!shell && (!start->program || !*start->program)))
 	{
 		c4_copy_text("no program to start", error, errorCapacity);
 		return -1;
 	}
-	wchar_t* program = c4_process_win32_program(start->program, error, errorCapacity);
+	if (shell && ((start->program && *start->program) || start->argumentCount > 0))
+	{
+		c4_copy_text("a shell command takes no program or arguments", error, errorCapacity);
+		return -1;
+	}
+	wchar_t* program = shell ? c4_process_win32_shell(error, errorCapacity) : c4_process_win32_program(start->program, error, errorCapacity);
 	if (!program) return -1;
 	const bool started = Start(start, program, out);
 	const DWORD why = GetLastError();

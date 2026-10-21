@@ -1,0 +1,361 @@
+include "runner.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	const int64 kRunReadBytes = 16384;
+
+	const char* RunStatusName(RunStatus status) {
+		if (status == RunStatus::Queued) return "queued";
+		if (status == RunStatus::Running) return "running";
+		if (status == RunStatus::Succeeded) return "succeeded";
+		if (status == RunStatus::Failed) return "failed";
+		return "cancelled";
+	}
+
+	Core::String ProblemSource(const ProblemMatcher* matcher, Core::StringView project) {
+		return project.IsEmpty() ? matcher->source : (matcher->source + "/") + project;
+	}
+
+	Core::String TasksTopic(const Workspace* ws) { return Core::String("tasks:") + ws->wsId.View(); }
+
+	static int64 NowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	static void WriteSummary(JsonWriter& json, const TaskRun* run) {
+		json.Field("runId", run->runId.View());
+		json.Field("project", run->project.View());
+		json.Field("task", run->task.View());
+		json.Field("label", run->label.View());
+		json.Field("status", RunStatusName(run->status));
+		json.Key(Core::StringView("exitCode"));
+		if (run->status == RunStatus::Succeeded || run->status == RunStatus::Failed) json.Int(run->exitCode);
+		else json.Null();
+		json.IntField("startedMs", run->startedMs);
+		json.IntField("endedMs", run->endedMs);
+	}
+
+	Core::String TaskRun::SummaryJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json, this);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String TaskRun::SnapshotJson() const {
+		JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json, this);
+		json.Field("wsId", ws->wsId.View());
+		json.Key(Core::StringView("steps"));
+		json.BeginArray();
+		for (int64 i = 0; i < steps.Count(); ++i) {
+			json.BeginObject();
+			json.IntField("step", i);
+			json.Field("label", steps[i]->label.View());
+			json.Field("status", steps[i]->status.View());
+			json.IntField("exitCode", steps[i]->exitCode);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Field("tail", tail.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Problems ----------------------------------------------------------------------------------------------------
+
+	static Core::String Slashed(Core::StringView path) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < path.ByteLength(); ++i) out.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		return out.ToString();
+	}
+
+	// Where a matched file is, as a workspace path: as written when absolute, else under the step's folder or the
+	// run's search roots; empty when it is not in the workspace or nowhere to be found.
+	static Core::String ProblemPath(const TaskRun* run, const PlannedStep* step, const ProblemMatcher* matcher, Core::StringView file) {
+		FS::Path written = FS::Path(Slashed(file).View());
+		Core::Array<FS::Path> candidates;
+		if (written.IsAbsolute() || matcher->fileKind == "absolute") candidates.Push(written);
+		else {
+			candidates.Push(FS::Path(step->cwd.View()) / written.View());
+			for (const Core::String& root : step->matchRoots) candidates.Push(FS::Path(root.View()) / written.View());
+			for (const Core::String& root : run->searchRoots) candidates.Push(FS::Path(root.View()) / written.View());
+		}
+		for (const FS::Path& candidate : candidates) {
+			FS::Path normalized = candidate.Normalized();
+			Core::String relative;
+			if (FS::FileExists(normalized.CStr()) && RelativeTo(run->ws->root.View(), normalized.View(), relative) && !relative.IsEmpty()) return relative;
+		}
+		return Core::String();
+	}
+
+	static int64 SeverityNumber(Core::StringView severity) {
+		if (severity == "warning") return 2;
+		if (severity == "info") return 3;
+		if (severity == "hint") return 4;
+		return 1;
+	}
+
+	static Core::String ProblemJson(const ProblemMatcher* matcher, const MatchedProblem& found) {
+		const int64 line = found.line > 0 ? found.line - 1 : 0;
+		const int64 column = found.column > 0 ? found.column - 1 : 0;
+		const int64 endLine = found.endLine > 0 ? found.endLine - 1 : line;
+		const int64 endColumn = found.endColumn > 0 ? found.endColumn - 1 : column + 1;
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("range"));
+		json.BeginObject();
+		json.Key(Core::StringView("start"));
+		json.BeginObject();
+		json.IntField("line", line);
+		json.IntField("character", column);
+		json.EndObject();
+		json.Key(Core::StringView("end"));
+		json.BeginObject();
+		json.IntField("line", endLine);
+		json.IntField("character", endColumn);
+		json.EndObject();
+		json.EndObject();
+		json.IntField("severity", SeverityNumber(found.severity.View()));
+		json.Field("message", found.message.View());
+		if (!found.code.IsEmpty()) json.Field("code", found.code.View());
+		json.Field("source", matcher->source.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// The lock is held: the problem joins its file's diagnostics from this matcher in this project.
+	static void AddProblem(Server* server, TaskRun* run, const PlannedStep* step, const ProblemMatcher* matcher, const MatchedProblem& found) {
+		Core::String path = ProblemPath(run, step, matcher, found.file.View());
+		if (path.IsEmpty()) return;
+		Core::String source = ProblemSource(matcher, run->project.View());
+		Core::String key = (source + "\n") + path.View();
+		Core::String items;
+		run->problems.TryGet(key, items);
+		items = items.IsEmpty() ? ProblemJson(matcher, found) : (items + ",") + ProblemJson(matcher, found).View();
+		run->problems.Insert(key, items);
+		server->diagnostics->Set(run->ws, path.View(), source.View(), ((Core::String("[") + items.View()) + "]").View());
+	}
+
+	// --- Output ------------------------------------------------------------------------------------------------------
+
+	// One stream of a running step: the line it is in the middle of, and its matchers' states.
+	class StreamReader
+	{
+		public Core::String pending;
+		public Core::Array<MatcherState*> states;
+	}
+
+	// How many bytes of `bytes` end at a whole UTF-8 character: a sequence cut by the read waits for the next one.
+	static int64 WholeCharacters(Core::StringView bytes) {
+		int64 end = bytes.ByteLength();
+		for (int64 back = 1; back <= 3 && back <= end; ++back) {
+			const int32 c = bytes.ByteAt(end - back) & 0xFF;
+			if ((c & 0xC0) == 0x80) continue;
+			const int64 length = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+			return length > back ? end - back : end;
+		}
+		return end;
+	}
+
+	// The lock is held: one whole line of a step's output through its matchers.
+	static void FeedLine(Server* server, TaskRun* run, int64 step, StreamReader* reader, Core::StringView line) {
+		if (line.EndsWith(Core::StringView("\r"))) line = line.Substring(0, line.ByteLength() - 1);
+		for (int64 m = 0; m < reader->states.Count(); ++m) {
+			MatchedProblem found;
+			if (reader->states[m]->Feed(line, found)) AddProblem(server, run, run->steps[step], run->steps[step]->matchers[m], found);
+		}
+	}
+
+	// The lock is held: text a step printed reaches the run's topic, its output source and its matchers.
+	static void Emit(Server* server, TaskRun* run, int64 step, const char* stream, Core::StringView text, StreamReader* reader) {
+		JsonWriter event;
+		event.BeginObject();
+		event.IntField("step", step);
+		event.Field("source", stream);
+		event.Field("text", text);
+		event.EndObject();
+		server->hub.Publish(run->Topic().View(), "output", event.View());
+		run->tail = Bounded(run->tail.View(), text, kRunTailBytes);
+		server->outputs->Append(run->ws, run->steps[step]->output.View(), text);
+		Core::String lines = reader->pending + text;
+		int64 at = 0;
+		for (int64 end = lines.View().IndexOf('\n', 0); end >= 0; end = lines.View().IndexOf('\n', at)) {
+			FeedLine(server, run, step, reader, lines.View().Substring(at, end - at));
+			at = end + 1;
+		}
+		reader->pending = Core::String(lines.View().Substring(at, lines.ByteLength() - at));
+	}
+
+	static void ReadStream(Server* server, TaskRun* run, int64 step, Process::Child* child, Process::Stream from, const char* name, StreamReader* reader) {
+		char[kRunReadBytes] buffer;
+		Core::String carried;
+		while (true) {
+			const int64 got = child->Read(from, (void*)&buffer[0], kRunReadBytes);
+			if (got <= 0) break;
+			Core::String bytes = carried + Core::StringView((const char*)&buffer[0], got);
+			const int64 whole = WholeCharacters(bytes.View());
+			carried = Core::String(bytes.View().Substring(whole, bytes.ByteLength() - whole));
+			Threading::LockGuard guard(server->lock);
+			Emit(server, run, step, name, bytes.View().Substring(0, whole), reader);
+		}
+		Threading::LockGuard guard(server->lock);
+		if (!carried.IsEmpty()) Emit(server, run, step, name, carried.View(), reader);
+		if (!reader->pending.IsEmpty()) FeedLine(server, run, step, reader, reader->pending.View());
+		reader->pending = Core::String();
+	}
+
+	// --- Steps -------------------------------------------------------------------------------------------------------
+
+	static StreamReader* ReaderFor(const PlannedStep* step) {
+		StreamReader* reader = new StreamReader();
+		for (ProblemMatcher* matcher : step->matchers) reader->states.Push(new MatcherState(matcher));
+		return reader;
+	}
+
+	static void Note(Server* server, TaskRun* run, int64 step, Core::StringView text) {
+		StreamReader* none = new StreamReader();
+		Emit(server, run, step, "stderr", text, none);
+	}
+
+	static void PublishStep(Server* server, TaskRun* run, int64 step, const char* kind) {
+		const PlannedStep* planned = run->steps[step];
+		JsonWriter event;
+		event.BeginObject();
+		event.IntField("step", step);
+		event.Field("label", planned->label.View());
+		event.Field("status", planned->status.View());
+		if (Core::StringView(kind) == "step.end") event.IntField("exitCode", planned->exitCode);
+		event.EndObject();
+		server->hub.Publish(run->Topic().View(), kind, event.View());
+	}
+
+	// The step's process, run to its end: its exit code, or -1 when it did not start or ran out of time.
+	static int64 RunProcess(Server* server, TaskRun* run, int64 index) {
+		PlannedStep* step = run->steps[index];
+		Process::StartInfo info;
+		if (!step->shell.IsEmpty()) info.shellCommand = step->shell;
+		else {
+			info.program = step->argv[0];
+			for (int64 i = 1; i < step->argv.Count(); ++i) info.arguments.Push(step->argv[i]);
+		}
+		info.workingDirectory = step->cwd;
+		info.environment = step->env;
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) {
+			Threading::LockGuard guard(server->lock);
+			Note(server, run, index, ((((Core::String("\x1b[31m") + step->label.View()) + " did not start: ") + started.Error()) + "\x1b[0m\r\n").View());
+			return -1;
+		}
+		Process::Child* child = new Process::Child(take(started));
+		{
+			Threading::LockGuard guard(server->lock);
+			run->child = child;
+			if (run->cancelled) child->Kill();
+		}
+		StreamReader* out = ReaderFor(step);
+		StreamReader* errors = ReaderFor(step);
+		Threading::Thread outThread = Threading::Thread::Run([server, run, index, child, out]() { ReadStream(server, run, index, child, Process::Stream::Output, "stdout", out); });
+		Threading::Thread errorThread = Threading::Thread::Run([server, run, index, child, errors]() { ReadStream(server, run, index, child, Process::Stream::Errors, "stderr", errors); });
+		int64 code = child->Wait(step->timeoutSeconds > 0 ? (int32)(step->timeoutSeconds * 1000) : Process::kWaitForever);
+		if (code == Process::kTimedOut) {
+			child->Kill();
+			child->Wait();
+			Threading::LockGuard guard(server->lock);
+			Note(server, run, index, Core::StringView("\x1b[31mthe step ran out of time and was stopped\x1b[0m\r\n"));
+			code = -1;
+		}
+		outThread.Join();
+		errorThread.Join();
+		Threading::LockGuard guard(server->lock);
+		run->child = nullptr;
+		return code;
+	}
+
+	// Whether a step runs after the last step that ran succeeded or failed (docs/06 `onlyIf`).
+	static bool ShouldRun(OnlyIf onlyIf, bool previousFailed) {
+		if (onlyIf == OnlyIf::Always) return true;
+		return onlyIf == OnlyIf::PrevFailure ? previousFailed : !previousFailed;
+	}
+
+	// A step whose kind arrives later (docs/25, docs/02) fails, saying so, rather than seeming to do nothing.
+	static int64 RunStep(Server* server, TaskRun* run, int64 index) {
+		PlannedStep* step = run->steps[index];
+		if (step->kind == StepKind::Run) return RunProcess(server, run, index);
+		Threading::LockGuard guard(server->lock);
+		const char* what = step->kind == StepKind::Debug ? "a debug step needs the debugger (docs/25), which is not built yet" : "a binding step needs plugin bindings (docs/02), which are not built yet";
+		Note(server, run, index, (((Core::String("\x1b[31m") + what) + "\x1b[0m") + "\r\n").View());
+		return -1;
+	}
+
+	// --- The run -----------------------------------------------------------------------------------------------------
+
+	static void Begin(Server* server, TaskRun* run) {
+		run->status = RunStatus::Running;
+		run->startedMs = NowMs();
+		Core::Array<Core::String> cleared;
+		for (PlannedStep* step : run->steps) {
+			bool seen = false;
+			for (const Core::String& output : cleared) seen = seen || output.View() == step->output.View();
+			if (!seen) {
+				cleared.Push(step->output);
+				server->outputs->Clear(run->ws, step->output.View());
+			}
+			for (ProblemMatcher* matcher : step->matchers) server->diagnostics->ClearSource(run->ws, ProblemSource(matcher, run->project.View()).View());
+		}
+		if (run->saveFirst) server->documents->SaveAll(run->ws);
+		server->hub.Publish(run->Topic().View(), "run.start", run->SummaryJson().View());
+	}
+
+	static void End(Server* server, TaskRun* run, bool failed, Threading::ConditionVariable* ended) {
+		run->status = run->cancelled ? RunStatus::Cancelled : failed ? RunStatus::Failed : RunStatus::Succeeded;
+		run->endedMs = NowMs();
+		server->hub.Publish(run->Topic().View(), "run.end", run->SummaryJson().View());
+		server->hub.Publish(TasksTopic(run->ws).View(), "run.ended", run->SummaryJson().View());
+		ended->NotifyAll();
+	}
+
+	void ExecuteRun(Server* server, TaskRun* run, Threading::ConditionVariable* ended) {
+		{
+			Threading::LockGuard guard(server->lock);
+			while (run->after && run->after->IsActive() && !run->cancelled) ended->Wait(server->lock);
+			if (run->cancelled) {
+				End(server, run, true, ended);
+				return;
+			}
+			Begin(server, run);
+		}
+		bool failed = false;
+		bool previousFailed = false;
+		for (int64 i = 0; i < run->steps.Count(); ++i) {
+			{
+				Threading::LockGuard guard(server->lock);
+				PlannedStep* step = run->steps[i];
+				if (run->cancelled || !ShouldRun(step->onlyIf, previousFailed)) {
+					step->status = Core::String(run->cancelled ? "cancelled" : "skipped");
+					PublishStep(server, run, i, "step.end");
+					continue;
+				}
+				step->status = Core::String("running");
+				PublishStep(server, run, i, "step.start");
+			}
+			const int64 code = RunStep(server, run, i);
+			Threading::LockGuard guard(server->lock);
+			PlannedStep* step = run->steps[i];
+			step->exitCode = code;
+			step->status = Core::String(run->cancelled ? "cancelled" : code == 0 ? "ok" : "failed");
+			previousFailed = code != 0;
+			if (code != 0) {
+				failed = true;
+				run->exitCode = code;
+			}
+			PublishStep(server, run, i, "step.end");
+		}
+		Threading::LockGuard guard(server->lock);
+		End(server, run, failed, ended);
+	}
+}

@@ -389,7 +389,7 @@ export class LanguageFeatures {
 	}
 
 	setMarkers(editor) {
-		const sources = this.diagnostics.of(editor.ctx.wsId, editor.path);
+		const sources = this.diagnostics.shown(editor.ctx.wsId, editor.path);
 		for (const owner of editor.markerOwners) if (!sources.has(owner)) this.monaco.editor.setModelMarkers(editor.model, "lsp:" + owner, []);
 		editor.markerOwners = new Set(sources.keys());
 		for (const [source, items] of sources) this.monaco.editor.setModelMarkers(editor.model, "lsp:" + source, C.markersOf(this.monaco, items));

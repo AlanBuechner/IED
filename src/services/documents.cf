@@ -281,9 +281,7 @@ namespace Ied
 		return json.ToString();
 	}
 
-	Core::String Documents::SaveMethod(Call& call, const Params& params) {
-		Document* doc = Get(params.Str("docId").View());
-		RefuseExternal(doc);
+	int64 Documents::Save(Document* doc) {
 		const int64 revision = server->workspaces->Write(doc->ws, doc->path.View(), doc->text.View(), -1);
 		doc->saved = doc->text;
 		doc->dirty = false;
@@ -295,6 +293,21 @@ namespace Ied
 		data.EndObject();
 		server->hub.Publish(doc->Topic().View(), "doc.saved", data.View());
 		server->lsp->DocumentSaved(doc);
+		return revision;
+	}
+
+	int64 Documents::SaveAll(Workspace* ws) {
+		Core::Array<Document*> dirty;
+		for (const Core::KeyValue<Core::String, Document*>& entry : byPath)
+			if (entry.value->ws == ws && entry.value->dirty && !entry.value->external) dirty.Push(entry.value);
+		for (Document* doc : dirty) Save(doc);
+		return dirty.Count();
+	}
+
+	Core::String Documents::SaveMethod(Call& call, const Params& params) {
+		Document* doc = Get(params.Str("docId").View());
+		RefuseExternal(doc);
+		const int64 revision = Save(doc);
 		JsonWriter json;
 		json.BeginObject();
 		json.IntField("version", doc->version);

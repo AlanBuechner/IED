@@ -22,7 +22,11 @@
 			{ "id": "ied.find", "title": "Find in Files", "icon": "$(search)", "view": "FindInFiles", "defaultDock": "bottom" }
 		],
 		"statusBarItems": [
-			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" }
+			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" },
+			{ "id": "ied.tasks.status", "alignment": "left", "priority": 50, "view": "TaskStatus", "command": "ied.task.showResult" }
+		],
+		"toolbarItems": [
+			{ "id": "ied.tasks.toolbar", "view": "TaskToolbar", "priority": 100 }
 		],
 		"commands": [
 			{ "id": "ied.explorer.open", "title": "Open", "category": "Solution Explorer", "icon": "$(go-to-file)" },
@@ -43,6 +47,16 @@
 			{ "id": "ied.editor.goToAll", "title": "Go To All", "category": "Edit", "icon": "$(go-to-file)" },
 			{ "id": "ied.markdown.preview", "title": "Open Preview", "category": "Markdown", "icon": "$(open-preview)" },
 			{ "id": "ied.editor.open", "title": "Open File at a Place", "category": "Editor" },
+			{ "id": "ied.task.build", "title": "Build", "category": "Build", "icon": "$(gear)" },
+			{ "id": "ied.task.rebuild", "title": "Rebuild", "category": "Build" },
+			{ "id": "ied.task.clean", "title": "Clean", "category": "Build" },
+			{ "id": "ied.task.cancel", "title": "Cancel", "category": "Build", "icon": "$(debug-stop)" },
+			{ "id": "ied.task.debug", "title": "Start Debugging", "category": "Debug", "icon": "$(debug-start)" },
+			{ "id": "ied.task.start", "title": "Start Without Debugging", "category": "Debug", "icon": "$(run)" },
+			{ "id": "ied.task.test", "title": "Run All Tests", "category": "Test", "icon": "$(beaker)" },
+			{ "id": "ied.task.setStartup", "title": "Set as Startup Project", "category": "Project" },
+			{ "id": "ied.task.showResult", "title": "Show Build Output", "category": "Build" },
+			{ "id": "ied.output.show", "title": "Show Output", "category": "View", "icon": "$(output)" },
 			{ "id": "ied.editor.toggleHeader", "title": "Toggle Header / Code File", "category": "Edit" },
 			{ "id": "ied.editor.action", "title": "Editor Action", "category": "Edit" },
 			{ "id": "ied.navigate.back", "title": "Navigate Backward", "category": "View", "icon": "$(arrow-left)" },
@@ -50,6 +64,19 @@
 		],
 		"fileOpener": { "command": "ied.editor.open" },
 		"menus": {
+			"menubar/build": [
+				{ "command": "ied.task.build", "group": "1_build" },
+				{ "command": "ied.task.rebuild", "group": "1_build", "order": 1 },
+				{ "command": "ied.task.clean", "group": "1_build", "order": 2 },
+				{ "command": "ied.task.cancel", "group": "2_cancel" }
+			],
+			"menubar/debug": [
+				{ "command": "ied.task.debug", "group": "1_start" },
+				{ "command": "ied.task.start", "group": "1_start", "order": 1 }
+			],
+			"menubar/test": [
+				{ "command": "ied.task.test", "group": "1_run" }
+			],
 			"menubar/edit": [
 				{ "command": "ied.find.inFiles", "group": "3_find" },
 				{ "command": "ied.editor.goToAll", "group": "4_go" }
@@ -69,6 +96,7 @@
 				{ "command": "ied.editor.saveAll", "group": "1_file", "order": 1 }
 			],
 			"explorer/context": [
+				{ "command": "ied.task.setStartup", "group": "0_startup", "when": "explorerItemKind == 'project'" },
 				{ "command": "ied.explorer.open", "group": "1_open", "when": "explorerItemKind == 'file'" },
 				{ "command": "ied.markdown.preview", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" },
 				{ "command": "ied.explorer.newFile", "group": "2_new", "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
@@ -90,6 +118,10 @@
 			{ "command": "ied.explorer.delete", "key": "delete", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
 			{ "command": "ied.editor.saveAll", "key": "ctrl+shift+s" },
 			{ "command": "ied.find.inFiles", "key": "ctrl+shift+f" },
+			{ "command": "ied.task.build", "key": "ctrl+shift+b" },
+			{ "command": "ied.task.debug", "key": "f5" },
+			{ "command": "ied.task.start", "key": "ctrl+f5" },
+			{ "command": "ied.task.cancel", "key": "ctrl+break" },
 			{ "command": "ied.editor.goToAll", "key": "ctrl+t" },
 			{ "command": "ied.editor.goToAll", "key": "ctrl+," },
 			{ "command": "ied.markdown.preview", "key": "ctrl+shift+v", "when": "activeTabKind == 'doc' && editorLanguage == 'markdown'" },

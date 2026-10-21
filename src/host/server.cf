@@ -35,7 +35,9 @@ namespace Ied
 		layouts = new Layouts(self);
 		trash = new Trash(self);
 		search = new Search(self);
+		diagnostics = new Diagnostics(self);
 		lsp = new LspPool(self);
+		tasks = new Tasks(self);
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
 		workspaces = new Workspaces(self);
 		if (config.testHooks) testHooks = new TestHooks(self);

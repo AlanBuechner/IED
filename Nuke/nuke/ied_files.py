@@ -12,6 +12,7 @@ from . import fsutil
 PROJECTS_DIR = "build/ied"
 RECORD = ".ied/local/generated.json"
 PLUGIN_ID = "c4"
+PRESET = "c4.nuke"  # the plugin's task preset: Build, Run, Test and the toolbar run Nuke
 KINDS = {"executable": "executable", "module": "library", "custom": "other"}
 ITEMS = ("README.md", "AGENTS.md", "nuke.toml")
 
@@ -54,7 +55,7 @@ def solution(workspace, plugin):
 def project(workspace, spec):
 	folder = fsutil.join(workspace.dir, PROJECTS_DIR)
 	body = {"version": 1, "name": spec.name, "root": _relative(spec.dir, folder), "kind": KINDS.get(spec.kind, "other"),
-		"buildSystem": {"id": "nuke", "projectName": spec.name}}
+		"buildSystem": {"id": "nuke", "projectName": spec.name}, "presets": [PRESET]}
 	if spec.depends:
 		body["references"] = list(spec.depends)
 	return body

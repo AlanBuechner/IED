@@ -195,6 +195,7 @@ def output_streams(run):
 		run.wait_text(".output-text .line", "Build succeeded", timeout=20000)
 		check(page.query_selector(".output-text .a-yellow, .output-text .a-byellow, .output-text .a-green, .output-text .a-bgreen") is not None, "ANSI colors became runs")
 	else:
+		page.select_option("select[aria-label='Show output from']", "ied")
 		run.wait_text(".output-text .line", "opened w1")
 	run.shot("output")
 
@@ -508,7 +509,7 @@ def edit_and_save(run):
 	page.keyboard.press("Control+S")
 	page.wait_for_selector(".tab:has-text('main.c') .dirty", state="detached")
 	check(server_text(run).startswith("// edited in IED\n"), "saved to disk: %r" % server_text(run)[:40])
-	check("Ln 2, Col 1" in run.texts(".statusbar .st")[2], "the status bar has the cursor: %s" % run.texts(".statusbar .st"))
+	check("Ln 2, Col 1" in run.texts(".statusbar [data-item='ied.editor.status']")[0], "the status bar has the cursor: %s" % run.texts(".statusbar .st"))
 	run.reload()
 	open_main_c(run, page)
 	take_over(page)
@@ -553,8 +554,9 @@ def track_changes_margin(run):
 	page.wait_for_selector(".monaco-editor .tc-unsaved")
 	run.shot("unsaved")
 	page.keyboard.press("Control+S")
-	page.wait_for_selector(".monaco-editor .tc-saved")
-	check(page.query_selector(".monaco-editor .tc-unsaved") is None, "saved: no line is unsaved")
+	# Earlier scenarios may have saved main.c already, so saved marks alone do not say this save landed.
+	page.wait_for_selector(".monaco-editor .tc-unsaved", state="detached", timeout=10000)
+	check(page.query_selector(".monaco-editor .tc-saved") is not None, "saved: the edited line is marked saved")
 	run.shot("saved")
 	for _ in range(20):
 		if editor_text(page) == before:
@@ -581,7 +583,7 @@ def file_outside_the_workspace(run):
 	run.shot("external")
 	page.keyboard.type("x")
 	check(page.evaluate("(uri) => " + model + ".getValue()", uri) == "int outside;\n", "read-only: typing changes nothing")
-	check("Ln 1, Col 5" in run.texts(".statusbar .st")[2], "at its place: %s" % run.texts(".statusbar .st"))
+	check("Ln 1, Col 5" in run.texts(".statusbar [data-item='ied.editor.status']")[0], "at its place: %s" % run.texts(".statusbar .st"))
 
 
 @scenario(viewports=("desktop", "phone"))
@@ -625,6 +627,60 @@ def launched_markdown_opens_with_its_preview(run):
 	page.evaluate("(path) => " + sync + ".save()", path)
 	check(run.request("fs.read", {"wsId": ws, "path": path})["text"] == "# Notes\n\n- [x] call back\n", "ticked in the file")
 	run.request("fs.delete", {"wsId": ws, "path": path})
+
+
+@scenario(viewports=("desktop",), targets=("mock",))
+def build_from_the_toolbar(run):
+	"""The startup project's toolbar (docs/06): its configuration dropdown shared by every window, Ctrl+Shift+B building
+	with the status bar counting and the Output showing the build, and a failed build turning the status bar red - still
+	red after a reload - a click on it opening the Error List."""
+	page = run.open()
+	page.wait_for_selector(".toolbar .tb-item select[aria-label='Configuration']")
+	check(page.query_selector(".toolbar .tb-item button[aria-label='Build']") is not None, "the build button")
+	page.select_option(".toolbar select[aria-label='Configuration']", "Debug")
+	other = run.open(fresh=False)
+	other.wait_for_function("document.querySelector(\".toolbar select[aria-label='Configuration']\") && document.querySelector(\".toolbar select[aria-label='Configuration']\").value === 'Debug'", timeout=10000)
+	run.page = page
+	page.bring_to_front()
+	page.click(".dock-group")
+	page.keyboard.press("Control+Shift+B")
+	page.wait_for_selector(".statusbar[data-state='building']")
+	run.wait_text(".statusbar", "Build demo", timeout=10000)
+	run.wait_text(".output-text .line", "Build demo | Debug | x64", timeout=10000)
+	run.shot("building")
+	page.wait_for_function("document.querySelector(\"select[aria-label='Show output from']\") && document.querySelector(\"select[aria-label='Show output from']\").value === 'build'", timeout=10000)
+	run.wait_text(".statusbar", "Build succeeded", timeout=20000)
+	check(page.query_selector(".statusbar[data-state='building']") is None, "the status bar is plain again")
+	run.request("task.run", {"wsId": "w1", "task": "build-broken"})
+	page.wait_for_selector(".statusbar[data-state='failed']", timeout=20000)
+	run.wait_text(".statusbar", "Build (with an error) failed", timeout=5000)
+	run.shot("failed")
+	run.reload()
+	page.wait_for_selector(".statusbar[data-state='failed']", timeout=10000)
+	run.wait_text(".statusbar", "Build (with an error) failed", timeout=5000)
+	page.click(".statusbar [data-item='ied.tasks.status']")
+	page.wait_for_selector(".tab.active:has-text('Error List'), .dock-tab.active:has-text('Error List'), [role='tab'][aria-selected='true']:has-text('Error List')", timeout=10000)
+
+
+@scenario(viewports=("phone",), targets=("mock",))
+def build_from_the_phone_strip(run):
+	"""On a phone the toolbar views sit in a strip above the bottom nav (docs/15 "Phone"), colored like the status bar:
+	a tap on Build shows the build's output, the strip is blue while it runs and red after a failed build; More offers
+	the Command Palette for everything else."""
+	page = run.open()
+	page.wait_for_selector(".phone-toolbar select[aria-label='Configuration']")
+	config = page.eval_on_selector(".phone-toolbar select[aria-label='Configuration']", "el => el.value")
+	page.tap(".phone-toolbar button[aria-label='Build']")
+	page.wait_for_selector(".phone-toolbar[data-state='building']")
+	run.wait_text(".output-text .line", "Build demo | %s | x64" % config, timeout=10000)
+	run.shot("building")
+	page.wait_for_selector(".phone-toolbar[data-state='idle']", timeout=20000)
+	run.request("task.run", {"wsId": "w1", "task": "build-broken"})
+	page.wait_for_selector(".phone-toolbar[data-state='failed']", timeout=20000)
+	run.shot("failed")
+	page.tap(".phone-nav button[aria-label='More']")
+	page.wait_for_selector(".menu [role='menuitem']:has-text('Command Palette'), .sheet :text('Command Palette')", timeout=5000)
+	run.shot("more")
 
 
 def restore(run, page, original):

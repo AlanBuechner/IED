@@ -75,7 +75,8 @@ class IedSolutionTests(WorkspaceTest):
 		self.assertEqual(["nuke", "init", "--ied"], solution["generator"]["run"])
 		self.assertEqual(["nuke.toml"], solution["items"])
 		project = json.loads(read(self.path("build", "ied", "Game.ied.proj")))
-		self.assertEqual({"version": 1, "name": "Game", "root": "../..", "kind": "executable", "buildSystem": {"id": "nuke", "projectName": "Game"}}, project)
+		self.assertEqual({"version": 1, "name": "Game", "root": "../..", "kind": "executable", "buildSystem": {"id": "nuke", "projectName": "Game"},
+			"presets": ["c4.nuke"]}, project)
 		self.assertIn("1 project(s)", out)
 
 	def test_projects_follow_the_workspace_and_hand_edits_are_kept(self):

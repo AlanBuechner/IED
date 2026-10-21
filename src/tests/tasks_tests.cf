@@ -1,0 +1,104 @@
+// tasks: what a project offers (presets under its own file, by key), ${name} expansion that refuses unknown names,
+// problem matchers over one line and over several, and the toolbar's selections on disk.
+
+include "tasks/model.ch"
+include "tasks/expand.ch"
+include "tasks/matcher.ch"
+include "tasks/selections.ch"
+
+static Serialization::DomNode Json(const char* text) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(Core::StringView(text), *doc).root;
+}
+
+static Ied::ProblemMatcher* Matcher(const char* json) {
+	Core::String problem;
+	return Ied::ReadProblemMatcher(Json(json), problem);
+}
+
+[test("server.tasks")]
+class TasksTests {
+	[test("presets_under_the_project")]
+	public static void TestPresetsUnderTheProject() {
+		Ied::OfferedTasks offered;
+		Ied::ReadTaskEntries(Json("{\"variables\": {\"config\": {\"kind\": \"dropdown\", \"values\": [\"Debug\", \"Development\"], \"default\": \"Development\", \"scope\": \"solution\"}},"
+			"\"tasks\": {\"build\": {\"slot\": \"build\", \"steps\": [{\"run\": [\"nuke\", \"build\"], \"problemMatcher\": \"c4\"}]}, \"test\": {\"steps\": [{\"run\": \"nuke test\"}]}},"
+			"\"toolbar\": [\"config\", \"build\"]}"), Core::StringView("preset c4.nuke"), offered);
+		Ied::ReadTaskEntries(Json("{\"tasks\": {\"build\": {\"label\": \"Build it\", \"steps\": [{\"task\": \"test\"}, {\"run\": [\"x\"], \"onlyIf\": \"always\", \"env\": {\"A\": \"1\"}}]}, \"empty\": {\"steps\": []}}}"), Core::StringView("Game.ied.proj"), offered);
+		assert_eq(2, offered.tasks.Count(), "the project's build replaced the preset's; an empty task is a problem, not a task");
+		Ied::TaskDef* build = offered.Task(Core::StringView("build"));
+		assert_se("Build it", build->label.CStr(), "the project's");
+		assert_true(build->slot.IsEmpty() && offered.InSlot(Core::StringView("build")) == nullptr, "a replaced task keeps nothing of the preset's");
+		assert_true(build->steps[0]->kind == Ied::StepKind::Task && build->steps[0]->name == "test", "a task step");
+		assert_true(build->steps[1]->onlyIf == Ied::OnlyIf::Always && build->steps[1]->env[0] == "A=1", "onlyIf and env");
+		assert_se("nuke test", offered.Task(Core::StringView("test"))->steps[0]->shell.CStr(), "a shell string");
+		assert_eq(1, offered.problems.Count(), "the empty task");
+		Ied::TaskVariable* config = offered.Variable(Core::StringView("config"));
+		assert_true(config->solutionScope && config->defaultValue == "Development" && config->values.Count() == 2, "the variable");
+		assert_eq(2, offered.toolbar.Count(), "the preset's toolbar stays when the project has none");
+	}
+
+	[test("expansion")]
+	public static void TestExpansion() {
+		Ied::TaskLookup lookup = [](Core::StringView name, Core::String& value) -> bool {
+			if (name == "config") value = Core::String("Debug");
+			else if (name == "buildSystem.projectName") value = Core::String("Game");
+			else return false;
+			return true;
+		};
+		Core::String out;
+		Core::String unknown;
+		assert_true(Ied::ExpandTaskText(Core::StringView("-c ${config} -p ${buildSystem.projectName}"), lookup, out, unknown) && out == "-c Debug -p Game", "known names");
+		assert_true(!Ied::ExpandTaskText(Core::StringView("${config}/${nope}"), lookup, out, unknown) && unknown == "nope", "an unknown name fails, named");
+		assert_true(Ied::ExpandTaskText(Core::StringView("plain $ {x} ${"), lookup, out, unknown) && out == "plain $ {x} ${", "no variable");
+	}
+
+	[test("one_line_matcher")]
+	public static void TestOneLineMatcher() {
+		Ied::ProblemMatcher* c4 = Matcher("{\"id\": \"c4\", \"source\": \"c4\", \"patterns\": [{\"regexp\": \"^(.+?) \\\\((\\\\d+):(\\\\d+)\\\\) (fatal error|error|warning): (.*)$\", \"file\": 1, \"line\": 2, \"column\": 3, \"severity\": 4, \"message\": 5}]}");
+		assert_true(c4 != nullptr && c4->source == "c4" && c4->fileKind == "search", "read");
+		Ied::MatcherState state = Ied::MatcherState(c4);
+		Ied::MatchedProblem found;
+		assert_true(state.Feed(Core::StringView("src/main.cf (12:5) error: no member 'x'"), found), "a problem");
+		assert_true(found.file == "src/main.cf" && found.line == 12 && found.column == 5 && found.severity == "error" && found.message == "no member 'x'", "its fields");
+		assert_true(state.Feed(Core::StringView("a.cf (1:1) fatal error: stop"), found) && found.severity == "error", "fatal error is an error");
+		assert_true(!state.Feed(Core::StringView("Compiling Game..."), found), "not a problem");
+		Core::String problem;
+		assert_true(Ied::ReadProblemMatcher(Json("{\"id\": \"bad\", \"patterns\": [{\"regexp\": \"(\"}]}"), problem) == nullptr && !problem.IsEmpty(), "a pattern that does not compile");
+	}
+
+	[test("multi_line_matcher")]
+	public static void TestMultiLineMatcher() {
+		Ied::ProblemMatcher* lint = Matcher("{\"id\": \"lint\", \"severityMap\": {\"W\": \"warning\"}, \"defaultSeverity\": \"info\", \"patterns\": ["
+			"{\"regexp\": \"^FILE (.+)$\", \"file\": 1},"
+			"{\"regexp\": \"^  (\\\\d+): ([A-Z]) (.+)$\", \"line\": 1, \"severity\": 2, \"message\": 3, \"loop\": true}]}");
+		Ied::MatcherState state = Ied::MatcherState(lint);
+		Ied::MatchedProblem found;
+		assert_true(!state.Feed(Core::StringView("FILE a.c"), found), "the first line starts a problem");
+		assert_true(state.Feed(Core::StringView("  3: W unused"), found) && found.file == "a.c" && found.line == 3 && found.severity == "warning", "the second completes it, the file carried over");
+		assert_true(state.Feed(Core::StringView("  7: X odd"), found) && found.file == "a.c" && found.line == 7 && found.severity == "info", "the loop goes on; an unmapped word is the default");
+		assert_true(!state.Feed(Core::StringView("done"), found), "the loop ends");
+		assert_true(!state.Feed(Core::StringView("  9: W stray"), found), "a loop line without its first line is nothing");
+		assert_true(!state.Feed(Core::StringView("FILE b.c"), found) && state.Feed(Core::StringView("  1: W x"), found) && found.file == "b.c", "a new problem");
+	}
+
+	[test("selections")]
+	public static void TestSelections() {
+		FS::Path file = FS::TempDirectory() / "ied-selections-test" / "selections.json";
+		FS::RemoveAll(file.Parent().CStr());
+		Ied::TaskSelections empty = Ied::ReadTaskSelections(file);
+		Core::String value;
+		assert_true(empty.startupProject.IsEmpty() && !empty.Value(Core::StringView("Game"), Core::StringView("config"), true, value), "none yet");
+		Ied::TaskSelections chosen;
+		chosen.startupProject = Core::String("Game");
+		chosen.Set(Core::StringView("Game"), Core::StringView("config"), true, Core::StringView("Debug"));
+		chosen.Set(Core::StringView("Game"), Core::StringView("target"), false, Core::StringView("Win64"));
+		assert_true(Ied::WriteTaskSelections(file, chosen), "written");
+		Ied::TaskSelections read = Ied::ReadTaskSelections(file);
+		assert_se("Game", read.startupProject.CStr(), "the startup project");
+		assert_true(read.Value(Core::StringView("Tool"), Core::StringView("config"), true, value) && value == "Debug", "a solution variable is every project's");
+		assert_true(read.Value(Core::StringView("Game"), Core::StringView("target"), false, value) && value == "Win64", "a project's own");
+		assert_true(!read.Value(Core::StringView("Tool"), Core::StringView("target"), false, value), "not another project's");
+		FS::RemoveAll(file.Parent().CStr());
+	}
+}

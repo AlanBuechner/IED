@@ -164,7 +164,7 @@ export class Explorer {
 
 	menu(node, at) {
 		this.selectedNode(node);
-		this.ied.menus.show("explorer/context", at, { path: node.path, kind: node.kind });
+		this.ied.menus.show("explorer/context", at, { path: node.path, kind: node.kind, name: node.name });
 	}
 
 	// The context keys of the selected item: its kind, and a file's extension (".md") for menus that fit its type.

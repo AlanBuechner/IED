@@ -6,11 +6,7 @@ include "settings/merge.ch"
 
 namespace Ied
 {
-	Core::String DiagnosticsTopic(const Workspace* ws) { return Core::String("diag:") + ws->wsId.View(); }
-
 	Core::String LspTopic(const Workspace* ws) { return Core::String("lsp:") + ws->wsId.View(); }
-
-	static Core::String DiagnosticsKey(const Workspace* ws, Core::StringView path) { return (ws->wsId + "/") + path; }
 
 	// An external document's path is already its file: URI (docs/10 "Files outside the workspace").
 	static Core::String DocumentFileUri(const Document* doc) { return doc->external ? doc->path : FileUriOf(doc->ws->At(doc->path.View()).View()); }
@@ -40,7 +36,6 @@ namespace Ied
 
 	void LspPool::WorkspaceOpened(Workspace* ws) {
 		LspPool* self = this;
-		server->hub.Add(DiagnosticsTopic(ws).View(), [self, ws]() -> Core::String { return self->DiagnosticsSnapshot(ws); });
 		server->hub.Add(LspTopic(ws).View(), [self, ws]() -> Core::String { return self->StatusSnapshot(ws); });
 	}
 
@@ -333,29 +328,10 @@ namespace Ied
 		Serialization::DomNode list = params.Member("diagnostics");
 		lineCache.Clear();
 		Core::String items = list.Kind() == Serialization::DomKind::Array ? RewriteJson(list, RewriteFor(language, params.Member("uri").AsView(), false)) : Core::String("[]");
-		SetDiagnostics(ws, path.View(), language->Source().View(), items.View());
+		server->diagnostics->Set(ws, path.View(), language->Source().View(), items.View());
 		if (items.View() == "[]") language->published.Remove(path);
 		else language->published.Insert(path, true);
 		if (!language->profile->refetch.IsEmpty()) Refresh(ws, path.View(), language->profile->refetch);
-	}
-
-	void LspPool::SetDiagnostics(Workspace* ws, Core::StringView path, Core::StringView source, Core::StringView items) {
-		Core::String key = DiagnosticsKey(ws, path);
-		FileDiagnostics* file = nullptr;
-		if (!diagnostics.TryGet(key, file)) {
-			file = new FileDiagnostics();
-			diagnostics.Insert(key, file);
-		}
-		if (items == "[]") file->bySource.Remove(Core::String(source));
-		else file->bySource.Insert(Core::String(source), Core::String(items));
-		if (file->bySource.IsEmpty()) diagnostics.Remove(key);
-		JsonWriter data;
-		data.BeginObject();
-		data.Field("path", path);
-		data.Field("source", source);
-		data.RawField("items", items);
-		data.EndObject();
-		server->hub.Publish(DiagnosticsTopic(ws).View(), "diag.set", data.View());
 	}
 
 	// A server that failed or stopped no longer vouches for what it published.
@@ -363,15 +339,11 @@ namespace Ied
 		Core::Array<Core::String> paths;
 		for (const Core::KeyValue<Core::String, bool>& entry : language->published) paths.Push(entry.key);
 		language->published.Clear();
-		for (const Core::String& path : paths) SetDiagnostics(language->ws, path.View(), language->Source().View(), Core::StringView("[]"));
+		for (const Core::String& path : paths) server->diagnostics->Set(language->ws, path.View(), language->Source().View(), Core::StringView("[]"));
 	}
 
 	void LspPool::ForgetDiagnostics(Workspace* ws, Core::StringView path) {
-		FileDiagnostics* file = nullptr;
-		if (!diagnostics.TryGet(DiagnosticsKey(ws, path), file)) return;
-		Core::Array<Core::String> sources;
-		for (const Core::KeyValue<Core::String, Core::String>& entry : file->bySource) sources.Push(entry.key);
-		for (const Core::String& source : sources) SetDiagnostics(ws, path, source.View(), Core::StringView("[]"));
+		server->diagnostics->Forget(ws, path);
 		for (LanguageServer* language : languages)
 			if (language->ws == ws) language->published.Remove(Core::String(path));
 	}
@@ -388,27 +360,6 @@ namespace Ied
 		data.EndArray();
 		data.EndObject();
 		server->hub.Publish(LspTopic(ws).View(), "lsp.refresh", data.View());
-	}
-
-	Core::String LspPool::DiagnosticsSnapshot(Workspace* ws) const {
-		Core::String prefix = ws->wsId + "/";
-		JsonWriter json;
-		json.BeginObject();
-		json.Key(Core::StringView("files"));
-		json.BeginObject();
-		for (const Core::KeyValue<Core::String, FileDiagnostics*>& entry : diagnostics) {
-			if (!entry.key.View().StartsWith(prefix.View())) continue;
-			json.Key(entry.key.View().Substring(prefix.ByteLength(), entry.key.ByteLength() - prefix.ByteLength()));
-			json.BeginObject();
-			for (const Core::KeyValue<Core::String, Core::String>& source : entry.value->bySource) {
-				json.Key(source.key.View());
-				json.Raw(source.value.View());
-			}
-			json.EndObject();
-		}
-		json.EndObject();
-		json.EndObject();
-		return json.ToString();
 	}
 
 	Core::String LspPool::StatusSnapshot(Workspace* ws) const {

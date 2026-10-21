@@ -1,11 +1,13 @@
 // phone.js - the phone chrome (< 720 px, docs/15 "Phone"): a header (back, pane title, workspace, bell), one pane at a
-// time, and a bottom nav whose four slots take the activities (those asking for phoneSlot first) and then tool
-// windows; More lists the rest. Opening a tab pushes the pane it leaves on the back stack (stored in the layout).
+// time, the plugins' toolbar views in a strip colored like the status bar (building, failed), and a bottom nav whose
+// four slots take the activities (those asking for phoneSlot first) and then tool windows; More lists the rest.
+// Opening a tab pushes the pane it leaves on the back stack (stored in the layout).
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { wellsOf, groupsOf } from "./layouttree.js";
 import { initials } from "./workspaces.js";
 import { banners } from "./banners.js";
+import { ToolbarItems } from "./toolbaritems.js";
 
 const SLOTS = 4;
 
@@ -16,13 +18,18 @@ export class PhoneChrome {
 		this.banners = h("div.banners");
 		this.area = h("main.activity-area.phone-pane");
 		this.nav = h("nav.phone-nav", { "aria-label": "Panes" });
-		this.app = h("div.app.phone", null, this.head, this.banners, this.area, this.nav);
+		this.strip = h("div.phone-toolbar", { role: "toolbar" });
+		this.toolbarItems = new ToolbarItems(shell);
+		this.app = h("div.app.phone", null, this.head, this.banners, this.area, this.strip, this.nav);
 		this.state = "connecting";
 		this.shown = null;
 		replace(root, this.app);
+		this.stopContext = shell.context.onChange(() => this.renderStrip());
 	}
 
 	dispose() {
+		this.stopContext();
+		this.toolbarItems.release();
 		this.app.remove();
 	}
 
@@ -30,8 +37,19 @@ export class PhoneChrome {
 		const pane = this.paneRef();
 		this.renderPane(pane);
 		this.renderHead(pane);
+		this.renderStrip();
 		this.renderNav(pane);
 		this.renderBanners();
+	}
+
+	renderStrip() {
+		const items = this.toolbarItems.shown();
+		this.strip.dataset.state = this.shell.context.get("statusState") || "idle";
+		const drawn = ToolbarItems.signature([], items);
+		if (drawn === this.stripDrawn) return;
+		this.stripDrawn = drawn;
+		replace(this.strip, ...items.map((item) => this.toolbarItems.element(item)));
+		this.strip.hidden = items.length === 0;
 	}
 
 	connection(state) {
@@ -48,7 +66,11 @@ export class PhoneChrome {
 		this.renderBanners();
 	}
 
-	contributionsChanged() {}
+	contributionsChanged() {
+		this.toolbarItems.release();
+		this.stripDrawn = null;
+		this.renderStrip();
+	}
 
 	chord() {}
 
@@ -142,7 +164,7 @@ export class PhoneChrome {
 		const shell = this.shell;
 		const rows = more.map((slot) => ({ kind: "item", label: slot.title, icon: slot.icon, base: slot.base, enabled: true, run: slot.run }));
 		if (rows.length) rows.push({ kind: "separator" });
-		for (const [command, title] of [["shell.showNotifications", "Notifications"], ["shell.switchWorkspace", "Switch Workspace"], ["shell.plugins", "Plugins"], ["shell.keyboardShortcuts", "Keyboard Shortcuts"], ["shell.resetLayout", "Reset Layout"], ["shell.about", "About IED"]]) {
+		for (const [command, title] of [["shell.commandPalette", "Command Palette"], ["shell.showNotifications", "Notifications"], ["shell.switchWorkspace", "Switch Workspace"], ["shell.plugins", "Plugins"], ["shell.keyboardShortcuts", "Keyboard Shortcuts"], ["shell.resetLayout", "Reset Layout"], ["shell.about", "About IED"]]) {
 			const definition = shell.commands.get(command);
 			rows.push({ kind: "item", label: title, icon: definition ? definition.icon : null, base: "/", enabled: true, run: () => shell.commands.run(command) });
 		}

@@ -1007,7 +1007,9 @@ if (git.exitCode == 0) printf("%s", git.output.CStr());
   such program, no such folder, a batch file). A bare program name is looked for as the system looks (the
   program's folder, the current folder, the system folders, `PATH`), with `.exe` added when it has no extension.
   Each argument reaches the child as written: it is quoted for `CommandLineToArgvW` and the C runtime. Batch files
-  are refused, because `cmd.exe` reads arguments its own way: run `cmd` with `/c` and a command written for cmd.
+  are refused as programs, because `cmd.exe` reads arguments its own way: set `shellCommand` instead of `program`
+  and `arguments` to a command line written for the shell, which runs it as written (`cmd.exe /d /s /c "..."`,
+  `%ComSpec%` or the system folder's `cmd.exe`): `info.shellCommand = Core::String("nuke build \"My Game\"");`.
   `environment` holds changes: `"NAME=value"` sets a variable, `"NAME"` removes one, and names compare as the
   system compares them (ignoring case on Windows); with `inheritEnvironment = false` they are the whole environment.
   `workingDirectory` empty is this process's.

@@ -18,5 +18,7 @@ import "./linediff.test.js";
 import "./fileuris.test.js";
 import "./markdown.test.js";
 import "./launch.test.js";
+import "./tasks.test.js";
+import "./diagnostics.test.js";
 
 run(document.getElementById("results"));

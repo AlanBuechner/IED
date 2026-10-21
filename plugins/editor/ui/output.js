@@ -130,7 +130,7 @@ function readRemembered() {
 	}
 }
 
-function remember(sourceId) {
+export function remember(sourceId) {
 	try {
 		sessionStorage.setItem(SOURCE_KEY, sourceId);
 	}

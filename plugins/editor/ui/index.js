@@ -4,7 +4,7 @@
 
 import { h, replace } from "/ui-kit/dom.js";
 import { Explorer } from "./explorer.js";
-import { Output as OutputView } from "./output.js";
+import { Output as OutputView, remember as rememberOutputSource } from "./output.js";
 import { DocumentView } from "./document.js";
 import { CodeEditor } from "./editorview.js";
 import { Editors } from "./editors.js";
@@ -18,6 +18,7 @@ import { findCounterpart } from "./headersource.js";
 import { showGoToAll } from "./gotoall.js";
 import { fileName } from "./fileuris.js";
 import { MarkdownPreview as MarkdownPreviewView } from "./mdpreview.js";
+import { TaskState, TaskToolbar as TaskToolbarView, TaskStatus as TaskStatusView } from "./tasks.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -26,6 +27,7 @@ const finders = new Set();
 const editors = new Editors();
 let diagnostics = null;
 let features = null;
+let tasks = null;
 
 function last(set) {
 	return [...set].pop() || null;
@@ -34,6 +36,7 @@ function last(set) {
 export function activate(ied) {
 	addStylesheet(ied.plugin.base + "ui/editor.css");
 	diagnostics = new Diagnostics(ied);
+	tasks = new TaskState(ied);
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => fileIconSpec(fileName(path)), resource: (path) => path });
 	ied.tabs.kind("mdpreview", { view: "MarkdownPreview", title: (path) => "Preview " + fileName(path), icon: () => "$(open-preview)", resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
@@ -59,6 +62,16 @@ export function activate(ied) {
 	ied.commands.handle("ied.editor.saveAll", () => Promise.all(editors.all().filter((e) => e.sync.dirty).map((e) => e.save())));
 	ied.commands.handle("ied.editor.goTo", (args) => goTo(ied, args));
 	ied.commands.handle("ied.editor.open", (args) => openFromOutside(ied, args));
+	ied.commands.handle("ied.task.build", () => tasks.run({ slot: "build" }));
+	ied.commands.handle("ied.task.rebuild", () => tasks.run({ slot: "rebuild" }));
+	ied.commands.handle("ied.task.clean", () => tasks.run({ slot: "clean" }));
+	ied.commands.handle("ied.task.debug", () => tasks.run({ slot: "debug" }));
+	ied.commands.handle("ied.task.start", () => tasks.run({ slot: "run" }));
+	ied.commands.handle("ied.task.test", () => tasks.run({ slot: "test" }));
+	ied.commands.handle("ied.task.cancel", () => tasks.cancelAll());
+	ied.commands.handle("ied.task.setStartup", (args) => args && args.name && tasks.setStartup(args.name));
+	ied.commands.handle("ied.task.showResult", () => (tasks.ended && tasks.ended.status === "failed" && !tasks.runs.size ? ied.commands.run("shell.showView", { id: "ied.errors" }) : ied.commands.run("shell.showView", { id: "ied.output" })));
+	ied.commands.handle("ied.output.show", (args) => showOutput(ied, args && args.sourceId));
 	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
 	ied.commands.handle("ied.markdown.preview", (args) => {
 		const path = args && args.path ? args.path : currentEditor(ied) ? currentEditor(ied).path : null;
@@ -108,6 +121,14 @@ async function findInFiles(ied) {
 	});
 }
 
+// The Output window with `sourceId` shown (a run's, as VS shows the build's output when it starts).
+async function showOutput(ied, sourceId) {
+	if (sourceId) rememberOutputSource(sourceId);
+	await ied.commands.run("shell.showView", { id: "ied.output" });
+	const output = last(outputs);
+	if (output && sourceId && output.sourceId !== sourceId) output.show(sourceId);
+}
+
 // A file opened from outside IED (`ied open`, the shell's fileOpener): {path, line, col}, 1-based and 0 when absent. A
 // Markdown file shows its preview too, where its boxes can be ticked (J10).
 async function openFromOutside(ied, args) {
@@ -134,6 +155,14 @@ export function SolutionExplorer(ctx) {
 
 export function Output(ctx) {
 	return new OutputView(ctx, outputs);
+}
+
+export function TaskToolbar(ctx) {
+	return TaskToolbarView(ctx, tasks);
+}
+
+export function TaskStatus(ctx) {
+	return TaskStatusView(ctx, tasks);
 }
 
 export function ErrorList(ctx) {

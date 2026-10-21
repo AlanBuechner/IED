@@ -43,6 +43,8 @@ namespace Process
 		public int32 columns = 80;
 		public int32 rows = 25;
 		public bool killOnClose = true;
+		public Core::String shellCommand;             // instead of program and arguments: a command line the system's
+		                                              // shell runs as written (cmd.exe /d /s /c), batch files included
 	}
 
 	// The runtime's handles (c4_process).

@@ -39,6 +39,8 @@ typedef struct c4_process_options
 	int32_t columns;
 	int32_t rows;
 	int32_t killOnClose;              // non-zero: closing the handle ends the child and what it started
+	const char* shellCommand;         // non-empty: instead of a program and arguments, a command line the system's shell
+	                                  // runs as written (cmd.exe /d /s /c "...")
 } c4_process_options;
 
 // A started child: its handles, null when it has none of that kind.

@@ -1,8 +1,8 @@
 // Outputs (docs/10 "out:<wsId>:<sourceId>"): a workspace's output sources - text that only grows - each a coalescible
 // topic whose snapshot is its label and its last 64 KB, with `append {text}` events that merge for a slow client and
-// `clear`. The "ied" source of every workspace is the server's own log (docs/02: validation failures show there);
-// tasks add theirs in M3. out.sources lists a workspace's sources, out.clear empties one. Members run with the server
-// lock held.
+// `clear`. The "ied" source of every workspace is the server's own log (docs/02: validation failures show there); the
+// build, run, test and debug sources are the tasks' (docs/06). out.sources lists a workspace's sources, out.clear
+// empties one. Members run with the server lock held.
 
 include "web/rpc.ch"
 
@@ -34,11 +34,13 @@ namespace Ied
 		// A workspace opened: its sources, the server log's with what it holds so far.
 		public void Opened(Workspace* ws);
 		public void Append(Workspace* ws, Core::StringView sourceId, Core::StringView text);
+		public void Clear(Workspace* ws, Core::StringView sourceId);
 		// A line of the server log, to every workspace's "ied" source.
 		public void Log(Core::StringView line);
 
 	private:
 		private OutputSource* Find(Workspace* ws, Core::StringView sourceId) const;
+		private OutputSource* Add(WorkspaceOutputs* outputs, const char* id, const char* label);
 		private Core::String Snapshot(const OutputSource* source) const;
 		private Core::String SourcesMethod(Call& call, const Params& params);
 		private Core::String ClearMethod(Call& call, const Params& params);

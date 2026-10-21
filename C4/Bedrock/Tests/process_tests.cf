@@ -113,6 +113,18 @@ class ProcessRunTests {
 		assert_true(MillisecondsSince(start) < 10000, "without waiting for it");
 	}
 
+	[test("shell_command")]
+	public static void TestShellCommand() {
+		Process::StartInfo info;
+		info.shellCommand = Core::String("echo \"a b\"& echo c\\d \"e & f\"");
+		Process::Output result = Process::Run(info, kProcessWaitMs);
+		assert_eq((int64)0, result.exitCode, result.error.CStr());
+		assert_se("\"a b\"\r\nc\\d \"e & f\"\r\n", result.output.CStr(), "the quotes reach cmd.exe as written");
+		info.program = Core::String("cmd");
+		Process::Output both = Process::Run(info, kProcessWaitMs);
+		assert_true(both.exitCode == Process::kError && both.error.View().Contains(Core::StringView("takes no program")), both.error.CStr());
+	}
+
 	[test("not_started")]
 	public static void TestNotStarted() {
 		Process::Output missing = Process::Run(Program("c4-no-such-program-anywhere"), kProcessWaitMs);
@@ -307,7 +319,7 @@ class ProcessChildTests {
 		child.Close();
 		assert_eq(Process::kError, child.Wait(0), "a closed child");
 		Process::Child batch = Process::Child::Start(Program("C:/c4-anywhere/build.bat"));
-		assert_true(!batch.IsOpen() && Core::StringView(batch.Error()).Contains(Core::StringView("cmd.exe /c")), batch.Error());
+		assert_true(!batch.IsOpen() && Core::StringView(batch.Error()).Contains(Core::StringView("a shell command")), batch.Error());
 		Process::Child nothing = Process::Child::Start(Program(""));
 		assert_true(!nothing.IsOpen() && nothing.Error()[0] != 0, "no program");
 		Process::Child moved = Process::Child::Start(Cmd("exit 5"));

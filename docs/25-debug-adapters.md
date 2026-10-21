@@ -2,32 +2,33 @@
 
 ## Purpose
 
-How IED debugs (F-DBG-1..15, `docs/features/06-debugger.md`, `src/dap`): the server is the DAP client, so a debug session belongs to the server, not to a browser tab - it survives the tab closing, any device can watch it and drive it, and an AI tool steps the same session a person sees. Everything about a debugger comes from a plugin's `debugAdapters` contribution; the host knows no language and no debugger. The first adapter is C4DAP through the `c4` plugin (`C4/docs/tools/03-editor-lsp-dap.md` section 3); C/C++ follows through a C/C++ adapter (lldb-dap, or cppvsdbg-compatible ones) in the `ied.cpp` plugin.
+How IED debugs (F-DBG-1..15, `docs/features/06-debugger.md`, `src/dap`): the server is the DAP client, so a debug session belongs to the server, not to a browser tab - it survives the tab closing, any device can watch it and drive it, and an AI tool steps the same session a person sees. Everything about a debugger comes from a plugin's `dapProviders` contribution (`shared/host-api/schemas/plugin-manifest.v1.schema.json`); the host knows no language and no debugger. The first adapter is C4DAP through the `c4` plugin (`C4/docs/tools/03-editor-lsp-dap.md` section 3); C/C++ follows through a C/C++ adapter (lldb-dap, or cppvsdbg-compatible ones) in the `ied.cpp` plugin.
 
 ## Adapters
 
 A plugin contributes adapters:
 
 ```jsonc
-"debugAdapters": [{
+"dapProviders": [{
 	"type": "c4",                                        // what a launch configuration names
 	"label": "C4",
 	"command": "${pluginDir}/../tools/C4DAP/C4DAP.exe",  // the variables of docs/24 "Profiles and selection", ${config:...} too
 	"args": [], "env": {}, "cwd": "${workspaceDir}",
+	"transport": "stdio",
 	"launchMode": "staged",                              // as for language servers: run a copy, so the adapter can be rebuilt
 	"languages": ["c4"],                                 // where breakpoints may be set for it
 	"when": "workspaceTrusted",
-	"configurations": [                                  // templates offered when a project has none
+	"configurationTemplates": [                          // offered when a project has no configuration
 		{ "name": "Launch", "request": "launch", "program": "${projectOutput}", "stopOnEntry": false }
 	]
 }]
 ```
 
-An adapter runs over stdio, one process per session (DAP's model). The last loaded plugin's adapter of a `type` wins, like profiles. An untrusted workspace starts no adapter at all (`docs/11`): debugging runs the project's code.
+An adapter runs over stdio (or TCP, when it says so), one process per session (DAP's model). The last loaded plugin's adapter of a `type` wins, like profiles. An untrusted workspace starts no adapter at all (`docs/11`): debugging runs the project's code.
 
 ## Launch configurations
 
-A project's configurations live in its `.ied.proj` (`docs/03`) as `debug: [{name, type, request, preLaunchTask?, ...adapter arguments}]`; `nuke init --ied` writes one per executable project (`type` from the workspace's toolchain plugin, `program` the executable Nuke builds). The toolbar's debug target is a project and one of its configurations; without one, the adapter's first template for the project's languages.
+A project's configurations live in its `.ied.proj` (`docs/03`) as `debug: {default, configurations: {<name>: {type, request, preLaunchTask?, ...adapter arguments}}}` (a preset's `debug` too, overridden by name); `nuke init --ied` writes one per executable project (`type` from the workspace's toolchain plugin, `program` the executable Nuke builds). The toolbar's debug target is a project and one of its configurations; without one, the adapter's first template for the project's languages.
 
 A configuration's strings expand the profile variables plus `${projectName}`, `${projectDir}`, `${projectOutput}` (the build system's output for the active configuration, `docs/06`) and `${configuration}`. `preLaunchTask` names a task (`docs/06`); F5 runs it first and starts the session only when it succeeds (F-DBG-3). Machine-specific adapter paths belong in settings (`${config:...}`), never in the committed project file.
 

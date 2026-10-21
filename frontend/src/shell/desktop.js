@@ -7,6 +7,7 @@ import { DockView } from "./dock.js";
 import * as T from "./layouttree.js";
 import { initials, kindIcon } from "./workspaces.js";
 import { StatusBar } from "./statusbar.js";
+import { ToolbarItems } from "./toolbaritems.js";
 import { banners } from "./banners.js";
 
 export class DesktopChrome {
@@ -18,6 +19,7 @@ export class DesktopChrome {
 		this.banners = h("div.banners");
 		this.area = h("main.activity-area");
 		this.status = new StatusBar(shell);
+		this.toolbarItems = new ToolbarItems(shell);
 		this.app = h("div.app.desktop", null, this.sidebar, this.menubar, this.toolbar, this.banners, this.area, this.status.el);
 		this.docks = new Map();
 		this.state = "connecting";
@@ -30,6 +32,7 @@ export class DesktopChrome {
 
 	dispose() {
 		this.stopContext();
+		this.toolbarItems.release();
 		this.status.dispose();
 		for (const dock of this.docks.values()) dock.container.remove();
 		this.docks.clear();
@@ -64,6 +67,9 @@ export class DesktopChrome {
 	}
 
 	contributionsChanged() {
+		this.toolbarItems.release();
+		this.toolbarDrawn = null;
+		this.renderToolbar();
 		this.status.contributionsChanged();
 	}
 
@@ -175,13 +181,17 @@ export class DesktopChrome {
 	renderToolbar() {
 		const shell = this.shell;
 		const rows = shell.menus.resolve("toolbar/main");
+		const items = this.toolbarItems.shown();
+		const drawn = ToolbarItems.signature(rows, items);
+		if (drawn === this.toolbarDrawn) return;
+		this.toolbarDrawn = drawn;
 		replace(this.toolbar, ...rows.map((row) => {
 			if (row.kind === "separator") return h("span.tb-sep");
 			const el = h("button.ib" + (row.enabled ? "" : ".dim"), { title: row.label + (row.keys ? " (" + row.keys + ")" : ""), "aria-label": row.label, disabled: !row.enabled, on: { click: () => shell.commands.run(row.command, row.args) } },
 				iconFrom(row.icon, row.base) || h("span.tb-label", null, row.label));
 			return el;
-		}));
-		this.app.classList.toggle("no-toolbar", rows.length === 0);
+		}), items.length && rows.length ? h("span.tb-sep") : null, ...items.map((item) => this.toolbarItems.element(item)));
+		this.app.classList.toggle("no-toolbar", rows.length === 0 && items.length === 0);
 	}
 
 	renderBanners() {

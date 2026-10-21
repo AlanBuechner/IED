@@ -15,6 +15,7 @@ REPO = HERE.parents[1]
 UI_KIT_DIR = REPO / "shared" / "ui-kit"
 VENDOR_DIR = REPO / "vendor" / "web"
 CODICONS_DIR = REPO / "third_party" / "codicons" / "src" / "icons"
+CODICON_MAPPING = REPO / "third_party" / "codicons" / "src" / "template" / "mapping.json"
 CODICON_FILE = re.compile(r"^[a-z0-9-]+\.svg$")
 WORKSPACE_PLUGIN = re.compile(r"^/w/([^/]+)/plugins/(.*)$")
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]"}
@@ -154,7 +155,9 @@ class Front:
 
 	def _codicon(self, name):
 		target = CODICONS_DIR / name
-		if not CODICON_FILE.match(name) or not target.is_file():
+		if CODICON_FILE.match(name) and not target.is_file():
+			target = _codicon_alias(name[:-len(".svg")])
+		if not CODICON_FILE.match(name) or target is None or not target.is_file():
 			raise HttpError(404, "not found")
 		return Response(200, target.read_bytes(), CONTENT_TYPES[".svg"], {"Cache-Control": "max-age=86400"})
 
@@ -176,6 +179,14 @@ class Front:
 		if blob is None:
 			raise HttpError(404, "no blob %r" % blob_id)
 		return Response(200, blob[1], blob[0])
+
+
+def _codicon_alias(name):
+	"""The icon file an alias names (mapping.json: "run" draws "play"); None when there is none."""
+	for names in json.loads(CODICON_MAPPING.read_text(encoding="utf-8")).values():
+		if name in names:
+			return next((CODICONS_DIR / (n + ".svg") for n in names if CODICON_FILE.match(n + ".svg") and (CODICONS_DIR / (n + ".svg")).is_file()), None)
+	return None
 
 
 def _file(root, rel):

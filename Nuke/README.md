@@ -304,7 +304,9 @@ the build. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine
 
 **IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.ied.sln` at the root
 and a project file per project under `build/ied/` (`root` the project's folder, `kind` executable / library /
-other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`), and pins the toolchain's IED plugin
+other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`, `presets: ["c4.nuke"]`: the plugin's
+toolbar and Build / Run / Test tasks, which run `nuke` - the `c4.nuke.command` setting - with the selected
+configuration), and pins the toolchain's IED plugin
 (`<toolchain>/ied`, which `C4/MakeToolchain.py` ships) in the solution's `localPlugins` - relative when the toolchain
 store is inside the workspace, as it is by default. Run it again after adding or removing projects: files it wrote
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it

@@ -1,4 +1,4 @@
-"""Output sources (docs/10 "out:<wsId>:<sourceId>"): every workspace has the "ied" source, the server's own log, with
+"""Output sources (docs/10 "out:<wsId>:<sourceId>"): every workspace has its tasks' sources and the "ied" source, the server's own log, with
 what it logged before the workspace opened; problems the server finds (a broken solution) arrive as append events; a
 source can be cleared."""
 
@@ -34,7 +34,8 @@ class OutputTests(ServerTestCase):
 
 	async def test_the_server_log_is_an_output_source(self):
 		sources = (await self.client.request("out.sources", {"wsId": "w1"}))["sources"]
-		self.assertEqual([{"sourceId": "ied", "label": "IED", "topic": TOPIC}], sources)
+		self.assertEqual([("build", "Build"), ("run", "Run"), ("test", "Tests"), ("debug", "Debug"), ("ied", "IED")], [(x["sourceId"], x["label"]) for x in sources], "the tasks' sources and the server's log")
+		self.assertEqual(TOPIC, sources[-1]["topic"])
 		await self.client.sub([TOPIC])
 		snapshot = (await self.client.next_frame(TOPIC))["data"]
 		self.assertEqual(("ied", "IED"), (snapshot["sourceId"], snapshot["label"]))

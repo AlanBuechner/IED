@@ -77,7 +77,29 @@ wchar_t* c4_process_win32_program(const char* program, char* error, int64_t erro
 	}
 	if (!EndsWith(path, L".bat") && !EndsWith(path, L".cmd")) return path;
 	free(path);
-	c4_copy_text("a batch file runs through \"cmd.exe /c\", which reads its arguments its own way", error, errorCapacity);
+	c4_copy_text("a batch file runs through the shell (a shell command): cmd.exe reads its arguments its own way", error, errorCapacity);
+	return NULL;
+}
+
+wchar_t* c4_process_win32_shell(char* error, int64_t errorCapacity)
+{
+	const DWORD needed = GetEnvironmentVariableW(L"ComSpec", NULL, 0);
+	const DWORD capacity = needed > MAX_PATH + 16 ? needed : MAX_PATH + 16;
+	wchar_t* shell = (wchar_t*)malloc(capacity * sizeof(wchar_t));
+	if (!shell)
+	{
+		c4_copy_text("out of memory", error, errorCapacity);
+		return NULL;
+	}
+	if (needed > 0 && GetEnvironmentVariableW(L"ComSpec", shell, needed) == needed - 1) return shell;
+	const UINT folder = GetSystemDirectoryW(shell, MAX_PATH);
+	if (folder > 0 && folder < MAX_PATH)
+	{
+		wcscat(shell, L"\\cmd.exe");
+		return shell;
+	}
+	free(shell);
+	c4_copy_text("the system's shell (cmd.exe) was not found", error, errorCapacity);
 	return NULL;
 }
 
@@ -112,11 +134,25 @@ static bool PutUtf8Argument(WideText* line, const char* argument)
 	return put;
 }
 
+// "/d /s /c" with the command in quotes: cmd.exe takes the text between the first and the last quote as written.
+static bool PutShellCommand(WideText* line, const char* command)
+{
+	wchar_t* wide = c4_utf8_to_wide(command);
+	bool put = wide != NULL;
+	for (const wchar_t* c = L" /d /s /c \""; put && *c; ++c) put = Put(line, *c);
+	for (const wchar_t* c = wide; put && *c; ++c) put = Put(line, *c);
+	put = put && Put(line, L'"');
+	free(wide);
+	return put;
+}
+
 wchar_t* c4_process_win32_command_line(const c4_process_options* start, const wchar_t* program)
 {
 	WideText line = { 0 };
 	bool ok = PutArgument(&line, program);
-	for (int32_t i = 0; ok && i < start->argumentCount; ++i) ok = Put(&line, L' ') && PutUtf8Argument(&line, start->arguments[i]);
+	if (ok && start->shellCommand && *start->shellCommand) ok = PutShellCommand(&line, start->shellCommand);
+	else
+		for (int32_t i = 0; ok && i < start->argumentCount; ++i) ok = Put(&line, L' ') && PutUtf8Argument(&line, start->arguments[i]);
 	if (ok) return line.text;
 	free(line.text);
 	return NULL;

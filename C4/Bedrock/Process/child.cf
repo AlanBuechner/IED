@@ -21,6 +21,7 @@ namespace Process
 		public int32 columns;
 		public int32 rows;
 		public int32 killOnClose;
+		public const char* shellCommand;
 	}
 }
 
@@ -60,6 +61,7 @@ namespace Process
 		start.columns = info.columns;
 		start.rows = info.rows;
 		start.killOnClose = info.killOnClose ? 1 : 0;
+		start.shellCommand = info.shellCommand.CStr();
 		Child child;
 		char[kErrorBytes] why;
 		const int32 started = c4_process_start(&start, &child.handles, &why[0], kErrorBytes);

@@ -12,6 +12,7 @@ include "services/outputs.ch"
 include "services/layouts.ch"
 include "services/trash.ch"
 include "services/search.ch"
+include "services/diagnostics.ch"
 include "auth/auth.ch"
 include "plugins/host.ch"
 include "trust.ch"
@@ -19,6 +20,7 @@ include "schemas.ch"
 include "appdata.ch"
 include "settings/service.ch"
 include "lsp/pool.ch"
+include "tasks/service.ch"
 
 namespace Ied
 {
@@ -55,7 +57,9 @@ namespace Ied
 		public Layouts* layouts;
 		public Trash* trash;
 		public Search* search;
+		public Diagnostics* diagnostics;
 		public LspPool* lsp;
+		public Tasks* tasks;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;

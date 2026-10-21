@@ -302,13 +302,42 @@ namespace Ied
 			Answer(response, 404, Core::StringView("not found"));
 			return;
 		}
-		FS::Path icon = FS::Path(server->config.homeDir.View()) / "third_party" / "codicons" / "src" / "icons" / file;
+		FS::Path icons = FS::Path(server->config.homeDir.View()) / "third_party" / "codicons" / "src" / "icons";
+		FS::Path icon = icons / file;
 		if (!FS::FileExists(icon.CStr())) {
-			Answer(response, 404, Core::StringView("not found"));
-			return;
+			Core::String other = CodiconAliasFile(icons, file.Substring(0, file.ByteLength() - 4));
+			if (other.IsEmpty()) {
+				Answer(response, 404, Core::StringView("not found"));
+				return;
+			}
+			icon = icons / other.View();
 		}
 		SendFile(icon, response);
 		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("max-age=86400"));
+	}
+
+	Core::String CodiconAliasFile(const FS::Path& icons, Core::StringView name) {
+		FS::Path mapping = icons.Parent() / "template" / "mapping.json";
+		if (!FS::FileExists(mapping.CStr())) return Core::String();
+		FS::File opened = FS::File(mapping.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		if (!read.Ok()) return Core::String();
+		for (int64 i = 0; i < read.root.Count(); ++i) {
+			Serialization::DomNode names = read.root.ValueAt(i);
+			if (!NamesInclude(names, name)) continue;
+			for (int64 n = 0; n < names.Count(); ++n) {
+				Core::String file = Core::String(names.At(n).AsView()) + ".svg";
+				if (IsCodiconFile(file.View()) && FS::FileExists((icons / file.View()).CStr())) return file;
+			}
+		}
+		return Core::String();
+	}
+
+	bool NamesInclude(const Serialization::DomNode& names, Core::StringView name) {
+		for (int64 n = 0; n < names.Count(); ++n) if (names.At(n).AsView() == name) return true;
+		return false;
 	}
 
 	bool IsCodiconFile(Core::StringView file) {

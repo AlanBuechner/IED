@@ -8,10 +8,10 @@ When you fix something on this page, delete its row here and remove the matching
 implementation" note on the feature's page. Planned work and open design questions live in
 [roadmap.md](roadmap.md).
 
-Last recorded gate results (2026-10-21, after BUG-306): TestCode e2e 1509 assertions / 0 failures at `-O0` and `-O2`
+Last recorded gate results (2026-10-21, after Process shellCommand): TestCode e2e 1509 assertions / 0 failures at `-O0` and `-O2`
 (also with the program split into 8 partitions, and at `-O2 --incremental`); NegativeTest 652 at `-O0` and `-O2`; IsolatedTest 440 at `-O0` and
 `-O2` (also 4 partitions with `-g`); RuntimeTest, ScriptTest (19 cases at `-O0` and `-O2`), ToolsTest (31 checks),
-DifferentialTest (150 programs against clang), the concurrent-GC step (Bedrock, MemoryGC and the GC benchmark with verified concurrent cycles) and the benchmark checks pass; Bedrock 531 tests (3257 assertions) at
+DifferentialTest (150 programs against clang), the concurrent-GC step (Bedrock, MemoryGC and the GC benchmark with verified concurrent cycles) and the benchmark checks pass; Bedrock 532 tests (3260 assertions) at
 `-O0` and `-O2`, also built for `-O2 -march=x86-64-v3`; C4Testing 1119. See [../tools/05-test-suites.md](../tools/05-test-suites.md).
 
 ---

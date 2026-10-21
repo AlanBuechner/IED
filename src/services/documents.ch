@@ -51,6 +51,10 @@ namespace Ied
 		// A file moved by the server (fs.rename): its open document follows, and is told (doc.renamed {docId, path}).
 		public void Renamed(Workspace* ws, Core::StringView from, Core::StringView to);
 		public bool IsOpen(Workspace* ws, Core::StringView path) const;
+		// Writes the document's text to its file: doc.saved, and its language servers' didSave. The file's revision.
+		public int64 Save(Document* doc);
+		// Saves every dirty document of `ws` (a task's saveBefore, docs/06); how many.
+		public int64 SaveAll(Workspace* ws);
 		public Core::Array<Core::String> OpenPaths(Workspace* ws) const;
 
 	private:

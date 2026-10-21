@@ -61,7 +61,7 @@ class Run:
 		self.contexts.append(context)
 		page = context.new_page()
 		page.on("pageerror", lambda e: self.errors.append("page error: %s" % e))
-		page.on("console", lambda m: self.errors.append("console %s: %s" % (m.type, m.text)) if m.type == "error" else None)
+		page.on("console", lambda m: self.errors.append("console %s: %s (%s)" % (m.type, m.text, m.location.get("url", ""))) if m.type == "error" else None)
 		self.page = page
 		self.goto()
 		if fresh:

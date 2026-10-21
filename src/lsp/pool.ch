@@ -1,6 +1,6 @@
 // LspPool (docs/24): the language servers of every workspace - started when a document one serves opens, fed the
 // document store's changes, asked by clients through lsp.request with positions and URIs rewritten both ways - and
-// what they publish: diagnostics on "diag:<wsId>", their states on "lsp:<wsId>". Every member runs with the server
+// what they publish: diagnostics (services/diagnostics), their states on "lsp:<wsId>". Every member runs with the server
 // lock held.
 
 include "client.ch"
@@ -9,12 +9,6 @@ include "services/documents.ch"
 
 namespace Ied
 {
-	// One file's diagnostics from each source (a profile id), as UTF-16 JSON arrays.
-	class FileDiagnostics
-	{
-		public Core::HashMap<Core::String, Core::String> bySource;
-	}
-
 	// The server that named a file outside its workspace in a result passed to a client.
 	class NamedFile
 	{
@@ -67,13 +61,11 @@ namespace Ied
 		private LanguageServer* Ready(Call& call, Document* doc);
 		private void OpenOn(LanguageServer* language, Document* doc);
 		private void Diagnostics(LanguageServer* language, const Serialization::DomNode& params);
-		private void SetDiagnostics(Workspace* ws, Core::StringView path, Core::StringView source, Core::StringView items);
 		private void ClearDiagnostics(LanguageServer* language);
 		// Every source's diagnostics of a path, gone (its file is not there any more).
 		private void ForgetDiagnostics(Workspace* ws, Core::StringView path);
 		// lsp.refresh: clients fetch `kinds` again for `path` (empty: every document).
 		private void Refresh(Workspace* ws, Core::StringView path, const Core::Array<Core::String>& kinds);
-		private Core::String DiagnosticsSnapshot(Workspace* ws) const;
 		private Core::String StatusSnapshot(Workspace* ws) const;
 		private bool TextOf(Workspace* ws, Core::StringView uri, Core::String& text);
 		private const LineIndex* LinesOf(Workspace* ws, Core::StringView uri);
@@ -92,7 +84,6 @@ namespace Ied
 
 		private Server* server;
 		private Core::Array<LanguageServer*> languages;
-		private Core::HashMap<Core::String, FileDiagnostics*> diagnostics;   // "<wsId>/<path>"
 		private Core::HashMap<Core::String, LineIndex*> lineCache;           // by URI, for one message
 		private Core::HashMap<Core::String, NamedFile*> named;               // "<wsId>|<file URI>" 
 	}
@@ -101,6 +92,5 @@ namespace Ied
 	Core::String WithTextDocument(Core::StringView params, Core::StringView uri);
 	// Code actions cut to those whose diagnostics meet `range` (or that have none), for servers that return them all.
 	Core::String FilterCodeActions(const Serialization::DomNode& actions, const Serialization::DomNode& range);
-	Core::String DiagnosticsTopic(const Workspace* ws);
 	Core::String LspTopic(const Workspace* ws);
 }

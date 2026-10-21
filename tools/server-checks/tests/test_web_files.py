@@ -42,6 +42,11 @@ class WebFileTests(ServerTestCase):
 			self.assertEqual(404, self.get(path).status, path)
 		self.assertEqual(401, self.get("/codicons/add.svg", signed_in=False).status)
 
+	def test_codicon_aliases(self):
+		# An icon's other names (codicons' mapping.json) draw it, as VS Code's $(run) draws play.
+		self.assertEqual(self.get("/codicons/play.svg").body, self.get("/codicons/run.svg").body)
+		self.assertEqual(404, self.get("/codicons/RUN.svg").status)
+
 	@unittest.skipUnless(os.path.isfile(VENDOR_LOADER), "vendor/web is not installed (setup.bat)")
 	def test_vendor(self):
 		reply = self.get("/vendor/monaco-editor/min/vs/loader.js")

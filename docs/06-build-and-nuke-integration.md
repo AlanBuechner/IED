@@ -38,10 +38,31 @@ Nuke was rebuilt when C4 moved into this repository; reference `Nuke/README.md`,
 
 - **Variables** use `${name}` (the earlier `{name}` sketch is retired): built-ins (`solutionDir`, `projectRoot`, `project`, `config`, `arch`, `file`, `line`, `selection`, `startupProject`, `testFilter`...), project/preset variables, `env:`, `setting:`, `input:`. Unknown variables fail the task visibly.
 - **Dropdowns** have fixed `values` or `valuesFrom` (a command or binding, e.g. a future `nuke list --json`); `scope: solution` shares one selection across projects (VS-style solution configuration).
-- **Steps:** `run` (argv preferred, or a shell string), `task` (compose tasks), `debug` (start a DAP session from a named configuration), `binding` (call a plugin). Each has `cwd`, `env`, `output`, `problemMatcher` or `diagnosticsFile`, `testResults`, `onlyIf` (`prevSuccess` default, `prevFailure`, `always`), `when` expressions, `timeoutSeconds`, `background.readyPattern`, `target` (`host` or `sandbox:<name>`).
+- **Steps:** `run` (argv preferred, or a shell string the system's shell runs as written - `cmd.exe /d /s /c`, so quotes and batch files such as `nuke.cmd` work), `task` (compose tasks), `debug` (start a DAP session from a named configuration), `binding` (call a plugin). Each has `cwd`, `env`, `output`, `problemMatcher` or `diagnosticsFile`, `testResults`, `onlyIf` (`prevSuccess` default, `prevFailure`, `always`), `when` expressions, `timeoutSeconds`, `background.readyPattern`, `target` (`host` or `sandbox:<name>`).
 - **Slots** bind tasks to VS keys and menus: `debug` = F5, `run` = Ctrl+F5, `build` = Ctrl+Shift+B, plus `rebuild`, `clean`, `test`, `testSelected`, `debugTest`, `profile`.
-- **Presets:** the `c4` plugin contributes the `c4.nuke` preset (variables, toolbar, standard tasks), so a `nuke init --ied` project needs only `"presets": ["c4.nuke"]` and overrides by key.
+- **Presets:** the `c4` plugin contributes the `c4.nuke` preset, so a `nuke init --ied` project needs only `"presets": ["c4.nuke"]` and overrides by key: `config` (Configuration: Debug, Development, Dist) and `arch` (Platform: x64) shared by the solution, and Build, Rebuild, Clean, Run and Test tasks in those slots, each `"<c4.nuke.command>" <verb> ${config} ${projectName} -a ${arch}` (the setting defaults to `nuke` on `PATH`) with the `c4` matcher (Test adds `c4-test`); the toolbar is `config`, `arch`, `|`, Run, Build, Test.
 - Nothing here is C4-specific: Nuke is just the first build system a plugin configures.
+
+## Protocol and state (M3)
+
+What a project offers is its file's `variables`, `tasks`, `toolbar` and `debug` over those of its `presets` (each preset's entries first, the project's overriding them by key); a project without presets gets those whose `detect` glob matches a file in its root (`nuke.toml` for `c4.nuke`). The **startup project** (VS) is the one the toolbar, F5, Ctrl+F5 and Ctrl+Shift+B act on: the first executable project until someone picks another.
+
+Selections are per machine, in `.ied/local/selections.json`: the startup project and each variable's value (a `scope: solution` variable once for the solution, others per project). Every device sees the same selections; a variable without one has its `default`, else its first value.
+
+| Method | Params | Result |
+|---|---|---|
+| `task.list` | `wsId, project?` (the startup project) | `{project, startupProject, projects, variables: [{key, kind, label, values, value, scope}], tasks: [{key, label, icon, tooltip, slot}], toolbar, problems}`; `projects` are those that offer tasks |
+| `task.select` | `wsId, project?, key, value` | the new `task.list`; a value a dropdown does not offer is `bad_request` |
+| `task.setStartup` | `wsId, project` | the new `task.list` |
+| `task.run` | `wsId, project?, task` or `slot`, `context?` (`{file, line, selection, testFilter}` for the variables of that name) | `{runId, topic, output}` at once (`output`: the output source its first step writes); `not_found` for no such task or no task in that slot |
+| `task.cancel` | `runId` | `{status}`: the run's process trees are killed |
+| `task.runs` | `wsId` | `{runs: [{runId, project, task, label, status, exitCode, startedMs, endedMs}]}`, the last 50 |
+
+Topics: `tasks:<wsId>` (snapshot `{offer, runs, ended}`: `task.list` of the startup project, the active runs, and the run that ended last or null - so a window that comes back shows a failed build in red; events `tasks.changed`, `run.started`, `run.ended`), and `run:<runId>` as in `docs/10`. A run is the server's: it goes on when every browser closes, and any device can cancel it. An untrusted workspace runs no task (`docs/11`): `task.run` answers `forbidden`.
+
+A run expands variables when it starts (an unknown one fails it, naming the variable), then, with `saveBefore` (default `all`), saves the workspace's dirty documents itself (the server owns them, so no client needs to be open). Steps run in order: `run` as a child process in a job object (cancel and `timeoutSeconds` kill the tree), its output streamed to `run:<runId>` and to the step's output source (`build` by default, `run` for the `run` slot); `task` runs another task of the same project (a cycle fails the run); `debug` and `binding` arrive with the DAP pool (`docs/25`) and bindings (`docs/02`). `onlyIf` looks at the last step that ran (`prevSuccess`, the default, runs after a success; `prevFailure` after a failure; `always` either way; a `task` step's `onlyIf` decides whether the task it names starts) and `when` (the when-clause grammar over the run's variables) at the variables; the run fails if any step that ran failed, with that step's exit code. `concurrency`: `queue` waits for the task's previous run, `single` refuses a second, `restart` cancels the first, `parallel` runs both.
+
+Problem matchers apply line by line to a step's output (both streams); a match becomes a diagnostic on `diag:<wsId>` with the matcher's `source` (default `build`), its path resolved by the matcher's `fileLocation` (absolute; relative to its roots; or searched in the step's `cwd`, the project root and the build's include paths, in that order). A run replaces the diagnostics its matchers' sources had for that project; they stay until the project's next run.
 
 ## Execution and output
 
@@ -52,7 +73,7 @@ Nuke was rebuilt when C4 moved into this repository; reference `Nuke/README.md`,
 ## Errors: problem matchers and structured diagnostics
 
 - **Problem matchers** (contributed by plugins) parse output lines into Error List entries. The `c4` matcher handles `<path> (<line>:<col>) <severity>: <msg>`; `c4-test` handles `FAIL: <file>:<line>: <msg>`.
-- **Path resolution** tries, in order: absolute path, step `cwd`, project `root`, then each include path from the build-derived LSP options (`${lspIncludePaths}`) - needed because the compiler prints root-relative names. Ambiguous matches are flagged in the entry.
+- **Path resolution** tries, in order: an absolute path, the step's `cwd`, the matcher's `fileLocation.roots` (expanded like a step's text, plus `${cwd}`; the `c4` matchers name `${projectRoot}/src`, as the compiler prints names relative to the source folder), the project's root, then the workspace's; a file that is in none of them, or outside the workspace, is no entry. (Planned: each include path from the build-derived LSP options as `${lspIncludePaths}`, and ambiguous matches flagged.)
 - **Structured diagnostics** beat regexes: if a step declares `diagnosticsFile`, IED reads JSON diagnostics instead. Nuke work item N5 adds this with absolute paths.
 - Build diagnostics persist until the next build of that project; LSP diagnostics for the same location are de-duplicated.
 

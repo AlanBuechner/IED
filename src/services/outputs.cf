@@ -26,17 +26,25 @@ namespace Ied
 		server->rpc.Register("out.clear", [self](Call& call, const Params& params) -> Core::String { return self->ClearMethod(call, params); });
 	}
 
+	OutputSource* Outputs::Add(WorkspaceOutputs* outputs, const char* id, const char* label) {
+		OutputSource* source = new OutputSource();
+		source->id = Core::String(id);
+		source->label = Core::String(label);
+		outputs->sources.Push(source);
+		Outputs* self = this;
+		server->hub.Add(OutputTopic(outputs->ws, source->id.View()).View(), [self, source]() -> Core::String { return self->Snapshot(source); });
+		return source;
+	}
+
 	void Outputs::Opened(Workspace* ws) {
-		OutputSource* log = new OutputSource();
-		log->id = Core::String(kServerLogSource);
-		log->label = Core::String("IED");
-		log->tail = logTail;
 		WorkspaceOutputs* outputs = new WorkspaceOutputs();
 		outputs->ws = ws;
-		outputs->sources.Push(log);
 		opened.Push(outputs);
-		Outputs* self = this;
-		server->hub.Add(OutputTopic(ws, log->id.View()).View(), [self, log]() -> Core::String { return self->Snapshot(log); });
+		Add(outputs, "build", "Build");
+		Add(outputs, "run", "Run");
+		Add(outputs, "test", "Tests");
+		Add(outputs, "debug", "Debug");
+		Add(outputs, kServerLogSource, "IED")->tail = logTail;
 	}
 
 	OutputSource* Outputs::Find(Workspace* ws, Core::StringView sourceId) const {
@@ -97,10 +105,15 @@ namespace Ied
 	Core::String Outputs::ClearMethod(Call& call, const Params& params) {
 		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
 		Core::String sourceId = params.Str("sourceId");
-		OutputSource* source = Find(ws, sourceId.View());
-		if (!source) throw RpcError(ErrorCode::NotFound, (Core::String("no output source ") + sourceId.View()).View());
-		source->tail = Core::String();
-		server->hub.Publish(OutputTopic(ws, sourceId.View()).View(), "clear", Core::StringView("{}"));
+		if (!Find(ws, sourceId.View())) throw RpcError(ErrorCode::NotFound, (Core::String("no output source ") + sourceId.View()).View());
+		Clear(ws, sourceId.View());
 		return Core::String("{}");
+	}
+
+	void Outputs::Clear(Workspace* ws, Core::StringView sourceId) {
+		OutputSource* source = Find(ws, sourceId);
+		if (!source) return;
+		source->tail = Core::String();
+		server->hub.Publish(OutputTopic(ws, sourceId).View(), "clear", Core::StringView("{}"));
 	}
 }

@@ -145,6 +145,7 @@ namespace Ied
 		data.RawField("solution", ws->solution->ToJson().View());
 		data.EndObject();
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "solution.changed", data.View());
+		server->tasks->ProjectsChanged(ws);
 	}
 
 	static bool TouchesSolution(const Workspace* ws, const ChangeBatch& batch) {
@@ -175,7 +176,9 @@ namespace Ied
 		server->settings->Opened(ws);
 		server->outputs->Opened(ws);
 		server->layouts->Opened(ws);
+		server->diagnostics->WorkspaceOpened(ws);
 		server->lsp->WorkspaceOpened(ws);
+		server->tasks->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;

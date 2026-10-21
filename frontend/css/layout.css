@@ -119,6 +119,7 @@ a { color: var(--link); text-decoration: none; }
 }
 .tb-sep { width: 1px; height: 16px; background: var(--border-1); margin: 0 var(--space-3); flex: none; }
 .tb-label { padding: 0 var(--space-3); font-size: var(--font-size-sm); }
+.tb-item { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .toolbar .ib:has(.tb-label) { width: auto; }
 
 /* ---------- banners ---------- */
@@ -330,8 +331,8 @@ dl.facts dd { margin: 0; }
 	height: 100vh;
 	height: 100dvh;
 	grid-template-columns: minmax(0, 1fr);
-	grid-template-rows: auto auto minmax(0, 1fr) auto;
-	grid-template-areas: "phead" "banner" "main" "pnav";
+	grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+	grid-template-areas: "phead" "banner" "main" "pstrip" "pnav";
 }
 .phone-head {
 	grid-area: phead;
@@ -350,6 +351,25 @@ dl.facts dd { margin: 0; }
 .phone-head .sb-ws { margin: 0 var(--space-2); width: 32px; height: 32px; }
 .phone-head .ib .badge { right: 3px; top: 3px; }
 .phone-pane .view { position: absolute; inset: 0; }
+.phone-toolbar {
+	grid-area: pstrip;
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	height: 44px;
+	padding: 0 var(--space-3);
+	background: var(--bg-0);
+	border-top: var(--border-width) solid var(--border-0);
+	overflow-x: auto;
+	white-space: nowrap;
+}
+.phone-toolbar[hidden] { display: none; }
+.phone-toolbar[data-state="building"] { background: var(--status-building-bg); }
+.phone-toolbar[data-state="debugging"] { background: var(--status-debugging-bg); }
+.phone-toolbar[data-state="failed"] { background: var(--status-failed-bg); }
+.phone-toolbar .ib { width: 36px; height: 36px; }
+.phone-toolbar .ib .ci { width: 20px; height: 20px; }
+.phone-toolbar select { height: 32px; }
 .phone-nav {
 	grid-area: pnav;
 	display: grid;

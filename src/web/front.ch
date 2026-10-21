@@ -44,4 +44,8 @@ namespace Ied
 	const char* ContentTypeOf(Core::StringView extension);
 	// "<name>.svg" with a name of lowercase letters, digits and '-': a codicon file name.
 	bool IsCodiconFile(Core::StringView file);
+	// The icon file an alias names (codicons' mapping.json: "run" draws "play"), from `icons`; empty when there is none.
+	Core::String CodiconAliasFile(const FS::Path& icons, Core::StringView name);
+	// Whether the array `names` holds `name`.
+	bool NamesInclude(const Serialization::DomNode& names, Core::StringView name);
 }

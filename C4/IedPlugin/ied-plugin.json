@@ -1,6 +1,7 @@
-// The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar, and C4LSP - one server per
-// project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project). Ships in
-// every toolchain as <toolchain>/ied/ (MakeToolchain.py); a solution names it in its localPlugins.
+// The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar, C4LSP - one server per
+// project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project) - and
+// the c4.nuke task preset with the c4 and c4-test problem matchers (IED docs/06). Ships in every toolchain as
+// <toolchain>/ied/ (MakeToolchain.py); a solution names it in its localPlugins.
 {
 	"manifestVersion": 1,
 	"id": "c4",
@@ -27,6 +28,41 @@
 			}
 		],
 		"headerSourcePairs": [ { "extensions": [".ch", ".cf"] } ],
+		"problemMatchers": [
+			{
+				"id": "c4",
+				"source": "c4",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}/src", "${cwd}"] },
+				"patterns": [ { "regexp": "^(.+?) \\((\\d+):(\\d+)\\) (fatal error|error|warning|note): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5 } ],
+				"severityMap": { "fatal error": "error", "note": "info" }
+			},
+			{
+				"id": "c4-test",
+				"source": "c4-test",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}/src", "${cwd}"] },
+				"patterns": [ { "regexp": "^FAIL: (.+?):(\\d+): (.*)$", "file": 1, "line": 2, "message": 3 } ],
+				"defaultSeverity": "error"
+			}
+		],
+		"taskPresets": [
+			{
+				"id": "c4.nuke",
+				"label": "Nuke",
+				"detect": "nuke.toml",
+				"variables": {
+					"config": { "kind": "dropdown", "label": "Configuration", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution" },
+					"arch": { "kind": "dropdown", "label": "Platform", "values": ["x64"], "default": "x64", "scope": "solution" }
+				},
+				"tasks": {
+					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [{ "run": "\"${setting:c4.nuke.command}\" build ${config} ${projectName} -a ${arch}", "problemMatcher": "c4" }] },
+					"rebuild": { "label": "Rebuild", "slot": "rebuild", "steps": [{ "run": "\"${setting:c4.nuke.command}\" rebuild ${config} ${projectName} -a ${arch}", "problemMatcher": "c4" }] },
+					"clean": { "label": "Clean", "slot": "clean", "steps": [{ "run": "\"${setting:c4.nuke.command}\" clean ${config} ${projectName} -a ${arch}", "problemMatcher": "c4" }] },
+					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [{ "run": "\"${setting:c4.nuke.command}\" run ${config} ${projectName} -a ${arch}", "problemMatcher": "c4", "output": "run" }] },
+					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [{ "run": "\"${setting:c4.nuke.command}\" test ${config} ${projectName} -a ${arch}", "problemMatcher": ["c4", "c4-test"], "output": "test" }] }
+				},
+				"toolbar": ["config", "arch", "|", "run", "build", "test"]
+			}
+		],
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C4" },
 		"lspProfiles": [
 			{

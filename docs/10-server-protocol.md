@@ -11,7 +11,7 @@ Status: **design v1, ready for implementation.** Machine-readable frame schema: 
 | Channel | Used for |
 |---|---|
 | `GET /` and static paths | the web app (HTML/JS/CSS, plugin UI modules under `/plugins/<id>/ui/...`, Monaco, xterm) |
-| `GET /ui-kit/<path>`, `GET /codicons/<name>.svg`, `GET /vendor/<library>/<path>` | the components shared by the shell and plugin UI modules (`shared/ui-kit/`), one codicon each (`third_party/codicons`), and the install's web libraries (`vendor/web/`: Monaco, xterm.js), cacheable for a day |
+| `GET /ui-kit/<path>`, `GET /codicons/<name>.svg`, `GET /vendor/<library>/<path>` | the components shared by the shell and plugin UI modules (`shared/ui-kit/`), one codicon each (`third_party/codicons`; an alias in its `mapping.json` names its icon, so `run` draws `play` as `$(run)` does in VS Code), and the install's web libraries (`vendor/web/`: Monaco, xterm.js), cacheable for a day |
 | `POST /api/auth/*` | login, logout, token exchange (`docs/11`) |
 | `GET /api/blob/<id>` | large binary payloads (images, trace chunks, file downloads), referenced from frames by id |
 | `GET /w/<wsId>/files/<path>` | a workspace's image (PNG, JPEG, GIF, WebP, BMP, ICO) for previews (a Markdown document's pictures): never another type, so a repository's HTML or SVG cannot run script on IED's origin; sent with `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy` |
@@ -69,7 +69,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `diag:<wsId>` | `diag.set {path, source, items}` (LSP diagnostics, UTF-16 ranges; `docs/24`) | all current diagnostics, `{files: {<path>: {<source>: [diagnostic]}}}` |
 | `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |
 | `run:<runId>` | `step.start`, `output` (source, text), `step.end`, `run.end` | task run state + output tail |
-| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
+| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
 | `term:<termId>` | `data`, `resize`, `exit`, `lease` | screen state (serialized via xterm headless) + scrollback tail |
 | `dbg:<sessionId>` | `stopped`, `continued`, `threads`, `breakpoints`, `output`, `terminated` | session state (threads, current frame) |
 | `prof:<captureId>` | `stats`, `progress` | capture summary (timeline data is fetched via requests/blobs) |

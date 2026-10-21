@@ -1,0 +1,116 @@
+include "matcher.ch"
+
+namespace Ied
+{
+	static Core::String Lower(Core::StringView text) {
+		Core::StringBuilder lower;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			lower.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return lower.ToString();
+	}
+
+	static MatcherPattern* ReadPattern(const Serialization::DomNode& node) {
+		MatcherPattern* pattern = new MatcherPattern();
+		pattern->regex = Core::Regex(node.Member("regexp").AsView());
+		pattern->file = (int32)node.Member("file").AsInt();
+		pattern->line = (int32)node.Member("line").AsInt();
+		pattern->column = (int32)node.Member("column").AsInt();
+		pattern->endLine = (int32)node.Member("endLine").AsInt();
+		pattern->endColumn = (int32)node.Member("endColumn").AsInt();
+		pattern->severity = (int32)node.Member("severity").AsInt();
+		pattern->code = (int32)node.Member("code").AsInt();
+		pattern->message = (int32)node.Member("message").AsInt();
+		pattern->loop = node.Member("loop").AsBool();
+		return pattern;
+	}
+
+	ProblemMatcher* ReadProblemMatcher(const Serialization::DomNode& node, Core::String& problem) {
+		ProblemMatcher* matcher = new ProblemMatcher();
+		matcher->id = Core::String(node.Member("id").AsView());
+		matcher->source = node.Member("source").Kind() == Serialization::DomKind::String ? Core::String(node.Member("source").AsView()) : Core::String("build");
+		Serialization::DomNode patterns = node.Member("patterns");
+		for (int64 i = 0; i < patterns.Count(); ++i) {
+			MatcherPattern* pattern = ReadPattern(patterns.At(i));
+			if (!pattern->regex.IsValid()) {
+				problem = (((Core::String("the problem matcher ") + matcher->id.View()) + "'s pattern does not compile: ") + pattern->regex.Error());
+				return nullptr;
+			}
+			matcher->patterns.Push(pattern);
+		}
+		Serialization::DomNode map = node.Member("severityMap");
+		for (int64 i = 0; map.Kind() == Serialization::DomKind::Object && i < map.Count(); ++i) matcher->severityMap.Insert(Lower(map.KeyAt(i)), Core::String(map.ValueAt(i).AsView()));
+		matcher->defaultSeverity = node.Member("defaultSeverity").Kind() == Serialization::DomKind::String ? Core::String(node.Member("defaultSeverity").AsView()) : Core::String("error");
+		Serialization::DomNode location = node.Member("fileLocation");
+		matcher->fileKind = location.Member("kind").Kind() == Serialization::DomKind::String ? Core::String(location.Member("kind").AsView()) : Core::String("search");
+		for (int64 i = 0; i < location.Member("roots").Count(); ++i) matcher->roots.Push(Core::String(location.Member("roots").At(i).AsView()));
+		if (matcher->patterns.IsEmpty()) {
+			problem = (Core::String("the problem matcher ") + matcher->id.View()) + " has no patterns";
+			return nullptr;
+		}
+		return matcher;
+	}
+
+	void MatcherState::Init(ProblemMatcher* matcher) {
+		this.matcher = matcher;
+		Reset();
+	}
+
+	void MatcherState::Reset() {
+		next = 0;
+		partial = MatchedProblem();
+	}
+
+	static int64 Number(Core::StringView text) {
+		int64 value = 0;
+		for (int64 i = 0; i < text.ByteLength() && text.ByteAt(i) >= '0' && text.ByteAt(i) <= '9'; ++i) value = value * 10 + (text.ByteAt(i) - '0');
+		return value;
+	}
+
+	static void Fill(const MatcherPattern* pattern, const Core::RegexMatch& match, MatchedProblem& into) {
+		if (pattern->file > 0 && match.Matched(pattern->file)) into.file = Core::String(match.Group(pattern->file));
+		if (pattern->line > 0 && match.Matched(pattern->line)) into.line = Number(match.Group(pattern->line));
+		if (pattern->column > 0 && match.Matched(pattern->column)) into.column = Number(match.Group(pattern->column));
+		if (pattern->endLine > 0 && match.Matched(pattern->endLine)) into.endLine = Number(match.Group(pattern->endLine));
+		if (pattern->endColumn > 0 && match.Matched(pattern->endColumn)) into.endColumn = Number(match.Group(pattern->endColumn));
+		if (pattern->severity > 0 && match.Matched(pattern->severity)) into.severity = Core::String(match.Group(pattern->severity));
+		if (pattern->code > 0 && match.Matched(pattern->code)) into.code = Core::String(match.Group(pattern->code));
+		if (pattern->message > 0 && match.Matched(pattern->message)) into.message = Core::String(match.Group(pattern->message));
+	}
+
+	// The severity a matched word stands for: the matcher's map, the word itself when it is one, else the default.
+	static Core::String SeverityOf(const ProblemMatcher* matcher, Core::StringView word) {
+		Core::String lower = Lower(word);
+		Core::String mapped;
+		if (matcher->severityMap.TryGet(lower, mapped)) return mapped;
+		if (lower == "error" || lower == "warning" || lower == "info" || lower == "hint") return lower;
+		if (lower == "fatal error" || lower == "fatal") return Core::String("error");
+		return matcher->defaultSeverity;
+	}
+
+	bool MatcherState::Advance(int64 index, const Core::RegexMatch& match, MatchedProblem& found) {
+		const MatcherPattern* pattern = matcher->patterns[index];
+		MatchedProblem current = index == 0 ? MatchedProblem() : partial;
+		Fill(pattern, match, current);
+		if (index + 1 < matcher->patterns.Count()) {
+			partial = current;
+			next = index + 1;
+			return false;
+		}
+		found = current;
+		found.severity = SeverityOf(matcher, found.severity.View());
+		if (pattern->loop && index > 0) next = index;
+		else Reset();
+		return !found.file.IsEmpty() && !found.message.IsEmpty();
+	}
+
+	bool MatcherState::Feed(Core::StringView line, MatchedProblem& found) {
+		Core::RegexMatch match;
+		if (next > 0) {
+			if (matcher->patterns[next]->regex.Search(line, match)) return Advance(next, match, found);
+			Reset();   // the sequence, or a loop, ended here: this line may start another
+		}
+		return matcher->patterns[0]->regex.Search(line, match) && Advance(0, match, found);
+	}
+}

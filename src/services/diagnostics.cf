@@ -1,0 +1,74 @@
+include "diagnostics.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	Core::String DiagnosticsTopic(const Workspace* ws) { return Core::String("diag:") + ws->wsId.View(); }
+
+	static Core::String FileKey(const Workspace* ws, Core::StringView path) { return (ws->wsId + "/") + path; }
+
+	void Diagnostics::Init(Server* server) { this.server = server; }
+
+	void Diagnostics::WorkspaceOpened(Workspace* ws) {
+		Diagnostics* self = this;
+		server->hub.Add(DiagnosticsTopic(ws).View(), [self, ws]() -> Core::String { return self->Snapshot(ws); });
+	}
+
+	void Diagnostics::Set(Workspace* ws, Core::StringView path, Core::StringView source, Core::StringView items) {
+		Core::String key = FileKey(ws, path);
+		FileDiagnostics* file = nullptr;
+		if (!files.TryGet(key, file) && items != "[]") {
+			file = new FileDiagnostics();
+			files.Insert(key, file);
+		}
+		if (file) {
+			if (items == "[]") file->bySource.Remove(Core::String(source));
+			else file->bySource.Insert(Core::String(source), Core::String(items));
+			if (file->bySource.IsEmpty()) files.Remove(key);
+		}
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("path", path);
+		data.Field("source", source);
+		data.RawField("items", items);
+		data.EndObject();
+		server->hub.Publish(DiagnosticsTopic(ws).View(), "diag.set", data.View());
+	}
+
+	void Diagnostics::Forget(Workspace* ws, Core::StringView path) {
+		FileDiagnostics* file = nullptr;
+		if (!files.TryGet(FileKey(ws, path), file)) return;
+		Core::Array<Core::String> sources;
+		for (const Core::KeyValue<Core::String, Core::String>& entry : file->bySource) sources.Push(entry.key);
+		for (const Core::String& source : sources) Set(ws, path, source.View(), Core::StringView("[]"));
+	}
+
+	void Diagnostics::ClearSource(Workspace* ws, Core::StringView source) {
+		Core::String prefix = ws->wsId + "/";
+		Core::Array<Core::String> paths;
+		for (const Core::KeyValue<Core::String, FileDiagnostics*>& entry : files)
+			if (entry.key.View().StartsWith(prefix.View()) && entry.value->bySource.Contains(Core::String(source))) paths.Push(Core::String(entry.key.View().Substring(prefix.ByteLength(), entry.key.ByteLength() - prefix.ByteLength())));
+		for (const Core::String& path : paths) Set(ws, path.View(), source, Core::StringView("[]"));
+	}
+
+	Core::String Diagnostics::Snapshot(Workspace* ws) const {
+		Core::String prefix = ws->wsId + "/";
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("files"));
+		json.BeginObject();
+		for (const Core::KeyValue<Core::String, FileDiagnostics*>& entry : files) {
+			if (!entry.key.View().StartsWith(prefix.View())) continue;
+			json.Key(entry.key.View().Substring(prefix.ByteLength(), entry.key.ByteLength() - prefix.ByteLength()));
+			json.BeginObject();
+			for (const Core::KeyValue<Core::String, Core::String>& source : entry.value->bySource) {
+				json.Key(source.key.View());
+				json.Raw(source.value.View());
+			}
+			json.EndObject();
+		}
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+}
