@@ -28,7 +28,10 @@ export class CodeEditor {
 		ctx.el.append(this.bar, this.host);
 		this.editor = monaco.editor.create(this.host, editorOptions(monaco));
 		this.editor.onDidFocusEditorText(() => this.focused());
-		this.editor.onDidChangeCursorPosition(() => this.changed());
+		this.editor.onDidChangeCursorPosition((event) => {
+			this.changed();
+			if (event.source !== "modelChange" && this.editor.hasTextFocus()) this.editors.visited(this);
+		});
 		this.sync = new DocumentSync(this.ied.client, this.target(), { onState: (state) => this.stateChanged(state) });
 		editors.add(this);
 		this.sync.open(ctx.wsId, path).catch((e) => this.problem(e.code === "not_found" ? "There is no file " + path + "." : "The document could not be opened: " + e.message));
@@ -120,6 +123,7 @@ export class CodeEditor {
 
 	focused() {
 		this.editors.touch(this);
+		this.editors.visited(this);
 		if (this.sync.docId && this.sync.holder === null) this.sync.takeLease().catch((e) => this.ied.report("the lease: " + e.message, e));
 		this.changed();
 	}

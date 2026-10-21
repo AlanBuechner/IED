@@ -11,6 +11,7 @@ include "services/blobs.ch"
 include "services/outputs.ch"
 include "services/layouts.ch"
 include "services/trash.ch"
+include "services/search.ch"
 include "auth/auth.ch"
 include "plugins/host.ch"
 include "trust.ch"
@@ -53,6 +54,7 @@ namespace Ied
 		public Outputs* outputs;
 		public Layouts* layouts;
 		public Trash* trash;
+		public Search* search;
 		public LspPool* lsp;
 		public Auth* auth;
 		public PluginHost* plugins;

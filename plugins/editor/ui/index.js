@@ -13,10 +13,13 @@ import { fileIconSpec } from "./fileicons.js";
 import { Diagnostics } from "./diagnostics.js";
 import { LanguageFeatures } from "./language.js";
 import { ErrorList as ErrorListView } from "./errorlist.js";
+import { FindInFiles as FindInFilesView } from "./findinfiles.js";
+import { findCounterpart } from "./headersource.js";
 
 const explorers = new Set();
 const outputs = new Set();
 const errorLists = new Set();
+const finders = new Set();
 const editors = new Editors();
 let diagnostics = null;
 let features = null;
@@ -55,6 +58,48 @@ export function activate(ied) {
 	});
 	ied.commands.handle("ied.editor.saveAll", () => Promise.all(editors.all().filter((e) => e.sync.dirty).map((e) => e.save())));
 	ied.commands.handle("ied.editor.goTo", (args) => goTo(ied, args));
+	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
+	ied.commands.handle("ied.editor.toggleHeader", () => toggleHeader(ied));
+	ied.commands.handle("ied.editor.action", (args) => runEditorAction(ied, args));
+	ied.commands.handle("ied.navigate.back", () => goTo(ied, editors.navigation.back()));
+	ied.commands.handle("ied.navigate.forward", () => goTo(ied, editors.navigation.forward()));
+}
+
+function currentEditor(ied) {
+	return editors.byRef(ied.context.get("activeTab")) || editors.last();
+}
+
+// A Monaco action on the current editor ({id}): the shell takes Ctrl+K as a chord's first key, so the editor's own
+// Ctrl+K chords come back through here.
+function runEditorAction(ied, args) {
+	const editor = currentEditor(ied);
+	if (!editor || !args || !args.id) return undefined;
+	editor.editor.focus();
+	return editor.editor.getAction(args.id) ? editor.editor.getAction(args.id).run() : editor.editor.trigger("ied", args.id, null);
+}
+
+async function toggleHeader(ied) {
+	const editor = currentEditor(ied);
+	if (!editor) return;
+	const pairs = ied.contributions("headerSourcePairs").map((c) => c.value);
+	const found = await findCounterpart(ied.client, editor.ctx.wsId, editor.path, pairs);
+	if (found) {
+		ied.tabs.open("doc:" + found, { preview: false });
+		(await editors.whenReady("doc:" + found)).focus();
+	}
+	else ied.toast("There is no header or code file for " + editor.path.slice(editor.path.lastIndexOf("/") + 1) + ".");
+}
+
+// Shows Find in Files with the editor's selection (one line of it) as the query.
+async function findInFiles(ied) {
+	const editor = editors.last();
+	const selection = editor && editor.model ? editor.editor.getSelection() : null;
+	const text = selection && !selection.isEmpty() && selection.startLineNumber === selection.endLineNumber ? editor.model.getValueInRange(selection) : "";
+	await ied.commands.run("shell.showView", { id: "ied.find" });
+	requestAnimationFrame(() => {
+		const finder = last(finders);
+		if (finder) finder.start(text);
+	});
 }
 
 // Opens a document at a place: {path, line, col} (0-based, UTF-16).
@@ -76,6 +121,10 @@ export function Output(ctx) {
 
 export function ErrorList(ctx) {
 	return new ErrorListView(ctx, diagnostics, errorLists);
+}
+
+export function FindInFiles(ctx) {
+	return new FindInFilesView(ctx, finders);
 }
 
 // Monaco when it loads; otherwise the read-only view, saying why.

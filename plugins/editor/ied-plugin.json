@@ -18,7 +18,8 @@
 		"toolWindows": [
 			{ "id": "ied.explorer", "title": "Solution Explorer", "icon": "$(list-tree)", "view": "SolutionExplorer", "defaultDock": "left" },
 			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "bottom" },
-			{ "id": "ied.errors", "title": "Error List", "icon": "$(error)", "view": "ErrorList", "defaultDock": "bottom" }
+			{ "id": "ied.errors", "title": "Error List", "icon": "$(error)", "view": "ErrorList", "defaultDock": "bottom" },
+			{ "id": "ied.find", "title": "Find in Files", "icon": "$(search)", "view": "FindInFiles", "defaultDock": "bottom" }
 		],
 		"statusBarItems": [
 			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" }
@@ -37,14 +38,28 @@
 			{ "id": "ied.output.toggleWrap", "title": "Toggle Word Wrap", "category": "Output", "icon": "$(word-wrap)" },
 			{ "id": "ied.editor.save", "title": "Save", "category": "File", "icon": "$(save)" },
 			{ "id": "ied.editor.saveAll", "title": "Save All", "category": "File", "icon": "$(save-all)" },
-			{ "id": "ied.editor.goTo", "title": "Go To Place", "category": "Editor" }
+			{ "id": "ied.editor.goTo", "title": "Go To Place", "category": "Editor" },
+			{ "id": "ied.find.inFiles", "title": "Find in Files", "category": "Edit", "icon": "$(search)" },
+			{ "id": "ied.editor.toggleHeader", "title": "Toggle Header / Code File", "category": "Edit" },
+			{ "id": "ied.editor.action", "title": "Editor Action", "category": "Edit" },
+			{ "id": "ied.navigate.back", "title": "Navigate Backward", "category": "View", "icon": "$(arrow-left)" },
+			{ "id": "ied.navigate.forward", "title": "Navigate Forward", "category": "View", "icon": "$(arrow-right)" }
 		],
 		"menus": {
+			"menubar/edit": [
+				{ "command": "ied.find.inFiles", "group": "3_find" }
+			],
+			"menubar/view": [
+				{ "command": "ied.navigate.back", "group": "1_navigate" },
+				{ "command": "ied.navigate.forward", "group": "1_navigate", "order": 1 }
+			],
 			"menubar/file": [
 				{ "command": "ied.editor.save", "group": "5_save" },
 				{ "command": "ied.editor.saveAll", "group": "5_save", "order": 1 }
 			],
 			"toolbar/main": [
+				{ "command": "ied.navigate.back", "group": "0_navigate" },
+				{ "command": "ied.navigate.forward", "group": "0_navigate", "order": 1 },
 				{ "command": "ied.editor.save", "group": "1_file" },
 				{ "command": "ied.editor.saveAll", "group": "1_file", "order": 1 }
 			],
@@ -68,6 +83,18 @@
 			{ "command": "ied.explorer.rename", "key": "f2", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
 			{ "command": "ied.explorer.delete", "key": "delete", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
 			{ "command": "ied.editor.saveAll", "key": "ctrl+shift+s" },
+			{ "command": "ied.find.inFiles", "key": "ctrl+shift+f" },
+			{ "command": "ied.editor.toggleHeader", "key": "ctrl+k ctrl+o", "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+c", "args": { "id": "editor.action.addCommentLine" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+u", "args": { "id": "editor.action.removeCommentLine" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+d", "args": { "id": "editor.action.formatDocument" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+f", "args": { "id": "editor.action.formatSelection" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+x", "args": { "id": "editor.action.trimTrailingWhitespace" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+0", "args": { "id": "editor.foldAll" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+j", "args": { "id": "editor.unfoldAll" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.action", "key": "ctrl+k ctrl+l", "args": { "id": "editor.toggleFold" }, "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.navigate.back", "key": "ctrl+-" },
+			{ "command": "ied.navigate.forward", "key": "ctrl+shift+-" },
 			{ "command": "shell.showView", "key": "ctrl+alt+l", "args": { "id": "ied.explorer" } },
 			{ "command": "shell.showView", "key": "ctrl+alt+o", "args": { "id": "ied.output" } },
 			{ "command": "shell.showView", "key": "ctrl+\\ ctrl+e", "args": { "id": "ied.errors" } }

@@ -1,11 +1,21 @@
 // editors.js - the open code editors of the page, the last focused one last, for the commands that act on "the editor"
-// (Save), the status bar items that describe it, and whatever waits for a document's editor to show its text.
+// (Save), the status bar items that describe it, whatever waits for a document's editor to show its text, and the
+// navigation history their cursors make.
+
+import { Navigation } from "./navigation.js";
 
 export class Editors {
 	constructor() {
 		this.open = new Set();
 		this.listeners = new Set();
 		this.waiting = new Map();   // ref -> resolvers waiting for its editor's text
+		this.navigation = new Navigation();
+	}
+
+	// `editor`'s cursor moved where the person put it.
+	visited(editor) {
+		const at = editor.position();
+		if (at) this.navigation.visit({ path: editor.path, line: at.line - 1, col: at.col - 1 });
 	}
 
 	add(editor) {

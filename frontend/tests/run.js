@@ -11,5 +11,7 @@ import "./keybindings.test.js";
 import "./docsync.test.js";
 import "./lspconvert.test.js";
 import "./tree.test.js";
+import "./navigation.test.js";
+import "./headersource.test.js";
 
 run(document.getElementById("results"));

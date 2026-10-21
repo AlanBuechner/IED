@@ -7,7 +7,10 @@ import time
 from fixtures import workspace_files
 from rpc import RpcError
 
-MAX_SEARCH_MATCHES = 500
+SEARCH_DEFAULT_RESULTS = 2000
+SEARCH_MOST_RESULTS = 20000
+# The folders fs.search skips when a query names no exclusions (src/fs/search.cf DefaultSearchExcludes).
+SEARCH_EXCLUDES = ["**/.git", "**/node_modules", "**/build", "**/bin", "**/bin-int", "**/toolchains", "**/vendor", "**/third_party", "**/__pycache__"]
 
 
 class File:
@@ -254,17 +257,47 @@ class Workspaces:
 		]})
 
 	async def m_fs_search(self, call, p):
+		"""docs/10 "Files": the first match of each line, open documents as they are, files in path order."""
 		ws = self.get(p.str("wsId"))
-		matcher = _matcher(p.str("query"), p.bool("regex", False, required=False), p.bool("caseSensitive", False, required=False))
+		query = p.str("query")
+		if not query:
+			raise RpcError("bad_request", "the query is empty")
+		matcher = _matcher(query, p.bool("regex", False, required=False), p.bool("caseSensitive", False, required=False))
+		include = p.list("include", [], required=False)
+		exclude = p.list("exclude", SEARCH_EXCLUDES, required=False)
+		limit = max(1, min(SEARCH_MOST_RESULTS, p.int("maxResults", SEARCH_DEFAULT_RESULTS, required=False)))
 		matches = []
 		for path in sorted(ws.files):
-			for number, line in enumerate(ws.files[path].text.split("\n")):
-				hit = matcher(line)
-				if hit is not None:
-					matches.append({"path": path, "line": number, "col": hit, "preview": line.strip()[:200]})
-				if len(matches) >= MAX_SEARCH_MATCHES:
+			if not _searched(path, include, exclude):
+				continue
+			doc = self.server.docs.by_path.get((ws.ws_id, path))
+			for number, line in enumerate((doc.text if doc else ws.files[path].text).split("\n")):
+				hit = matcher(line.rstrip("\r"))
+				if hit is None:
+					continue
+				if len(matches) >= limit:
 					return {"matches": matches, "truncated": True}
+				matches.append({"path": path, "line": number, "col": hit, "preview": line.strip()[:200]})
 		return {"matches": matches, "truncated": False}
+
+
+def _glob_regex(glob):
+	"""src/fs/glob.cf's rule: '*' within a segment, '?' one character, a '**' segment any number of segments."""
+	out = ""
+	for i, part in enumerate(glob.split("/")):
+		if part == "**":
+			out += "(?:[^/]+/)*"
+			continue
+		out += "".join("[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c) for c in part) + "/"
+	return re.compile(out.rstrip("/") + "$", re.IGNORECASE)
+
+
+def _searched(path, include, exclude):
+	parts = path.split("/")
+	prefixes = ["/".join(parts[:n]) for n in range(1, len(parts) + 1)]
+	if any(_glob_regex(g).match(prefix) for g in exclude for prefix in prefixes):
+		return False
+	return not include or any(_glob_regex(g).match(path) for g in include)
 
 
 def _matcher(query, is_regex, case_sensitive):
@@ -276,5 +309,7 @@ def _matcher(query, is_regex, case_sensitive):
 
 	def match(line):
 		found = pattern.search(line)
-		return len(line[:found.start()].encode("utf-16-le")) // 2 if found else None
+		if not found or found.end() == found.start():
+			return None
+		return len(line[:found.start()].encode("utf-16-le")) // 2
 	return match

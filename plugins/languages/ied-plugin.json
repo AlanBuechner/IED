@@ -11,6 +11,9 @@
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
 	"contributes": {
+		"headerSourcePairs": [
+			{ "extensions": [".h", ".c", ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".inl"], "searchPaths": ["../include", "../src", "../source"] }
+		],
 		"languages": [
 			{ "id": "c", "aliases": ["C"], "extensions": [".c", ".h"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
 			{ "id": "cpp", "aliases": ["C++"], "extensions": [".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++", ".inl", ".ipp"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },

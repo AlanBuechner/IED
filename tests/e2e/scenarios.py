@@ -39,7 +39,7 @@ def shell_chrome(run):
 	page = run.open()
 	check(page.is_visible(".sidebar .sb-ws"), "the workspace switcher")
 	check(page.is_visible('.sb-act[data-activity="ied.editor"].on'), "the editor activity, shown")
-	check(run.texts(".menubar .mi")[:2] == ["File", "View"], "the menu bar in VS order: %s" % run.texts(".menubar .mi"))
+	check(run.texts(".menubar .mi")[:3] == ["File", "Edit", "View"], "the menu bar in VS order: %s" % run.texts(".menubar .mi"))
 	run.page.wait_for_selector(".tree-row:has-text('README.md')")
 	check("Solution Explorer" in run.texts(".panel-title"), "Solution Explorer docked")
 	check("Output" in run.texts(".panel-title"), "Output docked")
@@ -345,6 +345,70 @@ def explorer_file_operations(run):
 	check("everything in it" in page.text_content(".popup.dialog"), "a folder's delete says it takes its contents")
 	page.click(".popup.dialog button:has-text('Delete')")
 	page.wait_for_selector(".tree-row:has-text('%s-moved')" % name, state="detached")
+
+
+@scenario()
+def find_in_files(run):
+	"""Ctrl+Shift+F, a query, the results by file, and a match opened at its place (docs/10 fs.search)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	token = "findme_%s_%d" % (run.viewport, int(time.time()))
+	run.request("fs.write", {"wsId": ws, "path": "src/find-%s.c" % run.viewport, "text": "int other;\n\tint %s = 1;\n" % token})
+	page.click(".tree-row:has-text('README.md')")
+	page.keyboard.press("Control+Shift+F")
+	page.wait_for_selector(".fif-query")
+	page.wait_for_function("document.activeElement && document.activeElement.classList.contains('fif-query')")
+	page.keyboard.type(token)
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".fif-results .tree-row:has-text('find-%s.c')" % run.viewport)
+	check("1 match in 1 file" in page.text_content(".fif-status"), "the count: %s" % page.text_content(".fif-status"))
+	run.shot("results")
+	page.dblclick(".fif-results .tree-row:has-text('%s')" % token)
+	page.wait_for_selector(".tab:has-text('find-%s.c')" % run.viewport)
+	page.wait_for_function("document.querySelector('.statusbar') && document.querySelector('.statusbar').textContent.includes('Ln 2, Col 6')", timeout=20000)
+	run.request("fs.delete", {"wsId": ws, "path": "src/find-%s.c" % run.viewport})
+
+
+def active_tab(page):
+	return page.evaluate("ied_shell.context.get('activeTab')")
+
+
+@scenario(viewports=("desktop",))
+def navigate_back_and_forward(run):
+	"""Ctrl+- goes back to where the cursor was before a jump to another document, Ctrl+Shift+- forward again."""
+	page = run.open()
+	open_main_c(run, page)
+	page.click(".monaco-editor .view-lines")
+	page.evaluate("ied_shell.commands.run('ied.editor.goTo', { path: 'README.md', line: 0, col: 0 })")
+	page.wait_for_function("ied_shell.context.get('activeTab') === 'doc:README.md'", timeout=20000)
+	page.wait_for_function("ied_shell.views.entries.get('doc:README.md').instance.editor.hasTextFocus()", timeout=20000)
+	page.keyboard.press("Control+Minus")
+	page.wait_for_function("ied_shell.context.get('activeTab') === 'doc:src/main.c'", timeout=20000)
+	page.keyboard.press("Control+Shift+Minus")
+	page.wait_for_function("ied_shell.context.get('activeTab') === 'doc:README.md'", timeout=20000)
+	check(active_tab(page) == "doc:README.md", "forward again")
+
+
+@scenario(viewports=("desktop",))
+def toggle_header_and_code(run):
+	"""Ctrl+K, Ctrl+O between a C file and its header (the languages plugin's headerSourcePairs)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	for name in ("pair.c", "pair.h"):
+		run.request("fs.write", {"wsId": ws, "path": "src/" + name, "text": "int pair;\n"})
+	page.evaluate("ied_shell.commands.run('ied.editor.goTo', { path: 'src/pair.c', line: 0 })")
+	page.wait_for_function("ied_shell.views.entries.get('doc:src/pair.c') && ied_shell.views.entries.get('doc:src/pair.c').instance.editor.hasTextFocus()", timeout=20000)
+	page.keyboard.press("Control+K")
+	page.keyboard.press("Control+O")
+	page.wait_for_function("ied_shell.context.get('activeTab') === 'doc:src/pair.h'", timeout=20000)
+	header = "ied_shell.views.entries.get('doc:src/pair.h').instance"
+	page.wait_for_function("%s && %s.model && %s.sync.holdsLease && %s.editor.hasTextFocus()" % (header, header, header, header), timeout=20000)
+	page.keyboard.press("Control+K")
+	page.keyboard.press("Control+C")
+	page.wait_for_function("%s.model.getValue().startsWith('//')" % header, timeout=10000)
+	check(True, "Ctrl+K, Ctrl+C still comments the line")
+	for name in ("pair.c", "pair.h"):
+		run.request("fs.delete", {"wsId": ws, "path": "src/" + name})
 
 
 @scenario(viewports=("desktop",))

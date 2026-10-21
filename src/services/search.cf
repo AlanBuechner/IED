@@ -1,0 +1,80 @@
+include "search.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	const int64 kSearchWaitSliceNs = 50000000;
+
+	static Core::Array<Core::String> Strings(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; i < list.Count(); ++i)
+			if (list.At(i).Kind() == Serialization::DomKind::String) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	SearchQuery SearchQueryOf(const Params& params) {
+		SearchQuery query;
+		query.text = params.Str("query");
+		if (query.text.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "the query is empty");
+		query.regex = params.Bool("regex", false);
+		query.caseSensitive = params.Bool("caseSensitive", false);
+		query.include = Strings(params.Field("include"));
+		query.exclude = params.Has("exclude") ? Strings(params.Field("exclude")) : DefaultSearchExcludes();
+		const int64 most = params.Int("maxResults", kSearchDefaultResults);
+		query.maxResults = most < 1 ? 1 : most > kSearchMostResults ? kSearchMostResults : most;
+		LineMatcher matcher = LineMatcher(query);
+		if (!matcher.IsValid()) throw RpcError(ErrorCode::BadRequest, (Core::String("the regex does not compile: ") + matcher.Error()).View());
+		return query;
+	}
+
+	Core::String SearchResultJson(const SearchResult& result) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("matches"));
+		json.BeginArray();
+		for (const SearchMatch& match : result.matches) {
+			json.BeginObject();
+			json.Field("path", match.path.View());
+			json.IntField("line", match.line);
+			json.IntField("col", match.col);
+			json.Field("preview", match.preview.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.BoolField("truncated", result.truncated);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Search::Init(Server* server) {
+		this.server = server;
+		Search* self = this;
+		server->rpc.Register("fs.search", [self](Call& call, const Params& params) -> Core::String { return self->SearchMethod(call, params); });
+	}
+
+	Core::HashMap<Core::String, Core::String> Search::OpenTexts(Workspace* ws) const {
+		Core::HashMap<Core::String, Core::String> texts;
+		for (const Core::String& path : server->documents->OpenPaths(ws)) texts.Insert(path, server->documents->Find(ws, path.View())->text);
+		return texts;
+	}
+
+	Core::String Search::SearchMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		SearchQuery query = SearchQueryOf(params);
+		SearchJob* job = new SearchJob();
+		FS::Path root = ws->root;
+		Core::HashMap<Core::String, Core::String> open = OpenTexts(ws);
+		CancelToken* cancel = call.cancel;
+		Server* host = server;
+		Threading::Thread::Run([job, root, query, open, cancel, host]() {
+			SearchResult result = SearchFolder(root, query, open, &cancel->cancelled);
+			Threading::LockGuard guard(host->lock);
+			job->result = result;
+			job->done = true;
+			cancel->wake.NotifyAll();
+		}).Detach();
+		while (!job->done && !call.cancel->IsCancelled()) call.cancel->wake.WaitFor(server->lock, kSearchWaitSliceNs);
+		if (!job->done) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+		return SearchResultJson(job->result);
+	}
+}
