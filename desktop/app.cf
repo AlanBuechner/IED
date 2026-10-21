@@ -99,7 +99,8 @@ namespace Desktop
 
 	Window* App::NewWindow() {
 		Placement placement = windows.IsEmpty() ? LoadPlacement(data) : Cascaded(windows[windows.Count() - 1]->CurrentPlacement());
-		Window* window = new Window(this);
+		App* self = this;
+		Window* window = new Window(self);
 		if (!window->Create(instance, placement)) return null;
 		windows.Push(window);
 		if (environment != null) window->Attach(environment);

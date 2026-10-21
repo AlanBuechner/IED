@@ -10,7 +10,7 @@ description = "IED's desktop app: the web client in a native WebView2 window, st
 depends = ["launcher"]
 sources = ["."]
 includes = ["../vendor/webview2/build/native/include"]
-links = ["user32", "gdi32", "ole32", "dwmapi", "advapi32", "shell32", "version", "../vendor/webview2/build/native/x64/WebView2LoaderStatic.lib"]
+links = ["user32", "gdi32", "ole32", "dwmapi", "advapi32", "shell32", "version", "${workspace.dir}/vendor/webview2/build/native/x64/WebView2LoaderStatic.lib"]
 compiler-args = ["-l", "${int}/ied.res"]
 working-dir = ".."
 
@@ -18,6 +18,6 @@ working-dir = ".."
 name = "resources"
 phase = "pre-build"
 description = "Compile the icon, version and manifest (resources/ied.rc) into ied.res"
-run = ["${workspace.dir}/C4/Frost/vendor/Compiler/bin/llvm-rc.exe", "-fo", "${int}/ied.res", "resources/ied.rc"]
+run = ["${toolchain.dir}/toolchain/bin/llvm-rc.exe", "-fo", "${int}/ied.res", "resources/ied.rc"]
 inputs = ["resources/ied.rc", "resources/ied.ico", "resources/ied-desktop.manifest"]
 outputs = ["${int}/ied.res"]

@@ -49,6 +49,15 @@ class C4BuildTests(WorkspaceTest):
 		self.assertIn("-march=x86-64-v3", args)
 		self.assertEqual(args[-2:], ["-o", self.bin("Game", "Game.exe").replace("\\", "/")])
 
+	def test_compiler_args_and_links_expand_variables(self):
+		self.files({"Game/nuke.toml": "[project]\ncompiler-args = [\"-l\", \"${int}/app.res\"]\nlinks = [\"${project.dir}/lib/x.lib\"]\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		args = self.compiles()[0]
+		links = [args[i + 1] for i, a in enumerate(args) if a == "-l"]
+		self.assertIn(self.int("Game", "app.res").replace("\\", "/"), links)
+		self.assertIn(self.path("Game", "lib", "x.lib").replace("\\", "/"), links)
+
 	def test_windows_subsystem_reaches_the_program_not_its_tests(self):
 		self.files({"Game/nuke.toml": "[project]\nsubsystem = \"windows\"\n", "Game/src/tests/t.cf": "\n"})
 		code, out = self.nuke("build")

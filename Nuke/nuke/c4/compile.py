@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from .. import fsutil, process
 from ..errors import StepFailed
+from ..variables import expand_argv
 from . import description
 
 ARGS_STAMP = "compile.args"
@@ -55,7 +56,7 @@ def plan(session, project, test=False):
 		argv += ["-l", link]
 	if project.subsystem != "console" and not test:
 		argv += ["--subsystem", project.subsystem]
-	argv += compiler_args(project, configuration)
+	argv += expand_argv(compiler_args(project, configuration), session.variables(project))
 	argv += ["--int-dir", int_dir, "-o", output]
 	tracked = description.tracked_files(modules) + _toolchain_files(toolchain)
 	return CompileJob(label=f"{project.name}{' tests' if test else ''}", argv=tuple(argv), output=output, int_dir=int_dir,
@@ -64,10 +65,11 @@ def plan(session, project, test=False):
 
 
 def collect_links(session, project):
+	"""Every module's links, each expanded with that module's variables (a path in its own ${int})."""
 	links = []
 	for module in session.c4_modules(project):
 		override = module.config_overrides.get(session.configuration.name)
-		for link in module.links + (override.links if override else ()):
+		for link in expand_argv(list(module.links + (override.links if override else ())), session.variables(module)):
 			if link not in links:
 				links.append(link)
 	return links

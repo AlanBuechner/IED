@@ -1,0 +1,31 @@
+# desktop/ - `ied-desktop`, the desktop app
+
+IED's web client in native windows (`docs/27`): WebView2 (the Edge engine Windows ships) shows the same UI a browser
+gets, with the keys a browser keeps (Ctrl+W/T/N, F5, Ctrl+R, F12) going to IED. It starts the user's `ied-server` when
+none runs, and again if it dies while windows are open. Written in C4: Win32 and WebView2 are bound from their headers
+through CBind, and the COM callbacks WebView2 makes are C4 structs.
+
+```bat
+ied-desktop                      IED's home
+ied-desktop C:\game\src\main.cf:42   a window on that file, at a line
+ied C:\game                      the CLI opens folders here when ied-desktop.exe sits beside ied.exe
+```
+
+Options: `--control <name>` (another server's pipe), `--data <dir>` (the app's window placement and WebView2 profile;
+default `%LOCALAPPDATA%\IED\desktop`), `--debug-port <n>` (the windows' DevTools protocol on loopback, for tests).
+
+| File | What |
+|---|---|
+| `main` | the program: the command line, then the app |
+| `app` | the windows, the WebView2 environment, reaching the server off the UI thread, the server watch's news |
+| `window` (`window.cf`, `view.cf`) | one window: Win32 (frame, placement, messages) and its WebView2 (settings, events, navigation policy) |
+| `com` | COM callback objects written in C4 |
+| `watch` | the thread that starts the server again (at most three times a minute) |
+| `pages` | where navigations go, the page's `window.iedDesktop` script, the app's own status pages |
+| `placement`, `options` | `window.json`; the command line |
+| `native.ch`, `native/webview.h` | what CBind binds: `<windows.h>`, COM, DWM, the WebView2 SDK (`vendor/webview2`, from `setup.bat`) |
+| `resources/` | the icon (`ied.svg`, rendered to `ied.ico` by `make_icon.py`), version and manifest, compiled into the exe |
+| `tests/` | the parts that need no window (`nuke test ied-desktop`) |
+
+The finding and starting of the server, and the control channel, are the `launcher` module's (`launcher/`), shared with
+`ied`.
