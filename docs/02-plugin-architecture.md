@@ -36,7 +36,7 @@ Validation failures appear in Settings > Plugins and the *IED* output source - n
 
 ## The host as built (M1)
 
-`src/plugins/` loads `builtin` and `declarative` plugins; `js` and `process` manifests are refused with "cannot load yet" (those runtimes are dropped for C4 code, `docs/26`).
+`src/plugins/` loads `builtin`, `declarative` and `c4` plugins (`c4`: code the server's script host compiles, `docs/26`). The dropped `js` and `process` runtimes are not in the manifest schema, so such a manifest fails validation and the plugin's problem says why.
 
 **Where plugins come from.**
 
