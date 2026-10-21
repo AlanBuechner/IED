@@ -1,0 +1,114 @@
+include "contributed.ch"
+
+namespace Profiler
+{
+	const int64 kMagicBytes = 64;
+	const int64 kImporterSeconds = 600;
+
+	static int32 AsciiLower(int32 c) { return c >= (int32)'A' && c <= (int32)'Z' ? c + 32 : c; }
+
+	static bool SameIgnoringCase(Core::StringView a, Core::StringView b) {
+		if (a.ByteLength() != b.ByteLength()) return false;
+		for (int64 i = 0; i < a.ByteLength(); ++i)
+			if (AsciiLower(a.ByteAt(i)) != AsciiLower(b.ByteAt(i))) return false;
+		return true;
+	}
+
+	static bool NamesExtension(const Serialization::DomNode& entry, Core::StringView extension) {
+		Serialization::DomNode extensions = entry.Member("extensions");
+		for (int64 i = 0; i < extensions.Count(); ++i)
+			if (SameIgnoringCase(extensions.At(i).AsView(), extension)) return true;
+		return false;
+	}
+
+	static bool BeginsWith(Core::StringView path, Core::StringView magic) {
+		if (magic.IsEmpty()) return true;
+		FS::File file = FS::File(Core::String(path).CStr(), "rb");
+		if (!file.IsOpen()) return false;
+		char8[64] head;
+		const int64 read = file.ReadAll((void*)&head[0], kMagicBytes);
+		return read >= 0 && Core::StringView(&head[0], read).StartsWith(magic);
+	}
+
+	bool FindContributedImporter(Core::StringView wsId, Core::StringView source, ContributedImporter& found) {
+		const Core::StringView extension = FS::Path(source).Extension();
+		for (const IED::Contribution& each : IED::Contributions(wsId, Core::StringView("profilerImporters"))) {
+			if (!NamesExtension(each.entry, extension) || !BeginsWith(source, each.entry.Member("magic").AsView())) continue;
+			found.id = Core::String(each.entry.Member("id").AsView());
+			found.pluginId = each.pluginId;
+			found.folder = each.folder;
+			found.entry = each.entry;
+			return true;
+		}
+		return false;
+	}
+
+	// A setting's value as a word: a string's text, anything else its JSON.
+	static Core::String SettingWord(const ImporterRun& run, Core::StringView key) {
+		Core::String json = run.context->Setting(key, run.ws.id.View());
+		Serialization::DomDoc doc;
+		Serialization::DomNode value = Serialization::ReadJson(json.View(), doc).root;
+		return value.Kind() == Serialization::DomKind::String ? Core::String(value.AsView()) : Core::String(json.View().Trimmed());
+	}
+
+	static bool VariableValue(Core::StringView name, const ContributedImporter& importer, const ImporterRun& run, Core::String& value) {
+		if (name == "input") value = run.input;
+		else if (name == "output") value = run.output;
+		else if (name == "pluginFolder") value = importer.folder;
+		else if (name.StartsWith(Core::StringView("config:"))) value = SettingWord(run, name.Substring(7, name.ByteLength() - 7));
+		else return false;
+		return true;
+	}
+
+	bool ExpandImporterWord(Core::StringView word, const ContributedImporter& importer, const ImporterRun& run, Core::String& expanded, Core::String& problem) {
+		Core::StringBuilder out;
+		int64 at = 0;
+		while (at < word.ByteLength()) {
+			const int64 open = word.Substring(at, word.ByteLength() - at).IndexOf(Core::StringView("${"));
+			if (open < 0) break;
+			const int64 close = word.IndexOf('}', at + open);
+			if (close < 0) break;
+			out.Append(word.Substring(at, open));
+			const Core::StringView name = word.Substring(at + open + 2, close - (at + open + 2));
+			Core::String value;
+			if (!VariableValue(name, importer, run, value)) {
+				problem = (((Core::String("the importer ") + importer.id.View()) + " names an unknown variable ${") + name) + "}";
+				return false;
+			}
+			out.Append(value.View());
+			at = close + 1;
+		}
+		out.Append(word.Substring(at, word.ByteLength() - at));
+		expanded = out.ToString();
+		return true;
+	}
+
+	bool RunContributedImporter(const ContributedImporter& importer, const ImporterRun& run, Core::String& problem) {
+		Serialization::DomNode words = importer.entry.Member("run");
+		Core::Array<Core::String> argv;
+		for (int64 i = 0; i < words.Count(); ++i) {
+			Core::String word;
+			if (!ExpandImporterWord(words.At(i).AsView(), importer, run, word, problem)) return false;
+			argv.Push(word);
+		}
+		const int64 seconds = importer.entry.Member("timeoutSeconds").IsValid() ? importer.entry.Member("timeoutSeconds").AsInt() : kImporterSeconds;
+		IED::CommandResult result = IED::RunCommand(run.ws, argv, Core::StringView(""), seconds);
+		if (result.started && result.exitCode == 0 && result.problem.IsEmpty() && FS::FileExists(run.output.CStr())) return true;
+		Core::StringBuilder why;
+		why.Append("the ");
+		why.Append(importer.pluginId.View());
+		why.Append(" importer ");
+		why.Append(importer.id.View());
+		why.Append(" failed");
+		if (!result.problem.IsEmpty()) {
+			why.Append(": ");
+			why.Append(result.problem.View());
+		}
+		if (!result.output.View().Trimmed().IsEmpty()) {
+			why.Append(":\n");
+			why.Append(result.output.View().Trimmed());
+		}
+		problem = why.ToString();
+		return false;
+	}
+}

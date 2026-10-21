@@ -64,9 +64,13 @@ namespace Profiler
 	}
 
 	Core::String ImportFile(Core::StringView source, Core::StringView folder, Core::String& problem) {
+		return ImportConverted(source, source, Core::StringView(""), folder, problem);
+	}
+
+	Core::String ImportConverted(Core::StringView source, Core::StringView origin, Core::StringView converter, Core::StringView folder, Core::String& problem) {
 		Core::Array<uint8> bytes;
 		if (!ReadAll(source, bytes, problem)) return Core::String();
-		FS::Path from = FS::Path(source);
+		FS::Path from = FS::Path(origin);
 		Core::String stem = Core::String(from.Stem());
 		Core::String target = TargetPath(folder, stem.View());
 		if (StartsWithText(bytes, "ITP1")) {
@@ -87,7 +91,8 @@ namespace Profiler
 			format = Core::StringView("pprof");
 			if (!ImportPprof(bytes, stem.View(), stream, problem)) return Core::String();
 		}
-		if (!WriteTraceFile(target.CStr(), stream, Metadata(source, format).View(), problem)) return Core::String();
+		if (!converter.IsEmpty()) format = converter;
+		if (!WriteTraceFile(target.CStr(), stream, Metadata(origin, format).View(), problem)) return Core::String();
 		return target;
 	}
 }

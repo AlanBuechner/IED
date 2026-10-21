@@ -1,0 +1,25 @@
+[package]
+name = "ied-profiler"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.76"
+description = "The Rust client of the IED Trace Protocol: zones, frames, plots, messages, thread names, tasks and allocations streamed to IED's profiler."
+license = "MIT"
+publish = false
+
+[features]
+# Spans and events of the `tracing` ecosystem as zones and messages (`ied_profiler::tracing::Subscriber`).
+tracing = ["dep:tracing-core"]
+
+[dependencies]
+tracing-core = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[[example]]
+name = "demo"
+
+[[example]]
+name = "spans"
+required-features = ["tracing"]

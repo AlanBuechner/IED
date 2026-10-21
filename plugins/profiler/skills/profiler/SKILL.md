@@ -102,6 +102,56 @@ int main() {
 - C: `ITP_ZONE_BEGIN("Name")` ... `ITP_ZONE_END()`.
 - `ITP_ENABLE=0` compiles the `ITP_*` macros away; the functions stay and cost one load without `IED_PROFILER`.
 
+## Instrumenting Go
+
+The module `github.com/AlanBuechner/IED/plugins/go/profiler` (standard library only; in a module outside this
+repository, `replace` it with the plugin's folder). The go preset's Profile task runs `go run .` with `IED_PROFILER`.
+
+```go
+func main() {
+	defer profiler.Stop()                              // Go runs nothing at exit: this sends the last events
+	ctx := profiler.WithThread(context.Background(), "Main")
+	for running {
+		update(ctx)
+		profiler.Frame()
+	}
+}
+
+func update(ctx context.Context) {
+	defer profiler.Zone(ctx, "Update").End()          // at this file and line
+	profiler.Plot("Entities", float64(len(world)))
+}
+```
+
+- Each goroutine records on its own track: give a long-lived one (a worker) `profiler.WithThread(ctx, name)` once,
+  and pass that context to its zones; a goroutine without one gets "goroutine N" (a microsecond to find it).
+- `ctx, task := profiler.Task(ctx, "Request")` ... `task.End()` groups work across goroutines in the Tasks view.
+- Collections, the heap and the goroutine count are reported by themselves.
+- Go's own tracer: `runtime/trace` (`go test -trace trace.out`, or `trace.Start`) writes an execution trace; Solution
+  Explorer > Import into Profiler on the `.out` converts it with the workspace's Go toolchain: each P's goroutines,
+  each goroutine's regions, tasks and logs, the collector, the heap.
+
+## Instrumenting Rust
+
+The `ied-profiler` crate (`plugins/rust/profiler`; a path or git dependency). The cargo preset's Profile task runs
+`cargo run` with `IED_PROFILER`.
+
+```rust
+fn update(world: &World) {
+    let _zone = ied_profiler::zone!("Update");        // bind it: `let _ =` drops it at once
+    ied_profiler::plot("Entities", world.len() as f64);
+}
+// in the loop, once per presented frame
+ied_profiler::frame();
+```
+
+- Threads keep their std names; `ied_profiler::set_thread_name` renames one. `Task::begin("Decode", None)` for tasks.
+- `#[global_allocator] static A: ied_profiler::Tracked<std::alloc::System> = ied_profiler::Tracked(std::alloc::System);`
+  reports every allocation (Memory, leaks).
+- Code already using `tracing`: enable the crate's `tracing` feature and
+  `tracing::subscriber::set_global_default(ied_profiler::tracing::Subscriber::new())` - spans become zones, events
+  messages.
+
 ## Other languages and tools
 
 - **Chrome trace JSON** (Rust's `tracing-chrome`, Chrome and Perfetto exports, Nuke's `build-trace.json`, many engines):

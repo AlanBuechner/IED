@@ -69,6 +69,7 @@ namespace Profiler
 			json.IntField("peak", pool->peak);
 			json.IntField("allocs", pool->allocs);
 			json.IntField("frees", pool->frees);
+			json.IntField("earlierFrees", pool->earlierFrees);
 			json.IntField("live", pool->live.Count());
 			json.Key(Core::StringView("usage"));
 			WriteUsage(json, capture, pool, range, pixel);

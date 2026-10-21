@@ -336,7 +336,7 @@ namespace Profiler
 		const uint64 address = event.fields[2];
 		int64 index;
 		if (!pool->live.TryGet(address, index)) {
-			capture.Warn(t, Core::StringView("an address was freed that was never allocated"));
+			pool->earlierFrees += 1;
 			return;
 		}
 		pool->live.Remove(address);

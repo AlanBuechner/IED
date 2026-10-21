@@ -1,5 +1,6 @@
 // Applies decoded events to a capture (docs/16 "Rules"). Nothing a client sends can stop a capture: an unbalanced
-// ZoneEnd, a free of an address never allocated, a task id never begun become warnings and the capture goes on.
+// ZoneEnd, an address allocated twice, a task id never begun become warnings and the capture goes on. A free of an
+// address the capture never saw allocated is counted, not warned of: a capture may begin while a program runs.
 // The caller holds the capture's lock.
 
 include "capture.ch"

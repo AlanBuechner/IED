@@ -5,6 +5,7 @@
 import { test, assertEqual, assertTrue } from "./harness.js";
 import { duration, ms, bytes, tickStep, tickLabel } from "/plugins/ied.profiler/ui/format.js";
 import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, seriesOf, frameBands, MIN_SPAN_NS } from "/plugins/ied.profiler/ui/model.js";
+import { openNextCapture } from "/plugins/ied.profiler/ui/index.js";
 
 const MICRO = String.fromCharCode(0xb5) + "s";
 
@@ -88,4 +89,42 @@ test("profiler: thread colors and frames over the budget", () => {
 	assertEqual(bands.map((b) => [b.index, b.over, b.spike]), [[0, false, false], [1, true, false], [2, true, true]]);
 	assertEqual(frameBands({ dense: true, items: [] }, 12), [], "too many to draw");
 	assertEqual(frameBands(null, 12), []);
+});
+
+// A plugin API with a client whose topic the test feeds, recording the tabs it opens.
+function fakeIed() {
+	const ied = { opened: [], subscribed: [], handlers: new Map() };
+	ied.client = {
+		subscribe: (key, handler) => {
+			ied.subscribed.push(key);
+			ied.handlers.set(key, handler);
+			return () => ied.handlers.delete(key);
+		},
+	};
+	ied.commands = { run: async () => {} };
+	ied.tabs = { open: (ref) => ied.opened.push(ref) };
+	return ied;
+}
+
+test("profiler: Start Profiling opens its workspace's next live capture, once", async () => {
+	const ied = fakeIed();
+	openNextCapture(ied, "w2", new Set(["old"]));
+	assertEqual(ied.subscribed, ["profs:w2"], "the workspace the task runs in, not the first one opened");
+	const topic = ied.handlers.get("profs:w2");
+	topic.snap({ captures: [{ captureId: "old", live: true, name: "old.iedtrace" }] });
+	topic.evt("captures.changed", { captures: [{ captureId: "done", live: false, name: "done.iedtrace" }] });
+	await Promise.resolve();
+	assertEqual(ied.opened, [], "neither a capture it knew nor one that is not live");
+	topic.evt("captures.changed", { captures: [{ captureId: "new", live: true, name: "game.iedtrace" }] });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assertEqual(ied.opened, ["prof:new"], "the program that connected");
+	assertTrue(!ied.handlers.has("profs:w2"), "and it stops listening");
+});
+
+test("profiler: a Profile task that does not start stops the waiting", () => {
+	const ied = fakeIed();
+	const stop = openNextCapture(ied, "w1", new Set());
+	stop();
+	assertTrue(!ied.handlers.has("profs:w1"));
+	stop();
 });

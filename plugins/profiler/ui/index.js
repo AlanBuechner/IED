@@ -9,7 +9,8 @@ import { CaptureView } from "./capture.js";
 import { CaptureLibraryView } from "./library.js";
 
 const names = new Map();
-let expectingSince = 0;
+// How long Start Profiling waits for its program to connect (a build may come first).
+const FOLLOW_FOR_MS = 10 * 60 * 1000;
 
 function remember(capture) {
 	const meta = capture.metadata || {};
@@ -30,13 +31,41 @@ function failed(ied, what) {
 
 async function startProfiling(ied) {
 	const wsId = ied.workspace.wsId;
-	expectingSince = Date.now();
+	const library = await ied.client.request("prof.captures", { wsId }).catch(failed(ied, "Cannot ask the profiler"));
+	if (!library) return;
+	const stopFollowing = openNextCapture(ied, wsId, new Set(library.captures.map((c) => c.captureId)));
 	const run = await ied.client.request("task.run", { wsId, slot: "profile" }).catch((e) => {
 		const missing = e.code === "not_found";
 		ied.toast(missing ? "The startup project has no Profile task. Add a task in the \"profile\" slot that starts the program with IED_PROFILER set to ${profiler.connect}." : "Cannot start profiling: " + e.message, { level: missing ? "warning" : "error" });
 		return null;
 	});
-	if (run) await ied.commands.run("shell.showActivity", { id: "ied.profiler" });
+	if (!run) {
+		stopFollowing();
+		return;
+	}
+	await ied.commands.run("shell.showActivity", { id: "ied.profiler" });
+}
+
+// Opens the first live capture of workspace `wsId` that is not among `known`: the program the Profile task started,
+// once it connects. Returns what stops waiting.
+export function openNextCapture(ied, wsId, known) {
+	let following = true;
+	const look = (data) => {
+		const live = following && (data.captures || []).find((c) => c.live && !known.has(c.captureId));
+		if (!live) return;
+		end();
+		remember(live);
+		openCapture(ied, live.captureId);
+	};
+	const stop = ied.client.subscribe("profs:" + wsId, { snap: look, evt: (kind, data) => look(data) });
+	const timer = setTimeout(() => end(), FOLLOW_FOR_MS);
+	function end() {
+		if (!following) return;
+		following = false;
+		clearTimeout(timer);
+		stop();
+	}
+	return end;
 }
 
 async function stopProfiling(ied) {
@@ -54,21 +83,6 @@ async function showConnect(ied) {
 		message: "Start the program with this environment variable; its ITP client (Bedrock Profile::, the C/C++, Go or Rust client) connects and records into this workspace. IED_PROFILER=file:<path> writes a trace file instead.",
 		value: "IED_PROFILER=" + library.connect.env,
 		confirm: "Done",
-	});
-}
-
-// While a Profile task starts, the first new live capture opens by itself.
-function followNewCaptures(ied) {
-	ied.client.subscribe("profs:" + ied.workspace.wsId, {
-		snap: () => {},
-		evt: (kind, data) => {
-			if (!expectingSince) return;
-			const live = (data.captures || []).find((c) => c.live && (c.modifiedNs || 0) / 1e6 >= expectingSince - 5000);
-			if (!live) return;
-			expectingSince = 0;
-			remember(live);
-			openCapture(ied, live.captureId);
-		},
 	});
 }
 
@@ -91,7 +105,6 @@ export function activate(ied) {
 		const imported = await ied.client.request("prof.import", { wsId: ied.workspace.wsId, path }).catch(failed(ied, "Cannot import " + path));
 		if (imported) openCapture(ied, imported.captureId);
 	});
-	if (ied.workspace.wsId) followNewCaptures(ied);
 }
 
 export function CaptureLibrary(ctx) {

@@ -138,7 +138,7 @@
 				},
 				"projectIcons": {
 					"type": "array",
-					"description": "How projects look in the Solution Explorer (docs/15 'Icons'): a thin tile with a short label in a theme hue. A project is matched by its .ied.proj 'language', else its presets or build system, else a marker file in its root folder.",
+					"description": "How projects look in the Solution Explorer (docs/15 'Icons'): a thin tile with a short label in a theme hue. A project is matched by its .iedproj 'language', else its presets or build system, else a marker file in its root folder.",
 					"items": {
 						"type": "object",
 						"required": ["languageId", "label"],
@@ -296,10 +296,19 @@
 				"sourceControlProviders": { "type": "array", "items": { "type": "object", "required": ["id", "binding"], "properties": { "id": { "type": "string" }, "binding": { "type": "string" } } } },
 				"profilerImporters": {
 					"type": "array",
+					"description": "A command that turns a tool's files into one the profiler reads (docs/16 \"Importers\").",
 					"items": {
 						"type": "object",
-						"required": ["id", "extensions", "binding"],
-						"properties": { "id": { "type": "string" }, "extensions": { "type": "array", "items": { "type": "string" } }, "binding": { "type": "string" } }
+						"required": ["id", "extensions", "run"],
+						"additionalProperties": false,
+						"properties": {
+							"id": { "type": "string" },
+							"label": { "type": "string" },
+							"extensions": { "type": "array", "items": { "type": "string" }, "description": "The file extensions it takes (\".out\"), any case." },
+							"magic": { "type": "string", "description": "Text the file must begin with; the profiler's own readers take it otherwise." },
+							"run": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "The command, run in the workspace's root (a trusted workspace): it writes ${output} - Chrome trace JSON, pprof or an .iedtrace - from ${input}; ${pluginFolder} and ${config:<key>} expand too." },
+							"timeoutSeconds": { "type": "integer", "minimum": 1, "description": "Default 600." }
+						}
 					}
 				}
 			}

@@ -598,7 +598,13 @@ namespace Profiler
 			out.AppendInt(p.Member("allocs").AsInt());
 			out.Append(" allocations, ");
 			out.AppendInt(p.Member("frees").AsInt());
-			out.Append(" frees\n");
+			out.Append(" frees");
+			if (p.Member("earlierFrees").AsInt() > 0) {
+				out.Append(" (and ");
+				out.AppendInt(p.Member("earlierFrees").AsInt());
+				out.Append(" of blocks allocated before the capture began)");
+			}
+			out.Append("\n");
 		}
 		Serialization::DomNode gc = memory.Member("gc");
 		if (gc.Member("count").AsInt() > 0) {

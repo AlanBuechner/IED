@@ -4,6 +4,7 @@ include "service.ch"
 include "timeline.ch"
 include "analysis.ch"
 include "importers.ch"
+include "contributed.ch"
 
 namespace Profiler
 {
@@ -120,6 +121,25 @@ namespace Profiler
 		return Core::String("{}");
 	}
 
+	// A file another plugin's importer takes (a Go execution trace): converted by its command, then read.
+	static Core::String ImportThroughPlugin(ProfilerPlugin* profiler, const ContributedImporter& importer, Core::StringView wsId, Core::StringView source, Core::StringView target, Core::String& problem) {
+		ImporterRun run;
+		run.context = profiler->context;
+		if (!IED::FindWorkspace(wsId, run.ws)) {
+			problem = Core::String("the workspace is not open");
+			return Core::String();
+		}
+		run.input = Core::String(source);
+		run.output = Core::String((FS::Path(target) / (Core::String(".import-") + FS::Path(source).Stem()).View()).View());
+		if (!RunContributedImporter(importer, run, problem)) {
+			FS::RemoveFile(run.output.CStr());
+			return Core::String();
+		}
+		Core::String written = ImportConverted(run.output.View(), source, importer.id.View(), target, problem);
+		FS::RemoveFile(run.output.CStr());
+		return written;
+	}
+
 	static Core::String ImportMethod(ProfilerPlugin* profiler, const IED::Params& params) {
 		Core::String root;
 		{
@@ -130,7 +150,10 @@ namespace Profiler
 		FS::Path target = FS::Path(root.View()) / kCapturesFolder;
 		FS::MakeDirectories(target.CStr());
 		Core::String problem;
-		Core::String written = ImportFile(source.View(), target.View(), problem);
+		ContributedImporter importer;
+		Core::String written = FindContributedImporter(params.Str("wsId").View(), source.View(), importer)
+			? ImportThroughPlugin(profiler, importer, params.Str("wsId").View(), source.View(), target.View(), problem)
+			: ImportFile(source.View(), target.View(), problem);
 		if (written.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, problem.View());
 		Core::String id;
 		{

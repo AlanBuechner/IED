@@ -10,6 +10,8 @@ namespace Profile
 	const int32 kStateOn = 2;
 	const int64 kFrequencyProbeNs = 20000000;
 	const int64 kNsPerSecond = 1000000000;
+	const int32 kMostPauses = 16;
+	const uint64 kFullCollection = 2;
 
 	int32 g_state = 0;
 	Session* g_session = null;
@@ -21,7 +23,7 @@ namespace Profile
 	int64 Now() {
 		uint64 low;
 		uint64 high;
-		asm(nostack) {
+		asm(nomem, nostack) {
 			"rdtsc";
 			out("eax") low;
 			out("edx") high;
@@ -73,6 +75,21 @@ namespace Profile
 
 	thread_local ThreadEnd t_end;
 
+	// A thread the system knows by a name (Thread::SetCurrentName, a debugger's) starts with that name in the profiler.
+	static void NameFromSystem(Session* session, EventBuffer* buffer) {
+		Core::String name = Threading::Thread::CurrentName();
+		if (name.IsEmpty()) return;
+		uint64 text;
+		{
+			Threading::LockGuard held(session->lock);
+			text = session->Intern(name.View());
+		}
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(Event::ThreadName, now);
+		PutVarint(buffer->bytes, text);
+	}
+
 	EventBuffer* ThreadBuffer(Session* session) {
 		if (t_buffer && t_bufferSession == session->number) return t_buffer;
 		EventBuffer* buffer = new EventBuffer();
@@ -92,6 +109,7 @@ namespace Profile
 		t_buffer = buffer;
 		t_bufferSession = session->number;
 		t_end.armed = 1;
+		NameFromSystem(session, buffer);
 		return buffer;
 	}
 
@@ -175,24 +193,49 @@ namespace Profile
 
 	// --- Collections ----------------------------------------------------------------------------------------------
 
-	// After each collection: its pause as a GcBegin and GcEnd (the runtime reports the end; the start is the end less
-	// the pause) and the live bytes it left.
+	// The session's clock and the system's counter (in nanoseconds) read together, to put a time on the counter on the
+	// session's clock.
+	class ClockPair
+	{
+		public int64 ticks;
+		public int64 systemNs;
+
+		public static ClockPair Read() {
+			ClockPair pair;
+			pair.ticks = Now();
+			const int64 counter = Platform::Ticks();
+			const int64 frequency = Platform::TickFrequency();
+			pair.systemNs = (counter / frequency) * kNsPerSecond + (counter % frequency) * kNsPerSecond / frequency;
+			return pair;
+		}
+
+		public int64 TicksAt(uint64 ns, int64 frequency) const {
+			return ticks - (int64)((double)(systemNs - (int64)ns) * (double)frequency / (double)kNsPerSecond);
+		}
+	}
+
+	// After each collection: each time it stopped the program as a GcBegin and GcEnd (a concurrent cycle stops it
+	// several times), the last with the live bytes it left. The runtime times the stops on the system's counter;
+	// `now` on both clocks maps them onto the session's.
 	static void OnCollection(void* user) {
 		Session* session = g_session;
 		if (!session || atomic_load(&g_state, MemoryOrder::Acquire) != kStateOn) return;
+		GC::Pause[kMostPauses] pauses;
+		const int32 count = GC::LastPauses(&pauses[0], kMostPauses);
 		const GC::Stats stats = GC::GetStats();
-		const int64 end = Now();
-		const int64 pause = (int64)((double)stats.lastPauseNs * (double)session->frequency / (double)kNsPerSecond);
+		const ClockPair now = ClockPair::Read();
 		Threading::LockGuard held(session->global.lock);
-		session->global.Timed(Event::GcBegin, end - pause);
-		PutVarint(session->global.bytes, 2);
-		PutVarint(session->global.bytes, 0);
-		session->global.Timed(Event::GcEnd, end);
-		PutVarint(session->global.bytes, 0);
-		PutVarint(session->global.bytes, stats.liveBytes);
-		PutVarint(session->global.bytes, 0);
-		PutVarint(session->global.bytes, 0);
-		PutVarint(session->global.bytes, 0);
+		for (int32 i = 0; i < count && i < kMostPauses; ++i) {
+			session->global.Timed(Event::GcBegin, now.TicksAt(pauses[i].startNs, session->frequency));
+			PutVarint(session->global.bytes, kFullCollection);
+			PutVarint(session->global.bytes, 0);
+			session->global.Timed(Event::GcEnd, now.TicksAt(pauses[i].endNs, session->frequency));
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, i == count - 1 || i == kMostPauses - 1 ? stats.liveBytes : 0);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, 0);
+		}
 	}
 
 	// --- Starting and stopping ------------------------------------------------------------------------------------

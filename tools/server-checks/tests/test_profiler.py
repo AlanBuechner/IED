@@ -11,6 +11,7 @@ import os
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -128,7 +129,9 @@ async def require_profiler(test, client):
 	test.skipTest("the server was built without plugins/profiler/code")
 
 
-class ProfilerTests(ServerTestCase):
+class ProfilerServer(ServerTestCase):
+	"""A server whose home has the profiler, with a workspace, connected and subscribed to its captures."""
+
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="ied-profiler-")
 		self.addCleanup(remove_tree, self.root)
@@ -194,6 +197,8 @@ class ProfilerTests(ServerTestCase):
 	async def query(self, method, **params):
 		return await self.client.request(method, params)
 
+
+class ProfilerTests(ProfilerServer):
 	async def test_a_program_streams_a_live_capture_to_a_file(self):
 		self.assertTrue(self.library["connect"]["env"].startswith("127.0.0.1:"), self.library)
 		data = game_stream(self.token(), bye=False)
@@ -288,8 +293,10 @@ class ProfilerTests(ServerTestCase):
 		w.add(w.chunk(itp.GLOBAL_CHUNK, 0, 0).event("Free", 7, threadId=1, poolId=0, address=1).event("Bye", reason=0))
 		capture = await self.capture_that_ends(w.bytes())
 		summary = await self.query("prof.summary", captureId=capture)
-		self.assertEqual(4, summary["warningCount"], summary["warnings"])
+		self.assertEqual(3, summary["warningCount"], summary["warnings"])
 		self.assertEqual(1, summary["zones"], "the open zone is closed at the end")
+		pools = (await self.query("prof.memory", captureId=capture, width=100))["pools"]
+		self.assertEqual([1], [p["earlierFrees"] for p in pools], "a free of a block from before the capture is counted, not warned of")
 
 	async def test_chrome_traces_and_pprof_profiles_import(self):
 		events = [
@@ -341,6 +348,154 @@ class ProfilerTests(ServerTestCase):
 		self.assertIn("A = ", await ask("compare", a="latest", b="latest"))
 		with self.assertRaises(RpcFailure):
 			await ask("summary", capture="no-such-capture")
+
+
+CONVERTER = (
+	"import json, sys\n"
+	"source, output, scale = sys.argv[1], sys.argv[2], float(sys.argv[3])\n"
+	"names = open(source, encoding='utf-8').read().split()[1:]\n"
+	"if 'fail' in names:\n"
+	"    sys.exit('cannot read ' + source)\n"
+	"events = [{'name': n, 'ph': 'X', 'pid': 1, 'tid': 1, 'ts': i * 10 * scale, 'dur': 5 * scale} for i, n in enumerate(names)]\n"
+	"json.dump({'traceEvents': events}, open(output, 'w'))\n")
+
+
+def importer_plugin(home):
+	"""A plugin whose profilerImporters entry turns `.up` files ("UP name name ...") into Chrome traces with a script."""
+	plugin = os.path.join(home, "plugins", "importer")
+	write(os.path.join(plugin, "convert.py"), CONVERTER)
+	write(os.path.join(plugin, "settings.schema.json"), {"type": "object", "properties": {"importer.scale": {"type": "string", "default": "2"}}})
+	write(os.path.join(plugin, "ied-plugin.json"), {
+		"manifestVersion": 1, "id": "test.importer", "name": "Importer", "version": "0.1.0", "publisher": "IED", "ied": {"api": "^1"},
+		"runtime": {"kind": "declarative"}, "permissions": [],
+		"contributes": {
+			"settings": {"schema": "settings.schema.json", "page": "Importer"},
+			"profilerImporters": [{"id": "upper", "extensions": [".up"], "magic": "UP", "run": [PY, "-I", "${pluginFolder}/convert.py", "${input}", "${output}", "${config:importer.scale}"]}]}})
+
+
+class ImporterTests(ProfilerServer):
+	"""profilerImporters: another plugin's command converts its files, then the profiler reads what it wrote."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-profiler-import-")
+		self.addCleanup(remove_tree, self.root)
+		self.home = make_home(os.path.join(self.root, "home"))
+		importer_plugin(self.home)
+		self.ws = os.path.join(self.root, "Game")
+		os.makedirs(self.ws)
+		self.data = os.path.join(self.root, "data")
+		self.prepare()
+		self.start()
+
+	def prepare(self):
+		pass
+
+	async def import_file(self, name, text, trusted=True):
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": trusted})
+		if text is not None:
+			write(os.path.join(self.ws, name), text)
+		return await self.query("prof.import", wsId="w1", path=name)
+
+	async def test_a_plugins_importer_converts_its_files(self):
+		capture = (await self.import_file("steps.up", "UP load decode draw"))["captureId"]
+		timeline = await self.query("prof.timeline", captureId=capture, width=200)
+		zones = timeline["lanes"][0]["zones"]
+		self.assertEqual([("load", 0, 10_000), ("decode", 20_000, 30_000), ("draw", 40_000, 50_000)],
+			[(timeline["names"][z[3]], z[1], z[2]) for z in zones], "the importer's setting (a scale of 2) reached its command")
+		entry = [c for c in (await self.query("prof.captures", wsId="w1"))["captures"] if c["captureId"] == capture][0]
+		self.assertEqual("steps.iedtrace", os.path.basename(entry["path"]))
+		self.assertEqual("upper", entry["metadata"]["format"])
+		self.assertTrue(entry["metadata"]["importedFrom"].endswith("steps.up"), entry["metadata"])
+		leftovers = [n for n in os.listdir(os.path.join(self.ws, ".ied", "local", "captures")) if n.startswith(".import-")]
+		self.assertEqual([], leftovers, "the converted file is removed")
+
+	async def test_a_failing_importer_says_why(self):
+		with self.assertRaises(RpcFailure) as refused:
+			await self.import_file("broken.up", "UP fail")
+		self.assertEqual("bad_request", refused.exception.code)
+		self.assertIn("the test.importer importer upper failed", refused.exception.message)
+		self.assertIn("cannot read", refused.exception.message)
+
+	async def test_a_file_without_the_magic_goes_to_the_profilers_own_readers(self):
+		with self.assertRaises(RpcFailure) as refused:
+			await self.import_file("plain.up", "load decode")
+		self.assertNotIn("importer", refused.exception.message)
+
+	async def test_an_untrusted_workspace_runs_no_importer(self):
+		with self.assertRaises(RpcFailure) as refused:
+			await self.import_file("steps.up", "UP load", trusted=False)
+		self.assertIn("not trusted", refused.exception.message)
+
+
+GO_PROGRAM = """package main
+
+import (
+	"context"
+	"os"
+	"runtime/trace"
+	"sync"
+	"time"
+)
+
+func main() {
+	out, _ := os.Create(os.Args[1])
+	trace.Start(out)
+	defer trace.Stop()
+	ctx, task := trace.NewTask(context.Background(), "frame")
+	var done sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			trace.WithRegion(ctx, "work", func() { time.Sleep(2 * time.Millisecond) })
+		}()
+	}
+	done.Wait()
+	task.End()
+}
+"""
+
+
+class GoTraceImportTests(ServerTestCase):
+	"""The go plugin's importer: a Go execution trace imports with each goroutine's regions on a track of its own,
+	beside each P's goroutines. Skipped without the go tool."""
+
+	def setUp(self):
+		if not shutil.which("go"):
+			self.skipTest("no go tool")
+		self.root = tempfile.mkdtemp(prefix="ied-profiler-go-")
+		self.addCleanup(remove_tree, self.root)
+		self.home = make_home(os.path.join(self.root, "home"))
+		shutil.copytree(os.path.join(REPO, "plugins", "go"), os.path.join(self.home, "plugins", "go"), ignore=shutil.ignore_patterns("__pycache__", "profiler"))
+		self.ws = os.path.join(self.root, "Game")
+		program = os.path.join(self.root, "tracer")
+		write(os.path.join(program, "go.mod"), "module tracer\n\ngo 1.22\n")
+		write(os.path.join(program, "main.go"), GO_PROGRAM)
+		os.makedirs(self.ws)
+		subprocess.run(["go", "run", ".", os.path.join(self.ws, "trace.out")], cwd=program, check=True, capture_output=True, timeout=300)
+		self.server = IedServer(data=os.path.join(self.root, "data"), extra=("--home", self.home, "--workspace", self.ws))
+		self.addCleanup(self.server.stop, False)
+		self.assertTrue(self.server.started, self.server.error)
+
+	async def asyncSetUp(self):
+		await super().asyncSetUp()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await require_profiler(self, self.client)
+
+	async def asyncTearDown(self):
+		self.assertEqual([], self.client.violations)
+		self.client.abort()
+
+	async def test_a_go_execution_trace_imports(self):
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		capture = (await self.client.request("prof.import", {"wsId": "w1", "path": "trace.out"}))["captureId"]
+		timeline = await self.client.request("prof.timeline", {"captureId": capture, "width": 400})
+		labels = {lane["label"]: [timeline["names"][z[3]] for z in lane["zones"] if z[3] >= 0] for lane in timeline["lanes"]}
+		workers = [names for label, names in labels.items() if label.endswith("main.main.func1")]
+		self.assertEqual([["work"]] * 3, workers, labels)
+		self.assertTrue(any(label.startswith("Proc ") for label in labels), labels)
+		captures = (await self.client.request("prof.captures", {"wsId": "w1"}))["captures"]
+		self.assertEqual("go.trace", [c for c in captures if c["captureId"] == capture][0]["metadata"]["format"])
 
 
 class ProfileTaskTests(ServerTestCase):

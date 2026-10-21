@@ -180,6 +180,7 @@ namespace Profile
 	}
 
 	void SetThreadName(Core::StringView name) {
+		Threading::Thread::SetCurrentName(Core::String(name).CStr());
 		Session* running = Running();
 		if (running) ThreadEvent(running, Event::ThreadName, Interned(running, name));
 	}

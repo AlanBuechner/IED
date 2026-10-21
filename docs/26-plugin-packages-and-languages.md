@@ -145,8 +145,8 @@ A language plugin owns everything about its language. The host and the default f
 | Plugin | Languages | Brings now | Brings later |
 |---|---|---|---|
 | `ied.cpp` | C, C++ | clangd, CodeLLDB, icons, matchers; CMake/meson markers | CMake and MSBuild presets, a CMake Nuke driver |
-| `ied.rust` | Rust | rust-analyzer, cargo preset, icons | cargo Nuke driver, `cargo_metadata` tool |
-| `ied.go` | Go | icons, markers | gopls, go preset, go Nuke driver |
+| `ied.rust` | Rust | rust-analyzer, cargo preset, icons | cargo Nuke driver, `cargo_metadata` tool, the `ied-profiler` crate and a Profile task (`docs/16`) |
+| `ied.go` | Go | icons, markers | gopls, go preset, go Nuke driver, the profiler client module, the Go execution-trace importer (`profilerImporters`) and a Profile task (`docs/16`) |
 | `ied.python` | Python | icons, markers | a language server, venv-aware run/test presets |
 | `ied.web` | JavaScript, TypeScript, HTML, CSS, SCSS | icons, markers | a TS server, npm-script presets |
 | `ied.csharp` | C# | icons, markers | `dotnet` presets |

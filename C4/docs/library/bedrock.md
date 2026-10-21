@@ -1188,33 +1188,35 @@ Profile::Frame();
 | `Site`, `Zone(Site&)`, `Zone(StringView)`, `Zone::Text`, `Zone::Value` | a zone of the calling thread from its creation to its scope's end; a static `Site` is registered once per session, a run-time name looked up each time; `PROFILE_ZONE(name)` declares both |
 | `Frame()`, `Frame(set)`, `FrameBegin(set)`, `FrameEnd(set)` | the end of a frame of the default set or a named one; discontinuous frames |
 | `Plot(name, value)`, `Message(text, severity)` | a value over time; a log line (`Severity::Trace` .. `Fatal`) |
-| `SetThreadName(name)` | the calling thread's name from now on (call it again when a pooled thread takes another role: the profiler keeps the history) |
+| `SetThreadName(name)` | the calling thread's name from now on (call it again when a pooled thread takes another role: the profiler keeps the history); the system's thread is named too (`Thread::SetCurrentName`), and a thread the system already knows by a name starts with it |
 | `TaskBegin(name, parent) -> id`, `TaskEnd`, `TaskSuspend`, `TaskResume`, `TaskScope` | units of work the profiler's Tasks view groups by name wherever they ran |
 | `Alloc(ptr, size, pool)`, `Free(ptr, pool)`, `PoolName`, `PoolReset` | a pool of the program's own (sent in one global order, so an address reused by another thread is never confused) |
 | `IsActive()`, `Start(target, problem)`, `Stop()` | for tools and tests; a program run by IED starts from its environment on its first call |
 
-Collections are reported from the runtime's collection callback (a `GcBegin`/`GcEnd` pair from the last pause), and
-the GC heap's size is plotted ten times a second. Events are stamped with the processor's time stamp counter (its
+Collections are reported from the runtime's collection callback, a `GcBegin`/`GcEnd` pair for each time the collection
+stopped the program (`GC::LastPauses`: one for `GC::Collect`, several for a concurrent cycle), and the GC heap's size
+is plotted ten times a second. Events are stamped with the processor's time stamp counter (its
 frequency measured against `Platform::Ticks` at start; calibration pairs every second let the profiler correct it),
 written by each thread into a buffer of its own under an uncontended lock, and sent by a flusher thread every 10 ms -
 each thread's events taken first, then the global buffer's, sent first, so a definition always precedes its first use. A
 failed send ends the session. One session runs per process, kept in globals (the module's documented exception to the
 no-globals convention). `-D PROFILE=0` compiles the `PROFILE_*` macros to nothing; direct calls stay and cost one load.
 
-Covered by `Bedrock/Tests/profile_tests.cf` (3 tests): a session to a file read back event by event - the preamble and
+Covered by `Bedrock/Tests/profile_tests.cf` (4 tests): a session to a file read back event by event - the preamble and
 `Hello`, definitions before their use, zones on two threads with times that only grow across chunks, frames, plots,
-messages, renames, tasks, a pool, a collection and `Bye` - and nothing recorded without a session, an unreachable or
-malformed target refused.
+messages, renames, tasks, a pool, a collection and `Bye`; a thread named by the system starting with that name, a
+`GcBegin`/`GcEnd` pair for each stop of a collection, inside the session; and nothing recorded without a session, an
+unreachable or malformed target refused.
 
 ---
 
 ## 18. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 65 files, 582 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 67 files, 592 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gc, buffer). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

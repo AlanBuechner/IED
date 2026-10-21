@@ -114,6 +114,7 @@ namespace Profiler
 		public int64 peak;
 		public int64 allocs;
 		public int64 frees;
+		public int64 earlierFrees;                  // frees of blocks allocated before the capture began
 	}
 
 	struct GcRecord

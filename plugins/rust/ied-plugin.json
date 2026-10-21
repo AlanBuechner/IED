@@ -4,7 +4,8 @@
 // with a Debug / Release profile, a rustc problem matcher over cargo's short messages - and a Launch configuration that
 // debugs the binary cargo builds through the ied.cpp plugin's lldb adapter (CodeLLDB, docs/25). In a Nuke workspace a
 // project with language = "rust" builds through the cargo driver in nuke/ (docs/26 section 6) and the rust.nuke preset,
-// which matches cargo's own diagnostics (`rustc-human`: "error[E0308]: ..." then " --> path:line:col").
+// which matches cargo's own diagnostics (`rustc-human`: "error[E0308]: ..." then " --> path:line:col"). For the
+// profiler (docs/16): the ied-profiler crate in profiler/ and the cargo preset's Profile task.
 {
 	"manifestVersion": 1,
 	"id": "ied.rust",
@@ -126,6 +127,10 @@
 					] },
 					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [
 						{ "run": ["${config:rust.cargo.path}", "test", "--message-format=short"], "problemMatcher": "rustc", "output": "test" }
+					] },
+					"profile": { "label": "Profile", "icon": "$(pulse)", "slot": "profile", "concurrency": "restart", "tooltip": "Run with the profiler connected (IED_PROFILER); the program records through the ied-profiler crate", "steps": [
+						{ "run": ["${config:rust.cargo.path}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } },
+						{ "run": ["${config:rust.cargo.path}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } }
 					] },
 					"clean": { "label": "Clean", "slot": "clean", "steps": [ { "run": ["${config:rust.cargo.path}", "clean"] } ] }
 				},

@@ -1,6 +1,7 @@
 // Profile: a session recorded to a trace file (IED_PROFILER=file:...) and read back event by event - the preamble and
 // Hello, definitions before their first use, zones on two threads with times that only grow, frames, plots, messages,
-// thread renames, tasks, memory, a collection, and Bye; nothing recorded outside a session.
+// thread renames and the names the system knows, tasks, memory, each stop of a collection, and Bye; nothing recorded
+// outside a session.
 
 include "bedrock.ch"
 include "profile.ch"
@@ -137,6 +138,22 @@ static const TracedEvent* First(const Core::Array<TracedEvent>& events, int32 ty
 	return null;
 }
 
+// The name a thread had last in the trace ("" for none).
+static Core::String NameOn(const Core::Array<TracedEvent>& events, const Core::HashMap<uint64, Core::String>& strings, uint64 thread) {
+	Core::String name;
+	for (const TracedEvent& e : events)
+		if (e.type == 0x13 && e.thread == thread) name = *strings.Find(e.fields[0]);
+	return name;
+}
+
+// The text of the last event of `type`'s first field.
+static Core::String LastName(const Core::Array<TracedEvent>& events, const Core::HashMap<uint64, Core::String>& strings, int32 type) {
+	Core::String name;
+	for (const TracedEvent& e : events)
+		if (e.type == type) name = *strings.Find(e.fields[0]);
+	return name;
+}
+
 static Core::String TracePath(const char* name) {
 	FS::Path folder = FS::Path(Platform::GetEnvironmentVariable("TEMP").View());
 	return Core::String((folder / name).View());
@@ -149,6 +166,7 @@ static void Busy() {
 }
 
 static Profile::Site s_update = Profile::Site("Update", "game.cf", 12);
+static Core::String s_systemName;
 
 static void RecordWorker() {
 	Profile::SetThreadName(Core::StringView("Worker"));
@@ -204,7 +222,8 @@ class ProfileTests {
 		assert_eq(2, CountOf(events, 0x12), "a ThreadDef for each thread");
 		assert_eq(5, CountOf(events, 0x20), "every zone began");
 		assert_eq(5, CountOf(events, 0x22), "and ended");
-		assert_eq(2, CountOf(events, 0x13), "both threads named");
+		assert_true(LastName(events, strings, 0x13) == "Worker", "the worker named last on its thread");
+		assert_true(NameOn(events, strings, First(events, 0x20)->thread) == "Main", "the main thread named");
 		assert_eq(1, CountOf(events, 0x40), "the frame");
 		uint64 entities = 0;
 		for (const TracedEvent& e : events)
@@ -222,6 +241,49 @@ class ProfileTests {
 		const TracedEvent* text = First(events, 0x23);
 		assert_true(text && *strings.Find(text->fields[0]) == "bodies=12", "the zone's text");
 		assert_true(First(events, 0x24)->fields[0] == 42, "and its value");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("threads_named_by_the_system_and_each_collection_stop")]
+	public static void TestSystemNamesAndStops() {
+		Core::String path = TracePath("bedrock-profile-system.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		Threading::Thread loader = Threading::Thread::Run([]() {
+			Threading::Thread::SetCurrentName("Loader");
+			Profile::Zone zone(Core::StringView("Load"));
+			Busy();
+		});
+		loader.Join();
+		Threading::Thread renamed = Threading::Thread::Run([]() {
+			Profile::SetThreadName(Core::StringView("Renamed"));
+			s_systemName = Threading::Thread::CurrentName();
+		});
+		renamed.Join();
+		GC::Collect();
+		GC::Pause[16] stops;
+		const int32 stopCount = GC::LastPauses(&stops[0], 16);
+		Profile::Stop();
+		assert_true(s_systemName == "Renamed", "the profiler's thread name is the system's too");
+
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		const TracedEvent* load = First(events, 0x20);
+		assert_true(load && NameOn(events, strings, load->thread) == "Loader", "a thread the system named starts with that name");
+		assert_true(stopCount >= 1, "the collection stopped the program");
+		assert_eq((int64)stopCount, CountOf(events, 0x68), "a GcBegin for each stop");
+		assert_eq((int64)stopCount, CountOf(events, 0x69), "and a GcEnd");
+		const int64 startTicks = (int64)events[0].fields[3];
+		const int64 frequency = (int64)events[0].fields[2];
+		bool ordered = true;
+		int64 begin = 0;
+		for (const TracedEvent& e : events) {
+			if (e.type == 0x68) begin = e.ticks;
+			if (e.type == 0x69 && (begin < startTicks || e.ticks < begin || e.ticks - begin > frequency)) ordered = false;
+		}
+		assert_true(ordered, "each stop begins after the session started, ends after it begins, and lasts under a second");
 		FS::RemoveFile(path.CStr());
 	}
 

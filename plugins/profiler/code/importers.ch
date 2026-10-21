@@ -16,4 +16,8 @@ namespace Profiler
 	// Converts the file `source` (by its contents: an .iedtrace is copied as it is) into a new .iedtrace in `folder`;
 	// the file written, or empty with `problem`.
 	Core::String ImportFile(Core::StringView source, Core::StringView folder, Core::String& problem);
+
+	// The same for a file a contributed importer (`converter`) wrote from `origin`: the capture is named and described
+	// after `origin`.
+	Core::String ImportConverted(Core::StringView source, Core::StringView origin, Core::StringView converter, Core::StringView folder, Core::String& problem);
 }

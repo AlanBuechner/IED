@@ -300,7 +300,7 @@ class ProfilerIngestTests {
 		Profiler::Pool* pool = capture->pools[0];
 		assert_true(pool->inUse == 50 && pool->peak == 150 && pool->live.Count() == 1, "in use, peak and what is live");
 		assert_true(capture->allocations[0].freed == 9 && capture->allocations[1].freed == Profiler::kOpen, "the first was freed, the second leaks");
-		assert_true(capture->warningCount == 1, "a free of an unknown address is a warning");
+		assert_true(pool->earlierFrees == 1 && capture->warningCount == 0, "a free of an unknown address is counted, not warned of");
 	}
 
 	[test("gc")]

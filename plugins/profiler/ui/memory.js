@@ -38,7 +38,7 @@ export class MemoryPanel {
 		const gc = answer.gc;
 		replace(this.pools,
 			answer.pools.map((p) => h("div.row", null, h("span.grow", null, p.name), h("span.meta", null, "peak " + bytes(p.peak)), h("span.meta", null, "now " + bytes(p.inUse)),
-				h("span.meta", null, count(p.allocs) + " allocs, " + count(p.frees) + " frees"))),
+				h("span.meta", { title: p.earlierFrees ? count(p.earlierFrees) + " frees of blocks allocated before the capture began" : null }, count(p.allocs) + " allocs, " + count(p.frees) + " frees" + (p.earlierFrees ? " (+" + count(p.earlierFrees) + " earlier)" : "")))),
 			gc.count ? h("div.row", null, h("span.grow.c-warn", null, "Collections"), h("span.meta", null, count(gc.count) + "x"), h("span.meta", null, "paused " + duration(gc.pauseNs)),
 				h("span.meta", null, "longest " + duration(gc.longestNs)), h("span.meta", null, "freed " + bytes(gc.freedBytes))) : null,
 			!answer.pools.length && !gc.count ? h("div.muted.prof-empty", null, "This capture reports no allocations or collections.") : null);
