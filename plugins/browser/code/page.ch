@@ -74,6 +74,7 @@ namespace Browser
 		public int32 frameHeight;
 		public bool screencasting;
 		public int64 lastPullNs;
+		public int64 lastUsedNs;      // the last call to its session (an AI tool, a person's input) or load
 		public int64 loads;           // load events seen
 
 		public Core::String Topic() const { return Core::String("page:") + pageId.View(); }

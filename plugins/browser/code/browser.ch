@@ -18,6 +18,7 @@ namespace Browser
 	const int64 kWorkerTickNs = 1000000000;
 	const int64 kLoadWaitNs = 30000000000;
 	const int64 kScreencastRetryNs = 250000000;
+	const int64 kDefaultUnloadSeconds = 600;
 
 	// Added to every document of a page: tells the server the top document's title as it changes (headless browsers
 	// do not report a script's document.title), through the page's __iedPageTitle binding.
@@ -86,6 +87,10 @@ namespace Browser
 		private void Later(func<void()> job);
 		private void WorkLoop();
 		private void StopIdleScreencasts();
+		// Pages nobody looked at or used for browser.unloadAfterSeconds leave the browser (still listed; they load again
+		// when next looked at or used); the browser stops once no page was loaded for that long.
+		private void UnloadIdlePages();
+		private int64 UnloadAfterNs();
 		// The page's title (headless browsers do not always tell when it changes) and history flags, asked of the page.
 		private void RefreshState(Page* page);
 		private void PageEvent(Page* page, const CdpEvent& event);
@@ -101,6 +106,7 @@ namespace Browser
 		private Threading::Mutex jobs;
 		private Threading::ConditionVariable jobAdded;
 		private Core::Array<func<void()>> queue;
+		private int64 idleSinceNs;    // the worker's: since when no page has been loaded
 	}
 
 	Core::String BrowserTopic(Core::StringView wsId);

@@ -213,6 +213,17 @@ class BrowserTests(ServerTestCase):
 		self.assertGreater(frame["seq"], 0, "looking at it loads it again")
 		await self.titled(page, "Fixture")
 
+	async def test_an_idle_page_leaves_the_browser_and_comes_back(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "browser.unloadAfterSeconds", "value": 2})
+		page = await self.open()
+		await self.titled(page, "Fixture")
+		await self.client.wait_for("page:" + page, lambda f: f.get("kind") == "changed" and not f["data"]["live"], timeout=20)
+		listed = (await self.client.request("browser.pages", {"wsId": self.ws}))["pages"]
+		self.assertEqual([(page, False)], [(p["pageId"], p["live"]) for p in listed], "still listed, not loaded")
+		frame = await self.client.request("browser.frame", {"pageId": page, "after": 0}, timeout=LOAD_SECONDS)
+		self.assertGreater(frame["seq"], 0, "looking at it loads it again")
+		self.assertTrue((await self.client.request("browser.pages", {"wsId": self.ws}))["pages"][0]["live"])
+
 	async def test_closing_removes_the_page(self):
 		page = await self.open()
 		await self.client.sub(["browser:" + self.ws])

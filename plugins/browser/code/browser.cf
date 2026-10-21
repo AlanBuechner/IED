@@ -181,6 +181,7 @@ namespace Browser
 			Threading::LockGuard routes(frames);
 			bySession.At(sessionId) = page;
 			byTarget.At(targetId) = page;
+			page->lastUsedNs = clock_now_ns();
 		}
 		Browsers* self = this;
 		context->Atomically([self, page, targetId, sessionId](IED::Events& events) {
@@ -204,6 +205,10 @@ namespace Browser
 	}
 
 	CdpReply Browsers::Call(Page* page, Core::StringView method, Core::StringView paramsJson) {
+		{
+			Threading::LockGuard guard(frames);
+			page->lastUsedNs = clock_now_ns();
+		}
 		Core::String sessionId;
 		{
 			IED::HostLock lock(*context);
@@ -469,7 +474,54 @@ namespace Browser
 				}
 			}
 			StopIdleScreencasts();
+			UnloadIdlePages();
 		}
+	}
+
+	int64 Browsers::UnloadAfterNs() {
+		Core::String json = context->Setting(Core::StringView("browser.unloadAfterSeconds"), Core::StringView(""));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(json.View(), *doc);
+		const int64 seconds = parsed.Ok() && parsed.root.Kind() == Serialization::DomKind::Int ? parsed.root.AsInt() : kDefaultUnloadSeconds;
+		return seconds * 1000000000;
+	}
+
+	void Browsers::UnloadIdlePages() {
+		const int64 after = UnloadAfterNs();
+		if (after <= 0) return;
+		const int64 now = clock_now_ns();
+		Core::Array<Page*> idle;
+		bool anyLoaded = false;
+		{
+			Threading::LockGuard guard(frames);
+			for (Core::KeyValue<Core::String, Page*>& entry : bySession) {
+				Page* page = entry.value;
+				const int64 last = page->lastPullNs > page->lastUsedNs ? page->lastPullNs : page->lastUsedNs;
+				if (now - last > after) idle.Push(page);
+				else anyLoaded = true;
+			}
+		}
+		for (Page* page : idle) {
+			Core::String targetId;
+			{
+				IED::HostLock lock(*context);
+				targetId = page->targetId;
+			}
+			if (engine.Running() && !targetId.IsEmpty())
+				engine.cdp->Call(Core::StringView(""), Core::StringView("Target.closeTarget"), (Core::String("{\"targetId\":") + JsonText(targetId.View()).View() + "}").View());
+			Unloaded(page);
+		}
+		if (anyLoaded || !engine.Running()) {
+			idleSinceNs = now;
+			return;
+		}
+		if (idleSinceNs == 0) idleSinceNs = now;
+		if (now - idleSinceNs <= after) return;
+		idleSinceNs = 0;
+		Threading::LockGuard guard(starting);
+		engine.Stop();
+		contexts.Clear();
+		context->Log(Core::StringView("the browser stopped: no page was loaded for browser.unloadAfterSeconds"));
 	}
 
 	void Browsers::StopIdleScreencasts() {
