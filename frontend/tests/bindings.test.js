@@ -11,6 +11,27 @@ function registry(loaded) {
 	return new Bindings((id) => loaded[id] || null);
 }
 
+test("bindings: an event reaches the plugins listening while they are loaded", () => {
+	const loaded = {
+		editor: { provides: [{ name: "editor.scrolled", version: "1", kind: "event", side: "client" }] },
+		markdown: { consumes: [{ name: "editor.scrolled", version: "1", optional: true }] },
+		other: {},
+	};
+	const bindings = registry(loaded);
+	const heard = [];
+	const stop = bindings.on("markdown", "editor.scrolled", (data) => heard.push(data.line));
+	assertThrows(() => bindings.on("other", "editor.scrolled", () => {}), Error, "a listener declares what it consumes");
+	assertThrows(() => bindings.emit("other", "editor.scrolled", {}), Error, "only its provider emits it");
+	bindings.emit("editor", "editor.scrolled", { path: "a.md", line: 3 });
+	delete loaded.markdown;
+	bindings.emit("editor", "editor.scrolled", { path: "a.md", line: 4 });
+	loaded.markdown = { consumes: [{ name: "editor.scrolled", version: "1" }] };
+	bindings.emit("editor", "editor.scrolled", { path: "a.md", line: 5 });
+	stop();
+	bindings.emit("editor", "editor.scrolled", { path: "a.md", line: 6 });
+	assertEqual(heard, [3, 5], "not while its plugin is gone, nor once stopped");
+});
+
 test("bindings: declared providers and consumers", async () => {
 	const loaded = {
 		editor: { provides: [{ name: "editor.colorize", version: "1", kind: "function", side: "client" }] },

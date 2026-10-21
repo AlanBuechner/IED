@@ -23,6 +23,14 @@
 					"description": "Lines colored as the editor colors a language (or a file's language): HTML per line (docs/02 \"Client bindings as built\").",
 					"params": { "type": "object", "required": ["lines"], "properties": { "path": { "type": "string" }, "languageId": { "type": "string" }, "lines": { "type": "array", "items": { "type": "string" } } } },
 					"result": { "type": "array", "items": { "type": "string" } }
+				},
+				{
+					"name": "editor.scrolled",
+					"version": "1",
+					"kind": "event",
+					"side": "client",
+					"description": "An editor scrolled: the file and the top line it shows (0-based, with the fraction of it scrolled past), for views that follow it (the Markdown preview).",
+					"params": { "type": "object", "required": ["path", "line"], "properties": { "path": { "type": "string" }, "line": { "type": "number" } } }
 				}
 			]
 		},
@@ -139,6 +147,7 @@
 			{ "id": "ied.task.showResult", "title": "Show Build Output", "category": "Build" },
 			{ "id": "ied.output.show", "title": "Show Output", "category": "View", "icon": "$(output)" },
 			{ "id": "ied.editor.toggleHeader", "title": "Toggle Header / Code File", "category": "Edit" },
+			{ "id": "ied.editor.openCounterpartBeside", "title": "Open Header / Code File to the Side", "category": "Edit", "icon": "$(link)" },
 			{ "id": "ied.editor.action", "title": "Editor Action", "category": "Edit" },
 			{ "id": "ied.navigate.back", "title": "Navigate Backward", "category": "View", "icon": "$(arrow-left)" },
 			{ "id": "ied.navigate.forward", "title": "Navigate Forward", "category": "View", "icon": "$(arrow-right)" }
@@ -283,6 +292,7 @@
 			{ "command": "ied.editor.goToAll", "key": "ctrl+t" },
 			{ "command": "ied.editor.goToAll", "key": "ctrl+," },
 			{ "command": "ied.editor.toggleHeader", "key": "ctrl+k ctrl+o", "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.editor.openCounterpartBeside", "key": "ctrl+k ctrl+shift+o", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.navigate.back", "key": "ctrl+-" },
 			{ "command": "ied.navigate.forward", "key": "ctrl+shift+-" },
 			{ "command": "shell.showView", "key": "ctrl+alt+l", "args": { "id": "ied.explorer" } },

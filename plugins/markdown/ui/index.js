@@ -1,5 +1,6 @@
 // index.js - the Markdown plugin's UI module (docs/26 "Language plugins"): the "mdpreview:<path>" tab kind and the Open
-// Preview command, for the file a menu names or the active tab's.
+// Preview commands, for the file a menu names or the active tab's; to the side, the preview is tethered to the file
+// (docs/15 "Tethered tabs"): it shows when the file does and closes with it.
 
 import { fileName } from "/ui-kit/fileuris.js";
 import { MarkdownPreview as Preview, fenceLanguages } from "./preview.js";
@@ -10,6 +11,10 @@ export function activate(ied) {
 	ied.commands.handle("ied.markdown.preview", (args) => {
 		const path = args && args.path ? args.path : ied.context.get("resourcePath");
 		if (path) ied.tabs.open("mdpreview:" + path, { preview: false });
+	});
+	ied.commands.handle("ied.markdown.previewBeside", (args) => {
+		const path = args && args.path ? args.path : ied.context.get("resourcePath");
+		if (path) ied.tabs.openBeside("doc:" + path, "mdpreview:" + path, { tether: true, closes: true });
 	});
 }
 

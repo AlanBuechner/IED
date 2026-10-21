@@ -84,6 +84,8 @@ A plugin's `runtime.ui` names an ES module in its folder; `plugins.contributions
 | `tabs.kind(kind, {view, title(arg), icon(arg), resource(arg)})` | a tab kind: refs `<kind>:<arg>` render with the module's export `view`; `resource` names the workspace file a tab shows (the context keys `resourcePath`, `resourceExtname`) |
 | `tabs.onClose(kind, fn)` | `fn(ref)` when the person closes a tab of `kind` in this window (Close, Close All, Close Others); another window's view of it is only released (the Browser tab closes its server page this way) |
 | `tabs.open(ref, {preview})` | opens or focuses a tab in the current activity's well; `preview` is the VS preview tab (replaced by the next preview, kept once edited or double-clicked) |
+| `tabs.openBeside(anchor, ref, {tether, closes})` | opens `ref` in a document group beside `anchor`'s (a new one to the right when there is none); `tether` tethers them, `closes` closes `ref` with `anchor` (docs/15 "Tethered tabs") |
+| `tabs.tether(lead, follower, {closes})`, `tabs.untether(ref)` | tethers two open tabs, or drops every tether of `ref` |
 | `context.set(key, value)`, `context.get(key)` | context keys for when-clauses |
 | `contributions(point)` | every loaded plugin's entries of a contribution point, in load order: `[{plugin: {id, base}, value}]` (the editor reads `languages` this way) |
 | `menus.show(menuId, at, args)` | shows a contributed menu (e.g. `explorer/context`) at a mouse event or element; its commands get `args` |
@@ -129,6 +131,7 @@ A binding with `side: "client"` lives in the browser: the providing plugin's UI 
 - `provide(name, fn)`: `fn(args)` answers a call (a value or a promise). Only a name the plugin's manifest lists under `bindings.provides` with `side: "client"`; anything else throws.
 - `call(name, args)`: a promise of the provider's answer. Only a name the caller's manifest lists under `bindings.consumes`; it rejects with `not provided` when no enabled plugin provides it (the caller degrades: an optional binding's feature goes without). When no UI module provides the name but a loaded plugin declares it as a server binding, the call goes to the server (`plugins.call`).
 - `has(name)`: whether a provider is there now (a UI module's, or a server binding a loaded plugin declares).
+- `emit(name, data)` and `on(name, fn) -> stop`: an event binding (`kind: "event"`): the plugin that declares it emits, each consumer listening gets `data` (not while its plugin is unloaded). The first one: `editor.scrolled {path, line}` (the top line shown, 0-based with the fraction scrolled past), which the Markdown preview follows.
 
 The first one: `editor.colorize {languageId | path, lines}` -> `[html]`, from the editor plugin (Monaco's tokenizers and the theme's colors), consumed optionally by the git plugin's diffs and the Markdown preview's fenced code.
 

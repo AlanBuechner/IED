@@ -246,6 +246,7 @@ export class DesktopChrome {
 			menus: { show: (menuId, at, args) => shell.showMenu(menuId, at, args), host: shell.menuHost },
 			emptyWell: () => this.emptyWell(activityId),
 			activate: (ref) => shell.activateTab(ref),
+			tetheredWith: (ref) => shell.tetheredWith(ref),
 			close: (ref) => shell.closeTab(ref),
 			pin: (ref) => shell.pinTab(ref),
 			move: (ref, path, zone, index) => shell.moveTab(ref, path, zone, index),

@@ -31,6 +31,29 @@ export function withActivity(doc, activityId) {
 	return doc.activity === activityId ? doc : Object.assign({}, doc, { activity: activityId });
 }
 
+// Tethered tabs (docs/15 "Tethered tabs"): pairs that show together - activating one shows the other in its own group -
+// and, when `closes`, the follower closes with its lead (a Markdown preview with its file).
+export function withTether(doc, lead, follower, closes) {
+	const others = (doc.tethers || []).filter((t) => !((t.lead === lead && t.follower === follower) || (t.lead === follower && t.follower === lead)));
+	return Object.assign({}, doc, { tethers: [...others, { lead, follower, closes: Boolean(closes) }] });
+}
+
+// Without the tethers of `refs` (tabs that closed, or a tab untethered).
+export function withoutTethers(doc, refs) {
+	const gone = new Set(refs);
+	const tethers = (doc.tethers || []).filter((t) => !gone.has(t.lead) && !gone.has(t.follower));
+	return tethers.length === (doc.tethers || []).length ? doc : Object.assign({}, doc, { tethers });
+}
+
+export function partnersOf(doc, ref) {
+	return (doc.tethers || []).filter((t) => t.lead === ref || t.follower === ref).map((t) => (t.lead === ref ? t.follower : t.lead));
+}
+
+// The tabs that close when `ref` does.
+export function followersOf(doc, ref) {
+	return (doc.tethers || []).filter((t) => t.lead === ref && t.closes).map((t) => t.follower);
+}
+
 const BACK_LIMIT = 20;
 
 // The phone shows `pane` (an activity id or a tab ref); the pane it leaves goes on the back stack.

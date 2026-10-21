@@ -12,6 +12,17 @@ function tabOf(shell, args) {
 	return (args && args.ref) || (shell.focus && shell.focus.ref) || null;
 }
 
+// Tethers `ref` with the tab shown in the nearest other group of its activity.
+function tetherBeside(shell, ref) {
+	const activityId = ref ? shell.activityOf(ref) : null;
+	if (!activityId) return;
+	const tree = shell.treeOf(activityId);
+	const home = T.groupOf(tree, ref);
+	const other = T.groupsOf(tree).find((g) => g !== home && g.active && g.well);
+	if (other) shell.tether(ref, other.active, {});
+	else shell.toasts.show("There is no tab beside this one to tether it with: open one in another group first.", "info");
+}
+
 function stepTab(shell, step) {
 	const ref = tabOf(shell, null);
 	const activityId = ref ? shell.activityOf(ref) : null;
@@ -41,6 +52,8 @@ const COMMANDS = [
 	{ id: "shell.moveTabRight", title: "Move to New Group Right", category: "Window", run: (shell, args) => tabOf(shell, args) && shell.splitTab(tabOf(shell, args), "right") },
 	{ id: "shell.moveTabDown", title: "Move to New Group Below", category: "Window", run: (shell, args) => tabOf(shell, args) && shell.splitTab(tabOf(shell, args), "bottom") },
 	{ id: "shell.copyTabRef", title: "Copy Reference", category: "Window", run: (shell, args) => tabOf(shell, args) && copyText(shell, tabOf(shell, args)) },
+	{ id: "shell.tetherBeside", title: "Tether with the Tab Beside", category: "Window", icon: "$(link)", run: (shell, args) => tetherBeside(shell, tabOf(shell, args)) },
+	{ id: "shell.untetherTab", title: "Untether", category: "Window", enablement: "tabTethered", run: (shell, args) => tabOf(shell, args) && shell.untether(tabOf(shell, args)) },
 	{ id: "shell.nextTab", title: "Next Tab", category: "Window", run: (shell) => stepTab(shell, 1) },
 	{ id: "shell.previousTab", title: "Previous Tab", category: "Window", run: (shell) => stepTab(shell, -1) },
 	{ id: "shell.resetLayout", title: "Reset Window Layout", category: "Window", run: (shell) => shell.resetLayout() },
@@ -97,6 +110,8 @@ const MENUS = {
 		{ command: "shell.closeAllTabs", group: "1_close", order: 2 },
 		{ command: "shell.moveTabRight", group: "2_groups" },
 		{ command: "shell.moveTabDown", group: "2_groups", order: 1 },
+		{ command: "shell.tetherBeside", group: "2_groups", order: 2, when: "!tabTethered" },
+		{ command: "shell.untetherTab", group: "2_groups", order: 3, when: "tabTethered" },
 		{ command: "shell.copyTabRef", group: "3_copy" },
 	],
 };

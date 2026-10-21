@@ -194,6 +194,7 @@ a { color: var(--link); text-decoration: none; }
 .tab:hover { color: var(--text-1); }
 .tab .ci { width: 14px; height: 14px; }
 .tab .name { overflow: hidden; text-overflow: ellipsis; }
+.tab .tether { display: inline-flex; color: var(--text-2); flex: none; }
 .tab .x { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-1); color: var(--text-3); visibility: hidden; }
 .tab .x .ci { width: 12px; height: 12px; }
 .tab:hover .x, .tab.on .x { visibility: visible; }

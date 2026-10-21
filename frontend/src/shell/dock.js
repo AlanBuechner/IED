@@ -20,12 +20,19 @@ export class DockView {
 		replace(container, this.root);
 	}
 
-	// Builds the tree again; views keep their elements, and the one with the focus keeps it.
+	// Builds the tree again; views keep their elements, the one with the focus keeps it, and what was scrolled keeps
+	// its place (an element moved to a new parent loses it).
 	render(tree) {
 		this.tree = tree;
 		const focused = document.activeElement;
+		const scrolled = [...this.root.querySelectorAll(".dock-body *")].filter((e) => e.scrollTop || e.scrollLeft).map((e) => [e, e.scrollTop, e.scrollLeft]);
 		const el = this.node(tree, []) || this.emptyWellGroup();
 		replace(this.root, el);
+		for (const [element, top, left] of scrolled) {
+			if (!element.isConnected) continue;
+			element.scrollTop = top;
+			element.scrollLeft = left;
+		}
 		if (focused && focused !== document.activeElement && this.root.contains(focused)) focused.focus({ preventScroll: true });
 	}
 
@@ -105,6 +112,14 @@ export class DockView {
 		return strip;
 	}
 
+	// A link on a tethered tab (docs/15 "Tethered tabs"), naming what it shows with.
+	tetherGlyph(ref) {
+		const partners = this.host.tetheredWith ? this.host.tetheredWith(ref) : [];
+		if (!partners.length) return null;
+		const names = partners.map((p) => (this.host.views.get(p) || { title: p }).title).join(", ");
+		return h("span.tether", { title: "Tethered with " + names, "aria-label": "Tethered with " + names }, icon("link"));
+	}
+
 	tab(ref, on, preview, path, cls) {
 		const entry = this.host.views.get(ref);
 		const document = cls === "tab";
@@ -127,6 +142,7 @@ export class DockView {
 		document ? iconFrom(entry.icon, entry.base) : null,
 		h("span.name", null, entry.title),
 		document && entry.dirty ? h("span.dirty", { title: "Unsaved changes" }) : null,
+		this.tetherGlyph(ref),
 		document ? h("button.x", { title: "Close", "aria-label": "Close " + entry.title, on: { click: (event) => { event.stopPropagation(); this.host.close(ref); } } }, icon("close")) : null);
 		return el;
 	}

@@ -3,6 +3,7 @@
 // `editor.colorize` binding, when an editor plugin provides it) and the workspace's images (`/w/<wsId>/files/`,
 // docs/10). Ticking a task box edits its line through the document store, taking the lease as typing would; a link to a
 // workspace file opens it in the editor, a web link a new browser window; a workspace image clicked shows at its size.
+// It scrolls with its file's editor (`editor.scrolled`), and a double-click shows that place in the editor.
 
 import { h, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
@@ -51,6 +52,10 @@ export class MarkdownPreview {
 		this.body = h("div.md-preview", { tabindex: "0" });
 		ctx.el.append(this.body);
 		this.body.addEventListener("click", (event) => this.clicked(event));
+		this.body.addEventListener("dblclick", (event) => this.showSource(event));
+		this.unfollow = this.ied.bindings.on("editor.scrolled", (data) => {
+			if (data.path === this.path) this.follow(data.line);
+		});
 		this.sync = new DocumentSync(this.ied.client, {
 			setText: (text) => this.changed(text),
 			applyRemote: (changes) => this.changed(applyChanges(this.text, changes)),
@@ -60,6 +65,7 @@ export class MarkdownPreview {
 	}
 
 	dispose() {
+		this.unfollow();
 		clearTimeout(this.timer);
 		this.sync.dispose();
 	}
@@ -84,6 +90,35 @@ export class MarkdownPreview {
 		for (const image of this.body.querySelectorAll("img[src]")) this.locate(image);
 		for (const box of this.body.querySelectorAll("input[data-task]")) box.disabled = this.sync.readOnly;
 		this.body.scrollTop = top;
+	}
+
+	// Scrolls to where the editor shows `line` (0-based, fractional): between the blocks that start before and after it.
+	// Not while hidden (a tab behind another).
+	follow(line) {
+		if (!this.body.offsetParent) return;
+		let before = null;
+		let after = null;
+		for (const block of this.body.querySelectorAll("[data-line]")) {
+			const at = Number(block.dataset.line);
+			if (at <= line) before = { block, at };
+			else {
+				after = { block, at };
+				break;
+			}
+		}
+		const offset = (element) => element.getBoundingClientRect().top - this.body.getBoundingClientRect().top + this.body.scrollTop;
+		const from = before ? offset(before.block) : 0;
+		const to = after ? offset(after.block) : before ? from + before.block.offsetHeight : 0;
+		const fromLine = before ? before.at : 0;
+		const toLine = after ? after.at : fromLine + 1;
+		const part = Math.min(1, Math.max(0, (line - fromLine) / Math.max(1, toLine - fromLine)));
+		this.body.scrollTop = from + (to - from) * part;
+	}
+
+	// The source of the block double-clicked, in the editor.
+	showSource(event) {
+		const block = event.target.closest("[data-line]");
+		if (block && !isFileUri(this.path)) this.ied.commands.run("ied.editor.goTo", { path: this.path, line: Number(block.dataset.line) });
 	}
 
 	// A fenced block colored as the editor colors its language; plain text until it answers, and without an editor.

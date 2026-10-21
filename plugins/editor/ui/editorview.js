@@ -35,6 +35,9 @@ export class CodeEditor {
 		this.editor = monaco.editor.create(this.host, editorOptions(monaco));
 		this.margin = new ChangeMargin(this.editor, this.ied.client, (message, e) => this.ied.report(message, e));
 		this.editor.onDidFocusEditorText(() => this.focused());
+		this.editor.onDidScrollChange((event) => {
+			if (event.scrollTopChanged) this.scrolled();
+		});
 		this.editor.onDidChangeCursorPosition((event) => {
 			this.changed();
 			if (event.source !== "modelChange" && this.editor.hasTextFocus()) this.editors.visited(this);
@@ -45,6 +48,7 @@ export class CodeEditor {
 	}
 
 	dispose() {
+		cancelAnimationFrame(this.scrollFrame);
 		this.editors.delete(this);
 		if (this.detach) this.detach();
 		for (const dispose of this.attachments) if (typeof dispose === "function") dispose();
@@ -56,6 +60,21 @@ export class CodeEditor {
 
 	focus() {
 		this.editor.focus();
+	}
+
+	// The top line shown, once a frame, for the views that follow this editor (editor.scrolled: a Markdown preview).
+	scrolled() {
+		if (this.scrollFrame) return;
+		this.scrollFrame = requestAnimationFrame(() => {
+			this.scrollFrame = 0;
+			const ranges = this.editor.getVisibleRanges();
+			if (!ranges.length) return;
+			const first = ranges[0].startLineNumber;
+			const top = this.editor.getTopForLineNumber(first);
+			const next = this.editor.getTopForLineNumber(first + 1);
+			const part = next > top ? Math.min(1, Math.max(0, (this.editor.getScrollTop() - top) / (next - top))) : 0;
+			this.ied.bindings.emit("editor.scrolled", { path: this.path, line: first - 1 + part });
+		});
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------

@@ -19,21 +19,24 @@
 			{ "languageId": "markdown", "extensions": [".md", ".markdown"], "label": "MD", "color": "--hue-gray" }
 		],
 		"bindings": {
-			"consumes": [ { "name": "editor.colorize", "version": "1", "optional": true } ]
+			"consumes": [ { "name": "editor.colorize", "version": "1", "optional": true }, { "name": "editor.scrolled", "version": "1", "optional": true } ]
 		},
 		"companionTabs": [
 			{ "kind": "mdpreview", "languages": ["markdown"] }
 		],
 		"commands": [
-			{ "id": "ied.markdown.preview", "title": "Open Preview", "category": "Markdown", "icon": "$(open-preview)" }
+			{ "id": "ied.markdown.preview", "title": "Open Preview", "category": "Markdown", "icon": "$(open-preview)" },
+			{ "id": "ied.markdown.previewBeside", "title": "Open Preview to the Side", "category": "Markdown", "icon": "$(open-preview)" }
 		],
 		"menus": {
 			"explorer/context": [
-				{ "command": "ied.markdown.preview", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" }
+				{ "command": "ied.markdown.preview", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" },
+				{ "command": "ied.markdown.previewBeside", "group": "1_open", "order": 2, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" }
 			]
 		},
 		"keybindings": [
-			{ "command": "ied.markdown.preview", "key": "ctrl+shift+v", "when": "activeTabKind == 'doc' && editorLanguage == 'markdown'" }
+			{ "command": "ied.markdown.preview", "key": "ctrl+shift+v", "when": "activeTabKind == 'doc' && editorLanguage == 'markdown'" },
+			{ "command": "ied.markdown.previewBeside", "key": "ctrl+k v", "when": "activeTabKind == 'doc' && editorLanguage == 'markdown'" }
 		]
 	}
 }

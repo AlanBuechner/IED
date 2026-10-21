@@ -2,6 +2,7 @@
 
 import { test, assertEqual, assertTrue } from "./harness.js";
 import * as L from "../src/shell/layouttree.js";
+import * as D from "../src/shell/layoutdoc.js";
 
 const TOOLS = [
 	{ id: "explorer", dock: "left" },
@@ -148,4 +149,47 @@ test("layout: tool windows are added where their dock says", () => {
 	assertEqual(L.groupOf(tree, "output").active, "output", "activated where it is");
 	tree = L.ensureTool(tree, "start", "document", false);
 	assertEqual(L.wellsOf(tree)[0].tabs, ["doc:a", "start"]);
+});
+
+test("layout: a tab opens beside another, in a new group when there is no other", () => {
+	let tree = L.normalize(L.group(["doc:a.md", "doc:b"], { well: true, active: "doc:a.md" }));
+	tree = L.openBeside(tree, "doc:a.md", "mdpreview:a.md");
+	assertEqual(shape(tree), "row(W[doc:a.md,doc:b|doc:a.md] W[mdpreview:a.md|mdpreview:a.md])", "the anchor stays shown");
+	const again = L.openBeside(tree, "doc:b", "doc:c");
+	assertEqual(shape(again), "row(W[doc:a.md,doc:b|doc:a.md] W[mdpreview:a.md,doc:c|doc:c])", "into the other group");
+	const moved = L.openBeside(L.normalize(L.group(["doc:a", "doc:b"], { well: true, active: "doc:a" })), "doc:a", "doc:b");
+	assertEqual(shape(moved), "row(W[doc:a|doc:a] W[doc:b|doc:b])", "one in the anchor's group moves beside it");
+	assertEqual(L.openBeside(tree, "doc:a.md", "mdpreview:a.md"), tree, "already beside");
+});
+
+test("layout: activating a tab shows its tethered partners in their groups", () => {
+	let tree = L.normalize(L.group(["doc:a.h", "doc:x"], { well: true, active: "doc:a.h" }));
+	tree = L.openBeside(tree, "doc:a.h", "doc:a.cf");
+	tree = L.openTab(tree, "doc:y", { groupPath: L.pathOf(tree, L.groupOf(tree, "doc:a.cf")) });
+	tree = L.activateTab(tree, "doc:x");
+	const shown = L.revealPartners(L.activateTab(tree, "doc:a.h"), "doc:a.h", ["doc:a.cf"]);
+	assertEqual(L.groupOf(shown, "doc:a.cf").active, "doc:a.cf");
+	assertEqual(L.groupOf(shown, "doc:a.h").active, "doc:a.h");
+	const same = L.normalize(L.group(["doc:a.h", "doc:a.cf"], { well: true, active: "doc:a.h" }));
+	assertEqual(L.revealPartners(same, "doc:a.h", ["doc:a.cf"]).tabs.length, 2, "a partner in the same group stays behind");
+	assertEqual(L.groupOf(L.revealPartners(same, "doc:a.h", ["doc:a.cf"]), "doc:a.h").active, "doc:a.h");
+	assertEqual(L.revealPartners(tree, "doc:a.h", []), tree);
+});
+
+test("layout doc: tethers pair tabs, and a follower closes with its lead", () => {
+	let doc = D.emptyDocument();
+	doc = D.withTether(doc, "doc:a.md", "mdpreview:a.md", true);
+	doc = D.withTether(doc, "doc:a.h", "doc:a.cf", false);
+	assertEqual(D.partnersOf(doc, "mdpreview:a.md"), ["doc:a.md"]);
+	assertEqual(D.followersOf(doc, "doc:a.md"), ["mdpreview:a.md"]);
+	assertEqual(D.followersOf(doc, "doc:a.h"), [], "not closing");
+	assertEqual(D.partnersOf(doc, "doc:a.cf"), ["doc:a.h"]);
+	doc = D.withTether(doc, "doc:a.cf", "doc:a.h", true);
+	assertEqual(doc.tethers.length, 2, "tethering a pair again replaces it");
+	assertEqual(D.followersOf(doc, "doc:a.cf"), ["doc:a.h"]);
+	const untethered = D.withoutTethers(doc, ["doc:a.h"]);
+	assertEqual(untethered.tethers.length, 1);
+	assertEqual(D.withoutTethers(untethered, ["doc:z"]), untethered, "nothing to drop");
+	assertTrue(!D.emptyDocument().tethers, "an old document has none");
+	assertEqual(D.partnersOf(D.emptyDocument(), "doc:a"), []);
 });

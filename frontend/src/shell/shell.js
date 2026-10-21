@@ -15,7 +15,7 @@ import { Menus } from "./menus.js";
 import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
-import { treeOf, withTree, withoutTree, withActivity, withPhonePane, phoneBack, emptyDocument } from "./layoutdoc.js";
+import { treeOf, withTree, withoutTree, withActivity, withPhonePane, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
@@ -409,8 +409,40 @@ export class Shell {
 		const activityId = this.dockActivity();
 		const groupPath = this.focus && this.focus.activity === activityId && this.focus.well ? this.focus.path : null;
 		this.layout.update((doc) => withActivity(doc, activityId));
-		this.changeTree(activityId, (tree) => T.openTab(tree, ref, { preview: opts.preview, groupPath }));
+		this.changeTree(activityId, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
 		if (!opts.preview || opts.focus) requestAnimationFrame(() => this.views.focus(ref));
+	}
+
+	// Opens `ref` beside `anchor` (ied.tabs.openBeside): in another document group, a new one to the right when there is
+	// none; with `tether`, the two are tethered (`closes`: `ref` closes with `anchor`).
+	openBeside(anchor, ref, options) {
+		const opts = options || {};
+		if (this.deviceClass === "phone" || !this.activityOf(anchor)) {
+			this.openTab(ref, { preview: false });
+			if (opts.tether) this.tether(anchor, ref, opts);
+			return;
+		}
+		if (!this.views.has(ref)) {
+			this.report("Nothing can show '" + ref + "': no loaded plugin renders tabs of its kind.");
+			return;
+		}
+		this.changeTree(this.activityOf(anchor), (tree) => T.openBeside(tree, anchor, ref));
+		if (opts.tether) this.tether(anchor, ref, opts);
+	}
+
+	// Tethers two tabs (docs/15 "Tethered tabs"): activating either shows the other in its own group; with `closes`,
+	// `follower` closes with `lead`.
+	tether(lead, follower, options) {
+		if (!this.layout || lead === follower) return;
+		this.layout.update((doc) => withTether(doc, lead, follower, options && options.closes));
+	}
+
+	untether(ref) {
+		if (this.layout) this.layout.update((doc) => withoutTethers(doc, [ref]));
+	}
+
+	tetheredWith(ref) {
+		return partnersOf(this.doc, ref);
 	}
 
 	// Shows a tool window (shell.showView): its activity, its tab added where its dock says when the tree lacks it.
@@ -438,7 +470,7 @@ export class Shell {
 
 	activateTab(ref) {
 		const activityId = this.activityOf(ref);
-		if (activityId) this.changeTree(activityId, (tree) => T.activateTab(tree, ref));
+		if (activityId) this.changeTree(activityId, (tree) => T.revealPartners(T.activateTab(tree, ref), ref, partnersOf(this.doc, ref)));
 		requestAnimationFrame(() => this.views.focus(ref));
 	}
 
@@ -461,9 +493,12 @@ export class Shell {
 	closeTabsBy(activityId, fn) {
 		const before = T.refsOf(this.treeOf(activityId));
 		const after = new Set(T.refsOf(fn(this.treeOf(activityId))));
-		this.changeTree(activityId, fn);
+		const closed = before.filter((ref) => !after.has(ref));
+		const followers = closed.flatMap((ref) => followersOf(this.doc, ref)).filter((ref) => after.has(ref));
+		this.changeTree(activityId, (tree) => followers.reduce((t, ref) => T.closeTab(t, ref), fn(tree)));
+		if (this.layout && closed.length) this.layout.update((doc) => withoutTethers(doc, closed.concat(followers)));
 		for (const ref of before) {
-			if (after.has(ref)) continue;
+			if (after.has(ref) && !followers.includes(ref)) continue;
 			for (const handler of this.tabCloseHandlers.get(ref.split(":")[0]) || []) {
 				try {
 					handler(ref);
@@ -501,7 +536,7 @@ export class Shell {
 	resetLayout() {
 		if (!this.layout) return;
 		const activityId = this.currentActivity();
-		this.layout.update((doc) => (this.deviceClass === "phone" ? Object.assign({}, doc, { phone: { pane: null, back: [] } }) : withoutTree(doc, activityId)));
+		this.layout.update((doc) => (this.deviceClass === "phone" ? Object.assign({}, doc, { phone: { pane: null, back: [] } }) : withoutTethers(withoutTree(doc, activityId), T.refsOf(this.treeOf(activityId)))));
 	}
 
 	phoneBack() {
@@ -512,6 +547,7 @@ export class Shell {
 	focused(activity, ref, path, well) {
 		this.focus = { activity, ref, path, well };
 		this.context.set("activeTab", ref || undefined);
+		this.context.set("tabTethered", (ref && partnersOf(this.doc, ref).length > 0) || undefined);
 		this.context.set("activeTabKind", ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : ref ? "tool" : undefined);
 		const resource = ref ? this.views.resourceOf(ref) : null;
 		this.context.set("resourcePath", resource || undefined);
@@ -532,6 +568,7 @@ export class Shell {
 	}
 
 	showMenu(menuId, at, args) {
+		if (args && args.ref) this.context.set("tabTethered", partnersOf(this.doc, args.ref).length > 0 || undefined);
 		const rows = this.menus.resolve(menuId);
 		return this.menuHost.show({
 			rows, at, label: menuId,
@@ -570,11 +607,17 @@ export class Shell {
 			bindings: {
 				provide: (name, fn) => shell.bindings.provide(plugin.id, name, fn),
 				call: (name, args) => shell.bindings.call(plugin.id, name, args),
+				emit: (name, data) => shell.bindings.emit(plugin.id, name, data),
+				on: (name, fn) => shell.bindings.on(plugin.id, name, fn),
 				has: (name) => shell.bindings.has(name),
 			},
 			tabs: {
 				kind: (kind, spec) => shell.views.registerKind(kind, Object.assign({}, spec, { plugin: plugin.id === "shell" ? null : plugin.id })),
 				open: (ref, options) => shell.openTab(ref, options),
+				// `ref` beside `anchor`; {tether, closes} tethers them (docs/15 "Tethered tabs").
+				openBeside: (anchor, ref, options) => shell.openBeside(anchor, ref, options),
+				tether: (lead, follower, options) => shell.tether(lead, follower, options),
+				untether: (ref) => shell.untether(ref),
 				// `fn(ref)` when the person closes a tab of `kind` in this window.
 				onClose: (kind, fn) => shell.onTabClose(kind, fn),
 			},

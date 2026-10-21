@@ -615,6 +615,30 @@ def markdown_preview_ticks_a_task(run):
 	run.request("fs.delete", {"wsId": ws, "path": path})
 
 
+@scenario()
+def markdown_preview_beside_is_tethered(run):
+	"""Open Preview to the Side opens the preview in a group beside its file, tethered (docs/15 "Tethered tabs"): it
+	scrolls with the editor, both tabs carry the link, and closing the file closes the preview."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	path = "docs/tether-%s.md" % run.viewport
+	run.request("fs.write", {"wsId": ws, "path": path, "text": "".join("## Section %d\n\nText %d.\n\n" % (i, i) for i in range(60))})
+	page.evaluate("(path) => ied_shell.commands.run('ied.editor.goTo', { path })", path)
+	editor = "ied_shell.views.entries.get('doc:' + path).instance"
+	page.wait_for_function("(path) => { const e = ied_shell.views.entries.get('doc:' + path); return !!(e && e.instance && e.instance.model); }", arg=path, timeout=20000)
+	page.evaluate("(path) => ied_shell.commands.run('ied.markdown.previewBeside', { path })", path)
+	page.wait_for_selector(".md-preview h2")
+	check(len(page.query_selector_all(".dock-group.well")) == 2, "the preview is in a group of its own")
+	check(len(page.query_selector_all(".dock-group.well .tab .tether")) == 2, "both tabs show the tether")
+	page.evaluate("(path) => " + editor + ".editor.setScrollTop(600)", path)
+	page.wait_for_function("document.querySelector('.md-preview').scrollTop > 100", timeout=5000)
+	run.shot("beside")
+	page.evaluate("(path) => ied_shell.closeTab('doc:' + path)", path)
+	page.wait_for_function("!document.querySelector('.md-preview')", timeout=5000)
+	check(len(page.query_selector_all(".dock-group.well")) == 1, "its group went with it")
+	run.request("fs.delete", {"wsId": ws, "path": path})
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def markdown_image_opens_in_the_viewer(run):
 	"""A workspace image in a Markdown preview (`/w/<wsId>/files/`) shows at its size when clicked (imageview.js); Escape

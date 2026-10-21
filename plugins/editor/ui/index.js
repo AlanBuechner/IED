@@ -108,6 +108,7 @@ export function activate(ied) {
 	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
 	ied.commands.handle("ied.editor.goToAll", () => showGoToAll(ied, (target) => goTo(ied, target)));
 	ied.commands.handle("ied.editor.toggleHeader", () => toggleHeader(ied));
+	ied.commands.handle("ied.editor.openCounterpartBeside", () => openCounterpartBeside(ied));
 	ied.commands.handle("ied.editor.action", (args) => runEditorAction(ied, args));
 	ied.commands.handle("ied.navigate.back", () => goTo(ied, editors.navigation.back()));
 	ied.commands.handle("ied.navigate.forward", () => goTo(ied, editors.navigation.forward()));
@@ -249,6 +250,19 @@ async function toggleHeader(ied) {
 	else ied.toast("There is no header or code file for " + editor.path.slice(editor.path.lastIndexOf("/") + 1) + ".");
 }
 
+// The header or code file in the group beside, tethered (docs/15 "Tethered tabs"): showing either shows the other.
+async function openCounterpartBeside(ied) {
+	const editor = currentEditor(ied);
+	if (!editor) return;
+	const pairs = ied.contributions("headerSourcePairs").map((c) => c.value);
+	const found = await findCounterpart(ied.client, editor.ctx.wsId, editor.path, pairs);
+	if (!found) {
+		ied.toast("There is no header or code file for " + editor.path.slice(editor.path.lastIndexOf("/") + 1) + ".");
+		return;
+	}
+	ied.tabs.openBeside("doc:" + editor.path, "doc:" + found, { tether: true });
+}
+
 // Shows Find in Files with the editor's selection (one line of it) as the query.
 async function findInFiles(ied) {
 	const editor = editors.last();
@@ -270,13 +284,14 @@ async function showOutput(ied, sourceId) {
 }
 
 // A file opened from outside IED (`ied open`, the shell's fileOpener): {path, line, col}, 1-based and 0 when absent. The
-// tabs plugins name for its language open beside it (`companionTabs`: a Markdown file's preview, J10).
+// tabs plugins name for its language open beside it, tethered to close with it (`companionTabs`: a Markdown file's
+// preview, J10; docs/15 "Tethered tabs").
 async function openFromOutside(ied, args) {
 	if (!args || !args.path) return;
 	await goTo(ied, { path: args.path, line: args.line > 0 ? args.line - 1 : undefined, col: args.col > 0 ? args.col - 1 : 0 });
 	const language = languageOf(ied.contributions("languages").map((c) => c.value), args.path);
 	for (const { value } of ied.contributions("companionTabs")) {
-		if (language && (value.languages || []).includes(language)) ied.tabs.open(value.kind + ":" + args.path, { preview: false });
+		if (language && (value.languages || []).includes(language)) ied.tabs.openBeside("doc:" + args.path, value.kind + ":" + args.path, { tether: true, closes: true });
 	}
 }
 

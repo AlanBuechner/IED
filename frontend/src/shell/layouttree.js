@@ -193,6 +193,33 @@ export function activateTab(tree, ref) {
 	return normalize(next);
 }
 
+// Shows each of `partners` that is open in a group other than `ref`'s in its group (tethered tabs, docs/15): one tab of
+// a group shows at a time, so a partner in `ref`'s own group stays behind it.
+export function revealPartners(tree, ref, partners) {
+	if (!partners.length) return tree;
+	const next = clone(tree);
+	const home = groupOf(next, ref);
+	for (const partner of partners) {
+		const owner = groupOf(next, partner);
+		if (owner && owner !== home) owner.active = partner;
+	}
+	return normalize(next);
+}
+
+// Opens `ref` beside `anchor`: in another document group (the first that is not `anchor`'s), or in a new group to the
+// right of `anchor`'s when there is none; a `ref` already open in another group is activated where it is.
+export function openBeside(tree, anchor, ref) {
+	const home = groupOf(tree, anchor);
+	if (!home) return openTab(tree, ref, {});
+	const existing = groupOf(tree, ref);
+	if (existing && existing !== home) return activateTab(tree, ref);
+	const other = wellsOf(tree).find((g) => g !== home);
+	if (other && existing) return moveTab(tree, ref, pathOf(tree, other), "center");
+	if (other) return openTab(tree, ref, { groupPath: pathOf(tree, other) });
+	const opened = existing ? tree : openTab(tree, ref, { groupPath: pathOf(tree, home) });
+	return activateTab(moveTab(opened, ref, pathOf(opened, groupOf(opened, anchor)), "right"), anchor);
+}
+
 // Keeps a preview tab open (it was edited or double-clicked).
 export function pinTab(tree, ref) {
 	const next = clone(tree);
