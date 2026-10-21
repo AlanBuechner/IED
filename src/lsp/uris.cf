@@ -80,6 +80,17 @@ namespace Ied
 		return true;
 	}
 
+	Core::String CanonicalFileUri(Core::StringView uri) {
+		Core::String path;
+		if (!PathOfFileUri(uri, path)) return Core::String();
+		if (!HasDriveLetter(path.View())) return FileUriOf(path.View());
+		Core::StringBuilder upper;
+		const int32 drive = path.View().ByteAt(0);
+		upper.AppendByte(drive >= 'a' && drive <= 'z' ? drive - 32 : drive);
+		upper.Append(path.View().Substring(1, path.ByteLength() - 1));
+		return FileUriOf(upper.View());
+	}
+
 	Core::String IedUriOf(Core::StringView wsId, Core::StringView relativePath) {
 		Core::StringBuilder uri;
 		uri.Append("ied://");

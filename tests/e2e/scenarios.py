@@ -566,6 +566,24 @@ def track_changes_margin(run):
 	check(page.query_selector(".monaco-editor .tc-unsaved") is None and server_text(run) == before, "the file is as it was")
 
 
+@scenario(viewports=("desktop",))
+def file_outside_the_workspace(run):
+	"""A file a language server named outside the workspace opens read-only at its place, its tab named by the file,
+	the bar saying where it is (docs/10 "Files outside the workspace")."""
+	page = run.open()
+	name = "outside%d.h" % int(time.time())
+	uri = run.request("testhooks.external", {"name": name, "text": "int outside;\n"})["uri"]
+	page.evaluate("(uri) => ied_shell.commands.run('ied.editor.goTo', { path: uri, line: 0, col: 4 })", uri)
+	page.wait_for_selector(".tab:has-text('%s')" % name)
+	page.wait_for_selector(".ed-bar:has-text('outside the workspace')")
+	model = "ied_shell.views.entries.get('doc:' + uri).instance.model"
+	page.wait_for_function("(uri) => { const e = ied_shell.views.entries.get('doc:' + uri); return !!(e && e.instance && e.instance.model); }", arg=uri, timeout=20000)
+	run.shot("external")
+	page.keyboard.type("x")
+	check(page.evaluate("(uri) => " + model + ".getValue()", uri) == "int outside;\n", "read-only: typing changes nothing")
+	check("Ln 1, Col 5" in run.texts(".statusbar .st")[2], "at its place: %s" % run.texts(".statusbar .st"))
+
+
 def restore(run, page, original):
 	"""Puts main.c back as it was (through the server, so every window follows) and saves it."""
 	sync = "ied_shell.views.entries.get('doc:src/main.c').instance.sync"

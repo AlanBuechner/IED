@@ -1,5 +1,6 @@
 include "documents.ch"
 include "host/server.ch"
+include "lsp/uris.ch"
 
 namespace Ied
 {
@@ -56,6 +57,7 @@ namespace Ied
 		else json.String(doc->holder.View());
 		json.EndObject();
 		json.BoolField("dirty", doc->dirty);
+		json.BoolField("readOnly", doc->external);
 		json.Field("languageId", server->plugins->LanguageOf(doc->ws, doc->path.View()).View());
 		json.EndObject();
 		return json.ToString();
@@ -65,7 +67,25 @@ namespace Ied
 		Core::String key = (ws->wsId + "/") + path;
 		Document* doc = nullptr;
 		if (byPath.TryGet(key, doc)) return doc;
-		doc = new Document();
+		return Added(ws, key.View(), path, server->workspaces->Read(ws, path), false);
+	}
+
+	Document* Documents::OpenExternal(Workspace* ws, Core::StringView uri) {
+		Core::String canonical = CanonicalFileUri(uri);
+		if (canonical.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "uri is not a file: URI");
+		Core::String key = (ws->wsId + "/") + canonical.View();
+		Document* doc = nullptr;
+		if (byPath.TryGet(key, doc)) return doc;
+		if (!server->lsp->WasNamed(ws, canonical.View())) throw RpcError(ErrorCode::Forbidden, "only a file a language server of the workspace named opens from outside it");
+		Core::String absolute;
+		PathOfFileUri(canonical.View(), absolute);
+		if (!FS::FileExists(absolute.CStr())) throw RpcError(ErrorCode::NotFound, (Core::String("no file ") + absolute.View()).View());
+		FS::File file = FS::File(absolute.CStr(), "rb");
+		return Added(ws, key.View(), canonical.View(), file.ReadText(), true);
+	}
+
+	Document* Documents::Added(Workspace* ws, Core::StringView key, Core::StringView path, Core::String text, bool external) {
+		Document* doc = new Document();
 		opened += 1;
 		Core::StringBuilder id;
 		id.Append("d");
@@ -73,12 +93,13 @@ namespace Ied
 		doc->docId = id.ToString();
 		doc->ws = ws;
 		doc->path = Core::String(path);
-		doc->text = server->workspaces->Read(ws, path);
+		doc->external = external;
+		doc->text = take(text);
 		doc->saved = doc->text;
 		doc->opened = doc->text;
 		doc->version = 1;
 		byId.Insert(doc->docId, doc);
-		byPath.Insert(key, doc);
+		byPath.Insert(Core::String(key), doc);
 		Documents* self = this;
 		Document* created = doc;
 		server->hub.Add(doc->Topic().View(), [self, created]() -> Core::String { return self->Snapshot(created); });
@@ -205,20 +226,34 @@ namespace Ied
 
 	Core::String Documents::OpenMethod(Call& call, const Params& params) {
 		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
-		Core::String path = NormalizePath(params.Str("path").View());
-		Document* doc = Open(ws, path.View());
-		if (doc->holder.IsEmpty()) Grant(doc, call.ClientId());
+		Document* doc = params.Has("uri") ? OpenExternal(ws, params.Str("uri").View()) : Open(ws, NormalizePath(params.Str("path").View()).View());
+		if (doc->holder.IsEmpty() && !doc->external) Grant(doc, call.ClientId());
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("docId", doc->docId.View());
+		json.Field("path", doc->path.View());
 		json.IntField("version", doc->version);
-		json.Field("holder", doc->holder.View());
+		json.Key(Core::StringView("holder"));
+		if (doc->holder.IsEmpty()) json.Null();
+		else json.String(doc->holder.View());
+		json.BoolField("readOnly", doc->external);
 		json.EndObject();
 		return json.ToString();
 	}
 
+	// A file outside the workspace is only shown (docs/10): no lease, no edit, no save.
+	static void RefuseExternal(const Document* doc) {
+		if (!doc->external) return;
+		JsonWriter data;
+		data.BeginObject();
+		data.Field("reason", "read_only");
+		data.EndObject();
+		throw RpcError(ErrorCode::Forbidden, "the file is outside the workspace and read-only", data.View());
+	}
+
 	Core::String Documents::EditMethod(Call& call, const Params& params) {
 		Document* doc = Get(params.Str("docId").View());
+		RefuseExternal(doc);
 		if (doc->holder.View() != call.ClientId()) {
 			JsonWriter data;
 			data.BeginObject();
@@ -236,6 +271,7 @@ namespace Ied
 
 	Core::String Documents::TakeLeaseMethod(Call& call, const Params& params) {
 		Document* doc = Get(params.Str("docId").View());
+		RefuseExternal(doc);
 		if (doc->holder.View() != call.ClientId()) Grant(doc, call.ClientId());
 		JsonWriter json;
 		json.BeginObject();
@@ -247,6 +283,7 @@ namespace Ied
 
 	Core::String Documents::SaveMethod(Call& call, const Params& params) {
 		Document* doc = Get(params.Str("docId").View());
+		RefuseExternal(doc);
 		const int64 revision = server->workspaces->Write(doc->ws, doc->path.View(), doc->text.View(), -1);
 		doc->saved = doc->text;
 		doc->dirty = false;

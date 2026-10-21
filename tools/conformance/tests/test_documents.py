@@ -77,6 +77,22 @@ class DocumentTests(ProtocolTest):
 		baseline = await owner.request("doc.baseline", {"docId": doc["docId"]})
 		self.assertEqual((opened, "aline 0\nline 1\n", typed["version"] + 1), (baseline["opened"], baseline["saved"], baseline["version"]))
 
+	async def test_a_named_file_outside_the_workspace_opens_read_only(self):
+		owner = await self.client()
+		scratch = await owner.request("testhooks.scratch", {"lines": 1})
+		with self.assertRaises(RpcFailure) as caught:
+			await owner.request("doc.open", {"wsId": scratch["wsId"], "uri": "file:///C:/nowhere/never-named.c"})
+		self.assertEqual("forbidden", caught.exception.code, "a file no language server named")
+		external = await owner.request("testhooks.external", {"name": new_id("ext").replace("-", "") + ".c", "text": "int x;\n"})
+		doc = await owner.request("doc.open", {"wsId": external["wsId"], "uri": external["uri"]})
+		self.assertEqual((True, None, external["uri"]), (doc["readOnly"], doc["holder"], doc["path"]))
+		state = await self.text_of(owner, doc["docId"])
+		self.assertEqual(("int x;\n", True, external["uri"]), (state["text"], state["readOnly"], state["path"]))
+		for method, params in (("doc.edit", {"baseVersion": 1, "changes": [change(0, 0, 0, 0, "x")]}), ("doc.save", {}), ("doc.takeLease", {})):
+			with self.assertRaises(RpcFailure) as caught:
+				await owner.request(method, dict(params, docId=doc["docId"]))
+			self.assertEqual(("forbidden", "read_only"), (caught.exception.code, caught.exception.data["reason"]), method)
+
 	async def test_take_lease_moves_the_lease_and_notifies_everyone(self):
 		owner, phone = await self.client(), await self.client(device_class="phone")
 		_, doc = await self.open_scratch(owner)

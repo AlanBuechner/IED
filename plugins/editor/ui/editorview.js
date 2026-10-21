@@ -8,6 +8,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
 import { themeName } from "./monaco.js";
 import { ChangeMargin } from "./changemargin.js";
+import { displayPath, isFileUri } from "./fileuris.js";
 
 const NOTICE_MS = 8000;
 // Narrower than this an editor is not laid out yet (a hidden or just-opened tab).
@@ -80,7 +81,7 @@ export class CodeEditor {
 
 	// The document's model: a new one, or the one a peek made of the file (language.js).
 	takeModel(text) {
-		const uri = this.monaco.Uri.from({ scheme: "ied", authority: this.ctx.wsId, path: "/" + this.path });
+		const uri = isFileUri(this.path) ? this.monaco.Uri.parse(this.path) : this.monaco.Uri.from({ scheme: "ied", authority: this.ctx.wsId, path: "/" + this.path });
 		let model = this.monaco.editor.getModel(uri);
 		if (model) {
 			model.setValue(text);
@@ -143,11 +144,12 @@ export class CodeEditor {
 	focused() {
 		this.editors.touch(this);
 		this.editors.visited(this);
-		if (this.sync.docId && this.sync.holder === null) this.sync.takeLease().catch((e) => this.ied.report("the lease: " + e.message, e));
+		if (this.sync.docId && this.sync.holder === null && !this.sync.readOnly) this.sync.takeLease().catch((e) => this.ied.report("the lease: " + e.message, e));
 		this.changed();
 	}
 
 	readOnlyReason() {
+		if (this.sync.readOnly) return "This file is outside the workspace; IED shows it read-only.";
 		if (this.mixedEndings) return "This file mixes line endings (CRLF and LF); it opens read-only until they are one kind.";
 		return "Another window is editing this document. Use Edit Here to take over.";
 	}
@@ -164,7 +166,8 @@ export class CodeEditor {
 	showBar() {
 		if (this.noticeText) return;
 		const sync = this.sync;
-		if (this.mixedEndings) this.setBar("warning", "This file mixes line endings (CRLF and LF), so it is read-only here.", null);
+		if (sync.readOnly) this.setBar("lock", "Read-only: " + displayPath(this.path) + " is outside the workspace.", null);
+		else if (this.mixedEndings) this.setBar("warning", "This file mixes line endings (CRLF and LF), so it is read-only here.", null);
 		else if (sync.docId && sync.holder && !sync.holdsLease) this.setBar("lock", "Read-only: another window is editing this document.", h("button.btn", { on: { click: () => this.takeOver() } }, "Edit Here"));
 		else if (sync.diskChanged) this.setBar("warning", sync.diskChanged === "deleted" ? "The file was deleted on disk; saving writes it again." : "The file changed on disk while you edit it here; saving replaces it.", null);
 		else this.bar.hidden = true;

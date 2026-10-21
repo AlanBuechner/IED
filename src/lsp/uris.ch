@@ -11,6 +11,9 @@ namespace Ied
 	// The path a `file:` URI names, with the system's separators ("C:\..." for a drive letter); false for another
 	// scheme or a bad escape.
 	bool PathOfFileUri(Core::StringView uri, Core::String& path);
+	// The one form IED gives a file's `file:` URI: FileUriOf its path with the drive letter upper case. Empty for a URI
+	// PathOfFileUri does not take.
+	Core::String CanonicalFileUri(Core::StringView uri);
 	// "ied://w1/src/main.c".
 	Core::String IedUriOf(Core::StringView wsId, Core::StringView relativePath);
 	// The workspace id and relative path of an "ied://" URI; false for anything else.

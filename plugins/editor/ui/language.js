@@ -1,10 +1,11 @@
 // language.js - language servers in Monaco (docs/24): a model's providers ask the workspace's language server pool
 // (lsp.request) about the document it shows, once its edits are on the server, for what the serving server can do
 // (lsp.capabilities, one set of providers per language and server); diagnostics become markers; lsp.refresh and a
-// server that starts again fetch tokens, folding and hints anew. Locations in other files open them as tabs, and their
-// text is loaded for peeks; edits to other files open them first.
+// server that starts again fetch tokens, folding and hints anew. Locations in other files open them as tabs (read-only
+// for files outside the workspace), and their text is loaded for peeks; edits to other files open them first.
 
 import * as C from "./lspconvert.js";
+import { canonicalFileUri } from "./fileuris.js";
 
 const QUIET = new Set(["cancelled", "not_found", "unavailable"]);
 const REPORT_EVERY_MS = 30000;
@@ -100,7 +101,8 @@ export class LanguageFeatures {
 		const known = this.bundles.get(key);
 		if (known && known.text === text) return;
 		if (known) known.disposables.forEach((d) => d.dispose());
-		this.bundles.set(key, { text, disposables: this.register({ language: languageId, scheme: "ied" }, info.capabilities || {}) });
+		const selector = [{ language: languageId, scheme: "ied" }, { language: languageId, scheme: "file" }];
+		this.bundles.set(key, { text, disposables: this.register(selector, info.capabilities || {}) });
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -331,29 +333,49 @@ export class LanguageFeatures {
 		return this.editors.whenReady(ref);
 	}
 
-	// Locations in files not open get a model of their text, so a peek can show them.
+	// Locations in files not open get a model of their text, so a peek can show them: a workspace file's from disk, a
+	// file outside the workspace from its read-only document (docs/10).
 	async located(locations) {
 		const missing = new Set();
 		for (const location of locations) {
-			if (location.uri.scheme === "ied" && !this.monaco.editor.getModel(location.uri)) missing.add(location.uri.toString());
+			if ((location.uri.scheme === "ied" || location.uri.scheme === "file") && !this.monaco.editor.getModel(location.uri)) missing.add(location.uri.toString());
 		}
 		await Promise.all([...missing].map(async (uri) => {
 			const resource = this.monaco.Uri.parse(uri);
 			try {
-				const file = await this.ied.client.request("fs.read", { wsId: resource.authority, path: resource.path.slice(1) });
-				if (!this.monaco.editor.getModel(resource)) this.monaco.editor.createModel(file.text, undefined, resource);
+				const text = resource.scheme === "ied" ? (await this.ied.client.request("fs.read", { wsId: resource.authority, path: resource.path.slice(1) })).text
+					: await this.externalText(canonicalFileUri(uri));
+				if (!this.monaco.editor.getModel(resource)) this.monaco.editor.createModel(text, undefined, resource);
 			}
 			catch (e) {
-				this.failed("fs.read", e);
+				this.failed(resource.scheme === "ied" ? "fs.read" : "doc.open", e);
 			}
 		}));
 		return locations;
 	}
 
-	// Monaco opening another model (go to definition, a peek's file): its tab, at the place.
+	// The text of a file outside the workspace: its document's first snapshot.
+	async externalText(uri) {
+		const opened = await this.ied.client.request("doc.open", { wsId: this.ied.workspace.wsId, uri });
+		return new Promise((resolve, reject) => {
+			let off = null;
+			off = this.ied.client.subscribe("doc:" + opened.docId, {
+				snap: (data) => {
+					resolve(data.text);
+					setTimeout(() => off && off(), 0);
+				},
+				evt: () => {},
+				gone: (reason) => reject(new Error("the document is gone (" + reason + ")")),
+			});
+		});
+	}
+
+	// Monaco opening another model (go to definition, a peek's file): its tab, at the place. A file outside the workspace
+	// opens read-only, named by its canonical file: URI.
 	open(resource, selection) {
-		if (resource.scheme !== "ied") return false;
-		this.openTab(resource.path.slice(1), false).then((editor) => editor.reveal(selection));
+		const path = resource.scheme === "ied" ? resource.path.slice(1) : resource.scheme === "file" ? canonicalFileUri(resource.toString()) : null;
+		if (!path) return false;
+		this.openTab(path, false).then((editor) => editor.reveal(selection));
 		return true;
 	}
 

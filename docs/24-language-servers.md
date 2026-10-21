@@ -26,7 +26,7 @@ The host's document store is the truth. When a served document opens, the server
 
 Clients speak UTF-16 code units (`docs/10`). The host converts every position it passes - in requests, results and notifications - to the server's encoding and back, using the open document's text or, for another file, its text on disk: `utf-16` (nothing to do), `utf-8` (UTF-8 bytes on the line, the negotiated or the fixed encoding) and `bytes` (the same, for servers that count bytes without saying so: C4LSP today, `docs/17` L1).
 
-Positions are found wherever LSP puts them: any object with numeric `line` and `character` is a position of the document the nearest `uri` / `targetUri` / `textDocument.uri` names, or of the request's document. URIs of the workspace's files become `ied://<wsId>/<relative path>` for clients (Monaco models use the same URIs); others stay `file:` URIs.
+Positions are found wherever LSP puts them: any object with numeric `line` and `character` is a position of the document the nearest `uri` / `targetUri` / `textDocument.uri` names, or of the request's document. URIs of the workspace's files become `ied://<wsId>/<relative path>` for clients (Monaco models use the same URIs); others stay `file:` URIs, and the host records each one with the server that named it: a client may open that file read-only (`docs/10` "Files outside the workspace"), and the document is served by that server (`didOpen` with the same URI).
 
 ## Diagnostics
 

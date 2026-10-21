@@ -5,6 +5,7 @@
 import { icon } from "/ui-kit/dom.js";
 import { showPicker } from "/ui-kit/picker.js";
 import { fileIcon } from "./fileicons.js";
+import { canonicalFileUri, displayPath, isFileUri } from "./fileuris.js";
 
 const IN_NAME_SCORE = 1000;
 const MOST_FILES = 100;
@@ -42,17 +43,18 @@ function fileItem(file) {
 	return { label: file.path.slice(file.path.lastIndexOf("/") + 1), detail: folderOf(file.path), icon: fileIcon(file.path), target: { path: file.path } };
 }
 
-// A symbol the editor can open (one in the workspace), else null.
+// Where a symbol opens: a workspace file, or a file outside the workspace (read-only, docs/10); null for another URI.
 export function symbolTarget(symbol, wsId) {
 	const location = symbol.location || {};
-	const path = pathOfUri(location.uri, wsId);
-	if (path === null) return null;
+	const path = pathOfUri(location.uri, wsId) || canonicalFileUri(location.uri);
+	if (!path) return null;
 	const start = location.range ? location.range.start : null;
 	return start ? { path, line: start.line, col: start.character } : { path };
 }
 
 function symbolItem(symbol, target) {
-	const where = symbol.containerName ? symbol.containerName + " - " + target.path : target.path;
+	const file = isFileUri(target.path) ? displayPath(target.path) : target.path;
+	const where = symbol.containerName ? symbol.containerName + " - " + file : file;
 	return { label: symbol.name, detail: where, icon: icon(symbolIconName(symbol.kind)), target };
 }
 

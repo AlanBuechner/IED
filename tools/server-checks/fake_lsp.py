@@ -1,6 +1,6 @@
 """A language server for the checks (docs/24): speaks LSP over stdio, takes UTF-8 positions when the client offers them,
 publishes a diagnostic on every "bad" of an open document, answers hover with the position it got and definition with
-another file, answers workspace/symbol with every "bad" of its open documents, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
+another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
 first argument - after a {"argv": [...]} line with the arguments that follow it."""
 
 import json
@@ -65,7 +65,9 @@ def answer(message):
 		end = dict(position, character=position["character"] + 3)
 		return {"contents": "at %d:%d" % (position["line"], position["character"]), "range": {"start": position, "end": end}}
 	if method == "textDocument/definition":
-		uri = params["textDocument"]["uri"].rsplit("/", 1)[0] + "/b.fk"
+		folder = params["textDocument"]["uri"].rsplit("/", 1)[0]
+		line = documents.get(params["textDocument"]["uri"], "").split("\n")[params["position"]["line"]]
+		uri = folder.rsplit("/", 1)[0] + "/far.fk" if "far" in line else folder + "/b.fk"
 		return [{"uri": uri, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}}]
 	if method == "workspace/symbol":
 		symbols = []

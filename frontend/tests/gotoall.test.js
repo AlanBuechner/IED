@@ -1,5 +1,6 @@
-// gotoall.test.js - Go To All's rows: the prefixes that pick a kind, workspace symbols by their ied: URI (others left
-// out), and files and symbols ranked together by how well their names match, files found through their folders last.
+// gotoall.test.js - Go To All's rows: the prefixes that pick a kind, symbols by their ied: URI or a file: URI outside
+// the workspace, and files and symbols ranked together by how well their names match, files found through their
+// folders last.
 
 import { test, assertEqual } from "./harness.js";
 import { matchTier, parseQuery, pathOfUri, rowsOf, symbolIconName, symbolTarget } from "/plugins/ied.editor/ui/gotoall.js";
@@ -15,6 +16,8 @@ test("gotoall: symbols open by their workspace path", () => {
 	assertEqual(pathOfUri("ied://w1/src/a%20b.cf", "w1"), "src/a b.cf");
 	assertEqual(pathOfUri("ied://w2/src/a.cf", "w1"), null, "another workspace");
 	assertEqual(pathOfUri("file:///c:/x.h", "w1"), null);
+	assertEqual(symbolTarget({ location: { uri: "file:///c%3A/sdk/x.h" } }, "w1"), { path: "file:///C:/sdk/x.h" }, "outside the workspace");
+	assertEqual(symbolTarget({ location: { uri: "http://x/y" } }, "w1"), null);
 	const at = { line: 3, character: 7 };
 	assertEqual(symbolTarget({ location: { uri: "ied://w1/a.cf", range: { start: at, end: at } } }, "w1"), { path: "a.cf", line: 3, col: 7 });
 	assertEqual(symbolTarget({ location: { uri: "ied://w1/a.cf" } }, "w1"), { path: "a.cf" }, "a WorkspaceSymbol without a range");
@@ -40,7 +43,8 @@ test("gotoall: files and symbols ranked together, files found through their fold
 		{ name: "Pool", kind: 5, location: { uri: "file:///c:/sdk/pool.h" } },
 	];
 	const rows = rowsOf(files, symbols, "w1", "pool");
-	assertEqual(rows.map((r) => r.label), ["pool.cf", "PoolOptions", "LspPool", "03-project-and-solution-model.md", "x.cf"]);
-	assertEqual(rows[2].detail, "Ied - src/lsp/pool.ch");
-	assertEqual(rows[2].target, { path: "src/lsp/pool.ch", line: 9, col: 7 });
+	assertEqual(rows.map((r) => r.label), ["pool.cf", "Pool", "PoolOptions", "LspPool", "03-project-and-solution-model.md", "x.cf"]);
+	assertEqual(rows[1].detail, "C:/sdk/pool.h", "a file outside the workspace as a person reads it");
+	assertEqual(rows[3].detail, "Ied - src/lsp/pool.ch");
+	assertEqual(rows[3].target, { path: "src/lsp/pool.ch", line: 9, col: 7 });
 });

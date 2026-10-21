@@ -16,6 +16,7 @@ import { ErrorList as ErrorListView } from "./errorlist.js";
 import { FindInFiles as FindInFilesView } from "./findinfiles.js";
 import { findCounterpart } from "./headersource.js";
 import { showGoToAll } from "./gotoall.js";
+import { fileName } from "./fileuris.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -29,14 +30,10 @@ function last(set) {
 	return [...set].pop() || null;
 }
 
-function baseName(path) {
-	return path.slice(path.lastIndexOf("/") + 1);
-}
-
 export function activate(ied) {
 	addStylesheet(ied.plugin.base + "ui/editor.css");
 	diagnostics = new Diagnostics(ied);
-	ied.tabs.kind("doc", { view: "TextDocument", title: baseName, icon: fileIconSpec, resource: (path) => path });
+	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => fileIconSpec(fileName(path)), resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
 	ied.commands.handle("ied.explorer.open", (args) => {
 		const path = pathOf(args);

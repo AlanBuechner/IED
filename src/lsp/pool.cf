@@ -12,9 +12,12 @@ namespace Ied
 
 	static Core::String DiagnosticsKey(const Workspace* ws, Core::StringView path) { return (ws->wsId + "/") + path; }
 
-	static Core::String DocumentFileUri(const Document* doc) { return FileUriOf(doc->ws->At(doc->path.View()).View()); }
+	// An external document's path is already its file: URI (docs/10 "Files outside the workspace").
+	static Core::String DocumentFileUri(const Document* doc) { return doc->external ? doc->path : FileUriOf(doc->ws->At(doc->path.View()).View()); }
 
-	static Core::String DocumentIedUri(const Document* doc) { return IedUriOf(doc->ws->wsId.View(), doc->path.View()); }
+	static Core::String DocumentIedUri(const Document* doc) { return doc->external ? doc->path : IedUriOf(doc->ws->wsId.View(), doc->path.View()); }
+
+	static Core::String NamedKey(const Workspace* ws, Core::StringView uri) { return (ws->wsId + "|") + uri; }
 
 	// The project whose server serves `path` under `profile`: the owning project, for a project-scoped profile in a
 	// solution; else none (the workspace-wide server).
@@ -83,7 +86,16 @@ namespace Ied
 		return language;
 	}
 
+	LanguageServer* LspPool::NamerOf(const Document* doc) const {
+		NamedFile* file = nullptr;
+		if (!named.TryGet(NamedKey(doc->ws, doc->path.View()), file)) return nullptr;
+		return Find(doc->ws, file->profile.View(), file->project.View());
+	}
+
+	bool LspPool::WasNamed(Workspace* ws, Core::StringView uri) const { return named.Contains(NamedKey(ws, uri)); }
+
 	LanguageServer* LspPool::Serving(Document* doc, bool start) {
+		if (doc->external) return NamerOf(doc);
 		Core::String languageId = server->plugins->LanguageOf(doc->ws, doc->path.View());
 		LspProfile* profile = ProfileServing(ProfilesFor(doc->ws), languageId.View(), doc->path.View());
 		if (!profile) return nullptr;
@@ -458,11 +470,24 @@ namespace Ied
 		return lines;
 	}
 
-	Core::String LspPool::ToClientUri(Workspace* ws, Core::StringView uri) const {
+	Core::String LspPool::ToClientUri(LanguageServer* language, Core::StringView uri) {
+		Workspace* ws = language->ws;
 		Core::String absolute;
 		Core::String relative;
-		if (PathOfFileUri(uri, absolute) && RelativeTo(ws->root.View(), absolute.View(), relative)) return IedUriOf(ws->wsId.View(), relative.View());
-		return Core::String(uri);
+		if (!PathOfFileUri(uri, absolute)) return Core::String(uri);
+		if (RelativeTo(ws->root.View(), absolute.View(), relative)) return IedUriOf(ws->wsId.View(), relative.View());
+		Core::String canonical = CanonicalFileUri(uri);
+		NameFile(ws, canonical.View(), language->profile->id.View(), language->project.View());
+		return canonical;
+	}
+
+	void LspPool::NameFile(Workspace* ws, Core::StringView uri, Core::StringView profile, Core::StringView project) {
+		Core::String key = NamedKey(ws, uri);
+		if (named.Contains(key)) return;
+		NamedFile* file = new NamedFile();
+		file->profile = Core::String(profile);
+		file->project = Core::String(project);
+		named.Insert(key, file);
 	}
 
 	Core::String LspPool::ToServerUri(Core::StringView uri) const {
@@ -481,7 +506,7 @@ namespace Ied
 		rewrite.to = toServer ? language->encoding : PositionEncoding::Utf16;
 		rewrite.lines = [self, ws](Core::StringView named) -> const LineIndex* { return self->LinesOf(ws, named); };
 		if (toServer) rewrite.mapUri = [self](Core::StringView named) -> Core::String { return self->ToServerUri(named); };
-		else rewrite.mapUri = [self, ws](Core::StringView named) -> Core::String { return self->ToClientUri(ws, named); };
+		else rewrite.mapUri = [self, language](Core::StringView named) -> Core::String { return self->ToClientUri(language, named); };
 		rewrite.uri = Core::String(uri);
 		return rewrite;
 	}

@@ -121,6 +121,7 @@ Evaluation order: deny -> confirm -> mode -> allow. The approval card's "Always 
 
 - The AI never receives secret values. Settings reference secrets by name; tools that need them (e.g. an HTTP tool with an auth header) get the value injected server-side, and results are redacted.
 - Tool path checks are done on **resolved real paths** (symlinks and `..` resolved), against the workspace roots plus explicitly granted extra paths.
+- A person's client reads a file outside the workspace only read-only, and only one a language server or debug adapter of that workspace named in a result (`docs/10` "Files outside the workspace"): the host records those paths as it passes the results on, so a client cannot ask for an arbitrary file of the machine. The AI's tools get no such path; their rule above is unchanged.
 - Deletes go to the recoverable trash.
 - Every executed command and file change is attributable in the trajectory and the per-turn checkpoint.
 - An untrusted workspace has no execute-class tools at all (not even with approval) - trust first.

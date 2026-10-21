@@ -125,6 +125,8 @@ Paths are workspace-relative with `/` separators. Every file has a `revision` (1
 | `trash.restore` | `id` | `{wsId?, path}`: moved back where it was (`conflict` when something is there now) |
 | `trash.purge` | `id` or `all: true` | `{}`: deleted for good |
 
+**Files outside the workspace** are shown read-only: a library's or a toolchain's sources, system headers, the standard library of a language - wherever go to definition, references, Go To All or a debugger's stack leads. `doc.open {wsId, uri}` with a `file:` URI opens one as a document like any other (`{docId, version, holder: null, readOnly: true}`; its snapshot has `readOnly: true` and the URI as `path`), on the language server that named it, so its own hover and navigation work. Only a file a process of the workspace named can be opened this way: the host keeps, per workspace, every `file:` URI outside the workspace that a language server or debug adapter put in a result it passed to a client (`forbidden` for any other; `docs/11`). Such a document takes no lease and no edit (`doc.edit` answers `forbidden` with reason `read_only`), is never saved, and is not watched: opening it again after it was closed reads it again.
+
 **Trash** (F-OPS-13): nothing a person or an AI deletes through the server is lost at once. A deleted file or folder moves to `<data>/trash/<id>/` (the server's data folder, `%LOCALAPPDATA%/IED/` by default) with an `entry.json` saying where it came from; `trash.restore` puts it back, `trash.purge` removes it. When the trash holds more than 4 GB the oldest entries are purged. Watchers see a trash move as a delete and a restore as a create, like any change.
 
 ## Document editing protocol

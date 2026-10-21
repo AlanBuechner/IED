@@ -28,6 +28,7 @@ namespace Ied
 		public bool dirty;            // the text differs from `saved`
 		public Core::String saved;    // the file's text as last read, saved or seen changed on disk
 		public Core::String opened;   // the text when the server opened it: the track-changes margin's baseline
+		public bool external;         // a file outside the workspace, read-only; `path` is its file: URI (docs/10)
 		public Core::Queue<VersionChanges*> history;
 
 		public Core::String Topic() const { return Core::String("doc:") + docId.View(); }
@@ -54,6 +55,9 @@ namespace Ied
 
 	private:
 		private Document* Open(Workspace* ws, Core::StringView path);
+		// A file outside the workspace that one of its language servers named; throws forbidden for another.
+		private Document* OpenExternal(Workspace* ws, Core::StringView uri);
+		private Document* Added(Workspace* ws, Core::StringView key, Core::StringView path, Core::String text, bool external);
 		private Core::String Snapshot(const Document* doc) const;
 		private Core::Array<Change> Rebase(const Document* doc, int64 baseVersion, const Core::Array<Change>& changes) const;
 		private void Grant(Document* doc, Core::StringView clientId);

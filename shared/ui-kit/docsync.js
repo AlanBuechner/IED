@@ -19,6 +19,7 @@ export class DocumentSync {
 		this.version = 0;
 		this.holder = null;
 		this.dirty = false;
+		this.readOnly = false;
 		this.diskChanged = null;
 		this.languageId = "plaintext";
 		this.inflight = null;
@@ -37,9 +38,10 @@ export class DocumentSync {
 		return (this.inflight ? 1 : 0) + this.queue.length;
 	}
 
-	// Opens the document and follows it; resolves with the first snapshot applied.
+	// Opens the document and follows it; resolves with the first snapshot applied. A `file:` URI is a file outside the
+	// workspace a language server named: shown read-only (docs/10).
 	async open(wsId, path) {
-		const opened = await this.client.request("doc.open", { wsId, path });
+		const opened = await this.client.request("doc.open", /^file:\/\//i.test(path) ? { wsId, uri: path } : { wsId, path });
 		this.docId = opened.docId;
 		return new Promise((resolve, reject) => {
 			this.unsubscribe = this.client.subscribe("doc:" + this.docId, {
@@ -69,6 +71,7 @@ export class DocumentSync {
 		this.version = data.version;
 		this.holder = data.lease ? data.lease.holder : null;
 		this.dirty = data.dirty;
+		this.readOnly = data.readOnly === true;
 		this.languageId = data.languageId || "plaintext";
 		this.inflight = null;
 		this.queue = [];

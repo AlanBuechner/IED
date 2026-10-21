@@ -105,6 +105,31 @@ class LanguageServerTests(ServerTestCase):
 		capabilities = await self.client.request("lsp.capabilities", {"docId": doc})
 		self.assertEqual(("fake-lsp", "running", True), (capabilities["profile"], capabilities["state"], capabilities["capabilities"]["hoverProvider"]))
 
+	async def test_a_file_a_server_named_outside_the_workspace_opens_read_only(self):
+		write(os.path.join(self.root, "far.fk"), "far bad\n")
+		write(os.path.join(self.workspace, "c.fk"), "go far\n")
+		doc = await self.open("c.fk")
+		await self.diagnostics("c.fk")
+		far = "file:///" + os.path.join(self.root, "far.fk").replace("\\", "/")
+		with self.assertRaises(RpcFailure) as caught:
+			await self.client.request("doc.open", {"wsId": "w1", "uri": far})
+		self.assertEqual("forbidden", caught.exception.code, "no server named it yet")
+		named = (await self.client.request("lsp.request", {"docId": doc, "method": "textDocument/definition", "params": {"position": {"line": 0, "character": 3}}}))[0]["uri"]
+		self.assertTrue(named.startswith("file:///") and named.endswith("/far.fk"), named)
+		opened = await self.client.request("doc.open", {"wsId": "w1", "uri": named})
+		self.assertEqual((True, None, named), (opened["readOnly"], opened["holder"], opened["path"]))
+		await self.client.sub(["doc:" + opened["docId"]])
+		snapshot = (await self.client.wait_for("doc:" + opened["docId"], lambda f: f["t"] == "snap"))[-1]["data"]
+		self.assertEqual(("far bad\n", True), (snapshot["text"], snapshot["readOnly"]))
+		hover = await self.client.request("lsp.request", {"docId": opened["docId"], "method": "textDocument/hover", "params": {"position": {"line": 0, "character": 4}}})
+		self.assertEqual("at 0:4", hover["contents"], "served by the server that named it")
+		self.assertIn(named, [m["params"]["textDocument"]["uri"] for m in self.received("textDocument/didOpen")])
+		with self.assertRaises(RpcFailure) as caught:
+			await self.client.request("doc.edit", {"docId": opened["docId"], "baseVersion": 1, "changes": [{"range": {"start": {"line": 0, "col": 0}, "end": {"line": 0, "col": 0}}, "text": "x"}]})
+		self.assertEqual(("forbidden", "read_only"), (caught.exception.code, caught.exception.data["reason"]))
+		published = [f["data"].get("path") for f in self.client.drain("diag:w1") if f["t"] == "evt"]
+		self.assertFalse([p for p in published if p and p.endswith("far.fk")], "no diagnostics for a file outside the workspace")
+
 	async def test_workspace_symbols(self):
 		await self.open("a.fk")
 		await self.diagnostics("a.fk")

@@ -30,7 +30,7 @@ class TestHooks:
 		self.streams = set()
 		self.scratch_count = 0
 		self.delays = 0
-		names = ("info", "configure", "topic", "emit", "stream", "delay", "counter", "fail", "restart", "scratch", "serverEdit")
+		names = ("info", "configure", "topic", "emit", "stream", "delay", "counter", "fail", "restart", "scratch", "serverEdit", "external")
 		for name in names:
 			server.rpc.register("testhooks." + name, getattr(self, "m_" + name))
 
@@ -140,6 +140,16 @@ class TestHooks:
 		text = "".join("line %d\n" % i for i in range(p.int("lines", 5, required=False)))
 		revision = self.server.workspace.write(ws, path, text)
 		return {"wsId": ws_id, "path": path, "text": text, "revision": revision}
+
+	async def m_external(self, call, p):
+		"""A file outside the workspace that counts as named by a language server (docs/10): kept in memory here."""
+		ws_id = next(iter(self.server.workspace.items))
+		name = p.str("name")
+		if not name or "/" in name or "\\" in name or name.startswith("."):
+			raise RpcError("bad_request", "name is a plain file name")
+		uri = "file:///C:/mock-external/" + name
+		self.server.docs.external[(ws_id, uri)] = p.str("text", "", required=False)
+		return {"wsId": ws_id, "uri": uri}
 
 	async def m_serverEdit(self, call, p):
 		doc = self.server.docs.get(p.str("docId"))

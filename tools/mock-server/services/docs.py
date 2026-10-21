@@ -19,6 +19,7 @@ class Doc:
 		self.holder = None
 		self.dirty = False
 		self.saved = text  # the file's text as last read, saved or seen changed on disk
+		self.external = False  # a file outside the workspace, read-only; `path` is its file: URI (docs/10)
 		self.opened = text  # the text when the server opened it: the track-changes margin's baseline
 		self.history = collections.deque(maxlen=HISTORY_VERSIONS)
 
@@ -32,13 +33,14 @@ class Documents:
 		self.server = server
 		self.by_id = {}
 		self.by_path = {}
+		self.external = {}  # (wsId, file URI) -> text: the files outside the workspace a language server named
 		for name in ("doc.open", "doc.edit", "doc.takeLease", "doc.save", "doc.baseline"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def snapshot(self, doc):
 		return {
 			"docId": doc.doc_id, "wsId": doc.ws_id, "path": doc.path, "text": doc.text, "version": doc.version,
-			"lease": {"holder": doc.holder}, "dirty": doc.dirty,
+			"lease": {"holder": doc.holder}, "dirty": doc.dirty, "readOnly": doc.external,
 			"languageId": self.server.plugins.language_of(doc.path),
 		}
 
@@ -117,14 +119,34 @@ class Documents:
 		replace_all = textedit.Change(textedit.Pos(0, 0), textedit.end_position(doc.text), text)
 		self.apply_edit(doc, doc.version, [replace_all], "disk")
 
+	def _open_external(self, ws_id, uri):
+		self.server.workspace.get(ws_id)
+		key = (ws_id, uri)
+		if key not in self.by_path:
+			if key not in self.external:
+				raise RpcError("forbidden", "only a file a language server of the workspace named opens from outside it")
+			doc = Doc("d%d" % (len(self.by_id) + 1), ws_id, uri, self.external[key])
+			doc.external = True
+			self.by_id[doc.doc_id] = doc
+			self.by_path[key] = doc
+			self.server.hub.add(doc.topic, lambda: self.snapshot(doc))
+		return self.by_path[key]
+
 	async def m_doc_open(self, call, p):
-		doc = self._open(p.str("wsId"), normalize(p.str("path")))
-		if doc.holder is None:
+		uri = p.str("uri", None, required=False)
+		doc = self._open_external(p.str("wsId"), uri) if uri else self._open(p.str("wsId"), normalize(p.str("path")))
+		if doc.holder is None and not doc.external:
 			self._grant(doc, call.client_id)
-		return {"docId": doc.doc_id, "version": doc.version, "holder": doc.holder}
+		return {"docId": doc.doc_id, "path": doc.path, "version": doc.version, "holder": doc.holder, "readOnly": doc.external}
+
+	@staticmethod
+	def _refuse_external(doc):
+		if doc.external:
+			raise RpcError("forbidden", "the file is outside the workspace and read-only", {"reason": "read_only"})
 
 	async def m_doc_edit(self, call, p):
 		doc = self.get(p.str("docId"))
+		self._refuse_external(doc)
 		if doc.holder != call.client_id:
 			raise RpcError("forbidden", "only the lease holder may edit", {"reason": "lease", "holder": doc.holder})
 		try:
@@ -135,6 +157,7 @@ class Documents:
 
 	async def m_doc_takeLease(self, call, p):
 		doc = self.get(p.str("docId"))
+		self._refuse_external(doc)
 		if doc.holder != call.client_id:
 			self._grant(doc, call.client_id)
 		return {"holder": doc.holder, "version": doc.version}
@@ -149,6 +172,7 @@ class Documents:
 
 	async def m_doc_save(self, call, p):
 		doc = self.get(p.str("docId"))
+		self._refuse_external(doc)
 		ws = self.server.workspace.get(doc.ws_id)
 		revision = self.server.workspace.write(ws, doc.path, doc.text)
 		doc.saved = doc.text

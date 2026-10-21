@@ -15,6 +15,13 @@ namespace Ied
 		public Core::HashMap<Core::String, Core::String> bySource;
 	}
 
+	// The server that named a file outside its workspace in a result passed to a client.
+	class NamedFile
+	{
+		public Core::String profile;
+		public Core::String project;
+	}
+
 	class LspPool
 	{
 		[operator("create")] public void Init() {}
@@ -40,6 +47,12 @@ namespace Ied
 		public Core::String ServerRequest(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params);
 		// Its profile's initializationOptions with its initializationOptionsFile merged over them (the file's keys win).
 		public Core::String InitializationOptions(const LanguageServer* language);
+		// Whether one of the workspace's servers named the file outside it (`uri` as CanonicalFileUri gives it) in a
+		// result passed to a client: only such a file opens as a document (docs/10 "Files outside the workspace").
+		public bool WasNamed(Workspace* ws, Core::StringView uri) const;
+		// Records that the server (`profile`, `project`) named the file outside `ws`; the first to name it serves it. The
+		// test hooks name one with no server.
+		public void NameFile(Workspace* ws, Core::StringView uri, Core::StringView profile, Core::StringView project);
 
 	private:
 		// The profiles of the plugins loaded for `ws` whose `when` holds, in load order.
@@ -49,6 +62,8 @@ namespace Ied
 		private LanguageServer* Create(Workspace* ws, LspProfile* profile, const ProjectModel* project);
 		// The server that serves `doc` - created and started, with `start`, when there is none yet - or null.
 		private LanguageServer* Serving(Document* doc, bool start);
+		// The server that named an external document's file, if it is still there.
+		private LanguageServer* NamerOf(const Document* doc) const;
 		private LanguageServer* Ready(Call& call, Document* doc);
 		private void OpenOn(LanguageServer* language, Document* doc);
 		private void Diagnostics(LanguageServer* language, const Serialization::DomNode& params);
@@ -62,7 +77,8 @@ namespace Ied
 		private Core::String StatusSnapshot(Workspace* ws) const;
 		private bool TextOf(Workspace* ws, Core::StringView uri, Core::String& text);
 		private const LineIndex* LinesOf(Workspace* ws, Core::StringView uri);
-		private Core::String ToClientUri(Workspace* ws, Core::StringView uri) const;
+		// The workspace's files as ied: URIs; another file's canonical file: URI, recorded as named by `language`.
+		private Core::String ToClientUri(LanguageServer* language, Core::StringView uri);
 		private Core::String ToServerUri(Core::StringView uri) const;
 		// The rewrite of a message to (or from) `language`, whose positions without a URI belong to `uri`.
 		private Rewrite RewriteFor(LanguageServer* language, Core::StringView uri, bool toServer);
@@ -78,6 +94,7 @@ namespace Ied
 		private Core::Array<LanguageServer*> languages;
 		private Core::HashMap<Core::String, FileDiagnostics*> diagnostics;   // "<wsId>/<path>"
 		private Core::HashMap<Core::String, LineIndex*> lineCache;           // by URI, for one message
+		private Core::HashMap<Core::String, NamedFile*> named;               // "<wsId>|<file URI>" 
 	}
 
 	// A params object's JSON with "textDocument": {"uri": `uri`} in place of any it had.

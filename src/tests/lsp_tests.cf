@@ -100,6 +100,9 @@ class LspTests {
 		assert_true(Ied::PathOfFileUri(Core::StringView("file:///home/x/%C3%A9.c"), path) && path == "/home/x/\xc3\xa9.c", "a POSIX path");
 		assert_true(!Ied::PathOfFileUri(Core::StringView("http://x/a.c"), path) && !Ied::PathOfFileUri(Core::StringView("file:///a%2"), path), "another scheme, a bad escape");
 		assert_se("ied://w1/src/my%20main.c", Ied::IedUriOf(Core::StringView("w1"), Core::StringView("src/my main.c")).CStr(), "an ied URI");
+		assert_se("file:///C:/My%20Lib/a.h", Ied::CanonicalFileUri(Core::StringView("file:///c%3A/My Lib/a.h")).CStr(), "the canonical form of a file URI");
+		assert_se("file:///home/x/a.h", Ied::CanonicalFileUri(Core::StringView("file:///home/x/a.h")).CStr(), "a POSIX one as it is");
+		assert_true(Ied::CanonicalFileUri(Core::StringView("http://x/a.h")).IsEmpty(), "not a file URI");
 		Core::String wsId;
 		Core::String relative;
 		assert_true(Ied::ParseIedUri(Core::StringView("ied://w1/src/my%20main.c"), wsId, relative) && wsId == "w1" && relative == "src/my main.c", "parsed");

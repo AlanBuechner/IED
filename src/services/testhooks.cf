@@ -1,5 +1,6 @@
 include "testhooks.ch"
 include "host/server.ch"
+include "lsp/uris.ch"
 
 namespace Ied
 {
@@ -21,6 +22,7 @@ namespace Ied
 		server->rpc.Register("testhooks.restart", [self](Call& call, const Params& params) -> Core::String { return self->Restart(call, params); });
 		server->rpc.Register("testhooks.scratch", [self](Call& call, const Params& params) -> Core::String { return self->Scratch(call, params); });
 		server->rpc.Register("testhooks.serverEdit", [self](Call& call, const Params& params) -> Core::String { return self->ServerEdit(call, params); });
+		server->rpc.Register("testhooks.external", [self](Call& call, const Params& params) -> Core::String { return self->External(call, params); });
 		server->rpc.Register("testhooks.mintToken", [self](Call& call, const Params& params) -> Core::String { return self->MintToken(call, params); });
 	}
 
@@ -255,6 +257,30 @@ namespace Ied
 		json.Field("path", path.View());
 		json.Field("text", text.View());
 		json.IntField("revision", revision);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// {name, text}: a file outside the workspace (in the data folder) that counts as named by a language server
+	// (docs/10 "Files outside the workspace"): {wsId, uri}.
+	Core::String TestHooks::External(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->First();
+		if (!ws) throw RpcError(ErrorCode::Unavailable, "no workspace is open");
+		Core::String name = params.Str("name");
+		if (name.IsEmpty() || name.View().IndexOf('/', 0) >= 0 || name.View().IndexOf('\\', 0) >= 0 || name.View().StartsWith(Core::StringView("."))) throw RpcError(ErrorCode::BadRequest, "name is a plain file name");
+		FS::Path folder = FS::Path(server->config.dataDir.View()) / "testhooks-external";
+		FS::MakeDirectories(folder.CStr());
+		FS::Path file = folder / name.CStr();
+		Core::String text = params.Str("text", Core::StringView(""));
+		FS::File written = FS::File(file.CStr(), "wb");
+		written.Write((const void*)text.CStr(), text.ByteLength());
+		written.Close();
+		Core::String uri = CanonicalFileUri(FileUriOf(Core::StringView(file.CStr())).View());
+		server->lsp->NameFile(ws, uri.View(), Core::StringView(""), Core::StringView(""));
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", ws->wsId.View());
+		json.Field("uri", uri.View());
 		json.EndObject();
 		return json.ToString();
 	}
