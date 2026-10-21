@@ -321,3 +321,39 @@ class SettingsTests(MockCase):
 		self.assertEqual((True, "llama.cpp"), (probe["ok"], probe["server"]))
 		gone = await client.request("ai.probe", {"wsId": "w1", "profile": {"endpoint": "http://127.0.0.1:9/v1"}})
 		self.assertFalse(gone["ok"])
+
+
+class GitTests(MockCase):
+	async def test_the_repository_follows_what_is_done(self):
+		client = await self.client()
+		repos = await self.subscribed(client, "gitrepos:w1")
+		self.assertEqual(["r1"], [r["repoId"] for r in repos["repos"]])
+		snap = await self.subscribed(client, "git:r1")
+		self.assertEqual(("port/logging", 2), (snap["head"]["branch"], snap["head"]["ahead"]))
+		self.assertEqual({"staged", "unstaged", "untracked", "conflicted"}, set(snap["changes"]))
+		self.assertEqual(["agents/fix-time-test", "master", "port/events", "port/logging"], [b["name"] for b in snap["refs"]["branches"]])
+		log = await client.request("git.log", {"repoId": "r1", "limit": 5})
+		self.assertEqual((5, True), (len(log["commits"]), log["more"]))
+		self.assertEqual(2, len([c for c in (await client.request("git.log", {"repoId": "r1"}))["commits"] if len(c["parents"]) == 2]) + 1, "one merge")
+		shown = await client.request("git.show", {"repoId": "r1", "oid": log["commits"][0]["oid"][:7]})
+		self.assertTrue(shown["files"])
+		await client.request("git.stage", {"repoId": "r1", "paths": ["src/game/player.c"]})
+		changed = (await client.wait_for("git:r1", lambda f: f.get("kind") == "status.changed"))[-1]["data"]
+		self.assertEqual(["docs/design.md", "src/game/player.c"], sorted(c["path"] for c in changed["changes"]["staged"]))
+		made = await client.request("git.commit", {"repoId": "r1", "message": "Player: faster"})
+		head = (await client.wait_for("git:r1", lambda f: f.get("kind") == "status.changed" and f["data"]["head"]["oid"] == made["oid"]))[-1]["data"]
+		self.assertEqual(([], 3), (head["changes"]["staged"], head["head"]["ahead"]))
+		self.assertEqual("Player: faster", (await client.request("git.log", {"repoId": "r1", "limit": 1}))["commits"][0]["subject"])
+		with self.assertRaises(RpcFailure) as unmerged:
+			await client.request("git.branchDelete", {"repoId": "r1", "name": "agents/fix-time-test"})
+		self.assertEqual("conflict", unmerged.exception.code)
+
+	async def test_push_streams_as_an_operation(self):
+		client = await self.client()
+		await self.subscribed(client, "git:r1")
+		started = await client.request("git.push", {"repoId": "r1"})
+		frames = await client.wait_for("git:r1", lambda f: f.get("kind") == "op.end", timeout=10)
+		self.assertTrue([f for f in frames if f.get("kind") == "op.progress" and f["data"].get("percent") == 100])
+		self.assertEqual((started["opId"], True), (frames[-1]["data"]["opId"], frames[-1]["data"]["ok"]))
+		head = (await client.wait_for("git:r1", lambda f: f.get("kind") == "status.changed"))[-1]["data"]["head"]
+		self.assertEqual(0, head["ahead"], "pushed")

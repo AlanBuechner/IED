@@ -2,6 +2,7 @@
 screenshots the states that matter. Both servers run every scenario unless it names one."""
 
 import json
+import os
 import time
 
 from harness import check
@@ -947,10 +948,12 @@ def server_edits_while_typing(run):
 def phone_panes(run):
 	page = run.open()
 	slots = run.texts(".phone-nav .pn > span:not(.ci)")
-	check(slots[:4] == ["Chat", "Editor", "Solution Explorer", "Output"] and slots[-1] == "More", "the slots: %s" % slots)
+	check(slots[:4] == ["Chat", "Editor", "Git", "Solution Explorer"] and slots[-1] == "More", "the slots: %s" % slots)
+	page.click(".phone-nav .pn[data-pane='ied.explorer']")
 	page.wait_for_selector(".phone-pane .tree-row:has-text('README.md')")
 	run.shot("explorer")
-	page.click(".phone-nav .pn[data-pane='ied.output']")
+	page.click(".phone-nav .pn[aria-label='More']")
+	page.click(".menu.sheet .menu-item:has-text('Output')")
 	page.wait_for_selector(".phone-pane .output-text")
 	run.shot("output")
 	page.click(".phone-nav .pn[data-pane='ied.explorer']")
@@ -1116,3 +1119,67 @@ def model_settings(run):
 	run.shot("groups")
 	groups = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
 	check(groups["ai.defaultGroup"]["value"] == "group" and groups["ai.groups"]["value"]["group"]["planning"]["model"] == primary, "written to the User tier: %s" % groups["ai.groups"])
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Git (docs/10 "Git", mockup 05): the mock's canned repository; the real server's is the fixture made a repository
+# (targets.make_repository).
+
+def open_git(run):
+	page = run.open()
+	if run.target.kind == "real":
+		run.request("ws.setTrust", {"wsId": page.evaluate("ied_shell.wsId"), "trusted": True})
+	run.show_activity("ied.git")
+	if run.phone:
+		page.click(".phone-nav .pn[data-pane='activity:ied.git']")
+	page.wait_for_selector(".git-row:not(.local)", timeout=20000)
+	return page
+
+
+@scenario(viewports=("desktop",))
+def git_stage_commit_branch_search(run):
+	page = open_git(run)
+	real = run.target.kind == "real"
+	path = "src/e2e-notes.txt" if real else "src/game/player.c"
+	if real:
+		with open(os.path.join(run.target.workspace, "src", "e2e-notes.txt"), "w", encoding="utf-8") as f:
+			f.write("from the e2e run" + chr(10))
+	page.wait_for_selector(".git-row.local")
+	check("main" in run.texts(".git-row .ref.head") if real else "port/logging" in run.texts(".git-row .ref.head"), "HEAD's branch labels its commit")
+	run.shot("graph")
+	page.click(".git-row.local")
+	row = ".git-changes .git-file[data-path='%s']" % path
+	page.hover(row)
+	page.click(row + " button[aria-label='Stage %s']" % path)
+	page.wait_for_selector(row + " button[aria-label='Unstage %s']" % path, state="attached")
+	page.click(row)
+	page.wait_for_selector(".git-diff .dl.add")
+	run.shot("staged")
+	page.fill(".git-message", "e2e: a commit")
+	page.click(".git-composer button:has-text('Commit')")
+	page.wait_for_selector(".git-row:has-text('e2e: a commit')")
+	page.click(".git-row:has-text('e2e: a commit')")
+	page.wait_for_selector(".cmeta .subject:has-text('e2e: a commit')")
+	page.wait_for_selector(".cfiles .git-file[data-path='%s']" % path)
+	page.wait_for_selector(".git-diff .dl")
+	run.shot("details")
+	page.click(".git-bar button:has-text('Branch')")
+	page.fill(".dialog input", "e2e/branch")
+	page.press(".dialog input", "Enter")
+	page.wait_for_selector(".git-refs .row.sel-dim:has-text('e2e/branch')")
+	page.fill(".git-search", "Fixture" if real else "Ring")
+	page.wait_for_function("document.querySelectorAll('.git-row').length === 1")
+	run.shot("search")
+	repo = run.request("git.repos", {"wsId": page.evaluate("ied_shell.wsId")})["repos"][0]["repoId"]
+	run.request("git.checkout", {"repoId": repo, "branch": "main" if real else "port/logging"})
+
+
+@scenario(viewports=("phone",))
+def git_on_a_phone(run):
+	page = open_git(run)
+	run.shot("graph")
+	page.click(".git-row:not(.local) >> nth=0")
+	page.wait_for_selector(".git-act.detail-open .cmeta .subject")
+	run.shot("details")
+	page.click(".git-back")
+	page.wait_for_selector(".git-row:not(.local)")

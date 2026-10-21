@@ -69,12 +69,12 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `diag:<wsId>` | `diag.set {path, source, items}` (LSP diagnostics, UTF-16 ranges; `docs/24`) | all current diagnostics, `{files: {<path>: {<source>: [diagnostic]}}}` |
 | `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |
 | `run:<runId>` | `step.start`, `output` (source, text), `step.end`, `run.end` | task run state + output tail |
-| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`), the `ai` source (the AI's `shell_run` commands and their output, `docs/13`) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
+| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `build`, `run`, `test` and `debug` sources of its tasks (`docs/06`), the `ai` source (the AI's `shell_run` commands and their output, `docs/13`), the `git` source (the git commands that change something, with what git said, "Git" below) and the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
 | `terms:<wsId>` | `term.added`, `term.changed`, `term.removed` (a terminal's summary) | `{terminals: [summary]}`: the workspace's terminals, in the order they were made; a summary is `{termId, wsId, title, kind, alive, exitCode, holder}` |
 | `term:<termId>` | `data {data}` (coalescible), `resize {cols, rows}`, `exit {code}`, `lease {holder}` | `{terminal: summary, cols, rows, scrollback}`: `scrollback` is the last 256 KB of output, replayed by a client to rebuild the screen |
 | `dbg:<wsId>`, `dbg:<wsId>:<sessionId>`, `bp:<wsId>` | the debugger's (`docs/25` "The server as built") | the workspace's debug sessions, one session's stop, the breakpoints |
 | `prof:<captureId>` | `stats`, `progress` | capture summary (timeline data is fetched via requests/blobs) |
-| `git:<repoId>` | `status.changed`, `refs.changed`, `op.progress` | status + refs |
+| `git:<repoId>` | `status.changed`, `refs.changed`, `op.progress`, `op.end` | head, changes, refs and the running operation ("Git" below) |
 
 Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is generic.
 
@@ -235,6 +235,50 @@ Events:
 | `context.changed` | `{window, used, parts: [{name, tokens}]}`: the last request's prompt by part against the model's window (0 when unknown) |
 | `turn.stats` | `{turnId, tokensIn, tokensOut, ttftMs, genMs}` after each request |
 | `turn.end` | `{turnId, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, endedMs}`: `stop` is `finished`, `user_cancelled`, `no_model`, `interrupted` or the stop reason that paused the chat (`docs/12` taxonomy); `recoveries` the recovery actions taken, in order ("retried after http_error 503 (1x)") |
+
+## Git
+
+`src/git/` runs the **git CLI** (`docs/99` #14) in the repository without the server lock, with no optional locks (`GIT_OPTIONAL_LOCKS=0`: a status never rewrites the index and wakes the watcher), `-c core.quotepath=off`, `GIT_TERMINAL_PROMPT=0`, `LC_ALL=C`, `GIT_EDITOR=:` and machine formats (`status --porcelain=v2 -z`, `log` and `for-each-ref` with unit-separator fields). A command that changes something goes to the workspace's `git` Output source with what git said. A workspace without git on `PATH` (or the `git.path` setting) has no repositories, and `git.repos` says why. Git never runs in an untrusted workspace: a repository's configuration (`core.fsmonitor`, hooks) runs programs, so `gitrepos:<wsId>` says `untrusted` and its repositories come back when it is trusted.
+
+**Repositories.** A workspace's repositories are the one its folder is in (`rev-parse --show-toplevel`, which may be above it) and those found in its folders down to `git.scanDepth` (2) levels, `build`-like folders skipped (the `fs.search` default excludes); a submodule is one too. A thread of the git service finds them when the workspace opens (or is trusted) and lists them on `gitrepos:<wsId>`. Each gets a `repoId` for this server run (`r1`, `r2`, ...). A change under a repository's folder or its git dir (the workspace watcher, "Files changed on disk"; a git dir outside the workspace folder gets a watcher of its own) reads its status again after 150 ms of quiet, at most once a second while changes keep coming; a change in the git dir other than `objects/`, `logs/` and lock files reads its refs too. A method that changes something reads both before it answers.
+
+| Method | Params | Answer |
+|---|---|---|
+| `git.repos` | `wsId` | `{repos: [{repoId, root, name, kind}], error, discovering}`: `root` workspace-relative (`""` the folder itself; `..` when the repository is above it), `kind` `repo` or `submodule`; `error` is `untrusted`, or why git cannot run; `discovering` while the repositories are being found. The same as `gitrepos:<wsId>`'s snapshot |
+| `git.log` | `repoId, skip?, limit?` (200, at most 2000), `query?` | `{commits: [commit], more}`, newest first in date order over every ref (`--all --date-order`), the stashes left out. `commit` is `{oid, parents, author, email, authorMs, subject}`. `query` keeps the commits whose message, author or email has it (ASCII letters in any case) or whose hash starts with it; `skip` and `limit` then count matches |
+| `git.show` | `repoId, oid` | `{oid, parents, author, email, authorMs, committer, committerEmail, commitMs, subject, body, files: [{path, oldPath?, status, added, removed, binary}]}`: `status` `A`, `M`, `D`, `R`, `C`, `T`; the files against the first parent (a root commit: against nothing) |
+| `git.diff` | `repoId, path`, and `oid` (a commit's change to the file) or `staged` (true: index against HEAD; false: the work tree against the index), `context?` (3) | `{path, oldPath?, binary, hunks: [{oldStart, oldLines, newStart, newLines, header, lines}], truncated}`: `lines` start with `+`, `-` or a space; a diff over 2 MB is cut (`truncated`) |
+| `git.fileAt` | `repoId, path, rev` (a commit, `:` the index, `""` the work tree) | `{text, binary, missing, truncated}` (4 MB at most): a side of a side-by-side diff |
+| `git.stage` / `git.unstage` | `repoId, paths` | `{}`: `add --` / `restore --staged --` (a new repository: `rm --cached`) |
+| `git.stagePatch` | `repoId, path, staged, hunk, header, lines?` | `{}`: hunk `hunk` of the file's `git.diff` (with `staged` false, the work tree's diff; true, the staged one), or the line indexes `lines` of it, staged (or unstaged); the patch is built here (`src/git/patch`: the lines not chosen are left out or kept as context) and applied with `apply --cached --recount` (`-R` to unstage). `header` is the hunk's header as the caller saw it: `conflict` when the diff has changed since |
+| `git.discardPatch` | `repoId, path, hunk, header, lines?` | `{}`: the same for the work tree's diff, taken out of the work tree (`apply -R --recount`) |
+| `git.discard` | `repoId, paths` | `{}`: tracked files back to the index (`restore --`); untracked ones to the IED trash (`docs/10` "Files") |
+| `git.commit` | `repoId, message, amend?, signoff?` | `{oid}`; `bad_request` when nothing is staged (and not `amend`) or the message is empty |
+| `git.lastMessage` | `repoId` | `{message}`: HEAD's, for amend |
+| `git.checkout` | `repoId, branch, remote?` | `{}`: `switch` to a local branch; with `remote`, `branch` is a remote one (`origin/x`) and a local branch tracking it is made. Local changes go along when they can; when the checkout would overwrite them: `conflict` with `data.files`, and the client offers to stash them first |
+| `git.branch` | `repoId, name, from?` (HEAD), `checkout?` | `{}` |
+| `git.branchDelete` | `repoId, name, force?` | `{}`; an unmerged branch without `force`: `conflict` with git's words |
+| `git.branchRename` | `repoId, name, to` | `{}` |
+| `git.stash` | `repoId, message?, untracked?, keepIndex?` | `{}` |
+| `git.stashApply` | `repoId, index, pop?` | `{}`; `conflict` with git's words when it does not apply cleanly |
+| `git.stashDrop` | `repoId, index` | `{}` |
+| `git.fetch` | `repoId, remote?` (all), `prune?` | `{opId}` |
+| `git.pull` | `repoId, mode?` (`git.pullMode`: `merge`, `rebase`, `ffOnly`) | `{opId}` |
+| `git.push` | `repoId, remote?, branch?` (the current), `setUpstream?`, `forceWithLease?` | `{opId}`; never a plain force |
+
+Fetch, pull and push are **operations**: one at a time per repository (`busy` otherwise), run with `--progress`, their lines streamed as `op.progress` and their end as `op.end`. They never ask for credentials on a terminal; Git Credential Manager may show its own window on the server's desktop (F-GIT-25 puts its prompts in the UI later).
+
+| Topic | Events | Snapshot |
+|---|---|---|
+| `gitrepos:<wsId>` | `repos.changed` (the snapshot again) | `{repos, error, discovering}` (`git.repos`) |
+| `git:<repoId>` | `status.changed {head, changes}`, `refs.changed {refs}`, `op.progress {opId, kind, line, percent?}`, `op.end {opId, kind, ok, error?}` | `{repoId, root, head, changes, refs, op}` |
+
+- `head`: `{branch, oid, detached, upstream, ahead, behind, state}`; `branch` empty when detached or before the first commit, `state` `""`, `merging`, `rebasing`, `cherryPicking`, `reverting` or `bisecting`.
+- `changes`: `{staged, unstaged, untracked, conflicted}`, each a list of `{path, oldPath?, status}` (`status` as in `git.show`; `?` untracked; a conflict's `status` is its two letters, `UU`, `AA`, ...). At most 5000 a list (`truncated: true`).
+- `refs`: `{branches: [{name, oid, upstream, ahead, behind, current, gone}], remotes: [{name, url, branches: [{name, oid}]}], tags: [{name, oid}], stashes: [{index, message, oid}], worktrees: [{path, branch, oid, current, locked}], submodules: [{path, oid, state}]}`; the oids are full, `gone` an upstream that no longer exists.
+- `op`: the running operation `{opId, kind, title, lines}` (its last 20 lines), or null.
+
+The commit graph's lanes are laid out by the client from the commits' parents (`plugins/git`), so paging only appends.
 
 ## Liveness
 

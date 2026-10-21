@@ -24,6 +24,7 @@ include "lsp/pool.ch"
 include "tasks/service.ch"
 include "dap/service.ch"
 include "ai/service.ch"
+include "git/service.ch"
 
 namespace Ied
 {
@@ -67,6 +68,7 @@ namespace Ied
 		public Breakpoints* breakpoints;
 		public Debugger* debugger;
 		public Chats* chats;
+		public Git* git;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;

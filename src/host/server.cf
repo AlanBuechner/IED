@@ -42,8 +42,10 @@ namespace Ied
 		breakpoints = new Breakpoints(self);
 		debugger = new Debugger(self);
 		chats = new Chats(self);
+		git = new Git(self);
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
-		// From here on the log pump (and each workspace's watcher once it opens) reaches the services under the lock.
+		// From here on the log pump, the git thread and each workspace's watcher once it opens reach the services under the
+		// lock.
 		Threading::LockGuard guard(lock);
 		workspaces = new Workspaces(self);
 		if (config.testHooks) testHooks = new TestHooks(self);

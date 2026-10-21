@@ -9,7 +9,7 @@ import sys
 from frames import FrameChecker
 from hub import Hub
 from rpc import Rpc
-from services import chat, debug, docs, layout, lsp, outputs, plugins, presence, settings, tasks, terminals, testhooks, workspace
+from services import chat, debug, docs, git, layout, lsp, outputs, plugins, presence, settings, tasks, terminals, testhooks, workspace
 
 MB = 1024 * 1024
 
@@ -87,6 +87,7 @@ class Server:
 		self.debug = debug.Debugger(self)
 		self.terminals = terminals.Terminals(self)
 		self.chat = chat.Chats(self)
+		self.git = git.Git(self)
 		self.testhooks = testhooks.TestHooks(self)
 
 	def check_outgoing(self, frame):

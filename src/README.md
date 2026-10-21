@@ -38,6 +38,7 @@ no `--port`, a taken 8765 falls back to a free port; `--control <name>` names th
 | `tasks/` | `model`, `service`, `runner`, `expand`, `selections`, `matcher` | `docs/06`: what projects offer to run, the toolbar's selections, runs with their steps, problem matchers |
 | `dap/` | `providers`, `session`, `breakpoints`, `service` | `docs/25`: debug adapters from plugins (stdio or TCP), sessions, the workspace's breakpoints and watches |
 | `ai/` | `wire/`, `step`, `classify`, `models`, `probe`, `permissions`, `prompts`, `tools/`, `run*`, `chat`, `chatstore`, `service` | `docs/04` "As built": the model wire (SSE, streaming requests, completions, dialects), a step under its watchdogs, the stop taxonomy, model profiles and groups, what a server says of itself, permissions, the system message, the core tools, the turn loop with its recoveries (`docs/12`), chats on disk and `chat.*` |
+| `git/` | `cli`, `parse`, `patch`, `discover`, `repo`, `service`, `methods`, `changes`, `ops` | `docs/10` "Git": the git CLI run without the lock in machine formats and read into values, the patch that stages a hunk or some of its lines, a workspace's repositories found by a thread of its own, each repository's `git:<repoId>` kept current from file changes, `git.*`, fetch / pull / push as operations that stream |
 | `tests/` | `*_tests.cf` | unit tests of the honest parts (`nuke test ied-server`) |
 
 Methods run holding the server lock, as the mock's single thread does, and release it only to wait (`Call::Sleep`); each

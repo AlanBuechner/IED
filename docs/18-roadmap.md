@@ -72,6 +72,8 @@ Git plugin core (graph, details, local changes, stage by hunk/line, commit with 
 
 **Exit:** J2 (leave it running, steer from the phone), J10 at phone width.
 
+**Status (2026-10-21):** the Git plugin core is built (`docs/05` "git" As built, `docs/10` "Git"): the graph, details, local changes staged by file, hunk or line, commit and amend, fetch / pull / push as streamed operations, stashes, branches, at desktop and phone width. Open: the AI commit message, Mission Control, notifications, the phone-first polish.
+
 ## M6 - P0 complete: the daily driver
 
 Context ledger + tiered compression + history tools; checkpoints + rewind; skills index/search + skill_write; settings window complete for P0 (models, groups, prompts, plugins, remote access); privacy taint; legacy-workspace importer; portable zip.

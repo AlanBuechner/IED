@@ -73,7 +73,8 @@ class Run:
 	def show_activity(self, activity):
 		"""A fresh layout opens on the first activity (Chat); most scenarios work in another."""
 		self.page.evaluate("(id) => ied_shell.showActivity(id)", activity)
-		self.page.wait_for_selector(".phone-nav .pn" if self.phone else (".chat-act:visible" if activity == "ied.chat" else ".dock-group:visible"), timeout=20000)
+		own = {"ied.chat": ".chat-act:visible", "ied.git": ".git-act:visible"}
+		self.page.wait_for_selector(".phone-nav .pn" if self.phone else own.get(activity, ".dock-group:visible"), timeout=20000)
 		self.page.wait_for_function("!ied_shell.layout.dirty && !ied_shell.layout.saving", timeout=10000)
 
 	def goto(self):

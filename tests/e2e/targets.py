@@ -19,6 +19,25 @@ FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
 FIXTURE = os.path.join(HERE, "fixture", "workspace")
 
 
+def make_repository(folder):
+	"""The fixture copy as a git repository with some history for the Git activity: the files on main, tagged v1, and
+	a branch with a commit of its own."""
+	def git(*args):
+		subprocess.run(["git", "-c", "core.autocrlf=false", *args], cwd=folder, check=True, capture_output=True)
+	git("init", "-q", "-b", "main")
+	git("config", "user.name", "e2e")
+	git("config", "user.email", "e2e@example.com")
+	git("add", ".")
+	git("commit", "-q", "-m", "Fixture: the workspace")
+	git("tag", "v1")
+	git("switch", "-q", "-c", "feature/ideas")
+	with open(os.path.join(folder, "docs", "ideas.md"), "w", encoding="utf-8", newline="") as f:
+		f.write("# Ideas" + chr(10))
+	git("add", ".")
+	git("commit", "-q", "-m", "Docs: ideas")
+	git("switch", "-q", "main")
+
+
 class Target:
 	kind = ""
 
@@ -76,6 +95,8 @@ class RealTarget(Target):
 		self.root = tempfile.mkdtemp(prefix="ied-e2e-")
 		workspace = os.path.join(self.root, "e2e")
 		shutil.copytree(FIXTURE, workspace)
+		make_repository(workspace)
+		self.workspace = workspace
 		argv = [self.executable, "--host", "127.0.0.1", "--port", "0", "--data", os.path.join(self.root, "data"), "--control", "ied-e2e-" + secrets.token_hex(6),
 			"--test-hooks", "--quiet", "--static", FRONTEND, "--workspace", workspace]
 		self.process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

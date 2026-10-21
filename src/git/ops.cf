@@ -1,0 +1,144 @@
+// Fetch, pull and push (docs/10 "Git"): operations that run on a thread of their own, one at a time per repository,
+// their progress lines streamed as op.progress and their end as op.end, everything they say in the Git output.
+
+include "service.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	const int64 kGitOpReadMs = 250;
+
+	// `git pull`'s mode from the call, or the git.pullMode setting.
+	static const char* PullFlag(Core::StringView mode) {
+		if (mode == "rebase") return "--rebase";
+		if (mode == "ffOnly") return "--ff-only";
+		return "--no-rebase";
+	}
+
+	static Core::Array<Core::String> OpArgs(const char* kind, const Params& params, Core::StringView pullMode) {
+		Core::Array<Core::String> arguments = GitArgs(kind, "--progress");
+		Core::String remote = Core::String(params.Str("remote", Core::StringView("")).View().Trimmed());
+		if (remote.View().StartsWith(Core::StringView("-"))) throw RpcError(ErrorCode::BadRequest, "remote is not a name git takes");
+		if (Core::StringView(kind) == "fetch") {
+			if (params.Bool("prune", false)) arguments.Push(Core::String("--prune"));
+			if (remote.IsEmpty()) arguments.Push(Core::String("--all"));
+			else arguments.Push(remote);
+		}
+		else if (Core::StringView(kind) == "pull") arguments.Push(Core::String(PullFlag(params.Str("mode", pullMode).View())));
+		else {
+			if (params.Bool("forceWithLease", false)) arguments.Push(Core::String("--force-with-lease"));
+			if (params.Bool("setUpstream", false)) arguments.Push(Core::String("--set-upstream"));
+			Core::String branch = Core::String(params.Str("branch", Core::StringView("")).View().Trimmed());
+			if (branch.View().StartsWith(Core::StringView("-"))) throw RpcError(ErrorCode::BadRequest, "branch is not a name git takes");
+			if (!remote.IsEmpty() || !branch.IsEmpty()) arguments.Push(remote.IsEmpty() ? Core::String("origin") : remote);
+			if (!branch.IsEmpty()) arguments.Push(branch);
+		}
+		return arguments;
+	}
+
+	Core::String Git::OpMethod(Call& call, const Params& params, const char* kind) {
+		GitRepo* repo = RepoFor(params);
+		if (repo->op) throw RpcError(ErrorCode::Busy, (Core::String("a ") + repo->op->kind.View() + " is running in this repository").View());
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String pullMode = Core::String(Serialization::ReadJson(server->settings->Effective(repo->ws, Core::StringView(""), Core::StringView("git.pullMode")).View(), *doc).root.AsView());
+		Core::Array<Core::String> arguments = OpArgs(kind, params, pullMode.View());
+		GitOp* op = new GitOp();
+		opCount += 1;
+		Core::StringBuilder id;
+		id.Append("op");
+		id.AppendInt(opCount);
+		op->opId = id.ToString();
+		op->kind = Core::String(kind);
+		op->title = GitCommandLine(arguments);
+		repo->op = op;
+		Log(repo, ((Core::String("> ") + op->title.View()) + "\n").View());
+		OpLine(repo, op, op->title.View());
+		Process::StartInfo info = CliFor(repo->ws).StartInfoFor(repo->root, arguments);
+		Git* self = this;
+		Threading::Thread::Run([self, repo, op, info]() { self->RunOp(repo, op, info); }).Detach();
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("opId", op->opId.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// "Receiving objects:  45% (9/20)" -> 45; -1 without a percentage.
+	static int64 Percent(Core::StringView line) {
+		const int64 sign = line.IndexOf('%', 0);
+		if (sign <= 0) return -1;
+		int64 start = sign;
+		while (start > 0 && line.ByteAt(start - 1) >= '0' && line.ByteAt(start - 1) <= '9') start -= 1;
+		int64 value = -1;
+		if (start < sign) Core::ParseInt64(line.Substring(start, sign - start), value);
+		return value;
+	}
+
+	void Git::OpLine(GitRepo* repo, GitOp* op, Core::StringView line) {
+		op->lines.Push(Core::String(line));
+		if (op->lines.Count() > kGitOpLines) op->lines.RemoveAt(0);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("opId", op->opId.View());
+		json.Field("kind", op->kind.View());
+		json.Field("line", line);
+		const int64 percent = Percent(line);
+		if (percent >= 0) json.IntField("percent", percent);
+		json.EndObject();
+		server->hub.Publish(repo->Topic().View(), "op.progress", json.View());
+	}
+
+	// Hands the complete lines of `pending` (ended by \n or a progress line's \r) to OpLine; keeps the rest.
+	static Core::Array<Core::String> TakeLines(Core::String& pending) {
+		Core::Array<Core::String> lines;
+		Core::StringView text = pending.View();
+		int64 start = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			if (text.ByteAt(i) != '\n' && text.ByteAt(i) != '\r') continue;
+			Core::StringView line = text.Substring(start, i - start).Trimmed();
+			if (!line.IsEmpty()) lines.Push(Core::String(line));
+			start = i + 1;
+		}
+		pending = Core::String(text.Substring(start, text.ByteLength() - start));
+		return lines;
+	}
+
+	// The operation's thread, holding no lock while git runs.
+	void Git::RunOp(GitRepo* repo, GitOp* op, Process::StartInfo info) {
+		Process::Child child = Process::Child::Start(info);
+		Core::String problem;
+		Core::StringBuilder said;
+		int64 code = -1;
+		if (!child.IsOpen()) problem = Core::String("git did not start: ") + child.Error();
+		else {
+			Core::String pending;
+			char8[8192] buffer;
+			while (child.HasOutput()) {
+				Process::Stream from;
+				const int64 got = child.ReadAny((void*)&buffer[0], 8192, from, kGitOpReadMs);
+				if (got == Process::kTimedOut) continue;
+				if (got <= 0) break;
+				Core::StringView text = Core::StringView(&buffer[0], got);
+				said.Append(text);
+				pending = pending + text;
+				Core::Array<Core::String> lines = TakeLines(pending);
+				Threading::LockGuard guard(server->lock);
+				for (const Core::String& line : lines) OpLine(repo, op, line.View());
+			}
+			code = child.Wait(10000);
+			if (code != 0) problem = op->lines.IsEmpty() ? Core::String("git failed") : op->lines[op->lines.Count() - 1];
+		}
+		Threading::LockGuard guard(server->lock);
+		repo->op = nullptr;
+		Log(repo, said.View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("opId", op->opId.View());
+		json.Field("kind", op->kind.View());
+		json.BoolField("ok", code == 0);
+		if (code != 0) json.Field("error", problem.View());
+		json.EndObject();
+		server->hub.Publish(repo->Topic().View(), "op.end", json.View());
+		Refresh(repo, true);
+	}
+}

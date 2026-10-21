@@ -1,0 +1,35 @@
+// The Git activity (docs/05 "git", features/09, mockup 05): a Fork-style view of the workspace's repositories - refs,
+// the commit graph, a commit's details and diffs, local changes staged by file, hunk or line, the commit composer,
+// branches, stashes, fetch, pull and push. Git itself runs on the server (src/git, docs/10 "Git"); this plugin is its
+// UI and declares its settings.
+{
+	"manifestVersion": 1,
+	"id": "ied.git",
+	"name": "Git",
+	"version": "0.1.0",
+	"description": "Source control: the commit graph, local changes, branches, stashes, fetch, pull and push.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Source Control" },
+		"activities": [
+			{ "id": "ied.git", "title": "Git", "icon": "$(source-control)", "order": 20, "phoneSlot": true, "view": "GitActivity" }
+		],
+		"statusBarItems": [
+			{ "id": "ied.git.status", "alignment": "right", "priority": 50, "view": "GitStatus", "command": "ied.git.show" }
+		],
+		"commands": [
+			{ "id": "ied.git.show", "title": "Git", "category": "View", "icon": "$(source-control)" },
+			{ "id": "ied.git.fetch", "title": "Fetch", "category": "Git", "icon": "$(repo-fetch)" },
+			{ "id": "ied.git.pull", "title": "Pull", "category": "Git", "icon": "$(repo-pull)" },
+			{ "id": "ied.git.push", "title": "Push", "category": "Git", "icon": "$(repo-push)" },
+			{ "id": "ied.git.newBranch", "title": "New Branch", "category": "Git", "icon": "$(git-branch)" },
+			{ "id": "ied.git.stash", "title": "Stash Local Changes", "category": "Git", "icon": "$(git-stash)" },
+			{ "id": "ied.git.commit", "title": "Commit Staged", "category": "Git", "icon": "$(check)" }
+		],
+		"keybindings": [
+			{ "command": "ied.git.show", "key": "ctrl+0 ctrl+g" }
+		]
+	}
+}

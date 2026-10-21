@@ -183,6 +183,7 @@ namespace Ied
 		server->breakpoints->WorkspaceOpened(ws);
 		server->debugger->WorkspaceOpened(ws);
 		server->chats->WorkspaceOpened(ws);
+		server->git->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;
@@ -335,6 +336,7 @@ namespace Ied
 			for (const Core::String& path : server->documents->OpenPaths(ws)) ExternalWrite(ws, path.View());
 		if (!published.IsEmpty() || batch.Overflowed()) PublishTree(ws, published, batch.Overflowed());
 		if (TouchesSolution(ws, batch)) ReadSolutionAgain(ws);
+		server->git->FilesChanged(ws, batch);
 	}
 
 	// Whether a change is someone else's; it updates what the server knows of the path either way.
@@ -594,6 +596,7 @@ namespace Ied
 		ws->trusted = trusted;
 		server->settings->TrustChanged(ws);
 		server->lsp->TrustChanged(ws);
+		server->git->TrustChanged(ws);
 		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();

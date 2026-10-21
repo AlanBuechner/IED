@@ -1,0 +1,25 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Git settings",
+	"type": "object",
+	"properties": {
+		"git.path": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "The git program. Empty: git on PATH."
+		},
+		"git.scanDepth": {
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 5,
+			"default": 2,
+			"description": "How many folders down from the workspace folder repositories are looked for, besides the one it is in."
+		},
+		"git.pullMode": {
+			"enum": ["merge", "rebase", "ffOnly"],
+			"default": "merge",
+			"description": "What Pull does with local commits: merge them, rebase them onto the upstream, or only fast-forward."
+		}
+	}
+}

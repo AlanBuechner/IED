@@ -4,6 +4,8 @@ Owner: `plugins/git` (UI + orchestration) on `src/git` (host plumbing).
 
 **Backend decision (recommended, see `docs/99` #14):** the **git CLI** is the backend for everything that mutates or touches the network (commit, merge, rebase, fetch/push, LFS, hooks, credential helpers) - so behavior matches the terminal exactly and Git Credential Manager, LFS and hooks just work. Read-heavy views (status, log graph, diff, blame) also start on the CLI with machine-readable formats (`--porcelain=v2 -z`, `log --format` with NUL separators); libgit2 stays vendored as a later optimization for the graph if profiling demands it. A custom source-control provider interface (`sourceControlProviders`) keeps room for Perforce/Fossil plugins.
 
+**Status (2026-10-21, `docs/05` "git" As built):** built - F-GIT-1 (the folder's repository, nested ones, submodules found; a picker when several), F-GIT-2, F-GIT-3 (no "jump to HEAD" button yet: a ref's click reveals its commit; search by message, author, email or hash, not path), F-GIT-4, F-GIT-10 (flat lists), F-GIT-11, F-GIT-12 (summary length and amend; no templates or recent messages), F-GIT-20 (force-with-lease and pull modes on the wire; the UI pushes plainly or sets the upstream), F-GIT-21, F-GIT-24 (create with untracked, apply, pop, drop; no stash diff view). The rest is open.
+
 ## Repository and overview
 
 | ID | Feature | Pri | Stories |

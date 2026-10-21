@@ -70,6 +70,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .btn.flat { background: transparent; border-color: transparent; color: var(--text-1); padding: 0 var(--space-3); }
 .btn.flat:hover { background: var(--veil); color: var(--text-0); }
 .btn.primary { background: var(--inverse-bg); border-color: var(--inverse-bg); color: var(--inverse-text); font-weight: var(--font-weight-semibold); }
+.btn:disabled, .btn:disabled:hover { background: transparent; border-color: var(--border-1); color: var(--text-3); cursor: default; }
+.btn.flat:disabled { border-color: transparent; }
 .btn .ci { width: 14px; height: 14px; vertical-align: 0; }
 
 /* ---------- chips, dots, badges ---------- */
@@ -175,6 +177,8 @@ select.input-field { padding-right: var(--space-2); }
 .popup.dialog.sheet { transform: none; width: auto; }
 .dialog-title { font-weight: var(--font-weight-semibold); color: var(--text-0); margin-bottom: var(--space-3); }
 .dialog-message { color: var(--text-1); overflow-wrap: anywhere; }
+.popup.dialog > .input-field { width: 100%; margin-top: var(--space-4); height: var(--row-h); padding: 0 var(--space-3); }
+.dialog-problem { min-height: 1.2em; margin-top: var(--space-2); font-size: var(--font-size-sm); }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-6); }
 .popup.dialog.sheet .dialog-buttons .btn { height: var(--row-h-touch); flex: 1; }
 .btn.danger { background: var(--accent-error); border-color: var(--accent-error); color: var(--inverse-text); font-weight: var(--font-weight-semibold); }
