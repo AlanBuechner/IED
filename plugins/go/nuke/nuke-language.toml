@@ -1,0 +1,6 @@
+# The Go plugin's Nuke driver (IED docs/26 section 6): a Nuke project with language = "go" builds, tests and runs through
+# the go tool; its IED task preset is go.nuke.
+[language]
+id = "go"
+module = "gotool.py"
+preset = "go.nuke"

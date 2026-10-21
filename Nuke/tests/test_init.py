@@ -74,7 +74,8 @@ class IedSolutionTests(WorkspaceTest):
 		self.assertEqual(["nuke", "init", "--ied"], solution["generator"]["run"])
 		self.assertEqual(["nuke.toml"], solution["items"])
 		project = json.loads(read(self.path("build", "ied", "Game.ied.proj")))
-		self.assertEqual({"version": 1, "name": "Game", "root": "../..", "kind": "executable", "buildSystem": {"id": "nuke", "projectName": "Game"},
+		self.assertEqual({"version": 1, "name": "Game", "root": "../..", "kind": "executable",
+			"buildSystem": {"id": "nuke", "projectName": "Game", "output": "${workspaceDir}/build/bin/${config}-windows-${arch}/Game/Game.exe"},
 			"presets": ["c4.nuke"], "language": "c4"}, project)
 		self.assertIn("1 project(s)", out)
 
@@ -98,6 +99,25 @@ class IedSolutionTests(WorkspaceTest):
 		self.assertFalse(os.path.exists(self.path("build", "ied", "Tools.ied.proj")), "a project gone: its file too")
 		self.assertIn("Game.ied.sln was not written by `nuke init --ied` or was edited since", out)
 		self.assertTrue(read(self.path("Game.ied.sln")).endswith(" "), "the hand edit stays")
+
+	def test_projects_in_other_languages(self):
+		"""IED docs/26 section 6: a Rust project gets the preset its package names and the program cargo builds; a pinned
+		package that is an IED plugin joins the solution's localPlugins."""
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n[languages]\ndialogue = \"tools/dialogue\"\n",
+			"Game/nuke.toml": "[project]\nlanguage = \"rust\"\n", "Game/Cargo.toml": "[package]\nname = \"rusty\"\n",
+			"Lines/nuke.toml": "[project]\nkind = \"library\"\nlanguage = \"dialogue\"\n",
+			"tools/dialogue/ied-plugin.json": "// the game's dialogue markup\n{\"id\": \"mygame.dialogue\"}",
+			"tools/dialogue/nuke/nuke-language.toml": "[language]\nid = \"dialogue\"\nmodule = \"d.py\"\npreset = \"dialogue.build\"\n",
+			"tools/dialogue/nuke/d.py": "def build(ctx):\n\treturn []\ndef program(ctx):\n\treturn None\ndef test(ctx):\n\treturn 0\n"})
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		game = json.loads(read(self.path("build", "ied", "Game.ied.proj")))
+		self.assertEqual((["rust.nuke"], "rust", "${workspaceDir}/build/bin/${config}-windows-${arch}/Game/rusty.exe"), (game["presets"], game["language"], game["buildSystem"]["output"]))
+		lines = json.loads(read(self.path("build", "ied", "Lines.ied.proj")))
+		self.assertEqual(("library", ["dialogue.build"]), (lines["kind"], lines["presets"]), "the package's own preset name")
+		self.assertNotIn("output", lines["buildSystem"], "a library runs nothing")
+		self.assertEqual([{"id": "c4", "path": "toolchains/c4/1.0.0/ied"}, {"id": "mygame.dialogue", "path": "tools/dialogue"}], self.solution()["localPlugins"],
+			"the pinned package's plugin; IED's own rust plugin needs no pin")
 
 	def test_a_solution_it_did_not_write_is_left_alone(self):
 		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n\n[project]\nname = \"Game\"\n", "Game.ied.sln": "{\"mine\": true}"})

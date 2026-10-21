@@ -1,0 +1,22 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Go settings",
+	"type": "object",
+	"properties": {
+		"go.path": {
+			"type": "string",
+			"default": "go",
+			"description": "The go tool the Go tasks run: a name looked up on PATH, or a path."
+		},
+		"go.languageServer": {
+			"type": "boolean",
+			"default": true,
+			"description": "Run gopls for Go documents of trusted workspaces (go install golang.org/x/tools/gopls@latest)."
+		},
+		"go.gopls.path": {
+			"type": "string",
+			"default": "gopls",
+			"description": "The gopls to run: a name looked up on PATH, or a path."
+		}
+	}
+}

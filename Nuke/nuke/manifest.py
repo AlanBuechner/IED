@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from .errors import NukeError
 
 MANIFEST_NAME = "nuke.toml"
-KINDS = ("executable", "module", "custom")
+KINDS = ("executable", "module", "library", "custom")   # library: a non-C4 language's (a C4 one is a module)
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 COMMAND_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -68,11 +68,18 @@ class ProjectSpec:
 	steps: tuple = ()
 	config_overrides: dict = field(default_factory=dict)
 	scripts: tuple = ()
-	language: str = ""              # the project's main language id for IDEs ("c4" for a C4 kind; a custom one says)
+	language: str = ""              # the project's language: "c4" by default for executable and module; another one
+	                                # builds through its driver (languages.py), a custom project's is for IDEs only
+	driver_options: dict = field(default_factory=dict)   # [project.driver]: what the language's driver reads
 
 	@property
 	def is_c4(self):
-		return self.kind in ("executable", "module")
+		return self.kind in ("executable", "module") and self.language == "c4"
+
+	@property
+	def is_driven(self):
+		"""Built, tested and run by its language's driver: an executable or library in a language other than C4."""
+		return self.kind in ("executable", "library") and self.language != "c4"
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,7 @@ class WorkspaceSpec:
 	steps: tuple = ()
 	commands: tuple = ()
 	ide: bool = True
+	languages: dict = field(default_factory=dict)   # [languages]: language -> its package's folder (languages.py)
 
 
 @dataclass(frozen=True)
@@ -218,17 +226,18 @@ def parse(data, path):
 	project_table = root.table("project")
 	configurations = root.subtables("configurations")
 	commands = root.subtables("commands")
+	languages = root.string_map("languages")
 	root.done()
 	if workspace_table is None and project_table is None:
 		raise NukeError(f"{path}: needs a [workspace] or a [project] table")
-	if workspace_table is None and (configurations or commands):
-		raise NukeError(f"{path}: [configurations] and [commands] belong to the workspace file")
-	workspace = _workspace(workspace_table, configurations, commands, folder, path) if workspace_table else None
+	if workspace_table is None and (configurations or commands or languages):
+		raise NukeError(f"{path}: [configurations], [commands] and [languages] belong to the workspace file")
+	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path) if workspace_table else None
 	project = _project(project_table, folder, path) if project_table else None
 	return ManifestFile(path, workspace, project)
 
 
-def _workspace(t, configurations, commands, folder, path):
+def _workspace(t, configurations, commands, languages, folder, path):
 	t.where = "workspace"
 	spec = WorkspaceSpec(
 		name=t.string("name") or os.path.basename(folder),
@@ -244,6 +253,7 @@ def _workspace(t, configurations, commands, folder, path):
 		steps=tuple(_step(s, path) for s in t.tables("steps")),
 		commands=tuple(_command(name, c, path) for name, c in commands),
 		ide=t.boolean("ide", True),
+		languages=languages,
 	)
 	t.done()
 	return spec
@@ -301,6 +311,9 @@ def _project(t, folder, path):
 	tests = t._get("tests", "auto")
 	if tests not in ("auto", True, False):
 		raise NukeError(f"{path}: project.tests must be \"auto\", true or false")
+	driver = t._get("driver", {})
+	if not isinstance(driver, dict):
+		raise NukeError(f"{path}: project.driver must be a table (what the language's driver reads)")
 	spec = ProjectSpec(
 		name=name,
 		dir=folder,
@@ -322,10 +335,15 @@ def _project(t, folder, path):
 		steps=tuple(_step(s, path) for s in t.tables("steps")),
 		config_overrides=dict(_override(name, o) for name, o in t.subtables("config")),
 		scripts=t.strings("scripts"),
+		driver_options=driver,
 	)
 	t.done()
 	if kind != "custom" and spec.output:
 		raise NukeError(f"{path}: project.output is only for kind = \"custom\" (C4 projects build {name}.exe)")
+	if kind == "module" and spec.language != "c4":
+		raise NukeError(f"{path}: a module is C4 source; a library in {spec.language} is kind = \"library\"")
+	if kind == "library" and spec.language in ("", "c4"):
+		raise NukeError(f"{path}: kind = \"library\" is for another language (language = \"rust\", ...); a C4 library is a module")
 	return spec
 
 

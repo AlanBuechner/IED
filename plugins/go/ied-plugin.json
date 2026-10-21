@@ -1,15 +1,20 @@
-// Go (docs/26 "Language plugins"): the language, its icons, Go projects by go.mod / go.work, and the places the go tool
-// prints ("path:line:col").
+// Go (docs/26 "Language plugins"): the language, its icons, Go projects by go.mod / go.work, the places the go tool
+// prints ("path:line:col"), gopls as the language server when it is installed (go install golang.org/x/tools/gopls),
+// the go preset for a folder with a go.mod - Build, Run and Test through the go tool with the `go` matcher - and, in a
+// Nuke workspace, the go driver in nuke/ with the go.nuke preset (docs/26 section 6).
 {
 	"manifestVersion": 1,
 	"id": "ied.go",
 	"name": "Go",
 	"version": "0.1.0",
-	"description": "The Go language: recognition, icons and build output links.",
+	"description": "The Go language: recognition, icons, gopls, builds through the go tool or Nuke, and build output links.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
 	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Go" },
 		"languages": [
 			{ "id": "go", "aliases": ["Go"], "extensions": [".go"], "fences": ["go", "golang"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] }
 		],
@@ -18,10 +23,36 @@
 			{ "languageId": "go", "fileNames": ["go.mod", "go.sum", "go.work"], "icon": "$(package)", "color": "--hue-cyan" }
 		],
 		"projectIcons": [
-			{ "languageId": "go", "label": "GO", "color": "--hue-cyan", "markers": ["go.mod", "go.work"] }
+			{ "languageId": "go", "label": "GO", "color": "--hue-cyan", "presets": ["go", "go.nuke"], "markers": ["go.mod", "go.work"] }
 		],
 		"outputLinks": [
 			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		],
+		"lspProfiles": [
+			{ "id": "gopls", "label": "gopls", "command": "${config:go.gopls.path}", "selector": { "languages": ["go"] }, "when": "config.go.languageServer && workspaceTrusted" }
+		],
+		"problemMatchers": [
+			{
+				"id": "go",
+				"source": "go",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}", "${cwd}"] },
+				"patterns": [ { "regexp": "^(.+?\\.go):(\\d+):(\\d+): (.*)$", "file": 1, "line": 2, "column": 3, "message": 4 } ],
+				"defaultSeverity": "error"
+			}
+		],
+		"taskPresets": [
+			{
+				"id": "go",
+				"label": "Go",
+				"detect": "go.mod",
+				"tasks": {
+					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [ { "run": ["${config:go.path}", "build", "./..."], "problemMatcher": "go" } ] },
+					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [ { "run": ["${config:go.path}", "run", "."], "problemMatcher": "go", "output": "run" } ] },
+					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [ { "run": ["${config:go.path}", "test", "./..."], "problemMatcher": "go", "output": "test" } ] }
+				},
+				"toolbar": ["run", "build", "test"]
+			},
+			{ "id": "go.nuke", "label": "Go (Nuke)", "extends": "nuke", "problemMatcher": "go" }
 		]
 	}
 }

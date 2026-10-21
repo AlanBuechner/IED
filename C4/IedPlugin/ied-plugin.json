@@ -100,7 +100,7 @@
 				"debug": {
 					"default": "Launch",
 					"configurations": {
-						"Launch": { "type": "c4", "request": "launch", "program": "${workspaceDir}/build/bin/${config}-windows-${arch}/${projectName}/${projectName}.exe", "cwd": "${projectRoot}", "stopOnEntry": false, "preLaunchTask": "build" }
+						"Launch": { "type": "c4", "request": "launch", "program": "${projectOutput}", "cwd": "${projectRoot}", "stopOnEntry": false, "preLaunchTask": "build" }
 					}
 				}
 			}

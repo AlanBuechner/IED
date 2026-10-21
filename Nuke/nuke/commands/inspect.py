@@ -31,6 +31,7 @@ def project_summary(session, project, default):
 	return {
 		"name": project.name,
 		"kind": project.kind,
+		"language": project.language,
 		"description": project.description,
 		"group": project.group,
 		"dir": project.dir,

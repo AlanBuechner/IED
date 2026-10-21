@@ -5,7 +5,7 @@ import os
 import sys
 import time
 
-from . import fsutil, graph, toolchains
+from . import fsutil, graph, languages, toolchains
 from .errors import NukeError
 from .variables import Variables, expand
 
@@ -56,10 +56,24 @@ class Session:
 	def int_dir(self, project):
 		return fsutil.join(self.int_root(), project.name)
 
+	# --- language drivers ------------------------------------------------------------------------
+
+	def driver(self, project):
+		"""The driver module of a project in another language than C4."""
+		return languages.load_driver(self.workspace.language_package(project.language))
+
+	def driver_context(self, project):
+		return languages.DriverContext(project, self.configuration, self.arch, self.system, self.bin_dir(project), self.int_dir(project),
+			self.log, list(self.args), self.test_filter)
+
 	def output(self, project):
-		"""The file `nuke run` starts: a C4 executable's .exe, or a custom project's `output` (None if it has none)."""
+		"""The file `nuke run` starts: a C4 executable's .exe, the program a driven project's driver names in its bin
+		folder, or a custom project's `output` (None if it has none)."""
 		if project.is_c4:
 			return fsutil.join(self.bin_dir(project), f"{project.name}.exe")
+		if project.is_driven:
+			name = self.driver(project).program(self.driver_context(project))
+			return fsutil.join(self.bin_dir(project), name) if name else None
 		if not project.output:
 			return None
 		path = expand(project.output, self._project_variables(project, with_output=False))
@@ -76,7 +90,12 @@ class Session:
 		Any project: steps in the "test" phase."""
 		if any(s.phase == "test" for s in project.steps):
 			return True
-		if not project.is_c4 or project.tests is False:
+		if project.tests is False:
+			return False
+		if project.is_driven:
+			has_tests = getattr(self.driver(project), "has_tests", None)
+			return has_tests(self.driver_context(project)) if has_tests else True
+		if not project.is_c4:
 			return False
 		if project.tests is True:
 			return True

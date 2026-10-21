@@ -93,8 +93,8 @@ def read_text(path):
 
 
 def copy_if_newer(source, dest):
-	"""Copy one file when `dest` is missing or older. True if copied."""
-	if os.path.exists(dest) and mtime(dest) >= mtime(source):
+	"""Copy one file when `dest` is missing or `source` changed since it was copied. True if copied."""
+	if os.path.exists(dest) and _copy_of(source, dest):
 		return False
 	ensure_dir(os.path.dirname(dest))
 	if os.path.exists(dest):
@@ -103,6 +103,11 @@ def copy_if_newer(source, dest):
 	stamp = mtime(source) - COPY_MTIME_NUDGE_SECONDS
 	os.utime(dest, (stamp, stamp))
 	return True
+
+
+def _copy_of(source, dest):
+	"""Whether `dest` is copy_if_newer's copy of `source` as it is now: the stamp the copy was given and the same size."""
+	return abs(mtime(dest) - (mtime(source) - COPY_MTIME_NUDGE_SECONDS)) < 0.01 and os.path.getsize(dest) == os.path.getsize(source)
 
 
 def copy_tree_if_newer(source, dest):

@@ -12,7 +12,7 @@ def validate(workspace):
 				workspace.project(name)  # raises with a suggestion
 			if dependency.name == project.name:
 				raise NukeError(f"{project.file}: project '{project.name}' depends on itself")
-			if project.is_c4 and dependency.kind == "executable":
+			if project.is_c4 and dependency.is_c4 and dependency.kind == "executable":
 				raise NukeError(f"{project.file}: '{project.name}' depends on the executable '{dependency.name}'; "
 					"a C4 program folds in the sources of what it depends on, so that project must be kind = \"module\"")
 	cycle = find_cycle(workspace)

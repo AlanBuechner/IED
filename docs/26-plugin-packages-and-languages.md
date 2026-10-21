@@ -130,21 +130,15 @@ The editor keeps no language knowledge: the compiler location shapes, Markdown f
 ```toml
 [project]
 name = "Tools"
-language = "rust"            # its driver comes from the package pinned below
+language = "rust"            # executable (the default) or library; built by the rust driver
 depends = ["Engine"]
 
-# the workspace's nuke.toml
+# the workspace's nuke.toml: only for a package IED does not ship
 [languages]
-rust = { package = "toolchains/ied-plugins/ied.rust" }    # a folder with nuke/nuke-language.toml
+dialogue = "tools/dialogue"  # a folder with nuke/nuke-language.toml
 ```
 
-A driver (`nuke/nuke-language.toml` naming a Python module) implements:
-
-| Hook | Does |
-|---|---|
-| `configure(project, config, arch)` | maps Nuke's configuration to the native one (Debug -> cargo `dev`, Development -> `release` with debug info, Dist -> `release`) |
-| `build(ctx)`, `test(ctx)`, `clean(ctx)`, `run(ctx)` | run the native tool with those flags, its output streamed through Nuke |
-| `outputs(ctx)` | the final artifacts, which Nuke copies to `build/bin/{config}-{system}-{arc}/{project}/` |
+A driver (`nuke/nuke-language.toml` naming a Python module and the IED preset of its projects) implements `build(ctx)` -> the artifacts Nuke copies to `build/bin/{config}-{system}-{arc}/{project}/`, `program(ctx)` -> the file `nuke run` starts, `test(ctx)` -> an exit code, and optionally `clean(ctx)` and `has_tests(ctx)`; it maps Nuke's configuration onto the native one itself (cargo: no optimization is the dev profile, otherwise `--release`, with debug info through `CARGO_PROFILE_RELEASE_DEBUG`; go: `-gcflags=all=-N -l` and `-ldflags=-s -w`). As built: `Nuke/nuke/languages.py`, `plugins/rust/nuke/cargo.py`, `plugins/go/nuke/gotool.py`, the presets `rust.nuke` and `go.nuke` (and Go's native `go` preset and gopls profile), a two-line `rustc-human` matcher for cargo's own diagnostics, and `${projectOutput}` from the project file's `buildSystem.output`, which `nuke init --ied` writes. A C4 + Rust + Go workspace builds, runs and tests in one `nuke` command (`Nuke/tests/test_languages.py` with the real cargo and go), and in IED a Rust error from the Nuke build lands in the Error List.
 
 Rules that keep the native toolchain intact:
 

@@ -20,7 +20,8 @@
 			"description": "Opaque to the host except 'id'; presets and tasks read the other fields as ${buildSystem.<field>}.",
 			"properties": {
 				"id": { "type": "string", "description": "e.g. 'nuke'." },
-				"projectName": { "type": "string" }
+				"projectName": { "type": "string" },
+				"output": { "type": "string", "description": "The program the build leaves, with task variables (${workspaceDir}, ${config}, ${arch}); ${projectOutput} expands it (docs/26)." }
 			}
 		},
 		"presets": {

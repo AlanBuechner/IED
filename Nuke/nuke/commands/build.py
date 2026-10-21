@@ -2,7 +2,7 @@
 
 import os
 
-from .. import fsutil
+from .. import fsutil, languages
 from ..c4 import compile as c4compile
 from ..c4 import ide_bridge
 from . import base
@@ -14,6 +14,11 @@ class Build(base.Command):
 	policy = base.CLOSURE
 
 	def work(self, session, project):
+		if project.is_driven:
+			session.log.note(f"{project.name}: building ({project.language})")
+			context = session.driver_context(project)
+			languages.stage(session.driver(project).build(context), context.bin_dir, session.log, project.name)
+			return
 		if project.kind == "module":
 			session.log.detail(f"{project.name}: a module compiles into the programs that depend on it")
 			return
@@ -50,6 +55,8 @@ class Clean(base.Command):
 	policy = base.EVERYTHING
 
 	def work(self, session, project):
+		if project.is_driven and callable(getattr(session.driver(project), "clean", None)):
+			session.driver(project).clean(session.driver_context(project))
 		removed = [d for d in (session.bin_dir(project), session.int_dir(project)) if fsutil.remove_tree(d)]
 		if removed:
 			session.log.note(f"cleaned {project.name} ({session.configuration.name})")

@@ -2,7 +2,9 @@
 // "-->"), rust-analyzer as the language server of Rust documents (one per workspace; it finds
 // the Cargo workspace itself), the rust.cargo task preset for a folder with a Cargo.toml - Build, Run, Test and Clean
 // with a Debug / Release profile, a rustc problem matcher over cargo's short messages - and a Launch configuration that
-// debugs the binary cargo builds through the ied.cpp plugin's lldb adapter (CodeLLDB, docs/25).
+// debugs the binary cargo builds through the ied.cpp plugin's lldb adapter (CodeLLDB, docs/25). In a Nuke workspace a
+// project with language = "rust" builds through the cargo driver in nuke/ (docs/26 section 6) and the rust.nuke preset,
+// which matches cargo's own diagnostics (`rustc-human`: "error[E0308]: ..." then " --> path:line:col").
 {
 	"manifestVersion": 1,
 	"id": "ied.rust",
@@ -13,6 +15,7 @@
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
 	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Rust" },
 		"systemMessageSections": [
@@ -81,9 +84,30 @@
 				"source": "rustc",
 				"fileLocation": { "kind": "search", "roots": ["${cwd}"] },
 				"patterns": [ { "regexp": "^(.+?):(\\d+):(\\d+): (error|warning)(?:\\[(\\w+)\\])?: (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "code": 5, "message": 6 } ]
+			},
+			{
+				"id": "rustc-human",
+				"source": "rustc",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}", "${cwd}"] },
+				"patterns": [
+					{ "regexp": "^(error|warning)(?:\\[(\\w+)\\])?: (.*)$", "severity": 1, "code": 2, "message": 3 },
+					{ "regexp": "^\\s*--> (.+?):(\\d+):(\\d+)$", "file": 1, "line": 2, "column": 3 }
+				]
 			}
 		],
 		"taskPresets": [
+			{
+				"id": "rust.nuke",
+				"label": "Rust (Nuke)",
+				"extends": "nuke",
+				"problemMatcher": ["rustc-human"],
+				"debug": {
+					"default": "Launch",
+					"configurations": {
+						"Launch": { "type": "lldb", "request": "launch", "program": "${projectOutput}", "cwd": "${projectRoot}", "preLaunchTask": "build" }
+					}
+				}
+			},
 			{
 				"id": "rust.cargo",
 				"label": "Cargo",

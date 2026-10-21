@@ -5,7 +5,7 @@ import glob
 import os
 from dataclasses import replace
 
-from . import configs, extensions, fsutil
+from . import configs, extensions, fsutil, languages
 from .errors import NukeError
 from .manifest import MANIFEST_NAME, load
 
@@ -24,6 +24,7 @@ class Workspace:
 		self.configurations = configs.merge(spec.configurations)
 		default = spec.default_configuration or configs.DEFAULT_CONFIGURATION
 		self.default_configuration = configs.require(default, self.configurations)
+		self._packages = None             # language -> LanguagePackage, found on first use
 
 	def project(self, name):
 		for project in self.projects.values():
@@ -48,6 +49,19 @@ class Workspace:
 
 	def output_root(self):
 		return fsutil.join(self.dir, "build")
+
+	def language_packages(self):
+		"""language -> the package its projects build with (languages.py)."""
+		if self._packages is None:
+			self._packages = languages.find_packages(self.dir, self.spec.languages)
+		return self._packages
+
+	def language_package(self, language):
+		package = self.language_packages().get(language)
+		if package is None:
+			raise NukeError(f"no Nuke driver for {language}: pin its package in the workspace's [languages] "
+				f"({language} = \"<folder with nuke/{languages.DESCRIPTION}>\") or add its IED plugin to .ied/plugins/")
+		return package
 
 
 # ------------------------------------------------------------------------------------------------ #

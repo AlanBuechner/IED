@@ -105,6 +105,9 @@ defines = { PROFILE = "1" }        # passed to every C4 compile of this configur
 [commands.kit]                     # section 5
 description = "Package a shippable folder"
 requires = ["build"]
+
+[languages]                        # section 9b: where a language's driver comes from (default: the workspace's
+dialogue = "tools/dialogue"        # .ied/plugins/, then IED's own plugins beside Nuke - rust, go)
 ```
 
 Discovery (no `projects` list) walks the workspace and skips `build`, `bin`, `bin-int`, `vendor`,
@@ -115,10 +118,11 @@ workspace of its own.
 # Game/nuke.toml
 [project]
 name = "Game"                      # default: the folder name
-kind = "executable"                # executable | module | custom
+kind = "executable"                # executable | module | library | custom
 description = "The game"
 group = "Games"                    # display grouping for IDEs
-language = "c4"                    # the main language, for IDEs (default "c4" for a C4 kind; a custom project names its own)
+language = "c4"                    # default "c4" for executable and module; another one builds through its driver
+                                   # (section 9b); a custom project's is for IDEs only
 depends = ["Engine"]               # build order; C4 programs also compile their modules' sources
 sources = ["src"]                  # folders or files of .cf/.ch sources (default ["src"])
 includes = ["third_party/include"] # further include folders
@@ -141,17 +145,21 @@ compiler-args = []
 [[project.steps]]                  # section 4
 phase = "pre-build"
 run = ["${python}", "tools/cook.py"]
+
+[project.driver]                   # a project in another language: what its driver reads (section 9b)
+package = "./cmd/server"
 ```
 
 | Kind | Builds | Runs |
 |---|---|---|
-| `executable` | a C4 program `<Name>.exe` from its sources plus the sources of every C4 module it depends on | the `.exe` |
+| `executable` | a C4 program `<Name>.exe` from its sources plus the sources of every C4 module it depends on; in another language, its driver's build (`cargo build`, `go build`) with the artifacts copied into its bin folder | the `.exe`, or the program its driver names |
 | `module` | nothing on its own: its sources compile into the programs that depend on it; its tests build a harness | - |
+| `library` | a library in another language than C4 (a C4 one is a module), through its driver | - |
 | `custom` | only what its steps do (any language, any tool); `depends` orders it | its `output = "..."`, or its `run` steps |
 
 Manifests are checked strictly: an unknown key, a wrong type, an unknown project in `depends`, a dependency
-cycle, a C4 program depending on another executable, or a step in an unknown phase stops Nuke with the file,
-the key and a suggestion.
+cycle, a C4 program depending on another C4 executable, a `module` in another language or a `library` in C4,
+or a step in an unknown phase stops Nuke with the file, the key and a suggestion.
 
 ## 4. Steps
 
@@ -316,6 +324,40 @@ is with a warning (`.ied/local/generated.json` keeps the digest of each file it 
 `.gitignore`, as `nuke init` does for a new workspace. The AI skills are not copied into the workspace: C4's come with the
 toolchain's IED plugin, Nuke's with IED's `ied.nuke` plugin (IED docs/26).
 
+## 9b. Projects in other languages
+
+A project whose `language` is not C4 builds, tests and runs through its language's **driver** (IED `docs/26`
+section 6): Python in the language's package - an IED plugin folder with `nuke/nuke-language.toml` - that runs the
+language's own tool and tells Nuke what to copy into `build/bin`. Native first: the tool's manifests (`Cargo.toml`,
+`go.mod`), lockfiles and caches (`target/`, Go's build cache) stay its own, building in IED and outside it share them,
+and Nuke adds only what is cross-language: one command, the configuration names, the order `depends` gives across
+languages, and the outputs in one place.
+
+| Language | Package | Builds | Configurations |
+|---|---|---|---|
+| `rust` | IED's `plugins/rust` | `cargo build --message-format=json-render-diagnostics` (diagnostics to the log, artifacts read from cargo's messages); executables and dynamic/static libraries with their `.pdb` are copied | no optimization: the dev profile; otherwise `--release`, with debug info (`CARGO_PROFILE_RELEASE_DEBUG`) when the configuration keeps it. `[project.driver]`: `package`, `bin` |
+| `go` | IED's `plugins/go` | `go build -o build/bin/.../<Name>.exe <package>` (a library: `go build ./...` to check it); `go test ./...` | no optimization: `-gcflags=all=-N -l`; no debug info: `-ldflags=-s -w`; GOOS/GOARCH from the platform. `[project.driver]`: `package` (default `.`), `name` |
+
+A language's package is the one the workspace pins in `[languages]` (a folder, relative to the workspace), else one
+of the workspace's own plugins (`.ied/plugins/<id>/`: a project that invents a language ships its driver with it),
+else one of IED's plugins beside Nuke (`NUKE_LANGUAGE_PACKAGES` adds folders to look in). `NUKE_TOOL_<NAME>`
+(`NUKE_TOOL_CARGO`) names the tool when it is not on `PATH`.
+
+```toml
+# Tools/nuke.toml
+[project]
+language = "rust"                  # its Cargo.toml sits beside this file
+depends = ["Engine"]               # built after Engine, whatever its language
+```
+
+A driver (`nuke/nuke-language.toml` names it and the IED preset of its projects) is a module with
+`build(ctx) -> [artifacts]`, `program(ctx) -> file name or None`, `test(ctx) -> exit code`, and optionally `clean(ctx)`
+and `has_tests(ctx)`; `ctx` (`nuke/languages.py`) carries the project, the configuration, the platform, the bin and
+int folders, the extra arguments and test filter, `options` (`[project.driver]`), `tool(name)`, and `run`/`capture`
+to run the tool with its output in Nuke's log. `nuke init --ied` gives such a project its package's preset
+(`rust.nuke`, `go.nuke`), the program in `buildSystem.output` (IED's `${projectOutput}`), and pins a `[languages]`
+package that is an IED plugin in the solution's `localPlugins`.
+
 ## 10. This repository as a workspace
 
 The repository root's `nuke.toml` makes IED itself a workspace. Its project `C4` (`C4/nuke.toml`, kind
@@ -346,6 +388,7 @@ Nuke/
     toolchains.py     the store: resolve, install, remove, pin
     variables.py      ${name} expansion
     configs.py        built-in and workspace configurations
+    languages.py      language packages and drivers: finding them, loading them, their context (section 9b)
     c4/               compiling C4 programs and harnesses, the build description, the IDE bridge
     commands/         one module per built-in command
   templates/          what `nuke init` writes

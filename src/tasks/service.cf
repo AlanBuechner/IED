@@ -395,6 +395,10 @@ namespace Ied
 			}
 			return false;
 		};
+		Core::StringView output = buildSystem.Member("output").AsView();
+		Core::String program;
+		Core::String unknown;
+		if (!output.IsEmpty() && ExpandTaskText(output, lookup, program, unknown)) values->Insert(Core::String("projectOutput"), program);
 		return lookup;
 	}
 

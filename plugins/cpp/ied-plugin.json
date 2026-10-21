@@ -148,7 +148,7 @@
 				"debug": {
 					"default": "Launch",
 					"configurations": {
-						"Launch": { "type": "lldb", "request": "launch", "program": "${workspaceDir}/build/bin/${config}-windows-${arch}/${projectName}/${projectName}.exe", "cwd": "${projectRoot}", "preLaunchTask": "build" }
+						"Launch": { "type": "lldb", "request": "launch", "program": "${projectOutput}", "cwd": "${projectRoot}", "preLaunchTask": "build" }
 					}
 				}
 			}

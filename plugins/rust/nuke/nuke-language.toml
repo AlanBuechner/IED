@@ -1,0 +1,6 @@
+# The Rust plugin's Nuke driver (IED docs/26 section 6): a Nuke project with language = "rust" builds, tests and runs
+# through cargo; its IED task preset is rust.nuke.
+[language]
+id = "rust"
+module = "cargo.py"
+preset = "rust.nuke"

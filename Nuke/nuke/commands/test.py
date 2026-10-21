@@ -1,5 +1,6 @@
-"""test: compile each test-bearing C4 project's [test] harness (C4.exe -test) and run it; custom projects test
-through their "test" steps. Every harness runs even when an earlier one fails; the exit code is 1 if any failed."""
+"""test: compile each test-bearing C4 project's [test] harness (C4.exe -test) and run it; a project in another language
+tests through its driver (`cargo test`, `go test`), custom projects through their "test" steps. Every harness runs even
+when an earlier one fails; the exit code is 1 if any failed."""
 
 from .. import fsutil, process
 from ..c4 import compile as c4compile
@@ -13,6 +14,11 @@ class Test(base.Command):
 	policy = base.TESTS
 
 	def work(self, session, project):
+		if project.is_driven:
+			session.log.header(f"tests: {project.name}")
+			code = session.driver(project).test(session.driver_context(project))
+			session.test_results.append((project.name, code, None))
+			return
 		if not project.is_c4:
 			return
 		job = c4compile.plan(session, project, test=True)

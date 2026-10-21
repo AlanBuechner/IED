@@ -60,7 +60,8 @@ class TaskTests(ServerTestCase):
 		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"}}})
 		write(os.path.join(self.repo, "src", "a.c"), "int a;\nint b;\nint c;\n")
 		write(os.path.join(self.repo, "hello.cmd"), "@echo hello %~1\r\n")
-		write(os.path.join(self.repo, "Game.ied.proj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "presets": ["fake.make"], "tasks": self.tasks()})
+		write(os.path.join(self.repo, "Game.ied.proj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "presets": ["fake.make"], "tasks": self.tasks(),
+			"buildSystem": {"id": "fake", "output": "${workspaceDir}/out/${config}/game.exe"}})
 		write(os.path.join(self.repo, "Game.ied.sln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.ied.proj"}]})
 		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.ied.sln")))
 		self.assertTrue(self.server.started, self.server.error)
@@ -82,7 +83,8 @@ class TaskTests(ServerTestCase):
 			"sleepy": {"concurrency": "parallel", "steps": [{"run": python("import time; time.sleep(60)  # " + self.orphan_marker())}]},
 			"typo": {"steps": [{"run": python("print('${nope}')")}]},
 			"show": {"steps": [{"run": python("print(open('src/a.c').read())")}]},
-			"greet": {"steps": [{"run": python("print('${config:fake.greeting} from ${config}')")}]}}
+			"greet": {"steps": [{"run": python("print('${config:fake.greeting} from ${config}')")}]},
+			"where": {"steps": [{"run": python("print(r'${projectOutput}')")}]}}
 
 	def orphan_marker(self):
 		return "ied-step-" + os.path.basename(self.root)
@@ -192,6 +194,13 @@ class TaskTests(ServerTestCase):
 			self.assertEqual([], other.violations)
 		finally:
 			other.abort()
+
+	async def test_the_project_output_is_the_build_systems_with_the_runs_variables(self):
+		"""${projectOutput}: the project file's buildSystem.output (what `nuke init --ied` writes) with ${workspaceDir},
+		${config} and the like filled in - what a launch configuration's program names (docs/25)."""
+		_, frames = await self.run_task(task="where")
+		self.assertIn("out/Development/game.exe", self.text_of(frames).replace("\\", "/"))
+		self.assertIn(os.path.basename(self.repo), self.text_of(frames))
 
 	async def test_a_setting_reaches_a_step(self):
 		"""${config:key} is a setting's effective value; ${config} stays the configuration variable."""
