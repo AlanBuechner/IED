@@ -1,5 +1,6 @@
 include "run.ch"
 include "host/server.ch"
+include "contributed.ch"
 
 namespace Ied
 {
@@ -76,7 +77,15 @@ namespace Ied
 			Finish(Core::StringView("no_model"));
 			return false;
 		}
-		system = chats->prompts.System(chat->mode, AgentsMd(ws).View(), WorkspaceSummary(ws).View());
+		Core::Array<Core::String> contributed;
+		tools = ToolsFor(server, ws, contributed);
+		SystemContext context;
+		context.agentsMd = AgentsMd(ws);
+		context.sections = PluginSections(server, ws, contributed);
+		context.workspace = WorkspaceSummary(ws);
+		context.skills = SkillsIndex(SkillsOf(server, ws, contributed), turn->userText.View(), DefaultSkillsIndexLimits());
+		for (const Core::String& problem : contributed) server->Log(problem.View());
+		system = chats->prompts.System(chat->mode, context);
 		return true;
 	}
 

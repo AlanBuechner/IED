@@ -21,6 +21,8 @@ namespace Ied
 		public void SolutionChanged(Workspace* ws);
 		// A workspace's trust changed: its local plugins' settings come or go.
 		public void TrustChanged(Workspace* ws);
+		// A workspace's own plugins changed (.ied/plugins/): their settings are read again.
+		public void PluginsChanged(Workspace* ws);
 		// A file of a workspace changed on disk (from its watcher): the tier file is read again if it is one.
 		public void WorkspaceFileChanged(Workspace* ws, Core::StringView path);
 		// The app tier file changed on disk.

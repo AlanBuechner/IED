@@ -1,0 +1,12 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Nuke settings",
+	"type": "object",
+	"properties": {
+		"nuke.command": {
+			"type": "string",
+			"default": "nuke",
+			"description": "How the Nuke tasks start Nuke: a name on PATH or the path of nuke.cmd (bin/ in the IED repository)."
+		}
+	}
+}

@@ -255,10 +255,45 @@ namespace Ied
 		return plugin;
 	}
 
+	// The workspace's own plugins: each folder of <root>/.ied/plugins/ that holds a manifest (docs/26 section 7).
+	static Core::Array<LocalPlugin*> WorkspacePlugins(Workspace* ws) {
+		Core::Array<LocalPlugin*> found;
+		FS::Path folder = ws->root / ".ied" / "plugins";
+		if (!FS::IsDirectory(folder.CStr())) return found;
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			FS::Path candidate = folder / entry.name.View();
+			if (entry.kind != FS::EntryKind::Directory || !FS::FileExists((candidate / kManifestFile).CStr())) continue;
+			LocalPlugin* local = new LocalPlugin();
+			local->folder = candidate;
+			local->enabled = true;
+			found.Push(local);
+		}
+		return found;
+	}
+
+	// Of a workspace's plugins with one id, the first that can load is the one (the solution's pins come first); the
+	// others are overridden by it.
+	static void FirstOfEachId(Core::Array<Plugin*>& local) {
+		for (Plugin* plugin : local) {
+			if (plugin->state != PluginState::Loaded) continue;
+			for (Plugin* earlier : local) {
+				if (earlier == plugin) break;
+				if (earlier->state != PluginState::Loaded || earlier->manifest->id.View() != plugin->manifest->id.View()) continue;
+				plugin->state = PluginState::Overridden;
+				plugin->overriddenBy = Core::String(PluginSourceName(PluginSource::Project));
+				break;
+			}
+		}
+	}
+
 	Core::Array<Plugin*> PluginHost::LocalFor(Workspace* ws) {
 		Core::Array<Plugin*> local;
-		if (!ws || !ws->solution) return local;
-		for (LocalPlugin* entry : ws->solution->localPlugins) local.Push(ReadLocalPlugin(server, entry, ws->trusted, disabled));
+		if (!ws) return local;
+		if (ws->solution)
+			for (LocalPlugin* entry : ws->solution->localPlugins) local.Push(ReadLocalPlugin(server, entry, ws->trusted, disabled));
+		for (LocalPlugin* entry : WorkspacePlugins(ws)) local.Push(ReadLocalPlugin(server, entry, ws->trusted, disabled));
+		FirstOfEachId(local);
 		return local;
 	}
 

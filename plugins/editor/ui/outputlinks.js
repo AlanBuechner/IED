@@ -1,23 +1,37 @@
-// outputlinks.js - file locations in the Output window (VS: a build line that names a place opens it): the shapes
-// compilers print - "path(line,col)" (MSVC), "path (line:col)" (C4), "path:line:col" (clang, gcc, rustc, Python) and
-// rustc's "--> path:line:col" - found in a line's text, and the workspace file a found path means.
+// outputlinks.js - file locations in the Output window (VS: a build line that names a place opens it): the shapes the
+// language plugins say their tools print (`outputLinks`: MSVC's "path(line,col)", C4's "path (line:col)", clang's
+// "path:line:col", a Python traceback's 'File "path", line N'), found in a line's text, and the workspace file a found
+// path means.
 
-const SHAPES = [
-	/(?:^|\s|-->\s)((?:[A-Za-z]:)?[^\s()<>"'|*?]+?\.[A-Za-z0-9_+-]+)\((\d+)(?:,(\d+))?\)/,
-	/(?:^|\s|-->\s)((?:[A-Za-z]:)?[^\s()<>"'|*?]+?\.[A-Za-z0-9_+-]+) \((\d+):(\d+)\)/,
-	/(?:^|\s|-->\s)((?:[A-Za-z]:)?[^\s():<>"'|*?]+?\.[A-Za-z0-9_+-]+):(\d+)(?::(\d+))?/,
-];
+// The plugins' `outputLinks` ([{plugin, value: {regexp, file, line, column?}}]) as shapes to match, each regular
+// expression once; one that does not compile is reported through `report` and left out.
+export function compileShapes(contributions, report) {
+	const shapes = [];
+	const seen = new Set();
+	for (const { plugin, value } of contributions || []) {
+		if (seen.has(value.regexp)) continue;
+		seen.add(value.regexp);
+		try {
+			shapes.push({ regex: new RegExp(value.regexp), file: value.file, line: value.line, column: value.column });
+		}
+		catch (e) {
+			if (report) report("the output link '" + value.id + "' of " + (plugin ? plugin.id : "a plugin") + " is not a regular expression: " + e.message);
+		}
+	}
+	return shapes;
+}
 
-// The first place `text` names: {start, end, path, line, col} (line and col 1-based as printed, col 0 when absent), or
-// null. `start`..`end` covers the path and the position, for underlining.
-export function findLocation(text) {
+// The first place `text` names among `shapes`: {start, end, path, line, col} (line and col 1-based as printed, col 0
+// when absent), or null. `start`..`end` covers the path and the position, for underlining.
+export function findLocation(text, shapes) {
 	let best = null;
-	for (const shape of SHAPES) {
-		const match = shape.exec(text);
-		if (!match) continue;
-		const start = match.index + match[0].indexOf(match[1]);
+	for (const shape of shapes) {
+		const match = shape.regex.exec(text);
+		if (!match || !match[shape.file]) continue;
+		const start = match.index + match[0].indexOf(match[shape.file]);
 		if (best && best.start <= start) continue;
-		best = { start, end: match.index + match[0].length, path: match[1], line: Number(match[2]), col: match[3] ? Number(match[3]) : 0 };
+		const column = shape.column ? match[shape.column] : undefined;
+		best = { start, end: match.index + match[0].length, path: match[shape.file], line: Number(match[shape.line]), col: column ? Number(column) : 0 };
 	}
 	return best;
 }

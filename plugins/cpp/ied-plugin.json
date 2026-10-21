@@ -1,6 +1,8 @@
-// C/C++ (docs/05 "Language plugins"): clangd as the language server of C and C++ documents, one per workspace. clangd
-// finds each file's flags in the nearest compile_commands.json (or compile_flags.txt) above it or in a build/ folder
-// beside one, and guesses without one. Debugging through LLDB: CodeLLDB's adapter (the vscode-lldb extension's
+// C/C++ (docs/26 "Language plugins"): the C and C++ languages - extensions, comments, brackets, the keywords Monaco's
+// grammars name for control flow, Markdown fence names, header/source pairs, icons and the places compilers print (MSVC's
+// "path(line,col)", clang's and gcc's "path:line:col") - and clangd as the language server of C and C++ documents, one
+// per workspace. clangd finds each file's flags in the nearest compile_commands.json (or compile_flags.txt) above it or
+// in a build/ folder beside one, and guesses without one. Debugging through LLDB: CodeLLDB's adapter (the vscode-lldb extension's
 // adapter/codelldb.exe), which connects back to IED's port (transport tcp, docs/25); a launch configuration's type is
 // "lldb", with CodeLLDB's arguments (program, args, cwd, env, stopOnEntry).
 // clangd's semantic tokens map onto the syntax colors Visual Assist style: `auto` (a deduced type) reads as a keyword and
@@ -15,13 +17,31 @@
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
 	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
+	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C/C++" },
+		"languages": [
+			{ "id": "c", "aliases": ["C"], "extensions": [".c", ".h"], "fences": ["c", "h"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
+				"controlKeywords": ["if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "goto", "try", "catch", "throw", "co_await", "co_return", "co_yield"] },
+			{ "id": "cpp", "aliases": ["C++"], "extensions": [".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++", ".inl", ".ipp"], "fences": ["cpp", "c++", "cc", "cxx", "hpp"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
+				"controlKeywords": ["if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "goto", "try", "catch", "throw", "co_await", "co_return", "co_yield"] }
+		],
+		"headerSourcePairs": [
+			{ "extensions": [".h", ".c", ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".inl"], "searchPaths": ["../include", "../src", "../source"] }
+		],
+		"outputLinks": [
+			{ "id": "msvc", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s()<>\"'|*?]+?\\.[A-Za-z0-9_+-]+)\\((\\d+)(?:,(\\d+))?\\)", "file": 1, "line": 2, "column": 3 },
+			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		],
 		"projectIcons": [
 			{ "languageId": "cpp", "label": "++", "color": "--hue-violet", "markers": ["CMakeLists.txt", "meson.build", "premake5.lua", "xmake.lua", "*.vcxproj", "compile_commands.json"] },
 			{ "languageId": "c", "label": "C", "color": "--hue-blue" }
 		],
 		"fileIcons": [
+			{ "languageId": "c", "extensions": [".c"], "label": "C", "color": "--hue-blue" },
+			{ "languageId": "c", "extensions": [".h"], "label": "h", "color": "--hue-violet" },
+			{ "languageId": "cpp", "extensions": [".cpp", ".cc", ".cxx", ".c++"], "label": "C++", "color": "--hue-violet" },
+			{ "languageId": "cpp", "extensions": [".hpp", ".hh", ".hxx", ".h++", ".inl", ".ipp", ".tpp"], "label": "h", "color": "--hue-violet" },
 			{ "fileNames": ["CMakeLists.txt"], "label": "CM", "color": "--hue-green" },
 			{ "extensions": [".cmake"], "label": "CM", "color": "--hue-green" },
 			{ "fileNames": ["compile_commands.json", "compile_flags.txt", ".clangd", ".clang-format", ".clang-tidy"], "icon": "$(gear)", "color": "--hue-violet" }
@@ -101,6 +121,36 @@
 				"transport": "tcp",
 				"languages": ["c", "cpp", "rust"],
 				"when": "workspaceTrusted"
+			}
+		],
+		"problemMatchers": [
+			{
+				"id": "clang",
+				"source": "clang",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}", "${cwd}"] },
+				"patterns": [ { "regexp": "^(.+?):(\\d+):(\\d+): (fatal error|error|warning|note): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5 } ],
+				"severityMap": { "fatal error": "error", "note": "info" }
+			},
+			{
+				"id": "msvc",
+				"source": "msvc",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}", "${cwd}"] },
+				"patterns": [ { "regexp": "^\\s*(.+?)\\((\\d+)(?:,(\\d+))?\\)\\s*: (fatal error|error|warning) (\\w+\\d+): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "code": 5, "message": 6 } ],
+				"severityMap": { "fatal error": "error" }
+			}
+		],
+		"taskPresets": [
+			{
+				"id": "cpp.nuke",
+				"label": "C/C++ (Nuke)",
+				"extends": "nuke",
+				"problemMatcher": ["clang", "msvc"],
+				"debug": {
+					"default": "Launch",
+					"configurations": {
+						"Launch": { "type": "lldb", "request": "launch", "program": "${workspaceDir}/build/bin/${config}-windows-${arch}/${projectName}/${projectName}.exe", "cwd": "${projectRoot}", "preLaunchTask": "build" }
+					}
+				}
 			}
 		]
 	}

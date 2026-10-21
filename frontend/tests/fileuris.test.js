@@ -2,7 +2,7 @@
 // or a language server wrote it (src/lsp/tests: CanonicalFileUri gives the same strings).
 
 import { test, assertEqual } from "./harness.js";
-import { canonicalFileUri, displayPath, fileName, isFileUri } from "/plugins/ied.editor/ui/fileuris.js";
+import { canonicalFileUri, displayPath, fileName, isFileUri } from "/ui-kit/fileuris.js";
 
 test("fileuris: one form for a file URI", () => {
 	assertEqual(canonicalFileUri("file:///c%3A/My Lib/a.h"), "file:///C:/My%20Lib/a.h", "the server's unit test's case");

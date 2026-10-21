@@ -1,0 +1,39 @@
+// Markdown (docs/26 "Language plugins"): the language, its icon, and the preview (F-EDT-91/92) - a "mdpreview:<path>"
+// tab rendering the server document as it changes, with fenced code colored through the editor's `editor.colorize`
+// binding and task boxes that tick into the file. A Markdown file opened from outside IED gets its preview beside it
+// (`companionTabs`, J10).
+{
+	"manifestVersion": 1,
+	"id": "ied.markdown",
+	"name": "Markdown",
+	"version": "0.1.0",
+	"description": "The Markdown language and its live preview, with task boxes that tick into the file.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative", "ui": "ui/index.js" },
+	"contributes": {
+		"languages": [
+			{ "id": "markdown", "aliases": ["Markdown"], "extensions": [".md", ".markdown"], "fences": ["markdown", "md"] }
+		],
+		"fileIcons": [
+			{ "languageId": "markdown", "extensions": [".md", ".markdown"], "label": "MD", "color": "--hue-gray" }
+		],
+		"bindings": {
+			"consumes": [ { "name": "editor.colorize", "version": "1", "optional": true } ]
+		},
+		"companionTabs": [
+			{ "kind": "mdpreview", "languages": ["markdown"] }
+		],
+		"commands": [
+			{ "id": "ied.markdown.preview", "title": "Open Preview", "category": "Markdown", "icon": "$(open-preview)" }
+		],
+		"menus": {
+			"explorer/context": [
+				{ "command": "ied.markdown.preview", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" }
+			]
+		},
+		"keybindings": [
+			{ "command": "ied.markdown.preview", "key": "ctrl+shift+v", "when": "activeTabKind == 'doc' && editorLanguage == 'markdown'" }
+		]
+	}
+}

@@ -8,7 +8,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
 import { framePath } from "./debug.js";
 
-// "main.cf, line 7" for a frame's place; the file name alone, as VS shows it.
+// "main.c, line 7" for a frame's place; the file name alone, as VS shows it.
 export function frameWhere(frame) {
 	const path = framePath(frame);
 	if (!path) return frame.source && frame.source.name ? frame.source.name : "";
@@ -221,7 +221,7 @@ export class Threads {
 	}
 }
 
-// "main.cf, line 7" for a breakpoint, with its condition when it has one.
+// "main.c, line 7" for a breakpoint, with its condition when it has one.
 export function breakpointLabel(path, breakpoint) {
 	const name = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
 	return name + ", line " + (breakpoint.line + 1) + (breakpoint.condition ? " when " + breakpoint.condition : "");

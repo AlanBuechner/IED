@@ -1,0 +1,127 @@
+include "contributed.ch"
+include "tools/catalog.ch"
+include "tools/plugintools.ch"
+include "host/server.ch"
+include "plugins/context.ch"
+
+namespace Ied
+{
+	// A path a manifest names inside its plugin's folder; empty when it is absolute or leaves the folder.
+	static FS::Path InsidePlugin(const Manifest* manifest, Core::StringView relative) {
+		if (relative.IsEmpty() || relative.StartsWith(Core::StringView("/")) || relative.StartsWith(Core::StringView("\\")) || relative.IndexOf(':', 0) >= 0) return FS::Path();
+		for (Core::StringView part : SplitPath(relative))
+			if (part == "..") return FS::Path();
+		return manifest->folder / relative;
+	}
+
+	static Core::Array<Core::StringView> SplitPath(Core::StringView path) {
+		Core::Array<Core::StringView> parts;
+		int64 start = 0;
+		for (int64 i = 0; i <= path.ByteLength(); ++i)
+			if (i == path.ByteLength() || path.ByteAt(i) == '/' || path.ByteAt(i) == '\\') {
+				parts.Push(path.Substring(start, i - start));
+				start = i + 1;
+			}
+		return parts;
+	}
+
+	static SkillFolder* Folder(const FS::Path& folder, Core::StringView source) {
+		SkillFolder* entry = new SkillFolder();
+		entry->folder = folder;
+		entry->source = Core::String(source);
+		return entry;
+	}
+
+	Core::Array<Skill*> SkillsOf(Server* server, Workspace* ws, Core::Array<Core::String>& problems) {
+		Core::Array<SkillFolder*> folders;
+		folders.Push(Folder(ws->root / ".ied" / "skills", Core::StringView("project")));
+		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
+			Serialization::DomNode skills = plugin->manifest->contributes.Member("skills");
+			for (int64 i = 0; i < skills.Count(); ++i) {
+				FS::Path folder = InsidePlugin(plugin->manifest, skills.At(i).AsView());
+				if (folder.IsEmpty()) problems.Push(((Core::String("plugin ") + plugin->manifest->id.View()) + ": a skills folder must be inside the plugin: ") + skills.At(i).AsView());
+				else folders.Push(Folder(folder, (Core::String("plugin ") + plugin->manifest->id.View()).View()));
+			}
+		}
+		folders.Push(Folder(FS::Path(AppDataFolder(server->config).View()) / "skills", Core::StringView("app")));
+		return ReadSkills(folders, problems);
+	}
+
+	// --- System-message sections -------------------------------------------------------------------------------------
+
+	static Core::String ReadAll(const FS::Path& file) {
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
+	// A section's text: its `text`, or its `file` inside the plugin; empty with a problem when the file is not there.
+	static Core::String SectionText(const Manifest* manifest, const Serialization::DomNode& section, Core::Array<Core::String>& problems) {
+		if (section.Member("text").IsValid()) return Core::String(section.Member("text").AsView().Trimmed());
+		FS::Path file = InsidePlugin(manifest, section.Member("file").AsView());
+		Core::String text = file.IsEmpty() ? Core::String() : ReadAll(file);
+		if (text.IsEmpty()) problems.Push((((Core::String("plugin ") + manifest->id.View()) + ": the section ") + section.Member("id").AsView()) + " has no text to give");
+		return Core::String(text.View().Trimmed());
+	}
+
+	static Core::StringView Capped(Core::StringView text, int64 bytes) { return text.ByteLength() <= bytes ? text : text.Substring(0, bytes); }
+
+	Core::String PluginSections(Server* server, Workspace* ws, Core::Array<Core::String>& problems) {
+		WhenLookup context = WorkspaceWhen(server, ws);
+		Core::StringBuilder out;
+		int64 left = kSectionsMostTokens * kBytesPerToken;
+		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
+			Serialization::DomNode sections = plugin->manifest->contributes.Member("systemMessageSections");
+			for (int64 i = 0; i < sections.Count() && left > 0; ++i) {
+				Serialization::DomNode section = sections.At(i);
+				Core::String error;
+				if (!WhenHolds(section.Member("when").AsView(), context, error)) {
+					if (!error.IsEmpty()) problems.Push((((Core::String("plugin ") + plugin->manifest->id.View()) + ": the when of section ") + section.Member("id").AsView()) + " does not parse: " + error.View());
+					continue;
+				}
+				const int64 tokens = section.Member("maxTokens").IsValid() ? section.Member("maxTokens").AsInt() : kSectionDefaultTokens;
+				Core::String text = SectionText(plugin->manifest, section, problems);
+				if (text.IsEmpty()) continue;
+				Core::StringView kept = Capped(Capped(text.View(), tokens * kBytesPerToken), left);
+				out.Append("## ");
+				out.Append(plugin->manifest->name.View());
+				out.Append("\n\n");
+				out.Append(kept);
+				out.Append("\n\n");
+				left -= kept.ByteLength();
+			}
+		}
+		return Core::String(out.View().Trimmed());
+	}
+
+	// --- Tool calls --------------------------------------------------------------------------------------------------
+
+	ToolRegistry* ToolsFor(Server* server, Workspace* ws, Core::Array<Core::String>& problems) {
+		ToolRegistry* registry = CoreTools();
+		WhenLookup context = WorkspaceWhen(server, ws);
+		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
+			Serialization::DomNode calls = plugin->manifest->contributes.Member("toolCalls");
+			for (int64 i = 0; i < calls.Count(); ++i) {
+				Serialization::DomNode entry = calls.At(i);
+				Core::String error;
+				if (!WhenHolds(entry.Member("when").AsView(), context, error)) continue;
+				Core::StringView name = entry.Member("name").AsView();
+				Core::String who = (Core::String("plugin ") + plugin->manifest->id.View()) + ": the tool " + name;
+				if (registry->Find(name)) {
+					problems.Push(who + " is already a tool");
+					continue;
+				}
+				if (!entry.Member("run").IsValid()) {
+					problems.Push(who + " needs plugin code (a binding or a function), which comes with the C4 plugin host (docs/26 P3)");
+					continue;
+				}
+				Core::String problem;
+				ToolSpec* spec = CommandTool(entry, plugin->manifest->id.View(), problem);
+				if (spec) registry->Add(spec);
+				else problems.Push(problem);
+			}
+		}
+		for (const Core::String& problem : registry->problems) problems.Push(problem);
+		return registry;
+	}
+}

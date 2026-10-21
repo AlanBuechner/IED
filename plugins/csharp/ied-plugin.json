@@ -1,0 +1,26 @@
+// C# (docs/26 "Language plugins"): the language, its icons, projects by their .csproj, and the places MSBuild prints
+// ("path(line,col)").
+{
+	"manifestVersion": 1,
+	"id": "ied.csharp",
+	"name": "C#",
+	"version": "0.1.0",
+	"description": "The C# language: recognition, icons and build output links.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "csharp", "aliases": ["C#"], "extensions": [".cs", ".csx"], "fences": ["csharp", "cs", "c#"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] }
+		],
+		"fileIcons": [
+			{ "languageId": "csharp", "extensions": [".cs", ".csx"], "label": "C#", "color": "--hue-green" }
+		],
+		"projectIcons": [
+			{ "languageId": "csharp", "label": "C#", "color": "--hue-green", "markers": ["*.csproj"] }
+		],
+		"outputLinks": [
+			{ "id": "msvc", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s()<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+)\\((\\d+)(?:,(\\d+))?(?:-\\d+)?\\)", "file": 1, "line": 2, "column": 3 }
+		]
+	}
+}

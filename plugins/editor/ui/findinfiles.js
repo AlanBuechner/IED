@@ -5,7 +5,7 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
 
-const INCLUDE_HINT = "e.g. **/*.cf, src/**";
+const INCLUDE_HINT = "e.g. **/*.txt, src/**";
 const EXCLUDE_HINT = "default: build, bin, vendor, node_modules, ...";
 
 function globs(text) {

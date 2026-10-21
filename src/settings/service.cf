@@ -88,7 +88,9 @@ namespace Ied
 		Publish(ws);
 	}
 
-	void Settings::TrustChanged(Workspace* ws) {
+	void Settings::TrustChanged(Workspace* ws) { PluginsChanged(ws); }
+
+	void Settings::PluginsChanged(Workspace* ws) {
 		Rebuild(ws);
 		Recheck(ws);
 		Publish(ws);

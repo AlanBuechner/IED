@@ -45,7 +45,8 @@ Committed, so deleting generated files never loses configuration ("if we delete 
 +- solution.json            solution-tier settings (default model group, egress policy, toolbar defaults, permissions rules)
 +- solutions/<Name>.json    per-solution settings when several solutions share one folder
 +- projects/<Name>.json     project-tier settings
-+- skills/<name>/SKILL.md   project skills (keyword-searchable by the AI)
++- skills/<name>/SKILL.md   project skills (keyword-searchable by the AI; they hide a plugin's or the app's skill of the name)
++- plugins/<id>/            the workspace's own plugins (a custom language's, a project's tools), loaded once it is trusted (docs/26)
 +- modes/<id>.json          custom agent modes (agent-mode.v1 schema)
 +- privacy.json             sensitive-path globs for AI taint tracking
 +- dictionary.txt           project spell-check words

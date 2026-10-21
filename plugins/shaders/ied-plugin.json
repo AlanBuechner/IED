@@ -1,0 +1,30 @@
+// Shader languages (docs/26 "Language plugins"): HLSL, GLSL and WGSL - recognition and icons (an include file's "h"),
+// and the places shader compilers print: dxc's "path:line:col" and fxc's "path(line,col-col)". An engine's own shader
+// plugin may replace this one by id or add a language server.
+{
+	"manifestVersion": 1,
+	"id": "ied.shaders",
+	"name": "Shader Languages",
+	"version": "0.1.0",
+	"description": "HLSL, GLSL and WGSL: recognition, icons and compiler output links.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "hlsl", "aliases": ["HLSL"], "extensions": [".hlsl", ".hlsli", ".fx", ".usf", ".ush"], "fences": ["hlsl"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "glsl", "aliases": ["GLSL"], "extensions": [".glsl", ".vert", ".frag", ".comp", ".geom", ".tesc", ".tese"], "fences": ["glsl"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "wgsl", "aliases": ["WGSL"], "extensions": [".wgsl"], "fences": ["wgsl"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] }
+		],
+		"fileIcons": [
+			{ "languageId": "hlsl", "extensions": [".hlsl", ".fx", ".usf"], "label": "HL", "color": "--hue-pink" },
+			{ "languageId": "hlsl", "extensions": [".hlsli", ".ush"], "label": "h", "color": "--hue-pink" },
+			{ "languageId": "glsl", "extensions": [".glsl", ".vert", ".frag", ".comp", ".geom", ".tesc", ".tese"], "label": "GL", "color": "--hue-pink" },
+			{ "languageId": "wgsl", "extensions": [".wgsl"], "label": "WG", "color": "--hue-pink" }
+		],
+		"outputLinks": [
+			{ "id": "msvc", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s()<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+)\\((\\d+)(?:,(\\d+))?(?:-\\d+)?\\)", "file": 1, "line": 2, "column": 3 },
+			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		]
+	}
+}

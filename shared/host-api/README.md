@@ -19,7 +19,7 @@ Validate the examples after any schema change (a minimal validator is enough; th
 - JSON with `//` comments allowed when read by IED (JSONC); written files preserve comments (F-SET-5).
 - Every top-level format has `version` (or `manifestVersion`) as an integer. Readers reject unknown major versions with a visible error.
 - Paths are relative to the file that contains them unless stated; `/` separators accepted on Windows.
-- **Variables:** `${name}` everywhere (commands, paths, launch configs). Built-ins: `solutionDir`, `projectRoot`, `projectFile`, `project`, `pluginDir`, `config`, `arch`, `system`, `file`, `fileDir`, `fileBasename`, `line`, `column`, `selection`, `startupProject`, `testFilter`, `cwd`, `lspIncludePaths`; plus `env:NAME`, `setting:key`, `input:prompt text`, `param.<name>` (templates), `buildSystem.<field>`, and any variable the project or preset declares. Unknown variables are an error at task start (shown, not silently empty).
+- **Variables:** `${name}` everywhere (commands, paths, launch configs). Built-ins: `solutionDir`, `projectRoot`, `projectFile`, `project`, `pluginDir`, `config`, `arch`, `system`, `file`, `fileDir`, `fileBasename`, `line`, `column`, `selection`, `startupProject`, `testFilter`, `cwd`, `lspIncludePaths`; plus `env:NAME`, `config:key`, `input:prompt text`, `param.<name>` (templates), `buildSystem.<field>`, and any variable the project or preset declares. Unknown variables are an error at task start (shown, not silently empty).
 - **`when` expressions:** `&&`, `||`, `!`, `==`, `!=`, `=~` (regex), parentheses; operands are context keys (`workspaceTrusted`, `resourceExtname`, `resourceLangId`, `debugState`, `config`, `config.<setting>`, `activeActivity`, `deviceClass`) and string literals in single quotes.
 - **Ids:** plugin ids dotted lowercase; contribution ids unique within the plugin and referenced globally as `<pluginId>/<id>` when ambiguous.
 
@@ -77,7 +77,7 @@ Skills are folders `<name>/SKILL.md` (plus optional resources next to it), found
 name: c4-testing                      # unique per source; collisions: project > plugin > app (shown in Settings > Skills)
 description: How to write and run [test] functions in C4 with the -test harness.
 keywords: [test, assert, fixture, nuke test]        # IED keyword field
-triggers: ["write a test", "test is failing"]       # accepted for compatibility with C4/skills/; indexed like keywords
+triggers: ["write a test", "test is failing"]       # accepted for compatibility with C4's skills (C4/IedPlugin/skills/); indexed like keywords
 tools: [build, debug]                 # optional: tool groups enabled when this skill is read
 ---
 

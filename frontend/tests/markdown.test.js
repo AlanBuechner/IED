@@ -4,7 +4,7 @@
 
 import { test, assertEqual } from "./harness.js";
 import { renderMarkdown, safeUrl, toggleTask } from "/ui-kit/markdown.js";
-import { resolveRelative } from "/plugins/ied.editor/ui/mdpreview.js";
+import { fenceLanguages, resolveRelative } from "/plugins/ied.markdown/ui/preview.js";
 
 function html(text, options) {
 	const host = document.createElement("div");
@@ -61,4 +61,9 @@ test("markdown: relative links and images resolve inside the workspace", () => {
 	assertEqual(resolveRelative("docs", "./b.md"), "docs/b.md");
 	assertEqual(resolveRelative("", "a/../c.md"), "c.md");
 	assertEqual(resolveRelative("docs", "../../outside.md"), null, "above the workspace");
+});
+
+test("markdown: a fence names its language by the languages' fence names or ids", () => {
+	const fences = fenceLanguages([{ id: "cpp", fences: ["cpp", "c++", "CC"] }, { id: "rust", fences: ["rs"] }, { id: "go" }]);
+	assertEqual(["c++", "cc", "rs", "rust", "go", "zig"].map((name) => fences.get(name) || null), ["cpp", "cpp", "rust", "rust", "go", null]);
 });

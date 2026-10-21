@@ -1,0 +1,29 @@
+// Data formats (docs/26 "Language plugins"): JSON (IED's own .ied.sln and .ied.proj too), YAML, TOML / INI and XML -
+// recognition and icons.
+{
+	"manifestVersion": 1,
+	"id": "ied.data",
+	"name": "Data Formats",
+	"version": "0.1.0",
+	"description": "JSON, YAML, TOML, INI and XML: recognition and icons.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "json", "aliases": ["JSON"], "extensions": [".json", ".jsonc", ".sln", ".proj"], "fences": ["json", "jsonc"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"]] },
+			{ "id": "yaml", "aliases": ["YAML"], "extensions": [".yaml", ".yml"], "fences": ["yaml", "yml"], "lineComment": "#" },
+			{ "id": "ini", "aliases": ["TOML", "INI"], "extensions": [".toml", ".ini", ".cfg", ".editorconfig"], "fences": ["toml", "ini"], "lineComment": "#" },
+			{ "id": "xml", "aliases": ["XML"], "extensions": [".xml", ".xaml", ".csproj", ".vcxproj", ".props", ".targets", ".svg"], "fences": ["xml", "xaml"], "blockComment": ["<!--", "-->"] }
+		],
+		"fileIcons": [
+			{ "languageId": "json", "extensions": [".json", ".jsonc"], "label": "{}", "color": "--hue-amber" },
+			{ "languageId": "json", "extensions": [".ied.sln"], "label": "SLN", "color": "--icon-solution" },
+			{ "languageId": "json", "extensions": [".ied.proj"], "label": "PRJ", "color": "--icon-project" },
+			{ "languageId": "xml", "extensions": [".xml", ".xaml", ".props", ".targets"], "label": "XML", "color": "--hue-orange" },
+			{ "languageId": "xml", "extensions": [".csproj", ".vcxproj", ".filters"], "label": "PRJ", "color": "--hue-violet" },
+			{ "languageId": "yaml", "extensions": [".yaml", ".yml"], "label": "YML", "color": "--hue-red" },
+			{ "languageId": "ini", "extensions": [".toml", ".ini", ".cfg", ".editorconfig"], "icon": "$(gear)", "color": "--hue-gray" }
+		]
+	}
+}

@@ -1,0 +1,56 @@
+// Example (docs/26): a project's own language as a plugin. A game that writes its dialogue in a markup language of
+// its own commits this folder as .ied/plugins/dialogue/; whoever opens the trusted workspace gets the language, its
+// icons, the places its compiler prints, a Nuke preset for the projects written in it, a skill and a system-message
+// section for the AI, and a tool that checks a file. With the C4 plugin host (docs/26 P3) it would add C4 code under
+// code/ and a Nuke driver under nuke/.
+{
+	"manifestVersion": 1,
+	"id": "mygame.dialogue",
+	"name": "Dialogue Markup",
+	"version": "1.0.0",
+	"description": "The game's dialogue markup: recognition, icons, compiler output, builds and AI help.",
+	"publisher": "MyGame",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn"],
+	"dependencies": [ { "id": "ied.nuke", "version": "^0.1", "optional": true } ],
+	"contributes": {
+		"languages": [
+			{ "id": "dialogue", "aliases": ["Dialogue"], "extensions": [".dlg"], "fences": ["dialogue", "dlg"], "lineComment": "#", "brackets": [["[", "]"]] }
+		],
+		"fileIcons": [
+			{ "languageId": "dialogue", "extensions": [".dlg"], "label": "DLG", "color": "--hue-pink" }
+		],
+		"projectIcons": [
+			{ "languageId": "dialogue", "label": "DLG", "color": "--hue-pink", "presets": ["dialogue.nuke"], "markers": ["dialogue.toml"] }
+		],
+		"outputLinks": [
+			{ "id": "dlgc", "regexp": "^dlgc: ([^:]+\\.dlg):(\\d+)", "file": 1, "line": 2 }
+		],
+		"problemMatchers": [
+			{
+				"id": "dlgc",
+				"source": "dlgc",
+				"fileLocation": { "kind": "search", "roots": ["${projectRoot}"] },
+				"patterns": [ { "regexp": "^dlgc: (.+?\\.dlg):(\\d+): (error|warning): (.*)$", "file": 1, "line": 2, "severity": 3, "message": 4 } ]
+			}
+		],
+		"taskPresets": [
+			{ "id": "dialogue.nuke", "label": "Dialogue (Nuke)", "extends": "nuke", "problemMatcher": "dlgc" }
+		],
+		"skills": ["skills"],
+		"systemMessageSections": [
+			{ "id": "dialogue", "when": "workspaceLanguage.dialogue", "maxTokens": 120, "text": "Dialogue lives in .dlg files; read the dialogue-markup skill before writing one, and check a file with dialogue_check." }
+		],
+		"toolCalls": [
+			{
+				"name": "dialogue_check",
+				"description": "Check a .dlg file: its errors and warnings as path:line: severity: message.",
+				"class": "read",
+				"inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"], "additionalProperties": false },
+				"run": ["python", "-I", "tools/dlgc.py", "--check", "${args.path}"],
+				"when": "workspaceLanguage.dialogue"
+			}
+		]
+	}
+}

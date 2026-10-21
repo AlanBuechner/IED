@@ -138,8 +138,8 @@ Permission handling per class is defined in `docs/11`.
 
 | ID | Tool | Class | Notes |
 |---|---|---|---|
-| T-KNW-1 | `skill_search(keywords, n?)` | meta | BM25 (+ optional embeddings) over all skills; returns names + descriptions + scores. |
-| T-KNW-2 | `skill_read(name)` | meta | Loads a skill body (and enables any tool groups it declares). |
+| T-KNW-1 | `skill_search(query)` | read | **Built**: the workspace's skills (`.ied/skills/`, plugins' `skills`, the app's; `docs/26` section 8) whose name, description or keywords hold the query's words, a word in the name counting most; up to 10 as `name (source): description`. BM25 and embeddings later. |
+| T-KNW-2 | `skill_read(name, file?)` | read | **Built**: a skill's SKILL.md without its frontmatter, or another file of its folder (`file`, relative to it); an unknown name lists the skills. Enabling the tool groups a skill declares comes with tool groups. |
 | T-KNW-3 | `skill_write(name, description, keywords, body)` | write | Approval-gated; writes to `.ied/skills/` or app tier. |
 | T-KNW-4 | `history_search(query)` / `history_read(turn or range)` | meta | Retrieve compressed-away chat history. |
 | T-KNW-5 | `scratchpad(action: read|write|append|replace_section, section?, text?)` | meta | Chat scratchpad (F-CHT-71). |
@@ -201,7 +201,7 @@ From `ied.gpu` (`docs/22`). Results cite EIDs, which the UI renders as links; im
 
 ### Plugin and MCP tools
 
-- Plugins add tools via `toolCalls` (named `<pluginId>_<tool>` unless the plugin claims a group name) and assign them to groups.
+- Plugins add tools via `toolCalls` (a name of the plugin's choosing, `cargo_metadata`; groups come with tool groups). **Built** for tools that run a command (`docs/26` section 8): each turn offers the core tools and the workspace's plugins' tool calls whose `when` holds; the command is the plugin's argv with `${args.<name>}` and `${config:<key>}` put in, its subject `shell(<command>)` for the permission rules, refused in an untrusted workspace; `output: json` gives all of stdout (its log on stderr goes only to Output > AI). Shipped: `nuke_list` (`ied.nuke`), `cargo_metadata` (`ied.rust`). Tools implemented by C4 functions or bindings come with the C4 plugin host (`docs/26` P3).
 - MCP server tools are exposed as group `mcp_<server>`; their descriptions come from the server. The UI shows the source on each call card.
 - **Engine tools come from engine plugins**, not the host. For a C4 game engine, the expected set (via its session pipe / MCP server, `docs/17`): `engine_status`, `engine_command(cmd, args)` (driven by the engine CLI's `--describe`), `scene_inspect(path or entity)`, `scene_diff`, `asset_import`, `engine_reload(kinds)`, `engine_capture_frame`, `engine_profile(frames)`. IED's generic tools (`screenshot_window`, `image_compare`, `process_stats`, `profile_*`) cover the rest.
 

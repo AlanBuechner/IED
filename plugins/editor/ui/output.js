@@ -5,7 +5,7 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { AnsiReader } from "/ui-kit/ansi.js";
-import { findLocation, pickFile, workspaceRelative } from "./outputlinks.js";
+import { compileShapes, findLocation, pickFile, workspaceRelative } from "./outputlinks.js";
 
 const MAX_LINES = 20000;
 const SOURCE_KEY = "ied.output.source";
@@ -99,8 +99,19 @@ export class Output {
 	}
 
 	finishLine() {
-		if (this.line) linkify(this.line);
+		if (this.line) linkify(this.line, this.shapes());
 		this.line = null;
+	}
+
+	// The places the loaded plugins' tools print, worked out again when the plugins change.
+	shapes() {
+		const contributions = this.ied.contributions("outputLinks");
+		const key = contributions.map((c) => c.value.regexp).join("\n");
+		if (this.shapesKey !== key) {
+			this.compiled = compileShapes(contributions, (message) => this.ied.report(message));
+			this.shapesKey = key;
+		}
+		return this.compiled;
 	}
 
 	clicked(event) {
@@ -154,8 +165,8 @@ export class Output {
 }
 
 // Underlines the place a finished line names, splitting its text nodes at the place's edges.
-function linkify(line) {
-	const found = findLocation(line.textContent);
+function linkify(line, shapes) {
+	const found = findLocation(line.textContent, shapes);
 	if (!found) return;
 	line.dataset.path = found.path;
 	line.dataset.line = String(found.line);

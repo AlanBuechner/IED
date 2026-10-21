@@ -34,7 +34,7 @@ namespace Ied
 			if (!each->compressed)
 				for (ModelMessage* message : each->messages) message->WriteJson(json);
 		json.EndArray();
-		json.RawField("tools", chats->tools->RequestTools(chat->mode).View());
+		json.RawField("tools", tools->RequestTools(chat->mode).View());
 		json.BoolField("stream", true);
 		json.Key(Core::StringView("stream_options"));
 		json.BeginObject();
@@ -213,11 +213,11 @@ namespace Ied
 
 	void TurnRun::PublishContext(int64 used) {
 		int64 messages = 0;
-		int64 tools = 0;
+		int64 results = 0;
 		for (Turn* each : chat->turns)
 			if (!each->compressed)
 				for (ModelMessage* message : each->messages) {
-					if (message->role == "tool") tools += message->content.ByteLength();
+					if (message->role == "tool") results += message->content.ByteLength();
 					else messages += message->content.ByteLength() + message->toolCalls.ByteLength();
 				}
 		JsonWriter json;
@@ -227,9 +227,9 @@ namespace Ied
 		json.Key(Core::StringView("parts"));
 		json.BeginArray();
 		WritePart(json, "System prompt", system.ByteLength() / 4);
-		WritePart(json, "Tool definitions", chats->tools->RequestTools(chat->mode).ByteLength() / 4);
+		WritePart(json, "Tool definitions", tools->RequestTools(chat->mode).ByteLength() / 4);
 		WritePart(json, "Messages", messages / 4);
-		WritePart(json, "Tool results", tools / 4);
+		WritePart(json, "Tool results", results / 4);
 		json.EndArray();
 		json.EndObject();
 		chat->context = json.ToString();

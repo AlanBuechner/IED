@@ -74,6 +74,7 @@ namespace Ied
 		public Core::Array<Core::String> toolbar;
 		public Core::Array<DebugConfig*> debugConfigs;
 		public Core::String debugDefault;
+		public Core::Array<Core::String> defaultMatchers;   // a preset's `problemMatcher`: for steps that name none
 		public Core::Array<Core::String> problems;
 
 		public TaskVariable* Variable(Core::StringView key) const;
@@ -83,7 +84,11 @@ namespace Ied
 		public DebugConfig* Debug(Core::StringView name) const;
 	}
 
-	// A project file's or a preset's `variables`, `tasks`, `toolbar` and `debug` into `into`, each key (and a debug
-	// configuration's name) replacing an earlier one and a toolbar the earlier toolbar; what does not read is a problem.
+	// A project file's or a preset's `variables`, `tasks`, `toolbar`, `debug` and `problemMatcher` into `into`, each key
+	// (and a debug configuration's name) replacing an earlier one and a toolbar or default matchers the earlier ones;
+	// what does not read is a problem.
 	void ReadTaskEntries(const Serialization::DomNode& node, Core::StringView origin, OfferedTasks& into);
+	// The default matchers given to every run step that names none (docs/26: a language's preset gives Nuke's steps its
+	// compiler's matchers).
+	void ApplyDefaultMatchers(OfferedTasks& offered);
 }

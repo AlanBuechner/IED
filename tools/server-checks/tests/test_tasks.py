@@ -33,6 +33,7 @@ def python(code):
 FAKE_PLUGIN = {
 	"manifestVersion": 1, "id": "fake.tasks", "name": "Fake tasks", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
 	"contributes": {
+		"settings": {"schema": "settings.schema.json"},
 		"problemMatchers": [
 			{"id": "fake", "source": "fake", "patterns": [{"regexp": "^(.+?) \\((\\d+):(\\d+)\\) (error|warning): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5}]},
 			{"id": "fake-src", "source": "fake-src", "fileLocation": {"kind": "search", "roots": ["${projectRoot}/src"]},
@@ -43,7 +44,10 @@ FAKE_PLUGIN = {
 			"tasks": {
 				"build": {"slot": "build", "steps": [{"run": python("print('building ${config}')"), "problemMatcher": "fake"}]},
 				"clean": {"steps": [{"run": python("print('preset clean')")}]}},
-			"toolbar": ["config", "|", "build"]}]}}
+			"toolbar": ["config", "|", "build"]},
+			{"id": "fake.derived", "label": "Derived", "extends": "fake.make", "problemMatcher": "fake", "toolbar": ["config", "|", "lint"],
+				"tasks": {"lint": {"steps": [{"run": python("print('src/a.c (1:1) warning: lint says hi')")}]}}},
+			{"id": "fake.loop", "label": "Loop", "extends": "fake.loop"}]}}
 
 
 class TaskTests(ServerTestCase):
@@ -53,6 +57,7 @@ class TaskTests(ServerTestCase):
 		self.repo = os.path.join(self.root, "Game")
 		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
 		write(os.path.join(self.home, "plugins", "fake", "ied-plugin.json"), FAKE_PLUGIN)
+		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"}}})
 		write(os.path.join(self.repo, "src", "a.c"), "int a;\nint b;\nint c;\n")
 		write(os.path.join(self.repo, "hello.cmd"), "@echo hello %~1\r\n")
 		write(os.path.join(self.repo, "Game.ied.proj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "presets": ["fake.make"], "tasks": self.tasks()})
@@ -76,7 +81,8 @@ class TaskTests(ServerTestCase):
 			"forever": {"concurrency": "single", "steps": [{"run": python(grandchild)}]},
 			"sleepy": {"concurrency": "parallel", "steps": [{"run": python("import time; time.sleep(60)  # " + self.orphan_marker())}]},
 			"typo": {"steps": [{"run": python("print('${nope}')")}]},
-			"show": {"steps": [{"run": python("print(open('src/a.c').read())")}]}}
+			"show": {"steps": [{"run": python("print(open('src/a.c').read())")}]},
+			"greet": {"steps": [{"run": python("print('${config:fake.greeting} from ${config}')")}]}}
 
 	def orphan_marker(self):
 		return "ied-step-" + os.path.basename(self.root)
@@ -120,6 +126,26 @@ class TaskTests(ServerTestCase):
 		self.assertEqual("build", tasks["build"]["slot"], "the preset's task stays")
 		self.assertEqual(["config", "|", "build"], offer["toolbar"])
 		self.assertEqual([], offer["problems"])
+
+	async def test_a_preset_extends_another(self):
+		"""docs/26: a preset reads its base first and overrides it by key; its problemMatcher reaches every step that names
+		none, the base's included; a preset that extends itself is a problem, not a loop."""
+		write(os.path.join(self.repo, "Lint.ied.proj"), {"version": 1, "name": "Lint", "root": ".", "kind": "other", "presets": ["fake.derived", "fake.loop"]})
+		write(os.path.join(self.repo, "Game.ied.sln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.ied.proj"}, {"file": "Lint.ied.proj"}]})
+		offer = None
+		for _ in range(50):
+			try:
+				offer = await self.client.request("task.list", {"wsId": "w1", "project": "Lint"})
+				break
+			except RpcFailure:
+				await asyncio.sleep(0.1)
+		tasks = {t["key"]: t for t in offer["tasks"]}
+		self.assertEqual(["build", "clean", "lint"], sorted(tasks), "the base's tasks and its own")
+		self.assertEqual(["config", "|", "lint"], offer["toolbar"], "its toolbar replaced the base's")
+		self.assertEqual(["the task preset fake.loop extends itself"], offer["problems"])
+		_, frames = await self.run_task(task="lint", project="Lint")
+		frame = (await self.client.wait_for("diag:w1", lambda f: f.get("kind") == "diag.set" and f["data"]["source"] == "fake/Lint", timeout=10))[-1]["data"]
+		self.assertEqual("lint says hi", frame["items"][0]["message"], "the preset's matcher on its step")
 
 	async def test_selections_persist(self):
 		chosen = await self.client.request("task.select", {"wsId": "w1", "key": "config", "value": "Debug"})
@@ -166,6 +192,14 @@ class TaskTests(ServerTestCase):
 			self.assertEqual([], other.violations)
 		finally:
 			other.abort()
+
+	async def test_a_setting_reaches_a_step(self):
+		"""${config:key} is a setting's effective value; ${config} stays the configuration variable."""
+		_, frames = await self.run_task(task="greet")
+		self.assertIn("hello from Development", self.text_of(frames))
+		await self.client.request("settings.set", {"tier": "solution", "wsId": "w1", "key": "fake.greeting", "value": "hi"})
+		_, frames = await self.run_task(task="greet")
+		self.assertIn("hi from Development", self.text_of(frames))
 
 	async def test_a_shell_string_runs_as_written(self):
 		_, frames = await self.run_task(task="shell")
@@ -271,6 +305,7 @@ class FolderTaskTests(ServerTestCase):
 		self.folder = os.path.join(self.root, "tool")
 		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
 		write(os.path.join(self.home, "plugins", "fake", "ied-plugin.json"), FAKE_PLUGIN)
+		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"}}})
 		write(os.path.join(self.folder, "fake.mk"), "all:\n")
 		self.server = IedServer(extra=("--home", self.home, "--workspace", self.folder))
 		self.assertTrue(self.server.started, self.server.error)

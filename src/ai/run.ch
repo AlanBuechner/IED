@@ -89,6 +89,8 @@ namespace Ied
 		private int64 candidate;
 		private RoleModel role;
 		private Core::String system;
+		// The core tools and the workspace's plugins' tools, as the turn started.
+		private ToolRegistry* tools;
 		private PermissionRules rules;
 		// ai.maxSteps; 0 is no limit.
 		private int64 maxSteps;

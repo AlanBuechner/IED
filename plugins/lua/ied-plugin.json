@@ -1,0 +1,22 @@
+// Lua (docs/26 "Language plugins"): the language, its icon, and the places Lua prints ("path:line:").
+{
+	"manifestVersion": 1,
+	"id": "ied.lua",
+	"name": "Lua",
+	"version": "0.1.0",
+	"description": "The Lua language: recognition, icon and error links.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "lua", "aliases": ["Lua"], "extensions": [".lua"], "fences": ["lua"], "lineComment": "--", "blockComment": ["--[[", "]]"] }
+		],
+		"fileIcons": [
+			{ "languageId": "lua", "extensions": [".lua"], "label": "LUA", "color": "--hue-indigo" }
+		],
+		"outputLinks": [
+			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		]
+	}
+}

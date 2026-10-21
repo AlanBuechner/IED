@@ -28,7 +28,7 @@ An adapter runs over stdio, or with `transport: tcp` over a loopback socket: IED
 
 ## Launch configurations
 
-A project's configurations live in its `.ied.proj` (`docs/03`) as `debug: {default, configurations: {<name>: {type, request, preLaunchTask?, ...adapter arguments}}}` (a preset's `debug` too, overridden by name); `nuke init --ied` writes one per executable project (`type` from the workspace's toolchain plugin, `program` the executable Nuke builds). The toolbar's debug target is a project and one of its configurations; without one, the adapter's first template for the project's languages.
+A project's configurations live in its `.ied.proj` (`docs/03`) as `debug: {default, configurations: {<name>: {type, request, preLaunchTask?, ...adapter arguments}}}` (a preset's `debug` too, overridden by name). A project `nuke init --ied` describes gets its configuration from its language's Nuke preset (`c4.nuke`: a C4DAP Launch of the executable Nuke builds; `cpp.nuke`: an LLDB one; `docs/26` section 6); the project file itself holds none unless someone adds one. The toolbar's debug target is a project and one of its configurations; without one, the adapter's first template for the project's languages.
 
 A configuration's strings expand the profile variables plus `${projectName}`, `${projectDir}`, `${projectOutput}` (the build system's output for the active configuration, `docs/06`) and `${configuration}`. `preLaunchTask` names a task (`docs/06`); F5 runs it first and starts the session only when it succeeds (F-DBG-3). Machine-specific adapter paths belong in settings (`${config:...}`), never in the committed project file.
 

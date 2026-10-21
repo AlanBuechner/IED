@@ -22,7 +22,7 @@ MyGame/
   Engine/
     nuke.toml           [project]: kind = "module"
     src/
-  .ied/skills/          AI skills (committed)
+  .ied/skills/          the workspace's own AI skills (committed)
   .ied/local/           machine-local files Nuke writes for the editor (gitignored)
   build/bin/...         outputs (gitignored)
   build/int/...         intermediates (gitignored)
@@ -35,8 +35,9 @@ MyGame/
 | `custom` | no C4 compile; its `[[project.steps]]` do the work (the compiler's own `C4/nuke.toml` is one) |
 
 `nuke init` in an empty folder writes a one-project workspace (`nuke.toml` with both tables, `src/main.cf` for an
-executable, a `.gitignore` with `build/` and `.ied/local/`) and copies the toolchain's language skills (`c4-language`,
-`c4-testing`, `c4-reflection`, `c4-garbage-collector`) and Nuke's own skill into `.ied/skills/`.
+executable, a `.gitignore` with `build/` and `.ied/local/`). The language's AI skills (`c4-language`, `c4-testing`,
+`c4-reflection`, `c4-garbage-collector`) come with the toolchain's IED plugin and Nuke's with IED's `ied.nuke` plugin;
+they are not copied into the workspace.
 
 ### Configuration -> C4.exe flags
 
@@ -172,7 +173,7 @@ Nuke reference).
   tools/C4LSP/          the language server (+ the LLVM dlls it loads)
   tools/C4DAP/          the debug adapter
   docs/                 the user-facing language, library, runtime and tools docs (this page among them)
-  skills/               the AI skills for this version of the language (from C4/skills/)
+  ied/                  the IED plugin for this version of the language, with its AI skills (from C4/IedPlugin/)
 ```
 
 The folder is mirrored: unchanged files are not copied again and files gone from the build are removed.
@@ -188,8 +189,8 @@ From the IED repository root, a workspace whose project `C4` (`C4/nuke.toml`) bu
   `C4/C4Lib/src/Compiler/Version.h`. Installed versions never change: bump the version first. A workspace then
   pins it with `nuke toolchain use <version>`.
 
-Note: `C4/skills/*/SKILL.md` are short agent-facing summaries kept in sync with these docs (they are the
-compressed view; when the two disagree, these pages win). Every toolchain ships them in `skills/`.
+Note: `C4/IedPlugin/skills/*/SKILL.md` are short agent-facing summaries kept in sync with these docs (they are the
+compressed view; when the two disagree, these pages win). Every toolchain ships them in its IED plugin, `ied/skills/`.
 
 Gaps:
 

@@ -3,7 +3,6 @@ IED solution and project files (ied_files.py)."""
 
 import argparse
 import os
-import shutil
 
 from .. import fsutil, ied_files
 from .. import workspace as workspaces
@@ -12,7 +11,6 @@ from ..manifest import KINDS, MANIFEST_NAME, PROJECT_NAME
 from . import base
 
 TEMPLATES = fsutil.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "templates")
-NUKE_SKILLS = fsutil.join(os.path.dirname(TEMPLATES), "skills")
 USAGE = """nuke init [NAME] [--kind executable|module|custom] [--toolchain VERSION] [--ied]
   outside a workspace: make the current folder a new workspace with one project (NAME defaults to the folder)
   inside a workspace:  create the project NAME in ./NAME (or here with --here)
@@ -91,8 +89,7 @@ def create_workspace(cli, folder, options):
 	_write_new(os.path.join(folder, MANIFEST_NAME), _template("workspace.toml", name=name, kind=options.kind, toolchain=toolchain))
 	_sources(folder, name, options.kind)
 	_ensure_gitignore(folder)
-	skills = _copy_skills(cli, folder, toolchain)
-	cli.log.note(f"created workspace {name} ({options.kind}, toolchain {toolchain}){f', {skills} skill(s) in .ied/skills' if skills else ''}")
+	cli.log.note(f"created workspace {name} ({options.kind}, toolchain {toolchain})")
 	cli.log.note("next: nuke build run")
 	return 0
 
@@ -111,7 +108,8 @@ def create_project(cli, folder, options):
 
 
 def ied_solution(cli, workspace):
-	"""The workspace's IED solution and project files, its .gitignore and skills as `nuke init` makes them."""
+	"""The workspace's IED solution and project files and its .gitignore as `nuke init` makes them. The AI skills come
+	with the IED plugins (the toolchain's for C4, IED's own for Nuke), not as copies in the workspace."""
 	toolchain = None
 	try:
 		toolchain = cli.store.resolve(workspace.spec.toolchain, workspace.dir)
@@ -119,7 +117,6 @@ def ied_solution(cli, workspace):
 		cli.log.warn(f"no toolchain, so no C4 plugin in the solution: {error}")
 	changed = ied_files.generate(workspace, toolchain, cli.log)
 	_ensure_gitignore(workspace.dir)
-	_copy_skills(cli, workspace.dir, workspace.spec.toolchain)
 	path = os.path.relpath(ied_files.solution_path(workspace), cli.cwd).replace("\\", "/")
 	cli.log.note(f"IED solution {path}: {len(workspace.projects)} project(s), {changed} file(s) written or removed")
 	return 0
@@ -143,19 +140,3 @@ def _ensure_gitignore(folder):
 			f.write(("" if not existing or existing.endswith("\n") else "\n") + "\n".join(wanted) + "\n")
 
 
-def _copy_skills(cli, folder, toolchain_spec):
-	"""The toolchain's C4 skills and Nuke's own skill into .ied/skills/ (the workspace's AI skills)."""
-	sources = [os.path.join(NUKE_SKILLS, d) for d in sorted(os.listdir(NUKE_SKILLS))] if os.path.isdir(NUKE_SKILLS) else []
-	try:
-		skills_dir = cli.store.resolve(toolchain_spec, folder).skills_dir()
-		if os.path.isdir(skills_dir):
-			sources += [os.path.join(skills_dir, d) for d in sorted(os.listdir(skills_dir))]
-	except NukeError as error:
-		cli.log.warn(f"no language skills copied: {error}")
-	copied = 0
-	for source in sources:
-		dest = os.path.join(folder, ".ied", "skills", os.path.basename(source))
-		if os.path.isfile(os.path.join(source, "SKILL.md")) and not os.path.exists(dest):
-			shutil.copytree(source, dest)
-			copied += 1
-	return copied

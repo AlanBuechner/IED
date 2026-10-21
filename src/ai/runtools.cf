@@ -73,20 +73,20 @@ namespace Ied
 	void TurnRun::ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId) {
 		const int64 started = ToolNowMs();
 		ToolOutcome outcome;
-		ToolSpec* spec = chats->tools->Find(call->name.View());
+		ToolSpec* spec = tools->Find(call->name.View());
 		Serialization::DomNode args;
-		if (!spec || !chats->tools->Offered(spec, chat->mode)) {
+		if (!spec || !tools->Offered(spec, chat->mode)) {
 			Core::Array<Core::String> values;
 			values.Push(Core::String("name"));
 			values.Push(call->name);
 			values.Push(Core::String("suggestions"));
-			values.Push(Joined(chats->tools->Suggest(call->name.View(), chat->mode), " or "));
+			values.Push(Joined(tools->Suggest(call->name.View(), chat->mode), " or "));
 			outcome = ToolError(chats->prompts.Note("unknown_tool", values).View());
 		}
 		else {
 			Core::Array<Core::String> problems;
 			if (!ReadToolArguments(call->arguments.View(), args)) problems.Push(Core::String("the arguments are not a JSON object"));
-			else problems = chats->tools->Check(spec, args);
+			else problems = tools->Check(spec, args);
 			if (problems.IsEmpty()) {
 				malformed = 0;
 				outcome = RunCall(spec, call, segment, args);

@@ -102,7 +102,15 @@ namespace Ied
 			else PutTask(into, task);
 		}
 		if (node.Member("toolbar").Kind() == Serialization::DomKind::Array) into.toolbar = StringList(node.Member("toolbar"));
+		if (node.Member("problemMatcher").Kind() != Serialization::DomKind::Null) into.defaultMatchers = StringList(node.Member("problemMatcher"));
 		ReadDebugEntries(node.Member("debug"), origin, into);
+	}
+
+	void ApplyDefaultMatchers(OfferedTasks& offered) {
+		if (offered.defaultMatchers.IsEmpty()) return;
+		for (TaskDef* task : offered.tasks)
+			for (TaskStep* step : task->steps)
+				if (step->kind == StepKind::Run && step->matchers.IsEmpty()) step->matchers = offered.defaultMatchers;
 	}
 
 	static void ReadDebugEntries(const Serialization::DomNode& debug, Core::StringView origin, OfferedTasks& into) {

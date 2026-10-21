@@ -42,7 +42,7 @@ class RealToolchainTests(unittest.TestCase):
 		os.makedirs(folder)
 		code, out = self.nuke("init", "--toolchain", TOOLCHAIN.version, cwd=folder)
 		self.assertEqual(code, 0, out)
-		self.assertTrue(os.path.isfile(os.path.join(folder, ".ied", "skills", "c4-language", "SKILL.md")))
+		self.assertFalse(os.path.exists(os.path.join(folder, ".ied", "skills")), "the skills come with the IED plugins")
 		self.assertIn("build/", read(os.path.join(folder, ".gitignore")))
 		code, out = self.nuke("build", "run", cwd=folder)
 		self.assertEqual(code, 0, out)

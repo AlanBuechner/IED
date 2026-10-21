@@ -1,0 +1,39 @@
+// The web languages (docs/26 "Language plugins"): JavaScript, TypeScript, HTML, CSS and SCSS - recognition, icons, Node and
+// TypeScript projects by package.json / tsconfig.json, and the places tsc ("path(line,col)") and the Node tools
+// ("path:line:col") print.
+{
+	"manifestVersion": 1,
+	"id": "ied.web",
+	"name": "Web Languages",
+	"version": "0.1.0",
+	"description": "JavaScript, TypeScript, HTML, CSS and SCSS: recognition, icons and build output links.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "javascript", "aliases": ["JavaScript"], "extensions": [".js", ".mjs", ".cjs", ".jsx"], "fences": ["javascript", "js", "jsx", "mjs"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "typescript", "aliases": ["TypeScript"], "extensions": [".ts", ".mts", ".cts", ".tsx"], "fences": ["typescript", "ts", "tsx"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "html", "aliases": ["HTML"], "extensions": [".html", ".htm"], "fences": ["html", "htm"], "blockComment": ["<!--", "-->"] },
+			{ "id": "css", "aliases": ["CSS"], "extensions": [".css"], "fences": ["css"], "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] },
+			{ "id": "scss", "aliases": ["SCSS"], "extensions": [".scss"], "fences": ["scss"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] }
+		],
+		"fileIcons": [
+			{ "languageId": "javascript", "extensions": [".js", ".mjs", ".cjs", ".jsx"], "label": "JS", "color": "--hue-yellow" },
+			{ "languageId": "typescript", "extensions": [".ts", ".mts", ".cts", ".tsx"], "label": "TS", "color": "--hue-blue" },
+			{ "languageId": "typescript", "extensions": [".d.ts"], "label": "DTS", "color": "--hue-blue" },
+			{ "languageId": "html", "extensions": [".html", ".htm"], "label": "<>", "color": "--hue-orange" },
+			{ "languageId": "css", "extensions": [".css"], "label": "#", "color": "--hue-blue" },
+			{ "languageId": "scss", "extensions": [".scss"], "label": "#", "color": "--hue-pink" },
+			{ "fileNames": ["package.json", "package-lock.json"], "icon": "$(package)", "color": "--hue-green" }
+		],
+		"projectIcons": [
+			{ "languageId": "typescript", "label": "TS", "color": "--hue-blue", "markers": ["tsconfig.json"] },
+			{ "languageId": "javascript", "label": "JS", "color": "--hue-yellow", "markers": ["package.json"] }
+		],
+		"outputLinks": [
+			{ "id": "msvc", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s()<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+)\\((\\d+)(?:,(\\d+))?(?:-\\d+)?\\)", "file": 1, "line": 2, "column": 3 },
+			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		]
+	}
+}

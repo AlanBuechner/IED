@@ -87,7 +87,7 @@ Until then, the **frontend (`frontend/`, `shared/ui-kit`) and the contract (`sha
 
 ### C4LSP (`C4/C4LSP/`)
 
-Today: stdio, full sync, standard features (completion, hover, signature help, def/decl/type-def/impl, references, highlights, symbols, semantic tokens full, rename, formatting, code actions, folding), push diagnostics matching the compiler exactly. Legacy quirks IED's generic client must tolerate now (the C4 plugin's LSP profile declares them, see `shared/host-api/examples/c4-plugin`) and the C4 team should fix:
+Today: stdio, full sync, standard features (completion, hover, signature help, def/decl/type-def/impl, references, highlights, symbols, semantic tokens full, rename, formatting, code actions, folding), push diagnostics matching the compiler exactly. Legacy quirks IED's generic client must tolerate now (the C4 plugin's LSP profile declares them, `C4/IedPlugin/ied-plugin.json`) and the C4 team should fix:
 
 | # | Item | Why |
 |---|---|---|
@@ -123,7 +123,7 @@ Today: launch, line breakpoints, thrown/uncaught exception filters, continue/ste
 
 C4Assist (the C4 plugin for the predecessor IDE, Go + TypeScript) was not carried into this repository when C4 moved in (2026-10-20); this section is the record of what it did and what the rewrite needs. Its theme values live on in `frontend/css/theme.css`.
 
-C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (see `shared/host-api/examples/c4-plugin/ied-plugin.json`):
+C4Assist is mostly declarative (LSP profile, Visual Assist-style token palettes, editor menus, ctrl-click navigation, auto-close pairs, 9 feature toggles, `c4.kitStatus`/`c4.formatDocument` RPC, one AI tool) plus a tiny Go backend. The rewrite is **a declarative IED plugin with no backend** (built: `C4/IedPlugin/ied-plugin.json`, shipped in every toolchain as `ied/`):
 
 - Language definition + Monarch grammar; semantic token mapping to `--syntax-*` tokens (IED's default palette is the Visual Assist X one C4Assist ships, `docs/07`).
 - LSP profile (staged launch, byte positions, integer ids, refetch-on-diagnostics, client-side code-action filtering) and DAP provider.

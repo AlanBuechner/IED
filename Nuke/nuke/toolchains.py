@@ -52,8 +52,6 @@ class Toolchain:
 	def compiler_path(self):
 		return self.compiler_command()[-1] if self.command else fsutil.join(self.dir, "C4.exe")
 
-	def skills_dir(self):
-		return fsutil.join(self.dir, "skills")
 
 	def accepts(self, option):
 		"""Whether the compiler takes `option`: its -h lists every option it has, and an older install lacks newer ones."""

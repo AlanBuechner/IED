@@ -1,5 +1,6 @@
 // PluginHost (docs/02 "Lifecycle"): finds plugins - built-in ones in the install's plugins/ folder, app ones in
-// <app data>/plugins/, and a solution's project-local ones - validates their manifests, lets a stronger source override
+// <app data>/plugins/, and a workspace's project ones: its solution's pins and its .ied/plugins/ folders (docs/26) -
+// validates their manifests, lets a stronger source override
 // a plugin of the same id, loads an app plugin only once the owner approved its exact content and a project-local one
 // only in a trusted workspace (docs/11 "Trust layers"), checks dependencies, keeps which are disabled, and offers the
 // declarative contributions of the loaded ones. The "plugins" topic and the plugins.* methods; every member runs with
@@ -36,7 +37,8 @@ namespace Ied
 		// for `ws`, a local one included); empty when no such plugin is loaded or it has no such file.
 		public FS::Path FileOf(Workspace* ws, Core::StringView id, Core::StringView path);
 		public const Core::Array<Plugin*>& All() const { return plugins; }
-		// A workspace's project-local plugins, read now: untrusted unless the workspace is trusted.
+		// A workspace's project plugins, read now: the solution's pins, then <root>/.ied/plugins/*; untrusted unless the
+		// workspace is trusted, and of two with one id the first is the one.
 		public Core::Array<Plugin*> LocalFor(Workspace* ws);
 		// The language of a file of `ws` (plugins/languages.ch).
 		public Core::String LanguageOf(Workspace* ws, Core::StringView path);

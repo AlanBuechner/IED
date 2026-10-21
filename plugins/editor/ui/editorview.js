@@ -9,7 +9,7 @@ import { DocumentSync } from "/ui-kit/docsync.js";
 import { themeName } from "./monaco.js";
 import { optionsOf } from "./editorsettings.js";
 import { ChangeMargin } from "./changemargin.js";
-import { displayPath, isFileUri } from "./fileuris.js";
+import { displayPath, isFileUri } from "/ui-kit/fileuris.js";
 
 const NOTICE_MS = 8000;
 // Narrower than this an editor is not laid out yet (a hidden or just-opened tab).

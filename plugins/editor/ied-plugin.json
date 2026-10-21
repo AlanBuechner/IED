@@ -20,8 +20,8 @@
 					"version": "1",
 					"kind": "function",
 					"side": "client",
-					"description": "Lines of a file colored as the editor colors them: HTML per line (docs/02 \"Client bindings as built\").",
-					"params": { "type": "object", "required": ["path", "lines"], "properties": { "path": { "type": "string" }, "lines": { "type": "array", "items": { "type": "string" } } } },
+					"description": "Lines colored as the editor colors a language (or a file's language): HTML per line (docs/02 \"Client bindings as built\").",
+					"params": { "type": "object", "required": ["lines"], "properties": { "path": { "type": "string" }, "languageId": { "type": "string" }, "lines": { "type": "array", "items": { "type": "string" } } } },
 					"result": { "type": "array", "items": { "type": "string" } }
 				}
 			]
@@ -119,7 +119,6 @@
 			{ "id": "ied.editor.zoomIn", "title": "Zoom In", "category": "Edit", "icon": "$(zoom-in)" },
 			{ "id": "ied.editor.zoomOut", "title": "Zoom Out", "category": "Edit", "icon": "$(zoom-out)" },
 			{ "id": "ied.editor.zoomReset", "title": "Reset Zoom", "category": "Edit" },
-			{ "id": "ied.markdown.preview", "title": "Open Preview", "category": "Markdown", "icon": "$(open-preview)" },
 			{ "id": "ied.editor.open", "title": "Open File at a Place", "category": "Editor" },
 			{ "id": "ied.task.build", "title": "Build", "category": "Build", "icon": "$(gear)" },
 			{ "id": "ied.task.rebuild", "title": "Rebuild", "category": "Build" },
@@ -189,7 +188,6 @@
 			"explorer/context": [
 				{ "command": "ied.task.setStartup", "group": "0_startup", "when": "explorerItemKind == 'project'" },
 				{ "command": "ied.explorer.open", "group": "1_open", "when": "explorerItemKind == 'file'" },
-				{ "command": "ied.markdown.preview", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" },
 				{ "command": "ied.explorer.newFile", "group": "2_new", "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.newFolder", "group": "2_new", "order": 1, "when": "explorerItemKind == 'folder' || explorerItemKind == 'project' || explorerItemKind == 'file'" },
 				{ "command": "ied.explorer.rename", "group": "4_edit", "when": "explorerItemKind == 'file' || explorerItemKind == 'folder'" },
@@ -284,7 +282,6 @@
 			{ "command": "ied.task.cancel", "key": "ctrl+break" },
 			{ "command": "ied.editor.goToAll", "key": "ctrl+t" },
 			{ "command": "ied.editor.goToAll", "key": "ctrl+," },
-			{ "command": "ied.markdown.preview", "key": "ctrl+shift+v", "when": "activeTabKind == 'doc' && editorLanguage == 'markdown'" },
 			{ "command": "ied.editor.toggleHeader", "key": "ctrl+k ctrl+o", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.navigate.back", "key": "ctrl+-" },
 			{ "command": "ied.navigate.forward", "key": "ctrl+shift+-" },

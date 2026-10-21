@@ -160,6 +160,21 @@ namespace Ied
 		return batch.Overflowed();
 	}
 
+	// Whether a change is in the workspace's own plugins (.ied/plugins/, read again on every request): what they
+	// contribute then changes.
+	static bool TouchesWorkspacePlugins(const ChangeBatch& batch) {
+		for (const TreeChange& change : batch.Changes())
+			if (change.path.View().StartsWith(Core::StringView(".ied/plugins/"))) return true;
+		return batch.Overflowed();
+	}
+
+	// The workspace's settings catalog and task offers made again, and its clients told to read the contributions again.
+	void Workspaces::PluginsChanged(Workspace* ws) {
+		server->settings->PluginsChanged(ws);
+		server->tasks->ProjectsChanged(ws);
+		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "plugins.changed", Core::StringView("{}"));
+	}
+
 	Workspace* Workspaces::Open(const FS::Path& folder, Core::StringView kind) {
 		Workspace* ws = new Workspace();
 		Core::StringBuilder id;
@@ -338,6 +353,7 @@ namespace Ied
 			for (const Core::String& path : server->documents->OpenPaths(ws)) ExternalWrite(ws, path.View());
 		if (!published.IsEmpty() || batch.Overflowed()) PublishTree(ws, published, batch.Overflowed());
 		if (TouchesSolution(ws, batch)) ReadSolutionAgain(ws);
+		if (TouchesWorkspacePlugins(batch)) PluginsChanged(ws);
 		server->git->FilesChanged(ws, batch);
 	}
 

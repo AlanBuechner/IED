@@ -89,18 +89,37 @@ namespace Ied
 			for (const Serialization::DomNode& preset : presets)
 				if (!preset.Member("detect").AsView().IsEmpty() && Detected(project->root, preset.Member("detect").AsView())) ids.Push(Core::String(preset.Member("id").AsView()));
 		for (const Core::String& id : ids) {
-			int64 found = -1;
-			for (int64 i = 0; i < presets.Count(); ++i)
-				if (presets[i].Member("id").AsView() == id.View()) found = i;
-			if (found < 0) into.problems.Push((Core::String("no plugin offers the task preset ") + id.View()));
-			else ReadTaskEntries(presets[found], (Core::String("the preset ") + id.View()).View(), into);
+			Core::Array<Core::String> chain;
+			ReadPreset(presets, id.View(), chain, into);
 		}
+	}
+
+	// The preset `id` into `into`, after the preset it extends (and that one's base before it); `chain` holds the ids
+	// being read, so a preset that extends itself is a problem instead of a loop.
+	static void ReadPreset(const Core::Array<Serialization::DomNode>& presets, Core::StringView id, Core::Array<Core::String>& chain, OfferedTasks& into) {
+		int64 found = -1;
+		for (int64 i = 0; i < presets.Count(); ++i)
+			if (presets[i].Member("id").AsView() == id) found = i;
+		if (found < 0) {
+			into.problems.Push((Core::String("no plugin offers the task preset ") + id));
+			return;
+		}
+		for (const Core::String& reading : chain)
+			if (reading.View() == id) {
+				into.problems.Push(((Core::String("the task preset ") + id) + " extends itself"));
+				return;
+			}
+		chain.Push(Core::String(id));
+		Core::StringView base = presets[found].Member("extends").AsView();
+		if (!base.IsEmpty()) ReadPreset(presets, base, chain, into);
+		ReadTaskEntries(presets[found], (Core::String("the preset ") + id).View(), into);
 	}
 
 	OfferedTasks* Tasks::Offered(Workspace* ws, const TaskProject* project) {
 		OfferedTasks* offered = new OfferedTasks();
 		ReadPresets(ws, project, *offered);
 		if (project->data.Kind() == Serialization::DomKind::Object) ReadTaskEntries(project->data, project->origin.View(), *offered);
+		ApplyDefaultMatchers(*offered);
 		return offered;
 	}
 
@@ -367,9 +386,9 @@ namespace Ied
 				if (!Platform::TryGetEnvironmentVariable(variable.CStr(), value)) value = Core::String();
 				return true;
 			}
-			if (name.StartsWith(Core::StringView("setting:"))) {
+			if (name.StartsWith(Core::StringView("config:"))) {
 				Serialization::DomDoc* doc = new Serialization::DomDoc();
-				Core::String json = settings->Effective(ws, Core::StringView(""), name.Substring(8, name.ByteLength() - 8));
+				Core::String json = settings->Effective(ws, Core::StringView(""), name.Substring(7, name.ByteLength() - 7));
 				Serialization::DomNode setting = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
 				value = setting.Kind() == Serialization::DomKind::String ? Core::String(setting.AsView()) : Core::String(json.View().Trimmed());
 				return true;

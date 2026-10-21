@@ -9,8 +9,7 @@
 #     CBind/    C4Script/                         binding generator, script host
 #     tools/C4LSP/  tools/C4DAP/                  language server (+ the LLVM dlls it loads), debug adapter
 #     docs/                 the user-facing language, library, runtime and build docs
-#     skills/               the AI skills for this version of the language
-#     ied/                  the IED plugin for this version of the language (IedPlugin/)
+#     ied/                  the IED plugin for this version of the language, its AI skills included (IedPlugin/)
 #
 # The folder is mirrored: unchanged files are not copied again and files gone from the build are removed.
 # C4/nuke.toml runs this after every Development build to refresh the "dev" toolchain.
@@ -89,8 +88,6 @@ def plan(build, repo):
 		source = os.path.join(repo, "docs", *doc.split("/"))
 		if os.path.isfile(source):
 			files[os.path.join("docs", *doc.split("/"))] = source
-	for rel in files_below(os.path.join(repo, "skills")):
-		files[os.path.join("skills", rel)] = os.path.join(repo, "skills", rel)
 	for rel in files_below(os.path.join(repo, "IedPlugin")):
 		files[os.path.join("ied", rel)] = os.path.join(repo, "IedPlugin", rel)
 	return {os.path.normpath(k): v for k, v in files.items()}

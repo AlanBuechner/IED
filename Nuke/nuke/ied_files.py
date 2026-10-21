@@ -12,7 +12,7 @@ from . import fsutil
 PROJECTS_DIR = "build/ied"
 RECORD = ".ied/local/generated.json"
 PLUGIN_ID = "c4"
-PRESET = "c4.nuke"  # the plugin's task preset: Build, Run, Test and the toolbar run Nuke
+BASE_PRESET = "nuke"  # IED's own Nuke preset (its ied.nuke plugin): Build, Run, Test and the toolbar run Nuke
 KINDS = {"executable": "executable", "module": "library", "custom": "other"}
 ITEMS = ("README.md", "AGENTS.md", "nuke.toml")
 
@@ -52,10 +52,16 @@ def solution(workspace, plugin):
 	return body
 
 
+def preset(spec):
+	"""The task preset of a project: its language's Nuke preset, `<language>.nuke`, which extends IED's `nuke` with the
+	language's problem matchers and launch configuration (IED docs/26 section 6); `nuke` itself without a language."""
+	return f"{spec.language}.nuke" if spec.language else BASE_PRESET
+
+
 def project(workspace, spec):
 	folder = fsutil.join(workspace.dir, PROJECTS_DIR)
 	body = {"version": 1, "name": spec.name, "root": _relative(spec.dir, folder), "kind": KINDS.get(spec.kind, "other"),
-		"buildSystem": {"id": "nuke", "projectName": spec.name}, "presets": [PRESET]}
+		"buildSystem": {"id": "nuke", "projectName": spec.name}, "presets": [preset(spec)]}
 	if spec.language:
 		body["language"] = spec.language
 	if spec.depends:

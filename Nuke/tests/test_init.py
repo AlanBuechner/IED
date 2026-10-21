@@ -7,14 +7,13 @@ from nuke import manifest
 
 
 class InitTests(WorkspaceTest):
-	def test_new_workspace_uses_the_latest_toolchain_and_copies_skills(self):
+	def test_new_workspace_uses_the_latest_toolchain(self):
 		code, out = self.nuke("init", "Game")
 		self.assertEqual(code, 0, out)
 		parsed = manifest.load(self.path("nuke.toml"))
 		self.assertEqual((parsed.workspace.toolchain, parsed.project.name, parsed.project.kind), ("1.0.0", "Game", "executable"))
 		self.assertIn("int32 main()", read(self.path("src", "main.cf")))
-		self.assertTrue(os.path.isfile(self.path(".ied", "skills", "c4-language", "SKILL.md")))
-		self.assertTrue(os.path.isfile(self.path(".ied", "skills", "nuke", "SKILL.md")))
+		self.assertFalse(os.path.exists(self.path(".ied", "skills")), "the skills come with the IED plugins, not as copies")
 		self.assertEqual(read(self.path(".gitignore")), "build/\n.ied/local/\n")
 
 	def test_gitignore_is_extended_not_replaced(self):
@@ -85,10 +84,11 @@ class IedSolutionTests(WorkspaceTest):
 		code, out = self.nuke("init", "--ied")
 		self.assertEqual(code, 0, out)
 		tools = json.loads(read(self.path("build", "ied", "Tools.ied.proj")))
-		self.assertEqual(("../../Tools", "other", ["Engine"], "cpp"), (tools["root"], tools["kind"], tools["references"], tools["language"]))
+		self.assertEqual(("../../Tools", "other", ["Engine"], "cpp", ["cpp.nuke"]), (tools["root"], tools["kind"], tools["references"], tools["language"], tools["presets"]))
 		engine = json.loads(read(self.path("build", "ied", "Engine.ied.proj")))
-		self.assertEqual(("library", "c4"), (engine["kind"], engine["language"]), "a C4 project's language is c4")
-		self.assertNotIn("language", json.loads(read(self.path("build", "ied", "Assets.ied.proj"))), "a custom project without one says none")
+		self.assertEqual(("library", "c4", ["c4.nuke"]), (engine["kind"], engine["language"], engine["presets"]), "a C4 project's language is c4, its preset C4's")
+		assets = json.loads(read(self.path("build", "ied", "Assets.ied.proj")))
+		self.assertEqual((None, ["nuke"]), (assets.get("language"), assets["presets"]), "a custom project without a language: Nuke's own preset")
 		code, out = self.nuke("init", "--ied")
 		self.assertIn("0 file(s) written", out, "nothing changed")
 		os.remove(self.path("Tools", "nuke.toml"))

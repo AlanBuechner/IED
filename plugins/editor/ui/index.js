@@ -9,7 +9,7 @@ import { DocumentView } from "./document.js";
 import { CodeEditor, editorEnvironment } from "./editorview.js";
 import { Editors } from "./editors.js";
 import { loadMonaco } from "./monaco.js";
-import { colorize } from "./colorize.js";
+import { colorize, languageOf } from "./colorize.js";
 import { EditorSettings } from "./editorsettings.js";
 import { Diagnostics } from "./diagnostics.js";
 import { LanguageFeatures } from "./language.js";
@@ -17,8 +17,7 @@ import { ErrorList as ErrorListView } from "./errorlist.js";
 import { FindInFiles as FindInFilesView } from "./findinfiles.js";
 import { findCounterpart } from "./headersource.js";
 import { showGoToAll } from "./gotoall.js";
-import { fileName } from "./fileuris.js";
-import { MarkdownPreview as MarkdownPreviewView } from "./mdpreview.js";
+import { fileName } from "/ui-kit/fileuris.js";
 import { TaskState, TaskToolbar as TaskToolbarView, TaskStatus as TaskStatusView } from "./tasks.js";
 import { DebugState, BreakpointState, DebugToolbar as DebugToolbarView, framePath, hoverExpression } from "./debug.js";
 import { BreakpointMargin } from "./breakpointmargin.js";
@@ -59,7 +58,6 @@ export function activate(ied) {
 		return () => margin.dispose();
 	});
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => ied.icons.fileSpec(fileName(path)), resource: (path) => path });
-	ied.tabs.kind("mdpreview", { view: "MarkdownPreview", title: (path) => "Preview " + fileName(path), icon: () => "$(open-preview)", resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
 	ied.bindings.provide("editor.colorize", (args) => colorize(ied, args));
 	ied.commands.handle("ied.editor.toggleWhitespace", () => settings.toggleWhitespace(ied.workspace.wsId));
@@ -108,10 +106,6 @@ export function activate(ied) {
 	ied.commands.handle("ied.task.showResult", () => (tasks.ended && tasks.ended.status === "failed" && !tasks.runs.size ? ied.commands.run("shell.showView", { id: "ied.errors" }) : ied.commands.run("shell.showView", { id: "ied.output" })));
 	ied.commands.handle("ied.output.show", (args) => showOutput(ied, args && args.sourceId));
 	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
-	ied.commands.handle("ied.markdown.preview", (args) => {
-		const path = args && args.path ? args.path : currentEditor(ied) ? currentEditor(ied).path : null;
-		if (path) ied.tabs.open("mdpreview:" + path, { preview: false });
-	});
 	ied.commands.handle("ied.editor.goToAll", () => showGoToAll(ied, (target) => goTo(ied, target)));
 	ied.commands.handle("ied.editor.toggleHeader", () => toggleHeader(ied));
 	ied.commands.handle("ied.editor.action", (args) => runEditorAction(ied, args));
@@ -275,14 +269,14 @@ async function showOutput(ied, sourceId) {
 	if (output && sourceId && output.sourceId !== sourceId) output.show(sourceId);
 }
 
-// A file opened from outside IED (`ied open`, the shell's fileOpener): {path, line, col}, 1-based and 0 when absent. A
-// Markdown file shows its preview too, where its boxes can be ticked (J10).
+// A file opened from outside IED (`ied open`, the shell's fileOpener): {path, line, col}, 1-based and 0 when absent. The
+// tabs plugins name for its language open beside it (`companionTabs`: a Markdown file's preview, J10).
 async function openFromOutside(ied, args) {
 	if (!args || !args.path) return;
 	await goTo(ied, { path: args.path, line: args.line > 0 ? args.line - 1 : undefined, col: args.col > 0 ? args.col - 1 : 0 });
-	const markdown = ied.contributions("languages").map((c) => c.value).filter((language) => language.id === "markdown");
-	if (markdown.some((language) => (language.extensions || []).some((e) => args.path.toLowerCase().endsWith(e.toLowerCase())))) {
-		ied.tabs.open("mdpreview:" + args.path, { preview: false });
+	const language = languageOf(ied.contributions("languages").map((c) => c.value), args.path);
+	for (const { value } of ied.contributions("companionTabs")) {
+		if (language && (value.languages || []).includes(language)) ied.tabs.open(value.kind + ":" + args.path, { preview: false });
 	}
 }
 
@@ -341,13 +335,6 @@ export function ErrorList(ctx) {
 
 export function FindInFiles(ctx) {
 	return new FindInFilesView(ctx, finders);
-}
-
-// The preview colors code with Monaco when it is installed; without it, code stays plain.
-export async function MarkdownPreview(ctx) {
-	const path = ctx.ref.slice("mdpreview:".length);
-	const monaco = await loadMonaco(ctx.ied).catch(() => null);
-	return new MarkdownPreviewView(ctx, path, monaco);
 }
 
 // Monaco when it loads; otherwise the read-only view, saying why.

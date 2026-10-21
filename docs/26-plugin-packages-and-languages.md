@@ -60,16 +60,16 @@ Every contribution point keeps its static shape in the manifest; most of a langu
 
 New and changed points (schema `plugin-manifest.v1`):
 
-| Point | Change |
-|---|---|
-| `code` | new: `{entry, sources?: ["code"], activation?}` - the C4 entry class |
-| `toolCalls` | implemented by `{function: "Ns::Fn"}` (C4) or `{run: [argv], cwd?, output}` (`text` or `json`) (a command) instead of a binding only **(owner)** |
-| `skills` | read: each listed folder of `<name>/SKILL.md` joins the workspace's skill index |
-| `systemMessageSections` | read: `{id, when}` with one of `file`, `text` or `function`; `when` can name the workspace's languages (`workspaceLanguage == 'rust'`) |
-| `taskPresets` | `extends: "<preset id>"`: a preset inherits another's variables, tasks and toolbar and overrides by key (a language's Nuke preset extends Nuke's own) |
-| `outputLinks` | new: a compiler's location shapes in plain output (today hard-coded in the editor's `outputlinks.js`) |
-| `markdownFences` | new: fence names that mean the plugin's language (today the editor's `mdpreview.js` map) |
-| `languages` | `controlKeywords` for the grammar (today the editor's `monaco.js` list) |
+| Point | Change | Built |
+|---|---|---|
+| `code` | new: `{entry, sources?: ["code"], activation?}` - the C4 entry class | P3 |
+| `toolCalls` | `{name, description, class, inputSchema, when}` and one of `run` (a command: argv with `${args.<name>}` - a list argument as a whole word is a word per item - and `${config:<key>}`; `cwd` relative to the root; `output` `text`, the exit code and the output's tail, or `json`, all of stdout; `timeoutSeconds`), `function` (a C4 function, P3) or `binding` **(owner)** | `run` |
+| `skills` | read: each listed folder (inside the plugin) of `<name>/SKILL.md` joins the workspace's skills | yes |
+| `systemMessageSections` | read: `{id, when, maxTokens}` with one of `text` or `file` (`function`, P3); `when` can name the workspace's languages (`workspaceLanguage.rust`) or a file in its root (`workspaceContains.nuke.toml`) | yes |
+| `taskPresets` | `extends: "<preset id>"`: the base is read first (its base before it; a preset that extends itself is a problem) and this one overrides by key; `problemMatcher`: the matchers of every run step that names none, inherited steps included (`c4.nuke` gives Nuke's steps C4's) | yes |
+| `outputLinks` | new: `{id, regexp, file, line, column?}` - a tool's location shapes in plain output, which the Output window underlines (before, the editor's own list) | yes |
+| `languages` | `fences`: Markdown fence names that mean the language (before, the preview's own map); `controlKeywords`: keywords the grammar names one by one that read as control flow (before, the editor's list) | yes |
+| `companionTabs` | new: `{kind, languages}` - a tab that opens beside a document of those languages opened from outside IED (the Markdown preview, J10; before, the editor knew Markdown) | yes |
 
 ## 4. Composition: plugins for plugins
 
@@ -89,7 +89,7 @@ A language plugin owns everything about its language. The host and the default f
 | Recognition, comments, brackets, grammar, control keywords | `languages` |
 | Colors | `semanticTokenColors` |
 | Icons | `fileIcons`, `projectIcons` (`docs/15` Icons) |
-| Editing | `headerSourcePairs`, `snippets`, `fileNesting`, `markdownFences` |
+| Editing | `headerSourcePairs`, `snippets`, `fileNesting`, `languages.fences`, `companionTabs` |
 | Language server, debugger | `lspProfiles`, `dapProviders` |
 | Build without Nuke | `taskPresets` that run the language's own tool, detected by marker files |
 | Build with Nuke | the `nuke/` driver plus a `taskPresets` entry extending Nuke's |
@@ -116,9 +116,10 @@ A language plugin owns everything about its language. The host and the default f
 | `ied.scripts` | Shell, PowerShell, Batch | icons | |
 | `ied.lua`, `ied.sql` | Lua, SQL | icons | |
 | `ied.filetypes` | (no language) | media, archive, binary, license icons; plain text | |
-| `c4` (in every C4 toolchain) | C4 | as now, plus its skills from the plugin and a Nuke preset extending Nuke's | C4 code: `c4_*` AI tools, test provider, project templates |
+| `c4` (in every C4 toolchain) | C4 | as now, plus its skills (`C4/IedPlugin/skills/`, shipped as `<toolchain>/ied/skills/`), a system-message section and `c4.nuke` extending Nuke's preset | C4 code: `c4_*` AI tools, test provider, project templates |
+| `ied.nuke` (built in) | (no language: the build system) | the `nuke` preset, `nuke.command`, the `nuke.toml` icon, the Nuke skill, a section and the `nuke_list` tool | |
 
-The editor keeps no language knowledge: the compiler location shapes, Markdown fence names and Monaco control keywords it holds today move into the language plugins (section 3).
+The editor keeps no language knowledge: the compiler location shapes, Markdown fence names and Monaco control keywords it held moved into the language plugins (section 3), and its Markdown preview into `ied.markdown`, which colors fenced code through the editor's `editor.colorize` binding (now `{languageId | path, lines}`).
 
 ## 6. Builds: native first, Nuke opt-in (owner)
 
@@ -152,7 +153,7 @@ Rules that keep the native toolchain intact:
 3. Always invoke the native tool and let it decide what is up to date; Nuke's own input hashing is for C4 and script steps only.
 4. Nuke owns only what is cross-language: the project graph (`depends` across languages), the configuration names, the staged outputs, and the one command a person or IED runs.
 
-`nuke init --ied` gives each project the preset of its language's plugin (`rust.nuke` extends `nuke`) and pins each language package in the solution's `localPlugins`, instead of today's `c4.nuke` for every project - which wrongly gives the C++ `C4` project a C4 debug launch. Nuke's own presets, matchers, `nuke.toml` icon and skill move out of the C4 plugin into a built-in `ied.nuke` plugin, since IED invokes Nuke for any language it builds (`AGENTS.md` rule 3).
+`nuke init --ied` names `<language>.nuke` in each project's file - the preset its language's plugin offers by that convention, extending `nuke` (`c4.nuke`, `cpp.nuke`, later `rust.nuke`) - and `nuke` for a project without a language; it used to give every project `c4.nuke`, which handed the C++ `C4` project a C4 debug launch. Nuke's own preset, the `nuke.command` setting, the `nuke.toml` icon and the Nuke skill are the built-in `ied.nuke` plugin's, since IED invokes Nuke for any language it builds (`AGENTS.md` rule 3). With P2, `nuke init --ied` also pins each language package the workspace's `[languages]` names in the solution's `localPlugins`.
 
 Cross-language linking (a C4 game calling a Rust library through a C header) is the drivers' and C4 interop's business, later.
 
@@ -164,13 +165,15 @@ Cross-language linking (a C4 game calling a Rust library through a C header) is 
 | App | `%APPDATA%/IED/plugins/<id>/` | the owner approved its content hash and permissions |
 | Project | **`.ied/plugins/<id>/`** in the workspace (new: found automatically, in folder workspaces too), and the solution's `localPlugins` paths (a toolchain's plugin) | the workspace is trusted |
 
-A project that invents its own markup language commits `.ied/plugins/mymarkup/` (grammar, icons, a C4 formatter as a tool call, a Nuke driver that renders it); whoever opens the trusted workspace gets it, compiled on load and reloaded as it is edited. Precedence is unchanged: project > app > built-in, so a repo pins its version of any plugin.
+A project that invents its own markup language commits `.ied/plugins/mymarkup/` (grammar, icons, a C4 formatter as a tool call, a Nuke driver that renders it); whoever opens the trusted workspace gets it, compiled on load and reloaded as it is edited. Precedence is unchanged: project > app > built-in, so a repo pins its version of any plugin; of two project plugins with one id, the solution's pin wins over the `.ied/plugins/` folder (the other is `overridden`).
+
+As built (P1): the server reads `.ied/plugins/*/ied-plugin.json` with the solution's pins on every request for a workspace's plugins (`src/plugins/host.cf`), so an edit is live; a change under `.ied/plugins/` rebuilds the workspace's settings catalog and task offers and sends `plugins.changed` on `ws:<wsId>`, and the clients read the contributions again. The mock server has no project plugins (`tools/mock-server/README.md`).
 
 ## 8. The AI side
 
-- **Skills**: the index merges `.ied/skills/`, app skills and every loaded plugin's `skills` folders; `skill_search` and `skill_read` reach them (`docs/04`). `nuke init` stops copying the C4 and Nuke skills into `.ied/skills/`: they come from the `c4` and `ied.nuke` plugins.
-- **System message**: plugin sections are item 5 of `docs/14`'s order, with its caps; a language plugin's section appears only when the workspace uses the language (its `when`), so a C4 workspace does not pay for Rust advice.
-- **Tool calls**: named `<prefix>_<tool>` in the plugin's group, enabled per mode like the built-in groups (`docs/13`). A C4-function tool runs in the server under the plugin's permissions; a command tool runs through the same runner, approvals and output limits as `shell_run`.
+- **Skills**: a workspace's skills are its `.ied/skills/`, then every loaded plugin's `skills` folders, then the app's `skills/`; of a name the first wins (project > plugin > app). The system message lists them (`docs/14` item 8: every skill up to 40, past that the ones the chat's first message names best and how many more there are); `skill_search` finds them by words and `skill_read` gives a skill's body or another file of its folder (`docs/13`). `nuke init` no longer copies the C4 and Nuke skills into `.ied/skills/`: they come from the `c4` and `ied.nuke` plugins. As built: `src/ai/skills.cf`, `src/ai/contributed.cf`, `src/ai/tools/skilltools.cf`.
+- **System message**: plugin sections are item 5 of `docs/14`'s order - under "From the workspace's plugins", a heading per plugin, each section within its `maxTokens` (200 by default, at most 600) and all within 1,500 tokens - and only those whose `when` holds in the workspace's context (`src/plugins/context.cf`: `workspaceTrusted`, `workspaceKind`, `config.<key>`, `workspaceContains.<name>`, `workspaceLanguage.<id>` - a project naming the language, or a `projectIcons` marker of it in the root or a project's root), so a C4 workspace does not pay for Rust advice. Language servers and debug adapters use the same context.
+- **Tool calls**: each turn offers the core tools and the workspace's plugins' tool calls whose `when` holds; a name already taken is a problem in the server log. A command tool (`src/ai/tools/plugintools.cf`) has `shell(<the command as run>)` as its subject, so the `ai.permissions` rules and approvals of commands apply; it never runs in an untrusted workspace; a `read` one is offered in Plan mode. Shipped: `nuke_list` (`ied.nuke`), `cargo_metadata` (`ied.rust`). A C4-function tool (P3) will run in the server under the plugin's permissions.
 
 ## 9. Order of work
 

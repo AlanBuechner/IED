@@ -42,8 +42,19 @@ def text_step(text):
 	return inline({"text": text}, {"finish": "stop"})
 
 
+DEMO_PLUGIN = {
+	"manifestVersion": 1, "id": "demo.lang", "name": "Demo Language", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+	"contributes": {
+		"projectIcons": [{"languageId": "demo", "label": "DM", "markers": ["demo.toml"]}],
+		"skills": ["skills"],
+		"systemMessageSections": [{"id": "style", "text": "Demo files end every line with a semicolon.", "when": "workspaceLanguage.demo"}],
+		"toolCalls": [{"name": "demo_echo", "description": "Echo a word.", "class": "read", "inputSchema": {"type": "object", "properties": {"word": {"type": "string"}}, "required": ["word"]},
+			"run": [sys.executable, "-I", "-c", "import sys; print('echo:', sys.argv[1])", "${args.word}"]}]}}
+
+
 def make_home(home):
-	"""An install with the host's schemas, the runtime's prompts and the chat plugin's settings, without its UI."""
+	"""An install with the host's schemas, the runtime's prompts, the chat plugin's settings (without its UI) and a demo
+	language plugin with a system-message section, a skills folder and a command tool (docs/26)."""
 	shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(home, "shared", "host-api", "schemas"))
 	shutil.copytree(os.path.join(REPO, "src", "ai", "prompts"), os.path.join(home, "src", "ai", "prompts"))
 	plugin = os.path.join(home, "plugins", "chat")
@@ -51,6 +62,7 @@ def make_home(home):
 	shutil.copy(os.path.join(REPO, "plugins", "chat", "settings.schema.json"), os.path.join(plugin, "settings.schema.json"))
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "ied.chat", "name": "Chat", "version": "0.1.0", "ied": {"api": "^1"},
 		"runtime": {"kind": "declarative"}, "contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}}}))
+	write(os.path.join(home, "plugins", "demo", "ied-plugin.json"), json.dumps(DEMO_PLUGIN))
 	return home
 
 
@@ -176,6 +188,32 @@ class ChatTests(ServerTestCase):
 			self.model.queue(script)
 			end = await self.turn(chat_id)
 			self.assertEqual(("finished", []), (end["stop"], end["recoveries"]), script)
+
+	# --- What plugins give the AI (docs/26 section 8) -----------------------------------------------------------------
+
+	async def test_plugin_sections_skills_and_command_tools(self):
+		skill = "---\nname: {0}\ndescription: {1}\nkeywords: [{2}]\n---\n\n# {0}\n\n{3}\n"
+		write(os.path.join(self.repo, ".ied", "skills", "greet", "SKILL.md"), skill.format("greet", "How this project greets people.", "hello, welcome", "Say hello first."))
+		write(os.path.join(self.home, "plugins", "demo", "skills", "demo-style", "SKILL.md"), skill.format("demo-style", "Demo code style.", "semicolon", "Semicolons everywhere."))
+		write(os.path.join(self.home, "plugins", "demo", "skills", "greet", "SKILL.md"), skill.format("greet", "The plugin's greet, which the project's hides.", "hello", "Wave."))
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("skill_search", {"query": "semicolon"}, "c1"), text_step("No demo here."))
+		await self.turn(chat_id)
+		system = self.model.requests()[0]["body"]["messages"][0]["content"]
+		self.assertNotIn("Demo files end every line", system, "the section waits for a workspace that uses the language")
+		self.assertIn("- demo-style: Demo code style.", system)
+		self.assertIn("- greet: How this project greets people.", system, "the project's skill of a name wins over the plugin's")
+		write(os.path.join(self.repo, "demo.toml"), "")
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("skill_read", {"name": "greet"}, "c2"), call_step("demo_echo", {"word": "hi"}, "c3"), text_step("Done."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		sent = self.model.requests()[-1]["body"]
+		self.assertIn("## Demo Language\n\nDemo files end every line with a semicolon.", sent["messages"][0]["content"], "the workspace uses demo now")
+		self.assertIn("demo_echo", [t["function"]["name"] for t in sent["tools"]])
+		results = {m["tool_call_id"]: m["content"] for m in sent["messages"] if m["role"] == "tool"}
+		self.assertIn("Say hello first.", results["c2"], "skill_read gives the body")
+		self.assertNotIn("name: greet", results["c2"], "without its frontmatter")
+		self.assertIn("echo: hi", results["c3"], "the command ran with the call's argument")
 
 	# --- Tools -------------------------------------------------------------------------------------------------------
 

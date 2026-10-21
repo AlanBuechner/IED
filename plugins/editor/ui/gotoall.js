@@ -4,7 +4,7 @@
 
 import { icon } from "/ui-kit/dom.js";
 import { showPicker } from "/ui-kit/picker.js";
-import { canonicalFileUri, displayPath, isFileUri } from "./fileuris.js";
+import { canonicalFileUri, displayPath, isFileUri } from "/ui-kit/fileuris.js";
 
 const IN_NAME_SCORE = 1000;
 const MOST_FILES = 100;

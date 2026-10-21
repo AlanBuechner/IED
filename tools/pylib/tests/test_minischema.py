@@ -150,7 +150,7 @@ class HostApiTests(unittest.TestCase):
 		self.assertTrue(self.validator("schemas/project.v1.schema.json").validate(broken))
 
 	def test_broken_manifest_rejected_through_cross_file_ref(self):
-		manifest = jsonc.load_file(HOST_API / "examples" / "c4-plugin" / "ied-plugin.json")
+		manifest = jsonc.load_file(HOST_API / "examples" / "markup-plugin" / "ied-plugin.json")
 		validator = self.validator("schemas/plugin-manifest.v1.schema.json")
 		self.assertEqual([], validator.validate(manifest))
 		broken = copy.deepcopy(manifest)

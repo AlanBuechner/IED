@@ -5,7 +5,7 @@
 // for files outside the workspace), and their text is loaded for peeks; edits to other files open them first.
 
 import * as C from "./lspconvert.js";
-import { canonicalFileUri } from "./fileuris.js";
+import { canonicalFileUri } from "/ui-kit/fileuris.js";
 import { LEGEND, SemanticMapper, rulesFor } from "./semanticcolors.js";
 
 const QUIET = new Set(["cancelled", "not_found", "unavailable"]);

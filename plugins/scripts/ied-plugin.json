@@ -1,0 +1,29 @@
+// Script languages (docs/26 "Language plugins"): shell, PowerShell, batch files and Dockerfiles - recognition, icons and
+// the places PowerShell prints ("At path:line char:col").
+{
+	"manifestVersion": 1,
+	"id": "ied.scripts",
+	"name": "Script Languages",
+	"version": "0.1.0",
+	"description": "Shell, PowerShell, batch and Dockerfile: recognition, icons and error links.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "shell", "aliases": ["Shell"], "extensions": [".sh", ".bash", ".zsh"], "fences": ["sh", "bash", "shell", "zsh"], "lineComment": "#" },
+			{ "id": "powershell", "aliases": ["PowerShell"], "extensions": [".ps1", ".psm1", ".psd1"], "fences": ["powershell", "ps1", "pwsh"], "lineComment": "#", "blockComment": ["<#", "#>"] },
+			{ "id": "bat", "aliases": ["Batch"], "extensions": [".bat", ".cmd"], "fences": ["bat", "cmd", "batch"], "lineComment": "rem" },
+			{ "id": "dockerfile", "aliases": ["Dockerfile"], "fileNames": ["Dockerfile"], "fences": ["dockerfile", "docker"], "lineComment": "#" }
+		],
+		"fileIcons": [
+			{ "languageId": "shell", "extensions": [".sh", ".bash", ".zsh"], "label": "$", "color": "--hue-green" },
+			{ "languageId": "powershell", "extensions": [".ps1", ".psm1", ".psd1"], "label": "PS", "color": "--hue-blue" },
+			{ "languageId": "bat", "extensions": [".bat", ".cmd"], "label": "BAT", "color": "--hue-lime" },
+			{ "languageId": "dockerfile", "fileNames": ["Dockerfile"], "label": "DK", "color": "--hue-cyan" }
+		],
+		"outputLinks": [
+			{ "id": "powershell", "regexp": "At ((?:[A-Za-z]:)?[^\\s:]+?\\.[A-Za-z0-9]+):(\\d+) char:(\\d+)", "file": 1, "line": 2, "column": 3 }
+		]
+	}
+}

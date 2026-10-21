@@ -88,7 +88,7 @@ Assembled in a fixed order - base prompt, style rules, mode instructions, soluti
 
 ## Skills
 
-- Sources: `.ied/skills/` (project, committed), `%APPDATA%/IED/skills/`, plugin `skills` paths. Format: `shared/host-api/README.md` (compatible with the existing C4 skills in `C4/skills/`, which use `triggers`).
+- Sources: `.ied/skills/` (project, committed), `%APPDATA%/IED/skills/`, plugin `skills` paths. Format: `shared/host-api/README.md` (compatible with the C4 skills the toolchain's plugin ships, `C4/IedPlugin/skills/`, which use `triggers`).
 - Index: BM25 over name, description, keywords, triggers and headings; optional embedding rerank (P2).
 - In the prompt: the whole index when small (<= 40), otherwise the top 15 for the task + `skill_search`. Bodies load only via `skill_read`; a skill can declare tool groups to enable.
 - Authoring: `skill_write` (approval-gated) and "synthesize skill from this chat"; the orchestration learning loop proposes skill updates after successful goals.
@@ -152,4 +152,4 @@ The runtime lives in `src/ai/` (host infrastructure; the `ied.chat` plugin is it
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`); a turn on a profile without `contextWindow` asks once and uses the slot context it reports. Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 
-**Not yet:** the Anthropic and Claude Code providers, Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), skills, MCP, attachments and @-mentions, sub-agents, checkpoints and rewind, the trajectory files.
+**Not yet:** the Anthropic and Claude Code providers, Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, attachments and @-mentions, sub-agents, checkpoints and rewind, the trajectory files.

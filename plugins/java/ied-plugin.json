@@ -1,0 +1,26 @@
+// Java (docs/26 "Language plugins"): the language, its icons, Maven and Gradle projects, and the places javac prints
+// ("path:line").
+{
+	"manifestVersion": 1,
+	"id": "ied.java",
+	"name": "Java",
+	"version": "0.1.0",
+	"description": "The Java language: recognition, icons and build output links.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "java", "aliases": ["Java"], "extensions": [".java"], "fences": ["java"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] }
+		],
+		"fileIcons": [
+			{ "languageId": "java", "extensions": [".java"], "label": "J", "color": "--hue-red" }
+		],
+		"projectIcons": [
+			{ "languageId": "java", "label": "J", "color": "--hue-red", "markers": ["pom.xml", "build.gradle", "build.gradle.kts"] }
+		],
+		"outputLinks": [
+			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\\\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		]
+	}
+}

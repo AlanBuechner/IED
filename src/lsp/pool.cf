@@ -1,7 +1,7 @@
 include "pool.ch"
 include "uris.ch"
 include "host/server.ch"
-include "plugins/when.ch"
+include "plugins/context.ch"
 include "settings/merge.ch"
 
 namespace Ied
@@ -56,15 +56,8 @@ namespace Ied
 	}
 
 	bool LspPool::Allowed(Workspace* ws, const LspProfile* profile) {
-		Settings* settings = server->settings;
-		WhenLookup lookup = [ws, settings](Core::StringView key) -> WhenValue {
-			if (key == "workspaceTrusted") return WhenBool(ws->trusted);
-			if (key == "workspaceKind") return WhenText(ws->kind.View());
-			if (key.StartsWith(Core::StringView("config."))) return WhenFromJson(settings->Effective(ws, Core::StringView(""), key.Substring(7, key.ByteLength() - 7)).View());
-			return WhenNone();
-		};
 		Core::String error;
-		const bool holds = WhenHolds(profile->when.View(), lookup, error);
+		const bool holds = WhenHolds(profile->when.View(), WorkspaceWhen(server, ws), error);
 		if (!error.IsEmpty()) server->Log((((Core::String("the when of language server profile ") + profile->id.View()) + " does not parse: ") + error.View()).View());
 		return holds;
 	}

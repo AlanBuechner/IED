@@ -133,6 +133,43 @@ class SolutionTests(ServerTestCase):
 		self.assertEqual("failed", listed[("c4", "project")]["state"])
 		self.assertIn("expects id not-c4", " ".join(listed[("c4", "project")]["problems"]))
 
+	async def test_the_workspace_s_own_plugins(self):
+		"""docs/26: each folder of .ied/plugins/ is a project plugin - it needs trust, the solution's pin of its id wins over
+		it, and an edit reaches the clients as plugins.changed."""
+		markup = {"manifestVersion": 1, "id": "my.markup", "name": "Markup", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+			"contributes": {"languages": [{"id": "mymarkup", "extensions": [".mym"]}]}}
+		own = os.path.join(self.repo, ".ied", "plugins")
+		write(os.path.join(own, "markup", "ied-plugin.json"), markup)
+		write(os.path.join(own, "c4", "ied-plugin.json"), {"manifestVersion": 1, "id": "c4", "name": "Other C4", "version": "2.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"}})
+		states = lambda listed: sorted((p["id"], p["source"], p["state"]) for p in listed["plugins"] if p["source"] == "project")
+		listed = await self.client.request("plugins.list", {"wsId": "w1"})
+		self.assertEqual([("c4", "project", "untrusted"), ("c4", "project", "untrusted"), ("my.markup", "project", "untrusted")], states(listed))
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		listed = await self.client.request("plugins.list", {"wsId": "w1"})
+		self.assertEqual([("c4", "project", "loaded"), ("c4", "project", "overridden"), ("my.markup", "project", "loaded")], states(listed))
+		pinned = [p for p in listed["plugins"] if p["id"] == "c4" and p["state"] == "loaded"][0]
+		self.assertEqual("1.0.0", pinned["version"], "the solution's pin wins over .ied/plugins/")
+		contributed = {p["id"]: p for p in (await self.client.request("plugins.contributions", {"wsId": "w1"}))["plugins"]}
+		self.assertEqual(["c4", "my.markup"], sorted(contributed))
+		markup["contributes"]["fileIcons"] = [{"extensions": [".mym"], "label": "MY", "color": "--hue-pink"}]
+		write(os.path.join(own, "markup", "ied-plugin.json"), markup)
+		await self.client.wait_for("ws:w1", lambda f: f["t"] == "evt" and f["kind"] == "plugins.changed", 10)
+		contributed = {p["id"]: p for p in (await self.client.request("plugins.contributions", {"wsId": "w1"}))["plugins"]}
+		self.assertEqual("MY", contributed["my.markup"]["contributes"]["fileIcons"][0]["label"], "read again after the edit")
+
+	async def test_a_folder_workspace_has_its_own_plugins_too(self):
+		folder = os.path.join(self.root, "Notes")
+		write(os.path.join(folder, ".ied", "plugins", "markup", "ied-plugin.json"), {"manifestVersion": 1, "id": "my.markup", "name": "Markup", "version": "1.0.0",
+			"ied": {"api": "^1"}, "runtime": {"kind": "declarative"}, "contributes": {"languages": [{"id": "mymarkup", "extensions": [".mym"]}]}})
+		pipe = ControlPipe(self.server.control)
+		try:
+			opened = pipe.call("open", {"path": folder})["result"]
+		finally:
+			pipe.close()
+		await self.client.request("ws.setTrust", {"wsId": opened["wsId"], "trusted": True})
+		contributed = (await self.client.request("plugins.contributions", {"wsId": opened["wsId"]}))["plugins"]
+		self.assertEqual([("my.markup", "project")], [(p["id"], p["source"]) for p in contributed])
+
 	async def test_open_a_solution_over_the_control_pipe(self):
 		other = os.path.join(self.root, "Other")
 		os.makedirs(other)

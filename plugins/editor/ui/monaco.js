@@ -1,6 +1,6 @@
 // monaco.js - Monaco for the editor plugin: loaded once (the AMD build served at /vendor/monaco-editor/), its theme
 // made from the theme tokens (docs/07, F-SHL-50), and the plugins' `languages` contributions registered with their
-// comment tokens, brackets and Monarch grammars.
+// comment tokens, brackets, Monarch grammars and the keywords their grammars name for control flow.
 
 import { SYNTAX_KINDS } from "./semanticcolors.js";
 
@@ -28,7 +28,7 @@ function boot(ied) {
 			window.require.config({ paths: { vs: BASE } });
 			window.require(["vs/editor/editor.main"], () => {
 				const monaco = window.monaco;
-				defineTheme(monaco);
+				defineTheme(monaco, controlKeywords(ied.contributions("languages")));
 				registerLanguages(monaco, ied).then(() => resolve(monaco), reject);
 			}, reject);
 		};
@@ -50,9 +50,13 @@ function hex(name) {
 	return /^#[0-9a-fA-F]{3,8}$/.test(value) ? value : null;
 }
 
-// Grammars that name each keyword ("keyword.return.cpp" - Monaco's C and C++): these read as control flow.
-const CONTROL_KEYWORDS = ["if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "goto", "try",
-	"catch", "throw", "co_await", "co_return", "co_yield"];
+// The keywords the languages' grammars name one by one ("keyword.return.cpp" - Monaco's C and C++) that read as control
+// flow: each language's `controlKeywords`.
+export function controlKeywords(contributions) {
+	const words = new Set();
+	for (const { value } of contributions) for (const word of value.controlKeywords || []) words.add(word);
+	return [...words];
+}
 
 // Grammar (Monarch) tokens, then a rule per syntax kind for language servers' tokens (semanticcolors.js puts every
 // server's legend onto those kinds, per language).
@@ -64,7 +68,6 @@ const TOKEN_RULES = [
 	["keyword.directive.include.end", "syntax-string"], ["annotation", "syntax-macro"], ["constant", "syntax-constant"],
 	["predefined", "syntax-function"], ["namespace", "syntax-namespace"], ["invalid", "syntax-invalid"], ["tag", "syntax-keyword"],
 	["attribute.name", "syntax-variable"], ["attribute.value", "syntax-string"], ["variable", "syntax-variable"], ["metatag", "syntax-macro"],
-	...CONTROL_KEYWORDS.map((word) => ["keyword." + word, "syntax-control"]),
 	...SYNTAX_KINDS.map((kind) => ["syntax-" + kind, "syntax-" + kind]),
 ];
 
@@ -84,9 +87,9 @@ const COLORS = {
 	"editorWhitespace.foreground": "text-3",
 };
 
-function defineTheme(monaco) {
+function defineTheme(monaco, control) {
 	const rules = [];
-	for (const [scope, name] of TOKEN_RULES) {
+	for (const [scope, name] of [...TOKEN_RULES, ...control.map((word) => ["keyword." + word, "syntax-control"])]) {
 		const color = hex(name);
 		if (color) rules.push({ token: scope, foreground: color.slice(1) });
 	}

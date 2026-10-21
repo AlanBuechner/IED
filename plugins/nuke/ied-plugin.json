@@ -1,0 +1,57 @@
+// Nuke (docs/06, docs/23, docs/26 section 6): IDE support for the Nuke build system, for every language it builds - the
+// `nuke` task preset (Configuration and Platform for the solution; Build, Rebuild, Clean, Run and Test running
+// `nuke <verb> <config> <project> -a <arch>`), the command that starts Nuke, and nuke.toml's icon. A language's plugin
+// extends the preset as `<language>.nuke` with its compiler's problem matchers and its launch configuration (the C4
+// toolchain's plugin: `c4.nuke`); `nuke init --ied` names that preset in each project's file. Its skill (skills/nuke)
+// teaches the AI Nuke's commands and manifests.
+{
+	"manifestVersion": 1,
+	"id": "ied.nuke",
+	"name": "Nuke",
+	"version": "0.1.0",
+	"description": "Builds, runs and tests with the Nuke build system, for every language it builds.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Build/Nuke" },
+		"skills": ["skills"],
+		"systemMessageSections": [
+			{ "id": "nuke", "when": "workspaceContains.nuke.toml", "text": "This workspace builds with Nuke (nuke.toml manifests). Read the nuke skill before changing a manifest or a build step; nuke_list gives the projects, their kinds and dependencies." }
+		],
+		"toolCalls": [
+			{
+				"name": "nuke_list",
+				"description": "The workspace's Nuke projects: names, kinds, languages, folders and dependencies, as JSON.",
+				"class": "read",
+				"inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+				"run": ["${config:nuke.command}", "list", "--json"],
+				"output": "json",
+				"when": "workspaceContains.nuke.toml"
+			}
+		],
+		"fileIcons": [
+			{ "fileNames": ["nuke.toml"], "label": "NK", "color": "--hue-red" }
+		],
+		"taskPresets": [
+			{
+				"id": "nuke",
+				"label": "Nuke",
+				"detect": "nuke.toml",
+				"variables": {
+					"config": { "kind": "dropdown", "label": "Configuration", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution" },
+					"arch": { "kind": "dropdown", "label": "Platform", "values": ["x64"], "default": "x64", "scope": "solution" }
+				},
+				"tasks": {
+					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [{ "run": "\"${config:nuke.command}\" build ${config} ${projectName} -a ${arch}" }] },
+					"rebuild": { "label": "Rebuild", "slot": "rebuild", "steps": [{ "run": "\"${config:nuke.command}\" rebuild ${config} ${projectName} -a ${arch}" }] },
+					"clean": { "label": "Clean", "slot": "clean", "steps": [{ "run": "\"${config:nuke.command}\" clean ${config} ${projectName} -a ${arch}" }] },
+					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [{ "run": "\"${config:nuke.command}\" run ${config} ${projectName} -a ${arch}", "output": "run" }] },
+					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [{ "run": "\"${config:nuke.command}\" test ${config} ${projectName} -a ${arch}", "output": "test" }] }
+				},
+				"toolbar": ["config", "arch", "|", "run", "build", "test"]
+			}
+		]
+	}
+}

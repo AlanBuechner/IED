@@ -1,0 +1,19 @@
+// SQL (docs/26 "Language plugins"): the language and its icon.
+{
+	"manifestVersion": 1,
+	"id": "ied.sql",
+	"name": "SQL",
+	"version": "0.1.0",
+	"description": "The SQL language: recognition and icon.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "sql", "aliases": ["SQL"], "extensions": [".sql"], "fences": ["sql"], "lineComment": "--", "blockComment": ["/*", "*/"] }
+		],
+		"fileIcons": [
+			{ "languageId": "sql", "extensions": [".sql"], "label": "SQL", "color": "--hue-amber" }
+		]
+	}
+}

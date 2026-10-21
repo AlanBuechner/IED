@@ -25,7 +25,7 @@ EXAMPLES = os.path.join(REPO, "shared", "host-api", "examples")
 PAIRS = [
 	("project.v1.schema.json", os.path.join(EXAMPLES, "Game.ied.proj")),
 	("solution.v1.schema.json", os.path.join(EXAMPLES, "MyGame.ied.sln")),
-	("plugin-manifest.v1.schema.json", os.path.join(EXAMPLES, "c4-plugin", "ied-plugin.json")),
+	("plugin-manifest.v1.schema.json", os.path.join(EXAMPLES, "markup-plugin", "ied-plugin.json")),
 ]
 
 

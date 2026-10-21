@@ -7,7 +7,6 @@ namespace Ied
 {
 	const int32 kShellPollMs = 250;
 	const int64 kShellDrainMs = 1000;
-	const int64 kShellKeptBytes = 256 * 1024;
 
 	static int64 WorkNowMs() { return clock_now_ns() / 1000000; }
 
@@ -85,8 +84,9 @@ namespace Ied
 	}
 
 	// Reads the child's output until it and what it started close it, the time is up or the run is stopped; the code
-	// it ended with, or -1 when it had to be stopped.
-	static int64 Drain(const ToolInvocation& call, Process::Child& child, int64 seconds, Core::String& kept, Core::String& stopped) {
+	// it ended with, or -1 when it had to be stopped. All of it goes to the AI output source; `kept` gets both streams,
+	// or only stdout (`stdoutOnly`: a tool whose output is data, its log on stderr).
+	static int64 Drain(const ToolInvocation& call, Process::Child& child, int64 seconds, bool stdoutOnly, Core::String& kept, Core::String& stopped) {
 		const int64 deadline = WorkNowMs() + seconds * 1000;
 		int64 exitedAt = -1;
 		char8[16384] buffer;
@@ -102,7 +102,7 @@ namespace Ied
 			const int64 got = child.ReadAny((void*)&buffer[0], 16384, from, kShellPollMs);
 			if (got > 0) {
 				Core::StringView text = Core::StringView(&buffer[0], got);
-				kept = Bounded(kept.View(), text, kShellKeptBytes);
+				if (!stdoutOnly || from == Process::Stream::Output) kept = Bounded(kept.View(), text, kShellKeptBytes);
 				ShellOutput(call, text);
 			}
 			else if (got != Process::kTimedOut && got != 0) break;
@@ -111,34 +111,54 @@ namespace Ied
 		return stopped.IsEmpty() ? code : -1;
 	}
 
-	static ToolOutcome ShellRun(const ToolInvocation& call) {
-		Core::String command = Core::String(call.args.Member("command").AsView());
-		Core::String cwd = NormalizePath(call.args.Member("cwd").AsView());
-		int64 seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : kShellDefaultSeconds;
-		if (seconds < 1 || seconds > kShellMostSeconds) seconds = kShellMostSeconds;
-		ShellOutput(call, ((Core::String("> ") + command.View()) + "\n").View());
+	static Core::String CommandLine(const ToolCommand& command) {
+		if (!command.shell.IsEmpty()) return command.shell;
+		Core::StringBuilder line;
+		for (const Core::String& word : command.argv) {
+			if (line.ByteLength() > 0) line.Append(" ");
+			line.Append(word.View());
+		}
+		return line.ToString();
+	}
+
+	ToolOutcome RunToolCommand(const ToolInvocation& call, const ToolCommand& command, bool whole) {
+		ShellOutput(call, ((Core::String("> ") + CommandLine(command).View()) + "\n").View());
 		Process::StartInfo info;
-		info.shellCommand = command;
-		info.workingDirectory = Core::String(call.ws->At(cwd.View()).View());
+		if (!command.shell.IsEmpty()) info.shellCommand = command.shell;
+		else {
+			info.program = command.argv[0];
+			for (int64 i = 1; i < command.argv.Count(); ++i) info.arguments.Push(command.argv[i]);
+		}
+		info.workingDirectory = Core::String(call.ws->At(command.cwd.View()).View());
 		info.input = Process::Redirect::Null;
 		info.output = Process::Redirect::Pipe;
 		info.errors = Process::Redirect::Pipe;
 		Process::Child child = Process::Child::Start(info);
-		if (!child.IsOpen()) return ToolError((Core::String("shell_run: the command did not start: ") + child.Error()).View());
+		if (!child.IsOpen()) return ToolError((((command.tool + ": the command did not start: ") + child.Error()).View()));
 		Core::String kept;
 		Core::String stopped;
-		const int64 code = Drain(call, child, seconds, kept, stopped);
+		const int64 code = Drain(call, child, command.seconds, whole, kept, stopped);
 		Core::StringBuilder said;
 		said.Append(stopped.IsEmpty() ? "exit " : "the command ");
 		if (stopped.IsEmpty()) said.AppendInt(code);
 		else said.Append(stopped.View());
 		said.Append("\n");
-		said.Append(TailOf(kept.View(), kShellTailLines, kShellTailBytes).View());
+		said.Append(whole ? kept.View() : TailOf(kept.View(), kShellTailLines, kShellTailBytes).View());
 		ShellOutput(call, ((Core::String("[") + said.View().Substring(0, said.View().IndexOf('\n', 0))) + "]\n").View());
 		ToolOutcome outcome = ToolResult(said.View(), TailOf(kept.View(), 12, 2048).View());
 		outcome.isError = code != 0;
 		outcome.source = Core::String("Output: AI");
 		return outcome;
+	}
+
+	static ToolOutcome ShellRun(const ToolInvocation& call) {
+		ToolCommand command;
+		command.shell = Core::String(call.args.Member("command").AsView());
+		command.cwd = NormalizePath(call.args.Member("cwd").AsView());
+		command.seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : kShellDefaultSeconds;
+		if (command.seconds < 1 || command.seconds > kShellMostSeconds) command.seconds = kShellMostSeconds;
+		command.tool = Core::String("shell_run");
+		return RunToolCommand(call, command, false);
 	}
 
 	// --- problems ----------------------------------------------------------------------------------------------------
@@ -276,7 +296,7 @@ namespace Ied
 	}
 
 	void AddWorkTools(ToolRegistry& registry) {
-		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for text (or a regex), skipping build output; returns path:line: text. Example: search_text({\"pattern\": \"RingSink\", \"glob\": \"src/**/*.cf\"})",
+		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for text (or a regex), skipping build output; returns path:line: text. Example: search_text({\"pattern\": \"RingSink\", \"glob\": \"src/**\"})",
 			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->plan = SearchPlan;

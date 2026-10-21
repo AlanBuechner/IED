@@ -247,8 +247,8 @@ Manifest strings expand `${name}`; an unknown name is an error. `$${` is a liter
 ## 8. Toolchains
 
 A **toolchain** is a complete C4 install - the compiler, its default library and runtime, clang and lld-link,
-CBind, C4Script, the language server and debug adapter, the user docs and the AI skills of that language
-version - with a `toolchain.json` (version, git commit, whether the tree was modified, build time). They live
+CBind, C4Script, the language server and debug adapter, the user docs and the IED plugin of that language
+version (with its AI skills) - with a `toolchain.json` (version, git commit, whether the tree was modified, build time). They live
 in one store per machine, `<this repository>/toolchains/c4/<version>/` (`NUKE_TOOLCHAINS` overrides the
 location), and every workspace shares them:
 
@@ -305,14 +305,16 @@ the build. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine
 
 **IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.ied.sln` at the root
 and a project file per project under `build/ied/` (`root` the project's folder, `kind` executable / library /
-other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`, `language` (the project's; IED picks its icon from it), `presets: ["c4.nuke"]`: the plugin's
-toolbar and Build / Run / Test tasks, which run `nuke` - the `c4.nuke.command` setting - with the selected
-configuration), and pins the toolchain's IED plugin
+other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`, `language` (the project's; IED picks its icon from it), `presets: ["<language>.nuke"]` - IED's
+`nuke` preset, its toolbar and Build / Run / Test tasks running `nuke` (the `nuke.command` setting) with the selected
+configuration, extended by the language's plugin with its problem matchers and launch configuration; `["nuke"]` for a
+project without a language), and pins the toolchain's IED plugin
 (`<toolchain>/ied`, which `C4/MakeToolchain.py` ships) in the solution's `localPlugins` - relative when the toolchain
 store is inside the workspace, as it is by default. Run it again after adding or removing projects: files it wrote
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
 is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). It also adds `.ied/local/` to
-`.gitignore` and copies the skills, as `nuke init` does for a new workspace.
+`.gitignore`, as `nuke init` does for a new workspace. The AI skills are not copied into the workspace: C4's come with the
+toolchain's IED plugin, Nuke's with IED's `ied.nuke` plugin (IED docs/26).
 
 ## 10. This repository as a workspace
 
@@ -347,7 +349,6 @@ Nuke/
     c4/               compiling C4 programs and harnesses, the build description, the IDE bridge
     commands/         one module per built-in command
   templates/          what `nuke init` writes
-  skills/nuke/        the AI skill `nuke init` copies into a workspace
   tests/              python -m unittest discover -s Nuke/tests (unit tests use a stub compiler;
                       test_integration.py uses a real installed toolchain and skips without one)
 ```

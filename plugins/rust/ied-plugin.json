@@ -1,4 +1,5 @@
-// Rust (docs/05 "Language plugins"): rust-analyzer as the language server of Rust documents (one per workspace; it finds
+// Rust (docs/26 "Language plugins"): the language, its icons and the places rustc prints ("path:line:col", also after
+// "-->"), rust-analyzer as the language server of Rust documents (one per workspace; it finds
 // the Cargo workspace itself), the rust.cargo task preset for a folder with a Cargo.toml - Build, Run, Test and Clean
 // with a Debug / Release profile, a rustc problem matcher over cargo's short messages - and a Launch configuration that
 // debugs the binary cargo builds through the ied.cpp plugin's lldb adapter (CodeLLDB, docs/25).
@@ -14,10 +15,31 @@
 	"permissions": ["process.spawn", "lsp", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Rust" },
+		"systemMessageSections": [
+			{ "id": "rust", "when": "workspaceLanguage.rust", "text": "Rust crates build with cargo (Cargo.toml); keep Cargo.toml and Cargo.lock as cargo writes them. cargo_metadata gives the workspace's crates and targets." }
+		],
+		"toolCalls": [
+			{
+				"name": "cargo_metadata",
+				"description": "The Cargo workspace: its crates (packages), their targets and dependencies, as JSON (cargo metadata --no-deps).",
+				"class": "read",
+				"inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+				"run": ["${config:rust.cargo.path}", "metadata", "--format-version", "1", "--no-deps"],
+				"output": "json",
+				"when": "workspaceContains.Cargo.toml"
+			}
+		],
+		"languages": [
+			{ "id": "rust", "aliases": ["Rust"], "extensions": [".rs"], "fences": ["rust", "rs"], "lineComment": "//", "blockComment": ["/*", "*/"], "brackets": [["{", "}"], ["[", "]"], ["(", ")"]] }
+		],
+		"outputLinks": [
+			{ "id": "rustc", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		],
 		"projectIcons": [
 			{ "languageId": "rust", "label": "RS", "color": "--hue-orange", "presets": ["rust.cargo"], "buildSystems": ["cargo"], "markers": ["Cargo.toml"] }
 		],
 		"fileIcons": [
+			{ "languageId": "rust", "extensions": [".rs"], "label": "RS", "color": "--hue-orange" },
 			{ "fileNames": ["Cargo.toml"], "icon": "$(package)", "color": "--hue-orange" },
 			{ "fileNames": ["Cargo.lock"], "icon": "$(lock)", "color": "--hue-orange" }
 		],
@@ -71,17 +93,17 @@
 				},
 				"tasks": {
 					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [
-						{ "run": ["${setting:rust.cargo.path}", "build", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc" },
-						{ "run": ["${setting:rust.cargo.path}", "build", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc" }
+						{ "run": ["${config:rust.cargo.path}", "build", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc" },
+						{ "run": ["${config:rust.cargo.path}", "build", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc" }
 					] },
 					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [
-						{ "run": ["${setting:rust.cargo.path}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run" },
-						{ "run": ["${setting:rust.cargo.path}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run" }
+						{ "run": ["${config:rust.cargo.path}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run" },
+						{ "run": ["${config:rust.cargo.path}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run" }
 					] },
 					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [
-						{ "run": ["${setting:rust.cargo.path}", "test", "--message-format=short"], "problemMatcher": "rustc", "output": "test" }
+						{ "run": ["${config:rust.cargo.path}", "test", "--message-format=short"], "problemMatcher": "rustc", "output": "test" }
 					] },
-					"clean": { "label": "Clean", "slot": "clean", "steps": [ { "run": ["${setting:rust.cargo.path}", "clean"] } ] }
+					"clean": { "label": "Clean", "slot": "clean", "steps": [ { "run": ["${config:rust.cargo.path}", "clean"] } ] }
 				},
 				"toolbar": ["profile", "|", "run", "build", "test"],
 				"debug": {

@@ -167,6 +167,35 @@
 						}
 					}
 				},
+				"outputLinks": {
+					"type": "array",
+					"description": "The places a language's tools print in plain output, underlined in the Output window and opened on a click (docs/26).",
+					"items": {
+						"type": "object",
+						"required": ["id", "regexp", "file", "line"],
+						"additionalProperties": false,
+						"properties": {
+							"id": { "type": "string" },
+							"regexp": { "type": "string", "description": "A JavaScript regular expression over one line." },
+							"file": { "type": "integer", "minimum": 1, "description": "The group holding the path." },
+							"line": { "type": "integer", "minimum": 1 },
+							"column": { "type": "integer", "minimum": 1 }
+						}
+					}
+				},
+				"companionTabs": {
+					"type": "array",
+					"description": "Tabs that open beside a document of these languages when it is opened from outside IED (a Markdown file's preview, docs/26).",
+					"items": {
+						"type": "object",
+						"required": ["kind", "languages"],
+						"additionalProperties": false,
+						"properties": {
+							"kind": { "type": "string", "description": "A tab kind a UI module registers; the tab is '<kind>:<path>'." },
+							"languages": { "type": "array", "items": { "type": "string" } }
+						}
+					}
+				},
 				"fileViewers": { "type": "array", "items": { "$ref": "#/$defs/fileViewer" } },
 				"snippets": {
 					"type": "array",
@@ -423,7 +452,9 @@
 				},
 				"grammar": { "type": "string", "description": "Path to a Monarch grammar (JSON) used until semantic tokens arrive." },
 				"wordPattern": { "type": "string" },
-				"taskComments": { "type": "array", "items": { "type": "string" }, "description": "Comment tokens for the Task List (TODO, HACK...)." }
+				"taskComments": { "type": "array", "items": { "type": "string" }, "description": "Comment tokens for the Task List (TODO, HACK...)." },
+				"fences": { "type": "array", "items": { "type": "string" }, "description": "Markdown fence names that mean this language ('cpp', 'c++'); the language's id always does." },
+				"controlKeywords": { "type": "array", "items": { "type": "string" }, "description": "Keywords the grammar names one by one ('keyword.return') that read as control flow." }
 			}
 		},
 		"semanticTokenColors": {
@@ -460,7 +491,7 @@
 			"properties": {
 				"id": { "type": "string" },
 				"label": { "type": "string" },
-				"command": { "type": "string", "description": "Executable; '${solutionDir}', '${pluginDir}', '${setting:...}' allowed." },
+				"command": { "type": "string", "description": "Executable; '${solutionDir}', '${pluginDir}', '${config:...}' allowed." },
 				"args": { "type": "array", "items": { "type": "string" } },
 				"env": { "type": "object", "additionalProperties": { "type": "string" } },
 				"cwd": { "type": "string" },
@@ -590,6 +621,8 @@
 				"id": { "type": "string" },
 				"label": { "type": "string" },
 				"detect": { "type": "string", "description": "Glob that marks a project as using this preset (e.g. 'nuke.toml')." },
+				"extends": { "type": "string", "description": "A preset read first, whose variables, tasks, toolbar, debug configurations and matchers this one overrides by key (docs/26: a language's Nuke preset extends 'nuke')." },
+				"problemMatcher": { "type": ["string", "array"], "items": { "type": "string" }, "description": "Matchers for every run step that names none, inherited steps included." },
 				"variables": { "type": "object", "additionalProperties": { "$ref": "project.v1.schema.json#/$defs/variable" } },
 				"tasks": { "type": "object", "additionalProperties": { "$ref": "project.v1.schema.json#/$defs/task" } },
 				"toolbar": { "$ref": "project.v1.schema.json#/$defs/toolbar" },
@@ -612,8 +645,10 @@
 		},
 		"toolCall": {
 			"type": "object",
-			"required": ["name", "description", "inputSchema", "class", "binding"],
+			"required": ["name", "description", "inputSchema", "class"],
 			"additionalProperties": false,
+			"oneOf": [ { "required": ["run"] }, { "required": ["binding"] }, { "required": ["function"] } ],
+			"description": "An AI tool (docs/26 section 8): a command it runs (`run`), a provided binding, or a C4 function of the plugin's code.",
 			"properties": {
 				"name": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" },
 				"description": { "type": "string" },
@@ -625,6 +660,11 @@
 				"outputSchema": { "type": "object" },
 				"resultBudgetTokens": { "type": "integer", "minimum": 64 },
 				"binding": { "type": "string", "description": "Provided binding that implements the tool." },
+				"function": { "type": "string", "description": "A function of the plugin's C4 code that implements the tool ('Rust::Tools::Metadata')." },
+				"run": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "The command: argv, with ${args.<name>} the call's arguments (a list argument as a whole word is a word per item)." },
+				"cwd": { "type": "string", "description": "The folder it runs in, relative to the workspace's root." },
+				"output": { "enum": ["text", "json"], "default": "text", "description": "text: the exit code and the output's tail; json: the whole output, for a tool whose output is data." },
+				"timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 1800 },
 				"when": { "$ref": "#/$defs/when" }
 			}
 		},

@@ -1,17 +1,16 @@
-// mdpreview.js - the Markdown preview ("mdpreview:<path>" tabs, F-EDT-91/92): the server document rendered as it
-// changes - typing in its editor, another writer, the disk - with fenced code colored by Monaco and the workspace's
-// images (`/w/<wsId>/files/`, docs/10). Ticking a task box edits its line through the document store, taking the lease
-// as typing would; a link to a workspace file opens it in the editor, a web link a new browser window.
+// preview.js - the Markdown preview ("mdpreview:<path>" tabs, F-EDT-91/92): the server document rendered as it
+// changes - typing in its editor, another writer, the disk - with fenced code colored as the editor colors it (the
+// `editor.colorize` binding, when an editor plugin provides it) and the workspace's images (`/w/<wsId>/files/`,
+// docs/10). Ticking a task box edits its line through the document store, taking the lease as typing would; a link to a
+// workspace file opens it in the editor, a web link a new browser window.
 
 import { h, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
 import { applyChanges } from "/ui-kit/textedits.js";
 import { renderMarkdown, toggleTask } from "/ui-kit/markdown.js";
-import { isFileUri } from "./fileuris.js";
-import { themeName } from "./monaco.js";
+import { isFileUri } from "/ui-kit/fileuris.js";
 
 const RENDER_MS = 60;
-const FENCE_LANGUAGES = { js: "javascript", ts: "typescript", py: "python", sh: "shell", bash: "shell", ps1: "powershell", "c++": "cpp", cs: "csharp", rs: "rust", md: "markdown", yml: "yaml" };
 
 // The workspace path `href` names, seen from the folder `from`; null when it leaves the workspace.
 export function resolveRelative(from, href) {
@@ -27,12 +26,24 @@ export function resolveRelative(from, href) {
 	return parts.join("/");
 }
 
+// Fence name -> language id, from the loaded languages' `fences` and their own ids: a "c++" fence and a "cpp" one both
+// mean "cpp".
+export function fenceLanguages(languages) {
+	const map = new Map();
+	for (const language of languages) {
+		for (const fence of language.fences || []) map.set(fence.toLowerCase(), language.id);
+		if (!map.has(language.id.toLowerCase())) map.set(language.id.toLowerCase(), language.id);
+	}
+	return map;
+}
+
 export class MarkdownPreview {
-	constructor(ctx, path, monaco) {
+	// `fences`: fenceLanguages() of the loaded languages.
+	constructor(ctx, path, fences) {
 		this.ctx = ctx;
 		this.ied = ctx.ied;
 		this.path = path;
-		this.monaco = monaco;
+		this.fences = fences;
 		this.folder = isFileUri(path) ? null : path.slice(0, Math.max(0, path.lastIndexOf("/")));
 		this.text = "";
 		this.timer = null;
@@ -74,15 +85,13 @@ export class MarkdownPreview {
 		this.body.scrollTop = top;
 	}
 
-	// A fenced block colored by Monaco when it knows the language, in IED's theme (its colorizer uses the theme set last,
-	// Monaco's light one before any editor exists); plain text until it answers.
+	// A fenced block colored as the editor colors its language; plain text until it answers, and without an editor.
 	colored(code, language) {
 		const element = h("code", null, code);
-		const id = FENCE_LANGUAGES[language.toLowerCase()] || language.toLowerCase();
-		if (this.monaco && id && this.monaco.languages.getLanguages().some((l) => l.id === id)) {
-			this.monaco.editor.setTheme(themeName());
-			this.monaco.editor.colorize(code, id, {}).then((html) => {
-				element.innerHTML = html; // Monaco's colorizer escapes the text it wraps
+		const id = this.fences.get(language.toLowerCase());
+		if (id && this.ied.bindings.has("editor.colorize")) {
+			this.ied.bindings.call("editor.colorize", { languageId: id, lines: code.split("\n") }).then((lines) => {
+				element.innerHTML = lines.join("\n"); // the colorizer escapes the text it wraps
 			}, () => {});
 		}
 		return element;

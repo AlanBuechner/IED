@@ -1,0 +1,26 @@
+// File types that are not languages (docs/26 "Language plugins"): plain text and logs, and the icons of pictures, sound,
+// video, fonts, archives, binaries and licenses.
+{
+	"manifestVersion": 1,
+	"id": "ied.filetypes",
+	"name": "File Types",
+	"version": "0.1.0",
+	"description": "Plain text, and the icons of media, archives, binaries and licenses.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"contributes": {
+		"languages": [
+			{ "id": "plaintext", "aliases": ["Plain Text"], "extensions": [".txt", ".log"], "fileNames": [".gitignore", ".gitattributes", "LICENSE"], "fences": ["text", "txt", "plaintext"] }
+		],
+		"fileIcons": [
+			{ "extensions": [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".dds", ".ico", ".webp", ".svg", ".psd", ".exr", ".hdr"], "icon": "$(file-media)", "color": "--hue-teal" },
+			{ "extensions": [".wav", ".mp3", ".ogg", ".flac"], "icon": "$(unmute)", "color": "--hue-teal" },
+			{ "extensions": [".mp4", ".webm", ".mov"], "icon": "$(device-camera-video)", "color": "--hue-teal" },
+			{ "extensions": [".ttf", ".otf", ".woff", ".woff2"], "icon": "$(text-size)", "color": "--hue-gray" },
+			{ "extensions": [".zip", ".7z", ".tar", ".gz", ".rar"], "icon": "$(file-zip)", "color": "--hue-amber" },
+			{ "extensions": [".exe", ".dll", ".lib", ".a", ".so", ".obj", ".o", ".pdb"], "icon": "$(file-binary)", "color": "--hue-gray" },
+			{ "fileNames": ["LICENSE", "LICENSE.txt", "LICENSE.md"], "icon": "$(law)", "color": "--hue-amber" }
+		]
+	}
+}

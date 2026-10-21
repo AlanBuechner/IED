@@ -67,6 +67,7 @@ namespace Ied
 		private Core::String RenameFolder(Workspace* ws, Core::StringView from, Core::StringView to);
 		private void PublishTree(Workspace* ws, const Core::Array<TreeChange>& changes, bool overflow);
 		private void ReadSolutionAgain(Workspace* ws);
+		private void PluginsChanged(Workspace* ws);
 		private bool External(Workspace* ws, const TreeChange& change);
 		private bool ExternalWrite(Workspace* ws, Core::StringView path);
 		private bool ExternalDelete(Workspace* ws, Core::StringView path);
