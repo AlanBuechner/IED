@@ -1,16 +1,18 @@
 // C/C++ (docs/05 "Language plugins"): clangd as the language server of C and C++ documents, one per workspace. clangd
 // finds each file's flags in the nearest compile_commands.json (or compile_flags.txt) above it or in a build/ folder
-// beside one, and guesses without one. Debugging C/C++ comes with the DAP pool (M3).
+// beside one, and guesses without one. Debugging through LLDB: CodeLLDB's adapter (the vscode-lldb extension's
+// adapter/codelldb.exe), which connects back to IED's port (transport tcp, docs/25); a launch configuration's type is
+// "lldb", with CodeLLDB's arguments (program, args, cwd, env, stopOnEntry).
 {
 	"manifestVersion": 1,
 	"id": "ied.cpp",
 	"name": "C/C++",
 	"version": "0.1.0",
-	"description": "C and C++ through clangd: diagnostics, completion, navigation, formatting and refactoring.",
+	"description": "C and C++ through clangd: diagnostics, completion, navigation, formatting and refactoring; debugging through LLDB (CodeLLDB).",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
-	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C/C++" },
 		"lspProfiles": [
@@ -21,6 +23,17 @@
 				"args": ["${config:cpp.clangd.arguments}"],
 				"selector": { "languages": ["c", "cpp"] },
 				"when": "config.cpp.languageServer && workspaceTrusted"
+			}
+		],
+		"dapProviders": [
+			{
+				"type": "lldb",
+				"label": "LLDB (CodeLLDB)",
+				"command": "${config:cpp.lldb.path}",
+				"args": ["--connect", "${port}"],
+				"transport": "tcp",
+				"languages": ["c", "cpp", "rust"],
+				"when": "workspaceTrusted"
 			}
 		]
 	}

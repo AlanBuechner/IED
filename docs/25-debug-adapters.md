@@ -24,7 +24,7 @@ A plugin contributes adapters:
 }]
 ```
 
-An adapter runs over stdio (or TCP, when it says so), one process per session (DAP's model). The last loaded plugin's adapter of a `type` wins, like profiles. An untrusted workspace starts no adapter at all (`docs/11`): debugging runs the project's code.
+An adapter runs over stdio, or with `transport: tcp` over a loopback socket: IED listens on a port of its own choosing, puts it in the adapter's `args` as `${port}` and waits for the adapter to connect (CodeLLDB's `--connect ${port}`); the adapter's output is then only a log. One process per session (DAP's model). The last loaded plugin's adapter of a `type` wins, like profiles. An untrusted workspace starts no adapter at all (`docs/11`): debugging runs the project's code.
 
 ## Launch configurations
 
@@ -67,7 +67,8 @@ Exception filters (F-DBG-14) are per workspace and adapter type, in `.ied/local/
 - A frame is `{id, name, line, column, presentationHint?, source: {name, path | uri, sourceReference?}}`, lines and columns from 0.
 - Controls answer `{revision}`: continue and the steps move the session to `running` at once (the revision grows), so a second press from the same revision is a `conflict`.
 - `bp:<wsId>`: snapshot `{files: [{path, breakpoints}], bound: [{sessionId, path, breakpoints: [{line, verified, boundLine, message?}]}]}`; events `bp.changed` (a file's breakpoints), `bp.bound` (a session's binding of a file), `bp.unbound` (`{sessionId}`, the session ended). `bp.set` answers the file's breakpoints; `bp.list {wsId}` the snapshot.
-- Not yet: breakpoints following edits, choosing exception filters (Exception Settings), `runInTerminal` and `startDebugging` (refused, so an adapter does without), TCP adapters, and the adapter's templates for a project without configurations.
+- Not yet: breakpoints following edits, choosing exception filters (Exception Settings), `runInTerminal` and `startDebugging` (refused, so an adapter does without), and the adapter's templates for a project without configurations.
+- C and C++ (and Rust) debug through CodeLLDB, the `ied.cpp` plugin's `lldb` adapter (transport tcp; `cpp.lldb.path` names its `codelldb.exe`). Checked live: a C program built with the vendored clang, stopped at a breakpoint with its locals.
 
 ## The client as built (M3)
 

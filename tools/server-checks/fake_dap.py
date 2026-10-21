@@ -3,15 +3,23 @@ JSON-lines file named by its first argument. Its "program" is the launch's `prog
 at each breakpoint's line in order (a line past the file's end is not verified; an empty line binds to the next one),
 steps by a line, prints "hello from <program>" when it runs off its last breakpoint and exits with the launch's
 `exitCode`. Its stack has the stopped line's frame and one in `outside`, a file the launch names outside the workspace.
-A launch with "refuse" set fails; a "fake/crash" request ends the adapter at once."""
+A launch with "refuse" set fails; a "fake/crash" request ends the adapter at once. With "--connect PORT" it speaks over
+a socket it opens to 127.0.0.1:PORT, as an adapter of transport tcp does (docs/25), and prints to its stdout instead."""
 
 import json
 import os
+import socket
 import sys
 
 LOG = open(sys.argv[1], "a", encoding="utf-8")
-STDIN = sys.stdin.buffer
-STDOUT = sys.stdout.buffer
+if "--connect" in sys.argv:
+	CONNECTION = socket.create_connection(("127.0.0.1", int(sys.argv[sys.argv.index("--connect") + 1])))
+	STDIN = CONNECTION.makefile("rb")
+	STDOUT = CONNECTION.makefile("wb")
+	print("fake adapter connected", flush=True)
+else:
+	STDIN = sys.stdin.buffer
+	STDOUT = sys.stdout.buffer
 seq = 0
 launch = {}
 breakpoints = {}          # path -> [line]

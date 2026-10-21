@@ -18,6 +18,7 @@ namespace Ied
 		public Core::String cwd;
 		public Core::Array<Core::String> languages;
 		public bool staged;
+		public bool tcp;                                // transport tcp: the adapter connects to IED's port, ${port} in its args
 		public Core::String when;
 	}
 

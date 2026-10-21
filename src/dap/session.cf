@@ -93,16 +93,28 @@ namespace Ied
 		return Core::String(staged.View());
 	}
 
-	Process::StartInfo DebugSession::StartInfoFor(Core::StringView program) const {
+	// `text` with ${port} as the port IED listens on for the adapter.
+	static Core::String WithPort(Core::StringView text, int32 port) {
+		const int64 at = text.IndexOf(Core::StringView("${port}"));
+		if (at < 0) return Core::String(text);
+		Core::StringBuilder out;
+		out.Append(text.Substring(0, at));
+		out.AppendInt(port);
+		out.Append(text.Substring(at + 7, text.ByteLength()));
+		return out.ToString();
+	}
+
+	// Over stdio the adapter's input and output are the protocol; over tcp its output and errors are only a log.
+	Process::StartInfo DebugSession::StartInfoFor(Core::StringView program, int32 port) const {
 		ProfileVariables variables = VariablesOf(server, ws, provider, launch.project.View());
 		Process::StartInfo info;
 		info.program = Core::String(program);
-		for (const Core::String& arg : provider->args) ExpandProfileArgument(arg.View(), variables, info.arguments);
+		for (const Core::String& arg : provider->args) ExpandProfileArgument(WithPort(arg.View(), port).View(), variables, info.arguments);
 		for (const Core::String& entry : provider->environment) info.environment.Push(ExpandProfileVariables(entry.View(), variables));
 		info.workingDirectory = provider->cwd.IsEmpty() ? Core::String(ws->root.View()) : ExpandProfileVariables(provider->cwd.View(), variables);
-		info.input = Process::Redirect::Pipe;
+		info.input = provider->tcp ? Process::Redirect::Null : Process::Redirect::Pipe;
 		info.output = Process::Redirect::Pipe;
-		info.errors = Process::Redirect::Pipe;
+		info.errors = provider->tcp ? Process::Redirect::ToOutput : Process::Redirect::Pipe;
 		return info;
 	}
 
@@ -133,8 +145,19 @@ namespace Ied
 			Fail(error.View());
 			return;
 		}
-		Process::Child started = Process::Child::Start(StartInfoFor(program.View()));
+		Net::TcpListener* listener = nullptr;
+		int32 port = 0;
+		if (provider->tcp) {
+			listener = new Net::TcpListener();
+			if (!listener->Listen(Net::Address::Loopback(0))) {
+				Fail((Core::String("cannot listen for the debug adapter: ") + listener->Error()).View());
+				return;
+			}
+			port = listener->LocalAddress().port;
+		}
+		Process::Child started = Process::Child::Start(StartInfoFor(program.View(), port));
 		if (!started.IsOpen()) {
+			if (listener) listener->Close();
 			Fail(((Core::String("cannot start the ") + provider->label.View()) + " debug adapter: " + started.Error()).View());
 			return;
 		}
@@ -145,9 +168,16 @@ namespace Ied
 		DebugSession* self = this;
 		Process::Child* process = child;
 		MessageQueue* queue = outgoing;
-		Threading::Thread::Run([self, process, queue]() { self->WriteLoop(process, queue); }).Detach();
-		Threading::Thread::Run([self, process, thisRun]() { self->ReadLoop(process, thisRun); }).Detach();
-		Threading::Thread::Run([self, process, thisRun]() { self->ErrorLoop(process, thisRun); }).Detach();
+		if (listener) {
+			Threading::Thread::Run([self, listener, process, queue, thisRun]() { self->AcceptLoop(listener, process, queue, thisRun); }).Detach();
+			Threading::Thread::Run([self, process, thisRun]() { self->ErrorLoop(process, Process::Stream::Output, thisRun); }).Detach();
+		}
+		else {
+			DapChannel* channel = new DapChannel();
+			channel->child = process;
+			Talk(channel, process, queue, thisRun);
+			Threading::Thread::Run([self, process, thisRun]() { self->ErrorLoop(process, Process::Stream::Errors, thisRun); }).Detach();
+		}
 		Ask(Core::StringView("initialize"), InitializeArguments(provider->type.View()).View(), [self](bool ok, const Serialization::DomNode& body, Core::StringView message) {
 			self->Initialized(ok, body, message);
 		});
@@ -368,19 +398,43 @@ namespace Ied
 
 	// --- The threads -------------------------------------------------------------------------------------------------
 
-	void DebugSession::WriteLoop(Process::Child* process, MessageQueue* queue) {
+	// A writer and a reader on `channel`; messages queued before it opened (initialize) go first.
+	void DebugSession::Talk(DapChannel* channel, Process::Child* process, MessageQueue* queue, int64 thisRun) {
+		DebugSession* self = this;
+		Threading::Thread::Run([self, channel, queue]() { self->WriteLoop(channel, queue); }).Detach();
+		Threading::Thread::Run([self, channel, process, thisRun]() { self->ReadLoop(channel, process, thisRun); }).Detach();
+	}
+
+	// Transport tcp: the adapter connects to the port it was given, within kDapConnectTimeoutMs.
+	void DebugSession::AcceptLoop(Net::TcpListener* listener, Process::Child* process, MessageQueue* queue, int64 thisRun) {
+		Net::TcpStream accepted = listener->Accept(kDapConnectTimeoutMs);
+		const Core::String why = Core::String(listener->Error());
+		listener->Close();
+		Threading::LockGuard guard(server->lock);
+		if (run != thisRun) return;
+		if (!accepted.IsOpen()) {
+			Fail((Core::String("the debug adapter did not connect: ") + (why.IsEmpty() ? Core::StringView("it took too long") : why.View())).View());
+			return;
+		}
+		DapChannel* channel = new DapChannel();
+		channel->child = process;
+		channel->stream = new Net::TcpStream(take(accepted));
+		Talk(channel, process, queue, thisRun);
+	}
+
+	void DebugSession::WriteLoop(DapChannel* channel, MessageQueue* queue) {
 		Core::String message;
 		while (queue->Next(message, kDapWriterSliceMs) || !queue->IsClosed()) {
-			if (!message.IsEmpty() && !process->WriteText(message.View())) return;
+			if (!message.IsEmpty() && !channel->Write(message.View())) return;
 			message = Core::String();
 		}
 	}
 
-	void DebugSession::ReadLoop(Process::Child* process, int64 thisRun) {
+	void DebugSession::ReadLoop(DapChannel* channel, Process::Child* process, int64 thisRun) {
 		FrameReader frames;
 		char[kDapReadBytes] buffer;
 		for (;;) {
-			const int64 got = process->Read(Process::Stream::Output, (void*)&buffer[0], kDapReadBytes);
+			const int64 got = channel->Read((void*)&buffer[0], kDapReadBytes);
 			if (got <= 0) break;
 			frames.Feed(Core::StringView(&buffer[0], got));
 			Core::String body;
@@ -395,15 +449,16 @@ namespace Ied
 				break;
 			}
 		}
-		process->Wait();
+		if (channel->stream) channel->stream->Close();
+		if (process->Wait(kDapExitGraceMs) == Process::kTimedOut) process->Kill();
 		Threading::LockGuard guard(server->lock);
 		if (run == thisRun) Exited();
 	}
 
-	void DebugSession::ErrorLoop(Process::Child* process, int64 thisRun) {
+	void DebugSession::ErrorLoop(Process::Child* process, Process::Stream stream, int64 thisRun) {
 		char[kDapReadBytes] buffer;
 		for (;;) {
-			const int64 got = process->Read(Process::Stream::Errors, (void*)&buffer[0], kDapReadBytes);
+			const int64 got = process->Read(stream, (void*)&buffer[0], kDapReadBytes);
 			if (got <= 0) break;
 			Threading::LockGuard guard(server->lock);
 			if (run == thisRun) server->debugger->Log(this, Core::StringView(&buffer[0], got));

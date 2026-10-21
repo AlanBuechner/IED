@@ -42,7 +42,8 @@ class DebuggerTests(ServerTestCase):
 
 	def plugin(self):
 		return {"manifestVersion": 1, "id": "fake.dap", "name": "Fake debugger", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
-			"contributes": {"dapProviders": [{"type": "fake", "label": "Fake", "command": sys.executable, "args": ["-I", FAKE_DAP, self.log]}]}}
+			"contributes": {"dapProviders": [{"type": "fake", "label": "Fake", "command": sys.executable, "args": ["-I", FAKE_DAP, self.log]},
+				{"type": "faketcp", "label": "Fake over TCP", "command": sys.executable, "args": ["-I", FAKE_DAP, self.log, "--connect", "${port}"], "transport": "tcp"}]}}
 
 	def tasks(self):
 		return {"build": {"steps": [{"run": [sys.executable, "-I", "-c", "print('built')"]}]},
@@ -56,6 +57,7 @@ class DebuggerTests(ServerTestCase):
 			"Built": dict(launch, preLaunchTask="build"),
 			"Broken": dict(launch, preLaunchTask="broken"),
 			"Refused": dict(launch, refuse=True),
+			"Tcp": dict(launch, type="faketcp", stopOnEntry=True),
 			"Unknown": {"type": "nope", "request": "launch"}}}
 
 	def tearDown(self):
@@ -109,6 +111,14 @@ class DebuggerTests(ServerTestCase):
 		self.assertEqual(["uncaught"], filters, "the adapter's default filters")
 		launch = [r for r in self.requests() if r["command"] == "launch"][0]["arguments"]
 		self.assertEqual(os.path.join(self.repo, "src", "game.txt").replace("\\", "/").lower(), launch["program"].replace("\\", "/").lower(), "the configuration's ${projectRoot}")
+
+	async def test_an_adapter_over_tcp(self):
+		session, topic = await self.start("Tcp")
+		stop = await self.stopped(topic)
+		self.assertEqual(("entry", "src/game.txt"), (stop["session"]["stop"]["reason"], stop["frames"][0]["source"]["path"]))
+		await self.client.request("dbg.stop", {"sessionId": session})
+		end = await self.ended(topic)
+		self.assertEqual("ended", end["state"])
 
 	async def test_controls_are_revision_checked(self):
 		session, topic = await self.start("Entry")
@@ -165,7 +175,7 @@ class DebuggerTests(ServerTestCase):
 
 	async def test_refusals(self):
 		offer = await self.client.request("task.list", {"wsId": "w1"})
-		self.assertEqual(("Launch", ["Launch", "Entry", "Built", "Broken", "Refused", "Unknown"]), (offer["debug"]["default"], offer["debug"]["configurations"]), "the offer names them")
+		self.assertEqual(("Launch", ["Launch", "Entry", "Built", "Broken", "Refused", "Tcp", "Unknown"]), (offer["debug"]["default"], offer["debug"]["configurations"]), "the offer names them")
 		with self.assertRaises(RpcFailure) as unknown:
 			await self.client.request("dbg.start", {"wsId": "w1", "configuration": "Unknown"})
 		self.assertEqual("not_found", unknown.exception.code)

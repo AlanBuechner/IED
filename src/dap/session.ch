@@ -21,7 +21,19 @@ namespace Ied
 	const int32 kDapExitGraceMs = 2000;
 	const int64 kDapOutputLinesKept = 2000;
 
+	const int32 kDapConnectTimeoutMs = 10000;
+
 	alias DapThen = func<void(bool ok, const Serialization::DomNode& body, Core::StringView message)>;
+
+	// What carries DAP to the adapter: its standard streams, or the loopback socket it connected to (transport tcp).
+	class DapChannel
+	{
+		public Process::Child* child;
+		public Net::TcpStream* stream;
+
+		public int64 Read(void* buffer, int64 capacity) { return stream ? stream->Receive(buffer, capacity) : child->Read(Process::Stream::Output, buffer, capacity); }
+		public bool Write(Core::StringView text) { return stream ? stream->SendText(text) : child->WriteText(text); }
+	}
 
 	class DapAnswer
 	{
@@ -75,7 +87,7 @@ namespace Ied
 
 	private:
 		private Core::String ProgramToRun(Core::String& error) const;
-		private Process::StartInfo StartInfoFor(Core::StringView program) const;
+		private Process::StartInfo StartInfoFor(Core::StringView program, int32 port) const;
 		private int64 Send(Core::StringView command, Core::StringView arguments, DapAnswer* answer);
 		private void Write(Core::StringView json);
 		private void Initialized(bool ok, const Serialization::DomNode& body, Core::StringView message);
@@ -88,9 +100,11 @@ namespace Ied
 		private void Continued();
 		private void Terminated();
 		private void Exited();
-		private void ReadLoop(Process::Child* child, int64 run);
-		private void ErrorLoop(Process::Child* child, int64 run);
-		private void WriteLoop(Process::Child* child, MessageQueue* queue);
+		private void Talk(DapChannel* channel, Process::Child* process, MessageQueue* queue, int64 run);
+		private void AcceptLoop(Net::TcpListener* listener, Process::Child* process, MessageQueue* queue, int64 run);
+		private void ReadLoop(DapChannel* channel, Process::Child* process, int64 run);
+		private void ErrorLoop(Process::Child* process, Process::Stream stream, int64 run);
+		private void WriteLoop(DapChannel* channel, MessageQueue* queue);
 
 		private Server* server;
 		private Process::Child* child;

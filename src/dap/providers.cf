@@ -21,6 +21,7 @@ namespace Ied
 		provider->cwd = Core::String(node.Member("cwd").AsView());
 		provider->languages = Strings(node.Member("languages"));
 		provider->staged = node.Member("launchMode").AsView() == "staged";
+		provider->tcp = node.Member("transport").AsView() == "tcp";
 		provider->when = Core::String(node.Member("when").AsView());
 		return provider;
 	}
