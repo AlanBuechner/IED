@@ -256,25 +256,30 @@ def plugins_page(run):
 @scenario(viewports=("desktop",))
 def disable_and_enable_a_plugin(run):
 	page = run.open()
-	page.click("button.mi:has-text('Extensions')")
-	page.click(".menu .menu-item:has-text('Manage Plugins')")
-	page.wait_for_selector(".plugin-card[data-plugin='ied.editor'] button:has-text('Disable')")
-	page.click(".plugin-card[data-plugin='ied.editor'] button:has-text('Disable')")
-	page.wait_for_selector('.sb-act[data-activity="ied.editor"]', state="detached")
-	page.wait_for_selector('.sb-act[data-activity="shell.home"]')
-	page.wait_for_selector('.sb-act[data-activity="ied.chat"].on')
-	page.wait_for_selector(".panel-title:has-text('Solution Explorer')", state="hidden")
-	run.shot("disabled")
-	page.click("button.mi:has-text('Extensions')")
-	page.click(".menu .menu-item:has-text('Manage Plugins')")
-	page.wait_for_selector(".plugin-card[data-plugin='ied.editor'] button:has-text('Enable')")
-	page.click(".plugin-card[data-plugin='ied.editor'] button:has-text('Enable')")
-	page.wait_for_selector('.sb-act[data-activity="ied.editor"]')
-	page.wait_for_selector('.sb-act[data-activity="shell.home"]', state="detached")
-	page.click('.sb-act[data-activity="ied.editor"]')
-	page.wait_for_selector(".panel-title:has-text('Solution Explorer')")
-	page.wait_for_selector(".tree-row:has-text('README.md')")
-	run.shot("enabled")
+	try:
+		page.click("button.mi:has-text('Extensions')")
+		page.click(".menu .menu-item:has-text('Manage Plugins')")
+		page.wait_for_selector(".plugin-card[data-plugin='ied.editor'] button:has-text('Disable')")
+		page.click(".plugin-card[data-plugin='ied.editor'] button:has-text('Disable')")
+		page.wait_for_selector('.sb-act[data-activity="ied.editor"]', state="detached")
+		# Another dock host keeps documents a home (the Profiler activity is one); with none left the shell adds Home.
+		page.wait_for_selector('.sb-act[data-activity="shell.home"], .sb-act[data-activity="ied.profiler"]')
+		page.wait_for_selector('.sb-act[data-activity="ied.chat"].on')
+		page.wait_for_selector(".panel-title:has-text('Solution Explorer')", state="hidden")
+		run.shot("disabled")
+		page.click("button.mi:has-text('Extensions')")
+		page.click(".menu .menu-item:has-text('Manage Plugins')")
+		page.wait_for_selector(".plugin-card[data-plugin='ied.editor'] button:has-text('Enable')")
+		page.click(".plugin-card[data-plugin='ied.editor'] button:has-text('Enable')")
+		page.wait_for_selector('.sb-act[data-activity="ied.editor"]')
+		page.wait_for_selector('.sb-act[data-activity="shell.home"]', state="detached")
+		page.click('.sb-act[data-activity="ied.editor"]')
+		page.wait_for_selector(".panel-title:has-text('Solution Explorer')")
+		page.wait_for_selector(".tree-row:has-text('README.md')")
+		run.shot("enabled")
+	finally:
+		# A failure part-way must not leave the editor disabled for the scenarios after this one.
+		run.request("plugins.setEnabled", {"id": "ied.editor", "enabled": True})
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1437,3 +1442,6 @@ def browser_tab(run):
 	run.wait_text(".browser-caption", 'AI: click button "Go"')
 	run.shot("ai-action")
 	run.wait_text(titles, "Went hello", timeout=20000)
+
+
+import profiler_scenarios  # noqa: E402,F401  (the profiler's scenarios register themselves)

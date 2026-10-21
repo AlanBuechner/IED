@@ -32,5 +32,6 @@ import "./keyboard.test.js";
 import "./fileicons.test.js";
 import "./browser.test.js";
 import "./desktop.test.js";
+import "./profiler.test.js";
 
 run(document.getElementById("results"));

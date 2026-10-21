@@ -30,6 +30,9 @@
 		"toolWindows": [
 			{ "id": "ied.profiler.captures", "title": "Captures", "icon": "$(history)", "view": "CaptureLibrary", "defaultDock": "left", "activity": "ied.profiler" }
 		],
+		"statusBarItems": [
+			{ "id": "ied.profiler.status", "alignment": "left", "priority": 20, "view": "ProfilerStatus" }
+		],
 		"fileIcons": [
 			{ "extensions": [".iedtrace"], "icon": "$(pulse)", "color": "--hue-orange" }
 		],

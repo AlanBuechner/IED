@@ -1,0 +1,52 @@
+include "encode.ch"
+
+namespace Profile
+{
+	void PutByte(Core::Array<uint8>& out, uint8 value) { out.Push(value); }
+
+	void PutVarint(Core::Array<uint8>& out, uint64 value) {
+		while (value >= 0x80) {
+			out.Push((uint8)((value & 0x7F) | 0x80));
+			value >>= 7;
+		}
+		out.Push((uint8)value);
+	}
+
+	void PutZigzag(Core::Array<uint8>& out, int64 value) {
+		PutVarint(out, value >= 0 ? (uint64)value << 1 : (((uint64)(-(value + 1))) << 1) | 1);
+	}
+
+	void PutText(Core::Array<uint8>& out, Core::StringView text) {
+		PutVarint(out, (uint64)text.ByteLength());
+		out.Append((const uint8*)text.Data(), text.ByteLength());
+	}
+
+	void PutDouble(Core::Array<uint8>& out, double value) {
+		const uint64 bits = reinterpret_cast<uint64>(value);
+		for (int32 i = 0; i < 8; ++i) out.Push((uint8)((bits >> (8 * i)) & 0xFF));
+	}
+
+	void PutEvent(Core::Array<uint8>& out, Event type) { out.Push((uint8)type); }
+
+	void PutPreamble(Core::Array<uint8>& out) {
+		out.Push((uint8)'I');
+		out.Push((uint8)'T');
+		out.Push((uint8)'P');
+		out.Push((uint8)'1');
+		out.Push((uint8)(kProtocolVersion & 0xFF));
+		out.Push((uint8)(kProtocolVersion >> 8));
+		out.Push((uint8)0);
+		out.Push((uint8)0);
+	}
+
+	void PutChunk(Core::Array<uint8>& out, uint8 kind, uint64 thread, int64 baseTicks, const Core::Array<uint8>& body) {
+		Core::Array<uint8> head;
+		head.Push(kind);
+		PutVarint(head, thread);
+		PutVarint(head, (uint64)baseTicks);
+		const uint64 length = (uint64)(head.Count() + body.Count());
+		for (int32 i = 0; i < 4; ++i) out.Push((uint8)((length >> (8 * i)) & 0xFF));
+		out.Append(head);
+		out.Append(body);
+	}
+}

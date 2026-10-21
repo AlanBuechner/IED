@@ -48,7 +48,8 @@
 					"rebuild": { "label": "Rebuild", "slot": "rebuild", "steps": [{ "run": "\"${config:nuke.command}\" rebuild ${config} ${projectName} -a ${arch}" }] },
 					"clean": { "label": "Clean", "slot": "clean", "steps": [{ "run": "\"${config:nuke.command}\" clean ${config} ${projectName} -a ${arch}" }] },
 					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [{ "run": "\"${config:nuke.command}\" run ${config} ${projectName} -a ${arch}", "output": "run" }] },
-					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [{ "run": "\"${config:nuke.command}\" test ${config} ${projectName} -a ${arch}", "output": "test" }] }
+					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [{ "run": "\"${config:nuke.command}\" test ${config} ${projectName} -a ${arch}", "output": "test" }] },
+					"profile": { "label": "Profile", "icon": "$(pulse)", "slot": "profile", "concurrency": "restart", "tooltip": "Build and run with the profiler connected (IED_PROFILER)", "steps": [{ "run": "\"${config:nuke.command}\" run ${config} ${projectName} -a ${arch}", "output": "run", "env": { "IED_PROFILER": "${profiler.connect}" } }] }
 				},
 				"toolbar": ["config", "arch", "|", "run", "build", "test"]
 			}

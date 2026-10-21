@@ -11,6 +11,8 @@ namespace Profiler
 	const int32 kTokenBytes = 16;
 	const char* kConnectVariable = "profiler.connect";
 
+	static Core::String StatusJson(const CaptureEntry* entry, const Capture& capture);
+
 	void ProfilerPlugin::Init(IED::PluginContext* context) {
 		this.context = context;
 	}
@@ -128,6 +130,7 @@ namespace Profiler
 		json.Field("name", path.FileName());
 		json.BoolField("live", entry->live);
 		json.BoolField("loaded", entry->capture != nullptr);
+		json.Field("app", entry->live && entry->capture ? entry->capture->appName.View() : Core::StringView(""));
 		json.IntField("sizeBytes", entry->sizeBytes);
 		json.IntField("modifiedNs", entry->modifiedNs);
 		json.RawField("metadata", entry->metadata.IsEmpty() ? Core::StringView("null") : entry->metadata.View());
@@ -215,6 +218,10 @@ namespace Profiler
 		if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + captureId).View());
 		if (!entry->capture) entry->capture = capture;
 		Unload(this, entry);
+		{
+			Threading::LockGuard held(entry->capture->lock);
+			context->Topic(entry->Topic().View(), StatusJson(entry, *entry->capture).View());
+		}
 		return entry->capture;
 	}
 

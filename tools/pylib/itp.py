@@ -54,6 +54,8 @@ EVENTS = {
 	0x73: ("LockRelease", [("dt", "dt"), ("lock", "v")]),
 	0x80: ("ModuleDef", [("base", "v"), ("size", "v"), ("pathStr", "v"), ("debugIdStr", "v")]),
 	0x81: ("CallstackDef", [("callstackId", "v"), ("addresses", "list")]),
+	0x82: ("Sample", [("dt", "dt"), ("threadId", "v"), ("callstackId", "v"), ("kind", "v"), ("weight", "v")]),
+	0x83: ("SymbolDef", [("address", "v"), ("functionStr", "v"), ("fileStr", "v"), ("line", "v")]),
 	0x90: ("GpuContextDef", [("ctxId", "v"), ("api", "v"), ("queueNameStr", "v"), ("periodPicoseconds", "v")]),
 	0x91: ("GpuCalibration", [("ctxId", "v"), ("cpuTicks", "v"), ("gpuTicks", "v")]),
 	0x92: ("GpuZoneBegin", [("dt", "dt"), ("ctxId", "v"), ("queryId", "v"), ("srcLocId", "v")]),

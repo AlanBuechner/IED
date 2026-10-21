@@ -41,7 +41,7 @@ namespace Profiler
 			count += 1;
 			pause += gc.end - gc.begin;
 			if (gc.end - gc.begin > longest) longest = gc.end - gc.begin;
-			freed += gc.bytesBefore - gc.bytesAfter;
+			freed += gc.Freed();
 		}
 		json.Key(Core::StringView("gc"));
 		json.BeginObject();

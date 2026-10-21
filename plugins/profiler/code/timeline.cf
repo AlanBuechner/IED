@@ -5,6 +5,7 @@ namespace Profiler
 {
 	const int32 kMostGcBands = 500;
 	const int32 kFramesPerPixelShown = 3;
+	const int64 kPixelsPerRename = 4;
 
 	// What every lane of one answer shares.
 	class TimelineWriter
@@ -70,12 +71,17 @@ namespace Profiler
 
 	// --- Thread lanes -------------------------------------------------------------------------------------------------
 
+	// The renames in the range, unless there are more than a quarter of the pixels: then each would be a sliver, and
+	// "renamesDense" says how many there were.
 	static void WriteRenames(TimelineWriter& w, const ThreadTrack* track) {
 		IED::JsonWriter& json = *w.json;
+		const int64 first = track->nameTimes.UpperBound(w.range.begin);
+		const int64 end = track->nameTimes.LowerBound(w.range.end);
+		const bool dense = (end - first) * kPixelsPerRename > w.range.Length() / w.pixel;
+		json.IntField("renamesInRange", end - first);
 		json.Key(Core::StringView("renames"));
 		json.BeginArray();
-		const int64 first = track->nameTimes.UpperBound(w.range.begin);
-		for (int64 i = first; i < track->nameTimes.Count() && track->nameTimes[i] < w.range.end; ++i) {
+		for (int64 i = first; !dense && i < end; ++i) {
 			json.BeginArray();
 			json.Int(w.Ns(track->nameTimes[i]));
 			json.String(w.capture->Text(track->nameStrs[i]));
@@ -357,7 +363,7 @@ namespace Profiler
 			json.Int(w.Ns(end));
 			json.Int(gc.kind);
 			json.Int(gc.generation);
-			json.Int(gc.bytesBefore - gc.bytesAfter);
+			json.Int(gc.Freed());
 			json.EndArray();
 			written += 1;
 		}

@@ -1,0 +1,339 @@
+include "session.ch"
+include "Platform/time.ch"
+include "Platform/system.ch"
+include "Memory/gc.ch"
+
+namespace Profile
+{
+	const int32 kStateUnknown = 0;
+	const int32 kStateOff = 1;
+	const int32 kStateOn = 2;
+	const int64 kFrequencyProbeNs = 20000000;
+	const int64 kNsPerSecond = 1000000000;
+
+	int32 g_state = 0;
+	Session* g_session = null;
+	int64 g_sessions = 0;
+	int32 g_gcKey = 0;
+	thread_local EventBuffer* t_buffer = null;
+	thread_local int64 t_bufferSession = 0;
+
+	int64 Now() {
+		uint64 low;
+		uint64 high;
+		asm(nostack) {
+			"rdtsc";
+			out("eax") low;
+			out("edx") high;
+		}
+		return (int64)((high << 32) | low);
+	}
+
+	void EventBuffer::Timed(Event type, int64 ticks) {
+		PutEvent(bytes, type);
+		PutZigzag(bytes, ticks - last);
+		last = ticks;
+	}
+
+	uint64 Session::Intern(Core::StringView text) {
+		if (text.IsEmpty()) return 0;
+		uint64 id;
+		if (strings.TryGet(Core::String(text), id)) return id;
+		id = Once(text);
+		strings.Insert(Core::String(text), id);
+		return id;
+	}
+
+	uint64 Session::Once(Core::StringView text) {
+		nextString += 1;
+		Threading::LockGuard held(global.lock);
+		PutEvent(global.bytes, Event::StringDef);
+		PutVarint(global.bytes, nextString);
+		PutText(global.bytes, text);
+		return nextString;
+	}
+
+	bool Session::Send(const Core::Array<uint8>& bytes) {
+		if (bytes.IsEmpty()) return true;
+		if (stream) return stream->SendAll((const void*)bytes.Data(), bytes.Count(), kSendWaitMs);
+		return file && file->Write((const void*)bytes.Data(), bytes.Count()) == bytes.Count();
+	}
+
+	// --- Threads --------------------------------------------------------------------------------------------------
+
+	// Marks the thread's buffer ended when the thread exits, so the flusher drops it once it is empty.
+	struct ThreadEnd
+	{
+		[operator("delete")] public void Delete() {
+			if (t_buffer) atomic_store(&t_buffer->ended, 1, MemoryOrder::Release);
+		}
+
+		public int32 armed;
+	}
+
+	thread_local ThreadEnd t_end;
+
+	EventBuffer* ThreadBuffer(Session* session) {
+		if (t_buffer && t_bufferSession == session->number) return t_buffer;
+		EventBuffer* buffer = new EventBuffer();
+		buffer->last = session->startTicks;
+		buffer->base = session->startTicks;
+		{
+			Threading::LockGuard held(session->lock);
+			session->nextThread += 1;
+			buffer->thread = session->nextThread;
+			session->threads.Push(buffer);
+			Threading::LockGuard global(session->global.lock);
+			PutEvent(session->global.bytes, Event::ThreadDef);
+			PutVarint(session->global.bytes, buffer->thread);
+			PutVarint(session->global.bytes, Threading::Thread::CurrentId());
+			PutVarint(session->global.bytes, 0);
+		}
+		t_buffer = buffer;
+		t_bufferSession = session->number;
+		t_end.armed = 1;
+		return buffer;
+	}
+
+	// --- Flushing -------------------------------------------------------------------------------------------------
+
+	static void QueueCalibration(Session* session, int64 now) {
+		Threading::LockGuard held(session->global.lock);
+		PutEvent(session->global.bytes, Event::Calibration);
+		PutVarint(session->global.bytes, (uint64)now);
+		PutVarint(session->global.bytes, (uint64)Platform::UnixTimeNs());
+	}
+
+	static void QueueHeapPlot(Session* session, int64 now) {
+		const GC::Stats stats = GC::GetStats();
+		Threading::LockGuard held(session->global.lock);
+		session->global.Timed(Event::PlotValue, now);
+		PutVarint(session->global.bytes, session->heapPlot);
+		PutDouble(session->global.bytes, (double)(stats.heapBytes - stats.freeBytes));
+	}
+
+	static void QueuePeriodic(Session* session) {
+		const int64 now = Now();
+		const int64 perSecond = session->frequency;
+		if (now - session->lastCalibration >= perSecond * kCalibrateEveryNs / kNsPerSecond) {
+			session->lastCalibration = now;
+			QueueCalibration(session, now);
+		}
+		if (now - session->lastHeapPlot >= perSecond / (kNsPerSecond / kHeapPlotEveryNs)) {
+			session->lastHeapPlot = now;
+			QueueHeapPlot(session, now);
+		}
+	}
+
+	// Takes a buffer's events (the lock held only while it swaps them); false when it had none.
+	static bool Take(EventBuffer* buffer, Core::Array<uint8>& bytes, int64& base) {
+		Threading::LockGuard held(buffer->lock);
+		if (buffer->bytes.IsEmpty()) return false;
+		buffer->bytes.Swap(bytes);
+		base = buffer->base;
+		buffer->base = buffer->last;
+		return true;
+	}
+
+	// One round: every thread's events, then the global ones, sent global first. False when sending failed.
+	static bool FlushOnce(Session* session) {
+		QueuePeriodic(session);
+		Core::Array<EventBuffer*> buffers;
+		{
+			Threading::LockGuard held(session->lock);
+			buffers.Append(session->threads);
+		}
+		Core::Array<uint8> threads;
+		for (EventBuffer* buffer : buffers) {
+			Core::Array<uint8> body;
+			int64 base;
+			if (Take(buffer, body, base)) PutChunk(threads, kThreadChunk, buffer->thread, base, body);
+		}
+		Core::Array<uint8> out;
+		Core::Array<uint8> globalBody;
+		int64 globalBase;
+		if (Take(&session->global, globalBody, globalBase)) PutChunk(out, kGlobalChunk, 0, globalBase, globalBody);
+		out.Append(threads);
+		const bool sent = session->Send(out);
+		Threading::LockGuard held(session->lock);
+		for (int64 i = session->threads.Count() - 1; i >= 0; --i) {
+			EventBuffer* buffer = session->threads[i];
+			if (atomic_load(&buffer->ended, MemoryOrder::Acquire) != 0 && buffer->bytes.IsEmpty()) session->threads.RemoveSwap(i);
+		}
+		return sent;
+	}
+
+	static void FlushLoop(Session* session) {
+		while (atomic_load(&session->stopping, MemoryOrder::Acquire) == 0) {
+			Threading::Thread::Sleep(kFlushEveryNs);
+			if (!FlushOnce(session)) {
+				atomic_store(&g_state, kStateOff, MemoryOrder::Release);
+				return;
+			}
+		}
+	}
+
+	// --- Collections ----------------------------------------------------------------------------------------------
+
+	// After each collection: its pause as a GcBegin and GcEnd (the runtime reports the end; the start is the end less
+	// the pause) and the live bytes it left.
+	static void OnCollection(void* user) {
+		Session* session = g_session;
+		if (!session || atomic_load(&g_state, MemoryOrder::Acquire) != kStateOn) return;
+		const GC::Stats stats = GC::GetStats();
+		const int64 end = Now();
+		const int64 pause = (int64)((double)stats.lastPauseNs * (double)session->frequency / (double)kNsPerSecond);
+		Threading::LockGuard held(session->global.lock);
+		session->global.Timed(Event::GcBegin, end - pause);
+		PutVarint(session->global.bytes, 2);
+		PutVarint(session->global.bytes, 0);
+		session->global.Timed(Event::GcEnd, end);
+		PutVarint(session->global.bytes, 0);
+		PutVarint(session->global.bytes, stats.liveBytes);
+		PutVarint(session->global.bytes, 0);
+		PutVarint(session->global.bytes, 0);
+		PutVarint(session->global.bytes, 0);
+	}
+
+	// --- Starting and stopping ------------------------------------------------------------------------------------
+
+	// Ticks a second of Now(), measured against the system's counter.
+	static int64 MeasureFrequency() {
+		const int64 ticks0 = Now();
+		const int64 counter0 = Platform::Ticks();
+		Threading::Thread::Sleep(kFrequencyProbeNs);
+		const int64 ticks1 = Now();
+		const int64 counter1 = Platform::Ticks();
+		const double seconds = (double)(counter1 - counter0) / (double)Platform::TickFrequency();
+		return seconds > 0.0 ? (int64)((double)(ticks1 - ticks0) / seconds) : kNsPerSecond;
+	}
+
+	static bool Open(Session* session, Core::StringView target, Core::String& token, Core::String& problem) {
+		if (target.StartsWith(Core::StringView("file:"))) {
+			Core::String path = Core::String(target.Substring(5, target.ByteLength() - 5));
+			session->file = new FS::File(path.CStr(), "wb");
+			if (!session->file->IsOpen()) problem = Core::String("cannot write ") + path.View();
+			return problem.IsEmpty();
+		}
+		const int64 at = target.IndexOf(Core::StringView(";token="));
+		Core::String address = Core::String(at < 0 ? target : target.Substring(0, at));
+		if (at >= 0) token = Core::String(target.Substring(at + 7, target.ByteLength() - at - 7));
+		Net::Address to = Net::ParseAddress(address.CStr());
+		if (!to.IsValid()) {
+			problem = Core::String("not an address: ") + address.View();
+			return false;
+		}
+		Net::TcpStream connected = Net::TcpStream::Connect(to, kConnectWaitMs);
+		if (!connected.IsOpen()) {
+			problem = (Core::String("cannot reach the profiler at ") + address.View()) + ": " + connected.Error();
+			return false;
+		}
+		connected.SetNoDelay(true);
+		session->stream = new Net::TcpStream(take(connected));
+		return true;
+	}
+
+	static Core::Array<uint8> HelloStream(Session* session, Core::StringView app, Core::StringView token) {
+		Core::Array<uint8> body;
+		PutEvent(body, Event::Hello);
+		PutVarint(body, kProtocolVersion);
+		PutText(body, app);
+		PutVarint(body, Platform::ProcessId());
+		PutVarint(body, (uint64)session->frequency);
+		PutVarint(body, (uint64)session->startTicks);
+		PutVarint(body, (uint64)Platform::UnixTimeNs());
+		PutVarint(body, kEstimatedClock);
+		PutText(body, token);
+		Core::Array<uint8> out;
+		PutPreamble(out);
+		PutChunk(out, kGlobalChunk, 0, session->startTicks, body);
+		return out;
+	}
+
+	bool StartSession(Core::StringView target, Core::StringView app, Core::String& problem) {
+		if (atomic_load(&g_state, MemoryOrder::Acquire) == kStateOn) {
+			problem = Core::String("a profiling session is running");
+			return false;
+		}
+		Session* session = new Session();
+		Core::String token;
+		if (!Open(session, target, token, problem)) return false;
+		g_sessions += 1;
+		session->number = g_sessions;
+		session->frequency = MeasureFrequency();
+		session->startTicks = Now();
+		session->global.last = session->startTicks;
+		session->global.base = session->startTicks;
+		session->lastCalibration = session->startTicks;
+		session->lastHeapPlot = session->startTicks;
+		if (!session->Send(HelloStream(session, app, token.View()))) {
+			problem = Core::String("the profiler closed the connection");
+			return false;
+		}
+		session->nextPlot = 1;
+		session->heapPlot = 1;
+		{
+			Threading::LockGuard held(session->lock);
+			const uint64 name = session->Intern(Core::StringView("GC heap"));
+			Threading::LockGuard global(session->global.lock);
+			PutEvent(session->global.bytes, Event::PlotDef);
+			PutVarint(session->global.bytes, session->heapPlot);
+			PutVarint(session->global.bytes, name);
+			PutVarint(session->global.bytes, 1);
+			PutVarint(session->global.bytes, 0);
+		}
+		QueueCalibration(session, session->startTicks);
+		g_session = session;
+		GC::RegisterCollectionResult((void*)&g_gcKey, OnCollection, null);
+		session->flusher = new Threading::Thread(Threading::Thread::Run([session]() { FlushLoop(session); }));
+		atomic_store(&g_state, kStateOn, MemoryOrder::Release);
+		return true;
+	}
+
+	void StopSession() {
+		int32 on = kStateOn;
+		if (!atomic_compare_exchange(&g_state, &on, kStateOff, MemoryOrder::AcqRel, MemoryOrder::Acquire)) return;
+		Session* session = g_session;
+		GC::UnregisterCollectionResult((void*)&g_gcKey);
+		atomic_store(&session->stopping, 1, MemoryOrder::Release);
+		session->flusher->Join();
+		FlushOnce(session);
+		Core::Array<uint8> body;
+		PutEvent(body, Event::Bye);
+		PutVarint(body, 0);
+		Core::Array<uint8> bye;
+		PutChunk(bye, kGlobalChunk, 0, session->startTicks, body);
+		session->Send(bye);
+		if (session->stream) session->stream->Close();
+		if (session->file) session->file->Close();
+	}
+
+	// --- The first use --------------------------------------------------------------------------------------------
+
+	// Reads IED_PROFILER once: a session starts when it names a target, profiling stays off otherwise.
+	static void StartFromEnvironment() {
+		Core::String target;
+		if (!Platform::TryGetEnvironmentVariable("IED_PROFILER", target) || target.IsEmpty()) return;
+		Core::String problem;
+		FS::Path program = Platform::ExecutablePath();
+		StartSession(target.View(), program.Stem(), problem);
+	}
+
+	Session* Running() {
+		int32 state = atomic_load(&g_state, MemoryOrder::Acquire);
+		if (state == kStateOn) return g_session;
+		if (state != kStateUnknown) return null;
+		int32 unknown = kStateUnknown;
+		if (!atomic_compare_exchange(&g_state, &unknown, kStateOff, MemoryOrder::AcqRel, MemoryOrder::Acquire)) return null;
+		StartFromEnvironment();
+		return atomic_load(&g_state, MemoryOrder::Acquire) == kStateOn ? g_session : null;
+	}
+
+	// Sends what is left when the program ends.
+	struct ProgramEnd
+	{
+		[operator("delete")] public void Delete() { StopSession(); }
+	}
+
+	ProgramEnd g_programEnd;
+}

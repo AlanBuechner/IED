@@ -93,11 +93,13 @@ Chunk   := u32 byteLength  u8 chunkKind  varint threadId  varint baseTimeTicks  
 | 0x62 | `Free` | dt, threadId, poolId, address | global chunks |
 | 0x63 | `PoolReset` | dt, poolId | arena reset frees everything in the pool |
 | 0x68 | `GcBegin` | dt, kind(0 minor, 1 major, 2 full), generation | global chunks |
-| 0x69 | `GcEnd` | dt, bytesBefore, bytesAfter, objectsFreed, pinned, roots | pause = end - begin |
+| 0x69 | `GcEnd` | dt, bytesBefore, bytesAfter, objectsFreed, pinned, roots | pause = end - begin; 0 is "not known" for any field (freed bytes are then 0) |
 | 0x70 | `LockDef` | lockId, nameStr, srcLocId | |
 | 0x71 | `LockWait` / 0x72 `LockObtain` / 0x73 `LockRelease` | dt, lock (`lockId * 2 + shared`) | |
 | 0x80 | `ModuleDef` | base, size, pathStr, debugIdStr (PDB GUID+age) | for server-side symbolization |
-| 0x81 | `CallstackDef` | callstackId, count, addresses[] | addresses resolved server-side from PDBs |
+| 0x81 | `CallstackDef` | callstackId, count, addresses[] | innermost frame first; addresses resolved server-side from PDBs, or by `SymbolDef` |
+| 0x82 | `Sample` | dt, threadId, callstackId, kind(0 CPU ns, 1 samples, 2 bytes, 3 objects, 4 other), weight | a call stack sample (sampling profilers, imported pprof profiles); names its thread |
+| 0x83 | `SymbolDef` | address, functionStr, fileStr, line | names an address of a call stack when the client (or an importer) knows it |
 | 0x90 | `GpuContextDef` | ctxId, api(0 other, 1 d3d12, 2 vulkan, 3 opengl, 4 metal), queueNameStr, periodPicoseconds | |
 | 0x91 | `GpuCalibration` | ctxId, cpuTicks, gpuTicks | D3D12 `GetClockCalibration`, periodic |
 | 0x92 | `GpuZoneBegin` | dt(cpu), ctxId, queryId, srcLocId | CPU-side submit time |
@@ -144,7 +146,48 @@ Server -> client control messages (same framing, global chunks): `0xE0 Configure
 - API surface (C4 side, names indicative): `Profile::Zone("Name")` (scoped), `Profile::ZoneText`, `Profile::Frame()`, `Profile::FrameBegin/End("Set")`, `Profile::Plot("name", value)`, `Profile::Message(severity, text)`, `Profile::SetThreadName(name)` (callable any time - that is the rename), `Profile::TaskScope("Name")` / `TaskBegin/End/Suspend/Resume`, `Profile::Alloc/Free(ptr, size, pool)`, GC events wired automatically from the runtime, `Profile::Gpu::Context(...)`, `Profile::Gpu::Zone(ctx, cmdList, "Name")`, `Profile::Gpu::Collect(ctx)`.
 - Thread names: C4's `Thread` and `JobSystem` call `SetThreadName` automatically ("Job Worker 3"), and `JobSystem` emits `TaskBegin/End` with the job's name when profiling is on - so C4 game engines get the by-task view for free.
 
+## As built (2026-10-21)
+
+**The plugin.** `ied.profiler` (`plugins/profiler`) is a built-in: its server code (`code/`, namespace `Profiler`) is compiled into the server (`src/nuke.toml`), its UI module is `ui/index.js`. It needs nothing of the host beyond the plugin API (`docs/26`): its own TCP listener, threads, topics and methods, and `IED::SetTaskVariable` / `StartTask` / `TaskEnded` / `CancelTask` for the Profile task.
+
+- **Listener.** One loopback TCP listener per server (`profiler.port`, default 0: a free port each start). Each workspace gets a random token; `${profiler.connect}` is `127.0.0.1:<port>;token=<token>` for that workspace's tasks. A connection must send a `Hello` whose token names a workspace within 10 s, else it is closed; so is anything that is not ITP. A connection is a live capture: its bytes are written to `.ied/local/captures/<app>-<yyyyMMdd-HHmmss>.iedtrace` as they arrive and applied to the capture in memory chunk by chunk; `Bye`, a closed socket or `prof.stop` ends it, and the index block and footer are written then.
+- **The capture in memory** (`capture.ch`): per thread, zones by depth (at one depth zones never overlap and arrive in order, so each depth is a sorted run a range finds by binary search) with self times computed as zones end, rename history, per-call names, text, values; per source location every zone's reference and totals; frame sets, plots, messages (kept in time order across threads), pools with every allocation and its free, collections, task runs per task name and thread, locks, GPU zones with their query times and calibrations, call stacks and symbols, samples, warnings. Names stay string ids until a query reads them. A saved capture is read back by replaying its stream; at most 6 are kept loaded (least recently used).
+- **Malformed input** never ends a capture: a zone ending that never began, a free of an unknown address, an address allocated twice, a task id never begun, zones nested past 255 levels, an unknown event type (the rest of its chunk is skipped), a chunk cut short - each is a warning (`prof.summary`'s `warnings`, the first 1000 kept).
+- **Trace file index block**: `"ITPI"`, u32 length, the metadata JSON (`app`, `pid`, `startUnixNs`, `durationNs`, `events`, `zones`, `frames`, `warnings`, `ended` - `bye`, `closed` or `stopped` - and `annotations`, or for an import `importedFrom` and `format`). Rewritten in place (padded, never shorter) when it changes. A file without a footer is a crash or a client's file mode: it opens by replaying everything.
+
+**Protocol** (`docs/10` lists them): every query takes `captureId` and answers in nanoseconds since the capture started.
+
+| Method | Params | Result |
+|---|---|---|
+| `prof.captures` | `wsId` | `{captures: [{captureId, path, name, live, loaded, app, sizeBytes, modifiedNs, metadata}], connect: {port, env, folder}}` |
+| `prof.open` / `prof.import` | `wsId, path` | `{captureId}`: a trace file of the workspace opened; or a Chrome trace / pprof profile / `.iedtrace` converted into the library |
+| `prof.stop` / `prof.close` / `prof.delete` | `captureId` | `{}`: stop recording (the connection is closed; the program goes on), unload, move the file to the trash |
+| `prof.timeline` | `from?, to?, width, mode` (`threads` or `tasks`), `depth?` | `{from, to, durationNs, live, pixelNs, lanes, gpu, frames, gc, messages, messagesInRange, plots, names}`; a lane's `zones` are `[depth, start, end, nameIndex, ref]`, or `[depth, start, end, -1, count]` for a run of zones narrower than a pixel merged; task lanes carry `slices` `[start, end, track, row]`; `renames` only when they are not denser than one per 4 pixels |
+| `prof.stats` | `from?, to?, groupBy` (`zone`, `thread`, `task`), `order`, `filter`, `limit` | `{rows: [{name, site, function, file, line, group, count, totalNs, selfNs, meanNs, medianNs, p95Ns, minNs, maxNs, share}], rowCount}` |
+| `prof.findZone` | `name` or `site`, `from?, to?, bins, low?, high?, limit` | the count, mean, median, p95, min, max, a histogram (log bins when the durations span decades) and the slowest instances |
+| `prof.zone` | `ref` (`track:depth:index`) | one zone's details: site, times, self, thread, task, text, value, color, call stack, frame, parents, children by name |
+| `prof.flame` | `from?, to?, track?, samples?` | `{source: zones|samples, unit, nodes, root: {name, total, self, count, children}}` |
+| `prof.frames` / `prof.frame` | `width` / `index?` (-1 or none: the worst) | the frame graph's bars (the worst frame of each run when there are more frames than pixels) with mean, median, p95, p99, max; one frame's threads, costliest zones, collections and GPU work |
+| `prof.memory` / `prof.leaks` | `width` / `at?, groupBy` (`callstack`, `pool`, `thread`) | pools over time with peak, allocations and frees, GC totals; allocations live at a time, grouped, largest first |
+| `prof.messages` | `from?, to?, severity, text, offset, limit` | messages in time order |
+| `prof.summary` / `prof.compare` | - / `a, b, limit` | a capture at a glance; two captures' frame times and the zones whose total changed most |
+
+Topics: `profs:<wsId>` (snapshot: `prof.captures`'s answer; event `captures.changed`) and `prof:<captureId>` (snapshot `{captureId, live, app, durationNs, events, zones, bytes, warnings}`; events `stats` four times a second while live, `ended`). Both are pushed by the plugin.
+
+**The UI** (mockup 06): the Profiler activity is a dock host with the Captures tool window (live first; how a program connects; Import); a capture opens as a document (`prof:<captureId>` tab kind) - the toolbar (recording state, Pause view / Follow and Stop while live, Threads or Tasks, Show all, the tool windows, Ask AI), the frame time graph (a click zooms to a frame, a drag to a run), the canvas timeline (`ui/timeline.js`, `timelinedraw.js`; theme tokens read once a paint), the zone details beside it, and the bottom tool windows Statistics (CSV), Find Zone, Messages, Memory and Flame Graph over the selection, else the view (Messages and Memory over the whole capture). A live capture follows its newest data until the timeline is moved. On a phone the details are a sheet under the timeline and a tool window takes the whole view. The status bar says "Capturing" while a program of the workspace records. Ask AI starts a chat with the question and an excerpt naming the capture, so the AI can use its tools on it.
+
+**The AI** (`docs/13` T-PRF): `profile_list`, `profile_summary`, `profile_top_zones`, `profile_frame`, `profile_find_zone`, `profile_flame`, `profile_messages`, `profile_leaks`, `profile_compare` and `profile_capture` are C4 functions that answer through the plugin's `profiler.query` server binding as compact text (times with units, aligned tables, an indented call tree); `profile_capture` runs the startup project's Profile task (`IED::StartTask`), waits for its program to connect, records for the asked seconds, stops the capture and cancels the run. The `profiler` skill says how to instrument a program in each language.
+
+**The Profile task.** A task in the `profile` slot starts the program with `IED_PROFILER=${profiler.connect}`; the `nuke` preset has one (`plugins/nuke`). Debug > Start Profiling (Alt+F2) runs it and opens the capture when the program connects.
+
+**Clients.** Bedrock `Profile::` (`C4/Bedrock/Profile/`, opt-in `include "profile.ch"`): zones as scope guards over a static `Site` (the `PROFILE_ZONE("Name")` macro records the file and line) or a name looked up at run time, frames, plots, messages, thread names at any time, tasks, pools' allocations, and collections from the runtime's collection callback (the start is the end less the reported pause; the runtime has no start hook yet) with the GC heap plotted ten times a second. Events are stamped with `rdtsc`, its frequency measured against the system counter at start (`Hello` flags it as estimated; `Calibration` pairs every second correct it on the server). Each thread writes encoded events into its own buffer under an uncontended lock; a flusher thread sends them every 10 ms. One relaxed load per call when no session runs; `-D PROFILE=0` compiles the macros away. A send that fails ends the session. Tested by `C4/Bedrock/Tests/profile_tests.cf` (a session to a file read back event by event).
+
+**Importers** (`code/importers.cf`): the Chrome trace event format (`X`, `B`/`E`, instants, counters, async `b`/`e` as tasks, thread and process names; Rust's `tracing-chrome`, Chrome, Perfetto JSON, Nuke's build trace) and pprof (gzip and protobuf decoded in C4; Go's `runtime/pprof`, Rust's `pprof-rs`, gperftools): samples with their stacks and symbols, flame graph and statistics from them.
+
+**Checks**: 27 unit tests beside the code (`*_tests.cf`), `tools/server-checks/tests/test_profiler.py` (9: live capture to file, queries, restart, refused connections, warnings, imports, the AI's answers, `${profiler.connect}`, `profile_capture`), the browser unit tests `frontend/tests/profiler.test.js`, the e2e scenario `profiler_live_capture` (desktop and phone), and `tools/pylib/itp.py`, the protocol's reference codec in Python.
+
 ## Open items
 
 - LZ4 in the client means a C dependency in Bedrock; v1 can ship uncompressed (localhost bandwidth is plentiful) and add compression with the first remote-capture use case.
+- Not built yet: locks in the UI (the events are kept), GPU zones from a client (`Profile::Gpu`, D3D12 timestamp queries; the server and the timeline take them), annotations in the UI, symbolizing raw addresses from PDBs, UDP announce, captures larger than memory (indexes on disk), the debugger's Diagnostic Tools graphs (F-PRF-63).
 - Sampling and context switches (ETW) are P2 and outside ITP v1 (the server collects them directly via an ETW helper and merges by timestamp).

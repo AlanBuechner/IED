@@ -185,6 +185,13 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | T-PRF-5 | `profile_leaks(capture, group_by: callstack|pool)` | read | Live allocations at end. |
 | T-PRF-6 | `profile_compare(a, b)` | read | Zone and frame-time deltas. |
 
+| T-PRF-7 | `profile_list()` | read | The workspace's captures, newest first, live ones first. |
+| T-PRF-8 | `profile_find_zone(capture, name, from_ms?, to_ms?)` | read | One zone's distribution and slowest instances. |
+| T-PRF-9 | `profile_flame(capture, from_ms?, to_ms?, depth?, min_percent?)` | read | The call tree merged by name, as indented text; from samples for pprof imports. |
+| T-PRF-10 | `profile_messages(capture, severity?, text?, limit?)` | read | The capture's log. |
+
+**As built (2026-10-21, `docs/16` "As built"):** all ten are C4 functions of the `ied.profiler` plugin answering through its `profiler.query` server binding, as compact text (durations with units, aligned tables). `capture` is a capture id, a `.iedtrace` path or file name, or `latest` (the default: the newest, a live one first). `profile_top_zones` takes `by` (self, total, count, mean, median, p95, max), `group_by` (zone, thread, task), `filter` and a range in milliseconds; `profile_frame` takes a frame number or `"worst"`; `profile_leaks` takes `group_by` (callstack, pool, thread) and `at_ms`; `profile_capture(seconds, project?)` runs the Profile task, records while the program streams, stops the capture and cancels the run (900 s timeout; it fails with the task's output when the program never connects). The `profiler` skill covers instrumenting each language.
+
 ### `gpu`
 
 From `ied.gpu` (`docs/22`). Results cite EIDs, which the UI renders as links; images go only to vision-capable models the chat's privacy allows.

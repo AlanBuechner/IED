@@ -115,7 +115,7 @@ namespace Profiler
 			json.IntField("startNs", capture.clock.Ns(gc.begin));
 			json.IntField("pauseNs", capture.clock.Ns(gc.end - gc.begin));
 			json.IntField("generation", gc.generation);
-			json.IntField("freedBytes", gc.bytesBefore - gc.bytesAfter);
+			json.IntField("freedBytes", gc.Freed());
 			json.EndObject();
 		}
 		json.EndArray();

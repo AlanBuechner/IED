@@ -9,9 +9,11 @@ namespace Profiler
 	static void WriteThreads(IED::JsonWriter& json, const Capture& capture) {
 		json.Key(Core::StringView("threads"));
 		json.BeginArray();
-		for (const ThreadTrack* track : capture.tracks) {
+		for (int64 i = 0; i < capture.tracks.Count(); ++i) {
+			const ThreadTrack* track = capture.tracks[i];
 			if (track->zones == 0 && track->nameTimes.IsEmpty()) continue;
 			json.BeginObject();
+			json.IntField("track", i);
 			json.Field("name", TrackLabel(capture, track, track->firstTicks < 0 ? 0 : track->firstTicks).View());
 			json.IntField("zones", track->zones);
 			json.IntField("renames", track->nameTimes.Count() > 1 ? track->nameTimes.Count() - 1 : 0);

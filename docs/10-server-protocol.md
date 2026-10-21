@@ -282,6 +282,10 @@ Fetch, pull and push are **operations**: one at a time per repository (`busy` ot
 
 The commit graph's lanes are laid out by the client from the commits' parents (`plugins/git`), so paging only appends.
 
+## Profiler
+
+The `ied.profiler` plugin's server code (`plugins/profiler/code/`, a built-in on the plugin API) owns the profiler's methods and topics; `docs/16` "As built" has their shapes. Methods: `prof.captures`, `prof.open`, `prof.import`, `prof.stop`, `prof.close`, `prof.delete`, `prof.timeline`, `prof.stats`, `prof.findZone`, `prof.zone`, `prof.flame`, `prof.frames`, `prof.frame`, `prof.memory`, `prof.leaks`, `prof.messages`, `prof.summary`, `prof.compare` - every query names a `captureId` (`<wsId>:<16 hex digits>`, stable for a file across restarts) and answers in nanoseconds since the capture started; a capture not in memory is read from its file first (`unavailable` when it cannot be). Topics, pushed by the plugin: `profs:<wsId>` (the workspace's capture library and how a program connects; event `captures.changed`) and `prof:<captureId>` (a capture's status; events `stats` while it records, `ended`). Instrumented programs do not use this protocol: they stream the IED Trace Protocol (`docs/16`) to the plugin's own loopback listener.
+
 ## Liveness
 
 - Client pings every 20 s; the server closes sockets silent for 60 s. The server also pings (WebSocket ping frames) to keep proxies alive.

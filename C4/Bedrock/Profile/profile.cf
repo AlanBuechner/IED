@@ -1,0 +1,279 @@
+include "profile.ch"
+include "Platform/system.ch"
+
+namespace Profile
+{
+	// The site's id in `session`, its definitions queued the first time.
+	static uint64 SiteId(Session* session, Site& site) {
+		if (atomic_load(&site.session, MemoryOrder::Acquire) == session->number) return site.id;
+		Threading::LockGuard held(session->lock);
+		if (site.session == session->number) return site.id;
+		const uint64 name = session->Intern(Core::StringView(site.name));
+		const uint64 file = session->Intern(Core::StringView(site.file));
+		session->nextSite += 1;
+		const uint64 id = session->nextSite;
+		{
+			Threading::LockGuard global(session->global.lock);
+			PutEvent(session->global.bytes, Event::SrcLocDef);
+			PutVarint(session->global.bytes, id);
+			PutVarint(session->global.bytes, name);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, file);
+			PutVarint(session->global.bytes, (uint64)site.line);
+			PutVarint(session->global.bytes, 0);
+		}
+		site.id = id;
+		atomic_store(&site.session, session->number, MemoryOrder::Release);
+		return id;
+	}
+
+	// The site of a zone named at run time: one per distinct name, kept by the session.
+	static uint64 NamedSiteId(Session* session, Core::StringView name) {
+		Threading::LockGuard held(session->lock);
+		uint64 id;
+		if (session->namedSites.TryGet(Core::String(name), id)) return id;
+		const uint64 text = session->Intern(name);
+		session->nextSite += 1;
+		id = session->nextSite;
+		{
+			Threading::LockGuard global(session->global.lock);
+			PutEvent(session->global.bytes, Event::SrcLocDef);
+			PutVarint(session->global.bytes, id);
+			PutVarint(session->global.bytes, text);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, 0);
+		}
+		session->namedSites.Insert(Core::String(name), id);
+		return id;
+	}
+
+	static uint64 Interned(Session* session, Core::StringView text) {
+		Threading::LockGuard held(session->lock);
+		return session->Intern(text);
+	}
+
+	static uint64 Once(Session* session, Core::StringView text) {
+		Threading::LockGuard held(session->lock);
+		return session->Once(text);
+	}
+
+	// A timed event of the calling thread with one varint field.
+	static void ThreadEvent(Session* session, Event type, uint64 field) {
+		EventBuffer* buffer = ThreadBuffer(session);
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(type, now);
+		PutVarint(buffer->bytes, field);
+	}
+
+	// An untimed event that describes the calling thread's innermost zone.
+	static void ZoneDetail(Session* session, Event type, uint64 field) {
+		EventBuffer* buffer = ThreadBuffer(session);
+		Threading::LockGuard held(buffer->lock);
+		PutEvent(buffer->bytes, type);
+		PutVarint(buffer->bytes, field);
+	}
+
+	// --- Zones ----------------------------------------------------------------------------------------------------
+
+	void Zone::Init(Site& site) {
+		Session* running = Running();
+		if (!running) return;
+		session = running->number;
+		ThreadEvent(running, Event::ZoneBegin, SiteId(running, site));
+	}
+
+	void Zone::Init(Core::StringView name) {
+		Session* running = Running();
+		if (!running) return;
+		session = running->number;
+		ThreadEvent(running, Event::ZoneBegin, NamedSiteId(running, name));
+	}
+
+	void Zone::Delete() {
+		if (session == 0) return;
+		Session* running = Running();
+		if (!running || running->number != session) return;
+		EventBuffer* buffer = ThreadBuffer(running);
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(Event::ZoneEnd, now);
+	}
+
+	void Zone::Text(Core::StringView text) {
+		Session* running = Running();
+		if (session == 0 || !running || running->number != session) return;
+		ZoneDetail(running, Event::ZoneText, Once(running, text));
+	}
+
+	void Zone::Value(uint64 value) {
+		Session* running = Running();
+		if (session == 0 || !running || running->number != session) return;
+		ZoneDetail(running, Event::ZoneValue, value);
+	}
+
+	// --- Frames, plots, messages, names ---------------------------------------------------------------------------
+
+	void Frame() {
+		Session* running = Running();
+		if (running) ThreadEvent(running, Event::FrameMark, 0);
+	}
+
+	void Frame(Core::StringView name) {
+		Session* running = Running();
+		if (running) ThreadEvent(running, Event::FrameMark, Interned(running, name));
+	}
+
+	void FrameBegin(Core::StringView name) {
+		Session* running = Running();
+		if (running) ThreadEvent(running, Event::FrameBegin, Interned(running, name));
+	}
+
+	void FrameEnd(Core::StringView name) {
+		Session* running = Running();
+		if (running) ThreadEvent(running, Event::FrameEnd, Interned(running, name));
+	}
+
+	// The id of the plot `name`, its PlotDef queued the first time.
+	static uint64 PlotId(Session* session, Core::StringView name) {
+		Threading::LockGuard held(session->lock);
+		uint64 id;
+		if (session->plots.TryGet(Core::String(name), id)) return id;
+		const uint64 text = session->Intern(name);
+		session->nextPlot += 1;
+		id = session->nextPlot;
+		session->plots.Insert(Core::String(name), id);
+		Threading::LockGuard global(session->global.lock);
+		PutEvent(session->global.bytes, Event::PlotDef);
+		PutVarint(session->global.bytes, id);
+		PutVarint(session->global.bytes, text);
+		PutVarint(session->global.bytes, 0);
+		PutVarint(session->global.bytes, 0);
+		return id;
+	}
+
+	void Plot(Core::StringView name, double value) {
+		Session* running = Running();
+		if (!running) return;
+		const uint64 id = PlotId(running, name);
+		EventBuffer* buffer = ThreadBuffer(running);
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(Event::PlotValue, now);
+		PutVarint(buffer->bytes, id);
+		PutDouble(buffer->bytes, value);
+	}
+
+	void Message(Core::StringView text, Severity severity) {
+		Session* running = Running();
+		if (!running) return;
+		const uint64 id = Once(running, text);
+		EventBuffer* buffer = ThreadBuffer(running);
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(Event::Message, now);
+		PutVarint(buffer->bytes, (uint64)severity);
+		PutVarint(buffer->bytes, id);
+		PutVarint(buffer->bytes, 0);
+	}
+
+	void SetThreadName(Core::StringView name) {
+		Session* running = Running();
+		if (running) ThreadEvent(running, Event::ThreadName, Interned(running, name));
+	}
+
+	// --- Tasks ----------------------------------------------------------------------------------------------------
+
+	uint64 TaskBegin(Core::StringView name, uint64 parent) {
+		Session* running = Running();
+		if (!running) return 0;
+		const uint64 text = Interned(running, name);
+		const uint64 id = atomic_fetch_add(&running->nextTask, 1, MemoryOrder::Relaxed) + 1;
+		EventBuffer* buffer = ThreadBuffer(running);
+		const int64 now = Now();
+		Threading::LockGuard held(buffer->lock);
+		buffer->Timed(Event::TaskBegin, now);
+		PutVarint(buffer->bytes, id);
+		PutVarint(buffer->bytes, text);
+		PutVarint(buffer->bytes, parent);
+		return id;
+	}
+
+	void TaskEnd(uint64 task) {
+		Session* running = Running();
+		if (running && task != 0) ThreadEvent(running, Event::TaskEnd, task);
+	}
+
+	void TaskSuspend(uint64 task) {
+		Session* running = Running();
+		if (running && task != 0) ThreadEvent(running, Event::TaskSuspend, task);
+	}
+
+	void TaskResume(uint64 task) {
+		Session* running = Running();
+		if (running && task != 0) ThreadEvent(running, Event::TaskResume, task);
+	}
+
+	void TaskScope::Init(Core::StringView name) { id = TaskBegin(name, 0); }
+	void TaskScope::Delete() { TaskEnd(id); }
+
+	// --- Memory ---------------------------------------------------------------------------------------------------
+
+	// An allocation event in the global buffer: allocations and frees from every thread stay in one order.
+	static void MemoryEvent(Session* session, Event type, uint32 pool, const void* address, int64 size) {
+		const uint64 thread = ThreadBuffer(session)->thread;
+		const int64 now = Now();
+		Threading::LockGuard held(session->global.lock);
+		session->global.Timed(type, now);
+		PutVarint(session->global.bytes, thread);
+		PutVarint(session->global.bytes, (uint64)pool);
+		PutVarint(session->global.bytes, (uint64)address);
+		if (type == Event::Alloc) {
+			PutVarint(session->global.bytes, (uint64)size);
+			PutVarint(session->global.bytes, 0);
+		}
+	}
+
+	void Alloc(const void* address, int64 size, uint32 pool) {
+		Session* running = Running();
+		if (running) MemoryEvent(running, Event::Alloc, pool, address, size);
+	}
+
+	void Free(const void* address, uint32 pool) {
+		Session* running = Running();
+		if (running) MemoryEvent(running, Event::Free, pool, address, 0);
+	}
+
+	void PoolName(uint32 pool, Core::StringView name) {
+		Session* running = Running();
+		if (!running) return;
+		const uint64 text = Interned(running, name);
+		Threading::LockGuard held(running->global.lock);
+		PutEvent(running->global.bytes, Event::PoolDef);
+		PutVarint(running->global.bytes, (uint64)pool);
+		PutVarint(running->global.bytes, text);
+	}
+
+	void PoolReset(uint32 pool) {
+		Session* running = Running();
+		if (!running) return;
+		const int64 now = Now();
+		Threading::LockGuard held(running->global.lock);
+		running->global.Timed(Event::PoolReset, now);
+		PutVarint(running->global.bytes, (uint64)pool);
+	}
+
+	// --- The session ----------------------------------------------------------------------------------------------
+
+	bool IsActive() { return Running() != null; }
+
+	bool Start(Core::StringView target, Core::String& problem) {
+		Running();
+		FS::Path program = Platform::ExecutablePath();
+		return StartSession(target, program.Stem(), problem);
+	}
+
+	void Stop() { StopSession(); }
+}
