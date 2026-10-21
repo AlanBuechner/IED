@@ -601,6 +601,41 @@ void Second(Drive d) {
 		TEST_PASSED();
 	}
 
+	void LspFeaturesTest::TestWorkspaceSymbolsFindsDeclarationsInNonMatchingNamespace()
+	{
+		const char* source =
+			"namespace Game\n"
+			"{\n"
+			"    namespace Physics\n"
+			"    {\n"
+			"        class Body { public int mass; }\n"
+			"        int Step(int dt) { return dt; }\n"
+			"    }\n"
+			"}\n"
+			"int main() { return 0; }\n";
+		auto session = Testing::Lsp::MakeSession("LspNamespaces.cf", source);
+
+		// BUG-302: a query that matches neither namespace still finds what is declared inside them.
+		auto symbols = WorkspaceSymbols::ForQuery(session, "bod");
+		bool foundBody = false;
+		for (const auto& symbol : symbols)
+			if (symbol.name == "Body" && symbol.kind == 5 /* Class */ && symbol.containerName == "Game :: Physics")
+				foundBody = true;
+		TEST_ASSERT(foundBody);
+
+		auto steps = WorkspaceSymbols::ForQuery(session, "step");
+		bool foundStep = false;
+		for (const auto& symbol : steps)
+			if (symbol.name == "Step" && symbol.kind == 12 /* Function */)
+				foundStep = true;
+		TEST_ASSERT(foundStep);
+
+		// A matching namespace is a symbol itself.
+		auto physics = WorkspaceSymbols::ForQuery(session, "phys");
+		TEST_ASSERT(physics.Count() == 1 && physics[0].name == "Physics" && physics[0].containerName == "Game");
+		TEST_PASSED();
+	}
+
 	void LspFeaturesTest::TestWorkspaceSymbolsEmptyQueryReturnsAllTopLevel()
 	{
 		auto session = Testing::Lsp::MakeSession("LspFixture.cf", kFixture);

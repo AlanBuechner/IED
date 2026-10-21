@@ -11,6 +11,7 @@
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include "Parser/Nodes/Statements/ForLoopNode.h"
+#include <algorithm>
 
 namespace C4LSP::Server
 {
@@ -532,5 +533,24 @@ namespace C4LSP::Server
 					out.push_back(info->declNode);
 		};
 		walk(m_Model.Symbols()->GetRoot());
+	}
+
+	void SemanticResolver::CollectFunctionDeclarations(const Scripting::AstNode* declaration, std::vector<const Scripting::AstNode*>& out) const
+	{
+		if (m_Model.IsValid() && declaration && declaration->Type() == Scripting::NodeType::FunctionDefinition)
+		{
+			Core::Vector<const Scripting::FunctionRecord*> records;
+			m_Model.AllFunctionRecords(records);
+			for (const Scripting::FunctionRecord* record : records)
+			{
+				if (std::find(record->declarations.begin(), record->declarations.end(), declaration) == record->declarations.end())
+					continue;
+				for (const Scripting::AstNode* node : record->declarations)
+					if (std::find(out.begin(), out.end(), node) == out.end())
+						out.push_back(node);
+			}
+		}
+		if (std::find(out.begin(), out.end(), declaration) == out.end())
+			out.push_back(declaration);
 	}
 } // namespace C4LSP::Server

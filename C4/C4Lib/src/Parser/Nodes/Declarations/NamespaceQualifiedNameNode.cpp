@@ -27,6 +27,11 @@ namespace Scripting
 		return m_Segments[0].nameToken;
 	}
 
+	const Token& NamespaceQualifiedNameNode::GetLastIdentifierToken() const
+	{
+		return m_Segments.Back().nameToken;
+	}
+
 	static Ref<AstNode> ParseTemplateArgument(ParserState& state)
 	{
 		Lexer& lexer = state.GetLexer();

@@ -40,7 +40,8 @@ namespace C4LSP::Server
 	{
 		auto position = ExtractPosition(params);
 		auto session = SnapshotForRequest();
-		auto locations = Features::References::At(*session, ExtractUri(params), position);
+		const bool includeDeclaration = params.Member("context").Member("includeDeclaration").GetBool(false);
+		auto locations = Features::References::At(*session, ExtractUri(params), position, includeDeclaration);
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 

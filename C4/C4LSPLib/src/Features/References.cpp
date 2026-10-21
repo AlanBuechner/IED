@@ -4,10 +4,11 @@
 #include "SourceManager/Source.h"
 #include "Features/Definition.h"
 #include "Features/ReferenceScanner.h"
+#include "Server/SemanticResolver.h"
 
 namespace C4LSP::Features
 {
-	Core::Vector<Protocol::Location> References::At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
+	Core::Vector<Protocol::Location> References::At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position, bool includeDeclaration)
 	{
 		uint32 sourceId = session.FindSourceIdByUri(uri);
 		if (sourceId == 0)
@@ -27,9 +28,17 @@ namespace C4LSP::Features
 			return {};
 
 		Core::Vector<Protocol::Location> result;
-		for (const Scripting::AstNode* ref : ReferenceScanner::FindOccurrences(session, sourceId, targetDecl))
+		if (includeDeclaration)
 		{
-			result.Push(session.ToEditorLocation(ref->startLocation, ref->endLocation));
+			std::vector<const Scripting::AstNode*> declarations;
+			session.GetResolver().CollectFunctionDeclarations(targetDecl, declarations);
+			for (const Scripting::AstNode* declaration : declarations)
+				result.Push(Definition::LocationForDeclaration(session, *declaration));
+		}
+		for (const Scripting::AstNode* ref : ReferenceScanner::FindEverywhere(session, targetDecl))
+		{
+			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
+			result.Push(session.ToEditorLocation(name.start, name.end));
 		}
 		return result;
 	}

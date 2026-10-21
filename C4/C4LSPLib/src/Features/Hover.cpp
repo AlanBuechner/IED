@@ -90,7 +90,7 @@ namespace C4LSP::Features
 			std::string text = "function ";
 			if (const auto* ret = func.GetReturnType().Get())
 				text += ret->ToString() + " ";
-			text += func.GetName()->GetFirstIdentifierToken().GetText() + "(";
+			text += func.GetName()->GetLastIdentifierToken().GetText() + "(";
 			const auto& params = func.GetParameters();
 			for (uint32 i = 0; i < params.Count(); ++i)
 			{

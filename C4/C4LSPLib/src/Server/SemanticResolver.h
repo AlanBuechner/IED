@@ -66,6 +66,10 @@ namespace C4LSP::Server
 		/// Every declaration node whose simple name matches, project-wide (by-name navigation fallback).
 		void CollectDeclarationsByName(const std::string& simpleName, std::vector<const Scripting::AstNode*>& out) const;
 
+		/// Every node that declares or defines the same function as `declaration` (its declaration in a type or a
+		/// header and its out-of-line definition), in source order; just `declaration` for anything else.
+		void CollectFunctionDeclarations(const Scripting::AstNode* declaration, std::vector<const Scripting::AstNode*>& out) const;
+
 	private:
 		struct Ctx { const Scripting::ObjectType* enclosingType = nullptr; const Scripting::Scope* scope = nullptr; uint32 unitId = 0; };
 		Ctx ContextFor(const Core::Vector<const Scripting::AstNode*>& path) const;

@@ -4,6 +4,7 @@
 #include "SourceManager/Source.h"
 #include "Features/Definition.h"
 #include "Features/ReferenceScanner.h"
+#include "Server/SemanticResolver.h"
 
 namespace C4LSP::Features
 {
@@ -32,11 +33,15 @@ namespace C4LSP::Features
 		// already resolves exactly that name-token location (function qualified-name identifier;
 		// GetNameToken() for variable/object/enum definitions). When the symbol is declared in another
 		// file its Write highlight belongs to THAT document and is skipped here.
-		const Protocol::Location declaredName = Definition::LocationForDeclaration(session, *targetDecl);
-
+		// A function's declaration and its out-of-line definition are each a declaration site.
 		Core::Vector<Protocol::DocumentHighlight> result;
-		if (declaredName.uri == uri)
+		std::vector<const Scripting::AstNode*> declarations;
+		session.GetResolver().CollectFunctionDeclarations(targetDecl, declarations);
+		for (const Scripting::AstNode* declaration : declarations)
 		{
+			const Protocol::Location declaredName = Definition::LocationForDeclaration(session, *declaration);
+			if (declaredName.uri != uri)
+				continue;
 			Protocol::DocumentHighlight declarationSite;
 			declarationSite.range = declaredName.range; // same unit: already editor coords
 			declarationSite.kind = Protocol::HighlightKind::Write;
@@ -46,7 +51,8 @@ namespace C4LSP::Features
 		for (const Scripting::AstNode* ref : ReferenceScanner::FindOccurrences(session, sourceId, targetDecl))
 		{
 			Protocol::DocumentHighlight highlight;
-			highlight.range = session.ToEditorRange(ref->startLocation.sourceId, ref->startLocation, ref->endLocation);
+			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
+			highlight.range = session.ToEditorRange(ref->startLocation.sourceId, name.start, name.end);
 			highlight.kind = Protocol::HighlightKind::Read; // uses only - the declaration was handled above
 			result.Push(highlight);
 		}

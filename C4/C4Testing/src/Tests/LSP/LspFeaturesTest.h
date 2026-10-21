@@ -106,5 +106,8 @@ namespace Testing
 
 	TEST_FUNC(Lsp.Features.WorkspaceSymbols)
 	void TestWorkspaceSymbolsEmptyQueryReturnsAllTopLevel();
+
+	TEST_FUNC(Lsp.Features.WorkspaceSymbols)
+	void TestWorkspaceSymbolsFindsDeclarationsInNonMatchingNamespace();
 	};
 } // namespace Testing

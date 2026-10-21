@@ -70,11 +70,12 @@ namespace C4LSP::Features
 		}
 		case Scripting::NodeType::FunctionDefinition: {
 			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(node);
-			std::string name = func.GetName() ? func.GetName()->GetFirstIdentifierToken().GetText() : "";
+			std::string name = func.GetName() ? func.GetName()->GetLastIdentifierToken().GetText() : "";
 			if (name.empty())
 				return;
+			const auto& nameToken = func.GetName()->GetLastIdentifierToken();
 			DocumentSymbol symbol = MakeSymbol(session, node, name, BuildFunctionDetail(func), Sym::Function,
-				func.GetName()->startLocation, func.GetName()->endLocation);
+				nameToken.GetStartLocation(), nameToken.GetEndLocation());
 			out.Push(symbol);
 			break;
 		}

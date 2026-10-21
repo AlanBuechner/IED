@@ -54,6 +54,8 @@ namespace Scripting
 		const Core::Vector<Segment>& GetSegments() const { return m_Segments; }
 		uint32 SegmentCount() const { return m_Segments.Count(); }
 		const Token& GetFirstIdentifierToken() const;
+		/// The name the qualified name declares or names: `Next` of `Counter::Next`.
+		const Token& GetLastIdentifierToken() const;
 
 		static Ref<NamespaceQualifiedNameNode> TryParse(ParserState& state);
 		void ParseBody(ParserState& state);

@@ -2,7 +2,6 @@
 #include "Core/Core.h"
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
-#include <set>
 
 namespace Scripting { class AstNode; class ProgramModel; struct SourceLocation; }
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
@@ -48,11 +47,7 @@ namespace C4LSP::Features
 		struct NameSpan { bool valid = false; Scripting::SourceLocation start, end; };
 
 		static const Scripting::AstNode* DeclarationUnderCursor(const Server::LocatedNode& located, size_t offset);
-		static void CollectReferences(const Scripting::AstNode& node, uint32 sourceId, const Server::SemanticResolver& resolver,
-			const Core::Vector<const Scripting::AstNode*>& path, const Scripting::AstNode* targetDecl, std::set<const Scripting::AstNode*>& out);
 		static NameSpan DeclarationNameSpan(const Scripting::AstNode& decl);
-		static NameSpan ReferenceNameSpan(const Scripting::AstNode& node);
-		static bool IsReferenceNode(const Scripting::AstNode& node);
 		static RenameOccurrence MakeOccurrence(Server::CompilationSession& session, uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end);
 	};
 } // namespace C4LSP::Features

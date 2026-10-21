@@ -95,13 +95,12 @@ namespace C4LSP::Features
 		{
 		case Scripting::NodeType::Namespace: {
 			const auto& ns = static_cast<const Scripting::NamespaceNode&>(node);
-			if (ns.IsRoot() || !Detail::Matches(ns.Name(), query))
-				break;
-			PushMatched(out, session, ns.Name(), Sym::Namespace, ns.GetNameToken().GetStartLocation(), ns.GetNameToken().GetEndLocation(), container);
+			if (!ns.IsRoot() && Detail::Matches(ns.Name(), query))
+				PushMatched(out, session, ns.Name(), Sym::Namespace, ns.GetNameToken().GetStartLocation(), ns.GetNameToken().GetEndLocation(), container);
 
 			// Keep descending even when the namespace itself did not match: a query like "Player"
 			// must still find Player inside an unrelated namespace.
-			const std::string inner = Detail::JoinContainer(container, ns.Name());
+			const std::string inner = ns.IsRoot() ? container : Detail::JoinContainer(container, ns.Name());
 			if (out.Count() < kMaxResults)
 				CollectChildrenFlat(session, node, sourceId, inner, query, out);
 			break;
@@ -140,11 +139,16 @@ namespace C4LSP::Features
 			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(node);
 			if (!func.GetName())
 				break;
-			std::string name = func.GetName()->GetFirstIdentifierToken().GetText();
+			const auto& token = func.GetName()->GetLastIdentifierToken();
+			std::string name = token.GetText();
 			if (name.empty() || !Detail::Matches(name, query))
 				break;
-			const auto& token = func.GetName()->GetFirstIdentifierToken();
-			PushMatched(out, session, name, Sym::Function, token.GetStartLocation(), token.GetEndLocation(), container);
+			// An out-of-line definition (`Counter::Next`) belongs to the type that qualifies it.
+			std::string owner = container;
+			const auto& segments = func.GetName()->GetSegments();
+			for (uint32 i = 0; i + 1 < segments.Count(); ++i)
+				owner = Detail::JoinContainer(owner, segments[i].nameToken.GetText());
+			PushMatched(out, session, name, Sym::Function, token.GetStartLocation(), token.GetEndLocation(), owner);
 			break;
 		}
 

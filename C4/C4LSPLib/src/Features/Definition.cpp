@@ -198,8 +198,18 @@ namespace C4LSP::Features
 	Core::Vector<Protocol::Location> Definition::ResolveReference(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located)
 	{
 		if (const Scripting::AstNode* declaration = FindTargetDeclaration(session, sourceId, located))
-			return { LocationForDeclaration(session, *declaration) };
+			return { LocationForDeclaration(session, *WithBody(session, declaration)) };
 		return {};
+	}
+
+	const Scripting::AstNode* Definition::WithBody(Server::CompilationSession& session, const Scripting::AstNode* declaration)
+	{
+		std::vector<const Scripting::AstNode*> declarations;
+		session.GetResolver().CollectFunctionDeclarations(declaration, declarations);
+		for (const Scripting::AstNode* node : declarations)
+			if (node->Type() == Scripting::NodeType::FunctionDefinition && static_cast<const Scripting::FunctionDefinitionNode&>(*node).IsDefinition())
+				return node;
+		return declaration;
 	}
 
 	Protocol::Location Definition::LocationForDeclaration(Server::CompilationSession& session, const Scripting::AstNode& declaration)
@@ -213,7 +223,7 @@ namespace C4LSP::Features
 			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(declaration);
 			if (func.GetName())
 			{
-				const auto& nameToken = func.GetName()->GetFirstIdentifierToken();
+				const auto& nameToken = func.GetName()->GetLastIdentifierToken();
 				start = &nameToken.GetStartLocation();
 				end = &nameToken.GetEndLocation();
 			}
