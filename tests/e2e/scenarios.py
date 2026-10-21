@@ -662,6 +662,81 @@ def build_from_the_toolbar(run):
 	page.wait_for_selector(".tab.active:has-text('Error List'), .dock-tab.active:has-text('Error List'), [role='tab'][aria-selected='true']:has-text('Error List')", timeout=10000)
 
 
+EDITOR = "ied_shell.views.entries.get('doc:src/main.c').instance.editor"
+
+
+def current_line(page):
+	"""The 1-based line the current-statement decoration is on, or None."""
+	return page.evaluate("(() => { const e = " + EDITOR + "; const d = e.getModel().getAllDecorations().find((d) => d.options.className === 'dbg-current-line'); return d ? d.range.startLineNumber : null; })()")
+
+
+@scenario(viewports=("desktop",), targets=("mock",))
+def debug_a_program(run):
+	"""F9 sets a breakpoint, F5 starts the startup project's configuration and stops there - the current statement shown
+	in the editor, the Call Stack and Locals filled, the status bar in the debugging color - F10 steps, another window
+	shows the same stop, and Shift+F5 ends the session (docs/25)."""
+	page = run.open()
+	open_main_c(run, page)
+	page.evaluate(EDITOR + ".setPosition({ lineNumber: 6, column: 2 })")
+	page.evaluate(EDITOR + ".focus()")
+	page.keyboard.press("F9")
+	page.wait_for_selector(".monaco-editor .bp-glyph.bp-set")
+	page.wait_for_selector(".toolbar button[aria-label='Start Debugging']")
+	page.keyboard.press("F5")
+	page.wait_for_function("(() => { const e = " + EDITOR + "; return e.getModel().getAllDecorations().some((d) => d.options.className === 'dbg-current-line'); })()", timeout=10000)
+	check(current_line(page) == 6, "stopped at the breakpoint: line %s" % current_line(page))
+	page.wait_for_selector(".statusbar[data-state='debugging']")
+	page.wait_for_selector(".toolbar button[aria-label='Step Over (F10)']:not([disabled])")
+	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.callStack' })")
+	run.wait_text(".cs-row", "main.c, line 6")
+	check(len(page.query_selector_all(".cs-row")) == 2, "two frames")
+	run.shot("stopped")
+	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.locals' })")
+	run.wait_text(".tree-row", "renderer")
+	page.click(".tree-row:has-text('player') .tw")
+	page.wait_for_function("[...document.querySelectorAll('.tree-row .lv-name')].some((e) => e.textContent === 'position')", timeout=10000)
+	run.shot("locals")
+	page.evaluate(EDITOR + ".focus()")
+	page.keyboard.press("F10")
+	page.wait_for_function("(() => { const e = " + EDITOR + "; const d = e.getModel().getAllDecorations().find((d) => d.options.className === 'dbg-current-line'); return d && d.range.startLineNumber === 7; })()", timeout=10000)
+	other = run.open(fresh=False)
+	open_main_c(run, other)
+	other.wait_for_function("(() => { const e = " + EDITOR + "; const d = e.getModel().getAllDecorations().find((d) => d.options.className === 'dbg-current-line'); return d && d.range.startLineNumber === 7; })()", timeout=10000)
+	run.page = page
+	page.bring_to_front()
+	page.evaluate(EDITOR + ".focus()")
+	page.keyboard.press("Shift+F5")
+	page.wait_for_selector(".statusbar[data-state='debugging']", state="detached", timeout=10000)
+	check(current_line(page) is None, "the current statement is gone with the session")
+	page.evaluate(EDITOR + ".setPosition({ lineNumber: 6, column: 2 })")
+	page.keyboard.press("F9")
+	page.wait_for_selector(".monaco-editor .bp-glyph", state="detached")
+
+
+@scenario(viewports=("phone",), targets=("mock",))
+def debug_on_a_phone(run):
+	"""On a phone the run controls are in the toolbar strip: Start Debugging stops at the breakpoint with the statement
+	shown in the editor, Step Over moves it, the Call Stack is a pane, and Stop ends the session."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": [{"line": 5}]})
+	page.evaluate("ied_shell.commands.run('ied.editor.goTo', { path: 'src/main.c', line: 5 })")
+	page.wait_for_selector(".monaco-editor .bp-glyph.bp-set", timeout=20000)
+	page.tap(".phone-toolbar button[aria-label='Start Debugging']")
+	page.wait_for_selector(".phone-toolbar[data-state='debugging']")
+	page.wait_for_function("(() => { const e = " + EDITOR + "; const d = e.getModel().getAllDecorations().find((d) => d.options.className === 'dbg-current-line'); return d && d.range.startLineNumber === 6; })()", timeout=10000)
+	page.wait_for_selector(".phone-toolbar button[aria-label='Step Over (F10)']:not([disabled])")
+	run.shot("stopped")
+	page.tap(".phone-toolbar button[aria-label='Step Over (F10)']")
+	page.wait_for_function("(() => { const e = " + EDITOR + "; const d = e.getModel().getAllDecorations().find((d) => d.options.className === 'dbg-current-line'); return d && d.range.startLineNumber === 7; })()", timeout=10000)
+	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.callStack' })")
+	run.wait_text(".cs-row", "main.c, line 7")
+	run.shot("call-stack")
+	page.tap(".phone-toolbar button[aria-label='Stop Debugging (Shift+F5)']")
+	page.wait_for_selector(".phone-toolbar[data-state='debugging']", state="detached", timeout=10000)
+	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": []})
+
+
 @scenario(viewports=("phone",), targets=("mock",))
 def build_from_the_phone_strip(run):
 	"""On a phone the toolbar views sit in a strip above the bottom nav (docs/15 "Phone"), colored like the status bar:

@@ -19,14 +19,17 @@
 			{ "id": "ied.explorer", "title": "Solution Explorer", "icon": "$(list-tree)", "view": "SolutionExplorer", "defaultDock": "left" },
 			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "bottom" },
 			{ "id": "ied.errors", "title": "Error List", "icon": "$(error)", "view": "ErrorList", "defaultDock": "bottom" },
-			{ "id": "ied.find", "title": "Find in Files", "icon": "$(search)", "view": "FindInFiles", "defaultDock": "bottom" }
+			{ "id": "ied.find", "title": "Find in Files", "icon": "$(search)", "view": "FindInFiles", "defaultDock": "bottom" },
+			{ "id": "ied.callStack", "title": "Call Stack", "icon": "$(debug-stackframe)", "view": "CallStack", "defaultDock": "bottom" },
+			{ "id": "ied.locals", "title": "Locals", "icon": "$(symbol-variable)", "view": "Locals", "defaultDock": "bottom" }
 		],
 		"statusBarItems": [
 			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" },
 			{ "id": "ied.tasks.status", "alignment": "left", "priority": 50, "view": "TaskStatus", "command": "ied.task.showResult" }
 		],
 		"toolbarItems": [
-			{ "id": "ied.tasks.toolbar", "view": "TaskToolbar", "priority": 100 }
+			{ "id": "ied.tasks.toolbar", "view": "TaskToolbar", "priority": 100 },
+			{ "id": "ied.debug.toolbar", "view": "DebugToolbar", "priority": 90 }
 		],
 		"commands": [
 			{ "id": "ied.explorer.open", "title": "Open", "category": "Solution Explorer", "icon": "$(go-to-file)" },
@@ -51,7 +54,14 @@
 			{ "id": "ied.task.rebuild", "title": "Rebuild", "category": "Build" },
 			{ "id": "ied.task.clean", "title": "Clean", "category": "Build" },
 			{ "id": "ied.task.cancel", "title": "Cancel", "category": "Build", "icon": "$(debug-stop)" },
-			{ "id": "ied.task.debug", "title": "Start Debugging", "category": "Debug", "icon": "$(debug-start)" },
+			{ "id": "ied.debug.start", "title": "Start Debugging / Continue", "category": "Debug", "icon": "$(debug-start)" },
+			{ "id": "ied.debug.stop", "title": "Stop Debugging", "category": "Debug", "icon": "$(debug-stop)", "enablement": "debugState" },
+			{ "id": "ied.debug.restart", "title": "Restart", "category": "Debug", "icon": "$(debug-restart)", "enablement": "debugState" },
+			{ "id": "ied.debug.pause", "title": "Break All", "category": "Debug", "icon": "$(debug-pause)", "enablement": "debugState == 'running'" },
+			{ "id": "ied.debug.stepOver", "title": "Step Over", "category": "Debug", "icon": "$(debug-step-over)", "enablement": "debugState == 'stopped'" },
+			{ "id": "ied.debug.stepInto", "title": "Step Into", "category": "Debug", "icon": "$(debug-step-into)", "enablement": "debugState == 'stopped'" },
+			{ "id": "ied.debug.stepOut", "title": "Step Out", "category": "Debug", "icon": "$(debug-step-out)", "enablement": "debugState == 'stopped'" },
+			{ "id": "ied.debug.toggleBreakpoint", "title": "Toggle Breakpoint", "category": "Debug", "enablement": "activeTabKind == 'doc'" },
 			{ "id": "ied.task.start", "title": "Start Without Debugging", "category": "Debug", "icon": "$(run)" },
 			{ "id": "ied.task.test", "title": "Run All Tests", "category": "Test", "icon": "$(beaker)" },
 			{ "id": "ied.task.setStartup", "title": "Set as Startup Project", "category": "Project" },
@@ -71,8 +81,15 @@
 				{ "command": "ied.task.cancel", "group": "2_cancel" }
 			],
 			"menubar/debug": [
-				{ "command": "ied.task.debug", "group": "1_start" },
-				{ "command": "ied.task.start", "group": "1_start", "order": 1 }
+				{ "command": "ied.debug.start", "group": "1_start" },
+				{ "command": "ied.task.start", "group": "1_start", "order": 1 },
+				{ "command": "ied.debug.pause", "group": "2_run" },
+				{ "command": "ied.debug.stop", "group": "2_run", "order": 1 },
+				{ "command": "ied.debug.restart", "group": "2_run", "order": 2 },
+				{ "command": "ied.debug.stepOver", "group": "3_step" },
+				{ "command": "ied.debug.stepInto", "group": "3_step", "order": 1 },
+				{ "command": "ied.debug.stepOut", "group": "3_step", "order": 2 },
+				{ "command": "ied.debug.toggleBreakpoint", "group": "4_breakpoints" }
 			],
 			"menubar/test": [
 				{ "command": "ied.task.test", "group": "1_run" }
@@ -119,7 +136,14 @@
 			{ "command": "ied.editor.saveAll", "key": "ctrl+shift+s" },
 			{ "command": "ied.find.inFiles", "key": "ctrl+shift+f" },
 			{ "command": "ied.task.build", "key": "ctrl+shift+b" },
-			{ "command": "ied.task.debug", "key": "f5" },
+			{ "command": "ied.debug.start", "key": "f5" },
+			{ "command": "ied.debug.stop", "key": "shift+f5", "when": "debugState" },
+			{ "command": "ied.debug.restart", "key": "ctrl+shift+f5", "when": "debugState" },
+			{ "command": "ied.debug.pause", "key": "ctrl+alt+break", "when": "debugState == 'running'" },
+			{ "command": "ied.debug.stepOver", "key": "f10", "when": "debugState == 'stopped'" },
+			{ "command": "ied.debug.stepInto", "key": "f11", "when": "debugState == 'stopped'" },
+			{ "command": "ied.debug.stepOut", "key": "shift+f11", "when": "debugState == 'stopped'" },
+			{ "command": "ied.debug.toggleBreakpoint", "key": "f9", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.task.start", "key": "ctrl+f5" },
 			{ "command": "ied.task.cancel", "key": "ctrl+break" },
 			{ "command": "ied.editor.goToAll", "key": "ctrl+t" },

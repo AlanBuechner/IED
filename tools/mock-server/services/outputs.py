@@ -3,7 +3,7 @@ numeric severities, by path and source, as docs/24 has them)."""
 
 from rpc import RpcError
 
-SOURCES = {"build": "Build", "test": "Tests", "run": "Run", "ied": "IED"}
+SOURCES = {"build": "Build", "run": "Run", "test": "Tests", "debug": "Debug", "ied": "IED"}
 TAIL_CHARS = 256 * 1024
 
 

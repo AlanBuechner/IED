@@ -69,6 +69,10 @@ Exception filters (F-DBG-14) are per workspace and adapter type, in `.ied/local/
 - `bp:<wsId>`: snapshot `{files: [{path, breakpoints}], bound: [{sessionId, path, breakpoints: [{line, verified, boundLine, message?}]}]}`; events `bp.changed` (a file's breakpoints), `bp.bound` (a session's binding of a file), `bp.unbound` (`{sessionId}`, the session ended). `bp.set` answers the file's breakpoints; `bp.list {wsId}` the snapshot.
 - Not yet: breakpoints following edits, choosing exception filters (Exception Settings), `runInTerminal` and `startDebugging` (refused, so an adapter does without), TCP adapters, and the adapter's templates for a project without configurations.
 
+## The client as built (M3)
+
+`plugins/editor/ui/debug.js` (`DebugState` follows `dbg:<wsId>` and the current session's topic - the newest live session, else the newest; `BreakpointState` follows `bp:<wsId>`), `breakpointmargin.js` (each editor's glyph margin, attached through `Editors.attach`), `debugviews.js` (Call Stack, Locals) and the commands, keys and menus in the editor plugin's manifest (`docs/15` "Debugging"). The context key `debugState` (`running`, `stopped`, unset) enables the run controls. The `c4` plugin contributes the `c4` adapter (C4DAP) and the `c4.nuke` preset's `Launch` configuration: the program Nuke builds for the selected configuration and platform, with `build` as its pre-launch task. Checked live on a Nuke workspace: a breakpoint, F5 building and stopping there, Locals with C4's types, F10, Shift+F5. Not yet: Watch, Breakpoints and Exception Settings windows, editing a breakpoint's condition, hover evaluation, breakpoints in files outside the workspace.
+
 ## What the host does not do
 
 It never interprets a debugger's data beyond paths and positions: values, types and expressions are the adapter's. It does not build: the pre-launch task is the task system's, which invokes the build system (`docs/06`). It does not decide where a program's console goes: an adapter asks for `runInTerminal` when it wants one.

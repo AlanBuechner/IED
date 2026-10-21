@@ -51,7 +51,7 @@ Selections are per machine, in `.ied/local/selections.json`: the startup project
 
 | Method | Params | Result |
 |---|---|---|
-| `task.list` | `wsId, project?` (the startup project) | `{project, startupProject, projects, variables: [{key, kind, label, values, value, scope}], tasks: [{key, label, icon, tooltip, slot}], toolbar, problems}`; `projects` are those that offer tasks |
+| `task.list` | `wsId, project?` (the startup project) | `{project, startupProject, projects, variables: [{key, kind, label, values, value, scope}], tasks: [{key, label, icon, tooltip, slot}], toolbar, debug: {default, configurations: [name]}, problems}`; `projects` are those that offer tasks; `debug` names the debug configurations (`docs/25`) |
 | `task.select` | `wsId, project?, key, value` | the new `task.list`; a value a dropdown does not offer is `bad_request` |
 | `task.setStartup` | `wsId, project` | the new `task.list` |
 | `task.run` | `wsId, project?, task` or `slot`, `context?` (`{file, line, selection, testFilter}` for the variables of that name) | `{runId, topic, output}` at once (`output`: the output source its first step writes); `not_found` for no such task or no task in that slot |

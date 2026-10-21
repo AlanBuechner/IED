@@ -68,9 +68,7 @@ export class TaskState {
 		return () => this.listeners.delete(fn);
 	}
 
-	// The status bar's color (and the phone's toolbar strip's) follows the runs: building, then failed or idle.
 	changed() {
-		this.ied.context.set("statusState", this.runs.size ? "building" : this.ended && this.ended.status === "failed" ? "failed" : "idle");
 		for (const fn of [...this.listeners]) fn(this);
 	}
 

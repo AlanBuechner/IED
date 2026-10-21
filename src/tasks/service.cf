@@ -138,6 +138,18 @@ namespace Ied
 		json.EndArray();
 	}
 
+	// {default, configurations: [name]}: what F5 and the toolbar's Start Debugging start (docs/25).
+	static void WriteDebug(JsonWriter& json, const OfferedTasks* offered) {
+		Core::Array<Core::String> names;
+		for (DebugConfig* config : offered->debugConfigs) names.Push(config->name);
+		DebugConfig* chosen = offered->Debug(Core::StringView(""));
+		json.Key(Core::StringView("debug"));
+		json.BeginObject();
+		json.Field("default", chosen ? chosen->name.View() : Core::StringView(""));
+		WriteStrings(json, "configurations", names);
+		json.EndObject();
+	}
+
 	Core::String Tasks::ListJson(Workspace* ws, Core::StringView projectName) {
 		Core::String startup = StartupProject(ws);
 		TaskProject* project = ProjectNamed(ws, projectName.IsEmpty() ? startup.View() : projectName);
@@ -178,6 +190,7 @@ namespace Ied
 		}
 		json.EndArray();
 		WriteStrings(json, "toolbar", offered->toolbar);
+		WriteDebug(json, offered);
 		WriteStrings(json, "problems", offered->problems);
 		json.EndObject();
 		return json.ToString();

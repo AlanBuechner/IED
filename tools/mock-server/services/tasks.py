@@ -56,7 +56,8 @@ class Tasks:
 		for variable in variables:
 			del variable["default"]
 		tasks = [{"key": k, "label": t["label"], "icon": t["icon"], "tooltip": "", "slot": t["slot"] or ""} for k, t in task_output.TASKS.items()]
-		return {"project": PROJECT, "startupProject": PROJECT, "projects": [PROJECT], "variables": variables, "tasks": tasks, "toolbar": task_output.TOOLBAR, "problems": []}
+		return {"project": PROJECT, "startupProject": PROJECT, "projects": [PROJECT], "variables": variables, "tasks": tasks, "toolbar": task_output.TOOLBAR,
+			"debug": {"default": "Launch", "configurations": ["Launch"]}, "problems": []}
 
 	def last_ended(self, ws_id):
 		ended = [r for r in self.runs.values() if r.ws_id == ws_id and r.status != "running"]

@@ -1,6 +1,7 @@
 // The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar, C4LSP - one server per
-// project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project) - and
-// the c4.nuke task preset with the c4 and c4-test problem matchers (IED docs/06). Ships in every toolchain as
+// project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project) - C4DAP,
+// and the c4.nuke task preset (with its Launch configuration) and the c4 and c4-test problem matchers (IED docs/06,
+// docs/25). Ships in every toolchain as
 // <toolchain>/ied/ (MakeToolchain.py); a solution names it in its localPlugins.
 {
 	"manifestVersion": 1,
@@ -11,7 +12,7 @@
 	"publisher": "C4",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "declarative" },
-	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
 	"contributes": {
 		"languages": [
 			{
@@ -60,7 +61,24 @@
 					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [{ "run": "\"${setting:c4.nuke.command}\" run ${config} ${projectName} -a ${arch}", "problemMatcher": "c4", "output": "run" }] },
 					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [{ "run": "\"${setting:c4.nuke.command}\" test ${config} ${projectName} -a ${arch}", "problemMatcher": ["c4", "c4-test"], "output": "test" }] }
 				},
-				"toolbar": ["config", "arch", "|", "run", "build", "test"]
+				"toolbar": ["config", "arch", "|", "run", "build", "test"],
+				"debug": {
+					"default": "Launch",
+					"configurations": {
+						"Launch": { "type": "c4", "request": "launch", "program": "${workspaceDir}/build/bin/${config}-windows-${arch}/${projectName}/${projectName}.exe", "cwd": "${projectRoot}", "stopOnEntry": false, "preLaunchTask": "build" }
+					}
+				}
+			}
+		],
+		"dapProviders": [
+			{
+				"type": "c4",
+				"label": "C4",
+				"command": "${pluginDir}/../tools/C4DAP/C4DAP.exe",
+				"env": { "C4_HOME": "${pluginDir}/.." },
+				"launchMode": "staged",
+				"languages": ["c4"],
+				"when": "workspaceTrusted"
 			}
 		],
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C4" },

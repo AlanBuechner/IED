@@ -164,6 +164,8 @@ class DebuggerTests(ServerTestCase):
 		self.assertIn("pre-launch task broken failed", failed["problem"])
 
 	async def test_refusals(self):
+		offer = await self.client.request("task.list", {"wsId": "w1"})
+		self.assertEqual(("Launch", ["Launch", "Entry", "Built", "Broken", "Refused", "Unknown"]), (offer["debug"]["default"], offer["debug"]["configurations"]), "the offer names them")
 		with self.assertRaises(RpcFailure) as unknown:
 			await self.client.request("dbg.start", {"wsId": "w1", "configuration": "Unknown"})
 		self.assertEqual("not_found", unknown.exception.code)

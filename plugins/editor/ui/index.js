@@ -19,6 +19,9 @@ import { showGoToAll } from "./gotoall.js";
 import { fileName } from "./fileuris.js";
 import { MarkdownPreview as MarkdownPreviewView } from "./mdpreview.js";
 import { TaskState, TaskToolbar as TaskToolbarView, TaskStatus as TaskStatusView } from "./tasks.js";
+import { DebugState, BreakpointState, DebugToolbar as DebugToolbarView, framePath } from "./debug.js";
+import { BreakpointMargin } from "./breakpointmargin.js";
+import { CallStack as CallStackView, Locals as LocalsView } from "./debugviews.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -28,6 +31,8 @@ const editors = new Editors();
 let diagnostics = null;
 let features = null;
 let tasks = null;
+let debug = null;
+let breakpoints = null;
 
 function last(set) {
 	return [...set].pop() || null;
@@ -37,6 +42,18 @@ export function activate(ied) {
 	addStylesheet(ied.plugin.base + "ui/editor.css");
 	diagnostics = new Diagnostics(ied);
 	tasks = new TaskState(ied);
+	debug = new DebugState(ied);
+	breakpoints = new BreakpointState(ied);
+	debug.onStop = (frame) => goTo(ied, { path: framePath(frame), line: frame.line, col: frame.column });
+	const status = () => ied.context.set("statusState", statusState(tasks, debug));
+	tasks.on(status);
+	debug.on(status);
+	editors.attach((editor) => {
+		breakpoints.follow(editor.ctx.wsId);
+		debug.follow(editor.ctx.wsId);
+		const margin = new BreakpointMargin(editor, editor.monaco, breakpoints, debug);
+		return () => margin.dispose();
+	});
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => fileIconSpec(fileName(path)), resource: (path) => path });
 	ied.tabs.kind("mdpreview", { view: "MarkdownPreview", title: (path) => "Preview " + fileName(path), icon: () => "$(open-preview)", resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
@@ -65,7 +82,14 @@ export function activate(ied) {
 	ied.commands.handle("ied.task.build", () => tasks.run({ slot: "build" }));
 	ied.commands.handle("ied.task.rebuild", () => tasks.run({ slot: "rebuild" }));
 	ied.commands.handle("ied.task.clean", () => tasks.run({ slot: "clean" }));
-	ied.commands.handle("ied.task.debug", () => tasks.run({ slot: "debug" }));
+	ied.commands.handle("ied.debug.start", () => debug.start());
+	ied.commands.handle("ied.debug.stop", () => debug.stop());
+	ied.commands.handle("ied.debug.restart", () => debug.restart());
+	ied.commands.handle("ied.debug.pause", () => debug.control("pause"));
+	ied.commands.handle("ied.debug.stepOver", () => debug.control("next"));
+	ied.commands.handle("ied.debug.stepInto", () => debug.control("stepIn"));
+	ied.commands.handle("ied.debug.stepOut", () => debug.control("stepOut"));
+	ied.commands.handle("ied.debug.toggleBreakpoint", () => toggleBreakpoint());
 	ied.commands.handle("ied.task.start", () => tasks.run({ slot: "run" }));
 	ied.commands.handle("ied.task.test", () => tasks.run({ slot: "test" }));
 	ied.commands.handle("ied.task.cancel", () => tasks.cancelAll());
@@ -82,6 +106,21 @@ export function activate(ied) {
 	ied.commands.handle("ied.editor.action", (args) => runEditorAction(ied, args));
 	ied.commands.handle("ied.navigate.back", () => goTo(ied, editors.navigation.back()));
 	ied.commands.handle("ied.navigate.forward", () => goTo(ied, editors.navigation.forward()));
+}
+
+// The status bar's color (docs/15): blue while a task runs, the debugging color while a session lives, red after a
+// failed run, else plain.
+function statusState(tasks, debug) {
+	if (tasks.runs.size) return "building";
+	if (debug.live()) return "debugging";
+	return tasks.ended && tasks.ended.status === "failed" ? "failed" : "idle";
+}
+
+// F9: a breakpoint on the current editor's line comes or goes.
+function toggleBreakpoint() {
+	const editor = editors.last();
+	const at = editor ? editor.position() : null;
+	if (at && !/^[a-z]+:/i.test(editor.path)) breakpoints.toggle(editor.path, at.line - 1);
 }
 
 function currentEditor(ied) {
@@ -163,6 +202,18 @@ export function TaskToolbar(ctx) {
 
 export function TaskStatus(ctx) {
 	return TaskStatusView(ctx, tasks);
+}
+
+export function DebugToolbar(ctx) {
+	return DebugToolbarView(ctx, debug, tasks);
+}
+
+export function CallStack(ctx) {
+	return new CallStackView(ctx, debug, (target) => goTo(ctx.ied, target));
+}
+
+export function Locals(ctx) {
+	return new LocalsView(ctx, debug);
 }
 
 export function ErrorList(ctx) {

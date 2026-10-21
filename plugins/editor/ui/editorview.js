@@ -24,6 +24,7 @@ export class CodeEditor {
 		this.editors = editors;
 		this.features = features;
 		this.detach = null;
+		this.attachments = [];    // what Editors.attach added, disposed with the editor
 		this.model = null;
 		this.applying = false;
 		this.mixedEndings = false;
@@ -45,6 +46,7 @@ export class CodeEditor {
 	dispose() {
 		this.editors.delete(this);
 		if (this.detach) this.detach();
+		for (const dispose of this.attachments) if (typeof dispose === "function") dispose();
 		this.margin.dispose();
 		this.sync.dispose();
 		this.editor.dispose();

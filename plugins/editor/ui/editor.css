@@ -165,3 +165,33 @@
 	.fif-row { flex-wrap: wrap; height: auto; padding: var(--space-2) var(--space-3); }
 	.fif-query { max-width: none; }
 }
+
+/* ---------- debugging (docs/25): breakpoints, the current statement, Call Stack, Locals ---------- */
+.monaco-editor .bp-glyph { cursor: pointer; }
+.monaco-editor .bp-glyph::before { content: ""; position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; box-sizing: border-box; }
+.monaco-editor .bp-set::before { background: var(--marker-breakpoint); }
+.monaco-editor .bp-unverified::before { border: 2px solid var(--marker-breakpoint); }
+.monaco-editor .bp-disabled::before { border: 2px solid var(--text-3); }
+.monaco-editor .dbg-arrow::after { content: ""; position: absolute; left: 50%; top: 50%; margin: -6px 0 0 -4px; border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 9px solid var(--marker-current); }
+.monaco-editor .dbg-caller::after { border-left-color: var(--text-2); }
+.monaco-editor .dbg-current-line { background: color-mix(in srgb, var(--marker-current) 24%, transparent); }
+.monaco-editor .dbg-caller-line { background: var(--veil); }
+.dbg-head { display: flex; align-items: center; gap: var(--space-3); height: 24px; padding: 0 var(--space-3); color: var(--text-2); font-size: var(--font-size-sm); border-bottom: var(--border-width) solid var(--border-0); flex: none; }
+.cs-grid { display: grid; grid-template-columns: 14px minmax(120px, 1fr) minmax(120px, 1fr); gap: var(--space-3); align-items: center; }
+.cs-rows { position: absolute; inset: 0; overflow: auto; outline: none; }
+.cs-row { height: var(--row-h); padding: 0 var(--space-3); font-size: var(--font-size-sm); cursor: default; }
+.cs-row:hover { background: var(--veil); }
+.cs-row.sel { background: var(--bg-4); }
+.cs-row .cs-name, .cs-row .cs-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-arrow { color: var(--marker-current); font-size: 9px; }
+.el-empty { padding: var(--space-4); font-size: var(--font-size-sm); }
+.lv-name { flex: 0 0 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lv-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lv-type { flex: 0 0 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbg-head .lv-name { padding-left: 20px; }
+.tb-start { width: auto !important; gap: var(--space-2); padding: 0 var(--space-3); }
+
+@media (max-width: 719px) {
+	.lv-type { display: none; }
+	.cs-row { height: var(--row-h-touch); }
+}

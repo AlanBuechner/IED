@@ -1,6 +1,7 @@
 // editors.js - the open code editors of the page, the last focused one last, for the commands that act on "the editor"
-// (Save), the status bar items that describe it, whatever waits for a document's editor to show its text, and the
-// navigation history their cursors make.
+// (Save), the status bar items that describe it, whatever waits for a document's editor to show its text, the features
+// attached to every editor once it shows its text (the breakpoint margin), and the navigation history their cursors
+// make.
 
 import { Navigation } from "./navigation.js";
 
@@ -9,7 +10,14 @@ export class Editors {
 		this.open = new Set();
 		this.listeners = new Set();
 		this.waiting = new Map();   // ref -> resolvers waiting for its editor's text
+		this.attachers = [];        // fn(editor) -> dispose, for every editor that shows its text
 		this.navigation = new Navigation();
+	}
+
+	// `fn(editor)` for each editor once it shows its text; what it returns is called when the editor goes.
+	attach(fn) {
+		this.attachers.push(fn);
+		for (const editor of this.open) if (editor.model) editor.attachments.push(fn(editor));
 	}
 
 	// `editor`'s cursor moved where the person put it.
@@ -30,6 +38,7 @@ export class Editors {
 
 	// `editor` shows its document's text.
 	ready(editor) {
+		for (const fn of this.attachers) editor.attachments.push(fn(editor));
 		const waiting = this.waiting.get(editor.ctx.ref) || [];
 		this.waiting.delete(editor.ctx.ref);
 		for (const resolve of waiting) resolve(editor);
