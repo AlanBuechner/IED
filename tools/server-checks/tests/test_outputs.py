@@ -9,9 +9,41 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client
-from server import ControlPipe, IedServer, ServerTestCase
+from server import REPO, ControlPipe, IedServer, ServerTestCase
 
 TOPIC = "out:w1:ied"
+
+
+class StartupLogTests(ServerTestCase):
+	"""Lines logged while the server starts reach the log's output source on its own thread while the workspaces
+	open: an install without the AI prompts logs at every start. A race there corrupted the heap about once in a
+	hundred starts."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-startlog-")
+		self.home = os.path.join(self.root, "home")
+		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
+		plugin = os.path.join(self.home, "plugins", "fake")
+		os.makedirs(plugin)
+		with open(os.path.join(plugin, "ied-plugin.json"), "w", encoding="utf-8") as f:
+			json.dump({"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+				"contributes": {"languages": [{"id": "fake", "extensions": [".fk"]}], "settings": {"schema": "settings.schema.json"}}}, f)
+		with open(os.path.join(plugin, "settings.schema.json"), "w", encoding="utf-8") as f:
+			json.dump({"type": "object", "properties": {"fake.flags": {"type": "array", "items": {"type": "string"}, "default": []}}}, f)
+		os.makedirs(os.path.join(self.root, "work"))
+		with open(os.path.join(self.root, "work", "a.fk"), "w", encoding="utf-8") as f:
+			f.write("a\n")
+
+	def tearDown(self):
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	def test_starts_that_log_while_workspaces_open(self):
+		for n in range(300):
+			server = IedServer(data=os.path.join(self.root, "data%d" % n), extra=("--home", self.home, "--workspace", os.path.join(self.root, "work")))
+			try:
+				self.assertTrue(server.started, "start %d: %s" % (n, server.error))
+			finally:
+				server.stop()
 
 
 class OutputTests(ServerTestCase):
