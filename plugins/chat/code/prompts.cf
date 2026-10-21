@@ -61,6 +61,10 @@ namespace Ai
 		}
 		out.Append("\n\n# Workspace\n\n");
 		out.Append(context.workspace.View());
+		if (!context.deferred.IsEmpty()) {
+			out.Append("\n\n# Tools you can load\n\nThese tools are not loaded, to keep the context small. tool_search loads them (words for what you need, or select: and their names); calling one by its name loads it too.\n\n");
+			out.Append(context.deferred.View());
+		}
 		if (!context.skills.IsEmpty()) {
 			out.Append("\n\n# Skills\n\nGuides for this workspace's languages, tools and conventions. Read the one that fits the task with skill_read before you start it; skill_search finds skills by words.\n\n");
 			out.Append(context.skills.View());

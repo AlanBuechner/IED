@@ -20,11 +20,11 @@ namespace Ai
 		return mode != ChatMode::Plan || spec->inPlan;
 	}
 
-	Core::String ToolRegistry::RequestTools(ChatMode mode) const {
+	Core::String ToolRegistry::RequestTools(ChatMode mode, const Core::Array<Core::String>& loaded) const {
 		IED::JsonWriter json;
 		json.BeginArray();
 		for (ToolSpec* spec : tools) {
-			if (!Offered(spec, mode)) continue;
+			if (!Offered(spec, mode) || (spec->deferred && !loaded.Contains(spec->name))) continue;
 			json.BeginObject();
 			json.Field("type", "function");
 			json.Key(Core::StringView("function"));
@@ -37,6 +37,82 @@ namespace Ai
 		}
 		json.EndArray();
 		return json.ToString();
+	}
+
+	// A description's first sentence, for a one-line listing.
+	static Core::StringView FirstSentence(Core::StringView text) {
+		const int64 stop = text.IndexOf(Core::StringView(". "));
+		const int64 end = stop >= 0 ? stop + 1 : text.ByteLength();
+		return text.Substring(0, end < kToolIndexLineBytes ? end : kToolIndexLineBytes);
+	}
+
+	Core::String ToolRegistry::DeferredIndex(ChatMode mode, const Core::Array<Core::String>& loaded) const {
+		Core::StringBuilder out;
+		for (ToolSpec* spec : tools) {
+			if (!spec->deferred || !Offered(spec, mode) || loaded.Contains(spec->name)) continue;
+			out.Append("- ");
+			out.Append(spec->name.View());
+			out.Append(": ");
+			out.Append(FirstSentence(spec->description.View()));
+			if (!spec->group.IsEmpty()) {
+				out.Append(" (");
+				out.Append(spec->group.View());
+				out.Append(")");
+			}
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+
+	// How well `query`'s words match the tool: each word found in its name counts 3, in its group 2, in its description 1.
+	static int64 Match(const ToolSpec* spec, Core::StringView query) {
+		int64 score = 0;
+		int64 at = 0;
+		while (at < query.ByteLength()) {
+			int64 end = at;
+			while (end < query.ByteLength() && query.ByteAt(end) != ' ' && query.ByteAt(end) != ',') end += 1;
+			Core::StringView word = query.Substring(at, end - at);
+			if (word.ByteLength() >= 2) {
+				if (spec->name.View().Contains(word)) score += 3;
+				if (spec->group.View().Contains(word)) score += 2;
+				if (spec->description.View().Contains(word)) score += 1;
+			}
+			at = end + 1;
+		}
+		return score;
+	}
+
+	Core::Array<ToolSpec*> ToolRegistry::SearchDeferred(Core::StringView query, ChatMode mode, int64 most) const {
+		Core::Array<ToolSpec*> found;
+		const Core::StringView select = Core::StringView("select:");
+		if (query.StartsWith(select)) {
+			Core::StringView names = query.Substring(select.ByteLength(), query.ByteLength() - select.ByteLength());
+			int64 at = 0;
+			while (at < names.ByteLength()) {
+				int64 end = names.IndexOf(',', at);
+				if (end < 0) end = names.ByteLength();
+				ToolSpec* spec = Find(names.Substring(at, end - at).Trimmed());
+				if (spec && spec->deferred && Offered(spec, mode) && !found.Contains(spec)) found.Push(spec);
+				at = end + 1;
+			}
+			return found;
+		}
+		Core::Array<int64> scores;
+		for (ToolSpec* spec : tools) {
+			if (!spec->deferred || !Offered(spec, mode)) continue;
+			const int64 score = Match(spec, query);
+			if (score == 0) continue;
+			int64 at = found.Count();
+			while (at > 0 && scores[at - 1] < score) at -= 1;
+			found.Insert(at, spec);
+			scores.Insert(at, score);
+		}
+		while (found.Count() > most) found.RemoveAt(found.Count() - 1);
+		return found;
+	}
+
+	void ToolRegistry::LoadAll() {
+		for (ToolSpec* spec : tools) spec->deferred = false;
 	}
 
 	Core::Array<Core::String> ToolRegistry::Check(const ToolSpec* spec, const Serialization::DomNode& args) const {

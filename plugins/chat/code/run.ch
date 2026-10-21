@@ -86,6 +86,10 @@ namespace Ai
 		private ToolOutcome SetTasks(const Serialization::DomNode& args);
 		private ToolOutcome UpdateTask(const Serialization::DomNode& args);
 		private ToolOutcome FinishCall(const Serialization::DomNode& args);
+		// tool_search: the deferred tools the query names loaded for the chat, their definitions told the model.
+		private ToolOutcome SearchTools(const Serialization::DomNode& args);
+		// The deferred tool loaded for the chat, inside the host lock.
+		private void LoadTool(const ToolSpec* spec);
 		private void ToolState(Segment* segment, const char* state);
 		private void Resolve(Segment* segment, const ToolOutcome& outcome, int64 ms);
 		private void TrackLoop(ToolCallDraft* call, const ToolOutcome& outcome);

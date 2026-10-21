@@ -147,6 +147,7 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 | `ai.defaultGroup` | app, solution | the group of a chat that names none; empty: the first group; with no group at all, the first model |
 | `ai.permissions` | app | `{allow, confirm, deny}`: lists of `kind(pattern)` rules |
 | `ai.maxSteps` | app, solution | model requests per turn before it pauses; 0, the default, is no limit |
+| `ai.tools.loadAll` | app, solution | send every tool's definition with every request; off, the default, plugin tools and tool groups are listed by name and loaded on demand (`tool_search`, `docs/13`) |
 
 **Persistence:** per chat under `<workspace>/.ied/local/chats/<chatId>/`: `chat.json` (title, mode, permission, group, tasks, queued messages, the rules allowed for the chat, the files the AI changed), `turns.jsonl` (each finished turn with the messages the model was sent) and `running.json` (the turn in flight, written at every step and tool boundary). A `running.json` found at start is a turn a restart interrupted: it ends `interrupted`, a call it had running gets a result saying its effect is unknown, and the chat waits paused for the next message.
 

@@ -79,11 +79,13 @@ namespace Ai
 		}
 		Core::Array<Core::String> contributed;
 		tools = ToolsFor(context, ws, contributed);
+		if (Serialization::ReadJson(context->Setting(Core::StringView("ai.tools.loadAll"), WsId(ws)).View(), *doc).root.AsBool()) tools->LoadAll();
 		SystemContext prompt;
 		prompt.agentsMd = AgentsMd(ws);
 		prompt.sections = PluginSections(context, ws, contributed);
 		prompt.workspace = WorkspaceSummary(ws);
 		prompt.skills = SkillsIndex(SkillsOf(context, ws, contributed), turn->userText.View(), DefaultSkillsIndexLimits());
+		prompt.deferred = tools->DeferredIndex(chat->mode, chat->loadedTools);
 		for (const Core::String& problem : contributed) context->Log(problem.View());
 		system = chats->prompts.System(chat->mode, prompt);
 		return true;

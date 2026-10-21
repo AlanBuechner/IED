@@ -643,6 +643,7 @@
 				"class": { "enum": ["read", "write", "exec", "net", "meta"] },
 				"parallelSafe": { "type": "boolean", "default": false },
 				"availableUntrusted": { "type": "boolean", "default": false },
+				"preload": { "type": "boolean", "default": false, "description": "Send its definition with every request. Off, the chat lists it by name and loads it on demand (tool_search, docs/13)." },
 				"inputSchema": { "type": "object" },
 				"outputSchema": { "type": "object" },
 				"resultBudgetTokens": { "type": "integer", "minimum": 64 },

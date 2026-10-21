@@ -88,6 +88,10 @@ namespace Ai
 			else problems = tools->Check(spec, args);
 			if (problems.IsEmpty()) {
 				malformed = 0;
+				if (spec->deferred) {
+					IED::HostLock guard(*context);
+					LoadTool(spec);
+				}
 				outcome = RunCall(spec, call, segment, args);
 			}
 			else {
@@ -166,11 +170,38 @@ namespace Ai
 		}
 	}
 
+	void TurnRun::LoadTool(const ToolSpec* spec) {
+		if (!chat->loadedTools.Contains(spec->name)) chat->loadedTools.Push(spec->name);
+	}
+
+	ToolOutcome TurnRun::SearchTools(const Serialization::DomNode& args) {
+		Core::StringView query = args.Member("query").AsView();
+		Core::Array<ToolSpec*> found = tools->SearchDeferred(query, chat->mode, kToolSearchMost);
+		if (found.IsEmpty()) return ToolError(((Core::String("tool_search: no tool you can load matches '") + query) + "'; they are listed under Tools you can load in the system message").View());
+		Core::StringBuilder said;
+		Core::StringBuilder names;
+		said.Append("Loaded; call them from now on:\n");
+		for (ToolSpec* spec : found) {
+			LoadTool(spec);
+			said.Append("\n## ");
+			said.Append(spec->name.View());
+			said.Append("\n");
+			said.Append(spec->description.View());
+			said.Append("\nParameters: ");
+			said.Append(spec->parameters.View());
+			said.Append("\n");
+			if (!names.IsEmpty()) names.Append(", ");
+			names.Append(spec->name.View());
+		}
+		return ToolResult(said.View(), (Core::String("Loaded ") + names.View()).View());
+	}
+
 	ToolOutcome TurnRun::RunMeta(ToolSpec* spec, Segment* segment, const Serialization::DomNode& args) {
 		if (spec->name == "ask_user") return AskUser(segment, args);
 		IED::HostLock guard(*context);
 		ToolState(segment, "running");
 		if (spec->name == "tasks_set") return SetTasks(args);
+		if (spec->name == "tool_search") return SearchTools(args);
 		if (spec->name == "task_update") return UpdateTask(args);
 		return FinishCall(args);
 	}

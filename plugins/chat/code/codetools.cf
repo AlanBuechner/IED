@@ -86,6 +86,8 @@ namespace Ai
 		spec->toolClass = CodeToolClass(node.Member("class").AsView());
 		spec->parallelSafe = spec->toolClass == ToolClass::Read && node.Member("parallelSafe").AsBool();
 		spec->inPlan = spec->toolClass == ToolClass::Read;
+		spec->deferred = !node.Member("preload").AsBool();
+		spec->group = Core::String(pluginId);
 		spec->plan = [entry](const ToolInvocation& call) -> ToolPlan { return CodeToolPlan(entry, call); };
 		spec->run = [entry](const ToolInvocation& call) -> ToolOutcome { return CodeToolRun(entry, call); };
 		return spec;

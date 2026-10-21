@@ -423,6 +423,28 @@ class ChatTests(ServerTestCase):
 		self.assertIn("call c2, shots/screen.png", parts[0]["text"])
 		self.assertEqual("data:image/png;base64," + base64.b64encode(png).decode(), parts[1]["image_url"]["url"], "the file's bytes")
 
+	async def test_plugin_tools_load_on_demand(self):
+		names = lambda body: [t["function"]["name"] for t in body["tools"]]
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("tool_search", {"query": "shout"}, "s1"), text_step("Loaded."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		first, last = self.model.requests()[-2]["body"], self.model.requests()[-1]["body"]
+		self.assertNotIn("demo_shout", names(first), "a plugin tool is not sent at first")
+		self.assertIn("- demo_shout: Shout a file's first line. (demo.code)", first["messages"][0]["content"], "it is listed by name")
+		self.assertIn("demo_shout", names(last), "tool_search loaded it")
+		self.assertIn("## demo_shout", [m for m in last["messages"] if m["role"] == "tool"][0]["content"], "its definition told the model")
+		chat_id, _ = await self.chat()
+		self.model.queue(text_step("Hi."))
+		await self.turn(chat_id)
+		self.assertNotIn("demo_shout", names(self.model.requests()[-1]["body"]), "loaded per chat")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.tools.loadAll", "value": True})
+		chat_id, _ = await self.chat()
+		self.model.queue(text_step("Hi."))
+		await self.turn(chat_id)
+		sent = self.model.requests()[-1]["body"]
+		self.assertIn("demo_shout", names(sent), "ai.tools.loadAll sends them all")
+		self.assertNotIn("# Tools you can load", sent["messages"][0]["content"])
+
 	# --- Tools -------------------------------------------------------------------------------------------------------
 
 	async def test_a_tool_call_runs_and_the_model_gets_its_result(self):

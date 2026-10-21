@@ -38,6 +38,10 @@ Permission handling per class is defined in `docs/11`.
 | T-META-3 | `tools_enable(group)` | meta | Enable a tool group for the rest of the turn. |
 | T-META-4 | `finish(summary, verification)` | meta | Agent mode only: end the turn with what was done and how it was verified. |
 
+## Loading tools on demand (built, 2026-10-21)
+
+Every tool definition sent costs context at every step, and the list grows with each plugin (the browser's and the profiler's tools alone are about 2,500 tokens). So the core set is always sent, and the rest is *deferred*: a plugin's tool calls (unless the entry says `"preload": true`) and the groups below (as built: `media`). A deferred tool is listed by name and one line in the system message ("Tools you can load", `docs/14` item 7); `tool_search(query)` - words for what the model needs, or `select:name,name` - loads up to 5 of them for the chat and tells the model their definitions, and from the next step on they are sent like core tools. Calling a listed tool by its name loads it too (its arguments are still checked against its schema, which a mistake gets back). What a chat loaded is kept with it (`chat.json` `loadedTools`), so its later turns keep them; another chat starts without. `ai.tools.loadAll` (app, solution; off) sends every definition, for a model that does better without the extra step. As built: `plugins/chat/code/tool.cf` (`DeferredIndex`, `SearchDeferred`), `runtools.cf` (`tool_search`).
+
 ## Groups (enabled on demand)
 
 ### `fs_more`

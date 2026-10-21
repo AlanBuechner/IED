@@ -1,0 +1,62 @@
+// tool search: deferred tools listed by name, found by words or select:, and sent only once loaded (docs/13).
+
+include "catalog.ch"
+
+static Ai::ToolSpec* DeferredTool(const char* name, const char* description, const char* group) {
+	Ai::ToolSpec* spec = new Ai::ToolSpec();
+	spec->name = Core::String(name);
+	spec->description = Core::String(description);
+	spec->parameters = Core::String("{\"type\": \"object\"}");
+	spec->toolClass = Ai::ToolClass::Read;
+	spec->inPlan = true;
+	spec->deferred = true;
+	spec->group = Core::String(group);
+	return spec;
+}
+
+static Ai::ToolRegistry* SearchRegistry() {
+	Ai::ToolRegistry* registry = Ai::CoreTools();
+	registry->Add(DeferredTool("browser_open", "Open a web page in the server's browser. Waits for its load.", "ied.browser"));
+	registry->Add(DeferredTool("browser_snapshot", "The page as text: its accessibility tree.", "ied.browser"));
+	registry->Add(DeferredTool("profile_list", "The workspace's captures, newest first.", "ied.profiler"));
+	return registry;
+}
+
+[test("server.ai.toolsearch")]
+class ToolSearchTests {
+	[test("listed_by_name_not_sent")]
+	public static void TestIndex() {
+		Ai::ToolRegistry* registry = SearchRegistry();
+		Core::Array<Core::String> none;
+		Core::String index = registry->DeferredIndex(Ai::ChatMode::Ask, none);
+		assert_true(index.View().Contains(Core::StringView("- browser_open: Open a web page in the server's browser. (ied.browser)\n")), index.CStr());
+		assert_true(index.View().Contains(Core::StringView("- image_view: ")), "the media group is deferred too");
+		Core::String request = registry->RequestTools(Ai::ChatMode::Ask, none);
+		assert_true(request.View().Contains(Core::StringView("\"fs_read\"")) && request.View().Contains(Core::StringView("\"tool_search\"")), "the core tools are sent");
+		assert_true(!request.View().Contains(Core::StringView("\"name\":\"browser_open\"")), "a deferred tool is not");
+		Core::Array<Core::String> loaded;
+		loaded.Push(Core::String("browser_open"));
+		assert_true(registry->RequestTools(Ai::ChatMode::Ask, loaded).View().Contains(Core::StringView("\"name\":\"browser_open\"")), "until it is loaded");
+		assert_true(!registry->DeferredIndex(Ai::ChatMode::Ask, loaded).View().Contains(Core::StringView("browser_open")), "and then no longer listed");
+	}
+
+	[test("found_by_words_or_names")]
+	public static void TestSearch() {
+		Ai::ToolRegistry* registry = SearchRegistry();
+		Core::Array<Ai::ToolSpec*> found = registry->SearchDeferred(Core::StringView("browser page"), Ai::ChatMode::Ask, 5);
+		assert_true(found.Count() == 2 && found[0]->name.View() == "browser_open", "the best match first");
+		Core::Array<Ai::ToolSpec*> named = registry->SearchDeferred(Core::StringView("select:profile_list, browser_snapshot,nope"), Ai::ChatMode::Ask, 5);
+		assert_true(named.Count() == 2 && named[0]->name.View() == "profile_list" && named[1]->name.View() == "browser_snapshot", "select: names them, unknown names skipped");
+		assert_eq((int64)0, registry->SearchDeferred(Core::StringView("xyzzy"), Ai::ChatMode::Ask, 5).Count(), "nothing matches");
+		assert_eq((int64)0, registry->SearchDeferred(Core::StringView("select:fs_read"), Ai::ChatMode::Ask, 5).Count(), "a loaded tool is not searched");
+	}
+
+	[test("load_all")]
+	public static void TestLoadAll() {
+		Ai::ToolRegistry* registry = SearchRegistry();
+		registry->LoadAll();
+		Core::Array<Core::String> none;
+		assert_true(registry->DeferredIndex(Ai::ChatMode::Ask, none).IsEmpty(), "nothing left to load");
+		assert_true(registry->RequestTools(Ai::ChatMode::Ask, none).View().Contains(Core::StringView("profile_list")), "every tool sent");
+	}
+}

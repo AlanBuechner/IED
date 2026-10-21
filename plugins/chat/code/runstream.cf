@@ -80,7 +80,7 @@ namespace Ai
 		for (Turn* each : chat->turns)
 			if (!each->compressed) WriteMessages(json, ws.root.View(), each->messages, images);
 		json.EndArray();
-		json.RawField("tools", tools->RequestTools(chat->mode).View());
+		json.RawField("tools", tools->RequestTools(chat->mode, chat->loadedTools).View());
 		json.BoolField("stream", true);
 		bool progressing = false;
 		chats->progressing.TryGet(profile->name, progressing);
@@ -310,7 +310,7 @@ namespace Ai
 		json.Key(Core::StringView("parts"));
 		json.BeginArray();
 		WritePart(json, "System prompt", system.ByteLength() / 4);
-		WritePart(json, "Tool definitions", tools->RequestTools(chat->mode).ByteLength() / 4);
+		WritePart(json, "Tool definitions", tools->RequestTools(chat->mode, chat->loadedTools).ByteLength() / 4);
 		WritePart(json, "Messages", messages / 4);
 		WritePart(json, "Tool results", results / 4);
 		json.EndArray();

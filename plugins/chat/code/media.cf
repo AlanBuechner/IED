@@ -89,6 +89,8 @@ namespace Ai
 		info->toolClass = ToolClass::Read;
 		info->parallelSafe = true;
 		info->inPlan = true;
+		info->deferred = true;
+		info->group = Core::String("media");
 		info->plan = InfoPlan;
 		info->run = InfoRun;
 		registry.Add(info);
@@ -99,6 +101,8 @@ namespace Ai
 		view->toolClass = ToolClass::Read;
 		view->parallelSafe = true;
 		view->inPlan = true;
+		view->deferred = true;
+		view->group = Core::String("media");
 		view->plan = ViewPlan;
 		view->run = ViewRun;
 		registry.Add(view);

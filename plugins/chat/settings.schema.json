@@ -87,6 +87,12 @@
 			"default": 0,
 			"x-ied-tiers": ["app", "solution"],
 			"description": "Model requests one turn may make before it pauses; 0 is no limit (docs/12 Budgets). Loop and no-progress detection still pause a turn that runs away."
+		},
+		"ai.tools.loadAll": {
+			"type": "boolean",
+			"default": false,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Send every tool's definition with every request. Off, plugin tools and tool groups are listed by name and loaded on demand with tool_search, which keeps the context small (docs/13 Loading tools on demand)."
 		}
 	}
 }

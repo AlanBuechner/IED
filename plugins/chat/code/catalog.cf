@@ -25,6 +25,9 @@ namespace Ai
 		AddFileTools(*registry);
 		AddMediaTools(*registry);
 		AddWorkTools(*registry);
+		AddRunTool(*registry, "tool_search", "Load tools listed under Tools you can load in the system message, so you can call them: words that describe what you need, or select: and their names. Example: tool_search({\"query\": \"look at an image\"}) or tool_search({\"query\": \"select:image_view,image_info\"})",
+			"{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"query\"], \"additionalProperties\": false}",
+			true, false);
 		AddSkillTools(*registry);
 		AddRunTool(*registry, "tasks_set", "Replace the chat's task list (the owner sees it). Keep exactly one task in_progress. Example: tasks_set({\"items\": [{\"title\": \"Port Log.h\", \"status\": \"in_progress\"}, {\"title\": \"Tests\"}]})",
 			"{\"type\": \"object\", \"properties\": {\"items\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"title\": {\"type\": \"string\", \"minLength\": 1}, \"status\": {\"enum\": [\"pending\", \"in_progress\", \"done\", \"skipped\"]}}, \"required\": [\"title\"], \"additionalProperties\": false}}}, \"required\": [\"items\"], \"additionalProperties\": false}",
