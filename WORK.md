@@ -75,6 +75,8 @@ Living document. Update it at every checkpoint commit.
   - debug adapters over TCP (`transport: tcp`, `${port}`), and CodeLLDB as the `ied.cpp` plugin's `lldb` adapter: C and C++ debugging, checked live on a C program built with the vendored clang;
   - Rust (`plugins/rust`, `docs/05`): rust-analyzer, the `rust.cargo` preset with its `rustc` matcher, and debugging through CodeLLDB - checked live on a cargo project;
   - the terminal dock (`docs/10` "Terminals", `docs/05` "terminal"): `src/services/terminals` (programs under a pseudo console that outlive the browser, `term.*`, `terms:<wsId>`, scrollback, the lease), the shell's `panels` contribution point (a full-width dock, collapsible to its header, sized in the layout; a drawer on a phone), and `plugins/terminal` (tabs, xterm.js, Type Here, rename in place, the phone's key row). Server checks `test_terminals.py`, e2e `terminal_dock` (both servers), `terminal_on_a_phone`;
+  - the debugger's other windows (`docs/25` "The client as built"): Watch (the workspace's expressions, `watch.set`, kept with the breakpoints), Threads, Breakpoints, hover values (DataTips); e2e `debug_windows`;
+  - Output links: a place a build line names (MSVC, C4, clang/gcc/rustc, rustc's arrow, test failures) is underlined and opens on a click, found among the workspace's files; unit `outputlinks.test.js`, e2e `output_links_open_places`;
   - C4 fix found debugging: BUG-307 (a call that first needed a cleanup pad took the cleanup's line, so a breakpoint on it moved and a step skipped it).
 
   Next in M3: the Watch, Breakpoints and Exception Settings windows and hover evaluation; the terminal; Test Explorer from Nuke's `results.json`.

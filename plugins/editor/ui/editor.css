@@ -195,3 +195,18 @@
 	.lv-type { display: none; }
 	.cs-row { height: var(--row-h-touch); }
 }
+
+.output-text .out-loc { text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 2px; cursor: pointer; }
+.output-text .out-loc:hover { text-decoration-color: currentColor; }
+
+/* Watch, Breakpoints */
+.watch-foot { flex: none; padding: var(--space-2) var(--space-3); border-top: var(--border-width) solid var(--border-0); }
+.watch-add { width: 100%; box-sizing: border-box; }
+.bp-grid { display: grid; grid-template-columns: 44px minmax(160px, 1fr) minmax(120px, 1fr) 24px; gap: var(--space-3); align-items: center; }
+.bp-cell { display: flex; align-items: center; gap: var(--space-2); }
+.bp-dot { width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box; flex: none; }
+.bp-dot.bp-set { background: var(--marker-breakpoint); }
+.bp-dot.bp-unverified { border: 2px solid var(--marker-breakpoint); }
+.bp-dot.bp-disabled { border: 2px solid var(--text-3); }
+.bp-grid .ib { opacity: 0; }
+.bp-grid:hover .ib, .bp-grid:focus-within .ib { opacity: 1; }

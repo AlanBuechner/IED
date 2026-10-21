@@ -689,7 +689,7 @@ def debug_a_program(run):
 	page.wait_for_selector(".toolbar button[aria-label='Step Over (F10)']:not([disabled])")
 	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.callStack' })")
 	run.wait_text(".cs-row", "main.c, line 6")
-	check(len(page.query_selector_all(".cs-row")) == 2, "two frames")
+	check(len(page.query_selector_all("[aria-label='Call Stack'] .cs-row")) == 2, "two frames")
 	run.shot("stopped")
 	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.locals' })")
 	run.wait_text(".tree-row", "renderer")
@@ -711,6 +711,44 @@ def debug_a_program(run):
 	page.evaluate(EDITOR + ".setPosition({ lineNumber: 6, column: 2 })")
 	page.keyboard.press("F9")
 	page.wait_for_selector(".monaco-editor .bp-glyph", state="detached")
+
+
+@scenario(viewports=("desktop",), targets=("mock",))
+def debug_windows(run):
+	"""Watch evaluates the workspace's expressions at each stop, a hover shows a value (DataTips), Threads lists the
+	program's threads, and the Breakpoints window disables one (docs/25)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": [{"line": 5}]})
+	run.request("watch.set", {"wsId": ws, "expressions": []})
+	open_main_c(run, page)
+	page.evaluate("ied_shell.commands.run('ied.debug.start')")
+	page.wait_for_selector(".statusbar[data-state='debugging']")
+	page.wait_for_function("(() => { const e = " + EDITOR + "; return e.getModel().getAllDecorations().some((d) => d.options.className === 'dbg-current-line'); })()", timeout=10000)
+	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.watch' })")
+	page.fill(".watch-add", "renderer")
+	page.press(".watch-add", "Enter")
+	page.wait_for_function("[...document.querySelectorAll('.tree-row')].some((r) => r.textContent.includes('renderer') && r.textContent.includes('0x000001f4a2b0e000'))", timeout=10000)
+	page.fill(".watch-add", "nonsense")
+	page.press(".watch-add", "Enter")
+	page.wait_for_selector(".tree-row .lv-value.c-error", timeout=10000)
+	run.shot("watch")
+	box = page.evaluate("(() => { const e = " + EDITOR + "; const p = e.getScrolledVisiblePosition({ lineNumber: 6, column: 11 }); const r = e.getDomNode().getBoundingClientRect(); return { x: r.left + p.left + 4, y: r.top + p.top + p.height / 2 }; })()")
+	page.mouse.move(box["x"], box["y"])
+	page.wait_for_selector(".monaco-hover:has-text('player = ')", timeout=10000)
+	run.shot("hover")
+	page.mouse.move(5, 5)
+	page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.threads' })")
+	run.wait_text(".cs-row", "main")
+	page.keyboard.press("Control+Alt+B")
+	page.wait_for_selector(".bp-grid.cs-row:has-text('main.c, line 6')")
+	page.click(".bp-grid.cs-row input[type='checkbox']")
+	page.wait_for_selector(".monaco-editor .bp-glyph.bp-disabled", timeout=10000)
+	run.shot("breakpoints")
+	page.evaluate("ied_shell.commands.run('ied.debug.stop')")
+	page.wait_for_selector(".statusbar[data-state='debugging']", state="detached", timeout=10000)
+	run.request("bp.set", {"wsId": ws, "path": "src/main.c", "breakpoints": []})
+	run.request("watch.set", {"wsId": ws, "expressions": []})
 
 
 @scenario(viewports=("phone",), targets=("mock",))
@@ -799,6 +837,18 @@ def terminal_on_a_phone(run):
 	page.wait_for_selector(".term-tab", state="detached", timeout=10000)
 	page.tap(".term-head button[aria-label='Hide the panel']")
 	page.wait_for_selector(".panel-dock.drawer.shown", state="detached")
+
+
+@scenario(viewports=("desktop",), targets=("mock",))
+def output_links_open_places(run):
+	"""A place an Output line names is underlined and a click opens it (VS): a compiler's error opens its file at the line."""
+	page = run.open()
+	run.request("task.run", {"wsId": "w1", "task": "build-broken"})
+	page.evaluate("ied_shell.commands.run('ied.output.show', { sourceId: 'build' })")
+	page.wait_for_selector(".output-text .out-loc:has-text('player.c(11,61)')", timeout=20000)
+	run.shot("links")
+	page.click(".output-text .out-loc:has-text('player.c(11,61)')")
+	page.wait_for_function("(() => { const e = ied_shell.views.entries.get('doc:src/game/player.c'); return !!(e && e.instance && e.instance.editor && e.instance.editor.getPosition() && e.instance.editor.getPosition().lineNumber === 11); })()", timeout=20000)
 
 
 @scenario(viewports=("phone",), targets=("mock",))

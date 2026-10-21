@@ -21,7 +21,10 @@
 			{ "id": "ied.errors", "title": "Error List", "icon": "$(error)", "view": "ErrorList", "defaultDock": "bottom" },
 			{ "id": "ied.find", "title": "Find in Files", "icon": "$(search)", "view": "FindInFiles", "defaultDock": "bottom" },
 			{ "id": "ied.callStack", "title": "Call Stack", "icon": "$(debug-stackframe)", "view": "CallStack", "defaultDock": "bottom" },
-			{ "id": "ied.locals", "title": "Locals", "icon": "$(symbol-variable)", "view": "Locals", "defaultDock": "bottom" }
+			{ "id": "ied.locals", "title": "Locals", "icon": "$(symbol-variable)", "view": "Locals", "defaultDock": "bottom" },
+			{ "id": "ied.watch", "title": "Watch", "icon": "$(eye)", "view": "Watch", "defaultDock": "bottom" },
+			{ "id": "ied.threads", "title": "Threads", "icon": "$(list-flat)", "view": "Threads", "defaultDock": "bottom" },
+			{ "id": "ied.breakpoints", "title": "Breakpoints", "icon": "$(circle-filled)", "view": "Breakpoints", "defaultDock": "bottom" }
 		],
 		"statusBarItems": [
 			{ "id": "ied.editor.status", "alignment": "right", "priority": 100, "view": "EditorStatus" },
@@ -62,6 +65,7 @@
 			{ "id": "ied.debug.stepInto", "title": "Step Into", "category": "Debug", "icon": "$(debug-step-into)", "enablement": "debugState == 'stopped'" },
 			{ "id": "ied.debug.stepOut", "title": "Step Out", "category": "Debug", "icon": "$(debug-step-out)", "enablement": "debugState == 'stopped'" },
 			{ "id": "ied.debug.toggleBreakpoint", "title": "Toggle Breakpoint", "category": "Debug", "enablement": "activeTabKind == 'doc'" },
+			{ "id": "ied.debug.windows", "title": "Breakpoints Window", "category": "Debug", "icon": "$(circle-filled)" },
 			{ "id": "ied.task.start", "title": "Start Without Debugging", "category": "Debug", "icon": "$(run)" },
 			{ "id": "ied.task.test", "title": "Run All Tests", "category": "Test", "icon": "$(beaker)" },
 			{ "id": "ied.task.setStartup", "title": "Set as Startup Project", "category": "Project" },
@@ -89,7 +93,8 @@
 				{ "command": "ied.debug.stepOver", "group": "3_step" },
 				{ "command": "ied.debug.stepInto", "group": "3_step", "order": 1 },
 				{ "command": "ied.debug.stepOut", "group": "3_step", "order": 2 },
-				{ "command": "ied.debug.toggleBreakpoint", "group": "4_breakpoints" }
+				{ "command": "ied.debug.toggleBreakpoint", "group": "4_breakpoints" },
+				{ "command": "ied.debug.windows", "group": "5_windows" }
 			],
 			"menubar/test": [
 				{ "command": "ied.task.test", "group": "1_run" }
@@ -144,6 +149,11 @@
 			{ "command": "ied.debug.stepInto", "key": "f11", "when": "debugState == 'stopped'" },
 			{ "command": "ied.debug.stepOut", "key": "shift+f11", "when": "debugState == 'stopped'" },
 			{ "command": "ied.debug.toggleBreakpoint", "key": "f9", "when": "activeTabKind == 'doc'" },
+			{ "command": "ied.debug.windows", "key": "ctrl+alt+b" },
+			{ "command": "shell.showView", "key": "ctrl+alt+c", "args": { "id": "ied.callStack" } },
+			{ "command": "shell.showView", "key": "ctrl+alt+v ctrl+l", "args": { "id": "ied.locals" } },
+			{ "command": "shell.showView", "key": "ctrl+alt+w ctrl+1", "args": { "id": "ied.watch" } },
+			{ "command": "shell.showView", "key": "ctrl+alt+h", "args": { "id": "ied.threads" } },
 			{ "command": "ied.task.start", "key": "ctrl+f5" },
 			{ "command": "ied.task.cancel", "key": "ctrl+break" },
 			{ "command": "ied.editor.goToAll", "key": "ctrl+t" },

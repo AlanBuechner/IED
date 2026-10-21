@@ -2,9 +2,9 @@
 // (bound breakpoints on the line the adapter moved them to, unverified and disabled ones, the current statement).
 
 import { test, assertEqual } from "./harness.js";
-import { currentSession, framePath, isLive } from "/plugins/ied.editor/ui/debug.js";
+import { currentSession, framePath, isLive, hoverExpression } from "/plugins/ied.editor/ui/debug.js";
 import { marginDecorations } from "/plugins/ied.editor/ui/breakpointmargin.js";
-import { frameWhere } from "/plugins/ied.editor/ui/debugviews.js";
+import { frameWhere, breakpointLabel } from "/plugins/ied.editor/ui/debugviews.js";
 
 test("debug: the session followed is the newest live one, else the newest", () => {
 	const ended = { id: "d1", state: "ended" };
@@ -35,4 +35,16 @@ test("debug: the margin's decorations", () => {
 	const caller = marginDecorations("src/main.cf", [], [], frame, false);
 	assertEqual(caller.map((d) => [d.glyph, d.whole]), [["dbg-arrow dbg-caller", "dbg-caller-line"]]);
 	assertEqual(marginDecorations("src/other.cf", [], [], frame, true), []);
+});
+
+test("debug: the expression a hover names", () => {
+	const line = "	m_Dropped += player.position.x + renderer->width * count;";
+	const at = (text) => hoverExpression(line, line.indexOf(text) + 1);
+	assertEqual([at("m_Dropped").text, hoverExpression(line, line.indexOf("x +")).text, at("position").text, at("width").text, at("count").text], ["m_Dropped", "player.position.x", "player.position", "renderer->width", "count"]);
+	assertEqual([hoverExpression(line, line.indexOf("+=")), hoverExpression("", 0)], [null, null]);
+});
+
+test("debug: a breakpoint's label", () => {
+	assertEqual(breakpointLabel("src/game/main.cf", { line: 6 }), "main.cf, line 7");
+	assertEqual(breakpointLabel("main.cf", { line: 0, condition: "i > 3" }), "main.cf, line 1 when i > 3");
 });

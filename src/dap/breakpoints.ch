@@ -1,7 +1,8 @@
 // Breakpoints (docs/25 "Breakpoints"): the workspace's, not a session's - set before any session, given to every one,
-// kept per machine in .ied/local/breakpoints.json. bp.set replaces a file's, bp.list lists them; the bp:<wsId> topic
-// carries each file's breakpoints and, per session, where each bound and whether the adapter verified it. Lines are
-// 0-based, as every position a client sees (docs/10). Members run with the server lock held.
+// kept per machine in .ied/local/breakpoints.json with the Watch window's expressions. bp.set replaces a file's, bp.list
+// lists them, watch.set replaces the watches; the bp:<wsId> topic carries each file's breakpoints, the watches and, per
+// session, where each breakpoint bound and whether the adapter verified it. Lines are 0-based, as every position a
+// client sees (docs/10). Members run with the server lock held.
 
 include "services/workspaces.ch"
 include "web/rpc.ch"
@@ -31,6 +32,7 @@ namespace Ied
 	{
 		public Core::HashMap<Core::String, Core::Array<SourceBreakpoint*>> files;                                    // by path
 		public Core::HashMap<Core::String, Core::HashMap<Core::String, Core::Array<BoundBreakpoint*>>> bound;        // session -> path
+		public Core::Array<Core::String> watches;
 	}
 
 	class Breakpoints
@@ -57,6 +59,8 @@ namespace Ied
 		private Core::String BoundJson(Core::StringView sessionId, Core::StringView path, const Core::Array<BoundBreakpoint*>& list) const;
 		private Core::String SetMethod(Call& call, const Params& params);
 		private Core::String ListMethod(Call& call, const Params& params);
+		private Core::String WatchSetMethod(Call& call, const Params& params);
+		private Core::String WatchesJson(Workspace* ws);
 
 		private Server* server;
 		private Core::HashMap<Core::String, WorkspaceBreakpoints*> workspaces;   // by wsId

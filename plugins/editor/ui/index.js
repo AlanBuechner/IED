@@ -19,9 +19,9 @@ import { showGoToAll } from "./gotoall.js";
 import { fileName } from "./fileuris.js";
 import { MarkdownPreview as MarkdownPreviewView } from "./mdpreview.js";
 import { TaskState, TaskToolbar as TaskToolbarView, TaskStatus as TaskStatusView } from "./tasks.js";
-import { DebugState, BreakpointState, DebugToolbar as DebugToolbarView, framePath } from "./debug.js";
+import { DebugState, BreakpointState, DebugToolbar as DebugToolbarView, framePath, hoverExpression } from "./debug.js";
 import { BreakpointMargin } from "./breakpointmargin.js";
-import { CallStack as CallStackView, Locals as LocalsView } from "./debugviews.js";
+import { CallStack as CallStackView, Locals as LocalsView, Watch as WatchView, Threads as ThreadsView, BreakpointsWindow } from "./debugviews.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -52,6 +52,7 @@ export function activate(ied) {
 		breakpoints.follow(editor.ctx.wsId);
 		debug.follow(editor.ctx.wsId);
 		const margin = new BreakpointMargin(editor, editor.monaco, breakpoints, debug);
+		debugHover(editor.monaco, editor.model.getLanguageId());
 		return () => margin.dispose();
 	});
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => fileIconSpec(fileName(path)), resource: (path) => path });
@@ -90,6 +91,7 @@ export function activate(ied) {
 	ied.commands.handle("ied.debug.stepInto", () => debug.control("stepIn"));
 	ied.commands.handle("ied.debug.stepOut", () => debug.control("stepOut"));
 	ied.commands.handle("ied.debug.toggleBreakpoint", () => toggleBreakpoint());
+	ied.commands.handle("ied.debug.windows", () => ied.commands.run("shell.showView", { id: "ied.breakpoints" }));
 	ied.commands.handle("ied.task.start", () => tasks.run({ slot: "run" }));
 	ied.commands.handle("ied.task.test", () => tasks.run({ slot: "test" }));
 	ied.commands.handle("ied.task.cancel", () => tasks.cancelAll());
@@ -114,6 +116,27 @@ function statusState(tasks, debug) {
 	if (tasks.runs.size) return "building";
 	if (debug.live()) return "debugging";
 	return tasks.ended && tasks.ended.status === "failed" ? "failed" : "idle";
+}
+
+// While the program is stopped, a hover shows the value of the expression under it (VS DataTips), beside the language
+// server's hover. One provider per language.
+const hoverLanguages = new Set();
+function debugHover(monaco, language) {
+	if (hoverLanguages.has(language)) return;
+	hoverLanguages.add(language);
+	monaco.languages.registerHoverProvider(language, {
+		provideHover: async (model, position) => {
+			if (!debug.stopped()) return null;
+			const expression = hoverExpression(model.getLineContent(position.lineNumber), position.column - 1);
+			if (!expression) return null;
+			const value = await debug.evaluate(expression.text, "hover");
+			if (value.error || value.result === undefined) return null;
+			return {
+				range: new monaco.Range(position.lineNumber, expression.start + 1, position.lineNumber, expression.end + 1),
+				contents: [{ value: "```\n" + expression.text + " = " + value.result + (value.type ? "  (" + value.type + ")" : "") + "\n```" }],
+			};
+		},
+	});
 }
 
 // F9: a breakpoint on the current editor's line comes or goes.
@@ -214,6 +237,18 @@ export function CallStack(ctx) {
 
 export function Locals(ctx) {
 	return new LocalsView(ctx, debug);
+}
+
+export function Watch(ctx) {
+	return new WatchView(ctx, debug, breakpoints);
+}
+
+export function Threads(ctx) {
+	return new ThreadsView(ctx, debug);
+}
+
+export function Breakpoints(ctx) {
+	return new BreakpointsWindow(ctx, debug, breakpoints, (target) => goTo(ctx.ied, target));
 }
 
 export function ErrorList(ctx) {

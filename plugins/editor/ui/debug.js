@@ -35,6 +35,7 @@ export class DebugState {
 		this.stopWorkspace = null;
 		this.stopSession = null;
 		this.followed = null;     // the session id whose topic is followed
+		this.thread = null;       // the thread a click in Threads chose; null: the stopped one
 		this.onStop = null;       // fn(frame) when a stop arrives: the shell shows its place
 	}
 
@@ -92,6 +93,7 @@ export class DebugState {
 	}
 
 	stoppedAt(frames, threads, shown) {
+		this.thread = null;
 		this.frames = frames;
 		this.threads = threads;
 		this.frame = frames[0] || null;
@@ -122,6 +124,38 @@ export class DebugState {
 	selectFrame(frame) {
 		this.frame = frame;
 		this.changed();
+	}
+
+	// Threads: another thread's frames, the top one shown.
+	async selectThread(threadId) {
+		if (!this.stopped()) return;
+		try {
+			const trace = await this.ied.client.request("dbg.stackTrace", { sessionId: this.session.id, threadId });
+			this.thread = threadId;
+			this.frames = trace.stackFrames || [];
+			this.frame = this.frames[0] || null;
+			this.changed();
+			if (this.frame && this.onStop) this.onStop(this.frame);
+		}
+		catch (e) {
+			this.ied.toast(e.message, { level: "error" });
+		}
+	}
+
+	// The thread the frames are of: the one a click in Threads chose, else the stopped one.
+	threadShown() {
+		return this.thread || (this.session && this.session.stop ? this.session.stop.threadId : null);
+	}
+
+	// An expression's value in the shown frame (watch, hover): {result, type, variablesReference} or {error}.
+	async evaluate(expression, context) {
+		if (!this.stopped()) return { error: "not stopped" };
+		try {
+			return await this.ied.client.request("dbg.evaluate", { sessionId: this.session.id, frameId: this.frame ? this.frame.id : undefined, expression, context });
+		}
+		catch (e) {
+			return { error: e.message };
+		}
 	}
 
 	// F5: continue a stopped session, start one when none runs.
@@ -170,6 +204,7 @@ export class BreakpointState {
 		this.wsId = null;
 		this.files = new Map();   // path -> breakpoints
 		this.bound = new Map();   // "<sessionId> <path>" -> bound breakpoints
+		this.watches = [];        // the Watch window's expressions
 		this.listeners = new Set();
 		this.stop = null;
 	}
@@ -184,12 +219,16 @@ export class BreakpointState {
 			snap: (data) => {
 				this.files = new Map((data.files || []).map((f) => [f.path, f.breakpoints]));
 				this.bound = new Map((data.bound || []).map((b) => [b.sessionId + " " + b.path, b.breakpoints]));
+				this.watches = data.watches || [];
 				this.changed();
 			},
 			evt: (kind, data) => {
 				if (kind === "bp.changed") this.files.set(data.path, data.breakpoints);
 				else if (kind === "bp.bound") this.bound.set(data.sessionId + " " + data.path, data.breakpoints);
-				else if (kind === "bp.unbound") for (const key of [...this.bound.keys()]) if (key.startsWith(data.sessionId + " ")) this.bound.delete(key);
+				else if (kind === "bp.unbound") {
+					for (const key of [...this.bound.keys()]) if (key.startsWith(data.sessionId + " ")) this.bound.delete(key);
+				}
+				else if (kind === "watch.changed") this.watches = data.expressions || [];
 				this.changed();
 			},
 		}) : null;
@@ -210,6 +249,29 @@ export class BreakpointState {
 
 	boundIn(sessionId, path) {
 		return this.bound.get(sessionId + " " + path) || [];
+	}
+
+	// Every file's breakpoints: [{path, breakpoint}], files in path order.
+	all() {
+		return [...this.files.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).flatMap(([path, list]) => list.map((breakpoint) => ({ path, breakpoint })));
+	}
+
+	async set(path, breakpoints) {
+		try {
+			await this.ied.client.request("bp.set", { wsId: this.wsId, path, breakpoints });
+		}
+		catch (e) {
+			this.ied.toast(e.message, { level: "error" });
+		}
+	}
+
+	async setWatches(expressions) {
+		try {
+			await this.ied.client.request("watch.set", { wsId: this.wsId, expressions });
+		}
+		catch (e) {
+			this.ied.toast(e.message, { level: "error" });
+		}
 	}
 
 	// F9 and a click in the margin: a breakpoint on `line` (0-based) goes, else one comes.
@@ -249,4 +311,26 @@ export function DebugToolbar(ctx, state, tasks) {
 	const stopDebug = state.on(render);
 	const stopTasks = tasks ? tasks.on(render) : () => {};
 	return { dispose: () => { stopDebug(); stopTasks(); } };
+}
+
+// The expression a hover at `col` (0-based) of `line` names: the identifier there with the member accesses before it
+// ("player.position.x", "renderer->width"), or null on anything else.
+export function hoverExpression(line, col) {
+	const word = /[A-Za-z_][A-Za-z0-9_]*/g;
+	let found = null;
+	for (let m = word.exec(line); m; m = word.exec(line)) {
+		if (m.index <= col && col < m.index + m[0].length) {
+			found = { start: m.index, end: m.index + m[0].length };
+			break;
+		}
+	}
+	if (!found) return null;
+	let start = found.start;
+	for (;;) {
+		const before = line.slice(0, start);
+		const access = /([A-Za-z_][A-Za-z0-9_]*)(\.|->)$/.exec(before);
+		if (!access) break;
+		start = access.index;
+	}
+	return { start, end: found.end, text: line.slice(start, found.end) };
 }

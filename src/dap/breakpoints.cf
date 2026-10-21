@@ -4,6 +4,7 @@ include "host/server.ch"
 namespace Ied
 {
 	const int64 kMostBreakpointsPerFile = 1000;
+	const int64 kMostWatches = 200;
 
 	Core::String BreakpointsTopic(const Workspace* ws) { return Core::String("bp:") + ws->wsId.View(); }
 
@@ -14,6 +15,7 @@ namespace Ied
 		Breakpoints* self = this;
 		server->rpc.Register("bp.set", [self](Call& call, const Params& params) -> Core::String { return self->SetMethod(call, params); });
 		server->rpc.Register("bp.list", [self](Call& call, const Params& params) -> Core::String { return self->ListMethod(call, params); });
+		server->rpc.Register("watch.set", [self](Call& call, const Params& params) -> Core::String { return self->WatchSetMethod(call, params); });
 	}
 
 	void Breakpoints::WorkspaceOpened(Workspace* ws) {
@@ -90,6 +92,8 @@ namespace Ied
 			server->Log((Core::String("ignoring ") + file.View() + ": not a breakpoints file").View());
 			return;
 		}
+		Serialization::DomNode watches = read.root.Member("watches");
+		for (int64 i = 0; watches.Kind() == Serialization::DomKind::Array && i < watches.Count(); ++i) Get(ws)->watches.Push(Core::String(watches.At(i).AsView()));
 		for (int64 i = 0; i < files.Count(); ++i) {
 			Core::Array<SourceBreakpoint*> list;
 			for (int64 j = 0; j < files.ValueAt(i).Count(); ++j) list.Push(ReadBreakpoint(files.ValueAt(i).At(j)));
@@ -110,6 +114,10 @@ namespace Ied
 			json.EndArray();
 		}
 		json.EndObject();
+		json.Key(Core::StringView("watches"));
+		json.BeginArray();
+		for (const Core::String& expression : Get(ws)->watches) json.String(expression.View());
+		json.EndArray();
 		json.EndObject();
 		FS::Path file = BreakpointsFile(ws);
 		FS::MakeDirectories(file.Parent().CStr());
@@ -173,7 +181,19 @@ namespace Ied
 
 	// --- The topic and methods ---------------------------------------------------------------------------------------
 
-	// {files: [{path, breakpoints}], bound: [{sessionId, path, breakpoints}]}
+	// {expressions: [text]}
+	Core::String Breakpoints::WatchesJson(Workspace* ws) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("expressions"));
+		json.BeginArray();
+		for (const Core::String& expression : Get(ws)->watches) json.String(expression.View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// {files: [{path, breakpoints}], bound: [{sessionId, path, breakpoints}], watches: [text]}
 	Core::String Breakpoints::Snapshot(Workspace* ws) {
 		JsonWriter json;
 		json.BeginObject();
@@ -186,8 +206,29 @@ namespace Ied
 		for (const Core::KeyValue<Core::String, Core::HashMap<Core::String, Core::Array<BoundBreakpoint*>>>& session : Get(ws)->bound)
 			for (const Core::KeyValue<Core::String, Core::Array<BoundBreakpoint*>>& entry : session.value) json.Raw(BoundJson(session.key.View(), entry.key.View(), entry.value).View());
 		json.EndArray();
+		json.Key(Core::StringView("watches"));
+		json.BeginArray();
+		for (const Core::String& expression : Get(ws)->watches) json.String(expression.View());
+		json.EndArray();
 		json.EndObject();
 		return json.ToString();
+	}
+
+	Core::String Breakpoints::WatchSetMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		Serialization::DomNode given = params.List("expressions");
+		if (given.Count() > kMostWatches) throw RpcError(ErrorCode::BadRequest, "too many watch expressions");
+		Core::Array<Core::String> expressions;
+		for (int64 i = 0; i < given.Count(); ++i) {
+			Core::StringView text = given.At(i).AsView().Trimmed();
+			if (text.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "a watch expression needs text");
+			expressions.Push(Core::String(text));
+		}
+		Get(ws)->watches = expressions;
+		Save(ws);
+		const Core::String json = WatchesJson(ws);
+		server->hub.Publish(BreakpointsTopic(ws).View(), "watch.changed", json.View());
+		return json;
 	}
 
 	Core::String Breakpoints::SetMethod(Call& call, const Params& params) {

@@ -202,6 +202,14 @@ class DebuggerTests(ServerTestCase):
 		self.assertEqual([3, 4], [b["line"] for b in saved])
 		listed = await self.client.request("bp.list", {"wsId": "w1"})
 		self.assertEqual("src/game.txt", listed["files"][0]["path"])
+		await self.client.request("watch.set", {"wsId": "w1", "expressions": ["line", " total "]})
+		changed = (await self.client.wait_for("bp:w1", lambda f: f.get("kind") == "watch.changed", timeout=10))[-1]["data"]
+		self.assertEqual(["line", "total"], changed["expressions"])
+		with open(os.path.join(self.repo, ".ied", "local", "breakpoints.json"), encoding="utf-8") as f:
+			self.assertEqual(["line", "total"], json.load(f)["watches"], "kept with the breakpoints")
+		with self.assertRaises(RpcFailure) as blank:
+			await self.client.request("watch.set", {"wsId": "w1", "expressions": [" "]})
+		self.assertEqual("bad_request", blank.exception.code)
 		with self.assertRaises(RpcFailure) as escape:
 			await self.client.request("bp.set", {"wsId": "w1", "path": "../x.txt", "breakpoints": []})
 		self.assertEqual("bad_request", escape.exception.code)

@@ -61,11 +61,12 @@ class Debugger:
 		self.server = server
 		self.sessions = {}
 		self.breakpoints = {ws_id: {} for ws_id in server.workspace.items}
+		self.watches = {ws_id: [] for ws_id in server.workspace.items}
 		for ws_id in server.workspace.items:
 			server.hub.add("dbg:" + ws_id, lambda ws_id=ws_id: {"sessions": [s.summary() for s in self.sessions.values() if s.ws_id == ws_id]})
 			server.hub.add("bp:" + ws_id, lambda ws_id=ws_id: self.bp_snapshot(ws_id))
 		for name in ("dbg.start", "dbg.stop", "dbg.restart", "dbg.sessions", "dbg.continue", "dbg.next", "dbg.stepIn", "dbg.stepOut", "dbg.pause",
-				"dbg.stackTrace", "dbg.scopes", "dbg.variables", "dbg.evaluate", "bp.set", "bp.list"):
+				"dbg.stackTrace", "dbg.scopes", "dbg.variables", "dbg.evaluate", "bp.set", "bp.list", "watch.set"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	# --- breakpoints ------------------------------------------------------------------------------------------------
@@ -78,7 +79,7 @@ class Debugger:
 	def bp_snapshot(self, ws_id):
 		files = [{"path": path, "breakpoints": list(items)} for path, items in self.breakpoints[ws_id].items()]
 		bound = [{"sessionId": s.session_id, "path": PROGRAM, "breakpoints": self.bound(s)} for s in self.sessions.values() if s.ws_id == ws_id and s.live()]
-		return {"files": files, "bound": bound}
+		return {"files": files, "bound": bound, "watches": list(self.watches[ws_id])}
 
 	def publish_bound(self, session):
 		self.server.hub.publish("bp:" + session.ws_id, "bp.bound", {"sessionId": session.session_id, "path": PROGRAM, "breakpoints": self.bound(session)})
@@ -98,6 +99,15 @@ class Debugger:
 			if session.ws_id == ws_id and session.live() and path == PROGRAM:
 				self.publish_bound(session)
 		return {"path": path, "breakpoints": items}
+
+	async def m_watch_set(self, call, p):
+		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
+		expressions = [str(e).strip() for e in p.list("expressions")]
+		if any(not e for e in expressions):
+			raise RpcError("bad_request", "a watch expression needs text")
+		self.watches[ws_id] = expressions
+		self.server.hub.publish("bp:" + ws_id, "watch.changed", {"expressions": expressions})
+		return {"expressions": expressions}
 
 	async def m_bp_list(self, call, p):
 		return self.bp_snapshot(self.server.workspace.get(p.str("wsId")).ws_id)
