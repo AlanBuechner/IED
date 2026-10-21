@@ -221,7 +221,7 @@ As built (P1): the server reads `.ied/plugins/*/ied-plugin.json` with the soluti
 
 ## Open items
 
-- Script debugging (no PDB for JIT code) - C4's "later"; until then a plugin is debugged by loading its code as a built-in.
+- Script debugging (no PDB for JIT code); until then a plugin is debugged by loading its code as a built-in. Agreed with the C4 session (2026-10-21, not built): a host option (default: the host's own `-g`) links each script with lld into a DLL and PDB under a fresh name per load (`<plugin id>#<build>-<digest>.dll`, so stacks read `ied.git#3!Git::Status`) instead of the in-memory JIT, so C4DAP, VS and WinDbg see ordinary modules - breakpoints by file:line in the plugin's sources, stepping, locals, stacks across host and script frames. A breakpoint stops the server it is in, so IED debugs plugin code in a second server - a plugin host it launches under C4DAP with the plugin under development, like an extension development host - never in the one serving the IDE.
 - A hang in plugin code (no watchdog inside the process): its callers time out, its thread stays busy.
 - Compile time: about 0.2-0.3 s per plugin against the interface since C4 8bad750 (was 4-5 s); a start with unchanged code links the kept build.
 - Permissions enforced at the API are a courtesy for in-process code; real isolation of third-party code would need a process again (`docs/99` "Later").
