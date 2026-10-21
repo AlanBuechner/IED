@@ -135,5 +135,14 @@ public static void TestStringOperators() {
 	assert_se("ab-abc", joined.CStr(), "+ concatenates");
 	Core::String withLiteral = a + "-x";
 	assert_se("ab-x", withLiteral.CStr(), "+ takes a literal too");
+	Core::String strings = a + c;
+	assert_se("ababc", strings.CStr(), "+ takes another String");
 	assert_se("ab", a.CStr(), "the operands are unchanged");
+	Core::String grown = Core::String("x");
+	grown += c;
+	grown += "-";
+	grown += Core::StringView("yz");
+	assert_se("xabc-yz", grown.CStr(), "+= appends a String, a literal and a view");
+	grown += grown;
+	assert_se("xabc-yzxabc-yz", grown.CStr(), "+= appends itself");
 }

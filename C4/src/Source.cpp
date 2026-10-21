@@ -324,8 +324,9 @@ namespace
 			for (const auto& inc : m_Options.includeDirs)
 				cliIncludes.push_back(std::string(inc.c_str()));
 
-			// The build's own folder: two programs built at once never share a foreign object.
-			const fs::path interopFolder = Scripting::IntermediateFolder(m_Options) / (fs::path(m_Options.outputFile.c_str()).stem().string() + ".interop");
+			// The build's own folder: two programs built at once never share a foreign object. Absolute, as CBind and clang
+			// run in other working folders (BUG-318).
+			const fs::path interopFolder = fs::absolute(Scripting::IntermediateFolder(m_Options) / (fs::path(m_Options.outputFile.c_str()).stem().string() + ".interop"));
 			std::error_code ec;
 			fs::create_directories(interopFolder, ec);
 			if (ec)

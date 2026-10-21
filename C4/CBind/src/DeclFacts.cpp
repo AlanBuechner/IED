@@ -214,6 +214,12 @@ namespace CBind
 	/// methods (inherited ones are excluded by `methods()`). This is exactly the condition for
 	/// a class to INTRODUCE a vptr slot: C++ places the vptr in the first class of the
 	/// hierarchy that has any virtual function, and derived classes inherit it.
+	bool BindsDestructor(const clang::CXXRecordDecl* rec, const clang::CXXDestructorDecl* dtor)
+	{
+		if (!dtor || dtor->isDeleted()) return false;
+		return !rec || !rec->isCompleteDefinition() || !rec->isAbstract() || dtor->isVirtual();
+	}
+
 	bool HasOwnVirtuals(const clang::CXXRecordDecl* rec)
 	{
 		if (!rec || !rec->isCompleteDefinition()) return false;

@@ -190,6 +190,9 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
 			return false;
 		}
 		libraries.Push(Core::String((scriptHost / "C4Script.lib").string().c_str()));
+		// Loaded on the first call, so a program without the DLL beside it starts and Host::Open says so.
+		libraries.Push("-Wl,/DELAYLOAD:C4Script.dll");
+		libraries.Push("-ldelayimp");
 	}
 	if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.subsystem, m_In.options.verbose))
 	{

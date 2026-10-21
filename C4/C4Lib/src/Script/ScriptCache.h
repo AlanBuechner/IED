@@ -19,7 +19,8 @@ namespace Scripting
 
 	/// Compiled scripts kept in a folder (docs/runtime/04 section 4.6): a script whose files, options, host build and
 	/// compiler are those of an earlier compile links from that compile's machine code. One entry is kept per script
-	/// name and optimization level; writing one removes the entry it replaces.
+	/// name (without a trailing `#<tag>`, as `go#7` is `go`) and optimization level; writing one removes the entry it
+	/// replaces.
 	class ScriptCache
 	{
 	public:

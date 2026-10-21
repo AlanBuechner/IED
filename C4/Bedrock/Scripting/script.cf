@@ -1,4 +1,5 @@
 include "script.ch"
+include "Platform/library.ch"
 
 namespace Scripting
 {
@@ -110,6 +111,17 @@ namespace Scripting
 	Host* Host::OpenAt(const char* path)
 	{
 		Host* host = new Host();
+		// A --script-host program loads C4Script.dll on its first call into it (the link delay-loads it): loaded here
+		// first, a missing one is this error, not a crash in that call.
+		Platform::Library library("C4Script.dll");
+		if (!library.IsOpen())
+		{
+			Core::String why("the script host library C4Script.dll does not load (");
+			why.Append(Core::StringView(library.Error()));
+			why.Append(Core::StringView("): ship it beside the program, where a --script-host build puts it"));
+			host->error = why;
+			return host;
+		}
 		char[512] reason;
 		reason[0] = 0;
 		host->handle = c4s_host_open(path, (void*)&__c4_script_table, &reason[0], 512);

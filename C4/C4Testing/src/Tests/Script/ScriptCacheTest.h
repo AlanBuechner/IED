@@ -26,5 +26,7 @@ namespace Testing
 		void AWriteReplacesOnlyItsScriptsEntryAtItsLevel();
 		TEST_FUNC(Script.Cache)
 		void AnUnreadableScriptFileHasNoEntry();
+		TEST_FUNC(Script.Cache)
+		void ABuildTagSharesTheEntry();
 	};
 } // namespace Testing

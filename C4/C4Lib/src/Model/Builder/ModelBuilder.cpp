@@ -329,16 +329,26 @@ namespace Scripting
 
 	void ModelBuilder::VisitPrelude(Context& ctx, CompilerInstance& compiler)
 	{
-		// After the program: a name the program declares at file scope is the program's, the prelude's is hidden.
+		// After the program: a name the program declares at file scope is the program's, the prelude's is hidden. A
+		// hidden function goes to a scope no name reaches, for the files the program's declaration is not visible in.
 		auto prelude = ctx.model->m_PreludeUnit ? compiler.GetCompilationUnit(ctx.model->m_PreludeUnit) : nullptr;
 		if (!prelude) return;
 		ctx.unitId = ctx.model->m_PreludeUnit;
-		const Scope* root = ctx.model->Symbols()->GetRoot();
+		Scope* root = ctx.model->Symbols()->GetRoot();
 		for (const auto& child : prelude->GetOriginalChildren())
 		{
 			const Core::String name = PreludeName(child.Get());
-			if (!name.empty() && !root->Entries(name).Empty()) continue;
-			VisitDeclaration(ctx, child.Get());
+			if (name.empty() || root->Entries(name).Empty()) VisitDeclaration(ctx, child.Get());
+			else if (dynamic_cast<const FunctionDefinitionNode*>(child.Get())) VisitHiddenPrelude(ctx, child.Get());
 		}
+	}
+
+	void ModelBuilder::VisitHiddenPrelude(Context& ctx, const AstNode* function)
+	{
+		if (!ctx.model->m_HiddenPrelude)
+			ctx.model->m_HiddenPrelude = ctx.model->Symbols()->CreateScope(Scope::Kind::Namespace, "__prelude", ctx.model->Symbols()->GetRoot());
+		Context hidden = ctx;
+		hidden.scope = ctx.model->m_HiddenPrelude;
+		VisitDeclaration(hidden, function);
 	}
 } // namespace Scripting

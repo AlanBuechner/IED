@@ -3,8 +3,8 @@
 // its own instead (docs/language/14-builtins.md).
 
 // --- C memory, strings and output (the C runtime) --------------------------------------------------------
-[link("memcpy")] void memcpy(void* dst, void* src, uint64 n);
-[link("memmove")] void memmove(void* dst, void* src, uint64 n);
+[link("memcpy")] void* memcpy(void* dst, const void* src, uint64 n);   // the C runtime's own signatures: a bound C header declares the same functions
+[link("memmove")] void* memmove(void* dst, const void* src, uint64 n);
 [link("memset")] void* memset(void* dst, int32 value, uint64 n);
 [link("strlen")] uint64 strlen(void* s);
 [link("strcmp")] int32 strcmp(void* a, void* b);

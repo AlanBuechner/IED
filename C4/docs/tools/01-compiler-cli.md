@@ -53,7 +53,7 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 | `-fno-strict-aliasing` | Turn off strict aliasing ([types 4.14](../language/04-types.md#414-strict-aliasing), D-64): the IR carries no type-based alias tags, so any load or store may touch any memory, for code that reads a value through a pointer to another type. |
 | `-g` | Debug information: the module describes the program's functions, parameters and locals, types, globals and a line for every statement as CodeView, and the link writes `<base>.pdb` beside the output for the Windows debuggers ([compiler/04-codegen-and-abi.md](../compiler/04-codegen-and-abi.md#debug-information--g)). It combines with every `-O` level. |
 | `--int-dir <dir>` | Write the intermediates (`.ll`, `.obj`, `.bc`) in `<dir>`. Without it they go next to the output. |
-| `-l <lib>`, `-l<lib>` | Link the library `<lib>` (`<lib>.lib`; a name that already ends in `.lib` is used as is). A compiled resource file, `-l app.res` (from `llvm-rc` or `rc.exe`: icons, version information, a manifest), goes to the linker as it is. |
+| `-l <lib>`, `-l<lib>` | Link the library `<lib>` (`<lib>.lib`; a name that already ends in `.lib` is used as is). A compiled resource file, `-l app.res` (icons, version information, a manifest; the install's `toolchain/bin/llvm-rc.exe -fo app.res app.rc` makes one), goes to the linker as it is. |
 | `-L <dir>`, `-L<dir>` | Look for `-l` libraries in `<dir>` too. |
 | `--subsystem <console\|windows>` | The executable's Windows subsystem. `console` (the default) gets a console window when started outside one; `windows` is a windowed program that gets none (`/SUBSYSTEM:WINDOWS`). Either way the program starts at `main` (`/ENTRY:mainCRTStartup`), and its standard streams work when its starter redirects them. Anything else is an error. |
 | `-c` | Compile to `<base>.obj` and stop: no runtime objects, no link. |
@@ -120,7 +120,7 @@ An install is one folder; copying it anywhere gives a working compiler (design D
   C4.exe, LLVM-C.dll, libclang.dll, LTO.dll
   Bedrock/                 the default library
   C4Runtime/               the runtime's C and C++ sources
-  toolchain/bin/           clang.exe, lld-link.exe
+  toolchain/bin/           clang.exe, lld-link.exe, llvm-rc.exe (compiles a .rc to the .res `-l` links)
   toolchain/lib/clang/     clang's own headers (stddef.h, stdint.h, intrinsics)
   CBind/CBind.exe          the interop binding generator
 ```

@@ -11,9 +11,11 @@
 #   - A folder listed in ExpectedExit.json must compile and terminate with the recorded exit code
 #     (used for programs that are correct precisely because they die: uncaught-exception tests).
 #     Every "mustContain" substring must appear in their output and no "mustNotContain" one may. An entry
-#     may also give "compileFlags" and "runArgs" ({dir} is the case's build folder), a "jsonFile" the run
+#     may also give "compileFlags" and "runArgs" ({dir} is the case's build folder; in compileFlags {case} is its
+#     source folder, for files the build folder does not get), a "jsonFile" the run
 #     must write there as valid JSON (the test harness's -test-json summary), and "compileMustContain":
-#     substrings the compiler's own output must contain (warnings of a build that succeeds).
+#     substrings the compiler's own output must contain (warnings of a build that succeeds), and
+#     "compileMustNotContain": substrings it must not (a generated shim's warnings).
 #   - A folder listed in ExpectedIR.json must also emit LLVM IR containing every "irContains" substring
 #     (for features whose effect is the code itself: volatile accesses, thread_local storage).
 #   - Every other folder must compile AND run with exit 0.
@@ -78,8 +80,11 @@ function Load-ExpectedManifest([string]$path) {
         if ($v.runArgs) { $runArgs = @($v.runArgs) }
         $compileMust = @()
         if ($v.compileMustContain) { $compileMust = @($v.compileMustContain) }
+        $compileMustNot = @()
+        if ($v.compileMustNotContain) { $compileMustNot = @($v.compileMustNotContain) }
         $map[$p.Name] = @{ exit = [int]$v.exit; must = $must; mustNot = $mustNot; reason = [string]$v.reason;
-            compileFlags = $compileFlags; runArgs = $runArgs; jsonFile = [string]$v.jsonFile; compileMust = $compileMust }
+            compileFlags = $compileFlags; runArgs = $runArgs; jsonFile = [string]$v.jsonFile; compileMust = $compileMust;
+            compileMustNot = $compileMustNot }
     }
     return $map
 }
@@ -151,7 +156,7 @@ foreach ($f in $folders) {
         continue
     }
     if ($hasTests) { $caseFlags += "-test" }
-    if ($expected.ContainsKey($rel)) { $caseFlags += @($expected[$rel].compileFlags | ForEach-Object { $_.Replace("{dir}", $sub) }) }
+    if ($expected.ContainsKey($rel)) { $caseFlags += @($expected[$rel].compileFlags | ForEach-Object { $_.Replace("{dir}", $sub).Replace("{case}", $f.FullName) }) }
     if ($negative.ContainsKey($rel)) { $caseFlags += @($negative[$rel].compileFlags) }
     $output = & $compiler $sub -o $exe @caseFlags 2>&1 | ForEach-Object { [string]$_ }
 
@@ -203,6 +208,7 @@ foreach ($f in $folders) {
         $missing = $spec.must | Where-Object { -not $runOut.Contains($_) } | Select-Object -First 1
         $compileText = $output -join "`n"
         $missingWarning = $spec.compileMust | Where-Object { -not $compileText.Contains($_) } | Select-Object -First 1
+        $unwanted = $spec.compileMustNot | Where-Object { $compileText.Contains($_) } | Select-Object -First 1
         $jsonProblem = ""
         if ($spec.jsonFile) {
             $jsonPath = Join-Path $sub $spec.jsonFile
@@ -217,6 +223,8 @@ foreach ($f in $folders) {
             $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "output must contain '$missing'" }
         } elseif ($missingWarning) {
             $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "the compiler's output must contain '$missingWarning'" }
+        } elseif ($unwanted) {
+            $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "the compiler's output must not contain '$unwanted'" }
         } elseif ($jsonProblem) {
             $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = $jsonProblem }
         } else {

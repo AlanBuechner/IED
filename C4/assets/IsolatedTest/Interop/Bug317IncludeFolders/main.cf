@@ -1,0 +1,10 @@
+// BUG-317: a bound header and a foreign source that include a header from an -I folder (or a project's `includes`)
+// find it: the folders the build searches reach CBind and the C compile. main returns 0 when the call works.
+extern "c" include "bar.h"
+extern "c" source "bar.c"
+
+int32 main() {
+	Bar bar;
+	bar.b = 14;
+	return bar_get(&bar) == 42 ? 0 : 1;
+}

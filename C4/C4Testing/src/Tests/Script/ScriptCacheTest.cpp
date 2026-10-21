@@ -152,6 +152,18 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// A host tells builds of one script apart by a trailing `#<tag>`; each build hits the same entry.
+	void ScriptCacheTest::ABuildTagSharesTheEntry()
+	{
+		const ScriptCache cache(Folder("tags").string(), "compiler");
+		const std::string first = cache.EntryFor(Host(1), Options("go@ws1#1", "int32 F() { return 1; }"));
+		TEST_ASSERT(first == cache.EntryFor(Host(1), Options("go@ws1#2", "int32 F() { return 1; }")));
+		TEST_ASSERT(first == cache.EntryFor(Host(1), Options("go@ws1", "int32 F() { return 1; }")));
+		TEST_ASSERT(first != cache.EntryFor(Host(1), Options("go@ws2#1", "int32 F() { return 1; }")));
+		TEST_ASSERT(StartsWith(fs::path(first).filename().string(), "go_ws1.O2-"));
+		TEST_PASSED();
+	}
+
 	void ScriptCacheTest::AnUnreadableScriptFileHasNoEntry()
 	{
 		const ScriptCache cache(Folder("unreadable").string(), "compiler");

@@ -1,0 +1,15 @@
+// BUG-319: an abstract class without a destructor of its own (a COM interface) gets no destructor binding, so the
+// shim calls no `~T()` on it and compiles without warnings (ExpectedExit.json); one with a virtual destructor keeps
+// its binding. main returns the failures.
+extern "c++" include "shapes.h"
+extern "c++" source "shapes.cpp"
+
+int32 main() {
+	int32 failures = 0;
+	IShape* square = MakeSquare(5);
+	failures += square->Area() == 25 && square->Sides() == 4 ? 0 : 1;
+	FreeShape(square);
+	IOwned* owned = MakeOwned(9);
+	failures += owned->Value() == 9 ? 0 : 1;
+	return failures;
+}

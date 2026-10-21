@@ -167,7 +167,7 @@ Nuke reference).
   C4.exe, *.dll, *.pdb  the compiler and the LLVM dlls it loads
   Bedrock/              the default library
   C4Runtime/            the runtime's C and C++ sources
-  toolchain/bin, lib/   clang, lld-link, clang's headers
+  toolchain/bin, lib/   clang, lld-link, llvm-rc, clang's headers
   CBind/                the binding generator
   C4Script/             the script host library (runtime/04-scripting.md)
   tools/C4LSP/          the language server (+ the LLVM dlls it loads)

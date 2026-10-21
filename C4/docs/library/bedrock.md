@@ -267,9 +267,9 @@ null-terminated buffer and keeps its character count current; a zero `String` is
 
 `Init(const char*)`, `Init(StringView)`, `Init(int64 reserve)`, copy, `Delete`, `ByteLength`,
 `CharCount`, `Capacity`, `IsEmpty`, `CStr()`, `View()`, `CodePointAt`, `==`, `!=`, `<`, `>`, `<=`, `>=` (`==` and `!=`
-also against a `StringView` or a `const char*`: `s == "ab"`), `hash`, `+` with a `StringView` or a
-`const char*` (a new `String`), `Append(StringView)` and `Append(const char*)` (safe with a view of itself), `Clear`,
-`Reserve`.
+also against a `StringView` or a `const char*`: `s == "ab"`), `hash`, `+` with a `String`, a `StringView` or a
+`const char*` (a new `String`), `Append` (`+=`) of a `String`, a `StringView` or a `const char*` (safe with itself
+or a view of itself), `Clear`, `Reserve`.
 
 ### `Core::StringBuilder` (`stringbuilder.ch`)
 
@@ -824,7 +824,7 @@ script host: build it with --script-host`).
 
 | Type | Meaning |
 |---|---|
-| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open). `Compile(options)` compiles, links and loads a script; `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). `UseCache(folder)` keeps compiled scripts in `folder`: a script compiled again with the same files, options, host and compiler links the machine code kept from before (docs/runtime/04 section 4.6). Closed on delete. |
+| `Host` | `Host::Open()` reads the interface beside the program (`Game.exe` -> `Game.c4i`), `OpenAt(path)` another one; `IsOpen()`, `Error()` (why it did not open: no interface, another build's, or no `C4Script.dll` beside the program). `Compile(options)` compiles, links and loads a script; `Reload(script)` compiles the script's options again and, when the new one compiles, unloads the old one and loads the new one (when it does not, the old one stays loaded and the new one carries the diagnostics). `UseCache(folder)` keeps compiled scripts in `folder`: a script compiled again with the same files, options, host and compiler links the machine code kept from before (docs/runtime/04 section 4.6). Closed on delete. |
 | `ScriptOptions` | `name` (the script's name and reflection tag), `optimize` (`-O2`, default; false for `-O0`), `AddFile(path)`, `AddText(fileName, text)` (a file given whole; other files include it by that name), `Allow(projectOrPath)` (the host headers it may include; none: all), `Define("NAME=VALUE")`. |
 | `Script` | `Ok()`, `Diagnostics()` (the compiler's messages, warnings too), `Tag()`, `Cached()` (linked from the host's cache), `Faulted()`, `FaultText()`; `Find(symbol)`, `Address(name)` (a function's address for a `funcptr`), `FindFunction(name)`, `FindType(name)` (the script's own, by reflection); `Call(fn, context)` runs `fn(context)` guarded, `Invoke(function, result, args...)` calls a reflected function guarded; `RunTests(filter)` runs the script's `[test]` functions with the harness (the failed assertions; -1 when it has none or a test faulted); `Unload()` (how many finalizers of its live objects it dropped); `Options()`. Unloads on delete. |
 | `Fault`, `Guard(fn, context, fault)` | runs any `fn(context)` under the structured-exception guard: false, with the fault's code, instruction and touched address, when a hardware fault stopped it. |

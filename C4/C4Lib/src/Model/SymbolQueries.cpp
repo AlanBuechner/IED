@@ -16,6 +16,16 @@ namespace Scripting
 {
 	namespace
 	{
+		void CollectHiddenPrelude(const ProgramModel& model, const Core::String& name, Core::Vector<OverloadCandidate>& candidates)
+		{
+			const SymbolInfo* hidden = model.HiddenPrelude() ? model.HiddenPrelude()->Find(name) : nullptr;
+			if (!hidden || hidden->kind != SymbolKind::Function) return;
+			for (const FunctionRecord* rec : hidden->functions) candidates.Push({ rec->type, rec, rec->minArity });
+		}
+	}
+
+	namespace
+	{
 		const Type* StripAliases(const Type* t)
 		{
 			while (t && t->GetKind() == TypeKind::Alias) t = static_cast<const AliasType*>(t)->GetAliasedType();
@@ -166,6 +176,7 @@ namespace Scripting
 		if (local && local->kind == SymbolKind::Function) sym = local;
 	}
 	if (!sym) sym = model.FindVisibleQualified(name, ctx.unitId, ctx.scope);
+		const FunctionRecord* elsewhere = nullptr; // a function of the name this file cannot see
 		if (sym)
 		{
 			if (sym->kind == SymbolKind::Function)
@@ -179,12 +190,22 @@ namespace Scripting
 					if (!haveReceiver && rec->isExtensionMethod) continue;
 					// One overload set holds every file's same-named static (D4): each is a candidate only where
 					// its declaration is visible, so a file calls its own.
-					if (!rec->isBuiltin && !model.Symbols()->IsVisible(rec->declUnit, ctx.unitId)) continue;
+					if (!rec->isBuiltin && !model.Symbols()->IsVisible(rec->declUnit, ctx.unitId)) { elsewhere = rec; continue; }
 					candidates.Push({ rec->type, rec, rec->minArity });
 				}
 			else if (!haveReceiver && !isOperatorName)
 				return QueryResult<const FunctionType*>::Fail(QueryError::NotCallable, "name is not a function: " + name);
 		}
+		// A prelude function the program's own declaration hides is the one a file calls where that declaration is
+		// not visible (BUG-320).
+		if (candidates.Empty() && !haveReceiver && !isOperatorName && name.find("::") == Core::String::npos)
+			CollectHiddenPrelude(model, name, candidates);
+		if (!sym && name.find("::") == Core::String::npos)
+			if (const SymbolInfo* unseen = model.Symbols()->GetRoot()->Find(name); unseen && unseen->kind == SymbolKind::Function && !unseen->functions.Empty())
+				elsewhere = unseen->functions[0];
+		if (candidates.Empty() && elsewhere && !tmplArgs)
+			reasons.Push("no function named " + name + " is visible here: it is declared in " + model.SourceName(elsewhere->declUnit) +
+				", which this file does not include");
 
 		// The function templates of the name join the overload set with their written, deduced or default
 		// arguments (D-17); a call that writes template arguments names only templates.

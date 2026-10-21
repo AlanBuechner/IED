@@ -2180,7 +2180,7 @@
         "reason": "Revived from IsoNegativeTest::TestSymbolsFromNonIncludedFileAreNotVisible: a body sees only what its file includes (01)."
     },
     "FunctionFromFileNotIncluded": {
-        "expect": ["main.cf (1:23) error: no function named MakeWidget"],
+        "expect": ["main.cf (1:23) error: no function named MakeWidget is visible here: it is declared in widgets.ch, which this file does not include"],
         "reason": "Revived from IsoNegativeTest::TestSymbolsFromNonIncludedFileAreNotVisible: functions follow the same include closure."
     },
     "NoSourcesWrongExtension": {

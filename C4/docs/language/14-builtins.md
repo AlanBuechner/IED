@@ -12,8 +12,11 @@ Rules:
 - The prelude declares each function with `[link("symbol")]`: C runtime functions keep their names, C4 runtime
   ones are prefixed `c4_` (`raw_alloc` calls `c4_raw_alloc`).
 - A program declaration of the same file-scope name, a function or a type, hides the prelude's: the prelude is a
-  fallback, never an override. A name inside a namespace hides nothing.
-- Prelude parameters are primitives or `void*`. Any pointer converts to `void*`; string literals are `char8*`.
+  fallback, never an override. A name inside a namespace hides nothing. A hidden function stays the one a file
+  calls where the program's declaration is not visible: Bedrock keeps the prelude's `memmove` beside a bound C
+  header that declares the C runtime's (the prelude's C functions have the C runtime's signatures, so both name one
+  function).
+- Prelude parameters are primitives, `void*` or `const void*`. Any pointer converts to them; string literals are `char8*`.
 - Prelude functions are the runtime's, not the program's: reflection does not list them. Go-to-definition in the
   editor opens their declaration in the prelude.
 - A compile without the default library (`Bedrock/` missing) has no prelude; `C4.exe` reports a missing
@@ -50,8 +53,8 @@ the intrinsic.
 
 | Builtin | Signature |
 |---|---|
-| `memcpy` | `void memcpy(void* dst, void* src, uint64 n)` |
-| `memmove` | `void memmove(void* dst, void* src, uint64 n)` - the ranges may overlap |
+| `memcpy` | `void* memcpy(void* dst, const void* src, uint64 n)` - returns `dst`, as C's does |
+| `memmove` | `void* memmove(void* dst, const void* src, uint64 n)` - the ranges may overlap; returns `dst` |
 | `memset` | `void* memset(void* dst, int32 value, uint64 n)` |
 | `memcmp` | `int32 memcmp(void* a, void* b, uint64 n)` |
 | `strlen` | `uint64 strlen(void* s)` |

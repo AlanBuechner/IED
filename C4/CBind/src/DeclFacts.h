@@ -36,6 +36,10 @@ namespace CBind
 	enum class FunctionBinding { None, Direct, Wrapper };
 	FunctionBinding HowToBind(const clang::FunctionDecl* fn, const clang::ASTContext& ctx, const BindingOptions& opts);
 	bool HasOwnVirtuals(const clang::CXXRecordDecl* rec);
+	/// Whether C4 gets `dtor` as the class's [operator("delete")] (BUG-319): not a deleted one, and not one of an
+	/// abstract class that is not virtual - an interface (a COM one) is never destroyed through its own type, and
+	/// calling such a destructor is undefined.
+	bool BindsDestructor(const clang::CXXRecordDecl* rec, const clang::CXXDestructorDecl* dtor);
 	bool BaseHasVirtuals(const clang::CXXRecordDecl* rec);
 
 	/// Recursively visit every declaration in the translation unit, descending into named and

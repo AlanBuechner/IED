@@ -1,0 +1,19 @@
+// BUG-320: a bound C header that declares the C runtime's memmove, memcpy, strlen, printf and sqrt (string.h, stdio.h,
+// math.h, as windows.h does) leaves the prelude's in force where the header is not visible - Bedrock's own calls -
+// and is the one called where it is. main returns the failures.
+extern "c" include "memory.h"
+include "bedrock.ch"
+
+int32 main() {
+	int32 failures = 0;
+	Core::String joined = Core::String("ab") + "cd";
+	joined.Append(Core::StringView("ef"));
+	failures += joined.ByteLength() == 6 && joined.View() == "abcdef" ? 0 : 1;
+	char[8] buffer;
+	memmove(&buffer[0], "xyz", 4);
+	memcpy(&buffer[4], "uv", 3);
+	failures += buffer[0] == 'x' && buffer[2] == 'z' && buffer[4] == 'u' ? 0 : 1;
+	failures += strlen(&buffer[0]) == 3 ? 0 : 1;
+	failures += sqrt(16.0) == 4.0 ? 0 : 1;
+	return failures;
+}

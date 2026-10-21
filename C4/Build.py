@@ -127,12 +127,13 @@ def GetProject():
 		p.copies.append(bedrockDir)
 
 	# The rest of the install layout C4.exe finds relative to itself (D-56): the runtime's sources in C4Runtime/
-	# and the clang + lld-link it compiles and links with, with clang's own headers, in toolchain/. A copy of
-	# the folder (MakeToolchain.py assembles the toolchain from it) then builds on any machine.
+	# and the clang + lld-link it compiles and links with, with clang's own headers, in toolchain/, beside llvm-rc,
+	# which compiles a program's .rc to the .res `-l` links. A copy of the folder (MakeToolchain.py assembles the
+	# toolchain from it) then builds on any machine.
 	runtimeDir = location + "/C4Runtime"
 	if os.path.isdir(runtimeDir):
 		p.copies.append(runtimeDir)
-	toolchainBin = [os.path.join(llvmBinDir, tool) for tool in ["clang.exe", "lld-link.exe"]]
+	toolchainBin = [os.path.join(llvmBinDir, tool) for tool in ["clang.exe", "lld-link.exe", "llvm-rc.exe"]]
 	if all(os.path.exists(tool) for tool in toolchainBin):
 		p.copies.append({ "folder": "toolchain/bin", "files": toolchainBin })
 	clangHeaders = Config.compilerFolder + "/lib/clang"

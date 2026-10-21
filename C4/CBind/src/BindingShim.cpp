@@ -131,7 +131,7 @@ namespace CBind
 			}
 			else if (const auto* dtor = dyn_cast<clang::CXXDestructorDecl>(m))
 			{
-				if (!dtor->isDeleted()) dtors.push_back(dtor);
+				if (BindsDestructor(rec, dtor)) dtors.push_back(dtor);
 			}
 			else
 			{

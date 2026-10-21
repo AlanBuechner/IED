@@ -1,4 +1,14 @@
 {
+  "Interop/Bug319AbstractInterfaces": {
+    "exit": 0,
+    "compileMustNotContain": ["warning"],
+    "reason": "BUG-319: an abstract class without a virtual destructor (a COM interface) gets no destructor binding, so CBind's shim never calls ~T() on it and builds without warnings."
+  },
+  "Interop/Bug317IncludeFolders": {
+    "exit": 0,
+    "compileFlags": ["-I{case}/inc"],
+    "reason": "BUG-317: the build's include folders reach CBind and the foreign C compile, so a bound header can include a vendored header from them."
+  },
   "Platform/WindowsSubsystem": {
     "exit": 2,
     "compileFlags": ["--subsystem", "windows"],

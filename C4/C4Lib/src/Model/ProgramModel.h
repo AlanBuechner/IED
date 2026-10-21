@@ -270,6 +270,10 @@ namespace Scripting
 		const std::unordered_map<uint32, std::string>& SourcePaths() const { return m_SourcePaths; }
 		/// The prelude's unit (every unit includes it, D-43); 0 when the program has none.
 		uint32 PreludeUnit() const { return m_PreludeUnit; }
+		/// The prelude's functions whose names the program declares at file scope: a file that cannot see the
+		/// program's declaration (Bedrock's, beside a bound C header that declares memmove) calls these. Null when
+		/// the program hides none.
+		const Scope* HiddenPrelude() const { return m_HiddenPrelude; }
 
 		/// The processor the program is compiled for (D-62): which intrinsics it may use.
 		void SetTarget(const CpuTarget& target) { m_Target = target; }
@@ -374,6 +378,7 @@ namespace Scripting
 		std::unordered_map<uint32, Core::String> m_SourceNames;
 		CpuTarget m_Target;
 		uint32 m_PreludeUnit = 0;
+		Scope* m_HiddenPrelude = nullptr;
 		std::unordered_map<uint32, std::string> m_SourcePaths;
 		const ProjectSet* m_Projects = nullptr;
 		std::unordered_map<uint32, uint32> m_ProjectOfUnit;

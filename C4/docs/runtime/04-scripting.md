@@ -187,7 +187,8 @@ bitcode: the script lowers their bodies from the template (section 4.3).
 ### 3.4 What the build ships
 
 `Game.exe`, `Game.c4i` and `C4Script.dll` (the compiler, LLVM and the JIT; about the size of `C4.exe`). The
-scripts' own files are the program's data.
+scripts' own files are the program's data. The program loads `C4Script.dll` on its first call into it (the link
+delay-loads it), so one shipped without the DLL still starts, and `Host::Open` reports the missing DLL as its error.
 
 ---
 
@@ -264,7 +265,8 @@ every host header. Bedrock is always allowed.
 (`Script/ScriptCache`): its machine code (the COFF object the JIT generated), its warnings and its `thread_local`
 names. A later compile whose inputs are the same links that object instead of compiling: steps 1 to 5 are
 skipped, and step 6 links the object as it is. The inputs are everything that decides the code: each script file's
-path and text, the script's name (its reflection tag), the optimization level, the allow-list, the defines, the
+path and text, the script's name up to a trailing `#<tag>` (a host tells builds of one script apart with one; the
+reflection tag is applied at load, not in the machine code), the optimization level, the allow-list, the defines, the
 host's build id, and the compiler's own build (the path, size and time of `C4Script.dll`, so a rebuilt compiler
 never runs code an older one made). An entry is a file `<name>.<O0|O2>-<digest>.c4so`; writing one removes the
 script's other entries at that level, so the folder holds one per script and level. A missing, damaged or

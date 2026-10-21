@@ -362,6 +362,25 @@ function Test-ProjectDefines {
     return @()
 }
 
+# A project's `includes` folder reaches CBind and the foreign C compile (BUG-317), and a relative --int-dir still gets
+# bindings (BUG-318): the build runs from the project folder with `--int-dir obj`.
+function Test-ProjectInterop {
+    $dir = New-Sources "projects-interop" @{
+        "vendor/inc/vendor.h" = "typedef struct Bar { int b; } Bar;`n#define VENDOR_SCALE 3"
+        "app/src/bar.h" = "#include ""vendor.h""`nint bar_get(const Bar* bar);"
+        "app/src/bar.c" = "#include ""bar.h""`nint bar_get(const Bar* bar) { return bar->b * VENDOR_SCALE; }"
+        "app/src/main.cf" = "extern ""c"" include ""bar.h""`nextern ""c"" source ""bar.c""`nint32 main() { Bar bar; bar.b = 14; return bar_get(&bar); }"
+        "app/projects.toml" = "root = ""App""`n[[project]]`nname = ""App""`nsources = [""src""]`nincludes = [""../vendor/inc""]"
+    }
+    Push-Location (Join-Path $dir "app")
+    try { $build = Invoke-Compiler $compiler @("--projects", "projects.toml", "-o", "out/app.exe", "--int-dir", "obj") }
+    finally { Pop-Location }
+    if ($build.exit -ne 0) { return @("the build with a vendored include folder and a relative --int-dir failed: $($build.output)") }
+    & (Join-Path $dir "app/out/app.exe") | Out-Null
+    if ($LASTEXITCODE -ne 42) { return @("the bound function returned $LASTEXITCODE, not 42") }
+    return @()
+}
+
 # The rules of a build description: a project reaches only what it depends on, a path two dependencies have is
 # ambiguous, and a broken description names its line or its problem.
 function Test-ProjectBoundaries {
@@ -788,7 +807,7 @@ int32 main()
 
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
-    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-DebugInfoFlag",
+    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag",
     "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-FrostCompileDatabase", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
 $passed = 0
 $failed = 0

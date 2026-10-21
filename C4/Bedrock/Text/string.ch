@@ -39,9 +39,11 @@ namespace Core
 		[operator("hash")] public uint64 Hash() const { return View().Hash(); }
 		[operator("+")] public String Concat(StringView other) const;
 		[operator("+")] public String ConcatText(const char* other) const { return Concat(StringView(other)); }
+		[operator("+")] public String ConcatString(const String& other) const { return Concat(other.View()); }
 
-		public void Append(StringView text);
-		public void Append(const char* text) { Append(StringView(text)); }
+		[operator("+=")] public void Append(StringView text);
+		[operator("+=")] public void Append(const char* text) { Append(StringView(text)); }
+		[operator("+=")] public void Append(const String& text) { Append(text.View()); }
 		public void Clear();                  // empty, keeping the buffer
 		public void Reserve(int64 bytes);     // room for at least `bytes` without growing again
 

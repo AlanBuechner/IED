@@ -290,6 +290,23 @@ namespace Scripting
 			return found;
 		}
 
+		// `folders` not yet in `into`, in order.
+		void AppendNewFolders(std::vector<std::string>& into, const std::vector<std::string>& folders)
+		{
+			for (const std::string& folder : folders)
+				if (std::none_of(into.begin(), into.end(), [&](const std::string& have) { return Norm(have) == Norm(folder); })) into.push_back(folder);
+		}
+
+		std::vector<std::string> ForeignIncludeDirs(const std::vector<std::string>& own, const std::vector<std::string>& cli,
+			const std::vector<std::string>& searched)
+		{
+			std::vector<std::string> folders;
+			AppendNewFolders(folders, own);
+			AppendNewFolders(folders, cli);
+			AppendNewFolders(folders, searched);
+			return folders;
+		}
+
 		std::string ResolveHeader(const std::string& headerPath, const std::string& fileDir,
 			const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs)
 		{
@@ -456,6 +473,11 @@ namespace Scripting
 				continue;
 			}
 
+			// The header or source sees the extern block's own include_dir()s, then every -I, then the folders the
+			// file's own includes search (its project's sources and includes): a bound header may include a vendored
+			// one from any of them (BUG-317).
+			const std::vector<std::string> includeDirs = ForeignIncludeDirs(d.includeDirs, cliIncludeDirs, f.folders.empty() ? rootFolders : f.folders);
+
 			if (d.isInclude)
 			{
 				if (cbindExe.empty())
@@ -468,7 +490,7 @@ namespace Scripting
 				}
 				std::string outFile = Norm(objDir + "/" + PathTag(absPath) + ".c4bind");
 				bool haveBindings = false;
-				const BindingFlags flags{ d.language, d.defines, d.includeDirs, targetFlags };
+				const BindingFlags flags{ d.language, d.defines, includeDirs, targetFlags };
 				if (fs::exists(outFile) && BindingIsCached(outFile, absPath, cbindExe, flags))
 				{
 					if (verbose) CORE_INFO("Interop: using cached bindings for {0}", absPath);
@@ -516,13 +538,8 @@ namespace Scripting
 						// The shim #includes the header by filename - make sure its directory is on
 						// the include path even when no explicit include_dirs were given.
 						std::string headerDir = Norm(fs::path(absPath).parent_path().string());
-						if (!headerDir.empty() && headerDir != ".")
-						{
-							bool have = false;
-							for (const auto& inc : d.includeDirs) if (Norm(inc) == headerDir) { have = true; break; }
-							if (!have) fo.includeDirs.push_back(headerDir);
-						}
-						fo.includeDirs.insert(fo.includeDirs.end(), d.includeDirs.begin(), d.includeDirs.end());
+						if (!headerDir.empty() && headerDir != ".") fo.includeDirs.push_back(headerDir);
+						AppendNewFolders(fo.includeDirs, includeDirs);
 						if (!CompileForeign(fo, verbose))
 							result.errors.push_back(
 								"Failed to compile the generated shim for '" + d.path +
@@ -539,7 +556,7 @@ namespace Scripting
 					fo.objPath = Norm(objDir + "/" + PathTag(absPath) + ".obj");
 					fo.language = d.language;
 					fo.defines = d.defines;
-					fo.includeDirs = d.includeDirs;
+					fo.includeDirs = includeDirs;
 					fo.targetFlags = targetFlags;
 					fo.compileFlags = compileFlags;
 					if (!declarationsOnly)

@@ -43,10 +43,6 @@ Next ID: **BUG-321**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
-| BUG-320 | A bound C header that declares memmove (string.h, windows.h) breaks the prelude's memmove | Interop | High |
-| BUG-317 | Include folders (-I, a project's `includes`) never reach CBind or the foreign-source compile | Interop | High |
-| BUG-318 | With --projects and a relative --int-dir, CBind produces no bindings | Interop | Medium |
-| BUG-319 | CBind binds a destructor for abstract classes without one, and the shim warns | Interop | Low |
 
 ---
 
@@ -57,38 +53,6 @@ Next ID: **BUG-321**
 ## HIR and codegen
 
 ## Interop, runtime and Bedrock
-
-### BUG-320 A bound C header that declares memmove breaks the prelude's memmove
-- **Area:** Interop
-- **Severity:** High
-- **Status:** Open
-- **Found:** 2026-10-21
-- **Symptom:** with `extern "c" include "s.h"` where s.h includes `<string.h>` (as `<windows.h>` does), Bedrock's calls fail: "Text/string.cf (48:3) error: no function named memmove". The prelude declares `[link("memmove")] void memmove(void*, void*, uint64)` and the binding adds the CRT's `void* memmove(void*, const void*, size_t)`: two declarations of one C function, so the call is ambiguous, and the error calls it missing. memcpy, memset and any other prelude function a C header declares break the same way.
-- **Where:** `Bedrock/Prelude/prelude.ch`; the bindings `Interop/InteropPass.cpp` appends; the call diagnostics for an ambiguous free function
-
-### BUG-317 Include folders never reach CBind or the foreign-source compile
-- **Area:** Interop
-- **Severity:** High
-- **Status:** Open
-- **Found:** 2026-10-21
-- **Symptom:** a bound header (`extern "c" include "x.h"`) that `#include`s a header from a `-I` folder or a project's `includes` fails: "CBind failed on p/x.h: fatal error: 'y.h' file not found", and an `extern "c" source` that includes it fails to compile the same way. Only the extern block's own `include_dir()` reaches clang.
-- **Where:** `Interop/InteropPass.cpp` `RunFolder`: `BindingFlags{ language, defines, includeDirs, targetFlags }` and `ForeignObject.includeDirs` take the block's include dirs only; the command line's / project's folders are used only to find the named header. The binding cache key must include them.
-
-### BUG-318 With --projects and a relative --int-dir, CBind produces no bindings
-- **Area:** Interop
-- **Severity:** Medium
-- **Status:** Open
-- **Found:** 2026-10-21
-- **Symptom:** `C4.exe --projects projects.toml -o out/r.exe --int-dir out2` reports that CBind "produced no bindings" for a header beside the `.ch`; an absolute `--int-dir` works.
-- **Where:** the interop pre-pass's paths under the intermediate folder (relative to a different working folder than the one CBind runs in)
-
-### BUG-319 CBind binds a destructor for abstract classes without one, and the shim warns
-- **Area:** Interop
-- **Severity:** Low
-- **Status:** Open
-- **Found:** 2026-10-21
-- **Symptom:** binding WebView2.h in C++ mode makes the generated shim emit about 296 `-Wdelete-abstract-non-virtual-dtor` warnings: every COM interface (an abstract class with no user-declared destructor) gets a `Finalize` wrapper calling `~T()`.
-- **Where:** CBind's destructor wrappers; an abstract class with no accessible virtual destructor should get no destructor binding
 
 ## Tools
 

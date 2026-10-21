@@ -49,6 +49,7 @@ namespace Scripting
 
 		/// The prelude's declarations, after the program's (D-43).
 		void VisitPrelude(Context& ctx, CompilerInstance& compiler);
+		void VisitHiddenPrelude(Context& ctx, const AstNode* function);
 		static std::unordered_map<uint32, uint32> ProjectOfEachUnit(const SourceManager& sources);
 		void ErrorAt(const Context& ctx, const AstNode* where, const Core::String& message);
 		/// "redefinition of <what> 'X': it is already a function (b.cf:12)" - what the name already is in the scope, and

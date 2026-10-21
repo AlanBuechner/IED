@@ -54,10 +54,14 @@ namespace Scripting
 			return true;
 		}
 
-		// The script's name as a file name: its letters, digits, '.', '_' and '-', anything else as '_'.
+		// The name a script is cached under: its name without a trailing `#<tag>`, which a host adds to tell builds of
+		// one script apart (each loads under its own reflection tag, which is not in the machine code).
+		std::string CachedName(const std::string& name) { return name.substr(0, name.rfind('#')); }
+
+		// The script's cached name as a file name: its letters, digits, '.', '_' and '-', anything else as '_'.
 		std::string FileNameOf(const std::string& name)
 		{
-			std::string file = name.empty() ? std::string("script") : name;
+			std::string file = CachedName(name).empty() ? std::string("script") : CachedName(name);
 			for (char& c : file)
 				if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') c = '_';
 			return file;
@@ -69,7 +73,7 @@ namespace Scripting
 		bool AddInputs(Digest& digest, const HostInterface& host, const ScriptCompileOptions& options)
 		{
 			digest.Add(llvm::StringRef(reinterpret_cast<const char*>(host.buildId.data()), host.buildId.size()));
-			digest.Add(options.name);
+			digest.Add(CachedName(options.name));
 			digest.Add(options.optimize ? "O2" : "O0");
 			for (const std::string& entry : options.allow) digest.Add(entry);
 			digest.Add("|");

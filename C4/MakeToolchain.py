@@ -5,7 +5,7 @@
 #   <dir>/
 #     toolchain.json        name, version (C4.exe --version), git commit, modified flag, build time
 #     C4.exe, *.dll, *.pdb  the compiler; it finds everything below relative to itself (docs/status/plan.md D-56)
-#     Bedrock/  C4Runtime/  toolchain/{bin,lib}   default library, runtime sources, clang + lld-link
+#     Bedrock/  C4Runtime/  toolchain/{bin,lib}   default library, runtime sources, clang + lld-link + llvm-rc
 #     CBind/    C4Script/                         binding generator, script host
 #     tools/C4LSP/  tools/C4DAP/                  language server (+ the LLVM dlls it loads), debug adapter
 #     docs/                 the user-facing language, library, runtime and build docs
@@ -34,7 +34,7 @@ TOOLS = {
 	"tools/C4DAP": ("C4DAP", ["C4DAP.exe", "C4DAP.pdb"]),
 }
 LSP_DLLS = ("libclang.dll", "LLVM-C.dll", "LTO.dll")
-REQUIRED = ["C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe",
+REQUIRED = ["C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe", "toolchain/bin/llvm-rc.exe",
 	"CBind/CBind.exe", "C4Script/C4Script.dll", "ied/ied-plugin.json"]
 DOCS = [
 	"01-what-is-c4.md",
