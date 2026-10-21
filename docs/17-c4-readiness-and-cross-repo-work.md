@@ -91,8 +91,8 @@ Today: stdio, full sync, standard features (completion, hover, signature help, d
 
 | # | Item | Why |
 |---|---|---|
-| L1 | Honor `general.positionEncodings` (offer `utf-8`; today columns are effectively bytes, correct for ASCII only) | Correct positions for non-ASCII text |
-| L2 | Accept string JSON-RPC ids (today answered with id -1) | Spec compliance |
+| L1 | Done (2026-10-21): `utf-8` when the client offers it, else UTF-16, converted at the protocol boundary (`C4LSPLib/src/Protocol/PositionCodec`) | Correct positions for non-ASCII text |
+| L2 | Done (2026-10-21): a request's id is echoed as sent, number or string | Spec compliance |
 | L3 | Implement `$/cancelRequest` | Typing fast cancels stale completions |
 | L4 | Send `workspace/semanticTokens/refresh` (and folding/inlay refresh) after recompiles, or support `semanticTokens/full/delta` | Removes the client refetch-after-diagnostics hack |
 | L5 | `codeAction` honoring the request range/context | Removes client-side filtering |

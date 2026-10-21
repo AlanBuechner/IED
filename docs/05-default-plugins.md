@@ -48,6 +48,16 @@ PIX/RenderDoc/Nsight-class graphics debugger (`docs/22`). Capture library with b
 
 Bindings provided: `gpu.captureFrame`, `gpu.openEvent`, `gpu.attachToChat`. Consumes: `editor.openFile`, `editor.applyEdit`, `tasks.run`, `profiler.openZone`, `chat.attach`.
 
+## Language plugins
+
+Declarative plugins (`docs/02`) that ship with IED and bring languages through the host's generic pools, so nothing about a language lives in the host:
+
+- `ied.languages`: ids, extensions, comment tokens and brackets for common languages, and C/C++ header/source pairs, so every document has a language (Monaco's tokenizers color them) before a dedicated plugin adds more.
+- `ied.cpp` (C/C++): clangd as the language server of `c` and `cpp` documents (one per workspace; `cpp.clangd.path`, default `clangd` from `PATH`, and `cpp.clangd.arguments`; `cpp.languageServer` turns it off). clangd finds each file's flags in the nearest `compile_commands.json` (or `compile_flags.txt`) above it or in a `build/` folder beside one - what CMake and most build systems write - and guesses without one. Debugging C/C++ comes with the DAP pool (M3).
+- One plugin per further language as its server is wired (Python, Go, Rust, the web languages): a profile that runs the language's usual server, its path a setting.
+
+A language server that is not installed shows as failed in `lsp.status` with the reason ("no program named "clangd" was found") and the language keeps its basic support.
+
 ## Cross-plugin notes
 
 - Every plugin exposes its useful capabilities as **skills** (how to use them) and, where actionable, **AI tools** and **bindings**.

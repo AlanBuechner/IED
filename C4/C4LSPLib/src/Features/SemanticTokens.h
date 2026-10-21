@@ -59,8 +59,8 @@ namespace C4LSP::Features
 	struct SemanticToken
 	{
 		uint32 startLine = 0;      // 0-based
-		uint32 startCharacter = 0; // 0-based
-		uint32 length = 0;         // UTF-16 code units (== bytes for ASCII C4 sources)
+		uint32 startCharacter = 0; // 0-based, UTF-8 bytes (the server converts for a UTF-16 client)
+		uint32 length = 0;         // UTF-8 bytes, like startCharacter
 		uint32 kindId = 0;         // index into the legend (SemanticTokenKind)
 		uint32 modifiers = None;   // SemanticTokenModifiers bit field
 	};

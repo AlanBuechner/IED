@@ -35,7 +35,9 @@ class LanguageServerTests(ServerTestCase):
 			"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
 			"contributes": {
 				"languages": [{"id": "fake", "extensions": [".fk"]}],
-				"lspProfiles": [{"id": "fake-lsp", "label": "Fake", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log], "selector": {"languages": ["fake"]}}]}})
+				"settings": {"schema": "settings.schema.json"},
+				"lspProfiles": [{"id": "fake-lsp", "label": "Fake", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log, "${config:fake.flags}"], "selector": {"languages": ["fake"]}}]}})
+		write(os.path.join(plugin, "settings.schema.json"), {"type": "object", "properties": {"fake.flags": {"type": "array", "items": {"type": "string"}, "default": ["--from-setting", "two words"]}}})
 		write(os.path.join(self.workspace, "a.fk"), "é bad\nok\n")
 		write(os.path.join(self.workspace, "b.fk"), "b\n")
 		write(os.path.join(self.workspace, "notes.txt"), "plain\n")
@@ -129,6 +131,12 @@ class LanguageServerTests(ServerTestCase):
 		self.assertEqual(("forbidden", "read_only"), (caught.exception.code, caught.exception.data["reason"]))
 		published = [f["data"].get("path") for f in self.client.drain("diag:w1") if f["t"] == "evt"]
 		self.assertFalse([p for p in published if p and p.endswith("far.fk")], "no diagnostics for a file outside the workspace")
+
+	async def test_profile_arguments_expand_settings(self):
+		await self.open("a.fk")
+		await self.diagnostics("a.fk")
+		with open(self.log, encoding="utf-8") as f:
+			self.assertEqual(["--from-setting", "two words"], json.loads(f.readline())["argv"], "a list setting, one argument per element")
 
 	async def test_workspace_symbols(self):
 		await self.open("a.fk")

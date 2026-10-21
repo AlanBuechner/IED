@@ -76,7 +76,7 @@ namespace C4LSP::Server
 		}
 	}
 
-	void LspServer::HandleInitialize(int64 id, const Json::Value& params)
+	void LspServer::HandleInitialize(const Json::Value& id, const Json::Value& params)
 	{
 		if (params.HasMember("rootUri"))
 			m_RootUri = params.Member("rootUri").GetString();
@@ -133,7 +133,10 @@ namespace C4LSP::Server
 				Features::CodeActions::SetCreateDefinitionEnabled(createDefinition.GetBool());
 		}
 
+		// Columns are UTF-8 bytes in the compiler: a client that takes utf-8 gets them as they are; another gets UTF-16 (L1).
+		m_Encoding = Protocol::NegotiatePositionEncoding(params);
 		Json::Value capabilities = Json::Value::MakeObject();
+		capabilities.SetMember("positionEncoding", Json::Value::String(Core::String(Protocol::PositionEncodingName(m_Encoding))));
 		capabilities.SetMember("textDocumentSync", BuildTextDocumentSync());
 		capabilities.SetMember("hoverProvider", Json::Value::Bool(true));
 		capabilities.SetMember("definitionProvider", Json::Value::Bool(true));
@@ -192,7 +195,7 @@ namespace C4LSP::Server
 		PostRecompile();
 	}
 
-	void LspServer::HandleShutdown(int64 id)
+	void LspServer::HandleShutdown(const Json::Value& id)
 	{
 		m_ShutdownRequested = true;
 		SendResponse(id, Json::Value::Null());

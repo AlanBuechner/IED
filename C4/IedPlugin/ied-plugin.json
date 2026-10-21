@@ -38,8 +38,6 @@
 				"scope": "project",
 				"initializationOptionsFile": "${workspaceDir}/.ied/local/lsp-options/${projectName}.json",
 				"launchMode": "staged",
-				"positionEncoding": "bytes",
-				"requestIds": "integer",
 				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
 				"codeActionsNeedClientFilter": true,
 				"when": "config.c4.languageServer"

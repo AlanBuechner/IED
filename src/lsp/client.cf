@@ -66,6 +66,9 @@ namespace Ied
 		variables.solutionDir = Core::String(ws->root.View());
 		variables.projectName = project;
 		variables.projectDir = Core::String(projectDir.View());
+		Settings* settings = server->settings;
+		Workspace* workspace = ws;
+		variables.config = [settings, workspace](Core::StringView key) -> Core::String { return settings->Effective(workspace, Core::StringView(""), key); };
 		return variables;
 	}
 
@@ -99,7 +102,7 @@ namespace Ied
 		Process::StartInfo info;
 		info.program = Core::String(program);
 		ProfileVariables variables = Variables();
-		for (const Core::String& arg : profile->args) info.arguments.Push(ExpandProfileVariables(arg.View(), variables));
+		for (const Core::String& arg : profile->args) ExpandProfileArgument(arg.View(), variables, info.arguments);
 		for (const Core::String& entry : profile->environment) info.environment.Push(ExpandProfileVariables(entry.View(), variables));
 		info.workingDirectory = profile->cwd.IsEmpty() ? Core::String(ws->root.View()) : ExpandProfileVariables(profile->cwd.View(), variables);
 		info.input = Process::Redirect::Pipe;

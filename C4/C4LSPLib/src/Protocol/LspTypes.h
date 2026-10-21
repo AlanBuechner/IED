@@ -10,7 +10,7 @@ namespace C4LSP::Protocol
 	struct Position
 	{
 		uint32 line = 0;      // 0-based
-		uint32 character = 0; // 0-based (UTF-16 code units per spec; C4 sources are treated as bytes)
+		uint32 character = 0; // 0-based UTF-8 bytes, as the compiler counts; LspServer converts for a UTF-16 client
 
 		static Position FromSourceLocation(const Scripting::SourceLocation& loc);
 	};

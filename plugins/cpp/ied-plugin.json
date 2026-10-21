@@ -1,0 +1,27 @@
+// C/C++ (docs/05 "Language plugins"): clangd as the language server of C and C++ documents, one per workspace. clangd
+// finds each file's flags in the nearest compile_commands.json (or compile_flags.txt) above it or in a build/ folder
+// beside one, and guesses without one. Debugging C/C++ comes with the DAP pool (M3).
+{
+	"manifestVersion": 1,
+	"id": "ied.cpp",
+	"name": "C/C++",
+	"version": "0.1.0",
+	"description": "C and C++ through clangd: diagnostics, completion, navigation, formatting and refactoring.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C/C++" },
+		"lspProfiles": [
+			{
+				"id": "clangd",
+				"label": "clangd",
+				"command": "${config:cpp.clangd.path}",
+				"args": ["${config:cpp.clangd.arguments}"],
+				"selector": { "languages": ["c", "cpp"] },
+				"when": "config.cpp.languageServer && workspaceTrusted"
+			}
+		]
+	}
+}

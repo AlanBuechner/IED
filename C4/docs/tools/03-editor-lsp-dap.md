@@ -49,7 +49,7 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 
 | Area | Methods |
 |---|---|
-| Lifecycle | `initialize`, `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration` |
+| Lifecycle | `initialize` (answers `positionEncoding`: `utf-8` when the client offers it, else `utf-16`; request ids, numbers or strings, come back as sent), `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration` |
 | Sync | `didOpen`, `didChange`, `didClose`, `publishDiagnostics` |
 | Navigation | `definition` (a function's body: its out-of-line definition when it has one), `declaration`, `typeDefinition`, `implementation`, `references` (every file, the declarations first with `context.includeDeclaration`), `documentHighlight` |
 | Information | `hover`, `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members) |

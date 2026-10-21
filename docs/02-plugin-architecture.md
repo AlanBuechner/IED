@@ -114,7 +114,7 @@ Grouped; full shapes in the schema.
 | AI | `toolCalls`, `toolGroups`, `skills`, `systemMessageSections`, `agentModes`, `mcpServers`, `modelProviders`, `chatSlashCommands` |
 | Infra | `settings` (JSON Schema with tier hints), `bindings` (provides/consumes), `sandboxProviders`, `sourceControlProviders`, `profilerImporters` |
 
-LSP profiles carry the quirk switches the family's servers need today (`launchMode: staged`, `positionEncoding: bytes`, `requestIds: integer`, `refetchOnDiagnostics`, `codeActionsNeedClientFilter`), so the host's LSP client stays generic and the C4-specific knowledge lives in the C4 plugin.
+LSP profiles carry the quirk switches a family's servers need (`launchMode: staged`, `positionEncoding: bytes`, `requestIds: integer`, `refetchOnDiagnostics`, `codeActionsNeedClientFilter`), so the host's LSP client stays generic and a server's quirks live in its plugin (the C4 plugin needs `launchMode`, `refetchOnDiagnostics` and `codeActionsNeedClientFilter` since C4LSP's L1 and L2, `docs/17`).
 
 ## Bindings - composing plugins on plugins
 

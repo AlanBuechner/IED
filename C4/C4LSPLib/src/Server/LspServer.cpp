@@ -167,9 +167,14 @@ namespace C4LSP::Server
 	void LspServer::HandleRequest(const Json::Value& message)
 	{
 		const std::string method = message.Member("method").GetString();
-		int64 id = message.Member("id").GetInt(-1);
+		const Json::Value id = message.Member("id");
 		// params must OWN its copy: Value::Member returns by value, so binding a const ref here would dangle.
 		Json::Value params = message.HasMember("params") ? message.Member("params") : Json::Value::Null();
+		// The request's document is where its positions (and its answer's without a URI) are; a UTF-16 client's columns
+		// become the compiler's UTF-8 ones here, and go back in SendResponse.
+		m_RequestUri = ExtractUri(params);
+		if (m_Encoding == Protocol::PositionEncoding::Utf16 && method != "initialize")
+			params = Codec().FromClient(params, m_RequestUri);
 
 		if (method == "initialize")
 			HandleInitialize(id, params);
@@ -247,9 +252,24 @@ namespace C4LSP::Server
 		// didSave and other notifications require no server action.
 	}
 
-	void LspServer::UnknownMethod(int64 id, const std::string& method)
+	void LspServer::UnknownMethod(const Json::Value& id, const std::string& method)
 	{
 		SendError(id, -32601, "Method not found: " + method);
+	}
+
+	std::string LspServer::TextOf(const std::string& uri)
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_DocMutex);
+			if (const std::string* text = m_Documents.GetText(uri))
+				return *text;
+		}
+		return GetSnapshot()->GetEditorText(uri);
+	}
+
+	Protocol::PositionCodec LspServer::Codec()
+	{
+		return Protocol::PositionCodec([this](const std::string& uri) { return TextOf(uri); });
 	}
 
 	std::string LspServer::ExtractUri(const Json::Value& params) const
@@ -266,17 +286,17 @@ namespace C4LSP::Server
 		return position;
 	}
 
-	void LspServer::SendResponse(int64 id, const Json::Value& result)
+	void LspServer::SendResponse(const Json::Value& id, const Json::Value& result)
 	{
 		Json::Value message = Json::Value::MakeObject();
 		message.SetMember("jsonrpc", Json::Value::String(Core::String("2.0")));
-		message.SetMember("id", Json::Value::Int(id));
-		message.SetMember("result", result);
+		message.SetMember("id", id);
+		message.SetMember("result", m_Encoding == Protocol::PositionEncoding::Utf16 ? Codec().ToClient(result, m_RequestUri) : result);
 		std::lock_guard<std::mutex> lock(m_SendMutex);
 		m_Send(Json::Writer::Encode(message));
 	}
 
-	void LspServer::SendError(int64 id, int code, const std::string& message)
+	void LspServer::SendError(const Json::Value& id, int code, const std::string& message)
 	{
 		Json::Value error = Json::Value::MakeObject();
 		error.SetMember("code", Json::Value::Int(code));
@@ -284,7 +304,7 @@ namespace C4LSP::Server
 
 		Json::Value response = Json::Value::MakeObject();
 		response.SetMember("jsonrpc", Json::Value::String(Core::String("2.0")));
-		response.SetMember("id", Json::Value::Int(id));
+		response.SetMember("id", id);
 		response.SetMember("error", error);
 		std::lock_guard<std::mutex> lock(m_SendMutex);
 		m_Send(Json::Writer::Encode(response));
@@ -295,7 +315,7 @@ namespace C4LSP::Server
 		Json::Value message = Json::Value::MakeObject();
 		message.SetMember("jsonrpc", Json::Value::String(Core::String("2.0")));
 		message.SetMember("method", Json::Value::String(Core::String(method)));
-		message.SetMember("params", params);
+		message.SetMember("params", m_Encoding == Protocol::PositionEncoding::Utf16 ? Codec().ToClient(params, "") : params);
 		std::lock_guard<std::mutex> lock(m_SendMutex);
 		m_Send(Json::Writer::Encode(message));
 	}

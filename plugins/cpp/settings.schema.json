@@ -1,0 +1,23 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "C/C++ settings",
+	"type": "object",
+	"properties": {
+		"cpp.languageServer": {
+			"type": "boolean",
+			"default": true,
+			"description": "Run clangd for C and C++ documents of trusted workspaces."
+		},
+		"cpp.clangd.path": {
+			"type": "string",
+			"default": "clangd",
+			"description": "The clangd to run: a name looked up on PATH, or a path."
+		},
+		"cpp.clangd.arguments": {
+			"type": "array",
+			"items": { "type": "string" },
+			"default": ["--background-index", "--header-insertion=never", "--log=error"],
+			"description": "clangd's command-line arguments."
+		}
+	}
+}

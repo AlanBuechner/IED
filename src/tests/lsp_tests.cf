@@ -143,6 +143,22 @@ class LspTests {
 		variables.projectName = Core::String("Game");
 		variables.projectDir = Core::String("D:/game/src");
 		assert_se("D:/game/src/lsp-options/Game.json", Ied::ExpandProfileVariables(Core::StringView("${projectDir}/lsp-options/${projectName}.json"), variables).CStr(), "a project");
+		assert_se("x", Ied::ExpandProfileVariables(Core::StringView("x${config:cpp.path}"), variables).CStr(), "no settings: nothing");
+		variables.config = [](Core::StringView key) -> Core::String {
+			if (key == "cpp.path") return Core::String("\"C:/LLVM/bin/clangd.exe\"");
+			if (key == "cpp.jobs") return Core::String("4");
+			if (key == "cpp.args") return Core::String("[\"--log=error\", \"--pch-storage=memory\"]");
+			return Core::String();
+		};
+		assert_se("C:/LLVM/bin/clangd.exe", Ied::ExpandProfileVariables(Core::StringView("${config:cpp.path}"), variables).CStr(), "a string setting");
+		assert_se("-j=4", Ied::ExpandProfileVariables(Core::StringView("-j=${config:cpp.jobs}"), variables).CStr(), "a number as written");
+		assert_se("-x=", Ied::ExpandProfileVariables(Core::StringView("-x=${config:cpp.unset}${config:cpp.args}"), variables).CStr(), "unset, or a list inside text: nothing");
+		Core::Array<Core::String> args;
+		Ied::ExpandProfileArgument(Core::StringView("${config:cpp.args}"), variables, args);
+		Ied::ExpandProfileArgument(Core::StringView("--x=${config:cpp.jobs}"), variables, args);
+		assert_eq(3, args.Count(), "a list argument spreads");
+		assert_se("--pch-storage=memory", args[1].CStr(), "in order");
+		assert_se("--x=4", args[2].CStr(), "another argument as one");
 	}
 
 	[test("rewrite")]

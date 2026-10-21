@@ -72,8 +72,20 @@ namespace Ied
 		return nullptr;
 	}
 
+	// The setting's value as text: a string as it is, a number or a boolean as written; nothing for anything else.
+	static void AppendConfig(Core::StringView key, const ProfileVariables& variables, Core::StringBuilder& out) {
+		if (!variables.config) return;
+		Core::String json = variables.config(key);
+		if (json.IsEmpty()) return;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(json.View(), *doc).root;
+		if (value.Kind() == Serialization::DomKind::String) out.Append(value.AsView());
+		else if (value.Kind() == Serialization::DomKind::Int || value.Kind() == Serialization::DomKind::Float || value.Kind() == Serialization::DomKind::Bool) out.Append(json.View().Trimmed());
+	}
+
 	static bool ExpandOne(Core::StringView name, const ProfileVariables& variables, Core::StringBuilder& out) {
-		if (name == "pluginDir") out.Append(variables.pluginDir.View());
+		if (name.StartsWith(Core::StringView("config:"))) AppendConfig(name.Substring(7, name.ByteLength() - 7), variables, out);
+		else if (name == "pluginDir") out.Append(variables.pluginDir.View());
 		else if (name == "workspaceDir") out.Append(variables.workspaceDir.View());
 		else if (name == "solutionDir") out.Append(variables.solutionDir.View());
 		else if (name == "projectName") out.Append(variables.projectName.View());
@@ -103,5 +115,20 @@ namespace Ied
 			at += close + 1;
 		}
 		return out.ToString();
+	}
+
+	void ExpandProfileArgument(Core::StringView text, const ProfileVariables& variables, Core::Array<Core::String>& out) {
+		const bool whole = text.StartsWith(Core::StringView("${config:")) && text.EndsWith(Core::StringView("}")) && text.IndexOf('}', 0) == text.ByteLength() - 1;
+		if (whole && variables.config) {
+			Core::String json = variables.config(text.Substring(9, text.ByteLength() - 10));
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::DomNode value = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
+			if (value.Kind() == Serialization::DomKind::Array) {
+				for (int64 i = 0; i < value.Count(); ++i)
+					if (value.At(i).Kind() == Serialization::DomKind::String) out.Push(Core::String(value.At(i).AsView()));
+				return;
+			}
+		}
+		out.Push(ExpandProfileVariables(text, variables));
 	}
 }

@@ -20,7 +20,7 @@
 
 namespace C4LSP::Server
 {
-	void LspServer::HandleHover(int64 id, const Json::Value& params)
+	void LspServer::HandleHover(const Json::Value& id, const Json::Value& params)
 	{
 		auto position = ExtractPosition(params);
 		auto session = SnapshotForRequest();
@@ -28,7 +28,7 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::Hover(result));
 	}
 
-	void LspServer::HandleDefinition(int64 id, const Json::Value& params)
+	void LspServer::HandleDefinition(const Json::Value& id, const Json::Value& params)
 	{
 		auto position = ExtractPosition(params);
 		auto session = SnapshotForRequest();
@@ -36,7 +36,7 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
-	void LspServer::HandleReferences(int64 id, const Json::Value& params)
+	void LspServer::HandleReferences(const Json::Value& id, const Json::Value& params)
 	{
 		auto position = ExtractPosition(params);
 		auto session = SnapshotForRequest();
@@ -45,7 +45,7 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
-	void LspServer::HandleDocumentHighlight(int64 id, const Json::Value& params)
+	void LspServer::HandleDocumentHighlight(const Json::Value& id, const Json::Value& params)
 	{
 		auto position = ExtractPosition(params);
 		auto session = SnapshotForRequest();
@@ -53,7 +53,7 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::DocumentHighlights(highlights));
 	}
 
-	void LspServer::HandleCompletion(int64 id, const Json::Value& params)
+	void LspServer::HandleCompletion(const Json::Value& id, const Json::Value& params)
 	{
 		auto position = ExtractPosition(params);
 		auto session = SnapshotForRequest();
@@ -61,14 +61,14 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::CompletionItems(items));
 	}
 
-	void LspServer::HandleDocumentSymbol(int64 id, const Json::Value& params)
+	void LspServer::HandleDocumentSymbol(const Json::Value& id, const Json::Value& params)
 	{
 		auto session = SnapshotForRequest();
 		auto symbols = Features::DocumentSymbols::ForDocument(*session, ExtractUri(params));
 		SendResponse(id, Protocol::LspJson::DocumentSymbols(symbols));
 	}
 
-	void LspServer::HandleWorkspaceSymbols(int64 id, const Json::Value& params)
+	void LspServer::HandleWorkspaceSymbols(const Json::Value& id, const Json::Value& params)
 	{
 		const std::string query = params.Member("query").GetString(""); // {query: "..."} per the LSP spec
 		auto session = SnapshotForRequest();
@@ -76,7 +76,7 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::WorkspaceSymbols(symbols));
 	}
 
-	void LspServer::HandleSemanticTokens(int64 id, const Json::Value& params)
+	void LspServer::HandleSemanticTokens(const Json::Value& id, const Json::Value& params)
 	{
 		// Answer immediately from the current snapshot - do NOT wait for a pending recompile here.
 		// The old behavior blocked up to 10s (SnapshotForRequest) because clients fetch semantic tokens
@@ -91,24 +91,35 @@ namespace C4LSP::Server
 		const std::string uri = ExtractUri(params);
 		auto session = GetSnapshot();
 		auto tokens = Features::SemanticTokens::ForDocument(*session, uri);
+		// The data array holds columns too, where the codec does not look: a UTF-16 client's are converted here.
+		if (m_Encoding == Protocol::PositionEncoding::Utf16)
+		{
+			Protocol::PositionCodec codec = Codec();
+			for (auto& token : tokens.tokens)
+			{
+				const uint32 start = codec.ToClientColumn(uri, token.startLine, token.startCharacter);
+				token.length = codec.ToClientColumn(uri, token.startLine, token.startCharacter + token.length) - start;
+				token.startCharacter = start;
+			}
+		}
 		SendResponse(id, Protocol::LspJson::SemanticTokens(tokens));
 	}
 
-	void LspServer::HandleSignatureHelp(int64 id, const Json::Value& params)
+	void LspServer::HandleSignatureHelp(const Json::Value& id, const Json::Value& params)
 	{
 		auto session = SnapshotForRequest();
 		auto result = Features::SignatureHelp::At(*session, ExtractUri(params), ExtractPosition(params));
 		SendResponse(id, Protocol::LspJson::SignatureHelp(result));
 	}
 
-	void LspServer::HandleTypeDefinition(int64 id, const Json::Value& params)
+	void LspServer::HandleTypeDefinition(const Json::Value& id, const Json::Value& params)
 	{
 		auto session = SnapshotForRequest();
 		auto locations = Features::TypeDefinition::At(*session, ExtractUri(params), ExtractPosition(params));
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
-	void LspServer::HandleDeclaration(int64 id, const Json::Value& params)
+	void LspServer::HandleDeclaration(const Json::Value& id, const Json::Value& params)
 	{
 		// C4 has no separate declaration/definition distinction; declarations are definitions.
 		auto session = SnapshotForRequest();
@@ -116,14 +127,14 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
-	void LspServer::HandleImplementation(int64 id, const Json::Value& params)
+	void LspServer::HandleImplementation(const Json::Value& id, const Json::Value& params)
 	{
 		auto session = SnapshotForRequest();
 		auto locations = Features::Implementation::At(*session, ExtractUri(params), ExtractPosition(params));
 		SendResponse(id, Protocol::LspJson::Locations(locations));
 	}
 
-		void LspServer::HandleRename(int64 id, const Json::Value& params)
+		void LspServer::HandleRename(const Json::Value& id, const Json::Value& params)
 		{
 			std::string newName = params.Member("newName").GetString();
 			auto session = SnapshotForRequest();
@@ -131,14 +142,14 @@ namespace C4LSP::Server
 			SendResponse(id, Protocol::LspJson::Rename(result, newName));
 		}
 
-		void LspServer::HandlePrepareRename(int64 id, const Json::Value& params)
+		void LspServer::HandlePrepareRename(const Json::Value& id, const Json::Value& params)
 		{
 			auto session = SnapshotForRequest(); // same freshness contract as rename: the text the user sees now
 			auto result = Features::Rename::PrepareAt(*session, ExtractUri(params), ExtractPosition(params));
 			SendResponse(id, Protocol::LspJson::PrepareRename(result));
 		}
 
-		void LspServer::HandleFormatting(int64 id, const Json::Value& params)
+		void LspServer::HandleFormatting(const Json::Value& id, const Json::Value& params)
 		{
 			std::string uri = ExtractUri(params);
 			auto session = SnapshotForRequest(); // format the document as the client last sent it
@@ -170,7 +181,7 @@ namespace C4LSP::Server
 			SendResponse(id, Protocol::LspJson::TextEdits(edits));
 		}
 
-	void LspServer::HandleCodeAction(int64 id, const Json::Value& params)
+	void LspServer::HandleCodeAction(const Json::Value& id, const Json::Value& params)
 	{
 		std::string uri = ExtractUri(params);
 		auto session = SnapshotForRequest();
@@ -182,7 +193,7 @@ namespace C4LSP::Server
 		SendResponse(id, Protocol::LspJson::CodeActions(actions, uri));
 	}
 
-	void LspServer::HandleFoldingRanges(int64 id, const Json::Value& params)
+	void LspServer::HandleFoldingRanges(const Json::Value& id, const Json::Value& params)
 	{
 		std::string uri = ExtractUri(params);
 		auto session = GetSnapshot(); // non-blocking like semantic tokens: Monaco refetches on content change and every diagnostics publish

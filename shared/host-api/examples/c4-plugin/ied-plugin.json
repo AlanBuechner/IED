@@ -58,8 +58,6 @@
 				"initializationOptionsFile": "${solutionDir}/.ied/local/lsp-options/c4.json",
 				"settingsBindings": { "c4.tidy": "tidy", "c4.quickfixes": "quickfixes", "c4.createDefinition": "createDefinition" },
 				"launchMode": "staged",
-				"positionEncoding": "bytes",
-				"requestIds": "integer",
 				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
 				"codeActionsNeedClientFilter": true,
 				"when": "workspaceTrusted && config.c4.languageServer"

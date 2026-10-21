@@ -32,6 +32,9 @@ namespace Ied
 	}
 
 	// The variables a profile's command, arguments and folders may use.
+	// A setting's effective value for the workspace as JSON text; empty when it has none.
+	alias ConfigLookup = func<Core::String(Core::StringView key)>;
+
 	struct ProfileVariables
 	{
 		public Core::String pluginDir;
@@ -39,6 +42,7 @@ namespace Ied
 		public Core::String solutionDir;   // the workspace folder when it is no solution
 		public Core::String projectName;   // empty for a workspace-wide server
 		public Core::String projectDir;
+		public ConfigLookup config;        // ${config:<setting>}; without one they expand to nothing
 	}
 
 	// The profiles of one plugin's `contributes`, in order.
@@ -50,4 +54,7 @@ namespace Ied
 	// `text` with ${pluginDir}, ${workspaceDir}, ${solutionDir}, ${projectName} and ${projectDir} expanded; any other
 	// ${...} is left as it is.
 	Core::String ExpandProfileVariables(Core::StringView text, const ProfileVariables& variables);
+	// One of a profile's `args`, expanded: one argument, or one per element when it is exactly one ${config:...} of a
+	// list setting (docs/24).
+	void ExpandProfileArgument(Core::StringView text, const ProfileVariables& variables, Core::Array<Core::String>& out);
 }
