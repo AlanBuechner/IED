@@ -1,0 +1,111 @@
+include "local.ch"
+include "../Text/stringbuilder.ch"
+
+[link("c4_local_listen")] void* c4_local_listen(const char* name, char* error, int64 errorCapacity);
+[link("c4_local_accept")] void* c4_local_accept(void* listener, int32 timeoutMs, int32* timedOut, char* error, int64 errorCapacity);
+[link("c4_local_connect")] void* c4_local_connect(const char* name, int32 timeoutMs, int32* timedOut, char* error, int64 errorCapacity);
+[link("c4_local_send")] int64 c4_local_send(void* pipe, const void* data, int64 size, int32 timeoutMs);
+[link("c4_local_receive")] int64 c4_local_receive(void* pipe, void* buffer, int64 capacity, int32 timeoutMs);
+[link("c4_local_close")] void c4_local_close(void* pipe);
+[link("c4_local_user_id")] int64 c4_local_user_id(char* out, int64 capacity);
+
+namespace Net
+{
+	const int32 kUserIdBytes = 192;
+
+	// What a call that opens a pipe came to: the pipe, or null with the outcome recorded.
+	static void* Opened(Outcome& last, void* pipe, int32 timedOut, const char* why) {
+		if (pipe != nullptr) last.Record(0, why);
+		else last.Record(timedOut != 0 ? kTimedOut : kError, why);
+		return pipe;
+	}
+
+	// The result of a send or receive, with what it means recorded.
+	static int64 Moved(Outcome& last, int64 result) {
+		if (result == kTimedOut) return last.Record(result, "the call waited too long");
+		if (result == kError) return last.Fail("the connection failed or was closed");
+		return last.Record(result, "");
+	}
+
+	// --- LocalStream ------------------------------------------------------------------------------------------------------
+
+	LocalStream LocalStream::Connect(const char* name, int32 timeoutMs) {
+		LocalStream stream;
+		char[kErrorBytes] why;
+		int32 timedOut = 0;
+		stream.pipe = Opened(stream.last, c4_local_connect(name, timeoutMs, &timedOut, &why[0], kErrorBytes), timedOut, &why[0]);
+		return stream;
+	}
+
+	LocalStream LocalStream::FromPipe(void* pipe) {
+		LocalStream stream;
+		stream.pipe = pipe;
+		return stream;
+	}
+
+	int64 LocalStream::Send(const void* bytes, int64 count, int32 timeoutMs) {
+		if (!IsOpen()) return last.Fail("the stream is closed");
+		return Moved(last, c4_local_send(pipe, bytes, count, timeoutMs));
+	}
+
+	bool LocalStream::SendAll(const void* bytes, int64 count, int32 timeoutMs) {
+		if (!IsOpen()) {
+			last.Fail("the stream is closed");
+			return false;
+		}
+		const uint8* next = (const uint8*)bytes;
+		int64 left = count;
+		while (left > 0) {
+			const int64 sent = Send((const void*)next, left, timeoutMs);
+			if (sent <= 0) return false;
+			next = next + sent;
+			left -= sent;
+		}
+		return true;
+	}
+
+	int64 LocalStream::Receive(void* buffer, int64 capacity, int32 timeoutMs) {
+		if (!IsOpen()) return last.Fail("the stream is closed");
+		return Moved(last, c4_local_receive(pipe, buffer, capacity, timeoutMs));
+	}
+
+	void LocalStream::Close() {
+		if (pipe != nullptr) c4_local_close(pipe);
+		pipe = nullptr;
+	}
+
+	// --- LocalListener ----------------------------------------------------------------------------------------------------
+
+	bool LocalListener::Listen(const char* name) {
+		Close();
+		char[kErrorBytes] why;
+		pipe = Opened(last, c4_local_listen(name, &why[0], kErrorBytes), 0, &why[0]);
+		return pipe != nullptr;
+	}
+
+	LocalStream LocalListener::Accept(int32 timeoutMs) {
+		if (!IsOpen()) {
+			last.Fail("the listener is not listening");
+			return LocalStream();
+		}
+		char[kErrorBytes] why;
+		int32 timedOut = 0;
+		return LocalStream::FromPipe(Opened(last, c4_local_accept(pipe, timeoutMs, &timedOut, &why[0], kErrorBytes), timedOut, &why[0]));
+	}
+
+	void LocalListener::Close() {
+		if (pipe != nullptr) c4_local_close(pipe);
+		pipe = nullptr;
+	}
+
+	Core::String UserLocalName(const char* base) {
+		char[kUserIdBytes] id;
+		Core::StringBuilder name;
+		name.Append(base);
+		if (c4_local_user_id(&id[0], kUserIdBytes) > 0) {
+			name.AppendByte('-');
+			name.Append((const char*)&id[0]);
+		}
+		return name.ToString();
+	}
+}

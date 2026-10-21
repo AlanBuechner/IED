@@ -1,0 +1,161 @@
+// Net::LocalListener and Net::LocalStream (B67): both directions, a name as a single-instance lock, no listener, timeouts,
+// what was sent before a close still arriving, several clients at once, a client that leaves before it is accepted,
+// the name freed on close, refused names and the user's own name.
+
+include "bedrock.ch"
+
+const int32 kLocalWaitMs = 5000;
+
+// A name of this test run's own, so runs and tests never meet.
+static Core::String TestName(const char* test) {
+	uint8[4] random;
+	Platform::RandomBytes((void*)&random[0], 4);
+	Core::StringBuilder name;
+	name.Append("c4-local-test-");
+	name.Append(test);
+	name.AppendByte('-');
+	for (int32 i = 0; i < 4; ++i) name.AppendUIntBase((uint64)random[i], 16, 2);
+	return name.ToString();
+}
+
+static Core::String ReceiveText(Net::LocalStream& stream, int64 count) {
+	Core::Array<uint8> bytes;
+	bytes.Resize(count);
+	int64 got = 0;
+	while (got < count) {
+		const int64 n = stream.Receive((void*)(bytes.Data() + got), count - got, kLocalWaitMs);
+		if (n <= 0) break;
+		got += n;
+	}
+	return Core::String(Core::StringView((const char*)bytes.Data(), got));
+}
+
+[test("net.local")]
+class LocalTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		Core::String name = TestName("trip");
+		Net::LocalListener listener;
+		assert_true(listener.Listen(name.CStr()), listener.Error());
+		Net::LocalStream client = Net::LocalStream::Connect(name.CStr(), kLocalWaitMs);
+		assert_true(client.IsOpen(), client.Error());
+		Net::LocalStream server = listener.Accept(kLocalWaitMs);
+		assert_true(server.IsOpen(), listener.Error());
+		assert_true(client.SendText(Core::StringView("ping\n")), "the client sends");
+		assert_se("ping\n", ReceiveText(server, 5).CStr(), "the server receives");
+		assert_true(server.SendText(Core::StringView("pong\n")), "and answers");
+		assert_se("pong\n", ReceiveText(client, 5).CStr(), "the client receives the answer");
+	}
+
+	[test("single_instance")]
+	public static void TestSingleInstance() {
+		Core::String name = TestName("single");
+		Net::LocalListener first;
+		assert_true(first.Listen(name.CStr()), first.Error());
+		Net::LocalListener second;
+		assert_true(!second.Listen(name.CStr()), "a second listener on the name fails");
+		assert_true(Core::StringView(second.Error()).Contains(Core::StringView("taken")), second.Error());
+		first.Close();
+		assert_true(second.Listen(name.CStr()), "once the first closes, the name is free");
+	}
+
+	[test("no_listener")]
+	public static void TestNoListener() {
+		const int64 started = clock_now_ns();
+		Net::LocalStream client = Net::LocalStream::Connect(TestName("nobody").CStr(), kLocalWaitMs);
+		assert_true(!client.IsOpen() && !client.TimedOut(), "no one listens: refused, not timed out");
+		assert_true(Core::StringView(client.Error()).Contains(Core::StringView("no one listens")), client.Error());
+		assert_true(clock_now_ns() - started < 1000000000, "at once, without waiting for the timeout");
+	}
+
+	[test("timeouts")]
+	public static void TestTimeouts() {
+		Core::String name = TestName("timeouts");
+		Net::LocalListener listener;
+		listener.Listen(name.CStr());
+		Net::LocalStream none = listener.Accept(50);
+		assert_true(!none.IsOpen() && listener.TimedOut(), "no client within the time");
+		Net::LocalStream client = Net::LocalStream::Connect(name.CStr(), kLocalWaitMs);
+		Net::LocalStream server = listener.Accept(kLocalWaitMs);
+		assert_true(server.IsOpen(), "a client after a timed-out accept is still accepted");
+		char[8] buffer;
+		assert_eq(Net::kTimedOut, server.Receive((void*)&buffer[0], 8, 50), "nothing to receive within the time");
+		assert_true(server.TimedOut(), "and it says so");
+		client.SendText(Core::StringView("late"));
+		assert_se("late", ReceiveText(server, 4).CStr(), "the stream still works after a timed-out receive");
+	}
+
+	[test("close_delivers")]
+	public static void TestCloseDelivers() {
+		Core::String name = TestName("close");
+		Net::LocalListener listener;
+		listener.Listen(name.CStr());
+		Net::LocalStream client = Net::LocalStream::Connect(name.CStr(), kLocalWaitMs);
+		Net::LocalStream server = listener.Accept(kLocalWaitMs);
+		Core::Array<uint8> big;
+		for (int32 i = 0; i < 40000; ++i) big.Push((uint8)('a' + i % 26));
+		Net::LocalStream* writer = &server;
+		Core::Array<uint8>* payload = &big;
+		Threading::Thread sending = Threading::Thread::Run([writer, payload]() {
+			writer->SendAll((const void*)payload->Data(), payload->Count(), kLocalWaitMs);
+			writer->Close();
+		});
+		Core::String got = ReceiveText(client, 40000);
+		sending.Join();
+		assert_eq((int64)40000, got.View().ByteLength(), "everything sent before the close arrives");
+		assert_true(got.View().StartsWith(Core::StringView("abcdefg")), "in order");
+		char[4] after;
+		assert_eq((int64)0, client.Receive((void*)&after[0], 4, kLocalWaitMs), "then the end");
+		assert_true(!client.SendText(Core::StringView("x")), "sending to a closed peer fails");
+	}
+
+	[test("many_clients")]
+	public static void TestManyClients() {
+		Core::String name = TestName("many");
+		Net::LocalListener listener;
+		listener.Listen(name.CStr());
+		Core::Array<Net::LocalStream*> clients;
+		for (int32 i = 0; i < 4; ++i) clients.Push(new Net::LocalStream(Net::LocalStream::Connect(name.CStr(), kLocalWaitMs)));
+		Core::Array<Net::LocalStream*> served;
+		for (int32 i = 0; i < 4; ++i) served.Push(new Net::LocalStream(listener.Accept(kLocalWaitMs)));
+		for (int32 i = 0; i < 4; ++i) {
+			assert_true(clients[i]->IsOpen() && served[i]->IsOpen(), "four connections at once");
+			Core::StringBuilder text;
+			text.AppendInt(i);
+			clients[i]->SendText(text.View());
+		}
+		int32 sum = 0;
+		for (int32 i = 0; i < 4; ++i) sum += ReceiveText(*served[i], 1).View().ByteAt(0) - '0';
+		assert_eq(6, sum, "each server end hears its own client");
+		for (int32 i = 0; i < 4; ++i) {
+			clients[i]->Close();
+			served[i]->Close();
+		}
+	}
+
+	[test("client_leaves")]
+	public static void TestClientLeaves() {
+		Core::String name = TestName("leaves");
+		Net::LocalListener listener;
+		listener.Listen(name.CStr());
+		Net::LocalStream gone = Net::LocalStream::Connect(name.CStr(), kLocalWaitMs);
+		gone.Close();
+		Net::LocalStream stays = Net::LocalStream::Connect(name.CStr(), kLocalWaitMs);
+		stays.SendText(Core::StringView("here"));
+		char[4] buffer;
+		Net::LocalStream first = listener.Accept(kLocalWaitMs);
+		assert_true(first.IsOpen() && first.Receive((void*)&buffer[0], 4, kLocalWaitMs) == 0, "a client that left reads as ended");
+		Net::LocalStream second = listener.Accept(kLocalWaitMs);
+		assert_se("here", ReceiveText(second, 4).CStr(), "the next client is not disturbed");
+	}
+
+	[test("names")]
+	public static void TestNames() {
+		Net::LocalListener listener;
+		assert_true(!listener.Listen(""), "an empty name");
+		assert_true(!listener.Listen("a\\b"), "a backslash");
+		Core::String user = Net::UserLocalName("ied");
+		assert_true(user.View().StartsWith(Core::StringView("ied-S-1-5-")), user.CStr());
+		assert_true(user.View() == Net::UserLocalName("ied").View(), "the same each time");
+	}
+}

@@ -135,6 +135,7 @@ declarations.
 | Waiting on an address | `c4_wait_on_address(address, expected, size, timeoutNs)`, `c4_wake_one`, `c4_wake_all` | `wait_on_address`, `wake_one`, `wake_all`: block while the bytes at `address` equal `expected` (a negative timeout waits forever; it may return early, so check the condition again) |
 | The operating system: virtual memory, system and process information, random bytes, libraries, time | `c4_vm_*`, `c4_system_*`, `c4_library_*`, `c4_time_*` (`C4Runtime/PlatformRuntimeC.h`) | Bedrock's `Platform` namespace ([Bedrock section 12](../library/bedrock.md#12-platform-platform)); memory it hands out is never scanned |
 | Sockets: TCP, UDP, name resolution, polling | `c4_net_*` (`C4Runtime/NetRuntimeC.h`) | Bedrock's `Net` namespace ([Bedrock section 13](../library/bedrock.md#13-networking-net)) |
+| Local connections between one user's processes (named pipes) | `c4_local_*` (`C4Runtime/LocalRuntimeC.h`) | Bedrock's `Net::LocalListener`, `Net::LocalStream` ([Bedrock section 13](../library/bedrock.md#13-networking-net)) |
 | Child processes: pipes, job objects, pseudo consoles | `c4_process_*` (`C4Runtime/ProcessRuntimeC.h`) | Bedrock's `Process` namespace ([Bedrock section 15](../library/bedrock.md#15-processes-process)) |
 | File information, copies, real paths, watching a directory | `c4_fs_info`, `c4_fs_copy_file`, `c4_fs_canonical`, `c4_fs_watch_*`, ... (`C4Runtime/FileSystemRuntimeC.h`) | Bedrock's `FS` namespace ([Bedrock section 5](../library/bedrock.md#5-files-paths-and-directories-fs)) |
 

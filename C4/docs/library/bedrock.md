@@ -840,6 +840,14 @@ if (!accepted.ReceiveAll((void*)&reply[0], 4, 2000)) printf("%s\n", accepted.Err
   closed its side), `ReceiveAll` (exactly a count), `SetNoDelay`, `Shutdown(Shutdown::Send / Receive / Both)`,
   `LocalAddress`, `PeerAddress`, `Close`. Each owns its socket and closes it on delete; neither can be copied (move
   one with `take()`), and a zero one is closed.
+- **Local connections** (`local.ch`, B67): `LocalListener::Listen(name)`, `Accept(timeoutMs)` and
+  `LocalStream::Connect(name, timeoutMs)`, `Send` / `SendAll` / `SendText`, `Receive`, `Close` - a channel between
+  this user's processes on this machine, found by a name (a named pipe on Windows, over the runtime's
+  `LocalRuntimeC.h`). No other machine and no other user can use one: remote clients are refused, the pipe's only
+  access entry is the current user, and `Connect` refuses a listener that runs as another user (a name squatted
+  first). A second `Listen` on a name someone listens on fails ("taken"), so a name is a single-instance lock. Four
+  clients can connect before one is accepted; what is sent before a close still arrives. `Net::UserLocalName(base)`
+  is `<base>-<the user's SID>`.
 - **UDP** (`udp.ch`): `UdpSocket::Open(address)`, `SendTo(bytes, count, to)`, `ReceiveFrom(buffer, capacity, from,
   timeoutMs)` - a datagram arrives whole; one larger than the buffer is an error.
 - **Waiting** (`poll.ch`): `Net::Poll(entries, timeoutMs)` over `PollEntry::For(socket, kReadable | kWritable)`
@@ -870,7 +878,10 @@ Covered by `Bedrock/Tests/net_tests.cf`: parsing and printing every address form
 addresses are loopback,
 resolution (also of a name that does not exist), a TCP round trip over IPv4 and IPv6, timeouts on accept, receive and
 `ReceiveAll`, a refused connection, shutdown, a 4 MiB transfer from another thread, a port in use, closed and moved
-streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams. `loop_tests.cf` covers the
+streams, UDP datagrams (whole, timed out, too large), and `Poll` on listeners and streams. `local_tests.cf` (8) covers
+local connections: both directions, a name as a single-instance lock, no listener (refused at once), timeouts, 40 KB
+sent before a close arriving whole, four clients connecting before any is accepted, a client that leaves before it is
+accepted, the name freed on close, refused names and the user's own name. `loop_tests.cf` covers the
 event loop: timers in order, periodic timers cancelling themselves, 4000 pieces of work posted from 4 threads,
 `Stop` from another thread, a callback that throws, watches paused and removed, and an echo server holding 1000
 connections at once on one loop thread while a timer keeps running.
@@ -1025,11 +1036,11 @@ salts, ten malformed strings, a changed tag).
 
 ## 17. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 52 files, 512 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 53 files, 520 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

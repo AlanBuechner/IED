@@ -1514,6 +1514,16 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   whole), `text.integer.parse`, `threading.mutex.unlock_guard`, `http.server.peer`, `net.address.loopback`,
   `file.sync`, `file.write_atomically`. Bedrock passes 512 tests.
 
+#### B67 - Local connections (IED's single instance and CLI, docs/10 "Local control channel")
+- **Status:** Done.
+- **Done notes:** `Net::LocalListener` / `Net::LocalStream` (`Net/local.ch`) over the runtime's `LocalRuntimeC.h` and
+  `Net/LocalPipesWin32.c`: named pipes whose only access entry is the current user (`D:P(A;;GA;;;<SID>)`), remote
+  clients refused, the first instance claiming the name (`FILE_FLAG_FIRST_PIPE_INSTANCE`, so a second `Listen` fails
+  and a name is a single-instance lock), a backlog of four instances each with an overlapped connect in flight, and a
+  client that checks the listener's process runs as the same user (`GetNamedPipeServerProcessId`), so a name another
+  user squatted first is refused. `Net::UserLocalName(base)`. POSIX (Unix domain sockets) comes with the Linux port.
+- **Tests:** Bedrock `net.local.*` (8). Bedrock passes 520 tests.
+
 ### Testing framework
 
 #### B16 - Interop binding fidelity
@@ -2031,7 +2041,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 ```text
 Architect, in order:  A0 -> A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10
-Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65 B66
+Done:                 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B27 B28 B30 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B62 B63 B64 B65 B66 B67
 Ready now:            B31
 After A1:             B10 B15 (done: A1)     After A2:       B7 B34 B35 (done: A2)
 After A3:             B11 (done: A3)         After A3 + A4:  B20(3-6) (done: A4)
