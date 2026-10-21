@@ -1,6 +1,8 @@
 // workspaces.js - the workspace switcher (F-SHL-1): the server's open workspaces as a menu; the chosen one is shown in
 // this tab. A workspace opens on the server (`ied <path>`, the control channel), never from the browser.
 
+import { FILE, FOLDER, SOLUTION } from "/ui-kit/fileglyphs.js";
+
 export function showWorkspaceSwitcher(shell, at) {
 	const rows = shell.server.workspaces.map((ws) => ({
 		kind: "item", label: ws.name + (ws.wsId === shell.wsId ? "  (shown)" : ""), icon: ws.wsId === shell.wsId ? "$(check)" : kindIcon(ws.kind), base: "/",
@@ -11,9 +13,9 @@ export function showWorkspaceSwitcher(shell, at) {
 }
 
 export function kindIcon(kind) {
-	if (kind === "solution") return "$(project)";
-	if (kind === "file") return "$(file)";
-	return "$(folder)";
+	if (kind === "solution") return SOLUTION;
+	if (kind === "file") return FILE;
+	return FOLDER;
 }
 
 // One or two letters for the sidebar's workspace button.

@@ -4,7 +4,6 @@
 
 import { icon } from "/ui-kit/dom.js";
 import { showPicker } from "/ui-kit/picker.js";
-import { fileIcon } from "./fileicons.js";
 import { canonicalFileUri, displayPath, isFileUri } from "./fileuris.js";
 
 const IN_NAME_SCORE = 1000;
@@ -39,8 +38,8 @@ function folderOf(path) {
 	return slash < 0 ? "" : path.slice(0, slash);
 }
 
-function fileItem(file) {
-	return { label: file.path.slice(file.path.lastIndexOf("/") + 1), detail: folderOf(file.path), icon: fileIcon(file.path), target: { path: file.path } };
+function fileItem(file, iconOf) {
+	return { label: file.path.slice(file.path.lastIndexOf("/") + 1), detail: folderOf(file.path), icon: iconOf ? iconOf(file.path) : null, target: { path: file.path } };
 }
 
 // Where a symbol opens: a workspace file, or a file outside the workspace (read-only, docs/10); null for another URI.
@@ -91,11 +90,11 @@ export function matchTier(query, name) {
 const PATH_ONLY_TIER = 5;
 
 // The rows of the picker, files and symbols together by how well their names match; a file found only through its
-// folders last. Within a tier the order is the server's (files by score).
-export function rowsOf(files, symbols, wsId, query) {
+// folders last. Within a tier the order is the server's (files by score). `iconOf(path)` draws a file's icon.
+export function rowsOf(files, symbols, wsId, query, iconOf) {
 	const ranked = [];
 	for (const file of files) {
-		const item = fileItem(file);
+		const item = fileItem(file, iconOf);
 		ranked.push({ item, tier: file.score >= IN_NAME_SCORE ? matchTier(query, item.label) : PATH_ONLY_TIER });
 	}
 	for (const symbol of symbols) {
@@ -117,7 +116,7 @@ export function showGoToAll(ied, open) {
 			const files = asked.files ? ied.client.request("fs.files", { wsId, query: asked.query, maxResults: MOST_FILES }, { signal }) : null;
 			const symbols = asked.symbols && asked.query ? ied.client.request("lsp.workspaceSymbols", { wsId, query: asked.query }, { signal }) : null;
 			const [foundFiles, foundSymbols] = await Promise.all([files, symbols]);
-			return rowsOf(foundFiles ? foundFiles.files : [], foundSymbols ? foundSymbols.symbols : [], wsId, asked.query);
+			return rowsOf(foundFiles ? foundFiles.files : [], foundSymbols ? foundSymbols.symbols : [], wsId, asked.query, (path) => ied.icons.file(path));
 		},
 		pick: (item) => open(item.target),
 	});

@@ -1219,6 +1219,52 @@ def take_lease(page):
 		page.wait_for_selector(".ed-bar button:has-text('Edit Here')", state="hidden")
 
 
+def badge(page, name):
+	"""The class, label and hue of a file's glyph in the Solution Explorer."""
+	return page.evaluate("""(name) => {
+		const row = [...document.querySelectorAll('.tree-row')].find((r) => r.querySelector('.name') && r.querySelector('.name').textContent === name);
+		const svg = row && row.querySelector('svg.fg');
+		return svg ? [svg.getAttribute('class'), svg.querySelector('text') ? svg.querySelector('text').textContent : null, svg.style.getPropertyValue('--fg-hue')] : null;
+	}""", name)
+
+
+def expand(page, name):
+	"""Opens a folder of the Solution Explorer (its glyph says whether it is)."""
+	row = ".tree-row:has(.name:text-is('%s'))" % name
+	page.wait_for_selector(row + " svg.fg")
+	if page.query_selector(row + " svg.fg-folder"):
+		page.click(row)
+	page.wait_for_selector(row + " svg.fg-folder-open")
+
+
+@scenario(viewports=("desktop", "phone"))
+def file_icons_from_plugins(run):
+	"""Files, folders and tabs show the icons the language plugins describe (docs/15 "Icons"): a C source "C", its
+	header "h", Markdown gray, a picture's own codicon in its hue, folders tan; the shell knows none of them."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	made = ["docs/icons-%s.%s" % (run.viewport, ext) for ext in ("c", "h", "png")]
+	for path in made:
+		run.request("fs.write", {"wsId": ws, "path": path, "text": ""})
+	source, header, picture = (path.split("/")[1] for path in made)
+	if run.phone:
+		page.evaluate("ied_shell.showView('ied.explorer')")
+	page.wait_for_selector(".tree-row:has(.name:text-is('README.md')) svg.fg-file")
+	check(badge(page, "README.md")[1:] == ["MD", "var(--hue-gray)"], "Markdown: %s" % badge(page, "README.md"))
+	expand(page, "docs")
+	page.wait_for_selector(".tree-row:has(.name:text-is('%s')) svg.fg-file" % header)
+	check(badge(page, source)[1:] == ["C", "var(--hue-blue)"], "a C source: %s" % badge(page, source))
+	check(badge(page, header)[1:] == ["h", "var(--hue-violet)"], "its header: %s" % badge(page, header))
+	color = page.evaluate("(name) => [...document.querySelectorAll('.tree-row')].find((r) => r.textContent.includes(name)).querySelector('.ci').style.color", picture)
+	check(color == "var(--hue-teal)", "a picture: the plugin's codicon in its hue, %s" % color)
+	run.shot("explorer")
+	page.dblclick(".tree-row:has(.name:text-is('%s'))" % source)
+	page.wait_for_selector(".phone-head svg.fg-file" if run.phone else ".tab:has-text('%s') svg.fg-file text:text-is('C')" % source)
+	run.shot("tab")
+	for path in made:
+		run.request("fs.delete", {"wsId": ws, "path": path})
+
+
 def line_count(page):
 	return page.evaluate("monaco.editor.getEditors().find((e) => e.getModel() && e.getModel().uri.toString().endsWith('README.md')).getModel().getLineCount()")
 

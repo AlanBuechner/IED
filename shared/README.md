@@ -8,7 +8,8 @@
 
 Shared web components used by the shell and every plugin UI module, built only on theme tokens (`frontend/css/theme.css`), served at `/ui-kit/` and imported by URL (`import { h } from "/ui-kit/dom.js"`). Built so far:
 
-- `dom.js` - `h()` element building, `icon()` / `iconFrom()` (codicons served one SVG each at `/codicons/<name>.svg`, painted as masks), `replace()`, `isTextInput()`
+- `dom.js` - `h()` element building, `icon()` / `iconFrom()` (codicons served one SVG each at `/codicons/<name>.svg`, painted as masks; `iconFrom` also draws a file icon's spec), `replace()`, `isTextInput()`
+- `fileglyphs.js` - the drawn glyphs of files, folders, projects and solutions, and which spec the plugins' `fileIcons` / `projectIcons` give a file or project (`docs/15` Icons)
 - `ansi.js` - ANSI escape sequences in streamed text as styled runs
 - `menu.js` - popup menus (context menus, menu bar, dropdowns; bottom sheets on phones), keyboard driven
 - `tree.js` - a virtualized tree view with lazy children, VS keys and type-ahead

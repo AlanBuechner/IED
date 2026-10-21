@@ -2,7 +2,8 @@
 // tokens map onto IED's syntax colors (Visual Assist style: `controlFlow` pink, `preprocessor` gray), C4LSP - one server per
 // project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project) - C4DAP,
 // and the c4.nuke task preset (with its Launch configuration) and the c4 and c4-test problem matchers (IED docs/06,
-// docs/25). Ships in every toolchain as
+// docs/25), and how C4 files and projects look (teal "C4", a header "h"; a Nuke manifest its own). Ships in every
+// toolchain as
 // <toolchain>/ied/ (MakeToolchain.py); a solution names it in its localPlugins.
 {
 	"manifestVersion": 1,
@@ -15,6 +16,14 @@
 	"runtime": { "kind": "declarative" },
 	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
 	"contributes": {
+		"fileIcons": [
+			{ "languageId": "c4", "extensions": [".cf"], "label": "C4", "color": "--hue-teal" },
+			{ "languageId": "c4", "extensions": [".ch"], "label": "h", "color": "--hue-teal" },
+			{ "fileNames": ["nuke.toml"], "label": "NK", "color": "--hue-red" }
+		],
+		"projectIcons": [
+			{ "languageId": "c4", "label": "C4", "color": "--hue-teal", "presets": ["c4.nuke"] }
+		],
 		"languages": [
 			{
 				"id": "c4",

@@ -2,6 +2,8 @@
 //     import { h, icon } from "/ui-kit/dom.js";
 //     h("div.row.sel", { on: { click: open }, title: path }, icon("file"), h("span.name", null, name));
 
+import { glyph, isGlyph, tokenColor } from "./fileglyphs.js";
+
 // An element: `tag` is "name.class1.class2"; `props` sets attributes, with `on` for listeners, `style` for properties
 // (custom ones included), `dataset`, `text`; children are nodes, strings, or arrays of them (null skipped).
 export function h(tag, props, ...children) {
@@ -54,15 +56,22 @@ export function icon(name, extraClass) {
 }
 
 // An icon as a manifest gives it: "$(name)" is a codicon, anything else an SVG path relative to `base` (a plugin's folder
-// URL). Null when there is none.
+// URL); or a file icon's spec (fileglyphs.js): a drawn shape, or {icon, base, color} for a plugin's own picture in a
+// theme color. Null when there is none.
 export function iconFrom(spec, base, extraClass) {
 	if (!spec) return null;
+	if (typeof spec === "object") return isGlyph(spec) ? glyph(spec, extraClass) : tinted(iconFrom(spec.icon, spec.base || base, extraClass), spec.color);
 	const codicon = /^\$\(([a-z0-9-]+)\)$/.exec(spec);
 	if (codicon) return icon(codicon[1], extraClass);
 	const el = document.createElement("span");
 	el.className = extraClass ? "ci " + extraClass : "ci";
 	el.style.setProperty("--ci", "url(" + JSON.stringify(new URL(spec, base || location.href).href) + ")");
 	el.setAttribute("aria-hidden", "true");
+	return el;
+}
+
+function tinted(el, color) {
+	if (el && color) el.style.color = tokenColor(color, "");
 	return el;
 }
 

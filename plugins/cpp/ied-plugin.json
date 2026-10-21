@@ -17,6 +17,15 @@
 	"permissions": ["process.spawn", "lsp", "dap", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C/C++" },
+		"projectIcons": [
+			{ "languageId": "cpp", "label": "++", "color": "--hue-violet", "markers": ["CMakeLists.txt", "meson.build", "premake5.lua", "xmake.lua", "*.vcxproj", "compile_commands.json"] },
+			{ "languageId": "c", "label": "C", "color": "--hue-blue" }
+		],
+		"fileIcons": [
+			{ "fileNames": ["CMakeLists.txt"], "label": "CM", "color": "--hue-green" },
+			{ "extensions": [".cmake"], "label": "CM", "color": "--hue-green" },
+			{ "fileNames": ["compile_commands.json", "compile_flags.txt", ".clangd", ".clang-format", ".clang-tidy"], "icon": "$(gear)", "color": "--hue-violet" }
+		],
 		"semanticTokenColors": [
 			{
 				"languageId": "c",

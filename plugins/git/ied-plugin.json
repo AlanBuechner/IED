@@ -12,6 +12,9 @@
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
 	"contributes": {
+		"fileIcons": [
+			{ "fileNames": [".gitignore", ".gitattributes", ".gitmodules", ".gitkeep"], "label": "GIT", "color": "--hue-red" }
+		],
 		"bindings": {
 			"consumes": [ { "name": "editor.colorize", "version": "1", "optional": true } ]
 		},

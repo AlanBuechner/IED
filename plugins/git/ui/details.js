@@ -10,7 +10,7 @@ function split(path) {
 	return slash < 0 ? ["", path] : [path.slice(0, slash), path.slice(slash + 1)];
 }
 
-function fileRow(change, { selected, buttons, pick, counts }) {
+function fileRow(change, { selected, buttons, pick, counts, fileIcon }) {
 	const [folder, name] = split(change.path);
 	const status = change.status;
 	return h("div.row.git-file" + (selected ? ".sel" : ""), {
@@ -18,13 +18,14 @@ function fileRow(change, { selected, buttons, pick, counts }) {
 		on: { click: pick },
 	},
 	h("span." + statusClass(status), { title: statusTitle(status) }, status === "?" ? "U" : status.charAt(0)),
+	fileIcon ? fileIcon(change.path) : null,
 	h("span.name", null, name, folder ? h("span.git-folder", null, folder) : null),
 	counts,
 	buttons ? h("span.git-file-actions", null, buttons) : null);
 }
 
 export class CommitDetails {
-	// events: {pick(file), reveal(oid), copy(text)}
+	// events: {pick(file), reveal(oid), copy(text), fileIcon(path)}
 	constructor(events) {
 		this.events = events;
 		this.commit = null;
@@ -67,6 +68,7 @@ export class CommitDetails {
 		replace(this.files, this.commit.files.map((file) => fileRow(file, {
 			selected: this.file && this.file.path === file.path,
 			pick: () => this.pick(file),
+			fileIcon: this.events.fileIcon,
 			counts: h("span.meta", null, file.binary ? "binary" : [file.added ? h("span.c-saved", null, "+" + file.added) : null, file.removed ? h("span.c-error", null, " -" + file.removed) : null]),
 		})));
 	}
@@ -80,7 +82,7 @@ export class CommitDetails {
 
 export class ChangesPane {
 	// events: {pick(change, staged), stage(paths), unstage(paths), discard(paths), commit(message, amend) -> Promise<bool>,
-	// lastMessage() -> Promise<string>, draft(text) (to keep it)}
+	// lastMessage() -> Promise<string>, draft(text) (to keep it), fileIcon(path)}
 	constructor(events, draft) {
 		this.events = events;
 		this.changes = null;
@@ -119,6 +121,7 @@ export class ChangesPane {
 				selected: this.selected && this.selected.path === change.path && this.selected.staged === staged,
 				pick: () => this.pick(change, staged),
 				buttons: this.buttons(change, staged),
+				fileIcon: this.events.fileIcon,
 			}));
 		};
 		if (c.conflicted.length) section("Conflicts", c.conflicted, false, null);

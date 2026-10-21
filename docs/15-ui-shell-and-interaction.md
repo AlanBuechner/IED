@@ -141,7 +141,14 @@ Default bindings (subset; full table generated from the command registry):
 
 ## Icons
 
-Codicons (vendored) for UI glyphs. File-type icons: a VS-like set in `shared/ui-kit/icons/` (distinct shape + restrained color per file category, since color here carries meaning: type identity); languages contribute icons for their extensions (`fileIcons`).
+Codicons (vendored) for UI glyphs. Files, folders, projects and solutions get one simple glyph each (`shared/ui-kit/fileglyphs.js`), as Visual Studio and VS Code draw them: a distinct shape for each kind of thing so a glance tells them apart, a muted hue for which language, and no solid fills.
+
+- **Solution**: two outlined tiles in `--icon-solution` (purple, as in Visual Studio).
+- **Project**: a thin rounded tile in its language's hue, faintly tinted, with the language's letters (`C4`, `++`, `RS`, `GO`); a project no plugin recognizes gets a plain tile.
+- **Folder** (a solution's groups and Solution Items too): Visual Studio's tan folder, open while expanded.
+- **File**: its type's letters alone in the type's hue (`C4`, `C`, `C++`, `{}`, `MD`), as VS Code's Seti icons; the second file of a pair has its own letter (a header is `h`), so a source and its header differ in shape, not only in color. A plugin may give its own picture instead (a tinted codicon: images, archives, binaries, config files, package manifests). A file no plugin names is a plain page.
+
+The shell knows no language: which file or project gets which letters and hue comes from the plugins' `fileIcons` and `projectIcons` (`docs/02`), with hues from the theme's identity tokens (`docs/07`). As shipped: C4 teal (`.cf` "C4", `.ch` "h", `nuke.toml`), C blue, C++ and C/C++ headers violet (`ied.languages`; the C/C++ plugin adds C++ projects by `CMakeLists.txt`, `*.vcxproj`, `meson.build`, `compile_commands.json`), Rust orange (`Cargo.toml` projects), Go and Python cyan, TypeScript blue, JavaScript yellow, C# green, JSON amber, Markdown gray, shaders pink, Git's files red. A project is matched by the `language` its `.ied.proj` names (`nuke init --ied` writes it), else its presets or build system, else marker files in its root folder (listed once, when no other rule decides). The glyphs appear in the Solution Explorer, document tabs, Find in Files, Go To All, the Git activity's file lists and the chat's modified files.
 
 ## Screens to design-review first (before building everything)
 

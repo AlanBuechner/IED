@@ -7,7 +7,7 @@ import { compact, contextBar } from "./chatmodel.js";
 
 const TASK_GLYPHS = { done: "check", skipped: "circle-slash", in_progress: "arrow-right", pending: null };
 
-// actions: {openFile(path)}
+// actions: {openFile(path), fileIcon(path)}
 export class SidePanel {
 	constructor(actions) {
 		this.actions = actions;
@@ -55,7 +55,7 @@ export class SidePanel {
 
 	filesSection(model) {
 		const rows = model.modified.map((file) => h("button.chat-sec-row.file", { title: file.path, on: { click: () => this.actions.openFile(file.path) } },
-			icon("file-code"), h("span.name", null, file.path.split("/").pop()), h("span.dir.muted", null, file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""),
+			this.actions.fileIcon(file.path), h("span.name", null, file.path.split("/").pop()), h("span.dir.muted", null, file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""),
 			h("span.meta", null, file.plus ? h("span.plus", null, "+" + file.plus) : null, file.minus ? h("span.minus", null, " -" + file.minus) : null)));
 		return this.section("files", "Modified files", model.modified.length ? String(model.modified.length) : "", rows.length ? rows : h("div.chat-sec-empty.muted", null, "The AI has not changed a file."));
 	}

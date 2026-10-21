@@ -87,6 +87,7 @@ export class ChatActivityView {
 			set: (change) => this.setChat(change),
 			groups: () => this.groups(),
 			openFile: (path) => this.openFile(path),
+			fileIcon: (path) => this.ied.icons.file(path),
 			loadEarlier: () => this.loadEarlier(),
 		};
 	}

@@ -4,7 +4,6 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
-import { fileIcon } from "./fileicons.js";
 
 const INCLUDE_HINT = "e.g. **/*.cf, src/**";
 const EXCLUDE_HINT = "default: build, bin, vendor, node_modules, ...";
@@ -115,7 +114,7 @@ export class FindInFiles {
 
 	renderRow(node, row) {
 		if (node.kind === "file") {
-			row.append(fileIcon(node.path.slice(node.path.lastIndexOf("/") + 1)), h("span.name", null, node.path), h("span.meta", null, String(node.matches.length)));
+			row.append(this.ied.icons.file(node.path), h("span.name", null, node.path), h("span.meta", null, String(node.matches.length)));
 			return;
 		}
 		row.append(h("span.fif-line.muted", null, String(node.match.line + 1)), h("span.name.fif-preview", null, ...this.highlighted(node.match.preview)));

@@ -14,6 +14,13 @@
 	"permissions": ["process.spawn", "lsp", "fs.read"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Rust" },
+		"projectIcons": [
+			{ "languageId": "rust", "label": "RS", "color": "--hue-orange", "presets": ["rust.cargo"], "buildSystems": ["cargo"], "markers": ["Cargo.toml"] }
+		],
+		"fileIcons": [
+			{ "fileNames": ["Cargo.toml"], "icon": "$(package)", "color": "--hue-orange" },
+			{ "fileNames": ["Cargo.lock"], "icon": "$(lock)", "color": "--hue-orange" }
+		],
 		"semanticTokenColors": [
 			{
 				"languageId": "rust",

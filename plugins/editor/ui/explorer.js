@@ -6,7 +6,6 @@
 import { h, icon } from "/ui-kit/dom.js";
 import { TreeView } from "/ui-kit/tree.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
-import { fileIcon, folderIcon } from "./fileicons.js";
 
 function parentOf(path) {
 	const slash = path.lastIndexOf("/");
@@ -33,6 +32,7 @@ export class Explorer {
 		this.ied = ctx.ied;
 		this.mounted = mounted;
 		this.folders = new Map();
+		this.rootNames = new Map();   // a project's root folder -> its names, for icons that go by marker files
 		const tools = h("div.ed-tools", null,
 			h("span.grow"),
 			h("button.ib", { title: "Collapse All", "aria-label": "Collapse All", on: { click: () => this.tree.collapseAll() } }, icon("collapse-all")),
@@ -67,6 +67,7 @@ export class Explorer {
 
 	refresh() {
 		this.folders.clear();
+		this.rootNames.clear();
 		return this.tree.refresh().catch((e) => this.ied.report("Solution Explorer: " + e.message, e));
 	}
 
@@ -142,17 +143,38 @@ export class Explorer {
 	}
 
 	renderRow(node, row) {
-		const open = this.tree.expanded.has(node.id);
-		const glyph = {
-			solution: () => icon("project", "ft-project"), group: () => folderIcon(open), items: () => folderIcon(open),
-			project: () => icon("project", "ft-project"), folder: () => folderIcon(open), missing: () => icon("warning", "c-warn"),
-		}[node.kind];
-		row.append(glyph ? glyph() : fileIcon(node.name), h("span.name", null, node.name));
+		row.append(this.iconOf(node), h("span.name", null, node.name));
 		if (node.problem) {
 			row.classList.add("problem");
 			row.title = node.problem;
 		}
 		else if (node.path !== undefined && node.path !== null) row.title = node.path || "/";
+	}
+
+	// A node's icon (docs/15 "Icons"): the solution; folders, a solution's groups and its Solution Items as folders; a
+	// project as the plugins draw its language; a file by its name.
+	iconOf(node) {
+		const icons = this.ied.icons;
+		const open = this.tree.expanded.has(node.id);
+		if (node.kind === "solution") return icons.solution();
+		if (node.kind === "group" || node.kind === "items" || node.kind === "folder") return icons.folder(open);
+		if (node.kind === "project") return icons.project(node.project, this.markerNames(node));
+		if (node.kind === "missing") return icon("warning", "c-warn");
+		return icons.file(node.name);
+	}
+
+	// The names in a project's root folder when its icon goes by marker files there, listed once; the row is drawn
+	// again when they arrive. A root that cannot be listed already says why on its row (its problem).
+	markerNames(node) {
+		if (node.path === null || !this.ied.icons.needsMarkers(node.project)) return [];
+		if (!this.rootNames.has(node.path)) {
+			this.rootNames.set(node.path, []);
+			this.ied.client.request("fs.list", { wsId: this.ctx.wsId, path: node.path }).then((answer) => {
+				this.rootNames.set(node.path, answer.entries.map((entry) => entry.name));
+				this.tree.draw();
+			}, () => {});
+		}
+		return this.rootNames.get(node.path);
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------

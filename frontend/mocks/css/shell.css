@@ -53,15 +53,15 @@ code, .mono { font-family: var(--font-mono); font-size: calc(var(--font-size-cod
 .c-3 { color: var(--text-3); }
 
 /* file-type icon identity */
-.ft-source { color: var(--filetype-source); }
-.ft-header { color: var(--filetype-header); }
-.ft-data { color: var(--filetype-data); }
-.ft-doc { color: var(--filetype-doc); }
-.ft-script { color: var(--filetype-script); }
-.ft-shader { color: var(--filetype-shader); }
-.ft-media { color: var(--filetype-media); }
-.ft-folder { color: var(--filetype-folder); }
-.ft-project { color: var(--filetype-project); }
+.ft-source { color: var(--hue-blue); }
+.ft-header { color: var(--hue-violet); }
+.ft-data { color: var(--hue-amber); }
+.ft-doc { color: var(--hue-gray); }
+.ft-script { color: var(--hue-green); }
+.ft-shader { color: var(--hue-pink); }
+.ft-media { color: var(--hue-teal); }
+.ft-folder { color: var(--icon-folder); }
+.ft-project { color: var(--icon-project); }
 
 /* ---------- app grid ---------- */
 .app {

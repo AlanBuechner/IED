@@ -154,16 +154,28 @@
 	--terminal-cursor: var(--text-0);
 
 	/* ---------- identity colors (meaning = which thing) ---------- */
-	/* file-type icons: restrained hue per file category (docs/15 Icons) */
-	--filetype-source: #8aa3d6;
-	--filetype-header: #6eb4a2;
-	--filetype-data: #c9a76f;
-	--filetype-doc: #a0a0a0;
-	--filetype-script: #c88f7a;
-	--filetype-shader: #c58fb4;
-	--filetype-media: #8fb07f;
-	--filetype-folder: var(--text-2);
-	--filetype-project: var(--text-1);
+	/* hues: which file type or project language (plugins' fileIcons and projectIcons name them, docs/15 Icons) */
+	--hue-red: #d0656d;
+	--hue-orange: #d98a52;
+	--hue-amber: #cfa752;
+	--hue-yellow: #cfc25c;
+	--hue-lime: #9cbf5c;
+	--hue-green: #67b271;
+	--hue-teal: #4db39b;
+	--hue-cyan: #4fa9c9;
+	--hue-blue: #5b9bd5;
+	--hue-indigo: #8a8fdc;
+	--hue-violet: #a882d6;
+	--hue-pink: #d47aae;
+	--hue-gray: #9d9d9d;
+
+	/* file, folder, project and solution glyphs (shared/ui-kit/fileglyphs.js) */
+	--icon-line: #a0a0a0;          /* a file no plugin names */
+	--icon-tint: 14%;              /* how much of its hue a project's tile is filled with */
+	--icon-folder: #dcb67a;
+	--icon-folder-back: #b39158;
+	--icon-project: #8f9db3;
+	--icon-solution: #a882d6;
 
 	/* series: categorical identity in graphs (git lanes, profiler threads, charts) */
 	--series-1: #7a9ccc;

@@ -57,6 +57,7 @@
 		"contributes": { "$ref": "#/$defs/contributes" }
 	},
 	"$defs": {
+		"themeColor": { "type": "string", "pattern": "^--[a-z][a-z0-9-]*$", "description": "A theme token's name ('--hue-blue', docs/07); raw colors are refused." },
 		"runtime": {
 			"type": "object",
 			"required": ["kind"],
@@ -134,15 +135,35 @@
 				"semanticTokenColors": { "type": "array", "items": { "$ref": "#/$defs/semanticTokenColors" } },
 				"fileIcons": {
 					"type": "array",
+					"description": "How files look in every file list (docs/15 'Icons'): a short label in a theme hue, or the plugin's own picture.",
 					"items": {
 						"type": "object",
-						"required": ["icon"],
+						"additionalProperties": false,
+						"anyOf": [ { "required": ["label"] }, { "required": ["icon"] } ],
+						"properties": {
+							"extensions": { "type": "array", "items": { "type": "string" }, "description": "'.cpp'; the longest match wins ('.d.ts' over '.ts')." },
+							"fileNames": { "type": "array", "items": { "type": "string" }, "description": "Whole names ('CMakeLists.txt'), matched without case; they win over extensions." },
+							"languageId": { "type": "string" },
+							"label": { "type": "string", "minLength": 1, "maxLength": 4, "description": "Up to four characters drawn as the icon: 'C++', 'h', 'RS'. The files of a pair get different labels (a header 'h')." },
+							"color": { "$ref": "#/$defs/themeColor" },
+							"icon": { "type": "string", "description": "'$(codicon)' or an SVG path in the plugin's folder, instead of a label." }
+						}
+					}
+				},
+				"projectIcons": {
+					"type": "array",
+					"description": "How projects look in the Solution Explorer (docs/15 'Icons'): a thin tile with a short label in a theme hue. A project is matched by its .ied.proj 'language', else its presets or build system, else a marker file in its root folder.",
+					"items": {
+						"type": "object",
+						"required": ["languageId", "label"],
 						"additionalProperties": false,
 						"properties": {
-							"extensions": { "type": "array", "items": { "type": "string" } },
-							"fileNames": { "type": "array", "items": { "type": "string" } },
 							"languageId": { "type": "string" },
-							"icon": { "type": "string" }
+							"label": { "type": "string", "minLength": 1, "maxLength": 3 },
+							"color": { "$ref": "#/$defs/themeColor" },
+							"presets": { "type": "array", "items": { "type": "string" } },
+							"buildSystems": { "type": "array", "items": { "type": "string" } },
+							"markers": { "type": "array", "items": { "type": "string" }, "description": "File names in a project's root folder that say its language ('Cargo.toml'); '*.csproj' matches by extension." }
 						}
 					}
 				},

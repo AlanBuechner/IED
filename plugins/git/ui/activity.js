@@ -62,7 +62,7 @@ export class GitActivityView {
 		this.selected = stored("ied.git.selected:" + this.wsId, LOCAL);
 		this.graph = new GraphList({ select: (id) => this.select(id), more: () => this.loadMore(), context: (e, c) => this.commitMenu(e, c) });
 		this.refsPane = new RefsPane({ reveal: (oid) => this.reveal(oid), checkout: (name, remote) => this.checkout(name, remote), menu: (e, ref) => this.refMenu(e, ref) }, stored("ied.git.folded", null));
-		this.details = new CommitDetails({ pick: (file) => this.diff.showCommit(this.repoId, this.details.commit.oid, file), reveal: (oid) => this.reveal(oid), copy: (text) => this.copy(text) });
+		this.details = new CommitDetails({ pick: (file) => this.diff.showCommit(this.repoId, this.details.commit.oid, file), reveal: (oid) => this.reveal(oid), copy: (text) => this.copy(text), fileIcon: (path) => this.ied.icons.file(path) });
 		this.changes = new ChangesPane({
 			pick: (change, staged) => this.showChange(change, staged),
 			stage: (paths) => this.call("git.stage", { paths }),
@@ -71,6 +71,7 @@ export class GitActivityView {
 			commit: (message, amend) => this.commit(message, amend),
 			lastMessage: async () => ((await this.call("git.lastMessage", {})) || { message: "" }).message,
 			draft: (text) => store("ied.git.draft:" + this.wsId, text),
+			fileIcon: (path) => this.ied.icons.file(path),
 		}, stored("ied.git.draft:" + this.wsId, ""));
 		this.diff = new DiffPane(this.ied, { open: (path) => this.open(path), mode: (mode) => store("ied.git.diffMode", mode) }, stored("ied.git.diffMode", "inline"));
 		this.build();

@@ -494,11 +494,15 @@ export class Shell {
 				open: (ref, options) => shell.openTab(ref, options),
 			},
 			context: { set: (key, value) => shell.context.set(key, value), get: (key) => shell.context.get(key) },
-			contributions: (point) => shell.contributions.plugins.flatMap((p) => {
-				const value = p.contributes[point];
-				if (value === undefined) return [];
-				return (Array.isArray(value) ? value : [value]).map((entry) => ({ plugin: { id: p.id, base: p.base }, value: entry }));
-			}),
+			contributions: (point) => shell.contributions.of(point),
+			icons: {
+				file: (name, extraClass) => shell.contributions.icons.file(name, extraClass),
+				fileSpec: (name) => shell.contributions.icons.fileSpec(name),
+				folder: (open, extraClass) => shell.contributions.icons.folder(open, extraClass),
+				project: (project, rootNames, extraClass) => shell.contributions.icons.project(project, rootNames, extraClass),
+				needsMarkers: (project) => shell.contributions.icons.needsMarkers(project),
+				solution: (extraClass) => shell.contributions.icons.solution(extraClass),
+			},
 			menus: { show: (menuId, at, args) => shell.showMenu(menuId, at, args) },
 			get workspace() {
 				return shell.workspace;

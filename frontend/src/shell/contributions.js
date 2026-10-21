@@ -1,6 +1,9 @@
 // contributions.js - what the loaded plugins of a workspace contribute to the shell (docs/02, docs/15 "Composition"):
 // activities, tool windows, commands, menus, keybindings and status bar items, registered with the shell's registries;
-// and each plugin's UI module, imported once per page with activate(ied) called once.
+// and each plugin's UI module, imported once per page with activate(ied) called once. The file and project icons they
+// describe are worked out by `icons`.
+
+import { Icons } from "./icons.js";
 
 const DOCKS = new Set(["left", "right", "bottom", "document"]);
 
@@ -19,6 +22,7 @@ export class Contributions {
 		this.statusItems = [];
 		this.toolbarItems = [];
 		this.panel = null;
+		this.icons = new Icons((point) => this.of(point));
 	}
 
 	// Reads the contributions of `wsId` and registers them; resolves once every UI module is imported and activated.
@@ -43,6 +47,7 @@ export class Contributions {
 		this.statusItems = [];
 		this.toolbarItems = [];
 		this.panel = null;
+		this.icons.clear();
 		for (const plugin of this.plugins) {
 			const c = plugin.contributes;
 			for (const spec of c.commands || []) commands.define(spec, plugin.id, plugin.base);
@@ -94,5 +99,14 @@ export class Contributions {
 
 	plugin(id) {
 		return this.plugins.find((p) => p.id === id) || null;
+	}
+
+	// A contribution point's entries over every plugin, in load order: [{plugin: {id, base}, value}].
+	of(point) {
+		return this.plugins.flatMap((p) => {
+			const value = p.contributes[point];
+			if (value === undefined) return [];
+			return (Array.isArray(value) ? value : [value]).map((entry) => ({ plugin: { id: p.id, base: p.base }, value: entry }));
+		});
 	}
 }

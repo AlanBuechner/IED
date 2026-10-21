@@ -29,6 +29,15 @@ input, select, textarea { font: inherit; color: inherit; }
 .ci.sm { width: 12px; height: 12px; vertical-align: -1px; }
 .ci.lg { width: 28px; height: 28px; }
 .ci.spin { animation: ui-spin 1.2s linear infinite; }
+
+/* file, folder, project and solution glyphs (fileglyphs.js): one simple shape each in its hue (--fg-hue), sized as codicons */
+.ci.fg { --fg-hue: var(--icon-line); background: none; -webkit-mask: none; mask: none; overflow: visible; vertical-align: -3px; }
+.fg-label { fill: var(--fg-hue); font-family: var(--font-ui); font-weight: 700; letter-spacing: -0.02em; }
+.fg-page { fill: none; stroke: var(--fg-hue); stroke-width: 1; stroke-linejoin: round; }
+.fg-folder { fill: var(--icon-folder); }
+.fg-folder-back { fill: var(--icon-folder-back); }
+.fg-tile { fill: color-mix(in srgb, var(--fg-hue) var(--icon-tint), transparent); stroke: var(--fg-hue); stroke-width: 1; }
+.fg-tile-back { fill: none; stroke: var(--fg-hue); stroke-width: 1; }
 @keyframes ui-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ci.spin { animation: none; } }
 

@@ -17,7 +17,7 @@ Owner: `src/plugins` (host) + `frontend/` (client-side contribution loader) + `s
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
 | F-PLG-10 | Shell: `activities` (sidebar icons + views), `toolWindows`, `commands`, `menus`, `keybindings`, `statusBarItems`, `toolbars`, `notifications` kinds | P0 | US-PLG-1 |
-| F-PLG-11 | Editor: `languages` (ids, extensions, comment tokens, brackets, auto-close pairs, indentation rules, Monarch grammar), `semanticTokenColors` (token type/modifier -> theme token), `fileIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries` | P0 (languages, colors, icons), P1 (rest) | US-PLG-5 |
+| F-PLG-11 | Editor: `languages` (ids, extensions, comment tokens, brackets, auto-close pairs, indentation rules, Monarch grammar), `semanticTokenColors` (token type/modifier -> theme token), `fileIcons`, `projectIcons`, `fileViewers` (custom editors), `snippets`, `headerSourcePairs`, `fileNesting`, `spellDictionaries` | P0 (languages, colors, icons), P1 (rest) | US-PLG-5 |
 | F-PLG-12 | Build/debug: `taskPresets` (toolbar presets), `problemMatchers`, `testProviders`, `dapProviders`, `lspProfiles`, `projectTemplates`, `outputSources` | P0 | US-PLG-5 |
 | F-PLG-13 | AI: `toolCalls`, `skills`, `systemMessageSections`, `agentModes`, `mcpServers`, `modelProviders`, `chatSlashCommands` | P0 (tools, skills, sections), P1 (rest) | US-PLG-5 |
 | F-PLG-14 | Infra: `settings` (JSON Schema per tier), `bindings` (provide/consume), `sandboxProviders`, `sourceControlProviders`, `profilerImporters` | P1 | US-PLG-5 |

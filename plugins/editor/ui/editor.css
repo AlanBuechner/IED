@@ -1,18 +1,7 @@
 /*
-	editor.css - the editor plugin's views: Solution Explorer, Output, the Error List, the read-only document view, and its
-	file-type colors wherever its icons show (menu rows included). Theme tokens only.
+	editor.css - the editor plugin's views: Solution Explorer, Output, the Error List, the read-only document view.
+	Theme tokens only.
 */
-
-.ft-source, .menu-item .ci.ft-source { color: var(--filetype-source); }
-.ft-header, .menu-item .ci.ft-header { color: var(--filetype-header); }
-.ft-data, .menu-item .ci.ft-data { color: var(--filetype-data); }
-.ft-doc, .menu-item .ci.ft-doc { color: var(--filetype-doc); }
-.ft-script, .menu-item .ci.ft-script { color: var(--filetype-script); }
-.ft-shader, .menu-item .ci.ft-shader { color: var(--filetype-shader); }
-.ft-media, .menu-item .ci.ft-media { color: var(--filetype-media); }
-.ft-folder, .menu-item .ci.ft-folder { color: var(--filetype-folder); }
-.ft-project, .menu-item .ci.ft-project { color: var(--filetype-project); }
-.ft-plain, .menu-item .ci.ft-plain { color: var(--text-2); }
 
 /* The Markdown preview (mdpreview.js): a readable column on the document surface. */
 .md-preview { height: 100%; overflow: auto; background: var(--editor-bg); color: var(--text-0); padding: var(--space-4) var(--space-6); font-size: var(--font-size-lg); line-height: 1.6; outline: none; }
