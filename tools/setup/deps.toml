@@ -67,6 +67,17 @@ dest = "vendor/webview2"
 format = "zip"
 probe = "build/native/include/WebView2.h"
 
+[packages.vulkan-headers]
+group = "ied"
+version = "1.4.309"
+description = "Khronos' Vulkan headers and vk_layer.h: the GPU debugger's capture layer and replayer (plugins/gpu/native)"
+url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.309.tar.gz"
+sha256 = "437925ada160d86ed763d29dcb9318c1bb0d024d7deaf77bc7c170b8eb6b6f10"
+dest = "vendor/vulkan-headers"
+format = "tgz"
+strip = 1
+probe = "include/vulkan/vulkan_core.h"
+
 [packages.searxng]
 group = "extras"
 version = "d47cb96bfb79240d487bdb2336886d0dc59f2f30"

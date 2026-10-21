@@ -2,9 +2,9 @@
 
 ## Purpose
 
-A graphics debugger as its own sidebar activity (**GPU**, plugin `ied.gpu`): capture frames from D3D12 and Vulkan programs, replay them on the server, inspect every event, debug shaders and pixels, and measure where GPU time goes. The owner works mostly in PIX, so **the UI follows PIX's layout and styling** (owner decision, 2026-10-19: RenderDoc's look is not wanted). RenderDoc contributes inspection depth and openness - as a backend and as capabilities placed inside PIX's layout - and Nsight contributes performance analysis. On top come what none of them have: AI that can drive the whole debugger, capture diffs across builds, one timeline with the CPU profiler, and triage from any device.
+A graphics debugger as its own sidebar activity (**GPU**, plugin `ied.gpu`): capture frames from D3D12 and Vulkan programs, replay them on the server, inspect every event, debug shaders and pixels, and measure where GPU time goes. The owner works mostly in PIX, so **the UI follows PIX's layout and styling** (owner decision, 2026-10-19: RenderDoc's look is not wanted). The capture and replay backend is IED's own, **Flashbang** (owner decision, 2026-10-21): RenderDoc is the reference for how a hard problem is solved (its source is MIT) and for inspection depth, Nsight for performance analysis, but neither is a dependency. On top come what none of them have: AI that can drive the whole debugger, capture diffs across builds, one timeline with the CPU profiler, and triage from any device.
 
-Feature list: `docs/features/17-gpu-debugger.md`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
+Feature list: `docs/features/17-gpu-debugger.md`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`. Code: `plugins/gpu/` (`README.md` there maps the folders).
 
 Generic by rule (AGENTS.md rule 1): the plugin knows D3D12, Vulkan and HLSL/SPIR-V, never a specific engine. Engine meaning (pass names, material and entity names, what a bindless index points at) arrives inside the capture as debug markers, object names and an optional metadata chunk that any engine can write.
 
@@ -15,62 +15,108 @@ Generic by rule (AGENTS.md rule 1): the plugin knows D3D12, Vulkan and HLSL/SPIR
 | Event list | marker tree with per-event GPU timing columns | marker tree, bookmarks, search, API call list per event | frame debugger event list | PIX's events grid (API calls as rows under markers, GPU time and statistics columns) plus bookmarks and a filter language (`kind:draw ps:DefaultLit rt:HDR`) |
 | State | Pipeline view: state tree by stage beside the selected resource | pipeline flowchart, bindings with contents, root signature | API inspector | PIX's state tree (no flowchart); **bindless indices resolved to the resource and its name**; constant buffers decoded in the tree |
 | Textures | resource viewer with channels, mips, range, pixel status line | overlays (wireframe, depth/stencil test, overdraw, clipping, triangle size), pixel context, thumbnails | resource viewer | PIX's resource viewer and status line; RenderDoc's overlays as entries of a *Visualize* menu (no thumbnail strip, no floating pixel box); **display transforms run in the browser (WebGL2), instant even on a phone** |
-| Geometry | mesh view | mesh viewer: VS in/out, mesh/task output, 3D preview, table | geometry view | RenderDoc mesh viewer |
-| Pixel history | yes | yes, with test-failure reasons per event | yes | RenderDoc history + "why" summary in plain words |
-| Shader debugging | HLSL source stepping | DXBC/DXIL/SPIR-V, source-level with debug info | yes | source-level stepping in an IED editor surface, watch/locals per lane; **later: time-travel debugging by instrumented replay** (Flashbang) |
+| Geometry | mesh view | mesh viewer: VS in/out, mesh/task output, 3D preview, table | geometry view | RenderDoc's mesh viewer content in a PIX pane |
+| Pixel history | yes | yes, with test-failure reasons per event | yes | RenderDoc's history + "why" summary in plain words |
+| Shader debugging | HLSL source stepping | DXBC/DXIL/SPIR-V, source-level with debug info | yes | source-level stepping in an IED editor surface, watch/locals per lane; **time-travel debugging by instrumented replay** |
 | Edit and replay | shader edit and continue | shader edit and replace | shader edit | edit in the IED editor (with the shader language plugin's LSP), replay, **show a diff of the output** |
 | Timing | timing captures, per-event GPU time, queue timeline | per-event duration | GPU Trace: queues, unit throughput, warp occupancy | per-event and per-pass time, queue timeline with bubbles and fences |
 | Counters | vendor counters | via vendor plugins (limited) | full hardware metrics, "speed of light" per unit, shader profiler stall reasons | vendor providers (AMD GPA, NVIDIA Perf SDK, Intel) in the replay process; SOL-style bars and a limiter verdict |
-| Analysis | warnings / automated analysis | none built in | GPU Trace analysis | **insights**: debug-layer and GPU-based-validation messages tied to events, redundant barriers, overdraw, tiny draws, NaN/Inf writes, unused outputs - each with "Ask AI" |
-| New APIs | work graphs, DXR | DXR, mesh shaders, no work graphs in its release notes | DXR inspector | through the backend; work graphs and bindless-everything are why Flashbang exists |
-| Openness | closed `.wpix`, programmatic capture API | MIT, C++ replay API, Python bindings | closed | IED owns the protocol and data model; backends are swappable |
+| Analysis | warnings / automated analysis | none built in | GPU Trace analysis | **insights**: debug-layer messages tied to events, redundant barriers, overdraw, tiny draws, NaN/Inf writes, unused outputs - each with "Ask AI" |
+| New APIs | work graphs, DXR | DXR, mesh shaders, no work graphs | DXR inspector | ours to add as needed: bindless and work graphs are why the backend is our own |
+| Openness | closed `.wpix`, programmatic capture API | MIT, C++ replay API, Python bindings | closed | IED owns the capture format, the replayer, the protocol and the data model |
+
+## Decision: our own backend (2026-10-21)
+
+The owner chose our own capture and replay over RenderDoc as a backend ("as few dependencies as possible ... build your own that we can have control over"), for **both D3D12 and Vulkan**, with a C4 library so projects can use it (`docs/99` O11). Earlier this doc recommended RenderDoc first and our own later; that plan is replaced:
+
+| Option | Why not / why |
+|---|---|
+| RenderDoc as backend | A complete debugger early, but its replay model decides what is possible: shaders with unbounded descriptor arrays are not debuggable, no work graphs, no engine semantics, a pinned external DLL and API to follow. Stays a *reference* (its MIT source) and, later, a hand-off ("Open in RenderDoc" when installed). |
+| PIX / Nsight as backend | Not possible: closed formats, no replay API. Hand-offs only. |
+| **Flashbang (ours)** | Full control over capture, format and replay; bindless, work graphs, engine metadata and time-travel shader debugging are ours to add. Costs: every API path and driver quirk is ours to maintain, so coverage grows feature by feature with tests against sample programs. |
+
+Dependencies, all already part of the setup: the Windows SDK's `d3d12.h` / `dxgi` headers (and its `dxcompiler.dll` for DXIL reflection and disassembly, used when present), Khronos' Vulkan headers (pinned in `tools/setup/deps.toml`), and the toolchain's clang and lld. Nothing of RenderDoc ships or is linked.
 
 ## Architecture
 
 ```
-browser (ied.gpu UI module)                         any device; WebGL2 for texture display and mesh preview
-   |  protocol v1: topics gpu.*, requests, blobs over HTTP (docs/10)
-ied-server  --  plugin ied.gpu (builtin, C4)
-   |   capture library + metadata index, launch/attach through tasks, sessions,
-   |   insights engine, compare, AI tools (T-GPU-*), bindings for profiler/editor/chat
-   |  ied-gpu/1: JSON-RPC over stdio + shared-memory blobs, one process per open capture
-replay backend (native process, crash-isolated, restartable)
-   +-- rdc        C++ adapter over RenderDoc's replay API (renderdoc_replay.h)        phase 1
-   +-- flashbang  IED's own replayer for .flash captures                              phase 2
+browser (plugins/gpu/ui)                         PIX-style views; WebGL2 texture display and mesh preview
+   |  protocol v1 (docs/10): gpu.* methods, gpu:<wsId> and gpurs:<sessionId> topics, blobs
+ied-server  --  built-in plugin ied.gpu (plugins/gpu/code, C4)
+   |   capture library, launch for capture, target control, replay sessions, AI tools
+   +-- \\.\pipe\flashbang-<pid>   JSON lines   --> flashbang.dll inside the running program
+   +-- stdio  ied-gpu/1           JSON-RPC     --> flashbang-replay.exe, one process per open capture
 target program
-   +-- rdc:       renderdoc.dll injected at launch; in-app API for triggers and comments
-   +-- flashbang: recorder compiled into C4 programs through Bedrock Gpu::  (no injection)
+   +-- flashbang.dll, loaded by the program itself:
+       D3D12: the program hands its device and DXGI factory to the capture library (Bedrock Gpu::Capture,
+              or flashbang_app.h for C/C++), which returns instrumented ones
+       Vulkan: the loader's own layer mechanism, VK_LAYER_IED_flashbang, enabled by IED's launch environment
 ```
 
-Why a separate native process: GPU replay crashes drivers' user-mode code often enough that it must never take the server down; native APIs reach C4 only through hand-written C shims today (`docs/17`), and a process boundary sidesteps CBind entirely; one process per capture lets two captures replay side by side for compare.
+The native parts are C++ (`plugins/gpu/native/`, built by `nuke build flashbang` with the toolchain's clang): a capture layer has to be a DLL, which C4 does not produce, and the capture DLL and the replayer share one serialization of every API structure. The replayer is a separate process because replay drives driver code that can crash: a crash never takes the server down, the session restarts and the UI keeps its place, and two captures replay side by side for compare.
 
-The server never ships raw GPU objects to the browser. Textures go as decoded tiles (RGBA16F/32F, requested mip/slice/region, downsampled to the viewport); the browser applies range, channels, gamma, NaN/Inf/negative highlighting and zoom in a WebGL2 shader. Overlays that need replay (wireframe, depth/stencil test, overdraw, triangle size, highlight draw) are rendered by the backend into an overlay tile. Pixel picks are typed values read by the backend (exact format, not the display value). Mesh data goes as vertex arrays for a WebGL2 preview.
+The server never ships GPU objects to the browser. Textures go as decoded float data (RGBA32F of the requested mip/slice, downsampled to the view); the browser applies range, channels, gamma, NaN/Inf/negative highlighting and zoom in a WebGL2 shader. Pixel picks are typed values read by the replayer (exact format, not the display value). Mesh data goes as vertex arrays for a WebGL2 preview.
 
-## Backends: RenderDoc, our own, or both
+## Capture (flashbang.dll)
 
-The question the owner asked: use RenderDoc as the backend, or build our own with RenderDoc as the reference ("more control, no Python runtime").
+**D3D12** (`native/capture/d3d12/`) is **opt-in by the program**: right after creating its device and its DXGI factory, the program passes them to the capture library (`Gpu::Capture::WrapD3D12Device` / `WrapDxgiFactory` in C4, `flashbang::WrapDevice` / `WrapFactory` from `native/include/flashbang_app.h` in C/C++), which gives back instrumented objects; without the library loaded the same calls return the program's own objects, so the calls can stay in every build but `Dist`. Only the objects whose calls a capture must see are proxies - the device, command queues, command lists, the DXGI factory and swap chains - each forwarding every method of every interface version the runtime supports (the forwarding is generated from the SDK headers, `native/capture/d3d12/gen_wrappers.py`). Resources, heaps, pipeline states and every other object stay the runtime's own, so structures that carry them need no translation; only the proxies' own types are unwrapped where they are passed (`ExecuteCommandLists`, `ExecuteBundle`, a swap chain's queue). The program never sees a call it did not make: nothing is patched or redirected outside the objects it handed over.
 
-**No Python is needed either way.** RenderDoc's replay API is C++ (`renderdoc/api/replay/renderdoc_replay.h`); its own Qt UI uses it directly, and the Python module is a wrapper over the same interfaces. An adapter process links `renderdoc.dll` and speaks `ied-gpu/1`; nothing else of RenderDoc ships.
+- Object tracking: every creation (heaps, committed/placed/reserved resources, descriptor heaps, root signatures, pipeline states, command signatures, query heaps, fences, queues) is kept as its creation record (with shader bytecode and root signature blobs). Lifetime comes from a private-data interface the DLL attaches to each object (`SetPrivateDataInterface`): it is released when the object dies. Names are read at capture time from `WKPDID_D3DDebugObjectNameW`, where `SetName` keeps them.
+- Descriptors: `Create*View`, `CreateSampler` and `CopyDescriptors*` write a shadow of every descriptor heap (CPU handle -> heap and index), so the capture knows what every slot held, bindless heaps included.
+- GPU addresses: buffers' virtual address ranges are kept sorted; every address the program passes (root descriptors, vertex/index buffer views, `WriteBufferImmediate`) is stored as (resource, offset) and rebuilt on replay. GPU descriptor handles are stored as (heap, index). Addresses written *inside* buffers (indirect arguments with addresses, ray tracing instances) are not rewritten; the capture warns when it sees them.
+- Command lists are recorded always (each call serialized into the list's buffer, cleared by `Reset`), because a list recorded before the captured frame may run in it. Barriers in submitted lists move the tracked state of each resource, which the snapshot needs.
+- A capture: the trigger arms it; at the next `Present` the DLL waits for every queue to idle, snapshots the **initial contents** of every live resource (default-heap resources by GPU copies into readback buffers, upload-heap resources by reading their mapped memory, which is then shadowed so the frame's CPU writes are recorded as diffs before each `ExecuteCommandLists`), records every submission until the next `Present`, waits for idle again and writes the file.
 
-| Option | Gets us | Costs | Limits we would hit |
-|---|---|---|---|
-| **A. RenderDoc backend** (adapter process) | A complete D3D11/12 + Vulkan debugger in weeks: capture, replay, state, textures, meshes, pixel history, DXIL/SPIR-V shader debugging. MIT license. | Pinning and adapting to its API across versions; its replay model decides what is possible. | Shaders with unbounded cbuffer arrays are marked not debuggable (release notes v1.45) - the target engine's `DefaultLit.hlsl` declares `ConstantBuffer<Material> u_Materials[]`, so its main lit shader is affected. Work graphs do not appear in RenderDoc's release notes (the engine's C++ reference implementation has `WorkGraphShaderPass`). Its notes warn of an AMD driver bug breaking multi-thread shader debugging. No engine semantics beyond names and markers. |
-| **B. Own backend from scratch** (Flashbang), RenderDoc as reference | Full control: bindless, work graphs, engine metadata, multi-frame and rolling captures, our own capture format, shader debugging designed for our needs. | Capture layer, serializer, replayer, format decoders, pixel history and a shader debugger: many months before it matches A. | Everything is ours to maintain, per API and driver quirk. |
-| **C. PIX as backend** | - | - | Not possible: `.wpix` is closed and there is no replay API. PIX stays a hand-off: programmatic capture (`WinPixGpuCapturer.dll`, `PIXGpuCaptureNextFrames`) and "Open in PIX". |
-| **D. Nsight as backend** | - | - | Closed. Hand-off only ("Open in Nsight Graphics"). |
+**Vulkan** (`native/capture/vulkan/`): the same DLL is a regular Vulkan layer (`VK_LAYER_IED_flashbang`, its manifest written beside the DLL), which the Vulkan loader itself loads when IED's launch environment names it (`VK_ADD_LAYER_PATH`, `VK_INSTANCE_LAYERS`), with the loader's dispatch tables - the mechanism the loader documents for tools, so a Vulkan program needs no code change. It tracks the same things the Vulkan way: memory allocations and bindings, buffers, images and views, samplers, descriptor set layouts, pools and sets (writes and copies), pipeline layouts, shader modules, pipelines, render passes, framebuffers; image layouts from barriers and render pass final layouts; command buffers recorded always; the snapshot copies buffers' and images' contents into host-visible memory at the frame start.
 
-**Recommendation: A, then B, behind one protocol.** The UI, data model, protocol, insights and AI layer are IED's from day one - that is where "a strong debugger" lives and none of it depends on the backend. RenderDoc gives a complete debugger early. Flashbang is then built for C4 programs exactly where control pays off (unbounded/bindless resources, work graphs, engine semantics, rolling and multi-frame capture, time-travel shader debugging), reading RenderDoc's MIT source as the reference. If Flashbang covers the owner's needs, RenderDoc becomes optional. Owner's call: `docs/99` O11.
+**Triggers:** IED's *Capture Next Frame* (the control pipe), or the program itself through `Gpu::Capture::TriggerCapture(n)` (bound to whatever key or console command the program likes). A frame ends at `Present` / `vkQueuePresentKHR`; a program without a swap chain marks frames with `Gpu::Capture::StartFrame` / `EndFrame`.
 
-## Flashbang - IED's own capture and replay (phase 2)
+**Control pipe** `\\.\pipe\flashbang-<pid>`, one JSON object per line. The server sends `{"cmd":"capture","frames":n}`, `{"cmd":"status"}`; the DLL answers `{"event":"hello","pid","program","apis","frame","captureDir"}` on connect, `{"event":"status",...}`, `{"event":"captured","path","frame","bytes"}`, `{"event":"error","message"}`.
 
-Working name in the family's explosion theme (a flashbang lights up the whole frame for an instant); owner to confirm (`docs/99` O11).
+## The capture file (`.flash`)
 
-- **Capture inside C4 programs, no injection.** Bedrock gets a `Gpu::` module (`docs/17`) that wraps the D3D12 calls a program makes; when an engine's RHI already routes every call through a `CommandList` abstraction, recording is a layer under it rather than a hook. Programs opt in with a define (compiled out in `Dist`, like `Profile::`).
-- **Engine semantics for free.** The recorder takes marker scopes from `Profile::Gpu::Zone` (so capture events and profiler GPU zones share names), object names, and an optional `Gpu::Annotate` table: bindless slot -> asset path, material -> source file, draw -> entity. Any engine can write the same chunk; IED only displays it.
-- **Format `.flash`:** chunked like ITP (`docs/16`): interned strings, resource table, per-command-list API streams, initial contents of referenced resources (zstd), shader blobs + PDBs, metadata chunk. Rolling mode keeps the last N frames in a ring and writes them out on a trigger ("capture on hitch": the profiler sees a spike and keeps the frames around it).
-- **Replayer:** `flashbang-replay.exe` implements `ied-gpu/1`. Native C++ first; C4 later is possible because it is an executable, not a DLL.
-- **Shader debugging by instrumented replay (time travel).** Instead of emulating DXIL, recompile the shader from source with DXC plus injected logging for one selected thread or quad, replay the event on the real GPU, and record every variable write into a buffer. The UI then steps forward *and backward* through the recorded trace. Real hardware means correct wave ops, derivatives and bindless reads; emulation (RenderDoc's approach) stays the reference for shaders without source.
-- **Non-C4 programs** keep using RenderDoc (or a later C++ layer DLL); Flashbang does not need to cover the world.
+`<program>_<yyyymmdd-hhmmss>_f<frame>.flash` in the capture folder (`FLASHBANG_CAPTURE_DIR`; IED passes `<workspace>/.ied/local/captures`), with a sidecar `.json` (program, API, frame, GPU and driver, size, time, comment) the library reads without opening the capture and a `.png` thumbnail of the presented image.
+
+- Header: magic `FLASHCAP`, format version, API (1 = D3D12, 2 = Vulkan), flags.
+- Then records `{u32 type, u32 flags, u64 size, payload}`, in order: metadata (JSON text), the device, object creations in creation order, descriptor contents, resource states at the frame start, initial contents (each subresource's rows packed), then the frame: submissions (queue, the command lists with their recorded calls), mapped-memory writes, fence signals and waits, the present.
+- Every API structure has **one symmetric serialization function** (RenderDoc's idea): the same code writes it in the capture DLL, reads it in the replayer (object ids mapped to the replay's objects, addresses rebuilt) and describes it as JSON with field and enum names for the API Calls window. The version in the header rejects files of another format version instead of misreading them.
+
+## Replay (`flashbang-replay.exe`, protocol `ied-gpu/1`)
+
+One process per open capture, started by the server with the capture's path. Messages on stdio as LSP frames them, with an optional binary part: `Content-Length: N\r\n[Binary-Length: M\r\n]\r\n<N bytes JSON-RPC 2.0><M bytes>`. Binary parts carry texture and buffer data; the server turns them into blobs.
+
+| Method | Result |
+|---|---|
+| `initialize {capture, options}` | `{api, frame, program, captureDevice, replayDevice, counts, warnings}` |
+| `events {}` | the event tree: per event `eid`, `parent`, `kind` (marker, draw, dispatch, copy, clear, barrier, present, call), `name`, `queue`, `flags`; markers with their spans |
+| `apiCalls {eid}` | the calls that belong to the event (the state set since the previous action, then the action) with their parameters as JSON |
+| `state {eid}` | the pipeline state at the event as a tree by stage: shaders, root signature or pipeline layout, every binding resolved to its resource and name, vertex/index buffers, render targets, viewports, rasterizer, blend, depth-stencil |
+| `resources {}` | every resource: id, name, kind, dimensions, format, size, heap/memory, first and last use |
+| `texture {id, eid, mip, slice, region?, maxSize?}` | `{width, height, format, min, max}` + RGBA32F data (binary) of the subresource after the event |
+| `pixel {id, eid, x, y, mip, slice}` | the texel's typed value (`raw`, `float`, `text`) |
+| `buffer {id, eid, offset, size}` | bytes (binary) |
+| `mesh {eid}` | the draw's vertex inputs: attributes with formats, indices, vertex data (binary) |
+| `shader {eid, stage}` | entry, kind, reflection (signature, bindings, constant buffers), disassembly |
+| `timing {repeat}` | per action GPU time (median of `repeat` replays with timestamp queries) and pipeline statistics |
+| `pixelHistory {id, x, y, eid}` | every event before `eid` that wrote the pixel, with values before and after |
+| `messages {}` | the debug layer's messages during replay, each with its event |
+| `shutdown {}` | ends the process |
+
+Replaying to an event re-applies the initial contents and replays every submission before it, then the event's command list up to the event (closing an open render pass or query so the list stays valid), and waits for the GPU. Pipeline state, resource states and bindings at an event are simulated on the CPU from the records, so the Pipeline view needs no GPU work.
+
+## Server and protocol (plugin `ied.gpu`)
+
+| Method | Does |
+|---|---|
+| `gpu.launch {wsId, project?, program?, args?, cwd?}` | builds the project (its debug configuration's pre-launch task) and starts its program with the capture environment (`FLASHBANG_DLL`, `FLASHBANG_CAPTURE_DIR`, the Vulkan layer's variables); the target appears on `gpu:<wsId>` |
+| `gpu.capture {wsId, targetId, frames?}` | asks the running target for the next frame(s) |
+| `gpu.stop {wsId, targetId}` | ends a target IED launched |
+| `gpu.delete {wsId, captureId}`, `gpu.comment {wsId, captureId, text}`, `gpu.pin {wsId, captureId, pinned}` | the library |
+| `gpu.open {wsId, captureId}` | the capture's replay session (started, or the running one): `{sessionId}`; its state on `gpurs:<sessionId>` |
+| `gpu.replay {sessionId, method, params}` | one `ied-gpu/1` request; a binary part comes back as `blob` (a blob id, `GET /api/blob/<id>`) |
+| `gpu.close {sessionId}` | ends the session for everyone |
+
+Topics: `gpu:<wsId>` (`{captures, targets}`; events `captures.changed`, `target.changed`, `target.removed`), `gpurs:<sessionId>` (`{state: starting|ready|failed|ended, summary, problem}`). Sessions end 30 minutes after their last request, and when the replayer exits (a crash shows on the topic, and the next `gpu.open` starts it again).
 
 ## Views
 
@@ -78,7 +124,7 @@ PIX's structure, restyled with IED's tokens: a capture opens as a **document tab
 
 | View | Contents |
 |---|---|
-| Capture library | captures per workspace with thumbnail, program, config, git commit, frame, GPU, size, backend; comments; pin; compare; open in PIX / Nsight / RenderDoc UI |
+| Capture library | captures per workspace with thumbnail, program, config, git commit, frame, GPU, size, backend; comments; pin; compare; the running targets with Capture Next Frame |
 | Events grid | markers as tree rows, API calls as rows (`DrawIndexedInstanced(36, 1, 0, 0, 37)` with the object name), columns EID, GPU ms with an in-cell bar, primitives, PS invocations; warning badges; bookmarks; filter language |
 | Timing timeline | marker rows (frame, passes, draws), one row per queue (Direct, Compute, Copy, Video) with idle bubbles, counter plots (GPU busy, occupancy, bandwidth), range selection |
 | Pipeline view | state tree by stage (Input Assembler ... Output Merger, Root Signature, Descriptor Heaps) with every binding; bindless indices resolved with names; constant buffers decoded with the shader's reflection; selecting an item shows it in the resource viewer |
@@ -87,19 +133,19 @@ PIX's structure, restyled with IED's tokens: a capture opens as a **document tab
 | Resources | all resources with usage, format, size, lifetime (first/last EID), memory heap, aliasing; per-resource history of writes and reads |
 | API Calls | the calls inside the selected event, parameters, callstack if captured |
 | Pixel History | every event that touched a pixel: before/after values, shader output, which test failed (depth, stencil, scissor, culling, blend), plain-words summary |
-| Shader Debugger | source in an editor surface (LSP from the shader-language plugin), breakpoints, step in/over/out (and back, on Flashbang), watch, locals, per-lane view, disassembly toggle |
-| Messages | debug layer and GPU-based validation output tied to EIDs |
+| Shader Debugger | source in an editor surface (LSP from the shader-language plugin), breakpoints, step in/over/out (and back), watch, locals, per-lane view, disassembly toggle |
+| Messages | debug layer output tied to EIDs |
 | Performance | passes grid with A/B columns (A ms, B ms, delta) and statistics, counters grid for the selected range with throughput bars and a limiter verdict, Analysis findings, the timeline with counter plots |
-| Warnings / Analysis | one grid for debug-layer messages, GPU-based validation and IED's analysis (NaN writes, regressions, culling, barriers, overdraw, queue bubbles), each row linked to its EID with Ask AI |
+| Warnings / Analysis | one grid for debug-layer messages and IED's analysis (NaN writes, regressions, culling, barriers, overdraw, queue bubbles), each row linked to its EID with Ask AI |
 
 Phone (one pane at a time, `docs/15`): capture library, event list with timings, texture preview with picks, pixel history, insights and AI answers. Shader stepping and the mesh viewer are desktop-only.
 
 ## Capture flow
 
-- **Launch:** a `Capture` task preset (toolbar button next to *Profile*) builds, then launches the program under the chosen backend (RenderDoc injection, or the Flashbang define + env var). The next frame is captured by the in-app hotkey, by IED's *Capture next frame* command (works from the phone), or by code.
-- **From code:** Bedrock `Gpu::Capture::NextFrames(n)`, `Begin/End`, `SetComment` - implemented over RenderDoc's in-app API (`renderdoc_app.h`), the PIX programmatic API, or the Flashbang recorder, whichever is active.
-- **From the profiler:** "capture on hitch" and "capture this frame" on a GPU zone. A capture taken during a profiling session links to the ITP trace; events and GPU zones cross-navigate.
-- **Storage:** captures live under the per-machine workspace state (`.ied/local/captures/`, gitignored) with a sidecar JSON of metadata; the library indexes them. Pin a capture to keep it past the retention limit.
+- **Launch:** *Capture* on the toolbar (next to *Profile*) and GPU > Launch for Capture build the startup project and start the program its debug configuration names with the capture environment: `FLASHBANG_DLL` (where the capture library is), `FLASHBANG_CAPTURE_DIR`, and the Vulkan layer's variables. A Vulkan program is captured as it is; a D3D12 program loads the library and wraps its device and factory through `Gpu::Capture` (or `flashbang_app.h`). *Capture Next Frame* (the GPU activity, the command palette, any device) asks the running program for a frame.
+- **From code:** Bedrock `Gpu::Capture` (`C4/Bedrock/Gpu/`, opt-in `include "gpu.ch"`): `Load()` loads the capture library (from `FLASHBANG_DLL`, or a path), `WrapD3D12Device` / `WrapDxgiFactory`, `TriggerCapture(n)`, `StartFrame` / `EndFrame` for programs without a swap chain, `SetComment`, `Annotate(key, value)` for the metadata chunk. Without the library every call does nothing (the wraps return what they were given), so a program can leave them in.
+- **From the profiler:** "capture on hitch" and "capture this frame" on a GPU zone (later); marker names are shared with `Profile::Gpu::Zone`, which emits the native markers with the zone's name.
+- **Storage:** captures live under `.ied/local/captures/` (gitignored) with their sidecars; the library indexes them. Pin a capture to keep it past the retention limit (`gpu.keepCaptures`).
 
 ## AI
 
@@ -117,16 +163,16 @@ GPU tools (`docs/13`, group `gpu`) let the agent work the debugger the way the o
 
 | Phase | Ships | Depends on |
 |---|---|---|
-| G1 | rdc backend; library; launch capture; Event Browser, Pipeline State, Texture Viewer, Resources, API Calls, Messages, Pixel History, Shader Debugger (RenderDoc's), Mesh Viewer; per-event timing; read-only AI tools | process spawn + blobs (M1), tasks (M3), docking (M2) |
-| G2 | Performance view with counters providers; compare and insights; Edit and Replay; phone triage; capture on hitch with the profiler | G1, profiler (M9) |
-| G3 | Flashbang: Bedrock `Gpu::` recorder, `.flash`, replayer, time-travel shader debugging, work graphs, rolling captures | G2, Bedrock `Gpu::` (C4 tree) |
+| G1 | Flashbang capture and replay for D3D12 and Vulkan (the common subset of both APIs: graphics, compute, copies, markers, bindless descriptor heaps / descriptor indexing); launch for capture; library; Events grid, timeline, Pipeline view, resource viewer with picks, Resources, API Calls, Messages, Mesh Viewer (VS input); per-event timing and pipeline statistics; Bedrock `Gpu::Capture`; read-only AI tools | process spawn + blobs (M1), tasks (M3), docking (M2) |
+| G2 | Pixel History, Performance view with counter providers, compare and insights, Edit and Replay, phone triage, capture on hitch with the profiler, VS output / mesh shader output | G1, profiler (M9) |
+| G3 | Shader debugging by instrumented replay (time travel), work graphs, ray tracing, rolling and multi-frame captures, `Gpu::Annotate` bindless naming | G2 |
 
 Roadmap placement: `docs/18` M12 (G1-G2) and M13 (G3).
 
 ## Risks
 
-- Replay is driver-sensitive: replay on the capturing GPU by default, show the capture's GPU/driver beside the replay's, and keep the backend restartable.
-- Captures are large (GBs): stream from disk, decode tiles lazily, retention limits.
-- RenderDoc's replay API is internal-facing and changes between versions: pin a version, cover the adapter with tests against stored captures.
-- Vendor counter SDKs differ in licensing and coverage: providers are optional plugins, D3D12 timestamps and pipeline statistics always work.
+- Replay is driver-sensitive: replay on the capturing GPU by default, show the capture's GPU/driver beside the replay's, and keep the replayer restartable.
+- API coverage is ours to grow: a call the capture layer does not understand is passed through and named in the capture's warnings, so a capture never silently lies about what it lacks.
+- Captures are large (GBs): stream from disk, decode lazily, retention limits.
+- Vendor counter SDKs differ in licensing and coverage: providers are optional plugins; D3D12 timestamps and pipeline statistics (and Vulkan's) always work.
 - The server needs the GPU: the replay runs where the IED server runs (the owner's desktop); the phone only views.
