@@ -25,6 +25,16 @@
 				{ "name": "browser.console", "version": "1", "kind": "function", "description": "Console messages, or failed requests with network: {wsId, args: {page, since?, network?}} -> {text}" },
 				{ "name": "browser.eval", "version": "1", "kind": "function", "description": "{wsId, args: {page, js}} -> {text, isError}" },
 				{ "name": "browser.closePage", "version": "1", "kind": "function", "description": "{wsId, args: {page}} -> {text}" }
+			],
+			"consumes": [
+				{ "name": "browser.openPage", "version": "1" },
+				{ "name": "browser.navigatePage", "version": "1" },
+				{ "name": "browser.snapshot", "version": "1" },
+				{ "name": "browser.screenshot", "version": "1" },
+				{ "name": "browser.act", "version": "1" },
+				{ "name": "browser.console", "version": "1" },
+				{ "name": "browser.eval", "version": "1" },
+				{ "name": "browser.closePage", "version": "1" }
 			]
 		},
 		"commands": [

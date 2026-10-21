@@ -16,6 +16,7 @@ import unittest
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
 from server import IedServer, ServerTestCase, remove_tree
+import test_chat as chat_checks
 
 PAGE = """<!doctype html>
 <html><head><title>Fixture</title></head>
@@ -223,3 +224,68 @@ class BrowserTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as gone:
 			await self.client.request("browser.frame", {"pageId": page, "after": 0})
 		self.assertEqual("not_found", gone.exception.code)
+
+
+@unittest.skipUnless(browser_installed(), "needs Microsoft Edge or Google Chrome")
+class BrowserToolTests(ServerTestCase):
+	"""The browser tools in a chat turn (docs/27 "AI tools"), against the fake model: open, act, and a screenshot that
+	reaches a model that sees images."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-browser-chat-")
+		self.addCleanup(remove_when_released, self.root)
+		self.site = os.path.join(self.root, "site")
+		os.makedirs(self.site)
+		with open(os.path.join(self.site, "index.html"), "w", encoding="utf-8") as f:
+			f.write(PAGE)
+		self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(QuietHandler, directory=self.site))
+		threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+		self.addCleanup(self.httpd.server_close)
+		self.addCleanup(self.httpd.shutdown)
+		self.url = "http://127.0.0.1:%d/index.html" % self.httpd.server_address[1]
+		self.model = chat_checks.FakeModel()
+		self.addCleanup(self.model.stop)
+		self.server = IedServer(data=os.path.join(self.root, "data"), extra=("--workspace", self.site))
+		self.addCleanup(self.server.stop)
+		self.assertTrue(self.server.started, self.server.error)
+
+	async def asyncSetUp(self):
+		await super().asyncSetUp()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		model = {"endpoint": self.model.url + "/v1", "vision": True, "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model}})
+
+	async def asyncTearDown(self):
+		self.assertEqual([], self.client.violations)
+		self.client.abort()
+
+	async def turn(self, chat_id):
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "Check the page"})
+		frames = await self.client.wait_for("chat:" + chat_id, lambda f: f.get("kind") == "turn.end", timeout=LOAD_SECONDS * 3)
+		self.assertEqual("finished", frames[-1]["data"]["stop"], frames[-1]["data"])
+		turn = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"][-1]
+		return [s for s in turn["segments"] if s["type"] == "tool"]
+
+	async def test_the_ai_opens_acts_on_and_sees_a_page(self):
+		created = await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "permission": "auto"})
+		chat_id = created["chatId"]
+		await self.client.sub(["chat:" + chat_id])
+		await self.client.next_frame("chat:" + chat_id)
+		self.model.queue(chat_checks.call_step("browser_open", {"url": self.url}, "c1"), chat_checks.text_step("Opened."))
+		opened = (await self.turn(chat_id))[0]
+		self.assertIn("Opened pg-", opened["result"]["preview"], opened)
+		page = re.search(r"(pg-[0-9a-f]+)", opened["result"]["preview"]).group(1)
+		self.model.queue(chat_checks.call_step("browser_act", {"page": page, "action": "click", "selector": "#go"}, "c2"),
+			chat_checks.call_step("browser_screenshot", {"page": page}, "c3"), chat_checks.text_step("Seen."))
+		acted, shot = await self.turn(chat_id)
+		self.assertIn('Done: clicked button "#go"', acted["result"]["preview"])
+		self.assertIn("Clicked ", acted["result"]["preview"], "the page's new title")
+		self.assertEqual(1, len(shot["result"]["images"]), shot)
+		self.assertEqual("image/png", shot["result"]["images"][0]["mime"])
+		self.assertTrue(shot["result"]["images"][0]["path"].startswith(".ied/local/browser/shots/" + page), shot)
+		sent = self.model.requests()[-1]["body"]["messages"]
+		parts = sent[-1]["content"]
+		self.assertEqual("user", sent[-1]["role"], "the screenshot follows the step's results")
+		self.assertIn("image_url", [p["type"] for p in parts])
+		self.assertTrue([p for p in parts if p["type"] == "image_url"][0]["image_url"]["url"].startswith("data:image/png;base64,"))

@@ -117,7 +117,8 @@ The plugin's `toolCalls` (`docs/13` T-BRW, as built), C4 functions that call the
 ## Tests
 
 - `launcher/tests`, `desktop/tests` (`nuke test launcher ied-desktop`): locations, the control channel's lines, which URLs may leave IED; the desktop's command line, placement, navigation targets, its own pages and script, the restart budget.
-- `tools/server-checks/tests/test_browser.py` (real Edge; skipped without one): a page's title, console and failed requests; frames and input; the AI's bindings end to end (snapshot refs, type, click, the action event, eval, screenshot, console, network); URL rules; pages across a restart; closing.
+- `tools/server-checks/tests/test_browser.py` (real Edge; skipped without one): a page's title, console and failed requests; frames and input; the AI's bindings end to end (snapshot refs, type, click, the action event, eval, screenshot, console, network); URL rules; pages across a restart; closing; and the tools in a chat turn against the fake model, the screenshot reaching a model that sees images as an `image_url` part.
+- `tools/server-checks/tests/test_desktop.py` (with `--desktop` and `--cli`, in `nuke conformance`): `ied-desktop` with no server running starts one and its window signs in on the folder it was given (checked over the app's `--debug-port`); a killed server is started again and the page reconnects.
 - `tests/e2e` `browser_tab` (real server, desktop and phone): View in Browser, a click and keys reaching the page, its console, an AI action drawn over it. `frontend/tests/browser.test.js`: fitting, page coordinates, modifiers, typed addresses, file URLs.
 
 ## Open items
