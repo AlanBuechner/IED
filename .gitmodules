@@ -1,7 +1,3 @@
-[submodule "C4/Frost/Projects/Profiling/tracy"]
-	path = C4/Frost/Projects/Profiling/tracy
-	url = https://github.com/AlanBuechner/tracy.git
-	shallow = true
 [submodule "C4/Frost/Projects/Core/Modules/yaml/yaml-cpp"]
 	path = C4/Frost/Projects/Core/Modules/yaml/yaml-cpp
 	url = https://github.com/AlanBuechner/yaml-cpp.git

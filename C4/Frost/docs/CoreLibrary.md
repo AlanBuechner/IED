@@ -16,7 +16,7 @@ The Core Library is the foundational C++20 library of Frost, shared by the C4 co
 - [Vector Container](#vector-container)
 - [Map and Set Aliases](#map-and-set-aliases)
 - [SparseMap Container](#sparsmap-container)
-- [Smart Pointer — Ref\<T\>](#smart-pointer--reft)
+- [Smart Pointer - Ref\<T\>](#smart-pointer---reft)
 - [Assertion Macros](#assertion-macros)
 - [Utility Macros](#utility-macros)
 - [String Formatting](#string-formatting)
@@ -30,7 +30,7 @@ The Core Library is the foundational C++20 library of Frost, shared by the C4 co
 - [Platform Abstraction](#platform-abstraction)
 - [Bit Flags](#bit-flags)
 - [Dynamic Bit Allocator](#dynamic-bit-allocator)
-- [Hash — Compile-Time CRC32](#hash---compile-time-crc32)
+- [Hash - Compile-Time CRC32](#hash---compile-time-crc32)
 - [Argument List](#argument-list)
 - [UTF-8 and Encoding Utilities](#utf-8-and-encoding-utilities)
 - [Math Module](#math-module)
@@ -60,10 +60,10 @@ The Core Library is the foundational C++20 library of Frost, shared by the C4 co
 
 ```cpp
 #define PLATFORM_WINDOWS    // Currently the only supported platform
-// #define PLATFORM_IOS      // Unsupported — compile error
-// #define PLATFORM_MACOS    // Unsupported — compile error
-// #define PLATFORM_ANDROID  // Unsupported — compile error
-// #define PLATFORM_LINUX    // Unsupported — compile error
+// #define PLATFORM_IOS      // Unsupported - compile error
+// #define PLATFORM_MACOS    // Unsupported - compile error
+// #define PLATFORM_ANDROID  // Unsupported - compile error
+// #define PLATFORM_LINUX    // Unsupported - compile error
 ```
 
 Attempting to build on an unsupported platform produces a hard `#error`.
@@ -238,12 +238,12 @@ public:
 
 The sparse map maintains two arrays:
 
-- **`m_Dense`** (`Core::Vector<Entry>`) — Contiguous storage of live `{key, value}` pairs. Removal uses swap-and-pop to keep this array compact.
-- **`m_Sparse`** (`Core::Vector<KeyType>`) — Direct index-by-key lookup array mapping `key → dense slot index` or `-1` (invalid). Grows automatically when a key exceeds current capacity.
+- **`m_Dense`** (`Core::Vector<Entry>`) - Contiguous storage of live `{key, value}` pairs. Removal uses swap-and-pop to keep this array compact.
+- **`m_Sparse`** (`Core::Vector<KeyType>`) - Direct index-by-key lookup array mapping `key -> dense slot index` or `-1` (invalid). Grows automatically when a key exceeds current capacity.
 
 ---
 
-## Smart Pointer — Ref\<T\>
+## Smart Pointer - Ref\<T\>
 
 **File:** `Core/Core.h` (defined inline)
 
@@ -257,7 +257,7 @@ public:
     uint32 GetRefCount();  // Current reference count
 private:
     std::atomic<uint32> m_Count = 0;
-    // AddRef/Release are private — only accessible via Ref<T>
+    // AddRef/Release are private - only accessible via Ref<T>
 };
 ```
 
@@ -280,10 +280,10 @@ bool isValid = obj.Valid();
 // Reset (release reference; deletes if refcount hits 0)
 obj.Reset();
 
-// Unchecked cast (no type check — faster)
+// Unchecked cast (no type check - faster)
 Ref<Derived> derived = base.As<Derived>();
 
-// Checked cast (dynamic_cast — returns null Ref on failure)
+// Checked cast (dynamic_cast - returns null Ref on failure)
 Ref<Derived> derived = base.Cast<Derived>();
 
 // Pointer cast (returns raw pointer, nullptr on failure)
@@ -381,7 +381,7 @@ The `DEFINE_HAS_FUNC(F)` macro generates a compile-time trait `HasF<T>` and cons
 
 `Core::StringFormat` provides a positional formatting system using `std::stringstream` as the output sink.
 
-### ⚠️ CRITICAL: Placeholder Syntax — NUMERIC INDEX REQUIRED
+### CRITICAL: Placeholder Syntax - NUMERIC INDEX REQUIRED
 
 Placeholders **must** contain a zero-indexed number: `{0}`, `{1}`, `{2}`, etc. The number tells the formatter which variadic argument to substitute (by position, starting at 0).
 
@@ -392,13 +392,13 @@ A backslash before `{` escapes it: `\{` prints a literal brace.
 ```cpp
 using namespace Core;
 
-// ✅ CORRECT — numbered placeholders match argument positions (0-indexed)
+// CORRECT - numbered placeholders match argument positions (0-indexed)
 String msg = FormatString("Hello {0}, you have {1} messages.", "Alice", 42);
 // Result: "Hello Alice, you have 42 messages."
 
-// ❌ WRONG — bare {} is INVALID. The parser fails and NO substitution occurs.
+// WRONG - bare {} is INVALID. The parser fails and NO substitution occurs.
 String bad = FormatString("Hello {}, you have {} messages.", "Alice", 42);
-// Result: the message is NOT formatted — it prints the raw string as-is
+// Result: the message is NOT formatted - it prints the raw string as-is
 ```
 
 ### Supported Types
@@ -440,12 +440,12 @@ The logging system provides a two-logger architecture with configurable patterns
 
 ### Log Levels
 
-| Level | Value | Console Color (Windows) | Tracy Color |
+| Level | Value | Console Color (Windows) | Profiler severity |
 |-------|-------|------------------------|-------------|
-| `Trace` | 0 | White (15) | `0xffffff` |
-| `Info` | 1 | Green (10) | `0x34eb40` |
-| `Warn` | 2 | Yellow (14) | `0xdeeb34` |
-| `Error` | 3 | Red (12) | `0xeb3434` |
+| `Trace` | 0 | White (15) | `ITP_TRACE` |
+| `Info` | 1 | Green (10) | `ITP_INFO` |
+| `Warn` | 2 | Yellow (14) | `ITP_WARNING` |
+| `Error` | 3 | Red (12) | `ITP_ERROR` |
 
 ### Logger Configuration
 
@@ -472,24 +472,24 @@ The system defines two static loggers via the `IMPLEMENT_LOGGER` define:
 ### Logging Macros
 
 ```cpp
-// Core (engine) logging — placeholders MUST be numbered: {0}, {1}, etc. NEVER use bare {}
+// Core (engine) logging - placeholders MUST be numbered: {0}, {1}, etc. NEVER use bare {}
 CORE_TRACE("Loading asset {0}", assetName);
 CORE_INFO("Frame started");
 CORE_WARN("Low memory warning");
 CORE_ERROR("Failed to open file {0}", path);
 
-// Client (application) logging — same placeholder rules apply
+// Client (application) logging - same placeholder rules apply
 DEBUG_TRACE("Custom trace message");
 DEBUG_INFO("Player spawned at {0}", pos);
 DEBUG_WARN("Deprecated API used");
 DEBUG_ERROR("Shader compile failed: {0}", error);
 ```
 
-> ⚠️ **CRITICAL:** Log messages use `Core::StringFormat` under the hood. Every placeholder **must** contain a number (e.g., `{0}`, `{1}`). Bare `{}` without an index is **INVALID** — it will cause the formatter to abort silently and output the raw message string with no substitution.
+> **CRITICAL:** Log messages use `Core::StringFormat` under the hood. Every placeholder **must** contain a number (e.g., `{0}`, `{1}`). Bare `{}` without an index is **INVALID** - it will cause the formatter to abort silently and output the raw message string with no substitution.
 
-### Tracy Integration
+### Profiler Integration
 
-When `ENABLE_PROFILING` is defined, log messages are also sent to the Tracy profiler via `TracyMessageC()` with level-appropriate colors.
+When `ENABLE_PROFILING` is defined, each log line is also sent to the IED profiler as a message (`itp_message`, with the level's severity), so it shows on the capture's timeline.
 
 ---
 
@@ -500,7 +500,7 @@ When `ENABLE_PROFILING` is defined, log messages are also sent to the Tracy prof
 
 > **Relocated from Core (card-1):** Performance profiling was moved from the Core library to the Profiling project. The new include path is `Profiling/Performance.h`. It is no longer transitively included by `Core/Core.h`.
 
-The profiling system integrates with [Tracy](https://github.com/wolfpld/tracy) when `ENABLE_PROFILING` is defined; otherwise all macros expand to empty statements for zero overhead.
+The profiling system is a client of the IED Trace Protocol (`Profiling/Itp.h`, `Profiling/Itp.cpp`; IED `docs/16`). With `ENABLE_PROFILING` defined, a program run with `IED_PROFILER` set (IED's Profile task sets it to `127.0.0.1:<port>;token=<t>`; `file:<path>.iedtrace` writes a trace file) streams its zones, frames, messages, thread names and, with the memory tracker, allocations to the IED profiler; without `IED_PROFILER` each zone costs one relaxed load. Without `ENABLE_PROFILING` all macros expand to empty statements. `Itp.h` and `Itp.cpp` depend only on the C++ standard library and the system's sockets, so other C and C++ programs can copy them; their own API (`ITP_ZONE`, `itp_plot`, tasks, pools) is documented in `Itp.h`.
 
 ### Instrumentor Singleton
 
@@ -519,7 +519,7 @@ namespace Profiler {
 
 | Macro | Description |
 |-------|-------------|
-| `FRAME_MARK` | Marks the start of a frame in Tracy (when profiling enabled) |
+| `FRAME_MARK` | Marks the end of a frame (`itp_frame`) |
 | `CREATE_PROFILE_SCOPEI(name)` | Begins a named scoped zone; auto-ends at scope exit |
 | `CREATE_PROFILE_FUNCTIONI()` | Profiles the current function using `__FUNCSIG__` as the name |
 | `ANNOTATE_PROFILEI(annotation)` | Attaches a text annotation to the active scoped zone |
@@ -593,7 +593,7 @@ Expresses relative performance change between two benchmark results:
 | `nameA`, `nameB` | `String` | Names of the compared benchmarks |
 | `meanA`, `meanB` | `double` | Mean iteration times for each |
 | `ratio` | `double` | B/A ratio (>1 means B is slower, <1 means B is faster) |
-| `percentChange` | `double` | Percentage change: ((B - A) / A) × 100 |
+| `percentChange` | `double` | Percentage change: ((B - A) / A) x 100 |
 
 ```cpp
 static BenchmarkComparison Compare(const BenchmarkResult& resultA, const BenchmarkResult& resultB);
@@ -736,7 +736,8 @@ uint64 currentBytes  = stats.allocatedBytes.load();
 - Overrides `operator new`, `operator new[]`, `operator delete`, `operator delete[]`
 - Uses `malloc`/`free` internally (to avoid recursive calls)
 - Tracks allocation size via `_msize()` on free (Windows-specific)
-- Integrates with Tracy profiler (`TracyAlloc`/`TracyFree`) when `ENABLE_PROFILING` is set
+- Reports every allocation and free to the IED profiler (`itp_alloc`/`itp_free`, pool 0) when `ENABLE_PROFILING` is set
+- Throws `std::bad_alloc` when `malloc` fails, as a replaced `operator new` must
 - Guards against double-free by checking that reported size does not exceed tracked bytes
 
 ---
@@ -883,7 +884,7 @@ Scans existing pages for the first free bit using `std::countr_one` (count trail
 
 ---
 
-## Hash — Compile-Time CRC32
+## Hash - Compile-Time CRC32
 
 **File:** `Core/Hash.h`
 
@@ -931,14 +932,14 @@ Arguments starting with `/`, `\`, or `--` are normalized to `-name` form during 
 |----------|-------------|
 | `GetWStr(const char*)` | Convert narrow string to wide (`wchar_t*`) |
 | `GetStr(const wchar_t*)` | Convert wide string to narrow (`char*`) |
-| `GetWStr(const std::string&)` | Inline: `std::string` → `std::wstring` |
-| `GetStr(const std::wstring&)` | Inline: `std::wstring` → `std::string` |
+| `GetWStr(const std::string&)` | Inline: `std::string` -> `std::wstring` |
+| `GetStr(const std::wstring&)` | Inline: `std::wstring` -> `std::string` |
 
 ### UTF-8 Helpers
 
 | Function | Description |
 |----------|-------------|
-| `utf8charlen(const char*)` | Byte length of the current UTF-8 character (1–4) |
+| `utf8charlen(const char*)` | Byte length of the current UTF-8 character (1-4) |
 | `utf8len(const char*)` | Total character count in a UTF-8 string |
 | `utf8valid(const char*)` | Validate that a string is well-formed UTF-8 |
 | `GetNextChar32(...)` | Extract the next UTF-32 code point from a UTF-8 string (multiple overloads) |
@@ -956,7 +957,7 @@ The math module provides custom engine-specific vector, matrix, and quaternion t
 | Constant | Value |
 |----------|-------|
 | `Math::PI` | 3.141592653589793f |
-| `Math::TAU` | PI × 2 |
+| `Math::TAU` | PI x 2 |
 | `Math::E` | 2.718281828459045f |
 | `Math::EPSILON` | 1e-10 |
 
@@ -969,11 +970,11 @@ All math functions are templated on type `T` and implemented natively:
 - **Angle conversion:** `Degrees`, `Radians`
 - **Arithmetic:** `Sqrt`, `InvSqrt`, `Pow`, `Exp`, `Log`, `Floor`, `Ceil`, `Abs`, `Clamp`, `Min`, `Max`, `Mod`
 - **Interpolation:** `Lerp`, `Slerp`
-- **Noise:** `Perlin` (1D–4D, with optional repetition), `Simplex` (1D–4D)
+- **Noise:** `Perlin` (1D-4D, with optional repetition), `Simplex` (1D-4D)
 
 ### Types
 
-The math module defines custom vector (`Vector2`, `Vector3`, `Vector4`), matrix, and quaternion types with native implementations. These are **not** built on GLM — they are hand-written C++20 types with optimized SIMD routines (SSE4.1/AVX2) and scalar fallbacks.
+The math module defines custom vector (`Vector2`, `Vector3`, `Vector4`), matrix, and quaternion types with native implementations. These are **not** built on GLM - they are hand-written C++20 types with optimized SIMD routines (SSE4.1/AVX2) and scalar fallbacks.
 
 ---
 
@@ -986,6 +987,6 @@ The math module defines custom vector (`Vector2`, `Vector3`, `Vector4`), matrix,
 | **Group** | `Frost.Core` |
 | **Build Stage** | `EARLY` (built before normal projects) |
 | **Reflection** | Disabled (`genReflection = False`) |
-| **Module Dependencies** | `yaml`, `tracy` |
+| **Module Dependencies** | `yaml` |
 
 The Core library is a static library with no reflection code generation, as it provides foundational types that other projects depend on.

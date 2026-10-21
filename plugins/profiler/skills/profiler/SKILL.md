@@ -78,6 +78,30 @@ int32 main() {
   do not put one around a loop body that runs millions of times - put it around the loop.
 - `-D PROFILE=0` (a configuration's `defines` in `nuke.toml`) compiles the `PROFILE_*` macros away for shipping.
 
+## Instrumenting C and C++
+
+Copy `Itp.h` and `Itp.cpp` from `C4/Frost/Projects/Profiling/src/Profiling/` into the project (no other dependency;
+Windows links `ws2_32`, POSIX needs `-pthread`). Frost projects already have them: build with `ENABLE_PROFILING`
+and use `CREATE_PROFILE_SCOPEI("Name")`, `CREATE_PROFILE_FUNCTIONI()`, `FRAME_MARK` from `Profiling/Performance.h`.
+
+```cpp
+#include "Itp.h"
+
+void Update() {
+	ITP_ZONE("Update");                       // to the end of the scope, with function, file and line
+	itp_plot("Entities", (double)count);
+}
+int main() {
+	itp_thread_name("Main");                  // again whenever a thread takes another role
+	while (running) { Update(); ITP_FRAME(); }
+}
+```
+
+- `itp::Task task("Decompress");` for the Tasks view; `itp_message(ITP_WARNING, text, length)`; `itp_alloc` /
+  `itp_free` / `itp_pool_name` (safe inside a replaced `operator new`).
+- C: `ITP_ZONE_BEGIN("Name")` ... `ITP_ZONE_END()`.
+- `ITP_ENABLE=0` compiles the `ITP_*` macros away; the functions stay and cost one load without `IED_PROFILER`.
+
 ## Other languages and tools
 
 - **Chrome trace JSON** (Rust's `tracing-chrome`, Chrome and Perfetto exports, Nuke's `build-trace.json`, many engines):

@@ -31,7 +31,7 @@ Frost/
 |   |   `-- Modules/yaml/     # yaml-cpp: the git submodule yaml-cpp/, compiled through Build.py
 |   |-- CoreTesting/          # Core library unit tests
 |   |-- ObjectDescription/    # Object description and serialization system
-|   |-- Profiling/            # Profiling library; the Tracy client is the git submodule tracy/
+|   |-- Profiling/            # Profiling library: the IED Trace Protocol client (Itp.h, Itp.cpp)
 |   |-- Reflection/           # C++ reflection codegen framework
 |   |   |-- CodeGen/          # Reflection code generator (runs post-compile)
 |   |   |-- HeaderTool/       # Header analysis tool for reflection extraction
@@ -53,11 +53,10 @@ Frost/
 Build output goes to the root project's folder: `bin/` (final output, per configuration) and `bin-int/`
 (intermediates: `.obj`, `.d`, `.args` files).
 
-yaml-cpp (`Projects/Core/Modules/yaml/yaml-cpp`, built from `externalSources = ["yaml-cpp/src/**/*.cpp"]`) and the
-Tracy client (`Projects/Profiling/tracy`) are git submodules (the forks AlanBuechner/yaml-cpp and
-AlanBuechner/tracy); `setup.bat` (or `git submodule update --init`) checks them out. The glm copies
-(`Projects/CoreTesting/src/glm`) stay vendored. The Tracy profiler GUI is an optional `setup.bat --with extras`
-package, installed at `vendor/tracy-profiler` at the repository root.
+yaml-cpp (`Projects/Core/Modules/yaml/yaml-cpp`, built from `externalSources = ["yaml-cpp/src/**/*.cpp"]`) is a git
+submodule (the fork AlanBuechner/yaml-cpp); `setup.bat` (or `git submodule update --init`) checks it out. The glm
+copies (`Projects/CoreTesting/src/glm`) stay vendored. Profiling (`ENABLE_PROFILING`) streams to the IED profiler
+through the IED Trace Protocol client in `Projects/Profiling/src/Profiling/Itp.h` (IED `docs/16`); Tracy is gone.
 
 ## Key Systems
 

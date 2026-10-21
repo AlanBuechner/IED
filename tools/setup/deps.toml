@@ -88,12 +88,3 @@ dest = "vendor/searxng"
 format = "tgz"
 strip = 1
 probe = "searx/__init__.py"
-
-[packages.tracy-profiler]
-group = "extras"
-version = "0.12.0"
-description = "the Tracy profiler GUI, for viewing traces of the compiler's own C++ support libraries"
-url = "https://github.com/wolfpld/tracy/releases/download/v0.12.0/windows-0.12.0.zip"
-sha256 = "ee5074cc33ec93b4955f4fc6d2737d7731e736337763f1f53773b26fa31fdf29"
-dest = "vendor/tracy-profiler"
-probe = "tracy-profiler.exe"

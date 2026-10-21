@@ -5,8 +5,9 @@ Core::MemStats Core::MemStats::s_MemStats;
 #if ENABLE_MEMORY_TRACKER
 #if !defined(HEADER_TOOL)
 
-extern "C" void tracy_alloc(const void* ptr, size_t size);
-extern "C" void tracy_free(const void* ptr);
+#include "Profiling/Itp.h"
+
+#include <new>
 
 inline void* new_internal(size_t size)
 {
@@ -18,13 +19,13 @@ inline void* new_internal(size_t size)
 		Core::GetMemStats().allocatedBytes += size;
 
 #if ENABLE_PROFILING
-		tracy_alloc(ptr, size);
+		itp_alloc(ptr, size, 0);
 #endif
 
 		return ptr;
 	}
 
-	return nullptr;
+	throw std::bad_alloc();
 }
 
 inline void delete_internal(void* ptr)
@@ -40,7 +41,7 @@ inline void delete_internal(void* ptr)
 		Core::GetMemStats().allocatedBytes -= size;
 
 #if ENABLE_PROFILING
-		tracy_free(ptr);
+		itp_free(ptr, 0);
 #endif
 
 		free(ptr);
@@ -58,12 +59,12 @@ void* operator new[] (size_t size)
 	return new_internal(size);
 }
 
-void operator delete(void* ptr)
+void operator delete(void* ptr) noexcept
 {
 	delete_internal(ptr);
 }
 
-void operator delete[](void* ptr)
+void operator delete[](void* ptr) noexcept
 {
 	delete_internal(ptr);
 }

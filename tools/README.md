@@ -24,7 +24,7 @@ Python is already part of the toolchain (`setup.bat` installs 3.12 into `vendor/
 ```bat
 setup.bat                         git submodules, LLVM for the C4 compiler, the web client's libraries
 setup.bat --toolchain             ... and build the C4 compiler + the "dev" toolchain (nuke build -p C4)
-setup.bat --with extras           ... and the optional packages (WebView2 SDK, SearXNG, Tracy profiler GUI)
+setup.bat --with extras           ... and the optional packages (WebView2 SDK, SearXNG)
 setup.bat --add-to-path           put bin/ (the nuke launcher) on the user PATH without asking
 setup.bat --list                  every package, its pin and whether it is installed
 setup.bat --only llvm --force     re-download and re-extract one package
@@ -33,7 +33,7 @@ setup.bat --only llvm --force     re-download and re-extract one package
 - **Pins and SHA256s live in `setup/deps.toml`** - the manifest of record. Bump a package by changing its `url` and `sha256` together, then `setup.bat --only <name> --force`. A download that does not match its hash is never installed.
 - Downloads land in `vendor/` (gitignored; the archives in `vendor/_downloads/` are deleted after extraction unless `--keep-downloads`), except LLVM, which Frost expects at `C4/Frost/vendor/Compiler` (gitignored by `C4/.gitignore`).
 - In a linked **git worktree**, packages marked `share-with-worktrees` (LLVM, 4 GB) become a directory junction to the main checkout's copy instead of a second download; `--force` replaces the junction, never the main copy.
-- Sources that are git repositories are **submodules** instead (`.gitmodules`): `third_party/codicons`, `third_party/libgit2`, `third_party/quickjs-ng`, and the compiler's `C4/Frost/Projects/Profiling/tracy` and `C4/Frost/Projects/Core/Modules/yaml/yaml-cpp`.
+- Sources that are git repositories are **submodules** instead (`.gitmodules`): `third_party/codicons`, `third_party/libgit2`, `third_party/quickjs-ng`, and the compiler's `C4/Frost/Projects/Core/Modules/yaml/yaml-cpp`.
 - setup updates submodules with `core.longpaths=true` (yaml-cpp's bundled gtest and other fixtures pass Windows' 260-character limit when the checkout is in a deep folder), which is why the README clones without `--recursive` and lets setup do it.
 - `third_party/libgit2` is not checked out by a clone or by setup (`update = none`): nothing uses it yet, and its test fixtures exceed Windows' 260-character path limit in deep folders. Fetch it when needed with `git -c core.longpaths=true submodule update --init --checkout third_party/libgit2`.
 
@@ -49,12 +49,10 @@ setup.bat --only llvm --force     re-download and re-extract one package
 | `libgit2` | `42a89d7c` | submodule, **opt-in** (`update = none`) | git plumbing candidate (`plugins/git/code/`) | the git CLI is the backend (docs/99 #14); libgit2 stays as a possible later graph optimization |
 | `Microsoft.Web.WebView2` | 1.0.4258.31 | download (extras) | optional desktop wrapper only | `build/native/include/WebView2.h` + libs. **Not a v1 dependency** - IED is a split server + web client (docs/01) |
 | `searxng` | `d47cb96b` | download (extras) | AI web egress (docs/04) | a tarball, not a submodule: 4 template files have Windows-illegal names (`*.conf:socket`) that break checkout; setup skips them on extract. Packaging: docs/21 |
-| Tracy profiler GUI | 0.12.0 | download (extras) | viewing traces of the compiler's C++ libraries | the client sources are the compiler's submodule; for IED, Tracy is a **feature reference only** (docs/16) |
 
 ## Gotchas learned while wiring this up (don't relearn them)
 
 1. npm scoped packages download as `<name>-<ver>.tgz` from `registry.npmjs.org/@scope/name/-/`; `npm pack` produces the same bytes.
 2. ChakraCore's aka.ms shortlinks are dead - do not resurrect that dependency.
 3. SearXNG cannot be checked out on Windows (illegal path names); use the codeload tarball and skip the 4 bad entries.
-4. Tracy lives at `wolfpld/tracy`, not `psymon/tracy`.
-5. The embeddable Python pins `sys.path` in `python312._pth`; setup keeps the file but enables `import site` (Frost and Nuke rely on the `exit` builtin and normal startup).
+4. The embeddable Python pins `sys.path` in `python312._pth`; setup keeps the file but enables `import site` (Frost and Nuke rely on the `exit` builtin and normal startup).

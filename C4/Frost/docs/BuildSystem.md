@@ -46,8 +46,6 @@ with SHA256 sums in `tools/setup/deps.toml`:
 | Clang/LLVM 22.1.0 | `Frost/vendor/Compiler/` | the LLVM GitHub release |
 | Python 3.12.10 | `vendor/python/` at the repository root | python.org embeddable package (used by the C4 tree's `Build.bat`) |
 | yaml-cpp | `Projects/Core/Modules/yaml/yaml-cpp/` | git submodule (fork AlanBuechner/yaml-cpp) |
-| Tracy client | `Projects/Profiling/tracy/` | git submodule (fork AlanBuechner/tracy) |
-| Tracy profiler GUI 0.12.0 (optional) | `vendor/tracy-profiler/` at the repository root | `setup.bat --with extras` |
 
 ### Phase 2 - CLI Argument Parsing
 

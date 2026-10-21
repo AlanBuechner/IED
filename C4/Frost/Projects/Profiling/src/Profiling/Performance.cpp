@@ -1,17 +1,15 @@
 #include "Profiling/MemTracker/MemTracker.h"
 #include "Profiling/Performance.h"
-#include <algorithm>
 
 namespace Profiler
 {
-
-	void Instrumentor::RegisterThread(const std::string& name, uint32 order)
+	void Instrumentor::RegisterThread(const std::string& name, uint32)
 	{
-		//uint32 threadID = (uint32)std::hash<std::thread::id>{}(std::this_thread::get_id());
 #if ENABLE_PROFILING
-		tracy::SetThreadNameWithHint(name.c_str(), order);
+		itp_thread_name(name.c_str());
+#else
+		(void)name;
 #endif
-
 	}
 
 	Instrumentor& Instrumentor::Get()
@@ -19,5 +17,4 @@ namespace Profiler
 		static Instrumentor* instance = new Instrumentor();
 		return *instance;
 	}
-
 }

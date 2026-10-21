@@ -11,10 +11,9 @@
 
 #include <sstream>
 
-#ifdef ENABLE_PROFILING
-extern "C" {
-        void TracyMessageC(const char* txt, size_t size, uint32_t color);
-}
+#if ENABLE_PROFILING
+// The IED Trace Protocol client's message (Profiling/Itp.h): Core does not depend on Profiling, so it is declared here.
+extern "C" void itp_message(int severity, const char* text, size_t length);
 #endif
 
 namespace Logging
@@ -77,9 +76,9 @@ namespace Logging
 				std::string msg = ss.str();
 				std::cout << msg << std::endl;
 
-				uint32 tracyColors[] = { 0xffffff, 0x34eb40, 0xdeeb34, 0xeb3434 };
 #if ENABLE_PROFILING
-				TracyMessageC(msg.c_str(), msg.size(), tracyColors[(uint32)level]);
+				const int severities[] = { 0, 2, 3, 4 };   // Trace, Info, Warn, Error as ITP_TRACE, ITP_INFO, ITP_WARNING, ITP_ERROR
+				itp_message(severities[(uint32)level], msg.c_str(), msg.size());
 #endif
 				SetConsoleColor(Level::Trace); // reset console window color
 

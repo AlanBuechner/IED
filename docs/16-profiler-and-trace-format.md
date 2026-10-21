@@ -4,7 +4,7 @@
 
 Resolve `docs/99` #9: define the seam between instrumented programs (C4 apps through Bedrock `Profile::`, game engines, anything else) and the IED profiler - the **IED Trace Protocol (ITP) v1** - and the profiler's server/client architecture. Feature list: `docs/features/12-profiler.md`.
 
-Tracy (the client sources are the `C4/Frost/Projects/Profiling/tracy` submodule, used by the compiler's C++ libraries) is a **feature reference only** for IED; it is never linked into IED. ITP deliberately fixes the Tracy limitations that matter for this project:
+Tracy is a **feature reference only** for IED; it is linked nowhere (the compiler's C++ libraries profile through the C/C++ ITP client, `C4/Frost/Projects/Profiling/src/Profiling/Itp.h`). ITP deliberately fixes the Tracy limitations that matter for this project:
 
 | Tracy limitation | ITP / IED answer |
 |---|---|
@@ -182,9 +182,11 @@ Topics: `profs:<wsId>` (snapshot: `prof.captures`'s answer; event `captures.chan
 
 **Clients.** Bedrock `Profile::` (`C4/Bedrock/Profile/`, opt-in `include "profile.ch"`): zones as scope guards over a static `Site` (the `PROFILE_ZONE("Name")` macro records the file and line) or a name looked up at run time, frames, plots, messages, thread names at any time, tasks, pools' allocations, and collections from the runtime's collection callback (the start is the end less the reported pause; the runtime has no start hook yet) with the GC heap plotted ten times a second. Events are stamped with `rdtsc`, its frequency measured against the system counter at start (`Hello` flags it as estimated; `Calibration` pairs every second correct it on the server). Each thread writes encoded events into its own buffer under an uncontended lock; a flusher thread sends them every 10 ms. One relaxed load per call when no session runs; `-D PROFILE=0` compiles the macros away. A send that fails ends the session. Tested by `C4/Bedrock/Tests/profile_tests.cf` (a session to a file read back event by event).
 
+**C and C++** (`C4/Frost/Projects/Profiling/src/Profiling/Itp.h`, `Itp.cpp`): the same client in two files that need only the C++ standard library and the system's sockets (Windows or POSIX), so any C or C++ program can copy them. `ITP_ZONE("Name")` (a C++ scope guard; `ITP_ZONE_BEGIN`/`ITP_ZONE_END` in C), named zones with text and a value, `itp_frame`, `itp_plot`, `itp_message`, `itp_thread_name`, tasks, pools; `itp_start`/`itp_stop` for tools, else the first call starts from `IED_PROFILER` and the session ends at exit. `itp_alloc`/`itp_free` may be called from a replaced `operator new`: the client's own allocations are not reported. `ITP_ENABLE=0` compiles the macros away. Frost's `Performance.h` macros, its logger (`itp_message`) and its memory tracker report through it; it replaced the Tracy client (the submodule and the Tracy GUI setup package are gone). Tested by `tools/pylib/tests/test_itp_client.py`: built with the vendored clang, run to a file and to a listener, read back with `itp.py`.
+
 **Importers** (`code/importers.cf`): the Chrome trace event format (`X`, `B`/`E`, instants, counters, async `b`/`e` as tasks, thread and process names; Rust's `tracing-chrome`, Chrome, Perfetto JSON, Nuke's build trace) and pprof (gzip and protobuf decoded in C4; Go's `runtime/pprof`, Rust's `pprof-rs`, gperftools): samples with their stacks and symbols, flame graph and statistics from them.
 
-**Checks**: 27 unit tests beside the code (`*_tests.cf`), `tools/server-checks/tests/test_profiler.py` (9: live capture to file, queries, restart, refused connections, warnings, imports, the AI's answers, `${profiler.connect}`, `profile_capture`), the browser unit tests `frontend/tests/profiler.test.js`, the e2e scenario `profiler_live_capture` (desktop and phone), and `tools/pylib/itp.py`, the protocol's reference codec in Python.
+**Checks**: 27 unit tests beside the code (`*_tests.cf`), `tools/server-checks/tests/test_profiler.py` (9: live capture to file, queries, restart, refused connections, warnings, imports, the AI's answers, `${profiler.connect}`, `profile_capture`), the browser unit tests `frontend/tests/profiler.test.js`, the e2e scenario `profiler_live_capture` (desktop and phone), `tools/pylib/tests/test_itp_client.py` (the C/C++ client), and `tools/pylib/itp.py`, the protocol's reference codec in Python.
 
 ## Open items
 

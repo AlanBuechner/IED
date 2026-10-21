@@ -12,7 +12,7 @@ The C4 tree is the `C4/` folder of the IED repository; "the repository root" bel
 | Piece | What it is |
 |---|---|
 | `setup.bat` (repository root) | Installs everything that is not committed: a private Python 3.12.10 into `vendor/python`, the pinned LLVM 22.1.0 release into `C4/Frost/vendor/Compiler`, the git submodules and the IED web libraries. Versions and SHA256 sums are pinned in `tools/setup/deps.toml`. Safe to re-run. |
-| `Frost/` | The C++ build system plus the C++ support libraries the compiler links (Core, Reflection, ObjectDescription, Profiling, UnitTesting). yaml-cpp (`Frost/Projects/Core/Modules/yaml/yaml-cpp`) and the Tracy client (`Frost/Projects/Profiling/tracy`) are git submodules; glm stays vendored. Its own docs (`Frost/docs/`, `Frost/AGENTS.md`) are separate and describe Frost, not C4. |
+| `Frost/` | The C++ build system plus the C++ support libraries the compiler links (Core, Reflection, ObjectDescription, Profiling, UnitTesting). yaml-cpp (`Frost/Projects/Core/Modules/yaml/yaml-cpp`) is a git submodule; glm stays vendored. Profiling streams to the IED profiler through the IED Trace Protocol client in `Frost/Projects/Profiling/src/Profiling/Itp.h`. Its own docs (`Frost/docs/`, `Frost/AGENTS.md`) are separate and describe Frost, not C4. |
 | `Frost/vendor/Compiler/` | Clang + LLVM **22.1** for x86_64-pc-windows-msvc (headers, libs, `clang.exe`, `lld-link.exe`), installed by `setup.bat`. Used both to build the compiler and, at run time, by C4.exe to compile `.ll` files and link. Opaque pointers only. When it is missing, `Frost/Build.py` stops and says to run `setup.bat`. |
 | `Build.bat` | Runs `Frost/Build.py` with `..\vendor\python\python.exe` (or `python` when that is missing); every argument passes through (`-b`, `-test`, `-c`, `-p`, ...). |
 | `Build.py` (C4 root) | The root Frost project: `src/Source.cpp` -> `C4.exe`. |
@@ -21,7 +21,7 @@ The C4 tree is the `C4/` folder of the IED repository; "the repository root" bel
 | `GenerateProjects.bat` | `Build.bat -gs -p <C4 root>` - generate the Visual Studio solution. |
 
 `setup.bat` options: `--toolchain` (also build the compiler and the `dev` toolchain), `--with extras` (the optional
-packages, among them the Tracy profiler GUI, installed at `vendor/tracy-profiler` at the repository root),
+packages),
 `--add-to-path` (put the repository's `bin/`, which holds the `nuke` launcher, on PATH), `--only NAME`, `--force`
 (download and extract again), `--list` (every package and whether it is installed).
 
