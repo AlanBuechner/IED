@@ -1,6 +1,6 @@
 # Features: AI runtime (AIR)
 
-Owner: `src/ai` unless noted. Design: `docs/04` (models, routing, privacy, context, MCP, egress), `docs/12` (agent loop, reliability), `docs/13` (tools), `docs/14` (system prompt).
+Owner: `plugins/chat/code` (the chat plugin's server code, a built-in on the plugin API, `docs/26`) unless noted. Design: `docs/04` (models, routing, privacy, context, MCP, egress), `docs/12` (agent loop, reliability), `docs/13` (tools), `docs/14` (system prompt).
 
 ## Providers
 

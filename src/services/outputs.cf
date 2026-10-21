@@ -57,7 +57,6 @@ namespace Ied
 		Add(outputs, Core::StringView("run"), Core::StringView("Run"));
 		Add(outputs, Core::StringView("test"), Core::StringView("Tests"));
 		Add(outputs, Core::StringView("debug"), Core::StringView("Debug"));
-		Add(outputs, Core::StringView("ai"), Core::StringView("AI"));
 		Add(outputs, Core::StringView(kServerLogSource), Core::StringView("IED"))->tail = logTail;
 		PluginsChanged(ws);
 	}

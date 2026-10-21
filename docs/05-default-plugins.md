@@ -12,7 +12,7 @@ The seven plugins that ship with IED. They are ordinary plugins (`docs/02`) of k
 | `ied.profiler` | plugin order | capture library, timeline, analysis views, AI profiler tools | `features/12-profiler.md`, `docs/16` |
 | `ied.gpu` | plugin order (after profiler) | GPU capture library, frame debugger views, replay backends (separate native processes), insights, compare, AI GPU tools | `features/17-gpu-debugger.md`, `docs/22` |
 
-Host modules they sit on (not plugins): `src/fs` (documents, search), `src/tasks`, `src/lsp`, `src/dap`, `src/ai`, `src/sandbox`, `src/profiler`, `src/spell` - moving behind the plugin API one at a time (`docs/26` "Built-ins on the API"); git's and the terminal's are their plugins' `code/` already.
+Host modules they sit on (not plugins): `src/fs` (documents, search), `src/tasks`, `src/lsp`, `src/dap`, `src/sandbox`, `src/profiler`, `src/spell` - the host's concepts, offered to plugins through the API (`docs/26` "Built-ins on the API"). Git's, the terminal's and the chat's server sides are their plugins' `code/`.
 
 ## chat
 

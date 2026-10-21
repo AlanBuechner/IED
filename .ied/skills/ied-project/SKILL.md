@@ -19,7 +19,7 @@ IED is a Visual Studio-style IDE with first-class local AI, built as a C4 server
 ## Where the answers are
 
 - Contracts (frozen formats): `shared/host-api/` - manifest, solution, project, federation, agent-mode and WS frame schemas, process-plugin RPC, skill format, validated examples.
-- Protocol: `docs/10`. Security and multi-device rules: `docs/11`. Agent loop and stall protection: `docs/12`. AI tools: `docs/13`. Prompts: `docs/14` + `src/ai/prompts/`. UI: `docs/15`. Profiler + ITP: `docs/16`.
+- Protocol: `docs/10`. Security and multi-device rules: `docs/11`. Agent loop and stall protection: `docs/12`. AI tools: `docs/13`. Prompts: `docs/14` + `plugins/chat/prompts/`. UI: `docs/15`. Profiler + ITP: `docs/16`.
 - What C4 must provide first, suspected C4 bugs, and C4LSP/C4DAP/Nuke/C4 plugin/Bedrock work items: `docs/17`. Nuke's design: `docs/23`.
 - Testing (mock server, fake model server, resume tests, screenshots at 3 viewports): `docs/19`.
 

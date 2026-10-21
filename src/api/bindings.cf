@@ -19,7 +19,7 @@ namespace IED
 		Ied::CodeInstance* caller = Ied::CurrentCode();
 		if (!caller) return Refusal(Core::StringView("the plugin API is for a plugin's code, on its thread"));
 		Ied::Server* server = caller->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Plugin* plugin = server->code->PluginOf(caller);
 		if (!plugin || !Ied::ConsumesBinding(plugin, name))
 			return Refusal(((Core::String("the plugin's manifest does not consume '") + name) + "' (bindings.consumes)").View());

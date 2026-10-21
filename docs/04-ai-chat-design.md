@@ -6,7 +6,7 @@ The AI is a first-class citizen of IED. This doc covers the AI runtime's cross-c
 
 ## Where things live
 
-- **AI runtime (`src/ai/`, host infrastructure, not a plugin):** providers, dialect adapters, scheduler and routing, agent loop, tool executor, permissions, context ledger and compression, persistence, egress proxy, MCP client, usage tracking, goal queue and verifier.
+- **AI runtime (the `ied.chat` plugin's server code, `plugins/chat/code/`, a built-in on the plugin API - `docs/26` "Built-ins on the API"):** providers, dialect adapters, scheduler and routing, agent loop, tool executor, permissions, context ledger and compression, persistence, egress proxy, MCP client, usage tracking, goal queue and verifier.
 - **Chat plugin (`plugins/chat/`):** all chat UI (tabs, streaming views, approval cards, right panel, scratchpad, tasks, Mission Control) and the default tool set's bindings.
 
 ## Providers
@@ -84,7 +84,7 @@ Flags and event shapes must be re-verified against the installed CLI version whe
 
 ## System message
 
-Assembled in a fixed order - base prompt, style rules, mode instructions, solution `AGENTS.md`, bounded plugin sections, workspace summary, tool-group index, skills index - with volatile state kept out of it. Exact rules and the shipped texts: `docs/14`, `src/ai/prompts/`. Nested `AGENTS.md` files (subfolders, federation members) are injected as tail notes the first time the agent works in that area.
+Assembled in a fixed order - base prompt, style rules, mode instructions, solution `AGENTS.md`, bounded plugin sections, workspace summary, tool-group index, skills index - with volatile state kept out of it. Exact rules and the shipped texts: `docs/14`, `plugins/chat/prompts/`. Nested `AGENTS.md` files (subfolders, federation members) are injected as tail notes the first time the agent works in that area.
 
 ## Skills
 
@@ -124,7 +124,7 @@ Drag-drop, paste and picker attachments (images/videos to vision-capable models;
 
 ## As built (M4, first slice, 2026-10-21)
 
-The runtime lives in `src/ai/` (host infrastructure; the `ied.chat` plugin is its UI and declares its settings):
+The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compiled into the server and written against `src/api/` like any plugin's, since P4 of `docs/26`; before, `src/ai/`); the plugin's UI module is its UI and its manifest declares its settings and the AI output source:
 
 | Part | Files | Does |
 |---|---|---|
@@ -134,7 +134,7 @@ The runtime lives in `src/ai/` (host infrastructure; the `ied.chat` plugin is it
 | Models | `models`, `probe` | profiles (`ai.models`) and a group's role candidates (`ai.groups`): the role's model, then its fallbacks, an off role the primary; what a model's server says of itself |
 | Permissions | `permissions` | `ai.permissions` rules and the chat's mode (`docs/11`) |
 | Tools | `tools/` | the core toolset (`docs/13` "As built") |
-| Prompts | `prompts` | the system message from `src/ai/prompts/` (base, style, mode, the workspace's `AGENTS.md`, a workspace summary) and the harness notes by name |
+| Prompts | `prompts` | the system message from `plugins/chat/prompts/` (base, style, mode, the workspace's `AGENTS.md`, a workspace summary) and the harness notes by name |
 | Run | `run`, `runstream`, `runtools` | the loop of `docs/12` on a thread per turn |
 | Chats | `chat`, `chatstore`, `service` | the model, persistence and `chat.*` (`docs/10` "Chats") |
 

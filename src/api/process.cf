@@ -34,7 +34,7 @@ namespace IED
 		Process::StartInfo info;
 		{
 			Ied::Server* server = instance->runtime->server;
-			Threading::LockGuard guard(server->lock);
+			Ied::ApiLock guard(server);
 			Ied::Workspace* found = server->workspaces->Find(ws.id.View());
 			if (!instance->May(Core::StringView("process.spawn"))) result.problem = Core::String("the plugin's manifest does not ask for the permission process.spawn");
 			else if (!found || !server->code->LoadedIn(instance, found)) result.problem = (Core::String("no open workspace ") + ws.id.View()) + " for this plugin";

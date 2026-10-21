@@ -1,6 +1,6 @@
 # Features: orchestration and mission control (ORC)
 
-Owner: `src/ai` (scheduler, queue, verifier) + `plugins/chat` (Mission Control UI). Design: `docs/12` (runs, sub-agents), `docs/04` (routing).
+Owner: `plugins/chat/code` (scheduler, queue, verifier) + `plugins/chat` (Mission Control UI). Design: `docs/12` (runs, sub-agents), `docs/04` (routing).
 
 This is the area where IED goes furthest beyond its predecessor. The predecessor IDE had one model per chat plus read-only research helpers; its Kanban/orchestrator/heartbeat/self-healing designs were never built (their docs drifted from the code). IED makes **many agents doing real work in parallel, unattended, verified, and steerable from a phone** a core capability, built on the server-owns-everything architecture.
 

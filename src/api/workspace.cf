@@ -1,6 +1,7 @@
 include "workspace.ch"
 include "host/server.ch"
 include "fs/search.ch"
+include "fs/glob.ch"
 
 namespace IED
 {
@@ -11,7 +12,7 @@ namespace IED
 		Ied::CodeInstance* instance = Caller(problem);
 		if (!instance) return false;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* found = server->workspaces->Find(wsId);
 		if (!found || !server->code->LoadedIn(instance, found)) return false;
 		ws = Ied::PluginWorkspace(server, found);
@@ -24,7 +25,7 @@ namespace IED
 		Ied::CodeInstance* instance = Caller(problem);
 		if (!instance) return open;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		for (Ied::Workspace* ws : server->workspaces->All())
 			if (server->code->LoadedIn(instance, ws)) open.Push(Ied::PluginWorkspace(server, ws));
 		return open;
@@ -38,7 +39,7 @@ namespace IED
 		Ied::CodeInstance* instance = Caller(problem);
 		if (!instance) return false;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* found = Permitted(instance, ws, "fs.read", problem);
 		if (!found) return false;
 		try {
@@ -55,7 +56,7 @@ namespace IED
 		Ied::CodeInstance* instance = Caller(problem);
 		if (!instance) return false;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Workspace named;
 		named.id = Core::String(wsId);
 		Ied::Workspace* found = Permitted(instance, named, "fs.write", problem);
@@ -77,11 +78,15 @@ namespace IED
 
 	Core::String NormalizePath(Core::StringView path) { return Ied::NormalizePath(path); }
 
+	bool GlobMatch(Core::StringView pattern, Core::StringView path) { return Ied::GlobMatch(pattern, path); }
+
+	Core::Array<Core::String> ExpandGlob(Core::StringView folder, Core::StringView pattern) { return Ied::ExpandGlob(FS::Path(folder), pattern); }
+
 	bool WriteFile(const Workspace& ws, Core::StringView path, Core::StringView text, Core::String& problem) {
 		Ied::CodeInstance* instance = Caller(problem);
 		if (!instance) return false;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* found = Permitted(instance, ws, "fs.write", problem);
 		if (!found) return false;
 		try {

@@ -187,7 +187,7 @@ Language servers receive changes from the server's document store (the server is
 
 ## Chats
 
-A chat belongs to a workspace and to the server: a turn runs on the server until it ends, whatever the browsers do, and every device sees the same chat (`docs/12`). The runtime is `src/ai/` (`docs/04` "As built"); its model settings come from `ai.models` and `ai.groups`.
+A chat belongs to a workspace and to the server: a turn runs on the server until it ends, whatever the browsers do, and every device sees the same chat (`docs/12`). The runtime is `plugins/chat/code/` (`docs/04` "As built"); its model settings come from `ai.models` and `ai.groups`.
 
 | Method | Params | Answer |
 |---|---|---|

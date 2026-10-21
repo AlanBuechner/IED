@@ -1,0 +1,286 @@
+include "api/plugin.ch"
+include "run.ch"
+
+namespace Ai
+{
+	const char* kTrimmedNote = "\n[trimmed to save context; call the tool again if you need it]";
+	const int64 kTrimmedKeepBytes = 300;
+	const int64 kTrimBelowBytes = 600;
+	const int64 kRecentMessagesKept = 4;
+
+	static int64 StreamNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	// --- The request -------------------------------------------------------------------------------------------------
+
+	static void WriteTemperature(IED::JsonWriter& json, double temperature) {
+		Core::StringBuilder text;
+		text.AppendDouble(temperature, 3);
+		json.Key(Core::StringView("temperature"));
+		json.Raw(text.View());
+	}
+
+	Core::String TurnRun::RequestBody() {
+		ModelProfile* profile = candidates[candidate];
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("model", profile->model.View());
+		json.Key(Core::StringView("messages"));
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("role", "system");
+		json.Field("content", system.View());
+		json.EndObject();
+		for (Turn* each : chat->turns)
+			if (!each->compressed)
+				for (ModelMessage* message : each->messages) message->WriteJson(json);
+		json.EndArray();
+		json.RawField("tools", tools->RequestTools(chat->mode).View());
+		json.BoolField("stream", true);
+		json.Key(Core::StringView("stream_options"));
+		json.BeginObject();
+		json.BoolField("include_usage", true);
+		json.EndObject();
+		if (role.hasTemperature) WriteTemperature(json, role.temperature);
+		if (profile->maxOutput > 0) json.IntField("max_tokens", profile->maxOutput);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	StepRequest TurnRun::Request() {
+		ModelProfile* profile = candidates[candidate];
+		StepRequest request;
+		request.url = profile->CompletionsUrl();
+		Core::String key;
+		if (!profile->apiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile->apiKeyEnv.CStr(), key)) request.headers.Push(Core::String("Authorization: Bearer ") + key.View());
+		request.body = RequestBody();
+		double rate = profile->prefillRate;
+		chats->prefillRates.TryGet(profile->name, rate);
+		const int64 promptTokens = request.body.ByteLength() / 4;
+		request.connectMs = profile->connectMs;
+		request.prefillMs = profile->prefillBaseMs + (int64)((double)promptTokens * 2000.0 / rate);
+		request.prefillExtendMs = profile->prefillBaseMs;
+		request.idleMs = profile->idleMs;
+		request.capMs = profile->stepCapMs;
+		return request;
+	}
+
+	// --- Segments as the reply streams -------------------------------------------------------------------------------
+
+	Segment* TurnRun::NewSegment(const char* type) {
+		Segment* segment = new Segment();
+		segment->segId = chat->NextId("s");
+		segment->type = Core::String(type);
+		segment->model = candidates.IsEmpty() ? Core::String() : candidates[candidate]->name;
+		return segment;
+	}
+
+	// The segment joins the turn: segment.start carries it as it starts (a note's text, a tool's name and call).
+	Segment* TurnRun::Begin(Segment* segment) {
+		turn->segments.Push(segment);
+		openedMs = StreamNowMs();
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", turn->turnId.View());
+		segment->WriteFields(data);
+		data.EndObject();
+		chats->Publish(chat, "segment.start", data.View());
+		return segment;
+	}
+
+	void TurnRun::Close(Segment* segment) {
+		if (!segment || segment->done) return;
+		segment->done = true;
+		segment->tokens = (segment->text.ByteLength() + segment->argsText.ByteLength() + 3) / 4;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("segId", segment->segId.View());
+		data.IntField("tokens", segment->tokens);
+		data.IntField("ms", StreamNowMs() - openedMs);
+		data.EndObject();
+		chats->Publish(chat, "segment.end", data.View());
+	}
+
+	void TurnRun::CloseStreaming() {
+		Close(thinking);
+		Close(text);
+		for (Segment* segment : callSegments) Close(segment);
+		thinking = nullptr;
+		text = nullptr;
+	}
+
+	// Mergeable: a slow client gets a segment's queued deltas as one (docs/10 "Backpressure").
+	static void PublishDelta(Chats* chats, Chat* chat, const Segment* segment, const char* field, Core::StringView text) {
+		Core::StringBuilder rest;
+		rest.Append("\"segId\":");
+		Serialization::WriteJsonString(segment->segId.View(), &rest);
+		IED::Merge merge;
+		merge.field = Core::String(field);
+		merge.text = Core::String(text);
+		merge.rest = rest.ToString();
+		chats->PublishMergeable(chat, "segment.delta", merge);
+	}
+
+	void TurnRun::OnEvent(StepEventKind kind, Core::StringView delta, int64 call) {
+		IED::HostLock guard(*context);
+		if (kind == StepEventKind::Thinking) {
+			if (!thinking) {
+				Close(text);
+				text = nullptr;
+				thinking = Begin(NewSegment("thinking"));
+			}
+			thinking->text.Append(delta);
+			PublishDelta(chats, chat, thinking, "text", delta);
+		}
+		else if (kind == StepEventKind::Text) {
+			Close(thinking);
+			thinking = nullptr;
+			if (!text) text = Begin(NewSegment("text"));
+			text->text.Append(delta);
+			PublishDelta(chats, chat, text, "text", delta);
+		}
+		else if (kind == StepEventKind::CallStarted) {
+			CloseStreaming();
+			Segment* segment = NewSegment("tool");
+			segment->tool = Core::String(delta);
+			segment->callId = chat->NextId("k");
+			segment->state = Core::String("streaming");
+			callSegments.Push(Begin(segment));
+		}
+		else if (call >= 0 && call < callSegments.Count()) {
+			callSegments[call]->argsText.Append(delta);
+			PublishDelta(chats, chat, callSegments[call], "argsText", delta);
+		}
+	}
+
+	// --- Notes -------------------------------------------------------------------------------------------------------
+
+	void TurnRun::UiNote(Core::StringView kind, Core::StringView note) {
+		Segment* segment = NewSegment("harness");
+		segment->kind = Core::String(kind);
+		segment->text = Core::String(note);
+		Close(Begin(segment));
+	}
+
+	void TurnRun::HarnessNote(Core::StringView kind, Core::StringView note) {
+		UiNote(kind, note);
+		ModelMessage* message = new ModelMessage();
+		message->role = Core::String("user");
+		message->content = Core::String(note);
+		turn->messages.Push(message);
+	}
+
+	void TurnRun::DeliverSteering() {
+		for (const Core::String& steering : chat->injected) {
+			Segment* segment = NewSegment("steering");
+			segment->text = steering;
+			Close(Begin(segment));
+			Core::Array<Core::String> values;
+			values.Push(Core::String("text"));
+			values.Push(steering);
+			ModelMessage* message = new ModelMessage();
+			message->role = Core::String("user");
+			message->content = chats->prompts.Note("steering", values);
+			turn->messages.Push(message);
+			turn->recoveries.Push(Core::String("delivered a steering message"));
+		}
+		chat->injected.Clear();
+	}
+
+	// --- Accounting --------------------------------------------------------------------------------------------------
+
+	int64 TurnRun::Window() const {
+		ModelProfile* profile = candidates[candidate];
+		int64 found = 0;
+		chats->windows.TryGet(profile->name, found);
+		if (profile->contextWindow > 0 && (found == 0 || profile->contextWindow < found)) return profile->contextWindow;
+		return found;
+	}
+
+	int64 TurnRun::EstimateTokens() const {
+		int64 bytes = system.ByteLength();
+		for (Turn* each : chat->turns)
+			if (!each->compressed)
+				for (ModelMessage* message : each->messages) bytes += message->content.ByteLength() + message->toolCalls.ByteLength();
+		return bytes / 4;
+	}
+
+	static void WritePart(IED::JsonWriter& json, const char* name, int64 tokens) {
+		json.BeginObject();
+		json.Field("name", name);
+		json.IntField("tokens", tokens);
+		json.EndObject();
+	}
+
+	void TurnRun::PublishContext(int64 used) {
+		int64 messages = 0;
+		int64 results = 0;
+		for (Turn* each : chat->turns)
+			if (!each->compressed)
+				for (ModelMessage* message : each->messages) {
+					if (message->role == "tool") results += message->content.ByteLength();
+					else messages += message->content.ByteLength() + message->toolCalls.ByteLength();
+				}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("window", Window());
+		json.IntField("used", used);
+		json.Key(Core::StringView("parts"));
+		json.BeginArray();
+		WritePart(json, "System prompt", system.ByteLength() / 4);
+		WritePart(json, "Tool definitions", tools->RequestTools(chat->mode).ByteLength() / 4);
+		WritePart(json, "Messages", messages / 4);
+		WritePart(json, "Tool results", results / 4);
+		json.EndArray();
+		json.EndObject();
+		chat->context = json.ToString();
+		chats->Publish(chat, "context.changed", chat->context.View());
+	}
+
+	void TurnRun::Account(const StepResult* result, int64 promptEstimate) {
+		ModelProfile* profile = candidates[candidate];
+		const Completion* completion = result->completion;
+		turn->tokensIn = completion->promptTokens > 0 ? completion->promptTokens : promptEstimate;
+		turn->tokensOut += completion->completionTokens > 0 ? completion->completionTokens : (result->text.ByteLength() + result->thinking.ByteLength()) / 4;
+		if (result->ttftMs >= 0) {
+			turn->ttftMs = result->ttftMs;
+			turn->genMs += result->ms - result->ttftMs;
+		}
+		if (completion->promptPerSecond > 0) chats->prefillRates.At(profile->name) = completion->promptPerSecond;
+		else if (result->ttftMs > 200 && turn->tokensIn > 0) chats->prefillRates.At(profile->name) = (double)turn->tokensIn * 1000.0 / (double)result->ttftMs;
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Field("turnId", turn->turnId.View());
+		data.IntField("tokensIn", turn->tokensIn);
+		data.IntField("tokensOut", turn->tokensOut);
+		data.IntField("ttftMs", turn->ttftMs);
+		data.IntField("genMs", turn->genMs);
+		data.EndObject();
+		chats->Publish(chat, "turn.stats", data.View());
+		PublishContext(turn->tokensIn);
+	}
+
+	// Mechanical compression (docs/04 "Context management"): tool results older than the last few messages trimmed;
+	// when that is not enough, whole earlier turns left out (they stay on disk). Whether anything changed.
+	bool TurnRun::Compress() {
+		bool changed = false;
+		for (Turn* each : chat->turns)
+			for (int64 i = 0; i < each->messages.Count(); ++i) {
+				ModelMessage* message = each->messages[i];
+				if (each == turn && i >= each->messages.Count() - kRecentMessagesKept) continue;
+				if (message->role != "tool" || message->content.ByteLength() < kTrimBelowBytes) continue;
+				message->content = Core::String(message->content.View().Substring(0, kTrimmedKeepBytes)) + kTrimmedNote;
+				changed = true;
+			}
+		const int64 target = Window() / 2;
+		for (Turn* each : chat->turns) {
+			if (target <= 0 || EstimateTokens() <= target || each == turn) break;
+			if (each->compressed) continue;
+			each->compressed = true;
+			changed = true;
+		}
+		if (changed) HarnessNote(Core::StringView("context_compressed"), chats->prompts.Note("context_compressed").View());
+		return changed;
+	}
+
+	void TurnRun::SaveRunning() { SaveRunningTurn(FS::Path(ws.root.View()), chat, turn); }
+}

@@ -61,4 +61,8 @@ namespace IED
 	Core::Array<Core::String> DefaultExcludes();
 	// A workspace-relative path with '/' separators and no '.' or '..'; throws IED::RpcError bad_request.
 	Core::String NormalizePath(Core::StringView path);
+	// Whether `path` (workspace-relative) matches the glob `pattern` ("src/**/*.cf"; '*' within a name, '**' any folders).
+	bool GlobMatch(Core::StringView pattern, Core::StringView path);
+	// The files under `folder` that `pattern` matches, relative to it, in path order.
+	Core::Array<Core::String> ExpandGlob(Core::StringView folder, Core::StringView pattern);
 }

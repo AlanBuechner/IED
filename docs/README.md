@@ -26,7 +26,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [11-security-and-multi-client](11-security-and-multi-client.md) | Threat model, access defaults, trust layers, AI permissions, secrets, concurrency rules |
 | [12-agent-runtime-and-reliability](12-agent-runtime-and-reliability.md) | Run state machine, loop, modes, **stall/stop protection**, tools execution, sub-agents, checkpoints, budgets |
 | [13-ai-tool-catalog](13-ai-tool-catalog.md) | Every AI tool with shape, class, group; mode presets; result budgets |
-| [14-system-prompt](14-system-prompt.md) | System message assembly and the shipped prompt texts (`src/ai/prompts/`) |
+| [14-system-prompt](14-system-prompt.md) | System message assembly and the shipped prompt texts (`plugins/chat/prompts/`) |
 | [15-ui-shell-and-interaction](15-ui-shell-and-interaction.md) | Desktop/phone wireframes, docking, VS keymap, context menus, interaction rules |
 | [16-profiler-and-trace-format](16-profiler-and-trace-format.md) | Profiler architecture and the ITP v1 trace protocol |
 | [17-c4-readiness-and-cross-repo-work](17-c4-readiness-and-cross-repo-work.md) | What C4/Bedrock must provide, suspected C4 bugs, C4LSP/C4DAP/Nuke/C4 plugin/Bedrock/game-engine work items |

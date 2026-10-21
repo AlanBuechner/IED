@@ -25,7 +25,7 @@ namespace IED
 
 	Core::String PluginContext::Setting(Core::StringView key, Core::StringView wsId) const {
 		Ied::Server* server = Of(host)->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* ws = wsId.IsEmpty() ? nullptr : server->workspaces->Find(wsId);
 		return server->settings->Effective(ws, Core::StringView(""), key);
 	}
@@ -34,7 +34,7 @@ namespace IED
 		Ied::CodeInstance* instance = Of(host);
 		if (!OnItsThread(instance, "Provide")) return;
 		instance->handlers.bindings.At(Core::String(name)) = handler;
-		Threading::LockGuard guard(instance->runtime->server->lock);
+		Ied::ApiLock guard(instance->runtime->server);
 		instance->provides.At(Core::String(name)) = true;
 	}
 
@@ -43,7 +43,7 @@ namespace IED
 		if (!OnItsThread(instance, "Listen")) return;
 		instance->handlers.listenKinds.Push(Core::String(kind));
 		instance->handlers.listeners.Push(handler);
-		Threading::LockGuard guard(instance->runtime->server->lock);
+		Ied::ApiLock guard(instance->runtime->server);
 		instance->hears.At(Core::String(kind)) = true;
 	}
 
@@ -64,7 +64,7 @@ namespace IED
 		Ied::CodeInstance* instance = Of(host);
 		if (!OnItsThread(instance, "OnTrustChanged")) return;
 		instance->handlers.trustHandlers.Push(handler);
-		Threading::LockGuard guard(instance->runtime->server->lock);
+		Ied::ApiLock guard(instance->runtime->server);
 		instance->wantsTrust = true;
 	}
 
@@ -72,7 +72,7 @@ namespace IED
 		Ied::CodeInstance* instance = Of(host);
 		if (!OnItsThread(instance, "OnFilesChanged")) return;
 		instance->handlers.filesHandlers.Push(handler);
-		Threading::LockGuard guard(instance->runtime->server->lock);
+		Ied::ApiLock guard(instance->runtime->server);
 		instance->wantsFiles = true;
 	}
 
@@ -88,7 +88,7 @@ namespace IED
 			runtime->QueueWatched(instance, watch, handler, paths);
 		}, problem);
 		if (!started) return false;
-		Threading::LockGuard guard(runtime->server->lock);
+		Ied::ApiLock guard(runtime->server);
 		instance->watches.Push(watch);
 		return true;
 	}
@@ -100,7 +100,7 @@ namespace IED
 			return false;
 		}
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		if (!instance->runtime->MayName(instance, name)) {
 			problem = (((Core::String("a plugin's methods are named ") + instance->pluginId.View()) + "/<method>, not ") + name);
 			return false;
@@ -136,7 +136,7 @@ namespace IED
 	void PluginContext::Topic(Core::StringView key, Core::StringView snapshot) {
 		Ied::CodeInstance* instance = Of(host);
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		const bool made = instance->runtime->TopicOf(instance, key) == nullptr;
 		Ied::PluginTopic* topic = OwnTopic(instance, key);
 		if (!topic) return;
@@ -147,7 +147,7 @@ namespace IED
 	void PluginContext::TopicFrom(Core::StringView key, func<Core::String()> snapshot) {
 		Ied::CodeInstance* instance = Of(host);
 		Ied::CodeRuntime* runtime = instance->runtime;
-		Threading::LockGuard guard(runtime->server->lock);
+		Ied::ApiLock guard(runtime->server);
 		if (runtime->TopicOf(instance, key)) return;
 		Ied::PluginTopic* topic = OwnTopic(instance, key);
 		if (!topic) return;
@@ -159,7 +159,7 @@ namespace IED
 	void PluginContext::Publish(Core::StringView key, const char* kind, Core::StringView data) {
 		Ied::CodeInstance* instance = Of(host);
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		if (instance->runtime->TopicOf(instance, key)) server->hub.Publish(key, kind, data);
 	}
 
@@ -173,6 +173,34 @@ namespace IED
 		if (instance->runtime->TopicOf(instance, key)) instance->runtime->server->hub.PublishMergeable(key, kind, merge);
 	}
 
+	void PluginContext::StartThread(func<void()> body) {
+		Ied::CodeInstance* instance = Of(host);
+		Threading::Thread::Run([instance, body]() {
+			Ied::CodeScope scope(instance);
+			body();
+		}).Detach();
+	}
+
+	void HostLock::Init(const PluginContext& context) {
+		host = context.Handle();
+		taken = !Ied::HostLockHeld();
+		if (!taken) return;
+		Of(host)->runtime->server->lock.Lock();
+		Ied::SetHostLockHeld(true);
+	}
+
+	void HostLock::Delete() {
+		if (!taken) return;
+		Ied::SetHostLockHeld(false);
+		Of(host)->runtime->server->lock.Unlock();
+	}
+
+	void HostLock::Wait(Threading::ConditionVariable& condition, int64 ns) {
+		Ied::Server* server = Of(host)->runtime->server;
+		if (ns < 0) condition.Wait(server->lock);
+		else condition.WaitFor(server->lock, ns);
+	}
+
 	void Events::Wait(Threading::ConditionVariable& condition, int64 ns) {
 		Ied::Server* server = Of(host)->runtime->server;
 		if (ns < 0) condition.Wait(server->lock);
@@ -182,14 +210,14 @@ namespace IED
 	void PluginContext::PublishMergeable(Core::StringView key, const char* kind, const Merge& merge) {
 		Ied::CodeInstance* instance = Of(host);
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		if (instance->runtime->TopicOf(instance, key)) server->hub.PublishMergeable(key, kind, merge);
 	}
 
 	void PluginContext::Atomically(func<void(Events& events)> change) {
 		Ied::CodeInstance* instance = Of(host);
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Events* events = new Events(host);
 		Core::String problem;
 		if (!Ied::GuardedCallLocked(instance, [change, events]() { change(*events); }, problem))
@@ -199,7 +227,7 @@ namespace IED
 	void PluginContext::RemoveTopic(Core::StringView key) {
 		Ied::CodeInstance* instance = Of(host);
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		for (int64 i = 0; i < instance->topics.Count(); ++i)
 			if (instance->topics[i]->key.View() == key) {
 				instance->topics.RemoveAt(i);
@@ -211,7 +239,7 @@ namespace IED
 	void PluginContext::Output(Core::StringView wsId, Core::StringView source, Core::StringView text) {
 		Ied::CodeInstance* instance = Of(host);
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* ws = server->workspaces->Find(wsId);
 		Ied::Plugin* plugin = instance->runtime->PluginOf(instance);
 		if (!ws || !plugin || !Ied::DeclaresOutput(plugin, source)) return;
@@ -233,7 +261,7 @@ namespace IED
 			return false;
 		}
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		for (int64 i = 0; i < instance->contributed.Count(); ++i)
 			if (instance->contributed[i]->point.View() == point && instance->contributed[i]->wsId.View() == wsId) {
 				instance->contributed.RemoveAt(i);

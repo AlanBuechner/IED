@@ -2,13 +2,13 @@
 
 ## Purpose
 
-IDEplan: "a strong system prompt to help the ai design and write high quality code with my preferred styling", plus "the ai should also be told to always use tabs". This doc defines how the system message is assembled, what the shipped default text says, and how it is kept small enough for local models. The draft texts are ready to ship and live in `src/ai/prompts/`:
+IDEplan: "a strong system prompt to help the ai design and write high quality code with my preferred styling", plus "the ai should also be told to always use tabs". This doc defines how the system message is assembled, what the shipped default text says, and how it is kept small enough for local models. The draft texts are ready to ship and live in `plugins/chat/prompts/`:
 
 | File | Role | Tier where it can be overridden |
 |---|---|---|
-| `src/ai/prompts/base-system.md` | Identity, working method, tool discipline, honesty, output rules. Language-agnostic. | App (Settings > AI > Prompts: edit / diff vs default / reset) |
-| `src/ai/prompts/style-default.md` | The owner's coding standards (tabs; single purpose; one level of abstraction; honest functions; no global mutable state; minimal comments; real tests; no dead code; explicit errors; performance). Derived from the family's `AGENTS.md` standards. | App ("my style"), solution `AGENTS.md` adds/overrides per project |
-| `src/ai/prompts/harness-notes.md` | Exact texts of recovery nudges (`docs/12`). | Not user-facing (tuned with the eval suite) |
+| `plugins/chat/prompts/base-system.md` | Identity, working method, tool discipline, honesty, output rules. Language-agnostic. | App (Settings > AI > Prompts: edit / diff vs default / reset) |
+| `plugins/chat/prompts/style-default.md` | The owner's coding standards (tabs; single purpose; one level of abstraction; honest functions; no global mutable state; minimal comments; real tests; no dead code; explicit errors; performance). Derived from the family's `AGENTS.md` standards. | App ("my style"), solution `AGENTS.md` adds/overrides per project |
+| `plugins/chat/prompts/harness-notes.md` | Exact texts of recovery nudges (`docs/12`). | Not user-facing (tuned with the eval suite) |
 
 ## Assembly order
 
@@ -44,7 +44,7 @@ The model profile can select a **prompt variant**:
 
 - `standard` (default).
 - `compact` for <= 16k-context models: style rules collapsed to 8 bullets, skills index top-5, tool descriptions shortened.
-- Dialect-specific additions where a model family needs them (e.g. reminding Hermes-format models of the exact tool-call syntax), kept in `src/ai/prompts/dialects/`.
+- Dialect-specific additions where a model family needs them (e.g. reminding Hermes-format models of the exact tool-call syntax), kept in `plugins/chat/prompts/dialects/`.
 
 ## Editing and review
 

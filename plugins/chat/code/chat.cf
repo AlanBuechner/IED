@@ -1,0 +1,333 @@
+include "api/plugin.ch"
+include "chat.ch"
+
+namespace Ai
+{
+	int64 ChatNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	Core::StringView WsId(const IED::Workspace& ws) { return ws.id.View(); }
+
+	const char* ChatModeName(ChatMode mode) {
+		if (mode == ChatMode::Ask) return "ask";
+		return mode == ChatMode::Plan ? "plan" : "agent";
+	}
+
+	bool ReadChatMode(Core::StringView text, ChatMode& mode) {
+		if (text == "ask") mode = ChatMode::Ask;
+		else if (text == "plan") mode = ChatMode::Plan;
+		else if (text == "agent") mode = ChatMode::Agent;
+		else return false;
+		return true;
+	}
+
+	const char* PermissionModeName(PermissionMode mode) {
+		const char*[4] names = { "plan", "ask", "acceptEdits", "auto" };
+		return names[(int32)mode];
+	}
+
+	bool ReadPermissionMode(Core::StringView text, PermissionMode& mode) {
+		if (text == "plan") mode = PermissionMode::Plan;
+		else if (text == "ask") mode = PermissionMode::Ask;
+		else if (text == "acceptEdits") mode = PermissionMode::AcceptEdits;
+		else if (text == "auto") mode = PermissionMode::Auto;
+		else return false;
+		return true;
+	}
+
+	const char* ChatStateName(ChatState state) {
+		const char*[5] names = { "idle", "running", "awaiting_approval", "awaiting_answer", "paused" };
+		return names[(int32)state];
+	}
+
+	PermissionMode DefaultPermission(ChatMode mode) { return mode == ChatMode::Plan ? PermissionMode::Plan : PermissionMode::Ask; }
+
+	// --- Segments and messages ---------------------------------------------------------------------------------------
+
+	void Segment::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		WriteFields(json);
+		json.EndObject();
+	}
+
+	void Segment::WriteFields(IED::JsonWriter& json) const {
+		json.Field("segId", segId.View());
+		json.Field("type", type.View());
+		json.BoolField("done", done);
+		if (!model.IsEmpty()) json.Field("model", model.View());
+		if (type == "tool") {
+			json.Field("tool", tool.View());
+			json.Field("callId", callId.View());
+			json.Field("argsText", argsText.View());
+			if (!state.IsEmpty()) json.Field("state", state.View());
+			if (!source.IsEmpty()) json.Field("source", source.View());
+			if (ms > 0) json.IntField("ms", ms);
+			if (plus > 0) json.IntField("plus", plus);
+			if (minus > 0) json.IntField("minus", minus);
+			if (state == "ok" || state == "error" || state == "denied" || state == "interrupted") {
+				json.Key(Core::StringView("result"));
+				json.BeginObject();
+				json.Field("preview", preview.View());
+				json.BoolField("isError", isError);
+				json.EndObject();
+			}
+		}
+		else json.Field("text", text.View());
+		if (!kind.IsEmpty()) json.Field("kind", kind.View());
+		if (tokens > 0) json.IntField("tokens", tokens);
+	}
+
+	void Segment::Read(const Serialization::DomNode& node) {
+		segId = Core::String(node.Member("segId").AsView());
+		type = Core::String(node.Member("type").AsView());
+		text = Core::String(node.Member("text").AsView());
+		done = true;
+		model = Core::String(node.Member("model").AsView());
+		kind = Core::String(node.Member("kind").AsView());
+		tool = Core::String(node.Member("tool").AsView());
+		callId = Core::String(node.Member("callId").AsView());
+		argsText = Core::String(node.Member("argsText").AsView());
+		state = Core::String(node.Member("state").AsView());
+		source = Core::String(node.Member("source").AsView());
+		ms = node.Member("ms").AsInt();
+		plus = node.Member("plus").AsInt();
+		minus = node.Member("minus").AsInt();
+		preview = Core::String(node.Member("result").Member("preview").AsView());
+		isError = node.Member("result").Member("isError").AsBool();
+		tokens = node.Member("tokens").AsInt();
+	}
+
+	void ModelMessage::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("role", role.View());
+		json.Field("content", content.View());
+		if (!toolCalls.IsEmpty()) json.RawField("tool_calls", toolCalls.View());
+		if (!toolCallId.IsEmpty()) json.Field("tool_call_id", toolCallId.View());
+		json.EndObject();
+	}
+
+	void ModelMessage::Read(const Serialization::DomNode& node) {
+		role = Core::String(node.Member("role").AsView());
+		content = Core::String(node.Member("content").AsView());
+		if (node.Member("tool_calls").IsValid()) toolCalls = IED::NodeJson(node.Member("tool_calls"));
+		toolCallId = Core::String(node.Member("tool_call_id").AsView());
+	}
+
+	// --- Turns -------------------------------------------------------------------------------------------------------
+
+	Segment* Turn::FindSegment(Core::StringView segId) const {
+		for (Segment* segment : segments)
+			if (segment->segId.View() == segId) return segment;
+		return nullptr;
+	}
+
+	Segment* Turn::ToolSegment(Core::StringView callId) const {
+		for (Segment* segment : segments)
+			if (segment->type == "tool" && segment->callId.View() == callId) return segment;
+		return nullptr;
+	}
+
+	void Turn::WriteJson(IED::JsonWriter& json, bool withMessages) const {
+		json.BeginObject();
+		json.Field("turnId", turnId.View());
+		json.Key(Core::StringView("user"));
+		json.BeginObject();
+		json.Field("text", userText.View());
+		json.EndObject();
+		json.Field("mode", ChatModeName(mode));
+		json.Field("model", model.View());
+		json.Field("group", group.View());
+		json.Key(Core::StringView("segments"));
+		json.BeginArray();
+		for (Segment* segment : segments) segment->WriteJson(json);
+		json.EndArray();
+		if (stop.IsEmpty()) {
+			json.Key(Core::StringView("stop"));
+			json.Null();
+		}
+		else json.Field("stop", stop.View());
+		json.Key(Core::StringView("recoveries"));
+		json.BeginArray();
+		for (const Core::String& recovery : recoveries) json.String(recovery.View());
+		json.EndArray();
+		json.IntField("tokensIn", tokensIn);
+		json.IntField("tokensOut", tokensOut);
+		if (ttftMs > 0) json.IntField("ttftMs", ttftMs);
+		if (genMs > 0) json.IntField("genMs", genMs);
+		json.IntField("startedMs", startedMs);
+		if (endedMs > 0) json.IntField("endedMs", endedMs);
+		if (withMessages) {
+			json.Key(Core::StringView("messages"));
+			json.BeginArray();
+			for (ModelMessage* message : messages) message->WriteJson(json);
+			json.EndArray();
+		}
+		json.EndObject();
+	}
+
+	void Turn::Read(const Serialization::DomNode& node) {
+		turnId = Core::String(node.Member("turnId").AsView());
+		userText = Core::String(node.Member("user").Member("text").AsView());
+		ReadChatMode(node.Member("mode").AsView(), mode);
+		model = Core::String(node.Member("model").AsView());
+		group = Core::String(node.Member("group").AsView());
+		Serialization::DomNode list = node.Member("segments");
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Segment* segment = new Segment();
+			segment->Read(list.At(i));
+			segments.Push(segment);
+		}
+		stop = Core::String(node.Member("stop").AsView());
+		Serialization::DomNode done = node.Member("recoveries");
+		for (int64 i = 0; i < done.Count(); ++i) recoveries.Push(Core::String(done.At(i).AsView()));
+		tokensIn = node.Member("tokensIn").AsInt();
+		tokensOut = node.Member("tokensOut").AsInt();
+		ttftMs = node.Member("ttftMs").AsInt();
+		genMs = node.Member("genMs").AsInt();
+		startedMs = node.Member("startedMs").AsInt();
+		endedMs = node.Member("endedMs").AsInt();
+		Serialization::DomNode sent = node.Member("messages");
+		for (int64 i = 0; i < sent.Count(); ++i) {
+			ModelMessage* message = new ModelMessage();
+			message->Read(sent.At(i));
+			messages.Push(message);
+		}
+	}
+
+	// --- Waiting -----------------------------------------------------------------------------------------------------
+
+	void Approval::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("approvalId", approvalId.View());
+		json.Field("callId", callId.View());
+		json.Field("tool", tool.View());
+		json.RawField("args", args.IsEmpty() ? Core::StringView("{}") : args.View());
+		json.Field("summary", summary.View());
+		json.Field("why", why.View());
+		json.Field("subject", subject.View());
+		if (!diff.IsEmpty()) json.Field("diff", diff.View());
+		if (plus > 0) json.IntField("plus", plus);
+		if (minus > 0) json.IntField("minus", minus);
+		json.EndObject();
+	}
+
+	void Question::WriteJson(IED::JsonWriter& json) const {
+		json.BeginObject();
+		json.Field("questionId", questionId.View());
+		json.Field("callId", callId.View());
+		json.Field("question", question.View());
+		json.Key(Core::StringView("options"));
+		json.BeginArray();
+		for (const Core::String& option : options) json.String(option.View());
+		json.EndArray();
+		json.BoolField("allowText", allowText);
+		json.EndObject();
+	}
+
+	// --- The chat ----------------------------------------------------------------------------------------------------
+
+	Core::String Chat::NextId(const char* prefix) {
+		counter += 1;
+		Core::StringBuilder id;
+		id.Append(prefix);
+		id.AppendInt(counter);
+		return id.ToString();
+	}
+
+	int64 Chat::WaitingApprovals() const {
+		int64 waiting = 0;
+		for (Approval* approval : approvals)
+			if (approval->decision.IsEmpty()) waiting += 1;
+		return waiting;
+	}
+
+	void Chat::WriteSummary(IED::JsonWriter& json) const {
+		json.Field("chatId", chatId.View());
+		json.Field("wsId", wsId.View());
+		json.Field("title", title.View());
+		json.Field("mode", ChatModeName(mode));
+		json.Field("permission", PermissionModeName(permission));
+		json.Field("group", group.View());
+		json.Field("state", ChatStateName(state));
+		if (!stateReason.IsEmpty()) json.Field("stateReason", stateReason.View());
+		json.IntField("turnCount", turns.Count());
+		json.IntField("updatedMs", updatedMs);
+		int64 done = 0;
+		for (ChatTask* task : tasks)
+			if (task->status == "done" || task->status == "skipped") done += 1;
+		json.IntField("tasksDone", done);
+		json.IntField("tasksTotal", tasks.Count());
+		json.IntField("approvalsWaiting", WaitingApprovals());
+	}
+
+	Core::String Chat::SummaryJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Chat::WriteTasks(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (ChatTask* task : tasks) {
+			json.BeginObject();
+			json.Field("id", task->id.View());
+			json.Field("title", task->title.View());
+			json.Field("status", task->status.View());
+			if (!task->note.IsEmpty()) json.Field("note", task->note.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void Chat::WriteQueued(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (const Core::String& text : queued) json.String(text.View());
+		json.EndArray();
+	}
+
+	void Chat::WriteModified(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (ModifiedFile* file : modified) {
+			json.BeginObject();
+			json.Field("path", file->path.View());
+			json.IntField("plus", file->plus);
+			json.IntField("minus", file->minus);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, int64 recent) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteSummary(json);
+		json.Field("model", model);
+		json.Field("groupInUse", groupInUse);
+		json.Key(Core::StringView("tasks"));
+		WriteTasks(json);
+		json.Key(Core::StringView("queued"));
+		WriteQueued(json);
+		json.Key(Core::StringView("modified"));
+		WriteModified(json);
+		json.Key(Core::StringView("context"));
+		if (context.IsEmpty()) json.Null();
+		else json.Raw(context.View());
+		const int64 first = turns.Count() > recent ? turns.Count() - recent : 0;
+		json.BoolField("hasMore", first > 0);
+		json.Key(Core::StringView("turns"));
+		json.BeginArray();
+		for (int64 i = first; i < turns.Count(); ++i) turns[i]->WriteJson(json, false);
+		json.EndArray();
+		json.Key(Core::StringView("pendingApprovals"));
+		json.BeginArray();
+		for (Approval* approval : approvals)
+			if (approval->decision.IsEmpty()) approval->WriteJson(json);
+		json.EndArray();
+		json.Key(Core::StringView("pendingQuestion"));
+		if (question && !question->answered) question->WriteJson(json);
+		else json.Null();
+		json.EndObject();
+		return json.ToString();
+	}
+}

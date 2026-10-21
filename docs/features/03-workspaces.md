@@ -53,7 +53,7 @@ Interpretation of the plan's "federated projects" (confirm in `docs/99`): a name
 | F-WSP-30 | `.ied.fed` file (or app-tier record): list of member roots (solutions or folders), display names, which member is "primary" | P1 | US-WSP-5 | src/host |
 | F-WSP-31 | Tree shows one top node per member; search scopes: current project / current member / whole federation | P1 | US-WSP-5, US-EDT-4 | plugins/editor |
 | F-WSP-32 | Each member keeps its own `.ied/`, plugins, LSP options and trust; settings resolve per member for files inside it | P1 | US-WSP-5 | src/host |
-| F-WSP-33 | Chats in a federation see all members' `AGENTS.md` (each scoped to its root) and can use tools across members, subject to each member's trust and egress policy (strictest wins for a chat that touched several) | P1 | US-WSP-5, US-CTX-5 | src/ai |
+| F-WSP-33 | Chats in a federation see all members' `AGENTS.md` (each scoped to its root) and can use tools across members, subject to each member's trust and egress policy (strictest wins for a chat that touched several) | P1 | US-WSP-5, US-CTX-5 | plugins/chat/code |
 | F-WSP-34 | Federation-level toolbar (e.g. "build C4 compiler, refresh the game's vendored C4.exe, build the game") composed from member toolbars | P2 | US-WSP-5 | plugins/editor |
 
 ## Trust

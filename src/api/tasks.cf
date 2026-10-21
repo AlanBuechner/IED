@@ -8,7 +8,7 @@ namespace IED
 		Ied::CodeInstance* instance = Ied::ApiCaller(outcome.problem);
 		if (!instance) return outcome;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "process.spawn", outcome.problem);
 		if (!found) return outcome;
 		if (!found->trusted) {
@@ -18,6 +18,10 @@ namespace IED
 		try {
 			Ied::TaskRun* run = server->tasks->RunTask(found, project, key, slot, Serialization::DomNode());
 			outcome.succeeded = server->tasks->AwaitEnd(run);
+			outcome.cancelled = run->status == Ied::RunStatus::Cancelled;
+			outcome.label = run->label;
+			outcome.ms = run->endedMs - run->startedMs;
+			outcome.tail = run->tail;
 			outcome.problems = Ied::RunProblemsJson(run);
 		}
 		catch (Ied::RpcError& error) {
@@ -31,7 +35,7 @@ namespace IED
 		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
 		if (!instance) return Core::String("{\"files\":{}}");
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "fs.read", problem);
 		return found ? server->diagnostics->Snapshot(found) : Core::String("{\"files\":{}}");
 	}

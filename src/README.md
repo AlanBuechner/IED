@@ -33,6 +33,7 @@ no `--port`, a taken 8765 falls back to a free port; `--control <name>` names th
 | `fs/` | `textedit`, `changes`, `watching`, `glob` | line/column (UTF-16) edits, their rebase, applying them; a watcher thread per workspace folder whose changes are gathered and folded per path, then published unless they were the server's own (recognized by the digest of what it wrote) |
 | `plugins/` | `manifest`, `host`, `languages`, `when`, `context`, `code`, `codecalls`, `codeserve`, `codediagnostics` | `docs/02` "The host as built": built-in, app and project plugins found, manifests validated (schema, API range, kind, dependencies), approval by content digest, precedence, enable/disable, `plugins.*` with each UI module's URL, `/plugins/<id>/<path>` and a workspace's `/w/<wsId>/plugins/<id>/<path>` (local plugins included); `when` clauses and the workspace's context; plugin C4 code (`docs/26` section 2): compiled by the script host (a built-in's compiled into the server and found by reflection), a thread per running copy, hot reload, server bindings (`plugins.call`), protocol methods, topics and output sources, workspace events, sections, computed contributions, compile errors in the Error List |
 | `api/` | `plugin`, `workspace`, `bindings`, `tools`, `process`, `methods`, `protocol`, `text` | the plugin API (`docs/26` section 2), namespace `IED`: the only server headers plugin code may include (the script allow-list) |
+| `../plugins/chat/code/` | `service`, `run*`, `step`, `wire` parts, `models`, `prompts`, `skills`, the tools, `chatstore`, `activate` | the `ied.chat` built-in's server code (`docs/04`, `docs/12`, `docs/13`): chats on disk, `chat.*`, the turn loop and its recoveries, the model wire, the tools; prompts in `../plugins/chat/prompts/` |
 | `../plugins/terminal/code/` | `terminal`, `methods`, `queue` | the `ied.terminal` built-in's server code (`docs/10` "Terminals"): programs under a pseudo console that outlive the browser, `term.*`, `term:<termId>` and `terms:<wsId>`, scrollback, the lease |
 | `../plugins/git/code/` | `cli`, `parse`, `patch`, `discover`, `repo`, `service`, `methods`, `changes`, `ops`, `git` | the `ied.git` built-in's server code, a source folder of this project (`docs/10` "Git", `docs/26` "Built-ins on the API"): the git CLI run without locks in machine formats, repositories found by a thread of its own, each repository's `git:<repoId>` kept current from file changes, `git.*`, fetch / pull / push as operations that stream |
 | `solutions/` | `model` | `docs/03` "The server as built": a `.ied.sln` and its `.ied.proj` files (paths and globs) validated, roots resolved, problems per file, local plugins |
@@ -40,7 +41,6 @@ no `--port`, a taken 8765 falls back to a free port; `--control <name>` names th
 | `lsp/` | `client`, `framing`, `pool`, `positions`, `profiles`, `queue`, `rewrite`, `uris` | `docs/24`: language servers from plugins' profiles, one per workspace and profile, requests passed through |
 | `tasks/` | `model`, `service`, `runner`, `expand`, `selections`, `matcher` | `docs/06`: what projects offer to run, the toolbar's selections, runs with their steps, problem matchers |
 | `dap/` | `providers`, `session`, `breakpoints`, `service` | `docs/25`: debug adapters from plugins (stdio or TCP), sessions, the workspace's breakpoints and watches |
-| `ai/` | `wire/`, `step`, `classify`, `models`, `probe`, `permissions`, `prompts`, `tools/`, `run*`, `chat`, `chatstore`, `service` | `docs/04` "As built": the model wire (SSE, streaming requests, completions, dialects), a step under its watchdogs, the stop taxonomy, model profiles and groups, what a server says of itself, permissions, the system message, the core tools, the turn loop with its recoveries (`docs/12`), chats on disk and `chat.*` |
 | `tests/` | `*_tests.cf` | unit tests of the honest parts (`nuke test ied-server`) |
 
 Methods run holding the server lock, as the mock's single thread does, and release it only to wait (`Call::Sleep`); each
@@ -62,9 +62,6 @@ src/
 +- tasks/       task/step runner, variables, conditions, problem matchers, output sources, test results  - docs/06
 +- lsp/         generic LSP client pool (profiles from plugins; encoding/id/refetch quirk switches)
 +- dap/         generic DAP client pool, server-owned debug sessions
-+- ai/          providers + dialects, scheduler/routing/privacy, agent loop + reliability, tools, context ledger +
-|  |            compression, persistence, MCP client/server, egress proxy, usage, goals/queue/verifier  - docs/04, 12, 13
-|  +- prompts/  base-system.md, style-default.md, harness-notes.md (shipped texts)                      - docs/14
 +- spell/       code-aware spell service (diagnostics)
 +- profiler/    ITP capture server, chunked trace storage, indexes, analysis queries                     - docs/16
 +- sandbox/     Docker / WSL / SSH providers, egress gateway

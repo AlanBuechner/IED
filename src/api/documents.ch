@@ -19,6 +19,7 @@ namespace IED
 	// Replaces `path`'s text: through its open document (an edit by `actor`, then saved) or straight to the file.
 	bool WriteThrough(const Workspace& ws, Core::StringView path, Core::StringView text, Core::StringView actor, Core::String& problem);
 	// Searches `ws`'s files, its open documents as edited, until the query's limit or soon after `cancel` is set; false
-	// with `problem` when the plugin may not read the workspace. Without the lock: the search runs on the caller's thread.
+	// with `problem` when the plugin may not read the workspace or the pattern is not a valid regex. Without the lock:
+	// the search runs on the caller's thread.
 	bool Search(const Workspace& ws, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem);
 }

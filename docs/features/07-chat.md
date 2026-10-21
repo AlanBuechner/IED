@@ -1,6 +1,6 @@
 # Features: chat (CHT)
 
-Owner: `plugins/chat` (UI + default tool set) on top of `src/ai` (runtime). Design: `docs/04` (AI design), `docs/12` (agent runtime), `docs/13` (tools).
+Owner: `plugins/chat` - its UI, its default tool set and the runtime (`code/`, a built-in on the plugin API, `docs/26`). Design: `docs/04` (AI design), `docs/12` (agent runtime), `docs/13` (tools).
 
 ## Tabs and layout
 

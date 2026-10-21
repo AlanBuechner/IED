@@ -92,6 +92,30 @@ namespace IED
 		// them); false with `problem` when `entries` is not an array of objects.
 		public bool Contribute(Core::StringView point, Core::StringView wsId, Core::StringView entries, Core::String& problem);
 
+		// Starts `body` on a thread of the plugin's own: the API's free functions (FindWorkspace, ReadFile, RunTask, ...)
+		// know the calling plugin on it, as on the plugin's thread and in its methods. A script stops its threads in
+		// OnDeactivate.
+		public void StartThread(func<void()> body);
+
+		// The server's record of the plugin, for the API's own classes (HostLock).
+		public void* Handle() const { return host; }
+
 		private void* host;
+	}
+
+	// Holds the server's lock for a scope (docs/26 "Built-ins on the API"): state a plugin keeps consistent with its
+	// topics' pulled snapshots and events changes under it, as the server's own services' state does. The API's calls
+	// work inside it - they do not take the lock again - and Wait releases it while it waits. Nothing slow inside it.
+	class HostLock
+	{
+		[operator("create")] public void Init(const PluginContext& context);
+		[operator("delete")] public void Delete();
+
+		// Waits on `condition` (notified under the lock) with the lock released, at most `ns` nanoseconds (negative:
+		// until notified).
+		public void Wait(Threading::ConditionVariable& condition, int64 ns);
+
+		private void* host;
+		private bool taken;
 	}
 }

@@ -70,7 +70,7 @@ IED/
 |  +- host-api/          THE CONTRACT: JSON Schemas (plugin manifest, solution, project, federation, agent mode),
 |  |                     WS frame schema, process-plugin RPC, skill format, examples (incl. the C4 plugin)
 |  +- ui-kit/            shared web components (tree, tabs, ANSI console, menus, dropdowns, icons)
-+- src/                  IED server (C4, when the compiler is ready); src/ai/prompts/ already holds the shipped prompt texts
++- src/                  IED server (C4, when the compiler is ready); plugins/chat/prompts/ already holds the shipped prompt texts
 +- frontend/             web client (html/css/js): theme tokens, static mocks, shell, docking, WS client
 +- plugins/              built-in plugins: chat, editor, git, terminal, sandbox, profiler, gpu
 +- C4/                   the C4 language (compiler sources, Bedrock, runtime, LSP, DAP, tests, docs, Frost)

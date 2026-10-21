@@ -1,7 +1,8 @@
 // The chat activity (docs/04, docs/12, docs/15 "Chat"): the server's chats - turns that run on the server whatever the
 // browsers do - as tabs with streaming segments, tool cards, approval cards and harness notes, a composer that sends,
-// queues, injects and stops, and a right panel with the context, the task list and the files the AI changed. The AI
-// runtime itself is the host's (src/ai); this plugin is its UI and declares its settings.
+// queues, injects and stops, and a right panel with the context, the task list and the files the AI changed. Its server
+// code (code/: the turn loop, the model wire, the tools, the chats on disk) is compiled into the server and runs on
+// the plugin API (docs/26 "Built-ins on the API"); its prompts are in prompts/.
 {
 	"manifestVersion": 1,
 	"id": "ied.chat",
@@ -10,9 +11,10 @@
 	"description": "AI chats: streaming turns, tool and approval cards, steering, tasks and context.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
-	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write"],
+	"runtime": { "kind": "builtin", "entry": "Ai::Activate", "ui": "ui/index.js" },
+	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn"],
 	"contributes": {
+		"outputSources": [ { "id": "ai", "title": "AI" } ],
 		"settings": { "schema": "settings.schema.json", "page": "AI" },
 		"settingsPages": [
 			{ "id": "ied.chat.models", "page": "AI", "title": "Models", "view": "ModelsSettings", "keys": ["ai.models"] },

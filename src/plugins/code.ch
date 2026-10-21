@@ -210,6 +210,21 @@ namespace Ied
 	// `problem` otherwise. With the lock held.
 	Workspace* PermittedWorkspace(CodeInstance* instance, Core::StringView wsId, const char* permission, Core::String& problem);
 
+	// The server lock as the plugin API takes it: not again on a thread that holds it already (inside IED::HostLock,
+	// PluginContext::Atomically, or a pulled snapshot's function).
+	class ApiLock
+	{
+		[operator("create")] public void Init(Server* server);
+		[operator("delete")] public void Delete();
+
+		private Server* server;
+		private bool taken;
+	}
+
+	// Whether this thread holds the server lock for plugin code; set while it does.
+	bool HostLockHeld();
+	void SetHostLockHeld(bool held);
+
 	// The thread's running code for a call made on another thread than the plugin's (a method, a pulled snapshot).
 	class CodeScope
 	{

@@ -9,6 +9,10 @@ namespace IED
 	class TaskOutcome
 	{
 		public bool succeeded;
+		public bool cancelled;
+		public Core::String label;      // the task as the toolbar names it
+		public int64 ms;                // how long it ran
+		public Core::String tail;       // the end of its output
 		public Core::String problems;   // the problems the run's matchers found: {<path>: {<source>: [diagnostic]}}
 		public Core::String problem;    // why it could not run
 	}

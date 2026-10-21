@@ -11,7 +11,7 @@ Owner: `plugins/editor` unless noted. Design: `docs/05` (overview), `docs/15` (k
 | F-EDT-1 | Server-side document store: every open document's text + version lives on the server; clients hold replicas | P0 | US-EDT-14 | src/fs (doc store), plugins/editor |
 | F-EDT-2 | Unsaved edits persist on the server (hot exit): survive browser close, server restart (journaled to `.ied/local/buffers/`), visible from other devices | P0 | US-EDT-14 | src/fs |
 | F-EDT-3 | Edit lease per document: one client edits, others mirror read-only live with *Take over*; lease auto-releases after idle | P1 | US-EDT-15 | src/fs |
-| F-EDT-4 | AI edits go through the same document store: if the doc is open with unsaved changes, the AI edit is applied to the buffer (not disk) and shown as an AI change (see F-EDT-90) | P0 | US-EDT-16 | src/fs, src/ai |
+| F-EDT-4 | AI edits go through the same document store: if the doc is open with unsaved changes, the AI edit is applied to the buffer (not disk) and shown as an AI change (see F-EDT-90) | P0 | US-EDT-16 | src/fs, plugins/chat/code |
 | F-EDT-5 | External change detection: clean buffer -> reload silently; dirty buffer -> banner with Compare / Keep mine / Take disk | P0 | US-EDT-16 | src/fs |
 | F-EDT-6 | Encoding detection (UTF-8 default, BOM preserved, UTF-16 read), EOL preserved per file, both shown/settable in the status bar | P0 | US-SHL-6 | src/fs |
 | F-EDT-7 | Large file mode: > N MB disables LSP/minimap/folding; > M MB read-only paged viewer | P1 | - | plugins/editor |
@@ -100,7 +100,7 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 | F-EDT-81 | Identifier splitting (camelCase, PascalCase, snake_case, digits, acronyms) and checking of subwords; comments and string literals checked as prose | P1 | US-EDT-7 | src/spell |
 | F-EDT-82 | Ignore lists from the language: keywords, semantic-token types/modifiers flagged builtin, symbols defined outside the workspace, words in the project's own identifiers (a word used as an identifier >= N times is accepted) | P1 | US-EDT-7 | src/spell, src/lsp |
 | F-EDT-83 | Dictionaries: user (app tier), project `.ied/dictionary.txt` (committed), plugin-contributed (e.g. C4 terms); quick fixes: suggestions, add to project/user dictionary, ignore once | P1 | US-EDT-7 | src/spell |
-| F-EDT-84 | AI-assisted mode (optional): a fast local model double-checks flagged words in batches to suppress false positives on jargon; never blocks typing | P2 | US-EDT-7 | src/spell, src/ai |
+| F-EDT-84 | AI-assisted mode (optional): a fast local model double-checks flagged words in batches to suppress false positives on jargon; never blocks typing | P2 | US-EDT-7 | src/spell, plugins/chat/code |
 
 ## Viewers and special editors
 
@@ -124,4 +124,4 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 | F-EDT-101 | Inline sessions are server-side (survive reload, unlike the predecessor IDE) and listed in the chat panel's history as small chats | P1 | US-INL-1 | plugins/chat |
 | F-EDT-102 | AI context-menu actions on selection/symbol: Explain, Fix, Document, Write tests, Refactor..., Send to chat (opens/focuses a chat with the selection attached) | P1 | US-INL-2 | plugins/editor |
 | F-EDT-103 | Lightbulb AI fixes: "Fix with AI" on diagnostics, alongside the LSP's quick fixes | P1 | US-INL-2 | plugins/editor |
-| F-EDT-104 | Ghost-text completion from a FIM-capable local model (role `completion` in the model group), debounced, cancellable, accept with Tab, word-by-word with Ctrl+Right | P1 | US-INL-3 | plugins/editor, src/ai |
+| F-EDT-104 | Ghost-text completion from a FIM-capable local model (role `completion` in the model group), debounced, cancellable, accept with Tab, word-by-word with Ctrl+Right | P1 | US-INL-3 | plugins/editor, plugins/chat/code |

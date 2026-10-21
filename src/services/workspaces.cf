@@ -206,7 +206,6 @@ namespace Ied
 		server->tasks->WorkspaceOpened(ws);
 		server->breakpoints->WorkspaceOpened(ws);
 		server->debugger->WorkspaceOpened(ws);
-		server->chats->WorkspaceOpened(ws);
 		server->code->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());

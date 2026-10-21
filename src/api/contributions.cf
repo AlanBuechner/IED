@@ -10,7 +10,7 @@ namespace IED
 		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
 		if (!instance) return found;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* ws = Ied::PermittedWorkspace(instance, wsId, "", problem);
 		if (!ws) return found;
 		for (const Ied::Contribution& given : server->plugins->Entries(ws, point)) {
@@ -35,7 +35,7 @@ namespace IED
 		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
 		if (!instance) return false;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", problem);
 		if (!found) return false;
 		Ied::Plugin* plugin = LoadedPlugin(server, found, pluginId);
@@ -53,7 +53,7 @@ namespace IED
 		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
 		if (!instance) return ToolFailure(problem.View());
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* ws = Ied::PermittedWorkspace(instance, call.workspace.id.View(), "", problem);
 		if (!ws) return ToolFailure(problem.View());
 		Ied::Plugin* plugin = LoadedPlugin(server, ws, pluginId);
@@ -66,7 +66,7 @@ namespace IED
 		Ied::CodeInstance* instance = Ied::ApiCaller(error);
 		if (!instance) return false;
 		Ied::Server* server = instance->runtime->server;
-		Threading::LockGuard guard(server->lock);
+		Ied::ApiLock guard(server);
 		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", error);
 		return found && Ied::WhenHolds(clause, Ied::WorkspaceWhen(server, found), error);
 	}

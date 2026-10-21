@@ -108,15 +108,16 @@ namespace DemoCode
 
 
 def make_home(home):
-	"""An install with the host's schemas, the runtime's prompts, the chat plugin's settings (without its UI) and a demo
-	language plugin with a system-message section, a skills folder and a command tool (docs/26)."""
+	"""An install with the host's schemas, the chat plugin - its server code (compiled into the server, docs/26), its
+	prompts, settings and output source, without its UI - and a demo language plugin with a system-message section, a
+	skills folder and a command tool (docs/26)."""
 	shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(home, "shared", "host-api", "schemas"))
-	shutil.copytree(os.path.join(REPO, "src", "ai", "prompts"), os.path.join(home, "src", "ai", "prompts"))
 	plugin = os.path.join(home, "plugins", "chat")
-	os.makedirs(plugin)
+	shutil.copytree(os.path.join(REPO, "plugins", "chat", "prompts"), os.path.join(plugin, "prompts"))
 	shutil.copy(os.path.join(REPO, "plugins", "chat", "settings.schema.json"), os.path.join(plugin, "settings.schema.json"))
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "ied.chat", "name": "Chat", "version": "0.1.0", "ied": {"api": "^1"},
-		"runtime": {"kind": "declarative"}, "contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}}}))
+		"runtime": {"kind": "builtin", "entry": "Ai::Activate"}, "permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn"],
+		"contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}, "outputSources": [{"id": "ai", "title": "AI"}]}}))
 	write(os.path.join(home, "plugins", "demo", "ied-plugin.json"), json.dumps(DEMO_PLUGIN))
 	write(os.path.join(home, "plugins", "democode", "ied-plugin.json"), json.dumps(CODE_PLUGIN))
 	write(os.path.join(home, "plugins", "democode", "code", "democode.cf"), CODE_PLUGIN_SOURCE)

@@ -13,6 +13,26 @@ namespace Ied
 
 	void CodeScope::Delete() { SetCurrentCode(saved); }
 
+	thread_local bool tHostLockHeld = false;
+
+	bool HostLockHeld() { return tHostLockHeld; }
+
+	void SetHostLockHeld(bool held) { tHostLockHeld = held; }
+
+	void ApiLock::Init(Server* server) {
+		this.server = server;
+		taken = !tHostLockHeld;
+		if (!taken) return;
+		server->lock.Lock();
+		tHostLockHeld = true;
+	}
+
+	void ApiLock::Delete() {
+		if (!taken) return;
+		tHostLockHeld = false;
+		server->lock.Unlock();
+	}
+
 	CodeInstance* ApiCaller(Core::String& problem) {
 		CodeInstance* instance = CurrentCode();
 		if (!instance) problem = Core::String("the plugin API is for a plugin's code, on its thread");
@@ -96,7 +116,11 @@ namespace Ied
 		Core::String problem;
 		CodeScope scope(instance);
 		func<Core::String()> pull = topic->pull;
-		if (!GuardedCallLocked(instance, [pull, text]() { *text = pull(); }, problem))
+		const bool held = HostLockHeld();
+		SetHostLockHeld(true);
+		const bool pulled = GuardedCallLocked(instance, [pull, text]() { *text = pull(); }, problem);
+		SetHostLockHeld(held);
+		if (!pulled)
 			server->Log((((((Core::String("plugin ") + instance->pluginId.View()) + ": the snapshot of ") + topic->key.View()) + ": ") + problem.View()).View());
 		return *text;
 	}

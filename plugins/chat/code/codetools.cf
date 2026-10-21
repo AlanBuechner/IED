@@ -1,0 +1,71 @@
+include "api/plugin.ch"
+include "codetools.ch"
+
+namespace Ai
+{
+	// What a code tool calls, held by its planner and runner.
+	class CodeToolEntry
+	{
+		public Core::String name;
+		public Serialization::DomNode entry;   // its toolCalls entry: a `function` or a `binding`
+		public Core::String pluginId;
+		public bool untrusted;          // availableUntrusted
+		public int64 seconds;
+	}
+
+	static ToolClass CodeToolClass(Core::StringView name) {
+		if (name == "read") return ToolClass::Read;
+		if (name == "write") return ToolClass::Write;
+		if (name == "meta") return ToolClass::Meta;
+		return ToolClass::Exec;
+	}
+
+	static ToolPlan CodeToolPlan(const CodeToolEntry* entry, const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = (((Core::String("plugin(") + entry->pluginId.View()) + "/") + entry->name.View()) + ")";
+		plan.summary = ((Core::String("Run ") + entry->name.View()) + " (plugin ") + entry->pluginId.View();
+		plan.summary = plan.summary + ")";
+		if (!call.ws.trusted && !entry->untrusted) plan.error = entry->name + ": the workspace is not trusted, so plugin tools may not run in it; ask the owner to trust it";
+		return plan;
+	}
+
+	static ToolOutcome CodeToolRun(const CodeToolEntry* entry, const ToolInvocation& call) {
+		const int64 started = clock_now_ns();
+		IED::ToolCall request;
+		request.name = entry->name;
+		request.args = call.args;
+		request.workspace = call.ws;
+		request.chatId = call.chat ? call.chat->chatId : Core::String("");
+		request.cancelled = call.cancelled;
+		IED::ToolResult result = IED::RunPluginTool(entry->pluginId.View(), entry->entry, request, entry->seconds);
+		ToolOutcome outcome = ToolResult(result.content.View(), result.preview.View());
+		outcome.isError = result.isError;
+		outcome.source = (Core::String("plugin ") + entry->pluginId.View());
+		outcome.ms = (clock_now_ns() - started) / 1000000;
+		outcome.timed = true;
+		return outcome;
+	}
+
+	ToolSpec* CodeTool(const Serialization::DomNode& node, Core::StringView pluginId, Core::String& problem) {
+		CodeToolEntry* entry = new CodeToolEntry();
+		entry->name = Core::String(node.Member("name").AsView());
+		if (node.Member("function").AsView().IsEmpty() && node.Member("binding").AsView().IsEmpty()) {
+			problem = (((Core::String("plugin ") + pluginId) + ": the tool ") + entry->name.View()) + " names no command, function or binding";
+			return nullptr;
+		}
+		entry->entry = node;
+		entry->pluginId = Core::String(pluginId);
+		entry->untrusted = node.Member("availableUntrusted").AsBool();
+		entry->seconds = node.Member("timeoutSeconds").IsValid() ? node.Member("timeoutSeconds").AsInt() : kCodeToolDefaultSeconds;
+		ToolSpec* spec = new ToolSpec();
+		spec->name = entry->name;
+		spec->description = Core::String(node.Member("description").AsView());
+		spec->parameters = IED::NodeJson(node.Member("inputSchema"));
+		spec->toolClass = CodeToolClass(node.Member("class").AsView());
+		spec->parallelSafe = spec->toolClass == ToolClass::Read && node.Member("parallelSafe").AsBool();
+		spec->inPlan = spec->toolClass == ToolClass::Read;
+		spec->plan = [entry](const ToolInvocation& call) -> ToolPlan { return CodeToolPlan(entry, call); };
+		spec->run = [entry](const ToolInvocation& call) -> ToolOutcome { return CodeToolRun(entry, call); };
+		return spec;
+	}
+}

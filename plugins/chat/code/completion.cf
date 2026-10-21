@@ -1,0 +1,96 @@
+include "api/plugin.ch"
+include "completion.ch"
+
+namespace Ai
+{
+	static CompletionDelta Delta(DeltaKind kind, Core::StringView text, int64 call) {
+		CompletionDelta delta;
+		delta.kind = kind;
+		delta.text = Core::String(text);
+		delta.call = call;
+		return delta;
+	}
+
+	void Completion::Take(Core::StringView data, Core::Array<CompletionDelta>& deltas) {
+		if (data.Trimmed() == "[DONE]") {
+			done = true;
+			return;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(data, *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+			malformedChunks += 1;
+			return;
+		}
+		chunks += 1;
+		Serialization::DomNode error = read.root.Member("error");
+		if (error.IsValid()) {
+			errored = true;
+			errorMessage = error.Kind() == Serialization::DomKind::String ? Core::String(error.AsView()) : Core::String(error.Member("message").AsView());
+			if (errorMessage.IsEmpty()) errorMessage = IED::NodeJson(error);
+			return;
+		}
+		Serialization::DomNode choices = read.root.Member("choices");
+		for (int64 i = 0; choices.Kind() == Serialization::DomKind::Array && i < choices.Count(); ++i) TakeChoice(choices.At(i), deltas);
+		TakeUsage(read.root);
+	}
+
+	void Completion::TakeChoice(const Serialization::DomNode& choice, Core::Array<CompletionDelta>& deltas) {
+		Serialization::DomNode delta = choice.Member("delta").IsValid() ? choice.Member("delta") : choice.Member("message");
+		Core::StringView text = delta.Member("content").AsView();
+		if (!text.IsEmpty()) {
+			content.Append(text);
+			deltas.Push(Delta(DeltaKind::Content, text, -1));
+		}
+		const char*[3] fields = { "reasoning_content", "reasoning", "thinking" };
+		for (int32 f = 0; f < 3; ++f) {
+			Core::StringView thought = delta.Member(fields[f]).AsView();
+			if (thought.IsEmpty()) continue;
+			reasoning.Append(thought);
+			deltas.Push(Delta(DeltaKind::Reasoning, thought, -1));
+		}
+		Serialization::DomNode calls = delta.Member("tool_calls");
+		for (int64 i = 0; calls.Kind() == Serialization::DomKind::Array && i < calls.Count(); ++i) TakeToolCall(calls.At(i), deltas);
+		Serialization::DomNode finish = choice.Member("finish_reason");
+		if (finish.Kind() == Serialization::DomKind::String) finishReason = Core::String(finish.AsView());
+	}
+
+	// A call's delta joins the call with its id; without an id, the latest call at its index; else it starts one.
+	void Completion::TakeToolCall(const Serialization::DomNode& delta, Core::Array<CompletionDelta>& deltas) {
+		Core::StringView id = delta.Member("id").AsView();
+		const int64 index = delta.Member("index").Kind() == Serialization::DomKind::Int ? delta.Member("index").AsInt() : calls.Count();
+		int64 at = -1;
+		for (int64 i = calls.Count() - 1; i >= 0 && at < 0; --i) {
+			if (!id.IsEmpty() ? calls[i]->id.View() == id : calls[i]->index == index) at = i;
+		}
+		if (at < 0 && !id.IsEmpty()) {
+			for (int64 i = calls.Count() - 1; i >= 0 && at < 0; --i)
+				if (calls[i]->id.IsEmpty() && calls[i]->index == index) at = i;
+		}
+		if (at < 0) {
+			ToolCallDraft* call = new ToolCallDraft();
+			call->id = Core::String(id);
+			call->index = index;
+			calls.Push(call);
+			at = calls.Count() - 1;
+		}
+		ToolCallDraft* call = calls[at];
+		if (call->id.IsEmpty() && !id.IsEmpty()) call->id = Core::String(id);
+		Serialization::DomNode function = delta.Member("function");
+		Core::StringView name = function.Member("name").AsView();
+		if (call->name.IsEmpty() && !name.IsEmpty()) call->name = Core::String(name);
+		Core::StringView arguments = function.Member("arguments").AsView();
+		call->arguments.Append(arguments);
+		deltas.Push(Delta(DeltaKind::ToolCall, arguments, at));
+	}
+
+	void Completion::TakeUsage(const Serialization::DomNode& root) {
+		Serialization::DomNode usage = root.Member("usage");
+		if (usage.Kind() == Serialization::DomKind::Object) {
+			if (usage.Member("prompt_tokens").IsValid()) promptTokens = usage.Member("prompt_tokens").AsInt();
+			if (usage.Member("completion_tokens").IsValid()) completionTokens = usage.Member("completion_tokens").AsInt();
+		}
+		Serialization::DomNode timings = root.Member("timings");
+		if (timings.Member("prompt_per_second").IsValid()) promptPerSecond = timings.Member("prompt_per_second").AsFloat();
+	}
+}
