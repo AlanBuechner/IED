@@ -67,7 +67,9 @@ C4LSP/src/main.cpp            the executable: the stdio loop
   processor allows, D-62; flags that select no target are ignored), which Nuke writes on every build
   (`.ied/local/lsp-options/<project>.json`). With a usable description
   the server compiles its projects, each with its own defines and boundary
-  ([../language/15-projects.md](../language/15-projects.md)); otherwise the workspace folder and `includePaths`.
+  ([../language/15-projects.md](../language/15-projects.md)); otherwise the files beside each open document (not the
+  folders under them: a workspace folder can hold many programs) and everything under `includePaths`.
+- File and folder names may use any script: the compiler keeps paths as UTF-8.
 - An editor document maps to its source by absolute path (case-insensitive on Windows), and a source's URI is its
   file, so navigation works in every project, `-I` folder and Bedrock alike.
 - Every toolchain ships it as `tools/C4LSP/C4LSP.exe`, with the LLVM dlls it loads

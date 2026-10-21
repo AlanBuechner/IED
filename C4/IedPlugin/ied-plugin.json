@@ -26,6 +26,7 @@
 				"taskComments": ["TODO", "HACK", "FIXME", "NOTE"]
 			}
 		],
+		"headerSourcePairs": [ { "extensions": [".ch", ".cf"] } ],
 		"settings": { "schema": "settings.schema.json", "page": "Text Editor/C4" },
 		"lspProfiles": [
 			{

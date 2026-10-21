@@ -67,18 +67,7 @@ namespace C4LSP::Server
 		m_Compiler->SetTarget(m_Target);
 
 		if (!RegisterProjects())
-		{
-			if (!m_RootFolder.empty() && fs::is_directory(m_RootFolder))
-				m_Compiler->RegisterFolder(fs::path(m_RootFolder));
-
-			for (const auto& dir : m_IncludePaths) {
-				// A real build registers every source under the -I dirs as a compilation unit too
-				// (the project generator feeds them to the compiler as inputs), so LSP must do the same:
-				// their files resolve against `include` and their errors surface, exactly like the build.
-				if (!dir.empty() && fs::is_directory(dir))
-					m_Compiler->RegisterFolder(fs::path(dir));
-			}
-		}
+			RegisterLooseSources();
 
 		for (const auto& [name, text] : m_InMemorySources)
 			m_Compiler->RegisterInMemory(name, text);
@@ -107,6 +96,23 @@ namespace C4LSP::Server
 
 		m_Compiled = true;
 		return true;
+	}
+
+	// Without a build description: the files beside each open document - never the whole tree under the workspace
+	// folder, which can hold any number of programs (BUG-301) - and every source under the -I folders, which a real
+	// build registers as inputs too, so their files resolve against `include` and their errors surface.
+	void CompilationSession::RegisterLooseSources()
+	{
+		for (const auto& [uri, text] : m_OpenDocuments)
+		{
+			const std::string path = Protocol::DocumentUri::FromUri(uri);
+			const fs::path folder = fs::path(std::u8string(path.begin(), path.end())).parent_path();
+			if (!folder.empty() && fs::is_directory(folder))
+				m_Compiler->RegisterFolder(folder, Scripting::FolderScan::TopOnly);
+		}
+		for (const auto& dir : m_IncludePaths)
+			if (!dir.empty() && fs::is_directory(fs::path(std::u8string(dir.begin(), dir.end()))))
+				m_Compiler->RegisterFolder(fs::path(std::u8string(dir.begin(), dir.end())));
 	}
 
 	bool CompilationSession::RegisterProjects()

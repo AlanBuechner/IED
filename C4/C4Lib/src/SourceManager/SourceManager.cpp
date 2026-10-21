@@ -9,20 +9,38 @@ namespace fs = std::filesystem;
 
 namespace Scripting
 {
+	namespace
+	{
+		// A path as UTF-8, C4's text: path::string() converts to the ANSI code page on Windows and throws for a
+		// name that page cannot hold (BUG-300).
+		std::string Utf8(const fs::path& path)
+		{
+			const std::u8string text = path.u8string();
+			return std::string(text.begin(), text.end());
+		}
+
+		fs::path PathOf(const std::string& utf8) { return fs::path(std::u8string(utf8.begin(), utf8.end())); }
+
+		bool IsC4Source(const fs::path& path)
+		{
+			const fs::path extension = path.extension();
+			return extension == ".cf" || extension == ".ch";
+		}
+	}
 
 	uint32 SourceManager::RegisterFile(const fs::path& path)
 	{
 		std::ifstream test(path, std::ios::binary);
 		if (!test.is_open()) return 0;
 
-		std::string absPath = NormalizePath(fs::absolute(path).lexically_normal().string());
+		std::string absPath = NormalizePath(Utf8(fs::absolute(path).lexically_normal()));
 		if (m_AbsPaths.count(absPath)) return 0;
 
 		uint32 id = m_NextId++;
 		m_AbsPaths.insert(absPath);
 
-		std::string name = path.filename().string();
-		SourceInfo info{ id, name, NormalizePath(fs::absolute(path).parent_path().string()), absPath, CreateRef<Source>(path) };
+		std::string name = Utf8(path.filename());
+		SourceInfo info{ id, name, NormalizePath(Utf8(fs::absolute(path).parent_path())), absPath, CreateRef<Source>(path) };
 		info.project = ProjectOf(absPath);
 		info.byName = true;
 		m_Sources.emplace(id, std::move(info));
@@ -34,7 +52,7 @@ namespace Scripting
 
 	uint32 SourceManager::RegisterInMemory(const fs::path& name, const std::string& sourceText)
 	{
-		std::string nameStr = name.filename().string();
+		std::string nameStr = Utf8(name.filename());
 		if (m_NameToId.count(nameStr)) return 0;
 
 		uint32 id = m_NextId++;
@@ -53,7 +71,7 @@ namespace Scripting
 		const std::string path = NormalizePath(absPath);
 		if (m_AbsPaths.count(path)) return 0;
 		const uint32 id = m_NextId++;
-		SourceInfo info{ id, displayName, NormalizePath(fs::path(path).parent_path().string()), path, Source::FromMemory(text) };
+		SourceInfo info{ id, displayName, NormalizePath(Utf8(PathOf(path).parent_path())), path, Source::FromMemory(text) };
 		info.project = project;
 		info.library = library;
 		m_Sources.emplace(id, std::move(info));
@@ -76,47 +94,51 @@ namespace Scripting
 		m_PreludeId = preludeId;
 	}
 
-	uint32 SourceManager::RegisterFolder(const fs::path& folder)
+	uint32 SourceManager::RegisterFolder(const fs::path& folder, FolderScan scan)
 	{
 		if (!fs::is_directory(folder)) return 0;
 
-		std::string baseDir = NormalizePath(fs::absolute(folder).lexically_normal().string());
+		std::string baseDir = NormalizePath(Utf8(fs::absolute(folder).lexically_normal()));
 		while (baseDir.size() > 1 && baseDir.back() == '/') baseDir.pop_back();
 		const uint32 project = ProjectOf(baseDir);
 		if (std::find(m_Folders.begin(), m_Folders.end(), std::make_pair(baseDir, project)) == m_Folders.end())
 			m_Folders.push_back({ baseDir, project });
 
+		// Error codes, never exceptions: a folder that cannot be read is skipped, as the build skips it.
 		uint32 count = 0;
-
-		for (const auto& entry : fs::recursive_directory_iterator(folder))
-		{
-			if (!entry.is_regular_file()) continue;
-
-			const auto ext = entry.path().extension().string();
-			if (ext != ".cf" && ext != ".ch") continue;
-
-			std::ifstream test(entry.path(), std::ios::binary);
-			if (!test.is_open()) continue;
-
-			std::string absPath = NormalizePath(fs::absolute(entry.path()).string());
-			if (m_AbsPaths.count(absPath)) continue;
-
-			uint32 id = m_NextId++;
-			m_AbsPaths.insert(absPath);
-
-			fs::path rel = fs::relative(entry.path(), folder);
-			std::string relStr = NormalizePath(rel.string());
-
-			SourceInfo info{ id, relStr, baseDir, absPath, CreateRef<Source>(entry.path()) };
-			info.project = ProjectOf(absPath);
-			m_Sources.emplace(id, std::move(info));
-			m_NameToId[relStr] = id;
-			m_AbsPathToId[absPath] = id;
-
-			++count;
-		}
-
+		std::error_code error;
+		const auto options = fs::directory_options::skip_permission_denied;
+		if (scan == FolderScan::TopOnly)
+			for (fs::directory_iterator it(folder, options, error), end; !error && it != end; it.increment(error))
+				count += RegisterFolderFile(*it, folder, baseDir);
+		else
+			for (fs::recursive_directory_iterator it(folder, options, error), end; !error && it != end; it.increment(error))
+				count += RegisterFolderFile(*it, folder, baseDir);
 		return count;
+	}
+
+	uint32 SourceManager::RegisterFolderFile(const fs::directory_entry& entry, const fs::path& folder, const std::string& baseDir)
+	{
+		std::error_code kindError;
+		if (!entry.is_regular_file(kindError) || !IsC4Source(entry.path())) return 0;
+
+		std::ifstream test(entry.path(), std::ios::binary);
+		if (!test.is_open()) return 0;
+
+		std::string absPath = NormalizePath(Utf8(fs::absolute(entry.path())));
+		if (m_AbsPaths.count(absPath)) return 0;
+
+		uint32 id = m_NextId++;
+		m_AbsPaths.insert(absPath);
+
+		std::string relStr = NormalizePath(Utf8(entry.path().lexically_relative(folder)));
+
+		SourceInfo info{ id, relStr, baseDir, absPath, CreateRef<Source>(entry.path()) };
+		info.project = ProjectOf(absPath);
+		m_Sources.emplace(id, std::move(info));
+		m_NameToId[relStr] = id;
+		m_AbsPathToId[absPath] = id;
+		return 1;
 	}
 
 	namespace
@@ -151,23 +173,23 @@ namespace Scripting
 	uint32 SourceManager::RegisterIncludedLibraryFiles(const fs::path& rootPath)
 	{
 		if (!fs::is_directory(rootPath)) return 0;
-		std::string root = NormalizePath(fs::absolute(rootPath).string());
+		std::string root = NormalizePath(Utf8(fs::absolute(rootPath)));
 		std::vector<fs::path> entries;
 		for (const auto& [id, info] : m_Sources)
 			for (const std::string& inc : ExtractIncludes(info.source->Data()))
 			{
 				if (ResolveIncludePath(inc.c_str(), id) != 0) continue; // the program's own file
-				fs::path candidate = fs::path(root) / inc;
+				fs::path candidate = PathOf(root) / PathOf(inc);
 				if (fs::is_regular_file(candidate)) entries.push_back(candidate);
 			}
-		const fs::path prelude = fs::path(root) / "Prelude" / "prelude.ch";
+		const fs::path prelude = PathOf(root) / "Prelude" / "prelude.ch";
 		const bool hasPrelude = fs::is_regular_file(prelude);
 		if (entries.empty() && !hasPrelude) return 0;
 		m_LibraryRoot = root;
 		uint32 count = RegisterLibraryClosure(root, std::move(entries));
 		if (!hasPrelude) return count;
 		count += RegisterLibraryClosure(root, { prelude });
-		m_PreludeId = m_AbsPathToId.at(NormalizePath(fs::absolute(prelude).string()));
+		m_PreludeId = m_AbsPathToId.at(NormalizePath(Utf8(fs::absolute(prelude))));
 		return count;
 	}
 
@@ -177,15 +199,14 @@ namespace Scripting
 		uint32 count = 0;
 		while (!queue.empty()) {
 			fs::path cur = queue.back(); queue.pop_back();
-			std::string absCur = NormalizePath(fs::absolute(cur).lexically_normal().string());
+			std::string absCur = NormalizePath(Utf8(fs::absolute(cur).lexically_normal()));
 			if (queued.count(absCur) || m_AbsPaths.count(absCur)) continue;
 			queued.insert(absCur);
 
 			uint32 id = m_NextId++;
 			m_AbsPaths.insert(absCur);
-			fs::path rel = fs::relative(cur, root);
-			std::string relStr = NormalizePath(rel.string());
-			SourceInfo info{ id, relStr, NormalizePath(fs::absolute(cur).parent_path().string()), absCur, CreateRef<Source>(cur) };
+			std::string relStr = NormalizePath(Utf8(fs::relative(cur, PathOf(root))));
+			SourceInfo info{ id, relStr, NormalizePath(Utf8(fs::absolute(cur).parent_path())), absCur, CreateRef<Source>(cur) };
 			info.project = m_Projects.Root();
 			info.library = true;
 			m_Sources.emplace(id, std::move(info));
@@ -194,17 +215,16 @@ namespace Scripting
 			++count;
 
 			// Register the paired implementation file (.ch <-> .cf) in the same directory.
-			std::string ext = cur.extension().string();
-			if (ext == ".ch" || ext == ".cf") {
+			if (IsC4Source(cur)) {
 				fs::path paired = cur;
-				paired.replace_extension(ext == ".ch" ? ".cf" : ".ch");
+				paired.replace_extension(cur.extension() == ".ch" ? ".cf" : ".ch");
 				if (fs::is_regular_file(paired)) queue.push_back(paired);
 			}
 
 			for (const auto& inc : ExtractIncludes(m_Sources.at(id).source->Data())) {
-				fs::path c1 = fs::absolute(fs::path(cur.parent_path() / inc));
+				fs::path c1 = fs::absolute(cur.parent_path() / PathOf(inc));
 				if (fs::is_regular_file(c1)) { queue.push_back(c1); continue; }
-				fs::path c2 = fs::absolute(fs::path(root) / inc);
+				fs::path c2 = fs::absolute(PathOf(root) / PathOf(inc));
 				if (fs::is_regular_file(c2)) queue.push_back(c2);
 			}
 		}
@@ -213,7 +233,7 @@ namespace Scripting
 
 	uint32 SourceManager::FindByAbsPath(const std::string& path) const
 	{
-		const std::string wanted = NormalizePath(fs::path(path).lexically_normal().string());
+		const std::string wanted = NormalizePath(Utf8(PathOf(path).lexically_normal()));
 		auto it = m_AbsPathToId.find(wanted);
 		if (it != m_AbsPathToId.end()) return it->second;
 #ifdef _WIN32
@@ -227,21 +247,21 @@ namespace Scripting
 
 	uint32 SourceManager::ProjectOf(const std::string& absPath) const
 	{
-		return m_Projects.OwnerOf(fs::path(absPath)).value_or(m_Projects.Root());
+		return m_Projects.OwnerOf(PathOf(absPath)).value_or(m_Projects.Root());
 	}
 
 	uint32 SourceManager::InFolder(const std::string& folder, const std::string& written) const
 	{
 		if (folder.empty()) return 0;
-		auto it = m_AbsPathToId.find(NormalizePath((fs::path(folder) / written).lexically_normal().string()));
+		auto it = m_AbsPathToId.find(NormalizePath(Utf8((PathOf(folder) / PathOf(written)).lexically_normal())));
 		return it != m_AbsPathToId.end() ? it->second : 0;
 	}
 
 	uint32 SourceManager::BesideRequester(const SourceInfo& requester, const std::string& written) const
 	{
-		if (!requester.absPath.empty()) return InFolder(NormalizePath(fs::path(requester.absPath).parent_path().string()), written);
+		if (!requester.absPath.empty()) return InFolder(NormalizePath(Utf8(PathOf(requester.absPath).parent_path())), written);
 		// A source registered in memory has a name, not a folder: the include is relative to that name's folder.
-		const std::string candidate = NormalizePath((fs::path(requester.displayName).parent_path() / written).lexically_normal().string());
+		const std::string candidate = NormalizePath(Utf8((PathOf(requester.displayName).parent_path() / PathOf(written)).lexically_normal()));
 		auto it = m_NameToId.find(candidate);
 		return it != m_NameToId.end() && m_Sources.at(it->second).byName ? it->second : 0;
 	}
@@ -249,7 +269,7 @@ namespace Scripting
 	std::vector<std::string> SourceManager::FoldersOf(uint32 project) const
 	{
 		std::vector<std::string> folders;
-		for (const fs::path& folder : m_Projects.SearchFolders(project)) folders.push_back(NormalizePath(folder.lexically_normal().string()));
+		for (const fs::path& folder : m_Projects.SearchFolders(project)) folders.push_back(NormalizePath(Utf8(folder.lexically_normal())));
 		for (const auto& [folder, owner] : m_Folders)
 			if (owner == project && std::find(folders.begin(), folders.end(), folder) == folders.end()) folders.push_back(folder);
 		return folders;

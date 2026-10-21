@@ -8,6 +8,9 @@
 namespace Scripting
 {
 
+	// How much of a folder RegisterFolder takes: everything under it, or only the files directly in it.
+	enum class FolderScan { Recursive, TopOnly };
+
 	struct SourceInfo
 	{
 		uint32 id = 0;
@@ -40,7 +43,7 @@ namespace Scripting
 		// Registration - folder registration is include path + file discovery
 		uint32 RegisterFile(const fs::path& path);
 		uint32 RegisterInMemory(const fs::path& name, const std::string& sourceText);
-		uint32 RegisterFolder(const fs::path& folder);
+		uint32 RegisterFolder(const fs::path& folder, FolderScan scan = FolderScan::Recursive);
 		/// A source whose text is given, at `absPath` in no folder on disk: a file of a script's host interface, or a
 		/// script given as text (docs/runtime/04 section 4). It is `project`'s; a library file's includes resolve in
 		/// the library. 0 when `absPath` is registered already.
@@ -123,6 +126,9 @@ namespace Scripting
 		}
 
 	private:
+		// One entry of a folder being registered: 1 when it is a C4 source now registered, else 0.
+		uint32 RegisterFolderFile(const fs::directory_entry& entry, const fs::path& folder, const std::string& baseDir);
+
 		std::string NormalizePath(const std::string& path) const
 		{
 			std::string result = path;

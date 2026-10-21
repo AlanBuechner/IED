@@ -70,6 +70,9 @@ namespace Testing
 		void TestMalformedInitializationOptionsNeverBreakServer();
 
 		TEST_FUNC(Lsp.Server)
+		void TestWithoutADescriptionOnlyTheOpenDocumentsFolderCompiles();
+
+		TEST_FUNC(Lsp.Server)
 		void TestFormattingCapabilityAndRequest();
 
 		TEST_FUNC(Lsp.Server)

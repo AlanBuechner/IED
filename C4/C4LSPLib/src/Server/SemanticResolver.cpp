@@ -162,12 +162,28 @@ namespace C4LSP::Server
 			c.scope = scope;
 			return c;
 		};
+		// The root sees a function declared inside namespaces by its qualified name (`N::Find` for a `Find` in
+		// `namespace N`), so try the name with every enclosing namespace first, then with fewer.
+		std::vector<std::string> namespaces; // innermost first
+		for (int i = fi - 1; i >= 0; --i)
+			if (path[i]->Type() == Scripting::NodeType::Namespace)
+				namespaces.push_back(static_cast<const Scripting::NamespaceNode&>(*path[i]).Name());
 		// A method needs its class context to resolve; a free function resolves from root. Try both so the
 		// record we get is the one HIR would lower - containingType and scope then match the compiler's.
-		if (m_Model.QueryFunction(name, nullptr, nullptr, Core::Vector<const Scripting::Type*>(), qctx(nullptr), &rec).Ok())
-			ctx.enclosingType = rec->containingType ? rec->containingType : receiver;
-		else if (receiver && m_Model.QueryFunction(name, receiver, nullptr, Core::Vector<const Scripting::Type*>(), qctx(nullptr), &rec).Ok())
-			ctx.enclosingType = rec->containingType ? rec->containingType : receiver;
+		const Core::Vector<const Scripting::Type*> noArguments;
+		for (size_t depth = namespaces.size() + 1; depth-- > 0;)
+		{
+			std::string qualified = name;
+			for (size_t k = 0; k < depth; ++k)
+				qualified = namespaces[k] + "::" + qualified;
+			if (m_Model.QueryFunction(qualified, nullptr, nullptr, noArguments, qctx(nullptr), &rec).Ok() ||
+				(receiver && m_Model.QueryFunction(qualified, receiver, nullptr, noArguments, qctx(nullptr), &rec).Ok()))
+			{
+				ctx.enclosingType = rec->containingType ? rec->containingType : receiver;
+				break;
+			}
+			rec = nullptr;
+		}
 		if (rec)
 			ctx.scope = rec->scope; // the function's enclosing namespace/class - unqualified lookup context
 		return ctx;

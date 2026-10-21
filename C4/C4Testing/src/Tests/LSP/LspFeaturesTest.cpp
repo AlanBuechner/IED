@@ -378,6 +378,20 @@ void Use(Box* b, Box c) {
 	if (!c.) {}
 	int32 n = 2+b->;
 }
+
+int32 Next(const Box* b) {
+	b->
+	return 1;
+}
+
+namespace N
+{
+	class Model { public int32 Owning(int32 at) { return at; } }
+	class Space { public Model* model; public int32 At(int32 i) { return i; } }
+	static int32 Find(const Space* ws, int32 i) {
+		return ws->model->Owning(ws->At(i));
+	}
+}
 )";
 		auto session = Testing::Lsp::MakeSession("Punct.cf", program);
 		auto uri = Testing::Lsp::UriFor("Punct.cf");
@@ -397,10 +411,15 @@ void Use(Box* b, Box c) {
 		dot.character += 2;
 		auto sum = Testing::Lsp::PositionOf(program, "b->", 2);
 		sum.character += 3;
-		// After `(` (and no `Take`/`Use`/`Box`), after `!`, after an operator.
+		auto before = Testing::Lsp::PositionOf(program, "b->", 3); // a statement follows the dangling accessor
+		before.character += 3;
+		auto chain = Testing::Lsp::PositionOf(program, "ws->", 1); // BUG-299: a valid chain, in a function of a namespace
+		chain.character += 4;
+		// After `(` (and no `Take`/`Use`/`Box`), after `!`, after an operator, before the next statement.
 		const std::string found = labels(Completion::At(session, uri, arrow)) + " | " + labels(Completion::At(session, uri, dot)) + " | " +
-			labels(Completion::At(session, uri, sum));
-		TEST_ASSERT_EQ(found, std::string("Empty,size | Empty,size | Empty,size"));
+			labels(Completion::At(session, uri, sum)) + " | " + labels(Completion::At(session, uri, before)) + " | " +
+			labels(Completion::At(session, uri, chain));
+		TEST_ASSERT_EQ(found, std::string("Empty,size | Empty,size | Empty,size | Empty,size | At,model"));
 		TEST_PASSED();
 	}
 

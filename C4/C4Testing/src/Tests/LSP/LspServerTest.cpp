@@ -632,6 +632,44 @@ int32 main() {
 		TEST_PASSED();
 	}
 
+	// BUG-301: without a build description the workspace folder is not compiled whole - it can hold any number of
+	// programs - only the files beside the open document (here `a/`, not the other program in `b/`).
+	void LspServerTest::TestWithoutADescriptionOnlyTheOpenDocumentsFolderCompiles()
+	{
+		const fs::path root = fs::temp_directory_path() / "c4lsp_loose_sources";
+		fs::remove_all(root);
+		WriteFile(root / "a" / "main.cf", "include \"util.ch\"\n\nint32 main() { return Util(); }\n");
+		WriteFile(root / "a" / "util.ch", "public int32 Util() { return 1; }\n");
+		WriteFile(root / "b" / "main.cf", "int32 main() { return 2; }\n");
+		const std::string rootUri = C4LSP::Protocol::DocumentUri::ToUri(root.string());
+		const std::string docUri = C4LSP::Protocol::DocumentUri::ToUri((root / "a" / "main.cf").string());
+		const std::string otherUri = C4LSP::Protocol::DocumentUri::ToUri((root / "b" / "main.cf").string());
+
+		Reset(rootUri);
+		Value init = Value::MakeObject();
+		init.SetMember("rootUri", Value::String(Core::String(rootUri)));
+		FeedRequest("initialize", 1, init);
+		FeedNotification("initialized", Value::Null());
+		m_Server->WaitForCurrentWork();
+		FeedNotification("textDocument/didOpen", MakeTextDocParams(docUri, "include \"util.ch\"\n\nint32 main() { return Util(); }\n"));
+		m_Server->WaitForCurrentWork();
+
+		size_t checked = 0;
+		bool sawOther = false;
+		bool sawErrorHere = false;
+		while (const Value* pub = NotificationByMethod("textDocument/publishDiagnostics", &checked))
+		{
+			const std::string uri = pub->Member("params").Member("uri").GetString();
+			sawOther = sawOther || uri == otherUri;
+			if (uri == docUri)
+				sawErrorHere = sawErrorHere || pub->Member("params").Member("diagnostics").Size() > 0;
+		}
+		TEST_ASSERT(!sawOther);     // b/ is another program, never compiled with this one
+		TEST_ASSERT(!sawErrorHere); // util.ch beside it resolves, and no second main clashes
+		fs::remove_all(root);
+		TEST_PASSED();
+	}
+
 	// BUG-198: the default library comes from the install the client names (Nuke writes its C4 install folder as c4Home), like
 	// C4.exe's own: a Bedrock include resolves there, and a c4Home without Bedrock leaves it unresolved.
 	void LspServerTest::TestInitializationOptionsC4HomeIsTheDefaultLibrary()

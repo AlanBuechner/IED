@@ -89,6 +89,7 @@ namespace C4LSP::Server
 		void ApplyOpenDocumentOverrides();
 		// The described projects' sources; false when there is no usable description.
 		bool RegisterProjects();
+		void RegisterLooseSources();
 		// Macro expansion + CBind interop bindings before parsing (see .cpp for why).
 		void RunPreprocessPhase();
 		// Root folders the preprocess passes run over: the project root plus any -I dirs that exist.

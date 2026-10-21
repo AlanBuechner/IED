@@ -36,7 +36,7 @@ namespace Scripting
 		const SourceManager& GetSourceManager() const { return m_SourceManager; }
 		uint32 RegisterFile(const fs::path& path) { return m_SourceManager.RegisterFile(path); }
 		uint32 RegisterInMemory(const fs::path& name, const std::string& sourceText) { return m_SourceManager.RegisterInMemory(name, sourceText); }
-		uint32 RegisterFolder(const fs::path& folder) { return m_SourceManager.RegisterFolder(folder); }
+		uint32 RegisterFolder(const fs::path& folder, FolderScan scan = FolderScan::Recursive) { return m_SourceManager.RegisterFolder(folder, scan); }
 		uint32 RegisterIncludedLibraryFiles(const fs::path& root) { return m_SourceManager.RegisterIncludedLibraryFiles(root); }
 
 		// compilation pipeline
