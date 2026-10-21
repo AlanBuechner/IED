@@ -86,7 +86,7 @@ Params are objects; ids such as `w1`, `c1`, `d1`, `r1`, `t1` come from the fixtu
 | `chat.stop`, `chat.history`, `chat.approve` | `chatId` / `chatId, before?, limit?` / `chatId, approvalId, decision: allow\|deny` (first answer wins; later ones get `conflict {decision, by}`) |
 | `testhooks.*` | see `tools/conformance/README.md` |
 
-Chat scripts (`fixtures/chat_scripts.py`) are picked by `mockScript` or by a keyword in the text: `screen` -> `snap` (a plugin tool whose result shows `shots/screen.png`), `big prompt` -> `prefill` (40 s of llama.cpp prompt progress, `turn.progress`, then an answer), `approv`/`run `/`test` -> `approval`, `long`/`essay` -> `long`, `error`/`fail` -> `error`, else `default` (thinking, two tool calls, tasks, markdown answer). Seeded chats: `c1` (two finished turns), `c2` (empty).
+Chat scripts (`fixtures/chat_scripts.py`) are picked by `mockScript` or by a keyword in the text: `screen` -> `snap` (a plugin tool whose result shows `shots/screen.png`), `big prompt` -> `prefill` (40 s of llama.cpp prompt progress, `turn.progress`, then an answer), `slow server` -> `estimate` (a 60 s estimated read, then an answer), `approv`/`run `/`test` -> `approval`, `long`/`essay` -> `long`, `error`/`fail` -> `error`, else `default` (thinking, two tool calls, tasks, markdown answer). Seeded chats: `c1` (two finished turns), `c2` (empty).
 
 ## Protocol decisions the mock had to make
 

@@ -348,6 +348,20 @@ class ChatTests(ServerTestCase):
 		self.assertEqual("tool", sent[-1]["role"], "the profile's false wins")
 		self.assertIn("this model is not sent images", sent[-1]["content"])
 
+	async def test_a_server_that_does_not_report_its_reading_gets_the_estimate_shown(self):
+		self.model.post("/_fake/config", {"props": False})
+		await self.use_model({"watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 50}})
+		chat_id, topic = await self.chat()
+		self.model.queue(text_step("Read."))
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "Hello"})
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=TURN_SECONDS)
+		progress = [f["data"]["prefill"] for f in frames if f.get("kind") == "turn.progress"]
+		self.assertTrue(progress and progress[0]["estimated"], progress)
+		self.assertGreaterEqual(progress[0]["estimatedMs"], 3000, "shown only for a read that takes a while")
+		self.assertGreater(progress[0]["total"], 0)
+		self.assertIsNone(progress[-1], "cleared when the reply starts")
+		self.assertNotIn("return_progress", self.model.requests()[-1]["body"], "only llama.cpp is asked for progress")
+
 	async def test_a_tools_images_reach_a_model_that_sees_them(self):
 		png = b"\x89PNG\r\n\x1a\n" + bytes(range(24))
 		os.makedirs(os.path.join(self.repo, "shots"))

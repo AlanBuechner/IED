@@ -20,6 +20,7 @@ namespace Ai
 	const int64 kRunKeptToolResultBytes = 16 * 1024;
 	const int64 kRunCompressAtPercent = 85;
 	const int64 kRunProgressEveryMs = 250;   // turn.progress at most this often
+	const int64 kRunEstimateShownMs = 3000;  // a prompt estimated to take this long to read shows the estimate
 
 	class TurnRun
 	{
@@ -57,6 +58,8 @@ namespace Ai
 		private void OnEvent(StepEventKind kind, Core::StringView text, int64 call);
 		// The prompt read so far (`progress` llama.cpp's object; empty: reading ended), for the clients.
 		private void Prefill(Core::StringView progress);
+		// For a server that does not report its reading, how long it should take, when that is a while.
+		private void EstimatePrefill(const StepRequest& request);
 		private Segment* NewSegment(const char* type);
 		private Segment* Begin(Segment* segment);
 		private void Close(Segment* segment);

@@ -1053,6 +1053,21 @@ def chat_shows_the_prompt_read(run):
 	check(page.is_hidden(".chat-turn:last-child .chat-prefill"), "gone once the reply came")
 
 
+@scenario(viewports=("desktop",), targets=("mock",))
+def chat_shows_an_estimated_read(run):
+	"""A server that does not report its reading (not llama.cpp): the turn shows the estimate, its bar moving with the
+	clock."""
+	page = open_chat(run)
+	send(page, "ask the slow server")
+	page.wait_for_selector(".chat-turn:last-child .chat-prefill:not([hidden]) .chat-bar", timeout=20000)
+	check("(estimated)" in run.texts(".chat-turn:last-child .chat-prefill")[0], "it says it is an estimate")
+	bar = "document.querySelector('.chat-turn:last-child .chat-prefill .chat-bar i').style.width"
+	first = page.evaluate(bar)
+	page.wait_for_function("(w) => " + bar + " !== w", arg=first, timeout=5000)
+	run.shot("estimate")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def chat_tool_image(run):
 	"""A tool's result shows an image (docs/13 "Images in tool results"): the card shows it, open or closed. The real

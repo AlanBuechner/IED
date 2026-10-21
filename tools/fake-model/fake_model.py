@@ -27,7 +27,7 @@ LOG_LIMIT = 500
 
 
 class Config:
-	def __init__(self, n_ctx=32768, n_ctx_train=131072, slots=1, model="fake-model", time_scale=1.0, enforce_ctx=False, ctx_error_style="llamacpp", default_script="ok-text", vision=False):
+	def __init__(self, n_ctx=32768, n_ctx_train=131072, slots=1, model="fake-model", time_scale=1.0, enforce_ctx=False, ctx_error_style="llamacpp", default_script="ok-text", vision=False, props=True):
 		self.n_ctx = n_ctx
 		self.n_ctx_train = n_ctx_train
 		self.slots = slots
@@ -37,6 +37,7 @@ class Config:
 		self.ctx_error_style = ctx_error_style
 		self.default_script = default_script
 		self.vision = vision
+		self.props = props
 
 	@property
 	def slot_ctx(self):
@@ -46,13 +47,13 @@ class Config:
 		return {
 			"nCtx": self.n_ctx, "nCtxTrain": self.n_ctx_train, "slots": self.slots, "slotCtx": self.slot_ctx, "model": self.model,
 			"timeScale": self.time_scale, "enforceCtx": self.enforce_ctx, "ctxErrorStyle": self.ctx_error_style, "defaultScript": self.default_script,
-			"vision": self.vision,
+			"vision": self.vision, "props": self.props,
 		}
 
 
 CONFIG_FIELDS = {"nCtx": ("n_ctx", int), "nCtxTrain": ("n_ctx_train", int), "slots": ("slots", int), "model": ("model", str),
 	"timeScale": ("time_scale", (int, float)), "enforceCtx": ("enforce_ctx", bool), "ctxErrorStyle": ("ctx_error_style", str), "defaultScript": ("default_script", str),
-	"vision": ("vision", bool)}
+	"vision": ("vision", bool), "props": ("props", bool)}
 
 
 class State:
@@ -157,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
 			"/_fake/requests": lambda: list(self.state.log),
 			"/_fake/config": config.to_dict,
 		}
-		if path not in routes:
+		if path not in routes or (path == "/props" and not config.props):
 			return self._json(404, {"error": {"message": "no route %s" % path}})
 		return self._json(200, routes[path]())
 

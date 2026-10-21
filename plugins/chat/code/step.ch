@@ -24,6 +24,7 @@ namespace Ai
 		public Core::Array<Core::String> headers;   // "Name: value"
 		public Core::String body;                   // the chat completion request, JSON
 		public int64 promptTokens;                  // the body's estimate
+		public int64 readMs;                        // how long the server takes to read it, from the measured rate
 		public int32 connectMs;
 		public int64 prefillMs;                     // until the first token
 		public int64 prefillExtendMs;               // what a keepalive comment adds

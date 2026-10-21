@@ -376,6 +376,8 @@ class Chats:
 			await self.server.clock.sleep(op[1])
 		elif kind == "progress":
 			await self._prefill(chat, turn, *op[1:])
+		elif kind == "estimate":
+			await self._estimate(chat, turn, *op[1:])
 		elif kind == "end":
 			extra = dict(op[2])
 			paused = extra.pop("paused", False)
@@ -389,6 +391,14 @@ class Chats:
 			turn.prefill = {"total": total, "cache": 0, "processed": total * step // steps, "time_ms": int(seconds * 1000 * step / steps)}
 			self.publish(chat, "turn.progress", {"turnId": turn.turn_id, "prefill": dict(turn.prefill)})
 			await self.server.clock.sleep(seconds / steps)
+		turn.prefill = None
+		self.publish(chat, "turn.progress", {"turnId": turn.turn_id, "prefill": None})
+
+	async def _estimate(self, chat, turn, total, seconds):
+		"""A server that does not report its reading: the estimate once, then cleared as a reply starts."""
+		turn.prefill = {"estimated": True, "total": total, "estimatedMs": int(seconds * 1000), "startedMs": now_ms()}
+		self.publish(chat, "turn.progress", {"turnId": turn.turn_id, "prefill": dict(turn.prefill)})
+		await self.server.clock.sleep(seconds)
 		turn.prefill = None
 		self.publish(chat, "turn.progress", {"turnId": turn.turn_id, "prefill": None})
 

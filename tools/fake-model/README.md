@@ -42,7 +42,7 @@ A script has one or more `responses`. Each request to a script uses the next res
 | `GET /v1/models` | vLLM-style `max_model_len` (slot context) and llama.cpp `meta.n_ctx_train` |
 | `POST /api/show` | Ollama: `model_info.<arch>.context_length`, `parameters: "num_ctx N"` |
 | `GET /health` | `{"status": "ok"}` |
-| `GET/POST /_fake/config` | read / change `nCtx`, `nCtxTrain`, `slots`, `model`, `timeScale`, `enforceCtx`, `ctxErrorStyle`, `defaultScript`, `vision` (what `/props` `modalities` says) |
+| `GET/POST /_fake/config` | read / change `nCtx`, `nCtxTrain`, `slots`, `model`, `timeScale`, `enforceCtx`, `ctxErrorStyle`, `defaultScript`, `vision` (what `/props` `modalities` says), `props` (false: no `/props`, a server that is not llama.cpp) |
 | `POST /_fake/queue`, `POST /_fake/reset` | script FIFO, rewind |
 | `GET /_fake/requests` | the last 500 requests: script, response index, estimated `promptTokens`, full body, outcome - assert what the harness sent (e.g. the continue note after a cut) |
 | `GET /_fake/scripts` | name -> stop class + description |

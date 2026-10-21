@@ -107,7 +107,8 @@ namespace Ai
 		double rate = profile->prefillRate;
 		chats->prefillRates.TryGet(profile->name, rate);
 		request.connectMs = profile->connectMs;
-		request.prefillMs = profile->prefillBaseMs + (int64)((double)request.promptTokens * 2000.0 / rate);
+		request.readMs = (int64)((double)request.promptTokens * 1000.0 / rate);
+		request.prefillMs = profile->prefillBaseMs + 2 * request.readMs;
 		request.prefillExtendMs = profile->prefillBaseMs;
 		request.idleMs = profile->idleMs;
 		request.capMs = profile->stepCapMs;
@@ -202,6 +203,20 @@ namespace Ai
 			callSegments[call]->argsText.Append(delta);
 			PublishDelta(chats, chat, callSegments[call], "argsText", delta);
 		}
+	}
+
+	void TurnRun::EstimatePrefill(const StepRequest& request) {
+		bool progressing = false;
+		chats->progressing.TryGet(candidates[candidate]->name, progressing);
+		if (progressing || request.readMs < kRunEstimateShownMs) return;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.BoolField("estimated", true);
+		json.IntField("total", request.promptTokens);
+		json.IntField("estimatedMs", request.readMs);
+		json.IntField("startedMs", StreamNowMs());
+		json.EndObject();
+		Prefill(json.View());
 	}
 
 	void TurnRun::Prefill(Core::StringView progress) {

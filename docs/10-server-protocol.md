@@ -182,7 +182,7 @@ Language servers receive changes from the server's document store (the server is
 { "t":"evt","topic":"chat:42","seq":1099,"kind":"turn.end","data":{"turnId":"u7","stop":"finished","recoveries":[],"tokensIn":18233,"tokensOut":911,"ttftMs":1400,"genMs":23800,"endedMs":1792586000000} }
 ```
 
-- `turn.progress {turnId, prefill}`: while a llama.cpp server reads the prompt, how far (`prefill` its `prompt_progress`: `{total, cache, processed, time_ms}`; at most every 250 ms), and `prefill: null` once the reply starts or the request ends; a running turn in a snapshot carries the latest as `prefill` (`docs/12` "Watchdogs").
+- `turn.progress {turnId, prefill}`: while a llama.cpp server reads the prompt, how far (`prefill` its `prompt_progress`: `{total, cache, processed, time_ms}`; at most every 250 ms) - another server's read, estimated, once (`{estimated: true, total, estimatedMs, startedMs}`, when it should take 3 s or more) - and `prefill: null` once the reply starts or the request ends; a running turn in a snapshot carries the latest as `prefill` (`docs/12` "Watchdogs").
 - A tool's `result` may carry `images` (`[{mime, path}]`, files in the workspace a tool showed the model, `docs/13` "Images in tool results"); the card shows them from `GET /w/<wsId>/files/<path>`.
 - Deltas go out as the model server streams them; a client that falls behind gets a segment's queued deltas merged into one (`chat:*` is coalescible, "Backpressure" above), so a phone on a slow link gets fewer, larger frames.
 - `stop` is `finished`, `user_cancelled`, `no_model`, `interrupted` or the stop reason that paused the chat (`docs/12` taxonomy); the recoveries say what the harness did on the way ("Chats" below).

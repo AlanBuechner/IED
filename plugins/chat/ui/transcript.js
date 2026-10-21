@@ -28,6 +28,7 @@ export class TranscriptView {
 		this.dirty = new Set();
 		this.expanded = new Set();
 		this.frame = 0;
+		this.prefillTimer = 0;
 	}
 
 	render() {
@@ -114,15 +115,41 @@ export class TranscriptView {
 		return el;
 	}
 
-	// While the model's server reads the prompt (llama.cpp's progress, docs/12 "Watchdogs"): how much, of how many tokens
-	// (the cached ones were not read again), and for how long.
+	// While the model's server reads the prompt (docs/12 "Watchdogs"): from llama.cpp's progress how much, of how many
+	// tokens (the cached ones were not read again), and for how long; from another server only the estimate, its bar
+	// moving with the clock.
 	showPrefill(el, turn) {
 		const progress = !turn.stop && turn.prefill;
 		el.hidden = !progress;
 		if (!progress) return;
+		if (progress.estimated) {
+			this.tickPrefill();
+			const elapsed = Math.max(0, Date.now() - progress.startedMs);
+			const share = progress.estimatedMs > 0 ? Math.min(99, Math.floor(elapsed * 100 / progress.estimatedMs)) : 0;
+			replace(el, icon("loading", "spin"), h("span", null, "Reading the prompt"), h("span.chat-bar", null, h("i", { style: { width: share + "%" } })),
+				h("span.meta", null, "about " + duration(progress.estimatedMs) + " for " + compact(progress.total) + " tokens (estimated) \u00b7 " + duration(elapsed)));
+			return;
+		}
 		const percent = progress.total > 0 ? Math.min(100, Math.floor(progress.processed * 100 / progress.total)) : 0;
 		replace(el, icon("loading", "spin"), h("span", null, "Reading the prompt"), h("span.chat-bar", null, h("i", { style: { width: percent + "%" } })), h("b", null, percent + "%"),
 			h("span.meta", null, compact(progress.processed) + " of " + compact(progress.total) + " tokens" + (progress.cache ? " (" + compact(progress.cache) + " cached)" : "") + " \u00b7 " + duration(progress.time_ms || 0)));
+	}
+
+	// While an estimated read shows, its bar moves with the clock; the timer stops when none shows.
+	tickPrefill() {
+		if (this.prefillTimer) return;
+		this.prefillTimer = setInterval(() => {
+			let shown = false;
+			for (const [turnId, holder] of this.turnEls) {
+				const turn = this.model.turn(turnId);
+				if (!turn || turn.stop || !turn.prefill || !turn.prefill.estimated) continue;
+				shown = true;
+				this.showPrefill(holder.prefill, turn);
+			}
+			if (shown && this.el.isConnected) return;
+			clearInterval(this.prefillTimer);
+			this.prefillTimer = 0;
+		}, 1000);
 	}
 
 	agentHeadParts(turn) {

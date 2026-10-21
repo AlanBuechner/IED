@@ -136,6 +136,7 @@ namespace Ai
 			if (Window() > 0 && EstimateTokens() * 100 > Window() * kRunCompressAtPercent && Compress()) turn->recoveries.Push(Core::String("compressed the context at 85%"));
 			request = Request();
 			estimate = request.promptTokens;
+			EstimatePrefill(request);
 			SaveRunning();
 		}
 		steps += 1;
