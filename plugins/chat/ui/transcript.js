@@ -5,6 +5,7 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { renderMarkdown } from "/ui-kit/markdown.js";
+import { showImage } from "/ui-kit/imageview.js";
 import { argsLine, compact, diffRows, duration, tokensPerSecond } from "./chatmodel.js";
 
 const QUIET_STOPS = new Set(["finished", "user_cancelled"]);
@@ -190,13 +191,18 @@ export class TranscriptView {
 		return h("div.chat-tool" + (segment.state === "error" ? ".failed" : ""), { dataset: { call: segment.callId, state: segment.state || "" } }, head, this.toolImages(result), out);
 	}
 
-	// The images the result showed the model (docs/13 "Images in tool results"), from the workspace; open or closed.
+	// The images the result showed the model (docs/13 "Images in tool results"), from the workspace; open or closed. A
+	// click shows one at its size over the page; a middle click opens it in a browser tab.
 	toolImages(result) {
 		if (!result || !result.images || !result.images.length || !this.model.summary) return null;
 		const base = "/w/" + encodeURIComponent(this.model.summary.wsId) + "/files/";
 		return h("div.chat-tool-images", null, ...result.images.map((image) => {
 			const url = base + image.path.split("/").map(encodeURIComponent).join("/");
-			return h("a", { href: url, target: "_blank", rel: "noopener", title: image.path }, h("img", { src: url, alt: image.path, loading: "lazy" }));
+			const show = (event) => {
+				event.preventDefault();
+				showImage({ src: url, title: image.path });
+			};
+			return h("a", { href: url, target: "_blank", rel: "noopener", title: image.path, on: { click: show } }, h("img", { src: url, alt: image.path, loading: "lazy" }));
 		}));
 	}
 

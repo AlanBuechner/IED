@@ -2,13 +2,14 @@
 // changes - typing in its editor, another writer, the disk - with fenced code colored as the editor colors it (the
 // `editor.colorize` binding, when an editor plugin provides it) and the workspace's images (`/w/<wsId>/files/`,
 // docs/10). Ticking a task box edits its line through the document store, taking the lease as typing would; a link to a
-// workspace file opens it in the editor, a web link a new browser window.
+// workspace file opens it in the editor, a web link a new browser window; a workspace image clicked shows at its size.
 
 import { h, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
 import { applyChanges } from "/ui-kit/textedits.js";
 import { renderMarkdown, toggleTask } from "/ui-kit/markdown.js";
 import { isFileUri } from "/ui-kit/fileuris.js";
+import { showImage } from "/ui-kit/imageview.js";
 
 const RENDER_MS = 60;
 
@@ -103,7 +104,10 @@ export class MarkdownPreview {
 		if (/^[a-z][a-z0-9+.-]*:/i.test(src) || this.folder === null) return;
 		const path = resolveRelative(this.folder, decodeURIComponent(src.split("#")[0]));
 		if (path === null) image.removeAttribute("src");
-		else image.setAttribute("src", "/w/" + encodeURIComponent(this.ctx.wsId) + "/files/" + path.split("/").map(encodeURIComponent).join("/"));
+		else {
+			image.setAttribute("src", "/w/" + encodeURIComponent(this.ctx.wsId) + "/files/" + path.split("/").map(encodeURIComponent).join("/"));
+			image.dataset.path = path;
+		}
 	}
 
 	clicked(event) {
@@ -114,6 +118,11 @@ export class MarkdownPreview {
 			return;
 		}
 		const link = event.target.closest("a[href]");
+		const image = event.target.closest("img[data-path]");
+		if (image && !link) {
+			showImage({ src: image.getAttribute("src"), title: image.dataset.path });
+			return;
+		}
 		if (!link) return;
 		event.preventDefault();
 		const href = link.getAttribute("href");

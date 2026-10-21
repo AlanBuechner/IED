@@ -15,7 +15,7 @@ Status: **design v1, ready for implementation.** Machine-readable frame schema: 
 | `POST /api/auth/*` | login, logout, token exchange (`docs/11`) |
 | `GET /api/blob/<id>` | large binary payloads (images, trace chunks, file downloads), referenced from frames by id |
 | `GET /w/<wsId>/files/<path>` | a workspace's image (PNG, JPEG, GIF, WebP, BMP, ICO) for previews (a Markdown document's pictures): never another type, so a repository's HTML or SVG cannot run script on IED's origin; sent with `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy` |
-| `PUT /api/upload` | attachments and file uploads (streamed, returns a blob id) |
+| `PUT /api/upload` | attachments and file uploads (streamed, returns a blob id; at most 64 MiB each, kept in memory, 256 MiB in all: past that the oldest are dropped and their ids answer 404) |
 | `GET /ws` | **one WebSocket per browser tab**, all real-time traffic |
 | `/w/<ws>/port/<n>/...` | port-forward proxy (F-SRV-50) |
 

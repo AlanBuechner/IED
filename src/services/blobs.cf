@@ -12,7 +12,10 @@ namespace Ied
 		blob->contentType = Core::String(contentType);
 		blob->bytes = bytes;
 		Threading::LockGuard guard(mutex);
+		while (!order.IsEmpty() && keptBytes + bytes.Count() > limitBytes) DropOldest();
 		items.Insert(id.ToString(), blob);
+		order.Push(id.ToString());
+		keptBytes += bytes.Count();
 		return id.ToString();
 	}
 
@@ -21,5 +24,18 @@ namespace Ied
 		Blob* blob = nullptr;
 		items.TryGet(Core::String(id), blob);
 		return blob;
+	}
+
+	int64 Blobs::KeptBytes() {
+		Threading::LockGuard guard(mutex);
+		return keptBytes;
+	}
+
+	// With the mutex held.
+	void Blobs::DropOldest() {
+		Blob* blob = nullptr;
+		if (items.TryGet(order[0], blob)) keptBytes -= blob->bytes.Count();
+		items.Remove(order[0]);
+		order.RemoveAt(0);
 	}
 }

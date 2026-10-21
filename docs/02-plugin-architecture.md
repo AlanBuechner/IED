@@ -92,7 +92,7 @@ A plugin's `runtime.ui` names an ES module in its folder; `plugins.contributions
 | `toast(text, {level, action})` | news for this person only, with an optional `action: {label, run}` button (Undo after a delete) |
 | `plugin` | `{id, base}`: the plugin's id and the URL its files are served under |
 
-Shared components (`shared/ui-kit/`, served at `/ui-kit/`) are imported by URL: `import { h, icon } from "/ui-kit/dom.js"`. Among them: `tree.js` (a virtualized tree with in-place naming), `dialog.js` (`confirmDialog`, the one modal question), `menu.js`, `docsync.js`, `ansi.js`, `markdown.js` (GitHub-flavored Markdown to elements).
+Shared components (`shared/ui-kit/`, served at `/ui-kit/`) are imported by URL: `import { h, icon } from "/ui-kit/dom.js"`. Among them: `tree.js` (a virtualized tree with in-place naming), `dialog.js` (`confirmDialog`, the one modal question), `imageview.js` (`showImage`, an image at its size over the page), `menu.js`, `docsync.js`, `ansi.js`, `markdown.js` (GitHub-flavored Markdown to elements).
 
 ## Contribution points
 

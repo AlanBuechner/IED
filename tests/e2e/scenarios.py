@@ -610,6 +610,25 @@ def markdown_preview_ticks_a_task(run):
 	run.request("fs.delete", {"wsId": ws, "path": path})
 
 
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def markdown_image_opens_in_the_viewer(run):
+	"""A workspace image in a Markdown preview (`/w/<wsId>/files/`) shows at its size when clicked (imageview.js); Escape
+	ends it. The mock serves shots/screen.png (the real server any image of the workspace, a server check)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	path = "docs/pictures-%s.md" % run.viewport
+	run.request("fs.write", {"wsId": ws, "path": path, "text": "# Pictures\n\n![the screen](../shots/screen.png)\n"})
+	page.evaluate("(path) => ied_shell.commands.run('ied.markdown.preview', { path })", path)
+	page.wait_for_function("(() => { const i = document.querySelector('.md-preview img[data-path]'); return i && i.complete && i.naturalWidth === 320; })()", timeout=10000)
+	page.click(".md-preview img[data-path]")
+	page.wait_for_selector(".image-view img")
+	check(run.texts(".image-view-head .mono") == ["shots/screen.png"], "the viewer names the workspace path")
+	run.shot("viewer")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".image-view", state="detached")
+	run.request("fs.delete", {"wsId": ws, "path": path})
+
+
 @scenario(viewports=("desktop",))
 def launched_markdown_opens_with_its_preview(run):
 	"""A launch URL's #open= (what `ied open notes.md` gives, docs/10): the file opens at its place with its preview
@@ -1031,6 +1050,12 @@ def chat_tool_image(run):
 	page.wait_for_function("(() => { const i = document.querySelector('.chat-tool-images img'); return i && i.complete && i.naturalWidth === 320; })()", timeout=10000)
 	check(page.get_attribute(".chat-tool-images a", "title") == "shots/screen.png", "the image's path on hover")
 	run.shot("image")
+	page.click(".chat-tool-images a")
+	page.wait_for_function("(() => { const i = document.querySelector('.image-view img'); return i && i.complete && i.naturalWidth === 320; })()", timeout=10000)
+	check(run.texts(".image-view-head .mono") == ["shots/screen.png"], "the viewer names it")
+	run.shot("viewer")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".image-view", state="detached")
 
 
 @scenario(viewports=("desktop",))
