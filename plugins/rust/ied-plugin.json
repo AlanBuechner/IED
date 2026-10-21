@@ -1,0 +1,66 @@
+// Rust (docs/05 "Language plugins"): rust-analyzer as the language server of Rust documents (one per workspace; it finds
+// the Cargo workspace itself), the rust.cargo task preset for a folder with a Cargo.toml - Build, Run, Test and Clean
+// with a Debug / Release profile, a rustc problem matcher over cargo's short messages - and a Launch configuration that
+// debugs the binary cargo builds through the ied.cpp plugin's lldb adapter (CodeLLDB, docs/25).
+{
+	"manifestVersion": 1,
+	"id": "ied.rust",
+	"name": "Rust",
+	"version": "0.1.0",
+	"description": "Rust through rust-analyzer and cargo: diagnostics, completion, navigation, builds, tests and debugging (CodeLLDB).",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "declarative" },
+	"permissions": ["process.spawn", "lsp", "fs.read"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Text Editor/Rust" },
+		"lspProfiles": [
+			{
+				"id": "rust-analyzer",
+				"label": "rust-analyzer",
+				"command": "${config:rust.analyzer.path}",
+				"selector": { "languages": ["rust"] },
+				"when": "config.rust.languageServer && workspaceTrusted"
+			}
+		],
+		"problemMatchers": [
+			{
+				"id": "rustc",
+				"source": "rustc",
+				"fileLocation": { "kind": "search", "roots": ["${cwd}"] },
+				"patterns": [ { "regexp": "^(.+?):(\\d+):(\\d+): (error|warning)(?:\\[(\\w+)\\])?: (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "code": 5, "message": 6 } ]
+			}
+		],
+		"taskPresets": [
+			{
+				"id": "rust.cargo",
+				"label": "Cargo",
+				"detect": "Cargo.toml",
+				"variables": {
+					"profile": { "kind": "dropdown", "label": "Profile", "values": ["debug", "release"], "default": "debug", "scope": "solution" }
+				},
+				"tasks": {
+					"build": { "label": "Build", "icon": "$(gear)", "slot": "build", "steps": [
+						{ "run": ["${setting:rust.cargo.path}", "build", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc" },
+						{ "run": ["${setting:rust.cargo.path}", "build", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc" }
+					] },
+					"run": { "label": "Run", "icon": "$(run)", "slot": "run", "concurrency": "restart", "steps": [
+						{ "run": ["${setting:rust.cargo.path}", "run", "--message-format=short"], "when": "profile == 'debug'", "problemMatcher": "rustc", "output": "run" },
+						{ "run": ["${setting:rust.cargo.path}", "run", "--release", "--message-format=short"], "when": "profile == 'release'", "problemMatcher": "rustc", "output": "run" }
+					] },
+					"test": { "label": "Test", "icon": "$(beaker)", "slot": "test", "steps": [
+						{ "run": ["${setting:rust.cargo.path}", "test", "--message-format=short"], "problemMatcher": "rustc", "output": "test" }
+					] },
+					"clean": { "label": "Clean", "slot": "clean", "steps": [ { "run": ["${setting:rust.cargo.path}", "clean"] } ] }
+				},
+				"toolbar": ["profile", "|", "run", "build", "test"],
+				"debug": {
+					"default": "Launch",
+					"configurations": {
+						"Launch": { "type": "lldb", "request": "launch", "program": "${projectRoot}/target/${profile}/${projectName}.exe", "cwd": "${projectRoot}", "preLaunchTask": "build" }
+					}
+				}
+			}
+		]
+	}
+}

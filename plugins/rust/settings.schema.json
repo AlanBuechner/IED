@@ -1,0 +1,22 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Rust settings",
+	"type": "object",
+	"properties": {
+		"rust.languageServer": {
+			"type": "boolean",
+			"default": true,
+			"description": "Run rust-analyzer for Rust documents of trusted workspaces."
+		},
+		"rust.analyzer.path": {
+			"type": "string",
+			"default": "rust-analyzer",
+			"description": "The rust-analyzer to run: a name looked up on PATH (rustup's, once its rust-analyzer component is installed), or a path."
+		},
+		"rust.cargo.path": {
+			"type": "string",
+			"default": "cargo",
+			"description": "The cargo the Cargo tasks run: a name looked up on PATH, or a path."
+		}
+	}
+}
