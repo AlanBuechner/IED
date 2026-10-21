@@ -6,7 +6,7 @@ namespace Core
 	public HashMapIterator<K, V> HashMapIterator::Next() {
 		HashMapIterator<K, V> next = *this;
 		next.index += 1;
-		while (next.index < end && states[next.index] != kLiveSlot) next.index += 1;
+		while (next.index < end && control[next.index] < (int8)0) next.index += 1;
 		return next;
 	}
 
@@ -14,136 +14,97 @@ namespace Core
 	public ConstHashMapIterator<K, V> ConstHashMapIterator::Next() {
 		ConstHashMapIterator<K, V> next = *this;
 		next.index += 1;
-		while (next.index < end && states[next.index] != kLiveSlot) next.index += 1;
+		while (next.index < end && control[next.index] < (int8)0) next.index += 1;
 		return next;
 	}
 
 	template<K, V, Traits>
 	public void HashMap::CopyFrom(const HashMap<K, V, Traits>& other) {
-		Reserve(other.count);
-		for (int64 i = 0; i < other.capacity; ++i)
-			if (other.states[i] == kLiveSlot) Insert(other.entries[i].key, other.entries[i].value);
+		Reserve(other.table.count);
+		const KeyValue<K, V>* from = other.entries;
+		for (int64 i = NextLiveSlot(other.table, 0); i < other.table.capacity; i = NextLiveSlot(other.table, i + 1)) Insert(from[i].key, from[i].value);
 	}
 
 	template<K, V, Traits>
 	public void HashMap::Delete() {
 		Clear();
-		if (entries) { gc_unregister_region((void*)entries); FreeElements<KeyValue<K, V>>(entries); }
-		raw_free((void*)states);
+		FreeTable(table, (void*)entries, (int64)alignof(KeyValue<K, V>));
 		entries = nullptr;
-		states = nullptr;
-		capacity = 0;
 	}
 
 	template<K, V, Traits>
 	public void HashMap::Clear() {
-		for (int64 i = 0; i < capacity; ++i) {
-			if (states[i] == kLiveSlot) destroy(&entries[i]);
-			states[i] = kEmptySlot;
-		}
-		count = 0;
-		used = 0;
+		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1)) destroy(&entries[i]);
+		EmptyTable(table);
 	}
 
-	template<K, V, Traits>
-	private int64 HashMap::Slot(const K& key) const {
-		if (capacity == 0) return -1;
-		int64 mask = capacity - 1;
-		for (int64 i = (int64)Traits::Hash(key) & mask;; i = (i + 1) & mask) {
-			if (states[i] == kEmptySlot) return -1;
-			if (states[i] == kLiveSlot && Traits::Equal(entries[i].key, key)) return i;
-		}
-		return -1;
-	}
-
-	template<K, V, Traits>
-	private int64 HashMap::FreeSlot(const K& key) const {
-		int64 mask = capacity - 1;
-		int64 i = (int64)Traits::Hash(key) & mask;
-		while (states[i] == kLiveSlot) i = (i + 1) & mask;
-		return i;
-	}
-
-	// Moves every live entry into a table of the new capacity; removed slots are dropped.
+	// Moves every live entry into a table of the new capacity; the removed slots are left behind.
 	template<K, V, Traits>
 	private void HashMap::Rehash(int64 newCapacity) {
-		KeyValue<K, V>* oldEntries = entries;
-		uint8* oldStates = states;
-		int64 oldCapacity = capacity;
-		entries = AllocateElements<KeyValue<K, V>>(newCapacity);
-		gc_register_region((void*)entries, (uint64)(newCapacity * (int64)sizeof(KeyValue<K, V>)));
-		states = (uint8*)raw_alloc((uint64)newCapacity);
-		memset((void*)states, 0, (uint64)newCapacity);
-		capacity = newCapacity;
-		used = count;
-		for (int64 i = 0; i < oldCapacity; ++i) {
-			if (oldStates[i] != kLiveSlot) continue;
-			int64 slot = FreeSlot(oldEntries[i].key);
-			relocate(&entries[slot], &oldEntries[i]);
-			states[slot] = kLiveSlot;
+		HashTable old = table;
+		KeyValue<K, V>* from = entries;
+		entries = (KeyValue<K, V>*)AllocateTable(table, newCapacity, (int64)sizeof(KeyValue<K, V>), (int64)alignof(KeyValue<K, V>));
+		KeyValue<K, V>* to = entries;
+		for (int64 i = NextLiveSlot(old, 0); i < old.capacity; i = NextLiveSlot(old, i + 1)) {
+			const uint64 hash = Traits::Hash(from[i].key);
+			const int64 slot = FreeSlot(table, hash);
+			relocate(&to[slot], &from[i]);
+			Occupy(table, slot, hash);
 		}
-		if (oldEntries) { gc_unregister_region((void*)oldEntries); FreeElements<KeyValue<K, V>>(oldEntries); }
-		raw_free((void*)oldStates);
+		FreeTable(old, (void*)from, (int64)alignof(KeyValue<K, V>));
 	}
 
 	template<K, V, Traits>
 	public void HashMap::Reserve(int64 wanted) {
-		int64 needed = NextPowerOfTwo((wanted * 4 + 2) / 3);
-		if (needed < 8) needed = 8;
-		if (needed > capacity) Rehash(needed);
+		const int64 needed = CapacityFor(wanted);
+		if (needed > table.capacity) Rehash(needed);
 	}
 
-	// Rebuilds the table at twice the live entries, which also drops the removed slots.
 	template<K, V, Traits>
-	private void HashMap::MakeRoom() {
-		if ((used + 1) * 4 <= capacity * 3) return;
-		int64 target = NextPowerOfTwo((count + 1) * 2);
-		Rehash(target < 8 ? 8 : target);
+	private int64 HashMap::SlotForNew(uint64 hash) {
+		if (NeedsRoom(table)) Rehash(GrownCapacity(table));
+		const int64 slot = FreeSlot(table, hash);
+		Occupy(table, slot, hash);
+		return slot;
 	}
 
 	template<K, V, Traits>
 	public bool HashMap::Insert(K key, V value) {
-		int64 found = Slot(key);
+		const int64 found = SlotOf(key);
 		if (found >= 0) { entries[found].value = take(value); return false; }
-		MakeRoom();
-		int64 slot = FreeSlot(key);
-		new (&entries[slot].key) K(take(key));
-		new (&entries[slot].value) V(take(value));
-		if (states[slot] == kEmptySlot) used += 1;
-		states[slot] = kLiveSlot;
-		count += 1;
+		const int64 slot = SlotForNew(Traits::Hash(key));
+		KeyValue<K, V>* entry = &entries[slot];
+		new (&entry->key) K(take(key));
+		new (&entry->value) V(take(value));
 		return true;
 	}
 
 	template<K, V, Traits>
 	public V& HashMap::At(const K& key) {
-		int64 found = Slot(key);
+		const int64 found = SlotOf(key);
 		if (found >= 0) return entries[found].value;
-		MakeRoom();
-		int64 slot = FreeSlot(key);
-		new (&entries[slot].key) K(key);
-		new (&entries[slot].value) V();
-		if (states[slot] == kEmptySlot) used += 1;
-		states[slot] = kLiveSlot;
-		count += 1;
-		return entries[slot].value;
+		const int64 slot = SlotForNew(Traits::Hash(key));
+		KeyValue<K, V>* entry = &entries[slot];
+		new (&entry->key) K(key);
+		new (&entry->value) V();
+		return entry->value;
 	}
 
 	template<K, V, Traits>
 	public V* HashMap::Find(const K& key) {
-		int64 slot = Slot(key);
+		const int64 slot = SlotOf(key);
 		return slot >= 0 ? &entries[slot].value : nullptr;
 	}
 
 	template<K, V, Traits>
 	public const V* HashMap::Find(const K& key) const {
-		int64 slot = Slot(key);
+		const int64 slot = SlotOf(key);
 		return slot >= 0 ? &entries[slot].value : nullptr;
 	}
 
 	template<K, V, Traits>
 	public bool HashMap::TryGet(const K& key, V& out) const {
-		int64 slot = Slot(key);
+		const int64 slot = SlotOf(key);
 		if (slot < 0) return false;
 		out = entries[slot].value;
 		return true;
@@ -151,19 +112,17 @@ namespace Core
 
 	template<K, V, Traits>
 	public V HashMap::Get(const K& key) const {
-		int64 slot = Slot(key);
+		const int64 slot = SlotOf(key);
 		if (slot < 0) { V none; return none; }
 		return entries[slot].value;
 	}
 
-	// The slot becomes a tombstone so the probe chains through it stay intact.
+	// The slot becomes removed, so the probes that pass through it go on.
 	template<K, V, Traits>
-	public bool HashMap::Remove(const K& key) {
-		int64 slot = Slot(key);
+	private bool HashMap::RemoveSlot(int64 slot) {
 		if (slot < 0) return false;
 		destroy(&entries[slot]);
-		states[slot] = kRemovedSlot;
-		count -= 1;
+		Vacate(table, slot);
 		return true;
 	}
 
@@ -171,10 +130,9 @@ namespace Core
 	public HashMapIterator<K, V> HashMap::Begin() {
 		HashMapIterator<K, V> it;
 		it.entries = entries;
-		it.states = states;
-		it.end = capacity;
-		it.index = 0;
-		while (it.index < capacity && states[it.index] != kLiveSlot) it.index += 1;
+		it.control = table.control;
+		it.end = table.capacity;
+		it.index = NextLiveSlot(table, 0);
 		return it;
 	}
 
@@ -182,9 +140,9 @@ namespace Core
 	public HashMapIterator<K, V> HashMap::End() {
 		HashMapIterator<K, V> it;
 		it.entries = entries;
-		it.states = states;
-		it.end = capacity;
-		it.index = capacity;
+		it.control = table.control;
+		it.end = table.capacity;
+		it.index = table.capacity;
 		return it;
 	}
 
@@ -192,10 +150,9 @@ namespace Core
 	public ConstHashMapIterator<K, V> HashMap::Begin() const {
 		ConstHashMapIterator<K, V> it;
 		it.entries = entries;
-		it.states = states;
-		it.end = capacity;
-		it.index = 0;
-		while (it.index < capacity && states[it.index] != kLiveSlot) it.index += 1;
+		it.control = table.control;
+		it.end = table.capacity;
+		it.index = NextLiveSlot(table, 0);
 		return it;
 	}
 
@@ -203,9 +160,9 @@ namespace Core
 	public ConstHashMapIterator<K, V> HashMap::End() const {
 		ConstHashMapIterator<K, V> it;
 		it.entries = entries;
-		it.states = states;
-		it.end = capacity;
-		it.index = capacity;
+		it.control = table.control;
+		it.end = table.capacity;
+		it.index = table.capacity;
 		return it;
 	}
 }

@@ -80,13 +80,27 @@ namespace Scripting
 		}
 	}
 
+	// `[key] = value` or `[start...end] = value`: the `]` that closes the `[` is followed by `=`. Anything else starting
+	// with `[` is an element, such as a lambda's capture list (BUG-313).
+	static bool StartsBracketedKey(const Lexer& lexer)
+	{
+		int depth = 0;
+		for (uint32 ahead = 0;; ++ahead)
+		{
+			const TokenType type = lexer.PeekCompound(ahead).GetType();
+			if (type == TokenType::EndOfFile) return false;
+			if (type == TokenType::OpenBracket) ++depth;
+			else if (type == TokenType::CloseBracket && --depth == 0) return lexer.PeekCompound(ahead + 1).GetType() == TokenType::Equal;
+		}
+	}
+
 	void BracedInitializerNode::ParseOneEntry(ParserState& state)
 	{
 		Lexer& lexer = state.GetLexer();
 		ErrorTracker& errorTracker = state.GetErrorTracker();
 		Token t = lexer.PeekCompound();
 
-		if (t.GetType() == TokenType::OpenBracket)
+		if (t.GetType() == TokenType::OpenBracket && StartsBracketedKey(lexer))
 		{
 			// Bracketed key: [key] or [start...end]. The lexer splits `2...5` into 2 / ... / 5, so
 			// a range is simply an expression followed by '...' (or '..').

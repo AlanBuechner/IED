@@ -1,0 +1,98 @@
+include "hashtable.ch"
+include "storage.ch"
+
+namespace Core
+{
+	Probe ProbeFor(const HashTable& table, uint64 hash) {
+		Probe probe;
+		probe.mask = table.capacity - 1;
+		probe.slot = (int64)ProbeStart(hash) & probe.mask;
+		return probe;
+	}
+
+	template<F> int64 FindSlot(const HashTable& table, uint64 hash, F matches) {
+		if (table.capacity == 0) return -1;
+		const int8 wanted = HashControl(hash);
+		Probe probe = ProbeFor(table, hash);
+		while (true) {
+			for (uint32 candidates = GroupMatching(table.control, probe.slot, wanted); candidates != 0u; candidates &= candidates - 1u) {
+				const int64 slot = probe.SlotAt(candidates);
+				if (matches(slot)) return slot;
+			}
+			if (GroupEmpty(table.control, probe.slot) != 0u) return -1;
+			probe.Next();
+		}
+		return -1;
+	}
+
+	int64 FreeSlot(const HashTable& table, uint64 hash) {
+		Probe probe = ProbeFor(table, hash);
+		while (true) {
+			const uint32 free = GroupFree(table.control, probe.slot);
+			if (free != 0u) return probe.SlotAt(free);
+			probe.Next();
+		}
+		return -1;
+	}
+
+	// A slot's control byte, and its copies past the end: a table smaller than a group has a copy in every lap of it.
+	static void SetControl(HashTable& table, int64 slot, int8 value) {
+		table.control[slot] = value;
+		for (int64 copy = slot; copy < kControlGroup; copy += table.capacity) table.control[table.capacity + copy] = value;
+	}
+
+	void Occupy(HashTable& table, int64 slot, uint64 hash) {
+		if (table.control[slot] == kEmptyControl) table.used += 1;
+		SetControl(table, slot, HashControl(hash));
+		table.count += 1;
+	}
+
+	void Vacate(HashTable& table, int64 slot) {
+		SetControl(table, slot, kRemovedControl);
+		table.count -= 1;
+	}
+
+	int64 NextLiveSlot(const HashTable& table, int64 slot) {
+		while (slot < table.capacity && !IsLive(table, slot)) slot += 1;
+		return slot;
+	}
+
+	int64 CapacityFor(int64 entries) {
+		const int64 capacity = NextPowerOfTwo((entries * 8 + 6) / 7);
+		return capacity < kSmallestTable ? kSmallestTable : capacity;
+	}
+
+	int64 GrownCapacity(const HashTable& table) { return CapacityFor((table.count + 1) * 2); }
+
+	static int64 ControlBytes(int64 capacity) { return capacity + kControlGroup; }
+
+	void* AllocateTable(HashTable& table, int64 capacity, int64 entryBytes, int64 entryAlign) {
+		const uint64 bytes = (uint64)(capacity * entryBytes);
+		void* entries = (uint64)entryAlign > kRawAllocAlignment ? raw_alloc_aligned(bytes, (uint64)entryAlign) : raw_alloc(bytes);
+		memset(entries, 0, bytes);
+		gc_register_region(entries, bytes);
+		table.control = (int8*)raw_alloc((uint64)ControlBytes(capacity));
+		table.capacity = capacity;
+		EmptyTable(table);
+		return entries;
+	}
+
+	void FreeTable(HashTable& table, void* entries, int64 entryAlign) {
+		if (entries) {
+			gc_unregister_region(entries);
+			if ((uint64)entryAlign > kRawAllocAlignment) raw_free_aligned(entries);
+			else raw_free(entries);
+		}
+		raw_free((void*)table.control);
+		table.control = nullptr;
+		table.count = 0;
+		table.used = 0;
+		table.capacity = 0;
+	}
+
+	void EmptyTable(HashTable& table) {
+		if (table.control) memset((void*)table.control, (int32)(uint8)kEmptyControl, (uint64)ControlBytes(table.capacity));
+		table.count = 0;
+		table.used = 0;
+	}
+}

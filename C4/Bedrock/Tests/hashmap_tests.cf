@@ -204,4 +204,89 @@ class HashMapTests {
 		m.Remove(4);
 		assert_eq((int64)420, HmSumOfConst(m), "a const map visits its live entries, read only");
 	}
+
+	[test("view_lookups")]
+	public static void TestViewLookups() {
+		Core::HashMap<Core::String, int32> ages;
+		ages.Insert(Core::String("ada"), 36);
+		ages.Insert(Core::String("alan"), 41);
+		int32* found = ages.FindAs(Core::StringView("ada"));
+		assert_true(found != nullptr && *found == 36, "found by a view, no String made");
+		assert_true(ages.ContainsAs(Core::StringView("alan")), "contains by a view");
+		assert_true(!ages.ContainsAs(Core::StringView("grace")), "absent by a view");
+		assert_true(ages.FindAs(Core::StringView("ad")) == nullptr, "a prefix is another key");
+		assert_true(ages.RemoveAs(Core::StringView("alan")) && ages.Count() == 1, "removed by a view");
+		assert_true(!ages.RemoveAs(Core::StringView("alan")), "removed once");
+	}
+
+	// A table smaller than a 16-byte control group probes its copies past the end.
+	[test("small_table")]
+	public static void TestSmallTable() {
+		Core::HashMap<int32, int32> m;
+		for (int32 i = 0; i < 7; ++i) m.Insert(i, i * 10);
+		assert_eq((int64)8, m.Capacity(), "seven entries fit eight slots");
+		bool found = true;
+		for (int32 round = 0; round < 500; ++round) {
+			m.Remove(round % 7);
+			m.Insert(round % 7, round);
+			for (int32 i = 0; i < 7; ++i) if (!m.Contains(i)) found = false;
+		}
+		assert_true(found, "every key found while removed slots come and go");
+		assert_true(m.Capacity() <= 16, "the churn does not grow the table without end");
+		m.Insert(7, 70);
+		assert_eq((int64)8, m.Count(), "an eighth entry grows the table");
+		assert_true(m.Capacity() > 8 && m.Get(7) == 70 && m.Get(3) >= 0, "all there after growing");
+	}
+
+	[test("many_strings")]
+	public static void TestManyStrings() {
+		Core::HashMap<Core::String, int64> m;
+		Core::StringBuilder text;
+		for (int64 i = 0; i < 20000; ++i) {
+			text.Clear();
+			text.Append("key/");
+			text.AppendInt(i);
+			m.Insert(text.ToString(), i);
+		}
+		assert_eq((int64)20000, m.Count(), "all inserted");
+		bool ok = true;
+		for (int64 i = 0; i < 20000; i += 7) {
+			text.Clear();
+			text.Append("key/");
+			text.AppendInt(i);
+			int64* value = m.FindAs(text.View());
+			if (!value || *value != i) ok = false;
+		}
+		assert_true(ok, "each found by its text");
+		for (int64 i = 0; i < 20000; i += 2) {
+			text.Clear();
+			text.Append("key/");
+			text.AppendInt(i);
+			m.RemoveAs(text.View());
+		}
+		assert_eq((int64)10000, m.Count(), "half removed");
+		int64 sum = 0;
+		for (Core::KeyValue<Core::String, int64>& entry : m) sum += entry.value;
+		assert_eq((int64)100000000, sum, "iteration visits the odd ones");
+	}
+
+	[test("hash_bytes")]
+	public static void TestHashBytes() {
+		char[200] bytes;
+		for (int32 i = 0; i < 200; ++i) bytes[i] = (char)(i * 7 + 1);
+		Core::HashSet<uint64> hashes;
+		for (int64 length = 0; length <= 120; ++length) hashes.Add(Core::HashBytes(&bytes[0], length));
+		assert_eq((int64)121, hashes.Count(), "every length of one input hashes apart");
+		bool flips = true;
+		for (int64 length = 1; length <= 120; length += 7)
+			for (int64 at = 0; at < length; at += 3) {
+				uint64 before = Core::HashBytes(&bytes[0], length);
+				bytes[at] = (char)(bytes[at] ^ 1);
+				if (Core::HashBytes(&bytes[0], length) == before) flips = false;
+				bytes[at] = (char)(bytes[at] ^ 1);
+			}
+		assert_true(flips, "one changed bit changes the hash, in every part of the input");
+		assert_true(Core::HashBytes(&bytes[1], 50) == Core::HashBytes(&bytes[1], 50), "unaligned input hashes alike");
+		assert_true(Core::StringView("same").Hash() == Core::String("same").Hash(), "a String hashes as its view");
+	}
 }

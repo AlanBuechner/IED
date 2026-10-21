@@ -1,6 +1,6 @@
 #include "TryCatchNode.h"
 #include "CodeBlockNode.h"
-#include "IfStatementNode.h" // for ParseAnyStatement forward
+#include "StatementParser.h"
 #include "../Declarations/QualTypeNode.h"
 #include "Core/StringFormat.h"
 

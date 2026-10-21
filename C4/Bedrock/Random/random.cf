@@ -1,0 +1,82 @@
+include "random.ch"
+include "Platform/system.ch"
+include "Platform/time.ch"
+
+namespace Core
+{
+	// splitmix64: spreads one seed over the four words of state, never all zero.
+	static uint64 SplitMix(uint64& seed) {
+		seed += 11400714819323198485u;
+		uint64 z = seed;
+		z = (z ^ (z >> 30)) * 13787848793156543929u;
+		z = (z ^ (z >> 27)) * 10723151780598845931u;
+		return z ^ (z >> 31);
+	}
+
+	void Random::Init(uint64 seed) {
+		for (int32 i = 0; i < 4; ++i) state[i] = SplitMix(seed);
+	}
+
+	uint64 Random::Next() {
+		const uint64 result = bit_rotate_left(state[1] * 5u, 7) * 9u;
+		const uint64 shifted = state[1] << 17;
+		state[2] ^= state[0];
+		state[3] ^= state[1];
+		state[1] ^= state[2];
+		state[0] ^= state[3];
+		state[2] ^= shifted;
+		state[3] = bit_rotate_left(state[3], 45);
+		return result;
+	}
+
+	// Lemire's method: the high half of a 64x64 product maps the bits onto the range, and the few low halves that
+	// would favour some values are drawn again.
+	int64 Random::Range(int64 low, int64 high) {
+		if (high <= low) return low;
+		const uint64 span = (uint64)high - (uint64)low;
+		uint64 bits = Next();
+		uint64 lowHalf = bits * span;
+		if (lowHalf < span) {
+			const uint64 threshold = ((uint64)0 - span) % span;
+			while (lowHalf < threshold) {
+				bits = Next();
+				lowHalf = bits * span;
+			}
+		}
+		return (int64)((uint64)low + mul_high(bits, span));
+	}
+
+	double Random::Normal(double mean, double deviation) {
+		double u = 0.0;
+		double v = 0.0;
+		double s = 0.0;
+		do {
+			u = Unit() * 2.0 - 1.0;
+			v = Unit() * 2.0 - 1.0;
+			s = u * u + v * v;
+		} while (s >= 1.0 || s == 0.0);
+		return mean + deviation * u * sqrt(-2.0 * log(s) / s);
+	}
+
+	// The xoshiro256 jump polynomial: 2^128 steps at once.
+	const uint64[4] kJumpPolynomial = { 0x180ec6d33cfd0abau, 0xd5a61266f0c9392cu, 0xa9582618e03fc9aau, 0x39abdc4529b1661cu };
+
+	Random Random::Split() {
+		Random before = *this;
+		uint64[4] jumped = { 0u, 0u, 0u, 0u };
+		for (int32 word = 0; word < 4; ++word)
+			for (int32 bit = 0; bit < 64; ++bit) {
+				if ((kJumpPolynomial[word] & ((uint64)1 << bit)) != 0u)
+					for (int32 i = 0; i < 4; ++i) jumped[i] ^= state[i];
+				Next();
+			}
+		for (int32 i = 0; i < 4; ++i) state[i] = jumped[i];
+		return before;
+	}
+
+	uint64 RandomSeed() {
+		uint64 seed = 0u;
+		if (!Platform::RandomBytes((void*)&seed, 8)) seed = (uint64)Platform::Ticks();
+		return seed;
+	}
+}

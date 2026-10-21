@@ -190,7 +190,7 @@ namespace Scripting
 				token.GetStartLocation(),
 				UnexpectedTokenMessage(lexer),
 				ErrorSeverity::Error);
-			lexer.NextCompoundToken();
+			SkipRestOfStatement(lexer);
 		}
 	}
 

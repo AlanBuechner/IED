@@ -38,8 +38,4 @@ static Ref<IfStatementNode> TryParse(ParserState& state);
 		Ref<AstNode> m_ElseBranch;
 		Core::Vector<Ref<AstNode>> m_Children; // condition + then + else
 	};
-
-	/// Parse a single statement (non-block body) or a code block.
-	/// Returns nullptr if no statement was parsed.
-	Ref<AstNode> ParseAnyStatement(ParserState& state);
 }

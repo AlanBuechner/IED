@@ -1,17 +1,16 @@
-// HashMap<K, V>: an unordered map (std::unordered_map) with open addressing and linear probing over a
-// power-of-two table. Keys hash and compare through Traits, by default KeyTraits<K>: K's own
-// [operator("hash")] and ==, with built-in traits for numbers, characters, bool and pointers; pass
-// ByteKeyTraits<K> for a plain-data struct key. The map constructs, copies, relocates and destroys its
-// keys and values itself and registers its entries with the GC. A zero HashMap is empty and allocates
-// nothing.
+// HashMap<K, V>: an unordered map (std::unordered_map) over the open-addressing table of hashtable.ch, Swiss-table
+// style: a lookup compares 16 control bytes at once and opens only the entries whose hash bits match. Keys hash and
+// compare through Traits, by default KeyTraits<K>: K's own [operator("hash")] and ==, with built-in traits for
+// numbers, characters, bool and pointers; pass ByteKeyTraits<K> for a plain-data struct key. The map constructs,
+// copies, relocates and destroys its keys and values itself and registers its entries with the GC. A zero HashMap is
+// empty and allocates nothing.
 //     Core::HashMap<Core::String, int32> ages;
 //     ages.Insert(Core::String("ada"), 36);
 //     ages[Core::String("alan")] = 41;          // added when absent
-//     int32* age = ages.Find(Core::String("ada"));
+//     int32* age = ages.FindAs(Core::StringView("ada"));   // looked up by a view: no String is made
 //     for (Core::KeyValue<Core::String, int32>& entry : ages) printf("%s %d\n", entry.key.CStr(), entry.value);
 
-include "hash.ch"
-include "storage.ch"
+include "hashtable.ch"
 
 namespace Core
 {
@@ -23,7 +22,7 @@ namespace Core
 	// Visits the live entries in table order.
 	template<K, V> struct HashMapIterator {
 		public KeyValue<K, V>* entries;
-		public const uint8* states;
+		public const int8* control;
 		public int64 index;
 		public int64 end;
 		[operator("notequal")] public bool NotEqual(const HashMapIterator<K, V>& other) const { return index != other.index; }
@@ -34,7 +33,7 @@ namespace Core
 	// The same over a const map: the entries read only.
 	template<K, V> struct ConstHashMapIterator {
 		public const KeyValue<K, V>* entries;
-		public const uint8* states;
+		public const int8* control;
 		public int64 index;
 		public int64 end;
 		[operator("notequal")] public bool NotEqual(const ConstHashMapIterator<K, V>& other) const { return index != other.index; }
@@ -50,9 +49,9 @@ namespace Core
 		[operator("copy")] public void CopyFrom(const HashMap<K, V, Traits>& other);
 		[operator("delete")] public void Delete();
 
-		public int64 Count() const { return count; }
-		public int64 Capacity() const { return capacity; }
-		public bool IsEmpty() const { return count == 0; }
+		public int64 Count() const { return table.count; }
+		public int64 Capacity() const { return table.capacity; }
+		public bool IsEmpty() const { return table.count == 0; }
 
 		// True when the key was added, false when its value was replaced.
 		// Copies `value` in, or moves it: Insert(key, take(x)) puts in a value that cannot be copied.
@@ -66,11 +65,17 @@ namespace Core
 		public bool TryGet(const K& key, V& out) const;
 		// A copy of the value of `key`; a zero V when absent.
 		public V Get(const K& key) const;
-		public bool Contains(const K& key) const { return Slot(key) >= 0; }
-		public bool Remove(const K& key);
+		public bool Contains(const K& key) const { return SlotOf(key) >= 0; }
+		public bool Remove(const K& key) { return RemoveSlot(SlotOf(key)); }
 		public void Clear();
 		// Room for `entries` entries without growing again.
 		public void Reserve(int64 entries);
+
+		// Lookups by a key of another type Q that hashes as K does (KeyTraits<Q>) and compares with == to a K: a
+		// Core::StringView for Core::String keys, so no String is made to look one up.
+		template<Q> public V* FindAs(const Q& key) { int64 slot = SlotAs(key); return slot >= 0 ? &entries[slot].value : nullptr; }
+		template<Q> public bool ContainsAs(const Q& key) const { return SlotAs(key) >= 0; }
+		template<Q> public bool RemoveAs(const Q& key) { return RemoveSlot(SlotAs(key)); }
 
 		[operator("begin")] public HashMapIterator<K, V> Begin();
 		[operator("end")] public HashMapIterator<K, V> End();
@@ -78,30 +83,23 @@ namespace Core
 		[operator("end")] public ConstHashMapIterator<K, V> End() const;
 
 	private:
-		private int64 Slot(const K& key) const;         // the live slot holding key, or -1
-		private int64 FreeSlot(const K& key) const;     // where key goes: its probe's first tombstone or empty slot
+		// The live slot holding `key`, or -1.
+		private int64 SlotOf(const K& key) const {
+			const KeyValue<K, V>* stored = entries;
+			return FindSlot(table, Traits::Hash(key), [stored, &key](int64 slot) -> bool { return Traits::Equal(stored[slot].key, key); });
+		}
+		template<Q> private int64 SlotAs(const Q& key) const {
+			const KeyValue<K, V>* stored = entries;
+			return FindSlot(table, KeyTraits<Q>::Hash(key), [stored, &key](int64 slot) -> bool { return stored[slot].key == key; });
+		}
+		// Where a new key of `hash` goes, the table first grown when it is full.
+		private int64 SlotForNew(uint64 hash);
+		private bool RemoveSlot(int64 slot);
 		private void Rehash(int64 capacity);
-		// Live and removed slots stay at most 3/4 of the table, so every probe meets an empty slot.
-		private void MakeRoom();
 
-		private KeyValue<K, V>* entries;
-		private uint8* states;   // per slot: kEmptySlot, kLiveSlot or kRemovedSlot
-		private int64 count;     // live entries
-		private int64 used;      // live and removed slots
-		private int64 capacity;  // zero or a power of two
+		// Code that knows V only at run time (Serialization's reflection codec) finds these two by reflection and reads
+		// and builds the map through the functions of hashtable.ch.
+		private KeyValue<K, V>* entries;   // capacity entries; the table says which are live
+		private HashTable table;
 	}
-
-	const uint8 kEmptySlot = 0;
-	const uint8 kLiveSlot = 1;
-	const uint8 kRemovedSlot = 2;
-
-	// The layout every HashMap<K, V> shares, for code that knows V only at run time: Serialization reads and builds
-	// HashMap<Core::String, V> through it (Serialization/reflectvalue.cf), so the two change together.
-	struct HashMapLayout
-	{
-		public void* entries;   // KeyValue<K, V>[capacity]
-		public uint8* states;
-		public int64 count;
-		public int64 used;
-		public int64 capacity;
-	}
+}

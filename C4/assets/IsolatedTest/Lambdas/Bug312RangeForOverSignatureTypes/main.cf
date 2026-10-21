@@ -1,0 +1,23 @@
+// BUG-312: a range-for whose loop variable is spelled `func<R(A)>` or `funcptr<R(A)>` read as a classic for and failed
+// at the ':'. main returns the failures.
+include "Container/array.ch"
+
+int32 Twice(int32 v) { return v * 2; }
+int32 Thrice(int32 v) { return v * 3; }
+
+int32 main() {
+	int32 failures = 0;
+	Core::Array<func<void()>> handlers;
+	int32 count = 0;
+	handlers.Push([&count]() { count += 1; });
+	handlers.Push([&count]() { count += 10; });
+	for (const func<void()>& handler : handlers) handler();
+	for (func<void()> copy : handlers) copy();
+	failures += count == 22 ? 0 : 1;
+	funcptr<int32(int32)>[2] pointers = { Twice, Thrice };
+	int32 sum = 0;
+	for (funcptr<int32(int32)> f : pointers) sum += f(5);
+	for (const funcptr<int32(int32)>& f : pointers) sum += f(1);
+	failures += sum == 30 ? 0 : 1;
+	return failures;
+}

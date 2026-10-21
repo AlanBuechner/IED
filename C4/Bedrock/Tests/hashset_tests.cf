@@ -1,0 +1,130 @@
+// Core::HashSet<T, Traits>: adding, lookup, removal, growth, set algebra, iteration, lookups by a view, value
+// lifetimes and GC liveness of the values.
+
+include "bedrock.ch"
+
+static int64 HsSum(const Core::HashSet<int32>& set) {
+	int64 total = 0;
+	for (const int32& value : set) total += value;
+	return total;
+}
+
+// Counts its live copies, so the set's lifetimes are visible.
+struct HsTracked {
+	public int32 id;
+	public int32* alive;
+	[operator("create")] public void Init(int32 value, int32* counter) { id = value; alive = counter; *alive += 1; }
+	[operator("copy")] public void CopyFrom(const HsTracked& other) { id = other.id; alive = other.alive; if (alive) *alive += 1; }
+	[operator("delete")] public void Delete() { if (alive) *alive -= 1; }
+	[operator("hash")] public uint64 Hash() const { return Core::HashInteger((uint64)id); }
+	[operator("==")] public bool Equals(const HsTracked& other) const { return id == other.id; }
+}
+
+[test("hashset")]
+class HashSetTests {
+	[test("basic")]
+	public static void TestBasic() {
+		Core::HashSet<int32> s;
+		assert_true(s.IsEmpty() && s.Capacity() == 0, "a zero set allocates nothing");
+		assert_true(s.Add(3), "added");
+		assert_true(!s.Add(3), "already there");
+		assert_eq((int64)1, s.Count(), "one value");
+		assert_true(s.Contains(3) && !s.Contains(4), "contains");
+		assert_true(s.Find(3) != nullptr && *s.Find(3) == 3, "Find");
+		assert_true(s.Find(4) == nullptr, "Find of a missing value");
+		assert_true(s.Remove(3) && !s.Remove(3), "removed once");
+		assert_true(s.IsEmpty(), "empty again");
+	}
+
+	[test("init_list_and_copy")]
+	public static void TestInitListAndCopy() {
+		Core::HashSet<int32> s = { 1, 2, 3, 2, 1 };
+		assert_eq((int64)3, s.Count(), "duplicates of a list are one value");
+		Core::HashSet<int32> copy = s;
+		copy.Add(4);
+		assert_eq((int64)3, s.Count(), "a copy owns its own table");
+		assert_eq((int64)4, copy.Count(), "the copy changed");
+		assert_eq((int64)6, HsSum(s), "iteration visits each value once");
+	}
+
+	[test("grow_and_churn")]
+	public static void TestGrowAndChurn() {
+		Core::HashSet<int64> s;
+		for (int64 i = 0; i < 50000; ++i) s.Add(i * 2654435761);
+		assert_eq((int64)50000, s.Count(), "all added");
+		bool ok = true;
+		for (int64 i = 0; i < 50000; i += 13) if (!s.Contains(i * 2654435761)) ok = false;
+		assert_true(ok, "found after growing");
+		for (int64 i = 0; i < 50000; ++i) s.Remove(i * 2654435761);
+		assert_true(s.IsEmpty(), "all removed");
+		for (int32 round = 0; round < 3000; ++round) { s.Add((int64)round); s.Remove((int64)round - 5); }
+		assert_eq((int64)5, s.Count(), "the last five");
+		Core::HashSet<int32> reserved;
+		reserved.Reserve(500);
+		int64 capacity = reserved.Capacity();
+		for (int32 i = 0; i < 500; ++i) reserved.Add(i);
+		assert_eq(capacity, reserved.Capacity(), "Reserve made room for every value");
+	}
+
+	[test("algebra")]
+	public static void TestAlgebra() {
+		Core::HashSet<int32> a = { 1, 2, 3, 4 };
+		Core::HashSet<int32> b = { 3, 4, 5 };
+		Core::HashSet<int32> both = a;
+		both.UnionWith(b);
+		assert_eq((int64)5, both.Count(), "union");
+		Core::HashSet<int32> common = a;
+		common.IntersectWith(b);
+		assert_true(common.Count() == 2 && common.Contains(3) && common.Contains(4), "intersection");
+		Core::HashSet<int32> only = a;
+		only.ExceptWith(b);
+		assert_true(only.Count() == 2 && only.Contains(1) && only.Contains(2), "difference");
+		assert_true(common.IsSubsetOf(a) && common.IsSubsetOf(b), "a subset of both");
+		assert_true(!a.IsSubsetOf(b), "not a subset");
+		Core::HashSet<int32> empty;
+		assert_true(empty.IsSubsetOf(a), "the empty set is a subset");
+		empty.IntersectWith(a);
+		assert_true(empty.IsEmpty(), "intersecting nothing");
+	}
+
+	[test("strings_and_views")]
+	public static void TestStringsAndViews() {
+		Core::HashSet<Core::String> names;
+		names.Add(Core::String("ada"));
+		names.Add(Core::String("grace"));
+		assert_true(names.ContainsAs(Core::StringView("ada")), "found by a view");
+		assert_true(!names.ContainsAs(Core::StringView("alan")), "absent by a view");
+		assert_true(names.RemoveAs(Core::StringView("grace")) && names.Count() == 1, "removed by a view");
+	}
+
+	[test("lifetimes")]
+	public static void TestLifetimes() {
+		int32 alive = 0;
+		{
+			Core::HashSet<HsTracked> s;
+			for (int32 i = 0; i < 100; ++i) s.Add(HsTracked(i, &alive));
+			assert_eq(100, alive, "one live value each, copies relocated not kept");
+			s.Add(HsTracked(5, &alive));
+			assert_eq(100, alive, "an equal value is not kept");
+			s.Remove(HsTracked(7, &alive));
+			assert_eq(99, alive, "a removed value is destroyed");
+			s.Clear();
+			assert_eq(0, alive, "Clear destroys every value");
+			s.Add(HsTracked(1, &alive));
+		}
+		assert_eq(0, alive, "the set's delete destroys its values");
+	}
+
+	[test("gc")]
+	public static void TestGc() {
+		Core::HashSet<Core::StringBuilder*> s;
+		Core::StringBuilder* kept = nullptr;
+		for (int32 i = 0; i < 20; ++i) { Core::StringBuilder* b = new Core::StringBuilder(4); b->AppendInt(i); s.Add(b); if (i == 13) kept = b; }
+		uint64 address = (uint64)kept;
+		kept = nullptr;
+		gc_collect();
+		bool found = false;
+		for (Core::StringBuilder* b : s) if ((uint64)b == address && b->ByteLength() == 2) found = true;
+		assert_true(found, "kept alive by the set");
+	}
+}

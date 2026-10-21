@@ -1,0 +1,139 @@
+// Core::Random: the same numbers from the same seed, ranges without bias, units, chance, the normal distribution,
+// shuffles that keep every element, and Split's independent generators.
+
+include "bedrock.ch"
+
+[test("random")]
+class RandomTests {
+	[test("seeded")]
+	public static void TestSeeded() {
+		Core::Random a(42);
+		Core::Random b(42);
+		Core::Random c(43);
+		bool same = true;
+		bool differs = false;
+		for (int32 i = 0; i < 100; ++i) {
+			uint64 x = a.Next();
+			if (x != b.Next()) same = false;
+			if (x != c.Next()) differs = true;
+		}
+		assert_true(same, "one seed gives one sequence");
+		assert_true(differs, "another seed another");
+		Core::Random zero(0);
+		assert_true(zero.Next() != 0u || zero.Next() != 0u, "a zero seed still gives numbers");
+	}
+
+	// xoshiro256** seeded by splitmix64 from 1: the reference implementation's first outputs.
+	[test("reference_sequence")]
+	public static void TestReferenceSequence() {
+		Core::Random random(1);
+		assert_true(random.Next() == 12966619160104079557u, "the first");
+		assert_true(random.Next() == 9600361134598540522u, "the second");
+		assert_true(random.Next() == 10590380919521690900u, "the third");
+	}
+
+	[test("ranges")]
+	public static void TestRanges() {
+		Core::Random random(7);
+		int64[6] counts = { 0, 0, 0, 0, 0, 0 };
+		bool inside = true;
+		for (int32 i = 0; i < 60000; ++i) {
+			int64 roll = random.Range(1, 7);
+			if (roll < 1 || roll > 6) inside = false;
+			else counts[roll - 1] += 1;
+		}
+		assert_true(inside, "1 to 6");
+		bool even = true;
+		for (int32 i = 0; i < 6; ++i) if (counts[i] < 9400 || counts[i] > 10600) even = false;
+		assert_true(even, "each face about a sixth of the time");
+		assert_eq((int64)5, random.Range(5, 5), "an empty range gives its low end");
+		assert_eq((int64)5, random.Range(5, 2), "a reversed range too");
+		bool wide = true;
+		for (int32 i = 0; i < 1000; ++i) {
+			int64 v = random.Range(-9223372036854775807 - 1, 9223372036854775807);
+			if (v == 9223372036854775807) wide = false;
+		}
+		assert_true(wide, "the whole int64 range, high end excluded");
+		bool negatives = true;
+		for (int32 i = 0; i < 1000; ++i) { int64 v = random.Range(-10, -5); if (v < -10 || v >= -5) negatives = false; }
+		assert_true(negatives, "a negative range");
+	}
+
+	[test("units_and_chance")]
+	public static void TestUnitsAndChance() {
+		Core::Random random(9);
+		double sum = 0.0;
+		bool inside = true;
+		for (int32 i = 0; i < 100000; ++i) {
+			double u = random.Unit();
+			float f = random.UnitFloat();
+			if (u < 0.0 || u >= 1.0 || f < 0.0f || f >= 1.0f) inside = false;
+			sum += u;
+		}
+		assert_true(inside, "[0, 1)");
+		assert_true(sum / 100000.0 > 0.49 && sum / 100000.0 < 0.51, "the mean is about a half");
+		double r = random.RangeDouble(-2.0, 3.0);
+		assert_true(r >= -2.0 && r < 3.0, "a double range");
+		int32 hits = 0;
+		for (int32 i = 0; i < 100000; ++i) if (random.Chance(0.25)) hits += 1;
+		assert_true(hits > 24000 && hits < 26000, "a quarter of the time");
+		assert_true(!random.Chance(0.0) && random.Chance(1.0), "never and always");
+	}
+
+	[test("normal")]
+	public static void TestNormal() {
+		Core::Random random(11);
+		double sum = 0.0;
+		double squares = 0.0;
+		for (int32 i = 0; i < 100000; ++i) {
+			double v = random.Normal(10.0, 2.0);
+			sum += v;
+			squares += v * v;
+		}
+		double mean = sum / 100000.0;
+		double deviation = sqrt(squares / 100000.0 - mean * mean);
+		assert_true(mean > 9.97 && mean < 10.03, "the mean");
+		assert_true(deviation > 1.97 && deviation < 2.03, "the deviation");
+	}
+
+	[test("shuffle")]
+	public static void TestShuffle() {
+		Core::Random random(13);
+		Core::Array<int32> cards;
+		for (int32 i = 0; i < 52; ++i) cards.Push(i);
+		random.Shuffle(cards);
+		int64 sum = 0;
+		int32 inPlace = 0;
+		for (int32 i = 0; i < 52; ++i) { sum += cards[i]; if (cards[i] == i) inPlace += 1; }
+		assert_eq((int64)1326, sum, "every card still there");
+		assert_true(inPlace < 10, "and moved");
+		cards.Sort();
+		bool all = true;
+		for (int32 i = 0; i < 52; ++i) if (cards[i] != i) all = false;
+		assert_true(all, "each once");
+		Core::Array<Core::String> words = { Core::String("a"), Core::String("b"), Core::String("c") };
+		random.Shuffle(words);
+		assert_eq((int64)3, words.Count(), "objects relocate, none copied away");
+		Core::Array<int32> none;
+		random.Shuffle(none);
+		assert_true(none.IsEmpty(), "an empty array");
+	}
+
+	[test("split")]
+	public static void TestSplit() {
+		Core::Random random(17);
+		Core::Random copy = random;
+		Core::Random other = random.Split();
+		assert_true(other.Next() == copy.Next(), "the split one starts where this one was");
+		bool apart = true;
+		for (int32 i = 0; i < 1000; ++i) if (random.Next() == other.Next()) apart = false;
+		assert_true(apart, "and this one has jumped away");
+	}
+
+	[test("entropy")]
+	public static void TestEntropy() {
+		uint64 a = Core::RandomSeed();
+		uint64 b = Core::RandomSeed();
+		assert_true(a != b, "two seeds from the system differ");
+	}
+}

@@ -29,6 +29,10 @@ namespace Scripting
 		Core::Vector<CompilationError>& GetErrorsMutable() { return m_Errors; }
 		void Clear();
 
+		/// A syntax error leaves the parser at the token it could not use, so what it reports there afterwards follows
+		/// from the first error: from now on an error at the same place as the error before it is dropped (BUG-311).
+		void ReportOncePerLocation() { m_OncePerLocation = true; }
+
 		// ------------------------------------------------------------------
 		// Suppression for speculative parsing.
 		//
@@ -57,6 +61,9 @@ namespace Scripting
 		bool SpeculationFailed() const { return !m_SuppressFrames.Empty() && !m_SuppressFrames.Back().buffered.Empty(); }
 
 	private:
+		// Whether `error` is at the place of the last error `reported` holds.
+		static bool FollowsFrom(const Core::Vector<CompilationError>& reported, const CompilationError& error);
+
 		struct SuppressionFrame
 		{
 			Core::Vector<CompilationError> buffered;
@@ -64,5 +71,6 @@ namespace Scripting
 
 		Core::Vector<CompilationError> m_Errors;
 		Core::Vector<SuppressionFrame> m_SuppressFrames; // one frame per active suppression level
+		bool m_OncePerLocation = false;
 	};
 }

@@ -1,0 +1,15 @@
+// BUG-313: an element of a braced list that starts with a lambda's capture list was read as a `[key] = value` entry.
+// A real `[index] = value` entry still works beside them. main returns the failures.
+int32 main() {
+	int32 failures = 0;
+	int32 base = 100;
+	func<int32(int32)>[3] steps = { [](int32 v) -> int32 { return v * 2; }, [base](int32 v) -> int32 { return v + base; }, [&base](int32 v) -> int32 { return v - base; } };
+	failures += steps[0](5) == 10 ? 0 : 1;
+	failures += steps[1](5) == 105 ? 0 : 1;
+	failures += steps[2](5) == -95 ? 0 : 1;
+	int32[4] keyed = { [2] = 7, [0] = 1 };
+	failures += keyed[0] == 1 && keyed[1] == 0 && keyed[2] == 7 ? 0 : 1;
+	int32[3] nested = { [sizeof(int32[1]) - 3] = 5 };   // brackets inside the key
+	failures += nested[1] == 5 ? 0 : 1;
+	return failures;
+}

@@ -29,6 +29,23 @@ namespace Scripting
 			(after == TokenType::Equal || after == TokenType::SemiColon || after == TokenType::Comma);
 	}
 
+	// Only braces count: they are the block structure, while broken code leaves parentheses and brackets unmatched. The
+	// token nothing took is always skipped, so a caller that meets it again makes progress (a stray `}` at file scope).
+	void SkipRestOfStatement(Lexer& lexer)
+	{
+		int braces = 0;
+		for (bool first = true;; first = false)
+		{
+			const TokenType type = lexer.PeekCompound().GetType();
+			if (type == TokenType::EndOfFile || (type == TokenType::CloseCurl && braces == 0 && !first)) return;
+			lexer.NextCompoundToken();
+			if (first && type == TokenType::CloseCurl) return;
+			if (type == TokenType::SemiColon && braces == 0) return;
+			if (type == TokenType::OpenCurl) ++braces;
+			else if (type == TokenType::CloseCurl) --braces;
+		}
+	}
+
 	Core::String KeywordNameMessage(const Token& name)
 	{
 		return Core::StringFormat::Format("'{0}' is a keyword: it cannot name a variable, parameter or function", name.GetText());

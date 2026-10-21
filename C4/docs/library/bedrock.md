@@ -118,29 +118,60 @@ whether `a` comes first: a lambda, a `funcptr` or an object with `[operator("cal
 Inserting or removing never moves the other elements, so a `ListNode<T>*` stays valid until its own
 element is removed: the handle an LRU cache keeps. Each node is one allocation registered with the GC.
 
-### `Core::HashMap<K, V, Traits = KeyTraits<K>>` - open addressing (`hashmap.ch`, `hash.ch`)
+### `Core::HashMap<K, V, Traits = KeyTraits<K>>` - open addressing (`hashmap.ch`, `hashtable.ch`, `hash.ch`)
 
 | Group | Members |
 |---|---|
 | Create / delete | `Init()` (allocates nothing), `Init(int64 capacity)`, copy, `Delete()` |
 | Size | `Count()`, `Capacity()`, `IsEmpty()` |
 | Use | `Insert(k, v)` -> `true` when added, `false` when the value was replaced; `At(k)` and `m[k]` -> `V&` (default-creates an absent key); `Find(k)` -> `V*` or null (valid until the map changes); `TryGet(k, out)`; `Get(k)` (a copy, zero `V` when absent); `Contains(k)`; `Remove(k)`; `Clear()`; `Reserve(n)` |
+| By another key type | `FindAs(q)`, `ContainsAs(q)`, `RemoveAs(q)` take a key of a type `Q` that hashes as `K` does (`KeyTraits<Q>`) and compares with `==` to a `K`: a `Core::StringView` for `Core::String` keys, so no `String` is made to look one up |
 | Iteration | range-for yields `Core::KeyValue<K, V>&` (`key`, `value`) in table order; do not change a key through it. A const map yields `const KeyValue<K, V>&` |
 
-Linear probing over a power-of-two table; live plus removed slots stay at most 3/4 of it, so every probe
-ends at an empty slot. `Traits` is a type with `static uint64 Hash(const K&)` and
-`static bool Equal(const K&, const K&)`:
+The table (`hashtable.ch`, shared with `HashSet`) is in the style of Swiss tables: beside the entries, one control byte
+per slot holds empty, removed, or 7 bits of the entry's hash. A lookup compares 16 control bytes at once (one SSE2
+compare) and opens only the entries whose 7 bits match, so a miss rarely touches an entry; probing goes group by
+group in growing steps over a power-of-two table. Live plus removed slots stay at most 7/8 of it, so every probe
+ends at an empty slot, and growing moves the live entries to a table twice their number, leaving the removed slots
+behind. Against `std::unordered_map` a million `int64` keys insert in a quarter of the time and missing ones are
+found in an eighth ([test suites 8](../tools/05-test-suites.md#8-benchmarks)). `Traits` is a type with
+`static uint64 Hash(const K&)` and `static bool Equal(const K&, const K&)`:
 
 - `Core::KeyTraits<K>` (the default) uses `K`'s own `[operator("hash")]` and `==`. It is specialized for
   every integer type, `char8`, `bool`, `float` and `double` (`-0` hashes as `+0`; NaN never equals
   itself, as with `==`) and pointers. `Core::String` and `Core::StringView` define `hash`.
 - `Core::ByteKeyTraits<K>` hashes and compares a key's bytes: for plain-data structs without padding.
 
-`hash.ch` also has `Core::HashBytes(bytes, length)` (FNV-1a, 64-bit), `Core::HashInteger(uint64)`
+`hash.ch` also has `Core::HashBytes(bytes, length)` (a 64-bit hash in the manner of wyhash: 16 bytes a step, 48 for
+long input, each pair of words folded through a 128-bit product, `Core::FoldedMultiply(a, b)`), `Core::HashInteger(uint64)`
 (the splitmix64 finalizer) and `Core::NextPowerOfTwo(int64)`. `sha1.ch` has the SHA-1 digest (FIPS 180-4) for
 protocols that require it (the WebSocket handshake; not for anything that must resist a forger):
 `Core::Sha1(bytes, count)` or a `Core::Sha1Builder` fed in pieces (`Add`, then `Finish` once), giving a
 `Sha1Digest` (`bytes[20]`, `ToHex()`, `==`, `!=`).
+
+### `Core::HashSet<T, Traits = KeyTraits<T>>` (`hashset.ch`)
+
+An unordered set on the same table as `HashMap`, with the same `Traits`.
+
+| Group | Members |
+|---|---|
+| Create / delete | `Init()` (allocates nothing), `Init(int64 capacity)`, `Init(InitList<T>)` (`Core::HashSet<int32> s = { 1, 2, 3 }`), copy, `Delete()` |
+| Size | `Count()`, `Capacity()`, `IsEmpty()` |
+| Use | `Add(v)` -> `true` when added, `false` when an equal value was there (the set keeps that one; takes `v` as `Push` does); `Contains(v)`; `Find(v)` -> `const T*` or null; `Remove(v)`; `Clear()`; `Reserve(n)`; `ContainsAs(q)`, `RemoveAs(q)` by another key type, as `HashMap`'s |
+| Set algebra | `UnionWith(other)`, `IntersectWith(other)`, `ExceptWith(other)` change the set in place; `IsSubsetOf(other)` |
+| Iteration | range-for yields `const T&` in table order: a value is found by its hash, so it is not changed in place |
+
+### `Core::BitSet` (`bitset.ch`)
+
+A growable array of bits worked on 64 at a time (`std::vector<bool>`, `std::bitset`). A zero set holds no bits;
+a copy owns its words; bit indices are unchecked, as element access is.
+
+| Group | Members |
+|---|---|
+| Create / size | `Init()`, `Init(int64 bits)` (all clear), copy, `Delete()`, `Count()` (bits held), `IsEmpty()`, `Resize(bits)` (new bits clear) |
+| Bits | `Test(i)`, `Set(i)`, `Clear(i)`, `Flip(i)`, `Assign(i, value)`, `SetAll()`, `ClearAll()` |
+| Queries | `CountSet()` (a population count a word), `Any()`, `None()`, `All()`, `NextSet(from)`, `NextClear(from)` (`-1` when there is none) |
+| Whole sets | `&=` / `And`, `|=` / `Or`, `^=` / `Xor`, `AndNot(other)` (a shorter set counts as clear past its end), `==`, `!=` |
 
 ### `Core::Queue<T>` and `Core::Stack<T>` (`queue.ch`, `stack.ch`)
 
@@ -155,6 +186,23 @@ protocols that require it (the WebSocket handshake; not for anything that must r
 The public name of the built-in braced-list view `__init_list<T>` (D-53): `data`, `size`, indexing and
 range-for. A parameter of this type takes a braced list, `Sum({ 1, 2, 3 })`; the containers' list
 creates take one.
+
+### Random numbers (`Random/random.ch`)
+
+`Core::Random` is xoshiro256** (256 bits of state, a period of 2^256 - 1, passes the statistical test suites)
+seeded through splitmix64: fast numbers for games, simulations and tests, not for secrets (those come from
+`Platform::RandomBytes` or `Crypto`). A generator is a value, never a global: seed it and pass it to what needs
+numbers, so a run replays from its seed. `Core::RandomSeed()` reads a seed from the operating system.
+
+| Members | |
+|---|---|
+| `Init(uint64 seed)` | the same numbers from the same seed on every machine |
+| `Next()`, `Next32()` | 64 and 32 random bits |
+| `Range(low, high)` | uniform in `[low, high)` with no modulo bias (Lemire's method); `low` for an empty range |
+| `Unit()`, `UnitFloat()`, `RangeDouble(low, high)` | uniform in `[0, 1)` (every `k / 2^53`, or `k / 2^24` as a float) and in `[low, high)` |
+| `Chance(p)`, `Normal(mean, deviation)` | true with probability `p`; a normal value (Marsaglia's polar method) |
+| `Shuffle(items, count)`, `Shuffle(array)` | Fisher-Yates: every order equally likely; elements relocate, never copied |
+| `Split()` | this generator jumps 2^128 steps ahead and the returned one starts where it was: one independent generator per thread or job |
 
 ### Sorting (`sort.ch`)
 
@@ -1066,11 +1114,11 @@ salts, ten malformed strings, a changed tag).
 
 ## 17. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 55 files, 538 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 58 files, 561 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

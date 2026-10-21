@@ -1,0 +1,130 @@
+include "hashset.ch"
+
+namespace Core
+{
+	template<T>
+	public HashSetIterator<T> HashSetIterator::Next() {
+		HashSetIterator<T> next = *this;
+		next.index += 1;
+		while (next.index < end && control[next.index] < (int8)0) next.index += 1;
+		return next;
+	}
+
+	template<T, Traits>
+	public void HashSet::Init(InitList<T> values) {
+		Reserve((int64)values.size);
+		for (int64 i = 0; i < (int64)values.size; ++i) Add(values[i]);
+	}
+
+	template<T, Traits>
+	public void HashSet::CopyFrom(const HashSet<T, Traits>& other) {
+		Reserve(other.table.count);
+		const T* from = other.values;
+		for (int64 i = NextLiveSlot(other.table, 0); i < other.table.capacity; i = NextLiveSlot(other.table, i + 1)) Add(from[i]);
+	}
+
+	template<T, Traits>
+	public void HashSet::Delete() {
+		Clear();
+		FreeTable(table, (void*)values, (int64)alignof(T));
+		values = nullptr;
+	}
+
+	template<T, Traits>
+	public void HashSet::Clear() {
+		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1)) destroy(&values[i]);
+		EmptyTable(table);
+	}
+
+	template<T, Traits>
+	private void HashSet::Rehash(int64 newCapacity) {
+		HashTable old = table;
+		T* from = values;
+		values = (T*)AllocateTable(table, newCapacity, (int64)sizeof(T), (int64)alignof(T));
+		T* to = values;
+		for (int64 i = NextLiveSlot(old, 0); i < old.capacity; i = NextLiveSlot(old, i + 1)) {
+			const uint64 hash = Traits::Hash(from[i]);
+			const int64 slot = FreeSlot(table, hash);
+			relocate(&to[slot], &from[i]);
+			Occupy(table, slot, hash);
+		}
+		FreeTable(old, (void*)from, (int64)alignof(T));
+	}
+
+	template<T, Traits>
+	public void HashSet::Reserve(int64 wanted) {
+		const int64 needed = CapacityFor(wanted);
+		if (needed > table.capacity) Rehash(needed);
+	}
+
+	template<T, Traits>
+	public bool HashSet::Add(T value) {
+		if (SlotOf(value) >= 0) return false;
+		if (NeedsRoom(table)) Rehash(GrownCapacity(table));
+		const uint64 hash = Traits::Hash(value);
+		const int64 slot = FreeSlot(table, hash);
+		Occupy(table, slot, hash);
+		new (&values[slot]) T(take(value));
+		return true;
+	}
+
+	template<T, Traits>
+	public const T* HashSet::Find(const T& value) const {
+		const int64 slot = SlotOf(value);
+		return slot >= 0 ? &values[slot] : nullptr;
+	}
+
+	template<T, Traits>
+	private bool HashSet::RemoveSlot(int64 slot) {
+		if (slot < 0) return false;
+		destroy(&values[slot]);
+		Vacate(table, slot);
+		return true;
+	}
+
+	template<T, Traits>
+	public void HashSet::UnionWith(const HashSet<T, Traits>& other) {
+		const T* from = other.values;
+		for (int64 i = NextLiveSlot(other.table, 0); i < other.table.capacity; i = NextLiveSlot(other.table, i + 1)) Add(from[i]);
+	}
+
+	template<T, Traits>
+	public void HashSet::IntersectWith(const HashSet<T, Traits>& other) {
+		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1))
+			if (!other.Contains(values[i])) RemoveSlot(i);
+	}
+
+	template<T, Traits>
+	public void HashSet::ExceptWith(const HashSet<T, Traits>& other) {
+		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1))
+			if (other.Contains(values[i])) RemoveSlot(i);
+	}
+
+	template<T, Traits>
+	public bool HashSet::IsSubsetOf(const HashSet<T, Traits>& other) const {
+		if (table.count > other.table.count) return false;
+		for (int64 i = NextLiveSlot(table, 0); i < table.capacity; i = NextLiveSlot(table, i + 1))
+			if (!other.Contains(values[i])) return false;
+		return true;
+	}
+
+	template<T, Traits>
+	public HashSetIterator<T> HashSet::Begin() const {
+		HashSetIterator<T> it;
+		it.values = values;
+		it.control = table.control;
+		it.end = table.capacity;
+		it.index = NextLiveSlot(table, 0);
+		return it;
+	}
+
+	template<T, Traits>
+	public HashSetIterator<T> HashSet::End() const {
+		HashSetIterator<T> it;
+		it.values = values;
+		it.control = table.control;
+		it.end = table.capacity;
+		it.index = table.capacity;
+		return it;
+	}
+}

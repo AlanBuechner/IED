@@ -31,5 +31,8 @@ namespace Testing
 
 		TEST_FUNC(Parser.Statements.CodeBlock.KeywordNames)
 		void TestKeywordNamesOneErrorEach();
+
+		TEST_FUNC(Parser.Statements.CodeBlock.Recovery)
+		void TestUnparsedStatementIsOneError();
 	};
 }

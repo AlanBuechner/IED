@@ -61,10 +61,12 @@ namespace Serialization
 		value.kind = ValueKind::Array;
 	}
 
-	// A HashMap whose keys are Core::String: its KeyValue's layout, from the type of its `entries`.
+	// A HashMap whose keys are Core::String: its KeyValue's layout, from the type of its `entries`, and where its
+	// entries pointer and its table are.
 	static void DescribeStringMap(ValueType& value) {
 		const Reflection::Field entries = value.type.FindField("entries");
-		if (!entries.IsValid()) return;
+		const Reflection::Field table = value.type.FindField("table");
+		if (!entries.IsValid() || !table.IsValid()) return;
 		const Reflection::Type entry = FindType(Pointee(entries.TypeName()).CStr());
 		const Reflection::Field key = entry.FindField("key");
 		const Reflection::Field mapped = entry.FindField("value");
@@ -73,6 +75,8 @@ namespace Serialization
 		value.valueOffset = (int64)mapped.Offset();
 		value.entrySize = (int64)entry.SizeOf();
 		value.entryAlign = (int64)entry.AlignOf();
+		value.entriesOffset = (int64)entries.Offset();
+		value.tableOffset = (int64)table.Offset();
 		value.kind = ValueKind::StringMap;
 	}
 
@@ -143,14 +147,21 @@ namespace Serialization
 		return array;
 	}
 
+	// The parts of the map at `at`, where reflection says they are: its entries pointer and its table.
+	static void** MapEntries(const ValueType& type, const void* at) { return (void**)((uint8*)at + type.entriesOffset); }
+	static Core::HashTable& MapTable(const ValueType& type, const void* at) { return *(Core::HashTable*)((uint8*)at + type.tableOffset); }
+
+	// A map's entry at `slot`: a KeyValue<Core::String, V> of `entrySize` bytes, its key first.
+	static uint8* EntryAt(void* entries, int64 slot, int64 entrySize) { return (uint8*)entries + slot * entrySize; }
+
 	// A JSON object in the map's own order.
 	static DomNode WriteStringMap(DomDoc& doc, const ValueType& type, const void* at) {
-		const Core::HashMapLayout* map = (const Core::HashMapLayout*)at;
+		const Core::HashTable& map = MapTable(type, at);
+		void* entries = *MapEntries(type, at);
 		const ValueType mapped = DescribeValue(type.element.CStr());
 		DomNode object = doc.NewObject();
-		for (int64 i = 0; i < map->capacity; ++i) {
-			if (map->states[i] != Core::kLiveSlot) continue;
-			const uint8* entry = (const uint8*)map->entries + i * type.entrySize;
+		for (int64 i = Core::NextLiveSlot(map, 0); i < map.capacity; i = Core::NextLiveSlot(map, i + 1)) {
+			const uint8* entry = EntryAt(entries, i, type.entrySize);
 			doc.AddMember(object, ((const Core::String*)entry)->View(), WriteValue(doc, mapped, (const void*)(entry + type.valueOffset)));
 		}
 		return object;
@@ -223,51 +234,37 @@ namespace Serialization
 	}
 
 	// Room for `members` keys in an empty map, as HashMap::Reserve gives it.
-	static void ReserveMap(Core::HashMapLayout* map, int64 members, const ValueType& type) {
-		int64 capacity = Core::NextPowerOfTwo((members * 4 + 2) / 3);
-		if (capacity < 8) capacity = 8;
-		const bool aligned = (uint64)type.entryAlign > Core::kRawAllocAlignment;
-		if (map->entries) {
-			gc_unregister_region(map->entries);
-			if (aligned) raw_free_aligned(map->entries);
-			else raw_free(map->entries);
-		}
-		if (map->states) raw_free((void*)map->states);
-		const uint64 bytes = (uint64)(capacity * type.entrySize);
-		map->entries = aligned ? raw_alloc_aligned(bytes, (uint64)type.entryAlign) : raw_alloc(bytes);
-		memset(map->entries, 0, bytes);
-		gc_register_region(map->entries, bytes);
-		map->states = (uint8*)raw_alloc((uint64)capacity);
-		memset((void*)map->states, 0, (uint64)capacity);
-		map->capacity = capacity;
-		map->used = 0;
+	static void ReserveMap(Core::HashTable& map, void** entries, int64 members, const ValueType& type) {
+		Core::FreeTable(map, *entries, type.entryAlign);
+		*entries = Core::AllocateTable(map, Core::CapacityFor(members), type.entrySize, type.entryAlign);
 	}
 
-	// Where `key` goes: a free slot on its probe, or -1 when it is there already (the first of duplicate keys stays).
-	static int64 SlotFor(const Core::HashMapLayout* map, Core::StringView key, int64 entrySize) {
-		const int64 mask = map->capacity - 1;
-		for (int64 i = (int64)key.Hash() & mask;; i = (i + 1) & mask) {
-			if (map->states[i] != Core::kLiveSlot) return i;
-			if (((const Core::String*)((const uint8*)map->entries + i * entrySize))->View() == key) return -1;
-		}
-		return -1;
+	// The live slot holding `key`, or -1; the key hashes as a Core::String does.
+	static int64 SlotOfKey(const Core::HashTable& map, void* entries, Core::StringView key, int64 entrySize) {
+		return Core::FindSlot(map, key.Hash(), [entries, key, entrySize](int64 slot) -> bool { return ((const Core::String*)EntryAt(entries, slot, entrySize))->View() == key; });
+	}
+
+	// A new entry for `key` (the map has room), its value zero.
+	static uint8* AddKey(Core::HashTable& map, void* entries, Core::StringView key, int64 entrySize) {
+		const uint64 hash = key.Hash();
+		const int64 slot = Core::FreeSlot(map, hash);
+		Core::Occupy(map, slot, hash);
+		uint8* entry = EntryAt(entries, slot, entrySize);
+		new ((Core::String*)entry) Core::String(key);
+		return entry;
 	}
 
 	static bool ReadStringMap(const DomNode& node, const ValueType& type, void* at) {
-		Core::HashMapLayout* map = (Core::HashMapLayout*)at;
-		if (node.Kind() != DomKind::Object || map->count != 0) return false;
+		Core::HashTable& map = MapTable(type, at);
+		void** entries = MapEntries(type, at);
+		if (node.Kind() != DomKind::Object || map.count != 0) return false;
 		if (node.Count() == 0) return true;
 		const ValueType mapped = DescribeValue(type.element.CStr());
-		ReserveMap(map, node.Count(), type);
+		ReserveMap(map, entries, node.Count(), type);
 		for (int64 i = 0; i < node.Count(); ++i) {
 			const Core::StringView key = node.KeyAt(i);
-			const int64 slot = SlotFor(map, key, type.entrySize);
-			if (slot < 0) continue;
-			uint8* entry = (uint8*)map->entries + slot * type.entrySize;
-			new ((Core::String*)entry) Core::String(key);
-			map->states[slot] = Core::kLiveSlot;
-			map->count += 1;
-			map->used += 1;
+			if (SlotOfKey(map, *entries, key, type.entrySize) >= 0) continue;   // the first of duplicate keys stays
+			uint8* entry = AddKey(map, *entries, key, type.entrySize);
 			if (!ReadValue(node.ValueAt(i), mapped, (void*)(entry + type.valueOffset))) return false;
 		}
 		return true;

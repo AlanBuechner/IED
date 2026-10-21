@@ -1,0 +1,107 @@
+// Core::BitSet: single bits, counting, searching, resizing, whole-set operations, copies and equality.
+
+include "bedrock.ch"
+
+static int64 CountByTest(const Core::BitSet& bits) {
+	int64 total = 0;
+	for (int64 i = 0; i < bits.Count(); ++i) if (bits.Test(i)) total += 1;
+	return total;
+}
+
+[test("bitset")]
+class BitSetTests {
+	[test("single_bits")]
+	public static void TestSingleBits() {
+		Core::BitSet bits(130);
+		assert_eq((int64)130, bits.Count(), "holds 130 bits");
+		assert_true(bits.None(), "every new bit is clear");
+		bits.Set(0);
+		bits.Set(63);
+		bits.Set(64);
+		bits.Set(129);
+		assert_true(bits.Test(0) && bits.Test(63) && bits.Test(64) && bits.Test(129), "set across word boundaries");
+		assert_true(!bits.Test(1) && !bits.Test(65), "neighbours stay clear");
+		bits.Clear(63);
+		assert_true(!bits.Test(63), "cleared");
+		bits.Flip(5);
+		bits.Flip(64);
+		assert_true(bits.Test(5) && !bits.Test(64), "flipped both ways");
+		bits.Assign(7, true);
+		bits.Assign(0, false);
+		assert_true(bits.Test(7) && !bits.Test(0), "assigned");
+		assert_eq((int64)3, bits.CountSet(), "5, 7 and 129");
+		assert_eq(CountByTest(bits), bits.CountSet(), "CountSet agrees with Test");
+	}
+
+	[test("search")]
+	public static void TestSearch() {
+		Core::BitSet bits(200);
+		assert_eq((int64)-1, bits.NextSet(0), "nothing set");
+		assert_eq((int64)0, bits.NextClear(0), "the first clear bit");
+		bits.Set(3);
+		bits.Set(70);
+		bits.Set(199);
+		assert_eq((int64)3, bits.NextSet(0), "the first");
+		assert_eq((int64)3, bits.NextSet(3), "from itself");
+		assert_eq((int64)70, bits.NextSet(4), "across a word");
+		assert_eq((int64)199, bits.NextSet(71), "the last bit");
+		assert_eq((int64)-1, bits.NextSet(200), "past the end");
+		int64 visited = 0;
+		for (int64 i = bits.NextSet(0); i >= 0; i = bits.NextSet(i + 1)) visited += 1;
+		assert_eq((int64)3, visited, "the loop visits every set bit");
+		bits.SetAll();
+		assert_true(bits.All(), "all set");
+		assert_eq((int64)200, bits.CountSet(), "the bits past the end are not counted");
+		assert_eq((int64)-1, bits.NextClear(0), "no clear bit");
+		bits.Clear(150);
+		assert_eq((int64)150, bits.NextClear(0), "the one clear bit");
+		bits.ClearAll();
+		assert_true(bits.None(), "all clear");
+	}
+
+	[test("resize")]
+	public static void TestResize() {
+		Core::BitSet bits;
+		assert_true(bits.IsEmpty() && bits.None() && bits.All(), "a zero set holds no bits");
+		bits.Resize(10);
+		bits.SetAll();
+		bits.Resize(100);
+		assert_eq((int64)10, bits.CountSet(), "grown bits are clear");
+		bits.Resize(5);
+		assert_eq((int64)5, bits.CountSet(), "shrunk to five");
+		bits.Resize(64);
+		assert_eq((int64)5, bits.CountSet(), "bits cut off and grown back are clear");
+		bits.Resize(-3);
+		assert_true(bits.IsEmpty(), "a negative size is none");
+	}
+
+	[test("operations")]
+	public static void TestOperations() {
+		Core::BitSet a(100);
+		Core::BitSet b(100);
+		for (int64 i = 0; i < 100; i += 2) a.Set(i);
+		for (int64 i = 0; i < 100; i += 3) b.Set(i);
+		Core::BitSet both = a;
+		both &= b;
+		assert_eq((int64)17, both.CountSet(), "multiples of six");
+		Core::BitSet either = a;
+		either |= b;
+		assert_eq((int64)67, either.CountSet(), "multiples of two or three");
+		Core::BitSet one = a;
+		one ^= b;
+		assert_eq((int64)50, one.CountSet(), "of two or three but not six");
+		Core::BitSet only = a;
+		only.AndNot(b);
+		assert_eq((int64)33, only.CountSet(), "even, not of three");
+		Core::BitSet shorter(10);
+		shorter.SetAll();
+		Core::BitSet masked = a;
+		masked &= shorter;
+		assert_eq((int64)5, masked.CountSet(), "a shorter set is clear past its end");
+		Core::BitSet copy = a;
+		assert_true(copy == a, "a copy is equal");
+		copy.Flip(99);
+		assert_true(copy != a, "and its own");
+		assert_true(a.Test(98) && !a.Test(99), "the original kept its bits");
+	}
+}

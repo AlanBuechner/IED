@@ -14,9 +14,12 @@ namespace Scripting
 	class ParserState
 	{
 	public:
+		// A parse reports one error a place: what follows a syntax error at the token it stopped on is its consequence.
 		ParserState(Lexer& lexer, ErrorTracker& errorTracker, CompilerMessageQueue* messageQueue = nullptr)
 			: m_Lexer(lexer), m_ErrorTracker(errorTracker), m_MessageQueue(messageQueue)
-		{}
+		{
+			errorTracker.ReportOncePerLocation();
+		}
 
 		ParserState(const ParserState&)            = delete;
 		ParserState& operator=(const ParserState&) = delete;

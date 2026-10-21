@@ -26,6 +26,8 @@ namespace Serialization
 		public int64 valueOffset;        // StringMap: where a KeyValue<Core::String, V>'s value starts
 		public int64 entrySize;          // StringMap: a KeyValue's size and alignment
 		public int64 entryAlign;
+		public int64 entriesOffset;      // StringMap: where the map's entries pointer and its Core::HashTable are
+		public int64 tableOffset;
 	}
 
 	// What the type named `name` is to the serializers.

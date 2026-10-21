@@ -1,15 +1,15 @@
-// Hashing for the containers: FNV-1a over bytes, a mixer for integers, and KeyTraits - how a HashMap
+// Hashing for the containers: a fast hash of bytes, a mixer for integers, and KeyTraits - how a HashMap or HashSet
 // hashes and compares keys of a type.
 
 namespace Core
 {
-	// FNV-1a, 64-bit: xor each byte in, then multiply.
-	uint64 HashBytes(const char* bytes, int64 length) {
-		const uint8* p = (const uint8*)bytes;
-		uint64 hash = 14695981039346656037u;
-		for (int64 i = 0; i < length; ++i) hash = (hash ^ (uint64)p[i]) * 1099511628211u;
-		return hash;
-	}
+	// A 64-bit hash of bytes in the manner of wyhash: 16 bytes a step (48 for long input), each pair of words folded
+	// through a 128-bit product. Every bit of the result depends on every byte; not for anything that must resist a
+	// forger (Crypto/ has those).
+	uint64 HashBytes(const char* bytes, int64 length);
+
+	// The 128-bit product of `a` and `b` with its halves xored: the mixing step of the byte hash.
+	uint64 FoldedMultiply(uint64 a, uint64 b) { return a * b ^ mul_high(a, b); }
 
 	// The splitmix64 finalizer: spreads an integer's bits, so neighbouring keys land in different slots.
 	uint64 HashInteger(uint64 value) {
@@ -20,9 +20,8 @@ namespace Core
 
 	// The smallest power of two that is at least `value` (and at least 1).
 	int64 NextPowerOfTwo(int64 value) {
-		int64 power = 1;
-		while (power < value) power = power * 2;
-		return power;
+		if (value <= 1) return 1;
+		return (int64)1 << (64 - bit_leading_zeros((uint64)(value - 1)));
 	}
 
 	// How a HashMap hashes and compares keys of type K. The primary asks K itself: its [operator("hash")]

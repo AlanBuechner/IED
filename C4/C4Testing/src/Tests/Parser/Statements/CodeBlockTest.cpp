@@ -1,6 +1,7 @@
 #include "CodeBlockTest.h"
 #include "SourceManager/Source.h"
 #include "Compiler/ErrorTracker.h"
+#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 
 namespace Testing
 {
@@ -106,6 +107,28 @@ namespace Testing
 		TEST_ASSERT(errors[1].message == "'asm' is a keyword: it cannot name a variable, parameter or function");
 		TEST_ASSERT(errors[2].message == "'this' is a keyword: it cannot name a variable, parameter or function");
 		TEST_ASSERT(errors[3].message == "'new' is a keyword: it cannot name a variable, parameter or function");
+		TEST_PASSED();
+	}
+
+	// A statement no parser takes is one error, and the block goes on after it (BUG-311): it once reported again at the
+	// token it stopped on, then at nearly every token after it.
+	void CodeBlockTest::TestUnparsedStatementIsOneError()
+	{
+		auto stream = Scripting::Source::FromMemory(
+			"{ int32 x = 1; return alias + 1; int32 z = Apply([&alias](int32 v) -> int32 { return v + x; }); ] ) garbage ( ; int32 y = 2; }");
+		Scripting::Lexer lexer(*stream, 0);
+		Scripting::ErrorTracker errorTracker;
+		Scripting::ParserState state(lexer, errorTracker);
+
+		auto node = Scripting::CodeBlockNode::TryParse(state);
+		TEST_ASSERT(node != nullptr);
+		const auto& errors = errorTracker.GetErrors();
+		TEST_ASSERT(errors.Count() == 3);
+		TEST_ASSERT(errors[0].message == "'alias' is a keyword: it cannot name a variable, parameter or function");
+		TEST_ASSERT(errors[1].message == "Expected a capture in lambda, got 'alias'");
+		TEST_ASSERT(errors[2].message == "Expected expression, got ']'");
+		const auto* last = dynamic_cast<const Scripting::VariableDefinitionNode*>(node->GetStatements()[node->StatementCount() - 1].Get());
+		TEST_ASSERT(last != nullptr && last->GetNameToken().GetText() == "y"); // the block went on after the bad statements
 		TEST_PASSED();
 	}
 }

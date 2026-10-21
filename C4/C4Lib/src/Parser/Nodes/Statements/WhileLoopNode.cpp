@@ -1,6 +1,6 @@
 #include "WhileLoopNode.h"
 #include "CodeBlockNode.h"
-#include "IfStatementNode.h" // for ParseAnyStatement forward
+#include "StatementParser.h"
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 

@@ -1,6 +1,6 @@
 #include "SimpleStatementNodes.h"
 #include "CodeBlockNode.h"
-#include "IfStatementNode.h" // for ParseAnyStatement forward
+#include "StatementParser.h"
 #include "ExpressionStatementNode.h"
 #include "Parser/PrattParser.h"
 #include "../Expressions/BracedInitializerNode.h"

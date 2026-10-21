@@ -349,19 +349,21 @@ Baselines (2026-10-21, ms; ratio < 1 means Bedrock is faster):
 
 | Kernel | Bedrock | C++ | Bedrock/C++ |
 |---|---|---|---|
-| map_int_insert | 32.4 | 92.0 | 0.35 |
-| map_int_find_hit | 8.9 | 22.7 | 0.39 |
-| map_int_find_miss | 11.5 | 26.2 | 0.44 |
-| map_int_remove | 3.3 | 36.1 | 0.09 |
-| map_text_insert | 41.4 | 42.7 | 0.97 |
-| map_text_find | 41.1 | 57.3 | 0.72 |
-| array_push_sum | 16.1 | 22.5 | 0.72 |
-| sort_int32 | 104.3 | 107.4 | 0.97 |
+| map_int_insert | 22.4 | 98.5 | 0.23 |
+| map_int_find_hit | 7.4 | 24.9 | 0.30 |
+| map_int_find_miss | 3.4 | 27.0 | 0.13 |
+| map_int_remove | 3.2 | 38.6 | 0.08 |
+| map_text_insert | 22.3 | 40.9 | 0.55 |
+| map_text_find | 32.1 | 50.9 | 0.63 |
+| array_push_sum | 16.5 | 21.9 | 0.75 |
+| sort_int32 | 96.7 | 106.2 | 0.91 |
 | text_append_int | 16.9 | 12.6 | 1.34 |
 | text_format_double | 34.8 | 34.2 | 1.02 |
 | text_parse_double | 77.3 | 73.7 | 1.05 |
 
-The shortest double form took 4,851 ms for the million doubles before the number text moved to `<charconv>`
+Before the Swiss-style table and the wyhash-style byte hash (linear probing over a separate state byte per slot,
+FNV-1a), the map kernels took 32.4, 8.9, 11.5, 3.3, 41.4 and 41.1 ms. The shortest double form took 4,851 ms for the
+million doubles before the number text moved to `<charconv>`
 (it printed and read back up to 17 times per number), and the integers 31.4 ms before they were written two digits
 at a time.
 

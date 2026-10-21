@@ -16,15 +16,18 @@ namespace Scripting
 		error.message = message;
 		error.severity = severity;
 
-		if (AreErrorsSuppressed())
-		{
-			// Buffer into the innermost suppression frame instead of discarding, so a
-			// committed speculative parse can still surface real diagnostics.
-			m_SuppressFrames.Back().buffered.Push(error);
-			return;
-		}
+		// Suppressed errors go to the innermost suppression frame instead of being discarded, so a committed
+		// speculative parse can still surface real diagnostics.
+		Core::Vector<CompilationError>& target = AreErrorsSuppressed() ? m_SuppressFrames.Back().buffered : m_Errors;
+		if (m_OncePerLocation && FollowsFrom(target, error)) return;
+		target.Push(error);
+	}
 
-		m_Errors.Push(error);
+	bool ErrorTracker::FollowsFrom(const Core::Vector<CompilationError>& reported, const CompilationError& error)
+	{
+		if (reported.Empty() || error.severity == ErrorSeverity::Warning) return false;
+		const CompilationError& last = reported.Back();
+		return last.severity != ErrorSeverity::Warning && last.location == error.location;
 	}
 
 	void ErrorTracker::SuppressErrors()

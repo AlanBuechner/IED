@@ -1,0 +1,28 @@
+// BUG-310: a destructuring assignment was rejected as the body of an if, else, loop or case without braces; every
+// single-statement body takes the statements a block takes. main returns the failures.
+[int32, int32] Pair(int32 x) { return [x, x * 2]; }
+
+int32 main() {
+	int32 failures = 0;
+	int32 a = 0;
+	int32 b = 0;
+	if (a == 0) [a, b] = Pair(1);
+	failures += a == 1 && b == 2 ? 0 : 1;
+	if (a == 5) [a, b] = Pair(9);
+	else [a, b] = Pair(3);
+	failures += a == 3 && b == 6 ? 0 : 1;
+	while (a < 6) [a, b] = Pair(a + 1);
+	failures += a == 6 && b == 12 ? 0 : 1;
+	for (int32 i = 0; i < 2; ++i) [a, b] = Pair(a + 10);
+	failures += a == 26 && b == 52 ? 0 : 1;
+	do [a, b] = Pair(a - 1); while (a > 20);
+	failures += a == 20 && b == 40 ? 0 : 1;
+	switch (a) {
+		case 20: [a, b] = Pair(100); break;
+		default: [a, b] = Pair(0); break;
+	}
+	failures += a == 100 && b == 200 ? 0 : 1;
+	if (a == 100) [a, int32 c] = Pair(7);
+	failures += a == 7 ? 0 : 1;
+	return failures;
+}

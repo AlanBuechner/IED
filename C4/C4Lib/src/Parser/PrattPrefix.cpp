@@ -1,6 +1,7 @@
 #include "Parser/PrattParser.h"
 #include "Lexer/Lexer.h"
 #include "Core/StringFormat.h"
+#include "Parser/UnexpectedToken.h"
 #include "Nodes/Expressions/BinaryExpressionNode.h"
 #include "Nodes/Expressions/UnaryExpressionNode.h"
 #include "Nodes/Expressions/TernaryExpressionNode.h"
@@ -369,10 +370,10 @@ namespace Scripting
 			return node;
 		}
 
-		// --- Nothing matched ---
+		// --- Nothing matched --- (a keyword here was meant as a name: `return alias + 1;`)
 		state.GetErrorTracker().AddError(
 			token.GetStartLocation(),
-			Core::StringFormat::Format("Expected expression, got '{0}'", token.GetText()),
+			Token::IsKeyword(token.GetType()) ? KeywordNameMessage(token) : Core::StringFormat::Format("Expected expression, got '{0}'", token.GetText()),
 			ErrorSeverity::Error);
 		return nullptr;
 	}

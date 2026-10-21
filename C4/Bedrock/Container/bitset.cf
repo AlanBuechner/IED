@@ -1,0 +1,111 @@
+include "bitset.ch"
+
+namespace Core
+{
+	const int64 kBitsPerWord = 64;
+
+	static int64 WordsFor(int64 bits) { return (bits + kBitsPerWord - 1) / kBitsPerWord; }
+
+	void BitSet::CopyFrom(const BitSet& other) {
+		Resize(other.bitCount);
+		if (other.bitCount > 0) memcpy((void*)words, (void*)other.words, (uint64)(WordCount() * 8));
+	}
+
+	void BitSet::Delete() {
+		raw_free((void*)words);
+		words = nullptr;
+		bitCount = 0;
+		wordCapacity = 0;
+	}
+
+	void BitSet::Resize(int64 bits) {
+		if (bits < 0) bits = 0;
+		const int64 needed = WordsFor(bits);
+		if (needed > wordCapacity) {
+			int64 grown = wordCapacity * 2 > needed ? wordCapacity * 2 : needed;
+			uint64* larger = (uint64*)raw_alloc((uint64)(grown * 8));
+			memset((void*)larger, 0, (uint64)(grown * 8));
+			if (words) memcpy((void*)larger, (void*)words, (uint64)(WordCount() * 8));
+			raw_free((void*)words);
+			words = larger;
+			wordCapacity = grown;
+		}
+		const int64 oldWords = WordCount();
+		if (needed > oldWords) memset((void*)(words + oldWords), 0, (uint64)((needed - oldWords) * 8));
+		bitCount = bits;
+		ClearTail();
+	}
+
+	void BitSet::ClearTail() {
+		const int64 used = bitCount & (kBitsPerWord - 1);
+		if (used != 0) words[WordCount() - 1] &= ((uint64)1 << used) - 1u;
+	}
+
+	void BitSet::SetAll() {
+		if (bitCount == 0) return;
+		memset((void*)words, 255, (uint64)(WordCount() * 8));
+		ClearTail();
+	}
+
+	void BitSet::ClearAll() {
+		if (bitCount > 0) memset((void*)words, 0, (uint64)(WordCount() * 8));
+	}
+
+	int64 BitSet::CountSet() const {
+		int64 total = 0;
+		for (int64 i = 0; i < WordCount(); ++i) total += (int64)bit_count(words[i]);
+		return total;
+	}
+
+	int64 BitSet::NextSet(int64 from) const {
+		if (from < 0) from = 0;
+		if (from >= bitCount) return -1;
+		int64 word = from >> 6;
+		uint64 bits = words[word] & ((uint64)0 - ((uint64)1 << (from & 63)));
+		while (bits == 0u) {
+			word += 1;
+			if (word >= WordCount()) return -1;
+			bits = words[word];
+		}
+		return word * kBitsPerWord + (int64)bit_trailing_zeros(bits);
+	}
+
+	int64 BitSet::NextClear(int64 from) const {
+		if (from < 0) from = 0;
+		if (from >= bitCount) return -1;
+		int64 word = from >> 6;
+		uint64 bits = ~words[word] & ((uint64)0 - ((uint64)1 << (from & 63)));
+		while (bits == 0u) {
+			word += 1;
+			if (word >= WordCount()) return -1;
+			bits = ~words[word];
+		}
+		const int64 found = word * kBitsPerWord + (int64)bit_trailing_zeros(bits);
+		return found < bitCount ? found : -1;
+	}
+
+	static uint64 WordAt(const uint64* words, int64 count, int64 index) { return index < count ? words[index] : 0u; }
+
+	void BitSet::And(const BitSet& other) {
+		for (int64 i = 0; i < WordCount(); ++i) words[i] &= WordAt(other.words, other.WordCount(), i);
+	}
+
+	void BitSet::Or(const BitSet& other) {
+		for (int64 i = 0; i < WordCount(); ++i) words[i] |= WordAt(other.words, other.WordCount(), i);
+		ClearTail();
+	}
+
+	void BitSet::Xor(const BitSet& other) {
+		for (int64 i = 0; i < WordCount(); ++i) words[i] ^= WordAt(other.words, other.WordCount(), i);
+		ClearTail();
+	}
+
+	void BitSet::AndNot(const BitSet& other) {
+		for (int64 i = 0; i < WordCount(); ++i) words[i] &= ~WordAt(other.words, other.WordCount(), i);
+	}
+
+	bool BitSet::Equals(const BitSet& other) const {
+		if (bitCount != other.bitCount) return false;
+		return bitCount == 0 || memcmp((void*)words, (void*)other.words, (uint64)(WordCount() * 8)) == 0;
+	}
+}

@@ -1,0 +1,70 @@
+include "hash.ch"
+
+namespace Core
+{
+	// Odd constants with their bits spread evenly, one per lane of the long-input loop.
+	const uint64 kHashSecret0 = 0x2d358dccaa6c78a5u;
+	const uint64 kHashSecret1 = 0x8bb84b93962eacc9u;
+	const uint64 kHashSecret2 = 0x4b33a62ed433d4a3u;
+	const uint64 kHashSecret3 = 0x4d5a2da51de1aa47u;
+	const int64 kShortInput = 16;
+	const int64 kLongStep = 48;
+
+	// Unaligned little-endian reads.
+	static uint64 Read64(const uint8* p) {
+		uint64 word;
+		memcpy((void*)&word, (void*)p, 8u);
+		return word;
+	}
+
+	static uint64 Read32(const uint8* p) {
+		uint32 word;
+		memcpy((void*)&word, (void*)p, 4u);
+		return (uint64)word;
+	}
+
+	// Up to 16 bytes as two words: overlapping reads from both ends, so every byte is in one.
+	static [uint64, uint64] ShortWords(const uint8* p, int64 length) {
+		if (length >= 4) {
+			const int64 middle = (length >> 3) << 2;
+			return [(Read32(p) << 32) | Read32(p + middle), (Read32(p + length - 4) << 32) | Read32(p + length - 4 - middle)];
+		}
+		if (length > 0) return [((uint64)p[0] << 16) | ((uint64)p[length >> 1] << 8) | (uint64)p[length - 1], 0u];
+		return [0u, 0u];
+	}
+
+	// More than 16 bytes: three lanes 48 bytes at a time, then 16, folded into the seed; the last 16 bytes are the words.
+	static [uint64, uint64, uint64] LongWords(const uint8* p, int64 length, uint64 seed) {
+		int64 left = length;
+		if (left > kLongStep) {
+			uint64 second = seed;
+			uint64 third = seed;
+			while (left > kLongStep) {
+				seed = FoldedMultiply(Read64(p) ^ kHashSecret1, Read64(p + 8) ^ seed);
+				second = FoldedMultiply(Read64(p + 16) ^ kHashSecret2, Read64(p + 24) ^ second);
+				third = FoldedMultiply(Read64(p + 32) ^ kHashSecret3, Read64(p + 40) ^ third);
+				p += kLongStep;
+				left -= kLongStep;
+			}
+			seed ^= second ^ third;
+		}
+		while (left > kShortInput) {
+			seed = FoldedMultiply(Read64(p) ^ kHashSecret1, Read64(p + 8) ^ seed);
+			p += kShortInput;
+			left -= kShortInput;
+		}
+		return [Read64(p + left - 16), Read64(p + left - 8), seed];
+	}
+
+	uint64 HashBytes(const char* bytes, int64 length) {
+		const uint8* p = (const uint8*)bytes;
+		uint64 seed = FoldedMultiply(kHashSecret0, kHashSecret1);
+		uint64 a = 0u;
+		uint64 b = 0u;
+		if (length <= kShortInput) [a, b] = ShortWords(p, length);
+		else [a, b, seed] = LongWords(p, length, seed);
+		a ^= kHashSecret1;
+		b ^= seed;
+		return FoldedMultiply((a * b) ^ kHashSecret0 ^ (uint64)length, mul_high(a, b) ^ kHashSecret1);
+	}
+}

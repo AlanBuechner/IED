@@ -1,19 +1,6 @@
 #include "IfStatementNode.h"
-#include "AsmStatementNode.h"
 #include "CodeBlockNode.h"
-#include "ExpressionStatementNode.h"
-#include "EmptyStatementNode.h"
-#include "ForLoopNode.h"
-#include "WhileLoopNode.h"
-#include "SimpleStatementNodes.h"
-#include "SwitchStatementNode.h"
-#include "TryCatchNode.h"
-#include "../Declarations/VariableDefinitionNode.h"
-#include "../Declarations/FunctionDefinitionNode.h"
-#include "../Declarations/ObjectDefinitionNode.h"
-#include "../Declarations/EnumDefinitionNode.h"
-#include "../Declarations/UnionDefinitionNode.h"
-#include "../Declarations/AliasDefinitionNode.h"
+#include "StatementParser.h"
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 
@@ -22,47 +9,6 @@ namespace Scripting
 	std::span<const Ref<AstNode>> IfStatementNode::Children() const
 	{
 		return m_Children;
-	}
-
-	Ref<AstNode> ParseAnyStatement(ParserState& state)
-	{
-#define TRY_PARSE_STMT(type) \
-		{ auto node = type::TryParse(state); \
-		if (node != nullptr) return node; }
-
-		// Declarations first (can appear in blocks)
-		TRY_PARSE_STMT(VariableDefinitionNode);
-		TRY_PARSE_STMT(FunctionDefinitionNode);
-		TRY_PARSE_STMT(ObjectDefinitionNode);
-		TRY_PARSE_STMT(EnumDefinitionNode);
-		TRY_PARSE_STMT(UnionDefinitionNode);
-		TRY_PARSE_STMT(AliasDefinitionNode);
-
-		// Keyword-based control flow (keyword first)
-		TRY_PARSE_STMT(IfStatementNode);
-		TRY_PARSE_STMT(WhileLoopNode);
-		TRY_PARSE_STMT(ForLoopNode);
-		TRY_PARSE_STMT(DoWhileLoopNode);
-		TRY_PARSE_STMT(SwitchStatementNode);
-		TRY_PARSE_STMT(TryCatchNode);
-		TRY_PARSE_STMT(ReturnStatementNode);
-		TRY_PARSE_STMT(BreakStatementNode);
-		TRY_PARSE_STMT(ContinueStatementNode);
-		TRY_PARSE_STMT(DeferStatementNode);
-		TRY_PARSE_STMT(AsmStatementNode);
-		TRY_PARSE_STMT(FallthroughStatementNode);
-		TRY_PARSE_STMT(GotoStatementNode);
-		TRY_PARSE_STMT(ThrowStatementNode);
-
-		// Structural statements
-		TRY_PARSE_STMT(CodeBlockNode);          // standalone scope {...}
-		TRY_PARSE_STMT(LabelStatementNode);     // identifier: statement
-		TRY_PARSE_STMT(EmptyStatementNode);     // bare semicolon
-		TRY_PARSE_STMT(ExpressionStatementNode);// catch-all expression + ;
-
-#undef TRY_PARSE_STMT
-
-		return nullptr;
 	}
 
 	Ref<IfStatementNode> IfStatementNode::TryParse(ParserState& state)

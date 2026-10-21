@@ -1,6 +1,6 @@
 #include "ForLoopNode.h"
 #include "CodeBlockNode.h"
-#include "IfStatementNode.h" // for ParseAnyStatement forward
+#include "StatementParser.h"
 #include "../Declarations/VariableDefinitionNode.h"
 #include "../Declarations/NamespaceQualifiedNameNode.h"
 #include "../Declarations/QualTypeNode.h"
@@ -12,6 +12,12 @@ namespace Scripting
 	std::span<const Ref<AstNode>> ForLoopNode::Children() const
 	{
 		return m_Children;
+	}
+
+	// A named type or a signature type (`func<void()>`, `funcptr<int32(int32)>`, BUG-312), as a loop variable's type is.
+	static bool NamesAType(const QualTypeNode& type)
+	{
+		return (type.BaseName() && !type.BaseName()->GetSegments().Empty()) || type.FuncPtrType();
 	}
 
 	Ref<ForLoopNode> ForLoopNode::TryParse(ParserState& state)
@@ -61,14 +67,13 @@ namespace Scripting
 		//    then an identifier, then a ':' - all within one undo scope so a failed probe
 		//    leaves the lexer exactly where classic-for parsing expects it.
 		Token first = lexer.PeekCompound();
-		if (first.GetType() == TokenType::Identifier || first.GetType() == TokenType::Const)
+		if (first.GetType() == TokenType::Identifier || first.GetType() == TokenType::Const || first.GetType() == TokenType::FunPtr)
 		{
 			auto undo = LexerUndoScope(lexer);
 
 			auto varType = QualTypeNode::TryParse(state);
 			Token afterType = lexer.PeekCompound();
-			if (varType && varType->BaseName() && !varType->BaseName()->GetSegments().Empty() &&
-				afterType.GetType() == TokenType::Identifier)
+			if (varType && NamesAType(*varType) && afterType.GetType() == TokenType::Identifier)
 			{
 				lexer.NextCompoundToken(); // consume the loop variable name
 				Token afterName = lexer.PeekCompound();

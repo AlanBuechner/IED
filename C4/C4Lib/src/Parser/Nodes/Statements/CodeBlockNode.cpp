@@ -1,21 +1,6 @@
 #include "CodeBlockNode.h"
 #include "Parser/UnexpectedToken.h"
-#include "AsmStatementNode.h"
-#include "DestructuringNode.h"
-#include "EmptyStatementNode.h"
-#include "ExpressionStatementNode.h"
-#include "IfStatementNode.h"
-#include "WhileLoopNode.h"
-#include "ForLoopNode.h"
-#include "SimpleStatementNodes.h"
-#include "SwitchStatementNode.h"
-#include "TryCatchNode.h"
-#include "../Declarations/VariableDefinitionNode.h"
-#include "../Declarations/FunctionDefinitionNode.h"
-#include "../Declarations/ObjectDefinitionNode.h"
-#include "../Declarations/EnumDefinitionNode.h"
-#include "../Declarations/UnionDefinitionNode.h"
-#include "../Declarations/AliasDefinitionNode.h"
+#include "StatementParser.h"
 #include "Core/StringFormat.h"
 
 namespace Scripting
@@ -88,51 +73,14 @@ namespace Scripting
 			if (token.GetType() == TokenType::CloseCurl)
 				break;
 
-#define TRY_PARSE_STATEMENT(type) \
-		{ auto node = type::TryParse(state); \
-	if (node != nullptr) { m_Statements.Push(node); continue; } }
+			if (Ref<AstNode> statement = ParseAnyStatement(state)) { m_Statements.Push(statement); continue; }
 
-	// Keyword-based control flow statements FIRST (they have unique keyword tokens)
-		TRY_PARSE_STATEMENT(IfStatementNode);
-		TRY_PARSE_STATEMENT(WhileLoopNode);
-		TRY_PARSE_STATEMENT(ForLoopNode);
-		TRY_PARSE_STATEMENT(DoWhileLoopNode);
-		TRY_PARSE_STATEMENT(SwitchStatementNode);
-		TRY_PARSE_STATEMENT(TryCatchNode);
-		TRY_PARSE_STATEMENT(ReturnStatementNode);
-		TRY_PARSE_STATEMENT(BreakStatementNode);
-		TRY_PARSE_STATEMENT(ContinueStatementNode);
-		TRY_PARSE_STATEMENT(DeferStatementNode);
-		TRY_PARSE_STATEMENT(AsmStatementNode);
-		TRY_PARSE_STATEMENT(FallthroughStatementNode);
-		TRY_PARSE_STATEMENT(GotoStatementNode);
-		TRY_PARSE_STATEMENT(ThrowStatementNode);
-
-	// Structural statements
-		TRY_PARSE_STATEMENT(LabelStatementNode);     // identifier: statement
-		TRY_PARSE_STATEMENT(CodeBlockNode);          // standalone scope {...}
-		TRY_PARSE_STATEMENT(EmptyStatementNode);     // bare semicolon
-		TRY_PARSE_STATEMENT(DestructuringNode);      // [a, float b] = F(); - before an annotated declaration's `[`
-
-	// Declarations (greedy - match after keywords to avoid consuming identifiers like 'goto')
-	TRY_PARSE_STATEMENT(VariableDefinitionNode);
-	TRY_PARSE_STATEMENT(FunctionDefinitionNode);
-	TRY_PARSE_STATEMENT(ObjectDefinitionNode);
-	TRY_PARSE_STATEMENT(EnumDefinitionNode);
-	TRY_PARSE_STATEMENT(UnionDefinitionNode);
-	TRY_PARSE_STATEMENT(AliasDefinitionNode);
-
-	// Catch-all expression statement (last)
-		TRY_PARSE_STATEMENT(ExpressionStatementNode);
-
-#undef TRY_PARSE_STATEMENT
-
-			// No parser matched - report an error, then skip the token.
+			// No parser matched - report an error, then skip the rest of the statement.
 			errorTracker.AddError(
 				token.GetStartLocation(),
 				UnexpectedTokenMessage(lexer),
 				ErrorSeverity::Error);
-			lexer.NextCompoundToken();
+			SkipRestOfStatement(lexer);
 		}
 
 		// Consume closing brace
