@@ -139,10 +139,12 @@ Plugin server logic is C4 code the server compiles and loads through C4's script
 
 | # | Item | Why |
 |---|---|---|
-| P1 | Build `ied-server` with `--script-host` (a Nuke project setting) and ship `ied-server.c4i` and `C4Script.dll` in the install (`docs/21`) | Plugins compile against the server's interface |
-| P2 | A compiled-script cache in `C4Script`: keep a script's linked object keyed by its sources' digest, the interface's build id and the options, and load it without compiling | No JIT compile of every plugin on every start |
+| P1 | Build `ied-server` with `--script-host` (a Nuke project setting) and ship `ied-server.c4i` and `C4Script.dll` in the install (`docs/21`) | Plugins compile against the server's interface. **Done** (`compiler-args` in `src/nuke.toml`; `docs/26` P3) |
+| P2 | A compiled-script cache in `C4Script`: keep a script's linked object keyed by its sources' digest, the interface's build id and the options, and load it without compiling; first a profile of script compile time (4-5 s per plugin against the 6.4 MB interface today) | No JIT compile of every plugin on every start. Queued by the C4 session |
 | P3 | Debug information for script code (C4's "later") | Debugging a plugin without compiling it into the server |
-| P4 | Nuke language drivers (`docs/26` section 6): `[languages]` pins, non-C4 projects by `language`, `nuke init --ied` giving each project its language's preset and pinning its package | Native-first builds in mixed workspaces |
+| P4 | Nuke language drivers (`docs/26` section 6): `[languages]` pins, non-C4 projects by `language`, `nuke init --ied` giving each project its language's preset and pinning its package | Native-first builds in mixed workspaces. **Done** (`docs/26` P2) |
+| P5 | C4LSP checks script code: `initializationOptions.scripts: [{folders, interface, allow, defines?}]` - files under a folder are one script against that interface (agreed shape); IED then passes its `.c4i` and the loaded c4 plugins' code folders to the `c4` plugin's language server | Editing plugin code in IED without false errors. Queued by the C4 session |
+| P6 | Delay-load `C4Script.dll` in a script host, so a missing DLL is `Host::Open`'s error instead of a process that does not start; script diagnostics naming files by their path in the script's first folder | A server copied without its DLL still runs; two script files of one name told apart. Queued by the C4 session |
 
 ### Bedrock profiler hooks (`C4/Bedrock/`)
 

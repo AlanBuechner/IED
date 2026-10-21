@@ -23,6 +23,8 @@ namespace Ied
 	}
 
 	// The adapters of one plugin's `contributes`, in order.
+	// One dapProviders entry.
+	DapProvider* ReadDapProvider(const Serialization::DomNode& entry, Core::StringView pluginId, const FS::Path& pluginDir);
 	void ReadDapProviders(const Serialization::DomNode& contributes, Core::StringView pluginId, const FS::Path& pluginDir, Core::Array<DapProvider*>& providers);
 	// The last of `providers` of `type`, or null.
 	DapProvider* ProviderOfType(const Core::Array<DapProvider*>& providers, Core::StringView type);

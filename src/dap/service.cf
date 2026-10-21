@@ -35,7 +35,8 @@ namespace Ied
 
 	DapProvider* Debugger::ProviderFor(Workspace* ws, Core::StringView type) {
 		Core::Array<DapProvider*> providers;
-		for (Plugin* plugin : server->plugins->LoadedFor(ws)) ReadDapProviders(plugin->manifest->contributes, plugin->manifest->id.View(), plugin->manifest->folder, providers);
+		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("dapProviders")))
+			providers.Push(ReadDapProvider(given.entry, given.plugin->manifest->id.View(), given.plugin->manifest->folder));
 		DapProvider* provider = ProviderOfType(providers, type);
 		if (!provider) return nullptr;
 		Core::String error;

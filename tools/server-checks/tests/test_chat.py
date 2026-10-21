@@ -52,6 +52,61 @@ DEMO_PLUGIN = {
 			"run": [sys.executable, "-I", "-c", "import sys; print('echo:', sys.argv[1])", "${args.word}"]}]}}
 
 
+CODE_PLUGIN = {
+	"manifestVersion": 1, "id": "demo.code", "name": "Demo Code", "version": "1.0.0", "ied": {"api": "^1"},
+	"runtime": {"kind": "c4", "entry": "DemoCode::Activate"}, "permissions": ["fs.read"],
+	"contributes": {
+		"bindings": {"provides": [{"name": "demo.count", "version": "1.0.0", "kind": "function"}]},
+		"systemMessageSections": [{"id": "files", "function": "DemoCode::Section"}],
+		"toolCalls": [
+			{"name": "demo_shout", "description": "Shout a file's first line.", "class": "read", "function": "DemoCode::Shout",
+				"inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
+			{"name": "demo_count", "description": "Count calls.", "class": "read", "binding": "demo.count", "inputSchema": {"type": "object"}}]}}
+
+CODE_PLUGIN_SOURCE = r'''include "api/plugin.ch"
+
+namespace DemoCode
+{
+	int64 calls = 0;
+
+	IED::ToolResult Shout(const IED::ToolCall& call)
+	{
+		Core::String text;
+		Core::String problem;
+		if (!IED::ReadFile(call.workspace, call.args.Member("path").AsView(), text, problem)) return IED::ToolFailure(problem.View());
+		Core::StringBuilder out;
+		Core::StringView first = text.View().Substring(0, text.View().IndexOf('\n', 0));
+		for (int64 i = 0; i < first.ByteLength(); ++i) out.AppendByte(first.ByteAt(i) >= 'a' && first.ByteAt(i) <= 'z' ? first.ByteAt(i) - 32 : first.ByteAt(i));
+		out.Append("! (in ");
+		out.Append(call.workspace.name.View());
+		out.Append(")");
+		return IED::ToolText(out.View());
+	}
+
+	Core::String Section(const IED::Workspace& ws)
+	{
+		Core::StringBuilder out;
+		out.Append("Workspace ");
+		out.Append(ws.name.View());
+		out.Append(" is computed by C4 plugin code.");
+		return out.ToString();
+	}
+
+	void Activate(IED::PluginContext& context)
+	{
+		context.Provide(Core::StringView("demo.count"), [](const Serialization::DomNode& args) -> IED::Result {
+			calls += 1;
+			Core::StringBuilder out;
+			out.Append("{\"calls\":");
+			out.AppendInt(calls);
+			out.Append("}");
+			return IED::Answer(out.View());
+		});
+	}
+}
+'''
+
+
 def make_home(home):
 	"""An install with the host's schemas, the runtime's prompts, the chat plugin's settings (without its UI) and a demo
 	language plugin with a system-message section, a skills folder and a command tool (docs/26)."""
@@ -63,6 +118,8 @@ def make_home(home):
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "ied.chat", "name": "Chat", "version": "0.1.0", "ied": {"api": "^1"},
 		"runtime": {"kind": "declarative"}, "contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}}}))
 	write(os.path.join(home, "plugins", "demo", "ied-plugin.json"), json.dumps(DEMO_PLUGIN))
+	write(os.path.join(home, "plugins", "democode", "ied-plugin.json"), json.dumps(CODE_PLUGIN))
+	write(os.path.join(home, "plugins", "democode", "code", "democode.cf"), CODE_PLUGIN_SOURCE)
 	return home
 
 
@@ -214,6 +271,18 @@ class ChatTests(ServerTestCase):
 		self.assertIn("Say hello first.", results["c2"], "skill_read gives the body")
 		self.assertNotIn("name: greet", results["c2"], "without its frontmatter")
 		self.assertIn("echo: hi", results["c3"], "the command ran with the call's argument")
+
+	async def test_plugin_code_tools_and_sections(self):
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("demo_shout", {"path": "src/main.c"}, "c1"), call_step("demo_count", {}, "c2"), call_step("demo_count", {}, "c3"), text_step("Done."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		sent = self.model.requests()[-1]["body"]
+		self.assertIn("## Demo Code\n\nWorkspace Game is computed by C4 plugin code.", sent["messages"][0]["content"], "a section a C4 function computed")
+		results = {m["tool_call_id"]: m["content"] for m in sent["messages"] if m["role"] == "tool"}
+		self.assertEqual("INT MAIN(VOID)! (in Game)", results["c1"], "a C4 function tool read the workspace's file")
+		self.assertEqual({"calls": 2}, json.loads(results["c3"]), "a binding tool keeps its plugin's state")
+		tool = self.segments(await self.last_turn(chat_id), "tool")[0]
+		self.assertEqual(("demo_shout", "ok", "plugin demo.code"), (tool["tool"], tool["state"], tool.get("source")))
 
 	# --- Tools -------------------------------------------------------------------------------------------------------
 

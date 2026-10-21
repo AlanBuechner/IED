@@ -64,11 +64,12 @@ Problems go to the server log; the IED output source comes later.
 
 | Method | Does |
 |---|---|
-| `plugins.list {wsId?}` | `{plugins: [{id, name, version, kind, source, state, overriddenBy?, problems, permissions, contributes: [point names]}]}`, with a workspace's local plugins when `wsId` is given (without it, also the `plugins` topic's snapshot; `plugins.changed` carries the same) |
-| `plugins.contributions {wsId?}` | `{plugins: [{id, source, contributes, ui?}]}` for the loaded ones, in load order, `ui` the URL of the plugin's UI module: what the web client builds menus, commands, keybindings and languages from. With `wsId`, a loaded local plugin replaces a global one of its id. |
+| `plugins.list {wsId?}` | `{plugins: [{id, name, version, kind, source, state, overriddenBy?, problems, permissions, contributes: [point names], code?}]}`, with a workspace's local plugins when `wsId` is given (without it, also the `plugins` topic's snapshot; `plugins.changed` carries the same). `code` is a c4 plugin's running code (`docs/26` section 2): `{state: idle\|compiling\|active\|failed, problem?, builds}`, `problem` its diagnostics, its fault, or a new build that did not compile while the previous one runs |
+| `plugins.contributions {wsId?}` | `{plugins: [{id, source, contributes, ui?}]}` for the loaded ones, in load order, `ui` the URL of the plugin's UI module: what the web client builds menus, commands, keybindings and languages from. With `wsId`, a loaded local plugin replaces a global one of its id. Each array point holds the manifest's entries, then those the plugin's code computed for the workspace (`docs/26` section 3). |
 | `plugins.setEnabled {id, enabled}` | the plugin's summary after the change |
 | `plugins.approve {id}` | approves the app plugin's current content |
-| `plugins.reload` | reads every plugin folder again |
+| `plugins.reload` | reads every plugin folder again; code whose files changed, and code that failed, builds again |
+| `plugins.call {wsId?, name, args?}` | `{result}`: calls the server binding `name` (`docs/26` section 4) that a plugin's code provides - one loaded for the workspace, or a built-in or app plugin without `wsId` - and waits for its answer (30 s); `not_found` when none provides it, `plugin_error` with the reason when its code refused, faulted or did not answer |
 
 `GET /plugins/<id>/<path>` serves a loaded plugin's files (grammars, icons, UI modules) to a signed-in client, never one outside the plugin's folder; `GET /w/<wsId>/plugins/<id>/<path>` serves the plugin loaded for a workspace, its project-local plugins included (only while the workspace is trusted). `runtime.ui` must name a file in the plugin's folder by a path a URL carries as it is (letters, digits, `.`, `_`, `-`, `/`), or the plugin fails.
 
@@ -125,10 +126,14 @@ Rules: a consumer never imports a provider's internals; a missing *required* bin
 A binding with `side: "client"` lives in the browser: the providing plugin's UI module implements it, any plugin's UI module calls it. The plugin API (`ied` in `activate`, `ctx.ied` in a view) has `ied.bindings`:
 
 - `provide(name, fn)`: `fn(args)` answers a call (a value or a promise). Only a name the plugin's manifest lists under `bindings.provides` with `side: "client"`; anything else throws.
-- `call(name, args)`: a promise of the provider's answer. Only a name the caller's manifest lists under `bindings.consumes`; it rejects with `not provided` when no enabled plugin provides it (the caller degrades: an optional binding's feature goes without).
-- `has(name)`: whether a provider is there now.
+- `call(name, args)`: a promise of the provider's answer. Only a name the caller's manifest lists under `bindings.consumes`; it rejects with `not provided` when no enabled plugin provides it (the caller degrades: an optional binding's feature goes without). When no UI module provides the name but a loaded plugin declares it as a server binding, the call goes to the server (`plugins.call`).
+- `has(name)`: whether a provider is there now (a UI module's, or a server binding a loaded plugin declares).
 
 The first one: `editor.colorize {languageId | path, lines}` -> `[html]`, from the editor plugin (Monaco's tokenizers and the theme's colors), consumed optionally by the git plugin's diffs and the Markdown preview's fenced code.
+
+### Server bindings as built
+
+A binding with `side: "server"` (the default) is answered by the providing plugin's C4 code (`PluginContext::Provide`, `docs/26` sections 2 and 4), on that plugin's thread. Another plugin's code calls it with `IED::CallBinding`, a UI module with `ied.bindings.call`, the owner through a command whose contribution names the `binding` (no UI handler needed: the command palette runs it through `plugins.call`), and the AI through a `toolCalls` entry with `binding`. Its answer is JSON; a provider that refuses, faults or takes more than 30 s answers `plugin_error`.
 
 ### Icons in the UI API
 
@@ -141,7 +146,7 @@ The first one: `editor.colorize {languageId | path, lines}` -> `[html]`, from th
 
 ## Permissions
 
-Declared in the manifest (`fs.read`, `fs.write`, `fs.watch`, `process.spawn`, `terminal`, `net.egress`, `net.listen`, `ai.invoke`, `ai.tools`, `ai.context`, `lsp`, `dap`, `git`, `sandbox`, `profiler`, `secrets`, `settings.write`, `ui.notifications`, `ui.clipboard`, `ui.externalLinks`), shown before enabling, enforced at the host API for JS and process plugins. A permission increase on update requires re-approval. UI modules run with full client privileges, so they are exactly as trusted as their plugin; untrusted third-party UI uses the sandboxed iframe view kind (`docs/11`).
+Declared in the manifest (`fs.read`, `fs.write`, `fs.watch`, `process.spawn`, `terminal`, `net.egress`, `net.listen`, `ai.invoke`, `ai.tools`, `ai.context`, `lsp`, `dap`, `git`, `sandbox`, `profiler`, `secrets`, `settings.write`, `ui.notifications`, `ui.clipboard`, `ui.externalLinks`), shown before enabling, enforced at the plugin API (`src/api/`) for a plugin's C4 code (`docs/26` section 2: a courtesy, not a sandbox, since the code runs in the server). A permission increase on update requires re-approval. UI modules run with full client privileges, so they are exactly as trusted as their plugin; untrusted third-party UI uses the sandboxed iframe view kind (`docs/11`).
 
 ## Open items
 

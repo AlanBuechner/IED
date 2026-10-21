@@ -2,7 +2,8 @@
 topic, plugins.list, plugins.contributions with each UI module's URL, and the files /plugins/<id>/<path> serves.
 
 The mock has no app or project-local plugins: a valid built-in manifest is loaded unless disabled (plugins.setEnabled,
-kept in memory), an invalid one is 'failed' with its problems; plugins.approve has no app plugin to approve.
+kept in memory), an invalid one is 'failed' with its problems; plugins.approve has no app plugin to approve. It runs
+no plugin code (docs/26 section 2): plugins.call finds no server binding.
 """
 
 import pathlib
@@ -73,6 +74,7 @@ class Plugins:
 		server.rpc.register("plugins.setEnabled", self.m_set_enabled)
 		server.rpc.register("plugins.approve", self.m_approve)
 		server.rpc.register("plugins.reload", self.m_reload)
+		server.rpc.register("plugins.call", self.m_call)
 
 	def _discover(self):
 		registry = minischema.Registry()
@@ -151,3 +153,6 @@ class Plugins:
 		self.items = self._discover()
 		self.changed()
 		return self.snapshot()
+
+	async def m_call(self, call, p):
+		raise RpcError("not_found", "no plugin provides the server binding '%s' (the mock runs no plugin code)" % p.str("name"))

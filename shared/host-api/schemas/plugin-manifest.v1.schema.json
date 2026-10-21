@@ -64,26 +64,12 @@
 			"additionalProperties": false,
 			"properties": {
 				"kind": {
-					"enum": ["builtin", "declarative", "js", "process"],
-					"description": "builtin = compiled into ied-server; declarative = manifest only; js = QuickJS-ng logic on the server; process = JSON-RPC backend executable."
+					"enum": ["builtin", "declarative", "c4"],
+					"description": "builtin = compiled into ied-server; declarative = manifest only; c4 = C4 code the server compiles with its script host (docs/26 section 2)."
 				},
-				"entry": { "type": "string", "description": "js: path to the ES module with activate()/deactivate()." },
-				"ui": { "type": "string", "description": "Path to the browser ES module that registers UI contributions." },
-				"process": {
-					"type": "object",
-					"additionalProperties": false,
-					"properties": {
-						"protocol": { "const": "ied-plugin-rpc/1" },
-						"targets": {
-							"type": "object",
-							"description": "Map of '<os>-<arch>' (e.g. 'windows-x64') to an executable path relative to the plugin root.",
-							"additionalProperties": { "type": "string" }
-						},
-						"args": { "type": "array", "items": { "type": "string" } },
-						"env": { "type": "object", "additionalProperties": { "type": "string" } },
-						"lazy": { "type": "boolean", "default": true }
-					}
-				}
+				"entry": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$", "description": "c4: the entry function, `void <Name>(IED::PluginContext& context)` ('Markup::Activate')." },
+				"sources": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "c4: the folders and files of the plugin's code, in its folder (default ['code']); every .cf file under them is compiled." },
+				"ui": { "type": "string", "description": "Path to the browser ES module that registers UI contributions." }
 			}
 		},
 		"permission": {
@@ -676,10 +662,11 @@
 				"id": { "type": "string" },
 				"text": { "type": "string" },
 				"file": { "type": "string" },
+				"function": { "type": "string", "description": "A function of the plugin's C4 code, `Core::String <Name>(const IED::Workspace& ws)`, that computes the text per workspace (empty: no section)." },
 				"maxTokens": { "type": "integer", "maximum": 600, "default": 200 },
 				"when": { "$ref": "#/$defs/when" }
 			},
-			"oneOf": [ { "required": ["text"] }, { "required": ["file"] } ]
+			"oneOf": [ { "required": ["text"] }, { "required": ["file"] }, { "required": ["function"] } ]
 		},
 		"mcpServer": {
 			"type": "object",

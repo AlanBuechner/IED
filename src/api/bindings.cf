@@ -1,0 +1,31 @@
+include "bindings.ch"
+include "host/server.ch"
+
+namespace IED
+{
+	Result Answer(Core::StringView json) {
+		Result result;
+		result.json = Core::String(json);
+		return result;
+	}
+
+	Result Refusal(Core::StringView error) {
+		Result result;
+		result.error = Core::String(error);
+		return result;
+	}
+
+	Result CallBinding(Core::StringView name, Core::StringView args) {
+		Ied::CodeInstance* caller = Ied::CurrentCode();
+		if (!caller) return Refusal(Core::StringView("the plugin API is for a plugin's code, on its thread"));
+		Ied::Server* server = caller->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Plugin* plugin = server->code->PluginOf(caller);
+		if (!plugin || !Ied::ConsumesBinding(plugin, name))
+			return Refusal(((Core::String("the plugin's manifest does not consume '") + name) + "' (bindings.consumes)").View());
+		Ied::Workspace* ws = caller->IsProject() ? server->workspaces->Find(caller->wsId.View()) : nullptr;
+		Ied::CodeInstance* provider = server->code->Provider(ws, name);
+		if (!provider) return Refusal(((Core::String("no plugin provides the server binding '") + name) + "'").View());
+		return Ied::InvokeBinding(server, provider, name, args, Ied::NeverStopped());
+	}
+}

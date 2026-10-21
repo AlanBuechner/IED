@@ -10,6 +10,7 @@ export class Commands {
 		this.definitions = new Map();
 		this.handlers = new Map();
 		this.listeners = new Set();
+		this.bindings = null;   // the shell's Bindings, for commands that name a server binding
 	}
 
 	// spec: {id, title, category, icon, enablement, binding, task}; `source`: "shell" or a plugin id; `base`: the URL an
@@ -46,8 +47,16 @@ export class Commands {
 
 	isEnabled(id) {
 		const definition = this.get(id);
-		if (!definition || !this.handlers.has(id)) return false;
+		if (!definition || !this.handlerOf(definition)) return false;
 		return this.context.holds(definition.enablement);
+	}
+
+	// A command's handler: the one a module registered, or the server binding it names (docs/26 section 4).
+	handlerOf(definition) {
+		const handler = this.handlers.get(definition.id);
+		if (handler) return handler;
+		if (definition.binding && this.bindings && this.bindings.onServer(definition.binding)) return (args) => this.bindings.callServer(definition.binding, args);
+		return null;
 	}
 
 	// Runs a command; resolves to what its handler returned, or undefined after reporting why it could not run.
@@ -55,7 +64,7 @@ export class Commands {
 		const definition = this.get(id);
 		if (!definition) return this.fail("There is no command '" + id + "'.");
 		if (!this.context.holds(definition.enablement)) return this.fail("'" + this.label(id) + "' is not available now.");
-		const handler = this.handlers.get(id);
+		const handler = this.handlerOf(definition);
 		if (!handler) return this.fail(this.unhandled(definition));
 		try {
 			return await handler(args);
@@ -66,7 +75,7 @@ export class Commands {
 	}
 
 	unhandled(definition) {
-		if (definition.binding) return "'" + this.label(definition.id) + "' calls the server binding '" + definition.binding + "', and server bindings arrive with plugin runtimes (M11).";
+		if (definition.binding) return "'" + this.label(definition.id) + "' calls the server binding '" + definition.binding + "', which no loaded plugin's code provides.";
 		if (definition.task) return "'" + this.label(definition.id) + "' runs the task '" + definition.task + "', and tasks arrive with the build loop (M3).";
 		return "'" + this.label(definition.id) + "' has no handler: its plugin's UI module did not register one.";
 	}

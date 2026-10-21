@@ -61,9 +61,9 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | Topic kind | Examples of event kinds | Snapshot contains |
 |---|---|---|
 | `server` | `workspace.opened`, `notification`, `device.connected` | open workspaces, notifications (unread), devices |
-| `ws:<wsId>` | `tree.changed`, `trust.changed`, `solution.changed`, `plugins.changed` (its `.ied/plugins/` changed: read the contributions again, `docs/26`) | workspace summary (`kind` folder, file or solution), trust, the solution model (`docs/03`) |
+| `ws:<wsId>` | `tree.changed`, `trust.changed`, `solution.changed`, `plugins.changed` (its `.ied/plugins/` changed, a project plugin's code changed state, or code computed new contributions for it: read the contributions again, `docs/26`) | workspace summary (`kind` folder, file or solution), trust, the solution model (`docs/03`) |
 | `settings:app`, `settings:<wsId>` | `settings.changed` | tier files (revision, problems) and every setting's effective value with its source (`docs/07`) |
-| `plugins` | `plugins.changed` | every plugin's summary and state (`docs/02`) |
+| `plugins` | `plugins.changed` (also when a built-in or app plugin's code changes state) | every plugin's summary and state, with its code's (`docs/02`) |
 | `layout:<wsId>:<deviceClass>` | `layout.changed {revision, layout, by}` | `{revision, layout}`: the layout document the client last stored for the workspace and device class (`docs/15`), verbatim; revision 0 with `layout: null` until one is. `layout.set {wsId, deviceClass, layout, expectedRevision}` stores one (an object up to 256 KB, or null to forget it) and answers `{revision}`; an old `expectedRevision` gets `conflict {revision}`. Kept in `.ied/local/layout/<deviceClass>.json` of a solution, and for a folder or a file in `<app data>/workspaces/<key>/layout/`, `key` the first 16 hex digits of the SHA-256 of the workspace folder's canonical path |
 | `doc:<docId>` | `doc.edit`, `doc.saved`, `doc.lease`, `doc.diskChanged`, `doc.renamed` | text + version + lease holder + dirty |
 | `diag:<wsId>` | `diag.set {path, source, items}` (LSP diagnostics, UTF-16 ranges; `docs/24`) | all current diagnostics, `{files: {<path>: {<source>: [diagnostic]}}}` |

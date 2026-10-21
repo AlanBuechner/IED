@@ -1,0 +1,23 @@
+// plugins/codediagnostics (docs/26 section 2): the problems of a compiler's diagnostics text - errors and warnings with
+// their place, the source lines and carets skipped, lines of any other shape ignored.
+
+include "plugins/codediagnostics.ch"
+
+[test("server.code")]
+class CodeTests {
+	[test("diagnostics_read")]
+	public static void TestDiagnosticsRead() {
+		Core::StringView text = Core::StringView("its code did not compile:\ntools.cf (10:15) error: no variable named projects_here\n  \t\tcontext.Log(projects_here);\n  \t\t            ^\n\nsub/util.cf (2:1) warning: an unused name: x\n");
+		Core::Array<Ied::CodeProblem> problems = Ied::ReadCodeProblems(text);
+		assert_true(problems.Count() == 2, "an error and a warning");
+		assert_true(problems[0].file.View() == "tools.cf" && problems[0].line == 10 && problems[0].column == 15 && problems[0].severity == 1, "the error's place");
+		assert_true(problems[0].message.View() == "no variable named projects_here", "the error's message");
+		assert_true(problems[1].file.View() == "sub/util.cf" && problems[1].severity == 2 && problems[1].message.View() == "an unused name: x", "the warning");
+	}
+
+	[test("diagnostics_other_lines")]
+	public static void TestDiagnosticsOtherLines() {
+		assert_true(Ied::ReadCodeProblems(Core::StringView("a (b) error: c\nx.cf (3) error: no column\ny.cf (1:2) remark: unknown\n")).IsEmpty(), "not the compiler's shape");
+		assert_true(Ied::ReadCodeProblems(Core::StringView("")).IsEmpty(), "nothing to read");
+	}
+}

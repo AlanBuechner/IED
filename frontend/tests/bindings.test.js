@@ -1,9 +1,10 @@
 // bindings.test.js - client bindings (docs/02 "Client bindings as built"): only declared providers and consumers, a
-// call answered by the provider, a binding nobody provides (or whose plugin went away) refused, and the editor's
-// language lookup behind `editor.colorize`.
+// call answered by the provider, a binding nobody provides (or whose plugin went away) refused, a server binding
+// reached through plugins.call (docs/26 section 4), and the editor's language lookup behind `editor.colorize`.
 
 import { test, assertEqual, assertThrows } from "./harness.js";
 import { Bindings } from "../src/shell/bindings.js";
+import { Commands } from "../src/shell/commands.js";
 import { languageOf } from "/plugins/ied.editor/ui/colorize.js";
 
 function registry(loaded) {
@@ -28,6 +29,25 @@ test("bindings: declared providers and consumers", async () => {
 	assertEqual(refused, "not_declared", "a caller declares what it consumes");
 	delete loaded.editor;
 	assertEqual(bindings.has("editor.colorize"), false, "a provider whose plugin is gone");
+});
+
+test("bindings: a server binding answers through the server, also for a command that names it", async () => {
+	const asked = [];
+	const server = { provides: (name) => name === "probe.echo", call: async (name, args) => { asked.push([name, args]); return { said: args.text }; } };
+	const bindings = new Bindings((id) => ({ ui: { consumes: [{ name: "probe.echo", version: "1" }] } })[id] || null, server);
+	assertEqual(bindings.has("probe.echo"), true);
+	assertEqual(await bindings.call("ui", "probe.echo", { text: "hi" }), { said: "hi" });
+	let refused = null;
+	await bindings.callServer("probe.other", {}).catch((e) => { refused = e.code; });
+	assertEqual(refused, "not_provided");
+	const commands = new Commands({ holds: () => true }, (message) => { refused = message; });
+	commands.bindings = bindings;
+	commands.define({ id: "probe.say", title: "Say", binding: "probe.echo" }, "probe");
+	commands.define({ id: "probe.none", title: "None", binding: "probe.missing" }, "probe");
+	assertEqual(commands.isEnabled("probe.say"), true);
+	assertEqual(await commands.run("probe.say", { text: "yo" }), { said: "yo" });
+	assertEqual(asked, [["probe.echo", { text: "hi" }], ["probe.echo", { text: "yo" }]]);
+	assertEqual(commands.isEnabled("probe.none"), false, "no plugin provides it");
 });
 
 test("bindings: the language of a path", () => {

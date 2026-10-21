@@ -74,9 +74,17 @@ namespace Ied
 		public void Remove(Core::StringView key);
 		public void ClearRings();
 		public static TopicLimits DefaultLimits(Core::StringView key);
+		// `hear(topic, kind, data)` for every event published from now on (plugin code listens through it, docs/26).
+		public void Tap(func<void(Core::StringView, Core::StringView, Core::StringView)> hear) {
+			tap = hear;
+			tapped = true;
+		}
 
 	private:
 		private int64 Deliver(Topic* topic, Event* event);
+
+		private func<void(Core::StringView, Core::StringView, Core::StringView)> tap;
+		private bool tapped;
 
 		private Core::HashMap<Core::String, Topic*> topics;
 	}

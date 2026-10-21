@@ -1,0 +1,96 @@
+include "codecalls.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	bool ConsumesBinding(Plugin* plugin, Core::StringView name) {
+		Serialization::DomNode consumes = plugin->manifest->contributes.Member("bindings").Member("consumes");
+		for (int64 i = 0; i < consumes.Count(); ++i)
+			if (consumes.At(i).Member("name").AsView() == name) return true;
+		return false;
+	}
+
+	IED::Result InvokeBinding(Server* server, CodeInstance* provider, Core::StringView name, Core::StringView args, func<bool()> stopped) {
+		IED::Result* result = new IED::Result();
+		Core::String binding = Core::String(name);
+		Core::String text = args.IsEmpty() ? Core::String("{}") : Core::String(args);
+		Core::String problem;
+		const bool ran = server->code->Run(provider, [binding, text, result](CodeInstance* instance) {
+			IED::Binding* handler = instance->handlers.bindings.Find(binding);
+			if (!handler) {
+				result->error = (Core::String("its code does not provide '") + binding.View()) + "'";
+				return;
+			}
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::ReadResult read = Serialization::ReadJson(text.View(), *doc);
+			if (!read.Ok()) {
+				result->error = Core::String("the arguments are not JSON");
+				return;
+			}
+			IED::Binding call = *handler;
+			Serialization::DomNode node = read.root;
+			Core::String failure;
+			if (!GuardedCall(instance, [call, node, result]() { *result = call(node); }, failure)) result->error = failure;
+		}, IED::kBindingWaitMs, stopped, problem);
+		if (!ran) result->error = problem;
+		if (result->Ok()) {
+			Serialization::DomDoc check;
+			if (!Serialization::ReadJson(result->json.View(), check).Ok())
+				result->error = (Core::String("its answer to '") + name) + "' is not JSON";
+		}
+		return *result;
+	}
+
+	Core::String ComputedSection(Server* server, CodeInstance* instance, Core::StringView function, Workspace* ws, Core::String& problem) {
+		Core::String* text = new Core::String();
+		Core::String* failure = new Core::String();
+		Core::String name = Core::String(function);
+		IED::Workspace shown = PluginWorkspace(server, ws);
+		const bool ran = server->code->Run(instance, [name, shown, text, failure](CodeInstance* code) {
+			void* address = CodeFunction(code, name.View(), Core::StringView("Core::String"), Core::StringView("IED::Workspace&"), *failure);
+			if (!address) return;
+			funcptr<Core::String(const IED::Workspace&)> section = (funcptr<Core::String(const IED::Workspace&)>)address;
+			GuardedCall(code, [section, shown, text]() { *text = section(shown); }, *failure);
+		}, kCodeCallMs, NeverStopped(), problem);
+		if (ran && !failure->IsEmpty()) problem = (((Core::String("plugin ") + instance->pluginId.View()) + ": ") + failure->View());
+		return ran && failure->IsEmpty() ? *text : Core::String("");
+	}
+
+	void DeliverEvent(CodeInstance* instance, Core::StringView topic, Core::StringView kind, Core::StringView data) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		IED::Event event;
+		event.topic = Core::String(topic);
+		event.kind = Core::String(kind);
+		event.data = Serialization::ReadJson(data, *doc).root;
+		for (int64 i = 0; i < instance->handlers.listeners.Count(); ++i) {
+			if (instance->handlers.listenKinds[i].View() != kind) continue;
+			IED::EventHandler handler = instance->handlers.listeners[i];
+			Core::String problem;
+			if (!GuardedCall(instance, [handler, event]() { handler(event); }, problem) && instance->script->Faulted()) return;
+		}
+	}
+
+	void CodeRuntime::Published(Core::StringView topic, Core::StringView kind, Core::StringView data) {
+		for (CodeInstance* instance : instances) {
+			if (instance->state != CodeState::Active || !instance->hears.Contains(Core::String(kind))) continue;
+			if (instance->queue.Count() >= kEventsQueued) continue;
+			Core::String at = Core::String(topic);
+			Core::String what = Core::String(kind);
+			Core::String body = Core::String(data);
+			Queue(instance, [instance, at, what, body]() { DeliverEvent(instance, at.View(), what.View(), body.View()); });
+		}
+	}
+
+	Core::String CallBindingMethod(Server* server, Call& call, const Params& params) {
+		Workspace* ws = params.Has("wsId") ? server->workspaces->Get(params.Str("wsId").View()) : nullptr;
+		Core::String name = params.Str("name");
+		CodeInstance* provider = server->code->Provider(ws, name.View());
+		if (!provider) throw RpcError(ErrorCode::NotFound, ((Core::String("no plugin provides the server binding '") + name.View()) + "'").View());
+		Serialization::DomNode args = params.Field("args");
+		CancelToken* cancel = call.cancel;
+		Core::String text = args.IsValid() ? NodeJson(args) : Core::String("");
+		IED::Result result = InvokeBinding(server, provider, name.View(), text.View(), [cancel]() -> bool { return cancel->IsCancelled(); });
+		if (!result.Ok()) throw RpcError(ErrorCode::PluginError, result.error.View());
+		return (Core::String("{\"result\":") + result.json.View()) + "}";
+	}
+}

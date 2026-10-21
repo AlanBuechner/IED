@@ -1,0 +1,242 @@
+"""Plugin code (docs/26 section 2): a plugin whose runtime is c4 has its code compiled by the server's script host against
+the plugin API (src/api/), started through its entry, and reached through server bindings (plugins.call), its computed
+contributions and the protocol events it listens to; a build that does not compile, code that faults, code that
+includes the server beyond the API, a new build that fails while one runs, and a project's own plugin in a trusted or
+untrusted workspace, reloaded as its code is edited."""
+
+import asyncio
+import json
+import os
+import shutil
+import tempfile
+import time
+
+from frames import FrameChecker
+from iedclient import Client, RpcFailure
+from server import REPO, IedServer, ServerTestCase
+
+COMPILE_SECONDS = 120
+BROKEN = "\nnamespace Probe { int32 Broken() { return missing_name; } }\n"
+
+PROBE = r'''include "api/plugin.ch"
+
+namespace Probe
+{
+	int64 heard = 0;
+	IED::PluginContext* plugin = nullptr;
+
+	IED::Result Echo(const Serialization::DomNode& args)
+	{
+		Core::StringBuilder out;
+		out.Append("{\"said\":");
+		Serialization::WriteJsonString(args.Member("text").AsView(), &out);
+		out.Append(",\"heard\":");
+		out.AppendInt(heard);
+		out.Append(",\"version\":VERSION}");
+		return IED::Answer(out.View());
+	}
+
+	IED::Result Crash(const Serialization::DomNode& args)
+	{
+		int32* nothing = (int32*)(void*)args.Member("address").AsInt();
+		*nothing = 7;
+		return IED::Answer(Core::StringView("{}"));
+	}
+
+	void Opened(const IED::Workspace& ws)
+	{
+		Core::StringBuilder entries;
+		entries.Append("[{\"id\":\"probe.hello\",\"title\":\"Hello ");
+		entries.Append(ws.name.View());
+		entries.Append("\"}]");
+		Core::String problem;
+		plugin->Contribute(Core::StringView("commands"), ws.id.View(), entries.View(), problem);
+	}
+
+	void Activate(IED::PluginContext& context)
+	{
+		plugin = &context;
+		context.Log(Core::StringView("probe started"));
+		context.Provide(Core::StringView("probe.echo"), Echo);
+		context.Provide(Core::StringView("probe.crash"), Crash);
+		context.Listen(Core::StringView("tree.changed"), [](const IED::Event& event) { heard += 1; });
+		context.OnWorkspace(Opened);
+	}
+}
+'''
+
+
+def probe_manifest(plugin_id="test.probe", **fields):
+	body = {
+		"manifestVersion": 1, "id": plugin_id, "name": "Probe", "version": "1.0.0", "ied": {"api": "^1"},
+		"runtime": {"kind": "c4", "entry": "Probe::Activate"},
+		"contributes": {"bindings": {"provides": [
+			{"name": "probe.echo", "version": "1.0.0", "kind": "function"},
+			{"name": "probe.crash", "version": "1.0.0", "kind": "function"}]}},
+	}
+	body.update(fields)
+	return body
+
+
+def write(path, text):
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	with open(path, "w", encoding="utf-8", newline="") as f:
+		f.write(text)
+
+
+class PluginCodeTests(ServerTestCase):
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-code-")
+		self.home = os.path.join(self.root, "home")
+		self.repo = os.path.join(self.root, "Game")
+		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
+		os.makedirs(os.path.join(self.home, "plugins"))
+		write(os.path.join(self.repo, "main.cf"), "int32 main() { return 0; }\n")
+		self.server = None
+
+	def tearDown(self):
+		if self.server:
+			self.server.stop()
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	def add(self, folder, body, code):
+		write(os.path.join(folder, "ied-plugin.json"), json.dumps(body, indent="\t"))
+		for name, text in code.items():
+			write(os.path.join(folder, *name.split("/")), text)
+		return folder
+
+	def builtin(self, body, code):
+		return self.add(os.path.join(self.home, "plugins", body["id"]), body, code)
+
+	def start(self):
+		self.server = IedServer(extra=("--home", self.home, "--workspace", self.repo))
+		self.assertTrue(self.server.started, self.server.error)
+		self.cookie = self.server.sign_in()
+
+	async def asyncTearDown(self):
+		if getattr(self, "client", None):
+			self.assertEqual([], self.client.violations)
+			self.client.abort()
+
+	async def connect(self):
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+
+	async def code(self, plugin_id, ws=None):
+		params = {"wsId": ws} if ws else {}
+		for plugin in (await self.client.request("plugins.list", params))["plugins"]:
+			if plugin["id"] == plugin_id and "code" in plugin:
+				return plugin["code"]
+		return None
+
+	async def settled(self, plugin_id, ws=None, after=None):
+		"""The plugin's code once it is no longer compiling, and has compiled again since `after` (a code state)."""
+		deadline = time.monotonic() + COMPILE_SECONDS
+		while time.monotonic() < deadline:
+			code = await self.code(plugin_id, ws)
+			if code and code["state"] not in ("idle", "compiling") and code["builds"] > (after["builds"] if after else 0):
+				return code
+			await asyncio.sleep(0.25)
+		self.fail("the code of %s did not settle: %s" % (plugin_id, await self.code(plugin_id, ws)))
+
+	async def echo(self, text, ws=None):
+		params = {"name": "probe.echo", "args": {"text": text}}
+		if ws:
+			params["wsId"] = ws
+		return (await self.client.request("plugins.call", params))["result"]
+
+	async def test_code_starts_provides_bindings_and_contributes(self):
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "1")})
+		self.start()
+		await self.connect()
+		code = await self.settled("test.probe")
+		self.assertEqual("active", code["state"], code)
+		self.assertEqual({"said": "hi", "heard": 0, "version": 1}, await self.echo("hi"))
+		contributions = await self.client.request("plugins.contributions", {"wsId": "w1"})
+		probe = [p for p in contributions["plugins"] if p["id"] == "test.probe"][0]
+		self.assertEqual([{"id": "probe.hello", "title": "Hello Game"}], probe["contributes"]["commands"], "computed for the open workspace")
+		with self.assertRaises(RpcFailure) as missing:
+			await self.client.request("plugins.call", {"name": "probe.nothing"})
+		self.assertEqual("not_found", missing.exception.code)
+
+	async def test_events_reach_the_code_that_listens(self):
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "1")})
+		self.start()
+		await self.connect()
+		await self.settled("test.probe")
+		write(os.path.join(self.repo, "new.txt"), "x")
+		deadline = time.monotonic() + 10
+		while (await self.echo("x"))["heard"] == 0 and time.monotonic() < deadline:
+			await asyncio.sleep(0.2)
+		self.assertGreater((await self.echo("x"))["heard"], 0, "tree.changed reached the plugin")
+
+	async def test_a_fault_fails_the_plugin_not_the_server(self):
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "1")})
+		self.start()
+		await self.connect()
+		await self.settled("test.probe")
+		with self.assertRaises(RpcFailure) as crashed:
+			await self.client.request("plugins.call", {"name": "probe.crash", "args": {"address": 16}})
+		self.assertEqual("plugin_error", crashed.exception.code)
+		self.assertIn("faulted", crashed.exception.message)
+		code = await self.code("test.probe")
+		self.assertEqual("failed", code["state"])
+		with self.assertRaises(RpcFailure):
+			await self.echo("after")
+		self.assertTrue((await self.client.request("ws.list"))["workspaces"], "the server still answers")
+		await self.client.request("plugins.reload")
+		await self.settled("test.probe", after=code)
+		self.assertEqual("after", (await self.echo("after"))["said"], "a reload builds it again")
+
+	async def test_diagnostics_the_allow_list_and_a_failed_rebuild(self):
+		folder = self.builtin(probe_manifest(), {"code/probe.cf": "include \"api/plugin.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) { undefined_thing(); } }\n"})
+		self.add(os.path.join(self.home, "plugins", "test.sneaky"), probe_manifest("test.sneaky", contributes={}),
+			{"code/sneaky.cf": "include \"api/plugin.ch\"\ninclude \"host/server.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) {} }\n"})
+		self.start()
+		await self.connect()
+		broken = await self.settled("test.probe")
+		self.assertEqual("failed", broken["state"])
+		self.assertIn("did not compile", broken["problem"])
+		self.assertIn("undefined_thing", broken["problem"])
+		sneaky = await self.settled("test.sneaky")
+		self.assertIn("not on the allow-list", sneaky["problem"])
+		write(os.path.join(folder, "code", "probe.cf"), PROBE.replace("VERSION", "2"))
+		await self.client.request("plugins.reload")
+		rebuilt = await self.settled("test.probe", after=broken)
+		self.assertEqual("active", rebuilt["state"], rebuilt)
+		self.assertEqual(2, (await self.echo("v"))["version"])
+		write(os.path.join(folder, "code", "probe.cf"), PROBE.replace("VERSION", "3") + BROKEN)
+		await self.client.request("plugins.reload")
+		deadline = time.monotonic() + COMPILE_SECONDS
+		while "previous one runs" not in ((await self.code("test.probe")).get("problem") or "") and time.monotonic() < deadline:
+			await asyncio.sleep(0.25)
+		code = await self.code("test.probe")
+		self.assertEqual("active", code["state"], code)
+		self.assertIn("previous one runs", code.get("problem", ""))
+		self.assertIn("missing_name", code["problem"])
+		self.assertEqual(2, (await self.echo("v"))["version"], "the build that compiled still answers")
+
+	async def test_the_example_plugin_compiles(self):
+		shutil.copytree(os.path.join(REPO, "shared", "host-api", "examples", "markup-plugin"), os.path.join(self.home, "plugins", "dialogue"))
+		write(os.path.join(self.repo, "dialogue.toml"), "")
+		write(os.path.join(self.repo, "intro.dlg"), "[Ana] Hello.\n[Bo] Hi.\n[Ana] Bye.\n")
+		self.start()
+		await self.connect()
+		code = await self.settled("mygame.dialogue")
+		self.assertEqual("active", code["state"], code)
+
+	async def test_a_project_plugin_runs_only_in_a_trusted_workspace(self):
+		self.add(os.path.join(self.repo, ".ied", "plugins", "probe"), probe_manifest("game.probe"), {"code/probe.cf": PROBE.replace("VERSION", "3")})
+		self.start()
+		await self.connect()
+		self.assertIsNone(await self.code("game.probe", "w1"), "untrusted: no code runs")
+		with self.assertRaises(RpcFailure):
+			await self.echo("x", "w1")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		code = await self.settled("game.probe", "w1")
+		self.assertEqual("active", code["state"], code)
+		self.assertEqual(3, (await self.echo("x", "w1"))["version"])
+		write(os.path.join(self.repo, ".ied", "plugins", "probe", "code", "probe.cf"), PROBE.replace("VERSION", "4"))
+		await self.settled("game.probe", "w1", after=code)
+		self.assertEqual(4, (await self.echo("x", "w1"))["version"], "an edit of its code reloads it")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": False})
+		self.assertIsNone(await self.code("game.probe", "w1"), "untrusted again: it stopped")

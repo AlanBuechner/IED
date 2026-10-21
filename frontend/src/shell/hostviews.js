@@ -31,6 +31,15 @@ export function registerShellViews(shell) {
 // Plugins
 
 const STATE_CHIPS = { loaded: "ok", disabled: "", failed: "err", needsApproval: "warn", overridden: "", untrusted: "warn" };
+const CODE_CHIPS = { active: "ok", compiling: "info", idle: "", failed: "err" };
+
+// A c4 plugin's code (docs/26 section 2): its state, and its diagnostics, its fault or a failed new build.
+function codeRow(code) {
+	if (!code) return null;
+	return h("div.plugin-code", null,
+		h("span.chip" + (CODE_CHIPS[code.state] ? "." + CODE_CHIPS[code.state] : ""), { title: "Built " + code.builds + " time(s)" }, "code " + code.state),
+		code.problem ? h("pre.plugin-code-problem" + (code.state === "failed" ? ".c-error" : ".c-warn"), null, code.problem) : null);
+}
 
 function pluginsView(shell, ctx) {
 	const list = h("div.plugin-list");
@@ -52,30 +61,37 @@ function pluginsView(shell, ctx) {
 				canToggle ? h("button.btn", { on: { click: () => act("plugins.setEnabled", { id: p.id, enabled: p.state === "disabled" }) } }, p.state === "disabled" ? "Enable" : "Disable") : null),
 			p.overriddenBy ? h("div.muted", null, "Overridden by the " + p.overriddenBy + " plugin of this id.") : null,
 			p.problems.length ? h("ul.problems", null, p.problems.map((problem) => h("li.c-error", null, problem))) : null,
+			codeRow(p.code),
 			p.contributes.length ? h("div.muted", null, "Contributes: " + p.contributes.join(", ")) : null,
 			p.permissions.length ? h("div.muted", null, "Permissions: " + p.permissions.join(", ")) : null);
 	}
 
+	// Rendered again on every change (a plugin's code compiling, starting, failing): where the page was scrolled stays.
 	function render() {
+		const page = list.closest(".page");
+		const top = page ? page.scrollTop : 0;
 		replace(list, ...plugins.map(card));
 		if (!plugins.length) list.append(h("div.muted", null, "No plugins are installed."));
+		if (page) page.scrollTop = top;
 	}
 
-	const stop = shell.client.subscribe("plugins", {
-		snap: (data) => {
-			plugins = data.plugins;
-			render();
-		},
-		evt: (kind, data) => {
-			if (kind !== "plugins.changed") return;
-			plugins = data.plugins;
-			render();
-		},
-	});
+	// The global plugins and the workspace's own (.ied/plugins/ and the solution's pins, docs/26 section 7).
+	function refresh() {
+		shell.client.request("plugins.list", ctx.wsId ? { wsId: ctx.wsId } : {})
+			.then((data) => {
+				plugins = data.plugins;
+				render();
+			})
+			.catch((e) => shell.report("plugins.list: " + e.message, e));
+	}
+
+	const changed = { snap: refresh, evt: (kind) => kind === "plugins.changed" && refresh() };
+	const stops = [shell.client.subscribe("plugins", changed)];
+	if (ctx.wsId) stops.push(shell.client.subscribe("ws:" + ctx.wsId, { evt: changed.evt }));
 	ctx.el.append(h("div.page", null,
 		h("div.page-head", null, h("h1", null, "Plugins"), h("button.btn", { on: { click: () => act("plugins.reload", {}) } }, icon("refresh"), "Reload")),
 		list));
-	return { dispose: stop };
+	return { dispose: () => stops.forEach((stop) => stop()) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------

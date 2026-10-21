@@ -1,0 +1,111 @@
+include "codediagnostics.ch"
+include "host/server.ch"
+
+namespace Ied
+{
+	static bool IsDigit(int32 c) { return c >= '0' && c <= '9'; }
+
+	// The number at `at` in `text`, moving `at` past it; -1 when none is there.
+	static int64 NumberAt(Core::StringView text, int64& at) {
+		int64 value = -1;
+		while (at < text.ByteLength() && IsDigit(text.ByteAt(at))) {
+			value = (value < 0 ? 0 : value * 10) + (text.ByteAt(at) - '0');
+			at += 1;
+		}
+		return value;
+	}
+
+	static int64 SeverityOf(Core::StringView word) {
+		if (word == "error") return 1;
+		if (word == "warning") return 2;
+		return word == "note" ? 3 : 0;
+	}
+
+	// "<file> (<line>:<column>) <severity>: <message>"; false for any other line.
+	static bool ReadProblem(Core::StringView line, CodeProblem& problem) {
+		const int64 open = line.IndexOf(Core::StringView(" ("));
+		if (open <= 0) return false;
+		int64 at = open + 2;
+		problem.line = NumberAt(line, at);
+		if (problem.line < 0 || at >= line.ByteLength() || line.ByteAt(at) != ':') return false;
+		at += 1;
+		problem.column = NumberAt(line, at);
+		if (problem.column < 0 || !line.Substring(at, line.ByteLength() - at).StartsWith(Core::StringView(") "))) return false;
+		at += 2;
+		const int64 colon = line.IndexOf(':', at);
+		if (colon < 0) return false;
+		problem.severity = SeverityOf(line.Substring(at, colon - at));
+		if (problem.severity == 0) return false;
+		problem.file = Core::String(line.Substring(0, open));
+		problem.message = Core::String(line.Substring(colon + 1, line.ByteLength() - colon - 1).Trimmed());
+		return true;
+	}
+
+	Core::Array<CodeProblem> ReadCodeProblems(Core::StringView diagnostics) {
+		Core::Array<CodeProblem> problems;
+		Core::StringView rest = diagnostics;
+		while (!rest.IsEmpty()) {
+			int64 end = rest.IndexOf('\n', 0);
+			if (end < 0) end = rest.ByteLength();
+			CodeProblem problem;
+			if (ReadProblem(rest.Substring(0, end).Trimmed(), problem)) problems.Push(problem);
+			rest = end < rest.ByteLength() ? rest.Substring(end + 1, rest.ByteLength() - end - 1) : Core::StringView("");
+		}
+		return problems;
+	}
+
+	// The workspace-relative path of the code file the compiler calls `name`; empty when none is in `ws`.
+	static Core::String CodePath(Workspace* ws, const Core::Array<Core::String>& files, Core::StringView name) {
+		for (const Core::String& file : files) {
+			Core::String relative;
+			if (!RelativeTo(ws->root.View(), file.View(), relative)) continue;
+			Core::StringView view = relative.View();
+			if (view == name || (view.EndsWith(name) && view.ByteAt(view.ByteLength() - name.ByteLength() - 1) == '/')) return relative;
+		}
+		return Core::String("");
+	}
+
+	static Core::String ProblemJson(const CodeProblem& problem, Core::StringView source) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("range"));
+		json.BeginObject();
+		json.Key(Core::StringView("start"));
+		json.BeginObject();
+		json.IntField("line", problem.line - 1);
+		json.IntField("character", problem.column - 1);
+		json.EndObject();
+		json.Key(Core::StringView("end"));
+		json.BeginObject();
+		json.IntField("line", problem.line - 1);
+		json.IntField("character", problem.column);
+		json.EndObject();
+		json.EndObject();
+		json.IntField("severity", problem.severity);
+		json.Field("message", problem.message.View());
+		json.Field("source", source);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void PublishCodeDiagnostics(Server* server, CodeInstance* instance, Core::StringView diagnostics) {
+		Workspace* ws = instance->IsProject() ? server->workspaces->Find(instance->wsId.View()) : nullptr;
+		if (!ws) return;
+		Core::String source = Core::String("plugin ") + instance->pluginId.View();
+		server->diagnostics->ClearSource(ws, source.View());
+		Core::Array<Core::String> files = CodeFilesOf(instance);
+		Core::HashMap<Core::String, Core::String> byPath;
+		Core::Array<Core::String> paths;
+		for (const CodeProblem& problem : ReadCodeProblems(diagnostics)) {
+			Core::String path = CodePath(ws, files, problem.file.View());
+			if (path.IsEmpty()) continue;
+			Core::String* items = byPath.Find(path);
+			if (!items) {
+				paths.Push(path);
+				byPath.At(path) = ProblemJson(problem, source.View());
+			}
+			else *items = (*items + ",") + ProblemJson(problem, source.View()).View();
+		}
+		for (const Core::String& path : paths) server->diagnostics->Set(ws, path.View(), source.View(), ((Core::String("[") + byPath.At(path).View()) + "]").View());
+	}
+}

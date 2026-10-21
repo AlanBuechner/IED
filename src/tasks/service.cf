@@ -78,10 +78,7 @@ namespace Ied
 
 	void Tasks::ReadPresets(Workspace* ws, const TaskProject* project, OfferedTasks& into) {
 		Core::Array<Serialization::DomNode> presets;
-		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
-			Serialization::DomNode list = plugin->manifest->contributes.Member("taskPresets");
-			for (int64 i = 0; i < list.Count(); ++i) presets.Push(list.At(i));
-		}
+		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("taskPresets"))) presets.Push(given.entry);
 		Core::Array<Core::String> ids;
 		Serialization::DomNode named = project->data.Member("presets");
 		for (int64 i = 0; i < named.Count(); ++i) ids.Push(Core::String(named.At(i).AsView()));
@@ -244,14 +241,11 @@ namespace Ied
 	ProblemMatcher* Tasks::MatcherNamed(Workspace* ws, Core::StringView id) {
 		Serialization::DomNode found;
 		bool any = false;
-		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
-			Serialization::DomNode list = plugin->manifest->contributes.Member("problemMatchers");
-			for (int64 i = 0; i < list.Count(); ++i)
-				if (list.At(i).Member("id").AsView() == id) {
-					found = list.At(i);
-					any = true;
-				}
-		}
+		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("problemMatchers")))
+			if (given.entry.Member("id").AsView() == id) {
+				found = given.entry;
+				any = true;
+			}
 		if (!any) throw RpcError(ErrorCode::BadRequest, (Core::String("no plugin offers the problem matcher ") + id).View());
 		Core::String problem;
 		ProblemMatcher* matcher = ReadProblemMatcher(found, problem);

@@ -1,6 +1,7 @@
 include "contributed.ch"
 include "tools/catalog.ch"
 include "tools/plugintools.ch"
+include "tools/codetools.ch"
 include "host/server.ch"
 include "plugins/context.ch"
 
@@ -55,9 +56,18 @@ namespace Ied
 		return opened.ReadText();
 	}
 
-	// A section's text: its `text`, or its `file` inside the plugin; empty with a problem when the file is not there.
-	static Core::String SectionText(const Manifest* manifest, const Serialization::DomNode& section, Core::Array<Core::String>& problems) {
+	// A section's text: its `text`, its `file` inside the plugin, or what its `function` computes for `ws` (the lock is
+	// released while it runs); empty with a problem when the file is not there or the function failed.
+	static Core::String SectionText(Server* server, Workspace* ws, Plugin* plugin, const Serialization::DomNode& section, Core::Array<Core::String>& problems) {
+		const Manifest* manifest = plugin->manifest;
 		if (section.Member("text").IsValid()) return Core::String(section.Member("text").AsView().Trimmed());
+		if (section.Member("function").IsValid()) {
+			CodeInstance* instance = server->code->For(plugin, ws);
+			Core::String problem = instance ? Core::String("") : (((Core::String("plugin ") + manifest->id.View()) + ": the section ") + section.Member("id").AsView()) + " names a function but the plugin has no code";
+			Core::String text = instance ? ComputedSection(server, instance, section.Member("function").AsView(), ws, problem) : Core::String("");
+			if (!problem.IsEmpty()) problems.Push(problem);
+			return Core::String(text.View().Trimmed());
+		}
 		FS::Path file = InsidePlugin(manifest, section.Member("file").AsView());
 		Core::String text = file.IsEmpty() ? Core::String() : ReadAll(file);
 		if (text.IsEmpty()) problems.Push((((Core::String("plugin ") + manifest->id.View()) + ": the section ") + section.Member("id").AsView()) + " has no text to give");
@@ -70,26 +80,25 @@ namespace Ied
 		WhenLookup context = WorkspaceWhen(server, ws);
 		Core::StringBuilder out;
 		int64 left = kSectionsMostTokens * kBytesPerToken;
-		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
-			Serialization::DomNode sections = plugin->manifest->contributes.Member("systemMessageSections");
-			for (int64 i = 0; i < sections.Count() && left > 0; ++i) {
-				Serialization::DomNode section = sections.At(i);
-				Core::String error;
-				if (!WhenHolds(section.Member("when").AsView(), context, error)) {
-					if (!error.IsEmpty()) problems.Push((((Core::String("plugin ") + plugin->manifest->id.View()) + ": the when of section ") + section.Member("id").AsView()) + " does not parse: " + error.View());
-					continue;
-				}
-				const int64 tokens = section.Member("maxTokens").IsValid() ? section.Member("maxTokens").AsInt() : kSectionDefaultTokens;
-				Core::String text = SectionText(plugin->manifest, section, problems);
-				if (text.IsEmpty()) continue;
-				Core::StringView kept = Capped(Capped(text.View(), tokens * kBytesPerToken), left);
-				out.Append("## ");
-				out.Append(plugin->manifest->name.View());
-				out.Append("\n\n");
-				out.Append(kept);
-				out.Append("\n\n");
-				left -= kept.ByteLength();
+		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("systemMessageSections"))) {
+			if (left <= 0) break;
+			Plugin* plugin = given.plugin;
+			Serialization::DomNode section = given.entry;
+			Core::String error;
+			if (!WhenHolds(section.Member("when").AsView(), context, error)) {
+				if (!error.IsEmpty()) problems.Push((((Core::String("plugin ") + plugin->manifest->id.View()) + ": the when of section ") + section.Member("id").AsView()) + " does not parse: " + error.View());
+				continue;
 			}
+			const int64 tokens = section.Member("maxTokens").IsValid() ? section.Member("maxTokens").AsInt() : kSectionDefaultTokens;
+			Core::String text = SectionText(server, ws, plugin, section, problems);
+			if (text.IsEmpty()) continue;
+			Core::StringView kept = Capped(Capped(text.View(), tokens * kBytesPerToken), left);
+			out.Append("## ");
+			out.Append(plugin->manifest->name.View());
+			out.Append("\n\n");
+			out.Append(kept);
+			out.Append("\n\n");
+			left -= kept.ByteLength();
 		}
 		return Core::String(out.View().Trimmed());
 	}
@@ -99,27 +108,26 @@ namespace Ied
 	ToolRegistry* ToolsFor(Server* server, Workspace* ws, Core::Array<Core::String>& problems) {
 		ToolRegistry* registry = CoreTools();
 		WhenLookup context = WorkspaceWhen(server, ws);
-		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
-			Serialization::DomNode calls = plugin->manifest->contributes.Member("toolCalls");
-			for (int64 i = 0; i < calls.Count(); ++i) {
-				Serialization::DomNode entry = calls.At(i);
-				Core::String error;
-				if (!WhenHolds(entry.Member("when").AsView(), context, error)) continue;
-				Core::StringView name = entry.Member("name").AsView();
-				Core::String who = (Core::String("plugin ") + plugin->manifest->id.View()) + ": the tool " + name;
-				if (registry->Find(name)) {
-					problems.Push(who + " is already a tool");
-					continue;
-				}
-				if (!entry.Member("run").IsValid()) {
-					problems.Push(who + " needs plugin code (a binding or a function), which comes with the C4 plugin host (docs/26 P3)");
-					continue;
-				}
-				Core::String problem;
-				ToolSpec* spec = CommandTool(entry, plugin->manifest->id.View(), problem);
-				if (spec) registry->Add(spec);
-				else problems.Push(problem);
+		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("toolCalls"))) {
+			Plugin* plugin = given.plugin;
+			Serialization::DomNode entry = given.entry;
+			Core::String error;
+			if (!WhenHolds(entry.Member("when").AsView(), context, error)) continue;
+			Core::StringView name = entry.Member("name").AsView();
+			Core::String who = (Core::String("plugin ") + plugin->manifest->id.View()) + ": the tool " + name;
+			if (registry->Find(name)) {
+				problems.Push(who + " is already a tool");
+				continue;
 			}
+			CodeInstance* instance = server->code->For(plugin, ws);
+			if (entry.Member("function").IsValid() && !instance) {
+				problems.Push(who + " names a function but the plugin has no code (runtime kind c4)");
+				continue;
+			}
+			Core::String problem;
+			ToolSpec* spec = entry.Member("run").IsValid() ? CommandTool(entry, plugin->manifest->id.View(), problem) : CodeTool(entry, instance, plugin->manifest->id.View(), problem);
+			if (spec) registry->Add(spec);
+			else problems.Push(problem);
 		}
 		for (const Core::String& problem : registry->problems) problems.Push(problem);
 		return registry;

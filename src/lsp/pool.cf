@@ -48,7 +48,8 @@ namespace Ied
 
 	Core::Array<LspProfile*> LspPool::ProfilesFor(Workspace* ws) {
 		Core::Array<LspProfile*> profiles;
-		for (Plugin* plugin : server->plugins->LoadedFor(ws)) ReadLspProfiles(plugin->manifest->contributes, plugin->manifest->id.View(), plugin->manifest->folder, profiles);
+		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("lspProfiles")))
+			profiles.Push(ReadLspProfile(given.entry, given.plugin->manifest->id.View(), given.plugin->manifest->folder));
 		Core::Array<LspProfile*> allowed;
 		for (LspProfile* profile : profiles)
 			if (Allowed(ws, profile)) allowed.Push(profile);

@@ -82,6 +82,10 @@ namespace Ied
 		manifest->description = Core::String(root.Member("description").AsView());
 		manifest->kind = Core::String(root.Member("runtime").Member("kind").AsView());
 		manifest->ui = Core::String(root.Member("runtime").Member("ui").AsView());
+		manifest->entry = Core::String(root.Member("runtime").Member("entry").AsView());
+		manifest->sources = Strings(root.Member("runtime").Member("sources"));
+		if (manifest->sources.IsEmpty()) manifest->sources.Push(Core::String("code"));
+		manifest->activation = Strings(root.Member("activation"));
 		manifest->apiRange = Core::String(root.Member("ied").Member("api").AsView());
 		manifest->permissions = Strings(root.Member("permissions"));
 		manifest->contributes = root.Member("contributes");
@@ -105,14 +109,27 @@ namespace Ied
 		return FS::FileExists((folder / path).CStr());
 	}
 
+	// A c4 plugin names its entry and code that lies in its folder (docs/26 section 2).
+	static void CheckCode(Manifest* manifest) {
+		if (manifest->entry.IsEmpty()) Problem(manifest, Core::StringView("runtime.entry: a c4 plugin names its entry function ('Markup::Activate')"));
+		for (const Core::String& source : manifest->sources) {
+			Core::StringView name = source.View();
+			const bool inside = !name.IsEmpty() && name.ByteAt(0) != '/' && !name.Contains(Core::StringView("..")) && !name.Contains(Core::StringView(":"));
+			FS::Path path = manifest->folder / name;
+			if (!inside || (!FS::IsDirectory(path.CStr()) && !FS::FileExists(path.CStr())))
+				Problem(manifest, (Core::String("runtime.sources: '") + source.View() + "' is not a folder or file in the plugin's folder").View());
+		}
+	}
+
 	// What the schema cannot say: whether this host can load it.
 	static void CheckHost(Manifest* manifest) {
 		if (!VersionInRange(Core::StringView(kHostApiVersion), manifest->apiRange.View()))
 			Problem(manifest, ((Core::String("needs host API ") + manifest->apiRange.View()) + ", this host has " + kHostApiVersion).View());
 		const bool builtin = manifest->kind.View() == "builtin";
 		if (builtin && manifest->source != PluginSource::BuiltIn) Problem(manifest, Core::StringView("a builtin plugin ships with IED itself"));
-		if (!builtin && manifest->kind.View() != "declarative")
-			Problem(manifest, (Core::String("runtime kind '") + manifest->kind.View() + "' cannot load yet (js and process plugins come in M11)").View());
+		if (!builtin && manifest->kind.View() != "declarative" && manifest->kind.View() != "c4")
+			Problem(manifest, (Core::String("runtime kind '") + manifest->kind.View() + "' is not one this host runs (builtin, declarative, c4)").View());
+		if (manifest->kind.View() == "c4") CheckCode(manifest);
 		if (!manifest->ui.IsEmpty() && !IsUiPath(manifest->folder, manifest->ui.View()))
 			Problem(manifest, (Core::String("runtime.ui '") + manifest->ui.View() + "' is not a file in the plugin's folder named with letters, digits, '.', '_', '-' and '/'").View());
 	}

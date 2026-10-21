@@ -5,4 +5,7 @@ kind = "executable"
 description = "The IED server: HTTP, the protocol v1 WebSocket hub (docs/10), workspaces and documents"
 sources = ["."]
 links = ["ws2_32"]
+# A script host (C4/docs/runtime/04): ied-server.c4i and C4Script.dll ship beside the exe, and plugin code (docs/26
+# section 2) compiles against that interface.
+compiler-args = ["--script-host"]
 working-dir = ".."

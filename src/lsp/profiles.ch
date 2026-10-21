@@ -46,6 +46,8 @@ namespace Ied
 	}
 
 	// The profiles of one plugin's `contributes`, in order.
+	// One lspProfiles entry.
+	LspProfile* ReadLspProfile(const Serialization::DomNode& entry, Core::StringView pluginId, const FS::Path& pluginDir);
 	void ReadLspProfiles(const Serialization::DomNode& contributes, Core::StringView pluginId, const FS::Path& pluginDir, Core::Array<LspProfile*>& profiles);
 	// Whether `profile`'s selector names the document.
 	bool ProfileSelects(const LspProfile* profile, Core::StringView languageId, Core::StringView path);

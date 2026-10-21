@@ -137,6 +137,7 @@ namespace Ied
 		event->kind = Core::String(kind);
 		event->text = EventFrame(key, event->seq, event->kind.View(), data);
 		event->bytes = event->text.ByteLength();
+		if (tapped) tap(key, event->kind.View(), data);
 		return Deliver(topic, event);
 	}
 
@@ -151,6 +152,7 @@ namespace Ied
 		event->bytes = event->text.ByteLength();
 		event->mergeable = topic->limits.coalescible;
 		event->merge = merge;
+		if (tapped) tap(key, event->kind.View(), data.View());
 		return Deliver(topic, event);
 	}
 

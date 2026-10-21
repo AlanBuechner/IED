@@ -21,8 +21,9 @@ namespace Ied
 		public Core::String digest;        // an app plugin's content digest now
 		public Core::String overriddenBy;  // the source of the plugin with this id that won
 
-		// {"id", "name", "version", "kind", "source", "state", "problems", "permissions", "contributes": [point names]}
-		public Core::String SummaryJson() const;
+		// {"id", "name", "version", "kind", "source", "state", "problems", "permissions", "contributes": [point names],
+		// "code"?: its code's state (`code`, JSON; empty for none)}
+		public Core::String SummaryJson(Core::StringView code) const;
 	}
 
 	class PluginHost
@@ -45,6 +46,13 @@ namespace Ied
 		// The plugins loaded for a workspace (null: none): the global ones, less those a loaded local plugin overrides,
 		// and the loaded local ones.
 		public Core::Array<Plugin*> LoadedFor(Workspace* ws);
+		// The entries of a contribution point the plugins loaded for `ws` give: each plugin's manifest entries, then
+		// those its code computed (docs/26 section 3), with the plugin that gave each.
+		public Core::Array<Contribution> Entries(Workspace* ws, Core::StringView point);
+		// A plugin's code changed state: the plugins topic (or its workspace's) says so.
+		public void CodeChanged(CodeInstance* instance);
+		// A plugin's code computed new contributions for `wsId` ("": every workspace it is loaded in).
+		public void ContributionsChanged(CodeInstance* instance, Core::StringView wsId);
 
 	private:
 		private void Discover(const FS::Path& folder, PluginSource source, Core::Array<Manifest*>& found);
@@ -54,6 +62,8 @@ namespace Ied
 		private bool SaveChoices() const;
 		private void Changed();
 		private Core::String Snapshot() const;
+		private Core::String Summary(Plugin* plugin, Workspace* ws) const;
+		private Core::String ContributesJson(Plugin* plugin, Workspace* ws) const;
 		private Core::String ListMethod(Call& call, const Params& params);
 		private Core::String SetEnabledMethod(Call& call, const Params& params);
 		private Core::String ApproveMethod(Call& call, const Params& params);
@@ -64,6 +74,19 @@ namespace Ied
 		private Core::Array<Plugin*> plugins;
 		private Core::HashMap<Core::String, bool> disabled;
 		private Core::HashMap<Core::String, Core::String> approved;   // app plugin id -> the digest the owner approved
+	}
+
+	// One entry of a contribution point and the plugin that gave it.
+	struct Contribution
+	{
+		[operator("create")] public void Init() {}
+		[operator("create")] public void Init(Plugin* from, Serialization::DomNode given) {
+			plugin = from;
+			entry = given;
+		}
+
+		public Plugin* plugin;
+		public Serialization::DomNode entry;
 	}
 
 	const char* PluginStateName(PluginState state);

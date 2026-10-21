@@ -115,7 +115,7 @@ Workspace trust is recorded in app tier (never in the repo - a repo cannot trust
 }
 ```
 
-Evaluation order: deny -> confirm -> mode -> allow. The approval card's "Always allow" writes an `allow` rule at the tier the owner picks.
+Evaluation order: deny -> confirm -> mode -> allow. The approval card's "Always allow" writes an `allow` rule at the tier the owner picks. A tool a plugin's C4 code implements (`docs/26` section 8) is the subject `plugin(<plugin id>/<tool>)`, so `"allow": ["plugin(ied.go/*)"]` allows every tool of one plugin; a plugin's command tool is `shell(<the command as run>)` like any command.
 
 **Invariants (regardless of mode):**
 

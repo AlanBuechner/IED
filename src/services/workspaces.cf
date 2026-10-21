@@ -168,8 +168,14 @@ namespace Ied
 		return batch.Overflowed();
 	}
 
-	// The workspace's settings catalog and task offers made again, and its clients told to read the contributions again.
+	// The workspace's project plugins' code reconciled, its settings catalog and task offers made again, and its clients
+	// told to read the contributions again.
 	void Workspaces::PluginsChanged(Workspace* ws) {
+		server->code->Reconcile(ws);
+		ContributionsChanged(ws);
+	}
+
+	void Workspaces::ContributionsChanged(Workspace* ws) {
 		server->settings->PluginsChanged(ws);
 		server->tasks->ProjectsChanged(ws);
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "plugins.changed", Core::StringView("{}"));
@@ -201,6 +207,7 @@ namespace Ied
 		server->debugger->WorkspaceOpened(ws);
 		server->chats->WorkspaceOpened(ws);
 		server->git->WorkspaceOpened(ws);
+		server->code->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;
@@ -616,6 +623,7 @@ namespace Ied
 		server->settings->TrustChanged(ws);
 		server->lsp->TrustChanged(ws);
 		server->git->TrustChanged(ws);
+		server->code->Reconcile(ws);
 		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();

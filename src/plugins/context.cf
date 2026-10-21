@@ -52,10 +52,7 @@ namespace Ied
 	Core::Array<Core::String> WorkspaceLanguages(Server* server, Workspace* ws) {
 		Core::Array<Core::String> languages;
 		Core::Array<Serialization::DomNode> icons;
-		for (Plugin* plugin : server->plugins->LoadedFor(ws)) {
-			Serialization::DomNode list = plugin->manifest->contributes.Member("projectIcons");
-			for (int64 i = 0; i < list.Count(); ++i) icons.Push(list.At(i));
-		}
+		for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("projectIcons"))) icons.Push(given.entry);
 		MarkedLanguages(icons, ws->root, languages);
 		if (ws->solution)
 			for (ProjectModel* project : ws->solution->projects) {

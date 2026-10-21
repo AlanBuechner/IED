@@ -23,8 +23,11 @@ namespace Ied
 		public Core::String name;
 		public Core::String version;
 		public Core::String description;
-		public Core::String kind;               // runtime.kind: builtin, declarative, js, process
+		public Core::String kind;               // runtime.kind: builtin, declarative, c4
 		public Core::String ui;                 // runtime.ui: its browser module's path in its folder; empty when none
+		public Core::String entry;              // runtime.entry: a c4 plugin's entry function ("Markup::Activate")
+		public Core::Array<Core::String> sources;      // runtime.sources: its code's folders and files (default "code")
+		public Core::Array<Core::String> activation;   // when its code starts (docs/26 section 2); empty: at load
 		public Core::String apiRange;           // ied.api
 		public Core::Array<Core::String> permissions;
 		public Core::Array<Dependency*> dependencies;

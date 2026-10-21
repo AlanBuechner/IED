@@ -1,0 +1,566 @@
+include "code.ch"
+include "host/server.ch"
+include "context.ch"
+include "codediagnostics.ch"
+
+namespace Ied
+{
+	thread_local CodeInstance* tCode = nullptr;
+
+	static Core::String Number(int64 value) {
+		Core::StringBuilder text;
+		text.AppendInt(value);
+		return text.ToString();
+	}
+
+	CodeInstance* CurrentCode() { return tCode; }
+
+	const char* CodeStateName(CodeState state) {
+		if (state == CodeState::Idle) return "idle";
+		if (state == CodeState::Compiling) return "compiling";
+		if (state == CodeState::Active) return "active";
+		if (state == CodeState::Stopped) return "stopped";
+		return "failed";
+	}
+
+	bool CodeInstance::May(Core::StringView permission) const {
+		for (const Core::String& held : permissions)
+			if (held.View() == permission) return true;
+		return false;
+	}
+
+	void CodeRuntime::Init(Server* server) {
+		this.server = server;
+		server->rpc.Register("plugins.call", [server](Call& call, const Params& params) -> Core::String { return CallBindingMethod(server, call, params); });
+		CodeRuntime* self = this;
+		server->hub.Tap([self](Core::StringView topic, Core::StringView kind, Core::StringView data) { self->Published(topic, kind, data); });
+	}
+
+	// --- Sources -------------------------------------------------------------------------------------------------------
+
+	// The .cf files under `path` (itself, when it is one), in name order.
+	static void CodeFiles(const FS::Path& path, Core::Array<Core::String>& into) {
+		if (FS::FileExists(path.CStr())) {
+			if (path.View().EndsWith(Core::StringView(".cf"))) into.Push(Core::String(path.View()));
+			return;
+		}
+		if (!FS::IsDirectory(path.CStr())) return;
+		Core::Array<Core::String> names;
+		FS::Directory listing = FS::Directory(path.CStr());
+		for (FS::DirectoryEntry& entry : listing) names.Push(entry.name);
+		names.Sort();
+		for (const Core::String& name : names) CodeFiles(path / name.View(), into);
+	}
+
+	Core::Array<Core::String> CodeFilesOf(CodeInstance* instance) {
+		Core::Array<Core::String> files;
+		for (const Core::String& source : instance->sources) CodeFiles(instance->folder / source.View(), files);
+		return files;
+	}
+
+	// What a build is made of: the entry, the sources and their files' digest.
+	static Core::String BuildDigest(const FS::Path& folder, Core::StringView entry, const Core::Array<Core::String>& sources) {
+		Core::StringBuilder all;
+		all.Append(entry);
+		for (const Core::String& source : sources) {
+			FS::Path path = folder / source.View();
+			all.Append("\n");
+			all.Append(source.View());
+			all.Append("=");
+			if (FS::IsDirectory(path.CStr())) all.Append(FolderDigest(path).View());
+			else if (FS::FileExists(path.CStr())) {
+				FS::File opened = FS::File(path.CStr(), "rb");
+				all.Append(TextDigest(opened.ReadText().View()).View());
+			}
+		}
+		return TextDigest(all.View());
+	}
+
+	static bool IsCode(Plugin* plugin) { return plugin->state == PluginState::Loaded && plugin->manifest->kind.View() == "c4"; }
+
+	static bool SameFolder(const FS::Path& a, const FS::Path& b) { return a.View() == b.View(); }
+
+	// --- Which code runs -----------------------------------------------------------------------------------------------
+
+	CodeInstance* CodeRuntime::For(Plugin* plugin, Workspace* ws) const {
+		const bool project = plugin->manifest->source == PluginSource::Project;
+		if (project && !ws) return nullptr;
+		Core::StringView wsId = project ? ws->wsId.View() : Core::StringView("");
+		for (CodeInstance* instance : instances)
+			if (instance->wsId.View() == wsId && instance->pluginId.View() == plugin->manifest->id.View() && SameFolder(instance->folder, plugin->manifest->folder))
+				return instance;
+		return nullptr;
+	}
+
+	static bool ProvidesServerBinding(Plugin* plugin, Core::StringView name) {
+		Serialization::DomNode provides = plugin->manifest->contributes.Member("bindings").Member("provides");
+		for (int64 i = 0; i < provides.Count(); ++i) {
+			Serialization::DomNode binding = provides.At(i);
+			Core::StringView side = binding.Member("side").IsValid() ? binding.Member("side").AsView() : Core::StringView("server");
+			if (binding.Member("name").AsView() == name && side == "server") return true;
+		}
+		return false;
+	}
+
+	CodeInstance* CodeRuntime::Provider(Workspace* ws, Core::StringView name) const {
+		Core::Array<Plugin*> loaded = ws ? server->plugins->LoadedFor(ws) : Core::Array<Plugin*>();
+		if (!ws)
+			for (Plugin* plugin : server->plugins->All())
+				if (plugin->state == PluginState::Loaded) loaded.Push(plugin);
+		for (Plugin* plugin : loaded)
+			if (IsCode(plugin) && ProvidesServerBinding(plugin, name)) return For(plugin, ws);
+		return nullptr;
+	}
+
+	bool CodeRuntime::LoadedIn(CodeInstance* instance, Workspace* ws) const {
+		if (instance->IsProject()) return instance->wsId.View() == ws->wsId.View();
+		for (Plugin* plugin : server->plugins->LocalFor(ws))
+			if (plugin->state == PluginState::Loaded && plugin->manifest->id.View() == instance->pluginId.View()) return false;
+		return true;
+	}
+
+	Plugin* CodeRuntime::PluginOf(CodeInstance* instance) const {
+		Workspace* ws = instance->IsProject() ? server->workspaces->Find(instance->wsId.View()) : nullptr;
+		Core::Array<Plugin*> candidates = ws ? server->plugins->LocalFor(ws) : server->plugins->All();
+		for (Plugin* plugin : candidates)
+			if (IsCode(plugin) && plugin->manifest->id.View() == instance->pluginId.View() && SameFolder(plugin->manifest->folder, instance->folder)) return plugin;
+		return nullptr;
+	}
+
+	void CodeRuntime::Reconcile(Workspace* ws) {
+		Core::Array<Plugin*> wanted = ws ? server->plugins->LocalFor(ws) : server->plugins->All();
+		Core::StringView wsId = ws ? ws->wsId.View() : Core::StringView("");
+		Core::Array<CodeInstance*> running = instances;
+		for (CodeInstance* instance : running) {
+			if (instance->wsId.View() != wsId) continue;
+			Plugin* match = nullptr;
+			for (Plugin* plugin : wanted)
+				if (IsCode(plugin) && plugin->manifest->id.View() == instance->pluginId.View() && SameFolder(plugin->manifest->folder, instance->folder)) match = plugin;
+			if (!match) {
+				Stop(instance);
+				continue;
+			}
+			instance->permissions = match->manifest->permissions;
+			instance->activation = match->manifest->activation;
+			Core::String digest = BuildDigest(match->manifest->folder, match->manifest->entry.View(), match->manifest->sources);
+			if (instance->buildQueued || instance->state == CodeState::Idle || digest.View() == instance->digest.View()) continue;
+			instance->entry = match->manifest->entry;
+			instance->sources = match->manifest->sources;
+			Activate(instance);
+		}
+		for (Plugin* plugin : wanted)
+			if (IsCode(plugin) && !For(plugin, ws)) Start(plugin, ws);
+	}
+
+	CodeInstance* CodeRuntime::Start(Plugin* plugin, Workspace* ws) {
+		CodeInstance* instance = new CodeInstance();
+		instance->pluginId = plugin->manifest->id;
+		instance->wsId = plugin->manifest->source == PluginSource::Project ? ws->wsId : Core::String("");
+		instance->folder = plugin->manifest->folder;
+		instance->entry = plugin->manifest->entry;
+		instance->sources = plugin->manifest->sources;
+		instance->permissions = plugin->manifest->permissions;
+		instance->activation = plugin->manifest->activation;
+		instance->state = CodeState::Idle;
+		instance->runtime = this;
+		instances.Push(instance);
+		CodeRuntime* self = this;
+		Threading::Thread::Run([self, instance]() { self->Loop(instance); }).Detach();
+		bool wanted = Wants(instance, nullptr);
+		if (!wanted && !instance->IsProject())
+			for (Workspace* open : server->workspaces->All()) wanted = wanted || Wants(instance, open);
+		if (!wanted && instance->IsProject()) wanted = Wants(instance, ws);
+		if (wanted) Activate(instance);
+		return instance;
+	}
+
+	// Whether an activation event of `instance` holds: at load (`ws` null) or for the workspace `ws`.
+	bool CodeRuntime::Wants(CodeInstance* instance, Workspace* ws) const {
+		if (!ws) {
+			if (instance->activation.IsEmpty()) return true;
+			for (const Core::String& event : instance->activation)
+				if (event.View() == "onStartup") return true;
+			return false;
+		}
+		WhenLookup lookup = WorkspaceWhen(server, ws);
+		for (const Core::String& event : instance->activation) {
+			Core::StringView text = event.View();
+			if (text == "onWorkspaceOpen") return true;
+			if (text.StartsWith(Core::StringView("onWorkspaceContains:")) && lookup((Core::String("workspaceContains.") + text.Substring(20, text.ByteLength() - 20)).View()).flag) return true;
+			if (text.StartsWith(Core::StringView("onLanguage:")) && lookup((Core::String("workspaceLanguage.") + text.Substring(11, text.ByteLength() - 11)).View()).flag) return true;
+		}
+		return false;
+	}
+
+	void CodeRuntime::WorkspaceOpened(Workspace* ws) {
+		Reconcile(ws);
+		for (CodeInstance* instance : instances) {
+			if (instance->IsProject() || instance->stopping) continue;
+			if (instance->state == CodeState::Idle && Wants(instance, ws)) Activate(instance);
+		}
+		IED::Workspace shown = PluginWorkspace(server, ws);
+		for (CodeInstance* instance : instances) {
+			if (instance->IsProject() || instance->state != CodeState::Active || !LoadedIn(instance, ws)) continue;
+			Queue(instance, [instance, shown]() {
+				for (const IED::WorkspaceHandler& handler : instance->handlers.workspaceHandlers) {
+					Core::String problem;
+					GuardedCall(instance, [handler, shown]() { handler(shown); }, problem);
+				}
+			});
+		}
+	}
+
+	void CodeRuntime::Stop(CodeInstance* instance) {
+		instance->stopping = true;
+		instance->state = CodeState::Stopped;
+		instance->contributed.Clear();
+		instance->provides.Clear();
+		instance->hears.Clear();
+		for (int64 i = 0; i < instances.Count(); ++i)
+			if (instances[i] == instance) {
+				instances.RemoveAt(i);
+				break;
+			}
+		CodeRuntime* self = this;
+		Queue(instance, [self, instance]() { self->Retire(instance); });
+		server->plugins->CodeChanged(instance);
+	}
+
+	// --- The plugin's thread -------------------------------------------------------------------------------------------
+
+	void CodeRuntime::Queue(CodeInstance* instance, func<void()> body) {
+		CodeJob* job = new CodeJob();
+		job->body = body;
+		instance->queue.Push(job);
+		instance->wake.NotifyAll();
+	}
+
+	void CodeRuntime::Loop(CodeInstance* instance) {
+		tCode = instance;
+		Threading::LockGuard guard(server->lock);
+		while (true) {
+			while (instance->queue.IsEmpty() && !instance->stopping) instance->wake.Wait(server->lock);
+			if (instance->queue.IsEmpty()) break;
+			CodeJob* job = instance->queue.Pop();
+			{
+				Threading::UnlockGuard unlocked(server->lock);
+				job->body();
+			}
+			job->done = true;
+			instance->finished.NotifyAll();
+		}
+	}
+
+	func<bool()> NeverStopped() { return []() -> bool { return false; }; }
+
+	bool CodeRuntime::Run(CodeInstance* instance, func<void(CodeInstance*)> body, int64 ms, func<bool()> stopped, Core::String& problem) {
+		Core::String who = Core::String("plugin ") + instance->pluginId.View();
+		if (instance->stopping) {
+			problem = who + ": its code stopped";
+			return false;
+		}
+		if (instance->state == CodeState::Failed) {
+			problem = (who + ": ") + instance->problem.View();
+			return false;
+		}
+		if (CurrentCode() == instance) {
+			Threading::UnlockGuard unlocked(server->lock);
+			body(instance);
+			return true;
+		}
+		int64 wait = ms;
+		if (instance->state != CodeState::Active) wait += kCodeStartMs;
+		if (instance->state == CodeState::Idle) Activate(instance);
+		Core::String* refused = new Core::String();
+		Server* host = server;
+		CodeJob* job = new CodeJob();
+		job->body = [host, instance, body, refused]() {
+			{
+				Threading::LockGuard guard(host->lock);
+				if (instance->state != CodeState::Active) {
+					*refused = instance->problem.IsEmpty() ? Core::String("its code did not start") : instance->problem;
+					return;
+				}
+			}
+			body(instance);
+		};
+		instance->queue.Push(job);
+		instance->wake.NotifyAll();
+		const int64 deadline = clock_now_ns() + wait * 1000000;
+		while (!job->done) {
+			const int64 left = deadline - clock_now_ns();
+			if (left <= 0) {
+				problem = ((who + ": no answer within ") + Number(wait / 1000).View()) + " s";
+				return false;
+			}
+			if (stopped()) {
+				problem = who + ": cancelled";
+				return false;
+			}
+			instance->finished.WaitFor(server->lock, left < 100000000 ? left : 100000000);
+		}
+		if (!refused->IsEmpty()) {
+			problem = (who + ": ") + refused->View();
+			return false;
+		}
+		return true;
+	}
+
+	// --- Building and starting -----------------------------------------------------------------------------------------
+
+	Scripting::Host* CodeRuntime::ScriptHost(Core::String& problem) {
+		if (!hostTried) {
+			hostTried = true;
+			host = Scripting::Host::Open();
+			if (!host->IsOpen()) hostProblem = Core::String("the server cannot run plugin code: ") + host->Error();
+		}
+		if (!hostProblem.IsEmpty()) {
+			problem = hostProblem;
+			return nullptr;
+		}
+		return host;
+	}
+
+	void CodeRuntime::RetryFailed() {
+		for (CodeInstance* instance : instances)
+			if (instance->state == CodeState::Failed && !instance->buildQueued) Activate(instance);
+	}
+
+	void CodeRuntime::Activate(CodeInstance* instance) {
+		if (instance->state == CodeState::Idle || instance->state == CodeState::Failed) instance->state = CodeState::Compiling;
+		instance->buildQueued = true;
+		CodeRuntime* self = this;
+		Queue(instance, [self, instance]() { self->Build(instance); });
+	}
+
+	// On the plugin's thread: compiles its sources and, when they compile, retires the running build and starts the new
+	// one through its entry.
+	void CodeRuntime::Build(CodeInstance* instance) {
+		Scripting::ScriptOptions options;
+		Scripting::Host* scripts = nullptr;
+		Core::String problem;
+		Core::String digest;
+		{
+			Threading::LockGuard guard(server->lock);
+			if (instance->stopping) return;
+			instance->buildQueued = false;
+			scripts = ScriptHost(problem);
+			digest = BuildDigest(instance->folder, instance->entry.View(), instance->sources);
+			instance->builds += 1;
+			options.name = ((instance->pluginId + "#") + Number(instance->builds).View());
+			for (const Core::String& file : CodeFilesOf(instance)) options.AddFile(file.CStr());
+			if (options.paths.IsEmpty() && problem.IsEmpty()) problem = Core::String("its sources hold no .cf file");
+		}
+		options.Allow(kCodeAllowed);
+		if (!problem.IsEmpty()) {
+			Failed(instance, problem.View(), digest.View());
+			return;
+		}
+		const int64 started = clock_now_ns();
+		Scripting::Script* fresh = scripts->Compile(options);
+		const int64 compileMs = (clock_now_ns() - started) / 1000000;
+		if (!fresh->Ok()) {
+			Core::String diagnostics = Core::String("its code did not compile:\n") + fresh->Diagnostics();
+			if (instance->script && !instance->script->Faulted()) {
+				Threading::LockGuard guard(server->lock);
+				instance->problem = Core::String("the new build did not compile, the previous one runs:\n") + fresh->Diagnostics();
+				instance->digest = digest;
+				PublishCodeDiagnostics(server, instance, Core::StringView(fresh->Diagnostics()));
+				server->Log((((Core::String("plugin ") + instance->pluginId.View()) + ": ") + instance->problem.View()).View());
+				server->plugins->CodeChanged(instance);
+				return;
+			}
+			Retire(instance);
+			Failed(instance, diagnostics.View(), digest.View());
+			Threading::LockGuard guard(server->lock);
+			PublishCodeDiagnostics(server, instance, Core::StringView(fresh->Diagnostics()));
+			return;
+		}
+		{
+			Threading::LockGuard guard(server->lock);
+			PublishCodeDiagnostics(server, instance, Core::StringView(""));
+		}
+		Retire(instance);
+		instance->script = fresh;
+		instance->context = new IED::PluginContext((void*)instance);
+		IED::PluginContext* context = instance->context;
+		void* address = CodeFunction(instance, instance->entry.View(), Core::StringView("void"), Core::StringView("IED::PluginContext&"), problem);
+		if (address) {
+			funcptr<void(IED::PluginContext&)> entry = (funcptr<void(IED::PluginContext&)>)address;
+			GuardedCall(instance, [entry, context]() { entry(*context); }, problem);
+		}
+		Threading::LockGuard guard(server->lock);
+		if (instance->stopping) return;
+		instance->digest = digest;
+		instance->state = problem.IsEmpty() ? CodeState::Active : CodeState::Failed;
+		instance->problem = problem;
+		Core::StringBuilder line;
+		line.Append("plugin ");
+		line.Append(instance->pluginId.View());
+		line.Append(problem.IsEmpty() ? ": code started (compiled in " : ": code did not start (compiled in ");
+		line.AppendInt(compileMs);
+		line.Append(" ms)");
+		if (!problem.IsEmpty()) {
+			line.Append(": ");
+			line.Append(problem.View());
+		}
+		server->Log(line.View());
+		server->plugins->CodeChanged(instance);
+	}
+
+	void CodeRuntime::Failed(CodeInstance* instance, Core::StringView problem, Core::StringView digest) {
+		Threading::LockGuard guard(server->lock);
+		if (instance->stopping) return;
+		instance->state = CodeState::Failed;
+		instance->problem = Core::String(problem);
+		instance->digest = Core::String(digest);
+		server->Log((((Core::String("plugin ") + instance->pluginId.View()) + ": ") + problem).View());
+		server->plugins->CodeChanged(instance);
+	}
+
+	// On the plugin's thread: the running build's deactivate handlers run, everything it registered goes, and its script
+	// unloads.
+	void CodeRuntime::Retire(CodeInstance* instance) {
+		if (!instance->script) return;
+		for (const func<void()>& handler : instance->handlers.deactivateHandlers) {
+			Core::String ignored;
+			if (!instance->script->Faulted()) GuardedCall(instance, handler, ignored);
+		}
+		instance->handlers.bindings.Clear();
+		instance->handlers.listenKinds.Clear();
+		instance->handlers.listeners.Clear();
+		instance->handlers.workspaceHandlers.Clear();
+		instance->handlers.deactivateHandlers.Clear();
+		{
+			Threading::LockGuard guard(server->lock);
+			instance->provides.Clear();
+			instance->hears.Clear();
+			instance->contributed.Clear();
+		}
+		const int64 dropped = instance->script->Unload();
+		if (dropped > 0) server->Log((((Core::String("plugin ") + instance->pluginId.View()) + ": unloaded with live objects, finalizers dropped: ") + Number(dropped).View()).View());
+		instance->script = nullptr;
+		instance->context = nullptr;
+	}
+
+	// --- Guarded calls -------------------------------------------------------------------------------------------------
+
+	class GuardFrame
+	{
+		public func<void()> body;
+		public bool threw;
+	}
+
+	static void RunGuardFrame(void* context) {
+		GuardFrame* frame = (GuardFrame*)context;
+		try {
+			frame->body();
+		}
+		catch (...) {
+			frame->threw = true;
+		}
+	}
+
+	bool GuardedCall(CodeInstance* instance, func<void()> body, Core::String& problem) {
+		GuardFrame* frame = new GuardFrame();
+		frame->body = body;
+		if (!instance->script->Call(RunGuardFrame, (void*)frame)) {
+			problem = Core::String("its code faulted: ") + instance->script->FaultText();
+			instance->runtime->Faulted(instance, problem.View());
+			return false;
+		}
+		if (frame->threw) {
+			problem = Core::String("its code threw an exception it did not catch");
+			return false;
+		}
+		return true;
+	}
+
+	void CodeRuntime::Faulted(CodeInstance* instance, Core::StringView problem) {
+		Threading::LockGuard guard(server->lock);
+		instance->state = CodeState::Failed;
+		instance->problem = Core::String(problem);
+		server->Log((((Core::String("plugin ") + instance->pluginId.View()) + ": ") + problem).View());
+		server->plugins->CodeChanged(instance);
+	}
+
+	// A type's name without `const` and spaces: a parameter taken by const reference or by reference fits alike.
+	static Core::String BareType(Core::StringView name) {
+		Core::StringBuilder bare;
+		for (int64 i = 0; i < name.ByteLength(); ++i) {
+			const bool starts = i == 0 || name.ByteAt(i - 1) == ' ' || name.ByteAt(i - 1) == '<' || name.ByteAt(i - 1) == ',';
+			const bool ends = i + 5 == name.ByteLength() || name.ByteAt(i + 5) == ' ' || name.ByteAt(i + 5) == '&' || name.ByteAt(i + 5) == '*';
+			if (starts && ends && name.Substring(i, name.ByteLength() - i).StartsWith(Core::StringView("const"))) {
+				i += 4;
+				continue;
+			}
+			if (name.ByteAt(i) != ' ') bare.AppendByte(name.ByteAt(i));
+		}
+		return bare.ToString();
+	}
+
+	static bool SameType(Core::StringView a, Core::StringView b) { return BareType(a).View() == BareType(b).View(); }
+
+	void* CodeFunction(CodeInstance* instance, Core::StringView name, Core::StringView returns, Core::StringView parameter, Core::String& problem) {
+		Core::String qualified = Core::String(name);
+		Reflection::Function function = instance->script->FindFunction(qualified.CStr());
+		Core::String wanted = ((((Core::String("`") + returns) + " ") + name) + "(") + parameter;
+		wanted = wanted + ")`";
+		if (!function.IsValid()) {
+			problem = ((Core::String("its code has no function '") + name) + "' (wanted: ") + wanted.View();
+			problem = problem + ")";
+			return nullptr;
+		}
+		const bool fits = function.ParamCount() == 1 && SameType(Core::StringView(function.ReturnTypeName()), returns) && SameType(Core::StringView(function.ParamAt(0).TypeName()), parameter);
+		if (!fits) {
+			problem = (((Core::String("'") + name) + "' is not ") + wanted.View()) + ": it returns ";
+			problem = problem + function.ReturnTypeName();
+			if (function.ParamCount() > 0) problem = (problem + " and takes ") + function.ParamAt(0).TypeName();
+			return nullptr;
+		}
+		void* address = instance->script->Address(qualified.CStr());
+		if (!address) problem = (Core::String("its function '") + name) + "' has no address";
+		return address;
+	}
+
+	// --- What it shows -------------------------------------------------------------------------------------------------
+
+	IED::Workspace PluginWorkspace(Server* server, Workspace* ws) {
+		IED::Workspace shown;
+		shown.id = ws->wsId;
+		shown.name = ws->name;
+		shown.root = Core::String(ws->root.View());
+		shown.kind = ws->kind;
+		shown.trusted = ws->trusted;
+		shown.languages = WorkspaceLanguages(server, ws);
+		if (!ws->solution) return shown;
+		for (ProjectModel* model : ws->solution->projects) {
+			IED::Project project;
+			project.name = model->name;
+			Core::String folder;
+			if (RelativeTo(ws->root.View(), model->root.View(), folder)) project.folder = folder;
+			project.kind = model->kind;
+			project.language = Core::String(model->data.Member("language").AsView());
+			shown.projects.Push(project);
+		}
+		return shown;
+	}
+
+	void CodeRuntime::ComputedFor(CodeInstance* instance, Workspace* ws, Core::StringView point, Core::Array<Serialization::DomNode>& into) const {
+		for (Contributed* given : instance->contributed) {
+			if (given->point.View() != point) continue;
+			if (!given->wsId.IsEmpty() && (!ws || given->wsId.View() != ws->wsId.View())) continue;
+			for (int64 i = 0; i < given->entries.Count(); ++i) into.Push(given->entries.At(i));
+		}
+	}
+
+	Core::String CodeRuntime::SummaryJson(CodeInstance* instance) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("state", CodeStateName(instance->state));
+		if (!instance->problem.IsEmpty()) json.Field("problem", instance->problem.View());
+		json.IntField("builds", instance->builds);
+		json.EndObject();
+		return json.ToString();
+	}
+}

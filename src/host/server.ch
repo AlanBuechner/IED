@@ -16,6 +16,7 @@ include "services/diagnostics.ch"
 include "services/terminals.ch"
 include "auth/auth.ch"
 include "plugins/host.ch"
+include "plugins/codecalls.ch"
 include "trust.ch"
 include "schemas.ch"
 include "appdata.ch"
@@ -71,6 +72,7 @@ namespace Ied
 		public Git* git;
 		public Auth* auth;
 		public PluginHost* plugins;
+		public CodeRuntime* code;
 		public TrustStore trust;
 		public HostSchemas schemas;
 		public Settings* settings;

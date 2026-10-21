@@ -8,7 +8,7 @@ namespace Ied
 		return strings;
 	}
 
-	static DapProvider* ReadProvider(const Serialization::DomNode& node, Core::StringView pluginId, const FS::Path& pluginDir) {
+	DapProvider* ReadDapProvider(const Serialization::DomNode& node, Core::StringView pluginId, const FS::Path& pluginDir) {
 		DapProvider* provider = new DapProvider();
 		provider->type = Core::String(node.Member("type").AsView());
 		provider->label = node.Member("label").AsView().IsEmpty() ? provider->type : Core::String(node.Member("label").AsView());
@@ -28,7 +28,7 @@ namespace Ied
 
 	void ReadDapProviders(const Serialization::DomNode& contributes, Core::StringView pluginId, const FS::Path& pluginDir, Core::Array<DapProvider*>& providers) {
 		Serialization::DomNode list = contributes.Member("dapProviders");
-		for (int64 i = 0; i < list.Count(); ++i) providers.Push(ReadProvider(list.At(i), pluginId, pluginDir));
+		for (int64 i = 0; i < list.Count(); ++i) providers.Push(ReadDapProvider(list.At(i), pluginId, pluginDir));
 	}
 
 	DapProvider* ProviderOfType(const Core::Array<DapProvider*>& providers, Core::StringView type) {

@@ -10,7 +10,7 @@ Versioned definitions that the server, the web client and every plugin code agai
 | `schemas/federation.v1.schema.json` | `<Name>.ied.fed` | v1 draft | `docs/03` |
 | `schemas/agent-mode.v1.schema.json` | `.ied/modes/<id>.json` | v1 draft | `docs/12` |
 | `protocol/frames.v1.schema.json` | WebSocket frames | v1 draft, ready | `docs/10` |
-| `examples/` | A game-shaped solution + project (`MyGame.ied.sln`, `Game.ied.proj`), and the C4 language plugin as a declarative manifest | illustrative | - |
+| `examples/` | A game-shaped solution + project (`MyGame.ied.sln`, `Game.ied.proj`), and `markup-plugin`: a project's own language as a plugin with C4 code (`docs/26`) | illustrative; the plugin's code compiles in the server checks | - |
 
 Validate the examples after any schema change (a minimal validator is enough; the schemas use only: type, required, properties, additionalProperties, items, enum, const, pattern, oneOf, minItems, local and cross-file `$ref`).
 
@@ -23,44 +23,42 @@ Validate the examples after any schema change (a minimal validator is enough; th
 - **`when` expressions:** `&&`, `||`, `!`, `==`, `!=`, `=~` (regex), parentheses; operands are context keys (`workspaceTrusted`, `resourceExtname`, `resourceLangId`, `debugState`, `config`, `config.<setting>`, `activeActivity`, `deviceClass`) and string literals in single quotes.
 - **Ids:** plugin ids dotted lowercase; contribution ids unique within the plugin and referenced globally as `<pluginId>/<id>` when ambiguous.
 
-## Process plugin protocol `ied-plugin-rpc/1`
+## Plugin code (C4)
 
-For `runtime.kind = "process"`. JSON-RPC 2.0, one JSON object per line on stdin/stdout (stderr goes to the plugin's output source).
+For `runtime.kind = "c4"` (`docs/26` section 2; the `js` and `process` runtimes are gone). The server compiles the plugin's `runtime.sources` (default `code/`) with its script host when the code starts, against the server headers under `src/api/` - the only ones a plugin may include:
 
+```c4
+include "api/plugin.ch"
+
+namespace Markup
+{
+	// toolCalls[].function: IED::ToolResult <Name>(const IED::ToolCall& call)
+	IED::ToolResult Outline(const IED::ToolCall& call) { ... IED::ReadFile(call.workspace, path, text, problem) ... }
+
+	// systemMessageSections[].function: Core::String <Name>(const IED::Workspace& ws)
+	Core::String Section(const IED::Workspace& ws) { ... }
+
+	// runtime.entry
+	void Activate(IED::PluginContext& context)
+	{
+		context.Provide(Core::StringView("markup.format"), [](const Serialization::DomNode& args) -> IED::Result { ... });
+		context.Listen(Core::StringView("tree.changed"), [](const IED::Event& event) { ... });
+		context.OnWorkspace([](const IED::Workspace& ws) { ... });   // then Contribute(point, ws.id, entries, problem)
+	}
+}
 ```
-host -> plugin   initialize { protocol: "ied-plugin-rpc/1", pluginId, pluginDir, workspace?: { id, roots[], trusted }, settings, hostVersion }
-plugin -> host   result     { provides: [binding names it implements], subscribes: [event names] }
-host -> plugin   binding/call   { name, params, invocationId, deadlineMs?, workspaceId? }   -> result | error
-host -> plugin   event          { name, payload }                                          (notification)
-host -> plugin   $/cancelRequest { id }
-host -> plugin   settings/changed { settings }
-host -> plugin   shutdown {} ; exit
-plugin -> host   host/<api>     (calls into the host API, permission-checked: fs/read, fs/write, process/spawn, ai/invoke, binding/call, notify, log ...)
-```
 
-Integer request ids only (some family tools mishandle string ids). Cancellation is mandatory to honor for calls longer than 1 s. The host restarts a crashed backend with backoff and quarantines it after 5 crashes in 10 minutes.
+Calls into a plugin's code run on its own thread, one at a time; `src/api/*.ch` documents each call and the permission it needs (`fs.read`, `fs.write`, `process.spawn`). `shared/host-api/examples/markup-plugin` is a complete one.
 
-## JS and UI module API (shape)
+## UI module API (shape)
 
-JS logic modules (QuickJS-ng, server) and UI modules (browser) both receive an `ied` object; the surfaces differ:
+UI modules (browser) receive an `ied` object (`docs/02` "UI modules" has the members as built):
 
 ```ts
-// server-side JS
-export function activate(ied: IedServer): void | Promise<void>;
-ied.bindings.provide("myplugin.doThing", async (params, ctx) => result);
-ied.bindings.call("editor.openFile", { path, line });
-ied.events.on("build.status", payload => ...);
-ied.fs.read(path) / write / watch      // permission-checked
-ied.process.spawn(argv, opts)          // streams
-ied.ai.invoke({ role, messages, tools }) // uses model groups + routing + privacy
-ied.settings.get(key, resource?)
-ied.log.info(...)
-
-// browser UI module
 export function register(ui: IedClient): void;
 ui.views.register("myplugin.view", (container, props) => dispose);
 ui.commands.register("myplugin.cmd", handler);
-ui.server.call("myplugin.doThing", params);  // -> server binding
+ui.bindings.call("myplugin.doThing", params);   // a server binding when no UI module provides it (plugins.call)
 ui.topics.subscribe("myplugin/thing:42", evt => ...);
 ui.kit                                       // shared/ui-kit components (tree, tabs, console, menus, dropdowns)
 ui.theme.token("--accent-error")             // tokens only, never raw colors

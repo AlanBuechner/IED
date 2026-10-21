@@ -28,6 +28,7 @@ namespace Ied
 		presence = new Presence(self);
 		auth = new Auth(self);
 		plugins = new PluginHost(self);
+		code = new CodeRuntime(self);
 		settings = new Settings(self);
 		documents = new Documents(self);
 		blobs = new Blobs();

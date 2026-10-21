@@ -73,6 +73,7 @@ Params are objects; ids such as `w1`, `c1`, `d1`, `r1`, `t1` come from the fixtu
 | `layout.set` | `wsId, deviceClass, layout (object or null), expectedRevision` -> `revision`; `conflict {revision}` when stale; at most 256 KB; in memory only |
 | `plugins.list`, `plugins.contributions` | `wsId?` -> the topic's summaries / `{plugins: [{id, source, contributes, ui?}]}` of the loaded ones |
 | `plugins.setEnabled`, `plugins.reload`, `plugins.approve` | `id, enabled` / - / `id` (always `not_found`: the mock has no app plugins) |
+| `plugins.call` | `wsId?, name, args?` -> always `not_found`: the mock runs no plugin code (docs/26 section 2) |
 | `out.sources`, `out.clear` | `wsId` / `wsId, sourceId` |
 | `task.list`, `task.runs` | `wsId` |
 | `task.run` | `wsId, task, params?` -> `runId, topic`. Tasks: `build` (succeeds, 1 warning), `build-broken` (fails with an error), `test` (2 pass, 1 fail), `run` (build, then the program), `flood` (`params.lines`, default 50000) |

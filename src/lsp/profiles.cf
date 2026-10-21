@@ -10,7 +10,7 @@ namespace Ied
 		return strings;
 	}
 
-	static LspProfile* ReadProfile(const Serialization::DomNode& node, Core::StringView pluginId, const FS::Path& pluginDir) {
+	LspProfile* ReadLspProfile(const Serialization::DomNode& node, Core::StringView pluginId, const FS::Path& pluginDir) {
 		LspProfile* profile = new LspProfile();
 		profile->id = Core::String(node.Member("id").AsView());
 		profile->label = Core::String(node.Member("label").AsView());
@@ -43,7 +43,7 @@ namespace Ied
 
 	void ReadLspProfiles(const Serialization::DomNode& contributes, Core::StringView pluginId, const FS::Path& pluginDir, Core::Array<LspProfile*>& profiles) {
 		Serialization::DomNode list = contributes.Member("lspProfiles");
-		for (int64 i = 0; i < list.Count(); ++i) profiles.Push(ReadProfile(list.At(i), pluginId, pluginDir));
+		for (int64 i = 0; i < list.Count(); ++i) profiles.Push(ReadLspProfile(list.At(i), pluginId, pluginDir));
 	}
 
 	static int32 Fold(int32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }

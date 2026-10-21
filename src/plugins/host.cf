@@ -19,7 +19,7 @@ namespace Ied
 		json.EndArray();
 	}
 
-	Core::String Plugin::SummaryJson() const {
+	Core::String Plugin::SummaryJson(Core::StringView code) const {
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("id", manifest->id.View());
@@ -34,8 +34,14 @@ namespace Ied
 		Core::Array<Core::String> points;
 		for (int64 i = 0; i < manifest->contributes.Count(); ++i) points.Push(Core::String(manifest->contributes.KeyAt(i)));
 		StringList(json, "contributes", points);
+		if (!code.IsEmpty()) json.RawField("code", code);
 		json.EndObject();
 		return json.ToString();
+	}
+
+	Core::String PluginHost::Summary(Plugin* plugin, Workspace* ws) const {
+		CodeInstance* instance = server->code->For(plugin, ws);
+		return plugin->SummaryJson(instance ? server->code->SummaryJson(instance).View() : Core::StringView(""));
 	}
 
 	void PluginHost::Init(Server* server) {
@@ -156,6 +162,8 @@ namespace Ied
 				server->Log((((Core::String("plugin ") + plugin->manifest->id.View()) + ": ") + problem.View()).View());
 		Changed();
 		server->settings->Load();
+		server->code->Reconcile(nullptr);
+		for (Workspace* ws : server->workspaces->All()) server->code->Reconcile(ws);
 	}
 
 	Plugin* PluginHost::Get(Core::StringView id) const {
@@ -229,7 +237,7 @@ namespace Ied
 		json.BeginObject();
 		json.Key(Core::StringView("plugins"));
 		json.BeginArray();
-		for (Plugin* plugin : plugins) json.Raw(plugin->SummaryJson().View());
+		for (Plugin* plugin : plugins) json.Raw(Summary(plugin, nullptr).View());
 		json.EndArray();
 		json.EndObject();
 		return json.ToString();
@@ -325,8 +333,8 @@ namespace Ied
 		json.BeginObject();
 		json.Key(Core::StringView("plugins"));
 		json.BeginArray();
-		for (Plugin* plugin : plugins) json.Raw(plugin->SummaryJson().View());
-		for (Plugin* plugin : LocalFor(ws)) json.Raw(plugin->SummaryJson().View());
+		for (Plugin* plugin : plugins) json.Raw(Summary(plugin, ws).View());
+		for (Plugin* plugin : LocalFor(ws)) json.Raw(Summary(plugin, ws).View());
 		json.EndArray();
 		json.EndObject();
 		return json.ToString();
@@ -345,7 +353,7 @@ namespace Ied
 		else disabled.At(id) = true;
 		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
 		Load();
-		return Get(id.View())->SummaryJson();
+		return Summary(Get(id.View()), nullptr);
 	}
 
 	Core::String PluginHost::ApproveMethod(Call& call, const Params& params) {
@@ -358,7 +366,7 @@ namespace Ied
 		if (!SaveChoices()) throw RpcError(ErrorCode::Unavailable, "the plugin choices could not be saved");
 		server->auth->Record("plugin-approved", (Core::String("\"plugin\":") + JsonString(id.View()).View()).View());
 		Load();
-		return Get(id.View())->SummaryJson();
+		return Summary(Get(id.View()), nullptr);
 	}
 
 	// Where the browser imports a plugin's UI module from: a local plugin's files are served per workspace.
@@ -377,7 +385,7 @@ namespace Ied
 			json.BeginObject();
 			json.Field("id", plugin->manifest->id.View());
 			json.Field("source", PluginSourceName(plugin->manifest->source));
-			json.RawField("contributes", plugin->manifest->contributes.IsValid() ? NodeJson(plugin->manifest->contributes).View() : Core::StringView("{}"));
+			json.RawField("contributes", ContributesJson(plugin, ws).View());
 			if (!plugin->manifest->ui.IsEmpty()) json.Field("ui", UiUrl(ws, plugin->manifest).View());
 			json.EndObject();
 		}
@@ -386,8 +394,75 @@ namespace Ied
 		return json.ToString();
 	}
 
+	// --- Contributions from code ---------------------------------------------------------------------------------------
+
+	Core::Array<Contribution> PluginHost::Entries(Workspace* ws, Core::StringView point) {
+		Core::Array<Contribution> entries;
+		Core::String key = Core::String(point);
+		Core::Array<Plugin*> from = ws ? LoadedFor(ws) : plugins;
+		for (Plugin* plugin : from) {
+			if (!ws && plugin->state != PluginState::Loaded) continue;
+			Serialization::DomNode listed = plugin->manifest->contributes.Member(key.CStr());
+			for (int64 i = 0; i < listed.Count(); ++i) entries.Push(Contribution(plugin, listed.At(i)));
+			CodeInstance* instance = server->code->For(plugin, ws);
+			if (!instance) continue;
+			Core::Array<Serialization::DomNode> computed;
+			server->code->ComputedFor(instance, ws, point, computed);
+			for (const Serialization::DomNode& entry : computed) entries.Push(Contribution(plugin, entry));
+		}
+		return entries;
+	}
+
+	// The manifest's contributes with the entries the plugin's code computed for `ws` after each array point's own.
+	Core::String PluginHost::ContributesJson(Plugin* plugin, Workspace* ws) const {
+		Serialization::DomNode contributes = plugin->manifest->contributes;
+		CodeInstance* instance = server->code->For(plugin, ws);
+		if (!instance || instance->contributed.IsEmpty()) return contributes.IsValid() ? NodeJson(contributes) : Core::String("{}");
+		Core::Array<Core::String> points;
+		for (int64 i = 0; i < contributes.Count(); ++i) points.Push(Core::String(contributes.KeyAt(i)));
+		for (Contributed* given : instance->contributed)
+			if (!points.Contains(given->point)) points.Push(given->point);
+		JsonWriter json;
+		json.BeginObject();
+		for (const Core::String& point : points) {
+			Serialization::DomNode listed = contributes.Member(point.CStr());
+			Core::Array<Serialization::DomNode> computed;
+			server->code->ComputedFor(instance, ws, point.View(), computed);
+			if (computed.IsEmpty() && !listed.IsValid()) continue;
+			json.Key(point.View());
+			if (computed.IsEmpty() || (listed.IsValid() && listed.Kind() != Serialization::DomKind::Array)) {
+				json.Raw(NodeJson(listed).View());
+				continue;
+			}
+			json.BeginArray();
+			for (int64 i = 0; i < listed.Count(); ++i) json.Raw(NodeJson(listed.At(i)).View());
+			for (const Serialization::DomNode& entry : computed) json.Raw(NodeJson(entry).View());
+			json.EndArray();
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void PluginHost::CodeChanged(CodeInstance* instance) {
+		if (!instance->IsProject()) {
+			Changed();
+			return;
+		}
+		Workspace* ws = server->workspaces->Find(instance->wsId.View());
+		if (ws) server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "plugins.changed", Core::StringView("{}"));
+	}
+
+	void PluginHost::ContributionsChanged(CodeInstance* instance, Core::StringView wsId) {
+		for (Workspace* ws : server->workspaces->All()) {
+			if (!wsId.IsEmpty() && ws->wsId.View() != wsId) continue;
+			if (server->code->LoadedIn(instance, ws)) server->workspaces->ContributionsChanged(ws);
+		}
+		if (!instance->IsProject() && wsId.IsEmpty()) Changed();
+	}
+
 	Core::String PluginHost::ReloadMethod(Call& call, const Params& params) {
 		Load();
+		server->code->RetryFailed();
 		return Snapshot();
 	}
 }

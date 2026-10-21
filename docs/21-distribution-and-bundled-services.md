@@ -17,9 +17,11 @@ Resolve `docs/99` #8 (SearXNG packaging) and define how IED is installed, what i
 ```
 %LOCALAPPDATA%\Programs\IED\            (install, read-only at runtime)
   ied.exe                                CLI + launcher (talks to the server over the named pipe)
-  ied-server.exe                         the server
+  ied-server.exe                         the server, a C4 script host
+  ied-server.c4i                         its interface: what plugin code compiles against (docs/26 section 2)
+  C4Script.dll                           C4's script compiler and JIT, beside the exe (the exe does not start without it)
   web\                                   frontend assets, Monaco, xterm, codicons, fonts
-  plugins\                               built-in plugin manifests + UI modules (logic is in ied-server.exe)
+  plugins\                               built-in plugins: manifests, UI modules, C4 code (code\), Nuke drivers (nuke\)
   services\
     searxng\    python\ (embeddable CPython) + site-packages\ + searxng\ + settings.yml template
     tor\        tor.exe + geoip files (Tor Expert Bundle)

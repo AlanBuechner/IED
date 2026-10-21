@@ -80,6 +80,7 @@ class PluginTests(ServerTestCase):
 		self.add("builtin", "bad-schema", manifest("bad-schema", version="one"))
 		self.add("builtin", "too-new", manifest("too-new", ied={"api": "^2"}))
 		self.add("builtin", "scripted", manifest("scripted", runtime={"kind": "js", "entry": "main.js"}))
+		self.add("builtin", "codeless", manifest("codeless", runtime={"kind": "c4"}))
 		self.add("app", "fake-builtin", manifest("fake-builtin", runtime={"kind": "builtin"}))
 		self.add("builtin", "not-json", {})
 		with open(os.path.join(self.home, "plugins", "not-json", "ied-plugin.json"), "w") as f:
@@ -91,7 +92,8 @@ class PluginTests(ServerTestCase):
 		problems = {key[0]: " ".join(value["problems"]) for key, value in states.items() if value["state"] == "failed"}
 		self.assertIn("/version", problems["bad-schema"])
 		self.assertIn("needs host API ^2", problems["too-new"])
-		self.assertIn("cannot load yet", problems["scripted"])
+		self.assertIn('"js" is not one of', problems["scripted"], "the js runtime is gone (docs/26)")
+		self.assertIn("names its entry function", problems["codeless"])
 		self.assertIn("ships with IED itself", problems["fake-builtin"])
 		self.assertIn("not JSON", problems["not-json"])
 

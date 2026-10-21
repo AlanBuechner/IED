@@ -1,0 +1,95 @@
+include "plugin.ch"
+include "host/server.ch"
+
+namespace IED
+{
+	static Ied::CodeInstance* Of(void* host) { return (Ied::CodeInstance*)host; }
+
+	// A registration from anywhere but the plugin's own thread would race with its calls.
+	static bool OnItsThread(Ied::CodeInstance* instance, const char* method) {
+		if (Ied::CurrentCode() == instance) return true;
+		instance->runtime->server->Log(((((Core::String("plugin ") + instance->pluginId.View()) + ": PluginContext::") + method) + " was called off the plugin's thread and did nothing").View());
+		return false;
+	}
+
+	Core::String PluginContext::Id() const { return Of(host)->pluginId; }
+
+	Core::String PluginContext::Folder() const { return Core::String(Of(host)->folder.View()); }
+
+	Core::String PluginContext::WorkspaceId() const { return Of(host)->wsId; }
+
+	void PluginContext::Log(Core::StringView line) const {
+		Ied::CodeInstance* instance = Of(host);
+		instance->runtime->server->Log((((Core::String("[") + instance->pluginId.View()) + "] ") + line).View());
+	}
+
+	Core::String PluginContext::Setting(Core::StringView key, Core::StringView wsId) const {
+		Ied::Server* server = Of(host)->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* ws = wsId.IsEmpty() ? nullptr : server->workspaces->Find(wsId);
+		return server->settings->Effective(ws, Core::StringView(""), key);
+	}
+
+	void PluginContext::Provide(Core::StringView name, Binding handler) {
+		Ied::CodeInstance* instance = Of(host);
+		if (!OnItsThread(instance, "Provide")) return;
+		instance->handlers.bindings.At(Core::String(name)) = handler;
+		Threading::LockGuard guard(instance->runtime->server->lock);
+		instance->provides.At(Core::String(name)) = true;
+	}
+
+	void PluginContext::Listen(Core::StringView kind, EventHandler handler) {
+		Ied::CodeInstance* instance = Of(host);
+		if (!OnItsThread(instance, "Listen")) return;
+		instance->handlers.listenKinds.Push(Core::String(kind));
+		instance->handlers.listeners.Push(handler);
+		Threading::LockGuard guard(instance->runtime->server->lock);
+		instance->hears.At(Core::String(kind)) = true;
+	}
+
+	void PluginContext::OnWorkspace(WorkspaceHandler opened) {
+		Ied::CodeInstance* instance = Of(host);
+		if (!OnItsThread(instance, "OnWorkspace")) return;
+		instance->handlers.workspaceHandlers.Push(opened);
+		Core::Array<Workspace> open = Workspaces();
+		for (const Workspace& ws : open) opened(ws);
+	}
+
+	void PluginContext::OnDeactivate(func<void()> handler) {
+		Ied::CodeInstance* instance = Of(host);
+		if (OnItsThread(instance, "OnDeactivate")) instance->handlers.deactivateHandlers.Push(handler);
+	}
+
+	bool PluginContext::Contribute(Core::StringView point, Core::StringView wsId, Core::StringView entries, Core::String& problem) {
+		Ied::CodeInstance* instance = Of(host);
+		if (point == "menus" || point == "fileOpener" || point == "fileNesting" || point == "settings" || point == "bindings") {
+			problem = (Core::String("'") + point) + "' comes from the manifest only: code computes array points";
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(entries, *doc);
+		bool objects = read.Ok() && read.root.Kind() == Serialization::DomKind::Array;
+		for (int64 i = 0; objects && i < read.root.Count(); ++i) objects = read.root.At(i).Kind() == Serialization::DomKind::Object;
+		if (!objects) {
+			problem = (Core::String("the entries of '") + point) + "' are not a JSON array of objects";
+			return false;
+		}
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		for (int64 i = 0; i < instance->contributed.Count(); ++i)
+			if (instance->contributed[i]->point.View() == point && instance->contributed[i]->wsId.View() == wsId) {
+				instance->contributed.RemoveAt(i);
+				break;
+			}
+		if (read.root.Count() > 0) {
+			Ied::Contributed* given = new Ied::Contributed();
+			given->point = Core::String(point);
+			given->wsId = Core::String(wsId);
+			given->doc = doc;
+			given->entries = read.root;
+			instance->contributed.Push(given);
+		}
+		server->plugins->ContributionsChanged(instance, wsId);
+		return true;
+	}
+}

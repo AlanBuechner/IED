@@ -1,0 +1,85 @@
+include "workspace.ch"
+include "host/server.ch"
+
+namespace IED
+{
+	// The calling plugin's code and its server; null outside a plugin's thread.
+	static Ied::CodeInstance* Caller(Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::CurrentCode();
+		if (!instance) problem = Core::String("the plugin API is for a plugin's code, on its thread");
+		return instance;
+	}
+
+	bool FindWorkspace(Core::StringView wsId, Workspace& ws) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Caller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* found = server->workspaces->Find(wsId);
+		if (!found || !server->code->LoadedIn(instance, found)) return false;
+		ws = Ied::PluginWorkspace(server, found);
+		return true;
+	}
+
+	Core::Array<Workspace> Workspaces() {
+		Core::Array<Workspace> open;
+		Core::String problem;
+		Ied::CodeInstance* instance = Caller(problem);
+		if (!instance) return open;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		for (Ied::Workspace* ws : server->workspaces->All())
+			if (server->code->LoadedIn(instance, ws)) open.Push(Ied::PluginWorkspace(server, ws));
+		return open;
+	}
+
+	// The open workspace `ws` names, when the calling plugin holds `permission` and is loaded there; with the lock held.
+	static Ied::Workspace* Permitted(Ied::CodeInstance* instance, const Workspace& ws, const char* permission, Core::String& problem) {
+		Ied::Server* server = instance->runtime->server;
+		if (!instance->May(Core::StringView(permission))) {
+			problem = (Core::String("the plugin's manifest does not ask for the permission ") + permission);
+			return nullptr;
+		}
+		Ied::Workspace* found = server->workspaces->Find(ws.id.View());
+		if (!found || !server->code->LoadedIn(instance, found)) {
+			problem = (Core::String("no open workspace ") + ws.id.View()) + " for this plugin";
+			return nullptr;
+		}
+		return found;
+	}
+
+	bool ReadFile(const Workspace& ws, Core::StringView path, Core::String& text, Core::String& problem) {
+		Ied::CodeInstance* instance = Caller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* found = Permitted(instance, ws, "fs.read", problem);
+		if (!found) return false;
+		try {
+			text = server->workspaces->Read(found, Ied::NormalizePath(path).View());
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+
+	bool WriteFile(const Workspace& ws, Core::StringView path, Core::StringView text, Core::String& problem) {
+		Ied::CodeInstance* instance = Caller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* found = Permitted(instance, ws, "fs.write", problem);
+		if (!found) return false;
+		try {
+			server->workspaces->Write(found, Ied::NormalizePath(path).View(), text, -1);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+}

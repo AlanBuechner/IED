@@ -41,6 +41,7 @@ namespace Ied
 		// The open workspace rooted at `root`, or null.
 		public Workspace* ForRoot(const FS::Path& root) const;
 		public Workspace* First() const { return items.IsEmpty() ? nullptr : items[0]; }
+		public const Core::Array<Workspace*>& All() const { return items; }
 		public Core::String SummariesJson() const;
 		// A file's text, the file seen from now on (its revision and digest kept); throws not_found.
 		public Core::String Read(Workspace* ws, Core::StringView path);
@@ -57,6 +58,11 @@ namespace Ied
 		public Workspace* OpenSolution(const FS::Path& file);
 		// What the watcher saw, less what the server did itself: published and passed to the open documents.
 		public void ApplyExternal(Workspace* ws, const ChangeBatch& batch);
+		// Its project plugins changed: their code reconciles and then ContributionsChanged.
+		public void PluginsChanged(Workspace* ws);
+		// What its plugins contribute changed: its settings catalog and task offers are made again and its clients read
+		// the contributions again (plugins.changed on ws:<wsId>).
+		public void ContributionsChanged(Workspace* ws);
 
 	private:
 		private Core::String Snapshot(const Workspace* ws) const;
@@ -67,7 +73,6 @@ namespace Ied
 		private Core::String RenameFolder(Workspace* ws, Core::StringView from, Core::StringView to);
 		private void PublishTree(Workspace* ws, const Core::Array<TreeChange>& changes, bool overflow);
 		private void ReadSolutionAgain(Workspace* ws);
-		private void PluginsChanged(Workspace* ws);
 		private bool External(Workspace* ws, const TreeChange& change);
 		private bool ExternalWrite(Workspace* ws, Core::StringView path);
 		private bool ExternalDelete(Workspace* ws, Core::StringView path);

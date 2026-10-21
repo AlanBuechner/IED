@@ -47,7 +47,11 @@ export class Shell {
 		this.bindings = new Bindings((id) => {
 			const plugin = this.contributions.plugins.find((p) => p.id === id);
 			return plugin ? plugin.contributes.bindings || {} : null;
+		}, {
+			provides: (name) => this.contributions.plugins.some((p) => ((p.contributes.bindings || {}).provides || []).some((b) => b.name === name && (b.side || "server") === "server")),
+			call: (name, args) => this.client.request("plugins.call", this.wsId ? { wsId: this.wsId, name, args } : { name, args }).then((answer) => answer.result),
 		});
+		this.commands.bindings = this.bindings;
 		this.client = null;
 		this.server = { workspaces: [], clients: [], notifications: [] };
 		this.wsId = null;
