@@ -5,7 +5,7 @@
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { wellsOf, groupsOf } from "./layouttree.js";
-import { initials, noWorkspaceView } from "./workspaces.js";
+import { initials } from "./workspaces.js";
 import { banners } from "./banners.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -87,7 +87,7 @@ export class PhoneChrome {
 	}
 
 	noWorkspace() {
-		replace(this.area, noWorkspaceView(this.shell));
+		replace(this.area, h("div.empty-area", null, icon("folder-opened", "lg"), h("p", null, "No workspace is open. Open one on the server: ied <folder or .ied.sln>")));
 	}
 
 	renderBanners() {
@@ -97,12 +97,16 @@ export class PhoneChrome {
 	// ---------------------------------------------------------------------------------------------------------------
 	// Panes
 
+	// The bottom nav (docs/15): the activities that ask for a phone slot, then the tool windows, then the other
+	// activities - one that did not ask never pushes a tool window off the bar.
 	slots() {
 		const shell = this.shell;
-		const activities = [...shell.contributions.activities].sort((a, b) => Number(Boolean(b.phoneSlot)) - Number(Boolean(a.phoneSlot)) || a.order - b.order);
+		const activities = [...shell.contributions.activities].sort((a, b) => a.order - b.order);
+		const activity = (a) => ({ pane: "activity:" + a.id, title: a.title, icon: a.icon, base: a.plugin.base, run: () => shell.showActivity(a.id) });
 		const all = [
-			...activities.map((a) => ({ pane: "activity:" + a.id, title: a.title, icon: a.icon, base: a.plugin.base, run: () => shell.showActivity(a.id) })),
+			...activities.filter((a) => a.phoneSlot).map(activity),
 			...shell.contributions.toolWindows.filter((t) => shell.context.holds(t.when)).map((t) => ({ pane: t.id, title: t.title, icon: t.icon, base: t.plugin.base, run: () => shell.showView(t.id) })),
+			...activities.filter((a) => !a.phoneSlot).map(activity),
 		];
 		return { shown: all.slice(0, SLOTS), more: all.slice(SLOTS) };
 	}
