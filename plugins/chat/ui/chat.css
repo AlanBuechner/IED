@@ -1,6 +1,7 @@
 /* chat.css - the Chat activity (mockup 02): tabs, transcript, cards, composer and the details panel. Theme tokens only. */
 
-.chat-act { display: flex; height: 100%; min-height: 0; background: var(--bg-2); }
+.chat-act { display: flex; height: 100%; min-height: 0; background: var(--bg-2); position: relative; }
+.chat-act .chat-phone-only { display: none; }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .chat-col { max-width: 1060px; margin: 0 auto; padding: 0 var(--space-7); }
 
@@ -141,6 +142,7 @@ button.chat-tool-head:hover { background: var(--veil); }
 .chat-mchip { display: inline-flex; align-items: center; gap: var(--space-2); }
 .chat-bar { display: inline-block; width: 90px; height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
 .chat-bar i { display: block; height: 100%; background: var(--text-2); }
+.chat-head.from .chat-from-link { background: none; border: none; padding: 0; color: var(--text-0); cursor: pointer; font: inherit; text-decoration: underline; text-decoration-color: var(--border-1); }
 .chat-prefill { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; color: var(--text-1); font-size: var(--font-size-sm); padding: var(--space-2) 0; }
 .chat-prefill .meta { color: var(--text-2); }
 
@@ -184,6 +186,9 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 /* ---------- phone ---------- */
 @media (max-width: 719px) {
 	.chat-panel, .chat-selectors, .chat-telemetry, .chat-segmeta, .chat-tool-head .src, .desk { display: none !important; }
+	.chat-act .chat-phone-only { display: inline-flex; }
+	.chat-act.phone-panel .chat-panel { display: flex !important; position: absolute; inset: 0; width: auto; z-index: 3; border-left: none; }
+	.chat-panel-title { display: flex; align-items: center; justify-content: space-between; }
 	.chat-col { padding: 0 var(--space-4); }
 	.chat-tabbar { height: auto; padding: var(--space-3) var(--space-4); gap: var(--space-3); background: var(--bg-1); }
 	.chat-tabs { gap: var(--space-3); overflow-x: auto; scrollbar-width: none; }

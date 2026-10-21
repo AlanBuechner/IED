@@ -16,6 +16,16 @@
 	"contributes": {
 		"outputSources": [ { "id": "ai", "title": "AI" } ],
 		"settings": { "schema": "settings.schema.json", "page": "AI" },
+		"bindings": {
+			"provides": [
+				{
+					"name": "chat.resource",
+					"version": "1.0.0",
+					"kind": "function",
+					"description": "A plugin says a chat uses one of its tabs (a page the AI drives), or no longer does: {chatId, ref, title?, kind?, open?} -> {}; the chat's side panel lists them (docs/04 \"What a chat has open\")."
+				}
+			]
+		},
 		"settingsPages": [
 			{ "id": "ied.chat.models", "page": "AI", "title": "Models", "view": "ModelsSettings", "keys": ["ai.models"] },
 			{ "id": "ied.chat.groups", "page": "AI", "title": "Model Groups", "view": "ModelGroupsSettings", "keys": ["ai.groups", "ai.defaultGroup"] }

@@ -1,6 +1,7 @@
 include "api/plugin.ch"
 include "run.ch"
 include "images.ch"
+include "superseded.ch"
 
 namespace Ai
 {
@@ -342,10 +343,20 @@ namespace Ai
 		PublishContext(turn->tokensIn);
 	}
 
-	// Mechanical compression (docs/04 "Context management"): tool results older than the last few messages trimmed;
-	// when that is not enough, whole earlier turns left out (they stay on disk). Whether anything changed.
+	// Mechanical compression (docs/04 "Context management"): file reads a later call made stale noted as such, tool
+	// results older than the last few messages trimmed; when that is not enough, whole earlier turns left out (they stay
+	// on disk). Whether anything changed.
 	bool TurnRun::Compress() {
-		bool changed = false;
+		Core::Array<ModelMessage*> sent;
+		int64 keepFrom = -1;
+		for (Turn* each : chat->turns) {
+			if (each->compressed) continue;
+			for (int64 i = 0; i < each->messages.Count(); ++i) {
+				if (each == turn && keepFrom < 0 && i >= each->messages.Count() - kRecentMessagesKept) keepFrom = sent.Count();
+				sent.Push(each->messages[i]);
+			}
+		}
+		bool changed = DropSuperseded(sent, keepFrom < 0 ? sent.Count() : keepFrom) > 0;
 		for (Turn* each : chat->turns)
 			for (int64 i = 0; i < each->messages.Count(); ++i) {
 				ModelMessage* message = each->messages[i];

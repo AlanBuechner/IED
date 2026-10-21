@@ -70,6 +70,9 @@ namespace Ai
 	{
 		public Core::String turnId;
 		public Core::String userText;
+		public Core::String fromChatId;               // another chat sent the message (chattools.ch); empty: the owner
+		public Core::String fromTitle;
+		public int64 hops;                            // chats in a row that messaged each other up to this turn
 		public ChatMode mode;
 		public Core::String model;
 		public Core::String group;
@@ -98,6 +101,14 @@ namespace Ai
 		public Core::String path;
 		public int64 plus;
 		public int64 minus;
+	}
+
+	// A tab a chat uses that another plugin opened for it (docs/04 "What a chat has open"): a page the AI drives, ...
+	class ChatResource
+	{
+		public Core::String ref;      // the tab ("browser:pg-3")
+		public Core::String title;
+		public Core::String kind;     // "page", ...: the side panel's icon
 	}
 
 	class ChatTask
@@ -170,6 +181,7 @@ namespace Ai
 		public Core::Array<Core::String> allowed;     // rules the owner allowed for this chat ("Allow for this chat")
 		public Core::Array<ModifiedFile*> modified;   // what the AI wrote, with its lines added and removed
 		public Core::Array<Core::String> loadedTools; // deferred tools tool_search or a call loaded (docs/13)
+		public Core::Array<ChatResource*> resources;  // tabs it uses that plugins reported (chat.resource)
 		public Core::String context;                  // the last context.changed data (JSON); empty before a request
 		public ChatRun* run;                          // the running turn, or null
 		public int64 counter;
@@ -183,6 +195,7 @@ namespace Ai
 		public void WriteTasks(IED::JsonWriter& json) const;
 		public void WriteQueued(IED::JsonWriter& json) const;
 		public void WriteModified(IED::JsonWriter& json) const;
+		public void WriteResources(IED::JsonWriter& json) const;
 		// The chat:<chatId> snapshot: the summary, the model and group in use, tasks, queued messages, the last `recent` turns
 		// and what it waits on.
 		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, int64 recent) const;

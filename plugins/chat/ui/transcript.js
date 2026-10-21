@@ -108,11 +108,18 @@ export class TranscriptView {
 		const foot = h("div.chat-foot");
 		replace(foot, ...this.footParts(turn));
 		foot.hidden = !turn.stop;
-		const el = h("section.chat-turn", { dataset: { turn: turn.turnId } },
-			h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(turn.startedMs))),
-			user, agentHead, body, prefill, foot);
+		const el = h("section.chat-turn", { dataset: { turn: turn.turnId } }, this.userHead(turn), user, agentHead, body, prefill, foot);
 		this.turnEls.set(turn.turnId, { el, agentHead, body, prefill, foot });
 		return el;
+	}
+
+	// Who sent the turn's message: the owner, or another chat (docs/04 "Chats talk to each other"), which a click opens.
+	userHead(turn) {
+		const from = turn.user && turn.user.from;
+		if (!from) return h("div.chat-head", null, icon("person"), h("b", null, "You"), h("span.muted", null, clock(turn.startedMs)));
+		return h("div.chat-head.from", null, icon("comment-discussion"), h("b", null, "From chat"),
+			h("button.chat-from-link", { title: "Open " + from.title, on: { click: () => this.actions.openChat(from.chatId) } }, from.title || from.chatId),
+			h("span.muted", null, clock(turn.startedMs)));
 	}
 
 	// While the model's server reads the prompt (docs/12 "Watchdogs"): from llama.cpp's progress how much, of how many

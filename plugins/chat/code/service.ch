@@ -30,8 +30,16 @@ namespace Ai
 		public void PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge);
 		// The chat's summary changed: chat.changed on its topic and its workspace's, and its header saved.
 		public void Changed(Chat* chat);
-		// A turn for `text` starts.
+		// A turn for `text` starts; `from` the chat that sent it (docs/04 "Chats talk to each other"), null for the owner.
 		public void StartTurn(Chat* chat, Core::StringView text);
+		public void StartTurn(Chat* chat, Core::StringView text, const Chat* from, int64 hops);
+		// The workspace's chats.
+		public Core::Array<Chat*> InWorkspace(Core::StringView wsId) const;
+		// A new chat in `ws`, published on its chats: topic.
+		public Chat* Create(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group);
+		// Another chat's message: true when it started a turn of `chat`, false when its running turn gets it at the next
+		// step. The model is told which chat sent it.
+		public bool Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops);
 		// A turn ended: the next queued message, if the turn finished, starts the next.
 		public void TurnEnded(Chat* chat);
 		public Core::String ModelOf(const Chat* chat) const;
@@ -49,6 +57,8 @@ namespace Ai
 		private Core::String Snapshot(Chat* chat);
 		private Core::String ListSnapshot(Core::StringView wsId);
 		private void AddTopic(Chat* chat);
+		private Chat* NewChat(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group);
+		private void Announce(const IED::Workspace& ws, Chat* chat);
 		// The method `name`, its body inside IED::HostLock.
 		private void Register(const char* name, IED::MethodHandler method);
 

@@ -57,13 +57,14 @@ CODE_PLUGIN = {
 	"manifestVersion": 1, "id": "demo.code", "name": "Demo Code", "version": "1.0.0", "ied": {"api": "^1"},
 	"runtime": {"kind": "c4", "entry": "DemoCode::Activate"}, "permissions": ["fs.read"],
 	"contributes": {
-		"bindings": {"provides": [{"name": "demo.count", "version": "1.0.0", "kind": "function"}]},
+		"bindings": {"provides": [{"name": "demo.count", "version": "1.0.0", "kind": "function"}], "consumes": [{"name": "chat.resource", "version": "1.0.0"}]},
 		"systemMessageSections": [{"id": "files", "function": "DemoCode::Section"}],
 		"toolCalls": [
 			{"name": "demo_shout", "description": "Shout a file's first line.", "class": "read", "function": "DemoCode::Shout",
 				"inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
 			{"name": "demo_count", "description": "Count calls.", "class": "read", "binding": "demo.count", "inputSchema": {"type": "object"}},
-			{"name": "demo_snap", "description": "Show the screen.", "class": "read", "function": "DemoCode::Snap", "inputSchema": {"type": "object"}}]}}
+			{"name": "demo_snap", "description": "Show the screen.", "class": "read", "function": "DemoCode::Snap", "inputSchema": {"type": "object"}},
+			{"name": "demo_page", "description": "Open the demo page for the chat.", "class": "read", "function": "DemoCode::Page", "inputSchema": {"type": "object"}}]}}
 
 CODE_PLUGIN_SOURCE = r'''include "api/plugin.ch"
 
@@ -99,6 +100,16 @@ namespace DemoCode
 		return result;
 	}
 
+	IED::ToolResult Page(const IED::ToolCall& call)
+	{
+		Core::StringBuilder args;
+		args.Append("{\"chatId\":\"");
+		args.Append(call.chatId.View());
+		args.Append("\",\"ref\":\"demo:page1\",\"title\":\"Demo page\",\"kind\":\"page\"}");
+		IED::Result told = IED::CallBinding(Core::StringView("chat.resource"), args.View());
+		return told.Ok() ? IED::ToolText(Core::StringView("opened")) : IED::ToolFailure(told.error.View());
+	}
+
 	Core::String Section(const IED::Workspace& ws)
 	{
 		Core::StringBuilder out;
@@ -123,17 +134,24 @@ namespace DemoCode
 '''
 
 
+def chat_bindings():
+	"""The bindings the chat plugin's manifest declares (its code provides them)."""
+	with open(os.path.join(REPO, "plugins", "chat", "ied-plugin.json"), encoding="utf-8") as f:
+		manifest = json.loads("".join(line for line in f if not line.lstrip().startswith("//")))
+	return manifest["contributes"]["bindings"]
+
+
 def make_home(home):
 	"""An install with the host's schemas, the chat plugin - its server code (compiled into the server, docs/26), its
-	prompts, settings and output source, without its UI - and a demo language plugin with a system-message section, a
-	skills folder and a command tool (docs/26)."""
+	prompts, settings, bindings and output source, without its UI - and a demo language plugin with a system-message
+	section, a skills folder and a command tool (docs/26)."""
 	shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(home, "shared", "host-api", "schemas"))
 	plugin = os.path.join(home, "plugins", "chat")
 	shutil.copytree(os.path.join(REPO, "plugins", "chat", "prompts"), os.path.join(plugin, "prompts"))
 	shutil.copy(os.path.join(REPO, "plugins", "chat", "settings.schema.json"), os.path.join(plugin, "settings.schema.json"))
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "ied.chat", "name": "Chat", "version": "0.1.0", "ied": {"api": "^1"},
 		"runtime": {"kind": "builtin", "entry": "Ai::Activate"}, "permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn"],
-		"contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}, "outputSources": [{"id": "ai", "title": "AI"}]}}))
+		"contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}, "outputSources": [{"id": "ai", "title": "AI"}], "bindings": chat_bindings()}}))
 	write(os.path.join(home, "plugins", "demo", "ied-plugin.json"), json.dumps(DEMO_PLUGIN))
 	write(os.path.join(home, "plugins", "democode", "ied-plugin.json"), json.dumps(CODE_PLUGIN))
 	write(os.path.join(home, "plugins", "democode", "code", "democode.cf"), CODE_PLUGIN_SOURCE)
@@ -422,6 +440,43 @@ class ChatTests(ServerTestCase):
 		self.assertEqual(["text", "image_url"], [p["type"] for p in parts])
 		self.assertIn("call c2, shots/screen.png", parts[0]["text"])
 		self.assertEqual("data:image/png;base64," + base64.b64encode(png).decode(), parts[1]["image_url"]["url"], "the file's bytes")
+
+	async def test_chats_talk_to_each_other(self):
+		model = {"endpoint": self.model.url + "/v1", "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model, "fixed": dict(model, model="script:ok-text")}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"lead": {"primary": {"model": "fake"}}, "helper": {"primary": {"model": "fixed"}}}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.permissions", "value": {"allow": ["chat.send(*)"]}})
+		helper = (await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "group": "helper", "title": "Helper"}))["chatId"]
+		chat_id, _ = await self.chat(mode="ask", group="lead")
+		self.model.queue(call_step("chat_send", {"chat": helper, "text": "ping"}, "s1"), call_step("chat_wait", {"chat": helper, "seconds": 30}, "w1"),
+			call_step("chat_list", {}, "l1"), text_step("Done."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		mine = [r for r in self.model.requests() if r["body"].get("model") != "script:ok-text"][-1]
+		results = {m["tool_call_id"]: m["content"] for m in mine["body"]["messages"] if m["role"] == "tool"}
+		helper_turns = (await self.client.request("chat.history", {"chatId": helper}))["turns"]
+		self.assertTrue(helper_turns, "chat_send started a turn in the helper: %s" % results)
+		helper_turn = helper_turns[-1]
+		self.assertEqual(("ping", chat_id), (helper_turn["user"]["text"], helper_turn["user"]["from"]["chatId"]), "the helper's turn says who sent it")
+		self.assertIn("it started a turn for it", results["s1"])
+		self.assertIn("its last turn finished", results["w1"], "chat_wait returned the helper's answer")
+		self.assertIn('"Helper"', results["l1"])
+		self.assertIn("- this chat", results["l1"])
+
+	async def test_a_plugin_tells_the_chat_what_it_has_open(self):
+		chat_id, topic = await self.chat()
+		self.model.queue(call_step("demo_page", {}, "p1"), text_step("Opened."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		changed = [f["data"] for f in self.frames if f.get("kind") == "resources.changed"]
+		results = [m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"]
+		self.assertTrue(changed, "resources.changed published: %s" % results)
+		self.assertEqual([{"ref": "demo:page1", "title": "Demo page", "kind": "page"}], changed[-1]["resources"])
+		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		try:
+			await other.sub([topic])
+			snapshot = (await other.next_frame(topic))["data"]
+			self.assertEqual("demo:page1", snapshot["resources"][0]["ref"], "the snapshot has it")
+		finally:
+			other.abort()
 
 	async def test_plugin_tools_load_on_demand(self):
 		names = lambda body: [t["function"]["name"] for t in body["tools"]]

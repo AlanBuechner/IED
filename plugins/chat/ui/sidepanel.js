@@ -1,13 +1,15 @@
 // sidepanel.js - the chat's right panel (mockup 02 "breakdown panel"): the context the last request used, by part,
 // against the model's window; the task list the agent keeps (tasks_set / task_update); the files the AI changed in
-// this chat with their lines added and removed, each opening in the editor. Sections fold.
+// this chat with their lines added and removed, each opening in the editor; the tabs it uses that plugins reported (the
+// pages it drives), each opening as a tab. Sections fold.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { compact, contextBar } from "./chatmodel.js";
 
 const TASK_GLYPHS = { done: "check", skipped: "circle-slash", in_progress: "arrow-right", pending: null };
+const RESOURCE_ICONS = { page: "globe", terminal: "terminal", process: "server-process" };
 
-// actions: {openFile(path), fileIcon(path)}
+// actions: {openFile(path), fileIcon(path), openTab(ref), closeDetails()}
 export class SidePanel {
 	constructor(actions) {
 		this.actions = actions;
@@ -18,8 +20,9 @@ export class SidePanel {
 	}
 
 	update(model) {
-		replace(this.title, h("span.ellip", null, (model.summary && model.summary.title) || "Chat"));
-		replace(this.body, this.contextSection(model), this.tasksSection(model), this.filesSection(model));
+		replace(this.title, h("span.ellip", null, (model.summary && model.summary.title) || "Chat"),
+			h("button.ib.chat-phone-only", { title: "Close details", "aria-label": "Close details", on: { click: () => this.actions.closeDetails() } }, icon("close")));
+		replace(this.body, this.contextSection(model), this.tasksSection(model), this.openSection(model), this.filesSection(model));
 	}
 
 	section(id, title, meta, rows) {
@@ -51,6 +54,14 @@ export class SidePanel {
 			h("span.name" + (task.status === "done" || task.status === "skipped" ? ".muted" : ""), null, task.title),
 			task.status === "in_progress" ? h("span.meta", null, "now") : null));
 		return this.section("tasks", "Tasks", model.tasks.length ? done + "/" + model.tasks.length : "", rows.length ? rows : h("div.chat-sec-empty.muted", null, "No tasks yet."));
+	}
+
+	// What the chat has open (docs/04 "What a chat has open"): shown only when it has something.
+	openSection(model) {
+		if (!model.resources.length) return null;
+		const rows = model.resources.map((resource) => h("button.chat-sec-row.file", { title: "Open " + (resource.title || resource.ref) + " in a tab", dataset: { ref: resource.ref }, on: { click: () => this.actions.openTab(resource.ref) } },
+			icon(RESOURCE_ICONS[resource.kind] || "link-external"), h("span.name", null, resource.title || resource.ref)));
+		return this.section("open", "Open by this chat", String(model.resources.length), rows);
 	}
 
 	filesSection(model) {

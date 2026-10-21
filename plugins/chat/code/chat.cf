@@ -168,7 +168,15 @@ namespace Ai
 		json.Key(Core::StringView("user"));
 		json.BeginObject();
 		json.Field("text", userText.View());
+		if (!fromChatId.IsEmpty()) {
+			json.Key(Core::StringView("from"));
+			json.BeginObject();
+			json.Field("chatId", fromChatId.View());
+			json.Field("title", fromTitle.View());
+			json.EndObject();
+		}
 		json.EndObject();
+		if (hops > 0) json.IntField("hops", hops);
 		json.Field("mode", ChatModeName(mode));
 		json.Field("model", model.View());
 		json.Field("group", group.View());
@@ -204,6 +212,9 @@ namespace Ai
 	void Turn::Read(const Serialization::DomNode& node) {
 		turnId = Core::String(node.Member("turnId").AsView());
 		userText = Core::String(node.Member("user").Member("text").AsView());
+		fromChatId = Core::String(node.Member("user").Member("from").Member("chatId").AsView());
+		fromTitle = Core::String(node.Member("user").Member("from").Member("title").AsView());
+		hops = node.Member("hops").AsInt();
 		ReadChatMode(node.Member("mode").AsView(), mode);
 		model = Core::String(node.Member("model").AsView());
 		group = Core::String(node.Member("group").AsView());
@@ -335,6 +346,18 @@ namespace Ai
 		json.EndArray();
 	}
 
+	void Chat::WriteResources(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (ChatResource* resource : resources) {
+			json.BeginObject();
+			json.Field("ref", resource->ref.View());
+			json.Field("title", resource->title.View());
+			json.Field("kind", resource->kind.View());
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
 	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, int64 recent) const {
 		IED::JsonWriter json;
 		json.BeginObject();
@@ -347,6 +370,8 @@ namespace Ai
 		WriteQueued(json);
 		json.Key(Core::StringView("modified"));
 		WriteModified(json);
+		json.Key(Core::StringView("resources"));
+		WriteResources(json);
 		json.Key(Core::StringView("context"));
 		if (context.IsEmpty()) json.Null();
 		else json.Raw(context.View());

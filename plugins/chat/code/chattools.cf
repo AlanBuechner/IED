@@ -1,0 +1,224 @@
+include "api/plugin.ch"
+include "chattools.ch"
+
+namespace Ai
+{
+	const int64 kChatWaitPollNs = 250000000;
+	const int64 kChatLineBytes = 160;
+
+	Core::String AnswerOf(const Turn* turn) {
+		Core::StringBuilder out;
+		for (const Segment* segment : turn->segments) {
+			if (segment->type != "text" || segment->text.IsEmpty()) continue;
+			if (!out.IsEmpty()) out.Append("\n");
+			out.Append(segment->text.View());
+		}
+		return out.ToString();
+	}
+
+	static Core::StringView FirstLine(Core::StringView text) {
+		int64 end = text.IndexOf('\n', 0);
+		if (end < 0) end = text.ByteLength();
+		return text.Substring(0, end < kChatLineBytes ? end : kChatLineBytes);
+	}
+
+	// The workspace's chat of that id, or null with why there is none.
+	static Chat* Named(Chats* chats, const IED::Workspace& ws, Core::StringView id, Core::String& problem) {
+		for (Chat* each : chats->InWorkspace(ws.id.View()))
+			if (each->chatId.View() == id) return each;
+		problem = (Core::String("there is no chat ") + id) + " in this workspace; chat_list lists them";
+		return nullptr;
+	}
+
+	static void Describe(Core::StringBuilder& out, const Chat* chat) {
+		out.Append(chat->chatId.View());
+		out.Append(" \"");
+		out.Append(chat->title.View());
+		out.Append("\" (");
+		out.Append(ChatModeName(chat->mode));
+		out.Append(", ");
+		out.Append(ChatStateName(chat->state));
+		out.Append(", ");
+		out.AppendInt(chat->turns.Count());
+		out.Append(chat->turns.Count() == 1 ? " turn)" : " turns)");
+	}
+
+	// The hops of a message this chat sends now: one more than the turn it is in got.
+	static int64 NextHops(const Chat* self) { return self->Current() ? self->Current()->hops + 1 : 1; }
+
+	static Core::String TooDeep() {
+		Core::StringBuilder out;
+		out.Append("chats have messaged each other ");
+		out.AppendInt(kChatHopsMost);
+		out.Append(" times in a row; answer here instead of sending another");
+		return out.ToString();
+	}
+
+	// --- The tools ---------------------------------------------------------------------------------------------------------
+
+	static ToolOutcome ListRun(Chats* chats, Chat* self, const ToolInvocation& call) {
+		IED::HostLock guard(*call.context);
+		Core::StringBuilder out;
+		int64 count = 0;
+		for (Chat* each : chats->InWorkspace(call.ws.id.View())) {
+			Describe(out, each);
+			if (each == self) out.Append(" - this chat");
+			Turn* last = each->Current();
+			Core::String answer = last ? AnswerOf(last) : Core::String();
+			if (!answer.IsEmpty()) {
+				out.Append(": ");
+				out.Append(FirstLine(answer.View()));
+			}
+			out.Append("\n");
+			count += 1;
+		}
+		Core::StringBuilder preview;
+		preview.AppendInt(count);
+		preview.Append(count == 1 ? " chat" : " chats");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	static ToolOutcome ReadRun(Chats* chats, const ToolInvocation& call) {
+		int64 most = call.args.Member("turns").IsValid() ? call.args.Member("turns").AsInt() : 1;
+		most = most < 1 ? 1 : most > kChatReadTurnsMost ? kChatReadTurnsMost : most;
+		IED::HostLock guard(*call.context);
+		Core::String problem;
+		Chat* chat = Named(chats, call.ws, call.args.Member("chat").AsView(), problem);
+		if (!chat) return ToolError((Core::String("chat_read: ") + problem.View()).View());
+		Core::StringBuilder out;
+		Describe(out, chat);
+		out.Append("\n");
+		const int64 from = chat->turns.Count() > most ? chat->turns.Count() - most : 0;
+		for (int64 i = from; i < chat->turns.Count(); ++i) {
+			const Turn* turn = chat->turns[i];
+			out.Append("\n## Turn ");
+			out.Append(turn->turnId.View());
+			out.Append((turn->stop.IsEmpty() ? Core::String(" (running)") : (Core::String(" (") + turn->stop.View()) + ")").View());
+			out.Append("\nMessage: ");
+			out.Append(turn->userText.View());
+			Core::String answer = AnswerOf(turn);
+			out.Append("\nAnswer: ");
+			out.Append(answer.IsEmpty() ? Core::StringView("(none yet)") : answer.View());
+			out.Append("\n");
+		}
+		return ToolResult(out.View(), (Core::String("Read ") + chat->title.View()).View());
+	}
+
+	static ToolOutcome SendRun(Chats* chats, Chat* self, const ToolInvocation& call) {
+		IED::HostLock guard(*call.context);
+		Core::String problem;
+		Chat* chat = Named(chats, call.ws, call.args.Member("chat").AsView(), problem);
+		if (!chat) return ToolError((Core::String("chat_send: ") + problem.View()).View());
+		if (chat == self) return ToolError(Core::StringView("chat_send: that is this chat"));
+		const int64 hops = NextHops(self);
+		if (hops > kChatHopsMost) return ToolError((Core::String("chat_send: ") + TooDeep().View()).View());
+		const bool started = chats->Deliver(chat, call.args.Member("text").AsView(), self, hops);
+		Core::StringBuilder said;
+		said.Append("Sent to ");
+		Describe(said, chat);
+		said.Append(started ? ": it started a turn for it." : ": its running turn gets it at its next step.");
+		said.Append(" chat_wait returns its answer.");
+		return ToolResult(said.View(), (Core::String("Sent to ") + chat->title.View()).View());
+	}
+
+	static ToolOutcome CreateRun(Chats* chats, Chat* self, const ToolInvocation& call) {
+		IED::HostLock guard(*call.context);
+		const int64 hops = NextHops(self);
+		if (hops > kChatHopsMost) return ToolError((Core::String("chat_create: ") + TooDeep().View()).View());
+		ChatMode mode = self->mode;
+		if (call.args.Member("mode").IsValid() && !ReadChatMode(call.args.Member("mode").AsView(), mode)) return ToolError(Core::StringView("chat_create: mode must be ask, plan or agent"));
+		Core::StringView title = call.args.Member("title").AsView();
+		Chat* made = chats->Create(call.ws, title.IsEmpty() ? Core::StringView(kNewChatTitle) : title, mode, self->group.View());
+		chats->Deliver(made, call.args.Member("text").AsView(), self, hops);
+		Core::StringBuilder said;
+		said.Append("Started ");
+		Describe(said, made);
+		said.Append(". chat_wait returns its answer; chat_send tells it more.");
+		return ToolResult(said.View(), (Core::String("Started ") + made->title.View()).View());
+	}
+
+	static ToolOutcome WaitRun(Chats* chats, const ToolInvocation& call) {
+		int64 seconds = call.args.Member("seconds").IsValid() ? call.args.Member("seconds").AsInt() : kChatWaitDefaultSeconds;
+		seconds = seconds < 1 ? 1 : seconds > kChatWaitMostSeconds ? kChatWaitMostSeconds : seconds;
+		const int64 deadline = Platform::UnixTimeNs() + seconds * 1000000000;
+		for (;;) {
+			{
+				IED::HostLock guard(*call.context);
+				Core::String problem;
+				Chat* chat = Named(chats, call.ws, call.args.Member("chat").AsView(), problem);
+				if (!chat) return ToolError((Core::String("chat_wait: ") + problem.View()).View());
+				const Turn* last = chat->Current();
+				if (!chat->run && last) {
+					Core::StringBuilder said;
+					Describe(said, chat);
+					said.Append(", its last turn ");
+					said.Append(last->stop.View());
+					said.Append(":\n\n");
+					Core::String answer = AnswerOf(last);
+					said.Append(answer.IsEmpty() ? Core::StringView("(no answer)") : answer.View());
+					return ToolResult(said.View(), (Core::String("Answer from ") + chat->title.View()).View());
+				}
+			}
+			if (call.cancelled && *call.cancelled) return ToolError(Core::StringView("chat_wait: stopped"));
+			if (Platform::UnixTimeNs() >= deadline) {
+				Core::StringBuilder said;
+				said.Append("chat_wait: still running after ");
+				said.AppendInt(seconds);
+				said.Append(" s; wait again, or chat_read what it has so far");
+				return ToolError(said.View());
+			}
+			Threading::Thread::Sleep(kChatWaitPollNs);
+		}
+	}
+
+	// --- The group ---------------------------------------------------------------------------------------------------------
+
+	static ToolPlan ChatPlan(const ToolInvocation& call, const char* kind) {
+		ToolPlan plan;
+		Core::StringView id = call.args.Member("chat").AsView();
+		plan.subject = ((Core::String(kind) + "(") + (id.IsEmpty() ? Core::StringView("*") : id)) + ")";
+		plan.summary = Core::String(kind) + (id.IsEmpty() ? Core::String() : Core::String(" ") + id);
+		return plan;
+	}
+
+	static ToolSpec* ChatTool(const char* name, const char* description, const char* parameters, ToolClass toolClass) {
+		ToolSpec* spec = new ToolSpec();
+		spec->name = Core::String(name);
+		spec->description = Core::String(description);
+		spec->parameters = Core::String(parameters);
+		spec->toolClass = toolClass;
+		spec->parallelSafe = toolClass == ToolClass::Read;
+		spec->inPlan = toolClass == ToolClass::Read;
+		spec->deferred = true;
+		spec->group = Core::String("chats");
+		return spec;
+	}
+
+	void AddChatTools(ToolRegistry& registry, Chats* chats, Chat* chat) {
+		ToolSpec* list = ChatTool("chat_list", "The chats of this workspace: id, title, mode, state and the first line of each one's last answer.",
+			"{\"type\": \"object\", \"properties\": {}, \"additionalProperties\": false}", ToolClass::Read);
+		list->plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
+		list->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return ListRun(chats, chat, call); };
+		registry.Add(list);
+		ToolSpec* read = ChatTool("chat_read", "Another chat's last turns: each message and its answer, without the tool calls. Example: chat_read({\"chat\": \"c18f2a\", \"turns\": 2})",
+			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"turns\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 5}}, \"required\": [\"chat\"], \"additionalProperties\": false}", ToolClass::Read);
+		read->plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
+		read->run = [chats](const ToolInvocation& call) -> ToolOutcome { return ReadRun(chats, call); };
+		registry.Add(read);
+		ToolSpec* send = ChatTool("chat_send", "Send another chat a message: it starts a turn there, or reaches its running turn at the next step. It is told this chat sent it, and can answer with chat_send. Example: chat_send({\"chat\": \"c18f2a\", \"text\": \"The build is green; go on with the tests.\"})",
+			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"text\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"chat\", \"text\"], \"additionalProperties\": false}", ToolClass::Exec);
+		send->plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.send"); };
+		send->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return SendRun(chats, chat, call); };
+		registry.Add(send);
+		ToolSpec* create = ChatTool("chat_create", "Start a new chat in this workspace with a message, to hand it part of the work. Example: chat_create({\"title\": \"Port Ring.h\", \"text\": \"Port src/Ring.h to C4 and its tests.\", \"mode\": \"agent\"})",
+			"{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"minLength\": 1}, \"title\": {\"type\": \"string\"}, \"mode\": {\"enum\": [\"ask\", \"plan\", \"agent\"]}}, \"required\": [\"text\"], \"additionalProperties\": false}", ToolClass::Exec);
+		create->plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.create"); };
+		create->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return CreateRun(chats, chat, call); };
+		registry.Add(create);
+		ToolSpec* wait = ChatTool("chat_wait", "Wait until another chat's turn ends and get its answer (at most 600 s; default 120). Example: chat_wait({\"chat\": \"c18f2a\", \"seconds\": 300})",
+			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"seconds\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 600}}, \"required\": [\"chat\"], \"additionalProperties\": false}", ToolClass::Read);
+		wait->plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
+		wait->run = [chats](const ToolInvocation& call) -> ToolOutcome { return WaitRun(chats, call); };
+		registry.Add(wait);
+	}
+}

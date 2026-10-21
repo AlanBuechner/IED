@@ -57,11 +57,12 @@ export class ChatActivityView {
 		this.showPanel = stored("ied.chat.panel", true);
 		this.tabs = h("div.chat-tabs", { role: "tablist", "aria-label": "Chats" });
 		this.panelButton = h("button.ib.desk", { title: "Details panel", "aria-label": "Details panel", on: { click: () => this.togglePanel() } }, icon("layout-sidebar-right"));
+		this.detailsButton = h("button.ib.chat-phone-only", { title: "Details", "aria-label": "Chat details", on: { click: () => this.showDetails(true) } }, icon("layout-sidebar-right"));
 		this.tabBar = h("div.chat-tabbar", null, this.tabs,
 			h("button.ib.chat-new", { title: "New chat (Ctrl+Alt+N)", "aria-label": "New chat", on: { click: () => this.newChat() } }, icon("add")),
 			h("span.grow"),
 			h("button.ib", { title: "All chats", "aria-label": "All chats", on: { click: (event) => this.allChats(event.currentTarget) } }, icon("history")),
-			this.panelButton);
+			this.panelButton, this.detailsButton);
 		this.scroller = h("div.chat-transcript", null, this.transcript.el);
 		this.main = h("section.chat-main", null, this.tabBar, this.scroller, this.composer.el);
 		this.root = h("div.chat-act" + (this.showPanel ? "" : ".no-panel"), null, this.main, this.panel.el);
@@ -87,6 +88,12 @@ export class ChatActivityView {
 			set: (change) => this.setChat(change),
 			groups: () => this.groups(),
 			openFile: (path) => this.openFile(path),
+			openTab: (ref) => {
+				this.showDetails(false);
+				this.ied.tabs.open(ref, { preview: false });
+			},
+			closeDetails: () => this.showDetails(false),
+			openChat: (chatId) => this.select(chatId),
 			fileIcon: (path) => this.ied.icons.file(path),
 			loadEarlier: () => this.loadEarlier(),
 		};
@@ -231,6 +238,11 @@ export class ChatActivityView {
 		return true;
 	}
 
+	// On a phone the details panel is a sheet over the transcript, opened from the tab bar.
+	showDetails(on) {
+		this.root.classList.toggle("phone-panel", on);
+	}
+
 	togglePanel() {
 		this.showPanel = !this.showPanel;
 		store("ied.chat.panel", this.showPanel);
@@ -272,7 +284,7 @@ export class ChatActivityView {
 		const change = this.model.event(kind, data);
 		this.transcript.update(change);
 		if (change.summary || change.queued || change.turn || change.context || change.approvals || change.question) this.composer.update(this.model);
-		if (change.summary || change.tasks || change.modified || change.context) this.panel.update(this.model);
+		if (change.summary || change.tasks || change.modified || change.context || change.resources) this.panel.update(this.model);
 		if (follow) this.scrollToEnd(false);
 	}
 

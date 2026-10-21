@@ -1,12 +1,14 @@
 // The ied.chat plugin's entry (docs/26 "Built-ins on the API"): the chats of every workspace it is loaded for, their
 // topics and the chat.* methods.
 include "service.ch"
+include "resources.ch"
 
 namespace Ai
 {
 	void Activate(IED::PluginContext& context)
 	{
 		Chats* chats = new Chats(&context);
+		ProvideChatResources(context, chats);
 		context.OnWorkspace([chats](const IED::Workspace& ws) { chats->WorkspaceOpened(ws); });
 	}
 }

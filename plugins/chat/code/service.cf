@@ -133,18 +133,37 @@ namespace Ai
 		return Core::String(line.Substring(0, cut)) + "...";
 	}
 
-	void Chats::StartTurn(Chat* chat, Core::StringView text) {
+	// What the model is told of a message another chat sent.
+	static Core::String FromText(const Chat* from, Core::StringView text) {
+		Core::StringBuilder out;
+		out.Append("Message from chat \"");
+		out.Append(from->title.View());
+		out.Append("\" (");
+		out.Append(from->chatId.View());
+		out.Append("); answer it with chat_send if it asks for an answer:\n\n");
+		out.Append(text);
+		return out.ToString();
+	}
+
+	void Chats::StartTurn(Chat* chat, Core::StringView text) { StartTurn(chat, text, nullptr, 0); }
+
+	void Chats::StartTurn(Chat* chat, Core::StringView text, const Chat* from, int64 hops) {
 		IED::Workspace ws = WorkspaceOf(chat);
 		Turn* turn = new Turn();
 		turn->turnId = chat->NextId("u");
 		turn->userText = Core::String(text);
+		turn->hops = hops;
+		if (from) {
+			turn->fromChatId = from->chatId;
+			turn->fromTitle = from->title;
+		}
 		turn->mode = chat->mode;
 		turn->group = GroupOf(context, chat, ws);
 		turn->model = ModelOf(chat);
 		turn->startedMs = ChatNowMs();
 		ModelMessage* message = new ModelMessage();
 		message->role = Core::String("user");
-		message->content = Core::String(text);
+		message->content = from ? FromText(from, text) : Core::String(text);
 		turn->messages.Push(message);
 		chat->turns.Push(turn);
 		if (chat->title == kNewChatTitle) chat->title = TitleFrom(text);
@@ -162,12 +181,67 @@ namespace Ai
 		data.Key(Core::StringView("user"));
 		data.BeginObject();
 		data.Field("text", text);
+		if (from) {
+			data.Key(Core::StringView("from"));
+			data.BeginObject();
+			data.Field("chatId", from->chatId.View());
+			data.Field("title", from->title.View());
+			data.EndObject();
+		}
 		data.EndObject();
 		data.IntField("startedMs", turn->startedMs);
 		data.EndObject();
 		Publish(chat, "turn.start", data.View());
 		Changed(chat);
 		StartRun(this, chat, ws);
+	}
+
+	Core::Array<Chat*> Chats::InWorkspace(Core::StringView wsId) const {
+		Core::Array<Chat*> found;
+		for (Chat* chat : chats)
+			if (chat->wsId.View() == wsId) found.Push(chat);
+		return found;
+	}
+
+	bool Chats::Deliver(Chat* chat, Core::StringView text, const Chat* from, int64 hops) {
+		if (!chat->run) {
+			StartTurn(chat, text, from, hops);
+			return true;
+		}
+		chat->injected.Push(FromText(from, text));
+		if (hops > chat->run->turn->hops) chat->run->turn->hops = hops;
+		return false;
+	}
+
+	// A chat not yet announced: kept and given its topic.
+	Chat* Chats::NewChat(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group) {
+		Chat* chat = new Chat();
+		Core::StringBuilder id;
+		id.Append("c");
+		id.AppendHex((uint64)(Platform::UnixTimeNs() / 1000));
+		chat->chatId = id.ToString();
+		chat->wsId = ws.id;
+		chat->title = Core::String(title);
+		chat->mode = mode;
+		chat->permission = DefaultPermission(mode);
+		chat->group = Core::String(group);
+		chat->createdMs = ChatNowMs();
+		chat->updatedMs = chat->createdMs;
+		chats.Push(chat);
+		AddTopic(chat);
+		return chat;
+	}
+
+	// The chat saved and announced on its workspace's chats: topic.
+	void Chats::Announce(const IED::Workspace& ws, Chat* chat) {
+		SaveChatHeader(FS::Path(ws.root.View()), chat);
+		context->Publish(ChatsTopic(ws.id.View()).View(), "chat.created", chat->SummaryJson().View());
+	}
+
+	Chat* Chats::Create(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group) {
+		Chat* chat = NewChat(ws, title, mode, group);
+		Announce(ws, chat);
+		return chat;
 	}
 
 	void Chats::TurnEnded(Chat* chat) {
@@ -200,25 +274,12 @@ namespace Ai
 	Core::String Chats::CreateMethod(const IED::Request& request) {
 		const IED::Params& params = request.params;
 		IED::Workspace ws = OpenWorkspace(params.Str("wsId").View());
-		Chat* chat = new Chat();
-		Core::StringBuilder id;
-		id.Append("c");
-		id.AppendHex((uint64)(Platform::UnixTimeNs() / 1000));
-		chat->chatId = id.ToString();
-		chat->wsId = ws.id;
-		chat->title = Core::String(kNewChatTitle);
-		chat->mode = ChatMode::Agent;
-		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), chat->mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
-		chat->permission = DefaultPermission(chat->mode);
+		ChatMode mode = ChatMode::Agent;
+		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
+		Chat* chat = NewChat(ws, Core::StringView(kNewChatTitle), mode, Core::StringView(""));
 		ReadSettings(chat, params);
-		chat->createdMs = ChatNowMs();
-		chat->updatedMs = chat->createdMs;
-		chats.Push(chat);
-		AddTopic(chat);
-		SaveChatHeader(FS::Path(ws.root.View()), chat);
-		Core::String summary = chat->SummaryJson();
-		context->Publish(ChatsTopic(ws.id.View()).View(), "chat.created", summary.View());
-		return summary;
+		Announce(ws, chat);
+		return chat->SummaryJson();
 	}
 
 	Core::String Chats::SetMethod(const IED::Request& request) {

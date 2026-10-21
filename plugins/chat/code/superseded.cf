@@ -1,0 +1,75 @@
+include "superseded.ch"
+
+namespace Ai
+{
+	// A call as a later one can make it stale: its tool, the file it names and its arguments.
+	class FileCall
+	{
+		public Core::String callId;
+		public Core::String tool;
+		public Core::String path;
+		public Core::String args;
+		public int64 at;   // the index of the message that made it
+	}
+
+	static Serialization::DomNode Parsed(Core::StringView text) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text, *doc);
+		return read.Ok() ? read.root : Serialization::DomNode();
+	}
+
+	static bool NamesFile(Core::StringView tool) { return tool == "fs_read" || tool == "fs_write" || tool == "fs_edit"; }
+
+	static Core::Array<FileCall*> FileCalls(const Core::Array<ModelMessage*>& messages) {
+		Core::Array<FileCall*> calls;
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			if (messages[i]->toolCalls.IsEmpty()) continue;
+			Serialization::DomNode list = Parsed(messages[i]->toolCalls.View());
+			for (int64 k = 0; k < list.Count(); ++k) {
+				Serialization::DomNode function = list.At(k).Member("function");
+				if (!NamesFile(function.Member("name").AsView())) continue;
+				FileCall* call = new FileCall();
+				call->callId = Core::String(list.At(k).Member("id").AsView());
+				call->tool = Core::String(function.Member("name").AsView());
+				call->args = Core::String(function.Member("arguments").AsView());
+				call->path = Core::String(Parsed(call->args.View()).Member("path").AsView());
+				call->at = i;
+				if (!call->path.IsEmpty()) calls.Push(call);
+			}
+		}
+		return calls;
+	}
+
+	static FileCall* CallOf(const Core::Array<FileCall*>& calls, Core::StringView callId) {
+		for (FileCall* call : calls)
+			if (call->callId.View() == callId) return call;
+		return nullptr;
+	}
+
+	// Why the read `read` is stale ("" when it is not): the later call of its file that made it so.
+	static Core::String StaleBecause(const Core::Array<FileCall*>& calls, const FileCall* read) {
+		for (FileCall* later : calls) {
+			if (later->at <= read->at || later->path != read->path) continue;
+			if (later->tool != "fs_read") return ((Core::String("[out of date: ") + read->path.View()) + " was changed later by " + later->tool.View()) + "; read it again if you need it]";
+			if (later->args == read->args) return (Core::String("[superseded: ") + read->path.View()) + " was read again later]";
+		}
+		return Core::String();
+	}
+
+	int64 DropSuperseded(const Core::Array<ModelMessage*>& messages, int64 keepFrom) {
+		Core::Array<FileCall*> calls = FileCalls(messages);
+		int64 dropped = 0;
+		for (int64 i = 0; i < messages.Count() && i < keepFrom; ++i) {
+			ModelMessage* message = messages[i];
+			if (message->role != "tool") continue;
+			FileCall* call = CallOf(calls, message->toolCallId.View());
+			if (!call || call->tool != "fs_read") continue;
+			Core::String because = StaleBecause(calls, call);
+			if (because.IsEmpty() || message->content == because) continue;
+			message->content = because;
+			message->images.Clear();
+			dropped += 1;
+		}
+		return dropped;
+	}
+}

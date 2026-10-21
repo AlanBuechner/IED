@@ -76,7 +76,7 @@ Flags and event shapes must be re-verified against the installed CLI version whe
 
 - **Ledger:** every context item typed and counted (provider usage is authoritative; per-family tokenizers or llama.cpp `/tokenize` for estimates). Feeds the right-panel context view.
 - **Tiered compression** at a high-water mark (defaults: warn 70%, compress at 85% of the discovered window, target 50%):
-  1. *Mechanical:* superseded file reads dropped (a later read of the same file wins), large tool results trimmed to conclusions + excerpts, stale diagnostics dropped.
+  1. *Mechanical:* superseded file reads dropped (a later read of the same file wins), large tool results trimmed to conclusions + excerpts, stale diagnostics dropped. As built: at a compression a read the same range of the file was read again after becomes "[superseded: <path> was read again later]", and one the file was written or edited after becomes "[out of date: ...; read it again if you need it]" (`plugins/chat/code/superseded.cf`); then older results are trimmed and whole earlier turns left out.
   2. *Summary:* older turns summarized by the `summarizer` role into a structured summary (goal, constraints, decisions, progress, files touched, open questions, exact snippets to keep).
 - **Cache-aware:** the system message and early prefix stay byte-identical; between compressions the context is append-only; compression happens in big steps rarely, so llama.cpp and Anthropic prefix caches stay warm (this is what makes long local chats *fast*, not just possible).
 - **Never lost:** the raw history stays on disk; `history_search` / `history_read` retrieve compressed-away details. Scratchpad and task list are never compressed (they travel as tail notes).
@@ -117,6 +117,20 @@ Per chat, under `.ied/local/chats/<chatId>/` (generic chats under `%APPDATA%/IED
 | `checkpoints/` | content-addressed pre-edit file snapshots for rewind |
 
 Only the active window of each chat stays in server memory; older turns load lazily on scroll.
+
+## Chats talk to each other (built, 2026-10-21)
+
+A chat can hand work to another chat of its workspace and hear back, the way a lead hands a task to a colleague. The tools are the deferred group `chats` (`docs/13`), loaded with `tool_search` or by calling one:
+
+- `chat_list` names the workspace's chats (id, title, mode, running or idle, the first line of its last answer); `chat_read` shows another chat's last turns (at most 5), messages and answers without the tool calls.
+- `chat_send` sends a chat a message: an idle chat starts a turn with it, a running one gets it at its next step (like a steering message). `chat_create` starts a new chat with a message (a title and mode optional; it uses this chat's model group), to split the work. Both are Exec tools: they ask in Ask mode, and "Allow for this chat" adds `chat.send(<id>)` / `chat.create(*)`.
+- `chat_wait` waits for another chat's turn to end and returns its answer (default 120 s, at most 600 s; a stop ends the wait).
+
+The receiving turn says who sent it: its user message carries `from {chatId, title}`, the transcript heads it "From chat <title>" with a link that opens that chat, and the model is told the message came from that chat and that it can answer with `chat_send`. A chain of chats messaging chats is cut at 3 hops (`hops` on the turn), so two chats cannot keep each other running forever.
+
+## What a chat has open (built, 2026-10-21)
+
+Other plugins open things on a chat's behalf - the Browser plugin's pages an AI drives (`docs/27`), and later terminals and processes. A plugin says so through the chat plugin's server binding `chat.resource` (`{chatId, ref, title?, kind?, open?}`; `open: false` takes it off): `ref` is the tab that shows it (`browser:pg-3`). The chat keeps the list in `chat.json` (`resources`), its topic says when it changes (`resources.changed`) and the side panel lists it under "Open by this chat", each row opening its tab, so the owner can watch the AI work in the page.
 
 ## Attachments and @-mentions
 

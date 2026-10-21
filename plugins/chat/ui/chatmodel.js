@@ -19,6 +19,7 @@ export class ChatModel {
 		this.tasks = [];
 		this.queued = [];
 		this.modified = [];
+		this.resources = [];
 		this.context = null;
 	}
 
@@ -34,6 +35,7 @@ export class ChatModel {
 		this.tasks = data.tasks || [];
 		this.queued = data.queued || [];
 		this.modified = data.modified || [];
+		this.resources = data.resources || [];
 		this.context = data.context || null;
 		return { all: true };
 	}
@@ -108,6 +110,9 @@ export class ChatModel {
 			case "queue.changed":
 				this.queued = data.queued || [];
 				return { queued: true };
+			case "resources.changed":
+				this.resources = data.resources || [];
+				return { resources: true };
 			case "files.changed":
 				this.modified = data.files || [];
 				return { modified: true };
