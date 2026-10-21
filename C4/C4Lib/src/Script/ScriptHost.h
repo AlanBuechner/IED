@@ -4,6 +4,7 @@
 #include "Script/ScriptCache.h"
 #include "Script/ScriptCompiler.h"
 #include "Script/ScriptJit.h"
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -76,6 +77,7 @@ namespace Scripting
 			: m_Runtime(runtime), m_Guard(guard), m_Loading(std::move(loading)), m_Tag(std::move(tag)) {}
 		bool Load(std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
 		bool CallStart(void (*start)());
+		void RecordFault(const ScriptFault& fault);
 
 		HostRuntime m_Runtime;              // a copy: a script may outlive its host object
 		GuardedCall m_Guard;
@@ -90,6 +92,7 @@ namespace Scripting
 		bool m_Faulted = false;
 		bool m_Cached = false;
 		ScriptFault m_Fault;
+		std::string m_FaultPlace;          // the fault's module and function, when the script's code has symbols
 	};
 
 	/// A program's side of scripting: its interface and table, from which it compiles and loads scripts.
@@ -110,7 +113,14 @@ namespace Scripting
 		/// links that compile's machine code. False, with nothing kept, when the compiler's own file cannot be named.
 		bool UseCache(const std::string& folder);
 
+		/// Whether scripts are debugged (section 6.4): each linked into a DLL with a PDB that debuggers read, instead of
+		/// in memory. On at first when the host was built with -g.
+		bool DebugScripts() const { return m_DebugScripts; }
+		void SetDebugScripts(bool on) { m_DebugScripts = on; }
+
 		const HostInterface& Interface() const { return m_Interface; }
+
+		~ScriptHost();
 
 	private:
 		ScriptHost(HostInterface host, HostSymbolTable table, HostRuntime runtime, GuardedCall guard);
@@ -130,12 +140,20 @@ namespace Scripting
 		Built CompileAndLink(const ScriptCompileOptions& options, std::string* generated);
 		static void LoadOrUndo(Script& script, std::unique_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
 
+		/// Links a compiled script: into a DLL when scripts are debugged, else in memory.
+		std::unique_ptr<LinkedScript> Link(ScriptCode code, const std::string& name, std::string* generated, std::string* error);
+
 		HostInterface m_Interface;
 		HostIndex m_Index;
 		HostSymbolTable m_Table;
 		HostRuntime m_Runtime;
 		GuardedCall m_Guard;
 		std::optional<ScriptCache> m_Cache;
+		std::atomic<bool> m_DebugScripts = false;
+		std::atomic<uint64> m_DllLoads = 0;  // each debug script's module is a file of its own
+		std::string m_DllRoot;               // where their process folders go (section 6.4)
+		std::string m_DllFolder;             // this process's, made at the first debug link
+		std::once_flag m_DllFolderMade;
 		std::shared_ptr<std::recursive_mutex> m_Loading = std::make_shared<std::recursive_mutex>(); // an exit may compile
 	};
 } // namespace Scripting

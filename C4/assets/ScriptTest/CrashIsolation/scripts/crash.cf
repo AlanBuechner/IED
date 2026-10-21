@@ -17,4 +17,6 @@ void Overflows(void* out) { *(int64*)out = Deep(0, *(int64*)out); }
 
 void Fine(void* out) { *(int32*)out = 5; }
 
+void Traps(void* unused) { asm(nomem, nostack) { "int3"; } }
+
 void Throws(void* unused) { throw 7; }

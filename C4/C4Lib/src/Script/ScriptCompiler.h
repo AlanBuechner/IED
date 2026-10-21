@@ -37,6 +37,7 @@ namespace Scripting
 		std::vector<std::string> allow;             // the host headers a script file may include (section 4.5); empty: all
 		std::map<std::string, std::string> defines;
 		bool optimize = true;                       // -O2; false: -O0
+		bool debugInfo = false;                     // CodeView for a debug script's PDB (section 6.4)
 	};
 
 	/// A compiled script, ready to link: its module (null when it did not compile) and its context, which outlives it.

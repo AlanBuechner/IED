@@ -18,6 +18,7 @@ namespace Scripting
 		std::vector<std::string> symbols;        // the symbol table's entries (Script/HostTable.h)
 		std::string inlineBodies;                // Script/InlineBodies.h
 		std::vector<std::string> reflectedTypes; // the types the program's reflection registers
+		bool debugInfo = false;                  // -g: the host debugs its scripts at first
 	};
 
 	/// The interface of the program `compiler` compiled (docs/runtime/04 section 3.2): its projects and folders, and

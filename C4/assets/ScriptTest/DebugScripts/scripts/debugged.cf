@@ -1,0 +1,14 @@
+// A script the host debugs: Twice starts at line 6 (Debugged::kTwiceFirstLine).
+include "debugged.ch"
+
+int32 g_calls = 0;
+
+int32 Twice(int32 value)
+{
+	g_calls++;
+	return value * 2;
+}
+
+void Throws(void* unused) { throw 41; }
+
+void WritesNull(void* unused) { *(int32*)Debugged::g_null = 1; }

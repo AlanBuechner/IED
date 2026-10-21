@@ -268,6 +268,7 @@ bool ProgramOutput::PrepareScriptHost(llvm::Module& module, std::optional<Script
 	build.symbols = Scripting::HostSymbols(module, *listed);
 	build.inlineBodies = Scripting::InlineBodies(module, build.symbols);
 	build.reflectedTypes = Scripting::ReflectedTypeNames(model);
+	build.debugInfo = m_In.options.debugInfo;
 	host = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(build), &error);
 	if (!host || !Scripting::EmitHostTable(module, host->symbols, host->buildId, &error))
 	{

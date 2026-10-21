@@ -10,7 +10,7 @@ namespace Scripting
 	namespace
 	{
 		constexpr char kMagic[4] = { 'C', '4', 'I', 'F' };
-		constexpr uint32 kFormatVersion = 2;
+		constexpr uint32 kFormatVersion = 3;
 
 		// Little-endian fields: integers of fixed width, strings and lists after their length.
 		class Writer
@@ -189,6 +189,7 @@ namespace Scripting
 		out.U32(host.compilerVersion);
 		out.Text(host.targetCpu);
 		out.Text(host.targetFeatures);
+		out.U32(host.debugInfo ? 1u : 0u);
 		out.U32(static_cast<uint32>(host.projects.size()));
 		for (const InterfaceProject& project : host.projects) WriteProject(out, project);
 		out.U32(host.rootProject);
@@ -215,6 +216,7 @@ namespace Scripting
 		read.compilerVersion = in.U32();
 		read.targetCpu = in.Text();
 		read.targetFeatures = in.Text();
+		read.debugInfo = in.U32() != 0;
 		const uint32 projects = in.U32();
 		for (uint32 i = 0; i < projects && in.Ok(); ++i) read.projects.push_back(ReadProject(in));
 		read.rootProject = in.U32();

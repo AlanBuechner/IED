@@ -1,0 +1,19 @@
+// A script whose code has asm blocks compiles, links and runs (BUG-324: the JIT's code generator had no asm parser and
+// stopped the host).
+include "scripttest.ch"
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("AsmBlocks");
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "asm", "asm.cf"));
+	if (!script->Ok()) return checks.End("AsmBlocks");
+	funcptr<int32()> seven = (funcptr<int32()>)script->Address("Seven");
+	funcptr<int32(int32, int32)> addTwice = (funcptr<int32(int32, int32)>)script->Address("AddTwice");
+	checks.That(seven != nullptr && addTwice != nullptr, "the script defines its asm functions");
+	if (seven != nullptr) checks.Equal(7, (int64)seven(), "an Intel asm block runs");
+	if (addTwice != nullptr) checks.Equal(25, (int64)addTwice(5, 10), "an AT&T asm block runs");
+	script->Unload();
+	return checks.End("AsmBlocks");
+}

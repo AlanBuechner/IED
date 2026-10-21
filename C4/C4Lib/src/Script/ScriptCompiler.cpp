@@ -183,6 +183,7 @@ namespace Scripting
 			CodeGenDriver driver(*out.context);
 			driver.SetReflectionTag(options.name.c_str());
 			driver.EnableScriptMode({ &index.symbols, &index.types, units.interfaceUnits });
+			if (options.debugInfo) driver.EnableDebugInfo();
 			TestHarnessOptions tests;
 			tests.entry = kScriptTestsSymbol;
 			tests.hostUnits = units.interfaceUnits;

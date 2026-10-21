@@ -85,14 +85,32 @@ void CheckChangedAndDamaged(Scripting::Host* host, ScriptTest::Checks& checks)
 	damaged->Unload();
 }
 
+// A debug script (docs/runtime/04 section 6.4) compiles every time: its module is not kept.
+void CheckDebugScriptsAreNotKept(Scripting::Host* host, ScriptTest::Checks& checks)
+{
+	FS::RemoveAll(kFolder);
+	host->UseCache(kFolder);
+	host->SetDebugScripts(true);
+	for (int32 i = 0; i < 2; ++i)
+	{
+		Scripting::Script* debug = ScriptTest::Load(host, checks, Given(checks, kFirst));
+		checks.That(!debug->Cached(), "a debug script compiles every time");
+		checks.Equal(42, Call(debug, "Answer"), "and runs");
+		debug->Unload();
+	}
+	checks.Equal(0, Entries().Count(), "nothing of it is kept");
+}
+
 int32 main(int32 argc, char** argv)
 {
 	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
 	Scripting::Host* host = ScriptTest::OpenHost(checks);
 	if (!host->IsOpen()) return checks.End("Cache");
+	host->SetDebugScripts(false); // the cache keeps scripts linked in memory
 	FS::RemoveAll(kFolder);
 	checks.That(host->UseCache(kFolder), "the host keeps compiled scripts");
 	CheckFirstAndAgain(host, checks);
 	CheckChangedAndDamaged(host, checks);
+	CheckDebugScriptsAreNotKept(host, checks);
 	return checks.End("Cache");
 }

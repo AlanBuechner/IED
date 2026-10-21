@@ -33,12 +33,14 @@ void CheckScriptFaults(Scripting::Host* host, ScriptTest::Checks& checks)
 	CheckFault(host, checks, "nullwrite", "WritesNull", "0xc0000005");
 	CheckFault(host, checks, "divide", "Divides", "0xc0000094");
 	CheckFault(host, checks, "overflow", "Overflows", "0xc00000fd");
+	CheckFault(host, checks, "trap", "Traps", "0x80000003");
 
 	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "details", "crash.cf"));
 	if (!script->Ok()) return;
 	checks.That(!CallGuarded(script, "WritesNull", nullptr), "a null write");
 	checks.Contains(script->FaultText(), "writing 0x0", "the fault says it wrote address 0");
-	checks.Contains(script->FaultText(), "at script+", "and where in the script it was");
+	// A debug script's fault is named by its module and function (docs/runtime/04 section 6.4).
+	checks.Contains(script->FaultText(), host->DebugScripts() ? "!" : "at script+", "and where in the script it was");
 	script->Unload();
 
 	Scripting::Script* after = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "after", "crash.cf"));

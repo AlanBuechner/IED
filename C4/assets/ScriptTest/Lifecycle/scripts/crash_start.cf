@@ -1,4 +1,7 @@
-int32* Nowhere() { return nullptr; }
+// Read as volatile, so no optimizer turns the store into a trap.
+volatile int64 g_nowhere = 0;
+
+int32* Nowhere() { return (int32*)g_nowhere; }
 
 int32 WriteNowhere()
 {

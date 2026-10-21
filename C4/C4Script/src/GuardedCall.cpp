@@ -28,6 +28,7 @@ namespace
 		case EXCEPTION_FLT_STACK_CHECK:
 		case EXCEPTION_FLT_DENORMAL_OPERAND:
 		case EXCEPTION_FLT_INEXACT_RESULT:
+		case EXCEPTION_BREAKPOINT: // a trap (int3) no debugger took: what the optimizer leaves of undefined behavior
 			return true;
 		default:
 			return false;

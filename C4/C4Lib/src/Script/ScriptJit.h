@@ -40,29 +40,33 @@ namespace Scripting
 		uintptr_t high = 0;
 	};
 
-	/// One script linked into the running program, with its own JIT: destroying it frees exactly its code and
-	/// data, removes its unwind tables and its image.
+	/// One script linked into the running program: in memory by its own JIT, or as a DLL (Script/ScriptDll.h).
+	/// Destroying it frees exactly its code and data, and removes its unwind tables and its image.
 	class LinkedScript
 	{
 	public:
-		LinkedScript(std::unique_ptr<llvm::orc::LLJIT> jit, std::shared_ptr<ScriptImage> image);
-		~LinkedScript();
+		LinkedScript() = default;
+		virtual ~LinkedScript() = default;
 		LinkedScript(const LinkedScript&) = delete;
 		LinkedScript& operator=(const LinkedScript&) = delete;
 
 		/// The address of the script's symbol `name`, or null when it has none.
-		void* Find(const std::string& name) const;
-		const ScriptImage& Image() const { return *m_Image; }
-
-	private:
-		std::unique_ptr<llvm::orc::LLJIT> m_Jit;
-		std::shared_ptr<ScriptImage> m_Image;
+		virtual void* Find(const std::string& name) const = 0;
+		virtual const ScriptImage& Image() const = 0;
+		/// Where `address` is, by its module and function (`ied.git#3-1!WritesNull+0x12`); empty when the script's
+		/// code has no symbols to name it by.
+		virtual std::string Describe(uint64 address) const { return ""; }
 	};
 
 	/// The target machine scripts are compiled for, the one the JIT generates code with: the host's processor
 	/// (`target`, D-62), so host and script pass vectors alike, with emulated thread storage (a JIT image has no PE
 	/// TLS directory).
 	std::unique_ptr<llvm::TargetMachine> ScriptTargetMachine(const CpuTarget& target, std::string* error);
+
+	/// The machine a debug script's DLL is compiled for (Script/ScriptDll.h): the same processor and thread storage, and
+	/// position-independent code of the small model, as any image's (the JIT's large model writes every address into the
+	/// code, and a static one writes 32-bit absolute addresses, which a DLL above 4 GiB cannot hold).
+	std::unique_ptr<llvm::TargetMachine> ScriptDllTargetMachine(const CpuTarget& target, bool optimize, std::string* error);
 
 	/// What a script links from: the module it compiled to, or the machine code an earlier link of it generated (a
 	/// ScriptCache entry's), used as it is.

@@ -1,5 +1,6 @@
 #include "Script/ScriptJit.h"
 #include "Script/ScriptModulePasses.h"
+#include "Script/ScriptSymbols.h"
 #include <llvm/TargetParser/Host.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/ObjectCache.h>
@@ -25,9 +26,6 @@
 #endif
 #include <windows.h>
 
-extern "C" void __chkstk();
-extern "C" int _fltused;
-
 namespace Scripting
 {
 	namespace
@@ -35,36 +33,8 @@ namespace Scripting
 		using ImageFn = void (*)(const void*, const void*);
 		using ImageRemoveFn = void (*)(const void*);
 
-		// What the code a compiler emits may call without naming it: memory helpers, the stack probe, and the math
-		// functions LLVM lowers intrinsics to.
-		void* SupportSymbol(const std::string& name)
-		{
-			static const std::unordered_map<std::string, void*> kSymbols = {
-				{ "memcpy", (void*)&memcpy }, { "memmove", (void*)&memmove }, { "memset", (void*)&memset }, { "memcmp", (void*)&memcmp },
-				{ "__chkstk", (void*)&__chkstk }, { "_fltused", (void*)&_fltused },
-				{ "sin", (void*)(double (*)(double))&sin }, { "cos", (void*)(double (*)(double))&cos }, { "tan", (void*)(double (*)(double))&tan },
-				{ "asin", (void*)(double (*)(double))&asin }, { "acos", (void*)(double (*)(double))&acos }, { "atan", (void*)(double (*)(double))&atan },
-				{ "atan2", (void*)(double (*)(double, double))&atan2 }, { "exp", (void*)(double (*)(double))&exp }, { "exp2", (void*)(double (*)(double))&exp2 },
-				{ "log", (void*)(double (*)(double))&log }, { "log2", (void*)(double (*)(double))&log2 }, { "log10", (void*)(double (*)(double))&log10 },
-				{ "pow", (void*)(double (*)(double, double))&pow }, { "fmod", (void*)(double (*)(double, double))&fmod }, { "sqrt", (void*)(double (*)(double))&sqrt },
-				{ "floor", (void*)(double (*)(double))&floor }, { "ceil", (void*)(double (*)(double))&ceil }, { "round", (void*)(double (*)(double))&round },
-				{ "trunc", (void*)(double (*)(double))&trunc }, { "rint", (void*)(double (*)(double))&rint }, { "nearbyint", (void*)(double (*)(double))&nearbyint },
-				{ "fma", (void*)(double (*)(double, double, double))&fma }, { "ldexp", (void*)(double (*)(double, int))&ldexp },
-				{ "sinf", (void*)(float (*)(float))&sinf }, { "cosf", (void*)(float (*)(float))&cosf }, { "tanf", (void*)(float (*)(float))&tanf },
-				{ "asinf", (void*)(float (*)(float))&asinf }, { "acosf", (void*)(float (*)(float))&acosf }, { "atanf", (void*)(float (*)(float))&atanf },
-				{ "atan2f", (void*)(float (*)(float, float))&atan2f }, { "expf", (void*)(float (*)(float))&expf }, { "exp2f", (void*)(float (*)(float))&exp2f },
-				{ "logf", (void*)(float (*)(float))&logf }, { "log2f", (void*)(float (*)(float))&log2f }, { "log10f", (void*)(float (*)(float))&log10f },
-				{ "powf", (void*)(float (*)(float, float))&powf }, { "fmodf", (void*)(float (*)(float, float))&fmodf }, { "sqrtf", (void*)(float (*)(float))&sqrtf },
-				{ "floorf", (void*)(float (*)(float))&floorf }, { "ceilf", (void*)(float (*)(float))&ceilf }, { "roundf", (void*)(float (*)(float))&roundf },
-				{ "truncf", (void*)(float (*)(float))&truncf }, { "rintf", (void*)(float (*)(float))&rintf }, { "nearbyintf", (void*)(float (*)(float))&nearbyintf },
-				{ "fmaf", (void*)(float (*)(float, float, float))&fmaf }, { "ldexpf", (void*)(float (*)(float, int))&ldexpf },
-			};
-			auto it = kSymbols.find(name);
-			return it == kSymbols.end() ? nullptr : it->second;
-		}
-
-		// Resolves what a script names: the host's symbols first, then the compiler's support functions. The host's
-		// personality routine goes by another name: the image has its own (AddPersonalityThunk).
+		// Resolves what a script names (ResolveScriptSymbol). The host's personality routine goes by another name: the
+		// image has its own (AddPersonalityThunk).
 		class HostGenerator : public llvm::orc::DefinitionGenerator
 		{
 		public:
@@ -80,12 +50,7 @@ namespace Scripting
 			}
 
 		private:
-			void* Resolve(const std::string& name) const
-			{
-				if (name == "__c4_host_CxxFrameHandler3") return m_Host.Find("__CxxFrameHandler3");
-				if (void* host = m_Host.Find(name)) return host;
-				return SupportSymbol(name);
-			}
+			void* Resolve(const std::string& name) const { return ResolveScriptSymbol(m_Host, name); }
 
 			const HostSymbolTable& m_Host;
 		};
@@ -169,12 +134,14 @@ namespace Scripting
 			B.CreateRet(call);
 		}
 
+		// The asm parser too: a script's asm blocks, and a debug script's import thunks, are assembled with its code.
 		void InitializeTarget()
 		{
 			static std::once_flag once;
 			std::call_once(once, [] {
 				llvm::InitializeNativeTarget();
 				llvm::InitializeNativeTargetAsmPrinter();
+				llvm::InitializeNativeTargetAsmParser();
 			});
 		}
 
@@ -216,6 +183,30 @@ namespace Scripting
 			if (error) *error = why;
 			return false;
 		}
+
+		// A script its own JIT linked in memory.
+		class JitScript final : public LinkedScript
+		{
+		public:
+			JitScript(std::unique_ptr<llvm::orc::LLJIT> jit, std::shared_ptr<ScriptImage> image) : m_Jit(std::move(jit)), m_Image(std::move(image)) {}
+
+			void* Find(const std::string& name) const override
+			{
+				auto symbol = m_Jit->lookup(name);
+				if (!symbol)
+				{
+					llvm::consumeError(symbol.takeError());
+					return nullptr;
+				}
+				return symbol->toPtr<void*>();
+			}
+
+			const ScriptImage& Image() const override { return *m_Image; }
+
+		private:
+			std::unique_ptr<llvm::orc::LLJIT> m_Jit;
+			std::shared_ptr<ScriptImage> m_Image;
+		};
 	}
 
 	std::optional<HostSymbolTable> HostSymbolTable::Read(const HostInterface& host, const void* table, std::string* error)
@@ -248,24 +239,24 @@ namespace Scripting
 		return it == m_Addresses.end() ? nullptr : it->second;
 	}
 
-	LinkedScript::LinkedScript(std::unique_ptr<llvm::orc::LLJIT> jit, std::shared_ptr<ScriptImage> image) : m_Jit(std::move(jit)), m_Image(std::move(image)) {}
-
-	LinkedScript::~LinkedScript() = default;
-
-	void* LinkedScript::Find(const std::string& name) const
-	{
-		auto symbol = m_Jit->lookup(name);
-		if (!symbol)
-		{
-			llvm::consumeError(symbol.takeError());
-			return nullptr;
-		}
-		return symbol->toPtr<void*>();
-	}
 
 	std::unique_ptr<llvm::TargetMachine> ScriptTargetMachine(const CpuTarget& target, std::string* error)
 	{
 		auto machine = MachineBuilder(target, true).createTargetMachine();
+		if (!machine)
+		{
+			Fail(error, "no target machine: " + llvm::toString(machine.takeError()));
+			return nullptr;
+		}
+		return std::move(*machine);
+	}
+
+	std::unique_ptr<llvm::TargetMachine> ScriptDllTargetMachine(const CpuTarget& target, bool optimize, std::string* error)
+	{
+		llvm::orc::JITTargetMachineBuilder builder = MachineBuilder(target, optimize);
+		builder.setCodeModel(llvm::CodeModel::Small);
+		builder.setRelocationModel(llvm::Reloc::PIC_); // every address relative to the code, as clang compiles for Windows
+		auto machine = builder.createTargetMachine();
 		if (!machine)
 		{
 			Fail(error, "no target machine: " + llvm::toString(machine.takeError()));
@@ -302,9 +293,6 @@ namespace Scripting
 		(*jit)->getExecutionSession().setErrorReporter([sessionErrors](llvm::Error e) { *sessionErrors += llvm::toString(std::move(e)) + "\n"; });
 		llvm::orc::JITDylib& library = (*jit)->getMainJITDylib();
 		library.addGenerator(std::make_unique<HostGenerator>(host));
-		auto process = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess((*jit)->getDataLayout().getGlobalPrefix());
-		if (!process) { Fail(error, llvm::toString(process.takeError())); return nullptr; }
-		library.addGenerator(std::move(*process));
 
 		if (auto added = AddCode(**jit, std::move(code)))
 		{
@@ -319,6 +307,6 @@ namespace Scripting
 			Fail(error, "the script does not link: " + (sessionErrors->empty() ? why : *sessionErrors));
 			return nullptr;
 		}
-		return std::make_unique<LinkedScript>(std::move(*jit), image);
+		return std::make_unique<JitScript>(std::move(*jit), image);
 	}
 } // namespace Scripting

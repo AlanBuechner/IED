@@ -149,8 +149,9 @@ One binary file:
 
 | Section | Content |
 |---|---|
-| Header | magic `C4IF`, format version (2), build id, compiler version |
+| Header | magic `C4IF`, format version (3), build id, compiler version |
 | Target | the host's LLVM CPU name and feature string (D-62); a target the reading compiler does not know is refused |
+| Debug information | whether the host was built with `-g`: its scripts are debugged at first (section 6.4) |
 | Projects | each project's name and dependencies (D-59), so includes resolve as in the host |
 | Folders | how many source folders the host registered; each project names its own |
 | Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text** and the macros it exports |
@@ -272,7 +273,8 @@ reflection tag is applied at load, not in the machine code), the optimization le
 host's build id, and the compiler's own build (the path, size and time of `C4Script.dll`, so a rebuilt compiler
 never runs code an older one made). An entry is a file `<name>.<O0|O2>-<digest>.c4so`; writing one removes the
 script's other entries at that level, so the folder holds one per script and level. A missing, damaged or
-unlinkable entry is compiled again; a folder that cannot be written only makes compiles slower.
+unlinkable entry is compiled again; a folder that cannot be written only makes compiles slower. Debug scripts
+(section 6.4) are never kept.
 
 ---
 
@@ -328,15 +330,49 @@ A host function that throws into a script must be able to unwind: a C or C++ fun
 with `-fexternc-nounwind` (Frost's default) has no unwind table, and an exception crossing it skips the frames
 above.
 
+### 6.4 Debug scripts
+
+A host whose scripts are debugged (`Host::SetDebugScripts`, `c4s_host_debug_scripts`; on at first when the host was
+built with `-g`, which its interface records) links each script into a DLL with a PDB instead of linking it in
+memory, and loads it with `LoadLibrary`: an ordinary module, so C4DAP, Visual Studio and WinDbg set breakpoints by
+file and line in the script's sources (the PDB names them by their absolute paths), step, show locals and stacks
+across host and script frames, and crash dumps name its functions.
+
+- The module is `<script name>-<n>.dll` beside its `.pdb`, in `<cache folder>/debug/<process id>` when the host keeps
+  a script cache, else `%TEMP%/c4_scripts/<process id>`. Each load is a file of its own (`ied.git#3-2.dll` after
+  `ied.git#3-1.dll`), so a debugger never sees a module change under it; the files go when the script unloads (a PDB
+  a debugger holds stays), and the folder of a process that has ended goes at the next host's first debug link.
+- The module is compiled for the host's processor as position-independent code of the small model (as any image's),
+  with CodeView. A `thread_local` keeps no debug record: emulated thread storage replaces its symbol with its control.
+- Every name the script takes from outside is reached through an import slot. Its declarations are `dllimport`, so
+  its code loads `__imp_<name>` and the address of a host function in script code is the host's. What the code
+  calls by name without declaring it (memcpy, the stack probe) and what an image-relative offset names (the unwind
+  tables' personality routine) get a thunk in the image that jumps through a slot. What only its data names (a host
+  vtable a script class extends, a host function in a table) gets a stand-in: the loader relocates the address of
+  the stand-in, and C4Script then rewrites every such address in the image (found through its base relocations) to
+  the host's own at the same offset, up to 64 KiB into the object. Thunk addresses in data are rewritten the same
+  way. All of it happens after `LoadLibrary` and before any script code runs: the DLL has no entry point, and the
+  script's globals start from C4Script as an in-memory script's do.
+- Every name the script defines is exported, so `Script::Find` is `GetProcAddress`.
+- C4Script links the DLL in the process with lld's COFF driver, one link at a time (`/manifest:no`: the vendored LLVM
+  has no libxml2 for manifests, and C4Script stands in for it at link time). Throws use `c4_script_throw` with the
+  module's base, as an in-memory script's do; the loader registers the unwind tables.
+- A fault in a debug script names the module, the function and the offset (`ied.git#3-1!WritesNull+0x12`), read from
+  its PDB on a DbgHelp session of C4Script's own.
+- Debug scripts are not kept in the compiled-script cache (section 4.6): each load compiles and links.
+- ScriptTest `DebugScripts` checks the module, its lines, a throw, a fault, a reload and the files; `RunTests.ps1
+  -DebugScripts` runs every case with its host built `-g`, so every case also runs as debug scripts.
+
 ---
 
 ## 7. Crash isolation
 
 Every call the host makes into a script through the scripting API (`Script::Call`, the loader's starts and
 exits, `Scripting::Guard`) runs inside a structured-exception guard. A hardware fault in the script (access
-violation, illegal instruction, divide by zero, stack overflow) stops that call: the call returns false, the
+violation, illegal instruction, divide by zero, stack overflow, and a trap no debugger took: an `int3`, which is
+also what the optimizer leaves of undefined behavior) stops that call: the call returns false, the
 script is marked faulted, and `Script::FaultText()` says what happened and where (`exception 0xc0000005 at
-script+0x1a2, writing 0x0`). A faulted script stays loaded
+script+0x1a2, writing 0x0`; a debug script's names its module and function, section 6.4). A faulted script stays loaded
 until the host unloads it, so the host decides; calling into it again is refused.
 
 A C4 exception that escapes a guarded call is not a fault: it propagates to the caller like any exception. A
@@ -365,4 +401,4 @@ There are no memory quotas.
 | Runtime: script exit lists, emulated thread storage, script images and throws, root tables, finalizer drop, stacked reflection registrations (IsolatedTest `Scripting/ScriptExits`, `Scripting/EmulatedThreadStorage`, `MemoryGC/RootTablesAndDroppedFinalizers`, `Reflection/StackedRegistrations`) | **Done** |
 | Guarded calls (in `C4Script.dll`; ScriptTest `CrashIsolation`) | **Done** |
 | `Bedrock/Scripting` (ScriptTest) | **Done** |
-| Debugging scripts | **Planned** (later) |
+| Debugging scripts: DLLs with PDBs (section 6.4; ScriptTest `DebugScripts`, and every case with `-DebugScripts`) | **Done** |

@@ -1,0 +1,14 @@
+// A script's own asm blocks (docs/language/16): an Intel and an AT&T one (BUG-324).
+int32 Seven()
+{
+	int32 out = 0;
+	asm(nomem, nostack) { "mov {o}, 7"; out(reg) o = out; }
+	return out;
+}
+
+int32 AddTwice(int32 a, int32 b)
+{
+	int32 sum = a;
+	asm(att_syntax, pure, nomem, nostack) { "addl {b}, {s}"; "addl {b}, {s}"; inout(reg) s = sum; in(reg) b; }
+	return sum;
+}

@@ -48,6 +48,10 @@ C4SCRIPT_API void c4s_host_close(c4s_host* host);
 // Keeps compiled scripts in `folder` from now on (docs/runtime/04 section 4.6): a script compiled again with the same
 // files, options, host build and compiler links the machine code kept from before. 0 when it cannot.
 C4SCRIPT_API int32_t c4s_host_use_cache(c4s_host* host, const char* folder);
+// Whether the host debugs its scripts (docs/runtime/04 section 6.4): links each into a DLL with a PDB that debuggers
+// read, instead of in memory. `on` 1 or 0 sets it, -1 only reads it; returns the setting it had. A host built with -g
+// starts with it on.
+C4SCRIPT_API int32_t c4s_host_debug_scripts(c4s_host* host, int32_t on);
 
 // Compiles, links and loads a script. Never null: c4s_script_ok says whether it worked, the diagnostics why not.
 C4SCRIPT_API c4s_script* c4s_compile(c4s_host* host, const c4s_options* options);

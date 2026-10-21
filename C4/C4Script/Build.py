@@ -17,6 +17,9 @@ if os.path.exists(compilerLibDir):
 	for name in ["LLVM*.lib", "Remarks.lib"]:
 		for path in sorted(glob.glob(os.path.join(compilerLibDir, name))):
 			if os.path.basename(path) not in kImportLibraries: links.append(os.path.basename(path))
+# Debug scripts (docs/runtime/04 section 6.4): lld's COFF driver links them into DLLs in the process, DbgHelp names a
+# fault in one.
+links += ["lldCOFF.lib", "lldCommon.lib", "dbghelp.lib"]
 
 
 def GetProject():

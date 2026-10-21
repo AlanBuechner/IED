@@ -93,6 +93,14 @@ extern "C"
 		return host && folder && *folder && host->host->UseCache(folder) ? 1 : 0;
 	}
 
+	int32_t c4s_host_debug_scripts(c4s_host* host, int32_t on)
+	{
+		if (!host) return 0;
+		const bool before = host->host->DebugScripts();
+		if (on >= 0) host->host->SetDebugScripts(on != 0);
+		return before ? 1 : 0;
+	}
+
 	c4s_script* c4s_compile(c4s_host* host, const c4s_options* options)
 	{
 		auto* result = new c4s_script();

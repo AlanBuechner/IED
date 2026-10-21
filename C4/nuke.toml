@@ -83,6 +83,17 @@ name = "script-O2"
 phase = "gates"
 run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ScriptTest/RunTests.ps1", "-O2"]
 
+# Every case again with its host built -g: its scripts are DLLs with PDBs (docs/runtime/04 section 6.4).
+[[project.steps]]
+name = "script-debug"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ScriptTest/RunTests.ps1", "-DebugScripts"]
+
+[[project.steps]]
+name = "script-debug-O2"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "assets/ScriptTest/RunTests.ps1", "-DebugScripts", "-O2"]
+
 [[project.steps]]
 name = "tools"
 phase = "gates"

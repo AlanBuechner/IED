@@ -10,7 +10,7 @@ All runners expect the compiler at `bin/Development-windows-x64/C4/C4.exe` (buil
 
 `nuke gates` from the repository root (the folder above the C4 tree) is the one command that builds the compiler
 and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`), NegativeTest (`-O0` and `-O2`), IsolatedTest (`-O0` and
-`-O2`), RuntimeTest, ScriptTest (`-O0` and `-O2`), ToolsTest and Bedrock (the steps are in `C4/nuke.toml`).
+`-O2`), RuntimeTest, ScriptTest (`-O0` and `-O2`, and both again as debug scripts), ToolsTest and Bedrock (the steps are in `C4/nuke.toml`).
 `nuke test` there runs C4Testing alone (`nuke test C4 -- --filter "Lexer.*"`).
 
 ---
@@ -26,7 +26,7 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
 | RuntimeTest | `assets/RuntimeTest/` | small runtime behaviours (printf, struct-return ABI) compile and exit 0 | `assets/RuntimeTest/RunTests.ps1 [-Filter x]` |
 | StressTest | `assets/StressTest/Dx12Game/` | a large DX12 + Win32 game program compiles clean | `assets/StressTest/RunTests.ps1 [-Run]` |
 | ScaleTest | `assets/ScaleTest/` | a generated 60k-line, 401-file program (classes, templates, containers, strings, GC objects, cross-module calls) compiles at `-O0` and `-O2` and runs on several threads with every result matching the single-threaded one | `python assets/ScaleTest/run.py [--seconds n --threads n --modules n]` |
-| ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2` | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2]` |
+| ScriptTest | `assets/ScriptTest/` | scripting end to end: per case, a host built with `--script-host` compiles, loads, calls and unloads its scripts, at `-O0` and `-O2`; with `-DebugScripts` every host is built `-g`, so its scripts are DLLs with PDBs | `assets/ScriptTest/RunTests.ps1 [-Filter x] [-O2] [-DebugScripts]` |
 | ToolsTest | `assets/ToolsTest/` | the install and a toolchain outside the repository, every compiler flag, `nuke toolchain install` / `nuke init` / `nuke run` | `assets/ToolsTest/RunTests.ps1` |
 | Bedrock | `Bedrock/Tests/` | the default library, through the built-in `[test]` framework | `C4.exe Bedrock\Tests -o <out>.exe -test`, then run `<out>.exe` |
 | DifferentialTest | `assets/DifferentialTest/` | random programs (every primitive type, operators, conversions, control flow, struct parameters and results, pointers) print the same as the same program compiled as C by clang, at `-O0` and `-O2` | `python assets/DifferentialTest/run.py [--start n --count n --size x]` |
@@ -398,7 +398,7 @@ benchmarks (item 11) on their own.
 5. IsolatedTest: `assets/IsolatedTest/RunTests.ps1` (and `-DebugInfo` when touching codegen or debug info).
 6. Bedrock: `C4.exe Bedrock\Tests -test` build + run, exit 0.
 7. RuntimeTest and StressTest (compile) when touching the runtime, ABI or interop.
-8. ScriptTest at `-O0` and `-O2`: `assets/ScriptTest/RunTests.ps1` and `-O2`.
+8. ScriptTest at `-O0` and `-O2`, and both again with `-DebugScripts`: `assets/ScriptTest/RunTests.ps1`, `-O2`, `-DebugScripts` and `-DebugScripts -O2`.
 9. ToolsTest: `assets/ToolsTest/RunTests.ps1`.
 10. DifferentialTest: `python assets/DifferentialTest/run.py` (150 seeds at `-O0` and `-O2`); after codegen or
    conversion changes also a long run (`--start 1000 --count 5000 --size 1.5`).

@@ -1,0 +1,82 @@
+// Debug scripts (docs/runtime/04 section 6.4): a host built with -g loads its scripts as DLLs with PDBs, which DbgHelp
+// reads as it reads any module: a script's code is in a module named for the script, its lines are the script file's
+// by its absolute path, it throws to the host, and a fault names its module and function. Each load is a module of
+// its own, gone after the unload. Turned off, the host links its scripts in memory again.
+include "scripttest.ch"
+include "debugged.ch"
+extern "c" include "symbols.h"
+extern "c" source "symbols.c"
+
+const int32 kNameBytes = 520;
+
+// The file name of the module holding `address` ("" when none does).
+Core::String ModuleFile(void* address)
+{
+	char[kNameBytes] name;
+	if (ModuleFileOf(address, &name[0], kNameBytes) == 0) return Core::String("");
+	return Core::String(&name[0]);
+}
+
+bool CallGuarded(Scripting::Script* script, const char* function, void* context)
+{
+	funcptr<void(void*)> fn = (funcptr<void(void*)>)script->Address(function);
+	return fn != nullptr && script->Call(fn, context);
+}
+
+void CheckModuleAndLines(ScriptTest::Checks& checks, Scripting::Script* script)
+{
+	void* twice = script->Address("Twice");
+	checks.That(twice != nullptr, "the script defines Twice");
+	Core::String module = ModuleFile(twice);
+	checks.Contains(module.CStr(), "ied.git#3-", "the script's code is in a module named for the script");
+	checks.Contains(module.CStr(), ".dll", "a DLL");
+	char[kNameBytes] file;
+	const int32 line = SourceLineOf(twice, &file[0], kNameBytes);
+	checks.That(line >= Debugged::kTwiceFirstLine && line <= Debugged::kTwiceFirstLine + 2, "the PDB has the script's lines");
+	checks.Contains(&file[0], "debugged.cf", "of the script's file");
+	checks.That(file[1] == ':' && (file[2] == '\\' || file[2] == '/'), "named by its absolute path, as a breakpoint names it");
+	funcptr<int32(int32)> fn = (funcptr<int32(int32)>)twice;
+	checks.Equal(42, (int64)fn(21), "the debug script runs");
+}
+
+void CheckThrowAndFault(ScriptTest::Checks& checks, Scripting::Script* script)
+{
+	int32 caught = 0;
+	try { CallGuarded(script, "Throws", nullptr); }
+	catch (int32 e) { caught = e; }
+	checks.Equal(41, (int64)caught, "a debug script's exception reaches the host");
+	checks.That(!CallGuarded(script, "WritesNull", nullptr), "a fault in a debug script stops the call");
+	checks.Contains(script->FaultText(), "ied.git#3-", "the fault names the script's module");
+	checks.Contains(script->FaultText(), "WritesNull", "and the function");
+}
+
+int32 main(int32 argc, char** argv)
+{
+	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
+	Scripting::Host* host = ScriptTest::OpenHost(checks);
+	if (!host->IsOpen()) return checks.End("DebugScripts");
+	checks.That(host->DebugScripts(), "a host built with -g debugs its scripts");
+
+	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "ied.git#3", "debugged.cf"));
+	if (!script->Ok()) return checks.End("DebugScripts");
+	CheckModuleAndLines(checks, script);
+	Core::String first = ModuleFile(script->Address("Twice"));
+
+	Scripting::Script* reloaded = host->Reload(script);
+	checks.That(reloaded->Ok(), "a debug script reloads");
+	Core::String second = ModuleFile(reloaded->Address("Twice"));
+	checks.That(!ScriptTest::SameText(first.CStr(), second.CStr()), "each load is a module of its own");
+	checks.That(ModuleLoaded(first.CStr()) == 0, "and the old one is gone");
+	CheckThrowAndFault(checks, reloaded);
+	char[kNameBytes] path;
+	ModulePathOf(reloaded->Address("Twice"), &path[0], kNameBytes);
+	reloaded->Unload();
+	checks.That(ModuleLoaded(second.CStr()) == 0, "an unloaded script's module is gone");
+	checks.That(!FS::FileExists(&path[0]), "and so is its file");
+
+	host->SetDebugScripts(false);
+	Scripting::Script* inMemory = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "jit", "debugged.cf"));
+	if (inMemory->Ok()) checks.Equal(0, ModuleFile(inMemory->Address("Twice")).ByteLength(), "turned off, scripts link in memory, in no module");
+	inMemory->Unload();
+	return checks.End("DebugScripts");
+}

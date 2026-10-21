@@ -1,9 +1,11 @@
 #include "Script/ScriptHost.h"
+#include "Script/ScriptDll.h"
 #include "Script/ScriptModulePasses.h"
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Target/TargetMachine.h>
 #include <cstdio>
+#include <filesystem>
 
 namespace Scripting
 {
@@ -65,7 +67,8 @@ namespace Scripting
 	{
 		if (!m_Faulted) return "";
 		std::string text = "exception " + Hex(m_Fault.code);
-		if (m_Fault.address >= m_Image.low && m_Fault.address < m_Image.high) text += " at script+" + Hex(m_Fault.address - m_Image.low);
+		if (!m_FaultPlace.empty()) text += " at " + m_FaultPlace;
+		else if (m_Fault.address >= m_Image.low && m_Fault.address < m_Image.high) text += " at script+" + Hex(m_Fault.address - m_Image.low);
 		else text += " at " + Hex(m_Fault.address);
 		if (m_Fault.code == 0xC0000005u)
 			text += std::string(m_Fault.write == 1 ? ", writing " : m_Fault.write == 8 ? ", executing " : ", reading ") + Hex(m_Fault.target);
@@ -79,9 +82,15 @@ namespace Scripting
 		if (!m_Linked || m_Faulted) return false;
 		ScriptFault fault;
 		if (m_Guard(fn, context, &fault)) return true;
+		RecordFault(fault);
+		return false;
+	}
+
+	void Script::RecordFault(const ScriptFault& fault)
+	{
 		m_Faulted = true;
 		m_Fault = fault;
-		return false;
+		m_FaultPlace = m_Linked ? m_Linked->Describe(fault.address) : "";
 	}
 
 	bool Script::CallStart(void (*start)())
@@ -124,7 +133,7 @@ namespace Scripting
 		try
 		{
 			ScriptFault fault;
-			if (!m_Guard(RunFinish, &finish, &fault)) { m_Faulted = true; m_Fault = fault; }
+			if (!m_Guard(RunFinish, &finish, &fault)) RecordFault(fault);
 		}
 		catch (...)
 		{
@@ -146,7 +155,14 @@ namespace Scripting
 	// --- the host ------------------------------------------------------------------------------------------------------
 
 	ScriptHost::ScriptHost(HostInterface host, HostSymbolTable table, HostRuntime runtime, GuardedCall guard)
-		: m_Interface(std::move(host)), m_Index(m_Interface), m_Table(std::move(table)), m_Runtime(runtime), m_Guard(guard) {}
+		: m_Interface(std::move(host)), m_Index(m_Interface), m_Table(std::move(table)), m_Runtime(runtime), m_Guard(guard),
+		  m_DebugScripts(m_Interface.debugInfo),
+		  m_DllRoot((std::filesystem::temp_directory_path() / "c4_scripts").string()) {}
+
+	ScriptHost::~ScriptHost()
+	{
+		if (!m_DllFolder.empty()) RemoveScriptDllFolder(m_DllFolder);
+	}
 
 	std::unique_ptr<ScriptHost> ScriptHost::Open(const std::string& interfacePath, const void* table, GuardedCall guard, std::string* error)
 	{
@@ -164,11 +180,13 @@ namespace Scripting
 		const std::string compiler = ScriptCompilerIdentity();
 		if (compiler.empty()) return false;
 		m_Cache.emplace(folder, compiler);
+		m_DllRoot = (std::filesystem::path(folder) / "debug").string();
 		return true;
 	}
 
 	ScriptHost::Built ScriptHost::Build(const ScriptCompileOptions& options)
 	{
+		if (m_DebugScripts) return CompileAndLink(options, nullptr); // a debug script's module is not cached
 		const std::string entry = m_Cache ? m_Cache->EntryFor(m_Interface, options) : "";
 		if (std::optional<CachedScript> cached = entry.empty() ? std::nullopt : m_Cache->Read(entry))
 			if (Built built = LinkCached(options, std::move(*cached)); built.linked) return built;
@@ -208,17 +226,26 @@ namespace Scripting
 			built.script->m_Diagnostics = "error: " + error + "\n";
 			return built;
 		}
-		CompiledScript compiled = CompileScript(m_Interface, m_Index, options, *machine);
+		ScriptCompileOptions compileOptions = options;
+		compileOptions.debugInfo = m_DebugScripts;
+		CompiledScript compiled = CompileScript(m_Interface, m_Index, compileOptions, *machine);
 		built.script->m_Diagnostics = compiled.diagnostics;
 		if (!compiled.module) return built;
 		ScriptCode code;
 		code.context = std::move(compiled.context);
 		code.module = std::move(compiled.module);
 		code.optimize = options.optimize;
-		built.linked = LinkScript(std::move(code), m_Table, m_Index.target, generated, &error);
+		built.linked = Link(std::move(code), options.name, generated, &error);
 		if (!built.linked) built.script->m_Diagnostics += "error: " + error + "\n";
 		built.threadLocals = std::move(compiled.threadLocals);
 		return built;
+	}
+
+	std::unique_ptr<LinkedScript> ScriptHost::Link(ScriptCode code, const std::string& name, std::string* generated, std::string* error)
+	{
+		if (!code.module || !m_DebugScripts) return LinkScript(std::move(code), m_Table, m_Index.target, generated, error);
+		std::call_once(m_DllFolderMade, [this] { m_DllFolder = ScriptDllFolder(m_DllRoot); });
+		return LinkScriptDll(std::move(code), m_Table, m_Index.target, { m_DllFolder, ScriptDllName(name, ++m_DllLoads) }, error);
 	}
 
 	std::unique_ptr<Script> ScriptHost::Compile(const ScriptCompileOptions& options)

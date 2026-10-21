@@ -25,6 +25,7 @@ struct __C4sOptions
 [link("c4s_host_open")] void* c4s_host_open(const char* interfacePath, void* table, char* error, uint64 errorSize);
 [link("c4s_host_close")] void c4s_host_close(void* host);
 [link("c4s_host_use_cache")] int32 c4s_host_use_cache(void* host, const char* folder);
+[link("c4s_host_debug_scripts")] int32 c4s_host_debug_scripts(void* host, int32 on);
 [link("c4s_compile")] void* c4s_compile(void* host, __C4sOptions* options);
 [link("c4s_reload")] void* c4s_reload(void* host, void* old, __C4sOptions* options);
 [link("c4s_script_ok")] int32 c4s_script_ok(void* script);
@@ -148,6 +149,10 @@ namespace Scripting
 		// Keeps compiled scripts in `folder` from now on (docs/runtime/04 section 4.6): a script compiled again with the
 		// same files, options, host build and compiler links the machine code kept from before. False when it cannot.
 		public bool UseCache(const char* folder) { return c4s_host_use_cache(handle, folder) != 0; }
+		// Whether scripts are debugged (docs/runtime/04 section 6.4): each linked into a DLL with a PDB, which debuggers
+		// read as any module's, instead of in memory. A host built with -g starts with it on.
+		public bool DebugScripts() const { return c4s_host_debug_scripts(handle, -1) != 0; }
+		public void SetDebugScripts(bool on) { c4s_host_debug_scripts(handle, on ? 1 : 0); }
 		// Compiles, links and loads a script; Ok() and Diagnostics() say how it went.
 		public Script* Compile(const ScriptOptions& options);
 		// Compiles `script`'s options again to replace it (docs/runtime/04 section 5): when the new one compiles, `script`

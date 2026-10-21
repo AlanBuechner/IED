@@ -15,6 +15,7 @@ namespace Testing
 			host.compilerVersion = 1234;
 			host.targetCpu = "x86-64-v3";
 			host.targetFeatures = "+avx2,+fma,-avx512f";
+			host.debugInfo = true;
 			host.projects.push_back({ "engine", {}, { 0 } });
 			host.projects.push_back({ "game", { 0 }, { 1, 2 } });
 			host.folderCount = 3;
@@ -56,6 +57,7 @@ namespace Testing
 		TEST_ASSERT(read.buildId == written.buildId);
 		TEST_ASSERT_EQ(read.compilerVersion, written.compilerVersion);
 		TEST_ASSERT(read.targetCpu == "x86-64-v3" && read.targetFeatures == "+avx2,+fma,-avx512f");
+		TEST_ASSERT(read.debugInfo); // the host was built with -g: its scripts are debugged at first
 		TEST_ASSERT_EQ(read.projects.size(), (size_t)2);
 		TEST_ASSERT(read.projects[1].name == "game" && read.projects[1].dependencies == std::vector<uint32>{ 0 });
 		TEST_ASSERT(read.projects[1].folders == (std::vector<uint32>{ 1, 2 }));

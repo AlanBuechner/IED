@@ -37,6 +37,7 @@ namespace Scripting
 		uint32 compilerVersion = 0;       // CompilerVersion::Encoded of the compiler that built the host
 		std::string targetCpu = "x86-64"; // the processor the host is compiled for (D-62): its scripts are too
 		std::string targetFeatures;       // its LLVM feature string (`+avx2,-avx512f,...`)
+		bool debugInfo = false;           // the host was built with -g: its scripts are debugged at first (section 6.4)
 		std::vector<InterfaceProject> projects;
 		uint32 rootProject = 0;
 		uint32 folderCount = 0;

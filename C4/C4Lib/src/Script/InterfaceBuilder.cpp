@@ -132,6 +132,7 @@ namespace Scripting
 		}
 		host.symbols = std::move(build.symbols);
 		host.reflectedTypes = std::move(build.reflectedTypes);
+		host.debugInfo = build.debugInfo;
 		host.inlineBodies = std::move(build.inlineBodies);
 		host.buildId = BuildIdOf(host);
 		return host;
