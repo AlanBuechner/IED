@@ -387,13 +387,15 @@ Log& Shared() {
 }
 ```
 
-- **Start.** A global, static member or static local whose initializer is a constant starts holding it,
-  converted to the variable's type as any initialization converts it (`const float half = 1;` holds `1.0`,
-  and the same conversion errors and warnings apply); `null` and a string literal are constant starts for a
-  pointer. Any other global or static member starts before `main`, in declaration order (the files in build
-  order, each top to bottom): from its initializer, by its braced list, or by its default construction
-  (6.2). Any other static local starts the first time control reaches its declaration, and never again; one
-  that starts as a constant costs nothing per pass.
+- **Start.** A global, static member or static local whose initializer is a constant starts holding it, converted
+  to the variable's type as any initialization converts it (`const float half = 1;` holds `1.0`, and the same
+  conversion errors and warnings apply); `null` and a string literal are constant starts for a pointer. A global
+  or static member whose braced list holds only such constants does too (`const uint32[256] kTable = { ... };`,
+  `const char const*[3] kNames = { "a", null, "c" };`): it starts holding that data, in read-only memory when it
+  is `const`, and no code runs for it. Any other global or static member starts before `main`, in declaration
+  order (the files in build order, each top to bottom): from its initializer, by its braced list, or by its
+  default construction (6.2). Any other static local starts the first time control reaches its declaration, and
+  never again; one that starts as a constant costs nothing per pass.
 - **Threads.** A static local's start runs once even when threads reach it together: the others wait for
   it. Every later pass costs one load. A `thread_local` variable starts once on each thread instead (04 4.13).
 - **A start that throws** leaves the static unstarted and zero again (the parts it built are destroyed);

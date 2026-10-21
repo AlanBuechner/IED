@@ -164,7 +164,8 @@ Assembly order (details in [04-codegen-and-abi.md](04-codegen-and-abi.md)):
    mirroring `argc/argv` when declared; a `void` entry returns 0.
 6. Lower and emit `__c4_global_init` (`Backend/HIR/GlobalInit`), registered in `@llvm.global_ctors`:
    every global and static member that does not fold to a constant starts there, in declaration order, and
-   each that needs destruction is registered for exit. It runs in rounds, each emitted with the functions it
+   each that needs destruction is registered for exit. A start that only stores constants (a table) becomes the
+   global's initial data instead (`ConstantImage`), so a program whose globals are all such starts has no rounds. It runs in rounds, each emitted with the functions it
    reaches: a template instance first made by a round's code gets its static data members started in the
    next round. It comes after the bodies so the instances they made are started too.
 7. Materialize every global (reflection registers each, whether or not code names it), then emit the

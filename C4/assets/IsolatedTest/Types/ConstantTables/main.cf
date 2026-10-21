@@ -1,0 +1,76 @@
+// Globals whose braced lists are constants start as data, not as code before main (docs/language/06 section 6.12):
+// numbers of every width, floats, bools, characters, enums, null and string pointers, nested arrays, structs,
+// designated and partial lists, static members, thread_locals. The values must be exactly what code would have
+// stored, and a table that is not const stays writable. main returns the failures.
+enum class Tint : uint8 { Red = 1, Green = 2, Blue = 250 }
+
+struct Point { public int16 x; public int16 y; }
+struct Entry { public const char* name; public int32 cost; public float weight; }
+
+const int32[4] kSquares = { 1, 4, 9, 16 };
+const int8[3] kSigned = { -1, -128, 127 };
+const uint64[2] kWide = { 18446744073709551615u, 1u };
+const double[2] kDoubles = { 0.5, -2.25 };
+const float[2] kFloats = { 1.5f, 3 };                  // an integer converted as a store converts it
+const bool[3] kFlags = { true, false, true };
+const char[3] kLetters = { 'a', 'b', 'c' };
+const Tint[3] kTints = { Tint::Red, Tint::Green, Tint::Blue };
+const int32[3][2] kGrid = { { 1, 2, 3 }, { 4, 5, 6 } };   // two rows of three
+const int32[6] kPartial = { 7, 8 };                     // the rest are zero
+const int32[5] kDesignated = { [3] = 30, [1] = 10 };
+const Point kOrigin = { 3, -4 };
+const Point[2] kCorners = { { 1, 2 }, { 3, 4 } };
+const char const*[3] kNames = { "alpha", null, "gamma" };
+const Entry[2] kEntries = { { "sword", 12, 2.5f }, { "shield", 7, 4.0f } };
+int64[3] g_scores = { 10, 20, 30 };                     // not const: still writable
+thread_local int32[3] t_counts = { 5, 6, 7 };
+
+class Table
+{
+	public static const uint16[3] kCodes = { 100, 200, 300 };
+}
+
+int32 Same(const char* a, const char* b)
+{
+	if (a == null || b == null) return a == b ? 1 : 0;
+	for (int32 i = 0; ; ++i)
+	{
+		if (a[i] != b[i]) return 0;
+		if (a[i] == 0) return 1;
+	}
+	return 0;
+}
+
+int32 CheckNumbers()
+{
+	int32 failures = 0;
+	failures += kSquares[0] == 1 && kSquares[3] == 16 ? 0 : 1;
+	failures += kSigned[0] == -1 && kSigned[1] == -128 && kSigned[2] == 127 ? 0 : 1;
+	failures += kWide[0] == 18446744073709551615u && kWide[1] == 1u ? 0 : 1;
+	failures += kDoubles[0] == 0.5 && kDoubles[1] == -2.25 ? 0 : 1;
+	failures += kFloats[0] == 1.5f && kFloats[1] == 3.0f ? 0 : 1;
+	failures += kFlags[0] && !kFlags[1] && kFlags[2] ? 0 : 1;
+	failures += kLetters[0] == 'a' && kLetters[2] == 'c' ? 0 : 1;
+	failures += kTints[0] == Tint::Red && kTints[2] == Tint::Blue ? 0 : 1;
+	failures += kGrid[0][2] == 3 && kGrid[1][0] == 4 && kGrid[1][2] == 6 ? 0 : 1;
+	failures += kPartial[0] == 7 && kPartial[1] == 8 && kPartial[2] == 0 && kPartial[5] == 0 ? 0 : 1;
+	failures += kDesignated[0] == 0 && kDesignated[1] == 10 && kDesignated[3] == 30 && kDesignated[4] == 0 ? 0 : 1;
+	failures += Table::kCodes[0] == 100 && Table::kCodes[2] == 300 ? 0 : 1;
+	return failures;
+}
+
+int32 CheckAggregates()
+{
+	int32 failures = 0;
+	failures += kOrigin.x == 3 && kOrigin.y == -4 ? 0 : 1;
+	failures += kCorners[1].x == 3 && kCorners[1].y == 4 ? 0 : 1;
+	failures += Same(kNames[0], "alpha") + Same(kNames[1], null) + Same(kNames[2], "gamma") == 3 ? 0 : 1;
+	failures += Same(kEntries[1].name, "shield") == 1 && kEntries[1].cost == 7 && kEntries[0].weight == 2.5f ? 0 : 1;
+	g_scores[1] = 25;
+	failures += g_scores[0] == 10 && g_scores[1] == 25 && g_scores[2] == 30 ? 0 : 1;
+	t_counts[0]++;
+	failures += t_counts[0] == 6 && t_counts[2] == 7 ? 0 : 1;
+	return failures;
+}
+
+int32 main() { return CheckNumbers() + CheckAggregates(); }

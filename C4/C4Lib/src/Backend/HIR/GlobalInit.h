@@ -1,4 +1,5 @@
 #pragma once
+#include "Backend/HIR/ConstantImage.h"
 #include "Backend/HIR/HIRNodes.h"
 #include <memory>
 #include <unordered_set>
@@ -12,17 +13,29 @@ namespace Scripting
 	/// The globals whose starts are already lowered.
 	using StartedGlobals = std::unordered_set<const SymbolInfo*>;
 
+	/// A global whose start only stores constants (ConstantImage): it starts holding `data`. `start` is its lowered
+	/// start, for codegen to run after all when the data cannot be written for its storage's type.
+	struct ConstantStart
+	{
+		const SymbolInfo* variable = nullptr;
+		ConstantData data;
+		BlockNode* start = nullptr;
+	};
+
 	/// One round of the global initialization that runs before main (docs/language/06): every global and static
 	/// member not in `started` that does not start as a constant starts here - from its initializer, else by its
 	/// default construction - in declaration order (units in build order, each top to bottom), and one that
 	/// needs destruction is registered to be destroyed at exit, in the reverse order. A template instance that
 	/// code reached from a round makes has its static data members started by a later round. False when no
 	/// global was left to start; failures go to `errors`. thread_local ones are LowerThreadInit's.
-	bool LowerGlobalInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started);
+	/// A global whose start is constant data is not lowered into the round but added to `constants`.
+	bool LowerGlobalInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started,
+		std::vector<ConstantStart>& constants);
 
 	/// The same for the thread_local globals and static members: a round of the starts each thread runs on its own
 	/// copies when it attaches (D-48), each registered to be destroyed when that thread ends.
-	bool LowerThreadInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started);
+	bool LowerThreadInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started,
+		std::vector<ConstantStart>& constants);
 
 	/// A global or static member whose start runs code: an initializer that does not fold, or a type that is
 	/// constructed or destroyed.

@@ -110,12 +110,16 @@ namespace Scripting
 		/// The rounds of one storage duration: how a round lowers, and what its functions are named.
 		struct InitRounds
 		{
-			bool (*lower)(ProgramModel&, ErrorTracker&, HIRFunction&, StartedGlobals&);
+			bool (*lower)(ProgramModel&, ErrorTracker&, HIRFunction&, StartedGlobals&, std::vector<ConstantStart>&);
 			std::string prefix;
 			std::vector<llvm::Function*> functions;
 		};
-		/// Lowers and emits the next round of `rounds` when a global of its kind is left to start.
+		/// Lowers and emits the next round of `rounds` when a global of its kind is left to start; a global whose start
+		/// is constant data starts holding it instead.
 		bool EmitInitRound(ProgramModel& model, InitRounds& rounds, StartedGlobals& started, std::string* errorMessage);
+		/// Gives each global of `constants` its data as its initial value (read-only when it is const); one whose
+		/// storage's type cannot hold it as data starts in `round` after all.
+		void StartAsData(std::vector<ConstantStart>& constants, HIRFunction& round);
 		/// A program's thread_locals start in `rounds` when a thread attaches; a script's that run code start on their
 		/// first use on each thread (docs/runtime/04 section 2).
 		bool EmitThreadStarts(ProgramModel& model, InitRounds& rounds, StartedGlobals& started, std::string* errorMessage);

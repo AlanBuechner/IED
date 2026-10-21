@@ -31,6 +31,8 @@ namespace Testing
 		void ConstantGlobalsNeedNoStartup();
 		TEST_FUNC(Semantic.StaticStorage)
 		void FoldedConstantsAreReadAsValues();
+		TEST_FUNC(Semantic.StaticStorage)
+		void ConstantTablesStartAsData();
 
 		TEST_FUNC(Semantic.StaticStorage)
 		void FailedGlobalInitializerIsAnError();

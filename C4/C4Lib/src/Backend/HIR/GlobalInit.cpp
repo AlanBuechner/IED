@@ -1,4 +1,5 @@
 #include "Backend/HIR/GlobalInit.h"
+#include "Backend/HIR/ConstantImage.h"
 #include "Backend/HIR/DeclLowerer.h"
 #include "Backend/HIR/LifecycleFacts.h"
 #include "Backend/HIR/LoweringContext.h"
@@ -125,27 +126,37 @@ namespace Scripting
 
 	namespace
 	{
-		bool LowerStarts(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started, bool threadLocal)
+		// Each start is lowered on its own: one that only stores constant numbers becomes data instead of code.
+		bool LowerStarts(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started, bool threadLocal,
+			std::vector<ConstantStart>& constants)
 		{
 			out.root = out.NewNode<BlockNode>(nullptr);
 			const std::vector<GlobalVariable> vars = StartedAtRuntime(model, started, threadLocal);
 			for (const GlobalVariable& var : vars)
 			{
 				started.insert(var.sym);
-				StartVariable(model, errors, out, var, out.root, StartTime::WithTheProgram);
+				BlockNode* start = out.NewNode<BlockNode>(nullptr);
+				const size_t failures = errors.GetErrors().Count();
+				StartVariable(model, errors, out, var, start, StartTime::WithTheProgram);
+				const uint64 size = TypeHandle::UnwrapToValue(var.sym->type)->GetSize();
+				std::optional<ConstantData> image = errors.GetErrors().Count() == failures ? ConstantImage(*start, *var.sym, size) : std::nullopt;
+				if (image) constants.push_back({ var.sym, std::move(*image), start });
+				else out.root->stmts.push_back(start);
 			}
 			return !vars.empty();
 		}
 	}
 
-	bool LowerGlobalInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started)
+	bool LowerGlobalInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started,
+		std::vector<ConstantStart>& constants)
 	{
-		return LowerStarts(model, errors, out, started, false);
+		return LowerStarts(model, errors, out, started, false, constants);
 	}
 
-	bool LowerThreadInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started)
+	bool LowerThreadInit(ProgramModel& model, ErrorTracker& errors, HIRFunction& out, StartedGlobals& started,
+		std::vector<ConstantStart>& constants)
 	{
-		return LowerStarts(model, errors, out, started, true);
+		return LowerStarts(model, errors, out, started, true, constants);
 	}
 
 	std::vector<FirstUseStart> LowerFirstUseStarts(ProgramModel& model, ErrorTracker& errors, StartedGlobals& started)

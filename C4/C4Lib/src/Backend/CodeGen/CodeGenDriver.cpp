@@ -1,4 +1,5 @@
 #include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/CodeGen/DataImage.h"
 #include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Backend/CodeGen/DebugInfo.h"
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -145,11 +146,33 @@ namespace Scripting
 	bool CodeGenDriver::EmitInitRound(ProgramModel& model, InitRounds& rounds, StartedGlobals& started, std::string* errorMessage)
 	{
 		auto round = std::make_unique<HIRFunction>();
-		if (!rounds.lower(model, m_LoweringErrors, *round, started)) return true;
+		std::vector<ConstantStart> constants;
+		if (!rounds.lower(model, m_LoweringErrors, *round, started, constants)) return true;
+		StartAsData(constants, *round);
+		if (round->root->stmts.empty()) return true; // every global of the round starts as data
 		if (!EmitReachable(model, {}, errorMessage)) return false; // reports the round's own failures too
 		const std::string name = rounds.prefix + std::to_string(rounds.functions.size());
 		rounds.functions.push_back(EmitStartFunction(model, std::move(round), name));
 		return EmitReachable(model, {}, errorMessage);
+	}
+
+	void CodeGenDriver::StartAsData(std::vector<ConstantStart>& constants, HIRFunction& round)
+	{
+		for (ConstantStart& constant : constants)
+		{
+			llvm::GlobalVariable* storage = m_MCtx.GlobalAddress(*constant.variable);
+			const llvm::DataLayout& layout = m_MCtx.module().getDataLayout();
+			const bool fits = layout.getTypeAllocSize(storage->getValueType()) == constant.data.bytes.size();
+			llvm::Constant* data = fits ? DataImage(storage->getValueType(), constant.data, 0, layout,
+				[this](const ConstantValue& text) -> llvm::Constant* { return m_MCtx.StringGlobal(text); }) : nullptr;
+			if (!data)
+			{
+				round.root->stmts.push_back(constant.start);
+				continue;
+			}
+			storage->setInitializer(data);
+			if (constant.variable->isConst) storage->setConstant(true);
+		}
 	}
 
 	bool CodeGenDriver::EmitThreadStarts(ProgramModel& model, InitRounds& rounds, StartedGlobals& started, std::string* errorMessage)

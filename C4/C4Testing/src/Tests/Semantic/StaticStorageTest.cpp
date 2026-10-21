@@ -157,12 +157,14 @@ namespace Testing
 		ErrorTracker errors;
 		HIRFunction init;
 		StartedGlobals started;
-		TEST_ASSERT(LowerGlobalInit(model, errors, init, started));
+		std::vector<ConstantStart> constants;
+		TEST_ASSERT(LowerGlobalInit(model, errors, init, started, constants));
 		TEST_ASSERT(errors.GetErrors().Empty());
 		const std::vector<const FunctionRecord*> calls = CallsInOrder(init);
 		TEST_ASSERT(calls.size() == 2 && calls[0] == Record(model, "Zebra_Init") && calls[1] == Record(model, "Apple_Init"));
 		TEST_ASSERT_EQ(Count(init, HIRNode::Kind::AtExit), 1);
-		TEST_ASSERT_EQ((int)init.root->stmts.size(), 4); // zebra, apple, apple's exit registration, counted
+		TEST_ASSERT_EQ((int)init.root->stmts.size(), 3); // zebra, apple with its exit registration, counted
+		TEST_ASSERT(constants.empty());
 
 		llvm::LLVMContext ctx;
 		CodeGenDriver driver(ctx);
@@ -188,6 +190,43 @@ namespace Testing
 		TEST_ASSERT(threadStart && !threadStart->isDeclaration() && CalleesOf(*threadStart).empty()); // the runtime always calls it
 	}
 
+	// A braced list of constants is the global's data, not code: numbers, null and string literals, in a struct or an
+	// array, const or not; a start that calls anything stays code.
+	void StaticStorageTest::ConstantTablesStartAsData()
+	{
+		CompilerInstance compiler;
+		auto& model = MakeModel(compiler,
+			"struct Pair { public int16 a; public const char* name; }\n"
+			"int32 Three() { return 3; }\n"
+			"const int32[3] g_table = { 1, -2, 3 };\n"
+			"Pair[2] g_pairs = { { 7, \"seven\" }, { -8, null } };\n"
+			"int32[2] g_called = { Three(), 4 };\n"
+			"int32 main() { return g_table[0] + g_pairs[0].a + g_called[1]; }\n");
+		ErrorTracker errors;
+		HIRFunction init;
+		StartedGlobals started;
+		std::vector<ConstantStart> constants;
+		TEST_ASSERT(LowerGlobalInit(model, errors, init, started, constants));
+		TEST_ASSERT(errors.GetErrors().Empty());
+		TEST_ASSERT_EQ((int)constants.size(), 2);
+		TEST_ASSERT_EQ((int)init.root->stmts.size(), 1); // g_called calls Three
+		const ConstantData& table = constants[0].data;
+		TEST_ASSERT(constants[0].variable->plainName == "g_table" && table.bytes.size() == 12 && table.strings.empty());
+		TEST_ASSERT(table.bytes[0] == 1 && table.bytes[4] == 0xFE && table.bytes[7] == 0xFF && table.bytes[8] == 3);
+		const ConstantData& pairs = constants[1].data;
+		TEST_ASSERT(pairs.bytes.size() == 32 && pairs.bytes[0] == 7 && pairs.bytes[16] == 0xF8 && pairs.bytes[17] == 0xFF);
+		TEST_ASSERT(pairs.strings.size() == 1 && pairs.strings.count(8) == 1 && pairs.strings.at(8).stringValue == "seven");
+
+		llvm::LLVMContext ctx;
+		CodeGenDriver driver(ctx);
+		TEST_ASSERT(driver.Lower(model, "main"));
+		const llvm::GlobalVariable* tableGlobal = driver.module()->getNamedGlobal("g_table");
+		TEST_ASSERT(tableGlobal && tableGlobal->isConstant() && !tableGlobal->getInitializer()->isNullValue());
+		const llvm::GlobalVariable* pairsGlobal = driver.module()->getNamedGlobal("g_pairs");
+		TEST_ASSERT(pairsGlobal && !pairsGlobal->isConstant() && !pairsGlobal->getInitializer()->isNullValue());
+		TEST_ASSERT(driver.module()->getFunction("__c4_global_init") != nullptr); // g_called still starts in code
+	}
+
 	void StaticStorageTest::ThreadLocalsStartInThreadRounds()
 	{
 		const char* source =
@@ -200,8 +239,9 @@ namespace Testing
 		ErrorTracker errors;
 		StartedGlobals started;
 		HIRFunction process, thread;
-		TEST_ASSERT(LowerGlobalInit(model, errors, process, started));
-		TEST_ASSERT(LowerThreadInit(model, errors, thread, started));
+		std::vector<ConstantStart> constants;
+		TEST_ASSERT(LowerGlobalInit(model, errors, process, started, constants));
+		TEST_ASSERT(LowerThreadInit(model, errors, thread, started, constants));
 		TEST_ASSERT(errors.GetErrors().Empty());
 		TEST_ASSERT_EQ((int)CallsInOrder(process).size(), 1);
 		TEST_ASSERT_EQ((int)CallsInOrder(thread).size(), 1);
