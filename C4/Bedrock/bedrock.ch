@@ -4,7 +4,7 @@
 //                  Format), hashing and sorting
 //   FS             files, paths and directories
 //   Crypto         SHA-256, HMAC, Blake2b, Argon2 password hashing, comparing secrets
-//   Serialization  the DOM, JSON and YAML read and written, and the binary form of reflected objects
+//   Serialization  the DOM, JSON (and JSONC) and YAML read and written, the binary form of reflected objects, JSON Schema
 //   Reflection     the runtime reflection registry
 //   GC             the garbage collector
 //   Threading      threads, atomics, locks, futures and the job system
@@ -55,6 +55,9 @@ include "Serialization/binary.ch"
 include "Serialization/binarystream.ch"
 include "Serialization/reflecttext.ch"
 include "Serialization/jsonfile.ch"
+include "Serialization/jsonc.ch"
+include "Serialization/schema.ch"
+include "Serialization/schemavalidate.ch"
 include "Memory/gc.ch"
 include "Memory/pool.ch"
 include "Threading/atomic.ch"

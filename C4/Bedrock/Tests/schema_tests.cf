@@ -1,0 +1,170 @@
+// Serialization: JSONC (comments blanked in place, unterminated ones refused) and JSON Schema (B68) - every keyword of
+// the dialect, problems with their JSON pointers, $refs within and across documents, boolean schemas, and what the
+// registry refuses on load (unknown keywords, bad patterns, malformed or missing files).
+
+include "bedrock.ch"
+
+static Serialization::SchemaRegistry* Registry(const char* schema) {
+	Serialization::SchemaRegistry* registry = new Serialization::SchemaRegistry();
+	Core::String error;
+	if (!registry->Add(Core::StringView("test.json"), Core::StringView(schema), error)) printf("schema refused: %s\n", error.CStr());
+	return registry;
+}
+
+// "<path>: <message>" for each problem, joined with " | ".
+static Core::String Problems(Serialization::SchemaRegistry* registry, const char* json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	Serialization::ReadResult read = Serialization::ReadJson(Core::StringView(json), *doc);
+	if (!read.Ok()) return Core::String("bad test JSON");
+	Core::StringBuilder text;
+	for (const Serialization::SchemaProblem& problem : Serialization::ValidateJson(*registry, Core::StringView("test.json"), Core::StringView(""), read.root)) {
+		if (!text.IsEmpty()) text.Append(" | ");
+		text.Append(problem.path.View());
+		text.Append(": ");
+		text.Append(problem.message.View());
+	}
+	return text.ToString();
+}
+
+static bool Valid(Serialization::SchemaRegistry* registry, const char* json) { return Problems(registry, json).IsEmpty(); }
+
+[test("serialization.jsonc")]
+class JsoncTests {
+	[test("comments")]
+	public static void TestComments() {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJsonc(Core::StringView("{ // a note\n  \"a\": 1, /* x\n y */ \"b\": \"//not a comment\" }"), doc);
+		assert_true(read.Ok(), "line and block comments are read past");
+		assert_eq((int64)1, read.root.Member("a").AsInt(), "the value before");
+		assert_true(read.root.Member("b").AsView() == "//not a comment", "a string's slashes are not a comment");
+		Serialization::DomDoc bad;
+		Serialization::ReadResult broken = Serialization::ReadJsonc(Core::StringView("{\n/* x\n*/\n \"a\": 1,, }"), bad);
+		assert_true(!broken.Ok() && broken.line == 4, "a block comment's line breaks stay, so errors keep their line");
+	}
+
+	[test("unterminated")]
+	public static void TestUnterminated() {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult block = Serialization::ReadJsonc(Core::StringView("{ \"a\": 1 /* never"), doc);
+		assert_true(!block.Ok() && block.offset == 9, "a block comment that never ends, at its start");
+		Serialization::ReadResult text = Serialization::ReadJsonc(Core::StringView("{ \"a\": \"open"), doc);
+		assert_true(!text.Ok(), "a string that never ends");
+		assert_true(Serialization::ReadJsonc(Core::StringView("[1] // last line, no break"), doc).Ok(), "a line comment at the end");
+	}
+}
+
+[test("serialization.schema")]
+class SchemaTests {
+	[test("types")]
+	public static void TestTypes() {
+		Serialization::SchemaRegistry* any = Registry("{\"type\": \"integer\"}");
+		assert_true(Valid(any, "3") && Valid(any, "3.0"), "an integer, and a float without a fraction");
+		assert_se(": expected integer, got number", Problems(any, "3.5").CStr(), "a fraction is a number");
+		Serialization::SchemaRegistry* several = Registry("{\"type\": [\"string\", \"null\"]}");
+		assert_true(Valid(several, "null") && Valid(several, "\"x\""), "either type");
+		assert_se(": expected string or null, got boolean", Problems(several, "true").CStr(), "neither");
+		Serialization::SchemaRegistry* number = Registry("{\"type\": \"number\"}");
+		assert_true(Valid(number, "7"), "a number accepts an integer");
+		assert_true(Valid(Registry("true"), "{}") && !Valid(Registry("false"), "{}"), "boolean schemas");
+	}
+
+	[test("values")]
+	public static void TestValues() {
+		Serialization::SchemaRegistry* choice = Registry("{\"enum\": [\"a\", 1, null, [1, 2]]}");
+		assert_true(Valid(choice, "\"a\"") && Valid(choice, "1.0") && Valid(choice, "null") && Valid(choice, "[1,2]"), "each allowed value");
+		assert_se(": \"b\" is not one of [\"a\",1,null,[1,2]]", Problems(choice, "\"b\"").CStr(), "another");
+		Serialization::SchemaRegistry* fixed = Registry("{\"const\": {\"k\": [true]}}");
+		assert_true(Valid(fixed, "{\"k\": [true]}"), "an equal object");
+		assert_true(!Valid(fixed, "{\"k\": [false]}") && !Valid(fixed, "{\"k\": [true], \"x\": 1}"), "unequal ones");
+	}
+
+	[test("strings_and_numbers")]
+	public static void TestStringsAndNumbers() {
+		Serialization::SchemaRegistry* text = Registry("{\"minLength\": 2, \"maxLength\": 3, \"pattern\": \"^[a-z\\u00e9]+$\"}");
+		assert_true(Valid(text, "\"ab\"") && Valid(text, "\"\\u00e9\\u00e9\""), "lengths count characters, not bytes");
+		assert_se(": string shorter than 2", Problems(text, "\"a\"").CStr(), "too short");
+		assert_se(": string longer than 3", Problems(text, "\"abcd\"").CStr(), "too long");
+		assert_true(Problems(text, "\"aB\"").View().StartsWith(Core::StringView(": \"aB\" does not match pattern \"^[a-z")), "a pattern");
+		assert_true(Valid(text, "5"), "string keywords pass other types");
+		Serialization::SchemaRegistry* range = Registry("{\"minimum\": 1, \"maximum\": 10, \"exclusiveMaximum\": 10}");
+		assert_true(Valid(range, "1") && Valid(range, "9.5"), "in range");
+		assert_se(": 0 is less than minimum 1", Problems(range, "0").CStr(), "below");
+		assert_se(": 10 is not less than 10", Problems(range, "10").CStr(), "at the exclusive maximum");
+		assert_true(Valid(Registry("{\"exclusiveMinimum\": 0}"), "0.001") && !Valid(Registry("{\"exclusiveMinimum\": 0}"), "0"), "exclusive minimum");
+	}
+
+	[test("objects")]
+	public static void TestObjects() {
+		Serialization::SchemaRegistry* shape = Registry(
+			"{\"type\": \"object\", \"required\": [\"id\"], \"properties\": {\"id\": {\"type\": \"string\"}, \"a/b~c\": {\"type\": \"integer\"}},"
+			" \"additionalProperties\": false}");
+		assert_true(Valid(shape, "{\"id\": \"x\", \"a/b~c\": 2}"), "declared properties");
+		assert_se(": missing required property \"id\"", Problems(shape, "{}").CStr(), "a required one missing");
+		assert_se("/a~1b~0c: expected integer, got string", Problems(shape, "{\"id\": \"x\", \"a/b~c\": \"2\"}").CStr(), "pointers escape '/' and '~'");
+		assert_se(": unexpected property \"extra\"", Problems(shape, "{\"id\": \"x\", \"extra\": 1}").CStr(), "an undeclared one");
+		Serialization::SchemaRegistry* map = Registry("{\"additionalProperties\": {\"type\": \"boolean\"}}");
+		assert_se("/b: expected boolean, got integer", Problems(map, "{\"a\": true, \"b\": 1}").CStr(), "a schema for the rest");
+	}
+
+	[test("arrays")]
+	public static void TestArrays() {
+		Serialization::SchemaRegistry* list = Registry("{\"items\": {\"type\": \"integer\"}, \"minItems\": 1, \"maxItems\": 3, \"uniqueItems\": true}");
+		assert_true(Valid(list, "[1, 2, 3]"), "a good list");
+		assert_se("/1: expected integer, got string", Problems(list, "[1, \"2\"]").CStr(), "an item's problem has its index");
+		assert_se(": expected at least 1 items, got 0", Problems(list, "[]").CStr(), "too few");
+		assert_se(": expected at most 3 items, got 4", Problems(list, "[1, 2, 3, 4]").CStr(), "too many");
+		assert_se(": items 0 and 2 are equal", Problems(list, "[1, 2, 1.0]").CStr(), "duplicates by JSON's equality");
+	}
+
+	[test("combinations")]
+	public static void TestCombinations() {
+		Serialization::SchemaRegistry* one = Registry(
+			"{\"oneOf\": [{\"properties\": {\"kind\": {\"const\": \"a\"}, \"n\": {\"type\": \"integer\"}}, \"required\": [\"kind\"]},"
+			" {\"properties\": {\"kind\": {\"const\": \"b\"}, \"s\": {\"type\": \"string\"}}, \"required\": [\"kind\"]}]}");
+		assert_true(Valid(one, "{\"kind\": \"a\", \"n\": 1}"), "exactly one branch");
+		assert_se(": matches no oneOf branch; closest is branch 1: | /s: expected string, got integer", Problems(one, "{\"kind\": \"b\", \"s\": 2}").CStr(),
+			"the const discriminator picks the branch that is reported");
+		Serialization::SchemaRegistry* overlap = Registry("{\"oneOf\": [{\"type\": \"integer\"}, {\"type\": \"number\"}]}");
+		assert_se(": matches 2 oneOf branches, expected exactly one", Problems(overlap, "1").CStr(), "two branches match");
+		Serialization::SchemaRegistry* some = Registry("{\"anyOf\": [{\"type\": \"string\"}, {\"minimum\": 5}]}");
+		assert_true(Valid(some, "\"x\"") && Valid(some, "7"), "any branch");
+		assert_se(": matches no anyOf branch; closest is branch 0: | : expected string, got integer", Problems(some, "2").CStr(), "none: the first of the closest");
+		Serialization::SchemaRegistry* all = Registry("{\"allOf\": [{\"type\": \"integer\"}, {\"minimum\": 3}], \"not\": {\"const\": 4}}");
+		assert_true(Valid(all, "3"), "every branch");
+		assert_se(": 2 is less than minimum 3", Problems(all, "2").CStr(), "one fails");
+		assert_se(": value must not match the 'not' schema", Problems(all, "4").CStr(), "not");
+	}
+
+	[test("references")]
+	public static void TestReferences() {
+		Serialization::SchemaRegistry registry;
+		Core::String error;
+		assert_true(registry.Add(Core::StringView("dir/main.json"),
+			Core::StringView("{\"$defs\": {\"id\": {\"type\": \"string\"}}, \"properties\": {\"a\": {\"$ref\": \"#/$defs/id\"}, \"b\": {\"$ref\": \"../common/defs.json#/$defs/n\"},"
+			" \"c\": {\"$ref\": \"#/$defs/missing\"}}}"), error), error.CStr());
+		assert_true(registry.Add(Core::StringView("common/defs.json"), Core::StringView("{\"$defs\": {\"n\": {\"type\": \"integer\"}}}"), error), error.CStr());
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(Core::StringView("{\"a\": 1, \"b\": \"x\", \"c\": 0}"), doc);
+		Core::Array<Serialization::SchemaProblem> problems = Serialization::ValidateJson(registry, Core::StringView("DIR/main.json"), Core::StringView(""), read.root);
+		assert_eq((int64)3, problems.Count(), "a local ref, a ref to another document, and one that does not resolve");
+		assert_true(problems[0].path.View() == "/a" && problems[1].path.View() == "/b", "each at its own path");
+		assert_true(problems[2].message.View().Contains(Core::StringView("unresolvable")), problems[2].message.CStr());
+		assert_true(registry.KeyOf(Core::StringView("A\\b\\..\\c.json")) == Core::String("a/c.json"), "names are folded");
+	}
+
+	[test("refusals")]
+	public static void TestRefusals() {
+		Serialization::SchemaRegistry registry;
+		Core::String error;
+		assert_true(!registry.Add(Core::StringView("a.json"), Core::StringView("{\"properties\": {\"x\": {\"typo\": 1}}}"), error), "an unknown keyword, deep inside");
+		assert_true(error.View().Contains(Core::StringView("unsupported keyword typo")), error.CStr());
+		assert_true(registry.Add(Core::StringView("b.json"), Core::StringView("{\"x-ied-tiers\": [\"app\"], \"description\": \"d\"}"), error), "x- and annotation keywords");
+		assert_true(!registry.Add(Core::StringView("c.json"), Core::StringView("{\"pattern\": \"(\"}"), error), "a pattern that does not compile");
+		assert_true(!registry.Add(Core::StringView("d.json"), Core::StringView("{\"type\": "), error), "not JSON");
+		assert_true(!registry.Add(Core::StringView("e.json"), Core::StringView("[]"), error), "not a schema");
+		assert_true(!registry.Load(Core::StringView("no/such/schema.json"), error) && error.View().Contains(Core::StringView("no schema file")), "a missing file");
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(Core::StringView("1"), doc);
+		assert_eq((int64)1, Serialization::ValidateJson(registry, Core::StringView("never.json"), Core::StringView(""), read.root).Count(), "an unknown schema is a problem");
+	}
+}

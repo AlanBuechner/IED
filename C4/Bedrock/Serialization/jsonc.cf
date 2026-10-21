@@ -1,0 +1,75 @@
+include "jsonc.ch"
+
+namespace Serialization
+{
+	static int32 ByteAt(Core::StringView text, int64 at) { return at < text.ByteLength() ? text.ByteAt(at) : -1; }
+
+	// Copies a string literal starting at `at` (its quote) whole; false when it never ends.
+	static bool CopyString(Core::StringView text, int64& at, Core::StringBuilder& out) {
+		const int64 start = at;
+		at += 1;
+		while (at < text.ByteLength()) {
+			const int32 c = text.ByteAt(at);
+			if (c == '\\') at += 2;
+			else {
+				at += 1;
+				if (c == '"') {
+					out.Append(text.Substring(start, at - start));
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// Blanks a comment starting at `at`: spaces, but a block comment's line breaks stay. False when a block never ends.
+	static bool BlankComment(Core::StringView text, int64& at, Core::StringBuilder& out) {
+		const bool block = ByteAt(text, at + 1) == '*';
+		out.Append("  ");
+		at += 2;
+		while (at < text.ByteLength()) {
+			const int32 c = text.ByteAt(at);
+			if (!block && (c == '\n' || c == '\r')) return true;
+			if (block && c == '*' && ByteAt(text, at + 1) == '/') {
+				out.Append("  ");
+				at += 2;
+				return true;
+			}
+			out.AppendByte(c == '\n' || c == '\r' ? c : ' ');
+			at += 1;
+		}
+		return !block;
+	}
+
+	bool StripJsonComments(Core::StringView text, Core::StringBuilder& out, const char*& error, int64& at) {
+		at = 0;
+		while (at < text.ByteLength()) {
+			const int32 c = text.ByteAt(at);
+			const int64 start = at;
+			if (c == '"' && !CopyString(text, at, out)) {
+				error = "a string never ends";
+				at = start;
+				return false;
+			}
+			if (c == '"') continue;
+			const int32 next = ByteAt(text, at + 1);
+			if (c == '/' && (next == '/' || next == '*')) {
+				if (BlankComment(text, at, out)) continue;
+				error = "a block comment never ends";
+				at = start;
+				return false;
+			}
+			out.AppendByte(c);
+			at += 1;
+		}
+		return true;
+	}
+
+	ReadResult ReadJsonc(Core::StringView text, DomDoc& doc) {
+		Core::StringBuilder plain;
+		const char* error = nullptr;
+		int64 at = 0;
+		if (!StripJsonComments(text, plain, error, at)) return ReadFailure(text, at, error);
+		return ReadJson(plain.View(), doc);
+	}
+}

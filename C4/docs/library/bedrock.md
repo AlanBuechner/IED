@@ -521,6 +521,34 @@ if (!read.Ok()) printf("%d:%d %s\n", read.line, read.column, read.error);
 int64 width = read.root.Member("window").Member("width").AsInt();   // 1280
 ```
 
+### JSONC and JSON Schema (`jsonc.ch`, `schema.ch`, `schemavalidate.ch`, B68)
+
+`Serialization::ReadJsonc(text, doc)` reads JSON with `//` and `/* */` comments, which settings files and manifests
+use. `StripJsonComments(text, out, error, at)` blanks the comments in place, keeping a block comment's line breaks, so
+a reported offset or line still points into the original text. A comment or string that never ends is an error at its
+start.
+
+`Serialization::SchemaRegistry` loads JSON Schema documents (`Load(path)` from JSONC files, `Add(name, text)` from
+memory) and resolves `$ref`s within and across them (`"#/$defs/x"`, `"../common.json#/$defs/y"`; names are folded:
+`/` separators, no `.` or `..`, ASCII case). The dialect is the draft 2020-12 subset that IED's
+`tools/pylib/minischema.py` knows:
+
+- assertions: `type enum const pattern minLength maxLength minimum maximum exclusiveMinimum exclusiveMaximum
+  required properties additionalProperties items minItems maxItems uniqueItems oneOf anyOf allOf not $ref`;
+- annotations: `$schema $id $defs $comment title description default examples deprecated readOnly writeOnly format
+  markdownDescription enumDescriptions`, and any key starting with `x-` (such as `x-ied-tiers`).
+
+Loading refuses any other keyword, and a `pattern` that does not compile (patterns are `Core::Regex`, searched for
+anywhere in the string), so a schema never relies on a check nothing makes.
+
+`Serialization::ValidateJson(registry, name, pointer, value)` returns the `SchemaProblem`s (`path`, a JSON pointer
+into the value with `~0` and `~1` escapes, and `message`); none means valid. The checks and messages match
+minischema's: an integer-valued float is an `integer`, string lengths count characters, `oneOf` reports the branch
+its `const` discriminator picks (else the one with the fewest problems), and a `$ref` that does not resolve is a
+problem. `JsonEquals` (numbers by value, objects regardless of order) and `JsonTypeName` are public.
+`tools/schema-check/crosscheck.py` in the IED tree runs both validators on the host API's examples and 450 mutations
+of them, and they agree on every problem path.
+
 ---
 
 ## 7. Memory (`Memory/gc.ch`, `Memory/pool.ch`)
@@ -1036,11 +1064,11 @@ salts, ten malformed strings, a changed tag).
 
 ## 17. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 53 files, 520 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 54 files, 530 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

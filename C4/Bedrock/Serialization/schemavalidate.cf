@@ -1,0 +1,326 @@
+include "schemavalidate.ch"
+include "json.ch"
+
+namespace Serialization
+{
+	// One validation: the registry, and the problems found so far.
+	class SchemaCheck
+	{
+		public SchemaRegistry* registry;
+		public Core::Array<SchemaProblem> problems;
+
+		public void Add(Core::StringView path, Core::StringView message) {
+			SchemaProblem problem;
+			problem.path = Core::String(path);
+			problem.message = Core::String(message);
+			problems.Push(problem);
+		}
+	}
+
+	static void Check(SchemaCheck& check, const DomNode& schema, Core::StringView base, const DomNode& value, Core::StringView path);
+
+	// --- JSON values ---------------------------------------------------------------------------------------------------
+
+	static bool IsWholeNumber(double value) { return value == (double)(int64)value; }
+
+	const char* JsonTypeName(const DomNode& value) {
+		const DomKind kind = value.Kind();
+		if (kind == DomKind::Bool) return "boolean";
+		if (kind == DomKind::Int) return "integer";
+		if (kind == DomKind::Float) return IsWholeNumber(value.AsFloat()) ? "integer" : "number";
+		if (kind == DomKind::String) return "string";
+		if (kind == DomKind::Array) return "array";
+		if (kind == DomKind::Object) return "object";
+		return "null";
+	}
+
+	static bool IsNumber(const DomNode& value) { return value.Kind() == DomKind::Int || value.Kind() == DomKind::Float; }
+
+	static bool ObjectsEqual(const DomNode& a, const DomNode& b) {
+		if (a.Count() != b.Count()) return false;
+		for (int64 i = 0; i < a.Count(); ++i) {
+			DomNode other = b.Member(Core::String(a.KeyAt(i)).CStr());
+			if (!other.IsValid() || !JsonEquals(a.ValueAt(i), other)) return false;
+		}
+		return true;
+	}
+
+	bool JsonEquals(const DomNode& a, const DomNode& b) {
+		if (IsNumber(a) && IsNumber(b)) return a.AsFloat() == b.AsFloat() && (a.Kind() == DomKind::Float || b.Kind() == DomKind::Float || a.AsInt() == b.AsInt());
+		if (a.Kind() != b.Kind()) return false;
+		if (a.Kind() == DomKind::Bool) return a.AsBool() == b.AsBool();
+		if (a.Kind() == DomKind::String) return a.AsView() == b.AsView();
+		if (a.Kind() == DomKind::Object) return ObjectsEqual(a, b);
+		if (a.Kind() != DomKind::Array) return true;
+		if (a.Count() != b.Count()) return false;
+		for (int64 i = 0; i < a.Count(); ++i)
+			if (!JsonEquals(a.At(i), b.At(i))) return false;
+		return true;
+	}
+
+	static Core::String JsonText(const DomNode& value) {
+		Core::StringBuilder text;
+		WriteJson(value, &text, 0);
+		return text.ToString();
+	}
+
+	static Core::String Quoted(Core::StringView text) {
+		Core::StringBuilder quoted;
+		WriteJsonString(text, &quoted);
+		return quoted.ToString();
+	}
+
+	static Core::String Child(Core::StringView path, Core::StringView key) {
+		Core::StringBuilder child;
+		child.Append(path);
+		child.AppendByte('/');
+		for (int64 i = 0; i < key.ByteLength(); ++i) {
+			const int32 c = key.ByteAt(i);
+			if (c == '~') child.Append("~0");
+			else if (c == '/') child.Append("~1");
+			else child.AppendByte(c);
+		}
+		return child.ToString();
+	}
+
+	static Core::String Index(Core::StringView path, int64 index) {
+		Core::StringBuilder text;
+		text.AppendInt(index);
+		return Child(path, text.View());
+	}
+
+	// --- Keywords of any value -----------------------------------------------------------------------------------------
+
+	static void CheckType(SchemaCheck& check, const DomNode& wanted, const DomNode& value, Core::StringView path) {
+		Core::StringView actual = Core::StringView(JsonTypeName(value));
+		Core::StringBuilder names;
+		const bool list = wanted.Kind() == DomKind::Array;
+		const int64 count = list ? wanted.Count() : 1;
+		for (int64 i = 0; i < count; ++i) {
+			Core::StringView name = (list ? wanted.At(i) : wanted).AsView();
+			if (name == actual || (name == "number" && actual == "integer")) return;
+			if (i > 0) names.Append(" or ");
+			names.Append(name);
+		}
+		check.Add(path, (((Core::String("expected ") + names.View()) + ", got ") + actual).View());
+	}
+
+	static void CheckEnum(SchemaCheck& check, const DomNode& allowed, const DomNode& value, Core::StringView path) {
+		for (int64 i = 0; i < allowed.Count(); ++i)
+			if (JsonEquals(value, allowed.At(i))) return;
+		check.Add(path, ((JsonText(value) + " is not one of ") + JsonText(allowed).View()).View());
+	}
+
+	static void CheckConst(SchemaCheck& check, const DomNode& wanted, const DomNode& value, Core::StringView path) {
+		if (!JsonEquals(value, wanted)) check.Add(path, (((Core::String("expected ") + JsonText(wanted).View()) + ", got ") + JsonText(value).View()).View());
+	}
+
+	// --- Strings and numbers -------------------------------------------------------------------------------------------
+
+	static void CheckString(SchemaCheck& check, Core::StringView keyword, const DomNode& argument, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::String) return;
+		Core::StringView text = value.AsView();
+		if (keyword == "pattern") {
+			const Core::Regex* pattern = check.registry->Pattern(argument.AsView());
+			if (pattern && !pattern->Contains(text)) check.Add(path, (((JsonText(value) + " does not match pattern ") + JsonText(argument).View())).View());
+			return;
+		}
+		Core::StringBuilder message;
+		message.Append(keyword == "minLength" ? "string shorter than " : "string longer than ");
+		message.AppendInt(argument.AsInt());
+		const int64 characters = text.CharCount();
+		if ((keyword == "minLength" && characters < argument.AsInt()) || (keyword == "maxLength" && characters > argument.AsInt())) check.Add(path, message.View());
+	}
+
+	static void CheckNumber(SchemaCheck& check, Core::StringView keyword, const DomNode& argument, const DomNode& value, Core::StringView path) {
+		if (!IsNumber(value)) return;
+		const double x = value.AsFloat();
+		const double limit = argument.AsFloat();
+		const char* broken = nullptr;
+		if (keyword == "minimum" && x < limit) broken = " is less than minimum ";
+		else if (keyword == "maximum" && x > limit) broken = " is greater than maximum ";
+		else if (keyword == "exclusiveMinimum" && x <= limit) broken = " is not greater than ";
+		else if (keyword == "exclusiveMaximum" && x >= limit) broken = " is not less than ";
+		if (broken) check.Add(path, ((JsonText(value) + broken) + JsonText(argument).View()).View());
+	}
+
+	// --- Objects and arrays --------------------------------------------------------------------------------------------
+
+	static void CheckRequired(SchemaCheck& check, const DomNode& names, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		for (int64 i = 0; i < names.Count(); ++i)
+			if (!value.Member(Core::String(names.At(i).AsView()).CStr()).IsValid())
+				check.Add(path, (Core::String("missing required property ") + JsonText(names.At(i)).View()).View());
+	}
+
+	static void CheckProperties(SchemaCheck& check, const DomNode& properties, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		for (int64 i = 0; i < properties.Count(); ++i) {
+			DomNode member = value.Member(Core::String(properties.KeyAt(i)).CStr());
+			if (member.IsValid()) Check(check, properties.ValueAt(i), base, member, Child(path, properties.KeyAt(i)).View());
+		}
+	}
+
+	static void CheckAdditional(SchemaCheck& check, const DomNode& schema, const DomNode& argument, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Object) return;
+		DomNode declared = schema.Member("properties");
+		for (int64 i = 0; i < value.Count(); ++i) {
+			Core::StringView name = value.KeyAt(i);
+			if (declared.IsValid() && declared.Member(Core::String(name).CStr()).IsValid()) continue;
+			if (argument.Kind() == DomKind::Bool && !argument.AsBool()) check.Add(path, (Core::String("unexpected property ") + Quoted(name).View()).View());
+			else Check(check, argument, base, value.ValueAt(i), Child(path, name).View());
+		}
+	}
+
+	static void CheckArray(SchemaCheck& check, Core::StringView keyword, const DomNode& argument, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (value.Kind() != DomKind::Array) return;
+		const int64 count = value.Count();
+		if (keyword == "items") {
+			for (int64 i = 0; i < count; ++i) Check(check, argument, base, value.At(i), Index(path, i).View());
+			return;
+		}
+		Core::StringBuilder message;
+		if (keyword == "minItems" && count < argument.AsInt()) message.Append("expected at least ");
+		else if (keyword == "maxItems" && count > argument.AsInt()) message.Append("expected at most ");
+		if (!message.IsEmpty()) {
+			message.AppendInt(argument.AsInt());
+			message.Append(" items, got ");
+			message.AppendInt(count);
+			check.Add(path, message.View());
+			return;
+		}
+		if (keyword != "uniqueItems" || !argument.AsBool()) return;
+		for (int64 i = 0; i < count; ++i)
+			for (int64 j = 0; j < i; ++j) {
+				if (!JsonEquals(value.At(i), value.At(j))) continue;
+				Core::StringBuilder equal;
+				equal.Append("items ");
+				equal.AppendInt(j);
+				equal.Append(" and ");
+				equal.AppendInt(i);
+				equal.Append(" are equal");
+				check.Add(path, equal.View());
+				return;
+			}
+	}
+
+	// --- Combining schemas ---------------------------------------------------------------------------------------------
+
+	static Core::Array<SchemaProblem> BranchProblems(SchemaCheck& check, const DomNode& schema, Core::StringView base, const DomNode& value, Core::StringView path) {
+		SchemaCheck branch;
+		branch.registry = check.registry;
+		Check(branch, schema, base, value, path);
+		return branch.problems;
+	}
+
+	static int64 Fewest(const Core::Array<Core::Array<SchemaProblem>>& results) {
+		int64 best = 0;
+		for (int64 i = 1; i < results.Count(); ++i)
+			if (results[i].Count() < results[best].Count()) best = i;
+		return best;
+	}
+
+	// The branch whose const discriminator the value matches, else the one with the fewest problems.
+	static int64 BestBranch(SchemaCheck& check, const DomNode& branches, Core::StringView base, const DomNode& value, const Core::Array<Core::Array<SchemaProblem>>& results) {
+		for (int64 i = 0; value.Kind() == DomKind::Object && i < branches.Count(); ++i) {
+			DomNode branch = branches.At(i);
+			Core::String target;
+			Core::String error;
+			DomNode ref = branch.Member("$ref");
+			if (ref.IsValid() && !check.registry->Resolve(ref.AsView(), base, branch, target, error)) continue;
+			DomNode properties = branch.Member("properties");
+			for (int64 p = 0; properties.IsValid() && p < properties.Count(); ++p) {
+				DomNode discriminator = properties.ValueAt(p).Member("const");
+				DomNode member = value.Member(Core::String(properties.KeyAt(p)).CStr());
+				if (discriminator.IsValid() && member.IsValid() && JsonEquals(member, discriminator)) return i;
+			}
+		}
+		return Fewest(results);
+	}
+
+	static void AddClosest(SchemaCheck& check, Core::StringView path, const char* keyword, int64 best, const Core::Array<SchemaProblem>& problems) {
+		Core::StringBuilder message;
+		message.Append("matches no ");
+		message.Append(keyword);
+		message.Append(" branch; closest is branch ");
+		message.AppendInt(best);
+		message.AppendByte(':');
+		check.Add(path, message.View());
+		for (const SchemaProblem& problem : problems) check.problems.Push(problem);
+	}
+
+	static void CheckCombined(SchemaCheck& check, Core::StringView keyword, const DomNode& branches, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (keyword == "allOf") {
+			for (int64 i = 0; i < branches.Count(); ++i) Check(check, branches.At(i), base, value, path);
+			return;
+		}
+		Core::Array<Core::Array<SchemaProblem>> results;
+		int64 passing = 0;
+		for (int64 i = 0; i < branches.Count(); ++i) {
+			results.Push(BranchProblems(check, branches.At(i), base, value, path));
+			if (results.Back().IsEmpty()) passing += 1;
+		}
+		if (keyword == "anyOf" && passing == 0) AddClosest(check, path, "anyOf", Fewest(results), results[Fewest(results)]);
+		if (keyword != "oneOf" || passing == 1) return;
+		if (passing == 0) {
+			const int64 best = BestBranch(check, branches, base, value, results);
+			AddClosest(check, path, "oneOf", best, results[best]);
+			return;
+		}
+		Core::StringBuilder message;
+		message.Append("matches ");
+		message.AppendInt(passing);
+		message.Append(" oneOf branches, expected exactly one");
+		check.Add(path, message.View());
+	}
+
+	static void CheckNot(SchemaCheck& check, const DomNode& schema, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (BranchProblems(check, schema, base, value, path).IsEmpty()) check.Add(path, Core::StringView("value must not match the 'not' schema"));
+	}
+
+	static void CheckRef(SchemaCheck& check, const DomNode& ref, Core::StringView base, const DomNode& value, Core::StringView path) {
+		DomNode target;
+		Core::String targetBase;
+		Core::String error;
+		if (check.registry->Resolve(ref.AsView(), base, target, targetBase, error)) Check(check, target, targetBase.View(), value, path);
+		else check.Add(path, error.View());
+	}
+
+	// --- Dispatch ------------------------------------------------------------------------------------------------------
+
+	static void CheckKeyword(SchemaCheck& check, const DomNode& schema, Core::StringView keyword, const DomNode& argument, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (keyword == "type") CheckType(check, argument, value, path);
+		else if (keyword == "enum") CheckEnum(check, argument, value, path);
+		else if (keyword == "const") CheckConst(check, argument, value, path);
+		else if (keyword == "pattern" || keyword == "minLength" || keyword == "maxLength") CheckString(check, keyword, argument, value, path);
+		else if (keyword == "minimum" || keyword == "maximum" || keyword == "exclusiveMinimum" || keyword == "exclusiveMaximum") CheckNumber(check, keyword, argument, value, path);
+		else if (keyword == "required") CheckRequired(check, argument, value, path);
+		else if (keyword == "properties") CheckProperties(check, argument, base, value, path);
+		else if (keyword == "additionalProperties") CheckAdditional(check, schema, argument, base, value, path);
+		else if (keyword == "items" || keyword == "minItems" || keyword == "maxItems" || keyword == "uniqueItems") CheckArray(check, keyword, argument, base, value, path);
+		else if (keyword == "oneOf" || keyword == "anyOf" || keyword == "allOf") CheckCombined(check, keyword, argument, base, value, path);
+		else if (keyword == "not") CheckNot(check, argument, base, value, path);
+		else if (keyword == "$ref") CheckRef(check, argument, base, value, path);
+	}
+
+	static void Check(SchemaCheck& check, const DomNode& schema, Core::StringView base, const DomNode& value, Core::StringView path) {
+		if (schema.Kind() == DomKind::Bool) {
+			if (!schema.AsBool()) check.Add(path, Core::StringView("no value is allowed here"));
+			return;
+		}
+		for (int64 i = 0; i < schema.Count(); ++i) CheckKeyword(check, schema, schema.KeyAt(i), schema.ValueAt(i), base, value, path);
+	}
+
+	Core::Array<SchemaProblem> ValidateJson(SchemaRegistry& registry, Core::StringView name, Core::StringView pointer, const DomNode& value) {
+		SchemaCheck check;
+		check.registry = &registry;
+		Core::String key = registry.Find(name);
+		DomNode schema;
+		if (key.IsEmpty() || !registry.At(key.View(), pointer, schema)) {
+			check.Add(Core::StringView(""), (((Core::String("no schema ") + name) + "#") + pointer).View());
+			return check.problems;
+		}
+		Check(check, schema, key.View(), value, Core::StringView(""));
+		return check.problems;
+	}
+}

@@ -1,0 +1,195 @@
+include "schema.ch"
+include "../FS/file.ch"
+include "../FS/info.ch"
+include "../Text/integer.ch"
+
+namespace Serialization
+{
+	const char*[14] kAnnotationKeywords = { "$schema", "$id", "$defs", "$comment", "title", "description", "default", "examples",
+		"deprecated", "readOnly", "writeOnly", "format", "markdownDescription", "enumDescriptions" };
+	const char*[22] kAssertionKeywords = { "type", "enum", "const", "pattern", "minLength", "maxLength", "minimum", "maximum",
+		"exclusiveMinimum", "exclusiveMaximum", "required", "properties", "additionalProperties", "items", "minItems", "maxItems",
+		"uniqueItems", "oneOf", "anyOf", "allOf", "not", "$ref" };
+
+	bool IsSchemaKeyword(Core::StringView key) {
+		if (key.StartsWith(Core::StringView("x-"))) return true;
+		for (int32 i = 0; i < 14; ++i)
+			if (key == kAnnotationKeywords[i]) return true;
+		for (int32 i = 0; i < 22; ++i)
+			if (key == kAssertionKeywords[i]) return true;
+		return false;
+	}
+
+	// One part of a JSON pointer with its escapes undone.
+	static Core::String PointerPart(Core::StringView raw) {
+		Core::StringBuilder part;
+		for (int64 i = 0; i < raw.ByteLength(); ++i) {
+			const int32 c = raw.ByteAt(i);
+			const int32 next = i + 1 < raw.ByteLength() ? raw.ByteAt(i + 1) : -1;
+			if (c == '~' && (next == '0' || next == '1')) {
+				part.AppendByte(next == '1' ? '/' : '~');
+				i += 1;
+			}
+			else part.AppendByte(c);
+		}
+		return part.ToString();
+	}
+
+	static bool Step(DomNode& node, Core::StringView raw) {
+		Core::String part = PointerPart(raw);
+		if (node.Kind() == DomKind::Object) {
+			DomNode member = node.Member(part.CStr());
+			if (!member.IsValid()) return false;
+			node = member;
+			return true;
+		}
+		int64 index = 0;
+		if (node.Kind() != DomKind::Array || !Core::ParseInt64(part.View(), index) || index < 0 || index >= node.Count()) return false;
+		node = node.At(index);
+		return true;
+	}
+
+	bool FollowPointer(const DomNode& root, Core::StringView pointer, DomNode& node) {
+		node = root;
+		int64 at = 0;
+		while (at < pointer.ByteLength()) {
+			int64 end = pointer.IndexOf('/', at);
+			if (end < 0) end = pointer.ByteLength();
+			if (end > at && !Step(node, pointer.Substring(at, end - at))) return false;
+			at = end + 1;
+		}
+		return true;
+	}
+
+	// --- Names ---------------------------------------------------------------------------------------------------------
+
+	static int32 FoldedByte(int32 c) {
+		if (c == '\\') return '/';
+		return c >= 'A' && c <= 'Z' ? c + 32 : c;
+	}
+
+	Core::String SchemaRegistry::KeyOf(Core::StringView path) const {
+		Core::Array<Core::String> parts;
+		int64 at = 0;
+		const bool rooted = path.ByteLength() > 0 && FoldedByte(path.ByteAt(0)) == '/';
+		while (at <= path.ByteLength()) {
+			int64 end = at;
+			while (end < path.ByteLength() && FoldedByte(path.ByteAt(end)) != '/') end += 1;
+			Core::StringBuilder part;
+			for (int64 i = at; i < end; ++i) part.AppendByte(FoldedByte(path.ByteAt(i)));
+			Core::StringView text = part.View();
+			if (text == ".." && !parts.IsEmpty() && parts.Back().View() != "..") parts.Pop();
+			else if (!text.IsEmpty() && text != ".") parts.Push(part.ToString());
+			at = end + 1;
+		}
+		Core::StringBuilder key;
+		if (rooted) key.AppendByte('/');
+		for (int64 i = 0; i < parts.Count(); ++i) {
+			if (i > 0) key.AppendByte('/');
+			key.Append(parts[i].View());
+		}
+		return key.ToString();
+	}
+
+	// --- Loading -------------------------------------------------------------------------------------------------------
+
+	static bool SchemaError(Core::String& error, Core::StringView where, const char* what, Core::StringView detail) {
+		error = (((Core::String(where) + ": ") + what) + detail);
+		return false;
+	}
+
+	bool SchemaRegistry::CheckSchema(const DomNode& schema, Core::StringView where, Core::String& error) {
+		if (schema.Kind() == DomKind::Bool) return true;
+		if (schema.Kind() != DomKind::Object) return SchemaError(error, where, "a schema is an object or a boolean", Core::StringView(""));
+		for (int64 i = 0; i < schema.Count(); ++i) {
+			Core::StringView key = schema.KeyAt(i);
+			DomNode value = schema.ValueAt(i);
+			if (!IsSchemaKeyword(key)) return SchemaError(error, where, "unsupported keyword ", key);
+			const bool named = key == "properties" || key == "$defs";
+			const bool single = key == "items" || key == "additionalProperties" || key == "not";
+			const bool list = key == "oneOf" || key == "anyOf" || key == "allOf";
+			if (key == "pattern" && !patterns.Contains(Core::String(value.AsView()))) {
+				Core::Regex* compiled = new Core::Regex(value.AsView());
+				if (!compiled->IsValid()) return SchemaError(error, where, "a pattern that does not compile: ", Core::StringView(compiled->Error()));
+				patterns.Insert(Core::String(value.AsView()), compiled);
+			}
+			if (single && !CheckSchema(value, where, error)) return false;
+			for (int64 j = 0; (named || list) && j < value.Count(); ++j)
+				if (!CheckSchema(named ? value.ValueAt(j) : value.At(j), where, error)) return false;
+		}
+		return true;
+	}
+
+	bool SchemaRegistry::Keep(Core::String key, DomDoc* doc, DomNode root, Core::String& error) {
+		if (!CheckSchema(root, key.View(), error)) return false;
+		docs.Insert(key, doc);
+		roots.Insert(key, root);
+		return true;
+	}
+
+	bool SchemaRegistry::Add(Core::StringView name, Core::StringView text, Core::String& error) {
+		Core::String key = KeyOf(name);
+		if (roots.Contains(key)) return true;
+		DomDoc* doc = new DomDoc();
+		ReadResult read = ReadJsonc(text, *doc);
+		if (!read.Ok()) {
+			Core::StringBuilder why;
+			why.Append(name);
+			why.Append(": not JSON: ");
+			why.Append(read.error);
+			why.Append(" at line ");
+			why.AppendInt(read.line);
+			error = why.ToString();
+			return false;
+		}
+		return Keep(key, doc, read.root, error);
+	}
+
+	bool SchemaRegistry::Load(Core::StringView path, Core::String& error) {
+		FS::Path absolute = FS::AbsolutePath(Core::String(path).CStr());
+		if (roots.Contains(KeyOf(absolute.View()))) return true;
+		if (!FS::FileExists(absolute.CStr())) {
+			error = Core::String("no schema file ") + absolute.View();
+			return false;
+		}
+		FS::File file = FS::File(absolute.CStr(), "rb");
+		return Add(absolute.View(), file.ReadText().View(), error);
+	}
+
+	// The folder part of a key: everything before its last '/'.
+	static Core::StringView FolderOf(Core::StringView key) {
+		int64 slash = -1;
+		for (int64 i = 0; i < key.ByteLength(); ++i)
+			if (key.ByteAt(i) == '/') slash = i;
+		return slash < 0 ? Core::StringView("") : key.Substring(0, slash);
+	}
+
+	bool SchemaRegistry::Resolve(Core::StringView ref, Core::StringView base, DomNode& node, Core::String& target, Core::String& error) {
+		const int64 hash = ref.IndexOf('#', 0);
+		Core::StringView file = hash < 0 ? ref : ref.Substring(0, hash);
+		Core::StringView pointer = hash < 0 ? Core::StringView("") : ref.Substring(hash + 1, ref.ByteLength() - hash - 1);
+		target = file.IsEmpty() ? Core::String(base) : KeyOf(((Core::String(FolderOf(base)) + "/") + file).View());
+		if (!roots.Contains(target) && !Load(target.View(), error)) return false;
+		if (At(target.View(), pointer, node)) return true;
+		error = Core::String("unresolvable $ref ") + ref;
+		return false;
+	}
+
+	Core::String SchemaRegistry::Find(Core::StringView name) const {
+		Core::String key = KeyOf(name);
+		if (roots.Contains(key)) return key;
+		key = KeyOf(FS::AbsolutePath(Core::String(name).CStr()).View());
+		return roots.Contains(key) ? key : Core::String();
+	}
+
+	bool SchemaRegistry::At(Core::StringView key, Core::StringView pointer, DomNode& node) const {
+		DomNode root;
+		return roots.TryGet(Core::String(key), root) && FollowPointer(root, pointer, node);
+	}
+
+	const Core::Regex* SchemaRegistry::Pattern(Core::StringView source) const {
+		Core::Regex* compiled = nullptr;
+		patterns.TryGet(Core::String(source), compiled);
+		return compiled;
+	}
+}
