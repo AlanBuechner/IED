@@ -130,6 +130,7 @@
 				"selector": { "languages": ["c4"] },
 				"scope": "project",
 				"initializationOptionsFile": "${workspaceDir}/.ied/local/lsp-options/${projectName}.json",
+				"pluginCodeOption": "scripts",
 				"launchMode": "staged",
 				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
 				"codeActionsNeedClientFilter": true,

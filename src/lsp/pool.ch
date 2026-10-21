@@ -39,7 +39,8 @@ namespace Ied
 		public void Notification(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params);
 		// The result's JSON for a request the server made.
 		public Core::String ServerRequest(LanguageServer* language, Core::StringView method, const Serialization::DomNode& params);
-		// Its profile's initializationOptions with its initializationOptionsFile merged over them (the file's keys win).
+		// Its profile's initializationOptions with its initializationOptionsFile merged over them (the file's keys win), and
+		// with a pluginCodeOption the workspace's plugin code scopes under that key (docs/26 "Editing plugin code").
 		public Core::String InitializationOptions(const LanguageServer* language);
 		// Whether one of the workspace's servers named the file outside it (`uri` as CanonicalFileUri gives it) in a
 		// result passed to a client: only such a file opens as a document (docs/10 "Files outside the workspace").
@@ -49,6 +50,8 @@ namespace Ied
 		public void NameFile(Workspace* ws, Core::StringView uri, Core::StringView profile, Core::StringView project);
 
 	private:
+		// Its profile's initializationOptions with its initializationOptionsFile merged over them.
+		private Core::String ProfileOptions(const LanguageServer* language);
 		// The profiles of the plugins loaded for `ws` whose `when` holds, in load order.
 		private Core::Array<LspProfile*> ProfilesFor(Workspace* ws);
 		private bool Allowed(Workspace* ws, const LspProfile* profile);

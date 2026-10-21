@@ -144,6 +144,9 @@ namespace Ied
 		// Whether `instance` is loaded for `ws`: a project plugin's own workspace, or a global one that no project plugin
 		// of `ws` overrides.
 		public bool LoadedIn(CodeInstance* instance, Workspace* ws) const;
+		// The scopes a C4 language server checks plugin code in (docs/26 "Editing plugin code"): one per script plugin
+		// loaded for `ws` - its source folders, the server's interface and the allow-list - as a JSON array.
+		public Core::String ScopesJson(Workspace* ws) const;
 		// The plugin `instance` runs the code of, as loaded now; null when it is gone.
 		public Plugin* PluginOf(CodeInstance* instance) const;
 		// Runs `body` on `instance`'s thread, starting its code first when it has not started, and waits at most `ms`

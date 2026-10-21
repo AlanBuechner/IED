@@ -50,14 +50,16 @@ namespace Ai
 		return accepted;
 	}
 
-	Core::String ImagesAsText(const Core::Array<IED::ToolImage>& images) {
+	Core::String ImagesAsText(const Core::Array<IED::ToolImage>& images, Core::StringView why) {
 		Core::StringBuilder out;
 		for (const IED::ToolImage& image : images) {
 			out.Append("\n[image ");
 			out.Append(image.path.View());
 			out.Append(" (");
 			out.Append(image.mime.View());
-			out.Append("): this model is not sent images]");
+			out.Append("): ");
+			out.Append(why);
+			out.Append("]");
 		}
 		return out.ToString();
 	}

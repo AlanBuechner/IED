@@ -493,6 +493,7 @@
 				},
 				"initializationOptions": { "type": "object" },
 				"initializationOptionsFile": { "type": "string", "description": "JSON file merged over initializationOptions (file keys win); watched; change -> didChangeConfiguration or restart." },
+				"pluginCodeOption": { "type": "string", "minLength": 1, "description": "An initializationOptions key that gets the workspace's plugin code scopes: [{folders, interface, allow}] - one per c4 plugin loaded for it, as the server compiles its code (docs/26 \"Editing plugin code\")." },
 				"settingsBindings": {
 					"type": "object",
 					"description": "Plugin setting key to initializationOptions/didChangeConfiguration path, pushed live.",

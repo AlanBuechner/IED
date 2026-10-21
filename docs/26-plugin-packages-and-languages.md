@@ -34,7 +34,7 @@ A plugin that needs a long-running service in another language starts it from it
 
 ## 2. Server logic: C4 code in the script host
 
-`ied-server` is built with `--script-host` (`compiler-args` in `src/nuke.toml`), so it ships `ied-server.c4i` (its interface) and `C4Script.dll` beside it - all three files travel together, and an exe without the DLL does not start. A plugin whose `runtime.kind` is `c4` has C4 code: every `.cf` file under its `runtime.sources` (default `["code"]`, inside its folder) is compiled as one script against the server's interface when the plugin's code starts, sharing the server's GC, types, reflection, threads and exceptions (`C4/docs/runtime/04-scripting.md`). As built (P3): `src/plugins/code.cf` (the running copies), `src/plugins/codecalls.cf` (bindings, sections, events), `src/plugins/codediagnostics.cf`, `plugins/chat/code/codetools.cf`, and the API in `src/api/`.
+`ied-server` is built with `--script-host` (`compiler-args` in `src/nuke.toml`), so it ships `ied-server.c4i` (its interface) and `C4Script.dll` beside it - all three files travel together; an exe without the DLL starts, and plugin code fails with `Host::Open`'s reason (the DLL is delay-loaded since C4 a1fd894). A plugin whose `runtime.kind` is `c4` has C4 code: every `.cf` file under its `runtime.sources` (default `["code"]`, inside its folder) is compiled as one script against the server's interface when the plugin's code starts, sharing the server's GC, types, reflection, threads and exceptions (`C4/docs/runtime/04-scripting.md`). As built (P3): `src/plugins/code.cf` (the running copies), `src/plugins/codecalls.cf` (bindings, sections, events), `src/plugins/codediagnostics.cf`, `plugins/chat/code/codetools.cf`, and the API in `src/api/`.
 
 **The plugin API** is the server headers under `src/api/` - the script allow-list (`Allow("api/")`), so a plugin includes nothing else of the server (Bedrock is always allowed; an include of another server header is the compile error "not on the allow-list"). Its namespace is `IED`; the server's own is `Ied`.
 
@@ -52,6 +52,8 @@ A plugin that needs a long-running service in another language starts it from it
 |---|---|
 | `toolCalls[].function` | `IED::ToolResult <Name>(const IED::ToolCall& call)` |
 | `systemMessageSections[].function` | `Core::String <Name>(const IED::Workspace& ws)` - the section's text, empty for none |
+
+**Editing plugin code.** A language server profile with `pluginCodeOption` (a key) gets, under that key of its `initializationOptions`, the workspace's plugin code scopes: one per c4 plugin loaded for it, `{folders: [its source folders], interface: "<the server's .c4i>", allow: ["api/"]}` - the shape C4LSP's `scripts` option takes, so the `c4` plugin's profile names `"pluginCodeOption": "scripts"` and plugin code is checked as the server compiles it (C4LSP: `C4/docs/tools/03` section 1). The scopes are those of the server's start: a plugin added later needs the language server restarted.
 
 **Running copies.** A built-in or app plugin's code runs once; a project plugin's once per workspace that loads it (only in a trusted workspace: trusting it starts the code, untrusting stops it). Each copy has its own thread: its compile, its entry, its bindings, tool calls, sections and event handlers all run there, one at a time and never holding the server lock, so the script is never unloaded under a call and plugin code needs no locking of its own. Callers queue a job and wait with the server lock released (a binding or a section 30 s, a tool its `timeoutSeconds` or 120 s, a first call also the compile); a call from a plugin's code into its own binding runs at once. The `PluginContext` methods that register work only on the plugin's thread.
 
@@ -220,7 +222,5 @@ As built (P1): the server reads `.ied/plugins/*/ied-plugin.json` with the soluti
 
 - Script debugging (no PDB for JIT code) - C4's "later"; until then a plugin is debugged by loading its code as a built-in.
 - A hang in plugin code (no watchdog inside the process): its callers time out, its thread stays busy.
-- Editing plugin code in IED: C4LSP does not know the code compiles against the server's interface yet ("include not found: 'api/plugin.ch'"). Agreed with the C4 session: C4LSP takes `initializationOptions.scripts: [{folders, interface, allow, defines?}]`; IED then passes its own `.c4i` and the loaded c4 plugins' code folders to the `c4` plugin's language server (`docs/17`).
 - Compile time: about 0.2-0.3 s per plugin against the interface since C4 8bad750 (was 4-5 s); a start with unchanged code links the kept build.
-- A server without `C4Script.dll` beside it does not start (the DLL is a load-time import); C4 is to delay-load it so `Host::Open` reports it and only plugin code fails.
 - Permissions enforced at the API are a courtesy for in-process code; real isolation of third-party code would need a process again (`docs/99` "Later").

@@ -61,8 +61,8 @@ namespace Ai
 
 		// As the chat keeps it.
 		public void WriteJson(IED::JsonWriter& json) const;
-		// As a request sends it: the images named in the text to a model that does not see them.
-		public void WriteRequest(IED::JsonWriter& json, bool vision) const;
+		// As a request sends it; with `unsent` (why its images are not sent, images.ch), the images named in its text.
+		public void WriteRequest(IED::JsonWriter& json, Core::StringView unsent) const;
 		public void Read(const Serialization::DomNode& node);
 	}
 

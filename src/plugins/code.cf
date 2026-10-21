@@ -124,6 +124,39 @@ namespace Ied
 		return true;
 	}
 
+	// The folder of each source: itself for a folder, the one it is in for a file.
+	static Core::Array<Core::String> SourceFolders(const CodeInstance* instance) {
+		Core::Array<Core::String> folders;
+		for (const Core::String& source : instance->sources) {
+			FS::Path path = instance->folder / source.View();
+			Core::String folder = Core::String((FS::IsDirectory(path.CStr()) ? path : path.Parent()).View());
+			if (!folders.Contains(folder)) folders.Push(folder);
+		}
+		return folders;
+	}
+
+	Core::String CodeRuntime::ScopesJson(Workspace* ws) const {
+		const Core::String interfaceFile = Core::String(Platform::ExecutablePath().WithExtension(Core::StringView(".c4i")).View());
+		JsonWriter json;
+		json.BeginArray();
+		for (CodeInstance* instance : instances) {
+			if (instance->builtin || !LoadedIn(instance, ws)) continue;
+			json.BeginObject();
+			json.Key(Core::StringView("folders"));
+			json.BeginArray();
+			for (const Core::String& folder : SourceFolders(instance)) json.String(folder.View());
+			json.EndArray();
+			json.Field("interface", interfaceFile.View());
+			json.Key(Core::StringView("allow"));
+			json.BeginArray();
+			json.String(Core::StringView(kCodeAllowed));
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
 	Plugin* CodeRuntime::PluginOf(CodeInstance* instance) const {
 		Workspace* ws = instance->IsProject() ? server->workspaces->Find(instance->wsId.View()) : nullptr;
 		Core::Array<Plugin*> candidates = ws ? server->plugins->LocalFor(ws) : server->plugins->All();

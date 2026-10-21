@@ -28,6 +28,7 @@ namespace Ied
 		Serialization::DomNode options = node.Member("initializationOptions");
 		profile->initializationOptions = options.Kind() == Serialization::DomKind::Object ? NodeJson(options) : Core::String("{}");
 		profile->initializationOptionsFile = Core::String(node.Member("initializationOptionsFile").AsView());
+		profile->pluginCodeOption = Core::String(node.Member("pluginCodeOption").AsView());
 		profile->staged = node.Member("launchMode").AsView() == "staged";
 		profile->perProject = node.Member("scope").AsView() == "project";
 		Core::StringView encoding = node.Member("positionEncoding").AsView();

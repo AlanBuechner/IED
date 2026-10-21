@@ -13,7 +13,7 @@ import time
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
-from server import REPO, IedServer, ServerTestCase
+from server import EXECUTABLE_ENV, REPO, IedServer, ServerTestCase
 
 COMPILE_SECONDS = 120
 BROKEN = "\nnamespace Probe { int32 Broken() { return missing_name; } }\n"
@@ -149,8 +149,8 @@ class PluginCodeTests(ServerTestCase):
 	def builtin(self, body, code):
 		return self.add(os.path.join(self.home, "plugins", body["id"]), body, code)
 
-	def start(self, data=None):
-		self.server = IedServer(data=data, extra=("--home", self.home, "--workspace", self.repo))
+	def start(self, data=None, executable=None):
+		self.server = IedServer(data=data, extra=("--home", self.home, "--workspace", self.repo), executable=executable)
 		self.assertTrue(self.server.started, self.server.error)
 		self.cookie = self.server.sign_in()
 
@@ -315,6 +315,20 @@ class PluginCodeTests(ServerTestCase):
 		code = await self.settled("test.probe")
 		self.assertEqual(("active", True), (code["state"], code.get("cached")), code)
 		self.assertEqual(5, (await self.echo("x"))["version"], "the kept build runs")
+
+	async def test_a_server_without_its_script_library_runs_and_says_why_code_cannot(self):
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "6")})
+		built = os.environ[EXECUTABLE_ENV]
+		copy = os.path.join(self.root, "nodll")
+		os.makedirs(copy)
+		for name in (os.path.basename(built), os.path.splitext(os.path.basename(built))[0] + ".c4i"):
+			shutil.copy(os.path.join(os.path.dirname(built), name), copy)
+		self.start(executable=os.path.join(copy, os.path.basename(built)))
+		await self.connect()
+		code = await self.settled("test.probe")
+		self.assertEqual("failed", code["state"], code)
+		self.assertIn("C4Script.dll", code["problem"], "the reason names the library")
+		self.assertTrue((await self.client.request("ws.list"))["workspaces"], "the server itself runs")
 
 	async def test_the_example_plugin_compiles(self):
 		shutil.copytree(os.path.join(REPO, "shared", "host-api", "examples", "markup-plugin"), os.path.join(self.home, "plugins", "dialogue"))

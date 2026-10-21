@@ -21,30 +21,53 @@ namespace Ai
 		json.Raw(text.View());
 	}
 
+	// What a request does with images (images.ch): whether the model is sent any, and how many of the oldest it names
+	// instead; what it sent.
+	class RequestImages
+	{
+		public bool vision;
+		public int64 older;     // images still to name rather than send
+		public int64 sent;
+		public int64 encoded;   // bytes of base64 written
+	}
+
+	// Why the message's images are not sent; empty when they are.
+	static Core::StringView Unsent(const ModelMessage* message, RequestImages& images) {
+		if (message->images.IsEmpty()) return Core::StringView("");
+		if (!images.vision) return Core::StringView(kImagesNotSent);
+		if (images.older <= 0) return Core::StringView("");
+		images.older -= message->images.Count();
+		return Core::StringView(kImagesEarlier);
+	}
+
 	// The messages as a request sends them: after a step's results, the images they name in a user message, to a model
-	// that sees images (images.ch). The bytes of base64 written.
-	static int64 WriteMessages(IED::JsonWriter& json, Core::StringView root, const Core::Array<ModelMessage*>& messages, bool vision) {
-		int64 encoded = 0;
+	// that sees images (images.ch).
+	static void WriteMessages(IED::JsonWriter& json, Core::StringView root, const Core::Array<ModelMessage*>& messages, RequestImages& images) {
 		Core::Array<ModelMessage*> shown;
 		for (int64 i = 0; i < messages.Count(); ++i) {
 			ModelMessage* message = messages[i];
-			message->WriteRequest(json, vision);
-			if (vision && !message->images.IsEmpty()) shown.Push(message);
+			Core::StringView unsent = Unsent(message, images);
+			message->WriteRequest(json, unsent);
+			if (unsent.IsEmpty() && !message->images.IsEmpty()) {
+				shown.Push(message);
+				images.sent += message->images.Count();
+			}
 			const bool resultsEnd = i + 1 == messages.Count() || messages[i + 1]->role != "tool";
 			if (resultsEnd && !shown.IsEmpty()) {
-				encoded += WriteImagesMessage(json, root, shown);
+				images.encoded += WriteImagesMessage(json, root, shown);
 				shown.Clear();
 			}
 		}
-		return encoded;
 	}
 
 	Core::String TurnRun::RequestBody(int64& promptTokens) {
 		ModelProfile* profile = candidates[candidate];
-		int64 encoded = 0;
-		int64 images = 0;
-		bool vision = profile->vision;
-		if (!profile->visionSet) chats->seesImages.TryGet(profile->name, vision);
+		RequestImages images;
+		images.vision = profile->vision;
+		if (!profile->visionSet) chats->seesImages.TryGet(profile->name, images.vision);
+		for (Turn* each : chat->turns)
+			if (!each->compressed) images.older += CountImages(each->messages);
+		images.older -= kRequestImagesSent;
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("model", profile->model.View());
@@ -55,10 +78,7 @@ namespace Ai
 		json.Field("content", system.View());
 		json.EndObject();
 		for (Turn* each : chat->turns)
-			if (!each->compressed) {
-				encoded += WriteMessages(json, ws.root.View(), each->messages, vision);
-				if (vision) images += CountImages(each->messages);
-			}
+			if (!each->compressed) WriteMessages(json, ws.root.View(), each->messages, images);
 		json.EndArray();
 		json.RawField("tools", tools->RequestTools(chat->mode).View());
 		json.BoolField("stream", true);
@@ -73,7 +93,7 @@ namespace Ai
 		if (profile->maxOutput > 0) json.IntField("max_tokens", profile->maxOutput);
 		json.EndObject();
 		Core::String body = json.ToString();
-		promptTokens = (body.ByteLength() - encoded) / 4 + images * kToolImageTokens;
+		promptTokens = (body.ByteLength() - images.encoded) / 4 + images.sent * kToolImageTokens;
 		return body;
 	}
 

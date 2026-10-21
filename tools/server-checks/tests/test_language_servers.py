@@ -1,6 +1,7 @@
 """Language servers (docs/24): a plugin's profile starts its server when a document it serves opens; documents reach it
 from the store; diagnostics land on diag:<wsId> in UTF-16; lsp.request adds the document, converts positions both ways
-and maps URIs; a server that exits is started again; lsp.status, lsp.capabilities and lsp.restart."""
+and maps URIs; a server that exits is started again; lsp.status, lsp.capabilities and lsp.restart; a profile's
+pluginCodeOption gets the workspace's plugin code scopes (docs/26)."""
 
 import json
 import os
@@ -36,7 +37,12 @@ class LanguageServerTests(ServerTestCase):
 			"contributes": {
 				"languages": [{"id": "fake", "extensions": [".fk"]}],
 				"settings": {"schema": "settings.schema.json"},
-				"lspProfiles": [{"id": "fake-lsp", "label": "Fake", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log, "${config:fake.flags}"], "selector": {"languages": ["fake"]}}]}})
+				"lspProfiles": [{"id": "fake-lsp", "label": "Fake", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log, "${config:fake.flags}"], "selector": {"languages": ["fake"]},
+					"initializationOptions": {"mine": 1}, "pluginCodeOption": "scripts"}]}})
+		code = os.path.join(self.home, "plugins", "scripted")
+		write(os.path.join(code, "ied-plugin.json"), {"manifestVersion": 1, "id": "scripted", "name": "Scripted", "version": "1.0.0", "ied": {"api": "^1"},
+			"runtime": {"kind": "c4", "entry": "Scripted::Activate"}})
+		write(os.path.join(code, "code", "scripted.cf"), 'include "api/plugin.ch"\n\nnamespace Scripted\n{\n\tvoid Activate(IED::PluginContext& context) {}\n}\n')
 		write(os.path.join(plugin, "settings.schema.json"), {"type": "object", "properties": {"fake.flags": {"type": "array", "items": {"type": "string"}, "default": ["--from-setting", "two words"]}}})
 		write(os.path.join(self.workspace, "a.fk"), "é bad\nok\n")
 		write(os.path.join(self.workspace, "b.fk"), "b\n")
@@ -137,6 +143,18 @@ class LanguageServerTests(ServerTestCase):
 		await self.diagnostics("a.fk")
 		with open(self.log, encoding="utf-8") as f:
 			self.assertEqual(["--from-setting", "two words"], json.loads(f.readline())["argv"], "a list setting, one argument per element")
+
+	async def test_plugin_code_scopes_reach_the_server_that_asks(self):
+		await self.open("a.fk")
+		await self.diagnostics("a.fk")
+		options = self.received("initialize")[0]["params"]["initializationOptions"]
+		self.assertEqual(1, options["mine"], "the profile's own options stay")
+		scopes = options["scripts"]
+		self.assertEqual(1, len(scopes), scopes)
+		self.assertEqual([os.path.join(self.home, "plugins", "scripted", "code")], [os.path.normpath(f) for f in scopes[0]["folders"]])
+		self.assertEqual("ied-server.c4i", os.path.basename(scopes[0]["interface"]), "the interface beside the server")
+		self.assertTrue(os.path.isabs(scopes[0]["interface"]))
+		self.assertEqual(["api/"], scopes[0]["allow"])
 
 	async def test_workspace_symbols(self):
 		await self.open("a.fk")

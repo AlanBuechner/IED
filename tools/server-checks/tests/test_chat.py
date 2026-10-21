@@ -317,6 +317,20 @@ class ChatTests(ServerTestCase):
 		self.assertNotIn("prefill", await self.last_turn(chat_id))
 		self.assertIs(True, self.model.requests()[-1]["body"].get("return_progress"), "a llama.cpp server is asked for it")
 
+	async def test_a_request_sends_the_newest_images_and_names_the_rest(self):
+		os.makedirs(os.path.join(self.repo, "shots"))
+		with open(os.path.join(self.repo, "shots", "screen.png"), "wb") as out:
+			out.write(b"\x89PNG\r\n\x1a\n")
+		await self.use_model({"vision": True})
+		chat_id, _ = await self.chat()
+		self.model.queue(*[call_step("demo_snap", {}, "c%d" % i) for i in range(1, 6)], text_step("Five screens."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 3))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		parts = [p for m in sent if m["role"] == "user" and isinstance(m["content"], list) for p in m["content"] if p["type"] == "image_url"]
+		self.assertEqual(4, len(parts), "the newest four")
+		first = [m for m in sent if m["role"] == "tool" and m["tool_call_id"] == "c1"][0]
+		self.assertIn("[image shots/screen.png (image/png): an earlier image: a request sends the newest 4]", first["content"], "the oldest is named")
+
 	async def test_a_server_that_takes_images_gets_them_unless_the_profile_says(self):
 		os.makedirs(os.path.join(self.repo, "shots"))
 		with open(os.path.join(self.repo, "shots", "screen.png"), "wb") as out:

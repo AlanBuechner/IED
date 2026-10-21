@@ -130,10 +130,10 @@ namespace Ai
 		json.EndObject();
 	}
 
-	void ModelMessage::WriteRequest(IED::JsonWriter& json, bool vision) const {
+	void ModelMessage::WriteRequest(IED::JsonWriter& json, Core::StringView unsent) const {
 		json.BeginObject();
 		json.Field("role", role.View());
-		Core::String text = vision ? content : content + ImagesAsText(images).View();
+		Core::String text = unsent.IsEmpty() ? content : content + ImagesAsText(images, unsent).View();
 		json.Field("content", text.View());
 		if (!toolCalls.IsEmpty()) json.RawField("tool_calls", toolCalls.View());
 		if (!toolCallId.IsEmpty()) json.Field("tool_call_id", toolCallId.View());

@@ -63,12 +63,12 @@ class ImageTests {
 		result->images.Push(Image("image/png", ImageView("shot.png")));
 		result->images.Push(Image("image/png", ImageView("gone.png")));
 		IED::JsonWriter blind;
-		result->WriteRequest(blind, false);
+		result->WriteRequest(blind, Core::StringView(Ai::kImagesNotSent));
 		Serialization::DomNode told = ParsedImageJson(blind.View());
 		assert_true(told.Member("content").AsView().Contains(ImageView("[image shot.png (image/png): this model is not sent images]")), "a model that does not see images is told the path");
 		assert_true(!told.Member("images").IsValid(), "a request carries no field the format lacks");
 		IED::JsonWriter seeing;
-		result->WriteRequest(seeing, true);
+		result->WriteRequest(seeing, Core::StringView(""));
 		assert_true(ParsedImageJson(seeing.View()).Member("content").AsView() == "took it", "one that sees them gets the text as it is");
 		Core::Array<Ai::ModelMessage*> results;
 		results.Push(result);

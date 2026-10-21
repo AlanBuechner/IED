@@ -65,13 +65,14 @@ class Reply:
 
 
 class IedServer:
-	"""Starts `ied-server --test-hooks` on a free port (or `port`) with a data folder of its own (or `data`)."""
+	"""Starts `ied-server --test-hooks` on a free port (or `port`) with a data folder of its own (or `data`); another copy
+	of the server with `executable`."""
 
-	def __init__(self, data=None, port=0, host="127.0.0.1", static=True, extra=(), control=None):
+	def __init__(self, data=None, port=0, host="127.0.0.1", static=True, extra=(), control=None, executable=None):
 		self.owns_data = data is None
 		self.data = data or tempfile.mkdtemp(prefix="ied-checks-")
 		self.control = control or "ied-checks-" + secrets.token_hex(6)
-		argv = [os.environ[EXECUTABLE_ENV], "--host", host, "--port", str(port), "--data", self.data, "--control", self.control, "--test-hooks", "--quiet"]
+		argv = [executable or os.environ[EXECUTABLE_ENV], "--host", host, "--port", str(port), "--data", self.data, "--control", self.control, "--test-hooks", "--quiet"]
 		if static:
 			argv += ["--static", FRONTEND]
 		self.process = subprocess.Popen(argv + list(extra), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -137,6 +138,7 @@ class IedServer:
 
 
 CLI_ENV = "IED_SERVER_CHECKS_CLI"
+DESKTOP_ENV = "IED_SERVER_CHECKS_DESKTOP"
 
 
 def pipe_path(name):
