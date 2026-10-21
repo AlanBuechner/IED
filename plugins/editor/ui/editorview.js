@@ -7,6 +7,7 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { DocumentSync } from "/ui-kit/docsync.js";
 import { themeName } from "./monaco.js";
+import { optionsOf } from "./editorsettings.js";
 import { ChangeMargin } from "./changemargin.js";
 import { displayPath, isFileUri } from "./fileuris.js";
 
@@ -245,28 +246,32 @@ function fromRange(range) {
 	return { start: { line: range.startLineNumber - 1, col: range.startColumn - 1 }, end: { line: range.endLineNumber - 1, col: range.endColumn - 1 } };
 }
 
-// VS defaults (docs/15, F-EDT-30): tabs, indentation guides, the map scrollbar (not on a phone, F-SHL-44); fonts from
-// the theme tokens.
+// The theme's code font and whether the page is a phone's (the settings' defaults in editorsettings.js).
+export function editorEnvironment() {
+	const style = getComputedStyle(document.documentElement);
+	return {
+		fontSize: parseInt(style.getPropertyValue("--font-size-code"), 10) || 13,
+		lineHeight: parseInt(style.getPropertyValue("--line-height-code"), 10) || 18,
+		phone: window.matchMedia("(max-width: 719px)").matches,
+	};
+}
+
+// VS defaults (docs/15, F-EDT-30): tabs, indentation guides; the editor settings' defaults until the workspace's arrive
+// (editorsettings.js); fonts from the theme tokens.
 function editorOptions(monaco) {
 	const style = getComputedStyle(document.documentElement);
-	const phone = window.matchMedia("(max-width: 719px)").matches;
-	return {
+	return Object.assign({
 		theme: themeName(),
 		automaticLayout: true,
 		fixedOverflowWidgets: true,
 		fontFamily: style.getPropertyValue("--font-mono").trim(),
-		fontSize: parseInt(style.getPropertyValue("--font-size-code"), 10) || 13,
-		lineHeight: parseInt(style.getPropertyValue("--line-height-code"), 10) || 18,
 		insertSpaces: false,
 		detectIndentation: true,
 		tabSize: 4,
 		guides: { indentation: true },
-		minimap: { enabled: !phone, renderCharacters: false, showSlider: "always" },
-		renderWhitespace: "all",   // editor.renderWhitespace's default until the settings arrive (editorsettings.js)
 		scrollBeyondLastLine: false,
 		smoothScrolling: false,
 		readOnly: true,
-		bracketPairColorization: { enabled: false },
 		"semanticHighlighting.enabled": true,
-	};
+	}, optionsOf(null, editorEnvironment()));
 }

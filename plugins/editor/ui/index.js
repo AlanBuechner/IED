@@ -6,7 +6,7 @@ import { h, replace } from "/ui-kit/dom.js";
 import { Explorer } from "./explorer.js";
 import { Output as OutputView, remember as rememberOutputSource } from "./output.js";
 import { DocumentView } from "./document.js";
-import { CodeEditor } from "./editorview.js";
+import { CodeEditor, editorEnvironment } from "./editorview.js";
 import { Editors } from "./editors.js";
 import { loadMonaco } from "./monaco.js";
 import { colorize } from "./colorize.js";
@@ -50,7 +50,7 @@ export function activate(ied) {
 	const status = () => ied.context.set("statusState", statusState(tasks, debug));
 	tasks.on(status);
 	debug.on(status);
-	const settings = new EditorSettings(ied);
+	const settings = new EditorSettings(ied, editorEnvironment);
 	editors.attach((editor) => settings.bind(editor));
 	editors.attach((editor) => {
 		breakpoints.follow(editor.ctx.wsId);
@@ -64,6 +64,10 @@ export function activate(ied) {
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
 	ied.bindings.provide("editor.colorize", (args) => colorize(ied, args));
 	ied.commands.handle("ied.editor.toggleWhitespace", () => settings.toggleWhitespace(ied.workspace.wsId));
+	ied.commands.handle("ied.editor.toggleWordWrap", () => settings.toggleWordWrap(ied.workspace.wsId));
+	for (const [command, action] of EDITOR_ACTIONS) ied.commands.handle(command, () => runEditorAction(ied, { id: action }));
+	ied.commands.handle("ied.editor.cutLine", () => cutLine(ied));
+	ied.commands.handle("ied.editor.toggleAllOutlining", () => toggleAllOutlining(ied));
 	ied.commands.handle("ied.explorer.open", (args) => {
 		const path = pathOf(args);
 		if (path) ied.tabs.open("doc:" + path, { preview: false });
@@ -158,6 +162,81 @@ function currentEditor(ied) {
 
 // A Monaco action on the current editor ({id}): the shell takes Ctrl+K as a chord's first key, so the editor's own
 // Ctrl+K chords come back through here.
+// Visual Studio's editor commands (docs/15 "The editor's keys") as Monaco's actions; their keys are the manifest's.
+const EDITOR_ACTIONS = [
+	["ied.editor.commentSelection", "editor.action.addCommentLine"],
+	["ied.editor.uncommentSelection", "editor.action.removeCommentLine"],
+	["ied.editor.toggleLineComment", "editor.action.commentLine"],
+	["ied.editor.toggleBlockComment", "editor.action.blockComment"],
+	["ied.editor.formatDocument", "editor.action.formatDocument"],
+	["ied.editor.formatSelection", "editor.action.formatSelection"],
+	["ied.editor.trimTrailingWhitespace", "editor.action.trimTrailingWhitespace"],
+	["ied.editor.duplicate", "editor.action.copyLinesDownAction"],
+	["ied.editor.deleteLine", "editor.action.deleteLines"],
+	["ied.editor.moveLinesUp", "editor.action.moveLinesUpAction"],
+	["ied.editor.moveLinesDown", "editor.action.moveLinesDownAction"],
+	["ied.editor.insertLineAbove", "editor.action.insertLineBefore"],
+	["ied.editor.insertLineBelow", "editor.action.insertLineAfter"],
+	["ied.editor.makeLowercase", "editor.action.transformToLowercase"],
+	["ied.editor.makeUppercase", "editor.action.transformToUppercase"],
+	["ied.editor.joinLines", "editor.action.joinLines"],
+	["ied.editor.sortLines", "editor.action.sortLinesAscending"],
+	["ied.editor.expandSelection", "editor.action.smartSelect.expand"],
+	["ied.editor.contractSelection", "editor.action.smartSelect.shrink"],
+	["ied.editor.insertNextMatchingCaret", "editor.action.addSelectionToNextFindMatch"],
+	["ied.editor.insertAllMatchingCarets", "editor.action.selectHighlights"],
+	["ied.editor.insertCaretAbove", "editor.action.insertCursorAbove"],
+	["ied.editor.insertCaretBelow", "editor.action.insertCursorBelow"],
+	["ied.editor.boxSelectUp", "cursorColumnSelectUp"],
+	["ied.editor.boxSelectDown", "cursorColumnSelectDown"],
+	["ied.editor.boxSelectLeft", "cursorColumnSelectLeft"],
+	["ied.editor.boxSelectRight", "cursorColumnSelectRight"],
+	["ied.editor.goToBrace", "editor.action.jumpToBracket"],
+	["ied.editor.selectToBrace", "editor.action.selectToBracket"],
+	["ied.editor.goToLine", "editor.action.gotoLine"],
+	["ied.editor.find", "actions.find"],
+	["ied.editor.replace", "editor.action.startFindReplaceAction"],
+	["ied.editor.findNext", "editor.action.nextMatchFindAction"],
+	["ied.editor.findPrevious", "editor.action.previousMatchFindAction"],
+	["ied.editor.findNextSelected", "editor.action.nextSelectionMatchFindAction"],
+	["ied.editor.completeWord", "editor.action.triggerSuggest"],
+	["ied.editor.parameterInfo", "editor.action.triggerParameterHints"],
+	["ied.editor.quickInfo", "editor.action.showHover"],
+	["ied.editor.quickActions", "editor.action.quickFix"],
+	["ied.editor.rename", "editor.action.rename"],
+	["ied.editor.goToDefinition", "editor.action.revealDefinition"],
+	["ied.editor.peekDefinition", "editor.action.peekDefinition"],
+	["ied.editor.goToImplementation", "editor.action.goToImplementation"],
+	["ied.editor.findAllReferences", "editor.action.goToReferences"],
+	["ied.editor.toggleOutlining", "editor.toggleFold"],
+	["ied.editor.collapseToDefinitions", "editor.foldAll"],
+	["ied.editor.stopOutlining", "editor.unfoldAll"],
+	["ied.editor.zoomIn", "editor.action.fontZoomIn"],
+	["ied.editor.zoomOut", "editor.action.fontZoomOut"],
+	["ied.editor.zoomReset", "editor.action.fontZoomReset"],
+];
+
+// Cut Line (Ctrl+L): the whole lines the selection touches.
+function cutLine(ied) {
+	const editor = currentEditor(ied);
+	if (!editor) return;
+	const ed = editor.editor;
+	const selection = ed.getSelection();
+	const last = ed.getModel().getLineCount();
+	const end = selection.endLineNumber < last ? { line: selection.endLineNumber + 1, column: 1 } : { line: last, column: ed.getModel().getLineMaxColumn(last) };
+	ed.setSelection(new editor.monaco.Selection(selection.startLineNumber, 1, end.line, end.column));
+	ed.focus();
+	ed.trigger("ied", "editor.action.clipboardCutAction", null);
+}
+
+// Toggle All Outlining (Ctrl+M, Ctrl+L): everything folded, or nothing, flipping each time.
+function toggleAllOutlining(ied) {
+	const editor = currentEditor(ied);
+	if (!editor) return;
+	editor.allFolded = !editor.allFolded;
+	runEditorAction(ied, { id: editor.allFolded ? "editor.foldAll" : "editor.unfoldAll" });
+}
+
 function runEditorAction(ied, args) {
 	const editor = currentEditor(ied);
 	if (!editor || !args || !args.id) return undefined;

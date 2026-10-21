@@ -1,12 +1,15 @@
-// hostviews.js - the shell's own tabs ("shell:<name>"): Keyboard Shortcuts (the full table from the registries, docs/15),
-// Plugins (the plugin host's state, docs/02), Settings (settingsview.js, docs/07) and About.
+// hostviews.js - the shell's own tabs ("shell:<name>"): Plugins (the plugin host's state, docs/02), Settings
+// (settingsview.js, docs/07; Keyboard Shortcuts is its Environment > Keyboard page) and About.
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { formatBinding } from "./keys.js";
 import { settingsView } from "./settingsview.js";
 
 const VIEWS = {
-	keys: { title: "Keyboard Shortcuts", icon: "$(record-keys)", view: keysView },
+	keys: { title: "Keyboard Shortcuts", icon: "$(record-keys)", view: (shell, ctx) => {
+		shell.nextSettingsPage = "custom:shell.keyboard";
+		return settingsView(shell, ctx);
+	} },
 	plugins: { title: "Plugins", icon: "$(extensions)", view: pluginsView },
 	settings: { title: "Settings", icon: "$(settings-gear)", view: (shell, ctx) => settingsView(shell, ctx) },
 	about: { title: "About IED", icon: "$(info)", view: aboutView },
@@ -22,55 +25,6 @@ export function registerShellViews(shell) {
 		title: (name) => (VIEWS[name] ? VIEWS[name].title : name),
 		icon: (name) => (VIEWS[name] ? VIEWS[name].icon : null),
 	});
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// Keyboard Shortcuts
-
-function bindingRows(shell) {
-	const rows = shell.keybindings.all().map((b) => ({
-		command: commandLabel(shell, b.command, b.args),
-		keys: b.label, when: b.when, source: b.source, appWindowOnly: b.appWindowOnly, conflict: false, chord: b.keys.join(" "),
-	}));
-	const byKey = new Map();
-	for (const row of rows) {
-		const key = row.chord + "\u0000" + row.when;
-		byKey.set(key, (byKey.get(key) || 0) + 1);
-	}
-	for (const row of rows) row.conflict = byKey.get(row.chord + "\u0000" + row.when) > 1;
-	return rows.sort((a, b) => a.command.localeCompare(b.command));
-}
-
-// "View: Solution Explorer" for shell.showView {id}, else the command's label with its arguments.
-function commandLabel(shell, command, args) {
-	const id = args && args.id;
-	const tool = command === "shell.showView" && id ? shell.contributions.toolWindow(id) : null;
-	const activity = command === "shell.showActivity" && id ? shell.contributions.activity(id) : null;
-	if (tool || activity) return "View: " + (tool || activity).title;
-	return shell.commands.label(command) + (args === undefined ? "" : " " + JSON.stringify(args));
-}
-
-function keysView(shell, ctx) {
-	const filter = h("input.input-field", { type: "search", placeholder: "Search keyboard shortcuts", "aria-label": "Search keyboard shortcuts" });
-	const body = h("tbody");
-	const note = h("div.note", null, "Keys the browser keeps (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab...) work only in an installed app window. When two bindings share a key and a when-clause, the later one wins.");
-
-	function render() {
-		const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
-		const rows = bindingRows(shell).filter((row) => words.every((w) => (row.command + " " + row.keys + " " + row.source).toLowerCase().includes(w)));
-		replace(body, ...rows.map((row) => h("tr", null,
-			h("td", null, row.command),
-			h("td.mono", null, row.keys, row.appWindowOnly ? h("span.chip.warn", { title: "The browser keeps this key in a tab" }, "app window only") : null, row.conflict ? h("span.chip.err", { title: "Another binding has this key and when-clause" }, "conflict") : null),
-			h("td.mono.muted", null, row.when),
-			h("td.muted", null, row.source))));
-	}
-
-	filter.addEventListener("input", render);
-	const stop = shell.commands.onChange(render);
-	ctx.el.append(h("div.page", null, h("div.page-head", null, h("h1", null, "Keyboard Shortcuts"), filter), note,
-		h("table.grid", null, h("thead", null, h("tr", null, h("th", null, "Command"), h("th", null, "Keys"), h("th", null, "When"), h("th", null, "Source"))), body)));
-	render();
-	return { dispose: stop, focus: () => filter.focus() };
 }
 
 // ---------------------------------------------------------------------------------------------------------------

@@ -2,10 +2,14 @@
 solution tier kept in memory, effective values by merge kind, settings.schema / get / set / reset and the
 settings:app and settings:<wsId> topics. Values are checked against their schema as the real server does."""
 
+import os
+
 import minischema
 from rpc import RpcError
 
 TIERS = ("app", "solution", "project")
+HOST_SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "shared", "host-api", "schemas", "host-settings.v1.schema.json")
+HOST_OWNER, HOST_PAGE = "ied", "Environment"
 
 
 class Entry:
@@ -58,18 +62,21 @@ class Settings:
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def entries(self):
+		"""The host's own settings (owner 'ied'), then the loaded plugins'."""
 		if self.catalog is None:
 			registry = minischema.Registry()
 			self.catalog = {}
+			self.declare(registry, HOST_OWNER, os.path.normpath(HOST_SCHEMA), HOST_PAGE)
 			for plugin in self.server.plugins.loaded():
 				declared = plugin.manifest.get("contributes", {}).get("settings")
-				if not declared:
-					continue
-				path = plugin.folder / declared["schema"]
-				for key, schema in registry.load(str(path)).get("properties", {}).items():
-					if key not in self.catalog:
-						self.catalog[key] = Entry(plugin.id, key, schema, minischema.Validator(registry, str(path), "/properties/" + key), declared.get("page"))
+				if declared:
+					self.declare(registry, plugin.id, str(plugin.folder / declared["schema"]), declared.get("page"))
 		return self.catalog
+
+	def declare(self, registry, owner, path, page):
+		for key, schema in registry.load(path).get("properties", {}).items():
+			if key not in self.catalog:
+				self.catalog[key] = Entry(owner, key, schema, minischema.Validator(registry, path, "/properties/" + key), page)
 
 	def values(self, ws_id):
 		out = {}

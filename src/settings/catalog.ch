@@ -8,6 +8,9 @@ namespace Ied
 	enum class MergeKind { Replace, Merge, Append }
 
 	const char*[3] kSettingTiers = { "app", "solution", "project" };
+	// Who declares the host's own settings (shared/host-api/schemas/host-settings.v1.schema.json), and their page.
+	const char* kHostSettingsOwner = "ied";
+	const char* kHostSettingsPage = "Environment";
 
 	class SettingInfo
 	{
@@ -26,7 +29,8 @@ namespace Ied
 		[operator("create")] public void Init() {}
 
 		// The settings of the loaded `plugins`; why a plugin's settings could not be read goes to `problems`.
-		public void Build(const Core::Array<Plugin*>& plugins, Core::Array<Core::String>& problems);
+		// With the host's own settings from `hostSchema` first; a missing host schema declares nothing.
+		public void Build(const FS::Path& hostSchema, const Core::Array<Plugin*>& plugins, Core::Array<Core::String>& problems);
 		public SettingInfo* Get(Core::StringView key) const;
 		public const Core::Array<SettingInfo*>& All() const { return order; }
 		public bool AllowedIn(const SettingInfo* setting, Core::StringView tier) const;
@@ -36,6 +40,8 @@ namespace Ied
 		public Core::String SchemaJson();
 
 		private bool Declare(Plugin* plugin, Core::String& problem);
+		// `file`'s top-level properties as settings of `owner` on `page`.
+		private bool DeclareSchema(Core::StringView owner, const FS::Path& file, Core::StringView page, Core::String& problem);
 
 		private Serialization::SchemaRegistry* registry;
 		private Core::HashMap<Core::String, SettingInfo*> settings;

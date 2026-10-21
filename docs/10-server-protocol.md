@@ -80,7 +80,7 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 
 **Files changed on disk.** The server watches each workspace folder, so changes made by anything else (a git checkout, another editor, a build) arrive like its own:
 
-- `tree.changed {changes: [{path, change: created|changed|deleted}], overflow?: true}`. Changes are gathered until the folder has been quiet for 100 ms, at most a second, and folded per path: created then deleted is nothing, a rename is a delete and a create. `overflow` means the system dropped changes, so the client lists the folder again. The repository folder (`.git/`) is not reported.
+- `tree.changed {changes: [{path, change: created|changed|deleted}], overflow?: true}`. Changes are gathered until the folder has been quiet for 100 ms, at most a second, and folded per path: created then deleted is nothing, a rename is a delete and a create. `overflow` means the system dropped changes, so the client lists the folder again. A repository folder (`.git`, at any depth) is not reported.
 - The server's own writes are reported once, by the method that made them; a change from outside moves the file's revision, so a write based on the old revision gets `conflict`.
 - An open document whose file changes reloads when it is clean (a `doc.edit` with origin `disk`) and gets `doc.diskChanged {docId, revision}` when it is dirty. When its file is deleted it gets `doc.diskChanged` with revision 0 and keeps its text.
 - `fs.rename` moves open documents with their files (a folder's too): the document keeps its docId, text, version and lease, and gets `doc.renamed {docId, path}`; clients show it under the new path (`doc.open` of the new path answers the same docId). `fs.delete` takes a folder only with `recursive: true`, and documents open under it get `doc.diskChanged` with revision 0.
@@ -115,7 +115,7 @@ Paths are workspace-relative with `/` separators. Every file has a `revision` (1
 
 | Method | Params | Result |
 |---|---|---|
-| `fs.list` | `wsId, path` | `{path, entries: [{name, path, kind: file\|dir, size?, revision?}]}` |
+| `fs.list` | `wsId, path` | `{path, entries: [{name, path, kind: file\|dir, size?, revision?}]}`; a repository's `.git` folder (at any depth) is not listed, as it is not reported in `tree.changed` |
 | `fs.read` | `wsId, path` | `{path, text, revision}` |
 | `fs.write` | `wsId, path, text, expectedRevision?` (0: must not exist) | `{path, revision}`; folders are made |
 | `fs.mkdir` | `wsId, path` | `{path}` |

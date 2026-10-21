@@ -28,10 +28,10 @@ namespace Ied
 		return MergeKind::Replace;
 	}
 
-	static SettingInfo* Info(Plugin* plugin, Core::StringView schemaName, Core::StringView key, const Serialization::DomNode& property, Core::StringView page) {
+	static SettingInfo* Info(Core::StringView owner, Core::StringView schemaName, Core::StringView key, const Serialization::DomNode& property, Core::StringView page) {
 		SettingInfo* setting = new SettingInfo();
 		setting->key = Core::String(key);
-		setting->plugin = plugin->manifest->id;
+		setting->plugin = Core::String(owner);
 		setting->schemaName = Core::String(schemaName);
 		setting->pointer = PropertyPointer(key);
 		Serialization::DomNode fallback = property.Member("default");
@@ -52,7 +52,10 @@ namespace Ied
 	bool SettingsCatalog::Declare(Plugin* plugin, Core::String& problem) {
 		Serialization::DomNode settingsPoint = plugin->manifest->contributes.Member("settings");
 		if (!settingsPoint.IsValid()) return true;
-		FS::Path file = plugin->manifest->folder / settingsPoint.Member("schema").AsView();
+		return DeclareSchema(plugin->manifest->id.View(), plugin->manifest->folder / settingsPoint.Member("schema").AsView(), settingsPoint.Member("page").AsView(), problem);
+	}
+
+	bool SettingsCatalog::DeclareSchema(Core::StringView owner, const FS::Path& file, Core::StringView page, Core::String& problem) {
 		Core::String error;
 		if (!registry->Load(file.View(), error)) {
 			problem = (Core::String("settings schema: ") + error.View());
@@ -68,17 +71,20 @@ namespace Ied
 				problem = (((Core::String("setting ") + key) + " is declared by ") + taken->plugin.View()) + " already";
 				return false;
 			}
-			SettingInfo* setting = Info(plugin, name.View(), key, properties.ValueAt(i), settingsPoint.Member("page").AsView());
+			SettingInfo* setting = Info(owner, name.View(), key, properties.ValueAt(i), page);
 			settings.Insert(setting->key, setting);
 			order.Push(setting);
 		}
 		return true;
 	}
 
-	void SettingsCatalog::Build(const Core::Array<Plugin*>& plugins, Core::Array<Core::String>& problems) {
+	void SettingsCatalog::Build(const FS::Path& hostSchema, const Core::Array<Plugin*>& plugins, Core::Array<Core::String>& problems) {
 		registry = new Serialization::SchemaRegistry();
 		settings.Clear();
 		order.Clear();
+		Core::String hostProblem;
+		if (FS::FileExists(hostSchema.CStr()) && !DeclareSchema(Core::StringView(kHostSettingsOwner), hostSchema, Core::StringView(kHostSettingsPage), hostProblem))
+			problems.Push(Core::String("the host settings: ") + hostProblem.View());
 		for (Plugin* plugin : plugins) {
 			Core::String problem;
 			if (plugin->state == PluginState::Loaded && !Declare(plugin, problem))

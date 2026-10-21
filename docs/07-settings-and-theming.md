@@ -82,6 +82,16 @@ The bottom sidebar icon opens Settings as a **docked view** (not a modal), style
 
 A plugin draws its own editor for some keys with a `settingsPages` contribution (`docs/02`): it goes under its page, those keys leave the generic rows, and its view gets `ctx.settings` - `keys`, `schema(key)`, `value(key)` (`{value, source}`), `tier()`, `set(key, value, tier?)` (the error to show, or null), `reset(key, tier?)` and `onChange(fn)`. The chat plugin's Models and Model Groups are two (`docs/04` "As built"). On a phone the tree is a row of pages above the page.
 
+### Host settings
+
+The host declares a few settings of its own next to the plugins': `shared/host-api/schemas/host-settings.v1.schema.json`, owner `ied`, page Environment, read from the install (`--home`) and listed first in `settings.schema`. Today one:
+
+- `keyboard.bindings` (app tier): the owner's keyboard shortcuts, `[{command, key?, when?, args?, remove?}]`. An entry with a `key` adds that key (or chord) to the command; one with `remove: true` takes the command's default `key` away, or every default key when it names none. The owner's bindings come after the shell's and the plugins' and so win; the shell applies them as the app tier changes (`settings:app`), in every window. Settings > Environment > **Keyboard** edits them (Help > Keyboard Shortcuts opens it): every command with its keys, searchable, "Only what I changed"; Add records a key or a two-key chord (Enter adds, Escape cancels; the commands that already have it are named) with a when-clause defaulting to the command's first default's; a key's x takes it off (a default shows struck through until its command is reset); Reset drops everything the owner said about the command.
+
+### The editor's settings
+
+The editor plugin's (`plugins/editor/settings.schema.json`, Settings > Text Editor, app tier, applied to open editors as they change): `editor.renderWhitespace` (all by default - owner 2026-10-21; trailing, boundary, selection, none; View White Space, Ctrl+R, Ctrl+W, flips all/none), `editor.wordWrap` (off; Word Wrap, Ctrl+E, Ctrl+W, flips it), `editor.lineNumbers` (on, relative, off), `editor.minimap` (on; never on a phone), `editor.stickyScroll` (on), `editor.fontSize` (0: the theme's; Ctrl+Shift+. and Ctrl+Shift+, zoom for a while) and `editor.bracketPairColorization` (off: color in code carries a token's kind).
+
 ## Theme
 
 **Dark only.** Grayscale base; color only where it carries meaning; every color is a token in `frontend/css/theme.css`, which is authoritative for the values below. Plugins must use tokens - raw hex values in plugin CSS or color contributions are rejected at validation (the `semanticTokenColors` contribution maps token types to `--syntax-*` names, never to colors). The values were checked on the M0 static mocks (`frontend/mocks/`, screenshots at 1920x1080, 1366x768 and 390x844); `frontend/mocks/00-tokens.html` shows every token with its live value.

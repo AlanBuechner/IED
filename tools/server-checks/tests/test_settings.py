@@ -70,12 +70,24 @@ class SettingsTests(ServerTestCase):
 
 	async def test_schema_defaults_and_tiers(self):
 		schema = (await self.client.request("settings.schema"))["settings"]
-		self.assertEqual(["sample.tabSize", "sample.theme", "sample.colors", "sample.paths"], list(schema))
+		self.assertEqual(["keyboard.bindings", "sample.tabSize", "sample.theme", "sample.colors", "sample.paths"], list(schema), "the host's own first")
 		self.assertEqual((["app"], "replace", "Sample", "sample"), (schema["sample.theme"]["tiers"], schema["sample.theme"]["merge"], schema["sample.theme"]["page"], schema["sample.theme"]["plugin"]))
 		values, state = await self.values()
 		self.assertEqual((8, "app"), values["sample.tabSize"], "the app file's value")
 		self.assertEqual(("dark", "default"), values["sample.theme"])
 		self.assertEqual([], state["tiers"]["app"]["problems"])
+
+	async def test_the_host_declares_its_own_settings(self):
+		schema = (await self.client.request("settings.schema", {}))["settings"]
+		host = schema["keyboard.bindings"]
+		self.assertEqual(("ied", "Environment", ["app"], []), (host["plugin"], host["page"], host["tiers"], host["default"]))
+		bindings = [{"command": "ied.editor.duplicate", "key": "ctrl+shift+d", "when": "activeTabKind == 'doc'"}, {"command": "ied.editor.find", "remove": True}]
+		await self.client.request("settings.set", {"tier": "app", "key": "keyboard.bindings", "value": bindings})
+		values, _ = await self.values(None)
+		self.assertEqual((bindings, "app"), values["keyboard.bindings"])
+		with self.assertRaises(RpcFailure) as refused:
+			await self.client.request("settings.set", {"tier": "app", "key": "keyboard.bindings", "value": [{"key": "ctrl+d"}]})
+		self.assertTrue(refused.exception.data["problems"], "a binding needs its command")
 
 	async def test_set_keeps_comments_and_layers_tiers(self):
 		await self.client.sub(["settings:w1", "settings:app"])
@@ -136,9 +148,9 @@ class SettingsTests(ServerTestCase):
 
 	async def test_settings_go_with_their_plugin(self):
 		await self.client.request("plugins.setEnabled", {"id": "sample", "enabled": False})
-		self.assertEqual({}, (await self.client.request("settings.schema"))["settings"])
+		self.assertEqual(["keyboard.bindings"], list((await self.client.request("settings.schema"))["settings"]), "only the host's own stay")
 		values, state = await self.values()
-		self.assertEqual({}, values)
+		self.assertEqual({"keyboard.bindings": ([], "default")}, values)
 		self.assertEqual("unknown setting", state["tiers"]["app"]["problems"][0]["message"])
 		await self.client.request("plugins.setEnabled", {"id": "sample", "enabled": True})
 		self.assertEqual((8, "app"), (await self.values())[0]["sample.tabSize"])

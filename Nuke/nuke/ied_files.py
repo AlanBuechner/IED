@@ -56,6 +56,8 @@ def project(workspace, spec):
 	folder = fsutil.join(workspace.dir, PROJECTS_DIR)
 	body = {"version": 1, "name": spec.name, "root": _relative(spec.dir, folder), "kind": KINDS.get(spec.kind, "other"),
 		"buildSystem": {"id": "nuke", "projectName": spec.name}, "presets": [PRESET]}
+	if spec.language:
+		body["language"] = spec.language
 	if spec.depends:
 		body["references"] = list(spec.depends)
 	return body

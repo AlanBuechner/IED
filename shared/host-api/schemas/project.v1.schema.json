@@ -13,6 +13,7 @@
 		"include": { "type": "array", "items": { "type": "string" }, "default": ["**/*"] },
 		"exclude": { "type": "array", "items": { "type": "string" } },
 		"kind": { "enum": ["executable", "library", "plugin", "tests", "other"], "description": "Display + startup-project eligibility; the build system remains authoritative." },
+		"language": { "type": "string", "description": "The language id of the project's code (e.g. 'c4', 'cpp', 'rust'); plugins' projectIcons draw the project by it (docs/15 'Icons')." },
 		"buildSystem": {
 			"type": "object",
 			"required": ["id"],

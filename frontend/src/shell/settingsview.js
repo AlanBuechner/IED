@@ -6,9 +6,16 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { TIERS, controlKind, findPage, inputText, matches, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "./settingsmodel.js";
+import { KeyboardPage } from "./keyboardpage.js";
 
 export function settingsView(shell, ctx) {
 	return new SettingsView(shell, ctx);
+}
+
+// The shell's own pages, drawn as a plugin's settingsPages are: Environment > Keyboard edits keyboard.bindings.
+function shellPages(shell) {
+	const plugin = { id: "shell", base: "/", module: { KeyboardSettings: (ctx) => new KeyboardPage(shell, ctx) } };
+	return [{ plugin, value: { id: "shell.keyboard", page: "Environment", title: "Keyboard", view: "KeyboardSettings", keys: ["keyboard.bindings"] } }];
 }
 
 class SettingsView {
@@ -20,7 +27,9 @@ class SettingsView {
 		this.projectValues = null;
 		this.tier = "app";
 		this.project = null;
-		this.pageId = null;
+		this.pageId = shell.nextSettingsPage || null;
+		shell.nextSettingsPage = null;
+		shell.settingsViews.add(this);
 		this.query = "";
 		this.loaded = false;
 		this.mounted = new Map();
@@ -80,7 +89,13 @@ class SettingsView {
 
 	pages() {
 		const contributed = this.shell.contributions.plugins.flatMap((p) => (p.contributes.settingsPages || []).map((value) => ({ plugin: p, value })));
-		return settingsPages(this.schema, contributed);
+		return settingsPages(this.schema, shellPages(this.shell).concat(contributed));
+	}
+
+	// Shows the page `id` ("custom:shell.keyboard", "page:AI").
+	showPage(id) {
+		this.pageId = id;
+		this.render();
 	}
 
 	render() {
@@ -285,6 +300,7 @@ class SettingsView {
 
 	dispose() {
 		this.stop();
+		this.shell.settingsViews.delete(this);
 		for (const entry of this.mounted.values()) if (entry.instance && entry.instance.dispose) entry.instance.dispose();
 	}
 }

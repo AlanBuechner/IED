@@ -153,6 +153,13 @@ class GitTests(ServerTestCase):
 			await self.client.request("git.show", {"repoId": self.repo_id, "oid": "0000000"})
 		self.assertEqual("not_found", unknown.exception.code)
 
+	async def test_git_folders_are_not_listed(self):
+		make_repo(os.path.join(self.repo, "libs", "inner"))
+		root = await self.client.request("fs.list", {"wsId": "w1", "path": ""})
+		self.assertNotIn(".git", [e["name"] for e in root["entries"]])
+		inner = await self.client.request("fs.list", {"wsId": "w1", "path": "libs/inner"})
+		self.assertEqual(["src", "a.txt"], [e["name"] for e in inner["entries"]], "a nested repository's .git is hidden too")
+
 	# --- The work tree --------------------------------------------------------------------------------------------------
 
 	async def test_the_status_follows_the_work_tree(self):

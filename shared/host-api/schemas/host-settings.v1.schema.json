@@ -1,0 +1,27 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://ied.dev/schemas/host-settings.v1.schema.json",
+	"title": "IED host settings",
+	"description": "The settings the host itself declares (docs/07 \"Host settings\"), next to the plugins'. Owner 'ied'.",
+	"type": "object",
+	"properties": {
+		"keyboard.bindings": {
+			"type": "array",
+			"default": [],
+			"x-ied-tiers": ["app"],
+			"description": "The owner's keyboard shortcuts, over the shell's and the plugins' (Settings > Environment > Keyboard): each adds a key to a command, or with `remove` takes a default key (or every default key, without `key`) off it.",
+			"items": {
+				"type": "object",
+				"required": ["command"],
+				"additionalProperties": false,
+				"properties": {
+					"command": { "type": "string", "minLength": 1 },
+					"key": { "type": "string", "minLength": 1, "description": "A key or a chord as docs/15 \"Commands and keys\" writes them: 'ctrl+k ctrl+c'." },
+					"when": { "type": "string" },
+					"args": {},
+					"remove": { "type": "boolean" }
+				}
+			}
+		}
+	}
+}

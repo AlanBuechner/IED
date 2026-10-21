@@ -76,17 +76,19 @@ class IedSolutionTests(WorkspaceTest):
 		self.assertEqual(["nuke.toml"], solution["items"])
 		project = json.loads(read(self.path("build", "ied", "Game.ied.proj")))
 		self.assertEqual({"version": 1, "name": "Game", "root": "../..", "kind": "executable", "buildSystem": {"id": "nuke", "projectName": "Game"},
-			"presets": ["c4.nuke"]}, project)
+			"presets": ["c4.nuke"], "language": "c4"}, project)
 		self.assertIn("1 project(s)", out)
 
 	def test_projects_follow_the_workspace_and_hand_edits_are_kept(self):
 		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n", "Engine/nuke.toml": "[project]\nkind = \"module\"\n",
-			"Tools/nuke.toml": "[project]\nkind = \"custom\"\ndepends = [\"Engine\"]\n"})
+			"Tools/nuke.toml": "[project]\nkind = \"custom\"\nlanguage = \"cpp\"\ndepends = [\"Engine\"]\n", "Assets/nuke.toml": "[project]\nkind = \"custom\"\n"})
 		code, out = self.nuke("init", "--ied")
 		self.assertEqual(code, 0, out)
 		tools = json.loads(read(self.path("build", "ied", "Tools.ied.proj")))
-		self.assertEqual(("../../Tools", "other", ["Engine"]), (tools["root"], tools["kind"], tools["references"]))
-		self.assertEqual("library", json.loads(read(self.path("build", "ied", "Engine.ied.proj")))["kind"])
+		self.assertEqual(("../../Tools", "other", ["Engine"], "cpp"), (tools["root"], tools["kind"], tools["references"], tools["language"]))
+		engine = json.loads(read(self.path("build", "ied", "Engine.ied.proj")))
+		self.assertEqual(("library", "c4"), (engine["kind"], engine["language"]), "a C4 project's language is c4")
+		self.assertNotIn("language", json.loads(read(self.path("build", "ied", "Assets.ied.proj"))), "a custom project without one says none")
 		code, out = self.nuke("init", "--ied")
 		self.assertIn("0 file(s) written", out, "nothing changed")
 		os.remove(self.path("Tools", "nuke.toml"))

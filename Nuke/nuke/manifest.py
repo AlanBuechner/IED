@@ -68,6 +68,7 @@ class ProjectSpec:
 	steps: tuple = ()
 	config_overrides: dict = field(default_factory=dict)
 	scripts: tuple = ()
+	language: str = ""              # the project's main language id for IDEs ("c4" for a C4 kind; a custom one says)
 
 	@property
 	def is_c4(self):
@@ -306,6 +307,7 @@ def _project(t, folder, path):
 		file=path,
 		kind=kind,
 		description=t.string("description", ""),
+		language=t.string("language", "c4" if kind in ("executable", "module") else ""),
 		group=t.string("group", ""),
 		depends=t.strings("depends"),
 		sources=t.strings("sources", ("src",)),

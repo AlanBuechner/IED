@@ -435,6 +435,35 @@ dl.facts dd { margin: 0; }
 .set-message { font-size: var(--font-size-sm); }
 .set-message[hidden] { display: none; }
 
+/* ---------- Settings > Environment > Keyboard (keyboardpage.js) ---------- */
+.kb-page .set-desc { max-width: 760px; }
+.kb-tools { display: flex; align-items: center; gap: var(--space-5); margin: var(--space-5) 0 var(--space-3); }
+.kb-search { width: 360px; height: var(--input-h); }
+.kb-only { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-1); font-size: var(--font-size-sm); }
+.kb-list { display: flex; flex-direction: column; border-top: var(--border-width) solid var(--border-0); }
+.kb-row { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(0, 2fr) auto; align-items: center; gap: var(--space-4); min-height: 30px; padding: var(--space-1) var(--space-2); border-bottom: var(--border-width) solid var(--border-0); }
+.kb-row:hover { background: var(--veil); }
+.kb-row.changed .kb-label::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: var(--space-3); border-radius: 50%; background: var(--accent-info); vertical-align: middle; }
+.kb-cmd { display: flex; flex-direction: column; min-width: 0; }
+.kb-cmd .mono { font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-label { color: var(--text-0); }
+.kb-keys { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.kb-key { display: inline-flex; align-items: center; gap: var(--space-1); height: 22px; padding: 0 var(--space-1) 0 var(--space-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-1); background: var(--bg-3); font-size: var(--font-size-sm); color: var(--text-0); }
+.kb-key.user { border-color: var(--accent-info); }
+.kb-key.removed { color: var(--text-3); text-decoration: line-through; background: transparent; padding-right: var(--space-3); }
+.kb-key.clash { border-color: var(--accent-warn); }
+.kb-actions { display: flex; gap: var(--space-2); }
+.kb-dialog .kb-recorded { margin: var(--space-4) 0 var(--space-2); padding: var(--space-3); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-1); background: var(--bg-1); font-size: var(--font-size-lg); text-align: center; color: var(--text-0); }
+.kb-dialog .kb-clash { min-height: 1.2em; font-size: var(--font-size-sm); }
+.kb-dialog > .input-field { width: 100%; height: var(--input-h); margin-top: var(--space-3); padding: 0 var(--space-3); }
+
+@media (max-width: 719px) {
+	.kb-row { grid-template-columns: minmax(0, 1fr) auto; }
+	.kb-keys { grid-column: 1 / -1; grid-row: 2; }
+	.kb-search { width: 100%; }
+	.kb-tools { flex-wrap: wrap; }
+}
+
 @media (max-width: 719px) {
 	.set-top { padding: var(--space-3) var(--space-4); }
 	.set-body { flex-direction: column; }

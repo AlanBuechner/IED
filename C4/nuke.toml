@@ -3,6 +3,7 @@
 [project]
 name = "C4"
 kind = "custom"
+language = "cpp"
 description = "The C4 compiler, language server, debug adapter, CBind and C4Script (C++, built with Frost)"
 output = "bin/${config}-windows-x64/C4/C4.exe"
 

@@ -7,6 +7,10 @@ namespace Ied
 
 	static Core::String ProjectKey(const Workspace* ws, Core::StringView project) { return (ws->wsId + "/") + project; }
 
+	static FS::Path HostSettingsSchema(Server* server) {
+		return FS::Path(server->config.homeDir.View()) / "shared" / "host-api" / "schemas" / "host-settings.v1.schema.json";
+	}
+
 	void Settings::Init(Server* server) {
 		this.server = server;
 		app = new TierFile(Core::StringView("app"), FS::Path(server->config.appDataDir.View()) / "settings.json");
@@ -30,7 +34,7 @@ namespace Ied
 	void Settings::Rebuild(Workspace* ws) {
 		SettingsCatalog* built = new SettingsCatalog();
 		Core::Array<Core::String> problems;
-		built->Build(server->plugins->LoadedFor(ws), problems);
+		built->Build(HostSettingsSchema(server), server->plugins->LoadedFor(ws), problems);
 		for (const Core::String& problem : problems) server->Log(problem.View());
 		catalogs.At(ws->wsId) = built;
 	}
@@ -47,7 +51,7 @@ namespace Ied
 
 	void Settings::Load() {
 		Core::Array<Core::String> problems;
-		catalog.Build(server->plugins->All(), problems);
+		catalog.Build(HostSettingsSchema(server), server->plugins->All(), problems);
 		for (const Core::String& problem : problems) server->Log(problem.View());
 		app->Reload(catalog, true);
 		for (const Core::KeyValue<Core::String, TierFile*>& entry : solutions) {

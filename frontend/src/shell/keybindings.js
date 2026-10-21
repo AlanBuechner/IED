@@ -1,5 +1,6 @@
 // keybindings.js - the keybinding service (F-SHL-21, docs/15 "Commands and keys"): bindings from the shell and the
-// plugins, chords with a 2 s wait for the second key, when-clauses, and the last binding that holds winning.
+// plugins, then the owner's (keyboard.bindings, docs/07 "Host settings"), which win and may take default keys away;
+// chords with a 2 s wait for the second key, when-clauses, and the last binding that holds winning.
 
 import { KeyError, parseBinding, keyOfEvent, formatBinding, belongsToTextField, isBrowserReserved } from "./keys.js";
 import { isTextInput } from "/ui-kit/dom.js";
@@ -15,8 +16,38 @@ export class Keybindings {
 		this.onChord = options.onChord || (() => {});
 		this.timers = options.timers || window;
 		this.bindings = [];
+		this.owner = [];            // the owner's bindings: after every default, so they win
+		this.removals = [];         // [{command, keys|null}]: default keys the owner took away
 		this.pending = null;
 		this.pendingTimer = null;
+		this.recording = false;     // a settings page is reading keys: the shell runs none
+	}
+
+	// The owner's keyboard.bindings: [{command, key?, when?, args?, remove?}]; an entry that does not parse is reported.
+	setOwner(entries) {
+		this.owner = [];
+		this.removals = [];
+		for (const entry of entries || []) {
+			try {
+				const keys = entry.key ? parseBinding(entry.key) : null;
+				if (entry.remove) this.removals.push({ command: entry.command, keys });
+				else if (keys) this.owner.push({ keys, command: entry.command, when: entry.when || "", args: entry.args, source: "user" });
+			}
+			catch (e) {
+				if (!(e instanceof KeyError)) throw e;
+				this.report("Your keyboard shortcut for '" + entry.command + "' is ignored: " + e.message);
+			}
+		}
+	}
+
+	// Whether the owner took `binding` (a default) away.
+	removed(binding) {
+		return this.removals.some((r) => r.command === binding.command && (!r.keys || r.keys.join(" ") === binding.keys.join(" ")));
+	}
+
+	// Every binding in effect, defaults first and the owner's last.
+	active() {
+		return this.bindings.filter((b) => !this.removed(b)).concat(this.owner);
 	}
 
 	// binding: {command, key, when, args}; `source`: "shell" or a plugin id. A key that does not parse is reported.
@@ -35,15 +66,17 @@ export class Keybindings {
 		this.bindings = this.bindings.filter((b) => b.source === "shell");
 	}
 
+	// Every binding, the owner's included, each with its label and whether the owner took it away.
 	all() {
-		return this.bindings.map((b) => Object.assign({ label: formatBinding(b.keys), appWindowOnly: isBrowserReserved(b.keys[0]) }, b));
+		return this.bindings.concat(this.owner).map((b) => Object.assign({ label: formatBinding(b.keys), appWindowOnly: isBrowserReserved(b.keys[0]), removed: b.source !== "user" && this.removed(b) }, b));
 	}
 
 	// The label of the binding that runs `command` with `args` (the last defined one), or "".
 	labelFor(command, args) {
 		const wanted = JSON.stringify(args === undefined ? null : args);
-		for (let i = this.bindings.length - 1; i >= 0; i--) {
-			const b = this.bindings[i];
+		const active = this.active();
+		for (let i = active.length - 1; i >= 0; i--) {
+			const b = active[i];
 			if (b.command === command && JSON.stringify(b.args === undefined ? null : b.args) === wanted) return formatBinding(b.keys);
 		}
 		return "";
@@ -52,7 +85,7 @@ export class Keybindings {
 	// A keydown: true when it was a binding's (or a chord's) and the event is consumed.
 	handle(event) {
 		const key = keyOfEvent(event);
-		if (!key) return false;
+		if (!key || this.recording) return false;
 		if (this.pending) return this.secondKey(event, key);
 		if (isTextInput(event.target) && belongsToTextField(key)) return false;
 		if (this.holding((b) => b.keys.length === 2 && b.keys[0] === key)) {
@@ -69,8 +102,9 @@ export class Keybindings {
 
 	// The last binding matching `test` whose when-clause holds.
 	holding(test) {
-		for (let i = this.bindings.length - 1; i >= 0; i--) {
-			const b = this.bindings[i];
+		const active = this.active();
+		for (let i = active.length - 1; i >= 0; i--) {
+			const b = active[i];
 			if (test(b) && this.context.holds(b.when)) return b;
 		}
 		return null;

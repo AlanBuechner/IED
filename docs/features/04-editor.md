@@ -45,13 +45,13 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 |---|---|---|---|
 | F-EDT-30 | Indentation guides on by default; tabs default for new files; visible whitespace toggle (Ctrl+R, Ctrl+W) - built: `editor.renderWhitespace` (all by default, owner 2026-10-21; trailing, boundary, selection, none) on Settings > Text Editor, Edit > View White Space flips all/none in the User tier | P0 | US-EDT-3 |
 | F-EDT-31 | Indentation detection per file (respect existing files), status-bar indicator and switch, *Fix indentation* (convert to project default) for file/selection | P0 (detect), P1 (fix) | US-EDT-3, US-EDT-8 |
-| F-EDT-32 | Comment / uncomment (Ctrl+K, Ctrl+C / Ctrl+K, Ctrl+U) using the language's comment tokens | P0 | US-EDT-12 |
-| F-EDT-33 | Line ops: duplicate (Ctrl+D), move (Alt+Up/Down), delete line (Ctrl+Shift+L), join, sort, transpose | P0 | US-EDT-18 |
-| F-EDT-34 | Multi-caret (Ctrl+Alt+click, Shift+Alt+. insert next match), column/box selection (Shift+Alt+arrows, Alt+drag) | P1 | US-EDT-18 |
+| F-EDT-32 | Comment / uncomment (Ctrl+K, Ctrl+C / Ctrl+K, Ctrl+U) using the language's comment tokens - built (`docs/15` "The editor's keys") | P0 | US-EDT-12 |
+| F-EDT-33 | Line ops: duplicate (Ctrl+D), move (Alt+Up/Down), delete line (Ctrl+Shift+L), join, sort, transpose - built (`docs/15` "The editor's keys") | P0 | US-EDT-18 |
+| F-EDT-34 | Multi-caret (Ctrl+Alt+click, Shift+Alt+. insert next match), column/box selection (Shift+Alt+arrows, Alt+drag) - built (`docs/15` "The editor's keys") | P1 | US-EDT-18 |
 | F-EDT-35 | Auto-close brackets/quotes, bracket matching, bracket pair colorization (off by default - color carries meaning only), surround with | P0 | - |
 | F-EDT-36 | Snippets (contributed + user), Code Snippets Manager equivalent | P2 | US-EDT-18 |
 | F-EDT-37 | Clipboard ring (Ctrl+Shift+V cycles) | P2 | US-EDT-18 |
-| F-EDT-38 | Word wrap toggle, zoom per editor, sticky scroll (VS 2022), line numbers | P0 | - |
+| F-EDT-38 | Word wrap toggle, zoom per editor, sticky scroll (VS 2022), line numbers - built: settings `editor.wordWrap`, `editor.stickyScroll`, `editor.lineNumbers`, `editor.fontSize` (`docs/07` "The editor's settings"), Ctrl+E, Ctrl+W and the zoom keys | P0 | - |
 | F-EDT-39 | Undo/redo across server round-trips; undo of an AI edit is one step | P0 | US-INL-1 |
 
 ## Margins and scrollbar

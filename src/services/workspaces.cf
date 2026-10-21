@@ -52,7 +52,9 @@ namespace Ied
 
 	Core::String TextDigest(Core::StringView text) { return Crypto::Sha256((const void*)text.Data(), text.ByteLength()).ToHex(); }
 
-	bool IsHiddenPath(Core::StringView path) { return path == ".git" || path.StartsWith(Core::StringView(".git/")); }
+	bool IsHiddenPath(Core::StringView path) {
+		return path == ".git" || path.StartsWith(Core::StringView(".git/")) || path.EndsWith(Core::StringView("/.git")) || path.Contains(Core::StringView("/.git/"));
+	}
 
 	Core::String Workspace::SummaryJson() const {
 		JsonWriter json;
@@ -437,6 +439,7 @@ namespace Ied
 		json.BeginArray();
 		for (int64 i = 0; i < entries.Count(); ++i) {
 			Core::String full = path.IsEmpty() ? entries[i].name : path + "/" + entries[i].name.View();
+			if (IsHiddenPath(full.View())) continue;
 			json.BeginObject();
 			json.Field("name", entries[i].name.View());
 			json.Field("path", full.View());

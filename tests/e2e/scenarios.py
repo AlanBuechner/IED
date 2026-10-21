@@ -91,9 +91,9 @@ def menus_and_palette(run):
 	time.sleep(0.2)
 	run.shot("palette")
 	page.keyboard.press("Enter")
-	page.wait_for_selector(".tab:has-text('Keyboard Shortcuts')")
-	rows = run.texts("table.grid tbody tr td:first-child")
-	check("View: Command Palette..." in rows and "View: Output" in rows, "the shortcuts table: %s" % rows)
+	page.wait_for_selector(".kb-row")
+	rows = run.texts(".kb-row .kb-label")
+	check("View: Command Palette..." in rows and "View: Output" in rows, "Settings > Environment > Keyboard: %s" % rows[:20])
 	run.shot("shortcuts")
 
 
@@ -1206,3 +1206,68 @@ def view_white_space(run):
 	run.shot("hidden")
 	run.request("settings.reset", {"tier": "app", "key": "editor.renderWhitespace"})
 	page.wait_for_function(shown + ".every((option) => option === 'all')")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Keyboard (docs/15 "The editor's keys", docs/07 "Host settings"): Visual Studio's editor keys, and the owner's own
+# shortcuts from Settings > Environment > Keyboard, which win and can take a default away.
+
+def take_lease(page):
+	"""Edit Here when another window (an earlier scenario's) holds the document."""
+	if page.is_visible(".ed-bar button:has-text('Edit Here')"):
+		page.click(".ed-bar button:has-text('Edit Here')")
+		page.wait_for_selector(".ed-bar button:has-text('Edit Here')", state="hidden")
+
+
+def line_count(page):
+	return page.evaluate("monaco.editor.getEditors().find((e) => e.getModel() && e.getModel().uri.toString().endsWith('README.md')).getModel().getLineCount()")
+
+
+@scenario(viewports=("desktop",))
+def editor_keys_and_keyboard_page(run):
+	page = run.open()
+	page.click(".tree-row:has-text('README.md')")
+	run.wait_text(".monaco-editor .view-lines", "workspace" if run.target.kind == "real" else "fixture", timeout=30000)
+	page.click(".monaco-editor .view-lines")
+	page.evaluate("ied_shell.commands.run('ied.editor.goTo', { path: 'README.md', line: 0, col: 0 })")
+	take_lease(page)
+	page.click(".monaco-editor .view-lines")
+	before = line_count(page)
+	page.keyboard.press("Control+d")
+	page.wait_for_function("(n) => monaco.editor.getEditors().some((e) => e.getModel() && e.getModel().getLineCount() === n)", arg=before + 1)
+	page.keyboard.press("Control+Shift+l")
+	page.wait_for_function("(n) => monaco.editor.getEditors().some((e) => e.getModel() && e.getModel().getLineCount() === n)", arg=before)
+	page.keyboard.press("Control+z")
+	page.keyboard.press("Control+z")
+	page.evaluate("ied_shell.commands.run('shell.keyboardShortcuts')")
+	page.wait_for_selector(".kb-row")
+	page.fill(".kb-search", "duplicate")
+	page.click(".kb-row[data-command='ied.editor.duplicate'] .kb-key[data-chord='ctrl+d'] button")
+	page.wait_for_selector(".kb-row[data-command='ied.editor.duplicate'] .kb-key.removed")
+	page.click(".kb-row[data-command='ied.editor.duplicate'] button:has-text('Add')")
+	page.wait_for_selector(".kb-dialog")
+	page.keyboard.press("Control+k")
+	page.keyboard.press("Control+d")
+	run.wait_text(".kb-dialog .kb-recorded", "Ctrl+K, Ctrl+D")
+	check("Edit: Format Document" in page.inner_text(".kb-dialog .kb-clash"), "the dialog names the command that has the key")
+	run.shot("record")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".kb-dialog", state="detached")
+	page.click(".kb-row[data-command='ied.editor.duplicate'] button:has-text('Add')")
+	page.keyboard.press("Control+Shift+d")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".kb-row[data-command='ied.editor.duplicate'] .kb-key.user[data-chord='ctrl+shift+d']")
+	run.shot("changed")
+	values = run.request("settings.get", {})["values"]["keyboard.bindings"]["value"]
+	check(values == [{"command": "ied.editor.duplicate", "key": "ctrl+d", "remove": True}, {"command": "ied.editor.duplicate", "key": "ctrl+shift+d", "when": "activeTabKind == 'doc'"}], "keyboard.bindings: %s" % values)
+	page.click(".tab:has-text('README.md')")
+	take_lease(page)
+	page.click(".monaco-editor .view-lines")
+	before = line_count(page)
+	page.keyboard.press("Control+Shift+d")
+	page.wait_for_function("(n) => monaco.editor.getEditors().some((e) => e.getModel() && e.getModel().getLineCount() === n)", arg=before + 1)
+	page.keyboard.press("Control+z")
+	page.evaluate("ied_shell.commands.run('shell.keyboardShortcuts')")
+	page.fill(".kb-search", "duplicate")
+	page.click(".kb-row[data-command='ied.editor.duplicate'] button:has-text('Reset')")
+	page.wait_for_function("ied_shell.keybindings.labelFor('ied.editor.duplicate') === 'Ctrl+D'")

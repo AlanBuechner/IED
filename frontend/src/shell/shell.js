@@ -42,6 +42,8 @@ export class Shell {
 		this.contributions = new Contributions(this);
 		this.modules = new Map();
 		this.apis = new Map();
+		this.settingsViews = new Set();   // the open settings windows (settingsview.js)
+		this.nextSettingsPage = null;     // the page the next settings window opens on
 		this.bindings = new Bindings((id) => {
 			const plugin = this.contributions.plugins.find((p) => p.id === id);
 			return plugin ? plugin.contributes.bindings || {} : null;
@@ -79,6 +81,12 @@ export class Shell {
 		document.addEventListener("focusin", (event) => this.context.set("inputFocus", isTextInput(event.target)));
 		this.client.subscribe("server", { snap: (data) => this.serverSnapshot(data), evt: (kind, data) => this.serverEvent(kind, data) });
 		this.client.subscribe("plugins", { evt: (kind) => kind === "plugins.changed" && this.reloadContributions() });
+		const ownerKeys = (data) => {
+			const entry = data && data.values && data.values["keyboard.bindings"];
+			this.keybindings.setOwner(entry ? entry.value : []);
+			this.commands.changed();
+		};
+		this.client.subscribe("settings:app", { snap: ownerKeys, evt: (kind, data) => kind === "settings.changed" && ownerKeys(data) });
 		this.client.start();
 	}
 
@@ -319,6 +327,14 @@ export class Shell {
 		if (!this.layout || !this.contributions.activity(activityId)) return;
 		if (this.deviceClass === "phone") this.layout.update((doc) => withPhonePane(withActivity(doc, activityId), "activity:" + activityId));
 		else this.layout.update((doc) => withActivity(doc, activityId));
+	}
+
+	// The settings window, on the page `page` ("custom:shell.keyboard", "page:AI") when one is given.
+	openSettings(page) {
+		const open = [...this.settingsViews].pop();
+		if (page && open) open.showPage(page);
+		else if (page) this.nextSettingsPage = page;
+		this.openTab("shell:settings");
 	}
 
 	// Opens a tab (ied.tabs.open): in the dock host's document group on a desktop, as the pane on a phone.

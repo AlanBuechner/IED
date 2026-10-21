@@ -28,5 +28,6 @@ import "./git.test.js";
 import "./semanticcolors.test.js";
 import "./bindings.test.js";
 import "./editorsettings.test.js";
+import "./keyboard.test.js";
 
 run(document.getElementById("results"));

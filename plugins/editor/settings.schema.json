@@ -8,6 +8,44 @@
 			"default": "all",
 			"x-ied-tiers": ["app"],
 			"description": "Spaces and tabs drawn as dots and arrows (Visual Studio's View White Space, Ctrl+R, Ctrl+W): all of them, only trailing ones, all but single spaces between words, only in the selection, or none."
+		},
+		"editor.wordWrap": {
+			"enum": ["off", "on"],
+			"default": "off",
+			"x-ied-tiers": ["app"],
+			"description": "Long lines wrap at the window's edge instead of scrolling (Visual Studio's Word Wrap, Ctrl+E, Ctrl+W)."
+		},
+		"editor.lineNumbers": {
+			"enum": ["on", "relative", "off"],
+			"default": "on",
+			"x-ied-tiers": ["app"],
+			"description": "Line numbers in the margin: the line's own, its distance from the caret, or none."
+		},
+		"editor.minimap": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app"],
+			"description": "The map of the document beside the scrollbar (never on a phone)."
+		},
+		"editor.stickyScroll": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app"],
+			"description": "The scopes the top line is in (namespace, class, function) stay at the top while you scroll, as in Visual Studio 2022."
+		},
+		"editor.fontSize": {
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 48,
+			"default": 0,
+			"x-ied-tiers": ["app"],
+			"description": "The code font's size in pixels; 0 follows the theme (larger on a phone). Ctrl+Shift+. and Ctrl+Shift+, zoom for a while without changing it."
+		},
+		"editor.bracketPairColorization": {
+			"type": "boolean",
+			"default": false,
+			"x-ied-tiers": ["app"],
+			"description": "Each pair of brackets in its own color. Off by default: color in code carries a token's kind."
 		}
 	}
 }

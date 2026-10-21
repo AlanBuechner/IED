@@ -118,6 +118,7 @@ name = "Game"                      # default: the folder name
 kind = "executable"                # executable | module | custom
 description = "The game"
 group = "Games"                    # display grouping for IDEs
+language = "c4"                    # the main language, for IDEs (default "c4" for a C4 kind; a custom project names its own)
 depends = ["Engine"]               # build order; C4 programs also compile their modules' sources
 sources = ["src"]                  # folders or files of .cf/.ch sources (default ["src"])
 includes = ["third_party/include"] # further include folders
@@ -304,7 +305,7 @@ the build. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine
 
 **IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.ied.sln` at the root
 and a project file per project under `build/ied/` (`root` the project's folder, `kind` executable / library /
-other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`, `presets: ["c4.nuke"]`: the plugin's
+other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`, `language` (the project's; IED picks its icon from it), `presets: ["c4.nuke"]`: the plugin's
 toolbar and Build / Run / Test tasks, which run `nuke` - the `c4.nuke.command` setting - with the selected
 configuration), and pins the toolchain's IED plugin
 (`<toolchain>/ied`, which `C4/MakeToolchain.py` ships) in the solution's `localPlugins` - relative when the toolchain
