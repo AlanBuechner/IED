@@ -27,7 +27,7 @@ LOG_LIMIT = 500
 
 
 class Config:
-	def __init__(self, n_ctx=32768, n_ctx_train=131072, slots=1, model="fake-model", time_scale=1.0, enforce_ctx=False, ctx_error_style="llamacpp", default_script="ok-text"):
+	def __init__(self, n_ctx=32768, n_ctx_train=131072, slots=1, model="fake-model", time_scale=1.0, enforce_ctx=False, ctx_error_style="llamacpp", default_script="ok-text", vision=False):
 		self.n_ctx = n_ctx
 		self.n_ctx_train = n_ctx_train
 		self.slots = slots
@@ -36,6 +36,7 @@ class Config:
 		self.enforce_ctx = enforce_ctx
 		self.ctx_error_style = ctx_error_style
 		self.default_script = default_script
+		self.vision = vision
 
 	@property
 	def slot_ctx(self):
@@ -45,11 +46,13 @@ class Config:
 		return {
 			"nCtx": self.n_ctx, "nCtxTrain": self.n_ctx_train, "slots": self.slots, "slotCtx": self.slot_ctx, "model": self.model,
 			"timeScale": self.time_scale, "enforceCtx": self.enforce_ctx, "ctxErrorStyle": self.ctx_error_style, "defaultScript": self.default_script,
+			"vision": self.vision,
 		}
 
 
 CONFIG_FIELDS = {"nCtx": ("n_ctx", int), "nCtxTrain": ("n_ctx_train", int), "slots": ("slots", int), "model": ("model", str),
-	"timeScale": ("time_scale", (int, float)), "enforceCtx": ("enforce_ctx", bool), "ctxErrorStyle": ("ctx_error_style", str), "defaultScript": ("default_script", str)}
+	"timeScale": ("time_scale", (int, float)), "enforceCtx": ("enforce_ctx", bool), "ctxErrorStyle": ("ctx_error_style", str), "defaultScript": ("default_script", str),
+	"vision": ("vision", bool)}
 
 
 class State:
@@ -185,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
 		return {
 			"default_generation_settings": {"n_ctx": config.slot_ctx, "params": {"temperature": 0.8, "n_predict": -1}},
 			"total_slots": config.slots, "model_path": "models/%s.gguf" % config.model,
-			"chat_template": "{{ messages }}", "build_info": "fake-model",
+			"chat_template": "{{ messages }}", "build_info": "fake-model", "modalities": {"vision": config.vision, "audio": False},
 		}
 
 	def _models(self):

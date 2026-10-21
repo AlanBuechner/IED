@@ -50,6 +50,10 @@ test("settings: search and problems", () => {
 test("settings: a model profile from its form", () => {
 	const made = profileFrom({ name: " desk ", endpoint: "http://10.1.2.3:8080/v1", model: "", contextWindow: "32768", maxOutput: "", privacy: "lan", apiKeyEnv: "KEY" });
 	assertEqual(made, { name: "desk", profile: { endpoint: "http://10.1.2.3:8080/v1", contextWindow: 32768, privacy: "lan", apiKey: { env: "KEY" } } });
+	const seeing = { name: "v", endpoint: "http://a/v1", model: "", contextWindow: "", maxOutput: "", privacy: "local", apiKeyEnv: "" };
+	assertEqual(profileFrom(Object.assign({ vision: "" }, seeing)).profile.vision, undefined, "left out: the server says");
+	assertEqual(profileFrom(Object.assign({ vision: "true" }, seeing)).profile.vision, true, "sent images");
+	assertEqual(profileFrom(Object.assign({ vision: "false" }, seeing)).profile.vision, false, "never sent images");
 	assertThrows(() => profileFrom({ name: "x", endpoint: "https://a/v1", model: "", contextWindow: "", maxOutput: "", privacy: "local", apiKeyEnv: "" }), Error, "only http");
 	assertThrows(() => profileFrom({ name: "", endpoint: "http://a/v1", model: "", contextWindow: "", maxOutput: "", privacy: "local", apiKeyEnv: "" }), Error, "a name");
 	assertThrows(() => profileFrom({ name: "x", endpoint: "http://a/v1", model: "", contextWindow: "1.5", maxOutput: "", privacy: "local", apiKeyEnv: "" }), Error, "a whole window");

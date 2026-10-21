@@ -317,6 +317,23 @@ class ChatTests(ServerTestCase):
 		self.assertNotIn("prefill", await self.last_turn(chat_id))
 		self.assertIs(True, self.model.requests()[-1]["body"].get("return_progress"), "a llama.cpp server is asked for it")
 
+	async def test_a_server_that_takes_images_gets_them_unless_the_profile_says(self):
+		os.makedirs(os.path.join(self.repo, "shots"))
+		with open(os.path.join(self.repo, "shots", "screen.png"), "wb") as out:
+			out.write(b"\x89PNG\r\n\x1a\n")
+		self.model.post("/_fake/config", {"vision": True})
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("demo_snap", {}, "c1"), text_step("A screen."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		self.assertEqual("user", self.model.requests()[-1]["body"]["messages"][-1]["role"], "its /props says it takes images: they are sent")
+		await self.use_model({"vision": False})
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("demo_snap", {}, "c2"), text_step("A screen."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		self.assertEqual("tool", sent[-1]["role"], "the profile's false wins")
+		self.assertIn("this model is not sent images", sent[-1]["content"])
+
 	async def test_a_tools_images_reach_a_model_that_sees_them(self):
 		png = b"\x89PNG\r\n\x1a\n" + bytes(range(24))
 		os.makedirs(os.path.join(self.repo, "shots"))

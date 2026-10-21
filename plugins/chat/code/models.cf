@@ -36,6 +36,7 @@ namespace Ai
 			problems.Push((Core::String("ai.models.") + name) + ": privacy must be local, lan or cloud");
 			return nullptr;
 		}
+		profile->visionSet = entry.Member("vision").Kind() == Serialization::DomKind::Bool;
 		profile->vision = entry.Member("vision").AsBool();
 		profile->apiKeyEnv = Core::String(entry.Member("apiKey").Member("env").AsView());
 		Serialization::DomNode watchdog = entry.Member("watchdog");

@@ -1,6 +1,7 @@
 // modelsettings.js - Settings > AI > Models (docs/04 "Model profiles"): each ai.models profile with its endpoint, model,
-// window, privacy and whether it sees images, a form to add or change one, and Test connection (ai.probe), which asks
-// the server what it serves: its models, its context per slot, its slots and whether it takes images. Profiles live in the app tier (the User settings file), never in a
+// window, privacy and whether it is sent images (left out: its server says), a form to add or change one, and Test
+// connection (ai.probe), which asks the server what it serves: its models, its context per slot, its slots and whether
+// it takes images. Profiles live in the app tier (the User settings file), never in a
 // repository; a key is only ever named by its environment variable.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
@@ -8,6 +9,8 @@ import { confirmDialog } from "/ui-kit/dialog.js";
 import { compact } from "./chatmodel.js";
 
 const PRIVACY = ["local", "lan", "cloud"];
+// ai.models `vision`: left out, the server says (llama.cpp's /props modalities).
+const IMAGES = [["", "As its server says"], ["true", "Send them"], ["false", "Never send them"]];
 
 // A probe's one-line summary.
 export function probeLine(probe) {
@@ -35,7 +38,7 @@ export function profileFrom(fields) {
 		profile[key] = value;
 	}
 	profile.privacy = fields.privacy;
-	if (fields.vision) profile.vision = true;
+	if (fields.vision === "true" || fields.vision === "false") profile.vision = fields.vision === "true";
 	if (fields.apiKeyEnv.trim()) profile.apiKey = { env: fields.apiKeyEnv.trim() };
 	return { name, profile };
 }
@@ -80,7 +83,7 @@ export class ModelsPage {
 			h("div.set-model-facts", null,
 				h("span.mono", null, profile.endpoint), h("span", null, "model " + (profile.model || name)),
 				h("span", null, profile.contextWindow ? compact(profile.contextWindow) + " context" : "context: asked from the server"),
-				profile.vision ? h("span", null, "sees images") : null,
+				profile.vision === true ? h("span", null, "sent images") : profile.vision === false ? h("span", null, "never sent images") : null,
 				profile.apiKey ? h("span", null, "key from %" + profile.apiKey.env + "%") : null),
 			probe ? h("div.set-probe" + (probe.ok ? (probe.modelServed || !probe.models.length ? ".ok" : ".warn") : ".bad"), null,
 				icon(probe.ok ? "pass" : "error"), probeLine(probe),
@@ -95,12 +98,13 @@ export class ModelsPage {
 		};
 		const fields = {};
 		const privacy = h("select.input-field", { "aria-label": "Privacy" }, ...PRIVACY.map((p) => h("option", Object.assign({ value: p }, (profile.privacy || "local") === p ? { selected: true } : {}), p)));
-		const vision = h("input", Object.assign({ type: "checkbox", "aria-label": "Sees images" }, profile.vision ? { checked: true } : {}));
+		const visionNow = profile.vision === undefined ? "" : String(profile.vision);
+		const vision = h("select.input-field", { "aria-label": "Images" }, ...IMAGES.map(([value, label]) => h("option", Object.assign({ value }, value === visionNow ? { selected: true } : {}), label)));
 		const message = h("div.set-message", { hidden: true });
 		const result = h("div.set-probe", { hidden: true });
 		const read = () => profileFrom({
 			name: fields.name.value, endpoint: fields.endpoint.value, model: fields.model.value, contextWindow: fields.contextWindow.value,
-			maxOutput: fields.maxOutput.value, privacy: privacy.value, vision: vision.checked, apiKeyEnv: fields.apiKeyEnv.value,
+			maxOutput: fields.maxOutput.value, privacy: privacy.value, vision: vision.value, apiKeyEnv: fields.apiKeyEnv.value,
 		});
 		const fail = (e) => {
 			message.textContent = e.message;
@@ -143,7 +147,6 @@ export class ModelsPage {
 			result.className = "set-probe " + (probe.ok ? "ok" : "bad");
 			replace(result, icon(probe.ok ? "pass" : "error"), probeLine(probe));
 			if (probe.ok && probe.contextWindow && !fields.contextWindow.value) fields.contextWindow.placeholder = "server says " + probe.contextWindow;
-			if (probe.ok && probe.vision && !vision.checked) vision.checked = true;
 			return null;
 		};
 		return h("div.set-model.editing", { dataset: { model: name || "new" } },
@@ -154,7 +157,7 @@ export class ModelsPage {
 				field("Context window", "contextWindow", profile.contextWindow, { placeholder: "asked from the server", inputmode: "numeric" }),
 				field("Max output", "maxOutput", profile.maxOutput, { placeholder: "the server's default", inputmode: "numeric" }),
 				h("label.set-field", null, h("span", null, "Privacy"), privacy),
-				h("label.set-field.set-check-field", null, h("span", null, "Sees images"), h("span", null, vision, " tool results' images are sent to it")),
+				h("label.set-field", null, h("span", null, "Images tool results show"), vision),
 				field("API key variable", "apiKeyEnv", profile.apiKey ? profile.apiKey.env : "", { placeholder: "none (an environment variable's name)" })),
 			message, result,
 			h("div.set-bar", null,

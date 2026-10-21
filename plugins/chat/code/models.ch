@@ -22,7 +22,8 @@ namespace Ai
 		public int64 contextWindow;        // tokens; 0 when unknown
 		public int64 maxOutput;            // tokens a reply may take; 0: the server's default
 		public Privacy privacy;
-		public bool vision;                // it is sent the images tool results show (images.ch)
+		public bool vision;                // it is sent the images tool results show (images.ch), when `visionSet`
+		public bool visionSet;             // the profile says; else its server does (llama.cpp's /props modalities)
 		public Core::String apiKeyEnv;     // the environment variable holding the key (`"apiKey": {"env": ...}`)
 		public int32 connectMs;
 		public int32 prefillBaseMs;        // the prefill watchdog before the prompt's share (docs/12 "Watchdogs")

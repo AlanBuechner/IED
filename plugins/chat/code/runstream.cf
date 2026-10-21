@@ -43,6 +43,8 @@ namespace Ai
 		ModelProfile* profile = candidates[candidate];
 		int64 encoded = 0;
 		int64 images = 0;
+		bool vision = profile->vision;
+		if (!profile->visionSet) chats->seesImages.TryGet(profile->name, vision);
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("model", profile->model.View());
@@ -54,8 +56,8 @@ namespace Ai
 		json.EndObject();
 		for (Turn* each : chat->turns)
 			if (!each->compressed) {
-				encoded += WriteMessages(json, ws.root.View(), each->messages, profile->vision);
-				if (profile->vision) images += CountImages(each->messages);
+				encoded += WriteMessages(json, ws.root.View(), each->messages, vision);
+				if (vision) images += CountImages(each->messages);
 			}
 		json.EndArray();
 		json.RawField("tools", tools->RequestTools(chat->mode).View());

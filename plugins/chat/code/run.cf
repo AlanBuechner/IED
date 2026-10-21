@@ -92,7 +92,8 @@ namespace Ai
 	// --- A step ------------------------------------------------------------------------------------------------------
 
 	// A profile's server is asked once per server run (docs/12 "Truth about the model's context window"): the window it
-	// reports, for a profile that names none, and whether it streams prompt progress; the lock is not held.
+	// reports, for a profile that names none, whether it streams prompt progress and whether it takes images, for a
+	// profile that does not say; the lock is not held.
 	void TurnRun::Discover() {
 		ModelProfile* profile = candidates[candidate];
 		bool asked = false;
@@ -105,6 +106,7 @@ namespace Ai
 		IED::HostLock guard(*context);
 		chats->probed.At(profile->name) = true;
 		chats->progressing.At(profile->name) = probe.server == "llama.cpp";
+		chats->seesImages.At(profile->name) = probe.vision;
 		if (probe.contextWindow > 0) chats->windows.At(profile->name) = probe.contextWindow;
 	}
 
