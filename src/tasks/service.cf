@@ -323,6 +323,14 @@ namespace Ied
 		run->status = RunStatus::Queued;
 		run->searchRoots.Push(Core::String(project->root.View()));
 		run->searchRoots.Push(Core::String(ws->root.View()));
+		TaskLookup lookup = LookupFor(ws, project, offered, context);
+		Core::Array<Core::String> nesting;
+		nesting.Push(task->key);
+		PlanSteps(run, task, offered, lookup, nesting, OnlyIf::PrevSuccess);
+		return run;
+	}
+
+	TaskLookup Tasks::LookupFor(Workspace* ws, const TaskProject* project, const OfferedTasks* offered, const Serialization::DomNode& context) {
 		Core::HashMap<Core::String, Core::String>* values = new Core::HashMap<Core::String, Core::String>();
 		values->Insert(Core::String("solutionDir"), Core::String(ws->root.View()));
 		values->Insert(Core::String("workspaceDir"), Core::String(ws->root.View()));
@@ -355,10 +363,47 @@ namespace Ied
 			}
 			return false;
 		};
-		Core::Array<Core::String> nesting;
-		nesting.Push(task->key);
-		PlanSteps(run, task, offered, lookup, nesting, OnlyIf::PrevSuccess);
-		return run;
+		return lookup;
+	}
+
+	// --- Debug configurations ----------------------------------------------------------------------------------------
+
+	// `node` as JSON with every string expanded.
+	static void WriteExpanded(JsonWriter& json, const Serialization::DomNode& node, const TaskLookup& lookup, Core::StringView config) {
+		if (node.Kind() == Serialization::DomKind::String) json.String(Expanded(node.AsView(), lookup, config).View());
+		else if (node.Kind() == Serialization::DomKind::Array) {
+			json.BeginArray();
+			for (int64 i = 0; i < node.Count(); ++i) WriteExpanded(json, node.At(i), lookup, config);
+			json.EndArray();
+		}
+		else if (node.Kind() == Serialization::DomKind::Object) {
+			json.BeginObject();
+			for (int64 i = 0; i < node.Count(); ++i) {
+				json.Key(node.KeyAt(i));
+				WriteExpanded(json, node.ValueAt(i), lookup, config);
+			}
+			json.EndObject();
+		}
+		else json.Raw(NodeJson(node).View());
+	}
+
+	DebugLaunch Tasks::ResolveDebug(Workspace* ws, Core::StringView projectName, Core::StringView name) {
+		TaskProject* project = ProjectNamed(ws, projectName.IsEmpty() ? StartupProject(ws).View() : projectName);
+		if (!project) throw RpcError(ErrorCode::NotFound, (Core::String("no project to debug: ") + projectName).View());
+		OfferedTasks* offered = Offered(ws, project);
+		DebugConfig* config = offered->Debug(name);
+		if (!config) throw RpcError(ErrorCode::NotFound, (name.IsEmpty() ? ((Core::String("the project ") + project->name.View()) + " has no debug configuration") : (Core::String("no debug configuration ") + name)).View());
+		TaskLookup lookup = LookupFor(ws, project, offered, Serialization::DomNode());
+		JsonWriter json;
+		WriteExpanded(json, config->node, lookup, config->name.View());
+		DebugLaunch launch;
+		launch.project = project->name;
+		launch.name = config->name;
+		launch.type = Core::String(config->node.Member("type").AsView());
+		launch.request = Core::String(config->node.Member("request").AsView());
+		launch.preLaunchTask = Expanded(config->node.Member("preLaunchTask").AsView(), lookup, config->name.View());
+		launch.arguments = json.ToString();
+		return launch;
 	}
 
 	// --- Running -----------------------------------------------------------------------------------------------------
@@ -423,21 +468,16 @@ namespace Ied
 		return ListJson(ws, named.View());
 	}
 
-	Core::String Tasks::RunMethod(Call& call, const Params& params) {
-		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
-		if (!ws->trusted) throw RpcError(ErrorCode::Forbidden, "tasks run the workspace's code: trust the workspace first");
-		Core::String named = params.Str("project", Core::StringView(""));
-		TaskProject* project = ProjectNamed(ws, named.IsEmpty() ? StartupProject(ws).View() : named.View());
-		if (!project) throw RpcError(ErrorCode::NotFound, (Core::String("no project to run tasks of: ") + named.View()).View());
+	TaskRun* Tasks::RunTask(Workspace* ws, Core::StringView projectName, Core::StringView key, Core::StringView slot, const Serialization::DomNode& context) {
+		TaskProject* project = ProjectNamed(ws, projectName.IsEmpty() ? StartupProject(ws).View() : projectName);
+		if (!project) throw RpcError(ErrorCode::NotFound, (Core::String("no project to run tasks of: ") + projectName).View());
 		OfferedTasks* offered = Offered(ws, project);
-		Core::String key = params.Str("task", Core::StringView(""));
-		Core::String slot = params.Str("slot", Core::StringView(""));
-		TaskDef* task = !key.IsEmpty() ? offered->Task(key.View()) : offered->InSlot(slot.View());
+		TaskDef* task = !key.IsEmpty() ? offered->Task(key) : offered->InSlot(slot);
 		if (!task) {
-			Core::String what = !key.IsEmpty() ? Core::String("no task ") + key.View() : (((Core::String("the project ") + project->name.View()) + " has no ") + slot.View()) + " task";
+			Core::String what = !key.IsEmpty() ? Core::String("no task ") + key : (((Core::String("the project ") + project->name.View()) + " has no ") + slot) + " task";
 			throw RpcError(ErrorCode::NotFound, what.View());
 		}
-		TaskRun* run = Plan(ws, project, offered, task, params.Field("context"));
+		TaskRun* run = Plan(ws, project, offered, task, context);
 		for (TaskRun* other : runs) {
 			if (other->ws != ws || other->project != run->project || other->task != run->task || !other->IsActive()) continue;
 			if (run->concurrency == Concurrency::Single) throw RpcError(ErrorCode::Conflict, ((Core::String("the task ") + run->task.View()) + " is running already").View());
@@ -445,6 +485,18 @@ namespace Ied
 			if (run->concurrency != Concurrency::Parallel) run->after = other;
 		}
 		Start(run);
+		return run;
+	}
+
+	bool Tasks::AwaitEnd(TaskRun* run) {
+		while (run->IsActive()) ended.Wait(server->lock);
+		return run->status == RunStatus::Succeeded;
+	}
+
+	Core::String Tasks::RunMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		if (!ws->trusted) throw RpcError(ErrorCode::Forbidden, "tasks run the workspace's code: trust the workspace first");
+		TaskRun* run = RunTask(ws, params.Str("project", Core::StringView("")).View(), params.Str("task", Core::StringView("")).View(), params.Str("slot", Core::StringView("")).View(), params.Field("context"));
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("runId", run->runId.View());

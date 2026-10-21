@@ -57,6 +57,18 @@ Breakpoints are the workspace's, not a session's: a person sets them before any 
 
 Exception filters (F-DBG-14) are per workspace and adapter type, in `.ied/local/exceptions.json`, from the filters the adapter's `initialize` offers.
 
+## The server as built (M3)
+
+`src/dap/`: `providers` (the `dapProviders` contributions; the last loaded plugin's adapter of a type, its `when` checked), `session` (one adapter process: a writer thread, readers for its messages and its errors, requests answered by sequence number, the state and revision), `breakpoints` (the workspace's, `bp.*`) and `service` (the `Debugger`: `dbg.*`, the topics, paths and positions).
+
+- `dbg.start {wsId, project?, configuration?}` resolves the configuration through the task system (`docs/06`: the project's `debug` over its presets', strings expanded with the task variables), starts its `preLaunchTask` with `task.run`'s rules and the adapter when it succeeds, and answers `{sessionId, topic}`. An untrusted workspace answers `forbidden`; no configuration, or no adapter of its `type`, `not_found`.
+- The adapter gets `initialize`, then `launch` / `attach` with the configuration's object; its `initialized` event gets every file's breakpoints (enabled ones; a condition, hit count or log message the adapter's capabilities do not take is not sent and reported unverified with the reason), `setExceptionBreakpoints` with the filters the adapter marks `default`, and `configurationDone`.
+- Topics: `dbg:<wsId>` (snapshot `{sessions: [summary]}`, event `dbg.session` with a summary: `{id, name, project, type, state, revision, problem, exitCode, stop: {threadId, reason, description} | null}`) and `dbg:<wsId>:<sessionId>` (snapshot `{session, threads, frames, output: [text]}`; events `dbg.state` (a summary), `dbg.stopped` (`{session, threads, frames}`: the stopped thread's top 20 frames, fetched before the stop is published), `dbg.output` (`{category, text}`, also appended to the `debug` output source)). `dbg.sessions {wsId}` answers the workspace snapshot. The last ten ended sessions are kept.
+- A frame is `{id, name, line, column, presentationHint?, source: {name, path | uri, sourceReference?}}`, lines and columns from 0.
+- Controls answer `{revision}`: continue and the steps move the session to `running` at once (the revision grows), so a second press from the same revision is a `conflict`.
+- `bp:<wsId>`: snapshot `{files: [{path, breakpoints}], bound: [{sessionId, path, breakpoints: [{line, verified, boundLine, message?}]}]}`; events `bp.changed` (a file's breakpoints), `bp.bound` (a session's binding of a file), `bp.unbound` (`{sessionId}`, the session ended). `bp.set` answers the file's breakpoints; `bp.list {wsId}` the snapshot.
+- Not yet: breakpoints following edits, choosing exception filters (Exception Settings), `runInTerminal` and `startDebugging` (refused, so an adapter does without), TCP adapters, and the adapter's templates for a project without configurations.
+
 ## What the host does not do
 
 It never interprets a debugger's data beyond paths and positions: values, types and expressions are the adapter's. It does not build: the pre-launch task is the task system's, which invokes the build system (`docs/06`). It does not decide where a program's console goes: an adapter asks for `runInTerminal` when it wants one.

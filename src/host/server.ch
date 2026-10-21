@@ -21,6 +21,7 @@ include "appdata.ch"
 include "settings/service.ch"
 include "lsp/pool.ch"
 include "tasks/service.ch"
+include "dap/service.ch"
 
 namespace Ied
 {
@@ -60,6 +61,8 @@ namespace Ied
 		public Diagnostics* diagnostics;
 		public LspPool* lsp;
 		public Tasks* tasks;
+		public Breakpoints* breakpoints;
+		public Debugger* debugger;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;

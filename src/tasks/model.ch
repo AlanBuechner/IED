@@ -1,5 +1,6 @@
-// What a project offers to run (docs/06 "Task model", "Protocol and state"): the variables, tasks and toolbar of its
-// presets with its own file's over them by key. Read from JSON (shared/host-api/schemas/project.v1.schema.json).
+// What a project offers to run (docs/06 "Task model", "Protocol and state"): the variables, tasks, toolbar and debug
+// configurations of its presets with its own file's over them by key. Read from JSON
+// (shared/host-api/schemas/project.v1.schema.json).
 
 include "bedrock.ch"
 
@@ -48,19 +49,41 @@ namespace Ied
 		public Core::Array<TaskStep*> steps;
 	}
 
+	// A debug configuration (docs/25 "Launch configurations"): {type, request, preLaunchTask?, ...adapter arguments}.
+	class DebugConfig
+	{
+		public Core::String name;
+		public Serialization::DomNode node;
+	}
+
+	// A configuration ready to launch: its strings expanded, `arguments` the whole object as JSON.
+	class DebugLaunch
+	{
+		public Core::String project;
+		public Core::String name;
+		public Core::String type;
+		public Core::String request;          // launch or attach
+		public Core::String preLaunchTask;
+		public Core::String arguments;
+	}
+
 	class OfferedTasks
 	{
 		public Core::Array<TaskVariable*> variables;
 		public Core::Array<TaskDef*> tasks;
 		public Core::Array<Core::String> toolbar;
+		public Core::Array<DebugConfig*> debugConfigs;
+		public Core::String debugDefault;
 		public Core::Array<Core::String> problems;
 
 		public TaskVariable* Variable(Core::StringView key) const;
 		public TaskDef* Task(Core::StringView key) const;
 		public TaskDef* InSlot(Core::StringView slot) const;
+		// The configuration named `name`; empty: the default, else the first. Null when there is none.
+		public DebugConfig* Debug(Core::StringView name) const;
 	}
 
-	// A project file's or a preset's `variables`, `tasks` and `toolbar` into `into`, each key replacing an earlier one
-	// and a toolbar the earlier toolbar; what does not read is a problem.
+	// A project file's or a preset's `variables`, `tasks`, `toolbar` and `debug` into `into`, each key (and a debug
+	// configuration's name) replacing an earlier one and a toolbar the earlier toolbar; what does not read is a problem.
 	void ReadTaskEntries(const Serialization::DomNode& node, Core::StringView origin, OfferedTasks& into);
 }

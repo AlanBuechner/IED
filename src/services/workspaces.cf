@@ -179,6 +179,8 @@ namespace Ied
 		server->diagnostics->WorkspaceOpened(ws);
 		server->lsp->WorkspaceOpened(ws);
 		server->tasks->WorkspaceOpened(ws);
+		server->breakpoints->WorkspaceOpened(ws);
+		server->debugger->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;

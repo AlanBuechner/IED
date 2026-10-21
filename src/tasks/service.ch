@@ -31,6 +31,14 @@ namespace Ied
 		public void WorkspaceOpened(Workspace* ws);
 		// The project files changed (or the plugins): the offer is published again.
 		public void ProjectsChanged(Workspace* ws);
+		// Starts the task `key` (or the one in `slot`) of `projectName` (empty: the startup project), as task.run does.
+		// Throws not_found and bad_request as task.run answers them.
+		public TaskRun* RunTask(Workspace* ws, Core::StringView projectName, Core::StringView key, Core::StringView slot, const Serialization::DomNode& context);
+		// Waits, the lock released, until `run` ends: whether it succeeded.
+		public bool AwaitEnd(TaskRun* run);
+		// The debug configuration `name` (empty: the default) of `projectName` (empty: the startup project), its strings
+		// expanded as a task's are. Throws not_found when the project has none.
+		public DebugLaunch ResolveDebug(Workspace* ws, Core::StringView projectName, Core::StringView name);
 
 	private:
 		private Core::Array<TaskProject*> ProjectsOf(Workspace* ws) const;
@@ -46,6 +54,8 @@ namespace Ied
 
 		// The run of `task` planned for `project`; throws bad_request naming what does not expand or exist.
 		private TaskRun* Plan(Workspace* ws, const TaskProject* project, const OfferedTasks* offered, const TaskDef* task, const Serialization::DomNode& context);
+		// What ${...} stands for in `project`'s tasks and debug configurations (docs/06 "Variables").
+		private TaskLookup LookupFor(Workspace* ws, const TaskProject* project, const OfferedTasks* offered, const Serialization::DomNode& context);
 		// `entry` is the onlyIf of the step that runs `task` (a task step's), given to its first step when that one has the
 		// default.
 		private void PlanSteps(TaskRun* run, const TaskDef* task, const OfferedTasks* offered, const TaskLookup& lookup, Core::Array<Core::String>& nesting, OnlyIf entry);

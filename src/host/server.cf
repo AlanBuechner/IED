@@ -38,6 +38,8 @@ namespace Ied
 		diagnostics = new Diagnostics(self);
 		lsp = new LspPool(self);
 		tasks = new Tasks(self);
+		breakpoints = new Breakpoints(self);
+		debugger = new Debugger(self);
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
 		workspaces = new Workspaces(self);
 		if (config.testHooks) testHooks = new TestHooks(self);

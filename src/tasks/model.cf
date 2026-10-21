@@ -102,6 +102,33 @@ namespace Ied
 			else PutTask(into, task);
 		}
 		if (node.Member("toolbar").Kind() == Serialization::DomKind::Array) into.toolbar = StringList(node.Member("toolbar"));
+		ReadDebugEntries(node.Member("debug"), origin, into);
+	}
+
+	static void ReadDebugEntries(const Serialization::DomNode& debug, Core::StringView origin, OfferedTasks& into) {
+		if (debug.Kind() != Serialization::DomKind::Object) return;
+		if (debug.Member("default").Kind() == Serialization::DomKind::String) into.debugDefault = Core::String(debug.Member("default").AsView());
+		Serialization::DomNode configurations = debug.Member("configurations");
+		for (int64 i = 0; configurations.Kind() == Serialization::DomKind::Object && i < configurations.Count(); ++i) {
+			Serialization::DomNode node = configurations.ValueAt(i);
+			if (node.Member("type").AsView().IsEmpty() || node.Member("request").AsView().IsEmpty()) {
+				into.problems.Push((((Core::String(origin) + ": the debug configuration ") + configurations.KeyAt(i)) + " needs a type and a request"));
+				continue;
+			}
+			DebugConfig* config = new DebugConfig();
+			config->name = Core::String(configurations.KeyAt(i));
+			config->node = node;
+			PutDebug(into, config);
+		}
+	}
+
+	static void PutDebug(OfferedTasks& into, DebugConfig* config) {
+		for (int64 i = 0; i < into.debugConfigs.Count(); ++i)
+			if (into.debugConfigs[i]->name.View() == config->name.View()) {
+				into.debugConfigs[i] = config;
+				return;
+			}
+		into.debugConfigs.Push(config);
 	}
 
 	TaskVariable* OfferedTasks::Variable(Core::StringView key) const {
@@ -120,5 +147,12 @@ namespace Ied
 		for (TaskDef* task : tasks)
 			if (task->slot.View() == slot) return task;
 		return nullptr;
+	}
+
+	DebugConfig* OfferedTasks::Debug(Core::StringView name) const {
+		Core::StringView wanted = name.IsEmpty() ? debugDefault.View() : name;
+		for (DebugConfig* config : debugConfigs)
+			if (config->name.View() == wanted) return config;
+		return name.IsEmpty() && !debugConfigs.IsEmpty() ? debugConfigs[0] : nullptr;
 	}
 }
