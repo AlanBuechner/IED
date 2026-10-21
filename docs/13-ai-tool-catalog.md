@@ -122,10 +122,10 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 
 | ID | Tool | Class | Notes |
 |---|---|---|---|
-| T-MED-1 | `image_view(path or url)` | read | Sends the image to a vision model; non-vision groups get a text description from the `vision` role. |
+| T-MED-1 | `image_view(path or url)` | read | Sends the image to a vision model; non-vision groups get a text description from the `vision` role. **Built** for a workspace path (`plugins/chat/code/media.cf`): offered with the core tools until groups and `tools_enable` exist; a model that does not take images is told the path. Not yet: a URL, the `vision` role's description. |
 | T-MED-2 | `video_frames(path, every_s? or count?, range?)` | read | Extracts frames (bundled ffmpeg or Media Foundation) and sends them as images. |
 | T-MED-3 | `image_compare(a, b, threshold?)` | read | Pixel diff: changed-pixel %, bounding boxes, diff image - for visual regression in games/UI. |
-| T-MED-4 | `image_info(path)` | read | Dimensions, format, mips, alpha, color space where detectable. |
+| T-MED-4 | `image_info(path)` | read | Dimensions, format, mips, alpha, color space where detectable. **Built** (`plugins/chat/code/imageinfo.cf`): PNG, JPEG, GIF, WebP, BMP and DDS from the first 256 KB - "DDS, 1024x2048, 12 mips, cube, BC7_UNORM_SRGB (sRGB)"; with the core tools until groups exist. |
 | T-MED-5 | `screenshot_window(process or title)` | read | Capture a running app's window (Windows Graphics Capture) - e.g. the game being developed. |
 | T-MED-6 | `screenshot_ied(view?)` | read | Screenshot of an IED view (for plugin/UI development and self-verification). |
 
@@ -184,7 +184,6 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | T-PRF-4 | `profile_frame(capture, index or "worst")` | read | Breakdown of one frame: CPU zones per task, GPU passes. |
 | T-PRF-5 | `profile_leaks(capture, group_by: callstack|pool)` | read | Live allocations at end. |
 | T-PRF-6 | `profile_compare(a, b)` | read | Zone and frame-time deltas. |
-
 | T-PRF-7 | `profile_list()` | read | The workspace's captures, newest first, live ones first. |
 | T-PRF-8 | `profile_find_zone(capture, name, from_ms?, to_ms?)` | read | One zone's distribution and slowest instances. |
 | T-PRF-9 | `profile_flame(capture, from_ms?, to_ms?, depth?, min_percent?)` | read | The call tree merged by name, as indented text; from samples for pprof imports. |
@@ -241,6 +240,6 @@ Budgets scale down automatically for models with small context windows (proporti
 
 ## As built (M4, first slice, 2026-10-21)
 
-The core set in `plugins/chat/code/`: `fs_read`, `fs_write`, `fs_edit` (exact text, all or none; `\n` in old and new matches a file's `\r\n`), `fs_list`, `fs_glob`, `search_text` (the open documents as edited), `shell_run`, `build_run`, `problems_list`, `tasks_set`, `task_update`, `ask_user`, `finish`. Files are read as the editors have them and written through the document store (an open editor shows the change; the file is saved). Arguments are checked against each tool's JSON Schema (Bedrock's validator); an unknown name is answered with the nearest tools; every result is bounded with how to read on. Writes plan a unified diff for the approval card. `shell_run` runs the command with the system shell in the workspace and shows it with its output in the Output window's "AI" source (the visible AI terminal is to come); it and `build_run` need a trusted workspace.
+The core set in `plugins/chat/code/`: `fs_read`, `fs_write`, `fs_edit` (exact text, all or none; `\n` in old and new matches a file's `\r\n`), `fs_list`, `fs_glob`, `image_view` (T-MED-1, a workspace image shown to the model), `image_info` (T-MED-4, an image's header), `search_text` (the open documents as edited), `shell_run`, `build_run`, `problems_list`, `tasks_set`, `task_update`, `ask_user`, `finish`. Files are read as the editors have them and written through the document store (an open editor shows the change; the file is saved). Arguments are checked against each tool's JSON Schema (Bedrock's validator); an unknown name is answered with the nearest tools; every result is bounded with how to read on. Writes plan a unified diff for the approval card. `shell_run` runs the command with the system shell in the workspace and shows it with its output in the Output window's "AI" source (the visible AI terminal is to come); it and `build_run` need a trusted workspace.
 
 Not yet: the `code_*` LSP tools, `tools_enable` and every group.

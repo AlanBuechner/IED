@@ -362,6 +362,35 @@ class ChatTests(ServerTestCase):
 		self.assertIsNone(progress[-1], "cleared when the reply starts")
 		self.assertNotIn("return_progress", self.model.requests()[-1]["body"], "only llama.cpp is asked for progress")
 
+	async def test_image_info_reads_a_texture_header(self):
+		header = b"DDS " + bytes(8) + (512).to_bytes(4, "little") + (256).to_bytes(4, "little") + bytes(8) + (10).to_bytes(4, "little") + bytes(48)
+		header += (4).to_bytes(4, "little") + b"DXT1" + bytes(40)
+		with open(os.path.join(self.repo, "rock.dds"), "wb") as out:
+			out.write(header)
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("image_info", {"path": "rock.dds"}, "i1"), call_step("image_info", {"path": "src/main.c"}, "i2"), text_step("A texture."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		results = {m["tool_call_id"]: m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"}
+		self.assertIn("rock.dds: DDS, 256x512, 10 mips, DXT1 (BC1)", results["i1"])
+		self.assertIn("it is not a PNG, JPEG, GIF, WebP, BMP or DDS file", results["i2"])
+
+	async def test_image_view_shows_a_workspace_image(self):
+		os.makedirs(os.path.join(self.repo, "shots"))
+		with open(os.path.join(self.repo, "shots", "menu.png"), "wb") as out:
+			out.write(b"\x89PNG\r\n\x1a\n")
+		await self.use_model({"vision": True})
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("image_view", {"path": "shots/menu.png"}, "v1"), call_step("image_view", {"path": "src/main.c"}, "v2"), text_step("Seen."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS * 2))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		parts = [p for m in sent if m["role"] == "user" and isinstance(m["content"], list) for p in m["content"]]
+		self.assertIn("call v1, shots/menu.png", parts[0]["text"])
+		self.assertTrue(parts[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+		wrong = [m for m in sent if m["role"] == "tool" and m["tool_call_id"] == "v2"][0]
+		self.assertIn("is not a PNG, JPEG, WebP or GIF file", wrong["content"])
+		tool = self.segments(await self.last_turn(chat_id), "tool")[0]
+		self.assertEqual([{"mime": "image/png", "path": "shots/menu.png"}], tool["result"]["images"], "the card shows it")
+
 	async def test_a_tools_images_reach_a_model_that_sees_them(self):
 		png = b"\x89PNG\r\n\x1a\n" + bytes(range(24))
 		os.makedirs(os.path.join(self.repo, "shots"))

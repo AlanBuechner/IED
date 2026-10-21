@@ -4,6 +4,7 @@
 include "files.ch"
 include "work.ch"
 include "skilltools.ch"
+include "media.ch"
 
 namespace Ai
 {

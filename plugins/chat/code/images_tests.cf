@@ -1,6 +1,7 @@
 // images: which images a tool's result names can be sent, and how a request shows them or names them.
 
 include "images.ch"
+include "media.ch"
 
 static Core::StringView ImageView(const char* text) { return Core::StringView(text); }
 
@@ -82,6 +83,15 @@ class ImageTests {
 		assert_eq((int64)30, encoded, "the bytes of the URL, for the estimate");
 		assert_true(parts.At(2).Member("text").AsView().Contains(ImageView("gone.png, is no longer there")), "a file since removed is said");
 		FS::RemoveAll(ws.root.CStr());
+	}
+
+	[test("image_types_by_extension")]
+	public static void TestMime() {
+		assert_true(Ai::ImageMime(ImageView("shots/Menu.PNG")).View() == "image/png", "any case");
+		assert_true(Ai::ImageMime(ImageView("a.jpeg")).View() == "image/jpeg" && Ai::ImageMime(ImageView("a.jpg")).View() == "image/jpeg", "both JPEG names");
+		assert_true(Ai::ImageMime(ImageView("t.webp")).View() == "image/webp" && Ai::ImageMime(ImageView("t.gif")).View() == "image/gif", "WebP, GIF");
+		assert_true(Ai::ImageMime(ImageView("logo.svg")).IsEmpty() && Ai::ImageMime(ImageView("README")).IsEmpty(), "none the format takes");
+		assert_true(Ai::ImageMime(ImageView("art.png/notes")).IsEmpty(), "the extension of the file, not of a folder");
 	}
 
 	[test("kept_with_the_chat")]

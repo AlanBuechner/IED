@@ -23,6 +23,7 @@ namespace Ai
 	ToolRegistry* CoreTools() {
 		ToolRegistry* registry = new ToolRegistry();
 		AddFileTools(*registry);
+		AddMediaTools(*registry);
 		AddWorkTools(*registry);
 		AddSkillTools(*registry);
 		AddRunTool(*registry, "tasks_set", "Replace the chat's task list (the owner sees it). Keep exactly one task in_progress. Example: tasks_set({\"items\": [{\"title\": \"Port Log.h\", \"status\": \"in_progress\"}, {\"title\": \"Tests\"}]})",
