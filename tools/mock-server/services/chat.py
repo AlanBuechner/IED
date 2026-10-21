@@ -127,6 +127,7 @@ class Chats:
 		server.hub.add("chats:" + ws_id, lambda: self.list_snapshot(ws_id))
 		self._seed(self._create(ws_id, "Player movement", "agent"))
 		self._create(ws_id, "Scratch", "ask")
+		server.rpc.register("ai.probe", self.m_ai_probe)
 		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
@@ -179,6 +180,14 @@ class Chats:
 				chat.runner.cancel()
 
 	# --- methods -----------------------------------------------------------------------------------------------------
+
+	async def m_ai_probe(self, call, p):
+		"""A canned answer (docs/10 ai.probe): a profile's endpoint on port 9 is unreachable, any other a llama.cpp."""
+		profile = p.raw.get("profile") if "profile" in p.raw else {"endpoint": "http://127.0.0.1:8080/v1", "model": p.str("model")}
+		if ":9/" in profile.get("endpoint", ""):
+			return {"ok": False, "error": "connection refused", "server": "OpenAI-compatible", "models": [], "modelServed": False, "contextWindow": 0, "trainContext": 0, "slots": 0, "ms": 0}
+		model = profile.get("model", MODEL)
+		return {"ok": True, "server": "llama.cpp", "models": [model], "modelServed": True, "contextWindow": 32768, "trainContext": 131072, "slots": 2, "ms": 4}
 
 	async def m_chat_list(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id

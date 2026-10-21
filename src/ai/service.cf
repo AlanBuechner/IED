@@ -6,6 +6,7 @@ namespace Ied
 {
 	const char* kInterruptedNote = "This call was interrupted by a server restart; its effect is unknown. Check the current state before retrying it.";
 	const int64 kTitleMostBytes = 48;
+	const int64 kProbeWaitSliceNs = 50000000;
 
 	Core::String ChatsTopic(const Workspace* ws) { return Core::String("chats:") + ws->wsId.View(); }
 
@@ -26,6 +27,7 @@ namespace Ied
 		server->rpc.Register("chat.approve", [self](Call& call, const Params& params) -> Core::String { return self->ApproveMethod(call, params); });
 		server->rpc.Register("chat.answer", [self](Call& call, const Params& params) -> Core::String { return self->AnswerMethod(call, params); });
 		server->rpc.Register("chat.history", [self](Call& call, const Params& params) -> Core::String { return self->HistoryMethod(call, params); });
+		server->rpc.Register("ai.probe", [self](Call& call, const Params& params) -> Core::String { return self->ProbeMethod(call, params); });
 		server->rpc.Register("chat.delete", [self](Call& call, const Params& params) -> Core::String { return self->DeleteMethod(call, params); });
 	}
 
@@ -353,5 +355,49 @@ namespace Ied
 		data.EndObject();
 		server->hub.Publish(ChatsTopic(ws).View(), "chat.deleted", data.View());
 		return Core::String("{}");
+	}
+	// --- Model probes ------------------------------------------------------------------------------------------------
+
+	class ProbeJob
+	{
+		public bool done;
+		public ModelProbe probe;
+	}
+
+	// ai.probe {wsId, model} asks a profile's server what it serves (settings' "Test connection"); {wsId, profile} tests a
+	// profile not saved yet (an ai.models entry). What it learns of a saved profile's window is kept for its turns.
+	Core::String Chats::ProbeMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		Core::Array<Core::String> problems;
+		Core::Array<ModelProfile*> models;
+		Core::String name;
+		if (params.Has("profile")) {
+			name = Core::String("probe");
+			models = ReadModels((Core::String("{\"probe\": ") + NodeJson(params.Field("profile")).View() + "}").View(), problems);
+		}
+		else {
+			name = params.Str("model");
+			models = ReadModels(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.models")).View(), problems);
+		}
+		ModelProfile* profile = FindModel(models, name.View());
+		if (!profile) throw RpcError(ErrorCode::BadRequest, (problems.IsEmpty() ? (Core::String("no model ") + name.View() + " in ai.models") : problems[0]).View());
+		ProbeJob* job = new ProbeJob();
+		CancelToken* cancel = call.cancel;
+		Server* host = server;
+		ModelProfile* asked = profile;
+		Threading::Thread::Run([job, asked, cancel, host]() {
+			ModelProbe probe = ProbeModel(*asked, kProbeTimeoutMs);
+			Threading::LockGuard guard(host->lock);
+			job->probe = probe;
+			job->done = true;
+			cancel->wake.NotifyAll();
+		}).Detach();
+		while (!job->done && !cancel->IsCancelled()) cancel->wake.WaitFor(server->lock, kProbeWaitSliceNs);
+		if (!job->done) throw RpcError(ErrorCode::Cancelled, "request cancelled");
+		if (!params.Has("profile") && job->probe.contextWindow > 0) {
+			windows.At(name) = job->probe.contextWindow;
+			probed.At(name) = true;
+		}
+		return job->probe.JsonText();
 	}
 }

@@ -82,10 +82,10 @@
 		},
 		"ai.maxSteps": {
 			"type": "integer",
-			"minimum": 1,
-			"default": 100,
+			"minimum": 0,
+			"default": 0,
 			"x-ied-tiers": ["app", "solution"],
-			"description": "Model requests one turn may make before it pauses (docs/12 Budgets)."
+			"description": "Model requests one turn may make before it pauses; 0 is no limit (docs/12 Budgets). Loop and no-progress detection still pause a turn that runs away."
 		}
 	}
 }

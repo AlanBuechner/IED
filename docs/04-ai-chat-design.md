@@ -44,7 +44,7 @@ A **model group** assigns, per **role**, a model + temperature + effort + fallba
 }
 ```
 
-Groups are defined at app tier; a solution can pick its default group or override roles; each chat selects a group (and effort). This is the plan's "Claude plans, a temp-0 local model implements" made concrete (journey J3).
+Groups are defined at app tier; a solution can pick its default group or override roles; each chat selects a group (and effort). A role a group leaves unset is **off** and uses the group's `primary` (a group without `primary` uses the first model in `ai.models`); a new group turns on `primary` alone, so the finer roles stay off until the owner gives one its own model. This is the plan's "Claude plans, a temp-0 local model implements" made concrete (journey J3).
 
 ## Scheduling and routing
 
@@ -128,10 +128,10 @@ The runtime lives in `src/ai/` (host infrastructure; the `ied.chat` plugin is it
 
 | Part | Files | Does |
 |---|---|---|
-| Wire | `wire/sse`, `wire/post`, `wire/completion`, `wire/dialect` | SSE events and comments; a streaming POST over Bedrock `Net::`/`Http::`; a completion put together from chunks (reasoning fields, calls merged by id then index, usage and llama.cpp timings, errors in the stream, malformed chunks counted and skipped); `<think>` blocks split from content across chunks and calls written as text in six dialects |
+| Wire | `wire/sse`, `wire/request`, `wire/completion`, `wire/dialect` | SSE events and comments; streaming requests (a POST, or a GET) over Bedrock `Net::`/`Http::`; a completion put together from chunks (reasoning fields, calls merged by id then index, usage and llama.cpp timings, errors in the stream, malformed chunks counted and skipped); `<think>` blocks split from content across chunks and calls written as text in six dialects |
 | Step | `step` | one request under the watchdogs, text released with a held tail so a call's markup never shows as prose |
 | Classification | `classify` | the stop taxonomy of `docs/12`, `announced_no_action` from the reply's last sentence |
-| Models | `models` | profiles (`ai.models`) and a group's role candidates (`ai.groups`): the role's model, then its fallbacks |
+| Models | `models`, `probe` | profiles (`ai.models`) and a group's role candidates (`ai.groups`): the role's model, then its fallbacks, an off role the primary; what a model's server says of itself |
 | Permissions | `permissions` | `ai.permissions` rules and the chat's mode (`docs/11`) |
 | Tools | `tools/` | the core toolset (`docs/13` "As built") |
 | Prompts | `prompts` | the system message from `src/ai/prompts/` (base, style, mode, the workspace's `AGENTS.md`, a workspace summary) and the harness notes by name |
@@ -146,8 +146,10 @@ The runtime lives in `src/ai/` (host infrastructure; the `ied.chat` plugin is it
 | `ai.groups` | app | `{<group>: {<role>: {model, temperature?, effort?, fallback?: [names]}}}`; a turn uses the role `primary` |
 | `ai.defaultGroup` | app, solution | the group of a chat that names none; empty: the first group; with no group at all, the first model |
 | `ai.permissions` | app | `{allow, confirm, deny}`: lists of `kind(pattern)` rules |
-| `ai.maxSteps` | app, solution | model requests per turn before it pauses (100) |
+| `ai.maxSteps` | app, solution | model requests per turn before it pauses; 0, the default, is no limit |
 
 **Persistence:** per chat under `<workspace>/.ied/local/chats/<chatId>/`: `chat.json` (title, mode, permission, group, tasks, queued messages, the rules allowed for the chat, the files the AI changed), `turns.jsonl` (each finished turn with the messages the model was sent) and `running.json` (the turn in flight, written at every step and tool boundary). A `running.json` found at start is a turn a restart interrupted: it ends `interrupted`, a call it had running gets a result saying its effect is unknown, and the chat waits paused for the next message.
 
-**Not yet:** the Anthropic and Claude Code providers, context discovery (`/props`, `/api/show`), the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), skills, MCP, attachments and @-mentions, sub-agents, checkpoints and rewind, the trajectory files.
+**Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`); a turn on a profile without `contextWindow` asks once and uses the slot context it reports. Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
+
+**Not yet:** the Anthropic and Claude Code providers, Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), skills, MCP, attachments and @-mentions, sub-agents, checkpoints and rewind, the trajectory files.

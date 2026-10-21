@@ -1,5 +1,5 @@
 include "step.ch"
-include "wire/post.ch"
+include "wire/request.ch"
 include "wire/sse.ch"
 include "wire/dialect.ch"
 
@@ -123,27 +123,27 @@ namespace Ied
 	}
 
 	// A refused request's body, bounded: the server says why there.
-	static Core::String ErrorBody(StreamingPost& post) {
+	static Core::String ErrorBody(StreamingRequest& http) {
 		Core::String body;
 		const int64 until = StepNowMs() + kStepErrorBodyMs;
 		while (StepNowMs() < until && body.ByteLength() < kStepErrorBodyBytes) {
-			const PostRead read = post.Read(body, kStepPollMs);
-			if (read == PostRead::Ended || read == PostRead::Failed) break;
+			const BodyRead read = http.Read(body, kStepPollMs);
+			if (read == BodyRead::Ended || read == BodyRead::Failed) break;
 		}
 		return body;
 	}
 
-	static bool AwaitHead(StreamingPost& post, StepStream& stream, const bool* cancelled) {
+	static bool AwaitHead(StreamingRequest& http, StepStream& stream, const bool* cancelled) {
 		for (;;) {
 			if (*cancelled) {
 				stream.result->end = WireEnd::Cancelled;
 				return false;
 			}
-			const PostRead read = post.ReadHead(kStepPollMs);
-			if (read == PostRead::Bytes) return true;
-			if (read == PostRead::Failed) {
+			const BodyRead read = http.ReadHead(kStepPollMs);
+			if (read == BodyRead::Bytes) return true;
+			if (read == BodyRead::Failed) {
 				stream.result->end = WireEnd::ConnectFailed;
-				stream.result->error = Core::String(post.Error());
+				stream.result->error = Core::String(http.Error());
 				return false;
 			}
 			if (StepNowMs() > stream.prefillDeadlineMs) {
@@ -163,7 +163,7 @@ namespace Ied
 		return true;
 	}
 
-	static void ReadEvents(StreamingPost& post, StepStream& stream, const StepRequest& request, const bool* cancelled) {
+	static void ReadEvents(StreamingRequest& http, StepStream& stream, const StepRequest& request, const bool* cancelled) {
 		SseReader sse;
 		SseEvent event;
 		int64 knownCalls = 0;
@@ -173,7 +173,7 @@ namespace Ied
 				return;
 			}
 			Core::String bytes;
-			const PostRead read = post.Read(bytes, kStepPollMs);
+			const BodyRead read = http.Read(bytes, kStepPollMs);
 			if (!bytes.IsEmpty()) {
 				stream.lastByteMs = StepNowMs();
 				sse.Feed(bytes.View());
@@ -183,14 +183,14 @@ namespace Ied
 					return;
 				}
 			}
-			if (read == PostRead::Ended || read == PostRead::Failed) {
+			if (read == BodyRead::Ended || read == BodyRead::Failed) {
 				if (sse.Flush(event)) TakeEvent(stream, event, knownCalls);
 				const bool ended = stream.result->completion->done || !stream.result->completion->finishReason.IsEmpty();
 				stream.result->end = ended ? WireEnd::Completed : WireEnd::Disconnected;
-				if (!ended && read == PostRead::Failed) stream.result->error = Core::String(post.Error());
+				if (!ended && read == BodyRead::Failed) stream.result->error = Core::String(http.Error());
 				return;
 			}
-			if (read == PostRead::Waiting && Stalled(stream, request)) return;
+			if (read == BodyRead::Waiting && Stalled(stream, request)) return;
 		}
 	}
 
@@ -202,22 +202,22 @@ namespace Ied
 		stream.lastByteMs = stream.startMs;
 		stream.prefillDeadlineMs = stream.startMs + request.prefillMs;
 		stream.prefillExtendMs = request.prefillExtendMs;
-		StreamingPost post;
+		StreamingRequest http;
 		Core::String error;
-		if (!post.Send(request.url.View(), request.headers, request.body.View(), request.connectMs, error)) {
+		if (!http.Send(request.url.View(), request.headers, request.body.View(), request.connectMs, error)) {
 			stream.result->end = WireEnd::ConnectFailed;
 			stream.result->error = error;
 		}
-		else if (AwaitHead(post, stream, cancelled)) {
-			stream.result->httpStatus = post.Status();
-			if (post.Status() != 200) {
+		else if (AwaitHead(http, stream, cancelled)) {
+			stream.result->httpStatus = http.Status();
+			if (http.Status() != 200) {
 				stream.result->end = WireEnd::HttpError;
-				stream.result->retryAfterMs = RetryAfterMs(post.Head());
-				stream.result->error = ErrorBody(post);
+				stream.result->retryAfterMs = RetryAfterMs(http.Head());
+				stream.result->error = ErrorBody(http);
 			}
-			else ReadEvents(post, stream, request, cancelled);
+			else ReadEvents(http, stream, request, cancelled);
 		}
-		post.Close();
+		http.Close();
 		Finish(stream);
 		stream.result->ms = StepNowMs() - stream.startMs;
 		return stream.result;

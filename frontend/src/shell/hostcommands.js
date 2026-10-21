@@ -48,6 +48,7 @@ const COMMANDS = [
 	{ id: "shell.switchWorkspace", title: "Switch Workspace...", category: "File", run: (shell, args) => showWorkspaceSwitcher(shell, args && args.at) },
 	{ id: "shell.trustWorkspace", title: "Trust Workspace", category: "File", enablement: "!workspaceTrusted", run: (shell) => shell.client.request("ws.setTrust", { wsId: shell.wsId, trusted: true }) },
 	{ id: "shell.keyboardShortcuts", title: "Keyboard Shortcuts", category: "Help", icon: "$(record-keys)", run: (shell) => shell.openTab("shell:keys") },
+	{ id: "shell.settings", title: "Settings", category: "Tools", icon: "$(settings-gear)", run: (shell) => shell.openTab("shell:settings") },
 	{ id: "shell.plugins", title: "Manage Plugins", category: "Extensions", icon: "$(extensions)", run: (shell) => shell.openTab("shell:plugins") },
 	{ id: "shell.about", title: "About IED", category: "Help", run: (shell) => shell.openTab("shell:about") },
 ];
@@ -74,8 +75,9 @@ const MENUS = {
 	],
 	"shell/manage": [
 		{ command: "shell.commandPalette", group: "1_palette" },
-		{ command: "shell.keyboardShortcuts", group: "2_settings" },
-		{ command: "shell.plugins", group: "2_settings", order: 1 },
+		{ command: "shell.settings", group: "2_settings" },
+		{ command: "shell.keyboardShortcuts", group: "2_settings", order: 1 },
+		{ command: "shell.plugins", group: "2_settings", order: 2 },
 		{ command: "shell.resetLayout", group: "3_layout" },
 		{ command: "shell.about", group: "9_about" },
 	],

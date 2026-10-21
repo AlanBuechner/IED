@@ -6,12 +6,12 @@ include "chatstore.ch"
 include "prompts.ch"
 include "models.ch"
 include "tools/catalog.ch"
+include "probe.ch"
 include "web/rpc.ch"
 
 namespace Ied
 {
 	const int64 kChatSnapshotTurns = 20;
-	const int64 kChatDefaultMaxSteps = 100;
 	const char* kNewChatTitle = "New chat";
 
 	class Chats
@@ -37,7 +37,8 @@ namespace Ied
 		public Prompts prompts;
 		public ToolRegistry* tools;
 		public Core::HashMap<Core::String, double> prefillRates;   // model -> prompt tokens per second, measured
-		public Core::HashMap<Core::String, int64> windows;         // model -> context size a server's error named
+		public Core::HashMap<Core::String, int64> windows;         // model -> context size its server reported or an error named
+		public Core::HashMap<Core::String, bool> probed;           // models whose server was asked (docs/12 discovery)
 
 	private:
 		private Core::String Snapshot(Chat* chat);
@@ -54,6 +55,7 @@ namespace Ied
 		private Core::String AnswerMethod(Call& call, const Params& params);
 		private Core::String HistoryMethod(Call& call, const Params& params);
 		private Core::String DeleteMethod(Call& call, const Params& params);
+		private Core::String ProbeMethod(Call& call, const Params& params);
 
 		private Server* server;
 		private Core::Array<Chat*> chats;

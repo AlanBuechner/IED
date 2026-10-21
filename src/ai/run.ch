@@ -35,6 +35,7 @@ namespace Ied
 
 		// --- run.cf: the loop ---
 		private bool Prepare();
+		private void Discover();
 		private void Step();
 		private void Handle(StepVerdict verdict, StepResult* result);
 		private void Progress();
@@ -89,6 +90,7 @@ namespace Ied
 		private RoleModel role;
 		private Core::String system;
 		private PermissionRules rules;
+		// ai.maxSteps; 0 is no limit.
 		private int64 maxSteps;
 		private int64 steps;
 		private int64 attempts;

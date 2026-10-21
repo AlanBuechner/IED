@@ -1,0 +1,124 @@
+include "probe.ch"
+include "wire/request.ch"
+include "web/json.ch"
+
+namespace Ied
+{
+	const int32 kProbePollMs = 100;
+
+	static int64 ProbeNowMs() { return clock_now_ns() / 1000000; }
+
+	static Serialization::DomNode ParseProbeJson(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(json, *doc);
+		return read.Ok() ? read.root : Serialization::DomNode();
+	}
+
+	Core::String ServerRoot(Core::StringView endpoint) {
+		Core::StringView root = endpoint;
+		while (root.EndsWith(Core::StringView("/"))) root = root.Substring(0, root.ByteLength() - 1);
+		if (root.EndsWith(Core::StringView("/v1"))) root = root.Substring(0, root.ByteLength() - 3);
+		return Core::String(root);
+	}
+
+	// A number a server may send as a JSON number or a string.
+	static int64 Count(const Serialization::DomNode& node) {
+		if (node.Kind() != Serialization::DomKind::String) return node.AsInt();
+		int64 value = 0;
+		Core::StringView text = node.AsView();
+		for (int64 i = 0; i < text.ByteLength() && text.ByteAt(i) >= '0' && text.ByteAt(i) <= '9'; ++i) value = value * 10 + (text.ByteAt(i) - '0');
+		return value;
+	}
+
+	void ReadModelList(Core::StringView json, ModelProbe& probe) {
+		Serialization::DomNode data = ParseProbeJson(json).Member("data");
+		for (int64 i = 0; data.Kind() == Serialization::DomKind::Array && i < data.Count(); ++i) {
+			Serialization::DomNode model = data.At(i);
+			probe.models.Push(Core::String(model.Member("id").AsView()));
+			if (probe.contextWindow == 0 && model.Member("max_model_len").IsValid()) probe.contextWindow = Count(model.Member("max_model_len"));
+			if (probe.contextWindow == 0 && model.Member("meta").Member("n_ctx").IsValid()) probe.contextWindow = Count(model.Member("meta").Member("n_ctx"));
+			if (probe.trainContext == 0) probe.trainContext = Count(model.Member("meta").Member("n_ctx_train"));
+		}
+	}
+
+	void ReadProps(Core::StringView json, ModelProbe& probe) {
+		Serialization::DomNode props = ParseProbeJson(json);
+		Serialization::DomNode slotContext = props.Member("default_generation_settings").Member("n_ctx");
+		if (!slotContext.IsValid()) return;
+		probe.server = Core::String("llama.cpp");
+		probe.contextWindow = Count(slotContext);
+		probe.slots = Count(props.Member("total_slots"));
+	}
+
+	// A GET's status and body; false with `error` when nothing usable came back in time.
+	static bool Fetch(Core::StringView url, const Core::Array<Core::String>& headers, int32 timeoutMs, int32& status, Core::String& body, Core::String& error) {
+		StreamingRequest http;
+		if (!http.Get(url, headers, timeoutMs, error)) return false;
+		const int64 until = ProbeNowMs() + timeoutMs;
+		BodyRead read = BodyRead::Waiting;
+		while (read == BodyRead::Waiting && ProbeNowMs() < until) read = http.ReadHead(kProbePollMs);
+		if (read != BodyRead::Bytes) {
+			error = read == BodyRead::Failed ? Core::String(http.Error()) : Core::String("no answer in time");
+			return false;
+		}
+		status = http.Status();
+		while (ProbeNowMs() < until) {
+			read = http.Read(body, kProbePollMs);
+			if (read == BodyRead::Ended) return true;
+			if (read == BodyRead::Failed) {
+				error = Core::String(http.Error());
+				return false;
+			}
+		}
+		error = Core::String("the answer did not finish in time");
+		return false;
+	}
+
+	ModelProbe ProbeModel(const ModelProfile& profile, int32 timeoutMs) {
+		ModelProbe probe;
+		probe.server = Core::String("OpenAI-compatible");
+		Core::Array<Core::String> headers;
+		Core::String key;
+		if (!profile.apiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile.apiKeyEnv.CStr(), key)) headers.Push(Core::String("Authorization: Bearer ") + key.View());
+		const int64 started = ProbeNowMs();
+		int32 status = 0;
+		Core::String body;
+		if (!Fetch((profile.endpoint + "/models").View(), headers, timeoutMs, status, body, probe.error)) return probe;
+		probe.ms = ProbeNowMs() - started;
+		if (status != 200) {
+			Core::StringBuilder said;
+			said.Append("HTTP ");
+			said.AppendInt(status);
+			said.Append(" from /models: ");
+			said.Append(body.View().Substring(0, body.ByteLength() < 200 ? body.ByteLength() : 200));
+			probe.error = said.ToString();
+			return probe;
+		}
+		ReadModelList(body.View(), probe);
+		for (const Core::String& id : probe.models) probe.modelServed = probe.modelServed || id == profile.model;
+		Core::String props;
+		Core::String ignored;
+		if (Fetch((ServerRoot(profile.endpoint.View()) + "/props").View(), headers, timeoutMs, status, props, ignored) && status == 200) ReadProps(props.View(), probe);
+		probe.ok = true;
+		return probe;
+	}
+
+	Core::String ModelProbe::JsonText() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.BoolField("ok", ok);
+		if (!error.IsEmpty()) json.Field("error", error.View());
+		json.Field("server", server.View());
+		json.Key(Core::StringView("models"));
+		json.BeginArray();
+		for (const Core::String& model : models) json.String(model.View());
+		json.EndArray();
+		json.BoolField("modelServed", modelServed);
+		json.IntField("contextWindow", contextWindow);
+		json.IntField("trainContext", trainContext);
+		json.IntField("slots", slots);
+		json.IntField("ms", ms);
+		json.EndObject();
+		return json.ToString();
+	}
+}

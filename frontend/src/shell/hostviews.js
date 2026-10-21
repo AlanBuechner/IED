@@ -1,12 +1,14 @@
 // hostviews.js - the shell's own tabs ("shell:<name>"): Keyboard Shortcuts (the full table from the registries, docs/15),
-// Plugins (the plugin host's state, docs/02) and About.
+// Plugins (the plugin host's state, docs/02), Settings (settingsview.js, docs/07) and About.
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { formatBinding } from "./keys.js";
+import { settingsView } from "./settingsview.js";
 
 const VIEWS = {
 	keys: { title: "Keyboard Shortcuts", icon: "$(record-keys)", view: keysView },
 	plugins: { title: "Plugins", icon: "$(extensions)", view: pluginsView },
+	settings: { title: "Settings", icon: "$(settings-gear)", view: (shell, ctx) => settingsView(shell, ctx) },
 	about: { title: "About IED", icon: "$(info)", view: aboutView },
 };
 

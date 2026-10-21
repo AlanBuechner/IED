@@ -159,6 +159,8 @@ class ChatTests(ServerTestCase):
 		self.assertEqual(("system", "user"), (sent["messages"][0]["role"], sent["messages"][-1]["role"]))
 		self.assertTrue(sent["stream"] and sent["tools"], "a streamed request with the tools")
 		self.assertNotIn("finish", [t["function"]["name"] for t in sent["tools"]], "finish is offered in Agent mode only")
+		context = [f for f in self.frames if f.get("kind") == "context.changed"][-1]["data"]
+		self.assertEqual(32768, context["window"], "a profile without a window gets the server's (its slot context)")
 
 	async def test_reasoning_is_a_thinking_segment(self):
 		for script in ("ok-reasoning-then-answer", "reasoning-field-variants"):
@@ -321,6 +323,26 @@ class ChatTests(ServerTestCase):
 		await self.use_model({}, script="loop-same-call")
 		self.assertEqual("loop_detected", (await self.turn(chat_id))["stop"])
 
+	async def test_steps_are_not_capped_unless_ai_max_steps_says_so(self):
+		chat_id, topic = await self.chat(mode="agent")
+		await self.use_model({}, script="budget-runaway")
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "read them all"})
+		calls = []
+
+		def past_the_old_cap(frame):
+			if frame.get("kind") == "segment.start" and frame["data"].get("type") == "tool":
+				calls.append(frame)
+			return len(calls) > 120 or frame.get("kind") == "turn.end"
+		last = (await self.client.wait_for(topic, past_the_old_cap, timeout=20))[-1]
+		self.assertNotEqual("turn.end", last.get("kind"), "ai.maxSteps 0 (the default) never pauses for steps: %s" % last)
+		await self.client.request("chat.stop", {"chatId": chat_id})
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.maxSteps", "value": 5})
+		self.assertEqual("budget", (await self.turn(chat_id, "again"))["stop"])
+		turn = await self.last_turn(chat_id)
+		self.assertEqual(5, len(self.segments(turn, "tool")), "five model requests, each a call")
+		self.assertTrue(any("80%" in s["text"] for s in self.segments(turn, "harness")), "the 80% note before the pause")
+
 	# --- Recovery ----------------------------------------------------------------------------------------------------
 
 	async def test_each_stop_class_is_recovered(self):
@@ -387,6 +409,18 @@ class ChatTests(ServerTestCase):
 		end = await self.turn(chat_id)
 		self.assertEqual("no_model", end["stop"])
 		self.assertIn("ai.models", self.segments(await self.last_turn(chat_id), "harness")[0]["text"])
+
+	async def test_test_connection_reports_the_server(self):
+		probe = await self.client.request("ai.probe", {"wsId": "w1", "model": "fake"})
+		self.assertEqual((True, "llama.cpp", ["fake-model"], 32768, 1, False), (probe["ok"], probe["server"], probe["models"], probe["contextWindow"], probe["slots"], probe["modelServed"]))
+		unsaved = await self.client.request("ai.probe", {"wsId": "w1", "profile": {"endpoint": self.model.url + "/v1", "model": "fake-model"}})
+		self.assertTrue(unsaved["ok"] and unsaved["modelServed"], unsaved)
+		gone = await self.client.request("ai.probe", {"wsId": "w1", "profile": {"endpoint": "http://127.0.0.1:9/v1", "watchdog": {"connectS": 1}}})
+		self.assertFalse(gone["ok"])
+		self.assertTrue(gone["error"], gone)
+		with self.assertRaises(RpcFailure) as missing:
+			await self.client.request("ai.probe", {"wsId": "w1", "model": "nope"})
+		self.assertEqual("bad_request", missing.exception.code)
 
 	# --- Steering and stopping ---------------------------------------------------------------------------------------
 

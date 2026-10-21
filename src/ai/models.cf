@@ -78,7 +78,7 @@ namespace Ied
 
 	Core::Array<ModelProfile*> RoleCandidates(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& chosen) {
 		Core::Array<ModelProfile*> candidates;
-		if (!ReadRole(groupsJson, group, role, chosen)) {
+		if (!ReadRole(groupsJson, group, role, chosen) && (role == "primary" || !ReadRole(groupsJson, group, Core::StringView("primary"), chosen))) {
 			if (!models.IsEmpty()) candidates.Push(models[0]);
 			return candidates;
 		}

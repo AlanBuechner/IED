@@ -47,7 +47,7 @@ namespace Ied
 	// The role `role` of `group` in the ai.groups value; false when the group has no such role.
 	bool ReadRole(Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& into);
 	// The models `role` of `group` tries in order - its model, then its fallbacks - of those `models` has; `chosen` gets
-	// the role. Without the role, the first model alone.
+	// the role. A role the group leaves off is its primary; without a primary either, the first model alone.
 	Core::Array<ModelProfile*> RoleCandidates(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& chosen);
 	// The groups in the ai.groups value, by name.
 	Core::Array<Core::String> GroupNames(Core::StringView groupsJson);

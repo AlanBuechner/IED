@@ -64,7 +64,7 @@ OpenAI-compatible provider with discovery and probing; dialect adapters; **full 
 
 **Exit:** J11 (all scripted stop classes recover and explain themselves), J4 against a real local model, a 2-hour unattended Agent-mode run on the owner's box with zero unexplained stops.
 
-**Status (2026-10-21):** the runtime with the full stall/recovery harness against the fake model's every script (J11's scripted half), the core tools, permissions and approvals, persistence with restart recovery, and the Chat activity at desktop and phone width are built (WORK.md M4, `docs/04` "As built"). Open: discovery and probing, the code tools, AI terminals, the scheduler and privacy classes, @-mentions and attachments, the trajectory, J4 and the 2-hour run.
+**Status (2026-10-21):** the runtime with the full stall/recovery harness against the fake model's every script (J11's scripted half), the core tools, permissions and approvals, persistence with restart recovery, and the Chat activity at desktop and phone width are built (WORK.md M4, `docs/04` "As built"). Discovery and probing (`ai.probe`, the slot context) and the settings window's Models and Model Groups pages are built too. Open: the code tools, AI terminals, the scheduler and privacy classes, @-mentions and attachments, the trajectory, J4 and the 2-hour run.
 
 ## M5 - Git, Mission Control, phone
 

@@ -14,6 +14,10 @@
 	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "AI" },
+		"settingsPages": [
+			{ "id": "ied.chat.models", "page": "AI", "title": "Models", "view": "ModelsSettings", "keys": ["ai.models"] },
+			{ "id": "ied.chat.groups", "page": "AI", "title": "Model Groups", "view": "ModelGroupsSettings", "keys": ["ai.groups", "ai.defaultGroup"] }
+		],
 		"activities": [
 			{ "id": "ied.chat", "title": "Chat", "icon": "$(comment-discussion)", "order": 0, "phoneSlot": true, "view": "ChatActivity" }
 		],

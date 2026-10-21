@@ -291,3 +291,33 @@ class HttpTests(MockCase):
 	async def test_static_root_cannot_be_escaped(self):
 		status, _ = await self.http(b"GET /_mock/../state.py HTTP/1.1\r\nHost: localhost\r\n\r\n")
 		self.assertIn(status, (403, 404))
+
+
+class SettingsTests(MockCase):
+	async def test_settings_come_from_the_plugins_and_are_checked(self):
+		client = await self.client()
+		schema = (await client.request("settings.schema", {"wsId": "w1"}))["settings"]
+		self.assertEqual(("ied.chat", "AI", ["app"]), (schema["ai.models"]["plugin"], schema["ai.models"]["page"], schema["ai.models"]["tiers"]))
+		snap = await self.subscribed(client, "settings:w1")
+		self.assertEqual({"value": 0, "source": "default"}, snap["values"]["ai.maxSteps"], "no step limit unless one is set")
+		await client.request("settings.set", {"tier": "solution", "wsId": "w1", "key": "ai.maxSteps", "value": 20})
+		changed = (await client.wait_for("settings:w1", lambda f: f.get("kind") == "settings.changed"))[-1]["data"]
+		self.assertEqual({"value": 20, "source": "solution"}, changed["values"]["ai.maxSteps"])
+		with self.assertRaises(RpcFailure) as low:
+			await client.request("settings.set", {"tier": "app", "key": "ai.maxSteps", "value": -1})
+		self.assertTrue(low.exception.data["problems"], "the schema's problem comes with the refusal")
+		with self.assertRaises(RpcFailure) as tier:
+			await client.request("settings.set", {"tier": "solution", "wsId": "w1", "key": "ai.models", "value": {}})
+		self.assertIn("cannot be set in the solution tier", str(tier.exception))
+		await client.request("settings.reset", {"tier": "solution", "wsId": "w1", "key": "ai.maxSteps"})
+		self.assertEqual("default", (await client.request("settings.get", {"wsId": "w1"}))["values"]["ai.maxSteps"]["source"])
+
+	async def test_merge_kind_merges_tiers(self):
+		client = await self.client()
+		await client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"a": {"endpoint": "http://a/v1"}}})
+		values = (await client.request("settings.get", {"wsId": "w1"}))["values"]
+		self.assertEqual({"a": {"endpoint": "http://a/v1"}}, values["ai.models"]["value"])
+		probe = await client.request("ai.probe", {"wsId": "w1", "model": "a"})
+		self.assertEqual((True, "llama.cpp"), (probe["ok"], probe["server"]))
+		gone = await client.request("ai.probe", {"wsId": "w1", "profile": {"endpoint": "http://127.0.0.1:9/v1"}})
+		self.assertFalse(gone["ok"])

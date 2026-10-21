@@ -1053,3 +1053,66 @@ def chat_stop_and_queue(run):
 	page.click(".chat-queued button[aria-label='Send the queued message now']")
 	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
 	check(not page.is_visible(".chat-queued") and "and then summarize it" in run.texts(".chat-turn:last-child .chat-user"), "the queued message was sent")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Settings (docs/07 "The settings window as built")
+
+def open_settings(run, page):
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('shell.settings')")
+	else:
+		page.click(".sidebar button[aria-label='Manage']")
+		page.click(".menu .menu-item:has-text('Settings')")
+	page.wait_for_selector(".settings-window .set-node")
+
+
+@scenario(viewports=("desktop", "phone"))
+def settings_window(run):
+	page = run.open()
+	open_settings(run, page)
+	page.click(".set-node[data-page='page:AI']")
+	field = ".set-row[data-key='ai.maxSteps'] input"
+	page.fill(field, "120")
+	page.press(field, "Enter")
+	page.wait_for_selector(".set-row[data-key='ai.maxSteps'] .set-source.set:has-text('User')")
+	page.fill(field, "-1")
+	page.press(field, "Enter")
+	run.wait_text(".set-row[data-key='ai.maxSteps'] .set-message", "less than minimum")
+	run.shot("refused")
+	page.click(".set-row[data-key='ai.maxSteps'] button:has-text('Reset')")
+	page.wait_for_selector(".set-row[data-key='ai.maxSteps'] .set-source:not(.set):has-text('Default')")
+	page.fill(".set-search", "clangd")
+	page.wait_for_selector(".set-row[data-key='cpp.clangd.path']")
+	check(not page.is_visible(".set-row[data-key='ai.maxSteps']"), "search keeps only what matches")
+	run.shot("search")
+
+
+@scenario(viewports=("desktop",))
+def model_settings(run):
+	page = run.open()
+	open_settings(run, page)
+	page.click(".set-node[data-page='custom:ied.chat.models']")
+	page.click(".set-bar button:has-text('Add model')")
+	endpoint = run.target.model_url + "/v1" if run.target.kind == "real" else "http://127.0.0.1:8080/v1"
+	page.fill(".set-model.editing input[aria-label='Name']", "local-test")
+	page.fill(".set-model.editing input[aria-label='Endpoint']", endpoint)
+	page.fill(".set-model.editing input[aria-label='Model id']", "fake-model")
+	page.click(".set-model.editing button:has-text('Test connection')")
+	page.wait_for_selector(".set-model.editing .set-probe.ok", timeout=15000)
+	run.shot("tested")
+	page.click(".set-model.editing button:has-text('Save')")
+	page.wait_for_selector(".set-model[data-model='local-test']:not(.editing)")
+	page.click(".set-node[data-page='custom:ied.chat.groups']")
+	page.click(".set-bar button:has-text('New')")
+	page.wait_for_selector(".set-role[data-role='primary'][data-state='on']")
+	check(page.is_visible(".set-role[data-role='planning'][data-state='off']"), "a new group turns on primary alone")
+	page.click(".set-role[data-role='planning'] .set-role-toggle")
+	page.wait_for_selector(".set-role[data-role='planning'][data-state='on']")
+	primary = page.eval_on_selector(".set-role[data-role='primary'] .set-role-model", "e => e.value")
+	check(primary and page.eval_on_selector(".set-role[data-role='planning'] .set-role-model", "e => e.value") == primary, "a role turned on gets the primary's model")
+	page.click(".set-bar button:has-text('Make default')")
+	page.wait_for_selector(".set-group.on .ci")
+	run.shot("groups")
+	groups = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
+	check(groups["ai.defaultGroup"]["value"] == "group" and groups["ai.groups"]["value"]["group"]["planning"]["model"] == primary, "written to the User tier: %s" % groups["ai.groups"])

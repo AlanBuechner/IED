@@ -1,9 +1,12 @@
 // index.js - the chat plugin's UI module (docs/04, docs/15 "Chat"): the Chat activity, the status bar's "AI: 1 running,
-// 1 needs approval" (from chats:<wsId>), and the commands that open the activity, start a chat and stop the turn.
+// 1 needs you" (from chats:<wsId>), Settings > AI > Models and Model Groups, and the commands that open the activity,
+// start a chat and stop the turn.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { ChatActivityView } from "./activity.js";
 import { ChatList } from "./chatmodel.js";
+import { ModelsPage } from "./modelsettings.js";
+import { ModelGroupsPage } from "./groupsettings.js";
 
 const views = new Set();
 
@@ -28,6 +31,15 @@ export function ChatActivity(ctx) {
 		views.delete(view);
 		view.dispose();
 	} };
+}
+
+// Settings > AI > Models and Model Groups (the settingsPages of the manifest).
+export function ModelsSettings(ctx) {
+	return new ModelsPage(ctx);
+}
+
+export function ModelGroupsSettings(ctx) {
+	return new ModelGroupsPage(ctx);
 }
 
 // What the status bar says of the workspace's chats: the running ones and those waiting on the owner.

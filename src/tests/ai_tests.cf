@@ -1,8 +1,11 @@
-// ai/wire: server-sent events, one completion put together from its chunks, and the dialects local models write.
+// ai: server-sent events, one completion put together from its chunks, the dialects local models write, and what a
+// model server says of itself.
 
 include "ai/wire/sse.ch"
 include "ai/wire/completion.ch"
 include "ai/wire/dialect.ch"
+include "ai/probe.ch"
+include "ai/models.ch"
 
 static Core::StringView View(const char* text) { return Core::StringView(text); }
 
@@ -197,5 +200,57 @@ class DialectTests {
 		assert_eq((int64)0, Ied::ParseTextToolCalls(View("I will now read the file."), rest).Count(), "no calls");
 		assert_true(!Ied::LooksLikeTextToolCall(View("I will now read the file.")), "nothing that looks like one");
 		assert_true(Ied::LooksLikeTextToolCall(View("<tool_call>{\"name\": \"fs_read\", \"argu")), "a cut call looks like one");
+	}
+}
+
+[test("server.ai.probe")]
+class ProbeTests {
+	[test("llamacpp_props_and_models")]
+	public static void TestLlamaCpp() {
+		Ied::ModelProbe probe;
+		Ied::ReadModelList(View("{\"object\": \"list\", \"data\": [{\"id\": \"qwen\", \"meta\": {\"n_ctx\": 262144, \"n_ctx_train\": 262144}}]}"), probe);
+		assert_eq((int64)262144, probe.contextWindow, "llama.cpp's meta.n_ctx");
+		Ied::ReadProps(View("{\"default_generation_settings\": {\"n_ctx\": 65536}, \"total_slots\": 4}"), probe);
+		assert_true(probe.server.View() == "llama.cpp", "/props names llama.cpp");
+		assert_eq((int64)65536, probe.contextWindow, "the slot context wins over the model's");
+		assert_eq((int64)4, probe.slots, "slots");
+		assert_true(probe.models.Count() == 1 && probe.models[0].View() == "qwen", "the ids");
+	}
+
+	[test("vllm_max_model_len")]
+	public static void TestVllm() {
+		Ied::ModelProbe probe;
+		Ied::ReadModelList(View("{\"data\": [{\"id\": \"a\", \"max_model_len\": 32768}, {\"id\": \"b\"}]}"), probe);
+		assert_eq((int64)32768, probe.contextWindow, "vLLM's max_model_len");
+		assert_eq((int64)2, probe.models.Count(), "every model");
+		Ied::ReadProps(View("{\"error\": \"not found\"}"), probe);
+		assert_eq((int64)32768, probe.contextWindow, "props without a slot context change nothing");
+	}
+
+	[test("server_root")]
+	public static void TestServerRoot() {
+		assert_true(Ied::ServerRoot(View("http://h:8080/v1")).View() == "http://h:8080", "/v1 off");
+		assert_true(Ied::ServerRoot(View("http://h:8080/v1/")).View() == "http://h:8080", "a trailing slash too");
+		assert_true(Ied::ServerRoot(View("http://h:11434")).View() == "http://h:11434", "no /v1 stays");
+	}
+}
+
+[test("server.ai.models")]
+class ModelTests {
+	[test("an_off_role_uses_primary")]
+	public static void TestOffRole() {
+		Core::Array<Core::String> problems;
+		Core::Array<Ied::ModelProfile*> models = Ied::ReadModels(View("{\"a\": {\"endpoint\": \"http://a/v1\"}, \"b\": {\"endpoint\": \"http://b/v1\"}}"), problems);
+		const char* groups = "{\"g\": {\"primary\": {\"model\": \"b\", \"fallback\": [\"a\"]}, \"worker\": {\"model\": \"a\"}}}";
+		Ied::RoleModel role;
+		Core::Array<Ied::ModelProfile*> worker = Ied::RoleCandidates(models, View(groups), View("g"), View("worker"), role);
+		assert_true(worker.Count() == 1 && worker[0]->name.View() == "a", "a role that is on uses its model");
+		Ied::RoleModel off;
+		Core::Array<Ied::ModelProfile*> planning = Ied::RoleCandidates(models, View(groups), View("g"), View("planning"), off);
+		assert_true(planning.Count() == 2 && planning[0]->name.View() == "b" && planning[1]->name.View() == "a", "an off role is the primary, fallbacks too");
+		Ied::RoleModel none;
+		Core::Array<Ied::ModelProfile*> first = Ied::RoleCandidates(models, View("{}"), View("g"), View("primary"), none);
+		assert_true(first.Count() == 1 && first[0]->name.View() == "a", "no group: the first model");
+		assert_true(problems.IsEmpty(), "both profiles read");
 	}
 }

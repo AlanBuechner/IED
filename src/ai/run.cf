@@ -70,7 +70,7 @@ namespace Ied
 		rules = ReadPermissionRules(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.permissions")).View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		maxSteps = Serialization::ReadJson(server->settings->Effective(ws, Core::StringView(""), Core::StringView("ai.maxSteps")).View(), *doc).root.AsInt();
-		if (maxSteps <= 0) maxSteps = kChatDefaultMaxSteps;
+		if (maxSteps < 0) maxSteps = 0;
 		if (candidates.IsEmpty()) {
 			UiNote(Core::StringView("no_model"), Core::StringView("No model is set up for this chat: add one to ai.models (an OpenAI-compatible endpoint) and, optionally, a group to ai.groups, in Settings."));
 			Finish(Core::StringView("no_model"));
@@ -82,7 +82,24 @@ namespace Ied
 
 	// --- A step ------------------------------------------------------------------------------------------------------
 
+	// A profile that names no window gets the one its server reports, asked once per server run (docs/12 "Truth about
+	// the model's context window"); the lock is not held.
+	void TurnRun::Discover() {
+		ModelProfile* profile = candidates[candidate];
+		bool asked = false;
+		{
+			Threading::LockGuard guard(server->lock);
+			chats->probed.TryGet(profile->name, asked);
+		}
+		if (asked || profile->contextWindow > 0) return;
+		ModelProbe probe = ProbeModel(*profile, kProbeTimeoutMs);
+		Threading::LockGuard guard(server->lock);
+		chats->probed.At(profile->name) = true;
+		if (probe.contextWindow > 0) chats->windows.At(profile->name) = probe.contextWindow;
+	}
+
 	void TurnRun::Step() {
+		Discover();
 		StepRequest request;
 		int64 estimate = 0;
 		{
@@ -91,11 +108,11 @@ namespace Ied
 				Finish(Core::StringView("user_cancelled"));
 				return;
 			}
-			if (steps >= maxSteps) {
+			if (maxSteps > 0 && steps >= maxSteps) {
 				Pause(Core::StringView("budget"), Core::StringView("the turn used its step budget (ai.maxSteps); send a message to continue"));
 				return;
 			}
-			if (steps == maxSteps * 8 / 10 && steps > 0) {
+			if (maxSteps > 0 && steps == maxSteps * 8 / 10 && steps > 0) {
 				Core::Array<Core::String> values;
 				values.Push(Core::String("percent"));
 				values.Push(Core::String("80"));

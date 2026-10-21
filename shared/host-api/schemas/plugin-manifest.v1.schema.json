@@ -120,6 +120,7 @@
 				"statusBarItems": { "type": "array", "items": { "$ref": "#/$defs/statusBarItem" } },
 				"toolbarItems": { "type": "array", "items": { "$ref": "#/$defs/toolbarItem" } },
 				"panels": { "type": "array", "items": { "$ref": "#/$defs/panel" } },
+				"settingsPages": { "type": "array", "items": { "$ref": "#/$defs/settingsPage" } },
 				"outputSources": {
 					"type": "array",
 					"items": {
@@ -353,6 +354,19 @@
 				"title": { "type": "string" },
 				"icon": { "type": "string" },
 				"view": { "type": "string" }
+			}
+		},
+		"settingsPage": {
+			"type": "object",
+			"required": ["id", "page", "title", "view", "keys"],
+			"additionalProperties": false,
+			"description": "A UI module's own editor for some settings, shown in the settings window under its page in place of the generic rows for those keys (the chat plugin's Models and Model Groups).",
+			"properties": {
+				"id": { "type": "string" },
+				"page": { "type": "string", "description": "The settings page it goes under (a settings contribution's page, as AI)." },
+				"title": { "type": "string" },
+				"view": { "type": "string" },
+				"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
 			}
 		},
 		"statusBarItem": {
