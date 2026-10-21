@@ -1066,11 +1066,11 @@ salts, ten malformed strings, a changed tag).
 
 ## 17. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 54 files, 531 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 55 files, 538 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -1078,7 +1078,8 @@ assets\build-output\bedrock\tests.exe
 ```
 
 The exit code is the number of failed assertions. The `GC` namespace is covered by
-`assets/IsolatedTest/MemoryGC/`. Thin areas: reflection groups, no performance tests.
+`assets/IsolatedTest/MemoryGC/`. Performance against the C++ standard library is `Benchmarks/bedrock/`
+([test suites 8](../tools/05-test-suites.md#8-benchmarks)). Thin areas: reflection groups.
 
 ---
 

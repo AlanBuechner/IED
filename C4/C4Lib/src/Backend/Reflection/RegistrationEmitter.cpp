@@ -1,6 +1,7 @@
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Backend/Reflection/ReflectionTables.h"
 #include "Backend/CodeGen/ModuleContext.h"
+#include "Backend/HIR/InvokeThunk.h"
 #include "Model/Annotations.h"
 #include "Model/ProgramModel.h"
 #include "Model/Types/EnumType.h"
@@ -112,7 +113,7 @@ namespace Scripting
 				m_Functions.push_back(m_Tables.Row(m_Tables.function, { Text(name), Text(function.mangledName.c_str()),
 					TypeText(function.type->GetReturnType()), params.count, params.rows, U32(function.isStatic || !owner ? 1 : 0),
 					U32(function.type->IsVariadic() ? 1 : 0), Text(owner ? std::string(QualifiedName(owner).c_str()) : std::string()),
-					groups.count, groups.rows, Invoke(&function), annotations.count, annotations.rows }));
+					groups.count, groups.rows, Invoke(&function), annotations.count, annotations.rows, Code(&function) }));
 			}
 
 			llvm::GlobalVariable* Finish()
@@ -146,11 +147,16 @@ namespace Scripting
 			}
 
 			// The function's invoke thunk, or null when reflection cannot call it.
-			llvm::Constant* Invoke(const FunctionRecord* function)
+			llvm::Constant* Invoke(const FunctionRecord* function) { return Entry(function, &InvokeEntry::thunk); }
+
+			// The code the function's shared thunk calls, or null for a thunk of its own.
+			llvm::Constant* Code(const FunctionRecord* function) { return Entry(function, &InvokeEntry::code); }
+
+			llvm::Constant* Entry(const FunctionRecord* function, llvm::Function* InvokeEntry::*part)
 			{
-				if (!function || !m_Thunks.count(function)) return Null();
-				llvm::Function* thunk = m_Module.module().getFunction(InvokeThunkSymbol(*function));
-				return thunk ? static_cast<llvm::Constant*>(thunk) : Null();
+				auto found = function ? m_Thunks.find(function) : m_Thunks.end();
+				llvm::Function* value = found == m_Thunks.end() ? nullptr : found->second.*part;
+				return value ? static_cast<llvm::Constant*>(value) : Null();
 			}
 
 			Table Groups(const Core::Vector<Core::String>& groups)
@@ -300,7 +306,7 @@ namespace Scripting
 					const Table annotations = RecordAnnotations(record);
 					rows.push_back(m_Tables.Row(m_Tables.method, { Text(method.mName.c_str()), params.count, params.rows, TypeText(method.m_ReturnType),
 						U32(method.m_IsStatic ? 1 : 0), U32(VirtualTables::IsVirtual(&object, method) ? 1 : 0), U32(method.m_IsConst ? 1 : 0),
-						Invoke(record), annotations.count, annotations.rows }));
+						Invoke(record), annotations.count, annotations.rows, Code(record) }));
 				}
 				return Rows(m_Tables.method, rows);
 			}
@@ -327,6 +333,8 @@ namespace Scripting
 	}
 
 	std::string InvokeThunkSymbol(const FunctionRecord& function) { return "__c4_invoke_" + EscapedText(function.mangledName); }
+
+	std::string SharedInvokeThunkSymbol(const FunctionRecord& function) { return "__c4_invoke_sig_" + EscapedText(InvokeSignature(function)); }
 
 	std::vector<std::string> ReflectedTypeNames(const ProgramModel& model)
 	{

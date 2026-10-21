@@ -47,7 +47,7 @@ namespace Testing
 	{
 		std::vector<const FunctionRecord*> callees;
 		for (const auto& node : fn.m_Nodes)
-			if (node->kind == HIRNode::Kind::Call) callees.push_back(static_cast<const CallNode*>(node.get())->callee);
+			if (node->kind == HIRNode::Kind::Call) callees.push_back(static_cast<const CallNode*>(node)->callee);
 		return callees;
 	}
 
@@ -133,7 +133,7 @@ namespace Testing
 		HIRFunction fn = LowerFunction(model, errors, Record(model, "F"));
 		const OnceNode* once = nullptr;
 		for (const auto& node : fn.m_Nodes)
-			if (node->kind == HIRNode::Kind::Once) once = static_cast<const OnceNode*>(node.get());
+			if (node->kind == HIRNode::Kind::Once) once = static_cast<const OnceNode*>(node);
 		TEST_ASSERT(once && !once->body->stmts.empty() && once->body->stmts[0]->kind == HIRNode::Kind::Defer);
 		const auto* reset = static_cast<const DeferNode*>(once->body->stmts[0]);
 		TEST_ASSERT(reset->exceptionalOnly);
@@ -207,7 +207,7 @@ namespace Testing
 		TEST_ASSERT_EQ((int)CallsInOrder(thread).size(), 1);
 		const auto perThread = [](const HIRFunction& fn) {
 			for (const auto& node : fn.m_Nodes)
-				if (node->kind == HIRNode::Kind::AtExit) return static_cast<const AtExitNode*>(node.get())->perThread;
+				if (node->kind == HIRNode::Kind::AtExit) return static_cast<const AtExitNode*>(node)->perThread;
 			return false;
 		};
 		TEST_ASSERT(!perThread(process) && perThread(thread));

@@ -15,5 +15,13 @@
   "Types/SizeOfIncompleteType": {
     "expect": ["sizeof of incomplete type"],
     "reason": "sizeof of a forward-declared (incomplete) type is not a compile-time constant: it must be a clear compile error, never a crash and never a silent zero"
+  },
+  "Operators/BitIntrinsicNeedsInteger": {
+    "expect": ["bit_count works on an integer or a packed integer vector, not a 'float'"],
+    "reason": "the bit intrinsics count and move integer bits: a float operand is a clear error naming the intrinsic and the type"
+  },
+  "Operators/BitIntrinsicArgumentCount": {
+    "expect": ["bit_rotate_left takes 2 arguments, not 1"],
+    "reason": "a rotation needs the value and the count: a wrong argument count names the intrinsic and both counts"
   }
 }

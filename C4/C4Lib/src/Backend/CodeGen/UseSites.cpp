@@ -21,7 +21,7 @@ namespace Scripting
 
 	SourceLocation UseSite(const HIRFunction& user, const FunctionRecord& callee)
 	{
-		for (const std::unique_ptr<HIRNode>& node : user.m_Nodes)
+		for (const HIRNode* node : user.m_Nodes)
 			if (Target(*node) == &callee && node->origin.line != 0) return node->origin;
 		for (const std::unique_ptr<HIRFunction>& nested : user.nestedFunctions)
 			if (SourceLocation found = UseSite(*nested, callee); found.line != 0) return found;

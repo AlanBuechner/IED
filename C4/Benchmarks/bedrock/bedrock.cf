@@ -1,0 +1,179 @@
+// Bedrock against the C++ standard library (bedrock.cpp): each kernel runs in process over the same pseudo-random data
+// and prints its name, its time in milliseconds and a checksum the C++ side must match.
+include "bedrock.ch"
+
+const int64 kIntKeys = 1000000;
+const int64 kTextKeys = 200000;
+const int64 kPushes = 10000000;
+const int64 kSorted = 2000000;
+const int64 kFormatted = 1000000;
+
+// splitmix64: the same sequence on both sides.
+struct Random
+{
+	public uint64 state;
+	public uint64 Next()
+	{
+		state += 11400714819323198485u;
+		uint64 z = state;
+		z = (z ^ (z >> 30)) * 13787848793156543929u;
+		z = (z ^ (z >> 27)) * 10723151780598845931u;
+		return z ^ (z >> 31);
+	}
+}
+
+struct Clock
+{
+	public int64 start;
+	public double frequency;
+	[operator("create")] public void Init() { frequency = (double)Platform::TickFrequency(); start = Platform::Ticks(); }
+	public double Milliseconds() const { return (double)(Platform::Ticks() - start) * 1000.0 / frequency; }
+}
+
+void Report(const char* kernel, const Clock& clock, uint64 checksum) { printf("%s %.3f %llu\n", kernel, clock.Milliseconds(), checksum); }
+
+Core::Array<int64> IntKeys(uint64 seed, int64 count)
+{
+	Random random;
+	random.state = seed;
+	Core::Array<int64> keys;
+	keys.Reserve(count);
+	for (int64 i = 0; i < count; ++i) keys.Push((int64)(random.Next() >> 1));
+	return keys;
+}
+
+Core::Array<Core::String> TextKeys(int64 count)
+{
+	Core::Array<Core::String> keys;
+	keys.Reserve(count);
+	Core::StringBuilder text;
+	for (int64 i = 0; i < count; ++i)
+	{
+		text.Clear();
+		text.Append("entity/");
+		text.AppendInt(i * 7919);
+		text.Append("/component");
+		keys.Push(text.ToString());
+	}
+	return keys;
+}
+
+void IntegerMap()
+{
+	Core::Array<int64> keys = IntKeys(1, kIntKeys);
+	Core::Array<int64> absent = IntKeys(2, kIntKeys);
+	Core::HashMap<int64, int64> map;
+	Clock insert;
+	for (int64 i = 0; i < kIntKeys; ++i) map.Insert(keys[i], i);
+	Report("map_int_insert", insert, (uint64)map.Count());
+	Clock hit;
+	uint64 sum = 0;
+	for (int64 i = 0; i < kIntKeys; ++i) sum += (uint64)*map.Find(keys[i]);
+	Report("map_int_find_hit", hit, sum);
+	Clock miss;
+	uint64 found = 0;
+	for (int64 i = 0; i < kIntKeys; ++i) found += map.Find(absent[i]) ? 1u : 0u;
+	Report("map_int_find_miss", miss, found);
+	Clock remove;
+	uint64 removed = 0;
+	for (int64 i = 0; i < kIntKeys; i += 2) removed += map.Remove(keys[i]) ? 1u : 0u;
+	Report("map_int_remove", remove, removed + (uint64)map.Count());
+}
+
+void TextMap()
+{
+	Core::Array<Core::String> keys = TextKeys(kTextKeys);
+	Core::HashMap<Core::String, int64> map;
+	Clock insert;
+	for (int64 i = 0; i < kTextKeys; ++i) map.Insert(keys[i], i);
+	Report("map_text_insert", insert, (uint64)map.Count());
+	Clock hit;
+	uint64 sum = 0;
+	for (int64 repeat = 0; repeat < 5; ++repeat)
+		for (int64 i = 0; i < kTextKeys; ++i) sum += (uint64)*map.Find(keys[i]);
+	Report("map_text_find", hit, sum);
+}
+
+void ArrayPush()
+{
+	Clock clock;
+	Core::Array<int32> values;
+	for (int64 i = 0; i < kPushes; ++i) values.Push((int32)(i * 3));
+	uint64 sum = 0;
+	for (int32 value : values) sum += (uint64)value;
+	Report("array_push_sum", clock, sum);
+}
+
+void SortIntegers()
+{
+	Random random;
+	random.state = 3;
+	Core::Array<int32> values;
+	values.Reserve(kSorted);
+	for (int64 i = 0; i < kSorted; ++i) values.Push((int32)(random.Next() >> 33));
+	Clock clock;
+	values.Sort();
+	Report("sort_int32", clock, (uint64)values[0] + (uint64)values[kSorted / 2] * 3u + (uint64)values[kSorted - 1] * 7u);
+}
+
+void BuildText()
+{
+	Clock clock;
+	Core::StringBuilder text;
+	for (int64 i = 0; i < kFormatted; ++i)
+	{
+		text.AppendInt(i * 1000003 - 500000000);
+		text.AppendByte(',');
+	}
+	Report("text_append_int", clock, (uint64)text.ByteLength());
+}
+
+void FormatDoubles()
+{
+	Random random;
+	random.state = 4;
+	Clock clock;
+	Core::StringBuilder text;
+	for (int64 i = 0; i < kFormatted; ++i)
+	{
+		text.AppendDouble((double)(random.Next() >> 11) / 9007199254740992.0 * 1000.0, -1);
+		text.AppendByte(',');
+	}
+	Report("text_format_double", clock, (uint64)text.ByteLength());
+}
+
+void ParseDoubles()
+{
+	Random random;
+	random.state = 5;
+	Core::StringBuilder text;
+	for (int64 i = 0; i < kFormatted; ++i)
+	{
+		text.AppendDouble((double)(random.Next() >> 11) / 9007199254740992.0 * 1000.0, -1);
+		text.AppendByte(',');
+	}
+	Clock clock;
+	const char* at = text.CStr();
+	const char* end = at + text.ByteLength();
+	double sum = 0.0;
+	while (at < end)
+	{
+		double value = 0.0;
+		int64 taken = parse_double((void*)at, end - at, (void*)&value);
+		sum += value;
+		at += taken + 1;
+	}
+	Report("text_parse_double", clock, (uint64)sum);
+}
+
+int32 main()
+{
+	IntegerMap();
+	TextMap();
+	ArrayPush();
+	SortIntegers();
+	BuildText();
+	FormatDoubles();
+	ParseDoubles();
+	return 0;
+}

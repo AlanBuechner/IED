@@ -16,6 +16,7 @@
 #include "Backend/HIR/AccessCheck.h"
 #include "Backend/HIR/VarArgs.h"
 #include "Backend/HIR/Atomics.h"
+#include "Backend/HIR/BitIntrinsics.h"
 #include "Backend/HIR/SimdIntrinsics.h"
 #include "Backend/HIR/BuiltinOperators.h"
 #include "Backend/HIR/ImplicitConversion.h"
@@ -95,7 +96,7 @@ namespace Scripting
 		return type && type->GetKind() == TypeKind::Int32 && constant && constant->value.kind == ConstantValue::Kind::Int64 && constant->value.intValue == 0;
 	}
 
-	// No function matches: a lifecycle, va_list, atomic or SIMD intrinsic, or `T(args)` constructing the object type `T`; otherwise
+	// No function matches: a lifecycle, va_list, atomic, SIMD or bit intrinsic, or `T(args)` constructing the object type `T`; otherwise
 	// the error, at the argument it names when it names one.
 	QueryResult<Value> ExprLowerer::CallWithoutFunction(const FunctionCallNode* n, const CallTarget& target, CallArgumentList& args,
 		const QueryResult<const FunctionType*>& unmatched)
@@ -107,6 +108,7 @@ namespace Scripting
 		if (notFound && VarArgs::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, VarArgs::LowerIntrinsic(m_Ctx, target.name, args.values));
 		if (notFound && Atomics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, Atomics::LowerIntrinsic(m_Ctx, target.name, args.values));
 		if (notFound && SimdIntrinsics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, SimdIntrinsics::LowerIntrinsic(m_Ctx, target.name, args.values));
+		if (notFound && BitIntrinsics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, BitIntrinsics::LowerIntrinsic(m_Ctx, target.name, args.values));
 		// Ambiguous and inaccessible calls are errors in their own right, never masked by a type of the same name.
 		if (unmatched.error == QueryError::NotFound || unmatched.error == QueryError::NotCallable)
 			if (const ObjectType* type = ConstructedType(n, target.name)) return ConstructorCall(callee, type, args);

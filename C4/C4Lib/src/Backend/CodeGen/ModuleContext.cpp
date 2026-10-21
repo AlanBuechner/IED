@@ -175,11 +175,8 @@ namespace Scripting
 		return st;
 	}
 
-	llvm::Function* ModuleContext::GetOrCreateFunction(const FunctionRecord& rec)
+	llvm::FunctionType* ModuleContext::FunctionTypeOf(const FunctionRecord& rec)
 	{
-		auto it = m_FuncCache.find(&rec);
-		if (it != m_FuncCache.end()) return it->second;
-
 		const FunctionType* ft = rec.type;
 		const Type* ret = ft ? ft->GetReturnType() : nullptr;
 
@@ -202,8 +199,15 @@ namespace Scripting
 		// storage type (scalars, references-as-ptr, pointers).
 		llvm::Type* retTy = sig.sret ? llvm::Type::getVoidTy(m_Context) : m_Abi.ReturnType(ret);
 		if (!retTy) retTy = Lower(ret);
+		return llvm::FunctionType::get(retTy, paramTys, ft ? ft->IsVariadic() : false);
+	}
 
-		llvm::FunctionType* fty = llvm::FunctionType::get(retTy, paramTys, ft ? ft->IsVariadic() : false);
+	llvm::Function* ModuleContext::GetOrCreateFunction(const FunctionRecord& rec)
+	{
+		auto it = m_FuncCache.find(&rec);
+		if (it != m_FuncCache.end()) return it->second;
+
+		llvm::FunctionType* fty = FunctionTypeOf(rec);
 		// Declarations of one foreign symbol (a builtin and a [link] of the same C function) are one function.
 		if (!HasBody(rec))
 			if (llvm::Function* existing = m_Module->getFunction(rec.mangledName.c_str()); existing && existing->getFunctionType() == fty)

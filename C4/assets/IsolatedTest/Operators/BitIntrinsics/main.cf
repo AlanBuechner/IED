@@ -1,0 +1,121 @@
+// The bit intrinsics (docs/language/14 section 12): bit_count, bit_leading_zeros, bit_trailing_zeros, bit_rotate_left,
+// bit_rotate_right, byte_swap and mul_high on every integer width, signed and unsigned, on packed integer vectors, in a
+// template, and beside a program function of the same name. main returns the failures.
+int32 Differs(int64 actual, int64 expected) { return actual == expected ? 0 : 1; }
+int32 DiffersU(uint64 actual, uint64 expected) { return actual == expected ? 0 : 1; }
+
+int32 Counts() {
+	int32 failures = 0;
+	failures += Differs(bit_count((uint8)255), 8);
+	failures += Differs(bit_count((int16)-1), 16);
+	failures += Differs(bit_count(0), 0);
+	failures += Differs(bit_count(-1), 32);
+	failures += Differs(bit_count((int64)-1), 64);
+	failures += Differs(bit_count(18446744073709551615u), 64);
+	failures += Differs(bit_count((uint64)1 << 63), 1);
+	failures += Differs(bit_count(0x5555), 8);
+	int32 count = bit_count(7);   // a count of an integer is an int32
+	failures += Differs(count, 3);
+	return failures;
+}
+
+int32 LeadingAndTrailing() {
+	int32 failures = 0;
+	failures += Differs(bit_leading_zeros(0), 32);                 // zero gives the width
+	failures += Differs(bit_trailing_zeros(0), 32);
+	failures += Differs(bit_leading_zeros((uint8)0), 8);
+	failures += Differs(bit_trailing_zeros((uint16)0), 16);
+	failures += Differs(bit_leading_zeros((uint64)0), 64);
+	failures += Differs(bit_leading_zeros(1), 31);
+	failures += Differs(bit_trailing_zeros(8), 3);
+	failures += Differs(bit_leading_zeros(-1), 0);
+	failures += Differs(bit_trailing_zeros((int64)1 << 40), 40);
+	failures += Differs(bit_leading_zeros((uint8)1), 7);
+	failures += Differs(bit_trailing_zeros((uint8)128), 7);
+	failures += Differs(bit_leading_zeros((uint64)1 << 63), 0);
+	return failures;
+}
+
+int32 Rotations() {
+	int32 failures = 0;
+	failures += DiffersU(bit_rotate_left((uint8)129, 1), 3);
+	failures += DiffersU(bit_rotate_right((uint8)3, 1), 129);
+	failures += DiffersU(bit_rotate_left((uint32)0x80000001, 4), 0x18);
+	failures += DiffersU(bit_rotate_right((uint32)0x18, 4), 0x80000001);
+	failures += DiffersU(bit_rotate_left((uint64)1, 64), 1);          // the count is taken modulo the width
+	failures += DiffersU(bit_rotate_left((uint64)1, 65), 2);
+	failures += DiffersU(bit_rotate_left((uint32)1, -1), 0x80000000); // -1 is 31 modulo 32
+	failures += Differs(bit_rotate_left(-2, 1), -3);                   // signed values rotate their bits
+	failures += DiffersU(bit_rotate_left((uint16)0x1234, 8), 0x3412);
+	uint64 x = 0x0123456789ABCDEFu;
+	for (int32 n = 0; n < 64; ++n) failures += DiffersU(bit_rotate_right(bit_rotate_left(x, n), n), x);
+	return failures;
+}
+
+int32 ByteSwaps() {
+	int32 failures = 0;
+	failures += DiffersU(byte_swap((uint8)0xAB), 0xAB);               // one byte has nothing to swap
+	failures += DiffersU(byte_swap((uint16)0x1234), 0x3412);
+	failures += DiffersU(byte_swap((uint32)0x12345678), 0x78563412);
+	failures += DiffersU(byte_swap((uint64)0x0102030405060708u), 0x0807060504030201u);
+	failures += Differs(byte_swap((int32)0x000000FF), (int64)(int32)0xFF000000);
+	return failures;
+}
+
+int32 HighHalves() {
+	int32 failures = 0;
+	failures += DiffersU(mul_high(18446744073709551615u, (uint64)2), 1);
+	failures += DiffersU(mul_high(18446744073709551615u, 18446744073709551615u), 18446744073709551614u);
+	failures += DiffersU(mul_high((uint64)1 << 32, (uint64)1 << 32), 1);
+	failures += DiffersU(mul_high((uint64)3, (uint64)5), 0);
+	failures += Differs(mul_high((int64)-1, (int64)1), -1);          // signed: the high half of -1
+	failures += Differs(mul_high((int64)-4, (int64)1 << 62), -1);
+	failures += Differs(mul_high((int32)0x40000000, 4), 1);
+	failures += Differs(mul_high((int32)-2, 0x40000000), -1);
+	failures += DiffersU(mul_high((uint8)200, (uint8)200), 156);     // 40000 is 0x9C40
+	uint64 a = 0x9E3779B97F4A7C15u;
+	uint64 b = 0xBF58476D1CE4E5B9u;
+	uint64 high = mul_high(a, b);
+	uint64 low = a * b;
+	failures += DiffersU(high, 0x7641F3080FF92329u);
+	failures += DiffersU(low, 0xD67411C46C86742Du);
+	return failures;
+}
+
+int32 Vectors() {
+	int32 failures = 0;
+	packed uint32[4] v = { 0, 1, 0xFF, 0xFFFFFFFF };
+	packed uint32[4] counts = bit_count(v);
+	failures += DiffersU(counts[0], 0) + DiffersU(counts[1], 1) + DiffersU(counts[2], 8) + DiffersU(counts[3], 32);
+	packed uint32[4] leading = bit_leading_zeros(v);
+	failures += DiffersU(leading[0], 32) + DiffersU(leading[1], 31) + DiffersU(leading[3], 0);
+	packed uint32[4] rotated = bit_rotate_left(v, 4);                // a scalar count rotates every lane
+	failures += DiffersU(rotated[1], 16) + DiffersU(rotated[2], 0xFF0);
+	packed uint16[8] halves = { 0x1234, 0, 0, 0, 0, 0, 0, 0xABCD };
+	packed uint16[8] swapped = byte_swap(halves);
+	failures += DiffersU(swapped[0], 0x3412) + DiffersU(swapped[7], 0xCDAB);
+	packed uint64[2] wide = { 18446744073709551615u, 5 };
+	packed uint64[2] factors = { 2, 7 };
+	packed uint64[2] high = mul_high(wide, factors);
+	failures += DiffersU(high[0], 1) + DiffersU(high[1], 0);
+	return failures;
+}
+
+template<T> int32 SetBits(T value) { return bit_count(value); }
+
+int32 Generic() {
+	return Differs(SetBits((uint8)0xF0), 4) + Differs(SetBits((int64)-1), 64) + Differs(SetBits(1023), 10);
+}
+
+namespace Custom
+{
+	int32 byte_swap(int32 value) { return value + 1; }   // a program function may take an intrinsic's name
+}
+
+int32 Shadowed() { return Differs(Custom::byte_swap(1), 2); }
+
+int32 main() {
+	int32 failures = Counts() + LeadingAndTrailing() + Rotations() + ByteSwaps() + HighHalves() + Vectors() + Generic() + Shadowed();
+	if (failures != 0) printf("bit intrinsics: %d failures\n", failures);
+	return failures;
+}

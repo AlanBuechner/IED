@@ -2,6 +2,7 @@
 #include "Backend/HIR/HIRValue.h"
 #include "Model/SymbolTable.h" // FunctionRecord
 #include <memory>
+#include "Backend/HIR/HIRArena.h"
 #include <deque>
 #include <string>
 
@@ -42,7 +43,9 @@ namespace Scripting
 		Add, Sub, Mul, Div, Mod, Pow,
 		Eq, Ne, Lt, Gt, Le, Ge,
 		BitAnd, BitOr, BitXor, Shl, Shr,
-		Negate, BitNot, BoolNot // unary (Negate = numeric -, BitNot = ~, BoolNot = !)
+		Negate, BitNot, BoolNot, // unary (Negate = numeric -, BitNot = ~, BoolNot = !)
+		// the bit intrinsics (BitIntrinsics.h): unary counts and byte swap, binary rotations and the product's high half
+		CountOnes, LeadingZeros, TrailingZeros, ByteSwap, RotateLeft, RotateRight, MulHigh
 	};
 
 	// ---------------------------------------------------------------------
@@ -68,6 +71,7 @@ namespace Scripting
 		const FunctionRecord* callee = nullptr; // the lowering record (mangled symbol, body); null for indirect
 		const LValue* receiver = nullptr;       // implicit this (method), or null
 		const HIRNode* target = nullptr;        // INDIRECT call: the function-pointer rvalue to call through
+		const HIRNode* code = nullptr;          // calls `callee`'s signature through this address instead of its symbol
 		bool isOperatorCall = false;            // true when this came from `a + b` etc.
 		bool materialize = false;               // member-access on a by-value aggregate result: yield the temp ADDRESS, not the value
 		int32_t virtualIndex = -1;              // >=0 when this is a VIRTUAL dispatch: the vtable slot to call through (receiver's vptr)
@@ -555,10 +559,10 @@ namespace Scripting
 		};
 		std::vector<Slot> slots;
 
-		// Arena: every node and lvalue lives here and dies with the function. deque gives stable
-		// addresses on push (LValue pointers are referenced by nodes and other lvalues).
-		std::deque<LValue> m_LValues;
-		std::vector<std::unique_ptr<HIRNode>> m_Nodes;
+		// Arena: every node and lvalue lives here and dies with the function, at a stable address (nodes and lvalues
+		// point at each other). m_Nodes lists the nodes in the order they were made.
+		HIRArena m_Arena;
+		std::vector<HIRNode*> m_Nodes;
 
 		// Functions declared INSIDE this body (local functions, doc 06): each is a fully lowered
 		// HIRFunction owned here so codegen can emit it alongside its parent.
@@ -568,7 +572,7 @@ namespace Scripting
 		SourceLocation location;
 
 		// --- allocation helpers (the ONLY way to create HIR storage) -------------------------
-		LValue* NewLValue(const LValue& v) { m_LValues.push_back(v); return &m_LValues.back(); }
+		LValue* NewLValue(const LValue& v) { return m_Arena.Make<LValue>(v); }
 		uint32 AddSlot(const Type* t, const Core::String& name, SlotClass c)
 		{
 			Slot slot{ t, name, c };
@@ -580,10 +584,9 @@ namespace Scripting
 		template <typename T, typename... Args>
 		T* NewNode(Args&&... args)
 		{
-			auto n = std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-			T* raw = n.get();
+			T* raw = m_Arena.Make<T>(std::forward<Args>(args)...);
 			raw->origin = location;
-			m_Nodes.push_back(std::move(n));
+			m_Nodes.push_back(raw);
 			return raw;
 		}
 

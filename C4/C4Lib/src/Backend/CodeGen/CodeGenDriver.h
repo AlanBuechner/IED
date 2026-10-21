@@ -128,6 +128,9 @@ namespace Scripting
 		/// function the thunks reach. A function an argument cannot be passed to gets no thunk.
 		bool EmitInvokeThunks(ProgramModel& model, std::string* errorMessage);
 		void EmitInvokeThunk(ProgramModel& model, const FunctionRecord& target);
+		/// The thunk named `symbol` for `target` (shared: calling the code it is given), or null when an argument cannot be
+		/// passed.
+		llvm::Function* LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared);
 		/// Reflected functions with code to call that have not been considered for a thunk yet: a body emitted
 		/// here, or a virtual method (the thunk dispatches through the object).
 		Core::Vector<const FunctionRecord*> NewInvokeTargets(ProgramModel& model);
@@ -167,6 +170,7 @@ namespace Scripting
 		std::vector<llvm::Function*> m_FirstUseStarts; // the starts of a script's thread_locals that start on first use
 		std::deque<FunctionRecord> m_ThunkRecords;     // compiler-written: no model record
 		std::set<const FunctionRecord*> m_ThunkTargets; // considered for a thunk (one that failed too: no retry)
+		std::unordered_map<std::string, llvm::Function*> m_SharedThunks; // by symbol; null for a signature that cannot be passed
 		InvokeThunks m_Thunks;
 	};
 } // namespace Scripting

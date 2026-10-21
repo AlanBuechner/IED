@@ -1,6 +1,7 @@
 #include "Script/ScriptCompiler.h"
 #include "Backend/CodeGen/CodeGenDriver.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
+#include "Compiler/AggregateCopies.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/DiagnosticReporter.h"
 #include "Compiler/SourceMacros.h"
@@ -137,6 +138,7 @@ namespace Scripting
 			builder.registerFunctionAnalyses(functions);
 			builder.registerLoopAnalyses(loops);
 			builder.crossRegisterProxies(loops, functions, sccs, modules);
+			if (!optimize) LowerAggregateCopies(module);
 			llvm::ModulePassManager pipeline = optimize ? builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2)
 				: builder.buildO0DefaultPipeline(llvm::OptimizationLevel::O0);
 			pipeline.run(module, modules);

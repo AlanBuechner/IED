@@ -166,6 +166,7 @@ namespace Scripting
 			{
 				Location(call.receiver);
 				Walk(call.target);
+				Walk(call.code);
 				All(call.args);
 			}
 

@@ -41,7 +41,7 @@ namespace Testing
 	{
 		int calls = 0;
 		for (const auto& node : fn.m_Nodes)
-			if (node->kind == HIRNode::Kind::Call && static_cast<const CallNode*>(node.get())->callee == callee) ++calls;
+			if (node->kind == HIRNode::Kind::Call && static_cast<const CallNode*>(node)->callee == callee) ++calls;
 		return calls;
 	}
 
@@ -254,7 +254,7 @@ namespace Testing
 		TEST_ASSERT(fn.complete);
 		const IfNode* branch = nullptr;
 		for (const auto& node : fn.m_Nodes)
-			if (node->kind == HIRNode::Kind::If) branch = static_cast<const IfNode*>(node.get());
+			if (node->kind == HIRNode::Kind::If) branch = static_cast<const IfNode*>(node);
 		TEST_ASSERT(branch != nullptr && branch->cond && branch->cond->kind == HIRNode::Kind::Sequence);
 		const auto* seq = static_cast<const SequenceNode*>(branch->cond);
 		bool destroyedInCondition = false;

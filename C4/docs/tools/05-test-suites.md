@@ -338,6 +338,33 @@ The front end is a small part of every build. The object is now emitted in proce
 assembled in parallel partitions (B47); at `-O2` the single-threaded LLVM optimizer is now most of the time, and at
 `-O0` code generation. Caching the objects of unchanged partitions is the next compile-time item (roadmap 5.3).
 
+`Benchmarks/bedrock/` (`run-benchmark.ps1`): Bedrock against the C++ standard library at `-O2`, the same kernels
+over the same pseudo-random data in `bedrock.cf` and `bedrock.cpp`, each timed in process (median of 5 runs) with a
+checksum both sides must print alike: `HashMap` (1M `int64` keys: insert, hits, misses, removes; 200k text keys:
+insert and five rounds of hits) against `std::unordered_map`, `Array::Push` against `std::vector::push_back`,
+`Sort` against `std::sort` (2M `int32`), and number text against `std::to_chars` / `std::from_chars` (1M integers
+and doubles). `-Check` builds both and compares the checksums once (gate item 11).
+
+Baselines (2026-10-21, ms; ratio < 1 means Bedrock is faster):
+
+| Kernel | Bedrock | C++ | Bedrock/C++ |
+|---|---|---|---|
+| map_int_insert | 32.4 | 92.0 | 0.35 |
+| map_int_find_hit | 8.9 | 22.7 | 0.39 |
+| map_int_find_miss | 11.5 | 26.2 | 0.44 |
+| map_int_remove | 3.3 | 36.1 | 0.09 |
+| map_text_insert | 41.4 | 42.7 | 0.97 |
+| map_text_find | 41.1 | 57.3 | 0.72 |
+| array_push_sum | 16.1 | 22.5 | 0.72 |
+| sort_int32 | 104.3 | 107.4 | 0.97 |
+| text_append_int | 16.9 | 12.6 | 1.34 |
+| text_format_double | 34.8 | 34.2 | 1.02 |
+| text_parse_double | 77.3 | 73.7 | 1.05 |
+
+The shortest double form took 4,851 ms for the million doubles before the number text moved to `<charconv>`
+(it printed and read back up to 17 times per number), and the integers 31.4 ms before they were written two digits
+at a time.
+
 ---
 
 ## 9. Gates
@@ -360,7 +387,8 @@ benchmarks (item 11) on their own.
 11. Benchmarks build and agree with C++: `Benchmarks/gemm/run-benchmark.ps1 -Check` and
    `Benchmarks/math/run-benchmark.ps1 -Check`; the GC benchmark computes the same world alone and with workers
    (`Benchmarks/gc/run-benchmark.ps1 -Check`); the compile benchmark's programs build
-   (`Benchmarks/compile/run-benchmark.ps1 -Check`).
+   (`Benchmarks/compile/run-benchmark.ps1 -Check`); Bedrock's kernels print what the C++ standard library's do
+   (`Benchmarks/bedrock/run-benchmark.ps1 -Check`, also a `nuke gates` step).
 
 ---
 

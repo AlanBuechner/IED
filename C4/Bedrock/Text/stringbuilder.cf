@@ -68,18 +68,53 @@ namespace Core
 		buffer[length] = (char)0;
 	}
 
+	// A uint64 has at most 64 binary digits.
+	const int32 kMostDigits = 64;
+	// The most a number's text takes: the shortest form, and a fixed one with up to 40 decimals (309 integer digits, a
+	// sign, a point and the decimals).
+	const int32 kShortestDoubleBytes = 32;
+	const int32 kFixedDoubleBytes = 352;
+	const int32 kMostDecimals = 40;
+
+	static char DigitChar(int32 digit) { return (char)(digit < 10 ? '0' + digit : 'a' + (digit - 10)); }
+
+	// Two decimal digits a step: one division by the constant 100 instead of two by a variable base.
+	static int32 DecimalDigitsBackward(uint64 value, char* digits) {
+		int32 at = kMostDigits;
+		while (value >= 100) {
+			int32 pair = (int32)(value % 100);
+			value = value / 100;
+			at -= 2;
+			digits[at] = DigitChar(pair / 10);
+			digits[at + 1] = DigitChar(pair % 10);
+		}
+		if (value >= 10) {
+			at -= 2;
+			digits[at] = DigitChar((int32)value / 10);
+			digits[at + 1] = DigitChar((int32)value % 10);
+			return at;
+		}
+		at -= 1;
+		digits[at] = DigitChar((int32)value);
+		return at;
+	}
+
+	static int32 BaseDigitsBackward(uint64 value, int32 base, char* digits) {
+		int32 at = kMostDigits;
+		do {
+			at -= 1;
+			digits[at] = DigitChar((int32)(value % (uint64)base));
+			value = value / (uint64)base;
+		} while (value > 0);
+		return at;
+	}
+
 	void StringBuilder::AppendUIntBase(uint64 value, int32 base, int32 minWidth) {
 		if (base < 2 || base > 16) base = 10;
-		char[64] digits;   // least significant first; a uint64 has at most 64 binary digits
-		int32 count = 0;
-		do {
-			int32 digit = (int32)(value % (uint64)base);
-			digits[count] = (char)(digit < 10 ? '0' + digit : 'a' + (digit - 10));
-			value = value / (uint64)base;
-			count += 1;
-		} while (value > 0);
-		for (int32 i = count; i < minWidth; ++i) AppendByte('0');
-		for (int32 i = count - 1; i >= 0; --i) AppendByte(digits[i]);
+		char[64] digits;   // filled from the end: the number is digits[first, kMostDigits)
+		int32 first = base == 10 ? DecimalDigitsBackward(value, &digits[0]) : BaseDigitsBackward(value, base, &digits[0]);
+		for (int32 i = kMostDigits - first; i < minWidth; ++i) AppendByte('0');
+		AppendBytes(&digits[first], kMostDigits - first);
 	}
 
 	// The magnitude is exact for the most negative int64 too.
@@ -89,9 +124,12 @@ namespace Core
 		AppendUIntBase((uint64)(-(value + 1)) + (uint64)1, base, minWidth);
 	}
 
+	// Written straight into the buffer, after room for the widest text of its form.
 	void StringBuilder::AppendDouble(double value, int32 decimals) {
-		char[352] text;   // the widest fixed form: 309 integer digits, a sign, a point and 40 decimals
-		int32 written = format_double(&text[0], 352, value, decimals > 40 ? 40 : decimals);
-		if (written > 0) AppendBytes(&text[0], written);
+		int32 room = decimals < 0 ? kShortestDoubleBytes : kFixedDoubleBytes;
+		Reserve(length + room);
+		int32 written = format_double(buffer + length, room + 1, value, decimals > kMostDecimals ? kMostDecimals : decimals);
+		if (written > 0) length += written;
+		buffer[length] = (char)0;
 	}
 }

@@ -171,11 +171,19 @@ t.FindField("label").Get(&item, label);
 ### 3.2 Calling functions and methods
 
 Every registered function that has code in the program gets an **invoke thunk**,
-`void(void* object, void* result, void** arguments)`, and its table entry stores the thunk's address:
+`void(const void* code, void* object, void* result, void** arguments)`, and its table entry stores the thunk's
+address:
 
 - a function or method with a body (a template-made one when the program uses it, as D-16 compiles it);
 - every virtual method, body or not: the thunk dispatches through the object, so a pure interface method
   is callable and runs the object's implementation.
+
+One thunk serves every function of a signature: it calls the `code` it is given, which the entry stores beside the
+thunk (the runtime passes it). The signature is what the thunk depends on: how `this` is passed, `noexcept`, and the
+return and parameter types as they are passed - every pointer alike, every reference alike, an integer or an enum by
+its width, an object (whose copy and delete run in the thunk) by its own type. A virtual method and a foreign
+(`[link]`) function have a thunk of their own, which ignores `code` (the entry's is null). The IED server's 4,866
+thunks became 1,038 this way.
 
 There is no thunk (`IsInvokable()` is false) for a C variadic function, a function local to a body, an
 extension method of a primitive type, a function declared but not defined in the program (an external

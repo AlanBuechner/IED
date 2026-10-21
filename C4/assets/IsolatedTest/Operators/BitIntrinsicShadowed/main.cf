@@ -1,0 +1,4 @@
+// A program function named like a bit intrinsic wins over it (docs/language/14 section 12).
+int32 bit_count(int32 value) { return value * 2; }
+
+int32 main() { return bit_count(3) == 6 ? 0 : 1; }

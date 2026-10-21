@@ -16,7 +16,7 @@ namespace Testing
 	{
 		// The image's fields (C4Runtime/ReflectABI.h c4_reflect_image).
 		enum ImageField { kTypeCount = 0, kTypes = 1, kVariableCount = 2, kVariables = 3, kAddresses = 4, kFunctionCount = 5, kFunctions = 6 };
-		enum FunctionField { kFunctionSymbol = 1 };
+		enum FunctionField { kFunctionSymbol = 1, kFunctionInvoke = 10, kFunctionCode = 13 };
 
 		// Lowers `source` with `entry` and hands the module (or null when lowering failed) and the driver to `inspect`.
 		template <typename Inspect>
@@ -65,6 +65,22 @@ namespace Testing
 					symbols.push_back(Text(llvm::cast<llvm::Constant>(llvm::cast<llvm::ConstantStruct>(row)->getOperand(kFunctionSymbol))));
 			return symbols;
 		}
+
+		// The function row of `symbol`, or null.
+		const llvm::ConstantStruct* FunctionRow(const llvm::ConstantStruct& image, const std::string& symbol)
+		{
+			if (const llvm::ConstantArray* rows = Rows(image, kFunctions))
+				for (const llvm::Use& row : rows->operands())
+				{
+					const auto* function = llvm::cast<llvm::ConstantStruct>(row);
+					if (Text(llvm::cast<llvm::Constant>(function->getOperand(kFunctionSymbol))) == symbol) return function;
+				}
+			return nullptr;
+		}
+
+		// A function row's invoke thunk and the code a shared thunk calls (null for a thunk of its own).
+		const llvm::Function* Invoke(const llvm::ConstantStruct* row) { return row ? llvm::dyn_cast<llvm::Function>(row->getOperand(kFunctionInvoke)) : nullptr; }
+		const llvm::Function* Code(const llvm::ConstantStruct* row) { return row ? llvm::dyn_cast<llvm::Function>(row->getOperand(kFunctionCode)) : nullptr; }
 
 		// The priority of `function` in @llvm.global_ctors, or -1.
 		int64_t CtorPriority(const llvm::Module& module, const char* function)
@@ -138,9 +154,66 @@ namespace Testing
 	{
 		Lowered(kProgram, "main", [](llvm::Module* module, CodeGenDriver&) {
 			TEST_ASSERT(module != nullptr);
-			const llvm::Function* thunk = module->getFunction("__c4_invoke_Add_5f2int32int32");
+			const llvm::ConstantStruct* image = Image(*module);
+			TEST_ASSERT(image != nullptr);
+			const llvm::Function* thunk = Invoke(FunctionRow(*image, "Add_2int32int32"));
 			TEST_ASSERT(thunk != nullptr && !thunk->isDeclaration());
 			TEST_ASSERT(thunk->hasInternalLinkage());
+			TEST_ASSERT(thunk->getName().starts_with("__c4_invoke_sig_"));
+		});
+		TEST_PASSED();
+	}
+
+	// Reflection calls every function of one signature through one thunk, given the function's own code.
+	void ReflectionImageTest::FunctionsOfOneSignatureShareAThunk()
+	{
+		const char* program =
+			"int32 Add(int32 a, int32 b) { return a + b; }\n"
+			"int32 Sub(int32 a, int32 b) { return a - b; }\n"
+			"uint32 Mask(uint32 a, uint32 b) { return a & b; }\n"
+			"int64 Wide(int64 a, int64 b) { return a * b; }\n"
+			"int32 main() { return Add(1, 2) - Sub(5, 2) - (int32)Mask(1, 1) + (int32)Wide(1, 1) - 1; }\n";
+		Lowered(program, "main", [](llvm::Module* module, CodeGenDriver&) {
+			TEST_ASSERT(module != nullptr);
+			const llvm::ConstantStruct* image = Image(*module);
+			TEST_ASSERT(image != nullptr);
+			const llvm::ConstantStruct* add = FunctionRow(*image, "Add_2int32int32");
+			const llvm::ConstantStruct* sub = FunctionRow(*image, "Sub_2int32int32");
+			const llvm::ConstantStruct* mask = FunctionRow(*image, "Mask_2uint32uint32");
+			const llvm::ConstantStruct* wide = FunctionRow(*image, "Wide_2int64int64");
+			TEST_ASSERT(add && sub && mask && wide);
+			TEST_ASSERT(Invoke(add) != nullptr && Invoke(add) == Invoke(sub));
+			TEST_ASSERT(Invoke(add) == Invoke(mask)); // int32 and uint32 pass alike
+			TEST_ASSERT(Invoke(wide) != nullptr && Invoke(wide) != Invoke(add));
+			TEST_ASSERT(Code(add) == module->getFunction("Add_2int32int32"));
+			TEST_ASSERT(Code(sub) == module->getFunction("Sub_2int32int32"));
+			TEST_ASSERT(Code(wide) == module->getFunction("Wide_2int64int64"));
+		});
+		TEST_PASSED();
+	}
+
+	// A virtual method dispatches on its object: its thunk is its own and calls no given code.
+	void ReflectionImageTest::VirtualMethodsHaveThunksOfTheirOwn()
+	{
+		const char* program =
+			"class Shape { public virtual int32 Sides() const { return 0; } }\n"
+			"class Square : Shape { public override int32 Sides() const { return 4; } }\n"
+			"int32 main() { Square s; Shape* shape = &s; return shape->Sides() - 4; }\n";
+		Lowered(program, "main", [](llvm::Module* module, CodeGenDriver&) {
+			TEST_ASSERT(module != nullptr);
+			const llvm::ConstantStruct* image = Image(*module);
+			TEST_ASSERT(image != nullptr);
+			int32_t virtualRows = 0;
+			if (const llvm::ConstantArray* rows = Rows(*image, kFunctions))
+				for (const llvm::Use& row : rows->operands())
+				{
+					const auto* function = llvm::cast<llvm::ConstantStruct>(row);
+					if (Text(llvm::cast<llvm::Constant>(function->getOperand(kFunctionSymbol))).find("Sides") == std::string::npos) continue;
+					virtualRows++;
+					TEST_ASSERT(Invoke(function) != nullptr && !Invoke(function)->getName().starts_with("__c4_invoke_sig_"));
+					TEST_ASSERT(Code(function) == nullptr);
+				}
+			TEST_ASSERT_EQ(virtualRows, int32_t(2));
 		});
 		TEST_PASSED();
 	}

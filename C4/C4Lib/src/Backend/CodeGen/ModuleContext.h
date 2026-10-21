@@ -61,6 +61,8 @@ namespace Scripting
 		// out-ptr prepended when the return is a too-large aggregate, params per the Abi brick. Centralizing
 		// signature building here guarantees the forward-decl pass and the body pass emit identical types.
 		llvm::Function* GetOrCreateFunction(const FunctionRecord& rec);
+		/// The LLVM type of `rec`'s function: its hidden parameters, then the declared ones as the ABI passes them.
+		llvm::FunctionType* FunctionTypeOf(const FunctionRecord& rec);
 		/// The records whose functions were created since the last call: what emitted code referenced for
 		/// the first time (the driver lowers the template-made ones among them, D-16).
 		std::vector<const FunctionRecord*> TakeNewFunctions() { return std::move(m_NewFunctions); }

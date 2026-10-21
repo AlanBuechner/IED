@@ -87,8 +87,8 @@ namespace Testing
 		TEST_ASSERT(fn.complete && errors.GetErrors().Empty());
 		int copies = 0;
 		for (const auto& node : fn.m_Nodes)
-			if (node->kind == HIRNode::Kind::Call && static_cast<const CallNode*>(node.get())->callee &&
-				static_cast<const CallNode*>(node.get())->callee->name == "Copy") ++copies;
+			if (node->kind == HIRNode::Kind::Call && static_cast<const CallNode*>(node)->callee &&
+				static_cast<const CallNode*>(node)->callee->name == "Copy") ++copies;
 		TEST_ASSERT_EQ(copies, 0);
 		TEST_ASSERT(Count(fn, HIRNode::Kind::LocalDecl) >= 2);
 	}

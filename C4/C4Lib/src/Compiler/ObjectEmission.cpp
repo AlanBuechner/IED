@@ -1,4 +1,5 @@
 #include "Compiler/ObjectEmission.h"
+#include "Compiler/AggregateCopies.h"
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
 #include <llvm/Analysis/TargetLibraryInfo.h>
@@ -286,7 +287,9 @@ namespace Scripting
 		const size_t before = diagnostics.size();
 		CollectedDiagnostics collected(module.getContext(), diagnostics);
 		std::unique_ptr<llvm::TargetMachine> machine = MachineFor(module, settings, diagnostics);
-		if (machine) RunPipeline(module, *machine, settings.optLevel);
+		if (!machine) return false;
+		if (settings.optLevel == 0) LowerAggregateCopies(module);
+		RunPipeline(module, *machine, settings.optLevel);
 		return diagnostics.size() == before;
 	}
 

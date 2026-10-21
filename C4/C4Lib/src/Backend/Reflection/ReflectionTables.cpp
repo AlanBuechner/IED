@@ -17,11 +17,11 @@ namespace Scripting
 		annotation = llvm::StructType::get(m_Context, { ptr, u32, ptr });
 		param = llvm::StructType::get(m_Context, { ptr, ptr, u32, ptr });
 		field = llvm::StructType::get(m_Context, { ptr, ptr, u64, u64, u32, u32, u32, ptr });
-		method = llvm::StructType::get(m_Context, { ptr, u32, ptr, ptr, u32, u32, u32, ptr, u32, ptr });
+		method = llvm::StructType::get(m_Context, { ptr, u32, ptr, ptr, u32, u32, u32, ptr, u32, ptr, ptr });
 		enumValue = llvm::StructType::get(m_Context, { ptr, u64 });
 		typeInfo = llvm::StructType::get(m_Context, { u32, ptr, u64, u64, u32, ptr, u32, ptr, ptr, u32, ptr, u32, ptr, u32, ptr });
 		variable = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u64, u64, u32, ptr, u32, ptr, u32, ptr });
-		function = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u32, ptr, u32, u32, ptr, u32, ptr, ptr, u32, ptr });
+		function = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u32, ptr, u32, u32, ptr, u32, ptr, ptr, u32, ptr, ptr });
 		image = llvm::StructType::get(m_Context, { u32, ptr, u32, ptr, ptr, u32, ptr });
 	}
 

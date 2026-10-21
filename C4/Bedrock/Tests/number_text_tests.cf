@@ -1,0 +1,151 @@
+// Number text (format_double / parse_double behind StringBuilder::AppendDouble and the JSON and YAML readers): the
+// shortest form reads back as the same double across the whole range, is plain for exponents -5 to 15 and scientific
+// outside them, and parsing takes strtod's syntax.
+
+include "bedrock.ch"
+
+// splitmix64, so the doubles are the same on every run.
+static uint64 NextBits(uint64& state) {
+	state += 11400714819323198485u;
+	uint64 z = state;
+	z = (z ^ (z >> 30)) * 13787848793156543929u;
+	z = (z ^ (z >> 27)) * 10723151780598845931u;
+	return z ^ (z >> 31);
+}
+
+static bool HasExponent(Core::StringView text) {
+	for (int64 i = 0; i < text.ByteLength(); ++i)
+		if (text.ByteAt(i) == 'e') return true;
+	return false;
+}
+
+static double ReadBack(const Core::StringBuilder& text) {
+	double value = 0.0;
+	parse_double((void*)text.CStr(), text.ByteLength(), (void*)&value);
+	return value;
+}
+
+[test("number_text.shortest_round_trips")]
+public static void TestShortestRoundTrips() {
+	uint64 state = 7;
+	int32 mismatches = 0;
+	int32 misplaced = 0;
+	for (int32 i = 0; i < 20000; ++i) {
+		double value = reinterpret_cast<double>(NextBits(state));
+		if (value != value) continue;
+		Core::StringBuilder text;
+		text.AppendDouble(value, -1);
+		if (ReadBack(text) != value) mismatches += 1;
+		double magnitude = value < 0.0 ? -value : value;
+		bool plain = magnitude == 0.0 || (magnitude >= 0.00001 && magnitude < 1e16);
+		if (magnitude == magnitude * 2.0 && magnitude != 0.0) continue;   // the infinities
+		if (HasExponent(text.View()) == plain) misplaced += 1;
+	}
+	assert_eq(0, mismatches, "every double reads back as itself");
+	assert_eq(0, misplaced, "plain for exponents -5 to 15, scientific outside them");
+}
+
+[test("number_text.ordinary_values_round_trip")]
+public static void TestOrdinaryValuesRoundTrip() {
+	uint64 state = 11;
+	int32 mismatches = 0;
+	for (int32 i = 0; i < 20000; ++i) {
+		double value = (double)(NextBits(state) >> 11) / 9007199254740992.0 * 1000.0;
+		Core::StringBuilder text;
+		text.AppendDouble(value, -1);
+		if (ReadBack(text) != value || HasExponent(text.View())) mismatches += 1;
+	}
+	assert_eq(0, mismatches, "values from 0 to 1000 are plain and read back");
+}
+
+// A long exponent left on the stack once made the next number's exponent read wrong.
+[test("number_text.exponent_after_a_long_one")]
+public static void TestExponentAfterALongOne() {
+	Core::StringBuilder text;
+	text.AppendDouble(-1.2345678901234567e-308, -1);
+	text.Clear();
+	text.AppendDouble(5.867183433069445e-200, -1);
+	text.Clear();
+	text.AppendDouble(586.7183433069445, -1);
+	assert_se("586.7183433069445", text.CStr(), "a plain number after scientific ones");
+	text.Clear();
+	text.AppendDouble(1.5e-300, -1);
+	assert_se("1.5e-300", text.CStr(), "a three-digit exponent");
+	text.Clear();
+	text.AppendDouble(-4.9e-324, -1);
+	assert_se("-5e-324", text.CStr(), "the smallest denormal");
+	text.Clear();
+	text.AppendDouble(1.7976931348623157e308, -1);
+	assert_se("1.7976931348623157e+308", text.CStr(), "the largest double");
+}
+
+[test("number_text.layout_boundaries")]
+public static void TestLayoutBoundaries() {
+	Core::StringBuilder text;
+	text.AppendDouble(0.00001, -1);
+	assert_se("0.00001", text.CStr(), "1e-5 is the smallest plain magnitude");
+	text.Clear();
+	text.AppendDouble(9.999999999999999e-06, -1);
+	assert_se("9.999999999999999e-06", text.CStr(), "just below it is scientific");
+	text.Clear();
+	text.AppendDouble(9999999999999998.0, -1);
+	assert_se("9999999999999998", text.CStr(), "the largest plain double");
+	text.Clear();
+	text.AppendDouble(1000000000000000.0, -1);
+	assert_se("1000000000000000", text.CStr(), "zeros fill out to the point");
+	text.Clear();
+	text.AppendDouble(-0.0, -1);
+	assert_se("-0", text.CStr(), "negative zero keeps its sign");
+	text.Clear();
+	text.AppendDouble(0.0, -1);
+	assert_se("0", text.CStr(), "zero");
+	text.Clear();
+	text.AppendDouble(-0.000123, -1);
+	assert_se("-0.000123", text.CStr(), "a small negative value");
+}
+
+[test("number_text.fixed_decimals")]
+public static void TestFixedDecimals() {
+	Core::StringBuilder text;
+	text.Append("x=");
+	text.AppendDouble(0.5, 3);
+	assert_se("x=0.500", text.CStr(), "appended after the text already there");
+	text.Clear();
+	text.AppendDouble(1.7976931348623157e308, 40);
+	assert_eq(350, text.ByteLength(), "309 integer digits, a point and 40 decimals");
+	text.Clear();
+	text.AppendDouble(2.5, 100);
+	assert_eq(42, text.ByteLength(), "decimals stop at 40");
+	text.Clear();
+	text.AppendDouble(-0.0, 2);
+	assert_se("-0.00", text.CStr(), "negative zero in fixed form");
+}
+
+static int64 Parsed(const char* text, double& value) { return parse_double((void*)text, (int64)strlen(text), (void*)&value); }
+
+[test("number_text.parse_syntax")]
+public static void TestParseSyntax() {
+	double value = 0.0;
+	assert_eq(4, Parsed("+1.5", value), "a plus sign");
+	assert_true(value == 1.5, "+1.5");
+	assert_eq(5, Parsed("0x1p3", value), "a hexadecimal float");
+	assert_true(value == 8.0, "0x1p3");
+	assert_eq(2, Parsed(" 2", value), "leading space");
+	assert_true(value == 2.0, " 2");
+	assert_eq(2, Parsed(".5", value), "no integer digits");
+	assert_true(value == 0.5, ".5");
+	assert_eq(1, Parsed("1e", value), "an exponent without digits is not taken");
+	assert_eq(1, Parsed("7,8", value), "stops at a comma");
+	assert_true(value == 7.0, "7");
+	assert_eq(5, Parsed("1e999", value), "too large");
+	assert_true(value > 1e308, "infinity");
+	assert_eq(6, Parsed("1e-999", value), "too small");
+	assert_true(value == 0.0, "zero");
+	assert_eq(3, Parsed("nan", value), "nan");
+	assert_true(value != value, "NaN");
+	assert_eq(4, Parsed("-inf", value), "-inf");
+	assert_true(value < -1e308, "negative infinity");
+	assert_eq(0, Parsed("-", value), "a sign alone");
+	assert_eq(0, Parsed("x1", value), "not a number");
+	assert_eq(0, parse_double((void*)"5", 0, (void*)&value), "no bytes");
+}

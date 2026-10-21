@@ -21,6 +21,10 @@ namespace Testing
 		TEST_FUNC(Semantic.ReflectionImage)
 		void InvokeThunksAreInternal();
 		TEST_FUNC(Semantic.ReflectionImage)
+		void FunctionsOfOneSignatureShareAThunk();
+		TEST_FUNC(Semantic.ReflectionImage)
+		void VirtualMethodsHaveThunksOfTheirOwn();
+		TEST_FUNC(Semantic.ReflectionImage)
 		void CompilerWrittenFunctionsAreLeftOut();
 		TEST_FUNC(Semantic.ReflectionImage)
 		void AnnotationThatDoesNotFoldFailsTheBuild();

@@ -5,7 +5,7 @@ needs before any library exists, the hooks into the C4 runtime (GC, reflection, 
 `_GUID` type, `BadCast`, what a checked cast to a reference throws, and `BadArrayLength`, what `new T[n]` throws
 for a count that cannot hold its elements ([10](10-expressions.md)). They are ordinary C4 declarations in the **prelude**, `Bedrock/Prelude/prelude.ch`, which the
 compiler makes every unit include (D-43). Only the intrinsics of section 1, the `va_*` forms of section 8, the
-atomics of section 10 and the SIMD intrinsics of section 11 stay in the compiler.
+atomics of section 10, the SIMD intrinsics of section 11 and the bit intrinsics of section 12 stay in the compiler.
 
 Rules:
 
@@ -110,12 +110,12 @@ the full statistics - is the Bedrock `GC` namespace (`include "Memory/gc.ch"`,
 
 ### 5.2 Number text
 
-**Status:** **Implemented** - Bedrock's `Core::StringBuilder` uses these; the C library does the rounding
+**Status:** **Implemented** - Bedrock's `Core::StringBuilder` uses these; the digits come from the C++ library's `<charconv>` (correctly rounded, the shortest form Ryu's), not from printf
 
 | Builtin | Signature | Notes |
 |---|---|---|
 | `format_double` | `int32 format_double(char* out, int32 cap, double value, int32 decimals)` | `decimals` fraction digits, or with a negative `decimals` the shortest text that reads back as `value` (plain decimals for exponents -5 to 15, scientific otherwise); NaN and the infinities are `nan`, `inf`, `-inf` on every platform. The length written (null-terminated), -1 when `out` is too small |
-| `parse_double` | `int64 parse_double(char* text, int64 length, double* out)` | the double that `text[0, length)` starts with (C `strtod` syntax); the bytes it took, 0 when there is no number. The bytes are copied to add a terminator, so pass the number, not the rest of a document |
+| `parse_double` | `int64 parse_double(char* text, int64 length, double* out)` | the double that `text[0, length)` starts with (C `strtod` syntax); the bytes it took, 0 when there is no number. Read in place; only leading space, a `+` or a hexadecimal float (`0x1p3`) takes strtod's slower path, which copies the bytes |
 
 ## 6. File I/O
 
@@ -316,4 +316,35 @@ Rules:
   `simd_shuffle's lane index 4 is out of range: the vectors have lanes 0 to 3`, `simd_sqrt works on float or
   double lanes, not a 'packed int32[4]'`, `simd_fma needs the processor's fused multiply-add: build with -mfma or
   -march=x86-64-v3 (or newer), or use simd_muladd`.
+- A program function of the same name wins over the intrinsic.
+
+## 12. Bit intrinsics
+
+**Status:** **Implemented**
+
+Integer bit operations the processor does in one instruction (or a few), on any integer type, signed or unsigned, of
+8 to 64 bits, and on packed integer vectors lane by lane. Hashing, bit sets and hash tables are built on them.
+
+```c4
+uint64 h = a * b ^ mul_high(a, b);          // the 128-bit product folded, as fast hashes do
+int32 first = bit_trailing_zeros(mask);      // the lowest set bit of a mask
+uint32 r = bit_rotate_left(x, 13);
+```
+
+| Intrinsic | Result |
+|---|---|
+| `bit_count(x)` | how many bits of `x` are set |
+| `bit_leading_zeros(x)` | how many zero bits come before the highest set bit; the width for 0 |
+| `bit_trailing_zeros(x)` | how many zero bits come after the lowest set bit; the width for 0 |
+| `bit_rotate_left(x, n)`, `bit_rotate_right(x, n)` | `x`'s bits rotated by `n` modulo the width (so `-1` rotates by width - 1); `n` converts to `x`'s type |
+| `byte_swap(x)` | `x` with its bytes in reverse order (an 8-bit value is itself) |
+| `mul_high(a, b)` | the upper half of the double-width product of `a` and `b`, signed or unsigned as their type is; `b` converts to `a`'s type. `a * b` is the lower half |
+
+Rules:
+
+- A count is an `int32` for an integer and the vector's own type for a vector; the other intrinsics give `x`'s (or
+  `a`'s) type.
+- A vector operand takes a vector of the same lanes or a scalar, which applies to every lane.
+- Errors name the call and what is wrong: `bit_count works on an integer or a packed integer vector, not a 'float'`,
+  `bit_rotate_left takes 2 arguments, not 1`.
 - A program function of the same name wins over the intrinsic.

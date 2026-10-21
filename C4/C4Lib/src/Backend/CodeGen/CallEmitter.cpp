@@ -168,6 +168,7 @@ namespace Scripting
 	CallEmitter::Callee CallEmitter::ResolveCallee(const CallNode* n, llvm::Value* thisArg)
 	{
 		if (!n->callee) return IndirectCallee(n);
+		if (n->code) return { m_Ctx.mctx().FunctionTypeOf(*n->callee), m_Expr.Emit(n->code) };
 		llvm::Function* fn = m_Ctx.mctx().GetOrCreateFunction(*n->callee);
 		if (n->virtualIndex < 0 || !thisArg) return { fn->getFunctionType(), fn };
 		// HIR moved the receiver to the sub-object whose vtable holds the slot: its vptr is at offset 0 and

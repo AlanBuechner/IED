@@ -1,0 +1,2 @@
+// A rotation takes the value and the count.
+int32 main() { return bit_rotate_left(1); }

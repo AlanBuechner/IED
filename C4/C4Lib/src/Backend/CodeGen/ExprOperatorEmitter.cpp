@@ -42,6 +42,31 @@ namespace Scripting
 		}
 
 		uint32_t BitWidth(const Type* t) { return static_cast<uint32_t>(t ? t->GetSize() * 8 : 0); }
+
+		// A count of `value`'s bits as `result` (an int32 for an integer, the vector itself for a vector).
+		llvm::Value* CountBits(llvm::IRBuilder<>& B, llvm::Intrinsic::ID id, llvm::Value* value, llvm::Type* result)
+		{
+			llvm::Value* count = id == llvm::Intrinsic::ctpop ? B.CreateUnaryIntrinsic(id, value)
+				: B.CreateBinaryIntrinsic(id, value, B.getFalse()); // zero gives the width, not poison
+			return count->getType() == result ? count : B.CreateZExtOrTrunc(count, result);
+		}
+
+		// A single byte has nothing to swap.
+		llvm::Value* SwapBytes(llvm::IRBuilder<>& B, llvm::Value* value)
+		{
+			return value->getType()->getScalarSizeInBits() < 16 ? value : B.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, value);
+		}
+
+		// The upper half of the double-width product.
+		llvm::Value* MultiplyHigh(llvm::IRBuilder<>& B, llvm::Value* lhs, llvm::Value* rhs, bool isUnsigned)
+		{
+			llvm::Type* narrow = lhs->getType();
+			const unsigned width = narrow->getScalarSizeInBits();
+			llvm::Type* wide = narrow->getWithNewBitWidth(width * 2);
+			llvm::Value* a = isUnsigned ? B.CreateZExt(lhs, wide) : B.CreateSExt(lhs, wide);
+			llvm::Value* b = isUnsigned ? B.CreateZExt(rhs, wide) : B.CreateSExt(rhs, wide);
+			return B.CreateTrunc(B.CreateLShr(B.CreateMul(a, b), llvm::ConstantInt::get(wide, width)), narrow);
+		}
 	}
 
 	llvm::Value* ExprEmitter::EmitIntrinsicOp(const IntrinsicOpNode* n)
@@ -59,6 +84,10 @@ namespace Scripting
 			{
 			case IntrinsicOp::Negate:  return isFloat ? B.CreateFNeg(lhs) : B.CreateNeg(lhs);
 			case IntrinsicOp::BitNot:  return B.CreateNot(lhs);
+			case IntrinsicOp::CountOnes: return CountBits(B, llvm::Intrinsic::ctpop, lhs, m_Ctx.mctx().Lower(n->type));
+			case IntrinsicOp::LeadingZeros: return CountBits(B, llvm::Intrinsic::ctlz, lhs, m_Ctx.mctx().Lower(n->type));
+			case IntrinsicOp::TrailingZeros: return CountBits(B, llvm::Intrinsic::cttz, lhs, m_Ctx.mctx().Lower(n->type));
+			case IntrinsicOp::ByteSwap: return SwapBytes(B, lhs);
 			// Logical NOT yields a boolean (i1): !x is true exactly when x IS zero, compared at the operand's own
 			// width. A pointer's zero is the null pointer: `!p` is `p == null`; a func's is a null code pointer
 			// (BUG-275: `s && f` negates its right operand twice and compared the func's { code, environment }).
@@ -124,6 +153,9 @@ namespace Scripting
 		case IntrinsicOp::BitOr:   return B.CreateOr(lhs, rhs);
 		case IntrinsicOp::BitXor:  return B.CreateXor(lhs, rhs);
 		case IntrinsicOp::Shl:     return B.CreateShl(lhs, rhs);
+		case IntrinsicOp::RotateLeft:  return B.CreateIntrinsic(llvm::Intrinsic::fshl, { lhs->getType() }, { lhs, lhs, rhs });
+		case IntrinsicOp::RotateRight: return B.CreateIntrinsic(llvm::Intrinsic::fshr, { lhs->getType() }, { lhs, lhs, rhs });
+		case IntrinsicOp::MulHigh:     return MultiplyHigh(B, lhs, rhs, opUnsigned);
 		case IntrinsicOp::Shr:     return unsignedInt ? B.CreateLShr(lhs, rhs) : B.CreateAShr(lhs, rhs);
 		default:                   return lhs;
 		}

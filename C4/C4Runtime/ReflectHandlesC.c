@@ -106,14 +106,14 @@ uint32_t reflect_method_is_invokable(const c4_method_info* m) { return m && m->i
 uint32_t reflect_function_invoke(const c4_function_info* f, void* object, void* result, void** arguments)
 {
     if (!reflect_function_is_invokable(f) || (!f->isStatic && !object)) return 0;
-    f->invoke(object, result, arguments);
+    f->invoke(f->code, object, result, arguments);
     return 1;
 }
 
 uint32_t reflect_method_invoke(const c4_method_info* m, void* object, void* result, void** arguments)
 {
     if (!reflect_method_is_invokable(m) || (!m->isStatic && !object)) return 0;
-    m->invoke(object, result, arguments);
+    m->invoke(m->code, object, result, arguments);
     return 1;
 }
 

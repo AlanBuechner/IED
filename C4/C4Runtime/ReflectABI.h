@@ -42,10 +42,11 @@ typedef struct c4_annotation_info {
     const c4_annotation_arg* args;
 } c4_annotation_info;
 
-// A function's invoke thunk (D-50): `object` is a method's receiver (unused otherwise), `arguments[i]` the
+// A function's invoke thunk (D-50): `code` is the function a thunk shared by its signature calls (the record's
+// `code`; unused by a thunk of its own), `object` is a method's receiver (unused otherwise), `arguments[i]` the
 // address of argument i as the parameter's type, and the result is built in `result` (a reference result
 // stores the referent's address there; unused for void).
-typedef void (*c4_invoke_fn)(void* object, void* result, void** arguments);
+typedef void (*c4_invoke_fn)(const void* code, void* object, void* result, void** arguments);
 
 // One parameter of a reflected function or method.
 typedef struct c4_param_info {
@@ -79,6 +80,7 @@ typedef struct c4_method_info {
     c4_invoke_fn invoke;           // NULL when reflection cannot call it
     uint32_t annotationCount;      // the annotations the compiler does not act on (D-42)
     const c4_annotation_info* annotations;
+    const void* code;              // what a shared invoke thunk calls; NULL for a thunk of its own
 } c4_method_info;
 
 // One enumerator of a reflected enum.
@@ -136,6 +138,7 @@ typedef struct c4_function_info {
     c4_invoke_fn invoke;           // NULL when reflection cannot call it
     uint32_t annotationCount;      // the annotations the compiler does not act on (D-42)
     const c4_annotation_info* annotations;
+    const void* code;              // what a shared invoke thunk calls; NULL for a thunk of its own
 } c4_function_info;
 
 // Everything one image registers: a program's (or a script's) types, its variables with their addresses, and its

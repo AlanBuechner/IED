@@ -40,7 +40,7 @@ namespace Testing
 			for (const auto& node : fn.m_Nodes)
 			{
 				if (node->kind != HIRNode::Kind::Transfer) continue;
-				const auto* transfer = static_cast<const TransferNode*>(node.get());
+				const auto* transfer = static_cast<const TransferNode*>(node);
 				++t.total;
 				t.moves += transfer->move ? 1 : 0;
 				t.flagged += transfer->dropFlag != kNoDropFlag ? 1 : 0;

@@ -1,0 +1,2 @@
+// A bit intrinsic works on integers: a float is a clear error.
+int32 main() { return bit_count(1.5f); }

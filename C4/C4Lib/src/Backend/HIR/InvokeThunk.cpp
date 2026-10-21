@@ -6,7 +6,10 @@
 #include "Backend/HIR/MethodReceiver.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
+#include "Model/Types/AliasType.h"
 #include "Model/Types/FunctionType.h"
+#include "Model/Types/QualifiedName.h"
+#include "Model/Types/VirtualTables.h"
 
 namespace Scripting
 {
@@ -14,17 +17,19 @@ namespace Scripting
 	{
 		const Type* VoidPointer(TypeStore* types) { return types->Pointer(types->Builtin(TypeKind::Void)); }
 
-		// The thunk's own parameters, slots 0, 1 and 2 in signature order.
-		enum ThunkSlot : uint32 { kObject = 0, kResult = 1, kArguments = 2 };
+		// The thunk's own parameters, slots 0 to 3 in signature order.
+		enum ThunkSlot : uint32 { kCode = 0, kObject = 1, kResult = 2, kArguments = 3 };
 
 		class ThunkBuilder
 		{
 		public:
-			ThunkBuilder(LoweringContext& ctx, const FunctionRecord& target) : m_Ctx(ctx), m_Target(target), m_Types(ctx.queries().TypeStore()) {}
+			ThunkBuilder(LoweringContext& ctx, const FunctionRecord& target, bool shared)
+				: m_Ctx(ctx), m_Target(target), m_Types(ctx.queries().TypeStore()), m_Shared(shared) {}
 
 			QueryResult<void> Build()
 			{
 				const Type* voidPtr = VoidPointer(m_Types);
+				m_Ctx.AllocSlot(voidPtr, "code", SlotClass::Param);
 				m_Ctx.AllocSlot(voidPtr, "object", SlotClass::Param);
 				m_Ctx.AllocSlot(voidPtr, "result", SlotClass::Param);
 				m_Ctx.AllocSlot(m_Types->Pointer(voidPtr), "arguments", SlotClass::Param);
@@ -42,6 +47,7 @@ namespace Scripting
 			QueryResult<CallNode*> Call()
 			{
 				auto* call = m_Ctx.out->NewNode<CallNode>(m_Target.type->GetReturnType(), &m_Target);
+				if (m_Shared) call->code = Load(kCode);
 				if (m_Target.containingType && !m_Target.isStatic)
 				{
 					auto bound = BindReceiver(m_Ctx, call, Pointee(Load(kObject), m_Target.containingType));
@@ -102,14 +108,50 @@ namespace Scripting
 			LoweringContext& m_Ctx;
 			const FunctionRecord& m_Target;
 			TypeStore* m_Types;
+			bool m_Shared;
 		};
+
+		bool DispatchesOnObject(const ProgramModel& model, const FunctionRecord& target)
+		{
+			if (!target.containingType || target.isStatic) return false;
+			const ObjectType::MethodInfo* method = model.MethodForRecord(target);
+			return method && VirtualTables::IsVirtual(target.containingType, *method);
+		}
+
+		const char* ReceiverText(const FunctionRecord& target)
+		{
+			if ((!target.containingType && !target.primitiveReceiverType) || target.isStatic) return "free";
+			return target.isExtensionMethod || target.primitiveReceiverType ? "extension" : "member";
+		}
+
+		// How a thunk passes a value of `type`: every pointer alike, every reference alike, a scalar by its kind and
+		// width, and anything else (an object's copy and delete run in the thunk) by its own type.
+		Core::String PassedAs(const Type* type)
+		{
+			if (!type) return "void";
+			switch (type->GetKind())
+			{
+			case TypeKind::Alias: return PassedAs(static_cast<const AliasType*>(type)->GetAliasedType());
+			case TypeKind::Reference: return "&";
+			case TypeKind::Pointer: case TypeKind::FunPtr: return "*";
+			case TypeKind::Void: case TypeKind::Bool: return QualifiedName(type);
+			case TypeKind::Float32: case TypeKind::Float64: return "f" + std::to_string(type->GetSize() * 8);
+			case TypeKind::Int8: case TypeKind::Int16: case TypeKind::Int32: case TypeKind::Int64:
+			case TypeKind::UInt8: case TypeKind::UInt16: case TypeKind::UInt32: case TypeKind::UInt64:
+			case TypeKind::SNorm8: case TypeKind::SNorm16: case TypeKind::SNorm32: case TypeKind::SNorm64:
+			case TypeKind::UNorm8: case TypeKind::UNorm16: case TypeKind::UNorm32: case TypeKind::UNorm64:
+			case TypeKind::Char8: case TypeKind::Char16: case TypeKind::Char32: case TypeKind::Enum:
+				return "i" + std::to_string(type->GetSize() * 8);
+			default: return QualifiedName(type);
+			}
+		}
 	}
 
 	const FunctionType* InvokeThunkType(ProgramModel& model)
 	{
 		TypeStore* types = model.TypeStorePtr();
 		const Type* voidPtr = VoidPointer(types);
-		return types->Function(types->Builtin(TypeKind::Void), { voidPtr, voidPtr, types->Pointer(voidPtr) });
+		return types->Function(types->Builtin(TypeKind::Void), { voidPtr, voidPtr, voidPtr, types->Pointer(voidPtr) });
 	}
 
 	bool Invokable(const FunctionRecord& target)
@@ -117,7 +159,20 @@ namespace Scripting
 		return target.type && !target.type->IsVariadic() && !target.primitiveReceiverType && !target.isLocal;
 	}
 
-	HIRFunction LowerInvokeThunk(ProgramModel& model, ErrorTracker& errors, const FunctionRecord& target, const FunctionRecord& thunk)
+	bool SharesInvokeThunk(const ProgramModel& model, const FunctionRecord& target)
+	{
+		return !target.isLinked && !DispatchesOnObject(model, target);
+	}
+
+	Core::String InvokeSignature(const FunctionRecord& target)
+	{
+		Core::String text = Core::String(ReceiverText(target)) + (target.isNoexcept ? " noexcept " : " ") + PassedAs(target.type->GetReturnType()) + "(";
+		const auto& parameters = target.type->GetParameters();
+		for (uint32 i = 0; i < parameters.Count(); ++i) text += Core::String(i ? ", " : "") + PassedAs(parameters[i].m_Type);
+		return text + ")";
+	}
+
+	HIRFunction LowerInvokeThunk(ProgramModel& model, ErrorTracker& errors, const FunctionRecord& target, const FunctionRecord& thunk, bool shared)
 	{
 		HIRFunction fn;
 		fn.record = &thunk;
@@ -128,7 +183,7 @@ namespace Scripting
 		ctx.scope = target.scope;
 		ScopeGuard frame = ctx.queries().PushScope(Scope::Kind::Function, thunk.mangledName);
 		fn.root = fn.NewNode<BlockNode>(nullptr);
-		fn.complete = ThunkBuilder(ctx, target).Build().Ok() && errors.GetErrors().Empty();
+		fn.complete = ThunkBuilder(ctx, target, shared).Build().Ok() && errors.GetErrors().Empty();
 		return fn;
 	}
 } // namespace Scripting

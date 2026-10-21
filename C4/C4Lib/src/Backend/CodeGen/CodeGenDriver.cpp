@@ -209,12 +209,25 @@ namespace Scripting
 
 	void CodeGenDriver::EmitInvokeThunk(ProgramModel& model, const FunctionRecord& target)
 	{
+		if (!SharesInvokeThunk(model, target))
+		{
+			if (llvm::Function* own = LowerInvokeThunk(model, target, InvokeThunkSymbol(target), false)) m_Thunks[&target] = { own, nullptr };
+			return;
+		}
+		const std::string symbol = SharedInvokeThunkSymbol(target);
+		auto [entry, fresh] = m_SharedThunks.try_emplace(symbol, nullptr);
+		if (fresh) entry->second = LowerInvokeThunk(model, target, symbol, true);
+		if (entry->second) m_Thunks[&target] = { entry->second, m_MCtx.GetOrCreateFunction(target) };
+	}
+
+	llvm::Function* CodeGenDriver::LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared)
+	{
 		FunctionRecord& thunk = m_ThunkRecords.emplace_back();
 		thunk.type = InvokeThunkType(model);
-		thunk.mangledName = InvokeThunkSymbol(target).c_str();
+		thunk.mangledName = symbol.c_str();
 		ErrorTracker notCallable; // reflection reports the function as not invokable instead
-		auto tree = std::make_unique<HIRFunction>(LowerInvokeThunk(model, notCallable, target, thunk));
-		if (!tree->complete) return;
+		auto tree = std::make_unique<HIRFunction>(Scripting::LowerInvokeThunk(model, notCallable, target, thunk, shared));
+		if (!tree->complete) return nullptr;
 		m_Emitter.Emit(*tree);
 		m_Trees.push_back(std::move(tree));
 		llvm::Function* emitted = m_MCtx.GetOrCreateFunction(thunk);
@@ -222,7 +235,7 @@ namespace Scripting
 		// Reflection calls through it seldom: small, with its target called rather than copied into it.
 		emitted->addFnAttr(llvm::Attribute::MinSize);
 		emitted->addFnAttr(llvm::Attribute::OptimizeForSize);
-		m_Thunks.insert(&target);
+		return emitted;
 	}
 
 	Core::Vector<const FunctionRecord*> CodeGenDriver::NewInvokeTargets(ProgramModel& model)
@@ -445,28 +458,21 @@ namespace Scripting
 		if (DebugInfo* debug = m_MCtx.Debug()) debug->Finish();
 	}
 
-	// Each function is verified on its own so the diagnostic names the culprit (a bare verifyModule reports the first
-	// error without saying where); the module check catches the rest (globals).
+	// The module is verified once (which checks every function too); only a failure goes through the functions one by
+	// one, so the diagnostic names the culprit (a bare verifyModule reports the first error without saying where).
 	bool CodeGenDriver::Verify(std::string* errorMessage)
 	{
+		if (!llvm::verifyModule(m_MCtx.module())) return true;
 		std::string err;
+		llvm::raw_string_ostream os(err);
 		for (llvm::Function& F : m_MCtx.module())
-		{
-			err.clear();
-			llvm::raw_string_ostream os(err);
 			if (llvm::verifyFunction(F, &os))
 			{
 				if (errorMessage) *errorMessage = "IR verification failed in function '" + F.getName().str() + "': " + err;
 				return false;
 			}
-		}
-		err.clear();
-		llvm::raw_string_ostream os(err);
-		if (llvm::verifyModule(m_MCtx.module(), &os))
-		{
-			if (errorMessage) *errorMessage = "IR verification failed: " + err;
-			return false;
-		}
-		return true;
+		llvm::verifyModule(m_MCtx.module(), &os);
+		if (errorMessage) *errorMessage = "IR verification failed: " + err;
+		return false;
 	}
 } // namespace Scripting

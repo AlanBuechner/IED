@@ -107,3 +107,8 @@ run = ["assets/build-output/bedrock/BedrockTests.exe"]
 name = "gc-concurrent"
 phase = "gates"
 run = ["${python}", "assets/ConcurrentGcTest/run.py"]
+
+[[project.steps]]
+name = "bedrock-benchmark"
+phase = "gates"
+run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "Benchmarks/bedrock/run-benchmark.ps1", "-Check"]

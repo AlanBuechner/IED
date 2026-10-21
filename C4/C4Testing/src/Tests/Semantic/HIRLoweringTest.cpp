@@ -1439,8 +1439,8 @@ namespace Testing
 		for (const auto& node : fn.m_Nodes)
 		{
 			if (node->kind == HIRNode::Kind::DynamicCast) dynamicCasts++;
-			if (node->kind == HIRNode::Kind::Convert && static_cast<const ConvertNode*>(node.get())->to &&
-				static_cast<const ConvertNode*>(node.get())->to->GetKind() == TypeKind::Pointer) pointerConverts++;
+			if (node->kind == HIRNode::Kind::Convert && static_cast<const ConvertNode*>(node)->to &&
+				static_cast<const ConvertNode*>(node)->to->GetKind() == TypeKind::Pointer) pointerConverts++;
 		}
 		TEST_ASSERT_EQ(dynamicCasts, 0);
 		TEST_ASSERT(pointerConverts >= 1);
@@ -1466,7 +1466,7 @@ namespace Testing
 		int casts = 0, tests = 0;
 		for (const auto& node : fn.m_Nodes)
 			if (node->kind == HIRNode::Kind::DynamicCast)
-				(static_cast<const DynamicCastNode*>(node.get())->testOnly ? tests : casts)++;
+				(static_cast<const DynamicCastNode*>(node)->testOnly ? tests : casts)++;
 		TEST_ASSERT_EQ(casts, 1);
 		TEST_ASSERT_EQ(tests, 1);
 
@@ -1528,7 +1528,7 @@ namespace Testing
 		for (const auto& node : fn.m_Nodes)
 			if (node->kind == HIRNode::Kind::Defer)
 			{
-				const auto* d = static_cast<const DeferNode*>(node.get());
+				const auto* d = static_cast<const DeferNode*>(node);
 				defers++;
 				bodyStmts += d->body ? (int)d->body->stmts.size() : 0;
 			}
