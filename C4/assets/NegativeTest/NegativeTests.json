@@ -2590,5 +2590,21 @@
     "FloatLiteralRoundsToInfinity": {
         "expect": ["floating-point literal '3.4028236e38f' is out of range for float"],
         "reason": "A float literal past FLT_MAX plus half its last place rounds to infinity: refused, while one that rounds to FLT_MAX is not (BUG-287)."
+    },
+    "VariableRedefinedAcrossFiles": {
+        "expect": ["redefinition of variable 'kSlice': it is already a variable (", "a.cf:5)"],
+        "reason": "BUG-294: a variable redefined in another file must say what the name already is and where, as types and functions do (BUG-291)."
+    },
+    "EnumRedefinedAcrossFiles": {
+        "expect": ["redefinition of enum 'Color': it is already a type (", "a.cf:5)"],
+        "reason": "BUG-294: an enum redefined in another file must say what the name already is and where, as types and functions do (BUG-291)."
+    },
+    "UnionRedefinedAcrossFiles": {
+        "expect": ["redefinition of union 'Bits': it is already a type (", "a.cf:5)"],
+        "reason": "BUG-294: a union redefined in another file must say what the name already is and where, as types and functions do (BUG-291)."
+    },
+    "AliasRedefinedAcrossFiles": {
+        "expect": ["redefinition of alias 'Count': it is already a type (", "a.cf:5)"],
+        "reason": "BUG-294: an alias redefined in another file must say what the name already is and where, as types and functions do (BUG-291)."
     }
 }

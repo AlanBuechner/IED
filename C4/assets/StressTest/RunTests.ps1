@@ -17,7 +17,7 @@ $work     = Join-Path $repoRoot "assets/build-output/stress"
 if (-not (Test-Path $compiler)) { Write-Host "COMPILER NOT FOUND: $compiler - build it first." -ForegroundColor Red; exit 1 }
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "C4 StressTest Runner" + $(if ($Run) { "(compile + run)" }) -ForegroundColor Cyan
+Write-Host ("C4 StressTest Runner" + $(if ($Run) { " (compile + run)" })) -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 $folders = Get-ChildItem $root -Recurse -Directory | Where-Object { (Get-ChildItem $_.FullName -Filter "*.cf").Count -gt 0 }

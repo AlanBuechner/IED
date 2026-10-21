@@ -1,0 +1,7 @@
+// BUG-294: a namespace's type and another file's alias of its name. The error must say where the name
+// already is, since the other side is another file.
+namespace N
+{
+	class Count { public int32 n; }
+}
+int32 main() { return 0; }

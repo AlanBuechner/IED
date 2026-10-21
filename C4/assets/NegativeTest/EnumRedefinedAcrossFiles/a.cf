@@ -1,0 +1,7 @@
+// BUG-294: a namespace's enum and another file's definition of its name. The error must say where the name
+// already is, since the other side is another file.
+namespace N
+{
+	enum class Color { Red }
+}
+int32 main() { return 0; }

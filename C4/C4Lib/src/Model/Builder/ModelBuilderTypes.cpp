@@ -253,7 +253,7 @@ namespace Scripting
 		info.type = raw;
 		info.definingUnit = ctx.unitId;
 		info.declNode = &en;
-		if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &en, "redefinition of enum '" + name + "'");
+		if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &en, Redefinition(ctx, "enum", name));
 
 		ctx.model->m_EnumTypes.Push(raw);
 		m_PendingEnums.Push({ raw, &en, ctx.unitId, ctx.scope });
@@ -299,7 +299,7 @@ namespace Scripting
 		if (!ctx.scope->Register(name, info))
 		{
 			repeats = EarlierAlias(*ctx.scope, name);
-			if (!repeats) ErrorAt(ctx, &alias, "redefinition of alias '" + name + "'");
+			if (!repeats) ErrorAt(ctx, &alias, Redefinition(ctx, "alias", name));
 		}
 		// scope: the target resolves in the alias's own namespace
 		m_PendingAliases.Push({ raw, alias.GetAliasedType().Get(), ctx.unitId, ctx.scope, repeats, &alias });

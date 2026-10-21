@@ -33,7 +33,7 @@ $flags = @()
 if ($O2) { $flags += "-O2" }
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "C4 Negative Test Runner" + $(if ($Filter) { "(filter: $Filter)" } else { "" }) + $(if ($O2) { " [-O2]" }) -ForegroundColor Cyan
+Write-Host ("C4 Negative Test Runner" + $(if ($Filter) { " (filter: $Filter)" } else { "" }) + $(if ($O2) { " [-O2]" })) -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 $folders = Get-ChildItem $root -Recurse -Directory | Where-Object { (Get-ChildItem $_.FullName -Filter "*.cf").Count -gt 0 }

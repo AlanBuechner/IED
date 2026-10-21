@@ -1,0 +1,5 @@
+// The other side of BUG-294 (see a.cf).
+namespace N
+{
+	enum class Color { Blue }
+}

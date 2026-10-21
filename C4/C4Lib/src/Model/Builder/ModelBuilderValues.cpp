@@ -41,7 +41,7 @@ namespace Scripting
 			// list can carry it; capture it from the node's annotations (shared across all declarators).
 			info.linkSymbol = LinkSymbolOf(var.GetAnnotations());
 			if (!info.linkSymbol.empty() && info.initializer) ErrorAt(ctx, &var, LinkedInitializerMessage(name, info.linkSymbol));
-			if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &var, "redefinition of variable '" + name + "'");
+			if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &var, Redefinition(ctx, "variable", name));
 
 			// The just-registered entry (match by declaration node: a same-name static adds a second).
 			SymbolInfo* stored = ctx.scope->Entries(name)[0].get();

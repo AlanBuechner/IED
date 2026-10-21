@@ -30,7 +30,7 @@ namespace Scripting
 		info.type = raw;
 		info.definingUnit = ctx.unitId;
 		info.declNode = &un;
-		if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &un, "redefinition of union '" + name + "'");
+		if (!ctx.scope->Register(name, info)) ErrorAt(ctx, &un, Redefinition(ctx, "union", name));
 
 		ReportUnionMembersItCannotHold(ctx, un);
 		m_PendingUnions.Push({ raw, &un, ctx.unitId, ctx.scope });
