@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ied.local/schemas/project.v1.schema.json",
-	"title": "IED project file v1 (<Name>.ied.proj)",
+	"title": "IED project file v1 (<Name>.iedproj)",
 	"description": "One per project. May live anywhere (e.g. build/projects/); 'root' says where the code is. Variable syntax in strings: ${name}.",
 	"type": "object",
 	"required": ["version", "name"],

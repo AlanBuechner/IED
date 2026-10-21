@@ -110,8 +110,9 @@ namespace Ied
 	}
 
 	Workspace* Workspaces::OpenOrFind(const FS::Path& target, Core::String& relative) {
+		// A solution file opens the solution, as a double click on it does in Explorer: nothing in it is shown as a file.
 		if (IsSolutionFile(target.View())) {
-			relative = Core::String(target.FileName());
+			relative = Core::String();
 			for (Workspace* ws : items)
 				if (ws->solution && TrustKey(ws->solution->file.View()).View() == TrustKey(target.View()).View()) return ws;
 			return OpenSolution(target);
@@ -119,6 +120,10 @@ namespace Ied
 		for (Workspace* ws : items)
 			if (RelativeTo(ws->root.View(), target.View(), relative)) return ws;
 		const bool folder = FS::IsDirectory(target.CStr());
+		// A folder holding one solution file opens as that solution (docs/03); its Solution Explorer still shows the
+		// folder on request.
+		FS::Path solution = folder ? SolutionIn(target) : FS::Path();
+		if (!solution.IsEmpty()) return OpenOrFind(solution, relative);
 		Workspace* opened = Open(folder ? target : target.Parent(), Core::StringView(folder ? "folder" : "file"));
 		relative = folder ? Core::String() : Core::String(target.FileName());
 		server->hub.Publish(Core::StringView("server"), "workspace.opened", opened->SummaryJson().View());
@@ -174,7 +179,7 @@ namespace Ied
 	static bool TouchesSolution(const Workspace* ws, const ChangeBatch& batch) {
 		if (!ws->solution) return false;
 		for (const TreeChange& change : batch.Changes()) {
-			if (change.path.View().EndsWith(Core::StringView(".ied.proj")) || IsSolutionFile(change.path.View())) return true;
+			if (IsProjectFile(change.path.View()) || IsSolutionFile(change.path.View())) return true;
 			for (const Core::String& watched : ws->solution->watched)
 				if (watched.View() == change.path.View()) return true;
 		}

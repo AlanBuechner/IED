@@ -8,7 +8,7 @@ const NOW = Date.UTC(2026, 9, 21, 12, 0, 0);
 
 const RECENT = [
 	{ path: "C:/work/Game", name: "Game", kind: "folder", opened: NOW - 60000 * 5, favorite: false, exists: true },
-	{ path: "C:/work/Tools/Tools.ied.sln", name: "Tools", kind: "solution", opened: NOW - 3600000 * 3, favorite: true, exists: true },
+	{ path: "C:/work/Tools/Tools.iedsln", name: "Tools", kind: "solution", opened: NOW - 3600000 * 3, favorite: true, exists: true },
 	{ path: "C:/work/Shooter", name: "Shooter", kind: "folder", opened: NOW - 86400000 * 2, favorite: true, exists: true },
 	{ path: "C:/old/Prototype", name: "Prototype", kind: "folder", opened: NOW - 86400000 * 40, favorite: false, exists: false },
 ];
@@ -35,7 +35,7 @@ function rowOf(view, path) {
 
 test("start page: a recent project is an open workspace by its folder, a solution by its file's folder", () => {
 	assertTrue(isProjectOf(RECENT[0], OPEN[0]), "case and separators do not matter");
-	assertTrue(isProjectOf(RECENT[1], OPEN[1]), "Tools.ied.sln is the solution rooted at C:/work/Tools");
+	assertTrue(isProjectOf(RECENT[1], OPEN[1]), "Tools.iedsln is the solution rooted at C:/work/Tools");
 	assertTrue(!isProjectOf(RECENT[1], { kind: "folder", root: "C:/work/Tools" }), "not the same folder opened as a folder");
 	assertTrue(!isProjectOf(RECENT[2], OPEN[0]));
 });

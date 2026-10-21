@@ -2,7 +2,7 @@
 	"version": 1,
 	"name": "MyGame",
 	"projects": [
-		{ "file": "build/ied/*.ied.proj", "optional": true }
+		{ "file": "build/ied/*.iedproj", "optional": true }
 	],
 	"groups": [
 		{ "name": "Engine", "projects": ["Engine"] },

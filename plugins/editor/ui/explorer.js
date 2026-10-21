@@ -1,5 +1,6 @@
 // explorer.js - Solution Explorer (F-WSP, docs/15): a solution shows its groups, projects (each its root folder) and
-// Solution Items; a folder or file workspace shows its folder. Folders load when opened; tree.changed keeps them
+// Solution Items, or its folder (Switch Views, remembered per workspace on this device); a folder or file workspace
+// shows its folder. Folders load when opened; tree.changed keeps them
 // current. A click opens a file in a preview tab, a double click or Enter keeps it open (VS). New files and folders
 // and renames are named in place; a delete asks first.
 
@@ -14,6 +15,29 @@ function parentOf(path) {
 
 function baseName(path) {
 	return path.slice(path.lastIndexOf("/") + 1);
+}
+
+const VIEW_KEY = "ied.explorer.folderView:";
+
+// Whether a solution workspace shows its folder here: a choice of how to look, like a scroll position, so this device
+// keeps it.
+function readFolderView(root) {
+	try {
+		return localStorage.getItem(VIEW_KEY + root) === "1";
+	}
+	catch {
+		return false;
+	}
+}
+
+function writeFolderView(root, folderView) {
+	try {
+		if (folderView) localStorage.setItem(VIEW_KEY + root, "1");
+		else localStorage.removeItem(VIEW_KEY + root);
+	}
+	catch {
+		// a page without storage forgets the choice
+	}
 }
 
 // `root`'s path inside the workspace `wsRoot` ("" for the root itself), or null when it is outside.
@@ -33,7 +57,9 @@ export class Explorer {
 		this.mounted = mounted;
 		this.folders = new Map();
 		this.rootNames = new Map();   // a project's root folder -> its names, for icons that go by marker files
+		this.viewButton = h("button.ib", { on: { click: () => this.switchView() } });
 		const tools = h("div.ed-tools", null,
+			this.viewButton,
 			h("span.grow"),
 			h("button.ib", { title: "Collapse All", "aria-label": "Collapse All", on: { click: () => this.tree.collapseAll() } }, icon("collapse-all")),
 			h("button.ib", { title: "Refresh", "aria-label": "Refresh", on: { click: () => this.refresh() } }, icon("refresh")));
@@ -65,7 +91,29 @@ export class Explorer {
 		this.tree.focus();
 	}
 
+	// A solution's folder view: the workspace's folder as a folder workspace shows it.
+	showsFolder() {
+		const ws = this.ied.workspace;
+		return ws.kind !== "solution" || !ws.solution || readFolderView(ws.root);
+	}
+
+	switchView() {
+		const ws = this.ied.workspace;
+		writeFolderView(ws.root, !readFolderView(ws.root));
+		this.refresh();
+	}
+
+	renderViewButton() {
+		const ws = this.ied.workspace;
+		const folder = this.showsFolder();
+		this.viewButton.hidden = ws.kind !== "solution" || !ws.solution;
+		this.viewButton.title = folder ? "Switch to Solution View" : "Switch to Folder View";
+		this.viewButton.setAttribute("aria-label", this.viewButton.title);
+		this.viewButton.replaceChildren(icon(folder ? "list-tree" : "folder"));
+	}
+
 	refresh() {
+		this.renderViewButton();
 		this.folders.clear();
 		this.rootNames.clear();
 		return this.tree.refresh().catch((e) => this.ied.report("Solution Explorer: " + e.message, e));
@@ -76,7 +124,7 @@ export class Explorer {
 
 	async roots() {
 		const ws = this.ied.workspace;
-		if (ws.kind === "solution" && ws.solution) {
+		if (!this.showsFolder()) {
 			const count = ws.solution.projects.length;
 			return [{ id: "sln", kind: "solution", name: "Solution '" + ws.solution.name + "' (" + count + (count === 1 ? " project)" : " projects)"), expandable: true }];
 		}
@@ -203,7 +251,7 @@ export class Explorer {
 	// Where a new item goes: into the selected folder or project, beside the selected file, or at the top of a folder
 	// workspace. {parent: the tree node to add the row under (null: the top), path}; null in a solution's own nodes.
 	targetOf(node) {
-		if (!node) return this.ied.workspace.kind === "solution" ? null : { parent: null, path: "" };
+		if (!node) return this.showsFolder() ? { parent: null, path: "" } : null;
 		if (node.kind === "folder" || (node.kind === "project" && node.path !== null)) return { parent: node, path: node.path };
 		if (node.kind !== "file") return null;
 		const parentId = node.id.slice(0, node.id.lastIndexOf("/"));
@@ -275,7 +323,7 @@ export class Explorer {
 		if (kind !== "tree.changed") return undefined;
 		if (data.overflow) return this.refresh();
 		const parents = new Set(data.changes.map((change) => parentOf(change.path)));
-		if (parents.has("") && this.ied.workspace.kind !== "solution") return this.refresh();
+		if (parents.has("") && this.showsFolder()) return this.refresh();
 		for (const parent of parents) for (const node of this.folders.get(parent) || []) this.tree.invalidate(node);
 		return undefined;
 	}

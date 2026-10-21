@@ -1496,7 +1496,7 @@ def start_page_and_recent_projects(run):
 	page.hover(row("C:/mock/Shooter"))
 	page.click(row("C:/mock/Shooter") + " button[aria-label='Add to Favorites']")
 	page.wait_for_function("() => [...document.querySelectorAll('.sp-section')].some(s => s.querySelector('h3').textContent === 'Favorites' && s.textContent.includes('Shooter'))")
-	tools = row("C:/mock/Tools/Tools.ied.sln") if page.query_selector(row("C:/mock/Tools/Tools.ied.sln")) else row("C:/mock/Tools")
+	tools = row("C:/mock/Tools/Tools.iedsln") if page.query_selector(row("C:/mock/Tools/Tools.iedsln")) else row("C:/mock/Tools")
 	page.click(tools)
 	page.wait_for_function("document.title === 'Tools - IED' && !document.querySelector('.start-page')", timeout=20000)
 	check(page.evaluate("location.hash") == "", "a project chosen, the start page is no longer asked for")
@@ -1507,3 +1507,29 @@ def start_page_and_recent_projects(run):
 	run.shot("switcher")
 	page.click(".menu .menu-item:has-text('Start Page')")
 	page.wait_for_function("() => location.hash === '#start' && [...document.querySelectorAll('.sp-section')].some(s => s.querySelector('h3').textContent === 'Open' && s.textContent.includes('Tools'))", timeout=10000)
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def solution_explorer_switches_views(run):
+	"""The Solution Explorer's Switch Views (docs/15): a solution shows its projects and Solution Items, or its folder,
+	and back. The mock's recent solution Tools opens as a solution with one project."""
+	page = run.open()
+	ws = run.request("ws.openRecent", {"path": "C:/mock/Tools/Tools.iedsln"})["workspace"]["wsId"]
+	page.evaluate("(id) => ied_shell.showWorkspace(id)", ws)
+	page.wait_for_function("document.title === 'Tools - IED' && ied_shell.layout", timeout=20000)
+	run.show_activity("ied.editor")
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.explorer' })")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (1 project)\")")
+	page.click(".explorer .tree-row:has-text(\"Solution 'Tools'\")")
+	page.keyboard.press("ArrowRight")
+	page.wait_for_selector(".explorer .tree-row:has-text('Solution Items')")
+	run.shot("solution")
+	page.click("button[aria-label='Switch to Folder View']")
+	page.wait_for_selector(".explorer .tree-row:has-text('Tools.iedsln')")
+	check(not page.query_selector(".explorer .tree-row:has-text(\"Solution 'Tools'\")"), "the folder instead of the solution")
+	rows = run.texts(".explorer .tree-row")
+	check(all(any(name in row for row in rows) for name in ("src", "README.md", "Tools.iedsln")), "the folder's entries: %r" % rows)
+	run.shot("folder")
+	page.click("button[aria-label='Switch to Solution View']")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (1 project)\")")

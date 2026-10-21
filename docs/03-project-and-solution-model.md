@@ -8,26 +8,28 @@ Define IED's workspace formats: Visual Studio-style solutions and projects, with
 
 | Kind | File | Notes |
 |---|---|---|
-| Solution | `<Name>.ied.sln` | groups projects; holds local-plugin pins and the generator recipe |
+| Solution | `<Name>.iedsln` | groups projects; holds local-plugin pins and the generator recipe |
 | Folder | - | `ied ./`; `.ied/` created lazily only when something workspace-tier is saved |
 | File | - | `ied file.txt`; lightweight folder workspace with just that document |
-| Federation | `<Name>.ied.fed` | several solutions/folders (e.g. C4 + a game engine + IED) in one workspace; each member keeps its own `.ied/`, trust, plugins, settings (interpretation of the plan's "federated projects", `docs/99` O1) |
+| Federation | `<Name>.iedfed` | several solutions/folders (e.g. C4 + a game engine + IED) in one workspace; each member keeps its own `.ied/`, trust, plugins, settings (interpretation of the plan's "federated projects", `docs/99` O1) |
+
+**Files.** Each format has one extension of its own - `.iedsln`, `.iedproj`, `.iedfed` - so Windows can hand IED's files to IED: the desktop app registers `.iedsln` and `.iedfed` for the user, and a double click opens one in IED (`docs/27`). They were `<Name>.ied.sln`, `.ied.proj` and `.ied.fed` until 2026-10 (Windows took `.sln` for Visual Studio's); those names are still read everywhere - opening, the watcher, a solution's project globs as written, the schema checks - and `nuke init --ied` replaces the files it generated under them (`docs/23`). New files use the new names.
 
 ## Solution file (`solution.v1.schema.json`)
 
-Fields: `version`, `name`, `projects[]` (paths or globs to `.ied.proj`, optionally `optional` for generated files not yet generated), `groups[]` (nested display folders), `items[]` (Solution Items: README, AGENTS.md...), `localPlugins[]` (path + expected id; trusted workspaces only), `generator` (the command that regenerates project files, e.g. `nuke init --ied`, and which paths it owns - so IED offers *Regenerate* and warns before hand-editing generated files).
+Fields: `version`, `name`, `projects[]` (paths or globs to `.iedproj`, optionally `optional` for generated files not yet generated), `groups[]` (nested display folders), `items[]` (Solution Items: README, AGENTS.md...), `localPlugins[]` (path + expected id; trusted workspaces only), `generator` (the command that regenerates project files, e.g. `nuke init --ied`, and which paths it owns - so IED offers *Regenerate* and warns before hand-editing generated files).
 
 ## Project file (`project.v1.schema.json`)
 
 Fields: `version`, `name`, **`root`** (code root relative to the project file - the key feature), `include`/`exclude`, `kind` (executable/library/plugin/tests/other), `buildSystem` (opaque except `id`; e.g. `{ "id": "nuke", "projectName": "Game" }`), `presets` (task presets from plugins, e.g. `c4.nuke`), `variables` (toolbar dropdowns/toggles), `tasks` (named step lists bound to standard slots like `build`, `run`, `debug`, `test`, `profile`), `toolbar` (ordered variable and task keys), `debug` (launch/attach configurations), `lspProfiles`, `env`, `sandbox`, `references`.
 
-Because `root` is explicit, a solution can keep every `.ied.proj` under `build/ied/` (generated, gitignored) while code folders stay clean. The Solution Explorer shows each project's files from its `root`, grouped by the solution's `groups`. Task grammar and the build-system seam: `docs/06`.
+Because `root` is explicit, a solution can keep every `.iedproj` under `build/ied/` (generated, gitignored) while code folders stay clean. The Solution Explorer shows each project's files from its `root`, grouped by the solution's `groups`. Task grammar and the build-system seam: `docs/06`.
 
 ## The server as built (M1)
 
 `src/solutions/` reads a solution, and `src/services/workspaces` opens one:
 
-- **Opening.** `ied path\MyGame.ied.sln`, the control pipe's `open`, or `--workspace` opens a solution as a workspace of kind `solution`, rooted at the file's folder and named after the solution. Opening it again gives the same workspace. A folder opens as kind `folder`, and a file as kind `file` (its folder).
+- **Opening.** `ied path\MyGame.iedsln`, the control pipe's `open`, or `--workspace` opens a solution as a workspace of kind `solution`, rooted at the file's folder and named after the solution. Opening it again gives the same workspace. A folder holding one solution file opens as that solution (two or more: as the folder); any other folder opens as kind `folder`, and a file as kind `file` (its folder). The Solution Explorer shows a solution's projects or, on Switch Views, its folder (`docs/15`).
 - **Validation.** The solution and each project file are JSONC, validated against `solution.v1` and `project.v1`.
 - **Projects.** `projects[].file` may be a glob (`*`, `?`, `**`; `src/fs/glob`). An entry that finds no file is a problem unless it is `optional`. Each project's `root` is resolved against its own file, and a root that is not a folder is a problem; so are two projects with one name.
 - **Problems** are listed per file with JSON pointers. A broken project stays listed with its problems.

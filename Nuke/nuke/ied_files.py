@@ -1,8 +1,9 @@
-"""IED's files for a workspace (`nuke init --ied`; IED docs/03): <Name>.ied.sln at the root, a project file per project
+"""IED's files for a workspace (`nuke init --ied`; IED docs/03): <Name>.iedsln at the root, a project file per project
 under build/ied/ and, in the solution's localPlugins, the IED plugin of the workspace's toolchain (<toolchain>/ied) and
 of each language package the workspace pins in [languages] (IED docs/26 section 6). The generator rewrites what it
 wrote when the workspace changes, but never a file edited by hand since, nor one it did not write:
-.ied/local/generated.json keeps the digest of each file it wrote."""
+.ied/local/generated.json keeps the digest of each file it wrote. The files it wrote under the names before
+(<Name>.ied.sln, *.ied.proj) go once the new ones are written."""
 
 import hashlib
 import json
@@ -22,11 +23,15 @@ ITEMS = ("README.md", "AGENTS.md", "nuke.toml")
 
 
 def solution_path(workspace):
+	return fsutil.join(workspace.dir, f"{workspace.name}.iedsln")
+
+
+def old_solution_path(workspace):
 	return fsutil.join(workspace.dir, f"{workspace.name}.ied.sln")
 
 
 def project_path(workspace, project):
-	return fsutil.join(workspace.dir, PROJECTS_DIR, f"{project.name}.ied.proj")
+	return fsutil.join(workspace.dir, PROJECTS_DIR, f"{project.name}.iedproj")
 
 
 def _relative(path, start):
@@ -72,7 +77,7 @@ def pinned_plugins(workspace):
 
 
 def solution(workspace, plugin):
-	body = {"version": 1, "name": workspace.name, "projects": [{"file": f"{PROJECTS_DIR}/*.ied.proj", "optional": True}]}
+	body = {"version": 1, "name": workspace.name, "projects": [{"file": f"{PROJECTS_DIR}/*.iedproj", "optional": True}]}
 	items = [item for item in ITEMS if os.path.isfile(fsutil.join(workspace.dir, item))]
 	if items:
 		body["items"] = items
@@ -177,9 +182,11 @@ def generate(workspace, toolchain, log):
 		path = project_path(workspace, spec)
 		wanted.add(os.path.normcase(path))
 		changed += int(generated.write(path, _text(project(workspace, spec))))
-	for path in fsutil.files_under(fsutil.join(workspace.dir, PROJECTS_DIR), [".proj"]):
-		if path.endswith(".ied.proj") and os.path.normcase(path) not in wanted:
+	for path in fsutil.files_under(fsutil.join(workspace.dir, PROJECTS_DIR), [".proj", ".iedproj"]):
+		if (path.endswith(".ied.proj") or path.endswith(".iedproj")) and os.path.normcase(path) not in wanted:
 			changed += int(generated.remove(path))
+	if os.path.isfile(old_solution_path(workspace)):
+		changed += int(generated.remove(old_solution_path(workspace)))
 	generated.save()
 	for key in generated.kept:
 		log.warn(f"{key} was not written by `nuke init --ied` or was edited since; left as it is (delete it to regenerate)")

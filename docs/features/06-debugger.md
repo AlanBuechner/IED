@@ -9,7 +9,7 @@ C4DAP today supports: launch, line breakpoints, exception filters (thrown/uncaug
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
 | F-DBG-1 | DAP client pool: adapters over stdio (and TCP), one session per launch, multiple concurrent sessions, child sessions (`startDebugging` reverse request) | P0 | US-DBG-1 |
-| F-DBG-2 | Launch configurations: contributed templates + per-project configs in `.ied.proj` (`debug` section), selected by the toolbar's debug target dropdown; machine-specific adapter paths in app tier | P0 | US-DBG-1 |
+| F-DBG-2 | Launch configurations: contributed templates + per-project configs in `.iedproj` (`debug` section), selected by the toolbar's debug target dropdown; machine-specific adapter paths in app tier | P0 | US-DBG-1 |
 | F-DBG-3 | Pre-launch task (build) via the task system: F5 = build task -> on success -> debug step | P0 | US-DBG-1 |
 | F-DBG-4 | Server-owned sessions: survive browser close; any client can attach to the session view; controls are revision-checked (two devices pressing "step" do not double-step) | P0 (survive), P1 (multi-device control) | US-DBG-4 |
 | F-DBG-5 | Debug toolbar (VS): Continue (F5), Break All (Ctrl+Alt+Break), Stop (Shift+F5), Restart (Ctrl+Shift+F5), Show Next Statement (Alt+Num*), Step Into (F11), Step Over (F10), Step Out (Shift+F11) | P0 | US-DBG-1 |

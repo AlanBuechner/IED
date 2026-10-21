@@ -29,7 +29,7 @@ Owner: `src/host` + installer tooling. Design: `docs/21` (distribution and bundl
 | F-OPS-20 | Windows x64 installer (per-user, no admin): server exe, frontend assets, built-in plugins, bundled services, `ied` on PATH | P1 | US-DST-1, US-DST-2 |
 | F-OPS-21 | Portable zip build (same layout, no registry changes) for dev/testing | P0 | US-DST-1 |
 | F-OPS-22 | Bundled services: SearXNG (embedded Python + wheels), tor (Tor Expert Bundle), ripgrep; each versioned and replaceable in settings | P0 (ripgrep, SearXNG), P1 (tor) | US-DST-1 |
-| F-OPS-23 | Explorer context menu + `.ied.sln`/`.ied.fed` file association + start-on-login option (installer) | P1 | US-DST-2 |
+| F-OPS-23 | Explorer context menu + `.iedsln`/`.iedfed` file association + start-on-login option (installer) | P1 | US-DST-2 |
 | F-OPS-24 | First-run setup in the browser: optional remote password, detect local model servers (llama.cpp :8080, Ollama :11434, LM Studio :1234, vLLM :8000) and LAN endpoints entered by the user, create a default group | P1 | US-DST-3 |
 | F-OPS-25 | Self-update: check a release feed, download, verify signature, swap on restart (server keeps running work until the user restarts) | P2 | - |
 | F-OPS-26 | Desktop app (`ied-desktop`, C4 + WebView2, `docs/27`): the web client in native windows that start the server, app-level shortcuts (Ctrl+W/T/N/Tab work), dark frame, kept placement, taskbar icon (owner, 2026-10-21) | P1 | US-DST-4 |

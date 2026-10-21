@@ -20,7 +20,7 @@ Nuke was rebuilt when C4 moved into this repository; reference `Nuke/README.md`,
 ## Task model
 
 ```jsonc
-// in a .ied.proj (full example: shared/host-api/examples/Game.ied.proj)
+// in a .iedproj (full example: shared/host-api/examples/Game.iedproj)
 "variables": {
 	"config": { "kind": "dropdown", "values": ["Debug", "Development", "Dist"], "default": "Development", "scope": "solution" },
 	"arch":   { "kind": "dropdown", "values": ["x64"], "default": "x64", "scope": "solution" }
@@ -92,6 +92,6 @@ Done 2026-10-20: N1 LSP options, N3 streamed output, N4 `nuke test --filter` + r
 
 ## Decided
 
-- `.ied.proj` is **not** read by Nuke; Nuke stays the build authority and generates IED files (`docs/99` D6). IED may read `nuke.toml` directly (declarative, `docs/23` N-1) for display, never to re-derive build inputs.
+- `.iedproj` is **not** read by Nuke; Nuke stays the build authority and generates IED files (`docs/99` D6). IED may read `nuke.toml` directly (declarative, `docs/23` N-1) for display, never to re-derive build inputs.
 - Build insights (`build-trace.json`) open in the profiler timeline: Solution Explorer > Import into Profiler converts the Chrome trace (`docs/16` "As built").
 - Multi-project builds are the build system's job; IED runs one task.

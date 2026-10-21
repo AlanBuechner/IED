@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ied.local/schemas/solution.v1.schema.json",
-	"title": "IED solution file v1 (<Name>.ied.sln)",
+	"title": "IED solution file v1 (<Name>.iedsln)",
 	"description": "Lives at the solution root (the folder that also holds .ied/). Paths are relative to this file.",
 	"type": "object",
 	"required": ["version", "name", "projects"],
@@ -16,7 +16,7 @@
 				"required": ["file"],
 				"additionalProperties": false,
 				"properties": {
-					"file": { "type": "string", "description": "Path to a .ied.proj file; globs allowed ('build/projects/*.ied.proj')." },
+					"file": { "type": "string", "description": "Path to a .iedproj file; globs allowed ('build/projects/*.iedproj')." },
 					"optional": { "type": "boolean", "default": false, "description": "Missing file is not an error (generated projects not yet generated)." }
 				}
 			}
@@ -62,7 +62,7 @@
 			"additionalProperties": false,
 			"properties": {
 				"name": { "type": "string" },
-				"projects": { "type": "array", "items": { "type": "string", "description": "Project name (from the .ied.proj 'name')." } },
+				"projects": { "type": "array", "items": { "type": "string", "description": "Project name (from the .iedproj 'name')." } },
 				"groups": { "type": "array", "items": { "$ref": "#/$defs/group" } }
 			}
 		}

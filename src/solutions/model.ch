@@ -49,6 +49,11 @@ namespace Ied
 
 	// The solution at `file` (a canonical path) and its projects.
 	SolutionModel* ReadSolution(const FS::Path& file, HostSchemas& schemas);
-	// "<name>.ied.sln", in any case.
+	// "<name>.iedsln", in any case; "<name>.ied.sln" too, the name before (docs/03 "Files").
 	bool IsSolutionFile(Core::StringView path);
+	// "<name>.iedproj", or "<name>.ied.proj", the name before.
+	bool IsProjectFile(Core::StringView path);
+	// The one solution file directly in `folder`, which opening the folder opens; empty when there is none, or more
+	// than one to choose from.
+	FS::Path SolutionIn(const FS::Path& folder);
 }

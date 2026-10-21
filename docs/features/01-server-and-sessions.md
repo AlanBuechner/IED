@@ -7,7 +7,7 @@ Design: `docs/01` (architecture), `docs/10` (protocol), `docs/11` (security and 
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
 | F-SRV-1 | Standalone server process `ied-server`; runs with zero clients connected | P0 | US-SRV-1 | src/host |
-| F-SRV-2 | Single-instance per user: a second launch (`ied ./`, double-click `.ied.sln`) hands its request to the running server over a local control channel and exits | P0 | US-SRV-3, US-WSP-3 | src/host |
+| F-SRV-2 | Single-instance per user: a second launch (`ied ./`, double-click `.iedsln`) hands its request to the running server over a local control channel and exits | P0 | US-SRV-3, US-WSP-3 | src/host |
 | F-SRV-3 | Startup modes: foreground (console log), background (no console), start-on-login (Run key / scheduled task); Windows service is P2 | P1 | US-SRV-8 | src/host |
 | F-SRV-4 | Tray icon: open UI, show status (running chats/builds), copy LAN URL, stop server, open logs | P1 | US-SRV-8 | src/host |
 | F-SRV-5 | Graceful shutdown: refuses (with a list) while autonomous runs are active unless forced; persists all session state; kills child processes via job objects | P0 | US-OPS-1 | src/host |

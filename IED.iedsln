@@ -3,7 +3,7 @@
 	"name": "IED",
 	"projects": [
 		{
-			"file": "build/ied/*.ied.proj",
+			"file": "build/ied/*.iedproj",
 			"optional": true
 		}
 	],

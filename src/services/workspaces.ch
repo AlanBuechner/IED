@@ -51,11 +51,11 @@ namespace Ied
 		public int64 Write(Workspace* ws, Core::StringView path, Core::StringView text, int64 expectedRevision);
 		// A folder as a workspace of `kind` ("folder", "file" or "solution"), told to every service.
 		public Workspace* Open(const FS::Path& folder, Core::StringView kind);
-		// The workspace `target` (a canonical path) belongs to, opening it when none does: a .ied.sln as a solution, a
-		// folder as itself, another file in its folder; `relative` is the path inside it. It goes first in the recent
-		// projects (host/recent).
+		// The workspace `target` (a canonical path) belongs to, opening it when none does: a .iedsln as a solution, a
+		// folder as its one solution file or else as itself, another file in its folder; `relative` is the path inside
+		// it. It goes first in the recent projects (host/recent).
 		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);
-		// A .ied.sln (a canonical path) as a solution workspace rooted at its folder.
+		// A .iedsln (a canonical path) as a solution workspace rooted at its folder.
 		public Workspace* OpenSolution(const FS::Path& file);
 		// What the watcher saw, less what the server did itself: published and passed to the open documents.
 		public void ApplyExternal(Workspace* ws, const ChangeBatch& batch);

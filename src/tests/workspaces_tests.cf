@@ -1,8 +1,10 @@
-// services/workspaces' and services/trash's honest parts: workspace-relative paths, the paths no one browses, and the
-// ids that name trash entries.
+// services/workspaces' and services/trash's honest parts: workspace-relative paths, the paths no one browses, the
+// ids that name trash entries, and which files are solutions and projects (the names before too) and which folder
+// opens as its solution.
 
 include "services/workspaces.ch"
 include "services/trash.ch"
+include "solutions/model.ch"
 
 static bool Refused(const char* path) {
 	try {
@@ -43,5 +45,28 @@ class WorkspaceTests {
 	[test("text_digest")]
 	public static void TestTextDigest() {
 		assert_se("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Ied::TextDigest(Core::StringView("abc")).CStr(), "SHA-256, hex");
+	}
+
+	[test("solution_files")]
+	public static void TestSolutionFiles() {
+		assert_true(Ied::IsSolutionFile(Core::StringView("C:/Work/Game.iedsln")) && Ied::IsSolutionFile(Core::StringView("Game.IEDSLN")), "the name, in any case");
+		assert_true(Ied::IsSolutionFile(Core::StringView("Game.ied.sln")), "the name before");
+		assert_true(!Ied::IsSolutionFile(Core::StringView("Game.sln")), "Visual Studio's");
+		assert_true(Ied::IsProjectFile(Core::StringView("build/ied/Game.iedproj")) && Ied::IsProjectFile(Core::StringView("Game.ied.proj")), "a project, either name");
+		assert_true(!Ied::IsProjectFile(Core::StringView("Game.vcxproj")), "not another tool's");
+		FS::Path root = FS::TempDirectory() / "ied-solution-files-test";
+		FS::RemoveAll(root.CStr());
+		FS::MakeDirectories((root / "none").CStr());
+		FS::MakeDirectories((root / "one").CStr());
+		FS::MakeDirectories((root / "two").CStr());
+		const char* text = "{}";
+		FS::WriteFileAtomically((root / "one" / "Game.iedsln").CStr(), (const void*)text, 2);
+		FS::WriteFileAtomically((root / "one" / "README.md").CStr(), (const void*)text, 2);
+		FS::WriteFileAtomically((root / "two" / "A.iedsln").CStr(), (const void*)text, 2);
+		FS::WriteFileAtomically((root / "two" / "B.ied.sln").CStr(), (const void*)text, 2);
+		assert_true(Ied::SolutionIn(root / "none").IsEmpty(), "no solution");
+		assert_true(Ied::SolutionIn(root / "one").View().EndsWith(Core::StringView("Game.iedsln")), "the one solution");
+		assert_true(Ied::SolutionIn(root / "two").IsEmpty(), "two: no choice made");
+		FS::RemoveAll(root.CStr());
 	}
 }

@@ -40,7 +40,11 @@ class Terminals:
 		for name in ("term.create", "term.input", "term.resize", "term.takeLease", "term.rename", "term.close", "term.list"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 		for ws_id in server.workspace.items:
-			server.hub.add("terms:" + ws_id, lambda ws_id=ws_id: {"terminals": [t.summary() for t in self.items.values() if t.ws_id == ws_id]})
+			self.opened(ws_id)
+
+	def opened(self, ws_id):
+		"""A workspace's topics and state; also for one opened after the start (ws.openRecent)."""
+		self.server.hub.add("terms:" + ws_id, lambda: {"terminals": [t.summary() for t in self.items.values() if t.ws_id == ws_id]})
 
 	def snapshot(self, term):
 		return {"terminal": term.summary(), "cols": term.cols, "rows": term.rows, "scrollback": term.scrollback}

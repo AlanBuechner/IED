@@ -35,9 +35,9 @@ class DebuggerTests(ServerTestCase):
 		write(os.path.join(self.home, "plugins", "fake", "ied-plugin.json"), self.plugin())
 		write(os.path.join(self.repo, "src", "game.txt"), GAME)
 		write(self.outside, "a\nb\nc\nd\n")
-		write(os.path.join(self.repo, "Game.ied.proj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "tasks": self.tasks(), "debug": self.debug()})
-		write(os.path.join(self.repo, "Game.ied.sln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.ied.proj"}]})
-		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.ied.sln")))
+		write(os.path.join(self.repo, "Game.iedproj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "tasks": self.tasks(), "debug": self.debug()})
+		write(os.path.join(self.repo, "Game.iedsln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.iedproj"}]})
+		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.iedsln")))
 		self.assertTrue(self.server.started, self.server.error)
 
 	def plugin(self):

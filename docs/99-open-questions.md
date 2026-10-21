@@ -52,7 +52,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 | D2 | Binary WS frames for terminal/profiler bulk | Measure in M1/M9 before adding |
 | D3 | Embeddings for skills/history search: which local embedding model/endpoint by default | P2; BM25 first |
 | D5 | Spell-check dictionary source and license (SCOWL-based Hunspell en_US) | Check before bundling |
-| D6 | Whether Nuke should read `.ied.proj` directly someday | No for v1 (Nuke stays authoritative; `nuke init --ied` generates IED files) |
+| D6 | Whether Nuke should read `.iedproj` directly someday | No for v1 (Nuke stays authoritative; `nuke init --ied` generates IED files) |
 
 ## Later (v2+ candidates)
 

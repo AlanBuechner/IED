@@ -1,7 +1,8 @@
 """Installs IED from this checkout's build (docs/21 "Install shape"): the programs and what the server serves and loads
 - the web client, the built-in plugins, the host API's schemas, the ui-kit, codicons and the web libraries - copied
 into %LOCALAPPDATA%\\Programs\\IED (only what changed), then `ied-desktop --register` puts IED in the Start menu and
-the folder goes on the user's PATH, so `ied <folder>` works in a terminal opened afterwards.
+makes IED's solution files (.iedsln, .iedfed) open in it, and the folder goes on the user's PATH, so `ied <folder>`
+works in a terminal opened afterwards.
 
 	python -I tools/install/install_ied.py --bin build/bin/Development-windows-x64 [--to <folder>] [--no-register] [--no-path]
 	python -I tools/install/install_ied.py --uninstall [--to <folder>]
@@ -239,7 +240,7 @@ def main(argv):
 	parser.add_argument("--to", default=None, help="the install folder (default %%LOCALAPPDATA%%\\Programs\\IED)")
 	parser.add_argument("--no-register", action="store_true", help="do not put IED in the Start menu")
 	parser.add_argument("--no-path", action="store_true", help="do not put the install folder on the user's PATH")
-	parser.add_argument("--uninstall", action="store_true", help="take IED out of the Start menu and the PATH and remove the folder")
+	parser.add_argument("--uninstall", action="store_true", help="take IED out of the Start menu, the file types and the PATH, and remove the folder")
 	args = parser.parse_args(argv)
 	target = os.path.abspath(args.to or default_target())
 	if args.uninstall:

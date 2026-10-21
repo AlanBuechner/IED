@@ -5,12 +5,12 @@ Versioned definitions that the server, the web client and every plugin code agai
 | Path | What | Status | Doc |
 |---|---|---|---|
 | `schemas/plugin-manifest.v1.schema.json` | `ied-plugin.json` | v1 draft, ready | `docs/02` |
-| `schemas/solution.v1.schema.json` | `<Name>.ied.sln` | v1 draft, ready | `docs/03` |
-| `schemas/project.v1.schema.json` | `<Name>.ied.proj` incl. variables, tasks, steps, toolbar, debug configs | v1 draft, ready | `docs/03`, `docs/06` |
-| `schemas/federation.v1.schema.json` | `<Name>.ied.fed` | v1 draft | `docs/03` |
+| `schemas/solution.v1.schema.json` | `<Name>.iedsln` | v1 draft, ready | `docs/03` |
+| `schemas/project.v1.schema.json` | `<Name>.iedproj` incl. variables, tasks, steps, toolbar, debug configs | v1 draft, ready | `docs/03`, `docs/06` |
+| `schemas/federation.v1.schema.json` | `<Name>.iedfed` | v1 draft | `docs/03` |
 | `schemas/agent-mode.v1.schema.json` | `.ied/modes/<id>.json` | v1 draft | `docs/12` |
 | `protocol/frames.v1.schema.json` | WebSocket frames | v1 draft, ready | `docs/10` |
-| `examples/` | A game-shaped solution + project (`MyGame.ied.sln`, `Game.ied.proj`), and `markup-plugin`: a project's own language as a plugin with C4 code (`docs/26`) | illustrative; the plugin's code compiles in the server checks | - |
+| `examples/` | A game-shaped solution + project (`MyGame.iedsln`, `Game.iedproj`), and `markup-plugin`: a project's own language as a plugin with C4 code (`docs/26`) | illustrative; the plugin's code compiles in the server checks | - |
 
 Validate the examples after any schema change. The schemas use a draft 2020-12 subset: the assertions type, required, properties, additionalProperties, items, enum, const, pattern, minLength, maxLength, minimum, maximum, minItems, maxItems, uniqueItems, oneOf, anyOf and local or cross-file `$ref`, with annotations (title, description, default, format, `$defs`, `x-` keys). `tools/pylib/minischema.py` and Bedrock's `Serialization::ValidateJson` implement exactly that dialect (and a few more assertions: exclusiveMinimum, exclusiveMaximum, allOf, not) and reject any other keyword, so a schema cannot rely on one they ignore.
 

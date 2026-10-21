@@ -13,7 +13,8 @@ ied C:\game                      the CLI opens folders here when ied-desktop.exe
 
 Options: `--control <name>` (another server's pipe), `--data <dir>` (the app's window placement and WebView2 profile;
 default `%LOCALAPPDATA%\IED\desktop`), `--debug-port <n>` (the windows' DevTools protocol on loopback, for tests).
-`--register` / `--unregister` put this program in the user's Start menu as IED, or take it out (`shortcut`);
+`--register` / `--unregister` put this program in the user's Start menu as IED and make `.iedsln` / `.iedfed` files
+open in it, or undo both (`shortcut`, `filetypes`);
 `nuke install-ied` installs IED into `%LOCALAPPDATA%\Programs\IED`, registers that copy and puts the folder on your
 PATH (`docs/21`). In a window, File > Open Folder (Ctrl+Shift+Alt+O, or the button on IED's home) picks a folder and
 opens it in that window.
@@ -29,6 +30,7 @@ opens it in that window.
 | `placement`, `options` | `window.json`; the command line |
 | `shortcut` | the Start menu's `IED.lnk` (`IShellLinkW`, `IPersistFile`) |
 | `folder` | File > Open Folder's picker (`IFileOpenDialog` in folder mode) |
+| `filetypes` | `.iedsln` and `.iedfed` opening in this program (`HKCU\Software\Classes`) |
 | `native.ch`, `native/webview.h` | what CBind binds: `<windows.h>`, COM, DWM, the WebView2 SDK (`vendor/webview2`, from `setup.bat`) |
 | `resources/` | the icon (`ied.svg`, rendered to `ied.ico` by `make_icon.py`), version and manifest, compiled into the exe |
 | `tests/` | the parts that need no window (`nuke test ied-desktop`) |

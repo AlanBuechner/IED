@@ -44,12 +44,12 @@ test("desktop: Open Folder is there only inside the desktop app", () => {
 test("desktop: the start page offers Open Folder, which asks the app", async () => {
 	const plain = startPageView(shellWith(false));
 	assertEqual(plain.querySelectorAll(".sp-start button").length, 0);
-	assertEqual(plain.querySelector(".sp-start p").textContent, "Open a project on the server: ied <folder or .ied.sln>");
+	assertEqual(plain.querySelector(".sp-start p").textContent, "Open a project on the server: ied <folder or .iedsln>");
 	const shell = shellWith(true);
 	const view = startPageView(shell);
 	const button = view.querySelector(".sp-start button");
 	assertEqual(button.textContent, "Open Folder...");
-	assertEqual(view.querySelector(".sp-start p").textContent, "Or on the server: ied <folder or .ied.sln>", "the command line too");
+	assertEqual(view.querySelector(".sp-start p").textContent, "Or on the server: ied <folder or .iedsln>", "the command line too");
 	let asked = 0;
 	const before = Object.getOwnPropertyDescriptor(window, "iedDesktop");
 	Object.defineProperty(window, "iedDesktop", { value: { openFolder: () => { asked += 1; } }, configurable: true });

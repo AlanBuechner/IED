@@ -32,7 +32,10 @@ SCHEMAS = {
 	"frames": HOST_API / "protocol" / "frames.v1.schema.json",
 }
 RULES = [
-	("*.ied.sln", "solution"),
+	("*.iedsln", "solution"),
+	("*.iedproj", "project"),
+	("*.iedfed", "federation"),
+	("*.ied.sln", "solution"),   # the names before (docs/03 "Files"), still read
 	("*.ied.proj", "project"),
 	("*.ied.fed", "federation"),
 	("ied-plugin.json", "plugin-manifest"),

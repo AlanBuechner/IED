@@ -20,12 +20,16 @@ class Outputs:
 		self.sources = {}
 		self.diagnostics = {}
 		for ws_id in server.workspace.items:
-			for source_id, label in SOURCES.items():
-				self._add_source(ws_id, source_id, label)
-			self._add_diagnostics(ws_id)
+			self.opened(ws_id)
 		server.rpc.register("out.sources", self.m_out_sources)
 		server.rpc.register("out.clear", self.m_out_clear)
 		self.append(next(iter(server.workspace.items)), "ied", "mock server %s started\r\n" % server.version)
+
+	def opened(self, ws_id):
+		"""A workspace's topics and state; also for one opened after the start (ws.openRecent)."""
+		for source_id, label in SOURCES.items():
+			self._add_source(ws_id, source_id, label)
+		self._add_diagnostics(ws_id)
 
 	def _add_source(self, ws_id, source_id, label):
 		key = "out:%s:%s" % (ws_id, source_id)

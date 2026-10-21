@@ -60,10 +60,10 @@ class TaskTests(ServerTestCase):
 		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"}}})
 		write(os.path.join(self.repo, "src", "a.c"), "int a;\nint b;\nint c;\n")
 		write(os.path.join(self.repo, "hello.cmd"), "@echo hello %~1\r\n")
-		write(os.path.join(self.repo, "Game.ied.proj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "presets": ["fake.make"], "tasks": self.tasks(),
+		write(os.path.join(self.repo, "Game.iedproj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "presets": ["fake.make"], "tasks": self.tasks(),
 			"buildSystem": {"id": "fake", "output": "${workspaceDir}/out/${config}/game.exe"}})
-		write(os.path.join(self.repo, "Game.ied.sln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.ied.proj"}]})
-		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.ied.sln")))
+		write(os.path.join(self.repo, "Game.iedsln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.iedproj"}]})
+		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.iedsln")))
 		self.assertTrue(self.server.started, self.server.error)
 
 	def tasks(self):
@@ -132,8 +132,8 @@ class TaskTests(ServerTestCase):
 	async def test_a_preset_extends_another(self):
 		"""docs/26: a preset reads its base first and overrides it by key; its problemMatcher reaches every step that names
 		none, the base's included; a preset that extends itself is a problem, not a loop."""
-		write(os.path.join(self.repo, "Lint.ied.proj"), {"version": 1, "name": "Lint", "root": ".", "kind": "other", "presets": ["fake.derived", "fake.loop"]})
-		write(os.path.join(self.repo, "Game.ied.sln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.ied.proj"}, {"file": "Lint.ied.proj"}]})
+		write(os.path.join(self.repo, "Lint.iedproj"), {"version": 1, "name": "Lint", "root": ".", "kind": "other", "presets": ["fake.derived", "fake.loop"]})
+		write(os.path.join(self.repo, "Game.iedsln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.iedproj"}, {"file": "Lint.iedproj"}]})
 		offer = None
 		for _ in range(50):
 			try:
@@ -263,7 +263,7 @@ class TaskTests(ServerTestCase):
 				if round:
 					self.client.abort()
 					self.server.stop()
-					self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.ied.sln")))
+					self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.iedsln")))
 					self.assertTrue(self.server.started, self.server.error)
 					await self.connect()
 				starts = [asyncio.ensure_future(self.client.request("task.run", {"wsId": "w1", "task": "sleepy"})) for _ in range(24)]

@@ -73,7 +73,7 @@ class LayoutFileTests(ServerTestCase):
 		self.assertEqual({"revision": 0, "layout": None}, await self.stored(client, "phone"))
 
 	async def test_a_solution_keeps_its_layouts_in_its_local_folder(self):
-		solution = os.path.join(self.folder, "Notes.ied.sln")
+		solution = os.path.join(self.folder, "Notes.iedsln")
 		with open(solution, "w", encoding="utf-8") as f:
 			json.dump({"version": 1, "name": "Notes", "projects": []}, f)
 		self.start(solution)

@@ -60,11 +60,10 @@ class Debugger:
 	def __init__(self, server):
 		self.server = server
 		self.sessions = {}
-		self.breakpoints = {ws_id: {} for ws_id in server.workspace.items}
-		self.watches = {ws_id: [] for ws_id in server.workspace.items}
+		self.breakpoints = {}
+		self.watches = {}
 		for ws_id in server.workspace.items:
-			server.hub.add("dbg:" + ws_id, lambda ws_id=ws_id: {"sessions": [s.summary() for s in self.sessions.values() if s.ws_id == ws_id]})
-			server.hub.add("bp:" + ws_id, lambda ws_id=ws_id: self.bp_snapshot(ws_id))
+			self.opened(ws_id)
 		for name in ("dbg.start", "dbg.stop", "dbg.restart", "dbg.sessions", "dbg.continue", "dbg.next", "dbg.stepIn", "dbg.stepOut", "dbg.pause",
 				"dbg.stackTrace", "dbg.scopes", "dbg.variables", "dbg.evaluate", "bp.set", "bp.list", "watch.set"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
@@ -75,6 +74,13 @@ class Debugger:
 		listed = self.breakpoints[session.ws_id].get(PROGRAM, [])
 		return [{"line": b["line"], "verified": bind(b["line"]) is not None, "boundLine": bind(b["line"]) if bind(b["line"]) is not None else b["line"]}
 			for b in listed if b.get("enabled", True)]
+
+	def opened(self, ws_id):
+		"""A workspace's topics and state; also for one opened after the start (ws.openRecent)."""
+		self.breakpoints[ws_id] = {}
+		self.watches[ws_id] = []
+		self.server.hub.add("dbg:" + ws_id, lambda: {"sessions": [s.summary() for s in self.sessions.values() if s.ws_id == ws_id]})
+		self.server.hub.add("bp:" + ws_id, lambda: self.bp_snapshot(ws_id))
 
 	def bp_snapshot(self, ws_id):
 		files = [{"path": path, "breakpoints": list(items)} for path, items in self.breakpoints[ws_id].items()]

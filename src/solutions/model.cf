@@ -17,7 +17,21 @@ namespace Ied
 		return true;
 	}
 
-	bool IsSolutionFile(Core::StringView path) { return EndsWithFolded(path, ".ied.sln"); }
+	bool IsSolutionFile(Core::StringView path) { return EndsWithFolded(path, ".iedsln") || EndsWithFolded(path, ".ied.sln"); }
+
+	bool IsProjectFile(Core::StringView path) { return EndsWithFolded(path, ".iedproj") || EndsWithFolded(path, ".ied.proj"); }
+
+	FS::Path SolutionIn(const FS::Path& folder) {
+		FS::Path found;
+		int64 count = 0;
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			if (entry.kind != FS::EntryKind::File || !IsSolutionFile(entry.name.View())) continue;
+			count += 1;
+			found = folder / entry.name.View();
+		}
+		return count == 1 ? found : FS::Path();
+	}
 
 	// A JSONC file into `doc`: its root, or an invalid node with a problem.
 	static Serialization::DomNode ReadFile(const FS::Path& file, Serialization::DomDoc* doc, Core::Array<Core::String>& problems) {

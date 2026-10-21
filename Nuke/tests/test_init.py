@@ -63,17 +63,17 @@ class IedSolutionTests(WorkspaceTest):
 		self.store = StubStore(os.path.join(self.root, "toolchains"))
 
 	def solution(self):
-		return json.loads(read(self.path("Game.ied.sln")))
+		return json.loads(read(self.path("Game.iedsln")))
 
 	def test_a_new_workspace_with_its_solution(self):
 		code, out = self.nuke("init", "Game", "--ied")
 		self.assertEqual(code, 0, out)
 		solution = self.solution()
-		self.assertEqual(["build/ied/*.ied.proj"], [p["file"] for p in solution["projects"]])
+		self.assertEqual(["build/ied/*.iedproj"], [p["file"] for p in solution["projects"]])
 		self.assertEqual([{"id": "c4", "path": "toolchains/c4/1.0.0/ied"}], solution["localPlugins"])
 		self.assertEqual(["nuke", "init", "--ied"], solution["generator"]["run"])
 		self.assertEqual(["nuke.toml"], solution["items"])
-		project = json.loads(read(self.path("build", "ied", "Game.ied.proj")))
+		project = json.loads(read(self.path("build", "ied", "Game.iedproj")))
 		self.assertEqual({"version": 1, "name": "Game", "root": "../..", "kind": "executable",
 			"buildSystem": {"id": "nuke", "projectName": "Game", "output": "${workspaceDir}/build/bin/${config}-windows-${arch}/Game/Game.exe"},
 			"presets": ["c4.nuke"], "language": "c4"}, project)
@@ -84,21 +84,21 @@ class IedSolutionTests(WorkspaceTest):
 			"Tools/nuke.toml": "[project]\nkind = \"custom\"\nlanguage = \"cpp\"\ndepends = [\"Engine\"]\n", "Assets/nuke.toml": "[project]\nkind = \"custom\"\n"})
 		code, out = self.nuke("init", "--ied")
 		self.assertEqual(code, 0, out)
-		tools = json.loads(read(self.path("build", "ied", "Tools.ied.proj")))
+		tools = json.loads(read(self.path("build", "ied", "Tools.iedproj")))
 		self.assertEqual(("../../Tools", "other", ["Engine"], "cpp", ["cpp.nuke"]), (tools["root"], tools["kind"], tools["references"], tools["language"], tools["presets"]))
-		engine = json.loads(read(self.path("build", "ied", "Engine.ied.proj")))
+		engine = json.loads(read(self.path("build", "ied", "Engine.iedproj")))
 		self.assertEqual(("library", "c4", ["c4.nuke"]), (engine["kind"], engine["language"], engine["presets"]), "a C4 project's language is c4, its preset C4's")
-		assets = json.loads(read(self.path("build", "ied", "Assets.ied.proj")))
+		assets = json.loads(read(self.path("build", "ied", "Assets.iedproj")))
 		self.assertEqual((None, ["nuke"]), (assets.get("language"), assets["presets"]), "a custom project without a language: Nuke's own preset")
 		code, out = self.nuke("init", "--ied")
 		self.assertIn("0 file(s) written", out, "nothing changed")
 		os.remove(self.path("Tools", "nuke.toml"))
-		with open(self.path("Game.ied.sln"), "a", encoding="utf-8") as f:
+		with open(self.path("Game.iedsln"), "a", encoding="utf-8") as f:
 			f.write(" ")
 		code, out = self.nuke("init", "--ied")
-		self.assertFalse(os.path.exists(self.path("build", "ied", "Tools.ied.proj")), "a project gone: its file too")
-		self.assertIn("Game.ied.sln was not written by `nuke init --ied` or was edited since", out)
-		self.assertTrue(read(self.path("Game.ied.sln")).endswith(" "), "the hand edit stays")
+		self.assertFalse(os.path.exists(self.path("build", "ied", "Tools.iedproj")), "a project gone: its file too")
+		self.assertIn("Game.iedsln was not written by `nuke init --ied` or was edited since", out)
+		self.assertTrue(read(self.path("Game.iedsln")).endswith(" "), "the hand edit stays")
 
 	def test_projects_in_other_languages(self):
 		"""IED docs/26 section 6: a Rust project gets the preset its package names and the program cargo builds; a pinned
@@ -111,20 +111,42 @@ class IedSolutionTests(WorkspaceTest):
 			"tools/dialogue/nuke/d.py": "def build(ctx):\n\treturn []\ndef program(ctx):\n\treturn None\ndef test(ctx):\n\treturn 0\n"})
 		code, out = self.nuke("init", "--ied")
 		self.assertEqual(code, 0, out)
-		game = json.loads(read(self.path("build", "ied", "Game.ied.proj")))
+		game = json.loads(read(self.path("build", "ied", "Game.iedproj")))
 		self.assertEqual((["rust.nuke"], "rust", "${workspaceDir}/build/bin/${config}-windows-${arch}/Game/rusty.exe"), (game["presets"], game["language"], game["buildSystem"]["output"]))
-		lines = json.loads(read(self.path("build", "ied", "Lines.ied.proj")))
+		lines = json.loads(read(self.path("build", "ied", "Lines.iedproj")))
 		self.assertEqual(("library", ["dialogue.build"]), (lines["kind"], lines["presets"]), "the package's own preset name")
 		self.assertNotIn("output", lines["buildSystem"], "a library runs nothing")
 		self.assertEqual([{"id": "c4", "path": "toolchains/c4/1.0.0/ied"}, {"id": "mygame.dialogue", "path": "tools/dialogue"}], self.solution()["localPlugins"],
 			"the pinned package's plugin; IED's own rust plugin needs no pin")
 
 	def test_a_solution_it_did_not_write_is_left_alone(self):
-		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n\n[project]\nname = \"Game\"\n", "Game.ied.sln": "{\"mine\": true}"})
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n\n[project]\nname = \"Game\"\n", "Game.iedsln": "{\"mine\": true}"})
 		code, out = self.nuke("init", "--ied")
 		self.assertEqual(code, 0, out)
-		self.assertEqual("{\"mine\": true}", read(self.path("Game.ied.sln")))
-		self.assertTrue(os.path.isfile(self.path("build", "ied", "Game.ied.proj")))
+		self.assertEqual("{\"mine\": true}", read(self.path("Game.iedsln")))
+		self.assertTrue(os.path.isfile(self.path("build", "ied", "Game.iedproj")))
+
+	def test_the_files_it_wrote_under_the_names_before_go(self):
+		"""IED docs/03 "Files": Game.ied.sln and build/ied/*.ied.proj, written by an older `nuke init --ied`, give way to
+		Game.iedsln and *.iedproj; one edited by hand stays, with a warning."""
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n\n[project]\nname = \"Game\"\n"})
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		record =self.path(".ied", "local", "generated.json")
+		digests = json.loads(read(record))
+		for new, old in (("Game.iedsln", "Game.ied.sln"), ("build/ied/Game.iedproj", "build/ied/Game.ied.proj")):
+			os.replace(self.path(*new.split("/")), self.path(*old.split("/")))
+			digests[old] = digests.pop(new)
+		with open(record, "w", encoding="utf-8") as f:
+			json.dump(digests, f)
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		self.assertTrue(os.path.isfile(self.path("Game.iedsln")) and os.path.isfile(self.path("build", "ied", "Game.iedproj")), "the new names")
+		self.assertFalse(os.path.exists(self.path("Game.ied.sln")) or os.path.exists(self.path("build", "ied", "Game.ied.proj")), "the old ones went")
+		self.files({"Game.ied.sln": "{\"mine\": true}"})
+		code, out = self.nuke("init", "--ied")
+		self.assertIn("Game.ied.sln was not written by `nuke init --ied` or was edited since", out)
+		self.assertEqual("{\"mine\": true}", read(self.path("Game.ied.sln")), "a hand-written one stays")
 
 	def test_a_toolchain_without_a_plugin(self):
 		make_install(os.path.join(self.root, "toolchains", "c4", "0.9.0"))

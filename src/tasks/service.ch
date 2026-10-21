@@ -19,7 +19,7 @@ namespace Ied
 		public Core::String name;
 		public FS::Path root;
 		public Core::String kind;
-		public Serialization::DomNode data;    // its .ied.proj; an invalid node for a folder
+		public Serialization::DomNode data;    // its .iedproj; an invalid node for a folder
 		public Core::String origin;            // its file's name, for problems
 	}
 

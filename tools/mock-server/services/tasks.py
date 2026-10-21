@@ -47,8 +47,12 @@ class Tasks:
 		for name in ("task.list", "task.select", "task.setStartup", "task.run", "task.cancel", "task.runs"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 		for ws_id in server.workspace.items:
-			server.hub.add("tasks:" + ws_id, lambda ws_id=ws_id: {"offer": self.offer(ws_id), "runs": [r.summary() for r in self.runs.values() if r.ws_id == ws_id and r.status == "running"],
-				"ended": self.last_ended(ws_id)})
+			self.opened(ws_id)
+
+	def opened(self, ws_id):
+		"""A workspace's topics and state; also for one opened after the start (ws.openRecent)."""
+		self.server.hub.add("tasks:" + ws_id, lambda: {"offer": self.offer(ws_id), "runs": [r.summary() for r in self.runs.values() if r.ws_id == ws_id and r.status == "running"],
+			"ended": self.last_ended(ws_id)})
 
 	def offer(self, ws_id):
 		chosen = self.selections.setdefault(ws_id, {})

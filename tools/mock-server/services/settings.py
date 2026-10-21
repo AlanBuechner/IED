@@ -56,8 +56,7 @@ class Settings:
 		self.catalog = None
 		server.hub.add("settings:app", lambda: self.snapshot(None))
 		for ws_id in server.workspace.items:
-			self.solutions[ws_id] = Tier("<mock>/%s/.ied/solution.json" % ws_id)
-			server.hub.add("settings:" + ws_id, lambda ws_id=ws_id: self.snapshot(ws_id))
+			self.opened(ws_id)
 		for name in ("settings.schema", "settings.get", "settings.set", "settings.reset"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
@@ -87,6 +86,11 @@ class Settings:
 					value, source = merged(entry, value, tier.values[key]), name
 			out[key] = {"value": value, "source": source}
 		return out
+
+	def opened(self, ws_id):
+		"""A workspace's topics and state; also for one opened after the start (ws.openRecent)."""
+		self.solutions[ws_id] = Tier("<mock>/%s/.ied/solution.json" % ws_id)
+		self.server.hub.add("settings:" + ws_id, lambda: self.snapshot(ws_id))
 
 	def snapshot(self, ws_id):
 		tiers = {"app": self.app.state()}

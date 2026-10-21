@@ -11,7 +11,7 @@ namespace Ied
 
 	struct RecentProject
 	{
-		public Core::String path;   // what opens it again: a folder, or a solution's .ied.sln
+		public Core::String path;   // what opens it again: a folder, or a solution's .iedsln
 		public Core::String name;
 		public Core::String kind;   // "folder" or "solution"
 		public int64 opened;        // unix ms

@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ied.local/schemas/federation.v1.schema.json",
-	"title": "IED federation file v1 (<Name>.ied.fed)",
+	"title": "IED federation file v1 (<Name>.iedfed)",
 	"description": "A named set of solutions/folders opened together as one workspace (e.g. this repo with IED + C4, plus a game project). Each member keeps its own .ied/, trust, plugins and settings.",
 	"type": "object",
 	"required": ["version", "name", "members"],
@@ -17,7 +17,7 @@
 				"required": ["path"],
 				"additionalProperties": false,
 				"properties": {
-					"path": { "type": "string", "description": "A .ied.sln file or a folder; relative to this file or absolute." },
+					"path": { "type": "string", "description": "A .iedsln file or a folder; relative to this file or absolute." },
 					"name": { "type": "string" },
 					"primary": { "type": "boolean", "default": false, "description": "Default member for new chats, terminals and the toolbar." }
 				}

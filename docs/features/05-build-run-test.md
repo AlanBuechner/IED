@@ -8,7 +8,7 @@ The generic mechanism is a **task**: a named list of **steps**, each a process (
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-BLD-1 | Per-project toolbar from `.ied.proj` (`toolbars`): dropdowns (fixed values, or values produced by a command / binding, e.g. `nuke list`) and buttons with icons, tooltips, enablement | P0 | US-BLD-1 |
+| F-BLD-1 | Per-project toolbar from `.iedproj` (`toolbars`): dropdowns (fixed values, or values produced by a command / binding, e.g. `nuke list`) and buttons with icons, tooltips, enablement | P0 | US-BLD-1 |
 | F-BLD-2 | Variables: built-ins (`project`, `projectRoot`, `solutionDir`, `config`, `arch`, `system`, `file`, `fileDir`, `line`, `selection`, `startupProject`, `testFilter`), dropdown ids, `env:NAME`, `config:key`, `input:<prompt>` (asks once) | P0 | US-BLD-1 |
 | F-BLD-3 | Step kinds: `process` (argv or shell string - argv preferred), `debug` (start a DAP session with a launch config), `binding` (call a plugin binding), `task` (run another task) | P0 (process), P1 (others) | US-BLD-2 |
 | F-BLD-4 | Conditions: `onlyIf: prevSuccess | prevFailure | always`, plus `when` expressions over variables (`config == 'Dist'`) | P0 | US-BLD-2 |

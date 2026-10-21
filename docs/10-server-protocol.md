@@ -111,7 +111,7 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 
 ## Workspaces
 
-A workspace is a folder, a solution (its `.ied.sln`'s folder) or the folder of a file opened alone, open on the server until it stops; its `wsId` (`w1`, `w2`, ...) lives for one server run. A summary is `{wsId, name, kind ("folder" | "solution" | "file"), root, trusted}`.
+A workspace is a folder, a solution (its `.iedsln`'s folder) or the folder of a file opened alone, open on the server until it stops; its `wsId` (`w1`, `w2`, ...) lives for one server run. A summary is `{wsId, name, kind ("folder" | "solution" | "file"), root, trusted}`.
 
 | Method | Result |
 |---|---|
@@ -121,7 +121,7 @@ A workspace is a folder, a solution (its `.ied.sln`'s folder) or the folder of a
 | `ws.setFavorite {path, favorite}` | `{}`; a listed project made a favorite, or not |
 | `ws.forgetRecent {path}` | `{}`; a listed project taken off the list |
 
-**The recent projects** are the server's: every workspace opened (`ied <path>`, the desktop app's Open Folder, `--workspace`, `ws.openRecent`) goes first in a list kept in the data folder's `recent.json` (machine-local: the paths are this machine's), newest first; past 20, the oldest that are not favorites drop off, and favorites stay. The `server` topic's snapshot carries it as `recent: [{path, name, kind, opened, favorite, exists}]` - `path` is what opens it again (a folder, or a solution's `.ied.sln`), `opened` unix ms, `exists` whether the path is still there - and every change publishes the whole list as `recent.changed {recent}`. A client opens again only what is listed: a path the owner never opened on the machine still comes from the machine (`docs/11` "Trust layers").
+**The recent projects** are the server's: every workspace opened (`ied <path>`, the desktop app's Open Folder, `--workspace`, `ws.openRecent`) goes first in a list kept in the data folder's `recent.json` (machine-local: the paths are this machine's), newest first; past 20, the oldest that are not favorites drop off, and favorites stay. The `server` topic's snapshot carries it as `recent: [{path, name, kind, opened, favorite, exists}]` - `path` is what opens it again (a folder, or a solution's `.iedsln`), `opened` unix ms, `exists` whether the path is still there - and every change publishes the whole list as `recent.changed {recent}`. A client opens again only what is listed: a path the owner never opened on the machine still comes from the machine (`docs/11` "Trust layers").
 
 A launch URL's `#open=<wsId>/<path>[:<line>[:<col>]]` (the control channel's `open`) shows that workspace, and the file when `path` is not empty; the web client's own `#start` shows its start page (`docs/15`).
 

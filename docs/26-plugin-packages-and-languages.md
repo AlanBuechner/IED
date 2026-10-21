@@ -152,7 +152,7 @@ A language plugin owns everything about its language. The host and the default f
 | `ied.csharp` | C# | icons, markers | `dotnet` presets |
 | `ied.java` | Java | icons, markers | Gradle/Maven presets |
 | `ied.shaders` | HLSL, GLSL, WGSL | icons | shader language servers (engine plugins may supersede) |
-| `ied.data` | JSON, YAML, TOML, XML, INI | icons, the `.ied.sln/.ied.proj` icons | schema validation |
+| `ied.data` | JSON, YAML, TOML, XML, INI | icons, the `.iedsln/.iedproj` icons | schema validation |
 | `ied.markdown` | Markdown | icons, the Markdown preview (moved out of the editor) | |
 | `ied.scripts` | Shell, PowerShell, Batch | icons | |
 | `ied.lua`, `ied.sql` | Lua, SQL | icons | |

@@ -25,7 +25,7 @@ class TasksTests {
 		Ied::ReadTaskEntries(Json("{\"variables\": {\"config\": {\"kind\": \"dropdown\", \"values\": [\"Debug\", \"Development\"], \"default\": \"Development\", \"scope\": \"solution\"}},"
 			"\"tasks\": {\"build\": {\"slot\": \"build\", \"steps\": [{\"run\": [\"nuke\", \"build\"], \"problemMatcher\": \"c4\"}]}, \"test\": {\"steps\": [{\"run\": \"nuke test\"}]}},"
 			"\"toolbar\": [\"config\", \"build\"]}"), Core::StringView("preset c4.nuke"), offered);
-		Ied::ReadTaskEntries(Json("{\"tasks\": {\"build\": {\"label\": \"Build it\", \"steps\": [{\"task\": \"test\"}, {\"run\": [\"x\"], \"onlyIf\": \"always\", \"env\": {\"A\": \"1\"}}]}, \"empty\": {\"steps\": []}}}"), Core::StringView("Game.ied.proj"), offered);
+		Ied::ReadTaskEntries(Json("{\"tasks\": {\"build\": {\"label\": \"Build it\", \"steps\": [{\"task\": \"test\"}, {\"run\": [\"x\"], \"onlyIf\": \"always\", \"env\": {\"A\": \"1\"}}]}, \"empty\": {\"steps\": []}}}"), Core::StringView("Game.iedproj"), offered);
 		assert_eq(2, offered.tasks.Count(), "the project's build replaced the preset's; an empty task is a problem, not a task");
 		Ied::TaskDef* build = offered.Task(Core::StringView("build"));
 		assert_se("Build it", build->label.CStr(), "the project's");

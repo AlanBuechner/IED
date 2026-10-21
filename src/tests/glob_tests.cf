@@ -8,18 +8,18 @@ static bool Match(const char* pattern, const char* path) { return Ied::GlobMatch
 class GlobTests {
 	[test("segments")]
 	public static void TestSegments() {
-		assert_true(Match("build/ied/*.ied.proj", "build/ied/Game.ied.proj"), "a star in the last segment");
-		assert_true(!Match("build/ied/*.ied.proj", "build/ied/sub/Game.ied.proj"), "a star stays in its segment");
+		assert_true(Match("build/ied/*.iedproj", "build/ied/Game.iedproj"), "a star in the last segment");
+		assert_true(!Match("build/ied/*.iedproj", "build/ied/sub/Game.iedproj"), "a star stays in its segment");
 		assert_true(Match("src/?.cf", "src/a.cf") && !Match("src/?.cf", "src/ab.cf"), "one character");
-		assert_true(Match("BUILD\\ied\\game.IED.proj", "build/ied/Game.ied.proj"), "case and separators folded");
+		assert_true(Match("BUILD\\ied\\game.IEDPROJ", "build/ied/Game.iedproj"), "case and separators folded");
 		assert_true(Match("*", "anything") && !Match("*", "a/b"), "a lone star");
 		assert_true(Match("a*b*c", "aXXbYYc") && !Match("a*b*c", "aXXbYY"), "stars that must back up");
 	}
 
 	[test("double_star")]
 	public static void TestDoubleStar() {
-		assert_true(Match("**/*.ied.proj", "Game.ied.proj"), "no folders");
-		assert_true(Match("**/*.ied.proj", "a/b/c/Game.ied.proj"), "many folders");
+		assert_true(Match("**/*.iedproj", "Game.iedproj"), "no folders");
+		assert_true(Match("**/*.iedproj", "a/b/c/Game.iedproj"), "many folders");
 		assert_true(Match("build/**/x.json", "build/x.json") && Match("build/**/x.json", "build/a/b/x.json"), "in the middle");
 		assert_true(!Match("build/**/x.json", "other/x.json"), "but not elsewhere");
 		assert_true(Match("**", "a/b/c"), "everything");
@@ -28,6 +28,6 @@ class GlobTests {
 	[test("is_glob")]
 	public static void TestIsGlob() {
 		assert_true(Ied::IsGlob(Core::StringView("a/*.x")) && Ied::IsGlob(Core::StringView("?")), "wildcards");
-		assert_true(!Ied::IsGlob(Core::StringView("tools/Tool.ied.proj")), "a plain path");
+		assert_true(!Ied::IsGlob(Core::StringView("tools/Tool.iedproj")), "a plain path");
 	}
 }

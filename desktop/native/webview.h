@@ -9,3 +9,6 @@
 #include <shellapi.h>
 #include <shobjidl.h>
 #include "WebView2.h"
+
+// shlobj_core.h's SHChangeNotify alone: the whole header binds deprecated shell views CBind's shim warns about.
+extern "C" __declspec(dllimport) void __stdcall SHChangeNotify(LONG wEventId, UINT uFlags, LPCVOID dwItem1, LPCVOID dwItem2);

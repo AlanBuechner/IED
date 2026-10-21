@@ -27,6 +27,11 @@ class Layouts:
 				self._add(ws, device_class)
 		server.rpc.register("layout.set", self.m_layout_set)
 
+	def opened(self, ws_id):
+		"""A workspace opened after the start (ws.openRecent) gets its layouts too."""
+		for device_class in DEVICE_CLASSES:
+			self._add(ws_id, device_class)
+
 	def _add(self, ws_id, device_class):
 		key = "layout:%s:%s" % (ws_id, device_class)
 		layout = Layout()

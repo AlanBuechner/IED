@@ -7,13 +7,31 @@ import zlib
 WORKSPACE = {"wsId": "w1", "name": "demo", "root": "C:/mock/demo"}
 
 
+def solution_files(name):
+	"""A recent solution's files when it is opened again: the solution, one project under src/, its code and README."""
+	return {
+		"README.md": "# %s\n" % name,
+		name + ".iedsln": '{ "version": 1, "name": "%s", "projects": [{ "file": "src/Tool.iedproj" }], "items": ["README.md"] }\n' % name,
+		"src/Tool.iedproj": '{ "version": 1, "name": "Tool", "root": ".", "kind": "executable" }\n',
+		"src/tool.c": "int main(void) { return 0; }\n",
+	}
+
+
+def solution_model(name, root):
+	"""What the server's ws:<wsId> snapshot carries as `solution` for solution_files (docs/03 "The server as built")."""
+	return {
+		"name": name, "file": root + "/" + name + ".iedsln", "problems": [], "groups": [], "items": ["README.md"], "generator": None, "localPlugins": [],
+		"projects": [{"name": "Tool", "file": root + "/src/Tool.iedproj", "root": root + "/src", "kind": "executable", "problems": [], "data": {"version": 1, "name": "Tool", "root": ".", "kind": "executable"}}],
+	}
+
+
 def recent_projects(now_ms):
 	"""The server's recent list (docs/10 "Workspaces"), newest first: the open demo, a solution, a favorite and a folder
 	that is gone."""
 	hour, day = 3600 * 1000, 24 * 3600 * 1000
 	return [
 		{"path": "C:/mock/demo", "name": "demo", "kind": "folder", "opened": now_ms - 5 * 60 * 1000, "favorite": False, "exists": True},
-		{"path": "C:/mock/Tools/Tools.ied.sln", "name": "Tools", "kind": "solution", "opened": now_ms - 3 * hour, "favorite": False, "exists": True},
+		{"path": "C:/mock/Tools/Tools.iedsln", "name": "Tools", "kind": "solution", "opened": now_ms - 3 * hour, "favorite": False, "exists": True},
 		{"path": "C:/mock/Shooter", "name": "Shooter", "kind": "folder", "opened": now_ms - 2 * day, "favorite": True, "exists": True},
 		{"path": "C:/mock/Prototype", "name": "Prototype", "kind": "folder", "opened": now_ms - 40 * day, "favorite": False, "exists": False},
 	]

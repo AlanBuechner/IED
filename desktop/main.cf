@@ -3,6 +3,7 @@
 
 include "app.ch"
 include "shortcut.ch"
+include "filetypes.ch"
 
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	Core::Array<Core::String> arguments;
@@ -18,12 +19,16 @@ static int32 Tell(Core::StringView text, bool failed) {
 	return failed ? 2 : 0;
 }
 
-// --register / --unregister: the Start menu's shortcut to this program. No message box: a script runs these, and gets
-// the exit code and, on a stderr it handed over, why.
+// --register / --unregister: the Start menu's shortcut to this program, and IED's files opening in it. No message box:
+// a script runs these, and gets the exit code and, on a stderr it handed over, why.
 static int32 Registered(const Desktop::Options& options) {
 	Core::String error;
 	Core::String appData = Platform::GetEnvironmentVariable("APPDATA");
-	const bool done = options.registering ? Desktop::Register(Platform::ExecutablePath(), appData.View(), error) : Desktop::Unregister(appData.View(), error);
+	Core::StringView classes = Core::StringView(Desktop::kUserClasses);
+	const bool done = options.registering
+		? Desktop::Register(Platform::ExecutablePath(), appData.View(), error) && Desktop::RegisterFileTypes(Platform::ExecutablePath(), classes, error)
+		: Desktop::Unregister(appData.View(), error) && Desktop::UnregisterFileTypes(classes, error);
+	Desktop::AssociationsChanged();
 	if (!done) Platform::WriteError((Core::String("ied-desktop: ") + error.View() + "\n").View());
 	return done ? 0 : 1;
 }

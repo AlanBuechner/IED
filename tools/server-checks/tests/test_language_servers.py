@@ -231,11 +231,11 @@ class ProjectScopeTests(ServerTestCase):
 				"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "scope": "project", "selector": {"languages": ["fake"]},
 					"args": ["-I", "${pluginDir}/fake_lsp.py", os.path.join(self.logs, "log-${projectName}.jsonl"), "${projectName}", "${projectDir}"]}]}})
 		for name in ("Game", "Tool"):
-			write(os.path.join(self.repo, "build", "ied", name + ".ied.proj"), {"version": 1, "name": name, "root": "../../src/" + name.lower(), "kind": "executable"})
+			write(os.path.join(self.repo, "build", "ied", name + ".iedproj"), {"version": 1, "name": name, "root": "../../src/" + name.lower(), "kind": "executable"})
 			write(os.path.join(self.repo, "src", name.lower(), "main.fk"), "bad\n")
 		write(os.path.join(self.repo, "loose.fk"), "fine\n")
-		write(os.path.join(self.repo, "Repo.ied.sln"), {"version": 1, "name": "Repo", "projects": [{"file": "build/ied/*.ied.proj"}]})
-		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Repo.ied.sln")))
+		write(os.path.join(self.repo, "Repo.iedsln"), {"version": 1, "name": "Repo", "projects": [{"file": "build/ied/*.iedproj"}]})
+		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Repo.iedsln")))
 		self.assertTrue(self.server.started, self.server.error)
 
 	def tearDown(self):

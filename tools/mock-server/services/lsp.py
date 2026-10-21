@@ -9,12 +9,16 @@ class LanguageServers:
 	def __init__(self, server):
 		self.server = server
 		for ws_id in server.workspace.items:
-			server.hub.add("lsp:" + ws_id, lambda: {"servers": []})
+			self.opened(ws_id)
 		server.rpc.register("lsp.request", self.m_request)
 		server.rpc.register("lsp.capabilities", self.m_capabilities)
 		server.rpc.register("lsp.status", self.m_status)
 		server.rpc.register("lsp.restart", self.m_restart)
 		server.rpc.register("lsp.workspaceSymbols", self.m_workspace_symbols)
+
+	def opened(self, ws_id):
+		"""A workspace's topics and state; also for one opened after the start (ws.openRecent)."""
+		self.server.hub.add("lsp:" + ws_id, lambda: {"servers": []})
 
 	async def m_request(self, call, p):
 		self.server.docs.get(p.str("docId"))

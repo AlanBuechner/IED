@@ -314,7 +314,7 @@ if any failed. Custom projects test with `phase = "test"` steps.
 the build. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine-local; `nuke init` adds it to
 `.gitignore`.
 
-**IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.ied.sln` at the root
+**IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.iedsln` at the root
 and a project file per project under `build/ied/` (`root` the project's folder, `kind` executable / library /
 other, `buildSystem: {id: "nuke", projectName}`, `references` from `depends`, `language` (the project's; IED picks its icon from it), `presets: ["<language>.nuke"]` - IED's
 `nuke` preset, its toolbar and Build / Run / Test tasks running `nuke` (the `nuke.command` setting) with the selected
@@ -323,7 +323,8 @@ project without a language), and pins the toolchain's IED plugin
 (`<toolchain>/ied`, which `C4/MakeToolchain.py` ships) in the solution's `localPlugins` - relative when the toolchain
 store is inside the workspace, as it is by default. Run it again after adding or removing projects: files it wrote
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
-is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). It also adds `.ied/local/` to
+is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). The files it wrote under the
+names before (`<Workspace>.ied.sln`, `build/ied/*.ied.proj`) go once the new ones are written. It also adds `.ied/local/` to
 `.gitignore`, as `nuke init` does for a new workspace. The AI skills are not copied into the workspace: C4's come with the
 toolchain's IED plugin, Nuke's with IED's `ied.nuke` plugin (IED docs/26).
 

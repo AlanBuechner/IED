@@ -25,6 +25,7 @@ class Workspace:
 		self.name = name
 		self.root = root
 		self.kind = kind
+		self.solution = None   # a solution workspace's model (docs/03), as the server's ws:<wsId> snapshot carries it
 		self.trusted = True
 		self.files = {path: File(text) for path, text in files.items()}
 		self.directories = set(directories)
@@ -84,7 +85,8 @@ class Workspaces:
 
 	def snapshot(self, ws):
 		chats = [c.summary() for c in self.server.chat.items.values() if c.ws_id == ws.ws_id]
-		return dict(ws.summary(), roots=["."], plugins=[{"id": "mock.language", "state": "active"}], chats=chats)
+		extra = {"solution": ws.solution} if ws.solution else {}
+		return dict(ws.summary(), **extra, roots=["."], plugins=[{"id": "mock.language", "state": "active"}], chats=chats)
 
 	def get(self, ws_id):
 		ws = self.items.get(ws_id)
@@ -134,9 +136,14 @@ class Workspaces:
 		root = posixpath.dirname(project["path"]) if solution else project["path"]
 		ws = next((w for w in self.items.values() if folded(w.root) == folded(root)), None)
 		if ws is None:
-			ws = Workspace("w%d" % (len(self.items) + 1), project["name"], root, {"README.md": "# %s\n" % project["name"]}, [], kind="solution" if solution else "folder")
+			files = workspace_files.solution_files(project["name"]) if solution else {"README.md": "# %s\n" % project["name"]}
+			ws = Workspace("w%d" % (len(self.items) + 1), project["name"], root, files, [], kind="solution" if solution else "folder")
+			if solution:
+				ws.solution = workspace_files.solution_model(project["name"], root)
 			self.items[ws.ws_id] = ws
 			self.server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
+			for service in (self.server.layout, self.server.settings, self.server.outputs, self.server.lsp, self.server.tasks, self.server.debug, self.server.terminals):
+				service.opened(ws.ws_id)
 			self.server.hub.publish("server", "workspace.opened", ws.summary())
 		self.recent.remove(project)
 		self.recent.insert(0, dict(project, opened=int(time.time() * 1000)))

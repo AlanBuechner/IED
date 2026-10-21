@@ -14,7 +14,7 @@ TEMPLATES = fsutil.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 USAGE = """nuke init [NAME] [--kind executable|module|custom] [--toolchain VERSION] [--ied]
   outside a workspace: make the current folder a new workspace with one project (NAME defaults to the folder)
   inside a workspace:  create the project NAME in ./NAME (or here with --here)
-  --ied:               also write (or refresh) the IED solution <Workspace>.ied.sln and build/ied/*.ied.proj;
+  --ied:               also write (or refresh) the IED solution <Workspace>.iedsln and build/ied/*.iedproj;
                        inside a workspace, `nuke init --ied` alone does only that"""
 
 

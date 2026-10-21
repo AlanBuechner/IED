@@ -133,7 +133,7 @@ function specOf(value, plugin, shape) {
 	return spec;
 }
 
-// The spec of a project (a solution's project: {data: its .ied.proj}) from the plugins' projectIcons: the one for the
+// The spec of a project (a solution's project: {data: its .iedproj}) from the plugins' projectIcons: the one for the
 // language its file names, else one whose presets or build system it uses, else one whose marker file is among
 // `rootNames` (the names in its root folder, when known).
 export function projectIconSpec(project, contributions, rootNames) {

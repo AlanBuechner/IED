@@ -6,16 +6,16 @@ A **workspace** is what one browser tab views. It is one of:
 
 | Kind | Opened from | Has `.ied/`? | Notes |
 |---|---|---|---|
-| **Solution** | `*.ied.sln` | yes (at the solution root) | Full feature set. |
+| **Solution** | `*.iedsln` | yes (at the solution root) | Full feature set. |
 | **Folder** | `ied ./`, *Open Folder*, Explorer right-click | created lazily on the first workspace-tier write (setting, skill, trust record stays in app data) | No projects: tree = the folder; toolbar from `.ied/folder.json` if present. |
 | **File** | `ied file.txt`, Explorer right-click on a file | no | Opens the file's folder as a hidden lightweight folder workspace, with only that document open and the tree collapsed. |
-| **Federation** | `*.ied.fed` or *Add root to workspace* | each member keeps its own `.ied/` | Several solutions/folders in one workspace (see below). |
+| **Federation** | `*.iedfed` or *Add root to workspace* | each member keeps its own `.ied/` | Several solutions/folders in one workspace (see below). |
 
 ## Solution and project model
 
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
-| F-WSP-1 | `.ied.sln` / `.ied.proj` JSON files (schema v1); project `root` may point outside the project file's folder | P0 | US-WSP-1 | src/host, shared/host-api |
+| F-WSP-1 | `.iedsln` / `.iedproj` JSON files (schema v1); project `root` may point outside the project file's folder | P0 | US-WSP-1 | src/host, shared/host-api |
 | F-WSP-2 | Solution groups (display folders in the tree, VS "solution folders") | P0 | US-WSP-6 | src/host, plugins/editor |
 | F-WSP-3 | Startup project selection (per device? no - per workspace, stored in `.ied/local/`) and VS "multiple startup projects" P2 | P1 | US-WSP-9 | plugins/editor |
 | F-WSP-4 | File-system watching of solution/project files: external regeneration (e.g. `nuke init`) reloads the tree without reopening | P0 | US-WSP-1 | src/fs |
@@ -31,8 +31,8 @@ A **workspace** is what one browser tab views. It is one of:
 |---|---|---|---|---|
 | F-WSP-10 | Open folder (no project) | P0 | US-WSP-3 | src/host |
 | F-WSP-11 | Open single file (lightweight workspace) | P0 | US-WSP-3 | src/host |
-| F-WSP-12 | `ied <path>` resolves: `.ied.sln` -> solution; folder containing exactly one `.ied.sln` -> asks "open solution or folder?" (remembered); else folder; file -> file mode, unless the file is inside an open workspace (then it opens there) | P0 | US-WSP-3 | src/host |
-| F-WSP-13 | Explorer integration: *Open with IED* on files, folders and folder backgrounds; `.ied.sln` file association (installer) | P1 | US-WSP-4 | installer |
+| F-WSP-12 | `ied <path>` resolves: `.iedsln` -> solution; folder containing exactly one `.iedsln` -> asks "open solution or folder?" (remembered); else folder; file -> file mode, unless the file is inside an open workspace (then it opens there) | P0 | US-WSP-3 | src/host |
+| F-WSP-13 | Explorer integration: *Open with IED* on files, folders and folder backgrounds; `.iedsln` file association (installer) | P1 | US-WSP-4 | installer |
 | F-WSP-14 | Recent list (app tier), pinning, removing missing entries | P1 | US-SHL-10 | src/host |
 | F-WSP-15 | Clone repository (URL -> folder -> open), using the git plugin | P1 | US-SHL-10 | plugins/git |
 
@@ -50,7 +50,7 @@ Interpretation of the plan's "federated projects" (confirm in `docs/99`): a name
 
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
-| F-WSP-30 | `.ied.fed` file (or app-tier record): list of member roots (solutions or folders), display names, which member is "primary" | P1 | US-WSP-5 | src/host |
+| F-WSP-30 | `.iedfed` file (or app-tier record): list of member roots (solutions or folders), display names, which member is "primary" | P1 | US-WSP-5 | src/host |
 | F-WSP-31 | Tree shows one top node per member; search scopes: current project / current member / whole federation | P1 | US-WSP-5, US-EDT-4 | plugins/editor |
 | F-WSP-32 | Each member keeps its own `.ied/`, plugins, LSP options and trust; settings resolve per member for files inside it | P1 | US-WSP-5 | src/host |
 | F-WSP-33 | Chats in a federation see all members' `AGENTS.md` (each scoped to its root) and can use tools across members, subject to each member's trust and egress policy (strictest wins for a chat that touched several) | P1 | US-WSP-5, US-CTX-5 | plugins/chat/code |
@@ -60,7 +60,7 @@ Interpretation of the plan's "federated projects" (confirm in `docs/99`): a name
 
 | ID | Feature | Pri | Stories | Owner |
 |---|---|---|---|---|
-| F-WSP-40 | Trust records in app tier (path + hash of `.ied.sln` local-plugin section); trusting a parent folder trusts children (VS Code model) | P0 | US-WSP-7 | src/host |
+| F-WSP-40 | Trust records in app tier (path + hash of `.iedsln` local-plugin section); trusting a parent folder trusts children (VS Code model) | P0 | US-WSP-7 | src/host |
 | F-WSP-41 | Untrusted mode disables: project-local plugins, project toolbar commands, AI tools that execute code (shell, build, run, debug), MCP servers defined by the project, LSP profiles that run project-provided binaries | P0 | US-WSP-7 | src/host |
 | F-WSP-42 | Re-prompt when the local-plugin section or toolbar commands change after a pull (diff shown) | P1 | US-WSP-7 | src/host |
 

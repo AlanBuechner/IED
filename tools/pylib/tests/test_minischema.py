@@ -137,11 +137,11 @@ class HostApiTests(unittest.TestCase):
 		return minischema.Validator(self.registry, HOST_API / rel)
 
 	def test_examples_valid(self):
-		project = jsonc.load_file(HOST_API / "examples" / "Game.ied.proj")
+		project = jsonc.load_file(HOST_API / "examples" / "Game.iedproj")
 		self.assertEqual([], self.validator("schemas/project.v1.schema.json").validate(project))
 
 	def test_broken_project_rejected(self):
-		project = jsonc.load_file(HOST_API / "examples" / "Game.ied.proj")
+		project = jsonc.load_file(HOST_API / "examples" / "Game.iedproj")
 		broken = copy.deepcopy(project)
 		del broken["version"]
 		self.assertTrue(self.validator("schemas/project.v1.schema.json").validate(broken))

@@ -32,7 +32,7 @@ Capture *who* IED is for and *what they need to do*, so every feature in `docs/f
 
 End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see `docs/19`). Every one must pass at desktop width and the starred (*) ones also at phone width.
 
-- **J1 - Morning build loop.** Owner double-clicks `MyGame.ied.sln` (or runs `ied .`). The browser opens to the solution with yesterday's tabs, splits and toolbar selections restored. They pick `Development | x64`, press F5: build output streams to *Build*, the error list fills with clickable errors, they fix one (green/yellow margins track it), press F5 again, the game launches under the debugger, hits a breakpoint, they inspect locals and step.
+- **J1 - Morning build loop.** Owner double-clicks `MyGame.iedsln` (or runs `ied .`). The browser opens to the solution with yesterday's tabs, splits and toolbar selections restored. They pick `Development | x64`, press F5: build output streams to *Build*, the error list fills with clickable errors, they fix one (green/yellow margins track it), press F5 again, the game launches under the debugger, hits a breakpoint, they inspect locals and step.
 - **J2 - Leave it running* .** Owner gives a chat a multi-hour task ("port the logging subsystem from the C++ reference engine"), closes the browser and leaves. The agent keeps working on the server. From the phone they open IED, see the task list half done, read the modified-files list and a diff, inject "use the existing Ring buffer type", and approve a pending shell command. Back at the desk later, everything is where the phone left it.
 - **J3 - Planner + implementer.** Owner selects model group "plan-claude/impl-local": Claude writes the plan into the chat's task list and scratchpad; temp-0 local workers implement each task; the main loop verifies with build + tests. When Claude hits its session limit, planning routes to the strong local model with a visible note.
 - **J4 - Crash triage with AI.** A test fails. Owner right-clicks the failure -> "Fix with AI". The agent reads the failure, sets a breakpoint through the debugger tools, runs the test, inspects the stack, navigates by symbol via LSP tools, edits, rebuilds, reruns, and reports. Every tool call is visible live with timing and status.
@@ -83,7 +83,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 - **US-WSP-5** `plan+` `P1` - As Owner, I can open a **federation** - several solutions/folders from different repos (this repo with IED + C4, plus a game project) in one workspace - so one chat can work across them. *(Interpretation of "federated projects" - confirm in `docs/99`.)*
 - **US-WSP-6** `plan` `P0` - As Owner, the Solution Explorer shows groups -> projects -> folders -> files with distinct file-type icons, like VS.
 - **US-WSP-7** `ext` `P0` - As Owner, opening an untrusted workspace asks whether to trust it; until trusted, project-local plugins, project-defined toolbar commands and AI tools that execute code stay off.
-- **US-WSP-8** `ext` `P1` - As Owner, *New Project* offers templates contributed by plugins (e.g. "C4 executable", or a game template from an engine plugin), and the generator writes `.ied.proj` / `.ied/` files idempotently.
+- **US-WSP-8** `ext` `P1` - As Owner, *New Project* offers templates contributed by plugins (e.g. "C4 executable", or a game template from an engine plugin), and the generator writes `.iedproj` / `.ied/` files idempotently.
 - **US-WSP-9** `ext` `P1` - As Owner, I choose a startup project (VS concept) when the solution has several executables; F5 uses it.
 - **US-WSP-10** `ext` `P1` - As Owner, file operations in the tree (new, rename, move, delete-to-recoverable-trash, drag-drop, copy path, reveal in Explorer) work like VS, and renames can trigger LSP refactors.
 - **US-WSP-11** `ext` `P1` - As Owner, a single loose file opened in a solution shows under *Miscellaneous Files* (VS parity) instead of being lost.
@@ -289,7 +289,7 @@ Journey added for this epic:
 ### DST - Install and distribution
 
 - **US-DST-1** `plan` `P1` - As Owner, IED installs from one package, with SearXNG and tor bundled (or auto-installed in isolation) - no manual setup.
-- **US-DST-2** `ext` `P1` - As Owner, the installer puts `ied` on PATH, registers Explorer context menus and `.ied.sln` file association.
+- **US-DST-2** `ext` `P1` - As Owner, the installer puts `ied` on PATH, registers Explorer context menus and `.iedsln` file association.
 - **US-DST-3** `ext` `P1` - As Owner, first run walks me through: (optional) remote password, detecting local model servers on common ports, picking a first model group.
 - **US-DST-4** `ext` `P2` - As Owner, an optional desktop window (WebView2) gives an app-like experience where browser-reserved shortcuts (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab) work.
 

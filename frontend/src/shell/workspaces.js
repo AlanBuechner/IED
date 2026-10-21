@@ -6,7 +6,7 @@
 import { h, icon, iconFrom } from "/ui-kit/dom.js";
 import { FILE, FOLDER, SOLUTION } from "/ui-kit/fileglyphs.js";
 
-const ON_THE_SERVER = "ied <folder or .ied.sln>";
+const ON_THE_SERVER = "ied <folder or .iedsln>";
 const SWITCHER_RECENT = 10;
 
 function folded(path) {
