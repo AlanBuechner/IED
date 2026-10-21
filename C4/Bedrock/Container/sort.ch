@@ -7,9 +7,9 @@ namespace Core
 		[operator("call")] public bool Before(const T& a, const T& b) const { return a < b; }
 	}
 
-	// Introsort (std::sort's strategy): quicksort with a depth budget, heapsort when the budget runs out so
-	// the worst case stays O(n log n), insertion sort for short ranges. Not stable; elements are relocated,
-	// never copied.
+	// Pattern-defeating quicksort: O(n log n) at worst (heapsort when partitions keep coming out unbalanced), linear on
+	// sorted, reversed and all-equal input, and branchless partitions for elements of 16 bytes or less. Not stable;
+	// elements are relocated, never copied.
 	template<T, F> void Sort(T* items, int64 count, F before);
 
 	// The first index whose element is not before `value` (std::lower_bound), or `count`.

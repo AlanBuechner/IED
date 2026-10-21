@@ -350,7 +350,7 @@ With the compiled-script cache (`Host::UseCache`, docs/runtime/04 section 4.6) t
 over the same pseudo-random data in `bedrock.cf` and `bedrock.cpp`, each timed in process (median of 5 runs) with a
 checksum both sides must print alike: `HashMap` (1M `int64` keys: insert, hits, misses, removes; 200k text keys:
 insert and five rounds of hits) against `std::unordered_map`, `Array::Push` against `std::vector::push_back`,
-`Sort` against `std::sort` (2M `int32`), and number text against `std::to_chars` / `std::from_chars` (1M integers
+`Sort` against `std::sort` (2M `int32`, and 2M 8-byte records by key through a lambda), and number text against `std::to_chars` / `std::from_chars` (1M integers
 and doubles). `-Check` builds both and compares the checksums once (gate item 11).
 
 Baselines (2026-10-21, ms; ratio < 1 means Bedrock is faster):
@@ -365,19 +365,22 @@ Baselines (2026-10-21, ms; ratio < 1 means Bedrock is faster):
 | map_text_find | 32.1 | 50.9 | 0.63 |
 | array_push_sum | 16.5 | 21.9 | 0.75 |
 | sort_int32 | 9.6 | 106.0 | 0.09 |
-| text_append_int | 13.3 | 14.0 | 0.95 |
+| sort_records | 43.5 | 108.4 | 0.40 |
+| text_append_int | 12.0 | 13.3 | 0.90 |
 | text_format_double | 36.0 | 36.5 | 0.99 |
 | text_parse_double | 21.3 | 73.8 | 0.29 |
 | json_write (C4 only, 10 MB) | 21.4 | - | - |
 | json_read (C4 only, 10 MB) | 27.7 | - | - |
 
 Before the Swiss-style table and the wyhash-style byte hash (linear probing over a separate state byte per slot,
-FNV-1a), the map kernels took 32.4, 8.9, 11.5, 3.3, 41.4 and 41.1 ms. Before the radix sort `sort_int32` took 104.3 ms (introsort);
+FNV-1a), the map kernels took 32.4, 8.9, 11.5, 3.3, 41.4 and 41.1 ms. Before the radix sort `sort_int32` took 104.3 ms (introsort), and the records about as long as `std::sort` before
+pdqsort with block partitions;
 before the Eisel-Lemire fast path `text_parse_double` took 77.3 ms (`from_chars`); before the DOM's single child block
 and string views of the source `json_read` took 72.2 ms and `json_write` 28.4 ms. The shortest double form took
 4,851 ms for the million doubles before the number text moved to `<charconv>`
 (it printed and read back up to 17 times per number), and the integers 31.4 ms before they were written two digits
-at a time.
+at a time (14.9 ms before one call wrote the sign and digits of a decimal, and a const string pointer was read-only
+data the loop's loads of could fold).
 
 ---
 

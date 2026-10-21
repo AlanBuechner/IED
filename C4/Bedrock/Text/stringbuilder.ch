@@ -19,8 +19,8 @@ namespace Core
 		// The UTF-8 bytes of a code point; a surrogate or anything past U+10FFFF is written as U+FFFD.
 		public void AppendCodePoint(int32 codePoint);
 		public void AppendBytes(const char* bytes, int64 count);   // raw bytes, no terminator searched for
-		public void AppendInt(int64 value) { AppendIntBase(value, 10, 0); }
-		public void AppendUInt(uint64 value) { AppendUIntBase(value, 10, 0); }
+		public void AppendInt(int64 value) { AppendDecimal(value < 0, value < 0 ? (uint64)(-(value + 1)) + 1u : (uint64)value, 0); }
+		public void AppendUInt(uint64 value) { AppendDecimal(false, value, 0); }
 		// Base 2 to 16 (anything else is 10), lowercase digits, zero-padded to at least minWidth digits.
 		public void AppendIntBase(int64 value, int32 base, int32 minWidth);
 		public void AppendUIntBase(uint64 value, int32 base, int32 minWidth);
@@ -41,7 +41,8 @@ namespace Core
 		public StringView View() const { return StringView(CStr(), length); }   // valid until the next change
 		public String ToString() const { return String(View()); }
 
-		private void AppendDecimal(uint64 value, int32 minWidth);
+		// A sign when `negative`, then `magnitude`'s digits, at least `minWidth` of them: one reservation, one terminator.
+		private void AppendDecimal(bool negative, uint64 magnitude, int32 minWidth);
 
 		private char* buffer;   // null-terminated at [length]; null for the zero builder
 		private int64 length;

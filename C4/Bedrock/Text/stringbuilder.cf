@@ -109,13 +109,16 @@ namespace Core
 	}
 
 	// Sized first, then written in place: no digits are copied.
-	void StringBuilder::AppendDecimal(uint64 value, int32 minWidth) {
-		const int32 digits = DecimalDigitCount(value);
+	void StringBuilder::AppendDecimal(bool negative, uint64 magnitude, int32 minWidth) {
+		const int32 digits = DecimalDigitCount(magnitude);
 		const int32 width = digits > minWidth ? digits : minWidth;
-		Reserve(length + width);
-		if (width > digits) memset((void*)(buffer + length), '0', (uint64)(width - digits));
-		WriteDecimalBackward(value, buffer + length + width);
-		length += width;
+		const int64 sign = negative ? 1 : 0;
+		Reserve(length + sign + width);
+		buffer[length] = '-'; // a positive number's first digit writes over it
+		char* start = buffer + length + sign;
+		if (width > digits) memset((void*)start, '0', (uint64)(width - digits));
+		WriteDecimalBackward(magnitude, start + width);
+		length += sign + width;
 		buffer[length] = (char)0;
 	}
 
@@ -130,7 +133,7 @@ namespace Core
 	}
 
 	void StringBuilder::AppendUIntBase(uint64 value, int32 base, int32 minWidth) {
-		if (base < 2 || base > 16 || base == 10) { AppendDecimal(value, minWidth); return; }
+		if (base < 2 || base > 16 || base == 10) { AppendDecimal(false, value, minWidth); return; }
 		char[64] digits;   // filled from the end: the number is digits[first, kMostDigits)
 		int32 first = BaseDigitsBackward(value, base, &digits[0]);
 		for (int32 i = kMostDigits - first; i < minWidth; ++i) AppendByte('0');
@@ -139,9 +142,10 @@ namespace Core
 
 	// The magnitude is exact for the most negative int64 too.
 	void StringBuilder::AppendIntBase(int64 value, int32 base, int32 minWidth) {
-		if (value >= 0) { AppendUIntBase((uint64)value, base, minWidth); return; }
-		AppendByte('-');
-		AppendUIntBase((uint64)(-(value + 1)) + (uint64)1, base, minWidth);
+		const uint64 magnitude = value < 0 ? (uint64)(-(value + 1)) + 1u : (uint64)value;
+		if (base < 2 || base > 16 || base == 10) { AppendDecimal(value < 0, magnitude, minWidth); return; }
+		if (value < 0) AppendByte('-');
+		AppendUIntBase(magnitude, base, minWidth);
 	}
 
 	// Written straight into the buffer, after room for the widest text of its form.

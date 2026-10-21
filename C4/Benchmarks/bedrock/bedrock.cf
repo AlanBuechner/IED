@@ -116,6 +116,31 @@ void SortIntegers()
 	Report("sort_int32", clock, (uint64)values[0] + (uint64)values[kSorted / 2] * 3u + (uint64)values[kSorted - 1] * 7u);
 }
 
+struct Record
+{
+	public int32 key;
+	public int32 id;
+}
+
+// Records by a key through a comparator: the sort a game does on its own structs.
+void SortRecords()
+{
+	Random random;
+	random.state = 5;
+	Core::Array<Record> records;
+	records.Reserve(kSorted);
+	for (int64 i = 0; i < kSorted; ++i)
+	{
+		Record record;
+		record.key = (int32)(random.Next() >> 33);
+		record.id = (int32)i;
+		records.Push(record);
+	}
+	Clock clock;
+	Core::Sort(records.Data(), records.Count(), [](const Record& a, const Record& b) -> bool { return a.key < b.key; });
+	Report("sort_records", clock, (uint64)records[0].key + (uint64)records[kSorted / 2].key * 3u + (uint64)records[kSorted - 1].key * 7u);
+}
+
 void BuildText()
 {
 	Clock clock;
@@ -213,6 +238,7 @@ int32 main()
 	TextMap();
 	ArrayPush();
 	SortIntegers();
+	SortRecords();
 	BuildText();
 	FormatDoubles();
 	ParseDoubles();

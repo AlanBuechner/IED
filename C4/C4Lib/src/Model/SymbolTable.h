@@ -139,12 +139,14 @@ namespace Scripting
 		/// A variable stored in a function's frame (a slot or a capture), as opposed to a type, a constant or a
 		/// function bound in a lowering layer.
 		bool IsFrameVariable() const { return kind == SymbolKind::Variable && (localSlot != kNoSlot || localCaptureField != kNoSlot); }
-		/// A const global or static whose value is a number known at compile time: reads use the value, and its
-		/// storage is read-only (BUG-190).
+		/// A const global or static whose value is known at compile time - a number, or a const pointer to a string
+		/// literal (`const char const* kDigits = "..."`): reads use the value, and its storage is read-only (BUG-190), so
+		/// a loop's loads of it fold away even beside stores through char pointers.
 		bool IsFoldedConstant() const
 		{
 			const ConstantValue::Kind k = constValue.kind;
-			return isConst && !isThreadLocal && (k == ConstantValue::Kind::Int64 || k == ConstantValue::Kind::Float64 || k == ConstantValue::Kind::Bool);
+			return isConst && !isThreadLocal && (k == ConstantValue::Kind::Int64 || k == ConstantValue::Kind::Float64 || k == ConstantValue::Kind::Bool ||
+				k == ConstantValue::Kind::String);
 		}
 	};
 

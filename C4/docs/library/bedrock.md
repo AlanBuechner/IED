@@ -206,16 +206,20 @@ numbers, so a run replays from its seed. `Core::RandomSeed()` reads a seed from 
 
 ### Sorting (`sort.ch`, `radixsort.ch`)
 
-`Core::Sort(T* items, int64 count, F before)` is introsort (quicksort with a depth budget, heapsort when
-it runs out, insertion sort for short ranges): O(n log n) worst case, not stable, elements relocated and
-never copied. `Core::LowerBound` / `Core::UpperBound(items, count, value, before)` are the binary
+`Core::Sort(T* items, int64 count, F before)` is pattern-defeating quicksort (pdqsort): median-of-three (of nine
+for long ranges) pivots, an insertion sort that finishes nearly sorted ranges, a partition that gathers the
+elements equal to a repeated pivot, a few swaps that break a pattern when a partition comes out unbalanced, and
+heapsort if that keeps happening. O(n log n) worst case, linear on sorted and all-equal input, not stable,
+elements relocated and never copied. Elements of 16 bytes or less partition in blocks (BlockQuicksort): each side
+records the offsets of its misplaced elements without branching on the comparisons, so a cheap comparator costs
+no mispredicted branches; 2M 8-byte records sort by key in 0.4 of `std::sort`'s time. `Core::LowerBound` / `Core::UpperBound(items, count, value, before)` are the binary
 searches. `Core::Ascending<T>` orders by `<`.
 
-`Array::Sort()` and `Core::SortAscending(items, count)` go through `Core::AscendingSorter<T>`: introsort for any
+`Array::Sort()` and `Core::SortAscending(items, count)` go through `Core::AscendingSorter<T>`: pdqsort for any
 `T`, and for the integers, characters, `float` and `double` an LSD radix sort (`Core::RadixSort`): a byte a pass
 over keys that order as the numbers do (`Core::RadixKey<T>`: a signed integer's sign bit flipped, a negative
 float's bits all flipped), one counting pass for every byte, and the passes whose byte all keys share skipped.
-Linear in the count, stable, with a scratch buffer of the same size; below 512 elements introsort does it. Two
+Linear in the count, stable, with a scratch buffer of the same size; below 512 elements pdqsort does it. Two
 million `int32` sort in about a tenth of `std::sort`'s time ([test suites 8](../tools/05-test-suites.md#8-benchmarks)).
 
 ### `Core::PriorityQueue<T, Before = Ascending<T>>` (`priorityqueue.ch`)
@@ -1156,11 +1160,11 @@ salts, ten malformed strings, a changed tag).
 
 ## 17. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 63 files, 574 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 64 files, 579 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

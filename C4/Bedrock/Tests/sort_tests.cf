@@ -1,0 +1,158 @@
+// Core::Sort with a comparator (pdqsort): every pattern quicksorts trip on, every small size, large random input
+// checked element for element by a multiset sum, elements that own memory, and the linear cases kept linear.
+
+include "bedrock.ch"
+
+struct SortKey {
+	public int32 key;
+	public int32 id;
+}
+
+struct ByKey {
+	[operator("call")] public bool Before(const SortKey& a, const SortKey& b) const { return a.key < b.key; }
+}
+
+// Counts its comparisons in a place it points at, so the sort's copies of it share the count.
+struct CountingAscending {
+	public int64* comparisons;
+	[operator("call")] public bool Before(const int64& a, const int64& b) const { *comparisons += 1; return a < b; }
+}
+
+struct SortName {
+	public Core::String name;
+	public int32 rank;
+}
+
+struct ByName {
+	[operator("call")] public bool Before(const SortName& a, const SortName& b) const { return a.name < b.name; }
+}
+
+struct SortSplitMix {
+	public uint64 state;
+	public uint64 Next() {
+		state += 11400714819323198485u;
+		uint64 z = state;
+		z = (z ^ (z >> 30)) * 13787848793156543929u;
+		z = (z ^ (z >> 27)) * 10723151780598845931u;
+		return z ^ (z >> 31);
+	}
+}
+
+bool KeysAscend(const Core::Array<SortKey>& items) {
+	for (int64 i = 1; i < items.Count(); ++i)
+		if (items[i].key < items[i - 1].key) return false;
+	return true;
+}
+
+// The same keys in any order give the same sum of a mix of each key (a multiset check).
+uint64 KeyMix(const Core::Array<SortKey>& items) {
+	uint64 sum = 0;
+	for (const SortKey& item : items) sum += (uint64)item.key * 2654435761u + (uint64)item.id * 40503u;
+	return sum;
+}
+
+// `count` keys in a named pattern.
+Core::Array<SortKey> Pattern(const char* name, int64 count, uint64 seed) {
+	SortSplitMix random;
+	random.state = seed;
+	Core::Array<SortKey> items;
+	Core::StringView pattern(name);
+	for (int64 i = 0; i < count; ++i) {
+		int32 key = 0;
+		if (pattern == "random") key = (int32)(random.Next() >> 33);
+		else if (pattern == "ascending") key = (int32)i;
+		else if (pattern == "descending") key = (int32)(count - i);
+		else if (pattern == "equal") key = 7;
+		else if (pattern == "organ") key = (int32)(i < count / 2 ? i : count - i);
+		else if (pattern == "sawtooth") key = (int32)(i % 97);
+		else if (pattern == "few") key = (int32)(random.Next() % 4u);
+		else if (pattern == "almost") key = (int32)(i % 1000 == 0 ? count - i : i);
+		SortKey item;
+		item.key = key;
+		item.id = (int32)i;
+		items.Push(item);
+	}
+	return items;
+}
+
+void CheckPattern(const char* name, int64 count) {
+	Core::Array<SortKey> items = Pattern(name, count, 11u);
+	uint64 before = KeyMix(items);
+	Core::Sort(items.Data(), items.Count(), ByKey());
+	assert_true(KeysAscend(items), name);
+	assert_eq(before, KeyMix(items), "every element is kept");
+}
+
+[test("sort.comparator")]
+class SortComparatorTests {
+	[test("patterns")]
+	public static void TestPatterns() {
+		const char*[8] names = { "random", "ascending", "descending", "equal", "organ", "sawtooth", "few", "almost" };
+		for (int32 n = 0; n < 8; ++n) {
+			CheckPattern(names[n], 100);
+			CheckPattern(names[n], 5000);
+			CheckPattern(names[n], 200000);
+		}
+	}
+
+	[test("every_small_size")]
+	public static void TestEverySmallSize() {
+		for (int64 count = 0; count <= 140; ++count) {
+			Core::Array<SortKey> items = Pattern("random", count, (uint64)count + 1u);
+			uint64 before = KeyMix(items);
+			Core::Sort(items.Data(), items.Count(), ByKey());
+			assert_true(KeysAscend(items), "sorted at every size");
+			assert_eq(before, KeyMix(items), "kept at every size");
+		}
+	}
+
+	[test("lambda_descending")]
+	public static void TestLambdaDescending() {
+		Core::Array<int32> values;
+		SortSplitMix random;
+		random.state = 3u;
+		for (int32 i = 0; i < 10000; ++i) values.Push((int32)(random.Next() % 1000u));
+		Core::Sort(values.Data(), values.Count(), [](const int32& a, const int32& b) -> bool { return a > b; });
+		bool descending = true;
+		for (int64 i = 1; i < values.Count(); ++i) descending = descending && values[i] <= values[i - 1];
+		assert_true(descending, "a lambda orders the elements");
+	}
+
+	[test("owning_elements")]
+	public static void TestOwningElements() {
+		Core::Array<SortName> names;
+		SortSplitMix random;
+		random.state = 9u;
+		for (int32 i = 0; i < 3000; ++i) {
+			SortName item;
+			Core::StringBuilder text;
+			text.AppendInt((int64)(random.Next() % 100000u));
+			item.name = text.ToString();
+			item.rank = i;
+			names.Push(item);
+		}
+		Core::Sort(names.Data(), names.Count(), ByName());
+		bool ascending = true;
+		for (int64 i = 1; i < names.Count(); ++i) ascending = ascending && !(names[i].name < names[i - 1].name);
+		assert_true(ascending, "strings are moved, never lost");
+		int64 nonEmpty = 0;
+		for (const SortName& item : names) nonEmpty += item.name.IsEmpty() ? 0 : 1;
+		assert_eq(3000, nonEmpty, "every string is still owned once");
+	}
+
+	[test("linear_cases")]
+	public static void TestLinearCases() {
+		const int64 count = 100000;
+		Core::Array<int64> ascending;
+		Core::Array<int64> equal;
+		for (int64 i = 0; i < count; ++i) { ascending.Push(i); equal.Push(5); }
+		int64 comparisons = 0;
+		CountingAscending counting;
+		counting.comparisons = &comparisons;
+		Core::Sort(ascending.Data(), ascending.Count(), counting);
+		assert_true(comparisons < 4 * count, "sorted input costs a few comparisons per element");
+		comparisons = 0;
+		Core::Sort(equal.Data(), equal.Count(), counting);
+		assert_true(comparisons < 4 * count, "equal elements cost a few comparisons per element");
+	}
+}

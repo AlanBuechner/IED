@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-321**
+Next ID: **BUG-322**
 
 ## Rules for this file
 
@@ -43,6 +43,7 @@ Next ID: **BUG-321**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
+| BUG-321 | Adding const at an inner pointer layer is refused, and the error prints the same type twice | HIR | Medium |
 
 ---
 
@@ -51,6 +52,14 @@ Next ID: **BUG-321**
 ## Model, templates and semantics
 
 ## HIR and codegen
+
+### BUG-321 Adding const at an inner pointer layer is refused, and the error prints the same type twice
+- **Area:** HIR
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-10-21
+- **Symptom:** `const Box* const* found = view.Find(1);` with `view` a `const Core::HashMap<int32, Box*>&` (Find returns a pointer to a const `Box*`) fails: "cannot initialize 'const Box**' from 'const Box**': the pointees are unrelated". Adding const at every layer below a const one (C++'s qualification conversion: `T* const*` to `const T* const*`) should convert; a conversion that drops const should say so, and both types should print their inner layers' const.
+- **Where:** `Backend/HIR/PointerConversion.cpp` `CheckPointerConversion`; pointer type names in `Model/Types/PointerType`
 
 ## Interop, runtime and Bedrock
 

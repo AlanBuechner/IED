@@ -116,6 +116,23 @@ void SortIntegers()
 	Report("sort_int32", clock, uint64_t(values[0]) + uint64_t(values[kSorted / 2]) * 3 + uint64_t(values[kSorted - 1]) * 7);
 }
 
+struct Record
+{
+	int32_t key;
+	int32_t id;
+};
+
+void SortRecords()
+{
+	Random random{ 5 };
+	std::vector<Record> records;
+	records.reserve(kSorted);
+	for (int64_t i = 0; i < kSorted; ++i) records.push_back(Record{ int32_t(random.Next() >> 33), int32_t(i) });
+	Clock clock;
+	std::sort(records.begin(), records.end(), [](const Record& a, const Record& b) { return a.key < b.key; });
+	Report("sort_records", clock, uint64_t(records[0].key) + uint64_t(records[kSorted / 2].key) * 3 + uint64_t(records[kSorted - 1].key) * 7);
+}
+
 void BuildText()
 {
 	Clock clock;
@@ -175,6 +192,7 @@ int main()
 	TextMap();
 	ArrayPush();
 	SortIntegers();
+	SortRecords();
 	BuildText();
 	FormatDoubles();
 	ParseDoubles();

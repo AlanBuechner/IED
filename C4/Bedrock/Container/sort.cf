@@ -1,8 +1,16 @@
 include "sort.ch"
 
+// Pattern-defeating quicksort (Orson Peters' pdqsort): introsort's worst-case bound, insertion sort that finishes
+// nearly sorted ranges, a left partition that groups the elements equal to a repeated pivot, and BlockQuicksort's
+// branchless partition (Edelkamp and Weiss) for small elements, whose comparisons then cost no mispredicted branches.
+
 namespace Core
 {
-	const int64 kInsertionSortLimit = 16;
+	const int64 kInsertionSortLimit = 24;
+	const int64 kNintherThreshold = 128;
+	const int64 kPartialInsertionMoves = 8;
+	const int64 kPartitionBlock = 64;
+	const int64 kBranchlessElementBytes = 16;
 
 	template<T> void SwapElements(T* items, int64 i, int64 j) {
 		if (i == j) return;
@@ -11,14 +19,45 @@ namespace Core
 		relocate(&items[j], &held);
 	}
 
+	// --- insertion sorts --------------------------------------------------------------------------------------
+
+	// [first, last); an unguarded one may assume the element before `first` comes before none of them.
 	template<T, F> void InsertionSort(T* items, int64 first, int64 last, F before) {
-		for (int64 j = first + 1; j <= last; ++j) {
-			T held = take(items[j]);
-			int64 i = j - 1;
-			while (i >= first && before(held, items[i])) { relocate(&items[i + 1], &items[i]); i -= 1; }
-			relocate(&items[i + 1], &held);
+		for (int64 cur = first + 1; cur < last; ++cur) {
+			if (!before(items[cur], items[cur - 1])) continue;
+			T held = take(items[cur]);
+			int64 hole = cur;
+			do { relocate(&items[hole], &items[hole - 1]); hole -= 1; } while (hole > first && before(held, items[hole - 1]));
+			relocate(&items[hole], &held);
 		}
 	}
+
+	template<T, F> void UnguardedInsertionSort(T* items, int64 first, int64 last, F before) {
+		for (int64 cur = first + 1; cur < last; ++cur) {
+			if (!before(items[cur], items[cur - 1])) continue;
+			T held = take(items[cur]);
+			int64 hole = cur;
+			do { relocate(&items[hole], &items[hole - 1]); hole -= 1; } while (before(held, items[hole - 1]));
+			relocate(&items[hole], &held);
+		}
+	}
+
+	// An insertion sort that gives up after a few moves: true when it sorted [first, last).
+	template<T, F> bool PartialInsertionSort(T* items, int64 first, int64 last, F before) {
+		int64 moves = 0;
+		for (int64 cur = first + 1; cur < last; ++cur) {
+			if (!before(items[cur], items[cur - 1])) continue;
+			T held = take(items[cur]);
+			int64 hole = cur;
+			do { relocate(&items[hole], &items[hole - 1]); hole -= 1; } while (hole > first && before(held, items[hole - 1]));
+			relocate(&items[hole], &held);
+			moves += cur - hole;
+			if (moves > kPartialInsertionMoves) return false;
+		}
+		return true;
+	}
+
+	// --- heapsort, for the worst case ---------------------------------------------------------------------------
 
 	template<T, F> void SiftDown(T* items, int64 i, int64 size, F before) {
 		while (true) {
@@ -38,37 +77,232 @@ namespace Core
 		for (int64 end = size - 1; end > 0; --end) { SwapElements(items, 0, end); SiftDown(items, 0, end, before); }
 	}
 
-	// Median-of-three pivot, so sorted and reverse-sorted input stay O(n log n); returns the pivot's place.
-	template<T, F> int64 Partition(T* items, int64 first, int64 last, F before) {
-		int64 middle = first + (last - first) / 2;
-		if (before(items[middle], items[first])) SwapElements(items, first, middle);
-		if (before(items[last], items[first])) SwapElements(items, first, last);
-		if (before(items[last], items[middle])) SwapElements(items, middle, last);
-		SwapElements(items, middle, last);
-		int64 store = first;
-		for (int64 j = first; j < last; ++j)
-			if (before(items[j], items[last])) { SwapElements(items, store, j); store += 1; }
-		SwapElements(items, store, last);
-		return store;
+	// --- pivots and partitions --------------------------------------------------------------------------------
+
+	template<T, F> void Sort2(T* items, int64 a, int64 b, F before) { if (before(items[b], items[a])) SwapElements(items, a, b); }
+
+	template<T, F> void Sort3(T* items, int64 a, int64 b, int64 c, F before) {
+		Sort2(items, a, b, before);
+		Sort2(items, b, c, before);
+		Sort2(items, a, b, before);
 	}
 
-	// Recurses into the smaller side and loops on the larger, so the stack stays O(log n).
-	template<T, F> void IntroSort(T* items, int64 first, int64 last, int64 depth, F before) {
-		while (last - first >= kInsertionSortLimit) {
-			if (depth == 0) { HeapSort(items + first, last - first + 1, before); return; }
-			depth -= 1;
-			int64 pivot = Partition(items, first, last, before);
-			if (pivot - first < last - pivot) { IntroSort(items, first, pivot - 1, depth, before); first = pivot + 1; }
-			else { IntroSort(items, pivot + 1, last, depth, before); last = pivot - 1; }
+	// The median of three (of nine for a large range) moved to `first`; an element not before it is left at last - 1.
+	template<T, F> void ChoosePivot(T* items, int64 first, int64 last, F before) {
+		const int64 half = (last - first) / 2;
+		if (last - first <= kNintherThreshold) { Sort3(items, first + half, first, last - 1, before); return; }
+		Sort3(items, first, first + half, last - 1, before);
+		Sort3(items, first + 1, first + half - 1, last - 2, before);
+		Sort3(items, first + 2, first + half + 1, last - 3, before);
+		Sort3(items, first + half - 1, first + half, first + half + 1, before);
+		SwapElements(items, first, first + half);
+	}
+
+	// What a partition did: where the pivot went, and whether nothing had to move.
+	struct PartitionResult {
+		public int64 pivot;
+		public bool alreadyPartitioned;
+	}
+
+	// Moves `pivot` (taken from items[first]) into its place: the end of the left part.
+	template<T> int64 PlacePivot(T* items, int64 first, int64 place, T& pivot) {
+		relocate(&items[first], &items[place]);
+		relocate(&items[place], &pivot);
+		return place;
+	}
+
+	// [first, last) around its first element: those before it to the left, the rest (equal ones too) to the right.
+	template<T, F> PartitionResult PartitionRight(T* items, int64 first, int64 last, F before) {
+		T pivot = take(items[first]);
+		int64 l = first + 1;
+		while (before(items[l], pivot)) l += 1;
+		int64 r = last - 1;
+		if (l - 1 == first) { while (l < r && !before(items[r], pivot)) r -= 1; }
+		else { while (!before(items[r], pivot)) r -= 1; }
+		PartitionResult result;
+		result.alreadyPartitioned = l >= r;
+		while (l < r) {
+			SwapElements(items, l, r);
+			l += 1;
+			while (before(items[l], pivot)) l += 1;
+			r -= 1;
+			while (!before(items[r], pivot)) r -= 1;
 		}
-		if (first < last) InsertionSort(items, first, last, before);
+		result.pivot = PlacePivot(items, first, l - 1, pivot);
+		return result;
+	}
+
+	// Moves the elements at the offsets on each side across: one rotation through a held element, or pairwise swaps
+	// when both blocks are full (descending input then stays linear).
+	template<T> void SwapOffsets(T* items, int64 leftBase, int64 rightBase, const uint8* left, const uint8* right, int64 count, bool pairwise) {
+		if (pairwise) {
+			for (int64 i = 0; i < count; ++i) SwapElements(items, leftBase + (int64)left[i], rightBase - (int64)right[i]);
+			return;
+		}
+		if (count == 0) return;
+		int64 l = leftBase + (int64)left[0];
+		int64 r = rightBase - (int64)right[0];
+		T held = take(items[l]);
+		relocate(&items[l], &items[r]);
+		for (int64 i = 1; i < count; ++i) {
+			l = leftBase + (int64)left[i];
+			relocate(&items[r], &items[l]);
+			r = rightBase - (int64)right[i];
+			relocate(&items[l], &items[r]);
+		}
+		relocate(&items[r], &held);
+	}
+
+	// PartitionRight without data-dependent branches: each side records, a block at a time, the offsets of the elements
+	// on the wrong side, and the two lists are swapped across.
+	template<T, F> PartitionResult PartitionRightBlocks(T* items, int64 first, int64 last, F before) {
+		T pivot = take(items[first]);
+		int64 l = first + 1;
+		while (before(items[l], pivot)) l += 1;
+		int64 r = last - 1;
+		if (l - 1 == first) { while (l < r && !before(items[r], pivot)) r -= 1; }
+		else { while (!before(items[r], pivot)) r -= 1; }
+		PartitionResult result;
+		result.alreadyPartitioned = l >= r;
+		if (!result.alreadyPartitioned) {
+			SwapElements(items, l, r);
+			l += 1;
+			uint8[64] leftOffsets;
+			uint8[64] rightOffsets;
+			int64 leftBase = l;
+			int64 rightBase = r;
+			int64 leftCount = 0;
+			int64 rightCount = 0;
+			int64 leftStart = 0;
+			int64 rightStart = 0;
+			while (l < r) {
+				const int64 unknown = r - l;
+				const int64 leftSplit = leftCount == 0 ? (rightCount == 0 ? unknown / 2 : unknown) : 0;
+				const int64 rightSplit = rightCount == 0 ? unknown - leftSplit : 0;
+				const int64 leftScan = leftSplit < kPartitionBlock ? leftSplit : kPartitionBlock;
+				for (int64 i = 0; i < leftScan; ++i) {
+					leftOffsets[leftCount] = (uint8)i;
+					leftCount += before(items[l], pivot) ? 0 : 1;
+					l += 1;
+				}
+				const int64 rightScan = rightSplit < kPartitionBlock ? rightSplit : kPartitionBlock;
+				for (int64 i = 1; i <= rightScan; ++i) {
+					r -= 1;
+					rightOffsets[rightCount] = (uint8)i;
+					rightCount += before(items[r], pivot) ? 1 : 0;
+				}
+				const int64 count = leftCount < rightCount ? leftCount : rightCount;
+				SwapOffsets(items, leftBase, rightBase, &leftOffsets[leftStart], &rightOffsets[rightStart], count, leftCount == rightCount);
+				leftCount -= count;
+				rightCount -= count;
+				leftStart += count;
+				rightStart += count;
+				if (leftCount == 0) { leftStart = 0; leftBase = l; }
+				if (rightCount == 0) { rightStart = 0; rightBase = r; }
+			}
+			// The scan met; what is left on one side goes to the meeting point.
+			while (leftCount > 0) {
+				leftCount -= 1;
+				r -= 1;
+				SwapElements(items, leftBase + (int64)leftOffsets[leftStart + leftCount], r);
+				l = r;
+			}
+			while (rightCount > 0) {
+				rightCount -= 1;
+				SwapElements(items, rightBase - (int64)rightOffsets[rightStart + rightCount], l);
+				l += 1;
+				r = l;
+			}
+		}
+		result.pivot = PlacePivot(items, first, l - 1, pivot);
+		return result;
+	}
+
+	// [first, last) around its first element, equal ones to the left: used when the pivot equals the element before
+	// the range, so every element equal to it is already in place.
+	template<T, F> int64 PartitionLeft(T* items, int64 first, int64 last, F before) {
+		T pivot = take(items[first]);
+		int64 r = last - 1;
+		while (before(pivot, items[r])) r -= 1;
+		int64 l = first + 1;
+		if (r + 1 == last) { while (l < r && !before(pivot, items[l])) l += 1; }
+		else { while (!before(pivot, items[l])) l += 1; }
+		while (l < r) {
+			SwapElements(items, l, r);
+			r -= 1;
+			while (before(pivot, items[r])) r -= 1;
+			l += 1;
+			while (!before(pivot, items[l])) l += 1;
+		}
+		return PlacePivot(items, first, r, pivot);
+	}
+
+	// A partition left badly unbalanced: a few elements swapped to break the input's pattern.
+	template<T> void BreakPatterns(T* items, int64 first, int64 pivot, int64 last) {
+		const int64 left = pivot - first;
+		const int64 right = last - (pivot + 1);
+		if (left >= kInsertionSortLimit) {
+			SwapElements(items, first, first + left / 4);
+			SwapElements(items, pivot - 1, pivot - left / 4);
+			if (left > kNintherThreshold) {
+				SwapElements(items, first + 1, first + left / 4 + 1);
+				SwapElements(items, first + 2, first + left / 4 + 2);
+				SwapElements(items, pivot - 2, pivot - (left / 4 + 1));
+				SwapElements(items, pivot - 3, pivot - (left / 4 + 2));
+			}
+		}
+		if (right >= kInsertionSortLimit) {
+			SwapElements(items, pivot + 1, pivot + 1 + right / 4);
+			SwapElements(items, last - 1, last - right / 4);
+			if (right > kNintherThreshold) {
+				SwapElements(items, pivot + 2, pivot + 2 + right / 4);
+				SwapElements(items, pivot + 3, pivot + 3 + right / 4);
+				SwapElements(items, last - 2, last - (1 + right / 4));
+				SwapElements(items, last - 3, last - (2 + right / 4));
+			}
+		}
+	}
+
+	// --- the sort -----------------------------------------------------------------------------------------------
+
+	// Sorts [first, last); `leftmost` is false when an element at first - 1 comes before none of the range. The left
+	// part recurses and the right part loops, so the stack stays O(log n).
+	template<T, F> void PdqSort(T* items, int64 first, int64 last, F before, int64 badAllowed, bool leftmost) {
+		while (true) {
+			const int64 size = last - first;
+			if (size < kInsertionSortLimit) {
+				if (leftmost) InsertionSort(items, first, last, before);
+				else UnguardedInsertionSort(items, first, last, before);
+				return;
+			}
+			ChoosePivot(items, first, last, before);
+			if (!leftmost && !before(items[first - 1], items[first])) {
+				first = PartitionLeft(items, first, last, before) + 1;
+				continue;
+			}
+			PartitionResult part = sizeof(T) <= kBranchlessElementBytes ? PartitionRightBlocks(items, first, last, before)
+				: PartitionRight(items, first, last, before);
+			const int64 leftSize = part.pivot - first;
+			const int64 rightSize = last - (part.pivot + 1);
+			if (leftSize < size / 8 || rightSize < size / 8) {
+				badAllowed -= 1;
+				if (badAllowed == 0) { HeapSort(items + first, size, before); return; }
+				BreakPatterns(items, first, part.pivot, last);
+			}
+			else if (part.alreadyPartitioned && PartialInsertionSort(items, first, part.pivot, before)
+				&& PartialInsertionSort(items, part.pivot + 1, last, before))
+				return;
+			PdqSort(items, first, part.pivot, before, badAllowed, leftmost);
+			first = part.pivot + 1;
+			leftmost = false;
+		}
 	}
 
 	template<T, F> void Sort(T* items, int64 count, F before) {
 		if (count < 2) return;
-		int64 depth = 0;
-		for (int64 n = count; n > 1; n = n / 2) depth += 2;
-		IntroSort(items, 0, count - 1, depth, before);
+		int64 badAllowed = 0;
+		for (int64 n = count; n > 1; n = n / 2) badAllowed += 1;
+		PdqSort(items, 0, count, before, badAllowed, true);
 	}
 
 	template<T, F> int64 LowerBound(const T* items, int64 count, const T& value, F before) {
