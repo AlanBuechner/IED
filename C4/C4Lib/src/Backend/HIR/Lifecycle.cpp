@@ -6,6 +6,7 @@
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/ExprLowerer.h"
 #include "Backend/HIR/MethodReceiver.h"
+#include "Backend/HIR/EvaluatedOnce.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
 
@@ -316,11 +317,13 @@ namespace Scripting
 		return LifecycleFacts::NeedsDestroy(m_Ctx.queries(), v) || LifecycleFacts::NeedsCopy(m_Ctx.queries(), v);
 	}
 
-	QueryResult<const LValue*> Lifecycle::Assign(const LValue* target, const Value& source)
+	QueryResult<const LValue*> Lifecycle::Assign(const LValue* named, const Value& source)
 	{
-		const Type* t = TypeHandle::UnwrapToValue(target->type);
+		const Type* t = TypeHandle::UnwrapToValue(named->type);
 		const ObjectType* obj = AsObject(t);
 		auto* seq = m_Ctx.out->NewNode<SequenceNode>(m_Ctx.queries().TypeStore()->Pointer(t));
+		// The target is named for the destroy, the store and the result: what it is made of runs once (BUG-305).
+		const LValue* target = EvaluatedOnce(m_Ctx, named, seq->steps);
 		const FunctionRecord* assign = obj ? LifecycleFacts::Own(m_Ctx.queries(), obj).assign : nullptr;
 		if (assign)
 		{

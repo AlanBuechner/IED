@@ -15,6 +15,19 @@ int32 EoGet(int32 i) extends EoByValue { return this.data[i]; }
 [operator("index_assign")]
 void EoSet(int32 i, int32 v) extends EoByValue { this.data[i] = v; }
 
+// BUG-305: assigning an object with a lifecycle - destroy the old value then store, or its own `=` - through what
+// f() returns calls f once.
+int32 g_eoDestroyed = 0;
+struct EoOwned {
+	public int32 v;
+	[operator("delete")] public void Delete() { g_eoDestroyed++; }
+}
+struct EoAssigned {
+	public int32 v;
+	[operator("=")] public void Set(const EoAssigned& other) { v = other.v; }
+}
+struct EoHolder { public EoOwned owned; public EoAssigned assigned; }
+
 int32 g_eoCalls = 0;
 EoCell g_eoCell;
 EoTally g_eoTally;
@@ -24,6 +37,9 @@ EoCell& EoCellRef() { g_eoCalls++; return g_eoCell; }
 EoCell* EoCellPtr() { g_eoCalls++; return &g_eoCell; }
 EoTally& EoTallyRef() { g_eoCalls++; return g_eoTally; }
 EoByValue& EoByValueRef() { g_eoCalls++; return g_eoByValue; }
+EoHolder g_eoHolder;
+EoHolder* EoHolderPtr() { g_eoCalls++; return &g_eoHolder; }
+EoHolder& EoHolderRef() { g_eoCalls++; return g_eoHolder; }
 
 void TestEvaluatedOnce() {
 	EoCellRef().n += 5;
@@ -67,4 +83,16 @@ void TestEvaluatedOnce() {
 	lanes[lane++] += 0.5f;
 	AssertIntEquals(3, lane, "a packed lane's index is computed once");
 	Assert(lanes[2] == 3.5f, "the packed lane it read is the one written");
+
+	const int32 before = g_eoCalls;
+	EoOwned fresh;
+	fresh.v = 9;
+	EoHolderPtr()->owned = take(fresh);
+	AssertIntEquals(before + 1, g_eoCalls, "f()->x = v, x with a destroy, calls f once");
+	AssertIntEquals(9, g_eoHolder.owned.v, "f()->x = v stores the value");
+	EoAssigned other;
+	other.v = 4;
+	EoHolderRef().assigned = other;
+	AssertIntEquals(before + 2, g_eoCalls, "f().x = v, x with its own =, calls f once");
+	AssertIntEquals(4, g_eoHolder.assigned.v, "f().x = v assigns the value");
 }
