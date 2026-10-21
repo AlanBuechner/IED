@@ -1,0 +1,26 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"properties": {
+		"profiler.port": {
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 65535,
+			"default": 0,
+			"description": "The loopback port instrumented programs connect to (0: a free port each time IED starts). The Profile task passes it in IED_PROFILER; set it to use a fixed address for programs started outside IED.",
+			"x-ied-tiers": ["app"]
+		},
+		"profiler.targetFps": {
+			"type": "number",
+			"minimum": 1,
+			"maximum": 1000,
+			"default": 60,
+			"description": "The frame rate the frame time graph draws its budget line at; frames over the budget are drawn in the warning color, frames over twice it in the error color."
+		},
+		"profiler.followLive": {
+			"type": "boolean",
+			"default": true,
+			"description": "A live capture's timeline scrolls with the newest data until you zoom or pan."
+		}
+	}
+}

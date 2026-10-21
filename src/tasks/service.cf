@@ -373,8 +373,11 @@ namespace Ied
 		values->Insert(Core::String("selection"), Core::String(context.Member("selection").AsView()));
 		values->Insert(Core::String("testFilter"), Core::String(context.Member("testFilter").AsView()));
 		Settings* settings = server->settings;
-		TaskLookup lookup = [values, settings, ws](Core::StringView name, Core::String& value) -> bool {
+		Core::HashMap<Core::String, Core::String>* offered = nullptr;
+		offeredVariables.TryGet(ws->wsId, offered);
+		TaskLookup lookup = [values, offered, settings, ws](Core::StringView name, Core::String& value) -> bool {
 			if (values->TryGet(Core::String(name), value)) return true;
+			if (offered && offered->TryGet(Core::String(name), value)) return true;
 			if (name.StartsWith(Core::StringView("env:"))) {
 				Core::String variable = Core::String(name.Substring(4, name.ByteLength() - 4));
 				if (!Platform::TryGetEnvironmentVariable(variable.CStr(), value)) value = Core::String();
@@ -394,6 +397,16 @@ namespace Ied
 		Core::String unknown;
 		if (!output.IsEmpty() && ExpandTaskText(output, lookup, program, unknown)) values->Insert(Core::String("projectOutput"), program);
 		return lookup;
+	}
+
+	void Tasks::SetVariable(Core::StringView wsId, Core::StringView name, Core::StringView value) {
+		Core::HashMap<Core::String, Core::String>* variables = nullptr;
+		if (!offeredVariables.TryGet(Core::String(wsId), variables)) {
+			variables = new Core::HashMap<Core::String, Core::String>();
+			offeredVariables.Insert(Core::String(wsId), variables);
+		}
+		variables->Remove(Core::String(name));
+		if (!value.IsEmpty()) variables->Insert(Core::String(name), Core::String(value));
 	}
 
 	// --- Debug configurations ----------------------------------------------------------------------------------------
@@ -516,6 +529,16 @@ namespace Ied
 		}
 		Start(run);
 		return run;
+	}
+
+	TaskRun* Tasks::Run(Core::StringView runId) const {
+		for (TaskRun* run : runs)
+			if (run->runId.View() == runId) return run;
+		return nullptr;
+	}
+
+	void Tasks::Cancel(TaskRun* run) {
+		CancelRun(run, ended);
 	}
 
 	bool Tasks::AwaitEnd(TaskRun* run) {

@@ -1,0 +1,74 @@
+include "capture.ch"
+
+namespace Profiler
+{
+	ZoneExtra* ThreadTrack::InnermostExtra() {
+		if (open.IsEmpty()) return nullptr;
+		const OpenZone& zone = open.Back();
+		ZoneLevel* level = levels[zone.depth];
+		if (level->extras[zone.index] == 0) {
+			ZoneExtra extra;
+			extras.Push(extra);
+			level->extras[zone.index] = (uint32)extras.Count();
+		}
+		return &extras[(int64)level->extras[zone.index] - 1];
+	}
+
+	uint64 ThreadTrack::NameAt(int64 t) const {
+		const int64 i = nameTimes.UpperBound(t);
+		return i == 0 ? (nameStrs.IsEmpty() ? 0 : nameStrs[0]) : nameStrs[i - 1];
+	}
+
+	int64 FrameSet::Completed() const {
+		if (ends.IsEmpty()) return 0;
+		return ends.Back() == kOpen ? ends.Count() - 1 : ends.Count();
+	}
+
+	bool GpuContext::ToCpu(int64 gpuTicks, const Clock& clock, int64 cpuFreqHz, int64& out) const {
+		if (calibrationGpu.IsEmpty() || cpuFreqHz <= 0) return false;
+		int64 nearest = calibrationGpu.UpperBound(gpuTicks);
+		if (nearest > 0) nearest -= 1;
+		const double gpuNs = (double)(gpuTicks - calibrationGpu[nearest]) * periodPs / 1000.0;
+		const int64 cpuTicks = calibrationCpu[nearest] + (int64)(gpuNs / clock.nsPerTick);
+		out = cpuTicks - clock.startTicks;
+		return true;
+	}
+
+	Core::StringView Capture::Text(uint64 id) const {
+		if (id == 0) return Core::StringView("");
+		const Core::String* text = strings.Find(id);
+		return text ? text->View() : Core::StringView("");
+	}
+
+	Core::StringView Capture::SiteName(uint64 site) const {
+		const SrcLoc* loc = srclocs.Find(site);
+		if (!loc) return Core::StringView("?");
+		Core::StringView name = Text(loc->nameStr);
+		if (name.IsEmpty()) name = Text(loc->functionStr);
+		return name.IsEmpty() ? Core::StringView("?") : name;
+	}
+
+	Core::StringView Capture::ZoneName(const ThreadTrack* track, const ZoneLevel* level, int64 index) const {
+		const uint32 extra = level->extras[index];
+		if (extra != 0) {
+			const uint64 named = track->extras[(int64)extra - 1].nameStr;
+			if (named != 0 && !Text(named).IsEmpty()) return Text(named);
+		}
+		return SiteName((uint64)level->sites[index]);
+	}
+
+	void Capture::Warn(int64 t, Core::StringView text) {
+		warningCount += 1;
+		if (warnings.Count() >= kMostWarnings) return;
+		WarningRecord warning;
+		warning.t = t;
+		warning.text = Core::String(text);
+		warnings.Push(warning);
+	}
+
+	int64 Capture::ZoneCount() const {
+		int64 count = 0;
+		for (const ThreadTrack* track : tracks) count += track->zones;
+		return count;
+	}
+}

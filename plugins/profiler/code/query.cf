@@ -1,0 +1,82 @@
+include "query.ch"
+
+namespace Profiler
+{
+	Range RangeOfNs(const Capture& capture, int64 fromNs, int64 toNs) {
+		Range range;
+		range.begin = fromNs < 0 ? 0 : capture.clock.Ticks(fromNs);
+		range.end = toNs < 0 ? capture.lastTicks + 1 : capture.clock.Ticks(toNs);
+		if (range.end <= range.begin) range.end = range.begin + 1;
+		return range;
+	}
+
+	Range Everything(const Capture& capture) {
+		return RangeOfNs(capture, -1, -1);
+	}
+
+	void WriteNumber(IED::JsonWriter& json, double value, int32 decimals) {
+		if (value != value || value > 1e300 || value < -1e300) {
+			json.Null();
+			return;
+		}
+		Core::StringBuilder text;
+		text.AppendDouble(value, decimals);
+		json.Raw(text.View());
+	}
+
+	void NumberField(IED::JsonWriter& json, const char* key, double value, int32 decimals) {
+		json.Key(Core::StringView(key));
+		WriteNumber(json, value, decimals);
+	}
+
+	int64 NameTable::Index(Core::StringView name) {
+		const int64* known = indexOf.FindAs(name);
+		if (known) return *known;
+		names.Push(Core::String(name));
+		indexOf.Insert(Core::String(name), names.Count() - 1);
+		return names.Count() - 1;
+	}
+
+	void NameTable::Write(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (const Core::String& name : names) json.String(name.View());
+		json.EndArray();
+	}
+
+	Core::String TrackLabel(const Capture& capture, const ThreadTrack* track, int64 t) {
+		Core::StringView name = capture.Text(track->NameAt(t));
+		if (!name.IsEmpty()) return Core::String(name);
+		Core::StringBuilder label;
+		if (track->clientId == 0) label.Append("Process");
+		else {
+			label.Append("Thread ");
+			label.AppendUInt(track->osId != 0 ? track->osId : track->clientId);
+		}
+		return label.ToString();
+	}
+
+	bool ZoneAt(const Capture& capture, ZoneRef ref, const ThreadTrack*& track, const ZoneLevel*& level) {
+		if (ref.Track() >= capture.tracks.Count()) return false;
+		track = capture.tracks[ref.Track()];
+		if (ref.Depth() >= track->levels.Count()) return false;
+		level = track->levels[ref.Depth()];
+		return ref.Index() < level->Count();
+	}
+
+	uint64 TaskNameAt(const Capture& capture, int32 track, int64 t) {
+		for (const TaskLane* lane : capture.taskLanes) {
+			TaskRuns* runs = nullptr;
+			if (!lane->runsOf.TryGet(track, runs)) continue;
+			const int64 i = runs->starts.UpperBound(t);
+			if (i > 0 && (runs->ends[i - 1] == kOpen || runs->ends[i - 1] > t)) return lane->nameStr;
+		}
+		return 0;
+	}
+
+	int64 Quantile(const Core::Array<int64>& sorted, double fraction) {
+		if (sorted.IsEmpty()) return 0;
+		int64 i = (int64)(fraction * (double)(sorted.Count() - 1) + 0.5);
+		if (i >= sorted.Count()) i = sorted.Count() - 1;
+		return sorted[i];
+	}
+}

@@ -1,7 +1,9 @@
 // plugins/codediagnostics (docs/26 section 2): the problems of a compiler's diagnostics text - errors and warnings with
-// their place, the source lines and carets skipped, lines of any other shape ignored.
+// their place, the source lines and carets skipped, lines of any other shape ignored. plugins/codecalls: an event
+// reaches each listener of a plugin even when one throws, a built-in's included (it has no script).
 
 include "plugins/codediagnostics.ch"
+include "plugins/codecalls.ch"
 
 [test("server.code")]
 class CodeTests {
@@ -19,5 +21,20 @@ class CodeTests {
 	public static void TestDiagnosticsOtherLines() {
 		assert_true(Ied::ReadCodeProblems(Core::StringView("a (b) error: c\nx.cf (3) error: no column\ny.cf (1:2) remark: unknown\n")).IsEmpty(), "not the compiler's shape");
 		assert_true(Ied::ReadCodeProblems(Core::StringView("")).IsEmpty(), "nothing to read");
+	}
+
+	[test("event_listener_that_throws")]
+	public static void TestEventListenerThatThrows() {
+		Ied::CodeInstance* instance = new Ied::CodeInstance();
+		instance->builtin = true;
+		instance->state = Ied::CodeState::Active;
+		bool* heard = new bool();
+		instance->handlers.listenKinds.Push(Core::String("tree.changed"));
+		instance->handlers.listeners.Push([](const IED::Event& event) { throw Ied::RpcError(Ied::ErrorCode::Internal, Core::StringView("a listener that throws")); });
+		instance->handlers.listenKinds.Push(Core::String("tree.changed"));
+		instance->handlers.listeners.Push([heard](const IED::Event& event) { *heard = true; });
+		Ied::DeliverEvent(instance, Core::StringView("ws:w1"), Core::StringView("tree.changed"), Core::StringView("{}"));
+		assert_true(*heard, "a built-in's next listener still hears the event");
+		assert_true(instance->state == Ied::CodeState::Active, "a throw is not a fault");
 	}
 }

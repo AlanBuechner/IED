@@ -1,0 +1,158 @@
+// The profiler (docs/16, docs/features/12-profiler.md): programs instrumented with an ITP client (Bedrock Profile::,
+// the C/C++, Go and Rust clients) connect to the listener its server code opens and stream captures into the
+// workspace's .ied/local/captures; Chrome traces and pprof profiles import. The Profiler activity shows the capture
+// library and opens each capture as a document: the frame graph, the timeline by thread or by task, statistics, find
+// zone, the flame graph, messages and memory. The AI reads captures through the profile_* tools.
+{
+	"manifestVersion": 1,
+	"id": "ied.profiler",
+	"name": "Profiler",
+	"version": "0.1.0",
+	"description": "A Tracy-class profiler on the IED trace protocol: live captures, timeline, statistics, flame graph, memory, and AI tools.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "Profiler::Activate", "ui": "ui/index.js" },
+	"permissions": ["profiler", "net.listen", "fs.read", "fs.write", "process.spawn", "ai.tools"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Profiler" },
+		"skills": ["skills"],
+		"bindings": {
+			"provides": [
+				{ "name": "profiler.query", "version": "1", "kind": "function", "description": "A profile_* tool's answer as text: {wsId, tool: list|summary|top_zones|frame|find_zone|flame|messages|leaks|compare|capture, args} -> {text}." }
+			],
+			"consumes": [
+				{ "name": "profiler.query", "version": "1" }
+			]
+		},
+		"activities": [
+			{ "id": "ied.profiler", "title": "Profiler", "icon": "$(pulse)", "order": 40 }
+		],
+		"toolWindows": [
+			{ "id": "ied.profiler.captures", "title": "Captures", "icon": "$(history)", "view": "CaptureLibrary", "defaultDock": "left", "activity": "ied.profiler" }
+		],
+		"fileIcons": [
+			{ "extensions": [".iedtrace"], "icon": "$(pulse)", "color": "--hue-orange" }
+		],
+		"commands": [
+			{ "id": "ied.profiler.show", "title": "Profiler", "category": "View", "icon": "$(pulse)" },
+			{ "id": "ied.profiler.profile", "title": "Start Profiling", "category": "Debug", "icon": "$(pulse)" },
+			{ "id": "ied.profiler.stop", "title": "Stop Profiling", "category": "Debug", "icon": "$(debug-stop)" },
+			{ "id": "ied.profiler.open", "title": "Open in Profiler", "category": "Solution Explorer", "icon": "$(pulse)" },
+			{ "id": "ied.profiler.import", "title": "Import into Profiler", "category": "Solution Explorer", "icon": "$(pulse)" },
+			{ "id": "ied.profiler.connect", "title": "Connect a Program to the Profiler...", "category": "Debug", "icon": "$(plug)" }
+		],
+		"menus": {
+			"menubar/view": [
+				{ "command": "ied.profiler.show", "group": "2_windows" }
+			],
+			"menubar/debug": [
+				{ "command": "ied.profiler.profile", "group": "5_profile" },
+				{ "command": "ied.profiler.stop", "group": "5_profile" },
+				{ "command": "ied.profiler.connect", "group": "5_profile" }
+			],
+			"explorer/context": [
+				{ "command": "ied.profiler.open", "group": "1_open", "when": "explorerItemKind == 'file' && explorerItemExtension == '.iedtrace'" },
+				{ "command": "ied.profiler.import", "group": "1_open", "when": "explorerItemKind == 'file' && (explorerItemExtension == '.json' || explorerItemExtension == '.pprof' || explorerItemExtension == '.pb' || explorerItemExtension == '.gz' || explorerItemExtension == '.prof')" }
+			]
+		},
+		"keybindings": [
+			{ "command": "ied.profiler.profile", "key": "alt+f2" },
+			{ "command": "ied.profiler.show", "key": "ctrl+alt+f2" }
+		],
+		"systemMessageSections": [
+			{ "id": "profiler", "text": "The profiler holds the workspace's captures (.ied/local/captures). To find where time goes, read captures with the profile_* tools: profile_list, then profile_summary, profile_top_zones, profile_frame (\"worst\" for the slowest frame), profile_find_zone, profile_flame, profile_messages, profile_leaks and profile_compare; profile_capture runs the project's Profile task and records. Read the profiler skill before instrumenting code." }
+		],
+		"toolCalls": [
+			{
+				"name": "profile_list",
+				"description": "The workspace's profiler captures, newest first: id, app, when, duration, zones, frames, and whether it is still recording.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+				"function": "Profiler::ListTool"
+			},
+			{
+				"name": "profile_summary",
+				"description": "One capture at a glance: duration, frame times (mean, median, p95, max), threads, the costliest zones by self and by total time, tasks, memory and GC, warnings. `capture` is a capture id from profile_list, a .iedtrace path, or \"latest\" (the default).",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" } }, "additionalProperties": false },
+				"function": "Profiler::SummaryTool"
+			},
+			{
+				"name": "profile_top_zones",
+				"description": "Zones ranked by time: count, total, self, mean, median, p95 and max per zone, optionally per thread or per task, over the whole capture or a time range in milliseconds.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "by": { "enum": ["self", "total", "count", "mean", "median", "p95", "max"] }, "group_by": { "enum": ["zone", "thread", "task"] }, "from_ms": { "type": "number" }, "to_ms": { "type": "number" }, "filter": { "type": "string" }, "n": { "type": "integer", "minimum": 1, "maximum": 200 } }, "additionalProperties": false },
+				"function": "Profiler::TopZonesTool"
+			},
+			{
+				"name": "profile_frame",
+				"description": "One frame's breakdown: its time against the capture's frame times, each thread's top-level zones and busy time in it, its costliest zones by self time, collections and GPU work in it. `index` is a frame number or \"worst\" (the default).",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "index": { "type": ["integer", "string"] } }, "additionalProperties": false },
+				"function": "Profiler::FrameTool"
+			},
+			{
+				"name": "profile_find_zone",
+				"description": "Every instance of one zone (by name): count, mean, median, p95, min and max, the distribution, and the slowest instances with when and on which thread they ran.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "name": { "type": "string" }, "from_ms": { "type": "number" }, "to_ms": { "type": "number" } }, "required": ["name"], "additionalProperties": false },
+				"function": "Profiler::FindZoneTool"
+			},
+			{
+				"name": "profile_flame",
+				"description": "The call tree merged by name (a flame graph as text): each node's total and self time and count, children by cost, small nodes pruned. From zones, or from call stack samples for imported pprof profiles.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "from_ms": { "type": "number" }, "to_ms": { "type": "number" }, "depth": { "type": "integer", "minimum": 1, "maximum": 64 }, "min_percent": { "type": "number", "minimum": 0, "maximum": 100 } }, "additionalProperties": false },
+				"function": "Profiler::FlameTool"
+			},
+			{
+				"name": "profile_messages",
+				"description": "The capture's log messages in time order, filtered by least severity (0 trace .. 5 fatal) and text.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "severity": { "type": "integer", "minimum": 0, "maximum": 5 }, "text": { "type": "string" }, "limit": { "type": "integer", "minimum": 1, "maximum": 500 } }, "additionalProperties": false },
+				"function": "Profiler::MessagesTool"
+			},
+			{
+				"name": "profile_leaks",
+				"description": "Allocations still live at the end of a capture (or at at_ms), grouped by call stack, pool or thread, largest first; plus each pool's peak and the GC totals.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "group_by": { "enum": ["callstack", "pool", "thread"] }, "at_ms": { "type": "number" } }, "additionalProperties": false },
+				"function": "Profiler::LeaksTool"
+			},
+			{
+				"name": "profile_compare",
+				"description": "Two captures compared: frame times side by side and the zones whose total time changed most.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "a": { "type": "string" }, "b": { "type": "string" }, "n": { "type": "integer", "minimum": 1, "maximum": 100 } }, "required": ["a", "b"], "additionalProperties": false },
+				"function": "Profiler::CompareTool"
+			},
+			{
+				"name": "profile_capture",
+				"description": "Builds and runs the startup project's Profile task (its program started with IED_PROFILER), records for `seconds`, stops the program and returns the new capture's summary. The program must be instrumented with an ITP client.",
+				"class": "exec",
+				"group": "profiler",
+				"inputSchema": { "type": "object", "properties": { "seconds": { "type": "number", "minimum": 0.5, "maximum": 600 }, "project": { "type": "string" } }, "additionalProperties": false },
+				"function": "Profiler::CaptureTool",
+				"timeoutSeconds": 900
+			}
+		]
+	}
+}

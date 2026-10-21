@@ -1,0 +1,174 @@
+// Frames (F-PRF-10, F-PRF-11, T-PRF-4): the frame time graph over the whole capture, and one frame's breakdown - the
+// work each thread did in it, its costliest zones, the collections and GPU work that fell in it.
+include "analysis.ch"
+
+namespace Profiler
+{
+	const int32 kBreakdownZones = 15;
+	const int32 kBreakdownTopLevel = 40;
+
+	const FrameSet* MainFrameSet(const Capture& capture) {
+		for (const FrameSet* set : capture.frameSets)
+			if (set->nameStr == 0 || capture.Text(set->nameStr).IsEmpty()) return set;
+		return capture.frameSets.IsEmpty() ? nullptr : capture.frameSets[0];
+	}
+
+	static void FrameDurations(const FrameSet* set, Core::Array<int64>& out) {
+		for (int64 i = 0; i < set->starts.Count(); ++i)
+			if (set->ends[i] != kOpen) out.Push(set->ends[i] - set->starts[i]);
+	}
+
+	static void WriteFrameStats(IED::JsonWriter& json, const Capture& capture, const FrameSet* set) {
+		Core::Array<int64> durations;
+		if (set) FrameDurations(set, durations);
+		int64 total = 0;
+		for (int64 duration : durations) total += duration;
+		durations.Sort();
+		json.IntField("count", durations.Count());
+		json.IntField("meanNs", durations.IsEmpty() ? 0 : capture.clock.Ns(total / durations.Count()));
+		json.IntField("medianNs", capture.clock.Ns(Quantile(durations, 0.5)));
+		json.IntField("p95Ns", capture.clock.Ns(Quantile(durations, 0.95)));
+		json.IntField("p99Ns", capture.clock.Ns(Quantile(durations, 0.99)));
+		json.IntField("maxNs", durations.IsEmpty() ? 0 : capture.clock.Ns(durations.Back()));
+		json.IntField("minNs", durations.IsEmpty() ? 0 : capture.clock.Ns(durations[0]));
+	}
+
+	Core::String FrameGraph(const Capture& capture, int32 width) {
+		const FrameSet* set = MainFrameSet(capture);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("set", set && !capture.Text(set->nameStr).IsEmpty() ? capture.Text(set->nameStr) : Core::StringView("Frame"));
+		WriteFrameStats(json, capture, set);
+		json.Key(Core::StringView("bars"));
+		json.BeginArray();
+		const int64 count = set ? set->Completed() : 0;
+		const int64 perBar = count <= (int64)width ? 1 : (count + (int64)width - 1) / (int64)width;
+		for (int64 first = 0; first < count; first += perBar) {
+			int64 worst = first;
+			for (int64 i = first; i < first + perBar && i < count; ++i)
+				if (set->ends[i] - set->starts[i] > set->ends[worst] - set->starts[worst]) worst = i;
+			const int64 last = first + perBar < count ? first + perBar - 1 : count - 1;
+			json.BeginArray();
+			json.Int(worst);
+			json.Int(capture.clock.Ns(set->ends[worst] - set->starts[worst]));
+			json.Int(capture.clock.Ns(set->starts[first]));
+			json.Int(capture.clock.Ns(set->ends[last]));
+			json.EndArray();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- One frame ----------------------------------------------------------------------------------------------------
+
+	static int64 WorstFrame(const FrameSet* set) {
+		int64 worst = -1;
+		for (int64 i = 0; i < set->starts.Count(); ++i) {
+			if (set->ends[i] == kOpen) continue;
+			if (worst < 0 || set->ends[i] - set->starts[i] > set->ends[worst] - set->starts[worst]) worst = i;
+		}
+		return worst;
+	}
+
+	static void WriteThreadWork(IED::JsonWriter& json, const Capture& capture, Range frame) {
+		json.Key(Core::StringView("threads"));
+		json.BeginArray();
+		for (int64 t = 0; t < capture.tracks.Count(); ++t) {
+			const ThreadTrack* track = capture.tracks[t];
+			if (track->levels.IsEmpty()) continue;
+			const ZoneLevel* top = track->levels[0];
+			int64 busy = 0;
+			const int64 stop = top->FirstStartingAt(frame.end);
+			int64 first = top->FirstEndingAfter(frame.begin);
+			if (first >= stop) continue;
+			json.BeginObject();
+			json.Field("thread", TrackLabel(capture, track, frame.begin).View());
+			json.Key(Core::StringView("zones"));
+			json.BeginArray();
+			for (int64 i = first; i < stop; ++i) {
+				const int64 start = top->starts[i] < frame.begin ? frame.begin : top->starts[i];
+				int64 end = top->EndOr(i, capture.lastTicks);
+				if (end > frame.end) end = frame.end;
+				busy += end - start;
+				if (i - first >= (int64)kBreakdownTopLevel) continue;
+				json.BeginObject();
+				json.Field("name", capture.ZoneName(track, top, i));
+				json.Field("ref", ZoneRef::Of(t, 0, i).Text().View());
+				json.IntField("startNs", capture.clock.Ns(top->starts[i]));
+				json.IntField("durationNs", capture.clock.Ns(top->EndOr(i, capture.lastTicks) - top->starts[i]));
+				json.EndObject();
+			}
+			json.EndArray();
+			json.IntField("busyNs", capture.clock.Ns(busy));
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteFrameGcs(IED::JsonWriter& json, const Capture& capture, Range frame) {
+		json.Key(Core::StringView("gc"));
+		json.BeginArray();
+		for (const GcRecord& gc : capture.gcs) {
+			if (gc.end == kOpen || !frame.Overlaps(gc.begin, gc.end + 1)) continue;
+			json.BeginObject();
+			json.IntField("startNs", capture.clock.Ns(gc.begin));
+			json.IntField("pauseNs", capture.clock.Ns(gc.end - gc.begin));
+			json.IntField("generation", gc.generation);
+			json.IntField("freedBytes", gc.bytesBefore - gc.bytesAfter);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteFrameGpu(IED::JsonWriter& json, const Capture& capture, Range frame) {
+		json.Key(Core::StringView("gpu"));
+		json.BeginArray();
+		for (const GpuContext* gpu : capture.gpus) {
+			for (const GpuZone& zone : gpu->zones) {
+				const int64* begin = gpu->times.Find(zone.beginQuery);
+				const int64* end = gpu->times.Find(zone.endQuery);
+				int64 cpuBegin;
+				int64 cpuEnd;
+				if (!begin || !end || zone.depth != 0 || !gpu->ToCpu(*begin, capture.clock, capture.clockFreqHz, cpuBegin) || !gpu->ToCpu(*end, capture.clock, capture.clockFreqHz, cpuEnd)) continue;
+				if (!frame.Holds(zone.cpuBegin)) continue;
+				json.BeginObject();
+				json.Field("queue", capture.Text(gpu->nameStr));
+				json.Field("name", capture.SiteName((uint64)zone.site));
+				json.IntField("durationNs", capture.clock.Ns(cpuEnd - cpuBegin));
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+	}
+
+	Core::String FrameBreakdown(const Capture& capture, int64 index) {
+		const FrameSet* set = MainFrameSet(capture);
+		if (!set) return Core::String();
+		const int64 i = index < 0 ? WorstFrame(set) : index;
+		if (i < 0 || i >= set->starts.Count() || set->ends[i] == kOpen) return Core::String();
+		Range frame;
+		frame.begin = set->starts[i];
+		frame.end = set->ends[i];
+		StatsAsk top;
+		top.fromNs = capture.clock.Ns(frame.begin);
+		top.toNs = capture.clock.Ns(frame.end);
+		top.order = StatsOrder::Self;
+		top.limit = kBreakdownZones;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("index", i);
+		json.IntField("startNs", capture.clock.Ns(frame.begin));
+		json.IntField("durationNs", capture.clock.Ns(frame.Length()));
+		json.Key(Core::StringView("frames"));
+		json.BeginObject();
+		WriteFrameStats(json, capture, set);
+		json.EndObject();
+		WriteThreadWork(json, capture, frame);
+		json.RawField("topZones", Stats(capture, top).View());
+		WriteFrameGcs(json, capture, frame);
+		WriteFrameGpu(json, capture, frame);
+		json.EndObject();
+		return json.ToString();
+	}
+}

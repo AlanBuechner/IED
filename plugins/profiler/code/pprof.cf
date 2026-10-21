@@ -1,0 +1,322 @@
+// pprof profiles (github.com/google/pprof proto/profile.proto): each sample's stack of locations - each location
+// one or more frames, inlined callees first - becomes a call stack of symbols, and the sample one Sample event weighed
+// by the profile's chosen value (its default sample type, else CPU time, else the last). The flame graph and the
+// statistics are read from those samples.
+include "importers.ch"
+include "inflate.ch"
+
+namespace Profiler
+{
+	const int64 kMostProfileBytes = 1073741824;
+
+	// Protocol buffer wire format, read field by field.
+	struct ProtoReader
+	{
+		public const uint8* data;
+		public int64 end;
+		public int64 at;
+		public bool broken;
+
+		public bool AtEnd() const { return at >= end || broken; }
+
+		public uint64 Varint() {
+			uint64 value = 0;
+			for (int32 shift = 0; shift < 64; shift += 7) {
+				if (at >= end) {
+					broken = true;
+					return 0;
+				}
+				const uint64 byte = (uint64)data[at];
+				at += 1;
+				value |= (byte & 0x7F) << shift;
+				if ((byte & 0x80) == 0) return value;
+			}
+			broken = true;
+			return 0;
+		}
+
+		// The next field's number and wire type; false at the end.
+		public bool Next(int32& field, int32& wire) {
+			if (AtEnd()) return false;
+			const uint64 key = Varint();
+			field = (int32)(key >> 3);
+			wire = (int32)(key & 7);
+			return !broken;
+		}
+
+		// A length-delimited field's bytes.
+		public ProtoReader Sub() {
+			const int64 length = (int64)Varint();
+			ProtoReader sub;
+			sub.data = data;
+			sub.at = at;
+			sub.end = at + length;
+			if (length < 0 || sub.end > end) {
+				broken = true;
+				sub.end = at;
+			}
+			at = sub.end;
+			return sub;
+		}
+
+		public Core::StringView Text() {
+			ProtoReader sub = Sub();
+			return Core::StringView((const char*)(data + sub.at), sub.end - sub.at);
+		}
+
+		public void Skip(int32 wire) {
+			if (wire == 0) Varint();
+			else if (wire == 1) at += 8;
+			else if (wire == 2) Sub();
+			else if (wire == 5) at += 4;
+			else broken = true;
+		}
+
+		// A repeated integer field, packed or not, appended to `out`.
+		public void Integers(int32 wire, Core::Array<int64>& out) {
+			if (wire == 0) {
+				out.Push((int64)Varint());
+				return;
+			}
+			ProtoReader packed = Sub();
+			while (!packed.AtEnd()) out.Push((int64)packed.Varint());
+			if (packed.broken) broken = true;
+		}
+	}
+
+	struct PprofLine
+	{
+		public uint64 function;
+		public int64 line;
+	}
+
+	class PprofLocation
+	{
+		public uint64 id;
+		public uint64 address;
+		public Core::Array<PprofLine> lines;
+	}
+
+	struct PprofFunction
+	{
+		public int64 name;
+		public int64 file;
+	}
+
+	class PprofSample
+	{
+		public Core::Array<int64> locations;
+		public Core::Array<int64> values;
+	}
+
+	class PprofProfile
+	{
+		public Core::Array<Core::String> strings;
+		public Core::Array<int64> sampleTypes;    // pairs: type, unit (string indices)
+		public Core::Array<PprofSample*> samples;
+		public Core::HashMap<uint64, PprofLocation*> locations;
+		public Core::HashMap<uint64, PprofFunction> functions;
+		public int64 timeNanos;
+		public int64 durationNanos;
+		public int64 defaultSampleType;
+
+		public Core::StringView Text(int64 index) const { return index >= 0 && index < strings.Count() ? strings[index].View() : Core::StringView(""); }
+	}
+
+	static void ReadValueType(ProtoReader reader, PprofProfile& profile) {
+		int64 type = 0;
+		int64 unit = 0;
+		int32 field;
+		int32 wire;
+		while (reader.Next(field, wire)) {
+			if (field == 1 && wire == 0) type = (int64)reader.Varint();
+			else if (field == 2 && wire == 0) unit = (int64)reader.Varint();
+			else reader.Skip(wire);
+		}
+		profile.sampleTypes.Push(type);
+		profile.sampleTypes.Push(unit);
+	}
+
+	static void ReadSample(ProtoReader reader, PprofProfile& profile) {
+		PprofSample* sample = new PprofSample();
+		int32 field;
+		int32 wire;
+		while (reader.Next(field, wire)) {
+			if (field == 1) reader.Integers(wire, sample->locations);
+			else if (field == 2) reader.Integers(wire, sample->values);
+			else reader.Skip(wire);
+		}
+		profile.samples.Push(sample);
+	}
+
+	static PprofLine ReadLine(ProtoReader reader) {
+		PprofLine line;
+		int32 field;
+		int32 wire;
+		while (reader.Next(field, wire)) {
+			if (field == 1 && wire == 0) line.function = reader.Varint();
+			else if (field == 2 && wire == 0) line.line = (int64)reader.Varint();
+			else reader.Skip(wire);
+		}
+		return line;
+	}
+
+	static void ReadLocation(ProtoReader reader, PprofProfile& profile) {
+		PprofLocation* location = new PprofLocation();
+		int32 field;
+		int32 wire;
+		while (reader.Next(field, wire)) {
+			if (field == 1 && wire == 0) location->id = reader.Varint();
+			else if (field == 3 && wire == 0) location->address = reader.Varint();
+			else if (field == 4 && wire == 2) location->lines.Push(ReadLine(reader.Sub()));
+			else reader.Skip(wire);
+		}
+		profile.locations.Remove(location->id);
+		profile.locations.Insert(location->id, location);
+	}
+
+	static void ReadFunction(ProtoReader reader, PprofProfile& profile) {
+		uint64 id = 0;
+		PprofFunction function;
+		int32 field;
+		int32 wire;
+		while (reader.Next(field, wire)) {
+			if (field == 1 && wire == 0) id = reader.Varint();
+			else if (field == 2 && wire == 0) function.name = (int64)reader.Varint();
+			else if (field == 4 && wire == 0) function.file = (int64)reader.Varint();
+			else reader.Skip(wire);
+		}
+		profile.functions.Remove(id);
+		profile.functions.Insert(id, function);
+	}
+
+	static bool ReadProfile(const uint8* data, int64 length, PprofProfile& profile) {
+		ProtoReader reader;
+		reader.data = data;
+		reader.end = length;
+		int32 field;
+		int32 wire;
+		while (reader.Next(field, wire)) {
+			if (field == 1 && wire == 2) ReadValueType(reader.Sub(), profile);
+			else if (field == 2 && wire == 2) ReadSample(reader.Sub(), profile);
+			else if (field == 4 && wire == 2) ReadLocation(reader.Sub(), profile);
+			else if (field == 5 && wire == 2) ReadFunction(reader.Sub(), profile);
+			else if (field == 6 && wire == 2) profile.strings.Push(Core::String(reader.Text()));
+			else if (field == 9 && wire == 0) profile.timeNanos = (int64)reader.Varint();
+			else if (field == 10 && wire == 0) profile.durationNanos = (int64)reader.Varint();
+			else if (field == 14 && wire == 0) profile.defaultSampleType = (int64)reader.Varint();
+			else reader.Skip(wire);
+		}
+		return !reader.broken && !profile.samples.IsEmpty() && !profile.strings.IsEmpty();
+	}
+
+	// Which of each sample's values the stream weighs it by.
+	static int64 ChosenValue(const PprofProfile& profile) {
+		const int64 types = profile.sampleTypes.Count() / 2;
+		for (int64 i = 0; i < types; ++i)
+			if (profile.defaultSampleType != 0 && profile.sampleTypes[i * 2] == profile.defaultSampleType) return i;
+		for (int64 i = 0; i < types; ++i)
+			if (profile.Text(profile.sampleTypes[i * 2]) == "cpu" || profile.Text(profile.sampleTypes[i * 2 + 1]) == "nanoseconds") return i;
+		return types > 0 ? types - 1 : 0;
+	}
+
+	// The Sample event's kind for a value's type and unit (docs/16: 0 ns, 1 samples, 2 bytes, 3 objects, 4 other).
+	static uint64 KindOf(Core::StringView type, Core::StringView unit) {
+		if (unit == "nanoseconds") return 0;
+		if (unit == "bytes") return 2;
+		if (unit == "count" && (type.EndsWith(Core::StringView("objects")) || type.EndsWith(Core::StringView("count")))) return 3;
+		if (unit == "count") return 1;
+		return 4;
+	}
+
+	// A frame's synthetic address: one per function and line, defined by a SymbolDef the first time.
+	class FrameIds
+	{
+		public Core::HashMap<Core::String, uint64> idOf;
+
+		public uint64 Of(StreamBuilder& builder, const PprofProfile& profile, const PprofLine& line) {
+			Core::StringBuilder key;
+			key.AppendUInt(line.function);
+			key.AppendByte(':');
+			key.AppendInt(line.line);
+			uint64 id;
+			if (idOf.TryGet(key.ToString(), id)) return id;
+			id = (uint64)idOf.Count() + 1;
+			idOf.Insert(key.ToString(), id);
+			PprofFunction function;
+			profile.functions.TryGet(line.function, function);
+			WireWriter& w = builder.Body();
+			const uint64 name = builder.String(profile.Text(function.name));
+			const uint64 file = builder.String(profile.Text(function.file));
+			w.Type(EventType::SymbolDef);
+			w.Varint(id);
+			w.Varint(name);
+			w.Varint(file);
+			w.Varint((uint64)line.line);
+			return id;
+		}
+	}
+
+	static void WriteSamples(StreamBuilder& builder, const PprofProfile& profile, int64 value, uint64 kind) {
+		FrameIds frames;
+		Core::HashMap<Core::String, uint64> stackOf;
+		builder.BeginChunk(0, 0);
+		WireWriter& w = builder.Body();
+		for (const PprofSample* sample : profile.samples) {
+			if (value >= sample->values.Count() || sample->values[value] == 0) continue;
+			Core::Array<uint64> stack;
+			for (int64 location : sample->locations) {
+				PprofLocation* found = nullptr;
+				if (!profile.locations.TryGet((uint64)location, found)) continue;
+				for (const PprofLine& line : found->lines) stack.Push(frames.Of(builder, profile, line));
+			}
+			Core::StringBuilder key;
+			for (uint64 frame : stack) {
+				key.AppendUInt(frame);
+				key.AppendByte(',');
+			}
+			uint64 id;
+			if (!stackOf.TryGet(key.ToString(), id)) {
+				id = (uint64)stackOf.Count() + 1;
+				stackOf.Insert(key.ToString(), id);
+				w.Type(EventType::CallstackDef);
+				w.Varint(id);
+				w.Varint((uint64)stack.Count());
+				for (uint64 frame : stack) w.Varint(frame);
+			}
+			w.Type(EventType::Sample);
+			w.Time(0);
+			w.Varint(0);
+			w.Varint(id);
+			w.Varint(kind);
+			w.Varint((uint64)sample->values[value]);
+		}
+		w.Type(EventType::Message);
+		w.Time(profile.durationNanos);
+		w.Varint(2);
+		w.Varint(builder.String(Core::StringView("end of the profiled time")));
+		w.Varint(0);
+		builder.EndChunk();
+	}
+
+	bool ImportPprof(const Core::Array<uint8>& bytes, Core::StringView app, Core::Array<uint8>& stream, Core::String& problem) {
+		Core::Array<uint8> raw;
+		const Core::Array<uint8>* data = &bytes;
+		if (IsGzip(bytes.Data(), bytes.Count())) {
+			if (!Gunzip(bytes.Data(), bytes.Count(), kMostProfileBytes, raw, problem)) return false;
+			data = &raw;
+		}
+		PprofProfile profile;
+		if (!ReadProfile(data->Data(), data->Count(), profile)) {
+			problem = Core::String("not a pprof profile (or one without samples)");
+			return false;
+		}
+		const int64 value = ChosenValue(profile);
+		const uint64 kind = KindOf(profile.Text(profile.sampleTypes.Count() > value * 2 ? profile.sampleTypes[value * 2] : 0), profile.Text(profile.sampleTypes.Count() > value * 2 + 1 ? profile.sampleTypes[value * 2 + 1] : 0));
+		StreamBuilder builder;
+		builder.Hello(app, 0, 1000000000, 0, profile.timeNanos);
+		WriteSamples(builder, profile, value, kind);
+		stream = builder.Bytes();
+		return true;
+	}
+}

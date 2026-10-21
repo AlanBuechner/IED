@@ -101,7 +101,7 @@ namespace Ied
 			if (instance->handlers.listenKinds[i].View() != kind) continue;
 			IED::EventHandler handler = instance->handlers.listeners[i];
 			Core::String problem;
-			if (!GuardedCall(instance, [handler, event]() { handler(event); }, problem) && instance->script->Faulted()) return;
+			if (!GuardedCall(instance, [handler, event]() { handler(event); }, problem) && instance->state == CodeState::Failed) return;
 		}
 	}
 

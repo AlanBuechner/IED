@@ -1,0 +1,165 @@
+// Memory (F-PRF-30, F-PRF-31, F-PRF-33): each pool's bytes in use over time with its totals, collections, and the
+// allocations live at a time grouped by call stack, pool or thread.
+include "analysis.ch"
+
+namespace Profiler
+{
+	const int32 kMostLeakAddresses = 8;
+
+	static void WriteUsage(IED::JsonWriter& json, const Capture& capture, const Pool* pool, Range range, int64 pixel) {
+		json.BeginArray();
+		int64 i = pool->times.LowerBound(range.begin);
+		if (i > 0) i -= 1;
+		int64 end = pool->times.LowerBound(range.end);
+		if (end < pool->times.Count()) end += 1;
+		while (i < end) {
+			const int64 t = pool->times[i];
+			int64 low = pool->bytes[i];
+			int64 high = pool->bytes[i];
+			i += 1;
+			while (i < end && pool->times[i] < t + pixel) {
+				if (pool->bytes[i] < low) low = pool->bytes[i];
+				if (pool->bytes[i] > high) high = pool->bytes[i];
+				i += 1;
+			}
+			json.BeginArray();
+			json.Int(capture.clock.Ns(t));
+			json.Int(low);
+			json.Int(high);
+			json.EndArray();
+		}
+		json.EndArray();
+	}
+
+	static void WriteGcTotals(IED::JsonWriter& json, const Capture& capture, Range range) {
+		int64 count = 0;
+		int64 pause = 0;
+		int64 longest = 0;
+		int64 freed = 0;
+		for (const GcRecord& gc : capture.gcs) {
+			if (gc.end == kOpen || !range.Overlaps(gc.begin, gc.end + 1)) continue;
+			count += 1;
+			pause += gc.end - gc.begin;
+			if (gc.end - gc.begin > longest) longest = gc.end - gc.begin;
+			freed += gc.bytesBefore - gc.bytesAfter;
+		}
+		json.Key(Core::StringView("gc"));
+		json.BeginObject();
+		json.IntField("count", count);
+		json.IntField("pauseNs", capture.clock.Ns(pause));
+		json.IntField("longestNs", capture.clock.Ns(longest));
+		json.IntField("freedBytes", freed);
+		json.EndObject();
+	}
+
+	Core::String Memory(const Capture& capture, int64 fromNs, int64 toNs, int32 width) {
+		const Range range = RangeOfNs(capture, fromNs, toNs);
+		int64 pixel = range.Length() / (int64)(width < 1 ? 1 : width);
+		if (pixel < 1) pixel = 1;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("pools"));
+		json.BeginArray();
+		for (const Pool* pool : capture.pools) {
+			json.BeginObject();
+			json.IntField("id", (int64)pool->id);
+			Core::StringView name = capture.Text(pool->nameStr);
+			json.Field("name", name.IsEmpty() ? Core::StringView("heap") : name);
+			json.IntField("inUse", pool->inUse);
+			json.IntField("peak", pool->peak);
+			json.IntField("allocs", pool->allocs);
+			json.IntField("frees", pool->frees);
+			json.IntField("live", pool->live.Count());
+			json.Key(Core::StringView("usage"));
+			WriteUsage(json, capture, pool, range, pixel);
+			json.EndObject();
+		}
+		json.EndArray();
+		WriteGcTotals(json, capture, range);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- Leaks --------------------------------------------------------------------------------------------------------
+
+	class LeakGroupRow
+	{
+		public uint64 key;
+		public int64 count;
+		public int64 bytes;
+		public uint64 callstack;
+		public Core::Array<uint64> addresses;
+	}
+
+	static uint64 LeakKey(const Allocation& allocation, LeakGroup groupBy) {
+		if (groupBy == LeakGroup::Pool) return allocation.pool;
+		if (groupBy == LeakGroup::Thread) return (uint64)allocation.track;
+		return allocation.callstack;
+	}
+
+	static void WriteLeakLabel(IED::JsonWriter& json, const Capture& capture, const LeakAsk& ask, const LeakGroupRow* row) {
+		if (ask.groupBy == LeakGroup::Pool) {
+			Pool* pool = nullptr;
+			capture.poolOf.TryGet(row->key, pool);
+			Core::StringView name = pool ? capture.Text(pool->nameStr) : Core::StringView("");
+			json.Field("label", name.IsEmpty() ? Core::StringView("heap") : name);
+		}
+		else if (ask.groupBy == LeakGroup::Thread) json.Field("label", TrackLabel(capture, capture.tracks[(int64)row->key], capture.lastTicks).View());
+		else json.Field("label", row->callstack == 0 ? Core::StringView("(no call stack)") : Core::StringView("call stack"));
+	}
+
+	Core::String Leaks(const Capture& capture, const LeakAsk& ask) {
+		const int64 at = ask.atNs < 0 ? capture.lastTicks + 1 : capture.clock.Ticks(ask.atNs);
+		Core::HashMap<uint64, LeakGroupRow*> rowOf;
+		Core::Array<LeakGroupRow*> rows;
+		int64 liveCount = 0;
+		int64 liveBytes = 0;
+		for (const Allocation& allocation : capture.allocations) {
+			if (allocation.t >= at || (allocation.freed != kOpen && allocation.freed < at)) continue;
+			const uint64 key = LeakKey(allocation, ask.groupBy);
+			LeakGroupRow* row = nullptr;
+			if (!rowOf.TryGet(key, row)) {
+				row = new LeakGroupRow();
+				row->key = key;
+				row->callstack = allocation.callstack;
+				rows.Push(row);
+				rowOf.Insert(key, row);
+			}
+			row->count += 1;
+			row->bytes += allocation.size;
+			if (row->addresses.Count() < kMostLeakAddresses) row->addresses.Push(allocation.address);
+			liveCount += 1;
+			liveBytes += allocation.size;
+		}
+		rows.SortBy([](LeakGroupRow* a, LeakGroupRow* b) -> bool { return a->bytes > b->bytes; });
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("atNs", capture.clock.Ns(at > capture.lastTicks ? capture.lastTicks : at));
+		json.IntField("count", liveCount);
+		json.IntField("bytes", liveBytes);
+		json.Key(Core::StringView("groups"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)ask.limit; ++i) {
+			const LeakGroupRow* row = rows[i];
+			json.BeginObject();
+			WriteLeakLabel(json, capture, ask, row);
+			json.IntField("count", row->count);
+			json.IntField("bytes", row->bytes);
+			json.Key(Core::StringView("callstack"));
+			WriteCallstack(json, capture, ask.groupBy == LeakGroup::Callstack ? row->callstack : 0);
+			json.Key(Core::StringView("addresses"));
+			json.BeginArray();
+			for (uint64 address : row->addresses) {
+				Core::StringBuilder hex;
+				hex.Append("0x");
+				hex.AppendHex(address);
+				json.String(hex.View());
+			}
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+}

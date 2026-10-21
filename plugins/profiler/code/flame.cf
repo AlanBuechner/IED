@@ -1,0 +1,155 @@
+// The flame graph (F-PRF-22): zones merged by their call path - a node per name under its parent - over a range, from
+// the zones themselves or from call stack samples (imported profiles, F-PRF-51).
+include "analysis.ch"
+
+namespace Profiler
+{
+	class FlameNode
+	{
+		public Core::String name;
+		public int64 parent = -1;
+		public int64 total;
+		public int64 self;
+		public int64 count;
+		public Core::Array<int64> children;
+	}
+
+	class FlameTree
+	{
+		public Core::Array<FlameNode*> nodes;
+		public Core::HashMap<Core::String, int64> childOf;   // "<parent>/<name>" -> node
+
+		[operator("create")] public void Init() {
+			FlameNode* root = new FlameNode();
+			root->name = Core::String("all");
+			nodes.Push(root);
+		}
+
+		public int64 Child(int64 parent, Core::StringView name) {
+			Core::StringBuilder key;
+			key.AppendInt(parent);
+			key.AppendByte('/');
+			key.Append(name);
+			int64 node;
+			if (childOf.TryGet(key.ToString(), node)) return node;
+			FlameNode* child = new FlameNode();
+			child->name = Core::String(name);
+			child->parent = parent;
+			nodes.Push(child);
+			node = nodes.Count() - 1;
+			nodes[parent]->children.Push(node);
+			childOf.Insert(key.ToString(), node);
+			return node;
+		}
+	}
+
+	// A zone and the zones under it, added below `parent`.
+	static void AddZone(FlameTree& tree, const Capture& capture, const ThreadTrack* track, int64 depth, int64 i, int64 parent, Range range) {
+		const ZoneLevel* level = track->levels[depth];
+		const int64 start = level->starts[i];
+		const int64 end = level->EndOr(i, capture.lastTicks);
+		const int64 node = tree.Child(parent, capture.ZoneName(track, level, i));
+		FlameNode* n = tree.nodes[node];
+		const int64 duration = end - start;
+		n->total += duration;
+		n->count += 1;
+		int64 children = 0;
+		if (depth + 1 < track->levels.Count()) {
+			const ZoneLevel* below = track->levels[depth + 1];
+			const int64 stop = below->FirstStartingAt(end);
+			for (int64 k = below->FirstStartingAt(start); k < stop; ++k) {
+				children += below->EndOr(k, capture.lastTicks) - below->starts[k];
+				AddZone(tree, capture, track, depth + 1, k, node, range);
+			}
+		}
+		n->self += duration - children > 0 ? duration - children : 0;
+	}
+
+	static void FromZones(FlameTree& tree, const Capture& capture, const FlameAsk& ask, Range range) {
+		for (int64 t = 0; t < capture.tracks.Count(); ++t) {
+			if (ask.track >= 0 && t != (int64)ask.track) continue;
+			const ThreadTrack* track = capture.tracks[t];
+			if (track->levels.IsEmpty()) continue;
+			const ZoneLevel* top = track->levels[0];
+			const int64 stop = top->FirstStartingAt(range.end);
+			for (int64 i = top->FirstStartingAt(range.begin); i < stop; ++i) AddZone(tree, capture, track, 0, i, 0, range);
+		}
+	}
+
+	static Core::String FrameName(const Capture& capture, uint64 address) {
+		const SymbolRecord* symbol = capture.symbols.Find(address);
+		if (symbol && symbol->functionStr != 0) return Core::String(capture.Text(symbol->functionStr));
+		Core::StringBuilder text;
+		text.Append("0x");
+		text.AppendHex(address);
+		return text.ToString();
+	}
+
+	static void FromSamples(FlameTree& tree, const Capture& capture, const FlameAsk& ask, Range range) {
+		for (const SampleRecord& sample : capture.samples) {
+			if (ask.track >= 0 && sample.track != ask.track) continue;
+			if (!range.Holds(sample.t) && !(sample.t == 0 && range.begin == 0)) continue;
+			const Core::Array<uint64>* frames = capture.callstacks.Find(sample.callstack);
+			int64 node = 0;
+			tree.nodes[0]->total += sample.weight;
+			tree.nodes[0]->count += 1;
+			for (int64 i = frames ? frames->Count() - 1 : -1; i >= 0; --i) {
+				node = tree.Child(node, FrameName(capture, (*frames)[i]).View());
+				tree.nodes[node]->total += sample.weight;
+				tree.nodes[node]->count += 1;
+			}
+			tree.nodes[node]->self += sample.weight;
+		}
+	}
+
+	// The weight units of the capture's samples: the kind the first sample has.
+	static const char* SampleUnit(const Capture& capture) {
+		if (capture.samples.IsEmpty()) return "ns";
+		const int32 kind = capture.samples[0].kind;
+		if (kind == 0) return "ns";
+		if (kind == 2) return "bytes";
+		if (kind == 3) return "objects";
+		return "samples";
+	}
+
+	static void WriteNode(IED::JsonWriter& json, const FlameTree& tree, const Capture& capture, int64 index, bool ticks, int64 smallest) {
+		const FlameNode* node = tree.nodes[index];
+		json.BeginObject();
+		json.Field("name", node->name.View());
+		json.IntField("total", ticks ? capture.clock.Ns(node->total) : node->total);
+		json.IntField("self", ticks ? capture.clock.Ns(node->self) : node->self);
+		json.IntField("count", node->count);
+		json.Key(Core::StringView("children"));
+		json.BeginArray();
+		Core::Array<int64> order = node->children;
+		order.SortBy([&tree](const int64& a, const int64& b) -> bool { return tree.nodes[a]->total > tree.nodes[b]->total; });
+		for (int64 child : order)
+			if (tree.nodes[child]->total >= smallest) WriteNode(json, tree, capture, child, ticks, smallest);
+		json.EndArray();
+		json.EndObject();
+	}
+
+	Core::String Flame(const Capture& capture, const FlameAsk& ask) {
+		const Range range = RangeOfNs(capture, ask.fromNs, ask.toNs);
+		FlameTree tree;
+		const bool samples = ask.samples || (capture.ZoneCount() == 0 && !capture.samples.IsEmpty());
+		if (samples) FromSamples(tree, capture, ask, range);
+		else {
+			FromZones(tree, capture, ask, range);
+			for (int64 child : tree.nodes[0]->children) tree.nodes[0]->total += tree.nodes[child]->total;
+		}
+		Core::Array<int64> totals;
+		for (const FlameNode* node : tree.nodes) totals.Push(node->total);
+		totals.Sort();
+		const int64 smallest = totals.Count() > (int64)ask.mostNodes ? totals[totals.Count() - (int64)ask.mostNodes] : 0;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("source", samples ? "samples" : "zones");
+		json.Field("unit", samples ? SampleUnit(capture) : "ns");
+		json.IntField("nodes", tree.nodes.Count());
+		json.Key(Core::StringView("root"));
+		WriteNode(json, tree, capture, 0, !samples, smallest);
+		json.EndObject();
+		return json.ToString();
+	}
+}

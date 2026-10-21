@@ -39,6 +39,13 @@ namespace Ied
 		// The debug configuration `name` (empty: the default) of `projectName` (empty: the startup project), its strings
 		// expanded as a task's are. Throws not_found when the project has none.
 		public DebugLaunch ResolveDebug(Workspace* ws, Core::StringView projectName, Core::StringView name);
+		// The run `runId` of the last kTaskRunsKept, or null.
+		public TaskRun* Run(Core::StringView runId) const;
+		// Cancels `run` as task.cancel does: its process trees are killed.
+		public void Cancel(TaskRun* run);
+		// A variable a plugin offers the tasks of workspace `wsId` (docs/06 "Variables": ${<name>}, such as the profiler's
+		// ${profiler.connect}); an empty value takes it away.
+		public void SetVariable(Core::StringView wsId, Core::StringView name, Core::StringView value);
 
 	private:
 		private Core::Array<TaskProject*> ProjectsOf(Workspace* ws) const;
@@ -71,6 +78,7 @@ namespace Ied
 
 		private Server* server;
 		private Core::HashMap<Core::String, TaskSelections*> selections;   // by wsId
+		private Core::HashMap<Core::String, Core::HashMap<Core::String, Core::String>*> offeredVariables;   // by wsId
 		private Core::Array<TaskRun*> runs;
 		private TaskRun* LastEnded(Workspace* ws);
 		private int64 started;

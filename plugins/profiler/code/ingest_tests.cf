@@ -1,0 +1,342 @@
+// The profiler's ITP reading (docs/16): varints and zig-zag deltas, chunks cut from a stream as it arrives, events
+// applied to a capture - zones by depth with self times, renames, tasks, frames, memory, GC - and every malformed input
+// turned into a warning instead of an end.
+
+include "ingest.ch"
+
+static Profiler::Capture* Read(const Profiler::WireWriter& writer) {
+	Profiler::Capture* capture = new Profiler::Capture();
+	Profiler::ChunkStream stream;
+	stream.Feed(writer.Bytes().Data(), writer.Length());
+	const uint8* chunk;
+	int64 length;
+	while (stream.Next(chunk, length)) Profiler::ApplyChunk(*capture, chunk, length);
+	return capture;
+}
+
+static void Hello(Profiler::WireWriter& w, int64 startTicks) {
+	w.BeginChunk(Profiler::kGlobalChunk, 0, startTicks);
+	w.Type(Profiler::EventType::Hello);
+	w.Varint(1);
+	w.Text(Core::StringView("game"));
+	w.Varint(42);
+	w.Varint(1000000000);
+	w.Varint((uint64)startTicks);
+	w.Varint(0);
+	w.Varint(0);
+	w.Text(Core::StringView("token"));
+	w.EndChunk();
+}
+
+static void Define(Profiler::WireWriter& w, uint64 id, const char* text) {
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(id);
+	w.Text(Core::StringView(text));
+}
+
+static void Site(Profiler::WireWriter& w, uint64 id, uint64 nameStr) {
+	w.Type(Profiler::EventType::SrcLocDef);
+	w.Varint(id);
+	w.Varint(nameStr);
+	w.Varint(0);
+	w.Varint(0);
+	w.Varint(0);
+	w.Varint(0);
+}
+
+static void Zone(Profiler::WireWriter& w, int64 begin, uint64 site) {
+	w.Type(Profiler::EventType::ZoneBegin);
+	w.Time(begin);
+	w.Varint(site);
+}
+
+static void End(Profiler::WireWriter& w, int64 at) {
+	w.Type(Profiler::EventType::ZoneEnd);
+	w.Time(at);
+}
+
+[test("server.profiler.wire")]
+class ProfilerWireTests {
+	[test("varints")]
+	public static void TestVarints() {
+		Profiler::WireWriter w;
+		w.Varint(0);
+		w.Varint(127);
+		w.Varint(128);
+		w.Varint(18446744073709551615);
+		Profiler::WireReader r = Profiler::WireReader(w.Bytes().Data() + Profiler::kPreambleBytes, w.Length() - Profiler::kPreambleBytes);
+		uint64 a;
+		uint64 b;
+		uint64 c;
+		uint64 d;
+		assert_true(r.Varint(a) && r.Varint(b) && r.Varint(c) && r.Varint(d), "four varints read back");
+		assert_true(a == 0 && b == 127 && c == 128 && d == 18446744073709551615, "with their values");
+		assert_true(r.AtEnd() && !r.Varint(a), "and nothing after them");
+	}
+
+	[test("zigzag")]
+	public static void TestZigzag() {
+		assert_true(Profiler::Zigzag(0) == 0 && Profiler::Zigzag(-1) == 1 && Profiler::Zigzag(1) == 2 && Profiler::Zigzag(-2) == 3, "small values alternate");
+		assert_true(Profiler::Unzigzag(Profiler::Zigzag(-1234567890123)) == -1234567890123, "a large negative delta round-trips");
+		assert_true(Profiler::Unzigzag(Profiler::Zigzag(9223372036854775807)) == 9223372036854775807, "the largest positive");
+	}
+
+	[test("truncated_varint")]
+	public static void TestTruncatedVarint() {
+		uint8[2] bytes;
+		bytes[0] = (uint8)0x80;
+		bytes[1] = (uint8)0x80;
+		Profiler::WireReader r = Profiler::WireReader(&bytes[0], 2);
+		uint64 value;
+		assert_true(!r.Varint(value), "a varint cut off is not read");
+	}
+
+	[test("stream_in_pieces")]
+	public static void TestStreamInPieces() {
+		Profiler::WireWriter w;
+		Hello(w, 100);
+		Profiler::ChunkStream stream;
+		const uint8* chunk;
+		int64 length;
+		int64 chunks = 0;
+		for (int64 i = 0; i < w.Length(); ++i) {
+			stream.Feed(w.Bytes().Data() + i, 1);
+			while (stream.Next(chunk, length)) chunks += 1;
+		}
+		assert_true(chunks == 1 && stream.Consumed() == w.Length() && stream.Pending() == 0, "a stream fed a byte at a time gives its chunk once whole");
+	}
+
+	[test("not_itp")]
+	public static void TestNotItp() {
+		const char* text = "GET / HTTP/1.1\r\n";
+		Profiler::ChunkStream stream;
+		stream.Feed((const uint8*)text, 16);
+		const uint8* chunk;
+		int64 length;
+		assert_true(!stream.Next(chunk, length) && stream.Problem() == "not an ITP stream", "something else is refused");
+	}
+}
+
+[test("server.profiler.ingest")]
+class ProfilerIngestTests {
+	[test("hello")]
+	public static void TestHello() {
+		Profiler::WireWriter w;
+		Hello(w, 5000);
+		Profiler::Capture* capture = Read(w);
+		assert_true(capture->hello && capture->appName == "game" && capture->pid == 42, "the app and its process");
+		assert_true(capture->clock.startTicks == 5000 && capture->clock.Ns(1000) == 1000, "ticks of a 1 GHz clock are nanoseconds");
+	}
+
+	[test("nested_zones")]
+	public static void TestNestedZones() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		Define(w, 1, "Frame");
+		Define(w, 2, "Update");
+		Site(w, 1, 1);
+		Site(w, 2, 2);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 7, 0);
+		Zone(w, 10, 1);
+		Zone(w, 12, 2);
+		End(w, 20);
+		Zone(w, 22, 2);
+		End(w, 25);
+		End(w, 30);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		assert_true(capture->tracks.Count() == 1 && capture->tracks[0]->clientId == 7, "the thread has a track");
+		Profiler::ThreadTrack* track = capture->tracks[0];
+		assert_true(track->levels.Count() == 2 && track->levels[0]->Count() == 1 && track->levels[1]->Count() == 2, "one zone at depth 0, two at depth 1");
+		assert_true(track->levels[0]->ends[0] == 30 && track->levels[0]->selfs[0] == 9, "the outer zone's self time leaves out its children");
+		assert_true(capture->ZoneName(track, track->levels[1], 1) == "Update", "a zone is named by its site");
+		Profiler::SiteStats* update = *capture->sites.Find(2);
+		assert_true(update->count == 2 && update->total == 11 && update->most == 8 && update->least == 3, "per-site totals");
+		assert_true(track->levels[1]->FirstEndingAfter(21) == 1 && track->levels[1]->FirstEndingAfter(19) == 0, "a range finds the first zone it overlaps");
+	}
+
+	[test("unbalanced_end_is_a_warning")]
+	public static void TestUnbalancedEnd() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+		End(w, 5);
+		Zone(w, 6, 1);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		assert_true(capture->warningCount == 1, "the stray end is a warning");
+		Profiler::Finish(*capture);
+		assert_true(capture->warningCount == 2 && capture->tracks[0]->levels[0]->ends[0] == 6, "the zone left open is closed at the end, and said so");
+	}
+
+	[test("renames_and_named_zones")]
+	public static void TestRenames() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		Define(w, 1, "Worker 1");
+		Define(w, 2, "Physics");
+		Define(w, 3, "Job");
+		Define(w, 4, "arena.dds");
+		Site(w, 9, 3);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 3, 0);
+		w.Type(Profiler::EventType::ThreadName);
+		w.Time(1);
+		w.Varint(1);
+		w.Type(Profiler::EventType::ThreadName);
+		w.Time(50);
+		w.Varint(2);
+		w.Type(Profiler::EventType::ZoneBeginNamed);
+		w.Time(60);
+		w.Varint(9);
+		w.Varint(4);
+		End(w, 70);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		Profiler::ThreadTrack* track = capture->tracks[0];
+		assert_true(capture->Text(track->NameAt(10)) == "Worker 1" && capture->Text(track->NameAt(55)) == "Physics", "a thread's name at a time");
+		assert_true(capture->ZoneName(track, track->levels[0], 0) == "arena.dds", "a per-call name wins over the site's");
+	}
+
+	[test("text_after_definition_arrives")]
+	public static void TestLateDefinition() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+		Zone(w, 1, 5);
+		End(w, 2);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		Define(w, 8, "Late");
+		Site(w, 5, 8);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		Profiler::ThreadTrack* track = capture->tracks[0];
+		assert_true(capture->ZoneName(track, track->levels[0], 0) == "Late", "names resolve when asked, not when read");
+	}
+
+	[test("tasks_move_between_threads")]
+	public static void TestTasks() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+		w.Type(Profiler::EventType::TaskBegin);
+		w.Time(10);
+		w.Varint(77);
+		w.Varint(2);
+		w.Varint(0);
+		w.Type(Profiler::EventType::TaskSuspend);
+		w.Time(20);
+		w.Varint(77);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 2, 0);
+		w.Type(Profiler::EventType::TaskResume);
+		w.Time(30);
+		w.Varint(77);
+		w.Type(Profiler::EventType::TaskEnd);
+		w.Time(45);
+		w.Varint(77);
+		w.Type(Profiler::EventType::TaskEnd);
+		w.Time(46);
+		w.Varint(78);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		assert_true(capture->taskLanes.Count() == 1 && capture->taskLanes[0]->count == 2, "one lane for the name, two runs");
+		Profiler::TaskLane* lane = capture->taskLanes[0];
+		assert_true(lane->runs.Count() == 2 && lane->runs[0]->ends[0] == 20 && lane->runs[1]->starts[0] == 30 && lane->runs[1]->ends[0] == 45, "a run on each thread");
+		assert_true(capture->warningCount == 1, "an unknown task id is a warning");
+	}
+
+	[test("frames")]
+	public static void TestFrames() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+		for (int64 t = 0; t <= 48; t += 16) {
+			w.Type(Profiler::EventType::FrameMark);
+			w.Time(t);
+			w.Varint(0);
+		}
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		Profiler::FrameSet* set = capture->frameSets[0];
+		assert_true(set->starts.Count() == 4 && set->Completed() == 3 && set->ends[2] == 48, "marks make frames; the last runs on");
+	}
+
+	[test("memory")]
+	public static void TestMemory() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		w.Type(Profiler::EventType::Alloc);
+		w.Time(5);
+		w.Varint(1);
+		w.Varint(0);
+		w.Varint(4096);
+		w.Varint(100);
+		w.Varint(0);
+		w.Type(Profiler::EventType::Alloc);
+		w.Time(6);
+		w.Varint(1);
+		w.Varint(0);
+		w.Varint(8192);
+		w.Varint(50);
+		w.Varint(0);
+		w.Type(Profiler::EventType::Free);
+		w.Time(9);
+		w.Varint(1);
+		w.Varint(0);
+		w.Varint(4096);
+		w.Type(Profiler::EventType::Free);
+		w.Time(10);
+		w.Varint(1);
+		w.Varint(0);
+		w.Varint(1);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		Profiler::Pool* pool = capture->pools[0];
+		assert_true(pool->inUse == 50 && pool->peak == 150 && pool->live.Count() == 1, "in use, peak and what is live");
+		assert_true(capture->allocations[0].freed == 9 && capture->allocations[1].freed == Profiler::kOpen, "the first was freed, the second leaks");
+		assert_true(capture->warningCount == 1, "a free of an unknown address is a warning");
+	}
+
+	[test("gc")]
+	public static void TestGc() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		w.Type(Profiler::EventType::GcBegin);
+		w.Time(100);
+		w.Varint(1);
+		w.Varint(1);
+		w.Type(Profiler::EventType::GcEnd);
+		w.Time(150);
+		w.Varint(1000);
+		w.Varint(400);
+		w.Varint(12);
+		w.Varint(0);
+		w.Varint(3);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		assert_true(capture->gcs.Count() == 1 && capture->gcs[0].end == 150 && capture->gcs[0].bytesAfter == 400, "a collection with its pause and bytes");
+	}
+
+	[test("unknown_event_ends_its_chunk")]
+	public static void TestUnknownEvent() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+		Zone(w, 1, 1);
+		w.Varint(0xEE);
+		End(w, 2);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 1, 2);
+		End(w, 3);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		assert_true(capture->warningCount == 1 && capture->tracks[0]->levels[0]->ends[0] == 3, "the rest of the chunk is skipped; the next chunk is read");
+	}
+}

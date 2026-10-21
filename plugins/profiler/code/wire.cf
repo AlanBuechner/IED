@@ -1,0 +1,111 @@
+include "wire.ch"
+
+namespace Profiler
+{
+	const int32 kVarintMostBytes = 10;
+
+	bool WireReader::Byte(uint8& out) {
+		if (at >= end) return false;
+		out = data[at];
+		at += 1;
+		return true;
+	}
+
+	bool WireReader::Varint(uint64& out) {
+		uint64 value = 0;
+		for (int32 i = 0; i < kVarintMostBytes; ++i) {
+			if (at >= end) return false;
+			const uint64 byte = (uint64)data[at];
+			at += 1;
+			value |= (byte & 0x7F) << (7 * i);
+			if ((byte & 0x80) == 0) {
+				out = value;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool WireReader::Zigzag(int64& out) {
+		uint64 raw;
+		if (!Varint(raw)) return false;
+		out = Unzigzag(raw);
+		return true;
+	}
+
+	bool WireReader::Double(double& out) {
+		if (end - at < 8) return false;
+		uint64 bits = 0;
+		for (int32 i = 0; i < 8; ++i) bits |= (uint64)data[at + i] << (8 * i);
+		at += 8;
+		out = reinterpret_cast<double>(bits);
+		return true;
+	}
+
+	bool WireReader::Text(Core::StringView& out) {
+		uint64 length;
+		if (!Varint(length) || length > (uint64)(end - at)) return false;
+		out = Core::StringView((const char*)(data + at), (int64)length);
+		at += (int64)length;
+		return true;
+	}
+
+	int64 Unzigzag(uint64 value) {
+		return (value & 1) == 0 ? (int64)(value >> 1) : -(int64)(value >> 1) - 1;
+	}
+
+	uint64 Zigzag(int64 value) {
+		return value >= 0 ? (uint64)value << 1 : (((uint64)(-(value + 1))) << 1) | 1;
+	}
+
+	// --- Writing ------------------------------------------------------------------------------------------------------
+
+	void WireWriter::Init() {
+		const char* magic = "ITP1";
+		for (int32 i = 0; i < 4; ++i) out.Push((uint8)magic[i]);
+		out.Push((uint8)(kItpVersion & 0xFF));
+		out.Push((uint8)(kItpVersion >> 8));
+		out.Push((uint8)0);
+		out.Push((uint8)0);
+	}
+
+	void WireWriter::BeginChunk(uint8 kind, uint64 threadId, int64 baseTicks) {
+		chunkStart = out.Count();
+		for (int32 i = 0; i < kChunkHeaderLength; ++i) out.Push((uint8)0);
+		out.Push(kind);
+		Varint(threadId);
+		Varint((uint64)baseTicks);
+		cursor = baseTicks;
+	}
+
+	void WireWriter::EndChunk() {
+		const uint64 length = (uint64)(out.Count() - chunkStart - kChunkHeaderLength);
+		for (int32 i = 0; i < kChunkHeaderLength; ++i) out[chunkStart + i] = (uint8)((length >> (8 * i)) & 0xFF);
+		chunkStart = -1;
+	}
+
+	void WireWriter::Type(EventType type) { out.Push((uint8)type); }
+
+	void WireWriter::Time(int64 ticks) {
+		Varint(Zigzag(ticks - cursor));
+		cursor = ticks;
+	}
+
+	void WireWriter::Varint(uint64 value) {
+		while (value >= 0x80) {
+			out.Push((uint8)((value & 0x7F) | 0x80));
+			value >>= 7;
+		}
+		out.Push((uint8)value);
+	}
+
+	void WireWriter::Double(double value) {
+		const uint64 bits = reinterpret_cast<uint64>(value);
+		for (int32 i = 0; i < 8; ++i) out.Push((uint8)((bits >> (8 * i)) & 0xFF));
+	}
+
+	void WireWriter::Text(Core::StringView value) {
+		Varint((uint64)value.ByteLength());
+		out.Append((const uint8*)value.Data(), value.ByteLength());
+	}
+}

@@ -33,10 +33,11 @@ instrumented app                       ied-server (src/profiler)                
 
 ## Connection model
 
-1. The *Profile* task (or any run with profiling enabled) starts the app with `IED_PROFILER=127.0.0.1:<port>;token=<t>;capture=<id>`.
+1. The *Profile* task (or any run with profiling enabled) starts the app with `IED_PROFILER=127.0.0.1:<port>;token=<t>` - the task variable `${profiler.connect}`, which the profiler plugin sets for each workspace (the token says which workspace a connection belongs to; the server names the capture when `Hello` arrives).
 2. The app's profiler client connects to that address and sends `Hello` (with the token). No discovery needed in the common path.
-3. For apps started outside IED: the client listens for nothing; instead IED listens on a well-known UDP port for `Announce` broadcasts from clients that have `IED_PROFILER=announce` and lists them in "Connect to running app".
-4. If no IED is reachable, the client either buffers up to a bounded size (setting) or drops events and counts drops (reported in `Hello`/`Stats` when it connects later). Never unbounded buffering.
+3. `IED_PROFILER=file:<path>` makes the client write the same stream to a file instead (CI, or an app run outside IED); the profiler opens it like any `.iedtrace`. Unset, or anything the client cannot parse: profiling stays off and costs one relaxed load per event site.
+4. For apps started outside IED: the client listens for nothing; instead IED listens on a well-known UDP port for `Announce` broadcasts from clients that have `IED_PROFILER=announce` and lists them in "Connect to running app" (P2).
+5. If no IED is reachable, the client either buffers up to a bounded size (setting) or drops events and counts drops (reported in `Hello`/`Stats` when it connects later). Never unbounded buffering.
 
 ## ITP v1 wire format
 
@@ -50,8 +51,11 @@ Preamble:= "ITP1" (4 bytes) u16 version u16 flags
 Chunk   := u32 byteLength  u8 chunkKind  varint threadId  varint baseTimeTicks  Event*
 ```
 
-- `chunkKind`: `0` thread chunk (all events from one thread; event times are deltas from the previous event in the chunk, starting at `baseTimeTicks`), `1` global chunk (definitions, memory, GPU, control - events carry absolute delta from `baseTimeTicks` too).
+- `byteLength` counts the bytes after it (kind, header, events).
+- `chunkKind`: `0` thread chunk (all events from one thread), `1` global chunk (definitions, memory, GC, GPU, control).
+- **Times:** a `dt` field is a **zig-zag signed** varint: the event's time in ticks minus the previous timed event's in the same chunk (the first one's minus `baseTimeTicks`). The same rule in both kinds of chunk, so a global chunk, whose events come from many threads, may step back.
 - Clients flush a thread's chunk when it reaches 16-64 KB or every 10 ms, so live view is smooth and per-thread ordering is preserved without a global lock.
+- **Definitions before use:** a client queues every definition (`StringDef`, `SrcLocDef`, `ThreadDef`, ...) in the global queue before the event that names it, and its flusher takes the thread buffers first, then the global queue, and sends the global chunk first - so a definition always reaches the server before its first use. The server still resolves ids when it answers queries, not when it reads events, so a client that gets this wrong shows names late, never wrong.
 - Optional compression (flag bit 0): each chunk body compressed with LZ4 frame format. v1 servers must accept uncompressed; compression is negotiated in `Hello`.
 
 ### Event catalog (type byte + fields)
@@ -63,45 +67,45 @@ Chunk   := u32 byteLength  u8 chunkKind  varint threadId  varint baseTimeTicks  
 | 0x03 | `Bye` | reason | |
 | 0x04 | `Warning` | code, strId | instrumentation errors, drops |
 | 0x05 | `Stats` | eventsSent, eventsDropped, bytesBuffered | periodic |
-| 0x10 | `StringDef` | id, utf8(len-prefixed bytes) | must precede first use |
+| 0x10 | `StringDef` | id, utf8(len-prefixed bytes) | ids start at 1; 0 is "none" everywhere |
 | 0x11 | `SrcLocDef` | id, nameStr, functionStr, fileStr, line, color(u32, 0 = default) | |
-| 0x12 | `ThreadDef` | threadId, osThreadId, groupHint | first time a thread appears |
+| 0x12 | `ThreadDef` | threadId, osThreadId, groupHintStr | first time a thread appears; `threadId` is the client's small index (the chunk header's), never 0 |
 | 0x13 | `ThreadName` | dt, nameStr | **rename at a time**; any number per thread |
 | 0x20 | `ZoneBegin` | dt, srcLocId | |
 | 0x21 | `ZoneBeginNamed` | dt, srcLocId, nameStr | per-call display name; stats can group by it (option) |
 | 0x22 | `ZoneEnd` | dt | |
 | 0x23 | `ZoneText` | strId | attaches to the innermost open zone |
 | 0x24 | `ZoneValue` | u64 | |
-| 0x25 | `ZoneColor` | u32 | |
+| 0x25 | `ZoneColor` | color (0xRRGGBB) | |
 | 0x26 | `ZoneCallstack` | callstackId | |
 | 0x30 | `TaskBegin` | dt, taskId, nameStr, parentTaskId(0 = none) | task identity is `taskId` (unique per run, never reused); grouping key is `nameStr` |
 | 0x31 | `TaskEnd` | dt, taskId | |
 | 0x32 | `TaskSuspend` | dt, taskId | e.g. job yields / waits |
 | 0x33 | `TaskResume` | dt, taskId | may arrive on another thread's chunk |
-| 0x40 | `FrameMark` | dt, frameSetStr | continuous frames |
+| 0x40 | `FrameMark` | dt, frameSetStr | continuous frames; set 0 is the default `Frame` set |
 | 0x41 | `FrameBegin` / 0x42 `FrameEnd` | dt, frameSetStr | discontinuous frames |
-| 0x43 | `FrameImage` | blobRef, width, height, format | optional screenshots, sent through a side blob |
-| 0x50 | `PlotDef` | plotId, nameStr, kind(number/memory/percent), flags | |
+| 0x43 | `FrameImage` | blobRef, width, height, format | reserved (P2): optional screenshots, sent through a side blob |
+| 0x50 | `PlotDef` | plotId, nameStr, kind(0 number, 1 memory, 2 percent), flags | |
 | 0x51 | `PlotValue` | dt, plotId, f64 (8 raw bytes) | |
-| 0x52 | `Message` | dt, severity(0-5), strId, color | |
+| 0x52 | `Message` | dt, severity(0 trace, 1 debug, 2 info, 3 warning, 4 error, 5 fatal), strId, color | |
 | 0x60 | `PoolDef` | poolId, nameStr | pool 0 = default heap |
-| 0x61 | `Alloc` | dt, poolId, address, size, callstackId(0 = none) | global chunk carries threadId explicitly |
-| 0x62 | `Free` | dt, poolId, address | |
+| 0x61 | `Alloc` | dt, threadId, poolId, address, size, callstackId(0 = none) | sent in global chunks (address reuse across threads must stay ordered), so it names its thread |
+| 0x62 | `Free` | dt, threadId, poolId, address | global chunks |
 | 0x63 | `PoolReset` | dt, poolId | arena reset frees everything in the pool |
-| 0x68 | `GcBegin` | dt, kind(minor/major/full), generation | |
+| 0x68 | `GcBegin` | dt, kind(0 minor, 1 major, 2 full), generation | global chunks |
 | 0x69 | `GcEnd` | dt, bytesBefore, bytesAfter, objectsFreed, pinned, roots | pause = end - begin |
 | 0x70 | `LockDef` | lockId, nameStr, srcLocId | |
-| 0x71 | `LockWait` / 0x72 `LockObtain` / 0x73 `LockRelease` | dt, lockId (shared flag in high bit) | |
+| 0x71 | `LockWait` / 0x72 `LockObtain` / 0x73 `LockRelease` | dt, lock (`lockId * 2 + shared`) | |
 | 0x80 | `ModuleDef` | base, size, pathStr, debugIdStr (PDB GUID+age) | for server-side symbolization |
 | 0x81 | `CallstackDef` | callstackId, count, addresses[] | addresses resolved server-side from PDBs |
-| 0x90 | `GpuContextDef` | ctxId, api(d3d12/vulkan/...), queueNameStr, periodPicoseconds | |
+| 0x90 | `GpuContextDef` | ctxId, api(0 other, 1 d3d12, 2 vulkan, 3 opengl, 4 metal), queueNameStr, periodPicoseconds | |
 | 0x91 | `GpuCalibration` | ctxId, cpuTicks, gpuTicks | D3D12 `GetClockCalibration`, periodic |
 | 0x92 | `GpuZoneBegin` | dt(cpu), ctxId, queryId, srcLocId | CPU-side submit time |
 | 0x93 | `GpuZoneEnd` | dt(cpu), ctxId, queryId | |
 | 0x94 | `GpuTime` | ctxId, queryId, gpuTicks | resolved timestamp, later |
-| 0xA0 | `Annotation` | startTicks, endTicks, strId | user annotations (server-written) |
+| 0xA0 | `Annotation` | startTicks, endTicks, strId | reserved: annotations live in the trace file's index block ("Trace files") |
 
-Server -> client control messages (same framing, global chunks): `Configure { categories enabled, callstack depth, alloc callstacks on/off }`, `StopCapture`, `Ping`.
+Server -> client control messages (same framing, global chunks): `0xE0 Configure { categoriesMask, callstackDepth, allocCallstacks }`, `0xE1 StopCapture`, `0xE2 Ping { value }`. A v1 client may ignore them: the server stops a capture by closing the connection, and a client whose send fails turns profiling off for the rest of the run.
 
 ### Rules
 

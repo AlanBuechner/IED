@@ -1,0 +1,166 @@
+// One zone's details (F-PRF-15): its site, times, annotations, call stack, the chain of zones around it, its children
+// by name, the task it ran in and the frame it fell in.
+include "analysis.ch"
+
+namespace Profiler
+{
+	const int32 kMostChildNames = 50;
+
+	void WriteCallstack(IED::JsonWriter& json, const Capture& capture, uint64 callstack) {
+		json.BeginArray();
+		const Core::Array<uint64>* frames = capture.callstacks.Find(callstack);
+		for (int64 i = 0; frames && i < frames->Count(); ++i) {
+			const uint64 address = (*frames)[i];
+			Core::StringBuilder text;
+			const SymbolRecord* symbol = capture.symbols.Find(address);
+			if (symbol) {
+				text.Append(capture.Text(symbol->functionStr));
+				if (symbol->fileStr != 0) {
+					text.Append(" (");
+					text.Append(capture.Text(symbol->fileStr));
+					text.AppendByte(':');
+					text.AppendUInt(symbol->line);
+					text.AppendByte(')');
+				}
+			}
+			else {
+				const ModuleRecord* module = nullptr;
+				for (const ModuleRecord& candidate : capture.modules)
+					if (address >= candidate.base && address < candidate.base + candidate.size) module = &candidate;
+				if (module) {
+					FS::Path path = FS::Path(capture.Text(module->pathStr));
+					text.Append(path.FileName());
+					text.Append("+0x");
+					text.AppendHex(address - module->base);
+				}
+				else {
+					text.Append("0x");
+					text.AppendHex(address);
+				}
+			}
+			json.String(text.View());
+		}
+		json.EndArray();
+	}
+
+	static void WriteParents(IED::JsonWriter& json, const Capture& capture, ZoneRef ref, const ThreadTrack* track, int64 start) {
+		json.Key(Core::StringView("parents"));
+		json.BeginArray();
+		for (int64 depth = ref.Depth() - 1; depth >= 0; --depth) {
+			const ZoneLevel* level = track->levels[depth];
+			const int64 i = level->FirstEndingAfter(start);
+			if (i >= level->Count() || level->starts[i] > start) break;
+			json.BeginObject();
+			json.Field("ref", ZoneRef::Of(ref.Track(), depth, i).Text().View());
+			json.Field("name", capture.ZoneName(track, level, i));
+			json.IntField("durationNs", capture.clock.Ns(level->EndOr(i, capture.lastTicks) - level->starts[i]));
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	static void WriteChildren(IED::JsonWriter& json, const Capture& capture, ZoneRef ref, const ThreadTrack* track, int64 start, int64 end) {
+		json.Key(Core::StringView("children"));
+		json.BeginArray();
+		const int64 depth = ref.Depth() + 1;
+		int64 count = 0;
+		if (depth < track->levels.Count()) {
+			const ZoneLevel* level = track->levels[depth];
+			Core::HashMap<Core::String, int64> slot;
+			Core::Array<Core::String> names;
+			Core::Array<int64> counts;
+			Core::Array<int64> totals;
+			const int64 stop = level->FirstStartingAt(end);
+			for (int64 i = level->FirstStartingAt(start); i < stop; ++i) {
+				Core::String name = Core::String(capture.ZoneName(track, level, i));
+				int64 at;
+				if (!slot.TryGet(name, at)) {
+					at = names.Count();
+					slot.Insert(name, at);
+					names.Push(name);
+					counts.Push(0);
+					totals.Push(0);
+				}
+				counts[at] += 1;
+				totals[at] += level->EndOr(i, capture.lastTicks) - level->starts[i];
+				count += 1;
+			}
+			Core::Array<int64> order;
+			for (int64 i = 0; i < names.Count(); ++i) order.Push(i);
+			order.SortBy([&totals](const int64& a, const int64& b) -> bool { return totals[a] > totals[b]; });
+			for (int64 k = 0; k < order.Count() && k < (int64)kMostChildNames; ++k) {
+				json.BeginObject();
+				json.Field("name", names[order[k]].View());
+				json.IntField("count", counts[order[k]]);
+				json.IntField("totalNs", capture.clock.Ns(totals[order[k]]));
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+		json.IntField("childCount", count);
+	}
+
+	static void WriteFrameOf(IED::JsonWriter& json, const Capture& capture, int64 t) {
+		json.Key(Core::StringView("frame"));
+		const FrameSet* set = MainFrameSet(capture);
+		const int64 i = set ? set->starts.UpperBound(t) - 1 : -1;
+		if (i < 0 || set->ends[i] == kOpen || set->ends[i] <= t) {
+			json.Null();
+			return;
+		}
+		json.BeginObject();
+		json.IntField("index", i);
+		json.IntField("startNs", capture.clock.Ns(set->starts[i]));
+		json.IntField("durationNs", capture.clock.Ns(set->ends[i] - set->starts[i]));
+		json.EndObject();
+	}
+
+	static void WriteExtra(IED::JsonWriter& json, const Capture& capture, const ThreadTrack* track, const ZoneLevel* level, int64 i) {
+		const uint32 index = level->extras[i];
+		const ZoneExtra* extra = index == 0 ? nullptr : &track->extras[(int64)index - 1];
+		json.Field("text", extra ? capture.Text(extra->textStr) : Core::StringView(""));
+		json.Key(Core::StringView("value"));
+		if (extra && extra->hasValue) json.Int((int64)extra->value);
+		else json.Null();
+		const SrcLoc* loc = capture.srclocs.Find((uint64)level->sites[i]);
+		json.IntField("color", extra && extra->color != 0 ? (int64)extra->color : (loc ? (int64)loc->color : 0));
+		json.Key(Core::StringView("callstack"));
+		WriteCallstack(json, capture, extra ? extra->callstack : 0);
+	}
+
+	Core::String ZoneDetails(const Capture& capture, ZoneRef ref) {
+		const ThreadTrack* track;
+		const ZoneLevel* level;
+		if (!ZoneAt(capture, ref, track, level)) return Core::String();
+		const int64 i = ref.Index();
+		const int64 start = level->starts[i];
+		const int64 end = level->EndOr(i, capture.lastTicks);
+		const uint64 site = (uint64)level->sites[i];
+		const SrcLoc* loc = capture.srclocs.Find(site);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("ref", ref.Text().View());
+		json.Field("name", capture.ZoneName(track, level, i));
+		json.Field("siteName", capture.SiteName(site));
+		json.IntField("site", (int64)site);
+		json.Field("function", loc ? capture.Text(loc->functionStr) : Core::StringView(""));
+		json.Field("file", loc ? capture.Text(loc->fileStr) : Core::StringView(""));
+		json.IntField("line", loc ? (int64)loc->line : 0);
+		json.IntField("startNs", capture.clock.Ns(start));
+		json.IntField("endNs", capture.clock.Ns(end));
+		json.IntField("durationNs", capture.clock.Ns(end - start));
+		json.IntField("selfNs", capture.clock.Ns(level->ends[i] == kOpen ? end - start : level->selfs[i]));
+		json.BoolField("open", level->ends[i] == kOpen);
+		json.IntField("depth", ref.Depth());
+		json.IntField("track", ref.Track());
+		json.Field("thread", TrackLabel(capture, track, start).View());
+		const uint64 task = TaskNameAt(capture, (int32)ref.Track(), start);
+		json.Field("task", capture.Text(task));
+		WriteExtra(json, capture, track, level, i);
+		WriteFrameOf(json, capture, start);
+		WriteParents(json, capture, ref, track, start);
+		WriteChildren(json, capture, ref, track, start, end);
+		json.EndObject();
+		return json.ToString();
+	}
+}

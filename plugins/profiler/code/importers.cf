@@ -1,0 +1,93 @@
+include "importers.ch"
+include "tracefile.ch"
+include "inflate.ch"
+include "api/protocol.ch"
+
+namespace Profiler
+{
+	const int64 kMostImportBytes = 2147483648;
+
+	static bool ReadAll(Core::StringView path, Core::Array<uint8>& bytes, Core::String& problem) {
+		Core::String name = Core::String(path);
+		const int64 size = FS::FileSize(name.CStr());
+		if (size < 0 || size > kMostImportBytes) {
+			problem = size < 0 ? Core::String("no file ") + path : Core::String("the file is larger than the profiler imports");
+			return false;
+		}
+		FS::File file = FS::File(name.CStr(), "rb");
+		bytes.Resize(size);
+		if (!file.IsOpen() || (size > 0 && file.ReadAll((void*)bytes.Data(), size) != size)) {
+			problem = Core::String("cannot read ") + path;
+			return false;
+		}
+		return true;
+	}
+
+	static bool StartsWithText(const Core::Array<uint8>& bytes, const char* text) {
+		for (int64 i = 0; text[i] != (char)0; ++i)
+			if (i >= bytes.Count() || bytes[i] != (uint8)text[i]) return false;
+		return true;
+	}
+
+	// Whether the bytes are JSON: the first character past white space opens an object or an array.
+	static bool LooksLikeJson(const Core::Array<uint8>& bytes) {
+		for (uint8 b : bytes) {
+			if (b == (uint8)' ' || b == (uint8)'\t' || b == (uint8)'\r' || b == (uint8)'\n') continue;
+			return b == (uint8)'{' || b == (uint8)'[';
+		}
+		return false;
+	}
+
+	static Core::String Metadata(Core::StringView source, Core::StringView format) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("importedFrom", source);
+		json.Field("format", format);
+		json.Key(Core::StringView("annotations"));
+		json.BeginArray();
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static Core::String TargetPath(Core::StringView folder, Core::StringView stem) {
+		FS::Path path = FS::Path(folder) / (Core::String(stem) + ".iedtrace").View();
+		for (int32 n = 2; FS::FileExists(path.CStr()); ++n) {
+			Core::StringBuilder name;
+			name.Append(stem);
+			name.AppendByte('_');
+			name.AppendInt(n);
+			name.Append(".iedtrace");
+			path = FS::Path(folder) / name.View();
+		}
+		return Core::String(path.View());
+	}
+
+	Core::String ImportFile(Core::StringView source, Core::StringView folder, Core::String& problem) {
+		Core::Array<uint8> bytes;
+		if (!ReadAll(source, bytes, problem)) return Core::String();
+		FS::Path from = FS::Path(source);
+		Core::String stem = Core::String(from.Stem());
+		Core::String target = TargetPath(folder, stem.View());
+		if (StartsWithText(bytes, "ITP1")) {
+			if (!FS::CopyFile(Core::String(source).CStr(), target.CStr(), false)) {
+				problem = Core::String("cannot copy the trace into ") + folder;
+				return Core::String();
+			}
+			return target;
+		}
+		Core::Array<uint8> stream;
+		Core::StringView format;
+		if (LooksLikeJson(bytes)) {
+			format = Core::StringView("chrome-trace");
+			Core::StringView json = Core::StringView((const char*)bytes.Data(), bytes.Count());
+			if (!ImportChromeTrace(json, stem.View(), stream, problem)) return Core::String();
+		}
+		else {
+			format = Core::StringView("pprof");
+			if (!ImportPprof(bytes, stem.View(), stream, problem)) return Core::String();
+		}
+		if (!WriteTraceFile(target.CStr(), stream, Metadata(source, format).View(), problem)) return Core::String();
+		return target;
+	}
+}

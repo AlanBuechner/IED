@@ -1,0 +1,185 @@
+include "tracefile.ch"
+
+namespace Profiler
+{
+	const int64 kReadBlockBytes = 1048576;
+	const int64 kPeekBytes = 65536;
+	const int64 kMostMetadataBytes = 16777216;
+
+	static void PutUInt(Core::Array<uint8>& out, uint64 value, int32 bytes) {
+		for (int32 i = 0; i < bytes; ++i) out.Push((uint8)((value >> (8 * i)) & 0xFF));
+	}
+
+	static uint64 GetUInt(const uint8* bytes, int32 count) {
+		uint64 value = 0;
+		for (int32 i = 0; i < count; ++i) value |= (uint64)bytes[i] << (8 * i);
+		return value;
+	}
+
+	// The index block and footer for a stream of `streamBytes`.
+	static Core::Array<uint8> Tail(int64 streamBytes, Core::StringView metadata) {
+		Core::Array<uint8> tail;
+		const char* index = "ITPI";
+		for (int32 i = 0; i < 4; ++i) tail.Push((uint8)index[i]);
+		PutUInt(tail, (uint64)metadata.ByteLength(), 4);
+		tail.Append((const uint8*)metadata.Data(), metadata.ByteLength());
+		PutUInt(tail, (uint64)streamBytes, 8);
+		PutUInt(tail, (uint64)kTraceFileVersion, 2);
+		PutUInt(tail, 0, 2);
+		const char* footer = "ITPX";
+		for (int32 i = 0; i < 4; ++i) tail.Push((uint8)footer[i]);
+		return tail;
+	}
+
+	bool TraceWriter::Open(const char* path, Core::String& problem) {
+		file = FS::File(path, "wb");
+		if (!file.IsOpen()) {
+			problem = Core::String("cannot write ") + path;
+			return false;
+		}
+		return true;
+	}
+
+	void TraceWriter::Append(const uint8* bytes, int64 length) {
+		if (!file.IsOpen()) return;
+		file.Write((const void*)bytes, length);
+		written += length;
+	}
+
+	void TraceWriter::Finish(Core::StringView metadata) {
+		if (!file.IsOpen()) return;
+		Core::Array<uint8> tail = Tail(written, metadata);
+		file.Write((const void*)tail.Data(), tail.Count());
+		file.Close();
+	}
+
+	bool ReadLayout(const char* path, TraceLayout& layout, Core::String& problem) {
+		FS::File file = FS::File(path, "rb");
+		if (!file.IsOpen()) {
+			problem = Core::String("cannot read ") + path;
+			return false;
+		}
+		layout.fileBytes = file.Seek(0, FS::SeekOrigin::End);
+		layout.streamBytes = layout.fileBytes;
+		layout.finished = false;
+		layout.metadata = Core::String();
+		if (layout.fileBytes < kPreambleBytes + kFooterBytes) return true;
+		uint8[16] footer;
+		file.Seek(layout.fileBytes - kFooterBytes);
+		if (file.Read((void*)&footer[0], kFooterBytes) != kFooterBytes) return true;
+		if (footer[12] != (uint8)'I' || footer[13] != (uint8)'T' || footer[14] != (uint8)'P' || footer[15] != (uint8)'X') return true;
+		const int64 indexAt = (int64)GetUInt(&footer[0], 8);
+		if (indexAt < kPreambleBytes || indexAt + 8 > layout.fileBytes - kFooterBytes) return true;
+		uint8[8] head;
+		file.Seek(indexAt);
+		if (file.Read((void*)&head[0], 8) != 8 || head[0] != (uint8)'I' || head[1] != (uint8)'T' || head[2] != (uint8)'P' || head[3] != (uint8)'I') return true;
+		const int64 length = (int64)GetUInt(&head[4], 4);
+		if (length > kMostMetadataBytes || indexAt + 8 + length > layout.fileBytes - kFooterBytes) return true;
+		Core::StringBuilder text;
+		text.Reserve(length);
+		Core::Array<uint8> bytes;
+		bytes.Resize(length);
+		if (length > 0 && file.Read((void*)bytes.Data(), length) != length) return true;
+		text.AppendBytes((const char*)bytes.Data(), length);
+		layout.metadata = text.ToString();
+		layout.streamBytes = indexAt;
+		layout.finished = true;
+		return true;
+	}
+
+	void LoadStream(Capture& capture, const uint8* bytes, int64 length) {
+		ChunkStream stream;
+		stream.Feed(bytes, length);
+		const uint8* chunk;
+		int64 size;
+		while (stream.Next(chunk, size)) ApplyChunk(capture, chunk, size);
+		if (!stream.Problem().IsEmpty()) capture.Warn(capture.lastTicks, stream.Problem());
+		Finish(capture);
+	}
+
+	bool LoadTraceFile(const char* path, Capture& capture, TraceLayout& layout, Core::String& problem) {
+		if (!ReadLayout(path, layout, problem)) return false;
+		FS::File file = FS::File(path, "rb");
+		if (!file.IsOpen()) {
+			problem = Core::String("cannot read ") + path;
+			return false;
+		}
+		ChunkStream stream;
+		Core::Array<uint8> block;
+		block.Resize(kReadBlockBytes);
+		int64 left = layout.streamBytes;
+		while (left > 0) {
+			const int64 want = left < kReadBlockBytes ? left : kReadBlockBytes;
+			const int64 got = file.Read((void*)block.Data(), want);
+			if (got <= 0) break;
+			left -= got;
+			stream.Feed(block.Data(), got);
+			const uint8* chunk;
+			int64 size;
+			while (stream.Next(chunk, size)) ApplyChunk(capture, chunk, size);
+			if (!stream.Problem().IsEmpty()) break;
+		}
+		if (!stream.StartedOk()) {
+			problem = stream.Problem().IsEmpty() ? Core::String("not a trace file") : Core::String(stream.Problem());
+			return false;
+		}
+		if (stream.Pending() > 0) capture.Warn(capture.lastTicks, Core::StringView("the file ends inside a chunk; the rest was left out"));
+		Finish(capture);
+		return true;
+	}
+
+	bool PeekHello(const char* path, Core::String& app, int64& startUnixNs) {
+		FS::File file = FS::File(path, "rb");
+		if (!file.IsOpen()) return false;
+		Core::Array<uint8> bytes;
+		bytes.Resize(kPeekBytes);
+		const int64 got = file.Read((void*)bytes.Data(), kPeekBytes);
+		if (got <= 0) return false;
+		ChunkStream stream;
+		stream.Feed(bytes.Data(), got);
+		const uint8* chunk;
+		int64 size;
+		bool found = false;
+		Core::String* name = &app;
+		int64* start = &startUnixNs;
+		bool* seen = &found;
+		Core::String problem;
+		if (!stream.Next(chunk, size)) return false;
+		DecodeChunk(chunk, size, [name, start, seen](const Event& event) {
+			if (event.type != EventType::Hello || *seen) return;
+			*name = Core::String(event.text);
+			*start = (int64)event.fields[4];
+			*seen = true;
+		}, problem);
+		return found;
+	}
+
+	bool RewriteMetadata(const char* path, Core::StringView metadata, Core::String& problem) {
+		TraceLayout layout;
+		if (!ReadLayout(path, layout, problem)) return false;
+		if (!layout.finished) {
+			problem = Core::String("the trace file has no index block to rewrite");
+			return false;
+		}
+		Core::StringBuilder padded;
+		padded.Append(metadata);
+		const int64 oldTail = layout.fileBytes - layout.streamBytes;
+		while (padded.ByteLength() + 8 + kFooterBytes < oldTail) padded.AppendByte(' ');
+		FS::File file = FS::File(path, "r+b");
+		if (!file.IsOpen()) {
+			problem = Core::String("cannot write ") + path;
+			return false;
+		}
+		Core::Array<uint8> tail = Tail(layout.streamBytes, padded.View());
+		file.Seek(layout.streamBytes);
+		return file.Write((const void*)tail.Data(), tail.Count()) == tail.Count();
+	}
+
+	bool WriteTraceFile(const char* path, const Core::Array<uint8>& stream, Core::StringView metadata, Core::String& problem) {
+		TraceWriter writer;
+		if (!writer.Open(path, problem)) return false;
+		writer.Append(stream.Data(), stream.Count());
+		writer.Finish(metadata);
+		return true;
+	}
+}
