@@ -1,0 +1,13 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Text editor settings",
+	"type": "object",
+	"properties": {
+		"editor.renderWhitespace": {
+			"enum": ["all", "trailing", "boundary", "selection", "none"],
+			"default": "all",
+			"x-ied-tiers": ["app"],
+			"description": "Spaces and tabs drawn as dots and arrows (Visual Studio's View White Space, Ctrl+R, Ctrl+W): all of them, only trailing ones, all but single spaces between words, only in the selection, or none."
+		}
+	}
+}

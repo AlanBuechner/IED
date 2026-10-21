@@ -10,8 +10,9 @@
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
-	"permissions": ["fs.read", "fs.write", "fs.watch", "ui.clipboard"],
+	"permissions": ["fs.read", "fs.write", "fs.watch", "ui.clipboard", "settings.write"],
 	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Text Editor" },
 		"bindings": {
 			"provides": [
 				{
@@ -64,6 +65,7 @@
 			{ "id": "ied.editor.goTo", "title": "Go To Place", "category": "Editor" },
 			{ "id": "ied.find.inFiles", "title": "Find in Files", "category": "Edit", "icon": "$(search)" },
 			{ "id": "ied.editor.goToAll", "title": "Go To All", "category": "Edit", "icon": "$(go-to-file)" },
+			{ "id": "ied.editor.toggleWhitespace", "title": "View White Space", "category": "Edit", "icon": "$(whitespace)" },
 			{ "id": "ied.markdown.preview", "title": "Open Preview", "category": "Markdown", "icon": "$(open-preview)" },
 			{ "id": "ied.editor.open", "title": "Open File at a Place", "category": "Editor" },
 			{ "id": "ied.task.build", "title": "Build", "category": "Build", "icon": "$(gear)" },
@@ -114,7 +116,8 @@
 			],
 			"menubar/edit": [
 				{ "command": "ied.find.inFiles", "group": "3_find" },
-				{ "command": "ied.editor.goToAll", "group": "4_go" }
+				{ "command": "ied.editor.goToAll", "group": "4_go" },
+				{ "command": "ied.editor.toggleWhitespace", "group": "5_view" }
 			],
 			"menubar/view": [
 				{ "command": "ied.navigate.back", "group": "1_navigate" },
@@ -148,6 +151,7 @@
 			]
 		},
 		"keybindings": [
+			{ "command": "ied.editor.toggleWhitespace", "key": "ctrl+r ctrl+w" },
 			{ "command": "ied.editor.save", "key": "ctrl+s" },
 			{ "command": "ied.explorer.rename", "key": "f2", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },
 			{ "command": "ied.explorer.delete", "key": "delete", "when": "activeTab == 'ied.explorer' && (explorerItemKind == 'file' || explorerItemKind == 'folder') && !inputFocus" },

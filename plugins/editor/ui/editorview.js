@@ -262,7 +262,7 @@ function editorOptions(monaco) {
 		tabSize: 4,
 		guides: { indentation: true },
 		minimap: { enabled: !phone, renderCharacters: false, showSlider: "always" },
-		renderWhitespace: "none",
+		renderWhitespace: "all",   // editor.renderWhitespace's default until the settings arrive (editorsettings.js)
 		scrollBeyondLastLine: false,
 		smoothScrolling: false,
 		readOnly: true,

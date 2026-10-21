@@ -27,5 +27,6 @@ import "./settings.test.js";
 import "./git.test.js";
 import "./semanticcolors.test.js";
 import "./bindings.test.js";
+import "./editorsettings.test.js";
 
 run(document.getElementById("results"));

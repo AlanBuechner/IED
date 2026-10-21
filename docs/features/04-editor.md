@@ -43,7 +43,7 @@ The host's LSP pool (`src/lsp`) manages servers; this plugin renders. Every feat
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-EDT-30 | Indentation guides on by default; tabs default for new files; visible whitespace toggle (Ctrl+R, Ctrl+W) | P0 | US-EDT-3 |
+| F-EDT-30 | Indentation guides on by default; tabs default for new files; visible whitespace toggle (Ctrl+R, Ctrl+W) - built: `editor.renderWhitespace` (all by default, owner 2026-10-21; trailing, boundary, selection, none) on Settings > Text Editor, Edit > View White Space flips all/none in the User tier | P0 | US-EDT-3 |
 | F-EDT-31 | Indentation detection per file (respect existing files), status-bar indicator and switch, *Fix indentation* (convert to project default) for file/selection | P0 (detect), P1 (fix) | US-EDT-3, US-EDT-8 |
 | F-EDT-32 | Comment / uncomment (Ctrl+K, Ctrl+C / Ctrl+K, Ctrl+U) using the language's comment tokens | P0 | US-EDT-12 |
 | F-EDT-33 | Line ops: duplicate (Ctrl+D), move (Alt+Up/Down), delete line (Ctrl+Shift+L), join, sort, transpose | P0 | US-EDT-18 |

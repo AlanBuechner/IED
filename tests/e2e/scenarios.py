@@ -1183,3 +1183,26 @@ def git_on_a_phone(run):
 	run.shot("details")
 	page.click(".git-back")
 	page.wait_for_selector(".git-row:not(.local)")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# White space (editor.renderWhitespace, on by default): View White Space (Ctrl+R, Ctrl+W) turns it off in every open
+# editor and records it in the User tier.
+
+@scenario(viewports=("desktop",))
+def view_white_space(run):
+	page = run.open()
+	page.click(".tree-row:has-text('README.md')")
+	run.wait_text(".monaco-editor .view-lines", "workspace" if run.target.kind == "real" else "fixture", timeout=30000)
+	shown = "monaco.editor.getEditors().filter((e) => e.getModel()).map((e) => e.getOption(monaco.editor.EditorOption.renderWhitespace))"
+	check(page.evaluate(shown) == ["all"], "white space shows by default: %s" % page.evaluate(shown))
+	run.shot("shown")
+	page.click(".monaco-editor .view-lines")
+	page.keyboard.press("Control+r")
+	page.keyboard.press("Control+w")
+	page.wait_for_function(shown + ".every((option) => option === 'none')")
+	values = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
+	check(values["editor.renderWhitespace"] == {"value": "none", "source": "app"}, "recorded in the User tier: %s" % values["editor.renderWhitespace"])
+	run.shot("hidden")
+	run.request("settings.reset", {"tier": "app", "key": "editor.renderWhitespace"})
+	page.wait_for_function(shown + ".every((option) => option === 'all')")
