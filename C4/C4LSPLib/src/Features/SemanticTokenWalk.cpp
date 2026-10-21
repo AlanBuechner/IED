@@ -56,6 +56,14 @@ namespace C4LSP::Features::TokenWalk
 		// and classifies them exactly like any other expression in the same file.
 	}
 
+	/// True when `node` (the last entry of `path`) is what its parent call calls: `x.Get` in `x.Get()`.
+	bool IsCallee(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path)
+	{
+		if (path.Count() < 2 || path[path.Count() - 2]->Type() != Scripting::NodeType::FunctionCall)
+			return false;
+		return static_cast<const Scripting::FunctionCallNode*>(path[path.Count() - 2])->GetCallee().Get() == &node;
+	}
+
 	// --- AST walk -----------------------------------------------------------
 	void Walk(const Scripting::AstNode& node, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& pathIn, int objectDepth, bool directMember)
 	{
@@ -259,6 +267,11 @@ namespace C4LSP::Features::TokenWalk
 		case Scripting::NodeType::MemberAccess: {
 			const auto& ma = static_cast<const Scripting::MemberAccessNode&>(node);
 			uint32 kind = ClassifyReference(ctx, node, path, /*isMemberAccess=*/true);
+			// A member the resolver could not place (its owner is itself a member, `o.inner.Get()`) is still a method
+			// when it is called; a resolved declaration keeps its own kind (a called function-pointer field stays a field).
+			const bool declared = ctx.resolver && ctx.resolver->ResolveReference(node, path).declaration;
+			if (!declared && IsCallee(node, path))
+				kind = K(SemanticTokenKind::Method);
 			RecordOffset(ctx, ma.GetMemberNameToken().GetStartLocation(), TokInfo{ kind, None });
 			break;
 		}

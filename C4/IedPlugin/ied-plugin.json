@@ -1,4 +1,5 @@
-// The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar, C4LSP - one server per
+// The C4 language in IED (docs/tools/03-editor-lsp-dap.md): the language with its grammar and how C4LSP's semantic
+// tokens map onto IED's syntax colors (Visual Assist style: `controlFlow` pink, `preprocessor` gray), C4LSP - one server per
 // project of a solution, as C4LSP analyzes one program (its options are the ones Nuke writes for the project) - C4DAP,
 // and the c4.nuke task preset (with its Launch configuration) and the c4 and c4-test problem matchers (IED docs/06,
 // docs/25). Ships in every toolchain as
@@ -26,6 +27,36 @@
 				"indentation": { "increasePattern": "^.*\\{[^}\"']*$", "decreasePattern": "^\\s*\\}" },
 				"grammar": "grammars/c4.monarch.json",
 				"taskComments": ["TODO", "HACK", "FIXME", "NOTE"]
+			}
+		],
+		"semanticTokenColors": [
+			{
+				"languageId": "c4",
+				"label": "Visual Assist style",
+				"rules": {
+					"namespace": "--syntax-namespace",
+					"type": "--syntax-type",
+					"type.builtin": "--syntax-keyword",
+					"class": "--syntax-type",
+					"enum": "--syntax-type",
+					"interface": "--syntax-type",
+					"struct": "--syntax-type",
+					"typeParameter": "--syntax-type",
+					"parameter": "--syntax-parameter",
+					"variable": "--syntax-variable",
+					"field": "--syntax-member",
+					"property": "--syntax-member",
+					"function": "--syntax-function",
+					"method": "--syntax-function",
+					"macro": "--syntax-macro",
+					"keyword": "--syntax-keyword",
+					"modifier": "--syntax-keyword",
+					"controlFlow": "--syntax-control",
+					"preprocessor": "--syntax-preprocessor",
+					"comment": "--syntax-comment",
+					"number": "--syntax-number",
+					"string": "--syntax-string"
+				}
 			}
 		],
 		"headerSourcePairs": [ { "extensions": [".ch", ".cf"] } ],

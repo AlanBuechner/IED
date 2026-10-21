@@ -54,7 +54,7 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 | Navigation | `definition` (a function's body: its out-of-line definition when it has one), `declaration`, `typeDefinition`, `implementation`, `references` (every file, the declarations first with `context.includeDeclaration`), `documentHighlight` |
 | Information | `hover`, `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members) |
 | Symbols | `documentSymbol`, `workspace/symbol` (names containing the query, any case, inside namespaces and types too; an out-of-line method's container is its type) |
-| Presentation | `semanticTokens/full` (20 token types: the 19 standard ones plus a C4 `controlFlow` kind; modifiers include `builtin`, used for primitives; a token never crosses a line - a block comment is one token per line), `foldingRange` |
+| Presentation | `semanticTokens/full` (21 token types: the 19 standard ones plus the C4 `controlFlow` kind and `preprocessor` for directive keywords - `#define`, `#if`, ... and `include`; modifiers include `builtin`, used for primitives; a token never crosses a line - a block comment is one token per line), `foldingRange` |
 | Edits | `rename` (a function's declaration, its out-of-line definition and every use), `prepareRename`, `formatting`, `rangeFormatting` |
 | Code actions | quick fixes, create-definition, tidy |
 

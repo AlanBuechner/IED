@@ -100,7 +100,7 @@ namespace C4LSP::Features
 
 		/// Scan `text` for preprocessor directive lines and return their (line, column-1) start positions: any line whose
 		/// first non-whitespace character is '#'. The lexer swallows the '#' into that line's first identifier ("#define"
-		/// lexes as one token), so no AST node exists for it - this scan lets the emit pass color those tokens as macros.
+		/// lexes as one token), so no AST node exists for it - this scan lets the emit pass color those tokens as directives.
 		std::vector<std::pair<uint32, uint32>> DirectiveLineStarts(const std::string& text)
 		{
 			std::vector<std::pair<uint32, uint32>> out; // (1-based line, 0-based column of '#')
@@ -304,10 +304,10 @@ namespace C4LSP::Features
 					else if (IsDirectiveLineStart(directiveStarts, startLoc))
 					{
 						// The lexer swallows the '#' into this identifier ("#define" lexes as one token "#define"), so a
-						// directive line's first token is an Identifier that no AST node ever records. Preprocessor KEYWORDS
-						// (#define, #if, #endif, ...) stay in the neutral keyword family (blue) - Visual Assist style; only
-						// macro NAMES are purple (the name following a `#define` lands in `definedMacros` via the scan above).
-						kind = K(SemanticTokenKind::Keyword);
+						// directive line's first token is an Identifier that no AST node ever records. Directive keywords
+						// (#define, #if, #endif, ...) are the preprocessor kind (gray, as Visual Studio shows them); macro
+						// NAMES are the macro kind (the name following a `#define` lands in `definedMacros` via the scan above).
+						kind = K(SemanticTokenKind::Preprocessor);
 					}
 					else if (ctx.templateParamNames.count(tok.GetText()))
 						kind = K(SemanticTokenKind::TypeParameter); // template parameter use site the semantic pass missed
@@ -315,8 +315,8 @@ namespace C4LSP::Features
 						kind = K(SemanticTokenKind::Macro); // a macro name: purple at its definition AND at every usage site
 					else if (tok.GetText() == "include" && IsIncludeDirective(lexer))
 						// `include` is lexed as a plain identifier and committed in IncludeDeclarationNode::TryParse,
-						// so the AST walk never records it. Replicate that commit rule to color the directive blue.
-						kind = K(SemanticTokenKind::Keyword);
+						// so the AST walk never records it. Replicate that commit rule to color it as a directive (#include's gray).
+						kind = K(SemanticTokenKind::Preprocessor);
 					else
 						kind = K(SemanticTokenKind::Variable); // unresolved identifier
 				}
@@ -354,7 +354,7 @@ namespace C4LSP::Features
 			"keyword", "modifier", "comment", "number", "string",
 
 			// C4 extension kinds (appended AFTER the standard legend so existing ids stay stable).
-			"controlFlow"
+			"controlFlow", "preprocessor"
 		};
 		static_assert(sizeof(names) / sizeof(names[0]) == static_cast<size_t>(SemanticTokenKind::Count),
 		              "TokenTypeNames must match SemanticTokenKind");

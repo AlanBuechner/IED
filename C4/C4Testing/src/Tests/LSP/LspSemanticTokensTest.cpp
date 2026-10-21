@@ -66,7 +66,7 @@ int32 main() {
 	void LspSemanticTokensTest::TestTokenTypeNamesMatchLegendOrder()
 	{
 		auto names = SemanticTokens::TokenTypeNames();
-		TEST_ASSERT_EQ(names.Count(), (uint32)SemanticTokenKind::Count); // 20 kinds (19 standard + controlFlow extension)
+		TEST_ASSERT_EQ(names.Count(), (uint32)SemanticTokenKind::Count); // 21 kinds (19 standard + the controlFlow and preprocessor extensions)
 		TEST_ASSERT(names[0] == std::string("namespace"));
 		TEST_ASSERT(names[1] == std::string("type"));
 		TEST_ASSERT(names[5] == std::string("struct"));
@@ -75,7 +75,8 @@ int32 main() {
 		TEST_ASSERT(names[10] == std::string("function"));
 		TEST_ASSERT(names[17] == std::string("number"));
 		TEST_ASSERT(names[18] == std::string("string"));
-		TEST_ASSERT(names[19] == std::string("controlFlow")); // C4 extension kind, appended last so ids stay stable
+		TEST_ASSERT(names[19] == std::string("controlFlow")); // C4 extension kinds, appended last so ids stay stable
+		TEST_ASSERT(names[20] == std::string("preprocessor"));
 
 		auto mods = SemanticTokens::ModifierNames();
 		TEST_ASSERT_EQ(mods.Count(), (uint32)6);
@@ -275,6 +276,40 @@ int32 main() {
 		TEST_PASSED();
 	}
 
+	// `o.inner.Get()` and `p->inner.Get()`: a method called on a field's value is a method, as `local.Get()` is
+	// (it read as a field: IED showed `ws->root.View()` with `View` in the field color).
+	void LspSemanticTokensTest::TestMethodCalledThroughAFieldIsMethodKind()
+	{
+		const std::string program =
+			R"(struct Inner {
+	int32 n;
+	int32 Get() { return n; }
+};
+struct Outer {
+	Inner inner;
+};
+int32 Use(Outer* p) {
+	Outer o;
+	Inner local;
+	return o.inner.Get() + p->inner.Get() + local.Get();
+}
+)";
+		auto session = Make("Chain.cf", program);
+		auto uri = Testing::Lsp::UriFor("Chain.cf");
+		auto result = SemanticTokens::ForDocument(session, uri);
+
+		for (int occurrence : { 2, 3, 4 }) // the three calls; the 1st is the definition
+		{
+			auto tok = TokenAt(result, program, "Get", occurrence);
+			TEST_ASSERT(tok.found);
+			TEST_ASSERT_EQ(tok.kind, (uint32)SemanticTokenKind::Method);
+		}
+		auto field = TokenAt(result, program, "inner", 2); // `o.inner`: still a field
+		TEST_ASSERT(field.found);
+		TEST_ASSERT_EQ(field.kind, (uint32)SemanticTokenKind::Field);
+		TEST_PASSED();
+	}
+
 	void LspSemanticTokensTest::TestControlFlowKeywordsAreControlFlowKind()
 	{
 		const std::string program = "int32 Pick(int32 n) {\n\tif (n > 0) { return 1; }\n\telse { return 0; }\n}\n";
@@ -399,7 +434,7 @@ int32 b = 2;
 		TEST_PASSED();
 	}
 
-	void LspSemanticTokensTest::TestIncludeDirectiveIsKeywordKind()
+	void LspSemanticTokensTest::TestIncludeDirectiveIsPreprocessorKind()
 	{
 		const std::string program =
 			R"(include "missing.ch"
@@ -411,11 +446,11 @@ void main() {
 		auto uri = Testing::Lsp::UriFor("Inc.cf");
 		auto result = SemanticTokens::ForDocument(session, uri);
 
-		// `include` gets keyword color only when it commits as a directive (next token is a `.ch` string),
-		// matching the parser's IncludeDeclarationNode rule.
+		// `include` reads as a directive (gray, like #include) only when it commits as one (next token is a `.ch`
+		// string), matching the parser's IncludeDeclarationNode rule.
 		auto tok = TokenAt(result, program, "include", 1);
 		TEST_ASSERT(tok.found);
-		TEST_ASSERT_EQ(tok.kind, (uint32)SemanticTokenKind::Keyword);
+		TEST_ASSERT_EQ(tok.kind, (uint32)SemanticTokenKind::Preprocessor);
 
 		// A bare `include` identifier that is not a directive stays an unresolved variable.
 		const std::string plain = "void main() {\n\tinclude(1);\n}\n";
@@ -503,7 +538,7 @@ int32 main() { return t.id; })";
 		TEST_PASSED();
 	}
 
-	void LspSemanticTokensTest::TestPreprocessorDirectivesAreKeywordAndMacroNamesPurple()
+	void LspSemanticTokensTest::TestPreprocessorDirectivesArePreprocessorAndMacroNamesMacro()
 	{
 		const char* code =
 			R"(#define MAX_HP 100
@@ -513,10 +548,11 @@ int32 main() { int32 hp = MAX_HP; return hp; })";
 		auto uri = Testing::Lsp::UriFor("M.cf");
 		auto result = SemanticTokens::ForDocument(session, uri);
 
-		// The directive line's first token is the swallowed "#define": a NEUTRAL KEYWORD, not a macro.
+		// The directive line's first token is the swallowed "#define": a preprocessor directive (gray, Visual Studio's
+		// preprocessor keyword), not a macro and not an ordinary keyword.
 		auto defTok = TokenAt(result, code, "#define", 1);
 		TEST_ASSERT(defTok.found);
-		TEST_ASSERT_EQ(defTok.kind, (uint32)SemanticTokenKind::Keyword);
+		TEST_ASSERT_EQ(defTok.kind, (uint32)SemanticTokenKind::Preprocessor);
 
 		// The macro NAME is purple at BOTH its definition and its usage site.
 		auto nameDef = TokenAt(result, code, "MAX_HP", 1); // on the #define line

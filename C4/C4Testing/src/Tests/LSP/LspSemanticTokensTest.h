@@ -57,6 +57,9 @@ namespace Testing
 		TEST_FUNC(Lsp.Features.SemanticTokens)
 		void TestMemberAccessFieldReferenceIsFieldKind();
 
+		TEST_FUNC(Lsp.Features.SemanticTokens)
+		void TestMethodCalledThroughAFieldIsMethodKind();
+
 		// --- Keywords / modifiers / literals / comments ---
 		TEST_FUNC(Lsp.Features.SemanticTokens)
 		void TestControlFlowKeywordsAreControlFlowKind();
@@ -77,7 +80,7 @@ namespace Testing
 		void TestStringLiteralIsStringKind();
 
 		TEST_FUNC(Lsp.Features.SemanticTokens)
-		void TestIncludeDirectiveIsKeywordKind();
+		void TestIncludeDirectiveIsPreprocessorKind();
 
 		// --- Unknown / empty document ---
 		TEST_FUNC(Lsp.Features.SemanticTokens)
@@ -94,7 +97,7 @@ namespace Testing
 	// Preprocessor lines: directive keywords stay in the neutral keyword family; macro NAMES are purple at their
 	// definition AND every usage site (this file and other files).
 	TEST_FUNC(Lsp.Features.SemanticTokens)
-	void TestPreprocessorDirectivesAreKeywordAndMacroNamesPurple();
+	void TestPreprocessorDirectivesArePreprocessorAndMacroNamesMacro();
 
 	// Cross-file: a #define in one source colors usages of its name in another source as macros.
 	TEST_FUNC(Lsp.Features.SemanticTokens)

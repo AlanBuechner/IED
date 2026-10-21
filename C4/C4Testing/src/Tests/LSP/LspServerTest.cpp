@@ -199,15 +199,12 @@ namespace Testing
 		const Value& legend = stp.Member("legend");
 		Value types = legend.Member("tokenTypes");
 		TEST_ASSERT(types.IsArray());
-		TEST_ASSERT_EQ((int64)types.Size(), (int64)20); // standard C++-like legend + string, plus the controlFlow extension kind
+		TEST_ASSERT_EQ((int64)types.Size(), (int64)21); // standard C++-like legend + string, plus the controlFlow and preprocessor extension kinds
 		TEST_ASSERT(legend.Member("tokenModifiers").IsArray());
 
-		// The last entry must be the C4 extension kind; existing indices stay stable.
-		bool sawControlFlow = false;
-		for (int64 i = 0; i < types.Size(); ++i)
-			if (types.At(i).GetString() == "controlFlow")
-				sawControlFlow = true;
-		TEST_ASSERT(sawControlFlow);
+		// The C4 extension kinds come last, so existing indices stay stable.
+		TEST_ASSERT(types.At(19).GetString() == "controlFlow");
+		TEST_ASSERT(types.At(20).GetString() == "preprocessor");
 
 		FeedNotification("initialized", Value::Null());
 		FeedNotification("textDocument/didOpen", MakeTextDocParams(uri, program));

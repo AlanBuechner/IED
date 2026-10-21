@@ -10,7 +10,7 @@ namespace C4LSP::Features
 	/// Semantic-token kinds emitted by the C4 LSP. The set and ordering mirror the standard
 	/// "c++-like" token taxonomy used by Visual Studio / clangd so that a client's C++ colouring
 	/// (e.g. VS Code's built-in C++ TextMate grammar or its semantic-token theme) applies to C4
-	/// sources unchanged, plus one extension kind (`controlFlow`) appended at the END of the list: LSP
+	/// sources unchanged, plus extension kinds (`controlFlow`, `preprocessor`) appended at the END of the list: LSP
 	/// token kinds are positional, so appending keeps every pre-existing index stable for any client
 	/// that already indexes the standard legend. The legend sent in `initialize` lists these names in
 	/// this order; the integer id of a kind is its index in that list.
@@ -38,6 +38,7 @@ namespace C4LSP::Features
 
 		// --- C4 extension kinds (appended AFTER the standard legend so existing ids are stable) ---
 		ControlFlow = 19,   // control-flow keywords: return / if-else / while / for / switch-case / break / continue / try-catch
+		Preprocessor = 20,  // a directive keyword: #define, #if, #endif, ... and the include directive (Visual Studio's preprocessor keyword)
 
 		Count
 	};

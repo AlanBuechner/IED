@@ -86,10 +86,11 @@ namespace C4LSP::Features::TokenWalk
 			if (res.declaration)
 				return DeclKind(res.declaration, isMemberAccess, ctx);
 
-			if (res.type)
+			if (res.type || res.isFunction)
 			{
+				// A method resolved without a declaring node carries its RETURN type: `isFunction` says what it is.
 				if (isMemberAccess)
-					return IsFunctionType(res.type) ? K(SemanticTokenKind::Method) : K(SemanticTokenKind::Field);
+					return res.isFunction || IsFunctionType(res.type) ? K(SemanticTokenKind::Method) : K(SemanticTokenKind::Field);
 				return res.isFunction ? K(SemanticTokenKind::Function) : K(SemanticTokenKind::Variable);
 			}
 		}
