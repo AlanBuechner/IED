@@ -75,14 +75,43 @@ namespace Ied
 		}
 	}
 
+	static int32 FoldedByte(int32 c) {
+		if (c == '\\') return '/';
+		return c >= 'A' && c <= 'Z' ? c + 32 : c;
+	}
+
+	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative) {
+		int64 rootLength = root.ByteLength();
+		while (rootLength > 0 && FoldedByte(root.ByteAt(rootLength - 1)) == '/') rootLength -= 1;
+		if (path.ByteLength() < rootLength) return false;
+		for (int64 i = 0; i < rootLength; ++i)
+			if (FoldedByte(root.ByteAt(i)) != FoldedByte(path.ByteAt(i))) return false;
+		if (path.ByteLength() > rootLength && FoldedByte(path.ByteAt(rootLength)) != '/') return false;
+		Core::StringBuilder inside;
+		for (int64 i = rootLength + 1; i < path.ByteLength(); ++i) inside.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		relative = inside.ToString();
+		return true;
+	}
+
+	Workspace* Workspaces::OpenFor(const FS::Path& target, Core::String& relative) {
+		for (Workspace* ws : items)
+			if (RelativeTo(ws->root.View(), target.View(), relative)) return ws;
+		const bool folder = FS::IsDirectory(target.CStr());
+		Workspace* opened = Open(folder ? target : target.Parent());
+		relative = folder ? Core::String() : Core::String(target.FileName());
+		server->hub.Publish(Core::StringView("server"), "workspace.opened", opened->SummaryJson().View());
+		return opened;
+	}
+
 	Workspace* Workspaces::Open(const FS::Path& folder) {
 		Workspace* ws = new Workspace();
 		Core::StringBuilder id;
 		id.Append("w");
 		id.AppendInt(items.Count() + 1);
 		ws->wsId = id.ToString();
-		ws->name = Core::String(folder.FileName());
-		ws->root = folder;
+		FS::Path canonical = FS::CanonicalPath(folder.CStr());
+		ws->root = canonical.IsEmpty() ? folder : canonical;
+		ws->name = Core::String(ws->root.FileName());
 		ws->trusted = true;
 		items.Push(ws);
 		Workspaces* self = this;

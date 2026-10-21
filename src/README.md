@@ -17,14 +17,15 @@ beyond loopback needs an owner password), `--port` (0: a free one), `--static <d
 state; default `%LOCALAPPDATA%\IED`, with `--test-hooks` a fresh temporary folder), `--workspace <dir>` (repeatable),
 `--test-hooks` (the test suites' `testhooks.*`, never in normal use), `--idle-timeout <s>`, `--outbound-budget-mb`,
 `--coalesce-kb`, `--allow-origin`, `--allow-host`, `--quiet`. `nuke conformance` builds the server and runs
-`tools/conformance` (46 checks) and `tools/server-checks` (38 checks: access rules and file watching) against it;
-`nuke test ied-server` runs the unit tests in `tests/` (13). All pass.
+`tools/conformance` (46 checks) and `tools/server-checks` (48 checks: access rules, file watching, the control pipe and
+the CLI) against it; `nuke test ied-server ied` runs the unit tests in `tests/` and `../cli/tests/`. All pass. With
+no `--port`, a taken 8765 falls back to a free port; `--control <name>` names the control pipe.
 
 ## What exists (M1, in progress)
 
 | Folder | Files | What |
 |---|---|---|
-| `host/` | `config`, `server`, `securitylog` | command line and the data folder; the shared state under one lock (epoch, hub, methods, sessions, services); simulated restart; the audit log |
+| `host/` | `config`, `server`, `securitylog`, `control` | command line and the data folder; the shared state under one lock (epoch, hub, methods, sessions, services); simulated restart; the audit log; the control pipe (`docs/10` "Local control channel": single instance, `open` / `url` / `status` / `stop` for the `ied` CLI in `../cli`) |
 | `web/` | `json`, `frames`, `hub`, `outbox`, `rpc`, `rpcerror`, `params`, `session`, `front`, `authgate` | protocol v1 (`docs/10`): frames and their checks, topics with seq and rings, per-client outbox (budget, coalescing, gaps), methods with typed params, stable errors, opId idempotency and cancellation, the WebSocket session (hello/resume, sub/unsub, liveness, a writer thread), HTTP (Host/Origin checks, `/ws`, `/healthz`, uploads and blobs, static files with the content policy), the session cookie, the launch-token exchange and `/api/auth/*` |
 | `auth/` | `auth`, `devices`, `throttle` | `docs/11`: launch tokens, device sessions (only the SHA-256 of a cookie is kept), the Argon2id owner password hashed outside the lock, the login throttle, `auth.setPassword` / `auth.devices` / `auth.revoke` |
 | `services/` | `presence`, `workspaces`, `documents`, `testhooks`, `blobs` | the `server` topic and notifications; folders with `fs.*` and revision checks; server-owned documents with lease and rebase; the conformance hooks |
@@ -35,8 +36,8 @@ Methods run holding the server lock, as the mock's single thread does, and relea
 request runs on a thread of its own, so responses overtake each other; each socket has a writer thread, so a slow
 client never holds up a producer.
 
-Still to come in M1 (`docs/18`): settings tiers, the plugin host (built-in and declarative), single
-instance and the named-pipe CLI (which will hand out launch tokens), the IED output source, the 24 h idle soak.
+Still to come in M1 (`docs/18`): settings tiers (and workspace trust kept in them: new workspaces are trusted today),
+the plugin host (built-in and declarative), the IED output source, the 24 h idle soak.
 
 ```
 src/

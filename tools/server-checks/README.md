@@ -6,7 +6,7 @@ Each test starts its own server with `--test-hooks` and a data folder of its own
 other. Stdlib only; it reuses `tools/pylib/ws.py` and the conformance client for protocol calls.
 
 ```bat
-python -I tools/server-checks/run_server_checks.py --server build\bin\Development-windows-x64\ied-server\ied-server.exe
+python -I tools/server-checks/run_server_checks.py --server build\bin\Development-windows-x64\ied-server\ied-server.exe --cli build\bin\Development-windows-x64\ied\ied.exe
 python -I tools/server-checks/run_server_checks.py --server <exe> -k lock -v
 nuke conformance
 ```
@@ -17,4 +17,5 @@ nuke conformance
 | `test_tokens.py` | the `OPEN` line's 64-digit token; the exchange's 303 without the token and the cookie's attributes; a token works once; a token dies after its time (`testhooks.mintToken`); malformed tokens; the cookie opens a protocol session (`auth.devices`); `/api/auth/state`; neither `auth/devices.json` nor the log holds the cookie |
 | `test_password.py` | login without a password (409); malformed logins (400); passwords have 12 characters; set then log in, devices listed, a wrong password gets no cookie; changing it needs the current one; five failures lock the address out, even for the right password, with `Retry-After`; the audit log's events in order and without secrets; `owner.json` holds an Argon2id string |
 | `test_watching.py` | outside changes reach the client (created, changed, deleted, renamed); an outside write moves the revision so a stale `fs.write` conflicts; the server's own write, mkdir, rename and delete are each reported once; a clean open document reloads (origin `disk`), a dirty one gets `doc.diskChanged`, and revision 0 when its file is deleted; `.git/` is quiet; 300 files arrive in a few batches; created-then-deleted within a batch is nothing |
+| `test_control.py` | one server per control pipe (a second exits 3); `status`; `url` signs in once; `open` of a file opens its folder once (any case), publishes `workspace.opened` and ends in `#open=`; JSON-RPC errors; `stop` says bye and ends the process. With `--cli`: `ied status` / `url` / `open --no-browser`, "no server runs", usage, and starting a server when none runs (under its own `LOCALAPPDATA`) then stopping it |
 | `test_devices.py` | `auth.revoke` sends `bye auth-revoked`, closes the device's sockets (1008) and kills its cookie; logout clears the cookie and the session; device sessions survive a restart on the same port; a corrupt devices file stops the server; a non-loopback `--host` is refused until a password exists |

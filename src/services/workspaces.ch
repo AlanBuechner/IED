@@ -42,6 +42,9 @@ namespace Ied
 		// Writes a file (its folders made), checking `expectedRevision` unless it is -1; the new revision.
 		public int64 Write(Workspace* ws, Core::StringView path, Core::StringView text, int64 expectedRevision);
 		public Workspace* Open(const FS::Path& folder);
+		// The workspace `target` (a canonical path) belongs to, opening its folder (or the file's folder) when none does;
+		// `relative` is the path inside it.
+		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);
 		// What the watcher saw, less what the server did itself: published and passed to the open documents.
 		public void ApplyExternal(Workspace* ws, const ChangeBatch& batch);
 
@@ -72,4 +75,7 @@ namespace Ied
 	Core::String TextDigest(Core::StringView text);
 	// Paths no one browses: a repository's own folder.
 	bool IsHiddenPath(Core::StringView path);
+	// `path` relative to `root` with '/' separators, comparing without regard to ASCII case or separator kind (Windows
+	// paths); false when it is not `root` or under it.
+	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative);
 }

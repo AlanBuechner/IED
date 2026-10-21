@@ -1,0 +1,8 @@
+# ied: the IED command line (docs/10 "Local control channel"): opens a folder or a file in the browser, starting the
+# server when none runs for this user; `ied status`, `ied url`, `ied stop`.
+[project]
+name = "ied"
+kind = "executable"
+description = "The IED command line: talks to the user's ied-server over its control pipe, starting it when needed"
+sources = ["."]
+working-dir = ".."

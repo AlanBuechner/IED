@@ -144,7 +144,21 @@ Language servers receive changes from the server's document store (the server is
 
 ## Local control channel (CLI <-> server)
 
-The `ied` CLI and the second-instance handoff (F-SRV-2) use a named pipe `\\.\pipe\ied-<user-sid>` with newline-delimited JSON-RPC 2.0: `open { path, line?, col?, wait? }`, `status`, `stop`, `url`. The pipe ACL restricts it to the current user. The CLI never talks HTTP, so it works even when the HTTP bind is LAN-only.
+The `ied` CLI and the second-instance handoff (F-SRV-2) use a named pipe `\\.\pipe\ied-<user-sid>` with newline-delimited JSON-RPC 2.0. The pipe's only access entry is the current user and remote clients are refused (Bedrock `Net::LocalListener`). A client refuses a pipe whose server runs as another user, which defeats a squatted name. The CLI never talks HTTP, so it works even when the HTTP bind is LAN-only.
+
+The pipe name is the single-instance lock: the server claims it before anything else, and a second server exits with code 3 ("another ied-server runs for this user").
+
+| Method | Result |
+|---|---|
+| `url` | `{url}`: `http://<host>:<port>/?t=<launch token>`, which signs a browser in once (`docs/11`) |
+| `open {path, line?, col?}` | `{wsId, path, url}`. `path` is absolute. A folder becomes a workspace unless one holds it already. A file opens in the workspace that holds it, else its folder becomes one; `path` in the result is workspace-relative, and the server topic gets `workspace.opened`. The URL ends in `#open=<wsId>/<path>[:<line>[:<col>]]`, which the web client reads once it has signed in. |
+| `status` | `{serverVersion, pid, url (without a token), workspaces, clients}` |
+| `stop` | `{}`, then every socket gets `bye {reason: "shutdown"}`, the pipe closes and the process ends |
+| (later) `open {wait: true}` | blocks until the document closes (git's editor) |
+
+Errors are JSON-RPC 2.0's: -32700 not JSON, -32600 not a request, -32601 no such method, -32602 bad params, and -32000 for anything a method refuses (a path that does not exist).
+
+**The CLI** (`cli/`, `ied.exe`) follows `ied [<path>[:<line>[:<col>]]]`, `ied status`, `ied url` and `ied stop`. When no server runs, it starts `ied-server.exe` from beside itself (the installed layout) or the sibling build folder. That server has no shared streams, so it gets a hidden console of its own and outlives the terminal. It is started with `--static` set to the nearest `frontend/` folder, and falls back to a free port when 8765 is taken. The CLI then opens the browser at the returned URL. `ied stop` returns once the pipe has closed.
 
 ## Open items
 

@@ -1,0 +1,61 @@
+// The `ied` command line: locations with lines and columns, verbs, options and what is refused.
+
+include "../command.ch"
+include "../client.ch"
+
+static Cli::Command Parsed(const char* first, const char* second, bool& ok) {
+	Core::Array<Core::String> arguments;
+	if (first) arguments.Push(Core::String(first));
+	if (second) arguments.Push(Core::String(second));
+	Cli::Command command;
+	Core::String error;
+	ok = Cli::ParseCommand(arguments, command, error);
+	return command;
+}
+
+[test("cli.command")]
+class CommandTests {
+	[test("locations")]
+	public static void TestLocations() {
+		Core::String path;
+		int64 line = 0;
+		int64 col = 0;
+		Cli::SplitLocation(Core::StringView("C:\\src\\a.cf:42:3"), path, line, col);
+		assert_true(path.View() == "C:\\src\\a.cf" && line == 42 && col == 3, "a line and a column");
+		Cli::SplitLocation(Core::StringView("src/a.cf:7"), path, line, col);
+		assert_true(path.View() == "src/a.cf" && line == 7 && col == 0, "a line");
+		Cli::SplitLocation(Core::StringView("C:\\src"), path, line, col);
+		assert_true(path.View() == "C:\\src" && line == 0, "a drive's colon stays");
+		Cli::SplitLocation(Core::StringView("notes:draft.txt"), path, line, col);
+		assert_true(path.View() == "notes:draft.txt" && line == 0, "a colon not before a number stays");
+		Cli::SplitLocation(Core::StringView("a.cf:0"), path, line, col);
+		assert_true(path.View() == "a.cf:0" && line == 0, "line 0 is not a line");
+	}
+
+	[test("verbs_and_options")]
+	public static void TestVerbsAndOptions() {
+		bool ok = false;
+		Cli::Command none = Parsed(nullptr, nullptr, ok);
+		assert_true(ok && none.verb == Cli::Verb::Open && none.path.View() == ".", "no arguments opens this folder");
+		assert_true(Parsed("status", nullptr, ok).verb == Cli::Verb::Status && ok, "status");
+		assert_true(Parsed("stop", nullptr, ok).verb == Cli::Verb::Stop && ok, "stop");
+		assert_true(Parsed("url", nullptr, ok).verb == Cli::Verb::Url && ok, "url");
+		assert_true(Parsed("--help", nullptr, ok).verb == Cli::Verb::Help && ok, "help");
+		Cli::Command open = Parsed("--no-browser", "game/main.cf:9", ok);
+		assert_true(ok && open.noBrowser && open.path.View() == "game/main.cf" && open.line == 9, "an option and a location");
+		Parsed("--bogus", nullptr, ok);
+		assert_true(!ok, "an unknown option");
+		Parsed("a", "b", ok);
+		assert_true(!ok, "two paths");
+	}
+
+	[test("request_and_reply")]
+	public static void TestRequestAndReply() {
+		assert_se("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"status\"}\n", Cli::RequestLine(Core::StringView("status"), Core::StringView("")).CStr(), "without params");
+		Cli::Reply good = Cli::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"url\":\"http://x/\"}}"));
+		assert_true(good.ok, "a result");
+		Cli::Reply bad = Cli::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"no such file\"}}"));
+		assert_true(!bad.ok && bad.error.View() == "no such file", "an error's message");
+		assert_true(!Cli::ParseReply(Core::StringView("garbage")).ok, "not JSON");
+	}
+}

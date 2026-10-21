@@ -2,6 +2,7 @@
 // "OPEN http://<host>:<port>/?t=<token>": a launch token that signs a browser in once, within a minute (docs/11).
 
 include "host/server.ch"
+include "host/control.ch"
 include "web/front.ch"
 
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
@@ -30,22 +31,11 @@ static void Fail(Core::StringView why) {
 	Platform::WriteError(text.View());
 }
 
-// The address a browser opens: the bind address, or loopback when the server listens on every interface.
-static Core::String BrowserHost(const Ied::ServerConfig& config) {
-	Core::StringView host = config.host.View();
-	if (host == "0.0.0.0" || host.IsEmpty()) return Core::String("127.0.0.1");
-	if (host == "::") return Core::String("[::1]");
-	return host.IndexOf(':', 0) >= 0 ? Core::String("[") + host + "]" : Core::String(host);
-}
-
-static void Announce(const char* what, const Ied::ServerConfig& config, int32 port, Core::StringView suffix) {
+static void Announce(const char* what, Core::StringView url) {
 	Core::StringBuilder line;
 	line.Append(what);
-	line.Append(" http://");
-	line.Append(BrowserHost(config).View());
-	line.AppendByte(':');
-	line.AppendInt(port);
-	line.Append(suffix);
+	line.AppendByte(' ');
+	line.Append(url);
 	line.AppendByte('\n');
 	Platform::WriteOutput(line.View());
 }
@@ -66,9 +56,15 @@ static bool Prepare(Ied::Server* server, const Net::Address& at) {
 	return true;
 }
 
-static Core::String LaunchSuffix(Ied::Server* server) {
+static Core::String LaunchToken(Ied::Server* server) {
 	Threading::LockGuard guard(server->lock);
-	return Core::String("/?t=") + server->auth->MintLaunchToken(Ied::kLaunchTokenMs).View();
+	return server->auth->MintLaunchToken(Ied::kLaunchTokenMs);
+}
+
+// The listening URL without the trailing '/' (the first line's form).
+static Core::String ListeningUrl(const Ied::ServerConfig& config, int32 port) {
+	Core::String url = Ied::LaunchUrl(config, port, Core::StringView(""), Core::StringView(""));
+	return Core::String(url.View().Substring(0, url.View().ByteLength() - 1));
 }
 
 int32 main(int32 argc, char8** argv) {
@@ -83,17 +79,23 @@ int32 main(int32 argc, char8** argv) {
 		Fail(Core::StringView("--host is not an address"));
 		return 2;
 	}
+	Http::Server* http = new Http::Server();
 	Ied::Server* server = new Ied::Server(config);
+	Ied::Control* control = new Ied::Control(server, [http]() { http->Stop(); });
+	if (!control->Listen(Ied::ControlName(config).View(), error)) {
+		Fail((Core::String("another ied-server runs for this user (") + error.View() + "); `ied status` tells which").View());
+		return 3;
+	}
 	if (!Prepare(server, at)) return 2;
 	Ied::Front* front = new Ied::Front(server);
-	Http::Server http;
-	if (!http.Listen(at)) {
-		Fail(Core::StringView(http.Error()));
+	if (!http->Listen(at) && (config.portGiven || !http->Listen(at.WithPort(0)))) {
+		Fail(Core::StringView(http->Error()));
 		return 1;
 	}
-	server->port = http.LocalAddress().port;
-	Announce("LISTENING", config, server->port, Core::StringView(""));
-	Announce("OPEN", config, server->port, LaunchSuffix(server).View());
-	http.Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
+	server->port = http->LocalAddress().port;
+	control->Start();
+	Announce("LISTENING", ListeningUrl(config, server->port).View());
+	Announce("OPEN", Ied::LaunchUrl(config, server->port, LaunchToken(server).View(), Core::StringView("")).View());
+	http->Serve([front](const Http::Request& request, Http::Response& response) { front->Handle(request, response); });
 	return 0;
 }

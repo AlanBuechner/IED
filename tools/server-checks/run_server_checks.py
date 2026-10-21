@@ -16,16 +16,19 @@ import unittest
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from server import EXECUTABLE_ENV  # noqa: E402
+from server import CLI_ENV, EXECUTABLE_ENV  # noqa: E402
 
 
 def main(argv):
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--server", required=True, help="the ied-server executable")
+	parser.add_argument("--cli", help="the ied executable (the CLI checks are skipped without it)")
 	parser.add_argument("-k", dest="pattern", help="only run tests whose name contains this")
 	parser.add_argument("-v", dest="verbose", action="store_true")
 	args = parser.parse_args(argv)
 	os.environ[EXECUTABLE_ENV] = os.path.abspath(args.server)
+	if args.cli:
+		os.environ[CLI_ENV] = os.path.abspath(args.cli)
 	loader = unittest.TestLoader()
 	if args.pattern:
 		loader.testNamePatterns = ["*%s*" % args.pattern]

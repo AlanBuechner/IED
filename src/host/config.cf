@@ -45,11 +45,15 @@ namespace Ied
 		if (option == "--host") config.host = Core::String(value);
 		else if (option == "--static") config.staticDir = Core::String(value);
 		else if (option == "--data") config.dataDir = Core::String(value);
+		else if (option == "--control") config.controlName = Core::String(value);
 		else if (option == "--workspace") config.workspaces.Push(Core::String(value));
 		else if (option == "--allow-origin") config.allowOrigins.Push(Core::String(value));
 		else if (option == "--allow-host") config.allowHosts.Push(Core::String(value));
 		else if (!ParseCount(value, number)) return Fail(error, option, "is unknown, or its value is not a count");
-		else if (option == "--port" && number <= 65535) config.port = (int32)number;
+		else if (option == "--port" && number <= 65535) {
+			config.port = (int32)number;
+			config.portGiven = true;
+		}
 		else if (option == "--idle-timeout") config.idleTimeoutMs = number * 1000;
 		else if (option == "--outbound-budget-mb") config.outboundBudget = number * kKilobyte * kKilobyte;
 		else if (option == "--coalesce-kb") config.coalesceBytes = number * kKilobyte;
@@ -75,5 +79,36 @@ namespace Ied
 		if (!config.dataDir.IsEmpty()) return config.dataDir;
 		if (config.testHooks) return Core::String((FS::TempDirectory() / (Core::String("ied-data-") + RandomHex(6).View()).View()).View());
 		return Core::String((FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED").View());
+	}
+
+	Core::String ControlName(const ServerConfig& config) {
+		if (!config.controlName.IsEmpty()) return config.controlName;
+		if (config.testHooks) return Net::UserLocalName((Core::String("ied-test-") + RandomHex(6).View()).CStr());
+		return Net::UserLocalName("ied");
+	}
+
+	Core::String BrowserHost(const ServerConfig& config) {
+		Core::StringView host = config.host.View();
+		if (host == "0.0.0.0" || host.IsEmpty()) return Core::String("127.0.0.1");
+		if (host == "::") return Core::String("[::1]");
+		return host.IndexOf(':', 0) >= 0 ? (Core::String("[") + host) + "]" : Core::String(host);
+	}
+
+	Core::String LaunchUrl(const ServerConfig& config, int32 port, Core::StringView token, Core::StringView fragment) {
+		Core::StringBuilder url;
+		url.Append("http://");
+		url.Append(BrowserHost(config).View());
+		url.AppendByte(':');
+		url.AppendInt(port);
+		url.AppendByte('/');
+		if (!token.IsEmpty()) {
+			url.Append("?t=");
+			url.Append(token);
+		}
+		if (!fragment.IsEmpty()) {
+			url.AppendByte('#');
+			url.Append(fragment);
+		}
+		return url.ToString();
 	}
 }

@@ -1,0 +1,87 @@
+// ied: the IED command line. Opens a folder or a file in the browser, starting the user's ied-server when none runs;
+// `ied status`, `ied url` and `ied stop` ask the running one (docs/10 "Local control channel").
+
+include "command.ch"
+include "client.ch"
+
+static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
+	Core::Array<Core::String> arguments;
+	for (int32 i = 1; i < argc; ++i) arguments.Push(Core::String((const char*)argv[i]));
+	return arguments;
+}
+
+static int32 Fail(Core::StringView why) {
+	Platform::WriteError((Core::String("ied: ") + why + "\n").View());
+	return 1;
+}
+
+static Core::String Field(Core::StringView reply, const char* name) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	Serialization::ReadResult parsed = Serialization::ReadJson(reply, *doc);
+	return Core::String(parsed.root.Member("result").Member(name).AsView());
+}
+
+static Core::String OpenParams(const Cli::Command& command) {
+	Core::StringBuilder params;
+	params.Append("{\"path\":");
+	Serialization::WriteJsonString(FS::AbsolutePath(command.path.CStr()).View(), &params);
+	params.Append(",\"line\":");
+	params.AppendInt(command.line);
+	params.Append(",\"col\":");
+	params.AppendInt(command.col);
+	params.AppendByte('}');
+	return params.ToString();
+}
+
+// Opens the default browser at `url` (url.dll's handler keeps the '#' part, which the web client reads).
+static bool Browse(Core::StringView url) {
+	Process::StartInfo info;
+	info.program = Core::String("rundll32");
+	info.arguments.Push(Core::String("url.dll,FileProtocolHandler"));
+	info.arguments.Push(Core::String(url));
+	Process::Child child = Process::Child::Start(info);
+	return child.IsOpen();
+}
+
+static Core::String ControlName(const Cli::Command& command) { return command.control.IsEmpty() ? Net::UserLocalName("ied") : command.control; }
+
+static int32 Show(const Cli::Command& command, Core::StringView url) {
+	if (command.noBrowser || !Browse(url)) Platform::WriteOutput((Core::String(url) + "\n").View());
+	return 0;
+}
+
+static int32 Run(const Cli::Command& command, Net::LocalStream& stream) {
+	if (command.verb == Cli::Verb::Open) {
+		Cli::Reply reply = Cli::Ask(stream, Core::StringView("open"), OpenParams(command).View());
+		return reply.ok ? Show(command, Field(reply.result.View(), "url").View()) : Fail(reply.error.View());
+	}
+	if (command.verb == Cli::Verb::Url) {
+		Cli::Reply reply = Cli::Ask(stream, Core::StringView("url"), Core::StringView(""));
+		return reply.ok ? Show(command, Field(reply.result.View(), "url").View()) : Fail(reply.error.View());
+	}
+	Cli::Reply reply = Cli::Ask(stream, Core::StringView(command.verb == Cli::Verb::Stop ? "stop" : "status"), Core::StringView(""));
+	if (!reply.ok) return Fail(reply.error.View());
+	if (command.verb == Cli::Verb::Status) Platform::WriteOutput((reply.result + "\n").View());
+	if (command.verb == Cli::Verb::Stop && !Cli::AwaitGone(ControlName(command).View())) return Fail(Core::StringView("the server said it stops but still answers"));
+	return 0;
+}
+
+int32 main(int32 argc, char8** argv) {
+	Cli::Command command;
+	Core::String error;
+	if (!Cli::ParseCommand(Arguments(argc, argv), command, error)) {
+		Fail(error.View());
+		Platform::WriteError(Core::StringView(Cli::Usage()));
+		return 2;
+	}
+	if (command.verb == Cli::Verb::Help) {
+		Platform::WriteOutput(Core::StringView(Cli::Usage()));
+		return 0;
+	}
+	Core::String name = ControlName(command);
+	Net::LocalStream stream = Net::LocalStream::Connect(name.CStr(), Cli::kConnectMs);
+	if (!stream.IsOpen() && (command.verb == Cli::Verb::Status || command.verb == Cli::Verb::Stop)) return Fail(Core::StringView("no ied-server runs for this user"));
+	if (!stream.IsOpen()) stream = Cli::StartServer(command.control.View(), error);
+	if (!stream.IsOpen()) return Fail(error.View());
+	return Run(command, stream);
+}

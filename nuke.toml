@@ -9,7 +9,7 @@
 name = "IED"
 toolchain = "dev"
 default-project = "C4"
-projects = ["C4", "src"]
+projects = ["C4", "src", "cli"]
 
 [commands.gates]
 description = "Build the C4 compiler, then run every C4 test suite (unit, e2e, negative, isolated, runtime, script, tools, Bedrock)"
@@ -28,8 +28,8 @@ steps = [
 [commands.conformance]
 description = "Build the IED server, then run the protocol v1 conformance suite (tools/conformance) and the server checks (tools/server-checks) against it"
 requires = ["build"]
-projects = ["ied-server"]
+projects = ["ied-server", "ied"]
 steps = [
 	{ name = "conformance", run = ["${python}", "-I", "tools/conformance/run_conformance.py", "--server", "${bin.root}/ied-server/ied-server.exe"] },
-	{ name = "server-checks", run = ["${python}", "-I", "tools/server-checks/run_server_checks.py", "--server", "${bin.root}/ied-server/ied-server.exe"] },
+	{ name = "server-checks", run = ["${python}", "-I", "tools/server-checks/run_server_checks.py", "--server", "${bin.root}/ied-server/ied-server.exe", "--cli", "${bin.root}/ied/ied.exe"] },
 ]

@@ -2,7 +2,9 @@
 
 import asyncio
 import http.client
+import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -45,10 +47,11 @@ class Reply:
 class IedServer:
 	"""Starts `ied-server --test-hooks` on a free port (or `port`) with a data folder of its own (or `data`)."""
 
-	def __init__(self, data=None, port=0, host="127.0.0.1", static=True, extra=()):
+	def __init__(self, data=None, port=0, host="127.0.0.1", static=True, extra=(), control=None):
 		self.owns_data = data is None
 		self.data = data or tempfile.mkdtemp(prefix="ied-checks-")
-		argv = [os.environ[EXECUTABLE_ENV], "--host", host, "--port", str(port), "--data", self.data, "--test-hooks", "--quiet"]
+		self.control = control or "ied-checks-" + secrets.token_hex(6)
+		argv = [os.environ[EXECUTABLE_ENV], "--host", host, "--port", str(port), "--data", self.data, "--control", self.control, "--test-hooks", "--quiet"]
 		if static:
 			argv += ["--static", FRONTEND]
 		self.process = subprocess.Popen(argv + list(extra), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -109,6 +112,41 @@ class IedServer:
 		self.process.stderr.close()
 		if remove_data if remove_data is not None else self.owns_data:
 			shutil.rmtree(self.data, ignore_errors=True)
+
+
+CLI_ENV = "IED_SERVER_CHECKS_CLI"
+
+
+def pipe_path(name):
+	return "\\\\.\\pipe\\" + name
+
+
+class ControlPipe:
+	"""The server's control channel (docs/10): one JSON-RPC 2.0 request per line."""
+
+	def __init__(self, name):
+		self.pipe = open(pipe_path(name), "r+b", buffering=0)
+		self.ids = 0
+
+	def call(self, method, params=None):
+		self.ids += 1
+		request = {"jsonrpc": "2.0", "id": self.ids, "method": method}
+		if params is not None:
+			request["params"] = params
+		return self.send_line(json.dumps(request))
+
+	def send_line(self, line):
+		self.pipe.write((line + "\n").encode("utf-8"))
+		data = b""
+		while not data.endswith(b"\n"):
+			chunk = self.pipe.read(65536)
+			if not chunk:
+				break
+			data += chunk
+		return json.loads(data)
+
+	def close(self):
+		self.pipe.close()
 
 
 def read_lines(path):
