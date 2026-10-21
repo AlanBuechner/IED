@@ -367,7 +367,7 @@ Baselines (2026-10-21, ms; ratio < 1 means Bedrock is faster):
 | sort_int32 | 9.6 | 106.0 | 0.09 |
 | sort_records | 43.5 | 108.4 | 0.40 |
 | text_append_int | 12.0 | 13.3 | 0.90 |
-| text_format_double | 36.0 | 36.5 | 0.99 |
+| text_format_double | 28.2 | 35.5 | 0.80 |
 | text_parse_double | 21.3 | 73.8 | 0.29 |
 | json_write (C4 only, 10 MB) | 21.4 | - | - |
 | json_read (C4 only, 10 MB) | 27.7 | - | - |
@@ -378,8 +378,8 @@ pdqsort with block partitions;
 before the Eisel-Lemire fast path `text_parse_double` took 77.3 ms (`from_chars`); before the DOM's single child block
 and string views of the source `json_read` took 72.2 ms and `json_write` 28.4 ms. The shortest double form took
 4,851 ms for the million doubles before the number text moved to `<charconv>`
-(it printed and read back up to 17 times per number), and the integers 31.4 ms before they were written two digits
-at a time (14.9 ms before one call wrote the sign and digits of a decimal, and a const string pointer was read-only
+(it printed and read back up to 17 times per number) and 36.0 ms before Schubfach's digits and the SSE2 layout. The
+integers took 31.4 ms before they were written two digits at a time (14.9 ms before one call wrote the sign and digits of a decimal, and a const string pointer was read-only
 data the loop's loads of could fold).
 
 ---

@@ -1,7 +1,7 @@
 // Sorting numbers by their bits: an LSD radix sort, a byte a pass, in time linear in the count (std::sort compares
-// n log n times). AscendingSorter<T> is what Array::Sort and SortAscending use: introsort by < for any T, and this
+// n log n times). AscendingSorter<T> is what Array::Sort and SortAscending use: pdqsort by < for any T, and this
 // radix sort for the integers, characters and floats, whose keys order as their values do. Short ranges go to
-// insertion and introsort, where a radix sort's fixed passes cost more than they save.
+// insertion and pdqsort, where a radix sort's fixed passes cost more than they save.
 
 include "sort.ch"
 
@@ -31,7 +31,7 @@ namespace Core
 	// `count` numbers in ascending order of their RadixKey.
 	template<T> void RadixSort(T* items, int64 count);
 
-	// Ascending order by <: introsort for any T, the radix sort for numbers.
+	// Ascending order by <: pdqsort for any T, the radix sort for numbers.
 	template<T> struct AscendingSorter { public static void Sort(T* items, int64 count) { Core::Sort(items, count, Ascending<T>()); } }
 	template<> struct AscendingSorter<int8> { public static void Sort(int8* items, int64 count) { RadixSort(items, count); } }
 	template<> struct AscendingSorter<uint8> { public static void Sort(uint8* items, int64 count) { RadixSort(items, count); } }

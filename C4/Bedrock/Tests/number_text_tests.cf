@@ -104,6 +104,42 @@ public static void TestLayoutBoundaries() {
 	assert_se("-0.000123", text.CStr(), "a small negative value");
 }
 
+static void AssertShortest(const char* expected, double value, const char* message) {
+	Core::StringBuilder text;
+	text.Append("x=");
+	text.AppendDouble(value, -1);
+	text.Append(";");
+	Core::StringBuilder wanted;
+	wanted.Append("x=");
+	wanted.Append(expected);
+	wanted.Append(";");
+	assert_se(wanted.CStr(), text.CStr(), message);
+}
+
+[test("number_text.digits_around_the_point")]
+public static void TestDigitsAroundThePoint() {
+	AssertShortest("1234567890123456.8", 1234567890123456.8, "sixteen integer digits put the point in the seventeenth byte");
+	AssertShortest("123456789012345.67", 123456789012345.67, "seventeen digits, the point after fifteen");
+	AssertShortest("0.30000000000000004", 0.30000000000000004, "seventeen digits below one");
+	AssertShortest("0.1", 0.1, "one digit below one");
+	AssertShortest("100", 100.0, "an integer drops its trailing zeros from the digits, not from the text");
+	AssertShortest("-1.5", -1.5, "a negative value with one decimal");
+	AssertShortest("1e+16", 1e16, "one digit in scientific form has no point");
+	AssertShortest("1.25e-07", 1.25e-7, "three digits in scientific form");
+	AssertShortest("1.2345678901234568e+20", 123456789012345680000.0, "seventeen digits in scientific form");
+	AssertShortest("2.2250738585072014e-308", 2.2250738585072014e-308, "the smallest normal double");
+}
+
+[test("number_text.small_buffers")]
+public static void TestSmallBuffers() {
+	char[8] out;
+	assert_eq(3, format_double((void*)&out[0], 8, 0.5, -1), "fits with its terminator");
+	assert_se("0.5", &out[0], "the text");
+	assert_eq(-1, format_double((void*)&out[0], 8, 1234.5678, -1), "nine bytes do not fit in eight");
+	assert_eq(7, format_double((void*)&out[0], 8, 1234.56, -1), "seven bytes and the terminator fill it");
+	assert_se("1234.56", &out[0], "the text that fills it");
+}
+
 [test("number_text.fixed_decimals")]
 public static void TestFixedDecimals() {
 	Core::StringBuilder text;

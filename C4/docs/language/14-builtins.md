@@ -113,7 +113,7 @@ the full statistics - is the Bedrock `GC` namespace (`include "Memory/gc.ch"`,
 
 ### 5.2 Number text
 
-**Status:** **Implemented** - Bedrock's `Core::StringBuilder` uses these; the digits come from the C++ library's `<charconv>` (correctly rounded, the shortest form Ryu's), not from printf; ordinary decimals parse on the Eisel-Lemire fast path (`C4Runtime/DecimalToDouble.h`), 3.5x faster than `from_chars`
+**Status:** **Implemented** - Bedrock's `Core::StringBuilder` uses these; nothing comes from printf. The shortest form's digits are Schubfach's (`C4Runtime/ShortestDecimal.h`, the same digits as Ryu's) laid out sixteen at a time in SSE2 lanes with no branch on the digits (`C4Runtime/ShortestDouble.cpp`), 1.5x faster than `to_chars`; fixed decimals come from the C++ library's `<charconv>` (correctly rounded); ordinary decimals parse on the Eisel-Lemire fast path (`C4Runtime/DecimalToDouble.h`), 3.5x faster than `from_chars`
 
 | Builtin | Signature | Notes |
 |---|---|---|

@@ -1,9 +1,11 @@
 // Number <-> text conversion behind the format_double / parse_double builtins (Bedrock's StringBuilder and the JSON /
-// YAML readers and writers). The digits come from the C++ library's charconv: correctly rounded, and the shortest form
-// is Ryu's, so neither depends on the C library's printf or locale. Ordinary decimals parse on the Eisel-Lemire fast
-// path (DecimalToDouble.h); the rest through charconv, and strtod's own syntax through strtod.
+// YAML readers and writers). The shortest form is Schubfach's digits laid out in SSE2 lanes (ShortestDouble.h), fixed
+// decimals come from the C++ library's charconv, correctly rounded, so nothing depends on the C library's printf or
+// locale. Ordinary decimals parse on the Eisel-Lemire fast path (DecimalToDouble.h); the rest through charconv, and
+// strtod's own syntax through strtod.
 
 #include "DecimalToDouble.h"
+#include "ShortestDouble.h"
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -13,13 +15,6 @@
 
 namespace
 {
-	// The exponents a shortest number is written plainly between (`1000`, `0.001`); outside them it is scientific
-	// (`1e+16`, `1e-05`) - the choice Python's repr makes.
-	constexpr int kLowestPlainExponent = -5;
-	constexpr int kHighestPlainExponent = 15;
-	// The longest scientific form of a double: a sign, 17 digits, a point, `e`, a sign and three exponent digits.
-	constexpr int kScientificCapacity = 32;
-
 	// The C libraries disagree on how they spell NaN ("nan", "-nan(ind)"); C4 writes the same text everywhere.
 	const char* NonFiniteText(double value)
 	{
@@ -36,82 +31,17 @@ namespace
 		return (int32_t)length;
 	}
 
-	// The shortest digits that read back as a double, as its scientific form gives them.
-	struct ShortestDigits
-	{
-		bool negative = false;
-		char digits[17] = {};
-		int count = 0;
-		int exponent = 0; // of the first digit
-	};
-
-	// The exponent after a scientific form's `e`: a sign, then digits up to `end` (charconv writes no terminator).
-	int ExponentOf(const char* at, const char* end)
-	{
-		const bool negative = at < end && *at == '-';
-		if (at < end && (*at == '-' || *at == '+')) ++at;
-		int exponent = 0;
-		for (; at < end; ++at) exponent = exponent * 10 + (*at - '0');
-		return negative ? -exponent : exponent;
-	}
-
-	ShortestDigits Decompose(const char* scientific, const char* end)
-	{
-		ShortestDigits shortest;
-		const char* at = scientific;
-		if (*at == '-') { shortest.negative = true; ++at; }
-		for (; at < end && *at != 'e'; ++at)
-			if (*at != '.') shortest.digits[shortest.count++] = *at;
-		if (at < end) shortest.exponent = ExponentOf(at + 1, end);
-		return shortest;
-	}
-
-	// `shortest` without an exponent: its digits around the point, zeros filling out to it on either side.
-	int32_t WritePlain(char* out, int32_t cap, const ShortestDigits& shortest)
-	{
-		char text[kHighestPlainExponent - kLowestPlainExponent + kScientificCapacity];
-		int length = 0;
-		if (shortest.negative) text[length++] = '-';
-		const int integerDigits = shortest.exponent + 1;
-		if (integerDigits <= 0)
-		{
-			text[length++] = '0';
-			text[length++] = '.';
-			for (int zero = 0; zero < -integerDigits; ++zero) text[length++] = '0';
-			for (int i = 0; i < shortest.count; ++i) text[length++] = shortest.digits[i];
-			return Copied(out, cap, text, (size_t)length);
-		}
-		for (int i = 0; i < integerDigits; ++i) text[length++] = i < shortest.count ? shortest.digits[i] : '0';
-		if (shortest.count > integerDigits)
-		{
-			text[length++] = '.';
-			for (int i = integerDigits; i < shortest.count; ++i) text[length++] = shortest.digits[i];
-		}
-		return Copied(out, cap, text, (size_t)length);
-	}
-
-	// Between these magnitudes the shortest digits always have an exponent that is written plainly, so charconv's
-	// shortest fixed form is the text, in one pass.
-	constexpr double kSmallestPlain = 1e-5;
-	constexpr double kFirstScientific = 1e16;
-
+	// Straight into `out` when it has room for any shortest text.
 	int32_t FormatShortest(char* out, int32_t cap, double value)
 	{
-		const double magnitude = std::fabs(value);
-		if (magnitude >= kSmallestPlain && magnitude < kFirstScientific)
+		if (cap > kShortestDoubleRoom)
 		{
-			const std::to_chars_result written = std::to_chars(out, out + cap - 1, value, std::chars_format::fixed);
-			if (written.ec != std::errc()) return -1;
-			*written.ptr = 0;
-			return (int32_t)(written.ptr - out);
+			const int length = WriteShortestDouble(out, value);
+			out[length] = 0;
+			return length;
 		}
-		char scientific[kScientificCapacity];
-		const std::to_chars_result written = std::to_chars(scientific, scientific + sizeof(scientific), value, std::chars_format::scientific);
-		if (written.ec != std::errc()) return -1;
-		const ShortestDigits shortest = Decompose(scientific, written.ptr);
-		if (shortest.exponent < kLowestPlainExponent || shortest.exponent > kHighestPlainExponent)
-			return Copied(out, cap, scientific, (size_t)(written.ptr - scientific));
-		return WritePlain(out, cap, shortest);
+		char text[kShortestDoubleRoom];
+		return Copied(out, cap, text, (size_t)WriteShortestDouble(text, value));
 	}
 
 	int32_t FormatFixed(char* out, int32_t cap, double value, int decimals)
