@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Two features built on one engine: the **desktop app** (`ied-desktop.exe`, F-OPS-26, US-DST-4), a native window that shows the same web client as any browser, and the **browser** (`plugins/browser`, F-EDT-93/94, US-EDT-10, T-BRW-1..7), web pages that live on the server so the AI and the user can render, look at and drive them together. Owner, 2026-10-21: "a desktop app as well ... effectively just a web browser that way we need just the one ui and so we can re use the web browser tech in the back end to allow for the AI to better work with web projects by rendering them as well as allowing the user to open a webpage in the IDE ... this client application should auto spawn the server if it is not already running ... the client should still be written in c4".
+Two features built on one engine: the **desktop app** (`ied-desktop.exe`, F-OPS-26, US-DST-4), a native window that shows the same web client as any browser, and the **browser** (`plugins/browser`, F-EDT-93/94, US-EDT-10, T-BRW-1..8), web pages that live on the server so the AI and the user can render, look at and drive them together. Owner, 2026-10-21: "a desktop app as well ... effectively just a web browser that way we need just the one ui and so we can re use the web browser tech in the back end to allow for the AI to better work with web projects by rendering them as well as allowing the user to open a webpage in the IDE ... this client application should auto spawn the server if it is not already running ... the client should still be written in c4".
 
 The engine is **Microsoft Edge's** (Chromium), which Windows 10 and 11 already carry twice: the Edge browser and the WebView2 Runtime. Nothing the size of Chromium is bundled. The desktop app hosts the web client in WebView2; the server drives Edge headless over the Chrome DevTools Protocol (CDP). Both are written in C4: the desktop app binds the WebView2 SDK header through CBind (`C4/docs/language/13-interop.md`), the server speaks CDP over Bedrock's WebSocket client.
 
@@ -35,8 +35,8 @@ The sign-in is the loopback one of `docs/11`: each window asks the pipe for a fr
 
 ### The window
 
-- Per-monitor DPI aware (v2); the WebView2 follows the monitor's scale.
-- Dark caption (`DWMWA_USE_IMMERSIVE_DARK_MODE`) and, on Windows 11, caption and border in `--bg-0` (`#0e0e0e`) with `--fg` text, so the window frame meets the web client's menu bar; the window and the WebView2's default background are `--bg-0` too, so nothing flashes white while the page loads.
+- Per-monitor DPI aware (v2, from the manifest); the WebView2 follows the monitor's scale.
+- Dark caption (`DWMWA_USE_IMMERSIVE_DARK_MODE`) and, on Windows 11, caption in `--bg-0` (`#0e0e0e`), border in `--border-0` and title in `--text-0`, so the window frame meets the web client's menu bar; the window and the WebView2's default background are `--bg-0` too, so nothing flashes white while the page loads.
 - Title: the page's (`<workspace> - IED`). Icon: resource 1 of the exe (`desktop/resources/ied.ico`), for the window, the taskbar and Explorer.
 - Placement (position, size, maximized) of the last window closed is kept in `<LOCALAPPDATA>\IED\desktop\window.json` and used for the next one; a further window cascades 32 px from the newest; a placement on no monitor falls back to the primary one, centered.
 
