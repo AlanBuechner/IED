@@ -22,6 +22,7 @@ namespace Testing
 	uint32 s_TotalTests = 0;
 	uint32 s_PassedTests = 0;
 	uint32 s_FailedTests = 0;
+	uint32 s_RunawayTests = 0; // still running past their timeout
 
 
 	// ─── TestGroup ──────────────────────────────────────────────────────────
@@ -170,13 +171,10 @@ namespace Testing
 		DWORD waitResult = WaitForSingleObject(threadHandle, entry.timeoutMs);
 
 		bool timedOut = (waitResult == WAIT_TIMEOUT);
-		if (timedOut)
-		{
-			// Terminate the hung thread. This is safe because:
-			// - The test instance stays alive in the parent thread until cleanup.
-			// - We only need to prevent the process from hanging.
-			TerminateThread(threadHandle, 0xDEAD); // 0xDEAD = timeout
-		}
+		// A test past its timeout is left running, never terminated: a thread killed while it holds the heap's lock (or any
+		// other) deadlocks every later allocation. It keeps its data and instance; the run ends the process at the end
+		// (EndRunWithoutRunaways) instead of waiting for it.
+		if (timedOut) s_RunawayTests++;
 
 		// Get the exit code of the dead thread to detect SEH crashes.
 		DWORD exitCode = 0;
@@ -263,7 +261,7 @@ namespace Testing
 			Logging::Logger::SetConsoleColor(Logging::Logger::Trace);
 		}
 
-		delete threadData;
+		if (!timedOut) delete threadData;
 		return passed;
 	}
 
@@ -344,9 +342,15 @@ namespace Testing
 		Logging::Logger::SetConsoleColor(Logging::Logger::Trace);
 		std::cout << "========================================" << std::endl;
 
-		// Clean up instances.
-		for (Test* instance : instances)
-			delete instance;
+		// Clean up instances, unless a runaway test may still use its own.
+		if (s_RunawayTests == 0)
+			for (Test* instance : instances)
+				delete instance;
+	}
+
+	uint32 GetRunawayTestCount()
+	{
+		return s_RunawayTests;
 	}
 
 	uint32 GetFailedTestCount()

@@ -19,4 +19,7 @@ namespace Testing
 	/// Runs all unit tests followed by all benchmarks in a single call.
 	/// Respects --filter and --benchmark-filter patterns set via ProcessCliArgs.
 	void RunTestsAndBenchmarks();
+
+	/// Ends the process, failing, when a test is still running past its timeout: nothing waits for it.
+	void EndRunWithoutRunaways();
 }

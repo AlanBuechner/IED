@@ -62,6 +62,9 @@ namespace Testing
 	/// Returns the number of failed tests from the last run (full or filtered).
 	uint32 GetFailedTestCount();
 
+	/// Tests that timed out and are still running (they count as failed).
+	uint32 GetRunawayTestCount();
+
 	/// Returns the total number of tests executed in the last run (full or filtered).
 	uint32 GetTotalTestCount();
 

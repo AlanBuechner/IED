@@ -40,14 +40,14 @@ namespace Testing
 		// Full-corpus sweep: every self-contained .cf in assets/IsolatedTest must build a COMPLETE
 		// model (AnalyzeProgram true + valid). The handful of files that are not self-contained on
 		// their own (GPU/env, native externs, multi-file, preprocessor semantics) are named below.
-		TEST_FUNC(Semantic.IsolatedCorpus)
+		TEST_FUNC_TIMEOUT(Semantic.IsolatedCorpus, 60) // every file of the isolated corpus, which keeps growing
 		void EverySelfContainedFileBuildsACompleteModel();
 
 		// Full-corpus LOWERING sweep: for every self-contained .cf, lower all function bodies and
 		// assert the diagnostic guarantee - a body either lowers completely or reports at least one
 		// diagnostic. This locks "nothing fails silently" against the whole real corpus (the invariant
 		// that was violated before LowerFunction guaranteed a diagnostic on every incomplete lowering).
-		TEST_FUNC(Semantic.IsolatedCorpus)
+		TEST_FUNC_TIMEOUT(Semantic.IsolatedCorpus, 60) // every file of the isolated corpus, which keeps growing
 		void EverySelfContainedFileLowersWithoutSilentFailures();
 	};
 } // namespace Testing

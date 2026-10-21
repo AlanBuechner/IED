@@ -1,7 +1,9 @@
 #include "Testing.h"
 #include "TestFilter.h"
 #include "BenchmarkFilter.h"
+#include <cstdio>
 #include <iostream>
+#include <windows.h>
 
 namespace Testing
 {
@@ -85,8 +87,9 @@ namespace Testing
 				std::cout << "  Failed: " << GetFailedTestCount() << std::endl;
 			std::cout << "========================================" << std::endl;
 
-			for (Test* instance : collection.instances)
-				delete instance;
+			if (GetRunawayTestCount() == 0)
+				for (Test* instance : collection.instances)
+					delete instance;
 		}
 		else
 		{
@@ -124,6 +127,16 @@ namespace Testing
 		{
 			RunBenchmarks();
 		}
+		EndRunWithoutRunaways();
+	}
+
+	void EndRunWithoutRunaways()
+	{
+		if (GetRunawayTestCount() == 0) return;
+		std::cout << GetRunawayTestCount() << " test(s) still running past their timeout: the run ends without them" << std::endl;
+		std::cout.flush();
+		std::fflush(stdout);
+		TerminateProcess(GetCurrentProcess(), 1);
 	}
 
 }
