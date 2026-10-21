@@ -59,6 +59,18 @@ static Core::String RfcTag(Crypto::Argon2Type type) {
 	return Hex(&tag[0], 32);
 }
 
+// BUG-293: the stored string with the first character of its tag changed. All six bits of that character count; the
+// last character's low bits do not (32 bytes are 43 characters), so changing it can leave the tag as it was.
+static Core::String TagChanged(Core::StringView stored) {
+	int64 tag = stored.ByteLength() - 1;
+	while (tag > 0 && stored.ByteAt(tag - 1) != '$') tag -= 1;
+	Core::StringBuilder changed;
+	changed.Append(stored.Substring(0, tag));
+	changed.AppendByte(stored.ByteAt(tag) == 'A' ? 'B' : 'A');
+	changed.Append(stored.Substring(tag + 1, stored.ByteLength()));
+	return changed.ToString();
+}
+
 static Crypto::Argon2Params SmallParams() {
 	Crypto::Argon2Params params = Crypto::DefaultArgon2Params();
 	params.memoryKiB = 64;
@@ -230,10 +242,11 @@ class PasswordTests {
 			"$argon2id$v=19$m=64,t=1,p=1$c29tZXNhbHQ$AAAAAA$"
 		};
 		for (int32 i = 0; i < 10; ++i) assert_true(!Crypto::VerifyPassword(password, Core::StringView(bad[i])), bad[i]);
-		Core::StringBuilder tampered;
-		tampered.Append(good.View().Substring(0, good.View().ByteLength() - 1));
-		tampered.AppendByte(good.View().ByteAt(good.View().ByteLength() - 1) == 'A' ? 'B' : 'A');
-		assert_true(!Crypto::VerifyPassword(password, tampered.View()), "a changed tag");
+		assert_true(!Crypto::VerifyPassword(password, TagChanged(good.View()).View()), "a changed tag");
+		for (int32 i = 0; i < 64; ++i) {
+			Core::String another = Crypto::HashPassword(password, SmallParams());
+			assert_true(!Crypto::VerifyPassword(password, TagChanged(another.View()).View()), "a changed tag, whatever the salt");
+		}
 	}
 
 	[test("compare")]

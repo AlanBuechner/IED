@@ -123,7 +123,7 @@ namespace Http
 
 	bool WebSocket::Send(Opcode opcode, const void* bytes, int64 count) {
 		Threading::LockGuard guard(sending);
-		if (!stream.IsOpen() || (closeSent && opcode != Opcode::Close)) return false;
+		if (!stream.IsOpen() || closeSent) return false;
 		uint8[4] mask;
 		if (client) Platform::RandomBytes((void*)&mask[0], 4);
 		Core::Array<uint8> frame;

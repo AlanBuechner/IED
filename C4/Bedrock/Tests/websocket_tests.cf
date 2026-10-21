@@ -318,6 +318,32 @@ class WsConnectionTests {
 		assert_true(seen.ended.Load() && seen.closeCode.Load() == 4000 && seen.closeReason == "done", "the session sees the client's code and reason");
 	}
 
+	// BUG-292: the close a receiving thread takes in is not answered with a second close frame.
+	[test("close_while_receiving_sends_one_close")]
+	public static void TestCloseWhileReceiving() {
+		WsRig rig;
+		rig.Start([](Http::WebSocket& socket) {
+			Http::WebSocket* shared = &socket;
+			Threading::Thread closer = Threading::Thread::Run([shared]() {
+				Threading::Thread::Sleep(100000000);
+				shared->Close(4001, WsText("restart"));
+			});
+			Http::WebSocketMessage message;
+			while (socket.Receive(message, Net::kWaitForever)) {}
+			closer.Join();
+		});
+		WsRaw raw;
+		assert_true(raw.Open(rig.server.LocalAddress(), "13"), "connected");
+		Http::Frame frame;
+		assert_true(raw.Read(frame) && frame.opcode == Http::Opcode::Close, "the server closes");
+		Core::Array<uint8> answer = Http::ClosePayload(4001, WsText(""));
+		raw.Send(true, Http::Opcode::Close, (const void*)answer.Data(), answer.Count(), true);
+		int32 more = 0;
+		while (raw.Read(frame)) more += 1;
+		assert_eq(0, more, "nothing after its close frame, the peer's answer taken in");
+		rig.Finish();
+	}
+
 	[test("server_stops")]
 	public static void TestServerStops() {
 		WsRig rig;
