@@ -50,8 +50,14 @@ namespace C4LSP::Server
 	bool WaitForPendingWork(std::chrono::milliseconds timeout);
 
 	private:
-		std::shared_ptr<CompilationSession> GetSnapshot() const; // current built session, atomically
+		std::shared_ptr<CompilationSession> GetSnapshot() const; // the program's current built session, atomically
 		std::shared_ptr<CompilationSession> SnapshotForRequest(); // waits (bounded) for a fresh build, then snapshots
+		// The session that analyzes `uri`: its script scope's (initializationOptions.scripts), else the program's.
+		std::shared_ptr<CompilationSession> GetSnapshot(const std::string& uri) const;
+		std::shared_ptr<CompilationSession> SnapshotForRequest(const std::string& uri);
+		int32 ScopeOfUri(const std::string& uri) const;
+		// A scope's open documents compiled as its scripts.
+		std::shared_ptr<CompilationSession> BuildScriptSession(size_t scope, const std::vector<std::pair<std::string, std::string>>& docs);
 
 		void HandleRequest(const Json::Value& message);
 		void HandleNotification(const Json::Value& message);
@@ -117,6 +123,9 @@ namespace C4LSP::Server
 		Scripting::CpuTarget m_Target;                 // from initializationOptions.target (the -march / -m flags, D-62)
 		std::string m_LibraryFolder;                   // <initializationOptions.c4Home>/Bedrock; empty: the session's default
 		std::string m_ProjectsFile;                    // initializationOptions.projects: the build description
+		std::vector<ScriptScope> m_Scripts;            // initializationOptions.scripts: folders of scripts and their hosts
+		InterfaceCache m_Interfaces;                   // the scopes' host interfaces (the worker's)
+		std::vector<std::shared_ptr<CompilationSession>> m_ScriptSessions; // per scope, null while none of its documents is open
 		Protocol::PositionEncoding m_Encoding = Protocol::PositionEncoding::Utf16; // negotiated in initialize
 		std::string m_RequestUri;                      // the document of the request being answered
 		bool m_Initialized = false;

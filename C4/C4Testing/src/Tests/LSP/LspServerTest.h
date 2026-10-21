@@ -67,6 +67,9 @@ namespace Testing
 		void TestInitializationOptionsProjectsDescribeTheBuild();
 
 		TEST_FUNC(Lsp.Server)
+		void TestInitializationOptionsScriptsCompileAgainstTheirHost();
+
+		TEST_FUNC(Lsp.Server)
 		void TestMalformedInitializationOptionsNeverBreakServer();
 
 		TEST_FUNC(Lsp.Server)

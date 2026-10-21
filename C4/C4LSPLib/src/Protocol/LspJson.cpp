@@ -35,12 +35,11 @@ namespace C4LSP::Protocol
 
 	Json::Value LspJson::Locations(const Core::Vector<Location>& locations)
 	{
-		if (locations.Count() == 0)
-			return Json::Value::Null();
+		// A location without a document (in a script host's interface) is not one the editor can open.
 		Json::Value array = Json::Value::MakeArray();
 		for (const auto& location : locations)
-			array.Append(LocationObject(location));
-		return array;
+			if (!location.uri.empty()) array.Append(LocationObject(location));
+		return array.Size() == 0 ? Json::Value::Null() : array;
 	}
 
 	Json::Value LspJson::LocationObject(const Location& location)

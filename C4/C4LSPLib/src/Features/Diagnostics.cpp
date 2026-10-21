@@ -81,6 +81,15 @@ namespace C4LSP::Features
 	Core::Vector<Protocol::Diagnostic> Diagnostics::ForDocument(Server::CompilationSession& session, const std::string& uri)
 	{
 		Core::Vector<Protocol::Diagnostic> result;
+		// A session that could analyze nothing (a script interface that does not read) says why on every document.
+		if (!session.GetSetupProblem().empty())
+		{
+			Protocol::Diagnostic problem;
+			problem.message = session.GetSetupProblem();
+			problem.source = "c4";
+			result.Push(problem);
+			return result;
+		}
 		uint32 targetId = session.FindSourceIdByUri(uri);
 		if (targetId == 0)
 			return result;

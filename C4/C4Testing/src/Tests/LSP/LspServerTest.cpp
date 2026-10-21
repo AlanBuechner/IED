@@ -3,11 +3,13 @@
 #include "Features/Tidy.h" // server-side tidy on/off flag (driven by initializationOptions / didChangeConfiguration)
 #include "Features/CodeActions.h" // server-side code-action flags (same mechanism)
 #include "Compiler/Toolchain.h"
+#include "Tests/Script/TestHosts.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -708,6 +710,66 @@ int32 main() {
 		TEST_ASSERT_EQ(withLibrary, std::string());
 		const std::string withoutLibrary = diagnosticsFor((root / "emptyhome").string());
 		TEST_ASSERT(Contains(withoutLibrary, "include not found: 'Container/array.ch'"));
+
+		fs::remove_all(root);
+		TEST_PASSED();
+	}
+
+	// initializationOptions.scripts: a document in a script folder is analyzed as a script against its host's interface -
+	// the host's API resolves, a script's own errors and the rules for scripts are reported - and an interface that does
+	// not read says so on the document.
+	void LspServerTest::TestInitializationOptionsScriptsCompileAgainstTheirHost()
+	{
+		const fs::path root = fs::temp_directory_path() / "c4lsp_initopts_scripts";
+		fs::remove_all(root);
+		fs::create_directories(root / "plugin");
+		const Testing::TestHost host = Testing::MakeTestHost({
+			{ "api.ch", "namespace Api\n{\n\tint32 Twice(int32 v);\n}\n" },
+			{ "api.cf", "include \"api.ch\"\nnamespace Api\n{\n\tint32 Twice(int32 v) { return v * 2; }\n}\nint32 main() { return Api::Twice(1); }\n" } });
+		if (!host.index) std::cout << host.diagnostics << std::endl;
+		TEST_ASSERT(host.index != nullptr);
+		std::string error;
+		TEST_ASSERT(Scripting::WriteInterface(host.interface, (root / "host.c4i").string(), &error));
+		const std::string rootUri = C4LSP::Protocol::DocumentUri::ToUri(root.string());
+		const std::string docUri = C4LSP::Protocol::DocumentUri::ToUri((root / "plugin" / "main.cf").string());
+
+		auto diagnosticsFor = [this, &root, &rootUri, &docUri](const std::string& interfacePath, const std::string& script) {
+			Reset(rootUri);
+			Value init = Value::MakeObject();
+			init.SetMember("rootUri", Value::String(Core::String(rootUri)));
+			Value scope = Value::MakeObject();
+			Value folders = Value::MakeArray();
+			folders.Append(Value::String(Core::String((root / "plugin").string())));
+			scope.SetMember("folders", folders);
+			scope.SetMember("interface", Value::String(Core::String(interfacePath)));
+			Value scripts = Value::MakeArray();
+			scripts.Append(scope);
+			Value options = Value::MakeObject();
+			options.SetMember("scripts", scripts);
+			init.SetMember("initializationOptions", options);
+			FeedRequest("initialize", 1, init);
+			FeedNotification("initialized", Value::Null());
+			m_Server->WaitForCurrentWork();
+			FeedNotification("textDocument/didOpen", MakeTextDocParams(docUri, script));
+			m_Server->WaitForCurrentWork();
+			std::string messages;
+			size_t checked = 0;
+			while (const Value* pub = NotificationByMethod("textDocument/publishDiagnostics", &checked))
+			{
+				if (pub->Member("params").Member("uri").GetString() != docUri) continue;
+				messages.clear(); // the last publish for the document is what the editor shows
+				Value diags = pub->Member("params").Member("diagnostics");
+				for (uint32 i = 0; i < diags.Size(); ++i) messages += std::string(diags.At(i).Member("message").GetString()) + "\n";
+			}
+			return messages;
+		};
+
+		const std::string interfacePath = (root / "host.c4i").string();
+		TEST_ASSERT_EQ(diagnosticsFor(interfacePath, "include \"api.ch\"\nint32 Four() { return Api::Twice(2); }\n"), std::string());
+		TEST_ASSERT(Contains(diagnosticsFor(interfacePath, "include \"api.ch\"\nint32 Bad() { return Api::Thrice(2); }\n"), "Thrice"));
+		TEST_ASSERT(Contains(diagnosticsFor(interfacePath, "include \"api.ch\"\nnamespace Api\n{\n\tint32 Twice(int32 v) { return v; }\n}\n"),
+			"a script cannot define"));
+		TEST_ASSERT(Contains(diagnosticsFor((root / "missing.c4i").string(), "int32 Five() { return 5; }\n"), "does not read"));
 
 		fs::remove_all(root);
 		TEST_PASSED();

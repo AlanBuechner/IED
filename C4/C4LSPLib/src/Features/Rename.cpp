@@ -58,6 +58,9 @@ namespace C4LSP::Features
 			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
 			result.occurrences.Push(MakeOccurrence(session, ref->startLocation.sourceId, name.start, name.end));
 		}
+		// A script host's symbol is declared in its interface, which no editor document is: rename it in the host.
+		for (const RenameOccurrence& occurrence : result.occurrences)
+			if (occurrence.uri.empty()) return RenameResult();
 
 		return result;
 	}

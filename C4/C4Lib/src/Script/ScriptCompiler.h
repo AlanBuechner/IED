@@ -18,6 +18,9 @@ namespace llvm
 
 namespace Scripting
 {
+	class CompilerInstance;
+	class ErrorTracker;
+
 	/// A host interface's lookups, made once for every compile against it.
 	struct HostIndex
 	{
@@ -50,6 +53,13 @@ namespace Scripting
 	/// the allow-list, defining a function its host defines), lowers it in script mode, imports the host's inline
 	/// bodies it calls, and optimizes it for `machine` (the JIT's). Never throws; the diagnostics say what failed.
 	CompiledScript CompileScript(const HostInterface& host, const HostIndex& index, const ScriptCompileOptions& options, llvm::TargetMachine& machine);
+
+	/// The front end of a script compile alone (section 4, steps 1 to 3) into `compiler`, which then holds the script's
+	/// model and the compiler's own diagnostics: registered, preprocessed, parsed and analyzed against `host`, with what a
+	/// script may not do (an `extern` import, a header off the allow-list, a body for a host function) in `checks`. The
+	/// language server analyzes scripts with it. Nothing, with why in `error`, when the files cannot be registered.
+	std::optional<ScriptUnits> AnalyzeScript(CompilerInstance& compiler, const HostInterface& host, const HostIndex& index,
+		const ScriptCompileOptions& options, ErrorTracker& checks, std::string* error);
 
 	/// Whether `include` (an interface file) is one the allow-list lets a script include: a library file always, any
 	/// file when the list is empty, else a file whose project is named on the list or whose path starts with an entry.

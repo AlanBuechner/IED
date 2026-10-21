@@ -3,6 +3,7 @@
 #include "Compiler/CompilerInstance.h"
 #include "Protocol/LspTypes.h" // Protocol::Position / Protocol::Range used by the coordinate helpers below
 #include "Server/SemanticResolver.h" // owned by value (unique_ptr) - the complete type is needed at destruction
+#include "Server/ScriptScopes.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -41,6 +42,12 @@ namespace C4LSP::Server
 		void SetProjectsFile(const std::string& file) { m_ProjectsFile = file; }
 		const std::string& GetLibraryFolder() const { return m_LibraryFolder; }
 
+		// Script mode (initializationOptions.scripts): the session analyzes `scope`'s files as scripts against `host`, as
+		// C4Script compiles them (docs/runtime/04 section 4), instead of a program.
+		void SetScript(ScriptScope scope, std::shared_ptr<const LoadedInterface> host) { m_Script = std::move(scope); m_ScriptHost = std::move(host); }
+		// Why the session could analyze nothing (a script's interface that does not read): every document shows it.
+		const std::string& GetSetupProblem() const { return m_SetupProblem; }
+
 		// Register a source from memory by display name (tests, or files outside the scanned folder).
 		void RegisterInMemorySource(const std::string& displayName, const std::string& text);
 
@@ -68,7 +75,7 @@ namespace C4LSP::Server
 		// so the LSP reports exactly what the build would - no separate/duplicated error logic in the LSP.
 		const Core::Vector<Scripting::CompilationError>& GetLoweringDiagnostics() const { return m_LoweringErrors; }
 
-		std::string UriForSourceId(uint32 sourceId) const;
+		std::string UriForSourceId(uint32 sourceId) const; // empty for a script host's interface file (in memory)
 		uint32 FindSourceIdByUri(const std::string& uri) const; // 0 when the file is unknown
 		bool IsCompiled() const { return m_Compiled; }
 
@@ -98,7 +105,10 @@ namespace C4LSP::Server
 		// exactly as CodeGenDriver::Lower does, to collect the body-level type diagnostics. No LLVM is
 		// emitted - only the diagnostics matter here. Gated on a valid model, mirroring C4.exe which
 		// lowers only after a clean front end.
-		void RunLoweringPass();
+		void RunLoweringPass(uint32 interfaceUnits = 0);
+		bool RecompileScript();
+		// The scope's files, each open one with the editor's text, as a script compile takes them.
+		Scripting::ScriptCompileOptions ScriptOptions() const;
 
 		std::unique_ptr<Scripting::CompilerInstance> m_Compiler;
 		std::unique_ptr<SemanticResolver> m_Resolver; // rebuilt on Recompile() to track the current model
@@ -114,5 +124,8 @@ namespace C4LSP::Server
 		std::map<uint32, uint32> m_BindingStartLine;          // sourceId -> 1-based effective line where the bindings start
 		std::map<uint32, uint32> m_BindingDirectiveLine;      // sourceId -> 1-based line of the extern include directive
 		bool m_Compiled = false;
+		ScriptScope m_Script;
+		std::shared_ptr<const LoadedInterface> m_ScriptHost; // set in script mode
+		std::string m_SetupProblem;
 	};
 } // namespace C4LSP::Server

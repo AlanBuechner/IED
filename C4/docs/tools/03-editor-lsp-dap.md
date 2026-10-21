@@ -69,6 +69,13 @@ C4LSP/src/main.cpp            the executable: the stdio loop
   the server compiles its projects, each with its own defines and boundary
   ([../language/15-projects.md](../language/15-projects.md)); otherwise the files beside each open document (not the
   folders under them: a workspace folder can hold many programs) and everything under `includePaths`.
+- `scripts` (`[{folders: [...], interface: "<host>.c4i", allow: [...], defines: ["NAME=VALUE"]}]`) names folders of
+  scripts: a document under one of them is analyzed as C4Script compiles it ([../runtime/04-scripting.md](../runtime/04-scripting.md)),
+  against that host's interface (read once, again when the file changes), with every `.cf` and `.ch` under the
+  folders, the allow-list and the defines, and is not part of the program. Its diagnostics are the script compile's
+  front end and body checks, the rules for scripts included (no `extern` import, no header off the allow-list, no
+  body for a host function); an interface that does not read is an error on each of its documents. A host header a
+  script includes lives in the interface, so navigation stops at the script's own files.
 - File and folder names may use any script: the compiler keeps paths as UTF-8.
 - An editor document maps to its source by absolute path (case-insensitive on Windows), and a source's URI is its
   file, so navigation works in every project, `-I` folder and Bedrock alike.

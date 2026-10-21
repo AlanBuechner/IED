@@ -61,11 +61,11 @@ namespace C4LSP::Server
 		// Republish from the CURRENT snapshot without a full recompile: RunRecompileAndPublish would
 		// rebuild every source just to flip one flag. Rebuild each open document's diagnostics with
 		// the new tidy state and send them, exactly like the publish loop does after a real build.
-		auto session = GetSnapshot();
-		if (!session)
-			return;
 		for (const auto& [uri, text] : docs)
 		{
+			auto session = GetSnapshot(uri); // a script scope's, or the program's
+			if (!session)
+				continue;
 			auto diagnostics = Features::Diagnostics::ForDocument(*session, uri);
 			for (const auto& tidyDiag : Features::Tidy::ForDocument(*session, uri))
 				diagnostics.Push(tidyDiag);
@@ -89,8 +89,11 @@ namespace C4LSP::Server
 		m_Target = Scripting::CpuTarget();
 		m_LibraryFolder.clear();
 		m_ProjectsFile.clear();
+		m_Scripts.clear();
 		const Json::Value options = params.Member("initializationOptions");
 		if (options.IsObject()) {
+			// Folders of scripts and the host interface each compiles against (docs/tools/03 section 1).
+			m_Scripts = ReadScriptScopes(options.Member("scripts"));
 			// The build description Nuke writes (docs/language/15-projects.md): the same projects the compiler gets.
 			const Json::Value projects = options.Member("projects");
 			if (projects.IsString())

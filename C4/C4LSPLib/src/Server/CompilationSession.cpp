@@ -7,6 +7,7 @@
 #include "Compiler/Toolchain.h"
 #include "Compiler/ProjectFile.h"
 #include "Compiler/SourceMacros.h"
+#include "Script/ScriptSources.h"
 #include <unordered_map>
 #include "Protocol/LspTypes.h"
 #include <algorithm>
@@ -60,6 +61,7 @@ namespace C4LSP::Server
 
 	bool CompilationSession::Recompile()
 	{
+		if (m_ScriptHost) return RecompileScript();
 		// A fresh instance per compile: the previous ASTs/symbol tables are discarded together,
 		// so no feature can observe a stale tree after an edit. (Types are process-lifetime by
 		// design, matching the compiler's own memory model.)
@@ -96,6 +98,60 @@ namespace C4LSP::Server
 
 		m_Compiled = true;
 		return true;
+	}
+
+	bool CompilationSession::RecompileScript()
+	{
+		m_Compiler = std::make_unique<Scripting::CompilerInstance>();
+		m_LoweringErrors.Clear();
+		m_SetupProblem.clear();
+		if (!m_ScriptHost->error.empty())
+			m_SetupProblem = "the script interface " + m_Script.interfacePath + " does not read: " + m_ScriptHost->error;
+		else
+		{
+			Scripting::ErrorTracker checks;
+			std::optional<Scripting::ScriptUnits> units =
+				Scripting::AnalyzeScript(*m_Compiler, m_ScriptHost->host, *m_ScriptHost->index, ScriptOptions(), checks, &m_SetupProblem);
+			if (units)
+			{
+				RunLoweringPass(units->interfaceUnits); // the host's bodies are its own
+				for (const auto& err : checks.GetErrors()) m_LoweringErrors.Push(err);
+			}
+		}
+		m_Resolver = std::make_unique<SemanticResolver>(m_Compiler->GetProgramModel());
+		m_Compiled = true;
+		return true;
+	}
+
+	Scripting::ScriptCompileOptions CompilationSession::ScriptOptions() const
+	{
+		Scripting::ScriptCompileOptions options;
+		options.name = "script";
+		options.allow = m_Script.allow;
+		options.defines = m_Script.defines;
+		std::map<std::string, std::string> open; // comparable path -> editor text
+		for (const auto& [uri, text] : m_OpenDocuments) open[ComparablePath(Protocol::DocumentUri::FromUri(uri))] = text;
+		std::set<std::string> taken;
+		for (const std::string& folder : m_Script.folders)
+		{
+			std::error_code ec;
+			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(fs::path(std::u8string(folder.begin(), folder.end())), ec))
+			{
+				const std::string ext = entry.path().extension().string();
+				if (!entry.is_regular_file(ec) || (ext != ".cf" && ext != ".ch")) continue;
+				const auto u8 = entry.path().generic_u8string();
+				const std::string path(u8.begin(), u8.end());
+				auto edited = open.find(ComparablePath(path));
+				options.files.push_back({ path, edited != open.end() ? std::optional<std::string>(edited->second) : std::nullopt });
+				taken.insert(ComparablePath(path));
+			}
+		}
+		for (const auto& [uri, text] : m_OpenDocuments) // a new file the editor has not saved yet
+		{
+			const std::string path = Protocol::DocumentUri::FromUri(uri);
+			if (!taken.count(ComparablePath(path)) && ScopeOf({ m_Script }, path) == 0) options.files.push_back({ path, text });
+		}
+		return options;
 	}
 
 	// Without a build description: the files beside each open document - never the whole tree under the workspace
@@ -135,7 +191,7 @@ namespace C4LSP::Server
 		return true;
 	}
 
-	void CompilationSession::RunLoweringPass()
+	void CompilationSession::RunLoweringPass(uint32 interfaceUnits)
 	{
 		m_LoweringErrors.Clear();
 		if (!m_Compiler->GetProgramModel().IsValid())
@@ -166,8 +222,8 @@ namespace C4LSP::Server
 			model.AllFunctionRecords(all);
 			for (const auto* rec : all)
 			{
-				if (!rec->bodyNode || emitted.count(rec) || rec->isLocal)
-					continue; // declaration only / already lowered / nested in a body (lowered with its parent)
+				if (!rec->bodyNode || emitted.count(rec) || rec->isLocal || rec->definingUnit <= interfaceUnits)
+					continue; // declaration only / already lowered / nested in a body (lowered with its parent) / the host's
 				emitted.insert(rec);
 				(void)Scripting::LowerFunction(model, loweringErrors, rec);
 				changed = true;
@@ -357,6 +413,9 @@ void CompilationSession::RunPreprocessPhase()
 	{
 		// A file on disk is where it is (a project's, an -I folder's or Bedrock's); an in-memory source has only a name.
 		const auto& info = m_Compiler->GetSourceManager().GetInfo(sourceId);
+		// A script's host files are its interface's, in memory: no editor document is one of them.
+		if (info.absPath.rfind(Scripting::kInterfaceRoot, 0) == 0)
+			return "";
 		if (!info.absPath.empty())
 			return Protocol::DocumentUri::ToUri(info.absPath);
 		if (m_RootFolder.empty())

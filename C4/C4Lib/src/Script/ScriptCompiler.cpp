@@ -124,27 +124,35 @@ namespace Scripting
 			ScriptUnits& units, CompiledScript& out)
 		{
 			std::string error;
-			std::optional<ScriptUnits> registered = RegisterScriptSources(compiler, host, options.name, options.files, options.defines, &error);
-			if (!registered)
+			ErrorTracker checks;
+			std::optional<ScriptUnits> analyzed = AnalyzeScript(compiler, host, index, options, checks, &error);
+			if (!analyzed)
 			{
 				out.diagnostics = "error: " + error + "\n";
 				return false;
 			}
-			units = std::move(*registered);
-			compiler.SetTarget(index.target);
-			Preprocess(compiler, units, index.target);
-			compiler.SetHostSymbols(&index.symbols);
-			compiler.CompileAll();
-			compiler.AnalyzeProgram();
-			ErrorTracker checks;
-			CheckImports(compiler, units, checks);
-			CheckIncludes(compiler, host, units, options.allow, checks);
-			CheckDefinitions(compiler.GetProgramModel(), index, units, checks);
+			units = std::move(*analyzed);
 			Core::Vector<CompilationError> diagnostics = compiler.GetAllDiagnostics();
 			for (const CompilationError& e : checks.GetErrors()) diagnostics.Push(e);
 			out.diagnostics = Format(diagnostics, compiler);
 			return !Failed(diagnostics);
 		}
+	}
+
+	std::optional<ScriptUnits> AnalyzeScript(CompilerInstance& compiler, const HostInterface& host, const HostIndex& index,
+		const ScriptCompileOptions& options, ErrorTracker& checks, std::string* error)
+	{
+		std::optional<ScriptUnits> units = RegisterScriptSources(compiler, host, options.name, options.files, options.defines, error);
+		if (!units) return std::nullopt;
+		compiler.SetTarget(index.target);
+		Preprocess(compiler, *units, index.target);
+		compiler.SetHostSymbols(&index.symbols);
+		compiler.CompileAll();
+		compiler.AnalyzeProgram();
+		CheckImports(compiler, *units, checks);
+		CheckIncludes(compiler, host, *units, options.allow, checks);
+		CheckDefinitions(compiler.GetProgramModel(), index, *units, checks);
+		return units;
 	}
 
 	HostIndex::HostIndex(const HostInterface& host)

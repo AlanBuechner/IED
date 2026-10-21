@@ -28,6 +28,35 @@ namespace C4LSP::Server
 		return m_Session;
 	}
 
+	std::shared_ptr<CompilationSession> LspServer::GetSnapshot(const std::string& uri) const
+	{
+		const int32 scope = ScopeOfUri(uri);
+		std::lock_guard<std::mutex> lock(m_SessionMutex);
+		if (scope >= 0 && static_cast<size_t>(scope) < m_ScriptSessions.size() && m_ScriptSessions[scope]) return m_ScriptSessions[scope];
+		return m_Session;
+	}
+
+	std::shared_ptr<CompilationSession> LspServer::SnapshotForRequest(const std::string& uri)
+	{
+		WaitForPendingWork(std::chrono::milliseconds(10'000)); // as SnapshotForRequest()
+		return GetSnapshot(uri);
+	}
+
+	int32 LspServer::ScopeOfUri(const std::string& uri) const
+	{
+		return m_Scripts.empty() ? -1 : ScopeOf(m_Scripts, Protocol::DocumentUri::FromUri(uri));
+	}
+
+	std::shared_ptr<CompilationSession> LspServer::BuildScriptSession(size_t scope, const std::vector<std::pair<std::string, std::string>>& docs)
+	{
+		auto session = std::make_shared<CompilationSession>();
+		if (!m_RootUri.empty()) session->SetRootFolder(Protocol::DocumentUri::FromUri(m_RootUri));
+		session->SetScript(m_Scripts[scope], m_Interfaces.Get(m_Scripts[scope].interfacePath));
+		for (const auto& [uri, text] : docs) session->SetOpenDocument(uri, text);
+		session->Recompile();
+		return session;
+	}
+
 	std::shared_ptr<CompilationSession> LspServer::SnapshotForRequest()
 	{
 		// Wait for pending work (bounded), then snapshot. Every read-only feature answers from this:
@@ -117,6 +146,17 @@ namespace C4LSP::Server
 				docs.emplace_back(uri, text);
 			});
 		}
+		// A script scope's documents compile as its scripts, apart from the program (initializationOptions.scripts).
+		std::vector<std::vector<std::pair<std::string, std::string>>> scriptDocs(m_Scripts.size());
+		std::vector<std::pair<std::string, std::string>> programDocs;
+		for (const auto& doc : docs)
+		{
+			const int32 scope = ScopeOfUri(doc.first);
+			(scope < 0 ? programDocs : scriptDocs[scope]).push_back(doc);
+		}
+		std::vector<std::shared_ptr<CompilationSession>> scripts(m_Scripts.size());
+		for (size_t scope = 0; scope < m_Scripts.size(); ++scope)
+			if (!scriptDocs[scope].empty()) scripts[scope] = BuildScriptSession(scope, scriptDocs[scope]);
 
 		// Build into a FRESH session so feature requests keep answering against the previous,
 		// still-valid snapshot while this (potentially long) recompile runs. Swap it in only when done.
@@ -129,23 +169,26 @@ namespace C4LSP::Server
 		if (!m_LibraryFolder.empty())
 			fresh->SetLibraryFolder(m_LibraryFolder);
 		fresh->SetProjectsFile(m_ProjectsFile);
-		for (const auto& [uri, text] : docs)
+		for (const auto& [uri, text] : programDocs)
 			fresh->SetOpenDocument(uri, text);
 		fresh->Recompile();
 
 		std::shared_ptr<CompilationSession> published = std::move(fresh);
 		{
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
-			m_Session = published; // atomically swap the snapshot in
+			m_Session = published; // atomically swap the snapshots in
+			m_ScriptSessions = scripts;
 		}
 
 		for (const auto& [uri, text] : docs)
 		{
-			auto diagnostics = Features::Diagnostics::ForDocument(*published, uri);
+			const int32 scope = ScopeOfUri(uri);
+			CompilationSession& analyzed = scope < 0 ? *published : *scripts[scope];
+			auto diagnostics = Features::Diagnostics::ForDocument(analyzed, uri);
 			// C4 Tidy appends its non-error code-quality findings to the same publish so the editor's
 			// squiggle list shows compiler errors and tidy warnings together (VS2022-style). With the
 			// feature disabled this returns empty and nothing changes.
-			for (const auto& tidyDiag : Features::Tidy::ForDocument(*published, uri))
+			for (const auto& tidyDiag : Features::Tidy::ForDocument(analyzed, uri))
 				diagnostics.Push(tidyDiag);
 			Json::Value params = Json::Value::MakeObject();
 			params.SetMember("uri", Json::Value::String(Core::String(uri)));
@@ -264,7 +307,7 @@ namespace C4LSP::Server
 			if (const std::string* text = m_Documents.GetText(uri))
 				return *text;
 		}
-		return GetSnapshot()->GetEditorText(uri);
+		return GetSnapshot(uri)->GetEditorText(uri);
 	}
 
 	Protocol::PositionCodec LspServer::Codec()
