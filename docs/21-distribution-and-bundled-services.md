@@ -41,7 +41,7 @@ Until the zip and the installer exist, a checkout installs itself: `nuke install
   chats\                                 generic (no-project) chats
 
 %LOCALAPPDATA%\IED\                      (machine-local state)
-  logs\, cache\ (indexes, symbol caches), trash\, services\ (SearXNG and tor runtime state), recent.json, trust.json, devices.json
+  logs\, cache\ (indexes, symbol caches), trash\, services\ (SearXNG and tor runtime state), recent.json (recent projects and favorites, docs/10), trust.json, devices.json
 ```
 
 Per workspace: `.ied/` (committed) and `.ied/local/` (gitignored) as in `docs/03`.

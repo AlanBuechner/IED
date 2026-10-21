@@ -13,6 +13,9 @@ namespace Desktop
 	Destination NavigationTarget(Core::StringView url, Core::StringView serverOrigin);
 	// Where a page's new window for `url` opens: an IED window for the server's pages, the default browser otherwise.
 	Destination NewWindowTarget(Core::StringView url, Core::StringView serverOrigin);
+	// `url` showing IED's start page (its fragment "start", any other fragment replaced): what a window opened without a
+	// path shows, even while workspaces are open on the server.
+	Core::String StartPageUrl(Core::StringView url);
 
 	// The script added before every document's own: window.iedDesktop, carried by chrome.webview.postMessage.
 	Core::String BridgeScript(Core::StringView version);

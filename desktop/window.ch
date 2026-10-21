@@ -11,9 +11,10 @@ namespace Desktop
 	const uint32 kResolvedMessage = 0x8001;     // WM_APP + 1: a resolver thread left a URL or an error
 	const uint32 kOpenFolderMessage = 0x8004;   // WM_APP + 4: the page asked for File > Open Folder
 
-	// Why a window asked the server for a URL: its first page; the server back after the watch started it again (the
-	// page stays unless the server's origin moved); or a folder the person picked (a failure is told, the page stays).
-	enum class Arrival { First, ServerBack, Folder }
+	// Why a window asked the server for a URL: its first page; IED's start page (a window opened without a path); the
+	// server back after the watch started it again (the page stays unless the server's origin moved); or a folder the
+	// person picked (a failure is told, the page stays).
+	enum class Arrival { First, StartPage, ServerBack, Folder }
 
 	class Window
 	{

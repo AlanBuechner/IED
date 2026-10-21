@@ -82,6 +82,8 @@ class DesktopTests {
 		assert_true(Desktop::NewWindowTarget(Core::StringView("https://example.com/"), server) == Desktop::Destination::External, "the web in the default browser");
 		assert_true(Desktop::NewWindowTarget(Core::StringView("ms-settings:"), server) == Desktop::Destination::Refused, "another scheme");
 		assert_true(Desktop::NewWindowTarget(Core::StringView("http://127.0.0.1:8765/"), Core::StringView("")) == Desktop::Destination::External, "no server yet");
+		assert_se("http://127.0.0.1:8765/?t=ab#start", Desktop::StartPageUrl(Core::StringView("http://127.0.0.1:8765/?t=ab")).CStr(), "the start page");
+		assert_se("http://127.0.0.1:8765/#start", Desktop::StartPageUrl(Core::StringView("http://127.0.0.1:8765/#open=w1/")).CStr(), "in place of another fragment");
 	}
 
 	[test("own_pages")]

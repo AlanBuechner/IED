@@ -119,7 +119,8 @@ namespace Desktop
 
 	void Window::Resolved(Core::StringView url, Core::StringView error, Arrival arrival) {
 		if (!url.IsEmpty() && arrival == Arrival::ServerBack && !showingStatus && OriginOf(url).View() == origin.View()) return;
-		if (!url.IsEmpty()) Show(url);
+		Core::String shown = arrival == Arrival::StartPage ? StartPageUrl(url) : Core::String(url);
+		if (!url.IsEmpty()) Show(shown.View());
 		else if (arrival == Arrival::Folder) Alert((Core::String("IED could not open the folder: ") + error).View());
 		else ShowStatus(Core::StringView("IED could not start its server"), error);
 	}

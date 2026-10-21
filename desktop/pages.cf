@@ -33,6 +33,11 @@ namespace Desktop
 		return Launch::IsExternalUrl(url) ? Destination::External : Destination::Refused;
 	}
 
+	Core::String StartPageUrl(Core::StringView url) {
+		const int64 fragment = url.IndexOf(Core::StringView("#"));
+		return Core::String(fragment < 0 ? url : url.Substring(0, fragment)) + "#start";
+	}
+
 	Core::String BridgeScript(Core::StringView version) {
 		Core::StringBuilder script;
 		script.Append("(() => {\n");

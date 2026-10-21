@@ -6,6 +6,18 @@ import zlib
 
 WORKSPACE = {"wsId": "w1", "name": "demo", "root": "C:/mock/demo"}
 
+
+def recent_projects(now_ms):
+	"""The server's recent list (docs/10 "Workspaces"), newest first: the open demo, a solution, a favorite and a folder
+	that is gone."""
+	hour, day = 3600 * 1000, 24 * 3600 * 1000
+	return [
+		{"path": "C:/mock/demo", "name": "demo", "kind": "folder", "opened": now_ms - 5 * 60 * 1000, "favorite": False, "exists": True},
+		{"path": "C:/mock/Tools/Tools.ied.sln", "name": "Tools", "kind": "solution", "opened": now_ms - 3 * hour, "favorite": False, "exists": True},
+		{"path": "C:/mock/Shooter", "name": "Shooter", "kind": "folder", "opened": now_ms - 2 * day, "favorite": True, "exists": True},
+		{"path": "C:/mock/Prototype", "name": "Prototype", "kind": "folder", "opened": now_ms - 40 * day, "favorite": False, "exists": False},
+	]
+
 FILES = {
 	"README.md": (
 		"# demo\n\n"

@@ -20,17 +20,18 @@ class File:
 
 
 class Workspace:
-	def __init__(self, ws_id, name, root, files, directories, images=None):
+	def __init__(self, ws_id, name, root, files, directories, images=None, kind="folder"):
 		self.ws_id = ws_id
 		self.name = name
 		self.root = root
+		self.kind = kind
 		self.trusted = True
 		self.files = {path: File(text) for path, text in files.items()}
 		self.directories = set(directories)
 		self.images = dict(images or {})
 
 	def summary(self):
-		return {"wsId": self.ws_id, "name": self.name, "root": self.root, "trusted": self.trusted}
+		return {"wsId": self.ws_id, "name": self.name, "kind": self.kind, "root": self.root, "trusted": self.trusted}
 
 	def is_dir(self, path):
 		if path == "" or path in self.directories:
@@ -52,6 +53,10 @@ class Workspace:
 		return sorted(names.items(), key=lambda item: (item[1] != "dir", item[0].lower()))
 
 
+def folded(path):
+	return path.replace("\\", "/").rstrip("/").lower()
+
+
 def normalize(path):
 	clean = path.replace("\\", "/").strip("/")
 	if re.match(r"^[A-Za-z]:", clean) or any(part in ("..", ".") for part in clean.split("/") if part):
@@ -69,7 +74,8 @@ class Workspaces:
 		server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
 		self.trash = {}
 		self.trash_made = 0
-		for name in ("ws.list", "ws.setTrust", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search", "fs.files",
+		self.recent = workspace_files.recent_projects(int(time.time() * 1000))
+		for name in ("ws.list", "ws.setTrust", "ws.openRecent", "ws.setFavorite", "ws.forgetRecent", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search", "fs.files",
 				"trash.list", "trash.restore", "trash.purge"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
@@ -78,7 +84,7 @@ class Workspaces:
 
 	def snapshot(self, ws):
 		chats = [c.summary() for c in self.server.chat.items.values() if c.ws_id == ws.ws_id]
-		return dict(ws.summary(), kind="folder", roots=["."], plugins=[{"id": "mock.language", "state": "active"}], chats=chats)
+		return dict(ws.summary(), roots=["."], plugins=[{"id": "mock.language", "state": "active"}], chats=chats)
 
 	def get(self, ws_id):
 		ws = self.items.get(ws_id)
@@ -109,6 +115,43 @@ class Workspaces:
 
 	async def m_ws_list(self, call, p):
 		return {"workspaces": self.summaries()}
+
+	def _recent(self, path):
+		key = folded(path)
+		for project in self.recent:
+			if folded(project["path"]) == key:
+				return project
+		raise RpcError("not_found", "no recent project %r" % path)
+
+	def _recent_changed(self):
+		self.server.hub.publish("server", "recent.changed", {"recent": [dict(p) for p in self.recent]})
+
+	async def m_ws_openRecent(self, call, p):
+		project = self._recent(p.str("path"))
+		if not project.get("exists", True):
+			raise RpcError("not_found", "it is not there any more: %s" % project["path"])
+		solution = project["kind"] == "solution"
+		root = posixpath.dirname(project["path"]) if solution else project["path"]
+		ws = next((w for w in self.items.values() if folded(w.root) == folded(root)), None)
+		if ws is None:
+			ws = Workspace("w%d" % (len(self.items) + 1), project["name"], root, {"README.md": "# %s\n" % project["name"]}, [], kind="solution" if solution else "folder")
+			self.items[ws.ws_id] = ws
+			self.server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
+			self.server.hub.publish("server", "workspace.opened", ws.summary())
+		self.recent.remove(project)
+		self.recent.insert(0, dict(project, opened=int(time.time() * 1000)))
+		self._recent_changed()
+		return {"workspace": ws.summary()}
+
+	async def m_ws_setFavorite(self, call, p):
+		self._recent(p.str("path"))["favorite"] = p.bool("favorite", True, required=False)
+		self._recent_changed()
+		return {}
+
+	async def m_ws_forgetRecent(self, call, p):
+		self.recent.remove(self._recent(p.str("path")))
+		self._recent_changed()
+		return {}
 
 	async def m_ws_setTrust(self, call, p):
 		ws = self.get(p.str("wsId"))

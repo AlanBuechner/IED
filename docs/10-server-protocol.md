@@ -60,7 +60,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 
 | Topic kind | Examples of event kinds | Snapshot contains |
 |---|---|---|
-| `server` | `workspace.opened`, `notification`, `device.connected` | open workspaces, notifications (unread), devices |
+| `server` | `workspace.opened`, `recent.changed {recent}`, `notification`, `device.connected` | open workspaces, the recent projects ("Workspaces" below), notifications (unread), devices |
 | `ws:<wsId>` | `tree.changed`, `trust.changed`, `solution.changed`, `plugins.changed` (its `.ied/plugins/` changed, a project plugin's code changed state, or code computed new contributions for it: read the contributions again, `docs/26`) | workspace summary (`kind` folder, file or solution), trust, the solution model (`docs/03`) |
 | `settings:app`, `settings:<wsId>` | `settings.changed` | tier files (revision, problems) and every setting's effective value with its source (`docs/07`) |
 | `plugins` | `plugins.changed` (also when a built-in or app plugin's code changes state) | every plugin's summary and state, with its code's (`docs/02`) |
@@ -108,6 +108,22 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 - Error codes (string, stable): `bad_request`, `not_found`, `forbidden`, `untrusted`, `conflict` (revision mismatch - `data` carries the current revision), `busy`, `cancelled`, `timeout`, `unavailable`, `internal`, `plugin_error`.
 - **Mutations carry the revision they were based on** (`baseVersion`, `expectedRevision`) wherever the target can be contended. The server rejects stale writes with `conflict`; the UI shows a resolve choice.
 - **Idempotency:** mutations that may be retried after a reconnect carry a client-generated `opId`; the server remembers recent `opId`s per client for 10 minutes and returns the original result for duplicates (so a "send message" retried during a flaky connection is not sent twice).
+
+## Workspaces
+
+A workspace is a folder, a solution (its `.ied.sln`'s folder) or the folder of a file opened alone, open on the server until it stops; its `wsId` (`w1`, `w2`, ...) lives for one server run. A summary is `{wsId, name, kind ("folder" | "solution" | "file"), root, trusted}`.
+
+| Method | Result |
+|---|---|
+| `ws.list` | `{workspaces: [summary]}` |
+| `ws.setTrust {wsId, trusted}` | `{trusted}`; `trust.changed` on `ws:<wsId>` (`docs/11` "Trust layers") |
+| `ws.openRecent {path}` | `{workspace: summary}`: a project of the recent list opened again (or the workspace that holds it); `not_found` for a path that is not listed, or not there any more |
+| `ws.setFavorite {path, favorite}` | `{}`; a listed project made a favorite, or not |
+| `ws.forgetRecent {path}` | `{}`; a listed project taken off the list |
+
+**The recent projects** are the server's: every workspace opened (`ied <path>`, the desktop app's Open Folder, `--workspace`, `ws.openRecent`) goes first in a list kept in the data folder's `recent.json` (machine-local: the paths are this machine's), newest first; past 20, the oldest that are not favorites drop off, and favorites stay. The `server` topic's snapshot carries it as `recent: [{path, name, kind, opened, favorite, exists}]` - `path` is what opens it again (a folder, or a solution's `.ied.sln`), `opened` unix ms, `exists` whether the path is still there - and every change publishes the whole list as `recent.changed {recent}`. A client opens again only what is listed: a path the owner never opened on the machine still comes from the machine (`docs/11` "Trust layers").
+
+A launch URL's `#open=<wsId>/<path>[:<line>[:<col>]]` (the control channel's `open`) shows that workspace, and the file when `path` is not empty; the web client's own `#start` shows its start page (`docs/15`).
 
 ## Files
 
@@ -208,9 +224,9 @@ A chat belongs to a workspace and to the server: a turn runs on the server until
 | Topic | Events | Snapshot |
 |---|---|---|
 | `chats:<wsId>` | `chat.created`, `chat.changed` (a summary), `chat.deleted {chatId}` | `{chats: [summary]}` |
-| `chat:<chatId>` | `turn.start`, `turn.progress`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `approval.resolved`, `question.request`, `question.resolved`, `tasks.changed`, `queue.changed`, `files.changed`, `context.changed`, `turn.stats`, `turn.end`, `chat.changed` | `{...summary, model, groupInUse, tasks, queued, modified, context, hasMore, turns: [the last 20], pendingApprovals, pendingQuestion}`: `model` and `groupInUse` are what a turn would use now |
+| `chat:<chatId>` | `turn.start`, `turn.progress`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `approval.resolved`, `question.request`, `question.resolved`, `tasks.changed`, `queue.changed`, `files.changed`, `resources.changed`, `context.changed`, `turn.stats`, `turn.end`, `chat.changed` | `{...summary, model, groupInUse, tasks, queued, modified, resources, context, hasMore, turns: [the last 20], pendingApprovals, pendingQuestion}`: `model` and `groupInUse` are what a turn would use now |
 
-A turn is `{turnId, user: {text}, mode, model, group, segments, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, startedMs, endedMs}`: `stop` is null while it runs; `tokensIn` is the last request's prompt, `tokensOut` every request's completion, `ttftMs` the last time to first token and `genMs` the time spent generating after it (tokens per second = `tokensOut / genMs`).
+A turn is `{turnId, user: {text, from?}, hops?, mode, model, group, segments, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, startedMs, endedMs}`: `stop` is null while it runs; `tokensIn` is the last request's prompt, `tokensOut` every request's completion, `ttftMs` the last time to first token and `genMs` the time spent generating after it (tokens per second = `tokensOut / genMs`).
 
 A segment is `{segId, type, done, model?, tokens?}` plus by type:
 
@@ -234,6 +250,7 @@ Events:
 | `tasks.changed` | `{items: [{id, title, status, note?}]}`; `status` is `pending`, `in_progress`, `done`, `skipped` |
 | `queue.changed` | `{queued: [text]}` |
 | `files.changed` | `{files: [{path, plus, minus}]}`: what the AI wrote in this chat |
+| `resources.changed` | `{resources: [{ref, title, kind}]}`: the tabs plugins opened for this chat (`docs/04` "What a chat has open") |
 | `context.changed` | `{window, used, parts: [{name, tokens}]}`: the last request's prompt by part against the model's window (0 when unknown) |
 | `turn.stats` | `{turnId, tokensIn, tokensOut, ttftMs, genMs}` after each request |
 | `turn.end` | `{turnId, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, endedMs}`: `stop` is `finished`, `user_cancelled`, `no_model`, `interrupted` or the stop reason that paused the chat (`docs/12` taxonomy); `recoveries` the recovery actions taken, in order ("retried after http_error 503 (1x)") |

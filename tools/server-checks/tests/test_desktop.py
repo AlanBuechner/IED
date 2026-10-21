@@ -223,19 +223,20 @@ class DesktopTests(ServerTestCase):
 		pages = [p for p in page_targets(self.port) if p["url"].startswith("http://127.0.0.1:") and "login" not in p["url"]]
 		if not pages:
 			return None
-		label = evaluate(pages[0], "(document.querySelector('.empty-area button') || {}).textContent || ''")
+		label = evaluate(pages[0], "(document.querySelector('.start-page .sp-start button') || {}).textContent || ''")
 		return pages[0] if label == "Open Folder..." else None
 
 	def open_folder(self, folder):
-		"""Presses the home page's Open Folder button and answers the picker with `folder` (None: cancels it)."""
-		evaluate(self.wait(self.home_page, "home page with Open Folder"), "document.querySelector('.empty-area button').click()")
+		"""Presses the start page's Open Folder button and answers the picker with `folder` (None: cancels it)."""
+		evaluate(self.wait(self.home_page, "start page with Open Folder"), "document.querySelector('.start-page .sp-start button').click()")
 		dialog = self.wait(lambda: dialog_of(self.app.pid), "folder picker", 15)
 		answer_dialog(dialog, folder)
 		self.wait(lambda: dialog_of(self.app.pid) is None, "picker closed", 15)
 
 	def test_open_folder_opens_the_picked_folder_in_the_window(self):
 		self.start_app(home=True)
-		self.wait(self.home_page, "home page with Open Folder")
+		home = self.wait(self.home_page, "start page with Open Folder")
+		self.assertTrue(home["url"].endswith("#start"), "a window without a path opens on the start page: " + home["url"])
 		self.assertEqual([], self.status()["workspaces"], "no workspace before")
 		self.open_folder(None)
 		time.sleep(1)
@@ -250,3 +251,6 @@ class DesktopTests(ServerTestCase):
 		self.assertEqual("project - IED", page["title"])
 		self.assertEqual([os.path.normcase(self.folder)], [os.path.normcase(w["root"]) for w in self.status()["workspaces"]])
 		self.assertEqual(1, len(page_targets(self.port)), "in the same window")
+		evaluate(page, "ied_shell.commands.run('shell.startPage')")
+		listed = self.wait(lambda: evaluate(self.wait(self.home_page, "the start page again"), "[...document.querySelectorAll('.sp-section')].map(s => s.querySelector('h3').textContent + ':' + [...s.querySelectorAll('.sp-name')].map(n => n.textContent).join(','))"), "its lists", 15)
+		self.assertEqual(["Open:project"], listed, "the folder is open, and so not repeated under Recent")

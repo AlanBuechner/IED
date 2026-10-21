@@ -21,6 +21,7 @@ class Presence:
 		return {
 			"serverVersion": self.server.version,
 			"workspaces": self.server.workspace.summaries(),
+			"recent": [dict(p) for p in self.server.workspace.recent],
 			"clients": [self._client(s) for s in self.server.sessions],
 			"notifications": list(self.notifications),
 		}

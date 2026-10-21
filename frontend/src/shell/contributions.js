@@ -63,6 +63,14 @@ export class Contributions {
 		this.activities.sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
 	}
 
+	// No workspace shown (the start page): none of a workspace's plugins stays registered, as on a page that never
+	// showed one.
+	clear() {
+		this.plugins = [];
+		this.register();
+		this.activities = [];
+	}
+
 	async importModule(plugin) {
 		if (!plugin.ui) return;
 		const cache = this.shell.modules;

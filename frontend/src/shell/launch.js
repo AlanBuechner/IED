@@ -2,7 +2,7 @@
 
 // {wsId, path, line, col} of the fragment (line and col 1-based, 0 when absent), or null for another fragment.
 export function parseOpenFragment(hash) {
-	const match = /^#?open=([^/]+)\/(.+?)(?::(\d+))?(?::(\d+))?$/.exec(hash || "");
+	const match = /^#?open=([^/]+)\/(.*?)(?::(\d+))?(?::(\d+))?$/.exec(hash || "");
 	if (!match) return null;
 	let path;
 	try {

@@ -109,7 +109,7 @@ namespace Desktop
 
 	void App::OpenHome() {
 		Window* window = NewWindow();
-		if (window != null) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::First);
+		if (window != null) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::StartPage);
 	}
 
 	void App::OpenLocation(Core::StringView path, int64 line, int64 col) {

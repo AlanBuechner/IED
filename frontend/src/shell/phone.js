@@ -5,7 +5,7 @@
 
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { wellsOf, groupsOf } from "./layouttree.js";
-import { initials, noWorkspaceView } from "./workspaces.js";
+import { initials, startPageView } from "./workspaces.js";
 import { banners } from "./banners.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -86,8 +86,8 @@ export class PhoneChrome {
 		if (entry.ref === this.shown) this.renderHead(this.paneRef());
 	}
 
-	noWorkspace() {
-		replace(this.area, noWorkspaceView(this.shell));
+	startPage() {
+		replace(this.area, startPageView(this.shell));
 	}
 
 	renderBanners() {

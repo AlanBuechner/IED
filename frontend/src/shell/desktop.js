@@ -5,7 +5,7 @@ import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { MENUBAR } from "./menus.js";
 import { DockView } from "./dock.js";
 import * as T from "./layouttree.js";
-import { initials, kindIcon, noWorkspaceView } from "./workspaces.js";
+import { initials, kindIcon, startPageView } from "./workspaces.js";
 import { StatusBar } from "./statusbar.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -88,8 +88,12 @@ export class DesktopChrome {
 		for (const dock of this.docks.values()) dock.updateTab(entry);
 	}
 
-	noWorkspace() {
-		replace(this.area, noWorkspaceView(this.shell));
+	// The start page takes the whole area: the activities' docks go with what it replaces, and come back on render.
+	startPage() {
+		for (const dock of this.docks.values()) dock.container.remove();
+		this.docks.clear();
+		this.renderMenubar();
+		replace(this.area, startPageView(this.shell));
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -218,8 +222,7 @@ export class DesktopChrome {
 			else dock.container.hidden = id !== activityId;
 		}
 		for (const el of this.area.querySelectorAll(":scope > .view")) el.hidden = el.dataset.ref !== "activity:" + activityId;
-		const empty = this.area.querySelector(":scope > .empty-area");
-		if (empty) empty.remove();
+		for (const empty of this.area.querySelectorAll(":scope > .empty-area, :scope > .start-page")) empty.remove();
 		if (!activityId) {
 			this.area.append(h("div.empty-area", null, icon("extensions", "lg"), h("p", null, "No plugin contributes an activity. Manage plugins with Extensions > Manage Plugins.")));
 			return;

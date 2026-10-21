@@ -92,7 +92,7 @@ Three independent switches, each with a narrow meaning:
 | **Plugin approval** | an installed plugin (by content hash) | whether a global plugin's code may load at all, and with which permissions | built-ins approved; others need approval |
 | **AI permission mode** | a chat (with rules at app/solution tier) | which tool calls run without asking | `ask` for mutations, auto for reads |
 
-Workspace trust is recorded in app tier (never in the repo - a repo cannot trust itself). Trust is re-requested when the solution's local-plugin pins, task commands or MCP definitions change (diff shown).
+Which folders a client may open is the machine's to say: a new path comes only from the machine itself (`ied <path>` over the control pipe, the desktop app's folder picker), and a client - a phone included - opens again only a project of the server's recent list, which those fill (`ws.openRecent`, `docs/10` "Workspaces"). Workspace trust is recorded in app tier (never in the repo - a repo cannot trust itself). Trust is re-requested when the solution's local-plugin pins, task commands or MCP definitions change (diff shown).
 
 ## AI permission model
 

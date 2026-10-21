@@ -52,7 +52,8 @@ namespace Ied
 		// A folder as a workspace of `kind` ("folder", "file" or "solution"), told to every service.
 		public Workspace* Open(const FS::Path& folder, Core::StringView kind);
 		// The workspace `target` (a canonical path) belongs to, opening it when none does: a .ied.sln as a solution, a
-		// folder as itself, another file in its folder; `relative` is the path inside it.
+		// folder as itself, another file in its folder; `relative` is the path inside it. It goes first in the recent
+		// projects (host/recent).
 		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);
 		// A .ied.sln (a canonical path) as a solution workspace rooted at its folder.
 		public Workspace* OpenSolution(const FS::Path& file);
@@ -65,6 +66,10 @@ namespace Ied
 		public void ContributionsChanged(Workspace* ws);
 
 	private:
+		private Workspace* OpenOrFind(const FS::Path& target, Core::String& relative);
+		private void Remember(Workspace* ws);
+		// recent.changed on the server topic: the whole list.
+		private void PublishRecent();
 		private Core::String Snapshot(const Workspace* ws) const;
 		private void TreeChanged(Workspace* ws, Core::StringView path, const char* change);
 		// tree.changed for a move: `from` deleted, `to` created.
@@ -84,6 +89,9 @@ namespace Ied
 		private Core::String MakeDirectoryMethod(Call& call, const Params& params);
 		private Core::String RenameMethod(Call& call, const Params& params);
 		private Core::String SetTrustMethod(Call& call, const Params& params);
+		private Core::String OpenRecentMethod(Call& call, const Params& params);
+		// ws.setFavorite, or ws.forgetRecent when `forget`.
+		private Core::String RecentChangeMethod(Call& call, const Params& params, bool forget);
 		private void RegisterMethods();
 
 		private Server* server;

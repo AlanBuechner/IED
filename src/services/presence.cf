@@ -32,6 +32,7 @@ namespace Ied
 		json.Field("serverVersion", server->config.version.View());
 		Core::String workspaces = server->workspaces->SummariesJson();
 		json.RawField("workspaces", workspaces.View());
+		json.RawField("recent", server->recent.Json().View());
 		json.Key(Core::StringView("clients"));
 		json.BeginArray();
 		for (int64 i = 0; i < server->sessions.Count(); ++i) json.Raw(server->sessions[i]->ClientJson().View());

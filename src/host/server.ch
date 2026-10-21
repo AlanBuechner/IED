@@ -17,6 +17,7 @@ include "auth/auth.ch"
 include "plugins/host.ch"
 include "plugins/codecalls.ch"
 include "trust.ch"
+include "recent.ch"
 include "schemas.ch"
 include "appdata.ch"
 include "settings/service.ch"
@@ -68,6 +69,7 @@ namespace Ied
 		public PluginHost* plugins;
 		public CodeRuntime* code;
 		public TrustStore trust;
+		public RecentProjects recent;
 		public HostSchemas schemas;
 		public Settings* settings;
 		public AppDataWatch appWatch;

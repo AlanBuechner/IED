@@ -22,7 +22,7 @@ ied-desktop.exe  (C4, one process, many windows)
 
 Command line: `ied-desktop [<path>[:<line>[:<col>]]] [--control <name>] [--data <dir>] [--debug-port <n>]`, or `ied-desktop --register` / `--unregister`.
 
-- With a path, the window opens it as `ied <path>` does (the control pipe's `open`); without one, it asks for `url` and opens IED's home.
+- With a path, the window opens it as `ied <path>` does (the control pipe's `open`); without one (the Start menu), it asks for `url` and opens IED's start page (`#start`, `docs/15` "Start page"): the open workspaces, favorites and recent projects, even while workspaces are open on the server.
 - `--control` names another server's pipe (tests); `--data` moves the app's own state and the WebView2 profile (tests); `--debug-port` opens the WebView2's CDP port on loopback so a test can drive and screenshot the window (Playwright's `connect_over_cdp`).
 - `--register` puts IED in the user's Start menu, a shortcut to this program (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\IED.lnk`, made with `IShellLinkW` and saved through `IPersistFile`), so Windows key, "ied", Enter opens it; `--unregister` removes it. Both open no window and answer with the exit code (0 done, 1 not). `nuke install-ied` installs IED and registers the installed copy (`docs/21` "As built").
 

@@ -1445,3 +1445,41 @@ def browser_tab(run):
 
 
 import profiler_scenarios  # noqa: E402,F401  (the profiler's scenarios register themselves)
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def start_page_and_recent_projects(run):
+	"""IED's start page (`#start`, what the desktop app opens without a path; docs/15 "Start page"): the open workspaces,
+	the favorites and the recent projects; a star moves a project between them, a click opens one, File > Start Page
+	comes back, and the workspace switcher lists the same. The mock's list: demo (open), Tools, Shooter (a favorite) and
+	Prototype (gone). Each viewport leaves it as it found it, but for Tools, which stays open."""
+	page = run.open()
+	page.goto(run.target.url + "/#start")
+	page.wait_for_function("window.ied_shell && ied_shell.client.state === 'live' && document.querySelectorAll('.start-page .sp-row').length >= 4", timeout=20000)
+
+	def names(section):
+		return page.eval_on_selector_all(".sp-section", "(els, title) => { const s = els.find(e => e.querySelector('h3').textContent === title); return s ? [...s.querySelectorAll('.sp-name')].map(n => n.textContent) : []; }", section)
+
+	def row(path):
+		return ".sp-row[data-path='%s']" % path
+
+	check("demo" in names("Open"), "the open workspace")
+	check(names("Favorites") == ["Shooter"], "the favorite")
+	check(page.eval_on_selector(row("C:/mock/Prototype"), "e => e.classList.contains('gone') && e.querySelector('.sp-when').textContent") == "not found", "a gone folder says so")
+	run.shot("start")
+	page.click(row("C:/mock/Shooter") + " button[aria-label='Remove from Favorites']")
+	page.wait_for_function("() => [...document.querySelectorAll('.sp-section')].some(s => s.querySelector('h3').textContent === 'Recent' && s.textContent.includes('Shooter'))")
+	page.hover(row("C:/mock/Shooter"))
+	page.click(row("C:/mock/Shooter") + " button[aria-label='Add to Favorites']")
+	page.wait_for_function("() => [...document.querySelectorAll('.sp-section')].some(s => s.querySelector('h3').textContent === 'Favorites' && s.textContent.includes('Shooter'))")
+	tools = row("C:/mock/Tools/Tools.ied.sln") if page.query_selector(row("C:/mock/Tools/Tools.ied.sln")) else row("C:/mock/Tools")
+	page.click(tools)
+	page.wait_for_function("document.title === 'Tools - IED' && !document.querySelector('.start-page')", timeout=20000)
+	check(page.evaluate("location.hash") == "", "a project chosen, the start page is no longer asked for")
+	page.click("button[aria-label='Switch workspace']")
+	page.wait_for_selector(".menu .menu-item:has-text('Start Page')")
+	labels = run.texts(".menu .menu-item .label")
+	check("Shooter" in labels and "demo" in labels and "Prototype" in labels, "the switcher lists the same projects: %r" % labels)
+	run.shot("switcher")
+	page.click(".menu .menu-item:has-text('Start Page')")
+	page.wait_for_function("() => location.hash === '#start' && [...document.querySelectorAll('.sp-section')].some(s => s.querySelector('h3').textContent === 'Open' && s.textContent.includes('Tools'))", timeout=10000)

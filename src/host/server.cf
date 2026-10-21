@@ -20,6 +20,9 @@ namespace Ied
 		Core::String trustError;
 		trust.Load((FS::Path(this.config.appDataDir.View()) / "trust.json").View(), trustError);
 		if (!trustError.IsEmpty()) Log(trustError.View());
+		Core::String recentError;
+		recent.Load((FS::Path(this.config.dataDir.View()) / "recent.json").View(), recentError);
+		if (!recentError.IsEmpty()) Log(recentError.View());
 		Core::String schemaError;
 		if (!schemas.Load(this.config.homeDir.View(), schemaError)) Log((Core::String("the host API schemas are missing: ") + schemaError.View()).View());
 		epoch = NewEpoch();

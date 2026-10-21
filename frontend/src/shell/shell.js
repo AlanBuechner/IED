@@ -56,7 +56,8 @@ export class Shell {
 		this.client = null;
 		this.server = { workspaces: [], clients: [], notifications: [] };
 		this.wsId = null;
-		this.showingNoWorkspace = false;   // the server has no workspace to show (not merely none chosen yet)
+		this.showingStartPage = false;   // this window shows the start page (not merely no workspace chosen yet)
+		this.startPageAsked = location.hash === "#start";   // the start page even while workspaces are open (docs/15)
 		this.pendingOpen = parseOpenFragment(location.hash);
 		this.workspace = workspaceInfo();
 		this.layout = null;
@@ -80,6 +81,7 @@ export class Shell {
 		// The width again: the window may have been resized while the identity was read, before anything listened.
 		this.deviceClass = deviceClassOf(window.innerWidth);
 		window.addEventListener("resize", () => this.resized());
+		window.addEventListener("hashchange", () => location.hash === "#start" && !this.showingStartPage && this.showStartPage());
 		this.context.set("deviceClass", this.deviceClass);
 		this.context.set("connected", false);
 		// Inside IED's desktop app (docs/27), which adds window.iedDesktop before the page's scripts.
@@ -130,7 +132,7 @@ export class Shell {
 	// The server topic: workspaces, devices, notifications
 
 	serverSnapshot(data) {
-		this.server = { serverVersion: data.serverVersion, workspaces: data.workspaces || [], clients: data.clients || [], notifications: data.notifications || [] };
+		this.server = { serverVersion: data.serverVersion, workspaces: data.workspaces || [], recent: data.recent || [], clients: data.clients || [], notifications: data.notifications || [] };
 		this.serverChanged();
 		if (!this.wsId || !this.server.workspaces.some((w) => w.wsId === this.wsId)) this.showWorkspace(this.preferredWorkspace());
 	}
@@ -145,12 +147,14 @@ export class Shell {
 		}
 		else if (kind === "notification.dismissed") s.notifications = s.notifications.filter((n) => n.id !== data.id);
 		else if (kind === "workspace.opened") s.workspaces = [...s.workspaces.filter((w) => w.wsId !== data.wsId), data];
+		else if (kind === "recent.changed") s.recent = data.recent || [];
 		this.serverChanged();
-		if (kind === "workspace.opened" && !this.wsId) this.showWorkspace(data.wsId);
+		if (kind === "workspace.opened" && !this.wsId && !this.startPageAsked) this.showWorkspace(data.wsId);
 	}
 
 	serverChanged() {
 		if (this.chrome) this.chrome.serverChanged();
+		if (this.chrome && this.showingStartPage) this.chrome.startPage();
 		for (const fn of [...this.serverListeners]) fn(this.server);
 	}
 
@@ -160,6 +164,7 @@ export class Shell {
 	}
 
 	preferredWorkspace() {
+		if (this.startPageAsked) return null;
 		const ids = this.server.workspaces.map((w) => w.wsId);
 		const asked = new URLSearchParams(location.search).get("ws");
 		let remembered = null;
@@ -186,13 +191,20 @@ export class Shell {
 		catch {
 			// a window without storage forgets the choice
 		}
-		this.showingNoWorkspace = !wsId;
+		this.showingStartPage = !wsId;
 		if (!wsId) {
-			// The workspace shown before is described no more: not in the title, not on the sidebar's button.
+			// The workspace shown before is described no more: not in the title, not on the sidebar's button, not by its
+			// plugins' activities, toolbars and panel.
 			Object.assign(this.workspace, { wsId: null, name: "", kind: null, root: "", trusted: true, solution: null });
+			this.contributions.clear();
 			this.workspaceChanged();
-			this.chrome.noWorkspace();
+			this.chrome.contributionsChanged();
+			this.chrome.startPage();
 			return;
+		}
+		if (this.startPageAsked) {
+			this.startPageAsked = false;
+			history.replaceState(null, "", location.pathname + location.search);
 		}
 		this.wsTopic = this.client.subscribe("ws:" + wsId, {
 			snap: (data) => this.workspaceSnapshot(data),
@@ -201,6 +213,32 @@ export class Shell {
 		});
 		await this.reloadContributions();
 		this.openLayout();
+	}
+
+	// The start page in this window (File > Start Page): the workspace stays open on the server.
+	showStartPage() {
+		this.startPageAsked = true;
+		history.replaceState(null, "", location.pathname + location.search + "#start");
+		return this.showWorkspace(null);
+	}
+
+	// A project of the recent list, opened again on the server and shown here.
+	async openProject(path) {
+		try {
+			const answer = await this.client.request("ws.openRecent", { path });
+			if (answer.workspace.wsId !== this.wsId) await this.showWorkspace(answer.workspace.wsId);
+		}
+		catch (e) {
+			this.report("The project did not open: " + e.message, e);
+		}
+	}
+
+	setFavorite(path, favorite) {
+		return this.client.request("ws.setFavorite", { path, favorite }).catch((e) => this.report("ws.setFavorite: " + e.message, e));
+	}
+
+	forgetProject(path) {
+		return this.client.request("ws.forgetRecent", { path }).catch((e) => this.report("ws.forgetRecent: " + e.message, e));
 	}
 
 	leaveWorkspace() {
@@ -269,6 +307,7 @@ export class Shell {
 		if (!open || open.wsId !== this.wsId) return;
 		this.pendingOpen = null;
 		history.replaceState(null, "", location.pathname + location.search);
+		if (!open.path) return;
 		const opener = this.contributions.plugins.flatMap((p) => (p.contributes.fileOpener ? [p.contributes.fileOpener] : [])).pop();
 		if (opener) this.commands.run(opener.command, { path: open.path, line: open.line, col: open.col });
 		else this.toasts.show("No plugin opens files, so " + open.path + " is not shown.", "warn");
@@ -281,8 +320,8 @@ export class Shell {
 		if (this.chrome) this.chrome.dispose();
 		this.chrome = this.deviceClass === "phone" ? new PhoneChrome(this, this.root) : new DesktopChrome(this, this.root);
 		this.chrome.connection(this.client ? this.client.state : "connecting");
-		// A chrome made for a new width shows what the old one did: a workspace is rendered by render(), none is shown here.
-		if (this.showingNoWorkspace) this.chrome.noWorkspace();
+		// A chrome made for a new width shows what the old one did: a workspace is rendered by render(), the start page here.
+		if (this.showingStartPage) this.chrome.startPage();
 	}
 
 	resized() {
