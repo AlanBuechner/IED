@@ -1,6 +1,6 @@
-"""File operations on folders and open documents (docs/10): fs.rename moves a folder with its files' revisions and the
-documents open in it, which keep their docId, text and version and get doc.renamed; fs.delete takes a folder only with
-recursive, and documents open in it are told."""
+"""File operations on folders and open documents (docs/10 "Files"): fs.rename moves a folder with its files' revisions and
+the documents open in it, which keep their docId, text and version and get doc.renamed; fs.delete takes a folder only
+with recursive, documents open in it are told, and what it deletes goes to the trash, which lists, restores and purges."""
 
 import os
 import shutil
@@ -75,7 +75,7 @@ class FileOperationTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as refused:
 			await self.call("fs.delete", path="src")
 		self.assertEqual("bad_request", refused.exception.code)
-		self.assertEqual({}, await self.call("fs.delete", path="src", recursive=True))
+		self.assertIn("trashId", await self.call("fs.delete", path="src", recursive=True))
 		self.assertFalse(os.path.exists(os.path.join(self.folder, "src")))
 		told = await self.client.wait_for("doc:" + doc, lambda f: f["t"] == "evt" and f["kind"] == "doc.diskChanged")
 		self.assertEqual(0, told[-1]["data"]["revision"])
@@ -85,3 +85,27 @@ class FileOperationTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as root:
 			await self.call("fs.rename", **{"from": "", "to": "x"})
 		self.assertEqual("bad_request", root.exception.code)
+
+	async def test_deletes_go_to_the_trash_and_come_back(self):
+		file_entry = (await self.call("fs.delete", path="top.txt"))["trashId"]
+		folder_entry = (await self.call("fs.delete", path="src", recursive=True))["trashId"]
+		self.assertFalse(os.path.exists(os.path.join(self.folder, "top.txt")))
+		listed = await self.client.request("trash.list", {"wsId": "w1"})
+		self.assertEqual([(folder_entry, "src", "folder"), (file_entry, "top.txt", "file")], [(e["id"], e["path"], e["kind"]) for e in listed["entries"]], "newest first")
+		self.assertEqual(4 + 7 + 7, listed["bytes"])
+		self.assertEqual({"wsId": "w1", "path": "src"}, await self.client.request("trash.restore", {"id": folder_entry}))
+		with open(os.path.join(self.folder, "src", "deep", "b.c"), newline="") as f:
+			self.assertEqual("int b;\n", f.read(), "the folder is back with what was in it")
+		self.assertEqual("int a;\n", (await self.call("fs.read", path="src/a.c"))["text"])
+		with open(os.path.join(self.folder, "top.txt"), "w") as f:
+			f.write("new\n")
+		with self.assertRaises(RpcFailure) as taken:
+			await self.client.request("trash.restore", {"id": file_entry})
+		self.assertEqual("conflict", taken.exception.code)
+		self.assertEqual({}, await self.client.request("trash.purge", {"id": file_entry}))
+		self.assertEqual([], (await self.client.request("trash.list", {}))["entries"])
+		for crafted in ("..", "../..", "1-2\\..\\.."):
+			with self.assertRaises(RpcFailure) as refused:
+				await self.client.request("trash.purge", {"id": crafted})
+			self.assertEqual("not_found", refused.exception.code, "an id never names a path outside the trash")
+		self.assertTrue(os.path.isdir(self.folder))

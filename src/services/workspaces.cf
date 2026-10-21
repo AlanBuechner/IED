@@ -242,6 +242,13 @@ namespace Ied
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "tree.changed", data.View());
 	}
 
+	Workspace* Workspaces::ForRoot(const FS::Path& root) const {
+		Core::String relative;
+		for (Workspace* ws : items)
+			if (RelativeTo(ws->root.View(), root.View(), relative) && relative.IsEmpty()) return ws;
+		return nullptr;
+	}
+
 	void Workspaces::Moved(Workspace* ws, Core::StringView from, Core::StringView to) {
 		JsonWriter data;
 		data.BeginObject();
@@ -471,18 +478,27 @@ namespace Ied
 		if (!current) throw Missing("file", path.View());
 		const int64 expected = params.Int("expectedRevision", -1);
 		if (expected >= 0 && expected != current) throw Changed(current);
-		if (!FS::RemoveFile(ws->At(path.View()).CStr())) throw RpcError(ErrorCode::Unavailable, "the file could not be deleted");
+		Core::String trashId = server->trash->MoveIn(ws, path.View(), false);
 		ws->revisions.Remove(path);
 		ws->digests.At(path) = Core::String();
+		server->documents->OnDiskDeleted(ws, path.View());
 		TreeChanged(ws, path.View(), "deleted");
-		return Core::String("{}");
+		return TrashResult(trashId.View());
 	}
 
-	// A folder with everything in it, when `recursive` says so: the files known under it are forgotten and the
-	// documents open on them told.
+	static Core::String TrashResult(Core::StringView trashId) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("trashId", trashId);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// A folder with everything in it, when `recursive` says so, to the trash: the files known under it are forgotten
+	// and the documents open on them told.
 	Core::String Workspaces::DeleteFolder(Workspace* ws, Core::StringView path, bool recursive) {
 		if (!recursive) throw RpcError(ErrorCode::BadRequest, "the path is a folder: pass recursive to delete it with everything in it");
-		const bool removed = FS::RemoveAll(ws->At(path).CStr()) >= 0;
+		Core::String trashId = server->trash->MoveIn(ws, path, true);
 		for (const Core::String& known : Under(KnownPaths(ws), path)) {
 			if (FS::FileExists(ws->At(known.View()).CStr())) continue;
 			ws->revisions.Remove(known);
@@ -491,8 +507,7 @@ namespace Ied
 		for (const Core::String& open : Under(server->documents->OpenPaths(ws), path))
 			if (!FS::FileExists(ws->At(open.View()).CStr())) server->documents->OnDiskDeleted(ws, open.View());
 		TreeChanged(ws, path, "deleted");
-		if (!removed) throw RpcError(ErrorCode::Unavailable, "some of the folder could not be deleted");
-		return Core::String("{}");
+		return TrashResult(trashId.View());
 	}
 
 	// A folder moved with what is in it: revisions and digests follow, and so do the documents open under it.

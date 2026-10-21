@@ -38,6 +38,8 @@ namespace Ied
 		// Throws not_found for an unknown id; Find answers null.
 		public Workspace* Get(Core::StringView wsId) const;
 		public Workspace* Find(Core::StringView wsId) const;
+		// The open workspace rooted at `root`, or null.
+		public Workspace* ForRoot(const FS::Path& root) const;
 		public Workspace* First() const { return items.IsEmpty() ? nullptr : items[0]; }
 		public Core::String SummariesJson() const;
 		// A file's text, the file seen from now on (its revision and digest kept); throws not_found.

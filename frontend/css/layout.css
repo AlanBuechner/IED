@@ -275,6 +275,7 @@ button.st:hover { background: var(--veil); color: var(--text-0); }
 	font-size: var(--font-size-sm);
 }
 .toast .text { flex: 1; overflow-wrap: anywhere; }
+.toast .toast-action { height: 22px; margin-top: -2px; color: var(--accent-info); }
 .toast .lvl { margin-top: 1px; }
 .toast.info .lvl { color: var(--accent-info); }
 .toast.warning .lvl { color: var(--accent-warn); }

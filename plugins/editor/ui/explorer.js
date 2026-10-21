@@ -217,16 +217,27 @@ export class Explorer {
 		}
 	}
 
+	// To the trash (docs/10 "Files"), with an Undo that puts it back.
 	async remove(node) {
 		if (!node || (node.kind !== "file" && node.kind !== "folder")) return;
 		const what = node.kind === "folder" ? "'" + node.name + "' and everything in it" : "'" + node.name + "'";
-		const sure = await confirmDialog({ title: "Delete", message: what + " will be deleted permanently.", confirm: "Delete", danger: true });
+		const sure = await confirmDialog({ title: "Delete", message: what + " will be moved to the trash.", confirm: "Delete", danger: true });
 		if (!sure) return;
 		try {
-			await this.ied.client.request("fs.delete", { wsId: this.ctx.wsId, path: node.path, recursive: node.kind === "folder" });
+			const result = await this.ied.client.request("fs.delete", { wsId: this.ctx.wsId, path: node.path, recursive: node.kind === "folder" });
+			this.ied.toast("Deleted '" + node.name + "'.", { action: { label: "Undo", run: () => this.restore(result.trashId, node.path) } });
 		}
 		catch (e) {
 			this.ied.report("Could not delete '" + node.path + "': " + e.message, e);
+		}
+	}
+
+	async restore(trashId, path) {
+		try {
+			await this.ied.client.request("trash.restore", { id: trashId });
+		}
+		catch (e) {
+			this.ied.report(e.code === "conflict" ? "'" + path + "' was not restored: something is there now." : "Could not restore '" + path + "': " + e.message, e);
 		}
 	}
 

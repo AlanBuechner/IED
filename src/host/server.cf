@@ -33,6 +33,7 @@ namespace Ied
 		blobs = new Blobs();
 		outputs = new Outputs(self);
 		layouts = new Layouts(self);
+		trash = new Trash(self);
 		lsp = new LspPool(self);
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
 		workspaces = new Workspaces(self);

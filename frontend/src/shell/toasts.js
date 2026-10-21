@@ -1,5 +1,6 @@
 // toasts.js - short-lived, non-blocking messages at the bottom right (docs/15 "Interaction rules": no modals): new
-// notifications and failures. Each stays 6 s (errors 10 s), or until dismissed; at most four show at once.
+// notifications, failures, and a view's own news with an action (Undo). Each stays 6 s (errors and ones with an
+// action 10 s), or until dismissed or acted on; at most four show at once.
 
 import { h, icon } from "/ui-kit/dom.js";
 
@@ -14,14 +15,20 @@ export class Toasts {
 		parent.append(this.el);
 	}
 
-	show(text, level) {
+	// `action`: {label, run} - a button that runs once and closes the toast.
+	show(text, level, action) {
 		const kind = LEVEL_ICONS[level] ? level : "info";
+		const button = action ? h("button.btn.flat.toast-action", { on: { click: () => {
+			toast.remove();
+			action.run();
+		} } }, action.label) : null;
 		const toast = h("div.toast." + kind, null,
 			icon(LEVEL_ICONS[kind], "lvl"),
 			h("span.text", null, text),
+			button,
 			h("button.ib", { title: "Dismiss", "aria-label": "Dismiss", on: { click: () => toast.remove() } }, icon("close")));
 		this.el.append(toast);
 		while (this.el.children.length > MOST) this.el.firstElementChild.remove();
-		setTimeout(() => toast.remove(), kind === "error" ? ERROR_STAY_MS : STAY_MS);
+		setTimeout(() => toast.remove(), kind === "error" || action ? ERROR_STAY_MS : STAY_MS);
 	}
 }

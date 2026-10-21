@@ -460,6 +460,7 @@ export class Shell {
 				return shell.workspace;
 			},
 			notify: (text, level) => shell.client.request("server.notify", { text, level: level || "info" }),
+			toast: (text, options) => shell.toasts.show(text, (options && options.level) || "info", options && options.action),
 			report: (message, error) => shell.report("Plugin '" + plugin.id + "': " + message, error),
 		};
 	}

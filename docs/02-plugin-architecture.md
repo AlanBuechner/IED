@@ -97,9 +97,10 @@ A plugin's `runtime.ui` names an ES module in its folder; `plugins.contributions
 | `workspace` | `{wsId, name, kind, root, trusted}` of the shown workspace; `workspace.on(fn)` for changes |
 | `notify(text, level)` | a notification for every device (`server.notify`) |
 | `report(message, error)` | a failure for this person (a toast and the console), attributed to the plugin |
+| `toast(text, {level, action})` | news for this person only, with an optional `action: {label, run}` button (Undo after a delete) |
 | `plugin` | `{id, base}`: the plugin's id and the URL its files are served under |
 
-Shared components (`shared/ui-kit/`, served at `/ui-kit/`) are imported by URL: `import { h, icon } from "/ui-kit/dom.js"`.
+Shared components (`shared/ui-kit/`, served at `/ui-kit/`) are imported by URL: `import { h, icon } from "/ui-kit/dom.js"`. Among them: `tree.js` (a virtualized tree with in-place naming), `dialog.js` (`confirmDialog`, the one modal question), `menu.js`, `docsync.js`, `ansi.js`.
 
 ## Contribution points
 

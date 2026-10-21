@@ -1,6 +1,8 @@
-// services/workspaces' honest parts: workspace-relative paths and the paths no one browses.
+// services/workspaces' and services/trash's honest parts: workspace-relative paths, the paths no one browses, and the
+// ids that name trash entries.
 
 include "services/workspaces.ch"
+include "services/trash.ch"
 
 static bool Refused(const char* path) {
 	try {
@@ -29,6 +31,13 @@ class WorkspaceTests {
 		assert_true(Ied::IsHiddenPath(Core::StringView(".git")) && Ied::IsHiddenPath(Core::StringView(".git/HEAD")), "a repository's folder");
 		assert_true(!Ied::IsHiddenPath(Core::StringView(".github/workflows/ci.yml")), "not a folder that merely starts alike");
 		assert_true(!Ied::IsHiddenPath(Core::StringView("src/.gitignore")), "nor a file named like it");
+	}
+
+	[test("trash_ids")]
+	public static void TestTrashIds() {
+		assert_true(Ied::IsTrashId(Core::StringView("1792555292665-3")), "the form MoveIn makes");
+		const char*[6] bad = { "", "..", "../x", "1-2/..", "C:", "1792555292665-3\\.." };
+		for (int32 i = 0; i < 6; ++i) assert_true(!Ied::IsTrashId(Core::StringView(bad[i])), bad[i]);
 	}
 
 	[test("text_digest")]

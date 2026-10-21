@@ -2,6 +2,7 @@
 
 import posixpath
 import re
+import time
 
 from fixtures import workspace_files
 from rpc import RpcError
@@ -62,7 +63,10 @@ class Workspaces:
 		ws = Workspace(fixture["wsId"], fixture["name"], fixture["root"], files, workspace_files.DIRECTORIES)
 		self.items = {ws.ws_id: ws}
 		server.hub.add("ws:" + ws.ws_id, lambda: self.snapshot(ws))
-		for name in ("ws.list", "ws.setTrust", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search"):
+		self.trash = {}
+		self.trash_made = 0
+		for name in ("ws.list", "ws.setTrust", "fs.list", "fs.read", "fs.write", "fs.delete", "fs.mkdir", "fs.rename", "fs.search",
+				"trash.list", "trash.restore", "trash.purge"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def summaries(self):
@@ -145,20 +149,63 @@ class Workspaces:
 		expected = p.int("expectedRevision", required=False)
 		if expected is not None and expected != entry.revision:
 			raise RpcError("conflict", "file changed since revision %d" % expected, {"revision": entry.revision})
-		del ws.files[path]
+		trash_id = self._to_trash(ws, path, "file", {path: ws.files.pop(path)}, set())
 		self.server.docs.on_disk_delete(ws.ws_id, path)
 		self._tree_changed(ws, path, "deleted")
-		return {}
+		return {"trashId": trash_id}
+
+	def _to_trash(self, ws, path, kind, files, directories):
+		"""Keeps what fs.delete removed (docs/10 Trash): its files and folders, for trash.restore."""
+		self.trash_made += 1
+		trash_id = "%d-%d" % (int(time.time() * 1000), self.trash_made)
+		size = sum(len(f.text.encode("utf-8")) for f in files.values())
+		self.trash[trash_id] = {"id": trash_id, "wsId": ws.ws_id, "root": ws.root, "path": path, "kind": kind,
+			"deletedMs": int(time.time() * 1000), "bytes": size, "files": files, "directories": directories}
+		return trash_id
 
 	def _delete_folder(self, ws, path, recursive):
 		if not recursive:
 			raise RpcError("bad_request", "the path is a folder: pass recursive to delete it with everything in it")
 		prefix = path + "/"
-		for gone in [f for f in ws.files if f.startswith(prefix)]:
-			del ws.files[gone]
+		files = {f: ws.files.pop(f) for f in [f for f in ws.files if f.startswith(prefix)]}
+		directories = {d for d in ws.directories if d == path or d.startswith(prefix)} | {path}
+		ws.directories -= directories
+		trash_id = self._to_trash(ws, path, "folder", files, directories)
+		for gone in files:
 			self.server.docs.on_disk_delete(ws.ws_id, gone)
-		ws.directories = {d for d in ws.directories if d != path and not d.startswith(prefix)}
 		self._tree_changed(ws, path, "deleted")
+		return {"trashId": trash_id}
+
+	@staticmethod
+	def _public(entry):
+		return {k: entry[k] for k in ("id", "root", "path", "kind", "deletedMs", "bytes")}
+
+	async def m_trash_list(self, call, p):
+		ws_id = p.str("wsId", required=False)
+		if ws_id:
+			self.get(ws_id)
+		entries = sorted(self.trash.values(), key=lambda e: e["deletedMs"], reverse=True)
+		return {"entries": [self._public(e) for e in entries if not ws_id or e["wsId"] == ws_id], "bytes": sum(e["bytes"] for e in entries)}
+
+	async def m_trash_restore(self, call, p):
+		entry = self.trash.get(p.str("id"))
+		if entry is None:
+			raise RpcError("not_found", "no trash entry %r" % p.str("id"))
+		ws = self.get(entry["wsId"])
+		if entry["path"] in ws.files or ws.is_dir(entry["path"]):
+			raise RpcError("conflict", "something is at %s now" % entry["path"])
+		ws.files.update(entry["files"])
+		ws.directories |= entry["directories"]
+		del self.trash[entry["id"]]
+		self._tree_changed(ws, entry["path"], "created")
+		return {"wsId": ws.ws_id, "path": entry["path"]}
+
+	async def m_trash_purge(self, call, p):
+		if p.bool("all", False, required=False):
+			self.trash.clear()
+			return {}
+		if self.trash.pop(p.str("id"), None) is None:
+			raise RpcError("not_found", "no trash entry %r" % p.str("id"))
 		return {}
 
 	async def m_fs_mkdir(self, call, p):

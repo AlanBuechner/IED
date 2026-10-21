@@ -107,6 +107,25 @@ Plugins add topics under their own prefix (`<pluginId>/<kind>:<id>`); the hub is
 - **Mutations carry the revision they were based on** (`baseVersion`, `expectedRevision`) wherever the target can be contended. The server rejects stale writes with `conflict`; the UI shows a resolve choice.
 - **Idempotency:** mutations that may be retried after a reconnect carry a client-generated `opId`; the server remembers recent `opId`s per client for 10 minutes and returns the original result for duplicates (so a "send message" retried during a flaky connection is not sent twice).
 
+## Files
+
+Paths are workspace-relative with `/` separators. Every file has a `revision` (1 when the server first sees it, then one more per write, the server's or anyone else's).
+
+| Method | Params | Result |
+|---|---|---|
+| `fs.list` | `wsId, path` | `{path, entries: [{name, path, kind: file\|dir, size?, revision?}]}` |
+| `fs.read` | `wsId, path` | `{path, text, revision}` |
+| `fs.write` | `wsId, path, text, expectedRevision?` (0: must not exist) | `{path, revision}`; folders are made |
+| `fs.mkdir` | `wsId, path` | `{path}` |
+| `fs.rename` | `wsId, from, to` (a file or a folder) | `{path, revision?}`; open documents follow (`doc.renamed`) |
+| `fs.delete` | `wsId, path, expectedRevision?, recursive?` (a folder needs `recursive`) | `{trashId}`: the file or folder is moved to the trash |
+| `fs.search` | `wsId, query, regex?, caseSensitive?, include?, exclude?, maxResults?` | `{matches: [{path, line, col, preview}], truncated}`: the first match of each line, `col` in UTF-16 units, `preview` the line trimmed to 200 characters; `include` / `exclude` are globs on the path |
+| `trash.list` | `wsId?` (only that workspace's) | `{entries: [{id, root, path, kind, deletedMs, bytes}], bytes}`, newest first |
+| `trash.restore` | `id` | `{wsId?, path}`: moved back where it was (`conflict` when something is there now) |
+| `trash.purge` | `id` or `all: true` | `{}`: deleted for good |
+
+**Trash** (F-OPS-13): nothing a person or an AI deletes through the server is lost at once. A deleted file or folder moves to `<data>/trash/<id>/` (the server's data folder, `%LOCALAPPDATA%/IED/` by default) with an `entry.json` saying where it came from; `trash.restore` puts it back, `trash.purge` removes it. When the trash holds more than 4 GB the oldest entries are purged. Watchers see a trash move as a delete and a restore as a create, like any change.
+
 ## Document editing protocol
 
 Server-owned buffers (F-EDT-1) with a simple, sufficient scheme:
