@@ -1,0 +1,63 @@
+/*
+	editor.css - the editor plugin's views: Solution Explorer, Output, the read-only document view. Theme tokens only.
+*/
+
+.ft-source { color: var(--filetype-source); }
+.ft-header { color: var(--filetype-header); }
+.ft-data { color: var(--filetype-data); }
+.ft-doc { color: var(--filetype-doc); }
+.ft-script { color: var(--filetype-script); }
+.ft-shader { color: var(--filetype-shader); }
+.ft-media { color: var(--filetype-media); }
+.ft-folder { color: var(--filetype-folder); }
+.ft-project { color: var(--filetype-project); }
+.ft-plain { color: var(--text-2); }
+
+.ed-tools {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-height: 28px;
+	padding: 0 var(--space-3);
+	border-bottom: var(--border-width) solid var(--border-0);
+	flex: none;
+	white-space: nowrap;
+	overflow: hidden;
+	font-size: var(--font-size-sm);
+	color: var(--text-1);
+}
+.ed-tools .ib.on { background: var(--bg-4); color: var(--text-0); }
+.ed-fill { flex: 1; min-height: 0; position: relative; }
+.ed-problem { padding: var(--space-3) var(--space-4); color: var(--accent-error); font-size: var(--font-size-sm); }
+
+/* Solution Explorer */
+.explorer .tree-row .name { overflow: hidden; text-overflow: ellipsis; }
+.explorer .tree-row .meta { font-size: var(--font-size-xs); }
+.explorer .tree-row.problem .name { color: var(--accent-error); }
+
+/* Output */
+.output-text {
+	position: absolute;
+	inset: 0;
+	overflow: auto;
+	padding: var(--space-2) var(--space-4);
+	font-family: var(--font-mono);
+	font-size: var(--font-size-code);
+	line-height: var(--line-height-code);
+	color: var(--text-0);
+	white-space: pre;
+	background: var(--bg-1);
+	user-select: text;
+	outline: none;
+}
+.output-text.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.output-text .line { min-height: var(--line-height-code); }
+
+/* read-only document */
+.doc-view { position: absolute; inset: 0; overflow: auto; background: var(--editor-bg); outline: none; }
+.doc-lines { position: relative; font-family: var(--font-mono); font-size: var(--font-size-code); line-height: var(--line-height-code); tab-size: var(--tab-size); min-width: max-content; }
+.doc-window { position: absolute; left: 0; right: 0; top: 0; }
+.doc-line { display: flex; height: var(--line-height-code); white-space: pre; }
+.doc-line .ln { width: 56px; padding-right: var(--space-5); text-align: right; color: var(--line-number); flex: none; user-select: none; background: var(--gutter-bg); }
+.doc-line .tx { color: var(--syntax-plain); padding-right: var(--space-7); user-select: text; }
+.doc-note { display: flex; align-items: center; gap: var(--space-3); }

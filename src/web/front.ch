@@ -1,7 +1,7 @@
 // The HTTP side (docs/10, docs/11): GET /ws becomes a protocol session; /healthz; uploads and blobs; the web client's
-// files; /api/auth/*. Every request's Host must be a loopback name or the bind address (DNS rebinding), unless the
-// server listens on every interface; /ws, uploads and auth POSTs also check Origin. Everything but /healthz,
-// /api/auth/* and the login page's files needs a session (AuthGate).
+// files, plugin files, /ui-kit/ and /codicons/; /api/auth/*. Every request's Host must be a loopback name or the bind
+// address (DNS rebinding), unless the server listens on every interface; /ws, uploads and auth POSTs also check Origin.
+// Everything but /healthz, /api/auth/* and the login page's files needs a session (AuthGate).
 
 include "session.ch"
 include "authgate.ch"
@@ -26,7 +26,10 @@ namespace Ied
 		private void Upload(const Http::Request& request, Http::Response& response);
 		private void Blob(Core::StringView id, const Http::Request& request, Http::Response& response);
 		private void StaticFile(Core::StringView path, Http::Response& response);
-		private void PluginFile(Core::StringView path, Http::Response& response);
+		private void FolderFile(const FS::Path& root, Core::StringView path, Http::Response& response);
+		private void PluginFile(Core::StringView wsId, Core::StringView path, Http::Response& response);
+		private void Codicon(Core::StringView file, Http::Response& response);
+		private void SendFile(const FS::Path& file, Http::Response& response);
 
 		private Server* server;
 		private AuthGate gate;
@@ -35,4 +38,6 @@ namespace Ied
 	// A path's percent escapes decoded; false for a malformed one.
 	bool PercentDecode(Core::StringView text, Core::String& decoded);
 	const char* ContentTypeOf(Core::StringView extension);
+	// "<name>.svg" with a name of lowercase letters, digits and '-': a codicon file name.
+	bool IsCodiconFile(Core::StringView file);
 }

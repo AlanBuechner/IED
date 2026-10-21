@@ -1,4 +1,4 @@
-// plugins/manifest: version ranges, as dependencies and "ied.api" use them.
+// plugins/manifest: version ranges, as dependencies and "ied.api" use them; the UI module's path.
 
 include "plugins/manifest.ch"
 
@@ -28,5 +28,22 @@ class PluginTests {
 		assert_true(!In("1.2", "^1") && !In("one", "^1"), "a version has three numbers");
 		assert_true(!In("1.0.0", "^banana") && !In("1.0.0", "^-1"), "a range that is not one");
 		assert_true(In("1.2.3-beta.1", "^1.2"), "a pre-release counts as its version");
+	}
+
+	[test("ui_path")]
+	public static void TestUiPath() {
+		Core::StringBuilder name;
+		name.Append("ied-ui-path-");
+		name.AppendInt(Platform::UnixTimeNs());
+		FS::Path folder = FS::TempDirectory() / name.View();
+		FS::MakeDirectories((folder / "ui").CStr());
+		FS::WriteFileAtomically((folder / "ui" / "index.js").CStr(), (const void*)"export {}", 9);
+		assert_true(Ied::IsUiPath(folder, Core::StringView("ui/index.js")), "a file in the folder");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("ui/missing.js")), "a file that is not there");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("ui")), "a folder");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("../ui/index.js")) && !Ied::IsUiPath(folder, Core::StringView("/ui/index.js")), "nothing outside it");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("ui/in dex.js")) && !Ied::IsUiPath(folder, Core::StringView("ui\\index.js")), "only what a URL carries as it is");
+		assert_true(!Ied::IsUiPath(folder, Core::StringView("")), "empty");
+		FS::RemoveAll(folder.CStr());
 	}
 }

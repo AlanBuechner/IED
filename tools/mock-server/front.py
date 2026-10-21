@@ -3,6 +3,7 @@
 import asyncio
 import json
 import pathlib
+import re
 import urllib.parse
 
 import ws
@@ -10,6 +11,11 @@ from session import Session
 
 HERE = pathlib.Path(__file__).resolve().parent
 CONSOLE_DIR = HERE / "console"
+REPO = HERE.parents[1]
+UI_KIT_DIR = REPO / "shared" / "ui-kit"
+CODICONS_DIR = REPO / "third_party" / "codicons" / "src" / "icons"
+CODICON_FILE = re.compile(r"^[a-z0-9-]+\.svg$")
+WORKSPACE_PLUGIN = re.compile(r"^/w/([^/]+)/plugins/(.*)$")
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]"}
 WILDCARD_BINDS = {"0.0.0.0", "::", ""}
 MAX_UPLOAD = 64 * 1024 * 1024
@@ -37,9 +43,10 @@ class Response:
 		self.headers = headers or {}
 
 	def encode(self):
+		headers = dict({"Cache-Control": "no-store"}, **self.headers)
 		lines = ["HTTP/1.1 %d %s" % (self.status, REASONS.get(self.status, "Status")), "Content-Type: " + self.content_type,
-			"Content-Length: %d" % len(self.body), "Cache-Control: no-store", "Connection: close"]
-		lines += ["%s: %s" % kv for kv in self.headers.items()]
+			"Content-Length: %d" % len(self.body), "Connection: close"]
+		lines += ["%s: %s" % kv for kv in headers.items()]
 		return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + self.body
 
 
@@ -119,9 +126,32 @@ class Front:
 			raise HttpError(405, "method not allowed")
 		if path == "/_mock" or path.startswith("/_mock/"):
 			return _file(CONSOLE_DIR, path[len("/_mock"):])
+		if path.startswith("/plugins/"):
+			return self._plugin_file(None, path[len("/plugins/"):])
+		match = WORKSPACE_PLUGIN.match(path)
+		if match:
+			return self._plugin_file(match.group(1), match.group(2))
+		if path.startswith("/ui-kit/"):
+			return _file(UI_KIT_DIR, path[len("/ui-kit"):])
+		if path.startswith("/codicons/"):
+			return self._codicon(path[len("/codicons/"):])
 		if self.static_root is None:
 			return Response(302, "", headers={"Location": "/_mock/"})
 		return _file(self.static_root, path)
+
+	def _plugin_file(self, ws_id, rest):
+		plugin_id, _, rel = rest.partition("/")
+		known_ws = ws_id is None or ws_id in self.server.workspace.items
+		target = self.server.plugins.file_of(plugin_id, rel) if known_ws and rel else None
+		if target is None:
+			raise HttpError(404, "not found")
+		return Response(200, target.read_bytes(), CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream"))
+
+	def _codicon(self, name):
+		target = CODICONS_DIR / name
+		if not CODICON_FILE.match(name) or not target.is_file():
+			raise HttpError(404, "not found")
+		return Response(200, target.read_bytes(), CONTENT_TYPES[".svg"], {"Cache-Control": "max-age=86400"})
 
 	async def _upload(self, method, headers, reader):
 		if method != "PUT":

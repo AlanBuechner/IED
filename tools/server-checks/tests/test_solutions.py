@@ -38,9 +38,10 @@ class SolutionTests(ServerTestCase):
 		write(os.path.join(self.repo, "build", "ied", "Game.ied.proj"), project("Game", "../../src/Game"))
 		write(os.path.join(self.repo, "tools", "Tool.ied.proj"), project("Tool", "Tool", kind="other"))
 		write(os.path.join(self.repo, "Nuke", "tools", "ied", "ied-plugin.json"), {
-			"manifestVersion": 1, "id": "c4", "name": "C4", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+			"manifestVersion": 1, "id": "c4", "name": "C4", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative", "ui": "ui/main.js"},
 			"contributes": {"commands": [{"id": "c4.hello", "title": "Hello"}], "settings": {"schema": "settings.schema.json"}}})
 		write(os.path.join(self.repo, "Nuke", "tools", "ied", "settings.schema.json"), SETTINGS_SCHEMA)
+		write(os.path.join(self.repo, "Nuke", "tools", "ied", "ui", "main.js"), "export function activate(ied) {}\n")
 		self.solution = os.path.join(self.repo, "MyGame.ied.sln")
 		write(self.solution, {
 			"version": 1, "name": "MyGame",
@@ -56,7 +57,8 @@ class SolutionTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.cookie = self.server.sign_in()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.sub(["ws:w1"])
 		self.snapshot = (await self.client.next_frame("ws:w1"))["data"]
 
@@ -105,9 +107,20 @@ class SolutionTests(ServerTestCase):
 		self.assertNotIn("local.indent", (await self.client.request("settings.schema", {"wsId": "w1"}))["settings"])
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		contributed = (await self.client.request("plugins.contributions", {"wsId": "w1"}))["plugins"]
-		self.assertEqual([("c4", "project")], [(p["id"], p["source"]) for p in contributed])
+		self.assertEqual([("c4", "project", "/w/w1/plugins/c4/ui/main.js")], [(p["id"], p["source"], p["ui"]) for p in contributed])
 		self.assertIn("local.indent", (await self.client.request("settings.schema", {"wsId": "w1"}))["settings"])
 		self.assertNotIn("local.indent", (await self.client.request("settings.schema"))["settings"], "not for the app tier")
+
+	async def test_a_local_plugin_files_are_served_per_workspace_once_trusted(self):
+		cookie = {"Cookie": self.cookie}
+		self.assertEqual(404, self.server.request("GET", "/w/w1/plugins/c4/ui/main.js", headers=cookie).status, "not while untrusted")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		reply = self.server.request("GET", "/w/w1/plugins/c4/ui/main.js", headers=cookie)
+		self.assertEqual((200, "text/javascript; charset=utf-8"), (reply.status, reply.header("Content-Type")))
+		self.assertIn(b"export function activate", reply.body)
+		for path in ("/plugins/c4/ui/main.js", "/w/w9/plugins/c4/ui/main.js", "/w/w1/plugins/c4/../c4/settings.schema.json/x", "/w/w1/plugins/c4/%2e%2e/MyGame.ied.sln", "/w/w1/plugins/c4/"):
+			self.assertEqual(404, self.server.request("GET", path, headers=cookie).status, path)
+		self.assertEqual(401, self.server.request("GET", "/w/w1/plugins/c4/ui/main.js").status, "files need a session")
 
 	async def test_a_local_plugin_must_have_the_expected_id(self):
 		with open(self.solution) as f:

@@ -1,0 +1,60 @@
+// services/layouts: the layout file format, the device classes, and where a workspace's layouts live.
+
+include "services/layouts.ch"
+include "services/workspaces.ch"
+include "host/trust.ch"
+
+static bool Reads(const char* text, int64& revision, Core::String& json) { return Ied::ReadLayoutFile(Core::StringView(text), revision, json); }
+
+static Ied::Workspace* WorkspaceAt(const char* root, const char* kind) {
+	Ied::Workspace* ws = new Ied::Workspace();
+	ws->wsId = Core::String("w1");
+	ws->root = FS::Path(root);
+	ws->kind = Core::String(kind);
+	return ws;
+}
+
+[test("server.layouts")]
+class LayoutTests {
+	[test("file_format")]
+	public static void TestFileFormat() {
+		int64 revision = -1;
+		Core::String json;
+		assert_true(Reads("{\"revision\": 3, \"layout\": {\"v\": 1}}", revision, json), "an object");
+		assert_eq(3, revision, "its revision");
+		assert_se("{\"v\":1}", json.CStr(), "the document, as JSON text");
+		assert_true(Reads("{\"revision\": 0, \"layout\": null}", revision, json), "a forgotten layout");
+		assert_se("null", json.CStr(), "null");
+	}
+
+	[test("file_format_refused")]
+	public static void TestFileFormatRefused() {
+		int64 revision = 0;
+		Core::String json;
+		assert_true(!Reads("{\"layout\": {}}", revision, json), "no revision");
+		assert_true(!Reads("{\"revision\": -1, \"layout\": {}}", revision, json), "a negative revision");
+		assert_true(!Reads("{\"revision\": 1}", revision, json), "no layout");
+		assert_true(!Reads("{\"revision\": 1, \"layout\": \"tabs\"}", revision, json), "a layout that is not an object");
+		assert_true(!Reads("{\"revision\": 1, \"layout\": ", revision, json), "malformed JSON");
+		assert_true(!Reads("", revision, json), "an empty file");
+	}
+
+	[test("device_classes")]
+	public static void TestDeviceClasses() {
+		assert_true(Ied::IsDeviceClass(Core::StringView("desktop")) && Ied::IsDeviceClass(Core::StringView("tablet")) && Ied::IsDeviceClass(Core::StringView("phone")), "the three");
+		assert_true(!Ied::IsDeviceClass(Core::StringView("Desktop")) && !Ied::IsDeviceClass(Core::StringView("")) && !Ied::IsDeviceClass(Core::StringView("watch")), "nothing else");
+	}
+
+	[test("folder")]
+	public static void TestFolder() {
+		Core::StringView appData = Core::StringView("C:/AppData/IED");
+		Ied::Workspace* solution = WorkspaceAt("C:/Work/Game", "solution");
+		assert_se("C:/Work/Game/.ied/local/layout", Ied::LayoutFolder(solution, appData).CStr(), "a solution: its .ied/local");
+		Ied::Workspace* folder = WorkspaceAt("C:/Work/Notes", "folder");
+		Core::String key = Ied::TextDigest(Ied::TrustKey(Core::StringView("C:/Work/Notes")).View());
+		Core::String expected = (Core::String("C:/AppData/IED/workspaces/") + key.View().Substring(0, 16)) + "/layout";
+		assert_se(expected.CStr(), Ied::LayoutFolder(folder, appData).CStr(), "a folder: the app data, by the folder's key");
+		Ied::Workspace* sameFolder = WorkspaceAt("c:\\work\\notes\\", "file");
+		assert_se(expected.CStr(), Ied::LayoutFolder(sameFolder, appData).CStr(), "the key folds case, separators and a trailing slash");
+	}
+}

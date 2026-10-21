@@ -1,0 +1,48 @@
+// The Visual Studio-style IDE (plugins/README.md, docs/05). M1 brings its first views: Solution Explorer over the
+// workspace's files and solution model, the Output window over the output sources, and a read-only text view of a
+// server document; Monaco, LSP, builds and debugging follow from M2.
+{
+	"manifestVersion": 1,
+	"id": "ied.editor",
+	"name": "Editor",
+	"version": "0.1.0",
+	"description": "Solution Explorer, Output and documents: the Visual Studio-shaped editor activity.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
+	"permissions": ["fs.read", "fs.write", "fs.watch", "ui.clipboard"],
+	"contributes": {
+		"activities": [
+			{ "id": "ied.editor", "title": "Editor", "icon": "$(code)", "order": 10, "phoneSlot": true }
+		],
+		"toolWindows": [
+			{ "id": "ied.explorer", "title": "Solution Explorer", "icon": "$(list-tree)", "view": "SolutionExplorer", "defaultDock": "left" },
+			{ "id": "ied.output", "title": "Output", "icon": "$(output)", "view": "Output", "defaultDock": "bottom" }
+		],
+		"commands": [
+			{ "id": "ied.explorer.open", "title": "Open", "category": "Solution Explorer", "icon": "$(go-to-file)" },
+			{ "id": "ied.explorer.refresh", "title": "Refresh", "category": "Solution Explorer", "icon": "$(refresh)" },
+			{ "id": "ied.explorer.collapseAll", "title": "Collapse All", "category": "Solution Explorer", "icon": "$(collapse-all)" },
+			{ "id": "ied.explorer.copyPath", "title": "Copy Full Path", "category": "Solution Explorer" },
+			{ "id": "ied.explorer.copyRelativePath", "title": "Copy Relative Path", "category": "Solution Explorer" },
+			{ "id": "ied.output.clear", "title": "Clear All", "category": "Output", "icon": "$(clear-all)" },
+			{ "id": "ied.output.toggleWrap", "title": "Toggle Word Wrap", "category": "Output", "icon": "$(word-wrap)" }
+		],
+		"menus": {
+			"explorer/context": [
+				{ "command": "ied.explorer.open", "group": "1_open", "when": "explorerItemKind == 'file'" },
+				{ "command": "ied.explorer.copyPath", "group": "5_copy" },
+				{ "command": "ied.explorer.copyRelativePath", "group": "5_copy", "order": 1 },
+				{ "command": "ied.explorer.refresh", "group": "9_refresh" }
+			],
+			"output/context": [
+				{ "command": "ied.output.clear", "group": "1_clear" },
+				{ "command": "ied.output.toggleWrap", "group": "2_view" }
+			]
+		},
+		"keybindings": [
+			{ "command": "shell.showView", "key": "ctrl+alt+l", "args": { "id": "ied.explorer" } },
+			{ "command": "shell.showView", "key": "ctrl+alt+o", "args": { "id": "ied.output" } }
+		]
+	}
+}

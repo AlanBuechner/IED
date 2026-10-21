@@ -11,7 +11,7 @@ Two things: the settings tier model (what lives where, who wins) and the visual 
 | **App** | `%APPDATA%/IED/settings.json` (+ `keybindings.json`) | this owner, all workspaces | model profiles and groups, prompt overrides, egress profiles, remote access, global plugins, keybindings, UI density/fonts |
 | **Solution** | `<solution>/.ied/solution.json` (or `.ied/solutions/<Name>.json` when several solutions share a folder) - committed | this solution on every machine | default model group, `aiEgress` policy, permission rules (restrict only), toolbar defaults, plugin settings |
 | **Project** | `<solution>/.ied/projects/<Name>.json` - committed | one project | LSP profile choice, sandbox image, project plugin settings |
-| Workspace state | `<solution>/.ied/local/` - gitignored | this machine | layouts per device class, open documents, toolbar selections, startup project, breakpoints, bookmarks |
+| Workspace state | `<solution>/.ied/local/` - gitignored; for a folder or file workspace `<app data>/workspaces/<key>/` (opening a folder writes nothing into it) | this machine | layouts per device class, open documents, toolbar selections, startup project, breakpoints, bookmarks |
 
 Rules:
 

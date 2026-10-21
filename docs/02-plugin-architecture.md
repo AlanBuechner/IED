@@ -74,12 +74,31 @@ Problems go to the server log; the IED output source comes later.
 | Method | Does |
 |---|---|
 | `plugins.list {wsId?}` | `{plugins: [{id, name, version, kind, source, state, overriddenBy?, problems, permissions, contributes: [point names]}]}`, with a workspace's local plugins when `wsId` is given (without it, also the `plugins` topic's snapshot; `plugins.changed` carries the same) |
-| `plugins.contributions {wsId?}` | `{plugins: [{id, source, contributes}]}` for the loaded ones: what the web client builds menus, commands, keybindings and languages from. With `wsId`, a loaded local plugin replaces a global one of its id. |
+| `plugins.contributions {wsId?}` | `{plugins: [{id, source, contributes, ui?}]}` for the loaded ones, in load order, `ui` the URL of the plugin's UI module: what the web client builds menus, commands, keybindings and languages from. With `wsId`, a loaded local plugin replaces a global one of its id. |
 | `plugins.setEnabled {id, enabled}` | the plugin's summary after the change |
 | `plugins.approve {id}` | approves the app plugin's current content |
 | `plugins.reload` | reads every plugin folder again |
 
-`GET /plugins/<id>/<path>` serves a loaded plugin's files (grammars, icons, UI modules) to a signed-in client, never one outside the plugin's folder.
+`GET /plugins/<id>/<path>` serves a loaded plugin's files (grammars, icons, UI modules) to a signed-in client, never one outside the plugin's folder; `GET /w/<wsId>/plugins/<id>/<path>` serves the plugin loaded for a workspace, its project-local plugins included (only while the workspace is trusted). `runtime.ui` must name a file in the plugin's folder by a path a URL carries as it is (letters, digits, `.`, `_`, `-`, `/`), or the plugin fails.
+
+### UI modules (host API v1, browser side)
+
+A plugin's `runtime.ui` names an ES module in its folder; `plugins.contributions` gives a loaded plugin's module as `ui` (`/plugins/<id>/<path>`). The web client imports each module once per page, calls its `activate(ied)` export (when it has one) before rendering, and renders a contribution's `view` (activity, tool window, status bar item) by calling the module's export of that name: `view(ctx)` fills `ctx.el` and may return `{dispose(), focus(), visible(shown)}`. `ctx` is `{el, ied, ref, wsId, tab}`, with `ref` the tab's ref (`docs/15`) and `tab` its handle: `setTitle(text)`, `setDirty(bool)`, `pin()` (keep a preview tab), `close()`. A view that throws, or a module that fails to load, shows its error in place and in a notification.
+
+| Member of `ied` | |
+|---|---|
+| `client` | the protocol client: `request(method, params, {opId}) -> Promise`, `subscribe(topic, {snap, evt}) -> unsubscribe` (resubscribed after a resume or gap, `snap` called again) |
+| `commands.handle(id, fn)` | `fn(args)` runs a contributed command; `commands.run(id, args)` runs any command |
+| `tabs.kind(kind, {view, title(arg), icon(arg), resource(arg)})` | a tab kind: refs `<kind>:<arg>` render with the module's export `view`; `resource` names the workspace file a tab shows (the context keys `resourcePath`, `resourceExtname`) |
+| `tabs.open(ref, {preview})` | opens or focuses a tab in the current activity's well; `preview` is the VS preview tab (replaced by the next preview, kept once edited or double-clicked) |
+| `context.set(key, value)`, `context.get(key)` | context keys for when-clauses |
+| `menus.show(menuId, at, args)` | shows a contributed menu (e.g. `explorer/context`) at a mouse event or element; its commands get `args` |
+| `workspace` | `{wsId, name, kind, root, trusted}` of the shown workspace; `workspace.on(fn)` for changes |
+| `notify(text, level)` | a notification for every device (`server.notify`) |
+| `report(message, error)` | a failure for this person (a toast and the console), attributed to the plugin |
+| `plugin` | `{id, base}`: the plugin's id and the URL its files are served under |
+
+Shared components (`shared/ui-kit/`, served at `/ui-kit/`) are imported by URL: `import { h, icon } from "/ui-kit/dom.js"`.
 
 ## Contribution points
 

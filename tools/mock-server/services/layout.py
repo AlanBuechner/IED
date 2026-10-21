@@ -1,33 +1,21 @@
-"""Per-device-class layouts: 'layout:<wsId>:<deviceClass>' topics with revision-checked layout.set (F-SRV-23/25).
+"""Per-device-class layouts: 'layout:<wsId>:<deviceClass>' topics with revision-checked layout.set (docs/10, F-SHL-13).
 
-The layout tree is opaque to the server; the defaults below are only a plausible starting point for the frontend.
+The layout document belongs to the client (docs/15); the server keeps it verbatim. Revision 0 holds null: the client
+starts from the default its contributions imply. The mock keeps layouts in memory only.
 """
+
+import json
 
 from rpc import RpcError
 
 DEVICE_CLASSES = ("desktop", "tablet", "phone")
-
-
-def default_layout(device_class):
-	if device_class == "phone":
-		return {"kind": "stack", "views": ["chat", "explorer", "editor", "output"], "active": "chat"}
-	return {
-		"kind": "split", "dir": "row", "sizes": [0.2, 0.55, 0.25],
-		"children": [
-			{"kind": "tabs", "views": ["explorer", "git"], "active": "explorer"},
-			{"kind": "split", "dir": "column", "sizes": [0.7, 0.3], "children": [
-				{"kind": "tabs", "views": ["editor"], "active": "editor"},
-				{"kind": "tabs", "views": ["output", "errors", "terminal"], "active": "output"},
-			]},
-			{"kind": "tabs", "views": ["chat"], "active": "chat"},
-		],
-	}
+MAX_BYTES = 262144
 
 
 class Layout:
-	def __init__(self, device_class):
-		self.revision = 1
-		self.tree = default_layout(device_class)
+	def __init__(self):
+		self.revision = 0
+		self.tree = None
 
 
 class Layouts:
@@ -41,19 +29,29 @@ class Layouts:
 
 	def _add(self, ws_id, device_class):
 		key = "layout:%s:%s" % (ws_id, device_class)
-		layout = Layout(device_class)
+		layout = Layout()
 		self.items[key] = layout
 		self.server.hub.add(key, lambda: {"revision": layout.revision, "layout": layout.tree})
 
 	async def m_layout_set(self, call, p):
-		key = "layout:%s:%s" % (p.str("wsId"), p.str("deviceClass"))
-		layout = self.items.get(key)
+		ws_id, device_class = p.str("wsId"), p.str("deviceClass")
+		if ws_id not in self.server.workspace.items:
+			raise RpcError("not_found", "no workspace '%s'" % ws_id)
+		layout = self.items.get("layout:%s:%s" % (ws_id, device_class))
 		if layout is None:
-			raise RpcError("not_found", "no layout %r" % key)
+			raise RpcError("bad_request", "deviceClass must be desktop, tablet or phone")
+		if "layout" not in p.raw:
+			raise RpcError("bad_request", "missing param 'layout'")
+		tree = p.raw["layout"]
+		if tree is not None and not isinstance(tree, dict):
+			raise RpcError("bad_request", "layout must be an object or null")
 		expected = p.int("expectedRevision")
 		if expected != layout.revision:
-			raise RpcError("conflict", "layout changed since revision %d" % expected, {"revision": layout.revision})
-		layout.tree = p.obj("layout")
+			raise RpcError("conflict", "the layout changed since that revision", {"revision": layout.revision})
+		if len(json.dumps(tree, separators=(",", ":"))) > MAX_BYTES:
+			raise RpcError("bad_request", "a layout is at most 256 KB")
+		layout.tree = tree
 		layout.revision += 1
+		key = "layout:%s:%s" % (ws_id, device_class)
 		self.server.hub.publish(key, "layout.changed", {"revision": layout.revision, "layout": layout.tree, "by": call.client_id})
 		return {"revision": layout.revision}

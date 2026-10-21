@@ -11,6 +11,7 @@ Status: **design v1, ready for implementation.** Machine-readable frame schema: 
 | Channel | Used for |
 |---|---|
 | `GET /` and static paths | the web app (HTML/JS/CSS, plugin UI modules under `/plugins/<id>/ui/...`, Monaco, xterm) |
+| `GET /ui-kit/<path>`, `GET /codicons/<name>.svg` | the components shared by the shell and plugin UI modules (`shared/ui-kit/`), and one codicon each (`third_party/codicons`) |
 | `POST /api/auth/*` | login, logout, token exchange (`docs/11`) |
 | `GET /api/blob/<id>` | large binary payloads (images, trace chunks, file downloads), referenced from frames by id |
 | `PUT /api/upload` | attachments and file uploads (streamed, returns a blob id) |
@@ -62,7 +63,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `ws:<wsId>` | `tree.changed`, `trust.changed`, `solution.changed` | workspace summary (`kind` folder, file or solution), trust, the solution model (`docs/03`) |
 | `settings:app`, `settings:<wsId>` | `settings.changed` | tier files (revision, problems) and every setting's effective value with its source (`docs/07`) |
 | `plugins` | `plugins.changed` | every plugin's summary and state (`docs/02`) |
-| `layout:<wsId>:<deviceClass>` | `layout.changed` | layout tree for that device class |
+| `layout:<wsId>:<deviceClass>` | `layout.changed {revision, layout, by}` | `{revision, layout}`: the layout document the client last stored for the workspace and device class (`docs/15`), verbatim; revision 0 with `layout: null` until one is. `layout.set {wsId, deviceClass, layout, expectedRevision}` stores one (an object up to 256 KB, or null to forget it) and answers `{revision}`; an old `expectedRevision` gets `conflict {revision}`. Kept in `.ied/local/layout/<deviceClass>.json` of a solution, and for a folder or a file in `<app data>/workspaces/<key>/layout/`, `key` the first 16 hex digits of the SHA-256 of the workspace folder's canonical path |
 | `doc:<docId>` | `doc.edit`, `doc.saved`, `doc.lease`, `doc.diskChanged` | text + version + lease holder + dirty |
 | `diag:<wsId>` | `diag.set` (per URI, per source) | all current diagnostics |
 | `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |

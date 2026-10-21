@@ -29,6 +29,8 @@ The first stdout line is `LISTENING http://<host>:<port>`. Every frame the mock 
 | `GET /healthz` | `{ok, serverVersion, sessionEpoch}` |
 | `PUT /api/upload` -> `GET /api/blob/<id>` | attachment blobs (in memory) |
 | `GET /_mock/` | debug console: hello/resume with cursors in sessionStorage, subscribe, send requests, drop and resume the socket |
+| `GET /plugins/<id>/<path>`, `GET /w/<wsId>/plugins/<id>/<path>` | a loaded built-in plugin's files (the repository's `plugins/`), as the real server serves them |
+| `GET /ui-kit/<path>`, `GET /codicons/<name>.svg` | `shared/ui-kit/`, and one codicon from `third_party/codicons` |
 | `GET /*` | files from `--static`, else a redirect to `/_mock/` |
 
 Not implemented (later milestones): auth (`docs/11` login, tokens, cookies), `/w/<ws>/port/<n>`, binary frames.
@@ -39,7 +41,8 @@ Not implemented (later milestones): auth (`docs/11` login, tokens, cookies), `/w
 |---|---|---|
 | `server` | `serverVersion`, `workspaces`, `clients` (presence), `notifications` | `device.connected`, `device.disconnected`, `notification`, `notification.dismissed` |
 | `ws:w1` | workspace summary, `trusted`, `plugins`, `chats` | `tree.changed {changes:[{path, change: created\|changed\|deleted}]}`, `trust.changed`, `chat.created` |
-| `layout:w1:<desktop\|tablet\|phone>` | `{revision, layout}` (opaque tree; defaults in `services/layout.py`) | `layout.changed {revision, layout, by}` |
+| `layout:w1:<desktop\|tablet\|phone>` | `{revision, layout}`: the client's layout document (`docs/15`), verbatim; revision 0 holds null | `layout.changed {revision, layout, by}` |
+| `plugins` | `{plugins: [summary]}` of the repository's built-in plugins (`plugins/*/ied-plugin.json`, schema-checked) | `plugins.changed` |
 | `doc:<docId>` | `docId, wsId, path, text, version, lease: {holder}, dirty, languageId` | `doc.edit {version, changes, origin, rebasedFrom?, opId?}`, `doc.lease {holder}`, `doc.saved {version, revision}`, `doc.diskChanged {revision}` |
 | `diag:w1` | `{files: {path: {source: [diagnostic]}}}` | `diag.set {path, source, items}` |
 | `chat:<chatId>` | header, `state`, `tasks`, last 20 `turns` (in-flight segment text included), `hasMore`, `pendingApprovals` | `turn.start {user}`, `segment.start/delta/end`, `tool.state`, `approval.request`, `approval.resolved`, `tasks.changed`, `turn.end {stop, tokensIn, tokensOut, error?}` |
@@ -67,7 +70,9 @@ Params are objects; ids such as `w1`, `c1`, `d1`, `r1`, `t1` come from the fixtu
 | `doc.open` | `wsId, path` -> `docId, version, holder` (the first opener gets the lease) |
 | `doc.edit` | `docId, baseVersion, changes [{range: {start: {line, col}, end}, text}]` + frame `opId` -> `version, changes, rebased` |
 | `doc.takeLease`, `doc.save` | `docId` -> `holder` / `version, revision` |
-| `layout.set` | `wsId, deviceClass, layout, expectedRevision` -> `revision` |
+| `layout.set` | `wsId, deviceClass, layout (object or null), expectedRevision` -> `revision`; `conflict {revision}` when stale; at most 256 KB; in memory only |
+| `plugins.list`, `plugins.contributions` | `wsId?` -> the topic's summaries / `{plugins: [{id, source, contributes, ui?}]}` of the loaded ones |
+| `plugins.setEnabled`, `plugins.reload`, `plugins.approve` | `id, enabled` / - / `id` (always `not_found`: the mock has no app plugins) |
 | `out.sources`, `out.clear` | `wsId` / `wsId, sourceId` |
 | `task.list`, `task.runs` | `wsId` |
 | `task.run` | `wsId, task, params?` -> `runId, topic`. Tasks: `build` (succeeds, 1 warning), `build-broken` (fails with an error), `test` (2 pass, 1 fail), `run` (build, then the program), `flood` (`params.lines`, default 50000) |

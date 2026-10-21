@@ -16,7 +16,7 @@ Living document. Update it at every checkpoint commit.
 - [x] **C4 readiness gap analysis + C4-side work items** - `docs/17` (Bedrock Net/Process/FS.Watch/Time/Text, suspected CBind bugs S1-S7, C4LSP L1-L9, Nuke N1-N9 - N1/N3/N4/N6 done, the old editor plugin -> declarative `c4` plugin, Bedrock `Profile::`).
 - [x] **M0 item 2: theme tokens + static mocks** - `frontend/css/theme.css` (every `docs/07` token; Visual Assist X syntax default + Grayscale), `frontend/mocks/` (token board + the six `docs/15` review screens, phone layouts included), 25 screenshots at 1920x1080 / 1366x768 / 390x844 in `frontend/mocks/screenshots/`, reviewed by eye. `frontend/mocks/build.py` regenerates icons, lints (ASCII, tabs, no raw colors outside `theme.css`) and retakes screenshots with Playwright. **Awaiting owner sign-off** (questions in `frontend/mocks/index.html`).
 - [x] **GPU debugger designed** - `docs/22` (PIX/RenderDoc/Nsight comparison, architecture with swappable replay backends, RenderDoc-first then own "Flashbang" recommendation, views, capture flow, AI, phases), `docs/features/17` (F-GPU), US-GPU-1..9 + J15, T-GPU tools, M12/M13, Bedrock `Gpu::` (P-8). Mocks 07-09 in PIX's layout with screenshots at three sizes. **Owner:** O11 (backend) in `docs/99`.
-- [ ] **M1 in progress: the C4 server (`src/`, `ied-server`, and the `ied` CLI in `cli/`)** (2026-10-20). `nuke conformance` builds both and runs the protocol suite (46/46), the schema cross-check and the server checks (68); `nuke test ied-server ied` runs the unit tests. See `src/README.md`. Done:
+- [ ] **M1 in progress: the C4 server (`src/`, `ied-server`, and the `ied` CLI in `cli/`)** (2026-10-20). `nuke conformance` builds both and runs the protocol suite (51/51), the schema cross-check and the server checks (75); `nuke e2e` drives the web client against the mock and this server; `nuke test ied-server ied` runs the unit tests. See `src/README.md`. Done:
   - protocol v1: frames, topics with rings and snapshots, resume, backpressure with coalescing and gaps, opId idempotency, cancellation, documents with lease and rebase, `fs.*` over real folders, presence, blobs, static files, Host/Origin checks;
   - auth (`docs/11` "Authentication on the wire"): the launch token on the `OPEN` line, a session cookie per port, device sessions kept as digests, the Argon2id owner password (Bedrock `Crypto::`, B66), the login throttle, `auth.*` with revoke, LAN bind refused without a password, the audit log, `frontend/login.html` checked by screenshot at desktop and phone width;
   - file watching (`docs/10` "Files changed on disk"): batches folded per path, the server's own writes recognized by digest, outside writes moving revisions and reaching open documents;
@@ -25,9 +25,11 @@ Living document. Update it at every checkpoint commit.
   - workspace trust in app data (folders open untrusted);
   - settings tiers (`docs/07` "Settings on the wire"): plugin-declared settings, app / solution / project tier files live and checked with problems on their lines, merge kinds, comment-keeping revision-checked writes;
   - solutions and projects (`docs/03` "The server as built");
-  - the IED output source: the server's log as every workspace's `out:<wsId>:ied` (plugin and solution problems show there).
+  - the IED output source: the server's log as every workspace's `out:<wsId>:ied` (plugin and solution problems show there);
+  - layouts (`docs/10` "layout:<wsId>:<deviceClass>"): the client's layout document per workspace and device class, revision-checked, a solution's kept in `.ied/local/layout/`, a folder's in the app data;
+  - the web client shell (M0 item 4, `docs/15` "The web client as built", 2026-10-20): the protocol client with resume, commands, keybindings with chords and when-clauses, VS menus and context menus, the command palette, docking (drag to groups and edges, splitters) kept on the server, the status bar, notifications, banners, the phone shell; plugins' UI modules (`docs/02` "UI modules") with the built-in `editor` plugin's Solution Explorer, Output and read-only documents. It runs unchanged on the mock and this server: `nuke e2e` (56 unit tests; 15 scenarios across 1920x1080, 1366x768 and 390x844 on both servers, resume after a restart and after a page closed mid-stream included). Bugs it found: BUG-292 (a second WebSocket close frame), local plugins' files not served (`/w/<wsId>/plugins/`), the shell left without a dock host when its plugins were disabled (the Home dock host).
 
-  Next in M1: the frontend shell (M0 item 4: a signed-in browser lands on `/`, which has no app yet; the M1 exit wants the M0 frontend running unchanged against this server), the 24 h idle soak.
+  Next in M1: the 24 h idle soak. Then M2 (Monaco on the document store, LSP, the explorer's file operations).
 - [x] **C4 readiness (`docs/17`) is green except the 24 h scale-test soak (item 8)** (2026-10-20): networking with an event loop, processes with ConPTY, file watching, UTF-16, base64/SHA-1, regex, reflection serialization, CBind fixes, incremental builds (`--incremental`, Nuke's Debug/Development: a one-module edit of a 60k-line program rebuilds in 2.6 s), streaming JSON (`JsonStream` for JSON-RPC as it arrives) and custom-allocator pools. M1 (server skeleton) can start.
 - [x] **M0 items 3 + 5: test doubles** - `tools/mock-server/` (protocol v1 + fixtures: workspace, docs with lease/rebase, scripted chat with tools and approvals, ANSI task runs, echo terminal, layouts, presence; debug console at `/_mock/`), `tools/conformance/` (46 black-box tests, green against the mock; needs `testhooks.*` on the real server), `tools/fake-model/` (40 scripts, every `docs/12` stop class + must-not-stop cases, discovery endpoints), `tools/schema-check/` (examples valid). All stdlib; `python -I tools/selftest.py` runs everything (~40 s, green on Python 3.12 and 3.14). Resume verified in a real browser against the mock.
 
@@ -41,7 +43,7 @@ Living document. Update it at every checkpoint commit.
 2. ~~`frontend/css/theme.css` + static HTML mocks of the six review screens (`docs/15`); screenshots at 1920x1080, 1366x768, 390x844~~ - done; owner sign-off pending. `frontend/mocks/css/shell.css` and `code.css` are the seed for `frontend/css/layout.css` in item 4.
 3. `tools/mock-server/` (Python, protocol v1) + `tools/conformance/` suite.
    - **Done** (see `tools/README.md`). The frontend shell (item 4) runs on it: `python -I tools/mock-server/mock_server.py --static frontend`.
-4. Frontend shell on the mock server: sidebar, docking, menus/commands/keybindings, status bar, WS client with resume, phone shell - with Playwright e2e and resume tests.
+4. ~~Frontend shell on the mock server: sidebar, docking, menus/commands/keybindings, status bar, WS client with resume, phone shell - with Playwright e2e and resume tests~~ - done, on the real server too (`nuke e2e`).
 5. `tools/fake-model/` + scripted cases for every stop class in `docs/12`.
    - **Done**: `tools/fake-model/README.md` maps each stop class to its scripts; `probe.py` replays any script (or probes a real server).
 6. SearXNG-on-Windows spike (`docs/21`).
@@ -50,6 +52,11 @@ Living document. Update it at every checkpoint commit.
 
 - Fold the 12 "Protocol decisions" in `tools/mock-server/README.md` into `docs/10` (or change them; the mock and conformance suite follow whatever is decided) and add the `testhooks.*` surface to `docs/10` or `docs/19`.
 - `shared/host-api/README.md` says the schemas use only type/required/properties/...; they also use `minimum`, `maximum`, `maxItems`, `uniqueItems` (the validator supports all of them and rejects unknown keywords).
+
+**Follow-ups from the shell (owner / later milestones):**
+
+- Playwright for the bundled Python: `setup.bat` could install it (a pip download plus Chromium) so `nuke e2e` needs nothing on PATH; today it uses a Python on PATH that has it.
+- The terminal dock and the chat activity appear with their plugins (M3, M4); the explorer's file operations, Monaco and LSP with M2. Tree expansion and the Output source are per-tab UI state, not kept on the server yet.
 
 **C4 (`C4/`, in parallel):** verify suspected bugs S1-S7 and file/fix confirmed ones per `AGENTS.md` (`C4/WORK.md` is the compiler's own tracker); Bedrock P-1 modules; scale test; Nuke N2 (`nuke init --ied`), N5 (diagnostics JSON, needs the compiler), N7; the declarative `c4` plugin (schema-valid today: see `shared/host-api/examples/c4-plugin/`); C4LSP L1-L5.
 

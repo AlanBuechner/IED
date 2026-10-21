@@ -152,3 +152,59 @@ Codicons (vendored) for UI glyphs. File-type icons: a VS-like set in `shared/ui-
 7. GPU debugger: frame debugger, shader debugging with pixel history, performance and compare (`docs/22`).
 
 Each gets a static HTML mock against `theme.css` (no server needed) and screenshots at 1920x1080, 1366x768, 390x844 - the first frontend deliverable (`docs/18`, M0). Built: `frontend/mocks/` (open `index.html`; screenshots in `frontend/mocks/screenshots/`).
+
+## The web client as built (M1)
+
+`frontend/` is plain ES modules served as they are (no bundler, no npm): `index.html` loads `css/theme.css`, `css/layout.css` and `src/main.js`. Components shared with plugin UI modules live in `shared/ui-kit/`, served at `/ui-kit/`. Codicons are served one SVG each at `/codicons/<name>.svg` (from `third_party/codicons`) and painted as CSS masks in the current text color, so any codicon a manifest names works.
+
+**Composition.** The shell owns chrome, layout, commands, keybindings, menus and focus; every view in it comes from a plugin's UI module (`docs/02`). For the shown workspace it reads `plugins.contributions {wsId}`, imports each loaded plugin's `ui` module, and builds:
+
+- the sidebar from `activities` by `order`: the workspace switcher on top, the notifications bell and the settings gear at the bottom;
+- the menu bar from `menus["menubar/<name>"]` in VS order (File, Edit, View, Git, Project, Build, Debug, Test, Analyze, Tools, Extensions, Window, Help); a menu shows only when something is in it, and menus that do not fit go into a trailing `...` menu. View lists every tool window;
+- the command registry from `commands`, keybindings from `keybindings`, status items from `statusBarItems`.
+
+An activity with a `view` renders that export over the whole center. One without is a **dock host**: its tool windows (`toolWindows` whose `activity` names it, `ied.editor` by default) and its document well are laid out by its layout tree. While no plugin contributes a dock host (every one disabled), the shell adds its own, **Home**, so its tabs (Plugins, Keyboard Shortcuts) always have a place and a person can turn plugins back on.
+
+The terminal dock and the chat activity are contributions of the `terminal` and `chat` plugins; they appear when those plugins ship (their server sides come in M3 and M4). A plugin with a status bar item, a toolbar (`menus["toolbar/main"]`) or a context menu (`explorer/context`, `tab/context`, `output/context`) gets it rendered the same way.
+
+**Layout document.** The server stores it verbatim per workspace and device class (`docs/10`); the client defines it:
+
+```jsonc
+{ "v": 1, "activity": "ied.editor",
+  "activities": { "ied.editor": <node> },
+  "phone": { "pane": "<ref>", "back": ["<ref>"] } }
+// node: { "kind": "split", "dir": "row" | "column", "sizes": [0.2, 0.8], "children": [<node>, ...] }
+//     | { "kind": "tabs", "tabs": ["<ref>", ...], "active": "<ref>", "well": true, "preview": "<ref>", "dock": "left" }
+// ref:  a tool window id ("ied.output"), "<kind>:<argument>" for a tab a plugin opens ("doc:src/main.cf"),
+//       or "activity:<id>" for an activity that renders itself (the phone's pane)
+```
+
+`well` marks a document group (tabs on top; documents open into it, VS); `preview` is that group's preview tab; `dock`
+is the region a tool-window group was made for, so a tool window shown later joins it. The operations on a tree are
+pure functions in `frontend/src/shell/layouttree.js`.
+
+- No stored layout (revision 0), or one of another `v`, starts from the default the contributions imply: tool windows placed by `defaultDock` (left, right, bottom; `document` joins the well) around one document well.
+- A tab whose ref nothing resolves (its plugin is disabled) stays in the tree, hidden, and comes back with its plugin. A tool window the tree lacks is added where its `defaultDock` says when it is first shown.
+- A split has at least two children and sizes that sum to 1; a group has one active tab; closing the last tab of a group removes the group, except the well, which stays (empty, as in VS).
+- Changes are written with `layout.set` 400 ms after the last one. A conflict retries on the new revision (last writer wins, `docs/11`); a `layout.changed` from another client of the same device class is applied unless a drag is under way.
+- Window > Reset Window Layout writes the default.
+
+**Docking.** Dragging a tab shows targets on the hovered group (center joins it, the four edges split it) and on the activity's edges, with a preview overlay. Splitters resize their neighbors (80 px minimum). A tab's context menu: Close, Close All But This, Close All, Move to New Group Right, Move to New Group Below, Copy Reference. No floating windows.
+
+**Commands and keys.**
+
+- A command has an id, a title, a category, an icon, an `enablement` when-clause and a handler: a UI module's (`ied.commands.handle`), a server binding (`binding`, from M11), or the shell's own (`shell.*`).
+- When-clauses: `!`, `&&`, `||`, parentheses, `==`, `!=`, `<`, `<=`, `>`, `>=`, `=~ /re/flags`, quoted strings, numbers, `true`/`false`; a bare key is true when its value is truthy. The shell sets `deviceClass`, `connected`, `workspaceTrusted`, `workspaceKind`, `activeActivity`, `activeTab` (its ref), `activeTabKind`, `inputFocus`, `resourcePath` and `resourceExtname` (when the active tab names a file).
+- A key is `[ctrl+][shift+][alt+][meta+]<key>` (modifiers in any order), and a chord is two keys separated by a space (`ctrl+k ctrl+d`). `<key>` is the physical key (`KeyboardEvent.code`) named as on a US keyboard: `a`-`z`, `0`-`9`, `f1`-`f24`, `` ` ``, `-`, `=`, `[`, `]`, `\`, `;`, `'`, `,`, `.`, `/`, `enter`, `escape`, `tab`, `space`, `backspace`, `delete`, `insert`, `home`, `end`, `pageup`, `pagedown`, `up`, `down`, `left`, `right`, `break`.
+- The first key of a chord waits 2 s for the second; the status bar shows it. For one key, the last binding whose when-clause holds wins (shell, then plugins in load order, then the owner's). A key without a modifier other than Shift does nothing while a text field has focus, except F-keys and Escape.
+- Browser-reserved keys (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+T, Ctrl+Shift+N, Ctrl+Shift+W, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PageUp, Ctrl+PageDown) are never bound by default. A binding on one is marked "app window only" in Help > Keyboard Shortcuts: it fires only in an installed app window.
+
+Shell commands: `shell.commandPalette` (Ctrl+Shift+P, Ctrl+Q), `shell.showView {id}` (View > tool windows), `shell.showActivity {id}`, `shell.closeTab` (Ctrl+F4), `shell.nextTab` / `shell.previousTab` (Ctrl+Alt+PageDown / PageUp), `shell.resetLayout`, `shell.showNotifications`, `shell.clearNotifications`, `shell.switchWorkspace`, `shell.keyboardShortcuts`, `shell.plugins` (Extensions > Manage Plugins), `shell.trustWorkspace`, `shell.about`.
+
+**Status bar.** Left: the connection (`Ready`, `Reconnecting...`, `Offline`) and the chord in progress, then plugin items; right: plugin items, the connected devices and the notifications count.
+
+**Connection.** The client keeps `clientId` in `sessionStorage` (a reload is the same client: its leases and opIds hold) and `deviceId` in `localStorage`. Cursors live with the page: a reconnect resumes every subscribed topic from its cursor (`docs/10` Resume), while a reload starts from snapshots, which hold everything a view needs (an in-flight chat segment included). It pings every 20 s, takes a socket that answers no ping within 10 s as dead, and reconnects with jittered backoff from 0.5 s to 15 s. While disconnected a non-blocking banner says so and views stay readable; requests that carry an `opId` are sent again after the resume, others fail with `unavailable`. `bye {reason: "auth-revoked"}`, and a socket that keeps failing while `/api/auth/state` says the device is signed out, go to the sign-in page; `protocol-mismatch` reloads the page. A topic subscribed by a second view is subscribed again, so every view of it starts from a fresh snapshot; a topic no view wants is unsubscribed 5 s later.
+
+**Phone (< 720 px).** A header (back, pane title, workspace, bell) and a bottom nav: the activities that ask for `phoneSlot`, then the rest by `order`, then tool windows fill four slots; More lists the others, notifications, keyboard shortcuts, plugins and the workspace switcher. One pane at a time: an activity with a view shows it; a dock host shows the active tab of its well or, with none open, its first tool window. Opening a tab pushes the current pane on `back`. Menus open as bottom sheets and a long press is the context menu.
+
+**Tests.** `frontend/tests/` holds the in-browser unit tests (layout tree operations, keys and chords, when-clauses, the protocol client's resume logic against a fake socket), run headless by `tests/e2e/run_e2e.py`, which then drives the shell with Playwright at 1920x1080, 1366x768 and 390x844 against the mock server and the real one.

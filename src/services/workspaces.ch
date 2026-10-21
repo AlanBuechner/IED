@@ -35,7 +35,9 @@ namespace Ied
 		[operator("create")] public void Init(Server* server);
 
 		// The lock is held for all of these.
+		// Throws not_found for an unknown id; Find answers null.
 		public Workspace* Get(Core::StringView wsId) const;
+		public Workspace* Find(Core::StringView wsId) const;
 		public Workspace* First() const { return items.IsEmpty() ? nullptr : items[0]; }
 		public Core::String SummariesJson() const;
 		// A file's text, the file seen from now on (its revision and digest kept); throws not_found.
@@ -44,7 +46,8 @@ namespace Ied
 		public int64 Revision(Workspace* ws, Core::StringView path);
 		// Writes a file (its folders made), checking `expectedRevision` unless it is -1; the new revision.
 		public int64 Write(Workspace* ws, Core::StringView path, Core::StringView text, int64 expectedRevision);
-		public Workspace* Open(const FS::Path& folder);
+		// A folder as a workspace of `kind` ("folder", "file" or "solution"), told to every service.
+		public Workspace* Open(const FS::Path& folder, Core::StringView kind);
 		// The workspace `target` (a canonical path) belongs to, opening it when none does: a .ied.sln as a solution, a
 		// folder as itself, another file in its folder; `relative` is the path inside it.
 		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);

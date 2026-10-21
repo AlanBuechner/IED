@@ -5,6 +5,7 @@
 #   nuke gates            every C4 test suite (run before calling compiler work done)
 #   nuke install-c4       install the compiler as a numbered, immutable toolchain other workspaces can pin
 #   nuke build ied-server the IED server (src/), with the "dev" toolchain; `nuke conformance` checks it (protocol + server checks)
+#   nuke e2e              the web client against the mock and the real server (Playwright, tests/e2e)
 [workspace]
 name = "IED"
 toolchain = "dev"
@@ -33,4 +34,14 @@ steps = [
 	{ name = "conformance", run = ["${python}", "-I", "tools/conformance/run_conformance.py", "--server", "${bin.root}/ied-server/ied-server.exe"] },
 	{ name = "schema-crosscheck", run = ["${python}", "-I", "tools/schema-check/crosscheck.py", "${bin.root}/schemacheck/schemacheck.exe"] },
 	{ name = "server-checks", run = ["${python}", "-I", "tools/server-checks/run_server_checks.py", "--server", "${bin.root}/ied-server/ied-server.exe", "--cli", "${bin.root}/ied/ied.exe"] },
+]
+
+[commands.e2e]
+description = "Build the IED server, then the web client end to end: lint, the in-browser unit tests and every shell scenario at 3 viewports on the mock and the real server (tests/e2e; needs Playwright, in the python on PATH when not in Nuke's)"
+requires = ["build"]
+projects = ["ied-server"]
+steps = [
+	{ name = "web-lint", run = ["${python}", "-I", "frontend/mocks/build.py", "lint"] },
+	{ name = "mock-tests", run = ["${python}", "-I", "-m", "unittest", "discover", "-s", "tools/mock-server/tests", "-t", "tools/mock-server/tests"] },
+	{ name = "e2e", run = ["${python}", "-I", "tests/e2e/run_e2e.py", "--server", "${bin.root}/ied-server/ied-server.exe"] },
 ]

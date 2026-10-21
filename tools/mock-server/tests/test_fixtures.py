@@ -1,4 +1,4 @@
-"""The mock's fixture behavior: scripted chat, approvals, task runs, output, diagnostics, terminal, layout, fs."""
+"""The mock's fixture behavior: scripted chat, approvals, task runs, output, diagnostics, terminal, layout, plugins, fs."""
 
 import asyncio
 import json
@@ -169,16 +169,20 @@ class TerminalLayoutFsTests(MockCase):
 		end = (await owner.wait_for(term["topic"], lambda f: f.get("kind") == "exit"))[-1]["data"]
 		self.assertEqual(0, end["code"])
 
-	async def test_layout_set_is_revision_checked_and_per_device_class(self):
-		desktop, phone = await self.client(), await self.client(device_class="phone")
-		layout = await self.subscribed(desktop, "layout:w1:desktop")
-		phone_layout = await self.subscribed(phone, "layout:w1:phone")
-		self.assertNotEqual(layout["layout"], phone_layout["layout"])
-		tree = {"kind": "tabs", "views": ["editor"], "active": "editor"}
-		result = await desktop.request("layout.set", {"wsId": "w1", "deviceClass": "desktop", "layout": tree, "expectedRevision": layout["revision"]})
-		with self.assertRaises(RpcFailure) as caught:
-			await phone.request("layout.set", {"wsId": "w1", "deviceClass": "desktop", "layout": tree, "expectedRevision": layout["revision"]})
-		self.assertEqual(("conflict", result["revision"]), (caught.exception.code, caught.exception.data["revision"]))
+	async def test_layouts_start_empty_for_every_device_class(self):
+		client = await self.client()
+		for device_class in ("desktop", "tablet", "phone"):
+			self.assertEqual({"revision": 0, "layout": None}, await self.subscribed(client, "layout:w1:%s" % device_class))
+
+	async def test_plugins_are_the_repository_built_ins_with_their_ui_modules(self):
+		client = await self.client()
+		listed = (await self.subscribed(client, "plugins"))["plugins"]
+		contributions = (await client.request("plugins.contributions", {"wsId": "w1"}))["plugins"]
+		loaded = [p["id"] for p in listed if p["state"] == "loaded"]
+		self.assertEqual(loaded, [p["id"] for p in contributions])
+		for plugin in contributions:
+			if "ui" in plugin:
+				self.assertTrue(plugin["ui"].startswith("/plugins/%s/" % plugin["id"]), plugin["ui"])
 
 	async def test_fs_tree_operations_publish_tree_changes(self):
 		client = await self.client()

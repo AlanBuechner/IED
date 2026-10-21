@@ -119,12 +119,29 @@ namespace Ied
 		}
 	}
 
+	// "/w/<wsId>/plugins/<id>/<path>": true, with the workspace's id and "<id>/<path>".
+	static bool WorkspacePluginPath(Core::StringView path, Core::StringView& wsId, Core::StringView& rest) {
+		if (!path.StartsWith(Core::StringView("/w/"))) return false;
+		const int64 slash = path.IndexOf('/', 3);
+		if (slash < 0) return false;
+		Core::StringView after = path.Substring(slash + 1, path.ByteLength());
+		if (!after.StartsWith(Core::StringView("plugins/"))) return false;
+		wsId = path.Substring(3, slash - 3);
+		rest = after.Substring(8, after.ByteLength());
+		return true;
+	}
+
 	void Front::Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device) {
+		Core::StringView wsId;
+		Core::StringView pluginPath;
 		if (path == "/ws") WebSocket(request, response, device);
 		else if (path == "/api/upload") Upload(request, response);
-		else if (path.StartsWith(Core::StringView("/plugins/")) && request.method.View() == "GET") PluginFile(path.Substring(9, path.ByteLength()), response);
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
 		else if (request.method.View() != "GET") Answer(response, 405, Core::StringView("method not allowed"));
+		else if (path.StartsWith(Core::StringView("/plugins/"))) PluginFile(Core::StringView(), path.Substring(9, path.ByteLength()), response);
+		else if (WorkspacePluginPath(path, wsId, pluginPath)) PluginFile(wsId, pluginPath, response);
+		else if (path.StartsWith(Core::StringView("/ui-kit/"))) FolderFile(FS::Path(server->config.homeDir.View()) / "shared" / "ui-kit", path.Substring(7, path.ByteLength()), response);
+		else if (path.StartsWith(Core::StringView("/codicons/"))) Codicon(path.Substring(10, path.ByteLength()), response);
 		else StaticFile(path, response);
 	}
 
@@ -206,11 +223,11 @@ namespace Ied
 		response.headers.Set(Core::StringView("Content-Type"), blob->contentType.View());
 	}
 
-	// /plugins/<id>/<path>: a loaded plugin's file (grammars, icons, UI modules), never one outside its folder.
-	void Front::PluginFile(Core::StringView path, Http::Response& response) {
+	// /plugins/<id>/<path> (`wsId` empty) or /w/<wsId>/plugins/<id>/<path>: a loaded plugin's file (grammars, icons, UI
+	// modules), never one outside its folder.
+	void Front::PluginFile(Core::StringView wsId, Core::StringView path, Http::Response& response) {
 		Core::String decoded;
-		const int64 slash = path.IndexOf('/', 0);
-		if (!PercentDecode(path, decoded) || slash < 0) {
+		if (!PercentDecode(path, decoded) || decoded.View().IndexOf('/', 0) < 0) {
 			Answer(response, 404, Core::StringView("not found"));
 			return;
 		}
@@ -219,23 +236,44 @@ namespace Ied
 		FS::Path file;
 		{
 			Threading::LockGuard guard(server->lock);
-			file = server->plugins->FileOf(text.Substring(0, split), text.Substring(split + 1, text.ByteLength()));
+			Workspace* ws = wsId.IsEmpty() ? nullptr : server->workspaces->Find(wsId);
+			if (wsId.IsEmpty() || ws) file = server->plugins->FileOf(ws, text.Substring(0, split), text.Substring(split + 1, text.ByteLength()));
 		}
-		if (file.IsEmpty()) {
+		if (file.IsEmpty()) Answer(response, 404, Core::StringView("not found"));
+		else SendFile(file, response);
+	}
+
+	// /codicons/<name>.svg: one codicon from the install's third_party/codicons.
+	void Front::Codicon(Core::StringView file, Http::Response& response) {
+		if (!IsCodiconFile(file)) {
 			Answer(response, 404, Core::StringView("not found"));
 			return;
 		}
-		FS::File opened = FS::File(file.CStr(), "rb");
-		Core::String body = opened.ReadText();
-		response.SetText(Core::StringView(ContentTypeOf(file.Extension())), body.View());
-		SecureHeaders(response, file.Extension() == ".html");
+		FS::Path icon = FS::Path(server->config.homeDir.View()) / "third_party" / "codicons" / "src" / "icons" / file;
+		if (!FS::FileExists(icon.CStr())) {
+			Answer(response, 404, Core::StringView("not found"));
+			return;
+		}
+		SendFile(icon, response);
+		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("max-age=86400"));
+	}
+
+	bool IsCodiconFile(Core::StringView file) {
+		if (!file.EndsWith(Core::StringView(".svg")) || file.ByteLength() <= 4) return false;
+		for (int64 i = 0; i < file.ByteLength() - 4; ++i) {
+			const int32 c = file.ByteAt(i);
+			if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+		}
+		return true;
 	}
 
 	void Front::StaticFile(Core::StringView path, Http::Response& response) {
-		if (server->config.staticDir.IsEmpty()) {
-			Answer(response, 404, Core::StringView("no web client is served (see --static)"));
-			return;
-		}
+		if (server->config.staticDir.IsEmpty()) Answer(response, 404, Core::StringView("no web client is served (see --static)"));
+		else FolderFile(FS::Path(server->config.staticDir.View()), path, response);
+	}
+
+	// A file under `root` named by a URL path; a folder's index.html. Nothing outside `root`.
+	void Front::FolderFile(const FS::Path& root, Core::StringView path, Http::Response& response) {
 		Core::String decoded;
 		if (!PercentDecode(path, decoded)) {
 			Answer(response, 400, Core::StringView("malformed path"));
@@ -249,16 +287,17 @@ namespace Ied
 			Answer(response, 403, Core::StringView("that path escapes the web client's folder"));
 			return;
 		}
-		FS::Path file = FS::Path(server->config.staticDir.View());
+		FS::Path file = root;
 		if (!relative.IsEmpty()) file = file / relative.View();
 		if (FS::IsDirectory(file.CStr())) file = file / "index.html";
-		if (!FS::FileExists(file.CStr())) {
-			Answer(response, 404, Core::StringView("not found"));
-			return;
-		}
+		if (!FS::FileExists(file.CStr())) Answer(response, 404, Core::StringView("not found"));
+		else SendFile(file, response);
+	}
+
+	void Front::SendFile(const FS::Path& file, Http::Response& response) {
 		FS::File opened = FS::File(file.CStr(), "rb");
-		Core::String text = opened.ReadText();
-		response.SetText(Core::StringView(ContentTypeOf(file.Extension())), text.View());
+		Core::String body = opened.ReadText();
+		response.SetText(Core::StringView(ContentTypeOf(file.Extension())), body.View());
 		SecureHeaders(response, file.Extension() == ".html");
 	}
 }

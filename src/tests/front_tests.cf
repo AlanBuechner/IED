@@ -1,0 +1,17 @@
+// web/front: which names the codicon route serves.
+
+include "web/front.ch"
+
+static bool Codicon(const char* file) { return Ied::IsCodiconFile(Core::StringView(file)); }
+
+[test("server.front")]
+class FrontTests {
+	[test("codicon_names")]
+	public static void TestCodiconNames() {
+		assert_true(Codicon("add.svg") && Codicon("debug-start.svg") && Codicon("layout-panel-left.svg") && Codicon("bracket-dot.svg"), "codicon names");
+		assert_true(Codicon("arrow-2.svg"), "digits");
+		assert_true(!Codicon(".svg") && !Codicon("add") && !Codicon("add.png"), "an svg with a name");
+		assert_true(!Codicon("../x.svg") && !Codicon("a/b.svg") && !Codicon("a\b.svg"), "no paths");
+		assert_true(!Codicon("Add.svg") && !Codicon("a b.svg") && !Codicon("a_b.svg") && !Codicon("a.b.svg"), "lowercase letters, digits and '-' only");
+	}
+}

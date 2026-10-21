@@ -14,13 +14,14 @@ namespace Ied
 	void Server::Init(ServerConfig config) {
 		this.config = config;
 		this.config.dataDir = DataFolder(config);
+		this.config.homeDir = HomeFolder(config);
 		this.config.staticDir = StaticFolder(this.config);
 		this.config.appDataDir = AppDataFolder(this.config);
 		Core::String trustError;
 		trust.Load((FS::Path(this.config.appDataDir.View()) / "trust.json").View(), trustError);
 		if (!trustError.IsEmpty()) Log(trustError.View());
 		Core::String schemaError;
-		if (!schemas.Load(HomeFolder(this.config).View(), schemaError)) Log((Core::String("the host API schemas are missing: ") + schemaError.View()).View());
+		if (!schemas.Load(this.config.homeDir.View(), schemaError)) Log((Core::String("the host API schemas are missing: ") + schemaError.View()).View());
 		epoch = NewEpoch();
 		Server* self = this;
 		// Opening the configured workspaces reaches settings, plugins and documents: they exist first.
@@ -31,6 +32,7 @@ namespace Ied
 		documents = new Documents(self);
 		blobs = new Blobs();
 		outputs = new Outputs(self);
+		layouts = new Layouts(self);
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
 		workspaces = new Workspaces(self);
 		if (config.testHooks) testHooks = new TestHooks(self);

@@ -31,8 +31,9 @@ namespace Ied
 		// Reads every plugin folder and the owner's choices again; a broken plugin is kept with its problems.
 		public void Load();
 		public Plugin* Get(Core::StringView id) const;
-		// A loaded plugin's file for /plugins/<id>/<path>; empty when the plugin is not loaded or there is no such file.
-		public FS::Path FileOf(Core::StringView id, Core::StringView path) const;
+		// A loaded plugin's file for /plugins/<id>/<path> (`ws` null) or /w/<wsId>/plugins/<id>/<path> (the plugin loaded
+		// for `ws`, a local one included); empty when no such plugin is loaded or it has no such file.
+		public FS::Path FileOf(Workspace* ws, Core::StringView id, Core::StringView path);
 		public const Core::Array<Plugin*>& All() const { return plugins; }
 		// A workspace's project-local plugins, read now: untrusted unless the workspace is trusted.
 		public Core::Array<Plugin*> LocalFor(Workspace* ws);

@@ -12,3 +12,5 @@ One folder per built-in plugin: its `ied-plugin.json` manifest, UI modules, skil
 | `profiler/` | Tracy-class profiler on the ITP trace protocol (Tracy is a feature reference only) |
 
 Default sidebar order: chat, editor, git, then plugin activities. All six are disable-able; IED must stay usable with only editor + terminal.
+
+**As built (M1):** `editor/` has its manifest and UI module (`ui/index.js`): the Editor activity (a dock host), Solution Explorer (solution groups and projects, or the folder; live on `tree.changed`), the Output window (sources, ANSI, follow, clear, wrap) and a read-only view of server documents (`doc:<path>` tabs). Monaco, LSP and the rest arrive from M2. The other folders get their manifests when their server sides exist (terminal M3, chat M4, git M5...).

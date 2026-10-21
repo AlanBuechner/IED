@@ -24,6 +24,7 @@ namespace Ied
 		public Core::String version;
 		public Core::String description;
 		public Core::String kind;               // runtime.kind: builtin, declarative, js, process
+		public Core::String ui;                 // runtime.ui: its browser module's path in its folder; empty when none
 		public Core::String apiRange;           // ied.api
 		public Core::Array<Core::String> permissions;
 		public Core::Array<Dependency*> dependencies;
@@ -41,6 +42,9 @@ namespace Ied
 	// Whether `version` (a semver "1.2.3") is in `range` ("^1.2", "~1.2.3", "1.2.3", ">=1.2", "*").
 	bool VersionInRange(Core::StringView version, Core::StringView range);
 	const char* PluginSourceName(PluginSource source);
+	// Whether `path` names a file in `folder` by a relative path a URL can carry as it is (letters, digits, '.', '_', '-',
+	// '/'; no '..').
+	bool IsUiPath(const FS::Path& folder, Core::StringView path);
 	// The SHA-256 of a folder's files - their paths and bytes, in name order - as hex: what an approval is for.
 	Core::String FolderDigest(const FS::Path& folder);
 }

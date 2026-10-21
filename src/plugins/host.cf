@@ -166,8 +166,9 @@ namespace Ied
 		return nullptr;
 	}
 
-	FS::Path PluginHost::FileOf(Core::StringView id, Core::StringView path) const {
-		Plugin* plugin = LoadedWithId(plugins, id);
+	FS::Path PluginHost::FileOf(Workspace* ws, Core::StringView id, Core::StringView path) {
+		Core::Array<Plugin*> candidates = ws ? LoadedFor(ws) : plugins;
+		Plugin* plugin = LoadedWithId(candidates, id);
 		if (!plugin) return FS::Path();
 		Core::String relative;
 		try {
@@ -319,16 +320,24 @@ namespace Ied
 		return Get(id.View())->SummaryJson();
 	}
 
+	// Where the browser imports a plugin's UI module from: a local plugin's files are served per workspace.
+	static Core::String UiUrl(const Workspace* ws, const Manifest* manifest) {
+		Core::String base = manifest->source == PluginSource::Project ? ((Core::String("/w/") + ws->wsId.View()) + "/plugins/") : Core::String("/plugins/");
+		return ((base + manifest->id.View()) + "/") + manifest->ui.View();
+	}
+
 	Core::String PluginHost::ContributionsMethod(Call& call, const Params& params) {
 		JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("plugins"));
 		json.BeginArray();
-		for (Plugin* plugin : LoadedFor(WorkspaceParam(server, params))) {
+		Workspace* ws = WorkspaceParam(server, params);
+		for (Plugin* plugin : LoadedFor(ws)) {
 			json.BeginObject();
 			json.Field("id", plugin->manifest->id.View());
 			json.Field("source", PluginSourceName(plugin->manifest->source));
 			json.RawField("contributes", plugin->manifest->contributes.IsValid() ? NodeJson(plugin->manifest->contributes).View() : Core::StringView("{}"));
+			if (!plugin->manifest->ui.IsEmpty()) json.Field("ui", UiUrl(ws, plugin->manifest).View());
 			json.EndObject();
 		}
 		json.EndArray();

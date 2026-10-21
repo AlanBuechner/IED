@@ -1,7 +1,8 @@
 """build.py - helper for the M0 static review mocks (frontend/mocks/).
 
 	python -I frontend/mocks/build.py icons   regenerate css/codicons.css from third_party/codicons
-	python -I frontend/mocks/build.py lint    ASCII only, tab indentation, no raw colors outside theme.css
+	python -I frontend/mocks/build.py lint    ASCII only, tab indentation, no raw colors outside theme.css - in frontend/,
+	                                          shared/ui-kit/ and plugins/
 	python -I frontend/mocks/build.py shots [prefix]  screenshots at 1920x1080, 1366x768, 390x844 (Playwright)
 	python -I frontend/mocks/build.py all     icons + lint + shots
 
@@ -125,10 +126,13 @@ def lint_file(path):
 	return problems
 
 
+LINT_ROOTS = (FRONTEND, REPO / "shared" / "ui-kit", REPO / "plugins")
+
+
 def lint():
 	failed = False
-	for path in sorted(FRONTEND.rglob("*")):
-		if path.suffix not in TEXT_SUFFIXES or "screenshots" in path.parts:
+	for path in sorted(p for root in LINT_ROOTS for p in root.rglob("*")):
+		if path.suffix not in TEXT_SUFFIXES or "screenshots" in path.parts or "__pycache__" in path.parts:
 			continue
 		for problem in lint_file(path):
 			failed = True

@@ -78,7 +78,7 @@ namespace Ied
 		if (items.IsEmpty() && server->config.testHooks) {
 			FS::Path scratch = FS::TempDirectory() / (Core::String("ied-test-") + server->epoch.View()).View();
 			FS::MakeDirectories(scratch.CStr());
-			Open(scratch);
+			Open(scratch, Core::StringView("folder"));
 		}
 	}
 
@@ -110,9 +110,8 @@ namespace Ied
 		for (Workspace* ws : items)
 			if (RelativeTo(ws->root.View(), target.View(), relative)) return ws;
 		const bool folder = FS::IsDirectory(target.CStr());
-		Workspace* opened = Open(folder ? target : target.Parent());
+		Workspace* opened = Open(folder ? target : target.Parent(), Core::StringView(folder ? "folder" : "file"));
 		relative = folder ? Core::String() : Core::String(target.FileName());
-		if (!folder) opened->kind = Core::String("file");
 		server->hub.Publish(Core::StringView("server"), "workspace.opened", opened->SummaryJson().View());
 		return opened;
 	}
@@ -126,8 +125,7 @@ namespace Ied
 	}
 
 	Workspace* Workspaces::OpenSolution(const FS::Path& file) {
-		Workspace* ws = Open(file.Parent());
-		ws->kind = Core::String("solution");
+		Workspace* ws = Open(file.Parent(), Core::StringView("solution"));
 		ws->solution = ReadSolution(file, server->schemas);
 		ws->name = ws->solution->name;
 		LogProblems(server, ws->solution);
@@ -159,7 +157,7 @@ namespace Ied
 		return batch.Overflowed();
 	}
 
-	Workspace* Workspaces::Open(const FS::Path& folder) {
+	Workspace* Workspaces::Open(const FS::Path& folder, Core::StringView kind) {
 		Workspace* ws = new Workspace();
 		Core::StringBuilder id;
 		id.Append("w");
@@ -168,7 +166,7 @@ namespace Ied
 		FS::Path canonical = FS::CanonicalPath(folder.CStr());
 		ws->root = canonical.IsEmpty() ? folder : canonical;
 		ws->name = Core::String(ws->root.FileName());
-		ws->kind = Core::String("folder");
+		ws->kind = Core::String(kind);
 		ws->trusted = server->trust.IsTrusted(ws->root);
 		items.Push(ws);
 		Workspaces* self = this;
@@ -176,6 +174,7 @@ namespace Ied
 		server->hub.Add(topic.View(), [self, ws]() -> Core::String { return self->Snapshot(ws); });
 		server->settings->Opened(ws);
 		server->outputs->Opened(ws);
+		server->layouts->Opened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;
@@ -192,10 +191,16 @@ namespace Ied
 		if (!watching) server->Log((Core::String("not watching ") + ws->root.View() + ": " + error.View()).View());
 	}
 
-	Workspace* Workspaces::Get(Core::StringView wsId) const {
+	Workspace* Workspaces::Find(Core::StringView wsId) const {
 		for (int64 i = 0; i < items.Count(); ++i)
 			if (items[i]->wsId.View() == wsId) return items[i];
-		throw Missing("workspace", wsId);
+		return nullptr;
+	}
+
+	Workspace* Workspaces::Get(Core::StringView wsId) const {
+		Workspace* ws = Find(wsId);
+		if (!ws) throw Missing("workspace", wsId);
+		return ws;
 	}
 
 	Core::String Workspaces::SummariesJson() const {
