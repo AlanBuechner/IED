@@ -290,8 +290,10 @@ namespace fb::replay::d3d12
 			event.op = i;
 			op.eid = event.eid;
 			if (op.kind == OpKind::Present) {
+				fb::d3d12::Present present = {};
+				Decode(op.data, op.size, present, &map);
 				event.kind = EventKind::Present;
-				event.name = "Present";
+				event.name = present.swapChain ? "Present" : "EndFrame";   // a frame bounded by StartFrame/EndFrame
 				event.parent = -1;
 			}
 			else if (op.kind == OpKind::QueueMarker) {

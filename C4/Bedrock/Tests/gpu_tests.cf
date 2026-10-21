@@ -1,0 +1,92 @@
+// Gpu::Capture: without the capture library every call gives back what it was given and records nothing; loading
+// from FLASHBANG_DLL when it is unset, empty or names nothing; a missing library and one that is not the capture
+// library refused with why. The real library (capture, frame bounds, paths) is covered by IED's flashbang tests, which
+// build plugins/gpu/samples/c4 against it.
+
+include "bedrock.ch"
+include "gpu.ch"
+
+const char* kMissingCaptureLibrary = "c4_gpu_no_such_library.dll";
+
+bool Mentions(const char* text, const char* part) { return Core::StringView(text).IndexOf(Core::StringView(part)) >= 0; }
+
+// Runs `body` with FLASHBANG_DLL set to `value` (removed for null), then puts the variable back as it was.
+void WithCaptureVariable(const char* value, func<void()> body) {
+	Core::String saved;
+	const bool wasSet = Platform::TryGetEnvironmentVariable("FLASHBANG_DLL", saved);
+	if (value == nullptr) Platform::RemoveEnvironmentVariable("FLASHBANG_DLL");
+	else Platform::SetEnvironmentVariable("FLASHBANG_DLL", value);
+	body();
+	if (wasSet) Platform::SetEnvironmentVariable("FLASHBANG_DLL", saved.CStr());
+	else Platform::RemoveEnvironmentVariable("FLASHBANG_DLL");
+}
+
+void AssertPassesThrough(Gpu::Capture& capture, const char* what) {
+	int32 device = 1;
+	int32 factory = 2;
+	assert_true(capture.WrapD3D12Device((void*)&device) == (void*)&device, what);
+	assert_true(capture.WrapDxgiFactory((void*)&factory) == (void*)&factory, what);
+	assert_true(capture.WrapD3D12Device(nullptr) == nullptr, what);
+	capture.TriggerCapture(1);
+	capture.StartFrame();
+	capture.EndFrame();
+	capture.SetComment(Core::StringView("nothing records this"));
+	capture.Annotate(Core::StringView("key"), Core::StringView("value"));
+	capture.SetCaptureFolder(Core::StringView("c4_gpu_no_such_folder"));
+	assert_true(!capture.IsCapturing(), what);
+	assert_eq(0, (int64)capture.CaptureCount(), what);
+	assert_true(capture.CapturePath(0).IsEmpty() && capture.CapturePath(-1).IsEmpty(), what);
+}
+
+[test("gpu.capture")]
+class CaptureTests {
+	[test("not_loaded")]
+	public static void TestNotLoaded() {
+		Gpu::Capture capture;
+		assert_true(!capture.IsLoaded(), "a new capture has no library");
+		assert_se("", capture.Error(), "and no error");
+		assert_eq(0, (int64)capture.Version(), "nor a version");
+		AssertPassesThrough(capture, "every call gives back what it was given");
+		capture.Unload();
+		capture.Unload();
+		assert_true(!capture.IsLoaded(), "unloading twice is harmless");
+	}
+
+	[test("environment")]
+	public static void TestEnvironment() {
+		WithCaptureVariable(nullptr, []() {
+			Gpu::Capture capture;
+			assert_true(!capture.Load(), "no FLASHBANG_DLL: nothing to load");
+			assert_true(Mentions(capture.Error(), "FLASHBANG_DLL is not set"), "and says the program was not started for capture");
+			AssertPassesThrough(capture, "and the capture passes through");
+		});
+		WithCaptureVariable("", []() {
+			Gpu::Capture capture;
+			assert_true(!capture.Load() && Mentions(capture.Error(), "FLASHBANG_DLL is not set"), "an empty one is unset");
+		});
+		WithCaptureVariable(kMissingCaptureLibrary, []() {
+			Gpu::Capture capture;
+			assert_true(!capture.Load(), "one naming nothing does not load");
+			assert_true(Mentions(capture.Error(), "(error 126)"), "with the system's reason");
+		});
+	}
+
+	[test("missing")]
+	public static void TestMissing() {
+		Gpu::Capture capture;
+		assert_true(!capture.Load(kMissingCaptureLibrary), "a missing library does not load");
+		assert_true(!capture.IsLoaded() && Mentions(capture.Error(), "(error 126)"), "and says the module was not found");
+		AssertPassesThrough(capture, "the capture passes through");
+		assert_true(!capture.Load((const char*)nullptr) && !Core::StringView(capture.Error()).IsEmpty(), "a null path");
+	}
+
+	[test("not_the_capture_library")]
+	public static void TestNotTheCaptureLibrary() {
+		Gpu::Capture capture;
+		assert_true(!capture.Load("kernel32.dll"), "a library without the capture exports is refused");
+		assert_true(Mentions(capture.Error(), "kernel32.dll is not the capture library"), "by name");
+		assert_true(!capture.IsLoaded(), "and nothing is loaded");
+		AssertPassesThrough(capture, "the capture passes through");
+		assert_true(!capture.Load(kMissingCaptureLibrary) && Mentions(capture.Error(), "(error 126)"), "a later load reports its own reason");
+	}
+}

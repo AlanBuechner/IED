@@ -1,0 +1,52 @@
+// The GPU debugger (docs/22, docs/features/17-gpu-debugger.md): frame capture and replay for D3D12 and Vulkan on IED's
+// own backend, Flashbang (native/). Programs launched for capture write captures into the workspace's
+// .ied/local/gpu-captures; each capture opens as a document in PIX's layout - the timing timeline, the events grid,
+// the Pipeline view with the resource viewer, and the docked API Calls, Messages and Warnings - replayed on the
+// server by flashbang-replay, one process per open capture. Its server code (code/) runs on the plugin API (docs/26
+// "Built-ins on the API"): the gpu.* methods and the gpu: and gpurs: topics.
+{
+	"manifestVersion": 1,
+	"id": "ied.gpu",
+	"name": "GPU Debugger",
+	"version": "0.1.0",
+	"description": "Frame capture and replay for D3D12 and Vulkan: events, pipeline state, resources, pixels, meshes, shaders and GPU timing.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "GpuDebug::Activate", "ui": "ui/index.js" },
+	"permissions": ["process.spawn", "fs.read", "fs.write", "fs.watch"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "GPU Debugger" },
+		"outputSources": [ { "id": "gpu", "title": "GPU" } ],
+		"activities": [
+			{ "id": "ied.gpu", "title": "GPU", "icon": "$(device-camera)", "order": 45 }
+		],
+		"toolWindows": [
+			{ "id": "ied.gpu.library", "title": "Capture Library", "icon": "$(library)", "view": "CaptureLibrary", "defaultDock": "document", "activity": "ied.gpu" }
+		],
+		"fileIcons": [
+			{ "extensions": [".flash"], "icon": "$(device-camera)", "color": "--hue-purple" }
+		],
+		"commands": [
+			{ "id": "ied.gpu.show", "title": "GPU Debugger", "category": "View", "icon": "$(device-camera)" },
+			{ "id": "ied.gpu.launch", "title": "Launch for Capture", "category": "Debug", "icon": "$(device-camera)" },
+			{ "id": "ied.gpu.captureNext", "title": "Capture Next Frame", "category": "Debug", "icon": "$(record)" },
+			{ "id": "ied.gpu.library", "title": "Capture Library", "category": "GPU", "icon": "$(library)" }
+		],
+		"menus": {
+			"menubar/view": [
+				{ "command": "ied.gpu.show", "group": "2_windows" }
+			],
+			"menubar/debug": [
+				{ "command": "ied.gpu.launch", "group": "6_graphics" },
+				{ "command": "ied.gpu.captureNext", "group": "6_graphics", "order": 1 }
+			],
+			"toolbar/main": [
+				{ "command": "ied.gpu.launch", "group": "7_graphics" }
+			]
+		},
+		"keybindings": [
+			{ "command": "ied.gpu.launch", "key": "alt+f5" },
+			{ "command": "ied.gpu.show", "key": "ctrl+alt+f5" }
+		]
+	}
+}

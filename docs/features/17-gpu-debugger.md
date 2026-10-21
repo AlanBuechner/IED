@@ -1,6 +1,6 @@
 # Features: GPU debugger (GPU)
 
-Owner: `plugins/gpu` (builtin plugin: library, sessions, insights, compare, AI tools, UI module) with replay backends as separate native processes under `plugins/gpu/backends/` (`rdc` first, `flashbang` later). Capture-side support for C4 programs is Bedrock `Gpu::` in the C4 tree (`C4/Bedrock/`). Design: `docs/22`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
+Owner: `plugins/gpu` (builtin plugin: library, sessions, insights, compare, AI tools, UI module) with its own backend, Flashbang, under `plugins/gpu/native/` (the capture library and Vulkan layer, and the replayer, one process per open capture; owner decision 2026-10-21, `docs/99` #23: RenderDoc is a reference, not a dependency). Capture-side support for C4 programs is Bedrock `Gpu::` in the C4 tree (`C4/Bedrock/`). Design: `docs/22`. Mocks: `frontend/mocks/07-gpu-frame.html`, `08-gpu-shader-debug.html`, `09-gpu-performance.html`.
 
 PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderDoc's look is not wanted) - RenderDoc the inspection and openness reference, Nsight the performance reference; the "Beyond" column says what IED adds.
 
@@ -9,10 +9,10 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
 | F-GPU-1 | GPU activity with a capture library: thumbnail, program, config, git commit, frame number, capture GPU and driver, backend, size; comments, pin, retention limits | P1 | US-GPU-1 | commit and build metadata on every capture |
-| F-GPU-2 | `Capture` task preset: build, launch under the active backend, capture the next frame (in-app hotkey, IED command from any device, or N frames) | P1 | US-GPU-1 | capture from the phone |
-| F-GPU-3 | Programmatic capture from code through Bedrock `Gpu::Capture` (RenderDoc in-app API, PIX programmatic API or Flashbang, whichever is active) | P1 | US-GPU-1 | one API over three capture tools |
+| F-GPU-2 | Launch for Capture: build, start the startup project with the capture library, capture the next frame (IED command from any device, the program's own key through `Gpu::Capture::TriggerCapture`, or N frames) | P1 | US-GPU-1 | capture from the phone |
+| F-GPU-3 | Programmatic capture from code through Bedrock `Gpu::Capture` (wrap the device and factory, trigger, frame bounds for programs without a swap chain, comments and annotations) | P1 | US-GPU-1 | the calls stay in every build: without the library they pass through |
 | F-GPU-4 | Hand-off: open a capture in RenderDoc's UI; capture with PIX and open in PIX; launch the program in Nsight Graphics | P2 | US-GPU-1 | - |
-| F-GPU-5 | Capture on hitch: a profiler frame-time trigger captures the next frame (rdc) or writes the rolling frames around the spike (Flashbang) | P2 | US-GPU-9 | none of the three tie GPU capture to a CPU profiler |
+| F-GPU-5 | Capture on hitch: a profiler frame-time trigger captures the next frame, or writes the rolling frames around the spike | P2 | US-GPU-9 | none of the three tie GPU capture to a CPU profiler |
 
 ## Events and timeline
 
@@ -85,8 +85,8 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
-| F-GPU-90 | `ied-gpu/1`: JSON-RPC over stdio plus shared-memory blobs; one backend process per open capture; crash restart without losing UI state | P1 | US-GPU-4 | - |
-| F-GPU-91 | `rdc` backend: C++ adapter over RenderDoc's replay API (`renderdoc_replay.h`), pinned RenderDoc version, adapter tests against stored captures; no Python | P1 | US-GPU-4 | - |
-| F-GPU-92 | Flashbang recorder in Bedrock `Gpu::` (C4 tree): records C4 programs without injection, metadata chunk (bindless names, entities, materials), rolling capture | P2 | US-GPU-9 | engine semantics in the capture |
-| F-GPU-93 | Flashbang replayer implementing `ied-gpu/1` (D3D12 first, work graphs, unbounded/bindless resources) | P2 | US-GPU-9 | covers what RenderDoc does not |
+| F-GPU-90 | `ied-gpu/1`: JSON-RPC with binary parts over stdio, binary parts handed to the browser as blobs; one replayer per open capture; crash restart without losing UI state | P1 | US-GPU-4 | - |
+| F-GPU-91 | Dropped 2026-10-21 (`docs/99` #23): a RenderDoc backend - Flashbang captures and replays | - | - | - |
+| F-GPU-92 | Flashbang capture for any program without injection: D3D12 by handing the device to the library (Bedrock `Gpu::Capture`, `flashbang_app.h`), Vulkan through the loader's layer; metadata chunk (bindless names, entities, materials), rolling capture | P1 | US-GPU-9 | engine semantics in the capture |
+| F-GPU-93 | Flashbang replayer implementing `ied-gpu/1` (D3D12 built; Vulkan next; work graphs, unbounded/bindless resources) | P1 | US-GPU-9 | covers what RenderDoc does not |
 | F-GPU-94 | Capture GPU/driver shown beside the replay GPU/driver; replay device selection | P1 | US-GPU-1 | - |

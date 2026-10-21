@@ -75,7 +75,7 @@ The server never ships GPU objects to the browser. Textures go as decoded float 
 
 ## The capture file (`.flash`)
 
-`<program>_<yyyymmdd-hhmmss>_f<frame>.flash` in the capture folder (`FLASHBANG_CAPTURE_DIR`; IED passes `<workspace>/.ied/local/captures`), with a sidecar `.json` (program, API, frame, GPU and driver, size, time, comment) the library reads without opening the capture and a `.png` thumbnail of the presented image.
+`<program>_<yyyymmdd-hhmmss>_f<frame>.flash` in the capture folder (`FLASHBANG_CAPTURE_DIR`; IED passes `<workspace>/.ied/local/gpu-captures`), with a sidecar `.json` (program, API, frame, GPU and driver, size, time, comment) the library reads without opening the capture and a `.png` thumbnail of the presented image.
 
 - Header: magic `FLASHCAP`, format version, API (1 = D3D12, 2 = Vulkan), flags.
 - Then records `{u32 type, u32 flags, u64 size, payload}`, in order: metadata (JSON text), the device, object creations in creation order, descriptor contents, resource states at the frame start, initial contents (each subresource's rows packed), then the frame: submissions (queue, the command lists with their recorded calls), mapped-memory writes, fence signals and waits, the present.
@@ -145,7 +145,7 @@ Phone (one pane at a time, `docs/15`): capture library, event list with timings,
 - **Launch:** *Capture* on the toolbar (next to *Profile*) and GPU > Launch for Capture build the startup project and start the program its debug configuration names with the capture environment: `FLASHBANG_DLL` (where the capture library is), `FLASHBANG_CAPTURE_DIR`, and the Vulkan layer's variables. A Vulkan program is captured as it is; a D3D12 program loads the library and wraps its device and factory through `Gpu::Capture` (or `flashbang_app.h`). *Capture Next Frame* (the GPU activity, the command palette, any device) asks the running program for a frame.
 - **From code:** Bedrock `Gpu::Capture` (`C4/Bedrock/Gpu/`, opt-in `include "gpu.ch"`): `Load()` loads the capture library (from `FLASHBANG_DLL`, or a path), `WrapD3D12Device` / `WrapDxgiFactory`, `TriggerCapture(n)`, `StartFrame` / `EndFrame` for programs without a swap chain, `SetComment`, `Annotate(key, value)` for the metadata chunk. Without the library every call does nothing (the wraps return what they were given), so a program can leave them in.
 - **From the profiler:** "capture on hitch" and "capture this frame" on a GPU zone (later); marker names are shared with `Profile::Gpu::Zone`, which emits the native markers with the zone's name.
-- **Storage:** captures live under `.ied/local/captures/` (gitignored) with their sidecars; the library indexes them. Pin a capture to keep it past the retention limit (`gpu.keepCaptures`).
+- **Storage:** captures live under `.ied/local/gpu-captures/` (gitignored; the profiler keeps its own in `.ied/local/captures/`) with their sidecars; the library indexes them. Pin a capture to keep it past the retention limit (`gpu.keepCaptures`).
 
 ## AI
 
@@ -168,6 +168,35 @@ GPU tools (`docs/13`, group `gpu`) let the agent work the debugger the way the o
 | G3 | Shader debugging by instrumented replay (time travel), work graphs, ray tracing, rolling and multi-frame captures, `Gpu::Annotate` bindless naming | G2 |
 
 Roadmap placement: `docs/18` M12 (G1-G2) and M13 (G3).
+
+## Status (2026-10-21)
+
+Built (G1 for D3D12), in `plugins/gpu/`:
+
+- **Capture** (`native/capture/`): the D3D12 proxies, the state and descriptor tracking, initial contents, the frame
+  recording, the `.flash` writer with its sidecar and thumbnail (only when a frame was presented), the control pipe, and
+  frame bounds from `Present` or from `StartFrame` / `EndFrame` (each `StartFrame` is a frame, captured when one was
+  triggered). The C/C++ helper `native/include/flashbang_app.h`.
+- **Replay** (`native/replay/`): `flashbang-replay --rpc` answers `initialize`, `events`, `apiCalls`, `state`,
+  `resources`, `texture`, `pixel`, `buffer`, `mesh`, `shader`, `timing` and `messages` on `ied-gpu/1`; its CLI does the
+  same for scripts and tests. A Vulkan capture is refused with a message.
+- **Server** (`code/`, namespace `GpuDebug`): the `gpu.*` methods and the `gpu:` / `gpurs:` topics above, Launch for
+  Capture from the startup project's debug configuration (its pre-launch task first), one replayer per open capture
+  (ended with its capture's delete, after 30 idle minutes, or with the server).
+- **UI** (`ui/`): the Capture Library tool window in the GPU activity; a capture as a document with Overview, Pipeline
+  and Performance; the timeline, the events grid with its filter, the state tree, the resource viewer (channels, range,
+  NaN / Inf / negative visualizing, mips and slices, picks), the shader and Mesh panels, and the API Calls, Messages,
+  Resources and Warnings grids; at phone width the events below one of Output, State or Calls.
+- **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample
+  `plugins/gpu/samples/c4`.
+- **Checks:** `nuke test flashbang` (`flashbang-tests`, and `native/tests/test_flashbang.py`, which captures the D3D12
+  sample and the C4 sample and replays them; the C4 one needs a toolchain whose Bedrock has `gpu.ch`),
+  `tools/server-checks/tests/test_gpu.py` (launch, capture, open, replay, blobs, comment, delete, refusals), Bedrock
+  `gpu_tests.cf`.
+
+Not yet: the Vulkan layer's capture, its records and its replay (the layer manifest and the launch variables are in
+place); a buffer view in the UI (the replayer's `buffer` method has none yet); the AI tools; the control pipe's DACL
+limited to the user; Pixel History and the rest of G2.
 
 ## Risks
 

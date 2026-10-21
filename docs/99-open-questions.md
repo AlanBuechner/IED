@@ -28,6 +28,7 @@ Decide open items during design, then **move the answer into the relevant doc an
 | 20 | How projects get the compiler | One shared store of immutable, versioned C4 toolchains in this checkout (`toolchains/c4/<version>`, plus `dev` = the in-tree build); workspaces pin a version; nothing vendors Nuke or C4 | `docs/23` N-7 |
 | 21 | Prefill-progress signals (was D4) | Verified 2026-10-21 against llama.cpp b10222: `"return_progress": true` on a streamed `/v1/chat/completions` request makes it send, before the first token, chunks with `prompt_progress {total, cache, processed, time_ms}` (and an empty assistant delta, content null). The chat asks for it from servers its probe found to be llama.cpp; each report extends the prefill watchdog and the clients see the prompt read so far (`turn.progress`). vLLM and Ollama send nothing before the first token: the estimate and SSE keepalives cover them | `docs/12` "Watchdogs", `docs/10` |
 | 22 | The browser engine for the desktop app, the AI's browser tools and the in-IDE browser | Owner, 2026-10-21: one engine, Edge's - WebView2 in the desktop app, Edge headless over CDP on the server for pages the AI and people share; the Browser tab is server-rendered (pulled frames, forwarded input), so it works on phones and shows the AI's pages live; everything in C4 (the desktop's COM callbacks too) | `docs/27` |
+| 23 | GPU debugger backend (was O11) | Owner, 2026-10-21: our own backend, Flashbang (capture library, Vulkan layer, replayer, `.flash` format), with RenderDoc as a reference rather than a dependency - fewer dependencies and full control (bindless, work graphs, engine metadata, time travel); D3D12 capture is opt-in by the program (Bedrock `Gpu::Capture`, `flashbang_app.h`), Vulkan through the loader's layer variables; the only new download is the pinned Khronos Vulkan-Headers | `docs/22` |
 
 ## Open - owner's call
 
@@ -42,7 +43,6 @@ Decide open items during design, then **move the answer into the relevant doc an
 | O8 | **Not core**: ComfyUI generation, Perforce/Fossil, GitHub PR integration as optional plugins rather than built-ins. OK? | Yes |
 | O9 | **"Explosion theming"**: purely functional grayscale, or a signature accent moment (logo, title treatment, splash)? | Functional; identity in iconography only |
 | O10 | **Phone editing**: read + light edits by default (tap to edit), or full editing parity? | Read + light edit |
-| O11 | **GPU debugger backend** (`docs/22`): RenderDoc as the replay backend, our own ("Flashbang", RenderDoc as reference), or both? Neither needs Python (RenderDoc's replay API is C++). Also: ship RenderDoc's DLL inside IED, and is "Flashbang" the name? | Both behind one protocol: RenderDoc backend first (complete debugger fast), Flashbang for C4 programs where control matters (bindless/unbounded arrays, work graphs, engine metadata, time-travel debugging); bundle a pinned RenderDoc (MIT); name Flashbang |
 
 ## Open - design (resolve before implementing the affected area)
 

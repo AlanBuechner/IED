@@ -90,10 +90,10 @@ namespace fb::capture::d3d12
 		if (active_) End(swapChain, syncInterval, flags);
 	}
 
-	void FrameCapture::ManualStart() {
+	void FrameCapture::ManualStart(u64 frame) {
 		std::lock_guard<std::recursive_mutex> guard(lock_);
 		if (active_) return;
-		frame_ = Session::Get().NextFrame();
+		frame_ = frame;
 		if (!Begin()) Session::Get().Failed("the capture could not start (see the program's debug output)");
 	}
 
@@ -482,6 +482,7 @@ namespace fb::capture::d3d12
 		if (!active_) return;
 		fb::d3d12::QueueFence op = {queue->Id(), device_.Objects().Id(fence), value};
 		Record(recordType, op);
+		events_ += 1;
 	}
 
 	void FrameCapture::QueueMarker(WrappedQueue* queue, MarkerOp op, UINT metadata, const void* data, UINT size) {
@@ -489,6 +490,7 @@ namespace fb::capture::d3d12
 		if (!active_) return;
 		fb::d3d12::QueueMarker marker = {queue->Id(), op, metadata, data, size};
 		Record(kQueueMarker, marker);
+		events_ += 1;
 	}
 
 	void FrameCapture::Created(Object* object) {
@@ -581,7 +583,7 @@ namespace fb::capture::d3d12
 			}
 			const D3D12_RANGE none = {0, 0};
 			readback->Unmap(0, &none);
-			WritePng(base_ + L".png", outWidth, outHeight, pixels.data(), (size_t)outWidth * 4);
+			summary.thumbnail = WritePng(base_ + L".png", outWidth, outHeight, pixels.data(), (size_t)outWidth * 4);
 			ByteWriter thumbnail;
 			thumbnail.Put(outWidth);
 			thumbnail.Put(outHeight);
@@ -625,6 +627,7 @@ namespace fb::capture::d3d12
 		}
 		fb::d3d12::Present present = {swapChain ? swapChain->Id() : 0, bufferId, syncInterval, flags};
 		Record(kPresent, present);
+		events_ += 1;
 		active_ = false;
 		Session::Get().SetCapturing(false);
 		WaitIdle();

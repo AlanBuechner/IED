@@ -37,13 +37,15 @@ extern "C"
 
 	__declspec(dllexport) void FlashbangTriggerCapture(int32_t frames) { capture::Session::Get().Trigger(frames); }
 
+	// Frame bounds for a program that does not Present: each StartFrame is a frame, captured when one was triggered.
 	__declspec(dllexport) void FlashbangStartFrame(void) {
-		capture::Session::Get().RequestManualStart();
-		for (capture::d3d12::WrappedDevice* device : capture::d3d12::Devices()) device->Frames().ManualStart();
+		const std::vector<capture::d3d12::WrappedDevice*> devices = capture::d3d12::Devices();
+		const uint64_t frame = capture::Session::Get().NextFrame();
+		if (devices.empty() || !capture::Session::Get().TakeTrigger()) return;
+		for (capture::d3d12::WrappedDevice* device : devices) device->Frames().ManualStart(frame);
 	}
 
 	__declspec(dllexport) void FlashbangEndFrame(void) {
-		capture::Session::Get().RequestManualEnd();
 		for (capture::d3d12::WrappedDevice* device : capture::d3d12::Devices()) device->Frames().ManualEnd();
 	}
 

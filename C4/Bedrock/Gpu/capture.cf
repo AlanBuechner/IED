@@ -1,0 +1,109 @@
+include "capture.ch"
+include "Platform/system.ch"
+
+namespace Gpu
+{
+	// A path long enough for any capture file; a longer one is asked for again at its length.
+	const int32 kCapturePathBytes = 1024;
+
+	bool Capture::Load() {
+		Core::String path;
+		if (!Platform::TryGetEnvironmentVariable("FLASHBANG_DLL", path) || path.IsEmpty()) {
+			Unload();
+			error = Core::String("FLASHBANG_DLL is not set: the program was not started for capture");
+			return false;
+		}
+		return Load(path.CStr());
+	}
+
+	bool Capture::Load(const char* path) {
+		Unload();
+		Platform::Library loaded = Platform::Library(path);
+		if (!loaded.IsOpen()) {
+			error = Core::String(loaded.Error());
+			return false;
+		}
+		funcptr<void*(void*)> wrap = (funcptr<void*(void*)>)loaded.Find("FlashbangWrapD3D12DeviceTake");
+		if (wrap == nullptr) {
+			error = Core::String(path) + " is not the capture library: it has no FlashbangWrapD3D12DeviceTake";
+			return false;
+		}
+		version = (funcptr<int32()>)loaded.Find("FlashbangVersion");
+		wrapFactory = (funcptr<void*(void*)>)loaded.Find("FlashbangWrapDxgiFactoryTake");
+		triggerCapture = (funcptr<void(int32)>)loaded.Find("FlashbangTriggerCapture");
+		startFrame = (funcptr<void()>)loaded.Find("FlashbangStartFrame");
+		endFrame = (funcptr<void()>)loaded.Find("FlashbangEndFrame");
+		isCapturing = (funcptr<int32()>)loaded.Find("FlashbangIsCapturing");
+		setComment = (funcptr<void(const char*)>)loaded.Find("FlashbangSetComment");
+		annotate = (funcptr<void(const char*, const char*)>)loaded.Find("FlashbangAnnotate");
+		setCaptureFolder = (funcptr<void(const char*)>)loaded.Find("FlashbangSetCaptureDir");
+		captureCount = (funcptr<int32()>)loaded.Find("FlashbangCaptureCount");
+		capturePath = (funcptr<int32(int32, char*, int32)>)loaded.Find("FlashbangCapturePath");
+		wrapDevice = wrap;
+		library = take(loaded);
+		return true;
+	}
+
+	void Capture::Unload() {
+		version = nullptr;
+		wrapDevice = nullptr;
+		wrapFactory = nullptr;
+		triggerCapture = nullptr;
+		startFrame = nullptr;
+		endFrame = nullptr;
+		isCapturing = nullptr;
+		setComment = nullptr;
+		annotate = nullptr;
+		setCaptureFolder = nullptr;
+		captureCount = nullptr;
+		capturePath = nullptr;
+		error = Core::String();
+		library.Close();
+	}
+
+	int32 Capture::Version() const { return version != nullptr ? version() : 0; }
+
+	void* Capture::WrapD3D12Device(void* device) { return wrapDevice != nullptr ? wrapDevice(device) : device; }
+
+	void* Capture::WrapDxgiFactory(void* factory) { return wrapFactory != nullptr ? wrapFactory(factory) : factory; }
+
+	void Capture::TriggerCapture(int32 frames) {
+		if (triggerCapture != nullptr) triggerCapture(frames);
+	}
+
+	void Capture::StartFrame() {
+		if (startFrame != nullptr) startFrame();
+	}
+
+	void Capture::EndFrame() {
+		if (endFrame != nullptr) endFrame();
+	}
+
+	bool Capture::IsCapturing() const { return isCapturing != nullptr && isCapturing() != 0; }
+
+	void Capture::SetComment(Core::StringView text) {
+		if (setComment != nullptr) setComment(Core::String(text).CStr());
+	}
+
+	void Capture::Annotate(Core::StringView key, Core::StringView value) {
+		if (annotate != nullptr) annotate(Core::String(key).CStr(), Core::String(value).CStr());
+	}
+
+	void Capture::SetCaptureFolder(Core::StringView folder) {
+		if (setCaptureFolder != nullptr) setCaptureFolder(Core::String(folder).CStr());
+	}
+
+	int32 Capture::CaptureCount() const { return captureCount != nullptr ? captureCount() : 0; }
+
+	Core::String Capture::CapturePath(int32 index) const {
+		if (capturePath == nullptr) return Core::String();
+		char[kCapturePathBytes] text;
+		const int32 length = capturePath(index, &text[0], kCapturePathBytes);
+		if (length < 0) return Core::String();
+		if (length < kCapturePathBytes) return Core::String(&text[0]);
+		Core::Array<char> longer;
+		longer.Resize((int64)length + 1);
+		capturePath(index, longer.Data(), length + 1);
+		return Core::String(longer.Data());
+	}
+}

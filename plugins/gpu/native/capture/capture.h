@@ -30,6 +30,7 @@ namespace fb::capture
 		u64 frame = 0;
 		u32 width = 0;
 		u32 height = 0;
+		bool thumbnail = false;   // the presented image was saved beside the capture
 		u64 events = 0;
 		std::vector<std::string> warnings;
 	};
@@ -52,11 +53,6 @@ namespace fb::capture
 		bool TakeTrigger();
 		bool Pending() const { return pending_.load() > 0; }
 
-		// Manual frame bounds for programs without a swap chain (Gpu::Capture::StartFrame / EndFrame).
-		void RequestManualStart() { manualStart_ = true; }
-		bool TakeManualStart() { return manualStart_.exchange(false); }
-		void RequestManualEnd() { manualEnd_ = true; }
-		bool TakeManualEnd() { return manualEnd_.exchange(false); }
 
 		void SetComment(const std::string& text);
 		std::string Comment();
@@ -84,8 +80,6 @@ namespace fb::capture
 	private:
 		std::mutex lock_;
 		std::atomic<int> pending_{0};
-		std::atomic<bool> manualStart_{false};
-		std::atomic<bool> manualEnd_{false};
 		std::atomic<bool> capturing_{false};
 		std::atomic<u64> frame_{0};
 		std::wstring dir_;

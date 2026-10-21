@@ -106,7 +106,7 @@ namespace fb::capture
 		json.BeginObject();
 		json.Uint("version", 1);
 		json.String("file", FileName(base + L".flash"));
-		json.String("thumbnail", FileName(base + L".png"));
+		if (summary.thumbnail) json.String("thumbnail", FileName(base + L".png"));
 		json.String("program", ExecutableName());
 		json.String("programPath", Narrow(ExecutablePath()));
 		json.Uint("pid", GetCurrentProcessId());

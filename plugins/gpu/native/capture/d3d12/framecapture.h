@@ -29,7 +29,7 @@ namespace fb::capture::d3d12
 		// Frame boundaries: a Present (before it shows the frame, and after), or the program's own bounds.
 		void BeforePresent(WrappedSwapChain* swapChain, UINT syncInterval, UINT flags);
 		void AfterPresent();
-		void ManualStart();
+		void ManualStart(u64 frame);   // a frame StartFrame began, when a capture was triggered
 		void ManualEnd();
 
 		// What happens while a frame is captured.

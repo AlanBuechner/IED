@@ -1,0 +1,27 @@
+include "launch.ch"
+include "host/server.ch"
+
+namespace IED
+{
+	Launch ResolveLaunch(const Workspace& ws, Core::StringView project, Core::StringView name) {
+		Launch launch;
+		Ied::CodeInstance* instance = Ied::ApiCaller(launch.problem);
+		if (!instance) return launch;
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "process.spawn", launch.problem);
+		if (!found) return launch;
+		try {
+			Ied::DebugLaunch resolved = server->tasks->ResolveDebug(found, project, name);
+			launch.project = resolved.project;
+			launch.name = resolved.name;
+			launch.type = resolved.type;
+			launch.preLaunchTask = resolved.preLaunchTask;
+			launch.configuration = resolved.arguments;
+		}
+		catch (Ied::RpcError& error) {
+			launch.problem = error.message;
+		}
+		return launch;
+	}
+}

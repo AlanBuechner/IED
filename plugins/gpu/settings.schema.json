@@ -1,0 +1,25 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "GPU Debugger settings",
+	"type": "object",
+	"properties": {
+		"gpu.nativeFolder": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "The folder of flashbang.dll and flashbang-replay.exe. Empty: the plugin's bin folder, else this repository's build folder (nuke build flashbang)."
+		},
+		"gpu.replayDebugLayer": {
+			"type": "boolean",
+			"default": false,
+			"description": "Replay with the D3D12 debug layer on, so its messages show in the capture's Messages (slower; needs Windows' Graphics Tools)."
+		},
+		"gpu.timingRepeat": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 25,
+			"default": 5,
+			"description": "How many times Collect Timing Data replays the frame; each event's time is the median."
+		}
+	}
+}

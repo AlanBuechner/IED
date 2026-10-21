@@ -24,5 +24,5 @@ run = ["${bin}/flashbang-tests.exe"]
 [[project.steps]]
 name = "capture-replay"
 phase = "test"
-description = "capture the samples and replay them (skipped without a GPU)"
-run = ["${python}", "-I", "native/tests/test_flashbang.py", "--bin", "${bin}"]
+description = "capture the samples (the C4 one built with the toolchain) and replay them (skipped without a GPU)"
+run = ["${python}", "-I", "native/tests/test_flashbang.py", "--bin", "${bin}", "--c4", "${toolchain.dir}/C4.exe"]

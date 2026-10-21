@@ -1210,13 +1210,52 @@ unreachable or malformed target refused.
 
 ---
 
-## 18. Tests
+## 18. GPU capture (`Gpu/`, `include "gpu.ch"`)
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 67 files, 592 tests (array, list, initlist,
+**Status:** **Implemented** (IED docs/22): the client of IED's GPU debugger. A program started by IED's Launch for
+Capture finds the capture library in `FLASHBANG_DLL`; `Gpu::Capture` loads it, and a D3D12 program hands it its device
+and DXGI factory right after making them, then keeps using the proxies it gets back, which record what the program
+does for the frames IED (or the program) asks for. A Vulkan program needs none of this: the loader brings the capture
+layer in. Without the library - a program not started for capture, or one built for shipping - every call gives back
+what it was given and records nothing. Opt-in like `math.ch`: `bedrock.ch` does not include it.
+
+```c4
+include "gpu.ch"
+
+Gpu::Capture capture;                                      // keep it as long as the device
+if (!capture.Load()) printf("%s
+", capture.Error());     // FLASHBANG_DLL is not set: the program runs alone
+D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), &raw);
+ID3D12Device* device = (ID3D12Device*)capture.WrapD3D12Device(raw);
+// a program with no swap chain bounds its frames itself
+capture.StartFrame();
+Render(device);
+capture.EndFrame();
+```
+
+| API | What it does |
+|---|---|
+| `Load()`, `Load(path)`, `Unload()`, `IsLoaded()`, `Error()`, `Version()` | the capture library from `FLASHBANG_DLL` or a path; false, with why, when it is not set, does not load (the system's reason) or is not the capture library; it frees the library on delete and cannot be copied (move it with `take`) |
+| `WrapD3D12Device(device)`, `WrapDxgiFactory(factory)` | the object to keep using: a proxy that takes the object's reference (any interface version), or the object itself when not loaded; swap chains a wrapped factory makes are captured, their `Present` bounding frames |
+| `TriggerCapture(frames)`, `IsCapturing()` | capture the next `frames` frames (IED's Capture Next Frame sends the same through the library's control pipe) |
+| `StartFrame()`, `EndFrame()` | frame bounds for a program that does not present: each `StartFrame` is a frame, captured when one was triggered |
+| `SetComment(text)`, `Annotate(key, value)`, `SetCaptureFolder(folder)` | a note kept with the next capture, a key and value recorded with it, where captures go instead of `FLASHBANG_CAPTURE_DIR` |
+| `CaptureCount()`, `CapturePath(index)` | the captures this process has written |
+
+Covered by `Bedrock/Tests/gpu_tests.cf` (4 tests): without the library every call passes through and records nothing;
+loading from `FLASHBANG_DLL` unset, empty or naming nothing; a missing library and one without the capture exports
+refused with why. The real library is covered by IED's `plugins/gpu/native/tests/test_flashbang.py`, which builds the
+C4 sample `plugins/gpu/samples/c4` with the toolchain and captures one triggered frame of it through `Gpu::Capture`.
+
+---
+
+## 19. Tests
+
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 68 files, 596 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gc, buffer). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -1229,7 +1268,7 @@ The exit code is the number of failed assertions. The `GC` namespace is covered 
 
 ---
 
-## 19. Missing versus the plan
+## 20. Missing versus the plan
 
 From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 

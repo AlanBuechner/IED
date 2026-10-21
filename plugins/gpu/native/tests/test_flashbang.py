@@ -1,7 +1,8 @@
 # Captures the sample programs with the capture library and replays the captures (docs/22): the files a capture leaves,
-# the replayer's events, state, readbacks, timing and its ied-gpu/1 framing on stdio. A machine without a D3D12 (or
-# Vulkan) GPU skips what it cannot run. Stdlib only.
-#   python -I test_flashbang.py --bin build/bin/Development-windows-x64/flashbang
+# the replayer's events, state, readbacks, timing and its ied-gpu/1 framing on stdio; the C4 sample (samples/c4) built
+# with --c4 and captured through Bedrock's Gpu::Capture with manual frame bounds. A machine without a D3D12 (or Vulkan)
+# GPU skips what it cannot run. Stdlib only.
+#   python -I test_flashbang.py --bin build/bin/Development-windows-x64/flashbang [--c4 toolchains/c4/dev/C4.exe]
 import argparse
 import glob
 import json
@@ -14,6 +15,8 @@ import tempfile
 import unittest
 
 BIN = ""
+C4 = ""
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 
 def run(args, env=None, timeout=120):
@@ -170,12 +173,77 @@ class D3D12CaptureReplay(unittest.TestCase):
 			client.close()
 
 
+class C4CaptureReplay(unittest.TestCase):
+	"""The C4 sample: Gpu::Capture loads the library from FLASHBANG_DLL, wraps the device, and captures the one frame it
+	triggers between StartFrame and EndFrame."""
+
+	@classmethod
+	def setUpClass(cls):
+		if not C4:
+			raise unittest.SkipTest("no C4 compiler given (--c4)")
+		if not os.path.isfile(os.path.join(os.path.dirname(C4), "Bedrock", "gpu.ch")):
+			raise unittest.SkipTest("the C4 toolchain predates Bedrock's Gpu module (nuke build -p C4 refreshes dev)")
+		cls.folder = tempfile.mkdtemp(prefix="flashbang-c4-")
+		program = os.path.join(cls.folder, "fb-sample-c4.exe")
+		built = run([C4, os.path.join(REPO, "plugins", "gpu", "samples", "c4"), "-o", program], timeout=600)
+		if built.returncode != 0:
+			raise AssertionError(f"the C4 sample does not build: {built.stdout} {built.stderr}")
+		captures = os.path.join(cls.folder, "captures")
+		env = dict(os.environ, FLASHBANG_DLL=os.path.join(BIN, "flashbang.dll"), FLASHBANG_CAPTURE_DIR=captures)
+		cls.sample = run([program, "--frames", "5", "--capture-frame", "2"], env=env)
+		if cls.sample.returncode == 2:
+			raise unittest.SkipTest(f"the C4 sample has no D3D12 device here: {cls.sample.stdout.strip()}")
+		if cls.sample.returncode != 0:
+			raise AssertionError(f"the C4 sample failed: {cls.sample.stdout} {cls.sample.stderr}")
+		cls.captures = sorted(glob.glob(os.path.join(captures, "*.flash")))
+		cls.events = replay(cls.captures[0], "events", device=False)["events"] if cls.captures else []
+
+	@classmethod
+	def tearDownClass(cls):
+		if hasattr(cls, "folder"):
+			shutil.rmtree(cls.folder, ignore_errors=True)
+
+	def test_only_the_triggered_frame(self):
+		self.assertEqual(1, len(self.captures), self.sample.stdout)
+		said = [line[len("captured "):] for line in self.sample.stdout.splitlines() if line.startswith("captured ")]
+		self.assertEqual([os.path.normcase(os.path.normpath(self.captures[0]))], [os.path.normcase(os.path.normpath(path)) for path in said], "CapturePath names it")
+		with open(self.captures[0][:-len(".flash")] + ".json", encoding="utf-8") as f:
+			sidecar = json.load(f)
+		self.assertEqual(("fb-sample-c4", "D3D12", 3, "fb-sample-c4"), (sidecar["program"], sidecar["api"], sidecar["frame"], sidecar["comment"]))
+		self.assertEqual({"frame": "even"}, sidecar["annotations"])
+		self.assertNotIn("thumbnail", sidecar, "nothing was presented, so there is no picture of it")
+		self.assertEqual(len(self.events), sidecar["events"])
+
+	def test_events_end_with_the_frame(self):
+		named = {e[6]: e for e in self.events}
+		marker = named["Clear"]
+		clears = [e for e in self.events if e[2] == "clear"]
+		self.assertEqual(1, len(clears))
+		self.assertEqual(marker[0], clears[0][1], "the clear sits in its marker")
+		self.assertIn("Signal(Frame fence, 3)", named)
+		self.assertEqual(["present", "EndFrame"], self.events[-1][2::4])
+
+	def test_the_target_holds_the_clear_color(self):
+		resources = {r["name"]: r for r in replay(self.captures[0], "resources", device=False)["resources"]}
+		clear = [e for e in self.events if e[2] == "clear"][0][0]
+		client = RpcClient()
+		try:
+			client.call("initialize", {"capture": self.captures[0]})
+			pixel, _ = client.call("pixel", {"id": resources["Target"]["id"], "eid": clear, "x": 100, "y": 200})
+			for got, want in zip(pixel["result"]["values"], (0.25, 0.5, 0.5, 1.0)):
+				self.assertAlmostEqual(want, got, places=2)
+		finally:
+			client.close()
+
+
 def main():
-	global BIN
+	global BIN, C4
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--bin", required=True)
+	parser.add_argument("--c4", default="", help="the C4 compiler that builds the C4 sample")
 	options, rest = parser.parse_known_args()
 	BIN = os.path.abspath(options.bin)
+	C4 = os.path.abspath(options.c4) if options.c4 else ""
 	unittest.main(argv=[sys.argv[0]] + rest, verbosity=2)
 
 
