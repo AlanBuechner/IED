@@ -8,6 +8,7 @@ include "../services/workspaces.ch"
 include "../services/documents.ch"
 include "../services/testhooks.ch"
 include "../services/blobs.ch"
+include "../services/outputs.ch"
 include "../auth/auth.ch"
 include "../plugins/host.ch"
 include "trust.ch"
@@ -22,6 +23,8 @@ namespace Ied
 		[operator("create")] public void Init() {}
 		[operator("create")] public void Init(ServerConfig config);
 
+		// A line of the server's log: to standard error (unless --quiet) and to every workspace's "ied" output source.
+		// Safe from any thread, holding the server lock or not.
 		public void Log(Core::StringView line);
 		// The lock is held.
 		public void RemoveSession(Session* session);
@@ -29,6 +32,8 @@ namespace Ied
 		// forgotten, durable state kept, and every session told bye and closed.
 		public void Restart();
 
+		public LogPump logPump;
+		public Threading::Thread logThread;
 		public Threading::Mutex lock;
 		public Threading::ConditionVariable changed;   // an opId's first run finished
 		public ServerConfig config;
@@ -42,6 +47,7 @@ namespace Ied
 		public Documents* documents;
 		public TestHooks* testHooks;
 		public Blobs* blobs;
+		public Outputs* outputs;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public TrustStore trust;
@@ -52,4 +58,19 @@ namespace Ied
 
 	// "e-" and 12 random hex digits.
 	Core::String NewEpoch();
+
+	// The log's lines between Log and the thread that publishes them under the server lock.
+	class LogPump
+	{
+		public void Push(Core::StringView line);
+		// Waits for lines, then hands them to `server`'s outputs with its lock held; forever.
+		public void Run(Server* server);
+
+		private Threading::Mutex lock;
+		private Threading::ConditionVariable ready;
+		private Core::Array<Core::String> pending;
+	}
+
+	// "[hh:mm:ss] " in local time.
+	Core::String LogStamp(int64 unixNs);
 }

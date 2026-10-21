@@ -67,7 +67,7 @@ A topic is a stream of state changes for one server object. Naming: `<kind>:<id>
 | `diag:<wsId>` | `diag.set` (per URI, per source) | all current diagnostics |
 | `chat:<chatId>` | `turn.start`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `tasks.changed`, `scratch.changed`, `turn.end`, `context.changed` | chat header + last N turns (older via `chat.history` request) |
 | `run:<runId>` | `step.start`, `output` (source, text), `step.end`, `run.end` | task run state + output tail |
-| `out:<wsId>:<sourceId>` | `append`, `clear` | output tail (older lines via request) |
+| `out:<wsId>:<sourceId>` | `append {text}` (coalescible), `clear` | `{sourceId, label, tail}`: the last 64 KB, cut at a line start. Every workspace has the `ied` source, the server's own log with each line stamped `[hh:mm:ss]`; `out.sources {wsId}` lists a workspace's sources and `out.clear {wsId, sourceId}` empties one |
 | `term:<termId>` | `data`, `resize`, `exit`, `lease` | screen state (serialized via xterm headless) + scrollback tail |
 | `dbg:<sessionId>` | `stopped`, `continued`, `threads`, `breakpoints`, `output`, `terminated` | session state (threads, current frame) |
 | `prof:<captureId>` | `stats`, `progress` | capture summary (timeline data is fetched via requests/blobs) |

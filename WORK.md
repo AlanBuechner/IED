@@ -24,9 +24,10 @@ Living document. Update it at every checkpoint commit.
   - the plugin host for built-in, app and project-local declarative plugins (`docs/02` "The host as built"): manifests validated by Bedrock's JSON Schema validator (B68), app plugins approved by content digest, local ones behind workspace trust, precedence, enable/disable, hot reload;
   - workspace trust in app data (folders open untrusted);
   - settings tiers (`docs/07` "Settings on the wire"): plugin-declared settings, app / solution / project tier files live and checked with problems on their lines, merge kinds, comment-keeping revision-checked writes;
-  - solutions and projects (`docs/03` "The server as built").
+  - solutions and projects (`docs/03` "The server as built");
+  - the IED output source: the server's log as every workspace's `out:<wsId>:ied` (plugin and solution problems show there).
 
-  Next in M1: the IED output source (server logs as an output source), the frontend shell (M0 item 4: a signed-in browser lands on `/`, which has no app yet; the M1 exit wants the M0 frontend running unchanged against this server), the 24 h idle soak.
+  Next in M1: the frontend shell (M0 item 4: a signed-in browser lands on `/`, which has no app yet; the M1 exit wants the M0 frontend running unchanged against this server), the 24 h idle soak.
 - [x] **C4 readiness (`docs/17`) is green except the 24 h scale-test soak (item 8)** (2026-10-20): networking with an event loop, processes with ConPTY, file watching, UTF-16, base64/SHA-1, regex, reflection serialization, CBind fixes, incremental builds (`--incremental`, Nuke's Debug/Development: a one-module edit of a 60k-line program rebuilds in 2.6 s), streaming JSON (`JsonStream` for JSON-RPC as it arrives) and custom-allocator pools. M1 (server skeleton) can start.
 - [x] **M0 items 3 + 5: test doubles** - `tools/mock-server/` (protocol v1 + fixtures: workspace, docs with lease/rebase, scripted chat with tools and approvals, ANSI task runs, echo terminal, layouts, presence; debug console at `/_mock/`), `tools/conformance/` (46 black-box tests, green against the mock; needs `testhooks.*` on the real server), `tools/fake-model/` (40 scripts, every `docs/12` stop class + must-not-stop cases, discovery endpoints), `tools/schema-check/` (examples valid). All stdlib; `python -I tools/selftest.py` runs everything (~40 s, green on Python 3.12 and 3.14). Resume verified in a real browser against the mock.
 

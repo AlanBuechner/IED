@@ -117,11 +117,20 @@ namespace Ied
 		return opened;
 	}
 
+	// Every problem of a solution and its projects goes to the server log too (docs/02, docs/03).
+	static void LogProblems(Server* server, const SolutionModel* solution) {
+		Core::String prefix = (Core::String("solution ") + solution->name.View()) + ": ";
+		for (const Core::String& problem : solution->problems) server->Log((prefix + problem.View()).View());
+		for (ProjectModel* project : solution->projects)
+			for (const Core::String& problem : project->problems) server->Log((prefix + problem.View()).View());
+	}
+
 	Workspace* Workspaces::OpenSolution(const FS::Path& file) {
 		Workspace* ws = Open(file.Parent());
 		ws->kind = Core::String("solution");
 		ws->solution = ReadSolution(file, server->schemas);
 		ws->name = ws->solution->name;
+		LogProblems(server, ws->solution);
 		server->settings->SolutionChanged(ws);
 		server->hub.Publish(Core::StringView("server"), "workspace.opened", ws->SummaryJson().View());
 		return ws;
@@ -131,6 +140,7 @@ namespace Ied
 	void Workspaces::ReadSolutionAgain(Workspace* ws) {
 		ws->solution = ReadSolution(ws->solution->file, server->schemas);
 		ws->name = ws->solution->name;
+		LogProblems(server, ws->solution);
 		server->settings->SolutionChanged(ws);
 		JsonWriter data;
 		data.BeginObject();
@@ -165,7 +175,9 @@ namespace Ied
 		Core::String topic = Core::String("ws:") + ws->wsId.View();
 		server->hub.Add(topic.View(), [self, ws]() -> Core::String { return self->Snapshot(ws); });
 		server->settings->Opened(ws);
+		server->outputs->Opened(ws);
 		Watch(ws);
+		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
 		return ws;
 	}
 

@@ -1,0 +1,106 @@
+include "outputs.ch"
+include "../host/server.ch"
+
+namespace Ied
+{
+	Core::String Bounded(Core::StringView tail, Core::StringView text, int64 limit) {
+		Core::StringBuilder both;
+		both.Append(tail);
+		both.Append(text);
+		Core::StringView all = both.View();
+		if (all.ByteLength() <= limit) return both.ToString();
+		Core::StringView kept = all.Substring(all.ByteLength() - limit, limit);
+		const int64 lineStart = kept.IndexOf('\n', 0);
+		if (lineStart >= 0) return Core::String(kept.Substring(lineStart + 1, kept.ByteLength()));
+		int64 start = 0;
+		while (start < kept.ByteLength() && (kept.ByteAt(start) & 0xC0) == 0x80) start += 1;
+		return Core::String(kept.Substring(start, kept.ByteLength()));
+	}
+
+	Core::String OutputTopic(const Workspace* ws, Core::StringView sourceId) { return ((Core::String("out:") + ws->wsId.View()) + ":") + sourceId; }
+
+	void Outputs::Init(Server* server) {
+		this.server = server;
+		Outputs* self = this;
+		server->rpc.Register("out.sources", [self](Call& call, const Params& params) -> Core::String { return self->SourcesMethod(call, params); });
+		server->rpc.Register("out.clear", [self](Call& call, const Params& params) -> Core::String { return self->ClearMethod(call, params); });
+	}
+
+	void Outputs::Opened(Workspace* ws) {
+		OutputSource* log = new OutputSource();
+		log->id = Core::String(kServerLogSource);
+		log->label = Core::String("IED");
+		log->tail = logTail;
+		WorkspaceOutputs* outputs = new WorkspaceOutputs();
+		outputs->ws = ws;
+		outputs->sources.Push(log);
+		opened.Push(outputs);
+		Outputs* self = this;
+		server->hub.Add(OutputTopic(ws, log->id.View()).View(), [self, log]() -> Core::String { return self->Snapshot(log); });
+	}
+
+	OutputSource* Outputs::Find(Workspace* ws, Core::StringView sourceId) const {
+		for (WorkspaceOutputs* outputs : opened)
+			if (outputs->ws == ws)
+				for (OutputSource* source : outputs->sources)
+					if (source->id.View() == sourceId) return source;
+		return nullptr;
+	}
+
+	void Outputs::Append(Workspace* ws, Core::StringView sourceId, Core::StringView text) {
+		OutputSource* source = Find(ws, sourceId);
+		if (!source || text.IsEmpty()) return;
+		source->tail = Bounded(source->tail.View(), text, kOutputTailBytes);
+		Merge merge;
+		merge.field = Core::String("text");
+		merge.text = Core::String(text);
+		server->hub.PublishMergeable(OutputTopic(ws, sourceId).View(), "append", merge);
+	}
+
+	void Outputs::Log(Core::StringView line) {
+		Core::String text = Core::String(line) + "\n";
+		logTail = Bounded(logTail.View(), text.View(), kOutputTailBytes);
+		for (WorkspaceOutputs* outputs : opened) Append(outputs->ws, Core::StringView(kServerLogSource), text.View());
+	}
+
+	Core::String Outputs::Snapshot(const OutputSource* source) const {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("sourceId", source->id.View());
+		json.Field("label", source->label.View());
+		json.Field("tail", source->tail.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Outputs::SourcesMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("sources"));
+		json.BeginArray();
+		for (WorkspaceOutputs* outputs : opened) {
+			if (outputs->ws != ws) continue;
+			for (OutputSource* source : outputs->sources) {
+				json.BeginObject();
+				json.Field("sourceId", source->id.View());
+				json.Field("label", source->label.View());
+				json.Field("topic", OutputTopic(ws, source->id.View()).View());
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Outputs::ClearMethod(Call& call, const Params& params) {
+		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
+		Core::String sourceId = params.Str("sourceId");
+		OutputSource* source = Find(ws, sourceId.View());
+		if (!source) throw RpcError(ErrorCode::NotFound, (Core::String("no output source ") + sourceId.View()).View());
+		source->tail = Core::String();
+		server->hub.Publish(OutputTopic(ws, sourceId.View()).View(), "clear", Core::StringView("{}"));
+		return Core::String("{}");
+	}
+}

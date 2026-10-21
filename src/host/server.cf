@@ -30,17 +30,49 @@ namespace Ied
 		settings = new Settings(self);
 		documents = new Documents(self);
 		blobs = new Blobs();
+		outputs = new Outputs(self);
+		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
 		workspaces = new Workspaces(self);
 		if (config.testHooks) testHooks = new TestHooks(self);
 	}
 
+	Core::String LogStamp(int64 unixNs) {
+		Platform::CalendarTime now = Platform::LocalCalendar(unixNs);
+		Core::StringBuilder stamp;
+		stamp.AppendByte('[');
+		stamp.AppendIntBase(now.hour, 10, 2);
+		stamp.AppendByte(':');
+		stamp.AppendIntBase(now.minute, 10, 2);
+		stamp.AppendByte(':');
+		stamp.AppendIntBase(now.second, 10, 2);
+		stamp.Append("] ");
+		return stamp.ToString();
+	}
+
 	void Server::Log(Core::StringView line) {
-		if (config.quiet) return;
-		Core::StringBuilder text;
-		text.Append("[ied] ");
-		text.Append(line);
-		text.AppendByte('\n');
-		Platform::WriteError(text.View());
+		Core::String stamped = LogStamp(Platform::UnixTimeNs()) + line;
+		if (!config.quiet) Platform::WriteError(((Core::String("[ied] ") + stamped.View()) + "\n").View());
+		logPump.Push(stamped.View());
+	}
+
+	void LogPump::Push(Core::StringView line) {
+		Threading::LockGuard guard(lock);
+		pending.Push(Core::String(line));
+		ready.NotifyOne();
+	}
+
+	void LogPump::Run(Server* server) {
+		for (;;) {
+			Core::Array<Core::String> lines;
+			{
+				Threading::LockGuard guard(lock);
+				while (pending.IsEmpty()) ready.Wait(lock);
+				lines = pending;
+				pending.Clear();
+			}
+			Threading::LockGuard serverGuard(server->lock);
+			for (const Core::String& line : lines) server->outputs->Log(line.View());
+		}
 	}
 
 	void Server::RemoveSession(Session* session) {
