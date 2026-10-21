@@ -14,6 +14,10 @@ namespace Ied
 	IED::Result InvokeBinding(Server* server, CodeInstance* provider, Core::StringView name, Core::StringView args, func<bool()> stopped);
 	// The text a systemMessageSections entry's `function` gives for `ws`; empty with `problem` when it failed.
 	Core::String ComputedSection(Server* server, CodeInstance* instance, Core::StringView function, Workspace* ws, Core::String& problem);
+	// A plugin's tool call (docs/26 section 8): the `function` of `plugin`'s code loaded for `ws`, or the server binding
+	// `entry` names, with `call`'s arguments; waits at most `seconds` or until `stopped()`. With the lock held (released
+	// while it waits).
+	IED::ToolResult InvokePluginTool(Server* server, Workspace* ws, Plugin* plugin, const Serialization::DomNode& entry, const IED::ToolCall& call, int64 seconds, func<bool()> stopped);
 	// On the instance's thread: its handlers of an event's kind, each guarded.
 	void DeliverEvent(CodeInstance* instance, Core::StringView topic, Core::StringView kind, Core::StringView data);
 	// plugins.call {wsId?, name, args?} -> {result}: a UI module's call of a server binding (docs/10).

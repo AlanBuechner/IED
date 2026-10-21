@@ -1,64 +1,49 @@
 // The git methods that read (docs/10 "Git"): repos, log, show, diff, fileAt and lastMessage.
 
 include "service.ch"
-include "host/server.ch"
 
-namespace Ied
+namespace Git
 {
-	void Git::RegisterMethods() {
-		Git* self = this;
-		server->rpc.Register("git.repos", [self](Call& call, const Params& params) -> Core::String { return self->ReposMethod(call, params); });
-		server->rpc.Register("git.log", [self](Call& call, const Params& params) -> Core::String { return self->LogMethod(call, params); });
-		server->rpc.Register("git.show", [self](Call& call, const Params& params) -> Core::String { return self->ShowMethod(call, params); });
-		server->rpc.Register("git.diff", [self](Call& call, const Params& params) -> Core::String { return self->DiffMethod(call, params); });
-		server->rpc.Register("git.fileAt", [self](Call& call, const Params& params) -> Core::String { return self->FileAtMethod(call, params); });
-		server->rpc.Register("git.lastMessage", [self](Call& call, const Params& params) -> Core::String { return self->LastMessageMethod(call, params); });
-		server->rpc.Register("git.stage", [self](Call& call, const Params& params) -> Core::String { return self->StageMethod(call, params); });
-		server->rpc.Register("git.unstage", [self](Call& call, const Params& params) -> Core::String { return self->UnstageMethod(call, params); });
-		server->rpc.Register("git.stagePatch", [self](Call& call, const Params& params) -> Core::String { return self->StagePatchMethod(call, params); });
-		server->rpc.Register("git.discardPatch", [self](Call& call, const Params& params) -> Core::String { return self->DiscardPatchMethod(call, params); });
-		server->rpc.Register("git.discard", [self](Call& call, const Params& params) -> Core::String { return self->DiscardMethod(call, params); });
-		server->rpc.Register("git.commit", [self](Call& call, const Params& params) -> Core::String { return self->CommitMethod(call, params); });
-		server->rpc.Register("git.checkout", [self](Call& call, const Params& params) -> Core::String { return self->CheckoutMethod(call, params); });
-		server->rpc.Register("git.branch", [self](Call& call, const Params& params) -> Core::String { return self->BranchMethod(call, params); });
-		server->rpc.Register("git.branchDelete", [self](Call& call, const Params& params) -> Core::String { return self->BranchDeleteMethod(call, params); });
-		server->rpc.Register("git.branchRename", [self](Call& call, const Params& params) -> Core::String { return self->BranchRenameMethod(call, params); });
-		server->rpc.Register("git.stash", [self](Call& call, const Params& params) -> Core::String { return self->StashMethod(call, params); });
-		server->rpc.Register("git.stashApply", [self](Call& call, const Params& params) -> Core::String { return self->StashApplyMethod(call, params); });
-		server->rpc.Register("git.stashDrop", [self](Call& call, const Params& params) -> Core::String { return self->StashDropMethod(call, params); });
-		server->rpc.Register("git.fetch", [self](Call& call, const Params& params) -> Core::String { return self->OpMethod(call, params, "fetch"); });
-		server->rpc.Register("git.pull", [self](Call& call, const Params& params) -> Core::String { return self->OpMethod(call, params, "pull"); });
-		server->rpc.Register("git.push", [self](Call& call, const Params& params) -> Core::String { return self->OpMethod(call, params, "push"); });
+	void RegisterMethod(GitPlugin* git, const char* name, IED::MethodHandler handler) {
+		Core::String problem;
+		if (!git->context->Method(Core::StringView(name), handler, problem)) git->context->Log(problem.View());
 	}
 
-	GitRepo* Git::RepoFor(const Params& params) const {
+	void RegisterMethods(GitPlugin* git) {
+		RegisterReadMethods(git);
+		RegisterChangeMethods(git);
+		RegisterOpMethods(git);
+	}
+
+
+	GitRepo* GitPlugin::RepoFor(const IED::Params& params) const {
 		Core::String repoId = params.Str("repoId");
-		for (GitWorkspace* git : workspaces)
-			for (GitRepo* repo : git->repos)
+		for (GitWorkspace* each : workspaces)
+			for (GitRepo* repo : each->repos)
 				if (repo->repoId == repoId) {
-					if (!repo->ws->trusted) throw RpcError(ErrorCode::Untrusted, "git does not run in an untrusted workspace");
+					if (!each->trusted) throw IED::RpcError(IED::ErrorCode::Untrusted, "git does not run in an untrusted workspace");
 					return repo;
 				}
-		throw RpcError(ErrorCode::NotFound, (Core::String("no repository ") + repoId.View()).View());
+		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no repository ") + repoId.View()).View());
 	}
 
-	GitRun Git::RunOrThrow(GitRepo* repo, const Core::Array<Core::String>& arguments, int32 timeoutMs, ErrorCode code) {
-		GitCli cli = CliFor(repo->ws);
+	GitRun GitPlugin::RunOrThrow(GitRepo* repo, const Core::Array<Core::String>& arguments, int32 timeoutMs, IED::ErrorCode code) {
+		GitCli cli = CliFor(repo->wsId.View());
 		FS::Path root = repo->root;
 		GitRun run;
 		{
-			Threading::UnlockGuard released(server->lock);
+			Threading::UnlockGuard released(lock);
 			run = cli.Run(root, arguments, timeoutMs);
 		}
-		if (!run.Ok()) throw RpcError(run.exitCode == Process::kError ? ErrorCode::Unavailable : code, run.Problem().View());
+		if (!run.Ok()) throw IED::RpcError(run.exitCode == Process::kError ? IED::ErrorCode::Unavailable : code, run.Problem().View());
 		return run;
 	}
 
-	Core::String Git::ReposMethod(Call& call, const Params& params) {
-		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
-		GitWorkspace* git = Find(ws);
-		if (!git) throw RpcError(ErrorCode::NotFound, "the workspace has no git side");
-		return git->SnapshotJson();
+	static Core::String ReposMethod(GitPlugin* git, const IED::Params& params) {
+		Threading::LockGuard guard(git->lock);
+		GitWorkspace* found = git->Find(params.Str("wsId").View());
+		if (!found) throw IED::RpcError(IED::ErrorCode::NotFound, "the workspace has no git side");
+		return found->SnapshotJson();
 	}
 
 	static int32 Folded(int32 c) {
@@ -104,14 +89,15 @@ namespace Ied
 		return arguments;
 	}
 
-	Core::String Git::LogMethod(Call& call, const Params& params) {
-		GitRepo* repo = RepoFor(params);
+	static Core::String LogMethod(GitPlugin* git, const IED::Params& params) {
+		Threading::LockGuard guard(git->lock);
+		GitRepo* repo = git->RepoFor(params);
 		int64 limit = params.Int("limit", kGitLogDefault);
-		if (limit < 1 || limit > kGitLogMost) throw RpcError(ErrorCode::BadRequest, "limit is 1 to 2000");
+		if (limit < 1 || limit > kGitLogMost) throw IED::RpcError(IED::ErrorCode::BadRequest, "limit is 1 to 2000");
 		const int64 skip = params.Int("skip", 0);
 		Core::String query = Core::String(params.Str("query", Core::StringView("")).View().Trimmed());
 		if (repo->headJson.IsEmpty() || repo->headJson.View().Contains(Core::StringView("\"oid\":\"\""))) return GitLogJson(Core::Array<GitCommit>(), false);
-		GitRun run = RunOrThrow(repo, LogArgs(skip, limit, !query.IsEmpty()), kGitReadTimeoutMs, ErrorCode::BadRequest);
+		GitRun run = git->RunOrThrow(repo, LogArgs(skip, limit, !query.IsEmpty()), kGitReadTimeoutMs, IED::ErrorCode::BadRequest);
 		if (query.IsEmpty()) {
 			Core::Array<GitCommit> commits = ParseLog(run.output.View());
 			const bool more = commits.Count() > limit;
@@ -137,15 +123,16 @@ namespace Ied
 		arguments.Push(Core::String(oid));
 	}
 
-	Core::String Git::ShowMethod(Call& call, const Params& params) {
-		GitRepo* repo = RepoFor(params);
+	static Core::String ShowMethod(GitPlugin* git, const IED::Params& params) {
+		Threading::LockGuard guard(git->lock);
+		GitRepo* repo = git->RepoFor(params);
 		Core::String oid = params.Str("oid");
 		Core::Array<Core::String> show = GitArgs("show", "-s");
 		show.Push(Core::String("--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%s%x1f%b"));
 		show.Push(Core::String(oid));
-		GitRun shown = RunOrThrow(repo, show, kGitReadTimeoutMs, ErrorCode::NotFound);
+		GitRun shown = git->RunOrThrow(repo, show, kGitReadTimeoutMs, IED::ErrorCode::NotFound);
 		Core::Array<Core::StringView> fields = SplitOn(shown.output.View(), (char)31);
-		if (fields.Count() < 10) throw RpcError(ErrorCode::NotFound, (Core::String("no commit ") + oid.View()).View());
+		if (fields.Count() < 10) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no commit ") + oid.View()).View());
 		const bool hasParent = !fields[1].Trimmed().IsEmpty();
 		Core::Array<Core::String> names = hasParent ? GitArgs("diff", "--name-status", "-z") : GitArgs("diff-tree", "-r", "--root", "--no-commit-id");
 		Core::Array<Core::String> counts = hasParent ? GitArgs("diff", "--numstat", "-z") : GitArgs("diff-tree", "-r", "--root", "--no-commit-id");
@@ -157,9 +144,9 @@ namespace Ied
 		}
 		AddRange(names, fields[0].Trimmed(), hasParent);
 		AddRange(counts, fields[0].Trimmed(), hasParent);
-		Core::Array<GitFileChange> files = ParseNameStatus(RunOrThrow(repo, names, kGitReadTimeoutMs, ErrorCode::NotFound).output.View());
-		AddNumstat(files, RunOrThrow(repo, counts, kGitReadTimeoutMs, ErrorCode::NotFound).output.View());
-		JsonWriter json;
+		Core::Array<GitFileChange> files = ParseNameStatus(git->RunOrThrow(repo, names, kGitReadTimeoutMs, IED::ErrorCode::NotFound).output.View());
+		AddNumstat(files, git->RunOrThrow(repo, counts, kGitReadTimeoutMs, IED::ErrorCode::NotFound).output.View());
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("oid", fields[0].Trimmed());
 		json.Key(Core::StringView("parents"));
@@ -202,16 +189,17 @@ namespace Ied
 		return !showParents.Trimmed().IsEmpty();
 	}
 
-	Core::String Git::DiffMethod(Call& call, const Params& params) {
-		GitRepo* repo = RepoFor(params);
+	static Core::String DiffMethod(GitPlugin* git, const IED::Params& params) {
+		Threading::LockGuard guard(git->lock);
+		GitRepo* repo = git->RepoFor(params);
 		Core::String path = params.Str("path");
 		Core::String oldPath = params.Str("oldPath", Core::StringView(""));
 		Core::String oid = params.Str("oid", Core::StringView(""));
 		int64 context = params.Int("context", 3);
-		if (context < 0 || context > 1000) throw RpcError(ErrorCode::BadRequest, "context is 0 to 1000");
+		if (context < 0 || context > 1000) throw IED::RpcError(IED::ErrorCode::BadRequest, "context is 0 to 1000");
 		bool hasParent = false;
-		if (!oid.IsEmpty()) hasParent = HasParent(RunOrThrow(repo, GitArgs("show", "-s", "--format=%P", oid.CStr()), kGitReadTimeoutMs, ErrorCode::NotFound).output.View());
-		GitRun run = RunOrThrow(repo, GitDiffArgs(path.View(), oldPath.View(), oid.View(), hasParent, params.Bool("staged", false), context), kGitReadTimeoutMs, ErrorCode::BadRequest);
+		if (!oid.IsEmpty()) hasParent = HasParent(git->RunOrThrow(repo, GitArgs("show", "-s", "--format=%P", oid.CStr()), kGitReadTimeoutMs, IED::ErrorCode::NotFound).output.View());
+		GitRun run = git->RunOrThrow(repo, GitDiffArgs(path.View(), oldPath.View(), oid.View(), hasParent, params.Bool("staged", false), context), kGitReadTimeoutMs, IED::ErrorCode::BadRequest);
 		const bool truncated = run.output.View().ByteLength() > kGitDiffMostBytes;
 		Core::StringView text = truncated ? run.output.View().Substring(0, kGitDiffMostBytes) : run.output.View();
 		return GitDiffJson(path.View(), oldPath.View(), ParseDiff(text), truncated);
@@ -225,8 +213,9 @@ namespace Ied
 	}
 
 	// A side of a side-by-side diff: the file in a commit (`rev`), the index (":") or the work tree ("").
-	Core::String Git::FileAtMethod(Call& call, const Params& params) {
-		GitRepo* repo = RepoFor(params);
+	static Core::String FileAtMethod(GitPlugin* git, const IED::Params& params) {
+		Threading::LockGuard guard(git->lock);
+		GitRepo* repo = git->RepoFor(params);
 		Core::String path = params.Str("path");
 		Core::String rev = params.Str("rev", Core::StringView(""));
 		Core::String text;
@@ -237,11 +226,11 @@ namespace Ied
 			if (!missing) text = FS::File(file.CStr(), "rb").ReadText();
 		}
 		else {
-			GitCli cli = CliFor(repo->ws);
+			GitCli cli = git->CliFor(repo->wsId.View());
 			FS::Path root = repo->root;
 			GitRun run;
 			{
-				Threading::UnlockGuard released(server->lock);
+				Threading::UnlockGuard released(git->lock);
 				run = cli.Run(root, GitArgs("show", (rev == ":" ? (Core::String(":") + path.View()) : ((rev + ":") + path.View())).CStr()), kGitReadTimeoutMs);
 			}
 			missing = !run.Ok();
@@ -249,7 +238,7 @@ namespace Ied
 		}
 		const bool binary = LooksBinary(text.View());
 		const bool truncated = text.View().ByteLength() > kGitFileMostBytes;
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("text", binary || missing ? Core::StringView("") : (truncated ? text.View().Substring(0, kGitFileMostBytes) : text.View()));
 		json.BoolField("binary", binary);
@@ -259,13 +248,23 @@ namespace Ied
 		return json.ToString();
 	}
 
-	Core::String Git::LastMessageMethod(Call& call, const Params& params) {
-		GitRepo* repo = RepoFor(params);
-		GitRun run = RunOrThrow(repo, GitArgs("log", "-1", "--format=%B"), kGitReadTimeoutMs, ErrorCode::NotFound);
-		JsonWriter json;
+	static Core::String LastMessageMethod(GitPlugin* git, const IED::Params& params) {
+		Threading::LockGuard guard(git->lock);
+		GitRepo* repo = git->RepoFor(params);
+		GitRun run = git->RunOrThrow(repo, GitArgs("log", "-1", "--format=%B"), kGitReadTimeoutMs, IED::ErrorCode::NotFound);
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("message", run.output.View().Trimmed());
 		json.EndObject();
 		return json.ToString();
+	}
+
+	void RegisterReadMethods(GitPlugin* git) {
+		RegisterMethod(git, "git.repos", [git](const IED::Request& request) -> Core::String { return ReposMethod(git, request.params); });
+		RegisterMethod(git, "git.log", [git](const IED::Request& request) -> Core::String { return LogMethod(git, request.params); });
+		RegisterMethod(git, "git.show", [git](const IED::Request& request) -> Core::String { return ShowMethod(git, request.params); });
+		RegisterMethod(git, "git.diff", [git](const IED::Request& request) -> Core::String { return DiffMethod(git, request.params); });
+		RegisterMethod(git, "git.fileAt", [git](const IED::Request& request) -> Core::String { return FileAtMethod(git, request.params); });
+		RegisterMethod(git, "git.lastMessage", [git](const IED::Request& request) -> Core::String { return LastMessageMethod(git, request.params); });
 	}
 }

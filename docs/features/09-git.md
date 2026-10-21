@@ -1,6 +1,6 @@
 # Features: git (GIT)
 
-Owner: `plugins/git` (UI + orchestration) on `src/git` (host plumbing).
+Owner: `plugins/git` - its UI module and its server code (`code/`, compiled into the server, on the plugin API: `docs/26` "Built-ins on the API").
 
 **Backend decision (recommended, see `docs/99` #14):** the **git CLI** is the backend for everything that mutates or touches the network (commit, merge, rebase, fetch/push, LFS, hooks, credential helpers) - so behavior matches the terminal exactly and Git Credential Manager, LFS and hooks just work. Read-heavy views (status, log graph, diff, blame) also start on the CLI with machine-readable formats (`--porcelain=v2 -z`, `log --format` with NUL separators); libgit2 stays vendored as a later optimization for the graph if profiling demands it. A custom source-control provider interface (`sourceControlProviders`) keeps room for Perforce/Fossil plugins.
 

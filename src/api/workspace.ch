@@ -28,6 +28,22 @@ namespace IED
 
 	alias WorkspaceHandler = func<void(const Workspace& ws)>;
 
+	// One path a workspace's watcher saw change: "created", "changed" or "deleted".
+	class FileChange
+	{
+		public Core::String path;      // workspace-relative
+		public Core::String change;
+	}
+
+	class FileChanges
+	{
+		public Core::String wsId;
+		public Core::Array<FileChange> changes;
+		public bool overflowed;        // too many to tell: anything may have changed
+	}
+
+	alias FilesHandler = func<void(const FileChanges& changes)>;
+
 	// The open workspace `wsId` as it is now; false when none is open.
 	bool FindWorkspace(Core::StringView wsId, Workspace& ws);
 	// The open workspaces the calling plugin is loaded for.
@@ -36,4 +52,13 @@ namespace IED
 	bool ReadFile(const Workspace& ws, Core::StringView path, Core::String& text, Core::String& problem);
 	// Writes a file of `ws` (its folders made); false with `problem` when it cannot be written.
 	bool WriteFile(const Workspace& ws, Core::StringView path, Core::StringView text, Core::String& problem);
+	// Moves a file or folder of workspace `wsId` to the recoverable trash (docs/11; fs.write).
+	bool MoveToTrash(Core::StringView wsId, Core::StringView path, Core::String& problem);
+	// `path` relative to `root` with '/' separators, ASCII case and separator kind not mattering; false when it is not
+	// `root` or under it.
+	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative);
+	// The folders a workspace search leaves out ("**/node_modules", ...).
+	Core::Array<Core::String> DefaultExcludes();
+	// A workspace-relative path with '/' separators and no '.' or '..'; throws IED::RpcError bad_request.
+	Core::String NormalizePath(Core::StringView path);
 }

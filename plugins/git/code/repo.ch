@@ -3,9 +3,9 @@
 // running in it. Also the JSON the git methods answer with.
 
 include "parse.ch"
-include "services/workspaces.ch"
+include "api/plugin.ch"
 
-namespace Ied
+namespace Git
 {
 	const int64 kGitListLimit = 5000;
 	const int64 kGitOpLines = 20;
@@ -25,7 +25,8 @@ namespace Ied
 	class GitRepo
 	{
 		public Core::String repoId;
-		public Workspace* ws;
+		public Core::String wsId;          // the workspace it was found in
+		public FS::Path wsRoot;
 		public FS::Path root;
 		public FS::Path gitDir;           // where HEAD and the index are
 		public FS::Path commonDir;        // where the refs are (a worktree's differs from gitDir)
@@ -43,7 +44,7 @@ namespace Ied
 		public int64 readGeneration;      // reads started; what a read older than the last published one found is dropped
 		public int64 statusGeneration;    // the read the status published came from
 		public int64 refsGeneration;      // the read the refs published came from
-		public FolderWatch* outsideWatch; // the common dir when it is not under the workspace folder
+		public FS::Watcher* outsideWatch; // the common dir when it is not under the workspace folder
 
 		public Core::String Topic() const { return Core::String("git:") + repoId.View(); }
 		// {repoId, root, name, kind}

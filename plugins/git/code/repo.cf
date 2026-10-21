@@ -1,10 +1,10 @@
 include "repo.ch"
-include "web/json.ch"
+include "api/protocol.ch"
 
-namespace Ied
+namespace Git
 {
 	Core::String GitOp::ToJson() const {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("opId", opId.View());
 		json.Field("kind", kind.View());
@@ -18,7 +18,7 @@ namespace Ied
 	}
 
 	Core::String GitRepo::SummaryJson() const {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("repoId", repoId.View());
 		json.Field("root", relative.View());
@@ -29,7 +29,7 @@ namespace Ied
 	}
 
 	Core::String GitRepo::SnapshotJson() const {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("repoId", repoId.View());
 		json.Field("root", relative.View());
@@ -43,7 +43,7 @@ namespace Ied
 	}
 
 	Core::String GitHeadJson(const GitHead& head, Core::StringView state) {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("branch", head.branch.View());
 		json.Field("oid", head.oid.View());
@@ -56,7 +56,7 @@ namespace Ied
 		return json.ToString();
 	}
 
-	static void WriteChange(JsonWriter& json, const GitChange& change) {
+	static void WriteChange(IED::JsonWriter& json, const GitChange& change) {
 		json.BeginObject();
 		json.Field("path", change.path.View());
 		if (!change.oldPath.IsEmpty()) json.Field("oldPath", change.oldPath.View());
@@ -64,7 +64,7 @@ namespace Ied
 		json.EndObject();
 	}
 
-	static void WriteChanges(JsonWriter& json, const char* key, const Core::Array<GitChange>& changes) {
+	static void WriteChanges(IED::JsonWriter& json, const char* key, const Core::Array<GitChange>& changes) {
 		json.Key(Core::StringView(key));
 		json.BeginArray();
 		for (int64 i = 0; i < changes.Count() && i < kGitListLimit; ++i) WriteChange(json, changes[i]);
@@ -72,7 +72,7 @@ namespace Ied
 	}
 
 	Core::String GitChangesJson(const GitStatus& status) {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		WriteChanges(json, "staged", status.staged);
 		WriteChanges(json, "unstaged", status.unstaged);
@@ -84,7 +84,7 @@ namespace Ied
 		return json.ToString();
 	}
 
-	static void WriteBranches(JsonWriter& json, const Core::Array<GitRef>& branches) {
+	static void WriteBranches(IED::JsonWriter& json, const Core::Array<GitRef>& branches) {
 		json.Key(Core::StringView("branches"));
 		json.BeginArray();
 		for (const GitRef& branch : branches) {
@@ -102,7 +102,7 @@ namespace Ied
 	}
 
 	// Each remote with its branches ("origin/main" under origin as "main").
-	static void WriteRemotes(JsonWriter& json, const GitRefsRead& read) {
+	static void WriteRemotes(IED::JsonWriter& json, const GitRefsRead& read) {
 		json.Key(Core::StringView("remotes"));
 		json.BeginArray();
 		for (const GitRemote& remote : read.remotes) {
@@ -125,7 +125,7 @@ namespace Ied
 		json.EndArray();
 	}
 
-	static void WriteTags(JsonWriter& json, const Core::Array<GitRef>& tags) {
+	static void WriteTags(IED::JsonWriter& json, const Core::Array<GitRef>& tags) {
 		json.Key(Core::StringView("tags"));
 		json.BeginArray();
 		for (const GitRef& tag : tags) {
@@ -137,7 +137,7 @@ namespace Ied
 		json.EndArray();
 	}
 
-	static void WriteStashes(JsonWriter& json, const Core::Array<GitStash>& stashes) {
+	static void WriteStashes(IED::JsonWriter& json, const Core::Array<GitStash>& stashes) {
 		json.Key(Core::StringView("stashes"));
 		json.BeginArray();
 		for (const GitStash& stash : stashes) {
@@ -164,7 +164,7 @@ namespace Ied
 		return true;
 	}
 
-	static void WriteWorktrees(JsonWriter& json, const Core::Array<GitWorktree>& worktrees, const FS::Path& root) {
+	static void WriteWorktrees(IED::JsonWriter& json, const Core::Array<GitWorktree>& worktrees, const FS::Path& root) {
 		json.Key(Core::StringView("worktrees"));
 		json.BeginArray();
 		for (const GitWorktree& worktree : worktrees) {
@@ -180,7 +180,7 @@ namespace Ied
 		json.EndArray();
 	}
 
-	static void WriteSubmodules(JsonWriter& json, const Core::Array<GitSubmodule>& submodules) {
+	static void WriteSubmodules(IED::JsonWriter& json, const Core::Array<GitSubmodule>& submodules) {
 		json.Key(Core::StringView("submodules"));
 		json.BeginArray();
 		for (const GitSubmodule& submodule : submodules) {
@@ -192,7 +192,7 @@ namespace Ied
 	}
 
 	Core::String GitRefsJson(const GitRefsRead& read, const FS::Path& root) {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		WriteBranches(json, read.refs.branches);
 		WriteRemotes(json, read);
@@ -205,7 +205,7 @@ namespace Ied
 	}
 
 	Core::String GitLogJson(const Core::Array<GitCommit>& commits, bool more) {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("commits"));
 		json.BeginArray();
@@ -229,7 +229,7 @@ namespace Ied
 	}
 
 	Core::String GitFilesJson(const Core::Array<GitFileChange>& files) {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginArray();
 		for (const GitFileChange& file : files) {
 			json.BeginObject();
@@ -246,7 +246,7 @@ namespace Ied
 	}
 
 	Core::String GitDiffJson(Core::StringView path, Core::StringView oldPath, const GitDiff& diff, bool truncated) {
-		JsonWriter json;
+		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("path", path);
 		if (!oldPath.IsEmpty()) json.Field("oldPath", oldPath);

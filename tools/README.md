@@ -46,7 +46,7 @@ setup.bat --only llvm --force     re-download and re-extract one package
 | `@xterm/xterm` + addon-fit + addon-web-links | 6.0.0 / 0.11.0 / 0.12.0 | download (ied) | terminal plugin, output window | npm tarballs |
 | `codicons` | v0.0.46-45 (`8853e0b`) | submodule | shared/ui-kit icon set, `frontend/mocks/build.py icons` | icons CC BY 4.0, code MIT |
 | `quickjs-ng` | v0.17.0 | submodule | JS plugin runtime (`src/jsruntime/`) | chosen over ChakraCore: actively maintained, modern JS, small C sources. **ChakraCore was dropped**: unmaintained since 2020 and its official binary links are dead |
-| `libgit2` | `42a89d7c` | submodule, **opt-in** (`update = none`) | git plumbing candidate (`src/git/`) | the git CLI is the backend (docs/99 #14); libgit2 stays as a possible later graph optimization |
+| `libgit2` | `42a89d7c` | submodule, **opt-in** (`update = none`) | git plumbing candidate (`plugins/git/code/`) | the git CLI is the backend (docs/99 #14); libgit2 stays as a possible later graph optimization |
 | `Microsoft.Web.WebView2` | 1.0.4258.31 | download (extras) | optional desktop wrapper only | `build/native/include/WebView2.h` + libs. **Not a v1 dependency** - IED is a split server + web client (docs/01) |
 | `searxng` | `d47cb96b` | download (extras) | AI web egress (docs/04) | a tarball, not a submodule: 4 template files have Windows-illegal names (`*.conf:socket`) that break checkout; setup skips them on extract. Packaging: docs/21 |
 | Tracy profiler GUI | 0.12.0 | download (extras) | viewing traces of the compiler's C++ libraries | the client sources are the compiler's submodule; for IED, Tracy is a **feature reference only** (docs/16) |

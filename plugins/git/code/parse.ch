@@ -4,7 +4,7 @@
 
 include "bedrock.ch"
 
-namespace Ied
+namespace Git
 {
 	// A path the index or the work tree changed: `status` is git's letter (A, M, D, R, C, T; "?" untracked; a
 	// conflict's two letters).

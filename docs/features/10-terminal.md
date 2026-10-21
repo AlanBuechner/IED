@@ -1,6 +1,6 @@
 # Features: terminal (TRM)
 
-Owner: `plugins/terminal` (UI, xterm.js) on `src/terminal` (PTY/process supervisor - also used by tasks and the AI shell tool).
+Owner: `plugins/terminal` - its UI (xterm.js) and its server code (`code/`: terminals under a pseudo console, compiled into the server on the plugin API, `docs/26` "Built-ins on the API"). Tasks and the AI's shell run their processes themselves.
 
 ## Dock and instances
 

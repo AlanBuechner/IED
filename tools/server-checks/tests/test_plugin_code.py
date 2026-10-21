@@ -65,6 +65,47 @@ namespace Probe
 }
 '''
 
+SERVER = r'''include "api/plugin.ch"
+
+namespace Serve
+{
+	int64 changes = 0;
+	int64 trusts = 0;
+	IED::PluginContext* plugin = nullptr;
+
+	Core::String Counts()
+	{
+		Core::StringBuilder out;
+		out.Append("{\"changes\":");
+		out.AppendInt(changes);
+		out.Append(",\"trusts\":");
+		out.AppendInt(trusts);
+		out.Append("}");
+		return out.ToString();
+	}
+
+	Core::String Ping(const IED::Request& request)
+	{
+		if (request.params.Str("say", Core::StringView("")).View() == "boom") throw IED::RpcError(IED::ErrorCode::Conflict, "boom refused");
+		plugin->Publish(Core::StringView("test.serve/news"), "said", Core::StringView("{\"n\":1}"));
+		plugin->Output(request.params.Str("wsId").View(), Core::StringView("serve"), Core::StringView("pinged\n"));
+		return Counts();
+	}
+
+	void Activate(IED::PluginContext& context)
+	{
+		plugin = &context;
+		Core::String problem;
+		context.Method(Core::StringView("test.serve/ping"), Ping, problem);
+		if (!context.Method(Core::StringView("git.repos"), Ping, problem)) context.Log(problem.View());
+		context.Topic(Core::StringView("test.serve/news"), Core::StringView("{\"pushed\":true}"));
+		context.TopicFrom(Core::StringView("test.serve/counts"), Counts);
+		context.OnFilesChanged([](const IED::FileChanges& files) { changes += files.changes.Count(); });
+		context.OnTrustChanged([](const IED::Workspace& ws) { trusts += 1; });
+	}
+}
+'''
+
 
 def probe_manifest(plugin_id="test.probe", **fields):
 	body = {
@@ -157,6 +198,49 @@ class PluginCodeTests(ServerTestCase):
 		with self.assertRaises(RpcFailure) as missing:
 			await self.client.request("plugins.call", {"name": "probe.nothing"})
 		self.assertEqual("not_found", missing.exception.code)
+
+	async def test_methods_topics_outputs_and_workspace_events(self):
+		self.builtin(probe_manifest("test.serve", runtime={"kind": "c4", "entry": "Serve::Activate"}, permissions=["fs.read"],
+			contributes={"outputSources": [{"id": "serve", "title": "Serve"}]}), {"code/serve.cf": SERVER})
+		self.start()
+		await self.connect()
+		self.assertEqual("active", (await self.settled("test.serve"))["state"])
+		await self.client.sub(["test.serve/news", "test.serve/counts", "out:w1:serve"])
+		news = await self.client.next_frame("test.serve/news")
+		self.assertEqual({"pushed": True}, news["data"], "a pushed snapshot")
+		counts = await self.client.next_frame("test.serve/counts")
+		self.assertEqual({"changes": 0, "trusts": 0}, counts["data"], "a pulled snapshot")
+		await self.client.next_frame("out:w1:serve")
+		self.assertEqual({"changes": 0, "trusts": 0}, await self.client.request("test.serve/ping", {"wsId": "w1"}))
+		said = await self.client.next_frame("test.serve/news")
+		self.assertEqual(("said", {"n": 1}), (said["kind"], said["data"]))
+		appended = await self.client.next_frame("out:w1:serve")
+		self.assertEqual("pinged\n", appended["data"]["text"])
+		with self.assertRaises(RpcFailure) as taken:
+			await self.client.request("git.repos", {"wsId": "w1"})
+		self.assertEqual("not_found", taken.exception.code, "a plugin that is not built in names its methods after itself")
+		write(os.path.join(self.repo, "changed.txt"), "x")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		deadline = time.monotonic() + 10
+		while time.monotonic() < deadline:
+			counts = await self.client.request("test.serve/ping", {"wsId": "w1"})
+			if counts["changes"] > 0 and counts["trusts"] > 0:
+				break
+			await asyncio.sleep(0.2)
+		self.assertGreater(counts["changes"], 0, "file changes reach OnFilesChanged")
+		self.assertEqual(1, counts["trusts"], "trusting the workspace reaches OnTrustChanged")
+
+	async def test_a_script_method_refuses_with_a_protocol_error(self):
+		# Fails until C4Script keeps a throw inside a guarded call working (reported to the C4 session, docs/26 open items).
+		self.builtin(probe_manifest("test.serve", runtime={"kind": "c4", "entry": "Serve::Activate"}, permissions=["fs.read"],
+			contributes={"outputSources": [{"id": "serve", "title": "Serve"}]}), {"code/serve.cf": SERVER})
+		self.start()
+		await self.connect()
+		self.assertEqual("active", (await self.settled("test.serve"))["state"])
+		with self.assertRaises(RpcFailure) as refused:
+			await self.client.request("test.serve/ping", {"wsId": "w1", "say": "boom"})
+		self.assertEqual(("conflict", "boom refused"), (refused.exception.code, refused.exception.message), "a method's RpcError reaches the client")
+		self.assertEqual("active", (await self.code("test.serve"))["state"], "refusing is not a fault")
 
 	async def test_events_reach_the_code_that_listens(self):
 		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "1")})

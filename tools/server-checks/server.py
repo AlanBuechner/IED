@@ -1,11 +1,15 @@
-"""A real ied-server for one test: its own data folder, the launch token it prints, and plain HTTP calls to it."""
+"""A real ied-server for one test: its own data folder, the launch token it prints, and plain HTTP calls to it. A
+server a test did not stop (its setUp failed after starting it, so its tearDown never ran) is stopped when the checks
+end, never left running."""
 
 import asyncio
+import atexit
 import http.client
 import json
 import os
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,6 +20,22 @@ EXECUTABLE_ENV = "IED_SERVER_CHECKS_SERVER"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 FRONTEND = os.path.join(REPO, "frontend")
+RUNNING = set()
+
+
+def remove_tree(path):
+	"""Removes a folder a test made, git's read-only object files included (rmtree alone leaves them, and the folder)."""
+	def writable(function, target, error):
+		os.chmod(target, stat.S_IWRITE)
+		function(target)
+	if os.path.isdir(path):
+		shutil.rmtree(path, onexc=writable)
+
+
+@atexit.register
+def stop_leftovers():
+	for server in list(RUNNING):
+		server.stop()
 
 
 class ServerTestCase(unittest.IsolatedAsyncioTestCase):
@@ -55,6 +75,7 @@ class IedServer:
 		if static:
 			argv += ["--static", FRONTEND]
 		self.process = subprocess.Popen(argv + list(extra), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+		RUNNING.add(self)
 		self.listening = self.process.stdout.readline().strip()
 		self.open_line = self.process.stdout.readline().strip()
 		if not self.listening.startswith("LISTENING "):
@@ -105,6 +126,7 @@ class IedServer:
 		return reply.cookies()[0].split(";", 1)[0]
 
 	def stop(self, remove_data=None):
+		RUNNING.discard(self)
 		if self.process.poll() is None:
 			self.process.terminate()
 			self.process.wait(10)

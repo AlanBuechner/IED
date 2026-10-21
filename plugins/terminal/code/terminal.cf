@@ -1,0 +1,213 @@
+include "terminal.ch"
+
+namespace Terminal
+{
+	const int64 kTerminalReadBytes = 65536;
+	const int32 kTerminalPollMs = 250;
+	const int32 kTerminalDrainMs = 100;
+
+	Core::String TerminalsTopic(Core::StringView wsId) { return Core::String("terms:") + wsId; }
+
+	Core::String Term::SummaryJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("termId", termId.View());
+		json.Field("wsId", wsId.View());
+		json.Field("title", title.View());
+		json.Field("kind", kind.View());
+		json.BoolField("alive", alive);
+		json.Key(Core::StringView("exitCode"));
+		if (alive) json.Null();
+		else json.Int(exitCode);
+		json.Field("holder", holder.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Term::SnapshotJson() const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.RawField("terminal", SummaryJson().View());
+		json.IntField("cols", cols);
+		json.IntField("rows", rows);
+		json.Field("scrollback", scrollback.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Terminals::Init(IED::PluginContext* context) { this.context = context; }
+
+	void Terminals::Opened(const IED::Workspace& ws) {
+		Terminals* self = this;
+		Core::String wsId = ws.id;
+		context->TopicFrom(TerminalsTopic(wsId.View()).View(), [self, wsId]() -> Core::String { return self->ListJson(wsId.View()); });
+	}
+
+	Core::String Terminals::ListJson(Core::StringView wsId) const {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("terminals"));
+		json.BeginArray();
+		for (Term* terminal : terminals)
+			if (terminal->wsId.View() == wsId) json.Raw(terminal->SummaryJson().View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void Terminals::Changed(IED::Events& events, Term* terminal, const char* kind) {
+		events.Publish(TerminalsTopic(terminal->wsId.View()).View(), kind, terminal->SummaryJson().View());
+	}
+
+	// --- Starting ----------------------------------------------------------------------------------------------------
+
+	static Core::Array<Core::String> Argv(const char* program, const char* argument) {
+		Core::Array<Core::String> argv;
+		argv.Push(Core::String(program));
+		if (argument) argv.Push(Core::String(argument));
+		return argv;
+	}
+
+	// The programs to try, in order: the `terminal.shell` setting (a name or path, or an argv), else PowerShell 7, Windows
+	// PowerShell and the system's cmd.
+	Core::Array<Core::Array<Core::String>> Terminals::ShellsFor(Core::StringView wsId) {
+		Core::Array<Core::Array<Core::String>> shells;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String json = context->Setting(Core::StringView("terminal.shell"), wsId);
+		Serialization::DomNode setting = json.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(json.View(), *doc).root;
+		if (setting.Kind() == Serialization::DomKind::String && !setting.AsView().IsEmpty()) shells.Push(Argv(setting.AsString(), nullptr));
+		else if (setting.Kind() == Serialization::DomKind::Array && setting.Count() > 0) {
+			Core::Array<Core::String> argv;
+			for (int64 i = 0; i < setting.Count(); ++i) argv.Push(Core::String(setting.At(i).AsView()));
+			shells.Push(argv);
+		}
+		if (!shells.IsEmpty()) return shells;
+		shells.Push(Argv("pwsh", "-NoLogo"));
+		shells.Push(Argv("powershell", "-NoLogo"));
+		Core::String comspec;
+		shells.Push(Argv(Platform::TryGetEnvironmentVariable("ComSpec", comspec) ? comspec.CStr() : "cmd", nullptr));
+		return shells;
+	}
+
+	static Process::Child* StartIn(const Core::Array<Core::String>& argv, Core::StringView cwd, int32 cols, int32 rows, Core::String& error) {
+		Process::StartInfo info;
+		info.program = argv[0];
+		for (int64 i = 1; i < argv.Count(); ++i) info.arguments.Push(argv[i]);
+		info.workingDirectory = Core::String(cwd);
+		info.environment.Push(Core::String("TERM_PROGRAM=IED"));
+		info.terminal = true;
+		info.columns = cols;
+		info.rows = rows;
+		info.input = Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		Process::Child started = Process::Child::Start(info);
+		if (!started.IsOpen()) {
+			error = Core::String(started.Error());
+			return nullptr;
+		}
+		return new Process::Child(take(started));
+	}
+
+	static void WriteLoop(Process::Child* child, MessageQueue* input) {
+		Core::String keys;
+		while (input->Next(keys, 200) || !input->IsClosed()) {
+			if (!keys.IsEmpty() && !child->WriteText(keys.View())) return;
+			keys = Core::String();
+		}
+	}
+
+	Term* Terminals::Create(Core::StringView wsId, const Core::Array<Core::String>& argv, Core::StringView cwd, Core::StringView title, Core::StringView kind, Core::StringView holder, int32 cols, int32 rows) {
+		Core::Array<Core::Array<Core::String>> tries;
+		if (argv.IsEmpty()) tries = ShellsFor(wsId);
+		else tries.Push(argv);
+		Process::Child* child = nullptr;
+		Core::String error;
+		Core::String program;
+		for (const Core::Array<Core::String>& each : tries) {
+			child = StartIn(each, cwd, cols, rows, error);
+			program = each[0];
+			if (child) break;
+		}
+		if (!child) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the terminal could not start: ") + error.View()).View());
+		Term* terminal = new Term();
+		terminal->wsId = Core::String(wsId);
+		terminal->title = title.IsEmpty() ? Core::String(FS::Path(program.View()).Stem()) : Core::String(title);
+		terminal->kind = Core::String(kind);
+		terminal->holder = Core::String(holder);
+		terminal->alive = true;
+		terminal->cols = cols;
+		terminal->rows = rows;
+		terminal->child = child;
+		terminal->input = new MessageQueue();
+		Terminals* self = this;
+		context->Atomically([self, terminal](IED::Events& events) {
+			self->made += 1;
+			Core::StringBuilder id;
+			id.Append("term");
+			id.AppendInt(self->made);
+			terminal->termId = id.ToString();
+			self->terminals.Push(terminal);
+		});
+		context->TopicFrom(terminal->Topic().View(), [self, terminal]() -> Core::String { return terminal->SnapshotJson(); });
+		context->Atomically([self, terminal](IED::Events& events) { self->Changed(events, terminal, "term.added"); });
+		MessageQueue* input = terminal->input;
+		Threading::Thread::Run([self, terminal, child]() { self->ReadLoop(terminal, child); }).Detach();
+		Threading::Thread::Run([child, input]() { WriteLoop(child, input); }).Detach();
+		return terminal;
+	}
+
+	// --- Running -----------------------------------------------------------------------------------------------------
+
+	// A pseudo console's output stays open after its program exits (until the console is closed), so the reader waits in
+	// slices and, once the program is gone, takes what is left and closes the console.
+	void Terminals::ReadLoop(Term* terminal, Process::Child* child) {
+		char[kTerminalReadBytes] buffer;
+		Core::String carried;
+		bool exited = false;
+		for (;;) {
+			const int64 got = child->Read(Process::Stream::Output, (void*)&buffer[0], kTerminalReadBytes, exited ? kTerminalDrainMs : kTerminalPollMs);
+			if (got == Process::kTimedOut && !exited) {
+				exited = child->Wait(0) != Process::kTimedOut;
+				continue;
+			}
+			if (got <= 0) break;
+			Core::String bytes = carried + Core::StringView((const char*)&buffer[0], got);
+			const int64 whole = IED::WholeCharacters(bytes.View());
+			carried = Core::String(bytes.View().Substring(whole, bytes.ByteLength() - whole));
+			Core::String text = Core::String(bytes.View().Substring(0, whole));
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Field("data", text.View());
+			json.EndObject();
+			Core::String data = json.ToString();
+			context->Atomically([terminal, text, data](IED::Events& events) {
+				events.Publish(terminal->Topic().View(), "data", data.View());
+				terminal->scrollback = IED::BoundedText(terminal->scrollback.View(), text.View(), kTerminalScrollbackBytes);
+			});
+		}
+		const int64 code = child->Wait();
+		terminal->input->Close();
+		child->Close();
+		Terminals* self = this;
+		context->Atomically([self, terminal, code](IED::Events& events) {
+			if (!terminal->alive) return;
+			terminal->alive = false;
+			terminal->exitCode = code;
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.IntField("code", code);
+			json.EndObject();
+			events.Publish(terminal->Topic().View(), "exit", json.View());
+			self->Changed(events, terminal, "term.changed");
+		});
+	}
+
+	// --- The plugin --------------------------------------------------------------------------------------------------
+
+	void Activate(IED::PluginContext& context)
+	{
+		Terminals* terminals = new Terminals(&context);
+		RegisterMethods(terminals);
+		context.OnWorkspace([terminals](const IED::Workspace& ws) { terminals->Opened(ws); });
+	}
+}

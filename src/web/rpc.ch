@@ -59,6 +59,8 @@ namespace Ied
 	class Rpc
 	{
 		public void Register(const char* name, Method method) { methods.Insert(Core::String(name), method); }
+		// A plugin's method goes with its code (docs/26 "Built-ins on the API").
+		public void Unregister(Core::StringView name) { methods.Remove(Core::String(name)); }
 		public bool Has(Core::StringView name) const { return methods.Contains(Core::String(name)); }
 		public Core::Array<Core::String> Names() const;
 		// Runs a request (the server lock is held), once per opId.

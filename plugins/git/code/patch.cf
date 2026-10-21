@@ -1,6 +1,6 @@
 include "patch.ch"
 
-namespace Ied
+namespace Git
 {
 	static bool Chosen(const Core::Array<int64>& chosen, int64 index) {
 		if (chosen.IsEmpty()) return true;

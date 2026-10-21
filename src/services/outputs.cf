@@ -37,11 +37,13 @@ namespace Ied
 		server->rpc.Register("out.clear", [self](Call& call, const Params& params) -> Core::String { return self->ClearMethod(call, params); });
 	}
 
-	OutputSource* Outputs::Add(WorkspaceOutputs* outputs, const char* id, const char* label) {
+	OutputSource* Outputs::Add(WorkspaceOutputs* outputs, Core::StringView id, Core::StringView label) {
 		OutputSource* source = new OutputSource();
 		source->id = Core::String(id);
 		source->label = Core::String(label);
-		outputs->sources.Push(source);
+		const int64 last = outputs->sources.Count();
+		if (last > 0 && outputs->sources[last - 1]->id.View() == kServerLogSource) outputs->sources.Insert(last - 1, source);
+		else outputs->sources.Push(source);
 		Outputs* self = this;
 		server->hub.Add(OutputTopic(outputs->ws, source->id.View()).View(), [self, source]() -> Core::String { return self->Snapshot(source); });
 		return source;
@@ -51,13 +53,23 @@ namespace Ied
 		WorkspaceOutputs* outputs = new WorkspaceOutputs();
 		outputs->ws = ws;
 		opened.Push(outputs);
-		Add(outputs, "build", "Build");
-		Add(outputs, "run", "Run");
-		Add(outputs, "test", "Tests");
-		Add(outputs, "debug", "Debug");
-		Add(outputs, "ai", "AI");
-		Add(outputs, "git", "Git");
-		Add(outputs, kServerLogSource, "IED")->tail = logTail;
+		Add(outputs, Core::StringView("build"), Core::StringView("Build"));
+		Add(outputs, Core::StringView("run"), Core::StringView("Run"));
+		Add(outputs, Core::StringView("test"), Core::StringView("Tests"));
+		Add(outputs, Core::StringView("debug"), Core::StringView("Debug"));
+		Add(outputs, Core::StringView("ai"), Core::StringView("AI"));
+		Add(outputs, Core::StringView(kServerLogSource), Core::StringView("IED"))->tail = logTail;
+		PluginsChanged(ws);
+	}
+
+	void Outputs::PluginsChanged(Workspace* ws) {
+		for (WorkspaceOutputs* outputs : opened) {
+			if (outputs->ws != ws) continue;
+			for (const Contribution& given : server->plugins->Entries(ws, Core::StringView("outputSources"))) {
+				Core::StringView id = given.entry.Member("id").AsView();
+				if (!id.IsEmpty() && !Find(ws, id)) Add(outputs, id, given.entry.Member("title").AsView());
+			}
+		}
 	}
 
 	OutputSource* Outputs::Find(Workspace* ws, Core::StringView sourceId) const {

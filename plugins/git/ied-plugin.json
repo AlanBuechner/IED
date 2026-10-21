@@ -1,7 +1,8 @@
 // The Git activity (docs/05 "git", features/09, mockup 05): a Fork-style view of the workspace's repositories - refs,
 // the commit graph, a commit's details and diffs, local changes staged by file, hunk or line, the commit composer,
-// branches, stashes, fetch, pull and push. Git itself runs on the server (src/git, docs/10 "Git"); this plugin is its
-// UI and declares its settings.
+// branches, stashes, fetch, pull and push. Its server code (code/, docs/10 "Git") is compiled into the server and runs
+// on the plugin API like any plugin's (docs/26 "Built-ins on the API"): the git.* methods, the git: and gitrepos:
+// topics, the Git output source.
 {
 	"manifestVersion": 1,
 	"id": "ied.git",
@@ -10,8 +11,10 @@
 	"description": "Source control: the commit graph, local changes, branches, stashes, fetch, pull and push.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
+	"runtime": { "kind": "builtin", "entry": "Git::Activate", "ui": "ui/index.js" },
+	"permissions": ["git", "process.spawn", "fs.read", "fs.write", "fs.watch"],
 	"contributes": {
+		"outputSources": [ { "id": "git", "title": "Git" } ],
 		"fileIcons": [
 			{ "fileNames": [".gitignore", ".gitattributes", ".gitmodules", ".gitkeep"], "label": "GIT", "color": "--hue-red" }
 		],

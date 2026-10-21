@@ -1,10 +1,11 @@
 // tasks: what a project offers (presets under its own file, by key), ${name} expansion that refuses unknown names,
-// problem matchers over one line and over several, and the toolbar's selections on disk.
+// problem matchers over one line and over several, the toolbar's selections on disk, and a run's problems as JSON.
 
 include "tasks/model.ch"
 include "tasks/expand.ch"
 include "tasks/matcher.ch"
 include "tasks/selections.ch"
+include "tasks/runner.ch"
 
 static Serialization::DomNode Json(const char* text) {
 	Serialization::DomDoc* doc = new Serialization::DomDoc();
@@ -100,5 +101,20 @@ class TasksTests {
 		assert_true(read.Value(Core::StringView("Game"), Core::StringView("target"), false, value) && value == "Win64", "a project's own");
 		assert_true(!read.Value(Core::StringView("Tool"), Core::StringView("target"), false, value), "not another project's");
 		FS::RemoveAll(file.Parent().CStr());
+	}
+
+	[test("run_problems_json")]
+	public static void TestRunProblemsJson() {
+		Ied::TaskRun* run = new Ied::TaskRun();
+		run->problems.Insert(Core::String("c4/Game\nsrc/a.cf"), Core::String("{\"message\":\"one\"},{\"message\":\"two\"}"));
+		run->problems.Insert(Core::String("lint/Game\nsrc/a.cf"), Core::String("{\"message\":\"three\"}"));
+		run->problems.Insert(Core::String("c4/Game\nsrc/b.cf"), Core::String("{\"message\":\"four\"}"));
+		Serialization::DomNode files = Json(Ied::RunProblemsJson(run).CStr());
+		assert_true(files.Kind() == Serialization::DomKind::Object && files.Count() == 2, "a member per file");
+		Serialization::DomNode a = files.Member("src/a.cf");
+		assert_true(a.Count() == 2 && a.Member("c4/Game").Count() == 2 && a.Member("lint/Game").Count() == 1, "an array per source, every item in it");
+		assert_true(a.Member("c4/Game").At(1).Member("message").AsView() == "two", "in order");
+		assert_true(files.Member("src/b.cf").Member("c4/Game").At(0).Member("message").AsView() == "four", "the other file");
+		assert_true(Ied::RunProblemsJson(new Ied::TaskRun()).View() == "{}", "none");
 	}
 }

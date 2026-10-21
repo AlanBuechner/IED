@@ -1,6 +1,6 @@
 include "cli.ch"
 
-namespace Ied
+namespace Git
 {
 	Core::String GitRun::Problem() const {
 		Core::StringView text = errors.View().Trimmed();

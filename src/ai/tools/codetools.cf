@@ -8,9 +8,7 @@ namespace Ied
 	class CodeToolEntry
 	{
 		public Core::String name;
-		public Core::String function;   // or
-		public Core::String binding;
-		public CodeInstance* instance;  // the function's
+		public Serialization::DomNode entry;   // its toolCalls entry: a `function` or a `binding`
 		public Core::String pluginId;
 		public bool untrusted;          // availableUntrusted
 		public int64 seconds;
@@ -32,74 +30,41 @@ namespace Ied
 		return plan;
 	}
 
-	// A call as the plugin's function gets it, with its own copy of the arguments: a call that times out leaves the
-	// function running.
-	class CodeToolRequest
-	{
-		public IED::ToolCall call;
-		public Serialization::DomDoc* doc;
-	}
-
-	// On the plugin's thread: the function's result.
-	static void CallFunction(const CodeToolEntry* entry, CodeInstance* instance, IED::ToolCall* request, IED::ToolResult* result) {
-		Core::String problem;
-		void* address = CodeFunction(instance, entry->function.View(), Core::StringView("IED::ToolResult"), Core::StringView("IED::ToolCall&"), problem);
-		if (address) {
-			funcptr<IED::ToolResult(const IED::ToolCall&)> tool = (funcptr<IED::ToolResult(const IED::ToolCall&)>)address;
-			GuardedCall(instance, [tool, request, result]() { *result = tool(*request); }, problem);
-		}
-		if (!problem.IsEmpty()) *result = IED::ToolFailure(((entry->name + ": ") + problem.View()).View());
-	}
-
 	static ToolOutcome CodeToolRun(const CodeToolEntry* entry, const ToolInvocation& call) {
 		const int64 started = clock_now_ns();
 		Server* server = call.server;
 		const bool* cancelled = call.cancelled;
-		IED::Result answer;
-		IED::ToolResult* result = new IED::ToolResult();
-		Core::String problem;
+		IED::ToolResult result;
 		{
 			Threading::LockGuard guard(server->lock);
-			if (!entry->binding.IsEmpty()) {
-				CodeInstance* provider = server->code->Provider(call.ws, entry->binding.View());
-				if (provider) answer = InvokeBinding(server, provider, entry->binding.View(), NodeJson(call.args).View(), [cancelled]() -> bool { return *cancelled; });
-				else answer = IED::Refusal(((Core::String("no plugin provides the server binding '") + entry->binding.View()) + "'").View());
-			}
-			else {
-				CodeToolRequest* request = new CodeToolRequest();
-				request->doc = new Serialization::DomDoc();
-				request->call.name = entry->name;
-				request->call.args = Serialization::ReadJson(NodeJson(call.args).View(), *request->doc).root;
-				request->call.workspace = PluginWorkspace(server, call.ws);
-				request->call.chatId = call.chat ? call.chat->chatId : Core::String("");
-				request->call.cancelled = cancelled;
-				server->code->Run(entry->instance, [entry, request, result](CodeInstance* instance) { CallFunction(entry, instance, &request->call, result); },
-					entry->seconds * 1000, [cancelled]() -> bool { return *cancelled; }, problem);
-			}
+			Plugin* plugin = nullptr;
+			for (Plugin* loaded : server->plugins->LoadedFor(call.ws))
+				if (loaded->manifest->id.View() == entry->pluginId.View()) plugin = loaded;
+			IED::ToolCall request;
+			request.name = entry->name;
+			request.args = call.args;
+			request.workspace = PluginWorkspace(server, call.ws);
+			request.chatId = call.chat ? call.chat->chatId : Core::String("");
+			request.cancelled = cancelled;
+			result = plugin ? InvokePluginTool(server, call.ws, plugin, entry->entry, request, entry->seconds, [cancelled]() -> bool { return *cancelled; })
+				: IED::ToolFailure(((entry->name + ": the plugin ") + entry->pluginId.View() + " is not loaded").View());
 		}
-		ToolOutcome outcome;
-		if (!entry->binding.IsEmpty()) outcome = answer.Ok() ? ToolResult(answer.json.View(), Core::StringView("")) : ToolError(((entry->name + ": ") + answer.error.View()).View());
-		else if (!problem.IsEmpty()) outcome = ToolError(((entry->name + ": ") + problem.View()).View());
-		else {
-			outcome = ToolResult(result->content.View(), result->preview.View());
-			outcome.isError = result->isError;
-		}
+		ToolOutcome outcome = ToolResult(result.content.View(), result.preview.View());
+		outcome.isError = result.isError;
 		outcome.source = (Core::String("plugin ") + entry->pluginId.View());
 		outcome.ms = (clock_now_ns() - started) / 1000000;
 		outcome.timed = true;
 		return outcome;
 	}
 
-	ToolSpec* CodeTool(const Serialization::DomNode& node, CodeInstance* instance, Core::StringView pluginId, Core::String& problem) {
+	ToolSpec* CodeTool(const Serialization::DomNode& node, Core::StringView pluginId, Core::String& problem) {
 		CodeToolEntry* entry = new CodeToolEntry();
 		entry->name = Core::String(node.Member("name").AsView());
-		entry->function = Core::String(node.Member("function").AsView());
-		entry->binding = Core::String(node.Member("binding").AsView());
-		if (entry->function.IsEmpty() && entry->binding.IsEmpty()) {
+		if (node.Member("function").AsView().IsEmpty() && node.Member("binding").AsView().IsEmpty()) {
 			problem = (((Core::String("plugin ") + pluginId) + ": the tool ") + entry->name.View()) + " names no command, function or binding";
 			return nullptr;
 		}
-		entry->instance = instance;
+		entry->entry = node;
 		entry->pluginId = Core::String(pluginId);
 		entry->untrusted = node.Member("availableUntrusted").AsBool();
 		entry->seconds = node.Member("timeoutSeconds").IsValid() ? node.Member("timeoutSeconds").AsInt() : kCodeToolDefaultSeconds;

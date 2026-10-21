@@ -39,11 +39,9 @@ namespace Ied
 		diagnostics = new Diagnostics(self);
 		lsp = new LspPool(self);
 		tasks = new Tasks(self);
-		terminals = new Terminals(self);
 		breakpoints = new Breakpoints(self);
 		debugger = new Debugger(self);
 		chats = new Chats(self);
-		git = new Git(self);
 		logThread = Threading::Thread::Run([self]() { self->logPump.Run(self); });
 		// From here on the log pump, the git thread and each workspace's watcher once it opens reach the services under the
 		// lock.

@@ -1,14 +1,10 @@
 include "workspace.ch"
 include "host/server.ch"
+include "fs/search.ch"
 
 namespace IED
 {
-	// The calling plugin's code and its server; null outside a plugin's thread.
-	static Ied::CodeInstance* Caller(Core::String& problem) {
-		Ied::CodeInstance* instance = Ied::CurrentCode();
-		if (!instance) problem = Core::String("the plugin API is for a plugin's code, on its thread");
-		return instance;
-	}
+	static Ied::CodeInstance* Caller(Core::String& problem) { return Ied::ApiCaller(problem); }
 
 	bool FindWorkspace(Core::StringView wsId, Workspace& ws) {
 		Core::String problem;
@@ -34,19 +30,8 @@ namespace IED
 		return open;
 	}
 
-	// The open workspace `ws` names, when the calling plugin holds `permission` and is loaded there; with the lock held.
 	static Ied::Workspace* Permitted(Ied::CodeInstance* instance, const Workspace& ws, const char* permission, Core::String& problem) {
-		Ied::Server* server = instance->runtime->server;
-		if (!instance->May(Core::StringView(permission))) {
-			problem = (Core::String("the plugin's manifest does not ask for the permission ") + permission);
-			return nullptr;
-		}
-		Ied::Workspace* found = server->workspaces->Find(ws.id.View());
-		if (!found || !server->code->LoadedIn(instance, found)) {
-			problem = (Core::String("no open workspace ") + ws.id.View()) + " for this plugin";
-			return nullptr;
-		}
-		return found;
+		return Ied::PermittedWorkspace(instance, ws.id.View(), permission, problem);
 	}
 
 	bool ReadFile(const Workspace& ws, Core::StringView path, Core::String& text, Core::String& problem) {
@@ -65,6 +50,32 @@ namespace IED
 			return false;
 		}
 	}
+
+	bool MoveToTrash(Core::StringView wsId, Core::StringView path, Core::String& problem) {
+		Ied::CodeInstance* instance = Caller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Workspace named;
+		named.id = Core::String(wsId);
+		Ied::Workspace* found = Permitted(instance, named, "fs.write", problem);
+		if (!found) return false;
+		try {
+			Core::String relative = Ied::NormalizePath(path);
+			server->trash->MoveIn(found, relative.View(), FS::IsDirectory(found->At(relative.View()).CStr()));
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+
+	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative) { return Ied::RelativeTo(root, path, relative); }
+
+	Core::Array<Core::String> DefaultExcludes() { return Ied::DefaultSearchExcludes(); }
+
+	Core::String NormalizePath(Core::StringView path) { return Ied::NormalizePath(path); }
 
 	bool WriteFile(const Workspace& ws, Core::StringView path, Core::StringView text, Core::String& problem) {
 		Ied::CodeInstance* instance = Caller(problem);

@@ -243,20 +243,6 @@ namespace Ied
 	}
 
 	// A run's problems ("<source>\n<path>" -> items) as a diag snapshot's files.
-	static Core::String RunProblemFiles(const TaskRun* run) {
-		JsonWriter json;
-		json.BeginObject();
-		for (const Core::KeyValue<Core::String, Core::String>& entry : run->problems) {
-			const int64 cut = entry.key.View().IndexOf('\n', 0);
-			json.Key(entry.key.View().Substring(cut + 1, entry.key.ByteLength() - cut - 1));
-			json.BeginObject();
-			json.Key(entry.key.View().Substring(0, cut));
-			json.Raw(entry.value.View());
-			json.EndObject();
-		}
-		json.EndObject();
-		return json.ToString();
-	}
 
 	static ToolOutcome BuildRun(const ToolInvocation& call) {
 		Threading::LockGuard guard(call.server->lock);
@@ -265,7 +251,7 @@ namespace Ied
 		const bool succeeded = call.server->tasks->AwaitEnd(run);
 		int64 errors = 0;
 		int64 warnings = 0;
-		Core::String problems = ProblemLines(ParsedObject(RunProblemFiles(run).View()), Core::StringView(""), false, kProblemsMost, errors, warnings);
+		Core::String problems = ProblemLines(ParsedObject(RunProblemsJson(run).View()), Core::StringView(""), false, kProblemsMost, errors, warnings);
 		Core::StringBuilder said;
 		said.Append(run->label.View());
 		said.Append(succeeded ? " succeeded" : run->status == RunStatus::Cancelled ? " was cancelled" : " failed");

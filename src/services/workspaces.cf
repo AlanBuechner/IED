@@ -77,8 +77,9 @@ namespace Ied
 			if (given.IsEmpty()) server->Log((Core::String("no such workspace: ") + server->config.workspaces[i].View()).View());
 			else OpenFor(given, relative);
 		}
+		// The test suites' server with no workspace gets an empty one inside its data folder, which goes with it.
 		if (items.IsEmpty() && server->config.testHooks) {
-			FS::Path scratch = FS::TempDirectory() / (Core::String("ied-test-") + server->epoch.View()).View();
+			FS::Path scratch = FS::Path(server->config.dataDir.View()) / "scratch-workspace";
 			FS::MakeDirectories(scratch.CStr());
 			Open(scratch, Core::StringView("folder"));
 		}
@@ -176,6 +177,7 @@ namespace Ied
 	}
 
 	void Workspaces::ContributionsChanged(Workspace* ws) {
+		server->outputs->PluginsChanged(ws);
 		server->settings->PluginsChanged(ws);
 		server->tasks->ProjectsChanged(ws);
 		server->hub.Publish((Core::String("ws:") + ws->wsId.View()).View(), "plugins.changed", Core::StringView("{}"));
@@ -202,11 +204,9 @@ namespace Ied
 		server->diagnostics->WorkspaceOpened(ws);
 		server->lsp->WorkspaceOpened(ws);
 		server->tasks->WorkspaceOpened(ws);
-		server->terminals->WorkspaceOpened(ws);
 		server->breakpoints->WorkspaceOpened(ws);
 		server->debugger->WorkspaceOpened(ws);
 		server->chats->WorkspaceOpened(ws);
-		server->git->WorkspaceOpened(ws);
 		server->code->WorkspaceOpened(ws);
 		Watch(ws);
 		server->Log((((Core::String("opened ") + ws->wsId.View()) + ": ") + ws->root.View()).View());
@@ -361,7 +361,7 @@ namespace Ied
 		if (!published.IsEmpty() || batch.Overflowed()) PublishTree(ws, published, batch.Overflowed());
 		if (TouchesSolution(ws, batch)) ReadSolutionAgain(ws);
 		if (TouchesWorkspacePlugins(batch)) PluginsChanged(ws);
-		server->git->FilesChanged(ws, batch);
+		server->code->FilesChanged(ws, batch);
 	}
 
 	// Whether a change is someone else's; it updates what the server knows of the path either way.
@@ -622,8 +622,8 @@ namespace Ied
 		ws->trusted = trusted;
 		server->settings->TrustChanged(ws);
 		server->lsp->TrustChanged(ws);
-		server->git->TrustChanged(ws);
 		server->code->Reconcile(ws);
+		server->code->TrustChanged(ws);
 		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();

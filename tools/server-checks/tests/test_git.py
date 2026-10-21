@@ -12,7 +12,7 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
-from server import REPO, IedServer, ServerTestCase
+from server import REPO, IedServer, ServerTestCase, remove_tree
 
 LINES = "".join("line %d\n" % n for n in range(1, 31))
 
@@ -42,28 +42,28 @@ def make_repo(folder):
 
 
 def make_home(home):
-	"""An install with the host's schemas and the git plugin's settings, without its UI."""
+	"""An install with the host's schemas and the git plugin - its server code (compiled into the server, docs/26), its
+	settings and its output source - without its UI."""
 	shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(home, "shared", "host-api", "schemas"))
 	plugin = os.path.join(home, "plugins", "git")
 	os.makedirs(plugin)
 	shutil.copy(os.path.join(REPO, "plugins", "git", "settings.schema.json"), plugin)
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "ied.git", "name": "Git", "version": "0.1.0", "ied": {"api": "^1"},
-		"runtime": {"kind": "declarative"}, "contributes": {"settings": {"schema": "settings.schema.json", "page": "Source Control"}}}))
+		"runtime": {"kind": "builtin", "entry": "Git::Activate"}, "permissions": ["git", "process.spawn", "fs.read", "fs.write", "fs.watch"],
+		"contributes": {"settings": {"schema": "settings.schema.json", "page": "Source Control"}, "outputSources": [{"id": "git", "title": "Git"}]}}))
 	return home
 
 
 class GitTests(ServerTestCase):
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="ied-git-")
+		self.addCleanup(remove_tree, self.root)
 		self.repo = os.path.join(self.root, "Game")
 		make_repo(self.repo)
 		self.home = make_home(os.path.join(self.root, "home"))
 		self.server = IedServer(extra=("--home", self.home, "--workspace", self.repo))
+		self.addCleanup(self.server.stop)
 		self.assertTrue(self.server.started, self.server.error)
-
-	def tearDown(self):
-		self.server.stop()
-		shutil.rmtree(self.root, ignore_errors=True)
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()

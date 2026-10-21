@@ -45,15 +45,50 @@ namespace Ied
 		Core::String* text = new Core::String();
 		Core::String* failure = new Core::String();
 		Core::String name = Core::String(function);
-		IED::Workspace shown = PluginWorkspace(server, ws);
-		const bool ran = server->code->Run(instance, [name, shown, text, failure](CodeInstance* code) {
-			void* address = CodeFunction(code, name.View(), Core::StringView("Core::String"), Core::StringView("IED::Workspace&"), *failure);
-			if (!address) return;
-			funcptr<Core::String(const IED::Workspace&)> section = (funcptr<Core::String(const IED::Workspace&)>)address;
-			GuardedCall(code, [section, shown, text]() { *text = section(shown); }, *failure);
+		IED::Workspace* given = new IED::Workspace();
+		*given = PluginWorkspace(server, ws);
+		const bool ran = server->code->Run(instance, [name, given, text, failure](CodeInstance* code) {
+			Reflection::Function section = CodeFunction(code, name.View(), Core::StringView("Core::String"), Core::StringView("IED::Workspace&"), *failure);
+			if (section.IsValid()) InvokeCode(code, section, (void*)text, (void*)given, *failure);
 		}, kCodeCallMs, NeverStopped(), problem);
 		if (ran && !failure->IsEmpty()) problem = (((Core::String("plugin ") + instance->pluginId.View()) + ": ") + failure->View());
 		return ran && failure->IsEmpty() ? *text : Core::String("");
+	}
+
+	// A tool call as the plugin's function gets it, with its own copy of the arguments: a call that times out leaves the
+	// function running.
+	class PluginToolCall
+	{
+		public IED::ToolCall call;
+		public Serialization::DomDoc* doc;
+	}
+
+	IED::ToolResult InvokePluginTool(Server* server, Workspace* ws, Plugin* plugin, const Serialization::DomNode& entry, const IED::ToolCall& call, int64 seconds, func<bool()> stopped) {
+		Core::String name = Core::String(entry.Member("name").AsView());
+		Core::String binding = Core::String(entry.Member("binding").AsView());
+		if (!binding.IsEmpty()) {
+			CodeInstance* provider = server->code->Provider(ws, binding.View());
+			if (!provider) return IED::ToolFailure(((((name + ": ") + "no plugin provides the server binding '") + binding.View()) + "'").View());
+			IED::Result answer = InvokeBinding(server, provider, binding.View(), NodeJson(call.args).View(), stopped);
+			return answer.Ok() ? IED::ToolText(answer.json.View()) : IED::ToolFailure(((name + ": ") + answer.error.View()).View());
+		}
+		CodeInstance* instance = server->code->For(plugin, ws);
+		if (!instance) return IED::ToolFailure(((name + ": ") + "the plugin has no code (runtime kind c4)").View());
+		PluginToolCall* request = new PluginToolCall();
+		request->doc = new Serialization::DomDoc();
+		request->call = call;
+		request->call.args = Serialization::ReadJson(NodeJson(call.args).View(), *request->doc).root;
+		IED::ToolResult* result = new IED::ToolResult();
+		Core::String function = Core::String(entry.Member("function").AsView());
+		Core::String problem;
+		server->code->Run(instance, [function, name, request, result](CodeInstance* code) {
+			Core::String failure;
+			Reflection::Function tool = CodeFunction(code, function.View(), Core::StringView("IED::ToolResult"), Core::StringView("IED::ToolCall&"), failure);
+			if (tool.IsValid()) InvokeCode(code, tool, (void*)result, (void*)&request->call, failure);
+			if (!failure.IsEmpty()) *result = IED::ToolFailure(((name + ": ") + failure.View()).View());
+		}, seconds * 1000, stopped, problem);
+		if (!problem.IsEmpty()) return IED::ToolFailure(((name + ": ") + problem.View()).View());
+		return *result;
 	}
 
 	void DeliverEvent(CodeInstance* instance, Core::StringView topic, Core::StringView kind, Core::StringView data) {

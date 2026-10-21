@@ -163,7 +163,10 @@ namespace Ied
 		Changed();
 		server->settings->Load();
 		server->code->Reconcile(nullptr);
-		for (Workspace* ws : server->workspaces->All()) server->code->Reconcile(ws);
+		for (Workspace* ws : server->workspaces->All()) {
+			server->code->Reconcile(ws);
+			server->outputs->PluginsChanged(ws);
+		}
 	}
 
 	Plugin* PluginHost::Get(Core::StringView id) const {

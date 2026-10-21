@@ -4,7 +4,7 @@
 
 include "bedrock.ch"
 
-namespace Ied
+namespace Git
 {
 	const int32 kGitReadTimeoutMs = 30000;
 	const int32 kGitWriteTimeoutMs = 120000;

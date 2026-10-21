@@ -125,6 +125,31 @@ namespace Ied
 		return json.ToString();
 	}
 
+	Core::String RunProblemsJson(const TaskRun* run) {
+		Core::Array<Core::String> paths;
+		for (const Core::KeyValue<Core::String, Core::String>& entry : run->problems) {
+			const int64 cut = entry.key.View().IndexOf('\n', 0);
+			Core::String path = Core::String(entry.key.View().Substring(cut + 1, entry.key.ByteLength() - cut - 1));
+			if (!paths.Contains(path)) paths.Push(path);
+		}
+		paths.Sort();
+		JsonWriter json;
+		json.BeginObject();
+		for (const Core::String& path : paths) {
+			json.Key(path.View());
+			json.BeginObject();
+			for (const Core::KeyValue<Core::String, Core::String>& entry : run->problems) {
+				const int64 cut = entry.key.View().IndexOf('\n', 0);
+				if (entry.key.View().Substring(cut + 1, entry.key.ByteLength() - cut - 1) != path.View()) continue;
+				json.Key(entry.key.View().Substring(0, cut));
+				json.Raw(((Core::String("[") + entry.value.View()) + "]").View());
+			}
+			json.EndObject();
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
 	// The lock is held: the problem joins its file's diagnostics from this matcher in this project.
 	static void AddProblem(Server* server, TaskRun* run, const PlannedStep* step, const ProblemMatcher* matcher, const MatchedProblem& found) {
 		Core::String path = ProblemPath(run, step, matcher, found.file.View());

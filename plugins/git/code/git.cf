@@ -1,0 +1,16 @@
+// The ied.git plugin's entry (docs/26 section 2b): the git side of every workspace it is loaded for, its methods, and
+// the workspace events it follows.
+include "service.ch"
+
+namespace Git
+{
+	void Activate(IED::PluginContext& context)
+	{
+		GitPlugin* git = new GitPlugin(&context);
+		RegisterMethods(git);
+		context.OnWorkspace([git](const IED::Workspace& ws) { git->Opened(ws); });
+		context.OnTrustChanged([git](const IED::Workspace& ws) { git->TrustChanged(ws); });
+		context.OnFilesChanged([git](const IED::FileChanges& changes) { git->FilesChanged(changes); });
+		context.OnDeactivate([git]() { git->Stop(); });
+	}
+}

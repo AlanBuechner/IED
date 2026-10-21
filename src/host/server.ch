@@ -13,7 +13,6 @@ include "services/layouts.ch"
 include "services/trash.ch"
 include "services/search.ch"
 include "services/diagnostics.ch"
-include "services/terminals.ch"
 include "auth/auth.ch"
 include "plugins/host.ch"
 include "plugins/codecalls.ch"
@@ -25,7 +24,6 @@ include "lsp/pool.ch"
 include "tasks/service.ch"
 include "dap/service.ch"
 include "ai/service.ch"
-include "git/service.ch"
 
 namespace Ied
 {
@@ -65,11 +63,9 @@ namespace Ied
 		public Diagnostics* diagnostics;
 		public LspPool* lsp;
 		public Tasks* tasks;
-		public Terminals* terminals;
 		public Breakpoints* breakpoints;
 		public Debugger* debugger;
 		public Chats* chats;
-		public Git* git;
 		public Auth* auth;
 		public PluginHost* plugins;
 		public CodeRuntime* code;

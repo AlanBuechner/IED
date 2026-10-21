@@ -1,14 +1,17 @@
 // Plugin code (docs/26 section 2): a plugin whose runtime is "c4" has C4 code the server compiles with its script host
-// (C4/docs/runtime/04) against its interface, allowed to include only api/ (and Bedrock). Each running copy - one for
-// a built-in or app plugin, one per workspace for a project plugin - has its own thread: its compile, its entry, its
-// bindings, tool calls, sections and event handlers all run there, one at a time and never holding the server lock, so
-// the script is never unloaded under a call. Callers queue a job and wait for it with the server lock released.
-// The code starts on its first activation event (or at load when it lists none) and is compiled again when its files
-// change; a new build that does not compile leaves the running one in place with the diagnostics as its problem.
+// (C4/docs/runtime/04) against its interface, allowed to include only api/ (and Bedrock); a built-in's ("builtin" with
+// an entry) is compiled into the server and found by reflection. Each running copy - one for a built-in or app plugin,
+// one per workspace for a project plugin - has its own thread: its compile, its entry, its bindings, tool calls,
+// sections and event handlers all run there, one at a time and never holding the server lock; callers queue a job and
+// wait for it with the server lock released. Its protocol methods run on their requests' threads, counted, so a script
+// unloads only once they have returned. The code starts on its first activation event (or at load when it lists none)
+// and a script is compiled again when its files change; a new build that does not compile leaves the running one in
+// place with the diagnostics as its problem.
 
 include "manifest.ch"
 include "api/plugin.ch"
 include "scripting.ch"
+include "fs/watching.ch"
 
 namespace Ied
 {
@@ -30,7 +33,25 @@ namespace Ied
 		public Core::Array<Core::String> listenKinds;
 		public Core::Array<IED::EventHandler> listeners;
 		public Core::Array<IED::WorkspaceHandler> workspaceHandlers;
+		public Core::Array<IED::WorkspaceHandler> trustHandlers;
+		public Core::Array<IED::FilesHandler> filesHandlers;
 		public Core::Array<func<void()>> deactivateHandlers;
+	}
+
+	// A hub topic a plugin made: its snapshot pushed as text, or pulled from its function when a client subscribes.
+	class PluginTopic
+	{
+		public Core::String key;
+		public Core::String text;
+		public func<Core::String()> pull;
+		public bool pulled;
+	}
+
+	// A folder a plugin watches outside every workspace; `stopped` once the plugin stops (the watcher's thread runs on).
+	class PluginWatch
+	{
+		public FolderWatch* watch;
+		public bool stopped;
 	}
 
 	// A computed contribution: entries of `point` in workspace `wsId` ("" every workspace).
@@ -53,6 +74,7 @@ namespace Ied
 		public Core::Array<Core::String> permissions;
 		public Core::Array<Core::String> activation;
 		public Core::String digest;          // of its sources, for the build that runs
+		public bool builtin;                 // compiled into the server: found by reflection, never reloaded
 
 		// Under the server lock.
 		public CodeState state;
@@ -66,6 +88,13 @@ namespace Ied
 		public Core::Array<Contributed*> contributed;
 		public int64 builds;                 // how many times it compiled
 		public bool buildQueued;             // a build is queued: it reads the files when it starts
+		public Core::Array<Core::String> methods;     // the protocol methods it registered
+		public Core::Array<PluginTopic*> topics;
+		public Core::Array<PluginWatch*> watches;
+		public bool wantsTrust;              // it has OnTrustChanged handlers
+		public bool wantsFiles;              // it has OnFilesChanged handlers
+		public int64 running;                // its methods running now
+		public Threading::ConditionVariable idle;
 		public CodeRuntime* runtime;
 
 		// On its thread only.
@@ -92,6 +121,20 @@ namespace Ied
 		public void RetryFailed();
 		// A workspace opened: its project plugins reconcile and the activation events and OnWorkspace handlers run.
 		public void WorkspaceOpened(Workspace* ws);
+		// A workspace was trusted or untrusted: the OnTrustChanged handlers of the code loaded in it run.
+		public void TrustChanged(Workspace* ws);
+		// What a workspace's watcher saw (hidden folders included): the OnFilesChanged handlers run.
+		public void FilesChanged(Workspace* ws, const ChangeBatch& batch);
+		// A request for a method `instance`'s code registered, run on the request's thread with the lock released.
+		public Core::String CallMethod(CodeInstance* instance, const IED::MethodHandler& handler, Call& call, const Params& params);
+		// The snapshot of a pulled topic, from its function (the lock is held, as the hub asks for it).
+		public Core::String PulledSnapshot(CodeInstance* instance, PluginTopic* topic);
+		// The topic `key` of `instance`'s, or null.
+		public PluginTopic* TopicOf(CodeInstance* instance, Core::StringView key) const;
+		// Whether `instance` may name a method or topic `name`: a built-in any free one, another "<pluginId>/...".
+		public bool MayName(CodeInstance* instance, Core::StringView name) const;
+		// A watched folder's changes (from the watcher's thread, without the lock): `handler` runs on the plugin's thread.
+		public void QueueWatched(CodeInstance* instance, PluginWatch* watch, func<void(const Core::Array<Core::String>&)> handler, const Core::Array<Core::String>& paths);
 		// A protocol event (the hub's tap): queued for the code that listens to its kind.
 		public void Published(Core::StringView topic, Core::StringView kind, Core::StringView data);
 		// The running code of `plugin` as loaded for `ws`, or null when it has none.
@@ -107,8 +150,9 @@ namespace Ied
 		// (more while it compiles) with the lock released, or until `stopped()`; false with `problem` when the code cannot
 		// run or did not finish in time. On the instance's own thread `body` runs at once.
 		public bool Run(CodeInstance* instance, func<void(CodeInstance*)> body, int64 ms, func<bool()> stopped, Core::String& problem);
-		// A guarded call faulted: the code fails until it is built again. Takes the lock.
+		// A guarded call faulted: the code fails until it is built again. Takes the lock; FaultedLocked with it held.
 		public void Faulted(CodeInstance* instance, Core::StringView problem);
+		public void FaultedLocked(CodeInstance* instance, Core::StringView problem);
 		// The entries `instance`'s code computed for `point` in `ws`.
 		public void ComputedFor(CodeInstance* instance, Workspace* ws, Core::StringView point, Core::Array<Serialization::DomNode>& into) const;
 		// The JSON for plugins.list's "code" field.
@@ -124,6 +168,11 @@ namespace Ied
 		private void Activate(CodeInstance* instance);
 		private void Build(CodeInstance* instance);
 		private void Retire(CodeInstance* instance);
+		// Its methods, topics and watches go (the lock is held).
+		private void Unregister(CodeInstance* instance);
+		// Runs a new build's entry (a script's, or a built-in's in the server); with `compileMs` for the log.
+		private void Enter(CodeInstance* instance, Core::StringView digest, int64 compileMs);
+		private void BuildScript(CodeInstance* instance);
 		private void Failed(CodeInstance* instance, Core::StringView problem, Core::StringView digest);
 		private bool Wants(CodeInstance* instance, Workspace* ws) const;
 		private void Loop(CodeInstance* instance);
@@ -135,18 +184,40 @@ namespace Ied
 		private bool hostTried;
 	}
 
+	// Whether `plugin`'s manifest declares the output source `source` (outputSources).
+	bool DeclaresOutput(Plugin* plugin, Core::StringView source);
 	// The .cf files of `instance`'s sources, in name order.
 	Core::Array<Core::String> CodeFilesOf(CodeInstance* instance);
 	// The running code on this thread, or null when the thread runs no plugin's code.
 	CodeInstance* CurrentCode();
+	void SetCurrentCode(CodeInstance* instance);
 	// `ws` as the plugin API shows it; with the server lock held.
 	IED::Workspace PluginWorkspace(Server* server, Workspace* ws);
-	// Runs `body` inside `instance`'s script, guarded (C4/docs/runtime/04 section 7): false with `problem` when it threw
-	// or faulted - a fault fails the plugin. On the instance's thread.
+	// Runs `body` inside `instance`'s script, guarded (C4/docs/runtime/04 section 7; a built-in's directly): false with
+	// `problem` when it threw or faulted - a fault fails the plugin. Without the lock held.
 	bool GuardedCall(CodeInstance* instance, func<void()> body, Core::String& problem);
-	// A free function of the code by its qualified name, checked against the signature its use expects: its address, or
-	// null with `problem`. On the instance's thread.
-	void* CodeFunction(CodeInstance* instance, Core::StringView name, Core::StringView returns, Core::StringView parameter, Core::String& problem);
+	// The same with the lock held.
+	bool GuardedCallLocked(CodeInstance* instance, func<void()> body, Core::String& problem);
+	// A free function of the code by its qualified name (a built-in's in the server's own reflection), checked against
+	// the signature its use expects; invalid with `problem` when there is none such.
+	Reflection::Function CodeFunction(CodeInstance* instance, Core::StringView name, Core::StringView returns, Core::StringView parameter, Core::String& problem);
+	// Calls `function` with one argument at `argument`, its result into `result`, guarded as GuardedCall.
+	bool InvokeCode(CodeInstance* instance, const Reflection::Function& function, void* result, void* argument, Core::String& problem);
+
+	// The plugin API's caller: the running code on this thread; null with `problem` outside a plugin's code.
+	CodeInstance* ApiCaller(Core::String& problem);
+	// The open workspace `wsId` when `instance` holds `permission` (empty: none needed) and is loaded there; null with
+	// `problem` otherwise. With the lock held.
+	Workspace* PermittedWorkspace(CodeInstance* instance, Core::StringView wsId, const char* permission, Core::String& problem);
+
+	// The thread's running code for a call made on another thread than the plugin's (a method, a pulled snapshot).
+	class CodeScope
+	{
+		[operator("create")] public void Init(CodeInstance* instance);
+		[operator("delete")] public void Delete();
+
+		private CodeInstance* saved;
+	}
 
 	// A wait nothing stops but its time.
 	func<bool()> NeverStopped();

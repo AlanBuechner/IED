@@ -33,6 +33,8 @@ namespace Ied
 
 		// A workspace opened: its sources, the server log's with what it holds so far.
 		public void Opened(Workspace* ws);
+		// The sources its plugins declare (outputSources, docs/26) that it has not got yet, before the server log's.
+		public void PluginsChanged(Workspace* ws);
 		public void Append(Workspace* ws, Core::StringView sourceId, Core::StringView text);
 		public void Clear(Workspace* ws, Core::StringView sourceId);
 		// A line of the server log, to every workspace's "ied" source.
@@ -40,7 +42,7 @@ namespace Ied
 
 	private:
 		private OutputSource* Find(Workspace* ws, Core::StringView sourceId) const;
-		private OutputSource* Add(WorkspaceOutputs* outputs, const char* id, const char* label);
+		private OutputSource* Add(WorkspaceOutputs* outputs, Core::StringView id, Core::StringView label);
 		private Core::String Snapshot(const OutputSource* source) const;
 		private Core::String SourcesMethod(Call& call, const Params& params);
 		private Core::String ClearMethod(Call& call, const Params& params);

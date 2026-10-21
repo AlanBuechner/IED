@@ -1,0 +1,85 @@
+include "contributions.ch"
+include "host/server.ch"
+include "plugins/context.ch"
+
+namespace IED
+{
+	Core::Array<Contribution> Contributions(Core::StringView wsId, Core::StringView point) {
+		Core::Array<Contribution> found;
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return found;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* ws = Ied::PermittedWorkspace(instance, wsId, "", problem);
+		if (!ws) return found;
+		for (const Ied::Contribution& given : server->plugins->Entries(ws, point)) {
+			Contribution each;
+			each.pluginId = given.plugin->manifest->id;
+			each.pluginName = given.plugin->manifest->name;
+			each.folder = Core::String(given.plugin->manifest->folder.View());
+			each.entry = given.entry;
+			found.Push(each);
+		}
+		return found;
+	}
+
+	// The plugin `pluginId` loaded for `ws`, or null.
+	static Ied::Plugin* LoadedPlugin(Ied::Server* server, Ied::Workspace* ws, Core::StringView pluginId) {
+		for (Ied::Plugin* plugin : server->plugins->LoadedFor(ws))
+			if (plugin->manifest->id.View() == pluginId) return plugin;
+		return nullptr;
+	}
+
+	bool PluginSection(const Workspace& ws, Core::StringView pluginId, Core::StringView function, Core::String& text, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", problem);
+		if (!found) return false;
+		Ied::Plugin* plugin = LoadedPlugin(server, found, pluginId);
+		Ied::CodeInstance* code = plugin ? server->code->For(plugin, found) : nullptr;
+		if (!code) {
+			problem = (Core::String("plugin ") + pluginId) + ": no code to compute its section";
+			return false;
+		}
+		text = Ied::ComputedSection(server, code, function, found, problem);
+		return problem.IsEmpty();
+	}
+
+	ToolResult RunPluginTool(Core::StringView pluginId, const Serialization::DomNode& entry, const ToolCall& call, int64 seconds) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return ToolFailure(problem.View());
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* ws = Ied::PermittedWorkspace(instance, call.workspace.id.View(), "", problem);
+		if (!ws) return ToolFailure(problem.View());
+		Ied::Plugin* plugin = LoadedPlugin(server, ws, pluginId);
+		if (!plugin) return ToolFailure(((Core::String("the plugin ") + pluginId) + " is not loaded").View());
+		const bool* cancelled = call.cancelled;
+		return Ied::InvokePluginTool(server, ws, plugin, entry, call, seconds, [cancelled]() -> bool { return cancelled && *cancelled; });
+	}
+
+	bool WhenHolds(const Workspace& ws, Core::StringView clause, Core::String& error) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(error);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "", error);
+		return found && Ied::WhenHolds(clause, Ied::WorkspaceWhen(server, found), error);
+	}
+
+	Core::String AppFolder() {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		return instance ? Ied::AppDataFolder(instance->runtime->server->config) : Core::String("");
+	}
+
+	Core::String HomeFolder() {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		return instance ? Ied::HomeFolder(instance->runtime->server->config) : Core::String("");
+	}
+}

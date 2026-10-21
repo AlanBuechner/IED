@@ -3,7 +3,7 @@
 
 include "parse.ch"
 
-namespace Ied
+namespace Git
 {
 	// The patch that stages hunk `hunk` of `diff` (a work tree diff), or with `reverse` the one that unstages it
 	// (applied with -R to a staged diff). `chosen` names the hunk's lines to take (indexes into its lines; empty: all):

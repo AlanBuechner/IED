@@ -7,9 +7,9 @@ include "tool.ch"
 
 namespace Ied
 {
-	// The tool `entry` of plugin `pluginId` describes: a function of `instance`, its code, or a binding (`instance` may
-	// then be null); null with `problem` when it names neither.
-	ToolSpec* CodeTool(const Serialization::DomNode& entry, CodeInstance* instance, Core::StringView pluginId, Core::String& problem);
+	// The tool `entry` of plugin `pluginId` describes: a function of its code, or a binding; null with `problem` when it
+	// names neither.
+	ToolSpec* CodeTool(const Serialization::DomNode& entry, Core::StringView pluginId, Core::String& problem);
 
 	const int64 kCodeToolDefaultSeconds = 120;
 }

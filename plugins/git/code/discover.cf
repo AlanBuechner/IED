@@ -1,9 +1,8 @@
 include "discover.ch"
 include "parse.ch"
-include "fs/search.ch"
-include "services/workspaces.ch"
+include "api/plugin.ch"
 
-namespace Ied
+namespace Git
 {
 	// What `rev-parse` says of `folder`: its repository, or false when it is in none.
 	static bool RepositoryOf(const GitCli& cli, const FS::Path& folder, GitFound& found, Core::String& error) {
@@ -25,7 +24,7 @@ namespace Ied
 	}
 
 	static bool Skipped(Core::StringView name) {
-		for (const Core::String& pattern : DefaultSearchExcludes())
+		for (const Core::String& pattern : IED::DefaultExcludes())
 			if (pattern.View().Substring(3, pattern.View().ByteLength() - 3) == name) return true;
 		return false;
 	}
@@ -33,7 +32,7 @@ namespace Ied
 	static bool Known(const Core::Array<GitFound>& found, const FS::Path& root) {
 		Core::String relative;
 		for (const GitFound& each : found)
-			if (RelativeTo(each.root.View(), root.View(), relative) && relative.IsEmpty()) return true;
+			if (IED::RelativeTo(each.root.View(), root.View(), relative) && relative.IsEmpty()) return true;
 		return false;
 	}
 
@@ -61,9 +60,9 @@ namespace Ied
 	}
 
 	bool GitRelative(const FS::Path& root, const FS::Path& path, Core::String& relative) {
-		if (RelativeTo(root.View(), path.View(), relative)) return true;
+		if (IED::RelativeTo(root.View(), path.View(), relative)) return true;
 		Core::String inside;
-		if (!RelativeTo(path.View(), root.View(), inside)) return false;
+		if (!IED::RelativeTo(path.View(), root.View(), inside)) return false;
 		relative = Core::String("..");
 		return true;
 	}

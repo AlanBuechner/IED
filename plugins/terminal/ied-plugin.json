@@ -1,6 +1,8 @@
 // The terminal dock (docs/15 "Terminal dock", docs/10 "Terminals"): the server's terminals - shells under a pseudo
 // console that outlive every browser - as tabs in the panel under every activity (a slide-up drawer on a phone, with a
-// row of the keys a phone keyboard lacks). One window types at a time; the others watch and can take over.
+// row of the keys a phone keyboard lacks). One window types at a time; the others watch and can take over. Its server
+// code (code/) is compiled into the server and runs on the plugin API (docs/26 "Built-ins on the API"): the term.*
+// methods and the term: and terms: topics.
 {
 	"manifestVersion": 1,
 	"id": "ied.terminal",
@@ -9,7 +11,7 @@
 	"description": "Terminals on the server: the terminal dock, shared by every window and device.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
-	"runtime": { "kind": "builtin", "ui": "ui/index.js" },
+	"runtime": { "kind": "builtin", "entry": "Terminal::Activate", "ui": "ui/index.js" },
 	"permissions": ["terminal", "process.spawn"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Terminal" },

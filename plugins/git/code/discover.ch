@@ -3,7 +3,7 @@
 
 include "cli.ch"
 
-namespace Ied
+namespace Git
 {
 	struct GitFound
 	{

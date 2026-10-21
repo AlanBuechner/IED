@@ -1,0 +1,102 @@
+include "documents.ch"
+include "host/server.ch"
+include "fs/textedit.ch"
+
+namespace IED
+{
+	// The workspace `ws` names for the calling plugin with `permission`, and `path` made workspace-relative; null with
+	// `problem` when either is refused. With the lock held.
+	static Ied::Workspace* Reached(Ied::CodeInstance* instance, const Workspace& ws, Core::StringView path, const char* permission, Core::String& relative, Core::String& problem) {
+		Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), permission, problem);
+		if (!found) return nullptr;
+		try {
+			relative = Ied::NormalizePath(path);
+			return found;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return nullptr;
+		}
+	}
+
+	bool TextAsEdited(const Workspace& ws, Core::StringView path, Core::String& text, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Core::String relative;
+		Ied::Workspace* found = Reached(instance, ws, path, "fs.read", relative, problem);
+		if (!found) return false;
+		Ied::Document* doc = server->documents->Find(found, relative.View());
+		if (doc) {
+			text = doc->text;
+			return true;
+		}
+		try {
+			text = server->workspaces->Read(found, relative.View());
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+
+	bool Exists(const Workspace& ws, Core::StringView path) {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Core::String relative;
+		Ied::Workspace* found = Reached(instance, ws, path, "fs.read", relative, problem);
+		return found && (server->workspaces->Revision(found, relative.View()) > 0 || server->documents->Find(found, relative.View()));
+	}
+
+	bool WriteThrough(const Workspace& ws, Core::StringView path, Core::StringView text, Core::StringView actor, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Threading::LockGuard guard(server->lock);
+		Core::String relative;
+		Ied::Workspace* found = Reached(instance, ws, path, "fs.write", relative, problem);
+		if (!found) return false;
+		try {
+			Ied::Document* doc = server->documents->Find(found, relative.View());
+			if (!doc) {
+				const int64 revision = server->workspaces->Write(found, relative.View(), text, -1);
+				server->documents->OnDiskWrite(found, relative.View(), text, revision);
+				return true;
+			}
+			Ied::Change whole;
+			whole.end = Ied::EndPosition(doc->text.View());
+			whole.text = Core::String(text);
+			Core::Array<Ied::Change> changes;
+			changes.Push(whole);
+			server->documents->ApplyEdit(doc, doc->version, changes, actor, Core::StringView(""));
+			server->documents->Save(doc);
+			return true;
+		}
+		catch (Ied::RpcError& error) {
+			problem = error.message;
+			return false;
+		}
+	}
+
+	bool Search(const Workspace& ws, const SearchQuery& query, const Threading::Atomic<bool>* cancel, SearchResult& result, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return false;
+		Ied::Server* server = instance->runtime->server;
+		Core::HashMap<Core::String, Core::String> open;
+		FS::Path root;
+		{
+			Threading::LockGuard guard(server->lock);
+			Ied::Workspace* found = Ied::PermittedWorkspace(instance, ws.id.View(), "fs.read", problem);
+			if (!found) return false;
+			root = found->root;
+			for (const Core::String& path : server->documents->OpenPaths(found)) open.Insert(path, server->documents->Find(found, path.View())->text);
+		}
+		result = Ied::SearchFolder(root, query, open, cancel);
+		return true;
+	}
+}

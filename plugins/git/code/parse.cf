@@ -1,6 +1,6 @@
 include "parse.ch"
 
-namespace Ied
+namespace Git
 {
 	const char kUnitSeparator = (char)31;
 

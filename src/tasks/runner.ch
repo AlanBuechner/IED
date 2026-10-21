@@ -49,7 +49,7 @@ namespace Ied
 		public Core::String tail;
 		public bool cancelled;
 		public Process::Child* child;                  // the step's process while it runs
-		public Core::HashMap<Core::String, Core::String> problems;   // "<source>\n<path>" -> the JSON array so far
+		public Core::HashMap<Core::String, Core::String> problems;   // "<source>\n<path>" -> its items so far, comma-joined
 
 		public Core::String Topic() const { return Core::String("run:") + runId.View(); }
 		public bool IsActive() const { return status == RunStatus::Queued || status == RunStatus::Running; }
@@ -64,6 +64,8 @@ namespace Ied
 	Core::String TasksTopic(const Workspace* ws);
 	// The diagnostics source of a matcher's problems in a project's run: "<source>/<project>".
 	Core::String ProblemSource(const ProblemMatcher* matcher, Core::StringView project);
+	// The problems a run found as the diagnostics snapshot holds them: {<path>: {<source>: [diagnostic]}}.
+	Core::String RunProblemsJson(const TaskRun* run);
 
 	// Runs `run` to its end; on a thread of its own, holding no lock. `ended` is notified, under the server lock, when a
 	// run ends.

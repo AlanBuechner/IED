@@ -125,7 +125,7 @@ namespace Ied
 				continue;
 			}
 			Core::String problem;
-			ToolSpec* spec = entry.Member("run").IsValid() ? CommandTool(entry, plugin->manifest->id.View(), problem) : CodeTool(entry, instance, plugin->manifest->id.View(), problem);
+			ToolSpec* spec = entry.Member("run").IsValid() ? CommandTool(entry, plugin->manifest->id.View(), problem) : CodeTool(entry, plugin->manifest->id.View(), problem);
 			if (spec) registry->Add(spec);
 			else problems.Push(problem);
 		}
