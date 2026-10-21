@@ -1,5 +1,5 @@
 include "sha1.ch"
-include "../Text/stringbuilder.ch"
+include "Text/stringbuilder.ch"
 
 namespace Core
 {

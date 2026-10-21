@@ -1,9 +1,9 @@
 include "websocket.ch"
 include "client.ch"
-include "../Container/sha1.ch"
-include "../Platform/system.ch"
-include "../Text/base64.ch"
-include "../Text/stringbuilder.ch"
+include "Container/sha1.ch"
+include "Platform/system.ch"
+include "Text/base64.ch"
+include "Text/stringbuilder.ch"
 
 namespace Http
 {

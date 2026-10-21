@@ -1,5 +1,5 @@
 include "local.ch"
-include "../Text/stringbuilder.ch"
+include "Text/stringbuilder.ch"
 
 [link("c4_local_listen")] void* c4_local_listen(const char* name, char* error, int64 errorCapacity);
 [link("c4_local_accept")] void* c4_local_accept(void* listener, int32 timeoutMs, int32* timedOut, char* error, int64 errorCapacity);

@@ -3,7 +3,7 @@
 // A view of part of a string is not null-terminated, so read it through Data() and ByteLength().
 //     Core::StringView s = Core::StringView("hello");
 
-include "../Container/hash.ch"
+include "Container/hash.ch"
 
 namespace Core
 {

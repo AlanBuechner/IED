@@ -2,8 +2,8 @@
 // API's schemas, each project's code root resolved against its own file. Problems are kept per file with their JSON
 // pointers; a broken project is listed with its problems rather than dropped.
 
-include "../host/schemas.ch"
-include "../fs/glob.ch"
+include "host/schemas.ch"
+include "fs/glob.ch"
 
 namespace Ied
 {

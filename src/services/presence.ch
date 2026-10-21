@@ -1,7 +1,7 @@
 // The "server" topic (docs/10, F-SRV-24): the open workspaces, the connected clients and the notifications; and
 // server.info, server.notify, server.dismiss.
 
-include "../web/rpc.ch"
+include "web/rpc.ch"
 
 namespace Ied
 {

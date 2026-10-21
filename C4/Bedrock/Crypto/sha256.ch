@@ -1,7 +1,7 @@
 // Sha256: the SHA-256 digest (FIPS 180-4) - content hashes, stored digests of secrets, the hash under HMAC.
 //     Crypto::Sha256Digest digest = Crypto::Sha256((const void*)text.Data(), text.ByteLength());
 
-include "../Text/string.ch"
+include "Text/string.ch"
 
 namespace Crypto
 {

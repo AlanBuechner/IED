@@ -2,19 +2,19 @@
 // and the services - under one lock. A method runs holding it (web/rpc.ch); a session takes it for each frame.
 
 include "config.ch"
-include "../web/session.ch"
-include "../services/presence.ch"
-include "../services/workspaces.ch"
-include "../services/documents.ch"
-include "../services/testhooks.ch"
-include "../services/blobs.ch"
-include "../services/outputs.ch"
-include "../auth/auth.ch"
-include "../plugins/host.ch"
+include "web/session.ch"
+include "services/presence.ch"
+include "services/workspaces.ch"
+include "services/documents.ch"
+include "services/testhooks.ch"
+include "services/blobs.ch"
+include "services/outputs.ch"
+include "auth/auth.ch"
+include "plugins/host.ch"
 include "trust.ch"
 include "schemas.ch"
 include "appdata.ch"
-include "../settings/service.ch"
+include "settings/service.ch"
 
 namespace Ied
 {

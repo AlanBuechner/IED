@@ -6,9 +6,9 @@
 //     Serialization::DomNode tree = Serialization::WriteValue(doc, Serialization::DescribeValue(nameof(Config)), (const void*)&config);
 
 include "dom.ch"
-include "../Container/array.ch"
-include "../Container/hashmap.ch"
-include "../Text/string.ch"
+include "Container/array.ch"
+include "Container/hashmap.ch"
+include "Text/string.ch"
 
 namespace Serialization
 {

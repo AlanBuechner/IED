@@ -7,8 +7,8 @@
 //     Core::Array<Serialization::SchemaProblem> problems = Serialization::ValidateJson(schemas, name, "", value);
 
 include "jsonc.ch"
-include "../Text/regex.ch"
-include "../Container/hashmap.ch"
+include "Text/regex.ch"
+include "Container/hashmap.ch"
 
 namespace Serialization
 {

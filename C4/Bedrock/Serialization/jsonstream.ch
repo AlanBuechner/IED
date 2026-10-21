@@ -14,7 +14,7 @@
 
 include "dom.ch"
 include "jsonreader.ch"
-include "../Container/array.ch"
+include "Container/array.ch"
 
 namespace Serialization
 {

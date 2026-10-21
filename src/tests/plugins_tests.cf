@@ -1,6 +1,6 @@
 // plugins/manifest: version ranges, as dependencies and "ied.api" use them.
 
-include "../plugins/manifest.ch"
+include "plugins/manifest.ch"
 
 static bool In(const char* version, const char* range) { return Ied::VersionInRange(Core::StringView(version), Core::StringView(range)); }
 

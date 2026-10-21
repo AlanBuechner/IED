@@ -9,9 +9,9 @@
 
 include "message.ch"
 include "parse.ch"
-include "../Net/tcp.ch"
-include "../Threading/atomic.ch"
-include "../Threading/thread.ch"
+include "Net/tcp.ch"
+include "Threading/atomic.ch"
+include "Threading/thread.ch"
 
 namespace Http
 {

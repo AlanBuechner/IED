@@ -1,6 +1,6 @@
 // settings/merge and catalog helpers: tiers merged per key, and setting keys as JSON pointers.
 
-include "../settings/merge.ch"
+include "settings/merge.ch"
 
 static Core::String Merged(const char* base, const char* over, Ied::MergeKind kind) {
 	return Ied::MergeJson(Core::StringView(base), Core::StringView(over), kind);

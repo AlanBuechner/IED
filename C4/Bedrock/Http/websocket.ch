@@ -11,9 +11,9 @@
 
 include "frames.ch"
 include "message.ch"
-include "../Net/tcp.ch"
-include "../Threading/atomic.ch"
-include "../Threading/mutex.ch"
+include "Net/tcp.ch"
+include "Threading/atomic.ch"
+include "Threading/mutex.ch"
 
 namespace Http
 {

@@ -6,7 +6,7 @@
 // the server lock held.
 
 include "manifest.ch"
-include "../web/rpc.ch"
+include "web/rpc.ch"
 
 namespace Ied
 {

@@ -6,7 +6,7 @@
 
 include "string.ch"
 include "stringview.ch"
-include "../Container/array.ch"
+include "Container/array.ch"
 
 namespace Core
 {

@@ -6,8 +6,8 @@
 //     icon.Extension();                            // ".png"
 //     icon.Parent().FileName();                    // "assets"
 
-include "../Container/array.ch"
-include "../Text/string.ch"
+include "Container/array.ch"
+include "Text/string.ch"
 
 namespace FS
 {

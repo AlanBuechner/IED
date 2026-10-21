@@ -17,7 +17,7 @@
 include "string.ch"
 include "stringview.ch"
 include "stringbuilder.ch"
-include "../Container/array.ch"
+include "Container/array.ch"
 
 namespace Core
 {

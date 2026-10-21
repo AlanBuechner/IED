@@ -1,7 +1,7 @@
 // settings/jsonedit: top-level members found past comments and nesting, and values set, added and removed with the
 // comments and layout around them kept.
 
-include "../settings/jsonedit.ch"
+include "settings/jsonedit.ch"
 
 static Core::String Set(const char* text, const char* key, const char* value) {
 	Core::String edited;

@@ -2,7 +2,7 @@
 // safe choice for anything that must resist a forger.
 //     Core::Sha1Digest digest = Core::Sha1((const void*)text.Data(), text.ByteLength());
 
-include "../Text/string.ch"
+include "Text/string.ch"
 
 namespace Core
 {

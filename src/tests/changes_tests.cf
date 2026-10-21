@@ -1,6 +1,6 @@
 // fs/changes: folding a watcher's changes per path, renames as a delete and a create, overflow, Windows separators.
 
-include "../fs/changes.ch"
+include "fs/changes.ch"
 
 static FS::Change Raw(FS::ChangeKind kind, const char* path) {
 	FS::Change change;

@@ -1,6 +1,6 @@
 include "argon2.ch"
 include "blake2b.ch"
-include "../Platform/memory.ch"
+include "Platform/memory.ch"
 
 namespace Crypto
 {

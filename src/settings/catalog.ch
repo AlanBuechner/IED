@@ -1,7 +1,7 @@
 // SettingsCatalog (docs/07 "Where settings are declared"): every setting the loaded plugins declare - its schema, its
 // default, the tiers it may be set in and how tiers merge it - and the checks a value must pass.
 
-include "../plugins/host.ch"
+include "plugins/host.ch"
 
 namespace Ied
 {

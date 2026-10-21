@@ -4,7 +4,7 @@
 //     if (!Core::Base64Decode(text.View(), back)) ...
 
 include "string.ch"
-include "../Container/array.ch"
+include "Container/array.ch"
 
 namespace Core
 {

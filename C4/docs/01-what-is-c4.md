@@ -156,8 +156,8 @@ int32 main() {
 A unit test, collected when compiling with `-test` (or `nuke test`):
 
 ```c4
-// tests/geometry_tests.cf
-include "../geometry.ch"
+// tests/geometry_tests.cf: a file of the project names another from the project's folder
+include "geometry.ch"
 
 [test("geometry.vec2.add")]
 public static void TestVec2Add() {

@@ -4,8 +4,8 @@
 
 include "devices.ch"
 include "throttle.ch"
-include "../host/securitylog.ch"
-include "../web/rpc.ch"
+include "host/securitylog.ch"
+include "web/rpc.ch"
 
 namespace Ied
 {

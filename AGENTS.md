@@ -26,6 +26,7 @@ design -> implement -> test -> review -> repeat
 5. **The `.ied/` hidden folder is committed** (settings + skills must survive deletion of generated files). Per-machine state goes in `.ied/local/` which is gitignored. Generated build artifacts go under `build/` and are gitignored.
 6. **Theme discipline:** dark only, grayscale base, no off-grays without meaning. Color is reserved for semantic accents (saved = green, unsaved = yellow, error = red, info = blue). Plugins must use the shared CSS theme tokens, never raw hex values. See `docs/07-settings-and-theming.md`.
 7. **Plugins compose on plugins.** New capabilities should be exposed as named bindings/tool calls/skills so other plugins can hook them. If two default plugins need to talk, define a binding rather than a direct dependency.
+8. **Includes name files from the project's source folder** (`include "web/rpc.ch"` anywhere in `src/`), or plainly when the file sits beside the includer (`include "session.ch"`); never with `../`. C4 resolves an include beside the includer first, then in the project's source folders (`C4/docs/language/15-projects.md` rule 3).
 
 ## Working on C4 and Nuke here
 

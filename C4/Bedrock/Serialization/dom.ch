@@ -8,8 +8,8 @@
 //     doc.AddMember(root, "name", doc.NewString("c4"));
 //     int64 version = root.Member("version").AsInt();   // 0: a missing member is an invalid node
 
-include "../Text/stringbuilder.ch"
-include "../Reflection/reflect.ch"
+include "Text/stringbuilder.ch"
+include "Reflection/reflect.ch"
 
 namespace Serialization
 {

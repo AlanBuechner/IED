@@ -1,6 +1,6 @@
 include "file.ch"
-include "../Platform/system.ch"
-include "../Text/stringbuilder.ch"
+include "Platform/system.ch"
+include "Text/stringbuilder.ch"
 
 namespace FS
 {

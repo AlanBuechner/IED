@@ -2,7 +2,7 @@
 // test topics and event floods, streams, delays, counters, chosen failures, a simulated restart, scratch files and
 // server-side document edits. Only a server started with --test-hooks has them.
 
-include "../web/rpc.ch"
+include "web/rpc.ch"
 
 namespace Ied
 {

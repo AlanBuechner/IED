@@ -1,6 +1,6 @@
 include "sha256.ch"
 include "compare.ch"
-include "../Text/stringbuilder.ch"
+include "Text/stringbuilder.ch"
 
 namespace Crypto
 {

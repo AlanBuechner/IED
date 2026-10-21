@@ -3,7 +3,7 @@
 // with conflict when it overlaps one. Server-side writers (a reload from disk, an AI tool) edit as the server, with
 // their own origin. Every method here runs with the server lock held.
 
-include "../fs/textedit.ch"
+include "fs/textedit.ch"
 include "workspaces.ch"
 
 namespace Ied

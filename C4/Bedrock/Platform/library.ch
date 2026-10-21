@@ -6,7 +6,7 @@
 //     if (!physics.IsOpen()) printf("%s\n", physics.Error());
 //     funcptr<int32(int32)> step = (funcptr<int32(int32)>)physics.Find("Step");
 
-include "../Text/string.ch"
+include "Text/string.ch"
 
 namespace Platform
 {

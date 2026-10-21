@@ -1,7 +1,7 @@
 include "model.ch"
-include "../web/json.ch"
-include "../web/params.ch"
-include "../services/workspaces.ch"
+include "web/json.ch"
+include "web/params.ch"
+include "services/workspaces.ch"
 
 namespace Ied
 {

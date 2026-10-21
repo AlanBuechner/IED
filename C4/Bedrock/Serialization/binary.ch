@@ -2,8 +2,8 @@
 // any other field as its raw bytes. Plain data only (no pointers or owning types); the layout comes from
 // the reflection registry, so a new field needs no change here.
 
-include "../Text/stringbuilder.ch"
-include "../Reflection/reflect.ch"
+include "Text/stringbuilder.ch"
+include "Reflection/reflect.ch"
 
 namespace Serialization
 {

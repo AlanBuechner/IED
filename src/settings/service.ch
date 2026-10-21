@@ -4,7 +4,7 @@
 
 include "tierfile.ch"
 include "merge.ch"
-include "../fs/watching.ch"
+include "fs/watching.ch"
 
 namespace Ied
 {

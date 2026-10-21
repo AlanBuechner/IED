@@ -10,7 +10,7 @@
 
 include "jsonstream.ch"
 include "reflectvalue.ch"
-include "../FS/chunks.ch"
+include "FS/chunks.ch"
 
 namespace Serialization
 {

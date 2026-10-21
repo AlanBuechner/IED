@@ -1,5 +1,5 @@
 include "server.ch"
-include "../Text/stringbuilder.ch"
+include "Text/stringbuilder.ch"
 
 namespace Http
 {

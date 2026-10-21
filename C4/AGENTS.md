@@ -114,6 +114,7 @@ Code should be easy to read, locally reason about, and extend without touching u
 - Errors are explicit and handled at the level that can act on them; don't swallow them, don't silently default, and never `exit()`/abort from library code when a result type will do.
 - Encapsulate ad-hoc data structures: if several functions in a class mirror the same low-level bookkeeping (same lowercasing, same insertion search), that's an un-named data structure — extract it into its own type and let the callers use the brick.
 - Refactor as you go: when touching code that violates these rules while fixing something else, clean it up in the same change rather than leaving debt behind.
+- Includes name a file from the project's source folder (Bedrock: its root, `include "Text/string.ch"`), or plainly when it sits beside the includer; never with `../` (an include resolves beside the includer first, then in the project's folders: docs/language/15-projects.md rule 3).
 - The build and the full test suite must pass before work is considered done.
 
 ## Additional notes

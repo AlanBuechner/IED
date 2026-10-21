@@ -1,6 +1,6 @@
 include "workspaces.ch"
-include "../host/server.ch"
-include "../host/trust.ch"
+include "host/server.ch"
+include "host/trust.ch"
 
 namespace Ied
 {

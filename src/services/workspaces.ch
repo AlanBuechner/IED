@@ -5,9 +5,9 @@
 // published as tree.changed and reaches the documents open on it, while the server's own writes are recognized by the
 // digest of what it wrote and not reported twice.
 
-include "../web/rpc.ch"
-include "../fs/watching.ch"
-include "../solutions/model.ch"
+include "web/rpc.ch"
+include "fs/watching.ch"
+include "solutions/model.ch"
 
 namespace Ied
 {

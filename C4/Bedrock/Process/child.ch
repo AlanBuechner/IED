@@ -11,9 +11,9 @@
 //     int64 read = git.Read(Process::Stream::Output, (void*)&text[0], 4096);
 //     int64 exitCode = git.Wait();
 
-include "../Text/string.ch"
-include "../Text/stringview.ch"
-include "../Container/array.ch"
+include "Text/string.ch"
+include "Text/stringview.ch"
+include "Container/array.ch"
 
 namespace Process
 {

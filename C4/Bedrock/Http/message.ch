@@ -4,11 +4,11 @@
 //     response.SetText("application/json", Core::StringView("{\"ok\":true}"));
 //     response.headers.Set("Cache-Control", "no-store");
 
-include "../Container/array.ch"
-include "../Net/tcp.ch"
-include "../Text/string.ch"
-include "../Text/stringview.ch"
-include "../Threading/atomic.ch"
+include "Container/array.ch"
+include "Net/tcp.ch"
+include "Text/string.ch"
+include "Text/stringview.ch"
+include "Threading/atomic.ch"
 
 namespace Http
 {

@@ -1,6 +1,6 @@
 // fs/glob: '*', '?' and "**" against paths, case folded; what counts as a glob.
 
-include "../fs/glob.ch"
+include "fs/glob.ch"
 
 static bool Match(const char* pattern, const char* path) { return Ied::GlobMatch(Core::StringView(pattern), Core::StringView(path)); }
 

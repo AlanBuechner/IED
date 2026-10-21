@@ -6,7 +6,7 @@
 //     watched.Push(Net::PollEntry::For(client.Socket(), Net::kReadable));
 //     if (Net::Poll(watched, 100) > 0 && (watched[0].ready & Net::kReadable) != 0) ...
 
-include "../Container/array.ch"
+include "Container/array.ch"
 
 namespace Net
 {

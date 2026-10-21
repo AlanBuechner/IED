@@ -1,5 +1,5 @@
 include "textedit.ch"
-include "../web/json.ch"
+include "web/json.ch"
 
 namespace Ied
 {

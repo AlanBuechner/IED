@@ -5,7 +5,7 @@
 
 include "message.ch"
 include "parse.ch"
-include "../Net/tcp.ch"
+include "Net/tcp.ch"
 
 namespace Http
 {

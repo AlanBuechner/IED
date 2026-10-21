@@ -8,8 +8,8 @@
 //     Particle* p = (Particle*)particles.Take();
 
 include "gc.ch"
-include "../Container/array.ch"
-include "../Threading/mutex.ch"
+include "Container/array.ch"
+include "Threading/mutex.ch"
 
 namespace GC
 {

@@ -1,5 +1,5 @@
 include "authgate.ch"
-include "../host/server.ch"
+include "host/server.ch"
 
 namespace Ied
 {

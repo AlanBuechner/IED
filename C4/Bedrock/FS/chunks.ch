@@ -5,10 +5,10 @@
 //     for (Core::StringView chunk = file.Next(); !chunk.IsEmpty(); chunk = file.Next()) json.Feed(chunk);
 
 include "file.ch"
-include "../Container/array.ch"
-include "../Threading/thread.ch"
-include "../Threading/mutex.ch"
-include "../Threading/condition.ch"
+include "Container/array.ch"
+include "Threading/thread.ch"
+include "Threading/mutex.ch"
+include "Threading/condition.ch"
 
 namespace FS
 {

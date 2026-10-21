@@ -3,8 +3,8 @@
 //     Platform::ProcessorInfo cpu = Platform::GetProcessorInfo();
 //     Core::String home = Platform::GetEnvironmentVariable("USERPROFILE");
 
-include "../Text/string.ch"
-include "../FS/path.ch"
+include "Text/string.ch"
+include "FS/path.ch"
 
 namespace Platform
 {

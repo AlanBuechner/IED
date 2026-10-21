@@ -1,5 +1,5 @@
 include "documents.ch"
-include "../host/server.ch"
+include "host/server.ch"
 
 namespace Ied
 {

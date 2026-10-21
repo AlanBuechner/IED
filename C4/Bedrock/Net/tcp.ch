@@ -11,7 +11,7 @@
 
 include "address.ch"
 include "outcome.ch"
-include "../Text/stringview.ch"
+include "Text/stringview.ch"
 
 namespace Net
 {

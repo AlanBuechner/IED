@@ -1,7 +1,7 @@
 include "schema.ch"
-include "../FS/file.ch"
-include "../FS/info.ch"
-include "../Text/integer.ch"
+include "FS/file.ch"
+include "FS/info.ch"
+include "Text/integer.ch"
 
 namespace Serialization
 {

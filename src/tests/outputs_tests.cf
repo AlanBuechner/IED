@@ -1,6 +1,6 @@
 // services/outputs: an output's tail kept to its last bytes, cut at a line start.
 
-include "../services/outputs.ch"
+include "services/outputs.ch"
 
 [test("server.outputs")]
 class OutputUnitTests {

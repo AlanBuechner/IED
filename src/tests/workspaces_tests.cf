@@ -1,6 +1,6 @@
 // services/workspaces' honest parts: workspace-relative paths and the paths no one browses.
 
-include "../services/workspaces.ch"
+include "services/workspaces.ch"
 
 static bool Refused(const char* path) {
 	try {

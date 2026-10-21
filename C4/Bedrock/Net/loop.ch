@@ -10,10 +10,10 @@
 
 include "poll.ch"
 include "udp.ch"
-include "../Container/hashmap.ch"
-include "../Container/queue.ch"
-include "../Threading/mutex.ch"
-include "../Threading/atomic.ch"
+include "Container/hashmap.ch"
+include "Container/queue.ch"
+include "Threading/mutex.ch"
+include "Threading/atomic.ch"
 
 namespace Net
 {

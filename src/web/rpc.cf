@@ -1,6 +1,6 @@
 include "rpc.ch"
 include "session.ch"
-include "../host/server.ch"
+include "host/server.ch"
 
 namespace Ied
 {

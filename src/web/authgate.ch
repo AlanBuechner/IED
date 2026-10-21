@@ -3,7 +3,7 @@
 // as it needs it.
 
 include "json.ch"
-include "../auth/devices.ch"
+include "auth/devices.ch"
 
 namespace Ied
 {

@@ -2,7 +2,7 @@
 // owner. Argon2id is the type for passwords; password.ch keeps a hash with its costs and salt as one string.
 //     Crypto::Argon2(Crypto::DefaultArgon2Params(), input, (void*)&tag[0]);
 
-include "../Text/string.ch"
+include "Text/string.ch"
 
 namespace Crypto
 {

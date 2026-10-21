@@ -1,7 +1,7 @@
 // auth/throttle and web/authgate's parsing: the lockout schedule, cookie and query values, device names.
 
-include "../auth/throttle.ch"
-include "../web/authgate.ch"
+include "auth/throttle.ch"
+include "web/authgate.ch"
 
 static Core::StringView View(const char* text) { return Core::StringView(text); }
 

@@ -1,7 +1,7 @@
 // AppDataWatch: the app data folder watched (docs/07 "Live", docs/02 "Lifecycle"): a changed settings.json is read
 // again, and a change under plugins/ re-runs the plugin lifecycle, so app plugins load, change and go without a restart.
 
-include "../fs/watching.ch"
+include "fs/watching.ch"
 
 namespace Ied
 {

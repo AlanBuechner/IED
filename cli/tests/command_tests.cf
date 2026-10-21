@@ -1,7 +1,7 @@
 // The `ied` command line: locations with lines and columns, verbs, options and what is refused.
 
-include "../command.ch"
-include "../client.ch"
+include "command.ch"
+include "client.ch"
 
 static Cli::Command Parsed(const char* first, const char* second, bool& ok) {
 	Core::Array<Core::String> arguments;

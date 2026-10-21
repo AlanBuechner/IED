@@ -4,7 +4,7 @@
 // tasks add theirs in M3. out.sources lists a workspace's sources, out.clear empties one. Members run with the server
 // lock held.
 
-include "../web/rpc.ch"
+include "web/rpc.ch"
 
 namespace Ied
 {

@@ -2,7 +2,7 @@
 // printf.
 //     Platform::WriteError(Core::StringView("warning: the cache is stale\n"));
 
-include "../Text/stringview.ch"
+include "Text/stringview.ch"
 
 namespace Platform
 {

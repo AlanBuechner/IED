@@ -1,6 +1,6 @@
 include "catalog.ch"
-include "../web/json.ch"
-include "../web/params.ch"
+include "web/json.ch"
+include "web/params.ch"
 
 namespace Ied
 {

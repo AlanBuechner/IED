@@ -31,17 +31,21 @@ shared declarations in a `.ch`, definitions in the paired `.cf`.
 **Status:** **Implemented**
 
 ```c4
-include "Player.ch"
-include "../Framework/Assert.ch"
-include "bedrock.ch"
+include "Player.ch"                  // beside this file
+include "Framework/Assert.ch"        // from the project's source folder, wherever this file is
+include "bedrock.ch"                 // the default library
 ```
 
 - `include` is a declaration, not a textual preprocessor directive. It is only allowed at file root.
 - The path is a string literal naming a `.ch` file; a trailing `;` is optional.
 - Resolution, the first match winning: relative to the including file's directory (`..` works); the
   including file's project folders (the input folders and `-I` folders of a plain command line); the folders of
-  the projects it depends on ([15](15-projects.md)); the default library. A bare name finds a file only there:
-  `include "math.ch"` does not pick some nested `x/math.ch`.
+  the projects it depends on ([15](15-projects.md)); the default library (and, for a file of the default library,
+  the library's root). A bare name finds a file only there: `include "math.ch"` does not pick some nested
+  `x/math.ch`.
+- So a file deep in a project names another by its path from the project's source folder, `include "web/rpc.ch"`,
+  and never needs `..`; that is the convention for every project in this repository, the default library included
+  (`include "Text/string.ch"` from `Bedrock/Crypto/`).
 - An include cycle of any length is an error at the include that closes it (`Cyclic include detected: 'b.ch'
   includes this file (directly or through the files it includes)`); a file including itself says so.
 

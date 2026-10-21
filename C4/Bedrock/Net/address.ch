@@ -4,8 +4,8 @@
 //     Net::Address parsed = Net::ParseAddress("[::1]:443");
 //     Net::Resolution found = Net::Resolve("localhost", 80);           // every address the name has
 
-include "../Container/array.ch"
-include "../Text/string.ch"
+include "Container/array.ch"
+include "Text/string.ch"
 
 namespace Net
 {

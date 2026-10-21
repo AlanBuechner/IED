@@ -1,7 +1,7 @@
 // Outcome: what a socket's last call came to (D-65) - why it failed, empty when it succeeded, and whether it gave up
 // waiting. TcpStream, TcpListener and UdpSocket each keep one.
 
-include "../Text/string.ch"
+include "Text/string.ch"
 
 namespace Net
 {

@@ -10,7 +10,7 @@
 
 include "jobqueue.ch"
 include "thread.ch"
-include "../Container/array.ch"
+include "Container/array.ch"
 
 namespace Threading
 {

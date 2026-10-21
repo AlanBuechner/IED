@@ -1,5 +1,5 @@
 include "jsontokens.ch"
-include "../Text/integer.ch"
+include "Text/integer.ch"
 
 namespace Serialization
 {

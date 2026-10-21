@@ -4,7 +4,7 @@
 //     out.Write("hello", 5);
 // Modes are C mode strings: "r" read, "w" write (truncate), "a" append, and the binary "rb", "wb", "ab".
 
-include "../Text/string.ch"
+include "Text/string.ch"
 
 namespace FS
 {
