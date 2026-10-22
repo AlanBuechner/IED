@@ -297,6 +297,7 @@ GCSpan* gc_pages_split(GCPageHeap* heap, GCSpan* span, size_t npages)
 
 void gc_pages_free(GCPageHeap* heap, GCSpan* span, uint64_t epoch)
 {
+	if (span->tags) gc_mem_free((void*)span->tags);
 	set_pages(heap, span->base, span->npages, NULL);
 	uint8_t* base = span->base;
 	const size_t npages = span->npages;

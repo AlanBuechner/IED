@@ -135,6 +135,8 @@ namespace Scripting
 		/// The thunk named `symbol` for `target` (shared: calling the code it is given), or null when an argument cannot be
 		/// passed.
 		llvm::Function* LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared);
+		/// The code reflection records as `target`'s address; none for a function without code (a pure virtual method).
+		llvm::Function* CodeOf(const FunctionRecord& target);
 		/// Reflected functions with code to call that have not been considered for a thunk yet: a body emitted
 		/// here, or a virtual method (the thunk dispatches through the object).
 		Core::Vector<const FunctionRecord*> NewInvokeTargets(ProgramModel& model);

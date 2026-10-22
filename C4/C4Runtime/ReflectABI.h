@@ -139,6 +139,7 @@ typedef struct c4_function_info {
     uint32_t annotationCount;      // the annotations the compiler does not act on (D-42)
     const c4_annotation_info* annotations;
     const void* code;              // what a shared invoke thunk calls; NULL for a thunk of its own
+    const void* address;           // the function's own code; NULL when reflection cannot call it
 } c4_function_info;
 
 // Everything one image registers: a program's (or a script's) types, its variables with their addresses, and its
@@ -188,6 +189,9 @@ uint32_t reflect_function_count(void);
 const c4_type_info*     reflect_type_by_index(uint32_t i);
 const c4_variable_info* reflect_variable_by_index(uint32_t i);
 const c4_function_info* reflect_function_by_index(uint32_t i);
+// The function whose code holds `address` (a return address of a sampled stack, say), found by the unwind data of the
+// code there (a leaf without any is found only by its first byte); null when it is no reflected function's.
+const c4_function_info* reflect_function_containing(const void* address);
 uint32_t reflect_kind_of(const void* handle);
 
 // --- types ---------------------------------------------------------------------------------------------
@@ -240,6 +244,7 @@ const c4_type_info* reflect_variable_type_handle(const c4_variable_info* v);
 const char*  reflect_function_handle_name(const c4_function_info* f);
 const char*  reflect_function_handle_tag(const c4_function_info* f);
 const char*  reflect_function_handle_symbol(const c4_function_info* f);
+const void*  reflect_function_handle_address(const c4_function_info* f);
 uint32_t     reflect_function_handle_param_count(const c4_function_info* f);
 uint32_t     reflect_function_handle_is_static(const c4_function_info* f);
 const char*  reflect_function_handle_owner(const c4_function_info* f);

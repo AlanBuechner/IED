@@ -63,6 +63,7 @@ void gc_reclaim(GCState* gc)
 	gc->collections++;
 	gc_heap_sweep(&gc->heap, gc->collections);
 	gc_pools_sweep(gc->pools, &gc->releases, &gc->heap.liveBytes);
+	if (gc->census.on) gc_census_take(&gc->census, &gc->heap);
 	gc->heap.allocateMarked = 0;
 	gc_pages_scavenge(&gc->heap.pages, gc->collections);
 	gc->nextCollection = next_collection(gc_heap_live_bytes(&gc->heap), gc->percent, gc->minTrigger);

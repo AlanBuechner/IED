@@ -113,7 +113,7 @@ namespace Scripting
 				m_Functions.push_back(m_Tables.Row(m_Tables.function, { Text(name), Text(function.mangledName.c_str()),
 					TypeText(function.type->GetReturnType()), params.count, params.rows, U32(function.isStatic || !owner ? 1 : 0),
 					U32(function.type->IsVariadic() ? 1 : 0), Text(owner ? std::string(QualifiedName(owner).c_str()) : std::string()),
-					groups.count, groups.rows, Invoke(&function), annotations.count, annotations.rows, Code(&function) }));
+					groups.count, groups.rows, Invoke(&function), annotations.count, annotations.rows, Code(&function), Address(&function) }));
 			}
 
 			llvm::GlobalVariable* Finish()
@@ -151,6 +151,9 @@ namespace Scripting
 
 			// The code the function's shared thunk calls, or null for a thunk of its own.
 			llvm::Constant* Code(const FunctionRecord* function) { return Entry(function, &InvokeEntry::code); }
+
+			// The function's own code, which FunctionContaining finds a return address in; null when it has no thunk.
+			llvm::Constant* Address(const FunctionRecord* function) { return Entry(function, &InvokeEntry::function); }
 
 			llvm::Constant* Entry(const FunctionRecord* function, llvm::Function* InvokeEntry::*part)
 			{

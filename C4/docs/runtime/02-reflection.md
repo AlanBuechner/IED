@@ -118,7 +118,7 @@ missing name or index gives an invalid handle, so check `IsValid()`.
 | `Param` | `IsValid, Name, TypeName, TypeOf` |
 | `EnumValue` | `IsValid, Name, Value` |
 | `Variable` | `IsValid, Name, Tag, TypeName, IsConst, OwnerName, TypeOf, Address` |
-| `Function` | `IsValid, Name, Tag, Symbol, ParamCount, ParamAt(i), IsStatic, OwnerName, ReturnTypeName, ReturnType, IsInvokable, Invoke(result, arguments), InvokeOn(object, result, arguments), Call(result, args...), CallOn(object, result, args...)` |
+| `Function` | `IsValid, Name, Tag, Symbol, Address` (its code; `nullptr` when it is not invokable)`, ParamCount, ParamAt(i), IsStatic, OwnerName, ReturnTypeName, ReturnType, IsInvokable, Invoke(result, arguments), InvokeOn(object, result, arguments), Call(result, args...), CallOn(object, result, args...)` |
 | `Group` | constructed from a name; `IsValid, Count, Item(i), KindOf(item)` (an `EntityKind`) |
 
 `Type` also has `StaticVariableCount` and `StaticVariableAt(i)` for its static data members. `Type`, `Field`,
@@ -128,7 +128,12 @@ missing name or index gives an invalid handle, so check `IsValid()`.
 Free functions in `Reflection`: `FindType`, `FindVariable`, `FindFunction`, `TypeAt`, `VariableAt`,
 `FunctionAt`, `TypeCount`, `VariableCount`, `FunctionCount`,
 `GroupNameCount`, `GroupNameAt`, `UnloadSource`, `OnUnload`,
-`RemoveUnloadListener`. Counts and indices are `int64`, as everywhere in Bedrock.
+`RemoveUnloadListener`, and `FunctionContaining(address)`: the reflected function whose code holds a code address,
+such as a return address in `GC::AllocSample::frames`. It finds the start of the code there by its unwind data (a
+chained entry leads to its function's primary one) and the function whose `Address` that is; invalid for an address
+in no reflected function or in a function reflection cannot call. A leaf function the optimizer gave no frame has no
+unwind data, so only its first byte finds it (a sampled frame is never one: it calls the allocator). Counts and
+indices are `int64`, as everywhere in Bedrock.
 
 Example (from `Bedrock/Tests/reflection_tests.cf`):
 

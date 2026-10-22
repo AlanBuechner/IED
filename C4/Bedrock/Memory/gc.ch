@@ -51,6 +51,21 @@ namespace GC
 	// Moves up to `capacity` of the oldest waiting samples to `out`: how many. The latest 4096 are kept.
 	[link("c4_gc_take_alloc_samples")] int32 TakeAllocSamples(AllocSample* out, int32 capacity);
 
+	// The live objects of one type in a census (SetCensus).
+	struct CensusEntry
+	{
+		public const char* type;    // its qualified name (Reflection's), `T[]` for an array of T; nullptr: not known
+		public uint64 objects;
+		public uint64 bytes;        // the slots they occupy
+	}
+	// While on, every `new` notes its type, and each collection counts the live objects by it (LastCensus); objects
+	// made before it was on, by native code or in a Pool are of no known type. It costs 8 bytes beside each slot of the
+	// spans allocated from and a walk of the live objects at each collection. Returns whether it was on.
+	[link("c4_gc_set_census")] bool SetCensus(bool on);
+	// The last census (taken by the last collection while it was on) into `out` (room for `capacity`), one entry a
+	// type name, by name, the unknown first: how many entries it has. Read it in a collection-result callback.
+	[link("c4_gc_last_census")] int32 LastCensus(CensusEntry* out, int32 capacity);
+
 	// One stop of the program by a collection, in nanoseconds of the system's high-resolution counter
 	// (Platform::Ticks() scaled by 1e9 / Platform::TickFrequency()).
 	struct Pause

@@ -141,6 +141,40 @@ const c4_function_info* c4_reflect_register_function(const char* tag, const c4_f
     return registered;
 }
 
+// The first byte of the function whose code holds `address`, by its unwind data: a chained entry (code the compiler
+// moved apart) leads to its function's primary one. NULL when the code there has none.
+static const void* code_start(const void* address)
+{
+    DWORD64 imageBase = 0;
+    PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry((DWORD64)(uintptr_t)address, &imageBase, NULL);
+    for (int hops = 0; entry && hops < 32; ++hops)
+    {
+        if (entry->UnwindData & 1u) { entry = (PRUNTIME_FUNCTION)(imageBase + (entry->UnwindData & ~(DWORD)1u)); continue; }
+        const uint8_t* info = (const uint8_t*)(imageBase + entry->UnwindData);
+        const uint8_t kChainInfo = 4;
+        if (((info[0] >> 3) & kChainInfo) == 0) return (const void*)(imageBase + entry->BeginAddress);
+        const uint8_t codeCount = info[2];
+        entry = (PRUNTIME_FUNCTION)(info + 4 + 2u * ((codeCount + 1u) & ~1u));
+    }
+    return NULL;
+}
+
+const c4_function_info* reflect_function_containing(const void* address)
+{
+    if (!address) return 0;
+    const void* found_start = code_start(address);
+    const void* start = found_start ? found_start : address;   // a leaf without unwind data: only its first byte
+    rt_registry* r = reading();
+    const c4_function_info* found = 0;
+    for (uint32_t i = 0; i < r->fns.count && !found; i++)
+    {
+        const rt_function* f = (const rt_function*)r->fns.items[i];
+        if (f->base.address == start) found = &f->base;
+    }
+    done_reading(r);
+    return found;
+}
+
 void c4_reflect_register_image(const char* tag, const c4_reflect_image* image)
 {
     if (!image) return;

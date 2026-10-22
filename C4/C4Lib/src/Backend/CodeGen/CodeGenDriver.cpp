@@ -234,13 +234,19 @@ namespace Scripting
 	{
 		if (!SharesInvokeThunk(model, target))
 		{
-			if (llvm::Function* own = LowerInvokeThunk(model, target, InvokeThunkSymbol(target), false)) m_Thunks[&target] = { own, nullptr };
+			if (llvm::Function* own = LowerInvokeThunk(model, target, InvokeThunkSymbol(target), false))
+				m_Thunks[&target] = { own, nullptr, CodeOf(target) };
 			return;
 		}
 		const std::string symbol = SharedInvokeThunkSymbol(target);
 		auto [entry, fresh] = m_SharedThunks.try_emplace(symbol, nullptr);
 		if (fresh) entry->second = LowerInvokeThunk(model, target, symbol, true);
-		if (entry->second) m_Thunks[&target] = { entry->second, m_MCtx.GetOrCreateFunction(target) };
+		if (entry->second) m_Thunks[&target] = { entry->second, m_MCtx.GetOrCreateFunction(target), CodeOf(target) };
+	}
+
+	llvm::Function* CodeGenDriver::CodeOf(const FunctionRecord& target)
+	{
+		return HasCode(target) ? m_MCtx.GetOrCreateFunction(target) : nullptr;
 	}
 
 	llvm::Function* CodeGenDriver::LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared)

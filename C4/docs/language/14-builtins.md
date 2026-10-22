@@ -171,14 +171,14 @@ About 85 low-level builtins operate on opaque handles (`void*`). Name accessors 
 
 | Group | Builtins |
 |---|---|
-| registry lookup | `reflect_type`, `reflect_type_by_index`, `reflect_count`, `reflect_variable`, `reflect_variable_by_index`, `reflect_variable_count`, `reflect_function`, `reflect_function_by_index`, `reflect_function_count`, `reflect_kind_of` |
+| registry lookup | `reflect_type`, `reflect_type_by_index`, `reflect_count`, `reflect_variable`, `reflect_variable_by_index`, `reflect_variable_count`, `reflect_function`, `reflect_function_by_index`, `reflect_function_count`, `reflect_function_containing`, `reflect_kind_of` |
 | type queries | `reflect_name`, `reflect_size`, `reflect_align`, `reflect_base_name`, `reflect_is_virtual_type`, `reflect_field_count`, `reflect_method_count`, `reflect_enum_count`, `reflect_type_static_variable_count`, `reflect_type_static_variable_at` |
 | fields | `reflect_field`, `reflect_field_at`, `reflect_field_handle_name`, `reflect_field_handle_offset`, `reflect_field_handle_size`, `reflect_field_handle_type_name`, `reflect_field_handle_is_const`, `reflect_field_type_handle` |
 | methods | `reflect_method`, `reflect_method_at`, `reflect_method_handle_name`, `reflect_method_handle_param_count`, `reflect_method_handle_is_virtual`, `reflect_method_handle_is_static`, `reflect_method_handle_is_const`, `reflect_method_handle_return_type_name`, `reflect_method_param`, `reflect_method_return_handle` |
 | parameters | `reflect_param_handle_name`, `reflect_param_handle_type_name`, `reflect_param_type_handle` |
 | enums | `reflect_enum_at`, `reflect_enum_handle_name`, `reflect_enum_handle_value` |
 | variables | `reflect_variable_handle_name`, `reflect_variable_handle_type_name`, `reflect_variable_handle_is_const`, `reflect_variable_handle_owner`, `reflect_variable_type_handle`, `reflect_variable_address` |
-| functions | `reflect_function_handle_name`, `reflect_function_handle_symbol`, `reflect_function_handle_param_count`, `reflect_function_handle_is_static`, `reflect_function_handle_owner`, `reflect_function_handle_return_type_name`, `reflect_function_param`, `reflect_function_return_handle` |
+| functions | `reflect_function_handle_name`, `reflect_function_handle_symbol`, `reflect_function_handle_address`, `reflect_function_handle_param_count`, `reflect_function_handle_is_static`, `reflect_function_handle_owner`, `reflect_function_handle_return_type_name`, `reflect_function_param`, `reflect_function_return_handle` |
 | invoke | `reflect_function_is_invokable`, `reflect_method_is_invokable`, `reflect_function_invoke(f, object, result, arguments)`, `reflect_method_invoke(m, object, result, arguments)` |
 | annotations | `reflect_<entity>_annotation_count`, `reflect_<entity>_annotation_at` for `type`, `field`, `method`, `param`, `variable`, `function`; `reflect_annotation_name`, `reflect_annotation_arg_count`, `reflect_annotation_arg_kind` (1 int, 2 float, 3 bool, 4 string), `reflect_annotation_arg_int`, `reflect_annotation_arg_float`, `reflect_annotation_arg_string` |
 | groups | `reflect_group`, `reflect_group_handle_count`, `reflect_group_handle_item`, `reflect_group_name_count`, `reflect_group_name_at` |

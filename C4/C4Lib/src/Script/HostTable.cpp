@@ -54,7 +54,7 @@ namespace Scripting
 	{
 		static const std::vector<const char*> kNames = {
 			// what codegen calls (Backend/CodeGen)
-			"c4_alloc", "c4_alloc_noscan", "c4_free", "c4_gc_register_finalizer", "c4_dynamic_cast", "c4_instance_of", "c4_purecall",
+			"c4_alloc", "c4_alloc_noscan", "c4_alloc_typed", "c4_alloc_typed_noscan", "c4_free", "c4_gc_register_finalizer", "c4_dynamic_cast", "c4_instance_of", "c4_purecall",
 			"c4_noexcept_violation", "c4_once_begin", "c4_once_end", "c4_once_abandon", "c4_thread_once_abandon", "c4_thread_once_reentered",
 			"c4_reflect_register_image", "__CxxFrameHandler3",
 			// the test harness and assertions, for a script's tests

@@ -21,7 +21,7 @@ namespace Scripting
 		enumValue = llvm::StructType::get(m_Context, { ptr, u64 });
 		typeInfo = llvm::StructType::get(m_Context, { u32, ptr, u64, u64, u32, ptr, u32, ptr, ptr, u32, ptr, u32, ptr, u32, ptr });
 		variable = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u64, u64, u32, ptr, u32, ptr, u32, ptr });
-		function = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u32, ptr, u32, u32, ptr, u32, ptr, ptr, u32, ptr, ptr });
+		function = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u32, ptr, u32, u32, ptr, u32, ptr, ptr, u32, ptr, ptr, ptr });
 		image = llvm::StructType::get(m_Context, { u32, ptr, u32, ptr, ptr, u32, ptr });
 	}
 

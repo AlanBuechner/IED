@@ -236,16 +236,16 @@ namespace Testing
 					if (f.getName().starts_with("Pointing")) linked = CalleesOf(f);
 				}
 				widths = true;
-				for (const char* name : { "c4_alloc", "c4_alloc_noscan" })
+				for (const char* name : { "c4_alloc_typed", "c4_alloc_typed_noscan" })
 				{
 					const llvm::Function* alloc = m.getFunction(name);
-					widths = widths && alloc && alloc->arg_size() == 2 && alloc->getArg(0)->getType()->isIntegerTy(64) &&
-						alloc->getArg(1)->getType()->isIntegerTy(64);
+					widths = widths && alloc && alloc->arg_size() == 3 && alloc->getArg(0)->getType()->isIntegerTy(64) &&
+						alloc->getArg(1)->getType()->isIntegerTy(64) && alloc->getArg(2)->getType()->isPointerTy();
 				}
 			}));
 		TEST_ASSERT(widths);
-		TEST_ASSERT(Contains(plain, "c4_alloc_noscan") && !Contains(plain, "c4_alloc"));
-		TEST_ASSERT(Contains(linked, "c4_alloc") && !Contains(linked, "c4_alloc_noscan"));
+		TEST_ASSERT(Contains(plain, "c4_alloc_typed_noscan") && !Contains(plain, "c4_alloc_typed"));
+		TEST_ASSERT(Contains(linked, "c4_alloc_typed") && !Contains(linked, "c4_alloc_typed_noscan"));
 	}
 
 	void CodeGenTest::GcRootsListEveryPointerHoldingGlobal()

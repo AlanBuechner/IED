@@ -1,0 +1,121 @@
+// GC: the census of live objects by type, after each collection while it is on. Each test counts types of its
+// own, so what another test left reachable does not change its counts.
+
+include "bedrock.ch"
+
+class CensusApple { public int64 index; public CensusApple* next; }
+class CensusPear { public int64 index; public CensusPear* next; }
+class CensusPlum { public int64 index; public CensusPlum* next; }
+class CensusFig { public int64 index; public CensusFig* next; }
+class CensusKiwi { public int64 index; public CensusKiwi* next; }
+class CensusLime { public int64 index; public CensusLime* next; }
+
+// `count` objects, each reached from the next: the last one made.
+template<T> static T* Chain(int32 count) {
+	T* last = nullptr;
+	for (int32 i = 0; i < count; ++i) {
+		T* made = new T();
+		made->index = i;
+		made->next = last;
+		last = made;
+	}
+	return last;
+}
+
+// The last census's entry for `type` (nullptr: of no known type), or an empty one.
+static GC::CensusEntry CensusOf(const char* type) {
+	GC::CensusEntry[512] entries;
+	const int32 count = GC::LastCensus(&entries[0], 512);
+	for (int32 i = 0; i < count && i < 512; ++i) {
+		const bool same = type == nullptr ? entries[i].type == nullptr : entries[i].type != nullptr && strcmp((void*)entries[i].type, (void*)type) == 0;
+		if (same) return entries[i];
+	}
+	GC::CensusEntry none;
+	return none;
+}
+
+[test("gc_census")]
+class GcCensusTests {
+	[test("counts_live_objects_by_type")]
+	public static void TestCountsLiveObjectsByType() {
+		const bool was = GC::SetCensus(true);
+		CensusApple* apples = Chain<CensusApple>(100);
+		CensusPear* pears = Chain<CensusPear>(30);
+		GC::Collect();
+		const GC::CensusEntry apple = CensusOf("CensusApple");
+		const GC::CensusEntry pear = CensusOf("CensusPear");
+		GC::SetCensus(was);
+		assert_true(apples->index == 99 && pears->index == 29, "the objects");
+		assert_true(apple.objects == 100u, "a hundred of one type");
+		assert_true(pear.objects == 30u, "thirty of the other");
+		assert_true(apple.bytes >= 100u * sizeof(CensusApple) && apple.bytes % 100u == 0u, "each in a slot of its size");
+	}
+
+	[test("a_rising_count_shows")]
+	public static void TestARisingCountShows() {
+		const bool was = GC::SetCensus(true);
+		CensusPlum* first = Chain<CensusPlum>(40);
+		GC::Collect();
+		const uint64 before = CensusOf("CensusPlum").objects;
+		CensusPlum* second = Chain<CensusPlum>(25);
+		GC::Collect();
+		const uint64 after = CensusOf("CensusPlum").objects;
+		GC::SetCensus(was);
+		assert_true(first->index == 39 && second->index == 24, "both kept");
+		assert_true(before == 40u && after == 65u, "the kept ones add up");
+	}
+
+	[test("arrays_are_their_own_type")]
+	public static void TestArraysAreTheirOwnType() {
+		const bool was = GC::SetCensus(true);
+		CensusFig* run = new CensusFig[8];
+		run[7].index = 7;
+		GC::Collect();
+		const GC::CensusEntry figs = CensusOf("CensusFig[]");
+		GC::SetCensus(was);
+		assert_true(run[7].index == 7, "the run");
+		assert_true(figs.objects == 1u && figs.bytes >= 8u * sizeof(CensusFig), "one run of eight");
+	}
+
+	[test("objects_from_before_have_no_type")]
+	public static void TestObjectsFromBeforeHaveNoType() {
+		const bool was = GC::SetCensus(false);
+		CensusKiwi* early = Chain<CensusKiwi>(12);
+		GC::SetCensus(true);
+		GC::Collect();
+		const GC::CensusEntry typed = CensusOf("CensusKiwi");
+		const GC::CensusEntry untyped = CensusOf(nullptr);
+		GC::SetCensus(was);
+		assert_true(early->index == 11, "the early ones");
+		assert_true(typed.objects == 0u, "not counted by their type");
+		assert_true(untyped.objects >= 12u, "but as of no known type");
+	}
+
+	[test("entries_are_by_name")]
+	public static void TestEntriesAreByName() {
+		const bool was = GC::SetCensus(true);
+		CensusLime* limes = Chain<CensusLime>(3);
+		GC::Collect();
+		GC::CensusEntry[512] entries;
+		const int32 count = GC::LastCensus(&entries[0], 512);
+		GC::SetCensus(was);
+		assert_true(limes->index == 2 && count > 0, "a census");
+		assert_eq(count, GC::LastCensus(nullptr, 0), "the count, given no room");
+		for (int32 i = 1; i < count && i < 512; ++i)
+			assert_true(entries[i].type != nullptr && (entries[i - 1].type == nullptr || strcmp((void*)entries[i - 1].type, (void*)entries[i].type) < 0),
+				"one entry a name, in order, the unknown first");
+	}
+
+	[test("off_keeps_the_last")]
+	public static void TestOffKeepsTheLast() {
+		const bool was = GC::SetCensus(true);
+		GC::Collect();
+		const int32 count = GC::LastCensus(nullptr, 0);
+		assert_true(GC::SetCensus(false), "it was on");
+		CensusLime* limes = Chain<CensusLime>(5);
+		GC::Collect();
+		GC::SetCensus(was);
+		assert_true(limes->index == 4, "made while off");
+		assert_eq(count, GC::LastCensus(nullptr, 0), "a collection without the census leaves the last one");
+	}
+}

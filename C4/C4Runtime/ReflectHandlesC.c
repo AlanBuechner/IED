@@ -90,6 +90,7 @@ const c4_type_info* reflect_variable_type_handle(const c4_variable_info* v) { re
 const char* reflect_function_handle_name(const c4_function_info* f) { return f ? f->name : 0; }
 const char* reflect_function_handle_tag(const c4_function_info* f) { return f ? ((const rt_function*)f)->tag : 0; }
 const char* reflect_function_handle_symbol(const c4_function_info* f) { return f ? f->symbol : 0; }
+const void* reflect_function_handle_address(const c4_function_info* f) { return f ? f->address : 0; }
 uint32_t reflect_function_handle_param_count(const c4_function_info* f) { return f ? f->paramCount : 0; }
 uint32_t reflect_function_handle_is_static(const c4_function_info* f) { return f ? f->isStatic : 0; }
 const char* reflect_function_handle_owner(const c4_function_info* f) { return f ? f->ownerType : 0; }

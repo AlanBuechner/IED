@@ -1,0 +1,60 @@
+// Reflection::FunctionContaining: the reflected function a code address is in, as a profiler names sampled frames.
+
+include "bedrock.ch"
+
+class AddressBox { public int64 value; }
+
+int64 ReflectionAddressLeaf(int64 x) { return x * 3 + 1; }
+
+AddressBox* ReflectionAddressAllocates(int64 value) {
+	AddressBox* box = new AddressBox();
+	box->value = value;
+	return box;
+}
+
+// Calls out, so it has a frame and unwind data however it is optimized.
+int64 ReflectionAddressTarget(int64 x) { return ReflectionAddressAllocates(x)->value * 3 + 1; }
+
+[test("reflection.address")]
+class ReflectionAddressTests {
+	[test("any_byte_of_a_function")]
+	public static void TestAnyByteOfAFunction() {
+		Reflection::Function target = Reflection::FindFunction("ReflectionAddressTarget");
+		assert_true(target.IsValid() && target.Address() != nullptr && ReflectionAddressTarget(2) == 7, "a reflected function with code");
+		const uint8* start = (const uint8*)target.Address();
+		Reflection::Function atStart = Reflection::FunctionContaining((const void*)start);
+		Reflection::Function inside = Reflection::FunctionContaining((const void*)(start + 1));
+		assert_true(atStart.IsValid() && strcmp((void*)atStart.Symbol(), (void*)target.Symbol()) == 0, "its first byte");
+		assert_true(inside.IsValid() && strcmp((void*)inside.Symbol(), (void*)target.Symbol()) == 0, "a byte inside it");
+	}
+
+	[test("a_leaf_by_its_first_byte")]
+	public static void TestALeafByItsFirstByte() {
+		Reflection::Function leaf = Reflection::FindFunction("ReflectionAddressLeaf");
+		assert_true(leaf.IsValid() && leaf.Address() != nullptr && ReflectionAddressLeaf(2) == 7, "a reflected leaf with code");
+		Reflection::Function found = Reflection::FunctionContaining(leaf.Address());
+		assert_true(found.IsValid() && strcmp((void*)found.Symbol(), (void*)leaf.Symbol()) == 0, "found by its first byte, unwind data or not");
+	}
+
+	[test("names_a_sampled_frame")]
+	public static void TestNamesASampledFrame() {
+		const uint64 previous = GC::SetAllocSampling(1u);
+		GC::AllocSample[64] samples;
+		while (GC::TakeAllocSamples(&samples[0], 64) > 0) {}
+		AddressBox* box = ReflectionAddressAllocates(5);
+		GC::SetAllocSampling(previous);
+		const int32 count = GC::TakeAllocSamples(&samples[0], 64);
+		assert_true(box->value == 5 && count == 1 && samples[0].frameCount >= 1, "one sampled allocation");
+		Reflection::Function site = Reflection::FunctionContaining(samples[0].frames[0]);
+		assert_true(site.IsValid(), "the allocating function is found");
+		assert_true((const uint8*)site.Address() < (const uint8*)samples[0].frames[0], "the return address is inside it");
+	}
+
+	[test("not_code_is_no_function")]
+	public static void TestNotCodeIsNoFunction() {
+		int64 local = 1;
+		assert_true(!Reflection::FunctionContaining((const void*)&local).IsValid(), "a stack address");
+		assert_true(!Reflection::FunctionContaining(nullptr).IsValid(), "null");
+		assert_true(local == 1, "the local");
+	}
+}

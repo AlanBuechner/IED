@@ -37,6 +37,8 @@ typedef struct GCSpan
 	uint64_t freeEpoch;       // free runs: the collection that freed them
 	const void* owner;        // small spans: the thread cache that allocates from it, or NULL
 	struct GCPool* pool;      // pool spans: their pool
+	const char** tags;        // while a census runs: each slot's type name (GCCensus.h), or NULL
+	uint32_t tagsEpoch;       // the census the tags were written under
 	struct GCSpan* next;      // the list the span is on (its class, the large list or a free bin)
 	struct GCSpan* prev;
 	struct GCSpan* nextPartial;

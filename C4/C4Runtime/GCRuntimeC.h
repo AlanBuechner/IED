@@ -160,6 +160,26 @@ uint64_t c4_gc_set_alloc_sampling(uint64_t everyBytes);
 // Moves up to `capacity` of the oldest waiting samples to `out`: how many. The runtime keeps the latest 4096.
 int32_t c4_gc_take_alloc_samples(c4_gc_alloc_sample* out, int32_t capacity);
 
+// c4_alloc for an object of a known type: `type` is its name (a string that lives as long as the program), noted
+// while a census is on. `new` allocates through these.
+void* c4_alloc_typed(size_t size, size_t align, const char* type);
+void* c4_alloc_typed_noscan(size_t size, size_t align, const char* type);
+
+// The census of live objects by type: while on, every allocation notes its type, and each collection counts the
+// live objects by it. Objects made before it was on, by c4_alloc or in a pool are of no known type (NULL). It costs 8
+// bytes beside each slot of the spans allocated from and a walk of the live objects at each collection. Returns
+// whether it was on.
+bool c4_gc_set_census(bool on);
+typedef struct c4_gc_census_entry
+{
+	const char* type;                     // the type's qualified name, `T[]` for an array of T; NULL: not known
+	uint64_t objects;
+	uint64_t bytes;                       // the slots they occupy
+} c4_gc_census_entry;
+// The last census (taken at the end of the last collection while it was on) into `out` (room for `capacity`), one
+// entry a type name, by name, the unknown first: how many entries it has. Read it in a collection-result callback.
+int32_t c4_gc_last_census(c4_gc_census_entry* out, int32_t capacity);
+
 // One stop of the program by a collection, in nanoseconds of the system's high-resolution counter
 // (QueryPerformanceCounter scaled to nanoseconds).
 typedef struct c4_gc_pause

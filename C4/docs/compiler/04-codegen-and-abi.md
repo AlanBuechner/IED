@@ -189,7 +189,7 @@ Emission:
 | `Call` | `CallEmitter`: direct, indirect through a funcptr, or virtual through the receiver's vptr; hidden params and aggregate args/returns per `Abi::Signature`; created by `IRContext::Call`, which makes it an `invoke` whenever an enclosing cleanup or try must see an exception |
 | `DynamicCast` | `c4_dynamic_cast(p, TypeDescriptor)` or `c4_instance_of(...) != 0` |
 | `Ternary`, `&&`, `||` | three blocks + PHI, insert point left at the join |
-| `New` | `c4_alloc(size, align)` (zeroed) or, for placement, the given storage zeroed with a store; every vptr; constructor (through `CallEmitter`) with `this` = the new pointer or positional field fill; `c4_gc_register_finalizer` with the type's full destruction when it has one (never for placement) |
+| `New` | `c4_alloc_typed(size, align, name)` (zeroed; `name` the type's QualifiedName for a census) or, for placement, the given storage zeroed with a store; every vptr; constructor (through `CallEmitter`) with `this` = the new pointer or positional field fill; `c4_gc_register_finalizer` with the type's full destruction when it has one (never for placement) |
 | `Relocate` | `memmove` of the object's bytes, then the source zeroed with its own vptrs |
 | `Delete` | `c4_free(p)` - the runtime runs the registered finalizer once, then frees |
 | `Construct` | entry-block temporary, zero-init at the use site, every vptr, constructor or field fill, yields the value |
@@ -269,8 +269,10 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
 
 1. **Stores.** Every typed store goes through `ExprEmitter::GcStore`. The collector needs no barrier, so it
    is a plain store; a future generational or concurrent collector adds its barrier there.
-2. **Allocation.** `new` -> `c4_alloc(size, align)`, or `c4_alloc_noscan` for a type that holds no pointers
-   (`TypeHandle::MayHoldPointers`); finalizer registration when `[operator("delete")]` exists.
+2. **Allocation.** `new` -> `c4_alloc_typed(size, align, name)`, or `c4_alloc_typed_noscan` for a type that holds
+   no pointers (`TypeHandle::MayHoldPointers`); `name` is a constant holding the type's QualifiedName (`T[]` for
+   `new T[n]`), one per program (a comdat named by its bytes), which the runtime notes only while a census runs;
+   finalizer registration when `[operator("delete")]` exists.
    `new T[n]` (`ObjectEmitter::EmitNewArray`, `ArrayStorage`): one allocation of `n * sizeof(T)` bytes (at least
    one, so the pointer to the first element is always inside it). When the elements need destruction an `int64`
    element count comes first, padded to `T`'s alignment, and after HIR's `initialize` block has started every
@@ -347,8 +349,8 @@ A `func<R(A)>` is called like a member function of signature `R(A)` whose `this`
 (`FuncEmitter::CodeType`; MSVC member order: environment, then the sret pointer, then the arguments - so
 an object return always goes through sret). `MakeFunc` builds the pair:
 
-- from a closure that captures: the closure's call method, with a GC copy of the closure (`c4_alloc`, or
-  `c4_alloc_noscan` for a pointer-free closure; the closure type's delete registered as finalizer);
+- from a closure that captures: the closure's call method, with a GC copy of the closure (`c4_alloc_typed`, or
+  `c4_alloc_typed_noscan` for a pointer-free closure; the closure type's delete registered as finalizer);
 - from a closure whose only capture is one pointer: `<call>_onepointer`, an adapter that rebuilds the
   closure `{ pointer }` on its own stack and calls the call method - no allocation;
 - from a funcptr (a function, a capture-less lambda): `__c4_func_thunk_<signature>`, which calls the

@@ -284,6 +284,8 @@ namespace Reflection
 		public const char* Tag() const { return reflect_function_handle_tag(handle); }
 		// The emitted symbol: unique, so each overload is its own Function.
 		public const char* Symbol() const { return reflect_function_handle_symbol(handle); }
+		// The function's code (nullptr when reflection cannot call it).
+		public const void* Address() const { return reflect_function_handle_address(handle); }
 		public int64 ParamCount() const { return (int64)reflect_function_handle_param_count(handle); }
 		public Param ParamAt(int64 i) const { return Param(reflect_function_param(handle, (uint32)i)); }
 		public bool IsStatic() const { return reflect_function_handle_is_static(handle) != 0; }
@@ -339,6 +341,9 @@ namespace Reflection
 	Type TypeAt(int64 i) { return Type(reflect_type_by_index((int32)i)); }
 	Variable VariableAt(int64 i) { return Variable(reflect_variable_by_index((int32)i)); }
 	Function FunctionAt(int64 i) { return Function(reflect_function_by_index((int32)i)); }
+	// The function whose code holds `address`, such as a return address of GC::AllocSample's frames; invalid when it is
+	// no reflected function's.
+	Function FunctionContaining(const void* address) { return Function(reflect_function_containing(address)); }
 	int64 TypeCount() { return (int64)reflect_count(); }
 	int64 VariableCount() { return (int64)reflect_variable_count(); }
 	int64 FunctionCount() { return (int64)reflect_function_count(); }

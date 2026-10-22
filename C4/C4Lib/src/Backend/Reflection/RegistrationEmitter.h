@@ -20,6 +20,7 @@ namespace Scripting
 	{
 		llvm::Function* thunk = nullptr;
 		llvm::Function* code = nullptr;
+		llvm::Function* function = nullptr;   // the reflected function itself, whose address reflection records
 	};
 
 	/// The functions reflection can call, each with its thunk.

@@ -8,6 +8,7 @@
 #include "GC/GCParallelMark.h"
 #include "GC/GCPools.h"
 #include "GC/GCConcurrent.h"
+#include "GC/GCCensus.h"
 
 #define GC_DEFAULT_PERCENT 100
 #define GC_MIN_TRIGGER_BYTES ((size_t)4 << 20)
@@ -49,6 +50,7 @@ typedef struct GCState
 	uint64_t allocs;
 	c4_gc_alloc_counts ended;           // what threads that ended allocated
 	GCSampling sampling;                // sampled allocations (GCSampling.h)
+	GCCensus census;                    // live objects by type (GCCensus.h)
 	uint64_t pauseNs;
 	uint64_t lastPauseNs;
 	GCStops cycleStops;                 // the running collection's stops so far

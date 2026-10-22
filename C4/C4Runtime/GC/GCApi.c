@@ -230,11 +230,12 @@ static void* allocate_object(GCThread* self, GCAllocRequest request)
 	}
 }
 
-static void* allocate(GCAllocRequest request, const void* caller)
+static void* allocate(GCAllocRequest request, const void* caller, const char* type)
 {
 	GCThread* self = this_thread();
 	void* p = allocate_object(self, request);
 	note_allocation(self, request.size, caller);
+	if (__atomic_load_n(&g_gc.census.on, __ATOMIC_RELAXED)) gc_census_note(&g_gc.census, &g_gc.heap, p, type);
 	return p;
 }
 
@@ -244,8 +245,18 @@ static GCAllocRequest request_of(size_t size, size_t align, int noscan)
 	return request;
 }
 
-void* c4_alloc(size_t size, size_t align) { return allocate(request_of(size, align, 0), __builtin_return_address(0)); }
-void* c4_alloc_noscan(size_t size, size_t align) { return allocate(request_of(size, align, 1), __builtin_return_address(0)); }
+void* c4_alloc(size_t size, size_t align) { return allocate(request_of(size, align, 0), __builtin_return_address(0), NULL); }
+void* c4_alloc_noscan(size_t size, size_t align) { return allocate(request_of(size, align, 1), __builtin_return_address(0), NULL); }
+
+void* c4_alloc_typed(size_t size, size_t align, const char* type)
+{
+	return allocate(request_of(size, align, 0), __builtin_return_address(0), type);
+}
+
+void* c4_alloc_typed_noscan(size_t size, size_t align, const char* type)
+{
+	return allocate(request_of(size, align, 1), __builtin_return_address(0), type);
+}
 
 void c4_free(void* ptr)
 {
@@ -535,6 +546,22 @@ uint64_t c4_gc_set_alloc_sampling(uint64_t everyBytes)
 	self->sampler.untilCheck = 0;
 	self->sampler.checkSpan = 0;
 	return previous;
+}
+
+bool c4_gc_set_census(bool on)
+{
+	gc_os_lock();
+	const bool was = gc_census_set(&collector()->census, on);
+	gc_os_unlock();
+	return was;
+}
+
+int32_t c4_gc_last_census(c4_gc_census_entry* out, int32_t capacity)
+{
+	gc_os_lock();
+	const int32_t count = gc_census_last(&collector()->census, out, capacity);
+	gc_os_unlock();
+	return count;
 }
 
 int32_t c4_gc_take_alloc_samples(c4_gc_alloc_sample* out, int32_t capacity)

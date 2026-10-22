@@ -2,8 +2,10 @@
 #include "Backend/CodeGen/ArrayStorage.h"
 #include "Backend/CodeGen/CallEmitter.h"
 #include "Backend/CodeGen/ExprEmitter.h"
+#include "Backend/CodeGen/StableNames.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Model/TypeHandle.h"
+#include "Model/Types/QualifiedName.h"
 #include "Model/Types/AggregateSlots.h"
 #include <llvm/IR/Intrinsics.h>
 #include <algorithm>
@@ -44,14 +46,30 @@ namespace Scripting
 
 	llvm::Value* ObjectEmitter::Allocate(const Type* objT)
 	{
-		llvm::LLVMContext& ctx = m_Ctx.mctx().context();
-		size_t size = objT && objT->GetSize() ? objT->GetSize() : kUnlaidObjectSize;
-		size_t align = objT && objT->GetAlignment() ? objT->GetAlignment() : kDefaultAlignment;
+		const size_t size = objT && objT->GetSize() ? objT->GetSize() : kUnlaidObjectSize;
+		const size_t align = objT && objT->GetAlignment() ? objT->GetAlignment() : kDefaultAlignment;
+		const std::string name = objT ? QualifiedName(objT).c_str() : "";
+		return AllocateTyped(objT, name, m_Ctx.builder().getInt64(size), align);
+	}
+
+	llvm::Value* ObjectEmitter::AllocateTyped(const Type* type, const std::string& name, llvm::Value* size, uint64 align)
+	{
 		// A pointer-free object is never scanned by the collector (docs/runtime/01).
-		const char* allocator = TypeHandle::MayHoldPointers(objT) ? "c4_alloc" : "c4_alloc_noscan";
-		auto* i64 = llvm::Type::getInt64Ty(ctx);
-		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, llvm::PointerType::get(ctx, 0), { i64, i64 });
-		return m_Ctx.Call(allocFn, { llvm::ConstantInt::get(i64, size), llvm::ConstantInt::get(i64, align) }, false);
+		const char* allocator = TypeHandle::MayHoldPointers(type) ? "c4_alloc_typed" : "c4_alloc_typed_noscan";
+		auto& B = m_Ctx.builder();
+		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, B.getPtrTy(), { B.getInt64Ty(), B.getInt64Ty(), B.getPtrTy() });
+		return m_Ctx.Call(allocFn, { size, B.getInt64(align), TypeName(name) }, false);
+	}
+
+	llvm::Constant* ObjectEmitter::TypeName(const std::string& name)
+	{
+		llvm::Module& m = m_Ctx.mctx().module();
+		auto* text = llvm::ConstantDataArray::getString(m.getContext(), name, true);
+		const std::string symbol = StableNames::ForConstant("c4.typename", *text);
+		if (llvm::GlobalVariable* same = m.getGlobalVariable(symbol, true)) return same;
+		auto* global = new llvm::GlobalVariable(m, text->getType(), true, llvm::GlobalValue::LinkOnceODRLinkage, text, symbol);
+		global->setComdat(m.getOrInsertComdat(symbol));
+		return global;
 	}
 
 	llvm::Value* ObjectEmitter::EmitNewArray(const NewNode* n)
@@ -91,9 +109,7 @@ namespace Scripting
 		const uint64 countBytes = n->finalizer ? ArrayStorage::CountBytes(element->GetAlignment()) : 0;
 		const uint64 align = std::max<uint64>(element->GetAlignment(), kDefaultAlignment);
 		llvm::Value* size = B.CreateAdd(B.CreateBinaryIntrinsic(llvm::Intrinsic::umax, bytes, B.getInt64(1)), B.getInt64(countBytes));
-		const char* allocator = TypeHandle::MayHoldPointers(element) ? "c4_alloc" : "c4_alloc_noscan";
-		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, B.getPtrTy(), { B.getInt64Ty(), B.getInt64Ty() });
-		llvm::Value* base = m_Ctx.Call(allocFn, { size, B.getInt64(align) }, false);
+		llvm::Value* base = AllocateTyped(element, std::string(QualifiedName(element).c_str()) + "[]", size, align);
 		if (!countBytes) return base;
 		B.CreateStore(count, base);
 		return B.CreateGEP(B.getInt8Ty(), base, B.getInt64(countBytes));

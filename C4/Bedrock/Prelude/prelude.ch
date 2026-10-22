@@ -160,6 +160,7 @@
 [link("reflect_function_count")] uint32 reflect_function_count();
 [link("reflect_variable_by_index")] void* reflect_variable_by_index(int32 index);
 [link("reflect_function_by_index")] void* reflect_function_by_index(int32 index);
+[link("reflect_function_containing")] void* reflect_function_containing(const void* address);
 [link("reflect_field")] void* reflect_field(void* type, void* name);
 [link("reflect_method")] void* reflect_method(void* type, void* name);
 [link("reflect_field_at")] void* reflect_field_at(void* handle, uint32 index);
@@ -198,6 +199,7 @@
 [link("reflect_variable_handle_is_const")] uint32 reflect_variable_handle_is_const(void* handle);
 [link("reflect_variable_handle_owner")] const char* reflect_variable_handle_owner(void* handle);
 [link("reflect_function_handle_symbol")] const char* reflect_function_handle_symbol(void* handle);
+[link("reflect_function_handle_address")] const void* reflect_function_handle_address(void* handle);
 [link("reflect_function_handle_is_static")] uint32 reflect_function_handle_is_static(void* handle);
 [link("reflect_function_handle_owner")] const char* reflect_function_handle_owner(void* handle);
 [link("reflect_function_handle_return_type_name")] const char* reflect_function_handle_return_type_name(void* handle);
