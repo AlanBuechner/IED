@@ -32,5 +32,15 @@ namespace Testing
 		void OnlyTheFirstPartitionKeepsFileScopeAssembly();
 		TEST_FUNC(Compiler.ModulePartitions)
 		void AddingAFunctionLeavesTheOtherPartitionsUnchanged();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void EachUnitListsTheGlobalsItsPartitionDefines();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void OnlyTheFirstPartitionKeepsTheProgramWideDebugLists();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void Bug327AddingADescribedGlobalLeavesTheOtherPartitionsUnchanged();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void AFilesCodeSharesAPartition();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void Bug328MovingAFilesLinesChangesOnlyItsPartition();
 	};
 } // namespace Testing

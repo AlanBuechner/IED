@@ -11,6 +11,6 @@ namespace Scripting::StableNames
 	/// their cached objects (roadmap 5.3). `prefix.<hash of bytes>`.
 	std::string ForBytes(std::string_view prefix, std::string_view bytes);
 
-	/// `prefix.<hash of the constant's printed form>`, which names every global the constant refers to.
+	/// `prefix.<hash of the constant>`: of its kinds, types and values and the names of the globals it refers to.
 	std::string ForConstant(std::string_view prefix, const llvm::Constant& value);
 }

@@ -1,4 +1,5 @@
 #include "Compiler/PartitionImports.h"
+#include "Compiler/FunctionSize.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstrTypes.h>
 #include <algorithm>
@@ -18,7 +19,7 @@ namespace Scripting
 		{
 			if (function.isDeclaration() || function.isInterposable()) return false;
 			if (function.hasFnAttribute(llvm::Attribute::NoInline) || function.hasFnAttribute(llvm::Attribute::OptimizeNone)) return false;
-			return function.hasFnAttribute(llvm::Attribute::AlwaysInline) || function.getInstructionCount() <= limit;
+			return function.hasFnAttribute(llvm::Attribute::AlwaysInline) || HasAtMostInstructions(function, limit);
 		}
 
 		// A caller built for size inlines next to nothing, so it copies nothing (reflection's invoke thunks).

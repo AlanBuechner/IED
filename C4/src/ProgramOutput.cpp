@@ -250,6 +250,7 @@ bool ProgramOutput::PrepareScriptHost(llvm::Module& module, std::optional<Script
 		m_In.result.AddBackendError("this program uses the scripting API (Scripting::Host), which needs a script host: build it with --script-host");
 		return false;
 	}
+	const auto start = std::chrono::steady_clock::now();
 	Scripting::EmitThreadLocalAccessors(module);
 	const Scripting::ProgramModel& model = m_In.compiler.GetProgramModel();
 	std::string error;
@@ -275,6 +276,7 @@ bool ProgramOutput::PrepareScriptHost(llvm::Module& module, std::optional<Script
 		m_In.result.AddBackendError(Core::String(error.c_str()));
 		return false;
 	}
+	Timed("script host", start);
 	return true;
 }
 

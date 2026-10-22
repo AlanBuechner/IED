@@ -45,7 +45,8 @@ in `C4Lib`.
  [8] clang driver -> lld-link: main obj + runtimes + foreign objs + libs -> <out>.exe
 ```
 
-`-ftime` prints the wall-clock time of the preprocess / parse / model / codegen phases.
+`-ftime` prints the wall-clock time of each phase: preprocess, parse, model, lower, script host (with
+`--script-host`), optimize and codegen (one `optimize+codegen` phase in an incremental build), runtime+link.
 
 ## 1. Source registration
 
@@ -193,12 +194,17 @@ straight from the module in memory).
   for an `asm` block comes back with the block's `!srcloc` cookie (`AsmEmitter::LocationCookie`) and is reported at
   the C4 line: `main.cf (4:2) error: invalid operand for instruction: 'mov rax, ecx'`.
 - Partitions (`Compiler/ModulePartitions`): after the whole module is optimized (inlining across the program is
-  unchanged), it is split into partitions that link back into the same program. A definition goes to the partition its
-  name hashes to (a comdat's members by the comdat's name; private data with the user whose name sorts first, so a
-  literal travels with its function), and each partition is built from its own definitions plus declarations of only
-  what they reach, so it changes only when its own code does. Local symbols become hidden globals with a `.local`
-  suffix, which no C or C++ symbol can have, so they meet no foreign object's names in the link; file-scope assembly
-  stays in the first partition. How many: `--partitions <n>`, else about one per 1,000 instructions (3,000 at `-O0`,
+  unchanged), it is split into partitions that link back into the same program. Where a definition goes
+  (`Compiler/PartitionPlacement`): with debug info, by the source file it names, so a file's code shares a partition
+  (a large file is spread by name over one partition per 8,000 instructions, rounded down to a power of two) and an
+  edit that moves a file's lines, which its debug info records, changes only that file's partitions and those that
+  copy its small functions; without debug info, by its name. A comdat's members stay together (by the comdat's name
+  and its leader's file); private data goes with the user whose name sorts first, so a literal travels with its
+  function. Each partition is built from its own definitions plus declarations of only what they reach, so it changes
+  only when its own code does; its debug-info compile unit lists only the globals it defines. Local symbols become
+  hidden globals with a `.local` suffix, which no C or C++ symbol can have, so they meet no foreign object's names in
+  the link; file-scope assembly and the compile unit's program-wide lists (enums, retained types, imports) stay in the
+  first partition. How many: `--partitions <n>`, else about one per 1,000 instructions (3,000 at `-O0`,
   where an instruction is cheaper to assemble) rounded down to a power of two, from 1 to 32, so the count changes
   only when the program doubles or halves. Partitions are assembled on up to `-j` threads (default: the processors,
   at most 4), each from a bitcode copy read into a context of its own. `-c` always writes one object.
@@ -222,7 +228,9 @@ straight from the module in memory).
   60k-line ScaleTest at `-O2` (32 partitions, `-j 3`): a cold build 9.1 s (the whole-program build: 12.5 s), an
   unchanged rebuild 2.0 s (front end 1.1 s, split and hash 0.8 s), a one-module edit 2.6 s (31 objects reused); the
   program runs at the whole-program build's speed, and the math benchmarks within 0-20% except a kernel whose helpers
-  are too large to copy (`batch_pointers`, 60%).
+  are too large to copy (`batch_pointers`, 60%). With `-g` (Nuke's Development), on the IED server's sources at
+  `-O3` (32 partitions, 4 threads): a cold build 10.4 s, an unchanged rebuild 2.3 s, a blank line atop a 660-line
+  file 4.3 s (25 objects reused; before file placement, BUG-328, 10.1 s and 5).
 - The X86 target is registered with its `LLVMInitializeX86*` functions; the compiler links LLVM statically and must
   not link `LLVM-C.lib`, whose import of `LLVM-C.dll` would bind those functions to the DLL's own copy of LLVM.
 - Runtime objects are compiled on demand (`Compiler/RuntimeObjects`) from every `.c` / `.cpp` under the

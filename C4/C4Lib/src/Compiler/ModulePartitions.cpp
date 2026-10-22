@@ -1,9 +1,11 @@
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/PartitionImports.h"
+#include "Compiler/PartitionPlacement.h"
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/Support/xxhash.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
@@ -42,72 +44,6 @@ namespace Scripting
 		{
 			for (llvm::Function& function : module) KeepDefinition(function);
 			for (llvm::GlobalVariable& variable : module.globals()) KeepDefinition(variable);
-		}
-
-		// How far a private symbol is followed to the code that uses it (a table of tables of strings).
-		constexpr int kMaxHomeHops = 8;
-
-		// The global a use belongs to: the function an instruction is in, the global a constant initializes.
-		void Owners(const llvm::User& user, std::vector<const llvm::GlobalValue*>& owners)
-		{
-			if (const auto* instruction = llvm::dyn_cast<llvm::Instruction>(&user)) { owners.push_back(instruction->getFunction()); return; }
-			if (const auto* global = llvm::dyn_cast<llvm::GlobalValue>(&user)) { owners.push_back(global); return; }
-			for (const llvm::User* outer : user.users()) Owners(*outer, owners);
-		}
-
-		// Of a private symbol's users, the one whose name sorts first: which user that is does not depend on the order
-		// the uses were made in.
-		const llvm::GlobalValue* FirstOwner(const llvm::GlobalValue& value)
-		{
-			std::vector<const llvm::GlobalValue*> owners;
-			for (const llvm::User* user : value.users()) Owners(*user, owners);
-			const llvm::GlobalValue* first = nullptr;
-			for (const llvm::GlobalValue* owner : owners)
-				if (owner != &value && (!first || owner->getName() < first->getName())) first = owner;
-			return first;
-		}
-
-		// Private data lives with the code that uses it, so a literal changes only with its function and the reflection
-		// tables with the image that lists them. Code, private or not, is spread by its own name: following uses would
-		// gather every reflection thunk into one partition.
-		bool FollowsItsUser(const llvm::GlobalValue& value)
-		{
-			return value.hasLocalLinkage() && llvm::isa<llvm::GlobalVariable>(value);
-		}
-
-		const llvm::GlobalValue& Home(const llvm::GlobalValue& value)
-		{
-			const llvm::GlobalValue* home = &value;
-			for (int hop = 0; hop < kMaxHomeHops && FollowsItsUser(*home); ++hop)
-			{
-				const llvm::GlobalValue* owner = FirstOwner(*home);
-				if (!owner) break;
-				home = owner;
-			}
-			return *home;
-		}
-
-		// By its home's name, or by the comdat's so a group stays together: a definition keeps its partition while the
-		// program changes around it.
-		unsigned PartitionOf(const llvm::GlobalValue& value, unsigned count)
-		{
-			if (const auto* alias = llvm::dyn_cast<llvm::GlobalAlias>(&value))
-				if (const llvm::GlobalObject* base = alias->getAliaseeObject()) return PartitionOf(*base, count);
-			const llvm::GlobalValue& home = value.hasComdat() ? value : Home(value);
-			const llvm::StringRef key = home.hasComdat() ? home.getComdat()->getName() : home.getName();
-			return static_cast<unsigned>(llvm::xxh3_64bits(key) % count);
-		}
-
-		// Assigned before the locals are renamed, so a symbol's home is found by the names the program gave it.
-		std::vector<std::vector<const llvm::GlobalValue*>> AssignDefinitions(const llvm::Module& module, unsigned count)
-		{
-			std::vector<std::vector<const llvm::GlobalValue*>> members(count);
-			for (const llvm::GlobalVariable& variable : module.globals())
-				if (!variable.isDeclaration()) members[PartitionOf(variable, count)].push_back(&variable);
-			for (const llvm::Function& function : module)
-				if (!function.isDeclaration()) members[PartitionOf(function, count)].push_back(&function);
-			for (const llvm::GlobalAlias& alias : module.aliases()) members[PartitionOf(alias, count)].push_back(&alias);
-			return members;
 		}
 
 		void CopyComdat(llvm::GlobalObject& to, const llvm::GlobalObject& from, llvm::Module& partition)
@@ -239,6 +175,96 @@ namespace Scripting
 			}
 		}
 
+		// The global variable definition each debug-info global expression is attached to.
+		using DescribedGlobals = llvm::DenseMap<const llvm::DIGlobalVariableExpression*, const llvm::GlobalVariable*>;
+
+		DescribedGlobals DescribedDefinitions(const llvm::Module& module)
+		{
+			DescribedGlobals described;
+			llvm::SmallVector<llvm::DIGlobalVariableExpression*, 1> expressions;
+			for (const llvm::GlobalVariable& variable : module.globals())
+			{
+				if (variable.isDeclaration()) continue;
+				expressions.clear();
+				variable.getDebugInfo(expressions);
+				for (const llvm::DIGlobalVariableExpression* expression : expressions) described[expression] = &variable;
+			}
+			return described;
+		}
+
+		// A debug-info compile unit and the partition's own copy of it, whose lists are filled in after its code.
+		struct UnitCopy
+		{
+			const llvm::DICompileUnit* from;
+			llvm::DICompileUnit* to;
+		};
+
+		// Made before any code is cloned, so the partition's code refers to its own copy, without the program's lists.
+		std::vector<UnitCopy> CreateUnits(const llvm::Module& module, llvm::ValueToValueMapTy& map)
+		{
+			std::vector<UnitCopy> units;
+			for (const llvm::DICompileUnit* unit : module.debug_compile_units())
+			{
+				llvm::TempDICompileUnit copy = unit->clone();
+				copy->replaceEnumTypes({});
+				copy->replaceRetainedTypes({});
+				copy->replaceGlobalVariables({});
+				copy->replaceImportedEntities({});
+				copy->replaceMacros({});
+				llvm::DICompileUnit* own = llvm::MDNode::replaceWithDistinct(std::move(copy));
+				map.MD()[unit].reset(own);
+				units.push_back({ unit, own });
+			}
+			return units;
+		}
+
+		llvm::MDTuple* MappedList(const llvm::MDTuple* list, llvm::ValueToValueMapTy& map, Declarations& declarations)
+		{
+			return list ? llvm::cast<llvm::MDTuple>(llvm::MapMetadata(list, map, llvm::RF_None, nullptr, &declarations)) : nullptr;
+		}
+
+		bool DefinedHere(const llvm::GlobalVariable& variable, const llvm::ValueToValueMapTy& map)
+		{
+			const auto mapped = map.find(&variable);
+			return mapped != map.end() && !llvm::cast<llvm::GlobalValue>(mapped->second)->isDeclaration();
+		}
+
+		// One partition: its members, then copies of the functions it imports.
+		struct Contents
+		{
+			std::vector<const llvm::GlobalValue*> members;
+			std::vector<const llvm::Function*> imports;
+			bool keepsProgramWide = false; // the file-scope assembly and the debug info's program-wide lists
+		};
+
+		// The expressions of the globals the partition defines; the partition that keeps the program-wide lists also
+		// gets those no definition carries.
+		llvm::MDTuple* ListedGlobals(const llvm::DICompileUnit& unit, const Contents& contents, const DescribedGlobals& described,
+			llvm::ValueToValueMapTy& map, Declarations& declarations)
+		{
+			std::vector<llvm::Metadata*> listed;
+			for (const llvm::DIGlobalVariableExpression* expression : unit.getGlobalVariables())
+			{
+				const llvm::GlobalVariable* carrier = described.lookup(expression);
+				if (carrier ? DefinedHere(*carrier, map) : contents.keepsProgramWide)
+					listed.push_back(llvm::MapMetadata(expression, map, llvm::RF_None, nullptr, &declarations));
+			}
+			return llvm::MDTuple::get(unit.getContext(), listed);
+		}
+
+		// A partition's unit lists only the globals it defines, so changing a global changes only the partition that
+		// defines it (BUG-327).
+		void FillUnit(const UnitCopy& unit, const Contents& contents, const DescribedGlobals& described, llvm::ValueToValueMapTy& map,
+			Declarations& declarations)
+		{
+			unit.to->replaceGlobalVariables(ListedGlobals(*unit.from, contents, described, map, declarations));
+			if (!contents.keepsProgramWide) return;
+			unit.to->replaceEnumTypes(MappedList(unit.from->getEnumTypes().get(), map, declarations));
+			unit.to->replaceRetainedTypes(MappedList(unit.from->getRetainedTypes().get(), map, declarations));
+			unit.to->replaceImportedEntities(MappedList(unit.from->getImportedEntities().get(), map, declarations));
+			unit.to->replaceMacros(MappedList(unit.from->getMacros().get(), map, declarations));
+		}
+
 		// Module flags, the debug-info compile unit and the rest of the named metadata go to every partition.
 		void CopyNamedMetadata(const llvm::Module& module, llvm::Module& partition, llvm::ValueToValueMapTy& map, Declarations& declarations)
 		{
@@ -249,30 +275,29 @@ namespace Scripting
 			}
 		}
 
-		// One partition: its members, then copies of the functions it imports.
-		struct Contents
-		{
-			std::vector<const llvm::GlobalValue*> members;
-			std::vector<const llvm::Function*> imports;
-			bool keepsAssembly = false;
-		};
-
-		std::unique_ptr<llvm::Module> Partition(const llvm::Module& module, const Contents& contents)
+		std::unique_ptr<llvm::Module> Partition(const llvm::Module& module, const Contents& contents, const DescribedGlobals& described)
 		{
 			auto partition = std::make_unique<llvm::Module>(module.getModuleIdentifier(), module.getContext());
 			partition->setSourceFileName(module.getSourceFileName());
 			partition->setDataLayout(module.getDataLayout());
 			partition->setTargetTriple(module.getTargetTriple());
-			if (contents.keepsAssembly) partition->setModuleInlineAsm(module.getModuleInlineAsm());
+			if (contents.keepsProgramWide) partition->setModuleInlineAsm(module.getModuleInlineAsm());
 			llvm::ValueToValueMapTy map;
 			Declarations declarations(*partition);
+			const std::vector<UnitCopy> units = CreateUnits(module, map);
 			CreateShells(contents.members, *partition, map);
 			CreateImportShells(contents.imports, *partition, map);
 			FillMembers(contents.members, *partition, map, declarations);
 			for (const llvm::Function* import : contents.imports) CloneBody(*import, map, declarations);
+			for (const UnitCopy& unit : units) FillUnit(unit, contents, described, map, declarations);
 			CopyNamedMetadata(module, *partition, map, declarations);
 			return partition;
 		}
+	}
+
+	std::unique_ptr<llvm::Module> ExtractDefinitions(const llvm::Module& module, const std::vector<const llvm::GlobalValue*>& definitions)
+	{
+		return Partition(module, Contents{ definitions, {}, false }, DescribedDefinitions(module));
 	}
 
 	std::string ModuleBitcode(const llvm::Module& module)
@@ -286,7 +311,9 @@ namespace Scripting
 
 	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count, PartitionOptimization optimization)
 	{
+		// Assigned before the locals are renamed, so a symbol's home is found by the names the program gave it.
 		const std::vector<std::vector<const llvm::GlobalValue*>> members = AssignDefinitions(module, count);
+		const DescribedGlobals described = DescribedDefinitions(module);
 		MakeLocalsGlobal(module);
 		const bool after = optimization == PartitionOptimization::After;
 		if (after) KeepDefinitions(module);
@@ -294,7 +321,7 @@ namespace Scripting
 		for (unsigned i = 0; i < count; ++i)
 		{
 			const Contents contents{ members[i], after ? ImportsFor(members[i]) : std::vector<const llvm::Function*>(), i == 0 };
-			partitions.push_back(ModuleBitcode(*Partition(module, contents)));
+			partitions.push_back(ModuleBitcode(*Partition(module, contents, described)));
 		}
 		return partitions;
 	}

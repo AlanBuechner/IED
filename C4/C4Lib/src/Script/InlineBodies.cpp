@@ -1,12 +1,12 @@
 #include "Script/InlineBodies.h"
+#include "Compiler/FunctionSize.h"
+#include "Compiler/ModulePartitions.h"
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/Transforms/Utils/Cloning.h>
-#include <llvm/Transforms/Utils/ValueMapper.h>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -23,7 +23,7 @@ namespace Scripting
 
 			bool FunctionQualifies(const llvm::Function& f)
 			{
-				if (f.isDeclaration() || f.getInstructionCount() > kInlineBodyLimit || !m_Host.count(f.getName().str())) return false;
+				if (f.isDeclaration() || !HasAtMostInstructions(f, kInlineBodyLimit) || !m_Host.count(f.getName().str())) return false;
 				std::vector<const llvm::GlobalVariable*> constants;
 				for (const llvm::BasicBlock& block : f)
 					for (const llvm::Instruction& instruction : block)
@@ -74,38 +74,28 @@ namespace Scripting
 			std::unordered_set<const llvm::GlobalVariable*> m_Copied;
 		};
 
-		// The declarations the copy made of everything it does not define go when nothing in it names them.
-		void DropUnusedDeclarations(llvm::Module& module)
+		// The qualifying functions and the constants they need, in the module's order.
+		std::vector<const llvm::GlobalValue*> Definitions(const llvm::Module& module, const std::vector<std::string>& hostSymbols)
 		{
-			bool dropped = true;
-			while (dropped)
-			{
-				dropped = false;
-				for (llvm::GlobalVariable& g : llvm::make_early_inc_range(module.globals()))
-					if ((g.isDeclaration() || g.getName().starts_with("llvm.")) && g.use_empty()) { g.eraseFromParent(); dropped = true; }
-				for (llvm::Function& f : llvm::make_early_inc_range(module))
-					if (f.isDeclaration() && f.use_empty()) { f.eraseFromParent(); dropped = true; }
-			}
+			Reach reach(hostSymbols);
+			std::vector<const llvm::GlobalValue*> functions;
+			for (const llvm::Function& f : module)
+				if (reach.FunctionQualifies(f)) functions.push_back(&f);
+			std::vector<const llvm::GlobalValue*> definitions;
+			for (const llvm::GlobalVariable& g : module.globals())
+				if (reach.Copied(&g)) definitions.push_back(&g);
+			definitions.insert(definitions.end(), functions.begin(), functions.end());
+			return definitions;
 		}
 	}
 
 	std::string InlineBodies(const llvm::Module& module, const std::vector<std::string>& hostSymbols)
 	{
-		Reach reach(hostSymbols);
-		std::unordered_set<const llvm::GlobalValue*> bodies;
-		for (const llvm::Function& f : module)
-			if (reach.FunctionQualifies(f)) bodies.insert(&f);
-		if (bodies.empty()) return {};
-
-		llvm::ValueToValueMapTy map;
-		std::unique_ptr<llvm::Module> copy = llvm::CloneModule(module, map, [&](const llvm::GlobalValue* value) {
-			return bodies.count(value) || reach.Copied(value);
-		});
-		for (llvm::GlobalVariable& g : llvm::make_early_inc_range(copy->globals()))
-			if (g.getName().starts_with("llvm.")) g.eraseFromParent(); // the constructors and used lists are the host's
+		const std::vector<const llvm::GlobalValue*> definitions = Definitions(module, hostSymbols);
+		if (definitions.empty()) return {};
+		std::unique_ptr<llvm::Module> copy = ExtractDefinitions(module, definitions);
 		for (llvm::Function& f : *copy)
 			if (!f.isDeclaration()) f.setLinkage(llvm::GlobalValue::ExternalLinkage); // named as the table names it
-		DropUnusedDeclarations(*copy);
 		llvm::StripDebugInfo(*copy);
 
 		std::string bitcode;
