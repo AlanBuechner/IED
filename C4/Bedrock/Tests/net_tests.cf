@@ -270,7 +270,11 @@ class NetPollTests {
 		assert_eq(1, Net::Poll(streams, kNetWaitMs), "the client can write; the server has nothing to read");
 		assert_true(streams[0].ready == 0 && (streams[1].ready & Net::kWritable) != 0, "each entry says which");
 		pair.client.SendText(Core::StringView("x"));
-		assert_true(Net::Poll(streams, kNetWaitMs) == 2 && (streams[0].ready & Net::kReadable) != 0, "data makes the server readable");
+		// Poll returns once any entry is ready, and the client is writable at once: wait on the server alone.
+		Core::Array<Net::PollEntry> server;
+		server.Push(Net::PollEntry::For(pair.server.Socket(), Net::kReadable));
+		assert_true(Net::Poll(server, kNetWaitMs) == 1 && (server[0].ready & Net::kReadable) != 0, "data makes the server readable");
+		assert_eq(2, Net::Poll(streams, 0), "then both are ready at once");
 		Core::Array<Net::PollEntry> nothing;
 		assert_eq(0, Net::Poll(nothing, 5), "with no entries Poll only waits");
 	}
