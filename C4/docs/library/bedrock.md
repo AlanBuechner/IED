@@ -1253,7 +1253,8 @@ the collector also takes a census after each collection (`GC::SetCensus`), sent 
 type (those made before the session, by native code or in a `Pool` as "(type not known)"), and samples about one
 allocation in every 64 KiB (`GC::SetAllocSampling`; a rate the program set is kept): the flusher sends each as a
 `Sample` of its thread standing for that many bytes, with its call stack (`CallstackDef`) and each address named by the
-reflected function holding it (`Reflection::FunctionContaining`, `SymbolDef`; native code stays unnamed). Both are put
+reflected function holding it and the source line of its call (`Reflection::FunctionContaining`,
+`Platform::SourceLineOf` for a program built with -g; `SymbolDef`; native code stays unnamed). Both are put
 back as they were when the session stops (`Profile/collector.cf`). The census makes each `new` dearer while it is on
 (about 16 ns in IED's LeakyC4 demo at -O2, the median of a zone of 300 allocations with it on and off). Events are stamped with the processor's time stamp counter (its
 frequency measured against `Platform::Ticks` at start; calibration pairs every second let the profiler correct it),
@@ -1270,7 +1271,7 @@ another holds it (its definition, the wait, both holds); zones that say what the
 nested zones' included and the profiler's naming of them left out, 64 KiB of native memory from a zone that grew an array
 and none from the others, given back as its scope ended, nothing from a zone that allocated nothing) and frames with the
 process's count; a census after a collection (a hundred live objects by their type's name, the native memory ten holders'
-buffers make theirs and none a blob's, what came before under a name of its own, the census off again after); allocations sampled with the function that made them (on the allocating thread, each for 64 KiB, its stack
+buffers make theirs and none a blob's, what came before under a name of its own, the census off again after); allocations sampled with the function that made them and, built with -g, the line of the call (on the allocating thread, each for 64 KiB, its stack
 defined first, sampling off again after); `JobSystem` jobs as
 tasks of their names on the named workers, and none once the session stopped; and nothing recorded without a session, an unreachable or malformed target refused.
 

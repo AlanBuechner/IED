@@ -517,6 +517,8 @@ class ProfileTests {
 		const uint64 me = SessionIdOf(events, Threading::Thread::CurrentId());
 		Core::HashMap<uint64, bool> stacks;
 		Core::HashMap<uint64, Core::String> named;
+		Core::HashMap<uint64, uint64> fileOf;
+		Core::HashMap<uint64, uint64> lineOf;
 		int64 samples = 0;
 		bool defined = true;
 		bool mine = true;
@@ -524,20 +526,35 @@ class ProfileTests {
 		bool namedAllocator = false;
 		for (const TracedEvent& e : events) {
 			if (e.type == 0x81) stacks.Insert(e.fields[0], true);
-			if (e.type == 0x83) named.Insert(e.fields[0], *strings.Find(e.fields[1]));
+			if (e.type == 0x83) {
+				named.Insert(e.fields[0], *strings.Find(e.fields[1]));
+				fileOf.Insert(e.fields[0], e.fields[2]);
+				lineOf.Insert(e.fields[0], e.fields[3]);
+			}
 			if (e.type != 0x82) continue;
 			samples += 1;
 			if (!stacks.Find(e.fields[1])) defined = false;
 			if (e.fields[0] != me) mine = false;
 			if (e.fields[2] != 2 || e.fields[3] != 65536) weighed = false;
 		}
+		uint64 allocator = 0;
 		for (const TracedEvent& e : events)
-			if (e.type == 0x81 && named.Find(e.fields[2]) && (named.Find(e.fields[2])->View().EndsWith(Core::StringView("AllocateMany")) || named.Find(e.fields[2])->View().EndsWith(Core::StringView("TestSamples")))) namedAllocator = true;
+			if (e.type == 0x81 && named.Find(e.fields[2]) && (named.Find(e.fields[2])->View().EndsWith(Core::StringView("AllocateMany")) || named.Find(e.fields[2])->View().EndsWith(Core::StringView("TestSamples")))) {
+				namedAllocator = true;
+				allocator = e.fields[2];
+			}
 		assert_true(samples >= 5, "two megabytes sampled every 64 KiB");
 		assert_true(defined, "each sample's stack defined before it");
 		assert_true(me != 0 && mine, "each the allocating thread's");
 		assert_true(weighed, "each standing for 64 KiB allocated");
 		assert_true(namedAllocator, "a stack's first address named by the function that allocated (the test, once it is inlined there)");
+		const Platform::SourceLine call = Platform::SourceLineOf((const void*)(allocator - 1));
+		if (call.IsKnown()) {
+			const Core::String* file = strings.Find(*fileOf.Find(allocator));
+			assert_true(file != null && file->View().EndsWith(Core::StringView("profile_tests.cf")), "with the file of the call that allocated");
+			assert_eq((uint64)call.line, *lineOf.Find(allocator), "and its line");
+		}
+		else assert_true(*fileOf.Find(allocator) == 0 && *lineOf.Find(allocator) == 0, "a program without debug information names no line");
 		for (int32 i = 0; i <= 100; ++i) s_blobs[i] = null;
 		FS::RemoveFile(path.CStr());
 	}

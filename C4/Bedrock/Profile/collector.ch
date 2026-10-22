@@ -1,6 +1,7 @@
 // What the collector says about a session's program (IED docs/16): each time a collection stopped it, the live
 // objects by type after each collection (GC::SetCensus), and allocations sampled with their call stacks
-// (GC::SetAllocSampling), named by the reflected functions that hold their addresses.
+// (GC::SetAllocSampling), named by the reflected functions that hold their addresses and the source lines the debug
+// information gives them.
 
 include "session.ch"
 

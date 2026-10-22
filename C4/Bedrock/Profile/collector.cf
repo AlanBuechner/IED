@@ -1,5 +1,6 @@
 include "collector.ch"
 include "Platform/time.ch"
+include "Platform/sourceline.ch"
 include "Reflection/reflect.ch"
 include "Text/stringbuilder.ch"
 
@@ -119,25 +120,29 @@ namespace Profile
 		return (Core::String(owner) + "::") + name.View();
 	}
 
-	// A SymbolDef naming `address` by the reflected function holding it, the first time it is seen; an address in no
-	// reflected function (the runtime's, native code) stays unnamed.
+	// A SymbolDef naming `address` by the reflected function holding it and the line of the call it returns from (the
+	// byte before a return address is the call's), the first time it is seen; an address in no reflected function (the
+	// runtime's, native code) stays unnamed, and a program without debug information knows no line.
 	static void NameAddress(Session* session, uint64 address) {
 		if (session->stacks.looked.Contains(address)) return;
 		session->stacks.looked.Insert(address, 1);
 		const Reflection::Function function = Reflection::FunctionContaining((const void*)address);
 		if (!function.IsValid()) return;
 		Core::String name = FunctionName(function);
+		const Platform::SourceLine at = Platform::SourceLineOf((const void*)(address - 1));
 		uint64 text;
+		uint64 file = 0;
 		{
 			Threading::LockGuard held(session->lock);
 			text = session->Intern(name.View());
+			if (at.IsKnown()) file = session->Intern(at.file.View());
 		}
 		Threading::LockGuard held(session->global.lock);
 		PutEvent(session->global.bytes, Event::SymbolDef);
 		PutVarint(session->global.bytes, address);
 		PutVarint(session->global.bytes, text);
-		PutVarint(session->global.bytes, 0);
-		PutVarint(session->global.bytes, 0);
+		PutVarint(session->global.bytes, file);
+		PutVarint(session->global.bytes, at.IsKnown() ? (uint64)at.line : 0);
 	}
 
 	// The id of a sample's call stack, its CallstackDef (and its addresses' names) queued the first time.
