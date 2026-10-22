@@ -2,7 +2,8 @@
 // own lane with its range, the pools' allocations and frees, the collections and their pauses. On the right, what is
 // still allocated at the end (or at the timeline's selection end), grouped by call stack, pool or thread; for a program
 // that counts its allocations instead of sending each one (a collected program), what was allocated in the capture or
-// the selection by zone, zone path or thread, and its live objects by type from its censuses.
+// the selection by zone, zone path or thread - or, from its collector's samples, by function or call stack - and its
+// live objects by type from its censuses.
 
 import { h, replace } from "/ui-kit/dom.js";
 import { readTheme } from "./timelinedraw.js";
@@ -10,14 +11,21 @@ import { bytes, count, duration, instant } from "./format.js";
 
 const LANE_HEIGHT = 40;
 
-// The groupings the right side offers, by what it lists: allocations still live, counted ones, or allocation samples.
+// The groupings the right side offers, by what it lists: allocations still live, counted ones (and the collector's
+// samples beside them), or allocation samples.
 const GROUPINGS = {
 	live: [["callstack", "By call stack"], ["pool", "By pool"], ["thread", "By thread"]],
 	zones: [["zone", "By zone"], ["path", "By zone path"], ["thread", "By thread"]],
-	samples: [["callstack", "By call stack"], ["thread", "By thread"]],
+	sampled: [["function", "By function (sampled)"], ["callstack", "By call stack (sampled)"]],
+	samples: [["function", "By function"], ["callstack", "By call stack"], ["thread", "By thread"]],
 	none: [],
 	loading: [],
 };
+const FROM_SAMPLES = new Set(["function", "callstack"]);
+
+function samples(n) {
+	return count(n) + (n === 1 ? " sample" : " samples");
+}
 
 const TITLES = { live: "Live allocations", zones: "Allocated", samples: "Allocation samples", none: "Allocated", loading: "" };
 
@@ -46,12 +54,14 @@ export class MemoryPanel {
 		this.load();
 	}
 
-	setMode(mode) {
+	// `sampled`: a counted capture also has the collector's allocation samples to group by function or call stack.
+	setMode(mode, sampled) {
+		const groupings = GROUPINGS[mode].concat(mode === "zones" && sampled ? GROUPINGS.sampled : []);
 		this.mode = mode;
-		this.groupBy = GROUPINGS[mode].length ? GROUPINGS[mode][0][0] : "";
+		this.groupBy = groupings.length ? groupings[0][0] : "";
 		this.listTitle.textContent = TITLES[mode];
-		replace(this.groupPick, GROUPINGS[mode].map(([v, t]) => h("option", { value: v }, t)));
-		this.groupPick.hidden = !GROUPINGS[mode].length;
+		replace(this.groupPick, groupings.map(([v, t]) => h("option", { value: v }, t)));
+		this.groupPick.hidden = !groupings.length;
 	}
 
 	async load() {
@@ -104,28 +114,29 @@ export class MemoryPanel {
 
 	async loadAllocated() {
 		const asked = { captureId: this.captureId, order: "bytes", limit: 200 };
-		if (this.mode === "zones" || this.mode === "samples") asked.groupBy = this.groupBy;
+		if (this.mode === "zones") Object.assign(asked, { groupBy: this.groupBy, source: FROM_SAMPLES.has(this.groupBy) ? "samples" : "zones" });
+		else if (this.mode === "samples") asked.groupBy = this.groupBy;
 		const picked = this.selection();
 		if (picked) Object.assign(asked, { from: Math.round(picked.from), to: Math.round(picked.to) });
 		const answer = await this.request("prof.allocations", asked);
 		if (!answer) return;
 		const mode = answer.source === "zones" || answer.source === "samples" ? answer.source : "none";
-		if (mode !== this.mode) this.setMode(mode);
+		if (this.mode !== "zones" && mode !== this.mode) this.setMode(mode, answer.samples > 0);
 		if (mode === "none") {
 			this.listHead.textContent = "";
-			replace(this.list, h("div.muted.prof-empty", null, "This capture reports no allocations."));
+			replace(this.list, h("div.muted.prof-empty", null, this.mode === "zones" ? "No allocation was sampled here." : "This capture reports no allocations."));
 			return;
 		}
 		const range = picked ? " in the selection" : "";
 		this.listHead.textContent = mode === "samples"
-			? count(answer.samples) + " samples, " + bytes(answer.weight) + range
+			? samples(answer.samples) + ", " + bytes(answer.weight) + range
 			: count(answer.count) + " (" + bytes(answer.bytes) + ")" + range + (answer.frames ? ", " + count(answer.frames.medianCount) + " a frame" : "");
 		replace(this.list, answer.groups.map((g) => this.allocatedRow(g, mode)));
 	}
 
 	allocatedRow(g, mode) {
 		const size = mode === "samples" ? g.weight : g.bytes;
-		const times = mode === "samples" ? count(g.samples) + " samples" : count(g.count) + "x" + (g.perFrame ? ", " + g.perFrame + " a frame" : "");
+		const times = mode === "samples" ? samples(g.samples) : count(g.count) + "x" + (g.perFrame ? ", " + g.perFrame + " a frame" : "");
 		const source = g.file ? g.file.split(/[\\/]/).pop() + (g.line ? ":" + g.line : "") : "";
 		const open = (e) => {
 			e.preventDefault();

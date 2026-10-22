@@ -15,7 +15,9 @@ namespace Profile
 		FrameMark = 0x40, FrameBegin = 0x41, FrameEnd = 0x42,
 		PlotDef = 0x50, PlotValue = 0x51, Message = 0x52,
 		PoolDef = 0x60, Alloc = 0x61, Free = 0x62, PoolReset = 0x63, GcBegin = 0x68, GcEnd = 0x69, AllocCount = 0x6A,
-		LockDef = 0x70, LockWait = 0x71, LockObtain = 0x72, LockRelease = 0x73
+		HeapCensus = 0x6B, HeapCensusType = 0x6C,
+		LockDef = 0x70, LockWait = 0x71, LockObtain = 0x72, LockRelease = 0x73,
+		CallstackDef = 0x81, Sample = 0x82, SymbolDef = 0x83
 	}
 
 	const uint8 kThreadChunk = 0;

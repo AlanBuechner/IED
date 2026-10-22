@@ -8,10 +8,15 @@ include "locks.ch"
 
 namespace Profiler
 {
+	// What allocations are read from: the best the capture has (events, else a program's counts - its sampled call
+	// stacks when grouped by call stack or function - else samples), or the one named.
+	enum class AllocSource { Best, Events, Zones, Samples }
+
 	struct AllocAsk
 	{
 		public int64 fromNs = -1;
 		public int64 toNs = -1;
+		public AllocSource source;
 		public AllocGroup groupBy;
 		public bool byBytes;             // the most bytes first instead of the most allocations
 		public int32 limit = 50;
@@ -56,6 +61,8 @@ namespace Profiler
 	// The allocations each frame of `set` held (indexed like its starts): from allocation events, else the process's
 	// count, else the zones'; false when the capture has none of them.
 	bool FrameAllocations(const Capture& capture, const FrameSet* set, Core::Array<int64>& objects, Core::Array<int64>& bytes);
+	// "events", "zones" or "samples"; false (and `out` untouched) for any other name.
+	bool AllocSourceNamed(Core::StringView name, AllocSource& out);
 	// What the process counted (AllocCount) between a range's ends.
 	void CountedBetween(const Capture& capture, Range range, int64& objects, int64& bytes);
 	// Live objects by type over the censuses in a range (HeapCensus), the types that grew most first.

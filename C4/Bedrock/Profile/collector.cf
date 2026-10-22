@@ -1,0 +1,206 @@
+include "collector.ch"
+include "Platform/time.ch"
+include "Reflection/reflect.ch"
+include "Text/stringbuilder.ch"
+
+namespace Profile
+{
+	const int32 kMostPauses = 16;
+	const uint64 kFullCollection = 2;
+	const uint64 kSampleEveryBytes = 65536;
+	const int32 kSamplesATake = 64;
+	const uint64 kSampledBytes = 2;
+	const char* kUnknownType = "(type not known)";
+
+	int32 g_collectorKey = 0;
+
+	// The session's clock and the system's counter (in nanoseconds) read together, to put a time on the counter on the
+	// session's clock.
+	class ClockPair
+	{
+		public int64 ticks;
+		public int64 systemNs;
+
+		public static ClockPair Read() {
+			ClockPair pair;
+			pair.ticks = Now();
+			const int64 counter = Platform::Ticks();
+			const int64 frequency = Platform::TickFrequency();
+			pair.systemNs = (counter / frequency) * kNsPerSecond + (counter % frequency) * kNsPerSecond / frequency;
+			return pair;
+		}
+
+		public int64 TicksAt(uint64 ns, int64 frequency) const {
+			return ticks - (int64)((double)(systemNs - (int64)ns) * (double)frequency / (double)kNsPerSecond);
+		}
+	}
+
+	// --- Collections ----------------------------------------------------------------------------------------------
+
+	// Each stop as a GcBegin and GcEnd, the last with the live bytes the collection left.
+	static void QueuePauses(Session* session, const ClockPair& now, const GC::Pause* pauses, int32 count, uint64 liveBytes) {
+		Threading::LockGuard held(session->global.lock);
+		for (int32 i = 0; i < count; ++i) {
+			session->global.Timed(Event::GcBegin, now.TicksAt(pauses[i].startNs, session->frequency));
+			PutVarint(session->global.bytes, kFullCollection);
+			PutVarint(session->global.bytes, 0);
+			session->global.Timed(Event::GcEnd, now.TicksAt(pauses[i].endNs, session->frequency));
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, i == count - 1 ? liveBytes : 0);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, 0);
+		}
+	}
+
+	static Core::Array<GC::CensusEntry> LastCensus() {
+		Core::Array<GC::CensusEntry> census;
+		const int32 count = GC::LastCensus(null, 0);
+		if (count <= 0) return census;
+		census.Resize(count);
+		const int32 now = GC::LastCensus(census.Data(), count);
+		if (now < count) census.Resize(now);
+		return census;
+	}
+
+	// The live objects by type as one HeapCensus at `at`, the type no census knew named as such.
+	static void QueueCensus(Session* session, const Core::Array<GC::CensusEntry>& census, int64 at) {
+		Core::Array<uint64> names;
+		{
+			Threading::LockGuard held(session->lock);
+			for (const GC::CensusEntry& entry : census) names.Push(session->Intern(Core::StringView(entry.type != null ? entry.type : kUnknownType)));
+		}
+		Threading::LockGuard held(session->global.lock);
+		session->global.Timed(Event::HeapCensus, at);
+		PutVarint(session->global.bytes, (uint64)census.Count());
+		for (int64 i = 0; i < census.Count(); ++i) {
+			PutEvent(session->global.bytes, Event::HeapCensusType);
+			PutVarint(session->global.bytes, names[i]);
+			PutVarint(session->global.bytes, census[i].objects);
+			PutVarint(session->global.bytes, census[i].bytes);
+		}
+	}
+
+	// After each collection, without the collector's lock: its stops and the census it took. The runtime times the
+	// stops on the system's counter; `now` on both clocks maps them onto the session's.
+	static void OnCollection(void* user) {
+		Session* session = (Session*)user;
+		if (atomic_load(&session->stopping, MemoryOrder::Acquire) != 0) return;
+		GC::Pause[kMostPauses] pauses;
+		const int32 stops = GC::LastPauses(&pauses[0], kMostPauses);
+		const int32 count = stops < kMostPauses ? stops : kMostPauses;
+		const GC::Stats stats = GC::GetStats();
+		const Core::Array<GC::CensusEntry> census = LastCensus();
+		const ClockPair now = ClockPair::Read();
+		QueuePauses(session, now, &pauses[0], count, stats.liveBytes);
+		if (!census.IsEmpty()) QueueCensus(session, census, count > 0 ? now.TicksAt(pauses[count - 1].endNs, session->frequency) : now.ticks);
+	}
+
+	// --- Allocation samples ---------------------------------------------------------------------------------------
+
+	static Core::String StackKey(const GC::AllocSample& sample) {
+		Core::StringBuilder key;
+		for (int32 i = 0; i < sample.frameCount; ++i) {
+			key.AppendHex((uint64)sample.frames[i]);
+			key.Append(" ");
+		}
+		return key.ToString();
+	}
+
+	// "Owner::Name" for a method, the name alone otherwise.
+	static Core::String FunctionName(const Reflection::Function& function) {
+		Core::StringView owner = Core::StringView(function.OwnerName() != null ? function.OwnerName() : "");
+		Core::String name = Core::String(Core::StringView(function.Name()));
+		if (owner.IsEmpty()) return name;
+		return (Core::String(owner) + "::") + name.View();
+	}
+
+	// A SymbolDef naming `address` by the reflected function holding it, the first time it is seen; an address in no
+	// reflected function (the runtime's, native code) stays unnamed.
+	static void NameAddress(Session* session, uint64 address) {
+		if (session->stacks.looked.Contains(address)) return;
+		session->stacks.looked.Insert(address, 1);
+		const Reflection::Function function = Reflection::FunctionContaining((const void*)address);
+		if (!function.IsValid()) return;
+		Core::String name = FunctionName(function);
+		uint64 text;
+		{
+			Threading::LockGuard held(session->lock);
+			text = session->Intern(name.View());
+		}
+		Threading::LockGuard held(session->global.lock);
+		PutEvent(session->global.bytes, Event::SymbolDef);
+		PutVarint(session->global.bytes, address);
+		PutVarint(session->global.bytes, text);
+		PutVarint(session->global.bytes, 0);
+		PutVarint(session->global.bytes, 0);
+	}
+
+	// The id of a sample's call stack, its CallstackDef (and its addresses' names) queued the first time.
+	static uint64 StackId(Session* session, const GC::AllocSample& sample) {
+		Core::String key = StackKey(sample);
+		uint64 id;
+		if (session->stacks.ids.TryGet(key, id)) return id;
+		for (int32 i = 0; i < sample.frameCount; ++i) NameAddress(session, (uint64)sample.frames[i]);
+		session->stacks.nextId += 1;
+		id = session->stacks.nextId;
+		session->stacks.ids.Insert(key, id);
+		Threading::LockGuard held(session->global.lock);
+		PutEvent(session->global.bytes, Event::CallstackDef);
+		PutVarint(session->global.bytes, id);
+		PutVarint(session->global.bytes, (uint64)sample.frameCount);
+		for (int32 i = 0; i < sample.frameCount; ++i) PutVarint(session->global.bytes, (uint64)sample.frames[i]);
+		return id;
+	}
+
+	// The session's id of a thread the system knows by `systemId`; 0 (the process) for one that never used the session.
+	static uint64 SessionThread(Session* session, uint64 systemId) {
+		Threading::LockGuard held(session->lock);
+		uint64 thread = 0;
+		session->threadOfSystem.TryGet(systemId, thread);
+		return thread;
+	}
+
+	static void QueueSample(Session* session, const GC::AllocSample& sample, const ClockPair& now) {
+		const uint64 stack = StackId(session, sample);
+		const uint64 thread = SessionThread(session, sample.threadId);
+		Threading::LockGuard held(session->global.lock);
+		session->global.Timed(Event::Sample, now.TicksAt(sample.timeNs, session->frequency));
+		PutVarint(session->global.bytes, thread);
+		PutVarint(session->global.bytes, stack);
+		PutVarint(session->global.bytes, kSampledBytes);
+		PutVarint(session->global.bytes, session->sampleEveryBytes);
+	}
+
+	void QueueAllocSamples(Session* session) {
+		GC::AllocSample[kSamplesATake] taken;
+		int32 count = kSamplesATake;
+		while (count == kSamplesATake) {
+			count = GC::TakeAllocSamples(&taken[0], kSamplesATake);
+			const ClockPair now = ClockPair::Read();
+			for (int32 i = 0; i < count; ++i) QueueSample(session, taken[i], now);
+		}
+	}
+
+	// --- Watching -------------------------------------------------------------------------------------------------
+
+	static void DropWaitingSamples() {
+		GC::AllocSample[kSamplesATake] taken;
+		while (GC::TakeAllocSamples(&taken[0], kSamplesATake) == kSamplesATake) {}
+	}
+
+	void WatchCollector(Session* session) {
+		session->censusBefore = GC::SetCensus(true);
+		session->samplingBefore = GC::SetAllocSampling(kSampleEveryBytes);
+		if (session->samplingBefore != 0) GC::SetAllocSampling(session->samplingBefore);
+		else DropWaitingSamples();
+		session->sampleEveryBytes = session->samplingBefore != 0 ? session->samplingBefore : kSampleEveryBytes;
+		GC::RegisterCollectionResult((void*)&g_collectorKey, OnCollection, (void*)session);
+	}
+
+	void UnwatchCollector(Session* session) {
+		GC::UnregisterCollectionResult((void*)&g_collectorKey);
+		GC::SetCensus(session->censusBefore);
+		GC::SetAllocSampling(session->samplingBefore);
+	}
+}

@@ -168,9 +168,12 @@ namespace Profiler
 		return sample.kind == 2 || sample.kind == 3;
 	}
 
-	static uint64 LeafOf(const Capture& capture, uint64 callstack) {
-		const Core::Array<uint64>* frames = capture.callstacks.Find(callstack);
-		return frames && !frames->IsEmpty() ? (*frames)[0] : 0;
+	// The allocation samples the capture has (a program's sampler, an imported heap profile).
+	static int64 AllocationSampleCount(const Capture& capture) {
+		int64 count = 0;
+		for (const SampleRecord& sample : capture.samples)
+			if (IsAllocationSample(sample)) count += 1;
+		return count;
 	}
 
 	static void WriteSampleLabel(IED::JsonWriter& json, const Capture& capture, const AllocAsk& ask, uint64 key, uint64 callstack) {
@@ -178,7 +181,7 @@ namespace Profiler
 			json.Field("label", TrackLabel(capture, capture.tracks[(int64)key], capture.lastTicks).View());
 			return;
 		}
-		const SymbolRecord* symbol = capture.symbols.Find(LeafOf(capture, callstack));
+		const SymbolRecord* symbol = capture.symbols.Find(LeafAddress(capture, callstack));
 		json.Field("label", symbol ? capture.Text(symbol->functionStr) : Core::StringView("(unknown function)"));
 		json.Field("file", symbol ? capture.Text(symbol->fileStr) : Core::StringView(""));
 		json.IntField("line", symbol ? (int64)symbol->line : 0);
@@ -195,7 +198,7 @@ namespace Profiler
 		for (const SampleRecord& sample : capture.samples) {
 			if (!IsAllocationSample(sample) || !range.Holds(sample.t)) continue;
 			kind = sample.kind;
-			const uint64 key = ask.groupBy == AllocGroup::Thread ? (uint64)sample.track : (ask.groupBy == AllocGroup::Callstack ? sample.callstack : LeafOf(capture, sample.callstack));
+			const uint64 key = ask.groupBy == AllocGroup::Thread ? (uint64)sample.track : (ask.groupBy == AllocGroup::Callstack ? sample.callstack : LeafAddress(capture, sample.callstack));
 			AllocRow* row = RowFor(rowOf, rows, key, sample.callstack);
 			row->count += 1;
 			row->bytes += sample.weight;
@@ -263,6 +266,7 @@ namespace Profiler
 		json.IntField("bytes", bytes);
 		json.IntField("inZones", inZones);
 		json.IntField("inZoneBytes", inZoneBytes);
+		json.IntField("samples", AllocationSampleCount(capture));
 		NumberField(json, "perSecond", seconds > 0.0 ? (double)count / seconds : 0.0, 1);
 		NumberField(json, "bytesPerSecond", seconds > 0.0 ? (double)bytes / seconds : 0.0, 0);
 		WriteFrameTally(json, capture, tally);
@@ -273,14 +277,31 @@ namespace Profiler
 		json.EndArray();
 	}
 
+	bool AllocSourceNamed(Core::StringView name, AllocSource& out) {
+		if (name == "events") out = AllocSource::Events;
+		else if (name == "zones") out = AllocSource::Zones;
+		else if (name == "samples") out = AllocSource::Samples;
+		else return false;
+		return true;
+	}
+
+	static AllocSource SourceFor(const Capture& capture, const AllocAsk& ask) {
+		if (ask.source != AllocSource::Best) return ask.source;
+		if (!capture.allocations.IsEmpty()) return AllocSource::Events;
+		const bool counted = capture.zoneAllocs > 0 || !capture.allocCounter.times.IsEmpty();
+		if (counted && !((ask.groupBy == AllocGroup::Callstack || ask.groupBy == AllocGroup::Function) && AllocationSampleCount(capture) > 0)) return AllocSource::Zones;
+		return AllocSource::Samples;
+	}
+
 	Core::String Allocations(const Capture& capture, const AllocAsk& ask) {
 		const Range range = RangeOfNs(capture, ask.fromNs, ask.toNs);
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.IntField("fromNs", capture.clock.Ns(range.begin));
 		json.IntField("toNs", capture.clock.Ns(range.end > capture.lastTicks ? capture.lastTicks : range.end));
-		if (!capture.allocations.IsEmpty()) FromEvents(json, capture, ask, range);
-		else if (capture.zoneAllocs > 0 || !capture.allocCounter.times.IsEmpty()) FromZones(json, capture, ask, range);
+		const AllocSource source = SourceFor(capture, ask);
+		if (source == AllocSource::Events) FromEvents(json, capture, ask, range);
+		else if (source == AllocSource::Zones) FromZones(json, capture, ask, range);
 		else FromSamples(json, capture, ask, range);
 		json.EndObject();
 		return json.ToString();

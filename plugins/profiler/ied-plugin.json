@@ -140,11 +140,11 @@
 			},
 			{
 				"name": "profile_allocations",
-				"description": "Where a program allocates: per zone (the innermost zone open on the allocating thread; the default without call stacks), zone path, thread, pool, size class or call stack - allocations and bytes in all and per frame, mean size, churn (the share freed within the frame it was made in) and what is still live at the range's end; the range's allocations per frame (mean, median, p95, the worst frame) and per second. A collected program (C4) that counts its allocations is read by each zone's own count; a capture with only allocation samples, by function.",
+				"description": "Where a program allocates: per zone (the innermost zone open on the allocating thread; the default without call stacks), zone path, thread, pool, size class, call stack or function (a stack's innermost frame) - allocations and bytes in all and per frame, mean size, churn (the share freed within the frame it was made in) and what is still live at the range's end; the range's allocations per frame (mean, median, p95, the worst frame) and per second. A collected program (C4) that counts its allocations is read by each zone's own count, and by its sampled call stacks with group_by callstack; a capture with only allocation samples, by function.",
 				"class": "read",
 				"group": "profiler",
 				"parallelSafe": true,
-				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "group_by": { "enum": ["zone", "path", "thread", "pool", "size", "callstack"] }, "by": { "enum": ["count", "bytes"] }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "n": { "type": "integer", "minimum": 1, "maximum": 200 } }, "additionalProperties": false },
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "group_by": { "enum": ["zone", "path", "thread", "pool", "size", "callstack", "function"] }, "by": { "enum": ["count", "bytes"] }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "n": { "type": "integer", "minimum": 1, "maximum": 200 } }, "additionalProperties": false },
 				"function": "Profiler::AllocationsTool"
 			},
 			{

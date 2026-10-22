@@ -567,6 +567,12 @@ namespace Profiler
 		return TrackFor(capture, event.thread);
 	}
 
+	// An event that names its thread in its first field (Alloc, Sample: sent in global chunks): that thread, else the
+	// chunk's when it names none.
+	static int32 TrackNamedBy(Capture& capture, const Event& event) {
+		return event.fields[0] != 0 ? TrackFor(capture, event.fields[0]) : TrackOfEvent(capture, event);
+	}
+
 	static void ApplyTimed(Capture& capture, const Event& event, int64 t) {
 		const EventType type = event.type;
 		if (type == EventType::ZoneBegin) BeginZone(capture, TrackOfEvent(capture, event), t, event.fields[0], 0);
@@ -581,14 +587,14 @@ namespace Profiler
 		else if (Within(type, EventType::FrameMark, EventType::FrameEnd)) FrameEvent(capture, TrackOfEvent(capture, event), event, t);
 		else if (type == EventType::PlotValue) PlotValue(capture, event, t);
 		else if (type == EventType::Message) Message(capture, TrackOfEvent(capture, event), event, t);
-		else if (type == EventType::Alloc) Alloc(capture, TrackOfEvent(capture, event), event, t);
+		else if (type == EventType::Alloc) Alloc(capture, TrackNamedBy(capture, event), event, t);
 		else if (type == EventType::Free) Free(capture, event, t);
 		else if (type == EventType::PoolReset) ResetPool(capture, event, t);
 		else if (type == EventType::GcBegin || type == EventType::GcEnd) GcEvent(capture, event, t);
 		else if (type == EventType::AllocCount) CountAllocations(capture, event, t);
 		else if (type == EventType::HeapCensus) BeginCensus(capture, event, t);
 		else if (Within(type, EventType::LockWait, EventType::LockRelease)) Lock(capture, TrackOfEvent(capture, event), event, t);
-		else if (type == EventType::Sample) Sample(capture, TrackOfEvent(capture, event), event, t);
+		else if (type == EventType::Sample) Sample(capture, TrackNamedBy(capture, event), event, t);
 		else if (IsGpu(type)) GpuEvent(capture, TrackOfEvent(capture, event), event, t);
 	}
 

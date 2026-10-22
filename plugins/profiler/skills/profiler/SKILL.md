@@ -71,7 +71,10 @@ by their source file and line and points in time in milliseconds from the captur
 - A collected program (C4) counts its allocations per zone instead of sending each one: `profile_allocations` then
   shows each zone's own allocations and the process's per frame (no churn: everything a frame drops is garbage the
   collector finds later), and `profile_leaks` reads the collector's census of live objects by type - a type that keeps
-  accumulating from one collection to the next is still referenced by something that lives on.
+  accumulating from one collection to the next is still referenced by something that lives on (small objects that
+  each own a native buffer accumulate by count, and their bytes show in "Process memory", not the GC heap). Its
+  collector also samples allocations with their call stacks: `profile_allocations` with `group_by: "function"` or
+  `"callstack"` names the functions that allocated, inside zones or not.
 
 ### Then
 

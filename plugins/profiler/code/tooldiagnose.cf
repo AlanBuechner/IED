@@ -282,6 +282,25 @@ namespace Profiler
 
 	// --- Memory -------------------------------------------------------------------------------------------------------
 
+	// The functions the collector's samples say allocated the most bytes, as evidence of a counted capture's finding.
+	static void SampledFunctions(Finding* finding, const Capture& capture) {
+		AllocAsk ask;
+		ask.source = AllocSource::Samples;
+		ask.groupBy = AllocGroup::Function;
+		ask.byBytes = true;
+		ask.limit = 3;
+		Serialization::DomNode groups = ParseJson(Allocations(capture, ask)).Member("groups");
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Core::StringBuilder line;
+			line.Append("sampled: ");
+			line.Append(groups.At(i).Member("label").AsView());
+			line.Append(" allocated ");
+			line.Append(Percent(groups.At(i).Member("share").AsFloat()).View());
+			line.Append(" of the sampled bytes");
+			finding->evidence.Push(line.ToString());
+		}
+	}
+
 	static void AllocationFinding(Findings& out, const Capture& capture) {
 		AllocAsk ask;
 		ask.groupBy = DefaultAllocGroup(capture);
@@ -349,6 +368,7 @@ namespace Profiler
 			}
 			finding->evidence.Push(line.ToString());
 		}
+		if (counted && a.Member("samples").AsInt() > 0) SampledFunctions(finding, capture);
 	}
 
 	static bool SeriesGrows(const Serialization::DomNode& s) {

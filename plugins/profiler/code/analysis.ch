@@ -43,7 +43,7 @@ namespace Profiler
 
 	// What allocations are told apart by: the innermost zone open on the allocating thread, the path of zones down to
 	// it, the thread, the pool, a size class or the call stack.
-	enum class AllocGroup { Zone, Path, Thread, Pool, Size, Callstack }
+	enum class AllocGroup { Zone, Path, Thread, Pool, Size, Callstack, Function }
 
 	struct LeakAsk
 	{
@@ -85,6 +85,8 @@ namespace Profiler
 	bool AllocationsHaveCallstacks(const Capture& capture);
 	// A grouping by its name in a request ("zone", "path", "thread", "pool", "size", "callstack"); false for another.
 	bool AllocGroupNamed(Core::StringView name, AllocGroup& out);
+	// A call stack's innermost address (the function that allocated); 0 for none.
+	uint64 LeafAddress(const Capture& capture, uint64 callstack);
 	// The grouping a capture reads best by when none is asked: call stacks when its allocations have them, else zones.
 	AllocGroup DefaultAllocGroup(const Capture& capture);
 

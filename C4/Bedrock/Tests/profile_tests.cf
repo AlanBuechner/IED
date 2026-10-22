@@ -1,12 +1,13 @@
 // Profile: a session recorded to a trace file (IED_PROFILER=file:...) and read back event by event - the preamble and
 // Hello, definitions before their first use, zones on two threads with times that only grow, frames, plots, messages,
-// thread renames and the names the system knows, tasks, memory, each stop of a collection, and Bye; nothing recorded
-// outside a session.
+// thread renames and the names the system knows, tasks, memory, each stop of a collection, censuses and sampled
+// allocations, and Bye; nothing recorded outside a session.
 
 include "bedrock.ch"
 include "profile.ch"
 
-// One event of a trace read back: its type, chunk, thread, absolute time, and up to six varint fields.
+// One event of a trace read back: its type, chunk, thread, absolute time, and up to six varint fields (a list: its
+// count, then its first value).
 struct TracedEvent
 {
 	public int32 type;
@@ -43,7 +44,7 @@ class TraceReader
 	public void Skip(int64 n) { at += n; }
 }
 
-// Each event's fields after its type: t a time delta, v a varint, s text, f a double.
+// Each event's fields after its type: t a time delta, v a varint, s text, f a double, l a count of varints.
 static const char* LayoutOf(int32 type) {
 	if (type == 0x01) return "vsvvvvvs";
 	if (type == 0x02) return "vv";
@@ -54,6 +55,11 @@ static const char* LayoutOf(int32 type) {
 	if (type == 0x23 || type == 0x24) return "v";
 	if (type == 0x27) return "vv";
 	if (type == 0x6A) return "tvv";
+	if (type == 0x6B) return "tv";
+	if (type == 0x6C) return "vvv";
+	if (type == 0x81) return "vl";
+	if (type == 0x82) return "tvvvv";
+	if (type == 0x83) return "vvvv";
 	if (type == 0x13 || type == 0x20 || type == 0x31 || type == 0x32 || type == 0x33 || type == 0x40 || type == 0x41 || type == 0x42) return "tv";
 	if (type == 0x22) return "t";
 	if (type == 0x30) return "tvvv";
@@ -114,6 +120,15 @@ static Core::Array<TracedEvent> ReadTrace(const char* path, Core::HashMap<uint64
 					Core::String text = Core::String(Core::StringView((const char*)(r.bytes.Data() + r.at), n));
 					r.Skip(n);
 					if (event.type == 0x10) strings.Insert(event.fields[0], text);
+				}
+				else if (*c == 'l') {
+					const uint64 n = r.Varint();
+					event.fields[field] = n;
+					for (uint64 i = 0; i < n; ++i) {
+						const uint64 value = r.Varint();
+						if (i == 0) event.fields[field + 1] = value;
+					}
+					field += 2;
 				}
 				else if (*c == 'f') {
 					uint64 bits = 0;
@@ -181,6 +196,18 @@ class Blob
 }
 
 static Blob*[101] s_blobs;
+
+// Two megabytes in blobs, so the sampler takes about thirty of them here.
+static void AllocateMany() {
+	for (int32 i = 0; i < 32768; ++i) s_blobs[i % 101] = new Blob();
+}
+
+// The session's id of the calling thread, from its ThreadDef (0 when it has none).
+static uint64 SessionIdOf(const Core::Array<TracedEvent>& events, uint64 systemId) {
+	for (const TracedEvent& e : events)
+		if (e.type == 0x12 && e.fields[1] == systemId) return e.fields[0];
+	return 0;
+}
 
 static void TakeQueue() {
 	atomic_store(&s_waiting, 1, MemoryOrder::Release);
@@ -387,6 +414,92 @@ class ProfileTests {
 		}
 		assert_true(frameCounts >= 2, "each frame came with the process's count");
 		assert_true(last >= first + 101, "the count grew by what the zones allocated");
+		for (int32 i = 0; i <= 100; ++i) s_blobs[i] = null;
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("a_census_of_live_objects_after_each_collection")]
+	public static void TestCensus() {
+		Core::String path = TracePath("bedrock-profile-census.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		for (int32 i = 0; i < 100; ++i) s_blobs[i] = new Blob();
+		GC::Collect();
+		Profile::Stop();
+		assert_true(!GC::SetCensus(false), "the census is off again once the session stopped");
+
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		const TracedEvent* census = First(events, 0x6B);
+		assert_true(census != null && census->fields[0] >= 1, "the collection's census, with its types");
+		int64 lines = 0;
+		uint64 blobs = 0;
+		uint64 blobBytes = 0;
+		bool unknownNamed = false;
+		for (int64 i = 0; i < events.Count(); ++i) {
+			if (&events[i] == census) {
+				for (int64 k = 1; k <= (int64)census->fields[0]; ++k) {
+					const TracedEvent& line = events[i + k];
+					if (line.type != 0x6C) continue;
+					lines += 1;
+					if (*strings.Find(line.fields[0]) == "Blob") {
+						blobs = line.fields[1];
+						blobBytes = line.fields[2];
+					}
+					if (*strings.Find(line.fields[0]) == "(type not known)") unknownNamed = true;
+				}
+				break;
+			}
+		}
+		assert_eq((int64)census->fields[0], lines, "one line a type right after it");
+		assert_true(blobs >= 100 && blobBytes >= 100 * 64, "the hundred live blobs, by their type's name");
+		assert_true(unknownNamed, "what was made before the census is counted under a name of its own");
+		for (int32 i = 0; i < 100; ++i) s_blobs[i] = null;
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("allocations_sampled_with_the_functions_that_made_them")]
+	public static void TestSamples() {
+		Core::String path = TracePath("bedrock-profile-samples.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		{
+			Profile::Zone zone(Core::StringView("Spawn"));
+			AllocateMany();
+		}
+		Profile::Stop();
+		assert_eq(0, (int64)GC::SetAllocSampling(0), "sampling is off again once the session stopped");
+
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		const uint64 me = SessionIdOf(events, Threading::Thread::CurrentId());
+		Core::HashMap<uint64, bool> stacks;
+		Core::HashMap<uint64, Core::String> named;
+		int64 samples = 0;
+		bool defined = true;
+		bool mine = true;
+		bool weighed = true;
+		bool namedAllocator = false;
+		for (const TracedEvent& e : events) {
+			if (e.type == 0x81) stacks.Insert(e.fields[0], true);
+			if (e.type == 0x83) named.Insert(e.fields[0], *strings.Find(e.fields[1]));
+			if (e.type != 0x82) continue;
+			samples += 1;
+			if (!stacks.Find(e.fields[1])) defined = false;
+			if (e.fields[0] != me) mine = false;
+			if (e.fields[2] != 2 || e.fields[3] != 65536) weighed = false;
+		}
+		for (const TracedEvent& e : events)
+			if (e.type == 0x81 && named.Find(e.fields[2]) && (named.Find(e.fields[2])->View().EndsWith(Core::StringView("AllocateMany")) || named.Find(e.fields[2])->View().EndsWith(Core::StringView("TestSamples")))) namedAllocator = true;
+		assert_true(samples >= 5, "two megabytes sampled every 64 KiB");
+		assert_true(defined, "each sample's stack defined before it");
+		assert_true(me != 0 && mine, "each the allocating thread's");
+		assert_true(weighed, "each standing for 64 KiB allocated");
+		assert_true(namedAllocator, "a stack's first address named by the function that allocated (the test, once it is inlined there)");
 		for (int32 i = 0; i <= 100; ++i) s_blobs[i] = null;
 		FS::RemoveFile(path.CStr());
 	}

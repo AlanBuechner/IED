@@ -183,7 +183,8 @@ def send_collected_game(env):
 	"""A collected program's finished capture (1 ns ticks, ten 16 ms frames) that counts its allocations instead of
 	sending each one: Frame holds Particles::Spawn (300 objects, 7200 bytes) and Cache::Remember (one of 32 bytes); the
 	process's count with each frame mark; its GC heap (a sawtooth) and process memory (climbing) plotted; a collection
-	that did not say what the heap held before; a census each frame in which CacheEntry grows by 100 KB."""
+	that did not say what the heap held before; a census each frame in which CacheEntry grows by 100 KB; an allocation
+	sampled each frame with its call stack, in SpawnParticles but once in Remember."""
 	address, token = env.split(";token=")
 	host, port = address.split(":")
 	w = itp.Writer().hello(app="Collected Game", pid=779, freq=1_000_000_000, start_ticks=0, token=token)
@@ -193,6 +194,9 @@ def send_collected_game(env):
 	cache = w.srcloc("Cache::Remember", defs, file="src/main.cf", line=38)
 	main_name, heap, process, particle, entry = (w.string(s, defs) for s in ("Main", "GC heap", "Process memory", "Particle", "CacheEntry"))
 	defs.event("PlotDef", plotId=1, nameStr=heap, kind=1, flags=0).event("PlotDef", plotId=2, nameStr=process, kind=1, flags=0)
+	for stack, (address, name) in enumerate(((0x1000, "SpawnParticles"), (0x3000, "Remember")), 1):
+		defs.event("CallstackDef", callstackId=stack, addresses=[address, 0x9000])
+		defs.event("SymbolDef", address=address, functionStr=w.string(name, defs), fileStr=0, line=0)
 	w.add(defs)
 	main = w.chunk(itp.THREAD_CHUNK, 1, 0).event("ThreadName", 0, nameStr=main_name)
 	counts = w.chunk(itp.GLOBAL_CHUNK)
@@ -211,6 +215,7 @@ def send_collected_game(env):
 		if f == 3:
 			counts.event("GcBegin", t + 13 * MS, kind=0, generation=0)
 			counts.event("GcEnd", t + 14 * MS, bytesBefore=0, bytesAfter=100_000, objectsFreed=0, pinned=0, roots=0)
+		counts.event("Sample", t + 3 * MS, threadId=1, callstackId=2 if f == 5 else 1, kind=2, weight=65536)
 		counts.event("HeapCensus", t + 14 * MS, types=2)
 		counts.event("HeapCensusType", nameStr=particle, objects=300, bytes=7200)
 		counts.event("HeapCensusType", nameStr=entry, objects=1000 * (f + 1), bytes=100_000 * (f + 1))
@@ -257,9 +262,9 @@ def open_capture(run, page, capture):
 @scenario(viewports=("desktop", "phone"), targets=("real",))
 def profiler_collected_memory(run):
 	"""Memory (F-PRF-30, F-PRF-33) for a collected program that counts its allocations: the Memory window draws its GC
-	heap and process memory, lists what each zone allocated and the types its censuses found accumulating, and says
-	nothing of what an unsized collection freed; a zone's details say what it allocated, its own share too; a program
-	that sends each allocation still gets those live at the end."""
+	heap and process memory, lists what each zone allocated, the functions its collector's samples name and the types
+	its censuses found accumulating, and says nothing of what an unsized collection freed; a zone's details say what it
+	allocated, its own share too; a program that sends each allocation still gets those live at the end."""
 	page = run.open()
 	ws = page.evaluate("() => ied_shell.wsId")
 	listed = run.request("prof.captures", {"wsId": ws})
@@ -278,6 +283,11 @@ def profiler_collected_memory(run):
 	check("Cache::Remember" in rows[1], "then Cache::Remember: %s" % rows)
 	check("CacheEntry" in memory and "keeps accumulating" in memory, "the census's growing type is marked")
 	run.shot("memory")
+	page.select_option(doc + " .prof-panel select", "function")
+	run.wait_text(doc + " .prof-memory-right", "SpawnParticles")
+	sampled = run.texts(doc + " .prof-memory-right .prof-leak summary")
+	check("SpawnParticles" in sampled[0] and "9 samples" in sampled[0] and "Remember" in sampled[1], "the collector's samples by the function that allocated: %s" % sampled)
+	run.shot("sampled")
 	if run.phone:
 		page.click(doc + " .prof-bar button.phone-only")
 	page.mouse.click(*canvas_point(page, doc + " .fg", 0.05, 30))

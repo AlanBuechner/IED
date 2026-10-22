@@ -142,7 +142,7 @@ namespace Profiler
 		for (const Core::KeyValue<Core::String, CaptureEntry*>& item : profiler->captures) {
 			CaptureEntry* entry = item.value;
 			FS::Path path = FS::Path(entry->path.View());
-			if (entry->wsId.View() == ws->wsId.View() && (entry->relative.View() == named || path.FileName() == named)) return entry->id;
+			if (entry->wsId.View() == ws->wsId.View() && (entry->relative.View() == named || path.FileName() == named || path.Stem() == named)) return entry->id;
 		}
 		FS::Path path = FS::Path(ws->root.View()) / IED::NormalizePath(named).View();
 		if (FS::FileExists(path.CStr())) return profiler->EntryForPath(ws, path.View())->id;

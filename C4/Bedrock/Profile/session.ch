@@ -17,6 +17,7 @@ include "Text/string.ch"
 
 namespace Profile
 {
+	const int64 kNsPerSecond = 1000000000;
 	const int64 kFlushEveryNs = 10000000;
 	const int64 kCalibrateEveryNs = 1000000000;
 	const int64 kHeapPlotEveryNs = 100000000;
@@ -37,6 +38,15 @@ namespace Profile
 
 		// Starts a timed event: its type and the delta from the event before. The lock is held.
 		public void Timed(Event type, int64 ticks);
+	}
+
+	// The sampled call stacks a session has defined (CallstackDef) and the code addresses it has looked up (SymbolDef
+	// for those in a reflected function). Only the flusher touches them.
+	class StackNames
+	{
+		public Core::HashMap<Core::String, uint64> ids;   // a stack's addresses, in hex
+		public Core::HashMap<uint64, int32> looked;
+		public uint64 nextId;
 	}
 
 	class Session
@@ -64,6 +74,11 @@ namespace Profile
 		public int64 lastHeapPlot;
 		public uint64 heapPlot;
 		public uint64 processPlot;           // the process's private bytes: containers' buffers too, which the GC heap is not
+		public Core::HashMap<uint64, uint64> threadOfSystem;   // the system's thread ids to the session's (under `lock`)
+		public StackNames stacks;
+		public uint64 sampleEveryBytes;      // what one sampled allocation stands for
+		public uint64 samplingBefore;        // the program's own settings, put back when the session stops
+		public bool censusBefore;
 
 		// The id of `text` (0 for empty), its StringDef queued the first time. The lock is held.
 		public uint64 Intern(Core::StringView text);

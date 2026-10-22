@@ -7,6 +7,7 @@ namespace Profiler
 	const double kCensusRises = 0.7;           // of the steps between censuses
 	const double kCensusGrowth = 1.2;
 	const int64 kCensusLeastGrowthBytes = 65536;
+	const int64 kCensusLeastGrowthObjects = 500;   // small objects that each hold native memory leak by count, not size
 
 	// One type across the censuses: its live objects and bytes in each (0 where it had none).
 	class TypeSeries
@@ -33,7 +34,8 @@ namespace Profiler
 
 		public bool Accumulating() const {
 			const int64 steps = bytes.Count() - 1;
-			return steps >= 2 && (double)Rises() >= kCensusRises * (double)steps && (double)bytes.Back() >= (double)bytes[0] * kCensusGrowth && Growth() >= kCensusLeastGrowthBytes;
+			const bool grewEnough = Growth() >= kCensusLeastGrowthBytes || objects.Back() - objects[0] >= kCensusLeastGrowthObjects;
+			return steps >= 2 && (double)Rises() >= kCensusRises * (double)steps && (double)bytes.Back() >= (double)bytes[0] * kCensusGrowth && grewEnough;
 		}
 	}
 

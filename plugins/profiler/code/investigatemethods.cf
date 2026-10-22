@@ -21,6 +21,7 @@ namespace Profiler
 		ask.toNs = params.Int("to", -1);
 		ask.byBytes = params.Str("order", Core::StringView("count")).View() == "bytes";
 		ask.limit = (int32)params.Int("limit", 50);
+		AllocSourceNamed(params.Str("source", Core::StringView("")).View(), ask.source);
 		const bool named = AllocGroupNamed(params.Str("groupBy", Core::StringView("")).View(), ask.groupBy);
 		return Answered(profiler, params, [ask, named](const Capture& capture) -> Core::String {
 			AllocAsk asked = ask;

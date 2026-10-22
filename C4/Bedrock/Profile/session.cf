@@ -1,4 +1,5 @@
 include "session.ch"
+include "collector.ch"
 include "Platform/time.ch"
 include "Platform/system.ch"
 include "Memory/gc.ch"
@@ -9,14 +10,10 @@ namespace Profile
 	const int32 kStateOff = 1;
 	const int32 kStateOn = 2;
 	const int64 kFrequencyProbeNs = 20000000;
-	const int64 kNsPerSecond = 1000000000;
-	const int32 kMostPauses = 16;
-	const uint64 kFullCollection = 2;
 
 	int32 g_state = 0;
 	Session* g_session = null;
 	int64 g_sessions = 0;
-	int32 g_gcKey = 0;
 	thread_local EventBuffer* t_buffer = null;
 	thread_local int64 t_bufferSession = 0;
 
@@ -100,6 +97,7 @@ namespace Profile
 			session->nextThread += 1;
 			buffer->thread = session->nextThread;
 			session->threads.Push(buffer);
+			session->threadOfSystem.Insert(Threading::Thread::CurrentId(), buffer->thread);
 			Threading::LockGuard global(session->global.lock);
 			PutEvent(session->global.bytes, Event::ThreadDef);
 			PutVarint(session->global.bytes, buffer->thread);
@@ -183,6 +181,7 @@ namespace Profile
 	// One round: every thread's events, then the global ones, sent global first. False when sending failed.
 	static bool FlushOnce(Session* session) {
 		QueuePeriodic(session);
+		QueueAllocSamples(session);
 		Core::Array<EventBuffer*> buffers;
 		{
 			Threading::LockGuard held(session->lock);
@@ -215,53 +214,6 @@ namespace Profile
 				atomic_store(&g_state, kStateOff, MemoryOrder::Release);
 				return;
 			}
-		}
-	}
-
-	// --- Collections ----------------------------------------------------------------------------------------------
-
-	// The session's clock and the system's counter (in nanoseconds) read together, to put a time on the counter on the
-	// session's clock.
-	class ClockPair
-	{
-		public int64 ticks;
-		public int64 systemNs;
-
-		public static ClockPair Read() {
-			ClockPair pair;
-			pair.ticks = Now();
-			const int64 counter = Platform::Ticks();
-			const int64 frequency = Platform::TickFrequency();
-			pair.systemNs = (counter / frequency) * kNsPerSecond + (counter % frequency) * kNsPerSecond / frequency;
-			return pair;
-		}
-
-		public int64 TicksAt(uint64 ns, int64 frequency) const {
-			return ticks - (int64)((double)(systemNs - (int64)ns) * (double)frequency / (double)kNsPerSecond);
-		}
-	}
-
-	// After each collection: each time it stopped the program as a GcBegin and GcEnd (a concurrent cycle stops it
-	// several times), the last with the live bytes it left. The runtime times the stops on the system's counter;
-	// `now` on both clocks maps them onto the session's.
-	static void OnCollection(void* user) {
-		Session* session = g_session;
-		if (!session || atomic_load(&g_state, MemoryOrder::Acquire) != kStateOn) return;
-		GC::Pause[kMostPauses] pauses;
-		const int32 count = GC::LastPauses(&pauses[0], kMostPauses);
-		const GC::Stats stats = GC::GetStats();
-		const ClockPair now = ClockPair::Read();
-		Threading::LockGuard held(session->global.lock);
-		for (int32 i = 0; i < count && i < kMostPauses; ++i) {
-			session->global.Timed(Event::GcBegin, now.TicksAt(pauses[i].startNs, session->frequency));
-			PutVarint(session->global.bytes, kFullCollection);
-			PutVarint(session->global.bytes, 0);
-			session->global.Timed(Event::GcEnd, now.TicksAt(pauses[i].endNs, session->frequency));
-			PutVarint(session->global.bytes, 0);
-			PutVarint(session->global.bytes, i == count - 1 || i == kMostPauses - 1 ? stats.liveBytes : 0);
-			PutVarint(session->global.bytes, 0);
-			PutVarint(session->global.bytes, 0);
-			PutVarint(session->global.bytes, 0);
 		}
 	}
 
@@ -347,7 +299,7 @@ namespace Profile
 		DefineMemoryPlot(session, session->processPlot, "Process memory");
 		QueueCalibration(session, session->startTicks);
 		g_session = session;
-		GC::RegisterCollectionResult((void*)&g_gcKey, OnCollection, null);
+		WatchCollector(session);
 		session->flusher = new Threading::Thread(Threading::Thread::Run([session]() { FlushLoop(session); }));
 		atomic_store(&g_state, kStateOn, MemoryOrder::Release);
 		ObserveJobs(true);
@@ -359,7 +311,7 @@ namespace Profile
 		if (!atomic_compare_exchange(&g_state, &on, kStateOff, MemoryOrder::AcqRel, MemoryOrder::Acquire)) return;
 		Session* session = g_session;
 		ObserveJobs(false);
-		GC::UnregisterCollectionResult((void*)&g_gcKey);
+		UnwatchCollector(session);
 		atomic_store(&session->stopping, 1, MemoryOrder::Release);
 		session->flusher->Join();
 		FlushOnce(session);

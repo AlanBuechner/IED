@@ -41,8 +41,14 @@ namespace Profiler
 		else if (name == "pool") out = AllocGroup::Pool;
 		else if (name == "size") out = AllocGroup::Size;
 		else if (name == "callstack") out = AllocGroup::Callstack;
+		else if (name == "function") out = AllocGroup::Function;
 		else return false;
 		return true;
+	}
+
+	uint64 LeafAddress(const Capture& capture, uint64 callstack) {
+		const Core::Array<uint64>* frames = capture.callstacks.Find(callstack);
+		return frames && !frames->IsEmpty() ? (*frames)[0] : 0;
 	}
 
 	AllocGroup DefaultAllocGroup(const Capture& capture) {
@@ -71,6 +77,7 @@ namespace Profiler
 		if (by == AllocGroup::Pool) return allocation.pool;
 		if (by == AllocGroup::Size) return (uint64)SizeClass(allocation.size);
 		if (by == AllocGroup::Callstack) return allocation.callstack;
+		if (by == AllocGroup::Function) return LeafAddress(*capture, allocation.callstack);
 		int64 depth;
 		int64 index;
 		if (!InnermostZoneAt(*capture, allocation.track, allocation.t, depth, index)) return 0;
@@ -115,6 +122,12 @@ namespace Profiler
 			const SrcLoc* loc = site == 0 ? nullptr : capture->srclocs.Find(site);
 			json.Field("file", loc ? capture->Text(loc->fileStr) : Core::StringView(""));
 			json.IntField("line", loc ? (int64)loc->line : 0);
+		}
+		else if (by == AllocGroup::Function) {
+			const SymbolRecord* symbol = capture->symbols.Find(key);
+			json.Field("label", symbol ? capture->Text(symbol->functionStr) : Core::StringView(key == 0 ? "(no call stack)" : "(unknown function)"));
+			json.Field("file", symbol ? capture->Text(symbol->fileStr) : Core::StringView(""));
+			json.IntField("line", symbol ? (int64)symbol->line : 0);
 		}
 		else json.Field("label", callstack == 0 ? Core::StringView("(no call stack)") : Core::StringView("call stack"));
 		json.Key(Core::StringView("callstack"));

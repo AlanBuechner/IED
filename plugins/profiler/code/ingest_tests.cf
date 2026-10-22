@@ -3,6 +3,7 @@
 // turned into a warning instead of an end.
 
 include "ingest.ch"
+include "analysis.ch"
 
 static Profiler::Capture* Read(const Profiler::WireWriter& writer) {
 	Profiler::Capture* capture = new Profiler::Capture();
@@ -301,6 +302,50 @@ class ProfilerIngestTests {
 		assert_true(pool->inUse == 50 && pool->peak == 150 && pool->live.Count() == 1, "in use, peak and what is live");
 		assert_true(capture->allocations[0].freed == 9 && capture->allocations[1].freed == Profiler::kOpen, "the first was freed, the second leaks");
 		assert_true(pool->earlierFrees == 1 && capture->warningCount == 0, "a free of an unknown address is counted, not warned of");
+	}
+
+	[test("allocations_and_samples_name_their_thread")]
+	public static void TestNamedThread() {
+		Profiler::WireWriter w;
+		Hello(w, 0);
+		w.BeginChunk(Profiler::kThreadChunk, 7, 0);
+		w.Type(Profiler::EventType::ZoneBegin);
+		w.Time(1);
+		w.Varint(1);
+		w.Type(Profiler::EventType::ZoneEnd);
+		w.Time(20);
+		w.EndChunk();
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		w.Type(Profiler::EventType::Alloc);
+		w.Time(5);
+		w.Varint(7);
+		w.Varint(0);
+		w.Varint(4096);
+		w.Varint(64);
+		w.Varint(0);
+		w.Type(Profiler::EventType::Sample);
+		w.Time(6);
+		w.Varint(7);
+		w.Varint(1);
+		w.Varint(2);
+		w.Varint(65536);
+		w.Type(Profiler::EventType::Sample);
+		w.Time(7);
+		w.Varint(0);
+		w.Varint(1);
+		w.Varint(2);
+		w.Varint(65536);
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		int32 thread;
+		assert_true(capture->trackOf.TryGet(7, thread), "thread 7's track");
+		assert_eq(thread, capture->allocations[0].track, "an allocation sent in a global chunk is its thread's");
+		assert_eq(thread, capture->samples[0].track, "so is a sample");
+		int32 process;
+		assert_true(capture->trackOf.TryGet(0, process) && capture->samples[1].track == process, "a sample naming no thread is the chunk's");
+		int64 depth;
+		int64 index;
+		assert_true(Profiler::InnermostZoneAt(*capture, capture->allocations[0].track, capture->allocations[0].t, depth, index) && depth == 0, "so it is placed in its thread's zone");
 	}
 
 	[test("gc")]

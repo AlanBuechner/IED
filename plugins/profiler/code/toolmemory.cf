@@ -21,6 +21,7 @@ namespace Profiler
 		if (group == AllocGroup::Pool) return "pool";
 		if (group == AllocGroup::Size) return "size";
 		if (group == AllocGroup::Callstack) return "call stack";
+		if (group == AllocGroup::Function) return "function";
 		return "zone";
 	}
 
@@ -35,12 +36,21 @@ namespace Profiler
 		return text.ToString();
 	}
 
+	// A call stack's frames, the innermost first; the trailing ones without a name (the runtime's and the system's code
+	// under a program's entry point) are counted, not listed.
 	static void StackLines(Core::StringBuilder& out, const Serialization::DomNode& stack) {
-		for (int64 k = 0; k < stack.Count() && k < (int64)kToolStackFrames; ++k) {
+		int64 named = stack.Count();
+		while (named > 0 && stack.At(named - 1).AsView().StartsWith(Core::StringView("0x"))) named -= 1;
+		const int64 shown = named < (int64)kToolStackFrames ? named : (int64)kToolStackFrames;
+		for (int64 k = 0; k < shown; ++k) {
 			out.Append("    ");
 			out.Append(stack.At(k).AsView());
 			out.AppendByte('\n');
 		}
+		if (stack.Count() == shown) return;
+		out.Append("    (");
+		out.Append(Number(stack.Count() - shown).View());
+		out.Append(shown < named ? " more frames)\n" : " frames without a name)\n");
 	}
 
 	// --- profile_leaks ------------------------------------------------------------------------------------------------
@@ -318,6 +328,12 @@ namespace Profiler
 		out.Append(") inside zones. By ");
 		out.Append(GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone));
 		out.Append(", each zone's own (its children's left to them):\n");
+		const int64 samples = a.Member("samples").AsInt();
+		if (samples > 0) {
+			out.Append("The collector also sampled ");
+			out.Append(Number(samples).View());
+			out.Append(" allocations with their call stacks: group_by \"callstack\" shows the functions that allocated, inside zones or not.\n");
+		}
 		TextTable table;
 		Core::Array<Core::String>* head = table.Row();
 		const char*[8] titles = { GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "thread", "source" };

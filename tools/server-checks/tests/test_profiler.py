@@ -570,6 +570,9 @@ class ProfilerTests(ProfilerServer):
 		self.assertIn("arena loaded", await ask("messages"))
 		self.assertIn("1 allocations (4.0 KiB) are live", await ask("leaks"))
 		self.assertIn("A = ", await ask("compare", a="latest", b="latest"))
+		path = (await self.query("prof.captures", wsId="w1"))["captures"][0]["path"]
+		stem = os.path.splitext(os.path.basename(path))[0]
+		self.assertIn("Frames: 3", await ask("summary", capture=stem), "a capture named as the Captures window shows it, without .iedtrace")
 		with self.assertRaises(RpcFailure):
 			await ask("summary", capture="no-such-capture")
 
