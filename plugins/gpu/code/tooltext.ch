@@ -45,6 +45,7 @@ namespace GpuDebug
 	// --- The answers ---
 
 	Core::String CapturesText(Debugger* debugger, const IED::Workspace& ws);
+	Core::String CaptureText(Debugger* debugger, const IED::Workspace& ws, const Serialization::DomNode& args);
 	Core::String EventsText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String ResourcesText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String TimingText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);

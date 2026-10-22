@@ -403,8 +403,8 @@ namespace GpuDebug
 
 	ToolAnswer AnswerTool(Debugger* debugger, const IED::Workspace& ws, Core::StringView tool, const Serialization::DomNode& args) {
 		ToolAnswer answer;
-		if (tool == "captures") {
-			answer.text = CapturesText(debugger, ws);
+		if (tool == "captures" || tool == "capture") {
+			answer.text = tool == "captures" ? CapturesText(debugger, ws) : CaptureText(debugger, ws, args);
 			return answer;
 		}
 		ToolCapture target = OpenNamed(debugger, ws, args);

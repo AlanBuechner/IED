@@ -18,7 +18,7 @@
 		"settings": { "schema": "settings.schema.json", "page": "GPU Debugger" },
 		"bindings": {
 			"provides": [
-				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|events|resources|state|shader|pixel|buffer|texture|scan|timing, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
+				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|timing, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
 			],
 			"consumes": [
 				{ "name": "gpu.query", "version": "1" }
@@ -58,9 +58,18 @@
 		],
 		"skills": ["skills"],
 		"systemMessageSections": [
-			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, and gpu_timing. Read the gpu skill before debugging a frame." }
+			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, and gpu_timing. gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
 		],
 		"toolCalls": [
+			{
+				"name": "gpu_capture",
+				"description": "Captures a frame: builds the startup project and launches the program its debug configuration names for capture (as GPU > Launch for Capture does), captures the next frame once the program's capture library answers, stops the program, and returns the new capture's id and events. A D3D12 program must hand its device to the capture library (the gpu skill says how); a Vulkan program needs nothing.",
+				"class": "exec",
+				"group": "gpu",
+				"inputSchema": { "type": "object", "properties": { "project": { "type": "string" }, "configuration": { "type": "string", "description": "A debug configuration of the project; its default when left out." } }, "additionalProperties": false },
+				"function": "GpuDebug::CaptureTool",
+				"timeoutSeconds": 900
+			},
 			{
 				"name": "gpu_captures",
 				"description": "The workspace's GPU frame captures, newest first: id, program, API (D3D12 or Vulkan), frame, when, GPU, size and comment.",

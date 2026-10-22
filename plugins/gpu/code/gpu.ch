@@ -145,6 +145,11 @@ namespace GpuDebug
 	}
 
 	void RegisterMethods(Debugger* debugger);
+	// The project's debug configuration launched for capture (named, else the default), its pre-launch task run first;
+	// refused in an untrusted workspace.
+	Target* LaunchConfigured(Debugger* debugger, const IED::Workspace& ws, Core::StringView project, Core::StringView configurationName);
+	// Asks the program's capture library for the next `frames` frames.
+	void RequestCapture(Debugger* debugger, Target* target, int64 frames);
 	// The gpu.query binding the gpu_* AI tools answer through (tools.cf).
 	void ProvideQuery(Debugger* debugger);
 	void Activate(IED::PluginContext& context);

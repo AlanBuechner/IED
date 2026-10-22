@@ -20,7 +20,8 @@ Words the tools use:
 
 ## Reading a frame
 
-1. `gpu_captures` - the captures, newest first. Every other tool takes `capture` (default `"latest"`).
+1. `gpu_captures` - the captures, newest first. Every other tool takes `capture` (default `"latest"`). With none
+   yet, or to see a change you made, `gpu_capture` builds and runs the startup project, captures a frame and stops it.
 2. `gpu_events` - the frame's events under their markers. Narrow with `filter` (`"Shadow"`, `"kind:draw Cube"`).
 3. `gpu_event_state` at a draw - its shaders, vertex and index buffers, render targets, blend, depth and stencil,
    and every binding resolved to its resource and name. A marker's EID gives its last action's state.

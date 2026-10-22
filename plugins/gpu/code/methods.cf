@@ -73,55 +73,64 @@ namespace GpuDebug
 		for (int64 i = 0; node.Kind() == Serialization::DomKind::Array && i < node.Count(); ++i) out.Push(Core::String(node.At(i).AsView()));
 	}
 
-	// The program to launch: given in the request, or the project's debug configuration (built first when it names a
-	// pre-launch task).
-	static Core::String LaunchMethod(Debugger* debugger, const IED::Request& request) {
-		IED::Workspace ws = WorkspaceOf(request);
+	Target* LaunchConfigured(Debugger* debugger, const IED::Workspace& ws, Core::StringView project, Core::StringView configurationName) {
 		if (!ws.trusted) throw IED::RpcError(IED::ErrorCode::Forbidden, Core::StringView("the workspace is not trusted: nothing runs in it"));
-		Core::String program = request.params.Str("program", Core::StringView(""));
+		IED::Launch launch = IED::ResolveLaunch(ws, project, configurationName);
+		if (!launch.problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, launch.problem.View());
+		if (!launch.preLaunchTask.IsEmpty()) {
+			IED::TaskOutcome built = IED::RunTask(ws, launch.project.View(), launch.preLaunchTask.View(), Core::StringView(""));
+			if (!built.problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the build could not run: ") + built.problem.View()).View());
+			if (!built.succeeded) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the build failed: ") + built.label.View()).View());
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode configuration = Serialization::ReadJson(launch.configuration.View(), *doc).root;
+		Core::String program = Core::String(configuration.Member("program").AsView());
+		if (program.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("the launch configuration of ") + launch.project.View() + " names no program").View());
 		Core::Array<Core::String> args;
 		Core::Array<Core::String> environment;
-		Core::String cwd = ws.root;
-		Serialization::DomDoc* doc = new Serialization::DomDoc();
-		if (program.IsEmpty()) {
-			IED::Launch launch = IED::ResolveLaunch(ws, request.params.Str("project", Core::StringView("")).View(), request.params.Str("configuration", Core::StringView("")).View());
-			if (!launch.problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, launch.problem.View());
-			if (!launch.preLaunchTask.IsEmpty()) {
-				IED::TaskOutcome built = IED::RunTask(ws, launch.project.View(), launch.preLaunchTask.View(), Core::StringView(""));
-				if (!built.problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the build could not run: ") + built.problem.View()).View());
-				if (!built.succeeded) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("the build failed: ") + built.label.View()).View());
-			}
-			Serialization::DomNode configuration = Serialization::ReadJson(launch.configuration.View(), *doc).root;
-			program = Core::String(configuration.Member("program").AsView());
-			StringsOf(configuration.Member("args"), args);
-			if (!configuration.Member("cwd").AsView().IsEmpty()) cwd = Core::String(configuration.Member("cwd").AsView());
-			Serialization::DomNode env = configuration.Member("env");
-			for (int64 i = 0; env.Kind() == Serialization::DomKind::Object && i < env.Count(); ++i)
-				environment.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
-			if (program.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("the launch configuration of ") + launch.project.View() + " names no program").View());
-		}
-		else {
-			StringsOf(request.params.Field("args"), args);
-			Core::String within = request.params.Str("cwd", Core::StringView(""));
-			if (!within.IsEmpty()) cwd = Core::String((FS::Path(ws.root.View()) / IED::NormalizePath(within.View()).View()).View());
-		}
-		Target* target = debugger->Launch(ws, program.View(), args, cwd.View(), environment);
-		return target->Json();
+		StringsOf(configuration.Member("args"), args);
+		Core::String cwd = configuration.Member("cwd").AsView().IsEmpty() ? ws.root : Core::String(configuration.Member("cwd").AsView());
+		Serialization::DomNode env = configuration.Member("env");
+		for (int64 i = 0; env.Kind() == Serialization::DomKind::Object && i < env.Count(); ++i)
+			environment.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
+		return debugger->Launch(ws, program.View(), args, cwd.View(), environment);
 	}
 
-	static Core::String CaptureMethod(Debugger* debugger, const IED::Request& request) {
-		Target* target = TargetOf(debugger, request.params.Str("targetId").View());
+	void RequestCapture(Debugger* debugger, Target* target, int64 frames) {
 		if (target->state.View() == "exited") throw IED::RpcError(IED::ErrorCode::Conflict, Core::StringView("the program has exited"));
 		if (!target->connected)
 			throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the program has not loaded the capture library: a D3D12 program loads it through Gpu::Capture (C4) or flashbang_app.h; a Vulkan program gets it from the loader"));
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("cmd", "capture");
-		json.IntField("frames", request.params.Int("frames", 1));
+		json.IntField("frames", frames);
 		json.EndObject();
 		if (!debugger->Send(target, json.View())) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("the program's control pipe closed"));
 		target->capturing = true;
 		debugger->Changed(target);
+	}
+
+	// The program to launch: given in the request, or the project's debug configuration (built first when it names a
+	// pre-launch task).
+	static Core::String LaunchMethod(Debugger* debugger, const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		Core::String program = request.params.Str("program", Core::StringView(""));
+		if (program.IsEmpty())
+			return LaunchConfigured(debugger, ws, request.params.Str("project", Core::StringView("")).View(), request.params.Str("configuration", Core::StringView("")).View())->Json();
+		if (!ws.trusted) throw IED::RpcError(IED::ErrorCode::Forbidden, Core::StringView("the workspace is not trusted: nothing runs in it"));
+		Core::Array<Core::String> args;
+		Core::Array<Core::String> environment;
+		StringsOf(request.params.Field("args"), args);
+		Core::String cwd = ws.root;
+		Core::String within = request.params.Str("cwd", Core::StringView(""));
+		if (!within.IsEmpty()) cwd = Core::String((FS::Path(ws.root.View()) / IED::NormalizePath(within.View()).View()).View());
+		Target* target = debugger->Launch(ws, program.View(), args, cwd.View(), environment);
+		return target->Json();
+	}
+
+	static Core::String CaptureMethod(Debugger* debugger, const IED::Request& request) {
+		Target* target = TargetOf(debugger, request.params.Str("targetId").View());
+		RequestCapture(debugger, target, request.params.Int("frames", 1));
 		return target->Json();
 	}
 

@@ -48,6 +48,7 @@ namespace GpuDebug
 	}
 
 	IED::ToolResult CapturesTool(const IED::ToolCall& call) { return Through("captures", call); }
+	IED::ToolResult CaptureTool(const IED::ToolCall& call) { return Through("capture", call); }
 	IED::ToolResult EventsTool(const IED::ToolCall& call) { return Through("events", call); }
 	IED::ToolResult ResourcesTool(const IED::ToolCall& call) { return Through("resources", call); }
 	IED::ToolResult StateTool(const IED::ToolCall& call) { return Through("state", call); }

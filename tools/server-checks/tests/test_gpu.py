@@ -205,6 +205,22 @@ class GpuTests(ServerTestCase):
 		with self.assertRaises(RpcFailure):
 			await ask("events", capture="nope")
 
+	async def test_the_ai_captures_a_frame(self):
+		async def capture(**args):
+			return (await self.client.request("plugins.call", {"name": "gpu.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "capture", "args": args}}))["result"]["text"]
+		with self.assertRaises(RpcFailure) as caught:
+			await capture()
+		self.assertIn("not trusted", str(caught.exception))
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		text = await capture(configuration="Vulkan")
+		self.assertTrue(text.startswith("Captured fb-sample-vulkan_"), text)
+		self.assertIn("the program is stopped", text)
+		self.assertIn("marker  Cube A", text, "the new capture's events follow")
+		captures = await self.client.wait_for("gpu:w1", lambda f: f.get("kind") == "captures" and f["data"]["captures"], timeout=30)
+		self.assertEqual("Vulkan", captures[-1]["data"]["captures"][0]["meta"]["api"])
+		targets = await self.client.request("gpu.status", {"wsId": "w1"})
+		self.assertTrue(all(t["state"] == "exited" for t in targets["targets"]), targets["targets"])
+
 	async def test_refusals(self):
 		with self.assertRaises(RpcFailure) as caught:
 			await self.client.request("gpu.launch", {"wsId": "w1"})
