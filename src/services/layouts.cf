@@ -11,11 +11,7 @@ namespace Ied
 		return false;
 	}
 
-	FS::Path LayoutFolder(const Workspace* ws, Core::StringView appData) {
-		if (ws->kind.View() == "solution") return ws->root / ".ied" / "local" / "layout";
-		Core::String key = TextDigest(TrustKey(ws->root.View()).View());
-		return FS::Path(appData) / "workspaces" / key.View().Substring(0, 16) / "layout";
-	}
+	FS::Path LayoutFolder(const Workspace* ws) { return ws->localState / "layout"; }
 
 	Core::String LayoutTopic(const Workspace* ws, Core::StringView deviceClass) {
 		return ((Core::String("layout:") + ws->wsId.View()) + ":") + deviceClass;
@@ -74,7 +70,7 @@ namespace Ied
 	}
 
 	FS::Path Layouts::FileOf(const StoredLayout* layout) const {
-		return LayoutFolder(layout->ws, server->config.appDataDir.View()) / (layout->deviceClass + ".json").View();
+		return LayoutFolder(layout->ws) / (layout->deviceClass + ".json").View();
 	}
 
 	bool Layouts::Save(const StoredLayout* layout, Core::StringView json, int64 revision) const {

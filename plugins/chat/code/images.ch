@@ -20,11 +20,11 @@ namespace Ai
 	Core::Array<IED::ToolImage> AcceptedImages(const IED::Workspace& ws, const Core::Array<IED::ToolImage>& images, Core::Array<Core::String>& notes);
 	// What a model is told of images it is not sent, and why (kImagesNotSent, kImagesEarlier); empty for none.
 	Core::String ImagesAsText(const Core::Array<IED::ToolImage>& images, Core::StringView why);
-	// The user message showing the images `results` name, read from the workspace at `root`. The bytes of base64 it
+	// The user message showing the images `results` name, read from `ws` (IED::WorkspaceFile). The bytes of base64 it
 	// holds, so an estimate can count the images as images rather than as text.
-	int64 WriteImagesMessage(IED::JsonWriter& json, Core::StringView root, const Core::Array<ModelMessage*>& results);
+	int64 WriteImagesMessage(IED::JsonWriter& json, const IED::Workspace& ws, const Core::Array<ModelMessage*>& results);
 	// The owner's message with the images attached to it, as parts of that message. The bytes of base64 it holds.
-	int64 WriteUserWithImages(IED::JsonWriter& json, Core::StringView root, const ModelMessage* message);
+	int64 WriteUserWithImages(IED::JsonWriter& json, const IED::Workspace& ws, const ModelMessage* message);
 	// The images the messages name.
 	int64 CountImages(const Core::Array<ModelMessage*>& messages);
 }

@@ -155,7 +155,7 @@ namespace GpuDebug
 		Core::Array<Core::String> extensions = {Core::String(".flash"), Core::String(".json"), Core::String(".png")};
 		for (const Core::String& extension : extensions) {
 			Core::String relative = (((Core::String(kCaptureFolder) + "/") + capture->id.View()) + extension.View());
-			if (FS::FileExists((FS::Path(ws.root.View()) / relative.View()).CStr()) && !IED::MoveToTrash(ws.id.View(), relative.View(), problem))
+			if (FS::FileExists(IED::WorkspaceFile(ws, relative.View()).CStr()) && !IED::MoveToTrash(ws.id.View(), relative.View(), problem))
 				throw IED::RpcError(IED::ErrorCode::Internal, problem.View());
 		}
 		debugger->Rescan(ws.id.View());

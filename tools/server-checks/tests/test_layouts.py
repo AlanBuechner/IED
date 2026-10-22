@@ -2,7 +2,6 @@
 folder writes nothing into it; a solution's in its .ied/local/layout/; both kept across a restart; a file that is not a
 layout is ignored with a log line."""
 
-import hashlib
 import json
 import os
 import shutil
@@ -10,14 +9,9 @@ import tempfile
 
 from frames import FrameChecker
 from iedclient import Client
-from server import IedServer, ServerTestCase
+from server import IedServer, ServerTestCase, local_state
 
 DOCUMENT = {"v": 1, "activity": "ied.editor", "activities": {"ied.editor": {"kind": "tabs", "tabs": ["ied.output"], "active": "ied.output", "well": True}}}
-
-
-def trust_key(path):
-	key = path.replace("\\", "/").lower()
-	return key.rstrip("/") if len(key) > 1 else key
 
 
 class LayoutFileTests(ServerTestCase):
@@ -55,8 +49,7 @@ class LayoutFileTests(ServerTestCase):
 		return (await client.request("layout.set", {"wsId": "w1", "deviceClass": device_class, "layout": layout, "expectedRevision": revision}))["revision"]
 
 	def folder_layouts(self, folder):
-		key = hashlib.sha256(trust_key(os.path.realpath(folder)).encode("utf-8")).hexdigest()[:16]
-		return os.path.join(self.data, "app", "workspaces", key, "layout")
+		return os.path.join(local_state(self.data, folder), "layout")
 
 	async def test_a_folder_keeps_its_layouts_in_the_app_data(self):
 		self.start(self.folder)

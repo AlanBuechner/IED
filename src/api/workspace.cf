@@ -98,6 +98,12 @@ namespace IED
 
 	Core::String NormalizePath(Core::StringView path) { return Ied::NormalizePath(path); }
 
+	Core::String WorkspaceFile(const Workspace& ws, Core::StringView path) {
+		FS::Path root = FS::Path(ws.root.View());
+		FS::Path state = ws.localState.IsEmpty() ? root / ".ied" / "local" : FS::Path(ws.localState.View());
+		return Core::String(Ied::LocalOrRootFile(root, state, path).View());
+	}
+
 	bool GlobMatch(Core::StringView pattern, Core::StringView path) { return Ied::GlobMatch(pattern, path); }
 
 	Core::Array<Core::String> ExpandGlob(Core::StringView folder, Core::StringView pattern) { return Ied::ExpandGlob(FS::Path(folder), pattern); }

@@ -330,9 +330,9 @@ namespace GpuDebug
 		file.Append("_s");
 		file.AppendInt(slice);
 		file.Append(".png");
-		FS::Path folder = FS::Path(target.root.View()) / kImageFolder;
+		FS::Path folder = FS::Path(IED::WorkspaceFile(target.workspace, Core::StringView(kImageFolder)).View());
 		FS::MakeDirectories(folder.CStr());
-		FS::Path path = FS::Path(target.root.View()) / file.CStr();
+		FS::Path path = FS::Path(IED::WorkspaceFile(target.workspace, file.View()).View());
 		IED::JsonWriter params;
 		params.BeginObject();
 		params.IntField("id", id);

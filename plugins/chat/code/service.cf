@@ -54,7 +54,7 @@ namespace Ai
 		Core::String wsId = ws.id;
 		context->TopicFrom(ChatsTopic(wsId.View()).View(), [self, wsId]() -> Core::String { return self->ListSnapshot(wsId.View()); });
 		Core::Array<Core::String> problems;
-		for (Chat* chat : LoadChats(FS::Path(ws.root.View()), ws.id.View(), Core::StringView(kInterruptedNote), problems)) {
+		for (Chat* chat : LoadChats(LocalStateOf(ws), ws.id.View(), Core::StringView(kInterruptedNote), problems)) {
 			chats.Push(chat);
 			AddTopic(chat);
 		}
@@ -77,7 +77,7 @@ namespace Ai
 		Core::String summary = chat->SummaryJson();
 		Publish(chat, "chat.changed", summary.View());
 		context->Publish(ChatsTopic(chat->wsId.View()).View(), "chat.changed", summary.View());
-		SaveChatHeader(FS::Path(WorkspaceOf(chat).root.View()), chat);
+		SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
 	}
 
 	// The chat's group: its own, else ai.defaultGroup, else the first group.
@@ -231,7 +231,7 @@ namespace Ai
 
 	// The chat saved and announced on its workspace's chats: topic.
 	void Chats::Announce(const IED::Workspace& ws, Chat* chat) {
-		SaveChatHeader(FS::Path(ws.root.View()), chat);
+		SaveChatHeader(LocalStateOf(ws), chat);
 		context->Publish(ChatsTopic(ws.id.View()).View(), "chat.created", chat->SummaryJson().View());
 	}
 
@@ -318,7 +318,7 @@ namespace Ai
 		else {
 			chat->queued.Push(message);
 			QueueChanged(chat);
-			SaveChatHeader(FS::Path(WorkspaceOf(chat).root.View()), chat);
+			SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
 			json.IntField("queued", chat->queued.Count());
 		}
 		json.EndObject();
@@ -335,7 +335,7 @@ namespace Ai
 		OwnerMessage* message = chat->queued[index];
 		chat->queued.RemoveAt(index);
 		QueueChanged(chat);
-		SaveChatHeader(FS::Path(WorkspaceOf(chat).root.View()), chat);
+		SaveChatHeader(LocalStateOf(WorkspaceOf(chat)), chat);
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("queued"));
@@ -450,7 +450,7 @@ namespace Ai
 				chats.RemoveAt(i);
 				break;
 			}
-		DeleteChatFiles(FS::Path(ws.root.View()), chat->chatId.View());
+		DeleteChatFiles(LocalStateOf(ws), chat->chatId.View());
 		context->RemoveTopic(chat->Topic().View());
 		IED::JsonWriter data;
 		data.BeginObject();

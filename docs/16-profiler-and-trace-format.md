@@ -140,7 +140,7 @@ Server -> client control messages (same framing, global chunks): `0xE0 Configure
 
 - Extension `.iedtrace`. Layout: the ITP stream exactly as received (so a file is replayable as a connection), followed by an index block and a footer `{ indexOffset, version, "ITPX" }`. A crash leaves a file without a footer; opening it rebuilds the index by scanning.
 - The server keeps derived indexes next to the trace (`.iedtrace.idx/`: per-lane interval trees, LOD pyramids, symbol cache) - deletable caches.
-- Captures live in `.ied/local/captures/` by default (per machine), with metadata (app, git commit, config, duration, size) for the capture library.
+- Captures live in `.ied/local/captures/` by default (per machine: the workspace's local state, `docs/07`, a folder's in the app data), with metadata (app, git commit, config, duration, size) for the capture library.
 - Import converters (F-PRF-7) produce `.iedtrace` from Chrome trace JSON (Nuke `build-trace.json`, game-engine JSON profiles) and, later, Tracy files.
 
 ## Client library requirements (Bedrock `Profile::`, and any other language)

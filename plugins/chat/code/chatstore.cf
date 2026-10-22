@@ -2,7 +2,9 @@ include "chatstore.ch"
 
 namespace Ai
 {
-	FS::Path ChatFolder(const FS::Path& wsRoot, Core::StringView chatId) { return wsRoot / ".ied" / "local" / "chats" / chatId; }
+	FS::Path LocalStateOf(const IED::Workspace& ws) { return FS::Path(IED::WorkspaceFile(ws, Core::StringView(".ied/local")).View()); }
+
+	FS::Path ChatFolder(const FS::Path& state, Core::StringView chatId) { return state / "chats" / chatId; }
 
 	static void WriteWhole(const FS::Path& file, Core::StringView text) {
 		FS::MakeDirectories(file.Parent().CStr());
@@ -21,7 +23,7 @@ namespace Ai
 		return read.Ok() ? read.root : Serialization::DomNode();
 	}
 
-	void SaveChatHeader(const FS::Path& wsRoot, const Chat* chat) {
+	void SaveChatHeader(const FS::Path& state, const Chat* chat) {
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("chatId", chat->chatId.View());
@@ -59,11 +61,11 @@ namespace Ai
 		}
 		json.EndArray();
 		json.EndObject();
-		WriteWhole(ChatFolder(wsRoot, chat->chatId.View()) / "chat.json", json.View());
+		WriteWhole(ChatFolder(state, chat->chatId.View()) / "chat.json", json.View());
 	}
 
-	void AppendTurn(const FS::Path& wsRoot, const Chat* chat, const Turn* turn) {
-		FS::Path folder = ChatFolder(wsRoot, chat->chatId.View());
+	void AppendTurn(const FS::Path& state, const Chat* chat, const Turn* turn) {
+		FS::Path folder = ChatFolder(state, chat->chatId.View());
 		FS::MakeDirectories(folder.CStr());
 		IED::JsonWriter json;
 		turn->WriteJson(json, true);
@@ -73,13 +75,13 @@ namespace Ai
 		out.Sync();
 	}
 
-	void SaveRunningTurn(const FS::Path& wsRoot, const Chat* chat, const Turn* turn) {
+	void SaveRunningTurn(const FS::Path& state, const Chat* chat, const Turn* turn) {
 		IED::JsonWriter json;
 		turn->WriteJson(json, true);
-		WriteWhole(ChatFolder(wsRoot, chat->chatId.View()) / "running.json", json.View());
+		WriteWhole(ChatFolder(state, chat->chatId.View()) / "running.json", json.View());
 	}
 
-	void ForgetRunningTurn(const FS::Path& wsRoot, const Chat* chat) { FS::RemoveFile((ChatFolder(wsRoot, chat->chatId.View()) / "running.json").CStr()); }
+	void ForgetRunningTurn(const FS::Path& state, const Chat* chat) { FS::RemoveFile((ChatFolder(state, chat->chatId.View()) / "running.json").CStr()); }
 
 	static void ReadHeader(Chat* chat, const Serialization::DomNode& header) {
 		chat->title = Core::String(header.Member("title").AsView());
@@ -164,7 +166,7 @@ namespace Ai
 		}
 	}
 
-	static void Interrupted(Chat* chat, const FS::Path& wsRoot, Turn* turn, Core::StringView note) {
+	static void Interrupted(Chat* chat, const FS::Path& state, Turn* turn, Core::StringView note) {
 		for (Segment* segment : turn->segments) {
 			if (segment->type != "tool" || segment->state == "ok" || segment->state == "error" || segment->state == "denied") continue;
 			segment->state = Core::String("interrupted");
@@ -177,12 +179,12 @@ namespace Ai
 		chat->turns.Push(turn);
 		chat->state = ChatState::Paused;
 		chat->stateReason = Core::String("interrupted");
-		AppendTurn(wsRoot, chat, turn);
-		ForgetRunningTurn(wsRoot, chat);
+		AppendTurn(state, chat, turn);
+		ForgetRunningTurn(state, chat);
 	}
 
-	static Chat* LoadChat(const FS::Path& wsRoot, Core::StringView wsId, Core::StringView chatId, Core::StringView note, Core::Array<Core::String>& problems) {
-		FS::Path folder = ChatFolder(wsRoot, chatId);
+	static Chat* LoadChat(const FS::Path& state, Core::StringView wsId, Core::StringView chatId, Core::StringView note, Core::Array<Core::String>& problems) {
+		FS::Path folder = ChatFolder(state, chatId);
 		Serialization::DomNode header = ParseJson(ReadWhole(folder / "chat.json").View());
 		if (header.Kind() != Serialization::DomKind::Object) {
 			problems.Push((Core::String("chat ") + chatId) + ": chat.json is missing or not JSON");
@@ -197,22 +199,22 @@ namespace Ai
 		if (running.Kind() == Serialization::DomKind::Object) {
 			Turn* turn = new Turn();
 			turn->Read(running);
-			Interrupted(chat, wsRoot, turn, note);
+			Interrupted(chat, state, turn, note);
 		}
 		return chat;
 	}
 
-	Core::Array<Chat*> LoadChats(const FS::Path& wsRoot, Core::StringView wsId, Core::StringView interruptedNote, Core::Array<Core::String>& problems) {
+	Core::Array<Chat*> LoadChats(const FS::Path& state, Core::StringView wsId, Core::StringView interruptedNote, Core::Array<Core::String>& problems) {
 		Core::Array<Chat*> chats;
-		FS::Directory folder = FS::Directory((wsRoot / ".ied" / "local" / "chats").CStr());
+		FS::Directory folder = FS::Directory((state / "chats").CStr());
 		if (!folder.IsOpen()) return chats;
 		for (FS::DirectoryEntry& entry : folder) {
 			if (entry.kind != FS::EntryKind::Directory) continue;
-			Chat* chat = LoadChat(wsRoot, wsId, entry.name.View(), interruptedNote, problems);
+			Chat* chat = LoadChat(state, wsId, entry.name.View(), interruptedNote, problems);
 			if (chat) chats.Push(chat);
 		}
 		return chats;
 	}
 
-	void DeleteChatFiles(const FS::Path& wsRoot, Core::StringView chatId) { FS::RemoveAll(ChatFolder(wsRoot, chatId).CStr()); }
+	void DeleteChatFiles(const FS::Path& state, Core::StringView chatId) { FS::RemoveAll(ChatFolder(state, chatId).CStr()); }
 }

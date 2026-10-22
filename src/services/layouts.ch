@@ -39,9 +39,8 @@ namespace Ied
 
 	// The device classes of docs/15: "desktop", "tablet", "phone".
 	bool IsDeviceClass(Core::StringView name);
-	// The folder a workspace's layouts are kept in: `.ied/local/layout` of a solution, else
-	// `<appData>/workspaces/<key>/layout`, `key` the first 16 hex digits of the SHA-256 of the folder's trust key.
-	FS::Path LayoutFolder(const Workspace* ws, Core::StringView appData);
+	// The folder a workspace's layouts are kept in: `layout` in its local state (localstate.ch).
+	FS::Path LayoutFolder(const Workspace* ws);
 	Core::String LayoutTopic(const Workspace* ws, Core::StringView deviceClass);
 	// {"revision": n, "layout": ...} as a layout file holds it; false when `text` is not one.
 	bool ReadLayoutFile(Core::StringView text, int64& revision, Core::String& json);

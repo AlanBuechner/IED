@@ -1,0 +1,96 @@
+// services/localstate: where a workspace keeps its per-machine state, what .ied/local paths name, and moving what an
+// older server left in a folder.
+
+include "services/localstate.ch"
+include "services/workspaces.ch"
+include "host/trust.ch"
+
+static Core::StringView LocalView(const char* text) { return Core::StringView(text); }
+
+// A fresh temporary folder.
+static FS::Path LocalScratch(const char* name) {
+	Core::StringBuilder folder;
+	folder.Append(name);
+	folder.AppendInt(Platform::UnixTimeNs());
+	FS::Path root = FS::TempDirectory() / folder.View();
+	FS::MakeDirectories(root.CStr());
+	return root;
+}
+
+static void LocalWrite(const FS::Path& file, const char* text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::WriteFileAtomically(file.CStr(), (const void*)text, Core::StringView(text).ByteLength());
+}
+
+[test("server.localstate")]
+class LocalStateTests {
+	[test("where_it_is")]
+	public static void TestFolder() {
+		FS::Path appData = FS::Path("C:/AppData/IED");
+		assert_se("C:/Work/Game/.ied/local", Ied::LocalStateFolder(FS::Path("C:/Work/Game"), LocalView("solution"), appData.View()).CStr(), "a solution: its .ied/local");
+		Core::String key = Ied::TextDigest(Ied::TrustKey(LocalView("C:/Work/Notes")).View());
+		Core::String expected = Core::String("C:/AppData/IED/workspaces/") + key.View().Substring(0, 16);
+		assert_se(expected.CStr(), Ied::LocalStateFolder(FS::Path("C:/Work/Notes"), LocalView("folder"), appData.View()).CStr(), "a folder: the app data, by the folder's key");
+		assert_se(expected.CStr(), Ied::LocalStateFolder(FS::Path("c:\\work\\notes\\"), LocalView("file"), appData.View()).CStr(), "the key folds case, separators and a trailing slash");
+	}
+
+	[test("what_paths_name")]
+	public static void TestPaths() {
+		FS::Path root = FS::Path("C:/Work/Notes");
+		FS::Path state = FS::Path("C:/AppData/IED/workspaces/abc");
+		assert_se("C:/AppData/IED/workspaces/abc/chats/c1/media/m3-a.png", Ied::LocalOrRootFile(root, state, LocalView(".ied/local/chats/c1/media/m3-a.png")).CStr(), "under .ied/local: the local state");
+		assert_se("C:/AppData/IED/workspaces/abc", Ied::LocalOrRootFile(root, state, LocalView(".ied/local")).CStr(), "the folder itself");
+		assert_se("C:/AppData/IED/workspaces/abc/x", Ied::LocalOrRootFile(root, state, LocalView(".IED\\Local\\x")).CStr(), "any case, either separator");
+		assert_se("C:/Work/Notes/.ied/localx", Ied::LocalOrRootFile(root, state, LocalView(".ied/localx")).CStr(), "a name that only starts like it");
+		assert_se("C:/Work/Notes/.ied/skills/a.md", Ied::LocalOrRootFile(root, state, LocalView(".ied/skills/a.md")).CStr(), "the rest of .ied is the folder's");
+		assert_se("C:/Work/Notes", Ied::LocalOrRootFile(root, state, LocalView("")).CStr(), "the root");
+		assert_true(Ied::InLocalState(LocalView(".ied/local/a")) && !Ied::InLocalState(LocalView("src/.ied/local/a")), "only at the root");
+	}
+
+	[test("moved_from_a_folder")]
+	public static void TestMove() {
+		FS::Path root = LocalScratch("ied-localstate-");
+		FS::Path state = LocalScratch("ied-localstate-to-");
+		LocalWrite(root / ".ied/local/chats/c1/chat.json", "{}");
+		LocalWrite(root / ".ied/local/breakpoints.json", "[]");
+		LocalWrite(root / ".ied/local/lsp-options/Game.json", "{}");
+		LocalWrite(root / ".ied/skills/a/SKILL.md", "x");
+		LocalWrite(state / "selections.json", "{}");
+		LocalWrite(root / ".ied/local/selections.json", "{\"old\": true}");
+		Core::Array<Core::String> said = Ied::MoveFolderState(root, state);
+		assert_true(FS::FileExists((state / "chats/c1/chat.json").CStr()) && FS::FileExists((state / "breakpoints.json").CStr()), "IED's own moved");
+		assert_true(!FS::IsDirectory((root / ".ied/local/chats").CStr()), "and gone from the folder");
+		assert_true(FS::FileExists((root / ".ied/local/lsp-options/Game.json").CStr()), "a build's lsp-options stay");
+		assert_true(FS::FileExists((root / ".ied/local/selections.json").CStr()), "what the local state has already is kept where it is");
+		assert_eq((int64)3, said.Count(), "two moved, one kept");
+		assert_true(FS::FileExists((root / ".ied/skills/a/SKILL.md").CStr()), "the rest of .ied untouched");
+		FS::RemoveAll(root.CStr());
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("nothing_left_behind")]
+	public static void TestEmptied() {
+		FS::Path root = LocalScratch("ied-localstate-empty-");
+		FS::Path state = LocalScratch("ied-localstate-empty-to-");
+		LocalWrite(root / ".ied/local/chats/c1/chat.json", "{}");
+		Ied::MoveFolderState(root, state);
+		assert_true(!FS::IsDirectory((root / ".ied").CStr()), "an .ied with nothing else goes");
+		assert_true(Ied::MoveFolderState(root, state).IsEmpty(), "and a second time there is nothing to do");
+		FS::RemoveAll(root.CStr());
+		FS::RemoveAll(state.CStr());
+	}
+
+	[test("a_solutions_folder_is_left")]
+	public static void TestSolution() {
+		FS::Path root = LocalScratch("ied-localstate-sln-");
+		FS::Path state = LocalScratch("ied-localstate-sln-to-");
+		LocalWrite(root / "Game.iedsln", "{}");
+		LocalWrite(root / ".ied/local/chats/c1/chat.json", "{}");
+		assert_true(Ied::MoveFolderState(root, state).IsEmpty() && FS::FileExists((root / ".ied/local/chats/c1/chat.json").CStr()), "a folder with a solution keeps the solution's state");
+		FS::RemoveFile((root / "Game.iedsln").CStr());
+		LocalWrite(root / "Old.IED.SLN", "{}");
+		assert_true(Ied::MoveFolderState(root, state).IsEmpty(), "the older name, in any case");
+		FS::RemoveAll(root.CStr());
+		FS::RemoveAll(state.CStr());
+	}
+}

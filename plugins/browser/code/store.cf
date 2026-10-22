@@ -2,7 +2,7 @@ include "store.ch"
 
 namespace Browser
 {
-	FS::Path BrowserFolder(const IED::Workspace& ws) { return FS::Path(ws.root.View()) / ".ied" / "local" / "browser"; }
+	FS::Path BrowserFolder(const IED::Workspace& ws) { return FS::Path(IED::WorkspaceFile(ws, Core::StringView(".ied/local/browser")).View()); }
 
 	Core::String PagesJson(const Core::Array<Page*>& pages, Core::StringView wsId) {
 		IED::JsonWriter json;

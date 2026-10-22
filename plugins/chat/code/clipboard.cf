@@ -409,7 +409,7 @@ namespace Ai
 		chat->WriteClips(data);
 		data.EndObject();
 		chats->Publish(chat, "clips.changed", data.View());
-		SaveChatHeader(FS::Path(chats->WorkspaceOf(chat).root.View()), chat);
+		SaveChatHeader(LocalStateOf(chats->WorkspaceOf(chat)), chat);
 	}
 
 	// --- Saying what it holds -----------------------------------------------------------------------------------------

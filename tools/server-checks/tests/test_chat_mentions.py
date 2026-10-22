@@ -13,7 +13,7 @@ import sys
 
 from test_chat import TURN_SECONDS, ChatCase, call_step, text_step, write
 from iedclient import RpcFailure
-from server import REPO
+from server import REPO, local_state
 
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(16))
 FAILING = "import sys; sys.stdout.write('\\x1b[31mbuild failed\\x1b[0m: 2 errors\\r\\n'); sys.stdout.flush()"
@@ -55,6 +55,10 @@ class MentionTests(ChatCase):
 		reply = self.server.request("PUT", "/api/upload", body=body, headers={"Cookie": self.cookie, "Content-Type": content_type})
 		self.assertEqual(201, reply.status, reply.text())
 		return json.loads(reply.body)["blobId"]
+
+	def state_file(self, path):
+		"""A ".ied/local/..." path's file: the folder workspace's local state, in the server's app data (docs/07)."""
+		return os.path.join(local_state(self.data, self.repo), path[len(".ied/local/"):])
 
 	def first_user(self):
 		return [m for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "user"][0]
@@ -131,8 +135,9 @@ class MentionTests(ChatCase):
 		self.assertEqual([("C:\\Users\\me\\my notes.txt", "text/plain", 18), ("shot.png", "image/png", len(PNG))], [(a["name"], a["mime"], a["bytes"]) for a in kept])
 		media = ".ied/local/chats/%s/media/" % chat_id
 		self.assertTrue(kept[0]["path"].startswith(media) and kept[0]["path"].endswith("-my_notes.txt"), kept[0]["path"])
-		with open(os.path.join(self.repo, kept[1]["path"]), "rb") as f:
+		with open(self.state_file(kept[1]["path"]), "rb") as f:
 			self.assertEqual(PNG, f.read(), "the upload's bytes in the chat's media folder")
+		self.assertFalse(os.path.exists(os.path.join(self.repo, ".ied", "local")), "in the app data, not in the folder")
 		parts = self.first_user()["content"]
 		self.assertEqual(["text", "text", "image_url"], [p["type"] for p in parts], "the image in the owner's own message")
 		self.assertEqual("What is wrong?\n[attached: %s (C:\\Users\\me\\my notes.txt, 18 bytes, text/plain); fs_read reads it]" % kept[0]["path"], parts[0]["text"])
@@ -169,7 +174,7 @@ class MentionTests(ChatCase):
 		self.assertEqual("bad_request", injected.exception.code, "steering is words only")
 		queued = await self.client.request("chat.send", {"chatId": chat_id, "text": "then @notes.txt", "as": "queue", "mentions": mention})
 		self.assertEqual(1, queued["queued"])
-		with open(os.path.join(self.repo, ".ied", "local", "chats", chat_id, "chat.json"), encoding="utf-8") as f:
+		with open(self.state_file(".ied/local/chats/%s/chat.json" % chat_id), encoding="utf-8") as f:
 			self.assertEqual([{"text": "then @notes.txt", "mentions": mention}], json.load(f)["queued"], "the header keeps it whole")
 		await self.client.request("chat.approve", {"chatId": chat_id, "approvalId": request["approvalId"], "decision": "deny"})
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.start" and f["data"]["user"]["text"] == "then @notes.txt", timeout=TURN_SECONDS)

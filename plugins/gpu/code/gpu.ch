@@ -37,10 +37,10 @@ namespace GpuDebug
 	class Library
 	{
 		public Core::String wsId;
-		public Core::String root;        // the workspace's folder
+		public Core::String folder;      // kCaptureFolder of the workspace, in its local state (IED::WorkspaceFile)
 		public Core::Array<Capture*> captures;   // newest first
 
-		public FS::Path Folder() const { return FS::Path(root.View()) / kCaptureFolder; }
+		public FS::Path Folder() const { return FS::Path(folder.View()); }
 		public Capture* Find(Core::StringView id) const;
 		public Core::String Json() const;
 	}

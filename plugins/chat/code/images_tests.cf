@@ -74,7 +74,7 @@ class ImageTests {
 		Core::Array<Ai::ModelMessage*> results;
 		results.Push(result);
 		IED::JsonWriter shown;
-		const int64 encoded = Ai::WriteImagesMessage(shown, ws.root.View(), results);
+		const int64 encoded = Ai::WriteImagesMessage(shown, ws, results);
 		Serialization::DomNode message = ParsedImageJson(shown.View());
 		assert_true(message.Member("role").AsView() == "user", "a user message: a tool message carries text only");
 		Serialization::DomNode parts = message.Member("content");

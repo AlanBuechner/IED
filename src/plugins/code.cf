@@ -691,6 +691,7 @@ namespace Ied
 		shown.name = ws->name;
 		shown.root = Core::String(ws->root.View());
 		shown.kind = ws->kind;
+		shown.localState = Core::String(ws->localState.View());
 		shown.trusted = ws->trusted;
 		shown.languages = WorkspaceLanguages(server, ws);
 		if (!ws->solution) return shown;

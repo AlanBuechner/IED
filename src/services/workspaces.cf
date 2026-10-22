@@ -48,7 +48,7 @@ namespace Ied
 		return clean.ToString();
 	}
 
-	FS::Path Workspace::At(Core::StringView path) const { return path.IsEmpty() ? root : root / path; }
+	FS::Path Workspace::At(Core::StringView path) const { return LocalOrRootFile(root, localState, path); }
 
 	Core::String TextDigest(Core::StringView text) { return Crypto::Sha256((const void*)text.Data(), text.ByteLength()).ToHex(); }
 
@@ -219,6 +219,9 @@ namespace Ied
 		ws->root = canonical.IsEmpty() ? folder : canonical;
 		ws->name = Core::String(ws->root.FileName());
 		ws->kind = Core::String(kind);
+		ws->localState = LocalStateFolder(ws->root, kind, server->config.appDataDir.View());
+		if (kind != "solution")
+			for (const Core::String& moved : MoveFolderState(ws->root, ws->localState)) server->Log(moved.View());
 		ws->trusted = server->trust.IsTrusted(ws->root);
 		items.Push(ws);
 		Workspaces* self = this;

@@ -26,9 +26,11 @@ namespace Profiler
 	class ProfWorkspace
 	{
 		public Core::String wsId;
-		public Core::String root;
+		public IED::Workspace workspace;
 		public Core::String token;
-		public FS::Path Captures() const { return FS::Path(root.View()) / kCapturesFolder; }
+		// A workspace-relative path's file: under .ied/local, in its local state (IED::WorkspaceFile).
+		public FS::Path File(Core::StringView relative) const { return FS::Path(IED::WorkspaceFile(workspace, relative).View()); }
+		public FS::Path Captures() const { return File(Core::StringView(kCapturesFolder)); }
 	}
 
 	// One capture: a file in the library (or anywhere in the workspace), loaded when asked, or a live connection.
@@ -37,7 +39,7 @@ namespace Profiler
 		public Core::String id;          // "<wsId>:<16 hex digits of its path's hash>"
 		public Core::String wsId;
 		public Core::String path;        // absolute
-		public Core::String relative;    // to the workspace's root
+		public Core::String relative;    // workspace-relative (.ied/local/... for one in its local state)
 		public Capture* capture;         // null until loaded
 		public bool live;
 		public Net::TcpStream* connection;

@@ -81,7 +81,9 @@ namespace Profiler
 
 	CaptureEntry* ProfilerPlugin::EntryForPath(ProfWorkspace* ws, Core::StringView absolutePath) {
 		Core::String relative;
-		if (!IED::RelativeTo(ws->root.View(), absolutePath, relative)) relative = Core::String(absolutePath);
+		Core::String kept;
+		if (IED::RelativeTo(ws->workspace.localState.View(), absolutePath, kept)) relative = Core::String(".ied/local/") + kept.View();
+		else if (!IED::RelativeTo(ws->workspace.root.View(), absolutePath, relative)) relative = Core::String(absolutePath);
 		relative = IED::NormalizePath(relative.View());
 		Core::String id = CaptureIdFor(ws->wsId.View(), relative.View());
 		CaptureEntry* entry = Entry(id.View());
@@ -179,7 +181,7 @@ namespace Profiler
 		if (Workspace(ws.id.View())) return;
 		ProfWorkspace* p = new ProfWorkspace();
 		p->wsId = ws.id;
-		p->root = ws.root;
+		p->workspace = ws;
 		p->token = NewToken();
 		workspaces.Insert(ws.id, p);
 		Rescan(p);

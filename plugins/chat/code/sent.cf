@@ -63,7 +63,7 @@ namespace Ai
 		attachment.bytes = bytes.Count();
 		Core::String file = (chat->NextId("m") + "-") + MediaName(attachment.name.View()).View();
 		attachment.path = MediaFolder(chat) + file.View();
-		FS::Path written = ChatFolder(FS::Path(ws.root.View()), chat->chatId.View()) / "media" / file.View();
+		FS::Path written = ChatFolder(LocalStateOf(ws), chat->chatId.View()) / "media" / file.View();
 		FS::MakeDirectories(written.Parent().CStr());
 		if (!FS::WriteFileAtomically(written.CStr(), (const void*)bytes.Data(), bytes.Count()))
 			throw IED::RpcError(IED::ErrorCode::Internal, (Core::String("could not write ") + attachment.path.View()).View());
@@ -77,7 +77,7 @@ namespace Ai
 		Core::String folder = MediaFolder(chat);
 		Core::StringView file = attachment.path.View().StartsWith(folder.View()) ? attachment.path.View().Substring(folder.ByteLength(), attachment.path.ByteLength() - folder.ByteLength()) : Core::StringView("");
 		if (file.IsEmpty() || MediaName(file) != file) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("an attachment's path must be a file in ") + folder.View()).View());
-		attachment.bytes = FS::FileSize((ChatFolder(FS::Path(ws.root.View()), chat->chatId.View()) / "media" / file).CStr());
+		attachment.bytes = FS::FileSize((ChatFolder(LocalStateOf(ws), chat->chatId.View()) / "media" / file).CStr());
 		if (attachment.bytes < 0) throw IED::RpcError(IED::ErrorCode::NotFound, (attachment.path + " is no longer there").View());
 		attachment.name = Core::String(sent.Member("name").AsView());
 		if (attachment.name.IsEmpty()) attachment.name = Core::String(file);

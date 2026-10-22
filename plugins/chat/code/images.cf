@@ -13,7 +13,9 @@ namespace Ai
 	// The path relative to the workspace root; false with `why` when it is not inside it.
 	static bool InsideWorkspace(const IED::Workspace& ws, Core::StringView path, Core::String& relative, Core::String& why) {
 		Core::String named = Core::String(path);
-		if (IsAbsolute(path) && !IED::RelativeTo(ws.root.View(), path, named)) {
+		Core::String kept;
+		if (IsAbsolute(path) && !ws.localState.IsEmpty() && IED::RelativeTo(ws.localState.View(), path, kept)) named = Core::String(".ied/local/") + kept.View();
+		else if (IsAbsolute(path) && !IED::RelativeTo(ws.root.View(), path, named)) {
 			why = Core::String("it is not inside the workspace");
 			return false;
 		}
@@ -32,7 +34,7 @@ namespace Ai
 		if (!SupportedImage(image.mime.View())) return Core::String("its type is not image/png, image/jpeg, image/webp or image/gif");
 		Core::String why;
 		if (!InsideWorkspace(ws, image.path.View(), kept.path, why)) return why;
-		const int64 bytes = FS::FileSize((FS::Path(ws.root.View()) / kept.path.View()).CStr());
+		const int64 bytes = FS::FileSize(IED::WorkspaceFile(ws, kept.path.View()).CStr());
 		if (bytes < 0) return Core::String("there is no such file");
 		if (bytes > kToolImageMaxBytes) return Core::String("it is larger than 4 MB");
 		kept.mime = image.mime;
@@ -65,8 +67,8 @@ namespace Ai
 	}
 
 	// The image's file as a data: URL; false when it can no longer be read.
-	static bool DataUrl(Core::StringView root, const IED::ToolImage& image, Core::String& url) {
-		FS::Path file = FS::Path(root) / image.path.View();
+	static bool DataUrl(const IED::Workspace& ws, const IED::ToolImage& image, Core::String& url) {
+		FS::Path file = FS::Path(IED::WorkspaceFile(ws, image.path.View()).View());
 		const int64 size = FS::FileSize(file.CStr());
 		if (size < 0 || size > kToolImageMaxBytes) return false;
 		Core::Array<uint8> bytes;
@@ -94,7 +96,7 @@ namespace Ai
 		json.EndObject();
 	}
 
-	int64 WriteImagesMessage(IED::JsonWriter& json, Core::StringView root, const Core::Array<ModelMessage*>& results) {
+	int64 WriteImagesMessage(IED::JsonWriter& json, const IED::Workspace& ws, const Core::Array<ModelMessage*>& results) {
 		int64 encoded = 0;
 		json.BeginObject();
 		json.Field("role", "user");
@@ -104,7 +106,7 @@ namespace Ai
 			for (const IED::ToolImage& image : result->images) {
 				Core::String url;
 				const Core::String from = ((Core::String(" from the result of call ") + result->toolCallId.View()) + ", ") + image.path.View();
-				if (!DataUrl(root, image, url)) {
+				if (!DataUrl(ws, image, url)) {
 					TextPart(json, ((Core::String("[the image") + from.View()) + ", is no longer there]").View());
 					continue;
 				}
@@ -117,7 +119,7 @@ namespace Ai
 		return encoded;
 	}
 
-	int64 WriteUserWithImages(IED::JsonWriter& json, Core::StringView root, const ModelMessage* message) {
+	int64 WriteUserWithImages(IED::JsonWriter& json, const IED::Workspace& ws, const ModelMessage* message) {
 		int64 encoded = 0;
 		json.BeginObject();
 		json.Field("role", "user");
@@ -126,7 +128,7 @@ namespace Ai
 		TextPart(json, message->content.View());
 		for (const IED::ToolImage& image : message->images) {
 			Core::String url;
-			if (!DataUrl(root, image, url)) {
+			if (!DataUrl(ws, image, url)) {
 				TextPart(json, ((Core::String("[the attached image ") + image.path.View()) + " is no longer there]").View());
 				continue;
 			}

@@ -45,7 +45,7 @@ namespace Ai
 		said.Append(" (");
 		said.Append(image.mime.View());
 		said.Append(", ");
-		said.AppendInt((FS::FileSize((FS::Path(call.ws.root.View()) / image.path.View()).CStr()) + 1023) / 1024);
+		said.AppendInt((FS::FileSize(IED::WorkspaceFile(call.ws, image.path.View()).CStr()) + 1023) / 1024);
 		said.Append(" KB).");
 		ToolOutcome outcome = ToolResult(said.View(), ((Core::String("[image ") + image.path.View()) + "]").View());
 		outcome.images = shown;
@@ -61,7 +61,7 @@ namespace Ai
 
 	static ToolOutcome InfoRun(const ToolInvocation& call) {
 		Core::String path = IED::NormalizePath(call.args.Member("path").AsView());
-		FS::Path file = FS::Path(call.ws.root.View()) / path.View();
+		FS::Path file = FS::Path(IED::WorkspaceFile(call.ws, path.View()).View());
 		const int64 size = FS::FileSize(file.CStr());
 		if (size < 0) return ToolError(((Core::String("image_info: there is no file ") + path.View()) + "; use fs_glob to find files by name").View());
 		Core::Array<uint8> head;

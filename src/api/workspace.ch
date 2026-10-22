@@ -21,6 +21,7 @@ namespace IED
 		public Core::String name;
 		public Core::String root;        // its folder
 		public Core::String kind;        // "folder", "file" (opened for one file) or "solution"
+		public Core::String localState;  // its per-machine state (docs/07): a solution's .ied/local, a folder's in the app data
 		public bool trusted;
 		public Core::Array<Core::String> languages;   // the languages it uses (workspaceLanguage.<id>, docs/26 section 8)
 		public Core::Array<Project> projects;         // a solution's projects; empty for a folder
@@ -63,6 +64,9 @@ namespace IED
 	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative);
 	// The folders a workspace search leaves out ("**/node_modules", ...).
 	Core::Array<Core::String> DefaultExcludes();
+	// The file a workspace-relative path names: under .ied/local, in its local state (so a folder's stays out of the
+	// folder), else under its root. Plugins join paths with it, never with `root`, for their state under .ied/local.
+	Core::String WorkspaceFile(const Workspace& ws, Core::StringView path);
 	// A workspace-relative path with '/' separators and no '.' or '..'; throws IED::RpcError bad_request.
 	Core::String NormalizePath(Core::StringView path);
 	// Whether `path` (workspace-relative) matches the glob `pattern` ("src/**/*.cf"; '*' within a name, '**' any folders).

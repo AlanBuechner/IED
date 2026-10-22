@@ -8,6 +8,7 @@
 include "web/rpc.ch"
 include "fs/watching.ch"
 include "solutions/model.ch"
+include "localstate.ch"
 
 namespace Ied
 {
@@ -17,6 +18,7 @@ namespace Ied
 		public Core::String name;
 		public FS::Path root;
 		public Core::String kind;          // "folder", "file" (opened for one file) or "solution"
+		public FS::Path localState;        // its per-machine state, what ".ied/local/..." paths name (localstate.ch)
 		public SolutionModel* solution;    // a solution workspace's model; null otherwise
 		public bool trusted;
 		public Core::HashMap<Core::String, int64> revisions;        // relative path -> revision
@@ -24,7 +26,7 @@ namespace Ied
 		public Core::HashMap<Core::String, bool> ownDirectories;    // folders the server made, until the watcher reports them
 		public FolderWatch watch;
 
-		// The file at a workspace-relative path.
+		// The file at a workspace-relative path; under .ied/local, in its local state.
 		public FS::Path At(Core::StringView path) const;
 		public Core::String SummaryJson() const;
 	}

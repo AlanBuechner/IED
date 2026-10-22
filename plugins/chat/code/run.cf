@@ -460,8 +460,8 @@ namespace Ai
 		chat->state = pausing ? ChatState::Paused : ChatState::Idle;
 		chat->stateReason = pausing ? stop : Core::String();
 		chat->updatedMs = turn->endedMs;
-		AppendTurn(FS::Path(ws.root.View()), chat, turn);
-		ForgetRunningTurn(FS::Path(ws.root.View()), chat);
+		AppendTurn(LocalStateOf(ws), chat, turn);
+		ForgetRunningTurn(LocalStateOf(ws), chat);
 		IED::JsonWriter data;
 		data.BeginObject();
 		data.Field("turnId", turn->turnId.View());

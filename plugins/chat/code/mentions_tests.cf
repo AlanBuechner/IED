@@ -136,8 +136,10 @@ class MentionTests {
 		gone.mime = Core::String("image/png");
 		gone.path = Core::String("missing.png");
 		message.images.Push(gone);
+		IED::Workspace ws;
+		ws.root = Core::String((FS::TempDirectory() / "ied-no-such-folder").View());
 		IED::JsonWriter json;
-		const int64 encoded = Ai::WriteUserWithImages(json, (FS::TempDirectory() / "ied-no-such-folder").View(), &message);
+		const int64 encoded = Ai::WriteUserWithImages(json, ws, &message);
 		Serialization::DomNode parts = MentionJson(json.View()).Member("content");
 		assert_true(parts.At(0).Member("text").AsView() == "what is wrong here?", "the text first, in the same message");
 		assert_true(parts.At(1).Member("text").AsView().Contains(MentionView("missing.png is no longer there")), "an image since removed is said");

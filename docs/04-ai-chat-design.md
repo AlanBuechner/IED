@@ -105,7 +105,7 @@ MCP client for stdio and streamable-HTTP servers (Blender, a game engine, anythi
 
 ## Persistence
 
-Per chat, under `.ied/local/chats/<chatId>/` (generic chats under `%APPDATA%/IED/chats/`):
+Per chat, under `.ied/local/chats/<chatId>/` - the workspace's local state, `docs/07` (generic chats under `%APPDATA%/IED/chats/`):
 
 | File | Content |
 |---|---|
@@ -182,8 +182,9 @@ Drag-drop, paste and picker attachments (images/videos to vision-capable models;
 - **Attachments in the request:** an image (PNG, JPEG, GIF, WebP, at most 4 MiB) goes to a model that takes images as an
   image part of the owner's own message (its text first), counted with a tool result's images among the newest 4 a
   request sends (`docs/13` "Images in tool results"); to a model that
-  does not, and for any other file, the message names it - `attached: .ied/local/chats/<id>/media/2-notes.txt (12 KB,
-  text/plain)` - and the model reads it with `fs_read` when it needs it.
+  does not, and for any other file, the message names it - `[attached: .ied/local/chats/<id>/media/m12-notes.txt
+  (notes.txt, 12 KB, text/plain); fs_read reads it]` - and the model reads it with `fs_read` when it needs it (the path
+  names the file in the workspace's local state wherever that is, `docs/07`).
 - **The transcript** shows a user message's mentions and attachments as chips under its text; an image chip shows the
   picture (the workspace's images route, `docs/10`), a file chip opens the file, a mention chip opens what it names.
 
@@ -228,7 +229,7 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 | `ai.maxSteps` | app, solution | model requests per turn before it pauses; 0, the default, is no limit |
 | `ai.tools.loadAll` | app, solution | send every tool's definition with every request; off, the default, plugin tools and tool groups are listed by name and loaded on demand (`tool_search`, `docs/13`) |
 
-**Persistence:** per chat under `<workspace>/.ied/local/chats/<chatId>/`: `chat.json` (title, mode, permission, group, tasks, queued messages, the rules allowed for the chat, the files the AI changed), `turns.jsonl` (each finished turn with the messages the model was sent) and `running.json` (the turn in flight, written at every step and tool boundary). A `running.json` found at start is a turn a restart interrupted: it ends `interrupted`, a call it had running gets a result saying its effect is unknown, and the chat waits paused for the next message.
+**Persistence:** per chat under the workspace's `.ied/local/chats/<chatId>/` (its local state, `docs/07`: a solution's folder, a folder's app data, so chatting writes nothing into an opened folder; chats an older server left in a plain folder move there when it opens): `chat.json` (title, mode, permission, group, tasks, queued messages, the rules allowed for the chat, the files the AI changed), `turns.jsonl` (each finished turn with the messages the model was sent) and `running.json` (the turn in flight, written at every step and tool boundary). A `running.json` found at start is a turn a restart interrupted: it ends `interrupted`, a call it had running gets a result saying its effect is unknown, and the chat waits paused for the next message.
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`), and llama.cpp's `/props` whether it takes images (`vision`, its `modalities`); a turn asks each profile's server once per server run: a profile without `contextWindow` uses the slot context it reports, a profile without `vision` takes what the server says of images, and a llama.cpp server streams the prompt read so far (`docs/12` "Watchdogs"). Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier; "Images tool results show" is `vision`: as its server says - left out -, send them, or never); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 

@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 import itp  # noqa: E402
 from frames import FrameChecker  # noqa: E402
 from iedclient import Client, RpcFailure  # noqa: E402
-from server import REPO, IedServer, ServerTestCase, remove_tree  # noqa: E402
+from server import REPO, IedServer, ServerTestCase, local_state, remove_tree, workspace_file  # noqa: E402
 
 PY = sys.executable
 MS = 1_000_000
@@ -325,7 +325,7 @@ class ProfilerTests(ProfilerServer):
 		ended = (await self.client.wait_for(topic, lambda f: f.get("kind") == "ended", timeout=15))[-1]["data"]
 		self.assertFalse(ended["live"])
 		sock.close()
-		path = os.path.join(self.ws, *live["path"].split("/"))
+		path = workspace_file(self.data, self.ws, live["path"])
 		with open(path, "rb") as f:
 			trace = f.read()
 		end, meta = itp.stream_end(trace)
@@ -634,7 +634,8 @@ class ImporterTests(ProfilerServer):
 		self.assertEqual("steps.iedtrace", os.path.basename(entry["path"]))
 		self.assertEqual("upper", entry["metadata"]["format"])
 		self.assertTrue(entry["metadata"]["importedFrom"].endswith("steps.up"), entry["metadata"])
-		leftovers = [n for n in os.listdir(os.path.join(self.ws, ".ied", "local", "captures")) if n.startswith(".import-")]
+		leftovers = [n for n in os.listdir(os.path.join(local_state(self.data, self.ws), "captures")) if n.startswith(".import-")]
+		self.assertFalse(os.path.exists(os.path.join(self.ws, ".ied")), "a folder's captures live in the app data")
 		self.assertEqual([], leftovers, "the converted file is removed")
 
 	async def test_a_failing_importer_says_why(self):

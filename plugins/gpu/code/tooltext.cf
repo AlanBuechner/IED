@@ -109,7 +109,7 @@ namespace GpuDebug
 		ToolCapture target;
 		target.capture = CaptureNamed(debugger, ws, args.Member("capture").AsView());
 		target.wsId = ws.id;
-		target.root = ws.root;
+		target.workspace = ws;
 		target.session = debugger->Open(ws.id.View(), target.capture);
 		target.api = Core::String(ParseAnswer(target.session->summary.View()).Member("api").AsView());
 		return target;

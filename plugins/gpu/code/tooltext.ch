@@ -25,7 +25,7 @@ namespace GpuDebug
 		public Capture* capture;
 		public Session* session;
 		public Core::String wsId;
-		public Core::String root;        // the workspace's folder
+		public IED::Workspace workspace;
 		public Core::String api;
 	}
 

@@ -16,7 +16,7 @@ import unittest
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
-from server import IedServer, ServerTestCase, remove_tree
+from server import IedServer, ServerTestCase, remove_tree, workspace_file
 import test_chat as chat_checks
 
 PAGE = """<!doctype html>
@@ -178,7 +178,7 @@ class BrowserTests(ServerTestCase):
 		self.assertEqual({"text": 'Value: "Clicked AI"', "isError": False}, await self.call("browser.eval", page=page, js="document.title"))
 		self.assertTrue((await self.call("browser.eval", page=page, js="throw new Error('nope')"))["isError"])
 		shot = await self.call("browser.screenshot", page=page)
-		path = os.path.join(self.site, shot["image"])
+		path = workspace_file(self.data, self.site, shot["image"])
 		self.assertTrue(shot["image"].startswith(".ied/local/browser/shots/" + page), shot)
 		with open(path, "rb") as f:
 			self.assertEqual(b"\x89PNG", f.read(4))

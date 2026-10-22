@@ -74,7 +74,7 @@ namespace Profiler
 		{
 			Threading::LockGuard guard(profiler->lock);
 			ProfWorkspace* ws = WorkspaceOrThrow(profiler, params.Str("wsId").View());
-			FS::Path path = FS::Path(ws->root.View()) / IED::NormalizePath(params.Str("path").View()).View();
+			FS::Path path = ws->File(IED::NormalizePath(params.Str("path").View()).View());
 			if (!FS::FileExists(path.CStr())) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no file ") + params.Str("path").View()).View());
 			CaptureEntry* entry = profiler->EntryForPath(ws, path.View());
 			FS::FileInfo info;
@@ -146,13 +146,14 @@ namespace Profiler
 	}
 
 	static Core::String ImportMethod(ProfilerPlugin* profiler, const IED::Params& params) {
-		Core::String root;
+		FS::Path source;
+		FS::Path target;
 		{
 			Threading::LockGuard guard(profiler->lock);
-			root = WorkspaceOrThrow(profiler, params.Str("wsId").View())->root;
+			ProfWorkspace* ws = WorkspaceOrThrow(profiler, params.Str("wsId").View());
+			source = ws->File(IED::NormalizePath(params.Str("path").View()).View());
+			target = ws->Captures();
 		}
-		FS::Path source = FS::Path(root.View()) / IED::NormalizePath(params.Str("path").View()).View();
-		FS::Path target = FS::Path(root.View()) / kCapturesFolder;
 		FS::MakeDirectories(target.CStr());
 		Core::String problem;
 		ContributedImporter importer;

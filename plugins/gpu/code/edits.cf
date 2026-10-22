@@ -9,7 +9,7 @@ namespace GpuDebug
 {
 	const char* kLinksFile = "shader-links.json";
 
-	static FS::Path LinksPath(const IED::Workspace& ws) { return FS::Path(ws.root.View()) / kCaptureFolder / kLinksFile; }
+	static FS::Path LinksPath(const IED::Workspace& ws) { return FS::Path(IED::WorkspaceFile(ws, Core::StringView(kCaptureFolder)).View()) / kLinksFile; }
 
 	static Core::String LinkName(Capture* capture, Core::StringView key) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();

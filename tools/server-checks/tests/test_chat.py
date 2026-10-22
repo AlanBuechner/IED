@@ -14,7 +14,7 @@ import urllib.request
 
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
-from server import REPO, IedServer, ServerTestCase
+from server import REPO, IedServer, ServerTestCase, local_state
 
 FAKE_MODEL = os.path.join(REPO, "tools", "fake-model", "fake_model.py")
 MAIN = "int main(void)\n{\n\treturn 0;\n}\n"
@@ -874,8 +874,27 @@ class ChatTests(ChatCase):
 		chat_id, _ = await self.chat()
 		self.model.queue("ok-text")
 		await self.turn(chat_id)
-		folder = os.path.join(self.repo, ".ied", "local", "chats", chat_id)
+		folder = os.path.join(local_state(self.data, self.repo), "chats", chat_id)
 		self.assertTrue(os.path.exists(os.path.join(folder, "turns.jsonl")))
+		self.assertFalse(os.path.exists(os.path.join(self.repo, ".ied", "local")), "a folder's chats live in the app data, never in the folder")
 		await self.client.request("chat.delete", {"chatId": chat_id})
 		self.assertFalse(os.path.exists(folder))
 		self.assertEqual([], [c for c in (await self.client.request("chat.list", {"wsId": "w1"}))["chats"] if c["chatId"] == chat_id])
+
+	async def test_chats_an_older_server_left_in_the_folder_move_to_the_app_data(self):
+		chat_id, _ = await self.chat()
+		self.model.queue("ok-text")
+		await self.turn(chat_id)
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		state = local_state(self.data, self.repo)
+		os.makedirs(os.path.join(self.repo, ".ied", "local"))
+		shutil.move(os.path.join(state, "chats"), os.path.join(self.repo, ".ied", "local", "chats"))
+		write(os.path.join(self.repo, ".ied", "local", "lsp-options", "Game.json"), "{}")
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		chats = (await self.client.request("chat.list", {"wsId": "w1"}))["chats"]
+		self.assertIn(chat_id, [c["chatId"] for c in chats], "the chat is still there")
+		self.assertTrue(os.path.exists(os.path.join(state, "chats", chat_id, "turns.jsonl")), "moved to the app data")
+		self.assertEqual(["lsp-options"], os.listdir(os.path.join(self.repo, ".ied", "local")), "what is not IED's own stays")

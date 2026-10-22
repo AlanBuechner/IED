@@ -458,6 +458,6 @@ namespace Ai
 		chat->WriteModified(data);
 		data.EndObject();
 		chats->Publish(chat, "files.changed", data.View());
-		SaveChatHeader(FS::Path(ws.root.View()), chat);
+		SaveChatHeader(LocalStateOf(ws), chat);
 	}
 }

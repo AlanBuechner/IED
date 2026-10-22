@@ -122,7 +122,7 @@ namespace Ied
 
 	// --- Selections --------------------------------------------------------------------------------------------------
 
-	static FS::Path SelectionsFile(const Workspace* ws) { return ws->root / ".ied" / "local" / "selections.json"; }
+	static FS::Path SelectionsFile(const Workspace* ws) { return ws->localState / "selections.json"; }
 
 	TaskSelections* Tasks::SelectionsOf(Workspace* ws) {
 		TaskSelections* chosen = nullptr;

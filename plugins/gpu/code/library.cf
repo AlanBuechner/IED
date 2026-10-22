@@ -131,7 +131,7 @@ namespace GpuDebug
 	void Debugger::Opened(const IED::Workspace& ws) {
 		Library* library = new Library();
 		library->wsId = ws.id;
-		library->root = ws.root;
+		library->folder = IED::WorkspaceFile(ws, Core::StringView(kCaptureFolder));
 		library->captures = ScanCaptures(library->Folder());
 		Debugger* self = this;
 		Core::String wsId = ws.id;

@@ -4,6 +4,7 @@ end, never left running."""
 
 import asyncio
 import atexit
+import hashlib
 import http.client
 import json
 import os
@@ -21,6 +22,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 FRONTEND = os.path.join(REPO, "frontend")
 RUNNING = set()
+
+
+def trust_key(path):
+	"""The server's TrustKey: a folder's path compared without ASCII case or separator kind, no trailing slash."""
+	key = path.replace("\\", "/").lower()
+	return key.rstrip("/") if len(key) > 1 else key
+
+
+def local_state(data, folder):
+	"""Where a server with `data` keeps a folder workspace's per-machine state (docs/07): its app data, never the
+	folder. The workspace's ".ied/local/..." paths name files here."""
+	key = hashlib.sha256(trust_key(os.path.realpath(folder)).encode("utf-8")).hexdigest()[:16]
+	return os.path.join(data, "app", "workspaces", key)
+
+
+def workspace_file(data, folder, path):
+	"""The file a folder workspace's relative `path` names, as the server's Workspace::At: ".ied/local/..." in its local
+	state, anything else in the folder."""
+	if path == ".ied/local" or path.startswith(".ied/local/"):
+		return os.path.join(local_state(data, folder), *path[len(".ied/local/"):].split("/"))
+	return os.path.join(folder, *path.split("/"))
 
 
 def remove_tree(path):

@@ -11,6 +11,7 @@ static Ied::Workspace* WorkspaceAt(const char* root, const char* kind) {
 	ws->wsId = Core::String("w1");
 	ws->root = FS::Path(root);
 	ws->kind = Core::String(kind);
+	ws->localState = Ied::LocalStateFolder(ws->root, ws->kind.View(), Core::StringView("C:/AppData/IED"));
 	return ws;
 }
 
@@ -47,14 +48,8 @@ class LayoutTests {
 
 	[test("folder")]
 	public static void TestFolder() {
-		Core::StringView appData = Core::StringView("C:/AppData/IED");
-		Ied::Workspace* solution = WorkspaceAt("C:/Work/Game", "solution");
-		assert_se("C:/Work/Game/.ied/local/layout", Ied::LayoutFolder(solution, appData).CStr(), "a solution: its .ied/local");
+		assert_se("C:/Work/Game/.ied/local/layout", Ied::LayoutFolder(WorkspaceAt("C:/Work/Game", "solution")).CStr(), "a solution: its .ied/local");
 		Ied::Workspace* folder = WorkspaceAt("C:/Work/Notes", "folder");
-		Core::String key = Ied::TextDigest(Ied::TrustKey(Core::StringView("C:/Work/Notes")).View());
-		Core::String expected = (Core::String("C:/AppData/IED/workspaces/") + key.View().Substring(0, 16)) + "/layout";
-		assert_se(expected.CStr(), Ied::LayoutFolder(folder, appData).CStr(), "a folder: the app data, by the folder's key");
-		Ied::Workspace* sameFolder = WorkspaceAt("c:\\work\\notes\\", "file");
-		assert_se(expected.CStr(), Ied::LayoutFolder(sameFolder, appData).CStr(), "the key folds case, separators and a trailing slash");
+		assert_se((folder->localState / "layout").CStr(), Ied::LayoutFolder(folder).CStr(), "a folder: layout in its local state, in the app data");
 	}
 }
