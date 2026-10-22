@@ -1,8 +1,8 @@
 """The Reflection library's code generation (Reflection library docs, ReflectionSystem.md): each source of a reflecting
 project goes through the HeaderTool after it compiles (objects.py), which writes what it found into
 <int>/generated/; then CodeGen gathers that into generated/generated.cpp, compiled with the project. CodeGen runs when
-a source compiled, when CodeGen is newer than the project's output, or when generated.cpp is newer than its object
-(an interrupted build left it uncompiled)."""
+a source compiled, when CodeGen is newer than the project's output, or when generated.cpp is missing or newer than its
+object (an interrupted build left it uncompiled)."""
 
 import os
 import subprocess
@@ -45,7 +45,7 @@ def needs_code_gen(target, code_gen, sources_worked):
 	if output is None or (generator is not None and generator > output):
 		return True
 	source, obj = _mtime(generated_source(target)), _mtime(f"{target.int_dir}/generated.obj")
-	return source is not None and (obj is None or source > obj)
+	return source is None or obj is None or source > obj
 
 
 def run_code_gen(target, code_gen, log):

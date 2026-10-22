@@ -50,14 +50,30 @@ def _build(ctx):
 	toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand)
 	target = model.target(ctx)
 	libraries = [model.target(dependency) for dependency in model.libraries(ctx)]
-	includes = _unique(target.includes + tuple(folder for library in libraries for folder in library.includes))
-	system_includes = _unique(target.system_includes + toolchain.system_includes)
+	_check_object_names(ctx, target)
+	_prepare_folders(target, ctx.log)
+	objects_linked = _compile_project(ctx, toolchain, target, libraries)
+	_link(ctx, toolchain, target, objects_linked, libraries)
+	_place_beside(ctx, target, libraries)
+	return []
+
+
+def _check_object_names(ctx, target):
 	clashes = objects.shared_object_names(target.sources + ((reflection.generated_source(target),) if target.reflection else ()))
 	if clashes:
 		ctx.problem(f"{target.name}: " + "; ".join(clashes) + " (rename one of them)")
+
+
+def _prepare_folders(target, log):
 	os.makedirs(target.int_dir, exist_ok=True)
 	os.makedirs(target.bin_dir, exist_ok=True)
-	_remove_stale_objects(target, ctx.log)
+	_remove_stale_objects(target, log)
+
+
+def _compile_project(ctx, toolchain, target, libraries):
+	"""Compiles the sources (and a reflecting project's generated code) and records them for clangd; the objects to link."""
+	includes = _unique(target.includes + tuple(folder for library in libraries for folder in library.includes))
+	system_includes = _unique(target.system_includes + toolchain.system_includes)
 	header_tool = reflection.tool_program(ctx, reflection.HEADER_TOOL) if target.reflection else None
 	compiles = [objects.make_job(toolchain, ctx.configuration, target, source, includes, system_includes, header_tool) for source in target.sources]
 	worked = _compile(ctx, toolchain, target, compiles, header_tool)
@@ -65,14 +81,17 @@ def _build(ctx):
 	objects_linked = [job.obj for job in compiles]
 	if target.reflection:
 		objects_linked.append(_compile_reflection(ctx, toolchain, target, includes, system_includes, worked))
-	_link(ctx, toolchain, target, objects_linked, libraries)
+	return objects_linked
+
+
+def _place_beside(ctx, target, libraries):
+	"""A program's or DLL's copies and those of the libraries it links; a program's assets link."""
 	if target.kind != "static":
 		copied = copies.copy_all(target.copies + tuple(copy for library in libraries for copy in library.copies), target.bin_dir, ctx.log)
 		if copied:
 			ctx.log.line(f"{target.name}: copied {copied} file(s) beside it")
 	if target.kind == "executable":
 		copies.link_assets(target.dir, target.bin_dir)
-	return []
 
 
 def _unique(items):
