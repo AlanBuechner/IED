@@ -37,6 +37,9 @@ time limit. Then `grade.py` grades the workspace.
 - `--parallel N` runs N tasks at once on the model server; wall times then include waiting for the GPU, so compare
   **solo seconds** (below), not wall seconds, across runs with different parallelism.
 - `--repeat N` runs everything N times: at temperature 0.6 one run of a task is a sample, not a measurement.
+- `--slots N` (default 4, the owner's llama.cpp server): runs started side by side share N lock files
+  (`slots.py`), so they never send the server more turns at once than it has slots - one more would wait in its
+  queue, and IED's prefill watchdog would take the wait for a stall.
 
 ## Variants
 

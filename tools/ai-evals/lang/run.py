@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 import grade  # noqa: E402
 import report  # noqa: E402
+import slots  # noqa: E402
 from proxy import ModelProxy  # noqa: E402
 
 sys.path.insert(0, os.path.join(common.REPO, "tools", "server-checks"))
@@ -218,21 +219,8 @@ async def run_job(job, settings, config):
 	record = {"task": task["id"], "lang": lang, "repeat": job["repeat"], "workspace": ws, "category": task.get("category"), "set": task.get("set")}
 	try:
 		opened = prepare_workspace(task, lang, ws, config["toolchain"])
-		data = os.path.join(os.path.dirname(ws), "data")
-		server = IedServer(data=data, extra=("--home", config["home"], "--workspace", opened), executable=config["server"], static=False)
-		if not server.started:
-			raise RuntimeError("the server did not start: " + server.error)
-		try:
-			cookie = server.sign_in()
-			client = await Client.connect(server.ws_url, FrameChecker(), headers={"Cookie": cookie})
-			await client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
-			for key, value in settings(task, os.path.basename(job_dir), job_dir).items():
-				await client.request("settings.set", {"tier": "app", "key": key, "value": value})
-			client.abort()
-			prompt = task[lang]["prompt"].strip()
-			record.update(await agent_turn(server, cookie, task, prompt, job_dir, [ws, data]))
-		finally:
-			server.stop(remove_data=False)
+		async with slots.Slot(config["slots"], os.path.basename(job_dir)):
+			await run_turn(task, lang, job_dir, ws, opened, settings, config, record)
 	except Exception as failed:
 		record["error"] = "".join(traceback.format_exception_only(failed)).strip()
 		record["trace"] = traceback.format_exc()
@@ -243,6 +231,25 @@ async def run_job(job, settings, config):
 		except Exception:
 			common.write_json(os.path.join(job_dir, "grade.json"), {"error": traceback.format_exc()})
 	print("%s-%s r%d: %s in %ss, %s steps, %d calls" % (task["id"], lang, job["repeat"], record.get("stop", record.get("error", "?")), record.get("seconds", "-"), record.get("steps", "-"), len(record.get("calls", []))), flush=True)
+
+
+async def run_turn(task, lang, job_dir, ws, opened, settings, config, record):
+	"""The task's turn in a server started for it on the workspace; fills `record`."""
+	data = os.path.join(os.path.dirname(ws), "data")
+	server = IedServer(data=data, extra=("--home", config["home"], "--workspace", opened), executable=config["server"], static=False)
+	if not server.started:
+		raise RuntimeError("the server did not start: " + server.error)
+	try:
+		cookie = server.sign_in()
+		client = await Client.connect(server.ws_url, FrameChecker(), headers={"Cookie": cookie})
+		await client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		for key, value in settings(task, os.path.basename(job_dir), job_dir).items():
+			await client.request("settings.set", {"tier": "app", "key": key, "value": value})
+		client.abort()
+		prompt = task[lang]["prompt"].strip()
+		record.update(await agent_turn(server, cookie, task, prompt, job_dir, [ws, data]))
+	finally:
+		server.stop(remove_data=False)
 
 
 def model_settings(args, name, profile, proxy):
@@ -284,6 +291,7 @@ def main():
 	parser.add_argument("--max-steps", type=int, default=150)
 	parser.add_argument("--parallel", type=int, default=1, help="tasks at once (they share the model server)")
 	parser.add_argument("--repeat", type=int, default=1)
+	parser.add_argument("--slots", type=int, default=4, help="model server slots every run on this machine shares (lock files in %%TEMP%%/ied-langeval/slots): a job waits for one")
 	args = parser.parse_args()
 	name, profile = common.settings_profile(args.settings, args.model)
 	put_tools_on_path()
@@ -293,7 +301,7 @@ def main():
 	out = os.path.join(common.RESULTS, run_id)
 	os.makedirs(out)
 	print("preparing the %s toolchain and home" % os.path.basename(variant), flush=True)
-	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain), "home": prepare_home(variant)}
+	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain), "home": prepare_home(variant), "slots": args.slots}
 	jobs = []
 	for repeat in range(1, args.repeat + 1):
 		for task in tasks:
