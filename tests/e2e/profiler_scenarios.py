@@ -177,3 +177,125 @@ def profiler_locks_and_notes(run):
 	page.click(".dialog-veil button:has-text('Delete')")
 	run.wait_text(".prof-doc .prof-empty", "No notes yet")
 	check(run.request("prof.annotations", {"captureId": capture})["annotations"] == [], "deleted on the server")
+
+
+def send_collected_game(env):
+	"""A collected program's finished capture (1 ns ticks, ten 16 ms frames) that counts its allocations instead of
+	sending each one: Frame holds Particles::Spawn (300 objects, 7200 bytes) and Cache::Remember (one of 32 bytes); the
+	process's count with each frame mark; its GC heap (a sawtooth) and process memory (climbing) plotted; a collection
+	that did not say what the heap held before; a census each frame in which CacheEntry grows by 100 KB."""
+	address, token = env.split(";token=")
+	host, port = address.split(":")
+	w = itp.Writer().hello(app="Collected Game", pid=779, freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK)
+	frame = w.srcloc("Frame", defs, file="src/main.cf", line=60)
+	spawn = w.srcloc("Particles::Spawn", defs, file="src/main.cf", line=20)
+	cache = w.srcloc("Cache::Remember", defs, file="src/main.cf", line=38)
+	main_name, heap, process, particle, entry = (w.string(s, defs) for s in ("Main", "GC heap", "Process memory", "Particle", "CacheEntry"))
+	defs.event("PlotDef", plotId=1, nameStr=heap, kind=1, flags=0).event("PlotDef", plotId=2, nameStr=process, kind=1, flags=0)
+	w.add(defs)
+	main = w.chunk(itp.THREAD_CHUNK, 1, 0).event("ThreadName", 0, nameStr=main_name)
+	counts = w.chunk(itp.GLOBAL_CHUNK)
+	for f in range(11):
+		t = f * FRAME
+		main.event("FrameMark", t, frameSetStr=0)
+		counts.event("AllocCount", t, objects=301 * f, bytes=7232 * f)
+		counts.event("PlotValue", t, plotId=1, value=float(100_000 + 50_000 * (f % 4)))
+		counts.event("PlotValue", t, plotId=2, value=float(60_000_000 + 1_000_000 * f))
+		if f == 10:
+			break
+		main.event("ZoneBegin", t + 1 * MS, srcLocId=frame)
+		main.event("ZoneBegin", t + 2 * MS, srcLocId=spawn).event("ZoneAllocs", objects=300, bytes=7200).event("ZoneEnd", t + 4 * MS)
+		main.event("ZoneBegin", t + 5 * MS, srcLocId=cache).event("ZoneAllocs", objects=1, bytes=32).event("ZoneEnd", t + 6 * MS)
+		main.event("ZoneAllocs", objects=301, bytes=7232).event("ZoneEnd", t + 12 * MS)
+		if f == 3:
+			counts.event("GcBegin", t + 13 * MS, kind=0, generation=0)
+			counts.event("GcEnd", t + 14 * MS, bytesBefore=0, bytesAfter=100_000, objectsFreed=0, pinned=0, roots=0)
+		counts.event("HeapCensus", t + 14 * MS, types=2)
+		counts.event("HeapCensusType", nameStr=particle, objects=300, bytes=7200)
+		counts.event("HeapCensusType", nameStr=entry, objects=1000 * (f + 1), bytes=100_000 * (f + 1))
+	w.add(main)
+	w.add(counts)
+	w.add(w.chunk(itp.GLOBAL_CHUNK).event("Bye", reason=0))
+	with socket.create_connection((host, int(port))) as sock:
+		sock.sendall(w.bytes())
+
+
+def send_native_game(env):
+	"""A finished capture that sends each allocation: three blocks from the heap, one of them freed."""
+	address, token = env.split(";token=")
+	host, port = address.split(":")
+	w = itp.Writer().hello(app="Native Game", pid=780, freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK)
+	defs.event("PoolDef", poolId=1, nameStr=w.string("heap", defs))
+	w.add(defs)
+	main = w.chunk(itp.THREAD_CHUNK, 1, 0).event("FrameMark", 0, frameSetStr=0)
+	for k in range(3):
+		main.event("Alloc", (k + 1) * MS, threadId=1, poolId=1, address=0x1000 * (k + 1), size=256, callstackId=0)
+	main.event("Free", 5 * MS, threadId=1, poolId=1, address=0x1000).event("FrameMark", 16 * MS, frameSetStr=0)
+	w.add(main)
+	w.add(w.chunk(itp.GLOBAL_CHUNK).event("Bye", reason=0))
+	with socket.create_connection((host, int(port))) as sock:
+		sock.sendall(w.bytes())
+
+
+def show_panel(page, doc, key):
+	"""Shows a capture's tool window: a tab click toggles it, and a new capture opens with the last one shown."""
+	if not page.query_selector(doc + " .tw-tab.on[data-panel='%s']" % key):
+		page.click(doc + " .tw-tab[data-panel='%s']" % key)
+	page.wait_for_selector(doc + " .prof-panel-body", state="visible", timeout=10000)
+
+
+def open_capture(run, page, capture):
+	page.evaluate("() => ied_shell.commands.run('shell.showActivity', { id: 'ied.profiler' })")
+	if run.phone:
+		page.evaluate("() => ied_shell.commands.run('shell.showView', { id: 'ied.profiler.captures' })")
+	page.click(".prof-library .prof-capture[data-capture='%s']" % capture)
+	page.wait_for_selector(".prof-doc[data-capture='%s'] .prof-canvas" % capture, timeout=20000)
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def profiler_collected_memory(run):
+	"""Memory (F-PRF-30, F-PRF-33) for a collected program that counts its allocations: the Memory window draws its GC
+	heap and process memory, lists what each zone allocated and the types its censuses found accumulating, and says
+	nothing of what an unsized collection freed; a zone's details say what it allocated, its own share too; a program
+	that sends each allocation still gets those live at the end."""
+	page = run.open()
+	ws = page.evaluate("() => ied_shell.wsId")
+	listed = run.request("prof.captures", {"wsId": ws})
+	known = {c["captureId"] for c in listed["captures"]}
+	send_collected_game(listed["connect"]["env"])
+	capture = new_capture(run, ws, known)
+	open_capture(run, page, capture)
+	doc = ".prof-doc[data-capture='%s']" % capture
+	show_panel(page, doc, "memory")
+	run.wait_text(doc + " .prof-memory-right", "Particles::Spawn")
+	memory = page.inner_text(doc + " .prof-memory")
+	check("GC heap" in memory and "Process memory" in memory and "Collections" in memory, "both memory plots and the collection: %s" % memory[:300])
+	check("freed" not in memory, "nothing said of what a collection freed when the program did not size it")
+	rows = run.texts(doc + " .prof-memory-right .prof-leak summary")
+	check("Particles::Spawn" in rows[0] and "3,000x" in rows[0] and "300 a frame" in rows[0] and "main.cf:20" in rows[0], "Spawn allocated the most, 300 a frame: %s" % rows)
+	check("Cache::Remember" in rows[1], "then Cache::Remember: %s" % rows)
+	check("CacheEntry" in memory and "keeps accumulating" in memory, "the census's growing type is marked")
+	run.shot("memory")
+	if run.phone:
+		page.click(doc + " .prof-bar button.phone-only")
+	page.mouse.click(*canvas_point(page, doc + " .fg", 0.05, 30))
+	time.sleep(0.8)
+	page.mouse.click(*canvas_point(page, doc + " .tl", 0.6, 52))
+	run.wait_text(doc + " .prof-side .zname", "Frame", timeout=10000)
+	side = page.inner_text(doc + " .prof-side")
+	check("IN THIS ZONE" in side.upper(), "the details say what happened in the zone")
+	check("301 (7.1 KiB)" in side and "self 0 (0 B)" in side, "it allocated 301, all in its children: %s" % side[:400])
+	run.shot("zone")
+	known.add(capture)
+	send_native_game(listed["connect"]["env"])
+	native = new_capture(run, ws, known)
+	open_capture(run, page, native)
+	doc = ".prof-doc[data-capture='%s']" % native
+	show_panel(page, doc, "memory")
+	run.wait_text(doc + " .prof-memory-right .group-head", "Live allocations")
+	page.wait_for_selector(doc + " .prof-memory-right .prof-leak summary", timeout=10000)
+	live = run.texts(doc + " .prof-memory-right .prof-leak summary")
+	check(len(live) == 1 and "2x" in live[0] and "512 B" in live[0], "the two blocks still live: %s" % live)
+	run.shot("native")

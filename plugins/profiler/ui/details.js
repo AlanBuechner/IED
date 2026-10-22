@@ -1,10 +1,30 @@
 // details.js - the zone details side panel (F-PRF-15, mockup 06): the selected zone's name, duration and self time,
-// thread or task, frame, source (a click opens it in the editor), text and value, call stack, the zones around it and
-// its children by name; or a selected lock hold (F-PRF-18): its wait and hold, the threads that held the lock while it
+// thread or task, frame, source (a click opens it in the editor), text and value, what happened in it, call stack, the
+// zones around it and its children by name; or a selected lock hold (F-PRF-18): its wait and hold, the threads that held the lock while it
 // waited and those that waited while it held. On a phone it is a sheet under the timeline.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { duration, count, instant } from "./format.js";
+import { bytes, duration, count, instant } from "./format.js";
+
+// What happened in a zone on its thread (prof.zone's `inside`): what it allocated, its children's included, and its
+// own share; its lock waits, the longest first; the collections that stopped it; its messages.
+function happenedInside(inside) {
+	if (!inside) return null;
+	const a = inside.allocations;
+	const allocated = a && a.count ? count(a.count) + " (" + bytes(a.bytes) + ")"
+		+ (a.selfCount !== a.count ? " \u00b7 self " + count(a.selfCount) + " (" + bytes(a.selfBytes) + ")" : "")
+		+ (a.freedInside > 0 ? " \u00b7 " + count(a.freedInside) + " freed in it" : "") : null;
+	const kv = [
+		allocated ? ["Allocated", allocated] : null,
+		inside.waitNs ? ["Lock waits", duration(inside.waitNs)] : null,
+		inside.gcCount ? ["Collections", count(inside.gcCount) + ", paused " + duration(inside.gcPauseNs)] : null,
+		inside.messageCount ? ["Messages", count(inside.messageCount)] : null,
+	].filter(Boolean);
+	if (!kv.length) return null;
+	return [h("div.group-head", null, "In this zone"),
+		h("div.zd", null, h("div.kv", null, kv.map(([k, v]) => [h("span.k", null, k), h("span", null, v)]))),
+		inside.waits.length ? h("div.kids", null, inside.waits.map((w) => h("div.row", null, h("span.name.ellip", null, w.lock), h("span.meta", null, duration(w.durationNs))))) : null];
+}
 
 export class ZoneDetails {
 	constructor({ request, openSource, findZone, askAi, showLocks, phone }) {
@@ -46,7 +66,8 @@ export class ZoneDetails {
 					source ? h("button.btn", { on: { click: () => this.openSource(zone) } }, icon("go-to-file"), "Open source") : null,
 					h("button.btn", { on: { click: () => this.findZone(zone.name) } }, icon("search"), "Find zone"),
 					h("button.btn", { on: { click: () => this.askAi(zone) } }, icon("sparkle", "c-ai"), "Ask AI"))),
-			zone.parents.length ? [h("div.group-head", null, "Inside"), h("div.kids", null, zone.parents.map((p) => h("div.row", null, h("span.name.ellip", null, p.name), h("span.meta", null, duration(p.durationNs)))))] : null,
+			happenedInside(zone.inside),
+			zone.parents.length ? [h("div.group-head", null, "Inside of"), h("div.kids", null, zone.parents.map((p) => h("div.row", null, h("span.name.ellip", null, p.name), h("span.meta", null, duration(p.durationNs)))))] : null,
 			h("div.group-head", null, "Children", h("span.meta", null, count(zone.childCount))),
 			h("div.kids", null, zone.children.length ? zone.children.map((c) => h("div.row", { title: count(c.count) + "x" },
 				h("span.name.ellip", null, c.name), h("span.bar", null, h("i", { style: { width: Math.round(c.totalNs / most * 100) + "%" } })), h("span.meta", null, duration(c.totalNs))))

@@ -53,6 +53,24 @@ namespace Profiler
 		}
 	}
 
+	void ZoneOwnCounts(const Capture& capture, ZoneRef ref, int64& objects, int64& bytes) {
+		const ThreadTrack* track = capture.tracks[ref.Track()];
+		const ZoneLevel* level = track->levels[ref.Depth()];
+		const int64 i = ref.Index();
+		objects = Inclusive(track, level, i, false);
+		bytes = Inclusive(track, level, i, true);
+		if (ref.Depth() + 1 < track->levels.Count()) {
+			const ZoneLevel* children = track->levels[ref.Depth() + 1];
+			const int64 end = level->EndOr(i, capture.lastTicks);
+			for (int64 j = children->FirstStartingAt(level->starts[i]); j < children->Count() && children->starts[j] < end; ++j) {
+				objects -= Inclusive(track, children, j, false);
+				bytes -= Inclusive(track, children, j, true);
+			}
+		}
+		if (objects < 0) objects = 0;
+		if (bytes < 0) bytes = 0;
+	}
+
 	// The process's allocations so far at `t`: the last count at or before it.
 	static void CountedAt(const AllocCounter& counter, int64 t, int64& objects, int64& bytes) {
 		const int64 i = counter.times.UpperBound(t) - 1;

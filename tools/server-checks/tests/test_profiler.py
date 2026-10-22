@@ -714,7 +714,8 @@ class GoTraceImportTests(ServerTestCase):
 	async def test_a_go_execution_trace_imports(self):
 		await require_plugin(self, self.client, "ied.go")
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
-		capture = (await self.client.request("prof.import", {"wsId": "w1", "path": "trace.out"}))["captureId"]
+		# The importer builds itself with `go run` and runs `go tool trace`: seconds of work on a busy machine.
+		capture = (await self.client.request("prof.import", {"wsId": "w1", "path": "trace.out"}, timeout=120))["captureId"]
 		timeline = await self.client.request("prof.timeline", {"captureId": capture, "width": 400})
 		labels = {lane["label"]: [timeline["names"][z[3]] for z in lane["zones"] if z[3] >= 0] for lane in timeline["lanes"]}
 		workers = [names for label, names in labels.items() if label.endswith("main.main.func1")]

@@ -7,8 +7,8 @@ include "ingest.ch"
 
 // One thread (1 ns ticks) marks a frame every 100 ns from 0 to 500. Each frame: Frame 0..80 (its own 5 allocations)
 // with Spawn 10..20 (300 objects, 43200 bytes) and Cache 30..31 (one object, 4096 bytes). The process counts 316
-// allocations a frame at each mark (10 outside any zone). Censuses at 50, 150, 250, 350: Particle steady, CacheEntry
-// growing 100 KB each time, Texture shrinking.
+// allocations a frame at each mark (10 outside any zone) and plots its memory, 1 MB rising 100 KB a frame. Censuses at
+// 50, 150, 250, 350: Particle steady, CacheEntry growing 100 KB each time, Texture shrinking.
 static Profiler::Capture* CountedCapture() {
 	Profiler::WireWriter w;
 	w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
@@ -35,6 +35,14 @@ static Profiler::Capture* CountedCapture() {
 		w.Varint(id * 10);
 		w.Varint(0);
 	}
+	w.Type(Profiler::EventType::StringDef);
+	w.Varint(7);
+	w.Text(Core::StringView("Process memory"));
+	w.Type(Profiler::EventType::PlotDef);
+	w.Varint(1);
+	w.Varint(7);
+	w.Varint(1);
+	w.Varint(0);
 	w.EndChunk();
 	FramesCountingAllocations(w);
 	CountsAndCensuses(w);
@@ -95,6 +103,10 @@ static void CountsAndCensuses(Profiler::WireWriter& w) {
 		w.Time(f * 100);
 		w.Varint((uint64)(316 * f));
 		w.Varint((uint64)(48296 * f));
+		w.Type(Profiler::EventType::PlotValue);
+		w.Time(f * 100);
+		w.Varint(1);
+		w.Double((double)(1000000 + 100000 * f));
 		if (f == 4 || f == 5) continue;
 		w.Type(Profiler::EventType::HeapCensus);
 		w.Time(f * 100 + 50);
@@ -140,6 +152,22 @@ class ProfilerCountedTests {
 		assert_true(Profiler::ZoneRef::Parse(Core::StringView("0:0:1"), ref), "a ref");
 		Serialization::DomNode inside = Json(Profiler::ZoneDetails(*capture, ref)).Member("inside").Member("allocations");
 		assert_true(inside.Member("count").AsInt() == 306 && inside.Member("freedInside").AsInt() == -1, "a zone's own count, its children's included");
+		assert_true(inside.Member("selfCount").AsInt() == 5 && inside.Member("selfBytes").AsInt() == 500, "and its own, its children's left to them");
+		assert_true(Profiler::ZoneRef::Parse(Core::StringView("0:1:0"), ref), "a child's ref");
+		inside = Json(Profiler::ZoneDetails(*capture, ref)).Member("inside").Member("allocations");
+		assert_true(inside.Member("count").AsInt() == 300 && inside.Member("selfCount").AsInt() == 300, "a zone with no children: all its own");
+	}
+
+	[test("the_memory_window_draws_the_memory_plots")]
+	public static void TestMemoryPlots() {
+		Profiler::Capture* capture = CountedCapture();
+		Serialization::DomNode m = Json(Profiler::Memory(*capture, -1, -1, 100));
+		assert_eq(0, m.Member("pools").Count(), "no pools: nothing was sent allocation by allocation");
+		Serialization::DomNode plots = m.Member("plots");
+		assert_eq(1, plots.Count(), "the one plot of bytes");
+		assert_true(plots.At(0).Member("name").AsView() == "Process memory" && plots.At(0).Member("now").AsInt() == 1500000 && plots.At(0).Member("peak").AsInt() == 1500000, "its last value and peak");
+		Serialization::DomNode usage = plots.At(0).Member("usage");
+		assert_true(usage.Count() == 6 && usage.At(0).At(1).AsInt() == 1000000 && usage.At(5).At(2).AsInt() == 1500000, "drawn like a pool's usage");
 	}
 
 	[test("types_that_keep_accumulating")]

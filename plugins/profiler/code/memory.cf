@@ -1,25 +1,28 @@
-// Memory (F-PRF-30, F-PRF-31, F-PRF-33): each pool's bytes in use over time with its totals, collections, and the
-// allocations live at a time grouped by call stack, pool or thread.
+// Memory (F-PRF-30, F-PRF-31, F-PRF-33): each pool's bytes in use over time with its totals, the memory plots (a
+// collected program's GC heap and process memory), collections, and the allocations live at a time grouped by call
+// stack, pool or thread.
 include "analysis.ch"
 
 namespace Profiler
 {
 	const int32 kMostLeakAddresses = 8;
 
-	static void WriteUsage(IED::JsonWriter& json, const Capture& capture, const Pool* pool, Range range, int64 pixel) {
+	// A series' [time, lowest, highest] per `pixel` of the range: `valueAt(i)` is its i-th sample's.
+	static void WriteUsage(IED::JsonWriter& json, const Capture& capture, const Core::Array<int64>& times, const func<int64(int64)>& valueAt, Range range, int64 pixel) {
 		json.BeginArray();
-		int64 i = pool->times.LowerBound(range.begin);
+		int64 i = times.LowerBound(range.begin);
 		if (i > 0) i -= 1;
-		int64 end = pool->times.LowerBound(range.end);
-		if (end < pool->times.Count()) end += 1;
+		int64 end = times.LowerBound(range.end);
+		if (end < times.Count()) end += 1;
 		while (i < end) {
-			const int64 t = pool->times[i];
-			int64 low = pool->bytes[i];
-			int64 high = pool->bytes[i];
+			const int64 t = times[i];
+			int64 low = valueAt(i);
+			int64 high = low;
 			i += 1;
-			while (i < end && pool->times[i] < t + pixel) {
-				if (pool->bytes[i] < low) low = pool->bytes[i];
-				if (pool->bytes[i] > high) high = pool->bytes[i];
+			while (i < end && times[i] < t + pixel) {
+				const int64 value = valueAt(i);
+				if (value < low) low = value;
+				if (value > high) high = value;
 				i += 1;
 			}
 			json.BeginArray();
@@ -35,13 +38,13 @@ namespace Profiler
 		int64 count = 0;
 		int64 pause = 0;
 		int64 longest = 0;
-		int64 freed = 0;
+		int64 freed = -1;
 		for (const GcRecord& gc : capture.gcs) {
 			if (gc.end == kOpen || !range.Overlaps(gc.begin, gc.end + 1)) continue;
 			count += 1;
 			pause += gc.end - gc.begin;
 			if (gc.end - gc.begin > longest) longest = gc.end - gc.begin;
-			freed += gc.Freed();
+			if (gc.Freed() >= 0) freed = (freed < 0 ? 0 : freed) + gc.Freed();
 		}
 		json.Key(Core::StringView("gc"));
 		json.BeginObject();
@@ -50,6 +53,26 @@ namespace Profiler
 		json.IntField("longestNs", capture.clock.Ns(longest));
 		json.IntField("freedBytes", freed);
 		json.EndObject();
+	}
+
+	// The plots of bytes (kind 1): their last value, peak and usage, like a pool's.
+	static void WriteMemoryPlots(IED::JsonWriter& json, const Capture& capture, Range range, int64 pixel) {
+		json.Key(Core::StringView("plots"));
+		json.BeginArray();
+		for (const Plot* plot : capture.plots) {
+			if (plot->kind != 1 || plot->times.IsEmpty()) continue;
+			double peak = plot->values[0];
+			for (double value : plot->values)
+				if (value > peak) peak = value;
+			json.BeginObject();
+			json.Field("name", capture.Text(plot->nameStr));
+			json.IntField("now", (int64)plot->values.Back());
+			json.IntField("peak", (int64)peak);
+			json.Key(Core::StringView("usage"));
+			WriteUsage(json, capture, plot->times, [plot](int64 i) -> int64 { return (int64)plot->values[i]; }, range, pixel);
+			json.EndObject();
+		}
+		json.EndArray();
 	}
 
 	Core::String Memory(const Capture& capture, int64 fromNs, int64 toNs, int32 width) {
@@ -72,10 +95,11 @@ namespace Profiler
 			json.IntField("earlierFrees", pool->earlierFrees);
 			json.IntField("live", pool->live.Count());
 			json.Key(Core::StringView("usage"));
-			WriteUsage(json, capture, pool, range, pixel);
+			WriteUsage(json, capture, pool->times, [pool](int64 i) -> int64 { return pool->bytes[i]; }, range, pixel);
 			json.EndObject();
 		}
 		json.EndArray();
+		WriteMemoryPlots(json, capture, range, pixel);
 		WriteGcTotals(json, capture, range);
 		json.EndObject();
 		return json.ToString();

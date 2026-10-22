@@ -154,8 +154,8 @@ namespace Profiler
 		public int64 pinned;
 		public int64 roots;
 
-		// Bytes the collection reclaimed; 0 when the client did not say what the heap held before (bytesBefore 0).
-		public int64 Freed() const { return bytesBefore > bytesAfter ? bytesBefore - bytesAfter : 0; }
+		// Bytes the collection reclaimed; -1 when the client did not say what the heap held before (bytesBefore 0).
+		public int64 Freed() const { return bytesBefore == 0 ? -1 : (bytesBefore > bytesAfter ? bytesBefore - bytesAfter : 0); }
 	}
 
 	// The intervals in which tasks of one name ran on one thread, in time order.

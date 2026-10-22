@@ -109,7 +109,7 @@ export class CaptureView {
 			stats: new StatsPanel({ request, onPick: (row) => this.findZone(row.name) }),
 			find: new FindZonePanel({ request, onJump: (from, to) => this.reveal(from, to) }),
 			messages: new MessagesPanel({ request, onJump: (t) => this.reveal(t - this.timeline.view.span / 2, t + this.timeline.view.span / 2) }),
-			memory: new MemoryPanel({ request }),
+			memory: new MemoryPanel({ request, openSource: (g) => this.openSource(g) }),
 			flame: new FlamePanel({ request, onPick: (name) => this.findZone(name) }),
 			locks: new LocksPanel({ request, onPick: (row) => this.pickLock(row) }),
 			notes: new NotesPanel({ onAdd: () => this.addNote(), onJump: (note) => this.jumpToNote(note), onEdit: (note) => this.editNote(note), onDelete: (note) => this.deleteNote(note) }),
@@ -121,7 +121,7 @@ export class CaptureView {
 		this.bindSash();
 		this.phoneBack = h("button.btn.flat.phone-only", { on: { click: () => this.showPanel(null) } }, icon("arrow-left"), "Timeline");
 		this.root = h("div.prof-doc",
-			{ dataset: { mode: this.mode } },
+			{ dataset: { mode: this.mode, capture: this.captureId } },
 			h("div.prof-bar", null, this.recLabel, h("span.tb-sep"), this.followButton, this.stopButton, h("span.tb-sep"), this.modeSeg, this.legend, h("span.grow"),
 				h("button.btn.flat", { title: "Show the whole capture (Home)", on: { click: () => this.timeline.showAll() } }, icon("screen-full"), h("span.lbl", null, "All")),
 				h("button.btn.flat", { title: "Add a note on the selection or the selected zone", on: { click: () => this.addNote() } }, icon("note"), h("span.lbl", null, "Note")),

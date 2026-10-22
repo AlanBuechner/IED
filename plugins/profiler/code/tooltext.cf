@@ -436,8 +436,10 @@ namespace Profiler
 			out.AppendInt(gcs.At(i).Member("generation").AsInt());
 			out.Append(") paused ");
 			out.Append(Duration(gcs.At(i).Member("pauseNs").AsInt()).View());
-			out.Append(", freed ");
-			out.Append(Bytes(gcs.At(i).Member("freedBytes").AsInt()).View());
+			if (gcs.At(i).Member("freedBytes").AsInt() >= 0) {
+				out.Append(", freed ");
+				out.Append(Bytes(gcs.At(i).Member("freedBytes").AsInt()).View());
+			}
 			out.AppendByte('\n');
 		}
 		Serialization::DomNode gpu = f.Member("gpu");

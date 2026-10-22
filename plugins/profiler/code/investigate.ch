@@ -51,6 +51,8 @@ namespace Profiler
 	// What each zone allocated itself (its ZoneAllocs less its children's), for the zones starting in a range:
 	// visit(track, depth, index, objects, bytes).
 	void ZoneSelfAllocations(const Capture& capture, Range range, const func<void(int64, int64, int64, int64, int64)>& visit);
+	// What one zone counted itself: its ZoneAllocs less its children's.
+	void ZoneOwnCounts(const Capture& capture, ZoneRef ref, int64& objects, int64& bytes);
 	// The allocations each frame of `set` held (indexed like its starts): from allocation events, else the process's
 	// count, else the zones'; false when the capture has none of them.
 	bool FrameAllocations(const Capture& capture, const FrameSet* set, Core::Array<int64>& objects, Core::Array<int64>& bytes);

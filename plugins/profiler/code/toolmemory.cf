@@ -486,7 +486,7 @@ namespace Profiler
 				out.AppendInt(g.Member("frame").AsInt());
 				out.Append(g.Member("slowFrame").AsBool() ? " (a slow one)" : "");
 			}
-			if (g.Member("freedBytes").AsInt() > 0) {
+			if (g.Member("freedBytes").AsInt() >= 0) {
 				out.Append(", freed ");
 				out.Append(Bytes(g.Member("freedBytes").AsInt()).View());
 			}
