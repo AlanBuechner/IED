@@ -87,4 +87,36 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void ArgListTest::TestDoubleDashAndSlash()
+	{
+		Core::Vector<Core::String> rawArgs;
+		rawArgs.Push("--filter=Vector.*");
+		rawArgs.Push("/mode=debug");
+
+		Core::ArgList args(rawArgs);
+		const Core::Arg* filter = args.GetArg("-filter");
+		if (filter == nullptr || filter->value != "Vector.*")
+			TEST_FAILED(Core::FormatString("Expected --filter=Vector.* as -filter, got {0}", filter ? filter->value : "nullptr"));
+		const Core::Arg* mode = args.GetArg("-mode");
+		if (mode == nullptr || mode->value != "debug")
+			TEST_FAILED(Core::FormatString("Expected /mode=debug as -mode, got {0}", mode ? mode->value : "nullptr"));
+
+		TEST_PASSED();
+	}
+
+	void ArgListTest::TestEmptyArgument()
+	{
+		Core::Vector<Core::String> rawArgs;
+		rawArgs.Push("");
+		rawArgs.Push("-");
+		rawArgs.Push("-mode=debug");
+
+		Core::ArgList args(rawArgs);
+		const Core::Arg* mode = args.GetArg("-mode");
+		if (mode == nullptr || mode->value != "debug")
+			TEST_FAILED("Expected -mode=debug after an empty argument and a lone dash");
+
+		TEST_PASSED();
+	}
+
 }

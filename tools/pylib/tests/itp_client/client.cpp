@@ -1,6 +1,6 @@
-// A program over the C/C++ ITP client (C4/Frost/Projects/Profiling/src/Profiling/Itp.h) for test_itp_client.py:
+// A program over the C/C++ ITP client (plugins/cpp/libraries/Profiling/src/Profiling/Itp.h) for test_itp_client.py:
 // zones on two threads, a named zone with text and a value, frames, a plot, a message, tasks, a pool, and every
-// operator new reported the way Frost's memory tracker does. argv[1] is the target; without it the client starts
+// operator new reported the way the C++ Core library's memory tracker does. argv[1] is the target; without it the client starts
 // from IED_PROFILER and the session ends at exit.
 #include "Profiling/Itp.h"
 

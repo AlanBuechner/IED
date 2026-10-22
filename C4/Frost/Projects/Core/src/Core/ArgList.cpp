@@ -8,10 +8,14 @@ namespace Core
 {
 	ArgList::ArgList(const Core::Vector<Core::String>& args)
 	{
+		// "/name" and "--name" are read as "-name".
 		auto fixArgFormating = [](Core::String& arg) {
+			if (arg.empty())
+				return;
 			if (arg[0] == '/' || arg[0] == '\\')
 				arg[0] = '-';
-			if (arg[1] == '-') arg.erase(1);
+			if (arg.size() > 1 && arg[0] == '-' && arg[1] == '-')
+				arg.erase(1, 1);
 		};
 
 		for (uint32 i = 0; i < args.Count(); i++)

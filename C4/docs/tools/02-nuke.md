@@ -158,8 +158,8 @@ Nuke reference).
 
 ### The layout
 
-`C4/MakeToolchain.py --out <dir> [--config Development]` assembles a toolchain from a Frost build of the compiler
-(`C4/bin/<Config>-windows-x64/`):
+`C4/MakeToolchain.py --out <dir> [--config Development] [--bin <folder>]` assembles a toolchain from a build of the
+compiler (`build/bin/<Config>-windows-x64/` of the IED repository):
 
 ```text
 <toolchain>/
@@ -183,8 +183,8 @@ The folder is mirrored: unchanged files are not copied again and files gone from
 From the IED repository root, a workspace whose project `C4` (`C4/nuke.toml`) builds the compiler
 ([04-building-the-compiler.md](04-building-the-compiler.md)):
 
-- `nuke build` builds the compiler with Frost and, for Development, refreshes the `dev` toolchain
-  (`MakeToolchain.py --out <store>/c4/dev`). A workspace pinned to `dev` uses the new compiler on its next build.
+- `nuke build` builds the compiler (C++ projects built by the C/C++ plugin's driver) and, for Development, refreshes
+  the `dev` toolchain (`MakeToolchain.py --bin <build/bin/Development-windows-x64> --out <store>/c4/dev`). A workspace pinned to `dev` uses the new compiler on its next build.
 - `nuke install-c4` builds, then installs the result as a numbered toolchain whose version comes from
   `C4/C4Lib/src/Compiler/Version.h`. Installed versions never change: bump the version first. A workspace then
   pins it with `nuke toolchain use <version>`.

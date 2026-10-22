@@ -80,7 +80,7 @@ been checked against the compiler.
 | [01-compiler-cli.md](tools/01-compiler-cli.md) | `C4.exe` command line |
 | [02-nuke.md](tools/02-nuke.md) | Building C4 projects with Nuke: the C4.exe command line, rebuild rules, tests, the editor bridge, versioned toolchains |
 | [03-editor-lsp-dap.md](tools/03-editor-lsp-dap.md) | Editor integration (IED), C4LSP, C4DAP |
-| [04-building-the-compiler.md](tools/04-building-the-compiler.md) | Building C4 itself: `setup.bat`, `nuke build` or Frost, toolchains from the build, build traps |
+| [04-building-the-compiler.md](tools/04-building-the-compiler.md) | Building C4 itself: `setup.bat`, `nuke build` (the C/C++ plugin's driver), toolchains from the build, build traps |
 | [05-test-suites.md](tools/05-test-suites.md) | Every test suite, how to run it (`nuke gates` runs them all), how to add tests |
 
 ### Compiler internals - `compiler/`
@@ -138,4 +138,4 @@ been checked against the compiler.
 | `WORK.md` | Tracker for active work |
 | `LongTermPlan.txt` | The original long-term plan; its items are tracked in [status/roadmap.md](status/roadmap.md) |
 | `skills/*/SKILL.md` | Short agent-facing summaries of the language, shipped in every toolchain; these docs are the full reference |
-| `Frost/docs/` | Documentation for Frost (the build system for the C4 compiler and its C++ support libraries) |
+| `../plugins/cpp/docs/` | The C++ libraries the compiler links (Core, Math, Reflection, UnitTesting); their build is `../Nuke/README.md` section 9c |

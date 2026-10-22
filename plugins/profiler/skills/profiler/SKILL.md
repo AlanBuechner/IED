@@ -142,8 +142,8 @@ int32 main() {
 
 ## Instrumenting C and C++
 
-Copy `Itp.h` and `Itp.cpp` from `C4/Frost/Projects/Profiling/src/Profiling/` into the project (no other dependency;
-Windows links `ws2_32`, POSIX needs `-pthread`). Frost projects already have them: build with `ENABLE_PROFILING`
+Copy `Itp.h` and `Itp.cpp` from `plugins/cpp/libraries/Profiling/src/Profiling/` into the project (no other dependency;
+Windows links `ws2_32`, POSIX needs `-pthread`). A Nuke C++ project that depends on `Profiling` already has them: build with `ENABLE_PROFILING`
 and use `CREATE_PROFILE_SCOPEI("Name")`, `CREATE_PROFILE_FUNCTIONI()`, `FRAME_MARK` from `Profiling/Performance.h`.
 
 ```cpp

@@ -10,10 +10,10 @@
 [packages.llvm]
 group = "core"
 version = "22.1.0"
-description = "clang, lld and the LLVM headers and libraries the C4 compiler is built with and links"
+description = "clang, lld and the LLVM headers and libraries the C4 compiler is built with and links (Nuke's C/C++ driver, [languages.cpp] llvm)"
 url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.0/clang+llvm-22.1.0-x86_64-pc-windows-msvc.tar.xz"
 sha256 = "2dd6a6c990865f98766dec58cce1cbfba48e5affc0098e5b1fff96c2f1d23e81"
-dest = "C4/Frost/vendor/Compiler"
+dest = "vendor/llvm"
 strip = 1
 probe = "bin/clang.exe"
 share-with-worktrees = true          # git worktrees junction the main checkout's copy (4 GB)

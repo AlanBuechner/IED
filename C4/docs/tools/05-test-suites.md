@@ -19,7 +19,7 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
 
 | Suite | Location | What it proves | Run |
 |---|---|---|---|
-| C4Testing | `C4Testing/src/Tests/` | C++ unit tests of the compiler library: lexer, source manager, parser, ProgramModel, overloads, HIR lowering, in-process codegen | `nuke test` (repository root), or `python Frost/Build.py -test -c Development -a x64 -p <C4 root>` |
+| C4Testing | `C4Testing/src/Tests/` | C++ unit tests of the compiler library: lexer, source manager, parser, ProgramModel, overloads, HIR lowering, in-process codegen | `nuke test C4Testing` (repository root; `--filter "Lexer.*"`) |
 | TestCode (e2e) | `assets/TestCode/` | one large C4 program covering the language end to end, run at `-O0` and `-O2` | `assets/TestCode/RunTests.ps1 [-DebugInfo] [-Partitions n] [-Incremental]` |
 | NegativeTest | `assets/NegativeTest/` | invalid programs fail with the exact, actionable diagnostic | `assets/NegativeTest/RunTests.ps1 [-Filter x] [-O2]` |
 | IsolatedTest | `assets/IsolatedTest/` | one folder = one feature or one historical bug, including interop | `assets/IsolatedTest/RunTests.ps1 [-Filter x] [-O2] [-DebugInfo] [-Partitions n]` |
@@ -36,7 +36,7 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
 
 ## 2. C4Testing
 
-- Frost UnitTesting framework; tests are discovered through Frost reflection.
+- The UnitTesting library (`plugins/cpp/libraries/UnitTesting`); tests are discovered through its reflection.
 - Layout mirrors the compiler subsystems: `Lexer/`, `SourceManager/`, `Core/`,
   `Parser/{Foundation,Expressions,Statements,Declarations,Integration}/`, `Semantic/` (ProgramModelTest,
   OverloadResolution, ModelParity, SimulatedLowering, ProgramModelEdgeCases, HIRLowering, CodeGenTest,
@@ -180,14 +180,10 @@ assets\build-output\iso\SwizzleLanguage.exe
     declaration across the boundary, an ambiguous path, a cycle, a misspelled key, inputs with `--projects`).
   - `DebugInfoFlag`: `-g` writes `app.pdb`, whose symbols (read with `llvm-pdbutil`) hold the function, its
     parameter and locals, the global and the lines of `main.cf`; a build without `-g` writes none.
-  - `FrostStaleObjects`: Frost removes the objects of a source that is gone (never a generated source's or
-    `linker.args`), and two sources with one base name are an error.
-  - Building in any folder (`FrostProbes.py` drives Frost on generated projects): `FrostLongLink` (a link whose
-    object paths pass the command-line limit goes through a response file), `FrostProjectName` (a project in a
-    folder that is no identifier takes the name its `Build.py` gives), `FrostBuildOrder` (early projects build after
-    the early projects they link), `FrostFailedCompile` (a compile that fails discards the object and dependency
-    file it may have written), and `NoIgnoredSources` (no source outside the build folders, installed packages
-    and Frost's vendored toolchain is hidden by `.gitignore`).
+  - `NoIgnoredSources`: no source outside the build folders and installed packages is hidden by `.gitignore`.
+    What Frost's probes checked here (stale objects, links past the command-line limit, a project in a folder that is
+    no identifier, build order, failed compiles, the compile database) the C/C++ driver's own tests check
+    (`Nuke/tests/test_cpp_driver.py`, `python -m unittest discover -s Nuke/tests`).
   - `LspStdio`: `StdioClient.py` drives `C4LSP.exe` over real stdio: `initialize`, a malformed frame it drops,
     `shutdown` and `exit` (exit code 0).
   - `DapAdapter`: `StdioClient.py` drives `C4DAP.exe` over real stdio through a session of a `-g` program: its
@@ -393,8 +389,8 @@ A change is done only when all of these pass. `nuke gates` from the repository r
 NegativeTest and IsolatedTest also at `-O2`) except StressTest and IsolatedTest `-DebugInfo`; run those and the
 benchmarks (item 11) on their own.
 
-1. The compiler builds with no swallowed errors (grep the log, see the traps list).
-2. C4Testing: `nuke test` (repository root), or `python Frost/Build.py -test -c Development -a x64 -p <C4 root>`.
+1. The compiler builds (`nuke build`; a failed compile fails it).
+2. C4Testing, CoreTesting and ReflectionTesting: `nuke test C4Testing CoreTesting ReflectionTesting` (repository root).
 3. TestCode at `-O0` and `-O2`: `assets/TestCode/RunTests.ps1`.
 4. NegativeTest: `assets/NegativeTest/RunTests.ps1`.
 5. IsolatedTest: `assets/IsolatedTest/RunTests.ps1` (and `-DebugInfo` when touching codegen or debug info).

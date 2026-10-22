@@ -329,7 +329,7 @@ MSVC exception tables are image-relative. The script image gets:
   host's code, and the runtime would jump into the script's data when it destroys or copies the exception object.
 
 A host function that throws into a script must be able to unwind: a C or C++ function compiled as `extern "C"`
-with `-fexternc-nounwind` (Frost's default) has no unwind table, and an exception crossing it skips the frames
+with `-fexternc-nounwind` (the C/C++ driver's default) has no unwind table, and an exception crossing it skips the frames
 above.
 
 ### 6.4 Debug scripts

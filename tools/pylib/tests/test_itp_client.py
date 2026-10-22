@@ -1,4 +1,4 @@
-"""The C/C++ ITP client (C4/Frost/Projects/Profiling/src/Profiling/Itp.cpp) built and run: what it writes to a trace
+"""The C/C++ ITP client (plugins/cpp/libraries/Profiling/src/Profiling/Itp.cpp) built and run: what it writes to a trace
 file and streams to a listener reads back as docs/16 says. Skipped without a C++ compiler (the vendored clang, else
 clang++ on the PATH)."""
 
@@ -14,8 +14,8 @@ from itp_clients import of
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
-CLIENT = ROOT / "C4" / "Frost" / "Projects" / "Profiling" / "src"
-VENDORED = ROOT / "C4" / "Frost" / "vendor" / "Compiler" / "bin" / ("clang++.exe" if os.name == "nt" else "clang++")
+CLIENT = ROOT / "plugins" / "cpp" / "libraries" / "Profiling" / "src"
+VENDORED = ROOT / "vendor" / "llvm" / "bin" / ("clang++.exe" if os.name == "nt" else "clang++")
 BUILT = {}
 
 

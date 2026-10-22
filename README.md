@@ -24,8 +24,8 @@ the roadmap is `docs/18`.
 
 ## Getting started (Windows x64)
 
-Prerequisites: git, and the Visual Studio C++ build tools / Windows SDK (Frost compiles the compiler against
-the MSVC headers and libraries).
+Prerequisites: git, and the Visual Studio C++ build tools / Windows SDK (Nuke's C/C++ driver compiles the compiler
+against the MSVC headers and libraries).
 
 ```bat
 git clone https://github.com/AlanBuechner/IED.git
@@ -81,8 +81,8 @@ IED/
 |  +- ui-kit/            shared web components (tree, tabs, ANSI console, menus, dropdowns, icons)
 +- src/                  IED server (C4): the host's concepts (workspaces, documents, tasks, language servers, ...) and the plugin API (src/api/, docs/26)
 +- frontend/             web client (html/css/js): theme tokens, static mocks, shell, docking, WS client
-+- plugins/              built-in plugins: one per language (cpp, rust, go, python, web, ...) and the features (chat, editor, git, terminal, browser, markdown, nuke, profiler, gpu, sandbox)
-+- C4/                   the C4 language (compiler sources, Bedrock, runtime, LSP, DAP, tests, docs, Frost)
++- plugins/              built-in plugins: one per language (cpp - with Nuke's C/C++ driver and the C++ libraries -, rust, go, python, web, ...) and the features (chat, editor, git, terminal, browser, markdown, nuke, profiler, gpu, sandbox)
++- C4/                   the C4 language (compiler sources, Bedrock, runtime, LSP, DAP, tests, docs)
 +- Nuke/                 the build system (Python, stdlib only) + its tests
 +- tests/                e2e: the web client in Playwright against the mock and the real server, desktop and phone
 +- tools/                setup, mock server, conformance suite, fake model server, server checks, schema check, soak

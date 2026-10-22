@@ -36,7 +36,7 @@ The C4 language (`C4/`) and Nuke (`Nuke/`) live in this repository, so a bug in 
 - **Releasing a toolchain:** bump `C4/C4Lib/src/Compiler/Version.h`, then `nuke install-c4`; installed versions never change.
 - **Nuke changes:** `python -m unittest discover -s Nuke/tests` must pass (`test_integration.py` runs against a real installed toolchain); keep `Nuke/README.md` and `docs/23` current.
 - **Planned C4-side work for IED** is tracked in `docs/17`: the compiler must build the IED server (it can't yet; that gates everything), C4LSP/C4DAP speak to IED's plugin host, the declarative `c4` plugin replaces the old editor plugin, `nuke init --ied` writes IED solution/project files, and Bedrock gets profiler hooks.
-- Setup is `setup.bat` (pins in `tools/setup/deps.toml`); never commit anything it installs (`vendor/`, `toolchains/`, `C4/Frost/vendor/`).
+- Setup is `setup.bat` (pins in `tools/setup/deps.toml`); never commit anything it installs (`vendor/`, `toolchains/`).
 
 ## What "done" looks like for a feature
 

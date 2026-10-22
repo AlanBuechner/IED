@@ -253,10 +253,13 @@ class DatabaseTests(CppTest):
 		database = self.path("build", "compile_commands.json")
 		os.makedirs(os.path.dirname(database), exist_ok=True)
 		with open(database, "w", encoding="utf-8") as f:
-			json.dump([{"directory": self.root, "file": "C:/elsewhere/other.cpp", "arguments": ["other"]}], f)
+			other = self.path("Other", "other.cpp").replace("\\", "/")
+			json.dump([{"directory": self.root, "file": other, "arguments": ["other"]},
+				{"directory": self.root, "file": self.path("Gone", "gone.cpp").replace("\\", "/"), "arguments": ["gone"]}], f)
+		self.files({"Other/other.cpp": "int other() { return 0; }\n"})
 		self.build("App")
 		entries = json.loads(read(database))
-		self.assertEqual(["Main.cpp", "Probe.c", "other.cpp"], sorted(os.path.basename(e["file"]) for e in entries))
+		self.assertEqual(["Main.cpp", "Probe.c", "other.cpp"], sorted(os.path.basename(e["file"]) for e in entries), "another project's entry stays, a gone file's goes")
 		cpp = next(e for e in entries if e["file"].endswith("Main.cpp"))["arguments"]
 		c = next(e for e in entries if e["file"].endswith("Probe.c"))["arguments"]
 		self.assertNotIn("-cc1", cpp)
@@ -311,6 +314,59 @@ class VariableTests(CppTest):
 		self.workspace({"App": ("[[project.steps]]\nphase = \"post-build\"\nrun = [\"${cpp.clang}\", \"--version\"]\n",
 			{"src/Main.cpp": "int main() { return 0; }\n"})})
 		self.assertIn("clang version", self.build("App"))
+
+
+FAKE_COMPILE = """import sys, time
+source, obj, dep, edit = sys.argv[1:5]
+time.sleep(0.3)
+if edit == "edit":
+	with open(source, "a") as f:
+		f.write("// edited while it compiled\\n")
+time.sleep(0.3)
+open(obj, "w").write("object")
+open(dep, "w").write(dep + ": " + source + "\\n")
+"""
+
+
+class ObjectStampTests(unittest.TestCase):
+	def setUp(self):
+		import tempfile
+		self.tmp = tempfile.mkdtemp(prefix="cpp-stamp-")
+		self.source = os.path.join(self.tmp, "Main.cpp").replace("\\", "/")
+		with open(self.source, "w") as f:
+			f.write("int main() { return 0; }\n")
+		self.compiler = os.path.join(self.tmp, "fake_compile.py")
+		with open(self.compiler, "w") as f:
+			f.write(FAKE_COMPILE)
+		old = time.time() - 60
+		os.utime(self.compiler, (old, old))
+
+	def tearDown(self):
+		shutil.rmtree(self.tmp, ignore_errors=True)
+
+	def job(self, edit):
+		objects = module("objects")
+		base = os.path.join(self.tmp, "Main")
+		return objects.Job(self.source, base + ".obj", base + ".d", base + ".args", [sys.executable, self.compiler, self.source, base + ".obj", base + ".d", edit])
+
+	def decided(self, job):
+		module("objects").decide(job, module("objects").Stats(), self.compiler, None)
+		return job.compile_needed
+
+	def test_bug_346_a_file_edited_during_its_compile_compiles_again(self):
+		objects = module("objects")
+		first = self.job("edit")
+		first.compile_needed = True
+		self.assertEqual(0, objects.run_job(first, self.tmp), first.log)
+		self.assertTrue(self.decided(self.job("edit")), "the edit came after the compile began: the object is older than it")
+
+	def test_an_untouched_file_is_up_to_date(self):
+		objects = module("objects")
+		first = self.job("keep")
+		first.compile_needed = True
+		self.assertEqual(0, objects.run_job(first, self.tmp), first.log)
+		self.assertFalse(self.decided(self.job("keep")))
+		self.assertTrue(self.decided(self.job("other arguments")), "a changed command compiles again")
 
 
 class DepfileTests(unittest.TestCase):

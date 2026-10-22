@@ -22,5 +22,11 @@ namespace Testing
 		TEST_FUNC(ArgList)
 		void TestGetMissingArg();
 
+		TEST_FUNC(ArgList)
+		void TestDoubleDashAndSlash();
+
+		TEST_FUNC(ArgList)
+		void TestEmptyArgument();
+
 	};
 }

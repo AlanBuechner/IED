@@ -94,12 +94,14 @@ def _compile(ctx, toolchain, target, jobs, header_tool):
 		objects.decide(job, stats, toolchain.clang, header_tool)
 
 	def report(job):
-		ctx.log.line(f"{target.name}: {os.path.relpath(job.source, target.dir).replace(os.sep, '/')}")
+		what = "" if job.compile_needed else " (reflection)"
+		ctx.log.line(f"{target.name}: {os.path.relpath(job.source, target.dir).replace(os.sep, '/')}{what}")
 		for text in job.log:
 			ctx.log.line(text)
 	outcome = objects.build_all(jobs, target.dir, _workers(ctx), report)
 	if outcome.worked:
-		ctx.log.line(f"{target.name}: {outcome.compiled} compiled, {outcome.failed} failed, {outcome.current} up to date")
+		reflected = f", {outcome.reflected} reflected again" if outcome.reflected else ""
+		ctx.log.line(f"{target.name}: {outcome.compiled} compiled{reflected}, {outcome.failed} failed, {outcome.current} up to date")
 	if outcome.failed:
 		ctx.fail(f"{target.name}: compiling {outcome.failed} file(s)")
 	return outcome.worked

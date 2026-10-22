@@ -128,9 +128,9 @@ An install is one folder; copying it anywhere gives a working compiler (design D
 | Thing | Where it is found |
 |---|---|
 | Bedrock | `<home>/Bedrock` |
-| clang, lld | `<home>/toolchain/bin`; a development build also finds the repository's `Frost/vendor/Compiler/bin` above the executable |
-| Runtime sources | `<home>/C4Runtime`; a development build also finds the repository's `C4Runtime/` |
-| CBind | `<home>/CBind/CBind.exe`, else `CBind/CBind.exe` beside the executable's folder (the development build's `bin/<config>/CBind/`) |
+| clang, lld | `<home>/toolchain/bin`; a development build also finds the repository's `vendor/llvm/bin` above the executable |
+| Runtime sources | `<home>/C4Runtime`; a development build also finds the repository's `C4/C4Runtime/` |
+| CBind | `<home>/CBind/CBind.exe`, else `CBind/CBind.exe` beside the executable's folder (the development build's `build/bin/<config>/CBind/`) |
 | Windows SDK and MSVC libraries | found by clang (the newest installed) |
 
 When clang or the runtime is missing, `C4.exe` says which folder it looked in and to set `C4_HOME`.

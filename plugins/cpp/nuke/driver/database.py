@@ -1,8 +1,8 @@
 """compile_commands.json for clangd (IED's C/C++ plugin) and other C++ tools: the driver compiles with clang's -cc1
 frontend, whose flags mean nothing to them, so each source's entry is the clang driver's form of the same compile.
 It is kept at <workspace>/build/compile_commands.json, which clangd finds for every file of the workspace (it looks in
-a build/ folder beside each folder above a file); each build replaces the entries of the sources it compiled and keeps
-the others."""
+a build/ folder beside each folder above a file); each build replaces the entries of the sources it compiled, keeps
+the others and drops those of files that are gone."""
 
 import json
 import os
@@ -34,8 +34,9 @@ def entry(toolchain, target, source, includes, system_includes):
 
 
 def merged(existing, entries):
-	"""`existing` with `entries` replacing those of the same files, sorted by file."""
-	by_file = {os.path.normcase(e["file"]): e for e in existing if isinstance(e, dict) and "file" in e}
+	"""`existing` with `entries` replacing those of the same files and those of files that are gone left out, sorted by
+	file."""
+	by_file = {os.path.normcase(e["file"]): e for e in existing if isinstance(e, dict) and "file" in e and os.path.isfile(e["file"])}
 	by_file.update({os.path.normcase(e["file"]): e for e in entries})
 	return [by_file[key] for key in sorted(by_file)]
 

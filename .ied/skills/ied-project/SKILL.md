@@ -6,7 +6,7 @@ keywords: [ied, ide, repo layout, docs, workflow, nuke, plugins, plugin api, roa
 
 # Working on IED
 
-IED is a Visual Studio-style IDE with first-class local AI, built as a C4 server that owns all state plus a web client usable from any browser (including phones). It replaces a predecessor IDE and must drastically surpass it. In this repo: C4 (`C4/` - compiler, LSP, DAP, runtime, Bedrock, plus Frost, the C++ build system of the compiler) and Nuke (`Nuke/`, the build system for C4 workspaces, with the shared versioned C4 toolchains).
+IED is a Visual Studio-style IDE with first-class local AI, built as a C4 server that owns all state plus a web client usable from any browser (including phones). It replaces a predecessor IDE and must drastically surpass it. In this repo: C4 (`C4/` - compiler, LSP, DAP, runtime, Bedrock; its C++ projects build with Nuke's C/C++ driver, `plugins/cpp/nuke`) and Nuke (`Nuke/`, the build system for C4 workspaces and their C++, Rust and Go projects, with the shared versioned C4 toolchains).
 
 ## Read first, in order
 

@@ -450,7 +450,7 @@ standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for
   strings, UUID, `Ref<T>`, logging, time, the Math library) with yaml-cpp as `yaml`, `Threading`, `Profiling` (the IED
   Trace Protocol client), `Reflection`, `StaticReflection`, `HeaderTool`, `CodeGen`, `ObjectDescription`,
   `ChangeNotification`, `UnitTesting` (the test and benchmark harness: a test program takes `-filter=GLOB`,
-  `-benchmark-filter=GLOB`, `-list-tests`, `-list-benchmarks`) and their tests, `CoreTesting` and `ReflectionTesting`.
+  `-benchmark-filter=GLOB`, `-list-tests=1`, `-list-benchmarks=1`) and their tests, `CoreTesting` and `ReflectionTesting`.
   A workspace depending on one by name gets it; this repository lists them all (`plugins/cpp/libraries/*`).
 
 What Frost did that the driver does not: Visual Studio solution files (IED is the IDE: `nuke init --ied`), its

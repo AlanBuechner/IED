@@ -2,8 +2,8 @@
 dependency file, other arguments than last time, a newer clang, or a file it read changed or went. A reflecting
 project's sources also go through the HeaderTool after they compile (and again when the HeaderTool is newer).
 
-An object is stamped with the time its compile began, so a file edited while the compile ran is newer than it and the
-next build compiles it again."""
+An object is stamped with the time its compile began (to the nanosecond), so a file edited while the compile ran is newer
+than it and the next build compiles it again (BUG-346, found in Frost)."""
 
 import concurrent.futures
 import os
@@ -35,7 +35,7 @@ class Job:
 
 
 class Stats:
-	"""File modification times, each read once per build."""
+	"""File modification times (nanoseconds), each read once per build."""
 
 	def __init__(self):
 		self._times = {}
@@ -43,7 +43,7 @@ class Stats:
 	def mtime(self, path):
 		if path not in self._times:
 			try:
-				self._times[path] = os.path.getmtime(path)
+				self._times[path] = os.stat(path).st_mtime_ns
 			except OSError:
 				self._times[path] = None
 		return self._times[path]
@@ -168,7 +168,7 @@ def discard(job):
 
 def run_job(job, cwd):
 	"""Compiles and reflects `job` as decided; its exit code (0: done)."""
-	started = time.time()
+	started = time.time_ns()
 	if job.compile_needed:
 		with open(job.argsfile, "w", encoding="utf-8") as f:
 			f.write(command_text(job.command))
@@ -185,19 +185,20 @@ def run_job(job, cwd):
 		if job.code != 0:
 			job.log.append(f"error: the HeaderTool failed on {os.path.basename(job.source)} (exit code {job.code})")
 			return job.code
-	os.utime(job.obj, (started, started))
+	os.utime(job.obj, ns=(started, started))
 	return 0
 
 
 @dataclass
 class Outcome:
 	compiled: int = 0
+	reflected: int = 0     # went through the HeaderTool again without compiling (a newer HeaderTool)
 	failed: int = 0
 	current: int = 0
 
 	@property
 	def worked(self):
-		return self.compiled > 0 or self.failed > 0
+		return self.compiled > 0 or self.reflected > 0 or self.failed > 0
 
 
 def build_all(jobs, cwd, workers, report):
@@ -216,8 +217,10 @@ def build_all(jobs, cwd, workers, report):
 			except Exception as error:
 				job.code = 1
 				job.log.append(f"error: compiling {job.source} raised {type(error).__name__}: {error}")
-			if job.code == 0:
+			if job.code == 0 and job.compile_needed:
 				outcome.compiled += 1
+			elif job.code == 0:
+				outcome.reflected += 1
 			else:
 				outcome.failed += 1
 			report(job)

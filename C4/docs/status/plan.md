@@ -43,16 +43,16 @@ Status of the plan itself: **active**. Update it in the same change as the work 
 
 ## 2. Gates (every WP, no exceptions)
 
-Run from the C4 root (`C:/Work/C4` in these examples; pass your own checkout to `-p`).
+`nuke gates` from the repository root (the folder above the C4 tree) runs them all; one by one, from the C4 root:
 
 ```bat
-cmd /c "Build.bat -b -c Development -a x64 -p C:/Work/C4"
-python Frost/Build.py -test -c Development -a x64 -p C:/Work/C4
+nuke build
+nuke test C4Testing CoreTesting ReflectionTesting
 powershell -File assets/TestCode/RunTests.ps1
 powershell -File assets/NegativeTest/RunTests.ps1
 powershell -File assets/IsolatedTest/RunTests.ps1
 powershell -File assets/IsolatedTest/RunTests.ps1 -O2
-bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\t.exe -test && assets\build-output\bedrock\t.exe
+..\build\bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\t.exe -test && assets\build-output\bedrock\t.exe
 powershell -File assets/RuntimeTest/RunTests.ps1
 powershell -File assets/ScriptTest/RunTests.ps1
 powershell -File assets/ScriptTest/RunTests.ps1 -O2
@@ -60,9 +60,8 @@ powershell -File assets/ToolsTest/RunTests.ps1
 powershell -File Benchmarks/gemm/run-benchmark.ps1 -Check
 ```
 
-- Grep the build log for `: error|error C\d|fatal error` (Frost can report success on a failed
-  compile) and check that each changed `.cpp`'s `.obj` is newer than the source.
-- After renaming or deleting a `.cpp`, delete its orphan `.obj` under `bin-int/` (orphans are linked).
+- A failed compile fails `nuke build`; the objects of removed sources are deleted before the link (the C/C++
+  driver, `Nuke/README.md` section 9c; Frost needed both checked by hand).
 - When the runtime, ABI or interop changes, also build `assets/StressTest` and the CBind tests.
 - Baseline on 2026-10-18 (start of this plan): TestCode 833 assertions / 0 failed (`-O0` and `-O2`),
   NegativeTest 43/43, IsolatedTest 130/130 (`-O0` and `-O2`), Bedrock 104 tests / 443 assertions,

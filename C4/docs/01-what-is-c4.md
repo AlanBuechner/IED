@@ -186,6 +186,6 @@ a file can see, not what gets compiled, and an included header is never re-parse
 | CBind | Generates C4 declarations from C/C++ headers for `extern` includes | [language/13-interop.md](language/13-interop.md) |
 | C4LSP | Language server, for IED or any other LSP client | [tools/03-editor-lsp-dap.md](tools/03-editor-lsp-dap.md) |
 | C4DAP | Debug adapter for programs built with `-g`, for IED or any other DAP client | [tools/03-editor-lsp-dap.md](tools/03-editor-lsp-dap.md) |
-| Frost | C++ build system used to build the compiler itself | [tools/04-building-the-compiler.md](tools/04-building-the-compiler.md) |
+| C/C++ driver | Nuke's C++ build (IED's C/C++ plugin, Frost before it), which builds the compiler itself | [tools/04-building-the-compiler.md](tools/04-building-the-compiler.md) |
 
 **Platform:** Windows x64 only today (MSVC ABI, Win32 GC runtime). Linux is planned.
