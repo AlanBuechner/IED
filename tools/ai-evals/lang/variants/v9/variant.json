@@ -1,0 +1,16 @@
+{
+	"description": "v8, and the base prompt asks the model to write code into files instead of drafting it in its thinking first (a fifth of all thinking was drafted code, more than was written): needs build/bin/langeval-ctx",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}

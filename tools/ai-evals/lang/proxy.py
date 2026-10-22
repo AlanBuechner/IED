@@ -24,7 +24,7 @@ class Recorder:
 	def __init__(self):
 		self.folders = {}
 		self.spent = {}      # job: solo and wall seconds of its finished requests
-		self.inflight = {}   # job: start times of its requests still running
+		self.inflight = {}   # job: {start time: time of its first byte, or None} of its requests still running
 		self.lock = threading.Lock()
 
 	def register(self, job, folder):
@@ -32,22 +32,32 @@ class Recorder:
 
 	def begin(self, job, started):
 		with self.lock:
-			self.inflight.setdefault(job, []).append(started)
+			self.inflight.setdefault(job, {})[started] = None
+
+	def streaming(self, job, started, at):
+		with self.lock:
+			if started in self.inflight.get(job, {}):
+				self.inflight[job][started] = at
 
 	def cost(self, job):
-		"""Solo seconds of the job's finished requests, and the wall seconds of all of them, running ones included."""
+		"""Solo seconds of the job's requests - the finished ones by their timings, the time a running one has streamed
+		as common.unmeasured_solo_seconds - and the wall seconds of all of them."""
 		with self.lock:
 			done = self.spent.get(job, {"solo": 0.0, "wall": 0.0})
 			now = time.time()
-			return done["solo"], done["wall"] + sum(now - started for started in self.inflight.get(job, []))
+			running = self.inflight.get(job, {})
+			streamed = sum(common.unmeasured_solo_seconds(now - first) for first in running.values() if first)
+			return done["solo"] + streamed, done["wall"] + sum(now - started for started in running)
 
 	def note(self, job, entry, body, started):
 		with self.lock:
-			if started in self.inflight.get(job, []):
-				self.inflight[job].remove(started)
+			self.inflight.get(job, {}).pop(started, None)
 			cost = self.spent.setdefault(job, {"solo": 0.0, "wall": 0.0})
 			cost["wall"] += entry.get("seconds") or 0.0
-			cost["solo"] += common.solo_model_seconds(entry.get("timings") or {})
+			if entry.get("timings"):
+				cost["solo"] += common.solo_model_seconds(entry["timings"])
+			elif entry.get("firstByteSeconds") is not None:   # cut before llama.cpp said what it cost (a step cap, a stop)
+				cost["solo"] += common.unmeasured_solo_seconds((entry.get("seconds") or 0.0) - entry["firstByteSeconds"])
 		folder = self.folders.get(job)
 		if not folder:
 			return
@@ -139,6 +149,7 @@ def make_handler(upstream, recorder):
 						break
 					if first_byte is None:
 						first_byte = time.time()
+						recorder.streaming(job, started, first_byte)
 					pending += chunk
 					*lines, pending = pending.split(b"\n")
 					for line in lines:

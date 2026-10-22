@@ -36,6 +36,15 @@ def solo_model_seconds(timings):
 	return (timings.get("prompt_n") or 0) / SOLO_PREFILL_RATE + (timings.get("predicted_n") or 0) / SOLO_GENERATE_RATE
 
 
+# Generation shared four ways ran at 11 to 14 tokens a second against 30 alone (2026-10-22): a second of streaming
+# whose tokens llama.cpp has not counted yet (a request still running, or one cut off) costs about this much alone.
+STREAMING_SOLO_FACTOR = 0.4
+
+
+def unmeasured_solo_seconds(streamed_seconds):
+	return max(0.0, streamed_seconds) * STREAMING_SOLO_FACTOR
+
+
 def load_task(task_id):
 	folder = os.path.join(TASKS, task_id)
 	with open(os.path.join(folder, "task.toml"), "rb") as f:

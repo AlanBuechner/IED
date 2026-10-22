@@ -36,7 +36,9 @@ constructors, `[test("name")]` functions its unit tests. Judge the code, not the
 def diff_of(ws):
 	"""What the agent changed against the fixture commit, new files included."""
 	common.run(["git", "add", "-A"], ws)
-	code, out, err, _ = common.run(["git", "diff", "--cached", "HEAD", "--", ".", ":(exclude)*.log", ":(exclude)*.csv", ":(exclude)*.txt"], ws)
+	# Data and built programs left out: `go build` writes its program beside the sources, which says nothing of the code.
+	code, out, err, _ = common.run(["git", "diff", "--cached", "HEAD", "--", ".", ":(exclude)*.log", ":(exclude)*.csv", ":(exclude)*.txt",
+		":(exclude)*.exe", ":(exclude)*.pdb", ":(exclude)*.dll", ":(exclude)*.test"], ws)
 	return out
 
 
