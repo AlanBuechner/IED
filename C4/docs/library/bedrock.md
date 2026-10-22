@@ -940,6 +940,15 @@ in the system's words and with its code (`The specified module could not be foun
 a file that is no library). Opening one library twice gives the same module, which unloads when its last
 `Library` closes.
 
+### Source lines (`sourceline.ch`)
+
+`Platform::SourceLineOf(code)` is where the instruction at a code address was written: `SourceLine { file, line }`
+(`IsKnown()` when `line > 0`), as a profiler names a sampled frame (`GC::AllocSample::frames`) or a crash report a
+return address. It reads the debug information of the module the address is in, a program built with `-g` or a
+debug script's DLL (C4Runtime's `c4_source_line_of`, over the system's DbgHelp, loaded the first time it is asked
+and asked one call at a time); a program without it, code a script compiled in memory, and data know no line.
+`Reflection::FunctionContaining` names the function.
+
 ### Time (`time.ch`)
 
 | Function | Meaning |
@@ -1376,11 +1385,11 @@ PNG lacks, a palette index past the palette).
 
 ## 21. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 76 files, 676 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 77 files, 678 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4, native_bytes). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4, native_bytes, platform_source_line). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

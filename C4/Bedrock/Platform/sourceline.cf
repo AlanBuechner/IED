@@ -1,0 +1,21 @@
+include "sourceline.ch"
+
+[link("c4_source_line_of")] int32 c4_source_line_of(const void* code, void* file, int32 capacity, int32* line);
+
+namespace Platform
+{
+	// The longest file name kept: Windows' longest path in UTF-8.
+	const int32 kSourceFileBytes = 4096;
+
+	SourceLine SourceLineOf(const void* code) {
+		SourceLine at;
+		char[kSourceFileBytes] file;
+		int32 line = 0;
+		const int32 length = c4_source_line_of(code, (void*)&file[0], kSourceFileBytes, &line);
+		if (length > 0) {
+			at.file = Core::String(Core::StringView(&file[0], length));
+			at.line = line;
+		}
+		return at;
+	}
+}

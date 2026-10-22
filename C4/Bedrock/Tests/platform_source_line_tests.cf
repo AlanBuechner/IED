@@ -1,0 +1,28 @@
+// Platform::SourceLineOf: a code address's source file and line, from the module's debug information. The gate builds
+// these tests without -g, where no line is known; built with -g, the target's line must be its own. The tools suite
+// checks a -g program end to end (assets/ToolsTest, SourceLines).
+
+include "bedrock.ch"
+
+int32 SourceLineTarget(int32 x) { return x * 3; }
+
+[test("platform.source_line")]
+class PlatformSourceLineTests {
+	[test("a_function_is_where_it_is_written")]
+	public static void TestAFunctionIsWhereItIsWritten() {
+		funcptr<int32(int32)> target = SourceLineTarget;
+		const Platform::SourceLine at = Platform::SourceLineOf((const void*)target);
+		assert_true(target(2) == 6, "the target");
+		assert_true(!at.IsKnown() || (at.file.View().EndsWith(Core::StringView("platform_source_line_tests.cf")) && at.line == 7),
+			"no line without debug information, else its own");
+		assert_true(at.IsKnown() || at.file.IsEmpty(), "no file without a line");
+	}
+
+	[test("data_is_no_line")]
+	public static void TestDataIsNoLine() {
+		int32 local = 1;
+		assert_true(!Platform::SourceLineOf((const void*)&local).IsKnown(), "a stack address");
+		assert_true(!Platform::SourceLineOf(nullptr).IsKnown(), "null");
+		assert_true(local == 1, "the local");
+	}
+}

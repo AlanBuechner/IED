@@ -123,6 +123,12 @@ void* c4_library_find(void* library, const char* symbol);
 // Drops one count of the module; it unloads when the last goes.
 void c4_library_close(void* library);
 
+// --- source lines (Platform/SourceLinesWin32.c) -------------------------------------------------------------
+// The source file (UTF-8, into `file`, room for `capacity` bytes) and the line where the instruction at `code` was
+// written, from the debug information (PDB) of the module it is in: the file's length, with `line`. 0, and line 0, when
+// the module has none (a program built without -g, a script compiled in memory) or `file` is too small.
+int32_t c4_source_line_of(const void* code, char* file, int32_t capacity, int32_t* line);
+
 // --- time (Platform/TimeWin32.c) ----------------------------------------------------------------------
 // The high-resolution counter (QueryPerformanceCounter): monotonic, `c4_time_tick_frequency` ticks per second.
 int64_t c4_time_ticks(void);

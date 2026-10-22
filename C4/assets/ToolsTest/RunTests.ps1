@@ -478,6 +478,28 @@ function Test-DebugInfoFlag {
     return $failures
 }
 
+# Platform::SourceLineOf: a program built with -g finds the line its own function starts on in its .pdb; without -g
+# it knows no line.
+function Test-SourceLines {
+    $source = "include ""bedrock.ch""`nint32 Twice(int32 value) {`n`treturn value * 2;`n}`nint32 main() {`n" +
+        "`tfuncptr<int32(int32)> twice = Twice;`n`tPlatform::SourceLine at = Platform::SourceLineOf((const void*)twice);`n" +
+        "`tprintf(""%s:%d\n"", at.file.CStr(), at.line);`n`treturn twice(3) - 6;`n}"
+    $dir = New-Sources "sourcelines" @{ "main.cf" = $source }
+    $exe = Join-Path $dir "app.exe"
+    $failures = @()
+    $build = Invoke-Compiler $compiler @($dir, "-g", "-o", $exe)
+    if ($build.exit -ne 0) { return @("-g did not build: $($build.output)") }
+    $withLines = (& $exe | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { $failures += "the -g program exited $LASTEXITCODE" }
+    if ($withLines -notmatch "main\.cf:[23]$") { $failures += "with -g, Twice is at '$withLines', not main.cf:2" }
+    Remove-Item (Join-Path $dir "app.pdb") -ErrorAction SilentlyContinue
+    $plain = Invoke-Compiler $compiler @($dir, "-o", $exe)
+    if ($plain.exit -ne 0) { return $failures + @("the plain build failed: $($plain.output)") }
+    $withoutLines = (& $exe | Out-String).Trim()
+    if ($withoutLines -ne ":0") { $failures += "without -g, Twice is at '$withoutLines', not a line unknown" }
+    return $failures
+}
+
 # The debug adapter over real stdio (B28 step 2): a program built with -g stops at its breakpoint with the right
 # stack and locals, then runs to its end with its output and exit code; disconnect ends the adapter with 0.
 function Test-DapAdapter {
@@ -754,7 +776,7 @@ int32 main()
 
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
-    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag",
+    "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag", "Test-SourceLines",
     "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
 $passed = 0
 $failed = 0
