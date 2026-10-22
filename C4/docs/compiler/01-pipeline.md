@@ -171,9 +171,12 @@ Assembly order (details in [04-codegen-and-abi.md](04-codegen-and-abi.md)):
    global's initial data instead (`ConstantImage`), so a program whose globals are all such starts has no rounds. It runs in rounds, each emitted with the functions it
    reaches: a template instance first made by a round's code gets its static data members started in the
    next round. It comes after the bodies so the instances they made are started too.
-7. Materialize every global (reflection registers each, whether or not code names it), then emit the
-   reflection image and `__c4_reflect_init` (`Backend/Reflection/RegistrationEmitter`), a static constructor
-   that registers it under the `-reflect-tag` tag before every other one.
+7. Materialize every global (reflection registers each, whether or not code names it), then describe the
+   reflection image from the model (`Backend/Reflection/RegistrationEmitter`) and emit `__c4_reflect_init`, a
+   static constructor that registers it under the `-reflect-tag` tag before every other one. The image's constants
+   (`Backend/Reflection/ReflectionTables`) go into the module; a split program's go into a module of their own,
+   built on a thread while the rest of the build goes on (D-82,
+   [05-partitioned-emission.md](05-partitioned-emission.md#the-reflection-image-d-82)).
 8. Emit `__c4_gc_roots`: `{address, size}` of every global, static member and static local that may hold a
    managed pointer.
 9. Verify each function (naming the culprit), then the module.

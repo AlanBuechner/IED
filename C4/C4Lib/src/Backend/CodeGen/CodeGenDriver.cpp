@@ -13,6 +13,7 @@
 #include "Backend/CodeGen/ImportPlanner.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/CodeGen/UseSites.h"
+#include "Backend/Reflection/ReflectionTables.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Script/ScriptModulePasses.h"
 #include "Model/TypeHandle.h"
@@ -35,6 +36,17 @@
 namespace Scripting
 {
 	CodeGenDriver::CodeGenDriver(llvm::LLVMContext& ctx) : m_Context(ctx), m_MCtx(ctx), m_Emitter(m_MCtx) {}
+
+	CodeGenDriver::~CodeGenDriver()
+	{
+		if (m_ImageThread.joinable()) m_ImageThread.join();
+	}
+
+	llvm::Module* CodeGenDriver::ReflectionModule()
+	{
+		if (m_ImageThread.joinable()) m_ImageThread.join();
+		return m_ImageModule.get();
+	}
 
 	namespace
 	{
@@ -313,7 +325,9 @@ namespace Scripting
 		m_Emitter.Emit(*tree);
 		m_Trees.push_back(std::move(tree));
 		llvm::Function* emitted = m_MCtx.GetOrCreateFunction(thunk);
-		emitted->setLinkage(llvm::GlobalValue::InternalLinkage); // only the reflection image names it
+		// Only the reflection image names it: a local of the program, which a split program's image module reaches.
+		emitted->setName(m_MCtx.LocalName(symbol));
+		m_MCtx.MakeLocal(*emitted);
 		// Reflection calls through it seldom: small, with its target called rather than copied into it.
 		emitted->addFnAttr(llvm::Attribute::MinSize);
 		emitted->addFnAttr(llvm::Attribute::OptimizeForSize);
@@ -399,9 +413,11 @@ namespace Scripting
 	{
 		const HostEntities host{ m_Script ? m_Script->hostSymbols : nullptr, m_Script ? m_Script->hostTypes : nullptr,
 			m_Script ? m_Script->interfaceUnits : 0 };
-		llvm::GlobalVariable* image = EmitReflectionImage(m_MCtx, model, m_Thunks, host, m_LoweringErrors);
+		ImageDescription description = DescribeReflectionImage(m_MCtx, model, m_Thunks, host, m_LoweringErrors);
 		if (LoweringFailed(errorMessage)) return false;
-		if (!image || m_Script) return true; // a script's loader registers the image under the script's tag
+		if (description.Empty()) return true;
+		llvm::GlobalVariable* image = m_Others.empty() ? BuildImageHere(description) : BuildImageApart(std::move(description));
+		if (m_Script) return true; // a script's loader registers the image under the script's tag
 		auto* ptrTy = llvm::PointerType::get(m_Context, 0);
 		llvm::Function* registerImage = m_MCtx.RuntimeFunction("c4_reflect_register_image", llvm::Type::getVoidTy(m_Context), { ptrTy, ptrTy });
 		auto* voidFn = llvm::FunctionType::get(llvm::Type::getVoidTy(m_Context), false);
@@ -411,6 +427,26 @@ namespace Scripting
 		B.CreateRetVoid();
 		llvm::appendToGlobalCtors(m_MCtx.module(), init, kReflectionPriority);
 		return true;
+	}
+
+	llvm::GlobalVariable* CodeGenDriver::BuildImageHere(const ImageDescription& image)
+	{
+		return ReflectionTables(m_MCtx.module(), [this](const std::string& text) -> llvm::Constant* {
+			return m_MCtx.StringGlobal(ConstantValue::String(text));
+		}).Build(image);
+	}
+
+	// Building the constants reads no model, so it goes on beside imports, the GC roots and the script host, in a context
+	// of its own (D-82).
+	llvm::GlobalVariable* CodeGenDriver::BuildImageApart(ImageDescription image)
+	{
+		m_ImageContext = std::make_unique<llvm::LLVMContext>();
+		m_ImageModule = std::make_unique<llvm::Module>("c4_reflection", *m_ImageContext);
+		m_ImageModule->setTargetTriple(m_MCtx.module().getTargetTriple());
+		m_ImageModule->setDataLayout(m_MCtx.module().getDataLayout());
+		m_ImageThread = std::thread([this, described = std::move(image)] { ReflectionTables(*m_ImageModule).Build(described); });
+		return new llvm::GlobalVariable(m_MCtx.module(), llvm::Type::getInt8Ty(m_Context), true, llvm::GlobalValue::ExternalLinkage, nullptr,
+			"__c4_reflect_image");
 	}
 
 	bool CodeGenDriver::IsHostSymbol(const std::string& symbol) const

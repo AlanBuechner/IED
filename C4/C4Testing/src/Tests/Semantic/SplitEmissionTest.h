@@ -27,5 +27,7 @@ namespace Testing
 		void ConstantsWithoutASymbolHaveNoStorage();
 		TEST_FUNC(Semantic.SplitEmission)
 		void AHostListsItsLocalsByTheirProgramNames();
+		TEST_FUNC(Semantic.SplitEmission)
+		void TheReflectionImageIsAModuleOfItsOwn();
 	};
 } // namespace Testing

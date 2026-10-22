@@ -30,9 +30,10 @@ namespace Testing
 			"int32 g_other = 5;\n"
 			"int32 main() { Shape* s = new Square(); return Count() + s->Sides() + g_other - 14 + (int32)TopRight - 1; }\n";
 
-		// Lowers the program into `count` partitions and hands their modules to `inspect` while they live.
+		// Lowers the program into `count` partitions and hands their modules, and the module its reflection image is built
+		// in (null when there is none), to `inspect` while they live.
 		template <typename Inspect>
-		bool LowerSplit(unsigned count, Inspect inspect)
+		bool LowerSplitWithImage(unsigned count, Inspect inspect)
 		{
 			CompilerInstance compiler;
 			compiler.RegisterInMemory("main.cf", kMain);
@@ -51,8 +52,14 @@ namespace Testing
 			}
 			std::vector<llvm::Module*> modules;
 			for (unsigned i = 0; i < driver.PartitionCount(); ++i) modules.push_back(&driver.PartitionModule(i));
-			inspect(modules);
+			inspect(modules, driver.ReflectionModule());
 			return true;
+		}
+
+		template <typename Inspect>
+		bool LowerSplit(unsigned count, Inspect inspect)
+		{
+			return LowerSplitWithImage(count, [&inspect](const std::vector<llvm::Module*>& modules, llvm::Module*) { inspect(modules); });
 		}
 
 		// How many of `modules` define each function or global that one of them defines (a copy for inlining defines
@@ -144,7 +151,37 @@ namespace Testing
 	void SplitEmissionTest::TheProgramsOwnCodeIsInTheFirstPartition()
 	{
 		TEST_ASSERT(LowerSplit(4, [](const std::vector<llvm::Module*>& modules) {
-			for (const char* own : { "main", "__c4_gc_roots", "__c4_reflect_image" }) TEST_ASSERT_EQ(DefinedIn(modules, own), 0);
+			for (const char* own : { "main", "__c4_gc_roots", "__c4_reflect_init" }) TEST_ASSERT_EQ(DefinedIn(modules, own), 0);
+		}));
+	}
+
+	// The image is built in a module of its own (D-82), which defines it and declares what it points at: the invoke
+	// thunks, hidden globals of partition 0, and the reflected functions and globals where their partitions define them.
+	void SplitEmissionTest::TheReflectionImageIsAModuleOfItsOwn()
+	{
+		TEST_ASSERT(LowerSplitWithImage(4, [](const std::vector<llvm::Module*>& modules, llvm::Module* image) {
+			TEST_ASSERT(image != nullptr);
+			const llvm::GlobalVariable* defined = image->getNamedGlobal("__c4_reflect_image");
+			TEST_ASSERT(defined && !defined->isDeclaration() && defined->hasExternalLinkage());
+			const llvm::GlobalVariable* declared = modules[0]->getNamedGlobal("__c4_reflect_image");
+			TEST_ASSERT(declared && declared->isDeclaration() && !declared->use_empty()); // __c4_reflect_init registers it
+			const std::map<std::string, int> definitions = Definitions(modules);
+			int thunks = 0;
+			for (const llvm::Function& f : *image)
+			{
+				TEST_ASSERT(f.isDeclaration() && definitions.count(f.getName().str()) == 1);
+				if (!f.getName().starts_with("__c4_invoke_")) continue;
+				TEST_ASSERT(f.hasHiddenVisibility() && f.getName().ends_with(kLocalSuffix));
+				thunks++;
+			}
+			TEST_ASSERT(thunks > 0);
+			for (const llvm::GlobalVariable& g : image->globals())
+				if (&g != defined) TEST_ASSERT(g.hasPrivateLinkage() || definitions.count(g.getName().str()) == 1);
+		}));
+		TEST_ASSERT(LowerSplitWithImage(1, [](const std::vector<llvm::Module*>& modules, llvm::Module* image) {
+			TEST_ASSERT(image == nullptr);
+			const llvm::GlobalVariable* own = modules[0]->getNamedGlobal("__c4_reflect_image");
+			TEST_ASSERT(own && !own->isDeclaration());
 		}));
 	}
 

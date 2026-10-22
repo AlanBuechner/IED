@@ -65,7 +65,8 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
    what it reaches (`EmitReachable`); a template instance first made there has its static data members
    started by the next round. Not emitted when nothing starts at run time. Then `MaterializeGlobals` gives
    every global its storage, and the reflection image is emitted with its registering constructor
-   (`EmitReflection`, priority 65534: before every other static constructor).
+   (`EmitReflection`, priority 65534: before every other static constructor; a split program's image in a module of
+   its own, D-82).
 6. **Test harness** (`-test`, see below).
 7. **Entry point.** Emit `@main` forwarding to the user's entry (`main_0` etc.), mirroring its
    `argc/argv` parameters and returning its value; a `void` entry returns 0. A `-test` build needs none.

@@ -778,7 +778,8 @@ int32 main()
     if ($LASTEXITCODE -ne 10) { $failures += "the first build exited $LASTEXITCODE, expected 10" }
     if ($first.output -notmatch "optimize\+codegen" -or $first.output -match "(?m)^\s+optimize\s") { $failures += "-ftime does not report the optimizer inside code generation" }
     $again = & $build @("--incremental")
-    if ($again.reused -ne 4 -or $again.objects -ne 4) { $failures += "an unchanged rebuild reused $($again.reused) of $($again.objects) objects" }
+    # Four partitions and the reflection image's module (D-82).
+    if ($again.reused -ne 5 -or $again.objects -ne 5) { $failures += "an unchanged rebuild reused $($again.reused) of $($again.objects) objects" }
     Set-Content -Path (Join-Path $src "main.cf") -Value ($program -replace "return v \* 3;", "return v * 30;") -Encoding ascii
     $edited = & $build @("--incremental")
     & $exe | Out-Null

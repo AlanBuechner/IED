@@ -25,14 +25,14 @@
 
 namespace fs = std::filesystem;
 
-bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions)
+bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions, const ImageModule& image)
 {
 	if (!MakeOutputFolder()) return false;
 	const std::string base = IntermediateBase();
 	if (base.empty()) return false;
 	llvm::Module& module = *partitions.front();
 	if (!PrepareScriptHost(partitions)) return false;
-	if (partitions.size() > 1 ? !WriteSplitProgram(partitions, base) : !WriteProgram(module, base)) return false;
+	if (partitions.size() > 1 ? !WriteSplitProgram(partitions, image, base) : !WriteProgram(module, base)) return false;
 	return !m_Interface || WriteScriptInterface(); // only beside the program it describes: a failed link keeps the old pair
 }
 
@@ -58,9 +58,12 @@ bool ProgramOutput::OptimizesPartitions(const Scripting::CompileOptions& options
 }
 
 // A program emitted in partitions (D-81): each partition's bitcode, its object reused or assembled, then the link.
-bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitions, const std::string& base)
+bool ProgramOutput::WriteSplitProgram(std::vector<llvm::Module*> partitions, const ImageModule& image, const std::string& base)
 {
 	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, true, true };
+	const auto waited = std::chrono::steady_clock::now();
+	if (llvm::Module* reflection = image ? image() : nullptr) partitions.push_back(reflection);
+	Timed("reflection", waited);
 	const auto start = std::chrono::steady_clock::now();
 	const Scripting::PartitionOptimization optimization = settings.optLevel == 0 ? Scripting::PartitionOptimization::AfterAtO0
 		: Scripting::PartitionOptimization::After;

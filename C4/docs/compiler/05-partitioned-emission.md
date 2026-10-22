@@ -34,8 +34,9 @@ the partitions' bitcode, and with it the object cache, does not depend on `-j`:
   signature, the function a function-pointer global starts at) go through a lock the partitions share
   (`ModuleContext::ShareModel`).
 - **The program's own code and data** come after the fixed point, in partition 0: global initialization, invoke
-  thunks, the reflection image, the GC roots (which declare every other partition's static locals), the entry point
-  or the test harness, the file-scope assembly.
+  thunks, the reflection image's registration, the GC roots (which declare every other partition's static locals),
+  the entry point or the test harness, the file-scope assembly. The reflection image itself is a module of its own
+  (below).
 
 ## Placement (`Backend/CodeGen/ProgramPlacement`)
 
@@ -54,7 +55,22 @@ rounded down to a power of two, 1 to 64, so the count changes only when the prog
 | a global's storage | defined where code first names it | defined in its declaring file's partition, its initial data (`StartAsData`) there; declared elsewhere |
 | a constant with no symbol (an unscoped enum's member) | no storage | no storage |
 | vtables and their thunks, RTTI locators, EH tables, strings, GUIDs, census records and counters, `c4.ipow.*`, finalizers, `func` thunks | internal or private | internal or private in each partition that uses them: dispatch and casts work through any copy (type identity is the RTTI type descriptor, `linkonce_odr`), and the runtime merges census records by name |
-| invoke thunks, reflection rows | internal, private | in partition 0, with the image |
+| invoke thunks | internal | hidden external `<name>.local` in partition 0, which the image's module names |
+| the reflection image and its rows and strings | in partition 0: external, private | in the image's own module (D-82): `__c4_reflect_image` external, the rest private; partition 0 declares the image |
+
+## The reflection image (D-82)
+
+The image is the program's largest piece of data (13 MB in the IED server) and was built on the coordinator after
+the fixed point. It is made in two steps: `DescribeReflectionImage` reads the model, on the coordinator, into an
+`ImageDescription` (rows of numbers, texts, references to tables and the names of the functions and globals it
+points at), folding annotation arguments and reporting those that do not fold as before; `ReflectionTables::Build`
+makes the LLVM constants from it and reads no model. One partition builds it in place, sharing the module's strings.
+A split program builds it in a module and LLVM context of its own on a thread (`CodeGenDriver::BuildImageApart`),
+declaring what it points at by name (a function as `void()`, a global as a byte, a program local hidden), while the
+coordinator emits the imports and the GC roots and the output writes the script host; `CodeGenDriver::ReflectionModule`
+waits for it, and the output takes it last, as one more object (`-ftime` reports the wait as `reflection`). Its
+object is reused like any partition's, so an edit that changes no reflected declaration reassembles no image, and an
+edit of partition 0 reassembles no image with it.
 
 ## Imports (`Backend/CodeGen/ImportPlanner`)
 
@@ -80,5 +96,5 @@ finds each under its partition name.
 
 C4Testing `Semantic.SplitEmission` (each function and global defined in one partition, locals other partitions name
 hidden globals, the program's own code in partition 0, one partition keeping locals local, no storage for nameless
-constants); TestCode with `-Incremental` (e2e-incremental) builds TestCode split; the IED server's own tests build it
+constants, the reflection image in a module of its own that declares only what the partitions define); TestCode with `-Incremental` (e2e-incremental) builds TestCode split; the IED server's own tests build it
 split.

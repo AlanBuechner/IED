@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 #include "Compiler/ErrorTracker.h"
+#include "Backend/Reflection/ImageDescription.h"
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -47,12 +48,13 @@ namespace Scripting
 	/// InvokeSignature, escaped.
 	std::string SharedInvokeThunkSymbol(const FunctionRecord& function);
 
-	/// The program's reflection image (docs/runtime/02, ABI in C4Runtime/ReflectABI.h): constant tables of its
-	/// types, enums, unions, globals and functions in one `c4_reflect_image`, the external constant
-	/// `__c4_reflect_image`, ready for `c4_reflect_register_image`. A function in `thunks` records its invoke
-	/// thunk, and the code a shared thunk calls. What `host` registered is left out (a script's image holds only the script's own). An annotation argument
-	/// that does not fold is reported in `errors` once. Null when there is nothing to register.
-	llvm::GlobalVariable* EmitReflectionImage(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks,
+	/// The program's reflection image (docs/runtime/02, ABI in C4Runtime/ReflectABI.h) as the model describes it:
+	/// tables of its types, enums, unions, globals and functions in one `c4_reflect_image`. A function in `thunks`
+	/// records its invoke thunk, and the code a shared thunk calls; a global, its storage in `module`. What `host`
+	/// registered is left out (a script's image holds only the script's own). An annotation argument that does not
+	/// fold is reported in `errors` once. Empty when there is nothing to register. It reads the model, so it runs where
+	/// the model may be read; ReflectionTables builds it anywhere (D-82).
+	ImageDescription DescribeReflectionImage(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks,
 		const HostEntities& host, ErrorTracker& errors);
 
 	/// The qualified names of the types, enums and unions the program's image registers, in its order.

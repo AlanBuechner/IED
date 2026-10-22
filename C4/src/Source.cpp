@@ -153,6 +153,8 @@ namespace
 		{
 			llvm::LLVMContext& ctx = *new llvm::LLVMContext;
 			Scripting::CodeGenDriver& driver = *new Scripting::CodeGenDriver(ctx);
+			// The driver is never freed: its reflection image's thread ends on every way out (D-82).
+			struct ImageWait { Scripting::CodeGenDriver& driver; ~ImageWait() { driver.ReflectionModule(); } } imageWait{ driver };
 
 			// The entry point the generated main calls: a -test run drives the test harness (the compiler
 			// emits a synthetic main that runs every [test] function), otherwise the user's main.
@@ -181,7 +183,8 @@ namespace
 			if (m_Result.HasErrors()) return false;
 			std::vector<llvm::Module*> partitions;
 			for (unsigned i = 0; i < driver.PartitionCount(); ++i) partitions.push_back(&driver.PartitionModule(i));
-			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros }).Write(partitions);
+			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros })
+				.Write(partitions, [&driver] { return driver.ReflectionModule(); });
 		}
 
 		// --- Phase 1: input registration -------------------------------------------------

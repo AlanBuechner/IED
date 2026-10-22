@@ -1,5 +1,4 @@
 #include "Backend/Reflection/RegistrationEmitter.h"
-#include "Backend/Reflection/ReflectionTables.h"
 #include "Backend/CodeGen/ModuleContext.h"
 #include "Backend/HIR/InvokeThunk.h"
 #include "Model/Annotations.h"
@@ -14,6 +13,7 @@
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 #include "ReflectABI.h"
+#include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <set>
 #include <tuple>
@@ -42,12 +42,13 @@ namespace Scripting
 			return inUnion && !UnionLayout::IsPrimary(UnionLayout::RegionMembers(fields, field.m_UnionRegionId), field);
 		}
 
-		// The rows of the image, built entity by entity; each table a row points at is a private constant.
+		// The rows of the image, described entity by entity (ImageDescription); each table a row points at becomes a
+		// private constant where the image is built.
 		class ImageWriter
 		{
 		public:
 			ImageWriter(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks, ErrorTracker& errors)
-				: m_Module(module), m_Tables(module), m_Model(model), m_Thunks(thunks), m_Errors(errors) {}
+				: m_Module(module), m_Model(model), m_Thunks(thunks), m_Errors(errors) {}
 
 			void AddType(const ObjectType& object)
 			{
@@ -56,34 +57,35 @@ namespace Scripting
 				const Table methods = Methods(object);
 				const Table groups = Groups(object.GetGroups());
 				const Table annotations = Annotations(object.GetDeclNode(), m_Model.TypeScope(&object));
-				m_Types.push_back(m_Tables.Row(m_Tables.typeInfo, { U32(reflect_KIND_OBJECT), TypeText(&object), U64(object.GetSize()),
+				m_Types.push_back({ U32(reflect_KIND_OBJECT), TypeText(&object), U64(object.GetSize()),
 					U64(object.GetAlignment()), fields.count, fields.rows, methods.count, methods.rows,
-					Text(!bases.Empty() && bases[0] ? std::string(QualifiedName(bases[0]).c_str()) : std::string()), U32(0), Null(),
-					groups.count, groups.rows, annotations.count, annotations.rows }));
+					Text(!bases.Empty() && bases[0] ? QualifiedName(bases[0]) : std::string()), U32(0), Null(),
+					groups.count, groups.rows, annotations.count, annotations.rows });
 			}
 
 			void AddUnion(const UnionType& un)
 			{
-				std::vector<llvm::Constant*> rows;
+				std::vector<ImageRow> rows;
 				for (const auto& field : un.GetFields())
 					if (!field.m_IsStatic && field.m_Type)
 						rows.push_back(FieldRow(field, field.m_Offset, IsAlias(un.GetFields(), field, true), un.GetDeclScope()));
+				const Table fields = Rows(ImageShape::Field, std::move(rows));
 				const Table groups = Groups(un.GetGroups());
 				const Table annotations = Annotations(un.GetDeclNode(), un.GetDeclScope());
-				m_Types.push_back(m_Tables.Row(m_Tables.typeInfo, { U32(reflect_KIND_UNION), TypeText(&un), U64(un.GetSize()),
-					U64(un.GetAlignment()), U32(rows.size()), m_Tables.Array(m_Tables.field, rows), U32(0), Null(), Text(""), U32(0), Null(),
-					groups.count, groups.rows, annotations.count, annotations.rows }));
+				m_Types.push_back({ U32(reflect_KIND_UNION), TypeText(&un), U64(un.GetSize()),
+					U64(un.GetAlignment()), fields.count, fields.rows, U32(0), Null(), Text(""), U32(0), Null(),
+					groups.count, groups.rows, annotations.count, annotations.rows });
 			}
 
 			void AddEnum(const EnumType& en)
 			{
-				std::vector<llvm::Constant*> values;
+				std::vector<ImageRow> values;
 				for (const auto& member : en.GetMembers())
-					values.push_back(m_Tables.Row(m_Tables.enumValue, { Text(member.mName.c_str()), m_Tables.I64(member.m_Value) }));
+					values.push_back({ Text(member.mName), I64(member.m_Value) });
 				const Table annotations = Annotations(en.GetDeclNode(), en.GetDeclScope());
-				m_Types.push_back(m_Tables.Row(m_Tables.typeInfo, { U32(reflect_KIND_ENUM), TypeText(&en), U64(en.GetSize()),
+				m_Types.push_back({ U32(reflect_KIND_ENUM), TypeText(&en), U64(en.GetSize()),
 					U64(en.GetAlignment()), U32(0), Null(), U32(0), Null(), Text(""), U32(en.GetMemberCount()),
-					m_Tables.Array(m_Tables.enumValue, values), U32(0), Null(), annotations.count, annotations.rows }));
+					m_Image.Table(ImageShape::EnumValue, std::move(values)), U32(0), Null(), annotations.count, annotations.rows });
 			}
 
 			void AddVariable(const SymbolInfo& variable)
@@ -93,11 +95,11 @@ namespace Scripting
 				const Core::String plain = variable.plainName.empty() ? variable.mangledName : variable.plainName;
 				const Table groups = Groups(variable.groups);
 				const Table annotations = Annotations(variable.declNode, scope);
-				m_Variables.push_back(m_Tables.Row(m_Tables.variable, { Text(Scoped(EnclosingNames(scope), plain)), Text(variable.mangledName.c_str()),
+				m_Variables.push_back({ Text(Scoped(EnclosingNames(scope), plain)), Text(variable.mangledName),
 					TypeText(variable.type), U64(variable.type->GetSize()), U64(variable.type->GetAlignment()), U32(variable.isConst ? 1 : 0),
-					Text(owner ? std::string(QualifiedName(owner).c_str()) : std::string()), groups.count, groups.rows, annotations.count,
-					annotations.rows }));
-				m_Addresses.push_back(m_Module.GlobalAddress(variable));
+					Text(owner ? QualifiedName(owner) : std::string()), groups.count, groups.rows, annotations.count,
+					annotations.rows });
+				m_Addresses.push_back({ Symbol(m_Module.GlobalAddress(variable)) });
 			}
 
 			void AddFunction(const FunctionRecord& function)
@@ -110,77 +112,86 @@ namespace Scripting
 				const Table params = Params(&function, types);
 				const Table groups = Groups(function.groups);
 				const Table annotations = RecordAnnotations(&function);
-				m_Functions.push_back(m_Tables.Row(m_Tables.function, { Text(name), Text(function.mangledName.c_str()),
+				m_Functions.push_back({ Text(name), Text(function.mangledName),
 					TypeText(function.type->GetReturnType()), params.count, params.rows, U32(function.isStatic || !owner ? 1 : 0),
-					U32(function.type->IsVariadic() ? 1 : 0), Text(owner ? std::string(QualifiedName(owner).c_str()) : std::string()),
-					groups.count, groups.rows, Invoke(&function), annotations.count, annotations.rows, Code(&function), Address(&function) }));
+					U32(function.type->IsVariadic() ? 1 : 0), Text(owner ? QualifiedName(owner) : std::string()),
+					groups.count, groups.rows, Invoke(&function), annotations.count, annotations.rows, Code(&function), Address(&function) });
 			}
 
-			llvm::GlobalVariable* Finish()
+			ImageDescription Finish()
 			{
-				if (m_Types.empty() && m_Variables.empty() && m_Functions.empty()) return nullptr;
-				llvm::Constant* image = m_Tables.Row(m_Tables.image, { U32(m_Types.size()), m_Tables.Array(m_Tables.typeInfo, m_Types),
-					U32(m_Variables.size()), m_Tables.Array(m_Tables.variable, m_Variables),
-					m_Tables.Array(llvm::PointerType::get(m_Module.module().getContext(), 0), m_Addresses), U32(m_Functions.size()),
-					m_Tables.Array(m_Tables.function, m_Functions) });
-				return new llvm::GlobalVariable(m_Module.module(), m_Tables.image, true, llvm::GlobalValue::ExternalLinkage, image,
-					"__c4_reflect_image");
+				if (m_Types.empty() && m_Variables.empty() && m_Functions.empty()) return std::move(m_Image);
+				const uint64 types = m_Types.size();
+				const uint64 variables = m_Variables.size();
+				const uint64 functions = m_Functions.size();
+				const ImageValue typeRows = m_Image.Table(ImageShape::TypeInfo, std::move(m_Types));
+				const ImageValue variableRows = m_Image.Table(ImageShape::Variable, std::move(m_Variables));
+				const ImageValue addresses = m_Image.Table(ImageShape::Pointer, std::move(m_Addresses));
+				const ImageValue functionRows = m_Image.Table(ImageShape::Function, std::move(m_Functions));
+				m_Image.SetImage({ U32(types), typeRows, U32(variables), variableRows, addresses, U32(functions), functionRows });
+				return std::move(m_Image);
 			}
 
 		private:
 			// A table field pair: how many rows, and where they are (null for none).
 			struct Table
 			{
-				llvm::Constant* count;
-				llvm::Constant* rows;
+				ImageValue count;
+				ImageValue rows;
 			};
 
-			llvm::Constant* U32(uint64 value) { return m_Tables.U32(value); }
-			llvm::Constant* U64(uint64 value) { return m_Tables.U64(value); }
-			llvm::Constant* Null() { return m_Tables.Null(); }
-			llvm::Constant* Text(const std::string& text) { return m_Tables.String(text); }
-			llvm::Constant* TypeText(const Type* type) { return Text(QualifiedName(type).c_str()); }
-
-			Table Rows(llvm::Type* rowType, const std::vector<llvm::Constant*>& rows)
+			ImageValue U32(uint64 value) const { return m_Image.Integer(value); }
+			ImageValue U64(uint64 value) const { return m_Image.Integer(value); }
+			ImageValue I64(int64 value) const { return m_Image.Integer(static_cast<uint64>(value)); }
+			ImageValue F64(double value) const { return m_Image.Real(value); }
+			ImageValue Null() const { return m_Image.Null(); }
+			ImageValue Text(std::string text) { return m_Image.Text(std::move(text)); }
+			ImageValue TypeText(const Type* type) { return Text(QualifiedName(type)); }
+			ImageValue Symbol(const llvm::GlobalValue* value)
 			{
-				return { U32(rows.size()), m_Tables.Array(rowType, rows) };
+				return value ? m_Image.Symbol(value->getName().str(), llvm::isa<llvm::Function>(value), value->hasHiddenVisibility()) : Null();
+			}
+
+			Table Rows(ImageShape shape, std::vector<ImageRow> rows)
+			{
+				const uint64 count = rows.size();
+				return { U32(count), m_Image.Table(shape, std::move(rows)) };
 			}
 
 			// The function's invoke thunk, or null when reflection cannot call it.
-			llvm::Constant* Invoke(const FunctionRecord* function) { return Entry(function, &InvokeEntry::thunk); }
+			ImageValue Invoke(const FunctionRecord* function) { return Entry(function, &InvokeEntry::thunk); }
 
 			// The code the function's shared thunk calls, or null for a thunk of its own.
-			llvm::Constant* Code(const FunctionRecord* function) { return Entry(function, &InvokeEntry::code); }
+			ImageValue Code(const FunctionRecord* function) { return Entry(function, &InvokeEntry::code); }
 
 			// The function's own code, which FunctionContaining finds a return address in; null when it has no thunk.
-			llvm::Constant* Address(const FunctionRecord* function) { return Entry(function, &InvokeEntry::function); }
+			ImageValue Address(const FunctionRecord* function) { return Entry(function, &InvokeEntry::function); }
 
-			llvm::Constant* Entry(const FunctionRecord* function, llvm::Function* InvokeEntry::*part)
+			ImageValue Entry(const FunctionRecord* function, llvm::Function* InvokeEntry::*part)
 			{
 				auto found = function ? m_Thunks.find(function) : m_Thunks.end();
-				llvm::Function* value = found == m_Thunks.end() ? nullptr : found->second.*part;
-				return value ? static_cast<llvm::Constant*>(value) : Null();
+				return Symbol(found == m_Thunks.end() ? nullptr : found->second.*part);
 			}
 
 			Table Groups(const Core::Vector<Core::String>& groups)
 			{
-				std::vector<llvm::Constant*> names;
-				for (const Core::String& group : groups) names.push_back(Text(group.c_str()));
-				return Rows(llvm::PointerType::get(m_Module.module().getContext(), 0), names);
+				std::vector<ImageRow> names;
+				for (const Core::String& group : groups) names.push_back({ Text(group) });
+				return Rows(ImageShape::Pointer, std::move(names));
 			}
 
-			llvm::Constant* ArgumentRow(const ConstantValue& value)
+			ImageRow ArgumentRow(const ConstantValue& value)
 			{
 				switch (value.kind)
 				{
 				case ConstantValue::Kind::Bool:
-					return m_Tables.Row(m_Tables.annotationArg, { U32(reflect_ARG_BOOL), m_Tables.I64(value.booleanValue ? 1 : 0), m_Tables.F64(0), Text("") });
+					return { U32(reflect_ARG_BOOL), I64(value.booleanValue ? 1 : 0), F64(0), Text("") };
 				case ConstantValue::Kind::Float64:
-					return m_Tables.Row(m_Tables.annotationArg, { U32(reflect_ARG_FLOAT), m_Tables.I64(0), m_Tables.F64(value.floatValue), Text("") });
+					return { U32(reflect_ARG_FLOAT), I64(0), F64(value.floatValue), Text("") };
 				case ConstantValue::Kind::String:
-					return m_Tables.Row(m_Tables.annotationArg, { U32(reflect_ARG_STRING), m_Tables.I64(0), m_Tables.F64(0), Text(value.stringValue) });
+					return { U32(reflect_ARG_STRING), I64(0), F64(0), Text(value.stringValue) };
 				default:
-					return m_Tables.Row(m_Tables.annotationArg, { U32(reflect_ARG_INT), m_Tables.I64(value.intValue), m_Tables.F64(0), Text("") });
+					return { U32(reflect_ARG_INT), I64(value.intValue), F64(0), Text("") };
 				}
 			}
 
@@ -194,15 +205,15 @@ namespace Scripting
 					if (m_Reported.insert({ folded.loc.sourceId, folded.loc.line, folded.loc.column }).second) m_Errors.AddError(folded.loc, folded.message);
 					return { U32(0), Null() };
 				}
-				std::vector<llvm::Constant*> rows;
+				std::vector<ImageRow> rows;
 				for (const ReflectedAnnotation& annotation : folded.value)
 				{
-					std::vector<llvm::Constant*> arguments;
+					std::vector<ImageRow> arguments;
 					for (const ConstantValue& argument : annotation.arguments) arguments.push_back(ArgumentRow(argument));
-					rows.push_back(m_Tables.Row(m_Tables.annotation, { Text(annotation.name.c_str()), U32(arguments.size()),
-						m_Tables.Array(m_Tables.annotationArg, arguments) }));
+					const Table table = Rows(ImageShape::AnnotationArg, std::move(arguments));
+					rows.push_back({ Text(annotation.name), table.count, table.rows });
 				}
-				return Rows(m_Tables.annotation, rows);
+				return Rows(ImageShape::Annotation, std::move(rows));
 			}
 
 			Table Annotations(const AstNode* declaration, const Scope* scope)
@@ -241,35 +252,34 @@ namespace Scripting
 			{
 				if (function)
 					if (auto known = m_RecordParams.find(function); known != m_RecordParams.end()) return known->second;
-				std::vector<llvm::Constant*> rows;
+				std::vector<ImageRow> rows;
 				for (uint32 i = 0; i < types.Count(); ++i)
 				{
 					const Core::String name = function && i < function->paramNames.Count() ? function->paramNames[i] : Core::String();
 					const Table annotations = ParamAnnotations(function, i);
-					rows.push_back(m_Tables.Row(m_Tables.param, { Text(name.c_str()), TypeText(types[i]), annotations.count, annotations.rows }));
+					rows.push_back({ Text(name), TypeText(types[i]), annotations.count, annotations.rows });
 				}
-				const Table table = Rows(m_Tables.param, rows);
+				const Table table = Rows(ImageShape::Param, std::move(rows));
 				if (function) m_RecordParams.emplace(function, table);
 				return table;
 			}
 
-			llvm::Constant* FieldRow(const ObjectType::FieldInfo& field, uint64 offset, bool alias, const Scope* scope)
+			ImageRow FieldRow(const ObjectType::FieldInfo& field, uint64 offset, bool alias, const Scope* scope)
 			{
 				const Table annotations = Annotations(field.m_DeclaringNode, scope);
-				return m_Tables.Row(m_Tables.field, { Text(field.mName.c_str()), TypeText(field.m_Type), U64(field.m_Type->GetSize()), U64(offset),
-					U32(field.m_IsConst ? 1 : 0), U32(alias ? 1 : 0), annotations.count, annotations.rows });
+				return { Text(field.mName), TypeText(field.m_Type), U64(field.m_Type->GetSize()), U64(offset),
+					U32(field.m_IsConst ? 1 : 0), U32(alias ? 1 : 0), annotations.count, annotations.rows };
 			}
 
-			llvm::Constant* LaneRow(const std::string& name, const std::string& typeName, uint64 size, uint64 offset, bool isConst, bool alias)
+			ImageRow LaneRow(const std::string& name, const std::string& typeName, uint64 size, uint64 offset, bool isConst, bool alias)
 			{
-				return m_Tables.Row(m_Tables.field, { Text(name), Text(typeName), U64(size), U64(offset), U32(isConst ? 1 : 0), U32(alias ? 1 : 0),
-					U32(0), Null() });
+				return { Text(name), Text(typeName), U64(size), U64(offset), U32(isConst ? 1 : 0), U32(alias ? 1 : 0), U32(0), Null() };
 			}
 
 			// A packed region is reflected through its lanes, each one element wide (BUG-193): the first name of each
 			// lane is its field, a later view of the same lane (`r` beside `x`) and the whole-vector array (`data`)
 			// are aliases.
-			void AddLaneRows(const ObjectType::FieldInfo& storage, std::vector<llvm::Constant*>& rows)
+			void AddLaneRows(const ObjectType::FieldInfo& storage, std::vector<ImageRow>& rows)
 			{
 				const auto* region = static_cast<const SwizzleType*>(storage.m_Type);
 				const Type* element = region->GetElementType();
@@ -289,43 +299,43 @@ namespace Scripting
 
 			Table Fields(const ObjectType& object)
 			{
-				std::vector<llvm::Constant*> rows;
+				std::vector<ImageRow> rows;
 				for (const auto& field : object.GetFields())
 				{
 					if (field.m_IsStatic || !field.m_Type) continue; // a static has its own storage, registered as a variable
 					if (field.m_IsPackedStorage) { AddLaneRows(field, rows); continue; }
 					rows.push_back(FieldRow(field, field.m_Offset, IsAlias(object.GetFields(), field, field.m_InUnionRegion), m_Model.TypeScope(&object)));
 				}
-				return Rows(m_Tables.field, rows);
+				return Rows(ImageShape::Field, std::move(rows));
 			}
 
 			Table Methods(const ObjectType& object)
 			{
-				std::vector<llvm::Constant*> rows;
+				std::vector<ImageRow> rows;
 				for (const auto& method : object.GetMethods())
 				{
 					const FunctionRecord* record = m_Model.RecordForMethod(&object, &method);
 					const Table params = Params(record, method.m_ParameterTypes);
 					const Table annotations = RecordAnnotations(record);
-					rows.push_back(m_Tables.Row(m_Tables.method, { Text(method.mName.c_str()), params.count, params.rows, TypeText(method.m_ReturnType),
+					rows.push_back({ Text(method.mName), params.count, params.rows, TypeText(method.m_ReturnType),
 						U32(method.m_IsStatic ? 1 : 0), U32(VirtualTables::IsVirtual(&object, method) ? 1 : 0), U32(method.m_IsConst ? 1 : 0),
-						Invoke(record), annotations.count, annotations.rows, Code(record) }));
+						Invoke(record), annotations.count, annotations.rows, Code(record) });
 				}
-				return Rows(m_Tables.method, rows);
+				return Rows(ImageShape::Method, std::move(rows));
 			}
 
 			ModuleContext& m_Module;
-			ReflectionTables m_Tables;
+			ImageDescription m_Image;
 			const ProgramModel& m_Model;
 			const InvokeThunks& m_Thunks;
 			ErrorTracker& m_Errors;
 			std::set<std::tuple<uint32, uint32, uint32>> m_Reported; // annotation failures already reported, by location
 			std::unordered_map<const FunctionRecord*, Table> m_RecordAnnotations;
 			std::unordered_map<const FunctionRecord*, Table> m_RecordParams;
-			std::vector<llvm::Constant*> m_Types;
-			std::vector<llvm::Constant*> m_Variables;
-			std::vector<llvm::Constant*> m_Addresses;
-			std::vector<llvm::Constant*> m_Functions;
+			std::vector<ImageRow> m_Types;
+			std::vector<ImageRow> m_Variables;
+			std::vector<ImageRow> m_Addresses;
+			std::vector<ImageRow> m_Functions;
 		};
 	}
 
@@ -351,7 +361,7 @@ namespace Scripting
 		return names;
 	}
 
-	llvm::GlobalVariable* EmitReflectionImage(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks,
+	ImageDescription DescribeReflectionImage(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks,
 		const HostEntities& host, ErrorTracker& errors)
 	{
 		auto hostType = [&](const Type* type) { return host.types && host.types->count(QualifiedName(type).c_str()); };

@@ -158,6 +158,7 @@ marked (owner) were made by the project owner in notes on the doc pages.
 | D-79 | Concurrent marking without a write barrier | A mostly-concurrent mark-sweep (Boehm, Demers and Shenker 1991), as .NET's first concurrent collector did it, rather than a compiler write barrier: threads are suspended at any instruction, so a barrier's flag check and its store can straddle the stop that turns marking on, and closing that window needs safepoints C4 does not have. The OS tracks written pages instead (`MEM_WRITE_WATCH`): the cycle forgets them, stops the program to copy its roots, marks from the copies beside the program, rescans the marked objects on written pages (a few passes, each with fresh root copies), and a final stop marks from the roots and the pages written since before the sweep. Native code, memcpy and atomics need nothing. Objects allocated during a cycle start unmarked, so frame garbage dies in the cycle it was made in. Heaps past 16 MiB live by default; `Collect()` stays stop-the-world; a verification mode compares each cycle with a fresh mark. | [memory and GC 2](../runtime/01-memory-and-gc.md#2-the-collector) |
 | D-80 | Native memory each object holds | Most of a game's memory sits in container buffers outside the GC heap, so a census of objects by type says little about a leak until it says what they hold. A type answers through a custom operator, `[operator("native_bytes")] int64 NativeBytes() const` (Bedrock's containers: storage by capacity plus their live elements'), and the compiler composes the rest: `native_bytes_of(x)` adds up a type's bases, fields and fixed arrays, never through a pointer (what it points at is its own object, counted on its own), and is a constant 0 for a type that can hold none; `holds_native_bytes(T)` lets a container skip an element walk at compile time. Each type `new` makes gets a record `{ name, counter }` (`c4_gc_type`), the counter a compiler-written `native_bytes_of` of one object or of a counted array's elements, so the census adds what each survivor holds with no cost to allocation. The census runs with the program stopped at any instruction, so the counters only read, under a guard that counts a faulting read as 0. | [builtins 1](../language/14-builtins.md#1-compiler-intrinsics), [memory and GC](../runtime/01-memory-and-gc.md) |
 | D-81 | Partitioned emission | An incremental build's edit loop is serial work around a little code generation: the split writes the whole module as bitcode on one thread and every thread reads a copy of it, and IR emission runs on one thread. The program is emitted into its partitions directly, each into a module context of its own on its own thread, so emission, bitcode, hashing and verification use every core and no whole-module copy exists; HIR lowering stays on one thread (it changes the model), and the coordinator decides placement and the order of everything, so the output does not depend on the thread count. A record's partition is decided from its source file before its code exists; partition 0 holds the program's own code and data. Every cross-partition rule (static storage as hidden globals, one vtable per program, globals defined in their file's partition) holds with one partition too, so whole-program builds and scripts take the same path with one partition. | [compiler 05](../compiler/05-partitioned-emission.md) |
+| D-82 | The reflection image is built beside the build | The image is the program's largest piece of data and was built on the coordinator after the fixed point, in partition 0. Its content depends on lowering (the function template instances bodies make, which functions an invoke thunk can call), so it cannot start before lowering ends, and folding an annotation argument can resolve types and make template instances, so reading the model stays on the coordinator. The image is described there, as plain values (`ImageDescription`), and a split program builds the LLVM constants from the description in a module and LLVM context of its own on a thread, which reads no model, while the coordinator emits imports and GC roots and the output writes the script host; the output takes the module last, as one more object. The module declares what the image points at by name (invoke thunks become hidden `.local` globals of partition 0), so the partitions' code does not change with it, and an edit that changes no reflected declaration reassembles no image. | [compiler 05](../compiler/05-partitioned-emission.md#the-reflection-image-d-82) |
 
 Questions deliberately left to the project owner (not blocking any WP): whether the GC should become
 optional per program (`-gc=off`); parameterized tests and benchmarks in the test framework.
@@ -1538,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 3 done).
+  progress (steps 1 to 4 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1600,10 +1601,29 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   | the constant back | 3.78 | 3.36 |
 
   Peak memory of an edit fell from about 2.05 GB to 1.9 GB.
-- **Next:** the reflection image is built after lowering, on partition 0: given a module of its own and the invoke
-  thunk set up front, it can be built while HIR lowering runs (about 0.2 s of every build). HIR lowering itself (about
-  0.6 s) needs a scope chain per lowering context instead of the symbol table's one cursor, a locked type store and
-  instantiation, and errors gathered per function to run on several threads.
+- **Done notes (step 4, D-82):** the reflection image is described from the model on the coordinator
+  (`DescribeReflectionImage`, `ImageDescription`) and built from the description by `ReflectionTables`, which reads no
+  model: in place in a program of one partition, and in a module of its own on a thread in a split program
+  (`CodeGenDriver::BuildImageApart`, `ReflectionModule`), whose output takes it last as one more object. It cannot
+  overlap lowering: its content depends on the template instances lowering makes and on which functions an invoke
+  thunk can call, and folding an annotation argument may resolve types and make instances, so it overlaps the imports,
+  the GC roots and the script host instead. The description keeps texts and symbol names as they come and the builder
+  merges them, so the coordinator does no hashing for it. Invoke thunks are hidden `.local` globals of partition 0 in
+  a split program. IED server, 16 threads, `-O3 -g --incremental --script-host` (before / after, the mean of two runs;
+  seconds):
+
+  | Build | Before | After |
+  |---|---|---|
+  | nothing changed | 1.86 | 1.79 |
+  | a statement in one function | 3.13 | 3.08 |
+  | a constant in a header | 3.45 | 3.27 |
+  | the constant back | 3.49 | 3.23 |
+
+  The header edits gain most because partition 0 no longer carries the image: an edit that reassembles it reassembles
+  no image with it. The coordinator's share of the image fell from about 12% of a no-op build's samples to 2.5%.
+- **Next:** HIR lowering (about 0.6 s of an edit, the largest serial part) needs a scope chain per lowering context
+  instead of the symbol table's one cursor, a locked type store and instantiation, and errors gathered per function
+  to run on several threads.
 
 ### Testing framework
 
