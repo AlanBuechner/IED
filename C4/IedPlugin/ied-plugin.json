@@ -73,7 +73,12 @@
 				}
 			}
 		],
-		"headerSourcePairs": [ { "extensions": [".ch", ".cf"] } ],
+		"headerSourcePairs": [ { "extensions": [".ch", ".cf"], "follow": true } ],
+		"menus": {
+			"tab/title": [
+				{ "command": "ied.editor.openCounterpartBeside", "group": "1_navigation", "when": "tabKind == 'doc' && (resourceExtname == '.ch' || resourceExtname == '.cf')" }
+			]
+		},
 		"problemMatchers": [
 			{
 				"id": "c4",

@@ -888,6 +888,42 @@ def markdown_preview_follows_its_group(run):
 	run.request("fs.delete", {"wsId": ws, "path": other})
 
 
+@scenario(viewports=("desktop",))
+def counterpart_follows_its_group(run):
+	"""A C file's tab strip has Open Header / Code File to the Side (the C/C++ plugin's "tab/title" item), and the header
+	follows the file its group shows, as a Markdown preview does, because the plugin's headerSourcePairs say `follow`:
+	another C file's header takes its place, a file without one leaves it, and a header shown on the right brings its
+	code file to the left (docs/15 "Tethered tabs")."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	made = ["src/tether_one.c", "src/tether_one.h", "src/tether_two.c", "src/tether_two.h", "src/tether_lone.c"]
+	for path in made:
+		run.request("fs.write", {"wsId": ws, "path": path, "text": "int %s;\n" % path.split("/")[-1].replace(".", "_")})
+	host = ".dock-host:not([hidden]) "
+	for path in ("src/tether_two.c", "src/tether_lone.c", "src/tether_one.c"):
+		page.evaluate("(path) => ied_shell.commands.run('ied.editor.goTo', { path })", path)
+		page.wait_for_selector(host + ".tab:has-text('%s')" % path.split("/")[-1])
+	page.click(host + ".tabs-tail .tabs-action[data-command='ied.editor.openCounterpartBeside']")
+	page.wait_for_selector(host + ".tab:has-text('tether_one.h')", timeout=10000)
+	check(len(page.query_selector_all(host + ".dock-group.well")) == 2, "the header is in a group beside")
+	page.click(host + ".tab:has-text('tether_two.c')")
+	page.wait_for_selector(host + ".tab:has-text('tether_two.h')", timeout=10000)
+	page.wait_for_selector(host + ".tab:has-text('tether_one.h')", state="detached", timeout=5000)
+	check(page.evaluate("ied_shell.tetheredWith('doc:src/tether_two.c')") == ["doc:src/tether_two.h"], "tethered to the file it follows")
+	run.shot("followed")
+	page.click(host + ".tab:has-text('tether_lone.c')")
+	time.sleep(0.8)
+	check(page.is_visible(host + ".tab.on:has-text('tether_two.h')"), "a file without a header leaves it on the last one")
+	page.click(host + ".tab:has-text('tether_two.h')")
+	page.evaluate("ied_shell.commands.run('ied.editor.goTo', { path: 'src/tether_one.h' })")
+	page.wait_for_selector(host + ".tab.on:has-text('tether_one.c')", timeout=10000)
+	check(page.evaluate("ied_shell.tetheredWith('doc:src/tether_one.h')") == ["doc:src/tether_one.c"], "a header shown on the right brings its code file to the left")
+	run.shot("reverse")
+	for path in made:
+		page.evaluate("(path) => ied_shell.closeTab('doc:' + path)", path)
+		run.request("fs.delete", {"wsId": ws, "path": path})
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def markdown_image_opens_in_the_viewer(run):
 	"""A workspace image in a Markdown preview (`/w/<wsId>/files/`) shows at its size when clicked (imageview.js); Escape

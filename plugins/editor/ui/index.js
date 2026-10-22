@@ -17,6 +17,7 @@ import { LanguageFeatures } from "./language.js";
 import { ErrorList as ErrorListView } from "./errorlist.js";
 import { FindInFiles as FindInFilesView } from "./findinfiles.js";
 import { findCounterpart } from "./headersource.js";
+import { followCounterparts } from "./counterpartfollow.js";
 import { showGoToAll } from "./gotoall.js";
 import { fileName } from "/ui-kit/fileuris.js";
 import { TaskState, TaskToolbar as TaskToolbarView, TaskStatus as TaskStatusView } from "./tasks.js";
@@ -64,6 +65,7 @@ export function activate(ied) {
 		};
 	});
 	ied.contributions.on(() => relabel(ied));
+	followCounterparts(ied);
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => ied.icons.fileSpec(fileName(path)), resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
 	ied.bindings.provide("editor.colorize", (args) => colorize(ied, args));
@@ -117,7 +119,7 @@ export function activate(ied) {
 	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
 	ied.commands.handle("ied.editor.goToAll", () => showGoToAll(ied, (target) => goTo(ied, target)));
 	ied.commands.handle("ied.editor.toggleHeader", () => toggleHeader(ied));
-	ied.commands.handle("ied.editor.openCounterpartBeside", () => openCounterpartBeside(ied));
+	ied.commands.handle("ied.editor.openCounterpartBeside", (args) => openCounterpartBeside(ied, args));
 	ied.commands.handle("ied.editor.action", (args) => runEditorAction(ied, args));
 	ied.commands.handle("ied.navigate.back", () => goTo(ied, editors.navigation.back()));
 	ied.commands.handle("ied.navigate.forward", () => goTo(ied, editors.navigation.forward()));
@@ -270,17 +272,20 @@ async function toggleHeader(ied) {
 	else ied.toast("There is no header or code file for " + editor.path.slice(editor.path.lastIndexOf("/") + 1) + ".");
 }
 
-// The header or code file in the group beside, tethered (docs/15 "Tethered tabs"): showing either shows the other.
-async function openCounterpartBeside(ied) {
+// The header or code file of the file a tab strip's button names, or the editor's, in the group beside and tethered
+// (docs/15 "Tethered tabs"): showing either shows the other, and where its pair says `follow`, it follows the file the
+// other group shows (counterpartfollow.js).
+async function openCounterpartBeside(ied, args) {
 	const editor = currentEditor(ied);
-	if (!editor) return;
+	const path = args && args.path ? args.path : editor ? editor.path : null;
+	if (!path) return;
 	const pairs = ied.contributions("headerSourcePairs").map((c) => c.value);
-	const found = await findCounterpart(ied.client, editor.ctx.wsId, editor.path, pairs);
+	const found = await findCounterpart(ied.client, args && args.path ? ied.workspace.wsId : editor.ctx.wsId, path, pairs);
 	if (!found) {
-		ied.toast("There is no header or code file for " + editor.path.slice(editor.path.lastIndexOf("/") + 1) + ".");
+		ied.toast("There is no header or code file for " + path.slice(path.lastIndexOf("/") + 1) + ".");
 		return;
 	}
-	ied.tabs.openBeside("doc:" + editor.path, "doc:" + found, { tether: true });
+	ied.tabs.openBeside("doc:" + path, "doc:" + found, { tether: true });
 }
 
 // Shows Find in Files with the editor's selection (one line of it) as the query.

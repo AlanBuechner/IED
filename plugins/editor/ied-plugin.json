@@ -152,7 +152,7 @@
 			{ "id": "ied.task.showResult", "title": "Show Build Output", "category": "Build" },
 			{ "id": "ied.output.show", "title": "Show Output", "category": "View", "icon": "$(output)" },
 			{ "id": "ied.editor.toggleHeader", "title": "Toggle Header / Code File", "category": "Edit" },
-			{ "id": "ied.editor.openCounterpartBeside", "title": "Open Header / Code File to the Side", "category": "Edit", "icon": "$(link)" },
+			{ "id": "ied.editor.openCounterpartBeside", "title": "Open Header / Code File to the Side", "category": "Edit", "icon": "$(go-to-file)" },
 			{ "id": "ied.editor.action", "title": "Editor Action", "category": "Edit" },
 			{ "id": "ied.navigate.back", "title": "Navigate Backward", "category": "View", "icon": "$(arrow-left)" },
 			{ "id": "ied.navigate.forward", "title": "Navigate Forward", "category": "View", "icon": "$(arrow-right)" }

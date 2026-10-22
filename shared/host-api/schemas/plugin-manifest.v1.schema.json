@@ -201,7 +201,8 @@
 						"additionalProperties": false,
 						"properties": {
 							"extensions": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
-							"searchPaths": { "type": "array", "items": { "type": "string" }, "description": "Extra relative folders to look in (e.g. '../include')." }
+							"searchPaths": { "type": "array", "items": { "type": "string" }, "description": "Extra relative folders to look in (e.g. '../include')." },
+							"follow": { "type": "boolean", "description": "A counterpart opened to the side, tethered, follows the file its partner's group shows when that is one of these too (docs/15 'Tethered tabs')." }
 						}
 					}
 				},

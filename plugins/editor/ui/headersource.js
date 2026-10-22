@@ -2,7 +2,7 @@
 // beside the document or in one of the pair's searchPaths, from the plugins' `headerSourcePairs` contributions
 // ({extensions: [".h", ".c", ...], searchPaths: ["../include"]}). The host knows no language: the pairs do.
 
-function extensionOf(path) {
+export function extensionOf(path) {
 	const slash = path.lastIndexOf("/");
 	const dot = path.lastIndexOf(".");
 	return dot > slash ? path.slice(dot).toLowerCase() : "";

@@ -30,8 +30,13 @@
 				"controlKeywords": ["if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "goto", "try", "catch", "throw", "co_await", "co_return", "co_yield"] }
 		],
 		"headerSourcePairs": [
-			{ "extensions": [".h", ".c", ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".inl"], "searchPaths": ["../include", "../src", "../source"] }
+			{ "extensions": [".h", ".c", ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".inl"], "searchPaths": ["../include", "../src", "../source"], "follow": true }
 		],
+		"menus": {
+			"tab/title": [
+				{ "command": "ied.editor.openCounterpartBeside", "group": "1_navigation", "when": "tabKind == 'doc' && resourceExtname =~ /^\\.(h|c|cpp|cc|cxx|hpp|hh|hxx|inl)$/" }
+			]
+		},
 		"outputLinks": [
 			{ "id": "msvc", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s()<>\"'|*?]+?\\.[A-Za-z0-9_+-]+)\\((\\d+)(?:,(\\d+))?\\)", "file": 1, "line": 2, "column": 3 },
 			{ "id": "gnu", "regexp": "(?:^|\\s)((?:[A-Za-z]:)?[^\\s():<>\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
