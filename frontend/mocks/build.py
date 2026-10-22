@@ -127,12 +127,15 @@ def lint_file(path):
 
 
 LINT_ROOTS = (FRONTEND, REPO / "shared" / "ui-kit", REPO / "plugins")
+# Third-party code kept as its authors wrote it (their indentation, their docs): the C/C++ plugin's yaml-cpp submodule and
+# the glm copy its Core tests compare against.
+VENDORED = (REPO / "plugins" / "cpp" / "libraries" / "yaml" / "yaml-cpp", REPO / "plugins" / "cpp" / "libraries" / "CoreTesting" / "src" / "glm")
 
 
 def lint():
 	failed = False
 	for path in sorted(p for root in LINT_ROOTS for p in root.rglob("*")):
-		if path.suffix not in TEXT_SUFFIXES or "screenshots" in path.parts or "__pycache__" in path.parts:
+		if path.suffix not in TEXT_SUFFIXES or "screenshots" in path.parts or "__pycache__" in path.parts or any(v in path.parents for v in VENDORED):
 			continue
 		for problem in lint_file(path):
 			failed = True

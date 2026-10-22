@@ -1,19 +1,19 @@
 # Reflection System
 
-The C++ Reflection System (IED's C/C++ plugin, `plugins/cpp/libraries/`) provides **compile-time metadata extraction** and **runtime type introspection** for C++ classes. It enables serialization, editor integration, dynamic function invocation, and ECS component inspection — all without manual boilerplate or runtime AST parsing.
+The C++ Reflection System (IED's C/C++ plugin, `plugins/cpp/libraries/`) provides **compile-time metadata extraction** and **runtime type introspection** for C++ classes. It enables serialization, editor integration, dynamic function invocation, and ECS component inspection - all without manual boilerplate or runtime AST parsing.
 
 The system is a three-stage pipeline:
 
 ```
 Source Headers (.h/.cpp)
-        │
-        ▼  [1] HeaderTool (Clang AST consumer)
+        |
+        v  [1] HeaderTool (Clang AST consumer)
    .reflected files (YAML)
-        │
-        ▼  [2] CodeGen (C++ code generator)
+        |
+        v  [2] CodeGen (C++ code generator)
    generated/generated.cpp
-        │
-        ▼  [3] Compiler + Linker
+        |
+        v  [3] Compiler + Linker
    Runtime Reflect::Registry with full type metadata
 ```
 
@@ -22,9 +22,9 @@ Source Headers (.h/.cpp)
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
-- [Stage 1 — Header Parsing (HeaderTool)](#stage-1--header-parsing-headertool)
-- [Stage 2 — Static Reflection Data](#stage-2--static-reflection-data)
-- [Stage 3 — Code Generation (CodeGen)](#stage-3--code-generation-codegen)
+- [Stage 1 - Header Parsing (HeaderTool)](#stage-1--header-parsing-headertool)
+- [Stage 2 - Static Reflection Data](#stage-2--static-reflection-data)
+- [Stage 3 - Code Generation (CodeGen)](#stage-3--code-generation-codegen)
 - [Runtime Reflection API](#runtime-reflection-api)
 - [ObjectDescription Serialization](#objectdescription-serialization)
 - [Build Pipeline Integration](#build-pipeline-integration)
@@ -41,13 +41,13 @@ The reflection system spans four projects under `plugins/cpp/libraries/`:
 | **HeaderTool** | `HeaderTool/` | Clang-based AST consumer that parses source headers and extracts `__attribute__((annotate(...)))` markers into `.reflected` YAML files |
 | **StaticReflection** | `StaticReflection/` | Shared data structures (`Reflection::Class`, `Reflection::Property`, `Reflection::Function`) used by both HeaderTool and CodeGen to represent reflection metadata in a language-neutral format |
 | **CodeGen** | `CodeGen/` | Reads `.reflected` YAML files, generates `generated/generated.cpp` containing runtime registration code that populates the `Reflect::Registry` |
-| **Reflection** | `Reflection/` | The runtime reflection library — provides `Reflect::Class`, `Reflect::Property`, `Reflect::Function`, `Reflect::Registry`, and the `REFLECTED_BODY` / `CLASS` / `PROPERTY` / `FUNCTION` macros |
+| **Reflection** | `Reflection/` | The runtime reflection library - provides `Reflect::Class`, `Reflect::Property`, `Reflect::Function`, `Reflect::Registry`, and the `REFLECTED_BODY` / `CLASS` / `PROPERTY` / `FUNCTION` macros |
 
 A fifth project, **ObjectDescription** (`ObjectDescription/`), builds on top of reflection to provide generic serialization and deserialization of reflected objects.
 
 ---
 
-## Stage 1 — Header Parsing (HeaderTool)
+## Stage 1 - Header Parsing (HeaderTool)
 
 ### Purpose
 
@@ -105,7 +105,7 @@ Classes:
 
 ---
 
-## Stage 2 — Static Reflection Data
+## Stage 2 - Static Reflection Data
 
 The `StaticReflection` library provides the intermediate data model shared between HeaderTool (writer) and CodeGen (reader).
 
@@ -123,7 +123,7 @@ struct Attribute {
 };
 ```
 
-Represents a single attribute — either a bare flag or a key-value property.
+Represents a single attribute - either a bare flag or a key-value property.
 
 #### `Reflection::Property`
 
@@ -197,11 +197,11 @@ Top-level aggregate used by CodeGen. `LoadFolder()` iterates the `generated/` di
 
 ---
 
-## Stage 3 — Code Generation (CodeGen)
+## Stage 3 - Code Generation (CodeGen)
 
 ### Purpose
 
-The CodeGen executable reads all `.reflected` YAML files from the project's `generated/` folder and produces `generated/generated.cpp` — a C++ source file that, when compiled and linked, populates the runtime `Reflect::Registry` with complete type metadata.
+The CodeGen executable reads all `.reflected` YAML files from the project's `generated/` folder and produces `generated/generated.cpp` - a C++ source file that, when compiled and linked, populates the runtime `Reflect::Registry` with complete type metadata.
 
 ### Entry Point (`Source.cpp`)
 
@@ -280,7 +280,7 @@ static Reflect::Registry::Add<Engine::TransformComponent> ClassTransformComponen
 void DeadLinkEngine() {}          // Linker dead-code elimination guard
 ```
 
-The `Registry::Add<T>` constructor is called at static initialization time, which calls `Registry::GetRegistry()->AddClass(...)` — ensuring all reflected types are registered before the application starts.
+The `Registry::Add<T>` constructor is called at static initialization time, which calls `Registry::GetRegistry()->AddClass(...)` - ensuring all reflected types are registered before the application starts.
 
 ### Linking Guard
 
@@ -308,7 +308,7 @@ Represents a registered reflected type:
 |--------|-------------|
 | `GetName()` | Short class name (e.g., `"TransformComponent"`) |
 | `GetSname()` | Semantic/fully-qualified name (e.g., `"Engine::TransformComponent"`) |
-| `GetTypeID()` | `typeid(T).hash_code()` — unique per type |
+| `GetTypeID()` | `typeid(T).hash_code()` - unique per type |
 | `GetSize()` | `sizeof(T)` |
 | `GetGroup()` | User-defined group string from `GROUP=<value>` attribute |
 | `CreateInstance(void*)` / `DestroyInstance(void*, bool)` | Allocate/deallocate instances through stored function pointers |
@@ -599,13 +599,13 @@ Attributes are parsed from the annotation string after the `reflect-class,` / `r
 |------|---------|
 | `Reflection/src/Reflection.h` | Runtime API: `Reflect::Class`, `Property`, `Function`, `Registry`, macros |
 | `Reflection/src/Reflection.cpp` | Registry singleton implementation, `AddClass()` logic |
-| `HeaderTool/src/Source.cpp` | HeaderTool entry point — Clang tool invocation |
+| `HeaderTool/src/Source.cpp` | HeaderTool entry point - Clang tool invocation |
 | `HeaderTool/src/ReflectionConsumer.h` | AST consumer declaration |
 | `HeaderTool/src/ReflectionConsumer.cpp` | AST visitor: class/property/function extraction, `.reflected` YAML emission |
 | `StaticReflection/src/StaticReflection/ReflectionData.h` | Shared data model: `Class`, `Property`, `Function`, `File`, `ReflectionData` |
 | `StaticReflection/src/StaticReflection/ReflectionData.cpp` | Serialization/deserialization of static reflection data, attribute parsing |
 | `StaticReflection/src/StaticReflection/Utils.h` | Tokenization helpers for attribute string parsing |
-| `CodeGen/src/Source.cpp` | CodeGen entry point — loads `.reflected` files, invokes `WriteCode()` |
+| `CodeGen/src/Source.cpp` | CodeGen entry point - loads `.reflected` files, invokes `WriteCode()` |
 | `CodeGen/src/CodeGen.h` / `.cpp` | C++ code generation: function wrappers, offset helpers, registry registration |
 | `CodeGen/src/Validate.cpp` | Stale `.reflected` file cleanup |
 | `ObjectDescription/src/ObjectDescription/ObjectDescription.h` | Variant container, converter templates, type system |

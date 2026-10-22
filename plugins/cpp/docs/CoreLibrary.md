@@ -2,8 +2,8 @@
 
 The Core Library is the foundational C++20 library of IED's C/C++ plugin (`plugins/cpp/libraries/`), shared by the C4 compiler and its tools. It provides essential utilities used by every other project - type aliases, containers, formatting, logging, memory tracking, threading, platform abstraction, and more.
 
-**Location:** `plugins/cpp/libraries/Core/src/` (the Nuke project `Core`, `language = "cpp"`)  
-**Reflection codegen:** none (no `reflection = true`)
+- **Location:** `plugins/cpp/libraries/Core/src/` (the Nuke project `Core`, `language = "cpp"`)
+- **Reflection codegen:** none (no `reflection = true`)
 
 ---
 
@@ -494,8 +494,8 @@ When `ENABLE_PROFILING` is defined, each log line is also sent to the IED profil
 
 ## Performance and Profiling
 
-**Files:** `Profiling/Performance.h`, `Profiling/Performance.cpp`  
-**Project:** `plugins/cpp/libraries/Profiling/`
+- **Files:** `Profiling/Performance.h`, `Profiling/Performance.cpp`
+- **Project:** `plugins/cpp/libraries/Profiling/`
 
 > **Relocated from Core (card-1):** Performance profiling was moved from the Core library to the Profiling project. The new include path is `Profiling/Performance.h`. It is no longer transitively included by `Core/Core.h`.
 
@@ -529,9 +529,9 @@ namespace Profiler {
 void RenderFrame() {
     CREATE_PROFILE_FUNCTIONI();
     FRAME_MARK;
-    
+
     // ... rendering code
-    
+
     {
         CREATE_PROFILE_SCOPEI("UploadTextures");
         ANNOTATE_PROFILEI("Uploading 64 textures");
@@ -701,8 +701,8 @@ On Windows, UUID implicitly converts to `LUID` for use with Win32 APIs.
 
 ## Memory Tracker
 
-**Files:** `Profiling/MemTracker/MemTracker.h`, `Profiling/MemTracker/MemTracker.cpp`  
-**Project:** `plugins/cpp/libraries/Profiling/`
+- **Files:** `Profiling/MemTracker/MemTracker.h`, `Profiling/MemTracker/MemTracker.cpp`
+- **Project:** `plugins/cpp/libraries/Profiling/`
 
 > **Relocated from Core (card-1):** MemTracker was moved from the Core library to the Profiling project on 2026-07-12. The new include path is `Profiling/MemTracker/MemTracker.h`. Downstream callers that depend on memory tracking must include this header explicitly; it is no longer transitively available via `Core/Core.h`.
 
@@ -716,7 +716,7 @@ struct MemStats {
     std::atomic<uint64> totalFrees = 0;          // Cumulative free count
     std::atomic<uint64> numAllocations = 0;      // Current live allocations
     std::atomic<uint64> allocatedBytes = 0;      // Current live bytes
-    
+
     static constexpr bool IsActive;              // true when ENABLE_MEMORY_TRACKER
     static MemStats s_MemStats;                  // Global instance
 };
@@ -743,8 +743,8 @@ uint64 currentBytes  = stats.allocatedBytes.load();
 
 ## Threading Primitives
 
-**Files:** `Threading/Flag.h`, `Threading/Flag.cpp`, `Threading/JobSystem.h`, `Threading/JobSystem.cpp`  
-**Project:** `plugins/cpp/libraries/Threading/`
+- **Files:** `Threading/Flag.h`, `Threading/Flag.cpp`, `Threading/JobSystem.h`, `Threading/JobSystem.cpp`
+- **Project:** `plugins/cpp/libraries/Threading/`
 
 \u003e **Relocated from Core (card-2):** Threading primitives were moved from the Core library to the standalone Threading project on 2026-07-12. Include via `Threading/Flag.h` and `Threading/JobSystem.h`; they are no longer available transitively through `Core/Core.h`.
 

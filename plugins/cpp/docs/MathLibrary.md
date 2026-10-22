@@ -79,11 +79,11 @@ Vectors support element access via `.x`, `.y`, `.z`, `.w` members and array inde
 
 Matrices are column-major classes designed for shader uniform compatibility:
 
-| Type | Columns × Rows | Use |
+| Type | Columns x Rows | Use |
 |------|---------------|-----|
-| `Mat2` | 2×2 | 2D transforms |
-| `Mat3` | 3×3 | Normal matrices, rotation-only |
-| `Mat4` | 4×4 | Model/view/projection transforms |
+| `Mat2` | 2x2 | 2D transforms |
+| `Mat3` | 3x3 | Normal matrices, rotation-only |
+| `Mat4` | 4x4 | Model/view/projection transforms |
 
 Matrices provide `.data()` for raw pointer access (shader uploads) and column/element access via `[]` operators.
 
@@ -112,8 +112,8 @@ Constants and templated scalar functions:
 
 | Function | Description |
 |----------|-------------|
-| `Degrees(x)` | Radians → degrees |
-| `Radians(x)` | Degrees → radians |
+| `Degrees(x)` | Radians -> degrees |
+| `Radians(x)` | Degrees -> radians |
 
 ### Arithmetic Helpers
 
@@ -149,7 +149,7 @@ float Perlin(const Vector4F& p);
 
 float Perlin(float p, float rep);
 float Perlin(const Vector2F& p, const Vector2F& rep);
-// … etc. for 3D and 4D
+// ... etc. for 3D and 4D
 
 float Simplex(float p);
 float Simplex(const Vector2F& p);
@@ -208,7 +208,7 @@ Vector3F Lerp(const Vector3F& v1, const Vector3F& v2, float a);
 Vector4F Lerp(const Vector4F& v1, const Vector4F& v2, float a);
 ```
 
-Interpolates between two vectors by factor `a ∈ [0, 1]`.
+Interpolates between two vectors by factor `a in [0, 1]`.
 
 ### Coordinate Conversions
 
@@ -237,7 +237,7 @@ Per-component degree/radian conversion for vectors.
 | Function | Description |
 |----------|-------------|
 | `Ortho(left, right, bottom, top, zNear, zFar)` | Orthographic projection matrix |
-| `Perspective(fovy, aspect, zNear, zFar)` | Perspective projection matrix (left-handed, depth 0–1) |
+| `Perspective(fovy, aspect, zNear, zFar)` | Perspective projection matrix (left-handed, depth 0-1) |
 | `LookAt(eye, center, up)` | View matrix from camera position |
 | `Rotate(angle, axis)` | Rotation matrix around an arbitrary axis |
 | `Scale(scale)` | Scaling matrix from a `Vector3F` |
@@ -312,7 +312,7 @@ Returns a raw pointer to the matrix data for shader uniform uploads. Replaces `g
 |----------|-------------|
 | `Mix(q1, q2, a)` | Linear mix |
 | `Lerp(q1, q2, a)` | Linear interpolation between two quaternions |
-| `Slerp(q1, q2, a)` | Spherical linear interpolation — constant-speed rotation |
+| `Slerp(q1, q2, a)` | Spherical linear interpolation - constant-speed rotation |
 
 ### Euler Angle Extraction
 
@@ -328,8 +328,8 @@ Returns a raw pointer to the matrix data for shader uniform uploads. Replaces `g
 | Function | Description |
 |----------|-------------|
 | `Rotate(q, angle, axis)` | Compose an additional rotation onto a quaternion |
-| `Mat3Cast(q)` | Convert quaternion to a 3×3 rotation matrix |
-| `Mat4Cast(q)` | Convert quaternion to a 4×4 rotation matrix |
+| `Mat3Cast(q)` | Convert quaternion to a 3x3 rotation matrix |
+| `Mat4Cast(q)` | Convert quaternion to a 4x4 rotation matrix |
 
 ---
 
@@ -411,14 +411,14 @@ static constexpr Rotor FromQuaternion(const Quaternion& q);
 #### Matrix Conversion
 
 ```cpp
-Mat3 ToMat3() const;   // Via quaternion → Mat3Cast
-Mat4 ToMat4() const;   // Via quaternion → Mat4Cast
+Mat3 ToMat3() const;   // Via quaternion -> Mat3Cast
+Mat4 ToMat4() const;   // Via quaternion -> Mat4Cast
 ```
 
 #### Composition and Inversion
 
 ```cpp
-constexpr Rotor operator*(const Rotor& o) const;  // Compose rotations: this ∘ other (via quaternion multiplication)
+constexpr Rotor operator*(const Rotor& o) const;  // Compose rotations: this o other (via quaternion multiplication)
 constexpr Rotor Inverse() const;                  // Negates spatial part (for unit rotor, inverse == conjugate)
 constexpr Rotor Conjugate() const;                // Same as Inverse for rotors
 Rotor Normalize() const;                          // Normalizes to unit magnitude
@@ -444,16 +444,16 @@ constexpr Rotor operator*(float s, const Rotor& r);
 
 ### Motor
 
-A motor encodes both rotation and translation. It is the GA equivalent of a unit dual quaternion: `DQ = Qr + ε·Qd`.
+A motor encodes both rotation and translation. It is the GA equivalent of a unit dual quaternion: `DQ = Qr + eps*Qd`.
 
 | Field | Meaning |
 |-------|---------|
 | `w` | Real scalar (rotation quaternion w) |
-| `spatial` | Real bivector — rotational part (e12, e23, e31) |
+| `spatial` | Real bivector - rotational part (e12, e23, e31) |
 | `ew` | Dual scalar |
-| `translational` | Dual bivector — translation-coupled part (e01, e02, e03) |
+| `translational` | Dual bivector - translation-coupled part (e01, e02, e03) |
 
-Translation extraction: `t = 2 · vec(Qd × conj(Qr))`. Construction from transform: `Qd = (t/2 as pure quat) × Qr`.
+Translation extraction: `t = 2 * vec(Qd x conj(Qr))`. Construction from transform: `Qd = (t/2 as pure quat) x Qr`.
 
 #### Construction
 
@@ -469,14 +469,14 @@ static Motor FromTransform(const Vector3F& position, const Rotor& rotation);
 
 ```cpp
 Mat4 ToMat4() const;        // Extracts rotation quaternion and translation into Mat4
-static Motor FromMat4(const Mat4& m);  // Extracts rotation from upper-left 3×3 and translation from column 3
+static Motor FromMat4(const Mat4& m);  // Extracts rotation from upper-left 3x3 and translation from column 3
 ```
 
 #### Accessors
 
 ```cpp
 constexpr Quaternion GetRotation() const;   // Extract real-part rotation as quaternion
-Vector3F GetTranslation() const;            // Extract translation: t = 2 · vec(Qd × conj(Qr))
+Vector3F GetTranslation() const;            // Extract translation: t = 2 * vec(Qd x conj(Qr))
 Rotor GetRotor() const;                     // Extract real part as Rotor {w, spatial}
 ```
 
@@ -484,7 +484,7 @@ Rotor GetRotor() const;                     // Extract real part as Rotor {w, sp
 
 ```cpp
 Motor operator*(const Motor& o) const;   // Compose transforms via dual-quaternion multiplication with normalization
-Motor Inverse() const;                   // Conjugate divided by |qr|² (≈ conjugate for valid motor)
+Motor Inverse() const;                   // Conjugate divided by |qr|^2 (~= conjugate for valid motor)
 Motor Normalize() const;                 // Normalize real part, orthogonalize dual part
 ```
 
@@ -505,7 +505,7 @@ bool operator!=(const Motor& a, const Motor& b);
 constexpr Motor operator*(float s, const Motor& m);
 ```
 
-### Rotor ↔ Motor Conversion Helpers
+### Rotor <-> Motor Conversion Helpers
 
 ```cpp
 Motor FromRotor(const Rotor& r);   // Embed rotor as zero-translation motor
@@ -524,7 +524,7 @@ Ensures shortest-path rotation by negating `b`'s quaternion when `dot(qa, qb) < 
 
 ### Plane
 
-An oriented plane in 3D represented by a normal vector and signed distance from the origin. Plane equation: `n·x + d = 0`, where `|n| = 1` for a normalized plane.
+An oriented plane in 3D represented by a normal vector and signed distance from the origin. Plane equation: `n*x + d = 0`, where `|n| = 1` for a normalized plane.
 
 #### Construction
 
@@ -532,11 +532,11 @@ An oriented plane in 3D represented by a normal vector and signed distance from 
 constexpr Plane();                                                        // Zero-initialized
 constexpr Plane(const Vector3F& normal, float d);                         // From normal and distance
 constexpr Plane(float nx, float ny, float nz, float pd);                  // Component constructor
-static constexpr Plane XY();   // { (0, 0, 1), 0 } — X-Y plane at origin
-static constexpr Plane YZ();   // { (1, 0, 0), 0 } — Y-Z plane at origin
-static constexpr Plane ZX();   // { (0, 1, 0), 0 } — Z-X plane at origin
+static constexpr Plane XY();   // { (0, 0, 1), 0 } - X-Y plane at origin
+static constexpr Plane YZ();   // { (1, 0, 0), 0 } - Y-Z plane at origin
+static constexpr Plane ZX();   // { (0, 1, 0), 0 } - Z-X plane at origin
 static Plane FromPointNormal(const Vector3F& point, const Vector3F& n);   // Normalized from point and normal
-static Plane FromPoints(const Vector3F& p0, const Vector3F& p1, const Vector3F& p2);  // CCW winding → outward normal
+static Plane FromPoints(const Vector3F& p0, const Vector3F& p1, const Vector3F& p2);  // CCW winding -> outward normal
 ```
 
 #### Distance and Classification
@@ -561,7 +561,7 @@ constexpr Plane Flipped() const;  // Negate both normal and distance
 Plane Transform(const Motor& m) const;      // Rotate normal + translate offset point
 Plane Transform(const Rotor& r) const;      // Pure rotation of normal and offset point
 Plane Transform(const Quaternion& q) const; // Pure rotation via quaternion
-Plane Transform(const Mat4& m) const;       // General transform using inverse-transpose of upper-left 3×3 for normal
+Plane Transform(const Mat4& m) const;       // General transform using inverse-transpose of upper-left 3x3 for normal
 ```
 
 #### Intersection

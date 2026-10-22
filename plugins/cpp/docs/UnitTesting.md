@@ -45,13 +45,13 @@ The framework lives in `plugins/cpp/libraries/UnitTesting/` and is consumed as a
 
 ```
 plugins/cpp/libraries/UnitTesting/
-├── nuke.toml             # the Nuke project: depends on Core, Reflection, ObjectDescription
-├── src/
-│   └── UnitTesting/
-│       ├── Testing.h/cpp           # Public entry point: RunTestsAndBenchmarks()
-│       ├── TestBase.h/cpp          # Unit test base class, macro definitions, runner
-│       ├── BenchmarkTest.h/cpp     # Benchmark base class, macro definitions, runner
-│       └── BenchmarkHistory.h/cpp  # Persistent benchmark history (JSON snapshots)
++-- nuke.toml             # the Nuke project: depends on Core, Reflection, ObjectDescription
++-- src/
+|   +-- UnitTesting/
+|       +-- Testing.h/cpp           # Public entry point: RunTestsAndBenchmarks()
+|       +-- TestBase.h/cpp          # Unit test base class, macro definitions, runner
+|       +-- BenchmarkTest.h/cpp     # Benchmark base class, macro definitions, runner
+|       +-- BenchmarkHistory.h/cpp  # Persistent benchmark history (JSON snapshots)
 ```
 
 ### Dependencies
@@ -70,24 +70,24 @@ The library itself does **not** generate reflection code. Test executables that 
 
 ```
 main()
-  └── Testing::RunTestsAndBenchmarks()
-        ├── RunTests()
-        │     ├── Discover test classes from Reflect::Registry group "Testing"
-        │     ├── Instantiate each class, collect tagged methods into hierarchical TestGroup tree
-        │     ├── Invoke each test method via reflection
-        │     └── Print colored summary (Total / Passed / Failed)
-        │
-        └── RunBenchmarks()
-              ├── Discover benchmark classes from Reflect::Registry group "Benchmarking"
-              ├── Instantiate each class, collect tagged methods into hierarchical BenchmarkGroup tree
-              ├── Invoke each benchmark method via reflection
-              ├── Collect BenchmarkResult objects
-              └── Print formatted results table (Name, Mean, Median, Min, Max, Iters)
+  +-- Testing::RunTestsAndBenchmarks()
+        +-- RunTests()
+        |     +-- Discover test classes from Reflect::Registry group "Testing"
+        |     +-- Instantiate each class, collect tagged methods into hierarchical TestGroup tree
+        |     +-- Invoke each test method via reflection
+        |     +-- Print colored summary (Total / Passed / Failed)
+        |
+        +-- RunBenchmarks()
+              +-- Discover benchmark classes from Reflect::Registry group "Benchmarking"
+              +-- Instantiate each class, collect tagged methods into hierarchical BenchmarkGroup tree
+              +-- Invoke each benchmark method via reflection
+              +-- Collect BenchmarkResult objects
+              +-- Print formatted results table (Name, Mean, Median, Min, Max, Iters)
 ```
 
 Both runners follow a **two-phase** pattern:
-1. **Discovery & Collection** — Scan the reflection registry, instantiate test/benchmark classes, and build hierarchical group trees from method attributes.
-2. **Execution** — Walk the tree, invoke each function via `Reflect::Function::Invoke()`, accumulate results.
+1. **Discovery & Collection** - Scan the reflection registry, instantiate test/benchmark classes, and build hierarchical group trees from method attributes.
+2. **Execution** - Walk the tree, invoke each function via `Reflect::Function::Invoke()`, accumulate results.
 
 Instances are kept alive in a local vector during execution and deleted after printing summaries.
 
@@ -180,7 +180,7 @@ struct TestGroup
 };
 ```
 
-The group path from `TEST_FUNC("A.B.C")` creates (or reuses) nested sub-groups `A → B → C`, placing the test as a leaf under `C`. This produces indented, tree-like console output.
+The group path from `TEST_FUNC("A.B.C")` creates (or reuses) nested sub-groups `A -> B -> C`, placing the test as a leaf under `C`. This produces indented, tree-like console output.
 
 ### Console Output
 
@@ -370,12 +370,12 @@ VectorResize           0.000034    0.000032    0.000025    0.000120       800
 ```
 
 Columns are:
-- **Name** — Left-aligned benchmark name (24 chars).
-- **Mean(s)** — Arithmetic mean per-iteration time in seconds.
-- **Median(s)** — Median per-iteration time.
-- **Min(s)** — Fastest iteration.
-- **Max(s)** — Slowest iteration.
-- **Iters** — Total measured iterations.
+- **Name** - Left-aligned benchmark name (24 chars).
+- **Mean(s)** - Arithmetic mean per-iteration time in seconds.
+- **Median(s)** - Median per-iteration time.
+- **Min(s)** - Fastest iteration.
+- **Max(s)** - Slowest iteration.
+- **Iters** - Total measured iterations.
 
 Results are also accessible programmatically via `Testing::GetBenchmarkResults()`, returning the global `Core::Vector<Core::BenchmarkResult>` from the last `RunBenchmarks()` call.
 
@@ -500,18 +500,18 @@ Serialization uses the `ObjectDescription` system (`SaveObjectDescriptionToJson`
 
 | Method | Return | Description |
 |--------|--------|-------------|
-| `BenchmarkHistory(config)` | — | Constructor. Creates the history directory if needed. |
+| `BenchmarkHistory(config)` | - | Constructor. Creates the history directory if needed. |
 | `SaveResult(result, label)` | `String` | Saves a benchmark result as a new timestamped JSON file. Returns the file path or empty string on failure. Automatically prunes old snapshots after saving. |
 | `LoadAll()` | `Vector<BenchmarkHistoryEntry>` | Loads all historical entries from disk, sorted oldest-first by filename (timestamp-based sorting). |
 | `LoadLatest()` | `optional<BenchmarkHistoryEntry>` | Returns the most recent entry, or `std::nullopt` if no snapshots exist. |
 | `CompareWithHistory(result, threshold)` | `BenchmarkHistoryComparison` | Compares a current result against the latest (and optionally pinned) history entry. |
-| `PinBaseline(timestamp)` | — | Pins a specific historical entry as the comparison baseline by its ISO-8601 timestamp string. |
-| `UnpinBaseline()` | — | Clears the pinned baseline. |
+| `PinBaseline(timestamp)` | - | Pins a specific historical entry as the comparison baseline by its ISO-8601 timestamp string. |
+| `UnpinBaseline()` | - | Clears the pinned baseline. |
 | `GetPinnedTimestamp()` | `const String&` | Returns the currently pinned timestamp, or empty string if none. |
 | `PruneOldSnapshots()` | `uint32` | Removes oldest snapshots beyond `maxSnapshots`. Returns count removed. |
 | `ClearHistory()` | `uint32` | Deletes all JSON files in the history directory. Returns count removed. |
 
-Copy and move constructors are deleted — `BenchmarkHistory` is a non-copyable singleton-style manager.
+Copy and move constructors are deleted - `BenchmarkHistory` is a non-copyable singleton-style manager.
 
 ### Regression Comparison
 
@@ -563,9 +563,9 @@ The pinned timestamp must match an existing entry's `timestamp` field exactly. I
 
 ### Pruning and Cleanup
 
-- **Automatic pruning** — `SaveResult()` calls `PruneOldSnapshots()` after writing a new snapshot. Files are sorted by name (which embeds the timestamp) and the oldest are removed first until `maxSnapshots` files remain.
-- **Manual pruning** — Call `PruneOldSnapshots()` directly to enforce retention limits.
-- **Full cleanup** — `ClearHistory()` removes all JSON files in the history directory.
+- **Automatic pruning** - `SaveResult()` calls `PruneOldSnapshots()` after writing a new snapshot. Files are sorted by name (which embeds the timestamp) and the oldest are removed first until `maxSnapshots` files remain.
+- **Manual pruning** - Call `PruneOldSnapshots()` directly to enforce retention limits.
+- **Full cleanup** - `ClearHistory()` removes all JSON files in the history directory.
 
 When `maxSnapshots` is `0`, pruning is disabled and all snapshots are retained indefinitely.
 
@@ -633,7 +633,7 @@ int main(int argc, char* argv[])
 }
 ```
 
-The `#define IMPLEMENT_LOGGER` is required before including `Core/Core.h` to instantiate the logger singleton. All test and benchmark headers must be included so the reflection codegen pipeline processes their `CLASS()` and `FUNCTION()` macros — without inclusion, the classes won't appear in the registry and discovery will skip them.
+The `#define IMPLEMENT_LOGGER` is required before including `Core/Core.h` to instantiate the logger singleton. All test and benchmark headers must be included so the reflection codegen pipeline processes their `CLASS()` and `FUNCTION()` macros - without inclusion, the classes won't appear in the registry and discovery will skip them.
 
 Alternatively, run phases separately:
 
