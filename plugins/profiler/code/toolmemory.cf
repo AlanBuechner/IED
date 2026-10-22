@@ -47,10 +47,12 @@ namespace Profiler
 			out.Append(stack.At(k).AsView());
 			out.AppendByte('\n');
 		}
-		if (stack.Count() == shown) return;
+		const int64 left = stack.Count() - shown;
+		if (left == 0) return;
 		out.Append("    (");
-		out.Append(Number(stack.Count() - shown).View());
-		out.Append(shown < named ? " more frames)\n" : " frames without a name)\n");
+		out.Append(Number(left).View());
+		out.Append(left == 1 ? " more frame" : " more frames");
+		out.Append(shown < named ? ")\n" : ", without a name)\n");
 	}
 
 	// --- profile_leaks ------------------------------------------------------------------------------------------------

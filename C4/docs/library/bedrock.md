@@ -1236,7 +1236,7 @@ allocation in every 64 KiB (`GC::SetAllocSampling`; a rate the program set is ke
 `Sample` of its thread standing for that many bytes, with its call stack (`CallstackDef`) and each address named by the
 reflected function holding it (`Reflection::FunctionContaining`, `SymbolDef`; native code stays unnamed). Both are put
 back as they were when the session stops (`Profile/collector.cf`). The census makes each `new` dearer while it is on
-(about 57 ns in IED's LeakyC4 demo). Events are stamped with the processor's time stamp counter (its
+(about 16 ns in IED's LeakyC4 demo at -O2, the median of a zone of 300 allocations with it on and off). Events are stamped with the processor's time stamp counter (its
 frequency measured against `Platform::Ticks` at start; calibration pairs every second let the profiler correct it),
 written by each thread into a buffer of its own under an uncontended lock, and sent by a flusher thread every 10 ms -
 each thread's events taken first, then the global buffer's, sent first, so a definition always precedes its first use. A

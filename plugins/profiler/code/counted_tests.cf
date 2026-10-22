@@ -265,6 +265,8 @@ class ProfilerCountedTests {
 		assert_true(capture->trackOf.TryGet(1, main) && capture->samples[0].track == main, "each sample the thread it names");
 		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
 		assert_true(text.View().Contains(Core::StringView("sampled: Particles::Spawn allocated 90.0%")), "the diagnosis names the function that allocated");
+		Core::String stacks = Profiler::AllocationsText(*capture, Json(Core::String("{\"group_by\":\"callstack\"}")));
+		assert_true(stacks.View().Contains(Core::StringView("    Particles::Spawn\n    (1 more frame, without a name)\n")), "a stack's unnamed tail is counted, not listed");
 		Profiler::AllocAsk none;
 		none.groupBy = Profiler::AllocGroup::Function;
 		assert_true(Json(Profiler::Allocations(*CountedCapture(), none)).Member("source").AsView() == "zones", "without samples, by zone however asked");
