@@ -1,7 +1,7 @@
 # Code style (owner defaults - project AGENTS.md rules take precedence where they are more specific)
 
 Formatting
-- Indent with tabs, never spaces (unless the file already uses spaces: then match it and mention it). Use fix_indentation if a file is mixed.
+- Indent with tabs, never spaces (unless the file already uses spaces: then match it and mention it).
 - Match the surrounding code's naming, structure and idiom.
 
 Functions and types

@@ -89,6 +89,31 @@ int32 main() {
 }
 """
 
+RING_TESTS_CF = """include "ring.ch"
+
+[test("ring.push")]
+static void PushCounts() {
+	Game::Ring ring;
+	ring.Push(1);
+	assert_eq(1, ring.Count(), "one value");
+}
+
+[test("ring.full")]
+static void ReportsAFailure() {
+	Game::Ring ring;
+	assert_eq(5, ring.Count(), "deliberately wrong");
+}
+"""
+
+PRINTING_MAIN_CF = """include "ring.ch"
+
+int32 main() {
+	Game::Ring ring;
+	printf("filled %d\\n", Game::Fill(ring));
+	return 0;
+}
+"""
+
 RING_H = """#pragma once
 #define RING_CAPACITY 64
 #define TWICE(x) ((x) * 2)
@@ -267,10 +292,27 @@ class C4CodeToolTests(CodeToolCase):
 			done = subprocess.run(["cmd", "/c", NUKE] + list(words), cwd=self.repo, capture_output=True, text=True)
 			self.assertEqual(0, done.returncode, done.stdout + done.stderr)
 		nuke("init", "--toolchain", "dev", "--ied")
+		shutil.copytree(os.path.join(REPO, "plugins", "nuke"), os.path.join(self.home, "plugins", "nuke"))
 		write(os.path.join(self.repo, "src", "ring.ch"), RING_CH)
 		write(os.path.join(self.repo, "src", "ring.cf"), RING_CF)
 		write(os.path.join(self.repo, "src", "main.cf"), MAIN_CF)
 		nuke("build")
+
+	async def test_building_testing_and_running_through_build_run(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "nuke.command", "value": os.path.join(REPO, "bin", "nuke.cmd")})
+		write(os.path.join(self.repo, "src", "tests", "ring_tests.cf"), RING_TESTS_CF)
+		write(os.path.join(self.repo, "src", "main.cf"), PRINTING_MAIN_CF)
+		results = await self.results(
+			("b1", "build_run", {}),
+			("t1", "build_run", {"task": "test"}),
+			("r1", "build_run", {"task": "run"}), permission="auto")
+		self.assertIn("Build succeeded", results["b1"], results["b1"])
+		self.assertNotIn("filled", results["b1"], "a build's output is not shown when it succeeds")
+		self.assertIn("Test failed", results["t1"], results["t1"])
+		self.assertIn("src/tests/ring_tests.cf:13:1: error: deliberately wrong", results["t1"], "the failed assertion as a problem with its place")
+		self.assertIn("1 passed, 1 failed", results["t1"], "the end of the output: the summary")
+		self.assertIn("Run succeeded", results["r1"], results["r1"])
+		self.assertIn("filled 2", results["r1"], "the program's output")
 
 	async def test_navigating_a_c4_project(self):
 		results = await self.results(

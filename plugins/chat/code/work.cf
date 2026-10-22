@@ -291,7 +291,8 @@ namespace Ai
 		said.AppendInt(warnings);
 		said.Append(" warnings)\n");
 		said.Append(problems.View());
-		if (!succeeded && errors == 0) said.Append(TailOf(run.tail.View(), 40, 4096).View());
+		const bool builds = task.IsEmpty() || task == "build" || task == "rebuild";
+		if ((!succeeded && errors == 0) || !builds) said.Append(TailOf(run.tail.View(), 40, 4096).View());
 		ToolOutcome outcome = ToolResult(said.View(), said.View().Substring(0, said.View().IndexOf('\n', 0)));
 		outcome.isError = !succeeded;
 		outcome.source = Core::String("Output: Build");
@@ -322,8 +323,8 @@ namespace Ai
 		shell->plan = ShellPlan;
 		shell->run = ShellRun;
 		registry.Add(shell);
-		ToolSpec* build = WorkSpec("build_run", "Build with the project's build task (as the toolbar's Build does) and return the result with its errors and warnings. Example: build_run({}) or build_run({\"project\": \"Game\"})",
-			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\"}, \"task\": {\"type\": \"string\", \"description\": \"another task than build, by its key\"}}, \"additionalProperties\": false}",
+		ToolSpec* build = WorkSpec("build_run", "Run one of the project's tasks as the toolbar does and return the result with its errors and warnings as path:line: build (the default), test (runs the tests; failed ones as path:line, then the output's end) or run (the program, without arguments; the end of its output). Example: build_run({}) or build_run({\"task\": \"test\", \"project\": \"Game\"})",
+			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}}, \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		build->plan = BuildPlan;
 		build->run = BuildRun;
