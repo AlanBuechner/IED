@@ -8,12 +8,13 @@
 
 import { h, icon, iconFrom, replace, append } from "/ui-kit/dom.js";
 import { autoHiddenOf, hiddenIn, isGroup, isSplit, nodeAt, pathOf } from "./layouttree.js";
-import { TabSlide } from "./tabslide.js";
+import { TabSlide, alongStrip } from "./tabslide.js";
 
 const MIN_PANE_PX = 80;
 const DRAG_START_PX = 5;
 const EDGE_SHARE = 0.25;
 const ACTIVITY_EDGE_PX = 20;
+const STRIP_REACH_PX = 20;   // how far off a tab strip a dropped tab still joins it
 const EDGES = ["left", "right", "top", "bottom"];
 // What a click or the focus may reach without the slid-out window going back: menus and popups, Monaco's widgets.
 const NOT_AWAY = ".ah-tab, .popup, .dock-ghost, .shadow-root-host";
@@ -218,7 +219,8 @@ export class DockView {
 	// Dragging a tab
 
 	// A tab pressed: dragged along its strip it slides into a new place (a browser's tabs); dragged off the strip it is
-	// docked where it is dropped. `path`: its group's, for a tab of a strip (an auto-hidden one has none).
+	// docked where it is dropped, and brought back along it, it slides again. `path`: its group's, for a tab of a strip
+	// (an auto-hidden one has none). The layout holds still from the first move to the drop.
 	press(event, ref, path) {
 		if (event.button !== 0 || event.target.closest("button")) return;
 		const start = { x: event.clientX, y: event.clientY };
@@ -228,19 +230,16 @@ export class DockView {
 		let drag = null;
 		const move = (e) => {
 			if (!drag && !slide && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_START_PX) return;
-			if (!drag && !slide && strip) {
-				this.host.hold(true);
-				slide = new TabSlide(strip, tabEl, start.x);
-			}
-			if (slide && slide.holds(e.clientX, e.clientY)) {
+			if (!drag && !slide) this.host.hold(true);
+			if (strip && alongStrip(strip, e.clientX, e.clientY)) {
+				if (drag) this.endDrag(drag, false);
+				drag = null;
+				if (!slide) slide = new TabSlide(strip, tabEl, start.x);
 				slide.move(e.clientX);
 				return;
 			}
-			if (slide) {
-				slide.end();
-				slide = null;
-				this.host.hold(false);
-			}
+			if (slide) slide.end();
+			slide = null;
 			if (!drag) drag = this.beginDrag(ref);
 			this.dragOver(drag, e.clientX, e.clientY);
 		};
@@ -248,8 +247,10 @@ export class DockView {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
 			window.removeEventListener("keydown", key, true);
+			const moved = slide || drag;
 			if (slide) this.endSlide(slide, ref, path, dropIt);
 			if (drag) this.endDrag(drag, dropIt);
+			if (moved) this.host.hold(false);
 		};
 		const up = () => finish(true);
 		const key = (e) => {
@@ -266,13 +267,11 @@ export class DockView {
 	endSlide(slide, ref, path, dropIt) {
 		const before = slide.before();
 		slide.end();
-		this.host.hold(false);
 		if (dropIt && before !== undefined) this.host.move(ref, path, "center", this.treeIndex(path, before));
 	}
 
 	beginDrag(ref) {
 		this.hideFlyout(false);
-		this.host.hold(true);
 		const entry = this.host.views.get(ref);
 		const overlay = h("div.dock-drop", { hidden: true });
 		const ghost = h("div.dock-ghost", null, entry ? entry.title : ref);
@@ -296,28 +295,41 @@ export class DockView {
 		drag.overlay.remove();
 		drag.ghost.remove();
 		this.root.classList.remove("dragging");
-		this.host.hold(false);
 		if (dropIt && drag.target) this.host.move(drag.ref, drag.target.path, drag.target.zone === "insert" ? "center" : drag.target.zone, drag.target.index);
 	}
 
-	// Where a tab dropped at (x, y) goes: {path, zone, index, rect}, or null outside this dock.
+	// Where a tab dropped at (x, y) goes: {path, zone, index, rect}, or null outside this dock. A tab strip comes first -
+	// over it or just beside it, the tab joins its group between the tabs - then the activity's edges, then the zones of
+	// the group's body (its edges split it, its center joins it).
 	targetAt(x, y) {
 		const box = this.root.getBoundingClientRect();
 		if (x < box.left || x > box.right || y < box.top || y > box.bottom) return null;
+		const strip = this.stripAt(x, y);
+		if (strip) {
+			const path = parsePath(strip.parentElement.dataset.path);
+			const before = insertionBefore(strip, x);
+			return { path, zone: "insert", index: this.treeIndex(path, before), rect: insertionMark(strip, before) };
+		}
 		const edge = activityEdge(box, x, y);
 		if (edge) return { path: [], zone: edge, index: null, rect: edgeRect(box, edge, EDGE_SHARE) };
 		const hit = document.elementFromPoint(x, y);
 		const groupEl = hit ? hit.closest(".dock-group") : null;
 		if (!groupEl || !this.root.contains(groupEl)) return null;
 		const path = parsePath(groupEl.dataset.path);
-		const strip = hit.closest(".tabs, .tw-tabs");
 		const groupRect = groupEl.getBoundingClientRect();
-		if (strip) {
-			const before = insertionBefore(strip, x);
-			return { path, zone: "insert", index: this.treeIndex(path, before), rect: insertionMark(strip, before) };
-		}
-		const zone = zoneIn(groupRect, x, y);
+		const body = groupEl.querySelector(":scope > .dock-body");
+		const zone = zoneIn(body ? body.getBoundingClientRect() : groupRect, x, y);
 		return { path, zone, index: null, rect: zone === "center" ? groupRect : edgeRect(groupRect, zone, 0.5) };
+	}
+
+	// The tab strip a tab dropped at (x, y) joins: the one it is over, or within STRIP_REACH_PX of one - a drag aimed at
+	// a strip often ends a little off it.
+	stripAt(x, y) {
+		for (const strip of this.root.querySelectorAll(".dock-group > .tabs, .dock-group > .tw-tabs")) {
+			const rect = strip.getBoundingClientRect();
+			if (rect.width && x >= rect.left && x <= rect.right && y >= rect.top - STRIP_REACH_PX && y <= rect.bottom + STRIP_REACH_PX) return strip;
+		}
+		return null;
 	}
 
 	// The index in the group's tabs (hidden ones included) of the tab `before`, or the end.

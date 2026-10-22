@@ -1,8 +1,15 @@
 // tabslide.js - a tab dragged along its own strip, as in a web browser (docs/15 "Docking"): it follows the pointer
 // within the strip and the tabs it passes slide aside to make its room; let go, it takes the place it reached. Only the
-// elements move here - the dock then moves the tab in the layout. Dragged off the strip, the dock docks it instead.
+// elements move here - the dock then moves the tab in the layout. Dragged off the strip, the dock docks it instead, and
+// brought back along it, it slides again.
 
 const LANE_PX = 24;   // how far above or below the strip the pointer may stray and still slide
+
+// Whether (x, y) is along `strip`: over it, or within LANE_PX of it.
+export function alongStrip(strip, x, y) {
+	const rect = strip.getBoundingClientRect();
+	return y >= rect.top - LANE_PX && y <= rect.bottom + LANE_PX && x >= rect.left - LANE_PX && x <= rect.right + LANE_PX;
+}
 
 export class TabSlide {
 	// `tab`: the dragged tab's element in `strip`; `x`: where the drag started.
@@ -21,8 +28,7 @@ export class TabSlide {
 
 	// Whether (x, y) is still along the strip.
 	holds(x, y) {
-		const rect = this.strip.getBoundingClientRect();
-		return y >= rect.top - LANE_PX && y <= rect.bottom + LANE_PX && x >= rect.left - LANE_PX && x <= rect.right + LANE_PX;
+		return alongStrip(this.strip, x, y);
 	}
 
 	// The tab under the pointer at `x`, kept within the strip's tabs; those whose middle its leading edge passed make room
