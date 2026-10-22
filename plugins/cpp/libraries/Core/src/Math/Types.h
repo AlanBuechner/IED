@@ -6,9 +6,9 @@
 
 namespace Math
 {
-	// ─── Backward-compatible type aliases (match previous GLM-based names) ──
+	// --- Backward-compatible type aliases (match previous GLM-based names) --
 	// NOTE: Vector2/3/4 are templates; use Vector2F/3F/4F for float, IVector2F etc. for int, UVector2F for uint.
-	// Do NOT alias Vector2 = Vector2F here — it would shadow the Vector2<T> template.
+	// Do NOT alias Vector2 = Vector2F here - it would shadow the Vector2<T> template.
 
 	using IVector2 = IVector2F;
 	using IVector3 = IVector3F;

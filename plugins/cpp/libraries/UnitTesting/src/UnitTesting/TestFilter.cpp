@@ -8,7 +8,7 @@
 namespace Testing
 {
 
-	// ─── Wildcard pattern matching ──────────────────────────────────────
+	// --- Wildcard pattern matching --------------------------------------
 
 	bool WildcardMatch(const Core::String& text, const Core::String& pattern)
 	{
@@ -35,7 +35,7 @@ namespace Testing
 			}
 			else if (starPi != std::string::npos)
 			{
-				// Mismatch — try extending the '*' match by one more text char.
+				// Mismatch - try extending the '*' match by one more text char.
 				ti = ++starTi;
 				pi = starPi;
 			}
@@ -52,7 +52,7 @@ namespace Testing
 		return pi == pattern.size();
 	}
 
-	// ─── Test path building ──────────────────────────────────────────────
+	// --- Test path building ----------------------------------------------
 
 	void BuildTestPath(const Core::String& prefix, const TestEntry& entry, Core::String& outPath)
 	{
@@ -64,7 +64,7 @@ namespace Testing
 		outPath += entry.func->GetName();
 	}
 
-	// ─── Collect test group ──────────────────────────────────────────────
+	// --- Collect test group ----------------------------------------------
 
 	TestCollection CollectTestGroup()
 	{
@@ -84,7 +84,7 @@ namespace Testing
 		return collection;
 	}
 
-	// ─── Print test paths ────────────────────────────────────────────────
+	// --- Print test paths ------------------------------------------------
 
 	void PrintTestPaths(TestGroup& group, const Core::String& prefix)
 	{
@@ -102,7 +102,7 @@ namespace Testing
 		}
 	}
 
-	// ─── Helpers for aligned output ──────────────────────────────────────
+	// --- Helpers for aligned output --------------------------------------
 
 	uint32 CollectMaxTestNameLength(TestGroup& group)
 	{
@@ -116,7 +116,7 @@ namespace Testing
 		return maxLen;
 	}
 
-	// ─── Recursive match checker (non-recursive-lambda via function pointer) ──
+	// --- Recursive match checker (non-recursive-lambda via function pointer) --
 
 	static bool GroupHasMatch(TestGroup& g, const Core::String& gPrefix, const Core::String& filter)
 	{
@@ -134,7 +134,7 @@ namespace Testing
 		return false;
 	}
 
-	// ─── Filtered test runner ────────────────────────────────────────────
+	// --- Filtered test runner --------------------------------------------
 
 	void IncrementTotalTestCount()
 	{
@@ -185,7 +185,7 @@ namespace Testing
 		switch (result)
 		{
 		case InvocationResult::Success:
-			// Test completed normally — it should have called TEST_PASSED().
+			// Test completed normally - it should have called TEST_PASSED().
 			break;
 		case InvocationResult::TestFailed:
 			// Failure already reported by the assertion macro; just skip TEST_PASSED().

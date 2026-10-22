@@ -7,12 +7,12 @@
 
 namespace Core
 {
-	// ⚠️ PLACEHOLDER RULE: a placeholder is {N} where N is all digits, e.g. {0}, {12}.
+	// WARNING PLACEHOLDER RULE: a placeholder is {N} where N is all digits, e.g. {0}, {12}.
 	// Any other brace sequence (unterminated '{', empty {}, non-numeric content) renders as
 	// LITERAL text - it never discards the message, because callers such as ErrorTracker drop
 	// empty diagnostics entirely. To print a literal brace that must not be parsed as a
 	// placeholder, escape it: "\{". This applies to StringFormat::Format(), FormatString(), and
-	// all logging macros. Examples:  FormatString("Hello {0}!", name)  ✅
+	// all logging macros. Examples:  FormatString("Hello {0}!", name)  OK
 	//   FormatString("expected ';' got '{'")  -> "expected ';' got '{'" (literal brace kept)
 	class StringFormat
 	{
@@ -176,7 +176,7 @@ namespace Core
 	};
 
 	template<typename... Args>
-	static inline String FormatString(const char* msg, const Args&... args) 
+	static inline String FormatString(const char* msg, const Args&... args)
 	{
 		return StringFormat::Format(msg, args...);
 	}
@@ -186,5 +186,5 @@ namespace Core
 	{
 		return StringFormat::Format(msg.c_str(), args...);
 	}
-	
+
 }

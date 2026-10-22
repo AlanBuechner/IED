@@ -22,7 +22,7 @@
 
 namespace Testing
 {
-	// ─── Per-Thread SEH Crash Detection Strategy ──────────────
+	// --- Per-Thread SEH Crash Detection Strategy --------------
 	//
 	// Each test runs in its own thread. Before invoking the test, the thread
 	// installs a first-position vectored exception handler. When an SEH exception
@@ -49,7 +49,7 @@ namespace Testing
 	{
 		DWORD code = exceptionPointers->ExceptionRecord->ExceptionCode;
 
-		// Ignore debugger single-step exceptions — let them pass through.
+		// Ignore debugger single-step exceptions - let them pass through.
 		if (code == EXCEPTION_SINGLE_STEP ||
 		    code == 0x40000015) // RPC Exception
 		{
@@ -82,7 +82,7 @@ namespace Testing
 		// Mark the exception as handled (EXCEPTION_EXECUTE_HANDLER) so Windows does NOT
 		// call TerminateProcess. Then terminate only this thread with the exception code.
 		// The parent will detect the dead thread via WaitForSingleObject + GetExitCodeThread.
-		// ExitThread is a kernel call that doesn't need much stack — safe even near overflow.
+		// ExitThread is a kernel call that doesn't need much stack - safe even near overflow.
 		ExitThread(code);
 
 		// Should never reach here, but just in case:
@@ -91,16 +91,16 @@ namespace Testing
 
 	void InstallCrashHandler()
 	{
-		// Global install is a no-op now — handlers are installed per-thread in InvokeWithCrashHandlingImpl.
+		// Global install is a no-op now - handlers are installed per-thread in InvokeWithCrashHandlingImpl.
 		// Kept for API compatibility.
 	}
 
 	void UninstallCrashHandler()
 	{
-		// No-op — handlers are removed per-thread after each invocation.
+		// No-op - handlers are removed per-thread after each invocation.
 	}
 
-	// ─── Non-template implementation with SEH + C++ exception handling ──
+	// --- Non-template implementation with SEH + C++ exception handling --
 
 	InvocationResult InvokeWithCrashHandlingImpl(std::function<void()> invokeFn, CrashInfo* outCrashInfo)
 	{
@@ -154,7 +154,7 @@ namespace Testing
 			return InvocationResult::UnknownException;
 		}
 
-		// Normal completion — clean up handler.
+		// Normal completion - clean up handler.
 		if (s_ThreadHandlerToken)
 		{
 			RemoveVectoredExceptionHandler(s_ThreadHandlerToken);
@@ -163,7 +163,7 @@ namespace Testing
 		return InvocationResult::Success;
 	}
 
-	// ─── SEH Exception Code Formatting ──────────────────────────────────
+	// --- SEH Exception Code Formatting ----------------------------------
 
 	Core::String FormatSehException(uint32_t code)
 	{

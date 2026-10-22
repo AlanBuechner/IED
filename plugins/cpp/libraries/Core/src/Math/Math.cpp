@@ -4,11 +4,11 @@
 namespace Math
 {
 
-	// ─── Internal helpers (port of GLM's _noise.hpp) ──────────────────────
+	// --- Internal helpers (port of GLM's _noise.hpp) ----------------------
 
 	namespace NoiseDetail
 	{
-		// Modulo 289 — avoids truncation effects in permutation
+		// Modulo 289 - avoids truncation effects in permutation
 		template <typename T>
 		inline T mod289(T x)
 		{
@@ -357,7 +357,7 @@ namespace Math
 		return static_cast<float>(2.2) * n_xyzw;
 	}
 
-	// ─── Periodic Perlin noise ────────────────────────────────────────────
+	// --- Periodic Perlin noise --------------------------------------------
 
 	float Perlin(float p, float rep)
 	{

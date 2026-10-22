@@ -18,7 +18,7 @@ namespace Reflect {
 		Associative = 2   // std::map, std::unordered_map
 	};
 
-	template <class T> 
+	template <class T>
 	T* CreateInstance(void* location = nullptr) {
 		if (location == nullptr)
 			return new T();
@@ -136,7 +136,7 @@ namespace Reflect {
 		friend class Registry;
 	};
 
-	class Function 
+	class Function
 	{
 	public:
 		typedef std::function<void (void*, std::vector<void*>)> InvokeFunc;
@@ -188,19 +188,19 @@ namespace Reflect {
 
 		Class() = default;
 		Class(
-			const std::string& name, 
-			const std::string& sname, 
-			uint64_t typeID, 
-			uint64_t size, 
+			const std::string& name,
+			const std::string& sname,
+			uint64_t typeID,
+			uint64_t size,
 			const std::string& group,
 			const std::string& scriptingLanguageID,
-			CreateFunc createFunc, 
+			CreateFunc createFunc,
 			DestroyFunc destroyFunc,
 			const std::vector<std::string>& flags,
 			const std::vector<Attribute>& attribs,
 			const std::vector<Property>& props,
 			const std::vector<Function>& funcs
-		): 
+		):
 			name(name),
 			sname(sname),
 			typeID(typeID),
@@ -309,7 +309,7 @@ namespace Reflect {
 					sname,
 					typeid(T).hash_code(),
 					sizeof(T),
-					group, 
+					group,
 					scriptingLanguageID,
 					CreateInstance<T>,
 					DestroyInstance<T>,

@@ -81,7 +81,7 @@ namespace Testing
 		static void BenchmarkFailedI(const Core::String& msg);
 	};
 
-	// Shared benchmark result counters — defined in BenchmarkTest.cpp, used by filter runners.
+	// Shared benchmark result counters - defined in BenchmarkTest.cpp, used by filter runners.
 	extern uint32 s_FailedBenchmarks;
 	extern uint32 s_CompletedBenchmarks;
 	extern uint32 s_TotalBenchmarks;

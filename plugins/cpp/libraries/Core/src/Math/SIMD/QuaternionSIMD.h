@@ -7,7 +7,7 @@
 namespace Math::SIMD
 {
 #if defined(MATH_SIMD_SSE41) || defined(MATH_SIMD_AVX2)
-	// ─── Quaternion multiply (q1 * q2) using SIMD ──────────────────────
+	// --- Quaternion multiply (q1 * q2) using SIMD ----------------------
 	inline void MulQuat(const float* q1, const float* q2, float* out)
 	{
 		__m128 v1 = _mm_loadu_ps(q1);  // x, y, z, w
@@ -22,7 +22,7 @@ namespace Math::SIMD
 		__m128 w1Vec = _mm_set1_ps(w1);
 		__m128 w2Vec = _mm_set1_ps(w2);
 
-		// Cross product of xyz parts: xyz1 × xyz2
+		// Cross product of xyz parts: xyz1 x xyz2
 		__m128 zyx1 = _mm_shuffle_ps(xyz1, xyz1, _MM_SHUFFLE(1, 0, 3, 2));
 		__m128 yzx1 = _mm_shuffle_ps(xyz1, xyz1, _MM_SHUFFLE(0, 3, 2, 1));
 		__m128 zyx2 = _mm_shuffle_ps(xyz2, xyz2, _MM_SHUFFLE(1, 0, 3, 2));
@@ -40,7 +40,7 @@ namespace Math::SIMD
 		out[3] = w1 * w2 - dotVal;
 	}
 
-	// ─── Quaternion normalize using SIMD ───────────────────────────────
+	// --- Quaternion normalize using SIMD -------------------------------
 	inline void NormalizeQuat(const float* q, float* out)
 	{
 		__m128 v = _mm_loadu_ps(q);
@@ -56,7 +56,7 @@ namespace Math::SIMD
 		_mm_storeu_ps(out, _mm_mul_ps(v, scale));
 	}
 
-	// ─── Batch quaternion-vector rotate (q * v * q^-1) ────────────────
+	// --- Batch quaternion-vector rotate (q * v * q^-1) ----------------
 	inline void RotateVec3Batch(const float* q, const float* in, float* out, int count)
 	{
 		__m128 qv = _mm_loadu_ps(q);
@@ -89,7 +89,7 @@ namespace Math::SIMD
 		}
 	}
 
-	// ─── Quaternion conjugate ─────────────────────────────────────────
+	// --- Quaternion conjugate -----------------------------------------
 	inline void ConjugateQuat(const float* q, float* out)
 	{
 		__m128 v = _mm_loadu_ps(q);

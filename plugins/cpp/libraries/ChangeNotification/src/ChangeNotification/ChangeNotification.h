@@ -33,7 +33,7 @@ namespace ChangeNotification
 	}
 
 	// ------------------------------------------------------------------------
-	// ChangeQueue — thread-safe singleton for change notifications
+	// ChangeQueue - thread-safe singleton for change notifications
 	// ------------------------------------------------------------------------
 	using ChangeCallback = std::function<void(const ChangeRecord&)>;
 
@@ -89,7 +89,7 @@ namespace ChangeNotification
 	};
 
 	// ------------------------------------------------------------------------
-	// ObservableProperty<T> — emits ChangeRecord only on actual change
+	// ObservableProperty<T> - emits ChangeRecord only on actual change
 	// ------------------------------------------------------------------------
 	template<typename T>
 	class ObservableProperty
@@ -110,7 +110,7 @@ namespace ChangeNotification
 		void Set(const T& newValue)
 		{
 			if (m_Value == newValue)
-				return; // No actual change — suppress notification
+				return; // No actual change - suppress notification
 
 			T previousValue = m_Value;
 			m_Value = newValue;
@@ -137,7 +137,7 @@ namespace ChangeNotification
 			else if constexpr (std::is_arithmetic_v<T>)
 				return std::to_string(value);
 			else
-				return "<serialized>"; // Fallback — specialise as needed
+				return "<serialized>"; // Fallback - specialise as needed
 		}
 
 		T m_Value;

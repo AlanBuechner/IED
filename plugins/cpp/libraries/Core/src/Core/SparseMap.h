@@ -69,7 +69,7 @@ namespace Core
 				}
 			}
 
-			// No free slot — allocate a new one beyond the current sparse capacity
+			// No free slot - allocate a new one beyond the current sparse capacity
 			KeyType key = static_cast<KeyType>(m_Sparse.Count());
 			m_Dense.Push({ key, value });
 			m_Sparse.Push(static_cast<KeyType>(m_Dense.Count() - 1));

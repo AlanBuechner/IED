@@ -7,7 +7,7 @@
 namespace Math::SIMD
 {
 #if defined(MATH_SIMD_SSE41) || defined(MATH_SIMD_AVX2)
-	// ─── Matrix multiply (column-major Mat4 × Mat4 → Mat4) ──────────────
+	// --- Matrix multiply (column-major Mat4 x Mat4 -> Mat4) --------------
 	inline void MulMat4(const float* a, const float* b, float* out)
 	{
 		// Load columns of B into SIMD registers
@@ -36,7 +36,7 @@ namespace Math::SIMD
 		}
 	}
 
-	// ─── Matrix transpose (column-major Mat4 → column-major Mat4) ───────
+	// --- Matrix transpose (column-major Mat4 -> column-major Mat4) -------
 	inline void TransposeMat4(const float* m, float* out)
 	{
 		__m128 c0 = _mm_loadu_ps(&m[0]);
@@ -57,7 +57,7 @@ namespace Math::SIMD
 		_mm_storeu_ps(&out[12], _mm_unpackhi_ps(r1, r3));
 	}
 
-	// ─── Matrix-vector multiply (Mat4 × Vector4) ────────────────────────
+	// --- Matrix-vector multiply (Mat4 x Vector4) ------------------------
 	inline void MulMat4Vec4(const float* m, const float* v, float* out)
 	{
 		__m128 vec = _mm_loadu_ps(v);
@@ -76,7 +76,7 @@ namespace Math::SIMD
 		_mm_storeu_ps(out, result);
 	}
 
-	// ─── Batch transform: apply same Mat4 to N vectors ──────────────────
+	// --- Batch transform: apply same Mat4 to N vectors ------------------
 	inline void TransformVec4Batch(const float* m, const float* in, float* out, int count)
 	{
 		__m128 c0 = _mm_loadu_ps(&m[0]);
@@ -99,7 +99,7 @@ namespace Math::SIMD
 		}
 	}
 
-	// ─── Batch transform positions: Mat4 × Vector3 (w=1) ────────────────
+	// --- Batch transform positions: Mat4 x Vector3 (w=1) ----------------
 	inline void TransformVec3Batch(const float* m, const float* in, float* out, int count)
 	{
 		__m128 c0 = _mm_loadu_ps(&m[0]);
@@ -125,7 +125,7 @@ namespace Math::SIMD
 		}
 	}
 
-	// ─── Component-wise matrix multiply (Hadamard product) ──────────────
+	// --- Component-wise matrix multiply (Hadamard product) --------------
 	inline void Mat4CompMult(const float* a, const float* b, float* out)
 	{
 		for (int i = 0; i < 4; ++i)

@@ -7,13 +7,13 @@
 
 namespace Math
 {
-	// ─── Rotor (pure rotation in 3D geometric algebra) ─────────────────────
+	// --- Rotor (pure rotation in 3D geometric algebra) ---------------------
 	// A rotor is an even-grade multivector: scalar + spatial bivector.
 	// It encodes a 3D rotation and maps bijectively to a unit quaternion.
-	// Layout:   scalar ↔ quaternion w
-	//           spatial.x (e12) ↔ quaternion z  (rotation about Z)
-	//           spatial.y (e23) ↔ quaternion x  (rotation about X)
-	//           spatial.z (e31) ↔ quaternion y  (rotation about Y)
+	// Layout:   scalar <-> quaternion w
+	//           spatial.x (e12) <-> quaternion z  (rotation about Z)
+	//           spatial.y (e23) <-> quaternion x  (rotation about X)
+	//           spatial.z (e31) <-> quaternion y  (rotation about Y)
 	struct Rotor
 	{
 		float scalar;            // Even-grade scalar component
@@ -25,7 +25,7 @@ namespace Math
 
 		static constexpr Rotor Identity() { return { 1.f, Vector3F(0.f, 0.f, 0.f) }; }
 
-		// ─── Quaternion roundtrip ──────────────────────────────────────
+		// --- Quaternion roundtrip --------------------------------------
 		constexpr Quaternion ToQuaternion() const
 		{
 			return { spatial.y, spatial.z, spatial.x, scalar };
@@ -36,7 +36,7 @@ namespace Math
 			return { q.w, Vector3F(q.z, q.x, q.y) };
 		}
 
-		// ─── Matrix conversion ─────────────────────────────────────────
+		// --- Matrix conversion -----------------------------------------
 		Mat3 ToMat3() const
 		{
 			return Mat3Cast(ToQuaternion());
@@ -47,18 +47,18 @@ namespace Math
 			return Mat4Cast(ToQuaternion());
 		}
 
-		// ─── Construction from axis-angle ──────────────────────────────
+		// --- Construction from axis-angle ------------------------------
 		static Rotor FromAxisAngle(float angle, const Vector3F& axis)
 		{
 			float halfAngle = angle * 0.5f;
 			float s = std::sin(halfAngle);
 			Vector3F a = Normalized(axis);
 
-			// axis → bivector: x-axis→e23(spatial.y), y-axis→e31(spatial.z), z-axis→e12(spatial.x)
+			// axis -> bivector: x-axis->e23(spatial.y), y-axis->e31(spatial.z), z-axis->e12(spatial.x)
 			return { std::cos(halfAngle), Vector3F(a.z * s, a.x * s, a.y * s) };
 		}
 
-		// ─── Rotor multiplication (compose rotations: this ∘ other) ────
+		// --- Rotor multiplication (compose rotations: this o other) ----
 		constexpr Rotor operator*(const Rotor& o) const
 		{
 			// Compose via quaternion multiplication for correctness
@@ -67,7 +67,7 @@ namespace Math
 			return FromQuaternion(q1 * q2);
 		}
 
-		// ─── Inverse / conjugate (for unit rotor, inverse == conjugate) ─
+		// --- Inverse / conjugate (for unit rotor, inverse == conjugate) -
 		constexpr Rotor Inverse() const
 		{
 			return { scalar, -spatial };
@@ -75,7 +75,7 @@ namespace Math
 
 		constexpr Rotor Conjugate() const { return Inverse(); }
 
-		// ─── Normalize ─────────────────────────────────────────────────
+		// --- Normalize -------------------------------------------------
 		Rotor Normalize() const
 		{
 			float len = std::sqrt(scalar * scalar + spatial.x * spatial.x + spatial.y * spatial.y + spatial.z * spatial.z);
@@ -84,13 +84,13 @@ namespace Math
 			return { scalar * invLen, spatial * invLen };
 		}
 
-		// ─── Transform a direction vector by this rotor ────────────────
+		// --- Transform a direction vector by this rotor ----------------
 		Vector3F TransformVector(const Vector3F& v) const
 		{
 			return ToQuaternion().RotateVector(v);
 		}
 
-		// ─── Angle and axis extraction ─────────────────────────────────
+		// --- Angle and axis extraction ---------------------------------
 		float Angle() const
 		{
 			float c = std::clamp(scalar, -1.0f, 1.0f);
@@ -101,42 +101,42 @@ namespace Math
 		{
 			float s = std::sqrt(1.0f - scalar * scalar);
 			if (s < 1e-6f) return Vector3F(1.f, 0.f, 0.f);
-			// Reverse the bivector→axis mapping
+			// Reverse the bivector->axis mapping
 			return Vector3F(spatial.y / s, spatial.z / s, spatial.x / s);
 		}
 
-		// ─── Scalar multiplication ─────────────────────────────────────
+		// --- Scalar multiplication -------------------------------------
 		constexpr Rotor operator*(float s) const { return { scalar * s, spatial * s }; }
 	};
 
 	inline constexpr Rotor operator*(float s, const Rotor& r) { return r * s; }
 
-	// ─── Rotor equality ──────────────────────────────────────────────────
+	// --- Rotor equality --------------------------------------------------
 	inline constexpr bool operator==(const Rotor& a, const Rotor& b)
 	{
 		return a.scalar == b.scalar && a.spatial == b.spatial;
 	}
 	inline constexpr bool operator!=(const Rotor& a, const Rotor& b) { return !(a == b); }
 
-	// ─── Namespace-level rotor utilities ──────────────────────────────────
+	// --- Namespace-level rotor utilities ----------------------------------
 	inline Rotor Normalize(const Rotor& r) { return r.Normalize(); }
 
 
-	// ─── Motor (rigid transform in geometric algebra / dual quaternion) ───
+	// --- Motor (rigid transform in geometric algebra / dual quaternion) ---
 	// A motor encodes both rotation and translation. It is the GA equivalent
-	// of a unit dual quaternion:  DQ = Qr + ε·Qd
-	//   Real part    (w, spatial)       — unit quaternion for rotation
-	//   Dual part    (ew, translational) — couples translation with rotation
+	// of a unit dual quaternion:  DQ = Qr + eps*Qd
+	//   Real part    (w, spatial)       - unit quaternion for rotation
+	//   Dual part    (ew, translational) - couples translation with rotation
 	//
-	// Translation extraction: t = 2 · vec(Qd × conj(Qr))
-	// Construction from transform: Qd = (t/2 as pure quat) × Qr
+	// Translation extraction: t = 2 * vec(Qd x conj(Qr))
+	// Construction from transform: Qd = (t/2 as pure quat) x Qr
 	struct Motor
 	{
 		float w;               // Real scalar (rotation quaternion w)
-		Vector3F spatial;      // Real bivector — rotational part (e12, e23, e31)
+		Vector3F spatial;      // Real bivector - rotational part (e12, e23, e31)
 
 		float ew;              // Dual scalar
-		Vector3F translational; // Dual bivector — translation-coupled part (e01, e02, e03)
+		Vector3F translational; // Dual bivector - translation-coupled part (e01, e02, e03)
 
 		constexpr Motor() : w(1.f), spatial(0.f, 0.f, 0.f), ew(0.f), translational(0.f, 0.f, 0.f) {}
 
@@ -145,15 +145,15 @@ namespace Math
 
 		static constexpr Motor Identity() { return {}; }
 
-		// ─── Construction from rotation + translation ──────────────────
+		// --- Construction from rotation + translation ------------------
 		static Motor FromTransform(const Vector3F& position, const Quaternion& rotation)
 		{
 			// Real part = rotation quaternion (in rotor layout)
 			Rotor r = Rotor::FromQuaternion(rotation);
 
-			// Dual part: Qd = (t/2) × Qr  where t is stored as pure quaternion
+			// Dual part: Qd = (t/2) x Qr  where t is stored as pure quaternion
 			Vector3F halfT = position * 0.5f;
-			// Quaternion multiply (halfT as pure quat) × rotation
+			// Quaternion multiply (halfT as pure quat) x rotation
 			// q1 = (hx, hy, hz, 0), q2 = (rx.x, rx.y, rx.z, rw)
 			Quaternion tQuat(halfT, 0.f);
 			Quaternion dQ = tQuat * rotation;
@@ -166,14 +166,14 @@ namespace Math
 			return FromTransform(position, rotation.ToQuaternion());
 		}
 
-		// ─── Matrix roundtrip ──────────────────────────────────────────
+		// --- Matrix roundtrip ------------------------------------------
 		Mat4 ToMat4() const
 		{
 			// Extract rotation from real quaternion
 			Quaternion q = GetRotation();
 			Mat4 result = Mat4Cast(q);
 
-			// Extract translation: t = 2 · vec(Qd × conj(Qr))
+			// Extract translation: t = 2 * vec(Qd x conj(Qr))
 			Vector3F t = GetTranslation();
 			result.columns[3].x = t.x;
 			result.columns[3].y = t.y;
@@ -184,7 +184,7 @@ namespace Math
 
 		static Motor FromMat4(const Mat4& m)
 		{
-			// Extract rotation quaternion from upper-left 3×3
+			// Extract rotation quaternion from upper-left 3x3
 			Mat3 rot3{
 				Vector3F(m.columns[0].x, m.columns[0].y, m.columns[0].z),
 				Vector3F(m.columns[1].x, m.columns[1].y, m.columns[1].z),
@@ -198,7 +198,7 @@ namespace Math
 			return FromTransform(t, q);
 		}
 
-		// ─── Accessor helpers ──────────────────────────────────────────
+		// --- Accessor helpers ------------------------------------------
 		constexpr Quaternion GetRotation() const
 		{
 			return { spatial.y, spatial.z, spatial.x, w };
@@ -209,7 +209,7 @@ namespace Math
 			Quaternion qr = GetRotation();
 			// Dual quaternion in standard layout
 			Quaternion qd(translational.y, translational.z, translational.x, ew);
-			// t = 2 · vec(qd × conj(qr))
+			// t = 2 * vec(qd x conj(qr))
 			Quaternion conj = qr.Conjugate();
 			Quaternion tQuat = qd * conj;
 			return Vector3F(tQuat.x * 2.f, tQuat.y * 2.f, tQuat.z * 2.f);
@@ -220,7 +220,7 @@ namespace Math
 			return { w, spatial };
 		}
 
-		// ─── Motor multiplication (compose transforms: this ∘ other) ───
+		// --- Motor multiplication (compose transforms: this o other) ---
 		Motor operator*(const Motor& o) const
 		{
 			// Convert to quaternions for clean dual-quaternion multiplication
@@ -230,7 +230,7 @@ namespace Math
 			Quaternion qr2 = o.GetRotation();
 			Quaternion qd2(o.translational.y, o.translational.z, o.translational.x, o.ew);
 
-			// Dual quaternion multiplication: (qr1+ε·qd1)(qr2+ε·qd2) = qr1·qr2 + ε·(qr1·qd2 + qd1·qr2)
+			// Dual quaternion multiplication: (qr1+eps*qd1)(qr2+eps*qd2) = qr1*qr2 + eps*(qr1*qd2 + qd1*qr2)
 			Quaternion newQr = qr1 * qr2;
 			Quaternion newQd = qr1 * qd2 + qd1 * qr2;
 
@@ -240,7 +240,7 @@ namespace Math
 			float invLenR = 1.0f / lenR;
 			newQr.x *= invLenR; newQr.y *= invLenR; newQr.z *= invLenR; newQr.w *= invLenR;
 
-			// Orthogonalize: qd -= qr · dot(qr, qd)
+			// Orthogonalize: qd -= qr * dot(qr, qd)
 			float dot = newQr.x * newQd.x + newQr.y * newQd.y + newQr.z * newQd.z + newQr.w * newQd.w;
 			newQd.x -= newQr.x * dot;
 			newQd.y -= newQr.y * dot;
@@ -252,14 +252,14 @@ namespace Math
 			         newQd.w, Vector3F(newQd.z, newQd.x, newQd.y) };
 		}
 
-		// ─── Inverse motor ─────────────────────────────────────────────
+		// --- Inverse motor ---------------------------------------------
 		Motor Inverse() const
 		{
 			Quaternion qr = GetRotation();
 			Quaternion qd(translational.y, translational.z, translational.x, ew);
 
-			// Inverse of dual quaternion: conj(DQ) / |qr|²
-			// Since |qr| should be 1 for a valid motor, inverse ≈ conjugate
+			// Inverse of dual quaternion: conj(DQ) / |qr|^2
+			// Since |qr| should be 1 for a valid motor, inverse ~= conjugate
 			Quaternion conjR = qr.Conjugate();
 			Quaternion conjD = qd.Conjugate();
 
@@ -274,7 +274,7 @@ namespace Math
 			         conjD.w, Vector3F(conjD.z, conjD.x, conjD.y) };
 		}
 
-		// ─── Normalize motor ───────────────────────────────────────────
+		// --- Normalize motor -------------------------------------------
 		Motor Normalize() const
 		{
 			Quaternion qr = GetRotation();
@@ -294,7 +294,7 @@ namespace Math
 			         qd.w, Vector3F(qd.z, qd.x, qd.y) };
 		}
 
-		// ─── Transform operations ──────────────────────────────────────
+		// --- Transform operations --------------------------------------
 		Vector3F TransformPoint(const Vector3F& p) const
 		{
 			return GetRotation().RotateVector(p) + GetTranslation();
@@ -305,7 +305,7 @@ namespace Math
 			return GetRotation().RotateVector(d);
 		}
 
-		// ─── Scalar multiplication ─────────────────────────────────────
+		// --- Scalar multiplication -------------------------------------
 		constexpr Motor operator*(float s) const
 		{
 			return { w * s, spatial * s, ew * s, translational * s };
@@ -314,7 +314,7 @@ namespace Math
 
 	inline constexpr Motor operator*(float s, const Motor& m) { return m * s; }
 
-	// ─── Motor equality ──────────────────────────────────────────────────
+	// --- Motor equality --------------------------------------------------
 	inline constexpr bool operator==(const Motor& a, const Motor& b)
 	{
 		return a.w == b.w && a.spatial == b.spatial &&
@@ -322,13 +322,13 @@ namespace Math
 	}
 	inline constexpr bool operator!=(const Motor& a, const Motor& b) { return !(a == b); }
 
-	// ─── Namespace-level motor utilities ──────────────────────────────────
+	// --- Namespace-level motor utilities ----------------------------------
 	inline Motor Normalize(const Motor& m) { return m.Normalize(); }
 
 
-	// ─── Plane (oriented plane in 3D) ────────────────────────────────────
+	// --- Plane (oriented plane in 3D) ------------------------------------
 	// Represented by normal vector n and signed distance d from origin.
-	// Plane equation: n·x + d = 0, where |n| = 1 for a normalized plane.
+	// Plane equation: n*x + d = 0, where |n| = 1 for a normalized plane.
 	struct Plane
 	{
 		Vector3F normal;  // Unit normal pointing toward the positive side
@@ -343,21 +343,21 @@ namespace Math
 		static constexpr Plane YZ() { return { Vector3F(1.f, 0.f, 0.f), 0.f }; }
 		static constexpr Plane ZX() { return { Vector3F(0.f, 1.f, 0.f), 0.f }; }
 
-		// ─── Construction from point and normal ────────────────────────
+		// --- Construction from point and normal ------------------------
 		static Plane FromPointNormal(const Vector3F& point, const Vector3F& n)
 		{
 			Vector3F nn = Normalized(n);
 			return { nn, -Dot(nn, point) };
 		}
 
-		// Construction from three points (counter-clockwise winding → outward normal)
+		// Construction from three points (counter-clockwise winding -> outward normal)
 		static Plane FromPoints(const Vector3F& p0, const Vector3F& p1, const Vector3F& p2)
 		{
 			Vector3F n = Normalized(Cross(p1 - p0, p2 - p0));
 			return { n, -Dot(n, p0) };
 		}
 
-		// ─── Signed distance from point to plane ───────────────────────
+		// --- Signed distance from point to plane -----------------------
 		constexpr float Distance(const Vector3F& p) const
 		{
 			return Dot(normal, p) + d;
@@ -370,11 +370,11 @@ namespace Math
 			return p - normal * dist;
 		}
 
-		// ─── Classification ────────────────────────────────────────────
+		// --- Classification --------------------------------------------
 		constexpr bool IsFrontFacing(const Vector3F& p) const { return Distance(p) > 0.f; }
 		constexpr bool IsBackFacing(const Vector3F& p) const  { return Distance(p) < 0.f; }
 
-		// ─── Normalize ─────────────────────────────────────────────────
+		// --- Normalize -------------------------------------------------
 		Plane Normalize() const
 		{
 			float len = Length(normal);
@@ -383,10 +383,10 @@ namespace Math
 			return { normal * invLen, d * invLen };
 		}
 
-		// ─── Flip plane orientation ────────────────────────────────────
+		// --- Flip plane orientation ------------------------------------
 		constexpr Plane Flipped() const { return { -normal, -d }; }
 
-		// ─── Transform by motor (rotation + translation) ───────────────
+		// --- Transform by motor (rotation + translation) ---------------
 		Plane Transform(const Motor& m) const
 		{
 			Vector3F newNormal = m.TransformDirection(normal);
@@ -397,19 +397,19 @@ namespace Math
 			return { newNormal, newD };
 		}
 
-		// ─── Transform by rotor (rotation only) ────────────────────────
+		// --- Transform by rotor (rotation only) ------------------------
 		Plane Transform(const Rotor& r) const
 		{
 			Vector3F newNormal = r.TransformVector(normal);
-			// For pure rotation, a point on the plane transforms as p' = R·p
-			// d' = -n'·(R·(-d·n)) = d · (n'·(R·n)) ... simpler: just rotate the offset point
+			// For pure rotation, a point on the plane transforms as p' = R*p
+			// d' = -n'*(R*(-d*n)) = d * (n'*(R*n)) ... simpler: just rotate the offset point
 			Vector3F p = -d * normal;
 			Vector3F newP = r.TransformVector(p);
 			float newD = -Dot(newNormal, newP);
 			return { newNormal, newD };
 		}
 
-		// ─── Transform by quaternion ───────────────────────────────────
+		// --- Transform by quaternion -----------------------------------
 		Plane Transform(const Quaternion& q) const
 		{
 			Vector3F newNormal = q.RotateVector(normal);
@@ -419,10 +419,10 @@ namespace Math
 			return { newNormal, newD };
 		}
 
-		// ─── Transform by matrix ───────────────────────────────────────
+		// --- Transform by matrix ---------------------------------------
 		Plane Transform(const Mat4& m) const
 		{
-			// Transform normal using upper-left 3×3 inverse-transpose
+			// Transform normal using upper-left 3x3 inverse-transpose
 			Mat3 rot3{
 				Vector3F(m.columns[0].x, m.columns[0].y, m.columns[0].z),
 				Vector3F(m.columns[1].x, m.columns[1].y, m.columns[1].z),
@@ -438,7 +438,7 @@ namespace Math
 			return { newNormal, newD };
 		}
 
-		// ─── Plane-plane intersection (returns line direction) ─────────
+		// --- Plane-plane intersection (returns line direction) ---------
 		Vector3F Intersect(const Plane& other, float& outDistA, float& outDistB) const
 		{
 			Vector3F lineDir = Cross(normal, other.normal);
@@ -463,7 +463,7 @@ namespace Math
 			return lineDir;
 		}
 
-		// ─── Ray-plane intersection ────────────────────────────────────
+		// --- Ray-plane intersection ------------------------------------
 		// Returns true if ray intersects plane; t is the distance along the ray.
 		bool IntersectRay(const Vector3F& origin, const Vector3F& direction, float& outT) const
 		{
@@ -478,24 +478,24 @@ namespace Math
 			return outT >= 0.f;
 		}
 
-		// ─── Arithmetic operators ──────────────────────────────────────
+		// --- Arithmetic operators --------------------------------------
 		constexpr Plane operator*(float s) const { return { normal * s, d * s }; }
 	};
 
 	inline constexpr Plane operator*(float s, const Plane& p) { return p * s; }
 
-	// ─── Plane equality ──────────────────────────────────────────────────
+	// --- Plane equality --------------------------------------------------
 	inline constexpr bool operator==(const Plane& a, const Plane& b)
 	{
 		return a.normal == b.normal && a.d == b.d;
 	}
 	inline constexpr bool operator!=(const Plane& a, const Plane& b) { return !(a == b); }
 
-	// ─── Namespace-level plane utilities ──────────────────────────────────
+	// --- Namespace-level plane utilities ----------------------------------
 	inline Plane Normalize(const Plane& p) { return p.Normalize(); }
 
 
-	// ─── Rotor ↔ Motor conversion helpers ────────────────────────────────
+	// --- Rotor <-> Motor conversion helpers --------------------------------
 	inline Motor FromRotor(const Rotor& r)
 	{
 		return { r.scalar, r.spatial, 0.f, Vector3F(0.f, 0.f, 0.f) };
@@ -507,7 +507,7 @@ namespace Math
 	}
 
 
-	// ─── Slerp for motors (rotational interpolation with translation blend) ──
+	// --- Slerp for motors (rotational interpolation with translation blend) --
 	inline Motor MotorSlerp(const Motor& a, const Motor& b, float t)
 	{
 		Quaternion qa = a.GetRotation();

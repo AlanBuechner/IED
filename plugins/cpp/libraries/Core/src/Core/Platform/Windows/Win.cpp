@@ -5,7 +5,7 @@
 std::wstring TranslateError(HRESULT hr)
 {
 	wchar_t* pMsgBuf = nullptr;
-	DWORD nMsgLen = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, 
+	DWORD nMsgLen = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 		nullptr, hr, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 		reinterpret_cast<LPWSTR>(&pMsgBuf), 0, nullptr);
 	std::wstring errorString = pMsgBuf;
@@ -82,14 +82,14 @@ namespace Platform
 
 		// Create the child process.
 		BOOL bSuccess = CreateProcess(NULL,
-			Core::GetWStr(cmd).data(),     // command line 
-			NULL,          // process security attributes 
-			NULL,          // primary thread security attributes 
-			TRUE,          // handles are inherited 
-			0,             // creation flags 
-			NULL,          // use parent's environment 
+			Core::GetWStr(cmd).data(),     // command line
+			NULL,          // process security attributes
+			NULL,          // primary thread security attributes
+			TRUE,          // handles are inherited
+			0,             // creation flags
+			NULL,          // use parent's environment
 			(dir == "") ? NULL : dir.c_str(),
-			&siStartInfo,  // STARTUPINFO pointer 
+			&siStartInfo,  // STARTUPINFO pointer
 			&piProcInfo);  // receives PROCESS_INFORMATION
 
 		// read the output
@@ -99,7 +99,7 @@ namespace Platform
 			if (childStd_OUT_Write != 0)
 				CloseHandle(childStd_OUT_Write);
 
-#define BUFSIZE 4096 
+#define BUFSIZE 4096
 			DWORD dwRead, dwWritten;
 			CHAR chBuf[BUFSIZE];
 			BOOL bSuccess = FALSE;
@@ -129,7 +129,7 @@ namespace Platform
 
 			CloseHandle(piProcInfo.hProcess);
 			CloseHandle(piProcInfo.hThread);
-			
+
 			return code;
 		}
 

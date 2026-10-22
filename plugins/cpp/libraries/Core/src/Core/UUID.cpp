@@ -10,7 +10,7 @@ namespace Core
 	static std::mt19937_64 s_Engine(s_RandomDivice());
 	static std::uniform_int_distribution<uint64> s_UniformDistribution;
 
-	UUID::UUID() : 
+	UUID::UUID() :
 		m_UUID(s_UniformDistribution(s_Engine))
 	{}
 

@@ -265,8 +265,8 @@ namespace Core
 		CONVERTER_BASE(bool);
 		static ObjectDescription Encode(bool val) {
 			ObjectDescription description(ObjectDescription::Type::Bool);
-			description.GetAsBool() = val; 
-			return description; 
+			description.GetAsBool() = val;
+			return description;
 		}
 		static bool Decode(bool& out, const ObjectDescription& in) {
 			if (!in.IsBool() && !in.IsNumber()) return false;

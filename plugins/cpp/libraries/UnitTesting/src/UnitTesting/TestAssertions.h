@@ -7,7 +7,7 @@
 
 namespace Testing
 {
-    // ─── Internal helpers ──────────────────────────────────────────────────
+    // --- Internal helpers --------------------------------------------------
 
     /// Evaluate a condition and report a failure if it is false.
     template <typename ... Args>
@@ -193,7 +193,7 @@ namespace Testing
     }
 }
 
-// ─── Public Assertion Macros ──────────────────────────────────────────────
+// --- Public Assertion Macros ----------------------------------------------
 
 /// Assert that a boolean condition is true.
 #define TEST_ASSERT(condition) \

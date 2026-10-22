@@ -17,7 +17,7 @@
 namespace Testing
 {
 
-	// ─── File-local test result counters ────────────────────────────────────
+	// --- File-local test result counters ------------------------------------
 
 	uint32 s_TotalTests = 0;
 	uint32 s_PassedTests = 0;
@@ -25,7 +25,7 @@ namespace Testing
 	uint32 s_RunawayTests = 0; // still running past their timeout
 
 
-	// ─── TestGroup ──────────────────────────────────────────────────────────
+	// --- TestGroup ----------------------------------------------------------
 
 	Testing::TestGroup* TestGroup::GetOrCreateSubGroup(const Core::String& name)
 	{
@@ -79,7 +79,7 @@ namespace Testing
 		}
 	}
 
-	// ─── Helpers for aligned output ────────────────────────────────────────
+	// --- Helpers for aligned output ----------------------------------------
 
 	static uint32 CollectMaxTestNameLength(TestGroup& group)
 	{
@@ -231,7 +231,7 @@ namespace Testing
 		}
 		else
 		{
-			// Thread died without completing — SEH crash, stack overflow, or timeout.
+			// Thread died without completing - SEH crash, stack overflow, or timeout.
 			s_TotalTests++;
 			s_FailedTests++;
 
@@ -292,7 +292,7 @@ namespace Testing
 		Logging::Logger::SetConsoleColor(Logging::Logger::Trace);
 	}
 
-	// ─── Global entry point ────────────────────────────────────────────────
+	// --- Global entry point ------------------------------------------------
 
 	void RunTests()
 	{

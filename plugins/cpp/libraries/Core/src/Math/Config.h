@@ -1,10 +1,10 @@
 #pragma once
 
-// ─── Coordinate system defines (DX12 conventions) ──────────────────────────
+// --- Coordinate system defines (DX12 conventions) --------------------------
 #define MATH_LEFT_HANDED
 #define MATH_NDC_ZERO_TO_ONE
 
-// ─── SIMD feature detection via compiler builtins + preprocessor ────────────
+// --- SIMD feature detection via compiler builtins + preprocessor ------------
 #if defined(__AVX2__) && defined(__AVX__)
 	#define MATH_SIMD_AVX2 1
 #elif defined(__SSE4_1__) && defined(__SSE__)
@@ -22,7 +22,7 @@
 	#define MATH_ALIGN 8
 #endif
 
-// ─── Math constants ────────────────────────────────────────────────────────
+// --- Math constants --------------------------------------------------------
 namespace Math
 {
 	constexpr float PI = static_cast<float>(3.14159265358979323846);

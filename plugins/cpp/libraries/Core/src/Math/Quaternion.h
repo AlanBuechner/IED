@@ -5,7 +5,7 @@
 
 namespace Math
 {
-	// ─── Quaternion (w,x,y,z layout) ────────────────────────────────────────
+	// --- Quaternion (w,x,y,z layout) ----------------------------------------
 	struct Quaternion
 	{
 		float x, y, z, w;
@@ -101,7 +101,7 @@ namespace Math
 	// Scalar multiplication (s * q)
 	inline constexpr Quaternion operator*(float s, const Quaternion& q) { return q * s; }
 
-	// ─── Quaternion functions ──────────────────────────────────────────────
+	// --- Quaternion functions ----------------------------------------------
 	inline float Dot(const Quaternion& q1, const Quaternion& q2)
 	{
 		return q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w;
@@ -178,7 +178,7 @@ namespace Math
 		}
 		else
 		{
-			// Gimbal lock: pitch ≈ ±90°, yaw and roll are degenerate (only yaw-roll difference is determined)
+			// Gimbal lock: pitch ~= +/-90 deg, yaw and roll are degenerate (only yaw-roll difference is determined)
 			yaw = std::atan2(m01, m00);
 			roll = 0.0f;
 		}
@@ -286,7 +286,7 @@ namespace Math
 		return rot * q;
 	}
 
-	// ─── Quaternion ↔ Matrix conversions ──────────────────────────────────
+	// --- Quaternion <-> Matrix conversions ----------------------------------
 	inline Mat3 Mat3Cast(const Quaternion& q)
 	{
 		float xx = q.x * q.x, yy = q.y * q.y, zz = q.z * q.z;
@@ -313,7 +313,7 @@ namespace Math
 
 	inline Quaternion QuatCast(const Mat3& mat)
 	{
-		// Schwarz's method — identical to glm::quat_cast regardless of handedness.
+		// Schwarz's method - identical to glm::quat_cast regardless of handedness.
 		float fourXSquaredMinus1 = mat.columns[0].x - mat.columns[1].y - mat.columns[2].z;
 		float fourYSquaredMinus1 = mat.columns[1].y - mat.columns[0].x - mat.columns[2].z;
 		float fourZSquaredMinus1 = mat.columns[2].z - mat.columns[0].x - mat.columns[1].y;
@@ -377,7 +377,7 @@ namespace Math
 
 	inline Quaternion QuatCast(const Mat4& mat)
 	{
-		// Extract upper-left 3×3 submatrix
+		// Extract upper-left 3x3 submatrix
 		Mat3 m3{
 			Vector3<float>(mat.columns[0].x, mat.columns[0].y, mat.columns[0].z),
 			Vector3<float>(mat.columns[1].x, mat.columns[1].y, mat.columns[1].z),

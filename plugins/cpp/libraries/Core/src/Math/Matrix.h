@@ -6,7 +6,7 @@
 
 namespace Math
 {
-	// ─── Mat2 (2×2, column-major) ──────────────────────────────────────────
+	// --- Mat2 (2x2, column-major) ------------------------------------------
 	struct Mat2
 	{
 		Vector2<float> columns[2];
@@ -25,13 +25,13 @@ namespace Math
 
 		float Determinant() const
 		{
-			// GLM parity — column-major 2×2 determinant: m00*m11 - m10*m01
+			// GLM parity - column-major 2x2 determinant: m00*m11 - m10*m01
 			return columns[0].x * columns[1].y - columns[0].y * columns[1].x;
 		}
 
 		constexpr Mat2 Inverse() const
 		{
-			// GLM parity — column-major 2×2 inverse via adjugate.
+			// GLM parity - column-major 2x2 inverse via adjugate.
 			// M = |m00 m01|, columns[0]=(m00,m10), columns[1]=(m01,m11).
 			//   |m10 m11|
 			// Inverse columns: col0=(+m11/det, -m10/det), col1=(-m01/det, +m00/det)
@@ -55,7 +55,7 @@ namespace Math
 		const float* data() const { return reinterpret_cast<const float*>(columns); }
 	};
 
-	// ─── Mat3 (3×3, column-major) ──────────────────────────────────────────
+	// --- Mat3 (3x3, column-major) ------------------------------------------
 	struct Mat3
 	{
 		Vector3<float> columns[3];
@@ -74,7 +74,7 @@ namespace Math
 
 		float Determinant() const
 		{
-			// GLM parity — column-major 3×3 cofactor expansion along column 0
+			// GLM parity - column-major 3x3 cofactor expansion along column 0
 			return columns[0].x * (columns[1].y * columns[2].z - columns[1].z * columns[2].y)
 				 - columns[0].y * (columns[1].x * columns[2].z - columns[1].z * columns[2].x)
 				 + columns[0].z * (columns[1].x * columns[2].y - columns[1].y * columns[2].x);
@@ -82,7 +82,7 @@ namespace Math
 
 		constexpr Mat3 Inverse() const
 		{
-			// GLM parity — column-major 3×3 inverse via cofactor/adjugate.
+			// GLM parity - column-major 3x3 inverse via cofactor/adjugate.
 			// Each output column i is {C0i, C1i, C2i} * invDet, where Cij is the (i,j) cofactor.
 			float invDet = 1.0f / (
 				+columns[0].x * (columns[1].y * columns[2].z - columns[2].y * columns[1].z)
@@ -119,7 +119,7 @@ namespace Math
 		const float* data() const { return reinterpret_cast<const float*>(columns); }
 	};
 
-	// ─── Mat4 (4×4, column-major) ──────────────────────────────────────────
+	// --- Mat4 (4x4, column-major) ------------------------------------------
 	struct Mat4
 	{
 		Vector4<float> columns[4];
@@ -140,7 +140,7 @@ namespace Math
 
 		float Determinant() const
 		{
-			// GLM parity — column-major cofactor expansion along row 0
+			// GLM parity - column-major cofactor expansion along row 0
 			float SubFactor00 = columns[2].z * columns[3].w - columns[3].z * columns[2].w;
 			float SubFactor01 = columns[2].y * columns[3].w - columns[3].y * columns[2].w;
 			float SubFactor02 = columns[2].y * columns[3].z - columns[3].y * columns[2].z;
@@ -158,7 +158,7 @@ namespace Math
 
 		constexpr Mat4 Inverse() const
 		{
-			// GLM parity — column-major 4×4 inverse via cofactor/adjugate
+			// GLM parity - column-major 4x4 inverse via cofactor/adjugate
 			float Coef00 = columns[2].z * columns[3].w - columns[3].z * columns[2].w;
 			float Coef02 = columns[1].z * columns[3].w - columns[3].z * columns[1].w;
 			float Coef03 = columns[1].z * columns[2].w - columns[2].z * columns[1].w;
@@ -243,8 +243,8 @@ namespace Math
 		const float* data() const { return reinterpret_cast<const float*>(columns); }
 	};
 
-	// ─── Matrix multiplication operators ────────────────────────────────────
-	// Matrix × Matrix multiplication
+	// --- Matrix multiplication operators ------------------------------------
+	// Matrix x Matrix multiplication
 	inline constexpr Mat2 operator*(const Mat2& a, const Mat2& b)
 	{
 		return Mat2{
@@ -292,7 +292,7 @@ namespace Math
 		};
 	}
 
-	// ─── Matrix × scalar multiplication ──────────────────────────────────────
+	// --- Matrix x scalar multiplication --------------------------------------
 	template<typename MatT, typename ScalarT>
 	inline constexpr auto operator*(const MatT& m, ScalarT s) -> MatT
 	{
@@ -302,7 +302,7 @@ namespace Math
 		return result;
 	}
 
-	// Matrix × Vector multiplication
+	// Matrix x Vector multiplication
 	inline constexpr Vector3<float> operator*(const Mat3& m, const Vector3<float>& v)
 	{
 		return Vector3<float>(
@@ -322,7 +322,7 @@ namespace Math
 		);
 	}
 
-	// Mat4 × Vector3 (position transform with translation)
+	// Mat4 x Vector3 (position transform with translation)
 	inline constexpr Vector3<float> operator*(const Mat4& m, const Vector3<float>& v)
 	{
 		return Vector3<float>(
@@ -332,7 +332,7 @@ namespace Math
 		);
 	}
 
-	// ─── Matrix addition/subtraction ────────────────────────────────────────
+	// --- Matrix addition/subtraction ----------------------------------------
 	inline constexpr Mat4 operator+(const Mat4& a, const Mat4& b)
 	{
 		return Mat4{
@@ -353,7 +353,7 @@ namespace Math
 		};
 	}
 
-	// ─── Matrix equality ────────────────────────────────────────────────────
+	// --- Matrix equality ----------------------------------------------------
 	inline constexpr bool operator==(const Mat2& a, const Mat2& b)
 	{ return a.columns[0] == b.columns[0] && a.columns[1] == b.columns[1]; }
 
@@ -372,7 +372,7 @@ namespace Math
 
 	inline constexpr bool operator!=(const Mat4& a, const Mat4& b) { return !(a == b); }
 
-	// ─── value_ptr helper ────────────────────────
+	// --- value_ptr helper ------------------------
 	inline const float* ValuePtr(const Mat2& m) { return reinterpret_cast<const float*>(m.columns); }
 	inline float* ValuePtr(Mat2& m) { return reinterpret_cast<float*>(m.columns); }
 	inline const float* ValuePtr(const Mat3& m) { return reinterpret_cast<const float*>(m.columns); }
@@ -386,7 +386,7 @@ namespace Math
 	inline const float* ValuePtr(const Vector4<float>& v) { return &v.x; }
 	inline float* ValuePtr(Vector4<float>& v) { return &v.x; }
 
-	// ─── epsilonEqual / epsilonNotEqual ────────
+	// --- epsilonEqual / epsilonNotEqual --------
 	template <typename T>
 	inline bool EpsilonEqual(T a, T b, T eps = static_cast<T>(1e-6))
 	{

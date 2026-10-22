@@ -3,13 +3,13 @@
 
 namespace Math
 {
-	// ─── MatrixFunctions.h ────────────────────────────────────────────────
+	// --- MatrixFunctions.h ------------------------------------------------
 	// Inline transformation functions for Mat4.
 	// The core types (Mat2, Mat3, Mat4) and operators live in Matrix.h;
 	// this header re-exports them plus provides additional convenience helpers.
 
 
-	// ─── Transform construction functions ───────────────────────────────────
+	// --- Transform construction functions -----------------------------------
 	inline Mat4 Translate(const Vector3<float>& position)
 	{
 		Mat4 result = Mat4::Identity();
@@ -65,7 +65,7 @@ namespace Math
 
 	inline Mat4 Perspective(float fovy, float aspect, float zNear, float zFar)
 	{
-		// Left-handed, NDC [0,1] — matches DX12 conventions.
+		// Left-handed, NDC [0,1] - matches DX12 conventions.
 		// Direct column-major layout:
 		//   | _00  0    0    0  |     col0 = (_00,  0,    0,  0)
 		//   | 0    _11  0    0  |     col1 = (0,    _11,  0,  0)
@@ -102,12 +102,12 @@ namespace Math
 		};
 	}
 
-	// ─── Matrix inverse functions (namespace-level for backward compat) ─────
+	// --- Matrix inverse functions (namespace-level for backward compat) -----
 	inline Mat2 Inverse(const Mat2& mat) { return mat.Inverse(); }
 	inline Mat3 Inverse(const Mat3& mat) { return mat.Inverse(); }
 	inline Mat4 Inverse(const Mat4& mat) { return mat.Inverse(); }
 
-	// ─── DecomposeTransform ────────────────────────────────────────────────
+	// --- DecomposeTransform ------------------------------------------------
 	inline bool DecomposeTransform(const Mat4& transform, Vector3<float>& outPosition, Vector3<float>& outRotation, Vector3<float>& outScale)
 	{
 		outPosition = Vector3<float>(transform.columns[3].x, transform.columns[3].y, transform.columns[3].z);
@@ -139,14 +139,14 @@ namespace Math
 		return true;
 	}
 
-	// ─── Euler angle helpers ────────────────
+	// --- Euler angle helpers ----------------
 	inline Mat4 EulerAngleYXZ(float pitch, float yaw, float roll)
 	{
 		return Rotate(yaw, Vector3(0.f, 1.f, 0.f)) * Rotate(pitch, Vector3(1.f, 0.f, 0.f)) * Rotate(roll, Vector3(0.f, 0.f, 1.f));
 	}
 
 
-	// ─── Matrix compound helpers ──────────────────────────────────────────
+	// --- Matrix compound helpers ------------------------------------------
 	/// Build a transform from position, rotation (YXZ Euler), and scale.
 	inline Mat4 TransformMatrix(const Vector3<float>& position, const Vector3<float>& rotation, const Vector3<float>& scale)
 	{

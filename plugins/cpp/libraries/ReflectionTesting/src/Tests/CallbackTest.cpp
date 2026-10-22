@@ -135,7 +135,7 @@ namespace Testing
 
 		if (count1 != 1 || count2 != 1 || count3 != 1) {
 			Core::String msg = Core::FormatString(
-				"Expected all 3 callbacks invoked, got {}, {}, {}", 
+				"Expected all 3 callbacks invoked, got {}, {}, {}",
 				count1.load(), count2.load(), count3.load());
 			Reflect::Scripting::Unsubscribe(h1);
 			Reflect::Scripting::Unsubscribe(h2);

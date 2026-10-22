@@ -1,6 +1,6 @@
 #include "VectorTest.h"
 
-// ─── Test Data Types ────────────────────────────────────────────────────────
+// --- Test Data Types --------------------------------------------------------
 
 /// Simple struct for testing Vector with user-defined types.
 struct TestStruct
@@ -104,7 +104,7 @@ struct CustomCompare
 
 namespace Testing
 {
-	// ─── Constructor Tests ──────────────────────────────────────────────────
+	// --- Constructor Tests --------------------------------------------------
 
 	void VectorTest::TestDefaultConstructor()
 	{
@@ -140,7 +140,7 @@ namespace Testing
 		if (copy[0] != 10 || copy[1] != 20 || copy[2] != 30)
 			TEST_FAILED("Copy constructor: values mismatch");
 
-		// Verify independent copy — modifying original does not affect copy
+		// Verify independent copy - modifying original does not affect copy
 		original[0] = 99;
 		if (copy[0] != 10)
 			TEST_FAILED("Copy constructor: copy not independent, copy[0] is {0}, expected 10", copy[0]);
@@ -231,7 +231,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ─── Accessor Tests ─────────────────────────────────────────────────────
+	// --- Accessor Tests -----------------------------------------------------
 
 	void VectorTest::TestOperatorIndex()
 	{
@@ -271,7 +271,7 @@ namespace Testing
 		if (vec.Front() != 50)
 			TEST_FAILED("Front(): value is {0}, expected 50", vec.Front());
 
-		// Write via Front() — verifies it returns a reference
+		// Write via Front() - verifies it returns a reference
 		vec.Front() = 5;
 		if (vec[0] != 5)
 			TEST_FAILED("Front() write: element [0] is {0}, expected 5", vec[0]);
@@ -292,7 +292,7 @@ namespace Testing
 		if (vec.Back() != 3)
 			TEST_FAILED("Back(): value is {0}, expected 3", vec.Back());
 
-		// Write via Back() — verifies it returns a reference
+		// Write via Back() - verifies it returns a reference
 		vec.Back() = 30;
 		if (vec[2] != 30)
 			TEST_FAILED("Back() write: element [2] is {0}, expected 30", vec[2]);
@@ -339,7 +339,7 @@ namespace Testing
 		if (diff != 1)
 			TEST_FAILED("Data() contiguity: pointer difference is {0}, expected 1", diff);
 
-		// Write through Data() pointer — verifies mutable access
+		// Write through Data() pointer - verifies mutable access
 		mutableData[0] = 100;
 		if (vec[0] != 100)
 			TEST_FAILED("Data() write: vec[0] is {0}, expected 100", vec[0]);
@@ -353,7 +353,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ─── Existing Tests ─────────────────────────────────────────────────────
+	// --- Existing Tests -----------------------------------------------------
 
 	void VectorTest::TestPushBackElement()
 	{

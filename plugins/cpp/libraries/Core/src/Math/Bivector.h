@@ -4,12 +4,12 @@
 
 namespace Math
 {
-	// ─── Bivector ──────────────────────────────────────────────────────────
+	// --- Bivector ----------------------------------------------------------
 	// Grade-2 element of 3D spatial geometric algebra (Cl(3,0) extended with
 	// translational bivectors for motor/dual-quaternion use).
 	// Represents an oriented plane segment with 6 independent components:
-	//   Spatial (rotational) : xy, yz, zx — basis blades e12, e23, e31
-	//   Translational        : tx, ty, tz — basis blades e01, e02, e03
+	//   Spatial (rotational) : xy, yz, zx - basis blades e12, e23, e31
+	//   Translational        : tx, ty, tz - basis blades e01, e02, e03
 	struct Bivector
 	{
 		Vector3F spatial;       // Rotational plane components (e12, e23, e31)
@@ -25,7 +25,7 @@ namespace Math
 
 		static constexpr Bivector Zero() { return {}; }
 
-		// ─── Arithmetic operators ──────────────────────────────────────
+		// --- Arithmetic operators --------------------------------------
 		Bivector operator+(const Bivector& o) const {
 			return { spatial + o.spatial, translational + o.translational };
 		}
@@ -39,7 +39,7 @@ namespace Math
 			return { spatial * s, translational * s };
 		}
 
-		// ─── Magnitude and normalization ───────────────────────────────
+		// --- Magnitude and normalization -------------------------------
 		float Magnitude() const {
 			return std::sqrt(spatial.x * spatial.x + spatial.y * spatial.y + spatial.z * spatial.z +
 				translational.x * translational.x + translational.y * translational.y + translational.z * translational.z);
@@ -52,7 +52,7 @@ namespace Math
 			return { spatial * invM, translational * invM };
 		}
 
-		// ─── Inner product (scalar part of geometric product between bivectors) ──
+		// --- Inner product (scalar part of geometric product between bivectors) --
 		constexpr float Dot(const Bivector& o) const {
 			return spatial.x * o.spatial.x + spatial.y * o.spatial.y + spatial.z * o.spatial.z +
 			       translational.x * o.translational.x + translational.y * o.translational.y + translational.z * o.translational.z;
@@ -62,13 +62,13 @@ namespace Math
 	// Scalar * Bivector
 	inline constexpr Bivector operator*(float s, const Bivector& b) { return b * s; }
 
-	// ─── Equality ──────────────────────────────────────────────────────────
+	// --- Equality ----------------------------------------------------------
 	inline constexpr bool operator==(const Bivector& a, const Bivector& b) {
 		return a.spatial == b.spatial && a.translational == b.translational;
 	}
 	inline constexpr bool operator!=(const Bivector& a, const Bivector& b) { return !(a == b); }
 
-	// ─── Namespace-level utilities ─────────────────────────────────────────
+	// --- Namespace-level utilities -----------------------------------------
 	inline float Magnitude(const Bivector& b) { return b.Magnitude(); }
 	inline Bivector Normalized(const Bivector& b) { return b.Normalized(); }
 }

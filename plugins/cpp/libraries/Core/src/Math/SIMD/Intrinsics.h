@@ -8,13 +8,13 @@
 namespace Math::SIMD
 {
 #if defined(MATH_SIMD_SSE41) || defined(MATH_SIMD_AVX2)
-	// ─── Load / Store ──────────────────────────────────────────────────────
+	// --- Load / Store ------------------------------------------------------
 	inline __m128 Load(const float* p) { return _mm_loadu_ps(p); }
 	inline __m128 LoadAligned(const float* p) { return _mm_load_ps(p); }
 	inline void Store(float* p, __m128 v) { _mm_storeu_ps(p, v); }
 	inline void StoreAligned(float* p, __m128 v) { _mm_store_ps(p, v); }
 
-	// ─── Arithmetic ────────────────────────────────────────────────────────
+	// --- Arithmetic --------------------------------------------------------
 	inline __m128 Add(__m128 a, __m128 b) { return _mm_add_ps(a, b); }
 	inline __m128 Sub(__m128 a, __m128 b) { return _mm_sub_ps(a, b); }
 	inline __m128 Mul(__m128 a, __m128 b) { return _mm_mul_ps(a, b); }
@@ -25,22 +25,22 @@ namespace Math::SIMD
 	inline __m128 FMA(__m128 a, __m128 b, __m128 c) { return _mm_fmadd_ps(a, b, c); }
 #endif
 
-	// ─── Comparison (returns mask with 0xFFFFFFFF or 0x0 per lane) ─────────
+	// --- Comparison (returns mask with 0xFFFFFFFF or 0x0 per lane) ---------
 	inline __m128 Greater(__m128 a, __m128 b) { return _mm_cmpgt_ps(a, b); }
 	inline __m128 Less(__m128 a, __m128 b) { return _mm_cmplt_ps(a, b); }
 	inline __m128 Equal(__m128 a, __m128 b) { return _mm_cmpeq_ps(a, b); }
 
-	// ─── Blend / Select (SSE4.1+) ──────────────────────────────────────────
+	// --- Blend / Select (SSE4.1+) ------------------------------------------
 	inline __m128 Blend(__m128 a, __m128 b, __m128 mask) { return _mm_blendv_ps(a, b, mask); }
 
-	// ─── Shuffle (SSE3+ for horizontal operations, SSE4.1 for general) ─────
+	// --- Shuffle (SSE3+ for horizontal operations, SSE4.1 for general) -----
 	inline __m128 Shuffle(__m128 a, const int imm8) { return _mm_shuffle_ps(a, a, imm8); }
 
-	// ─── Approximate reciprocal / inverse square root ──────────────────────
+	// --- Approximate reciprocal / inverse square root ----------------------
 	inline __m128 RCP(__m128 a) { return _mm_rcp_ps(a); }
 	inline __m128 RSQRT(__m128 a) { return _mm_rsqrt_ps(a); }
 
-	// ─── Horizontal dot product ────────────────────────────────────────────
+	// --- Horizontal dot product --------------------------------------------
 	inline float HDot(__m128 a, __m128 b)
 	{
 #if defined(MATH_SIMD_AVX2)
@@ -57,11 +57,11 @@ namespace Math::SIMD
 #endif
 	}
 
-	// ─── Constants (compile-time constructed) ──────────────────────────────
+	// --- Constants (compile-time constructed) ------------------------------
 	inline constexpr __m128 Zero() { return _mm_setzero_ps(); }
 	inline constexpr __m128 One() { return _mm_set_ps(1.0f, 1.0f, 1.0f, 1.0f); }
 
-#else // Scalar fallback — still works, just no SIMD
+#else // Scalar fallback - still works, just no SIMD
 
 	struct ScalarSimd
 	{

@@ -4,7 +4,7 @@
 
 namespace Testing
 {
-	// ── ObservableProperty emission behavior ────────────────────────────────
+	// -- ObservableProperty emission behavior --------------------------------
 
 	void ChangeNotificationTest::TestObservablePropertyEmission()
 	{
@@ -44,7 +44,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ── Duplicate suppression ───────────────────────────────────────────────
+	// -- Duplicate suppression -----------------------------------------------
 
 	void ChangeNotificationTest::TestDuplicateSuppression()
 	{
@@ -57,7 +57,7 @@ namespace Testing
 			});
 
 		ChangeNotification::ObservableProperty<int> prop(10, "test/value", nullptr);
-		prop.Set(10); // Same value — should be suppressed
+		prop.Set(10); // Same value - should be suppressed
 		prop.Set(10); // Again same value
 
 		ChangeNotification::ChangeQueue::GetInstance().Unsubscribe(id);
@@ -67,14 +67,14 @@ namespace Testing
 			TEST_FAILED(msg);
 		}
 
-		// Now change to a different value — should emit.
+		// Now change to a different value - should emit.
 		received.clear();
 		id = ChangeNotification::ChangeQueue::GetInstance().Subscribe(
 			[&](const ChangeNotification::ChangeRecord&) {
 				received.push_back(ChangeNotification::ChangeRecord{});
 			});
 
-		prop.Set(20); // Different value — should emit
+		prop.Set(20); // Different value - should emit
 
 		ChangeNotification::ChangeQueue::GetInstance().Unsubscribe(id);
 
@@ -86,7 +86,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ── Subscription and unsubscription lifecycle ───────────────────────────
+	// -- Subscription and unsubscription lifecycle ---------------------------
 
 	void ChangeNotificationTest::TestSubscribeUnsubscribeLifecycle()
 	{
@@ -135,7 +135,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ── Exact path filter matching ──────────────────────────────────────────
+	// -- Exact path filter matching ------------------------------------------
 
 	void ChangeNotificationTest::TestExactPathFilter()
 	{
@@ -146,7 +146,7 @@ namespace Testing
 			[&](const ChangeNotification::ChangeRecord& rec) {
 				receivedPaths.push_back(rec.ObjectPath);
 			},
-			"exact/path"); // Exact filter — no wildcards
+			"exact/path"); // Exact filter - no wildcards
 
 		ChangeNotification::ChangeRecord rec;
 
@@ -174,7 +174,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ── Wildcard path filter matching (* and ?) ─────────────────────────────
+	// -- Wildcard path filter matching (* and ?) -----------------------------
 
 	void ChangeNotificationTest::TestWildcardPathFilter()
 	{
@@ -195,10 +195,10 @@ namespace Testing
 		rec.ObjectPath = "entity/enemy/health";
 		ChangeNotification::ChangeQueue::GetInstance().Notify(rec);
 
-		rec.ObjectPath = "entity/boss/armor"; // Should NOT match — last segment is armor, not health
+		rec.ObjectPath = "entity/boss/armor"; // Should NOT match - last segment is armor, not health
 		ChangeNotification::ChangeQueue::GetInstance().Notify(rec);
 
-		rec.ObjectPath = "world/player/health"; // Should NOT match — first segment is world, not entity
+		rec.ObjectPath = "world/player/health"; // Should NOT match - first segment is world, not entity
 		ChangeNotification::ChangeQueue::GetInstance().Notify(rec);
 
 		ChangeNotification::ChangeQueue::GetInstance().Unsubscribe(id);
@@ -245,7 +245,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ── Batch accumulation mode ─────────────────────────────────────────────
+	// -- Batch accumulation mode ---------------------------------------------
 
 	void ChangeNotificationTest::TestBatchAccumulation()
 	{
@@ -300,7 +300,7 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	// ── ProcessPendingNotifications drain ───────────────────────────────────
+	// -- ProcessPendingNotifications drain -----------------------------------
 
 	void ChangeNotificationTest::TestPendingDrain()
 	{
@@ -322,7 +322,7 @@ namespace Testing
 			queue.Notify(rec);
 		}
 
-		// First drain — should process all 5.
+		// First drain - should process all 5.
 		queue.ProcessPendingNotifications();
 
 		if (receivedPaths.size() != 5) {
@@ -343,7 +343,7 @@ namespace Testing
 			}
 		}
 
-		// Second drain — should produce no additional invocations (nothing pending).
+		// Second drain - should produce no additional invocations (nothing pending).
 		size_t countBefore = receivedPaths.size();
 		queue.ProcessPendingNotifications();
 

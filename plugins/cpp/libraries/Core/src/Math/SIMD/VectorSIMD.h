@@ -6,7 +6,7 @@
 namespace Math::SIMD
 {
 #if defined(MATH_SIMD_SSE41) || defined(MATH_SIMD_AVX2)
-	// ─── Vector4 operations via SIMD ────────────────────────────────────
+	// --- Vector4 operations via SIMD ------------------------------------
 
 	inline __m128 Vec4Load(const Vector4<float>& v) { return _mm_loadu_ps(&v.x); }
 	inline void Vec4Store(Vector4<float>& out, __m128 v) { _mm_storeu_ps(&out.x, v); }
@@ -71,7 +71,7 @@ namespace Math::SIMD
 		_mm_storeu_ps(&out.x, _mm_max_ps(va, vb));
 	}
 
-	// ─── Vector3 operations via SIMD (stored as x,y,z,0) ──────────────
+	// --- Vector3 operations via SIMD (stored as x,y,z,0) --------------
 
 	inline __m128 Vec3Load(const Vector3<float>& v) { return _mm_set_ps(0.f, v.z, v.y, v.x); }
 	inline void Vec3Store(Vector3<float>& out, __m128 v)

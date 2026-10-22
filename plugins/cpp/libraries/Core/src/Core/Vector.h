@@ -96,7 +96,7 @@ namespace Core
 		std::vector<Type>& CastToSTD() { return (std::vector<Type>&) * this; }
 	};
 
-	template<class Type> 
+	template<class Type>
 	inline Vector<Type>::Vector()
 	{}
 
@@ -127,7 +127,7 @@ namespace Core
 		std::vector<Type>(list)
 	{}
 
-	template<class Type> 
+	template<class Type>
 	inline Vector<Type>::~Vector()
 	{}
 

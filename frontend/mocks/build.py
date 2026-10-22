@@ -1,8 +1,9 @@
 """build.py - helper for the M0 static review mocks (frontend/mocks/).
 
 	python -I frontend/mocks/build.py icons   regenerate css/codicons.css from third_party/codicons
-	python -I frontend/mocks/build.py lint    ASCII only, tab indentation, no raw colors outside theme.css - in frontend/,
-	                                          shared/ui-kit/ and plugins/
+	python -I frontend/mocks/build.py lint    ASCII only, no trailing whitespace, tab indentation (web and Python files),
+	                                          no raw colors outside theme.css - in frontend/, shared/ui-kit/ and plugins/
+	                                          (their C and C++ too; vendored third-party code is left out)
 	python -I frontend/mocks/build.py shots [prefix]  screenshots at 1920x1080, 1366x768, 390x844 (Playwright)
 	python -I frontend/mocks/build.py all     icons + lint + shots
 
@@ -51,7 +52,7 @@ SHOTS = [
 # icons that stylesheets use directly (pseudo-elements), exposed as :root { --ic-<name> }
 CSS_ICONS = ("chevron-down", "chevron-right", "check")
 
-TEXT_SUFFIXES ={".css", ".html", ".js", ".py", ".md"}
+TEXT_SUFFIXES = {".css", ".html", ".js", ".py", ".md", ".c", ".cpp", ".h", ".hpp"}   # plugins' C and C++ (gpu, cpp) too
 INDENT_SUFFIXES = {".css", ".html", ".js", ".py"}
 RAW_COLOR = re.compile(r"(?<![\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(")
 

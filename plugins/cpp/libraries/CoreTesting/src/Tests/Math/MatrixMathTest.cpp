@@ -205,7 +205,7 @@ namespace Testing
 
 	void MatrixMathTest::TestMatrixInverse()
 	{
-		// Mat4 inverse — use a non-singular matrix
+		// Mat4 inverse - use a non-singular matrix
 		Math::Mat4 m(
 			Vector4(1.0f, 2.0f, 3.0f, 1.0f),
 			Vector4(2.0f, 1.0f, 4.0f, 1.0f),
@@ -223,7 +223,7 @@ namespace Testing
 		if (!MatricesEpsilonEqual<4, 4>(ValuePtr(inv), glm::value_ptr(glmInv)))
 			TEST_FAILED("Mat4 inverse mismatch");
 
-		// Verify M * inv(M) ≈ I
+		// Verify M * inv(M) ~= I
 		Math::Mat4 check = m * inv;
 		Math::Mat4 id = Math::Mat4::Identity();
 		if (!MatricesEpsilonEqual<4, 4>(ValuePtr(check), ValuePtr(id), 1e-3f))
@@ -305,7 +305,7 @@ namespace Testing
 
 	void MatrixMathTest::TestMatrixQuatCast()
 	{
-		// ─── Identity matrix → quaternion must be identity ───
+		// --- Identity matrix -> quaternion must be identity ---
 		Math::Mat3 idM3 = Math::Mat3::Identity();
 		Math::Quaternion qFromIdM3 = QuatCast(idM3);
 		if (!QuaternionsEpsilonEqual(qFromIdM3, Math::Quaternion::Identity()))
@@ -316,7 +316,7 @@ namespace Testing
 		if (!QuaternionsEpsilonEqual(qFromIdM4, Math::Quaternion::Identity()))
 			TEST_FAILED("QuatCast(Mat4 identity) is not identity quaternion");
 
-		// ─── 90° Y rotation matrix → quaternion ───
+		// --- 90 deg Y rotation matrix -> quaternion ---
 		float angle = Math::PI / 2.0f;
 		Vector3 axis(0.0f, 1.0f, 0.0f);
 		Math::Quaternion qY = AngleAxis(angle, axis);
@@ -324,14 +324,14 @@ namespace Testing
 		Math::Mat3 m3y = Mat3Cast(qY);
 		Math::Quaternion qBackM3y = QuatCast(m3y);
 		if (!QuaternionsEpsilonEqual(qBackM3y, qY))
-			TEST_FAILED("QuatCast(Mat3Cast(90° Y)) round-trip mismatch");
+			TEST_FAILED("QuatCast(Mat3Cast(90 deg Y)) round-trip mismatch");
 
 		Math::Mat4 m4y = Mat4Cast(qY);
 		Math::Quaternion qBackM4y = QuatCast(m4y);
 		if (!QuaternionsEpsilonEqual(qBackM4y, qY))
-			TEST_FAILED("QuatCast(Mat4Cast(90° Y)) round-trip mismatch");
+			TEST_FAILED("QuatCast(Mat4Cast(90 deg Y)) round-trip mismatch");
 
-		// ─── 45° X rotation matrix → quaternion ───
+		// --- 45 deg X rotation matrix -> quaternion ---
 		float angleX = Math::PI / 4.0f;
 		Vector3 xAxis(1.0f, 0.0f, 0.0f);
 		Math::Quaternion qX = AngleAxis(angleX, xAxis);
@@ -339,14 +339,14 @@ namespace Testing
 		Math::Mat3 m3x = Mat3Cast(qX);
 		Math::Quaternion qBackM3x = QuatCast(m3x);
 		if (!QuaternionsEpsilonEqual(qBackM3x, qX))
-			TEST_FAILED("QuatCast(Mat3Cast(45° X)) round-trip mismatch");
+			TEST_FAILED("QuatCast(Mat3Cast(45 deg X)) round-trip mismatch");
 
 		Math::Mat4 m4x = Mat4Cast(qX);
 		Math::Quaternion qBackM4x = QuatCast(m4x);
 		if (!QuaternionsEpsilonEqual(qBackM4x, qX))
-			TEST_FAILED("QuatCast(Mat4Cast(45° X)) round-trip mismatch");
+			TEST_FAILED("QuatCast(Mat4Cast(45 deg X)) round-trip mismatch");
 
-		// ─── Arbitrary axis rotation matrix → quaternion ───
+		// --- Arbitrary axis rotation matrix -> quaternion ---
 		float arbAngle = Math::PI / 3.0f;
 		Vector3 arbAxis(1.0f, 2.0f, 3.0f);
 		arbAxis = Normalized(arbAxis);
@@ -362,20 +362,20 @@ namespace Testing
 		if (!QuaternionsEpsilonEqual(qBackM4Arb, qArb))
 			TEST_FAILED("QuatCast(Mat4Cast(arbitrary axis)) round-trip mismatch");
 
-		// ─── 180° rotation matrix → quaternion (edge case: trace ≈ -1) ───
+		// --- 180 deg rotation matrix -> quaternion (edge case: trace ~= -1) ---
 		Math::Quaternion qZ180 = AngleAxis(Math::PI, Vector3(0.0f, 0.0f, 1.0f));
 
 		Math::Mat3 m3z180 = Mat3Cast(qZ180);
 		Math::Quaternion qBackM3z180 = QuatCast(m3z180);
 		if (!QuaternionsEpsilonEqual(qBackM3z180, qZ180))
-			TEST_FAILED("QuatCast(Mat3Cast(180° Z)) round-trip mismatch");
+			TEST_FAILED("QuatCast(Mat3Cast(180 deg Z)) round-trip mismatch");
 
 		Math::Mat4 m4z180 = Mat4Cast(qZ180);
 		Math::Quaternion qBackM4z180 = QuatCast(m4z180);
 		if (!QuaternionsEpsilonEqual(qBackM4z180, qZ180))
-			TEST_FAILED("QuatCast(Mat4Cast(180° Z)) round-trip mismatch");
+			TEST_FAILED("QuatCast(Mat4Cast(180 deg Z)) round-trip mismatch");
 
-		// ─── Euler-composed quaternion → matrix → quaternion ───
+		// --- Euler-composed quaternion -> matrix -> quaternion ---
 		float pitch = Math::PI / 6.0f;
 		float yaw = Math::PI / 4.0f;
 		float roll = Math::PI / 3.0f;
@@ -393,7 +393,7 @@ namespace Testing
 		if (!QuaternionsEpsilonEqual(qBackM4Euler, qEuler))
 			TEST_FAILED("QuatCast(Mat4Cast(euler composed)) round-trip mismatch");
 
-		// ─── Verify QuatCast(Mat4) extracts the same rotation as QuatCast(Mat3) from the same source ───
+		// --- Verify QuatCast(Mat4) extracts the same rotation as QuatCast(Mat3) from the same source ---
 		Math::Mat4 m4Test = Mat4Cast(qArb);
 		Math::Quaternion qFromM4 = QuatCast(m4Test);
 		// Extract upper-left 3x3 manually
@@ -406,14 +406,14 @@ namespace Testing
 		if (!QuaternionsEpsilonEqual(qFromM4, qFromM3))
 			TEST_FAILED("QuatCast(Mat4) and QuatCast(Mat3) disagree on same rotation");
 
-		// ─── Verify that the extracted quaternion rotates vectors identically to the original quaternion ───
+		// --- Verify that the extracted quaternion rotates vectors identically to the original quaternion ---
 		Vector3 testVec(3.0f, -1.5f, 7.2f);
 		Vector3 rotatedByOriginal = qArb.RotateVector(testVec);
 		Vector3 rotatedByRoundTrip = qBackM4Arb.RotateVector(testVec);
 		if (!VectorsEpsilonEqual<3>(ValuePtr(rotatedByOriginal), ValuePtr(rotatedByRoundTrip), 1e-5f))
 			TEST_FAILED("Quaternion from Mat4Cast round-trip does not rotate vectors identically to original");
 
-		// ─── Verify that the round-tripped quaternion produces the same rotation matrix as the original ───
+		// --- Verify that the round-tripped quaternion produces the same rotation matrix as the original ---
 		Math::Mat3 m3RoundTrip = Mat3Cast(qBackM4Arb);
 		if (!MatricesEpsilonEqual<3, 3>(ValuePtr(m3RoundTrip), ValuePtr(m3Arb), 1e-5f))
 			TEST_FAILED("Mat3Cast(QuatCast(Mat3Cast(q))) does not reproduce original matrix");

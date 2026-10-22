@@ -126,7 +126,7 @@ namespace Core
         /// Stop the stopwatch and record elapsed time since last Start/Reset.
         void Stop();
 
-        /// Reset the stopwatch without recording — discards any running state.
+        /// Reset the stopwatch without recording - discards any running state.
         void Reset();
 
         /// Elapsed time in seconds since Start (updates live if still running).

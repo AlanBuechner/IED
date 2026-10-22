@@ -25,12 +25,12 @@ private:
 	Core::String m_Msg;
 };
 
-// Benchmark macros and types — defined in BenchmarkTest.h (BenchmarkFailedException is in namespace Testing).
+// Benchmark macros and types - defined in BenchmarkTest.h (BenchmarkFailedException is in namespace Testing).
 #include "BenchmarkTest.h"
 
 namespace Testing
 {
-	// Shared result counters — defined in TestBase.cpp, used by filter runners.
+	// Shared result counters - defined in TestBase.cpp, used by filter runners.
 	extern uint32 s_FailedTests;
 	extern uint32 s_PassedTests;
 	extern uint32 s_TotalTests;

@@ -14,7 +14,7 @@ namespace Testing
 		TEST_FUNC(ChangeNotification)
 		void TestObservablePropertyEmission();
 
-		// Duplicate suppression — setting to the same value emits nothing
+		// Duplicate suppression - setting to the same value emits nothing
 		TEST_FUNC(ChangeNotification)
 		void TestDuplicateSuppression();
 

@@ -4,7 +4,7 @@
 
 namespace Testing
 {
-	// ─── Epsilon comparison helpers for math tests ──────────────────────────
+	// --- Epsilon comparison helpers for math tests --------------------------
 
 	/// Compare two column-major matrices element-by-element using epsilon tolerance.
 	/// Both our Math library and GLM store matrices in column-major layout, so

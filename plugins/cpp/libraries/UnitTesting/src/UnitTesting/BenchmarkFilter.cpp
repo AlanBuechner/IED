@@ -11,7 +11,7 @@
 namespace Testing
 {
 
-	// ─── Benchmark path building ────────────────────────────────────────
+	// --- Benchmark path building ----------------------------------------
 
 	void BuildBenchmarkPath(const Core::String& prefix, const BenchmarkEntry& entry, Core::String& outPath)
 	{
@@ -23,7 +23,7 @@ namespace Testing
 		outPath += entry.func->GetName();
 	}
 
-	// ─── Collect benchmark group ────────────────────────────────────────
+	// --- Collect benchmark group ----------------------------------------
 
 	BenchmarkCollection CollectBenchmarkGroup()
 	{
@@ -43,7 +43,7 @@ namespace Testing
 		return collection;
 	}
 
-	// ─── Print benchmark paths ──────────────────────────────────────────
+	// --- Print benchmark paths ------------------------------------------
 
 	void PrintBenchmarkPaths(BenchmarkGroup& group, const Core::String& prefix)
 	{
@@ -61,7 +61,7 @@ namespace Testing
 		}
 	}
 
-	// ─── Helpers for aligned output ─────────────────────────────────────
+	// --- Helpers for aligned output -------------------------------------
 
 	uint32 CollectMaxBenchmarkNameLength(BenchmarkGroup& group)
 	{
@@ -75,7 +75,7 @@ namespace Testing
 		return maxLen;
 	}
 
-	// ─── Recursive match checker for benchmarks ─────────────────────────
+	// --- Recursive match checker for benchmarks -------------------------
 
 	static bool BenchmarkGroupHasMatch(BenchmarkGroup& g, const Core::String& gPrefix, const Core::String& filter)
 	{
@@ -93,7 +93,7 @@ namespace Testing
 		return false;
 	}
 
-	// ─── Filtered benchmark runner ──────────────────────────────────────
+	// --- Filtered benchmark runner --------------------------------------
 
 	void IncrementTotalBenchmarkCount()
 	{
@@ -137,7 +137,7 @@ namespace Testing
 		switch (result)
 		{
 		case InvocationResult::Success:
-			// Benchmark completed normally — it should have called BENCHMARK_PASSED().
+			// Benchmark completed normally - it should have called BENCHMARK_PASSED().
 			break;
 		case InvocationResult::TestFailed:
 			// Failure already reported by the benchmark macro; just skip BENCHMARK_PASSED().

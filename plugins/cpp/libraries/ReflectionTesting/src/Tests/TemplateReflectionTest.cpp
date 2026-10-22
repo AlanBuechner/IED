@@ -6,14 +6,14 @@
 
 namespace Testing
 {
-	// ── TemplateTestChild implementations ──────────────────────────────────
+	// -- TemplateTestChild implementations ----------------------------------
 
 	void TemplateTestChild::SetName(const Core::String& p_Name)
 	{
 		m_Name = p_Name;
 	}
 
-	// ── TemplateTestAllContainers implementations ──────────────────────────
+	// -- TemplateTestAllContainers implementations --------------------------
 
 	void TemplateTestAllContainers::SetChildren(
 		const Core::Vector<TemplateTestChild>& p_Children)
@@ -21,7 +21,7 @@ namespace Testing
 		m_Children = p_Children;
 	}
 
-	// ── Unit test implementations ──────────────────────────────────────────
+	// -- Unit test implementations ------------------------------------------
 
 	void TemplateReflectionTest::TestNonTemplateProperty()
 	{

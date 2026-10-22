@@ -8,12 +8,12 @@
 
 namespace Math
 {
-	// ─── Forward declarations (needed by SwizzleProxy conversion operators) ──
+	// --- Forward declarations (needed by SwizzleProxy conversion operators) --
 	template <typename T> struct Vector2;
 	template <typename T> struct Vector3;
 	template <typename T> struct Vector4;
 
-	// ─── Swizzle proxy (read-only HLSL-like swizzles) ──────────────────────
+	// --- Swizzle proxy (read-only HLSL-like swizzles) ----------------------
 	// 2-component swizzle
 	template <typename T, int I0, int I1>
 	struct SwizzleProxy2
@@ -52,7 +52,7 @@ namespace Math
 		constexpr operator Vector4<std::remove_const_t<T>>() const { return { m_Data[I0], m_Data[I1], m_Data[I2], m_Data[I3] }; }
 	};
 
-	// ─── Vector2 (default T = float for backward compatibility) ─────────────
+	// --- Vector2 (default T = float for backward compatibility) -------------
 	template<typename T = float>
 	struct Vector2
 	{
@@ -110,7 +110,7 @@ namespace Math
 		static constexpr Vector2 One() { return { 1, 1 }; }
 	};
 
-	// ─── Vector3 (default T = float for backward compatibility) ─────────────
+	// --- Vector3 (default T = float for backward compatibility) -------------
 	template<typename T = float>
 	struct Vector3
 	{
@@ -209,7 +209,7 @@ namespace Math
 
 	};
 
-	// ─── Vector4 (default T = float for backward compatibility) ─────────────
+	// --- Vector4 (default T = float for backward compatibility) -------------
 	template<typename T = float>
 	struct Vector4
 	{
@@ -244,7 +244,7 @@ namespace Math
 		}
 		constexpr bool operator!=(const Vector4& other) const { return !(*this == other); }
 
-		// Swizzles (2-component) — only a representative set
+		// Swizzles (2-component) - only a representative set
 		constexpr auto xx() const { return SwizzleProxy2<const T, 0, 0>{ data }; }
 		constexpr auto xy() const { return SwizzleProxy2<const T, 0, 1>{ data }; }
 		constexpr auto xz() const { return SwizzleProxy2<const T, 0, 2>{ data }; }
@@ -262,13 +262,13 @@ namespace Math
 		constexpr auto wz() const { return SwizzleProxy2<const T, 3, 2>{ data }; }
 		constexpr auto ww() const { return SwizzleProxy2<const T, 3, 3>{ data }; }
 
-		// Swizzles (3-component) — representative set
+		// Swizzles (3-component) - representative set
 		constexpr auto xyz() const { return SwizzleProxy3<const T, 0, 1, 2>{ data }; }
 		constexpr auto xyw() const { return SwizzleProxy3<const T, 0, 1, 3>{ data }; }
 		constexpr auto xzw() const { return SwizzleProxy3<const T, 0, 2, 3>{ data }; }
 		constexpr auto yzw() const { return SwizzleProxy3<const T, 1, 2, 3>{ data }; }
 
-		// Swizzles (4-component) — representative set
+		// Swizzles (4-component) - representative set
 		constexpr auto xxxx() const { return SwizzleProxy4<const T, 0, 0, 0, 0>{ data }; }
 		constexpr auto yyyy() const { return SwizzleProxy4<const T, 1, 1, 1, 1>{ data }; }
 		constexpr auto zzzz() const { return SwizzleProxy4<const T, 2, 2, 2, 2>{ data }; }
@@ -299,12 +299,12 @@ namespace Math
 		static constexpr Vector4 UnitW() { return { 0, 0, 0, 1 }; }
 	};
 
-	// ─── Scalar multiplication (s * v) ──────────────────────────────────────
+	// --- Scalar multiplication (s * v) --------------------------------------
 	template <typename T> constexpr Vector2<T> operator*(T s, const Vector2<T>& v) { return v * s; }
 	template <typename T> constexpr Vector3<T> operator*(T s, const Vector3<T>& v) { return v * s; }
 	template <typename T> constexpr Vector4<T> operator*(T s, const Vector4<T>& v) { return v * s; }
 
-	// ─── Dot product ────────────────────────────────────────────────────────
+	// --- Dot product --------------------------------------------------------
 	template <typename T> constexpr T Dot(const Vector2<T>& a, const Vector2<T>& b)
 	{ return a.x * b.x + a.y * b.y; }
 	template <typename T> constexpr T Dot(const Vector3<T>& a, const Vector3<T>& b)
@@ -312,7 +312,7 @@ namespace Math
 	template <typename T> constexpr T Dot(const Vector4<T>& a, const Vector4<T>& b)
 	{ return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
 
-	// ─── Cross product ──────────────────────────────────────────────────────
+	// --- Cross product ------------------------------------------------------
 	template <typename T> constexpr Vector3<T> Cross(const Vector3<T>& a, const Vector3<T>& b)
 	{
 		return {
@@ -325,7 +325,7 @@ namespace Math
 	template <typename T> constexpr T Cross(const Vector2<T>& a, const Vector2<T>& b)
 	{ return a.x * b.y - b.x * a.y; }
 
-	// ─── Length / Distance ──────────────────────────────────────────────────
+	// --- Length / Distance --------------------------------------------------
 	template <typename T> T LengthSqr(const Vector2<T>& v) { return Dot(v, v); }
 	template <typename T> T LengthSqr(const Vector3<T>& v) { return Dot(v, v); }
 	template <typename T> T LengthSqr(const Vector4<T>& v) { return Dot(v, v); }
@@ -342,7 +342,7 @@ namespace Math
 	template <typename T> T Distance(const Vector3<T>& a, const Vector3<T>& b) { return Length(b - a); }
 	template <typename T> T Distance(const Vector4<T>& a, const Vector4<T>& b) { return Length(b - a); }
 
-	// ─── Normalize ──────────────────────────────────────────────────────────
+	// --- Normalize ----------------------------------------------------------
 	template <typename T> Vector2<T> Normalized(const Vector2<T>& v)
 	{ float l = 1.0f / static_cast<float>(Length(v)); return v * static_cast<T>(l); }
 	template <typename T> Vector3<T> Normalized(const Vector3<T>& v)
@@ -350,7 +350,7 @@ namespace Math
 	template <typename T> Vector4<T> Normalized(const Vector4<T>& v)
 	{ float l = 1.0f / static_cast<float>(Length(v)); return v * static_cast<T>(l); }
 
-	// ─── Lerp ───────────────────────────────────────────────────────────────
+	// --- Lerp ---------------------------------------------------------------
 	template <typename T> constexpr Vector2<T> Lerp(const Vector2<T>& a, const Vector2<T>& b, T t)
 	{ return a + (b - a) * t; }
 	template <typename T> constexpr Vector3<T> Lerp(const Vector3<T>& a, const Vector3<T>& b, T t)
@@ -358,7 +358,7 @@ namespace Math
 	template <typename T> constexpr Vector4<T> Lerp(const Vector4<T>& a, const Vector4<T>& b, T t)
 	{ return a + (b - a) * t; }
 
-	// ─── Clamp ──────────────────────────────────────────────────────────────
+	// --- Clamp --------------------------------------------------------------
 	template <typename T> constexpr Vector2<T> Clamp(const Vector2<T>& v, T mn, T mx)
 	{
 		return { v.x < mn ? mn : (v.x > mx ? mx : v.x), v.y < mn ? mn : (v.y > mx ? mx : v.y) };
@@ -374,7 +374,7 @@ namespace Math
 			 v.z < mn ? mn : (v.z > mx ? mx : v.z), v.w < mn ? mn : (v.w > mx ? mx : v.w) };
 	}
 
-	// ─── Min / Max ──────────────────────────────────────────────────────────
+	// --- Min / Max ----------------------------------------------------------
 	template <typename T> constexpr Vector2<T> Min(const Vector2<T>& a, const Vector2<T>& b)
 	{ return { a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y }; }
 	template <typename T> constexpr Vector3<T> Min(const Vector3<T>& a, const Vector3<T>& b)
@@ -389,7 +389,7 @@ namespace Math
 	template <typename T> constexpr Vector4<T> Max(const Vector4<T>& a, const Vector4<T>& b)
 	{ return { a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z, a.w > b.w ? a.w : b.w }; }
 
-	// ─── Degrees / Radians (vector overloads) ──────────────────────────────
+	// --- Degrees / Radians (vector overloads) ------------------------------
 	template <typename T> constexpr Vector2<T> Degrees(Vector2<T> rad)
 	{ return { rad.x * RAD_TO_DEG, rad.y * RAD_TO_DEG }; }
 	template <typename T> constexpr Vector3<T> Degrees(Vector3<T> rad)
@@ -400,7 +400,7 @@ namespace Math
 	template <typename T> constexpr Vector3<T> Radians(Vector3<T> deg)
 	{ return { deg.x * DEG_TO_RAD, deg.y * DEG_TO_RAD, deg.z * DEG_TO_RAD }; }
 
-	// ─── Spherical / Cartesian conversions ──────────────────────────────────
+	// --- Spherical / Cartesian conversions ----------------------------------
 	inline Vector3<float> SphericalToCartesian(Vector2<float> rot)
 	{
 		float c = std::cos(rot.y);
@@ -415,12 +415,12 @@ namespace Math
 		return Degrees(Vector2<float>(pitch, yaw));
 	}
 
-	// ─── Abs ────────────────────────────────────────────────────────────────
+	// --- Abs ----------------------------------------------------------------
 	template <typename T> constexpr Vector2<T> Abs(const Vector2<T>& v) { return { std::abs(v.x), std::abs(v.y) }; }
 	template <typename T> constexpr Vector3<T> Abs(const Vector3<T>& v) { return { std::abs(v.x), std::abs(v.y), std::abs(v.z) }; }
 	template <typename T> constexpr Vector4<T> Abs(const Vector4<T>& v) { return { std::abs(v.x), std::abs(v.y), std::abs(v.z), std::abs(v.w) }; }
 
-	// ─── Floor / Ceil ──────────────────────────────────────────────────────
+	// --- Floor / Ceil ------------------------------------------------------
 	template <typename T> constexpr Vector2<T> Floor(const Vector2<T>& v) { return { std::floor(v.x), std::floor(v.y) }; }
 	template <typename T> constexpr Vector3<T> Floor(const Vector3<T>& v) { return { std::floor(v.x), std::floor(v.y), std::floor(v.z) }; }
 	template <typename T> constexpr Vector4<T> Floor(const Vector4<T>& v) { return { std::floor(v.x), std::floor(v.y), std::floor(v.z), std::floor(v.w) }; }
@@ -429,7 +429,7 @@ namespace Math
 	template <typename T> constexpr Vector3<T> Ceil(const Vector3<T>& v) { return { std::ceil(v.x), std::ceil(v.y), std::ceil(v.z) }; }
 	template <typename T> constexpr Vector4<T> Ceil(const Vector4<T>& v) { return { std::ceil(v.x), std::ceil(v.y), std::ceil(v.z), std::ceil(v.w) }; }
 
-	// ─── Type aliases for backward compatibility ───────────────────────────
+	// --- Type aliases for backward compatibility ---------------------------
 	using Vector2F = Vector2<float>;
 	using Vector3F = Vector3<float>;
 	using Vector4F = Vector4<float>;

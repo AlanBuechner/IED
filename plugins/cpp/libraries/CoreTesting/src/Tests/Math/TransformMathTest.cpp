@@ -52,7 +52,7 @@ namespace Testing
 	{
 		float angle = Math::PI / 4.0f; // 45 degrees
 
-		// Rotate around X axis — our Rotate is left-handed, GLM's rotate is right-handed.
+		// Rotate around X axis - our Rotate is left-handed, GLM's rotate is right-handed.
 		// LH(angle) == RH(-angle), so negate the angle for comparison.
 		Math::Mat4 rotX = Rotate(angle, Vector3(1.0f, 0.0f, 0.0f));
 		glm::mat4 glmRotX = glm::rotate(glm::mat4(1.0f), -angle, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -84,7 +84,7 @@ namespace Testing
 		if (!MatricesEpsilonEqual<4, 4>(ValuePtr(rotZero), ValuePtr(Math::Mat4::Identity())))
 			TEST_FAILED("Rotate with zero axis should return identity");
 
-		// EulerAngleYXZ composition — our Rotate is LH, so negate angles for GLM comparison
+		// EulerAngleYXZ composition - our Rotate is LH, so negate angles for GLM comparison
 		float pitch = Math::PI / 6.0f;
 		float yaw = Math::PI / 3.0f;
 		float roll = Math::PI / 4.0f;

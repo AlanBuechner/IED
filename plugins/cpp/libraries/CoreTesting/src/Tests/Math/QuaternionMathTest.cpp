@@ -188,7 +188,7 @@ namespace Testing
 		if (!QuaternionsEpsilonEqual(neg, glmNeg))
 			TEST_FAILED("Quaternion negation mismatch");
 
-		// Rotate function (angleAxis * q) — our Rotate pre-multiplies: rot * q
+		// Rotate function (angleAxis * q) - our Rotate pre-multiplies: rot * q
 		// GLM's glm::rotate post-multiplies: q * angleAxis, so we must mirror the pre-multiply order.
 		// Also negate the angle for LH vs RH handedness difference.
 		Math::Quaternion rotQ = Rotate(qx, Math::PI / 4.0f, Vector3(0.0f, 1.0f, 0.0f));
@@ -250,7 +250,7 @@ namespace Testing
 		glm::quat glmQ1 = glm::angleAxis(0.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::quat glmQ2 = glm::angleAxis(Math::PI / 2.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 
-		// Lerp at t=0.5 — our Lerp normalizes and handles shortest path; GLM lerp is simple linear.
+		// Lerp at t=0.5 - our Lerp normalizes and handles shortest path; GLM lerp is simple linear.
 		// Compare against normalized GLM lerp result.
 		Math::Quaternion lerp = Lerp(q1, q2, 0.5f);
 		glm::quat glmLerpRaw = glmQ1 * 0.5f + glmQ2 * 0.5f;
@@ -296,7 +296,7 @@ namespace Testing
 			glm::angleAxis(pitch, glm::vec3(1.0f, 0.0f, 0.0f)) *
 			glm::angleAxis(roll, glm::vec3(0.0f, 0.0f, 1.0f));
 
-		// Extract Euler angles — our EulerAngles uses LH convention (pitch = asin(-m12)),
+		// Extract Euler angles - our EulerAngles uses LH convention (pitch = asin(-m12)),
 		// GLM's glm::eulerAngles uses RH convention. Direct comparison is not valid.
 		// Instead, verify round-trip: create quaternion from known Euler angles and extract back.
 		float pitchOut, yawOut, rollOut;
@@ -310,7 +310,7 @@ namespace Testing
 		if (!Math::EpsilonEqual(ourEuler.z, Roll(q)))
 			TEST_FAILED("EulerAngles.z != Roll");
 
-		// Individual pitch/yaw/roll extraction — our Pitch/Yaw/Roll use LH convention.
+		// Individual pitch/yaw/roll extraction - our Pitch/Yaw/Roll use LH convention.
 		// GLM's glm::pitch/yaw/roll use RH convention. Direct comparison is not valid.
 		// Instead, verify that the individual helpers return the same values as EulerAngles().
 		float ourPitch = Pitch(q);
@@ -352,7 +352,7 @@ namespace Testing
 		Math::Quaternion q = AngleAxis(angle, axis);
 		glm::quat glmQ = glm::angleAxis(angle, glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)));
 
-		// Mat3Cast — with GLM_FORCE_LEFT_HANDED defined, both our Mat3Cast and
+		// Mat3Cast - with GLM_FORCE_LEFT_HANDED defined, both our Mat3Cast and
 		// glm::mat3_cast produce left-handed rotation matrices. Verify by checking
 		// that it's a proper orthonormal rotation matrix (columns are unit vectors
 		// and orthogonal) and comparing directly against GLM.
@@ -382,7 +382,7 @@ namespace Testing
 		if (!Math::EpsilonEqual(m3.Determinant(), 1.0f))
 			TEST_FAILED("Mat3Cast determinant is not +1");
 
-		// Direct comparison with glm::mat3_cast — both are left-handed now
+		// Direct comparison with glm::mat3_cast - both are left-handed now
 		glm::mat3 glmM3 = glm::mat3_cast(glmQ);
 		if (!MatricesEpsilonEqual<3, 3>(ValuePtr(m3), glm::value_ptr(glmM3)))
 			TEST_FAILED("Mat3Cast mismatch with glm::mat3_cast (LH)");
@@ -392,7 +392,7 @@ namespace Testing
 		if (!QuaternionsEpsilonEqual(qFromM3, glmQ))
 			TEST_FAILED("QuatCast(Mat3Cast(q)) mismatch");
 
-		// Mat4Cast — verify it wraps Mat3Cast correctly with zero translation and w=1
+		// Mat4Cast - verify it wraps Mat3Cast correctly with zero translation and w=1
 		Math::Mat4 m4 = Mat4Cast(q);
 
 		// Upper-left 3x3 should match Mat3Cast (compare element by element)
@@ -475,38 +475,38 @@ namespace Testing
 				TEST_FAILED("Mat4Cast translation/w mismatch with glm on " label); \
 		} while(0)
 
-		// Diagonal axis 45° (already tested above as m4)
+		// Diagonal axis 45 deg (already tested above as m4)
 		glm::quat glmQDiag = glm::angleAxis(angle, glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)));
-		VERIFY_MAT4_ROTATION(m4, "diagonal axis 45°");
-		VERIFY_MAT4_EQUALS_GLM(m4, glmQDiag, "diagonal axis 45°");
+		VERIFY_MAT4_ROTATION(m4, "diagonal axis 45 deg");
+		VERIFY_MAT4_EQUALS_GLM(m4, glmQDiag, "diagonal axis 45 deg");
 
-		// 90° around X
+		// 90 deg around X
 		Math::Quaternion qx = AngleAxis(Math::PI / 2.0f, Vector3(1.0f, 0.0f, 0.0f));
 		glm::quat glmQx = glm::angleAxis(Math::PI / 2.0f, glm::vec3(1.0f, 0.0f, 0.0f));
 		Math::Mat4 m4x = Mat4Cast(qx);
-		VERIFY_MAT4_ROTATION(m4x, "X axis 90°");
-		VERIFY_MAT4_EQUALS_GLM(m4x, glmQx, "X axis 90°");
+		VERIFY_MAT4_ROTATION(m4x, "X axis 90 deg");
+		VERIFY_MAT4_EQUALS_GLM(m4x, glmQx, "X axis 90 deg");
 
-		// 90° around Y
+		// 90 deg around Y
 		Math::Quaternion qy = AngleAxis(Math::PI / 2.0f, Vector3(0.0f, 1.0f, 0.0f));
 		glm::quat glmQy = glm::angleAxis(Math::PI / 2.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 		Math::Mat4 m4y = Mat4Cast(qy);
-		VERIFY_MAT4_ROTATION(m4y, "Y axis 90°");
-		VERIFY_MAT4_EQUALS_GLM(m4y, glmQy, "Y axis 90°");
+		VERIFY_MAT4_ROTATION(m4y, "Y axis 90 deg");
+		VERIFY_MAT4_EQUALS_GLM(m4y, glmQy, "Y axis 90 deg");
 
-		// 90° around Z
+		// 90 deg around Z
 		Math::Quaternion qz = AngleAxis(Math::PI / 2.0f, Vector3(0.0f, 0.0f, 1.0f));
 		glm::quat glmQz = glm::angleAxis(Math::PI / 2.0f, glm::vec3(0.0f, 0.0f, 1.0f));
 		Math::Mat4 m4z = Mat4Cast(qz);
-		VERIFY_MAT4_ROTATION(m4z, "Z axis 90°");
-		VERIFY_MAT4_EQUALS_GLM(m4z, glmQz, "Z axis 90°");
+		VERIFY_MAT4_ROTATION(m4z, "Z axis 90 deg");
+		VERIFY_MAT4_EQUALS_GLM(m4z, glmQz, "Z axis 90 deg");
 
-		// 180° around Y
+		// 180 deg around Y
 		Math::Quaternion qy180 = AngleAxis(Math::PI, Vector3(0.0f, 1.0f, 0.0f));
 		glm::quat glmQy180 = glm::angleAxis(Math::PI, glm::vec3(0.0f, 1.0f, 0.0f));
 		Math::Mat4 m4y180 = Mat4Cast(qy180);
-		VERIFY_MAT4_ROTATION(m4y180, "Y axis 180°");
-		VERIFY_MAT4_EQUALS_GLM(m4y180, glmQy180, "Y axis 180°");
+		VERIFY_MAT4_ROTATION(m4y180, "Y axis 180 deg");
+		VERIFY_MAT4_EQUALS_GLM(m4y180, glmQy180, "Y axis 180 deg");
 
 		// Combined rotations (yaw * pitch * roll)
 		float pitch = Math::PI / 6.0f;

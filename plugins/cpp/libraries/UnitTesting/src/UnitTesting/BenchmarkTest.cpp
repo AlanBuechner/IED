@@ -8,7 +8,7 @@
 namespace Testing
 {
 
-	// ─── File-local benchmark result counters ──────────────────────────────
+	// --- File-local benchmark result counters ------------------------------
 
 	uint32 s_TotalBenchmarks = 0;
 	uint32 s_CompletedBenchmarks = 0;
@@ -16,7 +16,7 @@ namespace Testing
 	Core::Vector<Core::BenchmarkResult> s_BenchmarkResults;
 
 
-	// ─── BenchmarkGroup ────────────────────────────────────────────────────
+	// --- BenchmarkGroup ----------------------------------------------------
 
 	Testing::BenchmarkGroup* BenchmarkGroup::GetOrCreateSubGroup(const Core::String& name)
 	{
@@ -57,7 +57,7 @@ namespace Testing
 		}
 	}
 
-	// ─── Helpers for aligned output ────────────────────────────────────────
+	// --- Helpers for aligned output ----------------------------------------
 
 	static uint32 CollectMaxBenchmarkNameLength(BenchmarkGroup& group)
 	{
@@ -114,7 +114,7 @@ namespace Testing
 			switch (result)
 			{
 			case InvocationResult::Success:
-				// Benchmark completed normally — it should have called BENCHMARK_PASSED().
+				// Benchmark completed normally - it should have called BENCHMARK_PASSED().
 				break;
 			case InvocationResult::TestFailed:
 				// Failure already reported by the benchmark macro; just skip BENCHMARK_PASSED().
@@ -143,7 +143,7 @@ namespace Testing
 		Logging::Logger::SetConsoleColor(Logging::Logger::Trace);
 	}
 
-	// ─── Global entry point ────────────────────────────────────────────────
+	// --- Global entry point ------------------------------------------------
 
 	void RunBenchmarks()
 	{

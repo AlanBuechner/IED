@@ -8,7 +8,7 @@
 namespace Testing
 {
 
-	// ─── Static CLI state ────────────────────────────────────────────────
+	// --- Static CLI state ------------------------------------------------
 
 	static Core::String s_TestFilter;
 	static Core::String s_BenchmarkFilter;
