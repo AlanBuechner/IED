@@ -24,6 +24,7 @@ import time
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import api_digest  # noqa: E402
 import common  # noqa: E402
 import grade  # noqa: E402
 import report  # noqa: E402
@@ -48,20 +49,24 @@ def variant_folder(name):
 	return name if os.path.isabs(name) else os.path.join(common.VARIANTS, name)
 
 
-def prepare_toolchain(variant, base=common.DEV_TOOLCHAIN):
+def prepare_toolchain(variant, base=common.DEV_TOOLCHAIN, name=None):
 	"""A copy of a toolchain (the dev one, or a frozen copy so runs days apart compare) with the variant's toolchain/
-	files over it."""
-	target = os.path.join(common.WORK, "toolchains", os.path.basename(variant))
+	files over it, in a folder of its own (`name`, by default the variant's): a run names its own, so two runs of one
+	variant never rewrite the files the other's servers read."""
+	target = os.path.join(common.WORK, "toolchains", name or os.path.basename(variant))
 	common.mirror(base, target, ignore=lambda rel: rel.endswith(".pdb") and not rel.startswith("tools"))
 	common.overlay(os.path.join(variant, "toolchain"), target)
-	for source, destination in common.read_json(os.path.join(variant, "variant.json"), {}).get("toolchainCopies", []):
+	described = common.read_json(os.path.join(variant, "variant.json"), {})
+	for digest in described.get("apiDigests", []):
+		api_digest.write_digest(os.path.join(target, digest["library"]), os.path.join(target, digest["out"]), digest["title"])
+	for source, destination in described.get("toolchainCopies", []):
 		common.overlay(os.path.join(target, source), os.path.join(target, destination))
 	return target
 
 
-def prepare_home(variant):
-	"""A copy of IED's home (plugins, frontend, shared) with the variant's home/ files over it."""
-	target = os.path.join(common.WORK, "homes", os.path.basename(variant))
+def prepare_home(variant, name=None):
+	"""A copy of IED's home (plugins, frontend, shared) with the variant's home/ files over it, named as the toolchain."""
+	target = os.path.join(common.WORK, "homes", name or os.path.basename(variant))
 	for part in HOME_PARTS:
 		common.mirror(os.path.join(common.REPO, part), os.path.join(target, part), ignore=lambda rel: os.path.basename(rel) in ("target", "__pycache__", "node_modules"))
 	common.overlay(os.path.join(variant, "home"), target)
@@ -74,7 +79,20 @@ def toolchain_line(toolchain):
 	return 'toolchain = "%s"' % toolchain.replace("\\", "/")
 
 
-def prepare_c4(task, spec, ws, toolchain):
+def write_starter(starter, ws, project):
+	"""The variant's starter files (its starter/ folder) over what nuke init wrote, {name} the project's name."""
+	for folder, _, files in os.walk(starter):
+		for name in files:
+			source = os.path.join(folder, name)
+			target = os.path.join(ws, os.path.relpath(source, starter))
+			os.makedirs(os.path.dirname(target), exist_ok=True)
+			with open(source, encoding="utf-8") as f:
+				text = f.read().replace("{name}", project)
+			with open(target, "w", encoding="utf-8", newline="\n") as f:
+				f.write(text)
+
+
+def prepare_c4(task, spec, ws, toolchain, starter):
 	fixture = os.path.join(task["dir"], "c4", "fixture")
 	if os.path.isdir(fixture):
 		shutil.copytree(fixture, ws)
@@ -88,6 +106,8 @@ def prepare_c4(task, spec, ws, toolchain):
 		code, out, err, _ = common.nuke(["init", spec["project"], "--toolchain", toolchain.replace("\\", "/")], ws)
 		if code != 0:
 			raise RuntimeError("nuke init failed: %s%s" % (out, err))
+		if starter:
+			write_starter(starter, ws, spec["project"])
 	code, out, err, _ = common.nuke(["init", "--ied"], ws)
 	if code != 0:
 		raise RuntimeError("nuke init --ied failed: %s%s" % (out, err))
@@ -131,9 +151,9 @@ def copy_fixture_files(task, ws):
 		shutil.copyfile(os.path.join(task["dir"], source), target)
 
 
-def prepare_workspace(task, lang, ws, toolchain):
+def prepare_workspace(task, lang, ws, toolchain, starter=None):
 	spec = task[lang]
-	opened = prepare_c4(task, spec, ws, toolchain) if lang == "c4" else prepare_go(task, spec, ws)
+	opened = prepare_c4(task, spec, ws, toolchain, starter) if lang == "c4" else prepare_go(task, spec, ws)
 	copy_fixture_files(task, ws)
 	commit_fixture(ws)
 	return opened
@@ -218,7 +238,7 @@ async def run_job(job, settings, config):
 	os.makedirs(job_dir, exist_ok=True)
 	record = {"task": task["id"], "lang": lang, "repeat": job["repeat"], "workspace": ws, "category": task.get("category"), "set": task.get("set")}
 	try:
-		opened = prepare_workspace(task, lang, ws, config["toolchain"])
+		opened = prepare_workspace(task, lang, ws, config["toolchain"], config.get("starter"))
 		async with slots.Slot(config["slots"], os.path.basename(job_dir)):
 			await run_turn(task, lang, job_dir, ws, opened, settings, config, record)
 	except Exception as failed:
@@ -301,7 +321,9 @@ def main():
 	out = os.path.join(common.RESULTS, run_id)
 	os.makedirs(out)
 	print("preparing the %s toolchain and home" % os.path.basename(variant), flush=True)
-	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain), "home": prepare_home(variant), "slots": args.slots}
+	starter = os.path.join(variant, "starter")
+	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain, run_id), "home": prepare_home(variant, run_id), "slots": args.slots,
+		"starter": starter if os.path.isdir(starter) else None}
 	jobs = []
 	for repeat in range(1, args.repeat + 1):
 		for task in tasks:

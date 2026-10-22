@@ -1,0 +1,16 @@
+{
+	"description": "v4, and a generated Bedrock API digest (docs/library/bedrock-api.md) the C4 section points to instead of code_members: needs build/bin/langeval-tools",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}

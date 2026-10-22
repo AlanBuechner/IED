@@ -1,0 +1,16 @@
+{
+	"description": "v5, and a richer starter project for from-scratch tasks (starter/: main reading its arguments and writing through Platform::WriteOutput and Core::Format, one example test in src/tests): needs build/bin/langeval-tools",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}

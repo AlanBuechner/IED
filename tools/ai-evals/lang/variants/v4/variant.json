@@ -1,5 +1,5 @@
 {
-	"description": "v3, and program_run (a program with arguments, no shell; exit code, stdout and stderr apart) in the prompts: needs a server with it (build/bin/langeval-tools)",
+	"description": "v3, and program_run (a program with arguments, no shell; exit code, stdout and stderr apart) in the prompts: needs a server with docs, hints and program_run (build/bin/langeval-tools)",
 	"toolchainCopies": [
 		[
 			"docs",

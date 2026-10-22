@@ -1,0 +1,16 @@
+{
+	"description": "v7 on the toolchain at 452dbef (Format writes each argument as its type, standard input, Split, ToLower, ParseDouble, C++-habit diagnostics): prompts and skill say so, digest regenerated; needs build/bin/langeval-ctx",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}

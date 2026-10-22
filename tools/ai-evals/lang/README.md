@@ -47,8 +47,12 @@ A variant (`variants/<name>/`) is what the model is given, changed without touch
 a copy of IED's `plugins/`, `frontend/` and `shared/` (the chat's prompts, other plugins' manifests and skills), and
 `toolchain/` files over a copy of the dev C4 toolchain (`ied/`: the C4 plugin's skills and system-message section;
 `docs/`). `baseline` is empty. A `variant.json` may say what the variant is (`description`) and copy folders within
-the toolchain copy (`toolchainCopies`: `[["docs", "ied/docs"]]`). Changes to tools (C4 code under `plugins/chat/code/`) need a server build: pass that
-build's exe with `--server`.
+the toolchain copy (`toolchainCopies`: `[["docs", "ied/docs"]]`), after writing any API digest it asks for
+(`apiDigests`: `[{"library": "Bedrock", "out": "docs/library/bedrock-api.md", "title": "..."}]`, by `api_digest.py` from
+the run's own toolchain, so it always matches the headers). `starter/` files go over what `nuke init` writes for
+a C4 task that starts from nothing (`{name}` becomes the project's name). Each run prepares its own copies under
+`%TEMP%/ied-langeval/{toolchains,homes}/<run>`, so two runs of one variant never rewrite each other's files. Changes to
+tools (C4 code under `plugins/chat/code/`) need a server build: pass that build's exe with `--server`.
 
 ## Tasks (`tasks/<id>/task.toml`)
 
@@ -100,5 +104,7 @@ against the reference".
 - **Runtime:** the benchmark's time and peak private memory, and both against the reference solution.
 
 Results: `build/ai-evals/lang/<run>/` - `run.json`, `summary.md`, `rows.json`, and per job `agent.json` (the turn),
-`grade.json`, `transcript.jsonl` (every message the model was sent), `model.jsonl` and `first-request.json` (the
-system message and tool definitions it saw).
+`grade.json` (each program check with its time and peak working set), `transcript.jsonl` (the turn as IED stored it:
+tool calls with their result previews), `model.jsonl` (each model request's size and timings), `first-request.json`
+(the system message and tool definitions it saw) and `last-request.json` (the whole conversation as last sent, every
+tool result in full unless compression dropped it).

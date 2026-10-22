@@ -1,0 +1,16 @@
+{
+	"description": "v6 on build/bin/langeval-ctx: build_run and problems_list put each error's source line under it, and the deferred tool index lists names by group (compact)",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}

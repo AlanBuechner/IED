@@ -249,6 +249,8 @@ def run_checks(task, program, scratch):
 			continue
 		stdin = os.path.join(task_data(task), check["stdin"]) if check.get("stdin") else None
 		ran = common.measure([program] + [expand(w, task, scratch) for w in check.get("args", [])], scratch, timeout=check.get("timeout", 60), stdin_path=stdin)
+		row["seconds"] = round(ran["seconds"], 4)
+		row["peakMB"] = round((ran["peakWorkingSet"] or 0) / 1048576, 1)
 		problems = []
 		if ran["exit"] is None:
 			problems.append("timed out")

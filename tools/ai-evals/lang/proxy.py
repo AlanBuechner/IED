@@ -17,7 +17,7 @@ HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriz
 
 
 class Recorder:
-	"""Where each job's notes go: <folder>/model.jsonl, <folder>/first-request.json."""
+	"""Where each job's notes go: <folder>/model.jsonl, <folder>/first-request.json, <folder>/last-request.json (the whole conversation as last sent)."""
 
 	def __init__(self):
 		self.folders = {}
@@ -35,6 +35,9 @@ class Recorder:
 			if body is not None and entry.get("path", "").endswith("/chat/completions") and not os.path.exists(first):
 				with open(first, "w", encoding="utf-8", newline="\n") as f:
 					json.dump(body, f, indent="\t")
+			if body is not None and entry.get("path", "").endswith("/chat/completions"):
+				with open(os.path.join(folder, "last-request.json"), "w", encoding="utf-8", newline="\n") as f:
+					json.dump(body, f)
 			with open(os.path.join(folder, "model.jsonl"), "a", encoding="utf-8", newline="\n") as f:
 				f.write(json.dumps(entry) + "\n")
 
