@@ -13,6 +13,7 @@
 #include "Compiler/Projects.h"
 #include <unordered_map>
 #include "Model/Closures.h"
+#include "Model/LifecycleMethods.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include "Core/Core.h"
@@ -164,6 +165,9 @@ namespace Scripting
 		/// type's parallel record list, so this is an exact lookup - no re-resolution needed. Null
 		/// when the method has no body yet (declaration only) or is not on `type`.
 		const FunctionRecord* RecordForMethod(const ObjectType* type, const ObjectType::MethodInfo* method) const;
+		/// The lifecycle methods `type` declares itself (FindLifecycleMethods), remembered until its methods or their
+		/// records change (a template instance's extensions join it later).
+		const LifecycleMethods& LifecycleMethodsOf(const ObjectType* type) const;
 		/// The method a method record declares in its type; null for a free function or an extension method.
 		const ObjectType::MethodInfo* MethodForRecord(const FunctionRecord& record) const;
 		/// The extension methods whose receiver is the primitive `type` (`... extends float`); null when none.
@@ -403,6 +407,13 @@ namespace Scripting
 		mutable std::unordered_map<const ObjectType*, Core::Vector<const FunctionRecord*>> m_MethodRecords;
 		mutable std::unordered_map<const FunctionType*, const FunctionRecord*> m_RecordBySignature;
 		mutable std::map<std::pair<const ObjectType*, LifecycleOp>, const FunctionRecord*> m_SynthesizedLifecycle;
+		struct KnownLifecycle
+		{
+			uint32 methods = 0;
+			uint32 records = 0;
+			LifecycleMethods found;
+		};
+		mutable std::unordered_map<const ObjectType*, KnownLifecycle> m_LifecycleMethods; // LifecycleMethodsOf's
 		mutable std::unordered_map<const ObjectType*, const Scope*> m_TypeScopes; // type -> its class scope (member domain)
 		mutable std::unordered_map<const ObjectType*, std::deque<TemplateDef>> m_MemberTemplates; // type -> its member function templates (stable addresses)
 		mutable std::map<std::vector<const Type*>, const ObjectType*> m_ReturnLists; // element types -> the return list's struct

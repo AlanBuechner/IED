@@ -485,5 +485,12 @@ int main(int argc, char** argv)
 		std::cerr << "error: no input: give the folders or files to compile (C4.exe -h lists the options)" << std::endl;
 		return kUsageError;
 	}
-	return (new CompilerDriver(opts))->Run(); // the program and its model go with the process, as the backend's do
+	const int code = (new CompilerDriver(opts))->Run(); // the program and its model go with the process, as the backend's do
+	// Everything is written: the process ends without its libraries' shutdown, which hands each of the allocator's
+	// spans back one by one (a tenth of a build that changed nothing) for memory the system takes back whole.
+	std::cout.flush();
+	std::cerr.flush();
+	std::fflush(nullptr);
+	TerminateProcess(GetCurrentProcess(), static_cast<UINT>(code));
+	return code;
 }

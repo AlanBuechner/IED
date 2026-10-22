@@ -1,5 +1,6 @@
 #pragma once
 #include "Backend/HIR/ModelQueries.h"
+#include "Model/LifecycleMethods.h"
 #include <vector>
 
 namespace Scripting
@@ -9,16 +10,9 @@ namespace Scripting
 	/// is a valid object and bytes copy, assign and relocate it.
 	namespace LifecycleFacts
 	{
-		/// The lifecycle methods a type declares itself (extension methods included); null when absent.
-		struct OwnMethods
-		{
-			const FunctionRecord* defaultCreate = nullptr; // a 0-argument create with a body (or linked)
-			const FunctionRecord* destroy = nullptr;       // [operator("delete")]
-			const FunctionRecord* copy = nullptr;          // [operator("copy")] taking one T&
-			const FunctionRecord* assign = nullptr;        // [operator("=")] / "assign" taking one T&
-			std::vector<const FunctionRecord*> creates;    // every create overload with a body (or linked)
-		};
-		OwnMethods Own(const ModelQueries& q, const ObjectType* type);
+		/// The lifecycle methods a type declares itself, as the model remembers them (ProgramModel::LifecycleMethodsOf).
+		using OwnMethods = LifecycleMethods;
+		const OwnMethods& Own(const ModelQueries& q, const ObjectType* type);
 
 		/// The class base (the one non-interface base), or null.
 		const ObjectType* ClassBase(const ObjectType* type);

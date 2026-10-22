@@ -9,15 +9,6 @@ namespace Scripting
 	{
 		namespace
 		{
-			bool HasAnnotation(const FunctionRecord* rec, const char* name)
-			{
-				for (const Core::String& a : rec->operatorAnnotations)
-					if (a == name) return true;
-				return false;
-			}
-
-			bool Callable(const FunctionRecord* rec) { return rec && HasCode(*rec); }
-
 			// `Init() {}`: nothing to run beyond the zeroing every object already gets.
 			bool IsEmptyCreate(const FunctionRecord* rec)
 			{
@@ -60,25 +51,9 @@ namespace Scripting
 			}
 		}
 
-		OwnMethods Own(const ModelQueries& q, const ObjectType* type)
+		const OwnMethods& Own(const ModelQueries& q, const ObjectType* type)
 		{
-			OwnMethods own;
-			for (uint32 i = 0; i < type->GetMethodCount(); ++i)
-			{
-				const FunctionRecord* rec = q.RecordForMethod(type, &type->GetMethods()[i]);
-				if (!Callable(rec) || rec->isStatic) continue;
-				if (HasAnnotation(rec, "create"))
-				{
-					own.creates.push_back(rec);
-					// The default create takes no arguments: one with no parameters, else one whose every parameter has a default.
-					const bool noParameters = rec->type && rec->type->GetParameterCount() == 0;
-					if (rec->minArity == 0 && (!own.defaultCreate || noParameters)) own.defaultCreate = rec;
-				}
-				if (HasAnnotation(rec, "delete") && !own.destroy) own.destroy = rec;
-				if (HasAnnotation(rec, "copy") && TakesOwnType(rec, type) && !own.copy) own.copy = rec;
-				if ((HasAnnotation(rec, "assign") || HasAnnotation(rec, "=")) && TakesOwnType(rec, type) && !own.assign) own.assign = rec;
-			}
-			return own;
+			return q.Model()->LifecycleMethodsOf(type);
 		}
 
 		const ObjectType* ClassBase(const ObjectType* type)

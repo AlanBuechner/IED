@@ -233,6 +233,8 @@ namespace Scripting
 		// a real directive. Records the offset of each 'extern' keyword for LSP coordinate mapping.
 		std::vector<ExternDirective> FindExternDirectives(const std::string& text)
 		{
+			// Most files name no foreign code: one search for the keyword spares them the walk.
+			if (text.find("extern") == std::string::npos) return {};
 			std::vector<ExternDirective> found;
 			size_t i = 0, n = text.size();
 			while (i < n)

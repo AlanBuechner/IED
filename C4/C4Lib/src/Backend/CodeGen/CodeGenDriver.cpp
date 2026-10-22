@@ -339,7 +339,7 @@ namespace Scripting
 		Core::Vector<const FunctionRecord*> records, targets;
 		model.AllFunctionRecords(records);
 		for (const FunctionRecord* rec : records)
-			if (ReflectedFunction(*rec) && Invokable(*rec) && !IsHostSymbol(rec->mangledName.c_str()) && HasCallableCode(model, *rec) &&
+			if (ReflectedFunction(*rec) && Invokable(*rec) && !IsHostSymbol(rec->mangledName) && HasCallableCode(model, *rec) &&
 				m_ThunkTargets.insert(rec).second)
 				targets.Push(rec);
 		return targets;

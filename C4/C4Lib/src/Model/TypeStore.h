@@ -1,10 +1,11 @@
 #pragma once
 #include "Model/Types.h"
 #include "Core/Core.h"
+#include <functional>
 #include <map>
 #include <memory>
 #include <unordered_map>
-#include <tuple>
+#include <vector>
 
 namespace Scripting
 {
@@ -74,19 +75,51 @@ namespace Scripting
 		Core::Vector<PrimitiveType*> m_Builtins; // one per TypeKind index, nullptr until made
 		std::unordered_map<Core::String, const Type*> m_BuiltinByName;
 		Core::Vector<std::unique_ptr<Type>> m_Owned;
-		std::map<std::pair<const Type*, bool>, const Type*> m_PointerCache;
-		std::map<std::pair<const Type*, bool>, const Type*> m_ReferenceCache;
-		std::map<std::pair<const Type*, uint64>, const Type*> m_ArrayCache;
+		// What a signature is interned by: what it returns (a funcptr's and a func's by name), its parameters and
+		// whether it is variadic.
+		template <typename Returned>
+		struct SignatureKey
+		{
+			Returned returned;
+			std::vector<const Type*> params;
+			bool variadic = false;
+			bool operator==(const SignatureKey& other) const
+			{
+				return returned == other.returned && params == other.params && variadic == other.variadic;
+			}
+		};
+
+		struct KeyHash
+		{
+			static size_t Combine(size_t seed, size_t value) { return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2)); }
+
+			template <typename A, typename B>
+			size_t operator()(const std::pair<A, B>& key) const { return Combine(std::hash<A>{}(key.first), std::hash<B>{}(key.second)); }
+
+			template <typename Returned>
+			size_t operator()(const SignatureKey<Returned>& key) const
+			{
+				size_t seed = Combine(std::hash<Returned>{}(key.returned), key.variadic ? 1 : 0);
+				for (const Type* param : key.params) seed = Combine(seed, std::hash<const Type*>{}(param));
+				return seed;
+			}
+		};
+
+		template <typename Returned>
+		static SignatureKey<Returned> KeyOf(Returned returned, const Core::Vector<const Type*>& params, bool variadic)
+		{
+			return { std::move(returned), std::vector<const Type*>(params.begin(), params.end()), variadic };
+		}
+
+		std::unordered_map<std::pair<const Type*, bool>, const Type*, KeyHash> m_PointerCache;
+		std::unordered_map<std::pair<const Type*, bool>, const Type*, KeyHash> m_ReferenceCache;
+		std::unordered_map<std::pair<const Type*, uint64>, const Type*, KeyHash> m_ArrayCache;
 		std::map<std::pair<const Type*, uint32>, const Type*> m_SwizzleCache; // (element, laneCount) -> <N x elem>
 		std::map<const Type*, const Type*> m_InitListCache; // element type -> __init_list<T>
 		std::map<uint32, const Type*> m_BracedListCache;    // entry count -> {N entries}
-		Core::Vector<std::pair<Core::String, Core::Vector<const Type*>>> m_FunPtrKeys; // (return name, params)
-		Core::Vector<const Type*> m_FunPtrValues;                                      // parallel to m_FunPtrKeys
-		Core::Vector<std::pair<Core::String, Core::Vector<const Type*>>> m_FuncKeys;   // (return name, params)
-		Core::Vector<const Type*> m_FuncValues;                                        // parallel to m_FuncKeys
-		// Interned free-function signatures: (return type, param types) -> canonical instance. A
-		// vector (not a map): the key holds a Core::Vector, which has no ==/hash; the set is small.
-		Core::Vector<std::tuple<const Type*, Core::Vector<const Type*>, bool, const FunctionType*>> m_FunctionCache;
+		std::unordered_map<SignatureKey<Core::String>, const Type*, KeyHash> m_FunPtrCache;
+		std::unordered_map<SignatureKey<Core::String>, const Type*, KeyHash> m_FuncCache;
+		std::unordered_map<SignatureKey<const Type*>, const FunctionType*, KeyHash> m_FunctionCache; // every function's signature
 	};
 
 } // namespace Scripting

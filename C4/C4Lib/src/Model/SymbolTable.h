@@ -209,6 +209,7 @@ namespace Scripting
 		Kind m_Kind;
 		Core::String m_Name;
 		Scope* m_Parent = nullptr;
+		static constexpr size_t kComparedNames = 4; // Entries compares names in a layer of at most this many
 		std::unordered_map<Core::String, Core::Vector<std::unique_ptr<SymbolInfo>>> m_Symbols;
 		Core::Vector<std::unique_ptr<Scope>> m_Children;
 	};

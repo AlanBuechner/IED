@@ -126,39 +126,27 @@ namespace Scripting
 	const Type* TypeStore::FunPtr(const Type* returnType, const Core::Vector<const Type*>& paramTypes)
 	{
 		if (!returnType) return nullptr;
-		Core::String retName = returnType->GetName();
-		for (uint32 i = 0; i < m_FunPtrKeys.Count(); ++i)
-			if (m_FunPtrKeys[i].first == retName && m_FunPtrKeys[i].second == paramTypes)
-				return m_FunPtrValues[i];
-		const Type* t = Own(new FunPtrType(returnType, paramTypes));
-		m_FunPtrKeys.Push({ retName, paramTypes });
-		m_FunPtrValues.Push(t);
-		return t;
+		auto [entry, fresh] = m_FunPtrCache.try_emplace(KeyOf(returnType->GetName(), paramTypes, false), nullptr);
+		if (fresh) entry->second = Own(new FunPtrType(returnType, paramTypes));
+		return entry->second;
 	}
 
 	const Type* TypeStore::Func(const Type* returnType, const Core::Vector<const Type*>& paramTypes)
 	{
 		if (!returnType) return nullptr;
-		Core::String retName = returnType->GetName();
-		for (uint32 i = 0; i < m_FuncKeys.Count(); ++i)
-			if (m_FuncKeys[i].first == retName && m_FuncKeys[i].second == paramTypes)
-				return m_FuncValues[i];
-		const Type* t = Own(new FuncType(returnType, paramTypes));
-		m_FuncKeys.Push({ retName, paramTypes });
-		m_FuncValues.Push(t);
-		return t;
+		auto [entry, fresh] = m_FuncCache.try_emplace(KeyOf(returnType->GetName(), paramTypes, false), nullptr);
+		if (fresh) entry->second = Own(new FuncType(returnType, paramTypes));
+		return entry->second;
 	}
 
 	const FunctionType* TypeStore::Function(const Type* returnType, const Core::Vector<const Type*>& paramTypes, bool variadic)
 	{
-		for (const auto& entry : m_FunctionCache)
-			if (std::get<0>(entry) == returnType && std::get<1>(entry) == paramTypes && std::get<2>(entry) == variadic)
-				return std::get<3>(entry);
+		auto [entry, fresh] = m_FunctionCache.try_emplace(KeyOf(returnType, paramTypes, variadic), nullptr);
+		if (!fresh) return entry->second;
 		Core::Vector<FunctionType::ParameterInfo> infos;
 		for (const Type* p : paramTypes) { FunctionType::ParameterInfo pi; pi.m_Type = p; infos.Push(pi); }
-		const FunctionType* t = Own(new FunctionType(returnType, infos, variadic));
-		m_FunctionCache.Push({ returnType, paramTypes, variadic, t });
-		return t;
+		entry->second = Own(new FunctionType(returnType, infos, variadic));
+		return entry->second;
 	}
 
 	void TypeStore::FinalizeLayouts()

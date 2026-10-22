@@ -66,6 +66,14 @@ namespace Scripting
 			bindingScope, context);
 	}
 
+	// Segments 0 to `last` of `name`, written as `A::B<int32>::C` would be without its arguments: `A::B`.
+	static Core::String PathTo(const NamespaceQualifiedNameNode& name, uint32 last)
+	{
+		Core::String path;
+		for (uint32 i = 0; i <= last && i < name.SegmentCount(); ++i) path += (i ? "::" : "") + name.GetSegments()[i].nameToken.GetText();
+		return path;
+	}
+
 	QueryResult<const Type*> TypeResolver::ResolveTypeInternal(const ProgramModel& model, const QualTypeNode& node, uint32 unitId, Scope* bindingScope, const Scope* context) const
 	{
 		if (node.IsReturnList()) return ResolveReturnList(model, node, unitId, bindingScope, context);
@@ -96,13 +104,10 @@ namespace Scripting
 		// whole of template instantiation: fake aliases in a scope, nothing else. Its parent chain
 		// carries outer bindings and then globals, so unbound names fall through naturally.
 		const Scope* from = model.m_Symbols->GetRoot();
-		Core::String fullPath;
 		for (uint32 i = 0; i < base->SegmentCount(); ++i)
 		{
 			const auto& seg = base->GetSegments()[i];
 			const Core::String& name = seg.nameToken.GetText();
-			if (!fullPath.empty()) fullPath += "::";
-			fullPath += name;
 
 			bool isFinal = (i == base->SegmentCount() - 1);
 
@@ -112,7 +117,7 @@ namespace Scripting
 				// `__init_list<T>` is a BUILT-IN alias template (doc 05): it resolves to an ordinary
 				// InitListType with no user definition. Checked before the symbol table so it works
 				// in every unit without any declaration.
-				if (fullPath == "__init_list" && seg.templateArgs->ArgumentCount() == 1)
+				if (i == 0 && name == "__init_list" && seg.templateArgs->ArgumentCount() == 1)
 				{
 					if (const auto* elemNode = dynamic_cast<const QualTypeNode*>(seg.templateArgs->GetArguments()[0].Get()))
 					{
@@ -135,7 +140,7 @@ namespace Scripting
 				if (!inst.Ok()) return inst;
 				const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(inst.value));
 				const Scope* members = obj ? model.TypeScope(obj) : nullptr;
-				if (!members) return QueryResult<const Type*>::Fail(QueryError::NotFound, "not a class: " + fullPath);
+				if (!members) return QueryResult<const Type*>::Fail(QueryError::NotFound, "not a class: " + PathTo(*base, i));
 				from = members;
 				continue;
 			}

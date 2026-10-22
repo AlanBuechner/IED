@@ -120,6 +120,17 @@ namespace Scripting
 		return nullptr;
 	}
 
+	const LifecycleMethods& ProgramModel::LifecycleMethodsOf(const ObjectType* type) const
+	{
+		const auto records = m_MethodRecords.find(type);
+		const uint32 recordCount = records == m_MethodRecords.end() ? 0 : records->second.Count();
+		auto [entry, fresh] = m_LifecycleMethods.try_emplace(type);
+		KnownLifecycle& known = entry->second;
+		if (fresh || known.methods != type->GetMethodCount() || known.records != recordCount)
+			known = { type->GetMethodCount(), recordCount, FindLifecycleMethods(*this, type) };
+		return known.found;
+	}
+
 	const ObjectType::MethodInfo* ProgramModel::MethodForRecord(const FunctionRecord& record) const
 	{
 		if (!record.containingType || record.isExtensionMethod) return nullptr;

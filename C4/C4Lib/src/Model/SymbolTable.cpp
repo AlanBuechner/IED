@@ -34,9 +34,17 @@ namespace Scripting
 		return true;
 	}
 
+	// Lowering asks each block layer of a body for every name it resolves, and most layers hold a few names or none:
+	// those are compared, not hashed.
 	const Core::Vector<std::unique_ptr<SymbolInfo>>& Scope::Entries(const Core::String& name) const
 	{
 		static const Core::Vector<std::unique_ptr<SymbolInfo>> kEmpty;
+		if (m_Symbols.size() <= kComparedNames)
+		{
+			for (const auto& [held, entries] : m_Symbols)
+				if (held == name) return entries;
+			return kEmpty;
+		}
 		auto it = m_Symbols.find(name);
 		return it != m_Symbols.end() ? it->second : kEmpty;
 	}
