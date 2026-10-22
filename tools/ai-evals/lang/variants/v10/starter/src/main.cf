@@ -1,0 +1,14 @@
+// {name} - entry point.
+include "bedrock.ch"
+
+// argv[0] is the program itself; its arguments are argv[1] to argv[argc - 1]. The exit code is main's result.
+int32 main(int32 argc, char** argv) {
+	if (argc < 2) {
+		Platform::WriteError(Core::StringView("usage: {name} <argument>\n"));
+		return 2;
+	}
+	Core::StringBuilder out;
+	Core::Format(&out, "{name}: {0:D} argument(s), the first is {1:s}\n", (int64)(argc - 1), argv[1]);
+	Platform::WriteOutput(out.View());
+	return 0;
+}

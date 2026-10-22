@@ -1,0 +1,16 @@
+{
+	"description": "v9 on build/bin/langeval-think: the turn's earlier thinking goes back to the llama.cpp server as reasoning_content, so the model's template shows each step's reasoning instead of an empty think block",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}
