@@ -5,7 +5,6 @@ namespace GpuDebug
 	const int64 kEventLines = 400;
 	const int64 kResourceLines = 300;
 	const int64 kTopEvents = 20;
-	const int64 kTimingRepeat = 5;
 
 	// What a change finds, read after it.
 	class ToolFound
@@ -89,8 +88,8 @@ namespace GpuDebug
 
 	// --- The capture and its session -------------------------------------------------------------------------------
 
-	ToolCapture OpenNamed(Debugger* debugger, const IED::Workspace& ws, const Serialization::DomNode& args) {
-		Core::String asked = Core::String(args.Member("capture").AsView());
+	Capture* CaptureNamed(Debugger* debugger, const IED::Workspace& ws, Core::StringView name) {
+		Core::String asked = Core::String(name);
 		if (asked.IsEmpty()) asked = Core::String("latest");
 		ToolFound* found = new ToolFound();
 		Core::String wsId = ws.id;
@@ -103,11 +102,15 @@ namespace GpuDebug
 		if (!found->capture)
 			throw IED::RpcError(IED::ErrorCode::NotFound, asked.View() == "latest" ? Core::StringView("the workspace has no GPU captures: launch the program for capture and capture a frame first")
 				: (Core::String("no capture ") + asked.View() + " (gpu_captures lists them)").View());
+		return found->capture;
+	}
+
+	ToolCapture OpenNamed(Debugger* debugger, const IED::Workspace& ws, const Serialization::DomNode& args) {
 		ToolCapture target;
-		target.capture = found->capture;
+		target.capture = CaptureNamed(debugger, ws, args.Member("capture").AsView());
 		target.wsId = ws.id;
 		target.root = ws.root;
-		target.session = debugger->Open(ws.id.View(), found->capture);
+		target.session = debugger->Open(ws.id.View(), target.capture);
 		target.api = Core::String(ParseAnswer(target.session->summary.View()).Member("api").AsView());
 		return target;
 	}
@@ -318,7 +321,7 @@ namespace GpuDebug
 		return -1;
 	}
 
-	static void AppendMs(Core::StringBuilder& text, double ms) {
+	void AppendMs(Core::StringBuilder& text, double ms) {
 		text.AppendDouble(ms, ms < 0.01 ? 4 : ms < 1.0 ? 3 : 2);
 		text.Append(" ms");
 	}
@@ -418,6 +421,7 @@ namespace GpuDebug
 		else if (tool == "texture") answer = TextureAnswer(debugger, target, args);
 		else if (tool == "scan") answer.text = ScanText(debugger, target, args);
 		else if (tool == "debug") answer.text = DebugText(debugger, target, args);
+		else if (tool == "compare") answer.text = CompareText(debugger, ws, target, args);
 		else throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no GPU tool ") + tool).View());
 		return answer;
 	}

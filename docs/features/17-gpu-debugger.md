@@ -68,7 +68,7 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
-| F-GPU-60 | Capture compare: event alignment by marker path and call signature, state diff, output image diff, timing deltas per pass | P1 | US-GPU-6 | not offered by PIX, RenderDoc or Nsight |
+| F-GPU-60 | Capture compare: event alignment by marker path and call signature, state diff, output image diff, timing deltas per pass | P1 | US-GPU-6 | not offered by PIX, RenderDoc or Nsight; built 2026-10-21 (`docs/22` "Compare"), across APIs too |
 | F-GPU-61 | Visual-regression bisect across a commit range (the orchestration queue builds, captures and compares) | P2 | US-GPU-6 | - |
 
 ## AI and integration

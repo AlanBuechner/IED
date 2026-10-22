@@ -13,17 +13,23 @@ namespace fb::replay
 		throw failure;
 	}
 
+	std::unique_ptr<ApiReplay> MakeReplay(Api api) {
+		switch (api) {
+			case Api::D3D12: return MakeD3D12Replay();
+			case Api::Vulkan: return MakeVulkanReplay();
+			default: Fail("the capture's API is not known");
+		}
+	}
+
 	void Session::Initialize(const JsonValue& params, JsonWriter& out) {
 		const std::string path = params["capture"].Str();
 		if (path.empty()) Fail("initialize needs the capture's path");
+		other_.reset();
+		otherFile_.reset();
 		file_ = std::make_unique<CaptureReader>();
 		std::string error;
 		if (!file_->Open(Widen(path), error)) Fail("%s", error.c_str());
-		switch (file_->GetApi()) {
-			case Api::D3D12: replay_ = MakeD3D12Replay(); break;
-			case Api::Vulkan: replay_ = MakeVulkanReplay(); break;
-			default: Fail("the capture's API is not known");
-		}
+		replay_ = MakeReplay(file_->GetApi());
 		out.String("capture", path);
 		out.Uint("bytes", file_->FileSize());
 		out.Uint("formatVersion", file_->Version());
@@ -39,7 +45,7 @@ namespace fb::replay
 		JsonWriter texture;
 		std::vector<u8> rgba;
 		texture.BeginObject();
-		replay_->Texture(params, texture, rgba);
+		Side(params).Texture(params, texture, rgba);
 		texture.EndObject();
 		JsonValue shown;
 		std::string error;
@@ -55,6 +61,10 @@ namespace fb::replay
 		out.BeginArray("range").Double(lo).Double(hi).EndArray();
 	}
 
+	ApiReplay& Session::Side(const JsonValue& params) {
+		return params["side"].Str() == "b" ? Other() : *replay_;
+	}
+
 	Answer Session::Handle(const std::string& method, const JsonValue& params, const Progress& progress) {
 		Answer answer;
 		JsonWriter out;
@@ -62,20 +72,26 @@ namespace fb::replay
 		try {
 			if (method == "initialize") Initialize(params, out);
 			else if (!replay_) Fail("no capture is open: send initialize first");
-			else if (method == "events") replay_->Events(out);
-			else if (method == "apiCalls") replay_->ApiCalls((u32)params["eid"].Uint(0), out);
-			else if (method == "state") replay_->State((u32)params["eid"].Uint(0), out);
-			else if (method == "resources") replay_->Resources(out);
-			else if (method == "texture") replay_->Texture(params, out, answer.binary);
+			else if (method == "events") Side(params).Events(out);
+			else if (method == "apiCalls") Side(params).ApiCalls((u32)params["eid"].Uint(0), out);
+			else if (method == "state") Side(params).State((u32)params["eid"].Uint(0), out);
+			else if (method == "resources") Side(params).Resources(out);
+			else if (method == "texture") Side(params).Texture(params, out, answer.binary);
 			else if (method == "png") Png(params, out);
-			else if (method == "pixel") replay_->Pixel(params, out);
-			else if (method == "pixelHistory") replay_->PixelHistory(params, out);
-			else if (method == "debugShader") replay_->DebugShader(params, out);
-			else if (method == "buffer") replay_->Buffer(params, out, answer.binary);
-			else if (method == "mesh") replay_->Mesh(params, out, answer.binary);
-			else if (method == "shader") replay_->Shader(params, out);
-			else if (method == "timing") replay_->Timing(params, out, progress);
-			else if (method == "messages") replay_->Messages(out);
+			else if (method == "pixel") Side(params).Pixel(params, out);
+			else if (method == "pixelHistory") Side(params).PixelHistory(params, out);
+			else if (method == "debugShader") Side(params).DebugShader(params, out);
+			else if (method == "buffer") Side(params).Buffer(params, out, answer.binary);
+			else if (method == "mesh") Side(params).Mesh(params, out, answer.binary);
+			else if (method == "shader") Side(params).Shader(params, out);
+			else if (method == "timing") Side(params).Timing(params, out, progress);
+			else if (method == "messages") Side(params).Messages(out);
+			else if (method == "compareOpen") CompareOpen(params, out);
+			else if (method == "compareClose") other_.reset(), otherFile_.reset();
+			else if (method == "compareEvents") CompareEvents(out);
+			else if (method == "compareState") CompareState(params, out);
+			else if (method == "compareTexture") CompareTexture(params, out, answer.binary);
+			else if (method == "compareTiming") CompareTiming(params, out, progress);
 			else Fail("unknown method %s", method.c_str());
 		}
 		catch (const Failure& failure) {

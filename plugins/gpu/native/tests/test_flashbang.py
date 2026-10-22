@@ -198,6 +198,40 @@ class D3D12CaptureReplay(unittest.TestCase):
 		thread = replay(self.capture, "debug", str(dispatch), "cs", "5", "7", "0")
 		self.assertEqual("5, 7, 0", thread["invocations"][0]["steps"][0][1], "the thread's global id, its first input")
 
+	def test_compare_with_a_later_frame(self):
+		folder = tempfile.mkdtemp(prefix="flashbang-compare-")
+		client = RpcClient()
+		try:
+			env = dict(os.environ, FLASHBANG_CAPTURE_DIR=folder)
+			run([os.path.join(BIN, "fb-sample-d3d12.exe"), "--frames", "12", "--capture-frame", "9", "--hidden", "--flashbang", os.path.join(BIN, "flashbang.dll")], env=env)
+			later = glob.glob(os.path.join(folder, "*.flash"))[0]
+			client.call("initialize", {"capture": self.capture})
+			self.assertTrue(client.call("compareOpen", {"capture": later})[0]["result"]["sameApi"])
+			events = client.call("compareEvents", {})[0]["result"]
+			self.assertEqual((0, 0), (events["counts"]["removed"], events["counts"]["added"]))
+			self.assertEqual(["fence"], [r[4] for r in events["rows"] if r[3] == "changed"], "only the frame's fence value differs")
+			marker = next(r for r in events["rows"] if r[5] == "Cube B")
+			a, b = next(r for r in events["rows"] if r[4] == "draw" and r[0] > marker[0])[:2]
+			paths = [d[0] for d in client.call("compareState", {"eid": a, "otherEid": b})[0]["result"]["differences"]]
+			self.assertTrue(paths and all(p.startswith("Root Signature / [1]") for p in paths), "only the cube's turn differs: %s" % paths)
+			texture, blob = client.call("compareTexture", {"eid": a, "otherEid": b})
+			result = texture["result"]
+			self.assertEqual(("Difference", "HDR", 1280, 720), (result["name"], result["a"]["name"], result["width"], result["height"]))
+			self.assertGreater(result["changed"], 0)
+			self.assertTrue(0 < result["box"][2] <= 1280 and 0 < result["box"][3] <= 720, result["box"])
+			self.assertEqual(1280 * 720 * 16, len(blob))
+			later_state = client.call("state", {"eid": b, "side": "b"})[0]["result"]
+			self.assertEqual(b, later_state["eid"], "a request with side b reaches the other capture")
+			timing = client.call("compareTiming", {"repeat": 1})[0]["result"]
+			cube = next(r for r in timing["markers"] if r[5] == "Cube B")
+			self.assertTrue(cube[3] > 0 and cube[4] > 0, cube)
+			client.call("compareOpen", {"capture": self.capture})
+			same = client.call("compareTexture", {"eid": a, "otherEid": a})[0]["result"]
+			self.assertEqual((0, 0), (same["changed"], same["largest"]), "a capture against itself")
+		finally:
+			client.close()
+			shutil.rmtree(folder, ignore_errors=True)
+
 
 def check_history(test, history, clear):
 	"""The pixel under Cube B with Hidden behind it: cleared first, Cube B on top, Hidden kept out by the depth test."""

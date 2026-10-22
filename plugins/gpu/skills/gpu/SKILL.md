@@ -34,6 +34,8 @@ Words the tools use:
    (a fragment at a pixel, a vertex, a compute thread). Vulkan, and D3D12 shaders of Shader Model 5.1 (DXBC); DXIL
    (Shader Model 6) not yet.
 9. `gpu_timing` - where the GPU time goes, by pass or by the costliest draws, measured on the replay GPU.
+10. `gpu_compare` - a capture beside another (`other`): the events only one has and the calls that changed, at an
+    `eid` the state and output pixels that differ, and each pass's time in both.
 
 ## Common questions
 
@@ -47,6 +49,9 @@ Words the tools use:
   `gpu_debug_shader` at that pixel shows the very step that made it.
 - **Why did this draw lose the pixel?** `gpu_pixel` gives the pixel's history: each draw's test result (outside the
   scissor, culled, depth or stencil test failed) with the values before and after.
+- **It changed since the last build (or frame).** Capture both, then `gpu_compare` with the old one as `other`:
+  the events that appeared or went, then `eid` at the first pass whose output differs for the state behind it; the
+  pass times say which got slower.
 - **Too slow.** `gpu_timing` by pass, then by event for the costly pass. High pixel-shader invocations against the
   target's size mean overdraw; many primitives in a small pass mean geometry that could be culled.
 

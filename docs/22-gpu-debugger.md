@@ -101,6 +101,10 @@ One process per open capture, started by the server with the capture's path. Mes
 | `debugShader {eid, stage, x?, y?, vertex?, instance?, thread?}` | one invocation's steps ("Shader debugging" below): `listing`, `sites` (`[line, type, components, store, name?]`; type 0 float, 1 int, 2 uint, 3 bool, 4 raw bits; DXBC names the register), `invocations` (each `{steps: [[site, value]], truncated}`) |
 | `pixelHistory {id, eid, x, y, mip?, slice?}` | every event up to `eid` that wrote the pixel or tried to ("Pixel History" below): `start`, `events` (each `{eid, kind, name, result, text, samples?, tests?, before, after, changed}`), `end`, `summary`, `unattributed?` |
 | `messages {}` | the debug layer's messages during replay, each with its event |
+| `compareOpen {capture, options}` | a second capture opened beside the session's ("Compare" below), with its own replay device: `{other, sameApi}`; only the server sends it (`gpu.compare`) |
+| `compareEvents {}`, `compareState {eid, otherEid}`, `compareTexture {eid, otherEid, id?, otherId?, mip?, slice?, maxSize?, threshold?}`, `compareTiming {repeat}` | the two captures compared ("Compare" below); `compareTexture`'s difference image comes as binary |
+| `compareClose {}` | lets the second capture go |
+| any method with `side: "b"` | answered from the second capture |
 | `shutdown {}` | ends the process |
 
 **Vulkan replay** (`native/replay/vulkan/`) creates its own instance and device on the GPU with the capture's vendor and device ID when there is one (else the first), with the captured device extensions the GPU has and the captured features, then the capture's objects in three passes (memory, buffers and images; their bindings; everything else). Swap chain images become plain images. SPIR-V is disassembled and reflected by Flashbang's own code (`vkspirv.cpp`), with no SPIRV-Tools dependency; the shader panel shows bindings by set and binding, uniform blocks and push constants with their members, and the stage's inputs and outputs by location.
@@ -173,6 +177,43 @@ have no spaces), subroutines (`call`), hull, domain and geometry shaders; source
 debug info, NonSemantic.Shader.DebugInfo or OpLine, or DXBC's SDBG and PDBs); values of other widths, matrices and
 structs; breakpoints set in the editor; which of a pixel's fragments won the depth test.
 
+### Compare
+
+A replay session can hold a second capture beside its own (built 2026-10-21): `compareOpen` opens it in the same
+replayer, with its own replay device, and every comparison works on the two replays' own answers
+(`native/common/compare.cpp`, `native/replay/sessioncompare.cpp`), so any two captures compare - two builds, two
+frames, D3D12 against Vulkan. Any other request reaches the second capture with `side: "b"`.
+
+- `compareEvents`: the visible events aligned marker by marker. At each level (the top, then inside each pair of
+  aligned markers) the children's longest common subsequence by key - a marker by its name, an action by its kind and
+  call (by its kind alone across APIs) - after the common head and tail are taken off; a level too long for the exact
+  table (4M cells) aligns greedily. Rows are `[a, b, depth, status, kind, nameA, nameB]` (EID 0: not in that capture)
+  with status `same`, `changed` (aligned, but the call or its arguments differ), `removed` (only here) or `added`
+  (only in the other); a marker only one side has brings its subtree. Object numbers in names (`Fence #4`) are each
+  capture's own and are not compared.
+- `compareState`: the state answers at an aligned pair diffed item by item, by group name and item label (a repeated
+  label by its order): `differences` as `[path, here, other]`, and how many items were `compared`. Resource ids are
+  not compared, their names are.
+- `compareTexture`: two textures (by default each event's first render target) read at the same size and diffed
+  texel by texel: `|here - other|` per channel as an RGBA32F image the texture viewer shows (NaN where only one side is
+  NaN or Inf), how many pixels differ by more than `threshold` (1/255 unless given), the largest and mean difference,
+  and the box they lie in, in the source's pixels. Images of different sizes are an error naming both sizes.
+- `compareTiming`: both frames timed (`timing`) and aligned: each marker's and action's GPU ms in both.
+
+The server's `gpu.compare {sessionId, captureId}` finds the capture in the session's workspace and opens it; the
+session keeps it (`compareWith` on `gpurs:<sessionId>`), so a client that comes back finds the comparison as it was,
+and a Compare view follows another client's (or the AI's) choice. `gpu.replay` refuses `initialize`, `png`,
+`compareOpen` and `compareClose`: what names a file on the server stays the server's.
+
+The UI's **Compare** view (`ui/compare.js`): the capture to compare with, picked from the library; the aligned events
+(`~` changed, `-` only here, `+` only there; Differences only) with both GPU times and the delta after Compare Timing;
+for the selected pair (a marker: the last action inside it both have) the state that differs and the output as the
+Difference, Here or Other, a pick reading both captures' values. At phone width the pair shows above the events. The
+AI's `gpu_compare` gives the same as text.
+
+Not yet: textures other than the render targets in the view (the request takes `id` and `otherId`); a visual
+regression bisect across commits (F-GPU-61).
+
 ## Server and protocol (plugin `ied.gpu`)
 
 | Method | Does |
@@ -182,10 +223,11 @@ structs; breakpoints set in the editor; which of a pixel's fragments won the dep
 | `gpu.stop {wsId, targetId}` | ends a target IED launched |
 | `gpu.delete {wsId, captureId}`, `gpu.comment {wsId, captureId, text}`, `gpu.pin {wsId, captureId, pinned}` | the library |
 | `gpu.open {wsId, captureId}` | the capture's replay session (started, or the running one): `{sessionId}`; its state on `gpurs:<sessionId>` |
-| `gpu.replay {sessionId, method, params}` | one `ied-gpu/1` request; a binary part comes back as `blob` (a blob id, `GET /api/blob/<id>`) |
+| `gpu.replay {sessionId, method, params}` | one `ied-gpu/1` request; a binary part comes back as `blob` (a blob id, `GET /api/blob/<id>`); not `initialize`, `png`, `compareOpen` or `compareClose`, which name files |
+| `gpu.compare {sessionId, captureId}` | the session's capture compared with another capture of its workspace ("Compare" above; `""` stops): `{session, result}` |
 | `gpu.close {sessionId}` | ends the session for everyone |
 
-Topics: `gpu:<wsId>` (`{captures, targets}`; events `captures.changed`, `target.changed`, `target.removed`), `gpurs:<sessionId>` (`{state: starting|ready|failed|ended, summary, problem}`). Sessions end 30 minutes after their last request, and when the replayer exits (a crash shows on the topic, and the next `gpu.open` starts it again).
+Topics: `gpu:<wsId>` (`{captures, targets}`; events `captures.changed`, `target.changed`, `target.removed`), `gpurs:<sessionId>` (`{state: starting|ready|failed|ended, summary, problem, compareWith}`). Sessions end 30 minutes after their last request, and when the replayer exits (a crash shows on the topic, and the next `gpu.open` starts it again).
 
 ## Views
 
@@ -221,7 +263,7 @@ Phone (one pane at a time, `docs/15`): capture library, event list with timings,
 
 GPU tools (`docs/13`, group `gpu`) let the agent work the debugger the way the owner does: list and search events, read state, read pixel values and histories, run shader debugging and get the trace as data, scan a render target for NaN/Inf, bisect which event first wrote a bad value, fetch timing and counters, compare two captures, and look at a texture (vision models only; privacy rules apply). Typical asks: "why is this pixel black?", "which pass got slower since yesterday's build?", "why does the shadow pass take 3 ms?". Answers cite EIDs, which the UI turns into links.
 
-Built (2026-10-21, `docs/13` T-GPU): `gpu_capture` (build, launch for capture, capture the next frame, stop), `gpu_captures`, `gpu_events`, `gpu_resources`, `gpu_event_state`, `gpu_shader`, `gpu_pixel`, `gpu_texture` (statistics and the image, written by the replayer's `png` method under `.ied/local/gpu-captures/ai/`), `gpu_buffer`, `gpu_scan` and `gpu_timing`, plain C4 `function` tools answering through the plugin's `gpu.query` binding from the capture's replay session, with the `gpu` skill and a system-message section. Not yet: the pixel history, shader debugging, `gpu_compare` and edit-and-replay.
+Built (2026-10-21, `docs/13` T-GPU): `gpu_capture` (build, launch for capture, capture the next frame, stop), `gpu_captures`, `gpu_events`, `gpu_resources`, `gpu_event_state`, `gpu_shader`, `gpu_pixel`, `gpu_texture` (statistics and the image, written by the replayer's `png` method under `.ied/local/gpu-captures/ai/`), `gpu_buffer`, `gpu_scan` and `gpu_timing`, plain C4 `function` tools answering through the plugin's `gpu.query` binding from the capture's replay session, with the `gpu` skill and a system-message section; then the pixel history (in `gpu_pixel`), `gpu_debug_shader` and `gpu_compare`. Not yet: edit-and-replay.
 
 ## Integrations
 
@@ -251,13 +293,13 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   triggered). The C/C++ helper `native/include/flashbang_app.h`. The Vulkan layer (`VK_LAYER_IED_flashbang`) with the
   same coverage: object and layout tracking, descriptor shadows, mapped-memory diffs, initial contents, the thumbnail.
 - **Replay** (`native/replay/`): `flashbang-replay --rpc` answers `initialize`, `events`, `apiCalls`, `state`,
-  `resources`, `texture`, `pixel`, `buffer`, `mesh`, `shader`, `timing` and `messages` on `ied-gpu/1`; its CLI does the
-  same for scripts and tests, for D3D12 and Vulkan captures alike.
+  `resources`, `texture`, `pixel`, `buffer`, `mesh`, `shader`, `timing`, `messages`, `pixelHistory`, `debugShader` and
+  the compare methods on `ied-gpu/1`; its CLI does the same for scripts and tests, for D3D12 and Vulkan captures alike.
 - **Server** (`code/`, namespace `GpuDebug`): the `gpu.*` methods and the `gpu:` / `gpurs:` topics above, Launch for
   Capture from the startup project's debug configuration (its pre-launch task first), one replayer per open capture
   (ended with its capture's delete, after 30 idle minutes, or with the server).
-- **UI** (`ui/`): the Capture Library tool window in the GPU activity; a capture as a document with Overview, Pipeline
-  and Performance; the timeline, the events grid with its filter, the state tree, the resource viewer (channels, range,
+- **UI** (`ui/`): the Capture Library tool window in the GPU activity; a capture as a document with Overview, Pipeline,
+  Performance and Compare; the timeline, the events grid with its filter, the state tree, the resource viewer (channels, range,
   NaN / Inf / negative visualizing, mips and slices, picks), the buffer view, the shader and Mesh panels, and the API Calls, Messages,
   Resources and Warnings grids; at phone width the events below one of Output, State or Calls.
 - **Pixel History** ("Pixel History" above): both replayers (`replay/d3d12/history.cpp`, `replay/vulkan/vkhistory.cpp`,
@@ -265,6 +307,8 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
 - **Shader debugging** ("Shader debugging" above): Vulkan (`replay/vulkan/vkinstrument.cpp`, `vkdebug.cpp`) and D3D12
   DXBC of Shader Model 5.1 (`common/dxbc.cpp`, `replay/d3d12/debug.cpp`), the UI's `ui/debugger.js`, and
   `gpu_debug_shader`.
+- **Compare** ("Compare" above): `common/compare.cpp`, `replay/sessioncompare.cpp`, `gpu.compare`, the UI's
+  `ui/compare.js`, and `gpu_compare`.
 - **AI:** the `gpu_*` tools ("AI" above), `plugins/gpu/code/tools.cf`, `tooltext.cf`, `toolinspect.cf`, and
   the `gpu` skill.
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample

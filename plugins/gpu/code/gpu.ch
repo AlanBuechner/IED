@@ -86,6 +86,7 @@ namespace GpuDebug
 		public Core::String state;       // starting, ready, failed, ended
 		public Core::String problem;
 		public Core::String summary;     // initialize's result
+		public Core::String compareId;   // the capture it is compared with (docs/22 "Compare"); "" when none
 		public Process::Child* child;
 		public Threading::Mutex lock;
 		public Threading::ConditionVariable answered;
@@ -95,7 +96,7 @@ namespace GpuDebug
 		public bool alive;
 
 		public Core::String Topic() const { return Core::String("gpurs:") + id.View(); }
-		// {sessionId, wsId, captureId, state, problem?, summary?}
+		// {sessionId, wsId, captureId, state, problem?, summary?, compareWith?}
 		public Core::String Json() const;
 	}
 
@@ -133,6 +134,9 @@ namespace GpuDebug
 		public Core::String Ask(Session* session, Core::StringView method, Core::StringView params, Core::Array<uint8>& binary);
 		public void Close(Session* session, Core::StringView why);
 		public void CloseIdle();
+		// Opens `other` beside the session's capture in its replayer (compareOpen): compareOpen's result. Null stops
+		// comparing and lets the other capture go.
+		public Core::String Compare(Session* session, Capture* other);
 
 	private:
 		private void Watch(Target* target);

@@ -44,6 +44,8 @@ namespace fb::replay
 
 	std::unique_ptr<ApiReplay> MakeD3D12Replay();
 	std::unique_ptr<ApiReplay> MakeVulkanReplay();
+	// The replay of a capture of `api`; Fail for an API it does not know.
+	std::unique_ptr<ApiReplay> MakeReplay(Api api);
 
 	[[noreturn]] void Fail(const char* format, ...);
 }

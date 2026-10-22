@@ -29,6 +29,10 @@ namespace GpuDebug
 		public Core::String api;
 	}
 
+	const int64 kTimingRepeat = 5;
+
+	// The capture `asked` names in `ws`: an id, or "latest"; throws NotFound.
+	Capture* CaptureNamed(Debugger* debugger, const IED::Workspace& ws, Core::StringView asked);
 	ToolCapture OpenNamed(Debugger* debugger, const IED::Workspace& ws, const Serialization::DomNode& args);
 	Serialization::DomNode ParseAnswer(Core::StringView json);
 	Serialization::DomNode AskTool(Debugger* debugger, const ToolCapture& target, const char* method, Core::StringView params);
@@ -37,6 +41,8 @@ namespace GpuDebug
 	int64 ResourceArg(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args, int64 eid);
 	Core::String ResourceName(Debugger* debugger, const ToolCapture& target, int64 id);
 	int64 IntArg(const Serialization::DomNode& args, const char* key, int64 fallback);
+	// Milliseconds to 2 to 4 decimals, as small times need: "0.0052 ms".
+	void AppendMs(Core::StringBuilder& text, double ms);
 	// A value as the UI shows one: integers whole, others to 6 significant digits, NaN and Inf by name.
 	void AppendValue(Core::StringBuilder& text, double value);
 	// Whether `text` holds `part`, ASCII letters in either case.
@@ -56,4 +62,5 @@ namespace GpuDebug
 	ToolAnswer TextureAnswer(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String ScanText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String DebugText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
+	Core::String CompareText(Debugger* debugger, const IED::Workspace& ws, const ToolCapture& target, const Serialization::DomNode& args);
 }

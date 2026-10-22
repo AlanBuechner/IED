@@ -18,7 +18,7 @@
 		"settings": { "schema": "settings.schema.json", "page": "GPU Debugger" },
 		"bindings": {
 			"provides": [
-				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|debug|timing, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
+				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|debug|timing|compare, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
 			],
 			"consumes": [
 				{ "name": "gpu.query", "version": "1" }
@@ -58,7 +58,7 @@
 		],
 		"skills": ["skills"],
 		"systemMessageSections": [
-			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, gpu_debug_shader to step a shader invocation with its values, and gpu_timing. gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
+			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, gpu_debug_shader to step a shader invocation with its values, gpu_timing, and gpu_compare to set two captures side by side (two builds, two frames). gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
 		],
 		"toolCalls": [
 			{
@@ -161,6 +161,16 @@
 				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The draw or dispatch, by its EID from gpu_events." }, "stage": { "enum": ["vs", "fs", "ps", "cs"] }, "x": { "type": "integer", "minimum": 0 }, "y": { "type": "integer", "minimum": 0 }, "vertex": { "type": "integer", "minimum": 0 }, "instance": { "type": "integer", "minimum": 0 }, "thread": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "maxItems": 3 }, "invocation": { "type": "integer", "minimum": 1 }, "max": { "type": "integer", "minimum": 1, "maximum": 5000 } }, "required": ["eid", "stage"], "additionalProperties": false },
 				"function": "GpuDebug::DebugShaderTool",
 				"timeoutSeconds": 300
+			},
+			{
+				"name": "gpu_compare",
+				"description": "Compares a capture with another (two builds, two frames, or D3D12 against Vulkan): the events aligned by marker path and call (what only one has, calls whose arguments changed); with `eid`, the pipeline state that differs at that event and how many pixels of its output differ, where; and each pass's GPU time in both, measured on the replay GPU (`timing: false` skips it).",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": false,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "The capture compared, by id from gpu_captures, or \"latest\" (the default)." }, "other": { "type": "string", "description": "The capture to compare it with, by id from gpu_captures." }, "eid": { "type": "integer", "minimum": 1, "description": "An event of `capture`: compare the state and output image there with the aligned event of `other`." }, "timing": { "type": "boolean", "description": "Measure each pass's GPU time in both (default true)." }, "repeat": { "type": "integer", "minimum": 1, "maximum": 20 } }, "required": ["other"], "additionalProperties": false },
+				"function": "GpuDebug::CompareTool",
+				"timeoutSeconds": 600
 			},
 			{
 				"name": "gpu_timing",

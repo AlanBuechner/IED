@@ -46,6 +46,7 @@ export class ReplaySession {
 		if (!data) return;
 		this.state = data.state;
 		if (data.summary) this.summary = data.summary;
+		this.compareWith = data.compareWith || "";
 		this.problem = data.problem || "";
 		this.onState(this);
 	}

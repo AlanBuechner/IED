@@ -192,13 +192,33 @@ namespace GpuDebug
 
 	static Core::String ReplayMethod(Debugger* debugger, const IED::Request& request) {
 		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
+		Core::String method = request.params.Str("method");
+		// What names a file on the server stays the server's: the capture it opens, the PNG it writes.
+		Core::StringView name = method.View();
+		if (name == "initialize" || name == "png" || name == "compareOpen" || name == "compareClose")
+			throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("gpu.replay does not send ") + method.View()).View());
 		Serialization::DomNode params = request.params.Field("params");
 		Core::String blob;
-		Core::String result = debugger->Call(session, request.params.Str("method").View(), params.IsValid() ? IED::NodeJson(params).View() : Core::StringView("{}"), blob);
+		Core::String result = debugger->Call(session, method.View(), params.IsValid() ? IED::NodeJson(params).View() : Core::StringView("{}"), blob);
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.RawField("result", result.View());
 		if (!blob.IsEmpty()) json.Field("blob", blob.View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// gpu.compare {sessionId, captureId}: the session's capture compared with another of its workspace ("" stops):
+	// {session, result} with compareOpen's result.
+	static Core::String CompareMethod(Debugger* debugger, const IED::Request& request) {
+		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
+		Core::String captureId = request.params.Str("captureId");
+		Capture* other = captureId.IsEmpty() ? nullptr : CaptureOf(debugger, session->wsId.View(), captureId.View());
+		Core::String result = debugger->Compare(session, other);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.RawField("session", session->Json().View());
+		json.RawField("result", result.View());
 		json.EndObject();
 		return json.ToString();
 	}
@@ -225,6 +245,7 @@ namespace GpuDebug
 		Register(debugger, "gpu.comment", CommentMethod);
 		Register(debugger, "gpu.open", OpenMethod);
 		Register(debugger, "gpu.replay", ReplayMethod);
+		Register(debugger, "gpu.compare", CompareMethod);
 		Register(debugger, "gpu.close", CloseMethod);
 	}
 

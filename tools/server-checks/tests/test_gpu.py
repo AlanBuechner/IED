@@ -76,8 +76,9 @@ class GpuTests(ServerTestCase):
 		frames = await self.client.wait_for("gpu:w1", lambda f: f.get("kind") == "targets" and any(predicate(t) for t in f["data"]["targets"]), timeout=timeout)
 		return next(t for t in frames[-1]["data"]["targets"] if predicate(t))
 
-	async def capture_frame(self, configuration="Launch", api="D3D12"):
-		"""Launches the startup project for capture, captures one frame and stops it: the new capture."""
+	async def capture_frame(self, configuration="Launch", api="D3D12", count=1):
+		"""Launches the startup project for capture, captures one frame and stops it: the new capture, the workspace's
+		`count`th."""
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		target = await self.client.request("gpu.launch", {"wsId": "w1", "configuration": configuration})
 		self.assertEqual("running", target["state"])
@@ -85,7 +86,7 @@ class GpuTests(ServerTestCase):
 		connected = await self.targets(lambda t: t["id"] == target["id"] and t["connected"] and t["apis"])
 		self.assertEqual([api], connected["apis"])
 		await self.client.request("gpu.capture", {"wsId": "w1", "targetId": target["id"]})
-		frames = await self.client.wait_for("gpu:w1", lambda f: f.get("kind") == "captures" and f["data"]["captures"], timeout=60)
+		frames = await self.client.wait_for("gpu:w1", lambda f: f.get("kind") == "captures" and len(f["data"]["captures"]) >= count, timeout=60)
 		capture = frames[-1]["data"]["captures"][0]
 		await self.client.request("gpu.stop", {"wsId": "w1", "targetId": target["id"]})
 		await self.targets(lambda t: t["id"] == target["id"] and t["state"] == "exited")
@@ -217,6 +218,37 @@ class GpuTests(ServerTestCase):
 			await ask("state")
 		with self.assertRaises(RpcFailure):
 			await ask("events", capture="nope")
+
+	async def test_compare_two_captures(self):
+		first = await self.capture_frame()
+		second = await self.capture_frame(count=2)
+		self.assertNotEqual(first["id"], second["id"])
+		session = (await self.client.request("gpu.open", {"wsId": "w1", "captureId": first["id"]}))["sessionId"]
+		for method in ("compareOpen", "initialize", "png"):
+			with self.assertRaises(RpcFailure) as caught:
+				await self.replay(session, method, {"capture": os.path.join(self.repo, "Scene.ied.sln"), "path": os.path.join(self.root, "x.png")})
+			self.assertEqual("bad_request", caught.exception.code, "the browser never names a file for the replayer: " + method)
+		compared = await self.client.request("gpu.compare", {"sessionId": session, "captureId": second["id"]})
+		self.assertEqual(second["id"], compared["session"]["compareWith"], "the session remembers it for a client that comes back")
+		self.assertTrue(compared["result"]["sameApi"])
+		events = (await self.replay(session, "compareEvents"))["result"]
+		self.assertEqual((0, 0), (events["counts"]["removed"], events["counts"]["added"]))
+		cube = next(r for r in events["rows"] if r[4] == "draw" and r[0] > next(m for m in events["rows"] if m[5] == "Cube B")[0])[0]
+		text = (await self.client.request("plugins.call", {"name": "gpu.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "compare",
+			"args": {"capture": first["id"], "other": second["id"], "eid": cube, "repeat": 1}}}))["result"]["text"]
+		self.assertIn("Comparing " + first["id"] + " (here) with " + second["id"], text)
+		self.assertIn("0 only here, 0 only in the other", text)
+		self.assertIn("State: ", text)
+		self.assertIn("Output HDR (1280x720): ", text)
+		self.assertIn("GPU time of the frame: ", text)
+		self.assertIn("Cube B", text.split("Passes")[1], "each pass's time in both")
+		with self.assertRaises(RpcFailure):
+			await self.client.request("plugins.call", {"name": "gpu.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "compare", "args": {"other": "nope"}}})
+		stopped = await self.client.request("gpu.compare", {"sessionId": session, "captureId": ""})
+		self.assertNotIn("compareWith", stopped["session"])
+		with self.assertRaises(RpcFailure):
+			await self.replay(session, "compareEvents")
+		await self.client.request("gpu.close", {"sessionId": session})
 
 	async def test_the_ai_captures_a_frame(self):
 		async def capture(**args):

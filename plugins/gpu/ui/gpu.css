@@ -196,6 +196,32 @@
 .gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 80px 60px 84px 80px 80px 80px 64px; }
 .gpu-pgrid .nm { padding-left: calc(var(--space-3) + var(--d, 0) * 14px); }
 
+/* Compare (compare.js): the aligned events beside the selected pair's state and output */
+.gpu-cmp { min-height: 0; }
+.gpu-cmpgrid { flex: none; width: 46%; min-width: 380px; border-right: var(--border-width) solid var(--border-0); }
+.gpu-cmpgrid .gpu-head, .gpu-cmpgrid .gpu-r { grid-template-columns: 22px 52px minmax(0, 1fr) 52px 74px 74px 80px; }
+.gpu-cmpgrid .gpu-r { position: absolute; left: 0; right: 0; }
+.gpu-cmpgrid .gpu-r > span:first-child { text-align: center; font-family: var(--font-mono); }
+.gpu-cmpgrid .nm { padding-left: calc(var(--space-3) + var(--d, 0) * 14px); }
+.gpu-cmpgrid .gpu-r.mk .nm { color: var(--text-0); }
+.gpu-cmp-changed { color: var(--accent-unsaved); }
+.gpu-cmp-removed { color: var(--accent-error); }
+.gpu-cmp-added { color: var(--accent-saved); }
+.gpu-cmp-slower { color: var(--accent-warn); }
+.gpu-cmp-detail { min-width: 0; }
+.gpu-cmp-detail .gpu-title .muted { display: flex; gap: var(--space-2); color: var(--text-2); }
+.gpu-cmp-detail .gpu-title .btn { margin-left: auto; }
+.gpu-cmpstate { flex: none; max-height: 32%; min-height: 64px; border-bottom: var(--border-width) solid var(--border-0); }
+.gpu-cmpstate .gpu-head, .gpu-cmpstate .gpu-r { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); }
+.gpu-cmp-pick { min-width: 0; max-width: 440px; flex: 0 1 auto; }
+.gpu-cmp-label, .gpu-cmp-counts, .gpu-cmp-only { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--text-1); }
+.gpu-cmp-modes { display: flex; align-self: stretch; }
+.gpu-cmp-mode { display: flex; align-items: center; padding: 0 var(--space-4); color: var(--text-2); background: none; border: none; font: inherit; position: relative; }
+.gpu-cmp-mode.on { color: var(--text-0); }
+.gpu-cmp-mode.on::after { content: ""; position: absolute; left: var(--space-3); right: var(--space-3); bottom: 0; height: 2px; background: var(--text-0); }
+.gpu-cmp-stats { margin-left: auto; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.gpu-cmp-stats.gpu-cmp-changed { color: var(--accent-unsaved); }
+
 @media (max-width: 1500px) {
 	.gpu-stree { width: 300px; }
 	.gpu-events { width: 380px; }
@@ -227,6 +253,17 @@ or the API calls and the other grids */
 	.gpu-events .gpu-head > span:nth-child(n+4), .gpu-events .gpu-r > span:nth-child(n+4) { display: none; }
 	.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 70px 56px 84px; }
 	.gpu-pgrid .gpu-head > span:nth-child(n+5), .gpu-pgrid .gpu-r > span:nth-child(n+5) { display: none; }
+	.gpu-vtab { padding: 0 var(--space-3); }
+	.gpu-vtab .ci { display: none; }
+	.gpu-cmp-pick { flex: 1 1 0; max-width: none; }
+	.gpu-cmp-time { display: none; }
+	.gpu-cmp-detail .gpu-title .muted { display: none; }
+	.gpu-cmp { flex-direction: column; }
+	.gpu-cmp .gpu-cmp-detail { flex: none; height: 52vh; order: 1; }
+	.gpu-cmpgrid { width: auto; min-width: 0; flex: 1; order: 2; border-right: none; border-top: var(--border-width) solid var(--border-0); }
+	.gpu-cmpgrid .gpu-head, .gpu-cmpgrid .gpu-r { grid-template-columns: 22px 44px minmax(0, 1fr) 80px; }
+	.gpu-cmpgrid .gpu-head > span:nth-child(n+4):not(:last-child), .gpu-cmpgrid .gpu-r > span:nth-child(n+4):not(:last-child) { display: none; }
+	.gpu-cmp-stats { display: none; }
 	.gpu-r { height: 36px; }
 	.gpu-captures { grid-template-columns: 1fr; }
 	.gpu-overview { flex-direction: column; }

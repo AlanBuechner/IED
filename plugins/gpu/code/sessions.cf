@@ -23,6 +23,7 @@ namespace GpuDebug
 		json.Field("state", state.View());
 		if (!problem.IsEmpty()) json.Field("problem", problem.View());
 		if (!summary.IsEmpty()) json.RawField("summary", summary.View());
+		if (!compareId.IsEmpty()) json.Field("compareWith", compareId.View());
 		json.EndObject();
 		return json.ToString();
 	}
@@ -96,6 +97,30 @@ namespace GpuDebug
 		}
 		PublishState(context, session);
 		return session;
+	}
+
+	Core::String Debugger::Compare(Session* session, Capture* other) {
+		Core::String blob;
+		Core::String opened("{}");
+		Core::String id;
+		if (other) {
+			IED::JsonWriter params;
+			params.BeginObject();
+			params.Field("capture", other->path.View());
+			params.Key(Core::StringView("options"));
+			params.BeginObject();
+			params.BoolField("debugLayer", context->Setting(Core::StringView("gpu.replayDebugLayer"), session->wsId.View()).View() == "true");
+			params.EndObject();
+			params.EndObject();
+			opened = Call(session, Core::StringView("compareOpen"), params.View(), blob);
+			id = other->id;
+		}
+		else Call(session, Core::StringView("compareClose"), Core::StringView("{}"), blob);
+		context->Atomically([session, id](IED::Events& events) {
+			session->compareId = id;
+			events.Publish(session->Topic().View(), "state", session->Json().View());
+		});
+		return opened;
 	}
 
 	static Core::String Frame(Core::StringView json) {

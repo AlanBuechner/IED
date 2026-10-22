@@ -1,5 +1,5 @@
 // capture.js - a capture as a document (F-GPU-14), PIX's layout: a bar with Collect Timing Data and the filter, the
-// view tabs (Overview, Pipeline, Performance), the timing timeline, then per view - Pipeline: the events grid, the
+// view tabs (Overview, Pipeline, Performance, Compare), the timing timeline, then per view - Pipeline: the events grid, the
 // state tree beside the resource viewer (or the buffer view, a shader, a draw's vertex inputs), and the docked API Calls, Messages,
 // Resources and Warnings grids. Everything comes from the capture's replay session on the server.
 
@@ -12,10 +12,11 @@ import { ShaderPanel, MeshPanel } from "./panels.js";
 import { BufferPanel } from "./bufview.js";
 import { PixelHistoryPanel } from "./history.js";
 import { ShaderDebugPanel } from "./debugger.js";
+import { CompareView } from "./compare.js";
 import { ReplaySession } from "./session.js";
 import { DOT, bytes, captureTime, count, counted, gpuMs } from "./format.js";
 
-const VIEWS = [["overview", "Overview", "info"], ["pipeline", "Pipeline", "symbol-structure"], ["performance", "Performance", "dashboard"]];
+const VIEWS = [["overview", "Overview", "info"], ["pipeline", "Pipeline", "symbol-structure"], ["performance", "Performance", "dashboard"], ["compare", "Compare", "diff-multiple"]];
 const BOTTOM = [["calls", "API Calls"], ["messages", "Messages"], ["resources", "Resources"], ["warnings", "Warnings"]];
 const PANES = [["output", "Output"], ["state", "State"], ["calls", "Calls"]];
 
@@ -46,6 +47,7 @@ export class CaptureView {
 	settings(values) {
 		const repeat = values["gpu.timingRepeat"];
 		this.timingRepeat = repeat && repeat.value ? Math.max(1, Math.min(25, repeat.value)) : 5;
+		if (this.compare) this.compare.repeat = this.timingRepeat;
 	}
 
 	build() {
@@ -58,6 +60,8 @@ export class CaptureView {
 		this.mesh = new MeshPanel({ onClose: () => this.showPanel(this.viewer.el), onDebugVertex: (vertex) => this.debug({ eid: this.outputEid, stage: "vs", vertex, instance: 0 }, "vertex " + vertex) });
 		this.debugger = new ShaderDebugPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); } });
 		this.history = new PixelHistoryPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); }, onSelect: (eid) => this.select(eid), onDebug: (eid, x, y) => this.debugPixel(eid, x, y) });
+		this.compare = new CompareView({ ied: this.ied, wsId: this.ctx.wsId, captureId: this.captureId, session: this.session, onShow: (eid) => { this.setView("pipeline"); this.select(eid); } });
+		this.compare.repeat = this.timingRepeat;
 		this.buffer = new BufferPanel({ onClose: () => this.unpin(), read: (id, eid, offset, size) => this.readBuffer(id, eid, offset, size) });
 		this.panel = h("div.gpu-col.grow.gpu-rv-host", null, this.viewer.el);
 		this.timingButton = h("button.btn.flat", { title: "Replay the frame several times with timestamps around every action", on: { click: () => this.collectTiming() } }, icon("watch"), "Collect Timing Data");
@@ -123,6 +127,10 @@ export class CaptureView {
 			this.viewer.draw();
 		}
 		else if (this.view === "overview") replace(this.body, this.overview());
+		else if (this.view === "compare") {
+			replace(this.body, this.compare.el);
+			this.compare.shown();
+		}
 		else replace(this.body, this.performance());
 	}
 
@@ -152,11 +160,13 @@ export class CaptureView {
 	}
 
 	sessionChanged(session) {
+		if (this.compare) this.compare.sessionChanged(session);
 		if (session.state === "failed") this.failed("The replay stopped: " + (session.problem || "the replayer exited") + ". Reopen starts it again.");
 	}
 
 	progress(p) {
-		if (p.what === "timing") this.timingButton.lastChild.textContent = "Timing " + Math.round(p.fraction * 100) + "%";
+		if (this.compare.busy) this.compare.progress(p);
+		else if (p.what === "timing") this.timingButton.lastChild.textContent = "Timing " + Math.round(p.fraction * 100) + "%";
 	}
 
 	async loaded(summary) {
@@ -511,6 +521,7 @@ export class CaptureView {
 
 	dispose() {
 		this.stopSettings();
+		this.compare.dispose();
 		this.session.dispose();
 	}
 }
