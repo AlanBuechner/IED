@@ -78,7 +78,7 @@ C4SCRIPT_API void c4s_script_destroy(c4s_script* script);
 }
 
 // These two let a C++ or C4 exception thrown in `fn` pass through, so they have C++ linkage under their C names:
-// Frost compiles with -fexternc-nounwind, which gives an extern "C" function no unwind table.
+// The C/C++ driver compiles with -fexternc-nounwind, which gives an extern "C" function no unwind table.
 
 // Runs fn(context) guarded; 0 when it faulted (the script is then faulted and refuses further calls).
 C4SCRIPT_API int32_t c4s_script_call(c4s_script* script, void (*fn)(void*), void* context) __asm__("c4s_script_call");

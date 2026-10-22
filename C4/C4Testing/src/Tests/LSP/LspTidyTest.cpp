@@ -2,7 +2,7 @@
 #include "LspTestSupport.h"
 #include <string>
 
-using Core::Vector; // Frost's container (global namespace) - see LspFormattingTest.cpp for the same pattern
+using Core::Vector; // Core's container (the C++ Core library, global namespace) - see LspFormattingTest.cpp for the same pattern
 using namespace C4LSP::Protocol;
 
 namespace Testing

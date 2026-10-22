@@ -1,5 +1,5 @@
 // Bedrock Format tests. Run with:  C4.exe c4/Bedrock/Tests -test
-// Covers the Frost-style positional formatter: verbatim text, default + typed kinds, width padding,
+// Covers the Core::StringFormat-style positional formatter: verbatim text, default + typed kinds, width padding,
 // float/double fraction digits, and multiple placeholders in one format string.
 
 include "bedrock.ch"

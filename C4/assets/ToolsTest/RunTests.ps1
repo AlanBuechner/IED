@@ -501,31 +501,6 @@ function Test-LspStdio {
     return $failures
 }
 
-# Frost links every object in a module's intermediates folder, so the objects of a removed or renamed source are
-# deleted first (never the generated sources' or the linker's), and two sources that would share an object are an
-# error.
-function Test-FrostStaleObjects {
-    $dir = Join-Path $scratch "froststale"
-    Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force $dir | Out-Null
-    foreach ($file in @("Kept.obj", "Kept.d", "Kept.args", "generated.obj", "generated.args", "linker.args", "Gone.obj", "Gone.d", "Gone.args", "notes.txt")) {
-        Set-Content (Join-Path $dir $file) ""
-    }
-    $probe = "import sys; sys.dont_write_bytecode = True; sys.path.insert(0, r'$repoRoot\Frost'); " +
-        "from Builder.ObjectBuilder import CleanStaleIntermediateFiles, SharedObjectNames; " +
-        "removed = CleanStaleIntermediateFiles({'Kept', 'generated'}, r'$dir'); " +
-        "print(len(removed)); print(len(SharedObjectNames(['a/Types.cpp', 'b/Types.cpp', 'a/Other.cpp', 'a/Types.cpp'])))"
-    $counts = @(python -c $probe)
-    $failures = @()
-    if ($LASTEXITCODE -ne 0 -or $counts.Count -ne 2) { return @("the Frost probe did not run: $counts") }
-    $left = (Get-ChildItem $dir -File | ForEach-Object { $_.Name } | Sort-Object) -join ","
-    if ($counts[0] -ne "3" -or $left -ne "generated.args,generated.obj,Kept.args,Kept.d,Kept.obj,linker.args,notes.txt") {
-        $failures += "the cleanup removed $($counts[0]) files and left $left"
-    }
-    if ($counts[1] -ne "1") { $failures += "two Types.cpp gave $($counts[1]) clashes, not 1" }
-    return $failures
-}
-
 # -march / -m pick the processor (D-62): its SIMD_* macros, the target on every function, and the same flags for a
 # foreign source and the header CBind binds, so C4 and C agree on it; a name that selects nothing is a usage error.
 function Test-TargetFlags {
@@ -562,75 +537,14 @@ int32 main()
     return $failures
 }
 
-# No source file outside the build folders and installed packages (node_modules, BUG-266; Frost's vendored toolchain)
-# is hidden by .gitignore, so a fresh checkout has every file the build needs (BUG-261: `output*` hid C4DAP's
+# No source file outside the build folders and installed packages (node_modules, BUG-266) is hidden by .gitignore, so a fresh checkout has every file the build needs (BUG-261: `output*` hid C4DAP's
 # OutputPipes sources).
 function Test-NoIgnoredSources {
     $patterns = @("*.cpp", "*.h", "*.hpp", "*.c", "*.cf", "*.ch", "*.py", "*.ps1")
     $ignored = @(git -C $repoRoot ls-files --others --ignored --exclude-standard -- @patterns 2>$null |
-        Where-Object { $_ -notmatch '^(bin|bin-int|assets/build-output|Frost/vendor|\.claude)/' -and $_ -notmatch '__pycache__' -and
+        Where-Object { $_ -notmatch '^(bin|bin-int|assets/build-output|\.claude)/' -and $_ -notmatch '__pycache__' -and
             $_ -notmatch '(^|/)node_modules/' })
     return @($ignored | ForEach-Object { "$_ is ignored by .gitignore" })
-}
-
-# Frost links a module whose objects' paths are longer together than a Windows command line through a response file:
-# any module of a checkout in a deep folder, such as a git worktree (BUG-260).
-function Test-FrostLongLink {
-    $dir = Join-Path $scratch "frost_long_link/a_folder_whose_name_is_long_enough_to_matter/and_another_one_below_it"
-    Remove-Item (Join-Path $scratch "frost_long_link") -Recurse -Force -ErrorAction SilentlyContinue
-    $lines = @(python (Join-Path $root "FrostProbes.py") long-link $dir)
-    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 2) { return @("the Frost probe did not run: $lines") }
-    $failures = @()
-    if ($lines[1] -ne "long") { $failures += "the probe's command was $($lines[1]), not past the limit" }
-    if ($lines[0] -ne "0") { $failures += "the link ended with $($lines[0])" }
-    return $failures
-}
-
-# A project's Build.py may name it, so a checkout in a folder that is no identifier (a git worktree) still builds C4.exe
-# with a valid PROJECT_NAME (BUG-262).
-function Test-FrostProjectName {
-    $dir = Join-Path $scratch "frost_project_name/not-an-identifier"
-    Remove-Item (Join-Path $scratch "frost_project_name") -Recurse -Force -ErrorAction SilentlyContinue
-    $lines = @(python (Join-Path $root "FrostProbes.py") project-name $dir)
-    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 2) { return @("the Frost probe did not run: $lines") }
-    if ($lines[0] -ne "Named" -or $lines[1] -ne "PROJECT_NAME=Named") { return @("the project is '$($lines[0])' with $($lines[1])") }
-    return @()
-}
-
-# A compile that fails discards the object and dependency file it may have written, so the next build compiles the
-# file again instead of linking what a crash left (BUG-255).
-function Test-FrostFailedCompile {
-    $dir = Join-Path $scratch "frost_failed_compile"
-    Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
-    $lines = @(python (Join-Path $root "FrostProbes.py") failed-compile $dir)
-    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 2) { return @("the Frost probe did not run: $lines") }
-    $failures = @()
-    if ($lines[0] -eq "0") { $failures += "the broken file compiled" }
-    if ($lines[1] -ne "gone") { $failures += "the failed compile left its object or dependency file" }
-    return $failures
-}
-
-# Every build merges each source's driver-form compile command into compile_commands.json, keeping other files'
-# entries; clangd and the clang driver can use them (Frost/docs/BuildSystem.md "Compile Database").
-function Test-FrostCompileDatabase {
-    $dir = Join-Path $scratch "frost_compile_database"
-    Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
-    $lines = @(python (Join-Path $root "FrostProbes.py") compile-database $dir)
-    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 3) { return @("the Frost probe did not run: $lines") }
-    $failures = @()
-    if ($lines[0] -ne "other.cpp,probe.c,probe.cpp") { $failures += "the database holds $($lines[0])" }
-    if ($lines[1] -ne "driver,-isystem,no-O,c-as-c") { $failures += "the entries' flags: $($lines[1])" }
-    if ($lines[2] -ne "0") { $failures += "the clang driver rejected the recorded arguments (exit $($lines[2]))" }
-    return $failures
-}
-
-# Frost builds every early project after the early projects it links, whatever order they loaded in, so a clean tree
-# builds with plain -b (BUG-265).
-function Test-FrostBuildOrder {
-    $order = @(python (Join-Path $root "FrostProbes.py") build-order)
-    if ($LASTEXITCODE -ne 0 -or $order.Count -ne 1) { return @("the Frost probe did not run: $order") }
-    if ($order[0] -ne "Base,Text,Reflect,Tool") { return @("the early projects build in the order $($order[0])") }
-    return @()
 }
 
 # -fno-strict-aliasing (D-64): the IR carries no alias tags (a default build does), and a pointer pun the optimizer
@@ -841,7 +755,7 @@ int32 main()
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag",
-    "Test-FrostStaleObjects", "Test-FrostLongLink", "Test-FrostProjectName", "Test-FrostBuildOrder", "Test-FrostFailedCompile", "Test-FrostCompileDatabase", "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
+    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

@@ -11,8 +11,7 @@
 name = "IED"
 toolchain = "dev"
 default-project = "C4"
-projects = ["C4", "C4/*", "C4/Frost/Projects/*", "C4/Frost/Projects/*/*", "C4/Frost/Projects/Core/Modules/yaml", "src", "cli", "launcher",
-	"desktop", "tools/schema-check/c4", "plugins/gpu"]
+projects = ["C4", "C4/*", "plugins/cpp/libraries/*", "src", "cli", "launcher", "desktop", "tools/schema-check/c4", "plugins/gpu"]
 
 # The LLVM release C++ compiles with (clang, lld, llvm-lib; setup.bat installs it). Its headers are system headers of
 # every C++ compile, as the C4 compiler's sources and tools include them.

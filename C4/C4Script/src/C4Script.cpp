@@ -1,6 +1,6 @@
 // The script host's C API over Script/ScriptHost (docs/runtime/04).
 
-#define IMPLEMENT_LOGGER // the DLL's own copy of Frost's loggers, which C4Lib logs through
+#define IMPLEMENT_LOGGER // the DLL's own copy of Core's loggers, which C4Lib logs through
 #include "Core/Logging/Log.h"
 #include "C4Script.h"
 #include "Script/ScriptHost.h"

@@ -4,8 +4,7 @@ generated/
 bin/
 bin-int/
 vendor/
-# The compile database every build writes (Frost/docs/BuildSystem.md) and clangd's index beside it.
-/compile_commands.json
+# clangd's index (the compile database is build/compile_commands.json at the repository root).
 .cache/
 
 *.sln
@@ -33,7 +32,7 @@ temp_*.bc
 temp_*.obj
 temp_*.ll
 
-# Frost build artifacts
+# Test scratch output
 final_test*
 comprehensive_test*
 integration_test*
