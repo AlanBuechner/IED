@@ -68,6 +68,12 @@
       "main.cf (3:2) warning: unknown annotation 'operater': did you mean 'operator'?", "Warnings:            2"],
     "reason": "Warnings are printed and the build still succeeds; constants that fit do not warn (B22)."
   },
+  "Diagnostics/Bug336ConditionalConstants": {
+    "exit": 0,
+    "compileMustContain": ["main.cf (4:47) warning: the conversion from 'uint32' to 'uint8' may change the value",
+      "main.cf (5:35) warning: the conversion from 'uint32' to 'uint8' may change the value", "Warnings:            2"],
+    "reason": "BUG-336: a conditional whose arms are constants that fit converts without a warning; an arm that may not fit warns."
+  },
   "Diagnostics/GlobalStartWarnings": {
     "exit": 0,
     "compileMustContain": ["main.cf (2:19) warning: the conversion from 'int32' to 'uint8' may change the value",

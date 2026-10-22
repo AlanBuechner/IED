@@ -1,0 +1,9 @@
+// BUG-336: a conditional whose two arms are constants that fit converts without a warning; an arm that may not fit warns.
+uint8 Level(int32 level) { return level == 6 ? 2u : 3u; }
+uint8 Nested(int32 level) { return level < 2 ? 0u : (level < 6 ? 1u : 2u); }
+uint8 Wide(bool small, uint32 value) { return small ? 4u : value; }
+uint8 TooBig(bool small) { return small ? 4u : 300u; }
+
+int32 main() {
+	return Level(6) == 2u && Nested(4) == 1u && Wide(false, 7u) == 7u && TooBig(true) == 4u ? 0 : 1;
+}

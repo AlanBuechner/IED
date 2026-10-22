@@ -7,6 +7,8 @@
 #include "Model/Types/EnumType.h"
 #include "Model/Types/SwizzleType.h"
 #include "Model/ConstEvaluator.h"
+#include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
+#include "Parser/Nodes/Expressions/TernaryExpressionNode.h"
 #include <cmath>
 #include <limits>
 
@@ -150,6 +152,25 @@ namespace Scripting::ImplicitConversion
 			if (to->IsIntegral()) return IntegerFits(v, to);
 			return !std::isfinite(v) || std::fabs(v) <= (double)std::numeric_limits<float>::max();
 		}
+
+		// Every value the written expression can have folds and fits: a conditional's by both its arms (clang's rule,
+		// BUG-336), whatever its condition.
+		bool EveryValueFits(LoweringContext& ctx, const AstNode* site, const Type* to)
+		{
+			if (const auto* parenthesized = dynamic_cast<const ParenthesizedExpressionNode*>(site))
+				return EveryValueFits(ctx, parenthesized->GetExpression().Get(), to);
+			if (const auto* choice = dynamic_cast<const TernaryExpressionNode*>(site))
+				return EveryValueFits(ctx, choice->GetThenBranch().Get(), to) && EveryValueFits(ctx, choice->GetElseBranch().Get(), to);
+			auto folded = ConstEvaluator(*ctx.queries().Model(), ctx.scope).Evaluate(site, ctx.unitId);
+			return folded.Ok() && ConstantFits(folded.value, to);
+		}
+
+		bool ValueFits(LoweringContext& ctx, const AstNode* site, const Value& value, const Type* to)
+		{
+			ConstantValue constant;
+			if (ConstantOf(ctx, site, value, constant)) return ConstantFits(constant, to);
+			return site && EveryValueFits(ctx, site, to);
+		}
 	}
 
 	void WarnIfNarrowing(LoweringContext& ctx, const AstNode* site, const Value& value, const Type* target)
@@ -159,8 +180,7 @@ namespace Scripting::ImplicitConversion
 		const Type* to = TypeHandle::UnwrapToValue(target);
 		if (to && IsPackedVector(to)) to = static_cast<const SwizzleType*>(to)->GetElementType(); // a broadcast converts to the lanes
 		if (!from || !to || from == to || !PlainNumber(from) || !PlainNumber(to) || !Narrows(from, to)) return;
-		ConstantValue constant;
-		if (ConstantOf(ctx, site, value, constant) && ConstantFits(constant, to)) return;
+		if (ValueFits(ctx, site, value, to)) return;
 		ctx.Warn(site, "the conversion from " + Quoted(from) + " to " + Quoted(to) + " may change the value: write (" + to->GetName() +
 			")x if that is intended");
 	}
