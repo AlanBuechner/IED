@@ -45,6 +45,7 @@ namespace
 		};
 		source.kind = [](u32 at) { return std::string("draw"); };
 		source.name = [](u32 at) { return Format("event %u", at); };
+		source.label = source.name;
 		JsonWriter out;
 		out.BeginObject();
 		WritePixelHistory(candidates, source, eid, out);

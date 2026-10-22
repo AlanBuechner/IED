@@ -90,6 +90,7 @@ namespace fb::replay::vulkan
 		void Texture(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Pixel(const JsonValue& params, JsonWriter& out) override;
 		void PixelHistory(const JsonValue& params, JsonWriter& out) override;
+		void DebugShader(const JsonValue& params, JsonWriter& out) override;
 		void Buffer(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Mesh(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Shader(const JsonValue& params, JsonWriter& out) override;

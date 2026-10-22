@@ -33,12 +33,14 @@ namespace fb::replay
 		DrawTests tests;
 	};
 
-	// What the history asks of the API: the pixel after an event (0: at the frame's start), an event's kind and name.
+	// What the history asks of the API: the pixel after an event (0: at the frame's start), an event's kind, its name
+	// (its marker and call), and a label for the summary (its marker, else its call).
 	struct HistorySource
 	{
 		std::function<TexelValue(u32 eid)> after;
 		std::function<std::string(u32 eid)> kind;
 		std::function<std::string(u32 eid)> name;
+		std::function<std::string(u32 eid)> label;
 	};
 
 	// Writes start, events (each {eid, kind, name, result, text, samples?, tests?, before, after, changed}), end, summary, and

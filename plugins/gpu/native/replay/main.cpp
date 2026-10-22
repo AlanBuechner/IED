@@ -153,6 +153,18 @@ int main(int argc, char** argv) {
 		request.Uint("y", strtoul(argv[at + 4], nullptr, 10)).Uint("mip", at + 5 < argc ? strtoul(argv[at + 5], nullptr, 10) : 0).EndObject();
 		answer = run("pixelHistory", request.Text());
 	}
+	else if (command == "debug" && at + 2 < argc) {
+		// debug <eid> fs <x> <y> | vs <vertex> [instance] | cs <x> <y> <z>
+		JsonWriter request;
+		const std::string stage = argv[at + 2];
+		request.BeginObject().Uint("eid", strtoul(argv[at + 1], nullptr, 10)).String("stage", stage);
+		auto arg = [&](int k) { return at + k < argc ? strtoul(argv[at + k], nullptr, 10) : 0ul; };
+		if (stage == "vs") request.Uint("vertex", arg(3)).Uint("instance", arg(4));
+		else if (stage == "cs") request.BeginArray("thread").Uint(arg(3)).Uint(arg(4)).Uint(arg(5)).EndArray();
+		else request.Uint("x", arg(3)).Uint("y", arg(4));
+		request.EndObject();
+		answer = run("debugShader", request.Text());
+	}
 	else return Usage();
 	if (!answer.error.empty()) {
 		fprintf(stderr, "error: %s\n", answer.error.c_str());

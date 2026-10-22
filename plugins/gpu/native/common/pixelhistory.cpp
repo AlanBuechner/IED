@@ -70,7 +70,7 @@ namespace fb::replay
 			WriteValue(out, "after", after);
 			out.Bool("changed", !Same(before, after));
 			out.EndObject();
-			const std::string what = Format("EID %u (%s)", candidate.eid, source.name(candidate.eid).c_str());
+			const std::string what = Format("EID %u (%s)", candidate.eid, source.label(candidate.eid).c_str());
 			if (wrote) writes.push_back({candidate.eid, what});
 			else failures.push_back({candidate.eid, what + " " + verdict.text});
 			before = after;

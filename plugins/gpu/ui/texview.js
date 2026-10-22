@@ -47,7 +47,7 @@ void main() {
 }`;
 
 export class TextureViewer {
-	constructor({ onPick }) {
+	constructor({ onPick, onHistory, onDebug }) {
 		this.onPick = onPick;
 		this.channels = [1, 1, 1, 0];
 		this.mode = 0;
@@ -68,11 +68,15 @@ export class TextureViewer {
 			h("option", { value: "0" }, "Visualize: Color"), h("option", { value: "1" }, "Visualize: NaN / Inf / negative"));
 		this.minInput = h("input", { type: "number", step: "any", title: "Range low", on: { change: () => this.setRange(+this.minInput.value, this.range[1]) } });
 		this.maxInput = h("input", { type: "number", step: "any", title: "Range high", on: { change: () => this.setRange(this.range[0], +this.maxInput.value) } });
+		this.historyButton = h("button.ib", { title: "Pixel History: every event that wrote, or tried to write, the picked pixel", "aria-label": "Pixel History", disabled: true,
+			on: { click: () => this.picked && onHistory(this.picked.x, this.picked.y) } }, icon("history"));
+		this.debugButton = h("button.ib", { title: "Debug the picked pixel's shader at the selected draw", "aria-label": "Debug Pixel", disabled: true,
+			on: { click: () => this.picked && onDebug(this.picked.x, this.picked.y) } }, icon("debug-alt"));
 		this.gammaButton = h("button.ib.gpu-wide", { title: "Gamma: show linear values sRGB-encoded", on: { click: () => { this.gamma = !this.gamma; this.draw(); this.tools(); } } }, icon("color-mode"));
 		this.toolbar = h("div.gpu-rv-tools", null, this.nameLabel, this.mipSelect, this.sliceSelect, h("span.gpu-chan", null, this.channelButtons), this.visualize,
 			h("span.range.gpu-wide", null, "Range"), this.minInput, this.maxInput,
 			h("button.ib.gpu-wide", { title: "Fit the range to the texture's values", on: { click: () => this.fitRange() } }, icon("arrow-both")),
-			this.gammaButton, h("span.grow"),
+			this.gammaButton, h("span.grow"), this.debugButton, this.historyButton,
 			h("button.ib", { title: "Fit to the view (double click)", on: { click: () => this.fit() } }, icon("screen-normal")));
 		this.status = h("div.gpu-rv-status");
 		this.el = h("div.gpu-rv", null, this.toolbar, this.view, this.status);
@@ -303,6 +307,8 @@ export class TextureViewer {
 				const texel = this.texelAt(e.clientX, e.clientY);
 				if (texel) {
 					this.picked = texel;
+					this.historyButton.disabled = false;
+					this.debugButton.disabled = false;
 					this.placeMarker();
 					this.onPick(texel.x, texel.y);
 				}

@@ -169,13 +169,21 @@ namespace fb::replay::vulkan
 		vk.vkGetPhysicalDeviceFeatures(physical, &supported);
 		pipelineStatistics = supported.pipelineStatisticsQuery == VK_TRUE;
 		VkPhysicalDeviceFeatures features = captured.pEnabledFeatures ? *captured.pEnabledFeatures : VkPhysicalDeviceFeatures{};
+		// What the replay's own work needs: statistics for timing, stores from vertex and fragment shaders for the shader
+		// debugger's trace.
+		const auto ours = [&](VkPhysicalDeviceFeatures& f) {
+			f.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;
+			f.fragmentStoresAndAtomics |= supported.fragmentStoresAndAtomics;
+			f.vertexPipelineStoresAndAtomics |= supported.vertexPipelineStoresAndAtomics;
+		};
 		bool inChain = false;
 		for (auto* next = (VkBaseOutStructure*)captured.pNext; next; next = next->pNext)
 			if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
-				((VkPhysicalDeviceFeatures2*)next)->features.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;
+				ours(((VkPhysicalDeviceFeatures2*)next)->features);
 				inChain = true;
 			}
-		features.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;
+		ours(features);
+		storesInShaders = supported.fragmentStoresAndAtomics && supported.vertexPipelineStoresAndAtomics;
 		const float priority = 1.0f;
 		VkDeviceQueueCreateInfo queueInfo = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
 		queueInfo.queueFamilyIndex = family;

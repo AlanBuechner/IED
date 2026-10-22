@@ -58,6 +58,9 @@ namespace fb::replay::vulkan
 
 	// Reflection of `count` words; false for something that is not SPIR-V.
 	bool ParseSpirv(const u32* words, size_t count, SpirvModule& out);
-	std::string DisassembleSpirv(const u32* words, size_t count);
+	// The listing; `lines` (when given) gets each instruction's line in it, by the instruction's word offset.
+	std::string DisassembleSpirv(const u32* words, size_t count, std::map<size_t, u32>* lines = nullptr);
+	// Whether opcode `op` has a result id, and whether a result type comes before it.
+	bool SpirvResult(u32 op, bool& typed);
 	const char* ExecutionModelName(u32 model);
 }

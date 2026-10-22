@@ -427,6 +427,11 @@ namespace fb::replay::vulkan
 			const Event* marker = event->parent >= 0 ? &model_.events[(size_t)event->parent] : nullptr;
 			return marker ? marker->name + ": " + event->name : event->name;
 		};
+		source.label = [&](u32 at) {
+			const Event* event = model_.EventAt(at);
+			if (!event) return std::string("?");
+			return event->parent >= 0 ? model_.events[(size_t)event->parent].name : event->name;
+		};
 		out.Uint("id", spot.id);
 		out.String("name", model_.NameOf(spot.id));
 		out.Uint("x", spot.x);

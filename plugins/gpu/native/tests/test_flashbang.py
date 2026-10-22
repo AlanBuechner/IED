@@ -331,6 +331,20 @@ class VulkanCaptureReplay(unittest.TestCase):
 		hdr = [r["id"] for r in replay(self.capture, "resources", device=False)["resources"] if r["name"] == "HDR"][0]
 		check_history(self, replay(self.capture, "history", str(hdr), str(self.events[-1][0]), "640", "240"), "vkCmdBeginRenderPass")
 
+	def test_shader_debugger_steps_each_stage(self):
+		cube = self.draws_under("Cube B")[0][0]
+		fragment = replay(self.capture, "debug", str(cube), "fs", "640", "240")
+		self.assertGreaterEqual(len(fragment["invocations"]), 1, "a fragment of Cube B ran at the pixel")
+		lines = fragment["listing"].split("\n")
+		ran = [lines[fragment["sites"][step[0]][0]] for step in fragment["invocations"][0]["steps"]]
+		self.assertTrue(any("OpImageSampleImplicitLod" in line for line in ran), ran)
+		vertex = replay(self.capture, "debug", str(cube), "vs", "3")
+		self.assertEqual(1, len(vertex["invocations"]))
+		self.assertEqual("0.5, 0.5, 0.5", vertex["invocations"][0]["steps"][0][1], "vertex 3's position, loaded first")
+		dispatch = [e for e in self.events if e[2] == "dispatch"][0][0]
+		thread = replay(self.capture, "debug", str(dispatch), "cs", "5", "7", "0")
+		self.assertEqual("5, 7, 0", thread["invocations"][0]["steps"][0][1], "the thread's global id, loaded first")
+
 	def test_mesh_shader_and_timing(self):
 		draw = self.draws_under("Cube A")[0][0]
 		client = RpcClient()

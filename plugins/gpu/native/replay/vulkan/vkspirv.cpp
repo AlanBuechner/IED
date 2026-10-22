@@ -445,7 +445,13 @@ namespace fb::replay::vulkan
 		return true;
 	}
 
-	std::string DisassembleSpirv(const u32* words, size_t count) {
+	bool SpirvResult(u32 op, bool& typed) {
+		const OpInfo* info = OpOf(op);
+		typed = info && info->pattern[0] == 'T' && info->pattern[1] == ' ' && info->pattern[2] == 'R';
+		return info && (typed || info->pattern[0] == 'R');
+	}
+
+	std::string DisassembleSpirv(const u32* words, size_t count, std::map<size_t, u32>* lines) {
 		Info info;
 		SpirvModule header;
 		if (!words || !Gather(words, count, info, header)) return "; not SPIR-V";
@@ -499,6 +505,7 @@ namespace fb::replay::vulkan
 		auto id = [&](u32 v) { return "%" + (names.count(v) ? names[v] : std::to_string(v)); };
 
 		std::string text = Format("; SPIR-V %u.%u, generator 0x%08x, bound %u\n", (header.version >> 16) & 0xFF, (header.version >> 8) & 0xFF, header.generator, header.bound);
+		u32 lineCount = 1;
 		bool inFunction = false;
 		at = 5;
 		while (at < count) {
@@ -560,7 +567,9 @@ namespace fb::replay::vulkan
 			// A function's body is indented under its OpFunction and labels.
 			if (op == 56) inFunction = false;
 			const bool indent = inFunction && op != 248;
-			text += (indent ? "        " : "") + result + line + "\n";
+			if (lines) (*lines)[at] = lineCount;
+			++lineCount;
+			text +=(indent ? "        " : "") + result + line + "\n";
 			if (op == 54) inFunction = true;
 			at += length;
 		}

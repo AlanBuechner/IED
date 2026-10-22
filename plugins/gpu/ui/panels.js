@@ -6,23 +6,29 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { DOT, value } from "./format.js";
 
 export class ShaderPanel {
-	constructor({ onClose }) {
+	constructor({ onClose, onDebugThread }) {
 		this.title = h("b");
 		this.reflection = h("div.refl");
 		this.code = h("pre");
+		// A compute shader's thread to debug: its global id.
+		this.thread = [0, 1, 2].map((k) => h("input", { type: "number", min: "0", value: "0", "aria-label": "Thread " + "xyz"[k], title: "Global thread " + "xyz"[k] }));
+		this.threadForm = h("div.gpu-rv-tools", { hidden: true }, h("span.range", null, "Thread"), this.thread,
+			h("button.btn.flat", { title: "Debug this compute thread", on: { click: () => onDebugThread(this.thread.map((input) => +input.value || 0)) } }, icon("debug-alt"), "Debug"));
 		this.el = h("div.gpu-shader", null,
 			h("div.gpu-rv-tools", null, icon("symbol-method"), this.title, h("span.grow"),
 				h("button.ib", { title: "Back to the resource", "aria-label": "Close", on: { click: onClose } }, icon("close"))),
-			this.reflection, this.code);
+			this.threadForm, this.reflection, this.code);
 	}
 
 	message(text) {
 		this.title.textContent = "Shader";
+		this.threadForm.hidden = true;
 		replace(this.reflection);
 		this.code.textContent = text;
 	}
 
 	show(shader) {
+		this.threadForm.hidden = shader.stage !== "cs";
 		const stage = {
 			vs: "Vertex", ps: "Pixel", cs: "Compute", hs: "Hull", ds: "Domain", gs: "Geometry", as: "Amplification", ms: "Mesh",
 			fs: "Fragment", tcs: "Tessellation control", tes: "Tessellation evaluation", task: "Task", mesh: "Mesh",
@@ -47,7 +53,8 @@ export class ShaderPanel {
 }
 
 export class MeshPanel {
-	constructor({ onClose }) {
+	constructor({ onClose, onDebugVertex }) {
+		this.onDebugVertex = onDebugVertex;
 		this.title = h("b");
 		this.table = h("div.gpu-mesh-table");
 		this.el = h("div.gpu-shader", null,
@@ -70,7 +77,8 @@ export class MeshPanel {
 		const shown = Math.min(mesh.count, 2000);
 		const rows = [];
 		for (let v = 0; v < shown; v++) {
-			const cells = [h("td", null, String(mesh.first + v))];
+			const vertex = mesh.first + v;
+			const cells = [h("td.link", { title: "Debug the vertex shader for vertex " + vertex, on: { click: () => this.onDebugVertex(vertex) } }, String(vertex))];
 			attributes.forEach((a, ai) => {
 				const at = (ai * mesh.count + v) * 4;
 				for (let c = 0; c < Math.max(1, a.components); c++) cells.push(h("td", null, value(floats[at + c])));

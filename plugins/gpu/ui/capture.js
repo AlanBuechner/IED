@@ -10,6 +10,8 @@ import { StateTree } from "./statetree.js";
 import { TextureViewer } from "./texview.js";
 import { ShaderPanel, MeshPanel } from "./panels.js";
 import { BufferPanel } from "./bufview.js";
+import { PixelHistoryPanel } from "./history.js";
+import { ShaderDebugPanel } from "./debugger.js";
 import { ReplaySession } from "./session.js";
 import { DOT, bytes, captureTime, count, counted, gpuMs } from "./format.js";
 
@@ -50,10 +52,12 @@ export class CaptureView {
 		this.events = new EventsGrid({ onSelect: (eid) => this.select(eid) });
 		this.timeline = new Timeline({ onSelect: (eid) => this.select(eid) });
 		this.tree = new StateTree({ onResource: (id, item) => this.pinResource(id, item), onShader: (stage) => this.showShader(stage) });
-		this.viewer = new TextureViewer({ onPick: (x, y) => this.pick(x, y) });
+		this.viewer = new TextureViewer({ onPick: (x, y) => this.pick(x, y), onHistory: (x, y) => this.showHistory(x, y), onDebug: (x, y) => this.debugPixel(this.outputEid, x, y) });
 		this.viewer.onChange = (what, v) => this.reloadTexture({ [what]: v });
-		this.shader = new ShaderPanel({ onClose: () => this.showPanel(this.viewer.el) });
-		this.mesh = new MeshPanel({ onClose: () => this.showPanel(this.viewer.el) });
+		this.shader = new ShaderPanel({ onClose: () => this.showPanel(this.viewer.el), onDebugThread: (thread) => this.debug({ eid: this.outputEid, stage: "cs", thread }, "thread (" + thread.join(", ") + ")") });
+		this.mesh = new MeshPanel({ onClose: () => this.showPanel(this.viewer.el), onDebugVertex: (vertex) => this.debug({ eid: this.outputEid, stage: "vs", vertex, instance: 0 }, "vertex " + vertex) });
+		this.debugger = new ShaderDebugPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); } });
+		this.history = new PixelHistoryPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); }, onSelect: (eid) => this.select(eid), onDebug: (eid, x, y) => this.debugPixel(eid, x, y) });
 		this.buffer = new BufferPanel({ onClose: () => this.unpin(), read: (id, eid, offset, size) => this.readBuffer(id, eid, offset, size) });
 		this.panel = h("div.gpu-col.grow.gpu-rv-host", null, this.viewer.el);
 		this.timingButton = h("button.btn.flat", { title: "Replay the frame several times with timestamps around every action", on: { click: () => this.collectTiming() } }, icon("watch"), "Collect Timing Data");
@@ -194,6 +198,9 @@ export class CaptureView {
 			this.tree.show(this.state);
 			this.renderCalls(calls.result.calls);
 			const output = StateTree.outputOf(this.state);
+			this.history.select(eid);
+			// The pixel history and the shader debugger stay while events are selected.
+			if (this.panel.firstChild === this.history.el || this.panel.firstChild === this.debugger.el) return;
 			if (!this.resource || !this.resource.pinned) this.resource = output ? { id: output.resource, name: output.value, pinned: false, offset: output.offset, layout: output.layout, elements: output.elements } : this.resource;
 			if (this.resource) this.showResource();
 			else {
@@ -276,6 +283,40 @@ export class CaptureView {
 		}
 		catch (e) {
 			this.viewer.setPick(e.message || String(e));
+		}
+	}
+
+	// Every event up to the selected one that wrote, or tried to write, the picked pixel of the viewer's texture.
+	async showHistory(x, y) {
+		if (!this.resource) return;
+		const params = { id: this.resource.id, eid: this.outputEid, x, y, mip: (this.textureParams && this.textureParams.mip) || 0, slice: (this.textureParams && this.textureParams.slice) || 0 };
+		this.showPanel(this.history.el);
+		this.history.message("Replaying the draws at (" + x + ", " + y + ")...");
+		try {
+			const { result } = await this.session.call("pixelHistory", params);
+			this.history.show(result);
+			this.history.select(this.eid);
+		}
+		catch (e) {
+			this.history.message(e.message || String(e), true);
+		}
+	}
+
+	debugPixel(eid, x, y) {
+		const d3d12 = this.summary && this.summary.api === "D3D12";
+		this.debug({ eid, stage: d3d12 ? "ps" : "fs", x, y }, "pixel (" + x + ", " + y + ")");
+	}
+
+	// Runs the shader debugger for one invocation (a debugShader request) and shows its trace.
+	async debug(params, what) {
+		this.showPanel(this.debugger.el);
+		this.debugger.message("Running the shader instrumented for " + what + "...");
+		try {
+			const { result } = await this.session.call("debugShader", params);
+			this.debugger.show(result, what);
+		}
+		catch (e) {
+			this.debugger.message(e.message || String(e), true);
 		}
 	}
 

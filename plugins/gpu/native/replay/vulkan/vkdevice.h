@@ -23,8 +23,8 @@ namespace fb::replay::vulkan
 	X(vkDestroyDevice) X(vkGetDeviceQueue) X(vkDeviceWaitIdle) X(vkQueueSubmit) X(vkQueueWaitIdle) X(vkAllocateMemory) X(vkFreeMemory) \
 	X(vkMapMemory) X(vkUnmapMemory) X(vkFlushMappedMemoryRanges) X(vkInvalidateMappedMemoryRanges) X(vkCreateBuffer) X(vkDestroyBuffer) \
 	X(vkGetBufferMemoryRequirements) X(vkBindBufferMemory) X(vkCreateImage) X(vkDestroyImage) X(vkGetImageMemoryRequirements) \
-	X(vkBindImageMemory) X(vkCreateImageView) X(vkCreateBufferView) X(vkCreateSampler) X(vkCreateShaderModule) X(vkCreateDescriptorSetLayout) \
-	X(vkCreatePipelineLayout) X(vkCreateDescriptorPool) X(vkAllocateDescriptorSets) X(vkUpdateDescriptorSets) X(vkCreateRenderPass) \
+	X(vkBindImageMemory) X(vkCreateImageView) X(vkCreateBufferView) X(vkCreateSampler) X(vkCreateShaderModule) X(vkDestroyShaderModule) X(vkCreateDescriptorSetLayout) X(vkDestroyDescriptorSetLayout) \
+	X(vkCreatePipelineLayout) X(vkDestroyPipelineLayout) X(vkCreateDescriptorPool) X(vkDestroyDescriptorPool) X(vkAllocateDescriptorSets) X(vkUpdateDescriptorSets) X(vkCreateRenderPass) \
 	X(vkCreateRenderPass2) X(vkCreateFramebuffer) X(vkCreateGraphicsPipelines) X(vkCreateComputePipelines) X(vkDestroyPipeline) X(vkCreateQueryPool) \
 	X(vkDestroyQueryPool) X(vkGetQueryPoolResults) X(vkCreateCommandPool) X(vkDestroyCommandPool) X(vkAllocateCommandBuffers) \
 	X(vkResetCommandBuffer) X(vkBeginCommandBuffer) X(vkEndCommandBuffer) X(vkCreateFence) X(vkDestroyFence) X(vkWaitForFences) \
@@ -129,6 +129,8 @@ namespace fb::replay::vulkan
 		// Ends what `pass` has open, so the command buffer can end.
 		void Close(VkCommandBuffer cb, PassState& pass);
 
+		// The first memory type of `bits` with all of `flags`; UINT32_MAX when none has them.
+		u32 MemoryType(u32 bits, VkMemoryPropertyFlags flags) const;
 		const ImageState* Image(u64 id) const;
 		const BufferState* Buffer(u64 id) const;
 		const ViewState* View(u64 id) const;
@@ -142,6 +144,7 @@ namespace fb::replay::vulkan
 		VkPhysicalDeviceProperties properties = {};
 		VkPhysicalDeviceMemoryProperties memory = {};
 		bool pipelineStatistics = false;
+		bool storesInShaders = false;      // vertex and fragment shaders can write storage (the shader debugger's trace)
 		std::string deviceName;
 		std::string driver;
 		std::vector<std::string> warnings;
@@ -164,7 +167,6 @@ namespace fb::replay::vulkan
 		void Reset();
 		void TrackBarrierLayouts(const CommandRef& command);
 		void EndPassLayouts(const PassState& pass);
-		u32 MemoryType(u32 bits, VkMemoryPropertyFlags flags) const;
 		VkDeviceMemory Allocate(const VkMemoryRequirements& needs, VkMemoryPropertyFlags flags);
 		void Set(u64 id, u64 handle);
 
