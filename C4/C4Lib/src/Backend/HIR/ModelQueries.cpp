@@ -109,11 +109,11 @@ namespace Scripting
 		const FunctionRecord* exact = nullptr;
 		const FunctionRecord* fallback = nullptr;
 		ClassHierarchy::ForEachSubobject(t, [&](const ObjectType* cur, int64) {
-			if (exact) return;
-			for (uint32 i = 0; i < cur->GetMethodCount() && !exact; ++i)
+			const Core::Vector<uint32>* with = exact ? nullptr : cur->MethodsWithOperator(annotation);
+			if (!with) return;
+			for (uint32 i : *with)
 			{
-				const auto& m = cur->GetMethods()[i];
-				if (!m.HasOperator(annotation)) continue;
+				if (exact) break;
 				const FunctionRecord* rec = RecordForMethod(cur, &cur->GetMethods()[i]);
 				if (!rec) continue;
 				uint32 pcount = rec->type ? rec->type->GetParameterCount() : 0;

@@ -125,6 +125,7 @@ namespace Scripting
 		void AddMethod(const MethodInfo& method)
 		{
 			m_MethodsNamed[method.mName].Push(m_Methods.Count());
+			for (const Core::String& annotation : method.m_OperatorAnnotations) m_MethodsWithOperator[annotation].Push(m_Methods.Count());
 			m_DeclaresVirtual = m_DeclaresVirtual || (!method.m_IsStatic && (method.m_IsVirtual || method.m_IsOverride));
 			m_Methods.Push(method);
 		}
@@ -134,6 +135,12 @@ namespace Scripting
 		{
 			const auto named = m_MethodsNamed.find(name);
 			return named == m_MethodsNamed.end() ? nullptr : &named->second;
+		}
+		/// The same for the methods an [operator("...")] annotation names (`+`, `==`, `copy`): null when none does.
+		const Core::Vector<uint32>* MethodsWithOperator(const Core::String& annotation) const
+		{
+			const auto found = m_MethodsWithOperator.find(annotation);
+			return found == m_MethodsWithOperator.end() ? nullptr : &found->second;
 		}
 
 		/// Size/alignment, lazily computed. Once the type is fully defined and every non-static field
@@ -274,6 +281,7 @@ namespace Scripting
 		Core::Vector<UnionRegion> m_UnionRegions;
 		Core::Vector<MethodInfo> m_Methods;
 		std::unordered_map<Core::String, Core::Vector<uint32>> m_MethodsNamed; // MethodsNamed's, kept by AddMethod
+		std::unordered_map<Core::String, Core::Vector<uint32>> m_MethodsWithOperator; // MethodsWithOperator's, kept by AddMethod
 		bool m_DeclaresVirtual = false; // a method of its own is virtual or overrides (IsPolymorphic), kept by AddMethod
 		Core::Vector<const ObjectType*> m_BaseTypes;
 		Core::Vector<size_t> m_BaseOffsets;        // parallel to m_BaseTypes, set by CalculateLayout

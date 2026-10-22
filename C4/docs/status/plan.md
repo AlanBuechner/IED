@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 11 done).
+  progress (steps 1 to 12 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1702,6 +1702,13 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   registered; a call's argument lists are reserved and a plain argument needs no vector of its own. IED server, the
   median of three runs (before / after; seconds): nothing changed 1.43 / 1.35, a statement 1.85 / 1.67, a function
   added 1.86 / 1.76, a header constant 2.39 / 2.32 to 2.40 (its two partitions, one of 25k instructions, dominate).
+- **Done notes (step 12):** the model's body pass walks a template body once per unit and round (its instances share
+  it); the reflection image's key is hashed on a thread of its own while the imports and GC roots are emitted; each
+  partition's imports are planned on the partitions' threads; an invoke thunk's target is named by its function in
+  its own partition, so partition 0 no longer declares every reflected function; a class indexes its methods by
+  operator (`MethodsWithOperator`), so operator lookups read only the methods that have one. No measurable change on
+  the IED server edit loop (nothing changed 1.38, a statement 1.70, a function added 1.72, a header constant 2.34 to
+  2.37): what is left before lowering is small, and lowering itself is the next step.
 - **Next:** HIR lowering (about 0.5 s of an edit, the largest serial part) on several threads. What it takes, found
   reading it: a scope position per lowering context (`SymbolTable::PushScope` moves the table's one `m_Current` and
   hangs each block's layer under the shared tree for good, since the trees point at their locals); the model's

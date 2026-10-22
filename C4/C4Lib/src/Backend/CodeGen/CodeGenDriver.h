@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <set>
 #include <deque>
+#include <future>
 #include <mutex>
 
 namespace Scripting
@@ -101,8 +102,9 @@ namespace Scripting
 		/// Partition `i`'s module (0: module()).
 		llvm::Module& PartitionModule(unsigned i) { return Partition(i).module(); }
 		/// A split program's reflection image is an object of its own (D-82), kept by this key, which changes with what
-		/// the image is made of; empty for a program that is not split or registers nothing.
-		const std::string& ReflectionImageKey() const { return m_ImageKey; }
+		/// the image is made of; empty for a program that is not split or registers nothing. It is a hash of every value
+		/// of the image, worked out on a thread of its own from when Lower keeps the image: this waits for it.
+		const std::string& ReflectionImageKey();
 		/// That image built into a module of `context`, which defines `__c4_reflect_image` (partition 0 declares and
 		/// registers it). It reads no model: any thread may build it, once Lower has returned.
 		std::unique_ptr<llvm::Module> BuildReflectionModule(llvm::LLVMContext& context) const;
@@ -174,7 +176,7 @@ namespace Scripting
 		const FunctionRecord* LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared,
 			std::vector<Placed>& lowered);
 		/// The code reflection records as `target`'s address; none for a function without code (a pure virtual method).
-		llvm::Function* CodeOf(const FunctionRecord& target);
+		llvm::Function* CodeOf(const FunctionRecord& target, ModuleContext& home);
 		/// Reflected functions with code to call that have not been considered for a thunk yet: a body emitted
 		/// here, or a virtual method (the thunk dispatches through the object).
 		Core::Vector<const FunctionRecord*> NewInvokeTargets(ProgramModel& model);
@@ -242,6 +244,7 @@ namespace Scripting
 		InvokeThunks m_Thunks;
 		ImageDescription m_Image; // a split program's reflection image (D-82)
 		std::string m_ImageKey;
+		std::future<std::string> m_ImageKeying; // the key while its thread works it out
 		std::string m_ImageTriple;
 		std::string m_ImageLayout;
 	};

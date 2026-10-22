@@ -291,14 +291,8 @@ namespace Scripting
 				const FunctionRecord* rec = (recsIt != model.m_MethodRecords.end() && i < recsIt->second.Count()) ? recsIt->second[i] : nullptr;
 				if (rec) out.Push({ rec->type, rec, rec->minArity });
 			};
-			if (!isOperatorName)
-			{
-				if (const Core::Vector<uint32>* named = t->MethodsNamed(name))
-					for (uint32 i : *named) take(i);
-				return;
-			}
-			for (uint32 i = 0; i < t->GetMethodCount(); ++i)
-				if (t->GetMethods()[i].HasOperator(annotation)) take(i);
+			if (const Core::Vector<uint32>* found = isOperatorName ? t->MethodsWithOperator(annotation) : t->MethodsNamed(name))
+				for (uint32 i : *found) take(i);
 		});
 	}
 
@@ -373,13 +367,13 @@ namespace Scripting
 				return;
 			}
 			ClassHierarchy::ForEachSubobject(static_cast<const ObjectType*>(lhsType), [&](const ObjectType* ty, int64) {
+				const Core::Vector<uint32>* with = ty->MethodsWithOperator(annotation);
+				if (!with) return;
 				auto recsIt = model.m_MethodRecords.find(ty);
-				for (uint32 i = 0; i < ty->GetMethodCount(); ++i)
+				for (uint32 i : *with)
 				{
-					const auto& m = ty->GetMethods()[i];
-					if (!m.HasOperator(annotation)) continue;
 					const FunctionRecord* rec = (recsIt != model.m_MethodRecords.end() && i < recsIt->second.Count()) ? recsIt->second[i] : nullptr;
-					if (rec) found.Push({ rec, &m });
+					if (rec) found.Push({ rec, &ty->GetMethods()[i] });
 				}
 			});
 		};

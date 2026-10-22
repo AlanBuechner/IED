@@ -37,6 +37,12 @@ namespace Scripting
 {
 	CodeGenDriver::CodeGenDriver(llvm::LLVMContext& ctx) : m_Context(ctx), m_MCtx(ctx), m_Emitter(m_MCtx) {}
 
+	const std::string& CodeGenDriver::ReflectionImageKey()
+	{
+		if (m_ImageKeying.valid()) m_ImageKey = m_ImageKeying.get();
+		return m_ImageKey;
+	}
+
 	std::unique_ptr<llvm::Module> CodeGenDriver::BuildReflectionModule(llvm::LLVMContext& context) const
 	{
 		auto module = std::make_unique<llvm::Module>("c4_reflection", context);
@@ -326,16 +332,18 @@ namespace Scripting
 		m_ThunkFunctions[&thunk] = emitted;
 	}
 
+	// The image names a target by its function in the partition that defines it, which declares nothing new there.
 	void CodeGenDriver::RecordThunk(ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk)
 	{
 		llvm::Function* emitted = m_ThunkFunctions.at(&thunk);
-		m_Thunks[&target] = SharesInvokeThunk(model, target) ? InvokeEntry{ emitted, m_MCtx.GetOrCreateFunction(target), CodeOf(target) }
-			: InvokeEntry{ emitted, nullptr, CodeOf(target) };
+		ModuleContext& home = Partition(PartitionOf(target));
+		m_Thunks[&target] = SharesInvokeThunk(model, target) ? InvokeEntry{ emitted, home.GetOrCreateFunction(target), CodeOf(target, home) }
+			: InvokeEntry{ emitted, nullptr, CodeOf(target, home) };
 	}
 
-	llvm::Function* CodeGenDriver::CodeOf(const FunctionRecord& target)
+	llvm::Function* CodeGenDriver::CodeOf(const FunctionRecord& target, ModuleContext& home)
 	{
-		return HasCode(target) ? m_MCtx.GetOrCreateFunction(target) : nullptr;
+		return HasCode(target) ? home.GetOrCreateFunction(target) : nullptr;
 	}
 
 	const FunctionRecord* CodeGenDriver::LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol,
@@ -460,8 +468,9 @@ namespace Scripting
 	{
 		m_ImageTriple = m_MCtx.module().getTargetTriple().str();
 		m_ImageLayout = m_MCtx.module().getDataLayoutStr();
-		m_ImageKey = "reflection-" + image.Key(m_ImageTriple + " " + m_ImageLayout);
 		m_Image = std::move(image);
+		// Hashing the image's values (about 17 MB of them in the IED server) goes on beside the imports and the GC roots.
+		m_ImageKeying = std::async(std::launch::async, [this] { return "reflection-" + m_Image.Key(m_ImageTriple + " " + m_ImageLayout); });
 		return new llvm::GlobalVariable(m_MCtx.module(), llvm::Type::getInt8Ty(m_Context), true, llvm::GlobalValue::ExternalLinkage, nullptr,
 			"__c4_reflect_image");
 	}
@@ -518,7 +527,9 @@ namespace Scripting
 			}
 		const auto home = [this](const FunctionRecord& rec) { return PartitionOf(rec); };
 		std::vector<std::vector<const FunctionRecord*>> imports(PartitionCount());
-		for (unsigned i = 0; i < PartitionCount(); ++i) imports[i] = ImportsOf(i, own[i], all, home, m_OnlyAlwaysInline);
+		ParallelFor(PartitionCount(), m_Threads, [&](size_t i) { // each reads the facts and the placement only
+			imports[i] = ImportsOf(static_cast<unsigned>(i), own[i], all, home, m_OnlyAlwaysInline);
+		});
 		return imports;
 	}
 

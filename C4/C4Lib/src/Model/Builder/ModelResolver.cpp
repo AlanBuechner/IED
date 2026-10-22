@@ -8,6 +8,7 @@
 #include "Model/OperatorAnnotations.h" // [operator(...)] set collection (shared with instantiation)
 #include "Compiler/CompilerInstance.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
+#include <set>
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
@@ -469,8 +470,11 @@ namespace Scripting
 	{
 		Core::Vector<const FunctionRecord*> recs;
 		ctx.model->AllFunctionRecords(recs);
+		// A template's instances share its body, and walking a body again in the same unit resolves the same names.
+		std::set<std::pair<const AstNode*, uint32>> walked;
 		for (const auto& r : recs)
-			if (r->bodyNode && r->bodyNode->Type() == NodeType::CodeBlock) InstantiateNamedTypes(*ctx.model, r->bodyNode, r->definingUnit);
+			if (r->bodyNode && r->bodyNode->Type() == NodeType::CodeBlock && walked.emplace(r->bodyNode, r->definingUnit).second)
+				InstantiateNamedTypes(*ctx.model, r->bodyNode, r->definingUnit);
 	}
 
 } // namespace Scripting
