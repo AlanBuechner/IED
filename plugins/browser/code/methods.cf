@@ -22,7 +22,7 @@ namespace Browser
 
 	static Core::String OpenMethod(Browsers* browsers, const IED::Params& params) {
 		Page* page = browsers->Open(params.Str("wsId").View(), params.Str("url", Core::StringView("about:blank")).View(), (int32)params.Int("width", 0),
-			(int32)params.Int("height", 0), ScaleParam(params), Core::StringView("user"));
+			(int32)params.Int("height", 0), ScaleParam(params), Core::StringView("user"), Core::StringView(""));
 		return PageJson(page);
 	}
 

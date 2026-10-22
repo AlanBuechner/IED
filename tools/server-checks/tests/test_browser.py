@@ -3,6 +3,7 @@ failed requests on page:<pageId>, frames pulled with browser.frame, a person's i
 (an accessibility snapshot with refs, acting on them, a screenshot, the console, eval) with each action told to the
 page's viewers, the URL rules, pages kept across a server restart, and closing."""
 
+import asyncio
 import base64
 import functools
 import http.server
@@ -278,7 +279,8 @@ class BrowserToolTests(ServerTestCase):
 
 	async def asyncSetUp(self):
 		await super().asyncSetUp()
-		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		self.cookie = self.server.sign_in()
+		self.client = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		model = {"endpoint": self.model.url + "/v1", "vision": True, "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}}
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": model}})
@@ -293,6 +295,21 @@ class BrowserToolTests(ServerTestCase):
 		self.assertEqual("finished", frames[-1]["data"]["stop"], frames[-1]["data"])
 		turn = (await self.client.request("chat.history", {"chatId": chat_id}))["turns"][-1]
 		return [s for s in turn["segments"] if s["type"] == "tool"]
+
+	async def listed(self, chat_id, wanted, what):
+		"""The chat's "Open by this chat" list (docs/04) once `wanted(resources)` holds, from fresh snapshots: the browser
+		tells the chat from its worker, so the change may come before or after the turn ends."""
+		deadline = time.monotonic() + LOAD_SECONDS
+		while True:
+			probe = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+			await probe.sub(["chat:" + chat_id])
+			resources = (await probe.wait_for("chat:" + chat_id, lambda f: f["t"] == "snap"))[-1]["data"]["resources"]
+			probe.abort()
+			if wanted(resources):
+				return resources
+			if time.monotonic() > deadline:
+				self.fail("the chat's list is not %s: %r" % (what, resources))
+			await asyncio.sleep(0.25)
 
 	async def test_the_ai_opens_acts_on_and_sees_a_page(self):
 		created = await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "permission": "auto"})
@@ -316,3 +333,25 @@ class BrowserToolTests(ServerTestCase):
 		self.assertEqual("user", sent[-1]["role"], "the screenshot follows the step's results")
 		self.assertIn("image_url", [p["type"] for p in parts])
 		self.assertTrue([p for p in parts if p["type"] == "image_url"][0]["image_url"]["url"].startswith("data:image/png;base64,"))
+
+	async def test_the_chat_lists_the_pages_its_ai_opened(self):
+		"""docs/04 "What a chat has open": a page the AI opens is in its chat's list under the page's title, follows a new
+		title, and leaves the list when the AI closes it; a page a person opens is in no chat's."""
+		created = await self.client.request("chat.create", {"wsId": "w1", "mode": "ask", "permission": "auto"})
+		chat_id = created["chatId"]
+		await self.client.sub(["chat:" + chat_id])
+		await self.client.next_frame("chat:" + chat_id)
+		self.model.queue(chat_checks.call_step("browser_open", {"url": self.url}, "c1"), chat_checks.text_step("Opened."))
+		opened = (await self.turn(chat_id))[0]
+		page = re.search(r"(pg-[0-9a-f]+)", opened["result"]["preview"]).group(1)
+		ref = "browser:" + page
+		listed = await self.listed(chat_id, lambda r: [x["ref"] for x in r] == [ref], "the page")
+		self.assertEqual(("page", "Fixture"), (listed[0]["kind"], listed[0]["title"]), "the page's kind and title")
+		self.model.queue(chat_checks.call_step("browser_act", {"page": page, "action": "click", "selector": "#go"}, "c2"), chat_checks.text_step("Clicked."))
+		await self.turn(chat_id)
+		await self.listed(chat_id, lambda r: len(r) == 1 and r[0]["title"] == "Clicked", "under the page's new title")
+		mine = await self.client.request("browser.open", {"wsId": "w1", "url": self.url}, timeout=LOAD_SECONDS)
+		self.model.queue(chat_checks.call_step("browser_close", {"page": page}, "c3"), chat_checks.text_step("Closed."))
+		await self.turn(chat_id)
+		await self.listed(chat_id, lambda r: r == [], "empty once the page closed")
+		await self.client.request("browser.close", {"pageId": mine["pageId"]})

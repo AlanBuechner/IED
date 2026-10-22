@@ -39,6 +39,25 @@ namespace Browser
 		Core::String summary = page->SummaryJson();
 		events.Publish(BrowserTopic(page->wsId.View()).View(), "page.changed", summary.View());
 		events.Publish(page->Topic().View(), "changed", summary.View());
+		TellChat(page, page->live);
+	}
+
+	// A server without the chat plugin refuses the call, which changes nothing.
+	void Browsers::TellChat(Page* page, bool open) {
+		if (page->chatId.IsEmpty()) return;
+		Core::String title = open ? (page->title.IsEmpty() ? page->url : page->title) : Core::String();
+		if (title.View() == page->toldChat.View()) return;
+		page->toldChat = title;
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Field("chatId", page->chatId.View());
+		args.Field("ref", (Core::String("browser:") + page->pageId.View()).View());
+		if (open) args.Field("title", title.View());
+		args.Field("kind", Core::StringView("page"));
+		args.BoolField("open", open);
+		args.EndObject();
+		Core::String text = args.ToString();
+		Later([text]() { IED::CallBinding(Core::StringView("chat.resource"), text.View()); });
 	}
 
 	Page* Browsers::Find(Core::StringView pageId) {
@@ -134,7 +153,8 @@ namespace Browser
 		return (Core::String(LocalHost(url) ? "http://" : "https://") + url);
 	}
 
-	Page* Browsers::Open(Core::StringView wsId, Core::StringView url, int32 width, int32 height, int32 scalePercent, Core::StringView opener) {
+	Page* Browsers::Open(Core::StringView wsId, Core::StringView url, int32 width, int32 height, int32 scalePercent, Core::StringView opener,
+			Core::StringView chatId) {
 		IED::Workspace ws;
 		if (!IED::FindWorkspace(wsId, ws)) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no workspace ") + wsId).View());
 		Page* page = new Page();
@@ -142,6 +162,7 @@ namespace Browser
 		page->wsId = Core::String(wsId);
 		page->url = Allowed(wsId, url);
 		page->opener = Core::String(opener);
+		page->chatId = Core::String(chatId);
 		page->width = width > 0 ? width : kDefaultPageWidth;
 		page->height = height > 0 ? height : kDefaultPageHeight;
 		page->scalePercent = scalePercent > 0 ? scalePercent : 100;
@@ -222,6 +243,7 @@ namespace Browser
 			IED::HostLock lock(*context);
 			page->wsId = parent->wsId;
 			page->opener = parent->opener;
+			page->chatId = parent->chatId;
 			page->parent = parent->pageId;
 			page->width = parent->width;
 			page->height = parent->height;
@@ -374,6 +396,7 @@ namespace Browser
 				if (other != page) kept.Push(other);
 			self->pages = kept;
 			page->live = false;
+			self->TellChat(page, false);
 			events.Publish(page->Topic().View(), "closed", Core::StringView("{}"));
 			events.Publish(BrowserTopic(page->wsId.View()).View(), "page.removed", (Core::String("{\"pageId\":") + JsonText(page->pageId.View()).View() + "}").View());
 		});

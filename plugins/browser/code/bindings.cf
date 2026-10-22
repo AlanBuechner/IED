@@ -65,7 +65,7 @@ namespace Browser
 
 	static Core::String OpenBinding(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
 		Page* page = browsers->Open(ws.id.View(), args.Member("url").AsView(), (int32)args.Member("width").AsInt(), (int32)args.Member("height").AsInt(),
-			100, Core::StringView("ai"));
+			100, Core::StringView("ai"), args.Member("chatId").AsView());
 		const bool loaded = browsers->AwaitLoad(page, 0, kLoadWaitNs);
 		Settle(browsers, page);
 		Core::String text = Core::String("Opened ") + Described(browsers, page).View() + (loaded ? "" : " - it had not finished loading after 30 s") +

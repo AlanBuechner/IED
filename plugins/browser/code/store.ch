@@ -1,7 +1,7 @@
 // A workspace's pages on disk (docs/27 "Pages"): .ied/local/browser/pages.json keeps what a page needs to be loaded
-// again after the server restarts - its id, URL, title, viewport and opener.
+// again after the server restarts - its id, URL, title, viewport, opener and, for a page an AI opened, its chat.
 //     {"pages": [{"pageId": "pg-3f9a12c4e0b1", "url": "http://localhost:5173/", "title": "App", "width": 1280,
-//                 "height": 800, "scale": 1, "opener": "user"}]}
+//                 "height": 800, "scale": 1, "opener": "ai", "chatId": "c-12ab34cd"}]}
 
 include "page.ch"
 

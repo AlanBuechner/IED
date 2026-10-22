@@ -1,15 +1,24 @@
 // The AI's browser tools (docs/13 T-BRW, the manifest's toolCalls): each calls its browser.* binding for the call's
-// workspace and tells the model what it answered; a screenshot comes with its image.
+// workspace, with the call's chat (a page it opens is then listed in that chat), and tells the model what it answered;
+// a screenshot comes with its image.
 
 include "browser.ch"
 
 namespace Browser
 {
+	// The call's arguments (a JSON object) with `member` ("\"key\":value") added.
+	static Core::String WithMember(const Serialization::DomNode& args, Core::StringView member) {
+		Core::String json = IED::NodeJson(args);
+		Core::String body = Core::String(json.View().Substring(0, json.ByteLength() - 1));
+		return (body + (json.ByteLength() > 2 ? "," : "")) + member + "}";
+	}
+
 	static IED::ToolResult Through(const char* binding, const IED::ToolCall& call) {
+		Core::String asked = call.chatId.IsEmpty() ? IED::NodeJson(call.args) : WithMember(call.args, (Core::String("\"chatId\":") + JsonText(call.chatId.View()).View()).View());
 		IED::JsonWriter args;
 		args.BeginObject();
 		args.Field("wsId", call.workspace.id.View());
-		args.RawField("args", IED::NodeJson(call.args).View());
+		args.RawField("args", asked.View());
 		args.EndObject();
 		IED::Result answer = IED::CallBinding(Core::StringView(binding), args.View());
 		if (!answer.Ok()) return IED::ToolFailure(answer.error.View());
@@ -36,8 +45,7 @@ namespace Browser
 	IED::ToolResult NetworkTool(const IED::ToolCall& call) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		IED::ToolCall asked = call;
-		Core::String args = IED::NodeJson(call.args);
-		Core::String withNetwork = Core::String(args.View().Substring(0, args.ByteLength() - 1)) + (args.ByteLength() > 2 ? "," : "") + "\"network\":true}";
+		Core::String withNetwork = WithMember(call.args, Core::StringView("\"network\":true"));
 		asked.args = Serialization::ReadJson(withNetwork.View(), *doc).root;
 		return Through("browser.console", asked);
 	}

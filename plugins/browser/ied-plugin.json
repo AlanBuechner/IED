@@ -34,7 +34,8 @@
 				{ "name": "browser.act", "version": "1" },
 				{ "name": "browser.console", "version": "1" },
 				{ "name": "browser.eval", "version": "1" },
-				{ "name": "browser.closePage", "version": "1" }
+				{ "name": "browser.closePage", "version": "1" },
+				{ "name": "chat.resource", "version": "1.0.0", "optional": true }
 			]
 		},
 		"commands": [

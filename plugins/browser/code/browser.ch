@@ -40,8 +40,10 @@ namespace Browser
 		public void Start();
 		public void Opened(const IED::Workspace& ws);
 
-		// A new page of workspace `wsId` at `url`, loaded; throws RpcError for a URL it may not open.
-		public Page* Open(Core::StringView wsId, Core::StringView url, int32 width, int32 height, int32 scalePercent, Core::StringView opener);
+		// A new page of workspace `wsId` at `url`, loaded; throws RpcError for a URL it may not open. `chatId`: the chat
+		// whose AI opens it, which then lists it while it is loaded ("" for none).
+		public Page* Open(Core::StringView wsId, Core::StringView url, int32 width, int32 height, int32 scalePercent, Core::StringView opener,
+			Core::StringView chatId);
 		// The page, or RpcError not_found.
 		public Page* Find(Core::StringView pageId);
 		// Loads the page into the browser when it is not; throws RpcError unavailable when the browser cannot run.
@@ -85,6 +87,9 @@ namespace Browser
 		private void Adopt(Page* parent, Core::StringView targetId, Core::StringView url);
 		private bool StartScreencast(Page* page);
 		private void Changed(IED::Events& events, Page* page);
+		// The chat whose AI opened `page` lists it while it is loaded, under its title (chat.resource, docs/04 "What a
+		// chat has open"); told on the worker, in order, only when that changes. In a change (the server's lock held).
+		private void TellChat(Page* page, bool open);
 		private void Persist(Core::StringView wsId);
 		private void Later(func<void()> job);
 		private void WorkLoop();
