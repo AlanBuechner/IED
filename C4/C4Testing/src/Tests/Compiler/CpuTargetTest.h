@@ -36,5 +36,9 @@ namespace Testing
 		void TheCommandLineSelectsTheTarget();
 		TEST_FUNC(Compiler.CpuTarget)
 		void PredefinedMacrosCarryTheTarget();
+		TEST_FUNC(Compiler.CpuTarget)
+		void WithTurnsOnAFunctionsFeatures();
+		TEST_FUNC(Compiler.CpuTarget)
+		void WithRejectsANameThatIsNoFeature();
 	};
 } // namespace Testing

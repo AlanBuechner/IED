@@ -2,6 +2,7 @@
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Backend/HIR/SimdLanes.h"
 #include "Backend/HIR/SimdMemory.h"
+#include "Model/TargetAnnotation.h"
 
 namespace Scripting::SimdIntrinsics
 {
@@ -89,12 +90,23 @@ namespace Scripting::SimdIntrinsics
 			return call.name + " works on " + Described(kind) + ", not a " + Quoted(lanes);
 		}
 
+		// The program's target, or the function's own when [target] widens it.
+		bool BuiltWith(const Call& call, const char* feature)
+		{
+			const CpuTarget& program = call.ctx.model().Target();
+			if (program.Has(feature)) return true;
+			if (!call.ctx.fn) return false;
+			std::string error;
+			const std::optional<CpuTarget> own = program.With(TargetFeaturesOf(*call.ctx.fn), error);
+			return own && own->Has(feature);
+		}
+
 		// The processor features an intrinsic needs (D-62): only simd_fma has no fallback.
 		Core::String FeatureProblem(const Call& call, Op op)
 		{
-			if (op != Op::Fma || call.ctx.model().Target().Has("fma")) return "";
-			return call.name + " needs the processor's fused multiply-add: build with -mfma or -march=x86-64-v3 (or newer), or use simd_muladd, "
-				"which fuses where the target can";
+			if (op != Op::Fma || BuiltWith(call, "fma")) return "";
+			return call.name + " needs the processor's fused multiply-add: build with -mfma or -march=x86-64-v3 (or newer), annotate "
+				"the function [target(\"fma\")], or use simd_muladd, which fuses where the target can";
 		}
 
 		// The shape the vector operands share; a scalar operand broadcasts to it.

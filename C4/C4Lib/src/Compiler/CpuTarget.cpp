@@ -162,6 +162,21 @@ namespace Scripting
 		return target;
 	}
 
+	std::optional<CpuTarget> CpuTarget::With(const std::vector<std::string>& features, std::string& error) const
+	{
+		CpuTarget target = *this;
+		for (const std::string& feature : features)
+		{
+			if (!IsFlagFeature(feature))
+			{
+				error = "'" + feature + "' is no processor feature: the features are " + FeatureList();
+				return std::nullopt;
+			}
+			target.m_Features = WithFeature(target.m_Features, feature, true);
+		}
+		return target;
+	}
+
 	std::optional<CpuTarget> CpuTarget::FromLlvm(const std::string& cpu, const std::string& features, std::string& error)
 	{
 		if (!IsX86_64Cpu(cpu))

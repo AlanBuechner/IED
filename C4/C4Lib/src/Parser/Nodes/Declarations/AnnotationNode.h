@@ -28,7 +28,7 @@ namespace Scripting
 		/// Optional parenthesized arguments (expressions), empty if none provided.
 		const Core::Vector<Ref<AstNode>>& GetArguments() const { return m_Arguments; }
 
-		/// One of the compiler's own annotations (operator, test, test_setup, test_teardown, group, link, uuid):
+		/// One of the compiler's own annotations (operator, test, test_setup, test_teardown, group, link, uuid, target):
 		/// its arguments are string literals and reflection does not keep it (D-42).
 		bool IsCompilerAnnotation() const;
 		/// The compiler annotation this unknown name is a near miss of (`operater`), or null.

@@ -478,6 +478,7 @@ namespace Scripting
 		if (m_Script) ApplyScriptLowering(); // after the roots: it removes host thread_locals the module's caches point at
 		AlignVectorAccesses(m_MCtx.module());
 		ApplyTarget(m_MCtx.module(), model.Target());
+		ApplyFunctionTargets(m_MCtx.module(), model);
 		if (DebugInfo* debug = m_MCtx.Debug()) debug->Finish();
 	}
 

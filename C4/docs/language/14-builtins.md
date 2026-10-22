@@ -321,7 +321,7 @@ Rules:
 - Errors name the call and the shape at fault: `simd_min's vectors are a 'packed float[8]' and a 'packed float[4]'`,
   `simd_shuffle's lane index 4 is out of range: the vectors have lanes 0 to 3`, `simd_sqrt works on float or
   double lanes, not a 'packed int32[4]'`, `simd_fma needs the processor's fused multiply-add: build with -mfma or
-  -march=x86-64-v3 (or newer), or use simd_muladd`.
+  -march=x86-64-v3 (or newer), annotate the function [target("fma")], or use simd_muladd`.
 - A program function of the same name wins over the intrinsic.
 
 ## 12. Bit intrinsics

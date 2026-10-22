@@ -75,7 +75,8 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 9. **Vector alignment and the target.** `AlignVectorAccesses` gives each load and store of a vector whose size is
    not a power of two the alignment C4 guarantees; `ApplyTarget` (`TargetAttributes.cpp`) gives every function the
    module defines the build's `target-cpu` and `target-features` (D-62, from `ProgramModel::Target`), as clang
-   does, so the optimizer, the inliner and the object writer all use the build's processor.
+   does, so the optimizer, the inliner and the object writer all use the build's processor. A function annotated
+   `[target(...)]` then gets the build's features with its own on (`ApplyFunctionTargets`, `CpuTarget::With`).
    **Debug information** (`-g`): `DebugInfo::Finish` completes the metadata (the subprograms, variables and
    globals were described as their functions and globals were emitted).
 10. **Verify.** `verifyFunction` per function (the diagnostic names the culprit), then `verifyModule`.

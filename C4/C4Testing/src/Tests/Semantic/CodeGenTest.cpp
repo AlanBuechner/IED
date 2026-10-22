@@ -176,6 +176,27 @@ namespace Testing
 		TEST_ASSERT(layout == "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128");
 	}
 
+	void CodeGenTest::ATargetAnnotationWidensOneFunction()
+	{
+		CompilerInstance compiler;
+		std::string wide, plain;
+		TEST_ASSERT(LowerAndInspect(compiler,
+			"[target(\"avx2\")] int32 Wide(int32 x) { return x * 3; }\n"
+			"int32 Plain(int32 x) { return x + 1; }\n"
+			"int32 main() { return Wide(1) + Plain(1); }", [&](llvm::Module& m) {
+				for (const llvm::Function& f : m)
+				{
+					if (f.isDeclaration()) continue;
+					const std::string features = f.getFnAttribute("target-features").getValueAsString().str();
+					if (f.getName().contains("Wide")) wide = features;
+					else if (f.getName().contains("Plain")) plain = features;
+				}
+			}));
+		TEST_ASSERT(wide.find("+avx2") != std::string::npos && wide.find("+avx,") != std::string::npos);
+		TEST_ASSERT(!plain.empty() && plain.find("+avx2") == std::string::npos);
+		TEST_PASSED();
+	}
+
 	void CodeGenTest::PointerFreeObjectsAllocateNoscan()
 	{
 		// BUG-092: both allocators take (i64 size, i64 align), matching the runtime's size_t parameters.

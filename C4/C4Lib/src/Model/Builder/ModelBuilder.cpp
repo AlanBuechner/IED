@@ -5,6 +5,7 @@
 #include "Model/Types/ValueContainment.h"
 #include "Model/Types/VirtualTables.h"
 #include "Model/Abstractness.h"
+#include "Model/TargetAnnotation.h"
 #include "Model/Builder/ObjectIdentity.h"
 #include "Model/Builder/ModelResolver.h" // pass 2: fixed-point resolution + GAP A body scan
 #include "Model/Builder/FreeFunctionResolver.h"
@@ -168,6 +169,23 @@ namespace Scripting
 		for (const FunctionRecord* rec : records)
 			if (auto names = CheckLifecycleOperators(*rec); !names.Ok() && ctx.errors)
 				ctx.errors->AddError(rec->bodyNode ? rec->bodyNode->startLocation : SourceLocation(), names.message, ErrorSeverity::Error);
+		CheckTargets(ctx, model, records);
+	}
+
+	// A [target] names features of the build's processor, and its function returns no vector whose register would
+	// depend on the target: the function is built for its target with the features on.
+	void ModelBuilder::CheckTargets(const Context& ctx, const ProgramModel& model, const Core::Vector<const FunctionRecord*>& records)
+	{
+		for (const FunctionRecord* rec : records)
+		{
+			const std::vector<std::string> features = TargetFeaturesOf(*rec);
+			if (features.empty() || !ctx.errors) continue;
+			std::string error;
+			if (!model.Target().With(features, error)) ctx.errors->AddError(TargetAnnotationAt(*rec), Core::String(("[target]: " + error).c_str()));
+			else if (ReturnsTargetDependentVector(*rec))
+				ctx.errors->AddError(TargetAnnotationAt(*rec), "[target]: the function returns a vector wider than 16 bytes, which comes back in "
+					"a register only some targets have: return it through a reference parameter");
+		}
 	}
 
 	// ===========================================================================

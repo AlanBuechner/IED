@@ -1,4 +1,12 @@
 {
+    "TargetUnknownFeature": {
+        "expect": ["[target]: 'avx3' is no processor feature"],
+        "reason": "A [target] names features of the processor; another name is an error at the annotation."
+    },
+    "TargetReturnsWideVector": {
+        "expect": ["[target]: the function returns a vector wider than 16 bytes"],
+        "reason": "Win64 returns a 32-byte vector in YMM0 only for AVX targets: a [target] function and its callers would disagree."
+    },
     "UndefinedIdentifier": {
         "expect": ["no variable named y"],
         "reason": "Using an undeclared variable must name the identifier."
@@ -2308,7 +2316,7 @@
         "reason": "D-62: the bitwise reductions take integer lanes."
     },
     "SimdFmaWithoutFeature": {
-        "expect": ["simd_fma needs the processor's fused multiply-add: build with -mfma or -march=x86-64-v3 (or newer), or use simd_muladd"],
+        "expect": ["simd_fma needs the processor's fused multiply-add: build with -mfma or -march=x86-64-v3 (or newer), annotate the function [target(\"fma\")], or use simd_muladd"],
         "reason": "D-62: simd_fma has no fallback on a target without fma; the message names the flags and the alternative."
     },
     "SimdShuffleIndexOutOfRange": {

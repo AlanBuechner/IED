@@ -20,7 +20,7 @@ namespace Scripting
 
 	namespace
 	{
-		const char* const kCompilerAnnotations[] = { "operator", "test", "test_setup", "test_teardown", "group", "link", "uuid" };
+		const char* const kCompilerAnnotations[] = { "operator", "test", "test_setup", "test_teardown", "group", "link", "uuid", "target" };
 
 		// Levenshtein distance, case-sensitive: `Test` is one edit from `test`.
 		size_t EditDistance(const std::string& a, const std::string& b)

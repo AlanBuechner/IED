@@ -1,0 +1,29 @@
+// [target("avx2")]: a function built for more than the program's target, called only where the processor has it.
+include "bedrock.ch"
+
+[target("avx2", "fma")]
+float SumWide(const float* values, int64 count) {
+	packed float[8] lanes = { 0.0f };
+	int64 at = 0;
+	for (; at + 8 <= count; at += 8) lanes = simd_fma(simd_load(values + at, 8), 2.0f, lanes);
+	float total = simd_reduce_add(lanes);
+	for (; at < count; at++) total += values[at] * 2.0f;
+	return total;
+}
+
+float SumPlain(const float* values, int64 count) {
+	float total = 0.0f;
+	for (int64 at = 0; at < count; at++) total += values[at] * 2.0f;
+	return total;
+}
+
+int32 main() {
+	float[100] values;
+	for (int32 i = 0; i < 100; i++) values[i] = (float)(i % 7);
+	const bool avx2 = Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx2);
+	const bool fma = Platform::HasProcessorFeature(Platform::ProcessorFeature::Fma);
+	if (avx2 && !Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx)) return 2;
+	if (!Platform::HasProcessorFeature(Platform::ProcessorFeature::Sse3)) return 3;
+	if (!avx2 || !fma) return 0;
+	return SumWide(&values[0], 100) == SumPlain(&values[0], 100) ? 0 : 1;
+}

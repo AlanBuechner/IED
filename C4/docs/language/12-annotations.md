@@ -62,6 +62,7 @@ qualified_name: identifier ('::' identifier)*
 | `[test_setup]`, `[test_teardown]` | static free functions (global) or static methods (per class) | test fixtures | **Implemented** |
 | `[group("name")]` | types, functions, variables | adds the entity to a named reflection group. See [runtime/02-reflection.md](../runtime/02-reflection.md) | **Implemented** |
 | `[link("symbol")]` | function and variable declarations (a variable without an initializer), function definitions | a declaration binds to the foreign symbol of that name; a function definition is emitted under it. See [13](13-interop.md) | **Implemented** |
+| `[target("avx2", ...)]` | functions and methods | builds the function for the program's processor with these features on as well (names a `-m` flag takes, [11 section 8](11-vectors-and-swizzling.md#8-the-simd-target)): its body uses them, and no caller built without them inlines it. Call it only where `Platform::HasProcessorFeature` says the processor has them | **Implemented** |
 | `[uuid("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]` | types | attaches a COM GUID, read by `__uuidof(T)`; CBind emits it from `__declspec(uuid(...))`. A type without one gets a calculated one (the name-based UUID of its qualified name, [14](14-builtins.md)), so `__uuidof` works for every type | **Implemented** |
 
 Details worth knowing:
@@ -72,6 +73,10 @@ Details worth knowing:
   between unary and binary meanings (`"-"` is `negate` with no parameters, `subtract` with one;
   `"*"` with none is `dereference`), and every name in a multi-name `[operator(...)]` dispatches.
 - A `[link]` variable has no initializer: it is the foreign variable, whose definition gives its value.
+- `[target]` on any declaration of a function applies to it. A name that is no feature is an error, and so is a
+  `[target]` function returning a vector wider than 16 bytes: Win64 returns one in YMM0 or ZMM0 only when the
+  target has them, so the function and its callers would disagree (return it through a reference parameter).
+  `simd_fma` works in a `[target("fma")]` function. A lambda inside it is built for the program's target.
 - `[test("math.vector")]` on a class prefixes its methods' groups: `[test("addition")]` on a method is
   `math.vector.addition` (see [runtime/03-testing.md](../runtime/03-testing.md)).
 

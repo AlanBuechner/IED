@@ -1,4 +1,11 @@
 {
+  "Simd/TargetAnnotation": {
+    "exit": 0,
+    "compileMustNotContain": [
+      "warning"
+    ],
+    "reason": "A [target(\"avx2\", \"fma\")] function compiles to AVX2 and FMA and runs where the processor has them; HasProcessorFeature agrees with itself."
+  },
   "Interop/Bug326DeprecatedInHeader": {
     "exit": 0,
     "compileMustNotContain": ["warning"],

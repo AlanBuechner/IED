@@ -62,6 +62,7 @@ namespace Scripting
 		Core::String SignatureWhy(const Context& ctx, const FunctionDefinitionNode& fn, uint32 unitId, const Scope* scope) const;
 		// The base-list and interface rules (ClassHierarchy), reported at each type's declaration.
 		void CheckObjectTypes(const Context& ctx, ProgramModel& model);
+		void CheckTargets(const Context& ctx, const ProgramModel& model, const Core::Vector<const FunctionRecord*>& records);
 
 private:
 		struct Context

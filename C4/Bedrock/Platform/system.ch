@@ -37,6 +37,18 @@ namespace Platform
 		public int64 peakPrivateBytes;
 	}
 
+	// What the processor this program runs on can do: a function built for more than the program's target
+	// (`[target("avx2")]`, docs/language/12) runs only where its features are. AVX and the features that use its
+	// registers count only when the system saves them.
+	enum class ProcessorFeature
+	{
+		Sse3, Ssse3, Sse41, Sse42, Popcnt, Pclmul, Aes, Avx, Avx2, Fma, F16c, Bmi1, Bmi2, Lzcnt, Sha, Avx512F, Avx512Dq,
+		Avx512Bw, Avx512Vl
+	}
+
+	[link("c4_system_processor_features")] uint64 c4_system_processor_features();
+	bool HasProcessorFeature(ProcessorFeature feature) { return ((c4_system_processor_features() >> (uint64)(int32)feature) & 1u) != 0u; }
+
 	ProcessorInfo GetProcessorInfo();
 	MemoryStatus GetMemoryStatus();
 	ProcessMemory GetProcessMemory();

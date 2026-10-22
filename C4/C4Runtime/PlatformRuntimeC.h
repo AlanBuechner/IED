@@ -89,6 +89,18 @@ typedef struct c4_process_memory
 } c4_process_memory;
 
 void c4_system_processor_info(c4_processor_info* info);
+
+// --- the processor's features (Platform/ProcessorFeaturesX64.c) ------------------------------------------------
+// Bedrock's Platform::ProcessorFeature: bit n of c4_system_processor_features is feature n. AVX and the features that
+// use its registers count only when the system saves those registers.
+enum
+{
+	kProcessorSse3, kProcessorSsse3, kProcessorSse41, kProcessorSse42, kProcessorPopcnt, kProcessorPclmul, kProcessorAes,
+	kProcessorAvx, kProcessorAvx2, kProcessorFma, kProcessorF16c, kProcessorBmi1, kProcessorBmi2, kProcessorLzcnt,
+	kProcessorSha, kProcessorAvx512F, kProcessorAvx512Dq, kProcessorAvx512Bw, kProcessorAvx512Vl
+};
+
+uint64_t c4_system_processor_features(void);
 void c4_system_memory_status(c4_memory_status* status);
 void c4_system_process_memory(c4_process_memory* memory);
 uint64_t c4_system_process_id(void);

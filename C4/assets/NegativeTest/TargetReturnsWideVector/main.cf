@@ -1,0 +1,4 @@
+[target("avx2")]
+packed float[8] Wide() { packed float[8] lanes = { 1.0f }; return lanes; }
+
+int32 main() { return 0; }

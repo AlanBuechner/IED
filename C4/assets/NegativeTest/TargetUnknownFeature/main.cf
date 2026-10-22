@@ -1,0 +1,4 @@
+[target("avx2", "avx3")]
+int32 Wide() { return 1; }
+
+int32 main() { return Wide(); }

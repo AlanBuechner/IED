@@ -32,6 +32,29 @@ namespace Testing
 		bool Defines(const CpuTarget& target, const char* macro) { return target.Macros().count(macro) == 1; }
 	}
 
+	void CpuTargetTest::WithTurnsOnAFunctionsFeatures()
+	{
+		const CpuTarget baseline;
+		std::string error;
+		const std::optional<CpuTarget> wide = baseline.With({ "avx2", "bmi2" }, error);
+		TEST_ASSERT(wide.has_value());
+		TEST_ASSERT(wide->Has("avx2") && wide->Has("avx") && wide->Has("sse4.2") && wide->Has("bmi2"));
+		TEST_ASSERT(wide->Cpu() == baseline.Cpu());
+		TEST_ASSERT(!baseline.Has("avx2"));
+		TEST_ASSERT(wide->LlvmFeatures().find("+avx2") != std::string::npos);
+		TEST_ASSERT(baseline.With({}, error) == baseline);
+		TEST_PASSED();
+	}
+
+	void CpuTargetTest::WithRejectsANameThatIsNoFeature()
+	{
+		std::string error;
+		TEST_ASSERT(!CpuTarget().With({ "avx2", "avx3" }, error).has_value());
+		TEST_ASSERT(error.find("'avx3' is no processor feature") != std::string::npos);
+		TEST_ASSERT(!CpuTarget().With({ "" }, error).has_value());
+		TEST_PASSED();
+	}
+
 	void CpuTargetTest::TheBaselineIsSse2()
 	{
 		const CpuTarget baseline;

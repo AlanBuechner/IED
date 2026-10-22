@@ -145,6 +145,19 @@ class SystemTests {
 		assert_true(Platform::RandomBytes((void*)large.Data(), large.Count()), "a megabyte at once");
 	}
 
+	[test("processor_features")]
+	public static void TestProcessorFeatures() {
+		bool sse3 = Platform::HasProcessorFeature(Platform::ProcessorFeature::Sse3);
+		bool avx = Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx);
+		bool avx2 = Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx2);
+		bool avx512 = Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx512F);
+		assert_true(sse3, "every x86-64 processor Windows 10 runs on has SSE3");
+		assert_true(!avx2 || avx, "AVX2 comes with AVX");
+		assert_true(!avx || Platform::HasProcessorFeature(Platform::ProcessorFeature::Sse42), "AVX comes with SSE4.2");
+		assert_true(!avx512 || avx2, "AVX-512 comes with AVX2");
+		assert_true(avx2 == Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx2), "asking again gives the same answer");
+	}
+
 	[test("console")]
 	public static void TestConsole() {
 		assert_true(Platform::WriteOutput(Core::StringView("")), "nothing to standard output");

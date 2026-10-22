@@ -111,7 +111,9 @@ Adding a test:
   fields, globals, the heap and every container on the default target), `TargetMacros`, and the cases
   `ExpectedExit.json` builds for another processor: `WideVectorsAvx2` (`-march=x86-64-v3`: YMM returns, aligned
   AVX loads from containers, gathers), `FusedMultiplyAdd` (`-mfma`) and `NativeTarget` (`-march=native`, the
-  widest vectors the machine has). The C4Testing corpus sweep models each file for the target its entry names.
+  widest vectors the machine has), and `TargetAnnotation`, a `[target("avx2", "fma")]` function called where
+  `Platform::HasProcessorFeature` says the machine has those features. The C4Testing corpus sweep models each file
+  for the target its entry names.
 - `Types/StrictAliasing*` (D-64): the punning strict aliasing allows (`Unions`: named and anonymous union members and
   an array member; `Bytes`: `uint8`, `int8`, `char8` and `memcpy`; `BitCasts`: `reinterpret_cast` between numbers)
   and a loop over pointers held in a struct (`StructPointers`, which also moves a pointer through a `float**`). The

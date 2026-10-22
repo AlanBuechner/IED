@@ -307,6 +307,19 @@ alias Wide = packed float[SIMD_FLOAT_LANES];   // 16 lanes with AVX-512, 8 with 
 #endif
 ```
 
+One function can be built for more than the program's target with `[target("avx2", "fma")]`
+([annotations](12-annotations.md)), and called only where the processor has those features, which
+`Platform::HasProcessorFeature` reports at run time (Bedrock's `Platform/system.ch`). A program built for the
+baseline then runs everywhere and still uses AVX2 where it is there:
+
+```c4
+[target("avx2")] void AddWide(float* to, const float* from, int64 count);   // packed float[8] in one YMM register
+void Add(float* to, const float* from, int64 count) {
+	if (Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx2)) AddWide(to, from, count);
+	else AddNarrow(to, from, count);
+}
+```
+
 Widths, alignment and passing:
 
 - Every width (2 to 16 lanes, at most 64 bytes) works on every target. A vector wider than the target's registers

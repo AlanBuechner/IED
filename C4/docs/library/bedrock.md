@@ -903,6 +903,7 @@ never scans this memory: `GC::RegisterRegion` a range that holds managed pointer
 | Function | Meaning |
 |---|---|
 | `GetProcessorInfo()` | `ProcessorInfo { logicalProcessors, cores, packages, cacheLineBytes, l1DataBytes, l2Bytes, l3Bytes }` (one cache of each level; 0 when there is none) |
+| `HasProcessorFeature(feature)` | whether the processor running the program has a `ProcessorFeature` (`Sse3`, `Ssse3`, `Sse41`, `Sse42`, `Popcnt`, `Pclmul`, `Aes`, `Avx`, `Avx2`, `Fma`, `F16c`, `Bmi1`, `Bmi2`, `Lzcnt`, `Sha`, `Avx512F`, `Avx512Dq`, `Avx512Bw`, `Avx512Vl`), for choosing a `[target]` function ([language 11 section 8](../language/11-vectors-and-swizzling.md#8-the-simd-target)); AVX and the features on its registers count only when the system saves those registers. Found once (CPUID, XGETBV) |
 | `GetMemoryStatus()` | `MemoryStatus { totalPhysicalBytes, availablePhysicalBytes, commitLimitBytes, availableCommitBytes, totalVirtualBytes, availableVirtualBytes }` (the virtual ones are this process's address space) |
 | `GetProcessMemory()` | `ProcessMemory { workingSetBytes, peakWorkingSetBytes, privateBytes, peakPrivateBytes }` |
 | `ProcessId()` | |

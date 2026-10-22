@@ -24,6 +24,10 @@ namespace Scripting
 		/// `-march=...`, `-m...` or `-mno-...`: a flag FromFlags reads.
 		static bool IsTargetFlag(const std::string& arg);
 
+		/// This target with each of `features` (names a `-m` flag takes: avx2, fma, bmi2) on, and what they imply: the
+		/// target of a function annotated `[target(...)]`. Fails, saying why, on a name that is not one.
+		std::optional<CpuTarget> With(const std::vector<std::string>& features, std::string& error) const;
+
 		const std::string& Cpu() const { return m_Cpu; }
 		/// An LLVM feature name: `avx2`, `fma`, `sse4.1`.
 		bool Has(const std::string& feature) const;
