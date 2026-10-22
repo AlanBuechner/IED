@@ -309,7 +309,7 @@ It is rebuilt when the output is missing, the command line or description change
 under the modules' sources and includes, and the toolchain's `C4.exe`, `Bedrock/` and `C4Runtime/` - was added,
 removed or changed since the last successful compile began. Each file's state (mtime and size) is taken before the
 compiler runs and stamped only after it succeeds, so a source edited while a build ran (another session's build
-finishing later included) is compiled by the next build, never reported up to date. Compiler output streams as it happens. An output that is running (a server under test, the IDE
+finishing later included) is compiled by the next build, never reported up to date. Compiler output streams as it happens; the compiler's progress lines (`ENGINE: Phase 1: Parsing`) show only with `-v`, its errors and warnings always. An output that is running (a server under test, the IDE
 built from this checkout) cannot be written on Windows, so it is renamed to `<output>.<ms>.old` first and the old
 program keeps running; a later build removes the `.old` copies nothing runs any more.
 

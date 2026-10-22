@@ -7,6 +7,7 @@ and written only after it succeeds, so an edit made while it ran (another build 
 failed compile are never mistaken for an up-to-date build."""
 
 import os
+import re
 from dataclasses import dataclass
 
 from .. import fsutil, process
@@ -102,6 +103,10 @@ def is_up_to_date(job):
 	return fsutil.read_text(fsutil.join(job.int_dir, DEPENDENCY_STAMP)) == fsutil.input_states(job.tracked)
 
 
+# The compiler's progress ("[10:2:31] ENGINE: Phase 1: Parsing"): shown with --verbose; its errors and warnings always.
+COMPILER_PROGRESS = re.compile(r"^\[\d+:\d+:\d+\] ENGINE: (?!.*\b(?:error|warning)s?\b)")
+
+
 def compile_program(session, job):
 	"""Compile when out of date. Returns True if the compiler ran; raises StepFailed when it fails."""
 	if is_up_to_date(job):
@@ -118,7 +123,7 @@ def compile_program(session, job):
 		session.log.note(f"{os.path.basename(job.output)} is running: moved aside to {os.path.basename(aside)}")
 	session.log.note(f"compiling {job.label} with {session.toolchain().describe()}")
 	inputs = fsutil.input_states(job.tracked)
-	code = process.run(list(job.argv), session.log, cwd=job.cwd)
+	code = process.run(list(job.argv), session.log, cwd=job.cwd, chatter=COMPILER_PROGRESS)
 	if code != 0:
 		raise StepFailed(f"compiling {job.label}", code)
 	fsutil.write_if_changed(fsutil.join(job.int_dir, ARGS_STAMP), _stamp_text(job))

@@ -4,8 +4,9 @@ import os
 import subprocess
 
 
-def run(argv, log, cwd=None, env=None, shell=False):
-	"""Run `argv` (a list, or a string with shell=True), streaming its merged stdout/stderr. Returns the exit code."""
+def run(argv, log, cwd=None, env=None, shell=False, chatter=None):
+	"""Run `argv` (a list, or a string with shell=True), streaming its merged stdout/stderr; lines `chatter` (a compiled
+	regex) matches are progress and only shown with --verbose. Returns the exit code."""
 	log.detail(f"run: {argv if shell else subprocess.list2cmdline(argv)}" + (f"  (in {cwd})" if cwd else ""))
 	merged_env = None
 	if env:
@@ -19,7 +20,8 @@ def run(argv, log, cwd=None, env=None, shell=False):
 		return 127
 	with proc:
 		for text in proc.stdout:
-			log.write(text)
+			if chatter is None or log.verbose or not chatter.match(text):
+				log.write(text)
 	return proc.returncode
 
 
