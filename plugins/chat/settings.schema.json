@@ -116,7 +116,7 @@
 			"items": { "type": "string" },
 			"default": [],
 			"x-ied-tiers": ["app"],
-			"description": "The Claude Code CLI's program and leading arguments. Empty: claude.exe on PATH, then the native installer's (%USERPROFILE%\\.local\\bin), then the newest the Claude desktop app keeps. Sign in to it yourself (claude auth login) with your Claude subscription: IED never handles Claude credentials and never runs Claude on an API key."
+			"description": "The Claude Code CLI's program and leading arguments. Empty: claude.exe on PATH, then the native installer's (%USERPROFILE%\\.local\\bin), WinGet's link, then the newest the Claude desktop app keeps (the app from Anthropic's installer or the Microsoft Store). Sign in to it with your Claude subscription (Settings > AI > Claude > Sign in, or claude auth login in a terminal of your own): IED never handles Claude credentials and never runs Claude on an API key."
 		},
 		"ai.claude.usageRefreshMinutes": {
 			"type": "integer",

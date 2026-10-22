@@ -109,6 +109,12 @@ with the CLI's own windows - IED never sees what is typed into them:
 
 - **Found by itself.** The CLI is looked for on PATH, in the native installer's folder, in WinGet's links
   (`%LOCALAPPDATA%\Microsoft\WinGet\Links`) and in the Claude desktop app, so a machine with the desktop app needs no install.
+  The desktop app keeps it in `%APPDATA%\Claude\claude-code\<version>\<build>` when installed with Anthropic's installer;
+  the Microsoft Store (MSIX) app's `%APPDATA%` is virtualized, so its copy really lives in
+  `%LOCALAPPDATA%\Packages\Claude_<publisher>\LocalCache\Roaming\Claude\claude-code` and a program outside the
+  package - IED - does not see it at `%APPDATA%` (a shell the desktop app starts does, which hid this). Both are searched,
+  the newest version wins. Until the server has asked the CLI once (`cli.asked`), the page says it is looking rather
+  than "not found", and asks at once.
 - **Install** (Settings > AI > Claude, when no CLI is found): opens a PowerShell window running the official installer,
   `irm https://claude.ai/install.ps1 | iex`, after the owner confirms the command; the page shows the CLI once it is there.
 - **Sign in** (when the CLI is not signed in to a subscription): opens a window running the CLI's own subscription login,

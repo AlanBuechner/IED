@@ -71,26 +71,44 @@ namespace Ai
 		return Core::String();
 	}
 
-	// The newest claude.exe under the Claude desktop app's %APPDATA%\Claude\claude-code\<version>\<build>.
-	static Core::String DesktopAppCli() {
-		Core::String appData;
-		if (!Platform::TryGetEnvironmentVariable("APPDATA", appData)) return Core::String();
-		FS::Path root = FS::Path(appData.View()) / "Claude" / "claude-code";
+	Core::Array<FS::Path> DesktopAppCliFolders(Core::StringView appData, Core::StringView localAppData) {
+		Core::Array<FS::Path> folders;
+		if (!appData.IsEmpty()) folders.Push(FS::Path(appData) / "Claude" / "claude-code");
+		if (localAppData.IsEmpty()) return folders;
+		FS::Path packages = FS::Path(localAppData) / "Packages";
+		for (FS::DirectoryEntry& package : FS::Directory(packages.CStr())) {
+			if (package.kind != FS::EntryKind::Directory || !package.name.View().StartsWith(Core::StringView("Claude_"))) continue;
+			folders.Push(packages / package.name.CStr() / "LocalCache" / "Roaming" / "Claude" / "claude-code");
+		}
+		return folders;
+	}
+
+	Core::String NewestDesktopCli(const Core::Array<FS::Path>& folders) {
 		Core::String best;
 		Core::String bestVersion;
-		for (FS::DirectoryEntry& version : FS::Directory(root.CStr())) {
-			if (version.kind != FS::EntryKind::Directory) continue;
-			if (!bestVersion.IsEmpty() && !LaterVersion(version.name.View(), bestVersion.View())) continue;
-			FS::Path folder = root / version.name.CStr();
-			for (FS::DirectoryEntry& build : FS::Directory(folder.CStr())) {
-				FS::Path program = folder / build.name.CStr() / "claude.exe";
-				if (build.kind != FS::EntryKind::Directory || !FS::FileExists(program.CStr())) continue;
-				best = Core::String(program.View());
-				bestVersion = version.name;
-				break;
+		for (const FS::Path& root : folders) {
+			for (FS::DirectoryEntry& version : FS::Directory(root.CStr())) {
+				if (version.kind != FS::EntryKind::Directory) continue;
+				if (!bestVersion.IsEmpty() && !LaterVersion(version.name.View(), bestVersion.View())) continue;
+				FS::Path folder = root / version.name.CStr();
+				for (FS::DirectoryEntry& build : FS::Directory(folder.CStr())) {
+					FS::Path program = folder / build.name.CStr() / "claude.exe";
+					if (build.kind != FS::EntryKind::Directory || !FS::FileExists(program.CStr())) continue;
+					best = Core::String(program.View());
+					bestVersion = version.name;
+					break;
+				}
 			}
 		}
 		return best;
+	}
+
+	static Core::String DesktopAppCli() {
+		Core::String appData;
+		Core::String localAppData;
+		Platform::TryGetEnvironmentVariable("APPDATA", appData);
+		Platform::TryGetEnvironmentVariable("LOCALAPPDATA", localAppData);
+		return NewestDesktopCli(DesktopAppCliFolders(appData.View(), localAppData.View()));
 	}
 
 	Core::Array<Core::String> FindClaude(const Core::Array<Core::String>& configured) {

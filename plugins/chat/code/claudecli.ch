@@ -16,9 +16,16 @@ namespace Ai
 
 	// The CLI's program and leading arguments: `configured` (the ai.claude.command setting) when it names one, else
 	// claude.exe on PATH, the native installer's (%USERPROFILE%\.local\bin), WinGet's link
-	// (%LOCALAPPDATA%\Microsoft\WinGet\Links), then the newest the Claude desktop app keeps
-	// (%APPDATA%\Claude\claude-code\<version>\<build>\claude.exe). Empty when there is none.
+	// (%LOCALAPPDATA%\Microsoft\WinGet\Links), then the newest the Claude desktop app keeps (DesktopAppCliFolders).
+	// Empty when there is none.
 	Core::Array<Core::String> FindClaude(const Core::Array<Core::String>& configured);
+	// Where the Claude desktop app keeps its CLI (<folder>\<version>\<build>\claude.exe): %APPDATA%\Claude\claude-code for
+	// the app from Anthropic's installer, and for the Store (MSIX) app each
+	// %LOCALAPPDATA%\Packages\Claude_<publisher>\LocalCache\Roaming\Claude\claude-code - Windows keeps a packaged app's
+	// %APPDATA% there, and a program outside the package (IED) does not see it at %APPDATA%.
+	Core::Array<FS::Path> DesktopAppCliFolders(Core::StringView appData, Core::StringView localAppData);
+	// The newest claude.exe in `folders` (<folder>\<version>\<build>\claude.exe); empty when there is none.
+	Core::String NewestDesktopCli(const Core::Array<FS::Path>& folders);
 	// Opens a console window of its own titled `title` running `command` (the program, then its arguments) with
 	// ClaudeEnvironment's changes - the CLI's login, the installer: IED never reads or writes what happens in it. False with
 	// `problem`.

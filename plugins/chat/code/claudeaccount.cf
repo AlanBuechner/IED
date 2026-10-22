@@ -181,6 +181,7 @@ namespace Ai
 			context->Log((Core::String("Claude could not be set up: ") + problem.View()).View());
 		IED::HostLock guard(*context);
 		refreshing = false;
+		asked = true;
 		cliPath = command.IsEmpty() ? Core::String() : command[0];
 		if (!version.IsEmpty()) cliVersion = version;
 		if (!method.IsEmpty()) {
@@ -243,6 +244,7 @@ namespace Ai
 		json.BoolField("configured", Configured());
 		json.Key(Core::StringView("cli"));
 		json.BeginObject();
+		json.BoolField("asked", asked);
 		json.Field("path", cliPath.View());
 		json.Field("version", cliVersion.View());
 		json.Field("signIn", signIn.View());

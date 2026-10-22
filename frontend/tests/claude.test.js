@@ -73,6 +73,7 @@ test("claude: the one step that sets Claude up", () => {
 	const cli = (fields) => Object.assign({ path: "C:/claude.exe", signIn: "signed_in", authMethod: "claude.ai", subscription: true, signingIn: false, installing: false }, fields);
 	assertEqual(setupStep(claude([], { offered: false })), "not_offered", "a distributed build");
 	assertEqual(setupStep(claude([], { cli: cli({ path: "" }) })), "install");
+	assertEqual(setupStep(claude([], { cli: cli({ path: "", signIn: "", asked: false }) })), "asking", "a server that has not looked yet: not \"install\"");
 	assertEqual(setupStep(claude([], { cli: cli({ path: "", installing: true }) })), "installing");
 	assertEqual(setupStep(claude([], { cli: cli({ signIn: "" }) })), "asking", "the CLI not asked yet");
 	assertEqual(setupStep(claude([], { cli: cli({ signIn: "signed_out", authMethod: "none", subscription: false }) })), "sign_in");

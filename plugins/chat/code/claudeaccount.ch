@@ -40,7 +40,7 @@ namespace Ai
 		public void MetLimit(int64 untilMs);
 		// Inside the host lock: when Claude's shared windows are used up until, or 0 when they are not.
 		public int64 BlockedUntil(int64 nowMs) const;
-		// {claude: {offered, configured, cli: {path, version, signIn, authMethod, subscription, signingIn, installing},
+		// {claude: {offered, configured, cli: {asked, path, version, signIn, authMethod, subscription, signingIn, installing},
 		// refreshing, blockedUntilMs, nowMs, paced: [{profile, target, ladder, model, why, untilMs}], usage: WriteUsage}}
 		public Core::String SnapshotJson();
 		// Whether ai.models names a claude-code profile.
@@ -53,6 +53,7 @@ namespace Ai
 		public Core::String authMethod;      // as `claude auth status` says (claude.ai, api_key, ...)
 		public int64 blockedUntilMs;         // a usage limit a turn met
 		public bool refreshing;
+		public bool asked;                   // the CLI looked for and asked at least once since the server started
 		public bool signingIn;               // a sign-in window is open and watched
 		public bool installing;              // an install window is open and watched
 

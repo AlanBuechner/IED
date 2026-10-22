@@ -278,7 +278,7 @@ class ClaudeSetupTests(ClaudeCase):
 	async def test_a_cli_signed_in_to_a_subscription_sets_claude_up_by_itself_once(self):
 		await self.local_only()
 		usage = await self.client.request("ai.usage", {"refresh": True})
-		self.assertTrue(usage["claude"]["configured"] and usage["claude"]["offered"], usage["claude"])
+		self.assertTrue(usage["claude"]["configured"] and usage["claude"]["offered"] and usage["claude"]["cli"]["asked"], usage["claude"])
 		models = await self.setting("ai.models")
 		self.assertEqual(["claude-auto", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models))
 		self.assertEqual("auto", models["claude-auto"]["model"])

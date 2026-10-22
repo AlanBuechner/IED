@@ -36,6 +36,11 @@ static Core::Array<Core::String> Ladder() {
 	return ladder;
 }
 
+static void Touch(const FS::Path& file) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::WriteFileAtomically(file.CStr(), (const void*)"", 0);
+}
+
 static Ai::ClaudeResponse* Streamed(const char* events) {
 	Ai::ClaudeResponse* response = new Ai::ClaudeResponse();
 	Serialization::DomNode list = Parse(events);
@@ -233,6 +238,23 @@ class ClaudeWireTests {
 		command.Push(Core::String("C:/Users/Ann Lee/claude.exe"));
 		command.Push(Core::String("auth"));
 		assert_se("start \"Claude Code sign-in\" \"C:/Users/Ann Lee/claude.exe\" \"auth\"", Ai::ClaudeWindowCommand(Text("Claude Code sign-in"), command).CStr(), "a window's command, each word quoted");
+	}
+
+	[test("the_desktop_apps_cli")]
+	public static void TestDesktopAppCli() {
+		FS::Path root = FS::TempDirectory() / "ied-claude-desktop";
+		FS::RemoveAll(root.CStr());
+		FS::Path store = root / "Local" / "Packages" / "Claude_pzs8sxrjxfjjc" / "LocalCache" / "Roaming" / "Claude" / "claude-code";
+		Touch(root / "Roaming" / "Claude" / "claude-code" / "2.1.299" / "f0584be0fbaf" / "claude.exe");
+		Touch(store / "2.1.304" / "aed62990b91e" / "claude.exe");
+		FS::MakeDirectories((store / "2.1.400" / "unpacking").CStr());
+		Touch(root / "Local" / "Packages" / "Other_x" / "LocalCache" / "Roaming" / "Claude" / "claude-code" / "9.0.0" / "a" / "claude.exe");
+		Core::Array<FS::Path> folders = Ai::DesktopAppCliFolders((root / "Roaming").View(), (root / "Local").View());
+		assert_true(folders.Count() == 2, "the installer's app's folder and the Store app's, no other package's");
+		Core::String found = Ai::NewestDesktopCli(folders);
+		assert_se((store / "2.1.304" / "aed62990b91e" / "claude.exe").CStr(), found.CStr(), "the newest with a claude.exe, in the Store app's package");
+		assert_true(Ai::NewestDesktopCli(Ai::DesktopAppCliFolders(Text(""), (root / "Nowhere").View())).IsEmpty(), "none");
+		FS::RemoveAll(root.CStr());
 	}
 
 	[test("history_for_a_new_session")]

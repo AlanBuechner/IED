@@ -70,6 +70,7 @@ export function setupStep(claude) {
 	const cli = (claude && claude.cli) || {};
 	if (claude && claude.offered === false) return "not_offered";
 	if (cli.installing) return "installing";
+	if (cli.asked === false) return "asking";
 	if (!cli.path) return "install";
 	if (cli.signingIn) return "signing_in";
 	if (!cli.signIn) return "asking";
@@ -127,6 +128,11 @@ export class ClaudePage {
 	show(data) {
 		this.claude = data && data.claude;
 		this.render();
+		// a server that just started asks the CLI on its own after a while; the page asks now
+		if (this.claude && this.claude.cli && this.claude.cli.asked === false && !this.askedOnce) {
+			this.askedOnce = true;
+			this.refresh();
+		}
 	}
 
 	render() {
@@ -145,14 +151,14 @@ export class ClaudePage {
 
 	cliCard(claude) {
 		const cli = claude.cli || {};
-		const state = !cli.path ? ["err", "not found"] : !cli.signIn ? ["", "not asked yet"] : onSubscription(claude) ? ["ok", "on your subscription"] : cli.signIn === "signed_in" ? ["err", "signed in with " + cli.authMethod + ", not a subscription"] : ["err", "not signed in"];
+		const state = cli.asked === false ? ["", "looking for it"] : !cli.path ? ["err", "not found"] : !cli.signIn ? ["", "not asked yet"] : onSubscription(claude) ? ["ok", "on your subscription"] : cli.signIn === "signed_in" ? ["err", "signed in with " + cli.authMethod + ", not a subscription"] : ["err", "not signed in"];
 		const usage = claude.usage || {};
 		return h("div.set-model.claude-cli", null,
 			h("div.set-model-head", null, h("b", null, "Claude Code"), h("span.chip" + (state[0] ? "." + state[0] : ""), null, state[1]),
 				usage.plan ? h("span.chip", null, usage.plan + " plan") : null, h("span.grow"),
 				h("button.btn", { disabled: this.refreshing || claude.refreshing, on: { click: () => this.refresh() } }, icon(this.refreshing || claude.refreshing ? "loading" : "refresh", this.refreshing || claude.refreshing ? "spin" : null), "Refresh")),
 			h("div.set-model-facts", null,
-				cli.path ? h("span.mono", { title: cli.path }, cli.path) : h("span", null, "no claude.exe on PATH, in %USERPROFILE%\\.local\\bin or the Claude desktop app"),
+				cli.path ? h("span.mono", { title: cli.path }, cli.path) : cli.asked === false ? null : h("span", null, "no claude.exe on PATH, in %USERPROFILE%\\.local\\bin, WinGet's links or the Claude desktop app"),
 				cli.version ? h("span", null, "version " + cli.version) : null,
 				cli.authMethod && cli.authMethod !== "none" ? h("span", null, "signs in with " + cli.authMethod) : null),
 			this.stepRow(claude));
@@ -170,6 +176,7 @@ export class ClaudePage {
 			h("span", null, cli.signIn === "signed_in" ? "It signs in with " + cli.authMethod + ", not your subscription: sign in with your Claude account instead." : "Sign in with your Claude account (Pro or Max) to use Claude here."),
 			h("button.btn.primary", { on: { click: () => this.signIn() } }, icon("account"), "Sign in with your Claude subscription"));
 		if (step === "signing_in") return h("div.claude-step", null, icon("loading", "spin"), h("span", null, "Finish signing in in the Claude Code window and the browser page that opened on the computer IED runs on" + ELLIPSIS));
+		if (step === "asking") return h("div.claude-step", null, icon("loading", "spin"), h("span", null, "Looking for Claude Code and asking it how it signs in" + ELLIPSIS));
 		return null;
 	}
 
