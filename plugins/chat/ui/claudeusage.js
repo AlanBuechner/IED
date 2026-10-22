@@ -1,12 +1,13 @@
 // claudeusage.js - Claude's plan usage in the UI (docs/04 "The Claude Code provider"), from the server's aiusage topic: the
 // status bar's "Claude 5h 42% wk 61%" (yellow while a window runs ahead of pace, red when one is used up or the CLI is not
-// on a subscription), and Settings > AI > Claude - the CLI (where it is, its version, whether it is signed in to a Claude
+// on a subscription) with its hover card (each window's bar and pace, the chains as pacing has them now), and Settings > AI > Claude - the CLI (where it is, its version, whether it is signed in to a Claude
 // subscription; IED never runs Claude on an API key) with the one step that sets it up (Install, Sign in: the CLI's own
 // windows, docs/04 "Setting it up"), each window as a bar with the even line marked, its pace and when it resets, each
 // group chain with a Claude model as pacing has it now (docs/04 "Pacing"), Refresh, and Add Claude models.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
+import { hoverCard } from "/ui-kit/hovercard.js";
 import { paceLabel } from "./pacing.js";
 
 const SHORT = { five_hour: "5h", seven_day: "wk" };
@@ -15,6 +16,7 @@ export const WARN_PACE = 1.25;
 export const CLAUDE_PROFILE_NAMES = ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"];
 export const INSTALL_SCRIPT = "irm https://claude.ai/install.ps1 | iex";
 const ELLIPSIS = "\u2026";
+const NEWLINE = String.fromCharCode(10);
 
 // When `at` comes, from `now`, as the server says it: "in 2 h 14 min", "in 35 min", "in 3 d 4 h", "now".
 export function resetText(at, now) {
@@ -49,19 +51,20 @@ export function chainLine(chain) {
 	return chain.group + " / " + chain.role + ": " + (chain.now || "nothing") + " now" + (why ? " (" + why + ")" : "");
 }
 
-// The status bar item for the snapshot's `claude`: {text, level ("", "warn", "error"), tooltip}; null when no claude-code
-// model is set up.
+// The status bar item for the snapshot's `claude`: {text, level ("", "warn", "error"), tooltip, message (why, when there are
+// no windows to show)}; null when no claude-code model is set up.
 export function usageStatus(claude) {
 	if (!claude || !claude.configured) return null;
 	const usage = claude.usage || {};
 	const now = claude.nowMs || Date.now();
 	const cli = claude.cli || {};
-	if (!cli.path && usage.error) return { text: "Claude: no CLI", level: "error", tooltip: usage.error };
+	const told = (text, level, message) => ({ text, level, tooltip: message, message });
+	if (!cli.path && usage.error) return told("Claude: no CLI", "error", usage.error);
 	if (cli.signIn && !onSubscription(claude))
-		return { text: "Claude: not on a subscription", level: "error", tooltip: "Claude Code signs in with " + (cli.signIn === "signed_in" ? cli.authMethod : "nothing") + ". IED runs Claude on your subscription only: sign in from Settings > AI > Claude." };
+		return told("Claude: not on a subscription", "error", "Claude Code signs in with " + (cli.signIn === "signed_in" ? cli.authMethod : "nothing") + ". IED runs Claude on your subscription only: sign in from Settings > AI > Claude.");
 	const windows = usage.windows || [];
 	const shown = windows.filter((w) => SHORT[w.id]);
-	if (!shown.length) return { text: "Claude", level: "", tooltip: usage.error ? "The usage is not known: " + usage.error : "The plan's usage is not known yet" };
+	if (!shown.length) return told("Claude", "", usage.error ? "The usage is not known: " + usage.error : "The plan's usage is not known yet");
 	let level = "";
 	if (claude.blockedUntilMs > now || windows.some((w) => w.usedUp)) level = "error";
 	else if (usage.status === "allowed_warning" || windows.some((w) => w.pace > WARN_PACE)) level = "warn";
@@ -84,16 +87,20 @@ export function setupStep(claude) {
 	return onSubscription(claude) ? "ready" : "sign_in";
 }
 
-// The status bar item (statusBarItems ied.chat.claude): the aiusage topic as usageStatus says it.
+// The status bar item (statusBarItems ied.chat.claude): the aiusage topic as usageStatus says it, and as usageHoverCard
+// draws it while the pointer rests on it.
 export function ClaudeStatusView(ctx) {
+	let last = null;
+	const card = hoverCard(ctx.el, () => usageHoverCard(last && last.claude));
 	const render = (data) => {
 		const status = usageStatus(data && data.claude);
 		ctx.el.hidden = !status;
-		if (!status) return;
-		ctx.el.title = status.tooltip;
-		replace(ctx.el, icon("pulse", status.level ? "c-" + status.level : null), h("span" + (status.level ? ".c-" + status.level : ""), null, status.text));
+		if (status) {
+			ctx.el.setAttribute("aria-label", status.text + ". " + status.tooltip.split(NEWLINE).join(". "));
+			replace(ctx.el, icon("pulse", status.level ? "c-" + status.level : null), h("span" + (status.level ? ".c-" + status.level : ""), null, status.text));
+		}
+		card.refresh();
 	};
-	let last = null;
 	const stop = ctx.ied.client.subscribe("aiusage", {
 		snap: (data) => render(last = data),
 		evt: (kind, data) => {
@@ -101,7 +108,69 @@ export function ClaudeStatusView(ctx) {
 		},
 	});
 	render(last);
-	return { dispose: stop };
+	return {
+		dispose: () => {
+			stop();
+			card.dispose();
+		},
+	};
+}
+
+// The status item's hover card: what its tooltip says, drawn as Settings > AI > Claude draws it - each window's bar with
+// the even line, its pace and when it resets, what holds Claude back, and each chain with the model a turn uses now and why
+// the ones before it are passed over; null while the item is hidden.
+export function usageHoverCard(claude) {
+	const status = usageStatus(claude);
+	if (!status) return null;
+	const usage = claude.usage || {};
+	const now = claude.nowMs || Date.now();
+	const head = h("div.claude-hover-head", null, icon("pulse", status.level ? "c-" + status.level : null), h("b", null, "Claude"),
+		usage.plan ? h("span.chip", null, usage.plan + " plan") : null, h("span.grow"),
+		usage.updatedMs ? h("span.muted", null, "asked " + new Date(usage.updatedMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) : null);
+	if (status.message) return h("div.claude-hover", null, head, h("div.claude-hover-note" + (status.level ? ".c-" + status.level : ""), null, status.message));
+	return h("div.claude-hover", null, head,
+		h("div.claude-hover-windows", null, ...(usage.windows || []).map((w) => hoverWindow(w, now))),
+		...usageNotes(claude, usage, now),
+		...(claude.chains || []).map((chain) => hoverChain(chain)),
+		h("div.claude-hover-foot", null, "The mark on a bar is an even pace to the reset: 1.00x lasts exactly to it. Click for Settings > AI > Claude."));
+}
+
+function paceClass(window) {
+	return window.usedUp ? ".c-error" : window.pace > WARN_PACE ? ".c-warn" : "";
+}
+
+function hoverWindow(window, now) {
+	return h("div.claude-hover-window", { dataset: { window: window.id } },
+		h("div.claude-hover-line", null, h("span.claude-label", null, window.label), h("span.claude-num", null, percent(window.utilization))),
+		usageBar(window, now),
+		h("div.claude-hover-line", null, h("span.claude-pace" + paceClass(window), null, window.usedUp ? "used up" : "pace " + window.pace.toFixed(2) + "x"),
+			window.resetsAtMs ? h("span.muted", null, "resets " + resetText(window.resetsAtMs, now)) : null));
+}
+
+// What holds Claude back now, or warns of it: used up, the CLI's warning, an ask that failed.
+function usageNotes(claude, usage, now) {
+	const notes = [];
+	if (claude.blockedUntilMs > now) notes.push(h("div.set-probe.bad", null, icon("error"), "Claude is used up; it frees " + resetText(claude.blockedUntilMs, now) + ". Turns go to their group's fallback meanwhile."));
+	else if (usage.status === "allowed_warning") notes.push(h("div.set-probe.warn", null, icon("warning"), "Claude Code warns that " + (usage.limitedBy || "a window") + " is near its limit."));
+	if (usage.error) notes.push(h("div.set-probe.warn", null, icon("warning"), "The last ask failed: " + usage.error));
+	return notes;
+}
+
+function hoverChain(chain) {
+	const passed = (chain.places || []).filter((place) => place.state !== "use" && place.why);
+	return h("div.claude-hover-chain", { dataset: { group: chain.group, role: chain.role } },
+		h("div.claude-hover-line", null, h("span", null, h("b", null, chain.group), " / " + chain.role), h("span.muted", null, "now ", h("b", null, chain.now || "nothing"))),
+		h("span.claude-places", null, ...(chain.places || []).map((place, i) => placeChip(place, i, chain.now, true))),
+		...passed.map((place) => h("div.claude-hover-why", null, place.model + ": " + place.why)));
+}
+
+// A chain's place: the model a turn uses now in blue, one over its pace yellow, one used up red; `brief` leaves its pace out.
+function placeChip(place, index, now, brief) {
+	const state = place.state === "over" ? ".warn" : place.state === "used_up" ? ".err" : place.model === now ? ".info" : "";
+	const pace = place.claude && !brief ? paceLabel(place.pace) : "";
+	const why = place.why ? (place.model === now ? place.why + "; a turn still uses it: nothing earlier fits" : place.why) : place.model === now ? "A turn uses it now" : "";
+	return h("span.chip.claude-place" + state, { dataset: { place: place.model, state: place.state }, title: why },
+		(index > 0 ? "> " : "") + place.model, pace ? h("span.muted", null, " " + pace) : null);
 }
 
 function usageBar(window, now) {
@@ -193,12 +262,9 @@ export class ClaudePage {
 		const rows = windows.map((w) => h("div.claude-window", { dataset: { window: w.id } },
 			h("span.claude-label", null, w.label), usageBar(w, now),
 			h("span.claude-num", null, percent(w.utilization)),
-			h("span.claude-pace" + (w.usedUp ? ".c-error" : w.pace > WARN_PACE ? ".c-warn" : ""), { title: "1.00x lasts exactly to the reset" }, w.usedUp ? "used up" : "pace " + w.pace.toFixed(2) + "x"),
+			h("span.claude-pace" + paceClass(w), { title: "1.00x lasts exactly to the reset" }, w.usedUp ? "used up" : "pace " + w.pace.toFixed(2) + "x"),
 			h("span.muted", null, w.resetsAtMs ? "resets " + resetText(w.resetsAtMs, now) : "")));
-		const notes = [];
-		if (claude.blockedUntilMs > now) notes.push(h("div.set-probe.bad", null, icon("error"), "Claude is used up; it frees " + resetText(claude.blockedUntilMs, now) + ". Turns go to their group's fallback meanwhile."));
-		else if (usage.status === "allowed_warning") notes.push(h("div.set-probe.warn", null, icon("warning"), "Claude Code warns that " + (usage.limitedBy || "a window") + " is near its limit."));
-		if (usage.error) notes.push(h("div.set-probe.warn", null, icon("warning"), "The last ask failed: " + usage.error));
+		const notes = usageNotes(claude, usage, now);
 		if (usage.extraEnabled) notes.push(h("div.muted", null, "Extra usage is on" + (usage.extraUtilization >= 0 ? " (" + percent(usage.extraUtilization) + " of its monthly limit used)" : "") + "."));
 		return h("div.set-model.claude-usage", null,
 			h("div.set-model-head", null, h("b", null, "Usage"), h("span.grow"), usage.updatedMs ? h("span.muted", null, "asked " + new Date(usage.updatedMs).toLocaleTimeString()) : null),
@@ -217,16 +283,8 @@ export class ClaudePage {
 			h("p.muted", null, "A turn tries its role's chain in order. A Claude model with a pace is passed over while your plan runs ahead of it, so the session or the week lasts; one without is used whatever the pace. A chat's mode picks the role: Ask primary, Plan planning, Agent implementation."),
 			...chains.map((chain) => h("div.claude-chain", { dataset: { group: chain.group, role: chain.role } },
 				h("span.claude-chain-name", null, h("b", null, chain.group), " / " + chain.role),
-				h("span.claude-places", null, ...(chain.places || []).map((place, i) => this.placeChip(place, i, chain.now))),
+				h("span.claude-places", null, ...(chain.places || []).map((place, i) => placeChip(place, i, chain.now))),
 				h("span.claude-chain-now", null, "now ", h("b", null, chain.now || "nothing")))));
-	}
-
-	placeChip(place, index, now) {
-		const state = place.state === "over" ? ".warn" : place.state === "used_up" ? ".err" : place.model === now ? ".info" : "";
-		const pace = place.claude ? paceLabel(place.pace) : "";
-		const why = place.why ? (place.model === now ? place.why + "; a turn still uses it: nothing earlier fits" : place.why) : place.model === now ? "A turn uses it now" : "";
-		return h("span.chip.claude-place" + state, { dataset: { place: place.model, state: place.state }, title: why },
-			(index > 0 ? "> " : "") + place.model, pace ? h("span.muted", null, " " + pace) : null);
 	}
 
 	setupBar(claude) {

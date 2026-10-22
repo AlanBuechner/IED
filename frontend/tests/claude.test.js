@@ -1,8 +1,8 @@
 // claude.test.js - Claude's plan usage in the chat plugin's UI (docs/04 "The Claude Code provider"): the status bar's text
-// and color from the aiusage snapshot, a window's line, when a window frees, and the step that sets Claude up.
+// and color from the aiusage snapshot, its hover card, a window's line, when a window frees, and the step that sets Claude up.
 
 import { test, assertEqual } from "./harness.js";
-import { CLAUDE_PROFILE_NAMES, chainLine, onSubscription, resetText, setupStep, usageStatus, windowLine } from "/plugins/ied.chat/ui/claudeusage.js";
+import { CLAUDE_PROFILE_NAMES, chainLine, onSubscription, resetText, setupStep, usageHoverCard, usageStatus, windowLine } from "/plugins/ied.chat/ui/claudeusage.js";
 import { ChatModel } from "/plugins/ied.chat/ui/chatmodel.js";
 
 const NOW = 1761150000000;
@@ -47,6 +47,29 @@ test("claude: the status bar says the session and the week", () => {
 	const paced = usageStatus(claude([window("seven_day", "Week", 60, 1.2)], { chains: [chain] }));
 	assertEqual(paced.tooltip.includes("claude / primary: claude-sonnet now (claude-opus over its pace)"), true);
 	assertEqual(chainLine(Object.assign({}, chain, { now: "", places: [{ model: "claude-opus", state: "used_up" }] })), "claude / primary: nothing now (claude-opus used up)");
+});
+
+test("claude: the status item's hover card draws each window's bar, its pace and the chains", () => {
+	assertEqual(usageHoverCard({ configured: false }), null, "hidden item, no card");
+	const chain = { group: "claude", role: "primary", now: "claude-sonnet", places: [
+		{ model: "claude-opus", claude: true, pace: { max: 1, target: "both" }, state: "over", why: "the session is at 1.60x pace, over its 1.00x" },
+		{ model: "claude-sonnet", claude: true, pace: { max: 1.5, target: "both" }, state: "use" }] };
+	const card = usageHoverCard(claude([window("five_hour", "Session (5 h)", 80, 1.6), window("seven_day", "Week", 30, 0.6, { through: 0.25 })], { chains: [chain] }));
+	const rows = [...card.querySelectorAll(".claude-hover-window")].map((row) => [row.dataset.window, row.querySelector(".claude-num").textContent,
+		row.querySelector(".claude-pace").textContent, row.querySelector(".claude-pace").className, row.querySelector(".claude-bar").className,
+		row.querySelector(".claude-bar .fill").style.width, row.querySelector(".claude-bar .even").style.left]);
+	assertEqual(rows, [
+		["five_hour", "80%", "pace 1.60x", "claude-pace c-warn", "claude-bar warn", "80%", "50%"],
+		["seven_day", "30%", "pace 0.60x", "claude-pace", "claude-bar", "30%", "25%"]]);
+	assertEqual(card.querySelector(".claude-hover-head .chip").textContent, "max plan");
+	assertEqual([...card.querySelectorAll(".claude-place")].map((chip) => chip.textContent + "|" + chip.className), ["claude-opus|chip claude-place warn", "> claude-sonnet|chip claude-place info"], "paces left out");
+	assertEqual(card.querySelector(".claude-hover-why").textContent, "claude-opus: the session is at 1.60x pace, over its 1.00x");
+	const spent = usageHoverCard(claude([window("five_hour", "Session (5 h)", 100, 2, { usedUp: true })], { blockedUntilMs: NOW + HOUR }));
+	assertEqual([spent.querySelector(".claude-pace").textContent, spent.querySelector(".claude-bar").className], ["used up", "claude-bar err"]);
+	assertEqual(spent.querySelector(".set-probe.bad").textContent.includes("frees in 1 h 0 min"), true);
+	const keyed = usageHoverCard(claude([], { cli: { path: "C:/claude.exe", signIn: "signed_in", authMethod: "api_key", subscription: false } }));
+	assertEqual([keyed.querySelector(".claude-hover-note").className, keyed.querySelector(".claude-hover-note").textContent.startsWith("Claude Code signs in with api_key."), keyed.querySelector(".claude-hover-window")],
+		["claude-hover-note c-error", true, null], "no windows: why");
 });
 
 test("claude: only a subscription sign-in runs Claude", () => {

@@ -28,6 +28,7 @@ import "./outputlinks.test.js";
 import "./chat.test.js";
 import "./chatmentions.test.js";
 import "./claude.test.js";
+import "./hovercard.test.js";
 import "./settings.test.js";
 import "./git.test.js";
 import "./semanticcolors.test.js";

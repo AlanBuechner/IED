@@ -152,6 +152,23 @@ class Chat:
 		return out
 
 
+def usage_window(id, label, utilization, through, length_ms, now):
+	return {"id": id, "label": label, "utilization": utilization, "resetsAtMs": now + int((1 - through) * length_ms), "lengthMs": length_ms,
+		"through": through, "pace": round(utilization / 100 / through, 3), "usedUp": utilization >= 100}
+
+
+def claude_usage(now):
+	"""aiusage for a claude-code model on a Max plan (the shapes of plugins/chat/code/claudewire.cf)."""
+	windows = [usage_window("five_hour", "Session (5 h)", 68, 0.5, 5 * 3600000, now), usage_window("seven_day", "Week", 41, 0.45, 7 * DAY_MS, now),
+		usage_window("seven_day_opus", "Opus week", 12, 0.45, 7 * DAY_MS, now)]
+	places = [{"model": "claude-opus", "claude": True, "pace": {"max": 1, "target": "both"}, "state": "over", "why": "the session is at 1.36x pace, over its 1.00x"},
+		{"model": "claude-sonnet", "claude": True, "pace": {"max": 1.5, "target": "both"}, "state": "use", "why": ""},
+		{"model": "claude-haiku", "claude": True, "state": "use", "why": ""}]
+	return {"claude": {"offered": True, "configured": True, "cli": {"asked": True, "path": "C:/Users/me/.local/bin/claude.exe", "version": "2.1.304", "signIn": "signed_in", "authMethod": "claude.ai", "subscription": True, "signingIn": False, "installing": False},
+		"refreshing": False, "blockedUntilMs": 0, "nowMs": now, "chains": [{"group": "claude", "role": "primary", "now": "claude-sonnet", "places": places}],
+		"usage": {"known": True, "available": True, "plan": "max", "status": "allowed", "limitedBy": "", "limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": now - 90000, "windows": windows}}}
+
+
 class Chats:
 	def __init__(self, server):
 		self.server = server
@@ -220,7 +237,11 @@ class Chats:
 				chat.runner.cancel()
 
 	def usage_snapshot(self):
-		"""aiusage (docs/10): the mock sets up no claude-code model, so the clients hide Claude's usage."""
+		"""aiusage (docs/10): Claude's usage stays hidden until ai.models names a claude-code model; then a Max plan signed in,
+		its session ahead of pace, its week behind, and a claude group whose chain passes Opus over."""
+		models = self.server.settings.values(None).get("ai.models", {}).get("value") or {}
+		if any(isinstance(m, dict) and m.get("provider") == "claude-code" for m in models.values()):
+			return claude_usage(now_ms())
 		return {"claude": {"offered": True, "configured": False, "cli": {"asked": True, "path": "", "version": "", "signIn": "", "authMethod": "", "subscription": False, "signingIn": False, "installing": False}, "refreshing": False,
 			"blockedUntilMs": 0, "nowMs": now_ms(), "chains": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
 				"limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": 0, "windows": []}}}

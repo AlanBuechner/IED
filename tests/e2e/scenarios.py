@@ -1563,6 +1563,34 @@ def chat_delete_and_restore(run):
 	run.shot("restored")
 
 
+@scenario(viewports=("desktop",), targets=("mock",))
+def claude_usage_hover_card(run):
+	"""The status bar's Claude usage draws itself on hover as Settings > AI > Claude does (docs/04 "The Claude Code
+	provider"): each window's bar with the even line, its pace (yellow ahead of it) and reset, and the chain with the
+	model a turn uses now and why Opus is passed over; a click opens the settings page and the card goes. The mock sets
+	Claude up when ai.models names a claude-code model (a phone has no status bar)."""
+	page = run.open()
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"claude-sonnet": {"provider": "claude-code", "model": "sonnet"}}})
+	try:
+		run.reload()
+		item = ".statusbar [data-item='ied.chat.claude']"
+		page.wait_for_selector(item + ":not([hidden])")
+		check(page.get_attribute(item, "title") is None, "no plain tooltip beside the card")
+		page.hover(item)
+		page.wait_for_selector(".hover-card .claude-hover")
+		check(run.texts(".hover-card .claude-hover-window .claude-label") == ["Session (5 h)", "Week", "Opus week"], "a row per window")
+		check(run.texts(".hover-card .claude-pace.c-warn") == ["pace 1.36x"], "the session runs ahead of pace")
+		check(len(page.query_selector_all(".hover-card .claude-bar .even")) == 3, "each bar marks the even pace")
+		check(run.texts(".hover-card .claude-place.warn") == ["claude-opus"] and run.texts(".hover-card .claude-place.info") == ["> claude-sonnet"], "the chain as pacing has it")
+		run.shot("card")
+		page.click(item)
+		page.wait_for_selector(".claude-page .claude-windows")
+		time.sleep(0.6)
+		check(page.query_selector(".hover-card") is None, "the click took the card away")
+	finally:
+		run.request("settings.reset", {"tier": "app", "key": "ai.models"})
+
+
 @scenario(viewports=("desktop",))
 def chat_reload_mid_turn(run):
 	page = open_chat(run)

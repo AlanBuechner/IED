@@ -363,6 +363,19 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .claude-place { margin-left: 0; }
 .claude-chain-now { white-space: nowrap; }
 
+/* the status item's hover card */
+.claude-hover { display: grid; gap: var(--space-4); width: 320px; max-width: 100%; }
+.claude-hover-head { display: flex; align-items: center; gap: var(--space-3); color: var(--text-0); }
+.claude-hover-head .ci { width: 14px; height: 14px; }
+.claude-hover-head .chip { margin-left: 0; }
+.claude-hover-windows { display: grid; gap: var(--space-4); }
+.claude-hover-window { display: grid; gap: var(--space-2); }
+.claude-hover-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
+.claude-hover-note { overflow-wrap: anywhere; }
+.claude-hover-chain { display: grid; gap: var(--space-2); padding-top: var(--space-3); border-top: var(--border-width) solid var(--border-0); }
+.claude-hover-why { color: var(--text-2); overflow-wrap: anywhere; }
+.claude-hover-foot { color: var(--text-2); font-size: var(--font-size-xs); }
+
 @media (max-width: 719px) {
 	.claude-windows { grid-template-columns: 1fr auto auto; grid-auto-flow: row dense; }
 	.claude-window .claude-bar { grid-column: 1 / -1; }

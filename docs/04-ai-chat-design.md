@@ -240,7 +240,10 @@ menu, `""` back to the group's): the group's fallbacks stay behind it. The AI ha
 `chat_set_model` (pin a model for this chat's next turns or another chat's, an Exec call: in Ask mode the owner approves it).
 
 **In the UI.** The status bar's Claude item (`Claude 5h 42% wk 61%`; yellow when a window runs ahead of pace or the CLI warns,
-red when one is used up; its tooltip each window and when it resets) opens Settings > AI > Claude: the CLI (where it is, its
+red when one is used up; resting the pointer on it shows a card drawn as the settings page draws the usage (owner, 2026-10-22:
+"a more visual representation of the usage limits and pace"): each window's bar with the even line, its pace - yellow ahead
+of it - and reset, what holds Claude back, and each paced chain with the model a turn uses now and why the ones before it are
+passed over; `usageHoverCard` in `plugins/chat/ui/claudeusage.js`, on `ui-kit/hovercard.js`) opens Settings > AI > Claude: the CLI (where it is, its
 version, whether it is signed in), each window as a bar with the even line marked, its pace and reset, each paced chain with
 every place's state (used now, over its pace, used up) and the model a turn uses now, Refresh, and Add Claude models (the
 automatic setup's profiles and `claude` group). Settings > AI > Model Groups edits the chains: a role's model and its pace, the
