@@ -41,6 +41,7 @@ from iedclient import Client  # noqa: E402
 AUTO_ANSWER = "I am not available to answer. Make the reasonable choice yourself, say which you chose, and continue."
 HOME_PARTS = ("plugins", "frontend", "shared")
 GIT_IDENTITY = ["-c", "user.name=eval", "-c", "user.email=eval@localhost", "-c", "commit.gpgsign=false"]
+EVAL_WATCHDOG = {"prefillBaseS": 900, "idleS": 300}
 
 
 # --- The variant's toolchain and home ------------------------------------------------------------------------------
@@ -276,6 +277,9 @@ def model_settings(args, name, profile, proxy):
 	def settings(task, job_key, job_dir):
 		model = dict(profile)
 		model["endpoint"] = proxy.endpoint_for(job_key, job_dir)
+		# The server's slots are shared with other runs (and anyone else on it), so a request can wait in its queue for
+		# minutes before its first byte: that is not the stall IED's watchdog is for.
+		model["watchdog"] = dict(EVAL_WATCHDOG, **profile.get("watchdog", {}))
 		if task.get("context_window"):
 			model["contextWindow"] = task["context_window"]
 		role = {"model": name, "temperature": args.temperature}
