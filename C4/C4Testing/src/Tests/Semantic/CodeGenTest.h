@@ -38,6 +38,8 @@ namespace Testing
 		void ModuleTargetsWindowsX64();
 		TEST_FUNC(Semantic.CodeGen)
 		void ATargetAnnotationWidensOneFunction();
+		TEST_FUNC(Semantic.CodeGen)
+		void HintsReachTheOptimizer();
 
 		TEST_FUNC(Semantic.CodeGen)
 		void PointerFreeObjectsAllocateNoscan();

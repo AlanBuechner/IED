@@ -35,7 +35,7 @@ namespace Scripting
 			info.kind = SymbolKind::Namespace;
 			info.scope = target;
 			info.definingUnit = 0; // a namespace is a GLOBAL entity: once any file opens it, every file may name it. Members keep their own visibility (declUnit gating), so this does not leak undeclared members - it only lets the qualified walk reach the shared scope. Gating the NAME by the first opener's unit made open namespaces invisible to sibling files that include only the shared header.
-			if (!parent->Register(name, info)) ErrorAt(ctx, &ns, "redeclaration of namespace '" + name + "'");
+			if (!parent->Register(name, info)) ErrorAt(ctx, &ns, Redefinition(ctx, "namespace", name));
 		}
 
 		Context inner = ctx;

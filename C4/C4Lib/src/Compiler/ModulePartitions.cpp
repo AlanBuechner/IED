@@ -2,12 +2,16 @@
 #include "Compiler/PartitionImports.h"
 #include "Compiler/PartitionPlacement.h"
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
+#include <algorithm>
+#include <atomic>
+#include <thread>
 
 namespace Scripting
 {
@@ -295,6 +299,109 @@ namespace Scripting
 		}
 	}
 
+	namespace
+	{
+		// Where a global value stands in its module: its list (functions, variables, aliases) and its place in it,
+		// which reading the module's bitcode back keeps, names or not.
+		struct Place
+		{
+			uint32_t list = 0;
+			uint32_t index = 0;
+		};
+
+		constexpr uint32_t kFunctions = 0;
+		constexpr uint32_t kVariables = 1;
+		constexpr uint32_t kAliases = 2;
+
+		llvm::DenseMap<const llvm::GlobalValue*, Place> PlacesIn(const llvm::Module& module)
+		{
+			llvm::DenseMap<const llvm::GlobalValue*, Place> places;
+			uint32_t index = 0;
+			for (const llvm::Function& function : module) places[&function] = { kFunctions, index++ };
+			index = 0;
+			for (const llvm::GlobalVariable& variable : module.globals()) places[&variable] = { kVariables, index++ };
+			index = 0;
+			for (const llvm::GlobalAlias& alias : module.aliases()) places[&alias] = { kAliases, index++ };
+			return places;
+		}
+
+		// A copy of the module's global values by list and place.
+		struct Directory
+		{
+			std::vector<llvm::GlobalValue*> lists[3];
+
+			explicit Directory(llvm::Module& module)
+			{
+				for (llvm::Function& function : module) lists[kFunctions].push_back(&function);
+				for (llvm::GlobalVariable& variable : module.globals()) lists[kVariables].push_back(&variable);
+				for (llvm::GlobalAlias& alias : module.aliases()) lists[kAliases].push_back(&alias);
+			}
+
+			// The value at `place`, its body read in when it is a lazily read function.
+			llvm::GlobalValue* Materialized(Place place) const
+			{
+				llvm::GlobalValue* value = lists[place.list][place.index];
+				if (value->isMaterializable()) llvm::consumeError(value->materialize());
+				return value;
+			}
+		};
+
+		// One partition planned on the module, found again in a copy by places.
+		struct PartitionPlan
+		{
+			std::vector<Place> members;
+			std::vector<Place> imports;
+			bool keepsProgramWide = false;
+		};
+
+		std::vector<PartitionPlan> Plans(const llvm::Module& module, const std::vector<std::vector<const llvm::GlobalValue*>>& members,
+			bool withImports)
+		{
+			const llvm::DenseMap<const llvm::GlobalValue*, Place> places = PlacesIn(module);
+			std::vector<PartitionPlan> plans(members.size());
+			for (size_t i = 0; i < members.size(); ++i)
+			{
+				for (const llvm::GlobalValue* member : members[i]) plans[i].members.push_back(places.lookup(member));
+				if (withImports)
+					for (const llvm::Function* import : ImportsFor(members[i])) plans[i].imports.push_back(places.lookup(import));
+				plans[i].keepsProgramWide = i == 0;
+			}
+			return plans;
+		}
+
+		Contents ContentsIn(const Directory& copy, const PartitionPlan& plan)
+		{
+			Contents contents;
+			for (Place place : plan.members) contents.members.push_back(copy.Materialized(place));
+			for (Place place : plan.imports) contents.imports.push_back(llvm::cast<llvm::Function>(copy.Materialized(place)));
+			contents.keepsProgramWide = plan.keepsProgramWide;
+			return contents;
+		}
+
+		// A thread's share of the partitions, each built from the thread's own copy of the module (bodies read in as
+		// partitions need them) and written to its slot of `partitions`; a copy that cannot be read leaves them empty.
+		void BuildPartitions(const std::string& whole, const std::vector<PartitionPlan>& plans, std::atomic<size_t>& next,
+			std::vector<std::string>& partitions)
+		{
+			llvm::LLVMContext context;
+			llvm::Expected<std::unique_ptr<llvm::Module>> copy = llvm::getLazyBitcodeModule(llvm::MemoryBufferRef(whole, "module"), context, true);
+			if (!copy)
+			{
+				llvm::consumeError(copy.takeError());
+				return;
+			}
+			if (llvm::Error error = (*copy)->materializeMetadata())
+			{
+				llvm::consumeError(std::move(error));
+				return;
+			}
+			const Directory directory(**copy);
+			const DescribedGlobals described = DescribedDefinitions(**copy);
+			for (size_t i = next++; i < plans.size(); i = next++)
+				partitions[i] = ModuleBitcode(*Partition(**copy, ContentsIn(directory, plans[i]), described));
+		}
+	}
+
 	std::unique_ptr<llvm::Module> ExtractDefinitions(const llvm::Module& module, const std::vector<const llvm::GlobalValue*>& definitions)
 	{
 		return Partition(module, Contents{ definitions, {}, false }, DescribedDefinitions(module));
@@ -309,20 +416,23 @@ namespace Scripting
 		return bitcode;
 	}
 
-	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count, PartitionOptimization optimization)
+	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count, PartitionOptimization optimization, unsigned threads)
 	{
 		// Assigned before the locals are renamed, so a symbol's home is found by the names the program gave it.
 		const std::vector<std::vector<const llvm::GlobalValue*>> members = AssignDefinitions(module, count);
-		const DescribedGlobals described = DescribedDefinitions(module);
 		MakeLocalsGlobal(module);
 		const bool after = optimization == PartitionOptimization::After;
 		if (after) KeepDefinitions(module);
-		std::vector<std::string> partitions;
-		for (unsigned i = 0; i < count; ++i)
-		{
-			const Contents contents{ members[i], after ? ImportsFor(members[i]) : std::vector<const llvm::Function*>(), i == 0 };
-			partitions.push_back(ModuleBitcode(*Partition(module, contents, described)));
-		}
+		const std::vector<PartitionPlan> plans = Plans(module, members, after);
+		const std::string whole = ModuleBitcode(module);
+		std::vector<std::string> partitions(count);
+		std::atomic<size_t> next = 0;
+		std::vector<std::thread> workers;
+		const unsigned workerCount = std::clamp(threads, 1u, count);
+		for (unsigned i = 1; i < workerCount; ++i)
+			workers.emplace_back([&] { BuildPartitions(whole, plans, next, partitions); });
+		BuildPartitions(whole, plans, next, partitions);
+		for (std::thread& worker : workers) worker.join();
 		return partitions;
 	}
 }

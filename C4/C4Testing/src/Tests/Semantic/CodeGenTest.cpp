@@ -197,6 +197,25 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void CodeGenTest::HintsReachTheOptimizer()
+	{
+		CompilerInstance compiler;
+		int expects = 0;
+		int prefetches = 0;
+		TEST_ASSERT(LowerAndInspect(compiler,
+			"int32 Pick(int32 x, int32* p) { mem_prefetch(p); if (likely(x > 0)) return 1; if (unlikely(x < -5)) return 2; return 3; }\n"
+			"int32 main() { int32 v = 0; return Pick(1, &v); }", [&](llvm::Module& m) {
+				for (const llvm::Function& f : m)
+				{
+					if (f.getName().starts_with("llvm.expect")) expects += (int)f.getNumUses();
+					if (f.getName().starts_with("llvm.prefetch")) prefetches += (int)f.getNumUses();
+				}
+			}));
+		TEST_ASSERT_EQ(expects, 2);
+		TEST_ASSERT_EQ(prefetches, 1);
+		TEST_PASSED();
+	}
+
 	void CodeGenTest::PointerFreeObjectsAllocateNoscan()
 	{
 		// BUG-092: both allocators take (i64 size, i64 align), matching the runtime's size_t parameters.

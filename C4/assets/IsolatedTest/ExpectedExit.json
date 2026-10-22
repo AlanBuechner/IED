@@ -75,6 +75,11 @@
       "main.cf (3:2) warning: unknown annotation 'operater': did you mean 'operator'?", "Warnings:            2"],
     "reason": "Warnings are printed and the build still succeeds; constants that fit do not warn (B22)."
   },
+  "Functions/OptimizerHints": {
+    "exit": 0,
+    "compileMustNotContain": ["warning"],
+    "reason": "likely, unlikely and mem_prefetch change nothing a program computes; a prefetch of null does not fault."
+  },
   "Functions/Bug340DeclaredTwice": {
     "exit": 0,
     "reason": "BUG-340: a function declared in two headers is visible to the includers of each, not only the last one read."

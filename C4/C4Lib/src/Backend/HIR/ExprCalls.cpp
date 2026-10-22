@@ -17,6 +17,7 @@
 #include "Backend/HIR/VarArgs.h"
 #include "Backend/HIR/Atomics.h"
 #include "Backend/HIR/BitIntrinsics.h"
+#include "Backend/HIR/HintIntrinsics.h"
 #include "Backend/HIR/SimdIntrinsics.h"
 #include "Backend/HIR/BuiltinOperators.h"
 #include "Backend/HIR/ImplicitConversion.h"
@@ -109,6 +110,7 @@ namespace Scripting
 		if (notFound && Atomics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, Atomics::LowerIntrinsic(m_Ctx, target.name, args.values));
 		if (notFound && SimdIntrinsics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, SimdIntrinsics::LowerIntrinsic(m_Ctx, target.name, args.values));
 		if (notFound && BitIntrinsics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, BitIntrinsics::LowerIntrinsic(m_Ctx, target.name, args.values));
+		if (notFound && HintIntrinsics::IsIntrinsic(target.name)) return m_Ctx.Fail(callee, HintIntrinsics::LowerIntrinsic(m_Ctx, target.name, args.values));
 		// Ambiguous and inaccessible calls are errors in their own right, never masked by a type of the same name.
 		if (unmatched.error == QueryError::NotFound || unmatched.error == QueryError::NotCallable)
 			if (const ObjectType* type = ConstructedType(n, target.name)) return ConstructorCall(callee, type, args);

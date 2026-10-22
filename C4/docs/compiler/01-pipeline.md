@@ -206,8 +206,10 @@ straight from the module in memory).
   the link; file-scope assembly and the compile unit's program-wide lists (enums, retained types, imports) stay in the
   first partition. How many: `--partitions <n>`, else about one per 1,000 instructions (3,000 at `-O0`,
   where an instruction is cheaper to assemble) rounded down to a power of two, from 1 to 32, so the count changes
-  only when the program doubles or halves. Partitions are assembled on up to `-j` threads (default: the processors,
-  at most 4), each from a bitcode copy read into a context of its own. `-c` always writes one object.
+  only when the program doubles or halves. Partitions are built and assembled on up to `-j` threads (default: the
+  processors, at most 4): the module is written once as bitcode, each thread reads a copy of it lazily into a context
+  of its own and builds its share of the partitions from that copy (a definition found by its place in the module's
+  lists), so a partition's bitcode is the same whatever the thread count. `-c` always writes one object.
 - The object cache (`Compiler/ObjectCache`, roadmap 5.3): a linked build keeps its objects in
   `<int>/<out name>.objects/`, each named after the hash of its partition's bitcode and of the compiler (its version,
   and the size and time of its executable) and the target settings, so a partition whose code is unchanged reuses

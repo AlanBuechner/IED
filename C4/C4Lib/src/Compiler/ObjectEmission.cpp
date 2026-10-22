@@ -227,7 +227,8 @@ namespace Scripting
 		std::vector<Partition> CachedPartitions(llvm::Module& module, const ObjectSettings& settings, unsigned count, const ObjectCache& cache)
 		{
 			const PartitionOptimization optimization = settings.optimizePartitions ? PartitionOptimization::After : PartitionOptimization::Before;
-			std::vector<std::string> bitcode = count == 1 ? std::vector<std::string>{ ModuleBitcode(module) } : SplitModuleToBitcode(module, count, optimization);
+			std::vector<std::string> bitcode = count == 1 ? std::vector<std::string>{ ModuleBitcode(module) }
+				: SplitModuleToBitcode(module, count, optimization, settings.threads);
 			std::vector<Partition> partitions(bitcode.size());
 			for (size_t i = 0; i < bitcode.size(); ++i)
 			{

@@ -1,6 +1,6 @@
 include "png.ch"
 
-namespace Image
+namespace Imaging
 {
 	const uint8[8] kPngSignature = { 137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u };
 	const int32 kChunkOverhead = 12;   // length, type and CRC
@@ -70,7 +70,7 @@ namespace Image
 		header.color = data[9];
 		header.interlaced = data[12] == 1u;
 		if (header.width <= 0 || header.height <= 0) return "an image with no pixels, or more than 2^31 a side";
-		if ((int64)header.width * (int64)header.height > kMostPixels) return "an image of more pixels than Image::kMostPixels";
+		if ((int64)header.width * (int64)header.height > kMostPixels) return "an image of more pixels than Imaging::kMostPixels";
 		if (!ValidDepth(header.color, header.depth)) return "a color type and bit depth PNG does not have";
 		if (data[10] != 0u || data[11] != 0u || data[12] > 1u) return "an unknown compression, filter or interlace method";
 		for (int32 i = 0; i < 256; ++i) header.palette[i * 4 + 3] = 255u;

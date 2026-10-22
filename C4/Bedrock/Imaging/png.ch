@@ -2,14 +2,14 @@
 // and tRNS transparency, and Adam7 interlacing, and checks every chunk's CRC; 16-bit samples keep their high byte.
 // Writing makes RGBA, or RGB when every pixel is opaque, each row with the filter that leaves the smallest sum (libpng's
 // choice), at a Compression level.
-//     Image::Rgba picture;
-//     Image::ReadResult read = Image::DecodePng(bytes, count, picture);
+//     Imaging::Rgba picture;
+//     Imaging::ReadResult read = Imaging::DecodePng(bytes, count, picture);
 //     Core::Array<uint8> png;
-//     Image::EncodePng(picture, Compression::kDefaultLevel, png);
+//     Imaging::EncodePng(picture, Compression::kDefaultLevel, png);
 
 include "Compression/zlib.ch"
 
-namespace Image
+namespace Imaging
 {
 	// The most pixels an image read may have: 2^28, a gibibyte of RGBA.
 	const int64 kMostPixels = 268435456;

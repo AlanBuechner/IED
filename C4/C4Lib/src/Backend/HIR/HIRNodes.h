@@ -45,7 +45,9 @@ namespace Scripting
 		BitAnd, BitOr, BitXor, Shl, Shr,
 		Negate, BitNot, BoolNot, // unary (Negate = numeric -, BitNot = ~, BoolNot = !)
 		// the bit intrinsics (BitIntrinsics.h): unary counts and byte swap, binary rotations and the product's high half
-		CountOnes, LeadingZeros, TrailingZeros, ByteSwap, RotateLeft, RotateRight, MulHigh
+		CountOnes, LeadingZeros, TrailingZeros, ByteSwap, RotateLeft, RotateRight, MulHigh,
+		// the optimizer's hints (HintIntrinsics.h): a bool's usual value, and memory about to be read
+		Likely, Unlikely, Prefetch
 	};
 
 	// ---------------------------------------------------------------------

@@ -354,3 +354,25 @@ Rules:
 - Errors name the call and what is wrong: `bit_count works on an integer or a packed integer vector, not a 'float'`,
   `bit_rotate_left takes 2 arguments, not 1`.
 - A program function of the same name wins over the intrinsic.
+
+## 13. Optimizer hints
+
+**Status:** **Implemented**
+
+Hints that change how fast a program runs, never what it computes: which way a branch usually goes, and memory the
+program is about to read.
+
+```c4
+if (unlikely(count > capacity)) Grow(count);    // the rare path laid out of the way
+for (int64 i = 0; i < n; ++i) {
+	mem_prefetch(&table[keys[i + 8]]);          // the read eight steps ahead, started now
+	sum += table[keys[i]];
+}
+```
+
+| Intrinsic | Meaning |
+|---|---|
+| `likely(c)`, `unlikely(c)` | `c` as a `bool` (it converts as a condition does), with the way it usually goes: the optimizer lays out and predicts the branch it decides (`llvm.expect`) |
+| `mem_prefetch(p)` | starts reading the cache line `p` points to into every cache level (`llvm.prefetch`, a read of data); any pointer, valid or not, since nothing is read through it. Returns nothing |
+
+A program function of the same name wins over the intrinsic.

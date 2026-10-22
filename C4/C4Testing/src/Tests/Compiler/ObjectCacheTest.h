@@ -42,5 +42,7 @@ namespace Testing
 		void AFilesCodeSharesAPartition();
 		TEST_FUNC(Compiler.ModulePartitions)
 		void Bug328MovingAFilesLinesChangesOnlyItsPartition();
+		TEST_FUNC(Compiler.ModulePartitions)
+		void SeveralThreadsSplitAsOneDoes();
 	};
 } // namespace Testing

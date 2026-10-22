@@ -1,0 +1,1 @@
+int32 main() { mem_prefetch(5); return 0; }

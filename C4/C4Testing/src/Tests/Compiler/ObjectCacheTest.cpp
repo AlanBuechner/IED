@@ -131,11 +131,12 @@ namespace Testing
 			return llvm::parseAssemblyString(text, error, context);
 		}
 
-		std::vector<std::string> Split(const std::string& text)
+		std::vector<std::string> Split(const std::string& text, PartitionOptimization optimization = PartitionOptimization::Before,
+			unsigned threads = 1)
 		{
 			llvm::LLVMContext context;
 			std::unique_ptr<llvm::Module> module = Parse(text, context);
-			return module ? SplitModuleToBitcode(*module, kPartitions) : std::vector<std::string>();
+			return module ? SplitModuleToBitcode(*module, kPartitions, optimization, threads) : std::vector<std::string>();
 		}
 
 		std::unique_ptr<llvm::Module> ReadBack(const std::string& bitcode, llvm::LLVMContext& context)
@@ -347,6 +348,19 @@ namespace Testing
 		TEST_ASSERT(before[home] != after[home]);
 		for (size_t i = 0; i < after.size(); ++i)
 			if (static_cast<int>(i) != home) TEST_ASSERT(before[i] == after[i]);
+	}
+
+	void ObjectCacheTest::SeveralThreadsSplitAsOneDoes()
+	{
+		for (const std::string& text : { ProgramText(""), DescribedProgramText(4), TwoFileProgramText(0) })
+			for (PartitionOptimization optimization : { PartitionOptimization::Before, PartitionOptimization::After })
+			{
+				const std::vector<std::string> one = Split(text, optimization, 1);
+				TEST_ASSERT_EQ(one.size(), static_cast<size_t>(kPartitions));
+				for (const std::string& bitcode : one) TEST_ASSERT(!bitcode.empty());
+				TEST_ASSERT(Split(text, optimization, 3) == one);
+				TEST_ASSERT(Split(text, optimization, 8) == one);
+			}
 	}
 
 	void ObjectCacheTest::AddingAFunctionLeavesTheOtherPartitionsUnchanged()

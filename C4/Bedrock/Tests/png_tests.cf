@@ -1,4 +1,4 @@
-// Image: PNG read for every color type and bit depth, interlaced or not, with palettes and tRNS (files written by
+// Imaging: PNG read for every color type and bit depth, interlaced or not, with palettes and tRNS (files written by
 // hand with each combination), written and read back at every level, RGB for opaque images, and damaged files refused.
 
 include "bedrock.ch"
@@ -248,15 +248,15 @@ Core::Array<PngVector> Vectors() {
 	return vectors;
 }
 
-bool Holds(const Image::Rgba& image, const PngVector& vector) {
+bool Holds(const Imaging::Rgba& image, const PngVector& vector) {
 	return image.width == vector.width && image.height == vector.height &&
 		image.pixels.Count() == (int64)(vector.width * vector.height * 4) &&
 		memcmp((void*)image.pixels.Data(), (void*)vector.rgba, (uint64)image.pixels.Count()) == 0;
 }
 
 bool Fails(const uint8* data, int64 size, const char* why) {
-	Image::Rgba image;
-	Image::ReadResult read = Image::DecodePng(data, size, image);
+	Imaging::Rgba image;
+	Imaging::ReadResult read = Imaging::DecodePng(data, size, image);
 	return !read.ok && read.error != nullptr && Core::StringView(read.error) == Core::StringView(why);
 }
 
@@ -296,8 +296,8 @@ class PngTests {
 		Core::Array<PngVector> vectors = Vectors();
 		int32 wrong = 0;
 		for (int64 i = 0; i < vectors.Count(); ++i) {
-			Image::Rgba image;
-			Image::ReadResult read = Image::DecodePng(vectors[i].png, vectors[i].pngBytes, image);
+			Imaging::Rgba image;
+			Imaging::ReadResult read = Imaging::DecodePng(vectors[i].png, vectors[i].pngBytes, image);
 			if (!read.ok || !Holds(image, vectors[i])) wrong++;
 		}
 		assert_eq(0, wrong, "gray 1 and 16 bits, RGB 8 and 16, palettes of 2 and 8 bits, gray with alpha, RGBA 16, interlaced or not, with tRNS");
@@ -308,13 +308,13 @@ class PngTests {
 		Core::Array<PngVector> vectors = Vectors();
 		int32 wrong = 0;
 		for (int64 i = 0; i < vectors.Count(); ++i) {
-			Image::Rgba image;
-			Image::DecodePng(vectors[i].png, vectors[i].pngBytes, image);
+			Imaging::Rgba image;
+			Imaging::DecodePng(vectors[i].png, vectors[i].pngBytes, image);
 			for (int32 level = Compression::kStoreLevel; level <= Compression::kBestLevel; level += 3) {
 				Core::Array<uint8> png;
-				Image::EncodePng(image, level, png);
-				Image::Rgba back;
-				if (!Image::DecodePng(png.Data(), png.Count(), back).ok || !Holds(back, vectors[i])) wrong++;
+				Imaging::EncodePng(image, level, png);
+				Imaging::Rgba back;
+				if (!Imaging::DecodePng(png.Data(), png.Count(), back).ok || !Holds(back, vectors[i])) wrong++;
 			}
 		}
 		assert_eq(0, wrong, "each image written at four levels reads back the same");
@@ -322,7 +322,7 @@ class PngTests {
 
 	[test("opaque_writes_rgb")]
 	public static void TestOpaqueWritesRgb() {
-		Image::Rgba image;
+		Imaging::Rgba image;
 		image.width = 3;
 		image.height = 2;
 		for (int32 i = 0; i < 6; ++i) {
@@ -332,14 +332,14 @@ class PngTests {
 			image.pixels.Push(255u);
 		}
 		Core::Array<uint8> opaque;
-		Image::EncodePng(image, 6, opaque);
+		Imaging::EncodePng(image, 6, opaque);
 		assert_true(opaque[25] == 2u, "every pixel opaque: RGB");
 		image.pixels[3] = 128u;
 		Core::Array<uint8> translucent;
-		Image::EncodePng(image, 6, translucent);
+		Imaging::EncodePng(image, 6, translucent);
 		assert_true(translucent[25] == 6u, "one translucent pixel: RGBA");
-		Image::Rgba back;
-		assert_true(Image::DecodePng(translucent.Data(), translucent.Count(), back).ok && back.pixels[3] == 128u, "the alpha kept");
+		Imaging::Rgba back;
+		assert_true(Imaging::DecodePng(translucent.Data(), translucent.Count(), back).ok && back.pixels[3] == 128u, "the alpha kept");
 	}
 
 	[test("damaged")]
@@ -355,8 +355,8 @@ class PngTests {
 		png[20] ^= 1u;
 		int32 cutsRead = 0;
 		for (int64 cut = 0; cut < png.Count(); ++cut) {
-			Image::Rgba image;
-			if (Image::DecodePng(png.Data(), cut, image).ok) cutsRead++;
+			Imaging::Rgba image;
+			if (Imaging::DecodePng(png.Data(), cut, image).ok) cutsRead++;
 		}
 		assert_eq(0, cutsRead, "a file cut anywhere fails");
 		Core::Array<uint8> late;
@@ -367,7 +367,7 @@ class PngTests {
 		assert_true(Fails(late.Data(), late.Count(), "a chunk before IHDR"), "no IHDR first");
 		Core::Array<uint8> huge = Header(70000u, 70000u, 8u, 6u);
 		PutChunk(huge, "IEND", nothing);
-		assert_true(Fails(huge.Data(), huge.Count(), "an image of more pixels than Image::kMostPixels"), "too many pixels");
+		assert_true(Fails(huge.Data(), huge.Count(), "an image of more pixels than Imaging::kMostPixels"), "too many pixels");
 		Core::Array<uint8> badDepth = Header(1u, 1u, 3u, 2u);
 		PutChunk(badDepth, "IEND", nothing);
 		assert_true(Fails(badDepth.Data(), badDepth.Count(), "a color type and bit depth PNG does not have"), "a depth PNG lacks");

@@ -88,6 +88,11 @@ namespace Scripting
 			case IntrinsicOp::LeadingZeros: return CountBits(B, llvm::Intrinsic::ctlz, lhs, m_Ctx.mctx().Lower(n->type));
 			case IntrinsicOp::TrailingZeros: return CountBits(B, llvm::Intrinsic::cttz, lhs, m_Ctx.mctx().Lower(n->type));
 			case IntrinsicOp::ByteSwap: return SwapBytes(B, lhs);
+			case IntrinsicOp::Likely: return B.CreateIntrinsic(llvm::Intrinsic::expect, { lhs->getType() }, { lhs, B.getTrue() });
+			case IntrinsicOp::Unlikely: return B.CreateIntrinsic(llvm::Intrinsic::expect, { lhs->getType() }, { lhs, B.getFalse() });
+			// A read (0), kept in every cache level (3), of data (1).
+			case IntrinsicOp::Prefetch:
+				return B.CreateIntrinsic(llvm::Intrinsic::prefetch, { lhs->getType() }, { lhs, B.getInt32(0), B.getInt32(3), B.getInt32(1) });
 			// Logical NOT yields a boolean (i1): !x is true exactly when x IS zero, compared at the operand's own
 			// width. A pointer's zero is the null pointer: `!p` is `p == null`; a func's is a null code pointer
 			// (BUG-275: `s && f` negates its right operand twice and compared the func's { code, environment }).

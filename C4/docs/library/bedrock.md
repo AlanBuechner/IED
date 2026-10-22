@@ -1306,14 +1306,14 @@ byte, sentences, runs, noise, a mix, matches 32 KiB back) read back raw and wrap
 
 ---
 
-## 20. Images (`Image/`)
+## 20. Images (`Imaging/`)
 
 **Status:** **Implemented**. Plain C4 over Compression (section 19), checked against PNG files of every kind and read
 back by PIL.
 
 | Header | Gives |
 |---|---|
-| `png.ch` | `Image::DecodePng(data, size, image)`: a PNG file's image as an `Rgba` (`width`, `height`, `pixels`: four bytes a pixel, rows top to bottom); a `ReadResult` (`ok`, `error`). `Image::EncodePng(image, level, out)`: the image as a PNG file appended to `out`, at a Compression level |
+| `png.ch` | `Imaging::DecodePng(data, size, image)`: a PNG file's image as an `Rgba` (`width`, `height`, `pixels`: four bytes a pixel, rows top to bottom); a `ReadResult` (`ok`, `error`). `Imaging::EncodePng(image, level, out)`: the image as a PNG file appended to `out`, at a Compression level |
 
 Reading takes every color type (gray, RGB, a palette, gray with alpha, RGBA) at every bit depth PNG has (1, 2, 4,
 8 and 16), a palette's and a gray or RGB image's tRNS transparency, and Adam7 interlacing; low depths stretch to the

@@ -22,9 +22,11 @@ namespace Scripting
 	/// suffix (left on `module` too). Only the first partition keeps the file-scope assembly and the debug info's
 	/// program-wide lists (enums, retained types, imports): a partition's compile unit lists only the globals it
 	/// defines. Partitions optimized after the split also keep every definition another one may use (linkonce becomes
-	/// weak, also on `module`) and carry copies of the small functions they call (PartitionImports).
+	/// weak, also on `module`) and carry copies of the small functions they call (PartitionImports). The partitions are
+	/// built on up to `threads` threads, each from a copy of the module read from its bitcode into a context of its own,
+	/// so their bitcode is the same whatever the count.
 	std::vector<std::string> SplitModuleToBitcode(llvm::Module& module, unsigned count,
-		PartitionOptimization optimization = PartitionOptimization::Before);
+		PartitionOptimization optimization = PartitionOptimization::Before, unsigned threads = 1);
 
 	/// A module, in `module`'s context, of `definitions` (in that order) and declarations of only what they reach, built
 	/// as a partition is: for a part of a program that leaves it (Script/InlineBodies).

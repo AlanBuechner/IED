@@ -1,4 +1,12 @@
 {
+    "HintLikelyArguments": {
+        "expect": ["likely(c) takes one condition"],
+        "reason": "likely and unlikely take the one condition they hint."
+    },
+    "HintPrefetchNotAPointer": {
+        "expect": ["mem_prefetch(p) takes one pointer to the memory about to be read"],
+        "reason": "mem_prefetch takes a pointer."
+    },
     "TargetUnknownFeature": {
         "expect": ["[target]: 'avx3' is no processor feature"],
         "reason": "A [target] names features of the processor; another name is an error at the annotation."
@@ -1528,8 +1536,8 @@
         "reason": "BUG-273: only an alias may be declared again; a type of the same name is a redefinition."
     },
     "NamespaceNameTaken": {
-        "expect": ["main.cf (2:11) error: redeclaration of namespace 'Shapes'"],
-        "reason": "BUG-207: a namespace cannot take the name of a type; reported at the namespace."
+        "expect": ["main.cf (2:11) error: redefinition of namespace 'Shapes': it is already a type (main.cf:1)"],
+        "reason": "BUG-207: a namespace cannot take the name of a type; reported at the namespace, saying what the name is."
     },
     "FunctionNameTaken": {
         "expect": ["main.cf (2:1) error: redefinition of function 'Count'"],

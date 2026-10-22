@@ -1,0 +1,20 @@
+// likely, unlikely and mem_prefetch change no result: the conditions come back as they are, and a prefetch reads
+// nothing, even of a null or freed pointer.
+int32 Classify(int32 x) {
+	if (likely(x > 0)) return 1;
+	if (unlikely(x < -100)) return 2;
+	return 3;
+}
+
+int32 main() {
+	int32[64] table;
+	int64 sum = 0;
+	for (int32 i = 0; i < 64; ++i) table[i] = i;
+	for (int32 i = 0; i < 64; ++i) {
+		mem_prefetch(&table[(i + 8) % 64]);
+		sum += (int64)table[i];
+	}
+	mem_prefetch((int32*)nullptr);
+	const bool truth = likely(true) && !unlikely(false) && likely(sum == 2016) && !likely(sum == 0);
+	return truth && Classify(5) == 1 && Classify(-200) == 2 && Classify(-3) == 3 ? 0 : 1;
+}
