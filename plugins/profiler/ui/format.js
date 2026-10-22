@@ -18,6 +18,14 @@ export function duration(ns) {
 	return sign + fixed(v / NS_PER_S, 3) + " s";
 }
 
+// A point in time as precisely as a range of `spanNs` needs to tell its ends apart: "1.29 s" in a long range,
+// "1290.05 ms" in a short one; to the microsecond without a range.
+export function instant(ns, spanNs) {
+	const step = spanNs > 0 ? Math.max(1, spanNs / 10) : NS_PER_US;
+	const decimals = (unit) => Math.max(0, Math.min(6, Math.ceil(-Math.log10(step / unit))));
+	return step >= NS_PER_MS ? fixed(ns / NS_PER_S, decimals(NS_PER_S)) + " s" : fixed(ns / NS_PER_MS, decimals(NS_PER_MS)) + " ms";
+}
+
 // Milliseconds with two decimals, the statistics table's unit.
 export function ms(ns) {
 	return fixed(ns / NS_PER_MS, ns < 10 * NS_PER_MS ? 2 : 1);

@@ -1171,7 +1171,7 @@ salts, ten malformed strings, a changed tag).
 ## 17. Profiling (`Profile/`, `include "profile.ch"`)
 
 **Status:** **Implemented** (IED docs/16): the client of the IED Trace Protocol. A program run with `IED_PROFILER`
-set streams its zones, frames, plots, messages, thread names, tasks, allocations and collections to the IED profiler
+set streams its zones, frames, plots, messages, thread names, tasks, locks, allocations and collections to the IED profiler
 (the IED Profile task sets it to `127.0.0.1:<port>;token=<t>`) or, with `file:<path>`, to a trace file; without it each
 call costs one relaxed load. Opt-in like `math.ch`: `bedrock.ch` does not include it.
 
@@ -1195,8 +1195,13 @@ Profile::Frame();
 | `Plot(name, value)`, `Message(text, severity)` | a value over time; a log line (`Severity::Trace` .. `Fatal`) |
 | `SetThreadName(name)` | the calling thread's name from now on (call it again when a pooled thread takes another role: the profiler keeps the history); the system's thread is named too (`Thread::SetCurrentName`), and a thread the system already knows by a name starts with it |
 | `TaskBegin(name, parent) -> id`, `TaskEnd`, `TaskSuspend`, `TaskResume`, `TaskScope` | units of work the profiler's Tasks view groups by name wherever they ran |
+| `Mutex`, `MutexGuard`, `PROFILE_MUTEX(variable, name)` | a `Threading::Mutex` whose waits and holds the profiler shows (`Lock`, `TryLock`, `Unlock`; a free mutex is taken without recording a wait); the macro gives it this file and line |
+| `LockSite`, `LockWait(site, shared)`, `LockObtained`, `LockReleased` | a lock of the program's own: its name and place, registered once per session, and the calling thread's wait, hold and release (`shared` for a reader of a reader-writer lock) |
 | `Alloc(ptr, size, pool)`, `Free(ptr, pool)`, `PoolName`, `PoolReset` | a pool of the program's own (sent in one global order, so an address reused by another thread is never confused) |
 | `IsActive()`, `Start(target, problem)`, `Stop()` | for tools and tests; a program run by IED starts from its environment on its first call |
+
+While a session runs, every `JobSystem` job is a task by itself, named as it was submitted ("Job" without a name), on
+the worker that ran it (`Threading::SetJobObserver`, installed as the session starts and removed as it stops).
 
 Collections are reported from the runtime's collection callback, a `GcBegin`/`GcEnd` pair for each time the collection
 stopped the program (`GC::LastPauses`: one for `GC::Collect`, several for a concurrent cycle), and the GC heap's size
@@ -1207,11 +1212,12 @@ each thread's events taken first, then the global buffer's, sent first, so a def
 failed send ends the session. One session runs per process, kept in globals (the module's documented exception to the
 no-globals convention). `-D PROFILE=0` compiles the `PROFILE_*` macros to nothing; direct calls stay and cost one load.
 
-Covered by `Bedrock/Tests/profile_tests.cf` (4 tests): a session to a file read back event by event - the preamble and
+Covered by `Bedrock/Tests/profile_tests.cf` (6 tests): a session to a file read back event by event - the preamble and
 `Hello`, definitions before their use, zones on two threads with times that only grow across chunks, frames, plots,
 messages, renames, tasks, a pool, a collection and `Bye`; a thread named by the system starting with that name, a
-`GcBegin`/`GcEnd` pair for each stop of a collection, inside the session; and nothing recorded without a session, an
-unreachable or malformed target refused.
+`GcBegin`/`GcEnd` pair for each stop of a collection, inside the session; a `Profile::Mutex` one thread waits for while
+another holds it (its definition, the wait, both holds); `JobSystem` jobs as tasks of their names on the named workers,
+and none once the session stopped; and nothing recorded without a session, an unreachable or malformed target refused.
 
 ---
 
@@ -1256,7 +1262,7 @@ C4 sample `plugins/gpu/samples/c4` with the toolchain and captures one triggered
 
 ## 19. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 68 files, 596 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 68 files, 600 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,

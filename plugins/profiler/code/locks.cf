@@ -1,0 +1,297 @@
+include "locks.ch"
+
+namespace Profiler
+{
+	const int32 kMostOthers = 8;
+
+	int64 ReleaseOr(const LockSpan& span, int64 now) {
+		return span.release == kOpen ? now : span.release;
+	}
+
+	int64 FirstReleasedAfter(const LockTrack* holder, int64 t, int64 now) {
+		int64 low = 0;
+		int64 high = holder->spans.Count();
+		while (low < high) {
+			const int64 mid = (low + high) / 2;
+			if (ReleaseOr(holder->spans[mid], now) < t) low = mid + 1;
+			else high = mid;
+		}
+		return low;
+	}
+
+	Core::String LockName(const Capture& capture, const LockInfo* lock) {
+		if (lock->nameStr != 0) return Core::String(capture.Text(lock->nameStr));
+		if (lock->site != 0) return Core::String(capture.SiteName(lock->site));
+		Core::StringBuilder name;
+		name.Append("Lock ");
+		name.AppendInt((int64)lock->id);
+		return name.ToString();
+	}
+
+	void WriteLockSite(IED::JsonWriter& json, const Capture& capture, const LockInfo* lock) {
+		json.IntField("lock", (int64)lock->id);
+		json.Field("name", LockName(capture, lock).View());
+		const SrcLoc* loc = lock->site != 0 ? capture.srclocs.Find(lock->site) : nullptr;
+		json.Field("function", loc ? capture.Text(loc->functionStr) : Core::StringView(""));
+		json.Field("file", loc ? capture.Text(loc->fileStr) : Core::StringView(""));
+		json.IntField("line", loc ? (int64)loc->line : 0);
+	}
+
+	// --- Waits ------------------------------------------------------------------------------------------------------
+
+	struct WaitInterval
+	{
+		public int64 start;
+		public int64 end;
+	}
+
+	static void AddWait(Core::Array<WaitInterval>& waits, int64 start, int64 end) {
+		WaitInterval wait;
+		wait.start = start;
+		wait.end = end;
+		waits.Push(wait);
+	}
+
+	void LockWaits::Build(const Capture& capture, const LockInfo* lock, const Range& range) {
+		const int64 now = capture.lastTicks;
+		Core::Array<WaitInterval> waits;
+		for (const LockTrack* holder : lock->tracks) {
+			for (int64 i = FirstReleasedAfter(holder, range.begin, now); i < holder->spans.Count(); ++i) {
+				const LockSpan& span = holder->spans[i];
+				if (span.wait >= range.end) break;
+				if (span.obtain > span.wait) AddWait(waits, span.wait, span.obtain);
+			}
+			if (holder->waitingSince >= 0 && holder->waitingSince < range.end) AddWait(waits, holder->waitingSince, now);
+		}
+		waits.SortBy([](const WaitInterval& a, const WaitInterval& b) -> bool { return a.start < b.start; });
+		int64 latest = -1;
+		for (const WaitInterval& wait : waits) {
+			if (wait.end > latest) latest = wait.end;
+			starts.Push(wait.start);
+			latestEnd.Push(latest);
+		}
+	}
+
+	bool LockWaits::Covers(int64 t) const {
+		const int64 before = starts.LowerBound(t);
+		return before > 0 && latestEnd[before - 1] >= t;
+	}
+
+	// --- Statistics -------------------------------------------------------------------------------------------------
+
+	class LockRow
+	{
+		public const LockInfo* lock;
+		public Core::String name;
+		public int64 acquisitions;
+		public int64 contended;
+		public int64 blocked;
+		public int64 wait;
+		public int64 maxWait;
+		public int64 hold;
+		public int64 maxHold;
+		public int32 threads;
+		public int32 stuck;
+		public int32 worstTrack = -1;
+		public int64 worstIndex;
+		public int64 worstStart;
+		public int64 worstEnd;
+
+		public void Waited(int32 track, int64 index, int64 start, int64 end) {
+			blocked += 1;
+			wait += end - start;
+			if (worstTrack >= 0 && end - start <= maxWait) return;
+			maxWait = end - start;
+			worstTrack = track;
+			worstIndex = index;
+			worstStart = start;
+			worstEnd = end;
+		}
+
+		public void Held(int64 ticks) {
+			acquisitions += 1;
+			hold += ticks;
+			if (ticks > maxHold) maxHold = ticks;
+		}
+	}
+
+	// One thread's use of the lock in the range: holds counted where they were obtained, waits where they ended.
+	static bool AddHolder(LockRow* row, const LockTrack* holder, const LockWaits& waits, const Range& range, int64 now) {
+		bool used = false;
+		for (int64 i = FirstReleasedAfter(holder, range.begin, now); i < holder->spans.Count(); ++i) {
+			const LockSpan& span = holder->spans[i];
+			if (span.wait >= range.end) break;
+			if (!range.Holds(span.obtain)) continue;
+			used = true;
+			row->Held(ReleaseOr(span, now) - span.obtain);
+			if (span.obtain > span.wait) row->Waited(holder->track, i, span.wait, span.obtain);
+			if (span.release != kOpen && waits.Covers(span.release)) row->contended += 1;
+		}
+		if (holder->waitingSince >= 0 && holder->waitingSince < range.end) {
+			used = true;
+			row->stuck += 1;
+			row->Waited(holder->track, holder->spans.Count(), holder->waitingSince, now);
+		}
+		return used;
+	}
+
+	static LockRow* RowOf(const Capture& capture, const LockInfo* lock, const Range& range) {
+		LockWaits waits;
+		waits.Build(capture, lock, range);
+		LockRow* row = new LockRow();
+		row->lock = lock;
+		row->name = LockName(capture, lock);
+		for (const LockTrack* holder : lock->tracks)
+			if (AddHolder(row, holder, waits, range, capture.lastTicks)) row->threads += 1;
+		return row;
+	}
+
+	static bool Before(const LockRow* a, const LockRow* b, LockOrder order) {
+		if (order == LockOrder::MaxWait && a->maxWait != b->maxWait) return a->maxWait > b->maxWait;
+		if (order == LockOrder::Contended && a->contended != b->contended) return a->contended > b->contended;
+		if (order == LockOrder::Hold && a->hold != b->hold) return a->hold > b->hold;
+		if (order == LockOrder::Acquisitions && a->acquisitions != b->acquisitions) return a->acquisitions > b->acquisitions;
+		if (order == LockOrder::Name) return a->name.View() < b->name.View();
+		if (a->wait != b->wait) return a->wait > b->wait;
+		return a->name.View() < b->name.View();
+	}
+
+	static Core::Array<LockRow*> Rows(const Capture& capture, const Range& range, LockOrder order) {
+		Core::Array<LockRow*> rows;
+		for (const LockInfo* lock : capture.lockList) {
+			LockRow* row = RowOf(capture, lock, range);
+			if (row->acquisitions > 0 || row->blocked > 0) rows.Push(row);
+		}
+		rows.SortBy([order](const LockRow* a, const LockRow* b) -> bool { return Before(a, b, order); });
+		return rows;
+	}
+
+	static void WriteRow(IED::JsonWriter& json, const Capture& capture, const LockRow* row) {
+		json.BeginObject();
+		WriteLockSite(json, capture, row->lock);
+		json.IntField("acquisitions", row->acquisitions);
+		json.IntField("contended", row->contended);
+		json.IntField("blocked", row->blocked);
+		json.IntField("waitNs", capture.clock.Ns(row->wait));
+		json.IntField("maxWaitNs", capture.clock.Ns(row->maxWait));
+		json.IntField("meanWaitNs", row->blocked > 0 ? capture.clock.Ns(row->wait / row->blocked) : 0);
+		json.IntField("holdNs", capture.clock.Ns(row->hold));
+		json.IntField("maxHoldNs", capture.clock.Ns(row->maxHold));
+		NumberField(json, "contention", row->acquisitions > 0 ? (double)row->contended / (double)row->acquisitions : 0.0, 4);
+		json.IntField("threads", row->threads);
+		json.IntField("stuck", row->stuck);
+		json.Key(Core::StringView("worst"));
+		if (row->worstTrack < 0) json.Null();
+		else {
+			json.BeginObject();
+			json.IntField("track", row->worstTrack);
+			json.IntField("index", row->worstIndex);
+			json.Field("thread", TrackLabel(capture, capture.tracks[row->worstTrack], row->worstStart).View());
+			json.IntField("fromNs", capture.clock.Ns(row->worstStart));
+			json.IntField("toNs", capture.clock.Ns(row->worstEnd));
+			json.EndObject();
+		}
+		json.EndObject();
+	}
+
+	Core::String Locks(const Capture& capture, const LockAsk& ask) {
+		const Range range = RangeOfNs(capture, ask.fromNs, ask.toNs);
+		Core::Array<LockRow*> rows = Rows(capture, range, ask.order);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("locks", capture.lockList.Count());
+		json.IntField("rowCount", rows.Count());
+		json.Key(Core::StringView("rows"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)ask.limit; ++i) WriteRow(json, capture, rows[i]);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	void WriteTopLocks(IED::JsonWriter& json, const Capture& capture, int32 most) {
+		Core::Array<LockRow*> rows = Rows(capture, Everything(capture), LockOrder::Wait);
+		json.Key(Core::StringView("locks"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)most; ++i) WriteRow(json, capture, rows[i]);
+		json.EndArray();
+	}
+
+	// --- One hold ---------------------------------------------------------------------------------------------------
+
+	// The other threads' holds (`holds`) or waits of the lock that overlap [from, to).
+	static void WriteOthers(IED::JsonWriter& json, const Capture& capture, const LockInfo* lock, int32 track, int64 from, int64 to, bool holds) {
+		const int64 now = capture.lastTicks;
+		int32 written = 0;
+		json.BeginArray();
+		for (const LockTrack* other : lock->tracks) {
+			if (other->track == track) continue;
+			for (int64 i = FirstReleasedAfter(other, from, now); i < other->spans.Count() && written < kMostOthers; ++i) {
+				const LockSpan& span = other->spans[i];
+				if (span.wait >= to) break;
+				const int64 begin = holds ? span.obtain : span.wait;
+				const int64 end = holds ? ReleaseOr(span, now) : span.obtain;
+				if (end <= begin || begin >= to || end <= from) continue;
+				json.BeginObject();
+				json.Field("thread", TrackLabel(capture, capture.tracks[other->track], begin).View());
+				json.IntField("track", other->track);
+				json.IntField("index", i);
+				json.IntField("fromNs", capture.clock.Ns(begin));
+				json.IntField("toNs", capture.clock.Ns(end));
+				json.EndObject();
+				written += 1;
+			}
+			if (!holds && written < kMostOthers && other->waitingSince >= 0 && other->waitingSince < to) {
+				json.BeginObject();
+				json.Field("thread", TrackLabel(capture, capture.tracks[other->track], other->waitingSince).View());
+				json.IntField("track", other->track);
+				json.IntField("index", other->spans.Count());
+				json.IntField("fromNs", capture.clock.Ns(other->waitingSince));
+				json.IntField("toNs", capture.clock.Ns(now));
+				json.EndObject();
+				written += 1;
+			}
+		}
+		json.EndArray();
+	}
+
+	Core::String LockHold(const Capture& capture, uint64 lockId, int32 track, int64 index) {
+		LockInfo* lock = nullptr;
+		LockTrack* holder = nullptr;
+		if (!capture.locks.TryGet(lockId, lock) || !lock->trackOf.TryGet(track, holder)) return Core::String();
+		const bool stuck = index == holder->spans.Count() && holder->waitingSince >= 0;
+		if (!stuck && (index < 0 || index >= holder->spans.Count())) return Core::String();
+		const int64 now = capture.lastTicks;
+		const int64 wait = stuck ? holder->waitingSince : holder->spans[index].wait;
+		const int64 obtain = stuck ? now : holder->spans[index].obtain;
+		const int64 release = stuck ? now : ReleaseOr(holder->spans[index], now);
+		LockWaits waits;
+		waits.Build(capture, lock, Everything(capture));
+		const bool contended = !stuck && holder->spans[index].release != kOpen && waits.Covers(holder->spans[index].release);
+		IED::JsonWriter json;
+		json.BeginObject();
+		WriteLockSite(json, capture, lock);
+		json.Field("thread", TrackLabel(capture, capture.tracks[track], wait).View());
+		json.IntField("track", track);
+		json.IntField("index", index);
+		json.BoolField("shared", !stuck && holder->spans[index].shared);
+		json.Field("state", stuck ? "waiting" : (contended ? "contended" : "held"));
+		json.IntField("waitFromNs", capture.clock.Ns(wait));
+		json.IntField("waitNs", capture.clock.Ns(obtain - wait));
+		json.Key(Core::StringView("obtainNs"));
+		if (stuck) json.Null();
+		else json.Int(capture.clock.Ns(obtain));
+		json.Key(Core::StringView("releaseNs"));
+		if (stuck || holder->spans[index].release == kOpen) json.Null();
+		else json.Int(capture.clock.Ns(release));
+		json.IntField("holdNs", capture.clock.Ns(release - obtain));
+		json.Key(Core::StringView("heldBy"));
+		WriteOthers(json, capture, lock, track, wait, obtain, true);
+		json.Key(Core::StringView("waitedBy"));
+		WriteOthers(json, capture, lock, track, obtain, release, false);
+		json.Key(Core::StringView("totals"));
+		WriteRow(json, capture, RowOf(capture, lock, Everything(capture)));
+		json.EndObject();
+		return json.ToString();
+	}
+}

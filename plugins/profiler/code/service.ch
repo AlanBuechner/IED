@@ -4,13 +4,15 @@
 // and the AI tools answered from them.
 //
 // Topics (pushed): profs:<wsId> - {captures, connect} the workspace's library and how a program connects; events
-// "captures.changed" (the new list). prof:<captureId> - {status} of one capture; events "stats" while live, "ended".
+// "captures.changed" (the new list). prof:<captureId> - {status} of one capture; events "stats" while live, "ended",
+// "annotations" ({annotations}, the whole list, when one is added, changed or removed).
 //
 // Threads: the accept loop, one thread per connection and the ticker that publishes live progress are threads of the
 // plugin's own (StartThread); methods run on their requests' threads. The plugin's lock guards the workspaces and the
 // capture list; each capture's own lock its contents. The plugin's lock is taken before a capture's, never after.
 
 include "tracefile.ch"
+include "annotations.ch"
 include "api/plugin.ch"
 
 namespace Profiler
@@ -44,6 +46,8 @@ namespace Profiler
 		public Core::String metadata;    // the index block's JSON, once known
 		public int64 sizeBytes;
 		public int64 modifiedNs;
+		public Core::Array<Annotation> annotations;
+		public bool annotationsRead;     // `annotations` holds the metadata's, read the first time they were asked for
 
 		public Core::String Topic() const { return Core::String("prof:") + id.View(); }
 	}
@@ -79,6 +83,12 @@ namespace Profiler
 		// A connection's life, on its own thread.
 		public void Serve(Net::TcpStream* stream);
 
+		// A capture's annotations, read from its file's metadata the first time. The lock is held.
+		public Core::Array<Annotation>& AnnotationsOf(CaptureEntry* entry);
+		// Keeps the file's metadata in step with the entry's annotations (a live capture's are written when it ends)
+		// and pushes them to the capture's topic; throws unavailable when the file cannot take them. The lock is held.
+		public void SaveAnnotations(CaptureEntry* entry);
+
 		public IED::PluginContext* context;
 		public Threading::Mutex lock;
 		public Core::HashMap<Core::String, ProfWorkspace*> workspaces;
@@ -93,7 +103,16 @@ namespace Profiler
 	Core::String CaptureIdFor(Core::StringView wsId, Core::StringView relativePath);
 	// A file name for a new capture of `app` started at `unixNs`: "<app>-<yyyyMMdd-HHmmss>.iedtrace", made safe.
 	Core::String CaptureFileName(Core::StringView app, int64 unixNs);
+	// The metadata a capture's trace file ends with, ended for `ended` ("bye", "closed", "stopped").
+	Core::String MetadataJson(const Capture& capture, Core::StringView ended);
 	void RegisterMethods(ProfilerPlugin* profiler);
+	// Answers the protocol method `name` with `method` (logged when it cannot).
+	void RegisterMethod(ProfilerPlugin* profiler, const char* name, func<Core::String(ProfilerPlugin*, const IED::Params&)> method);
+	// prof.annotations, prof.annotate, prof.updateAnnotation, prof.deleteAnnotation.
+	void RegisterAnnotationMethods(ProfilerPlugin* profiler);
+	// Adds an annotation by `by` ("owner" or "ai") to a capture and saves it; throws not_found, bad_request or
+	// unavailable. Takes the plugin's lock.
+	Annotation AddAnnotation(ProfilerPlugin* profiler, Core::StringView captureId, int64 fromNs, int64 toNs, Core::StringView text, Core::StringView by);
 	// The profiler.query server binding the profile_* AI tools answer through.
 	void ProvideQuery(ProfilerPlugin* profiler);
 }

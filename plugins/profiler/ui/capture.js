@@ -1,23 +1,26 @@
 // capture.js - one capture as a document (F-PRF-62, mockup 06): the toolbar (live state, Follow, Stop, Threads or
-// Tasks, the analysis windows, Ask AI), the frame time graph, the timeline with the zone details beside it, and the
-// bottom tool windows - Statistics, Find Zone, Messages, Memory, Flame Graph - over the selection, else the view.
-// A live capture follows its newest data until the timeline is moved. On a phone the details are a sheet under the
-// timeline and a tool window takes the whole view, with a way back.
+// Tasks, Note, the analysis windows, Ask AI), the frame time graph, the timeline with the zone or lock details beside
+// it, and the bottom tool windows - Statistics, Find Zone, Messages, Memory, Flame Graph, Locks, Notes - over the
+// selection, else the view. A live capture follows its newest data until the timeline is moved. Notes (F-PRF-19) are
+// the server's: the list comes with the capture's topic and every client sees a change. On a phone the details are a
+// sheet under the timeline and a tool window takes the whole view, with a way back.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { promptDialog } from "/ui-kit/dialog.js";
+import { confirmDialog, promptDialog } from "/ui-kit/dialog.js";
 import { TimelineView } from "./timeline.js";
 import { FrameGraph } from "./framegraph.js";
 import { StatsPanel, MessagesPanel } from "./panels.js";
 import { FindZonePanel } from "./findzone.js";
 import { FlamePanel } from "./flame.js";
 import { MemoryPanel } from "./memory.js";
+import { LocksPanel } from "./locks.js";
+import { NotesPanel, noteRange } from "./notes.js";
 import { ZoneDetails } from "./details.js";
-import { duration, bytes, count } from "./format.js";
-import { seriesOf } from "./model.js";
+import { duration, bytes, count, instant } from "./format.js";
+import { seriesOf, LOCK_BLOCKED } from "./model.js";
 
 const PHONE = "(max-width: 719px)";
-const PANELS = [["stats", "Statistics", "table"], ["find", "Find Zone", "search"], ["messages", "Messages", "output"], ["memory", "Memory", "database"], ["flame", "Flame Graph", "flame"]];
+const PANELS = [["stats", "Statistics", "table"], ["find", "Find Zone", "search"], ["messages", "Messages", "output"], ["memory", "Memory", "database"], ["flame", "Flame Graph", "flame"], ["locks", "Locks", "lock"], ["notes", "Notes", "note"]];
 const SCOPE_DELAY_MS = 400;
 const LIVE_REFRESH_MS = 1000;
 
@@ -48,6 +51,7 @@ export class CaptureView {
 		this.mode = stored("ied.profiler.mode", "threads");
 		this.panel = stored("ied.profiler.panel", "stats");
 		this.status = null;
+		this.notes = [];
 		this.budgetNs = 1e9 / 60;
 		this.phone = window.matchMedia(PHONE).matches;
 		this.build();
@@ -67,8 +71,14 @@ export class CaptureView {
 		for (const thread of summary.threads) this.threadNames[thread.track] = thread.name;
 		if (this.disposed) return;
 		this.stop = this.ied.client.subscribe("prof:" + this.captureId, {
-			snap: (data) => this.statusChanged(data),
-			evt: (kind, data) => this.statusChanged(data),
+			snap: (data) => {
+				this.statusChanged(data);
+				this.loadNotes();
+			},
+			evt: (kind, data) => {
+				if (kind === "annotations") this.setNotes(data.annotations);
+				else this.statusChanged(data);
+			},
 		});
 		this.refreshFrames();
 	}
@@ -94,13 +104,15 @@ export class CaptureView {
 		this.panelButtons = PANELS.map(([key, title, glyph]) => h("button.btn.flat", { dataset: { panel: key }, title, on: { click: () => this.togglePanel(key) } }, icon(glyph), h("span.lbl", null, title)));
 		this.fgHost = h("div.fg");
 		this.tlHost = h("div.tl");
-		this.details = new ZoneDetails({ request, phone: this.phone, openSource: (z) => this.openSource(z), findZone: (n) => this.findZone(n), askAi: (z) => this.askAi(z) });
+		this.details = new ZoneDetails({ request, phone: this.phone, openSource: (z) => this.openSource(z), findZone: (n) => this.findZone(n), askAi: (z) => this.askAi(z), showLocks: () => this.showPanel("locks") });
 		this.panels = {
 			stats: new StatsPanel({ request, onPick: (row) => this.findZone(row.name) }),
-			find: new FindZonePanel({ request, onJump: (from, to) => this.timeline.zoomTo(from, to) }),
-			messages: new MessagesPanel({ request, onJump: (t) => this.timeline.zoomTo(t - this.timeline.view.span / 2, t + this.timeline.view.span / 2) }),
+			find: new FindZonePanel({ request, onJump: (from, to) => this.reveal(from, to) }),
+			messages: new MessagesPanel({ request, onJump: (t) => this.reveal(t - this.timeline.view.span / 2, t + this.timeline.view.span / 2) }),
 			memory: new MemoryPanel({ request }),
 			flame: new FlamePanel({ request, onPick: (name) => this.findZone(name) }),
+			locks: new LocksPanel({ request, onPick: (row) => this.pickLock(row) }),
+			notes: new NotesPanel({ onAdd: () => this.addNote(), onJump: (note) => this.jumpToNote(note), onEdit: (note) => this.editNote(note), onDelete: (note) => this.deleteNote(note) }),
 		};
 		this.tabs = h("div.tw-tabs", null, PANELS.map(([key, title]) => h("span.tw-tab", { dataset: { panel: key }, on: { click: () => this.togglePanel(key) } }, title)));
 		this.panelBody = h("div.prof-panel-body");
@@ -112,6 +124,7 @@ export class CaptureView {
 			{ dataset: { mode: this.mode } },
 			h("div.prof-bar", null, this.recLabel, h("span.tb-sep"), this.followButton, this.stopButton, h("span.tb-sep"), this.modeSeg, this.legend, h("span.grow"),
 				h("button.btn.flat", { title: "Show the whole capture (Home)", on: { click: () => this.timeline.showAll() } }, icon("screen-full"), h("span.lbl", null, "All")),
+				h("button.btn.flat", { title: "Add a note on the selection or the selected zone", on: { click: () => this.addNote() } }, icon("note"), h("span.lbl", null, "Note")),
 				this.panelButtons, h("span.tb-sep"),
 				h("button.btn.flat", { title: "Ask the AI about the selection", on: { click: () => this.askAi(this.details.zone) } }, icon("sparkle", "c-ai"), h("span.lbl", null, "Ask AI about selection")),
 				this.phoneBack),
@@ -123,6 +136,7 @@ export class CaptureView {
 		this.timeline = new TimelineView(this.tlHost, {
 			fetch: (from, to, width) => this.request("prof.timeline", { captureId: this.captureId, from: Math.floor(from), to: Math.ceil(to), width, mode: this.mode }).then((a) => this.answered(a)),
 			onSelect: (selected) => this.selected(selected),
+			onNote: (note) => this.noteClicked(note),
 			onRange: () => this.scopeChanged(),
 			onView: (view) => {
 				this.frameGraph.setView(view);
@@ -256,6 +270,11 @@ export class CaptureView {
 			this.root.classList.remove("zone-shown");
 			return;
 		}
+		if (selected.kind === "lock") {
+			this.root.classList.add("zone-shown");
+			this.details.showLock(this.captureId, selected);
+			return;
+		}
 		const ref = selected.zone[4];
 		if (selected.zone[3] < 0) {
 			this.timeline.zoomTo(selected.zone[1], selected.zone[2]);
@@ -295,6 +314,8 @@ export class CaptureView {
 		this.root.classList.toggle("panel-closed", !this.panel);
 		this.root.classList.toggle("panel-open", !!this.panel);
 		for (const tab of this.tabs.children) tab.classList.toggle("on", tab.dataset.panel === this.panel);
+		const shown = [...this.tabs.children].find((tab) => tab.dataset.panel === this.panel);
+		if (shown) shown.scrollIntoView({ block: "nearest", inline: "nearest" });
 		for (const button of this.panelButtons) button.classList.toggle("on", button.dataset.panel === this.panel);
 		if (!this.panel) return;
 		replace(this.panelBody, this.panels[this.panel].el);
@@ -304,6 +325,80 @@ export class CaptureView {
 	findZone(name) {
 		this.showPanel("find");
 		this.panels.find.find(name);
+	}
+
+	// A tool window's pick zoomed to on the timeline; on a phone, where the window covers the timeline, the window closes.
+	reveal(from, to) {
+		this.timeline.zoomTo(from, Math.max(to, from + 1));
+		if (this.phone) this.showPanel(null);
+	}
+
+	// The Locks window's row: its longest wait, shown and selected.
+	pickLock(row) {
+		if (!row.worst) return;
+		const { track, index, fromNs, toNs } = row.worst;
+		this.reveal(fromNs, toNs);
+		this.timeline.selectLock({ laneId: "thread:" + track, track, lock: row.lock, name: row.name, item: [fromNs, toNs, LOCK_BLOCKED, index] });
+	}
+
+	// --- Notes ------------------------------------------------------------------------------------------------------
+
+	async loadNotes() {
+		const answer = await this.request("prof.annotations", { captureId: this.captureId });
+		if (answer) this.setNotes(answer.annotations);
+	}
+
+	setNotes(notes) {
+		this.notes = notes || [];
+		this.timeline.setNotes(this.notes);
+		this.panels.notes.set(this.notes);
+	}
+
+	// What a new note covers: the selected range, else the selected zone or lock hold.
+	noteTarget() {
+		const range = this.timeline.normalizedRange();
+		if (range) return range;
+		if (this.timeline.selected) return { from: this.timeline.selected.zone[1], to: this.timeline.selected.zone[2] };
+		if (this.timeline.selectedLock) return { from: this.timeline.selectedLock.item[0], to: this.timeline.selectedLock.item[1] };
+		return null;
+	}
+
+	async addNote() {
+		const target = this.noteTarget();
+		if (!target) {
+			this.ied.toast("Select a range (Shift+drag) or a zone first; the note covers it.", { level: "info" });
+			return;
+		}
+		const text = await promptDialog({ title: "Note " + noteRange({ fromNs: target.from, toNs: target.to }), placeholder: "What happens here", confirm: "Add note", check: (v) => (v.trim() ? "" : "Write the note") });
+		if (!text) return;
+		const added = await this.request("prof.annotate", { captureId: this.captureId, from: Math.round(target.from), to: Math.round(target.to), text });
+		if (added) {
+			this.timeline.selectNote(added.annotation.id);
+			this.panels.notes.select(added.annotation.id);
+		}
+	}
+
+	noteClicked(note) {
+		this.panels.notes.select(note.id);
+		this.showPanel("notes");
+	}
+
+	jumpToNote(note) {
+		this.timeline.selectNote(note.id);
+		this.panels.notes.select(note.id);
+		this.timeline.range = note.toNs > note.fromNs ? { from: note.fromNs, to: note.toNs } : null;
+		this.reveal(note.fromNs, note.toNs);
+		this.scopeChanged();
+	}
+
+	async editNote(note) {
+		const text = await promptDialog({ title: "Note " + noteRange(note), value: note.text, confirm: "Save", check: (v) => (v.trim() ? "" : "Write the note") });
+		if (text && text !== note.text) await this.request("prof.updateAnnotation", { captureId: this.captureId, id: note.id, text });
+	}
+
+	async deleteNote(note) {
+		const sure = await confirmDialog({ title: "Delete this note?", message: note.text, confirm: "Delete", danger: true });
+		if (sure) await this.request("prof.deleteAnnotation", { captureId: this.captureId, id: note.id });
 	}
 
 	// --- Leaving the profiler ---------------------------------------------------------------------------------------
@@ -332,7 +427,9 @@ export class CaptureView {
 		const scope = this.scope();
 		const question = await promptDialog({ title: "Ask AI about this " + (zone ? "zone" : scope.label), value: zone ? "Why is " + zone.name + " slow, and what would make it faster?" : "Where does the time go here?", confirm: "Ask" });
 		if (!question) return;
-		const lines = [question, "", "Profiler capture " + this.captureId + (this.status ? " (" + this.status.app + ")" : "") + ", " + scope.label + " " + duration(scope.from) + " to " + duration(scope.to) + "."];
+		const lines = [question, "", "Profiler capture " + this.captureId + (this.status ? " (" + this.status.app + ")" : "") + ", " + scope.label + " " + instant(scope.from, scope.to - scope.from) + " to " + instant(scope.to, scope.to - scope.from) + "."];
+		const notes = this.notes.filter((n) => n.toNs >= scope.from && n.fromNs <= scope.to);
+		if (notes.length) lines.push("Notes here: " + notes.slice(0, 8).map((n) => noteRange(n) + " \"" + n.text + "\"").join("; ") + ".");
 		if (zone) {
 			lines.push("Zone " + zone.name + " [" + zone.ref + "]: " + duration(zone.durationNs) + ", self " + duration(zone.selfNs) + ", on " + (zone.task || zone.thread) +
 				(zone.file ? ", " + zone.file + ":" + zone.line : "") + (zone.frame ? ", frame " + zone.frame.index + " (" + duration(zone.frame.durationNs) + ")" : "") + ".");

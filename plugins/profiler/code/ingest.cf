@@ -84,7 +84,18 @@ namespace Profiler
 		lock = new LockInfo();
 		lock->id = id;
 		capture.locks.Insert(id, lock);
+		capture.lockList.Push(lock);
 		return lock;
+	}
+
+	static LockTrack* HolderOf(LockInfo* lock, int32 track) {
+		LockTrack* holder = nullptr;
+		if (lock->trackOf.TryGet(track, holder)) return holder;
+		holder = new LockTrack();
+		holder->track = track;
+		lock->trackOf.Insert(track, holder);
+		lock->tracks.Push(holder);
+		return holder;
 	}
 
 	static SiteStats* StatsFor(Capture& capture, uint64 site) {
@@ -465,14 +476,31 @@ namespace Profiler
 		}
 	}
 
+	static void ObtainLock(LockInfo* lock, LockTrack* holder, bool shared, int64 t) {
+		holder->depth += 1;
+		if (holder->depth > 1) return;
+		LockSpan span;
+		span.wait = holder->waitingSince >= 0 ? holder->waitingSince : t;
+		span.obtain = t;
+		span.shared = shared;
+		holder->spans.Push(span);
+		holder->waitingSince = -1;
+		lock->acquisitions += 1;
+	}
+
+	// A lock's wait, obtain or release on a thread (the field is the lock id times two, plus one for a shared hold).
 	static void Lock(Capture& capture, int32 track, const Event& event, int64 t) {
 		LockInfo* lock = LockFor(capture, event.fields[0] >> 1);
-		LockEventRecord record;
-		record.t = t;
-		record.track = track;
-		record.kind = event.type == EventType::LockWait ? 0 : (event.type == EventType::LockObtain ? 1 : 2);
-		record.shared = (event.fields[0] & 1) != 0;
-		lock->events.Push(record);
+		LockTrack* holder = HolderOf(lock, track);
+		if (event.type == EventType::LockWait) {
+			if (holder->depth == 0 && holder->waitingSince < 0) holder->waitingSince = t;
+		}
+		else if (event.type == EventType::LockObtain) ObtainLock(lock, holder, (event.fields[0] & 1) != 0, t);
+		else if (holder->depth == 0) capture.Warn(t, Core::StringView("a lock was released that was not held; the release was left out"));
+		else {
+			holder->depth -= 1;
+			if (holder->depth == 0) holder->spans.Back().release = t;
+		}
 	}
 
 	static void Sample(Capture& capture, int32 track, const Event& event, int64 t) {

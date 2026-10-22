@@ -4,7 +4,7 @@
 
 import { h, replace } from "/ui-kit/dom.js";
 import { readTheme } from "./timelinedraw.js";
-import { bytes, count, duration } from "./format.js";
+import { bytes, count, duration, instant } from "./format.js";
 
 export class MemoryPanel {
 	constructor({ request }) {
@@ -51,7 +51,7 @@ export class MemoryPanel {
 		if (this.scope && this.scope.to !== undefined && this.scope.label === "selection") asked.at = Math.round(this.scope.to);
 		const answer = await this.request("prof.leaks", asked);
 		if (!answer) return;
-		this.leakHead.textContent = " \u00b7 " + count(answer.count) + " (" + bytes(answer.bytes) + ") at " + duration(answer.atNs);
+		this.leakHead.textContent = " \u00b7 " + count(answer.count) + " (" + bytes(answer.bytes) + ") at " + instant(answer.atNs, 0);
 		replace(this.leaks, answer.groups.map((g) => h("details.prof-leak", null,
 			h("summary", null, h("span.mono", null, bytes(g.bytes)), h("span.meta", null, count(g.count) + "x"), h("span", null, g.label)),
 			g.callstack.length ? h("div.mono.prof-stack", null, g.callstack.map((frame) => h("div", null, frame))) : null,

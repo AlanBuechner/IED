@@ -2,7 +2,7 @@
 
 include "contributed.ch"
 
-[test("profiler.contributed")]
+[test("server.profiler.contributed")]
 class ContributedImporterTests
 {
 	static Profiler::ContributedImporter Importer() {

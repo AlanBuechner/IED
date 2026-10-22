@@ -1,5 +1,5 @@
 // Itp.h - the C and C++ client of the IED Trace Protocol (IED docs/16): a program run with IED_PROFILER set streams
-// its zones, frames, plots, messages, thread names, tasks and allocations to the IED profiler (the Profile task sets
+// its zones, frames, plots, messages, thread names, tasks, locks and allocations to the IED profiler (the Profile task sets
 // it to "127.0.0.1:<port>;token=<t>"), or with "file:<path>" to a trace file. Without it every call costs one relaxed
 // atomic load. Two files, Itp.h and Itp.cpp, with no dependency but the C++ standard library and the system's sockets:
 // copy them into any C or C++ project.
@@ -35,6 +35,17 @@ typedef struct itp_site
 
 enum itp_severity { ITP_TRACE, ITP_DEBUG, ITP_INFO, ITP_WARNING, ITP_ERROR, ITP_FATAL };
 
+// A lock as the profiler shows it: its name and where it is declared. Registered once per session; leave id and
+// session zero.
+typedef struct itp_lock
+{
+	const char* name;
+	const char* file;
+	uint32_t line;
+	uint64_t id;
+	int64_t session;
+} itp_lock;
+
 // Starts recording to `target` ("host:port;token=<t>" or "file:<path>") as `app`; 0 on success, else -1 with why in
 // `problem` (when given). A program run by IED does not call it: its first ITP call starts from IED_PROFILER.
 int itp_start(const char* target, const char* app, char* problem, size_t problem_size);
@@ -64,6 +75,12 @@ uint64_t itp_task_begin(const char* name, uint64_t parent);
 void itp_task_end(uint64_t task);
 void itp_task_suspend(uint64_t task);
 void itp_task_resume(uint64_t task);
+
+// The calling thread's use of a lock: it starts waiting for it, gets it, lets it go (`shared` non-zero for a reader's
+// hold). A lock taken without waiting needs no itp_lock_wait.
+void itp_lock_wait(itp_lock* lock, int shared);
+void itp_lock_obtained(itp_lock* lock, int shared);
+void itp_lock_released(itp_lock* lock, int shared);
 
 // Memory of the program's pools (pool 0 is the default heap).
 void itp_alloc(const void* address, size_t size, uint32_t pool);
@@ -106,6 +123,68 @@ namespace itp
 
 		uint64_t id;
 	};
+
+	// A lock the profiler watches (std::mutex, std::shared_mutex, ...): its waits and holds show on each thread's lock
+	// rows. It works with std::lock_guard, std::unique_lock and std::shared_lock; a free lock is taken without a wait.
+	template <class Mutex>
+	class Lockable
+	{
+	public:
+		explicit Lockable(const char* name, const char* file = "", uint32_t line = 0) : site{ name, file, line, 0, 0 } {}
+		Lockable(const Lockable&) = delete;
+		Lockable& operator=(const Lockable&) = delete;
+
+		void lock()
+		{
+			if (!inner.try_lock())
+			{
+				itp_lock_wait(&site, 0);
+				inner.lock();
+			}
+			itp_lock_obtained(&site, 0);
+		}
+
+		bool try_lock()
+		{
+			if (!inner.try_lock()) return false;
+			itp_lock_obtained(&site, 0);
+			return true;
+		}
+
+		void unlock()
+		{
+			itp_lock_released(&site, 0);
+			inner.unlock();
+		}
+
+		// A reader's hold, for a shared mutex (instantiated only when used).
+		template <class M = Mutex> void lock_shared()
+		{
+			if (!static_cast<M&>(inner).try_lock_shared())
+			{
+				itp_lock_wait(&site, 1);
+				inner.lock_shared();
+			}
+			itp_lock_obtained(&site, 1);
+		}
+
+		template <class M = Mutex> bool try_lock_shared()
+		{
+			if (!static_cast<M&>(inner).try_lock_shared()) return false;
+			itp_lock_obtained(&site, 1);
+			return true;
+		}
+
+		template <class M = Mutex> void unlock_shared()
+		{
+			itp_lock_released(&site, 1);
+			static_cast<M&>(inner).unlock_shared();
+		}
+
+	private:
+		Mutex inner;
+		itp_lock site;
+	};
 }
 #endif
 
@@ -124,6 +203,9 @@ namespace itp
 #define ITP_PLOT(name, value) itp_plot(name, (double)(value))
 #define ITP_MESSAGE(text) itp_message(ITP_INFO, text, sizeof(text) - 1)
 #define ITP_THREAD_NAME(name) itp_thread_name(name)
+#ifdef __cplusplus
+#define ITP_LOCKABLE(type, variable, name) itp::Lockable<type> variable{ name, __FILE__, (uint32_t)__LINE__ }
+#endif
 #else
 #define ITP_ZONE(name)
 #define ITP_ZONE_FUNCTION()
@@ -133,4 +215,5 @@ namespace itp
 #define ITP_PLOT(name, value)
 #define ITP_MESSAGE(text)
 #define ITP_THREAD_NAME(name)
+#define ITP_LOCKABLE(type, variable, name) type variable
 #endif

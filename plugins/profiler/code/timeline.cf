@@ -1,11 +1,13 @@
 include "timeline.ch"
 include "analysis.ch"
+include "locks.ch"
 
 namespace Profiler
 {
 	const int32 kMostGcBands = 500;
 	const int32 kFramesPerPixelShown = 3;
 	const int64 kPixelsPerRename = 4;
+	const int32 kMostLockRows = 12;
 
 	// What every lane of one answer shares.
 	class TimelineWriter
@@ -16,6 +18,7 @@ namespace Profiler
 		public Range range;
 		public int64 pixel;        // ticks one pixel covers, at least 1
 		public int32 mostDepth;
+		public Core::HashMap<uint64, LockWaits*> waitsOf;
 
 		public int64 Ns(int64 ticks) const { return capture->clock.Ns(ticks); }
 	}
@@ -69,6 +72,110 @@ namespace Profiler
 		}
 	}
 
+	// --- Lock rows of a thread lane -----------------------------------------------------------------------------------
+
+	// One lock row's segments as written: [start, end, state, hold index] - a wait (blocked) and the hold after it - or
+	// a run of segments narrower than a pixel merged as [start, end, its worst state, -count].
+	class LockRowWriter
+	{
+		public TimelineWriter* w;
+		public int64 start;
+		public int64 end;
+		public int32 state;
+		public int64 index;
+		public int64 count;
+
+		public void Add(int64 from, int64 to, LockState kind, int64 hold) {
+			if (to - from >= w->pixel) {
+				Flush();
+				Write(from, to, (int32)kind, hold);
+				return;
+			}
+			if (count > 0 && from - end < w->pixel && end - start < w->pixel) {
+				if (to > end) end = to;
+				if ((int32)kind > state) state = (int32)kind;
+				count += 1;
+				return;
+			}
+			Flush();
+			start = from;
+			end = to;
+			state = (int32)kind;
+			index = hold;
+			count = 1;
+		}
+
+		public void Flush() {
+			if (count == 0) return;
+			Write(start, end, state, count == 1 ? index : -count);
+			count = 0;
+		}
+
+		private void Write(int64 from, int64 to, int32 kind, int64 ref) {
+			IED::JsonWriter& json = *w->json;
+			json.BeginArray();
+			json.Int(w->Ns(from));
+			json.Int(w->Ns(to));
+			json.Int((int64)kind);
+			json.Int(ref);
+			json.EndArray();
+		}
+	}
+
+	static LockWaits* WaitsOf(TimelineWriter& w, const LockInfo* lock) {
+		LockWaits* waits = nullptr;
+		if (w.waitsOf.TryGet(lock->id, waits)) return waits;
+		waits = new LockWaits();
+		waits->Build(*w.capture, lock, w.range);
+		w.waitsOf.Insert(lock->id, waits);
+		return waits;
+	}
+
+	static void WriteLockRow(TimelineWriter& w, const LockInfo* lock, const LockTrack* holder) {
+		IED::JsonWriter& json = *w.json;
+		const int64 now = w.capture->lastTicks;
+		const LockWaits* waits = WaitsOf(w, lock);
+		json.BeginObject();
+		json.IntField("lock", (int64)lock->id);
+		json.Field("name", LockName(*w.capture, lock).View());
+		json.Key(Core::StringView("items"));
+		json.BeginArray();
+		LockRowWriter row;
+		row.w = &w;
+		for (int64 i = FirstReleasedAfter(holder, w.range.begin, now); i < holder->spans.Count(); ++i) {
+			const LockSpan& span = holder->spans[i];
+			if (span.wait >= w.range.end) break;
+			if (span.obtain > span.wait) row.Add(span.wait, span.obtain, LockState::Blocked, i);
+			const bool contended = span.release != kOpen && waits->Covers(span.release);
+			row.Add(span.obtain, ReleaseOr(span, now), contended ? LockState::Contended : LockState::Held, i);
+		}
+		if (holder->waitingSince >= 0 && holder->waitingSince < w.range.end) row.Add(holder->waitingSince, now, LockState::Blocked, holder->spans.Count());
+		row.Flush();
+		json.EndArray();
+		json.EndObject();
+	}
+
+	// The locks a thread used, in the order they appeared, each a row under its zones (at most kMostLockRows, so a
+	// thread's rows stay put as the view moves; "locksHidden" says how many more).
+	static void WriteLockRows(TimelineWriter& w, int64 trackIndex) {
+		IED::JsonWriter& json = *w.json;
+		int64 hidden = 0;
+		int32 written = 0;
+		json.Key(Core::StringView("locks"));
+		json.BeginArray();
+		for (const LockInfo* lock : w.capture->lockList) {
+			LockTrack* holder = nullptr;
+			if (!lock->trackOf.TryGet((int32)trackIndex, holder)) continue;
+			if (written >= kMostLockRows) hidden += 1;
+			else {
+				WriteLockRow(w, lock, holder);
+				written += 1;
+			}
+		}
+		json.EndArray();
+		json.IntField("locksHidden", hidden);
+	}
+
 	// --- Thread lanes -------------------------------------------------------------------------------------------------
 
 	// The renames in the range, unless there are more than a quarter of the pixels: then each would be a sliver, and
@@ -110,6 +217,7 @@ namespace Profiler
 		json.BeginArray();
 		for (int64 depth = 0; depth < track->levels.Count() && depth < (int64)w.mostDepth; ++depth) WriteLevel(w, track, trackIndex, depth, depth, w.range.begin, w.range.end, true);
 		json.EndArray();
+		WriteLockRows(w, trackIndex);
 		json.EndObject();
 	}
 

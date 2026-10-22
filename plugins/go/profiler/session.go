@@ -84,6 +84,7 @@ type session struct {
 	nextSite   uint64
 	nextPlot   uint64
 	nextThread uint64
+	nextLock   uint64
 	nextTask   atomic.Uint64
 	sites      sync.Map // call site's pc -> *site
 

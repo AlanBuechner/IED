@@ -14,7 +14,8 @@ namespace Profile
 		TaskBegin = 0x30, TaskEnd = 0x31, TaskSuspend = 0x32, TaskResume = 0x33,
 		FrameMark = 0x40, FrameBegin = 0x41, FrameEnd = 0x42,
 		PlotDef = 0x50, PlotValue = 0x51, Message = 0x52,
-		PoolDef = 0x60, Alloc = 0x61, Free = 0x62, PoolReset = 0x63, GcBegin = 0x68, GcEnd = 0x69
+		PoolDef = 0x60, Alloc = 0x61, Free = 0x62, PoolReset = 0x63, GcBegin = 0x68, GcEnd = 0x69,
+		LockDef = 0x70, LockWait = 0x71, LockObtain = 0x72, LockRelease = 0x73
 	}
 
 	const uint8 kThreadChunk = 0;

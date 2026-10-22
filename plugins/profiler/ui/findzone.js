@@ -4,7 +4,7 @@
 
 import { h, replace } from "/ui-kit/dom.js";
 import { readTheme } from "./timelinedraw.js";
-import { duration, count } from "./format.js";
+import { duration, count, instant } from "./format.js";
 import { scopeLabel } from "./panels.js";
 
 export class FindZonePanel {
@@ -50,7 +50,7 @@ export class FindZonePanel {
 			" \u00b7 median " + duration(answer.medianNs) + " \u00b7 p95 " + duration(answer.p95Ns) + " \u00b7 max " + duration(answer.maxNs) + " \u00b7 " + scopeLabel(this.scope).replace("Range: ", "");
 		replace(this.axis, h("span", null, duration(answer.minNs)), h("span", null, "median " + duration(answer.medianNs)), h("span", null, "p95 " + duration(answer.p95Ns)), h("span", null, duration(answer.maxNs)));
 		replace(this.list, answer.instances.map((i) => h("div.row", { on: { click: () => this.onJump(i.startNs, i.startNs + i.durationNs, i.ref) } },
-			h("span.mono", null, duration(i.durationNs)), h("span.meta", null, "at " + duration(i.startNs)), h("span.grow.ellip.meta", null, i.thread))));
+			h("span.mono", null, duration(i.durationNs)), h("span.meta", null, "at " + instant(i.startNs, i.durationNs)), h("span.grow.ellip.meta", null, i.thread))));
 		this.paint();
 	}
 

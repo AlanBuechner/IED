@@ -57,6 +57,7 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 .prof-side .kids .bar { width: 70px; height: 4px; background: var(--bg-4); border-radius: 2px; overflow: hidden; flex: none; }
 .prof-side .kids .bar i { display: block; height: 100%; background: var(--text-1); }
 .prof-side .kids .meta { width: 64px; text-align: right; flex: none; }
+.prof-side .kids .meta.when { width: auto; }
 .prof-stack { padding: 0 var(--space-5) var(--space-4); font-size: var(--font-size-xs); color: var(--text-1); }
 .prof-stack div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -91,6 +92,21 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 .prof-doc .row .meta { color: var(--text-2); white-space: nowrap; }
 .prof-message.c-warn .grow { color: var(--accent-warn); }
 .prof-message.c-error .grow { color: var(--accent-error); }
+
+/* Locks: the key of the lock rows' colors - held, held while others waited, waited (a thinner bar). */
+.lock-key { display: flex; align-items: center; gap: var(--space-4); font-size: var(--font-size-xs); color: var(--text-1); }
+.lock-key .sw { width: 9px; height: 5px; border-radius: 1px; display: inline-block; margin-right: 3px; vertical-align: 1px; }
+.lock-key .lock-held { background: var(--text-3); }
+.lock-key .lock-contended { background: var(--accent-warn); }
+.lock-key .lock-blocked { background: var(--accent-error); height: 3px; }
+.prof-doc .stats tr.c-error td { color: var(--accent-error); }
+
+/* Notes: the owner's (You) and the AI's, each a jump to its range. */
+.prof-note.on { background: var(--bg-4); }
+.prof-note .chip { flex: none; }
+.prof-note .chip.ai { color: var(--accent-ai); border-color: color-mix(in srgb, var(--accent-ai) 40%, transparent); }
+.prof-note .note-act { visibility: hidden; padding: 0 var(--space-2); }
+.prof-note:hover .note-act, .prof-note.on .note-act { visibility: visible; }
 .prof-find { flex: 1; min-height: 0; display: flex; }
 .prof-histo { width: 46%; min-width: 220px; padding: var(--space-3) var(--space-5); display: flex; flex-direction: column; }
 .prof-histo-canvas { flex: 1; min-height: 40px; width: 100%; display: block; cursor: crosshair; }
@@ -142,6 +158,11 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 }
 
 @media (max-width: 719px) {
+	.prof-note .note-act { visibility: visible; }
+	.prof-note { flex-wrap: wrap; row-gap: 0; height: auto; min-height: var(--row-h); padding-bottom: var(--space-3); }
+	.prof-note .meta { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+	.prof-note .ellip { order: 1; flex-basis: 100%; white-space: normal; }
+	.lock-key { display: none; }
 	.prof-bar { height: 44px; gap: var(--space-2); }
 	.prof-bar .tb-sep, .prof-bar .legend, .prof-bar .rec .muted { display: none; }
 	.prof-doc .fg { height: 46px; }
@@ -152,7 +173,7 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 	.prof-doc.panel-open .prof-main, .prof-doc.panel-open .fg { display: none; }
 	.prof-doc.panel-open .prof-bottom { flex: 1; height: auto !important; }
 	.prof-sash { display: none; }
-	.prof-doc.panel-closed .prof-bottom .tw-tabs { overflow-x: auto; }
+	.prof-bottom .tw-tabs { overflow-x: auto; scrollbar-width: none; }
 	.prof-doc.panel-open .phone-only { display: inline-flex; }
 	.prof-find { flex-direction: column; }
 	.prof-histo { width: auto; height: 120px; }

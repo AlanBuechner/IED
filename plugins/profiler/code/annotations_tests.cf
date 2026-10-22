@@ -1,0 +1,58 @@
+// Annotations (F-PRF-19): read from and written into a trace file's metadata, ids, and the text they take.
+
+include "annotations.ch"
+
+static Profiler::Annotation Note(const char* id, int64 from, int64 to, const char* text, const char* by) {
+	Profiler::Annotation note;
+	note.id = Core::String(id);
+	note.fromNs = from;
+	note.toNs = to;
+	note.text = Core::String(text);
+	note.by = Core::String(by);
+	note.createdUnixNs = 7;
+	return note;
+}
+
+[test("server.profiler.annotations")]
+class ProfilerAnnotationTests {
+	[test("metadata_round_trip")]
+	public static void TestRoundTrip() {
+		Core::Array<Profiler::Annotation> notes;
+		notes.Push(Note("n1", 1000, 5000, "a \"hitch\"", "owner"));
+		notes.Push(Note("n4", 9000, 9000, "GC here", "ai"));
+		Core::String metadata = Profiler::MetadataWith(Core::StringView("{\"app\":\"game\",\"durationNs\":12,\"annotations\":[]}"), notes);
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = Serialization::ReadJson(metadata.View(), doc).root;
+		assert_true(root.Member("app").AsView() == "game" && root.Member("durationNs").AsInt() == 12, "the other members are kept");
+		Core::Array<Profiler::Annotation> back = Profiler::ReadAnnotations(metadata.View());
+		assert_true(back.Count() == 2, "both read back");
+		assert_true(back[0].text.View() == "a \"hitch\"" && back[0].fromNs == 1000 && back[0].toNs == 5000 && back[0].by.View() == "owner", "the first as written");
+		assert_true(back[1].by.View() == "ai" && back[1].createdUnixNs == 7, "the second's author and time");
+	}
+
+	[test("metadata_without_annotations")]
+	public static void TestWithout() {
+		Core::Array<Profiler::Annotation> notes;
+		notes.Push(Note("n1", 0, 0, "start", "owner"));
+		assert_true(Profiler::ReadAnnotations(Core::StringView("")).IsEmpty() && Profiler::ReadAnnotations(Core::StringView("not json")).IsEmpty(), "none in empty or malformed metadata");
+		assert_true(Profiler::ReadAnnotations(Profiler::MetadataWith(Core::StringView(""), notes).View()).Count() == 1, "an object made for empty metadata");
+		assert_true(Profiler::ReadAnnotations(Profiler::MetadataWith(Core::StringView("{\"app\":\"x\"}"), notes).View()).Count() == 1, "the member added when it had none");
+	}
+
+	[test("ids_and_text")]
+	public static void TestIdsAndText() {
+		Core::Array<Profiler::Annotation> notes;
+		assert_true(Profiler::NextAnnotationId(notes).View() == "n1", "the first");
+		notes.Push(Note("n7", 0, 0, "a", "owner"));
+		notes.Push(Note("x99", 0, 0, "b", "owner"));
+		assert_true(Profiler::NextAnnotationId(notes).View() == "n8", "one past the largest n<number>");
+		Core::String text;
+		Core::String problem;
+		assert_true(Profiler::AnnotationText(Core::StringView("  slow load  "), text, problem) && text.View() == "slow load", "trimmed");
+		assert_true(!Profiler::AnnotationText(Core::StringView("   "), text, problem) && !problem.IsEmpty(), "empty text is refused");
+		Core::StringBuilder long;
+		for (int32 i = 0; i < 2001; ++i) long.AppendByte('a');
+		Core::String problem2;
+		assert_true(!Profiler::AnnotationText(long.View(), text, problem2), "and text past 2000 bytes");
+	}
+}

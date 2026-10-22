@@ -31,7 +31,8 @@ namespace Profiler
 	}
 
 	bool FindContributedImporter(Core::StringView wsId, Core::StringView source, ContributedImporter& found) {
-		const Core::StringView extension = FS::Path(source).Extension();
+		const FS::Path path = FS::Path(source);
+		const Core::StringView extension = path.Extension();
 		for (const IED::Contribution& each : IED::Contributions(wsId, Core::StringView("profilerImporters"))) {
 			if (!NamesExtension(each.entry, extension) || !BeginsWith(source, each.entry.Member("magic").AsView())) continue;
 			found.id = Core::String(each.entry.Member("id").AsView());

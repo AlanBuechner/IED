@@ -89,6 +89,9 @@ class FileTraceTests(unittest.TestCase):
 		self.assertEqual(["Physics"] * 5, list(begun.values()))
 		self.assertEqual(set(begun), {e["taskId"] for e in of(self.events, "TaskEnd")})
 
+	def test_a_lockable_mutex_records_its_waits_and_holds(self):
+		clients.check_lock(self, self.events, "Queue", 1)
+
 	def test_operator_new_is_reported_without_recursing(self):
 		heap = [e for e in of(self.events, "Alloc") if e["poolId"] == 0]
 		self.assertGreaterEqual(len(heap), 5 * 16)

@@ -1,14 +1,21 @@
-// timelinedraw.js - paints the timeline (mockup 06) on a canvas: the ruler, the frame row, each lane's label and its
-// zones by depth (runs narrower than a pixel merged by the server), rename tints, task slices with their threads'
-// colors, GPU lanes, messages, plots, collections and the selection. Colors are the theme's tokens, read once per paint
-// from the document; translucent ones are drawn with globalAlpha rather than computed colors.
+// timelinedraw.js - paints the timeline (mockup 06) on a canvas: the ruler, the frame row, the notes row, each lane's
+// label and its zones by depth (runs narrower than a pixel merged by the server), a thread's lock rows (held, held
+// while others waited, waited), rename tints, task slices with their threads' colors, GPU lanes, messages, plots,
+// collections, notes' bands and the selection. Colors are the theme's tokens, read once per paint from the document;
+// translucent ones are drawn with globalAlpha rather than computed colors.
 
 import { duration, tickLabel, tickStep, bytes } from "./format.js";
-import { frameBands, seriesOf } from "./model.js";
+import { frameBands, seriesOf, LOCK_BLOCKED } from "./model.js";
 
 export const RULER_HEIGHT = 22;
 export const FRAME_ROW_HEIGHT = 20;
 export const HEADER_HEIGHT = RULER_HEIGHT + FRAME_ROW_HEIGHT;
+export const NOTE_ROW_HEIGHT = 18;
+
+// The header's height: the ruler, the frame row, and the notes row when there are notes.
+export function headerHeight(notes) {
+	return HEADER_HEIGHT + (notes && notes.length ? NOTE_ROW_HEIGHT : 0);
+}
 
 const SEVERITY_WARNING = 3;
 const SEVERITY_ERROR = 4;
@@ -31,6 +38,7 @@ export function readTheme() {
 		frameOver: token("accent-warn"), frameSpike: token("accent-error"), info: token("accent-info"),
 		series: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => token("series-" + n)),
 		selectionActive: token("selection-active"),
+		lockHeld: token("text-3"), noteOwner: token("accent-info"), noteAi: token("accent-ai"),
 		fontUi: token("font-ui"), fontMono: token("font-mono"),
 		fontXs: px("font-size-xs", 11), fontSm: px("font-size-sm", 12),
 	};
@@ -76,19 +84,22 @@ export class TimelinePainter {
 	// selected, range, hover, budgetNs, live}.
 	paint(state) {
 		const { ctx, width, height, theme } = state;
+		state.header = headerHeight(state.notes);
 		ctx.fillStyle = theme.bg2;
 		ctx.fillRect(0, 0, width, height);
 		if (!state.answer) return;
 		ctx.save();
 		ctx.beginPath();
-		ctx.rect(0, HEADER_HEIGHT, width, height - HEADER_HEIGHT);
+		ctx.rect(0, state.header, width, height - state.header);
 		ctx.clip();
 		this.lanes(state);
 		this.collections(state);
+		this.noteBands(state);
 		this.selection(state);
 		ctx.restore();
 		this.ruler(state);
 		this.frames(state);
+		this.noteRow(state);
 		this.labelEdge(state);
 	}
 
@@ -166,8 +177,8 @@ export class TimelinePainter {
 	lanes(state) {
 		const { ctx, theme, layout, scrollY, width, height, labelWidth } = state;
 		for (const lane of layout.lanes) {
-			const top = HEADER_HEIGHT + lane.y - scrollY;
-			if (top > height || top + lane.height < HEADER_HEIGHT) continue;
+			const top = state.header + lane.y - scrollY;
+			if (top > height || top + lane.height < state.header) continue;
 			ctx.fillStyle = lane.kind === "gpu" ? theme.bg1 : theme.bg2;
 			ctx.fillRect(labelWidth, top, width - labelWidth, lane.height);
 			ctx.save();
@@ -177,6 +188,7 @@ export class TimelinePainter {
 			if (lane.kind === "thread") this.renames(state, lane, top);
 			if (lane.kind === "task") this.slices(state, lane, top);
 			if (!lane.collapsed && (lane.kind === "thread" || lane.kind === "task" || lane.kind === "gpu")) this.zones(state, lane, top);
+			if (lane.lockRows) this.lockRows(state, lane, top);
 			if (lane.kind === "messages") this.messages(state, lane, top);
 			if (lane.kind === "plot") this.plot(state, lane, top);
 			ctx.restore();
@@ -208,10 +220,109 @@ export class TimelinePainter {
 		ctx.font = theme.fontSm + "px " + theme.fontUi;
 		const prefix = lane.kind === "gpu" ? "GPU: " : "";
 		ctx.fillText(this.fitter.fit(ctx, prefix + lane.label, labelWidth - x - 8), x, line);
-		if (lane.sub && lane.height >= options.rowHeight * 2 && !state.phone) {
+		if (lane.sub && lane.height - lane.lockRows * options.lockRowHeight >= options.rowHeight * 2 && !state.phone) {
 			ctx.fillStyle = theme.text2;
 			ctx.font = theme.fontXs + "px " + theme.fontUi;
 			ctx.fillText(this.fitter.fit(ctx, lane.sub, labelWidth - x - 8), x, line + options.rowHeight);
+		}
+		this.lockLabels(state, lane, top);
+	}
+
+	// Each lock row's name beside it, under the thread's label.
+	lockLabels(state, lane, top) {
+		if (!lane.lockRows) return;
+		const { ctx, theme, labelWidth, options } = state;
+		ctx.font = "10px " + theme.fontUi;
+		ctx.textBaseline = "middle";
+		lane.source.locks.forEach((lock, row) => {
+			const y = top + lane.lockTop + row * options.lockRowHeight + options.lockRowHeight / 2;
+			ctx.fillStyle = theme.lockHeld;
+			ctx.fillRect(20, y - 1, 6, 2);
+			ctx.fillStyle = theme.text2;
+			ctx.fillText(this.fitter.fit(ctx, lock.name, labelWidth - 38), 30, y);
+		});
+	}
+
+	// A thread's lock rows: what it held alone (gray), held while another thread waited (warning) and waited for
+	// (error, a thinner bar); a run narrower than a pixel in its worst state.
+	lockRows(state, lane, top) {
+		const { ctx, theme, options } = state;
+		const colors = [theme.lockHeld, theme.warn, theme.error];
+		const barHeight = options.lockRowHeight - 4;
+		lane.source.locks.forEach((lock, row) => {
+			const y = top + lane.lockTop + row * options.lockRowHeight + 2;
+			for (const item of lock.items) {
+				const x0 = this.x(state, item[0]);
+				if (x0 > state.width) continue;
+				const x1 = Math.max(this.x(state, item[1]), x0 + 1);
+				if (x1 < state.labelWidth) continue;
+				const blocked = item[2] === LOCK_BLOCKED;
+				ctx.fillStyle = colors[item[2]] || theme.lockHeld;
+				ctx.fillRect(x0, y + (blocked ? barHeight / 4 : 0), x1 - x0, blocked ? barHeight / 2 : barHeight);
+			}
+			const selected = state.selectedLock;
+			if (selected && selected.laneId === lane.id && selected.lock === lock.lock) {
+				const x0 = this.x(state, selected.item[0]);
+				const x1 = Math.max(this.x(state, selected.item[1]), x0 + 2);
+				ctx.strokeStyle = theme.focus;
+				ctx.lineWidth = 2;
+				ctx.strokeRect(x0, y - 1, x1 - x0, barHeight + 2);
+			}
+		});
+	}
+
+	// The notes row under the frames: each note a tag over its range (a moment's at least a sliver), the owner's in
+	// the info color, the AI's in its own; a label stops where the next note starts.
+	noteRow(state) {
+		const notes = state.notes || [];
+		if (!notes.length) return;
+		const { ctx, theme, width, labelWidth } = state;
+		const top = HEADER_HEIGHT;
+		ctx.fillStyle = theme.bg1;
+		ctx.fillRect(0, top, width, NOTE_ROW_HEIGHT);
+		ctx.font = theme.fontXs + "px " + theme.fontUi;
+		ctx.textBaseline = "middle";
+		const ordered = [...notes].sort((a, b) => a.fromNs - b.fromNs);
+		ordered.forEach((note, i) => {
+			const start = this.x(state, note.fromNs);
+			const x0 = Math.max(labelWidth, start);
+			const x1 = Math.min(width, Math.max(this.x(state, note.toNs), start + 2));
+			if (x1 < labelWidth || x0 > width) return;
+			const next = i + 1 < ordered.length ? Math.max(labelWidth, this.x(state, ordered[i + 1].fromNs)) : width;
+			const color = note.by === "ai" ? theme.noteAi : theme.noteOwner;
+			ctx.globalAlpha = state.selectedNote === note.id ? 0.5 : 0.28;
+			ctx.fillStyle = color;
+			ctx.fillRect(x0, top + 3, Math.max(2, x1 - x0), NOTE_ROW_HEIGHT - 6);
+			ctx.globalAlpha = 1;
+			ctx.fillRect(Math.round(x0), top + 2, 2, NOTE_ROW_HEIGHT - 4);
+			const text = this.fitter.fit(ctx, note.text, Math.min(Math.max(x1 - x0, 140), next - x0, width - x0) - 8);
+			if (text) {
+				ctx.fillStyle = theme.text0;
+				ctx.fillText(text, x0 + 5, top + NOTE_ROW_HEIGHT / 2);
+			}
+		});
+		ctx.fillStyle = theme.border0;
+		ctx.fillRect(0, top + NOTE_ROW_HEIGHT - 1, width, 1);
+		ctx.fillStyle = theme.bg1;
+		ctx.fillRect(0, top, labelWidth, NOTE_ROW_HEIGHT - 1);
+		ctx.fillStyle = theme.text2;
+		ctx.fillText("Notes", 8, top + NOTE_ROW_HEIGHT / 2);
+	}
+
+	// Each note's range faintly over the lanes, with its edges.
+	noteBands(state) {
+		const { ctx, theme, height } = state;
+		for (const note of state.notes || []) {
+			const x0 = Math.max(state.labelWidth, this.x(state, note.fromNs));
+			const x1 = this.x(state, note.toNs);
+			if (x1 < state.labelWidth || x0 > state.width) continue;
+			ctx.fillStyle = note.by === "ai" ? theme.noteAi : theme.noteOwner;
+			ctx.globalAlpha = state.selectedNote === note.id ? 0.12 : 0.05;
+			if (x1 - x0 >= 1) ctx.fillRect(x0, state.header, x1 - x0, height - state.header);
+			ctx.globalAlpha = 0.6;
+			ctx.fillRect(Math.round(x0), state.header, 1, height - state.header);
+			if (x1 - x0 >= 2) ctx.fillRect(Math.round(x1), state.header, 1, height - state.header);
+			ctx.globalAlpha = 1;
 		}
 	}
 
@@ -357,10 +468,10 @@ export class TimelinePainter {
 			if (x1 < state.labelWidth || x0 > state.width) continue;
 			ctx.globalAlpha = 0.09;
 			ctx.fillStyle = theme.gc;
-			ctx.fillRect(x0, HEADER_HEIGHT, x1 - x0, height - HEADER_HEIGHT);
+			ctx.fillRect(x0, state.header, x1 - x0, height - state.header);
 			ctx.globalAlpha = 1;
-			ctx.fillRect(x0, HEADER_HEIGHT, 1, height - HEADER_HEIGHT);
-			if (x1 - x0 > 1) ctx.fillRect(x1 - 1, HEADER_HEIGHT, 1, height - HEADER_HEIGHT);
+			ctx.fillRect(x0, state.header, 1, height - state.header);
+			if (x1 - x0 > 1) ctx.fillRect(x1 - 1, state.header, 1, height - state.header);
 			if (x1 - x0 > 40) ctx.fillText("GC " + duration(end - start), x0 + 3, height - 2);
 		}
 	}
@@ -371,20 +482,21 @@ export class TimelinePainter {
 		const { ctx, theme, height } = state;
 		const x0 = Math.max(state.labelWidth, this.x(state, Math.min(range.from, range.to)));
 		const x1 = this.x(state, Math.max(range.from, range.to));
+		const top = state.header;
 		ctx.globalAlpha = 0.10;
 		ctx.fillStyle = theme.text0;
-		ctx.fillRect(x0, HEADER_HEIGHT, x1 - x0, height - HEADER_HEIGHT);
+		ctx.fillRect(x0, top, x1 - x0, height - top);
 		ctx.globalAlpha = 1;
 		ctx.fillStyle = theme.focus;
-		ctx.fillRect(x0, HEADER_HEIGHT, 1, height - HEADER_HEIGHT);
-		ctx.fillRect(x1, HEADER_HEIGHT, 1, height - HEADER_HEIGHT);
+		ctx.fillRect(x0, top, 1, height - top);
+		ctx.fillRect(x1, top, 1, height - top);
 		ctx.font = theme.fontXs + "px " + theme.fontUi;
 		ctx.textBaseline = "top";
 		const text = duration(Math.abs(range.to - range.from));
 		ctx.fillStyle = theme.bg4;
 		const w = this.fitter.width(ctx, text) + 8;
-		ctx.fillRect((x0 + x1) / 2 - w / 2, HEADER_HEIGHT + 2, w, 16);
+		ctx.fillRect((x0 + x1) / 2 - w / 2, top + 2, w, 16);
 		ctx.fillStyle = theme.text0;
-		ctx.fillText(text, (x0 + x1) / 2 - w / 2 + 4, HEADER_HEIGHT + 4);
+		ctx.fillText(text, (x0 + x1) / 2 - w / 2 + 4, top + 4);
 	}
 }

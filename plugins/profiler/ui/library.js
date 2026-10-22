@@ -61,7 +61,7 @@ export class CaptureLibraryView {
 		const app = meta.app || capture.app || capture.name.replace(/\.iedtrace$/, "");
 		const details = capture.live ? "recording" : [meta.durationNs ? duration(meta.durationNs) : null, meta.zones ? count(meta.zones) + " zones" : null, bytes(capture.sizeBytes)].filter(Boolean).join(" \u00b7 ");
 		return h("div.row.prof-capture" + (capture.live ? ".live" : ""), {
-			role: "option", tabindex: "0", title: capture.path,
+			role: "option", tabindex: "0", title: capture.path, dataset: { capture: capture.captureId },
 			on: {
 				click: () => this.openCapture(capture.captureId),
 				keydown: (e) => { if (e.key === "Enter") this.openCapture(capture.captureId); },

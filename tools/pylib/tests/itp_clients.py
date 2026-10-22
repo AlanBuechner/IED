@@ -136,6 +136,24 @@ def check_zones_take_time(test, events, name):
 	test.assertEqual([], [ticks for ticks in durations if ticks <= 0], "%s zones that took no time" % name)
 
 
+def check_lock(test, events, name, waits):
+	"""The lock `name` defined once with its site, `waits` waits for it, and as many releases as holds, each event naming
+	the lock's id (times two: an exclusive hold)."""
+	strings, _ = names(events)
+	defs = [e for e in of(events, "LockDef") if strings.get(e["nameStr"]) == name]
+	test.assertEqual(1, len(defs), "the lock is defined once")
+	test.assertNotEqual(0, defs[0]["srcLocId"], "with the place it is declared")
+	lock = defs[0]["lockId"] * 2
+	mine = lambda kind: [e for e in of(events, kind) if e["lock"] == lock]
+	test.assertEqual(waits, len(mine("LockWait")))
+	test.assertGreater(len(mine("LockObtain")), waits)
+	test.assertEqual(len(mine("LockObtain")), len(mine("LockRelease")))
+	wait = mine("LockWait")[0]
+	obtain = [e for e in mine("LockObtain") if e["threadId"] == wait["threadId"] and e["t"] >= wait["t"]][0]
+	other = [e for e in mine("LockRelease") if e["threadId"] != wait["threadId"] and e["t"] <= obtain["t"]]
+	test.assertTrue(other, "the waiter got the lock only after another thread let it go")
+
+
 def thread_names(events):
 	strings, _ = names(events)
 	return [strings[e["nameStr"]] for e in of(events, "ThreadName")]

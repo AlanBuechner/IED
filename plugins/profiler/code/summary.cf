@@ -1,10 +1,12 @@
 // A capture at a glance (T-PRF-2), two captures compared (F-PRF-23, T-PRF-6), and the messages window (F-PRF-16).
 include "analysis.ch"
+include "locks.ch"
 
 namespace Profiler
 {
 	const int32 kSummaryZones = 10;
 	const int32 kSummaryWarnings = 10;
+	const int32 kSummaryLocks = 3;
 
 	static void WriteThreads(IED::JsonWriter& json, const Capture& capture) {
 		json.Key(Core::StringView("threads"));
@@ -116,6 +118,7 @@ namespace Profiler
 			json.EndObject();
 		}
 		json.EndArray();
+		WriteTopLocks(json, capture, kSummaryLocks);
 		WriteWarnings(json, capture);
 		json.EndObject();
 		return json.ToString();

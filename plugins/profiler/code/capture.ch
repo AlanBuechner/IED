@@ -164,12 +164,23 @@ namespace Profiler
 		public int64 totalTicks;
 	}
 
-	struct LockEventRecord
+	// One hold of a lock by a thread: when it asked (wait; the obtain when it never waited), got it and let it go.
+	struct LockSpan
 	{
-		public int64 t;
-		public int32 track;
-		public int32 kind;                  // 0 wait, 1 obtain, 2 release
+		public int64 wait;
+		public int64 obtain;
+		public int64 release = kOpen;
 		public bool shared;
+	}
+
+	// A lock's holds by one thread in time order: a thread's events arrive in order, and an obtain while it already
+	// holds the lock (a recursive lock) only deepens the hold.
+	class LockTrack
+	{
+		public int32 track;
+		public Core::Array<LockSpan> spans;
+		public int64 waitingSince = -1;     // a wait not yet obtained (a deadlock, when it never is)
+		public int32 depth;                 // obtains not yet released
 	}
 
 	class LockInfo
@@ -177,7 +188,9 @@ namespace Profiler
 		public uint64 id;
 		public uint64 nameStr;
 		public uint64 site;
-		public Core::Array<LockEventRecord> events;
+		public Core::HashMap<int32, LockTrack*> trackOf;
+		public Core::Array<LockTrack*> tracks;
+		public int64 acquisitions;
 	}
 
 	struct GpuZone
@@ -278,6 +291,7 @@ namespace Profiler
 		public Core::HashMap<uint64, TaskLane*> taskLaneOf;  // task name string id -> lane
 		public Core::Array<TaskLane*> taskLanes;
 		public Core::HashMap<uint64, LockInfo*> locks;
+		public Core::Array<LockInfo*> lockList;              // in the order they appeared
 		public Core::HashMap<uint64, GpuContext*> gpuOf;
 		public Core::Array<GpuContext*> gpus;
 		public Core::Array<ModuleRecord> modules;

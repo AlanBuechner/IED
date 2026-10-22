@@ -10,7 +10,7 @@ namespace Profiler
 	const int32 kToolFlameDepth = 12;
 	const double kToolFlameMinPercent = 1.0;
 
-	static Serialization::DomNode ParseJson(const Core::String& json) {
+	Serialization::DomNode ParseJson(const Core::String& json) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		return Serialization::ReadJson(json.View(), *doc).root;
 	}
@@ -42,6 +42,13 @@ namespace Profiler
 		return text.ToString();
 	}
 
+	Core::String Instant(int64 ns) {
+		Core::StringBuilder text;
+		AppendFixed(text, (double)ns / 1000000.0, 3);
+		text.Append(" ms");
+		return text.ToString();
+	}
+
 	static Core::String Bytes(int64 bytes) {
 		Core::StringBuilder text;
 		const double value = (double)bytes;
@@ -70,37 +77,31 @@ namespace Profiler
 		return text.ToString();
 	}
 
-	// Rows of cells written as aligned columns: the first left-aligned, the rest right-aligned.
-	class TextTable
-	{
-		public Core::Array<Core::Array<Core::String>*> rows;
+	Core::Array<Core::String>* TextTable::Row() {
+		Core::Array<Core::String>* row = new Core::Array<Core::String>();
+		rows.Push(row);
+		return row;
+	}
 
-		public Core::Array<Core::String>* Row() {
-			Core::Array<Core::String>* row = new Core::Array<Core::String>();
-			rows.Push(row);
-			return row;
-		}
-
-		public void Write(Core::StringBuilder& out) const {
-			Core::Array<int64> widths;
-			for (const Core::Array<Core::String>* row : rows)
-				for (int64 c = 0; c < row->Count(); ++c) {
-					if (widths.Count() <= c) widths.Push(0);
-					if ((*row)[c].ByteLength() > widths[c]) widths[c] = (*row)[c].ByteLength();
-				}
-			for (const Core::Array<Core::String>* row : rows) {
-				for (int64 c = 0; c < row->Count(); ++c) {
-					const int64 pad = widths[c] - (*row)[c].ByteLength();
-					if (c > 0) {
-						out.Append("  ");
-						for (int64 k = 0; k < pad; ++k) out.AppendByte(' ');
-					}
-					out.Append((*row)[c].View());
-					if (c == 0 && row->Count() > 1)
-						for (int64 k = 0; k < pad; ++k) out.AppendByte(' ');
-				}
-				out.AppendByte('\n');
+	void TextTable::Write(Core::StringBuilder& out) const {
+		Core::Array<int64> widths;
+		for (const Core::Array<Core::String>* row : rows)
+			for (int64 c = 0; c < row->Count(); ++c) {
+				if (widths.Count() <= c) widths.Push(0);
+				if ((*row)[c].ByteLength() > widths[c]) widths[c] = (*row)[c].ByteLength();
 			}
+		for (const Core::Array<Core::String>* row : rows) {
+			for (int64 c = 0; c < row->Count(); ++c) {
+				const int64 pad = widths[c] - (*row)[c].ByteLength();
+				if (c > 0) {
+					out.Append("  ");
+					for (int64 k = 0; k < pad; ++k) out.AppendByte(' ');
+				}
+				out.Append((*row)[c].View());
+				if (c == 0 && row->Count() > 1)
+					for (int64 k = 0; k < pad; ++k) out.AppendByte(' ');
+			}
+			out.AppendByte('\n');
 		}
 	}
 
@@ -131,7 +132,7 @@ namespace Profiler
 
 	// --- Each tool ----------------------------------------------------------------------------------------------------
 
-	static int64 MsArg(const Serialization::DomNode& args, const char* name) {
+	int64 MsArg(const Serialization::DomNode& args, const char* name) {
 		const Serialization::DomNode value = args.Member(name);
 		return value.IsValid() && !value.IsNull() ? (int64)(value.AsFloat() * 1000000.0) : -1;
 	}
@@ -318,6 +319,7 @@ namespace Profiler
 			out.Append(Duration(memory.Member("gcLongestNs").AsInt()).View());
 			out.AppendByte('\n');
 		}
+		out.Append(TopLocksText(s.Member("locks")).View());
 		if (s.Member("warningCount").AsInt() > 0) {
 			out.Append("\nWarnings (");
 			out.AppendInt(s.Member("warningCount").AsInt());
@@ -354,9 +356,9 @@ namespace Profiler
 		Serialization::DomNode answer = ParseJson(Stats(capture, ask));
 		Core::StringBuilder out;
 		out.Append("Range ");
-		out.Append(Duration(answer.Member("from").AsInt()).View());
+		out.Append(Instant(answer.Member("from").AsInt()).View());
 		out.Append(" to ");
-		out.Append(Duration(answer.Member("to").AsInt()).View());
+		out.Append(Instant(answer.Member("to").AsInt()).View());
 		out.Append("; ");
 		out.AppendInt(answer.Member("rowCount").AsInt());
 		out.Append(" rows, the first ");
@@ -376,7 +378,7 @@ namespace Profiler
 		out.Append("Frame ");
 		out.AppendInt(f.Member("index").AsInt());
 		out.Append(" at ");
-		out.Append(Duration(f.Member("startNs").AsInt()).View());
+		out.Append(Instant(f.Member("startNs").AsInt()).View());
 		out.Append(" took ");
 		out.Append(Duration(f.Member("durationNs").AsInt()).View());
 		out.AppendByte('\n');
@@ -471,7 +473,7 @@ namespace Profiler
 			out.Append("  ");
 			out.Append(Duration(instances.At(i).Member("durationNs").AsInt()).View());
 			out.Append(" at ");
-			out.Append(Duration(instances.At(i).Member("startNs").AsInt()).View());
+			out.Append(Instant(instances.At(i).Member("startNs").AsInt()).View());
 			out.Append(" on ");
 			out.Append(instances.At(i).Member("thread").AsView());
 			out.Append(" [");
@@ -541,7 +543,7 @@ namespace Profiler
 		for (int64 i = 0; i < messages.Count(); ++i) {
 			Serialization::DomNode m = messages.At(i);
 			const int64 severity = m.Member("severity").AsInt();
-			out.Append(Duration(m.Member("timeNs").AsInt()).View());
+			out.Append(Instant(m.Member("timeNs").AsInt()).View());
 			out.Append(" [");
 			out.Append(severity >= 0 && severity < 6 ? severities[severity] : "?");
 			out.Append("] ");
@@ -566,7 +568,7 @@ namespace Profiler
 		out.Append(" allocations (");
 		out.Append(Bytes(leaks.Member("bytes").AsInt()).View());
 		out.Append(") live at ");
-		out.Append(Duration(leaks.Member("atNs").AsInt()).View());
+		out.Append(Instant(leaks.Member("atNs").AsInt()).View());
 		out.Append("\n");
 		Serialization::DomNode groups = leaks.Member("groups");
 		for (int64 i = 0; i < groups.Count(); ++i) {
@@ -673,6 +675,12 @@ namespace Profiler
 		return ws;
 	}
 
+	static Core::String NotesOf(ProfilerPlugin* profiler, Core::StringView id) {
+		Threading::LockGuard guard(profiler->lock);
+		CaptureEntry* entry = profiler->Entry(id);
+		return entry ? NotesText(profiler->AnnotationsOf(entry)) : Core::String();
+	}
+
 	static Core::String Resolved(ProfilerPlugin* profiler, Core::StringView wsId, Core::StringView named) {
 		Threading::LockGuard guard(profiler->lock);
 		return ResolveCapture(profiler, ToolWorkspace(profiler, wsId), named);
@@ -697,9 +705,12 @@ namespace Profiler
 			return CompareText(*a, *b, idA.View(), idB.View(), limit);
 		}
 		Core::String id = Resolved(profiler, wsId, args.Member("capture").AsView());
+		if (tool == "annotate") return AnnotateText(profiler, id.View(), args);
+		Core::String notes = tool == "summary" ? NotesOf(profiler, id.View()) : Core::String();
 		Capture* capture = profiler->Loaded(id.View());
 		Threading::LockGuard held(capture->lock);
-		if (tool == "summary") return SummaryText(*capture, id.View());
+		if (tool == "summary") return SummaryText(*capture, id.View()) + notes.View();
+		if (tool == "locks") return LocksText(*capture, args);
 		if (tool == "top_zones") return TopZonesText(*capture, args);
 		if (tool == "frame") return FrameText(*capture, args);
 		if (tool == "find_zone") return FindZoneText(*capture, args);

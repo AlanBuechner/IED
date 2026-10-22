@@ -330,6 +330,7 @@ namespace Profile
 		GC::RegisterCollectionResult((void*)&g_gcKey, OnCollection, null);
 		session->flusher = new Threading::Thread(Threading::Thread::Run([session]() { FlushLoop(session); }));
 		atomic_store(&g_state, kStateOn, MemoryOrder::Release);
+		ObserveJobs(true);
 		return true;
 	}
 
@@ -337,6 +338,7 @@ namespace Profile
 		int32 on = kStateOn;
 		if (!atomic_compare_exchange(&g_state, &on, kStateOff, MemoryOrder::AcqRel, MemoryOrder::Acquire)) return;
 		Session* session = g_session;
+		ObserveJobs(false);
 		GC::UnregisterCollectionResult((void*)&g_gcKey);
 		atomic_store(&session->stopping, 1, MemoryOrder::Release);
 		session->flusher->Join();

@@ -3,7 +3,7 @@
 // the scope it is given: the timeline's selection, else its view, else the whole capture.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { duration, ms, count } from "./format.js";
+import { duration, ms, count, instant } from "./format.js";
 
 const SEVERITIES = ["trace", "debug", "info", "warning", "error", "fatal"];
 
@@ -153,6 +153,6 @@ export class MessagesPanel {
 		this.countLabel.textContent = count(answer.total) + " messages \u00b7 " + scopeLabel(this.scope).replace("Range: ", "");
 		replace(this.list, answer.messages.map((m) => h("div.row.prof-message" + (m.severity >= 4 ? ".c-error" : m.severity >= 3 ? ".c-warn" : ""), {
 			on: { click: () => this.onJump(m.timeNs) },
-		}, h("span.meta.mono", null, duration(m.timeNs)), h("span.meta", null, SEVERITIES[m.severity] || ""), h("span.meta", null, m.thread), h("span.grow.ellip", null, m.text))));
+		}, h("span.meta.mono", null, instant(m.timeNs, 0)), h("span.meta", null, SEVERITIES[m.severity] || ""), h("span.meta", null, m.thread), h("span.grow.ellip", null, m.text))));
 	}
 }

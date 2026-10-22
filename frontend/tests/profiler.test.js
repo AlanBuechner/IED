@@ -3,9 +3,10 @@
 // and the frame bands over the budget.
 
 import { test, assertEqual, assertTrue } from "./harness.js";
-import { duration, ms, bytes, tickStep, tickLabel } from "/plugins/ied.profiler/ui/format.js";
-import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, seriesOf, frameBands, MIN_SPAN_NS } from "/plugins/ied.profiler/ui/model.js";
+import { duration, ms, bytes, tickStep, tickLabel, instant } from "/plugins/ied.profiler/ui/format.js";
+import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel, seriesOf, frameBands, MIN_SPAN_NS, LOCK_HELD, LOCK_CONTENDED, LOCK_BLOCKED } from "/plugins/ied.profiler/ui/model.js";
 import { openNextCapture } from "/plugins/ied.profiler/ui/index.js";
+import { noteRange } from "/plugins/ied.profiler/ui/notes.js";
 
 const MICRO = String.fromCharCode(0xb5) + "s";
 
@@ -127,4 +128,49 @@ test("profiler: a Profile task that does not start stops the waiting", () => {
 	stop();
 	assertTrue(!ied.handlers.has("profs:w1"));
 	stop();
+});
+
+// A thread lane with two zone rows and two lock rows; a lock row's items are [start, end, state, hold or -count].
+const LOCK_ANSWER = {
+	lanes: [{ kind: "thread", id: "thread:0", label: "Main", track: 0, depth: 2, zones: [],
+		locks: [
+			{ lock: 1, name: "Queue", items: [[100, 300, LOCK_HELD, 0], [400, 600, LOCK_BLOCKED, 1], [600, 700, LOCK_CONTENDED, 1]] },
+			{ lock: 2, name: "Assets", items: [[0, 900, LOCK_BLOCKED, -40]] }] }],
+};
+const LOCK_OPTIONS = { rowHeight: 18, lockRowHeight: 12, pad: 3, messageHeight: 26, plotHeight: 36, slop: 2 };
+
+test("profiler: a thread's lock rows come under its zone rows", () => {
+	const lane = layoutLanes(LOCK_ANSWER, LOCK_OPTIONS).lanes[0];
+	assertEqual([lane.lockRows, lane.lockTop, lane.height], [2, 3 + 2 * 18, 2 * 18 + 2 * 12 + 6]);
+	const folded = layoutLanes(LOCK_ANSWER, { ...LOCK_OPTIONS, collapsed: new Set(["thread:0"]) }).lanes[0];
+	assertEqual([folded.lockRows, folded.height], [0, 18 + 6], "a folded lane hides its lock rows");
+});
+
+test("profiler: a point hits the lock hold under it, the worst state where they meet", () => {
+	const lane = layoutLanes(LOCK_ANSWER, LOCK_OPTIONS).lanes[0];
+	const view = new TimeView(0, 1000);
+	const row0 = lane.lockTop + 6;
+	assertEqual(lockAt(lane, view, 1000, 200, row0, LOCK_OPTIONS).item, [100, 300, LOCK_HELD, 0]);
+	const edge = lockAt(lane, view, 1000, 600, row0, LOCK_OPTIONS);
+	assertEqual([edge.name, edge.item[2]], ["Queue", LOCK_BLOCKED], "at the wait's end and the hold's start, the wait");
+	assertEqual(lockAt(lane, view, 1000, 350, row0, LOCK_OPTIONS), null, "between holds");
+	assertEqual(lockAt(lane, view, 1000, 500, row0 + 12, LOCK_OPTIONS).lock, 2, "the second row is the second lock");
+	assertEqual(lockAt(lane, view, 1000, 500, 10, LOCK_OPTIONS), null, "the zone rows are not lock rows");
+	assertEqual(lockLabel("Queue", [600, 700, LOCK_CONTENDED, 1], duration), "Queue: held while others waited, 100 ns");
+	assertEqual(lockLabel("Assets", [0, 900, LOCK_BLOCKED, -40], duration), "Assets: 40 holds and waits");
+});
+
+test("profiler: a point on the notes row hits the narrowest note there", () => {
+	const notes = [{ id: "n1", fromNs: 0, toNs: 800, text: "loading" }, { id: "n2", fromNs: 300, toNs: 400, text: "hitch" }, { id: "n3", fromNs: 900, toNs: 900, text: "moment" }];
+	const view = new TimeView(0, 1000);
+	assertEqual(noteAt(notes, view, 1000, 350).id, "n2");
+	assertEqual(noteAt(notes, view, 1000, 100).id, "n1");
+	assertEqual(noteAt(notes, view, 1000, 902).id, "n3", "a moment is hit within the slop");
+	assertEqual(noteAt(notes, view, 1000, 860), null);
+	assertEqual([noteRange(notes[1]), noteRange(notes[2])], ["0.00030 ms to 0.00040 ms (100 ns)", "at 0.001 ms"]);
+});
+
+test("profiler: a point in time is as precise as its range needs", () => {
+	assertEqual([instant(1290050000, 400000), instant(1290450000, 400000)], ["1290.05 ms", "1290.45 ms"], "a short range's ends apart");
+	assertEqual([instant(2000000000, 5e9), instant(2000000000, 1e11), instant(1290050000, 0)], ["2.0 s", "2 s", "1290.050 ms"]);
 });

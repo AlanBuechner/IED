@@ -64,6 +64,8 @@ static const char* LayoutOf(int32 type) {
 	if (type == 0x63) return "tv";
 	if (type == 0x68) return "tvv";
 	if (type == 0x69) return "tvvvvv";
+	if (type == 0x70) return "vvv";
+	if (type == 0x71 || type == 0x72 || type == 0x73) return "tv";
 	return null;
 }
 
@@ -167,6 +169,14 @@ static void Busy() {
 
 static Profile::Site s_update = Profile::Site("Update", "game.cf", 12);
 static Core::String s_systemName;
+static Profile::Mutex s_queue = Profile::Mutex("Queue", "game.cf", 30);
+static int32 s_waiting = 0;
+
+static void TakeQueue() {
+	atomic_store(&s_waiting, 1, MemoryOrder::Release);
+	Profile::MutexGuard held(s_queue);
+	Busy();
+}
 
 static void RecordWorker() {
 	Profile::SetThreadName(Core::StringView("Worker"));
@@ -284,6 +294,81 @@ class ProfileTests {
 			if (e.type == 0x69 && (begin < startTicks || e.ticks < begin || e.ticks - begin > frequency)) ordered = false;
 		}
 		assert_true(ordered, "each stop begins after the session started, ends after it begins, and lasts under a second");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("a_mutex_records_its_waits_and_holds")]
+	public static void TestMutex() {
+		Core::String path = TracePath("bedrock-profile-locks.iedtrace");
+		Core::String problem;
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		s_queue.Lock();
+		Threading::Thread waiter = Threading::Thread::Run([]() { TakeQueue(); });
+		while (atomic_load(&s_waiting, MemoryOrder::Acquire) == 0) Threading::Thread::Sleep(1000000);
+		Threading::Thread::Sleep(20000000);
+		s_queue.Unlock();
+		waiter.Join();
+		assert_true(s_queue.TryLock(), "a free mutex is taken without waiting");
+		s_queue.Unlock();
+		Profile::Stop();
+
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		const TracedEvent* def = First(events, 0x70);
+		assert_true(def && *strings.Find(def->fields[1]) == "Queue" && def->fields[2] != 0, "the lock defined with its name and site");
+		assert_eq(1, CountOf(events, 0x71), "only the waiter waited");
+		assert_eq(3, CountOf(events, 0x72), "three holds");
+		assert_eq(3, CountOf(events, 0x73), "each released");
+		const TracedEvent* wait = First(events, 0x71);
+		int64 obtained = -1;
+		int64 releasedFirst = -1;
+		for (const TracedEvent& e : events) {
+			if (e.fields[0] != def->fields[0] * 2) continue;
+			if (e.type == 0x72 && e.thread == wait->thread) obtained = e.ticks;
+			if (e.type == 0x73 && e.thread != wait->thread && releasedFirst < 0) releasedFirst = e.ticks;
+		}
+		assert_true(wait->ticks < obtained && releasedFirst <= obtained, "the waiter got the lock only once the main thread let it go");
+		FS::RemoveFile(path.CStr());
+	}
+
+	[test("jobs_are_tasks_on_named_workers")]
+	public static void TestJobs() {
+		Core::String path = TracePath("bedrock-profile-jobs.iedtrace");
+		Core::String problem;
+		Threading::JobSystemDesc desc;
+		desc.frameWorkers = 2;
+		desc.backgroundWorkers = 1;
+		Threading::JobSystem jobs(desc);
+		assert_true(Profile::Start((Core::String("file:") + path.View()).View(), problem), "started");
+		Threading::WaitGroup group;
+		for (int32 i = 0; i < 6; i++) jobs.Submit([]() { Busy(); }, Threading::JobPriority::Normal, &group, "Decompress");
+		jobs.Submit([]() { Busy(); }, Threading::JobPriority::Background, &group);
+		group.Wait();
+		Profile::Stop();
+		Threading::WaitGroup after;
+		jobs.Submit([]() { Busy(); }, Threading::JobPriority::Normal, &after, "Late");
+		after.Wait();
+
+		Core::HashMap<uint64, Core::String> strings;
+		bool wellFormed;
+		Core::Array<TracedEvent> events = ReadTrace(path.CStr(), strings, wellFormed);
+		assert_true(wellFormed, "read whole");
+		int64 decompress = 0;
+		int64 unnamed = 0;
+		for (const TracedEvent& e : events) {
+			if (e.type != 0x30) continue;
+			if (*strings.Find(e.fields[1]) == "Decompress") decompress += 1;
+			if (*strings.Find(e.fields[1]) == "Job") unnamed += 1;
+		}
+		assert_eq(6, decompress, "each named job a task of its name");
+		assert_eq(1, unnamed, "a job without one is a Job");
+		assert_eq(7, CountOf(events, 0x31), "each ended");
+		bool workerNamed = false;
+		for (const TracedEvent& e : events)
+			if (e.type == 0x13 && strings.Find(e.fields[0])->View().StartsWith(Core::StringView("Job Worker"))) workerNamed = true;
+		assert_true(workerNamed, "the workers keep the names the job system gave them");
 		FS::RemoveFile(path.CStr());
 	}
 

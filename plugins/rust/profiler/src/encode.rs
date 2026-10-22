@@ -26,6 +26,10 @@ pub const POOL_DEF: u8 = 0x60;
 pub const ALLOC: u8 = 0x61;
 pub const FREE: u8 = 0x62;
 pub const POOL_RESET: u8 = 0x63;
+pub const LOCK_DEF: u8 = 0x70;
+pub const LOCK_WAIT: u8 = 0x71;
+pub const LOCK_OBTAIN: u8 = 0x72;
+pub const LOCK_RELEASE: u8 = 0x73;
 
 pub const THREAD_CHUNK: u8 = 0;
 pub const GLOBAL_CHUNK: u8 = 1;

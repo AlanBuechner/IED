@@ -18,15 +18,18 @@
 //! ```
 //!
 //! Threads keep the names std gives them ("main", a `Builder::name`); `set_thread_name` renames one from then on.
-//! `Tracked` reports every allocation of the program's global allocator; the `tracing` feature turns spans and events
-//! of the `tracing` ecosystem into zones and messages. The session ends at exit (or with `stop`).
+//! `Mutex` (or `mutex!` in a static) is a std mutex whose waits and holds the profiler shows; `Tracked` reports every
+//! allocation of the program's global allocator; the `tracing` feature turns spans and events of the `tracing`
+//! ecosystem into zones and messages. The session ends at exit (or with `stop`).
 
 mod encode;
+mod locks;
 mod session;
 #[cfg(feature = "tracing")]
 pub mod tracing;
 
 use encode::*;
+pub use locks::{LockSite, Mutex, MutexGuard};
 use session::{running, Inside, Session, SiteIds};
 use std::alloc::{GlobalAlloc, Layout};
 use std::marker::PhantomData;

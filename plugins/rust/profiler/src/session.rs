@@ -131,6 +131,7 @@ struct Names {
     next_site: u64,
     next_plot: u64,
     next_thread: u64,
+    next_lock: u64,
     threads: Vec<Arc<Buffer>>,
 }
 
@@ -424,6 +425,37 @@ impl Session {
         }
         site.id.store(id, Ordering::Relaxed);
         site.session.store(self.number, Ordering::Release);
+        id
+    }
+
+    /// The id of a lock, its place and its LockDef queued the first time in this session.
+    pub fn lock_id(&self, ids: &SiteIds, name: &str, file: &str, line: u32) -> u64 {
+        if ids.session.load(Ordering::Acquire) == self.number {
+            return ids.id.load(Ordering::Relaxed);
+        }
+        let mut names = lock(&self.names);
+        if ids.session.load(Ordering::Acquire) == self.number {
+            return ids.id.load(Ordering::Relaxed);
+        }
+        let name_id = self.intern_locked(&mut names, name);
+        let file_id = self.intern_locked(&mut names, file);
+        names.next_site += 1;
+        let site = names.next_site;
+        names.next_lock += 1;
+        let id = names.next_lock;
+        {
+            let mut global = lock(&self.global);
+            global.bytes.push(SRC_LOC_DEF);
+            for value in [site, name_id, 0, file_id, line as u64, 0] {
+                put_varint(&mut global.bytes, value);
+            }
+            global.bytes.push(LOCK_DEF);
+            for value in [id, name_id, site] {
+                put_varint(&mut global.bytes, value);
+            }
+        }
+        ids.id.store(id, Ordering::Relaxed);
+        ids.session.store(self.number, Ordering::Release);
         id
     }
 

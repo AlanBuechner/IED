@@ -233,7 +233,7 @@ namespace Profiler
 
 	// --- Connections --------------------------------------------------------------------------------------------------
 
-	static Core::String MetadataJson(const Capture& capture, Core::StringView ended) {
+	Core::String MetadataJson(const Capture& capture, Core::StringView ended) {
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("app", capture.appName.View());
@@ -325,8 +325,9 @@ namespace Profiler
 			Finish(*capture);
 			metadata = MetadataJson(*capture, why);
 		}
-		writer.Finish(metadata.View());
 		Threading::LockGuard guard(profiler->lock);
+		metadata = MetadataWith(metadata.View(), profiler->AnnotationsOf(entry));
+		writer.Finish(metadata.View());
 		entry->live = false;
 		entry->connection = nullptr;
 		entry->metadata = metadata;

@@ -54,6 +54,7 @@ namespace Profile
 		public uint64 nextPlot;
 		public uint64 nextThread;
 		public uint64 nextTask;
+		public uint64 nextLock;
 		public Core::Array<EventBuffer*> threads;
 		public EventBuffer global;
 		public int32 stopping;           // atomic
@@ -82,4 +83,7 @@ namespace Profile
 	bool StartSession(Core::StringView target, Core::StringView app, Core::String& problem);
 	// Sends what is buffered and Bye, and closes the session; events after it are dropped.
 	void StopSession();
+	// Every JobSystem's jobs as tasks (Threading::SetJobObserver), named as they were submitted: on while a session
+	// runs.
+	void ObserveJobs(bool on);
 }

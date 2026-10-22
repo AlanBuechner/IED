@@ -1,5 +1,6 @@
 include "profile.ch"
 include "Platform/system.ch"
+include "Threading/jobs.ch"
 
 namespace Profile
 {
@@ -49,6 +50,36 @@ namespace Profile
 		return id;
 	}
 
+	// The lock's id in `session`, its name, its place and its LockDef queued the first time.
+	static uint64 LockId(Session* session, LockSite& lock) {
+		if (atomic_load(&lock.session, MemoryOrder::Acquire) == session->number) return lock.id;
+		Threading::LockGuard held(session->lock);
+		if (lock.session == session->number) return lock.id;
+		const uint64 name = session->Intern(Core::StringView(lock.name));
+		const uint64 file = session->Intern(Core::StringView(lock.file));
+		session->nextSite += 1;
+		const uint64 site = session->nextSite;
+		session->nextLock += 1;
+		const uint64 id = session->nextLock;
+		{
+			Threading::LockGuard global(session->global.lock);
+			PutEvent(session->global.bytes, Event::SrcLocDef);
+			PutVarint(session->global.bytes, site);
+			PutVarint(session->global.bytes, name);
+			PutVarint(session->global.bytes, 0);
+			PutVarint(session->global.bytes, file);
+			PutVarint(session->global.bytes, (uint64)lock.line);
+			PutVarint(session->global.bytes, 0);
+			PutEvent(session->global.bytes, Event::LockDef);
+			PutVarint(session->global.bytes, id);
+			PutVarint(session->global.bytes, name);
+			PutVarint(session->global.bytes, site);
+		}
+		lock.id = id;
+		atomic_store(&lock.session, session->number, MemoryOrder::Release);
+		return id;
+	}
+
 	static uint64 Interned(Session* session, Core::StringView text) {
 		Threading::LockGuard held(session->lock);
 		return session->Intern(text);
@@ -74,6 +105,56 @@ namespace Profile
 		Threading::LockGuard held(buffer->lock);
 		PutEvent(buffer->bytes, type);
 		PutVarint(buffer->bytes, field);
+	}
+
+	// --- Jobs -----------------------------------------------------------------------------------------------------
+
+	static uint64 JobBegun(const char* name) {
+		return TaskBegin(Core::StringView(name ? name : "Job"));
+	}
+
+	static void JobEnded(uint64 task) {
+		TaskEnd(task);
+	}
+
+	void ObserveJobs(bool on) {
+		Threading::JobObserver observer;
+		if (on) {
+			observer.begin = JobBegun;
+			observer.end = JobEnded;
+		}
+		Threading::SetJobObserver(observer);
+	}
+
+	// --- Locks ----------------------------------------------------------------------------------------------------
+
+	// A lock event of the calling thread: its field is the lock's id times two, plus one for a shared hold.
+	static void LockEvent(Event type, LockSite& lock, bool shared) {
+		Session* running = Running();
+		if (running) ThreadEvent(running, type, LockId(running, lock) * 2 + (shared ? 1 : 0));
+	}
+
+	void LockWait(LockSite& lock, bool shared) { LockEvent(Event::LockWait, lock, shared); }
+	void LockObtained(LockSite& lock, bool shared) { LockEvent(Event::LockObtain, lock, shared); }
+	void LockReleased(LockSite& lock, bool shared) { LockEvent(Event::LockRelease, lock, shared); }
+
+	void Mutex::Lock() {
+		if (!inner.TryLock()) {
+			LockWait(site);
+			inner.Lock();
+		}
+		LockObtained(site);
+	}
+
+	bool Mutex::TryLock() {
+		if (!inner.TryLock()) return false;
+		LockObtained(site);
+		return true;
+	}
+
+	void Mutex::Unlock() {
+		LockReleased(site);
+		inner.Unlock();
 	}
 
 	// --- Zones ----------------------------------------------------------------------------------------------------

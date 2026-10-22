@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/AlanBuechner/IED/plugins/go/profiler"
@@ -31,6 +32,7 @@ func main() {
 		profiler.Frame()
 	}
 	background()
+	contend(ctx)
 	profiler.Message(ctx, profiler.Warning, "done")
 	pool(ctx)
 	runtime.GC()
@@ -74,6 +76,29 @@ func background() {
 		spin(context.Background(), 1000)
 	}()
 	done.Wait()
+}
+
+var queue = profiler.NewMutex("Queue")
+
+// contend holds the queue while a goroutine waits for it, then takes it again without waiting.
+func contend(ctx context.Context) {
+	queue.Lock(ctx)
+	waiting := make(chan struct{})
+	var done sync.WaitGroup
+	done.Add(1)
+	go func() {
+		defer done.Done()
+		worker := profiler.WithThread(context.Background(), "Waiter")
+		close(waiting)
+		queue.Lock(worker)
+		queue.Unlock(worker)
+	}()
+	<-waiting
+	time.Sleep(5 * time.Millisecond)
+	queue.Unlock(ctx)
+	done.Wait()
+	queue.Lock(ctx)
+	queue.Unlock(ctx)
 }
 
 func pool(ctx context.Context) {

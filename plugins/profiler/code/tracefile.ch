@@ -44,8 +44,10 @@ namespace Profiler
 	// The Hello at the start of a trace file without metadata: its app name and start time.
 	bool PeekHello(const char* path, Core::String& app, int64& startUnixNs);
 
-	// Replaces a finished file's metadata (annotations, a rename), keeping its stream.
+	// Replaces a file's metadata (annotations, a rename), keeping its stream; a file without an index block gets one,
+	// once nothing has written to it for kQuietBeforeIndexNs.
 	bool RewriteMetadata(const char* path, Core::StringView metadata, Core::String& problem);
+	const int64 kQuietBeforeIndexNs = 10000000000;
 
 	// Writes a whole stream and its metadata as a trace file (an import).
 	bool WriteTraceFile(const char* path, const Core::Array<uint8>& stream, Core::StringView metadata, Core::String& problem);

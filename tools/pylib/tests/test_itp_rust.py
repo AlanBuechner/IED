@@ -56,14 +56,14 @@ class DemoTests(unittest.TestCase):
 		clients.check_zones_take_time(self, self.events, "Spin")
 
 	def test_threads_keep_their_std_names_and_renames(self):
-		self.assertEqual([["Worker"]] * 5 + [["main", "Main loop done"]], names_by_track(self.events))
+		self.assertEqual([["Waiter"]] + [["Worker"]] * 5 + [["main", "Main loop done"]], names_by_track(self.events))
 
 	def test_zones_nest_and_name_where_they_are(self):
 		zones = list(clients.zones_by_track(self, self.events).values())
 		self.assertIn(["Spin"] + ["Update", "level.bin", "Spin"] * 5, zones)
 		self.assertEqual(5, zones.count(["Physics::Step", "Spin"]))
 		sites = {self.strings[e["nameStr"]]: e for e in of(self.events, "SrcLocDef")}
-		functions = {name: self.strings[site["functionStr"]] for name, site in sites.items()}
+		functions = {name: self.strings[site["functionStr"]] for name, site in sites.items() if site["functionStr"]}
 		self.assertEqual({"Spin": "demo::spin", "Update": "demo::update", "Load": "demo::update", "Physics::Step": "demo::update"}, functions)
 		self.assertTrue(all(self.strings[site["fileStr"]].replace("\\", "/").endswith("examples/demo.rs") for site in sites.values()))
 
@@ -77,6 +77,9 @@ class DemoTests(unittest.TestCase):
 		begun = {e["taskId"]: self.strings[e["nameStr"]] for e in of(self.events, "TaskBegin")}
 		self.assertEqual(["Physics"] * 5, list(begun.values()))
 		self.assertEqual(set(begun), {e["taskId"] for e in of(self.events, "TaskEnd")})
+
+	def test_a_mutex_records_its_waits_and_holds(self):
+		clients.check_lock(self, self.events, "Queue", 1)
 
 	def test_the_global_allocator_reports_every_block(self):
 		heap = [e for e in of(self.events, "Alloc") if e["poolId"] == 0]

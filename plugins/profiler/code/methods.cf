@@ -5,6 +5,7 @@ include "timeline.ch"
 include "analysis.ch"
 include "importers.ch"
 include "contributed.ch"
+include "locks.ch"
 
 namespace Profiler
 {
@@ -40,6 +41,15 @@ namespace Profiler
 		if (text == "max") return StatsOrder::Max;
 		if (text == "name") return StatsOrder::Name;
 		return StatsOrder::Total;
+	}
+
+	static LockOrder LockOrderOf(Core::StringView text) {
+		if (text == "maxWait") return LockOrder::MaxWait;
+		if (text == "contended") return LockOrder::Contended;
+		if (text == "hold") return LockOrder::Hold;
+		if (text == "acquisitions") return LockOrder::Acquisitions;
+		if (text == "name") return LockOrder::Name;
+		return LockOrder::Wait;
 	}
 
 	static LeakGroup LeakGroupOf(Core::StringView text) {
@@ -261,6 +271,24 @@ namespace Profiler
 		return answer;
 	}
 
+	static Core::String LocksMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		LockAsk ask;
+		ask.fromNs = params.Int("from", -1);
+		ask.toNs = params.Int("to", -1);
+		ask.order = LockOrderOf(params.Str("order", Core::StringView("wait")).View());
+		ask.limit = (int32)params.Int("limit", 200);
+		return Answer(profiler, params, [ask](const Capture& capture) -> Core::String { return Locks(capture, ask); });
+	}
+
+	static Core::String LockHoldMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const uint64 lock = (uint64)params.Int("lock");
+		const int32 track = (int32)params.Int("track");
+		const int64 index = params.Int("index");
+		Core::String answer = Answer(profiler, params, [lock, track, index](const Capture& capture) -> Core::String { return LockHold(capture, lock, track, index); });
+		if (answer.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such hold of the lock"));
+		return answer;
+	}
+
 	static Core::String SummaryMethod(ProfilerPlugin* profiler, const IED::Params& params) {
 		return Answer(profiler, params, [](const Capture& capture) -> Core::String { return Summary(capture); });
 	}
@@ -282,30 +310,33 @@ namespace Profiler
 
 	// --- Registration -------------------------------------------------------------------------------------------------
 
-	static void Register(ProfilerPlugin* profiler, const char* name, func<Core::String(ProfilerPlugin*, const IED::Params&)> method) {
+	void RegisterMethod(ProfilerPlugin* profiler, const char* name, func<Core::String(ProfilerPlugin*, const IED::Params&)> method) {
 		Core::String problem;
 		if (!profiler->context->Method(Core::StringView(name), [profiler, method](const IED::Request& request) -> Core::String { return method(profiler, request.params); }, problem))
 			profiler->context->Log(problem.View());
 	}
 
 	void RegisterMethods(ProfilerPlugin* profiler) {
-		Register(profiler, "prof.captures", CapturesMethod);
-		Register(profiler, "prof.open", OpenMethod);
-		Register(profiler, "prof.close", CloseMethod);
-		Register(profiler, "prof.stop", StopMethod);
-		Register(profiler, "prof.delete", DeleteMethod);
-		Register(profiler, "prof.import", ImportMethod);
-		Register(profiler, "prof.timeline", TimelineMethod);
-		Register(profiler, "prof.stats", StatsMethod);
-		Register(profiler, "prof.findZone", FindZoneMethod);
-		Register(profiler, "prof.zone", ZoneMethod);
-		Register(profiler, "prof.flame", FlameMethod);
-		Register(profiler, "prof.memory", MemoryMethod);
-		Register(profiler, "prof.leaks", LeaksMethod);
-		Register(profiler, "prof.messages", MessagesMethod);
-		Register(profiler, "prof.frames", FramesMethod);
-		Register(profiler, "prof.frame", FrameMethod);
-		Register(profiler, "prof.summary", SummaryMethod);
-		Register(profiler, "prof.compare", CompareMethod);
+		RegisterMethod(profiler, "prof.captures", CapturesMethod);
+		RegisterMethod(profiler, "prof.open", OpenMethod);
+		RegisterMethod(profiler, "prof.close", CloseMethod);
+		RegisterMethod(profiler, "prof.stop", StopMethod);
+		RegisterMethod(profiler, "prof.delete", DeleteMethod);
+		RegisterMethod(profiler, "prof.import", ImportMethod);
+		RegisterMethod(profiler, "prof.timeline", TimelineMethod);
+		RegisterMethod(profiler, "prof.stats", StatsMethod);
+		RegisterMethod(profiler, "prof.findZone", FindZoneMethod);
+		RegisterMethod(profiler, "prof.zone", ZoneMethod);
+		RegisterMethod(profiler, "prof.flame", FlameMethod);
+		RegisterMethod(profiler, "prof.memory", MemoryMethod);
+		RegisterMethod(profiler, "prof.leaks", LeaksMethod);
+		RegisterMethod(profiler, "prof.messages", MessagesMethod);
+		RegisterMethod(profiler, "prof.frames", FramesMethod);
+		RegisterMethod(profiler, "prof.frame", FrameMethod);
+		RegisterMethod(profiler, "prof.summary", SummaryMethod);
+		RegisterMethod(profiler, "prof.compare", CompareMethod);
+		RegisterMethod(profiler, "prof.locks", LocksMethod);
+		RegisterMethod(profiler, "prof.lockHold", LockHoldMethod);
+		RegisterAnnotationMethods(profiler);
 	}
 }

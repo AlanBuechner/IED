@@ -65,6 +65,7 @@ namespace
 		FrameMark = 0x40, FrameBegin = 0x41, FrameEnd = 0x42,
 		PlotDef = 0x50, PlotValue = 0x51, Message = 0x52,
 		PoolDef = 0x60, Alloc = 0x61, Free = 0x62, PoolReset = 0x63,
+		LockDef = 0x70, LockWait = 0x71, LockObtain = 0x72, LockRelease = 0x73,
 	};
 
 	constexpr uint8_t kThreadChunk = 0;
@@ -208,6 +209,7 @@ namespace
 		uint64_t nextSite = 0;
 		uint64_t nextPlot = 0;
 		uint64_t nextThread = 0;
+		uint64_t nextLock = 0;
 		std::atomic<uint64_t> nextTask{ 0 };
 		std::vector<std::shared_ptr<Buffer>> threads;
 		Buffer global;
@@ -579,6 +581,37 @@ namespace
 		return id;
 	}
 
+	// The lock's id in this session, its place and its LockDef queued the first time.
+	uint64_t LockId(Session* session, itp_lock* lock)
+	{
+		std::atomic_ref<int64_t> owner(lock->session);
+		if (owner.load(std::memory_order_acquire) == session->number) return lock->id;
+		std::lock_guard<std::mutex> held(session->lock);
+		if (lock->session == session->number) return lock->id;
+		const uint64_t name = lock->name ? session->Intern(lock->name, std::strlen(lock->name)) : 0;
+		const uint64_t file = lock->file ? session->Intern(lock->file, std::strlen(lock->file)) : 0;
+		const uint64_t site = ++session->nextSite;
+		const uint64_t id = ++session->nextLock;
+		{
+			std::lock_guard<std::mutex> global(session->global.lock);
+			PutEvent(session->global.bytes, Event::SrcLocDef);
+			for (uint64_t field : { site, name, (uint64_t)0, file, (uint64_t)lock->line, (uint64_t)0 }) PutVarint(session->global.bytes, field);
+			PutEvent(session->global.bytes, Event::LockDef);
+			PutVarint(session->global.bytes, id);
+			PutVarint(session->global.bytes, name);
+			PutVarint(session->global.bytes, site);
+		}
+		lock->id = id;
+		owner.store(session->number, std::memory_order_release);
+		return id;
+	}
+
+	void LockEvent(Event type, itp_lock* lock, int shared)
+	{
+		Session* session = Running();
+		if (session && lock) ThreadEvent(session, type, LockId(session, lock) * 2 + (shared ? 1 : 0));
+	}
+
 	void MemoryEvent(Session* session, Event type, uint32_t pool, const void* address, size_t size)
 	{
 		const uint64_t thread = ThreadBuffer(session)->thread;
@@ -842,6 +875,24 @@ extern "C" void itp_pool_name(uint32_t pool, const char* name)
 	PutEvent(session->global.bytes, Event::PoolDef);
 	PutVarint(session->global.bytes, pool);
 	PutVarint(session->global.bytes, text);
+}
+
+extern "C" void itp_lock_wait(itp_lock* lock, int shared)
+{
+	Inside inside;
+	LockEvent(Event::LockWait, lock, shared);
+}
+
+extern "C" void itp_lock_obtained(itp_lock* lock, int shared)
+{
+	Inside inside;
+	LockEvent(Event::LockObtain, lock, shared);
+}
+
+extern "C" void itp_lock_released(itp_lock* lock, int shared)
+{
+	Inside inside;
+	LockEvent(Event::LockRelease, lock, shared);
 }
 
 extern "C" void itp_pool_reset(uint32_t pool)

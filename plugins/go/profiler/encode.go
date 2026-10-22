@@ -34,6 +34,10 @@ const (
 	evFree           = 0x62
 	evGcBegin        = 0x68
 	evGcEnd          = 0x69
+	evLockDef        = 0x70
+	evLockWait       = 0x71
+	evLockObtain     = 0x72
+	evLockRelease    = 0x73
 )
 
 const (

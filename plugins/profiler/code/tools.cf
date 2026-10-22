@@ -121,5 +121,7 @@ namespace Profiler
 	IED::ToolResult MessagesTool(const IED::ToolCall& call) { return Through("messages", call); }
 	IED::ToolResult LeaksTool(const IED::ToolCall& call) { return Through("leaks", call); }
 	IED::ToolResult CompareTool(const IED::ToolCall& call) { return Through("compare", call); }
+	IED::ToolResult LocksTool(const IED::ToolCall& call) { return Through("locks", call); }
+	IED::ToolResult AnnotateTool(const IED::ToolCall& call) { return Through("annotate", call); }
 	IED::ToolResult CaptureTool(const IED::ToolCall& call) { return Through("capture", call); }
 }

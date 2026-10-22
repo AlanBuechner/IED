@@ -104,3 +104,76 @@ def profiler_live_capture(run):
 		run.shot("tasks")
 	library = run.request("prof.captures", {"wsId": ws})["captures"]
 	check(library and all(not c["live"] and c["metadata"]["app"] == "E2E Game" and c["metadata"]["frames"] > 10 for c in library), "each capture is kept with its metadata: %s" % library)
+
+
+def send_lock_game(env):
+	"""A finished capture of a lock two threads wanted (1 ns ticks): Main holds Queue from 10 to 50 ms while Loader waits
+	for it from 20 ms, then Loader holds it to 60 ms."""
+	address, token = env.split(";token=")
+	host, port = address.split(":")
+	w = itp.Writer().hello(app="Lock Game", pid=778, freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK)
+	work = w.srcloc("Work", defs, file="src/work.c", line=3)
+	queue = w.string("Queue", defs)
+	site = w.srcloc("Queue", defs, file="src/queue.c", line=12)
+	names = [w.string(name, defs) for name in ("Main", "Loader")]
+	defs.event("LockDef", lockId=1, nameStr=queue, srcLocId=site)
+	w.add(defs)
+	main = w.chunk(itp.THREAD_CHUNK, 1, 0).event("ThreadName", 0, nameStr=names[0]).event("ZoneBegin", 0, srcLocId=work)
+	w.add(main.event("LockObtain", 10 * MS, lock=2).event("LockRelease", 50 * MS, lock=2).event("ZoneEnd", 100 * MS))
+	loader = w.chunk(itp.THREAD_CHUNK, 2, 0).event("ThreadName", 0, nameStr=names[1]).event("ZoneBegin", 0, srcLocId=work)
+	loader.event("LockWait", 20 * MS, lock=2).event("LockObtain", 50 * MS, lock=2).event("LockRelease", 60 * MS, lock=2)
+	w.add(loader.event("ZoneEnd", 100 * MS))
+	w.add(w.chunk(itp.GLOBAL_CHUNK).event("Bye", reason=0))
+	with socket.create_connection((host, int(port))) as sock:
+		sock.sendall(w.bytes())
+
+
+def new_capture(run, ws, known):
+	deadline = time.monotonic() + 20
+	while time.monotonic() < deadline:
+		ended = [c["captureId"] for c in run.request("prof.captures", {"wsId": ws})["captures"] if c["captureId"] not in known and not c["live"]]
+		if ended:
+			return ended[0]
+		time.sleep(0.3)
+	raise AssertionError("the capture never ended")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def profiler_locks_and_notes(run):
+	"""Locks (F-PRF-18) and notes (F-PRF-19): the Locks window lists a lock two threads wanted; its row shows the
+	longest wait on the timeline with the hold's details; Note keeps a note on that wait, listed in the Notes window,
+	kept by the server and deleted from the window."""
+	page = run.open()
+	ws = page.evaluate("() => ied_shell.wsId")
+	listed = run.request("prof.captures", {"wsId": ws})
+	send_lock_game(listed["connect"]["env"])
+	capture = new_capture(run, ws, {c["captureId"] for c in listed["captures"]})
+	page.evaluate("() => ied_shell.commands.run('shell.showActivity', { id: 'ied.profiler' })")
+	if run.phone:
+		page.evaluate("() => ied_shell.commands.run('shell.showView', { id: 'ied.profiler.captures' })")
+	page.click(".prof-library .prof-capture[data-capture='%s']" % capture)
+	page.wait_for_selector(".prof-doc .prof-canvas", timeout=20000)
+	page.click(".prof-doc .tw-tab[data-panel='locks']")
+	run.wait_text(".prof-doc .stats tbody tr td:first-child", "Queue")
+	row = run.texts(".prof-doc .stats tbody tr td")
+	check(row[:4] == ["Queue", "src/queue.c:12", "1", "30.0"], "one wait of 30 ms on Queue: %s" % row[:4])
+	run.shot("locks")
+	page.click(".prof-doc .stats tbody tr")
+	run.wait_text(".prof-side", "Held alone")
+	side = page.inner_text(".prof-side")
+	check("Loader" in side and "30.0 ms" in side, "the longest wait's details: %s" % side[:200])
+	run.shot("wait")
+	page.click(".prof-doc .prof-bar button[title^='Add a note']")
+	page.fill(".dialog-veil input", "Loader waits for Queue")
+	page.keyboard.press("Enter")
+	page.click(".prof-doc .tw-tab[data-panel='notes']")
+	run.wait_text(".prof-doc .prof-note", "Loader waits for Queue")
+	check("0.020 s to 0.050 s" in page.inner_text(".prof-doc .prof-note"), "the note covers the wait")
+	kept = run.request("prof.annotations", {"captureId": capture})["annotations"]
+	check([(n["fromNs"], n["toNs"], n["by"]) for n in kept] == [(20 * MS, 50 * MS, "owner")], "the server keeps the note: %s" % kept)
+	run.shot("notes")
+	page.click(".prof-doc .prof-note button[title='Delete the note']")
+	page.click(".dialog-veil button:has-text('Delete')")
+	run.wait_text(".prof-doc .prof-empty", "No notes yet")
+	check(run.request("prof.annotations", {"captureId": capture})["annotations"] == [], "deleted on the server")

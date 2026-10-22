@@ -63,7 +63,7 @@
 			{ "command": "ied.profiler.show", "key": "ctrl+alt+f2" }
 		],
 		"systemMessageSections": [
-			{ "id": "profiler", "text": "The profiler holds the workspace's captures (.ied/local/captures). To find where time goes, read captures with the profile_* tools: profile_list, then profile_summary, profile_top_zones, profile_frame (\"worst\" for the slowest frame), profile_find_zone, profile_flame, profile_messages, profile_leaks and profile_compare; profile_capture runs the project's Profile task and records. Read the profiler skill before instrumenting code." }
+			{ "id": "profiler", "text": "The profiler holds the workspace's captures (.ied/local/captures). To find where time goes, read captures with the profile_* tools: profile_list, then profile_summary, profile_top_zones, profile_frame (\"worst\" for the slowest frame), profile_find_zone, profile_flame, profile_messages, profile_leaks, profile_locks and profile_compare; profile_capture runs the project's Profile task and records; profile_annotate marks a finding on the capture's timeline. Read the profiler skill before instrumenting code." }
 		],
 		"toolCalls": [
 			{
@@ -137,6 +137,23 @@
 				"parallelSafe": true,
 				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "group_by": { "enum": ["callstack", "pool", "thread"] }, "at_ms": { "type": "number" } }, "additionalProperties": false },
 				"function": "Profiler::LeaksTool"
+			},
+			{
+				"name": "profile_locks",
+				"description": "Lock contention in a capture: each lock's waits (time threads were blocked), contended holds (another thread waited as it was released), holds, threads and source, most waited for first; and the longest waits with who waited and when.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "by": { "enum": ["wait", "max_wait", "contended", "hold", "acquisitions"] }, "from_ms": { "type": "number" }, "to_ms": { "type": "number" }, "n": { "type": "integer", "minimum": 1, "maximum": 200 } }, "additionalProperties": false },
+				"function": "Profiler::LocksTool"
+			},
+			{
+				"name": "profile_annotate",
+				"description": "Adds a note to a capture's time range (from_ms to to_ms; to_ms left out for a moment), kept in its trace file: mark a finding where the owner will see it on the timeline. The summary lists a capture's notes.",
+				"class": "write",
+				"group": "profiler",
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "text": { "type": "string", "minLength": 1, "maxLength": 2000 } }, "required": ["from_ms", "text"], "additionalProperties": false },
+				"function": "Profiler::AnnotateTool"
 			},
 			{
 				"name": "profile_compare",

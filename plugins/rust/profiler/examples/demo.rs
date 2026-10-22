@@ -19,6 +19,7 @@ fn main() {
         update(frame);
         ied_profiler::frame();
     }
+    contend();
     ied_profiler::set_thread_name("Main loop done");
     ied_profiler::message(ied_profiler::Severity::Warning, "done");
     let block = [0u8; 64];
@@ -47,6 +48,26 @@ fn update(frame: u32) {
         .join()
         .unwrap();
     ied_profiler::plot("Frame", frame as f64);
+}
+
+static QUEUE: ied_profiler::Mutex<u32> = ied_profiler::mutex!("Queue", 0);
+
+// The main thread holds the queue while a thread waits for it, then takes it again without waiting.
+fn contend() {
+    let held = QUEUE.lock();
+    let (started, waiting) = std::sync::mpsc::channel();
+    let waiter = std::thread::Builder::new()
+        .name("Waiter".to_string())
+        .spawn(move || {
+            started.send(()).unwrap();
+            *QUEUE.lock() += 1;
+        })
+        .unwrap();
+    waiting.recv().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    drop(held);
+    waiter.join().unwrap();
+    *QUEUE.lock() += 1;
 }
 
 fn spin(count: u64) -> u64 {

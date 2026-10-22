@@ -154,13 +154,28 @@ namespace Profiler
 		return found;
 	}
 
+	// A file without an index block (a program's file mode, a capture cut short) gets one at its end - once nothing has
+	// written to it for a while, as a program may still be streaming into it.
+	static bool AppendIndex(const char* path, const TraceLayout& layout, Core::StringView metadata, Core::String& problem) {
+		FS::FileInfo info;
+		if (!FS::GetInfo(path, info) || Platform::UnixTimeNs() - info.modifiedNs < kQuietBeforeIndexNs) {
+			problem = Core::String("a program may still be writing this trace file; try again once it is done");
+			return false;
+		}
+		FS::File file = FS::File(path, "r+b");
+		if (!file.IsOpen()) {
+			problem = Core::String("cannot write ") + path;
+			return false;
+		}
+		Core::Array<uint8> tail = Tail(layout.fileBytes, metadata);
+		file.Seek(layout.fileBytes);
+		return file.Write((const void*)tail.Data(), tail.Count()) == tail.Count();
+	}
+
 	bool RewriteMetadata(const char* path, Core::StringView metadata, Core::String& problem) {
 		TraceLayout layout;
 		if (!ReadLayout(path, layout, problem)) return false;
-		if (!layout.finished) {
-			problem = Core::String("the trace file has no index block to rewrite");
-			return false;
-		}
+		if (!layout.finished) return AppendIndex(path, layout, metadata, problem);
 		Core::StringBuilder padded;
 		padded.Append(metadata);
 		const int64 oldTail = layout.fileBytes - layout.streamBytes;

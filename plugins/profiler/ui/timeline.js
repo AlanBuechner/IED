@@ -1,12 +1,13 @@
 // timeline.js - the timeline view (docs/16, mockup 06): asks the server for what a range shows at the canvas's width
 // (prof.timeline merges sub-pixel zones), keeps the last answer drawn while a new one is on its way, and turns input
 // into view changes. Wheel zooms at the pointer, a drag pans (time and lanes), Shift+drag selects a range, a click
-// selects a zone (or folds a lane from its label, or zooms to a frame from the frame row), a double click zooms to a
-// zone; two fingers pinch. Keys: arrows pan and zoom, Home shows everything, F fits the selection, Esc clears it.
+// selects a zone or a lock hold (or folds a lane from its label, zooms to a frame from the frame row, picks a note from
+// the notes row), a double click zooms to it; two fingers pinch. Keys: arrows pan and zoom, Home shows everything, F
+// fits the selection, Esc clears it.
 
 import { h } from "/ui-kit/dom.js";
-import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt } from "./model.js";
-import { TimelinePainter, readTheme, HEADER_HEIGHT, RULER_HEIGHT } from "./timelinedraw.js";
+import { TimeView, answerServes, fetchRange, layoutLanes, laneAt, zoneAt, lockAt, noteAt, lockLabel } from "./model.js";
+import { TimelinePainter, readTheme, headerHeight, HEADER_HEIGHT, RULER_HEIGHT } from "./timelinedraw.js";
 import { duration } from "./format.js";
 
 const PHONE = "(max-width: 719px)";
@@ -21,10 +22,14 @@ function rowHeightFor(phone) {
 
 export class TimelineView {
 	// `host` is the element to fill; `fetch(from, to, width)` resolves to a prof.timeline answer.
-	constructor(host, { fetch, onSelect, onRange, onView, budgetNs }) {
+	constructor(host, { fetch, onSelect, onRange, onView, onNote, budgetNs }) {
 		this.host = host;
 		this.fetch = fetch;
 		this.onSelect = onSelect || (() => {});
+		this.onNote = onNote || (() => {});
+		this.notes = [];
+		this.selectedNote = null;
+		this.selectedLock = null;
 		this.onRange = onRange || (() => {});
 		this.onView = onView || (() => {});
 		this.budgetNs = budgetNs || 16666667;
@@ -65,7 +70,25 @@ export class TimelineView {
 
 	options() {
 		const rowHeight = rowHeightFor(this.phone);
-		return { rowHeight, pad: 3, messageHeight: 26, plotHeight: 36, collapsed: this.collapsed, slop: this.phone ? 6 : 2 };
+		return { rowHeight, lockRowHeight: this.phone ? 14 : 12, pad: 3, messageHeight: 26, plotHeight: 36, collapsed: this.collapsed, slop: this.phone ? 6 : 2 };
+	}
+
+	// The ruler, the frame row and the notes row when there are notes.
+	get header() {
+		return headerHeight(this.notes);
+	}
+
+	// The capture's notes, drawn on their row and as bands over the lanes.
+	setNotes(notes) {
+		this.notes = notes || [];
+		if (this.selectedNote && !this.notes.some((n) => n.id === this.selectedNote)) this.selectedNote = null;
+		this.clampScroll();
+		this.schedulePaint();
+	}
+
+	selectNote(id) {
+		this.selectedNote = id;
+		this.schedulePaint();
 	}
 
 	// --- Data -------------------------------------------------------------------------------------------------------
@@ -167,11 +190,12 @@ export class TimelineView {
 			ctx, width: this.width, height: this.height, labelWidth: this.labelWidth, view: this.view, answer: this.answer,
 			layout: this.layout || { lanes: [], height: 0 }, scrollY: this.scrollY, theme: this.theme, options: this.options(),
 			selected: this.selected, range: this.range, budgetNs: this.budgetNs, phone: this.phone,
+			notes: this.notes, selectedNote: this.selectedNote, selectedLock: this.selectedLock,
 		});
 	}
 
 	clampScroll() {
-		const most = Math.max(0, (this.layout ? this.layout.height : 0) - (this.height - HEADER_HEIGHT));
+		const most = Math.max(0, (this.layout ? this.layout.height : 0) - (this.height - this.header));
 		this.scrollY = Math.min(Math.max(0, this.scrollY), most);
 	}
 
@@ -187,13 +211,21 @@ export class TimelineView {
 	}
 
 	hit(x, y) {
-		if (!this.layout || y < HEADER_HEIGHT) return null;
-		const ly = y - HEADER_HEIGHT + this.scrollY;
+		if (!this.layout || y < this.header) return null;
+		const ly = y - this.header + this.scrollY;
 		const lane = laneAt(this.layout, ly);
 		if (!lane) return null;
 		if (x < this.labelWidth) return { lane, label: true };
-		const zone = zoneAt(lane, this.view, this.trackWidth(), x - this.labelWidth, ly, this.options());
+		const options = this.options();
+		const lock = lockAt(lane, this.view, this.trackWidth(), x - this.labelWidth, ly, options);
+		if (lock) return { lane, lock };
+		const zone = zoneAt(lane, this.view, this.trackWidth(), x - this.labelWidth, ly, options);
 		return { lane, zone };
+	}
+
+	noteAtPoint(p) {
+		if (p.y < HEADER_HEIGHT || p.y >= this.header || p.x < this.labelWidth) return null;
+		return noteAt(this.notes, this.view, this.trackWidth(), p.x - this.labelWidth, this.phone ? 8 : 4);
 	}
 
 	frameAt(x) {
@@ -318,6 +350,14 @@ export class TimelineView {
 			if (frame) this.zoomTo(frame[1], frame[2]);
 			return;
 		}
+		if (p.y >= HEADER_HEIGHT && p.y < this.header) {
+			const note = this.noteAtPoint(p);
+			if (note) {
+				this.selectNote(note.id);
+				this.onNote(note);
+			}
+			return;
+		}
 		const hit = this.hit(p.x, p.y);
 		if (hit && hit.label) {
 			if (this.collapsed.has(hit.lane.id)) this.collapsed.delete(hit.lane.id);
@@ -325,19 +365,39 @@ export class TimelineView {
 			this.relayout();
 			return;
 		}
+		if (hit && hit.lock) {
+			if (hit.lock.item[3] < 0) this.zoomTo(hit.lock.item[0], hit.lock.item[1]);
+			else this.selectLock({ laneId: hit.lane.id, track: hit.lane.source.track, ...hit.lock });
+			return;
+		}
 		this.select(hit && hit.zone ? { laneId: hit.lane.id, zone: hit.zone, lane: hit.lane } : null);
 	}
 
 	select(selected) {
 		this.selected = selected;
+		this.selectedLock = null;
 		this.schedulePaint();
 		this.onSelect(selected);
 	}
 
+	// A lock hold picked: {laneId, track, row, lock, name, item}; the zone selection gives way to it.
+	selectLock(lock) {
+		this.selected = null;
+		this.selectedLock = lock;
+		this.schedulePaint();
+		this.onSelect(lock ? { kind: "lock", ...lock } : null);
+	}
+
 	doubleClick(e) {
 		const p = this.point(e);
+		const note = this.noteAtPoint(p);
+		if (note) {
+			this.zoomTo(note.fromNs, Math.max(note.toNs, note.fromNs + 1));
+			return;
+		}
 		const hit = this.hit(p.x, p.y);
 		if (hit && hit.zone) this.zoomTo(hit.zone[1], hit.zone[2]);
+		else if (hit && hit.lock) this.zoomTo(hit.lock.item[0], hit.lock.item[1]);
 	}
 
 	zoomTo(from, to) {
@@ -359,6 +419,7 @@ export class TimelineView {
 			Escape: () => {
 				this.range = null;
 				this.select(null);
+				this.selectNote(null);
 			},
 		}[e.key];
 		if (!handled) return;
@@ -372,18 +433,29 @@ export class TimelineView {
 		const range = this.normalizedRange();
 		if (range) this.view.fit(range.from, range.to, 0.02);
 		else if (this.selected) this.view.fit(this.selected.zone[1], this.selected.zone[2], 0.05);
+		else if (this.selectedLock) this.view.fit(this.selectedLock.item[0], this.selectedLock.item[1], 0.05);
 	}
 
-	hover(p) {
+	// What the pointer is over, as the tip says it: a note, a lock hold or a zone.
+	tipText(p) {
+		const note = this.noteAtPoint(p);
+		if (note) return (note.by === "ai" ? "AI note: " : "Note: ") + note.text;
 		const hit = this.hit(p.x, p.y);
-		if (!hit || !hit.zone) {
-			this.hideTip();
-			return;
-		}
+		if (hit && hit.lock) return lockLabel(hit.lock.name, hit.lock.item, duration) + " \u00b7 " + hit.lane.label;
+		if (!hit || !hit.zone) return null;
 		const zone = hit.zone;
 		const merged = zone[3] < 0;
 		const name = merged ? zone[4] + " zones" : (this.answer.names || [])[zone[3]] || "?";
-		this.tip.textContent = name + " \u00b7 " + duration(zone[2] - zone[1]) + (hit.lane.kind === "task" ? "" : " \u00b7 " + hit.lane.label);
+		return name + " \u00b7 " + duration(zone[2] - zone[1]) + (hit.lane.kind === "task" ? "" : " \u00b7 " + hit.lane.label);
+	}
+
+	hover(p) {
+		const text = this.tipText(p);
+		if (!text) {
+			this.hideTip();
+			return;
+		}
+		this.tip.textContent = text;
 		this.tip.hidden = false;
 		const x = Math.min(p.x + 14, this.width - this.tip.offsetWidth - 4);
 		this.tip.style.left = Math.max(0, x) + "px";

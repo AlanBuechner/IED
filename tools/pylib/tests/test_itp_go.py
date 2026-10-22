@@ -50,8 +50,9 @@ class FileTraceTests(unittest.TestCase):
 	def test_each_goroutine_records_on_its_own_track(self):
 		names = clients.thread_names(self.events)
 		self.assertEqual(["Main"] + ["Worker"] * 5, names[:6])
-		self.assertEqual(7, len(names))
+		self.assertEqual(8, len(names))
 		self.assertRegex(names[6], r"^goroutine \d+$")
+		self.assertEqual("Waiter", names[7])
 		zones = list(clients.zones_by_track(self, self.events).values())
 		self.assertIn(["Spin"] + ["Update", "Load", "a.bin", "Spin", "b.bin", "Spin"] * 5, zones)
 		self.assertEqual(5, zones.count(["Physics.Step", "Spin"]))
@@ -80,6 +81,9 @@ class FileTraceTests(unittest.TestCase):
 		self.assertEqual(set(begun), {e["taskId"] for e in of(self.events, "TaskEnd")})
 		arena = [e for e in self.events if e["name"] in ("Alloc", "Free")]
 		self.assertEqual([("Alloc", 2, 64), ("Free", 2, None)], [(e["name"], e["poolId"], e.get("size")) for e in arena])
+
+	def test_a_mutex_records_its_waits_and_holds(self):
+		clients.check_lock(self, self.events, "Queue", 1)
 
 	def test_the_runtime_reports_collections_heap_and_goroutines(self):
 		begins, ends = of(self.events, "GcBegin"), of(self.events, "GcEnd")

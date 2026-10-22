@@ -4,8 +4,11 @@
 // from IED_PROFILER and the session ends at exit.
 #include "Profiling/Itp.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <mutex>
 #include <new>
 #include <string>
 #include <thread>
@@ -31,6 +34,24 @@ void operator delete(void* ptr) noexcept
 void operator delete(void* ptr, size_t) noexcept
 {
 	operator delete(ptr);
+}
+
+static ITP_LOCKABLE(std::mutex, queue, "Queue");
+
+// The main thread holds the queue while a thread waits for it, then takes it again without waiting.
+static void Contend()
+{
+	std::atomic<bool> waiting{ false };
+	queue.lock();
+	std::thread waiter([&] {
+		waiting = true;
+		std::lock_guard<decltype(queue)> held(queue);
+	});
+	while (!waiting) std::this_thread::yield();
+	std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	queue.unlock();
+	waiter.join();
+	std::lock_guard<decltype(queue)> again(queue);
 }
 
 static int Spin(int count)
@@ -83,6 +104,7 @@ int main(int argc, char** argv)
 		Frame(frame);
 		ITP_FRAME();
 	}
+	Contend();
 	itp_message(ITP_WARNING, "done", 4);
 	int block = 0;
 	itp_pool_name(2, "Arena");

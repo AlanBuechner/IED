@@ -93,6 +93,27 @@ def game_stream(token, frames=3, bye=True):
 	return w.bytes()
 
 
+def lock_stream(token):
+	"""A lock, "Queue", used by two threads (1 ns ticks): thread 1 holds it 10..50 us while thread 2 waits from 20 us,
+	then thread 2 holds it to 60 us."""
+	w = itp.Writer().hello(app="Locks", freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK, 0, 0)
+	work = w.srcloc("Work", defs, file="src/work.cf", line=3)
+	queue = w.string("Queue", defs)
+	site = w.srcloc("Queue", defs, file="src/queue.cf", line=12)
+	defs.event("LockDef", lockId=1, nameStr=queue, srcLocId=site)
+	w.add(defs)
+	us = 1000
+	first = w.chunk(itp.THREAD_CHUNK, 1, 0).event("ZoneBegin", 0, srcLocId=work)
+	first.event("LockObtain", 10 * us, lock=2).event("LockRelease", 50 * us, lock=2).event("ZoneEnd", 100 * us)
+	w.add(first)
+	second = w.chunk(itp.THREAD_CHUNK, 2, 0).event("ZoneBegin", 0, srcLocId=work)
+	second.event("LockWait", 20 * us, lock=2).event("LockObtain", 50 * us, lock=2).event("LockRelease", 60 * us, lock=2).event("ZoneEnd", 100 * us)
+	w.add(second)
+	w.add(w.chunk(itp.GLOBAL_CHUNK, 0, 0).event("Bye", reason=0))
+	return w.bytes()
+
+
 def pprof_profile():
 	"""A pprof CPU profile, gzip-compressed: main -> work (3 samples) and main -> idle (1 sample)."""
 	def varint(value):
@@ -127,6 +148,15 @@ async def require_profiler(test, client):
 		if plugin["id"] == "ied.profiler" and plugin.get("code", {}).get("state") == "active":
 			return
 	test.skipTest("the server was built without plugins/profiler/code")
+
+
+async def require_plugin(test, client, plugin_id):
+	"""Fails with the plugin's state and problems unless it loaded: an importer's contribution comes only from a loaded
+	plugin."""
+	listed = {p["id"]: p for p in (await client.request("plugins.list", {"wsId": "w1"}))["plugins"]}
+	plugin = listed.get(plugin_id)
+	test.assertIsNotNone(plugin, "%s is not in the server's plugins: %s" % (plugin_id, sorted(listed)))
+	test.assertEqual("loaded", plugin["state"], "%s did not load: %s" % (plugin_id, plugin.get("problems")))
 
 
 class ProfilerServer(ServerTestCase):
@@ -222,6 +252,66 @@ class ProfilerTests(ProfilerServer):
 		end, meta = itp.stream_end(trace)
 		self.assertEqual(data + itp.Writer().chunk(itp.GLOBAL_CHUNK).event("Bye", reason=0).encode(), trace[:end], "the stream is kept as it arrived")
 		self.assertEqual(("Game", 10, 3, "bye"), (meta["app"], meta["zones"], meta["frames"], meta["ended"]))
+
+	async def test_locks_answer_what_waited_for_what(self):
+		capture = await self.capture_that_ends(lock_stream(self.token()))
+		rows = (await self.query("prof.locks", captureId=capture))["rows"]
+		self.assertEqual(1, len(rows))
+		row = rows[0]
+		self.assertEqual(("Queue", "src/queue.cf", 12), (row["name"], row["file"], row["line"]))
+		self.assertEqual((2, 1, 1, 30_000), (row["acquisitions"], row["contended"], row["blocked"], row["waitNs"]))
+		self.assertEqual({"track": 1, "index": 0, "fromNs": 20_000, "toNs": 50_000}, {k: row["worst"][k] for k in ("track", "index", "fromNs", "toNs")})
+		hold = await self.query("prof.lockHold", captureId=capture, lock=1, track=0, index=0)
+		self.assertEqual(("contended", 40_000), (hold["state"], hold["holdNs"]))
+		self.assertEqual([(1, 20_000, 50_000)], [(w["track"], w["fromNs"], w["toNs"]) for w in hold["waitedBy"]])
+		with self.assertRaises(RpcFailure) as missing:
+			await self.query("prof.lockHold", captureId=capture, lock=1, track=0, index=7)
+		self.assertEqual("not_found", missing.exception.code)
+		lanes = (await self.query("prof.timeline", captureId=capture, width=1000))["lanes"]
+		self.assertEqual([[[10_000, 50_000, 1, 0]], [[20_000, 50_000, 2, 0], [50_000, 60_000, 0, 0]]], [lane["locks"][0]["items"] for lane in lanes])
+		text = (await self.client.request("plugins.call", {"name": "profiler.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "locks", "args": {"capture": capture}}}))["result"]["text"]
+		self.assertIn("Queue", text)
+		self.assertIn("30.0 us", text)
+
+	async def test_notes_are_kept_in_the_trace_file(self):
+		capture = await self.capture_that_ends(game_stream(self.token()))
+		topic = "prof:" + capture
+		await self.client.sub([topic])
+		added = (await self.query("prof.annotate", captureId=capture, **{"from": 5 * MS, "to": 2 * MS, "text": "  slow physics  "}))["annotation"]
+		self.assertEqual((2 * MS, 5 * MS, "slow physics", "owner"), (added["fromNs"], added["toNs"], added["text"], added["by"]), "the range in order, the text trimmed")
+		pushed = await self.client.wait_for(topic, lambda f: f.get("kind") == "annotations", timeout=10)
+		self.assertEqual(["slow physics"], [n["text"] for n in pushed[-1]["data"]["annotations"]])
+		with self.assertRaises(RpcFailure) as empty:
+			await self.query("prof.annotate", captureId=capture, **{"from": 0, "text": "   "})
+		self.assertEqual("bad_request", empty.exception.code)
+		said = await self.client.request("plugins.call", {"name": "profiler.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "annotate", "args": {"capture": capture, "from_ms": 20, "text": "GC pause"}}})
+		self.assertIn("Added note", said["result"]["text"])
+		self.client.abort()
+		self.server.stop(False)
+		self.start()
+		await self.connect()
+		notes = (await self.query("prof.annotations", captureId=capture))["annotations"]
+		self.assertEqual([("slow physics", "owner"), ("GC pause", "ai")], [(n["text"], n["by"]) for n in notes], "both survive a restart, read from the file")
+		await self.query("prof.updateAnnotation", captureId=capture, id=notes[0]["id"], text="physics spike")
+		await self.query("prof.deleteAnnotation", captureId=capture, id=notes[1]["id"])
+		self.assertEqual(["physics spike"], [n["text"] for n in (await self.query("prof.annotations", captureId=capture))["annotations"]])
+		summary = await self.client.request("plugins.call", {"name": "profiler.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "summary", "args": {"capture": capture}}})
+		self.assertIn("Notes on the capture", summary["result"]["text"])
+		self.assertIn("physics spike", summary["result"]["text"])
+		with self.assertRaises(RpcFailure) as gone:
+			await self.query("prof.deleteAnnotation", captureId=capture, id="n99")
+		self.assertEqual("not_found", gone.exception.code)
+
+	async def test_a_live_captures_notes_are_written_when_it_ends(self):
+		sock = await self.send(game_stream(self.token(), bye=False))
+		frame = (await self.client.wait_for("profs:w1", lambda f: f.get("kind") == "captures.changed" and any(c["live"] for c in f["data"]["captures"]), timeout=15))[-1]
+		capture = [c for c in frame["data"]["captures"] if c["live"]][0]["captureId"]
+		await self.query("prof.annotate", captureId=capture, **{"from": MS, "text": "while live"})
+		sock.close()
+		await self.client.sub(["prof:" + capture])
+		await self.client.wait_for("prof:" + capture, lambda f: f.get("kind") == "ended" or (f.get("t") == "snap" and not f["data"]["live"]), timeout=15)
+		listed = [c for c in (await self.query("prof.captures", wsId="w1"))["captures"] if c["captureId"] == capture][0]
+		self.assertEqual(["while live"], [n["text"] for n in listed["metadata"]["annotations"]], "in the file's metadata")
 
 	async def test_queries_answer_from_a_finished_capture(self):
 		capture = await self.capture_that_ends(game_stream(self.token()))
@@ -391,6 +481,7 @@ class ImporterTests(ProfilerServer):
 		pass
 
 	async def import_file(self, name, text, trusted=True):
+		await require_plugin(self, self.client, "test.importer")
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": trusted})
 		if text is not None:
 			write(os.path.join(self.ws, name), text)
@@ -487,6 +578,7 @@ class GoTraceImportTests(ServerTestCase):
 		self.client.abort()
 
 	async def test_a_go_execution_trace_imports(self):
+		await require_plugin(self, self.client, "ied.go")
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
 		capture = (await self.client.request("prof.import", {"wsId": "w1", "path": "trace.out"}))["captureId"]
 		timeline = await self.client.request("prof.timeline", {"captureId": capture, "width": 400})
