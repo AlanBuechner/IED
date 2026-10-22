@@ -116,5 +116,25 @@ namespace Testing
 	// names read as field definitions, and the element type keeps its real QualType classification (primitive -> builtin).
 	TEST_FUNC(Lsp.Features.SemanticTokens)
 	void TestSwizzleViewPackedKeywordLanesAndElementType();
+
+	// BUG-329: `char` of `const char*` and `uint8` of `uint8[4]` read as built in, like a bare primitive.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestPrimitiveBehindPointerOrArrayIsBuiltin();
+
+	// BUG-330 / BUG-333: the type name of a constructor call keeps its own kind (struct), not variable.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestConstructorCallNamesItsType();
+
+	// BUG-331: a method called without `this.` inside another method is a method, as through `.`.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestImplicitThisCallIsMethod();
+
+	// BUG-334: an inherited static field reached through `Derived::` is a field, not a method.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestInheritedStaticFieldThroughOwnerIsField();
+
+	// BUG-335: a scoped enum constant through `Owner::` is a variable (an enum constant), as unscoped ones are.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestScopedEnumConstantThroughOwnerIsVariable();
 	};
 } // namespace Testing

@@ -665,4 +665,119 @@ int32 main() { return 0; })";
 
 		TEST_PASSED();
 	}
+
+	void LspSemanticTokensTest::TestPrimitiveBehindPointerOrArrayIsBuiltin()
+	{
+		const std::string program =
+			R"(int32 Count(const char* text, int32* total) {
+	uint8[4] bytes;
+	return 0;
+}
+int32 main() { return 0; }
+)";
+		auto session = Make("Pointers.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("Pointers.cf"));
+
+		auto charTok = TokenAt(result, program, "char", 1);
+		TEST_ASSERT(charTok.found);
+		TEST_ASSERT_EQ(charTok.kind, (uint32)SemanticTokenKind::Type);
+		TEST_ASSERT((charTok.mods & SemanticTokenModifiers::Builtin) != 0);
+
+		auto pointee = TokenAt(result, program, "int32", 2); // `int32* total`
+		TEST_ASSERT(pointee.found);
+		TEST_ASSERT((pointee.mods & SemanticTokenModifiers::Builtin) != 0);
+
+		auto element = TokenAt(result, program, "uint8", 1);
+		TEST_ASSERT(element.found);
+		TEST_ASSERT((element.mods & SemanticTokenModifiers::Builtin) != 0);
+		TEST_PASSED();
+	}
+
+	void LspSemanticTokensTest::TestConstructorCallNamesItsType()
+	{
+		const std::string program =
+			R"(struct Span {
+	[operator("create")] void Init(int32 count) { n = count; }
+	int32 n;
+};
+Span Make() { return Span(3); }
+int32 main() { return 0; }
+)";
+		auto session = Make("Construct.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("Construct.cf"));
+
+		auto call = TokenAt(result, program, "Span", 3); // `return Span(3)`
+		TEST_ASSERT(call.found);
+		TEST_ASSERT_EQ(call.kind, (uint32)SemanticTokenKind::Struct);
+		TEST_PASSED();
+	}
+
+	void LspSemanticTokensTest::TestImplicitThisCallIsMethod()
+	{
+		const std::string program =
+			R"(class Box {
+	public int32 Size() const { return 1; }
+	public int32 Twice() const { return Size() * 2; }
+	public int32 Thrice() const { return this.Size() * 3; }
+};
+int32 main() { return 0; }
+)";
+		auto session = Make("ImplicitThis.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("ImplicitThis.cf"));
+
+		auto bare = TokenAt(result, program, "Size", 2); // `return Size() * 2`
+		TEST_ASSERT(bare.found);
+		TEST_ASSERT_EQ(bare.kind, (uint32)SemanticTokenKind::Method);
+
+		auto explicitThis = TokenAt(result, program, "Size", 3); // `this.Size()`
+		TEST_ASSERT(explicitThis.found);
+		TEST_ASSERT_EQ(explicitThis.kind, (uint32)SemanticTokenKind::Method);
+		TEST_PASSED();
+	}
+
+	void LspSemanticTokensTest::TestInheritedStaticFieldThroughOwnerIsField()
+	{
+		const std::string program =
+			R"(struct Base {
+	static int32 total;
+	static int32 Read() { return 1; }
+};
+struct Derived : public Base {
+};
+int32 main() { return Derived::total + Derived::Read(); }
+)";
+		auto session = Make("StaticField.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("StaticField.cf"));
+
+		auto field = TokenAt(result, program, "total", 2); // `Derived::total`
+		TEST_ASSERT(field.found);
+		TEST_ASSERT_EQ(field.kind, (uint32)SemanticTokenKind::Field);
+
+		auto method = TokenAt(result, program, "Read", 2); // `Derived::Read()`
+		TEST_ASSERT(method.found);
+		TEST_ASSERT_EQ(method.kind, (uint32)SemanticTokenKind::Method);
+		TEST_PASSED();
+	}
+
+	void LspSemanticTokensTest::TestScopedEnumConstantThroughOwnerIsVariable()
+	{
+		const std::string program =
+			R"(enum class Mode { On, Off }
+int32 main() {
+	Mode m = Mode::Off;
+	return 0;
+}
+)";
+		auto session = Make("ScopedEnum.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("ScopedEnum.cf"));
+
+		auto constant = TokenAt(result, program, "Off", 2); // `Mode::Off`
+		TEST_ASSERT(constant.found);
+		TEST_ASSERT_EQ(constant.kind, (uint32)SemanticTokenKind::Variable);
+
+		auto owner = TokenAt(result, program, "Mode", 3); // the `Mode` of `Mode::Off`
+		TEST_ASSERT(owner.found);
+		TEST_ASSERT_EQ(owner.kind, (uint32)SemanticTokenKind::Enum);
+		TEST_PASSED();
+	}
 } // namespace Testing

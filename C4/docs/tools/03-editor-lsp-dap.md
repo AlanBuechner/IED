@@ -52,9 +52,9 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 | Lifecycle | `initialize` (answers `positionEncoding`: `utf-8` when the client offers it, else `utf-16`; request ids, numbers or strings, come back as sent), `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration` |
 | Sync | `didOpen`, `didChange`, `didClose`, `publishDiagnostics` |
 | Navigation | `definition` (a function's body: its out-of-line definition when it has one), `declaration`, `typeDefinition`, `implementation`, `references` (every file, the declarations first with `context.includeDeclaration`), `documentHighlight` |
-| Information | `hover`, `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members) |
+| Information | `hover` (a reference shows its declaration; a type written in a declaration shows that type, a parameter's name the parameter), `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members) |
 | Symbols | `documentSymbol`, `workspace/symbol` (names containing the query, any case, inside namespaces and types too; an out-of-line method's container is its type) |
-| Presentation | `semanticTokens/full` (21 token types: the 19 standard ones plus the C4 `controlFlow` kind and `preprocessor` for directive keywords - `#define`, `#if`, ... and `include`; modifiers include `builtin`, used for primitives; a token never crosses a line - a block comment is one token per line), `foldingRange` |
+| Presentation | `semanticTokens/full` (21 token types: the 19 standard ones plus the C4 `controlFlow` kind and `preprocessor` for directive keywords - `#define`, `#if`, ... and `include`; modifiers include `builtin`, used for primitives, also behind a pointer or an array (`char` of `const char*`); a type named in an expression (a constructor call) keeps its own kind, and a method called through an implicit `this` is a `method`; a token never crosses a line - a block comment is one token per line), `foldingRange` |
 | Edits | `rename` (a function's declaration, its out-of-line definition and every use), `prepareRename`, `formatting`, `rangeFormatting` |
 | Code actions | quick fixes, create-definition, tidy |
 

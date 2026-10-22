@@ -9,6 +9,7 @@
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
+#include "Parser/Nodes/Expressions/FunctionCallNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include "Parser/Nodes/Statements/ForLoopNode.h"
 #include <algorithm>
@@ -26,6 +27,37 @@ namespace C4LSP::Server
 		}
 
 		uint32 UnitIdOf(const Scripting::AstNode& node) { return node.startLocation.sourceId; }
+
+		/// Of a function name's overload set, the record whose declarations hold `fn`; else its first (overloads share
+		/// their scope and containing type); null when `info` names no function.
+		const Scripting::FunctionRecord* RecordAmong(const Scripting::SymbolInfo* info, const Scripting::AstNode& fn)
+		{
+			if (!info || info->kind != Scripting::SymbolKind::Function || info->functions.Empty())
+				return nullptr;
+			for (const Scripting::FunctionRecord* rec : info->functions)
+				for (const Scripting::AstNode* declaration : rec->declarations)
+					if (declaration == &fn)
+						return rec;
+			return info->functions[0];
+		}
+
+		bool IsTypeDeclaration(const Scripting::AstNode* node)
+		{
+			if (!node)
+				return false;
+			const Scripting::NodeType type = node->Type();
+			return type == Scripting::NodeType::ObjectDefinition || type == Scripting::NodeType::EnumDefinition ||
+				type == Scripting::NodeType::UnionDefinition || type == Scripting::NodeType::AliasDefinition;
+		}
+
+		/// What calling a function of type `callee` gives: a function type's return type; a resolved method already
+		/// carries its return type.
+		const Scripting::Type* ReturnTypeOf(const Scripting::Type* callee)
+		{
+			if (const auto* function = dynamic_cast<const Scripting::FunctionType*>(callee))
+				return function->GetReturnType();
+			return callee;
+		}
 
 		const Scripting::ObjectType* UnwrapObject(const Scripting::Type* t)
 		{
@@ -153,41 +185,48 @@ namespace C4LSP::Server
 		if (!fn.GetName())
 			return ctx;
 
-		std::string name = JoinSegments(*fn.GetName());
+		if (const Scripting::FunctionRecord* rec = RecordOf(path, fi, ctx.unitId))
+		{
+			ctx.enclosingType = rec->containingType ? rec->containingType : EnclosingObject(path);
+			ctx.scope = rec->scope; // the function's enclosing namespace/class - unqualified lookup context
+		}
+		return ctx;
+	}
+
+	// The record HIR lowers for the function `path[fi]` declares or defines, so containingType and scope match the
+	// compiler's. Its name is registered in its class's scope (a method defined in its class) or under every enclosing
+	// namespace (`N::Find` for a `Find` in `namespace N`, tried with all of them first, then fewer); of the overloads a
+	// name finds, the one whose declarations hold this node. An argument-free query is the last resort only: it misses
+	// every function that takes parameters.
+	const Scripting::FunctionRecord* SemanticResolver::RecordOf(const Core::Vector<const Scripting::AstNode*>& path, int fi, uint32 unitId) const
+	{
+		const auto& fn = static_cast<const Scripting::FunctionDefinitionNode&>(*path[fi]);
+		const std::string name = JoinSegments(*fn.GetName());
 		const Scripting::ObjectType* receiver = EnclosingObject(path);
-		const Scripting::FunctionRecord* rec = nullptr;
-		auto qctx = [&](const Scripting::Scope* scope) {
-			Scripting::LookupContext c;
-			c.unitId = ctx.unitId;
-			c.enclosingType = receiver;
-			c.scope = scope;
-			return c;
-		};
-		// The root sees a function declared inside namespaces by its qualified name (`N::Find` for a `Find` in
-		// `namespace N`), so try the name with every enclosing namespace first, then with fewer.
+		if (receiver)
+			if (const Scripting::FunctionRecord* rec = RecordAmong(FindVisibleQualified(m_Model, name, 0, m_Model.TypeScope(receiver)), fn))
+				return rec;
+
 		std::vector<std::string> namespaces; // innermost first
 		for (int i = fi - 1; i >= 0; --i)
 			if (path[i]->Type() == Scripting::NodeType::Namespace)
 				namespaces.push_back(static_cast<const Scripting::NamespaceNode&>(*path[i]).Name());
-		// A method needs its class context to resolve; a free function resolves from root. Try both so the
-		// record we get is the one HIR would lower - containingType and scope then match the compiler's.
-		const Core::Vector<const Scripting::Type*> noArguments;
 		for (size_t depth = namespaces.size() + 1; depth-- > 0;)
 		{
 			std::string qualified = name;
 			for (size_t k = 0; k < depth; ++k)
 				qualified = namespaces[k] + "::" + qualified;
-			if (m_Model.QueryFunction(qualified, nullptr, nullptr, noArguments, qctx(nullptr), &rec).Ok() ||
-				(receiver && m_Model.QueryFunction(qualified, receiver, nullptr, noArguments, qctx(nullptr), &rec).Ok()))
-			{
-				ctx.enclosingType = rec->containingType ? rec->containingType : receiver;
-				break;
-			}
-			rec = nullptr;
+			if (const Scripting::FunctionRecord* rec = RecordAmong(QuerySym(m_Model, qualified, unitId), fn))
+				return rec;
 		}
-		if (rec)
-			ctx.scope = rec->scope; // the function's enclosing namespace/class - unqualified lookup context
-		return ctx;
+
+		Scripting::LookupContext lookup;
+		lookup.unitId = unitId;
+		lookup.enclosingType = receiver;
+		const Scripting::FunctionRecord* rec = nullptr;
+		if (m_Model.QueryFunction(name, nullptr, nullptr, {}, lookup, &rec).Ok() || (receiver && m_Model.QueryFunction(name, receiver, nullptr, {}, lookup, &rec).Ok()))
+			return rec;
+		return nullptr;
 	}
 
 	const Scripting::SymbolInfo* SemanticResolver::Lookup(const std::string& name, uint32 unitId,
@@ -311,17 +350,32 @@ namespace C4LSP::Server
 			return res;
 		}
 
-		// 3) A function name in expression position (call callee, decay, or bare reference).
-		auto fn = m_Model.QueryFunction(name, nullptr, nullptr, Core::Vector<const Scripting::Type*>(), qctx);
-		if (fn.Ok())
+		// 3) A function name in expression position (call callee, decay, or bare reference). The arguments are not
+		//    known here, so any overload names it: the one an argument-free call picks, else the first of the set.
+		const Scripting::FunctionRecord* picked = nullptr;
+		auto fn = m_Model.QueryFunction(name, nullptr, nullptr, Core::Vector<const Scripting::Type*>(), qctx, &picked);
+		const Scripting::SymbolInfo* info = FindVisibleQualified(m_Model, name, 0, ctx.scope);
+		const bool overloads = info && info->kind == Scripting::SymbolKind::Function && !info->functions.Empty();
+		if (fn.Ok() || overloads)
 		{
+			const Scripting::FunctionRecord* rec = fn.Ok() ? picked : info->functions[0];
 			NodeResolution res;
 			res.isFunction = true;
-			res.type = fn.value;
-			const Scripting::SymbolInfo* info = FindVisibleQualified(m_Model, name, 0, ctx.scope);
+			res.type = fn.Ok() ? fn.value : rec->type;
 			res.declaration = info ? info->declNode : nullptr;
+			if (!res.declaration && rec && !rec->declarations.Empty())
+				res.declaration = rec->declarations[0]; // a function's symbol keeps no node; its record has every one
 			return res;
 		}
+
+		// 4) A type named as a value: the callee of a constructor call (`StringView(text)`).
+		if (info && info->kind == Scripting::SymbolKind::Type && info->type)
+			return { Scripting::TypeHandle::UnwrapToValue(info->type), info->declNode, false };
+
+		// 5) An implicit-this method a base class declares (the class scope holds only the type's own).
+		for (const Scripting::ObjectType* t = ctx.enclosingType; t; t = t->GetBaseTypes().Count() ? t->GetBaseTypes()[0] : nullptr)
+			if (const Scripting::ObjectType::MethodInfo* method = t->FindMethodByName(name))
+				return { method->m_ReturnType, method->m_DeclaringNode, true };
 		return {};
 	}
 
@@ -416,6 +470,19 @@ namespace C4LSP::Server
 								}
 							}
 			}
+			break;
+		}
+		case Scripting::NodeType::FunctionCall: {
+			// A call's value - what `View()` gives `View().CodePointAt(i)`: what the callee returns, or the type a
+			// constructor call names.
+			const auto& call = static_cast<const Scripting::FunctionCallNode&>(node);
+			if (!call.GetCallee())
+				break;
+			const NodeResolution callee = ResolveReference(*call.GetCallee(), path);
+			if (callee.isFunction)
+				res.type = ReturnTypeOf(callee.type);
+			else if (IsTypeDeclaration(callee.declaration))
+				res.type = callee.type;
 			break;
 		}
 		default:

@@ -3,7 +3,7 @@
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
 
-namespace Scripting { class AstNode; class Type; class ProgramModel; }
+namespace Scripting { class AstNode; class Type; class ProgramModel; class QualTypeNode; }
 
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
 
@@ -26,6 +26,9 @@ namespace C4LSP::Features
 	private:
 		static std::string BuildHoverText(const Server::SemanticResolver& resolver, const Server::LocatedNode& located);
 		static std::string BuildReferenceHover(const Scripting::AstNode& node, const Scripting::Type* type, const Scripting::AstNode* declaration);
+		static std::string BuildTypeHover(const Server::SemanticResolver& resolver, const Scripting::QualTypeNode& type, const Core::Vector<const Scripting::AstNode*>& path);
+		/// The declaring node of an object, enum or union type; null for anything else.
+		static const Scripting::AstNode* DeclarationOf(const Scripting::Type* type);
 		static std::string BuildDeclarationHover(const Scripting::AstNode& node);
 	};
 } // namespace C4LSP::Features

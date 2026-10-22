@@ -1,4 +1,5 @@
 #include "Features/SemanticTokenWalk.h"
+#include "Features/TypeText.h"
 #include "Server/SemanticResolver.h"
 #include "Lexer/Lexer.h"
 #include "SourceManager/Source.h"
@@ -12,9 +13,9 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Declarations/SwizzleViewNode.h"
 #include "Parser/Nodes/Declarations/TemplateParameterNode.h"
+#include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include <algorithm>
 #include <cctype>
-#include <functional>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -39,6 +40,78 @@ namespace C4LSP::Features::TokenWalk
 		return dynamic_cast<const Scripting::ObjectType*>(Scripting::TypeHandle::UnwrapToValue(info->type));
 	}
 
+	uint32 TypeDeclKind(const Scripting::AstNode* decl)
+	{
+		if (decl && decl->Type() == Scripting::NodeType::ObjectDefinition)
+			return ObjectKindToToken(static_cast<const Scripting::ObjectDefinitionNode*>(decl)->Kind());
+		if (decl && decl->Type() == Scripting::NodeType::EnumDefinition)
+			return K(SemanticTokenKind::Enum);
+		return K(SemanticTokenKind::Type);
+	}
+
+	bool HasMethod(const Scripting::ObjectType* object, const std::string& name)
+	{
+		if (!object)
+			return false;
+		for (const auto& m : object->GetMethods())
+			if (m.mName == name) return true;
+		for (const auto& m : object->GetExtensionMethods())
+			if (m.mName == name) return true;
+		for (const auto* base : object->GetBaseTypes())
+			if (HasMethod(base, name)) return true;
+		return false;
+	}
+
+	bool HasField(const Scripting::ObjectType* object, const std::string& name)
+	{
+		if (!object)
+			return false;
+		for (const auto& f : object->GetFields())
+			if (f.mName == name) return true;
+		for (const auto* base : object->GetBaseTypes())
+			if (HasField(base, name)) return true;
+		return false;
+	}
+
+	bool OwnerMemberKind(const Scripting::SymbolInfo* owner, const std::string& name, uint32& kind)
+	{
+		if (!owner)
+			return false;
+		if (const Scripting::ObjectType* object = AsObject(owner))
+		{
+			if (HasMethod(object, name))
+			{
+				kind = K(SemanticTokenKind::Method);
+				return true;
+			}
+			kind = K(SemanticTokenKind::Field);
+			return HasField(object, name);
+		}
+		const Scripting::Type* value = Scripting::TypeHandle::UnwrapToValue(owner->type);
+		if (const auto* enumType = dynamic_cast<const Scripting::EnumType*>(value))
+		{
+			kind = K(SemanticTokenKind::Variable); // a scoped constant
+			for (const auto& m : enumType->GetMembers())
+				if (m.mName == name) return true;
+		}
+		if (const auto* unionType = dynamic_cast<const Scripting::UnionType*>(value))
+		{
+			kind = K(SemanticTokenKind::Field);
+			for (const auto& f : unionType->GetFields())
+				if (f.mName == name) return true;
+		}
+		return false;
+	}
+
+	/// A bare name inside a member function that names a method of its object: an implicit-this call.
+	bool IsImplicitThisMethod(const Ctx& ctx, const Scripting::AstNode& refNode, const Core::Vector<const Scripting::AstNode*>& path)
+	{
+		if (!ctx.resolver || refNode.Type() != Scripting::NodeType::IdentifierExpression)
+			return false;
+		const auto& id = static_cast<const Scripting::IdentifierExpressionNode&>(refNode);
+		return HasMethod(ctx.resolver->EnclosingObject(path), std::string(id.GetNameToken().GetText()));
+	}
+
 	/// Classify a reference based on the declaration node it resolved to. A variable that is an
 	/// object member (tracked in `fields`) counts as a field whether reached via `p.x` or a bare
 	/// implicit-this identifier.
@@ -60,7 +133,7 @@ namespace C4LSP::Features::TokenWalk
 		case Scripting::NodeType::EnumDefinition:
 		case Scripting::NodeType::UnionDefinition:
 		case Scripting::NodeType::AliasDefinition:
-			return K(SemanticTokenKind::Type);
+			return TypeDeclKind(decl);
 		case Scripting::NodeType::Namespace:
 			return K(SemanticTokenKind::Namespace);
 		default:
@@ -83,6 +156,9 @@ namespace C4LSP::Features::TokenWalk
 		if (ctx.resolver)
 		{
 			const Server::NodeResolution res = ctx.resolver->ResolveReference(refNode, path);
+			const bool function = res.isFunction || (res.declaration && res.declaration->Type() == Scripting::NodeType::FunctionDefinition);
+			if (!isMemberAccess && function && IsImplicitThisMethod(ctx, refNode, path))
+				return K(SemanticTokenKind::Method);
 			if (res.declaration)
 				return DeclKind(res.declaration, isMemberAccess, ctx);
 
@@ -185,22 +261,7 @@ namespace C4LSP::Features::TokenWalk
 			}
 
 			if (entry && entry->kind == Scripting::SymbolKind::Type)
-			{
-				// A resolved owner type: color it as its own declaration kind.
-				if (const Scripting::AstNode* decl = entry->declNode)
-				{
-					switch (decl->Type())
-					{
-					case Scripting::NodeType::ObjectDefinition:
-						return ObjectKindToToken(static_cast<const Scripting::ObjectDefinitionNode*>(decl)->Kind());
-					case Scripting::NodeType::EnumDefinition:
-						return K(SemanticTokenKind::Enum);
-					default:
-						break; // alias/other type decls keep the generic type color below
-					}
-				}
-				return K(SemanticTokenKind::Type); // `SomeClass::` prefix of a member chain
-			}
+				return TypeDeclKind(entry->declNode); // a resolved owner type: `SomeClass::` of a member chain
 
 			// A namespace the chain continues through. Checked AFTER resolved-type matching (above) so a
 			// qualified owner type keeps its own kind; still correct for plain namespace chains because a
@@ -209,28 +270,13 @@ namespace C4LSP::Features::TokenWalk
 				return K(SemanticTokenKind::Namespace);
 		}
 
-		// A prefix that is itself a type name: color it as its own declaration kind.
+		// The FINAL segment is a type name: its own declaration kind; an alias reached through a namespace is
+		// generic gold.
 		if (entry && entry->kind == Scripting::SymbolKind::Type)
 		{
-			if (const Scripting::AstNode* decl = entry->declNode)
-			{
-				switch (decl->Type())
-				{
-				case Scripting::NodeType::ObjectDefinition:
-					return ObjectKindToToken(static_cast<const Scripting::ObjectDefinitionNode*>(decl)->Kind());
-				case Scripting::NodeType::EnumDefinition:
-					return K(SemanticTokenKind::Enum);
-				default:
-					break; // alias/other type decls keep the generic type color below
-				}
-			}
-			if (!isLast)
-				return K(SemanticTokenKind::Type); // `SomeClass::` prefix of a member chain
-
-			// FINAL segment is a TYPE name: if it resolved through a namespace, that's its
-			// definition; otherwise (unqualified local type in this file) same kind applies.
-			if (prefix.find("::") != std::string::npos || ctx.namespacePaths.count(prefix))
-				return K(SemanticTokenKind::Type); // qualified type reference: generic gold
+			const uint32 kind = TypeDeclKind(entry->declNode);
+			if (kind != K(SemanticTokenKind::Type) || prefix.find("::") != std::string::npos || ctx.namespacePaths.count(prefix))
+				return kind;
 		}
 
 		const bool isMemberAccess = prefix.find("::") != std::string::npos;
@@ -262,48 +308,9 @@ namespace C4LSP::Features::TokenWalk
 			const Scripting::SymbolInfo* owner = nullptr;
 			if (!ownerPrefix.empty() && ctx.resolver)
 				owner = ctx.resolver->Lookup(ownerPrefix, 0);
-
-			if (const Scripting::ObjectType* objType = AsObject(owner))
-			{
-				auto hasMethod = [&](const Scripting::ObjectType* t) {
-					for (const auto& m : t->GetMethods())
-						if (m.mName == memberName) return true;
-					for (const auto& m : t->GetExtensionMethods())
-						if (m.mName == memberName) return true;
-					return false;
-				};
-				auto hasField = [&](const Scripting::ObjectType* t) {
-					for (const auto& f : t->GetFields())
-						if (f.mName == memberName) return true;
-					return false;
-				};
-				std::function<bool(const Scripting::ObjectType*)> walkInherited = [&](const Scripting::ObjectType* t) -> bool {
-					for (const auto* base : t->GetBaseTypes())
-						if (base && walkInherited(base)) return true;
-					return hasMethod(t) || hasField(t);
-				};
-				if (walkInherited(objType))
-					return K(SemanticTokenKind::Method); // member function reference through the chain
-
-				std::function<bool(const Scripting::ObjectType*)> walkFields = [&](const Scripting::ObjectType* t) -> bool {
-					for (const auto* base : t->GetBaseTypes())
-						if (base && walkFields(base)) return true;
-					return hasField(t);
-				};
-				if (walkFields(objType))
-					return K(SemanticTokenKind::Field); // static member variable reference
-
-				if (const Scripting::EnumType* enumType = owner ? dynamic_cast<const Scripting::EnumType*>(Scripting::TypeHandle::UnwrapToValue(owner->type)) : nullptr)
-				{
-					for (const auto& m : enumType->GetMembers())
-						if (m.mName == memberName) return K(SemanticTokenKind::Variable); // scoped constant
-				}
-				if (const Scripting::UnionType* unionType = owner ? dynamic_cast<const Scripting::UnionType*>(Scripting::TypeHandle::UnwrapToValue(owner->type)) : nullptr)
-				{
-					for (const auto& f : unionType->GetFields())
-						if (f.mName == memberName) return K(SemanticTokenKind::Field);
-				}
-			}
+			uint32 memberKind = 0;
+			if (OwnerMemberKind(owner, memberName, memberKind))
+				return memberKind;
 		}
 
 		return isLast ? K(SemanticTokenKind::Field) : K(SemanticTokenKind::Namespace); // conservative fallbacks
@@ -319,11 +326,11 @@ namespace C4LSP::Features::TokenWalk
 		if (!qt.BaseName())
 			return;
 
-		bool isPrimitive = false; // resolved through the model's own type verb
+		bool isPrimitive = false; // resolved through the model's own type verb; `char` of `const char*` too
 		if (ctx.resolver)
 		{
-			const Scripting::Type* resolved = ctx.resolver->ResolveQualType(qt, path);
-			isPrimitive = resolved && Scripting::TypeHandle::UnwrapToValue(resolved)->IsPrimitive();
+			const Scripting::Type* named = NamedType(ctx.resolver->ResolveQualType(qt, path));
+			isPrimitive = named && named->IsPrimitive();
 		}
 
 		std::string prefix; // outermost..this segment, for namespace / type resolution
@@ -345,15 +352,7 @@ namespace C4LSP::Features::TokenWalk
 				// declaration kind instead of the generic gold. The class/enum family is distinct from `type`.
 				const Scripting::SymbolInfo* entry = ctx.resolver->Lookup(prefix, 0);
 				if (entry && entry->kind == Scripting::SymbolKind::Type)
-				{
-					if (const Scripting::AstNode* decl = entry->declNode)
-					{
-						if (decl->Type() == Scripting::NodeType::ObjectDefinition)
-							kind = ObjectKindToToken(static_cast<const Scripting::ObjectDefinitionNode*>(decl)->Kind());
-						else if (decl->Type() == Scripting::NodeType::EnumDefinition)
-							kind = K(SemanticTokenKind::Enum);
-					}
-				}
+					kind = TypeDeclKind(entry->declNode);
 				else if (!entry && !IsNamespacePrefix(ctx, prefix))
 				{
 					// Nested types (`struct Vec2` inside `class Test`) don't resolve through the global

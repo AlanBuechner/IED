@@ -70,10 +70,14 @@ namespace C4LSP::Server
 		/// header and its out-of-line definition), in source order; just `declaration` for anything else.
 		void CollectFunctionDeclarations(const Scripting::AstNode* declaration, std::vector<const Scripting::AstNode*>& out) const;
 
+		/// The object type a path is inside - a member function's own type, what an implicit `this` names; null outside one.
+		const Scripting::ObjectType* EnclosingObject(const Core::Vector<const Scripting::AstNode*>& path) const;
+
 	private:
 		struct Ctx { const Scripting::ObjectType* enclosingType = nullptr; const Scripting::Scope* scope = nullptr; uint32 unitId = 0; };
 		Ctx ContextFor(const Core::Vector<const Scripting::AstNode*>& path) const;
-		const Scripting::ObjectType* EnclosingObject(const Core::Vector<const Scripting::AstNode*>& path) const;
+		/// The record of the function `path[fi]` declares or defines (see the .cpp); null when the model has none.
+		const Scripting::FunctionRecord* RecordOf(const Core::Vector<const Scripting::AstNode*>& path, int fi, uint32 unitId) const;
 		bool ResolveLocal(const std::string& name, const Core::Vector<const Scripting::AstNode*>& path,
 			const Scripting::AstNode*& declOut, const Scripting::Type*& typeOut) const;
 

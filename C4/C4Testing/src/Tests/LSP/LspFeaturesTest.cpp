@@ -122,6 +122,86 @@ int32 main() {
 		TEST_PASSED();
 	}
 
+	void LspFeaturesTest::TestHoverOnAParameterShowsItsTypeOrItself()
+	{
+		const std::string program =
+			R"(struct Span { int32 n; };
+int32 Length(Span span) { return span.n; }
+int32 main() { return 0; }
+)";
+		auto session = Testing::Lsp::MakeSession("ParamHover.cf", program);
+		auto uri = Testing::Lsp::UriFor("ParamHover.cf");
+
+		auto type = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "Span", 2)); // the parameter's type
+		TEST_ASSERT(type.found);
+		TEST_ASSERT(Contains(type.contents, "struct Span"));
+		TEST_ASSERT(!Contains(type.contents, "function"));
+
+		auto name = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "span", 1)); // the parameter's name
+		TEST_ASSERT(name.found);
+		TEST_ASSERT(Contains(name.contents, "parameter Span span"));
+		TEST_PASSED();
+	}
+
+	void LspFeaturesTest::TestHoverInsideAMethodWithParametersResolvesItsMembers()
+	{
+		const std::string program =
+			R"(namespace Shapes {
+	struct Size { int32 extent; };
+	class Box {
+		public int32 Width() const { return 2; }
+		public int32 Area(int32 scale) const { return Width() * scale; }
+		public int32 Grow(const Size& base) const { return base.extent; }
+		public Size Corner() const { Size s; return s; }
+		public int32 Wide() const { return Corner().extent; }
+	};
+}
+int32 main() { return 0; }
+)";
+		auto session = Testing::Lsp::MakeSession("Members.cf", program);
+		auto uri = Testing::Lsp::UriFor("Members.cf");
+
+		// BUG-337: `Width()` inside Area(int32 scale) is the method, not the function around it.
+		auto call = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "Width", 2));
+		TEST_ASSERT(call.found);
+		TEST_ASSERT(Contains(call.contents, "Width"));
+		TEST_ASSERT(!Contains(call.contents, "Area"));
+
+		// BUG-337: `base` (a `const Size&` in namespace Shapes) has its type, so `base.extent` resolves.
+		auto field = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "extent", 2));
+		TEST_ASSERT(field.found);
+		TEST_ASSERT(Contains(field.contents, "int32 extent"));
+
+		// BUG-338: a member of a call's result, `Corner().extent`.
+		auto ofCall = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "extent", 3));
+		TEST_ASSERT(ofCall.found);
+		TEST_ASSERT(Contains(ofCall.contents, "int32 extent"));
+		TEST_PASSED();
+	}
+
+	void LspFeaturesTest::TestHoverOnAConstructorCallShowsItsType()
+	{
+		const std::string program =
+			R"(struct Span {
+	[operator("create")] void Init(int32 count) { extent = count; }
+	int32 extent;
+};
+int32 Length(int32 count) { return Span(count).extent; }
+int32 main() { return 0; }
+)";
+		auto session = Testing::Lsp::MakeSession("CtorHover.cf", program);
+		auto uri = Testing::Lsp::UriFor("CtorHover.cf");
+
+		auto type = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "Span", 2)); // `Span(count)`
+		TEST_ASSERT(type.found);
+		TEST_ASSERT(Contains(type.contents, "struct Span"));
+
+		auto member = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "extent", 3)); // `.extent` of the constructed value
+		TEST_ASSERT(member.found);
+		TEST_ASSERT(Contains(member.contents, "int32 extent"));
+		TEST_PASSED();
+	}
+
 	void LspFeaturesTest::TestDefinitionOfGlobalVariableUseJumpsToDeclaration()
 	{
 		auto session = Testing::Lsp::MakeSession("LspFixture.cf", kFixture);

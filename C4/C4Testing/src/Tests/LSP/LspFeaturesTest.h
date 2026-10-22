@@ -37,6 +37,19 @@ namespace Testing
 		TEST_FUNC(Lsp.Features.Hover)
 		void TestHoverWithNoSymbolReturnsNotFound();
 
+		// BUG-332: hovering a parameter's type names that type, and its name the parameter - not the function.
+		TEST_FUNC(Lsp.Features.Hover)
+		void TestHoverOnAParameterShowsItsTypeOrItself();
+
+		// BUG-337 / BUG-338: inside a method that takes parameters, implicit-this members and the namespace's types
+		// resolve, and so does a member of a call's result.
+		TEST_FUNC(Lsp.Features.Hover)
+		void TestHoverInsideAMethodWithParametersResolvesItsMembers();
+
+		// BUG-330: a constructor call's type name hovers as that type, and a member of the value it makes resolves.
+		TEST_FUNC(Lsp.Features.Hover)
+		void TestHoverOnAConstructorCallShowsItsType();
+
 		// --- Definition ---
 		TEST_FUNC(Lsp.Features.Definition)
 		void TestDefinitionOfGlobalVariableUseJumpsToDeclaration();

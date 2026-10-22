@@ -67,6 +67,15 @@ namespace C4LSP::Features::TokenWalk
 
 	uint32 ObjectKindToToken(Scripting::ObjectKind kind);
 	const Scripting::ObjectType* AsObject(const Scripting::SymbolInfo* info);
+	/// A type declaration's own kind: struct / class / interface / enum, else the generic `type` (an alias).
+	uint32 TypeDeclKind(const Scripting::AstNode* decl);
+	/// Whether `object`, a base it inherits or one of its extensions declares a method / a field named `name`.
+	bool HasMethod(const Scripting::ObjectType* object, const std::string& name);
+	bool HasField(const Scripting::ObjectType* object, const std::string& name);
+	/// The kind of `name` as a member of the type `owner` names (a method or field of an object, a scoped enum constant,
+	/// a union field); false when it has no such member.
+	bool OwnerMemberKind(const Scripting::SymbolInfo* owner, const std::string& name, uint32& kind);
+	bool IsImplicitThisMethod(const Ctx& ctx, const Scripting::AstNode& refNode, const Core::Vector<const Scripting::AstNode*>& path);
 	uint32 DeclKind(const Scripting::AstNode* decl, bool isMemberAccess, const Ctx& ctx);
 	bool IsFunctionType(const Scripting::Type* type);
 	uint32 ClassifyReference(const Ctx& ctx, const Scripting::AstNode& refNode, const Core::Vector<const Scripting::AstNode*>& path, bool isMemberAccess);

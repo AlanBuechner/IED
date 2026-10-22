@@ -13,6 +13,8 @@
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
+#include "Parser/Nodes/Declarations/ParameterNode.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
 
 namespace C4LSP::Features
 {
@@ -61,6 +63,15 @@ namespace C4LSP::Features
 					return BuildReferenceHover(*node, res.type, res.declaration);
 			}
 
+			// A type written in a declaration (`StringView` of `Init(StringView text)`) names that type, not the
+			// declaration around it.
+			if (node->Type() == Scripting::NodeType::QualType)
+			{
+				std::string typeText = BuildTypeHover(resolver, static_cast<const Scripting::QualTypeNode&>(*node), located.path);
+				if (!typeText.empty())
+					return typeText;
+			}
+
 			std::string declText = BuildDeclarationHover(*node);
 			if (!declText.empty())
 				return declText;
@@ -77,6 +88,27 @@ namespace C4LSP::Features
 				return declText;
 		}
 		return TypeText(type);
+	}
+
+	std::string Hover::BuildTypeHover(const Server::SemanticResolver& resolver, const Scripting::QualTypeNode& type, const Core::Vector<const Scripting::AstNode*>& path)
+	{
+		const Scripting::Type* resolved = resolver.ResolveQualType(type, path);
+		if (!resolved)
+			return "";
+		const Scripting::AstNode* declaration = DeclarationOf(NamedType(resolved));
+		std::string declText = declaration ? BuildDeclarationHover(*declaration) : "";
+		return declText.empty() ? std::string(TypeText(resolved)) : declText;
+	}
+
+	const Scripting::AstNode* Hover::DeclarationOf(const Scripting::Type* type)
+	{
+		if (const auto* object = dynamic_cast<const Scripting::ObjectType*>(type))
+			return object->GetDeclNode();
+		if (const auto* enumType = dynamic_cast<const Scripting::EnumType*>(type))
+			return enumType->GetDeclNode();
+		if (const auto* unionType = dynamic_cast<const Scripting::UnionType*>(type))
+			return unionType->GetDeclNode();
+		return nullptr;
 	}
 
 	std::string Hover::BuildDeclarationHover(const Scripting::AstNode& node)
@@ -124,6 +156,13 @@ namespace C4LSP::Features
 		case Scripting::NodeType::EnumDefinition: {
 			const auto& en = static_cast<const Scripting::EnumDefinitionNode&>(node);
 			return "enum " + en.GetNameToken().GetText();
+		}
+		case Scripting::NodeType::Parameter: {
+			const auto& param = static_cast<const Scripting::ParameterNode&>(node);
+			std::string text = "parameter ";
+			if (param.GetType())
+				text += param.GetType()->ToString() + " ";
+			return text + param.GetNameToken().GetText();
 		}
 		default:
 			return "";
