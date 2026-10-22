@@ -30,9 +30,10 @@ namespace C4LSP::Features
 		/// Shared by definition, type-definition, implementation, and rename.
 		static Protocol::Location LocationForDeclaration(Server::CompilationSession& session, const Scripting::AstNode& declaration);
 
-	private:
 		/// The node of `declaration`'s function that has its body (its out-of-line definition), else `declaration`.
 		static const Scripting::AstNode* WithBody(Server::CompilationSession& session, const Scripting::AstNode* declaration);
+
+	private:
 
 		/// Walk the located path (deepest first) for a reference node with a recorded declaration.
 		static Core::Vector<Protocol::Location> ResolveReference(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located);

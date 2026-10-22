@@ -134,6 +134,13 @@
 				"launchMode": "staged",
 				"refetchOnDiagnostics": ["semanticTokens", "foldingRange"],
 				"codeActionsNeedClientFilter": true,
+				"aiExposedRequests": [
+					{
+						"method": "c4/expandMacro",
+						"purpose": "expandMacro",
+						"description": "The C4 macro used at a position and what that use expands to: {textDocument, position} -> {name, expansion}, or null where no macro is used."
+					}
+				],
 				"when": "config.c4.languageServer"
 			}
 		]

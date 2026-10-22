@@ -17,6 +17,9 @@
 #include "Features/FoldingRanges.h"
 #include "Features/Formatting.h"
 #include "Features/Tidy.h"
+#include "Features/CallHierarchy.h"
+#include "Features/TypeHierarchy.h"
+#include "Features/MacroUses.h"
 
 namespace C4LSP::Server
 {
@@ -203,5 +206,39 @@ namespace C4LSP::Server
 			ranges = Features::FoldingRanges::ForDocument(*session, uri); // empty for files that failed to parse
 
 		SendResponse(id, Protocol::LspJson::FoldingRanges(ranges));
+	}
+
+	void LspServer::HandlePrepareCallHierarchy(const Json::Value& id, const Json::Value& params)
+	{
+		auto session = SnapshotForRequest(ExtractUri(params));
+		SendResponse(id, Protocol::LspJson::HierarchyItems(Features::CallHierarchy::Prepare(*session, ExtractUri(params), ExtractPosition(params))));
+	}
+
+	void LspServer::HandleCalls(const Json::Value& id, const Json::Value& params, bool incoming)
+	{
+		const Features::HierarchyItem item = Protocol::LspJson::HierarchyItemFrom(params.Member("item"));
+		auto session = SnapshotForRequest(item.uri);
+		const auto calls = incoming ? Features::CallHierarchy::Incoming(*session, item) : Features::CallHierarchy::Outgoing(*session, item);
+		SendResponse(id, Protocol::LspJson::HierarchyCalls(calls, incoming ? "from" : "to"));
+	}
+
+	void LspServer::HandlePrepareTypeHierarchy(const Json::Value& id, const Json::Value& params)
+	{
+		auto session = SnapshotForRequest(ExtractUri(params));
+		SendResponse(id, Protocol::LspJson::HierarchyItems(Features::TypeHierarchy::Prepare(*session, ExtractUri(params), ExtractPosition(params))));
+	}
+
+	void LspServer::HandleRelatedTypes(const Json::Value& id, const Json::Value& params, bool supertypes)
+	{
+		const Features::HierarchyItem item = Protocol::LspJson::HierarchyItemFrom(params.Member("item"));
+		auto session = SnapshotForRequest(item.uri);
+		const auto items = supertypes ? Features::TypeHierarchy::Supertypes(*session, item) : Features::TypeHierarchy::Subtypes(*session, item);
+		SendResponse(id, Protocol::LspJson::HierarchyItems(items));
+	}
+
+	void LspServer::HandleExpandMacro(const Json::Value& id, const Json::Value& params)
+	{
+		auto session = SnapshotForRequest(ExtractUri(params));
+		SendResponse(id, Protocol::LspJson::ExpandedMacro(Features::MacroUses::At(*session, ExtractUri(params), ExtractPosition(params))));
 	}
 } // namespace C4LSP::Server

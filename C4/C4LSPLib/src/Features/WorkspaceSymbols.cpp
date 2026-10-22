@@ -1,183 +1,127 @@
 #include "Features/WorkspaceSymbols.h"
+#include "Features/DeclarationText.h"
 #include "Server/CompilationSession.h"
+#include "Server/SemanticResolver.h"
 #include <algorithm>
 #include <cctype>
 #include "Parser/AstNode.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
-#include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
 
 namespace C4LSP::Features
 {
-	// LSP SymbolKind values (same table DocumentSymbols uses).
-	namespace Sym { constexpr int Namespace = 3; constexpr int Class = 5; constexpr int Enum = 10; constexpr int Function = 12; constexpr int Variable = 13; constexpr int Constant = 14; }
+	using Scripting::NodeType;
 
 	// Cap so a large project (Bedrock + user code) cannot flood the client's symbol picker.
 	static constexpr size_t kMaxResults = 500;
 
-	namespace Detail
+	static std::string ToLower(const std::string& text)
 	{
-		std::string ToLower(const std::string& text)
-		{
-			std::string result = text;
-			std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			return result;
-		}
-
-		bool Matches(const std::string& name, const std::string& query)
-		{
-			if (query.empty())
-				return true;
-			return ToLower(name).find(ToLower(query)) != std::string::npos;
-		}
-
-		std::string JoinContainer(const std::string& outer, const std::string& inner)
-		{
-			return outer.empty() ? inner : (outer + " :: " + inner);
-		}
+		std::string result = text;
+		std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		return result;
 	}
 
-	void WorkspaceSymbols::PushMatched(Core::Vector<WorkspaceSymbol>& out, Server::CompilationSession& session, const std::string& name, int kind, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end, const std::string& containerName)
+	static bool Matches(const std::string& name, const std::string& query)
 	{
-		if (out.Count() >= kMaxResults || name.empty())
-			return;
-		WorkspaceSymbol symbol;
-		symbol.name = name;
-		symbol.kind = kind;
-		symbol.location = session.ToEditorLocation(start, end);
-		symbol.containerName = containerName;
-		out.Push(symbol);
+		return query.empty() || ToLower(name).find(ToLower(query)) != std::string::npos;
+	}
+
+	static std::string Joined(const std::string& outer, const std::string& inner)
+	{
+		return outer.empty() ? inner : (inner.empty() ? outer : outer + "::" + inner);
 	}
 
 	Core::Vector<WorkspaceSymbol> WorkspaceSymbols::ForQuery(Server::CompilationSession& session, const std::string& query)
 	{
+		Walk walk{ session, query };
+		session.GetResolver().CollectNamespacePaths(walk.namespaces);
 		auto& compiler = session.GetCompiler();
-		const uint32 sourceCount = compiler.SourceCount();
-		Core::Vector<WorkspaceSymbol> out;
-
-		for (uint32 sourceId = 1; sourceId <= sourceCount && out.Count() < kMaxResults; ++sourceId)
+		for (uint32 sourceId = 1; sourceId <= compiler.SourceCount() && walk.out.Count() < kMaxResults; ++sourceId)
 		{
 			if (!compiler.GetSourceManager().HasInfo(sourceId))
 				continue;
 			auto unit = compiler.GetCompilationUnit(sourceId);
-			if (!unit || !unit->GetRootAST())
-				continue;
-
-			const std::string container; // file scope: no enclosing name
-			CollectChildrenFlat(session, *unit->GetRootAST().Get(), sourceId, container, query, out);
+			if (unit && unit->GetRootAST())
+				for (const auto& child : unit->GetRootAST()->Children())
+					if (child && child->startLocation.sourceId == sourceId)
+						AddDeclaration(walk, *child.Get(), sourceId, "", false);
 		}
-
-		return out;
+		return walk.out;
 	}
 
-	void WorkspaceSymbols::CollectChildrenFlat(Server::CompilationSession& session, const Scripting::AstNode& parent, uint32 sourceId, const std::string& container, const std::string& query, Core::Vector<WorkspaceSymbol>& out)
+	void WorkspaceSymbols::AddEach(Walk& walk, const Core::Vector<Ref<Scripting::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member)
 	{
-		auto children = parent.Children();
-		for (const auto& child : children)
-			if (child && child->startLocation.sourceId == sourceId)
-				AddDeclarationFlat(session, *child.Get(), sourceId, container, query, out);
+		for (const auto& node : nodes)
+			if (node && node->startLocation.sourceId == sourceId && walk.out.Count() < kMaxResults)
+				AddDeclaration(walk, *node.Get(), sourceId, container, member);
 	}
 
-	void WorkspaceSymbols::CollectMembersFlat(Server::CompilationSession& session, const Core::Vector<Ref<Scripting::AstNode>>& members, uint32 sourceId, const std::string& container, const std::string& query, Core::Vector<WorkspaceSymbol>& out)
-	{
-		for (const auto& member : members)
-			if (member && member->startLocation.sourceId == sourceId)
-				AddDeclarationFlat(session, *member.Get(), sourceId, container, query, out);
-	}
-
-	void WorkspaceSymbols::AddDeclarationFlat(Server::CompilationSession& session, const Scripting::AstNode& node, uint32 sourceId, const std::string& container, const std::string& query, Core::Vector<WorkspaceSymbol>& out)
+	void WorkspaceSymbols::AddDeclaration(Walk& walk, const Scripting::AstNode& node, uint32 sourceId, const std::string& container, bool member)
 	{
 		switch (node.Type())
 		{
-		case Scripting::NodeType::Namespace: {
+		case NodeType::Namespace: {
 			const auto& ns = static_cast<const Scripting::NamespaceNode&>(node);
-			if (!ns.IsRoot() && Detail::Matches(ns.Name(), query))
-				PushMatched(out, session, ns.Name(), Sym::Namespace, ns.GetNameToken().GetStartLocation(), ns.GetNameToken().GetEndLocation(), container);
-
-			// Keep descending even when the namespace itself did not match: a query like "Player"
-			// must still find Player inside an unrelated namespace.
-			const std::string inner = ns.IsRoot() ? container : Detail::JoinContainer(container, ns.Name());
-			if (out.Count() < kMaxResults)
-				CollectChildrenFlat(session, node, sourceId, inner, query, out);
+			if (!ns.IsRoot())
+				Push(walk, node, container, false);
+			// Keep descending when the namespace did not match: "Player" must still find Player inside it.
+			const std::string inner = ns.IsRoot() ? container : Joined(container, ns.Name());
+			for (const auto& child : node.Children())
+				if (child && child->startLocation.sourceId == sourceId && walk.out.Count() < kMaxResults)
+					AddDeclaration(walk, *child.Get(), sourceId, inner, false);
 			break;
 		}
-
-		case Scripting::NodeType::ObjectDefinition: {
-			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(node);
-			const std::string inner = Detail::JoinContainer(container, obj.GetNameToken().GetText());
-
-			// Emit the type when it matches, but ALWAYS descend into its body: a query for a
-			// field name ("x") must find Point.x even though "Point" itself does not match.
-			if (Detail::Matches(obj.GetNameToken().GetText(), query))
-				PushMatched(out, session, obj.GetNameToken().GetText(), Sym::Class, obj.GetNameToken().GetStartLocation(), obj.GetNameToken().GetEndLocation(), container);
-
-			if (out.Count() < kMaxResults)
-				CollectMembersFlat(session, obj.GetBodyMembers(), sourceId, inner, query, out);
+		case NodeType::ObjectDefinition: {
+			Push(walk, node, container, member);
+			// Always descend: a query for a field name ("x") must find Point.x though "Point" does not match.
+			AddEach(walk, static_cast<const Scripting::ObjectDefinitionNode&>(node).GetBodyMembers(), sourceId, Joined(container, DeclarationText::NameOf(node)), true);
 			break;
 		}
-
-		case Scripting::NodeType::EnumDefinition: {
-			const auto& en = static_cast<const Scripting::EnumDefinitionNode&>(node);
-			const std::string inner = Detail::JoinContainer(container, en.GetNameToken().GetText());
-
-			if (Detail::Matches(en.GetNameToken().GetText(), query))
-				PushMatched(out, session, en.GetNameToken().GetText(), Sym::Enum, en.GetNameToken().GetStartLocation(), en.GetNameToken().GetEndLocation(), container);
-
-			// Enum values are themselves symbols; a value query ("green") must work even when the
-			// enum name does not match. Each member is checked against the query individually.
-			for (const auto& member : en.GetMembers())
-				if (member && Detail::Matches(member->GetNameToken().GetText(), query))
-					PushMatched(out, session, member->GetNameToken().GetText(), Sym::Constant, member->GetNameToken().GetStartLocation(), member->GetNameToken().GetEndLocation(), inner);
+		case NodeType::EnumDefinition: {
+			Push(walk, node, container, member);
+			const std::string inner = Joined(container, DeclarationText::NameOf(node));
+			for (const auto& value : static_cast<const Scripting::EnumDefinitionNode&>(node).GetMembers())
+				if (value)
+					Push(walk, *value.Get(), inner, true);
 			break;
 		}
-
-		case Scripting::NodeType::FunctionDefinition: {
-			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(node);
-			if (!func.GetName())
+		case NodeType::FunctionDefinition: {
+			// An out-of-line definition (`Counter::Next`) belongs to what qualifies it: a type, unless it names a namespace.
+			const std::string written = DeclarationText::WrittenName(node);
+			const size_t qualified = written.rfind("::");
+			if (qualified == std::string::npos)
+			{
+				Push(walk, node, container, member);
 				break;
-			const auto& token = func.GetName()->GetLastIdentifierToken();
-			std::string name = token.GetText();
-			if (name.empty() || !Detail::Matches(name, query))
-				break;
-			// An out-of-line definition (`Counter::Next`) belongs to the type that qualifies it.
-			std::string owner = container;
-			const auto& segments = func.GetName()->GetSegments();
-			for (uint32 i = 0; i + 1 < segments.Count(); ++i)
-				owner = Detail::JoinContainer(owner, segments[i].nameToken.GetText());
-			PushMatched(out, session, name, Sym::Function, token.GetStartLocation(), token.GetEndLocation(), owner);
+			}
+			const std::string owner = Joined(container, written.substr(0, qualified));
+			Push(walk, node, owner, member || walk.namespaces.count(owner) == 0);
 			break;
 		}
-
-		case Scripting::NodeType::VariableDefinition: {
-			const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(node);
-			if (!Detail::Matches(var.GetNameToken().GetText(), query))
-				break;
-			PushMatched(out, session, var.GetNameToken().GetText(), Sym::Variable, var.GetNameToken().GetStartLocation(), var.GetNameToken().GetEndLocation(), container);
+		case NodeType::VariableDefinition:
+		case NodeType::UnionDefinition:
+		case NodeType::AliasDefinition:
+			Push(walk, node, container, member);
 			break;
-		}
-
-		case Scripting::NodeType::UnionDefinition: {
-			const auto& un = static_cast<const Scripting::UnionDefinitionNode&>(node);
-			if (!Detail::Matches(un.GetNameToken().GetText(), query))
-				break;
-			PushMatched(out, session, un.GetNameToken().GetText(), Sym::Class, un.GetNameToken().GetStartLocation(), un.GetNameToken().GetEndLocation(), container);
-			break;
-		}
-
-		case Scripting::NodeType::AliasDefinition: {
-			const auto& alias = static_cast<const Scripting::AliasDefinitionNode&>(node);
-			if (!Detail::Matches(alias.GetNameToken().GetText(), query))
-				break;
-			PushMatched(out, session, alias.GetNameToken().GetText(), Sym::Variable, alias.GetNameToken().GetStartLocation(), alias.GetNameToken().GetEndLocation(), container);
-			break;
-		}
-
 		default:
 			break; // statements and expressions are not workspace symbols
 		}
+	}
+
+	void WorkspaceSymbols::Push(Walk& walk, const Scripting::AstNode& node, const std::string& container, bool member)
+	{
+		const std::string name = DeclarationText::NameOf(node);
+		if (walk.out.Count() >= kMaxResults || name.empty() || !Matches(name, walk.query))
+			return;
+		const DeclarationText::NameLocation location = DeclarationText::NameLocationOf(node);
+		WorkspaceSymbol symbol;
+		symbol.name = name;
+		symbol.kind = DeclarationText::SymbolKindOf(node, member);
+		symbol.location = location.found ? walk.session.ToEditorLocation(location.simpleStart, location.end) : walk.session.ToEditorLocation(node.startLocation, node.endLocation);
+		symbol.containerName = container;
+		walk.out.Push(symbol);
 	}
 } // namespace C4LSP::Features

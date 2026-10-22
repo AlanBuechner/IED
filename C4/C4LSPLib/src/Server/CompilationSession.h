@@ -4,6 +4,7 @@
 #include "Protocol/LspTypes.h" // Protocol::Position / Protocol::Range used by the coordinate helpers below
 #include "Server/SemanticResolver.h" // owned by value (unique_ptr) - the complete type is needed at destruction
 #include "Server/ScriptScopes.h"
+#include "Macro/MacroTable.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -85,6 +86,9 @@ namespace C4LSP::Server
 		// have CBind bindings appended.
 		std::string GetEditorText(const std::string& uri) const;
 
+		// The macros a source has at its end, as the last compile's macro pass left them; null when it had none.
+		const Scripting::MacroTable* MacroTableOf(uint32 sourceId) const;
+
 		// CBind appends generated bindings to interop files' text before parsing, so the user's lines keep
 		// their numbers; a location inside the bindings maps to the directive that produced them.
 		Protocol::Range ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const;
@@ -121,6 +125,7 @@ namespace C4LSP::Server
 		Scripting::CpuTarget m_Target;                  // the build's processor (see SetTarget)
 		std::map<std::string, std::string> m_InMemorySources; // display name -> text
 		std::map<std::string, std::string> m_OpenDocuments;   // uri -> editor text
+		std::map<uint32, Scripting::MacroTable> m_MacroTables; // sourceId -> its macros at its end (RunPreprocessPhase)
 		std::map<uint32, uint32> m_BindingStartLine;          // sourceId -> 1-based effective line where the bindings start
 		std::map<uint32, uint32> m_BindingDirectiveLine;      // sourceId -> 1-based line of the extern include directive
 		bool m_Compiled = false;

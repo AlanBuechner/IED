@@ -24,6 +24,10 @@ namespace Testing
 		TEST_FUNC(Lsp.Server)
 		void TestHoverEndToEndReturnsType();
 
+		// docs/17 L12-L13: a call hierarchy continued from the item the server gave, and a macro use expanded.
+		TEST_FUNC(Lsp.Server)
+		void TestHierarchyAndMacroExpansionOverTheWire();
+
 		TEST_FUNC(Lsp.Server)
 		void TestSemanticTokensCapabilityAndFullRequest();
 

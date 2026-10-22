@@ -87,6 +87,9 @@ namespace C4LSP::Protocol
 				return node.Member(key).GetString();
 		if (node.Member("textDocument").Member("uri").IsString())
 			return node.Member("textDocument").Member("uri").GetString();
+		// An incoming call's `fromRanges` are in the caller's document, which its `from` item names.
+		if (node.Member("fromRanges").IsArray() && node.Member("from").Member("uri").IsString())
+			return node.Member("from").Member("uri").GetString();
 		return outer;
 	}
 

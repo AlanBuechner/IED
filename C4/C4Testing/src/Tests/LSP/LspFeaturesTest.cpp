@@ -139,7 +139,8 @@ int32 main() { return 0; }
 
 		auto name = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "span", 1)); // the parameter's name
 		TEST_ASSERT(name.found);
-		TEST_ASSERT(Contains(name.contents, "parameter Span span"));
+		TEST_ASSERT(Contains(name.contents, "parameter `span`"));
+		TEST_ASSERT(Contains(name.contents, "```c4\nSpan span\n```"));
 		TEST_PASSED();
 	}
 
@@ -170,12 +171,12 @@ int32 main() { return 0; }
 		// BUG-337: `base` (a `const Size&` in namespace Shapes) has its type, so `base.extent` resolves.
 		auto field = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "extent", 2));
 		TEST_ASSERT(field.found);
-		TEST_ASSERT(Contains(field.contents, "int32 extent"));
+		TEST_ASSERT(Contains(field.contents, "int32 Shapes::Size::extent"));
 
 		// BUG-338: a member of a call's result, `Corner().extent`.
 		auto ofCall = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "extent", 3));
 		TEST_ASSERT(ofCall.found);
-		TEST_ASSERT(Contains(ofCall.contents, "int32 extent"));
+		TEST_ASSERT(Contains(ofCall.contents, "int32 Shapes::Size::extent"));
 		TEST_PASSED();
 	}
 
@@ -198,7 +199,7 @@ int32 main() { return 0; }
 
 		auto member = Hover::At(session, uri, Testing::Lsp::PositionOf(program, "extent", 3)); // `.extent` of the constructed value
 		TEST_ASSERT(member.found);
-		TEST_ASSERT(Contains(member.contents, "int32 extent"));
+		TEST_ASSERT(Contains(member.contents, "int32 Span::extent"));
 		TEST_PASSED();
 	}
 
@@ -642,7 +643,7 @@ void Second(Drive d) {
 		auto symbols = WorkspaceSymbols::ForQuery(session, "point");
 		bool foundPoint = false;
 		for (const auto& symbol : symbols)
-			if (symbol.name == "Point" && symbol.kind == 5 /* Class */)
+			if (symbol.name == "Point" && symbol.kind == 23 /* Struct */)
 				foundPoint = true;
 		TEST_ASSERT(foundPoint);
 
@@ -675,7 +676,7 @@ void Second(Drive d) {
 		auto colors = WorkspaceSymbols::ForQuery(session, "green");
 		bool foundGreen = false;
 		for (const auto& symbol : colors)
-			if (symbol.name == "Green" && symbol.kind == 14 /* Constant */ && symbol.containerName == "Color")
+			if (symbol.name == "Green" && symbol.kind == 22 /* EnumMember */ && symbol.containerName == "Color")
 				foundGreen = true;
 		TEST_ASSERT(foundGreen);
 		TEST_PASSED();
@@ -699,7 +700,7 @@ void Second(Drive d) {
 		auto symbols = WorkspaceSymbols::ForQuery(session, "bod");
 		bool foundBody = false;
 		for (const auto& symbol : symbols)
-			if (symbol.name == "Body" && symbol.kind == 5 /* Class */ && symbol.containerName == "Game :: Physics")
+			if (symbol.name == "Body" && symbol.kind == 5 /* Class */ && symbol.containerName == "Game::Physics")
 				foundBody = true;
 		TEST_ASSERT(foundBody);
 

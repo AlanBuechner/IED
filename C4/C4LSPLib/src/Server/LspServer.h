@@ -99,6 +99,11 @@ namespace C4LSP::Server
 		void HandleFormatting(const Json::Value& id, const Json::Value& params); // textDocument/formatting + rangeFormatting
 		void HandleCodeAction(const Json::Value& id, const Json::Value& params);  // textDocument/codeAction (lightbulb)
 		void HandleFoldingRanges(const Json::Value& id, const Json::Value& params); // textDocument/foldingRange (gutter triangles)
+		void HandlePrepareCallHierarchy(const Json::Value& id, const Json::Value& params);
+		void HandleCalls(const Json::Value& id, const Json::Value& params, bool incoming); // callHierarchy/incomingCalls, outgoingCalls
+		void HandlePrepareTypeHierarchy(const Json::Value& id, const Json::Value& params);
+		void HandleRelatedTypes(const Json::Value& id, const Json::Value& params, bool supertypes); // typeHierarchy/supertypes, subtypes
+		void HandleExpandMacro(const Json::Value& id, const Json::Value& params); // c4/expandMacro: {name, expansion} or null
 
 		void SendResponse(const Json::Value& id, const Json::Value& result);
 		void SendError(const Json::Value& id, int code, const std::string& message);

@@ -264,6 +264,16 @@ namespace C4LSP::Server
 				HandleCodeAction(id, params);
 			else if (method == "textDocument/foldingRange")
 				HandleFoldingRanges(id, params);
+			else if (method == "textDocument/prepareCallHierarchy")
+				HandlePrepareCallHierarchy(id, params);
+			else if (method == "callHierarchy/incomingCalls" || method == "callHierarchy/outgoingCalls")
+				HandleCalls(id, params, method == "callHierarchy/incomingCalls");
+			else if (method == "textDocument/prepareTypeHierarchy")
+				HandlePrepareTypeHierarchy(id, params);
+			else if (method == "typeHierarchy/supertypes" || method == "typeHierarchy/subtypes")
+				HandleRelatedTypes(id, params, method == "typeHierarchy/supertypes");
+			else if (method == "c4/expandMacro")
+				HandleExpandMacro(id, params);
 			else
 				UnknownMethod(id, method);
 		}
@@ -317,6 +327,9 @@ namespace C4LSP::Server
 
 	std::string LspServer::ExtractUri(const Json::Value& params) const
 	{
+		// A hierarchy request names its document in the item it continues from.
+		if (!params.Member("textDocument").Member("uri").IsString() && params.Member("item").Member("uri").IsString())
+			return params.Member("item").Member("uri").GetString();
 		return params.Member("textDocument").Member("uri").GetString();
 	}
 

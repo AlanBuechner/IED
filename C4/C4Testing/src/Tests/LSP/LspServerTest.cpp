@@ -145,6 +145,9 @@ namespace Testing
 		for (uint32 i = 0; i < triggers.Size(); ++i)
 			trigger.push_back(triggers.At(i).GetString());
 		TEST_ASSERT(trigger == std::vector<std::string>({ ".", ">" }));
+		TEST_ASSERT_EQ(caps.Member("callHierarchyProvider").GetBool(), true);
+		TEST_ASSERT_EQ(caps.Member("typeHierarchyProvider").GetBool(), true);
+		TEST_ASSERT_EQ(caps.Member("experimental").Member("expandMacro").GetBool(), true);
 		TEST_PASSED();
 	}
 
@@ -177,7 +180,58 @@ namespace Testing
 		TEST_ASSERT_NOT_NULL(resp);
 		Value result = resp->Member("result");
 		TEST_ASSERT(result.IsObject()); // a found hover is an object, not null
-		TEST_ASSERT(Contains(result.Member("contents").GetString(), "int32"));
+		TEST_ASSERT_EQ(result.Member("contents").Member("kind").GetString(), std::string("markdown"));
+		TEST_ASSERT(Contains(result.Member("contents").Member("value").GetString(), "int32"));
+		TEST_PASSED();
+	}
+
+	void LspServerTest::TestHierarchyAndMacroExpansionOverTheWire()
+	{
+		const std::string program = "#define TWICE(x) ((x) * 2)\nint32 Leaf() { return 1; }\nint32 Top() { return Leaf() + TWICE(2); }\n";
+		std::string uri = Testing::Lsp::UriFor("WireCalls.cf");
+
+		Reset("file:///root");
+		Value init = Value::MakeObject();
+		init.SetMember("rootUri", Value::String(Core::String("file:///root")));
+		FeedRequest("initialize", 1, init);
+		FeedNotification("initialized", Value::Null());
+		FeedNotification("textDocument/didOpen", MakeTextDocParams(uri, program));
+		m_Server->WaitForCurrentWork();
+
+		auto at = [&](const std::string& needle) {
+			const auto pos = Testing::Lsp::PositionOf(program, needle);
+			Value params = Value::MakeObject();
+			Value doc = Value::MakeObject();
+			doc.SetMember("uri", Value::String(Core::String(uri)));
+			params.SetMember("textDocument", doc);
+			Value position = Value::MakeObject();
+			position.SetMember("line", Value::Int(pos.line));
+			position.SetMember("character", Value::Int(pos.character));
+			params.SetMember("position", position);
+			return params;
+		};
+
+		FeedRequest("textDocument/prepareCallHierarchy", 2, at("Leaf()"));
+		const Value* prepared = ResponseForId(2);
+		TEST_ASSERT_NOT_NULL(prepared);
+		Value items = prepared->Member("result");
+		TEST_ASSERT(items.IsArray() && items.Size() == 1);
+		TEST_ASSERT_EQ(items.At(0).Member("name").GetString(), std::string("Leaf"));
+
+		Value callsParams = Value::MakeObject();
+		callsParams.SetMember("item", items.At(0));
+		FeedRequest("callHierarchy/incomingCalls", 3, callsParams);
+		const Value* incoming = ResponseForId(3);
+		TEST_ASSERT_NOT_NULL(incoming);
+		TEST_ASSERT(incoming->Member("result").IsArray() && incoming->Member("result").Size() == 1);
+		TEST_ASSERT_EQ(incoming->Member("result").At(0).Member("from").Member("name").GetString(), std::string("Top"));
+		TEST_ASSERT_EQ(incoming->Member("result").At(0).Member("fromRanges").Size(), 1u);
+
+		FeedRequest("c4/expandMacro", 4, at("TWICE(2)"));
+		const Value* expanded = ResponseForId(4);
+		TEST_ASSERT_NOT_NULL(expanded);
+		TEST_ASSERT_EQ(expanded->Member("result").Member("name").GetString(), std::string("TWICE"));
+		TEST_ASSERT(Contains(expanded->Member("result").Member("expansion").GetString(), "((2) * 2)"));
 		TEST_PASSED();
 	}
 

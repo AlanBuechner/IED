@@ -218,31 +218,14 @@ namespace C4LSP::Features
 		std::unordered_set<std::string> pendingMacroNames; // #define names in this document's CURRENT text, colored before recompile sees them
 
 		// Every macro name visible to the project, so a USE of `MAX_HP` reads purple (macro) wherever it appears -
-		// Visual Assist colors the NAME at both its definition and its usages. Sources are scanned as TEXT (not via
-		// the compiler's effective/macro-expanded form): semantic tokens must describe what is on screen, and a
-		// `#define` line exists verbatim in every file that defines one. Predefined (-D) macros join the same set.
+		// Visual Assist colors the NAME at both its definition and its usages. The names come from the macro tables the
+		// last compile's macro pass left each source: its stored text is the macro-expanded one, whose directive lines
+		// are blank (BUG-343).
 		auto& sourceManager = session.GetSourceManager();
 		for (uint32 sid = 1; sid <= sourceManager.Count(); ++sid)
-		{
-			const Ref<Scripting::Source>& srcRef = sourceManager.GetInfo(sid).source;
-			if (!srcRef || srcRef->Size() == 0)
-				continue; // in-memory or not yet loaded: no text to scan (the editor's own file is covered below anyway)
-			std::string allText(srcRef->Data(), srcRef->Size()); // full raw text - #define lines exist verbatim in it either way
-			size_t pos = 0;
-			while ((pos = allText.find("#define", pos)) != std::string::npos)
-			{
-				pos += 7; // past "#define"
-				while (pos < allText.size() && (allText[pos] == ' ' || allText[pos] == '\t'))
-					++pos;
-				if (pos < allText.size() && (std::isalpha((unsigned char)allText[pos]) || allText[pos] == '_'))
-				{
-					size_t end = pos;
-					while (end < allText.size() && (std::isalnum((unsigned char)allText[end]) || allText[end] == '_'))
-						++end;
-					definedMacros.insert(allText.substr(pos, end - pos));
-				}
-			}
-		}
+			if (const Scripting::MacroTable* table = session.MacroTableOf(sid))
+				for (const auto& [name, macro] : table->All())
+					definedMacros.insert(name);
 
 		// The compiler's effective text lags the editor by one recompile: a `#define` typed seconds ago is not in any
 		// source yet. Scan THIS document's current text for directive lines so their names read purple immediately.

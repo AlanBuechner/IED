@@ -1,154 +1,127 @@
 #include "Features/DocumentSymbols.h"
+#include "Features/DeclarationText.h"
+#include "Features/DocComment.h"
+#include "Features/MacroUses.h"
 #include "Server/CompilationSession.h"
+#include "Server/SemanticResolver.h"
 #include "Parser/AstNode.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
-#include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
-#include "Parser/Nodes/Statements/CodeBlockNode.h"
+#include <algorithm>
 
 namespace C4LSP::Features
 {
-	// LSP SymbolKind values.
-	namespace Sym { constexpr int File = 6; constexpr int Module = 9; constexpr int Namespace = 3; constexpr int Class = 5; constexpr int Method = 6; constexpr int Property = 7; constexpr int Field = 8; constexpr int Constructor = 4; constexpr int Enum = 10; constexpr int Constant = 14; constexpr int Function = 12; constexpr int Variable = 13; }
+	using Scripting::NodeType;
 
 	Core::Vector<DocumentSymbol> DocumentSymbols::ForDocument(Server::CompilationSession& session, const std::string& uri)
 	{
+		Core::Vector<DocumentSymbol> symbols;
 		uint32 sourceId = session.FindSourceIdByUri(uri);
 		if (sourceId == 0)
-			return {};
+			return symbols;
 
 		auto unit = session.GetCompiler().GetCompilationUnit(sourceId);
-		if (!unit || !unit->GetRootAST())
-			return {};
-
-		Core::Vector<DocumentSymbol> symbols;
-		CollectChildren(session, *unit->GetRootAST().Get(), sourceId, symbols);
+		if (unit && unit->GetRootAST())
+		{
+			Walk walk{ session, sourceId };
+			session.GetResolver().CollectNamespacePaths(walk.namespaces);
+			CollectChildren(walk, *unit->GetRootAST().Get(), false, symbols);
+		}
+		AddMacros(session, uri, symbols);
+		std::stable_sort(symbols.begin(), symbols.end(), [](const DocumentSymbol& a, const DocumentSymbol& b) {
+			return a.range.start.line < b.range.start.line;
+		});
 		return symbols;
 	}
 
-	void DocumentSymbols::CollectChildren(Server::CompilationSession& session, const Scripting::AstNode& parent, uint32 sourceId, Core::Vector<DocumentSymbol>& out)
+	void DocumentSymbols::CollectChildren(Walk& walk, const Scripting::AstNode& parent, bool members, Core::Vector<DocumentSymbol>& out)
 	{
-		auto children = parent.Children();
-		for (const auto& child : children)
-		{
-			if (!child || child->startLocation.sourceId != sourceId)
-				continue; // skip inlined include trees and foreign nodes
-			AddDeclaration(session, *child.Get(), out);
-		}
+		for (const auto& child : parent.Children())
+			if (child && child->startLocation.sourceId == walk.sourceId) // skip inlined include trees and foreign nodes
+				AddDeclaration(walk, *child.Get(), members, out);
 	}
 
-	void DocumentSymbols::AddDeclaration(Server::CompilationSession& session, const Scripting::AstNode& node, Core::Vector<DocumentSymbol>& out)
+	void DocumentSymbols::AddDeclaration(Walk& walk, const Scripting::AstNode& node, bool member, Core::Vector<DocumentSymbol>& out)
 	{
 		switch (node.Type())
 		{
-		case Scripting::NodeType::Namespace: {
+		case NodeType::Namespace: {
 			const auto& ns = static_cast<const Scripting::NamespaceNode&>(node);
 			if (ns.IsRoot())
 				return;
-			DocumentSymbol symbol = MakeSymbol(session, node, ns.Name(), "namespace", Sym::Namespace,
-				ns.GetNameToken().GetStartLocation(), ns.GetNameToken().GetEndLocation());
-			CollectChildren(session, node, node.startLocation.sourceId, symbol.children);
+			DocumentSymbol symbol = MakeSymbol(walk, node, false);
+			const std::string outer = walk.scope;
+			walk.scope = outer.empty() ? ns.Name() : outer + "::" + ns.Name();
+			CollectChildren(walk, node, false, symbol.children);
+			walk.scope = outer;
 			out.Push(symbol);
 			break;
 		}
-		case Scripting::NodeType::ObjectDefinition: {
-			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(node);
-			std::string kindText = obj.Kind() == Scripting::ObjectKind::Struct ? "struct" : (obj.Kind() == Scripting::ObjectKind::Interface ? "interface" : "class");
-			DocumentSymbol symbol = MakeSymbol(session, node, obj.GetNameToken().GetText(), kindText, Sym::Class,
-				obj.GetNameToken().GetStartLocation(), obj.GetNameToken().GetEndLocation());
-			for (const auto& member : obj.GetBodyMembers())
-			{
-				if (member)
-					AddDeclaration(session, *member.Get(), symbol.children);
-			}
+		case NodeType::ObjectDefinition: {
+			DocumentSymbol symbol = MakeSymbol(walk, node, member);
+			for (const auto& body : static_cast<const Scripting::ObjectDefinitionNode&>(node).GetBodyMembers())
+				if (body)
+					AddDeclaration(walk, *body.Get(), true, symbol.children);
 			out.Push(symbol);
 			break;
 		}
-		case Scripting::NodeType::FunctionDefinition: {
-			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(node);
-			std::string name = func.GetName() ? func.GetName()->GetLastIdentifierToken().GetText() : "";
-			if (name.empty())
-				return;
-			const auto& nameToken = func.GetName()->GetLastIdentifierToken();
-			DocumentSymbol symbol = MakeSymbol(session, node, name, BuildFunctionDetail(func), Sym::Function,
-				nameToken.GetStartLocation(), nameToken.GetEndLocation());
+		case NodeType::EnumDefinition: {
+			DocumentSymbol symbol = MakeSymbol(walk, node, member);
+			for (const auto& value : static_cast<const Scripting::EnumDefinitionNode&>(node).GetMembers())
+				if (value)
+					symbol.children.Push(MakeSymbol(walk, *value.Get(), true));
 			out.Push(symbol);
 			break;
 		}
-		case Scripting::NodeType::VariableDefinition: {
-			const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(node);
-			DocumentSymbol symbol = MakeSymbol(session, node, var.GetNameToken().GetText(),
-				var.GetType() ? var.GetType()->ToString() : "", Sym::Variable,
-				var.GetNameToken().GetStartLocation(), var.GetNameToken().GetEndLocation());
-			out.Push(symbol);
+		case NodeType::FunctionDefinition:
+			if (!DeclarationText::NameOf(node).empty())
+				out.Push(MakeSymbol(walk, node, member || DefinedForType(walk, node)));
 			break;
-		}
-		case Scripting::NodeType::EnumDefinition: {
-			const auto& en = static_cast<const Scripting::EnumDefinitionNode&>(node);
-			DocumentSymbol symbol = MakeSymbol(session, node, en.GetNameToken().GetText(), "enum", Sym::Enum,
-				en.GetNameToken().GetStartLocation(), en.GetNameToken().GetEndLocation());
-			for (const auto& member : en.GetMembers())
-			{
-				if (!member)
-					continue;
-				DocumentSymbol m = MakeSymbol(session, *member.Get(), member->GetNameToken().GetText(), "enum member", Sym::Constant,
-					member->GetNameToken().GetStartLocation(), member->GetNameToken().GetEndLocation());
-				symbol.children.Push(m);
-			}
-			out.Push(symbol);
+		case NodeType::VariableDefinition:
+		case NodeType::UnionDefinition:
+		case NodeType::AliasDefinition:
+			out.Push(MakeSymbol(walk, node, member));
 			break;
-		}
-		case Scripting::NodeType::UnionDefinition: {
-			const auto& un = static_cast<const Scripting::UnionDefinitionNode&>(node);
-			DocumentSymbol symbol = MakeSymbol(session, node, un.GetNameToken().GetText(), "union", Sym::Class,
-				un.GetNameToken().GetStartLocation(), un.GetNameToken().GetEndLocation());
-			out.Push(symbol);
-			break;
-		}
-		case Scripting::NodeType::AliasDefinition: {
-			const auto& alias = static_cast<const Scripting::AliasDefinitionNode&>(node);
-			DocumentSymbol symbol = MakeSymbol(session, node, alias.GetNameToken().GetText(), "alias", Sym::Variable,
-				alias.GetNameToken().GetStartLocation(), alias.GetNameToken().GetEndLocation());
-			out.Push(symbol);
-			break;
-		}
 		default:
 			break; // statements and expressions are not document symbols
 		}
 	}
 
-	DocumentSymbol DocumentSymbols::MakeSymbol(Server::CompilationSession& session, const Scripting::AstNode& node, const std::string& name, const std::string& detail, int kind, const Scripting::SourceLocation& selectionStart, const Scripting::SourceLocation& selectionEnd)
+	DocumentSymbol DocumentSymbols::MakeSymbol(Walk& walk, const Scripting::AstNode& node, bool member)
 	{
-		uint32 sourceId = node.startLocation.sourceId;
 		DocumentSymbol symbol;
-		symbol.name = name;
-		symbol.detail = detail;
-		symbol.kind = kind;
-		symbol.range = session.ToEditorRange(sourceId, node.startLocation, node.endLocation);
-		symbol.selectionRange = session.ToEditorRange(sourceId, selectionStart, selectionEnd);
+		symbol.name = DeclarationText::WrittenName(node);
+		symbol.detail = DeclarationText::Detail(walk.session, node);
+		symbol.kind = DeclarationText::SymbolKindOf(node, member);
+		symbol.range = walk.session.ToEditorRange(walk.sourceId, DocComment::Start(walk.session, node), node.endLocation);
+		const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(node);
+		symbol.selectionRange = name.found ? walk.session.ToEditorRange(walk.sourceId, name.simpleStart, name.end) : symbol.range;
 		return symbol;
 	}
 
-	std::string DocumentSymbols::BuildFunctionDetail(const Scripting::FunctionDefinitionNode& func)
+	bool DocumentSymbols::DefinedForType(const Walk& walk, const Scripting::AstNode& node)
 	{
-		std::string detail;
-		if (const auto* ret = func.GetReturnType().Get())
-			detail += ret->ToString() + " ";
-		detail += "(";
-		const auto& params = func.GetParameters();
-		for (uint32 i = 0; i < params.Count(); ++i)
+		const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(node);
+		if (!func.GetName() || func.GetName()->GetSegments().Count() < 2)
+			return false;
+		const std::string written = DeclarationText::WrittenName(node);
+		const std::string qualifier = written.substr(0, written.rfind("::"));
+		return walk.namespaces.count(qualifier) == 0 && walk.namespaces.count(walk.scope + "::" + qualifier) == 0;
+	}
+
+	void DocumentSymbols::AddMacros(Server::CompilationSession& session, const std::string& uri, Core::Vector<DocumentSymbol>& out)
+	{
+		for (const MacroUses::Definition& macro : MacroUses::DefinitionsIn(session.GetEditorText(uri)))
 		{
-			if (i > 0)
-				detail += ", ";
-			if (params[i]->GetType())
-				detail += params[i]->GetType()->ToString() + " ";
-			detail += params[i]->GetNameToken().GetText();
+			DocumentSymbol symbol;
+			symbol.name = macro.name;
+			symbol.detail = "macro";
+			symbol.kind = SymbolKinds::Function;
+			symbol.range = macro.range;
+			symbol.selectionRange = macro.nameRange;
+			out.Push(symbol);
 		}
-		detail += ")";
-		return detail;
 	}
 } // namespace C4LSP::Features

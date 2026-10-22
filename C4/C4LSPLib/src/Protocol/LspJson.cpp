@@ -27,10 +27,85 @@ namespace C4LSP::Protocol
 	{
 		if (!hover.found)
 			return Json::Value::Null();
+		Json::Value contents = Json::Value::MakeObject();
+		contents.SetMember("kind", Json::Value::String(Core::String("markdown")));
+		contents.SetMember("value", Json::Value::String(Core::String(hover.contents)));
 		Json::Value obj = Json::Value::MakeObject();
-		obj.SetMember("contents", Json::Value::String(Core::String(hover.contents)));
+		obj.SetMember("contents", contents);
 		obj.SetMember("range", RangeObject(hover.range));
 		return obj;
+	}
+
+	Json::Value LspJson::HierarchyItemObject(const Features::HierarchyItem& item)
+	{
+		Json::Value obj = Json::Value::MakeObject();
+		obj.SetMember("name", Json::Value::String(Core::String(item.name)));
+		obj.SetMember("kind", Json::Value::Int(item.kind));
+		obj.SetMember("detail", Json::Value::String(Core::String(item.detail)));
+		obj.SetMember("uri", Json::Value::String(Core::String(item.uri)));
+		obj.SetMember("range", RangeObject(item.range));
+		obj.SetMember("selectionRange", RangeObject(item.selectionRange));
+		return obj;
+	}
+
+	Json::Value LspJson::HierarchyItems(const Core::Vector<Features::HierarchyItem>& items)
+	{
+		Json::Value array = Json::Value::MakeArray();
+		for (const auto& item : items)
+			if (!item.uri.empty())
+				array.Append(HierarchyItemObject(item));
+		return array.Size() == 0 ? Json::Value::Null() : array;
+	}
+
+	Json::Value LspJson::HierarchyCalls(const Core::Vector<Features::HierarchyCall>& calls, const char* itemKey)
+	{
+		Json::Value array = Json::Value::MakeArray();
+		for (const auto& call : calls)
+		{
+			if (call.item.uri.empty())
+				continue;
+			Json::Value ranges = Json::Value::MakeArray();
+			for (const auto& range : call.fromRanges)
+				ranges.Append(RangeObject(range));
+			Json::Value obj = Json::Value::MakeObject();
+			obj.SetMember(itemKey, HierarchyItemObject(call.item));
+			obj.SetMember("fromRanges", ranges);
+			array.Append(obj);
+		}
+		return array;
+	}
+
+	Json::Value LspJson::ExpandedMacro(const Features::MacroUses::Use& use)
+	{
+		if (!use.found)
+			return Json::Value::Null();
+		Json::Value obj = Json::Value::MakeObject();
+		obj.SetMember("name", Json::Value::String(Core::String(use.name)));
+		obj.SetMember("expansion", Json::Value::String(Core::String(use.expansion)));
+		return obj;
+	}
+
+	Range LspJson::RangeFrom(const Json::Value& range)
+	{
+		auto position = [](const Json::Value& value) {
+			Position p;
+			p.line = static_cast<uint32>(value.Member("line").GetInt(0));
+			p.character = static_cast<uint32>(value.Member("character").GetInt(0));
+			return p;
+		};
+		return Range{ position(range.Member("start")), position(range.Member("end")) };
+	}
+
+	Features::HierarchyItem LspJson::HierarchyItemFrom(const Json::Value& item)
+	{
+		Features::HierarchyItem out;
+		out.name = item.Member("name").GetString("");
+		out.kind = static_cast<int>(item.Member("kind").GetInt(0));
+		out.detail = item.Member("detail").GetString("");
+		out.uri = item.Member("uri").GetString("");
+		out.range = RangeFrom(item.Member("range"));
+		out.selectionRange = RangeFrom(item.Member("selectionRange"));
+		return out;
 	}
 
 	Json::Value LspJson::Locations(const Core::Vector<Location>& locations)

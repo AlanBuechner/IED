@@ -319,7 +319,7 @@ void CompilationSession::RunPreprocessPhase()
 
 		std::unordered_map<std::string, uint32> projectOf;
 		for (uint32 id = 1; id <= sources.Count(); ++id)
-			if (sources.HasInfo(id)) projectOf[sources.GetInfo(id).absPath] = sources.GetInfo(id).project;
+			if (sources.HasInfo(id)) projectOf[Scripting::MacroIdentity(sources.GetInfo(id))] = sources.GetInfo(id).project;
 		std::vector<Scripting::InteropFileInput> texts;
 		texts.reserve(macroResults.size());
 		for (const auto& r : macroResults)
@@ -341,6 +341,7 @@ void CompilationSession::RunPreprocessPhase()
 
 		m_BindingStartLine.clear();
 		m_BindingDirectiveLine.clear();
+		m_MacroTables.clear();
 		// Replace each source's text with its effective form (macro-expanded + bindings) so the
 		// parser sees exactly what the compiler would parse. The bindings follow the user's text, so
 		// the user's lines are the editor's; record where the bindings start and the editor line of the
@@ -349,14 +350,22 @@ void CompilationSession::RunPreprocessPhase()
 		for (uint32 id = 1; id <= m_Compiler->SourceCount(); ++id)
 		{
 			const auto& info = m_Compiler->GetSourceManager().GetInfo(id);
+			// The macro pass names a source by its path, or `memory:<id>` for one given as text (BUG-343).
+			const std::string identity = Scripting::MacroIdentity(info);
+			for (const auto& mr : macroResults)
+				if (mr.absPath == identity && !mr.table.Empty())
+				{
+					m_MacroTables[id] = mr.table;
+					break;
+				}
 			std::string effective;
 			bool hasBindings = false;
 			size_t directiveOffset = SIZE_MAX;
 			for (const auto& ir : interop.files)
-				if (ir.absPath == info.absPath) { effective = ir.text; hasBindings = true; directiveOffset = ir.directiveOffset; break; }
+				if (ir.absPath == identity) { effective = ir.text; hasBindings = true; directiveOffset = ir.directiveOffset; break; }
 			if (!hasBindings)
 			for (const auto& mr : macroResults)
-				if (mr.absPath == info.absPath) { effective = mr.text; break; }
+				if (mr.absPath == identity) { effective = mr.text; break; }
 			if (effective.empty())
 				continue;
 
@@ -364,7 +373,7 @@ void CompilationSession::RunPreprocessPhase()
 
 			if (hasBindings)
 			{
-				auto it = macroByAbs.find(info.absPath);
+				auto it = macroByAbs.find(identity);
 				m_BindingStartLine[id] = (it != macroByAbs.end() ? CountLines(it->second) : 0) + 1;
 
 				// Editor line (1-based) of the directive, computed against the original text.
@@ -372,6 +381,12 @@ void CompilationSession::RunPreprocessPhase()
 					m_BindingDirectiveLine[id] = static_cast<uint32>(std::count(it->second.begin(), it->second.begin() + directiveOffset, '\n')) + 1;
 			}
 		}
+	}
+
+	const Scripting::MacroTable* CompilationSession::MacroTableOf(uint32 sourceId) const
+	{
+		auto found = m_MacroTables.find(sourceId);
+		return found == m_MacroTables.end() ? nullptr : &found->second;
 	}
 
 	Protocol::Range CompilationSession::ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const

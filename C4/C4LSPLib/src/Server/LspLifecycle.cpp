@@ -187,6 +187,13 @@ namespace C4LSP::Server
 		semanticTokensOptions.SetMember("full", Json::Value::Bool(true));
 		capabilities.SetMember("semanticTokensProvider", semanticTokensOptions);
 
+		capabilities.SetMember("callHierarchyProvider", Json::Value::Bool(true));
+		capabilities.SetMember("typeHierarchyProvider", Json::Value::Bool(true));
+		// c4/expandMacro (TextDocumentPositionParams -> {name, expansion}), as rust-analyzer's expandMacro.
+		Json::Value experimental = Json::Value::MakeObject();
+		experimental.SetMember("expandMacro", Json::Value::Bool(true));
+		capabilities.SetMember("experimental", experimental);
+
 		Json::Value result = Json::Value::MakeObject();
 		result.SetMember("capabilities", capabilities);
 		SendResponse(id, result);

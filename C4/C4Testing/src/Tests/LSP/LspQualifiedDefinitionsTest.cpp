@@ -59,7 +59,7 @@ int32 main() {
 		for (const auto& symbol : DocumentSymbols::ForDocument(session, Testing::Lsp::UriFor("Qualified.cf")))
 		{
 			TEST_ASSERT(!(symbol.name == "Counter" && symbol.kind == 12 /* Function */));
-			if (symbol.name == "Next" && At(symbol.selectionRange.start, definition))
+			if (symbol.name == "Counter::Next" && symbol.kind == 6 /* Method */ && At(symbol.selectionRange.start, definition))
 				found = true;
 		}
 		TEST_ASSERT(found);
