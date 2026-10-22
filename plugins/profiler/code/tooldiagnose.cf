@@ -426,7 +426,7 @@ namespace Profiler
 			line.Append(Bytes(g.Member("nativeBytes").AsInt()).View());
 			line.Append(" of native memory (");
 			line.Append(Bytes(g.Member("nativeBytesPerFrame").AsInt()).View());
-			line.Append(" a frame)");
+			line.Append(" a frame, kept or freed again)");
 			if (!g.Member("file").AsView().IsEmpty()) {
 				line.Append(", at ");
 				line.Append(g.Member("file").AsView());

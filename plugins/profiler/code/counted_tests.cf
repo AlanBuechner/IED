@@ -251,7 +251,7 @@ class ProfilerCountedTests {
 		assert_eq(15, capture->zoneAllocs, "a zone with both counts is counted once");
 		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
 		assert_true(text.View().Contains(Core::StringView("Native memory's floor rose")), "the native memory climbs");
-		assert_true(text.View().Contains(Core::StringView("Cache took 40.0 KiB of native memory (8.0 KiB a frame)")), "and the zone that took it is named");
+		assert_true(text.View().Contains(Core::StringView("Cache took 40.0 KiB of native memory (8.0 KiB a frame, kept or freed again)")), "and the zone that took it is named");
 	}
 
 	[test("the_memory_window_draws_the_memory_plots")]
