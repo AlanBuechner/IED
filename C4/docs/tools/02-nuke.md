@@ -172,8 +172,11 @@ compiler (`build/bin/<Config>-windows-x64/` of the IED repository):
   C4Script/             the script host library (runtime/04-scripting.md)
   tools/C4LSP/          the language server (+ the LLVM dlls it loads)
   tools/C4DAP/          the debug adapter
-  docs/                 the user-facing language, library, runtime and tools docs (this page among them)
+  docs/                 the user-facing language, library, runtime and tools docs (this page among them), and
+                        library/bedrock-api.md, the Bedrock API digest: every public type and function of the shipped
+                        headers with its signature and doc comment's first sentence (C4/ApiDigest.py)
   ied/                  the IED plugin for this version of the language, with its AI skills (from C4/IedPlugin/)
+  ied/docs/             docs/ again, inside the plugin: its aiDocs contribution, which the AI searches and reads
 ```
 
 The folder is mirrored: unchanged files are not copied again and files gone from the build are removed.

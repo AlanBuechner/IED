@@ -26,6 +26,10 @@ Location: `Bedrock/` in the repo. Umbrella headers: `Bedrock/bedrock.ch` (everyt
   Development `nuke build` from the repository root refreshes the `dev` one,
   [tools/02-nuke.md](../tools/02-nuke.md#5-toolchains)). A stale copy next to the exe or in the toolchain is a
   common source of "my change did nothing".
+- Every toolchain also carries `docs/library/bedrock-api.md`, a digest of these headers made when the toolchain is
+  (`C4/ApiDigest.py`): every public type with its members as declared and every free function, each with its doc
+  comment's first sentence. The IED plugin's docs search and read it, so an AI writing C4 looks up exact
+  signatures there instead of reading the headers.
 
 ```c4
 include "bedrock.ch"

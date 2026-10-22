@@ -8,8 +8,10 @@
 #     Bedrock/  C4Runtime/  toolchain/{bin,lib}   default library, runtime sources, clang + lld-link + llvm-rc
 #     CBind/    C4Script/                         binding generator, script host
 #     tools/C4LSP/  tools/C4DAP/                  language server (+ the LLVM dlls it loads), debug adapter
-#     docs/                 the user-facing language, library, runtime and build docs
-#     ied/                  the IED plugin for this version of the language, its AI skills included (IedPlugin/)
+#     docs/                 the user-facing language, library, runtime and build docs, and library/bedrock-api.md: the
+#                           Bedrock API digest, made from the headers the toolchain ships (ApiDigest.py)
+#     ied/                  the IED plugin for this version of the language, its AI skills included (IedPlugin/), and
+#                           ied/docs/, a copy of docs/ the plugin's aiDocs contribution reads
 #
 # The folder is mirrored: unchanged files are not copied again and files gone from the build are removed.
 # C4/nuke.toml runs this after every Development build to refresh the "dev" toolchain.
@@ -24,6 +26,8 @@ import sys
 
 sys.dont_write_bytecode = True
 
+from ApiDigest import write_digest
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPOSITORY = os.path.dirname(HERE)
 COMPILER_FILES = (".exe", ".dll", ".pdb")
@@ -36,7 +40,8 @@ TOOLS = {
 }
 LSP_DLLS = ("libclang.dll", "LLVM-C.dll", "LTO.dll")
 REQUIRED = ["C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe", "toolchain/bin/llvm-rc.exe",
-	"CBind/CBind.exe", "C4Script/C4Script.dll", "ied/ied-plugin.json"]
+	"CBind/CBind.exe", "C4Script/C4Script.dll", "ied/ied-plugin.json", "docs/library/bedrock-api.md", "ied/docs/library/bedrock-api.md"]
+DIGEST = "library/bedrock-api.md"  # under docs/, made by MakeToolchain from the shipped Bedrock
 DOCS = [
 	"01-what-is-c4.md",
 	"language/01-program-model.md", "language/02-preprocessor.md", "language/03-lexical-structure.md",
@@ -66,7 +71,26 @@ def _is_junction(path):
 	return hasattr(os.path, "isjunction") and os.path.isjunction(path)
 
 
-def plan(build, repo):
+def bedrock_digest(build):
+	"""The Bedrock API digest of the compiler's own copy of the library, kept in the build beside it (rewritten only when
+	the headers say something new)."""
+	out = os.path.join(build, "C4", "generated", *DIGEST.split("/"))
+	write_digest(os.path.join(build, "C4", "Bedrock"), out, "Bedrock API digest")
+	return out
+
+
+def shipped_docs(repo, digest):
+	"""docs/ of the toolchain, relative to it -> source file: the listed docs and the digest."""
+	docs = {}
+	for doc in DOCS:
+		source = os.path.join(repo, "docs", *doc.split("/"))
+		if os.path.isfile(source):
+			docs[doc] = source
+	docs[DIGEST] = digest
+	return docs
+
+
+def plan(build, repo, digest):
 	"""destination (relative to the toolchain) -> source file."""
 	files = {}
 	compiler = os.path.join(build, "C4")
@@ -85,10 +109,9 @@ def plan(build, repo):
 		for dll in LSP_DLLS:
 			if os.path.isfile(os.path.join(compiler, dll)):
 				files[os.path.join("tools", "C4LSP", dll)] = os.path.join(compiler, dll)
-	for doc in DOCS:
-		source = os.path.join(repo, "docs", *doc.split("/"))
-		if os.path.isfile(source):
-			files[os.path.join("docs", *doc.split("/"))] = source
+	for doc, source in shipped_docs(repo, digest).items():
+		files[os.path.join("docs", *doc.split("/"))] = source
+		files[os.path.join("ied", "docs", *doc.split("/"))] = source  # the plugin's aiDocs folder
 	for rel in files_below(os.path.join(repo, "IedPlugin")):
 		files[os.path.join("ied", rel)] = os.path.join(repo, "IedPlugin", rel)
 	return {os.path.normpath(k): v for k, v in files.items()}
@@ -167,7 +190,7 @@ def main(argv):
 		print(f"MakeToolchain: no compiler build at {build}/C4 (build it first: nuke build C4 {options.config})")
 		return 1
 	out = os.path.abspath(options.out)
-	copied, removed = mirror(plan(build, HERE), out)
+	copied, removed = mirror(plan(build, HERE, bedrock_digest(build)), out)
 	missing = [f for f in REQUIRED if not os.path.exists(os.path.join(out, *f.split("/")))]
 	if missing:
 		print(f"MakeToolchain: {out} is incomplete, missing {', '.join(missing)} (did every tool build?)")
