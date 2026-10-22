@@ -22,6 +22,7 @@ namespace Profiler
 			case EventType::ZoneColor: return "v";
 			case EventType::ZoneCallstack: return "v";
 			case EventType::ZoneAllocs: return "vv";
+			case EventType::ZoneNative: return "v";
 			case EventType::TaskBegin: return "tvvv";
 			case EventType::TaskEnd: return "tv";
 			case EventType::TaskSuspend: return "tv";

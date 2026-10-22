@@ -53,11 +53,23 @@ namespace Profiler
 	// What happened in a window, per thread in time order.
 	Core::String Window(const Capture& capture, const WindowAsk& ask);
 
-	// What each zone allocated itself (its ZoneAllocs less its children's), for the zones starting in a range:
-	// visit(track, depth, index, objects, bytes).
-	void ZoneSelfAllocations(const Capture& capture, Range range, const func<void(int64, int64, int64, int64, int64)>& visit);
-	// What one zone counted itself: its ZoneAllocs less its children's.
-	void ZoneOwnCounts(const Capture& capture, ZoneRef ref, int64& objects, int64& bytes);
+	// What a zone counted (ZoneAllocs, ZoneNative): objects and their bytes, and the native memory its thread took.
+	struct ZoneCounts
+	{
+		public int64 objects;
+		public int64 bytes;
+		public int64 nativeBytes;
+
+		public bool IsEmpty() const { return objects == 0 && bytes == 0 && nativeBytes == 0; }
+	}
+
+	// What zone `i` of `level` counted, its children's included.
+	ZoneCounts ZoneCountsOf(const ThreadTrack* track, const ZoneLevel* level, int64 i);
+	// What each zone counted itself (its counts less its children's), for the zones starting in a range:
+	// visit(track, depth, index, counts).
+	void ZoneSelfAllocations(const Capture& capture, Range range, const func<void(int64, int64, int64, const ZoneCounts&)>& visit);
+	// What one zone counted itself: its counts less its children's.
+	ZoneCounts ZoneOwnCounts(const Capture& capture, ZoneRef ref);
 	// The allocations each frame of `set` held (indexed like its starts): from allocation events, else the process's
 	// count, else the zones'; false when the capture has none of them.
 	bool FrameAllocations(const Capture& capture, const FrameSet* set, Core::Array<int64>& objects, Core::Array<int64>& bytes);

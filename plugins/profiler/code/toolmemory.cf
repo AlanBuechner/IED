@@ -327,7 +327,13 @@ namespace Profiler
 		out.Append(Number(a.Member("inZones").AsInt()).View());
 		out.Append(" of them (");
 		out.Append(Bytes(a.Member("inZoneBytes").AsInt()).View());
-		out.Append(") inside zones. By ");
+		out.Append(") inside zones");
+		if (a.Member("inZoneNativeBytes").AsInt() > 0) {
+			out.Append(", and the zones took ");
+			out.Append(Bytes(a.Member("inZoneNativeBytes").AsInt()).View());
+			out.Append(" of native memory (containers' buffers, raw blocks: the \"native\" column)");
+		}
+		out.Append(". By ");
 		out.Append(GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone));
 		out.Append(", each zone's own (its children's left to them):\n");
 		const int64 samples = a.Member("samples").AsInt();
@@ -338,8 +344,8 @@ namespace Profiler
 		}
 		TextTable table;
 		Core::Array<Core::String>* head = table.Row();
-		const char*[8] titles = { GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "thread", "source" };
-		for (int32 i = 0; i < 8; ++i) head->Push(Core::String(titles[i]));
+		const char*[9] titles = { GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "native", "thread", "source" };
+		for (int32 i = 0; i < 9; ++i) head->Push(Core::String(titles[i]));
 		Serialization::DomNode groups = a.Member("groups");
 		for (int64 i = 0; i < groups.Count(); ++i) {
 			Serialization::DomNode g = groups.At(i);
@@ -350,6 +356,7 @@ namespace Profiler
 			row->Push(Bytes(g.Member("bytes").AsInt()));
 			row->Push(Bytes(g.Member("bytesPerFrame").AsInt()));
 			row->Push(Bytes(g.Member("meanSize").AsInt()));
+			row->Push(g.Member("nativeBytes").AsInt() > 0 ? Bytes(g.Member("nativeBytes").AsInt()) : Core::String());
 			row->Push(Core::String(g.Member("thread").AsView()));
 			row->Push(Source(g));
 		}

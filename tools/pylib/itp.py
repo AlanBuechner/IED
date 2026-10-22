@@ -33,6 +33,7 @@ EVENTS = {
 	0x25: ("ZoneColor", [("color", "v")]),
 	0x26: ("ZoneCallstack", [("callstackId", "v")]),
 	0x27: ("ZoneAllocs", [("objects", "v"), ("bytes", "v")]),
+	0x28: ("ZoneNative", [("bytes", "v")]),
 	0x30: ("TaskBegin", [("dt", "dt"), ("taskId", "v"), ("nameStr", "v"), ("parentTaskId", "v")]),
 	0x31: ("TaskEnd", [("dt", "dt"), ("taskId", "v")]),
 	0x32: ("TaskSuspend", [("dt", "dt"), ("taskId", "v")]),

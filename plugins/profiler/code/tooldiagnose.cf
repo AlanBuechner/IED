@@ -21,6 +21,7 @@ namespace Profiler
 	const double kThreadWaitHigh = 0.2;
 	const double kAllocsPerFrameMedium = 100.0;
 	const double kAllocsPerFrameHigh = 1000.0;
+	const int64 kNativeTakers = 3;                 // the zones named as taking the most native memory
 	const int64 kAllocBytesPerFrameMedium = 65536;
 	const int64 kAllocBytesPerFrameHigh = 1048576;
 	const double kAllocsPerSecondMedium = 50000.0;
@@ -404,6 +405,38 @@ namespace Profiler
 		}
 	}
 
+	// The zones that took the most native memory (a collected program's containers' buffers), as evidence of growth.
+	static void NativeZoneEvidence(Finding* finding, const Capture& capture) {
+		AllocAsk ask;
+		ask.source = AllocSource::Zones;
+		ask.groupBy = AllocGroup::Zone;
+		ask.limit = 200;
+		Serialization::DomNode a = ParseJson(Allocations(capture, ask));
+		if (a.Member("source").AsView() != "zones" || a.Member("inZoneNativeBytes").AsInt() == 0) return;
+		Core::Array<Serialization::DomNode> takers;
+		Serialization::DomNode groups = a.Member("groups");
+		for (int64 i = 0; i < groups.Count(); ++i)
+			if (groups.At(i).Member("nativeBytes").AsInt() > 0) takers.Push(groups.At(i));
+		takers.SortBy([](const Serialization::DomNode& x, const Serialization::DomNode& y) -> bool { return x.Member("nativeBytes").AsInt() > y.Member("nativeBytes").AsInt(); });
+		for (int64 i = 0; i < takers.Count() && i < (int64)kNativeTakers; ++i) {
+			Serialization::DomNode g = takers[i];
+			Core::StringBuilder line;
+			line.Append(g.Member("label").AsView());
+			line.Append(" took ");
+			line.Append(Bytes(g.Member("nativeBytes").AsInt()).View());
+			line.Append(" of native memory (");
+			line.Append(Bytes(g.Member("nativeBytesPerFrame").AsInt()).View());
+			line.Append(" a frame)");
+			if (!g.Member("file").AsView().IsEmpty()) {
+				line.Append(", at ");
+				line.Append(g.Member("file").AsView());
+				line.AppendByte(':');
+				line.AppendInt(g.Member("line").AsInt());
+			}
+			finding->evidence.Push(line.ToString());
+		}
+	}
+
 	static bool HeapAfterGrows(const Serialization::DomNode& after) {
 		if (!after.IsValid() || after.IsNull() || after.Member("count").AsInt() < 4) return false;
 		const int64 steps = after.Member("count").AsInt() - 1;
@@ -492,6 +525,7 @@ namespace Profiler
 		}
 		Serialization::DomNode after = trend.Member("gc").Member("heapAfter");
 		if (finding) FlatSeriesEvidence(finding, series, after);
+		if (finding) NativeZoneEvidence(finding, capture);
 		if (HeapAfterGrows(after)) {
 			Core::StringBuilder line;
 			line.Append("the heap left after each collection grew from ");

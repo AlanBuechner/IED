@@ -15,6 +15,7 @@ namespace Profiler
 		public uint64 callstack;
 		public int64 count;
 		public int64 bytes;
+		public int64 nativeBytes;   // native memory the zones took (a collected program's counts)
 		public int64 churn;
 		public int64 live;
 		public int64 liveBytes;
@@ -101,6 +102,8 @@ namespace Profiler
 		json.IntField("meanSize", row->count == 0 ? 0 : row->bytes / row->count);
 		NumberField(json, "perFrame", frames == 0 ? 0.0 : (double)row->count / (double)frames, 1);
 		json.IntField("bytesPerFrame", frames == 0 ? 0 : row->bytes / frames);
+		json.IntField("nativeBytes", row->nativeBytes);
+		json.IntField("nativeBytesPerFrame", frames == 0 ? 0 : row->nativeBytes / frames);
 		json.IntField("churn", row->churn);
 		json.IntField("live", row->live);
 		json.IntField("liveBytes", row->liveBytes);
@@ -232,22 +235,23 @@ namespace Profiler
 		AllocGrouper grouper(capture, asked.groupBy);
 		Core::HashMap<uint64, AllocRow*> rowOf;
 		Core::Array<AllocRow*> rows;
-		int64 inZones = 0;
-		int64 inZoneBytes = 0;
+		ZoneCounts inZones;
 		AllocGrouper* g = &grouper;
 		Core::HashMap<uint64, AllocRow*>* of = &rowOf;
 		Core::Array<AllocRow*>* all = &rows;
-		ZoneSelfAllocations(capture, range, [g, of, all, &inZones, &inZoneBytes](int64 t, int64 d, int64 i, int64 objects, int64 bytes) {
+		ZoneSelfAllocations(capture, range, [g, of, all, &inZones](int64 t, int64 d, int64 i, const ZoneCounts& counts) {
 			AllocRow* row = RowFor(*of, *all, g->KeyOfZone(t, d, i), 0);
-			row->count += objects;
-			row->bytes += bytes;
+			row->count += counts.objects;
+			row->bytes += counts.bytes;
+			row->nativeBytes += counts.nativeBytes;
 			if (row->firstTrack < 0) row->firstTrack = (int32)t;
 			if (!row->tracks.Contains((int32)t)) row->tracks.Insert((int32)t, true);
-			inZones += objects;
-			inZoneBytes += bytes;
+			inZones.objects += counts.objects;
+			inZones.bytes += counts.bytes;
+			inZones.nativeBytes += counts.nativeBytes;
 		});
-		int64 count = inZones;
-		int64 bytes = inZoneBytes;
+		int64 count = inZones.objects;
+		int64 bytes = inZones.bytes;
 		if (!capture.allocCounter.times.IsEmpty()) CountedBetween(capture, range, count, bytes);
 		FrameTally tally;
 		tally.Init(capture, range);
@@ -258,14 +262,15 @@ namespace Profiler
 				tally.counts[f - tally.first] = frameObjects[f];
 				tally.bytes[f - tally.first] = frameBytes[f];
 			}
-		if (asked.byBytes) rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->bytes > b->bytes; });
+		if (asked.byBytes) rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->bytes + a->nativeBytes > b->bytes + b->nativeBytes; });
 		else rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->count > b->count; });
 		const double seconds = (double)capture.clock.Ns(range.Length()) / 1e9;
 		json.Field("source", "zones");
 		json.IntField("count", count);
 		json.IntField("bytes", bytes);
-		json.IntField("inZones", inZones);
-		json.IntField("inZoneBytes", inZoneBytes);
+		json.IntField("inZones", inZones.objects);
+		json.IntField("inZoneBytes", inZones.bytes);
+		json.IntField("inZoneNativeBytes", inZones.nativeBytes);
 		json.IntField("samples", AllocationSampleCount(capture));
 		NumberField(json, "perSecond", seconds > 0.0 ? (double)count / seconds : 0.0, 1);
 		NumberField(json, "bytesPerSecond", seconds > 0.0 ? (double)bytes / seconds : 0.0, 0);

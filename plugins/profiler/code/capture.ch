@@ -314,7 +314,7 @@ namespace Profiler
 		public Core::Array<GcRecord> gcs;
 		public AllocCounter allocCounter;
 		public Core::Array<HeapCensus*> censuses;
-		public int64 zoneAllocs;                             // zones that said what they allocated (ZoneAllocs)
+		public int64 zoneAllocs;                             // zones that said what they allocated (ZoneAllocs, ZoneNative)
 		public Core::HashMap<uint64, TaskInfo*> tasks;
 		public Core::HashMap<uint64, TaskLane*> taskLaneOf;  // task name string id -> lane
 		public Core::Array<TaskLane*> taskLanes;
