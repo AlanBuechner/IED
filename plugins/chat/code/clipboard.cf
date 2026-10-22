@@ -1,0 +1,588 @@
+include "api/plugin.ch"
+include "clipboard.ch"
+include "files.ch"
+
+namespace Ai
+{
+	const int64 kClipLineShownBytes = 160;   // of a clip's first and last line, what a result shows
+	const int64 kClipQuotedBytes = 60;       // of a from or to an error quotes
+
+	// --- Cutting -----------------------------------------------------------------------------------------------------
+
+	class ClipLine
+	{
+		public int64 number;
+		public Core::StringView text;
+		public bool broken;   // a line break followed it
+	}
+
+	// The number of a line that starts with "<n>\t" (spaces before it allowed), and in `skip` where its text starts; -1 for
+	// a line without that gutter.
+	static int64 GutterNumber(Core::StringView line, int64& skip) {
+		int64 at = 0;
+		while (at < line.ByteLength() && line.ByteAt(at) == ' ') at += 1;
+		const int64 digits = at;
+		int64 number = 0;
+		while (at < line.ByteLength() && at - digits < 10 && line.ByteAt(at) >= '0' && line.ByteAt(at) <= '9') {
+			number = number * 10 + (line.ByteAt(at) - '0');
+			at += 1;
+		}
+		if (at == digits || at >= line.ByteLength() || line.ByteAt(at) != '\t') return -1;
+		skip = at + 1;
+		return number;
+	}
+
+	static bool IsNote(Core::StringView line) { return line.StartsWith(Core::StringView("[")); }
+
+	bool LooksNumbered(Core::StringView text) {
+		bool numbered = false;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int64 end = text.IndexOf('\n', at);
+			if (end < 0) end = text.ByteLength();
+			Core::StringView line = text.Substring(at, end - at);
+			at = end + 1;
+			int64 skip = 0;
+			if (GutterNumber(line, skip) >= 0) numbered = true;
+			else if (!IsNote(line)) return false;
+		}
+		return numbered;
+	}
+
+	// The lines of `text`, numbered by their place from 1, or a numbered text's by their gutters.
+	static Core::Array<ClipLine> LinesOf(Core::StringView text, bool numbered) {
+		Core::Array<ClipLine> lines;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			int64 end = text.IndexOf('\n', at);
+			ClipLine line;
+			line.broken = end >= 0;
+			if (end < 0) end = text.ByteLength();
+			int64 cut = end;
+			if (cut > at && text.ByteAt(cut - 1) == '\r') cut -= 1;
+			line.text = text.Substring(at, cut - at);
+			at = end + 1;
+			line.number = lines.Count() + 1;
+			if (numbered) {
+				int64 skip = 0;
+				line.number = GutterNumber(line.text, skip);
+				if (line.number < 0) continue;
+				line.text = line.text.Substring(skip, line.text.ByteLength() - skip);
+				line.broken = true;
+			}
+			lines.Push(line);
+		}
+		return lines;
+	}
+
+	static Core::String Quoted(Core::StringView text) {
+		int64 cut = text.ByteLength() < kClipQuotedBytes ? text.ByteLength() : kClipQuotedBytes;
+		while (cut > 0 && cut < text.ByteLength() && ((uint8)text.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+		Core::StringBuilder out;
+		out.Append("\"");
+		out.Append(text.Substring(0, cut));
+		out.Append(cut < text.ByteLength() ? "...\"" : "\"");
+		return out.ToString();
+	}
+
+	static Core::String MissingLines(const Core::Array<ClipLine>& lines, const ClipRange& range) {
+		if (lines.IsEmpty()) return Core::String("it is empty");
+		Core::StringBuilder out;
+		out.Append("it has no lines ");
+		if (range.startLine > 0) out.AppendInt(range.startLine);
+		out.Append("-");
+		if (range.endLine > 0) out.AppendInt(range.endLine);
+		out.Append("; its lines are ");
+		out.AppendInt(lines[0].number);
+		out.Append("-");
+		out.AppendInt(lines[lines.Count() - 1].number);
+		return out.ToString();
+	}
+
+	bool CutClip(Core::StringView text, bool numbered, const ClipRange& range, Core::String& cut, Core::String& error) {
+		if (range.startLine > 0 && range.endLine > 0 && range.endLine < range.startLine) {
+			error = Core::String("end_line is before start_line");
+			return false;
+		}
+		Core::Array<ClipLine> lines = LinesOf(text, numbered);
+		Core::StringBuilder taken;
+		int64 count = 0;
+		for (const ClipLine& line : lines) {
+			if ((range.startLine > 0 && line.number < range.startLine) || (range.endLine > 0 && line.number > range.endLine)) continue;
+			taken.Append(line.text);
+			if (line.broken) taken.Append("\n");
+			count += 1;
+		}
+		if (count == 0) {
+			error = MissingLines(lines, range);
+			return false;
+		}
+		Core::StringView whole = taken.View();
+		int64 begin = 0;
+		int64 end = whole.ByteLength();
+		if (!range.from.IsEmpty()) {
+			begin = whole.IndexOf(range.from.View());
+			if (begin < 0) {
+				error = (Core::String("from ") + Quoted(range.from.View()).View()) + " is not in it";
+				return false;
+			}
+		}
+		if (!range.to.IsEmpty()) {
+			const int64 after = range.from.IsEmpty() ? begin : begin + range.from.ByteLength();
+			const int64 found = whole.Substring(after, whole.ByteLength() - after).IndexOf(range.to.View());
+			if (found < 0) {
+				error = (Core::String("to ") + Quoted(range.to.View()).View()) + (range.from.IsEmpty() ? " is not in it" : " is not in it after from");
+				return false;
+			}
+			end = after + found + range.to.ByteLength();
+		}
+		cut = Core::String(whole.Substring(begin, end - begin));
+		if (cut.IsEmpty()) {
+			error = Core::String("there is nothing to copy");
+			return false;
+		}
+		return true;
+	}
+
+	// --- Pasting -----------------------------------------------------------------------------------------------------
+
+	static bool IsNameByte(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-'; }
+
+	static Clip* Named(const Core::Array<Clip*>& clips, Core::StringView name) {
+		for (Clip* clip : clips)
+			if (clip->name.View() == name) return clip;
+		return nullptr;
+	}
+
+	// The length of the {{clip:<name>}} or {{!clip:<name>}} at the start of `text`, with its name and whether it is the
+	// escaped one; 0 when it does not start with one.
+	static int64 Token(Core::StringView text, Core::StringView& name, bool& escaped) {
+		escaped = text.StartsWith(Core::StringView("{{!clip:"));
+		if (!escaped && !text.StartsWith(Core::StringView("{{clip:"))) return 0;
+		const int64 start = escaped ? 8 : 7;
+		int64 end = start;
+		while (end < text.ByteLength() && end - start <= kClipNameMostBytes && IsNameByte(text.ByteAt(end))) end += 1;
+		if (end == start || end - start > kClipNameMostBytes || !text.Substring(end, text.ByteLength() - end).StartsWith(Core::StringView("}}"))) return 0;
+		name = text.Substring(start, end - start);
+		return end + 2;
+	}
+
+	bool PasteClips(Core::StringView text, const Core::Array<Clip*>& clips, Core::String& pasted, Core::String& missing) {
+		if (!text.Contains(Core::StringView("clip:"))) {
+			pasted = Core::String(text);
+			return true;
+		}
+		Core::StringBuilder out;
+		int64 at = 0;
+		for (;;) {
+			const int64 found = text.Substring(at, text.ByteLength() - at).IndexOf(Core::StringView("{{"));
+			if (found < 0) break;
+			out.Append(text.Substring(at, found));
+			at += found;
+			Core::StringView name;
+			bool escaped = false;
+			const int64 length = Token(text.Substring(at, text.ByteLength() - at), name, escaped);
+			if (length == 0) {
+				out.Append("{");
+				at += 1;
+				continue;
+			}
+			if (escaped) {
+				out.Append("{{clip:");
+				out.Append(name);
+				out.Append("}}");
+			}
+			else {
+				Clip* clip = Named(clips, name);
+				if (!clip) {
+					missing = Core::String(name);
+					return false;
+				}
+				out.Append(clip->text.View());
+			}
+			at += length;
+		}
+		out.Append(text.Substring(at, text.ByteLength() - at));
+		pasted = out.ToString();
+		return true;
+	}
+
+	static bool WritePasted(IED::JsonWriter& json, const Serialization::DomNode& node, const Core::Array<Clip*>& clips, bool& changed, Core::String& missing) {
+		if (node.Kind() == Serialization::DomKind::String) {
+			Core::String pasted;
+			if (!PasteClips(node.AsView(), clips, pasted, missing)) return false;
+			changed = changed || pasted.View() != node.AsView();
+			json.String(pasted.View());
+			return true;
+		}
+		if (node.Kind() == Serialization::DomKind::Object) {
+			json.BeginObject();
+			for (int64 i = 0; i < node.Count(); ++i) {
+				json.Key(node.KeyAt(i));
+				if (!WritePasted(json, node.ValueAt(i), clips, changed, missing)) return false;
+			}
+			json.EndObject();
+			return true;
+		}
+		if (node.Kind() == Serialization::DomKind::Array) {
+			json.BeginArray();
+			for (int64 i = 0; i < node.Count(); ++i)
+				if (!WritePasted(json, node.At(i), clips, changed, missing)) return false;
+			json.EndArray();
+			return true;
+		}
+		json.Raw(IED::NodeJson(node).View());
+		return true;
+	}
+
+	bool PasteArguments(const Serialization::DomNode& args, const Core::Array<Clip*>& clips, Serialization::DomNode& pasted, Core::String& missing) {
+		IED::JsonWriter json;
+		bool changed = false;
+		if (!WritePasted(json, args, clips, changed, missing)) return false;
+		if (!changed) {
+			pasted = args;
+			return true;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		pasted = Serialization::ReadJson(json.View(), *doc).root;
+		return true;
+	}
+
+	// --- Where a copy reads ------------------------------------------------------------------------------------------
+
+	static bool IsClipboardTool(Core::StringView name) { return name.StartsWith(Core::StringView("clipboard_")); }
+
+	// The tool names of an assistant message's calls, by their ids.
+	static void CallNames(Core::StringView toolCalls, Core::HashMap<Core::String, Core::String>& names) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode calls = Serialization::ReadJson(toolCalls, *doc).root;
+		for (int64 i = 0; i < calls.Count(); ++i) names.At(Core::String(calls.At(i).Member("id").AsView())) = Core::String(calls.At(i).Member("function").Member("name").AsView());
+	}
+
+	// The `back`-th tool result of the chat so far, newest first, the clipboard's own not counted, with its tool's name;
+	// false with `count` the results there are.
+	static bool EarlierResult(const Chat* chat, int64 back, Core::String& tool, Core::String& content, int64& count) {
+		count = 0;
+		for (int64 t = chat->turns.Count() - 1; t >= 0; --t) {
+			Core::HashMap<Core::String, Core::String> names;
+			Core::Array<const ModelMessage*> results;
+			Core::Array<Core::String> tools;
+			for (const ModelMessage* message : chat->turns[t]->messages) {
+				if (!message->toolCalls.IsEmpty()) CallNames(message->toolCalls.View(), names);
+				if (message->role != "tool") continue;
+				Core::String name;
+				names.TryGet(message->toolCallId, name);
+				results.Push(message);
+				tools.Push(name);
+			}
+			for (int64 i = results.Count() - 1; i >= 0; --i) {
+				if (IsClipboardTool(tools[i].View())) continue;
+				count += 1;
+				if (count < back) continue;
+				tool = tools[i];
+				content = results[i]->content;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static ClipRange RangeOf(const Serialization::DomNode& args) {
+		ClipRange range;
+		range.startLine = args.Member("start_line").AsInt();
+		range.endLine = args.Member("end_line").AsInt();
+		range.from = Core::String(args.Member("from").AsView());
+		range.to = Core::String(args.Member("to").AsView());
+		return range;
+	}
+
+	// " lines 40-62", " from line 40", " to line 62", or nothing.
+	static Core::String LinesNote(const ClipRange& range) {
+		Core::StringBuilder out;
+		if (range.startLine > 0 && range.endLine > 0) {
+			out.Append(range.startLine == range.endLine ? " line " : " lines ");
+			out.AppendInt(range.startLine);
+			if (range.endLine != range.startLine) {
+				out.Append("-");
+				out.AppendInt(range.endLine);
+			}
+		}
+		else if (range.startLine > 0) {
+			out.Append(" from line ");
+			out.AppendInt(range.startLine);
+		}
+		else if (range.endLine > 0) {
+			out.Append(" to line ");
+			out.AppendInt(range.endLine);
+		}
+		return out.ToString();
+	}
+
+	static int64 SourcesGiven(const Serialization::DomNode& args) {
+		int64 count = 0;
+		if (args.Member("path").IsValid()) count += 1;
+		if (args.Member("result").IsValid()) count += 1;
+		if (args.Member("text").IsValid()) count += 1;
+		return count;
+	}
+
+	// The text a copy reads and what to call it; false with `error`. Inside the host lock.
+	static bool CopySource(const Chat* chat, const ToolInvocation& call, Core::String& text, Core::String& source, bool& numbered, Core::String& error) {
+		numbered = false;
+		if (call.args.Member("path").IsValid()) {
+			source = IED::NormalizePath(call.args.Member("path").AsView());
+			text = TextAsEdited(call.ws, source.View());
+			return true;
+		}
+		if (call.args.Member("text").IsValid()) {
+			source = Core::String("text");
+			text = Core::String(call.args.Member("text").AsView());
+			return true;
+		}
+		Core::String tool;
+		int64 count = 0;
+		if (!EarlierResult(chat, call.args.Member("result").AsInt(), tool, text, count)) {
+			Core::StringBuilder said;
+			said.Append("there ");
+			said.Append(count == 1 ? "is 1 earlier tool result" : "are ");
+			if (count != 1) {
+				said.AppendInt(count);
+				said.Append(" earlier tool results");
+			}
+			said.Append(" (the clipboard's own not counted); result 1 is the latest");
+			error = said.ToString();
+			return false;
+		}
+		source = (Core::String("the ") + (tool.IsEmpty() ? Core::StringView("tool") : tool.View())) + " result";
+		numbered = LooksNumbered(text.View());
+		return true;
+	}
+
+	// --- Keeping ------------------------------------------------------------------------------------------------------
+
+	// `text` kept as the clip `name`, after the clip's own text with `append`, as the newest; past kClipsMost the oldest is
+	// dropped and named in `dropped`. Null with `error` when the clip would be too large.
+	static Clip* Keep(Chat* chat, Core::StringView name, Core::StringView text, Core::StringView source, bool append, Core::String& dropped, Core::String& error) {
+		Clip* clip = nullptr;
+		int64 at = -1;
+		for (int64 i = 0; i < chat->clips.Count(); ++i)
+			if (chat->clips[i]->name.View() == name) {
+				clip = chat->clips[i];
+				at = i;
+			}
+		const bool adding = append && clip;
+		const int64 bytes = adding ? clip->text.ByteLength() + text.ByteLength() : text.ByteLength();
+		if (bytes > kClipMostBytes) {
+			Core::StringBuilder said;
+			said.Append("that makes ");
+			said.AppendInt((bytes + 1023) / 1024);
+			said.Append(" KB; a clip holds at most ");
+			said.AppendInt(kClipMostBytes / 1024);
+			said.Append(" KB: copy fewer lines, or into two clips");
+			error = said.ToString();
+			return nullptr;
+		}
+		if (adding) {
+			clip->text = clip->text + text;
+			clip->source = (clip->source + "; ") + source;
+			chat->clips.RemoveAt(at);
+		}
+		else {
+			if (clip) chat->clips.RemoveAt(at);
+			clip = new Clip();
+			clip->name = Core::String(name);
+			clip->text = Core::String(text);
+			clip->source = Core::String(source);
+		}
+		chat->clips.Push(clip);
+		if (chat->clips.Count() > kClipsMost) {
+			dropped = chat->clips[0]->name;
+			chat->clips.RemoveAt(0);
+		}
+		return clip;
+	}
+
+	static void PublishClips(Chats* chats, Chat* chat) {
+		IED::JsonWriter data;
+		data.BeginObject();
+		data.Key(Core::StringView("clips"));
+		chat->WriteClips(data);
+		data.EndObject();
+		chats->Publish(chat, "clips.changed", data.View());
+		SaveChatHeader(FS::Path(chats->WorkspaceOf(chat).root.View()), chat);
+	}
+
+	// --- Saying what it holds -----------------------------------------------------------------------------------------
+
+	static int64 LineCount(Core::StringView text) {
+		Clip counted;
+		counted.text = Core::String(text);
+		return counted.Lines();
+	}
+
+	static void AppendSize(Core::StringBuilder& out, Core::StringView text) {
+		const int64 lines = LineCount(text);
+		out.AppendInt(lines);
+		out.Append(lines == 1 ? " line (" : " lines (");
+		out.AppendInt(text.ByteLength());
+		out.Append(text.ByteLength() == 1 ? " byte)" : " bytes)");
+	}
+
+	static Core::StringView Shown(Core::StringView line) {
+		int64 cut = line.ByteLength() < kClipLineShownBytes ? line.ByteLength() : kClipLineShownBytes;
+		while (cut > 0 && cut < line.ByteLength() && ((uint8)line.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+		return line.Substring(0, cut);
+	}
+
+	static Core::StringView FirstLine(Core::StringView text) {
+		const int64 end = text.IndexOf('\n', 0);
+		return Shown(end < 0 ? text : text.Substring(0, end));
+	}
+
+	static Core::StringView LastLine(Core::StringView text) {
+		Core::StringView body = text.EndsWith(Core::StringView("\n")) ? text.Substring(0, text.ByteLength() - 1) : text;
+		int64 start = body.ByteLength();
+		while (start > 0 && body.ByteAt(start - 1) != '\n') start -= 1;
+		return Shown(body.Substring(start, body.ByteLength() - start));
+	}
+
+	static Core::String Copied(const Clip* clip, Core::StringView added, Core::StringView source, bool appended, Core::StringView dropped) {
+		Core::StringBuilder out;
+		out.Append(appended ? "Added " : "Copied ");
+		AppendSize(out, added);
+		out.Append(" of ");
+		out.Append(source);
+		out.Append(appended ? " to the end of the clip " : " to the clip ");
+		out.Append(clip->name.View());
+		if (appended) {
+			out.Append(", now ");
+			AppendSize(out, clip->text.View());
+		}
+		out.Append(". Write {{clip:");
+		out.Append(clip->name.View());
+		out.Append("}} in any later call's arguments to paste it (as fs_edit's old to match it exactly, as new to put it elsewhere).");
+		if (LineCount(added) == 1) {
+			out.Append("\nLine: ");
+			out.Append(FirstLine(added));
+		}
+		else {
+			out.Append("\nFirst line: ");
+			out.Append(FirstLine(added));
+			out.Append("\nLast line: ");
+			out.Append(LastLine(added));
+		}
+		if (!dropped.IsEmpty()) {
+			out.Append("\nThe clipboard keeps ");
+			out.AppendInt(kClipsMost);
+			out.Append(" clips: the oldest, ");
+			out.Append(dropped);
+			out.Append(", was dropped.");
+		}
+		return out.ToString();
+	}
+
+	// --- The tools ----------------------------------------------------------------------------------------------------
+
+	static ToolPlan CopyPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		Core::StringView name = call.args.Member("name").AsView();
+		if (SourcesGiven(call.args) != 1) {
+			plan.error = Core::String("clipboard_copy: give one of path (a file), result (an earlier tool result, 1 the latest) or text");
+			return plan;
+		}
+		Core::String lines = LinesNote(RangeOf(call.args));
+		if (call.args.Member("path").IsValid()) {
+			Core::String path = IED::NormalizePath(call.args.Member("path").AsView());
+			plan.subject = (Core::String("fs.read(") + path.View()) + ")";
+			plan.summary = ((Core::String("Copy ") + path.View()) + lines.View() + " to " + name);
+			return plan;
+		}
+		plan.subject = (Core::String("clipboard.copy(") + name) + ")";
+		plan.summary = Core::String("Copy to ") + name;
+		return plan;
+	}
+
+	static ToolOutcome CopyRun(Chats* chats, Chat* chat, const ToolInvocation& call) {
+		Core::StringView name = call.args.Member("name").AsView();
+		Core::String text;
+		Core::String source;
+		Core::String error;
+		bool numbered = false;
+		{
+			IED::HostLock guard(*call.context);
+			if (!CopySource(chat, call, text, source, numbered, error)) return ToolError((Core::String("clipboard_copy: ") + error.View()).View());
+		}
+		ClipRange range = RangeOf(call.args);
+		Core::String cut;
+		if (!CutClip(text.View(), numbered, range, cut, error)) return ToolError(((Core::String("clipboard_copy: ") + source.View()) + ": " + error.View()).View());
+		source = source + LinesNote(range).View();
+		IED::HostLock guard(*call.context);
+		const bool append = call.args.Member("append").AsBool() && Named(chat->clips, name);
+		Core::String dropped;
+		Clip* clip = Keep(chat, name, cut.View(), source.View(), append, dropped, error);
+		if (!clip) return ToolError((Core::String("clipboard_copy: ") + error.View()).View());
+		PublishClips(chats, chat);
+		Core::StringBuilder preview;
+		preview.Append(append ? "Added " : "Copied ");
+		AppendSize(preview, cut.View());
+		preview.Append(" to ");
+		preview.Append(name);
+		preview.Append("\n\n");
+		preview.Append(cut.View());
+		return ToolResult(Copied(clip, cut.View(), source.View(), append, dropped.View()).View(), preview.View());
+	}
+
+	static ToolOutcome ListRun(Chat* chat, const ToolInvocation& call) {
+		IED::HostLock guard(*call.context);
+		if (chat->clips.IsEmpty()) return ToolResult(Core::StringView("The clipboard is empty; clipboard_copy copies to it."), Core::StringView("Empty"));
+		Core::StringBuilder out;
+		for (Clip* clip : chat->clips) {
+			out.Append(clip->name.View());
+			out.Append(": ");
+			AppendSize(out, clip->text.View());
+			out.Append(", from ");
+			out.Append(clip->source.View());
+			out.Append(" - ");
+			out.Append(FirstLine(clip->text.View()));
+			out.Append("\n");
+		}
+		out.Append("Paste a clip with {{clip:<name>}} in any call's arguments.");
+		Core::StringBuilder preview;
+		preview.AppendInt(chat->clips.Count());
+		preview.Append(chat->clips.Count() == 1 ? " clip" : " clips");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	static ToolPlan ListPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		plan.subject = Core::String("clipboard.read()");
+		plan.summary = Core::String("List the clipboard");
+		return plan;
+	}
+
+	static ToolSpec* ClipboardTool(const char* name, const char* description, const char* parameters) {
+		ToolSpec* spec = new ToolSpec();
+		spec->name = Core::String(name);
+		spec->description = Core::String(description);
+		spec->parameters = Core::String(parameters);
+		spec->toolClass = ToolClass::Read;
+		spec->inPlan = true;
+		spec->deferred = true;
+		spec->group = Core::String("clipboard");
+		return spec;
+	}
+
+	void AddClipboardTools(ToolRegistry& registry, Chats* chats, Chat* chat) {
+		ToolSpec* copy = ClipboardTool("clipboard_copy", "Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. Use it to match a long block exactly (fs_edit old: \"{{clip:old}}\"), to move or repeat code, or to reuse output. Copy from path (the file as the editors have it), result (an earlier tool result: 1 the latest, the clipboard's own not counted; an fs_read result's line numbers are left out and start_line/end_line are the numbers it shows) or text; start_line/end_line take whole lines, from/to the text from the first from to the end of the first to after it. Example: clipboard_copy({\"name\": \"push\", \"path\": \"src/ring.cf\", \"start_line\": 40, \"end_line\": 62})",
+			"{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"pattern\": \"^[A-Za-z0-9_.-]{1,40}$\", \"description\": \"letters, digits, _ . -\"}, \"path\": {\"type\": \"string\", \"description\": \"copy from this workspace file\"}, \"result\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"copy from an earlier tool result: 1 the latest\"}, \"text\": {\"type\": \"string\", \"minLength\": 1}, \"start_line\": {\"type\": \"integer\", \"minimum\": 1}, \"end_line\": {\"type\": \"integer\", \"minimum\": 1}, \"from\": {\"type\": \"string\", \"minLength\": 1, \"description\": \"start at the first occurrence of this text\"}, \"to\": {\"type\": \"string\", \"minLength\": 1, \"description\": \"end after the first occurrence of this text after from\"}, \"append\": {\"type\": \"boolean\", \"description\": \"add to the end of the clip instead of replacing it\"}}, \"required\": [\"name\"], \"additionalProperties\": false}");
+		copy->plan = CopyPlan;
+		copy->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return CopyRun(chats, chat, call); };
+		registry.Add(copy);
+		ToolSpec* list = ClipboardTool("clipboard_list", "The clips on the clipboard: each one's name, size, where it came from and first line. Example: clipboard_list({})",
+			"{\"type\": \"object\", \"properties\": {}, \"additionalProperties\": false}");
+		list->parallelSafe = true;
+		list->plan = ListPlan;
+		list->run = [chat](const ToolInvocation& call) -> ToolOutcome { return ListRun(chat, call); };
+		registry.Add(list);
+	}
+}

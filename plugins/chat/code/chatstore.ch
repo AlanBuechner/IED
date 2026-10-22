@@ -1,5 +1,5 @@
 // Chats on disk (docs/04 "Persistence"), under <workspace>/.ied/local/chats/<chatId>/: chat.json the header (title,
-// mode, permission, group, task list, queued messages, what was allowed for the chat), turns.jsonl the finished turns
+// mode, permission, group, task list, queued messages, what was allowed for the chat, the clipboard), turns.jsonl the finished turns
 // one per line, with the messages the model was sent, and running.json the turn in flight, written at every step and
 // tool boundary. A running.json found at load is a turn a restart interrupted (docs/12 "Restart behavior"): it ends
 // "interrupted", a call that was running gets a result saying its effect is unknown, and the chat waits paused.

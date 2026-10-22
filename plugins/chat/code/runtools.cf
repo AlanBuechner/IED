@@ -1,6 +1,7 @@
 include "api/plugin.ch"
 include "run.ch"
 include "roots.ch"
+include "clipboard.ch"
 
 namespace Ai
 {
@@ -85,9 +86,11 @@ namespace Ai
 		}
 		else {
 			Core::Array<Core::String> problems;
+			Core::String missing;
 			if (!ReadToolArguments(call->arguments.View(), args)) problems.Push(Core::String("the arguments are not a JSON object"));
-			else problems = tools->Check(spec, args);
-			if (problems.IsEmpty()) {
+			else if (Pasted(args, missing)) problems = tools->Check(spec, args);
+			if (!missing.IsEmpty()) outcome = UnknownClip(call->name.View(), missing.View());
+			else if (problems.IsEmpty()) {
 				malformed = 0;
 				if (spec->deferred) {
 					IED::HostLock guard(*context);
@@ -118,6 +121,27 @@ namespace Ai
 		TrackLoop(call, outcome);
 		if (malformed > kRunMalformedBound) Pause(Core::StringView("malformed_tool_call"), Core::StringView("the model kept sending tool arguments that do not fit the tool's schema"));
 		SaveRunning();
+	}
+
+	bool TurnRun::Pasted(Serialization::DomNode& args, Core::String& missing) {
+		IED::HostLock guard(*context);
+		return PasteArguments(args, chat->clips, args, missing);
+	}
+
+	ToolOutcome TurnRun::UnknownClip(Core::StringView tool, Core::StringView missing) {
+		Core::Array<Core::String> names;
+		{
+			IED::HostLock guard(*context);
+			for (Clip* clip : chat->clips) names.Push(clip->name);
+		}
+		Core::Array<Core::String> values;
+		values.Push(Core::String("tool"));
+		values.Push(Core::String(tool));
+		values.Push(Core::String("name"));
+		values.Push(Core::String(missing));
+		values.Push(Core::String("clips"));
+		values.Push(names.IsEmpty() ? Core::String("the clipboard is empty") : Core::String("the clips are ") + Joined(names, ", ").View());
+		return ToolError(chats->prompts.Note("unknown_clip", values).View());
 	}
 
 	ToolOutcome TurnRun::RunCall(ToolSpec* spec, ToolCallDraft* call, Segment* segment, const Serialization::DomNode& args) {

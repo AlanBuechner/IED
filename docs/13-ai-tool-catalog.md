@@ -173,6 +173,17 @@ Chats of one workspace talking to each other (`docs/04` "Chats talk to each othe
 | `chat_create(text, title?, mode?)` | exec | a new chat started with `text`; subject `chat.create(*)` |
 | `chat_wait(chat, seconds?)` | read | until its turn ends (default 120, at most 600 s); returns the answer |
 
+### `clipboard` (built, 2026-10-21; deferred)
+
+A chat's own clipboard, so the model moves, repeats or matches text it has seen without typing it again: a long `old` for `fs_edit` taken exactly from the file (no lost tab, no wrong line), a function moved to another file, an error message reused in a search. As built: `plugins/chat/code/clipboard.cf`.
+
+| Tool | Class | Notes |
+|---|---|---|
+| `clipboard_copy(name, path? / result? / text?, start_line?, end_line?, from?, to?, append?)` | read | One source: `path` a workspace file as the editors have it (subject `fs.read(<path>)`), `result` an earlier tool result of the chat (1 the latest, the clipboard's own not counted; a line-numbered result such as `fs_read`'s loses its gutter and `start_line`/`end_line` are the numbers it shows), or `text`. `start_line`/`end_line` take whole lines with their breaks (a CRLF break read as LF); `from`/`to` then narrow it from the first `from` to the end of the first `to` after it. `append` adds to the clip. A clip holds at most 64 KB, the clipboard 20 (the oldest dropped, said in the result). The result gives the size and the first and last line, not the text; the card shows the text. |
+| `clipboard_list()` | read | Each clip's name, size, source and first line. |
+
+**Pasting.** `{{clip:<name>}}` in any string of any later call's arguments - any tool, a plugin's too, at any depth (`edits[].old`) - is replaced by the clip before the arguments are checked against the tool's schema, so the permission check, the approval card's diff and the tool see the pasted text, while the model's own call, which later requests send, keeps the token (no context spent twice). `{{!clip:<name>}}` writes `{{clip:<name>}}` itself; text that is not a well-formed token (`{{clip:<name>}}` as written here, angle brackets and all) stays as it is, and pasted text is not pasted into again. A token naming a clip the chat does not have fails the call without running it (harness note `unknown_clip`, naming the clips there are). Clips are names of letters, digits, `_`, `.` and `-`, at most 40. They are kept in `chat.json` (a restart keeps them), are the chat's own (another chat starts empty), and show in the details panel's "Clipboard" section (`clips.changed`, `docs/10`), each unfolding to its first 2 KB. `fs_edit`'s description points at the clipboard for long blocks.
+
 ### `ide` (drive the UI for the human)
 
 | ID | Tool | Class | Notes |

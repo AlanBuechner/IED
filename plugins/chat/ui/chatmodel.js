@@ -1,7 +1,8 @@
 // chatmodel.js - a chat as this client sees it (docs/10 "Chats"): the chat:<chatId> snapshot with its events folded in
 // - turns and their segments, tool states, approvals and the question waiting, tasks, queued messages, the files the
-// AI changed and the context. Each event says what changed, so the view redraws only that. Also the chats:<wsId> list
-// and the small facts the views show (a tool call's one-line arguments, a tab's glyphs, tokens per second).
+// AI changed, its clipboard and the context. Each event says what changed, so the view redraws only that. Also the
+// chats:<wsId> list and the small facts the views show (a tool call's one-line arguments, a tab's glyphs, tokens per
+// second).
 
 export const STATE_LABELS = { idle: "Idle", running: "Running", awaiting_approval: "Needs approval", awaiting_answer: "Needs an answer", paused: "Paused" };
 export const MODES = [["ask", "Ask"], ["plan", "Plan"], ["agent", "Agent"]];
@@ -20,6 +21,7 @@ export class ChatModel {
 		this.queued = [];
 		this.modified = [];
 		this.resources = [];
+		this.clips = [];
 		this.context = null;
 	}
 
@@ -36,6 +38,7 @@ export class ChatModel {
 		this.queued = data.queued || [];
 		this.modified = data.modified || [];
 		this.resources = data.resources || [];
+		this.clips = data.clips || [];
 		this.context = data.context || null;
 		return { all: true };
 	}
@@ -47,8 +50,8 @@ export class ChatModel {
 		return { all: true };
 	}
 
-	// Folds one event in; what changed: {turn}, {segment, turn}, {summary}, {tasks}, {queued}, {modified}, {context},
-	// {approvals}, {question}.
+	// Folds one event in; what changed: {turn}, {segment, turn}, {summary}, {tasks}, {queued}, {modified}, {clips},
+	// {context}, {approvals}, {question}.
 	event(kind, data) {
 		switch (kind) {
 			case "chat.changed":
@@ -116,6 +119,9 @@ export class ChatModel {
 			case "files.changed":
 				this.modified = data.files || [];
 				return { modified: true };
+			case "clips.changed":
+				this.clips = data.clips || [];
+				return { clips: true };
 			case "context.changed":
 				this.context = data;
 				return { context: true };
@@ -240,6 +246,7 @@ export function argsLine(tool, argsText) {
 	if (tool === "fs_edit" && Array.isArray(args.edits)) rest.push(args.edits.length + (args.edits.length === 1 ? " edit" : " edits"));
 	if (tool === "tasks_set" && Array.isArray(args.items)) rest.push(args.items.length + " tasks");
 	if (tool === "task_update") rest.push(args.id + " " + args.status);
+	if (tool === "clipboard_copy") return [args.name + ":", args.path || (args.result ? "result " + args.result : "text"), args.start_line || args.end_line ? (args.start_line || 1) + "-" + (args.end_line || "end") : ""].filter(Boolean).join(" ");
 	return [lead].concat(rest).filter(Boolean).join(" ") || JSON.stringify(args).slice(0, 200);
 }
 

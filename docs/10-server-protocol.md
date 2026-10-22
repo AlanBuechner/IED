@@ -224,7 +224,7 @@ A chat belongs to a workspace and to the server: a turn runs on the server until
 | Topic | Events | Snapshot |
 |---|---|---|
 | `chats:<wsId>` | `chat.created`, `chat.changed` (a summary), `chat.deleted {chatId}` | `{chats: [summary]}` |
-| `chat:<chatId>` | `turn.start`, `turn.progress`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `approval.resolved`, `question.request`, `question.resolved`, `tasks.changed`, `queue.changed`, `files.changed`, `resources.changed`, `context.changed`, `turn.stats`, `turn.end`, `chat.changed` | `{...summary, model, groupInUse, tasks, queued, modified, resources, context, hasMore, turns: [the last 20], pendingApprovals, pendingQuestion}`: `model` and `groupInUse` are what a turn would use now |
+| `chat:<chatId>` | `turn.start`, `turn.progress`, `segment.start`, `segment.delta`, `segment.end`, `tool.state`, `approval.request`, `approval.resolved`, `question.request`, `question.resolved`, `tasks.changed`, `queue.changed`, `files.changed`, `resources.changed`, `clips.changed`, `context.changed`, `turn.stats`, `turn.end`, `chat.changed` | `{...summary, model, groupInUse, tasks, queued, modified, resources, clips, context, hasMore, turns: [the last 20], pendingApprovals, pendingQuestion}`: `model` and `groupInUse` are what a turn would use now |
 
 A turn is `{turnId, user: {text, from?}, hops?, mode, model, group, segments, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, startedMs, endedMs}`: `stop` is null while it runs; `tokensIn` is the last request's prompt, `tokensOut` every request's completion, `ttftMs` the last time to first token and `genMs` the time spent generating after it (tokens per second = `tokensOut / genMs`).
 
@@ -251,6 +251,7 @@ Events:
 | `queue.changed` | `{queued: [text]}` |
 | `files.changed` | `{files: [{path, plus, minus}]}`: what the AI wrote in this chat |
 | `resources.changed` | `{resources: [{ref, title, kind}]}`: the tabs plugins opened for this chat (`docs/04` "What a chat has open") |
+| `clips.changed` | `{clips: [{name, source, lines, bytes, text}]}`: the AI's clipboard, oldest first (`docs/13` `clipboard`); `text` is the first 2 KB of the clip |
 | `context.changed` | `{window, used, parts: [{name, tokens}]}`: the last request's prompt by part against the model's window (0 when unknown) |
 | `turn.stats` | `{turnId, tokensIn, tokensOut, ttftMs, genMs}` after each request |
 | `turn.end` | `{turnId, stop, recoveries, tokensIn, tokensOut, ttftMs, genMs, endedMs}`: `stop` is `finished`, `user_cancelled`, `no_model`, `interrupted` or the stop reason that paused the chat (`docs/12` taxonomy); `recoveries` the recovery actions taken, in order ("retried after http_error 503 (1x)") |

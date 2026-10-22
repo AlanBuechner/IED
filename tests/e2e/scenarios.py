@@ -1146,6 +1146,39 @@ def chat_turn_with_approval(run):
 	run.shot("finished")
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def chat_clipboard(run):
+	"""The AI copies lines of a file and pastes them into a later call (docs/13 `clipboard`): the cards say what was
+	copied and where it was pasted, and the details panel lists the clip, which unfolds to its text. The file tools'
+	side (fs_edit, fs_write, an unknown clip, a restart) is a server check (test_chat)."""
+	page = open_chat(run)
+	entry = {"name": "entry", "path": "src/main.c", "from": "int main", "to": "}"}
+	call = {"name": "call", "path": "src/main.c", "from": "core_run", "to": "("}
+	run.target.queue_model(
+		model_script({"text": "Copying the entry point:", "chunk": 6}, {"toolCall": {"name": "clipboard_copy", "arguments": entry}}, {"finish": "tool_calls"}),
+		model_script({"toolCall": {"name": "clipboard_copy", "arguments": call}}, {"finish": "tool_calls"}),
+		model_script({"toolCall": {"name": "search_text", "arguments": {"pattern": "{{clip:call}}"}}}, {"finish": "tool_calls"}),
+		model_script({"text": "`core_run` is called from `main`.", "chunk": 6}, {"finish": "stop"}))
+	send(page, "who calls core_run?")
+	page.wait_for_selector(".chat-turn:last-child .chat-foot:has-text('Finished')", timeout=30000)
+	states = page.eval_on_selector_all(".chat-turn:last-child .chat-tool", "els => els.map(e => e.dataset.state)")
+	check(states == ["ok", "ok", "ok"], "the copies and the search ran: %s" % states)
+	check("entry: src/main.c" in run.texts(".chat-turn:last-child .chat-tool")[0], "the copy's card names the clip and the file")
+	page.click(".chat-turn:last-child .chat-tool >> nth=2 >> .chat-tool-head")
+	run.wait_text(".chat-turn:last-child .chat-tool-out", "matches")
+	found = run.texts(".chat-turn:last-child .chat-tool-out")[0]
+	matches = found[found.rindex("}") + 1:].split(" ")[0]
+	check("{{clip:call}}" in found and int(matches) > 0, "the card keeps the token; the search found the pasted text: %s" % found)
+	run.shot("pasted")
+	if run.phone:
+		page.click("button[aria-label='Chat details']")
+	page.wait_for_selector(".chat-panel .chat-sec[data-section='clips'] .chat-sec-row.clip[data-clip='entry']")
+	page.click(".chat-sec-row.clip[data-clip='entry']")
+	page.wait_for_selector(".chat-panel .chat-clip")
+	check(run.texts(".chat-panel .chat-clip")[0].startswith("int main(void)\n{"), "the clip unfolds to the text it holds")
+	run.shot("clipboard")
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def chat_shows_the_prompt_read(run):
 	"""While the model's server reads a long prompt the turn shows how far (llama.cpp's progress, turn.progress), and

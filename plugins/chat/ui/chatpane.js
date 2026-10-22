@@ -125,7 +125,7 @@ export class ChatPane {
 		const change = this.model.event(kind, data);
 		this.transcript.update(change);
 		if (change.summary || change.queued || change.turn || change.context || change.approvals || change.question) this.composer.update(this.model);
-		if (change.summary || change.tasks || change.modified || change.context || change.resources) this.panel.update(this.model);
+		if (change.summary || change.tasks || change.modified || change.context || change.resources || change.clips) this.panel.update(this.model);
 		if (change.summary && this.host.shown) this.host.shown(this.model.summary);
 		if (follow) this.scrollToEnd(false);
 	}

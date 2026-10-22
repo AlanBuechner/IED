@@ -173,6 +173,9 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .chat-sec-row .ci { width: 14px; height: 14px; flex: none; }
 .chat-sec-row.task.now { background: var(--veil); color: var(--text-0); }
 .chat-sec-empty { padding: var(--space-2) var(--space-4) var(--space-2) 26px; font-size: var(--font-size-sm); }
+.chat-sec-row.clip { padding-left: var(--space-5); }
+.chat-sec-row.clip .dir { flex: 1; }
+.chat-clip { margin: var(--space-1) var(--space-4) var(--space-2) 26px; padding: var(--space-2) var(--space-3); max-height: 200px; overflow: auto; font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); line-height: 17px; color: var(--text-1); background: var(--bg-0); border: var(--border-width) solid var(--border-0); white-space: pre; tab-size: 4; }
 .chat-check { display: inline-grid; place-items: center; width: 13px; height: 13px; border: var(--border-width) solid var(--border-1); border-radius: 2px; flex: none; }
 .chat-check .ci { width: 11px; height: 11px; }
 .chat-check.on { color: var(--text-2); }

@@ -2,6 +2,7 @@ include "api/plugin.ch"
 include "run.ch"
 include "contributed.ch"
 include "chattools.ch"
+include "clipboard.ch"
 
 namespace Ai
 {
@@ -81,6 +82,7 @@ namespace Ai
 		Core::Array<Core::String> contributed;
 		tools = ToolsFor(context, ws, contributed);
 		AddChatTools(*tools, chats, chat);
+		AddClipboardTools(*tools, chats, chat);
 		if (Serialization::ReadJson(context->Setting(Core::StringView("ai.tools.loadAll"), WsId(ws)).View(), *doc).root.AsBool()) tools->LoadAll();
 		SystemContext prompt;
 		prompt.agentsMd = AgentsMd(ws);

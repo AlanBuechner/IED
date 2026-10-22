@@ -594,6 +594,47 @@ class ChatTests(ChatCase):
 		files = [f for f in self.frames if f.get("kind") == "files.changed"][-1]["data"]["files"]
 		self.assertEqual([{"path": "src/main.c", "plus": 1, "minus": 1}], files)
 
+	async def test_the_clipboard_copies_from_results_and_files_and_pastes_into_calls(self):
+		chat_id, topic = await self.chat(permission="acceptEdits")
+		paste = {"path": "src/main.c", "edits": [{"old": "{{clip:ret}}", "new": "\tputs(\"{{!clip:sig}}\");\n{{clip:ret}}"}]}
+		self.model.queue(call_step("fs_read", {"path": "src/main.c"}, "r1"), call_step("clipboard_copy", {"name": "ret", "result": 1, "start_line": 3, "end_line": 3}, "c1"),
+			call_step("clipboard_copy", {"name": "sig", "path": "src/main.c", "from": "int", "to": ")"}, "c2"), call_step("fs_edit", paste, "e1"),
+			call_step("fs_write", {"path": "src/decl.h", "content": "{{clip:sig}};\n"}, "w1"), call_step("fs_read", {"path": "{{clip:nope}}"}, "x1"),
+			call_step("clipboard_list", {}, "l1"), text_step("Done."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		results = {m["tool_call_id"]: m["content"] for m in sent if m["role"] == "tool"}
+		self.assertIn("Copied 1 line (11 bytes) of the fs_read result line 3 to the clip ret", results["c1"], "the read's line numbers are left out")
+		self.assertIn("{{clip:ret}}", results["c1"], "the result says how to paste it")
+		self.assertIn("Line: \treturn 0;", results["c1"])
+		self.assertIn("of src/main.c to the clip sig", results["c2"])
+		with open(os.path.join(self.repo, "src", "main.c"), encoding="utf-8") as f:
+			self.assertEqual("int main(void)\n{\n\tputs(\"{{clip:sig}}\");\n\treturn 0;\n}\n", f.read(), "pasted into old and new; the escaped one written as text")
+		with open(os.path.join(self.repo, "src", "decl.h"), encoding="utf-8") as f:
+			self.assertEqual("int main(void);\n", f.read())
+		self.assertIn("there is no clip nope (the clips are ret, sig)", results["x1"])
+		self.assertIn("ret: 1 line (11 bytes), from the fs_read result line 3", results["l1"])
+		calls = [c["function"]["arguments"] for m in sent if m.get("tool_calls") for c in m["tool_calls"]]
+		self.assertTrue(any("{{clip:ret}}" in c for c in calls), "the model's own calls keep the tokens, not the pasted text")
+		tools = {t["callId"]: t for t in self.segments(await self.last_turn(chat_id), "tool")}
+		self.assertEqual(["ok", "ok", "ok", "ok", "ok", "error", "ok"], [t["state"] for t in tools.values()])
+		clips = [f["data"]["clips"] for f in self.frames if f.get("kind") == "clips.changed"][-1]
+		self.assertEqual([("ret", "the fs_read result line 3", 1, 11, "\treturn 0;\n"), ("sig", "src/main.c", 1, 14, "int main(void)")],
+			[(c["name"], c["source"], c["lines"], c["bytes"], c["text"]) for c in clips])
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		await self.client.sub([topic])
+		self.assertEqual(["ret", "sig"], [c["name"] for c in (await self.client.next_frame(topic))["data"]["clips"]], "the clipboard is kept with the chat")
+		other, _ = await self.chat(permission="acceptEdits")
+		self.model.queue(call_step("fs_write", {"path": "src/other.c", "content": "{{clip:sig}}"}, "o1"), text_step("No."))
+		await self.turn(other)
+		result = [m for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"][0]["content"]
+		self.assertIn("there is no clip sig (the clipboard is empty)", result, "each chat has its own clipboard")
+		self.assertFalse(os.path.exists(os.path.join(self.repo, "src", "other.c")))
+
 	async def test_a_plan_mode_chat_cannot_write(self):
 		chat_id, _ = await self.chat(mode="plan")
 		self.model.queue(call_step("fs_write", {"path": "src/new.c", "content": "x"}), text_step("Planned."))

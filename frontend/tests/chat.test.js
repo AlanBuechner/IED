@@ -57,6 +57,9 @@ test("chat: tasks, queue, files and context", () => {
 	assertEqual(model.event("tasks.changed", { items: [{ id: "t1", title: "Read", status: "done" }] }), { tasks: true });
 	assertEqual(model.event("queue.changed", { queued: ["later"] }), { queued: true });
 	assertEqual(model.event("files.changed", { files: [{ path: "src/a.cf", plus: 3, minus: 0 }] }), { modified: true });
+	assertEqual(model.clips, [], "a snapshot without clips");
+	assertEqual(model.event("clips.changed", { clips: [{ name: "push", source: "src/ring.cf lines 40-62", lines: 23, bytes: 812, text: "void Push()\n" }] }), { clips: true });
+	assertEqual([model.clips.length, model.clips[0].name], [1, "push"]);
 	model.event("context.changed", { window: 32768, used: 16384, parts: [{ name: "System prompt", tokens: 4096 }] });
 	assertEqual([model.tasks.length, model.queued, model.modified[0].plus, model.context.used], [1, ["later"], 3, 16384]);
 	const bar = contextBar(model.context);
@@ -89,6 +92,8 @@ test("chat: a call's arguments on one line", () => {
 	assertEqual(argsLine("shell_run", "{\"command\": \"nuke build\"}"), "nuke build");
 	assertEqual(argsLine("fs_edit", "{\"path\": \"a.cf\", \"edits\": [{}, {}]}"), "a.cf 2 edits");
 	assertEqual(argsLine("task_update", "{\"id\": \"t2\", \"status\": \"done\"}"), "t2 done");
+	assertEqual(argsLine("clipboard_copy", "{\"name\": \"push\", \"path\": \"src/ring.cf\", \"start_line\": 40, \"end_line\": 62}"), "push: src/ring.cf 40-62");
+	assertEqual(argsLine("clipboard_copy", "{\"name\": \"err\", \"result\": 1}"), "err: result 1");
 	assertEqual(argsLine("fs_read", "{\"path\": \"src/Log"), "{\"path\": \"src/Log", "streaming arguments show as they are");
 });
 

@@ -111,6 +111,19 @@ namespace Ai
 		public Core::String kind;     // "page", ...: the side panel's icon
 	}
 
+	const int64 kClipShownBytes = 2048;   // of a clip's text, what the clients get
+
+	// A clip on the AI's clipboard (clipboard.ch): text it copied, pasted into later calls as {{clip:<name>}}.
+	class Clip
+	{
+		public Core::String name;
+		public Core::String text;
+		public Core::String source;   // where it came from ("src/ring.cf lines 40-62", "the shell_run result")
+
+		// Its lines; a final line break starts no line.
+		public int64 Lines() const;
+	}
+
 	class ChatTask
 	{
 		public Core::String id;
@@ -182,6 +195,7 @@ namespace Ai
 		public Core::Array<ModifiedFile*> modified;   // what the AI wrote, with its lines added and removed
 		public Core::Array<Core::String> loadedTools; // deferred tools tool_search or a call loaded (docs/13)
 		public Core::Array<ChatResource*> resources;  // tabs it uses that plugins reported (chat.resource), this run only
+		public Core::Array<Clip*> clips;              // the AI's clipboard, oldest first (clipboard.ch)
 		public Core::String context;                  // the last context.changed data (JSON); empty before a request
 		public ChatRun* run;                          // the running turn, or null
 		public int64 counter;
@@ -196,8 +210,10 @@ namespace Ai
 		public void WriteQueued(IED::JsonWriter& json) const;
 		public void WriteModified(IED::JsonWriter& json) const;
 		public void WriteResources(IED::JsonWriter& json) const;
-		// The chat:<chatId> snapshot: the summary, the model and group in use, tasks, queued messages, the last `recent` turns
-		// and what it waits on.
+		// The clips as the clients show them: [{name, source, lines, bytes, text}], each text cut to kClipShownBytes.
+		public void WriteClips(IED::JsonWriter& json) const;
+		// The chat:<chatId> snapshot: the summary, the model and group in use, tasks, queued messages, the clips, the last
+		// `recent` turns and what it waits on.
 		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, int64 recent) const;
 	}
 

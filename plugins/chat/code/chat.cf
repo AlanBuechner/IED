@@ -358,6 +358,31 @@ namespace Ai
 		json.EndArray();
 	}
 
+	int64 Clip::Lines() const {
+		int64 lines = 0;
+		Core::StringView view = text.View();
+		for (int64 i = 0; i < view.ByteLength(); ++i)
+			if (view.ByteAt(i) == '\n') lines += 1;
+		return view.IsEmpty() || view.EndsWith(Core::StringView("\n")) ? lines : lines + 1;
+	}
+
+	void Chat::WriteClips(IED::JsonWriter& json) const {
+		json.BeginArray();
+		for (Clip* clip : clips) {
+			Core::StringView text = clip->text.View();
+			int64 cut = text.ByteLength() < kClipShownBytes ? text.ByteLength() : kClipShownBytes;
+			while (cut > 0 && cut < text.ByteLength() && ((uint8)text.ByteAt(cut) & 0xC0) == 0x80) cut -= 1;
+			json.BeginObject();
+			json.Field("name", clip->name.View());
+			json.Field("source", clip->source.View());
+			json.IntField("lines", clip->Lines());
+			json.IntField("bytes", text.ByteLength());
+			json.Field("text", text.Substring(0, cut));
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
 	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, int64 recent) const {
 		IED::JsonWriter json;
 		json.BeginObject();
@@ -372,6 +397,8 @@ namespace Ai
 		WriteModified(json);
 		json.Key(Core::StringView("resources"));
 		WriteResources(json);
+		json.Key(Core::StringView("clips"));
+		WriteClips(json);
 		json.Key(Core::StringView("context"));
 		if (context.IsEmpty()) json.Null();
 		else json.Raw(context.View());

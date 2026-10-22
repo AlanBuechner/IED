@@ -1,0 +1,124 @@
+// clipboard: what a copy takes of a text - whole lines, an fs_read result's lines by its numbers, from/to - and clips
+// pasted into a call's arguments, escaped and missing ones included (docs/13 `clipboard`).
+
+include "clipboard.ch"
+
+static Core::StringView Text(const char* text) { return Core::StringView(text); }
+
+static Ai::ClipRange Lines(int64 first, int64 last) {
+	Ai::ClipRange range;
+	range.startLine = first;
+	range.endLine = last;
+	return range;
+}
+
+static Core::Array<Ai::Clip*> Board() {
+	Core::Array<Ai::Clip*> clips;
+	Ai::Clip* block = new Ai::Clip();
+	block->name = Core::String("block");
+	block->text = Core::String("\treturn 0;\n");
+	clips.Push(block);
+	Ai::Clip* word = new Ai::Clip();
+	word->name = Core::String("w.2-x_y");
+	word->text = Core::String("Ring");
+	clips.Push(word);
+	return clips;
+}
+
+[test("server.ai.clipboard")]
+class ClipboardTests {
+	[test("whole_lines_with_their_breaks")]
+	public static void TestLines() {
+		Core::String cut;
+		Core::String error;
+		assert_true(Ai::CutClip(Text("one\r\ntwo\r\nthree"), false, Lines(2, 3), cut, error), error.CStr());
+		assert_true(cut.View() == "two\nthree", "CRLF read as LF; the last line has no break to keep");
+		assert_true(Ai::CutClip(Text("one\ntwo\n"), false, Lines(0, 0), cut, error) && cut.View() == "one\ntwo\n", "no range: all of it");
+		assert_true(Ai::CutClip(Text("one\ntwo\n"), false, Lines(2, 0), cut, error) && cut.View() == "two\n", "from a line to the end");
+		assert_true(!Ai::CutClip(Text("one\ntwo\n"), false, Lines(5, 9), cut, error), "past the end");
+		assert_true(error.View() == "it has no lines 5-9; its lines are 1-2", error.CStr());
+		assert_true(!Ai::CutClip(Text("one\ntwo\n"), false, Lines(2, 1), cut, error) && error.View() == "end_line is before start_line", error.CStr());
+		assert_true(!Ai::CutClip(Text(""), false, Lines(0, 0), cut, error) && error.View() == "it is empty", error.CStr());
+	}
+
+	[test("an_fs_read_result_by_its_numbers")]
+	public static void TestNumbered() {
+		Core::StringView read = Text("40\tvoid Push()\n41\t{\n42\t\tcount += 1;\n43\t}\n[lines 40-43 of 90; call fs_read with offset 44 to read on]\n");
+		assert_true(Ai::LooksNumbered(read), "line numbers and a note");
+		assert_true(!Ai::LooksNumbered(Text("error: x\n40\ty\n")), "a line without a gutter");
+		assert_true(!Ai::LooksNumbered(Text("[only a note]\n")), "no numbered line");
+		assert_true(Ai::LooksNumbered(Text("  9\tx\n 10\ty\n")), "a padded gutter");
+		Core::String cut;
+		Core::String error;
+		assert_true(Ai::CutClip(read, true, Lines(41, 43), cut, error), error.CStr());
+		assert_true(cut.View() == "{\n\tcount += 1;\n}\n", "the gutters and the note left out; a tab after the gutter kept");
+		assert_true(!Ai::CutClip(read, true, Lines(10, 20), cut, error) && error.View() == "it has no lines 10-20; its lines are 40-43", error.CStr());
+	}
+
+	[test("from_and_to")]
+	public static void TestFromTo() {
+		Core::StringView text = Text("int a = 1;\nvoid f() { g(); }\nint b = 2;\n");
+		Ai::ClipRange range;
+		range.from = Core::String("void");
+		range.to = Core::String("}");
+		Core::String cut;
+		Core::String error;
+		assert_true(Ai::CutClip(text, false, range, cut, error) && cut.View() == "void f() { g(); }", "from the first from to the end of the first to after it");
+		range.to = Core::String("int");
+		assert_true(Ai::CutClip(text, false, range, cut, error) && cut.View() == "void f() { g(); }\nint", "to is looked for after from");
+		range.from = Core::String("nope");
+		assert_true(!Ai::CutClip(text, false, range, cut, error) && error.View() == "from \"nope\" is not in it", error.CStr());
+		Ai::ClipRange onlyTo = Lines(2, 3);
+		onlyTo.to = Core::String("a = 1");
+		assert_true(!Ai::CutClip(text, false, onlyTo, cut, error) && error.View() == "to \"a = 1\" is not in it", "within the lines given");
+	}
+
+	[test("paste_replaces_tokens")]
+	public static void TestPaste() {
+		Core::Array<Ai::Clip*> clips = Board();
+		Core::String pasted;
+		Core::String missing;
+		assert_true(Ai::PasteClips(Text("{\n{{clip:block}}}"), clips, pasted, missing) && pasted.View() == "{\n\treturn 0;\n}", pasted.CStr());
+		assert_true(Ai::PasteClips(Text("{{clip:w.2-x_y}}::Push {{{clip:w.2-x_y}}}"), clips, pasted, missing) && pasted.View() == "Ring::Push {Ring}", pasted.CStr());
+		assert_true(Ai::PasteClips(Text("write {{!clip:block}} or {{clip:<name>}} or {{clip: block}}"), clips, pasted, missing), "escaped and malformed ones are text");
+		assert_true(pasted.View() == "write {{clip:block}} or {{clip:<name>}} or {{clip: block}}", pasted.CStr());
+		assert_true(!Ai::PasteClips(Text("a {{clip:gone}} b"), clips, pasted, missing) && missing.View() == "gone", "a clip it does not have");
+		Ai::Clip* nested = new Ai::Clip();
+		nested->name = Core::String("doc");
+		nested->text = Core::String("{{clip:block}}");
+		clips.Push(nested);
+		assert_true(Ai::PasteClips(Text("{{clip:doc}}"), clips, pasted, missing) && pasted.View() == "{{clip:block}}", "a pasted clip is not pasted into again");
+	}
+
+	[test("paste_into_arguments")]
+	public static void TestArguments() {
+		Core::Array<Ai::Clip*> clips = Board();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode args = Serialization::ReadJson(Text("{\"path\": \"a.cf\", \"edits\": [{\"old\": \"{{clip:block}}\", \"new\": \"\\treturn 1;\\n\", \"replace_all\": true}], \"n\": 2.5}"), *doc).root;
+		Serialization::DomNode pasted;
+		Core::String missing;
+		assert_true(Ai::PasteArguments(args, clips, pasted, missing), missing.CStr());
+		assert_true(pasted.Member("edits").At(0).Member("old").AsView() == "\treturn 0;\n", "a string in an object in an array");
+		assert_true(pasted.Member("edits").At(0).Member("replace_all").AsBool() && pasted.Member("path").AsView() == "a.cf", "the rest kept");
+		Serialization::DomNode plain = Serialization::ReadJson(Text("{\"path\": \"a.cf\"}"), *doc).root;
+		Serialization::DomNode same;
+		assert_true(Ai::PasteArguments(plain, clips, same, missing) && same.index == plain.index && same.doc == plain.doc, "nothing to paste: the arguments themselves");
+		Serialization::DomNode bad = Serialization::ReadJson(Text("{\"edits\": [{\"new\": \"{{clip:gone}}\"}]}"), *doc).root;
+		assert_true(!Ai::PasteArguments(bad, clips, same, missing) && missing.View() == "gone", "a missing clip at any depth");
+	}
+
+	[test("the_tools_are_deferred_and_check_names")]
+	public static void TestTools() {
+		Ai::ToolRegistry* registry = new Ai::ToolRegistry();
+		Ai::AddClipboardTools(*registry, nullptr, new Ai::Chat());
+		assert_eq((int64)0, registry->problems.Count(), registry->problems.IsEmpty() ? "" : registry->problems[0].CStr());
+		Core::Array<Core::String> none;
+		Core::String index = registry->DeferredIndex(Ai::ChatMode::Plan, none);
+		assert_true(index.View().Contains(Text("- clipboard_copy: Copy lines of a file or tool result to a clip; {{clip:<name>}} in a later call's arguments pastes it. (clipboard)\n")), index.CStr());
+		assert_true(index.View().Contains(Text("- clipboard_list: ")), "both, in Plan mode too");
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Ai::ToolSpec* copy = registry->Find(Text("clipboard_copy"));
+		assert_eq((int64)0, registry->Check(copy, Serialization::ReadJson(Text("{\"name\": \"a.b-c_1\", \"path\": \"src/a.cf\", \"start_line\": 3}"), *doc).root).Count(), "a good call");
+		assert_eq((int64)1, registry->Check(copy, Serialization::ReadJson(Text("{\"name\": \"two words\", \"text\": \"x\"}"), *doc).root).Count(), "a name with a space");
+	}
+}

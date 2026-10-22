@@ -46,6 +46,16 @@ namespace Ai
 		json.EndArray();
 		json.Key(Core::StringView("modified"));
 		chat->WriteModified(json);
+		json.Key(Core::StringView("clips"));
+		json.BeginArray();
+		for (Clip* clip : chat->clips) {
+			json.BeginObject();
+			json.Field("name", clip->name.View());
+			json.Field("source", clip->source.View());
+			json.Field("text", clip->text.View());
+			json.EndObject();
+		}
+		json.EndArray();
 		json.EndObject();
 		WriteWhole(ChatFolder(wsRoot, chat->chatId.View()) / "chat.json", json.View());
 	}
@@ -99,6 +109,14 @@ namespace Ai
 			file->plus = modified.At(i).Member("plus").AsInt();
 			file->minus = modified.At(i).Member("minus").AsInt();
 			chat->modified.Push(file);
+		}
+		Serialization::DomNode clips = header.Member("clips");
+		for (int64 i = 0; i < clips.Count(); ++i) {
+			Clip* clip = new Clip();
+			clip->name = Core::String(clips.At(i).Member("name").AsView());
+			clip->source = Core::String(clips.At(i).Member("source").AsView());
+			clip->text = Core::String(clips.At(i).Member("text").AsView());
+			chat->clips.Push(clip);
 		}
 	}
 

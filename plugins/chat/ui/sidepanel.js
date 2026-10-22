@@ -1,7 +1,7 @@
 // sidepanel.js - the chat's right panel (mockup 02 "breakdown panel"): the context the last request used, by part,
 // against the model's window; the task list the agent keeps (tasks_set / task_update); the files the AI changed in
 // this chat with their lines added and removed, each opening in the editor; the tabs it uses that plugins reported (the
-// pages it drives), each opening as a tab. Sections fold.
+// pages it drives), each opening as a tab; the AI's clipboard, each clip unfolding to its text. Sections fold.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { compact, contextBar } from "./chatmodel.js";
@@ -14,6 +14,7 @@ export class SidePanel {
 	constructor(actions) {
 		this.actions = actions;
 		this.closed = new Set();
+		this.openClips = new Set();
 		this.title = h("div.panel-title.chat-panel-title");
 		this.body = h("div.chat-panel-body");
 		this.el = h("aside.chat-panel", { "aria-label": "Chat details" }, this.title, this.body);
@@ -22,7 +23,12 @@ export class SidePanel {
 	update(model) {
 		replace(this.title, h("span.ellip", null, (model.summary && model.summary.title) || "Chat"),
 			h("button.ib.chat-phone-only", { title: "Close details", "aria-label": "Close details", on: { click: () => this.actions.closeDetails() } }, icon("close")));
-		replace(this.body, this.contextSection(model), this.tasksSection(model), this.openSection(model), this.filesSection(model));
+		replace(this.body, this.contextSection(model), this.tasksSection(model), this.openSection(model), this.filesSection(model), this.clipsSection(model));
+	}
+
+	// The panel drawn again after a fold or unfold.
+	toggled() {
+		this.el.dispatchEvent(new CustomEvent("chat-panel-toggle"));
 	}
 
 	section(id, title, meta, rows) {
@@ -30,7 +36,7 @@ export class SidePanel {
 		const toggle = () => {
 			if (closed) this.closed.delete(id);
 			else this.closed.add(id);
-			this.el.dispatchEvent(new CustomEvent("chat-panel-toggle"));
+			this.toggled();
 		};
 		return h("section.chat-sec" + (closed ? ".closed" : ""), { dataset: { section: id } },
 			h("button.chat-sec-head", { "aria-expanded": closed ? "false" : "true", on: { click: toggle } }, icon(closed ? "chevron-right" : "chevron-down"), h("span", null, title), h("span.meta", null, meta)),
@@ -69,5 +75,24 @@ export class SidePanel {
 			this.actions.fileIcon(file.path), h("span.name", null, file.path.split("/").pop()), h("span.dir.muted", null, file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""),
 			h("span.meta", null, file.plus ? h("span.plus", null, "+" + file.plus) : null, file.minus ? h("span.minus", null, " -" + file.minus) : null)));
 		return this.section("files", "Modified files", model.modified.length ? String(model.modified.length) : "", rows.length ? rows : h("div.chat-sec-empty.muted", null, "The AI has not changed a file."));
+	}
+
+	// The AI's clipboard (clipboard_copy): shown only when it holds something; a clip unfolds to its text.
+	clipsSection(model) {
+		if (!model.clips.length) return null;
+		const rows = [];
+		for (const clip of model.clips) {
+			const open = this.openClips.has(clip.name);
+			const toggle = () => {
+				if (open) this.openClips.delete(clip.name);
+				else this.openClips.add(clip.name);
+				this.toggled();
+			};
+			rows.push(h("button.chat-sec-row.clip", { title: "{{clip:" + clip.name + "}} from " + clip.source, "aria-expanded": open ? "true" : "false", dataset: { clip: clip.name }, on: { click: toggle } },
+				icon(open ? "chevron-down" : "chevron-right"), h("span.name", null, clip.name), h("span.dir.muted", null, clip.source),
+				h("span.meta", null, clip.lines + (clip.lines === 1 ? " line" : " lines"))));
+			if (open) rows.push(h("pre.chat-clip", null, clip.text + (new TextEncoder().encode(clip.text).length < clip.bytes ? "\n..." : "")));
+		}
+		return this.section("clips", "Clipboard", String(model.clips.length), rows);
 	}
 }

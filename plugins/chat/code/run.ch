@@ -79,6 +79,10 @@ namespace Ai
 		private void RecordAssistant(const StepResult* result, bool withCalls);
 		private void ExecuteCalls(StepResult* result);
 		private void ExecuteCall(ToolCallDraft* call, Segment* segment, Core::StringView modelId);
+		// The chat's clips pasted into `args` (clipboard.ch); false with `missing` a name it has no clip of.
+		private bool Pasted(Serialization::DomNode& args, Core::String& missing);
+		// What the model is told when a call pastes a clip there is not.
+		private ToolOutcome UnknownClip(Core::StringView tool, Core::StringView missing);
 		private ToolOutcome RunCall(ToolSpec* spec, ToolCallDraft* call, Segment* segment, const Serialization::DomNode& args);
 		private ToolOutcome RunMeta(ToolSpec* spec, Segment* segment, const Serialization::DomNode& args);
 		private bool AwaitApproval(ToolSpec* spec, Segment* segment, const ToolPlan& plan, Core::StringView why, const Serialization::DomNode& args, ToolOutcome& refused);

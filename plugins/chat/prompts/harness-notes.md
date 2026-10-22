@@ -32,6 +32,9 @@ The arguments for {tool} were invalid: {error}. Expected schema: {schema_excerpt
 ## unknown_tool
 There is no tool named {name}. Did you mean {suggestions}? Tool groups can be enabled with tools_enable.
 
+## unknown_clip
+{tool} did not run: its arguments paste {{clip:{name}}}, and there is no clip {name} ({clips}). Copy it with clipboard_copy first. To write {{clip:{name}}} as text, write {{!clip:{name}}}.
+
 ## interrupted_call
 The call {tool} ({call_id}) was interrupted by a restart; its effect is unknown. Check the current state before retrying it.
 
