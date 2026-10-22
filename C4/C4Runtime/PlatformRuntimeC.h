@@ -97,7 +97,7 @@ enum
 {
 	kProcessorSse3, kProcessorSsse3, kProcessorSse41, kProcessorSse42, kProcessorPopcnt, kProcessorPclmul, kProcessorAes,
 	kProcessorAvx, kProcessorAvx2, kProcessorFma, kProcessorF16c, kProcessorBmi1, kProcessorBmi2, kProcessorLzcnt,
-	kProcessorSha, kProcessorAvx512F, kProcessorAvx512Dq, kProcessorAvx512Bw, kProcessorAvx512Vl
+	kProcessorSha, kProcessorAvx512F, kProcessorAvx512Dq, kProcessorAvx512Bw, kProcessorAvx512Vl, kProcessorVpclmulqdq
 };
 
 uint64_t c4_system_processor_features(void);

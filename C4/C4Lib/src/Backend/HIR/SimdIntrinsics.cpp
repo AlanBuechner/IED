@@ -12,7 +12,7 @@ namespace Scripting::SimdIntrinsics
 	{
 		using Op = SimdNode::Op;
 
-		enum class Family { LaneMath, Select, MaskTest, Reduce, Shuffle, Concat, Splat, Memory };
+		enum class Family { LaneMath, Select, MaskTest, Reduce, Shuffle, Concat, Splat, Memory, Carryless };
 		enum class LaneKind { Any, Numbers, Floats, Integers };
 
 		struct Form
@@ -37,6 +37,7 @@ namespace Scripting::SimdIntrinsics
 				{ "simd_trunc", { Op::Trunc, Family::LaneMath, 1, LaneKind::Floats } },
 				{ "simd_muladd", { Op::MulAdd, Family::LaneMath, 3, LaneKind::Floats } },
 				{ "simd_fma", { Op::Fma, Family::LaneMath, 3, LaneKind::Floats } },
+				{ "simd_clmul", { Op::Clmul, Family::Carryless } },
 				{ "simd_select", { Op::Select, Family::Select } },
 				{ "simd_any", { Op::Any, Family::MaskTest } },
 				{ "simd_all", { Op::All, Family::MaskTest } },
@@ -204,6 +205,47 @@ namespace Scripting::SimdIntrinsics
 			return Node(MakeSimd(call, result, op, { mask.value.node }));
 		}
 
+		// The feature simd_clmul needs at `lanes`: the 128-bit instruction, or its 256- and 512-bit forms.
+		Core::String ClmulFeatureProblem(const Call& call, uint32 lanes)
+		{
+			if (lanes == 2 && BuiltWith(call, "pclmul")) return "";
+			if (lanes == 4 && BuiltWith(call, "vpclmulqdq") && BuiltWith(call, "avx")) return "";
+			if (lanes == 8 && BuiltWith(call, "vpclmulqdq") && BuiltWith(call, "avx512f")) return "";
+			const char* features = lanes == 2 ? "\"pclmul\"" : lanes == 4 ? "\"vpclmulqdq\", \"avx\"" : "\"vpclmulqdq\", \"avx512f\"";
+			const char* flags = lanes == 2 ? "-mpclmul" : lanes == 4 ? "-mvpclmulqdq -mavx" : "-mvpclmulqdq -mavx512f";
+			return call.name + " needs the processor's carry-less multiply: build with " + flags + " (or a -march that has it), or annotate " +
+				"the function [target(" + features + ")] and check Platform::HasProcessorFeature before calling it";
+		}
+
+		// `simd_clmul(a, b, i, j)`: in each 128-bit block, the carry-less product of a's 64-bit lane i and b's lane j.
+		Result LowerClmul(const Call& call)
+		{
+			if (Core::String why = ArgumentCount(call, 4); !why.empty()) return Fail(why);
+			const Operand a = Read(call.ctx, call.args[0]);
+			const Operand b = Read(call.ctx, call.args[1]);
+			const auto words = [](const SwizzleType* lanes) {
+				return lanes && IsInteger(lanes->GetElementType()) && lanes->GetElementType()->GetSize() == 8 &&
+					(lanes->GetLaneCount() == 2 || lanes->GetLaneCount() == 4 || lanes->GetLaneCount() == 8);
+			};
+			if (!words(a.lanes) || a.lanes != b.lanes)
+				return Fail(call.name + " multiplies two vectors of one shape, 'packed uint64[2]', '[4]' or '[8]', not a " + Quoted(a.type) + " and a " +
+					Quoted(b.type));
+			if (Core::String why = ClmulFeatureProblem(call, a.lanes->GetLaneCount()); !why.empty()) return Fail(why);
+			std::vector<int32> selected;
+			for (size_t arg = 2; arg < 4; ++arg)
+			{
+				auto lane = Constant(call, arg, arg == 2 ? "lane of the first vector" : "lane of the second vector");
+				if (!lane.Ok()) return Result::Fail(lane.error, lane.message);
+				if (lane.value != 0 && lane.value != 1)
+					return Fail(call.name + "'s " + (arg == 2 ? "first" : "second") + " lane is " + std::to_string(lane.value) +
+						": it picks the low (0) or high (1) 64 bits of each 128-bit block");
+				selected.push_back((int32)lane.value);
+			}
+			SimdNode* node = MakeSimd(call, a.lanes, Op::Clmul, { a.node, b.node });
+			node->indices = std::move(selected);
+			return Node(node);
+		}
+
 		Result LowerReduce(const Call& call, const Form& form)
 		{
 			if (Core::String why = ArgumentCount(call, 1); !why.empty()) return Fail(why);
@@ -234,6 +276,7 @@ namespace Scripting::SimdIntrinsics
 		case Family::Shuffle: return SimdLanes::LowerShuffle(call);
 		case Family::Concat: return SimdLanes::LowerConcat(call);
 		case Family::Splat: return SimdLanes::LowerSplat(call);
+		case Family::Carryless: return LowerClmul(call);
 		default: return SimdMemory::Lower(call, form.op);
 		}
 	}

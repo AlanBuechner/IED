@@ -46,6 +46,7 @@ static uint64_t Detect(void)
 	ReadLeaves(&leaves);
 	const int ecx = leaves.basic[2];
 	const int ebx7 = leaves.extended[1];
+	const int ecx7 = leaves.extended[2];
 	const uint64_t saved = SavedState(&leaves);
 	const int avxState = (saved & (kXsaveSse | kXsaveAvx)) == (kXsaveSse | kXsaveAvx);
 	const int avx512State = avxState && (saved & kXsaveAvx512) == kXsaveAvx512;
@@ -69,6 +70,7 @@ static uint64_t Detect(void)
 	features |= Feature(Bit(ebx7, 17) && avx512State, kProcessorAvx512Dq);
 	features |= Feature(Bit(ebx7, 30) && avx512State, kProcessorAvx512Bw);
 	features |= Feature(Bit(ebx7, 31) && avx512State, kProcessorAvx512Vl);
+	features |= Feature(Bit(ecx7, 10) && avxState, kProcessorVpclmulqdq);
 	return features;
 }
 

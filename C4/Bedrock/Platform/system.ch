@@ -43,7 +43,7 @@ namespace Platform
 	enum class ProcessorFeature
 	{
 		Sse3, Ssse3, Sse41, Sse42, Popcnt, Pclmul, Aes, Avx, Avx2, Fma, F16c, Bmi1, Bmi2, Lzcnt, Sha, Avx512F, Avx512Dq,
-		Avx512Bw, Avx512Vl
+		Avx512Bw, Avx512Vl, Vpclmulqdq
 	}
 
 	[link("c4_system_processor_features")] uint64 c4_system_processor_features();

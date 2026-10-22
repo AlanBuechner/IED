@@ -1,0 +1,4 @@
+[target("pclmul")]
+packed uint32[4] Product(packed uint32[4] a) { return simd_clmul(a, a, 0, 0); }
+
+int32 main() { return 0; }

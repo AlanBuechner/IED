@@ -1,0 +1,59 @@
+// simd_clmul in [target] functions (D-62): each 128-bit block's carry-less product of the 64-bit lanes the selectors
+// pick, against the product bit by bit. A processor without the feature skips that width. main returns the failures.
+[link("c4_system_processor_features")] uint64 ProcessorFeatures();
+
+const uint64 kPclmul = 5u;
+const uint64 kVpclmulqdq = 19u;
+
+bool Has(uint64 feature) { return ((ProcessorFeatures() >> feature) & 1u) != 0u; }
+
+// The carry-less product of a and b, one bit of b at a time: its low and high 64 bits.
+void SlowProduct(uint64 a, uint64 b, uint64* low, uint64* high) {
+	uint64 lo = 0u;
+	uint64 hi = 0u;
+	for (int32 i = 0; i < 64; ++i) {
+		if (((b >> (uint64)i) & 1u) == 0u) continue;
+		lo ^= a << (uint64)i;
+		if (i > 0) hi ^= a >> (uint64)(64 - i);
+	}
+	*low = lo;
+	*high = hi;
+}
+
+int32 Differs(uint64 low, uint64 high, uint64 a, uint64 b) {
+	uint64 lo = 0u;
+	uint64 hi = 0u;
+	SlowProduct(a, b, &lo, &hi);
+	return lo == low && hi == high ? 0 : 1;
+}
+
+[target("pclmul")]
+int32 CheckBlock(uint64 x0, uint64 x1, uint64 y0, uint64 y1) {
+	packed uint64[2] x = { x0, x1 };
+	packed uint64[2] y = { y0, y1 };
+	packed uint64[2] r00 = simd_clmul(x, y, 0, 0);
+	packed uint64[2] r01 = simd_clmul(x, y, 0, 1);
+	packed uint64[2] r10 = simd_clmul(x, y, 1, 0);
+	packed uint64[2] r11 = simd_clmul(x, y, 1, 1);
+	return Differs(r00[0], r00[1], x0, y0) + Differs(r01[0], r01[1], x0, y1) + Differs(r10[0], r10[1], x1, y0) +
+		Differs(r11[0], r11[1], x1, y1);
+}
+
+[target("vpclmulqdq", "avx")]
+int32 CheckWide(uint64 seed) {
+	packed uint64[4] x = { seed, seed * 3u, seed ^ 0xF0F0F0F0F0F0F0F0u, ~seed };
+	packed uint64[4] y = { seed + 7u, seed >> 3u, 0x8000000000000001u, seed * seed };
+	packed uint64[4] r = simd_clmul(x, y, 1, 0);
+	return Differs(r[0], r[1], x[1], y[0]) + Differs(r[2], r[3], x[3], y[2]);
+}
+
+int32 main() {
+	int32 failures = 0;
+	if (Has(kPclmul)) {
+		failures += CheckBlock(0x87654321DEADBEEFu, 0xFFFFFFFFFFFFFFFFu, 0x123456789ABCDEF1u, 0x8000000000000001u);
+		failures += CheckBlock(1u, 0u, 0xFEDCBA9876543210u, 3u);
+		failures += CheckBlock(0x154442BD4u, 0x1C6E41596u, 0x1751997D0u, 0xCCAA009Eu);
+	}
+	if (Has(kVpclmulqdq)) failures += CheckWide(0x0123456789ABCDEFu);
+	return failures;
+}

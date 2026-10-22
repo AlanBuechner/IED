@@ -6,6 +6,7 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/IntrinsicsX86.h>
 #include <llvm/Support/MathExtras.h>
 #include <functional>
 #include <vector>
@@ -120,6 +121,15 @@ namespace Scripting
 			}
 		}
 
+		// pclmulqdq at the vector's width; the immediate's bit 0 picks a's 64-bit lane, bit 4 b's.
+		llvm::Value* CarrylessProduct(Builder& B, llvm::Value* a, llvm::Value* b, int32 i, int32 j)
+		{
+			const unsigned lanes = LaneCount(a);
+			const llvm::Intrinsic::ID id = lanes == 2 ? llvm::Intrinsic::x86_pclmulqdq
+				: lanes == 4 ? llvm::Intrinsic::x86_pclmulqdq_256 : llvm::Intrinsic::x86_pclmulqdq_512;
+			return B.CreateIntrinsic(id, {}, { a, b, B.getInt8((uint8)(i | (j << 4))) });
+		}
+
 		llvm::Value* AllLanes(Builder& B, unsigned lanes) { return llvm::ConstantVector::getSplat(llvm::ElementCount::getFixed(lanes), B.getTrue()); }
 
 		// The address of each lane: `base + indices[i]` elements, the indices widened by their signedness.
@@ -149,6 +159,7 @@ namespace Scripting
 		case Op::Sqrt: case Op::Floor: case Op::Ceil: case Op::Round: case Op::Trunc: return B.CreateUnaryIntrinsic(Rounding(n->op), v[0]);
 		case Op::MulAdd: return B.CreateIntrinsic(llvm::Intrinsic::fmuladd, { v[0]->getType() }, { v[0], v[1], v[2] });
 		case Op::Fma: return B.CreateIntrinsic(llvm::Intrinsic::fma, { v[0]->getType() }, { v[0], v[1], v[2] });
+		case Op::Clmul: return CarrylessProduct(B, v[0], v[1], n->indices[0], n->indices[1]);
 		case Op::Select: return B.CreateSelect(v[0], v[1], v[2]);
 		case Op::Any: return B.CreateOrReduce(v[0]);
 		case Op::All: return B.CreateAndReduce(v[0]);

@@ -292,6 +292,7 @@ normalized integers).
 | `simd_round(a)` | per lane nearest integer, halves away from zero (as `round`) | floats |
 | `simd_muladd(a, b, c)` | `a * b + c`, one fused multiply-add where the target has FMA | floats |
 | `simd_fma(a, b, c)` | `a * b + c` with one rounding; needs `fma` in the target (`-mfma`, `-march=x86-64-v3`) | floats |
+| `simd_clmul(a, b, i, j)` | in each 128-bit block, the 128-bit carry-less product of `a`'s 64-bit lane `i` and `b`'s lane `j` (`i`, `j` constant 0 or 1: the block's low or high half), low half in the block's first lane; needs `pclmul` (`-mpclmul`) for `packed uint64[2]`, `vpclmulqdq` with `avx` for `[4]` or with `avx512f` for `[8]`. CRC folding and GHASH are built on it | `uint64` or `int64`, 2, 4 or 8 lanes |
 | `simd_select(mask, a, b)` | per lane `mask ? a : b`; two scalars give a vector of the mask's lane count | any |
 | `simd_any(mask)`, `simd_all(mask)` | a `bool`: some lane / every lane is true | masks |
 | `simd_bitmask(mask)` | a `uint32` with bit i set when lane i is true | masks |
@@ -321,7 +322,8 @@ Rules:
 - Errors name the call and the shape at fault: `simd_min's vectors are a 'packed float[8]' and a 'packed float[4]'`,
   `simd_shuffle's lane index 4 is out of range: the vectors have lanes 0 to 3`, `simd_sqrt works on float or
   double lanes, not a 'packed int32[4]'`, `simd_fma needs the processor's fused multiply-add: build with -mfma or
-  -march=x86-64-v3 (or newer), annotate the function [target("fma")], or use simd_muladd`.
+  -march=x86-64-v3 (or newer), annotate the function [target("fma")], or use simd_muladd`, `simd_clmul's first lane is
+  2: it picks the low (0) or high (1) 64 bits of each 128-bit block`.
 - A program function of the same name wins over the intrinsic.
 
 ## 12. Bit intrinsics

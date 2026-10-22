@@ -1,8 +1,9 @@
 include "crc32.ch"
+include "Platform/system.ch"
 
 namespace Core
 {
-	// Slicing-by-8 (Intel, 2006): kCrcTables[k][b] is the CRC of byte b followed by k zero bytes, so eight bytes
+	// Slicing-by-8 (Intel, 2006), for what the carry-less multiply does not fold: kCrcTables[k][b] is the CRC of byte b followed by k zero bytes, so eight bytes
 	// update the remainder with eight lookups and no dependency between them. Generated from the polynomial.
 	const uint32[2048] kCrcTables = {
 		0x00000000u, 0x77073096u, 0xee0e612cu, 0x990951bau, 0x076dc419u, 0x706af48fu, 0xe963a535u, 0x9e6495a3u,
@@ -265,9 +266,8 @@ namespace Core
 
 	static uint32 TableAt(int32 table, uint32 index) { return kCrcTables[table * 256 + (int32)(index & 255u)]; }
 
-	void Crc32Builder::Add(const void* data, int64 count) {
-		const uint8* p = (const uint8*)data;
-		uint32 crc = ~state;
+	// The CRC register after `count` bytes from `crc`, by the tables.
+	static uint32 TableCrc(const uint8* p, int64 count, uint32 crc) {
 		while (count >= 8) {
 			uint32 low = 0u;
 			uint32 high = 0u;
@@ -280,7 +280,113 @@ namespace Core
 			count -= 8;
 		}
 		for (int64 i = 0; i < count; ++i) crc = (crc >> 8) ^ TableAt(0, crc ^ (uint32)p[i]);
-		state = ~crc;
+		return crc;
+	}
+
+	// Folding with the carry-less multiply (Gopal et al., "Fast CRC Computation for Generic Polynomials Using
+	// PCLMULQDQ", Intel 2009; the constants are Linux's crc32-pclmul): four 128-bit remainders, each multiplied ahead
+	// past the next 64 bytes and added to them, then folded into one, then 16 bytes at a time. What is left is a block
+	// whose CRC register from zero is the register over everything folded, which the tables finish.
+	[target("pclmul")]
+	static packed uint64[2] Fold(packed uint64[2] remainder, packed uint64[2] ahead, packed uint64[2] next) {
+		return simd_clmul(remainder, ahead, 0, 0) ^ simd_clmul(remainder, ahead, 1, 1) ^ next;
+	}
+
+	[target("pclmul")]
+	static packed uint64[2] Block(const uint8* p) { return simd_load((const uint64*)p, 2); }
+
+	// The register after `count` bytes (at least 64, a multiple of 16) from `crc`.
+	[target("pclmul")]
+	static uint32 FoldedCrc(const uint8* p, int64 count, uint32 crc) {
+		const packed uint64[2] past64 = { 0x154442bd4u, 0x1c6e41596u };
+		const packed uint64[2] past16 = { 0x1751997d0u, 0xccaa009eu };
+		const packed uint64[2] start = { (uint64)crc, 0u };
+		packed uint64[2] a = Block(p) ^ start;
+		packed uint64[2] b = Block(p + 16);
+		packed uint64[2] c = Block(p + 32);
+		packed uint64[2] d = Block(p + 48);
+		int64 at = 64;
+		for (; at + 64 <= count; at += 64) {
+			a = Fold(a, past64, Block(p + at));
+			b = Fold(b, past64, Block(p + at + 16));
+			c = Fold(c, past64, Block(p + at + 32));
+			d = Fold(d, past64, Block(p + at + 48));
+		}
+		a = Fold(Fold(Fold(a, past16, b), past16, c), past16, d);
+		for (; at < count; at += 16) a = Fold(a, past16, Block(p + at));
+		uint64[2] left;
+		simd_store(&left[0], a);
+		return TableCrc((const uint8*)&left[0], 16, 0u);
+	}
+
+	// The same at 512 bits: four remainders of four 128-bit lanes each, 256 bytes a round, folded into one, whose lanes
+	// are then each moved to the last lane's place (by 48, 32 and 16 bytes) and added to it. Constants: x^(D+32) and
+	// x^(D-32) mod P, bit-reflected and shifted by one, for a lane moved D bits ahead.
+	[target("vpclmulqdq", "avx512f")]
+	static void WideFold(packed uint64[8]& remainder, packed uint64[8] ahead, packed uint64[8] next) {
+		remainder = simd_clmul(remainder, ahead, 0, 0) ^ simd_clmul(remainder, ahead, 1, 1) ^ next;
+	}
+
+	// The register after `count` bytes (at least 256, a multiple of 64) from `crc`.
+	[target("vpclmulqdq", "avx512f")]
+	static uint32 WideFoldedCrc(const uint8* p, int64 count, uint32 crc) {
+		const uint64* words = (const uint64*)p;
+		const packed uint64[8] past256 = { 0x11542778au, 0x1322d1430u, 0x11542778au, 0x1322d1430u, 0x11542778au, 0x1322d1430u,
+			0x11542778au, 0x1322d1430u };
+		const packed uint64[8] past64 = { 0x154442bd4u, 0x1c6e41596u, 0x154442bd4u, 0x1c6e41596u, 0x154442bd4u, 0x1c6e41596u,
+			0x154442bd4u, 0x1c6e41596u };
+		const packed uint64[8] toLastLane = { 0x3db1ecdcu, 0x174359406u, 0xf1da05aau, 0x15a546366u, 0x1751997d0u, 0xccaa009eu, 0u, 0u };
+		const packed uint64[8] start = { (uint64)crc };
+		packed uint64[8] a = simd_load(words, 8) ^ start;
+		packed uint64[8] b = simd_load(words + 8, 8);
+		packed uint64[8] c = simd_load(words + 16, 8);
+		packed uint64[8] d = simd_load(words + 24, 8);
+		int64 at = 32;
+		const int64 total = count / 8;
+		for (; at + 32 <= total; at += 32) {
+			WideFold(a, past256, simd_load(words + at, 8));
+			WideFold(b, past256, simd_load(words + at + 8, 8));
+			WideFold(c, past256, simd_load(words + at + 16, 8));
+			WideFold(d, past256, simd_load(words + at + 24, 8));
+		}
+		WideFold(a, past64, b);
+		WideFold(a, past64, c);
+		WideFold(a, past64, d);
+		for (; at < total; at += 8) WideFold(a, past64, simd_load(words + at, 8));
+		const packed uint64[8] moved = simd_clmul(a, toLastLane, 0, 0) ^ simd_clmul(a, toLastLane, 1, 1);
+		const packed uint64[2] last = simd_shuffle(a, 6, 7) ^ simd_shuffle(moved, 0, 1) ^ simd_shuffle(moved, 2, 3) ^ simd_shuffle(moved, 4, 5);
+		uint64[2] left;
+		simd_store(&left[0], last);
+		return TableCrc((const uint8*)&left[0], 16, 0u);
+	}
+
+	// How many of `count` bytes the 512-bit fold takes: whole 64-byte blocks, at least four, where the processor has it.
+	static int64 WideFoldable(int64 count) {
+		if (count < 256 || !Platform::HasProcessorFeature(Platform::ProcessorFeature::Vpclmulqdq)) return 0;
+		return Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx512F) ? count & ~(int64)63 : 0;
+	}
+
+	// How many the 128-bit fold takes: whole 16-byte blocks, at least four, where the processor has it.
+	static int64 Foldable(int64 count) {
+		return count >= 64 && Platform::HasProcessorFeature(Platform::ProcessorFeature::Pclmul) ? count & ~(int64)15 : 0;
+	}
+
+	void Crc32Builder::Add(const void* data, int64 count) {
+		const uint8* p = (const uint8*)data;
+		uint32 crc = ~state;
+		const int64 wide = WideFoldable(count);
+		if (wide > 0) {
+			crc = WideFoldedCrc(p, wide, crc);
+			p += wide;
+			count -= wide;
+		}
+		const int64 narrow = Foldable(count);
+		if (narrow > 0) {
+			crc = FoldedCrc(p, narrow, crc);
+			p += narrow;
+			count -= narrow;
+		}
+		state = ~TableCrc(p, count, crc);
 	}
 
 	uint32 Crc32(const void* data, int64 count) {

@@ -166,6 +166,10 @@
     "compileFlags": ["-march=native"],
     "reason": "D-62: -march=native compiles for the building machine; SIMD_FLOAT_LANES picks 16 lanes with AVX-512, 8 with AVX."
   },
+  "Simd/CarrylessMultiply": {
+    "exit": 0,
+    "reason": "D-62: simd_clmul in [target(\"pclmul\")] and [target(\"vpclmulqdq\", \"avx\")] functions gives each 128-bit block's carry-less product of the selected lanes, as a bit-by-bit product does; a processor without the feature skips that width."
+  },
   "Simd/FusedMultiplyAdd": {
     "exit": 0,
     "compileFlags": ["-mfma"],

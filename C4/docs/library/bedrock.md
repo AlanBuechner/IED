@@ -244,8 +244,10 @@ a `List` kept from the most to the least recently used, so every operation is O(
 ### Checksums (`crc32.ch`)
 
 `Core::Crc32(data, count)` and `Core::Crc32Builder` (`Add` pieces, then `Value()`; any split gives the same value):
-CRC-32 as zlib, gzip, PNG and ZIP compute it (IEEE 802.3, reflected polynomial `0xEDB88320`), eight bytes a step
-by slicing-by-8 tables. For accidental changes only; `Crypto/` resists forgers.
+CRC-32 as zlib, gzip, PNG and ZIP compute it (IEEE 802.3, reflected polynomial `0xEDB88320`): folded with the
+carry-less multiply (`simd_clmul`), 256 bytes a step where the processor has VPCLMULQDQ and AVX-512 and 64 where it
+has PCLMULQDQ, the rest eight bytes a step by slicing-by-8 tables (on a Ryzen 7800X3D: 2.6 GB/s by the tables alone, 17 GB/s folding 128 bits
+at a time, about 55 GB/s folding 512; zlib-ng about 65). For accidental changes only; `Crypto/` resists forgers.
 
 ---
 
@@ -907,7 +909,7 @@ never scans this memory: `GC::RegisterRegion` a range that holds managed pointer
 | Function | Meaning |
 |---|---|
 | `GetProcessorInfo()` | `ProcessorInfo { logicalProcessors, cores, packages, cacheLineBytes, l1DataBytes, l2Bytes, l3Bytes }` (one cache of each level; 0 when there is none) |
-| `HasProcessorFeature(feature)` | whether the processor running the program has a `ProcessorFeature` (`Sse3`, `Ssse3`, `Sse41`, `Sse42`, `Popcnt`, `Pclmul`, `Aes`, `Avx`, `Avx2`, `Fma`, `F16c`, `Bmi1`, `Bmi2`, `Lzcnt`, `Sha`, `Avx512F`, `Avx512Dq`, `Avx512Bw`, `Avx512Vl`), for choosing a `[target]` function ([language 11 section 8](../language/11-vectors-and-swizzling.md#8-the-simd-target)); AVX and the features on its registers count only when the system saves those registers. Found once (CPUID, XGETBV) |
+| `HasProcessorFeature(feature)` | whether the processor running the program has a `ProcessorFeature` (`Sse3`, `Ssse3`, `Sse41`, `Sse42`, `Popcnt`, `Pclmul`, `Aes`, `Avx`, `Avx2`, `Fma`, `F16c`, `Bmi1`, `Bmi2`, `Lzcnt`, `Sha`, `Avx512F`, `Avx512Dq`, `Avx512Bw`, `Avx512Vl`, `Vpclmulqdq`), for choosing a `[target]` function ([language 11 section 8](../language/11-vectors-and-swizzling.md#8-the-simd-target)); AVX and the features on its registers count only when the system saves those registers. Found once (CPUID, XGETBV) |
 | `GetMemoryStatus()` | `MemoryStatus { totalPhysicalBytes, availablePhysicalBytes, commitLimitBytes, availableCommitBytes, totalVirtualBytes, availableVirtualBytes }` (the virtual ones are this process's address space) |
 | `GetProcessMemory()` | `ProcessMemory { workingSetBytes, peakWorkingSetBytes, privateBytes, peakPrivateBytes }` |
 | `ProcessId()` | |

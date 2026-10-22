@@ -286,7 +286,7 @@ One build compiles for one processor, chosen on the command line (and the LSP's 
 | Flag | Selects |
 |---|---|
 | `-march=<cpu>` | the processor: `x86-64` (the default, SSE2), `x86-64-v2` (SSE4.2), `x86-64-v3` (AVX2, FMA), `x86-64-v4` (AVX-512), any LLVM x86-64 CPU (`haswell`, `znver4`, ...) or `native`, the building machine |
-| `-m<feature>`, `-mno-<feature>` | one feature on or off: `sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd` |
+| `-m<feature>`, `-mno-<feature>` | one feature on or off: `sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd pclmul vpclmulqdq` |
 
 Flags read as clang reads them: the last `-march` names the processor, then each `-m` flag applies in order,
 with what it implies (`-mavx2` turns on `avx`; `-mno-avx` turns off `avx2` and `fma`). Every function of the
@@ -295,7 +295,8 @@ script host records it in its `.c4i`, so its scripts compile and run for exactly
 ([scripting](../runtime/04-scripting.md)). All code of one program agrees on how a vector is passed.
 
 Each enabled feature defines a macro (= 1): `SIMD_SSE3`, `SIMD_SSSE3`, `SIMD_SSE4_1`, `SIMD_SSE4_2`, `SIMD_AVX`,
-`SIMD_AVX2`, `SIMD_FMA`, `SIMD_AVX512F`, `SIMD_AVX512VL`, `SIMD_AVX512BW`, `SIMD_AVX512DQ`. `SIMD_FLOAT_LANES` is
+`SIMD_AVX2`, `SIMD_FMA`, `SIMD_AVX512F`, `SIMD_AVX512VL`, `SIMD_AVX512BW`, `SIMD_AVX512DQ`, `SIMD_PCLMUL`,
+`SIMD_VPCLMULQDQ`. `SIMD_FLOAT_LANES` is
 4, 8 or 16: the floats the widest register holds, a width for code that adapts:
 
 ```c4

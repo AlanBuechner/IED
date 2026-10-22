@@ -223,7 +223,7 @@ namespace Scripting
 	{
 		enum class Op
 		{
-			Min, Max, Abs, Sqrt, Floor, Ceil, Round, Trunc, MulAdd, Fma,
+			Min, Max, Abs, Sqrt, Floor, Ceil, Round, Trunc, MulAdd, Fma, Clmul,
 			Select, Any, All, Bitmask,
 			Shuffle, Concat, Splat,
 			ReduceAdd, ReduceMul, ReduceMin, ReduceMax, ReduceAnd, ReduceOr, ReduceXor,

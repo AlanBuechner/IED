@@ -2347,6 +2347,18 @@
         "expect": ["simd_shuffle's two vectors are a 'packed float[4]' and a 'packed float[8]': a shuffle takes lanes from vectors of one shape"],
         "reason": "D-62: the two sources of a shuffle have one shape."
     },
+    "SimdClmulWithoutFeature": {
+        "expect": ["simd_clmul needs the processor's carry-less multiply: build with -mpclmul (or a -march that has it), or annotate the function [target(\"pclmul\")] and check Platform::HasProcessorFeature before calling it"],
+        "reason": "D-62: simd_clmul has no fallback on a target without pclmul; the message names the flag and the [target] route."
+    },
+    "SimdClmulLaneSelector": {
+        "expect": ["simd_clmul's first lane is 2: it picks the low (0) or high (1) 64 bits of each 128-bit block"],
+        "reason": "D-62: a selector of simd_clmul is a constant 0 or 1, the half of each 128-bit block."
+    },
+    "SimdClmulNotWords": {
+        "expect": ["simd_clmul multiplies two vectors of one shape, 'packed uint64[2]', '[4]' or '[8]', not a 'packed uint32[4]' and a 'packed uint32[4]'"],
+        "reason": "D-62: the carry-less multiply works on 64-bit lanes, two to a 128-bit block."
+    },
     "SimdConcatTooWide": {
         "expect": ["simd_concat of two 'packed float[16]': 'packed float[32]' is not a vector"],
         "reason": "D-62: a joined vector still holds at most 16 lanes and 64 bytes."

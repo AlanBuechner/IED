@@ -16,12 +16,12 @@ namespace Scripting
 		constexpr const char* kDisable = "no-";
 
 		// The features a flag may name, each with the macro it defines when enabled.
-		constexpr std::array<std::pair<const char*, const char*>, 17> kFeatures = { {
+		constexpr std::array<std::pair<const char*, const char*>, 19> kFeatures = { {
 			{ "sse3", "SIMD_SSE3" }, { "ssse3", "SIMD_SSSE3" }, { "sse4.1", "SIMD_SSE4_1" }, { "sse4.2", "SIMD_SSE4_2" },
 			{ "popcnt", nullptr }, { "avx", "SIMD_AVX" }, { "avx2", "SIMD_AVX2" }, { "fma", "SIMD_FMA" }, { "f16c", nullptr },
 			{ "bmi", nullptr }, { "bmi2", nullptr }, { "lzcnt", nullptr }, { "avx512f", "SIMD_AVX512F" },
 			{ "avx512vl", "SIMD_AVX512VL" }, { "avx512bw", "SIMD_AVX512BW" }, { "avx512dq", "SIMD_AVX512DQ" },
-			{ "avx512cd", nullptr },
+			{ "avx512cd", nullptr }, { "pclmul", "SIMD_PCLMUL" }, { "vpclmulqdq", "SIMD_VPCLMULQDQ" },
 		} };
 
 		bool IsFlagFeature(const std::string& name)

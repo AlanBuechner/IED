@@ -1,4 +1,5 @@
-// Core::Crc32 against the standard check values, split input and every alignment.
+// Core::Crc32 against the standard check values, long inputs (folded with the carry-less multiply where the processor has
+// it), split input, every length and every alignment.
 
 include "bedrock.ch"
 
@@ -34,5 +35,30 @@ class Crc32Tests {
 			if (fast.Value() != slow.Value()) bytewise = false;
 		}
 		assert_true(bytewise, "eight at a time equals one at a time, from any alignment");
+	}
+
+	[test("long_inputs")]
+	public static void TestLongInputs() {
+		Core::Array<uint8> data;
+		data.Resize(100003);
+		for (int32 i = 0; i < 100003; ++i) data[i] = (uint8)(i * 31 + 7);
+		assert_true(Core::Crc32((const void*)&data[0], 100003) == 0x17340963u, "a hundred thousand bytes, as zlib has it");
+		for (int32 i = 0; i < 1000; ++i) data[i] = (uint8)(i * i * 13 + i * 5 + 3);
+		assert_true(Core::Crc32((const void*)&data[0], 1000) == 0x9747FE8Au, "a thousand, as zlib has it");
+	}
+
+	[test("every_length")]
+	public static void TestEveryLength() {
+		uint8[1100] data;
+		for (int32 i = 0; i < 1100; ++i) data[i] = (uint8)(i * 7 + (i >> 3));
+		bool same = true;
+		for (int32 length = 0; length <= 1100; ++length) {
+			Core::Crc32Builder whole;
+			whole.Add((const void*)&data[0], length);
+			Core::Crc32Builder bytes;
+			for (int32 i = 0; i < length; ++i) bytes.Add((const void*)&data[i], 1);
+			if (whole.Value() != bytes.Value()) same = false;
+		}
+		assert_true(same, "every length folds to what one byte at a time gives");
 	}
 }

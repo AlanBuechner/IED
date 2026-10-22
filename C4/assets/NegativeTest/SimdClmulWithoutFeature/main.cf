@@ -1,0 +1,5 @@
+int32 main() {
+	packed uint64[2] a = 1u;
+	packed uint64[2] r = simd_clmul(a, a, 0, 0);
+	return 0;
+}
