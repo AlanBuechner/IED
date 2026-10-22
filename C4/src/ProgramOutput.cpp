@@ -20,6 +20,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <system_error>
@@ -49,7 +50,7 @@ bool ProgramOutput::WriteProgram(llvm::Module& module, const std::string& base)
 	std::vector<std::string> objects = Assemble(module, settings, Scripting::ObjectCache(base + ".objects", CacheSalt(settings)));
 	if (objects.empty()) return false;
 	if (m_HostBuild && !FinishScriptHost(module, settings, base, objects)) return false;
-	return Link(objects);
+	return Link(objects, base);
 }
 
 // Incremental (D-76): at -O0 too, whose always-inliner and aggregate copies then run on the partitions' threads.
@@ -87,7 +88,7 @@ bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitio
 	if (objects.paths.empty()) return false;
 	if (m_HostBuild && !CollectInlineBodies(partitions, bitcode, base, settings)) return false;
 	if (m_HostBuild && !FinishScriptHost(*partitions.front(), settings, base, objects.paths)) return false;
-	return Link(objects.paths);
+	return Link(objects.paths, base);
 }
 
 // The compiler owns its output location: a missing folder is created, as every toolchain does.
@@ -234,7 +235,7 @@ void ProgramOutput::Report(const std::vector<Scripting::ObjectDiagnostic>& diagn
 	}
 }
 
-bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
+bool ProgramOutput::Link(const std::vector<std::string>& programObjects, const std::string& base)
 {
 	const auto start = std::chrono::steady_clock::now();
 	const Core::String& out = m_In.options.outputFile;
@@ -274,17 +275,66 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
 		libraries.Push("-Wl,/DELAYLOAD:C4Script.dll");
 		libraries.Push("-ldelayimp");
 	}
-	if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.subsystem, m_In.options.verbose))
+	const LinkStamp stamp = StampFor(base, objects, libraries, debugInfo);
+	if (stamp.Current()) CORE_INFO("{0} is up to date: its link would read what it read", out);
+	else
 	{
-		Scripting::RemoveFile(debugInfo.partial.string());
-		m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
-		return false;
+		stamp.Forget();
+		if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.subsystem, m_In.options.verbose))
+		{
+			Scripting::RemoveFile(debugInfo.partial.string());
+			m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
+			return false;
+		}
+		CORE_INFO("Linked {0}", out);
+		if (m_In.options.debugInfo && !PlaceDebugInfo(debugInfo)) return false;
+		stamp.Record();
 	}
-	CORE_INFO("Linked {0}", out);
-	if (m_In.options.debugInfo && !PlaceDebugInfo(debugInfo)) return false;
 	if (m_In.options.scriptHost && !ShipScriptHost(scriptHost)) return false;
 	Timed("runtime+link", start);
 	return true;
+}
+
+namespace
+{
+	// The library files a link's arguments name, by path or found in a -L folder; the system's, found through LIB, are
+	// not among them.
+	std::vector<std::string> LibraryFiles(const Core::Vector<Core::String>& libraries)
+	{
+		std::vector<std::string> folders;
+		std::vector<std::string> names;
+		for (const Core::String& library : libraries)
+			for (const std::string& argument : Scripting::LinkerArguments(library))
+			{
+				if (argument.rfind("-libpath:", 0) == 0) folders.push_back(argument.substr(9));
+				else if (!argument.empty() && argument[0] != '-' && argument[0] != '/') names.push_back(argument);
+			}
+		std::vector<std::string> files;
+		for (const std::string& name : names)
+		{
+			if (Scripting::IsFile(name)) { files.push_back(name); continue; }
+			for (const std::string& folder : folders)
+				if (const std::string found = (fs::path(folder) / name).string(); Scripting::IsFile(found)) { files.push_back(found); break; }
+		}
+		return files;
+	}
+}
+
+// A link reads its objects and libraries, the compiler (whose install ships the runtime libraries and the script host)
+// and lld-link, and writes the program and its .pdb.
+LinkStamp ProgramOutput::StampFor(const std::string& base, const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
+	const DebugInfoPaths& debugInfo) const
+{
+	std::vector<std::string> inputs = LibraryFiles(libraries);
+	for (const Core::String& object : objects) inputs.push_back(object);
+	inputs.push_back(Scripting::Toolchain::Executable().string());
+	inputs.push_back(Scripting::Toolchain::LldLink().string());
+	std::vector<std::string> arguments = { m_In.options.outputFile, std::to_string(static_cast<int>(m_In.options.subsystem)) };
+	for (const Core::String& library : libraries) arguments.push_back(library);
+	if (const char* lib = std::getenv("LIB")) arguments.push_back(lib);
+	std::vector<std::string> outputs = { m_In.options.outputFile };
+	if (m_In.options.debugInfo) outputs.push_back(debugInfo.final.string());
+	return LinkStamp(base + ".link", inputs, arguments, std::move(outputs));
 }
 
 ProgramOutput::DebugInfoPaths ProgramOutput::DebugInfoPathsFor(const Core::String& program)
@@ -409,8 +459,19 @@ bool ProgramOutput::FinishInterface(llvm::Module& module)
 	return true;
 }
 
+namespace
+{
+	std::string HexOf(const std::array<uint8, 16>& id)
+	{
+		static const char digits[] = "0123456789abcdef";
+		std::string hex;
+		for (const uint8 byte : id) hex += { digits[byte >> 4], digits[byte & 15] };
+		return hex;
+	}
+}
+
 // The interface of a build whose split extracted the inline bodies, and its build id as an object of its own, linked
-// with the program's.
+// with the program's: kept by the id, so a build whose interface is unchanged links the same object (LinkStamp).
 bool ProgramOutput::FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
 	std::vector<std::string>& objects)
 {
@@ -419,12 +480,27 @@ bool ProgramOutput::FinishScriptHost(const llvm::Module& program, const Scriptin
 	buildId.setTargetTriple(program.getTargetTriple());
 	buildId.setDataLayout(program.getDataLayout());
 	if (!FinishInterface(buildId)) return false;
+	const Scripting::ObjectCache kept(base + ".build-id", CacheSalt(settings));
+	const std::string path = kept.ObjectKeyed(HexOf(m_Interface->buildId)).string();
+	if (!Scripting::IsFile(path) && !WriteBuildId(buildId, settings, kept, path)) return false;
+	objects.push_back(path);
+	Timed("interface", start);
+	return true;
+}
+
+bool ProgramOutput::WriteBuildId(llvm::Module& buildId, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& kept,
+	const std::string& path)
+{
+	if (const std::error_code ec = Scripting::CreateFolders(kept.Folder().string()))
+	{
+		m_In.result.AddBackendError(Core::String(("cannot create " + kept.Folder().string() + ": " + ec.message()).c_str()));
+		return false;
+	}
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
-	const std::string path = base + ".build-id.obj";
 	const bool written = Scripting::WriteObject(buildId, settings, path, diagnostics);
 	Report(diagnostics);
-	if (written) objects.push_back(path);
-	Timed("interface", start);
+	if (!written) Scripting::RemoveFile(path); // never a partial object kept for the next build
+	kept.KeepOnly({ std::filesystem::path(path) });
 	return written;
 }
 

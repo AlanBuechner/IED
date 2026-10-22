@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 12 done).
+  progress (steps 1 to 13 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1709,6 +1709,11 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   operator (`MethodsWithOperator`), so operator lookups read only the methods that have one. No measurable change on
   the IED server edit loop (nothing changed 1.38, a statement 1.70, a function added 1.72, a header constant 2.34 to
   2.37): what is left before lowering is small, and lowering itself is the next step.
+- **Done notes (step 13):** a link that would read what the last one read (`LinkStamp`: each object, library,
+  the compiler and lld-link by size and time, the arguments, `LIB`) into an exe and `.pdb` nothing has touched is
+  skipped; a script host's build id object is kept by the id. An unchanged rebuild of the IED server 1.38 s / 1.08 s.
+  lld's own time on an edit is 262 ms, two thirds of it the `.pdb` (symbol merging 60 ms, commit 29 ms): only an
+  incremental `.pdb` would cut it.
 - **Next:** HIR lowering (about 0.5 s of an edit, the largest serial part) on several threads. What it takes, found
   reading it: a scope position per lowering context (`SymbolTable::PushScope` moves the table's one `m_Current` and
   hangs each block's layer under the shared tree for good, since the trees point at their locals); the model's

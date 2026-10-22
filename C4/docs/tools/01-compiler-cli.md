@@ -109,7 +109,11 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
    arguments, `libcmt`, `oldnames` and clang's runtime libraries, `/SUBSYSTEM:CONSOLE`. lld-link finds the MSVC and
    Windows SDK libraries itself, or through `LIB` when it is set. With `-g` the link also passes `/DEBUG`, which writes
    `<base>.pdb` beside the exe; the objects carry their CodeView types' global hashes (`.debug$H`), so the link does
-   not compute them.
+   not compute them. A build whose link would read the same files (by size and time: the objects, the libraries it
+   names or finds through `-L`, the compiler and lld-link) with the same arguments, into an exe and `.pdb` nothing has
+   touched since the last link, skips it (`<int>/<name>.link` keeps what that link read and left): a source saved
+   without a change, or an edit that changes no object. A script host's build id object is kept by the id
+   (`<int>/<name>.build-id/`), so an unchanged interface changes nothing the link reads.
 
 ---
 

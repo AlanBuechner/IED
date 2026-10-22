@@ -803,6 +803,34 @@ int32 main()
     return $failures
 }
 
+# A rebuild whose link would read what the last one read, into the program and .pdb it left, skips the link; a script
+# host's build id object is kept by the id, so an unchanged interface does not count as a change (LinkStamp).
+function Test-LinkStamp {
+    $dir = New-Sources "linkstamp" @{ "src/main.cf" = "int32 main() { return 7; }" }
+    $src = Join-Path $dir "src"
+    $exe = Join-Path $dir "out/app.exe"
+    $pdb = Join-Path $dir "out/app.pdb"
+    $build = { $r = Invoke-Compiler $compiler @($src, "-o", $exe, "-v", "-g", "--script-host")
+        return @{ exit = $r.exit; linked = $r.output -match "Linking: "; output = $r.output } }
+    $first = & $build
+    if ($first.exit -ne 0 -or -not $first.linked) { return @("the first build did not link: $($first.output)") }
+    $failures = @()
+    $written = (Get-Item $exe).LastWriteTimeUtc
+    $again = & $build
+    if ($again.exit -ne 0 -or $again.linked) { $failures += "an unchanged rebuild linked again (exit $($again.exit))" }
+    if ((Get-Item $exe).LastWriteTimeUtc -ne $written) { $failures += "an unchanged rebuild rewrote the program" }
+    & $exe | Out-Null
+    if ($LASTEXITCODE -ne 7) { $failures += "the program kept by an unchanged rebuild exited $LASTEXITCODE, expected 7" }
+    Remove-Item $pdb
+    $noPdb = & $build
+    if ($noPdb.exit -ne 0 -or -not $noPdb.linked -or -not (Test-Path $pdb)) { $failures += "a rebuild after the .pdb was deleted did not link it again" }
+    Set-Content -Path (Join-Path $src "main.cf") -Value "int32 main() { return 8; }" -Encoding ascii
+    $edited = & $build
+    & $exe | Out-Null
+    if ($edited.exit -ne 0 -or -not $edited.linked -or $LASTEXITCODE -ne 8) { $failures += "an edit did not relink: exit $LASTEXITCODE, expected 8" }
+    return $failures
+}
+
 # BUG-360: a filter reads standard input (Platform::InputLines, Platform::ReadAllInput), a line ending in "\r\n" or
 # "\n" or nothing; the standard streams carry the bytes as written, so a "\n" written is one byte.
 function Test-StandardInput {
@@ -860,7 +888,7 @@ int32 main()
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
-    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-StandardInput")
+    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

@@ -1,4 +1,5 @@
 #pragma once
+#include "LinkStamp.h"
 #include "Compiler/BuildUtils.h"
 #include "Compiler/CompilationResult.h"
 #include "Compiler/CompilerInstance.h"
@@ -69,7 +70,9 @@ private:
 	void ReportPartitions(const Scripting::CachedObjects& objects, unsigned partitions, unsigned threads) const;
 	void ReportObjects(uint64_t instructions, unsigned objects, size_t reused, unsigned threads, const Scripting::ObjectCache& cache) const;
 	void Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics);
-	bool Link(const std::vector<std::string>& programObjects);
+	bool Link(const std::vector<std::string>& programObjects, const std::string& base);
+	LinkStamp StampFor(const std::string& base, const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
+		const DebugInfoPaths& debugInfo) const;
 	static DebugInfoPaths DebugInfoPathsFor(const Core::String& program);
 	bool PlaceDebugInfo(const DebugInfoPaths& paths);
 	bool PrepareScriptHost(const std::vector<llvm::Module*>& partitions);
@@ -79,6 +82,8 @@ private:
 	bool FinishInterface(llvm::Module& module);
 	bool FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
 		std::vector<std::string>& objects);
+	bool WriteBuildId(llvm::Module& buildId, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& kept,
+		const std::string& path);
 	bool WriteScriptInterface();
 	bool ShipScriptHost(const std::filesystem::path& scriptHost);
 	void Timed(const char* phase, std::chrono::steady_clock::time_point since);
