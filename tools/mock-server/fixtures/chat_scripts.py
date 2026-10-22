@@ -81,6 +81,42 @@ LONG = [
 	("end", "finished", {}),
 ]
 
+RICH = [
+	("thinking", "An overview: read the player and the renderer, then explain both with the code that matters."),
+	("tool", {"name": "fs_read", "args": {"path": "src/game/player.c"}, "result": {"preview": "src/game/player.c (24 lines)"}, "ms": 6}),
+	("tool", {"name": "lsp_symbols", "args": {"path": "src/engine/render.c"}, "result": {"preview": "render_frame (function, line 12)\nrender_init (function, line 4)"}, "ms": 31}),
+	("text", (
+		"## How a frame runs\n\n"
+		"Each frame, `main` calls **`player_update`** and then `render_frame`, which returns `0` after 600 frames. "
+		"The step is *fixed* at 1/60 s, so a replay gives the same positions. See [the engine notes](https://example.com/engine).\n\n"
+		"```c\n"
+		"// One step of the simulation: explicit Euler.\n"
+		"void player_update(Player* player, float dt)\n"
+		"{\n"
+		"\tif (player->velocity.x > MAX_SPEED)\n"
+		"\t\tplayer->velocity.x = MAX_SPEED;\n"
+		"\tplayer->position = vec2_add(player->position, vec2_scale(player->velocity, dt));\n"
+		"}\n"
+		"```\n\n"
+		"### What each part owns\n\n"
+		"| Part | File | Owns |\n"
+		"|---|---|---|\n"
+		"| Player | `src/game/player.c` | position, velocity |\n"
+		"| Renderer | `src/engine/render.c` | the window, the frame count |\n"
+		"| Math | `src/engine/math.h` | `Vec2` and its helpers |\n\n"
+		"### Next steps\n\n"
+		"1. Read input before `player_update`, so a key changes `velocity` that frame.\n"
+		"2. Clamp both axes, not only `x`:\n"
+		"   - `vec2_clamp` already exists in `math.h`.\n"
+		"   - It takes the limit as a length.\n"
+		"3. Add a test that runs 60 frames and checks the position.\n\n"
+		"> **Note:** the renderer counts frames itself; a test that calls `player_update` directly does not need a window.\n\n"
+		"To run the tests:\n\n"
+		"```bash\nnuke test dev --filter player\n```\n"
+	)),
+	("end", "finished", {}),
+]
+
 SNAP = [
 	("tool", {"name": "game_snap", "args": {}, "result": {"preview": "the game's screen, 320x180\n[image shots/screen.png]", "images": [{"mime": "image/png", "path": "shots/screen.png"}]},
 		"ms": 41, "source": "plugin game.snap"}),
@@ -100,8 +136,8 @@ ESTIMATE = [
 	("end", "finished", {}),
 ]
 
-SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP, "prefill": PREFILL, "estimate": ESTIMATE}
-KEYWORDS = [("screen", "snap"), ("big prompt", "prefill"), ("slow server", "estimate"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
+SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP, "prefill": PREFILL, "estimate": ESTIMATE, "rich": RICH}
+KEYWORDS = [("overview", "rich"), ("screen", "snap"), ("big prompt", "prefill"), ("slow server", "estimate"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
 	("long", "long"), ("essay", "long"), ("error", "error"), ("fail", "error")]
 
 SEED_TURNS = [

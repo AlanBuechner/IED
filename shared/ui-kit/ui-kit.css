@@ -46,6 +46,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .c-error { color: var(--accent-error); }
 .c-warn { color: var(--accent-warn); }
 .c-info { color: var(--accent-info); }
+.c-ai { color: var(--accent-ai); }
 
 /* ---------- buttons ---------- */
 .ib {

@@ -15,10 +15,22 @@ const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])(\s+|$)(.*)$/;
 const TASK = /^\[([ xX])\]\s+(.*)$/;
 const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 
-// The elements of `text`: {nodes, options}; options.code(text, language) may return an element for a fenced block.
+// The elements of `text`: {nodes, options}; options.code(text, language, closed) may return an element for a fenced
+// block. `closed`: its closing fence is there, so a reply still streaming will not change the block.
 export function renderMarkdown(text, options = {}) {
 	const lines = text.replace(/\r\n?/g, "\n").split("\n");
 	return blocks(lines, 0, lines.length, options);
+}
+
+// Fence name -> language id, from the loaded languages' `fences` and their own ids: a "c++" fence and a "cpp" one both
+// mean "cpp".
+export function fenceLanguages(languages) {
+	const map = new Map();
+	for (const language of languages) {
+		for (const fence of language.fences || []) map.set(fence.toLowerCase(), language.id);
+		if (!map.has(language.id.toLowerCase())) map.set(language.id.toLowerCase(), language.id);
+	}
+	return map;
 }
 
 function blank(line) {
@@ -77,7 +89,7 @@ function codeFence(lines, at, to, fence, options, out) {
 	let end = at + 1;
 	while (end < to && !closing.test(lines[end])) body.push(lines[end++]);
 	const code = body.join("\n");
-	const colored = options.code ? options.code(code, fence[2]) : null;
+	const colored = options.code ? options.code(code, fence[2], end < to) : null;
 	out.push(h("pre", { "data-line": String(at) }, colored || h("code", null, code)));
 	return Math.min(end + 1, to);
 }

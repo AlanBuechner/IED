@@ -7,6 +7,7 @@ import { h, icon } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
 import { ChatModel } from "./chatmodel.js";
 import { TranscriptView } from "./transcript.js";
+import { CodeColors } from "./codecolors.js";
 import { Composer } from "./composer.js";
 import { SidePanel } from "./sidepanel.js";
 import { MentionSource } from "./mentions.js";
@@ -36,6 +37,7 @@ export class ChatPane {
 		this.stopChat = null;
 		this.draft = newDraft();
 		this.model.summary = draftSummary(this.draft);
+		this.codeColors = new CodeColors(ied);
 		const actions = this.actions();
 		this.transcript = new TranscriptView(this.model, actions);
 		this.composer = new Composer(actions);
@@ -81,6 +83,8 @@ export class ChatPane {
 			openChat: (chatId) => this.host.openChat(chatId),
 			fileIcon: (path) => this.ied.icons.file(path),
 			loadEarlier: () => this.loadEarlier(),
+			codeBlock: (code, fence, closed) => this.codeColors.element(code, fence, closed),
+			colorDiff: (path, spans) => this.codeColors.diff(path, spans),
 		};
 	}
 

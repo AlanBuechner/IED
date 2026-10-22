@@ -3,8 +3,8 @@
 // in the source.
 
 import { test, assertEqual } from "./harness.js";
-import { renderMarkdown, safeUrl, toggleTask } from "/ui-kit/markdown.js";
-import { fenceLanguages, resolveRelative } from "/plugins/ied.markdown/ui/preview.js";
+import { fenceLanguages, renderMarkdown, safeUrl, toggleTask } from "/ui-kit/markdown.js";
+import { resolveRelative } from "/plugins/ied.markdown/ui/preview.js";
 
 function html(text, options) {
 	const host = document.createElement("div");
@@ -43,6 +43,9 @@ test("markdown: tables, code blocks", () => {
 	assertEqual(html("```c\nint x;\n```\n\n    indented\n    code"), '<pre data-line="0"><code>int x;</code></pre><pre data-line="4"><code>indented\ncode</code></pre>');
 	const colored = html("```js\nlet a;\n```", { code: (code, language) => { const span = document.createElement("span"); span.textContent = language + ":" + code; return span; } });
 	assertEqual(colored, '<pre data-line="0"><span>js:let a;</span></pre>', "a colorizer's element");
+	const closed = [];
+	html("```c\nint a;\n```\n\n```c\nint b;", { code: (code, language, done) => { closed.push(code + ":" + done); return null; } });
+	assertEqual(closed, ["int a;:true", "int b;:false"], "a fence still streaming is not closed");
 });
 
 test("markdown: text stays text, addresses cannot run script", () => {

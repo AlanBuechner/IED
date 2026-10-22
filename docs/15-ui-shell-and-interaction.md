@@ -67,6 +67,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 - Tab glyphs: `*` running, `!` needs approval, `3/7` task progress, dot = unread result.
 - Approval cards and questions are inline and also aggregated in the notification center.
 - Harness notes (nudges, continues, retries, routing) are thin grey rows - always visible, never hidden in a log.
+- A reply reads as prose, colored the way Claude Code colors its output (owner, 2026-10-22: easy on the eyes in a dark room): body text softer than the UI's and set larger and looser (`--prose-*`, `docs/07` "Prose"), headings and list markers warm, inline code lavender on a faint tint, links blue, the agent's name in the AI accent. Fenced code takes the editor's syntax colors through `editor.colorize` (once its closing fence arrives, cached by text so a streaming reply does not flicker), and a change's diff in an approval card or a tool result is colored as its file's language. The prose column is at most 940 px wide; the composer's Send button is a step dimmer than white.
 
 ## Phone layout (< 720 px)
 

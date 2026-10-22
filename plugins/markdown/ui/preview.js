@@ -28,17 +28,6 @@ export function resolveRelative(from, href) {
 	return parts.join("/");
 }
 
-// Fence name -> language id, from the loaded languages' `fences` and their own ids: a "c++" fence and a "cpp" one both
-// mean "cpp".
-export function fenceLanguages(languages) {
-	const map = new Map();
-	for (const language of languages) {
-		for (const fence of language.fences || []) map.set(fence.toLowerCase(), language.id);
-		if (!map.has(language.id.toLowerCase())) map.set(language.id.toLowerCase(), language.id);
-	}
-	return map;
-}
-
 export class MarkdownPreview {
 	// `fences`: fenceLanguages() of the loaded languages.
 	constructor(ctx, path, fences) {

@@ -132,6 +132,22 @@
 	--syntax-operator-weight: 400; --syntax-operator-style: normal;
 	--syntax-invalid-weight: 400;  --syntax-invalid-style: normal;
 
+	/* ---------- prose: Markdown read at length (chat replies) ----------
+	   Owner choice 2026-10-22: colorful like Claude Code, easy on the eyes in a dark room. Body copy is softer than
+	   --text-0 and set larger and looser than the dense UI; structure (headings, list markers) is warm, inline code cool. */
+	--prose-text: #d4d4d4;
+	--prose-strong: #f0f0f0;
+	--prose-heading: #e6c384;
+	--prose-marker: #c9a86a;
+	--prose-code: #b1b9f9;
+	--prose-code-bg: color-mix(in srgb, var(--prose-code) 9%, transparent);
+	--prose-link: #7aaee6;
+	--prose-quote: #a6a6a6;
+	--prose-quote-bar: color-mix(in srgb, var(--prose-heading) 45%, transparent);
+	--prose-rule: var(--border-1);
+	--prose-font-size: 14px;
+	--prose-line-height: 1.6;
+
 	/* ---------- terminal / Output ANSI palette ---------- */
 	--ansi-black: #3c3c3c;
 	--ansi-red: var(--accent-error);
@@ -292,6 +308,7 @@
 		--font-size-xs: 12px;
 		--font-size-code: 14px;
 		--line-height-code: 21px;
+		--prose-font-size: 15px;
 		--row-h: 40px;
 		--tab-h: 40px;
 		--icon-size: 18px;

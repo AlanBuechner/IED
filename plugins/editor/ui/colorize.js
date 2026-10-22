@@ -35,7 +35,20 @@ export async function colorize(ied, { path, languageId, lines }) {
 	const language = languageId && known.some((l) => l.id === languageId) ? languageId : languageOf(known, path || "");
 	if (!language || !lines.length) return plain();
 	monaco.editor.setTheme(themeName());
+	writeTokenColors(monaco);
 	const html = await monaco.editor.colorize(lines.join("\n"), language, { tabSize: 4 });
 	const colored = html.split("<br/>");
 	return lines.map((line, i) => (colored[i] !== undefined ? colored[i] : escape(line)));
+}
+
+// Monaco writes the CSS of its token classes (style.monaco-colors) when its first editor is made, so on a page with no
+// editor yet (only a chat, or a preview restored alone) the colored spans would show plain: an editor made out of sight
+// and dropped at once leaves that CSS behind.
+function writeTokenColors(monaco) {
+	if (document.querySelector("style.monaco-colors")) return;
+	const host = document.createElement("div");
+	host.style.cssText = "position: fixed; left: -10000px; top: 0; width: 10px; height: 10px; visibility: hidden;";
+	document.body.append(host);
+	monaco.editor.create(host, { value: "", language: "plaintext", minimap: { enabled: false } }).dispose();
+	host.remove();
 }

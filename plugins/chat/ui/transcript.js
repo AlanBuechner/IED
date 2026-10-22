@@ -19,7 +19,7 @@ function clock(ms) {
 }
 
 // actions: {approve(approval, decision, message), allowAlways(approval), answer(question, text), openFile(path, line?),
-// openChat(chatId)}
+// openChat(chatId), codeBlock(code, fence, closed) (a fenced block's colored <code>), colorDiff(path, spans)}
 export class TranscriptView {
 	constructor(model, actions) {
 		this.model = model;
@@ -191,10 +191,14 @@ export class TranscriptView {
 
 	textParts(segment) {
 		const body = h("div.chat-text");
-		body.append(...renderMarkdown(segment.text || ""));
+		body.append(...this.markdown(segment.text || ""));
 		if (!segment.done) return [body];
 		const meta = [segment.model, segment.ms ? duration(segment.ms) : "", segment.tokens ? segment.tokens + " tok" : ""].filter(Boolean).join(" \u00b7 ");
 		return [body, meta ? h("div.chat-segmeta", null, meta) : null];
+	}
+
+	markdown(text) {
+		return renderMarkdown(text, { code: (code, fence, closed) => this.actions.codeBlock(code, fence, closed) });
 	}
 
 	thinkingParts(segment) {
@@ -258,18 +262,21 @@ export class TranscriptView {
 
 	toolResult(segment, result) {
 		const preview = result ? result.preview : "";
-		if (preview && /^@@ -\d/.test(preview)) return this.diffBlock(preview);
+		if (preview && /^@@ -\d/.test(preview)) return this.diffBlock(preview, pathOf(segment.argsText));
 		return h("div.chat-tool-out", null,
 			h("div.chat-tool-args", null, segment.argsText || ""),
 			preview ? h("div" + (result.isError ? ".c-error" : ""), null, preview) : h("div.muted", null, segment.state === "running" ? "Running\u2026" : "No result yet."));
 	}
 
-	diffBlock(unified) {
-		return h("div.chat-diff", null, ...diffRows(unified).map((row) => row.kind === "@"
+	// A change's diff, its code in the colors of `path`'s language.
+	diffBlock(unified, path) {
+		const block = h("div.chat-diff", null, ...diffRows(unified).map((row) => row.kind === "@"
 			? h("div.dl.hunk", null, h("span.no"), h("span.no"), h("span.code", null, row.text))
 			: h("div.dl" + (row.kind === "+" ? ".add" : row.kind === "-" ? ".del" : ""), null,
 				h("span.no", null, row.old === null ? "" : String(row.old)), h("span.no", null, row.new === null ? "" : String(row.new)),
 				h("span.sign", null, row.kind === " " ? "" : row.kind), h("span.code", null, row.text))));
+		this.actions.colorDiff(path, [...block.querySelectorAll(".dl:not(.hunk) .code")]);
+		return block;
 	}
 
 	approvalCard(segment, approval) {
@@ -285,7 +292,7 @@ export class TranscriptView {
 			h("div.chat-tool-head", null, icon("shield", "c-warn"), h("span.tname", null, approval.tool), h("span.targs", null, argsLine(approval.tool, approval.args ? JSON.stringify(approval.args) : segment.argsText)),
 				h("span.tstat", null, approval.plus ? h("span.plus", null, "+" + approval.plus) : null, approval.minus ? h("span.minus", null, "-" + approval.minus) : null, h("span", null, "awaiting approval"))),
 			approval.summary ? h("div.chat-approval-what", null, approval.summary) : null,
-			approval.diff ? this.diffBlock(approval.diff) : null,
+			approval.diff ? this.diffBlock(approval.diff, (approval.args && approval.args.path) || pathOf(segment.argsText)) : null,
 			h("div.why", null, approval.why),
 			h("div.actions", null,
 				h("button.btn.primary", { title: "Alt+A", on: { click: () => this.actions.approve(approval, "allow") } }, icon("check"), "Allow once"),
@@ -323,8 +330,19 @@ export class TranscriptView {
 		}
 		return h("div.chat-finish", { dataset: { call: segment.callId } },
 			h("div.chat-tool-head", null, icon("pass", "c-saved"), h("span.tname", null, "Finished")),
-			h("div.chat-finish-body", null, ...renderMarkdown(args.summary || ""),
+			h("div.chat-finish-body.chat-text", null, ...this.markdown(args.summary || ""),
 				args.verification ? h("div.chat-finish-verify", null, h("b", null, "Verified: "), args.verification) : null));
+	}
+}
+
+// The file a call's arguments name ("" when none does).
+function pathOf(argsText) {
+	try {
+		const args = JSON.parse(argsText || "{}");
+		return typeof args.path === "string" ? args.path : "";
+	}
+	catch {
+		return "";
 	}
 }
 

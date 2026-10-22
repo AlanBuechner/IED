@@ -4,6 +4,7 @@
 import { test, assertEqual } from "./harness.js";
 import { ChatList, ChatModel, argsLine, compact, contextBar, diffRows, duration, effortLabel, effortRows, tabGlyphs, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
 import { chatStatusText } from "/plugins/ied.chat/ui/index.js";
+import { CodeColors } from "/plugins/ied.chat/ui/codecolors.js";
 
 function snapshot() {
 	return {
@@ -120,4 +121,38 @@ test("chat: the composer's effort - the chat's pick, else its group's, else the 
 test("chat: a unified diff's rows carry both line numbers", () => {
 	const rows = diffRows("@@ -21,3 +21,2 @@\n void f()\n-\ta();\n-\tb();\n+\tc();\n");
 	assertEqual(rows.map((r) => [r.kind, r.old, r.new]), [["@", null, null], [" ", 21, 21], ["-", 22, null], ["-", 23, null], ["+", null, 22]]);
+});
+
+// An editor's `editor.colorize`: each line as <i>line</i>, and the calls it was asked.
+function colorizingIed() {
+	const asked = [];
+	const ied = {
+		contributions: () => [{ value: { id: "cpp", fences: ["c++", "cpp"] } }],
+		bindings: {
+			has: (name) => name === "editor.colorize",
+			call: async (name, args) => {
+				asked.push(args.languageId || args.path);
+				return args.lines.map((line) => "<i>" + line + "</i>");
+			},
+		},
+	};
+	return { ied, asked };
+}
+
+test("chat: a reply's code in the editor's colors, once its fence closes, kept while it streams", async () => {
+	const { ied, asked } = colorizingIed();
+	const colors = new CodeColors(ied);
+	const first = colors.element("int a;\nint b;", "C++", true);
+	assertEqual(first.innerHTML, "int a;\nint b;", "plain until the editor answers");
+	await Promise.resolve();
+	await Promise.resolve();
+	assertEqual(first.innerHTML, "<i>int a;</i>\n<i>int b;</i>");
+	assertEqual(colors.element("int a;\nint b;", "cpp", true).innerHTML, "<i>int a;</i>\n<i>int b;</i>", "drawn again: colored at once");
+	assertEqual([colors.element("int c", "cpp", false).innerHTML, colors.element("x", "zig", true).innerHTML, colors.element("x", "", true).innerHTML], ["int c", "x", "x"], "streaming, unknown, none");
+	assertEqual(asked, ["cpp"], "one call for the block drawn twice");
+	const spans = ["a();", "b();"].map((text) => Object.assign(document.createElement("span"), { textContent: text }));
+	colors.diff("src/f.cpp", spans);
+	await Promise.resolve();
+	await Promise.resolve();
+	assertEqual([spans.map((span) => span.innerHTML), asked], [["<i>a();</i>", "<i>b();</i>"], ["cpp", "src/f.cpp"]], "a diff's lines by its file");
 });

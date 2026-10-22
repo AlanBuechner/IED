@@ -160,6 +160,22 @@ Two palettes ship:
 
 Language plugins map their server's semantic token legend onto these names with `semanticTokenColors` (`docs/02`; the C4 plugin's in `C4/IedPlugin/ied-plugin.json`, clangd's in `plugins/cpp`, rust-analyzer's in `plugins/rust`). Grammar (Monarch) tokens map by name: `keyword.directive` is the preprocessor gray, an `#include`'s path a string, a grammar's per-keyword control-flow names (`keyword.return`) the control color. Monaco's theme, the xterm/ANSI palette and the Output window are generated from the same tokens, so editor, terminal and chat cannot drift. Tokens a generator reads (syntax, ANSI, terminal) are plain hex or `var()` of plain hex; `color-mix()` is only for CSS-only tints.
 
+### Prose
+
+Markdown read at length - the chat's replies - is a third sanctioned palette (owner, 2026-10-22: "more color from the AI output like there is in Claude Code", pleasant in a dark room). Its colors mean which Markdown element: warm for structure (headings, list markers), cool for code, so a reply scans by shape. Body copy is softer than `--text-0` and set larger and looser than the dense UI; fenced code uses the syntax tokens (through the editor's colorizer).
+
+| Token | Value | Use |
+|---|---|---|
+| `--prose-text` | `#d4d4d4` | body copy (VS Code's editor foreground: bright enough, no glare) |
+| `--prose-strong` | `#f0f0f0` | bold, table headers |
+| `--prose-heading` | `#e6c384` | headings (warm sand) |
+| `--prose-marker` | `#c9a86a` | list bullets and numbers, task boxes |
+| `--prose-code` / `--prose-code-bg` | `#b1b9f9` / its 9% tint | inline code (Claude Code's lavender) |
+| `--prose-link` | `#7aaee6` | links (a lighter `--accent-info`, readable on the dark surface) |
+| `--prose-quote` / `--prose-quote-bar` | `#a6a6a6` / the heading's 45% tint | block quotes |
+| `--prose-rule` | `var(--border-1)` | horizontal rules |
+| `--prose-font-size` / `--prose-line-height` | `14px` (15 px on a phone) / `1.6` | prose type |
+
 ### Other token groups
 
 `frontend/css/theme.css` holds these too; the names are the contract, values are tuned there.

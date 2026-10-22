@@ -133,7 +133,7 @@ A binding with `side: "client"` lives in the browser: the providing plugin's UI 
 - `has(name)`: whether a provider is there now (a UI module's, or a server binding a loaded plugin declares).
 - `emit(name, data)` and `on(name, fn) -> stop`: an event binding (`kind: "event"`): the plugin that declares it emits, each consumer listening gets `data` (not while its plugin is unloaded). The first one: `editor.scrolled {path, line}` (the top line shown, 0-based with the fraction scrolled past), which the Markdown preview follows.
 
-The first one: `editor.colorize {languageId | path, lines}` -> `[html]`, from the editor plugin (Monaco's tokenizers and the theme's colors), consumed optionally by the git plugin's diffs and the Markdown preview's fenced code.
+The first one: `editor.colorize {languageId | path, lines}` -> `[html]`, from the editor plugin (Monaco's tokenizers and the theme's colors), consumed optionally by the git plugin's diffs, the Markdown preview's fenced code and the chat's replies (fenced code and change diffs). On a page where no editor has been made yet, it makes and drops one out of sight first, since Monaco writes the CSS of its token colors only for its first editor.
 
 ### Server bindings as built
 

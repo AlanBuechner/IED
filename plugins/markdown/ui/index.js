@@ -3,7 +3,8 @@
 // (docs/15 "Tethered tabs"): it shows when the file does and closes with it.
 
 import { fileName } from "/ui-kit/fileuris.js";
-import { MarkdownPreview as Preview, fenceLanguages } from "./preview.js";
+import { fenceLanguages } from "/ui-kit/markdown.js";
+import { MarkdownPreview as Preview } from "./preview.js";
 
 export function activate(ied) {
 	addStylesheet(ied.plugin.base + "ui/markdown.css");
