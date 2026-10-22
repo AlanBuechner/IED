@@ -1,5 +1,6 @@
 #include "Features/WorkspaceSymbols.h"
 #include "Features/DeclarationText.h"
+#include "Features/MacroUses.h"
 #include "Server/CompilationSession.h"
 #include "Server/SemanticResolver.h"
 #include <algorithm>
@@ -49,7 +50,24 @@ namespace C4LSP::Features
 					if (child && child->startLocation.sourceId == sourceId)
 						AddDeclaration(walk, *child.Get(), sourceId, "", false);
 		}
+		AddMacros(walk);
 		return walk.out;
+	}
+
+	void WorkspaceSymbols::AddMacros(Walk& walk)
+	{
+		for (uint32 sourceId = 1; sourceId <= walk.session.GetCompiler().SourceCount() && walk.out.Count() < kMaxResults; ++sourceId)
+		{
+			const std::string_view text = walk.session.RawTextOf(sourceId);
+			if (text.find("define") == std::string_view::npos)
+				continue; // most files define none
+			const std::string uri = walk.session.UriForSourceId(sourceId);
+			if (uri.empty())
+				continue;
+			for (const MacroUses::Definition& macro : MacroUses::DefinitionsIn(text))
+				if (walk.out.Count() < kMaxResults && Matches(macro.name, walk.query))
+					walk.out.Push(WorkspaceSymbol{ macro.name, SymbolKinds::Function, Protocol::Location{ uri, macro.nameRange }, "" });
+		}
 	}
 
 	void WorkspaceSymbols::AddEach(Walk& walk, const Core::Vector<Ref<Scripting::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member)

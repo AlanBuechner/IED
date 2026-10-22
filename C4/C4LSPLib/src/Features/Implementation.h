@@ -20,6 +20,8 @@ namespace C4LSP::Features
 		static const Scripting::ObjectType* TypeUnderCursor(Server::CompilationSession& session, const Server::LocatedNode& located);
 
 	private:
+		// The methods of the types derived from a method's type that override it: same name, same parameter count.
+		static Core::Vector<Protocol::Location> Overrides(Server::CompilationSession& session, const Scripting::AstNode& method);
 		// True when `type` derives from `target` directly or transitively.
 		static bool DerivesFrom(const Scripting::ObjectType* type, const Scripting::ObjectType* target, std::set<const Scripting::ObjectType*>& visited);
 	};

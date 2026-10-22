@@ -33,6 +33,13 @@ namespace C4LSP::Features
 		/// The node of `declaration`'s function that has its body (its out-of-line definition), else `declaration`.
 		static const Scripting::AstNode* WithBody(Server::CompilationSession& session, const Scripting::AstNode* declaration);
 
+		/// The declaration a position names: what a reference there resolves to, else the declaration whose own name
+		/// is there. Null anywhere else.
+		static const Scripting::AstNode* TargetAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
+		/// The declaration whose own name is at `position` - `Push` of `void Ring::Push()` is the function, its `Ring`
+		/// the type - not its type, parameters or body (BUG-349). Null elsewhere.
+		static const Scripting::AstNode* DeclarationNamedAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
+
 	private:
 
 		/// Walk the located path (deepest first) for a reference node with a recorded declaration.

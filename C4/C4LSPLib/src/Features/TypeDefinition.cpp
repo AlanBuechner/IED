@@ -5,6 +5,12 @@
 #include "Model/ProgramModel.h" // the model is the only thing phases query (doc 03)
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
+#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
+#include "Parser/Nodes/Declarations/ParameterNode.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
+#include "Features/Definition.h"
+#include "Features/TypeText.h"
+#include "Model/Types.h"
 #include <cctype>
 
 namespace C4LSP::Features
@@ -25,6 +31,11 @@ namespace C4LSP::Features
 			return {};
 
 		const Server::SemanticResolver& resolver = session.GetResolver();
+
+		// A variable or parameter's own name: the type it is declared with.
+		auto declared = DeclaredType(session, sourceId, located, position);
+		if (!declared.Empty())
+			return declared;
 
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
@@ -52,49 +63,27 @@ namespace C4LSP::Features
 
 	Core::Vector<Protocol::Location> TypeDefinition::ResolveReference(Server::CompilationSession& session, const Server::SemanticResolver& resolver, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path)
 	{
-		const Server::NodeResolution res = resolver.ResolveReference(node, path);
-		if (!res.type)
-			return {};
+		return LocationOfType(session, resolver.ResolveReference(node, path).type);
+	}
 
-		// Only user-defined named types have a definition to jump to. Unwrap alias/reference/pointer
-		// indirection to the underlying value type (a `Point* p` reference still navigates to Point).
-		const Scripting::Type* value = res.type;
-		while (value)
-		{
-			switch (value->GetKind())
-			{
-			case Scripting::TypeKind::Alias:
-				value = static_cast<const Scripting::AliasType*>(value)->GetAliasedType();
-				break;
-			case Scripting::TypeKind::Reference:
-				value = static_cast<const Scripting::ReferenceType*>(value)->GetReferentType();
-				break;
-			case Scripting::TypeKind::Pointer:
-				value = static_cast<const Scripting::PointerType*>(value)->GetPointeeType();
-				break;
-			default:
-				break; // a named / scalar value type
-			}
-		}
-		if (!value)
-			return {};
-
-		const Scripting::AstNode* typeDecl = nullptr;
-		switch (value->GetKind())
-		{
-		case Scripting::TypeKind::Object:
-			typeDecl = static_cast<const Scripting::ObjectType*>(value)->GetDeclNode();
-			break;
-		case Scripting::TypeKind::Enum:
-			typeDecl = static_cast<const Scripting::EnumType*>(value)->GetDeclNode();
-			break;
-		default:
-			break; // scalars / pointers to scalars have no type definition to navigate to
-		}
-
+	Core::Vector<Protocol::Location> TypeDefinition::LocationOfType(Server::CompilationSession& session, const Scripting::Type* type)
+	{
+		// Only user-defined named types have a definition to jump to: a `Point*` or a `Point&` still lands on Point.
+		const Scripting::AstNode* typeDecl = DeclarationOfNamedType(type);
 		if (!typeDecl)
 			return {};
 		return { session.ToEditorLocation(typeDecl->startLocation, typeDecl->endLocation) };
+	}
+
+	Core::Vector<Protocol::Location> TypeDefinition::DeclaredType(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
+	{
+		const Scripting::AstNode* declaration = Definition::DeclarationNamedAt(session, sourceId, located, position);
+		const Scripting::QualTypeNode* type = nullptr;
+		if (declaration && declaration->Type() == Scripting::NodeType::VariableDefinition)
+			type = static_cast<const Scripting::VariableDefinitionNode&>(*declaration).GetType().Get();
+		else if (declaration && declaration->Type() == Scripting::NodeType::Parameter)
+			type = static_cast<const Scripting::ParameterNode&>(*declaration).GetType().Get();
+		return type ? LocationOfType(session, session.GetResolver().ResolveQualType(*type, located.path)) : Core::Vector<Protocol::Location>();
 	}
 
 	Core::Vector<Protocol::Location> TypeDefinition::ResolveTypeName(Server::CompilationSession& session, const Scripting::AstNode& typeNode, const Core::Vector<const Scripting::AstNode*>& path)

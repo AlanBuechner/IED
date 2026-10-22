@@ -3,7 +3,7 @@
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
 
-namespace Scripting { class AstNode; }
+namespace Scripting { class AstNode; class Type; }
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
 
 namespace C4LSP::Features
@@ -18,6 +18,10 @@ namespace C4LSP::Features
 
 	private:
 		static Core::Vector<Protocol::Location> ResolveReference(Server::CompilationSession& session, const Server::SemanticResolver& resolver, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path);
+		/// Where the named type a value of `type` has is defined (through aliases, references, pointers and arrays).
+		static Core::Vector<Protocol::Location> LocationOfType(Server::CompilationSession& session, const Scripting::Type* type);
+		/// The type a variable or parameter named at `position` is declared with (BUG-350).
+		static Core::Vector<Protocol::Location> DeclaredType(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
 		static Core::Vector<Protocol::Location> ResolveTypeName(Server::CompilationSession& session, const Scripting::AstNode& typeNode, const Core::Vector<const Scripting::AstNode*>& path);
 	};
 } // namespace C4LSP::Features

@@ -13,6 +13,8 @@
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Features/TypeDefinition.h"
+#include "Features/DeclarationText.h"
+#include "Model/SymbolTable.h"
 #include <cctype>
 #include <set>
 
@@ -164,6 +166,55 @@ namespace C4LSP::Features
 			if (seen.insert(decl).second) // same declaration reachable through several units' merged trees
 				result.Push(LocationForDeclaration(session, *decl));
 		return result;
+	}
+
+	// Whether a 0-based position is on the text from `start` to `end`, or just after it (a caret at a word's end).
+	static bool Within(const Protocol::Position& position, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end)
+	{
+		const uint32 line = position.line + 1;
+		const uint32 column = position.character + 1;
+		const bool fromStart = line > start.line || (line == start.line && column >= start.column);
+		const bool toEnd = line < end.line || (line == end.line && column <= end.column);
+		return fromStart && toEnd;
+	}
+
+	// The type an out-of-line definition's qualifier names at `position` (`Ring` of `Ring::Push`); null off it.
+	static const Scripting::AstNode* QualifierAt(Server::CompilationSession& session, uint32 sourceId, const Scripting::FunctionDefinitionNode& func,
+		const Core::Vector<const Scripting::AstNode*>& path, const Protocol::Position& position)
+	{
+		std::string written;
+		const auto& segments = func.GetName()->GetSegments();
+		for (uint32 i = 0; i + 1 < segments.Count(); ++i)
+		{
+			written += (written.empty() ? "" : "::") + std::string(segments[i].nameToken.GetText());
+			if (!Within(position, segments[i].nameToken.GetStartLocation(), segments[i].nameToken.GetEndLocation()))
+				continue;
+			const Scripting::SymbolInfo* info = session.GetResolver().Lookup(written, sourceId, &path);
+			return info && info->kind == Scripting::SymbolKind::Type ? info->declNode : nullptr;
+		}
+		return nullptr;
+	}
+
+	const Scripting::AstNode* Definition::DeclarationNamedAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
+	{
+		for (uint32 i = located.path.Count(); i-- > 0;)
+		{
+			const Scripting::AstNode& node = *located.path[i];
+			const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(node);
+			if (!name.found)
+				continue;
+			if (Within(position, name.simpleStart, name.end))
+				return &node;
+			if (node.Type() == Scripting::NodeType::FunctionDefinition && Within(position, name.start, name.simpleStart))
+				return QualifierAt(session, sourceId, static_cast<const Scripting::FunctionDefinitionNode&>(node), located.path, position);
+		}
+		return nullptr;
+	}
+
+	const Scripting::AstNode* Definition::TargetAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
+	{
+		const Scripting::AstNode* target = FindTargetDeclaration(session, sourceId, located);
+		return target ? target : DeclarationNamedAt(session, sourceId, located, position);
 	}
 
 	const Scripting::AstNode* Definition::FindTargetDeclaration(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located)

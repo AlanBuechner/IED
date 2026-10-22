@@ -105,6 +105,10 @@ Today: stdio, full sync, standard features (completion, hover, signature help, d
 | L12 | Done (2026-10-21, `Features/CallHierarchy`, `TypeHierarchy`): Call hierarchy (`textDocument/prepareCallHierarchy`, `callHierarchy/incomingCalls`, `outgoingCalls`) and type hierarchy (`textDocument/prepareTypeHierarchy`, `typeHierarchy/supertypes`, `subtypes`) | `code_call_hierarchy`, `code_type_hierarchy`, `code_members` with inherited members |
 | L13 | Done (2026-10-21, `Features/MacroUses`; the `c4` plugin declares it): `c4/expandMacro` (TextDocumentPositionParams -> `{name, expansion}`, as rust-analyzer's `rust-analyzer/expandMacro`), declared in the `c4` plugin's profile as `aiExposedRequests: [{"method": "c4/expandMacro", "purpose": "expandMacro", "description": ...}]` | `code_expand_macro` resolves a macro use |
 | L14 | Done (2026-10-21): `documentSymbol` ranges that cover a declaration's doc comment and annotations, and macros as symbols (`SymbolKind` Function, `detail` "macro") | `code_read_symbol` returns a function with its comment; a macro is found by name |
+| L15 | Done (2026-10-22, BUG-349, BUG-353): `references` and `documentHighlight` asked at a declaration's own name (`Push` of `void Ring::Push()`; its `Ring` names the type), a type's references where it is written as a type, and members reached with `->` through a pointer (`server->documents->ApplyEdit(...)`, which references and the call hierarchy missed) | Found by IED's `code_references` |
+| L16 | Done (2026-10-22, BUG-350): `typeDefinition` of a variable or parameter, at its declaration or a use (it never answered for an object-typed value) | `code_type_definition` |
+| L17 | Done (2026-10-22): `implementation` at a method gives the methods that override it (`ISink::Write` -> `Ring::Write`), not the class around it | `code_implementations` |
+| L18 | Done (2026-10-22): `workspace/symbol` includes `#define`s | `code_read_symbol` finds a macro by name |
 
 ### C4DAP (`C4/C4DAP/`)
 

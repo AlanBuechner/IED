@@ -23,7 +23,7 @@ namespace C4LSP::Features
 		if (!located.Found())
 			return {};
 
-		const Scripting::AstNode* targetDecl = Definition::FindTargetDeclaration(session, sourceId, located);
+		const Scripting::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
 		if (!targetDecl)
 			return {};
 

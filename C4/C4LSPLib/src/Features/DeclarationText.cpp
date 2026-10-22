@@ -413,6 +413,18 @@ namespace C4LSP::Features
 		return namespaces.count(OwnerOf(session, decl)) == 0;
 	}
 
+	const Scripting::AstNode& DeclarationText::InItsType(Server::CompilationSession& session, const Scripting::AstNode& decl)
+	{
+		if (decl.Type() != NodeType::FunctionDefinition)
+			return decl;
+		std::vector<const Scripting::AstNode*> declarations;
+		session.GetResolver().CollectFunctionDeclarations(&decl, declarations);
+		for (const Scripting::AstNode* node : declarations)
+			if (node && WrittenName(*node).find("::") == std::string::npos)
+				return *node;
+		return decl;
+	}
+
 	Core::Vector<const Scripting::AstNode*> DeclarationText::PathTo(Server::CompilationSession& session, const Scripting::AstNode& decl)
 	{
 		Core::Vector<const Scripting::AstNode*> path;

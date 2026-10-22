@@ -30,10 +30,6 @@ namespace C4LSP::Features
 		static std::string BuildHoverText(Server::CompilationSession& session, const Server::LocatedNode& located);
 		static std::string BuildReferenceHover(Server::CompilationSession& session, const Scripting::Type* type, const Scripting::AstNode* declaration);
 		static std::string BuildTypeHover(Server::CompilationSession& session, const Scripting::QualTypeNode& type, const Core::Vector<const Scripting::AstNode*>& path);
-		/// The declaring node of an object, enum or union type; null for anything else.
-		static const Scripting::AstNode* DeclarationOf(const Scripting::Type* type);
-		/// A function's declaration in its type (where its modifiers and comment are), else `declaration` itself.
-		static const Scripting::AstNode* Documented(Server::CompilationSession& session, const Scripting::AstNode& declaration);
 		static std::string MacroHover(const std::string& definition, const std::string& expansion, const std::string& doc);
 	};
 } // namespace C4LSP::Features

@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting { class Type; class FunctionType; }
+namespace Scripting { class Type; class FunctionType; struct AstNode; }
 
 namespace C4LSP::Features
 {
@@ -11,6 +11,9 @@ namespace C4LSP::Features
 
 	/// The type a type name denotes, past pointers, arrays, references and aliases: `char` for `const char*`.
 	const Scripting::Type* NamedType(const Scripting::Type* type);
+
+	/// Where the object, enum or union type a value of `type` names is declared (NamedType first); null for any other.
+	const Scripting::AstNode* DeclarationOfNamedType(const Scripting::Type* type);
 
 	/// Render a function/method signature from its semantic type (returns the bare type name
 	/// when `type` is not a function).

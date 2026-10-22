@@ -43,5 +43,7 @@ namespace C4LSP::Features
 		static void AddDeclaration(Walk& walk, const Scripting::AstNode& node, uint32 sourceId, const std::string& container, bool member);
 		static void AddEach(Walk& walk, const Core::Vector<Ref<Scripting::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member);
 		static void Push(Walk& walk, const Scripting::AstNode& node, const std::string& container, bool member);
+		/// Every source's `#define`s whose name matches, as Function symbols where they are defined.
+		static void AddMacros(Walk& walk);
 	};
 } // namespace C4LSP::Features

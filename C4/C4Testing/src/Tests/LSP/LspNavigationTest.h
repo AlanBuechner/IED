@@ -9,6 +9,10 @@
 #include "Features/TypeHierarchy.h"
 #include "Features/MacroUses.h"
 #include "Features/DeclarationText.h"
+#include "Features/References.h"
+#include "Features/DocumentHighlight.h"
+#include "Features/TypeDefinition.h"
+#include "Features/Implementation.h"
 #include "LspTestSupport.h"
 
 namespace Testing
@@ -63,5 +67,28 @@ namespace Testing
 
 		TEST_FUNC(Lsp.Navigation.Symbols)
 		void TestMacrosAreDocumentSymbols();
+
+		// --- Found by IED's code tools ---
+		// BUG-349: references and highlights from a declaration's own name, not only from a use.
+		TEST_FUNC(Lsp.Navigation.References)
+		void TestReferencesFromADeclarationsOwnName();
+
+		// A type's uses where it is written as a type (a parameter's, a local's) are its references.
+		TEST_FUNC(Lsp.Navigation.References)
+		void TestReferencesOfATypeIncludeWhereItIsWritten();
+
+		// BUG-350: the type definition of an object-typed variable, at its declaration and at a use (it never answered).
+		TEST_FUNC(Lsp.Navigation.TypeDefinition)
+		void TestTypeDefinitionOfAVariable();
+
+		TEST_FUNC(Lsp.Navigation.Implementation)
+		void TestImplementationOfAMethodIsWhatOverridesIt();
+
+		TEST_FUNC(Lsp.Navigation.Symbols)
+		void TestWorkspaceSymbolsIncludeMacros();
+
+		// BUG-353: a member reached with `->` through a pointer (`server->documents->ApplyEdit(...)`) resolves.
+		TEST_FUNC(Lsp.Navigation.References)
+		void TestMembersReachedThroughPointersResolve();
 	};
 }

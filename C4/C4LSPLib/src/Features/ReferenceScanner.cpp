@@ -6,6 +6,9 @@
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
+#include "Features/TypeText.h"
+#include <algorithm>
 
 namespace C4LSP::Features
 {
@@ -101,9 +104,26 @@ namespace C4LSP::Features
 			const auto& sa = static_cast<const Scripting::StaticAccessNode&>(reference);
 			return { sa.GetMemberNameToken().GetStartLocation(), sa.GetMemberNameToken().GetEndLocation() };
 		}
+		case Scripting::NodeType::QualType: {
+			const auto& type = static_cast<const Scripting::QualTypeNode&>(reference);
+			if (type.BaseName())
+				return { type.BaseName()->GetLastIdentifierToken().GetStartLocation(), type.BaseName()->GetLastIdentifierToken().GetEndLocation() };
+			return { reference.startLocation, reference.endLocation };
+		}
 		default:
 			return { reference.startLocation, reference.endLocation };
 		}
+	}
+
+	// Whether a type written in code (`Ring&` of a parameter, `Game::Ring` of a local) names one of `targets`.
+	static bool NamesATargetType(const Scripting::QualTypeNode& type, const Server::SemanticResolver& resolver,
+		const Core::Vector<const Scripting::AstNode*>& path, const std::set<const Scripting::AstNode*>& targets)
+	{
+		const bool typeTarget = std::any_of(targets.begin(), targets.end(), [](const Scripting::AstNode* target) {
+			return target && (target->Type() == Scripting::NodeType::ObjectDefinition || target->Type() == Scripting::NodeType::EnumDefinition ||
+				target->Type() == Scripting::NodeType::UnionDefinition);
+		});
+		return typeTarget && type.BaseName() && targets.count(DeclarationOfNamedType(resolver.ResolveQualType(type, path))) > 0;
 	}
 
 	void ReferenceScanner::Walk(const Scripting::AstNode& node, uint32 sourceId, const Server::SemanticResolver& resolver,
@@ -125,6 +145,8 @@ namespace C4LSP::Features
 			if (targets.count(res.declaration) > 0)
 				sink(node, path);
 		}
+		else if (node.Type() == Scripting::NodeType::QualType && NamesATargetType(static_cast<const Scripting::QualTypeNode&>(node), resolver, path, targets))
+			sink(node, path);
 
 		for (const auto& child : node.Children())
 		{

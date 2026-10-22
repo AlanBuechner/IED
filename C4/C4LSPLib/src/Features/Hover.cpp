@@ -145,37 +145,14 @@ namespace C4LSP::Features
 		const Scripting::Type* resolved = session.GetResolver().ResolveQualType(type, path);
 		if (!resolved)
 			return "";
-		const Scripting::AstNode* declaration = DeclarationOf(NamedType(resolved));
+		const Scripting::AstNode* declaration = DeclarationOfNamedType(resolved);
 		std::string declText = declaration ? DeclarationMarkdown(session, *declaration) : "";
 		return declText.empty() ? CodeBlock(TypeText(resolved)) : declText;
 	}
 
-	const Scripting::AstNode* Hover::DeclarationOf(const Scripting::Type* type)
-	{
-		if (const auto* object = dynamic_cast<const Scripting::ObjectType*>(type))
-			return object->GetDeclNode();
-		if (const auto* enumType = dynamic_cast<const Scripting::EnumType*>(type))
-			return enumType->GetDeclNode();
-		if (const auto* unionType = dynamic_cast<const Scripting::UnionType*>(type))
-			return unionType->GetDeclNode();
-		return nullptr;
-	}
-
-	const Scripting::AstNode* Hover::Documented(Server::CompilationSession& session, const Scripting::AstNode& declaration)
-	{
-		if (declaration.Type() != NodeType::FunctionDefinition)
-			return &declaration;
-		std::vector<const Scripting::AstNode*> declarations;
-		session.GetResolver().CollectFunctionDeclarations(&declaration, declarations);
-		for (const Scripting::AstNode* node : declarations)
-			if (node && DeclarationText::WrittenName(*node).find("::") == std::string::npos)
-				return node;
-		return &declaration;
-	}
-
 	std::string Hover::DeclarationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration)
 	{
-		const Scripting::AstNode& shown = *Documented(session, declaration);
+		const Scripting::AstNode& shown = DeclarationText::InItsType(session, declaration);
 		const std::string code = DeclarationText::Qualified(session, shown);
 		if (code.empty())
 			return "";

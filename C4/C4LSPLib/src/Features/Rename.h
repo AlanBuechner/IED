@@ -46,7 +46,6 @@ namespace C4LSP::Features
 		// The name-token span of a declaration or reference node (not the whole statement).
 		struct NameSpan { bool valid = false; Scripting::SourceLocation start, end; };
 
-		static const Scripting::AstNode* DeclarationUnderCursor(const Server::LocatedNode& located, size_t offset);
 		static NameSpan DeclarationNameSpan(const Scripting::AstNode& decl);
 		static RenameOccurrence MakeOccurrence(Server::CompilationSession& session, uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end);
 	};

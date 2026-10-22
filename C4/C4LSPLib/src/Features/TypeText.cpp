@@ -26,6 +26,18 @@ namespace C4LSP::Features
 		return nullptr;
 	}
 
+	const Scripting::AstNode* DeclarationOfNamedType(const Scripting::Type* type)
+	{
+		const Scripting::Type* named = NamedType(type);
+		if (const auto* object = dynamic_cast<const Scripting::ObjectType*>(named))
+			return object->GetDeclNode();
+		if (const auto* enumType = dynamic_cast<const Scripting::EnumType*>(named))
+			return enumType->GetDeclNode();
+		if (const auto* unionType = dynamic_cast<const Scripting::UnionType*>(named))
+			return unionType->GetDeclNode();
+		return nullptr;
+	}
+
 	Core::String FunctionSignature(const Scripting::FunctionType* func)
 	{
 		if (!func)

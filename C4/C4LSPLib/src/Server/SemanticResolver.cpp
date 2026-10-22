@@ -64,6 +64,13 @@ namespace C4LSP::Server
 			return dynamic_cast<const Scripting::ObjectType*>(Scripting::TypeHandle::UnwrapToValue(t));
 		}
 
+		/// What `->` reaches: the type a pointer points to (past aliases and references to it); `t` itself otherwise (BUG-353).
+		const Scripting::Type* Pointee(const Scripting::Type* t)
+		{
+			const auto* pointer = dynamic_cast<const Scripting::PointerType*>(Scripting::TypeHandle::UnwrapToValue(t));
+			return pointer ? pointer->GetPointeeType() : t;
+		}
+
 		/// Faithful replica of ProgramModel::FindVisibleQualified (which is private), built from the model's
 		/// PUBLIC verbs so the LSP resolves names exactly as the compiler does - no duplicated resolution logic.
 		/// A qualified name starts at root; an unqualified name starts at `context` (the enclosing namespace/class)
@@ -415,7 +422,7 @@ namespace C4LSP::Server
 			if (!obj) // base is an expression: resolve its value type, then query the member on it
 			{
 				NodeResolution baseRes = ResolveReference(*base, path);
-				const Scripting::ObjectType* baseObj = baseRes.type ? UnwrapObject(baseRes.type) : nullptr;
+				const Scripting::ObjectType* baseObj = baseRes.type ? UnwrapObject(ma.IsArrowAccess() ? Pointee(baseRes.type) : baseRes.type) : nullptr;
 				if (!baseObj)
 					break;
 				auto mb = m_Model.QueryMember(static_cast<const Scripting::Type*>(baseObj), member);

@@ -342,6 +342,7 @@ void CompilationSession::RunPreprocessPhase()
 		m_BindingStartLine.clear();
 		m_BindingDirectiveLine.clear();
 		m_MacroTables.clear();
+		m_RawTexts.clear();
 		// Replace each source's text with its effective form (macro-expanded + bindings) so the
 		// parser sees exactly what the compiler would parse. The bindings follow the user's text, so
 		// the user's lines are the editor's; record where the bindings start and the editor line of the
@@ -352,6 +353,8 @@ void CompilationSession::RunPreprocessPhase()
 			const auto& info = m_Compiler->GetSourceManager().GetInfo(id);
 			// The macro pass names a source by its path, or `memory:<id>` for one given as text (BUG-343).
 			const std::string identity = Scripting::MacroIdentity(info);
+			if (info.source)
+				m_RawTexts[id] = std::string(info.source->Data(), info.source->Size());
 			for (const auto& mr : macroResults)
 				if (mr.absPath == identity && !mr.table.Empty())
 				{
@@ -387,6 +390,12 @@ void CompilationSession::RunPreprocessPhase()
 	{
 		auto found = m_MacroTables.find(sourceId);
 		return found == m_MacroTables.end() ? nullptr : &found->second;
+	}
+
+	std::string_view CompilationSession::RawTextOf(uint32 sourceId) const
+	{
+		auto found = m_RawTexts.find(sourceId);
+		return found == m_RawTexts.end() ? std::string_view() : std::string_view(found->second);
 	}
 
 	Protocol::Range CompilationSession::ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const

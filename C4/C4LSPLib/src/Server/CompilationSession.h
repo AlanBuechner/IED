@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace C4LSP::Server
@@ -88,6 +89,9 @@ namespace C4LSP::Server
 
 		// The macros a source has at its end, as the last compile's macro pass left them; null when it had none.
 		const Scripting::MacroTable* MacroTableOf(uint32 sourceId) const;
+		// A source's text as the last compile read it, before its macros were expanded (its `#define` lines are there);
+		// empty for one it has not read.
+		std::string_view RawTextOf(uint32 sourceId) const;
 
 		// CBind appends generated bindings to interop files' text before parsing, so the user's lines keep
 		// their numbers; a location inside the bindings maps to the directive that produced them.
@@ -126,6 +130,7 @@ namespace C4LSP::Server
 		std::map<std::string, std::string> m_InMemorySources; // display name -> text
 		std::map<std::string, std::string> m_OpenDocuments;   // uri -> editor text
 		std::map<uint32, Scripting::MacroTable> m_MacroTables; // sourceId -> its macros at its end (RunPreprocessPhase)
+		std::map<uint32, std::string> m_RawTexts;              // sourceId -> its text before macro expansion (RunPreprocessPhase)
 		std::map<uint32, uint32> m_BindingStartLine;          // sourceId -> 1-based effective line where the bindings start
 		std::map<uint32, uint32> m_BindingDirectiveLine;      // sourceId -> 1-based line of the extern include directive
 		bool m_Compiled = false;

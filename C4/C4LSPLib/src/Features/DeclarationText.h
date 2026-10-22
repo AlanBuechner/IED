@@ -55,6 +55,9 @@ namespace C4LSP::Features
 		static int SymbolKindOf(const Scripting::AstNode& decl, bool member);
 		/// Whether it is a type's: declared in an object's or enum's body, or defined out of line for a type.
 		static bool IsMember(Server::CompilationSession& session, const Scripting::AstNode& decl);
+		/// A function's declaration in its type (where its modifiers and comment are) for its out-of-line definition;
+		/// `decl` itself for anything else.
+		static const Scripting::AstNode& InItsType(Server::CompilationSession& session, const Scripting::AstNode& decl);
 		/// The nodes from a unit's root down to `decl` (itself last); empty when no unit holds it.
 		static Core::Vector<const Scripting::AstNode*> PathTo(Server::CompilationSession& session, const Scripting::AstNode& decl);
 		/// The text a source was parsed from; empty when the session has none.

@@ -80,6 +80,37 @@ class Tile : Square
 int32 main() { Tile t; return t.Area(); }
 )";
 
+	// A method called unqualified, through a reference, and through `->` chains of pointer members and parameters.
+	static const char* kPointers =
+		R"(namespace Ied
+{
+	class Documents
+	{
+		public int32 ApplyEdit(int32 doc) { return doc; }
+		public int32 OnDiskWrite() { return ApplyEdit(1); }
+	};
+
+	class Server
+	{
+		public Documents* documents;
+	};
+
+	class Hooks
+	{
+		public Server* server;
+		public int32 ServerEdit() { return server->documents->ApplyEdit(2); }
+	};
+}
+
+namespace IED
+{
+	int32 WriteThrough(Ied::Server* server) { return server->documents->ApplyEdit(3); }
+	int32 Direct(Ied::Documents& docs) { return docs.ApplyEdit(4); }
+}
+
+int32 main() { return 0; }
+)";
+
 	static const DocumentSymbol* Named(const Core::Vector<DocumentSymbol>& symbols, const std::string& name)
 	{
 		for (const auto& symbol : symbols)
@@ -171,13 +202,16 @@ int32 main() { Tile t; return t.Area(); }
 	void LspNavigationTest::TestWorkspaceSymbolContainersAreQualifiedNames()
 	{
 		auto session = Testing::Lsp::MakeSession("Registry.cf", kRegistry);
-		const WorkspaceSymbol* find = Found(WorkspaceSymbols::ForQuery(session, "find"), "Find", "Ai::ToolRegistry");
+		const auto finds = WorkspaceSymbols::ForQuery(session, "find");
+		const WorkspaceSymbol* find = Found(finds, "Find", "Ai::ToolRegistry");
 		TEST_ASSERT_NOT_NULL(find);
 		TEST_ASSERT_EQ(find->kind, SymbolKinds::Method);
-		const WorkspaceSymbol* size = Found(WorkspaceSymbols::ForQuery(session, "size"), "size", "Ai::ToolRegistry");
+		const auto sizes = WorkspaceSymbols::ForQuery(session, "size");
+		const WorkspaceSymbol* size = Found(sizes, "size", "Ai::ToolRegistry");
 		TEST_ASSERT_NOT_NULL(size);
 		TEST_ASSERT_EQ(size->kind, SymbolKinds::Field);
-		TEST_ASSERT_NOT_NULL(Found(WorkspaceSymbols::ForQuery(session, "green"), "Green", "Color"));
+		const auto greens = WorkspaceSymbols::ForQuery(session, "green");
+		TEST_ASSERT_NOT_NULL(Found(greens, "Green", "Color"));
 		TEST_PASSED();
 	}
 
@@ -354,6 +388,111 @@ int32 main() { Tile t; return t.Area(); }
 		TEST_ASSERT_EQ(sum->range.end.line, sum->range.start.line + 1); // both lines of the definition
 		TEST_ASSERT_NOT_NULL(Named(symbols, "LIMIT"));
 		TEST_ASSERT_NOT_NULL(Named(symbols, "Twice"));
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestReferencesFromADeclarationsOwnName()
+	{
+		auto session = Testing::Lsp::MakeSession("Calls.cf", kCalls);
+		const std::string uri = Testing::Lsp::UriFor("Calls.cf");
+		TEST_ASSERT_EQ(References::At(session, uri, Testing::Lsp::PositionOf(kCalls, "Leaf(int32")).Count(), 2u); // Leaf(v), Leaf(v * 2)
+		TEST_ASSERT_EQ(References::At(session, uri, Testing::Lsp::PositionOf(kCalls, "Leaf(v)")).Count(), 2u);
+		TEST_ASSERT_EQ(References::At(session, uri, After(kCalls, "Leaf(int32", 4)).Count(), 2u); // a caret at the name's end
+		TEST_ASSERT_EQ(References::At(session, uri, Testing::Lsp::PositionOf(kCalls, "int32 Leaf")).Count(), 0u); // its return type
+		TEST_ASSERT_EQ(DocumentHighlight::At(session, uri, Testing::Lsp::PositionOf(kCalls, "Leaf(int32")).Count(), 3u); // and itself
+
+		auto registry = Testing::Lsp::MakeSession("Registry.cf", kRegistry);
+		const std::string registryUri = Testing::Lsp::UriFor("Registry.cf");
+		// The out-of-line definition's own name is the method: its declaration and definition.
+		auto add = References::At(registry, registryUri, After(kRegistry, "ToolRegistry::Add", 14), true);
+		TEST_ASSERT_EQ(add.Count(), 2u);
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestReferencesOfATypeIncludeWhereItIsWritten()
+	{
+		auto session = Testing::Lsp::MakeSession("Registry.cf", kRegistry);
+		const std::string uri = Testing::Lsp::UriFor("Registry.cf");
+		const auto use = Testing::Lsp::PositionOf(kRegistry, "ToolRegistry registry");
+		auto fromClass = References::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "ToolRegistry"));
+		TEST_ASSERT_EQ(fromClass.Count(), 1u);
+		TEST_ASSERT_EQ(fromClass[0].range.start.line, use.line);
+		TEST_ASSERT_EQ(fromClass[0].range.start.character, use.character);
+		// From the qualifier of an out-of-line definition: the type it names.
+		auto fromQualifier = References::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "ToolRegistry::Add"));
+		TEST_ASSERT_EQ(fromQualifier.Count(), 1u);
+		TEST_ASSERT_EQ(fromQualifier[0].range.start.line, use.line);
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestTypeDefinitionOfAVariable()
+	{
+		auto session = Testing::Lsp::MakeSession("Registry.cf", kRegistry);
+		const std::string uri = Testing::Lsp::UriFor("Registry.cf");
+		const uint32 classLine = Testing::Lsp::PositionOf(kRegistry, "class ToolRegistry").line;
+		auto atDeclaration = TypeDefinition::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "registry;"));
+		TEST_ASSERT_EQ(atDeclaration.Count(), 1u);
+		TEST_ASSERT_EQ(atDeclaration[0].range.start.line, classLine);
+		auto atUse = TypeDefinition::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "registry.Find"));
+		TEST_ASSERT_EQ(atUse.Count(), 1u);
+		TEST_ASSERT_EQ(atUse[0].range.start.line, classLine);
+		auto parameter = TypeDefinition::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "text, int64"));
+		TEST_ASSERT_EQ(parameter.Count(), 1u); // a `const Span&` parameter: Span
+		TEST_ASSERT_EQ(parameter[0].range.start.line, Testing::Lsp::PositionOf(kRegistry, "struct Span").line);
+		TEST_ASSERT_EQ(TypeDefinition::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "found")).Count(), 0u); // an int64
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestImplementationOfAMethodIsWhatOverridesIt()
+	{
+		auto session = Testing::Lsp::MakeSession("Shapes.cf", kShapes);
+		const std::string uri = Testing::Lsp::UriFor("Shapes.cf");
+		auto overrides = Implementation::At(session, uri, Testing::Lsp::PositionOf(kShapes, "Area() = 0"));
+		TEST_ASSERT_EQ(overrides.Count(), 1u);
+		TEST_ASSERT_EQ(overrides[0].range.start.line, Testing::Lsp::PositionOf(kShapes, "Area() { return 4").line);
+		TEST_ASSERT_EQ(Implementation::At(session, uri, Testing::Lsp::PositionOf(kShapes, "Area() { return 4")).Count(), 0u); // Tile does not override it
+		TEST_ASSERT_EQ(Implementation::At(session, uri, Testing::Lsp::PositionOf(kShapes, "IShape")).Count(), 2u); // the type: Square and Tile
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestWorkspaceSymbolsIncludeMacros()
+	{
+		auto session = Testing::Lsp::MakeSession("Macros.cf", kMacros);
+		const auto doubles = WorkspaceSymbols::ForQuery(session, "doub");
+		const WorkspaceSymbol* doubled = Found(doubles, "DOUBLE", "");
+		TEST_ASSERT_NOT_NULL(doubled);
+		TEST_ASSERT_EQ(doubled->kind, SymbolKinds::Function);
+		TEST_ASSERT_EQ(doubled->location.uri, Testing::Lsp::UriFor("Macros.cf"));
+		TEST_ASSERT_EQ(doubled->location.range.start.line, 1u);
+		TEST_ASSERT_EQ(doubled->location.range.start.character, 8u);
+		const auto sums = WorkspaceSymbols::ForQuery(session, "SUM");
+		TEST_ASSERT_NOT_NULL(Found(sums, "SUM", ""));
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestMembersReachedThroughPointersResolve()
+	{
+		auto session = Testing::Lsp::MakeSession("Pointers.cf", kPointers);
+		const std::string uri = Testing::Lsp::UriFor("Pointers.cf");
+		auto hover = Hover::At(session, uri, Testing::Lsp::PositionOf(kPointers, "ApplyEdit(2)"));
+		TEST_ASSERT(hover.found);
+		TEST_ASSERT(Contains(hover.contents, "public int32 Ied::Documents::ApplyEdit(int32 doc)"));
+		auto member = Hover::At(session, uri, Testing::Lsp::PositionOf(kPointers, "documents->ApplyEdit(3)"));
+		TEST_ASSERT(Contains(member.contents, "public Documents* Ied::Server::documents"));
+
+		TEST_ASSERT_EQ(References::At(session, uri, Testing::Lsp::PositionOf(kPointers, "ApplyEdit(int32")).Count(), 4u);
+		auto items = CallHierarchy::Prepare(session, uri, Testing::Lsp::PositionOf(kPointers, "ApplyEdit(int32"));
+		TEST_ASSERT_EQ(items.Count(), 1u);
+		auto callers = CallHierarchy::Incoming(session, items[0]);
+		TEST_ASSERT_EQ(callers.Count(), 4u); // OnDiskWrite, ServerEdit, WriteThrough, Direct
+		bool hooks = false, through = false;
+		for (const auto& call : callers)
+		{
+			hooks = hooks || call.item.detail == "Ied::Hooks::ServerEdit";
+			through = through || call.item.detail == "IED::WriteThrough";
+		}
+		TEST_ASSERT(hooks);
+		TEST_ASSERT(through);
 		TEST_PASSED();
 	}
 }

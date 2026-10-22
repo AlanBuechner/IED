@@ -31,13 +31,8 @@ namespace C4LSP::Features
 		if (!located.Found())
 			return result;
 
-		size_t offset = source.LineToByteOffset(position.line + 1) + position.character;
-		offset = std::min(offset, source.Size());
-
 		// Target declaration: from a reference (usual case), or directly under the cursor.
-		const Scripting::AstNode* targetDecl = Definition::FindTargetDeclaration(session, sourceId, located);
-		if (!targetDecl)
-			targetDecl = DeclarationUnderCursor(located, offset);
+		const Scripting::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
 		if (!targetDecl)
 			return result; // not on a rename-able symbol
 
@@ -81,9 +76,6 @@ namespace C4LSP::Features
 		if (!located.Found())
 			return result;
 
-		size_t offset = source.LineToByteOffset(position.line + 1) + position.character;
-		offset = std::min(offset, source.Size());
-
 		// A reference under the cursor renames its target declaration's name token (the usual F2 case:
 		// click a use, select the declaration-style span at that use). Otherwise fall back to a
 		// declaration whose own name token covers the position. Both resolve through the same logic
@@ -103,9 +95,7 @@ namespace C4LSP::Features
 		}
 		else
 		{
-			const Scripting::AstNode* targetDecl = Definition::FindTargetDeclaration(session, sourceId, located);
-			if (!targetDecl)
-				targetDecl = DeclarationUnderCursor(located, offset);
+			const Scripting::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
 			if (targetDecl)
 				span = DeclarationNameSpan(*targetDecl);
 		}
@@ -120,17 +110,6 @@ namespace C4LSP::Features
 		result.placeholder.assign(source.Data() + span.start.byteOffset, source.Data() + span.start.byteOffset + std::min<size_t>(length, 64)); // guard: placeholder is UI text only
 		result.range = session.ToEditorRange(sourceId, span.start, span.end);
 		return result;
-	}
-
-	const Scripting::AstNode* Rename::DeclarationUnderCursor(const Server::LocatedNode& located, size_t offset)
-	{
-		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
-		{
-			NameSpan span = DeclarationNameSpan(*located.path[i]);
-			if (span.valid && offset >= span.start.byteOffset && offset < span.end.byteOffset)
-				return located.path[i];
-		}
-		return nullptr;
 	}
 
 	Rename::NameSpan Rename::DeclarationNameSpan(const Scripting::AstNode& decl)
