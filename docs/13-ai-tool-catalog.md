@@ -189,8 +189,19 @@ Chats of one workspace talking to each other (`docs/04` "Chats talk to each othe
 | `chat_list()` | read | id, title, mode, state, the first line of each last answer; this chat marked |
 | `chat_read(chat, turns?)` | read | the last turns (at most 5): messages and answers, no tool calls |
 | `chat_send(chat, text)` | exec | starts a turn there or reaches its running turn; subject `chat.send(<id>)`; at most 3 hops |
-| `chat_create(text, title?, mode?)` | exec | a new chat started with `text`; subject `chat.create(*)` |
+| `chat_create(text, title?, mode?, model?)` | exec | a new chat started with `text`, on this chat's group and pinned model or `model` (a cheaper one for routine work); subject `chat.create(*)` |
 | `chat_wait(chat, seconds?)` | read | until its turn ends (default 120, at most 600 s); returns the answer |
+
+### `models` (built, 2026-10-22; deferred)
+
+The models a chat runs on, and Claude's plan usage, so a lead chat can keep the strongest model for itself while it is
+under pace and give routine work a cheaper one (`docs/04` "Pacing", "Switching models"). As built:
+`plugins/chat/code/modeltools.cf`.
+
+| Tool | Class | Notes |
+|---|---|---|
+| `ai_usage(refresh?)` | read | Claude Code's version and whether it is on the Claude subscription, the plan; each window (the 5-hour session, the week, the per-model weeks): percent used, when it resets, how far through it is, its pace; when Claude frees if it is used up; each `ai.models` profile, with what a paced one picks now and why; this chat's pinned model. `refresh` asks the CLI first. Subject `ai.usage(*)` |
+| `chat_set_model(model, chat?)` | exec | pins a model of `ai.models` for a chat's next turns (this chat's, or another's by id), `""` back to the group's; the current turn keeps its model. An unknown name fails listing the names. Subject `chat.model(<name>)` |
 
 ### `clipboard` (built, 2026-10-21; deferred)
 

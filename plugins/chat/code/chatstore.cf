@@ -33,6 +33,17 @@ namespace Ai
 		json.Field("permission", PermissionModeName(chat->permission));
 		json.Field("group", chat->group.View());
 		if (!chat->effort.IsEmpty()) json.Field("effort", chat->effort.View());
+		if (!chat->pinnedModel.IsEmpty()) json.Field("pinnedModel", chat->pinnedModel.View());
+		if (!chat->claudeSession.IsEmpty()) {
+			json.Key(Core::StringView("claude"));
+			json.BeginObject();
+			json.Field("session", chat->claudeSession.View());
+			json.Key(Core::StringView("turns"));
+			json.BeginArray();
+			for (const Core::String& turnId : chat->claudeTurns) json.String(turnId.View());
+			json.EndArray();
+			json.EndObject();
+		}
 		json.IntField("createdMs", chat->createdMs);
 		json.IntField("updatedMs", chat->updatedMs);
 		json.IntField("counter", chat->counter);
@@ -91,6 +102,10 @@ namespace Ai
 		ReadPermissionMode(header.Member("permission").AsView(), chat->permission);
 		chat->group = Core::String(header.Member("group").AsView());
 		if (IsEffort(header.Member("effort").AsView())) chat->effort = Core::String(header.Member("effort").AsView());
+		chat->pinnedModel = Core::String(header.Member("pinnedModel").AsView());
+		chat->claudeSession = Core::String(header.Member("claude").Member("session").AsView());
+		Serialization::DomNode claudeTurns = header.Member("claude").Member("turns");
+		for (int64 i = 0; i < claudeTurns.Count(); ++i) chat->claudeTurns.Push(Core::String(claudeTurns.At(i).AsView()));
 		chat->createdMs = header.Member("createdMs").AsInt();
 		chat->updatedMs = header.Member("updatedMs").AsInt();
 		chat->counter = header.Member("counter").AsInt();

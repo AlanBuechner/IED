@@ -1,0 +1,674 @@
+include "api/plugin.ch"
+include "claudewire.ch"
+
+namespace Ai
+{
+	const double kPaceEarlyThrough = 0.05;   // before this far through a window, little use counts as no pace
+	const double kPaceEarlyUsed = 5.0;
+	const double kPaceLeastThrough = 0.02;
+	const int64 kHistoryResultBytes = 160;
+
+	static Core::String Lower(Core::StringView text) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			out.AppendByte(c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		return out.ToString();
+	}
+
+	// --- Usage ---------------------------------------------------------------------------------------------------------
+
+	UsageWindow* ClaudeUsage::Find(Core::StringView id) const {
+		for (UsageWindow* window : windows)
+			if (window->id.View() == id) return window;
+		return nullptr;
+	}
+
+	UsageWindow* ClaudeUsage::Window(Core::StringView id) {
+		UsageWindow* found = Find(id);
+		if (found) return found;
+		UsageWindow* window = new UsageWindow();
+		window->id = Core::String(id);
+		window->lengthMs = id == "five_hour" ? kSessionWindowMs : kWeekWindowMs;
+		if (id == "five_hour") window->label = Core::String("Session (5 h)");
+		else if (id == "seven_day") window->label = Core::String("Week");
+		else if (id == "seven_day_opus") {
+			window->label = Core::String("Opus week");
+			window->model = Core::String("opus");
+		}
+		else if (id == "seven_day_sonnet") {
+			window->label = Core::String("Sonnet week");
+			window->model = Core::String("sonnet");
+		}
+		else window->label = Core::String(id);
+		windows.Push(window);
+		return window;
+	}
+
+	static void TakeWindow(ClaudeUsage& usage, const char* id, const Serialization::DomNode& node) {
+		if (node.Kind() != Serialization::DomKind::Object || !node.Member("utilization").IsValid() || node.Member("utilization").IsNull()) return;
+		UsageWindow* window = usage.Window(Core::StringView(id));
+		window->utilization = node.Member("utilization").AsFloat();
+		window->resetsAtMs = IsoToMs(node.Member("resets_at").AsView());
+	}
+
+	bool ReadUsage(const Serialization::DomNode& response, ClaudeUsage& usage, int64 nowMs) {
+		if (response.Kind() != Serialization::DomKind::Object || !response.Member("rate_limits_available").IsValid()) return false;
+		usage.known = true;
+		usage.available = response.Member("rate_limits_available").AsBool();
+		usage.plan = Core::String(response.Member("subscription_type").AsView());
+		usage.windows.Clear();
+		usage.extraEnabled = false;
+		usage.extraUtilization = -1;
+		usage.updatedMs = nowMs;
+		usage.error = Core::String();
+		Serialization::DomNode limits = response.Member("rate_limits");
+		TakeWindow(usage, "five_hour", limits.Member("five_hour"));
+		TakeWindow(usage, "seven_day", limits.Member("seven_day"));
+		TakeWindow(usage, "seven_day_opus", limits.Member("seven_day_opus"));
+		TakeWindow(usage, "seven_day_sonnet", limits.Member("seven_day_sonnet"));
+		Serialization::DomNode scoped = limits.Member("model_scoped");
+		for (int64 i = 0; scoped.Kind() == Serialization::DomKind::Array && i < scoped.Count(); ++i) {
+			Serialization::DomNode each = scoped.At(i);
+			Core::StringView name = each.Member("display_name").AsView();
+			if (name.IsEmpty() || each.Member("utilization").IsNull() || !each.Member("utilization").IsValid()) continue;
+			UsageWindow* window = usage.Window((Core::String("model:") + Lower(name).View()).View());
+			window->label = Core::String(name) + " week";
+			window->model = Lower(name);
+			window->utilization = each.Member("utilization").AsFloat();
+			window->resetsAtMs = IsoToMs(each.Member("resets_at").AsView());
+		}
+		Serialization::DomNode extra = limits.Member("extra_usage");
+		if (extra.Kind() == Serialization::DomKind::Object) {
+			usage.extraEnabled = extra.Member("is_enabled").AsBool();
+			if (extra.Member("utilization").Kind() == Serialization::DomKind::Int || extra.Member("utilization").Kind() == Serialization::DomKind::Float) usage.extraUtilization = extra.Member("utilization").AsFloat();
+		}
+		bool usedUp = false;
+		for (UsageWindow* window : usage.windows) usedUp = usedUp || UsedUp(*window, nowMs);
+		if (!usedUp && usage.status == "rejected") usage.status = Core::String("allowed");
+		return true;
+	}
+
+	static void TakeUnified(ClaudeUsage& usage, const char* id, const Serialization::DomNode& node) {
+		if (node.Kind() != Serialization::DomKind::Object || !node.Member("utilization").IsValid()) return;
+		UsageWindow* window = usage.Window(Core::StringView(id));
+		window->utilization = node.Member("utilization").AsFloat() * 100.0;
+		if (node.Member("resetsAt").AsInt() > 0) window->resetsAtMs = node.Member("resetsAt").AsInt() * 1000;
+	}
+
+	static bool IsPlanWindow(Core::StringView id) { return id == "five_hour" || id == "seven_day" || id == "seven_day_opus" || id == "seven_day_sonnet"; }
+
+	void TakeRateLimit(const Serialization::DomNode& info, ClaudeUsage& usage, int64 nowMs) {
+		if (info.Kind() != Serialization::DomKind::Object) return;
+		Core::StringView type = info.Member("rateLimitType").AsView();
+		Serialization::DomNode unified = info.Member("unifiedWindows");
+		if (!IsPlanWindow(type) && unified.Kind() != Serialization::DomKind::Object) return;
+		usage.known = true;
+		usage.available = true;
+		usage.updatedMs = nowMs;
+		usage.status = Core::String(info.Member("status").AsView());
+		usage.limitedBy = Core::String(type);
+		usage.limitResetsAtMs = info.Member("resetsAt").AsInt() > 0 ? info.Member("resetsAt").AsInt() * 1000 : 0;
+		TakeUnified(usage, "five_hour", unified.Member("five_hour"));
+		TakeUnified(usage, "seven_day", unified.Member("seven_day"));
+		if (IsPlanWindow(type) && info.Member("utilization").IsValid()) {
+			UsageWindow* window = usage.Window(type);
+			window->utilization = info.Member("utilization").AsFloat() * 100.0;
+			if (usage.limitResetsAtMs > 0) window->resetsAtMs = usage.limitResetsAtMs;
+		}
+		if (usage.status == "rejected" && IsPlanWindow(type)) {
+			UsageWindow* window = usage.Window(type);
+			if (window->utilization < 100.0) window->utilization = 100.0;
+			if (usage.limitResetsAtMs > 0) window->resetsAtMs = usage.limitResetsAtMs;
+		}
+	}
+
+	static int64 Digits(Core::StringView text, int64 at, int64 count, bool& ok) {
+		int64 value = 0;
+		for (int64 i = at; i < at + count; ++i) {
+			if (i >= text.ByteLength() || text.ByteAt(i) < '0' || text.ByteAt(i) > '9') {
+				ok = false;
+				return 0;
+			}
+			value = value * 10 + (text.ByteAt(i) - '0');
+		}
+		return value;
+	}
+
+	// Days from 1970-01-01 to the civil date (Howard Hinnant's days_from_civil).
+	static int64 DaysFromCivil(int64 year, int64 month, int64 day) {
+		year -= month <= 2 ? 1 : 0;
+		const int64 era = (year >= 0 ? year : year - 399) / 400;
+		const int64 yoe = year - era * 400;
+		const int64 doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+		const int64 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+		return era * 146097 + doe - 719468;
+	}
+
+	int64 IsoToMs(Core::StringView text) {
+		if (text.ByteLength() < 19 || text.ByteAt(4) != '-' || text.ByteAt(7) != '-' || (text.ByteAt(10) != 'T' && text.ByteAt(10) != ' ')) return 0;
+		bool ok = true;
+		const int64 year = Digits(text, 0, 4, ok);
+		const int64 month = Digits(text, 5, 2, ok);
+		const int64 day = Digits(text, 8, 2, ok);
+		const int64 hour = Digits(text, 11, 2, ok);
+		const int64 minute = Digits(text, 14, 2, ok);
+		const int64 second = Digits(text, 17, 2, ok);
+		if (!ok || month < 1 || month > 12 || day < 1 || day > 31) return 0;
+		int64 at = 19;
+		int64 millis = 0;
+		if (at < text.ByteLength() && text.ByteAt(at) == '.') {
+			at += 1;
+			int64 scale = 100;
+			while (at < text.ByteLength() && text.ByteAt(at) >= '0' && text.ByteAt(at) <= '9') {
+				millis += (text.ByteAt(at) - '0') * scale;
+				scale /= 10;
+				at += 1;
+			}
+		}
+		int64 offsetMinutes = 0;
+		if (at < text.ByteLength() && (text.ByteAt(at) == '+' || text.ByteAt(at) == '-')) {
+			const int64 sign = text.ByteAt(at) == '-' ? -1 : 1;
+			const int64 hours = Digits(text, at + 1, 2, ok);
+			const int64 minutes = text.ByteLength() >= at + 6 && text.ByteAt(at + 3) == ':' ? Digits(text, at + 4, 2, ok) : 0;
+			if (!ok) return 0;
+			offsetMinutes = sign * (hours * 60 + minutes);
+		}
+		const int64 seconds = DaysFromCivil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offsetMinutes * 60;
+		return seconds * 1000 + millis;
+	}
+
+	double Through(const UsageWindow& window, int64 nowMs) {
+		if (window.resetsAtMs <= 0 || window.lengthMs <= 0) return 1.0;
+		if (nowMs >= window.resetsAtMs) return 0.0;
+		const double through = 1.0 - (double)(window.resetsAtMs - nowMs) / (double)window.lengthMs;
+		return through < 0.0 ? 0.0 : through;
+	}
+
+	double Pace(const UsageWindow& window, int64 nowMs) {
+		if (window.resetsAtMs > 0 && nowMs >= window.resetsAtMs) return 0.0;
+		const double through = Through(window, nowMs);
+		if (through < kPaceEarlyThrough && window.utilization < kPaceEarlyUsed) return 0.0;
+		return window.utilization / (100.0 * (through < kPaceLeastThrough ? kPaceLeastThrough : through));
+	}
+
+	bool UsedUp(const UsageWindow& window, int64 nowMs) { return window.utilization >= 100.0 && (window.resetsAtMs <= 0 || nowMs < window.resetsAtMs); }
+
+	UsageWindow* ModelWindow(const ClaudeUsage& usage, Core::StringView model) {
+		Core::String name = Lower(model);
+		for (UsageWindow* window : usage.windows)
+			if (!window->model.IsEmpty() && name.View().Contains(window->model.View())) return window;
+		return nullptr;
+	}
+
+	static void WriteNumber(IED::JsonWriter& json, const char* key, double value) {
+		Core::StringBuilder text;
+		text.AppendDouble(value, 3);
+		json.RawField(key, text.View());
+	}
+
+	void WriteUsage(IED::JsonWriter& json, const ClaudeUsage& usage, int64 nowMs) {
+		json.BeginObject();
+		json.BoolField("known", usage.known);
+		json.BoolField("available", usage.available);
+		json.Field("plan", usage.plan.View());
+		json.Field("status", usage.status.View());
+		json.Field("limitedBy", usage.limitedBy.View());
+		json.IntField("limitResetsAtMs", usage.limitResetsAtMs);
+		json.BoolField("extraEnabled", usage.extraEnabled);
+		if (usage.extraUtilization >= 0) WriteNumber(json, "extraUtilization", usage.extraUtilization);
+		json.IntField("updatedMs", usage.updatedMs);
+		if (!usage.error.IsEmpty()) json.Field("error", usage.error.View());
+		json.Key(Core::StringView("windows"));
+		json.BeginArray();
+		for (UsageWindow* window : usage.windows) {
+			json.BeginObject();
+			json.Field("id", window->id.View());
+			json.Field("label", window->label.View());
+			if (!window->model.IsEmpty()) json.Field("model", window->model.View());
+			WriteNumber(json, "utilization", window->utilization);
+			json.IntField("resetsAtMs", window->resetsAtMs);
+			json.IntField("lengthMs", window->lengthMs);
+			WriteNumber(json, "through", Through(*window, nowMs));
+			WriteNumber(json, "pace", Pace(*window, nowMs));
+			json.BoolField("usedUp", UsedUp(*window, nowMs));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+	}
+
+	// --- Pacing --------------------------------------------------------------------------------------------------------
+
+	bool IsPacingTarget(Core::StringView target) { return target == "session" || target == "week" || target == "both"; }
+
+	Core::String ResetText(int64 atMs, int64 nowMs) {
+		const int64 minutes = (atMs - nowMs + 59999) / 60000;
+		if (atMs <= 0 || minutes <= 0) return Core::String("now");
+		Core::StringBuilder out;
+		out.Append("in ");
+		if (minutes >= 24 * 60) {
+			out.AppendInt(minutes / (24 * 60));
+			out.Append(" d ");
+			out.AppendInt(minutes / 60 % 24);
+			out.Append(" h");
+		}
+		else if (minutes >= 60) {
+			out.AppendInt(minutes / 60);
+			out.Append(" h ");
+			out.AppendInt(minutes % 60);
+			out.Append(" min");
+		}
+		else {
+			out.AppendInt(minutes);
+			out.Append(" min");
+		}
+		return out.ToString();
+	}
+
+	static double RungLimit(int64 rung) { return rung == 0 ? 1.0 : rung == 1 ? 1.25 : 1.5; }
+
+	// The windows that pace `model` under `target`.
+	static Core::Array<UsageWindow*> PacedWindows(const ClaudeUsage& usage, Core::StringView model, Core::StringView target) {
+		Core::Array<UsageWindow*> windows;
+		UsageWindow* session = usage.Find(Core::StringView("five_hour"));
+		UsageWindow* week = usage.Find(Core::StringView("seven_day"));
+		UsageWindow* own = ModelWindow(usage, model);
+		if (target != "week" && session) windows.Push(session);
+		if (target != "session" && week) windows.Push(week);
+		if (target != "session" && own) windows.Push(own);
+		return windows;
+	}
+
+	static Core::String PaceText(const UsageWindow* window, double pace) {
+		Core::StringBuilder out;
+		out.Append(window->id == "five_hour" ? Core::StringView("the 5-hour session") : window->id == "seven_day" ? Core::StringView("the week") : window->label.View());
+		out.Append(" is at ");
+		out.AppendDouble(pace, 2);
+		out.Append("x pace");
+		return out.ToString();
+	}
+
+	PacedChoice ChoosePaced(const ClaudeUsage& usage, const Core::Array<Core::String>& ladder, Core::StringView target, int64 nowMs) {
+		PacedChoice choice;
+		if (ladder.IsEmpty()) {
+			choice.model = Core::String("default");
+			choice.why = Core::String("no ladder: the CLI's default model");
+			return choice;
+		}
+		if (!usage.known || !usage.available) {
+			choice.model = ladder[0];
+			choice.why = Core::String("the plan's usage is not known yet");
+			return choice;
+		}
+		for (UsageWindow* window : usage.windows) {
+			if (!window->model.IsEmpty() || !UsedUp(*window, nowMs)) continue;
+			choice.untilMs = window->resetsAtMs > choice.untilMs ? window->resetsAtMs : choice.untilMs;
+			choice.why = (Core::String("the plan's ") + (window->id == "five_hour" ? Core::StringView("5-hour session") : Core::StringView("week"))) + " is used up";
+		}
+		if (choice.untilMs > 0 || !choice.why.IsEmpty()) return choice;
+		int64 fallback = -1;
+		Core::String fallbackWhy;
+		for (int64 rung = 0; rung < ladder.Count(); ++rung) {
+			UsageWindow* own = ModelWindow(usage, ladder[rung].View());
+			if (own && UsedUp(*own, nowMs)) continue;
+			double worst = 0.0;
+			UsageWindow* worstWindow = nullptr;
+			for (UsageWindow* window : PacedWindows(usage, ladder[rung].View(), target)) {
+				const double pace = Pace(*window, nowMs);
+				if (worstWindow && pace <= worst) continue;
+				worst = pace;
+				worstWindow = window;
+			}
+			Core::String why = worstWindow ? PaceText(worstWindow, worst) : Core::String("no window paces it");
+			if (worst <= RungLimit(rung)) {
+				choice.model = ladder[rung];
+				choice.rung = rung;
+				choice.why = why;
+				return choice;
+			}
+			fallback = rung;
+			fallbackWhy = why;
+		}
+		if (fallback < 0) {
+			choice.why = Core::String("every model of the ladder has used up its week");
+			return choice;
+		}
+		choice.model = ladder[fallback];
+		choice.rung = fallback;
+		choice.why = fallbackWhy;
+		return choice;
+	}
+
+	// --- A response ------------------------------------------------------------------------------------------------------
+
+	static void TakeUsage(ClaudeResponse& response, const Serialization::DomNode& usage) {
+		if (usage.Kind() != Serialization::DomKind::Object) return;
+		const int64 prompt = usage.Member("input_tokens").AsInt() + usage.Member("cache_read_input_tokens").AsInt() + usage.Member("cache_creation_input_tokens").AsInt();
+		if (prompt > 0) {
+			response.promptTokens = prompt;
+			response.cachedTokens = usage.Member("cache_read_input_tokens").AsInt();
+		}
+		if (usage.Member("output_tokens").AsInt() > 0) response.outputTokens = usage.Member("output_tokens").AsInt();
+	}
+
+	void ClaudeResponse::Take(const Serialization::DomNode& event, Core::Array<ClaudeDelta>& deltas) {
+		Core::StringView type = event.Member("type").AsView();
+		const int64 block = event.Member("index").AsInt();
+		if (type == "message_start") {
+			started = true;
+			model = Core::String(event.Member("message").Member("model").AsView());
+			TakeUsage(*this, event.Member("message").Member("usage"));
+		}
+		else if (type == "content_block_start") {
+			Serialization::DomNode content = event.Member("content_block");
+			Core::StringView kind = content.Member("type").AsView();
+			if (kind == "thinking" || kind == "redacted_thinking") thinkingOf.At(block) = true;
+			if (kind != "tool_use") return;
+			ToolCallDraft* call = new ToolCallDraft();
+			call->id = Core::String(content.Member("id").AsView());
+			call->name = Core::String(IedToolName(content.Member("name").AsView()));
+			call->index = calls.Count();
+			callOf.At(block) = calls.Count();
+			calls.Push(call);
+			ClaudeDelta delta;
+			delta.kind = ClaudeDeltaKind::CallStarted;
+			delta.text = call->name;
+			delta.call = call->index;
+			deltas.Push(delta);
+		}
+		else if (type == "content_block_delta") {
+			Serialization::DomNode change = event.Member("delta");
+			Core::StringView kind = change.Member("type").AsView();
+			ClaudeDelta delta;
+			if (kind == "text_delta") {
+				delta.kind = ClaudeDeltaKind::Text;
+				delta.text = Core::String(change.Member("text").AsView());
+				text.Append(delta.text.View());
+			}
+			else if (kind == "thinking_delta") {
+				delta.kind = ClaudeDeltaKind::Thinking;
+				delta.text = Core::String(change.Member("thinking").AsView());
+				thinking.Append(delta.text.View());
+			}
+			else if (kind == "input_json_delta") {
+				int64 call = -1;
+				if (!callOf.TryGet(block, call)) return;
+				delta.kind = ClaudeDeltaKind::CallInput;
+				delta.call = call;
+				delta.text = Core::String(change.Member("partial_json").AsView());
+				calls[call]->arguments.Append(delta.text.View());
+			}
+			else return;
+			if (!delta.text.IsEmpty()) deltas.Push(delta);
+		}
+		else if (type == "message_delta") {
+			if (event.Member("delta").Member("stop_reason").Kind() == Serialization::DomKind::String) stopReason = Core::String(event.Member("delta").Member("stop_reason").AsView());
+			TakeUsage(*this, event.Member("usage"));
+		}
+		else if (type == "message_stop") stopped = true;
+	}
+
+	ClaudeError ClaudeErrorKind(Core::StringView error) {
+		if (error.IsEmpty()) return ClaudeError::None;
+		if (error == "rate_limit" || error == "billing_error") return ClaudeError::UsageLimit;
+		if (error == "authentication_failed" || error == "oauth_org_not_allowed" || error == "account_on_hold" || error == "verification_required") return ClaudeError::SignIn;
+		if (error == "overloaded" || error == "server_error" || error == "unknown") return ClaudeError::Transport;
+		if (error == "invalid_request" || error == "model_not_found") return ClaudeError::Refused;
+		return ClaudeError::Other;
+	}
+
+	int64 LimitResetIn(Core::StringView text) {
+		const int64 bar = text.IndexOf('|', 0);
+		if (bar < 0) return 0;
+		int64 seconds = 0;
+		Core::StringView rest = text.Substring(bar + 1, text.ByteLength() - bar - 1).Trimmed();
+		return Core::ParseInt64(rest, seconds) && seconds > 0 ? seconds * 1000 : 0;
+	}
+
+	// --- Lines to the CLI ------------------------------------------------------------------------------------------------
+
+	Core::String ControlRequestLine(Core::StringView requestId, Core::StringView request) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("type", "control_request");
+		json.Field("request_id", requestId);
+		json.RawField("request", request);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ControlAnswerLine(Core::StringView requestId, Core::StringView response) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("type", "control_response");
+		json.Key(Core::StringView("response"));
+		json.BeginObject();
+		json.Field("subtype", "success");
+		json.Field("request_id", requestId);
+		json.RawField("response", response);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String ControlRefusalLine(Core::StringView requestId, Core::StringView error) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("type", "control_response");
+		json.Key(Core::StringView("response"));
+		json.BeginObject();
+		json.Field("subtype", "error");
+		json.Field("request_id", requestId);
+		json.Field("error", error);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static void WriteImageBlock(IED::JsonWriter& json, const ClaudeImage& image) {
+		json.BeginObject();
+		json.Field("type", "image");
+		json.Key(Core::StringView("source"));
+		json.BeginObject();
+		json.Field("type", "base64");
+		json.Field("media_type", image.mime.View());
+		json.Field("data", image.base64.View());
+		json.EndObject();
+		json.EndObject();
+	}
+
+	Core::String UserMessageLine(Core::StringView text, const Core::Array<ClaudeImage>& images) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("type", "user");
+		json.Key(Core::StringView("message"));
+		json.BeginObject();
+		json.Field("role", "user");
+		json.Key(Core::StringView("content"));
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("type", "text");
+		json.Field("text", text);
+		json.EndObject();
+		for (const ClaudeImage& image : images) WriteImageBlock(json, image);
+		json.EndArray();
+		json.EndObject();
+		json.Key(Core::StringView("parent_tool_use_id"));
+		json.Null();
+		json.Field("session_id", "");
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String InitializeRequest() {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("subtype", "initialize");
+		json.Key(Core::StringView("sdkMcpServers"));
+		json.BeginArray();
+		json.String(Core::StringView(kClaudeServerName));
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpReply(const Serialization::DomNode& id, Core::StringView result) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.RawField("id", IED::NodeJson(id).View());
+		json.RawField("result", result);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpFailure(const Serialization::DomNode& id, int64 code, Core::StringView message) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("jsonrpc", "2.0");
+		json.RawField("id", IED::NodeJson(id).View());
+		json.Key(Core::StringView("error"));
+		json.BeginObject();
+		json.IntField("code", code);
+		json.Field("message", message);
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpInitializeResult(Core::StringView protocolVersion) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("protocolVersion", protocolVersion.IsEmpty() ? Core::StringView("2025-06-18") : protocolVersion);
+		json.Key(Core::StringView("capabilities"));
+		json.BeginObject();
+		json.Key(Core::StringView("tools"));
+		json.BeginObject();
+		json.BoolField("listChanged", true);
+		json.EndObject();
+		json.EndObject();
+		json.Key(Core::StringView("serverInfo"));
+		json.BeginObject();
+		json.Field("name", kClaudeServerName);
+		json.Field("version", "1.0.0");
+		json.EndObject();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpToolsResult(Core::StringView requestTools) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode tools = Serialization::ReadJson(requestTools, *doc).root;
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("tools"));
+		json.BeginArray();
+		for (int64 i = 0; tools.Kind() == Serialization::DomKind::Array && i < tools.Count(); ++i) {
+			Serialization::DomNode function = tools.At(i).Member("function");
+			if (function.Member("name").AsView() == "tool_search") continue;
+			json.BeginObject();
+			json.Field("name", function.Member("name").AsView());
+			json.Field("description", function.Member("description").AsView());
+			json.RawField("inputSchema", function.Member("parameters").IsValid() ? IED::NodeJson(function.Member("parameters")).View() : Core::StringView("{\"type\":\"object\"}"));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String McpCallResult(Core::StringView text, const Core::Array<ClaudeImage>& images, bool isError) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("content"));
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("type", "text");
+		json.Field("text", text);
+		json.EndObject();
+		for (const ClaudeImage& image : images) {
+			json.BeginObject();
+			json.Field("type", "image");
+			json.Field("data", image.base64.View());
+			json.Field("mimeType", image.mime.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.BoolField("isError", isError);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::StringView IedToolName(Core::StringView claudeName) {
+		Core::StringView prefix = Core::StringView(kClaudeToolPrefix);
+		return claudeName.StartsWith(prefix) ? claudeName.Substring(prefix.ByteLength(), claudeName.ByteLength() - prefix.ByteLength()) : claudeName;
+	}
+
+	// --- The history a new session is told -------------------------------------------------------------------------------
+
+	static Core::StringView FirstLineOf(Core::StringView text, int64 most) {
+		int64 end = text.IndexOf('\n', 0);
+		if (end < 0) end = text.ByteLength();
+		if (end > most) end = most;
+		while (end > 0 && end < text.ByteLength() && ((uint8)text.ByteAt(end) & 0xC0) == 0x80) end -= 1;
+		return text.Substring(0, end);
+	}
+
+	static void WriteCalls(Core::StringBuilder& out, Core::StringView calls) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode list = Serialization::ReadJson(calls, *doc).root;
+		for (int64 i = 0; list.Kind() == Serialization::DomKind::Array && i < list.Count(); ++i) {
+			Serialization::DomNode function = list.At(i).Member("function");
+			out.Append("[called ");
+			out.Append(function.Member("name").AsView());
+			out.Append(" ");
+			out.Append(FirstLineOf(function.Member("arguments").AsView(), kHistoryResultBytes));
+			out.Append("]\n");
+		}
+	}
+
+	static Core::String TurnText(const Turn* turn) {
+		Core::StringBuilder out;
+		for (const ModelMessage* message : turn->messages) {
+			if (message->role == "user") {
+				out.Append("\n## User\n");
+				out.Append(message->content.View());
+				out.Append("\n");
+			}
+			else if (message->role == "assistant") {
+				if (!message->content.IsEmpty()) {
+					out.Append("\n## Assistant\n");
+					out.Append(message->content.View());
+					out.Append("\n");
+				}
+				if (!message->toolCalls.IsEmpty()) WriteCalls(out, message->toolCalls.View());
+			}
+			else {
+				out.Append("[result: ");
+				out.Append(FirstLineOf(message->content.View(), kHistoryResultBytes));
+				out.Append("]\n");
+			}
+		}
+		return out.ToString();
+	}
+
+	Core::String HistoryText(const Core::Array<Turn*>& turns) {
+		Core::Array<Core::String> parts;
+		int64 bytes = 0;
+		for (int64 i = turns.Count() - 1; i >= 0; --i) {
+			Core::String part = TurnText(turns[i]);
+			if (bytes + part.ByteLength() > kHistoryTextBytes && !parts.IsEmpty()) break;
+			bytes += part.ByteLength();
+			parts.Push(part);
+		}
+		if (parts.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		out.Append("Earlier in this chat (another model, or a session that was lost; tool calls shortened to their first line):\n");
+		if (parts.Count() < turns.Count()) out.Append("[older turns left out]\n");
+		for (int64 i = parts.Count() - 1; i >= 0; --i) out.Append(parts[i].View());
+		out.Append("\n[end of the earlier turns; the conversation goes on below]");
+		return out.ToString();
+	}
+}

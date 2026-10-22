@@ -1,6 +1,7 @@
 // index.js - the chat plugin's UI module (docs/04, docs/15 "Chat"): the Chat activity, a chat as a tab of the editor
-// area ("chat:<chatId>"), the status bar's "AI: 1 running, 1 needs you" (from chats:<wsId>), Settings > AI > Models and
-// Model Groups, and the commands that open the activity, start a chat and stop the turn.
+// area ("chat:<chatId>"), the status bar's "AI: 1 running, 1 needs you" (from chats:<wsId>) and Claude's plan usage (from
+// aiusage), Settings > AI > Models, Model Groups and Claude, and the commands that open the activity, start a chat, stop
+// the turn and show Claude's usage.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { ChatActivityView } from "./activity.js";
@@ -8,6 +9,7 @@ import { ChatTabView } from "./chattab.js";
 import { ChatList } from "./chatmodel.js";
 import { ModelsPage } from "./modelsettings.js";
 import { ModelGroupsPage } from "./groupsettings.js";
+import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
 
 const views = new Set();
 
@@ -23,6 +25,7 @@ export function activate(ied) {
 		if (last()) last().newChat();
 	});
 	ied.commands.handle("ied.chat.stop", () => last() && last().stop());
+	ied.commands.handle("ied.chat.claudeUsage", () => ied.commands.run("shell.settings", { page: "custom:ied.chat.claude" }));
 	ied.tabs.kind("chat", { view: "ChatTab", title: () => "Chat", icon: () => "$(comment-discussion)" });
 }
 
@@ -46,6 +49,14 @@ export function ModelsSettings(ctx) {
 
 export function ModelGroupsSettings(ctx) {
 	return new ModelGroupsPage(ctx);
+}
+
+export function ClaudeSettings(ctx) {
+	return new ClaudePage(ctx);
+}
+
+export function ClaudeStatus(ctx) {
+	return ClaudeStatusView(ctx);
 }
 
 // What the status bar says of the workspace's chats: the running ones and those waiting on the owner.

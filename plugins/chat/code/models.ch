@@ -6,6 +6,8 @@ include "bedrock.ch"
 namespace Ai
 {
 	enum class Privacy { Local, Lan, Cloud }
+	// What serves a profile: an OpenAI-compatible endpoint, or the owner's Claude Code CLI (docs/04 "The Claude Code provider").
+	enum class Provider { OpenAi, ClaudeCode }
 
 	const int32 kModelConnectMs = 10000;
 	const int32 kModelPrefillBaseMs = 30000;
@@ -13,12 +15,16 @@ namespace Ai
 	const int32 kModelIdleCloudMs = 120000;
 	const int64 kModelStepCapMs = 30 * 60 * 1000;
 	const double kModelPrefillRate = 150.0;
+	const int32 kClaudeFirstEventMs = 300000;   // a Claude step's wait for the CLI's first event (it retries the API itself)
 
 	class ModelProfile
 	{
 		public Core::String name;          // its key in ai.models: what groups and chats name
-		public Core::String endpoint;      // an OpenAI-compatible base URL ("http://127.0.0.1:8080/v1")
-		public Core::String model;         // the id a request names; the profile's name when unset
+		public Provider provider;
+		public Core::String endpoint;      // an OpenAI-compatible base URL ("http://127.0.0.1:8080/v1"); empty for Claude Code
+		public Core::String model;         // the id a request names; the profile's name when unset (Claude Code: "default")
+		public Core::Array<Core::String> ladder;   // Claude Code's "auto": the models pacing picks from, strongest first
+		public Core::String pacingTarget;  // session, week or both
 		public int64 contextWindow;        // tokens; 0 when unknown
 		public int64 maxOutput;            // tokens a reply may take; 0: the server's default
 		public Privacy privacy;
@@ -33,6 +39,9 @@ namespace Ai
 		public int64 stepCapMs;            // the hard cap on one request
 
 		public Core::String CompletionsUrl() const;
+		public bool IsClaude() const { return provider == Provider::ClaudeCode; }
+		// A Claude profile whose model pacing picks per turn.
+		public bool IsPaced() const { return provider == Provider::ClaudeCode && model == "auto"; }
 	}
 
 	class RoleModel
@@ -52,6 +61,9 @@ namespace Ai
 	// The models `role` of `group` tries in order - its model, then its fallbacks - of those `models` has; `chosen` gets
 	// the role. A role the group leaves off is its primary; without a primary either, the first model alone.
 	Core::Array<ModelProfile*> RoleCandidates(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& chosen);
+	// `candidates` with the profile `pinned` of `models` first and the rest after it in order; as they are when `pinned` is
+	// empty or names no profile (docs/04 "Switching models").
+	Core::Array<ModelProfile*> PinnedFirst(const Core::Array<ModelProfile*>& models, const Core::Array<ModelProfile*>& candidates, Core::StringView pinned);
 	// The groups in the ai.groups value, by name.
 	Core::Array<Core::String> GroupNames(Core::StringView groupsJson);
 	const char* PrivacyName(Privacy privacy);

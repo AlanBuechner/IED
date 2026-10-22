@@ -149,7 +149,7 @@ export class Composer {
 		this.injectButton.hidden = !this.running;
 		this.stopButton.hidden = !this.running;
 		replace(this.queuedEl, ...model.queued.map((text, index) => this.queuedRow(text, index)));
-		this.renderSelectors(summary, model.groupInUse, model.roleEffort);
+		this.renderSelectors(summary, model.groupInUse, model.roleEffort, model.model);
 		this.renderTelemetry(model);
 	}
 
@@ -173,11 +173,12 @@ export class Composer {
 		this.focus();
 	}
 
-	renderSelectors(summary, groupInUse, roleEffort) {
+	renderSelectors(summary, groupInUse, roleEffort, inUse) {
 		const mode = MODES.find(([id]) => id === summary.mode) || MODES[2];
 		const permission = PERMISSIONS.find(([id]) => id === summary.permission) || PERMISSIONS[1];
 		replace(this.selectors,
 			h("span.muted", null, "Group"), this.dropdown(summary.group || groupInUse || "default", "Model group", () => this.groupRows(summary.group || groupInUse), (row) => this.actions.set({ group: row.value })),
+			h("span.muted", null, "Model"), this.dropdown(summary.pinnedModel || "Group's", "Model (pinned over the group's)", () => this.modelRows(summary.pinnedModel, inUse), (row) => this.actions.set({ model: row.value })),
 			h("span.muted", null, "Effort"), this.dropdown(effortLabel(summary.effort, roleEffort), "Effort", () => effortRows(summary.effort, roleEffort), (row) => this.actions.set({ effort: row.value })),
 			h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODES, summary.mode), (row) => this.actions.set({ mode: row.value })),
 			h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value })));
@@ -188,6 +189,14 @@ export class Composer {
 			const at = event.currentTarget;
 			menus.show({ rows: await rows(), at, pick, label: title });
 		} } }, h("span", null, label), icon("chevron-down"));
+	}
+
+	// The Model menu: the group's model, or a model of ai.models pinned over it for the next turns (docs/04 "Switching models").
+	async modelRows(pinned, inUse) {
+		const models = await this.actions.models();
+		const rows = [{ kind: "item", label: "As the group says" + (!pinned && inUse ? " (" + inUse + ")" : ""), value: "", enabled: true, icon: pinned ? null : "$(check)" }];
+		for (const model of models) rows.push({ kind: "item", label: model.name + (model.claude ? "  (Claude subscription)" : ""), value: model.name, enabled: true, icon: model.name === pinned ? "$(check)" : null });
+		return rows;
 	}
 
 	async groupRows(current) {

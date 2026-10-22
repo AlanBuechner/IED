@@ -301,7 +301,28 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .set-chips .chip .ib .ci { width: 11px; height: 11px; }
 .set-add { width: auto !important; min-width: 44px !important; }
 
+/* ---------- Settings > AI > Claude ---------- */
+.claude-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); max-width: 980px; }
+.claude-page .set-model { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.claude-page .set-model-facts .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; min-width: 0; }
+.claude-page .set-probe > span { min-width: 0; overflow-wrap: anywhere; }
+.claude-windows { display: grid; grid-template-columns: minmax(110px, auto) minmax(160px, 1fr) 44px 96px minmax(120px, auto); gap: var(--space-2) var(--space-4); align-items: center; }
+.claude-window { display: contents; }
+.claude-label { color: var(--text-0); }
+.claude-num { text-align: right; color: var(--text-0); font-variant-numeric: tabular-nums; }
+.claude-pace { font-variant-numeric: tabular-nums; }
+.claude-bar { position: relative; height: 8px; background: var(--bg-3); border-radius: var(--radius-1); overflow: hidden; }
+.claude-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--text-2); }
+.claude-bar.warn .fill { background: var(--accent-warn); }
+.claude-bar.err .fill { background: var(--accent-error); }
+.claude-bar .even { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--text-0); }
+.claude-paced { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; color: var(--text-1); }
+.claude-paced .input-field { width: auto; }
+
 @media (max-width: 719px) {
+	.claude-windows { grid-template-columns: 1fr auto auto; grid-auto-flow: row dense; }
+	.claude-window .claude-bar { grid-column: 1 / -1; }
+	.claude-window .muted { grid-column: 1 / -1; margin-bottom: var(--space-3); }
 	.set-role { grid-template-columns: 20px 1fr 1fr; }
 	.set-role.head { display: none; }
 	.set-role-name { grid-column: 2 / -1; }

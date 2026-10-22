@@ -21,7 +21,7 @@ function newDraft() {
 
 // What the composer shows of a chat not made yet.
 function draftSummary(draft) {
-	return Object.assign({ title: "New chat", state: "idle" }, draft);
+	return Object.assign({ title: "New chat", state: "idle", pinnedModel: draft.model || "" }, draft);
 }
 
 export class ChatPane {
@@ -74,6 +74,7 @@ export class ChatPane {
 			fileUrl: (path) => workspaceFileUrl(this.wsId, path),
 			set: (change) => this.setChat(change),
 			groups: () => this.groups(),
+			models: () => this.models(),
 			openFile: (path, line) => this.openFile(path, line),
 			openTab: (ref) => this.openTab(ref),
 			closeDetails: () => this.showDetails(false),
@@ -231,6 +232,13 @@ export class ChatPane {
 		const settings = await this.request("settings.get", { wsId: this.wsId });
 		const groups = settings && settings.values && settings.values["ai.groups"] ? settings.values["ai.groups"].value || {} : {};
 		return Object.keys(groups);
+	}
+
+	// The models of ai.models a chat can be pinned to: [{name, claude}].
+	async models() {
+		const settings = await this.request("settings.get", { wsId: this.wsId });
+		const models = settings && settings.values && settings.values["ai.models"] ? settings.values["ai.models"].value || {} : {};
+		return Object.keys(models).map((name) => ({ name, claude: models[name].provider === "claude-code" }));
 	}
 
 	openFile(path, line) {

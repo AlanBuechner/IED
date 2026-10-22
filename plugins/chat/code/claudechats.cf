@@ -1,0 +1,82 @@
+// The chats' Claude Code sessions and the plan's usage kept current (docs/04 "The Claude Code provider"): a session per chat
+// that uses a Claude profile, made from what its header kept; a thread that asks for the usage every
+// ai.claude.usageRefreshMinutes while a claude-code profile is set up, and stops sessions idle for kClaudeIdleMs.
+
+include "api/plugin.ch"
+include "service.ch"
+
+namespace Ai
+{
+	const int64 kClaudeKeeperTickNs = 15000000000;   // how often the keeper looks
+	const int64 kClaudeRefreshDefaultMinutes = 10;
+
+	static int64 KeeperNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	ClaudeSession* Chats::SessionOf(Chat* chat) {
+		ClaudeSession* session = nullptr;
+		if (claudeSessions.TryGet(chat->chatId, session)) return session;
+		session = new ClaudeSession();
+		session->chatId = chat->chatId;
+		session->sessionId = chat->claudeSession;
+		session->turns = chat->claudeTurns;
+		session->idleSinceMs = KeeperNowMs();
+		claudeSessions.At(chat->chatId) = session;
+		return session;
+	}
+
+	void Chats::StopIdleSessions() {
+		const int64 now = KeeperNowMs();
+		for (Core::KeyValue<Core::String, ClaudeSession*>& entry : claudeSessions) {
+			ClaudeSession* session = entry.value;
+			if (!session->inUse && session->process && now - session->idleSinceMs > kClaudeIdleMs) session->Stop();
+		}
+	}
+
+	void Chats::ClaudeKeeper() {
+		int64 askedMs = 0;
+		for (;;) {
+			Threading::Thread::Sleep(kClaudeKeeperTickNs);
+			bool configured = false;
+			{
+				IED::HostLock guard(*context);
+				if (stopping) return;
+				StopIdleSessions();
+				configured = claude->Configured();
+			}
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::DomNode minutes = Serialization::ReadJson(context->Setting(Core::StringView("ai.claude.usageRefreshMinutes"), Core::StringView("")).View(), *doc).root;
+			const int64 every = (minutes.Kind() == Serialization::DomKind::Int ? minutes.AsInt() : kClaudeRefreshDefaultMinutes) * 60 * 1000;
+			if (!configured || every <= 0 || KeeperNowMs() - askedMs < every) continue;
+			askedMs = KeeperNowMs();
+			claude->Refresh(false);
+		}
+	}
+
+	// ai.probe of a claude-code profile: the CLI asked now, its answer in a probe's shape (settings' Test connection).
+	Core::String ProbeClaude(ClaudeAccount* account, IED::PluginContext* context, const ModelProfile& profile) {
+		account->Refresh(true);
+		IED::HostLock guard(*context);
+		IED::JsonWriter json;
+		json.BeginObject();
+		const bool found = !account->cliPath.IsEmpty();
+		const bool signedIn = account->signIn == "signed_in";
+		json.BoolField("ok", found && signedIn);
+		if (!found) json.Field("error", "no Claude Code CLI was found: install it, or set ai.claude.command");
+		else if (!signedIn) json.Field("error", "Claude Code is not signed in: run `claude auth login` in a terminal of your own");
+		json.Field("server", (Core::String("Claude Code ") + account->cliVersion.View()).View());
+		json.Key(Core::StringView("models"));
+		json.BeginArray();
+		if (profile.IsPaced())
+			for (const Core::String& rung : profile.ladder) json.String(rung.View());
+		else json.String(profile.model.View());
+		json.EndArray();
+		json.BoolField("modelServed", true);
+		json.IntField("contextWindow", profile.contextWindow);
+		json.IntField("trainContext", 0);
+		json.IntField("slots", 0);
+		json.BoolField("vision", true);
+		json.IntField("ms", 0);
+		json.EndObject();
+		return json.ToString();
+	}
+}

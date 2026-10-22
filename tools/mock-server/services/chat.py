@@ -106,6 +106,7 @@ class Chat:
 		self.mode = mode
 		self.permission = "plan" if mode == "plan" else "ask"
 		self.group = ""
+		self.pinned_model = ""
 		self.state = "idle"
 		self.state_reason = ""
 		self.turns = []
@@ -135,7 +136,7 @@ class Chat:
 		done = sum(1 for t in self.tasks if t["status"] in ("done", "skipped"))
 		out = {
 			"chatId": self.chat_id, "wsId": self.ws_id, "title": self.title, "mode": self.mode, "permission": self.permission, "group": self.group,
-			"state": self.state, "turnCount": len(self.turns), "updatedMs": self.updated_ms, "tasksDone": done, "tasksTotal": len(self.tasks),
+			"pinnedModel": self.pinned_model, "state": self.state, "turnCount": len(self.turns), "updatedMs": self.updated_ms, "tasksDone": done, "tasksTotal": len(self.tasks),
 			"approvalsWaiting": sum(1 for a in self.approvals.values() if a.decision is None),
 		}
 		if self.state_reason:
@@ -152,6 +153,8 @@ class Chats:
 		self._seed(self._create(ws_id, "Player movement", "agent"))
 		self._create(ws_id, "Scratch", "ask")
 		server.rpc.register("ai.probe", self.m_ai_probe)
+		server.hub.add("aiusage", self.usage_snapshot)
+		server.rpc.register("ai.usage", self.m_ai_usage)
 		for name in ("chat.list", "chat.create", "chat.set", "chat.send", "chat.unqueue", "chat.stop", "chat.approve", "chat.answer", "chat.history", "chat.delete"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
@@ -203,7 +206,16 @@ class Chats:
 				chat.stop_reason = "interrupted"
 				chat.runner.cancel()
 
+	def usage_snapshot(self):
+		"""aiusage (docs/10): the mock sets up no claude-code model, so the clients hide Claude's usage."""
+		return {"claude": {"configured": False, "cli": {"path": "", "version": "", "signIn": "", "authMethod": "", "subscription": False}, "refreshing": False,
+			"blockedUntilMs": 0, "nowMs": now_ms(), "paced": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
+				"limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": 0, "windows": []}}}
+
 	# --- methods -----------------------------------------------------------------------------------------------------
+
+	async def m_ai_usage(self, call, p):
+		return self.usage_snapshot()
 
 	async def m_ai_probe(self, call, p):
 		"""A canned answer (docs/10 ai.probe): a profile's endpoint on port 9 is unreachable, any other a llama.cpp."""
@@ -230,6 +242,8 @@ class Chats:
 			chat.permission = p.str("permission")
 		if "group" in p.raw:
 			chat.group = p.str("group")
+		if "model" in p.raw:
+			chat.pinned_model = p.str("model")
 
 	async def m_chat_create(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id

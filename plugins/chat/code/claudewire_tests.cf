@@ -1,0 +1,235 @@
+// claudewire: the plan's usage from get_usage and rate_limit_events, pace and the pacing pick, a response from the CLI's
+// stream events, its errors, and the lines IED writes to the CLI (docs/04 "The Claude Code provider").
+
+include "api/plugin.ch"
+include "claudewire.ch"
+include "claudecli.ch"
+
+static Core::StringView Text(const char* text) { return Core::StringView(text); }
+
+static Serialization::DomNode Parse(const char* json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(Text(json), *doc).root;
+}
+
+static const int64 kNow = 1761150000000;   // 2025-10-22T16:20:00Z
+
+static Ai::UsageWindow* Window(Ai::ClaudeUsage& usage, const char* id, double used, int64 resetsInMs) {
+	Ai::UsageWindow* window = usage.Window(Text(id));
+	window->utilization = used;
+	window->resetsAtMs = kNow + resetsInMs;
+	return window;
+}
+
+static Ai::ClaudeUsage* Plan() {
+	Ai::ClaudeUsage* usage = new Ai::ClaudeUsage();
+	usage->known = true;
+	usage->available = true;
+	return usage;
+}
+
+static Core::Array<Core::String> Ladder() {
+	Core::Array<Core::String> ladder;
+	ladder.Push(Core::String("opus"));
+	ladder.Push(Core::String("sonnet"));
+	ladder.Push(Core::String("haiku"));
+	return ladder;
+}
+
+static Ai::ClaudeResponse* Streamed(const char* events) {
+	Ai::ClaudeResponse* response = new Ai::ClaudeResponse();
+	Serialization::DomNode list = Parse(events);
+	Core::Array<Ai::ClaudeDelta> deltas;
+	for (int64 i = 0; i < list.Count(); ++i) response->Take(list.At(i), deltas);
+	return response;
+}
+
+[test("server.ai.claude")]
+class ClaudeWireTests {
+	[test("iso_times")]
+	public static void TestIso() {
+		assert_true(Ai::IsoToMs(Text("1970-01-01T00:00:00Z")) == 0, "the epoch");
+		assert_true(Ai::IsoToMs(Text("2025-10-22T16:20:00.250+00:00")) == kNow + 250, "fraction and offset");
+		assert_true(Ai::IsoToMs(Text("2025-10-22T18:20:00+02:00")) == kNow, "an offset east of UTC");
+		assert_true(Ai::IsoToMs(Text("not a time")) == 0 && Ai::IsoToMs(Text("")) == 0, "not one");
+	}
+
+	[test("get_usage_answer")]
+	public static void TestReadUsage() {
+		Ai::ClaudeUsage usage;
+		const bool read = Ai::ReadUsage(Parse("{\"subscription_type\": \"max\", \"rate_limits_available\": true, \"rate_limits\": {\"five_hour\": {\"utilization\": 42.5, \"resets_at\": \"2025-10-22T18:20:00Z\"}, \"seven_day\": {\"utilization\": 61, \"resets_at\": \"2025-10-25T16:20:00Z\"}, \"seven_day_opus\": null, \"seven_day_sonnet\": {\"utilization\": null, \"resets_at\": null}, \"model_scoped\": [{\"display_name\": \"Fable\", \"utilization\": 12, \"resets_at\": \"2025-10-25T16:20:00Z\"}], \"extra_usage\": {\"is_enabled\": false, \"utilization\": null}}}"), usage, kNow);
+		assert_true(read && usage.known && usage.available, "an answer with the plan's limits");
+		assert_se("max", usage.plan.CStr(), "the plan");
+		assert_true(usage.windows.Count() == 3, "five_hour, seven_day and Fable's week; the null ones left out");
+		Ai::UsageWindow* session = usage.Find(Text("five_hour"));
+		assert_true(session && session->utilization == 42.5 && session->resetsAtMs == kNow + 2 * 3600 * 1000 && session->lengthMs == Ai::kSessionWindowMs, "the session");
+		Ai::UsageWindow* fable = usage.Find(Text("model:fable"));
+		assert_true(fable && fable->model == "fable" && fable->label == "Fable week", "a model_scoped window");
+		assert_true(Ai::ModelWindow(usage, Text("claude-fable-5-1[1m]")) == fable, "found by its model's id");
+		assert_true(!usage.extraEnabled && usage.extraUtilization < 0, "no extra usage");
+		Ai::ClaudeUsage signedOut;
+		assert_true(Ai::ReadUsage(Parse("{\"subscription_type\": null, \"rate_limits_available\": false, \"rate_limits\": null}"), signedOut, kNow) && !signedOut.available && signedOut.windows.IsEmpty(), "no plan");
+		assert_true(!Ai::ReadUsage(Parse("{\"other\": 1}"), signedOut, kNow), "not an answer");
+	}
+
+	[test("rate_limit_events")]
+	public static void TestRateLimit() {
+		Ai::ClaudeUsage usage;
+		Ai::TakeRateLimit(Parse("{\"status\": \"allowed_warning\", \"rateLimitType\": \"seven_day\", \"utilization\": 0.81, \"resetsAt\": 1761400000, \"unifiedWindows\": {\"five_hour\": {\"utilization\": 0.3, \"resetsAt\": 1761160000}}}"), usage, kNow);
+		assert_true(usage.known && usage.available, "a plan's event");
+		assert_se("allowed_warning", usage.status.CStr(), "its status");
+		Ai::UsageWindow* week = usage.Find(Text("seven_day"));
+		assert_true(week && week->utilization > 80.9 && week->utilization < 81.1 && week->resetsAtMs == (int64)1761400000 * 1000, "the window it names, 0-1 made percent");
+		Ai::UsageWindow* session = usage.Find(Text("five_hour"));
+		assert_true(session && session->utilization > 29.9 && session->utilization < 30.1, "the unified windows");
+		Ai::TakeRateLimit(Parse("{\"status\": \"rejected\", \"rateLimitType\": \"five_hour\", \"resetsAt\": 1761160000}"), usage, kNow);
+		assert_true(Ai::UsedUp(*usage.Find(Text("five_hour")), kNow), "a rejected window is used up until it resets");
+		Ai::ClaudeUsage apiKey;
+		Ai::TakeRateLimit(Parse("{\"status\": \"allowed\"}"), apiKey, kNow);
+		assert_true(!apiKey.known, "an event that names no plan window");
+	}
+
+	[test("pace")]
+	public static void TestPace() {
+		Ai::ClaudeUsage* usage = Plan();
+		Ai::UsageWindow* half = Window(*usage, "five_hour", 50, Ai::kSessionWindowMs / 2);
+		assert_true(Ai::Through(*half, kNow) > 0.49 && Ai::Through(*half, kNow) < 0.51, "half way through");
+		assert_true(Ai::Pace(*half, kNow) > 0.99 && Ai::Pace(*half, kNow) < 1.01, "half used half way: on the even line");
+		Ai::UsageWindow* early = Window(*usage, "seven_day", 2, Ai::kWeekWindowMs - 3600 * 1000);
+		assert_true(Ai::Pace(*early, kNow) == 0.0, "an hour into the week with 2% used counts as no pace");
+		Ai::UsageWindow* reset = Window(*usage, "seven_day_opus", 90, -1000);
+		assert_true(Ai::Pace(*reset, kNow) == 0.0 && !Ai::UsedUp(*reset, kNow), "a window past its reset");
+	}
+
+	[test("pacing_picks_a_rung")]
+	public static void TestChoosePaced() {
+		Core::Array<Core::String> ladder = Ladder();
+		Ai::ClaudeUsage* calm = Plan();
+		Window(*calm, "five_hour", 20, Ai::kSessionWindowMs / 2);
+		Window(*calm, "seven_day", 30, Ai::kWeekWindowMs / 2);
+		Ai::PacedChoice first = Ai::ChoosePaced(*calm, ladder, Text("both"), kNow);
+		assert_se("opus", first.model.CStr(), "under pace: the strongest");
+		assert_true(first.why.View().Contains(Text("the week is at 0.60x pace")), first.why.CStr());
+
+		Ai::ClaudeUsage* busy = Plan();
+		Window(*busy, "five_hour", 20, Ai::kSessionWindowMs / 2);
+		Window(*busy, "seven_day", 60, Ai::kWeekWindowMs / 2);
+		assert_se("sonnet", Ai::ChoosePaced(*busy, ladder, Text("both"), kNow).model.CStr(), "the week at 1.2x: the second rung");
+		assert_se("opus", Ai::ChoosePaced(*busy, ladder, Text("session"), kNow).model.CStr(), "paced against the session only");
+		Ai::ClaudeUsage* hot = Plan();
+		Window(*hot, "five_hour", 90, Ai::kSessionWindowMs / 2);
+		Ai::PacedChoice last = Ai::ChoosePaced(*hot, ladder, Text("session"), kNow);
+		assert_se("haiku", last.model.CStr(), "1.8x: past every limit, the last rung");
+		assert_true(last.why.View().Contains(Text("5-hour session is at 1.80x")), last.why.CStr());
+		assert_se("opus", Ai::ChoosePaced(*hot, ladder, Text("week"), kNow).model.CStr(), "the week alone knows nothing of the session");
+
+		Ai::ClaudeUsage* opusOut = Plan();
+		Window(*opusOut, "seven_day_opus", 100, 3600 * 1000);
+		assert_se("sonnet", Ai::ChoosePaced(*opusOut, ladder, Text("both"), kNow).model.CStr(), "a rung whose own week is used up is skipped");
+
+		Ai::ClaudeUsage* spent = Plan();
+		Window(*spent, "five_hour", 100, 3600 * 1000);
+		Ai::PacedChoice none = Ai::ChoosePaced(*spent, ladder, Text("both"), kNow);
+		assert_true(none.model.IsEmpty() && none.untilMs == kNow + 3600 * 1000, "the session used up: no Claude until it resets");
+
+		Ai::ClaudeUsage unknown;
+		assert_se("opus", Ai::ChoosePaced(unknown, ladder, Text("both"), kNow).model.CStr(), "usage unknown: the first rung");
+		assert_true(Ai::IsPacingTarget(Text("week")) && !Ai::IsPacingTarget(Text("month")), "targets");
+	}
+
+	[test("when_a_window_frees")]
+	public static void TestResetText() {
+		assert_se("in 35 min", Ai::ResetText(kNow + 35 * 60000, kNow).CStr(), "minutes");
+		assert_se("in 2 h 14 min", Ai::ResetText(kNow + 134 * 60000, kNow).CStr(), "hours");
+		assert_se("in 3 d 4 h", Ai::ResetText(kNow + (3 * 24 + 4) * 3600000, kNow).CStr(), "days");
+		assert_se("now", Ai::ResetText(kNow - 1, kNow).CStr(), "past");
+	}
+
+	[test("a_streamed_response")]
+	public static void TestResponse() {
+		Ai::ClaudeResponse* response = Streamed("["
+			"{\"type\": \"message_start\", \"message\": {\"model\": \"claude-opus-5-5\", \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 900, \"cache_creation_input_tokens\": 90, \"output_tokens\": 1}}},"
+			"{\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"thinking\", \"thinking\": \"\"}},"
+			"{\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"thinking_delta\", \"thinking\": \"Look first.\"}},"
+			"{\"type\": \"content_block_stop\", \"index\": 0},"
+			"{\"type\": \"content_block_start\", \"index\": 1, \"content_block\": {\"type\": \"text\", \"text\": \"\"}},"
+			"{\"type\": \"content_block_delta\", \"index\": 1, \"delta\": {\"type\": \"text_delta\", \"text\": \"Reading \"}},"
+			"{\"type\": \"content_block_delta\", \"index\": 1, \"delta\": {\"type\": \"text_delta\", \"text\": \"it.\"}},"
+			"{\"type\": \"content_block_start\", \"index\": 2, \"content_block\": {\"type\": \"tool_use\", \"id\": \"toolu_1\", \"name\": \"mcp__ied__fs_read\", \"input\": {}}},"
+			"{\"type\": \"content_block_delta\", \"index\": 2, \"delta\": {\"type\": \"input_json_delta\", \"partial_json\": \"{\\\"path\\\": \"}},"
+			"{\"type\": \"content_block_delta\", \"index\": 2, \"delta\": {\"type\": \"input_json_delta\", \"partial_json\": \"\\\"a.cf\\\"}\"}},"
+			"{\"type\": \"content_block_stop\", \"index\": 2},"
+			"{\"type\": \"message_delta\", \"delta\": {\"stop_reason\": \"tool_use\"}, \"usage\": {\"output_tokens\": 42}},"
+			"{\"type\": \"message_stop\"}]");
+		assert_true(response->started && response->stopped, "start to stop");
+		assert_se("claude-opus-5-5", response->model.CStr(), "the model");
+		assert_se("Look first.", response->thinking.CStr(), "thinking");
+		assert_se("Reading it.", response->text.CStr(), "text");
+		assert_true(response->calls.Count() == 1, "one call");
+		assert_se("fs_read", response->calls[0]->name.CStr(), "IED's name for it");
+		assert_se("toolu_1", response->calls[0]->id.CStr(), "its tool_use id");
+		assert_se("{\"path\": \"a.cf\"}", response->calls[0]->arguments.CStr(), "its input");
+		assert_se("tool_use", response->stopReason.CStr(), "the stop reason");
+		assert_true(response->promptTokens == 1000 && response->cachedTokens == 900 && response->outputTokens == 42, "the usage");
+	}
+
+	[test("errors")]
+	public static void TestErrors() {
+		assert_true(Ai::ClaudeErrorKind(Text("rate_limit")) == Ai::ClaudeError::UsageLimit && Ai::ClaudeErrorKind(Text("billing_error")) == Ai::ClaudeError::UsageLimit, "usage limits");
+		assert_true(Ai::ClaudeErrorKind(Text("authentication_failed")) == Ai::ClaudeError::SignIn, "sign in");
+		assert_true(Ai::ClaudeErrorKind(Text("overloaded")) == Ai::ClaudeError::Transport, "transport");
+		assert_true(Ai::ClaudeErrorKind(Text("")) == Ai::ClaudeError::None, "none");
+		assert_true(Ai::LimitResetIn(Text("Claude AI usage limit reached|1761160000")) == (int64)1761160000 * 1000 && Ai::LimitResetIn(Text("You've hit your limit")) == 0, "a reset in the message");
+	}
+
+	[test("lines_to_the_cli")]
+	public static void TestLines() {
+		assert_se("{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":\"initialize\",\"sdkMcpServers\":[\"ied\"]}}", Ai::ControlRequestLine(Text("r1"), Ai::InitializeRequest().View()).CStr(), "initialize");
+		assert_se("{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"q\",\"response\":{}}}", Ai::ControlAnswerLine(Text("q"), Text("{}")).CStr(), "an answer");
+		Core::Array<Ai::ClaudeImage> images;
+		Ai::ClaudeImage image;
+		image.mime = Core::String("image/png");
+		image.base64 = Core::String("AAAA");
+		images.Push(image);
+		assert_se("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Look\"},{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AAAA\"}}]},\"parent_tool_use_id\":null,\"session_id\":\"\"}", Ai::UserMessageLine(Text("Look"), images).CStr(), "a user message with an image");
+		assert_se("{\"tools\":[{\"name\":\"fs_read\",\"description\":\"Read.\",\"inputSchema\":{\"type\":\"object\"}}]}", Ai::McpToolsResult(Text("[{\"type\": \"function\", \"function\": {\"name\": \"fs_read\", \"description\": \"Read.\", \"parameters\": {\"type\": \"object\"}}}, {\"type\": \"function\", \"function\": {\"name\": \"tool_search\", \"description\": \"x\", \"parameters\": {}}}]")).CStr(), "tools/list without tool_search");
+		assert_se("{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"},{\"type\":\"image\",\"data\":\"AAAA\",\"mimeType\":\"image/png\"}],\"isError\":false}}", Ai::McpReply(Parse("7"), Ai::McpCallResult(Text("ok"), images, false).View()).CStr(), "a call's result");
+		assert_true(Ai::IedToolName(Text("mcp__ied__shell_run")) == "shell_run" && Ai::IedToolName(Text("Bash")) == "Bash", "tool names");
+	}
+
+	[test("subscription_only")]
+	public static void TestSubscriptionOnly() {
+		assert_true(Ai::IsSubscriptionAuth(Text("claude.ai")) && Ai::IsSubscriptionAuth(Text("oauth_token")), "a claude.ai sign-in and its long-lived token");
+		assert_true(!Ai::IsSubscriptionAuth(Text("api_key")) && !Ai::IsSubscriptionAuth(Text("api_key_helper")) && !Ai::IsSubscriptionAuth(Text("third_party")) && !Ai::IsSubscriptionAuth(Text("none")) && !Ai::IsSubscriptionAuth(Text("")), "keys, helpers, other providers and no sign-in");
+		Core::Array<Core::String> environment = Ai::ClaudeEnvironment();
+		const char*[6] removed = { "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY" };
+		for (int64 i = 0; i < 6; ++i) assert_true(environment.Contains(Core::String(removed[i])), removed[i]);
+		assert_true(environment.Contains(Core::String("CLAUDE_CODE_DISABLE_CLAUDE_MDS=1")), "the CLI's own CLAUDE.md reading off");
+		assert_true(Ai::NotSubscription(Text("api_key")).View().Contains(Text("subscription only")), "why an API key is refused");
+		assert_true(Ai::LaterVersion(Text("2.1.304"), Text("2.1.299")) && !Ai::LaterVersion(Text("2.1.299"), Text("2.1.304")) && !Ai::LaterVersion(Text("2.1.0"), Text("2.1.0")), "versions");
+	}
+
+	[test("history_for_a_new_session")]
+	public static void TestHistory() {
+		Core::Array<Ai::Turn*> turns;
+		assert_true(Ai::HistoryText(turns).IsEmpty(), "no turns: nothing");
+		Ai::Turn* turn = new Ai::Turn();
+		Ai::ModelMessage* asked = new Ai::ModelMessage();
+		asked->role = Core::String("user");
+		asked->content = Core::String("Fix the build.");
+		Ai::ModelMessage* called = new Ai::ModelMessage();
+		called->role = Core::String("assistant");
+		called->content = Core::String("Building.");
+		called->toolCalls = Core::String("[{\"id\": \"c1\", \"type\": \"function\", \"function\": {\"name\": \"build_run\", \"arguments\": \"{}\"}}]");
+		Ai::ModelMessage* result = new Ai::ModelMessage();
+		result->role = Core::String("tool");
+		result->content = Core::String("exit 0\nall green");
+		turn->messages.Push(asked);
+		turn->messages.Push(called);
+		turn->messages.Push(result);
+		turns.Push(turn);
+		Core::String text = Ai::HistoryText(turns);
+		assert_true(text.View().Contains(Text("## User\nFix the build.")) && text.View().Contains(Text("## Assistant\nBuilding.")), text.CStr());
+		assert_true(text.View().Contains(Text("[called build_run {}]")) && text.View().Contains(Text("[result: exit 0]")), text.CStr());
+	}
+}

@@ -26,6 +26,7 @@ Define how IED is verified, so "done" (AGENTS.md) is mechanical, not a feeling. 
 
 1. **Mock server** (`tools/mock-server/`, Python): implements protocol v1 with in-memory fixture data (a fake workspace tree, documents, a scripted chat stream, a build run with ANSI output, a terminal echo). It lets the whole frontend be built, screenshot-tested and resume-tested in M0. The conformance suite keeps it honest.
 2. **Fake model server** (`tools/fake-model/`, Python): OpenAI-compatible SSE with a script language (`emit text`, `emit tool_call(name,args)`, `emit text_tool_call(dialect)`, `stall 90s`, `cut`, `finish(reason)`, `error(status, body)`). Used by harness tests now (against the mock server's simulated runtime) and against the real runtime later.
+   **Fake Claude Code CLI** (`tools/fake-claude/`, Python): the stream-json protocol of the owner's `claude` CLI (`docs/04` "The Claude Code provider") scripted from a state folder, so the Claude provider's server checks run with no signed-in CLI and no usage spent; it reports an API key the way the real CLI does, so the subscription-only rules are checked too.
 3. **Real family binaries**: C4LSP and C4DAP exist today (sources in `C4/C4LSP/` and `C4/C4DAP/`, binaries shipped through Nuke's `tools/`), so LSP/DAP client tests run against the real servers from M2 on, not mocks.
 
 Python is already in the family toolchain (Nuke vendors it), so these add no new language to the stack.

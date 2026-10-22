@@ -15,6 +15,7 @@
 	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp"],
 	"contributes": {
 		"outputSources": [ { "id": "ai", "title": "AI" } ],
+		"skills": ["skills"],
 		"settings": { "schema": "settings.schema.json", "page": "AI" },
 		"bindings": {
 			"consumes": [
@@ -33,18 +34,21 @@
 		},
 		"settingsPages": [
 			{ "id": "ied.chat.models", "page": "AI", "title": "Models", "view": "ModelsSettings", "keys": ["ai.models"] },
-			{ "id": "ied.chat.groups", "page": "AI", "title": "Model Groups", "view": "ModelGroupsSettings", "keys": ["ai.groups", "ai.defaultGroup"] }
+			{ "id": "ied.chat.groups", "page": "AI", "title": "Model Groups", "view": "ModelGroupsSettings", "keys": ["ai.groups", "ai.defaultGroup"] },
+			{ "id": "ied.chat.claude", "page": "AI", "title": "Claude", "view": "ClaudeSettings", "keys": ["ai.claude.command", "ai.claude.usageRefreshMinutes"] }
 		],
 		"activities": [
 			{ "id": "ied.chat", "title": "Chat", "icon": "$(comment-discussion)", "order": 0, "phoneSlot": true, "view": "ChatActivity" }
 		],
 		"statusBarItems": [
-			{ "id": "ied.chat.status", "alignment": "left", "priority": 40, "view": "ChatStatus", "command": "ied.chat.show" }
+			{ "id": "ied.chat.status", "alignment": "left", "priority": 40, "view": "ChatStatus", "command": "ied.chat.show" },
+			{ "id": "ied.chat.claude", "alignment": "right", "priority": 30, "view": "ClaudeStatus", "command": "ied.chat.claudeUsage" }
 		],
 		"commands": [
 			{ "id": "ied.chat.new", "title": "New Chat", "category": "Chat", "icon": "$(add)" },
 			{ "id": "ied.chat.show", "title": "Chat", "category": "View", "icon": "$(comment-discussion)" },
-			{ "id": "ied.chat.stop", "title": "Stop the Turn", "category": "Chat", "icon": "$(debug-stop)" }
+			{ "id": "ied.chat.stop", "title": "Stop the Turn", "category": "Chat", "icon": "$(debug-stop)" },
+			{ "id": "ied.chat.claudeUsage", "title": "Claude Usage", "category": "Chat", "icon": "$(pulse)" }
 		],
 		"keybindings": [
 			{ "command": "ied.chat.show", "key": "ctrl+alt+i" },

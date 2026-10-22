@@ -6,8 +6,18 @@
 		"model": {
 			"type": "object",
 			"properties": {
-				"endpoint": { "type": "string", "pattern": "^http://", "description": "An OpenAI-compatible base URL: http://127.0.0.1:8080/v1 (llama.cpp, vLLM, LM Studio, Ollama's /v1)." },
-				"model": { "type": "string", "description": "The model id a request names; the profile's name when unset." },
+				"provider": { "enum": ["openai", "claude-code"], "default": "openai", "description": "What serves it: an OpenAI-compatible endpoint, or your own signed-in Claude Code CLI on your Claude subscription (docs/04 The Claude Code provider; never an API key)." },
+				"endpoint": { "type": "string", "pattern": "^http://", "description": "An OpenAI-compatible base URL: http://127.0.0.1:8080/v1 (llama.cpp, vLLM, LM Studio, Ollama's /v1). Not for claude-code." },
+				"model": { "type": "string", "description": "The model id a request names; the profile's name when unset. For claude-code: opus, sonnet, haiku, fable, a full id, or auto (pacing picks per turn); default: the CLI's." },
+				"pacing": {
+					"type": "object",
+					"description": "claude-code with model auto: the models to pick from, strongest first, and the plan's windows to pace against (docs/04 Pacing).",
+					"properties": {
+						"ladder": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "default": ["opus", "sonnet", "haiku"] },
+						"target": { "enum": ["session", "week", "both"], "default": "both", "description": "session: spend each 5-hour window fully; week: stretch the weekly limit across the week; both: the stricter of the two." }
+					},
+					"additionalProperties": false
+				},
 				"contextWindow": { "type": "integer", "minimum": 0, "description": "Tokens; 0 when unknown (a context error reveals it)." },
 				"maxOutput": { "type": "integer", "minimum": 0, "description": "Tokens a reply may take; 0 leaves it to the server." },
 				"privacy": { "enum": ["local", "lan", "cloud"], "default": "local" },
@@ -41,7 +51,10 @@
 					"additionalProperties": false
 				}
 			},
-			"required": ["endpoint"],
+			"anyOf": [
+				{ "required": ["endpoint"] },
+				{ "properties": { "provider": { "const": "claude-code" } }, "required": ["provider"] }
+			],
 			"additionalProperties": false
 		},
 		"role": {
@@ -97,6 +110,20 @@
 			"default": 0,
 			"x-ied-tiers": ["app", "solution"],
 			"description": "Model requests one turn may make before it pauses; 0 is no limit (docs/12 Budgets). Loop and no-progress detection still pause a turn that runs away."
+		},
+		"ai.claude.command": {
+			"type": "array",
+			"items": { "type": "string" },
+			"default": [],
+			"x-ied-tiers": ["app"],
+			"description": "The Claude Code CLI's program and leading arguments. Empty: claude.exe on PATH, then the native installer's (%USERPROFILE%\\.local\\bin), then the newest the Claude desktop app keeps. Sign in to it yourself (claude auth login) with your Claude subscription: IED never handles Claude credentials and never runs Claude on an API key."
+		},
+		"ai.claude.usageRefreshMinutes": {
+			"type": "integer",
+			"minimum": 0,
+			"default": 10,
+			"x-ied-tiers": ["app"],
+			"description": "How often the plan's usage (the 5-hour session and the week) is asked of the CLI while a claude-code model is set up; 0: only when asked and after Claude turns. Asking spends no usage."
 		},
 		"ai.tools.loadAll": {
 			"type": "boolean",

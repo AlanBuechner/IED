@@ -384,6 +384,7 @@ namespace Ai
 		json.Field("permission", PermissionModeName(permission));
 		json.Field("group", group.View());
 		json.Field("effort", effort.View());
+		json.Field("pinnedModel", pinnedModel.View());
 		json.Field("state", ChatStateName(state));
 		if (!stateReason.IsEmpty()) json.Field("stateReason", stateReason.View());
 		json.IntField("turnCount", turns.Count());

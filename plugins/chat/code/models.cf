@@ -28,9 +28,51 @@ namespace Ai
 		return true;
 	}
 
+	static bool ReadProvider(Core::StringView text, Provider& provider) {
+		if (text.IsEmpty() || text == "openai") provider = Provider::OpenAi;
+		else if (text == "claude-code") provider = Provider::ClaudeCode;
+		else return false;
+		return true;
+	}
+
+	// A Claude Code profile (docs/04 "The Claude Code provider"): the CLI's model, always cloud; `model: "auto"` with its
+	// pacing - a ladder of models, strongest first (opus, sonnet, haiku when it names none), and what it paces against.
+	static ModelProfile* ReadClaude(ModelProfile* profile, const Serialization::DomNode& entry, Core::Array<Core::String>& problems) {
+		profile->model = entry.Member("model").Kind() == Serialization::DomKind::String ? Core::String(entry.Member("model").AsView()) : Core::String("default");
+		profile->privacy = Privacy::Cloud;
+		profile->contextWindow = entry.Member("contextWindow").AsInt();
+		Serialization::DomNode pacing = entry.Member("pacing");
+		Serialization::DomNode ladder = pacing.Member("ladder");
+		for (int64 i = 0; ladder.Kind() == Serialization::DomKind::Array && i < ladder.Count(); ++i)
+			if (!ladder.At(i).AsView().IsEmpty()) profile->ladder.Push(Core::String(ladder.At(i).AsView()));
+		if (profile->ladder.IsEmpty()) {
+			profile->ladder.Push(Core::String("opus"));
+			profile->ladder.Push(Core::String("sonnet"));
+			profile->ladder.Push(Core::String("haiku"));
+		}
+		profile->pacingTarget = pacing.Member("target").IsValid() ? Core::String(pacing.Member("target").AsView()) : Core::String("both");
+		if (profile->pacingTarget != "session" && profile->pacingTarget != "week" && profile->pacingTarget != "both") {
+			problems.Push((Core::String("ai.models.") + profile->name.View()) + ": pacing.target must be session, week or both");
+			return nullptr;
+		}
+		Serialization::DomNode watchdog = entry.Member("watchdog");
+		profile->prefillBaseMs = SecondsAsMs(watchdog.Member("prefillBaseS"), kClaudeFirstEventMs);
+		profile->idleMs = SecondsAsMs(watchdog.Member("idleS"), kModelIdleCloudMs);
+		profile->stepCapMs = watchdog.Member("stepCapS").AsFloat() > 0 ? (int64)(watchdog.Member("stepCapS").AsFloat() * 1000.0) : kModelStepCapMs;
+		profile->prefillRate = kModelPrefillRate;
+		profile->vision = true;
+		profile->visionSet = true;
+		return profile;
+	}
+
 	static ModelProfile* ReadModel(Core::StringView name, const Serialization::DomNode& entry, Core::Array<Core::String>& problems) {
 		ModelProfile* profile = new ModelProfile();
 		profile->name = Core::String(name);
+		if (!ReadProvider(entry.Member("provider").AsView(), profile->provider)) {
+			problems.Push((Core::String("ai.models.") + name) + ": provider must be openai or claude-code");
+			return nullptr;
+		}
+		if (profile->IsClaude()) return ReadClaude(profile, entry, problems);
 		profile->endpoint = Core::String(entry.Member("endpoint").AsView());
 		if (!profile->endpoint.View().StartsWith(Core::StringView("http://"))) {
 			problems.Push((Core::String("ai.models.") + name) + ": endpoint must be an http:// URL");
@@ -108,6 +150,16 @@ namespace Ai
 			if (fallback) candidates.Push(fallback);
 		}
 		return candidates;
+	}
+
+	Core::Array<ModelProfile*> PinnedFirst(const Core::Array<ModelProfile*>& models, const Core::Array<ModelProfile*>& candidates, Core::StringView pinned) {
+		ModelProfile* first = pinned.IsEmpty() ? nullptr : FindModel(models, pinned);
+		if (!first) return candidates;
+		Core::Array<ModelProfile*> ordered;
+		ordered.Push(first);
+		for (ModelProfile* candidate : candidates)
+			if (candidate != first) ordered.Push(candidate);
+		return ordered;
 	}
 
 	Core::Array<Core::String> GroupNames(Core::StringView groupsJson) {

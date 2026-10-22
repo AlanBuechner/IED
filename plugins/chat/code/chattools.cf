@@ -128,7 +128,12 @@ namespace Ai
 		ChatMode mode = self->mode;
 		if (call.args.Member("mode").IsValid() && !ReadChatMode(call.args.Member("mode").AsView(), mode)) return ToolError(Core::StringView("chat_create: mode must be ask, plan or agent"));
 		Core::StringView title = call.args.Member("title").AsView();
+		Core::StringView model = call.args.Member("model").AsView();
+		Core::Array<Core::String> problems;
+		if (!model.IsEmpty() && !FindModel(ReadModels(call.context->Setting(Core::StringView("ai.models"), WsId(call.ws)).View(), problems), model))
+			return ToolError(((Core::String("chat_create: there is no model ") + model) + " in ai.models; ai_usage lists them").View());
 		Chat* made = chats->Create(call.ws, title.IsEmpty() ? Core::StringView(kNewChatTitle) : title, mode, self->group.View());
+		made->pinnedModel = model.IsEmpty() ? self->pinnedModel : Core::String(model);
 		chats->Deliver(made, call.args.Member("text").AsView(), self, hops);
 		Core::StringBuilder said;
 		said.Append("Started ");
@@ -210,8 +215,8 @@ namespace Ai
 		send->plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.send"); };
 		send->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return SendRun(chats, chat, call); };
 		registry.Add(send);
-		ToolSpec* create = ChatTool("chat_create", "Start a new chat in this workspace with a message, to hand it part of the work. Example: chat_create({\"title\": \"Port Ring.h\", \"text\": \"Port src/Ring.h to C4 and its tests.\", \"mode\": \"agent\"})",
-			"{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"minLength\": 1}, \"title\": {\"type\": \"string\"}, \"mode\": {\"enum\": [\"ask\", \"plan\", \"agent\"]}}, \"required\": [\"text\"], \"additionalProperties\": false}", ToolClass::Exec);
+		ToolSpec* create = ChatTool("chat_create", "Start a new chat in this workspace with a message, to hand it part of the work. It uses this chat's model group and model, or `model` (one of ai.models: a cheaper one for routine work stretches Claude's usage). Example: chat_create({\"title\": \"Port Ring.h\", \"text\": \"Port src/Ring.h to C4 and its tests.\", \"mode\": \"agent\", \"model\": \"claude-sonnet\"})",
+			"{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"minLength\": 1}, \"title\": {\"type\": \"string\"}, \"mode\": {\"enum\": [\"ask\", \"plan\", \"agent\"]}, \"model\": {\"type\": \"string\"}}, \"required\": [\"text\"], \"additionalProperties\": false}", ToolClass::Exec);
 		create->plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.create"); };
 		create->run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return CreateRun(chats, chat, call); };
 		registry.Add(create);

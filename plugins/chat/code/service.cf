@@ -36,6 +36,13 @@ namespace Ai
 		Register("chat.history", [self](const IED::Request& request) -> Core::String { return self->HistoryMethod(request); });
 		Register("ai.probe", [self](const IED::Request& request) -> Core::String { return self->ProbeMethod(request); });
 		Register("chat.delete", [self](const IED::Request& request) -> Core::String { return self->DeleteMethod(request); });
+		claude = new ClaudeAccount(context);
+		context->StartThread([self]() { self->ClaudeKeeper(); });
+		context->OnDeactivate([self]() {
+			IED::HostLock guard(*self->context);
+			self->stopping = true;
+			for (Core::KeyValue<Core::String, ClaudeSession*>& entry : self->claudeSessions) entry.value->Stop();
+		});
 	}
 
 	void Chats::Register(const char* name, IED::MethodHandler method) {
@@ -94,7 +101,8 @@ namespace Ai
 	static Core::Array<ModelProfile*> PrimaryOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
-		return RoleCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), Core::StringView("primary"), role);
+		Core::Array<ModelProfile*> candidates = RoleCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), Core::StringView("primary"), role);
+		return PinnedFirst(models, candidates, chat->pinnedModel.View());
 	}
 
 	Core::String Chats::ModelOf(const Chat* chat) const {
@@ -287,12 +295,23 @@ namespace Ai
 		}
 	}
 
+	// chat.set {model}: a model of ai.models pinned over the group's primary, "" back to the group's (docs/04 "Switching models").
+	static void ReadPinnedModel(IED::PluginContext* context, const IED::Workspace& ws, Chat* chat, const IED::Params& params) {
+		if (!params.Has("model")) return;
+		Core::String name = params.Str("model");
+		Core::Array<Core::String> problems;
+		if (!name.IsEmpty() && !FindModel(ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems), name.View()))
+			throw IED::RpcError(IED::ErrorCode::BadRequest, ((Core::String("no model ") + name.View()) + " in ai.models").View());
+		chat->pinnedModel = name;
+	}
+
 	Core::String Chats::CreateMethod(const IED::Request& request) {
 		const IED::Params& params = request.params;
 		IED::Workspace ws = OpenWorkspace(params.Str("wsId").View());
 		ChatMode mode = ChatMode::Agent;
 		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
 		Chat* chat = NewChat(ws, Core::StringView(kNewChatTitle), mode, Core::StringView(""));
+		ReadPinnedModel(context, ws, chat, params);
 		ReadSettings(chat, params);
 		Announce(ws, chat);
 		return chat->SummaryJson();
@@ -301,6 +320,7 @@ namespace Ai
 	Core::String Chats::SetMethod(const IED::Request& request) {
 		const IED::Params& params = request.params;
 		Chat* chat = Get(params.Str("chatId").View());
+		ReadPinnedModel(context, WorkspaceOf(chat), chat, params);
 		ReadSettings(chat, params);
 		Changed(chat);
 		return chat->SummaryJson();
@@ -465,6 +485,11 @@ namespace Ai
 				chats.RemoveAt(i);
 				break;
 			}
+		ClaudeSession* session = nullptr;
+		if (claudeSessions.TryGet(chat->chatId, session)) {
+			session->Stop();
+			claudeSessions.Remove(chat->chatId);
+		}
 		DeleteChatFiles(LocalStateOf(ws), chat->chatId.View());
 		context->RemoveTopic(chat->Topic().View());
 		IED::JsonWriter data;
@@ -480,6 +505,7 @@ namespace Ai
 	{
 		public bool done;
 		public ModelProbe probe;
+		public Core::String claude;    // a claude-code profile's answer, whole
 		public Threading::ConditionVariable ready;
 	}
 
@@ -504,16 +530,22 @@ namespace Ai
 		ProbeJob* job = new ProbeJob();
 		IED::PluginContext* plugin = context;
 		ModelProfile* asked = profile;
-		plugin->StartThread([job, asked, plugin]() {
-			ModelProbe probe = ProbeModel(*asked, kProbeTimeoutMs);
+		ClaudeAccount* account = claude;
+		plugin->StartThread([job, asked, plugin, account]() {
+			Core::String claudeAnswer;
+			ModelProbe probe;
+			if (asked->IsClaude()) claudeAnswer = ProbeClaude(account, plugin, *asked);
+			else probe = ProbeModel(*asked, kProbeTimeoutMs);
 			IED::HostLock guard(*plugin);
 			job->probe = probe;
+			job->claude = claudeAnswer;
 			job->done = true;
 			job->ready.NotifyAll();
 		});
 		IED::HostLock guard(*context);
 		while (!job->done && !request.Cancelled()) guard.Wait(job->ready, kProbeWaitSliceNs);
 		if (!job->done) throw IED::RpcError(IED::ErrorCode::Cancelled, "request cancelled");
+		if (!job->claude.IsEmpty()) return job->claude;
 		if (!params.Has("profile") && job->probe.contextWindow > 0) {
 			windows.At(name) = job->probe.contextWindow;
 			probed.At(name) = true;

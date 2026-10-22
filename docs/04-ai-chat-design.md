@@ -74,6 +74,125 @@ IED is primarily local-AI; Claude is optional. Anthropic's policy (Agent SDK ove
 
 Flags and event shapes must be re-verified against the installed CLI version when implementing (they change across releases).
 
+### The Claude Code provider (built 2026-10-22, checked against Claude Code 2.1.304)
+
+**Profiles.** An `ai.models` entry with `"provider": "claude-code"` is a Claude model the owner's own CLI serves:
+`{provider: "claude-code", model: "opus" | "sonnet" | "haiku" | "fable" | a full id | "auto", pacing?, contextWindow?}`. It has no
+endpoint and its privacy is always `cloud`. Effort goes to the CLI as `--effort` (Claude takes low, medium, high, xhigh and max;
+IED's three are sent as they are). `model: "auto"` lets pacing pick the model per turn (below).
+
+**The CLI.** `ai.claude.command` (app tier) is the program and its leading arguments; empty, IED looks for `claude` on PATH, then
+`%USERPROFILE%\.local\bin\claude.exe` (the native installer), then the newest copy the Claude desktop app keeps
+(`%APPDATA%\Claude\claude-code\<version>\<build>\claude.exe`). IED never reads, stores or asks for Claude credentials: the owner
+signs in to the CLI in a terminal of their own (`claude auth login`; not IED's terminal, whose bytes pass through the server), and
+IED reads only `claude auth status` (signed in or not, and how) to say so.
+
+**Subscription only** (owner, 2026-10-22: "make sure it uses the subscriptions and not api tokens"). IED runs Claude on the
+owner's Claude subscription and never on an API key or another provider's billing:
+
+- Every CLI process IED starts has `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`,
+  `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY` taken out of its environment, and reads no settings file (where an
+  `apiKeyHelper` could be named).
+- Before a session starts, `claude auth status` must say it is signed in with `authMethod` `claude.ai` (a claude.ai login) or
+  `oauth_token` (that login's long-lived token, `claude setup-token`); `api_key`, `api_key_helper`, `third_party` and `none` are
+  refused, and nothing is sent.
+- A session whose `system/init` reports an `apiKeySource` other than `none` is stopped at once.
+- A refusal is a routing note and the turn moves to the role's next candidate that is not Claude, or pauses `not_subscription`
+  with how to sign in. The status bar's Claude item turns red ("Claude: not on a subscription") and Settings > AI > Claude
+  says so with the exact `claude auth login` command for the CLI found.
+
+**A chat's session.** A chat that uses a Claude profile gets one CLI process, started at its first Claude step and kept between
+turns so its prompt cache stays warm; it stops when the chat is deleted, the server stops, or after 10 idle minutes (a
+`--resume` brings it back in seconds, and the prompt cache does not outlive that much idling):
+
+    <cli> -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
+          --tools "" --strict-mcp-config --setting-sources "" --disable-slash-commands --permission-prompt-tool stdio
+          --allowedTools mcp__ied --system-prompt-file <its claude-system.md> --system-prompt-snapshot off
+          --model <id> [--effort <effort>] [--resume <session>]
+
+in the workspace's root, with `CLAUDE_CODE_DISABLE_CLAUDE_MDS`, `_AUTO_MEMORY`, `_BUNDLED_SKILLS`, `_BACKGROUND_TASKS`, `_CRON`,
+`_WORKFLOWS`, `_ADVISOR_TOOL` and `_FILE_CHECKPOINTING` set, so the CLI adds nothing of its own (no CLAUDE.md or AGENTS.md reading
+of its own, no memory, skills or built-in tools): the system message, tools and context are IED's. The first control request is
+`initialize {sdkMcpServers: ["ied"]}`: IED's tools reach Claude as the CLI's in-process MCP server `ied`, whose JSON-RPC travels
+as `mcp_message` control requests on the same pipes. `tools/list` answers the chat's tools for its mode with every deferred
+tool loaded (the CLI defers MCP tools itself) and `tool_search` left out; the model sees them as `mcp__ied__<name>`. The session's
+id (the `system/init` message) is kept in `chat.json`; a session whose system message or effort changed is restarted with
+`--resume`, a changed tool list is told with `notifications/tools/list_changed`, a model change is a `set_model` request. The
+system message goes in a file, `.ied/local/chats/<chatId>/claude-system.md` (a Windows command line holds 32,767 characters).
+
+**A turn.** IED's loop (`docs/12`) runs unchanged, and a step is one model response:
+
+1. The step sends what the session has not seen of the conversation - the owner's message (its mentions resolved, its images as
+   image blocks), harness notes, steering - as stream-json `user` messages. A session that does not have the chat's earlier turns
+   (a new one for a chat another model answered so far, or one `--resume` could not find) first gets them written out as text.
+   Nothing is sent while a query runs (between a step's tool calls and the next response): the CLI would make it a query of its
+   own after this one. Steering that comes then goes with the next tool result's text, or as a message once the query ends,
+   and a turn does not finish before Claude has it. A retried step with nothing new (the CLI's query ended with an error, or
+   the CLI was restarted) tells Claude to go on.
+2. It reads the CLI's output: `stream_event`s (the Messages API's raw events) stream thinking, text and tool-use input into the
+   segments as any model's; `message_stop` ends the step with the response's stop reason (`tool_use`, `end_turn`, `max_tokens`,
+   `refusal`) and its usage. Its `tool_use` blocks are the step's calls.
+3. Each call runs through IED's own path - permission rules, approval cards, the tool card - and its result answers the CLI's
+   `tools/call` for it (matched by `_meta["claudecode/toolUseId"]`) as MCP content (text, images as image blocks). The next step
+   reads the CLI's next response.
+4. A turn that ends (an answer in Ask or Plan mode, `finish` in Agent mode, a pause) reads on to the CLI's `result`; Stop sends
+   `interrupt`. The turn's messages are kept in IED's own format too, so the chat can move to a local model and back.
+5. The CLI's own errors map onto the stop taxonomy (`docs/12`): an assistant message with `error` `rate_limit` or
+   `billing_error` is a usage limit - the model is marked exhausted until the reset its window names and the turn moves to the
+   role's next candidate (a fallback; a local model), or pauses saying when Claude resets; `authentication_failed` pauses with how
+   to sign in; `overloaded` and `server_error` are transport errors, retried and then sent to the fallback; `system/api_retry`
+   shows as a routing note. The CLI compacts its own context, so IED's compression does not run on a Claude step; the window is
+   the one the CLI reports (`modelUsage.<model>.contextWindow`).
+
+**Usage.** The server keeps the account's plan usage: each window's utilization (0-100) and reset - `five_hour` (the session),
+`seven_day` (the week), the per-model weekly windows (`seven_day_opus`, `seven_day_sonnet`, `model_scoped` by display name),
+extra usage - from the CLI's `get_usage {skip_behaviors: true}` control request, asked through a running session or a short-lived
+CLI process of its own (no model request, no usage spent): when a client asks (`ai.usage {refresh: true}`), after each Claude
+turn, and every `ai.claude.usageRefreshMinutes` (default 10; 0 never) while a `claude-code` profile is set up. Between, each
+`rate_limit_event` a session streams updates the windows it names. It is on the app-wide topic `aiusage` (`docs/10`).
+
+**Pacing.** A window of length L (5 h, 7 d) at utilization u resetting at R is `e = 1 - (R - now) / L` through, and its pace is
+`p = u / (100 e)`: 1.0 is the even line that runs out exactly at the reset, 2.0 is spending twice as fast. A profile with
+`model: "auto"` names a ladder, strongest first, and what to pace against:
+
+    "claude-auto": {"provider": "claude-code", "model": "auto",
+                    "pacing": {"ladder": ["opus", "sonnet", "haiku"], "target": "both"}}
+
+`target` is `session` (spend each 5-hour window fully: pace against `five_hour` only), `week` (stretch the week: `seven_day` and
+the rung's own weekly window) or `both` (the higher of the two). Each turn takes the first rung whose pace is at most its limit -
+1.0 for the first, 1.25 for the second, 1.5 for the third - and the last rung otherwise; early in a window (under 5% through and
+under 5% used) its pace counts as 0. A window at 100% (or a `rejected` rate-limit status) leaves Claude out: the turn goes to
+the role's fallback. The pick holds for the whole turn (a model change mid-turn would read the whole context into a new
+cache), and the turn says why in a routing note: "auto: sonnet (the week is at 1.31x pace)". `ladder` may name `fable` first for
+the strongest model while it is under pace.
+
+**Switching models.** A chat may pin a model of `ai.models` over its group's primary (`chat.set {model}`, the composer's Model
+menu, `""` back to the group's): the group's fallbacks stay behind it. The AI has two tools (group `models`, `docs/13`):
+`ai_usage` (the plan's windows with their pace and resets, and what `auto` picks now and why) and `chat_set_model` (pin a model
+for this chat's next turns or another chat's, an Exec call: in Ask mode the owner approves it).
+
+**In the UI.** The status bar's Claude item (`Claude 5h 42% wk 61%`; yellow when a window runs ahead of pace or the CLI warns,
+red when one is used up; its tooltip each window and when it resets) opens Settings > AI > Claude: the CLI (where it is, its
+version, whether it is signed in), each window as a bar with the even line marked, its pace and reset, Refresh, and Add Claude
+models, which adds `claude-auto`, `claude-opus`, `claude-sonnet`, `claude-haiku` and `claude-fable` profiles and a `claude`
+group (primary `claude-auto`, falling back to the current default group's primary). The command Chat: Claude Usage opens the page
+(on a phone, which has no status bar, from the command palette).
+
+**As built.** Server (`plugins/chat/code/`): `claudewire` (usage windows from `get_usage` and `rate_limit_event`, pace and the
+pacing pick, a response from stream events, the CLI's errors, the lines IED writes, the history a new session is told),
+`claudecli` (finding the CLI, a running one with its reader thread and control requests, the environment and arguments,
+`auth status`), `claudesession` (a chat's session: start and resume, IED's MCP server and permission answers, `tools/call`
+kept for its run, `set_model`, settling a query), `claudeaccount` (the usage record, `aiusage`, `ai.usage`), `claudechats` (the
+sessions by chat, the keeper thread: the periodic usage ask, idle sessions stopped), `runclaude` (the step, the tool answers,
+the turn's end, usage limits and refusals routed), `modeltools` (`ai_usage`, `chat_set_model`); `models` reads `provider` and
+`pacing`, a chat's `pinnedModel` and its session (`claude: {session, turns}`) are kept in `chat.json`. Client
+(`plugins/chat/ui/`): `claudeusage.js` (the status item, Settings > AI > Claude, Add Claude models), the composer's Model menu.
+Tests: unit `server.ai.claude` (`claudewire_tests.cf`), server checks `test_claude.py` (16, against `tools/fake-claude`, a fake
+CLI that speaks the same protocol and records what IED sent), frontend `claude.test.js`. Checked by hand against the real CLI
+(2.1.304, the Claude desktop app's copy, not signed in): discovery, `--version`, `auth status`, `get_usage`, IED's exact session
+arguments with the MCP handshake, and the refusal before anything is sent. A signed-in turn was checked against the fake only:
+the owner signs in (`claude auth login`) for the first real one.
+
 ## Context management
 
 - **Ledger:** every context item typed and counted (provider usage is authoritative; per-family tokenizers or llama.cpp `/tokenize` for estimates). Feeds the right-panel context view.
@@ -224,7 +343,9 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 | Key | Tiers | Value |
 |---|---|---|
-| `ai.models` | app | `{<name>: {endpoint, model?, contextWindow?, maxOutput?, privacy?, vision?, effort?: {low?, medium?, high?}, apiKey?: {env}, watchdog?: {connectS, prefillBaseS, prefillRate, idleS, stepCapS}}}`: an OpenAI-compatible endpoint (`http://host:port/v1`); `effort` the request fields each effort adds ("Model groups and roles"); `vision` says whether the images tool results show are sent to it (`docs/13` "Images in tool results"; left out, its server says: llama.cpp's `/props` `modalities.vision`); a key is only ever named by its environment variable |
+| `ai.models` | app | `{<name>: {endpoint, model?, contextWindow?, maxOutput?, privacy?, vision?, effort?: {low?, medium?, high?}, apiKey?: {env}, watchdog?: {connectS, prefillBaseS, prefillRate, idleS, stepCapS}}}`: an OpenAI-compatible endpoint (`http://host:port/v1`); `effort` the request fields each effort adds ("Model groups and roles"); `vision` says whether the images tool results show are sent to it (`docs/13` "Images in tool results"; left out, its server says: llama.cpp's `/props` `modalities.vision`); a key is only ever named by its environment variable. Or `{provider: "claude-code", model?, pacing?: {ladder, target}, contextWindow?, watchdog?}`: Claude through the owner's Claude Code CLI on their subscription ("The Claude Code provider") |
+| `ai.claude.command` | app | the Claude Code CLI's program and leading arguments; `[]`, the default: found (PATH, the native installer's, the Claude desktop app's) |
+| `ai.claude.usageRefreshMinutes` | app | how often the plan's usage is asked while a `claude-code` profile is set up (10; 0: only when asked and after Claude turns) |
 | `ai.groups` | app | `{<group>: {<role>: {model, temperature?, effort?, fallback?: [names]}}}`; a turn uses the role `primary`, with the chat's effort when it picked one |
 | `ai.defaultGroup` | app, solution | the group of a chat that names none; empty: the first group; with no group at all, the first model |
 | `ai.permissions` | app | `{allow, confirm, deny}`: lists of `kind(pattern)` rules |
@@ -235,4 +356,4 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`), and llama.cpp's `/props` whether it takes images (`vision`, its `modalities`); a turn asks each profile's server once per server run: a profile without `contextWindow` uses the slot context it reports, a profile without `vision` takes what the server says of images, and a llama.cpp server streams the prompt read so far (`docs/12` "Watchdogs"). Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier; "Images tool results show" is `vision`: as its server says - left out -, send them, or never); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 
-**Not yet:** the Anthropic and Claude Code providers, Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, sub-agents, checkpoints and rewind, the trajectory files.
+**Not yet:** the Anthropic API provider (an API key; Bedrock's HTTP has no TLS yet, and the owner wants Claude on the subscription), Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, sub-agents, checkpoints and rewind, the trajectory files.

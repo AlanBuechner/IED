@@ -9,6 +9,8 @@ include "prompts.ch"
 include "models.ch"
 include "catalog.ch"
 include "probe.ch"
+include "claudeaccount.ch"
+include "claudesession.ch"
 
 namespace Ai
 {
@@ -43,8 +45,12 @@ namespace Ai
 		// A turn ended: the next queued message, if the turn finished, starts the next.
 		public void TurnEnded(Chat* chat);
 		public Core::String ModelOf(const Chat* chat) const;
+		// The chat's Claude session (docs/04 "A chat's session"), made from what its header kept the first time this
+		// server run asks.
+		public ClaudeSession* SessionOf(Chat* chat);
 
 		public IED::PluginContext* context;
+		public ClaudeAccount* claude;                              // the plan's usage (docs/04 "Usage")
 		public Prompts prompts;
 		public ToolRegistry* tools;
 		public Core::HashMap<Core::String, double> prefillRates;   // model -> prompt tokens per second, measured
@@ -74,11 +80,20 @@ namespace Ai
 		private Core::String HistoryMethod(const IED::Request& request);
 		private Core::String DeleteMethod(const IED::Request& request);
 		private Core::String ProbeMethod(const IED::Request& request);
+		// The thread that asks for Claude's usage every ai.claude.usageRefreshMinutes and stops idle sessions.
+		private void ClaudeKeeper();
+		// Stops the Claude sessions no turn used for kClaudeIdleMs; the lock is held.
+		private void StopIdleSessions();
 
 		private Core::Array<Chat*> chats;
+		private Core::HashMap<Core::String, ClaudeSession*> claudeSessions;   // by chat
+		private bool stopping;
 	}
 
 	Core::String ChatsTopic(Core::StringView wsId);
+	// ai.probe of a claude-code profile: the CLI asked now (where it is, its version, whether it is signed in), answered in
+	// a probe's shape.
+	Core::String ProbeClaude(ClaudeAccount* account, IED::PluginContext* context, const ModelProfile& profile);
 	// The workspace `wsId` the plugin is loaded for; throws not_found.
 	IED::Workspace OpenWorkspace(Core::StringView wsId);
 }

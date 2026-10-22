@@ -100,6 +100,39 @@ namespace Ai
 		private void TrackLoop(ToolCallDraft* call, const ToolOutcome& outcome);
 		private void TrackModified(Core::StringView path, int64 plus, int64 minus);
 
+		// --- runclaude.cf: Claude through the owner's CLI (docs/04 "The Claude Code provider") ---
+		// The Claude candidates the plan's usage leaves in, with each paced profile's pick; why the last went, when every
+		// candidate did. The lock is held.
+		private Core::String ChooseClaude();
+		// The model the candidate in use runs on Claude: pacing's pick, or its profile's model.
+		private Core::String ClaudeModel() const;
+		// One step: what the session has not seen sent, the CLI's stream read to the response's end.
+		private StepResult* ClaudeStep(const StepEvents& events);
+		private bool StartClaude(Core::String& problem);
+		private void SendToClaude();
+		// One of the step's lines; true when the step is over.
+		private bool TakeClaudeLine(ClaudeLine* line, ClaudeResponse* response, StepResult* result, const StepEvents& events, int64 startedMs);
+		// A line beside a step's: a rate limit event, the session's id, a query's result.
+		private void ClaudeAside(ClaudeLine* line);
+		private void ClaudeErrorOf(ClaudeLine* line, StepResult* result);
+		// The query's result: the context window the CLI reports.
+		private void ClaudeResult(ClaudeLine* line);
+		// Reads the query to its result.
+		private void DrainClaude();
+		// Claude cannot serve the turn (`claudeBlocked`: a usage limit, no subscription sign-in): the next candidate that is
+		// not Claude, or a pause saying why. The lock is held.
+		private void ClaudeBlocked();
+		// The call's result to the CLI's tools/call for it.
+		private void AnswerClaude(Core::StringView toolUseId, const ToolOutcome& outcome);
+		// The turn is over: the query settled, the usage asked, the session kept for the chat's next turn.
+		private void EndClaude();
+		private ClaudeSession* claude;                               // the chat's session once a Claude step used it
+		private int64 claudeSent;                                    // the turn's messages before this the session has
+		private Core::String claudeAside;                            // steering that came mid-query, for the next tool result
+		private Core::HashMap<Core::String, Core::String> claudePicks;   // a paced profile -> the model pacing picked
+		private Core::String claudeBlocked;                          // why Claude cannot serve this turn; empty while it can
+		private Core::String claudeBlockedStop;                      // the stop a pause for it records: usage_limit, not_subscription
+
 		// The models to try in order, the one in use, and the attempts on it.
 		private Core::Array<ModelProfile*> candidates;
 		private int64 candidate;
