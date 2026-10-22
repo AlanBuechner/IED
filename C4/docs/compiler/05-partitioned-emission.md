@@ -33,10 +33,16 @@ the partitions' bitcode, and with it the object cache, does not depend on `-j`:
   each round (`SettleLayouts`); the two things emission asks of the model that can change it (a census counter's
   signature, the function a function-pointer global starts at) go through a lock the partitions share
   (`ModuleContext::ShareModel`).
-- **The program's own code and data** come after the fixed point, in partition 0: global initialization, invoke
-  thunks, the reflection image's registration, the GC roots (which declare every other partition's static locals),
-  the entry point or the test harness, the file-scope assembly. The reflection image itself is a module of its own
-  (below).
+- **The program's own code and data** come after the fixed point, in partition 0: global initialization, the
+  reflection image's registration, the GC roots (which declare every other partition's static locals), the entry
+  point or the test harness, the file-scope assembly. The reflection image itself is a module of its own (below).
+- **Invoke thunks** are lowered on the coordinator and emitted like any round's trees, an own thunk in its target's
+  partition and a shared one where its name places it, so an edit that adds a reflected method changes its own
+  partition only.
+- **Objects.** Each partition's bitcode is written on the output's threads, and a partition whose object the cache
+  does not keep is assembled on the same thread right after (`WriteCachedObjects` with a bitcode callback), so an
+  edit's partitions start while the others' bitcode is written; partitions with the same code (empty ones) claim
+  their shared object once (BUG-366).
 
 ## Placement (`Backend/CodeGen/ProgramPlacement`)
 

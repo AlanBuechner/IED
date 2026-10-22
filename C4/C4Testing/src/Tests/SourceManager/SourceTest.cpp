@@ -419,6 +419,30 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void SourceTest::TestFolderFilesKeepTheirOrderAndText()
+	{
+		TempDirGuard guard;
+		guard.path = MakeTempDir("order");
+		for (int i = 0; i < 40; ++i)
+			WriteFile(guard.path / (i % 2 ? "nested" : "") / ("file" + std::to_string(i) + ".cf"), "// file " + std::to_string(i) + "\n");
+
+		Scripting::SourceManager manager;
+		TEST_ASSERT_EQ(manager.RegisterFolder(guard.path), 40u);
+		uint32 previous = 0;
+		for (const fs::directory_entry& entry : fs::recursive_directory_iterator(guard.path))
+		{
+			if (!entry.is_regular_file()) continue;
+			const std::string relative = entry.path().lexically_relative(guard.path).generic_string();
+			const uint32 id = manager.FindSourceId(relative.c_str());
+			TEST_ASSERT(id > previous);
+			previous = id;
+			const std::string stem = entry.path().stem().string();
+			const std::string expected = "// file " + stem.substr(4) + "\n";
+			TEST_ASSERT(std::string(manager.GetInfo(id).source->Data()) == expected);
+		}
+		TEST_PASSED();
+	}
+
 	void SourceTest::TestResolveIncludeHasNoBasenameFallback()
 	{
 		TempDirGuard guard;

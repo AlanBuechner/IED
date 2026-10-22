@@ -4,6 +4,7 @@
 #include "Compiler/IrVerification.h"
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
+#include "Compiler/ParallelFor.h"
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/Bitcode/BitcodeReader.h>
@@ -400,6 +401,14 @@ namespace Scripting
 	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, std::vector<KeyedModule> keyed, const ObjectSettings& settings,
 		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics)
 	{
+		std::vector<std::string> written;
+		return WriteCachedObjects(partitions.size(), [&partitions](size_t i) { return std::move(partitions[i]); }, std::move(keyed), settings,
+			cache, diagnostics, written);
+	}
+
+	CachedObjects WriteCachedObjects(size_t partitions, const std::function<std::string(size_t)>& bitcode, std::vector<KeyedModule> keyed,
+		const ObjectSettings& settings, const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, std::vector<std::string>& written)
+	{
 		InitializeX86();
 		const std::error_code ec = llvm::sys::fs::create_directories(cache.Folder().string());
 		if (ec)
@@ -407,19 +416,37 @@ namespace Scripting
 			diagnostics.push_back({ 0, "cannot create the object cache '" + cache.Folder().string() + "': " + ec.message() });
 			return {};
 		}
-		std::vector<Partition> parts(partitions.size() + keyed.size());
-		for (size_t i = 0; i < partitions.size(); ++i)
-		{
-			parts[i].objPath = cache.ObjectFor(partitions[i]).string();
-			parts[i].bitcode = std::move(partitions[i]);
-		}
+		std::vector<Partition> parts(partitions + keyed.size());
 		for (size_t i = 0; i < keyed.size(); ++i)
 		{
-			parts[partitions.size() + i].objPath = cache.ObjectKeyed(keyed[i].key).string();
-			parts[partitions.size() + i].build = std::move(keyed[i].build);
+			parts[partitions + i].objPath = cache.ObjectKeyed(keyed[i].key).string();
+			parts[partitions + i].build = std::move(keyed[i].build);
 		}
-		const std::vector<Partition*> missing = NotCached(parts);
-		AssembleInParallel(missing, settings);
-		return Collected(parts, missing, cache, diagnostics);
+		std::mutex lock;
+		std::unordered_set<std::string> claimed; // each object assembled once: partitions with the same code share it (BUG-366)
+		std::vector<char> assembled(parts.size(), 0);
+		ParallelFor(parts.size(), std::max(settings.threads, 1u), [&](size_t task) {
+			const size_t i = task < keyed.size() ? partitions + task : task - keyed.size();
+			Partition& part = parts[i];
+			if (i < partitions)
+			{
+				part.bitcode = bitcode(i);
+				part.objPath = cache.ObjectFor(part.bitcode).string();
+			}
+			{
+				const std::lock_guard<std::mutex> held(lock);
+				if (!claimed.insert(part.objPath).second) return;
+			}
+			if (llvm::sys::fs::exists(part.objPath)) return;
+			AssemblePartition(part, settings);
+			assembled[i] = 1;
+		});
+		std::vector<Partition*> made;
+		for (size_t i = 0; i < parts.size(); ++i)
+			if (assembled[i]) made.push_back(&parts[i]);
+		CachedObjects objects = Collected(parts, made, cache, diagnostics);
+		written.clear();
+		for (size_t i = 0; i < partitions; ++i) written.push_back(std::move(parts[i].bitcode));
+		return objects;
 	}
 }

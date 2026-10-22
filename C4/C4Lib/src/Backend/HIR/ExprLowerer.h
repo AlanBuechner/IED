@@ -153,6 +153,15 @@ namespace Scripting
 			std::vector<const HIRNode*> nodes;
 			std::vector<Value> values;
 			std::vector<const BracedInitializerNode*> braced;
+
+			/// Room for `count` arguments in each list: a call's are made one by one.
+			void Reserve(uint32 count)
+			{
+				types.Reserve(count);
+				nodes.reserve(count);
+				values.reserve(count);
+				braced.reserve(count);
+			}
 		};
 		QueryResult<CallArgumentList> ResolveCallArguments(const Core::Vector<Ref<AstNode>>& nodes);
 		void AppendCallArgument(CallArgumentList& list, const Value& value);

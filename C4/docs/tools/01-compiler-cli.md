@@ -67,7 +67,7 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 | `-Werror` | Every warning is an error: the build fails on the first phase that reports one. |
 | `-w` | Warnings are not reported. |
 | `-export-macros` | Write each file's final macro table as `<name>.c4macro` next to the output. |
-| `-ftime`, `--time-phases` | Print a per-phase timing footer (preprocess, parse, model, lower, script host, bitcode, inline bodies, optimize, split, codegen or optimize+codegen, interface, runtime+link), also when the build succeeds, and a line on the partitions: how many, how many were reused, and of those assembled the longest, all of them together and the largest in instructions (how well the threads were used). |
+| `-ftime`, `--time-phases` | Print a per-phase timing footer (register, preprocess, parse, model, lower, script host, optimize, split, codegen or optimize+codegen (a program in partitions: their bitcode too), inline bodies, interface, runtime+link), also when the build succeeds, and a line on the partitions: how many, how many were reused, and of those assembled the longest, all of them together and the largest in instructions (how well the threads were used). |
 | `--pretty-print` | Dump the parsed ASTs. |
 | `-v` | Verbose: prints the tool command lines (clang, CBind, link). |
 | `--version` | Print `C4 <major>.<minor>.<patch>` and exit 0. |

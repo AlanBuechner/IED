@@ -45,9 +45,11 @@ in `C4Lib`.
  [8] lld-link: main obj + runtimes + foreign objs + libs -> <out>.exe
 ```
 
-`-ftime` prints the wall-clock time of each phase: preprocess, parse, model, lower, script host (with
-`--script-host`), bitcode and inline bodies (a program emitted in partitions; inline bodies with `--script-host`),
-optimize and codegen (one `optimize+codegen` phase in an incremental build), interface, runtime+link.
+`-ftime` prints the wall-clock time of each phase: register (reading the sources, on several threads), preprocess,
+parse, model, lower, script host (with
+`--script-host`), optimize and codegen (one `optimize+codegen` phase in an incremental build, which writes each
+partition's bitcode and assembles the partitions it changed on the same threads), inline bodies (with `--script-host`),
+interface, runtime+link.
 
 ## 1. Source registration
 

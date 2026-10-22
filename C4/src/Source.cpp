@@ -60,8 +60,10 @@ namespace
 
 		int Run()
 		{
+			auto registered = std::chrono::steady_clock::now();
 			if (!RegisterSources())
 				return 1;
+			m_Compiler.AddPhaseTime("register", SecondsSince(registered));
 
 			m_Result.timePhases = m_Options.timePhases;
 			m_Compiler.SetTarget(m_Options.target);

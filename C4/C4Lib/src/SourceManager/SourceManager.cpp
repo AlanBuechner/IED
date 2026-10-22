@@ -1,7 +1,10 @@
 #include "SourceManager.h"
 #include "Compiler/FileIo.h"
+#include "Compiler/ParallelFor.h"
 #include <algorithm>
+#include <thread>
 #include <cctype>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -106,26 +109,32 @@ namespace Scripting
 			m_Folders.push_back({ baseDir, project });
 
 		// Error codes, never exceptions: a folder that cannot be read is skipped, as the build skips it.
-		uint32 count = 0;
 		std::error_code error;
 		const auto options = fs::directory_options::skip_permission_denied;
 		const fs::path walked = ExtendedPath(folder);
 		const fs::path plainFolder = PlainPath(walked);
+		std::vector<fs::path> found;
+		auto take = [&](const fs::directory_entry& entry) {
+			std::error_code kindError;
+			if (!entry.is_regular_file(kindError) || !IsC4Source(entry.path())) return;
+			const fs::path path = PlainPath(entry.path());
+			if (!m_AbsPaths.count(NormalizePath(Utf8(path)))) found.push_back(path);
+		};
 		if (scan == FolderScan::TopOnly)
-			for (fs::directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error))
-				count += RegisterFolderFile(*it, plainFolder, baseDir);
+			for (fs::directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error)) take(*it);
 		else
-			for (fs::recursive_directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error))
-				count += RegisterFolderFile(*it, plainFolder, baseDir);
+			for (fs::recursive_directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error)) take(*it);
+
+		// The files are read on several threads, then registered in the order the walk found them.
+		std::vector<Ref<Source>> read(found.size());
+		ParallelFor(found.size(), std::thread::hardware_concurrency(), [&](size_t i) { read[i] = CreateRef<Source>(found[i]); });
+		uint32 count = 0;
+		for (size_t i = 0; i < found.size(); ++i) count += RegisterFolderFile(found[i], read[i], plainFolder, baseDir);
 		return count;
 	}
 
-	uint32 SourceManager::RegisterFolderFile(const fs::directory_entry& entry, const fs::path& folder, const std::string& baseDir)
+	uint32 SourceManager::RegisterFolderFile(const fs::path& path, Ref<Source> source, const fs::path& folder, const std::string& baseDir)
 	{
-		std::error_code kindError;
-		if (!entry.is_regular_file(kindError) || !IsC4Source(entry.path())) return 0;
-
-		const fs::path path = PlainPath(entry.path());
 		std::string absPath = NormalizePath(Utf8(path));
 		if (m_AbsPaths.count(absPath)) return 0;
 
@@ -134,7 +143,7 @@ namespace Scripting
 
 		std::string relStr = NormalizePath(Utf8(path.lexically_relative(folder)));
 
-		SourceInfo info{ id, relStr, baseDir, absPath, CreateRef<Source>(path) };
+		SourceInfo info{ id, relStr, baseDir, absPath, std::move(source) };
 		info.project = ProjectOf(absPath);
 		m_Sources.emplace(id, std::move(info));
 		m_NameToId[relStr] = id;
@@ -176,12 +185,15 @@ namespace Scripting
 		if (!IsFolder(Utf8(rootPath))) return 0;
 		std::string root = NormalizePath(Utf8(fs::absolute(rootPath).lexically_normal()));
 		std::vector<fs::path> entries;
+		std::map<std::string, bool> exists; // the file system asked once per path: most files include the same headers
 		for (const auto& [id, info] : m_Sources)
 			for (const std::string& inc : ExtractIncludes(info.source->Data()))
 			{
 				if (ResolveIncludePath(inc.c_str(), id) != 0) continue; // the program's own file
 				fs::path candidate = PathOf(root) / PathOf(inc);
-				if (IsFile(Utf8(candidate))) entries.push_back(candidate);
+				auto [asked, fresh] = exists.try_emplace(Utf8(candidate));
+				if (fresh) asked->second = IsFile(asked->first);
+				if (asked->second) entries.push_back(candidate); // every time: the walk takes them from the back
 			}
 		const fs::path prelude = PathOf(root) / "Prelude" / "prelude.ch";
 		const bool hasPrelude = IsFile(Utf8(prelude));
@@ -222,11 +234,15 @@ namespace Scripting
 				if (IsFile(Utf8(paired))) queue.push_back(paired);
 			}
 
+			// A file this walk registered exists and is not registered again: most includes name one, and asking the file
+			// system for each costs more than the rest of the walk.
+			auto known = [&](const fs::path& p) { return queued.count(NormalizePath(Utf8(p.lexically_normal()))) != 0; };
 			for (const auto& inc : ExtractIncludes(m_Sources.at(id).source->Data())) {
 				fs::path c1 = fs::absolute(cur.parent_path() / PathOf(inc));
+				if (known(c1)) continue;
 				if (IsFile(Utf8(c1))) { queue.push_back(c1); continue; }
 				fs::path c2 = fs::absolute(PathOf(root) / PathOf(inc));
-				if (IsFile(Utf8(c2))) queue.push_back(c2);
+				if (!known(c2) && IsFile(Utf8(c2))) queue.push_back(c2);
 			}
 		}
 		return count;

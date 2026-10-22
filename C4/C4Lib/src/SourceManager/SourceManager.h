@@ -127,7 +127,7 @@ namespace Scripting
 
 	private:
 		// One entry of a folder being registered: 1 when it is a C4 source now registered, else 0.
-		uint32 RegisterFolderFile(const fs::directory_entry& entry, const fs::path& folder, const std::string& baseDir);
+		uint32 RegisterFolderFile(const fs::path& path, Ref<Source> source, const fs::path& folder, const std::string& baseDir);
 
 		std::string NormalizePath(const std::string& path) const
 		{

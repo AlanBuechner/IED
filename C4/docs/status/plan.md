@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 10 done).
+  progress (steps 1 to 11 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1694,7 +1694,15 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
   The link fell from 0.32 s to 0.29 s and lowering from 0.55 s to 0.51 s; the bitcode phase stayed at 0.11 s: it is
   the partitions' throughput, not partition 0.
-- **Next:** HIR lowering (about 0.55 s of an edit, the largest serial part) on several threads. What it takes, found
+- **Done notes (step 11):** a partition's object is assembled on the thread that wrote its bitcode, right after it,
+  when the cache has none (`WriteCachedObjects` with a bitcode callback; identical partitions claim their shared
+  object once), so an edit's partition starts while the others' bitcode is written; `-ftime` counts the bitcode in
+  `optimize+codegen`, and the inline bodies follow it. A folder's sources are read on several threads and registered
+  in the walk's order (`-ftime`: `register`); the library walk asks the file system once per header it has not
+  registered; a call's argument lists are reserved and a plain argument needs no vector of its own. IED server, the
+  median of three runs (before / after; seconds): nothing changed 1.43 / 1.35, a statement 1.85 / 1.67, a function
+  added 1.86 / 1.76, a header constant 2.39 / 2.32 to 2.40 (its two partitions, one of 25k instructions, dominate).
+- **Next:** HIR lowering (about 0.5 s of an edit, the largest serial part) on several threads. What it takes, found
   reading it: a scope position per lowering context (`SymbolTable::PushScope` moves the table's one `m_Current` and
   hangs each block's layer under the shared tree for good, since the trees point at their locals); the model's
   memos made safe to fill from several threads (`LifecycleMethodsOf`, the synthesized lifecycle records, the

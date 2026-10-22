@@ -80,4 +80,11 @@ namespace Scripting
 	/// only when missing, before the partitions that are.
 	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, std::vector<KeyedModule> keyed, const ObjectSettings& settings,
 		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics);
+
+	/// The same with partition i's bitcode made by `bitcode(i)` on the threads that assemble: a partition whose object
+	/// is missing is assembled on the thread that made its bitcode, at once, so an edit's partitions start while the
+	/// others' bitcode is still being written. The keyed modules go first, their building the longest work when it is
+	/// needed. `written` gets each partition's bitcode.
+	CachedObjects WriteCachedObjects(size_t partitions, const std::function<std::string(size_t)>& bitcode, std::vector<KeyedModule> keyed,
+		const ObjectSettings& settings, const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, std::vector<std::string>& written);
 }

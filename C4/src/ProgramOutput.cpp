@@ -58,28 +58,25 @@ bool ProgramOutput::OptimizesPartitions(const Scripting::CompileOptions& options
 	return options.incremental && !options.emitIR && !options.emitBitcode && !options.compileOnly;
 }
 
-// A program emitted in partitions (D-81): each partition's bitcode, its object reused or assembled, then the link.
+// A program emitted in partitions (D-81): each partition's bitcode, its object reused or assembled on the thread that
+// wrote the bitcode (an edit's partitions start while the others' bitcode is written), the inline bodies, then the link.
 bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base)
 {
 	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, true, true };
 	const auto start = std::chrono::steady_clock::now();
 	const Scripting::PartitionOptimization optimization = settings.optLevel == 0 ? Scripting::PartitionOptimization::AfterAtO0
 		: Scripting::PartitionOptimization::After;
-	std::vector<std::string> bitcode(partitions.size());
-	Scripting::ParallelFor(partitions.size(), settings.threads,
-		[&](size_t i) { bitcode[i] = Scripting::PartitionBitcode(*partitions[i], optimization); });
-	m_In.compiler.AddPhaseTime("bitcode", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
-	if (m_HostBuild && !CollectInlineBodies(partitions, bitcode, base, settings)) return false;
-	const auto assembly = std::chrono::steady_clock::now();
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
 	const Scripting::ObjectCache cache(base + ".objects", CacheSalt(settings));
 	std::vector<Scripting::KeyedModule> keyed;
 	if (!image.key.empty()) keyed.push_back(image);
 	if (m_HostBuild) keyed.push_back(HostTable(*partitions.front()));
 	const unsigned count = static_cast<unsigned>(partitions.size() + keyed.size());
-	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(std::move(bitcode), std::move(keyed), settings, cache, diagnostics);
+	std::vector<std::string> bitcode;
+	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(partitions.size(),
+		[&](size_t i) { return Scripting::PartitionBitcode(*partitions[i], optimization); }, std::move(keyed), settings, cache, diagnostics, bitcode);
 	Report(diagnostics);
-	Timed("optimize+codegen", assembly);
+	Timed("optimize+codegen", start);
 	if (m_In.options.timePhases) ReportPartitions(objects, count, settings.threads);
 	if (m_In.options.verbose)
 	{
@@ -88,6 +85,7 @@ bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitio
 		ReportObjects(instructions, count, objects.reused, settings.threads, cache);
 	}
 	if (objects.paths.empty()) return false;
+	if (m_HostBuild && !CollectInlineBodies(partitions, bitcode, base, settings)) return false;
 	if (m_HostBuild && !FinishScriptHost(*partitions.front(), settings, base, objects.paths)) return false;
 	return Link(objects.paths);
 }

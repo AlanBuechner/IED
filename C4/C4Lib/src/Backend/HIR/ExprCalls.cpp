@@ -8,6 +8,7 @@
 #include "Backend/HIR/Lifecycle.h"
 #include "Backend/HIR/DeclLowerer.h"
 #include "Backend/HIR/Intrinsics.h"
+#include "Parser/Nodes/Expressions/PackExpansionNode.h"
 #include "Backend/HIR/MethodReceiver.h"
 #include "Backend/HIR/LambdaLowerer.h"
 #include "Backend/HIR/Callables.h"
@@ -246,6 +247,7 @@ namespace Scripting
 	QueryResult<ExprLowerer::CallArgumentList> ExprLowerer::ResolveCallArguments(const Core::Vector<Ref<AstNode>>& nodes)
 	{
 		CallArgumentList list;
+		list.Reserve(nodes.Count());
 		for (const auto& node : nodes)
 		{
 			if (const auto* brace = NodeAs<BracedInitializerNode>(node.Get()))
@@ -264,9 +266,16 @@ namespace Scripting
 				list.braced.push_back(nullptr);
 				continue;
 			}
-			auto values = ResolveArgument(node.Get());
-			if (!values.Ok()) return QueryResult<CallArgumentList>::Fail(values.error, values.message);
-			for (const Value& value : values.value) AppendCallArgument(list, value);
+			if (const auto* expansion = NodeAs<PackExpansionNode>(node.Get()))
+			{
+				auto values = ResolveExpansion(expansion);
+				if (!values.Ok()) return QueryResult<CallArgumentList>::Fail(values.error, values.message);
+				for (const Value& value : values.value) AppendCallArgument(list, value);
+				continue;
+			}
+			auto value = ResolveExpr(node.Get());
+			if (!value.Ok()) return QueryResult<CallArgumentList>::Fail(value.error, value.message);
+			AppendCallArgument(list, value.value);
 		}
 		return list;
 	}

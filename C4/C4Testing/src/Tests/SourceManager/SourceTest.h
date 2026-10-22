@@ -104,5 +104,9 @@ namespace Testing
 		// A bare include name does not reach a file registered under a nested relative path.
 		TEST_FUNC(SourceManager.Resolve)
 		void TestResolveIncludeHasNoBasenameFallback();
+
+		// A folder's files are read on several threads and registered in the order its walk lists them.
+		TEST_FUNC(SourceManager.Folder)
+		void TestFolderFilesKeepTheirOrderAndText();
 	};
 } // namespace Testing
