@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <windows.h>
 #include "ReflectABI.h"
+#include "Reflect/ReflectCodeIndex.h"
 #include "Reflect/ReflectIndex.h"
 #include "Reflect/ReflectOwned.h"
 #include "Reflect/ReflectRecords.h"
@@ -32,18 +33,20 @@ typedef struct rt_registry {
     rt_groups groups;
     rt_listener* listeners;
     uint32_t listenerCount, listenerCapacity, nextListenerId;
+    rt_code_index code;            // functions by where their code starts, rebuilt when it is stale
+    int codeStale;                 // set by every write: registrations and unloads change the functions
 } rt_registry;
 
 // The C ABI carries no registry parameter: this is the process's one registry.
 static rt_registry g_registry = {
     SRWLOCK_INIT, { 0 }, { 0 }, { 0 },
     { 0, 0, type_name }, { 0, 0, variable_symbol }, { 0, 0, variable_name }, { 0, 0, function_symbol }, { 0, 0, function_name },
-    { 0 }, 0, 0, 0, 1 };
+    { 0 }, 0, 0, 0, 1, { 0 }, 0 };
 
 static rt_registry* reading(void) { AcquireSRWLockShared(&g_registry.lock); return &g_registry; }
 static void done_reading(rt_registry* r) { ReleaseSRWLockShared(&r->lock); }
 static rt_registry* writing(void) { AcquireSRWLockExclusive(&g_registry.lock); return &g_registry; }
-static void done_writing(rt_registry* r) { ReleaseSRWLockExclusive(&r->lock); }
+static void done_writing(rt_registry* r) { r->codeStale = 1; ReleaseSRWLockExclusive(&r->lock); }
 
 // ------------------------------------------------------------------ registration
 
@@ -159,18 +162,32 @@ static const void* code_start(const void* address)
     return NULL;
 }
 
+// The registry for reading, its code index current: rebuilt under the exclusive lock (which no write then marks
+// stale) whenever a write made it stale, until a reader finds it current.
+static rt_registry* reading_with_code_index(void)
+{
+    for (;;)
+    {
+        rt_registry* r = reading();
+        if (!r->codeStale) return r;
+        done_reading(r);
+        AcquireSRWLockExclusive(&g_registry.lock);
+        if (g_registry.codeStale && rt_code_index_build(&g_registry.code, (const c4_function_info* const*)g_registry.fns.items, g_registry.fns.count))
+            g_registry.codeStale = 0;
+        const int built = !g_registry.codeStale;
+        ReleaseSRWLockExclusive(&g_registry.lock);
+        if (!built) return 0;
+    }
+}
+
 const c4_function_info* reflect_function_containing(const void* address)
 {
     if (!address) return 0;
     const void* found_start = code_start(address);
     const void* start = found_start ? found_start : address;   // a leaf without unwind data: only its first byte
-    rt_registry* r = reading();
-    const c4_function_info* found = 0;
-    for (uint32_t i = 0; i < r->fns.count && !found; i++)
-    {
-        const rt_function* f = (const rt_function*)r->fns.items[i];
-        if (f->base.address == start) found = &f->base;
-    }
+    rt_registry* r = reading_with_code_index();
+    if (!r) return 0;
+    const c4_function_info* found = rt_code_index_find(&r->code, start);
     done_reading(r);
     return found;
 }
