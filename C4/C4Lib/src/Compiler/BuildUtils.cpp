@@ -1,5 +1,6 @@
 #include "Compiler/BuildUtils.h"
 #include "Compiler/Version.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/Toolchain.h"
 #include "Core/Core.h"
 #include <iostream>
@@ -341,11 +342,7 @@ namespace Scripting
 		return RunTool(args);
 	}
 
-	void RemoveIfExists(const std::string& path)
-	{
-		if (fs::exists(path))
-			fs::remove(path);
-	}
+	void RemoveIfExists(const std::string& path) { RemoveFile(path); }
 
 	bool RunToolWithOutput(const Core::Vector<Core::String>& args, int& exitCode,
 		std::string& outStdout, std::string& outStderr)

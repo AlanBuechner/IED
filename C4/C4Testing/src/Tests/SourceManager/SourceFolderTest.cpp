@@ -1,6 +1,7 @@
 #include "SourceFolderTest.h"
 #include "SourceManager/SourceManager.h"
-#include <fstream>
+#include "Compiler/FileIo.h"
+#include <process.h>
 
 namespace Testing
 {
@@ -8,24 +9,26 @@ namespace Testing
 
 	namespace
 	{
-		// A folder in the temp folder, removed with the test.
+		// A folder in the temp folder, this process's own, removed with the test; made and removed by its extended
+		// spelling, so it may be deeper than MAX_PATH.
 		struct Folder
 		{
 			fs::path root;
 
-			explicit Folder(const char* name) : root(fs::temp_directory_path() / (std::string("c4_folder_") + name))
+			explicit Folder(const char* name)
+				: root(fs::temp_directory_path() / (std::string("c4_folder_") + name + "_" + std::to_string(_getpid())))
 			{
 				std::error_code ec;
-				fs::remove_all(root, ec);
-				fs::create_directories(root, ec);
+				fs::remove_all(ExtendedPath(root), ec);
+				fs::create_directories(ExtendedPath(root), ec);
 			}
-			~Folder() { std::error_code ec; fs::remove_all(root, ec); }
+			~Folder() { std::error_code ec; fs::remove_all(ExtendedPath(root), ec); }
 
 			void Write(const fs::path& file, const std::string& text)
 			{
 				const fs::path path = root / file;
-				fs::create_directories(path.parent_path());
-				std::ofstream(path, std::ios::binary) << text;
+				CreateFolders(PathText(path.parent_path()));
+				WriteFileBytes(PathText(path), text);
 			}
 
 			std::string Utf8(const fs::path& file) const
@@ -37,8 +40,8 @@ namespace Testing
 			}
 		};
 
-		const fs::path kData = fs::path(u8"数据.cf");                 // two CJK characters: no ANSI code page holds them
-		const fs::path kNotes = fs::path(u8"заметки.txt");   // Cyrillic, not a source
+		const fs::path kData = fs::path(u8"\u6570\u636e.cf");                 // two CJK characters: no ANSI code page holds them
+		const fs::path kNotes = fs::path(u8"\u0437\u0430\u043c\u0435\u0442\u043a\u0438.txt");   // Cyrillic, not a source
 		const std::string kDataUtf8 = "\xe6\x95\xb0\xe6\x8d\xae.cf";
 	}
 
@@ -47,13 +50,13 @@ namespace Testing
 		Folder folder("utf8");
 		folder.Write(kData, "int32 x = 1;\n");
 		folder.Write(kNotes, "not C4\n");
-		folder.Write(fs::path(u8"дир") / "inner.ch", "int32 y = 2;\n");
+		folder.Write(fs::path(u8"\u0434\u0438\u0440") / "inner.ch", "int32 y = 2;\n");
 		SourceManager sources;
 		TEST_ASSERT_EQ(sources.RegisterFolder(folder.root), 2u);
 		const uint32 id = sources.FindByAbsPath(folder.Utf8(kData));
 		TEST_ASSERT(id != 0);
 		TEST_ASSERT_EQ(sources.GetInfo(id).displayName, kDataUtf8);
-		TEST_ASSERT(sources.FindByAbsPath(folder.Utf8(fs::path(u8"дир") / "inner.ch")) != 0);
+		TEST_ASSERT(sources.FindByAbsPath(folder.Utf8(fs::path(u8"\u0434\u0438\u0440") / "inner.ch")) != 0);
 		TEST_PASSED();
 	}
 
@@ -67,6 +70,25 @@ namespace Testing
 		SourceManager sources;
 		TEST_ASSERT_EQ(sources.RegisterFolder(folder.root), 2u);
 		TEST_ASSERT_EQ(sources.RegisterFolder(folder.root / "missing"), 0u);
+		TEST_PASSED();
+	}
+
+	void SourceFolderTest::ADeepFolderRegistersAndReads()
+	{
+		Folder folder("deep");
+		const fs::path deep = fs::path(std::string(120, 'd')) / std::string(120, 'e') / "deep.cf";
+		const std::string text = "int32 deep = 3;\n";
+		folder.Write(deep, text);
+		TEST_ASSERT(PathText(folder.root / deep).size() > 260);
+		SourceManager sources;
+		TEST_ASSERT_EQ(sources.RegisterFolder(folder.root), 1u);
+		const uint32 id = sources.FindByAbsPath(folder.Utf8(deep));
+		TEST_ASSERT(id != 0);
+		TEST_ASSERT_EQ(std::string(sources.GetInfo(id).source->Data()), text);
+		SourceManager single;
+		const uint32 file = single.RegisterFile(folder.root / deep);
+		TEST_ASSERT(file != 0);
+		TEST_ASSERT_EQ(std::string(single.GetInfo(file).source->Data()), text);
 		TEST_PASSED();
 	}
 } // namespace Testing

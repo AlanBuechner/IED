@@ -1,5 +1,6 @@
 #include "Script/ScriptDll.h"
 #include "Script/ScriptDllImports.h"
+#include "Compiler/FileIo.h"
 #include <lld/Common/Driver.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -9,7 +10,6 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -92,9 +92,8 @@ namespace Scripting
 			{
 				if (m_Remove) m_Remove(reinterpret_cast<const void*>(m_Image.low));
 				FreeLibrary(m_Module);
-				std::error_code ec;
-				fs::remove(m_Path, ec);
-				fs::remove(fs::path(m_Path).replace_extension(".pdb"), ec);
+				RemoveFile(PathText(m_Path));
+				RemoveFile(PathText(fs::path(m_Path).replace_extension(".pdb")));
 			}
 
 			void* Find(const std::string& name) const override { return reinterpret_cast<void*>(GetProcAddress(m_Module, name.c_str())); }
@@ -151,10 +150,8 @@ namespace Scripting
 
 		bool WriteFile(const fs::path& path, const std::string& bytes, std::string* error)
 		{
-			std::ofstream out(path, std::ios::binary | std::ios::trunc);
-			out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-			if (out) return true;
-			return Fail(error, "cannot write " + path.string());
+			if (WriteFileBytes(PathText(path), bytes)) return true;
+			return Fail(error, "cannot write " + PathText(path));
 		}
 
 		// lld keeps its state per link; one link at a time. A link that crashed leaves it unusable for the process.
@@ -213,14 +210,17 @@ namespace Scripting
 			return runs;
 		}
 
+		// Walked and removed by the extended spelling, so a deep folder goes too (BUG-356).
 		void RemoveEndedProcessFolders(const fs::path& root)
 		{
 			std::error_code ec;
-			for (const fs::directory_entry& entry : fs::directory_iterator(root, ec))
+			for (fs::directory_iterator it(ExtendedPath(root), ec), end; !ec && it != end; it.increment(ec))
 			{
-				const std::string name = entry.path().filename().string();
-				if (!entry.is_directory(ec) || name.empty() || name.find_first_not_of("0123456789") != std::string::npos) continue;
-				if (!ProcessRuns(static_cast<DWORD>(std::stoul(name)))) fs::remove_all(entry.path(), ec);
+				const std::string name = PathText(it->path().filename());
+				std::error_code kind;
+				if (!it->is_directory(kind) || name.empty() || name.find_first_not_of("0123456789") != std::string::npos) continue;
+				std::error_code held;
+				if (!ProcessRuns(static_cast<DWORD>(std::stoul(name)))) fs::remove_all(it->path(), held);
 			}
 		}
 	}
@@ -233,8 +233,7 @@ namespace Scripting
 
 	void RemoveScriptDllFolder(const std::string& folder)
 	{
-		std::error_code ec;
-		fs::remove(folder, ec); // only when empty: a PDB a debugger holds keeps it for the next host to clean
+		RemoveFile(folder); // only when empty: a PDB a debugger holds keeps it for the next host to clean
 	}
 
 	std::unique_ptr<LinkedScript> LinkScriptDll(ScriptCode code, const HostSymbolTable& host, const CpuTarget& target,
@@ -254,8 +253,7 @@ namespace Scripting
 		std::optional<std::string> importObject = EmitObject(*ScriptImportModule(*code.context, *imports, *machine), *machine, error);
 		if (!importObject) return nullptr;
 
-		std::error_code ec;
-		fs::create_directories(file.folder, ec);
+		CreateFolders(file.folder);
 		const fs::path base = fs::path(file.folder) / file.name;
 		const fs::path scriptObject = base.string() + ".obj";
 		const fs::path importsObject = base.string() + ".imports.obj";
@@ -263,8 +261,8 @@ namespace Scripting
 		const fs::path pdb = base.string() + ".pdb";
 		if (!WriteFile(scriptObject, *object, error) || !WriteFile(importsObject, *importObject, error)) return nullptr;
 		const bool linked = LinkWithLld(LinkArguments(dll, pdb, { scriptObject, importsObject }, *definitions), error);
-		fs::remove(scriptObject, ec);
-		fs::remove(importsObject, ec);
+		RemoveFile(PathText(scriptObject));
+		RemoveFile(PathText(importsObject));
 		if (!linked) return nullptr;
 
 		HMODULE module = LoadLibraryExW(dll.wstring().c_str(), nullptr, 0);

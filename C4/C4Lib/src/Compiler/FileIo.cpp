@@ -23,7 +23,42 @@ namespace Scripting
 		return !out.has_error();
 	}
 
+	std::string PathText(const std::filesystem::path& path)
+	{
+		const std::u8string text = path.u8string();
+		return std::string(text.begin(), text.end());
+	}
+
 	bool FileExists(const std::string& path) { return llvm::sys::fs::exists(path); }
+
+	bool IsFile(const std::string& path) { return llvm::sys::fs::is_regular_file(path); }
+
+	bool IsFolder(const std::string& path) { return llvm::sys::fs::is_directory(path); }
+
+	namespace
+	{
+		const std::wstring kExtended = L"\\\\?\\";
+		const std::wstring kExtendedShare = L"\\\\?\\UNC\\";
+		const std::wstring kShare = L"\\\\";
+	}
+
+	std::filesystem::path ExtendedPath(const std::filesystem::path& path)
+	{
+		if (path.wstring().rfind(kExtended, 0) == 0) return path;
+		std::error_code ec;
+		const std::filesystem::path full = std::filesystem::absolute(path, ec);
+		const std::wstring normal = (ec ? path : full).lexically_normal().make_preferred().wstring();
+		if (normal.rfind(kShare, 0) == 0) return std::filesystem::path(kExtendedShare + normal.substr(kShare.size()));
+		return std::filesystem::path(kExtended + normal);
+	}
+
+	std::filesystem::path PlainPath(const std::filesystem::path& path)
+	{
+		const std::wstring text = path.wstring();
+		if (text.rfind(kExtendedShare, 0) == 0) return std::filesystem::path(kShare + text.substr(kExtendedShare.size()));
+		if (text.rfind(kExtended, 0) == 0) return std::filesystem::path(text.substr(kExtended.size()));
+		return path;
+	}
 
 	void RemoveFile(const std::string& path) { llvm::sys::fs::remove(path); }
 

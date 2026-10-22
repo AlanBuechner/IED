@@ -1,4 +1,5 @@
 #include "Compiler/Toolchain.h"
+#include "Compiler/FileIo.h"
 #include <cstdlib>
 #include <system_error>
 #ifdef _WIN32
@@ -14,8 +15,10 @@ namespace Scripting::Toolchain
 		constexpr int kRepositoryDepth = 4;
 		const fs::path kSourceTree = "C4";
 
-		bool IsFile(const fs::path& p) { std::error_code ec; return fs::is_regular_file(p, ec); }
-		bool IsFolder(const fs::path& p) { std::error_code ec; return fs::is_directory(p, ec); }
+		// Through FileIo, so a C4 installed in a deep folder finds its parts (BUG-356).
+		bool IsFile(const fs::path& p) { return Scripting::IsFile(PathText(p)); }
+		bool IsFolder(const fs::path& p) { return Scripting::IsFolder(PathText(p)); }
+		bool Exists(const fs::path& p) { return FileExists(PathText(p)); }
 
 		fs::path ExecutableFolder()
 		{
@@ -35,8 +38,8 @@ namespace Scripting::Toolchain
 			for (int i = 0; i < kRepositoryDepth && !folder.empty(); ++i)
 			{
 				folder = folder.parent_path();
-				if (fs::exists(folder / relative)) return folder / relative;
-				if (IsSourceTree(folder / kSourceTree) && fs::exists(folder / kSourceTree / relative)) return folder / kSourceTree / relative;
+				if (Exists(folder / relative)) return folder / relative;
+				if (IsSourceTree(folder / kSourceTree) && Exists(folder / kSourceTree / relative)) return folder / kSourceTree / relative;
 			}
 			return {};
 		}

@@ -1,5 +1,7 @@
 #include "ProjectsTest.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/ProjectFile.h"
+#include <process.h>
 #include <string>
 
 namespace Testing
@@ -148,6 +150,26 @@ namespace Testing
 		ProjectSet one = ProjectSet::OneProject({ "C:/Work/app", "C:/Work/lib" });
 		TEST_ASSERT_EQ((int)one.Count(), 1);
 		TEST_ASSERT_EQ((int)*one.OwnerOf("C:/Work/lib/x.cf"), 0);
+		TEST_PASSED();
+	}
+
+	void ProjectsTest::ADeepDescriptionReads()
+	{
+		// BUG-356: a description in a folder whose path passes MAX_PATH reads, and its folders resolve from there.
+		const fs::path root = fs::temp_directory_path() / ("c4_projects_test_" + std::to_string(_getpid()));
+		const fs::path folder = root / std::string(120, 'd') / std::string(120, 'e');
+		std::error_code ec;
+		fs::create_directories(ExtendedPath(folder), ec);
+		const fs::path file = folder / "c4project.toml";
+		TEST_ASSERT(PathText(file).size() > 260);
+		TEST_ASSERT(WriteFileBytes(PathText(file), "root = \"App\"\n[[project]]\nname = \"App\"\nsources = [\"src\"]\n"));
+		ProjectFileResult read = ReadProjectFile(file);
+		TEST_ASSERT_EQ(read.error, std::string());
+		TEST_ASSERT_EQ((int)read.list.projects.size(), 1);
+		TEST_ASSERT(read.list.projects[0].sources[0].lexically_normal() == (folder / "src").lexically_normal());
+		ProjectFileResult missing = ReadProjectFile(folder / "missing.toml");
+		TEST_ASSERT(missing.error.find("cannot read the build description") == 0 && missing.error.find('\\') == std::string::npos);
+		fs::remove_all(ExtendedPath(root), ec);
 		TEST_PASSED();
 	}
 } // namespace Testing

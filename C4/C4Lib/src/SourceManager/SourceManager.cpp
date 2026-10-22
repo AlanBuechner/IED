@@ -1,7 +1,7 @@
 #include "SourceManager.h"
+#include "Compiler/FileIo.h"
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <set>
 #include <sstream>
 
@@ -30,8 +30,7 @@ namespace Scripting
 
 	uint32 SourceManager::RegisterFile(const fs::path& path)
 	{
-		std::ifstream test(path, std::ios::binary);
-		if (!test.is_open()) return 0;
+		if (!IsFile(Utf8(path))) return 0;
 
 		std::string absPath = NormalizePath(Utf8(fs::absolute(path).lexically_normal()));
 		if (m_AbsPaths.count(absPath)) return 0;
@@ -94,9 +93,11 @@ namespace Scripting
 		m_PreludeId = preludeId;
 	}
 
+	// Walked by its extended spelling (FileIo's ExtendedPath), so a deep folder lists (BUG-356); its entries are named
+	// as they read.
 	uint32 SourceManager::RegisterFolder(const fs::path& folder, FolderScan scan)
 	{
-		if (!fs::is_directory(folder)) return 0;
+		if (!IsFolder(Utf8(folder))) return 0;
 
 		std::string baseDir = NormalizePath(Utf8(fs::absolute(folder).lexically_normal()));
 		while (baseDir.size() > 1 && baseDir.back() == '/') baseDir.pop_back();
@@ -108,12 +109,14 @@ namespace Scripting
 		uint32 count = 0;
 		std::error_code error;
 		const auto options = fs::directory_options::skip_permission_denied;
+		const fs::path walked = ExtendedPath(folder);
+		const fs::path plainFolder = PlainPath(walked);
 		if (scan == FolderScan::TopOnly)
-			for (fs::directory_iterator it(folder, options, error), end; !error && it != end; it.increment(error))
-				count += RegisterFolderFile(*it, folder, baseDir);
+			for (fs::directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error))
+				count += RegisterFolderFile(*it, plainFolder, baseDir);
 		else
-			for (fs::recursive_directory_iterator it(folder, options, error), end; !error && it != end; it.increment(error))
-				count += RegisterFolderFile(*it, folder, baseDir);
+			for (fs::recursive_directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error))
+				count += RegisterFolderFile(*it, plainFolder, baseDir);
 		return count;
 	}
 
@@ -122,18 +125,16 @@ namespace Scripting
 		std::error_code kindError;
 		if (!entry.is_regular_file(kindError) || !IsC4Source(entry.path())) return 0;
 
-		std::ifstream test(entry.path(), std::ios::binary);
-		if (!test.is_open()) return 0;
-
-		std::string absPath = NormalizePath(Utf8(fs::absolute(entry.path())));
+		const fs::path path = PlainPath(entry.path());
+		std::string absPath = NormalizePath(Utf8(path));
 		if (m_AbsPaths.count(absPath)) return 0;
 
 		uint32 id = m_NextId++;
 		m_AbsPaths.insert(absPath);
 
-		std::string relStr = NormalizePath(Utf8(entry.path().lexically_relative(folder)));
+		std::string relStr = NormalizePath(Utf8(path.lexically_relative(folder)));
 
-		SourceInfo info{ id, relStr, baseDir, absPath, CreateRef<Source>(entry.path()) };
+		SourceInfo info{ id, relStr, baseDir, absPath, CreateRef<Source>(path) };
 		info.project = ProjectOf(absPath);
 		m_Sources.emplace(id, std::move(info));
 		m_NameToId[relStr] = id;
@@ -172,18 +173,18 @@ namespace Scripting
 
 	uint32 SourceManager::RegisterIncludedLibraryFiles(const fs::path& rootPath)
 	{
-		if (!fs::is_directory(rootPath)) return 0;
-		std::string root = NormalizePath(Utf8(fs::absolute(rootPath)));
+		if (!IsFolder(Utf8(rootPath))) return 0;
+		std::string root = NormalizePath(Utf8(fs::absolute(rootPath).lexically_normal()));
 		std::vector<fs::path> entries;
 		for (const auto& [id, info] : m_Sources)
 			for (const std::string& inc : ExtractIncludes(info.source->Data()))
 			{
 				if (ResolveIncludePath(inc.c_str(), id) != 0) continue; // the program's own file
 				fs::path candidate = PathOf(root) / PathOf(inc);
-				if (fs::is_regular_file(candidate)) entries.push_back(candidate);
+				if (IsFile(Utf8(candidate))) entries.push_back(candidate);
 			}
 		const fs::path prelude = PathOf(root) / "Prelude" / "prelude.ch";
-		const bool hasPrelude = fs::is_regular_file(prelude);
+		const bool hasPrelude = IsFile(Utf8(prelude));
 		if (entries.empty() && !hasPrelude) return 0;
 		m_LibraryRoot = root;
 		uint32 count = RegisterLibraryClosure(root, std::move(entries));
@@ -205,7 +206,7 @@ namespace Scripting
 
 			uint32 id = m_NextId++;
 			m_AbsPaths.insert(absCur);
-			std::string relStr = NormalizePath(Utf8(fs::relative(cur, PathOf(root))));
+			std::string relStr = NormalizePath(Utf8(fs::absolute(cur).lexically_normal().lexically_relative(PathOf(root))));
 			SourceInfo info{ id, relStr, NormalizePath(Utf8(fs::absolute(cur).parent_path())), absCur, CreateRef<Source>(cur) };
 			info.project = m_Projects.Root();
 			info.library = true;
@@ -218,14 +219,14 @@ namespace Scripting
 			if (IsC4Source(cur)) {
 				fs::path paired = cur;
 				paired.replace_extension(cur.extension() == ".ch" ? ".cf" : ".ch");
-				if (fs::is_regular_file(paired)) queue.push_back(paired);
+				if (IsFile(Utf8(paired))) queue.push_back(paired);
 			}
 
 			for (const auto& inc : ExtractIncludes(m_Sources.at(id).source->Data())) {
 				fs::path c1 = fs::absolute(cur.parent_path() / PathOf(inc));
-				if (fs::is_regular_file(c1)) { queue.push_back(c1); continue; }
+				if (IsFile(Utf8(c1))) { queue.push_back(c1); continue; }
 				fs::path c2 = fs::absolute(PathOf(root) / PathOf(inc));
-				if (fs::is_regular_file(c2)) queue.push_back(c2);
+				if (IsFile(Utf8(c2))) queue.push_back(c2);
 			}
 		}
 		return count;

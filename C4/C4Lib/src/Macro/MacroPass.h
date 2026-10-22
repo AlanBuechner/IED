@@ -44,14 +44,6 @@ namespace Scripting
 		/// Preprocesses `files`. An include carries the macros of the file `resolve` names, when it is one of them.
 		static std::vector<FileResult> RunFiles(std::vector<Input> files, const IncludeResolver& resolve);
 
-		/// Process every .cf/.ch file under each folder in roots (shared include fallback).
-		/// Returns results in sorted order. Optional overrides replace a file's on-disk text
-		/// (e.g. unsaved editor buffers), keyed by normalized absolute path (forward slashes).
-		/// predefinedMacros (Macro/PredefinedMacros.h) are seeded into every file's initial macro table.
-		static std::vector<FileResult> RunFolders(const std::vector<std::string>& roots,
-			const std::map<std::string, std::string>* overrides = nullptr,
-			const std::map<std::string, std::string>& predefinedMacros = {});
-
 		/// Write each result's macro table to <name>.c4macro next to the output dir.
 		static void ExportTables(const std::vector<FileResult>& results, const std::string& outDir);
 

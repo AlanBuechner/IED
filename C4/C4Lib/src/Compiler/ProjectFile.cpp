@@ -1,8 +1,8 @@
 #include "Compiler/ProjectFile.h"
+#include "Compiler/FileIo.h"
+#include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <set>
-#include <sstream>
 
 namespace Scripting
 {
@@ -205,14 +205,14 @@ namespace Scripting
 		return result;
 	}
 
+	// Through FileIo, so a project in a deep folder reads (BUG-356).
 	ProjectFileResult ReadProjectFile(const fs::path& file)
 	{
-		std::ifstream in(file, std::ios::binary);
-		if (!in.is_open()) return { {}, "cannot read the build description '" + file.generic_string() + "'" };
-		std::stringstream text;
-		text << in.rdbuf();
-		ProjectFileResult result = ParseProjectFile(text.str(), fs::absolute(file).parent_path());
-		if (!result.error.empty()) result.error = file.generic_string() + ": " + result.error;
+		std::string shown = PathText(file);
+		std::replace(shown.begin(), shown.end(), '\\', '/');
+		if (!IsFile(PathText(file))) return { {}, "cannot read the build description '" + shown + "'" };
+		ProjectFileResult result = ParseProjectFile(ReadFileBytes(PathText(file)), fs::absolute(file).parent_path());
+		if (!result.error.empty()) result.error = shown + ": " + result.error;
 		return result;
 	}
 }

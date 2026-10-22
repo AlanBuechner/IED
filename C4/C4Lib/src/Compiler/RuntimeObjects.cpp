@@ -1,9 +1,8 @@
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/BuildUtils.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/Toolchain.h"
 #include <cstdio>
-#include <fstream>
-#include <iterator>
 #include <functional>
 #include <algorithm>
 #include <iostream>
@@ -29,34 +28,35 @@ namespace Scripting
 			return fs::temp_directory_path() / "c4_runtime" / hex / kObjectFolder;
 		}
 
-		std::vector<fs::path> CollectSources(const fs::path& root)
+		// The files under `root` with one of `extensions`, in path order, as they read. Walked by the extended spelling,
+		// so a deep install lists (BUG-356).
+		std::vector<fs::path> FilesUnder(const fs::path& root, std::initializer_list<const char*> extensions)
 		{
-			std::vector<fs::path> sources;
-			for (const auto& entry : fs::recursive_directory_iterator(root))
-			{
-				const fs::path ext = entry.path().extension();
-				if (ext == ".c" || ext == ".cpp") sources.push_back(entry.path());
-			}
-			std::sort(sources.begin(), sources.end());
-			return sources;
+			std::vector<fs::path> files;
+			std::error_code ec;
+			for (fs::recursive_directory_iterator it(ExtendedPath(root), fs::directory_options::skip_permission_denied, ec), end;
+				!ec && it != end; it.increment(ec))
+				for (const char* extension : extensions)
+					if (it->path().extension() == extension) files.push_back(PlainPath(it->path()));
+			std::sort(files.begin(), files.end());
+			return files;
 		}
 
-		std::string Bytes(const fs::path& file)
+		std::string Bytes(const fs::path& file) { return ReadFileBytes(PathText(file)); }
+
+		// `file`'s path from `root`, with forward slashes: what a source's object and the headers' key are named by.
+		std::string RelativeName(const fs::path& file, const fs::path& root)
 		{
-			std::ifstream in(file, std::ios::binary);
-			return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+			const std::u8string text = file.lexically_relative(PlainPath(ExtendedPath(root))).generic_u8string();
+			return std::string(text.begin(), text.end());
 		}
 
 		// Every header's path and bytes, in path order: a changed header changes every source's key.
 		uint64_t HeadersKey(const fs::path& root)
 		{
-			std::vector<fs::path> headers;
-			for (const auto& entry : fs::recursive_directory_iterator(root))
-				if (entry.path().extension() == ".h") headers.push_back(entry.path());
-			std::sort(headers.begin(), headers.end());
 			uint64_t key = kContentSeed;
-			for (const fs::path& header : headers)
-				key = RuntimeContentKey(Bytes(header), RuntimeContentKey(fs::relative(header, root).generic_string(), key));
+			for (const fs::path& header : FilesUnder(root, { ".h" }))
+				key = RuntimeContentKey(Bytes(header), RuntimeContentKey(RelativeName(header, root), key));
 			return key;
 		}
 
@@ -71,11 +71,12 @@ namespace Scripting
 		void RemoveOtherVersions(const fs::path& objectDir, const std::string& stem, const fs::path& current)
 		{
 			std::error_code ec;
-			for (const auto& entry : fs::directory_iterator(objectDir, ec))
+			for (fs::directory_iterator it(ExtendedPath(objectDir), ec), end; !ec && it != end; it.increment(ec))
 			{
-				const std::string name = entry.path().filename().string();
-				const bool sameSource = name.rfind(stem + "-", 0) == 0 && entry.path().extension() == ".obj";
-				if (sameSource && entry.path() != current) fs::remove(entry.path(), ec); // another build may still hold it
+				const std::string name = PathText(it->path().filename());
+				const bool sameSource = name.rfind(stem + "-", 0) == 0 && it->path().extension() == ".obj";
+				std::error_code held;
+				if (sameSource && it->path().filename() != current.filename()) fs::remove(it->path(), held); // another build may still hold it
 			}
 		}
 
@@ -93,16 +94,14 @@ namespace Scripting
 				for (const std::string& a : args) std::cout << " " << a;
 				std::cout << std::endl;
 			}
-			std::error_code ec;
 			if (!RunTool(args))
 			{
-				fs::remove(partial, ec);
+				RemoveFile(PathText(partial));
 				return false;
 			}
-			fs::rename(partial, object, ec);
-			if (!ec) return true;
-			fs::remove(partial, ec);
-			return fs::exists(object, ec); // another process put its copy in place first
+			if (!RenameFile(PathText(partial), PathText(object))) return true;
+			RemoveFile(PathText(partial));
+			return FileExists(PathText(object)); // another process put its copy in place first
 		}
 	}
 
@@ -133,14 +132,13 @@ namespace Scripting
 			return false;
 		}
 		const fs::path objectDir = ObjectFolder(root);
-		std::error_code ec;
-		fs::create_directories(objectDir, ec);
+		CreateFolders(PathText(objectDir));
 		const uint64_t headersKey = HeadersKey(root);
-		for (const fs::path& source : CollectSources(root))
+		for (const fs::path& source : FilesUnder(root, { ".c", ".cpp" }))
 		{
-			const std::string relative = fs::relative(source, root).generic_string();
+			const std::string relative = RelativeName(source, root);
 			const fs::path object = objectDir / RuntimeObjectName(relative, RuntimeContentKey(Bytes(source), headersKey));
-			if (!fs::exists(object, ec))
+			if (!FileExists(PathText(object)))
 			{
 				if (!Compile(root, source, object, verbose))
 				{

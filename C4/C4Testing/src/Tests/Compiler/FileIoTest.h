@@ -18,5 +18,9 @@ namespace Testing
 		void AMissingFileHasNoBytesAndNoStamp();
 		TEST_FUNC(Compiler.FileIo)
 		void AFileInAMissingFolderIsNotWritten();
+		TEST_FUNC(Compiler.FileIo)
+		void DeepFilesAndFoldersAreTold();
+		TEST_FUNC(Compiler.FileIo)
+		void ExtendedPathsAreSpelledForStdFilesystem();
 	};
 } // namespace Testing

@@ -1,9 +1,8 @@
 #include "Script/HostInterface.h"
 #include "Compiler/CpuTarget.h"
+#include "Compiler/FileIo.h"
 #include <cstring>
-#include <fstream>
 #include <iterator>
-#include <sstream>
 
 namespace Scripting
 {
@@ -234,21 +233,17 @@ namespace Scripting
 		return true;
 	}
 
+	// Through FileIo, so an interface in a deep folder is written and read (BUG-356).
 	bool WriteInterface(const HostInterface& host, const std::string& path, std::string* error)
 	{
-		std::ofstream file(path, std::ios::binary | std::ios::trunc);
-		if (!file) return Fail(error, "cannot write " + path);
-		const std::string bytes = SerializeInterface(host);
-		file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-		if (!file) return Fail(error, "cannot write " + path);
+		if (!WriteFileBytes(path, SerializeInterface(host))) return Fail(error, "cannot write " + path);
 		return true;
 	}
 
 	bool ReadInterface(const std::string& path, HostInterface& host, std::string* error)
 	{
-		std::ifstream file(path, std::ios::binary);
-		if (!file) return Fail(error, "cannot read " + path);
-		const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+		if (!IsFile(path)) return Fail(error, "cannot read " + path);
+		const std::string bytes = ReadFileBytes(path);
 		std::string why;
 		if (!DeserializeInterface(bytes, host, &why)) return Fail(error, path + ": " + why);
 		return true;

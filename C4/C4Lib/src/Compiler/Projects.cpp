@@ -1,4 +1,5 @@
 #include "Compiler/Projects.h"
+#include "Compiler/FileIo.h"
 #include <algorithm>
 #include <cctype>
 #include <functional>
@@ -157,7 +158,7 @@ namespace Scripting
 		for (const Project& project : m_Projects)
 		{
 			std::vector<fs::path>& folders = m_SearchFolders.emplace_back();
-			for (const fs::path& source : project.sources) folders.push_back(fs::is_directory(source) ? source : source.parent_path());
+			for (const fs::path& source : project.sources) folders.push_back(IsFolder(PathText(source)) ? source : source.parent_path());
 			for (const fs::path& include : project.includes) folders.push_back(include);
 		}
 	}

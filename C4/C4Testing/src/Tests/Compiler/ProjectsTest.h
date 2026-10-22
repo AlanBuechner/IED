@@ -27,5 +27,7 @@ namespace Testing
 		void AProjectUsesWhatItDependsOn();
 		TEST_FUNC(Compiler.Projects)
 		void FilesBelongToTheirProject();
+		TEST_FUNC(Compiler.Projects)
+		void ADeepDescriptionReads();
 	};
 } // namespace Testing

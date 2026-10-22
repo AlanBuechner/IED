@@ -1,10 +1,9 @@
 #include "Script/ScriptSources.h"
 #include "Compiler/CompilerInstance.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/Projects.h"
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 
 namespace Scripting
 {
@@ -75,11 +74,11 @@ namespace Scripting
 			return table;
 		}
 
+		// Through FileIo, so a script in a deep folder reads (BUG-356).
 		bool ReadText(const std::string& path, std::string& text)
 		{
-			std::ifstream file(path, std::ios::binary);
-			if (!file) return false;
-			text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			if (!IsFile(path)) return false;
+			text = ReadFileBytes(path);
 			return true;
 		}
 

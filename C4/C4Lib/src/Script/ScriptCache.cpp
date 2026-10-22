@@ -183,12 +183,9 @@ namespace Scripting
 		wchar_t path[MAX_PATH * 4];
 		const DWORD length = GetModuleFileNameW(module, path, static_cast<DWORD>(std::size(path)));
 		if (length == 0 || length >= std::size(path)) return "";
-		std::error_code ec;
-		const fs::path file(std::wstring(path, length));
-		const auto size = fs::file_size(file, ec);
-		if (ec) return "";
-		const auto time = fs::last_write_time(file, ec).time_since_epoch().count();
-		if (ec) return "";
-		return std::string(reinterpret_cast<const char*>(path), length * sizeof(wchar_t)) + "|" + std::to_string(size) + "|" + std::to_string(time);
+		const std::optional<FileStamp> stamp = StampOf(PathText(fs::path(std::wstring(path, length))));
+		if (!stamp) return "";
+		return std::string(reinterpret_cast<const char*>(path), length * sizeof(wchar_t)) + "|" + std::to_string(stamp->size) + "|" +
+			std::to_string(stamp->modified);
 	}
 } // namespace Scripting

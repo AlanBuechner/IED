@@ -5,7 +5,7 @@
 
 namespace Testing
 {
-	// Registering a folder's sources: names in any script, as UTF-8 (BUG-300).
+	// Registering a folder's sources: names in any script, as UTF-8 (BUG-300), and paths past MAX_PATH (BUG-356).
 	CLASS(GROUP = Testing) SourceFolderTest : public Test
 	{
 	public:
@@ -15,5 +15,7 @@ namespace Testing
 		void NamesOutsideTheCodePageAreUtf8();
 		TEST_FUNC(SourceManager.Folders)
 		void OnlyC4SourcesAreRegistered();
+		TEST_FUNC(SourceManager.Folders)
+		void ADeepFolderRegistersAndReads();
 	};
 } // namespace Testing

@@ -1,5 +1,5 @@
 #include "Source.h"
-#include <fstream>
+#include "Compiler/FileIo.h"
 #include <algorithm>
 
 namespace Scripting
@@ -26,23 +26,9 @@ namespace Scripting
 		}
 	}
 
-	Source::Source(const fs::path& path) : m_ReadPosition(0)
+	// Through FileIo, so a source in a deep folder reads (BUG-356); one that cannot be read is empty.
+	Source::Source(const fs::path& path) : m_Data(ReadFileBytes(PathText(path))), m_ReadPosition(0)
 	{
-		std::ifstream file(path, std::ios::binary | std::ios::ate);
-		if (!file.is_open())
-		{
-			m_Size = 0;
-			return;
-		}
-
-		size_t fileSize = static_cast<size_t>(file.tellg());
-		file.seekg(0, std::ios::beg);
-
-		m_Data.resize(fileSize);
-		if (fileSize > 0)
-		{
-			file.read(m_Data.data(), static_cast<std::streamsize>(fileSize));
-		}
 		StripUtf8Bom(m_Data);
 		m_Size = m_Data.size();
 		BuildLineTable();
