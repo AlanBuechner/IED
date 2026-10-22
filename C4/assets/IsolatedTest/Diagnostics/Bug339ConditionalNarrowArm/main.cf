@@ -1,0 +1,10 @@
+// BUG-339: a conditional's arm that is already narrow enough converts without a warning, though the conditional's
+// common type is wider; an arm whose own type is wider still warns.
+uint8 Pick(bool first, const uint8* bytes) { return first ? bytes[0] : 0u; }
+uint8 Nested(int32 n, uint8 small) { return n < 0 ? 0u : (n > 9 ? small : 7u); }
+uint8 Wide(bool first, uint16 wide) { return first ? wide : 0u; }
+
+int32 main() {
+	uint8[2] bytes = { 5u, 6u };
+	return Pick(true, &bytes[0]) == 5u && Nested(20, 3u) == 3u && Wide(false, 300u) == 0u ? 0 : 1;
+}

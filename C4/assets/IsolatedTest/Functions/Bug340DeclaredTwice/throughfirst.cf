@@ -1,0 +1,3 @@
+include "first.ch"
+
+int32 ThroughFirst() { return Twice(3); }

@@ -75,6 +75,15 @@
       "main.cf (3:2) warning: unknown annotation 'operater': did you mean 'operator'?", "Warnings:            2"],
     "reason": "Warnings are printed and the build still succeeds; constants that fit do not warn (B22)."
   },
+  "Functions/Bug340DeclaredTwice": {
+    "exit": 0,
+    "reason": "BUG-340: a function declared in two headers is visible to the includers of each, not only the last one read."
+  },
+  "Diagnostics/Bug339ConditionalNarrowArm": {
+    "exit": 0,
+    "compileMustContain": ["main.cf (5:46) warning: the conversion from 'uint32' to 'uint8' may change the value", "Warnings:            1"],
+    "reason": "BUG-339: a conditional's arm whose own type fits converts without a warning; a wider arm still warns."
+  },
   "Diagnostics/Bug336ConditionalConstants": {
     "exit": 0,
     "compileMustContain": ["main.cf (4:47) warning: the conversion from 'uint32' to 'uint8' may change the value",

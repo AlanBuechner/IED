@@ -190,7 +190,7 @@ namespace Scripting
 					if (!haveReceiver && rec->isExtensionMethod) continue;
 					// One overload set holds every file's same-named static (D4): each is a candidate only where
 					// its declaration is visible, so a file calls its own.
-					if (!rec->isBuiltin && !model.Symbols()->IsVisible(rec->declUnit, ctx.unitId)) { elsewhere = rec; continue; }
+					if (!rec->isBuiltin && !model.Symbols()->DeclarationVisible(*rec, ctx.unitId)) { elsewhere = rec; continue; }
 					candidates.Push({ rec->type, rec, rec->minArity });
 				}
 			else if (!haveReceiver && !isOperatorName)

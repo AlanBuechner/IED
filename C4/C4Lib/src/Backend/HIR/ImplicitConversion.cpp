@@ -165,10 +165,43 @@ namespace Scripting::ImplicitConversion
 			return folded.Ok() && ConstantFits(folded.value, to);
 		}
 
+		const TernaryExpressionNode* AsConditional(const AstNode* site)
+		{
+			while (const auto* parenthesized = dynamic_cast<const ParenthesizedExpressionNode*>(site)) site = parenthesized->GetExpression().Get();
+			return dynamic_cast<const TernaryExpressionNode*>(site);
+		}
+
+		bool ArmsFit(LoweringContext& ctx, const TernaryNode& choice, const TernaryExpressionNode* written, const Type* to);
+
+		// An arm narrows only when its own type is wider than `to` and it is no constant that fits: the common type the
+		// conditional converted it to does not count (clang's rule, BUG-339).
+		bool ArmFits(LoweringContext& ctx, const HIRNode* arm, const AstNode* written, const Type* to)
+		{
+			while (const auto* convert = dynamic_cast<const ConvertNode*>(arm))
+			{
+				const Type* from = TypeHandle::UnwrapToValue(convert->from);
+				if (from && PlainNumber(from) && !Narrows(from, to)) return true;
+				arm = convert->src;
+			}
+			if (const auto* choice = dynamic_cast<const TernaryNode*>(arm)) return ArmsFit(ctx, *choice, AsConditional(written), to);
+			if (const auto* constant = dynamic_cast<const ConstantNode*>(arm)) return ConstantFits(constant->value, to);
+			const Type* own = arm ? TypeHandle::UnwrapToValue(arm->type) : nullptr;
+			if (own && PlainNumber(own) && !Narrows(own, to)) return true;
+			return written && EveryValueFits(ctx, written, to);
+		}
+
+		bool ArmsFit(LoweringContext& ctx, const TernaryNode& choice, const TernaryExpressionNode* written, const Type* to)
+		{
+			return ArmFits(ctx, choice.thenExpr, written ? written->GetThenBranch().Get() : nullptr, to) &&
+				ArmFits(ctx, choice.elseExpr, written ? written->GetElseBranch().Get() : nullptr, to);
+		}
+
 		bool ValueFits(LoweringContext& ctx, const AstNode* site, const Value& value, const Type* to)
 		{
 			ConstantValue constant;
 			if (ConstantOf(ctx, site, value, constant)) return ConstantFits(constant, to);
+			if (const auto* choice = value.isLValue ? nullptr : dynamic_cast<const TernaryNode*>(value.rvalue))
+				return ArmsFit(ctx, *choice, AsConditional(site), to);
 			return site && EveryValueFits(ctx, site, to);
 		}
 	}

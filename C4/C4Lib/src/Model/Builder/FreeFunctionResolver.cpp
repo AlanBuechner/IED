@@ -170,7 +170,11 @@ namespace Scripting
 				: !f.fn->IsExtensionMethod();
 			if (!sameReceiver) continue;
 			AttachDefinition(*rec, *f.fn, f.unitId, QualifiedName(f.scope, f.name));
-			if (!f.fn->GetBody()) rec->declUnit = f.unitId; // a declaration makes the name visible to its includers
+			if (!f.fn->GetBody())
+			{
+				rec->declUnit = f.unitId; // a declaration makes the name visible to its includers, as each other one does
+				rec->declUnits.Push(f.unitId);
+			}
 			return rec;
 		}
 		return nullptr;
@@ -199,6 +203,7 @@ namespace Scripting
 		rec.declarations.Push(&fn);
 		rec.definingUnit = f.unitId;
 		rec.declUnit = f.unitId;
+		rec.declUnits.Push(f.unitId);
 		rec.isBuiltin = f.unitId == m_Ctx.model->PreludeUnit();
 		rec.mangledName = FunctionSymbol(f.scope, f.name, *sig.type);
 		// Same-named file-scope statics in different files must not share one symbol.

@@ -1,0 +1,4 @@
+include "first.ch"
+include "second.ch"
+
+int32 Twice(int32 x) { return x * 2; }

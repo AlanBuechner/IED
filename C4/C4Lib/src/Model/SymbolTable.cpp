@@ -153,6 +153,14 @@ namespace Scripting
 		return it != m_Closures.end() && it->second.count(definingUnit) != 0;
 	}
 
+	bool SymbolTable::DeclarationVisible(const FunctionRecord& function, uint32 askingUnit) const
+	{
+		if (IsVisible(function.declUnit, askingUnit)) return true;
+		for (uint32 unit : function.declUnits)
+			if (IsVisible(unit, askingUnit)) return true;
+		return false;
+	}
+
 	const SymbolInfo* SymbolTable::FindVisible(const Scope* from, const Core::String& name, uint32 askingUnit) const
 	{
 		if (!from) return nullptr;
@@ -175,7 +183,7 @@ namespace Scripting
 				// invisible to units that include only the header. The set is visible if ANY signature's
 				// declaration is visible to the asking unit.
 				for (const FunctionRecord* rec : e->functions)
-					if (rec && IsVisible(rec->declUnit, askingUnit)) { visible = true; break; }
+					if (rec && DeclarationVisible(*rec, askingUnit)) { visible = true; break; }
 			}
 				if (!visible) continue;
 				if (e->definingUnit == askingUnit) return e.get(); // own declaration wins

@@ -49,6 +49,7 @@ namespace Scripting
 		mutable Core::Vector<const AstNode*> declarations; // every FunctionDefinitionNode that declares or defines it, in order
 		mutable uint32 definingUnit = 0;            // source id of the defining file (0 = builtin); mutable: a body attached at pass 2 re-points it to the definition's unit
 		mutable uint32 declUnit = 0;                // the unit where this record was DECLARED - stable, used for VISIBILITY. Never re-pointed at body-attach (that would hide the name from header-only includers).
+		mutable Core::Vector<uint32> declUnits;     // every unit that declares it (BUG-340): each makes the name visible to its includers
 		Core::String mangledName;                   // unique emitted symbol for this signature
 		Core::String name;                          // plain C4-side name (not mangled) - reflection display + group queries
 		Core::Vector<Core::String> groups;          // [group("name")] annotations on the declaration (reflection, plan 14)
@@ -331,6 +332,8 @@ namespace Scripting
 		/// Record unitId's include closure (the units whose symbols are visible from it).
 		void SetIncludeClosure(uint32 unitId, const Core::Vector<uint32>& closure);
 		bool IsVisible(uint32 definingUnit, uint32 askingUnit) const;
+		/// Whether any declaration of `function` is visible from `askingUnit`.
+		bool DeclarationVisible(const FunctionRecord& function, uint32 askingUnit) const;
 
 		/// Innermost-first lookup that also enforces include-closure visibility. `askingUnit`
 		/// 0 (builtin context) sees everything. Among same-layer entries, the asking unit's own

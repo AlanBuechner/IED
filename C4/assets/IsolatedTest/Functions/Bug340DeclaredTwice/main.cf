@@ -1,0 +1,6 @@
+// BUG-340: a function declared in two headers is visible to the includers of each, whichever the compiler read last.
+include "second.ch"
+
+int32 ThroughFirst();
+
+int32 main() { return Twice(4) == 8 && ThroughFirst() == 6 ? 0 : 1; }
