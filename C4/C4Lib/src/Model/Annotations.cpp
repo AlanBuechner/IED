@@ -16,8 +16,7 @@ namespace Scripting
 	{
 		template<typename Node> const Core::Vector<Ref<AnnotationNode>>* AnnotationsAs(const AstNode* node)
 		{
-			const auto* typed = dynamic_cast<const Node*>(node);
-			return typed ? &typed->GetAnnotations() : nullptr;
+			return &static_cast<const Node*>(node)->GetAnnotations();
 		}
 
 		bool Reflectable(ConstantValue::Kind kind)
@@ -61,15 +60,21 @@ namespace Scripting
 		}
 	}
 
+	// Reflection asks this of every entity it registers: the node's kind is read, not cast.
 	const Core::Vector<Ref<AnnotationNode>>* DeclarationAnnotations(const AstNode* declaration)
 	{
-		if (const auto* found = AnnotationsAs<FunctionDefinitionNode>(declaration)) return found;
-		if (const auto* found = AnnotationsAs<ObjectDefinitionNode>(declaration)) return found;
-		if (const auto* found = AnnotationsAs<VariableDefinitionNode>(declaration)) return found;
-		if (const auto* found = AnnotationsAs<ParameterNode>(declaration)) return found;
-		if (const auto* found = AnnotationsAs<EnumDefinitionNode>(declaration)) return found;
-		if (const auto* found = AnnotationsAs<UnionDefinitionNode>(declaration)) return found;
-		return AnnotationsAs<AliasDefinitionNode>(declaration);
+		if (!declaration) return nullptr;
+		switch (declaration->Type())
+		{
+		case NodeType::FunctionDefinition: return AnnotationsAs<FunctionDefinitionNode>(declaration);
+		case NodeType::ObjectDefinition: return AnnotationsAs<ObjectDefinitionNode>(declaration);
+		case NodeType::VariableDefinition: return AnnotationsAs<VariableDefinitionNode>(declaration);
+		case NodeType::Parameter: return AnnotationsAs<ParameterNode>(declaration);
+		case NodeType::EnumDefinition: return AnnotationsAs<EnumDefinitionNode>(declaration);
+		case NodeType::UnionDefinition: return AnnotationsAs<UnionDefinitionNode>(declaration);
+		case NodeType::AliasDefinition: return AnnotationsAs<AliasDefinitionNode>(declaration);
+		default: return nullptr;
+		}
 	}
 
 	QueryResult<Core::Vector<ReflectedAnnotation>> ReflectedAnnotations(const ProgramModel& model,

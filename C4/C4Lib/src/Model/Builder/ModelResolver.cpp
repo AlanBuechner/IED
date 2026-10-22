@@ -454,25 +454,23 @@ namespace Scripting
 		return changed;
 	}
 
+	// A template specialization `node` names in a type position, and those its children name: instantiated (no-op for
+	// one that is not a template). Every node of every body passes here, so the node's kind is read, not cast.
+	static void InstantiateNamedTypes(ProgramModel& model, const AstNode* node, uint32 unit)
+	{
+		if (!node) return;
+		if (node->Type() == NodeType::QualType)
+			if (const auto* qt = static_cast<const QualTypeNode*>(node); qt->HasTemplateArgs()) model.ResolveType(*qt, unit);
+		for (const auto& child : node->Children()) InstantiateNamedTypes(model, child.Get(), unit);
+	}
+
 	// --- GAP A: the ONE body-opening pass (see ModelResolver.h) ------------------------------
 	void ModelResolver::InstantiateBodyReferences(ModelBuilder& builder, ModelBuilder::Context& ctx)
 	{
 		Core::Vector<const FunctionRecord*> recs;
 		ctx.model->AllFunctionRecords(recs);
 		for (const auto& r : recs)
-		{
-			if (!r->bodyNode) continue;
-			const auto* block = dynamic_cast<const CodeBlockNode*>(r->bodyNode);
-			if (!block) continue;
-			std::function<void(const AstNode*)> walk = [&](const AstNode* n) {
-				if (!n) return;
-				// A template specialization named in a type position: instantiate it (no-op if not a template).
-				if (const auto* qt = dynamic_cast<const QualTypeNode*>(n))
-					if (qt->HasTemplateArgs()) ctx.model->ResolveType(*qt, r->definingUnit);
-				for (const auto& child : n->Children()) walk(child.Get());
-			};
-			walk(block);
-		}
+			if (r->bodyNode && r->bodyNode->Type() == NodeType::CodeBlock) InstantiateNamedTypes(*ctx.model, r->bodyNode, r->definingUnit);
 	}
 
 } // namespace Scripting

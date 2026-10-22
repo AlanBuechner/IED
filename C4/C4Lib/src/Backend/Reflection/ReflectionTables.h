@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Core.h"
+#include "Backend/CodeGen/StableNames.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <string>
@@ -51,5 +52,6 @@ namespace Scripting
 		ModuleContext& m_Module;
 		llvm::LLVMContext& m_Context;
 		std::unordered_map<std::string, llvm::Constant*> m_Strings;
+		StableNames::ConstantNamer m_Namer; // names each table after its rows
 	};
 } // namespace Scripting

@@ -37,7 +37,7 @@ namespace Scripting
 		if (rows.empty()) return Null();
 		auto* table = llvm::ConstantArray::get(llvm::ArrayType::get(rowType, rows.size()), rows);
 		// Named after its rows; LLVM keeps one copy of each distinct constant, so the same pointer is the same table.
-		const std::string name = StableNames::ForConstant("c4.reflect.rows", *table);
+		const std::string name = m_Namer.Name("c4.reflect.rows", *table);
 		if (llvm::GlobalVariable* same = m_Module.module().getGlobalVariable(name, true); same && same->getInitializer() == table) return same;
 		return Global(name, table);
 	}

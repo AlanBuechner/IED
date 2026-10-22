@@ -37,29 +37,29 @@ namespace Scripting::StableNames
 				for (const llvm::Type* element : structure->elements()) AppendType(out, *element);
 			}
 		}
+	}
 
-		// The kinds reflection tables are made of are encoded by their parts; any other by its printed form.
-		void AppendConstant(std::string& out, const llvm::Constant& value)
+	// The kinds reflection tables are made of are encoded by their parts; any other by its printed form.
+	void ConstantNamer::Append(std::string& out, const llvm::Constant& value)
+	{
+		StableNames::Append(out, value.getValueID());
+		out += TypeBytes(*value.getType());
+		if (const auto* global = llvm::dyn_cast<llvm::GlobalValue>(&value)) AppendText(out, global->getName());
+		else if (const auto* integer = llvm::dyn_cast<llvm::ConstantInt>(&value))
 		{
-			Append(out, value.getValueID());
-			AppendType(out, *value.getType());
-			if (const auto* global = llvm::dyn_cast<llvm::GlobalValue>(&value)) AppendText(out, global->getName());
-			else if (const auto* integer = llvm::dyn_cast<llvm::ConstantInt>(&value))
-			{
-				const llvm::APInt& bits = integer->getValue();
-				out.append(reinterpret_cast<const char*>(bits.getRawData()), bits.getNumWords() * sizeof(uint64_t));
-			}
-			else if (const auto* real = llvm::dyn_cast<llvm::ConstantFP>(&value)) Append(out, real->getValueAPF().bitcastToAPInt().getZExtValue());
-			else if (const auto* data = llvm::dyn_cast<llvm::ConstantDataSequential>(&value)) AppendText(out, data->getRawDataValues());
-			else if (const auto* aggregate = llvm::dyn_cast<llvm::ConstantAggregate>(&value))
-				for (const llvm::Use& element : aggregate->operands()) AppendConstant(out, *llvm::cast<llvm::Constant>(element.get()));
-			else if (!llvm::isa<llvm::ConstantPointerNull, llvm::ConstantAggregateZero, llvm::UndefValue>(value))
-			{
-				std::string printed;
-				llvm::raw_string_ostream text(printed);
-				value.print(text);
-				AppendText(out, text.str());
-			}
+			const llvm::APInt& bits = integer->getValue();
+			out.append(reinterpret_cast<const char*>(bits.getRawData()), bits.getNumWords() * sizeof(uint64_t));
+		}
+		else if (const auto* real = llvm::dyn_cast<llvm::ConstantFP>(&value)) StableNames::Append(out, real->getValueAPF().bitcastToAPInt().getZExtValue());
+		else if (const auto* data = llvm::dyn_cast<llvm::ConstantDataSequential>(&value)) AppendText(out, data->getRawDataValues());
+		else if (const auto* aggregate = llvm::dyn_cast<llvm::ConstantAggregate>(&value))
+			for (const llvm::Use& element : aggregate->operands()) Append(out, *llvm::cast<llvm::Constant>(element.get()));
+		else if (!llvm::isa<llvm::ConstantPointerNull, llvm::ConstantAggregateZero, llvm::UndefValue>(value))
+		{
+			std::string printed;
+			llvm::raw_string_ostream text(printed);
+			value.print(text);
+			AppendText(out, text.str());
 		}
 	}
 
@@ -70,10 +70,22 @@ namespace Scripting::StableNames
 		return std::string(prefix) + "." + hash;
 	}
 
-	std::string ForConstant(std::string_view prefix, const llvm::Constant& value)
+	const std::string& ConstantNamer::TypeBytes(const llvm::Type& type)
+	{
+		auto [entry, fresh] = m_Types.try_emplace(&type);
+		if (fresh) AppendType(entry->second, type);
+		return entry->second;
+	}
+
+	std::string ConstantNamer::Name(std::string_view prefix, const llvm::Constant& value)
 	{
 		std::string encoded;
-		AppendConstant(encoded, value);
+		Append(encoded, value);
 		return ForBytes(prefix, encoded);
+	}
+
+	std::string ForConstant(std::string_view prefix, const llvm::Constant& value)
+	{
+		return ConstantNamer().Name(prefix, value);
 	}
 }
