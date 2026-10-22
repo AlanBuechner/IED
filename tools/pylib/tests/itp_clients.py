@@ -21,7 +21,7 @@ USES = {
 	"TaskBegin": [("nameStr", "string")], "PlotValue": [("plotId", "plot")], "PlotDef": [("nameStr", "string")],
 	"PoolDef": [("nameStr", "string")], "SrcLocDef": [("nameStr", "string"), ("fileStr", "string"), ("functionStr", "string")],
 	"FrameMark": [("frameSetStr", "string")], "FrameBegin": [("frameSetStr", "string")], "FrameEnd": [("frameSetStr", "string")],
-	"Alloc": [("poolId", "pool")], "Free": [("poolId", "pool")], "HeapCensusType": [("nameStr", "string")],
+	"Alloc": [("poolId", "pool")], "Free": [("poolId", "pool")], "HeapCensusType": [("nameStr", "string")], "HeapCensusTypeNative": [("nameStr", "string")],
 }
 DEFINES = {"StringDef": ("id", "string"), "SrcLocDef": ("id", "site"), "PlotDef": ("plotId", "plot"), "PoolDef": ("poolId", "pool")}
 

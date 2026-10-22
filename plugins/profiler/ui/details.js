@@ -15,7 +15,8 @@ function happenedInside(inside) {
 	const allocated = a && a.count ? count(a.count) + " (" + bytes(a.bytes) + ")"
 		+ (a.selfCount !== a.count ? " \u00b7 self " + count(a.selfCount) + " (" + bytes(a.selfBytes) + ")" : "")
 		+ (a.freedInside > 0 ? " \u00b7 " + count(a.freedInside) + " freed in it" : "") : null;
-	const native = a && a.nativeBytes ? bytes(a.nativeBytes) + (a.selfNativeBytes !== a.nativeBytes ? " \u00b7 self " + bytes(a.selfNativeBytes) : "") : null;
+	const native = a && (a.nativeBytes || a.nativeFreed) ? bytes(a.nativeBytes) + (a.selfNativeBytes !== a.nativeBytes ? " \u00b7 self " + bytes(a.selfNativeBytes) : "")
+		+ (a.nativeFreed ? " \u00b7 gave back " + bytes(a.nativeFreed) : "") : null;
 	const kv = [
 		allocated ? ["Allocated", allocated] : null,
 		native ? ["Native memory", native] : null,

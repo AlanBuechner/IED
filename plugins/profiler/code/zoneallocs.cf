@@ -13,6 +13,7 @@ namespace Profiler
 		counts.objects = (int64)extra.allocObjects;
 		counts.bytes = (int64)extra.allocBytes;
 		counts.nativeBytes = (int64)extra.nativeBytes;
+		counts.nativeFreed = (int64)extra.nativeFreed;
 		return counts;
 	}
 
@@ -20,6 +21,7 @@ namespace Profiler
 		parent.objects -= child.objects;
 		parent.bytes -= child.bytes;
 		parent.nativeBytes -= child.nativeBytes;
+		parent.nativeFreed -= child.nativeFreed;
 	}
 
 	// A zone's own counts can only fall below zero by a client's rounding; none is taken as none.
@@ -27,6 +29,7 @@ namespace Profiler
 		if (counts.objects < 0) counts.objects = 0;
 		if (counts.bytes < 0) counts.bytes = 0;
 		if (counts.nativeBytes < 0) counts.nativeBytes = 0;
+		if (counts.nativeFreed < 0) counts.nativeFreed = 0;
 		return counts;
 	}
 

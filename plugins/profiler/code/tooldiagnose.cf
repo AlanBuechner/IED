@@ -426,7 +426,12 @@ namespace Profiler
 			line.Append(Bytes(g.Member("nativeBytes").AsInt()).View());
 			line.Append(" of native memory (");
 			line.Append(Bytes(g.Member("nativeBytesPerFrame").AsInt()).View());
-			line.Append(" a frame, kept or freed again)");
+			line.Append(" a frame");
+			if (g.Member("nativeFreed").AsInt() > 0) {
+				line.Append(", and gave back ");
+				line.Append(Bytes(g.Member("nativeFreed").AsInt()).View());
+			}
+			line.Append(")");
 			if (!g.Member("file").AsView().IsEmpty()) {
 				line.Append(", at ");
 				line.Append(g.Member("file").AsView());
@@ -480,7 +485,15 @@ namespace Profiler
 			line.Append(Bytes(t.Member("firstBytes").AsInt()).View());
 			line.Append(" -> ");
 			line.Append(Bytes(t.Member("lastBytes").AsInt()).View());
-			line.Append("), more after ");
+			line.Append(")");
+			if (t.Member("lastNativeBytes").AsInt() > 0) {
+				line.Append(" holding ");
+				line.Append(Bytes(t.Member("firstNativeBytes").AsInt()).View());
+				line.Append(" -> ");
+				line.Append(Bytes(t.Member("lastNativeBytes").AsInt()).View());
+				line.Append(" of native memory");
+			}
+			line.Append(", more after ");
 			line.AppendInt(t.Member("rises").AsInt());
 			line.Append(" of ");
 			line.AppendInt(t.Member("steps").AsInt());

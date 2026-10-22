@@ -124,6 +124,9 @@ bottom tool windows) and the Captures tool window. Theme tokens only. */
 .prof-leak summary { display: flex; align-items: center; gap: var(--space-4); height: 22px; padding: 0 var(--space-5); cursor: pointer; font-size: var(--font-size-sm); }
 .prof-leak summary .meta { color: var(--text-2); }
 .prof-empty { padding: var(--space-5); font-size: var(--font-size-sm); line-height: 1.5; }
+/* A census row keeps its type's name; what it holds and its pattern wrap under it where the row is narrow. */
+.prof-census .row { flex-wrap: wrap; }
+.prof-census .row .grow { min-width: 7em; }
 
 .prof-library { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-1); }
 .prof-library .scroll { flex: 1; min-height: 0; overflow: auto; }

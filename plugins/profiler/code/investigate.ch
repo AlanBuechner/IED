@@ -53,14 +53,16 @@ namespace Profiler
 	// What happened in a window, per thread in time order.
 	Core::String Window(const Capture& capture, const WindowAsk& ask);
 
-	// What a zone counted (ZoneAllocs, ZoneNative): objects and their bytes, and the native memory its thread took.
+	// What a zone counted (ZoneAllocs, ZoneNative, ZoneNativeFreed): objects and their bytes, and the native memory its
+	// thread took and gave back.
 	struct ZoneCounts
 	{
 		public int64 objects;
 		public int64 bytes;
 		public int64 nativeBytes;
+		public int64 nativeFreed;
 
-		public bool IsEmpty() const { return objects == 0 && bytes == 0 && nativeBytes == 0; }
+		public bool IsEmpty() const { return objects == 0 && bytes == 0 && nativeBytes == 0 && nativeFreed == 0; }
 	}
 
 	// What zone `i` of `level` counted, its children's included.

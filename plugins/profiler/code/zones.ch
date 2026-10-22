@@ -21,7 +21,8 @@ namespace Profiler
 		public uint64 allocObjects;  // ZoneAllocs: what the zone allocated, its children's included
 		public uint64 allocBytes;
 		public uint64 nativeBytes;   // ZoneNative: the native memory its thread took in it, its children's included
-		public bool counted;         // a ZoneAllocs or ZoneNative came
+		public uint64 nativeFreed;   // ZoneNativeFreed: and gave back in it
+		public bool counted;         // a ZoneAllocs, ZoneNative or ZoneNativeFreed came
 	}
 
 	// The zones of one depth of one thread, in time order.

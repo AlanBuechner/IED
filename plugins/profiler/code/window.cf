@@ -168,9 +168,11 @@ namespace Profiler
 		json.IntField("count", all.objects);
 		json.IntField("bytes", all.bytes);
 		json.IntField("nativeBytes", all.nativeBytes);
+		json.IntField("nativeFreed", all.nativeFreed);
 		json.IntField("selfCount", own.objects);
 		json.IntField("selfBytes", own.bytes);
 		json.IntField("selfNativeBytes", own.nativeBytes);
+		json.IntField("selfNativeFreed", own.nativeFreed);
 		json.IntField("freedInside", freedInside);
 		json.EndObject();
 	}

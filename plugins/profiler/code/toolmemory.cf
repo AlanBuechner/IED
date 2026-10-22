@@ -105,10 +105,12 @@ namespace Profiler
 		out.Append(", the most growth first (");
 		out.Append(Number(c.Member("typeCount").AsInt()).View());
 		out.Append(" types):\n");
+		const bool native = c.Member("native").AsBool();
 		TextTable table;
 		Core::Array<Core::String>* head = table.Row();
-		const char*[7] titles = { "type", "objects first", "objects last", "bytes first", "bytes last", "rose in", "pattern" };
-		for (int32 i = 0; i < 7; ++i) head->Push(Core::String(titles[i]));
+		const char*[9] titles = { "type", "objects first", "objects last", "bytes first", "bytes last", "native first", "native last", "rose in", "pattern" };
+		for (int32 i = 0; i < 9; ++i)
+			if (native || (i != 5 && i != 6)) head->Push(Core::String(titles[i]));
 		Serialization::DomNode types = c.Member("types");
 		for (int64 i = 0; i < types.Count(); ++i) {
 			Serialization::DomNode t = types.At(i);
@@ -118,6 +120,10 @@ namespace Profiler
 			row->Push(Number(t.Member("lastObjects").AsInt()));
 			row->Push(Bytes(t.Member("firstBytes").AsInt()));
 			row->Push(Bytes(t.Member("lastBytes").AsInt()));
+			if (native) {
+				row->Push(Bytes(t.Member("firstNativeBytes").AsInt()));
+				row->Push(Bytes(t.Member("lastNativeBytes").AsInt()));
+			}
 			Core::StringBuilder rose;
 			rose.AppendInt(t.Member("rises").AsInt());
 			rose.Append(" of ");
@@ -126,6 +132,7 @@ namespace Profiler
 			row->Push(Core::String(t.Member("accumulating").AsBool() ? "keeps accumulating" : (t.Member("lastBytes").AsInt() > t.Member("firstBytes").AsInt() ? "grew" : "steady")));
 		}
 		table.Write(out);
+		if (native) out.Append("\"native\" is the native memory a type's live objects hold through their containers (buffers by capacity): a small object that owns a buffer weighs the buffer.\n");
 		out.Append("In a collected heap a leak is objects still reachable: a type that keeps accumulating is held by something that lives on (a cache, a list, an event handler never removed). Find who keeps references to it.\n");
 		return out.ToString();
 	}
@@ -331,7 +338,7 @@ namespace Profiler
 		if (a.Member("inZoneNativeBytes").AsInt() > 0) {
 			out.Append(", and the zones took ");
 			out.Append(Bytes(a.Member("inZoneNativeBytes").AsInt()).View());
-			out.Append(" of native memory (containers' buffers, raw blocks: the \"native\" column)");
+			out.Append(" of native memory (containers' buffers, raw blocks: the \"native\" column; \"native freed\" what they gave back, wherever it was taken)");
 		}
 		out.Append(". By ");
 		out.Append(GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone));
@@ -344,8 +351,8 @@ namespace Profiler
 		}
 		TextTable table;
 		Core::Array<Core::String>* head = table.Row();
-		const char*[9] titles = { GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "native", "thread", "source" };
-		for (int32 i = 0; i < 9; ++i) head->Push(Core::String(titles[i]));
+		const char*[10] titles = { GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "native", "native freed", "thread", "source" };
+		for (int32 i = 0; i < 10; ++i) head->Push(Core::String(titles[i]));
 		Serialization::DomNode groups = a.Member("groups");
 		for (int64 i = 0; i < groups.Count(); ++i) {
 			Serialization::DomNode g = groups.At(i);
@@ -357,6 +364,7 @@ namespace Profiler
 			row->Push(Bytes(g.Member("bytesPerFrame").AsInt()));
 			row->Push(Bytes(g.Member("meanSize").AsInt()));
 			row->Push(g.Member("nativeBytes").AsInt() > 0 ? Bytes(g.Member("nativeBytes").AsInt()) : Core::String());
+			row->Push(g.Member("nativeFreed").AsInt() > 0 ? Bytes(g.Member("nativeFreed").AsInt()) : Core::String());
 			row->Push(Core::String(g.Member("thread").AsView()));
 			row->Push(Source(g));
 		}

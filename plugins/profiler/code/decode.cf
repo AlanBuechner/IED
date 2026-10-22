@@ -23,6 +23,7 @@ namespace Profiler
 			case EventType::ZoneCallstack: return "v";
 			case EventType::ZoneAllocs: return "vv";
 			case EventType::ZoneNative: return "v";
+			case EventType::ZoneNativeFreed: return "v";
 			case EventType::TaskBegin: return "tvvv";
 			case EventType::TaskEnd: return "tv";
 			case EventType::TaskSuspend: return "tv";
@@ -42,6 +43,7 @@ namespace Profiler
 			case EventType::AllocCount: return "tvv";
 			case EventType::HeapCensus: return "tv";
 			case EventType::HeapCensusType: return "vvv";
+			case EventType::HeapCensusTypeNative: return "vvvv";
 			case EventType::LockDef: return "vvv";
 			case EventType::LockWait: return "tv";
 			case EventType::LockObtain: return "tv";

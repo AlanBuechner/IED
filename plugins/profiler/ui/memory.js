@@ -147,6 +147,7 @@ export class MemoryPanel {
 		return h("details.prof-leak", null,
 			h("summary", null, h("span.mono", null, bytes(size)), h("span.meta", null, times),
 				g.nativeBytes ? h("span.meta", { title: "Native memory its zones took: containers' buffers and raw blocks" }, "+" + bytes(g.nativeBytes) + " native") : null,
+				g.nativeFreed ? h("span.meta", { title: "Native memory its zones gave back, wherever it was taken" }, "-" + bytes(g.nativeFreed) + " native") : null,
 				h("span.ellip.grow", null, g.label),
 				source && this.openSource ? h("a.mono.prof-link", { href: "#", title: g.file, on: { click: open } }, source) : null),
 			g.callstack && g.callstack.length ? h("div.mono.prof-stack", null, g.callstack.map((frame) => h("div", null, frame))) : null);
@@ -165,9 +166,13 @@ export class MemoryPanel {
 		}
 		replace(this.census,
 			h("div.group-head", null, "Live objects by type", h("span.meta", null, count(answer.censuses) + " censuses")),
-			answer.types.map((t) => h("div.row", { title: count(t.firstObjects) + " (" + bytes(t.firstBytes) + ") at the first census" },
-				h("span.mono", null, bytes(t.lastBytes)), h("span.meta", null, count(t.lastObjects) + "x"), h("span.ellip.grow", null, t.name),
-				t.accumulating ? h("span.c-warn", null, "keeps accumulating") : h("span.meta", null, (t.lastBytes >= t.firstBytes ? "+" : "-") + bytes(Math.abs(t.lastBytes - t.firstBytes))))));
+			answer.types.map((t) => {
+				const grew = t.lastBytes + t.lastNativeBytes - t.firstBytes - t.firstNativeBytes;
+				return h("div.row", { title: count(t.firstObjects) + " (" + bytes(t.firstBytes) + ") at the first census" },
+					h("span.mono", null, bytes(t.lastBytes)), h("span.meta", null, count(t.lastObjects) + "x"), h("span.ellip.grow", null, t.name),
+					t.lastNativeBytes ? h("span.meta", { title: "Native memory its objects hold: their containers' buffers" }, "holding " + bytes(t.lastNativeBytes) + " native") : null,
+					t.accumulating ? h("span.c-warn", null, "keeps accumulating") : h("span.meta", null, (grew >= 0 ? "+" : "-") + bytes(Math.abs(grew))));
+			}));
 	}
 
 	lanes() {

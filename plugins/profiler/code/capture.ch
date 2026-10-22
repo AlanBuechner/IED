@@ -132,6 +132,7 @@ namespace Profiler
 		public uint64 nameStr;
 		public int64 objects;
 		public int64 bytes;
+		public int64 nativeBytes;   // the native memory its objects hold (HeapCensusTypeNative; 0 from HeapCensusType)
 	}
 
 	// Live objects by type after one collection (HeapCensus and its HeapCensusType lines).
@@ -314,7 +315,8 @@ namespace Profiler
 		public Core::Array<GcRecord> gcs;
 		public AllocCounter allocCounter;
 		public Core::Array<HeapCensus*> censuses;
-		public int64 zoneAllocs;                             // zones that said what they allocated (ZoneAllocs, ZoneNative)
+		public int64 zoneAllocs;                             // zones that said what they allocated (ZoneAllocs, ZoneNative, ZoneNativeFreed)
+		public bool censusNative;                            // a census said what native memory its types hold
 		public Core::HashMap<uint64, TaskInfo*> tasks;
 		public Core::HashMap<uint64, TaskLane*> taskLaneOf;  // task name string id -> lane
 		public Core::Array<TaskLane*> taskLanes;

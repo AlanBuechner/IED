@@ -16,6 +16,7 @@ namespace Profiler
 		public int64 count;
 		public int64 bytes;
 		public int64 nativeBytes;   // native memory the zones took (a collected program's counts)
+		public int64 nativeFreed;   // and gave back
 		public int64 churn;
 		public int64 live;
 		public int64 liveBytes;
@@ -104,6 +105,7 @@ namespace Profiler
 		json.IntField("bytesPerFrame", frames == 0 ? 0 : row->bytes / frames);
 		json.IntField("nativeBytes", row->nativeBytes);
 		json.IntField("nativeBytesPerFrame", frames == 0 ? 0 : row->nativeBytes / frames);
+		json.IntField("nativeFreed", row->nativeFreed);
 		json.IntField("churn", row->churn);
 		json.IntField("live", row->live);
 		json.IntField("liveBytes", row->liveBytes);
@@ -244,11 +246,13 @@ namespace Profiler
 			row->count += counts.objects;
 			row->bytes += counts.bytes;
 			row->nativeBytes += counts.nativeBytes;
+			row->nativeFreed += counts.nativeFreed;
 			if (row->firstTrack < 0) row->firstTrack = (int32)t;
 			if (!row->tracks.Contains((int32)t)) row->tracks.Insert((int32)t, true);
 			inZones.objects += counts.objects;
 			inZones.bytes += counts.bytes;
 			inZones.nativeBytes += counts.nativeBytes;
+			inZones.nativeFreed += counts.nativeFreed;
 		});
 		int64 count = inZones.objects;
 		int64 bytes = inZones.bytes;
@@ -271,6 +275,7 @@ namespace Profiler
 		json.IntField("inZones", inZones.objects);
 		json.IntField("inZoneBytes", inZones.bytes);
 		json.IntField("inZoneNativeBytes", inZones.nativeBytes);
+		json.IntField("inZoneNativeFreed", inZones.nativeFreed);
 		json.IntField("samples", AllocationSampleCount(capture));
 		NumberField(json, "perSecond", seconds > 0.0 ? (double)count / seconds : 0.0, 1);
 		NumberField(json, "bytesPerSecond", seconds > 0.0 ? (double)bytes / seconds : 0.0, 0);

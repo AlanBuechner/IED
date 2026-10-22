@@ -8,11 +8,11 @@ include "ingest.ch"
 include "tooltext.ch"
 
 // One thread (1 ns ticks) marks a frame every 100 ns from 0 to 500. Each frame: Frame 0..80 (its own 5 allocations)
-// with Spawn 10..20 (300 objects, 43200 bytes) and Cache 30..31 (one object, 4096 bytes, and 8 KiB of native memory
-// its thread took). The process counts 316
+// with Spawn 10..20 (300 objects, 43200 bytes, and a 4 KiB array Frame gives back) and Cache 30..31 (one object, 4096
+// bytes, and 8 KiB of native memory its thread took). The process counts 316
 // allocations a frame at each mark (10 outside any zone) and plots its memory, 1 MB rising 100 KB a frame. Censuses at
 // 50, 150, 250, 350: Particle steady, CacheEntry growing 100 KB each time, Texture shrinking, Handle growing by 600
-// small objects (under 64 KiB in all) and Tiny by 100.
+// small objects (under 64 KiB in all) and Tiny by 100; each CacheEntry holds a 4 KiB buffer (native memory).
 static void WriteCounted(Profiler::WireWriter& w) {
 	w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
 	w.Type(Profiler::EventType::Hello);
@@ -118,6 +118,11 @@ static void ZoneNative(Profiler::WireWriter& w, uint64 bytes) {
 	w.Varint(bytes);
 }
 
+static void ZoneNativeFreed(Profiler::WireWriter& w, uint64 bytes) {
+	w.Type(Profiler::EventType::ZoneNativeFreed);
+	w.Varint(bytes);
+}
+
 static void CountedZone(Profiler::WireWriter& w, uint64 site, int64 begin, int64 end, uint64 objects, uint64 bytes, uint64 native) {
 	w.Type(Profiler::EventType::ZoneBegin);
 	w.Time(begin);
@@ -141,16 +146,25 @@ static void FramesCountingAllocations(Profiler::WireWriter& w) {
 		w.Type(Profiler::EventType::ZoneBegin);
 		w.Time(t);
 		w.Varint(1);
-		CountedZone(w, 2, t + 10, t + 20, 300, 43200, 0);
+		CountedZone(w, 2, t + 10, t + 20, 300, 43200, 4096);
 		CountedZone(w, 3, t + 30, t + 31, 1, 4096, 8192);
 		w.Type(Profiler::EventType::ZoneAllocs);
 		w.Varint(306);
 		w.Varint(43200 + 4096 + 500);
-		ZoneNative(w, 8192);
+		ZoneNative(w, 4096 + 8192);
+		ZoneNativeFreed(w, 4096);
 		w.Type(Profiler::EventType::ZoneEnd);
 		w.Time(t + 80);
 	}
 	w.EndChunk();
+}
+
+static void CensusLineNative(Profiler::WireWriter& w, uint64 name, uint64 objects, uint64 bytes, uint64 native) {
+	w.Type(Profiler::EventType::HeapCensusTypeNative);
+	w.Varint(name);
+	w.Varint(objects);
+	w.Varint(bytes);
+	w.Varint(native);
 }
 
 static void CensusLine(Profiler::WireWriter& w, uint64 name, uint64 objects, uint64 bytes) {
@@ -176,7 +190,7 @@ static void CountsAndCensuses(Profiler::WireWriter& w) {
 		w.Time(f * 100 + 50);
 		w.Varint(5);
 		CensusLine(w, 4, 300, 43200);
-		CensusLine(w, 5, (uint64)(100 * (f + 1)), (uint64)(100000 * (f + 1)));
+		CensusLineNative(w, 5, (uint64)(100 * (f + 1)), (uint64)(100000 * (f + 1)), (uint64)(4096 * 100 * (f + 1)));
 		CensusLine(w, 6, (uint64)(10 - f), (uint64)(1000000 - f * 100000));
 		CensusLine(w, 8, (uint64)(600 * (f + 1)), (uint64)(9600 * (f + 1)));
 		CensusLine(w, 9, (uint64)(100 * (f + 1)), (uint64)(1600 * (f + 1)));
@@ -203,7 +217,8 @@ class ProfilerCountedTests {
 		assert_true(groups.At(0).Member("label").AsView() == "Spawn" && groups.At(0).Member("count").AsInt() == 1500 && groups.At(0).Member("perFrame").AsFloat() == 300.0, "Spawn's 300 a frame");
 		assert_true(groups.At(1).Member("label").AsView() == "Frame" && groups.At(1).Member("count").AsInt() == 25, "Frame's own five, its children's left to them");
 		assert_true(groups.At(1).Member("nativeBytes").AsInt() == 0 && groups.At(2).Member("label").AsView() == "Cache" && groups.At(2).Member("nativeBytes").AsInt() == 5 * 8192 && groups.At(2).Member("nativeBytesPerFrame").AsInt() == 8192, "the native memory is Cache's, not Frame's");
-		assert_eq(5 * 8192, a.Member("inZoneNativeBytes").AsInt(), "the zones' native memory in all");
+		assert_eq(5 * (4096 + 8192), a.Member("inZoneNativeBytes").AsInt(), "the zones' native memory in all");
+		assert_true(groups.At(1).Member("nativeFreed").AsInt() == 5 * 4096 && a.Member("inZoneNativeFreed").AsInt() == 5 * 4096, "Frame gave back what Spawn's array took");
 		assert_true(a.Member("frames").Member("medianCount").AsInt() == 316, "a frame's allocations from the process's count");
 		ask.groupBy = Profiler::AllocGroup::Path;
 		assert_true(Json(Profiler::Allocations(*capture, ask)).Member("groups").At(0).Member("label").AsView() == "Frame > Spawn", "by path");
@@ -221,7 +236,8 @@ class ProfilerCountedTests {
 		Serialization::DomNode inside = Json(Profiler::ZoneDetails(*capture, ref)).Member("inside").Member("allocations");
 		assert_true(inside.Member("count").AsInt() == 306 && inside.Member("freedInside").AsInt() == -1, "a zone's own count, its children's included");
 		assert_true(inside.Member("selfCount").AsInt() == 5 && inside.Member("selfBytes").AsInt() == 500, "and its own, its children's left to them");
-		assert_true(inside.Member("nativeBytes").AsInt() == 8192 && inside.Member("selfNativeBytes").AsInt() == 0, "the native memory taken in it, none by itself");
+		assert_true(inside.Member("nativeBytes").AsInt() == 4096 + 8192 && inside.Member("selfNativeBytes").AsInt() == 0, "the native memory taken in it, none by itself");
+		assert_true(inside.Member("nativeFreed").AsInt() == 4096 && inside.Member("selfNativeFreed").AsInt() == 4096, "and given back by itself");
 		assert_true(Profiler::ZoneRef::Parse(Core::StringView("0:1:0"), ref), "a child's ref");
 		inside = Json(Profiler::ZoneDetails(*capture, ref)).Member("inside").Member("allocations");
 		assert_true(inside.Member("count").AsInt() == 300 && inside.Member("selfCount").AsInt() == 300, "a zone with no children: all its own");
@@ -251,7 +267,8 @@ class ProfilerCountedTests {
 		assert_eq(15, capture->zoneAllocs, "a zone with both counts is counted once");
 		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
 		assert_true(text.View().Contains(Core::StringView("Native memory's floor rose")), "the native memory climbs");
-		assert_true(text.View().Contains(Core::StringView("Cache took 40.0 KiB of native memory (8.0 KiB a frame, kept or freed again)")), "and the zone that took it is named");
+		assert_true(text.View().Contains(Core::StringView("Cache took 40.0 KiB of native memory (8.0 KiB a frame)")), "and the zone that took it is named");
+		assert_true(text.View().Contains(Core::StringView("CacheEntry: 100 -> 400 live objects")) && text.View().Contains(Core::StringView("of native memory, more after")), "the census names the type and the native memory it holds");
 	}
 
 	[test("the_memory_window_draws_the_memory_plots")]
@@ -273,6 +290,7 @@ class ProfilerCountedTests {
 		assert_true(c.Member("censuses").AsInt() == 4 && c.Member("typeCount").AsInt() == 5, "four censuses of five types");
 		Serialization::DomNode first = c.Member("types").At(0);
 		assert_true(first.Member("name").AsView() == "CacheEntry" && first.Member("accumulating").AsBool(), "CacheEntry grew the most and keeps accumulating");
+		assert_true(c.Member("native").AsBool() && first.Member("firstNativeBytes").AsInt() == 409600 && first.Member("lastNativeBytes").AsInt() == 4 * 409600, "and the native memory its objects hold");
 		assert_true(first.Member("rises").AsInt() == 3 && first.Member("lastObjects").AsInt() == 400, "more after each collection");
 		for (int64 i = 1; i < c.Member("types").Count(); ++i) {
 			Serialization::DomNode type = c.Member("types").At(i);
