@@ -94,7 +94,7 @@ than the 16 bytes `raw_alloc` guarantees, so an element such as a `packed float[
 | Create / delete | `Init()` (allocates nothing), `Init(int64 capacity)`, `Init(__init_list<T>)` (enables `Core::Array<int32> a = {1, 2, 3}`), copy, `Delete()` |
 | Size | `Count()`, `Capacity()`, `ByteSize()`, `IsEmpty()` |
 | Access | `At(int64 i)` and `a[i]` -> `T&`, `Front()`, `Back()`, `Data()`; on a const array they give `const T&` / `const T*` |
-| Modify | `Push(v)` (takes `v` by value: a temporary or `take(x)` moves in, so a value that cannot be copied fits; safe when `v` is an element of the same array), `Pop()` (moves the last element out), `Insert(i, v)` (as `Push`), `Append(const Array<T>&)`, `Append(const T* items, count)` (both safe with the array's own elements; they grow as `Push` does), `RemoveAt(i)`, `RemoveRange(first, end)`, `RemoveSwap(i)` (O(1)), `Clear()` (destroys the elements, keeps the buffer), `Reserve(n)`, `Resize(n)` (default-creates or destroys), `ShrinkToFit()`, `Swap(Array<T>&)` |
+| Modify | `Push(v)` (takes `v` by value: a temporary or `take(x)` moves in, so a value that cannot be copied fits; safe when `v` is an element of the same array), `Pop()` (moves the last element out), `Insert(i, v)` (as `Push`), `Append(const Array<T>&)`, `Append(const T* items, count)` (both safe with the array's own elements; they grow as `Push` does), `RemoveAt(i)`, `RemoveRange(first, end)`, `RemoveSwap(i)` (O(1)), `Clear()` (destroys the elements, keeps the buffer), `Reserve(n)`, `Resize(n)` (default-creates or destroys), `ResizeUninitialized(n)` (grows without creating the new elements: for bytes and numbers written before they are read, such as a decoder's output; shrinks as `Resize`), `ShrinkToFit()`, `Swap(Array<T>&)` |
 | Search | `IndexOf(v)` (`==`, `-1` when absent), `Contains(v)` |
 | Algorithms | `Sort()` (by `<`), `SortBy(before)`, `Reverse()`, `LowerBound(v)`, `UpperBound(v)`, `LowerBoundBy(v, before)`, `UpperBoundBy(v, before)` |
 | Iteration | range-for through `ArrayIterator<T>` (yields `T&`); a const array iterates through `ConstArrayIterator<T>` (yields `const T&`) |
@@ -1307,6 +1307,8 @@ C4 sample `plugins/gpu/samples/c4` with the toolchain and captures one triggered
 |---|---|
 | `inflate.ch` | `Compression::Inflate(data, size, out)`: a raw DEFLATE stream (RFC 1951) appended to `out`; an `InflateResult` (`ok`, `consumed`: the input bytes the stream took, `error`: why it failed) |
 | `deflate.ch` | `Compression::Deflate(data, size, level, out)`: `size` bytes as a raw DEFLATE stream appended to `out`. Levels as zlib's: `kStoreLevel` (0) stores, `kFastestLevel` (1) to `kBestLevel` (9), `kDefaultLevel` (6); each block is stored, fixed-coded or given codes of its own, whichever is smallest |
+| `lz4.ch` | LZ4 (lz4 1.9's formats): byte-oriented LZ77 with no entropy stage, for data read often and fast (streamed assets). `Lz4CompressBlock(data, size, out, acceleration = 1)` appends one block (`Lz4Bound(size)` at most; a higher `acceleration` skips faster through data that does not match), `Lz4DecompressBlock(data, size, limit, out, history = 0)` appends at most `limit` bytes (a match may reach back `history` bytes into `out`); `Lz4CompressFrame(data, size, out, acceleration = 1)` writes a frame (independent 4 MiB blocks, the content size and the content's XXH32; a block that would not shrink is stored), `Lz4DecompressFrame(data, size, out)` reads any frame (every block size, independent or linked blocks, block and content checksums, skippable frames before it; `consumed` says where a next one starts). Both return an `InflateResult` |
+| `xxhash.ch` | `Xxh32(data, size, seed = 0)`: XXH32, the LZ4 frame's checksum (fast and well spread, not for secrets) |
 | `zlib.ch` | `ZlibCompress` / `ZlibDecompress` (RFC 1950: a two-byte header, the DEFLATE stream, the Adler-32 of the data), `GzipCompress` / `GzipDecompress` (RFC 1952: one member; reading takes the optional name, comment, extra field and header CRC, and `consumed` says where a next member starts), `Adler32(data, count)` |
 
 Reading rejects what zlib rejects: a reserved block type, a stored length its complement does not match, an
@@ -1322,10 +1324,21 @@ only (its level 1 is a fifth larger). Adler-32 runs 16 bytes a step, 32 with AVX
 Levels 1 and 2 find matches in a hash table of two positions a bucket, the others along hash chains, both keyed by
 four bytes (zlib-ng's choice).
 
+LZ4 on the same core, on 5 MB of this repository's code and docs: compressing at about 500 MB/s to 43% (acceleration
+8: about 650 MB/s, 56%), reading at 2.5-3 GB/s; the reader decodes the common sequence (under 15 literals, a match of
+at most 18 bytes from at least 8 back) in fixed-size copies and a short period in 8-byte steps, the writer hashes 5
+bytes as lz4 does on 64-bit processors. Its blocks were checked against an independent decoder written from the
+format's description. Reading rejects a match before the data, an offset of zero, a block that ends in a match or
+runs past its limit, and (frames) another version, a bad block size, a dictionary, a header, block or content checksum
+or a content size that does not match, and a frame cut short; nothing is read past `size`.
+
 Covered by `Bedrock/Tests/compression_tests.cf`: streams zlib wrote (stored, fixed and dynamic blocks, a zlib stream,
 a gzip member with a name), every cut of a stream, damaged blocks, checksums, sizes and headers, a gzip member with an
 extra field, a comment and a header CRC, the Adler-32 check values, every level's output of seven inputs (nothing, one
-byte, sentences, runs, noise, a mix, matches 32 KiB back) read back raw and wrapped, and the match finder's slide.
+byte, sentences, runs, noise, a mix, matches 32 KiB back) read back raw and wrapped, and the match finder's slide; and by `Bedrock/Tests/lz4_tests.cf` (11 tests): XXH32's published values, blocks and frames
+of five kinds of data at sizes from nothing to past one 4 MiB block, acceleration, hand-made blocks (literals only, an
+overlapping match, a long literal run), linked and independent blocks, a stored block with its checksum, the reference
+lz4's empty frame, skippable and concatenated frames, and every cut and a changed byte of blocks and frames.
 
 ---
 
@@ -1356,11 +1369,11 @@ PNG lacks, a palette index past the palette).
 
 ## 21. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 74 files, 652 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 75 files, 663 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

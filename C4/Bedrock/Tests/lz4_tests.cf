@@ -1,0 +1,268 @@
+// LZ4 blocks and frames: XXH32's published values, round trips of every kind of data, hand-made blocks and frames
+// (linked blocks, checksums, skippable frames) read as the format says, the reference lz4's empty frame, and damage.
+
+include "bedrock.ch"
+
+// `count` bytes of a kind: 0 noise, 1 text-like words, 2 zeros, 3 a short period, 4 noise and text by turns.
+static Core::Array<uint8> Lz4Sample(int64 count, int32 kind) {
+	Core::Array<uint8> bytes;
+	bytes.Resize(count);
+	uint64 state = 0x9E3779B97F4A7C15u + (uint64)kind;
+	const char* words = "the quick brown fox jumps over the lazy dog while compression keeps every byte ";
+	for (int64 i = 0; i < count; ++i) {
+		state ^= state << 13u;
+		state ^= state >> 7u;
+		state ^= state << 17u;
+		const bool noise = kind == 0 || (kind == 4 && ((i >> 12) & 1) == 0);
+		if (noise) bytes[i] = (uint8)state;
+		else if (kind == 2) bytes[i] = (uint8)0;
+		else if (kind == 3) bytes[i] = (uint8)(i % 3 + 65);
+		else bytes[i] = (uint8)words[(i * 7 + (i >> 5)) % 80];
+	}
+	return bytes;
+}
+
+static bool SameBytes(const Core::Array<uint8>& a, const Core::Array<uint8>& b) {
+	return a.Count() == b.Count() && (a.Count() == 0 || memcmp((void*)a.Data(), (void*)b.Data(), (uint64)a.Count()) == 0);
+}
+
+static void PushText(Core::Array<uint8>& out, const char* text) {
+	for (int64 i = 0; text[i] != (char)0; ++i) out.Push((uint8)text[i]);
+}
+
+static void PushLe32(Core::Array<uint8>& out, uint32 value) {
+	for (int32 i = 0; i < 4; ++i) out.Push((uint8)(value >> (uint32)(8 * i)));
+}
+
+// A frame of `blocks` (each a size word then its bytes, already in `body`) with the descriptor's flags and a 64 KiB block
+// size, its header checksum computed.
+static Core::Array<uint8> HandFrame(uint8 flags, const Core::Array<uint8>& body) {
+	Core::Array<uint8> frame;
+	PushLe32(frame, 0x184D2204u);
+	frame.Push(flags);
+	frame.Push((uint8)0x40);
+	frame.Push((uint8)(Compression::Xxh32(frame.Data() + 4, 2) >> 8u));
+	frame.Append(body);
+	PushLe32(frame, 0u);
+	return frame;
+}
+
+static Core::Array<uint8> DecodeBlock(const Core::Array<uint8>& block, int64 limit, bool& ok) {
+	Core::Array<uint8> out;
+	ok = Compression::Lz4DecompressBlock(block.Data(), block.Count(), limit, out).ok;
+	return out;
+}
+
+[test("compression.lz4")]
+class Lz4Tests {
+	[test("xxh32_known_values")]
+	public static void TestXxh32KnownValues() {
+		assert_true(Compression::Xxh32((const uint8*)"", 0) == 0x02CC5D05u, "empty");
+		assert_true(Compression::Xxh32((const uint8*)"abc", 3) == 0x32D153FFu, "abc");
+		assert_true(Compression::Xxh32((const uint8*)"Nobody inspects the spammish repetition", 39) == 0xE2293B2Fu, "a sentence");
+		Core::Array<uint8> run;
+		for (int32 i = 0; i < 768; ++i) run.Push((uint8)(i & 255));
+		assert_true(Compression::Xxh32(run.Data(), run.Count(), 0x9E3779B1u) == 0xAED9C9A4u, "768 bytes, seeded");
+	}
+
+	[test("blocks_round_trip")]
+	public static void TestBlocksRoundTrip() {
+		int64[12] sizes = { 0, 1, 5, 12, 13, 16, 63, 64, 100, 1000, 65543, 300000 };
+		int32 failures = 0;
+		for (int32 kind = 0; kind < 5; ++kind)
+			for (int32 s = 0; s < 12; ++s) {
+				Core::Array<uint8> data = Lz4Sample(sizes[s], kind);
+				Core::Array<uint8> block;
+				Compression::Lz4CompressBlock(data.Data(), data.Count(), block);
+				bool ok = false;
+				Core::Array<uint8> back = DecodeBlock(block, data.Count(), ok);
+				if (!ok || !SameBytes(back, data) || block.Count() > Compression::Lz4Bound(data.Count())) failures += 1;
+				if (data.Count() > 0) {
+					DecodeBlock(block, data.Count() - 1, ok);
+					if (ok) failures += 1;
+				}
+			}
+		assert_eq(0, failures, "every size and kind comes back, within the bound, and not into less room");
+	}
+
+	[test("frames_round_trip")]
+	public static void TestFramesRoundTrip() {
+		int64[5] sizes = { 0, 7, 70000, 4194304, 5000000 };
+		int32 failures = 0;
+		for (int32 kind = 0; kind < 5; ++kind)
+			for (int32 s = 0; s < 5; ++s) {
+				Core::Array<uint8> data = Lz4Sample(sizes[s], kind);
+				Core::Array<uint8> frame;
+				Compression::Lz4CompressFrame(data.Data(), data.Count(), frame);
+				Core::Array<uint8> back;
+				const Compression::InflateResult read = Compression::Lz4DecompressFrame(frame.Data(), frame.Count(), back);
+				if (!read.ok || read.consumed != frame.Count() || !SameBytes(back, data)) failures += 1;
+			}
+		assert_eq(0, failures, "every size and kind, blocks stored or compressed, comes back");
+		Core::Array<uint8> zeros = Lz4Sample(1 << 20, 2);
+		Core::Array<uint8> packed;
+		Compression::Lz4CompressFrame(zeros.Data(), zeros.Count(), packed);
+		assert_true(packed.Count() < 6000, "a run of zeros packs tight");
+	}
+
+	[test("acceleration_trades_size")]
+	public static void TestAccelerationTradesSize() {
+		Core::Array<uint8> text = Lz4Sample(200000, 1);
+		Core::Array<uint8> careful;
+		Core::Array<uint8> quick;
+		Compression::Lz4CompressBlock(text.Data(), text.Count(), careful, 1);
+		Compression::Lz4CompressBlock(text.Data(), text.Count(), quick, 64);
+		bool ok = false;
+		Core::Array<uint8> back = DecodeBlock(quick, text.Count(), ok);
+		assert_true(ok && SameBytes(back, text), "an accelerated block comes back");
+		assert_true(quick.Count() >= careful.Count(), "and is no smaller");
+	}
+
+	[test("hand_made_blocks")]
+	public static void TestHandMadeBlocks() {
+		bool ok = false;
+		Core::Array<uint8> literals;
+		literals.Push((uint8)0x50);
+		PushText(literals, "hello");
+		Core::Array<uint8> out = DecodeBlock(literals, 64, ok);
+		assert_true(ok && out.Count() == 5 && out[4] == (uint8)111, "literals only");
+		Core::Array<uint8> run;   // "a", then 9 bytes from 1 back, then "b"
+		run.Push((uint8)0x15);
+		run.Push((uint8)97);
+		run.Push((uint8)1);
+		run.Push((uint8)0);
+		run.Push((uint8)0x10);
+		run.Push((uint8)98);
+		out = DecodeBlock(run, 64, ok);
+		assert_true(ok && out.Count() == 11 && out[9] == (uint8)97 && out[10] == (uint8)98, "an overlapping match repeats a byte");
+		Core::Array<uint8> long;   // 300 literals: 15, then 255 and 30 more
+		long.Push((uint8)0xF0);
+		long.Push((uint8)255);
+		long.Push((uint8)30);
+		for (int32 i = 0; i < 300; ++i) long.Push((uint8)(i & 127));
+		out = DecodeBlock(long, 300, ok);
+		assert_true(ok && out.Count() == 300 && out[299] == (uint8)(299 & 127), "a long literal run");
+	}
+
+	[test("damaged_blocks_fail")]
+	public static void TestDamagedBlocksFail() {
+		bool ok = true;
+		Core::Array<uint8> zeroOffset;
+		zeroOffset.Push((uint8)0x10);
+		zeroOffset.Push((uint8)97);
+		zeroOffset.Push((uint8)0);
+		zeroOffset.Push((uint8)0);
+		zeroOffset.Push((uint8)0x00);
+		DecodeBlock(zeroOffset, 64, ok);
+		assert_true(!ok, "an offset of zero");
+		Core::Array<uint8> before;
+		before.Push((uint8)0x10);
+		before.Push((uint8)97);
+		before.Push((uint8)2);
+		before.Push((uint8)0);
+		before.Push((uint8)0x00);
+		DecodeBlock(before, 64, ok);
+		assert_true(!ok, "a match before the data");
+		Core::Array<uint8> endsWithMatch;
+		endsWithMatch.Push((uint8)0x10);
+		endsWithMatch.Push((uint8)97);
+		endsWithMatch.Push((uint8)1);
+		endsWithMatch.Push((uint8)0);
+		DecodeBlock(endsWithMatch, 64, ok);
+		assert_true(!ok, "a block that ends with a match");
+		Core::Array<uint8> empty;
+		DecodeBlock(empty, 64, ok);
+		assert_true(!ok, "an empty block");
+		Core::Array<uint8> data = Lz4Sample(5000, 1);
+		Core::Array<uint8> block;
+		Compression::Lz4CompressBlock(data.Data(), data.Count(), block);
+		int32 survived = 0;
+		for (int64 cut = 0; cut < block.Count() - 1; ++cut) {
+			Core::Array<uint8> out;
+			if (Compression::Lz4DecompressBlock(block.Data(), cut, data.Count(), out).ok && SameBytes(out, data)) survived += 1;
+		}
+		assert_eq(0, survived, "no cut-short block reads as the whole");
+	}
+
+	[test("reference_empty_frame")]
+	public static void TestReferenceEmptyFrame() {
+		uint8[15] frame = { 0x04u, 0x22u, 0x4Du, 0x18u, 0x64u, 0x40u, 0xA7u, 0x00u, 0x00u, 0x00u, 0x00u, 0x05u, 0x5Du, 0xCCu, 0x02u };
+		Core::Array<uint8> out;
+		const Compression::InflateResult read = Compression::Lz4DecompressFrame(&frame[0], 15, out);
+		assert_true(read.ok && read.consumed == 15 && out.Count() == 0, "what lz4 writes for nothing");
+	}
+
+	[test("linked_blocks")]
+	public static void TestLinkedBlocks() {
+		Core::Array<uint8> body;
+		PushLe32(body, 9u);
+		body.Push((uint8)0x80);
+		PushText(body, "abcdefgh");
+		PushLe32(body, 5u);   // no literals, 8 bytes from 8 back (the first block), then "!"
+		body.Push((uint8)0x04);
+		body.Push((uint8)8);
+		body.Push((uint8)0);
+		body.Push((uint8)0x10);
+		body.Push((uint8)33);
+		Core::Array<uint8> linked = HandFrame((uint8)0x40, body);
+		Core::Array<uint8> out;
+		const Compression::InflateResult read = Compression::Lz4DecompressFrame(linked.Data(), linked.Count(), out);
+		assert_true(read.ok && out.Count() == 17 && out[8] == (uint8)97 && out[16] == (uint8)33, "a linked block reads the one before");
+		Core::Array<uint8> independent = HandFrame((uint8)0x60, body);
+		out.Clear();
+		assert_true(!Compression::Lz4DecompressFrame(independent.Data(), independent.Count(), out).ok, "an independent one may not");
+	}
+
+	[test("block_checksums")]
+	public static void TestBlockChecksums() {
+		Core::Array<uint8> body;
+		PushLe32(body, 0x80000000u | 5u);
+		PushText(body, "plain");
+		PushLe32(body, Compression::Xxh32((const uint8*)"plain", 5));
+		Core::Array<uint8> frame = HandFrame((uint8)0x70, body);
+		Core::Array<uint8> out;
+		assert_true(Compression::Lz4DecompressFrame(frame.Data(), frame.Count(), out).ok && out.Count() == 5, "a stored block with its checksum");
+		frame[frame.Count() - 8] = (uint8)(frame[frame.Count() - 8] ^ 1);
+		out.Clear();
+		assert_true(!Compression::Lz4DecompressFrame(frame.Data(), frame.Count(), out).ok, "a wrong checksum is caught");
+	}
+
+	[test("skippable_and_concatenated_frames")]
+	public static void TestSkippableAndConcatenatedFrames() {
+		Core::Array<uint8> first = Lz4Sample(1000, 1);
+		Core::Array<uint8> second = Lz4Sample(3000, 3);
+		Core::Array<uint8> stream;
+		PushLe32(stream, 0x184D2A5Fu);
+		PushLe32(stream, 3u);
+		PushText(stream, "xyz");
+		Compression::Lz4CompressFrame(first.Data(), first.Count(), stream);
+		const int64 firstEnds = stream.Count();
+		Compression::Lz4CompressFrame(second.Data(), second.Count(), stream);
+		Core::Array<uint8> out;
+		const Compression::InflateResult a = Compression::Lz4DecompressFrame(stream.Data(), stream.Count(), out);
+		assert_true(a.ok && a.consumed == firstEnds && SameBytes(out, first), "the skippable frame is passed over, the first frame read");
+		Core::Array<uint8> rest;
+		const Compression::InflateResult b = Compression::Lz4DecompressFrame(stream.Data() + a.consumed, stream.Count() - a.consumed, rest);
+		assert_true(b.ok && SameBytes(rest, second), "and the next starts where it says");
+	}
+
+	[test("damaged_frames_fail")]
+	public static void TestDamagedFramesFail() {
+		Core::Array<uint8> data = Lz4Sample(20000, 4);
+		Core::Array<uint8> frame;
+		Compression::Lz4CompressFrame(data.Data(), data.Count(), frame);
+		int32 survived = 0;
+		for (int64 cut = 0; cut < frame.Count(); ++cut) {
+			Core::Array<uint8> out;
+			if (Compression::Lz4DecompressFrame(frame.Data(), cut, out).ok) survived += 1;
+		}
+		assert_eq(0, survived, "no cut-short frame reads");
+		frame[frame.Count() - 100] = (uint8)(frame[frame.Count() - 100] ^ 0x20);
+		Core::Array<uint8> out;
+		const Compression::InflateResult read = Compression::Lz4DecompressFrame(frame.Data(), frame.Count(), out);
+		assert_true(!read.ok, "a changed byte is caught");
+		frame[4] = (uint8)0x80;
+		out.Clear();
+		assert_se("an LZ4 frame of another version", Compression::Lz4DecompressFrame(frame.Data(), frame.Count(), out).error, "says why");
+	}
+}

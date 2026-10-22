@@ -203,7 +203,7 @@ namespace Compression
 			if (count + bytes <= room) return;
 			int64 grown = (start + count + bytes) * 2;
 			if (grown < 65536) grown = 65536;
-			array->Resize(grown);
+			array->ResizeUninitialized(grown);   // written before it is read: no need to zero it
 			base = array->Data() + start;
 			room = grown - start;
 		}

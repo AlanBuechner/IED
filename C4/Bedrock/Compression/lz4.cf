@@ -1,0 +1,295 @@
+include "lz4.ch"
+
+namespace Compression
+{
+	const int64 kLz4MinMatch = 4;
+	const int64 kLz4LastLiterals = 5;    // a block ends with at least this many literals
+	const int64 kLz4MatchFindLimit = 12; // and its last match starts at least this far from its end
+	const int64 kLz4MaxOffset = 65535;
+	const int32 kLz4HashLog = 12;
+	const int32 kLz4SkipTrigger = 6;     // misses before the search steps further
+	const int64 kLz4WildCopy = 32;       // what a fast copy may write past its end
+
+	static uint32 Read32(const uint8* p) {
+		uint32 value = 0u;
+		memcpy((void*)&value, (void*)p, 4u);
+		return value;
+	}
+
+	static uint64 Read64(const uint8* p) {
+		uint64 value = 0u;
+		memcpy((void*)&value, (void*)p, 8u);
+		return value;
+	}
+
+	// The hash of the 5 bytes at `p` (read as 8, at least 12 from the end), as lz4 hashes on 64-bit processors.
+	static uint32 HashAt(const uint8* p) { return (uint32)(((Read64(p) << 24u) * 889523592379u) >> (uint64)(64 - kLz4HashLog)); }
+
+	int64 Lz4Bound(int64 size) { return size + size / 255 + 16; }
+
+	// ------------------------------------------------------------------------------------------------------------------
+	// Writing
+
+	// The bytes after a 4-bit field that holds 15: 255 for each whole 255 of `rest`, then what is left.
+	static uint8* WriteLengthTail(uint8* op, int64 rest) {
+		for (; rest >= 255; rest -= 255) *op++ = (uint8)255;
+		*op++ = (uint8)rest;
+		return op;
+	}
+
+	// A sequence's token and the literal length after it: the token's match field is filled in once the match is measured.
+	static uint8* WriteLiteralLength(uint8* op, uint8*& token, int64 count) {
+		token = op++;
+		if (count < 15) {
+			*token = (uint8)(count << 4);
+			return op;
+		}
+		*token = (uint8)(15 << 4);
+		return WriteLengthTail(op, count - 15);
+	}
+
+	// The last literals, exactly.
+	static uint8* WriteLastLiterals(uint8* op, const uint8* literals, int64 count) {
+		uint8* token = nullptr;
+		op = WriteLiteralLength(op, token, count);
+		memcpy((void*)op, (void*)literals, (uint64)count);
+		return op + count;
+	}
+
+	// The literals before a match, 8 bytes a step: the input goes on past them (the match), and so does the output (its
+	// offset, then at least the last sequence's token and five literals).
+	static uint8* WriteLiterals(uint8* op, uint8*& token, const uint8* literals, int64 count) {
+		op = WriteLiteralLength(op, token, count);
+		for (int64 i = 0; i < count; i += 8) memcpy((void*)(op + i), (void*)(literals + i), 8u);
+		return op + count;
+	}
+
+	static uint8* WriteMatchLength(uint8* op, uint8* token, int64 extra) {
+		if (extra < 15) {
+			*token = (uint8)(*token | (uint8)extra);
+			return op;
+		}
+		*token = (uint8)(*token | (uint8)15);
+		return WriteLengthTail(op, extra - 15);
+	}
+
+	// How many bytes from `p` equal those from `q`, up to `limit`.
+	static int64 MatchLength(const uint8* p, const uint8* q, const uint8* limit) {
+		const uint8* start = p;
+		while (p + 8 <= limit) {
+			const uint64 diff = Read64(p) ^ Read64(q);
+			if (diff != 0u) return (p - start) + (int64)(bit_trailing_zeros(diff) >> 3);
+			p += 8;
+			q += 8;
+		}
+		while (p < limit && *p == *q) {
+			++p;
+			++q;
+		}
+		return p - start;
+	}
+
+	// LZ4's fast search: hashes of 4-byte sequences point at where each was last seen; after a run of misses it steps
+	// further ahead each time, sooner with a higher acceleration.
+	struct Lz4Search
+	{
+		public const uint8* src;
+		public const uint8* matchFindLimit;
+		public uint32* table;
+		public int32 acceleration;
+
+		// The next match at or after `ip` (moved to it, `match` set), or false when the search reaches the end.
+		public bool Next(const uint8*& ip, const uint8*& match) {
+			const uint8* forward = ip;
+			int32 step = 1;
+			int32 misses = acceleration << kLz4SkipTrigger;
+			uint32 forwardHash = HashAt(forward);
+			for (;;) {
+				const uint32 h = forwardHash;
+				ip = forward;
+				forward += step;
+				step = misses++ >> kLz4SkipTrigger;
+				if (forward > matchFindLimit) return false;
+				match = src + table[h];
+				forwardHash = HashAt(forward);
+				table[h] = (uint32)(ip - src);
+				if (match + kLz4MaxOffset >= ip && Read32(match) == Read32(ip)) return true;
+			}
+		}
+
+		// A match starting right at `ip`, found by its hash (which now points at `ip`).
+		public bool At(const uint8* ip, const uint8*& match) {
+			const uint32 h = HashAt(ip);
+			match = src + table[h];
+			table[h] = (uint32)(ip - src);
+			return match + kLz4MaxOffset >= ip && Read32(match) == Read32(ip);
+		}
+
+		public void Remember(const uint8* p) { table[HashAt(p)] = (uint32)(p - src); }
+	}
+
+	// The sequences of `size` (at least kLz4MatchFindLimit + 1) bytes but the last literals, from `anchor` on: where
+	// the last literals start.
+	static const uint8* WriteSequences(const uint8* src, int64 size, uint8*& op, int32 acceleration) {
+		uint32[4096] table;
+		memset((void*)&table[0], 0, 4096u * 4u);
+		const uint8* end = src + size;
+		const uint8* matchLimit = end - kLz4LastLiterals;
+		Lz4Search search = { src, end - kLz4MatchFindLimit, &table[0], acceleration < 1 ? 1 : acceleration };
+		const uint8* anchor = src;
+		const uint8* ip = src + 1;
+		search.Remember(src);
+		const uint8* match = nullptr;
+		while (search.Next(ip, match)) {
+			while (ip > anchor && match > src && ip[-1] == match[-1]) {
+				--ip;
+				--match;
+			}
+			uint8* token = nullptr;
+			op = WriteLiterals(op, token, anchor, ip - anchor);
+			for (;;) {
+				const int64 offset = ip - match;
+				*op++ = (uint8)offset;
+				*op++ = (uint8)(offset >> 8);
+				const int64 extra = MatchLength(ip + kLz4MinMatch, match + kLz4MinMatch, matchLimit);
+				op = WriteMatchLength(op, token, extra);
+				ip += kLz4MinMatch + extra;
+				anchor = ip;
+				if (ip > search.matchFindLimit) return anchor;
+				search.Remember(ip - 2);
+				if (!search.At(ip, match)) break;
+				token = op++;
+				*token = (uint8)0;
+			}
+			++ip;
+		}
+		return anchor;
+	}
+
+	static int64 CompressInto(const uint8* src, int64 size, uint8* dst, int32 acceleration) {
+		uint8* op = dst;
+		const uint8* anchor = size > kLz4MatchFindLimit ? WriteSequences(src, size, op, acceleration) : src;
+		op = WriteLastLiterals(op, anchor, src + size - anchor);
+		return op - dst;
+	}
+
+	void Lz4CompressBlock(const uint8* data, int64 size, Core::Array<uint8>& out, int32 acceleration) {
+		const int64 start = out.Count();
+		out.ResizeUninitialized(start + Lz4Bound(size));
+		const int64 written = CompressInto(data, size, out.Data() + start, acceleration);
+		out.ResizeUninitialized(start + written);
+	}
+
+	// ------------------------------------------------------------------------------------------------------------------
+	// Reading
+
+	// Adds to `length` the bytes after a 4-bit field that holds 15. False when the block ends first.
+	static bool ReadLengthTail(const uint8*& ip, const uint8* end, int64& length) {
+		uint32 b = 255u;
+		while (b == 255u) {
+			if (ip >= end) return false;
+			b = (uint32)*ip++;
+			length += (int64)b;
+		}
+		return true;
+	}
+
+	// `count` literals; 32 bytes a step, past the end, where both sides have that room.
+	static void CopyLiterals(uint8* op, const uint8* ip, int64 count, const uint8* outEnd, const uint8* inEnd) {
+		if (outEnd - op < count + kLz4WildCopy || inEnd - ip < count + kLz4WildCopy) {
+			memcpy((void*)op, (void*)ip, (uint64)count);
+			return;
+		}
+		for (int64 i = 0; i < count; i += 32) memcpy((void*)(op + i), (void*)(ip + i), 32u);
+	}
+
+	// `length` bytes from `offset` back, which may overlap what they write: 16 or 8 bytes a step when the offset allows
+	// it and the output has room past the end, else one byte at a time.
+	static void CopyMatch(uint8* op, int64 offset, int64 length, const uint8* outEnd) {
+		const uint8* from = op - offset;
+		const bool room = outEnd - op >= length + kLz4WildCopy;
+		if (room && offset >= 16) {
+			for (int64 i = 0; i < length; i += 16) memcpy((void*)(op + i), (void*)(from + i), 16u);
+		}
+		else if (room && offset >= 8) {
+			for (int64 i = 0; i < length; i += 8) memcpy((void*)(op + i), (void*)(from + i), 8u);
+		}
+		else if (offset == 1) memset((void*)op, (int32)*from, (uint64)length);
+		else if (room) {
+			// A short period: its first bytes one at a time up to a whole number of periods of at least 8, then 8 bytes
+			// a step from that far back, which the pattern repeats at.
+			int64 period = offset;
+			while (period < 8) period += offset;
+			for (int64 i = 0; i < period; ++i) op[i] = from[i];
+			for (int64 i = period; i < length; i += 8) memcpy((void*)(op + i), (void*)(op + i - period), 8u);
+		}
+		else {
+			for (int64 i = 0; i < length; ++i) op[i] = from[i];
+		}
+	}
+
+	// The common sequence in fixed-size copies and no loops: under 15 literals, then a match of at most 18 bytes from at
+	// least 8 back, with room on both sides. False, having changed nothing, for any other.
+	static bool ShortSequence(uint32 token, const uint8*& ip, const uint8* inEnd, uint8*& op, const uint8* outEnd, const uint8* low) {
+		const int64 literals = (int64)(token >> 4);
+		const int64 extra = (int64)(token & 15u);
+		if (literals == 15 || extra == 15 || inEnd - ip < 18 || outEnd - op < 34) return false;
+		const int64 offset = (int64)ip[literals] | ((int64)ip[literals + 1] << 8);
+		uint8* matchAt = op + literals;
+		if (offset < 8 || offset > matchAt - low) return false;
+		memcpy((void*)op, (void*)ip, 16u);
+		const uint8* from = matchAt - offset;
+		memcpy((void*)matchAt, (void*)from, 8u);
+		memcpy((void*)(matchAt + 8), (void*)(from + 8), 8u);
+		memcpy((void*)(matchAt + 16), (void*)(from + 16), 2u);
+		ip += literals + 2;
+		op = matchAt + extra + kLz4MinMatch;
+		return true;
+	}
+
+	// The block at `src` into `dst` (room for `capacity`), matches reaching back no further than `low`: the bytes written,
+	// or -1 with `error` set.
+	static int64 DecodeInto(const uint8* src, int64 size, uint8* dst, int64 capacity, const uint8* low, const char*& error) {
+		const uint8* ip = src;
+		const uint8* inEnd = src + size;
+		uint8* op = dst;
+		const uint8* outEnd = dst + capacity;
+		while (ip < inEnd) {
+			const uint32 token = (uint32)*ip++;
+			if (ShortSequence(token, ip, inEnd, op, outEnd, low)) continue;
+			int64 literals = (int64)(token >> 4);
+			if (literals == 15 && !ReadLengthTail(ip, inEnd, literals)) { error = "a literal length runs past the block"; return -1; }
+			if (literals > inEnd - ip) { error = "literals run past the block"; return -1; }
+			if (literals > outEnd - op) { error = "the block holds more than its limit"; return -1; }
+			CopyLiterals(op, ip, literals, outEnd, inEnd);
+			ip += literals;
+			op += literals;
+			if (ip == inEnd) return op - dst;
+			if (inEnd - ip < 2) { error = "an offset runs past the block"; return -1; }
+			const int64 offset = (int64)ip[0] | ((int64)ip[1] << 8);
+			ip += 2;
+			if (offset == 0 || offset > op - low) { error = "a match reaches before the data"; return -1; }
+			int64 length = (int64)(token & 15u);
+			if (length == 15 && !ReadLengthTail(ip, inEnd, length)) { error = "a match length runs past the block"; return -1; }
+			length += kLz4MinMatch;
+			if (length > outEnd - op) { error = "the block holds more than its limit"; return -1; }
+			CopyMatch(op, offset, length, outEnd);
+			op += length;
+		}
+		error = size == 0 ? "an empty block" : "the block ends with a match";
+		return -1;
+	}
+
+	InflateResult Lz4DecompressBlock(const uint8* data, int64 size, int64 limit, Core::Array<uint8>& out, int64 history) {
+		InflateResult result = { false, 0, "" };
+		const int64 start = out.Count();
+		const int64 reach = history < 0 ? 0 : (history > start ? start : history);
+		out.ResizeUninitialized(start + (limit < 0 ? 0 : limit));
+		uint8* dst = out.Data() + start;
+		const int64 written = DecodeInto(data, size, dst, limit < 0 ? 0 : limit, dst - reach, result.error);
+		out.ResizeUninitialized(start + (written < 0 ? 0 : written));
+		result.ok = written >= 0;
+		result.consumed = written >= 0 ? size : 0;
+		return result;
+	}
+}

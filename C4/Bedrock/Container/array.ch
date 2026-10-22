@@ -66,6 +66,9 @@ namespace Core
 		public void Clear();                               // destroys the elements, keeps the buffer
 		public void Reserve(int64 capacity);
 		public void Resize(int64 count);                   // new elements default-created, removed ones destroyed
+		// Resize that leaves new elements as the memory held them: for bytes and numbers the caller writes before it
+		// reads them (a decoder's output), where creating them would only zero what is about to be written.
+		public void ResizeUninitialized(int64 count);
 		public void ShrinkToFit();
 		public void Swap(Array<T>& other);                 // exchanges the buffers, no element moves
 

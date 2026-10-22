@@ -1,0 +1,49 @@
+include "xxhash.ch"
+
+namespace Compression
+{
+	const uint32 kXxPrime1 = 2654435761u;
+	const uint32 kXxPrime2 = 2246822519u;
+	const uint32 kXxPrime3 = 3266489917u;
+	const uint32 kXxPrime4 = 668265263u;
+	const uint32 kXxPrime5 = 374761393u;
+
+	static uint32 ReadLe32(const uint8* p) {
+		uint32 value = 0u;
+		memcpy((void*)&value, (void*)p, 4u);
+		return value;
+	}
+
+	static uint32 XxRound(uint32 lane, uint32 input) { return bit_rotate_left(lane + input * kXxPrime2, 13) * kXxPrime1; }
+
+	// The four lanes over every whole 16 bytes, merged: where the hash starts for input of 16 bytes or more.
+	static uint32 XxStripes(const uint8* p, int64 stripes, uint32 seed) {
+		uint32 v1 = seed + kXxPrime1 + kXxPrime2;
+		uint32 v2 = seed + kXxPrime2;
+		uint32 v3 = seed;
+		uint32 v4 = seed - kXxPrime1;
+		for (int64 i = 0; i < stripes; ++i, p += 16) {
+			v1 = XxRound(v1, ReadLe32(p));
+			v2 = XxRound(v2, ReadLe32(p + 4));
+			v3 = XxRound(v3, ReadLe32(p + 8));
+			v4 = XxRound(v4, ReadLe32(p + 12));
+		}
+		return bit_rotate_left(v1, 1) + bit_rotate_left(v2, 7) + bit_rotate_left(v3, 12) + bit_rotate_left(v4, 18);
+	}
+
+	uint32 Xxh32(const uint8* data, int64 size, uint32 seed) {
+		const int64 stripes = size / 16;
+		uint32 h = stripes > 0 ? XxStripes(data, stripes, seed) : seed + kXxPrime5;
+		h += (uint32)size;
+		const uint8* p = data + stripes * 16;
+		const uint8* end = data + size;
+		for (; p + 4 <= end; p += 4) h = bit_rotate_left(h + ReadLe32(p) * kXxPrime3, 17) * kXxPrime4;
+		for (; p < end; ++p) h = bit_rotate_left(h + (uint32)*p * kXxPrime5, 11) * kXxPrime1;
+		h ^= h >> 15;
+		h *= kXxPrime2;
+		h ^= h >> 13;
+		h *= kXxPrime3;
+		h ^= h >> 16;
+		return h;
+	}
+}

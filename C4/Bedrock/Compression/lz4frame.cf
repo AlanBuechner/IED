@@ -1,0 +1,174 @@
+include "lz4.ch"
+
+namespace Compression
+{
+	const uint32 kLz4FrameMagic = 0x184D2204u;
+	const uint32 kLz4SkippableMagic = 0x184D2A50u;   // 0x184D2A50 to 0x184D2A5F
+	const int64 kLz4FrameBlockBytes = 4 << 20;
+	const int64 kLz4LinkedHistory = 65536;           // how far a linked block's matches reach back
+
+	// Frame descriptor flags (FLG) and the block size code (BD).
+	const uint8 kFlagVersion = 0x40;
+	const uint8 kFlagIndependent = 0x20;
+	const uint8 kFlagBlockChecksum = 0x10;
+	const uint8 kFlagContentSize = 0x08;
+	const uint8 kFlagContentChecksum = 0x04;
+	const uint8 kFlagDictionary = 0x01;
+	const uint8 kBlockSize4MiB = 0x70;
+	const uint32 kStoredBlock = 0x80000000u;
+
+	static void PutLe32(Core::Array<uint8>& out, uint32 value) {
+		for (int32 i = 0; i < 4; ++i) out.Push((uint8)(value >> (uint32)(8 * i)));
+	}
+
+	static void PutLe64(Core::Array<uint8>& out, uint64 value) {
+		for (int32 i = 0; i < 8; ++i) out.Push((uint8)(value >> (uint64)(8 * i)));
+	}
+
+	static void SetLe32(Core::Array<uint8>& out, int64 at, uint32 value) {
+		for (int32 i = 0; i < 4; ++i) out[at + i] = (uint8)(value >> (uint32)(8 * i));
+	}
+
+	static uint64 GetLe(const uint8* p, int32 bytes) {
+		uint64 value = 0u;
+		for (int32 i = bytes - 1; i >= 0; --i) value = (value << 8u) | (uint64)p[i];
+		return value;
+	}
+
+	// One block of the frame: compressed, or stored when that would not shrink it.
+	static void WriteFrameBlock(const uint8* chunk, int64 count, Core::Array<uint8>& out, int32 acceleration) {
+		const int64 sizeAt = out.Count();
+		PutLe32(out, 0u);
+		Lz4CompressBlock(chunk, count, out, acceleration);
+		const int64 packed = out.Count() - sizeAt - 4;
+		if (packed < count) {
+			SetLe32(out, sizeAt, (uint32)packed);
+			return;
+		}
+		out.ResizeUninitialized(sizeAt + 4);
+		out.Append(chunk, count);
+		SetLe32(out, sizeAt, (uint32)count | kStoredBlock);
+	}
+
+	void Lz4CompressFrame(const uint8* data, int64 size, Core::Array<uint8>& out, int32 acceleration) {
+		PutLe32(out, kLz4FrameMagic);
+		const int64 descriptor = out.Count();
+		out.Push(kFlagVersion | kFlagIndependent | kFlagContentSize | kFlagContentChecksum);
+		out.Push(kBlockSize4MiB);
+		PutLe64(out, (uint64)size);
+		out.Push((uint8)(Xxh32(out.Data() + descriptor, out.Count() - descriptor) >> 8u));
+		for (int64 at = 0; at < size; at += kLz4FrameBlockBytes) {
+			const int64 count = size - at < kLz4FrameBlockBytes ? size - at : kLz4FrameBlockBytes;
+			WriteFrameBlock(data + at, count, out, acceleration);
+		}
+		PutLe32(out, 0u);
+		PutLe32(out, Xxh32(data, size));
+	}
+
+	// ------------------------------------------------------------------------------------------------------------------
+	// Reading
+
+	// What a frame's descriptor says.
+	struct Lz4FrameHeader
+	{
+		public uint8 flags;
+		public int64 blockMax;
+		public bool hasContentSize;
+		public uint64 contentSize;
+	}
+
+	// A reader over the frame's bytes that fails once and keeps the first reason.
+	struct Lz4FrameReader
+	{
+		public const uint8* data;
+		public int64 size;
+		public int64 at;
+		public const char* error;
+
+		public bool Has(int64 bytes) { return bytes >= 0 && size - at >= bytes; }
+
+		public bool Fail(const char* why) {
+			if (error[0] == (char)0) error = why;
+			return false;
+		}
+
+		public bool Take(int32 bytes, uint64& value) {
+			if (!Has((int64)bytes)) return Fail("the frame is cut short");
+			value = GetLe(data + at, bytes);
+			at += (int64)bytes;
+			return true;
+		}
+	}
+
+	// Skippable frames (their own magic and length) before the LZ4 frame.
+	static bool SkipSkippable(Lz4FrameReader& in) {
+		while (in.Has(8) && (GetLe(in.data + in.at, 4) & 0xFFFFFFF0u) == (uint64)kLz4SkippableMagic) {
+			const int64 length = (int64)GetLe(in.data + in.at + 4, 4);
+			if (!in.Has(8 + length)) return in.Fail("a skippable frame is cut short");
+			in.at += 8 + length;
+		}
+		return true;
+	}
+
+	static bool ReadHeader(Lz4FrameReader& in, Lz4FrameHeader& header) {
+		uint64 magic = 0u;
+		if (!SkipSkippable(in) || !in.Take(4, magic)) return false;
+		if (magic != (uint64)kLz4FrameMagic) return in.Fail("not an LZ4 frame");
+		const int64 descriptor = in.at;
+		uint64 flags = 0u;
+		uint64 sizeCode = 0u;
+		if (!in.Take(1, flags) || !in.Take(1, sizeCode)) return false;
+		header.flags = (uint8)flags;
+		if ((flags & 0xC2u) != (uint64)kFlagVersion) return in.Fail("an LZ4 frame of another version");
+		if ((sizeCode & 0x8Fu) != 0u || ((sizeCode >> 4u) & 7u) < 4u) return in.Fail("an LZ4 frame with a bad block size");
+		header.blockMax = (int64)1 << (int64)(8u + 2u * ((sizeCode >> 4u) & 7u));
+		header.hasContentSize = (flags & (uint64)kFlagContentSize) != 0u;
+		if (header.hasContentSize && !in.Take(8, header.contentSize)) return false;
+		if ((flags & (uint64)kFlagDictionary) != 0u) return in.Fail("an LZ4 frame that needs a dictionary");
+		uint64 check = 0u;
+		if (!in.Take(1, check)) return false;
+		if (check != (uint64)((Xxh32(in.data + descriptor, in.at - 1 - descriptor) >> 8u) & 0xFFu)) return in.Fail("the frame header's checksum does not match");
+		return true;
+	}
+
+	// One block into `out`: stored or compressed, with its checksum when the frame has them.
+	static bool ReadBlock(Lz4FrameReader& in, const Lz4FrameHeader& header, uint32 word, int64 frameStart, Core::Array<uint8>& out) {
+		const int64 length = (int64)(word & ~kStoredBlock);
+		if (length > header.blockMax) return in.Fail("a block larger than the frame allows");
+		if (!in.Has(length)) return in.Fail("the frame is cut short");
+		const uint8* block = in.data + in.at;
+		in.at += length;
+		if ((word & kStoredBlock) != 0u) out.Append(block, length);
+		else {
+			const bool linked = (header.flags & kFlagIndependent) == (uint8)0;
+			const int64 history = linked ? out.Count() - frameStart : 0;
+			const InflateResult decoded = Lz4DecompressBlock(block, length, header.blockMax, out, history < kLz4LinkedHistory ? history : kLz4LinkedHistory);
+			if (!decoded.ok) return in.Fail(decoded.error);
+		}
+		if ((header.flags & kFlagBlockChecksum) == (uint8)0) return true;
+		uint64 sum = 0u;
+		if (!in.Take(4, sum)) return false;
+		return sum == (uint64)Xxh32(block, length) || in.Fail("a block's checksum does not match");
+	}
+
+	// The frame's end: the content checksum and the content size, where the frame has them.
+	static bool CheckContent(Lz4FrameReader& in, const Lz4FrameHeader& header, const uint8* content, int64 count) {
+		if (header.hasContentSize && header.contentSize != (uint64)count) return in.Fail("the content size does not match");
+		if ((header.flags & kFlagContentChecksum) == (uint8)0) return true;
+		uint64 sum = 0u;
+		if (!in.Take(4, sum)) return false;
+		return sum == (uint64)Xxh32(content, count) || in.Fail("the content checksum does not match");
+	}
+
+	InflateResult Lz4DecompressFrame(const uint8* data, int64 size, Core::Array<uint8>& out) {
+		Lz4FrameReader in = { data, size, 0, "" };
+		Lz4FrameHeader header;
+		const int64 start = out.Count();
+		bool ok = ReadHeader(in, header);
+		uint64 word = 1u;
+		while (ok && (ok = in.Take(4, word)) && word != 0u) ok = ReadBlock(in, header, (uint32)word, start, out);
+		ok = ok && CheckContent(in, header, out.Data() + start, out.Count() - start);
+		InflateResult result = { ok, ok ? in.at : 0, in.error };
+		return result;
+	}
+}

@@ -4,7 +4,7 @@
 //                  numbers, UUIDs, text (StringView, String, StringBuilder, Format), hashing, checksums and sorting
 //   FS             files, paths and directories
 //   Crypto         SHA-256, HMAC, Blake2b, Argon2 password hashing, comparing secrets
-//   Compression    DEFLATE, zlib and gzip streams written and read
+//   Compression    DEFLATE, zlib, gzip and LZ4 streams written and read
 //   Imaging        PNG read and written as 8-bit RGBA
 //   Serialization  the DOM, JSON (and JSONC) and YAML read and written, the binary form of reflected objects, JSON Schema
 //   Reflection     the runtime reflection registry
@@ -47,6 +47,7 @@ include "Crypto/blake2b.ch"
 include "Crypto/argon2.ch"
 include "Crypto/password.ch"
 include "Compression/zlib.ch"
+include "Compression/lz4.ch"
 include "Imaging/png.ch"
 include "FS/file.ch"
 include "FS/path.ch"

@@ -140,6 +140,14 @@ namespace Core
 	}
 
 	template<T>
+	public void Array::ResizeUninitialized(int64 newCount) {
+		if (newCount < 0) newCount = 0;
+		Reserve(newCount);
+		DestroyElements(data, newCount, count);
+		count = newCount;
+	}
+
+	template<T>
 	public void Array::ShrinkToFit() {
 		if (count < capacity) Reallocate(count);
 	}

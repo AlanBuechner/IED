@@ -354,7 +354,7 @@ namespace Imaging
 		image.width = header.width;
 		image.height = header.height;
 		image.pixels.Clear();
-		image.pixels.Resize((int64)header.width * (int64)header.height * 4);
+		image.pixels.ResizeUninitialized((int64)header.width * (int64)header.height * 4);   // every pixel is written
 		problem = ReadPixels(header, raw, image);
 		if (problem != nullptr) return Failed(problem);
 		ReadResult result;
