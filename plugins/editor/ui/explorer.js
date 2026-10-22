@@ -51,10 +51,11 @@ export function relativeTo(wsRoot, root) {
 }
 
 export class Explorer {
-	constructor(ctx, mounted) {
+	constructor(ctx, mounted, tasks) {
 		this.ctx = ctx;
 		this.ied = ctx.ied;
 		this.mounted = mounted;
+		this.startup = null;          // the startup project's name, drawn bold as VS does
 		this.folders = new Map();
 		this.rootNames = new Map();   // a project's root folder -> its names, for icons that go by marker files
 		this.viewButton = h("button.ib", { on: { click: () => this.switchView() } });
@@ -76,6 +77,8 @@ export class Explorer {
 		});
 		this.stopWorkspace = this.ied.workspace.on(() => this.refresh());
 		this.stopTopic = this.ied.client.subscribe("ws:" + ctx.wsId, { evt: (kind, data) => this.workspaceEvent(kind, data) });
+		tasks.follow(ctx.wsId);
+		this.stopTasks = tasks.on(() => this.startupIs(tasks.offer ? tasks.offer.startupProject : null));
 		mounted.add(this);
 		this.refresh();
 	}
@@ -84,7 +87,14 @@ export class Explorer {
 		this.mounted.delete(this);
 		this.stopWorkspace();
 		this.stopTopic();
+		this.stopTasks();
 		this.tree.dispose();
+	}
+
+	startupIs(name) {
+		if (name === this.startup) return;
+		this.startup = name;
+		this.tree.draw();
 	}
 
 	focus() {
@@ -192,6 +202,7 @@ export class Explorer {
 
 	renderRow(node, row) {
 		row.append(this.iconOf(node), h("span.name", null, node.name));
+		if (node.kind === "project" && node.name === this.startup) row.classList.add("startup");
 		if (node.problem) {
 			row.classList.add("problem");
 			row.title = node.problem;
@@ -237,9 +248,11 @@ export class Explorer {
 		this.ied.menus.show("explorer/context", at, { path: node.path, kind: node.kind, name: node.name });
 	}
 
-	// The context keys of the selected item: its kind, and a file's extension (".md") for menus that fit its type.
+	// The context keys of the selected item: its kind, a project's kind (a library cannot be the startup project), and a
+	// file's extension (".md") for menus that fit its type.
 	selectedNode(node) {
 		this.ied.context.set("explorerItemKind", node.kind);
+		this.ied.context.set("explorerProjectKind", node.kind === "project" ? node.project.kind || "" : undefined);
 		const name = node.kind === "file" && node.path ? baseName(node.path) : "";
 		this.ied.context.set("explorerItemExtension", name.lastIndexOf(".") > 0 ? name.slice(name.lastIndexOf(".")).toLowerCase() : "");
 	}

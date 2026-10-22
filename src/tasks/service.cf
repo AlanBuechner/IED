@@ -1,4 +1,5 @@
 include "service.ch"
+include "missing.ch"
 include "host/server.ch"
 include "plugins/when.ch"
 include "fs/glob.ch"
@@ -54,11 +55,16 @@ namespace Ied
 		return nullptr;
 	}
 
+	// Whether a project can be the startup project: a library or a plugin is not a program to run (docs/03 `kind`).
+	static bool Startable(const TaskProject* project) {
+		return project->kind != "library" && project->kind != "plugin";
+	}
+
 	Core::String Tasks::StartupProject(Workspace* ws) {
 		Core::Array<TaskProject*> projects = ProjectsOf(ws);
 		TaskSelections* chosen = SelectionsOf(ws);
 		for (TaskProject* project : projects)
-			if (project->name.View() == chosen->startupProject.View()) return project->name;
+			if (project->name.View() == chosen->startupProject.View() && Startable(project)) return project->name;
 		for (TaskProject* project : projects)
 			if (project->kind == "executable") return project->name;
 		return projects.IsEmpty() ? Core::String() : projects[0]->name;
@@ -178,7 +184,8 @@ namespace Ied
 		else json.Null();
 		json.Field("startupProject", startup.View());
 		Core::Array<Core::String> names;
-		for (TaskProject* each : ProjectsOf(ws)) names.Push(each->name);
+		for (TaskProject* each : ProjectsOf(ws))
+			if (Startable(each)) names.Push(each->name);
 		WriteStrings(json, "projects", names);
 		json.Key(Core::StringView("variables"));
 		json.BeginArray();
@@ -318,6 +325,7 @@ namespace Ied
 			planned->kind = step->kind;
 			for (const Core::String& arg : step->argv) planned->argv.Push(Expanded(arg.View(), lookup, task->key.View()));
 			if (!step->shell.IsEmpty()) planned->shell = Expanded(step->shell.View(), lookup, task->key.View());
+			planned->programSetting = ProgramSetting(!step->shell.IsEmpty() ? step->shell.View() : step->argv.IsEmpty() ? Core::StringView("") : step->argv[0].View());
 			if (step->kind == StepKind::Run && planned->argv.IsEmpty() && planned->shell.IsEmpty()) throw RpcError(ErrorCode::BadRequest, ((Core::String("a step of the task ") + task->key.View()) + " has nothing to run").View());
 			planned->label = !step->label.IsEmpty() ? Expanded(step->label.View(), lookup, task->key.View()) : !planned->shell.IsEmpty() ? planned->shell : planned->argv.IsEmpty() ? step->name : planned->argv[0];
 			FS::Path cwd = FS::Path(Expanded(step->cwd.IsEmpty() ? Core::StringView("${projectRoot}") : step->cwd.View(), lookup, task->key.View()).View());
@@ -504,7 +512,9 @@ namespace Ied
 	Core::String Tasks::SetStartupMethod(Call& call, const Params& params) {
 		Workspace* ws = server->workspaces->Get(params.Str("wsId").View());
 		Core::String named = params.Str("project");
-		if (!ProjectNamed(ws, named.View())) throw RpcError(ErrorCode::NotFound, (Core::String("no project ") + named.View()).View());
+		TaskProject* project = ProjectNamed(ws, named.View());
+		if (!project) throw RpcError(ErrorCode::NotFound, (Core::String("no project ") + named.View()).View());
+		if (!Startable(project)) throw RpcError(ErrorCode::BadRequest, (((named + " is a ") + project->kind.View()) + ", not a program to run: pick an executable project").View());
 		SelectionsOf(ws)->startupProject = named;
 		SaveSelections(ws);
 		ProjectsChanged(ws);

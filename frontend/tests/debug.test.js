@@ -1,9 +1,9 @@
 // debug.test.js - which session the debugger follows, a frame's file and place, and the breakpoint margin's decorations
 // (bound breakpoints on the line the adapter moved them to, unverified and disabled ones, the current statement), and the
-// Diagnostic Tools' scales and graphs.
+// Diagnostic Tools' scales and graphs, and the output a Launch shows while its build runs and once the program starts.
 
 import { test, assertEqual } from "./harness.js";
-import { currentSession, framePath, isLive, hoverExpression } from "/plugins/ied.editor/ui/debug.js";
+import { DebugState, currentSession, framePath, isLive, hoverExpression } from "/plugins/ied.editor/ui/debug.js";
 import { marginDecorations } from "/plugins/ied.editor/ui/breakpointmargin.js";
 import { frameWhere, breakpointLabel } from "/plugins/ied.editor/ui/debugviews.js";
 import { niceTop, graphPoints, sessionClock } from "/plugins/ied.editor/ui/diagtools.js";
@@ -64,4 +64,22 @@ test("debug: Diagnostic Tools scales its graphs to round tops and draws the sess
 	assertEqual(sessionClock(65000), "1:05");
 	assertEqual(sessionClock(3723000), "1:02:03");
 	assertEqual(sessionClock(0), "0:00");
+});
+
+test("debug: a Launch shows its build's output, then the program's once it starts; a failed build says so", () => {
+	const shown = [];
+	const toasts = [];
+	const ied = { context: { set() {} }, commands: { run: (id, args) => shown.push(args.sourceId) }, toast: (text, options) => toasts.push(options.level + ": " + text) };
+	const state = new DebugState(ied);
+	state.launching = "d1";
+	state.launched({ id: "d1", state: "building", problem: "" });
+	state.launched({ id: "d2", state: "running", problem: "" });
+	assertEqual([shown, state.launching], [[], "d1"], "still building, and another session");
+	state.launched({ id: "d1", state: "running", problem: "" });
+	assertEqual([shown, state.launching], [["debug"], null], "the program started: its output");
+	state.launched({ id: "d1", state: "stopped", problem: "" });
+	assertEqual(shown, ["debug"], "once");
+	state.launching = "d3";
+	state.launched({ id: "d3", state: "failed", problem: "the pre-launch task build failed" });
+	assertEqual([shown, toasts], [["debug"], ["error: Launch stopped: the pre-launch task build failed. The output shows why."]], "the build's output stays");
 });

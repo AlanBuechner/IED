@@ -29,6 +29,7 @@
 .explorer .tree-row .name { overflow: hidden; text-overflow: ellipsis; }
 .explorer .tree-row .meta { font-size: var(--font-size-xs); }
 .explorer .tree-row.problem .name { color: var(--accent-error); }
+.explorer .tree-row.startup .name { font-weight: 600; color: var(--text-0); }
 
 /* Output */
 .output-text {

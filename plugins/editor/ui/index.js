@@ -19,6 +19,7 @@ import { FindInFiles as FindInFilesView } from "./findinfiles.js";
 import { findCounterpart } from "./headersource.js";
 import { followCounterparts } from "./counterpartfollow.js";
 import { showGoToAll } from "./gotoall.js";
+import { showPicker } from "/ui-kit/picker.js";
 import { fileName } from "/ui-kit/fileuris.js";
 import { TaskState, TaskToolbar as TaskToolbarView, TaskStatus as TaskStatusView } from "./tasks.js";
 import { DebugState, BreakpointState, DebugToolbar as DebugToolbarView, framePath, hoverExpression } from "./debug.js";
@@ -113,7 +114,7 @@ export function activate(ied) {
 	ied.commands.handle("ied.task.start", () => tasks.run({ slot: "run" }));
 	ied.commands.handle("ied.task.test", () => tasks.run({ slot: "test" }));
 	ied.commands.handle("ied.task.cancel", () => tasks.cancelAll());
-	ied.commands.handle("ied.task.setStartup", (args) => args && args.name && tasks.setStartup(args.name));
+	ied.commands.handle("ied.task.setStartup", (args) => (args && args.name ? tasks.setStartup(args.name) : pickStartup(ied)));
 	ied.commands.handle("ied.task.showResult", () => (tasks.ended && tasks.ended.status === "failed" && !tasks.runs.size ? ied.commands.run("shell.showView", { id: "ied.errors" }) : ied.commands.run("shell.showView", { id: "ied.output" })));
 	ied.commands.handle("ied.output.show", (args) => showOutput(ied, args && args.sourceId));
 	ied.commands.handle("ied.find.inFiles", () => findInFiles(ied));
@@ -288,6 +289,21 @@ async function openCounterpartBeside(ied, args) {
 	ied.tabs.openBeside("doc:" + path, "doc:" + found, { tether: true });
 }
 
+// Set as Startup Project from the palette: which project, of those that can run.
+function pickStartup(ied) {
+	const offer = tasks.offer;
+	const names = offer ? offer.projects : [];
+	if (!names.length) {
+		ied.toast("No project of this workspace can be the startup project: libraries and plugins do not run.", { level: "info" });
+		return;
+	}
+	showPicker({
+		placeholder: "Set as Startup Project",
+		provide: async (text) => names.filter((name) => name.toLowerCase().includes(text.toLowerCase())).map((name) => ({ label: name, detail: name === offer.startupProject ? "the startup project now" : "", name })),
+		pick: (item) => tasks.setStartup(item.name),
+	});
+}
+
 // Shows Find in Files with the editor's selection (one line of it) as the query.
 async function findInFiles(ied) {
 	const editor = editors.last();
@@ -330,7 +346,7 @@ async function goTo(ied, args) {
 }
 
 export function SolutionExplorer(ctx) {
-	return new Explorer(ctx, explorers);
+	return new Explorer(ctx, explorers, tasks);
 }
 
 export function Output(ctx) {

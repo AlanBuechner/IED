@@ -38,6 +38,7 @@ export class DebugState {
 		this.stopSession = null;
 		this.followed = null;     // the session id whose topic is followed
 		this.thread = null;       // the thread a click in Threads chose; null: the stopped one
+		this.launching = null;    // the session this window launched while its pre-launch build runs
 		this.onStop = null;       // fn(frame) when a stop arrives: the shell shows its place
 		// What the program uses once the adapter names its process (docs/25 "Diagnostic Tools"):
 		// {processId, name, samples: [[t ms, cpu %, privateBytes, workingSetBytes]]}; heard with onUsage.
@@ -82,6 +83,7 @@ export class DebugState {
 			snap: (data) => {
 				if (this.followed !== id) return;
 				this.session = data.session;
+				this.launched(data.session);
 				this.usageIs(data.usage || null);
 				this.stoppedAt(data.frames || [], data.threads || [], false);
 			},
@@ -89,6 +91,7 @@ export class DebugState {
 				if (this.followed !== id) return;
 				if (kind === "dbg.state") {
 					this.session = data;
+					this.launched(data);
 					if (data.state !== "stopped") this.stoppedAt([], this.threads, false);
 					else this.changed();
 				}
@@ -102,6 +105,15 @@ export class DebugState {
 				}
 			},
 		});
+	}
+
+	// A Launch of this window whose build has ended: the program's output once it starts; when the build failed, its
+	// output stays and a toast says so.
+	launched(session) {
+		if (!session || this.launching !== session.id || session.state === "building") return;
+		this.launching = null;
+		if (session.state === "failed") this.ied.toast("Launch stopped: " + session.problem + ". The output shows why.", { level: "error" });
+		else if (isLive(session)) this.ied.commands.run("ied.output.show", { sourceId: "debug" });
 	}
 
 	stoppedAt(frames, threads, shown) {
@@ -187,7 +199,8 @@ export class DebugState {
 		if (this.live()) return null;
 		try {
 			const started = await this.ied.client.request("dbg.start", { wsId: this.wsId });
-			await this.ied.commands.run("ied.output.show", { sourceId: "debug" });
+			this.launching = started.output && started.output !== "debug" ? started.sessionId : null;
+			await this.ied.commands.run("ied.output.show", { sourceId: started.output || "debug" });
 			return started;
 		}
 		catch (e) {

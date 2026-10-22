@@ -2,7 +2,8 @@
 selections persist per machine; a run streams its steps' output to run:<runId> and the output source, turns matched
 lines into diagnostics, follows onlyIf, saves dirty documents first, refuses unknown variables and a second `single`
 run, and cancel kills the step's whole process tree. An untrusted workspace runs nothing; a folder workspace gets the
-presets whose `detect` matches."""
+presets whose `detect` matches. Only a project that runs can be the startup project (not a library), trusting a workspace
+sends its offer again, and a step whose program a setting names says how to fix it when that program is not there."""
 
 import asyncio
 import json
@@ -57,12 +58,15 @@ class TaskTests(ServerTestCase):
 		self.repo = os.path.join(self.root, "Game")
 		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
 		write(os.path.join(self.home, "plugins", "fake", "ied-plugin.json"), FAKE_PLUGIN)
-		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"}}})
+		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"},
+			"fake.tool": {"type": "string", "default": "no-such-tool-ied"}, "fake.python": {"type": "string", "default": PY}}})
 		write(os.path.join(self.repo, "src", "a.c"), "int a;\nint b;\nint c;\n")
 		write(os.path.join(self.repo, "hello.cmd"), "@echo hello %~1\r\n")
 		write(os.path.join(self.repo, "Game.iedproj"), {"version": 1, "name": "Game", "root": ".", "kind": "executable", "presets": ["fake.make"], "tasks": self.tasks(),
 			"buildSystem": {"id": "fake", "output": "${workspaceDir}/out/${config}/game.exe"}})
-		write(os.path.join(self.repo, "Game.iedsln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.iedproj"}]})
+		write(os.path.join(self.repo, "viewer", "Viewer.iedproj"), {"version": 1, "name": "Viewer", "root": ".", "kind": "executable", "presets": ["fake.make"]})
+		write(os.path.join(self.repo, "core", "Core.iedproj"), {"version": 1, "name": "Core", "root": ".", "kind": "library", "presets": ["fake.make"]})
+		write(os.path.join(self.repo, "Game.iedsln"), {"version": 1, "name": "Game", "projects": [{"file": "Game.iedproj"}, {"file": "viewer/Viewer.iedproj"}, {"file": "core/Core.iedproj"}]})
 		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Game.iedsln")))
 		self.assertTrue(self.server.started, self.server.error)
 
@@ -84,7 +88,9 @@ class TaskTests(ServerTestCase):
 			"typo": {"steps": [{"run": python("print('${nope}')")}]},
 			"show": {"steps": [{"run": python("print(open('src/a.c').read())")}]},
 			"greet": {"steps": [{"run": python("print('${config:fake.greeting} from ${config}')")}]},
-			"where": {"steps": [{"run": python("print(r'${projectOutput}')")}]}}
+			"where": {"steps": [{"run": python("print(r'${projectOutput}')")}]},
+			"missing": {"steps": [{"run": "\"${config:fake.tool}\" build"}]},
+			"failing": {"steps": [{"run": "\"${config:fake.python}\" -I -c \"import sys; sys.exit(3)\""}]}}
 
 	def orphan_marker(self):
 		return "ied-step-" + os.path.basename(self.root)
@@ -119,9 +125,33 @@ class TaskTests(ServerTestCase):
 	def text_of(self, frames):
 		return "".join(f["data"]["text"] for f in frames if f.get("kind") == "output") + "".join(f["data"].get("tail", "") for f in frames if f["t"] == "snap")
 
+	async def test_only_a_project_that_runs_is_the_startup_project(self):
+		with self.assertRaises(RpcFailure) as library:
+			await self.client.request("task.setStartup", {"wsId": "w1", "project": "Core"})
+		self.assertEqual("bad_request", library.exception.code)
+		self.assertIn("not a program to run", str(library.exception))
+		offer = await self.client.request("task.setStartup", {"wsId": "w1", "project": "Viewer"})
+		self.assertEqual(("Viewer", "Viewer"), (offer["project"], offer["startupProject"]))
+		with open(os.path.join(self.repo, ".ied", "local", "selections.json"), encoding="utf-8") as f:
+			self.assertEqual("Viewer", json.load(f)["startupProject"], "kept on this machine")
+
+	async def test_trusting_the_workspace_sends_its_offer_again(self):
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": False})
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		changed = await self.client.wait_for("tasks:w1", lambda f: f.get("kind") == "tasks.changed", timeout=10)
+		self.assertEqual("Game", changed[-1]["data"]["offer"]["project"], "the toolbar's offer comes again, with what the trusted plugins add")
+
+	async def test_a_missing_program_a_setting_names_says_how_to_fix_it(self):
+		_, frames = await self.run_task(task="missing")
+		text = self.text_of(frames)
+		self.assertIn("no-such-tool-ied was not found", text)
+		self.assertIn("Set fake.tool (Settings) to its full path", text)
+		_, frames = await self.run_task(task="failing")
+		self.assertNotIn("was not found", self.text_of(frames), "a program that is there and fails is not missing")
+
 	async def test_the_offer_is_the_presets_under_the_project(self):
 		offer = await self.client.request("task.list", {"wsId": "w1"})
-		self.assertEqual(("Game", "Game", ["Game"]), (offer["project"], offer["startupProject"], offer["projects"]))
+		self.assertEqual(("Game", "Game", ["Game", "Viewer"]), (offer["project"], offer["startupProject"], offer["projects"]), "the library Core cannot be the startup project")
 		self.assertEqual([("config", "Development", "solution", ["Debug", "Development"])], [(v["key"], v["value"], v["scope"], v["values"]) for v in offer["variables"]])
 		tasks = {t["key"]: t for t in offer["tasks"]}
 		self.assertEqual("Clean it", tasks["clean"]["label"], "the project's task replaced the preset's")
@@ -314,7 +344,8 @@ class FolderTaskTests(ServerTestCase):
 		self.folder = os.path.join(self.root, "tool")
 		shutil.copytree(os.path.join(REPO, "shared", "host-api", "schemas"), os.path.join(self.home, "shared", "host-api", "schemas"))
 		write(os.path.join(self.home, "plugins", "fake", "ied-plugin.json"), FAKE_PLUGIN)
-		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"}}})
+		write(os.path.join(self.home, "plugins", "fake", "settings.schema.json"), {"properties": {"fake.greeting": {"type": "string", "default": "hello"},
+			"fake.tool": {"type": "string", "default": "no-such-tool-ied"}, "fake.python": {"type": "string", "default": PY}}})
 		write(os.path.join(self.folder, "fake.mk"), "all:\n")
 		self.server = IedServer(extra=("--home", self.home, "--workspace", self.folder))
 		self.assertTrue(self.server.started, self.server.error)

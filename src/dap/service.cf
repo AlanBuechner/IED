@@ -338,6 +338,7 @@ namespace Ied
 		id.Append("d");
 		id.AppendInt(started);
 		DebugSession* session = new DebugSession(server, ws, id.View(), launch);
+		if (before) session->buildRunId = before->runId;
 		Keep(session);
 		server->outputs->Clear(ws, Core::StringView("debug"));
 		if (!before) session->Start(provider);
@@ -356,6 +357,7 @@ namespace Ied
 		json.BeginObject();
 		json.Field("sessionId", session->id.View());
 		json.Field("topic", SessionTopic(session).View());
+		json.Field("output", before && !before->steps.IsEmpty() ? before->steps[0]->output.CStr() : "debug");
 		json.EndObject();
 		return json.ToString();
 	}
@@ -365,6 +367,8 @@ namespace Ied
 		if (session->state == DebugState::Building) {
 			session->state = DebugState::Ended;
 			StateChanged(session);
+			TaskRun* build = server->tasks->Run(session->buildRunId.View());
+			if (build && build->IsActive()) server->tasks->Cancel(build);
 		}
 		else session->Stop();
 		return Core::String("{}");

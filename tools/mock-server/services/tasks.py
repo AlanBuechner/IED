@@ -1,5 +1,6 @@
-"""Tasks (docs/06 "Protocol and state"): the demo project's offer with its selections (task.list/select/setStartup, the
-'tasks:<wsId>' topic), and scripted runs (task.run/cancel/runs, 'run:<runId>' topics) with output mirrored to 'out:' and
+"""Tasks (docs/06 "Protocol and state"): the startup project's offer with its selections (task.list/select/setStartup, the
+'tasks:<wsId>' topic) - a folder is the demo project, a solution has its projects, of which those that are not a library or
+a plugin can be the startup project - and scripted runs (task.run/cancel/runs, 'run:<runId>' topics) with output mirrored to 'out:' and
 diagnostics to 'diag:'."""
 
 import asyncio
@@ -16,12 +17,18 @@ PROJECT = "demo"
 FLOOD_YIELD_EVERY = 100
 
 
+def startable(kind):
+	"""Whether a project of this kind can be the startup project (the server's Startable)."""
+	return kind not in ("library", "plugin")
+
+
 class Run:
-	def __init__(self, run_id, ws_id, task_id, label):
+	def __init__(self, run_id, ws_id, task_id, label, project):
 		self.run_id = run_id
 		self.ws_id = ws_id
 		self.task_id = task_id
 		self.label = label
+		self.project = project
 		self.status = "running"
 		self.steps = []
 		self.exit_code = None
@@ -35,7 +42,7 @@ class Run:
 		return "run:" + self.run_id
 
 	def summary(self):
-		return {"runId": self.run_id, "project": PROJECT, "task": self.task_id, "label": self.label, "status": self.status, "exitCode": self.exit_code,
+		return {"runId": self.run_id, "project": self.project, "task": self.task_id, "label": self.label, "status": self.status, "exitCode": self.exit_code,
 			"startedMs": int(self.started * 1000), "endedMs": 0}
 
 
@@ -44,6 +51,7 @@ class Tasks:
 		self.server = server
 		self.runs = {}
 		self.selections = {}
+		self.startups = {}   # wsId -> the startup project chosen
 		for name in ("task.list", "task.select", "task.setStartup", "task.run", "task.cancel", "task.runs"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 		for ws_id in server.workspace.items:
@@ -54,13 +62,30 @@ class Tasks:
 		self.server.hub.add("tasks:" + ws_id, lambda: {"offer": self.offer(ws_id), "runs": [r.summary() for r in self.runs.values() if r.ws_id == ws_id and r.status == "running"],
 			"ended": self.last_ended(ws_id)})
 
+	def projects_of(self, ws_id):
+		"""[(name, kind)]: a solution's projects (docs/03), else the folder as the one project."""
+		ws = self.server.workspace.get(ws_id)
+		if ws.solution:
+			return [(p["name"], p.get("kind", "")) for p in ws.solution["projects"]]
+		return [(PROJECT, "other")]
+
+	def startup(self, ws_id):
+		"""The chosen startup project while it can run, else the first program, else the first project."""
+		projects = self.projects_of(ws_id)
+		chosen = self.startups.get(ws_id)
+		for name, kind in projects:
+			if name == chosen and startable(kind):
+				return name
+		return next((name for name, kind in projects if kind == "executable"), projects[0][0] if projects else None)
+
 	def offer(self, ws_id):
 		chosen = self.selections.setdefault(ws_id, {})
 		variables = [dict(v, value=chosen.get(v["key"], v["default"])) for v in task_output.VARIABLES]
 		for variable in variables:
 			del variable["default"]
 		tasks = [{"key": k, "label": t["label"], "icon": t["icon"], "tooltip": "", "slot": t["slot"] or ""} for k, t in task_output.TASKS.items()]
-		return {"project": PROJECT, "startupProject": PROJECT, "projects": [PROJECT], "variables": variables, "tasks": tasks, "toolbar": task_output.TOOLBAR,
+		startup = self.startup(ws_id)
+		return {"project": startup, "startupProject": startup, "projects": [name for name, kind in self.projects_of(ws_id) if startable(kind)], "variables": variables, "tasks": tasks, "toolbar": task_output.TOOLBAR,
 			"debug": {"default": "Launch", "configurations": ["Launch"]}, "problems": []}
 
 	def last_ended(self, ws_id):
@@ -75,17 +100,19 @@ class Tasks:
 
 	async def m_task_list(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
-		self._project(p)
+		self._project(ws_id, p)
 		return self.offer(ws_id)
 
-	def _project(self, p):
+	def _project(self, ws_id, p):
+		"""The project a call names, else the startup project."""
 		project = p.str("project", "", required=False)
-		if project and project != PROJECT:
+		if project and project not in dict(self.projects_of(ws_id)):
 			raise RpcError("not_found", "no project %s" % project)
+		return project or self.startup(ws_id)
 
 	async def m_task_select(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
-		self._project(p)
+		self._project(ws_id, p)
 		key, value = p.str("key"), p.str("value")
 		variable = next((v for v in task_output.VARIABLES if v["key"] == key), None)
 		if variable is None:
@@ -98,8 +125,13 @@ class Tasks:
 
 	async def m_task_setStartup(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
-		if p.str("project") != PROJECT:
-			raise RpcError("not_found", "no project %s" % p.str("project"))
+		name = p.str("project")
+		kinds = dict(self.projects_of(ws_id))
+		if name not in kinds:
+			raise RpcError("not_found", "no project %s" % name)
+		if not startable(kinds[name]):
+			raise RpcError("bad_request", "%s is a %s, not a program to run: pick an executable project" % (name, kinds[name]))
+		self.startups[ws_id] = name
 		self._changed(ws_id)
 		return self.offer(ws_id)
 
@@ -109,17 +141,17 @@ class Tasks:
 
 	async def m_task_run(self, call, p):
 		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
-		self._project(p)
+		project = self._project(ws_id, p)
 		slot = p.str("slot", "", required=False)
 		task_id = p.str("task", "", required=False) or next((k for k, t in task_output.TASKS.items() if slot and t["slot"] == slot), "")
 		task = task_output.TASKS.get(task_id)
 		if task is None:
-			raise RpcError("not_found", ("no task %r" % task_id) if not slot else "the project %s has no %s task" % (PROJECT, slot))
+			raise RpcError("not_found", ("no task %r" % task_id) if not slot else "the project %s has no %s task" % (project, slot))
 		params = p.obj("params", {}, required=False)
 		lines = params.get("lines", 50000)
 		if type(lines) is not int or not 1 <= lines <= 5000000:
 			raise RpcError("bad_request", "params.lines must be an integer in 1..5000000")
-		run = Run("r%d" % (len(self.runs) + 1), ws_id, task_id, task["label"])
+		run = Run("r%d" % (len(self.runs) + 1), ws_id, task_id, task["label"], project)
 		self.runs[run.run_id] = run
 		self.server.hub.add(run.topic, lambda: self.snapshot(run))
 		chosen = {v["key"]: v["value"] for v in self.offer(ws_id)["variables"]}

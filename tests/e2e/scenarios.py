@@ -2088,10 +2088,57 @@ def start_page_and_recent_projects(run):
 	page.wait_for_function("() => location.hash === '#start' && [...document.querySelectorAll('.sp-section')].some(s => s.querySelector('h3').textContent === 'Open' && s.textContent.includes('Tools'))", timeout=10000)
 
 
+@scenario(viewports=("desktop",), targets=("mock",))
+def startup_project_runs(run):
+	"""Pick the startup project and Run builds and runs it (docs/06 "Protocol and state"): Solution Explorer draws it in
+	bold, as VS does; the toolbar's Startup project list and Set as Startup Project (the project's menu, or the palette,
+	which asks which) offer only the projects that run - not the Core library, which the server refuses too - and Run
+	runs the one picked. The mock's recent solution Tools has the programs Tool and Viewer and the library Core."""
+	page = run.open()
+	ws = run.request("ws.openRecent", {"path": "C:/mock/Tools/Tools.iedsln"})["workspace"]["wsId"]
+	page.evaluate("(id) => ied_shell.showWorkspace(id)", ws)
+	page.wait_for_function("document.title === 'Tools - IED' && ied_shell.layout", timeout=20000)
+	run.show_activity("ied.editor")
+	page.click(".explorer .tree-row:has-text(\"Solution 'Tools'\")")
+	page.keyboard.press("ArrowRight")
+	page.wait_for_selector(".explorer .tree-row:has-text('Viewer')")
+	page.wait_for_selector(".explorer .tree-row.startup:has-text('Tool')")
+	check(run.texts(".explorer .tree-row.startup") == ["Tool"], "the startup project in bold: %r" % run.texts(".explorer .tree-row.startup"))
+	startup = ".toolbar select[aria-label='Startup project']"
+	check(page.eval_on_selector(startup, "el => [...el.options].map(o => o.value)") == ["Tool", "Viewer"], "the toolbar offers the programs, not the library")
+	page.click(".explorer .tree-row:has-text('Core')", button="right")
+	page.wait_for_selector(".menu")
+	check(not page.is_visible(".menu .menu-item:has-text('Set as Startup Project')"), "a library has no Set as Startup Project")
+	page.keyboard.press("Escape")
+	refused = None
+	try:
+		run.request("task.setStartup", {"wsId": ws, "project": "Core"})
+	except Exception as e:
+		refused = str(e)
+	check(refused is not None and "not a program to run" in refused, "the server refuses a library: %r" % refused)
+	page.click(".explorer .tree-row:has-text('Viewer')", button="right")
+	page.click(".menu .menu-item:has-text('Set as Startup Project')")
+	page.wait_for_selector(".explorer .tree-row.startup:has-text('Viewer')")
+	check(page.eval_on_selector(startup, "el => el.value") == "Viewer", "the toolbar follows")
+	run.shot("viewer")
+	page.evaluate("ied_shell.commands.run('ied.task.setStartup')")
+	page.wait_for_selector(".picker .palette-list")
+	page.wait_for_selector(".picker .palette-list .menu-item .label")
+	check(run.texts(".picker .palette-list .menu-item .label") == ["Tool", "Viewer"], "the palette asks which: %r" % run.texts(".picker .palette-list .menu-item .label"))
+	page.keyboard.type("Tool")
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".explorer .tree-row.startup:has-text('Tool')")
+	page.click(".toolbar button[aria-label='Run']")
+	page.wait_for_function("(id) => ied_shell.client.request('task.runs', { wsId: id }).then(r => r.runs.some(x => x.task === 'run'))", arg=ws, timeout=10000)
+	runs = run.request("task.runs", {"wsId": ws})["runs"]
+	check([r["project"] for r in runs if r["task"] == "run"][-1:] == ["Tool"], "Run ran the startup project: %r" % runs)
+	run.shot("ran")
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def solution_explorer_switches_views(run):
 	"""The Solution Explorer's Switch Views (docs/15): a solution shows its projects and Solution Items, or its folder,
-	and back. The mock's recent solution Tools opens as a solution with one project."""
+	and back. The mock's recent solution Tools opens as a solution with three projects."""
 	page = run.open()
 	ws = run.request("ws.openRecent", {"path": "C:/mock/Tools/Tools.iedsln"})["workspace"]["wsId"]
 	page.evaluate("(id) => ied_shell.showWorkspace(id)", ws)
@@ -2099,7 +2146,7 @@ def solution_explorer_switches_views(run):
 	run.show_activity("ied.editor")
 	if run.phone:
 		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.explorer' })")
-	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (1 project)\")")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (3 projects)\")")
 	page.click(".explorer .tree-row:has-text(\"Solution 'Tools'\")")
 	page.keyboard.press("ArrowRight")
 	page.wait_for_selector(".explorer .tree-row:has-text('Solution Items')")
@@ -2111,4 +2158,4 @@ def solution_explorer_switches_views(run):
 	check(all(any(name in row for row in rows) for name in ("src", "README.md", "Tools.iedsln")), "the folder's entries: %r" % rows)
 	run.shot("folder")
 	page.click("button[aria-label='Switch to Solution View']")
-	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (1 project)\")")
+	page.wait_for_selector(".explorer .tree-row:has-text(\"Solution 'Tools' (3 projects)\")")

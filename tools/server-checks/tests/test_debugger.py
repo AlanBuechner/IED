@@ -4,6 +4,7 @@ verified per session; a stop arriving with its frames in workspace paths and 0-b
 workspace as a named file: URI); revision-checked controls; inspection through the adapter; output to the Debug
 source; the session outliving its client; refusals; an adapter that crashes."""
 
+import asyncio
 import json
 import os
 import shutil
@@ -47,7 +48,8 @@ class DebuggerTests(ServerTestCase):
 
 	def tasks(self):
 		return {"build": {"steps": [{"run": [sys.executable, "-I", "-c", "print('built')"]}]},
-			"broken": {"steps": [{"run": [sys.executable, "-I", "-c", "import sys; sys.exit(2)"]}]}}
+			"broken": {"steps": [{"run": [sys.executable, "-I", "-c", "import sys; sys.exit(2)"]}]},
+			"slow": {"steps": [{"run": [sys.executable, "-I", "-c", "import time; print('building', flush=True); time.sleep(60)"]}]}}
 
 	def debug(self):
 		launch = {"type": "fake", "request": "launch", "program": "${projectRoot}/src/game.txt", "outside": self.outside.replace("\\", "/"), "exitCode": 7}
@@ -56,6 +58,7 @@ class DebuggerTests(ServerTestCase):
 			"Entry": dict(launch, stopOnEntry=True),
 			"Built": dict(launch, preLaunchTask="build"),
 			"Broken": dict(launch, preLaunchTask="broken"),
+			"Slow": dict(launch, preLaunchTask="slow"),
 			"Refused": dict(launch, refuse=True),
 			"Tcp": dict(launch, type="faketcp", stopOnEntry=True),
 			"Unknown": {"type": "nope", "request": "launch"}}}
@@ -197,9 +200,31 @@ class DebuggerTests(ServerTestCase):
 		self.assertEqual("failed", failed["state"])
 		self.assertIn("pre-launch task broken failed", failed["problem"])
 
+	async def test_stop_while_it_builds_ends_the_build(self):
+		started = await self.client.request("dbg.start", {"wsId": "w1", "configuration": "Slow"})
+		self.assertNotEqual("debug", started["output"], "the build's output to show while it builds")
+		await self.client.sub([started["topic"]])
+		for _ in range(50):
+			runs = (await self.client.request("task.runs", {"wsId": "w1"}))["runs"]
+			if runs and runs[-1]["task"] == "slow" and runs[-1]["status"] == "running":
+				break
+			await asyncio.sleep(0.2)
+		await asyncio.sleep(0.5)
+		await self.client.request("dbg.stop", {"sessionId": started["sessionId"]})
+		end = await self.ended(started["topic"])
+		self.assertEqual("ended", end["state"])
+		for _ in range(50):
+			runs = (await self.client.request("task.runs", {"wsId": "w1"}))["runs"]
+			if runs and runs[-1]["status"] != "running":
+				break
+			await asyncio.sleep(0.2)
+		self.assertEqual(("slow", "cancelled"), (runs[-1]["task"], runs[-1]["status"]), "the build was stopped with it")
+		plain = await self.client.request("dbg.start", {"wsId": "w1"})
+		self.assertEqual("debug", plain["output"], "no build: the program's output at once")
+
 	async def test_refusals(self):
 		offer = await self.client.request("task.list", {"wsId": "w1"})
-		self.assertEqual(("Launch", ["Launch", "Entry", "Built", "Broken", "Refused", "Tcp", "Unknown"]), (offer["debug"]["default"], offer["debug"]["configurations"]), "the offer names them")
+		self.assertEqual(("Launch", ["Launch", "Entry", "Built", "Broken", "Slow", "Refused", "Tcp", "Unknown"]), (offer["debug"]["default"], offer["debug"]["configurations"]), "the offer names them")
 		with self.assertRaises(RpcFailure) as unknown:
 			await self.client.request("dbg.start", {"wsId": "w1", "configuration": "Unknown"})
 		self.assertEqual("not_found", unknown.exception.code)

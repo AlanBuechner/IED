@@ -34,7 +34,7 @@ A configuration's strings expand the profile variables plus `${projectName}`, `$
 
 ## Sessions
 
-`dbg.start {wsId, project?, configuration?}` answers `{sessionId}` at once; the session then goes through its states, published on `dbg:<wsId>`:
+`dbg.start {wsId, project?, configuration?}` answers `{sessionId, topic, output}` at once (`output`: the source to show - the pre-launch task's while it builds, else `debug`); the session then goes through its states, published on `dbg:<wsId>`:
 
 `building` (the pre-launch task) -> `starting` (the adapter's `initialize`, the workspace's breakpoints and exception filters, `launch` or `attach`, `configurationDone`) -> `running` <-> `stopped` -> `ended` (with the exit code), or `failed` (with why: the task failed, the adapter would not start, the launch was refused).
 
@@ -61,7 +61,7 @@ Exception filters (F-DBG-14) are per workspace and adapter type, in `.ied/local/
 
 `src/dap/`: `providers` (the `dapProviders` contributions; the last loaded plugin's adapter of a type, its `when` checked), `session` (one adapter process: a writer thread, readers for its messages and its errors, requests answered by sequence number, the state and revision), `breakpoints` (the workspace's, `bp.*`) and `service` (the `Debugger`: `dbg.*`, the topics, paths and positions).
 
-- `dbg.start {wsId, project?, configuration?}` resolves the configuration through the task system (`docs/06`: the project's `debug` over its presets', strings expanded with the task variables), starts its `preLaunchTask` with `task.run`'s rules and the adapter when it succeeds, and answers `{sessionId, topic}`. An untrusted workspace answers `forbidden`; no configuration, or no adapter of its `type`, `not_found`.
+- `dbg.start {wsId, project?, configuration?}` resolves the configuration through the task system (`docs/06`: the project's `debug` over its presets', strings expanded with the task variables), starts its `preLaunchTask` with `task.run`'s rules and the adapter when it succeeds, and answers `{sessionId, topic, output}`. `dbg.stop` while it builds ends the session and cancels the build. An untrusted workspace answers `forbidden`; no configuration, or no adapter of its `type`, `not_found`.
 - The adapter gets `initialize`, then `launch` / `attach` with the configuration's object; its `initialized` event gets every file's breakpoints (enabled ones; a condition, hit count or log message the adapter's capabilities do not take is not sent and reported unverified with the reason), `setExceptionBreakpoints` with the filters the adapter marks `default`, and `configurationDone`.
 - Topics: `dbg:<wsId>` (snapshot `{sessions: [summary]}`, event `dbg.session` with a summary: `{id, name, project, type, state, revision, problem, exitCode, stop: {threadId, reason, description} | null}`) and `dbg:<wsId>:<sessionId>` (snapshot `{session, threads, frames, output: [text]}`; events `dbg.state` (a summary), `dbg.stopped` (`{session, threads, frames}`: the stopped thread's top 20 frames, fetched before the stop is published), `dbg.output` (`{category, text}`, also appended to the `debug` output source), `dbg.usage` ("Diagnostic Tools" below)). `dbg.sessions {wsId}` answers the workspace snapshot. The last ten ended sessions are kept.
 - A frame is `{id, name, line, column, presentationHint?, source: {name, path | uri, sourceReference?}}`, lines and columns from 0.

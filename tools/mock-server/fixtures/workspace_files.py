@@ -8,20 +8,29 @@ WORKSPACE = {"wsId": "w1", "name": "demo", "root": "C:/mock/demo"}
 
 
 def solution_files(name):
-	"""A recent solution's files when it is opened again: the solution, one project under src/, its code and README."""
+	"""A recent solution's files when it is opened again: the solution, two programs (src/, viewer/) and a library (core/),
+	their code and README."""
 	return {
 		"README.md": "# %s\n" % name,
-		name + ".iedsln": '{ "version": 1, "name": "%s", "projects": [{ "file": "src/Tool.iedproj" }], "items": ["README.md"] }\n' % name,
+		name + ".iedsln": '{ "version": 1, "name": "%s", "projects": [{ "file": "src/Tool.iedproj" }, { "file": "viewer/Viewer.iedproj" }, { "file": "core/Core.iedproj" }], "items": ["README.md"] }\n' % name,
 		"src/Tool.iedproj": '{ "version": 1, "name": "Tool", "root": ".", "kind": "executable" }\n',
 		"src/tool.c": "int main(void) { return 0; }\n",
+		"viewer/Viewer.iedproj": '{ "version": 1, "name": "Viewer", "root": ".", "kind": "executable" }\n',
+		"viewer/viewer.c": "int main(void) { return 0; }\n",
+		"core/Core.iedproj": '{ "version": 1, "name": "Core", "root": ".", "kind": "library" }\n',
+		"core/core.c": "int core(void) { return 1; }\n",
 	}
+
+
+def project(root, folder, name, kind):
+	return {"name": name, "file": "%s/%s/%s.iedproj" % (root, folder, name), "root": root + "/" + folder, "kind": kind, "problems": [], "data": {"version": 1, "name": name, "root": ".", "kind": kind}}
 
 
 def solution_model(name, root):
 	"""What the server's ws:<wsId> snapshot carries as `solution` for solution_files (docs/03 "The server as built")."""
 	return {
 		"name": name, "file": root + "/" + name + ".iedsln", "problems": [], "groups": [], "items": ["README.md"], "generator": None, "localPlugins": [],
-		"projects": [{"name": "Tool", "file": root + "/src/Tool.iedproj", "root": root + "/src", "kind": "executable", "problems": [], "data": {"version": 1, "name": "Tool", "root": ".", "kind": "executable"}}],
+		"projects": [project(root, "src", "Tool", "executable"), project(root, "viewer", "Viewer", "executable"), project(root, "core", "Core", "library")],
 	}
 
 

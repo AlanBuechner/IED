@@ -19,6 +19,7 @@ namespace Ied
 		public Core::String label;
 		public Core::Array<Core::String> argv;    // what runs, as argv
 		public Core::String shell;                // or a command line the system's shell runs as written
+		public Core::String programSetting;       // the setting its program comes from (${config:KEY} first), or ""
 		public Core::String cwd;
 		public Core::Array<Core::String> env;
 		public Core::String output;               // the output source

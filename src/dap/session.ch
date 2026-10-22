@@ -59,6 +59,7 @@ namespace Ied
 		public DebugState state;
 		public int64 revision;
 		public Core::String problem;
+		public Core::String buildRunId;      // the pre-launch task's run while it builds
 		public int64 exitCode;
 		public bool exited;
 		public Core::String capabilities;    // the adapter's, after initialize

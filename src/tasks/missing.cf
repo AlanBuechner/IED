@@ -1,0 +1,54 @@
+include "missing.ch"
+
+namespace Ied
+{
+	Core::String ProgramSetting(Core::StringView text) {
+		Core::StringView rest = text.Trimmed();
+		if (rest.StartsWith(Core::StringView("\""))) rest = rest.Substring(1, rest.ByteLength() - 1);
+		if (!rest.StartsWith(Core::StringView("${config:"))) return Core::String();
+		const int64 end = rest.IndexOf('}', 0);
+		return end < 0 ? Core::String() : Core::String(rest.Substring(9, end - 9));
+	}
+
+	Core::String ProgramWord(Core::StringView commandLine) {
+		Core::StringView rest = commandLine.Trimmed();
+		if (rest.StartsWith(Core::StringView("\""))) {
+			const int64 close = rest.IndexOf('"', 1);
+			return Core::String(close < 0 ? rest.Substring(1, rest.ByteLength() - 1) : rest.Substring(1, close - 1));
+		}
+		const int64 space = rest.IndexOf(' ', 0);
+		return Core::String(space < 0 ? rest : rest.Substring(0, space));
+	}
+
+	static bool FileWithExtension(const FS::Path& file, Core::StringView extensions) {
+		if (FS::FileExists(file.CStr())) return true;
+		if (!file.Extension().IsEmpty()) return false;
+		for (Core::StringView extension : extensions.Split(';'))
+			if (!extension.Trimmed().IsEmpty() && FS::FileExists((Core::String(file.View()) + extension.Trimmed()).CStr())) return true;
+		return false;
+	}
+
+	bool FindsProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions) {
+		FS::Path given = FS::Path(program);
+		if (given.IsAbsolute() || program.IndexOf('/', 0) >= 0 || program.IndexOf('\\', 0) >= 0) return FileWithExtension(FS::Path(cwd) / program, extensions);
+		if (FileWithExtension(FS::Path(cwd) / program, extensions)) return true;
+		for (Core::StringView folder : path.Split(';'))
+			if (!folder.Trimmed().IsEmpty() && FileWithExtension(FS::Path(folder.Trimmed()) / program, extensions)) return true;
+		return false;
+	}
+
+	Core::String MissingProgramNote(Core::StringView program, Core::StringView setting) {
+		Core::StringBuilder note;
+		note.Append("\x1b[31m");
+		note.Append(program);
+		note.Append(" was not found: it is not a program in the step's folder or on PATH. ");
+		if (setting.IsEmpty()) note.Append("Give its full path, or put its folder on PATH.");
+		else {
+			note.Append("Set ");
+			note.Append(setting);
+			note.Append(" (Settings) to its full path, or put its folder on PATH and restart IED.");
+		}
+		note.Append("\x1b[0m\r\n");
+		return note.ToString();
+	}
+}

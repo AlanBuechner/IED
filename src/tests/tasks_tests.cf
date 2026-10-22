@@ -1,11 +1,13 @@
 // tasks: what a project offers (presets under its own file, by key), ${name} expansion that refuses unknown names,
-// problem matchers over one line and over several, the toolbar's selections on disk, and a run's problems as JSON.
+// problem matchers over one line and over several, the toolbar's selections on disk, a run's problems as JSON, and a
+// step's missing program: the setting that names it, whether cmd would find it, what to say.
 
 include "tasks/model.ch"
 include "tasks/expand.ch"
 include "tasks/matcher.ch"
 include "tasks/selections.ch"
 include "tasks/runner.ch"
+include "tasks/missing.ch"
 
 static Serialization::DomNode Json(const char* text) {
 	Serialization::DomDoc* doc = new Serialization::DomDoc();
@@ -19,6 +21,30 @@ static Ied::ProblemMatcher* Matcher(const char* json) {
 
 [test("server.tasks")]
 class TasksTests {
+	[test("missing_program")]
+	public static void TestMissingProgram() {
+		assert_se("nuke.command", Ied::ProgramSetting(Core::StringView("\"${config:nuke.command}\" build ${config}")).CStr(), "quoted, as the Nuke preset writes it");
+		assert_se("tool.path", Ied::ProgramSetting(Core::StringView("  ${config:tool.path} -v")).CStr(), "bare");
+		assert_se("", Ied::ProgramSetting(Core::StringView("nuke ${config:nuke.command}")).CStr(), "a setting later on the line names no program");
+		assert_se("C:/Tools/nuke.cmd", Ied::ProgramWord(Core::StringView("\"C:/Tools/nuke.cmd\" run")).CStr(), "quotes taken off");
+		assert_se("nuke", Ied::ProgramWord(Core::StringView("nuke build Development")).CStr(), "the first word");
+		FS::Path folder = FS::TempDirectory() / "ied-missing-program-test";
+		FS::RemoveAll(folder.CStr());
+		assert_true(FS::MakeDirectories((folder / "bin").CStr()), "made");
+		const char* text = "@echo off";
+		assert_true(FS::WriteFileAtomically((folder / "bin" / "tool.cmd").CStr(), text, 9), "written");
+		Core::StringView extensions = Core::StringView(".COM;.EXE;.BAT;.CMD");
+		Core::String path = Core::String("C:/nowhere;") + (folder / "bin").View();
+		assert_true(Ied::FindsProgram(Core::StringView("tool"), folder.View(), path.View(), extensions), "on PATH, with PATHEXT's .CMD");
+		assert_true(Ied::FindsProgram(Core::StringView("tool"), (folder / "bin").View(), Core::StringView(""), extensions), "in the step's folder");
+		assert_true(Ied::FindsProgram(Core::StringView("bin/tool.cmd"), folder.View(), Core::StringView(""), extensions), "a path under the step's folder");
+		assert_true(!Ied::FindsProgram(Core::StringView("nuke"), folder.View(), path.View(), extensions), "nowhere");
+		assert_true(!Ied::FindsProgram(Core::StringView("tool.exe"), folder.View(), path.View(), extensions), "an extension of its own is not completed");
+		Core::String note = Ied::MissingProgramNote(Core::StringView("nuke"), Core::StringView("nuke.command"));
+		assert_true(note.View().IndexOf(Core::StringView("nuke was not found"), 0) >= 0 && note.View().IndexOf(Core::StringView("Set nuke.command (Settings)"), 0) >= 0, "names the program and its setting");
+		FS::RemoveAll(folder.CStr());
+	}
+
 	[test("presets_under_the_project")]
 	public static void TestPresetsUnderTheProject() {
 		Ied::OfferedTasks offered;

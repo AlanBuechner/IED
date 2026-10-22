@@ -1,4 +1,5 @@
 include "runner.ch"
+include "missing.ch"
 include "host/server.ch"
 
 namespace Ied
@@ -244,6 +245,21 @@ namespace Ied
 		server->hub.Publish(run->Topic().View(), kind, event.View());
 	}
 
+	// A failed step whose program a setting names, made plain when that program is not there: cmd only says the name "is
+	// not recognized" (and exits 1, as for any failure).
+	static void NoteMissingProgram(Server* server, TaskRun* run, int64 index) {
+		const PlannedStep* step = run->steps[index];
+		Core::String program = ProgramWord(step->shell.View());
+		Core::String path;
+		Core::String extensions;
+		for (const Core::String& entry : step->env)
+			if (entry.View().StartsWith(Core::StringView("PATH="))) path = Core::String(entry.View().Substring(5, entry.View().ByteLength() - 5));
+		if (path.IsEmpty() && !Platform::TryGetEnvironmentVariable("PATH", path)) path = Core::String();
+		if (!Platform::TryGetEnvironmentVariable("PATHEXT", extensions)) extensions = Core::String(".COM;.EXE;.BAT;.CMD");
+		if (program.IsEmpty() || FindsProgram(program.View(), step->cwd.View(), path.View(), extensions.View())) return;
+		Note(server, run, index, MissingProgramNote(program.View(), step->programSetting.View()).View());
+	}
+
 	// The step's process, run to its end: its exit code, or -1 when it did not start or ran out of time.
 	static int64 RunProcess(Server* server, TaskRun* run, int64 index) {
 		PlannedStep* step = run->steps[index];
@@ -262,6 +278,7 @@ namespace Ied
 		if (!started.IsOpen()) {
 			Threading::LockGuard guard(server->lock);
 			Note(server, run, index, ((((Core::String("\x1b[31m") + step->label.View()) + " did not start: ") + started.Error()) + "\x1b[0m\r\n").View());
+			if (!step->programSetting.IsEmpty()) Note(server, run, index, MissingProgramNote(step->argv[0].View(), step->programSetting.View()).View());
 			return -1;
 		}
 		Process::Child* child = new Process::Child(take(started));
@@ -286,6 +303,7 @@ namespace Ied
 		errorThread.Join();
 		Threading::LockGuard guard(server->lock);
 		run->child = nullptr;
+		if (code != 0 && !step->shell.IsEmpty() && !step->programSetting.IsEmpty() && !run->cancelled) NoteMissingProgram(server, run, index);
 		return code;
 	}
 

@@ -653,6 +653,8 @@ namespace Ied
 		server->code->Reconcile(ws);
 		server->code->TrustChanged(ws);
 		server->documents->LanguagesChanged(ws);
+		server->outputs->PluginsChanged(ws);
+		server->tasks->ProjectsChanged(ws);
 		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();
