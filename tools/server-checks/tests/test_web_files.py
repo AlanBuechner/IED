@@ -1,7 +1,8 @@
 """The files the web client loads besides its own (docs/10 "Transport"): /ui-kit/ (shared/ui-kit), /codicons/<name>.svg
 (third_party/codicons) and /vendor/<library>/ (vendor/web, installed by setup.bat): with a session only, their types,
-cached where the content never changes, nothing outside their folders."""
+cached where the content never changes, nothing outside their folders. Text goes gzipped to a client that takes it."""
 
+import gzip
 import os
 import shutil
 import tempfile
@@ -41,6 +42,20 @@ class WebFileTests(ServerTestCase):
 		for path in ("/codicons/Add.svg", "/codicons/add", "/codicons/no-such-icon.svg", "/codicons/a_b.svg", "/codicons/%2e%2e%2fREADME.md"):
 			self.assertEqual(404, self.get(path).status, path)
 		self.assertEqual(401, self.get("/codicons/add.svg", signed_in=False).status)
+
+	def test_text_goes_gzipped_to_a_client_that_takes_it(self):
+		plain = self.get("/ui-kit/dom.js")
+		self.assertIsNone(plain.header("Content-Encoding"), "a client that asks for none gets none")
+		zipped = self.server.request("GET", "/ui-kit/dom.js", headers=dict(self.cookie, **{"Accept-Encoding": "gzip, deflate, br, zstd"}))
+		self.assertEqual((200, "gzip", "Accept-Encoding"), (zipped.status, zipped.header("Content-Encoding"), zipped.header("Vary")))
+		self.assertEqual("text/javascript; charset=utf-8", zipped.header("Content-Type"), "the type stays the content's")
+		self.assertEqual(plain.body, gzip.decompress(zipped.body))
+		self.assertLess(len(zipped.body), len(plain.body) // 2)
+		other = self.server.request("GET", "/ui-kit/dom.js", headers=dict(self.cookie, **{"Accept-Encoding": "br"}))
+		self.assertIsNone(other.header("Content-Encoding"), "only gzip is written")
+		login = self.server.request("GET", "/", headers={"Accept-Encoding": "gzip"})
+		self.assertEqual((401, "gzip"), (login.status, login.header("Content-Encoding")), "the sign-in page too")
+		self.assertIn(b"<html", gzip.decompress(login.body).lower())
 
 	def test_codicon_aliases(self):
 		# An icon's other names (codicons' mapping.json) draw it, as VS Code's $(run) draws play.

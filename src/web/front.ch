@@ -1,7 +1,8 @@
 // The HTTP side (docs/10, docs/11): GET /ws becomes a protocol session; /healthz; uploads and blobs; the web client's
 // files, plugin files, /ui-kit/, /codicons/ and /vendor/; /api/auth/*. Every request's Host must be a loopback name or the bind
 // address (DNS rebinding), unless the server listens on every interface; /ws, uploads and auth POSTs also check Origin.
-// Everything but /healthz, /api/auth/* and the login page's files needs a session (AuthGate).
+// Everything but /healthz, /api/auth/* and the login page's files needs a session (AuthGate). Text bodies go gzipped
+// to a client that accepts it (Http::CompressResponse).
 
 include "session.ch"
 include "authgate.ch"
@@ -17,6 +18,7 @@ namespace Ied
 		public void Handle(const Http::Request& request, Http::Response& response);
 
 	private:
+		private void Respond(const Http::Request& request, Http::Response& response);
 		private bool HostAllowed(const Http::Request& request) const;
 		private bool OriginAllowed(const Http::Request& request) const;
 		private void Route(Core::StringView path, const Http::Request& request, Http::Response& response, Device* device);

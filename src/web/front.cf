@@ -116,7 +116,14 @@ namespace Ied
 		return false;
 	}
 
+	// Text the client accepts gzipped goes gzipped (the web client's scripts, Monaco's above all, on a phone's first load);
+	// the fastest level, since most bodies are read from disk for each request.
 	void Front::Handle(const Http::Request& request, Http::Response& response) {
+		Respond(request, response);
+		Http::CompressResponse(request, response, Compression::kFastestLevel);
+	}
+
+	void Front::Respond(const Http::Request& request, Http::Response& response) {
 		if (!HostAllowed(request)) {
 			Answer(response, 403, Core::StringView("that Host is not allowed (DNS rebinding protection; see --allow-host)"));
 			return;

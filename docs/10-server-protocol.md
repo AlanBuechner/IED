@@ -19,6 +19,12 @@ Status: **design v1, ready for implementation.** Machine-readable frame schema: 
 | `GET /ws` | **one WebSocket per browser tab**, all real-time traffic |
 | `/w/<ws>/port/<n>/...` | port-forward proxy (F-SRV-50) |
 
+Every HTTP response with a text body (HTML, scripts, CSS, JSON, SVG, WebAssembly) of 1 KiB or more goes gzipped
+to a client whose `Accept-Encoding` takes gzip, with `Vary: Accept-Encoding` (Bedrock's `Http::CompressResponse` at
+the fastest level, in `Front::Handle`). It is for the phone over a network: Monaco's editor script goes as 730 KB instead
+of 2.5 MB. On loopback it costs about nothing - that script answers in 15 ms either way, the 7 MB TypeScript worker in
+57 ms instead of 25. Images and blobs of other types go as they are.
+
 Rationale for one socket per tab (not per device): tabs can view different workspaces, and a tab is the unit that resumes. The server tracks a **client** = one socket identity (persisted id in `sessionStorage`) belonging to a **device** (persisted id in `localStorage` + auth session).
 
 Frames are JSON text messages, UTF-8. Binary WebSocket messages are reserved for v1.1 (terminal and trace bulk data) - v1 keeps everything JSON to simplify debugging; terminal output is base64 only when it contains invalid UTF-8.
