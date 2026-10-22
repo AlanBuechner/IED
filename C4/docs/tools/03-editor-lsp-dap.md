@@ -222,7 +222,8 @@ handles.)
 | `continue`, `next`, `stepIn`, `stepOut`, `pause` | Run and step; `pause` breaks into the running program. |
 | `disconnect`, `terminate` | End the program and the session. |
 
-Events: `initialized`, `stopped` (`entry`, `breakpoint`, `step`, `pause`, `exception`), `output`
+Events: `initialized`, `process` (the program's `name` and `systemProcessId` once it starts, so a client can
+graph what it uses), `stopped` (`entry`, `breakpoint`, `step`, `pause`, `exception`), `output`
 (`stdout` / `stderr`), `thread`, `breakpoint`, `exited` (the exit code), `terminated`. Frame ids and
 variable references live until the program runs again.
 

@@ -61,6 +61,7 @@ namespace C4DAP::Server
 		std::mutex m_SendLock;
 		int64_t m_NextSeq = 1;
 		bool m_Exit = false;
+		std::string m_Program;   // what `launch` started, for the `process` event
 		std::unique_ptr<Target::Debuggee> m_Debuggee;
 	};
 } // namespace C4DAP::Server

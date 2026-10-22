@@ -168,6 +168,14 @@ namespace C4DAP::Server
 			Emit("exited", body);
 			Emit("terminated", Json::Value::MakeObject());
 		};
+		events.processStarted = [this](DWORD processId) {
+			Json::Value body = Json::Value::MakeObject();
+			body.SetMember("name", Text(std::filesystem::path(m_Program).filename().string()));
+			body.SetMember("systemProcessId", Json::Value::Int(processId));
+			body.SetMember("isLocalProcess", Json::Value::Bool(true));
+			body.SetMember("startMethod", Text("launch"));
+			Emit("process", body);
+		};
 		return events;
 	}
 
@@ -192,6 +200,7 @@ namespace C4DAP::Server
 			return;
 		}
 		if (options.cwd.empty()) options.cwd = std::filesystem::path(options.program).parent_path().string();
+		m_Program = options.program;
 		const std::string failure = m_Debuggee->Call([&options](Target::Engine& engine) { return engine.Launch(options); });
 		if (!failure.empty())
 		{

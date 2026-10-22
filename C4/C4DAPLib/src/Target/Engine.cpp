@@ -133,6 +133,7 @@ namespace C4DAP::Target
 	{
 		const CREATE_PROCESS_DEBUG_INFO& info = event.u.CreateProcessInfo;
 		m_Process.Started(info, event.dwProcessId, event.dwThreadId);
+		if (m_Events.processStarted) m_Events.processStarted(event.dwProcessId);
 		if (m_Symbols.Open(info.hProcess))
 		{
 			m_Symbols.ModuleLoaded(info.hFile, reinterpret_cast<uint64_t>(info.lpBaseOfImage));

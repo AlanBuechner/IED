@@ -37,6 +37,8 @@ namespace C4DAP::Target
 		std::function<void(const BoundBreakpoint&)> breakpointChanged;
 		std::function<void(const char* category, const std::string& text)> output;
 		std::function<void(uint32_t exitCode)> exited;
+		/// The program's process exists (its id), so a client can watch what it uses.
+		std::function<void(DWORD processId)> processStarted;
 	};
 
 	struct ThreadInfo

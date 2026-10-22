@@ -49,6 +49,10 @@ namespace Testing
 		TEST_ASSERT(!stop.IsNull());
 		TEST_ASSERT_EQ(ReasonOf(stop), std::string("breakpoint"));
 		TEST_ASSERT_EQ(stop.Member("body").Member("hitBreakpointIds").Size(), 1u);
+		const std::vector<Json::Value> named = client.History("process"); // the program's process, for a client's graphs
+		TEST_ASSERT_EQ(named.size(), size_t(1));
+		TEST_ASSERT_GT(named[0].Member("body").Member("systemProcessId").GetInt(), int64(0));
+		TEST_ASSERT_EQ(named[0].Member("body").Member("name").GetString(), program.exe.filename().string());
 		const Json::Value frames = client.Request("stackTrace", Object({ { "threadId", Num(ThreadOf(stop)) } })).Member("body").Member("stackFrames");
 		TEST_ASSERT_GE(frames.Size(), 2u);
 		TEST_ASSERT_EQ(NameOf(frames.At(0)), std::string("Twice"));
