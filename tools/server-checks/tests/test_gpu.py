@@ -218,7 +218,15 @@ class GpuTests(ServerTestCase):
 		timing = await text("timing", repeat=2)
 		self.assertIn("GPU time of the frame: ", timing)
 		self.assertIn("Cube A", timing)
-		self.assertIn(f" | {last_draw} | ", await text("timing", by="event", repeat=2, top=50))
+		by_event = await text("timing", by="event", repeat=2, top=50)
+		self.assertIn(f" | {last_draw} | ", by_event)
+		self.assertIn("| samples passed |", by_event)
+		self.assertIn(" | 921600 | ", by_event, "the tonemap's samples: every pixel of 1280x720")
+		scene = int(next(line for line in events.splitlines() if line.rstrip().endswith("marker  Scene")).split()[0])
+		limiter = await text("limiter", eid=scene, repeat=2)
+		self.assertIn(f"EID {scene} to ", limiter)
+		self.assertIn("every pixel shader trivial: ", limiter)
+		self.assertTrue("Limiter: " in limiter or "under 2 microseconds" in limiter, limiter)
 		with self.assertRaises(RpcFailure):
 			await ask("state")
 		with self.assertRaises(RpcFailure):
@@ -301,6 +309,43 @@ class GpuTests(ServerTestCase):
 		broken = await edit(eid=cube, stage="ps", source=hlsl.replace(opening, opening + "\n\treturn colr;"), entry="PSMain")
 		self.assertIn("did not go in", broken)
 		self.assertIn("source:" + str(hlsl[:hlsl.index(opening)].count("\n") + 2) + ":", broken, "the error's line")
+		await self.client.request("gpu.close", {"sessionId": session})
+
+	async def test_the_session_keeps_what_it_measured(self):
+		first = await self.capture_frame()
+		second = await self.capture_frame(count=2)
+		session = (await self.client.request("gpu.open", {"wsId": "w1", "captureId": first["id"]}))["sessionId"]
+		async def kept():
+			return await self.client.request("gpu.measurements", {"sessionId": session})
+		self.assertEqual({"timingStale": False, "experiments": []}, await kept())
+		events = (await self.replay(session, "events"))["result"]["events"]
+		scene = next(e for e in events if e[6] == "Scene")[0]
+		cube = next(e for e in events if e[1] == next(m for m in events if m[6] == "Cube B")[0] and e[2] == "draw")[0]
+		timing = (await self.replay(session, "timing", {"repeat": 1}))["result"]
+		await self.replay(session, "experiments", {"eid": scene, "repeat": 1})
+		await self.replay(session, "experiments", {"eid": cube, "repeat": 1})
+		await self.replay(session, "experiments", {"eid": scene, "repeat": 1})
+		await self.client.request("gpu.compare", {"sessionId": session, "captureId": second["id"]})
+		await self.replay(session, "compareTiming", {"repeat": 1})
+		await self.replay(session, "experiments", {"eid": cube, "repeat": 1, "side": "b"})
+		measured = await kept()
+		self.assertEqual(timing["frameMs"], measured["timing"]["frameMs"], "a page that comes back shows the timing")
+		self.assertEqual([cube, scene], [e["eid"] for e in measured["experiments"]], "one answer per range, the newest last; the other capture's are not kept")
+		self.assertIn("compareTiming", measured)
+		await self.client.request("gpu.compare", {"sessionId": session, "captureId": ""})
+		self.assertNotIn("compareTiming", await kept(), "the times belonged to the comparison")
+		with open(os.path.join(REPO, "plugins", "gpu", "native", "samples", "d3d12", "main.cpp"), encoding="ascii") as f:
+			sample = f.read()
+		hlsl = sample[sample.index('R"(') + 3:sample.index(')"', sample.index('R"('))]
+		opening = "float4 PSMain(VSOut i) : SV_Target {"
+		edited = await self.client.request("gpu.editShader", {"sessionId": session, "eid": cube, "stage": "ps", "language": "hlsl",
+			"text": hlsl.replace(opening, opening + "\n\treturn float4(1, 0, 0, 1);"), "entry": "PSMain"})
+		self.assertTrue(edited["ok"], edited["diagnostics"])
+		measured = await kept()
+		self.assertEqual((True, []), (measured["timingStale"], measured["experiments"]), "the edit changed the frame they measured")
+		self.assertIn("timing", measured)
+		await self.replay(session, "timing", {"repeat": 1})
+		self.assertFalse((await kept())["timingStale"])
 		await self.client.request("gpu.close", {"sessionId": session})
 
 	async def test_the_ai_captures_a_frame(self):

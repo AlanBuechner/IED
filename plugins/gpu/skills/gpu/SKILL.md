@@ -40,6 +40,9 @@ Words the tools use:
     or source, compiled into every pipeline using that shader; it says how the output at the event changed, or the
     compiler's errors, and puts the captured shader back unless `keep`. D3D12 shaders in HLSL (give `entry`, such as
     PSMain); Vulkan shaders as the SPIR-V listing `gpu_shader` shows, or HLSL.
+12. `gpu_limiter` - what limits a pass (its marker's EID) or a draw: the range replayed with every pixel shader
+    trivial, every scissor one pixel, color writes off, and the share of the time vertices, pixel shading,
+    rasterization and color output take. Runs about 20 replays of the range; ask it for the costly pass, not the frame.
 
 ## Common questions
 
@@ -59,7 +62,9 @@ Words the tools use:
 - **Would this fix it?** Edit the shader (its file, or the listing) and `gpu_replay_with_shader` at the event that
   showed the problem: the changed pixels say whether the fix reaches the output, before anything is rebuilt.
 - **Too slow.** `gpu_timing` by pass, then by event for the costly pass. High pixel-shader invocations against the
-  target's size mean overdraw; many primitives in a small pass mean geometry that could be culled.
+  target's size mean overdraw (more PS invocations than samples passed: pixels shaded, then discarded or failing a
+  late depth test); many primitives in a small pass mean geometry that could be culled. `gpu_limiter` on the costly pass
+  says which part of the GPU's work to cut.
 
 Say which capture and EIDs you looked at, so the owner can open the same events.
 

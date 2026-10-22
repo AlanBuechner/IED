@@ -193,7 +193,30 @@
 .gpu-facts .k { color: var(--text-2); }
 .gpu-facts .v { color: var(--text-0); }
 .gpu-facts .warn { color: var(--accent-warn); }
-.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 80px 60px 84px 80px 80px 80px 64px; }
+.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 80px 60px 84px 84px 84px 64px; }
+.gpu-pgrid.ab .gpu-head, .gpu-pgrid.ab .gpu-r { grid-template-columns: minmax(0, 1fr) 74px 74px 80px 60px 84px 84px 84px 64px; }
+
+/* Performance (perf.js): the passes or actions beside the selection's counters and limiter */
+.gpu-perf { min-height: 0; }
+.gpu-perf > .gpu-grid { min-width: 0; }
+.gpu-perf-modes { display: flex; align-self: stretch; }
+.gpu-perf-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gpu-perf-detail { flex: none; width: 400px; display: flex; flex-direction: column; min-height: 0; overflow: auto; border-left: var(--border-width) solid var(--border-0); }
+.gpu-perf-detail .gpu-title .muted { color: var(--text-2); }
+.gpu-agrid .gpu-head, .gpu-agrid .gpu-r { grid-template-columns: 56px minmax(0, 1fr) 80px 80px 84px 84px 80px; }
+.gpu-agrid .gpu-head .sort { cursor: pointer; }
+.gpu-agrid .gpu-head .sort.on { color: var(--text-0); }
+.gpu-perf-run { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-3) var(--space-4); font-size: var(--font-size-sm); }
+.gpu-perf-run .muted { color: var(--text-2); white-space: normal; }
+.gpu-shares { display: flex; flex-direction: column; gap: 5px; padding: var(--space-3) var(--space-4); }
+.gpu-share { display: grid; grid-template-columns: 160px minmax(0, 1fr) 44px; align-items: center; gap: var(--space-3); font-size: var(--font-size-sm); color: var(--text-1); }
+.gpu-share .bar { height: 8px; background: var(--bg-3); border-radius: var(--radius-1); overflow: hidden; }
+.gpu-share .bar i { display: block; height: 100%; background: var(--text-3); }
+.gpu-share .v { text-align: right; font-variant-numeric: tabular-nums; }
+.gpu-share.lim { color: var(--text-0); }
+.gpu-share.lim .bar i { background: var(--accent-info); }
+.gpu-perf-verdict { padding: 0 var(--space-4) var(--space-3); font-size: var(--font-size-sm); line-height: 1.45; color: var(--text-1); }
+.gpu-perf-verdict b { color: var(--text-0); font-weight: var(--font-weight-normal); }
 .gpu-pgrid .nm { padding-left: calc(var(--space-3) + var(--d, 0) * 14px); }
 
 /* Edit and Replay (editpane.js): the edit in the viewer's place, the bar's chip while shaders are edited */
@@ -269,7 +292,13 @@ or the API calls and the other grids */
 	.gpu-main.pipeline > .gpu-col.grow { flex: none; height: 44vh; order: 1; }
 	.gpu-events .gpu-head, .gpu-events .gpu-r { grid-template-columns: 48px minmax(0, 1fr) 70px; }
 	.gpu-events .gpu-head > span:nth-child(n+4), .gpu-events .gpu-r > span:nth-child(n+4) { display: none; }
-	.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 70px 56px 84px; }
+	.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r, .gpu-pgrid.ab .gpu-head, .gpu-pgrid.ab .gpu-r { grid-template-columns: minmax(0, 1fr) 70px 56px 84px; }
+	.gpu-perf { flex-direction: column; }
+	.gpu-perf-detail { width: auto; max-height: 52vh; order: 1; border-left: none; border-bottom: var(--border-width) solid var(--border-0); }
+	.gpu-perf > .gpu-grid { order: 2; }
+	.gpu-agrid .gpu-head, .gpu-agrid .gpu-r { grid-template-columns: 48px minmax(0, 1fr) 70px; }
+	.gpu-agrid .gpu-head > span:nth-child(n+4), .gpu-agrid .gpu-r > span:nth-child(n+4) { display: none; }
+	.gpu-share { grid-template-columns: 130px minmax(0, 1fr) 40px; }
 	.gpu-pgrid .gpu-head > span:nth-child(n+5), .gpu-pgrid .gpu-r > span:nth-child(n+5) { display: none; }
 	.gpu-vtab { padding: 0 var(--space-3); }
 	.gpu-vtab .ci { display: none; }

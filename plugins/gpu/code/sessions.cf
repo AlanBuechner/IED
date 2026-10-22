@@ -118,6 +118,7 @@ namespace GpuDebug
 		}
 		else Call(session, Core::StringView("compareClose"), Core::StringView("{}"), blob);
 		context->Atomically([session, id](IED::Events& events) {
+			if (session->compareId.View() != id.View()) session->compareTiming = Core::String();
 			session->compareId = id;
 			events.Publish(session->Topic().View(), "state", session->Json().View());
 		});

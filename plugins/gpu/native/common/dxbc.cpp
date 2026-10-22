@@ -716,6 +716,22 @@ namespace fb
 		return true;
 	}
 
+	bool ReadDxbcSignature(const u8* bytes, size_t size, char which, std::vector<DxbcElement>& out) {
+		out.clear();
+		std::vector<DxbcChunk> chunks;
+		if (!ReadDxbc(bytes, size, chunks)) return false;
+		const std::string narrow = std::string(1, which) + "SGN", wide = std::string(1, which) + "SG1";
+		for (const DxbcChunk& chunk : chunks) {
+			const bool isWide = chunk.fourcc == FourCC(wide.c_str());
+			if (chunk.fourcc != FourCC(narrow.c_str()) && !isWide) continue;
+			std::vector<Element> elements;
+			if (!ReadSignature(chunk.data, isWide, elements)) return false;
+			for (const Element& e : elements) out.push_back({e.name, e.index, e.system, e.component, e.reg, e.mask});
+			return true;
+		}
+		return false;
+	}
+
 	std::string DxbcValueText(const DxbcSite& site, const u32 values[4]) {
 		std::string text;
 		for (u32 k = 0; k < 4; ++k) {

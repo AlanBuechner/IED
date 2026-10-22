@@ -1,8 +1,10 @@
 // gpu.test.js - the GPU debugger's buffer layouts (plugins/gpu/ui/layout.js): the layout text as fields at their
-// offsets, what it refuses, and bytes read as rows of a layout or as hex.
+// offsets, what it refuses, and bytes read as rows of a layout or as hex; the Performance view (perf.js) taking back what
+// the server kept measured.
 
 import { test, assertEqual, assertTrue, assertThrows } from "./harness.js";
 import { parseLayout, readRows, half } from "/plugins/ied.gpu/ui/layout.js";
+import { PerformanceView } from "/plugins/ied.gpu/ui/perf.js";
 
 const shape = (layout) => layout.fields.map((f) => [f.name, f.offset, f.components, f.bytes]);
 
@@ -51,4 +53,16 @@ test("gpu layout: hex rows are 16 bytes with their text", () => {
 	assertEqual(rows[0].cells[0], "46");
 	assertEqual(rows[0].text, "Flashbang buffer");
 	assertEqual(rows[1].text, " view!");
+});
+
+test("gpu performance: what the server kept comes back by EID", () => {
+	const perf = new PerformanceView({});
+	// compareTiming's rows: [eid here, eid there, depth, ms here, ms there]; 0 is an event only the other capture has.
+	perf.restore({ timingStale: false, experiments: [{ eid: 15, limiter: "pixelShading" }, { eid: 30, limiter: "colorOutput" }],
+		compareTiming: { markers: [[15, 15, 0, 0.0066, 0.0067]], events: [[30, 31, 1, 0.005, 0.004], [0, 32, 1, null, 0.001]] } });
+	assertEqual(perf.experiments.get(15).limiter, "pixelShading");
+	assertEqual(perf.experiments.get(30).limiter, "colorOutput");
+	assertEqual([...perf.compareTimes], [[15, 0.0067], [30, 0.004]]);
+	perf.restore({ experiments: [] });
+	assertEqual([perf.experiments.size, perf.compareTimes], [0, null], "nothing kept: nothing shown");
 });

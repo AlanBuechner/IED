@@ -39,6 +39,39 @@ def sample_hlsl():
 	return source[start:source.index(')"', start)]
 
 
+def check_counters_and_experiments(test, capture, events):
+	"""Each draw's samples (exact: the full-screen pass passes every pixel, the hidden cube none), then experiments on the
+	Scene pass: every one ran on its draws, the shares are fractions of the captured time and one is the limiter."""
+	timing = replay(capture, "timing", "1")
+	test.assertEqual("samples", timing["statColumns"][-1])
+	rows = {row[0]: dict(zip(timing["statColumns"], row)) for row in timing["stats"]}
+	names = {e[0]: e[6] for e in events}
+	draws = [e[0] for e in events if e[2] == "draw"]
+	test.assertEqual(1280 * 720, rows[draws[-1]]["samples"], "the tonemap passes every pixel")
+	hidden = [d for d in draws if names.get(next(e[1] for e in events if e[0] == d)) == "Hidden"]
+	if hidden:
+		test.assertEqual(0, rows[hidden[0]]["samples"], "the hidden cube fails the depth test everywhere")
+	scene = next(e[0] for e in events if e[2] == "marker" and e[6] == "Scene")
+	client = RpcClient()
+	try:
+		client.call("initialize", {"capture": capture})
+		result = client.call("experiments", {"eid": scene, "repeat": 3})[0]["result"]
+	finally:
+		client.close()
+	scene_draws = result["draws"]
+	test.assertGreaterEqual(scene_draws, 4)
+	variants = {v["id"]: v for v in result["variants"]}
+	test.assertEqual(["captured", "trivialPixelShader", "onePixel", "noColorWrites"], [v["id"] for v in result["variants"]])
+	for name in ("trivialPixelShader", "onePixel", "noColorWrites"):
+		test.assertEqual(scene_draws, variants[name]["changed"], name)
+		test.assertIsNotNone(variants[name]["ms"], name)
+	test.assertGreater(variants["captured"]["ms"], 0)
+	if not result["tooShort"]:
+		for share in result["shares"].values():
+			test.assertTrue(0 <= share <= 1, result["shares"])
+		test.assertIn(result["limiter"], ("vertices", "pixelShading", "rasterization", "colorOutput"))
+
+
 def check_edit_and_replay(test, capture, eid, stage, language, edit, broken):
 	"""Edits the stage at `eid` with `edit` (the source shaderSource gives -> the edited one), checks the output changes
 	and the diff says so, that `broken` answers with a diagnostic at its line, and that reverting brings the frame back."""
@@ -242,6 +275,9 @@ class D3D12CaptureReplay(unittest.TestCase):
 		thread = replay(self.capture, "debug", str(dispatch), "cs", "5", "7", "0")
 		self.assertEqual("5, 7, 0", thread["invocations"][0]["steps"][0][1], "the thread's global id, its first input")
 
+	def test_counters_and_experiments(self):
+		check_counters_and_experiments(self, self.capture, self.events["events"])
+
 	def test_edit_and_replay(self):
 		cube = self.draws_under("Cube B")[0][0]
 		opening = "float4 PSMain(VSOut i) : SV_Target {"
@@ -433,6 +469,9 @@ class VulkanCaptureReplay(unittest.TestCase):
 	def test_pixel_history_says_why(self):
 		hdr = [r["id"] for r in replay(self.capture, "resources", device=False)["resources"] if r["name"] == "HDR"][0]
 		check_history(self, replay(self.capture, "history", str(hdr), str(self.events[-1][0]), "640", "240"), "vkCmdBeginRenderPass")
+
+	def test_counters_and_experiments(self):
+		check_counters_and_experiments(self, self.capture, self.events)
 
 	def test_edit_and_replay(self):
 		cube = self.draws_under("Cube B")[0][0]

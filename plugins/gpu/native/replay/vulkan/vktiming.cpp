@@ -1,6 +1,8 @@
-// Timing (F-GPU-12): the frame replayed with a timestamp before and after every action, and a pipeline-statistics query
-// around it where the device has them; the median of the replays per action, markers spanning their actions. The
-// statistics' eleven counters are D3D12's columns in the same order.
+// Timing (F-GPU-12): the frame replayed once with a pipeline-statistics query around every action where the device has
+// them and an occlusion query around every draw (the samples that passed the depth and stencil tests: exact where the
+// device has occlusionQueryPrecise), then `repeat` times with only a timestamp before and after every action - the
+// queries make the GPU finish each action before the next, so they would time another frame. The median of the replays
+// per action, markers spanning their actions. The statistics' eleven counters are D3D12's columns in the same order.
 #include "vkreplay.h"
 
 #include <algorithm>
@@ -24,19 +26,26 @@ namespace fb::replay::vulkan
 					stats.pipelineStatistics = 0x7FF;   // the eleven counters of Vulkan 1.0
 					if (device.vk.vkCreateQueryPool(device.device, &stats, nullptr, &stats_) != VK_SUCCESS) stats_ = VK_NULL_HANDLE;
 				}
+				VkQueryPoolCreateInfo samples = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+				samples.queryType = VK_QUERY_TYPE_OCCLUSION;
+				samples.queryCount = std::max<u32>(1, actions);
+				if (device.vk.vkCreateQueryPool(device.device, &samples, nullptr, &samples_) != VK_SUCCESS) samples_ = VK_NULL_HANDLE;
 			}
 			~TimingHooks() override {
 				if (times_) device_.vk.vkDestroyQueryPool(device_.device, times_, nullptr);
 				if (stats_) device_.vk.vkDestroyQueryPool(device_.device, stats_, nullptr);
+				if (samples_) device_.vk.vkDestroyQueryPool(device_.device, samples_, nullptr);
 			}
 
 			// The pools are reset in a submission of their own, before the replay (a reset inside each submission would
 			// lose the ones before it).
 			void Clear() {
 				order_.clear();
+				drawn_.clear();
 				VkCommandBuffer cb = device_.BeginOwn();
 				device_.vk.vkCmdResetQueryPool(cb, times_, 0, std::max<u32>(1, actions_ * 2));
 				if (stats_) device_.vk.vkCmdResetQueryPool(cb, stats_, 0, std::max<u32>(1, actions_));
+				if (samples_) device_.vk.vkCmdResetQueryPool(cb, samples_, 0, std::max<u32>(1, actions_));
 				device_.SubmitOwn(cb);
 			}
 
@@ -45,13 +54,18 @@ namespace fb::replay::vulkan
 				if (index >= actions_) return;
 				order_.push_back(command.eid);
 				device_.vk.vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, times_, index * 2);
-				if (stats_) device_.vk.vkCmdBeginQuery(cb, stats_, index, 0);
+				if (counting_ && stats_) device_.vk.vkCmdBeginQuery(cb, stats_, index, 0);
+				if (counting_ && samples_ && ClassOf(command.command) == CmdClass::Draw) {
+					device_.vk.vkCmdBeginQuery(cb, samples_, index, device_.occlusionPrecise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
+					drawn_.push_back(index);
+				}
 			}
 
 			void AfterAction(VkCommandBuffer cb, const CommandRef& command, PassState& pass) override {
 				if (order_.empty() || order_.back() != command.eid) return;
 				const u32 index = (u32)order_.size() - 1;
-				if (stats_) device_.vk.vkCmdEndQuery(cb, stats_, index);
+				if (!drawn_.empty() && drawn_.back() == index) device_.vk.vkCmdEndQuery(cb, samples_, index);
+				if (counting_ && stats_) device_.vk.vkCmdEndQuery(cb, stats_, index);
 				device_.vk.vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, times_, index * 2 + 1);
 			}
 
@@ -74,12 +88,29 @@ namespace fb::replay::vulkan
 				return out;
 			}
 
+			// Statistics and samples on (the counting replay), or only timestamps.
+			void Counting(bool on) { counting_ = on; }
+
+			// The samples each draw's pixels passed the depth and stencil tests with, by eid.
+			std::map<u32, u64> Samples() {
+				std::map<u32, u64> out;
+				for (u32 index : drawn_) {
+					u64 value = 0;
+					if (device_.vk.vkGetQueryPoolResults(device_.device, samples_, index, 1, 8, &value, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
+						out[order_[index]] = value;
+				}
+				return out;
+			}
+
 		private:
 			ReplayDevice& device_;
 			u32 actions_;
 			VkQueryPool times_ = VK_NULL_HANDLE;
 			VkQueryPool stats_ = VK_NULL_HANDLE;
+			VkQueryPool samples_ = VK_NULL_HANDLE;
 			std::vector<u32> order_;
+			std::vector<u32> drawn_;
+			bool counting_ = true;
 		};
 	}
 
@@ -94,12 +125,17 @@ namespace fb::replay::vulkan
 		TimingHooks hooks(device, actions);
 		std::vector<std::map<u32, std::pair<u64, u64>>> runs;
 		std::map<u32, std::vector<u64>> stats;
+		std::map<u32, u64> samples;
+		if (progress) progress("timing", 0.0);
+		hooks.Clear();
+		device.ReplayTo(UINT32_MAX, &hooks);
+		stats = hooks.Stats(), samples = hooks.Samples();
+		hooks.Counting(false);
 		for (u32 r = 0; r < repeat; ++r) {
-			if (progress) progress("timing", (double)r / repeat);
+			if (progress) progress("timing", (r + 1.0) / (repeat + 1.0));
 			hooks.Clear();
 			device.ReplayTo(UINT32_MAX, &hooks);
 			runs.push_back(hooks.Times());
-			if (r == 0) stats = hooks.Stats();
 		}
 		replayed_ = false;
 		last_.valid = false;
@@ -159,7 +195,7 @@ namespace fb::replay::vulkan
 		}
 		out.EndArray();
 		out.BeginArray("statColumns");
-		for (const char* column : {"eid", "iaVertices", "iaPrimitives", "vsInvocations", "gsInvocations", "gsPrimitives", "cInvocations", "cPrimitives", "psInvocations", "hsInvocations", "dsInvocations", "csInvocations"})
+		for (const char* column : {"eid", "iaVertices", "iaPrimitives", "vsInvocations", "gsInvocations", "gsPrimitives", "cInvocations", "cPrimitives", "psInvocations", "hsInvocations", "dsInvocations", "csInvocations", "samples"})
 			out.String(column);
 		out.EndArray();
 		out.BeginArray("stats");
@@ -167,6 +203,8 @@ namespace fb::replay::vulkan
 			out.BeginArray();
 			out.Uint(s.first);
 			for (u64 v : s.second) out.Uint(v);
+			auto drawn = samples.find(s.first);
+			out.Uint(drawn != samples.end() ? drawn->second : 0);
 			out.EndArray();
 		}
 		out.EndArray();

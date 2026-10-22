@@ -54,6 +54,7 @@ namespace fb::replay::d3d12
 		void Mesh(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) override;
 		void Shader(const JsonValue& params, JsonWriter& out) override;
 		void Timing(const JsonValue& params, JsonWriter& out, const Progress& progress) override;
+		void Experiments(const JsonValue& params, JsonWriter& out, const Progress& progress) override;
 		void Messages(JsonWriter& out) override;
 		void ShaderSource(const JsonValue& params, JsonWriter& out) override;
 		void EditShader(const JsonValue& params, JsonWriter& out) override;

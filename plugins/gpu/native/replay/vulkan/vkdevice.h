@@ -148,6 +148,7 @@ namespace fb::replay::vulkan
 		VkPhysicalDeviceMemoryProperties memory = {};
 		bool pipelineStatistics = false;
 		bool storesInShaders = false;      // vertex and fragment shaders can write storage (the shader debugger's trace)
+		bool occlusionPrecise = false;     // occlusion queries count samples exactly (VK_QUERY_CONTROL_PRECISE_BIT)
 		std::string deviceName;
 		std::string driver;
 		std::vector<std::string> warnings;

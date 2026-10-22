@@ -59,9 +59,9 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
-| F-GPU-50 | Per-event and per-pass GPU timing (timestamp queries, N repeats, median) | P1 | US-GPU-3 | - |
-| F-GPU-51 | Pipeline statistics per event (invocations, primitives, clipping) | P1 | US-GPU-3 | - |
-| F-GPU-52 | Counter providers (AMD GPA, NVIDIA Perf SDK, Intel) as optional plugins; speed-of-light bars per unit, occupancy, limiter verdict | P2 | US-GPU-3 | vendor-neutral view |
+| F-GPU-50 | Per-event and per-pass GPU timing (timestamp queries, N repeats, median) | P1 | US-GPU-3 | built 2026-10-21; since 2026-10-22 the timed replays carry timestamps only, the counters come from one more replay (`docs/22` "Performance") |
+| F-GPU-51 | Pipeline statistics per event (invocations, primitives, clipping) | P1 | US-GPU-3 | built, with samples passed per draw (occlusion queries) and the Performance view's counters and ratios for a range (2026-10-22) |
+| F-GPU-52 | Counter providers (AMD GPA, NVIDIA Perf SDK, Intel) as optional plugins; speed-of-light bars per unit, occupancy, limiter verdict | P2 | US-GPU-3 | vendor-neutral view; the limiter verdict built 2026-10-22 without vendor counters, by experiments (trivial pixel shader, one-pixel scissor, color writes off) on any GPU; the providers not yet |
 | F-GPU-53 | Insights: redundant barriers, overdraw hot spots, tiny draws, empty passes, unused render-target writes, large uploads, queue bubbles - each with "Ask AI" | P1 | US-GPU-5 | AI explains and proposes the fix |
 
 ## Compare

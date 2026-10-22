@@ -201,6 +201,7 @@ namespace GpuDebug
 		Serialization::DomNode params = request.params.Field("params");
 		Core::String blob;
 		Core::String result = debugger->Call(session, method.View(), params.IsValid() ? IED::NodeJson(params).View() : Core::StringView("{}"), blob);
+		debugger->Keep(session, method.View(), params, result.View());
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.RawField("result", result.View());
@@ -259,6 +260,11 @@ namespace GpuDebug
 		return debugger->RevertShader(session, request.params.Str("key", Core::StringView("")).View());
 	}
 
+	// gpu.measurements {sessionId}: the timing, compare timing and experiments the session keeps.
+	static Core::String MeasurementsMethod(Debugger* debugger, const IED::Request& request) {
+		return debugger->Measurements(SessionOf(debugger, request.params.Str("sessionId").View()));
+	}
+
 	static Core::String CloseMethod(Debugger* debugger, const IED::Request& request) {
 		Session* session = SessionOf(debugger, request.params.Str("sessionId").View());
 		debugger->Close(session, Core::StringView("closed"));
@@ -282,6 +288,7 @@ namespace GpuDebug
 		Register(debugger, "gpu.open", OpenMethod);
 		Register(debugger, "gpu.replay", ReplayMethod);
 		Register(debugger, "gpu.compare", CompareMethod);
+		Register(debugger, "gpu.measurements", MeasurementsMethod);
 		Register(debugger, "gpu.shaderSource", ShaderSourceMethod);
 		Register(debugger, "gpu.editShader", EditShaderMethod);
 		Register(debugger, "gpu.revertShader", RevertShaderMethod);

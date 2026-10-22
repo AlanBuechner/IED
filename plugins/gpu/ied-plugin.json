@@ -18,7 +18,7 @@
 		"settings": { "schema": "settings.schema.json", "page": "GPU Debugger" },
 		"bindings": {
 			"provides": [
-				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|debug|timing|compare|edit, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
+				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|capture|events|resources|state|shader|pixel|buffer|texture|scan|debug|timing|compare|edit|limiter, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
 			],
 			"consumes": [
 				{ "name": "gpu.query", "version": "1" }
@@ -58,7 +58,7 @@
 		],
 		"skills": ["skills"],
 		"systemMessageSections": [
-			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, gpu_debug_shader to step a shader invocation with its values, gpu_timing, gpu_compare to set two captures side by side (two builds, two frames), and gpu_replay_with_shader to try a shader change on the captured frame. gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
+			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, gpu_debug_shader to step a shader invocation with its values, gpu_timing, gpu_compare to set two captures side by side (two builds, two frames), and gpu_replay_with_shader to try a shader change on the captured frame, and gpu_limiter for what limits a pass. gpu_capture builds, runs and captures the startup project. Read the gpu skill before debugging a frame." }
 		],
 		"toolCalls": [
 			{
@@ -181,6 +181,16 @@
 				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The draw or dispatch whose shader is edited, and whose output is compared." }, "stage": { "enum": ["vs", "ps", "fs", "cs", "gs", "hs", "ds"] }, "path": { "type": "string", "description": "A workspace file with the edited shader." }, "source": { "type": "string", "description": "The edited shader's text." }, "language": { "enum": ["hlsl", "spirv"] }, "entry": { "type": "string" }, "profile": { "type": "string", "description": "HLSL's target profile, e.g. ps_5_1; the captured shader's by default." }, "keep": { "type": "boolean", "description": "Leave the edit in the replay (default false)." } }, "required": ["eid", "stage"], "additionalProperties": false },
 				"function": "GpuDebug::ReplayWithShaderTool",
 				"timeoutSeconds": 300
+			},
+			{
+				"name": "gpu_limiter",
+				"description": "What limits a pass (a marker) or a draw, found by experiments on the replay GPU (no vendor counters needed): the range timed as captured, then with every draw in it changed - a trivial pixel shader, a one-pixel scissor, color writes off - each the median of several replays. Says the share of the time vertex and primitive work, pixel shading, rasterization and depth, and color output take, and names the largest. Pair it with gpu_timing's pipeline statistics (primitives, pixel shader invocations, samples passed).",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": false,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "A pass's marker or an action, by EID from gpu_events." }, "repeat": { "type": "integer", "minimum": 1, "maximum": 25 } }, "required": ["eid"], "additionalProperties": false },
+				"function": "GpuDebug::LimiterTool",
+				"timeoutSeconds": 600
 			},
 			{
 				"name": "gpu_timing",

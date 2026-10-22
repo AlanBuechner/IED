@@ -65,6 +65,12 @@ export class ReplaySession {
 		return { result: reply.result, binary };
 	}
 
+	// What the session keeps measured (gpu.measurements): {timing?, timingStale, compareTiming?, experiments}.
+	async measurements() {
+		if (!this.sessionId) await this.open();
+		return this.ied.client.request("gpu.measurements", { sessionId: this.sessionId });
+	}
+
 	dispose() {
 		if (this.stop) this.stop();
 		this.stop = null;

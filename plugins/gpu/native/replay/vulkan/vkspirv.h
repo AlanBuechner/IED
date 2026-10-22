@@ -4,6 +4,7 @@
 #pragma once
 
 #include "bufferlayout.h"
+#include "experiments.h"
 #include "fb_base.h"
 
 #include <map>
@@ -76,4 +77,7 @@ namespace fb::replay::vulkan
 	// gives keep their ids, so a number the listing prints for an id still means it; a new name gets a new id. False with
 	// `log` ("line N: ..." per problem) when the text does not read.
 	bool AssembleSpirv(const std::string& text, const u32* original, size_t count, std::vector<u32>& words, std::string& log);
+	// The listing of a fragment shader writing zero to each of `targets` (by location), entry "main" (the experiments'
+	// trivial pixel shader, docs/22 "Performance").
+	std::string TrivialFragmentShader(const std::vector<TargetOutput>& targets);
 }

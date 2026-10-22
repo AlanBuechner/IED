@@ -1,9 +1,12 @@
-// GPU time per action (docs/22 "Performance"): the frame replayed `repeat` times with a timestamp before and after
-// every action on the direct and compute queues and pipeline statistics around every draw and dispatch; each action's
-// time is the median of the repeats, a marker's the span of its actions in the median frame.
+// GPU time per action (docs/22 "Performance"): the frame replayed once with pipeline statistics around every draw and
+// dispatch and an occlusion query around every draw (the samples that passed the depth and stencil tests), then
+// `repeat` times with only a timestamp before and after every action on the direct and compute queues - the queries
+// make the GPU finish each action before the next, so they would time another frame. Each action's time is the median
+// of the repeats, a marker's the span of its actions in the median frame.
 #include "d3d12replay.h"
 
 #include <algorithm>
+#include <set>
 
 namespace fb::replay::d3d12
 {
@@ -21,30 +24,41 @@ namespace fb::replay::d3d12
 				const u32 count = std::max<u32>(1, (u32)slots_.size());
 				D3D12_QUERY_HEAP_DESC times = {D3D12_QUERY_HEAP_TYPE_TIMESTAMP, count * 2};
 				D3D12_QUERY_HEAP_DESC stats = {D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS, count};
-				if (FAILED(d->CreateQueryHeap(&times, __uuidof(ID3D12QueryHeap), (void**)&times_)) || FAILED(d->CreateQueryHeap(&stats, __uuidof(ID3D12QueryHeap), (void**)&stats_)))
+				D3D12_QUERY_HEAP_DESC samples = {D3D12_QUERY_HEAP_TYPE_OCCLUSION, count};
+				if (FAILED(d->CreateQueryHeap(&times, __uuidof(ID3D12QueryHeap), (void**)&times_)) || FAILED(d->CreateQueryHeap(&stats, __uuidof(ID3D12QueryHeap), (void**)&stats_)) ||
+					FAILED(d->CreateQueryHeap(&samples, __uuidof(ID3D12QueryHeap), (void**)&samples_)))
 					Fail("cannot make the timing queries");
 				timeResults_ = Buffer(d, (u64)count * 2 * 8);
 				statResults_ = Buffer(d, (u64)count * sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS));
+				sampleResults_ = Buffer(d, (u64)count * 8);
 			}
 			~TimingHooks() {
 				if (times_) times_->Release();
 				if (stats_) stats_->Release();
+				if (samples_) samples_->Release();
 				if (timeResults_) timeResults_->Release();
 				if (statResults_) statResults_->Release();
+				if (sampleResults_) sampleResults_->Release();
 			}
 
 			void Before(ID3D12GraphicsCommandList* list, const CommandRef& command) override {
 				auto slot = slots_.find(command.eid);
 				if (slot == slots_.end() || !Timed(list)) return;
 				list->EndQuery(times_, D3D12_QUERY_TYPE_TIMESTAMP, slot->second * 2);
-				if (Counted(command)) list->BeginQuery(stats_, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, slot->second);
+				if (counting_ && Counted(command)) list->BeginQuery(stats_, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, slot->second);
+				if (counting_ && ClassOf(command.command) == CmdClass::Draw) list->BeginQuery(samples_, D3D12_QUERY_TYPE_OCCLUSION, slot->second);
 				used_.push_back(slot->second);
 			}
 
 			void After(ID3D12GraphicsCommandList* list, const CommandRef& command) override {
 				auto slot = slots_.find(command.eid);
 				if (slot == slots_.end() || !Timed(list)) return;
-				if (Counted(command)) {
+				if (counting_ && ClassOf(command.command) == CmdClass::Draw) {
+					list->EndQuery(samples_, D3D12_QUERY_TYPE_OCCLUSION, slot->second);
+					drawn_.push_back(slot->second);
+					drawnEids_.insert(command.eid);
+				}
+				if (counting_ && Counted(command)) {
 					list->EndQuery(stats_, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, slot->second);
 					counted_.push_back(slot->second);
 				}
@@ -54,13 +68,17 @@ namespace fb::replay::d3d12
 			void EndList(ID3D12GraphicsCommandList* list, D3D12_COMMAND_LIST_TYPE type) override {
 				for (u32 slot : used_) list->ResolveQueryData(times_, D3D12_QUERY_TYPE_TIMESTAMP, slot * 2, 2, timeResults_, (u64)slot * 16);
 				for (u32 slot : counted_) list->ResolveQueryData(stats_, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, slot, 1, statResults_, (u64)slot * sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS));
+				for (u32 slot : drawn_) list->ResolveQueryData(samples_, D3D12_QUERY_TYPE_OCCLUSION, slot, 1, sampleResults_, (u64)slot * 8);
 				used_.clear();
 				counted_.clear();
+				drawn_.clear();
 				list_ = list;
 				listType_ = type;
 			}
 
 			void SetQueue(u64 queue) { queue_ = queue; }
+			// Statistics and samples on (the counting replay), or only timestamps.
+			void Counting(bool on) { counting_ = on; }
 
 			// Ticks of each action's begin and end, by eid.
 			std::map<u32, std::pair<u64, u64>> Times() {
@@ -87,8 +105,20 @@ namespace fb::replay::d3d12
 				return stats;
 			}
 
+			// The samples each draw's pixels passed the depth and stencil tests with, by eid.
+			std::map<u32, u64> Samples() {
+				std::map<u32, u64> samples;
+				const u64* data = Map<u64>(sampleResults_);
+				if (!data) return samples;
+				for (const auto& slot : slots_)
+					if (drawnEids_.count(slot.first)) samples[slot.first] = data[slot.second];
+				Unmap(sampleResults_);
+				return samples;
+			}
+
 			void Clear() {
-				for (ID3D12Resource* buffer : {timeResults_, statResults_}) {
+				drawnEids_.clear();
+				for (ID3D12Resource* buffer : {timeResults_, statResults_, sampleResults_}) {
 					u8* mapped = nullptr;
 					if (SUCCEEDED(buffer->Map(0, nullptr, (void**)&mapped))) {
 						memset(mapped, 0, (size_t)buffer->GetDesc().Width);
@@ -125,13 +155,18 @@ namespace fb::replay::d3d12
 			std::map<u32, u32> slots_;
 			std::vector<u32> used_;
 			std::vector<u32> counted_;
+			std::vector<u32> drawn_;
+			std::set<u32> drawnEids_;
 			ID3D12QueryHeap* times_ = nullptr;
 			ID3D12QueryHeap* stats_ = nullptr;
+			ID3D12QueryHeap* samples_ = nullptr;
 			ID3D12Resource* timeResults_ = nullptr;
 			ID3D12Resource* statResults_ = nullptr;
+			ID3D12Resource* sampleResults_ = nullptr;
 			ID3D12GraphicsCommandList* list_ = nullptr;
 			D3D12_COMMAND_LIST_TYPE listType_ = D3D12_COMMAND_LIST_TYPE_DIRECT;
 			u64 queue_ = 0;
+			bool counting_ = true;
 		};
 	}
 
@@ -150,12 +185,17 @@ namespace fb::replay::d3d12
 		const double frequency = (double)device.TimestampFrequency(queue);
 		std::vector<std::map<u32, std::pair<u64, u64>>> runs;
 		std::map<u32, D3D12_QUERY_DATA_PIPELINE_STATISTICS> stats;
+		std::map<u32, u64> samples;
+		if (progress) progress("timing", 0.0);
+		hooks.Clear();
+		device.ReplayTo(last, &hooks);
+		stats = hooks.Stats(), samples = hooks.Samples();
+		hooks.Counting(false);
 		for (u32 r = 0; r < repeat; ++r) {
-			if (progress) progress("timing", (double)r / repeat);
+			if (progress) progress("timing", (r + 1.0) / (repeat + 1.0));
 			hooks.Clear();
 			device.ReplayTo(last, &hooks);
 			runs.push_back(hooks.Times());
-			if (r == 0) stats = hooks.Stats();
 		}
 		replayedTo_ = UINT32_MAX;
 		last_.valid = false;
@@ -214,14 +254,16 @@ namespace fb::replay::d3d12
 		}
 		out.EndArray();
 		out.BeginArray("statColumns");
-		for (const char* column : {"eid", "iaVertices", "iaPrimitives", "vsInvocations", "gsInvocations", "gsPrimitives", "cInvocations", "cPrimitives", "psInvocations", "hsInvocations", "dsInvocations", "csInvocations"})
+		for (const char* column : {"eid", "iaVertices", "iaPrimitives", "vsInvocations", "gsInvocations", "gsPrimitives", "cInvocations", "cPrimitives", "psInvocations", "hsInvocations", "dsInvocations", "csInvocations", "samples"})
 			out.String(column);
 		out.EndArray();
 		out.BeginArray("stats");
 		for (const auto& s : stats) {
 			const D3D12_QUERY_DATA_PIPELINE_STATISTICS& d = s.second;
 			out.BeginArray();
-			for (u64 v : {(u64)s.first, d.IAVertices, d.IAPrimitives, d.VSInvocations, d.GSInvocations, d.GSPrimitives, d.CInvocations, d.CPrimitives, d.PSInvocations, d.HSInvocations, d.DSInvocations, d.CSInvocations})
+			auto drawn = samples.find(s.first);
+			for (u64 v : {(u64)s.first, d.IAVertices, d.IAPrimitives, d.VSInvocations, d.GSInvocations, d.GSPrimitives, d.CInvocations, d.CPrimitives, d.PSInvocations, d.HSInvocations, d.DSInvocations, d.CSInvocations,
+					 drawn != samples.end() ? drawn->second : (u64)0})
 				out.Uint(v);
 			out.EndArray();
 		}

@@ -217,14 +217,14 @@ namespace fb::replay::vulkan
 					for (u32 k = kCovered; k < kPassed; ++k) {
 						device_.vk.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, copies.probes[k]);
 						if (copies.dynamicScissor) device_.vk.vkCmdSetScissor(cb, 0, (u32)clamped.size(), k == kCovered ? pixel.data() : clamped.data());
-						device_.vk.vkCmdBeginQuery(cb, pool_, probe.slot * kProbes + k, 0);
+						device_.vk.vkCmdBeginQuery(cb, pool_, probe.slot * kProbes + k, device_.occlusionPrecise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
 						device_.RunCommand(cb, command, pass);
 						device_.vk.vkCmdEndQuery(cb, pool_, probe.slot * kProbes + k);
 					}
 				}
 				device_.vk.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, copies.dynamicScissor ? original : copies.clamped);
 				if (copies.dynamicScissor) device_.vk.vkCmdSetScissor(cb, 0, (u32)clamped.size(), clamped.data());
-				device_.vk.vkCmdBeginQuery(cb, pool_, probe.slot * kProbes + kPassed, 0);
+				device_.vk.vkCmdBeginQuery(cb, pool_, probe.slot * kProbes + kPassed, device_.occlusionPrecise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
 				open_ = command.eid;
 			}
 

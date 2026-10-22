@@ -64,6 +64,7 @@ namespace GpuDebug
 	Core::String DebugText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String CompareText(Debugger* debugger, const IED::Workspace& ws, const ToolCapture& target, const Serialization::DomNode& args);
 	Core::String ReplayWithShaderText(Debugger* debugger, const IED::Workspace& ws, const ToolCapture& target, const Serialization::DomNode& args);
+	Core::String LimiterText(Debugger* debugger, const ToolCapture& target, const Serialization::DomNode& args);
 	// A texel difference (compareTexture's or editDiff's answer) as a line: the output, how many pixels differ and where.
 	void AppendImageDifference(Core::StringBuilder& text, const Serialization::DomNode& image);
 }

@@ -121,6 +121,7 @@ namespace GpuDebug
 		Serialization::DomNode list = Serialization::ReadJson(answer.View(), *doc).root.Member("edits");
 		Core::String edits = list.IsValid() && list.Count() ? IED::NodeJson(list) : Core::String();
 		context->Atomically([session, edits](IED::Events& events) {
+			if (session->edits.View() != edits.View()) session->Edited();
 			session->edits = edits;
 			events.Publish(session->Topic().View(), "state", session->Json().View());
 		});

@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <set>
 #include <unordered_map>
 
 namespace fb::replay::vulkan
@@ -307,6 +308,32 @@ namespace fb::replay::vulkan
 			std::string problems_;
 			u32 problemCount_ = 0;
 		};
+	}
+
+	std::string TrivialFragmentShader(const std::vector<TargetOutput>& targets) {
+		const char* scalars[] = {"float", "int", "uint"};
+		std::string interface, decorations, types, variables, stores;
+		std::set<std::string> declared;
+		for (const TargetOutput& t : targets) {
+			const std::string scalar = scalars[std::min<u32>(t.kind, 2)];
+			const std::string type = t.components > 1 ? scalar + std::to_string(t.components) : scalar;
+			if (t.components > 1 && declared.insert(type).second) types += Format("%%%s = OpTypeVector %%%s %u\n", type.c_str(), scalar.c_str(), t.components);
+			if (declared.insert("ptr_" + type).second) {
+				types += Format("%%ptr_%s = OpTypePointer Output %%%s\n", type.c_str(), type.c_str());
+				types += Format("%%zero_%s = OpConstantNull %%%s\n", type.c_str(), type.c_str());
+			}
+			interface += Format(" %%target%u", t.reg);
+			decorations += Format("OpDecorate %%target%u Location %u\n", t.reg, t.reg);
+			variables += Format("%%target%u = OpVariable %%ptr_%s Output\n", t.reg, type.c_str());
+			stores += Format("OpStore %%target%u %%zero_%s\n", t.reg, type.c_str());
+		}
+		return "; SPIR-V 1.0, generator 0x00000000, bound 1\n"
+			"OpCapability Shader\n"
+			"OpMemoryModel Logical GLSL450\n"
+			"OpEntryPoint Fragment %main \"main\"" + interface + "\n"
+			"OpExecutionMode %main OriginUpperLeft\n" + decorations +
+			"%void = OpTypeVoid\n%fn = OpTypeFunction %void\n%float = OpTypeFloat 32\n%int = OpTypeInt 32 1\n%uint = OpTypeInt 32 0\n" + types + variables +
+			"%main = OpFunction %void 0 %fn\n%entry = OpLabel\n" + stores + "OpReturn\nOpFunctionEnd\n";
 	}
 
 	bool AssembleSpirv(const std::string& text, const u32* original, size_t count, std::vector<u32>& words, std::string& log) {

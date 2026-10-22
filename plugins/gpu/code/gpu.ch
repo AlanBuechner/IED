@@ -77,6 +77,13 @@ namespace GpuDebug
 		public Core::Array<uint8> binary;
 	}
 
+	// A range's experiments answer, by the EID they were asked for.
+	class Experimented
+	{
+		public int64 eid;
+		public Core::String answer;
+	}
+
 	class Session
 	{
 		public Core::String id;
@@ -88,6 +95,12 @@ namespace GpuDebug
 		public Core::String summary;     // initialize's result
 		public Core::String compareId;   // the capture it is compared with (docs/22 "Compare"); "" when none
 		public Core::String edits;       // the replayer's edits list (docs/22 "Edit and Replay"); "" when none
+		// What the replay measured (docs/22 "Performance"), kept for clients that come back: the last timing and
+		// compareTiming answers ("" when none) and each range's experiments.
+		public Core::String timing;
+		public bool timingStale;         // shaders were edited after it
+		public Core::String compareTiming;
+		public Core::Array<Experimented*> experiments;
 		public Process::Child* child;
 		public Threading::Mutex lock;
 		public Threading::ConditionVariable answered;
@@ -99,6 +112,8 @@ namespace GpuDebug
 		public Core::String Topic() const { return Core::String("gpurs:") + id.View(); }
 		// {sessionId, wsId, captureId, state, problem?, summary?, compareWith?, edits?}
 		public Core::String Json() const;
+		// Edits change the frame: the timing is marked stale and what was measured with it dropped. Inside a change.
+		public void Edited();
 	}
 
 	// An edit to compile (gpu.editShader, gpu_replay_with_shader): a workspace file's text as edited (`path`), else `text`.
@@ -150,6 +165,12 @@ namespace GpuDebug
 		// Opens `other` beside the session's capture in its replayer (compareOpen): compareOpen's result. Null stops
 		// comparing and lets the other capture go.
 		public Core::String Compare(Session* session, Capture* other);
+
+		// --- What the replay measured (measurements.cf) ---
+		// Keeps a timing, compareTiming or experiments answer of the session's own capture.
+		public void Keep(Session* session, Core::StringView method, Serialization::DomNode params, Core::StringView answer);
+		// {timing?, timingStale, compareTiming?, experiments}: what the session keeps.
+		public Core::String Measurements(Session* session);
 
 		// --- Edit and Replay (edits.cf) ---
 		// shaderSource's answer for the session's capture, with the file the shader was last edited from (`link`).

@@ -16,13 +16,15 @@ function rowHeight() {
 }
 
 export class CompareView {
-	// `session` is the capture's ReplaySession; onShow(eid) shows an event of this capture in the Pipeline view.
-	constructor({ ied, wsId, captureId, session, onShow }) {
+	// `session` is the capture's ReplaySession; onShow(eid) shows an event of this capture in the Pipeline view;
+	// onTimed(answer) gets compareTiming's answer, which comes back through setTiming.
+	constructor({ ied, wsId, captureId, session, onShow, onTimed }) {
 		this.ied = ied;
 		this.wsId = wsId;
 		this.captureId = captureId;
 		this.session = session;
 		this.onShow = onShow;
+		this.onTimed = onTimed;
 		this.rows = [];
 		this.times = new Map();       // EID here -> [ms here, ms other]
 		this.mode = "difference";
@@ -125,7 +127,6 @@ export class CompareView {
 	async load(other) {
 		this.loaded = other;
 		this.picker.value = other;
-		this.times = new Map();
 		try {
 			const { result } = await this.session.call("compareEvents");
 			if (this.loaded !== other) return;
@@ -273,10 +274,7 @@ export class CompareView {
 		this.busy = true;
 		try {
 			const { result } = await this.session.call("compareTiming", { repeat: this.repeat || 5 });
-			this.times = new Map();
-			for (const [a, b, , msA, msB] of [...result.markers, ...result.events]) this.times.set(a || -b, [msA, msB]);
-			this.timingButton.lastChild.textContent = "GPU " + gpuMs(result.frameMs[0]) + " / " + gpuMs(result.frameMs[1]) + " ms";
-			this.renderRows();
+			this.onTimed(result);
 		}
 		catch (e) {
 			this.ied.report("Compare timing failed", e);
@@ -286,6 +284,14 @@ export class CompareView {
 			this.busy = false;
 			this.timingButton.disabled = false;
 		}
+	}
+
+	// Each pass's time in both captures (compareTiming's answer), or none.
+	setTiming(result) {
+		this.times = new Map();
+		if (result) for (const [a, b, , msA, msB] of [...result.markers, ...result.events]) this.times.set(a || -b, [msA, msB]);
+		this.timingButton.lastChild.textContent = result ? "GPU " + gpuMs(result.frameMs[0]) + " / " + gpuMs(result.frameMs[1]) + " ms" : "Compare Timing";
+		this.renderRows();
 	}
 
 	progress(p) {

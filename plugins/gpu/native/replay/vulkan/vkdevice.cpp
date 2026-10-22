@@ -180,6 +180,7 @@ namespace fb::replay::vulkan
 		// debugger's trace.
 		const auto ours = [&](VkPhysicalDeviceFeatures& f) {
 			f.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;
+			f.occlusionQueryPrecise = supported.occlusionQueryPrecise;
 			f.fragmentStoresAndAtomics |= supported.fragmentStoresAndAtomics;
 			f.vertexPipelineStoresAndAtomics |= supported.vertexPipelineStoresAndAtomics;
 		};
@@ -191,6 +192,7 @@ namespace fb::replay::vulkan
 			}
 		ours(features);
 		storesInShaders = supported.fragmentStoresAndAtomics && supported.vertexPipelineStoresAndAtomics;
+		occlusionPrecise = supported.occlusionQueryPrecise == VK_TRUE;
 		const float priority = 1.0f;
 		VkDeviceQueueCreateInfo queueInfo = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
 		queueInfo.queueFamilyIndex = family;

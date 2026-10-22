@@ -16,6 +16,7 @@ import { PixelHistoryPanel } from "./history.js";
 import { ShaderDebugPanel } from "./debugger.js";
 import { CompareView } from "./compare.js";
 import { EditPane } from "./editpane.js";
+import { PerformanceView } from "./perf.js";
 import { ReplaySession } from "./session.js";
 import { DOT, bytes, captureTime, count, counted, gpuMs } from "./format.js";
 
@@ -65,7 +66,9 @@ export class CaptureView {
 		this.mesh = new MeshPanel({ onClose: () => this.showPanel(this.viewer.el), onDebugVertex: (vertex) => this.debug({ eid: this.outputEid, stage: "vs", vertex, instance: 0 }, "vertex " + vertex) });
 		this.debugger = new ShaderDebugPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); } });
 		this.history = new PixelHistoryPanel({ onClose: () => { this.showPanel(this.viewer.el); this.select(this.eid); }, onSelect: (eid) => this.select(eid), onDebug: (eid, x, y) => this.debugPixel(eid, x, y) });
-		this.compare = new CompareView({ ied: this.ied, wsId: this.ctx.wsId, captureId: this.captureId, session: this.session, onShow: (eid) => { this.setView("pipeline"); this.select(eid); } });
+		this.perf = new PerformanceView(this);
+		this.compare = new CompareView({ ied: this.ied, wsId: this.ctx.wsId, captureId: this.captureId, session: this.session, onShow: (eid) => { this.setView("pipeline"); this.select(eid); },
+			onTimed: (result) => this.compareTimed(result) });
 		this.compare.repeat = this.timingRepeat;
 		this.buffer = new BufferPanel({ onClose: () => this.unpin(), read: (id, eid, offset, size) => this.readBuffer(id, eid, offset, size) });
 		this.panel = h("div.gpu-col.grow.gpu-rv-host", null, this.viewer.el);
@@ -142,7 +145,7 @@ export class CaptureView {
 			replace(this.body, this.compare.el);
 			this.compare.shown();
 		}
-		else replace(this.body, this.performance());
+		else replace(this.body, this.perf.render());
 	}
 
 	showPanel(el) {
@@ -175,13 +178,18 @@ export class CaptureView {
 	}
 
 	sessionChanged(session) {
+		// Another capture compared: the times measured with the last one go (the server drops them too).
+		const comparing = session.compareWith || "";
+		if (this.comparing !== undefined && comparing !== this.comparing) this.compareTimed(null);
+		this.comparing = comparing;
 		if (this.compare) this.compare.sessionChanged(session);
 		this.editsChanged(session.edits || []);
 		if (session.state === "failed") this.failed("The replay stopped: " + (session.problem || "the replayer exited") + ". Reopen starts it again.");
 	}
 
 	progress(p) {
-		if (this.compare.busy) this.compare.progress(p);
+		if (p.what === "experiments") this.perf.progress(p);
+		else if (this.compare.busy) this.compare.progress(p);
 		else if (p.what === "timing") this.timingButton.lastChild.textContent = "Timing " + Math.round(p.fraction * 100) + "%";
 	}
 
@@ -197,6 +205,7 @@ export class CaptureView {
 		this.queues = result.queues;
 		this.events.load(result);
 		this.timeline.load(this.events, result.queues);
+		await this.restoreMeasurements();
 		this.renderBottom();
 		// Start where PIX does: the frame's last draw, so the viewer shows the finished image.
 		const lastDraw = [...this.events.events].reverse().find((e) => e.kind === "draw") || this.events.events[this.events.events.length - 1];
@@ -388,6 +397,11 @@ export class CaptureView {
 		const shown = JSON.stringify(edits);
 		if (shown === this.editsShown) return;
 		this.editsShown = shown;
+		// Timing and experiments measured another frame.
+		if (this.timing) this.timingStale = true;
+		this.perf.invalidate();
+		this.compare.setTiming(null);
+		if (this.view === "performance") this.renderView();
 		this.editChip.hidden = !edits.length;
 		this.editCount.textContent = edits.length === 1 ? "1 shader edited" : edits.length + " shaders edited";
 		if (!edits.length) this.editDiff = false;
@@ -420,15 +434,43 @@ export class CaptureView {
 
 	// --- Timing ----------------------------------------------------------------------------------------------------
 
+	timed(result) {
+		this.timing = result;
+		this.events.setTiming(result);
+		this.timeline.setTiming(result);
+		this.timingChip.hidden = false;
+		replace(this.timingChip, icon("check", "sm"), "timing: " + result.repeat + " replays " + DOT + " " + gpuMs(result.frameMs) + " ms");
+	}
+
+	// Each pass's time in both captures, from either view; null when the comparison or the frame changed.
+	compareTimed(result) {
+		this.perf.setCompareTiming(result);
+		this.compare.setTiming(result);
+		if (this.view === "performance") this.renderView();
+	}
+
+	// What the server kept measured before this page opened: the timing, the compare timing, the experiments.
+	async restoreMeasurements() {
+		try {
+			const kept = await this.session.measurements();
+			if (kept.timing) this.timed(kept.timing);
+			this.timingStale = !!kept.timingStale;
+			this.perf.restore(kept);
+			this.compare.setTiming(kept.compareTiming || null);
+		}
+		catch (e) {
+			this.ied.report("The kept timing could not be read", e);
+		}
+	}
+
 	async collectTiming() {
 		this.timingButton.disabled = true;
 		try {
 			const { result } = await this.session.call("timing", { repeat: this.timingRepeat });
-			this.timing = result;
-			this.events.setTiming(result);
-			this.timeline.setTiming(result);
-			this.timingChip.hidden = false;
-			replace(this.timingChip, icon("check", "sm"), "timing: " + result.repeat + " replays " + DOT + " " + gpuMs(result.frameMs) + " ms");
+			this.timed(result);
+			this.timingStale = false;
+			this.perf.invalidate();
+			this.compare.setTiming(null);
 			if (this.view === "performance") this.renderView();
 		}
 		catch (e) {
@@ -527,7 +569,7 @@ export class CaptureView {
 			h("div.viewport", null, list.length ? list.map((w) => h("div.gpu-r", null, h("span", null, icon("warning", "c-warn")), h("span"), h("span", { title: w }, w), h("span.d", null, "capture"))) : h("div.gpu-state-msg", null, "No warnings: everything the frame did was captured."))));
 	}
 
-	// --- Overview and Performance ----------------------------------------------------------------------------------
+	// --- Overview ----------------------------------------------------------------------------------------------------
 
 	overview() {
 		const summary = this.summary || {};
@@ -550,33 +592,6 @@ export class CaptureView {
 			h("img", { src: thumbnail, alt: "The presented frame", on: { error: (e) => e.target.remove() } }),
 			h("div.gpu-facts", null, facts.flatMap(([k, v]) => [h("span.k", null, k), h("span.v", null, String(v))]),
 				warnings.length ? [h("span.k", null, "Warnings"), h("span.v.warn", null, warnings.join("; "))] : null));
-	}
-
-	performance() {
-		if (!this.timing) return h("div.gpu-state-msg", null, h("p", null, "No timing data yet."), h("button.btn", { on: { click: () => this.collectTiming() } }, icon("watch"), "Collect Timing Data"));
-		const rows = [];
-		const markerTime = new Map(this.timing.markers.map((m) => [m[0], m[1]]));
-		const walk = (list, depth) => {
-			for (const e of list) {
-				if (e.kind !== "marker" || e.hidden) continue;
-				const inside = this.events.events.filter((x) => x.eid > e.eid && x.eid <= e.last);
-				const draws = inside.filter((x) => x.kind === "draw").length;
-				const dispatches = inside.filter((x) => x.kind === "dispatch").length;
-				const stats = this.events.stats && this.events.stats.get(e.eid);
-				rows.push(h("div.gpu-r", { on: { click: () => { this.setView("pipeline"); this.select(e.eid); } } },
-					h("span.nm", { style: { "--d": depth } }, e.name), h("span.n", null, gpuMs(markerTime.get(e.eid))), h("span.n", null, String(draws)),
-					h("span.n", null, String(dispatches)), h("span.n", null, stats ? count(stats.prims) : ""), h("span.n", null, stats ? count(stats.ps) : ""),
-					h("span.n", null, stats ? count(stats.cs) : ""), h("span.n.d", null, String(e.eid))));
-				walk(e.children, depth + 1);
-			}
-		};
-		walk(this.events.roots || [], 0);
-		return h("div.gpu-col.grow", null,
-			h("div.gpu-title", null, h("b", null, "Passes"), h("span.muted", null, "GPU " + gpuMs(this.timing.frameMs) + " ms " + DOT + " median of " + this.timing.repeat + " replays")),
-			h("div.gpu-grid.gpu-pgrid", null,
-				h("div.gpu-head", null, h("span", null, "Pass"), h("span.n", null, "GPU ms"), h("span.n", null, "Draws"), h("span.n", null, "Dispatches"), h("span.n", null, "Prims"), h("span.n", null, "PS inv."),
-					h("span.n", null, "CS inv."), h("span.n", null, "EID")),
-				h("div.viewport", null, rows.length ? rows : h("div.gpu-state-msg", null, "The frame has no markers."))));
 	}
 
 	dispose() {

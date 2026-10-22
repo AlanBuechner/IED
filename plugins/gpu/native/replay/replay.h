@@ -39,6 +39,10 @@ namespace fb::replay
 		virtual void Mesh(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) = 0;
 		virtual void Shader(const JsonValue& params, JsonWriter& out) = 0;
 		virtual void Timing(const JsonValue& params, JsonWriter& out, const Progress& progress) = 0;
+		// experiments {eid, repeat?}: the event's range (a marker's actions, or the action itself) timed as captured and
+		// with each experiment applied to its draws (common/experiments.h): `first`, `last`, `draws`, `dispatches`,
+		// `repeat`, then the `variants`, their `shares` and the `limiter`.
+		virtual void Experiments(const JsonValue& params, JsonWriter& out, const Progress& progress) = 0;
 		virtual void Messages(JsonWriter& out) = 0;
 
 		// Edit and Replay (docs/22 "Edit and Replay"). shaderSource {eid, stage}: the stage's shader `key`, `kind`,

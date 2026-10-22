@@ -336,7 +336,7 @@ namespace GpuDebug
 		Core::HashMap<int64, int64> rowOf;
 		for (int64 i = 0; i < events.Count(); i += 1) rowOf.Insert(events.At(i).At(0).AsInt(), i);
 		Serialization::DomNode statColumns = timing.Member("statColumns");
-		const int64 prims = Column(statColumns, "iaPrimitives"), ps = Column(statColumns, "psInvocations"), cs = Column(statColumns, "csInvocations");
+		const int64 prims = Column(statColumns, "iaPrimitives"), ps = Column(statColumns, "psInvocations"), cs = Column(statColumns, "csInvocations"), samples = Column(statColumns, "samples");
 		Core::HashMap<int64, int64> statOf;
 		Serialization::DomNode stats = timing.Member("stats");
 		for (int64 i = 0; i < stats.Count(); i += 1) statOf.Insert(stats.At(i).At(0).AsInt(), i);
@@ -380,7 +380,7 @@ namespace GpuDebug
 				order[j - 1] = swap;
 			}
 		const int64 top = IntArg(args, "top", kTopEvents);
-		text.Append("Costliest actions: GPU ms | EID | name | primitives | PS invocations | CS invocations\n");
+		text.Append("Costliest actions: GPU ms | EID | name | primitives | PS invocations | samples passed | CS invocations\n");
 		for (int64 i = 0; i < order.Count() && i < top; i += 1) {
 			Serialization::DomNode row = rows.At(order[i]);
 			const int64 eid = row.At(0).AsInt();
@@ -391,8 +391,8 @@ namespace GpuDebug
 			text.AppendInt(eid);
 			text.Append(" | ");
 			text.Append(at ? events.At(*at).At(6).AsView() : Core::StringView("?"));
-			const int64[3] columns = {prims, ps, cs};
-			for (int64 c = 0; c < 3; c += 1) {
+			const int64[4] columns = {prims, ps, samples, cs};
+			for (int64 c = 0; c < 4; c += 1) {
 				text.Append(" | ");
 				if (stat && columns[c] >= 0) text.AppendInt(stats.At(*stat).At(columns[c]).AsInt());
 				else text.Append("-");
@@ -423,6 +423,7 @@ namespace GpuDebug
 		else if (tool == "debug") answer.text = DebugText(debugger, target, args);
 		else if (tool == "compare") answer.text = CompareText(debugger, ws, target, args);
 		else if (tool == "edit") answer.text = ReplayWithShaderText(debugger, ws, target, args);
+		else if (tool == "limiter") answer.text = LimiterText(debugger, target, args);
 		else throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no GPU tool ") + tool).View());
 		return answer;
 	}

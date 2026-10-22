@@ -66,4 +66,15 @@ namespace fb
 	bool InstrumentDxbc(const u8* bytes, size_t size, const DxbcTarget& target, DxbcInstrumented& out);
 	// A logged record's components as the site reads them: "0.5, 1, 2".
 	std::string DxbcValueText(const DxbcSite& site, const u32 values[4]);
+
+	// An element of a shader's input or output signature: its semantic, system value (D3D_NAME), component type
+	// (1 uint, 2 int, 3 float), register and components.
+	struct DxbcElement
+	{
+		std::string name;
+		u32 index = 0, system = 0, component = 0, reg = 0, mask = 0;
+	};
+	// The input ('I': ISGN or ISG1) or output ('O': OSGN or OSG1) signature of a DXBC or DXIL container; false when it
+	// has none.
+	bool ReadDxbcSignature(const u8* bytes, size_t size, char which, std::vector<DxbcElement>& out);
 }

@@ -97,7 +97,8 @@ One process per open capture, started by the server with the capture's path. Mes
 | `buffer {id, eid, offset, size}` | bytes (binary) |
 | `mesh {eid}` | the draw's vertex inputs: attributes with formats, indices, vertex data (binary) |
 | `shader {eid, stage}` | entry, kind, reflection (signature, bindings, constant buffers), disassembly |
-| `timing {repeat}` | per action GPU time (median of `repeat` replays with timestamp queries) and pipeline statistics |
+| `timing {repeat}` | per action GPU time (median of `repeat` replays with timestamp queries only), and from one more replay each action's pipeline statistics and samples passed ("Performance" below) |
+| `experiments {eid, repeat?}` | the range timed as captured and with every draw changed - a trivial pixel shader, a one-pixel scissor, color writes off - and the share of its time each part takes ("Performance" below) |
 | `debugShader {eid, stage, x?, y?, vertex?, instance?, thread?}` | one invocation's steps ("Shader debugging" below): `listing`, `sites` (`[line, type, components, store, name?]`; type 0 float, 1 int, 2 uint, 3 bool, 4 raw bits; DXBC names the register), `invocations` (each `{steps: [[site, value]], truncated}`) |
 | `pixelHistory {id, eid, x, y, mip?, slice?}` | every event up to `eid` that wrote the pixel or tried to ("Pixel History" below): `start`, `events` (each `{eid, kind, name, result, text, samples?, tests?, before, after, changed}`), `end`, `summary`, `unattributed?` |
 | `messages {}` | the debug layer's messages during replay, each with its event |
@@ -264,6 +265,51 @@ Not yet: GLSL edits (no GLSL compiler is a dependency; the Vulkan SDK's glslang 
 sources from debug information (DXBC's SPDB, DXIL's SRCI); the shader debugger and the Shader panel show the captured
 shader while an edit is in place; a shader plugin's own compiler through a binding.
 
+### Performance
+
+Built 2026-10-22. No vendor counter SDK is a dependency, and the GPUs here offer no `VK_KHR_performance_query`, so the
+counters are the ones every D3D12 and Vulkan device has, and what limits a pass is found by experiments on the replay
+GPU (PIX and Nsight read hardware unit counters for the same answer; vendor counters stay a provider plugin for later).
+
+- **Counters** (`timing`): one counting replay takes each action's pipeline statistics (vertices, primitives, VS
+  invocations, clipper in and out, PS and CS invocations) and the samples each draw passed (an occlusion query, precise
+  on Vulkan when the device has `occlusionQueryPrecise`); then `repeat` replays take timestamps only, since the queries
+  serialize the GPU and tripled the times measured with them. `statColumns` ends with `samples`.
+- **Experiments** (`experiments {eid, repeat?}`; `native/common/experiments.cpp`, `replay/d3d12/experiments.cpp`,
+  `replay/vulkan/vkexperiments.cpp`): the range (a marker's actions, or one action) timed as captured and then with
+  every draw in it changed, each the median of `repeat` replays up to the range's end:
+  - a trivial pixel shader writing zero to each target the captured one writes (HLSL compiled to DXBC or DXIL, as the
+    captured shader is, on D3D12; a SPIR-V listing assembled on Vulkan);
+  - the scissor cut to one pixel (on Vulkan dynamically, or through a pipeline copy with a static scissor);
+  - color writes off (write masks 0, blending off).
+
+  The answer: `eid`, `first`, `last`, `draws`, `dispatches`, `repeat`; `variants` (`{id, ms, changed, problem?}`, `ms`
+  null when the variant could not be replayed); `shares` of the captured time, each clamped to 0..1 and null when its
+  variants changed no draw; `limiter`, the largest share; `tooShort` for a range under 2 microseconds, where what the
+  experiments save is the timer's noise.
+
+  | Share | Is |
+  |---|---|
+  | `vertices` | one pixel / captured: what is left when no pixel is drawn |
+  | `pixelShading` | (captured - trivial pixel shader) / captured |
+  | `rasterization` | (trivial pixel shader - one pixel) / captured: pixels rasterized and depth tested |
+  | `colorOutput` | (captured - color writes off) / captured: blending and target bandwidth; it overlaps the others |
+- **The view** (`ui/perf.js`): Passes (each marker's GPU ms, draws, primitives, PS invocations and samples; A ms, B ms
+  and the delta once the compared captures are timed together) or Actions (the costliest 300, sorted by any column).
+  Beside it the selected range's counters added up, derived ratios (VS invocations per vertex, primitives rejected,
+  samples per primitive, PS invocations per sample, GPU ms per million pixels shaded), and Run Experiments: the shares
+  as bars, the limiter with what helps it, each variant's time. CSV saves the grid. At phone width the detail shows
+  above the grid.
+- **Kept by the server**: the session keeps the last `timing` and `compareTiming` answers and each range's experiments
+  that a client asked for through `gpu.replay`, and `gpu.measurements` gives them back, so a reload or another device
+  shows the view as it was. A new timing drops the experiments and the compare timing; edits mark the timing stale and
+  drop the rest; another compared capture drops the compare timing.
+- **The AI**: `gpu_timing`'s table by event has a samples passed column; `gpu_limiter` runs the experiments on a pass
+  or a draw and says the shares and the limiter.
+
+Not yet: vendor counters (unit throughputs, occupancy, cache hit rates) through counter provider plugins; the
+timeline's counter plots; Analysis findings.
+
 ## Server and protocol (plugin `ied.gpu`)
 
 | Method | Does |
@@ -276,6 +322,7 @@ shader while an edit is in place; a shader plugin's own compiler through a bindi
 | `gpu.replay {sessionId, method, params}` | one `ied-gpu/1` request; a binary part comes back as `blob` (a blob id, `GET /api/blob/<id>`); not `initialize`, `png`, `compareOpen` or `compareClose`, which name files |
 | `gpu.compare {sessionId, captureId}` | the session's capture compared with another capture of its workspace ("Compare" above; `""` stops): `{session, result}` |
 | `gpu.shaderSource {sessionId, eid, stage}`, `gpu.editShader {sessionId, eid, stage, language, path?, text?, entry?, profile?}`, `gpu.revertShader {sessionId, key?}` | Edit and Replay ("Edit and Replay" above): the source with the file it was last edited from, an edit compiled (a workspace file as the editor holds it, or text), one or all put back |
+| `gpu.measurements {sessionId}` | what the session keeps measured ("Performance" above): `{timing?, timingStale, compareTiming?, experiments}` |
 | `gpu.close {sessionId}` | ends the session for everyone |
 
 Topics: `gpu:<wsId>` (`{captures, targets}`; events `captures.changed`, `target.changed`, `target.removed`), `gpurs:<sessionId>` (`{state: starting|ready|failed|ended, summary, problem, compareWith, edits}`). Sessions end 30 minutes after their last request, and when the replayer exits (a crash shows on the topic, and the next `gpu.open` starts it again).
@@ -298,7 +345,7 @@ PIX's structure, restyled with IED's tokens: a capture opens as a **document tab
 | Pixel History | every event that touched a pixel: before/after values, shader output, which test failed (depth, stencil, scissor, culling, blend), plain-words summary. **Built**: the viewer's History button on a picked pixel opens it in the viewer's place, a row selects its event and the panel stays; at phone width too |
 | Shader Debugger | source in an editor surface (LSP from the shader-language plugin), breakpoints, step in/over/out (and back), watch, locals, per-lane view, disassembly toggle |
 | Messages | debug layer output tied to EIDs |
-| Performance | passes grid with A/B columns (A ms, B ms, delta) and statistics, counters grid for the selected range with throughput bars and a limiter verdict, Analysis findings, the timeline with counter plots |
+| Performance | passes grid with A/B columns (A ms, B ms, delta) and statistics, counters grid for the selected range with throughput bars and a limiter verdict, Analysis findings, the timeline with counter plots. **Built**: passes or actions with time and counters, the range's counters and ratios, the limiter by experiments ("Performance" above) |
 | Warnings / Analysis | one grid for debug-layer messages and IED's analysis (NaN writes, regressions, culling, barriers, overdraw, queue bubbles), each row linked to its EID with Ask AI |
 
 Phone (one pane at a time, `docs/15`): capture library, event list with timings, texture preview with picks, pixel history, insights and AI answers. Shader stepping and the mesh viewer are desktop-only.
@@ -314,7 +361,7 @@ Phone (one pane at a time, `docs/15`): capture library, event list with timings,
 
 GPU tools (`docs/13`, group `gpu`) let the agent work the debugger the way the owner does: list and search events, read state, read pixel values and histories, run shader debugging and get the trace as data, scan a render target for NaN/Inf, bisect which event first wrote a bad value, fetch timing and counters, compare two captures, and look at a texture (vision models only; privacy rules apply). Typical asks: "why is this pixel black?", "which pass got slower since yesterday's build?", "why does the shadow pass take 3 ms?". Answers cite EIDs, which the UI turns into links.
 
-Built (2026-10-21, `docs/13` T-GPU): `gpu_capture` (build, launch for capture, capture the next frame, stop), `gpu_captures`, `gpu_events`, `gpu_resources`, `gpu_event_state`, `gpu_shader`, `gpu_pixel`, `gpu_texture` (statistics and the image, written by the replayer's `png` method under `.ied/local/gpu-captures/ai/`), `gpu_buffer`, `gpu_scan` and `gpu_timing`, plain C4 `function` tools answering through the plugin's `gpu.query` binding from the capture's replay session, with the `gpu` skill and a system-message section; then the pixel history (in `gpu_pixel`), `gpu_debug_shader`, `gpu_compare` and `gpu_replay_with_shader`.
+Built (2026-10-21, `docs/13` T-GPU): `gpu_capture` (build, launch for capture, capture the next frame, stop), `gpu_captures`, `gpu_events`, `gpu_resources`, `gpu_event_state`, `gpu_shader`, `gpu_pixel`, `gpu_texture` (statistics and the image, written by the replayer's `png` method under `.ied/local/gpu-captures/ai/`), `gpu_buffer`, `gpu_scan` and `gpu_timing`, plain C4 `function` tools answering through the plugin's `gpu.query` binding from the capture's replay session, with the `gpu` skill and a system-message section; then the pixel history (in `gpu_pixel`), `gpu_debug_shader`, `gpu_compare`, `gpu_replay_with_shader` and `gpu_limiter`.
 
 ## Integrations
 
@@ -363,6 +410,8 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   and `gpu_replay_with_shader`.
 - **Compare** ("Compare" above): `common/compare.cpp`, `replay/sessioncompare.cpp`, `gpu.compare`, the UI's
   `ui/compare.js`, and `gpu_compare`.
+- **Performance** ("Performance" above): the counting replay in `replay/d3d12/timing.cpp` and
+  `replay/vulkan/vktiming.cpp`, the experiments, `code/measurements.cf`, the UI's `ui/perf.js`, and `gpu_limiter`.
 - **AI:** the `gpu_*` tools ("AI" above), `plugins/gpu/code/tools.cf`, `tooltext.cf`, `toolinspect.cf`, and
   the `gpu` skill.
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample

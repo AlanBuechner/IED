@@ -85,6 +85,7 @@ namespace fb::replay
 			else if (method == "mesh") Side(params).Mesh(params, out, answer.binary);
 			else if (method == "shader") Side(params).Shader(params, out);
 			else if (method == "timing") Side(params).Timing(params, out, progress);
+			else if (method == "experiments") Side(params).Experiments(params, out, progress);
 			else if (method == "messages") Side(params).Messages(out);
 			else if (method == "compareOpen") CompareOpen(params, out);
 			else if (method == "compareClose") other_.reset(), otherFile_.reset();
