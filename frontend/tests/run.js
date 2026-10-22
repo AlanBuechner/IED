@@ -34,5 +34,6 @@ import "./browser.test.js";
 import "./desktop.test.js";
 import "./startpage.test.js";
 import "./profiler.test.js";
+import "./gpu.test.js";
 
 run(document.getElementById("results"));

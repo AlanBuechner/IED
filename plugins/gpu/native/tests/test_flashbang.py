@@ -117,6 +117,10 @@ class D3D12CaptureReplay(unittest.TestCase):
 		self.assertIn(f"DSV {dot} Depth {dot} D32_FLOAT", text)
 		self.assertIn(f"SRV {dot} Pattern", text)
 		self.assertIn("Frame constants", text)
+		# Buffer bindings say where they start and how their elements read, for the buffer view.
+		items = {item["label"]: item for group in state["groups"] for item in group["items"]}
+		self.assertEqual((896, "uint16 index"), (items["Index buffer"]["offset"], items["Index buffer"]["layout"]))
+		self.assertEqual("float3 POSITION0; float3 NORMAL0; float2 TEXCOORD0", items["VB 0"]["layout"])
 
 	def test_partial_replay_reads_the_target(self):
 		floor = self.draws_under("Floor")[0][0]
@@ -249,6 +253,9 @@ class VulkanCaptureReplay(unittest.TestCase):
 		self.assertEqual("depth", items["Depth"]["role"])
 		self.assertTrue(items["b1 COMBINED_IMAGE_SAMPLER"]["value"].startswith(f"Pattern {dot} R8G8B8A8_UNORM"))
 		self.assertTrue(items["b0 UNIFORM_BUFFER"]["value"].startswith("Frame constants"))
+		self.assertEqual((0, "float4"), (items["b0 UNIFORM_BUFFER"]["offset"], items["b0 UNIFORM_BUFFER"]["layout"]))
+		self.assertEqual((896, "uint16 index"), (items["Index buffer"]["offset"], items["Index buffer"]["layout"]))
+		self.assertEqual("float3 position; float3 normal; float2 uv", items["VB 0"]["layout"])
 		self.assertEqual(["position (0)", "normal (1)", "uv (2)"], [label for label in items if label.endswith(")") and "(" in label and label[0].islower()][:3])
 		self.assertIn("fs", [i.get("shader") for i in items.values()])
 

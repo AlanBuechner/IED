@@ -1,6 +1,6 @@
 // capture.js - a capture as a document (F-GPU-14), PIX's layout: a bar with Collect Timing Data and the filter, the
 // view tabs (Overview, Pipeline, Performance), the timing timeline, then per view - Pipeline: the events grid, the
-// state tree beside the resource viewer (or a shader, or a draw's vertex inputs), and the docked API Calls, Messages,
+// state tree beside the resource viewer (or the buffer view, a shader, a draw's vertex inputs), and the docked API Calls, Messages,
 // Resources and Warnings grids. Everything comes from the capture's replay session on the server.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
@@ -9,6 +9,7 @@ import { Timeline } from "./timeline.js";
 import { StateTree } from "./statetree.js";
 import { TextureViewer } from "./texview.js";
 import { ShaderPanel, MeshPanel } from "./panels.js";
+import { BufferPanel } from "./bufview.js";
 import { ReplaySession } from "./session.js";
 import { DOT, bytes, captureTime, count, counted, gpuMs } from "./format.js";
 
@@ -24,7 +25,7 @@ export class CaptureView {
 		this.view = "pipeline";
 		this.bottomTab = "calls";
 		this.generation = 0;
-		this.resource = null;      // the resource the viewer shows: {id, name, pinned}
+		this.resource = null;      // the resource the viewer shows: {id, name, pinned, offset?, layout?}
 		this.eid = 0;
 		this.outputEid = 0;   // the action the selection shows: itself, or a marker's last action
 		this.session = new ReplaySession(this.ied, ctx.wsId, captureId, {
@@ -53,6 +54,7 @@ export class CaptureView {
 		this.viewer.onChange = (what, v) => this.reloadTexture({ [what]: v });
 		this.shader = new ShaderPanel({ onClose: () => this.showPanel(this.viewer.el) });
 		this.mesh = new MeshPanel({ onClose: () => this.showPanel(this.viewer.el) });
+		this.buffer = new BufferPanel({ onClose: () => this.unpin(), read: (id, eid, offset, size) => this.readBuffer(id, eid, offset, size) });
 		this.panel = h("div.gpu-col.grow.gpu-rv-host", null, this.viewer.el);
 		this.timingButton = h("button.btn.flat", { title: "Replay the frame several times with timestamps around every action", on: { click: () => this.collectTiming() } }, icon("watch"), "Collect Timing Data");
 		this.timingChip = h("span.chip.gpu-wide", { hidden: true });
@@ -192,10 +194,12 @@ export class CaptureView {
 			this.tree.show(this.state);
 			this.renderCalls(calls.result.calls);
 			const output = StateTree.outputOf(this.state);
-			if (!this.resource || !this.resource.pinned) this.resource = output ? { id: output.resource, name: output.value, pinned: false } : this.resource;
-			if (this.panel.firstChild !== this.viewer.el) this.showPanel(this.viewer.el);
-			if (this.resource) this.reloadTexture();
-			else this.viewer.message("This event writes no texture.");
+			if (!this.resource || !this.resource.pinned) this.resource = output ? { id: output.resource, name: output.value, pinned: false, offset: output.offset, layout: output.layout } : this.resource;
+			if (this.resource) this.showResource();
+			else {
+				this.showPanel(this.viewer.el);
+				this.viewer.message("This event writes no texture.");
+			}
 		}
 		catch (e) {
 			if (generation === this.generation) this.tree.message(e.message || String(e), true);
@@ -203,10 +207,47 @@ export class CaptureView {
 	}
 
 	pinResource(id, item) {
-		this.resource = { id, name: item.value, pinned: true };
-		this.showPanel(this.viewer.el);
-		this.reloadTexture({ mip: 0, slice: 0 });
+		this.resource = { id, name: item.value, pinned: true, offset: item.offset, layout: item.layout };
+		this.showResource({ mip: 0, slice: 0 });
 		if (this.bottomTab === "resources" && this.view === "pipeline") this.renderResources();
+	}
+
+	// Back to what the selected event writes.
+	unpin() {
+		this.resource = null;
+		this.select(this.eid);
+	}
+
+	async resourceInfo(id) {
+		if (!this.resources) this.resources = (await this.session.call("resources")).result.resources;
+		return this.resources.find((r) => r.id === id);
+	}
+
+	// The resource in the viewer's place: a buffer in the buffer view, else the texture viewer.
+	async showResource(change) {
+		const resource = this.resource;
+		let info = null;
+		try {
+			info = await this.resourceInfo(resource.id);
+		}
+		catch (e) {
+			// Without the list the resource reads as a texture, whose answer says what is wrong.
+		}
+		if (resource !== this.resource) return;
+		if (!info || info.dimension !== "BUFFER") {
+			if (this.panel.firstChild !== this.viewer.el) this.showPanel(this.viewer.el);
+			this.reloadTexture(change);
+			return;
+		}
+		if (this.panel.firstChild !== this.buffer.el) this.showPanel(this.buffer.el);
+		if (this.buffer.source === resource) this.buffer.at(this.outputEid);
+		else this.buffer.open({ id: resource.id, name: info.name, size: info.width, offset: resource.offset, layout: resource.layout }, this.outputEid);
+		this.buffer.source = resource;
+	}
+
+	async readBuffer(id, eid, offset, size) {
+		const { binary } = await this.session.call("buffer", { id, eid, offset, size });
+		return binary;
 	}
 
 	async reloadTexture(change) {
@@ -318,7 +359,7 @@ export class CaptureView {
 				if (v.every((x) => typeof x !== "object" || x === null)) return [h("span.num", null, "[" + v.join(", ") + "]")];
 				return v.flatMap((x, i) => ["\n" + indent + "[" + i + "] ", ...value(x, indent + "  ")]);
 			}
-			if (v.$ref !== undefined) return [h("span.ref", { on: { click: () => this.pinResource(v.$ref, { value: v.name }) } }, (v.name || "#" + v.$ref) + (v.offset !== undefined ? " +" + v.offset : ""))];
+			if (v.$ref !== undefined) return [h("span.ref", { on: { click: () => this.pinResource(v.$ref, { value: v.name, offset: v.offset }) } }, (v.name || "#" + v.$ref) + (v.offset !== undefined ? " +" + v.offset : ""))];
 			if (v.$heap !== undefined) return [h("span.str", null, (v.name || "heap #" + v.$heap) + "[" + v.index + "]")];
 			return Object.entries(v).flatMap(([k, x]) => ["\n" + indent, h("span.key", null, k), ": ", ...value(x, indent + "  ")]);
 		};
@@ -349,7 +390,7 @@ export class CaptureView {
 			h("div.viewport", null, h("div.gpu-state-msg", null, "Reading...")));
 		replace(this.bottomBody, grid);
 		try {
-			if (!this.resources) this.resources = (await this.session.call("resources")).result.resources;
+			await this.resourceInfo(0);
 			const rows = this.resources.map((r) => h("div.gpu-r" + (this.resource && this.resource.id === r.id ? ".sel" : ""), { title: r.flags, on: { click: () => this.pinResource(r.id, { value: r.name }) } },
 				h("span.n.d", null, r.firstUse ? String(r.firstUse) : ""), h("span", null, r.name),
 				h("span.m", null, r.dimension === "BUFFER" ? "buffer" : r.format),

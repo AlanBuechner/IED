@@ -90,7 +90,7 @@ One process per open capture, started by the server with the capture's path. Mes
 | `initialize {capture, options}` | `{api, frame, program, captureDevice, replayDevice, counts, warnings}` |
 | `events {}` | the event tree: per event `eid`, `parent`, `kind` (marker, draw, dispatch, copy, clear, barrier, present, call), `name`, `queue`, `flags`; markers with their spans |
 | `apiCalls {eid}` | the calls that belong to the event (the state set since the previous action, then the action) with their parameters as JSON |
-| `state {eid}` | the pipeline state at the event as a tree by stage: shaders, root signature or pipeline layout, every binding resolved to its resource and name, vertex/index buffers, render targets, viewports, rasterizer, blend, depth-stencil |
+| `state {eid}` | the pipeline state at the event as a tree by stage: shaders, root signature or pipeline layout, every binding resolved to its resource and name, vertex/index buffers, render targets, viewports, rasterizer, blend, depth-stencil; an item naming a resource has `resource`, a render target, depth target or storage resource its `role` (`rt`, `depth`, `uav`), a buffer binding its `offset` and suggested `layout` |
 | `resources {}` | every resource: id, name, kind, dimensions, format, size, heap/memory, first and last use |
 | `texture {id, eid, mip, slice, region?, maxSize?}` | `{width, height, format, min, max}` + RGBA32F data (binary) of the subresource after the event |
 | `pixel {id, eid, x, y, mip, slice}` | the texel's typed value (`raw`, `float`, `text`) |
@@ -131,6 +131,7 @@ PIX's structure, restyled with IED's tokens: a capture opens as a **document tab
 | Timing timeline | marker rows (frame, passes, draws), one row per queue (Direct, Compute, Copy, Video) with idle bubbles, counter plots (GPU busy, occupancy, bandwidth), range selection |
 | Pipeline view | state tree by stage (Input Assembler ... Output Merger, Root Signature, Descriptor Heaps) with every binding; bindless indices resolved with names; constant buffers decoded with the shader's reflection; selecting an item shows it in the resource viewer |
 | Resource viewer | the selected texture or buffer: mip/slice/sample, channels, range, *Visualize* menu (NaN/Inf/negative, depth/stencil test, overdraw, wireframe, triangle size, highlight draw), zoom; a status line with the pixel, typed value, depth and last write; Pixel History / Debug Pixel / Resource History actions |
+| Buffer view | the selected buffer after the event, a page of elements at a time from an offset, read with a layout: `float3 position; float3 normal; float2 uv` - fields in order, tightly packed, each a type (`float`, `half`, `double`, `int`, `uint`, `int8/16/64`, `uint8/16/64`, `unorm8/16`, `snorm8/16`, `bool`; vectors `float3`, `uint16x2`; matrices `float4x4`), an optional name and `[count]`; `pad N` skips bytes; `hex` shows 16 bytes a row with their text. A binding suggests the layout (a vertex buffer its attributes, an index buffer its format, a constant buffer `float4`); an edited layout holds for that buffer and binding while the capture is open |
 | Mesh Viewer | VS input/output, mesh/task output, table + 3D preview with camera from the capture |
 | Resources | all resources with usage, format, size, lifetime (first/last EID), memory heap, aliasing; per-resource history of writes and reads |
 | API Calls | the calls inside the selected event, parameters, callstack if captured |
@@ -188,7 +189,7 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   (ended with its capture's delete, after 30 idle minutes, or with the server).
 - **UI** (`ui/`): the Capture Library tool window in the GPU activity; a capture as a document with Overview, Pipeline
   and Performance; the timeline, the events grid with its filter, the state tree, the resource viewer (channels, range,
-  NaN / Inf / negative visualizing, mips and slices, picks), the shader and Mesh panels, and the API Calls, Messages,
+  NaN / Inf / negative visualizing, mips and slices, picks), the buffer view, the shader and Mesh panels, and the API Calls, Messages,
   Resources and Warnings grids; at phone width the events below one of Output, State or Calls.
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample
   `plugins/gpu/samples/c4`.
@@ -198,7 +199,7 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   (launch, capture, open, replay, blobs, comment, delete, refusals; a Vulkan launch through the layer), Bedrock
   `gpu_tests.cf`.
 
-Not yet: a buffer view in the UI (the replayer's `buffer` method has none yet); the AI tools; Pixel History and the rest of G2.
+Not yet: the AI tools; Pixel History and the rest of G2.
 
 ## Risks
 

@@ -102,21 +102,6 @@ namespace fb::replay::vulkan
 		out.Uint("size", binary.size());
 	}
 
-	// The vertex shader's input names by location, from the pipeline's vertex stage.
-	static std::map<u32, std::string> InputNames(const Model& model, const VkGraphicsPipelineCreateInfo& pipeline) {
-		std::map<u32, std::string> names;
-		for (u32 i = 0; i < pipeline.stageCount; ++i) {
-			if (pipeline.pStages[i].stage != VK_SHADER_STAGE_VERTEX_BIT) continue;
-			Create<VkShaderModuleCreateInfo> module = {};
-			if (!model.DecodeObject(IdOf(pipeline.pStages[i].module), module)) continue;
-			SpirvModule spirv;
-			if (!ParseSpirv(module.info.pCode, module.info.codeSize / 4, spirv)) continue;
-			for (const SpirvInterface& input : spirv.inputs)
-				if (input.location >= 0) names[(u32)input.location] = input.name;
-		}
-		return names;
-	}
-
 	void VulkanReplay::Mesh(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) {
 		const u32 eid = (u32)params["eid"].Uint(0);
 		const Snapshot s = Simulate(model_, eid);
@@ -157,7 +142,7 @@ namespace fb::replay::vulkan
 		if (indices.empty()) low = high = 0;
 		const u32 vertices = std::min<u32>(high - low + 1, 1u << 16);
 		const u32 instance = indexed ? indexedArgs.firstInstance : drawArgs.firstInstance;
-		const std::map<u32, std::string> names = InputNames(model_, pipeline.info);
+		const std::map<u32, std::string> names = VertexInputNames(model_, pipeline.info);
 
 		out.Uint("eid", eid);
 		out.String("topology", EnumName(topology) ? EnumName(topology) : "?");

@@ -2,6 +2,7 @@
 // attachments with depth, stencil and blend, every bound descriptor set with each element resolved to its resource,
 // and the push constants. Items naming an image or buffer open it in the resource viewer; an attachment or storage
 // image carries its role, which the UI's "the event's output" looks for.
+#include "bufferlayout.h"
 #include "vkreplay.h"
 #include "vkspirv.h"
 
@@ -33,6 +34,16 @@ namespace fb::replay::vulkan
 				if (resource) out_.Uint("resource", resource);
 				if (shader) out_.String("shader", shader);
 				if (role) out_.String("role", role);
+				out_.EndObject();
+			}
+			// A buffer binding: where in the buffer it starts and the layout its elements read with, for the buffer view.
+			void Buffer(const std::string& label, const std::string& value, u64 resource, u64 offset, const std::string& layout) {
+				out_.BeginObject();
+				out_.String("label", label);
+				out_.String("value", value);
+				out_.Uint("resource", resource);
+				out_.Uint("offset", offset);
+				if (!layout.empty()) out_.String("layout", layout);
 				out_.EndObject();
 			}
 			void Parent(const std::string& label, const std::string& value) {
@@ -114,14 +125,31 @@ namespace fb::replay::vulkan
 		return true;
 	}
 
+	// The layout of one vertex binding's elements: its attributes at their offsets.
+	static std::string VertexLayout(const VkPipelineVertexInputStateCreateInfo& input, u32 binding, u32 stride, const std::map<u32, std::string>& names) {
+		std::vector<LayoutField> fields;
+		for (u32 a = 0; a < input.vertexAttributeDescriptionCount; ++a) {
+			const VkVertexInputAttributeDescription& attribute = input.pVertexAttributeDescriptions[a];
+			if (attribute.binding != binding) continue;
+			const FormatInfo* info = fb::vk::FormatOf(attribute.format, VK_IMAGE_ASPECT_COLOR_BIT);
+			auto name = names.find(attribute.location);
+			const std::string field = FieldOf(info, name != names.end() ? name->second : "location" + std::to_string(attribute.location));
+			fields.push_back({attribute.offset, info ? info->bytes : 0u, field});
+		}
+		return BufferLayout(fields, stride);
+	}
+
 	static void InputAssembler(const Model& model, const Snapshot& s, const VkGraphicsPipelineCreateInfo* p, Tree& tree) {
 		VkPrimitiveTopology topology = p && p->pInputAssemblyState ? p->pInputAssemblyState->topology : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		u32 value = 0;
 		if (DynamicValue(s, VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, value)) topology = (VkPrimitiveTopology)value;
 		tree.Group("Input Assembler", Name(topology));
 		tree.Item("Topology", Name(topology));
-		if (s.indexBuffer) tree.Item("Index buffer", Format("%s +%llu " DOT " %s", model.NameOf(s.indexBuffer).c_str(), (unsigned long long)s.indexOffset, Name(s.indexType)), s.indexBuffer);
+		if (s.indexBuffer)
+			tree.Buffer("Index buffer", Format("%s +%llu " DOT " %s", model.NameOf(s.indexBuffer).c_str(), (unsigned long long)s.indexOffset, Name(s.indexType)), s.indexBuffer,
+				s.indexOffset, s.indexType == VK_INDEX_TYPE_UINT16 ? "uint16 index" : s.indexType == VK_INDEX_TYPE_UINT8_EXT ? "uint8 index" : "uint index");
 		const VkPipelineVertexInputStateCreateInfo* input = p ? p->pVertexInputState : nullptr;
+		const std::map<u32, std::string> names = p ? VertexInputNames(model, *p) : std::map<u32, std::string>();
 		for (u32 b = 0; input && b < input->vertexBindingDescriptionCount; ++b) {
 			const VkVertexInputBindingDescription& binding = input->pVertexBindingDescriptions[b];
 			auto bound = s.vertexBuffers.find(binding.binding);
@@ -130,21 +158,11 @@ namespace fb::replay::vulkan
 				continue;
 			}
 			const u64 stride = bound->second.stride ? bound->second.stride : binding.stride;
-			tree.Item(Format("VB %u", binding.binding), Format("%s +%llu " DOT " %llu B stride%s", model.NameOf(bound->second.buffer).c_str(),
+			tree.Buffer(Format("VB %u", binding.binding), Format("%s +%llu " DOT " %llu B stride%s", model.NameOf(bound->second.buffer).c_str(),
 				(unsigned long long)bound->second.offset, (unsigned long long)stride, binding.inputRate == VK_VERTEX_INPUT_RATE_INSTANCE ? " " DOT " per instance" : ""),
-				bound->second.buffer);
+				bound->second.buffer, bound->second.offset, VertexLayout(*input, binding.binding, (u32)stride, names));
 		}
 		if (input && input->vertexAttributeDescriptionCount) {
-			// Attribute names from the vertex shader's inputs.
-			std::map<u32, std::string> names;
-			for (u32 i = 0; p && i < p->stageCount; ++i) {
-				if (p->pStages[i].stage != VK_SHADER_STAGE_VERTEX_BIT) continue;
-				Create<VkShaderModuleCreateInfo> module = {};
-				SpirvModule spirv;
-				if (model.DecodeObject(IdOf(p->pStages[i].module), module) && ParseSpirv(module.info.pCode, module.info.codeSize / 4, spirv))
-					for (const SpirvInterface& in : spirv.inputs)
-						if (in.location >= 0) names[(u32)in.location] = in.name;
-			}
 			tree.Parent("Vertex input", Format("%u attributes", input->vertexAttributeDescriptionCount));
 			for (u32 a = 0; a < input->vertexAttributeDescriptionCount; ++a) {
 				const VkVertexInputAttributeDescription& attribute = input->pVertexAttributeDescriptions[a];
@@ -296,8 +314,9 @@ namespace fb::replay::vulkan
 						else if (d->type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER || d->type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) tree.Item(label, model.NameOf(IdOf(d->texel)));
 						else {
 							const u64 buffer = IdOf(d->buffer.buffer);
-							tree.Item(label, Format("%s +%llu " DOT " %s", model.NameOf(buffer).c_str(), (unsigned long long)d->buffer.offset,
-								d->buffer.range == VK_WHOLE_SIZE ? "whole" : Bytes(d->buffer.range).c_str()), buffer);
+							const bool uniform = d->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || d->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+							tree.Buffer(label, Format("%s +%llu " DOT " %s", model.NameOf(buffer).c_str(), (unsigned long long)d->buffer.offset,
+								d->buffer.range == VK_WHOLE_SIZE ? "whole" : Bytes(d->buffer.range).c_str()), buffer, d->buffer.offset, uniform ? "float4" : "");
 						}
 					}
 					if (binding.descriptorCount > shown) tree.Item(Format("b%u", binding.binding), Format("... %u more", binding.descriptorCount - shown));

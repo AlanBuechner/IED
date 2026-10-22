@@ -75,6 +75,8 @@ namespace fb::replay::vulkan
 	};
 	// The descriptor sets' contents an event sees: set id -> (binding << 32 | element) -> what it holds (handles as ids).
 	std::map<u64, std::map<u64, Descriptor>> DescriptorsAt(const Model& model, u32 eid);
+	// The vertex shader's input names by location, from the pipeline's vertex stage.
+	std::map<u32, std::string> VertexInputNames(const Model& model, const VkGraphicsPipelineCreateInfo& pipeline);
 
 	class VulkanReplay final : public ApiReplay
 	{

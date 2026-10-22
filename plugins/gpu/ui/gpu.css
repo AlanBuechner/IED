@@ -150,6 +150,14 @@
 .gpu-mesh-table table { border-collapse: collapse; }
 .gpu-mesh-table th, .gpu-mesh-table td { padding: 1px var(--space-3); border-bottom: var(--border-width) solid var(--border-0); text-align: right; white-space: nowrap; }
 .gpu-mesh-table th { position: sticky; top: 0; background: var(--bg-1); color: var(--text-2); font-family: var(--font-ui); font-weight: var(--font-weight-normal); }
+.gpu-mesh-table td.d { color: var(--text-2); }
+.gpu-mesh-table th[colspan] { text-align: center; }
+.gpu-mesh-table .t { text-align: left; }
+.gpu-shader .gpu-buf-tools { flex-wrap: wrap; }
+.gpu-buf-layout { flex: 1 1 240px; min-width: 0; height: 22px; padding: 0 var(--space-2); background: var(--bg-3); color: var(--text-0); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); font-family: var(--font-mono); font-size: var(--font-size-xs); }
+.gpu-buf-layout:focus { outline: none; border-color: var(--focus); }
+.gpu-buf-nav { display: flex; align-items: center; gap: var(--space-2); }
+.gpu-buffer > .gpu-state-msg { padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-0); }
 
 /* Overview and Performance */
 .gpu-overview { flex: 1; overflow: auto; padding: var(--space-5) var(--space-6); display: flex; gap: var(--space-7); align-items: flex-start; }

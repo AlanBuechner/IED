@@ -16,6 +16,20 @@ namespace fb::replay::vulkan
 		return VK_SHADER_STAGE_FRAGMENT_BIT;
 	}
 
+	std::map<u32, std::string> VertexInputNames(const Model& model, const VkGraphicsPipelineCreateInfo& pipeline) {
+		std::map<u32, std::string> names;
+		for (u32 i = 0; i < pipeline.stageCount; ++i) {
+			if (pipeline.pStages[i].stage != VK_SHADER_STAGE_VERTEX_BIT) continue;
+			Create<VkShaderModuleCreateInfo> module = {};
+			if (!model.DecodeObject(IdOf(pipeline.pStages[i].module), module)) continue;
+			SpirvModule spirv;
+			if (!ParseSpirv(module.info.pCode, module.info.codeSize / 4, spirv)) continue;
+			for (const SpirvInterface& input : spirv.inputs)
+				if (input.location >= 0) names[(u32)input.location] = input.name;
+		}
+		return names;
+	}
+
 	void VulkanReplay::Shader(const JsonValue& params, JsonWriter& out) {
 		const std::string stage = params["stage"].Str("fs");
 		const VkShaderStageFlagBits flag = StageOf(stage);

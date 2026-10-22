@@ -1,6 +1,7 @@
 // The Pipeline view's tree (docs/22 "Views"): the state an event sees, by stage - input assembly, the shaders, the
 // rasterizer, the output merger, then the root signature with every argument and every descriptor a table reaches
 // resolved to its resource and name. Items name a resource (for the resource viewer) or a shader stage.
+#include "bufferlayout.h"
 #include "d3d12replay.h"
 #include "d3d12_names.h"
 #include "formats.h"
@@ -29,13 +30,16 @@ namespace fb::replay::d3d12
 			}
 			void Item(const std::string& label, const std::string& value, u64 resource = 0, const char* shader = nullptr) {
 				out_.BeginObject();
-				out_.String("label", label);
-				out_.String("value", value);
-				if (resource) out_.Uint("resource", resource);
+				Fields(label, value, resource);
 				if (shader) out_.String("shader", shader);
-				// A view's role, which the UI's "the event's output" looks for.
-				const char* role = value.compare(0, 3, "RTV") == 0 ? "rt" : value.compare(0, 3, "DSV") == 0 ? "depth" : value.compare(0, 3, "UAV") == 0 ? "uav" : nullptr;
-				if (resource && role) out_.String("role", role);
+				out_.EndObject();
+			}
+			// A buffer binding: where in the buffer it starts and the layout its elements read with, for the buffer view.
+			void Buffer(const std::string& label, const std::string& value, u64 resource, u64 offset, const std::string& layout) {
+				out_.BeginObject();
+				Fields(label, value, resource);
+				out_.Uint("offset", offset);
+				if (!layout.empty()) out_.String("layout", layout);
 				out_.EndObject();
 			}
 			void Parent(const std::string& label, const std::string& value, u64 resource = 0) {
@@ -51,6 +55,15 @@ namespace fb::replay::d3d12
 			}
 
 		private:
+			void Fields(const std::string& label, const std::string& value, u64 resource) {
+				out_.String("label", label);
+				out_.String("value", value);
+				if (resource) out_.Uint("resource", resource);
+				// A view's role, which the UI's "the event's output" looks for.
+				const char* role = value.compare(0, 3, "RTV") == 0 ? "rt" : value.compare(0, 3, "DSV") == 0 ? "depth" : value.compare(0, 3, "UAV") == 0 ? "uav" : nullptr;
+				if (resource && role) out_.String("role", role);
+			}
+
 			JsonWriter& out_;
 		};
 
@@ -104,6 +117,27 @@ namespace fb::replay::d3d12
 		return IdOf(view.resource);
 	}
 
+	// A descriptor's item: a view of a buffer says where it starts and how its elements read.
+	static void ViewItem(Tree& tree, const Model& model, const std::string& label, const DescriptorWrite& view) {
+		const u64 resource = ViewResource(view);
+		if (view.kind == ViewKind::Cbv && view.hasDesc) {
+			tree.Buffer(label, ViewText(model, view), resource, AddressOffset(view.cbv.BufferLocation), "float4");
+			return;
+		}
+		const bool srvBuffer = view.kind == ViewKind::Srv && view.hasDesc && view.srv.ViewDimension == D3D12_SRV_DIMENSION_BUFFER;
+		const bool uavBuffer = view.kind == ViewKind::Uav && view.hasDesc && view.uav.ViewDimension == D3D12_UAV_DIMENSION_BUFFER;
+		if (!srvBuffer && !uavBuffer) {
+			tree.Item(label, ViewText(model, view), resource);
+			return;
+		}
+		const DXGI_FORMAT format = srvBuffer ? view.srv.Format : view.uav.Format;
+		const u64 first = srvBuffer ? view.srv.Buffer.FirstElement : view.uav.Buffer.FirstElement;
+		const u32 structure = srvBuffer ? view.srv.Buffer.StructureByteStride : view.uav.Buffer.StructureByteStride;
+		const FormatInfo* info = DxgiFormat(format);
+		const u32 stride = structure ? structure : info ? info->bytes : 0;
+		tree.Buffer(label, ViewText(model, view), resource, first * stride, structure ? "" : FieldOf(info, "value"));
+	}
+
 	static const char* RangeLetter(D3D12_DESCRIPTOR_RANGE_TYPE type) {
 		switch (type) {
 			case D3D12_DESCRIPTOR_RANGE_TYPE_SRV: return "t";
@@ -150,7 +184,7 @@ namespace fb::replay::d3d12
 				++shown;
 				const std::string reg = Format("%s%u space%u", RangeLetter(range.RangeType), range.BaseShaderRegister + i, range.RegisterSpace);
 				if (!present) tree.Item(reg, "(empty)");
-				else tree.Item(reg, ViewText(model, view), ViewResource(view));
+				else ViewItem(tree, model, reg, view);
 			}
 			if (unbounded) tree.Item(Format("%s%u+ space%u", RangeLetter(range.RangeType), range.BaseShaderRegister, range.RegisterSpace), Format("unbounded: %u written slots shown", written));
 			offset += unbounded ? 0 : range.NumDescriptors;
@@ -203,7 +237,8 @@ namespace fb::replay::d3d12
 					if (arg.kind == RootArgument::Kind::None) tree.Item(where, "not set");
 					else {
 						const u64 resource = AddressId(arg.value);
-						tree.Item(where, Format("%s +%llu", model.NameOf(resource).c_str(), (unsigned long long)AddressOffset(arg.value)), resource);
+						tree.Buffer(where, Format("%s +%llu", model.NameOf(resource).c_str(), (unsigned long long)AddressOffset(arg.value)), resource, AddressOffset(arg.value),
+							param.ParameterType == D3D12_ROOT_PARAMETER_TYPE_CBV ? "float4" : "");
 					}
 				}
 			}
@@ -239,13 +274,30 @@ namespace fb::replay::d3d12
 		return Format("%s " DOT " %s", dxil ? "DXIL" : dxbc ? "DXBC" : "bytecode", Bytes(code.BytecodeLength).c_str());
 	}
 
+	// The layout of one input slot's elements: its input layout elements at their offsets (an appended one right after
+	// the slot's element before it).
+	static std::string VertexLayout(const D3D12_INPUT_LAYOUT_DESC& layout, u32 slot, u32 stride) {
+		std::vector<LayoutField> fields;
+		u32 next = 0;
+		for (UINT i = 0; i < layout.NumElements; ++i) {
+			const D3D12_INPUT_ELEMENT_DESC& e = layout.pInputElementDescs[i];
+			if (e.InputSlot != slot) continue;
+			const FormatInfo* info = DxgiFormat(e.Format);
+			const u32 offset = e.AlignedByteOffset == D3D12_APPEND_ALIGNED_ELEMENT ? next : e.AlignedByteOffset;
+			const u32 bytes = info ? info->bytes : 0;
+			fields.push_back({offset, bytes, FieldOf(info, (e.SemanticName ? std::string(e.SemanticName) : "element") + std::to_string(e.SemanticIndex))});
+			next = offset + bytes;
+		}
+		return BufferLayout(fields, stride);
+	}
+
 	static void InputAssembler(const Model& model, const Snapshot& s, const PipelineCreate* pso, Tree& tree) {
 		tree.Group("Input Assembler", Name(EnumName(s.topology)));
 		tree.Item("Topology", Name(EnumName(s.topology)));
 		if (s.indexed) {
 			const u64 id = AddressId(s.indexAddress);
-			tree.Item("Index buffer", Format("%s +%llu " DOT " %s " DOT " %s", model.NameOf(id).c_str(), (unsigned long long)AddressOffset(s.indexAddress), Name(EnumName(s.indexFormat)),
-				Bytes(s.indexSize).c_str()), id);
+			tree.Buffer("Index buffer", Format("%s +%llu " DOT " %s " DOT " %s", model.NameOf(id).c_str(), (unsigned long long)AddressOffset(s.indexAddress), Name(EnumName(s.indexFormat)),
+				Bytes(s.indexSize).c_str()), id, AddressOffset(s.indexAddress), s.indexFormat == DXGI_FORMAT_R16_UINT ? "uint16 index" : "uint index");
 		}
 		std::vector<bool> usedSlots(32, false);
 		if (pso)
@@ -255,8 +307,10 @@ namespace fb::replay::d3d12
 			const VertexBufferBinding& vb = s.vertexBuffers[slot];
 			if (!usedSlots[slot] && !vb.address) continue;
 			const u64 id = AddressId(vb.address);
-			tree.Item(Format("VB %u", slot),
-				vb.address ? Format("%s +%llu " DOT " %u B stride " DOT " %s", model.NameOf(id).c_str(), (unsigned long long)AddressOffset(vb.address), vb.stride, Bytes(vb.size).c_str()) : "not set", id);
+			if (!vb.address) tree.Item(Format("VB %u", slot), "not set");
+			else
+				tree.Buffer(Format("VB %u", slot), Format("%s +%llu " DOT " %u B stride " DOT " %s", model.NameOf(id).c_str(), (unsigned long long)AddressOffset(vb.address), vb.stride,
+					Bytes(vb.size).c_str()), id, AddressOffset(vb.address), pso ? VertexLayout(pso->inputLayout, slot, vb.stride) : "");
 		}
 		if (pso && pso->inputLayout.NumElements) {
 			tree.Parent("Input layout", Format("%u elements", pso->inputLayout.NumElements));
