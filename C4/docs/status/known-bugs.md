@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-363**
+Next ID: **BUG-365**
 
 ## Rules for this file
 
@@ -48,6 +48,8 @@ Next ID: **BUG-363**
 | BUG-360 | No way to read standard input | Bedrock | High |
 | BUG-361 | C++ forms and STL names get diagnostics that do not name the C4 form | Diagnostics | Low |
 | BUG-362 | A `const T&` field cannot be bound in its object's create | HIR | Medium |
+| BUG-363 | Each struct returned from a call takes its own stack slot, so recursive functions overflow early | Codegen | Medium |
+| BUG-364 | HashMap::FindAs has no const form | Bedrock | Low |
 
 ---
 
@@ -70,6 +72,21 @@ Next ID: **BUG-363**
 
 ## HIR and codegen
 
+### BUG-363 Each struct returned from a call takes its own stack slot, so recursive functions overflow early
+- **Area:** Codegen
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** every `return f(...)` of a struct goes through an sret temporary of its own that is then copied into
+  the caller's return slot, and no `llvm.lifetime` markers are emitted, so temporaries of call sites that never run
+  together never share a slot even at -O3: a function returning an 80-byte struct from each of eight switch cases has
+  a 704-byte frame (144 with one case). A tree-walking interpreter written in C4 (IED's language eval) overflows the
+  1 MiB stack at about 209 nested script calls where the same program in Go reaches 100000.
+- **Repro:** `C:\Users\Alan\AppData\Local\Temp\ied-langeval\authoring\interp\repro-frame-size` (nuke build run):
+  prints both frame sizes.
+- **Notes:** return into the caller's slot directly (copy elision for `return f(...)`), and emit lifetime markers
+  for temporaries and locals so LLVM's stack coloring can share slots.
+
 ### BUG-362 A `const T&` field cannot be bound in its object's create
 - **Area:** HIR
 - **Severity:** Medium
@@ -86,6 +103,16 @@ Next ID: **BUG-363**
   classified.
 
 ## Interop, runtime and Bedrock
+
+### BUG-364 HashMap::FindAs has no const form
+- **Area:** Bedrock
+- **Severity:** Low
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** `const Core::HashMap<Core::String, int64>& map; map.FindAs(name)` does not compile: `Find` has a const
+  twin returning `const V*` and `FindAs` has none, against "Queries are const (D-31)" (library/bedrock.md section 2),
+  so a lookup by view in a const method has to drop the const.
+- **Repro:** `static bool Has(const Core::HashMap<Core::String, int64>& map, Core::StringView name) { return map.FindAs(name) != null; }`.
 
 ### BUG-359 Core::Format cuts an int64 under `{n}` to 32 bits without a word
 - **Area:** Bedrock
