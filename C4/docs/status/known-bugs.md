@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-358**
+Next ID: **BUG-362**
 
 ## Rules for this file
 
@@ -43,6 +43,10 @@ Next ID: **BUG-358**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
+| BUG-358 | printf and Core::Format take a String as a C string and print garbage | Model | Medium |
+| BUG-359 | Core::Format cuts an int64 under `{n}` to 32 bits without a word | Bedrock | Medium |
+| BUG-360 | No way to read standard input | Bedrock | High |
+| BUG-361 | C++ forms and STL names get diagnostics that do not name the C4 form | Diagnostics | Low |
 
 ---
 
@@ -50,10 +54,61 @@ Next ID: **BUG-358**
 
 ## Model, templates and semantics
 
+### BUG-358 printf and Core::Format take a String as a C string and print garbage
+- **Area:** Model
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** an object (Core::String, Core::StringView, an Array) passed to a C variadic `...` parameter compiles and
+  is read as a `const char*`: `printf("%s", name)` and `Core::Format(&b, "{0:s}", name)` with a `Core::String name`
+  print garbage. Models trained on C++ (where `std::string` in printf is a compile warning) write it constantly
+  (IED's language eval, tools/ai-evals/lang).
+- **Repro:** `Core::String name = Core::String("ada"); printf("[%s]", name);` prints bytes of the String object.
+- **Notes:** reject (or warn on) a non-trivially-copyable object as a variadic argument, naming `.CStr()`; a type-safe
+  Format (variadic templates exist) would remove BUG-359 too.
+
 ## HIR and codegen
 
 ## Interop, runtime and Bedrock
 
+### BUG-359 Core::Format cuts an int64 under `{n}` to 32 bits without a word
+- **Area:** Bedrock
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** `Core::Format(&b, "{0}", big)` with `int64 big = 5000000000` writes 705032704: `{n}` reads an int32 and
+  nothing checks the arguments against the placeholders (`{0:D}` is right). Counts in Bedrock are int64, so the
+  default placeholder is the wrong one for most numbers a program formats.
+- **Notes:** check placeholders against argument types (a variadic-template Format), or make `{n}` format any integer.
+
+### BUG-360 No way to read standard input
+- **Area:** Bedrock
+- **Severity:** High
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** Bedrock writes standard output and error (`Platform::WriteOutput`, `WriteError`) but has nothing that
+  reads standard input, and the prelude's `file_open` cannot open it: a filter (`tool < input`, a pipe) cannot be
+  written in C4.
+- **Notes:** e.g. `Platform::ReadInput(buffer, capacity)` / `Platform::ReadAllInput()` and an `FS::File` on stdin.
+
 ## Tools
 
 ## Diagnostics and tests
+
+### BUG-361 C++ forms and STL names get diagnostics that do not name the C4 form
+- **Area:** Diagnostics
+- **Severity:** Low
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** the forms a C++ programmer (or a model trained on C++) writes first are reported without the C4 way:
+  `a.push_back(1)`, `s.size()`, `m.insert(k, v)` on Bedrock types say "no matching overload of push_back" (there is
+  no such member at all; Push, Count, Insert exist); `auto x = 1;` says "type not found: auto"; `int values[4];` and
+  `char buf[16];` say "Unexpected token 'int'"; a C++ constructor `Point(int32 px) { ... }` in a class body gives ten
+  "Unexpected token" errors; `std::string` says "type not found: std". IED's language eval (tools/ai-evals/lang)
+  shows these as the usual first errors of a local model writing C4.
+- **Notes:** "has no member push_back; did you mean Push?" (edit distance over the type's members plus the common STL
+  names: push_back->Push, size->Count, empty->IsEmpty, c_str->CStr, substr->Substring, find->Find, insert->Insert);
+  "C4 has no auto: write the type"; "array extents belong to the type: int32[4] values"; "constructors are methods
+  marked [operator("create")]"; "there is no std: Bedrock's Core::String". Also: inside one function body only
+  the first error is reported, so a model fixes one error per build.
+
