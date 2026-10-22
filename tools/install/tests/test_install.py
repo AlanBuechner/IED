@@ -179,6 +179,16 @@ class ProgramInUseTests(unittest.TestCase):
 			install_ied.remove_install(self.root)
 		self.assertTrue(os.path.isfile(os.path.join(self.root, "notes.txt")))
 
+	def test_a_running_ied_is_told_to_restart_for_any_change(self):
+		running = [os.path.join(self.root, "IED", "ied-server.exe"), os.path.join(self.root, "IED", "ied-desktop.exe")]
+		replaced = dict(report(), copied=3, in_use=["ied-server.exe"])
+		self.assertIn("restart it to use the new one", install_ied.restart_note(replaced, running))
+		changed = dict(report(), copied=10)
+		self.assertIn("(ied-desktop.exe, ied-server.exe) with the plugins it read when it started; restart it", install_ied.restart_note(changed, running),
+			"only a manifest or a page changed: the running server still has the old plugins")
+		self.assertIsNone(install_ied.restart_note(changed, []), "nothing runs")
+		self.assertIsNone(install_ied.restart_note(report(), running), "nothing changed")
+
 
 if __name__ == "__main__":
 	unittest.main()

@@ -307,6 +307,18 @@ def uninstall(target):
 	return 0
 
 
+def restart_note(report, running):
+	"""What to say of an IED running from the install folder (`running`: its programs' paths): a program that was
+	replaced, or anything else that changed - a running server read its plugins' manifests and the schemas when it
+	started, and a desktop app reloading its page reaches that same server. None when no restart is needed."""
+	if report["in_use"]:
+		return "install-ied: IED was running from here (%s); restart it to use the new one: `ied stop`, then open IED" % ", ".join(report["in_use"])
+	if running and (report["copied"] or report["removed"]):
+		names = ", ".join(sorted(set(os.path.basename(p) for p in running)))
+		return "install-ied: IED is running from here (%s) with the plugins it read when it started; restart it to use what changed: `ied stop`, then open IED" % names
+	return None
+
+
 def main(argv):
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--bin", help="the build's bin folder for one configuration (build/bin/<config>-windows-x64)")
@@ -324,8 +336,9 @@ def main(argv):
 	print("install-ied: %s - %d files copied, %d removed" % (target, report["copied"], report["removed"]))
 	if report["missing"]:
 		print("install-ied: without %s: web search will say what is missing (run setup.bat, then install again)" % ", ".join(report["missing"]))
-	if report["in_use"]:
-		print("install-ied: IED was running from here (%s); restart it to use the new one: `ied stop`, then open IED" % ", ".join(report["in_use"]))
+	note = restart_note(report, running_from(target) if os.name == "nt" else [])
+	if note:
+		print(note)
 	if not args.no_register:
 		print("install-ied: in the Start menu as IED (%s)" % register(target))
 	if not args.no_path:
