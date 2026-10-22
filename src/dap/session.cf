@@ -320,7 +320,18 @@ namespace Ied
 			exitCode = body.Member("exitCode").AsInt();
 		}
 		else if (event == "terminated") Terminated();
+		else if (event == "process") Named(body);
 		else server->debugger->Event(this, event, body);
+	}
+
+	// The adapter named the program's process: what it uses is sampled from now on (docs/25 "Diagnostic Tools").
+	void DebugSession::Named(const Serialization::DomNode& body) {
+		const int64 processId = body.Member("systemProcessId").AsInt();
+		if (processId <= 0 || usage) return;
+		usage = new ProgramUsage();
+		usage->processId = (uint32)processId;
+		usage->name = Core::String(body.Member("name").AsView());
+		server->debugger->ProgramNamed(this);
 	}
 
 	// The program stopped: its threads and the stopped thread's top frames are fetched before clients hear of it, so

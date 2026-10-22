@@ -112,6 +112,30 @@ class DebuggerTests(ServerTestCase):
 		launch = [r for r in self.requests() if r["command"] == "launch"][0]["arguments"]
 		self.assertEqual(os.path.join(self.repo, "src", "game.txt").replace("\\", "/").lower(), launch["program"].replace("\\", "/").lower(), "the configuration's ${projectRoot}")
 
+	async def test_what_the_program_uses_is_sampled(self):
+		"""Diagnostic Tools (docs/25): the adapter's `process` event names the program; its process is read twice a
+		second while the session lives, each reading a dbg.usage event and kept in the session's snapshot."""
+		session, topic = await self.start("Entry")
+		await self.stopped(topic)
+		usages = await self.client.wait_for(topic, lambda f: f.get("kind") == "dbg.usage", timeout=10)
+		first = usages[-1]["data"]
+		self.assertEqual("game.txt", first["name"])
+		self.assertGreater(first["processId"], 0)
+		ms, cpu, private, working = first["sample"]
+		self.assertTrue(ms >= 0 and 0 <= cpu <= 100 and private > 0 and working > 0, first)
+		later = (await self.client.wait_for(topic, lambda f: f.get("kind") == "dbg.usage" and f["data"]["sample"][0] > ms, timeout=10))[-1]["data"]
+		self.assertGreater(later["sample"][0], ms, "a reading every half second")
+		await self.client.request("dbg.stop", {"sessionId": session})
+		await self.ended(topic)
+		other = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		try:
+			await other.sub([topic])
+			usage = (await other.next_frame(topic))["data"]["usage"]
+			self.assertEqual(("game.txt", first["processId"]), (usage["name"], usage["processId"]))
+			self.assertGreaterEqual(len(usage["samples"]), 2, "the readings stay with the ended session")
+		finally:
+			other.abort()
+
 	async def test_an_adapter_over_tcp(self):
 		session, topic = await self.start("Tcp")
 		stop = await self.stopped(topic)

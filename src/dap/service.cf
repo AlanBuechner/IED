@@ -121,6 +121,42 @@ namespace Ied
 		server->Log((((Core::String("[debug ") + session->launch.type.View()) + "] ") + text.Trimmed()).View());
 	}
 
+	// --- What the program uses (Diagnostic Tools) --------------------------------------------------------------------
+
+	void Debugger::ProgramNamed(DebugSession* session) {
+		Debugger* self = this;
+		DebugSession* watched = session;
+		const uint32 processId = session->usage->processId;
+		Threading::Thread::Run([self, watched, processId]() { self->Sample(watched, processId); }).Detach();
+	}
+
+	// A thread of its own: reads the process every kUsageIntervalMs, the lock held only to keep and publish a sample,
+	// until the session ends or the process cannot be read (it ended, or the system will not say).
+	void Debugger::Sample(DebugSession* session, uint32 processId) {
+		const int32 processors = Platform::GetProcessorInfo().logicalProcessors;
+		Process::Usage last;
+		if (!Process::GetUsage(processId, last)) return;
+		const int64 startNs = clock_now_ns();
+		int64 lastNs = startNs;
+		while (true) {
+			Threading::Thread::Sleep(kUsageIntervalMs * 1000000);
+			Process::Usage now;
+			const bool read = Process::GetUsage(processId, now);
+			const int64 nowNs = clock_now_ns();
+			Threading::LockGuard guard(server->lock);
+			if (!read || !session->IsLive()) return;
+			UsageSample sample;
+			sample.ms = (nowNs - startNs) / 1000000;
+			sample.cpuTenths = CpuTenths(now.cpuTimeNs - last.cpuTimeNs, nowNs - lastNs, processors);
+			sample.privateBytes = now.privateBytes;
+			sample.workingSetBytes = now.workingSetBytes;
+			session->usage->Add(sample);
+			server->hub.Publish(SessionTopic(session).View(), "dbg.usage", session->usage->EventJson(sample).View());
+			last = now;
+			lastNs = nowNs;
+		}
+	}
+
 	// --- Breakpoints and exception filters ---------------------------------------------------------------------------
 
 	static bool Takes(const DebugSession* session, const char* capability) {
@@ -269,7 +305,7 @@ namespace Ied
 		return json.ToString();
 	}
 
-	// {session, threads, frames, output: [text]}
+	// {session, threads, frames, output: [text], usage: ProgramUsage | null}
 	Core::String Debugger::SessionSnapshot(DebugSession* session) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		JsonWriter json;
@@ -281,6 +317,9 @@ namespace Ied
 		json.BeginArray();
 		for (const Core::String& text : session->output) json.String(text.View());
 		json.EndArray();
+		json.Key(Core::StringView("usage"));
+		if (session->usage) json.Raw(session->usage->Json().View());
+		else json.Null();
 		json.EndObject();
 		return json.ToString();
 	}

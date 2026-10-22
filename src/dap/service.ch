@@ -25,6 +25,8 @@ namespace Ied
 		public void Configure(DebugSession* session);
 		public void Event(DebugSession* session, Core::StringView event, const Serialization::DomNode& body);
 		public void Log(DebugSession* session, Core::StringView text);
+		// The session's program has a process (its `usage`): what it uses is sampled while the session lives.
+		public void ProgramNamed(DebugSession* session);
 		// A file's breakpoints changed: every configured session gets them.
 		public void BreakpointsChanged(Workspace* ws, Core::StringView path);
 
@@ -39,6 +41,7 @@ namespace Ied
 		private Core::String ClientFrames(DebugSession* session, const Serialization::DomNode& frames);
 		private void WriteClientSource(DebugSession* session, JsonWriter& json, const Serialization::DomNode& source);
 		private Core::String Control(const Params& params, Core::StringView command, bool whenStopped);
+		private void Sample(DebugSession* session, uint32 processId);
 
 		private Core::String StartMethod(Call& call, const Params& params);
 		private Core::String StopMethod(Call& call, const Params& params);

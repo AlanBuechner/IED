@@ -6,6 +6,7 @@
 // adapter sends goes to the Debugger, which publishes it.
 
 include "providers.ch"
+include "usage.ch"
 include "lsp/queue.ch"
 include "tasks/model.ch"
 include "services/workspaces.ch"
@@ -68,6 +69,7 @@ namespace Ied
 		public Core::String frames;          // the stopped thread's top frames as the adapter gave them, as JSON
 		public Core::Array<Core::String> output;
 		public bool configured;
+		public ProgramUsage* usage;          // once the adapter names the program's process (Diagnostic Tools)
 
 		// Starts the adapter and sends initialize; Failed with `problem` when it cannot start.
 		public void Start(DapProvider* provider);
@@ -96,6 +98,7 @@ namespace Ied
 		private void Respond(const Serialization::DomNode& request);
 		private void Happened(Core::StringView event, const Serialization::DomNode& body);
 		private void Stopped(const Serialization::DomNode& body);
+		private void Named(const Serialization::DomNode& body);
 		private void FetchFrames(int64 stopped);
 		private void Continued();
 		private void Terminated();

@@ -113,6 +113,8 @@ def handle(request):
 		with open(arguments["program"], encoding="utf-8") as f:
 			lines = f.read().split("\n")
 		respond(request)
+		# The adapter's own process stands for the program's (Diagnostic Tools samples it).
+		event("process", {"name": os.path.basename(arguments["program"]), "systemProcessId": os.getpid(), "isLocalProcess": True, "startMethod": "launch"})
 	elif command == "setBreakpoints":
 		path = arguments["source"]["path"]
 		breakpoints[path] = [b["line"] for b in arguments.get("breakpoints", [])]
