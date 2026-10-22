@@ -83,7 +83,7 @@ namespace Core
 			if ((uint64)entryAlign > kRawAllocAlignment) raw_free_aligned(entries);
 			else raw_free(entries);
 		}
-		raw_free((void*)table.control);
+		raw_free_sized((void*)table.control, (uint64)ControlBytes(table.capacity));
 		table.control = nullptr;
 		table.count = 0;
 		table.used = 0;

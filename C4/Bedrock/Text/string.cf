@@ -17,7 +17,7 @@ namespace Core
 	}
 
 	[operator("delete")] void String::Delete() {
-		raw_free(buffer);
+		raw_free_sized(buffer, (uint64)(capacity + 1));
 		buffer = nullptr;
 		length = 0;
 		capacity = 0;
@@ -31,7 +31,7 @@ namespace Core
 		char* larger = (char*)raw_alloc((uint64)(grown + 1));
 		if (buffer) memcpy(larger, buffer, (uint64)(length + 1));
 		else larger[0] = (char)0;
-		raw_free(buffer);
+		raw_free_sized(buffer, (uint64)(capacity + 1));
 		buffer = larger;
 		capacity = grown;
 	}

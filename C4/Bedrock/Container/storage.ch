@@ -12,9 +12,10 @@ namespace Core
 		return (T*)raw_alloc(bytes);
 	}
 
-	template<T> void FreeElements(T* elements) {
+	// `count` is what AllocateElements was asked for.
+	template<T> void FreeElements(T* elements, int64 count) {
 		if ((uint64)alignof(T) > kRawAllocAlignment) raw_free_aligned((void*)elements);
-		else raw_free((void*)elements);
+		else raw_free_sized((void*)elements, (uint64)(count * (int64)sizeof(T)));
 	}
 
 	// A buffer the collector scans, of `newBytes` in place of `elements` (`oldBytes`, null for none), its first

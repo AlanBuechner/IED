@@ -80,6 +80,33 @@ class GcAllocTests {
 		pool.Close();
 	}
 
+	[test("native_bytes_follow_containers")]
+	public static void TestNativeBytesFollowContainers() {
+		const uint64 large = 2u << 20;
+		const GC::AllocCounts before = GC::ThreadAllocated();
+		const uint64 inUseBefore = GC::GetStats().nativeBytes;
+		uint64 taken = 0u;
+		uint64 inUseDuring = 0u;
+		{
+			Core::Array<uint8> bytes;
+			bytes.Resize((int64)large);
+			Core::Array<int32> numbers;
+			numbers.Resize(1000);
+			Core::StringBuilder text;
+			for (int32 i = 0; i < 5000; ++i) text.Append("x");
+			Core::Array<packed float[16]> wide;
+			wide.Resize(100);
+			taken = GC::ThreadAllocated().nativeBytes - before.nativeBytes;
+			inUseDuring = GC::GetStats().nativeBytes;
+			assert_true(((uint64)&wide[0] & 63u) == 0u && text.ByteLength() == 5000, "the containers");
+		}
+		const uint64 inUseAfter = GC::GetStats().nativeBytes;
+		const uint64 held = large + 4000u + 5000u + 6400u;
+		assert_true(taken >= held, "this thread took their buffers");
+		assert_true(inUseDuring >= inUseBefore + held, "which were in use");
+		assert_true(inUseAfter + held <= inUseDuring, "and given back when the containers went");
+	}
+
 	[test("all_threads_count")]
 	public static void TestAllThreadsCount() {
 		const GC::AllocCounts before = GC::Allocated();

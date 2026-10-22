@@ -112,16 +112,36 @@ static void* Resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newB
 	return Move(buffer, oldBytes, keepBytes, newBytes, scanned);
 }
 
-void* c4_buffer_resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes)
+// A resize that succeeded, as native memory taken or given back (c4_gc_native_taken / _given).
+static void Count(size_t oldBytes, size_t newBytes)
 {
-	return Resize(buffer, oldBytes, keepBytes, newBytes, false);
+	if (newBytes > oldBytes) c4_gc_native_taken(newBytes - oldBytes);
+	else if (oldBytes > newBytes) c4_gc_native_given(oldBytes - newBytes);
 }
 
-void c4_buffer_free(void* buffer, size_t bytes) { Free(buffer, bytes, false); }
+static void* CountedResize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, bool scanned)
+{
+	void* resized = Resize(buffer, oldBytes, keepBytes, newBytes, scanned);
+	if (resized || newBytes == 0) Count(buffer ? oldBytes : 0, newBytes);
+	return resized;
+}
+
+static void CountedFree(void* buffer, size_t bytes, bool scanned)
+{
+	if (buffer) c4_gc_native_given(bytes);
+	Free(buffer, bytes, scanned);
+}
+
+void* c4_buffer_resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes)
+{
+	return CountedResize(buffer, oldBytes, keepBytes, newBytes, false);
+}
+
+void c4_buffer_free(void* buffer, size_t bytes) { CountedFree(buffer, bytes, false); }
 
 void* c4_buffer_resize_scanned(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes)
 {
-	return Resize(buffer, oldBytes, keepBytes, newBytes, true);
+	return CountedResize(buffer, oldBytes, keepBytes, newBytes, true);
 }
 
-void c4_buffer_free_scanned(void* buffer, size_t bytes) { Free(buffer, bytes, true); }
+void c4_buffer_free_scanned(void* buffer, size_t bytes) { CountedFree(buffer, bytes, true); }

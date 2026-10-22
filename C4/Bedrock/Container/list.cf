@@ -15,7 +15,7 @@ namespace Core
 	private void List::FreeNode(ListNode<T>* node) {
 		destroy(&node->value);
 		gc_unregister_region((void*)node);
-		FreeElements<ListNode<T>>(node);
+		FreeElements<ListNode<T>>(node, 1);
 	}
 
 	template<T>

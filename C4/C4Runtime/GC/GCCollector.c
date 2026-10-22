@@ -31,6 +31,7 @@ c4_gc_stats gc_stats(const GCState* gc)
 	s.freeBytes = s.heapBytes > s.liveBytes ? s.heapBytes - s.liveBytes : 0;
 	s.pauseNs = gc->pauseNs;
 	s.lastPauseNs = gc->lastPauseNs;
+	s.nativeBytes = 0;   // kept apart from the collector: c4_gc_get_stats adds it
 	return s;
 }
 

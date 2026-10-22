@@ -10,6 +10,8 @@
 #include <string.h>
 
 static GCState g_gc;
+static volatile int64_t g_nativeInUse;    // native memory threads not registered took and gave back; apart from g_gc,
+                                          // which starts later
 static int g_ready;
 static _Thread_local GCThread* t_self;
 
@@ -65,6 +67,8 @@ static void on_thread_exit(void* data)
 	gc_thread_flush_cache(thread, &gc->heap, &gc->allocs);
 	gc->ended.objects += thread->allocated.objects;
 	gc->ended.bytes += thread->allocated.bytes;
+	gc->ended.nativeBytes += thread->allocated.nativeBytes;
+	gc->endedNativeInUse += thread->nativeInUse;
 	gc_threads_remove(&gc->threads, thread);
 	gc_os_unlock();
 	t_self = NULL;
@@ -533,7 +537,45 @@ static c4_gc_stats locked_stats(void)
 	return s;
 }
 
-c4_gc_stats c4_gc_get_stats(void) { return locked_stats(); }
+// Every thread's native bytes in use, the ended ones' and the unregistered ones' (under the lock; a thread's own count
+// may lag the read by its last allocation).
+static int64_t native_in_use(const GCState* gc)
+{
+	int64_t total = __atomic_load_n(&g_nativeInUse, __ATOMIC_RELAXED) + gc->endedNativeInUse;
+	for (const GCThread* thread = gc->threads.all; thread; thread = thread->next) total += thread->nativeInUse;
+	return total;
+}
+
+c4_gc_stats c4_gc_get_stats(void)
+{
+	gc_os_lock();
+	const GCState* gc = collector();
+	c4_gc_stats stats = gc_stats(gc);
+	const int64_t native = native_in_use(gc);
+	gc_os_unlock();
+	stats.nativeBytes = native > 0 ? (uint64_t)native : 0;
+	return stats;
+}
+
+// A registered thread counts on its own record, without an atomic: native memory comes and goes often.
+void c4_gc_native_taken(uint64_t bytes)
+{
+	GCThread* self = t_self;
+	if (!self)
+	{
+		__atomic_add_fetch(&g_nativeInUse, (int64_t)bytes, __ATOMIC_RELAXED);
+		return;
+	}
+	self->allocated.nativeBytes += bytes;
+	self->nativeInUse += (int64_t)bytes;
+}
+
+void c4_gc_native_given(uint64_t bytes)
+{
+	GCThread* self = t_self;
+	if (self) self->nativeInUse -= (int64_t)bytes;
+	else __atomic_sub_fetch(&g_nativeInUse, (int64_t)bytes, __ATOMIC_RELAXED);
+}
 
 c4_gc_alloc_counts c4_gc_thread_allocated(void) { return this_thread()->allocated; }
 
@@ -581,6 +623,7 @@ c4_gc_alloc_counts c4_gc_allocated(void)
 	{
 		total.objects += thread->allocated.objects;
 		total.bytes += thread->allocated.bytes;
+		total.nativeBytes += thread->allocated.nativeBytes;
 	}
 	gc_os_unlock();
 	return total;

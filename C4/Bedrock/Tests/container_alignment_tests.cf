@@ -47,10 +47,10 @@ class ContainerAlignmentTests {
 	public static void TestStorage() {
 		packed double[8]* wide = Core::AllocateElements<packed double[8]>(3);
 		assert_true(Aligned((void*)wide, 64), "over-aligned storage from raw_alloc_aligned");
-		Core::FreeElements<packed double[8]>(wide);
+		Core::FreeElements<packed double[8]>(wide, 3);
 		int32* plain = Core::AllocateElements<int32>(5);
 		assert_true(Aligned((void*)plain, 4), "plain storage from raw_alloc");
-		Core::FreeElements<int32>(plain);
+		Core::FreeElements<int32>(plain, 5);
 		void* raw = raw_alloc_aligned(100, 128);
 		assert_true(Aligned(raw, 128), "raw_alloc_aligned honors any power of two");
 		raw_free_aligned(raw);

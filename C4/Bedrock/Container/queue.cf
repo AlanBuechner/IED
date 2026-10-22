@@ -15,7 +15,7 @@ namespace Core
 	template<T>
 	public void Queue::Delete() {
 		Clear();
-		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data); }
+		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data, capacity); }
 		data = nullptr;
 		capacity = 0;
 	}
@@ -39,7 +39,7 @@ namespace Core
 			memcpy((void*)larger, (void*)&data[head], (uint64)(first * (int64)sizeof(T)));
 			memcpy((void*)&larger[first], (void*)data, (uint64)((count - first) * (int64)sizeof(T)));
 		}
-		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data); }
+		if (data) { gc_unregister_region((void*)data); FreeElements<T>(data, capacity); }
 		data = larger;
 		capacity = grown;
 		head = 0;

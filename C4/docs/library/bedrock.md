@@ -657,8 +657,8 @@ as `[link]` declarations, with no wrappers.
 | Function | Meaning |
 |---|---|
 | `Collect()` | collect now (also while disabled) |
-| `GetStats()` | `GC::Stats { allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes, lastPauseNs }` |
-| `ThreadAllocated()` | `GC::AllocCounts { objects, bytes }`: the calling thread's allocations since it started, never reset (a pool slot counts at its size when `Take` hands it out); its own counters, no lock, so a profiler can read it around any scope |
+| `GetStats()` | `GC::Stats { allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes, lastPauseNs, nativeBytes }`; `nativeBytes` is the native memory in use beside the GC heap: `raw_alloc`'s blocks and container buffers (`Array`, `String`, `HashMap`, ...) |
+| `ThreadAllocated()` | `GC::AllocCounts { objects, bytes, nativeBytes }`: the calling thread's allocations since it started, never reset (a pool slot counts at its size when `Take` hands it out), and the native memory it took (`raw_alloc`'s blocks and the bytes container buffers grew by); its own counters, no lock, so a profiler can read it around any scope |
 | `Allocated()` | every thread's `AllocCounts` so far, threads that ended included (takes the collector's lock) |
 | `SetCensus(bool on)`, `LastCensus(CensusEntry* out, int32 capacity)` | the live objects by type: while on, every `new` notes its type, and each collection counts the live objects by it into `GC::CensusEntry { type, objects, bytes }` (`type` the qualified name, `T[]` for an array of T, `nullptr` for objects of no known type: made before it was on, by native code or in a Pool), one entry a name, by name; `LastCensus` returns how many entries there are (read it in a collection-result callback). It costs 8 bytes beside each slot of the spans allocated from and a walk of the live objects at each collection |
 | `SetAllocSampling(uint64 everyBytes)` | records about one allocation in every `everyBytes` a thread allocates, with its call stack, at points drawn at random so each sample stands for `everyBytes` bytes on average; 0 (default) turns it off; returns the previous setting. The calling thread takes a change up at once, another within 64 KiB |
@@ -1352,7 +1352,7 @@ PNG lacks, a palette index past the palette).
 
 ## 21. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 74 files, 651 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 74 files, 652 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,

@@ -84,6 +84,7 @@ keeps the sign of its first argument.
 |---|---|---|
 | `raw_alloc` | `void* raw_alloc(uint64 size)` | unmanaged memory, never scanned or collected |
 | `raw_free` | `void raw_free(void* p)` | |
+| `raw_free_sized` | `void raw_free_sized(void* p, uint64 bytes)` | `raw_free` for a block of `bytes`, the size asked of `raw_alloc`: the runtime's native-memory count needs no heap lookup (what Bedrock's containers use) |
 | `raw_alloc_aligned` | `void* raw_alloc_aligned(uint64 size, uint64 align)` | unmanaged memory aligned to `align`, a power of two (`raw_alloc` gives 16): for elements such as a `packed float[8]` |
 | `raw_free_aligned` | `void raw_free_aligned(void* p)` | frees what `raw_alloc_aligned` gave, and only that |
 | `buffer_resize` | `void* buffer_resize(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes)` | a buffer that grows: heap memory below 1 MiB; from 1 MiB up, reserved address space whose pages are committed as it grows, so it grows in place (the reservation holds 8 times the size, at least 64 MiB) and moves only when it outgrows that. `oldBytes` is the size asked for last (0 with a null `buffer`): it alone says which kind the buffer is. Keeps the first `keepBytes`; null for `newBytes` 0, and null with `buffer` untouched when memory runs out. StringBuilder's text and Array's elements live in these |

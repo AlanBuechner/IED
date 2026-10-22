@@ -25,6 +25,7 @@ typedef struct GCThread
 	volatile long inAllocator;        // inside the cache fast path
 	c4_gc_alloc_counts allocated;     // since it registered, never reset; only the thread itself writes it
 	GCSampler sampler;                // its countdown to the next sampled allocation
+	int64_t nativeInUse;              // native bytes it took less those it gave back (others' blocks included)
 	struct GCThread* next;
 } GCThread;
 

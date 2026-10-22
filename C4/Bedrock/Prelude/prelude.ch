@@ -62,6 +62,8 @@
 // --- The GC heap (C4Runtime/GC) --------------------------------------------------------------------------
 [link("c4_raw_alloc")] void* raw_alloc(uint64 size);
 [link("c4_raw_free")] void raw_free(void* p);
+// raw_free for a block of `bytes`, the size asked of raw_alloc: the native-memory count needs no heap lookup.
+[link("c4_raw_free_sized")] void raw_free_sized(void* p, uint64 bytes);
 [link("c4_raw_alloc_aligned")] void* raw_alloc_aligned(uint64 size, uint64 align);
 [link("c4_raw_free_aligned")] void raw_free_aligned(void* p);
 // A buffer that grows in place once past 1 MiB; the owner passes back the size it asked for last (GCRuntimeC.h).

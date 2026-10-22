@@ -128,20 +128,27 @@ typedef struct c4_gc_stats
 	uint64_t pauseNs;         // total collection time
 	uint64_t liveBytes;       // bytes of live objects (slot sizes)
 	uint64_t lastPauseNs;     // the last collection's time
+	uint64_t nativeBytes;     // native memory in use: c4_raw_alloc's blocks and container buffers
 } c4_gc_stats;
 
 c4_gc_stats c4_gc_get_stats(void);
 
-// Allocations counted as they are made: objects, and the bytes asked for (an occupied pool slot's size).
+// Allocations counted as they are made: objects, and the bytes asked for (an occupied pool slot's size); and native
+// memory taken: c4_raw_alloc's blocks and the bytes container buffers (c4_buffer_resize) grew by.
 typedef struct c4_gc_alloc_counts
 {
 	uint64_t objects;
 	uint64_t bytes;
+	uint64_t nativeBytes;
 } c4_gc_alloc_counts;
 // The calling thread's allocations since it registered, never reset: a read of the thread's own counters, no lock.
 c4_gc_alloc_counts c4_gc_thread_allocated(void);
 // Every thread's, those that ended included (takes the lock).
 c4_gc_alloc_counts c4_gc_allocated(void);
+// Native memory beside the collector's: `bytes` taken (counted for the calling thread when it is registered) or given
+// back. c4_raw_alloc and the container buffers report through these; c4_gc_stats.nativeBytes is what is in use.
+void c4_gc_native_taken(uint64_t bytes);
+void c4_gc_native_given(uint64_t bytes);
 
 // Sampled allocations, for a profiler: about one allocation in every `everyBytes` bytes a thread allocates is recorded
 // with its call stack, at points drawn at random so that each sample stands for `everyBytes` bytes on average whatever
@@ -207,6 +214,8 @@ void c4_gc_install_default_stats_printer(void);
 // Never scanned and never freed by the collector.
 void* c4_raw_alloc(size_t size);
 void c4_raw_free(void* ptr);
+// c4_raw_free for a block of `size` bytes, the size it was asked of c4_raw_alloc (cheaper: the size is not looked up).
+void c4_raw_free_sized(void* ptr, size_t size);
 // Unmanaged memory aligned to `align` (a power of two), for over-aligned elements; freed with c4_raw_free_aligned.
 void* c4_raw_alloc_aligned(size_t size, size_t align);
 void c4_raw_free_aligned(void* ptr);

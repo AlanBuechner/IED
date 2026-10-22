@@ -12,7 +12,7 @@ namespace Core
 	}
 
 	void BitSet::Delete() {
-		raw_free((void*)words);
+		raw_free_sized((void*)words, (uint64)(wordCapacity * 8));
 		words = nullptr;
 		bitCount = 0;
 		wordCapacity = 0;
@@ -26,7 +26,7 @@ namespace Core
 			uint64* larger = (uint64*)raw_alloc((uint64)(grown * 8));
 			memset((void*)larger, 0, (uint64)(grown * 8));
 			if (words) memcpy((void*)larger, (void*)words, (uint64)(WordCount() * 8));
-			raw_free((void*)words);
+			raw_free_sized((void*)words, (uint64)(wordCapacity * 8));
 			words = larger;
 			wordCapacity = grown;
 		}

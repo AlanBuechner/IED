@@ -13,6 +13,7 @@ namespace GC
 		public uint64 pauseNs;       // total collection time
 		public uint64 liveBytes;     // bytes of live objects
 		public uint64 lastPauseNs;   // the last collection's time
+		public uint64 nativeBytes;   // native memory in use: raw_alloc's blocks and container buffers (Array, String, ...)
 	}
 
 	// visit(visitContext, object) reports one live object; an enumerator gets it with its user data.
@@ -23,11 +24,13 @@ namespace GC
 	[link("c4_gc_collect")] void Collect();
 	[link("c4_gc_get_stats")] Stats GetStats();
 
-	// Allocations counted as they are made: objects, and the bytes asked for (a slot's size when a Pool hands one out).
+	// Allocations counted as they are made: objects, and the bytes asked for (a slot's size when a Pool hands one out);
+	// and native memory taken: raw_alloc's blocks and the bytes container buffers (Array, String, ...) grew by.
 	struct AllocCounts
 	{
 		public uint64 objects;
 		public uint64 bytes;
+		public uint64 nativeBytes;
 	}
 	// The calling thread's allocations since it started, never reset; reads the thread's own counters, no lock, so a
 	// profiler can take it around any scope.

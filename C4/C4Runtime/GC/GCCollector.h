@@ -49,6 +49,7 @@ typedef struct GCState
 	uint64_t collections;
 	uint64_t allocs;
 	c4_gc_alloc_counts ended;           // what threads that ended allocated
+	int64_t endedNativeInUse;           // and their native bytes in use
 	GCSampling sampling;                // sampled allocations (GCSampling.h)
 	GCCensus census;                    // live objects by type (GCCensus.h)
 	uint64_t pauseNs;
