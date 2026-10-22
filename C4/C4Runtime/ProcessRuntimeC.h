@@ -75,6 +75,18 @@ int32_t c4_process_resize(c4_process* process, int32_t columns, int32_t rows);
 // Releases the handles; with killOnClose, whatever still runs in the child's job ends.
 void c4_process_close(c4_process* process);
 
+// What a running process uses (Bedrock's Process::Usage, Process/UsageWin32.c).
+typedef struct c4_process_counters
+{
+	int64_t cpuTimeNs;          // processor time in user and kernel mode so far, every thread's
+	int64_t workingSetBytes;    // its memory in RAM now
+	int64_t privateBytes;       // memory committed to it alone
+	int64_t peakPrivateBytes;
+} c4_process_counters;
+
+// What process `id` uses: 0, or -1 when there is no such process or the system will not say (`usage` zeroed).
+int32_t c4_process_usage(uint32_t id, c4_process_counters* usage);
+
 #ifdef __cplusplus
 }
 #endif

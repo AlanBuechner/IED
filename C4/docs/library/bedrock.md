@@ -1144,14 +1144,21 @@ if (git.exitCode == 0) printf("%s", git.output.CStr());
 - **Run** (`run.ch`): `Process::Run(info, timeoutMs)` runs a program to its end with its input from nowhere and its
   stdout and stderr captured into an `Output` (`exitCode`, `output`, `errors`, `error`); a program still running at
   the timeout is ended with everything it started, and `exitCode` is `kTimedOut`.
+- **Usage** (`usage.ch`): `Process::GetUsage(id, usage)` reads what a running process uses, found by the system's id
+  (`Child::Id()`, `Platform::ProcessId()`, or a program another tool started): `Usage { cpuTimeNs, workingSetBytes,
+  privateBytes, peakPrivateBytes }`, its processor time in user and kernel mode so far and its memory now. false, with
+  `usage` zeroed, when there is no such process (it ended and nothing holds it) or the system will not say; it asks
+  only for limited query rights. A watcher works out CPU use from two readings: the time's growth over the wall
+  clock's, divided by `Platform::GetProcessorInfo().logicalProcessors` for a share of the whole machine.
 
-Covered by `Bedrock/Tests/process_tests.cf` (18 tests) against the system's own programs (`cmd`, `sort`, `findstr`,
+Covered by `Bedrock/Tests/process_tests.cf` (20 tests) against the system's own programs (`cmd`, `sort`, `findstr`,
 `ping`, `tasklist`): output and errors apart and together, 5000 lines out and 600 KB in (far past a pipe's buffer),
 exit codes up to 4294967295, arguments with spaces, quotes and trailing backslashes as the child reads them, the
 environment changed (set, replaced in another case, removed, inherited) and replaced, the working folder, `ReadAny`
 until both streams end, timeouts on reads, waits and `Run`, `Kill` ending `cmd` and the `ping` it started, closing
-with and without `killOnClose`, 32 children from 8 threads at once, misuse and failures, and a terminal: a shell
-typed to, resized, and exiting with the code it was told.
+with and without `killOnClose`, 32 children from 8 threads at once, misuse and failures, a terminal: a shell
+typed to, resized, and exiting with the code it was told, and usage: this process's memory and its processor time
+growing while it works, a child read by its id, and an ended one gone.
 
 ---
 

@@ -1,7 +1,8 @@
-// Process::Child and Process::Run against the system's own programs (cmd, sort, findstr, ping, tasklist): output and
-// errors apart or together, input, exit codes, arguments as the child reads them, the environment changed or
-// replaced, the working folder, waiting on both outputs at once, timeouts, killing a tree, closing ends the child,
-// children started from many threads, failures, and a terminal (a pseudo console).
+// Process::Child, Process::Run and Process::GetUsage against the system's own programs (cmd, sort, findstr, ping,
+// tasklist): output and errors apart or together, input, exit codes, arguments as the child reads them, the
+// environment changed or replaced, the working folder, waiting on both outputs at once, timeouts, killing a tree,
+// closing ends the child, children started from many threads, failures, a terminal (a pseudo console), and what a
+// process uses.
 
 include "bedrock.ch"
 
@@ -66,6 +67,36 @@ static int64 CountOf(Core::StringView text, char c) {
 	for (int64 i = 0; i < text.ByteLength(); ++i)
 		if (text.ByteAt(i) == (int32)c) ++count;
 	return count;
+}
+
+[test("process.usage")]
+class ProcessUsageTests {
+	[test("this_process")]
+	public static void TestThisProcess() {
+		const uint32 self = (uint32)Platform::ProcessId();
+		Process::Usage usage;
+		assert_true(Process::GetUsage(self, usage), "this process can be read");
+		assert_true(usage.workingSetBytes > 0 && usage.privateBytes > 0 && usage.peakPrivateBytes >= usage.privateBytes, "its memory");
+		const int64 before = usage.cpuTimeNs;
+		const int64 start = clock_now_ns();
+		while (MillisecondsSince(start) < 100) {}
+		assert_true(Process::GetUsage(self, usage) && usage.cpuTimeNs > before, "its processor time grows while it works");
+	}
+
+	[test("a_child_and_after_it")]
+	public static void TestChild() {
+		Process::Child child = Process::Child::Start(LongPing());
+		assert_true(child.IsOpen(), "started");
+		const uint32 id = child.Id();
+		Process::Usage usage;
+		assert_true(Process::GetUsage(id, usage) && usage.workingSetBytes > 0, "a child it started, read by its id");
+		child.Kill();
+		child.Wait(kProcessWaitMs);
+		child.Close();
+		usage.privateBytes = 7;
+		assert_true(!Process::GetUsage(id, usage), "an ended process is gone");
+		assert_eq((int64)0, usage.privateBytes, "and says nothing");
+	}
 }
 
 [test("process.run")]
