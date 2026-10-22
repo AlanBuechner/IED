@@ -22,7 +22,8 @@ const NOT_AWAY = ".ah-tab, .popup, .dock-ghost, .shadow-root-host";
 export class DockView {
 	// `host`: {views, menus, emptyWell(), activate(ref), close(ref), pin(ref), move(ref, path, zone, index),
 	// resize(path, sizes), autoHide(ref, hidden), resizeAutoHidden(ref, share), hold(on), focused(ref, path, well),
-	// newTab(path, active) and newTabTitle when the activity opens new tabs (null: no "+")}
+	// newTab(path, active) and newTabTitle when the activity opens new tabs (null: no "+"), titleActions(path, active):
+	// the strip's buttons for its group's active tab, [{title, icon, base, command, run}]}
 	constructor(host, container) {
 		this.host = host;
 		this.container = container;
@@ -127,7 +128,10 @@ export class DockView {
 		const strip = h("div.tabs", { role: "tablist", on: { dblclick: (event) => newTab && (event.target === strip || event.target.matches(".tabs-tail")) && newTab() } });
 		for (const ref of visible) strip.append(this.tab(ref, ref === active, group.preview === ref, path, "tab"));
 		if (newTab) strip.append(h("button.ib.tabs-new", { title: this.host.newTabTitle, "aria-label": this.host.newTabTitle, on: { click: newTab } }, icon("add")));
-		strip.append(h("div.tabs-tail", null, visible.length ? h("button.ib.tabs-menu", { title: "Open documents", "aria-label": "Open documents", on: { click: (event) => this.listTabs(event, visible) } }, icon("chevron-down")) : null));
+		const actions = active && this.host.titleActions ? this.host.titleActions(path, active) : [];
+		strip.append(h("div.tabs-tail", null,
+			...actions.map((action) => h("button.ib.tabs-action", { title: action.title, "aria-label": action.title, dataset: { command: action.command }, on: { click: action.run } }, iconFrom(action.icon, action.base) || h("span", null, action.title))),
+			visible.length ? h("button.ib.tabs-menu", { title: "Open documents", "aria-label": "Open documents", on: { click: (event) => this.listTabs(event, visible) } }, icon("chevron-down")) : null));
 		return strip;
 	}
 

@@ -174,7 +174,9 @@ a { color: var(--link); text-decoration: none; }
 
 /* document tab strip (top) */
 .tabs { display: flex; align-items: stretch; height: var(--tab-h); background: var(--bg-1); flex: none; min-width: 0; overflow: hidden; }
-.tabs-tail { margin-left: auto; display: flex; align-items: center; padding: 0 var(--space-2); flex: none; }
+.tabs-tail { margin-left: auto; display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); flex: none; }
+/* the group's buttons for its active tab ("tab/title": Open Preview to the Side), beside "Open documents" */
+.tabs-action .ci { width: 16px; height: 16px; }
 .tab {
 	display: flex;
 	align-items: center;

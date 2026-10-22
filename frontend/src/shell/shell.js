@@ -15,7 +15,7 @@ import { Menus } from "./menus.js";
 import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
-import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
+import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, partnersOf, followersOf } from "./layoutdoc.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
@@ -329,16 +329,20 @@ export class Shell {
 	// group's active one, the phone's pane): what ied.tabs.state() answers.
 	tabsState() {
 		const phone = (this.doc && this.doc.phone) || {};
-		if (this.deviceClass === "phone") return { open: [phone.pane, ...(phone.back || [])].filter(Boolean), shown: phone.pane ? [phone.pane] : [] };
+		if (this.deviceClass === "phone") return { open: [phone.pane, ...(phone.back || [])].filter(Boolean), shown: phone.pane ? [phone.pane] : [], groups: [] };
 		const open = new Set();
 		const shown = new Set();
+		const groups = [];
 		for (const activity of this.contributions.activities) {
 			if (activity.view) continue;
 			const tree = this.treeOf(activity.id);
 			for (const ref of T.refsOf(tree)) open.add(ref);
-			for (const group of T.groupsOf(tree)) if (group.active) shown.add(group.active);
+			for (const group of T.groupsOf(tree)) {
+				if (group.active) shown.add(group.active);
+				groups.push({ activity: activity.id, well: Boolean(group.well), tabs: [...group.tabs], active: group.active || null });
+			}
 		}
-		return { open: [...open], shown: [...shown] };
+		return { open: [...open], shown: [...shown], groups };
 	}
 
 	// Tells the ied.tabs.onChange listeners when the tabs open or shown changed.
@@ -559,6 +563,20 @@ export class Shell {
 		return partnersOf(this.doc, ref);
 	}
 
+	// Tab `from` becomes `to` in its place - its group and position, active or not, its tethers (ied.tabs.replace); `to`
+	// gets a view of its own. Nothing when `from` is not open or `to` is.
+	replaceTab(from, to) {
+		if (!this.views.has(to)) {
+			this.report("Nothing can show '" + to + "': no loaded plugin renders tabs of its kind.");
+			return;
+		}
+		const open = this.tabsState().open;
+		if (!open.includes(from) || open.includes(to)) return;
+		const activityId = this.activityOf(from);
+		if (activityId) this.changeTree(activityId, (tree) => T.replaceTab(tree, from, to));
+		this.layout.update((doc) => withRenamedTab(doc, from, to));
+	}
+
 	// Shows a tool window (shell.showView): its activity, its tab added where its dock says when the tree lacks it.
 	showView(id) {
 		const tool = this.contributions.toolWindow(id);
@@ -697,10 +715,35 @@ export class Shell {
 		this.focus = { activity, ref, path, well };
 		this.context.set("activeTab", ref || undefined);
 		this.tabKeys(ref);
-		this.context.set("activeTabKind", ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : ref ? "tool" : undefined);
+		const keys = this.keysOf(ref);
+		this.context.set("activeTabKind", keys.tabKind || (ref ? "tool" : undefined));
+		this.context.set("resourcePath", keys.resourcePath);
+		this.context.set("resourceExtname", keys.resourceExtname);
+	}
+
+	// What a when-clause about tab `ref` reads: tabRef, tabKind, and the file it shows, resourcePath and resourceExtname.
+	keysOf(ref) {
 		const resource = ref ? this.views.resourceOf(ref) : null;
-		this.context.set("resourcePath", resource || undefined);
-		this.context.set("resourceExtname", resource && /\.[^./]+$/.test(resource) ? /\.[^./]+$/.exec(resource)[0].toLowerCase() : undefined);
+		return {
+			tabRef: ref || undefined,
+			tabKind: ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : undefined,
+			resourcePath: resource || undefined,
+			resourceExtname: resource && /\.[^./]+$/.test(resource) ? /\.[^./]+$/.exec(resource)[0].toLowerCase() : undefined,
+		};
+	}
+
+	// The buttons of a document group's strip, beside its "Open documents" list: the "tab/title" menu's items whose
+	// when-clause holds for the group's active tab `ref`. Each runs its command with {ref, path} (the tab's file), the
+	// group focused first, so what it opens goes beside that group.
+	titleActions(activityId, groupPath, ref) {
+		const keys = this.keysOf(ref);
+		return this.menus.resolve("tab/title", keys).filter((row) => row.kind === "item").map((row) => ({
+			title: row.label, icon: row.icon, base: row.base, command: row.command,
+			run: () => {
+				this.focused(activityId, ref, groupPath, true);
+				this.commands.run(row.command, row.args !== undefined ? row.args : { ref, path: keys.resourcePath });
+			},
+		}));
 	}
 
 	// Views whose tabs left every tree (and the phone's pane and back stack) are disposed.
@@ -783,7 +826,12 @@ export class Shell {
 				// `fn(ref)` when the person closes a tab of `kind` in this window.
 				onClose: (kind, fn) => shell.onTabClose(kind, fn),
 				close: (ref) => shell.closeTab(ref),
-				// {open: [ref], shown: [ref]}: the tabs open in this window's layout, and those shown.
+				// `from` becomes `to` in its place (a preview following another file).
+				replace: (from, to) => shell.replaceTab(from, to),
+				// The tabs tethered with `ref` (docs/15 "Tethered tabs").
+				partners: (ref) => shell.tetheredWith(ref),
+				// {open: [ref], shown: [ref], groups: [{activity, well, tabs, active}]}: the tabs open in this window's layout,
+				// those shown, and the groups (a phone's: none).
 				state: () => shell.tabsState(),
 				// `fn(state)` each time state() would answer differently; returns the function that stops it.
 				onChange: (fn) => {

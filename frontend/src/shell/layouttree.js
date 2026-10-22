@@ -277,6 +277,20 @@ export function closeGroupTabs(tree, ref, including) {
 	return normalize(next);
 }
 
+// `from` becomes `to` in its group, in its place, active, preview or auto-hidden as it was; the tree as it is when `from`
+// is not in it or `to` is already.
+export function replaceTab(tree, from, to) {
+	const next = clone(tree);
+	const owner = groupOf(next, from);
+	if (!owner || groupOf(next, to)) return tree;
+	const swap = (ref) => (ref === from ? to : ref);
+	owner.tabs = owner.tabs.map(swap);
+	if (owner.active === from) owner.active = to;
+	if (owner.preview === from) owner.preview = to;
+	if (owner.autoHidden) owner.autoHidden = owner.autoHidden.map(swap);
+	return normalize(next);
+}
+
 function removeRef(owner, ref) {
 	const index = owner.tabs.indexOf(ref);
 	owner.tabs.splice(index, 1);

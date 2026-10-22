@@ -46,10 +46,10 @@ export class Menus {
 	}
 
 	// The rows to show: {kind: "item", command, args, label, icon, base, enabled, keys} | {kind: "submenu", label, menuId}
-	// | {kind: "separator"}.
-	resolve(menuId) {
+	// | {kind: "separator"}. `keys` stand in for context keys in the items' when-clauses.
+	resolve(menuId, keys) {
 		const provided = this.providers.has(menuId) ? this.providers.get(menuId)() : [];
-		const visible = [...(this.items.get(menuId) || []), ...provided].filter((item) => this.context.holds(item.when));
+		const visible = [...(this.items.get(menuId) || []), ...provided].filter((item) => this.context.holds(item.when, keys));
 		const groups = new Map();
 		for (const item of visible) {
 			const key = item.group || "";

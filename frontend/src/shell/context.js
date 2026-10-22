@@ -20,9 +20,10 @@ export class ContextKeys {
 		for (const fn of [...this.listeners]) fn(key, value);
 	}
 
-	// Whether `clause` holds now (an empty one always does; one that does not parse never does).
-	holds(clause) {
-		return evaluateWhen(clause, (key) => this.values.get(key));
+	// Whether `clause` holds now (an empty one always does; one that does not parse never does); `keys` ({key: value})
+	// stand in for the context's own (a tab strip's buttons ask about its group's tab, not the focused one).
+	holds(clause, keys) {
+		return evaluateWhen(clause, (key) => (keys && key in keys ? keys[key] : this.values.get(key)));
 	}
 
 	onChange(fn) {

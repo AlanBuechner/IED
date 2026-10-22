@@ -277,6 +277,7 @@ export class DesktopChrome {
 					shell.commands.run(activity.newTab);
 				};
 			},
+			titleActions: (path, active) => shell.titleActions(activityId, path, active),
 			get newTabTitle() {
 				const activity = shell.contributions.activity(activityId);
 				const command = activity && activity.newTab ? shell.commands.get(activity.newTab) : null;

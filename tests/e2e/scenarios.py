@@ -860,6 +860,34 @@ def markdown_preview_beside_is_tethered(run):
 	run.request("fs.delete", {"wsId": ws, "path": path})
 
 
+@scenario(viewports=("desktop",))
+def markdown_preview_follows_its_group(run):
+	"""A Markdown file's tab strip has Open Preview to the Side beside its Open documents list (the "tab/title" menu),
+	and the preview follows the Markdown file its group shows, as VS Code's does: another .md made active there takes
+	its place; a file of another kind leaves it on the last one (docs/15 "Tethered tabs")."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	other = "docs/follow-%s.md" % run.viewport
+	run.request("fs.write", {"wsId": ws, "path": other, "text": "# Followed\n"})
+	for path in ("src/main.c", other, "README.md"):
+		page.evaluate("(path) => ied_shell.commands.run('ied.editor.goTo', { path })", path)
+		page.wait_for_selector(".dock-host:not([hidden]) .tab:has-text('%s')" % path.split("/")[-1])
+	button = ".dock-host:not([hidden]) .tabs-tail .tabs-action[data-command='ied.markdown.previewBeside']"
+	page.click(button)
+	page.wait_for_selector(".dock-host:not([hidden]) .tab:has-text('Preview README.md')")
+	check(len(page.query_selector_all(".dock-host:not([hidden]) .dock-group.well")) == 2, "the preview is in a group beside")
+	page.click(".dock-host:not([hidden]) .tab:has-text('%s')" % other.split("/")[-1])
+	page.wait_for_selector(".dock-host:not([hidden]) .tab:has-text('Preview %s')" % other.split("/")[-1], timeout=5000)
+	page.wait_for_selector(".md-preview h1:has-text('Followed')")
+	check(page.query_selector(".dock-host:not([hidden]) .tab:has-text('Preview README.md')") is None, "in its place, not beside it")
+	run.shot("followed")
+	page.click(".dock-host:not([hidden]) .tab:has-text('main.c')")
+	time.sleep(0.6)
+	check(page.is_visible(".dock-host:not([hidden]) .tab:has-text('Preview %s')" % other.split("/")[-1]), "a C file leaves it on the last Markdown file")
+	check(not page.is_visible(button), "no preview button for a C file")
+	run.request("fs.delete", {"wsId": ws, "path": other})
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def markdown_image_opens_in_the_viewer(run):
 	"""A workspace image in a Markdown preview (`/w/<wsId>/files/`) shows at its size when clicked (imageview.js); Escape

@@ -5,6 +5,7 @@
 import { test, assertEqual } from "./harness.js";
 import { fenceLanguages, renderMarkdown, safeUrl, toggleTask } from "/ui-kit/markdown.js";
 import { resolveRelative } from "/plugins/ied.markdown/ui/preview.js";
+import { moves } from "/plugins/ied.markdown/ui/follow.js";
 
 function html(text, options) {
 	const host = document.createElement("div");
@@ -72,4 +73,17 @@ test("markdown: relative links and images resolve inside the workspace", () => {
 test("markdown: a fence names its language by the languages' fence names or ids", () => {
 	const fences = fenceLanguages([{ id: "cpp", fences: ["cpp", "c++", "CC"] }, { id: "rust", fences: ["rs"] }, { id: "go" }]);
 	assertEqual(["c++", "cc", "rs", "rust", "go", "zig"].map((name) => fences.get(name) || null), ["cpp", "cpp", "rust", "rust", "go", null]);
+});
+
+test("markdown: a preview beside its file follows the Markdown file its group shows", () => {
+	const state = (active, open) => ({
+		open: open || ["doc:a.md", "doc:b.md", "doc:c.cf", "mdpreview:a.md"],
+		groups: [{ activity: "ied.editor", well: true, tabs: ["doc:a.md", "doc:b.md", "doc:c.cf"], active }, { activity: "ied.editor", well: true, tabs: ["mdpreview:a.md"], active: "mdpreview:a.md" }],
+	});
+	const tethered = (ref) => (ref === "mdpreview:a.md" ? ["doc:a.md"] : []);
+	assertEqual(moves(state("doc:b.md"), tethered), [{ from: "mdpreview:a.md", to: "mdpreview:b.md", lead: "doc:b.md" }], "another .md shown: the preview takes it");
+	assertEqual(moves(state("doc:c.cf"), tethered), [], "a file of another kind: it stays");
+	assertEqual(moves(state("doc:a.md"), tethered), [], "its own file");
+	assertEqual(moves(state("doc:b.md"), () => []), [], "a preview not tethered (opened in place) does not follow");
+	assertEqual(moves(state("doc:b.md", ["doc:a.md", "doc:b.md", "mdpreview:a.md", "mdpreview:b.md"]), tethered), [], "not onto a preview open already");
 });

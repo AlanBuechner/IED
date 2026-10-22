@@ -62,6 +62,14 @@ export function withoutTethers(doc, refs) {
 	return tethers.length === (doc.tethers || []).length ? doc : Object.assign({}, doc, { tethers });
 }
 
+// `from` renamed `to` wherever the document names a tab outside the trees: its tethers, a phone's pane and back stack.
+export function withRenamedTab(doc, from, to) {
+	const swap = (ref) => (ref === from ? to : ref);
+	const tethers = (doc.tethers || []).map((t) => Object.assign({}, t, { lead: swap(t.lead), follower: swap(t.follower) }));
+	const phone = doc.phone ? { pane: swap(doc.phone.pane), back: (doc.phone.back || []).map(swap) } : doc.phone;
+	return Object.assign({}, doc, doc.tethers ? { tethers } : {}, doc.phone ? { phone } : {});
+}
+
 export function partnersOf(doc, ref) {
 	return (doc.tethers || []).filter((t) => t.lead === ref || t.follower === ref).map((t) => (t.lead === ref ? t.follower : t.lead));
 }

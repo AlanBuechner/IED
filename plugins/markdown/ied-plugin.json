@@ -1,7 +1,8 @@
 // Markdown (docs/26 "Language plugins"): the language, its icon, and the preview (F-EDT-91/92) - a "mdpreview:<path>"
 // tab rendering the server document as it changes, with fenced code colored through the editor's `editor.colorize`
 // binding and task boxes that tick into the file. A Markdown file opened from outside IED gets its preview beside it
-// (`companionTabs`, J10).
+// (`companionTabs`, J10). A Markdown file's tab strip has Open Preview to the Side; that preview follows the Markdown
+// file shown in the file's group, as VS Code's does.
 {
 	"manifestVersion": 1,
 	"id": "ied.markdown",
@@ -29,6 +30,9 @@
 			{ "id": "ied.markdown.previewBeside", "title": "Open Preview to the Side", "category": "Markdown", "icon": "$(open-preview)" }
 		],
 		"menus": {
+			"tab/title": [
+				{ "command": "ied.markdown.previewBeside", "group": "1_preview", "when": "tabKind == 'doc' && (resourceExtname == '.md' || resourceExtname == '.markdown')" }
+			],
 			"explorer/context": [
 				{ "command": "ied.markdown.preview", "group": "1_open", "order": 1, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" },
 				{ "command": "ied.markdown.previewBeside", "group": "1_open", "order": 2, "when": "explorerItemKind == 'file' && explorerItemExtension == '.md'" }

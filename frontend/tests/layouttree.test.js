@@ -333,3 +333,16 @@ test("layout doc: a phone's tab closed while another shows leaves its back stack
 	assertEqual(doc.phone, { pane: "chat:c4", back: [] }, "back goes where the draft came from, not to the draft");
 	assertEqual(D.withoutPhoneBack(doc, "chat:z"), doc, "nothing to drop");
 });
+
+test("layout: a tab becomes another in its place, its tethers and phone places renamed", () => {
+	let tree = L.openTab(L.openTab(L.defaultTree([]), "doc:a.md"), "mdpreview:a.md");
+	tree = L.openTab(tree, "doc:z.c");
+	const swapped = L.replaceTab(tree, "mdpreview:a.md", "mdpreview:b.md");
+	assertEqual(L.refsOf(swapped), ["doc:a.md", "mdpreview:b.md", "doc:z.c"], "same group, same place");
+	assertEqual(L.replaceTab(swapped, "mdpreview:a.md", "doc:x"), swapped, "not open: nothing");
+	assertEqual(L.replaceTab(swapped, "doc:a.md", "doc:z.c"), swapped, "onto an open tab: nothing");
+	let doc = D.withTether(D.emptyDocument(), "doc:a.md", "mdpreview:a.md", true);
+	doc = D.withPhonePane(D.withPhonePane(doc, "mdpreview:a.md"), "doc:z.c");
+	doc = D.withRenamedTab(doc, "mdpreview:a.md", "mdpreview:b.md");
+	assertEqual([doc.tethers[0].follower, doc.phone.back], ["mdpreview:b.md", ["mdpreview:b.md"]]);
+});
