@@ -88,6 +88,11 @@ class WorkToolTests(CodeToolCase):
 		self.assertIn("median", results["p2"], "repeated runs for timing")
 		self.assertIn("did not start", results["p3"], results["p3"])
 
+	async def test_a_task_update_before_any_task(self):
+		results = await self.results(("u1", "task_update", {"id": "t1", "status": "in_progress"}))
+		self.assertIn("the chat has no tasks yet", results["u1"], results["u1"])
+		self.assertIn("tasks_set(", results["u1"], "the call to make instead (a model asked five times with the old empty list)")
+
 	async def test_errors_with_their_source_lines_and_hints(self):
 		await self.client.request("settings.set", {"tier": "app", "key": "nuke.command", "value": os.path.join(REPO, "bin", "nuke.cmd")})
 		write(os.path.join(self.repo, "src", "main.cf"), BROKEN_MAIN_CF)

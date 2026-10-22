@@ -378,6 +378,8 @@ namespace Ai
 			PublishTasks(chats, chat);
 			return ToolResult(((task->id + " is now ") + task->status.View()).View(), ((task->title + ": ") + task->status.View()).View());
 		}
+		if (chat->tasks.IsEmpty())
+			return ToolError(Core::StringView("task_update: the chat has no tasks yet; make the list first with tasks_set({\"items\": [{\"title\": \"...\", \"status\": \"in_progress\"}, {\"title\": \"...\"}]})"));
 		return ToolError(((Core::String("task_update: there is no task ") + args.Member("id").AsView()) + "; the tasks are:\n" + TaskLines(chat).View()).View());
 	}
 
