@@ -23,7 +23,17 @@ NUKE = os.path.join(REPO, "bin", "nuke.cmd")
 DEV_TOOLCHAIN = os.path.join(REPO, "toolchains", "c4", "dev")
 LANGUAGES = ("c4", "go")
 
+# Rates of the owner's model server with one request at a time (prompt tokens and generated tokens a second): what a
+# job's model requests would have taken alone, whatever else shared the server. Jobs are budgeted in these seconds.
+SOLO_PREFILL_RATE = 900.0
+SOLO_GENERATE_RATE = 30.0
+
 sys.path.insert(0, os.path.join(REPO, "tools", "pylib"))
+
+
+def solo_model_seconds(timings):
+	"""One request's cost alone on the server, by the tokens it read (cache reuse left out) and generated."""
+	return (timings.get("prompt_n") or 0) / SOLO_PREFILL_RATE + (timings.get("predicted_n") or 0) / SOLO_GENERATE_RATE
 
 
 def load_task(task_id):

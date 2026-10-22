@@ -42,6 +42,10 @@ AUTO_ANSWER = "I am not available to answer. Make the reasonable choice yourself
 HOME_PARTS = ("plugins", "frontend", "shared")
 GIT_IDENTITY = ["-c", "user.name=eval", "-c", "user.email=eval@localhost", "-c", "commit.gpgsign=false"]
 EVAL_WATCHDOG = {"prefillBaseS": 900, "idleS": 300}
+# A task's timeout_minutes as budget seconds: the share of it a job got alone-on-the-server when four jobs shared the
+# server (0.40 to 0.49 measured, 2026-10-22), so budgeted runs compare with the wall-clock runs before them.
+BUDGET_FACTOR = 0.45
+WALL_CAP = 2   # times timeout_minutes: the wall-clock stop whatever the budget says
 
 
 # --- The variant's toolchain and home ------------------------------------------------------------------------------
@@ -179,10 +183,19 @@ def turn_transcript(roots, chat_id):
 	return []
 
 
-async def agent_turn(server, cookie, task, prompt, job_dir, roots):
-	"""Sends the task and follows the turn to its end: the turn's record for agent.json."""
+def budget_used(spent, elapsed):
+	"""Seconds of the job's budget used: its model requests as they would have taken alone on the server, plus the time
+	outside them (tools, builds, the harness). A busy server slows a job's requests but does not spend its budget."""
+	solo, wall = spent()
+	return solo + max(0.0, elapsed - wall)
+
+
+async def agent_turn(server, cookie, task, prompt, job_dir, roots, spent):
+	"""Sends the task and follows the turn to its end: the turn's record for agent.json. The turn stops when it has used
+	BUDGET_FACTOR of the task's timeout in budget seconds (budget_used), or WALL_CAP times it in wall seconds."""
 	client = await Client.connect(server.ws_url, FrameChecker(), headers={"Cookie": cookie})
-	limit = task.get("timeout_minutes", 45) * 60
+	wall_limit = task.get("timeout_minutes", 45) * 60
+	limit = wall_limit * BUDGET_FACTOR
 	try:
 		chat_id = (await client.request("chat.create", {"wsId": "w1", "mode": task.get("mode", "agent"), "permission": "auto", "title": task["id"]}))["chatId"]
 		topic = "chat:" + chat_id
@@ -192,14 +205,15 @@ async def agent_turn(server, cookie, task, prompt, job_dir, roots):
 		await client.request("chat.send", {"chatId": chat_id, "text": prompt}, timeout=30)
 		stats, approvals, questions, end, timed_out = [], 0, [], None, False
 		while end is None:
-			remaining = limit - (time.time() - started)
+			elapsed = time.time() - started
+			remaining = min(limit - budget_used(spent, elapsed), wall_limit * WALL_CAP - elapsed)
 			if remaining <= 0:
 				timed_out = True
 				await client.request("chat.stop", {"chatId": chat_id}, timeout=30)
 				end = (await client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=120))[-1]["data"]
 				break
 			try:
-				frame = await client.next_frame(topic, timeout=min(remaining, 60))
+				frame = await client.next_frame(topic, timeout=min(max(remaining, 1), 30))
 			except asyncio.TimeoutError:
 				continue
 			kind, data = frame.get("kind"), frame.get("data") or {}
@@ -214,6 +228,7 @@ async def agent_turn(server, cookie, task, prompt, job_dir, roots):
 			elif kind == "turn.end":
 				end = data
 		seconds = time.time() - started
+		budget = budget_used(spent, seconds)
 		history = (await client.request("chat.history", {"chatId": chat_id}, timeout=60))["turns"][-1]
 	finally:
 		client.abort()
@@ -224,7 +239,7 @@ async def agent_turn(server, cookie, task, prompt, job_dir, roots):
 		for turn in transcript:
 			f.write(json.dumps(turn) + "\n")
 	return {
-		"stop": end.get("stop"), "timedOut": timed_out, "recoveries": end.get("recoveries", []), "seconds": round(seconds, 1),
+		"stop": end.get("stop"), "timedOut": timed_out, "recoveries": end.get("recoveries", []), "seconds": round(seconds, 1), "budgetSeconds": round(budget, 1),
 		"steps": len(stats), "stepStats": stats, "tokensOut": end.get("tokensOut"), "lastPrompt": end.get("tokensIn"),
 		"approvals": approvals, "questions": questions, "calls": calls,
 		"thinkingChars": sum(len(s.get("text", "")) for s in segments if s["type"] == "thinking"),
@@ -268,7 +283,8 @@ async def run_turn(task, lang, job_dir, ws, opened, settings, config, record):
 			await client.request("settings.set", {"tier": "app", "key": key, "value": value})
 		client.abort()
 		prompt = task[lang]["prompt"].strip()
-		record.update(await agent_turn(server, cookie, task, prompt, job_dir, [ws, data]))
+		job_key = os.path.basename(job_dir)
+		record.update(await agent_turn(server, cookie, task, prompt, job_dir, [ws, data], lambda: config["spent"](job_key)))
 	finally:
 		server.stop(remove_data=False)
 
@@ -339,6 +355,7 @@ def main():
 		"toolchainBuilt": common.read_json(os.path.join(args.base_toolchain, "toolchain.json"), {}).get("built"), "started": time.strftime("%Y-%m-%d %H:%M:%S"),
 		"jobs": [os.path.basename(j["dir"]) for j in jobs], "commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=common.REPO, capture_output=True, text=True).stdout.strip()})
 	proxy = ModelProxy(profile["endpoint"])
+	config["spent"] = proxy.spent
 	try:
 		asyncio.run(run_all(jobs, model_settings(args, name, profile, proxy), config, args.parallel))
 	finally:

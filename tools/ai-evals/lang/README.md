@@ -35,7 +35,9 @@ time limit. Then `grade.py` grades the workspace.
 - `--temperature` defaults to 0.6: Qwen3 asks for it in thinking mode, and at 0 it fell into a reply that repeated
   itself for 30 minutes (now cut by the agent runtime, `docs/12` `repetition`).
 - `--parallel N` runs N tasks at once on the model server; wall times then include waiting for the GPU, so compare
-  **solo seconds** (below), not wall seconds, across runs with different parallelism.
+  **solo seconds** (below), not wall seconds, across runs with different parallelism. A task's `timeout_minutes` is
+  a budget, not a wall-clock limit: the turn stops once its solo seconds reach 0.45 of it (what a job got of it with
+  four jobs on the server, measured), so a busy server never shortens a job; twice it in wall seconds stops it anyway.
 - `--repeat N` runs everything N times: at temperature 0.6 one run of a task is a sample, not a measurement.
 - `--slots N` (default 4, the owner's llama.cpp server): runs started side by side share N lock files
   (`slots.py`), so they never send the server more turns at once than it has slots - one more would wait in its

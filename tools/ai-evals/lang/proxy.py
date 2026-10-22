@@ -13,6 +13,8 @@ import threading
 import time
 import urllib.parse
 
+import common
+
 HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
 
 
@@ -21,12 +23,31 @@ class Recorder:
 
 	def __init__(self):
 		self.folders = {}
+		self.spent = {}      # job: solo and wall seconds of its finished requests
+		self.inflight = {}   # job: start times of its requests still running
 		self.lock = threading.Lock()
 
 	def register(self, job, folder):
 		self.folders[job] = folder
 
-	def note(self, job, entry, body):
+	def begin(self, job, started):
+		with self.lock:
+			self.inflight.setdefault(job, []).append(started)
+
+	def cost(self, job):
+		"""Solo seconds of the job's finished requests, and the wall seconds of all of them, running ones included."""
+		with self.lock:
+			done = self.spent.get(job, {"solo": 0.0, "wall": 0.0})
+			now = time.time()
+			return done["solo"], done["wall"] + sum(now - started for started in self.inflight.get(job, []))
+
+	def note(self, job, entry, body, started):
+		with self.lock:
+			if started in self.inflight.get(job, []):
+				self.inflight[job].remove(started)
+			cost = self.spent.setdefault(job, {"solo": 0.0, "wall": 0.0})
+			cost["wall"] += entry.get("seconds") or 0.0
+			cost["solo"] += common.solo_model_seconds(entry.get("timings") or {})
 		folder = self.folders.get(job)
 		if not folder:
 			return
@@ -86,6 +107,7 @@ def make_handler(upstream, recorder):
 			headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS}
 			connection = (http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection)(target.hostname, target.port, timeout=3600)
 			started = time.time()
+			recorder.begin(job, started)
 			entry = {"at": round(started, 3), "method": method, "path": path}
 			entry.update(summarize_request(body))
 			try:
@@ -137,7 +159,7 @@ def make_handler(upstream, recorder):
 				connection.close()
 				entry["seconds"] = round(time.time() - started, 3)
 				entry["firstByteSeconds"] = round(first_byte - started, 3) if first_byte else None
-				recorder.note(job, entry, body)
+				recorder.note(job, entry, body, started)
 
 		def do_POST(self):
 			self.forward("POST")
@@ -162,6 +184,10 @@ class ModelProxy:
 		"""The endpoint a job's profile names: this proxy, the job, and the real endpoint's path."""
 		self.recorder.register(job, folder)
 		return "http://127.0.0.1:%d/%s%s" % (self.server.server_address[1], job, self.upstream_path)
+
+	def spent(self, job):
+		"""The job's model requests so far: their cost alone on the server (solo seconds) and their wall seconds."""
+		return self.recorder.cost(job)
 
 	def close(self):
 		self.server.shutdown()

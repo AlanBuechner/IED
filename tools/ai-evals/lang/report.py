@@ -21,10 +21,8 @@ BUILD_TOOLS = {"build_run", "problems_list"}
 SKILLS = {"skill_search", "skill_read"}
 BUILD_COMMAND = re.compile(r"\b(nuke(\.bat|\.cmd)?\s+(build|test|run|rebuild)|nuke\s*$|go\s+(build|test|run|vet))\b")
 
-# Rates of the owner's model server with one request at a time (prompt tokens and generated tokens a second), for
-# the time a run would have taken alone when it shared the server.
-SOLO_PREFILL_RATE = 900.0
-SOLO_GENERATE_RATE = 30.0
+SOLO_PREFILL_RATE = common.SOLO_PREFILL_RATE
+SOLO_GENERATE_RATE = common.SOLO_GENERATE_RATE
 
 
 def category(call):
