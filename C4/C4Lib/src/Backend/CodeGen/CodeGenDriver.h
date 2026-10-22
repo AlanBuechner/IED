@@ -166,10 +166,13 @@ namespace Scripting
 		/// An invoke thunk for every function reflection registers and can call that has none yet, then every
 		/// function the thunks reach. A function an argument cannot be passed to gets no thunk.
 		bool EmitInvokeThunks(ProgramModel& model, std::string* errorMessage);
-		void EmitInvokeThunk(ProgramModel& model, const FunctionRecord& target);
+		const FunctionRecord* ThunkFor(ProgramModel& model, const FunctionRecord& target, std::vector<Placed>& lowered);
+		void FinishThunk(const FunctionRecord& thunk, unsigned partition);
+		void RecordThunk(ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk);
 		/// The thunk named `symbol` for `target` (shared: calling the code it is given), or null when an argument cannot be
 		/// passed.
-		llvm::Function* LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared);
+		const FunctionRecord* LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared,
+			std::vector<Placed>& lowered);
 		/// The code reflection records as `target`'s address; none for a function without code (a pure virtual method).
 		llvm::Function* CodeOf(const FunctionRecord& target);
 		/// Reflected functions with code to call that have not been considered for a thunk yet: a body emitted
@@ -234,7 +237,8 @@ namespace Scripting
 		std::vector<llvm::Function*> m_FirstUseStarts; // the starts of a script's thread_locals that start on first use
 		std::deque<FunctionRecord> m_ThunkRecords;     // compiler-written: no model record
 		std::set<const FunctionRecord*> m_ThunkTargets; // considered for a thunk (one that failed too: no retry)
-		std::unordered_map<std::string, llvm::Function*> m_SharedThunks; // by symbol; null for a signature that cannot be passed
+		std::unordered_map<std::string, const FunctionRecord*> m_SharedThunks; // by symbol; null for a signature that cannot be passed
+		std::unordered_map<const FunctionRecord*, llvm::Function*> m_ThunkFunctions; // each thunk emitted, in its partition
 		InvokeThunks m_Thunks;
 		ImageDescription m_Image; // a split program's reflection image (D-82)
 		std::string m_ImageKey;

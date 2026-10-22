@@ -17,6 +17,13 @@ namespace Scripting::Toolchain
 	/// the executable. Empty when there is none.
 	fs::path Clang();
 
+	/// lld-link.exe beside Clang. Empty when there is none.
+	fs::path LldLink();
+
+	/// clang's own runtime libraries (`clang_rt.builtins` and the like), which clang's driver hands every link:
+	/// lib/clang/<version>/lib/windows above Clang's folder. Empty when there are none.
+	fs::path ClangRuntimeLibraries();
+
 	/// The runtime's C and C++ sources: <home>/C4Runtime, or a development build's repository copy. Empty when
 	/// there are none.
 	fs::path Runtime();

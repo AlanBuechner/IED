@@ -52,6 +52,9 @@ namespace Scripting
 		: m_Module(module), m_Builder(module), m_SourcePaths(std::move(sourcePaths))
 	{
 		module.addModuleFlag(llvm::Module::Warning, "CodeView", 1);
+		// Each object carries its types' global hashes (`.debug$H`), made once when a partition is assembled, which the
+		// link would otherwise compute for every object on every build.
+		module.addModuleFlag(llvm::Module::Warning, "CodeViewGHash", 1);
 		module.addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
 		uint32 first = 0;
 		for (const auto& [unit, path] : m_SourcePaths)

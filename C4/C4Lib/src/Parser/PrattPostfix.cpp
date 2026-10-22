@@ -46,8 +46,8 @@ namespace Scripting
 
 				// Chain as binary expression for now; semantic analysis will resolve
 				auto wrapper = CreateRef<BinaryExpressionNode>();
-				wrapper->m_LeftOperand = base;
-				wrapper->m_RightOperand = braceInit;
+				wrapper->m_Children[0] = base;
+				wrapper->m_Children[1] = braceInit;
 				wrapper->startLocation = base->startLocation;
 				wrapper->endLocation = braceInit->endLocation;
 				base = wrapper;
@@ -116,7 +116,7 @@ namespace Scripting
 			if (type == TokenType::OpenBracket)
 			{
 				auto node = CreateRef<ArrayIndexNode>();
-				node->m_ArrayExpression = base;
+				node->m_Children[0] = base;
 				node->m_OpenBracketToken = next;
 				node->startLocation = base->startLocation;
 				lexer.NextCompoundToken(); // consume [
@@ -131,7 +131,7 @@ namespace Scripting
 						ErrorSeverity::Error);
 				}
 				else
-					node->m_IndexExpression = index;
+					node->m_Children[1] = index;
 
 				Token close = lexer.PeekCompound();
 				if (close.GetType() != TokenType::CloseBracket)

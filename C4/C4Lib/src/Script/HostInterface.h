@@ -60,5 +60,8 @@ namespace Scripting
 	bool WriteInterface(const HostInterface& host, const std::string& path, std::string* error);
 	/// Bytes SerializeInterface or SealInterface made.
 	bool WriteInterfaceBytes(const std::string& bytes, const std::string& path, std::string* error);
+	/// Bytes SealInterface made, unless the file at `path` holds them already (the same size and build id, which is a
+	/// hash of all of them): a build that changed nothing a script sees leaves the interface as it was.
+	bool WriteSealedInterface(const std::string& bytes, const std::string& path, std::string* error);
 	bool ReadInterface(const std::string& path, HostInterface& host, std::string* error);
 } // namespace Scripting

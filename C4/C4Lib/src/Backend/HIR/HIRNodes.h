@@ -575,6 +575,12 @@ namespace Scripting
 
 		// --- allocation helpers (the ONLY way to create HIR storage) -------------------------
 		LValue* NewLValue(const LValue& v) { return m_Arena.Make<LValue>(v); }
+		std::span<const uint32> NewLanes(const std::vector<uint32>& lanes)
+		{
+			const std::span<uint32> made = m_Arena.MakeArray<uint32>(lanes.size());
+			std::copy(lanes.begin(), lanes.end(), made.begin());
+			return made;
+		}
 		uint32 AddSlot(const Type* t, const Core::String& name, SlotClass c)
 		{
 			Slot slot{ t, name, c };

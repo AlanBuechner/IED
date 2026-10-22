@@ -42,7 +42,7 @@ in `C4Lib`.
      partitions, and the X86 backend on -j threads for each partition whose object is not already cached
      -> <int>/<out name>.objects/<hash>.obj (-c: <out>.obj)
  [7] runtime objects (GC, reflect, test, IO as C; EH as C++), cached in %TEMP%/c4_runtime
- [8] clang driver -> lld-link: main obj + runtimes + foreign objs + libs -> <out>.exe
+ [8] lld-link: main obj + runtimes + foreign objs + libs -> <out>.exe
 ```
 
 `-ftime` prints the wall-clock time of each phase: preprocess, parse, model, lower, script host (with
@@ -263,8 +263,10 @@ straight from the module in memory).
   are linked into every executable: the collector (`GC/`), threads, memory helpers, reflection (`Reflect/`), IO,
   testing, static storage (`StaticStorageRuntimeC.c` + `StaticStorageShim.cpp`: once guards and exit-time
   destruction) and EH (`EHRuntime.cpp`).
-- `LinkWithLLD`: `clang -fuse-ld=lld` with the main object, runtimes, interop objects,
-  libraries and the `-l` / `-L` arguments, `/SUBSYSTEM:CONSOLE`; with `-g`, `/DEBUG` (the `.pdb` beside the exe).
+- `LinkWithLLD`: `lld-link` with the main object, runtimes, interop objects, libraries and the `-l` / `-L` /
+  `-Wl,` arguments as clang's driver would hand them over (`LinkerArguments`), `libcmt`, `oldnames` and clang's
+  runtime libraries, `/SUBSYSTEM:CONSOLE`; with `-g`, `/DEBUG` (the `.pdb` beside the exe). lld-link finds the MSVC
+  and Windows SDK libraries itself (or through `LIB` when it is set), so no clang process starts for the link.
 - clang, lld, the runtime sources, CBind and Bedrock come from the install `C4.exe` runs from
   (`Compiler/Toolchain`, [../tools/01-compiler-cli.md](../tools/01-compiler-cli.md#4-the-install)).
 

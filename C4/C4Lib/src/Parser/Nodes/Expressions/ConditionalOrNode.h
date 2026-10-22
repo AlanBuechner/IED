@@ -9,9 +9,9 @@ namespace Scripting
 	{
 		ConditionalOrNode() = default;
 
-		const Ref<AstNode>& GetLeftOperand() const { return m_LeftOperand; }
+		const Ref<AstNode>& GetLeftOperand() const { return m_Children[0]; }
 		const Token& GetOperatorToken() const { return m_OperatorToken; }
-		const Ref<AstNode>& GetRightOperand() const { return m_RightOperand; }
+		const Ref<AstNode>& GetRightOperand() const { return m_Children[1]; }
 
 		std::span<const Ref<AstNode>> Children() const override;
 		Core::String ToString() const override;
@@ -21,9 +21,7 @@ protected:
 		friend struct PrattParser;
 
 	private:
-		Ref<AstNode> m_LeftOperand;
 		Token m_OperatorToken;
-		Ref<AstNode> m_RightOperand;
-		mutable Ref<AstNode> m_Children[2] = { nullptr, nullptr };
+		Ref<AstNode> m_Children[2]; // the left operand, then the right: Children is a span of them
 	};
 }

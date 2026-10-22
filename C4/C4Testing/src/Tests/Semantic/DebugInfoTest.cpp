@@ -87,12 +87,13 @@ namespace Testing
 
 	void DebugInfoTest::TheModuleIsCodeView()
 	{
-		bool codeView = false, version = false;
+		bool codeView = false, version = false, hashes = false;
 		TEST_ASSERT(WithModule(true, [&](llvm::Module& m) {
 			codeView = m.getModuleFlag("CodeView") != nullptr;
 			version = m.getModuleFlag("Debug Info Version") != nullptr;
+			hashes = m.getModuleFlag("CodeViewGHash") != nullptr; // the objects carry their types' hashes for the link
 		}));
-		TEST_ASSERT(codeView && version);
+		TEST_ASSERT(codeView && version && hashes);
 		TEST_PASSED();
 	}
 

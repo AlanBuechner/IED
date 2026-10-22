@@ -30,5 +30,7 @@ namespace Testing
 		void AMissingFileIsAnError();
 		TEST_FUNC(Script.HostInterface)
 		void ASealedInterfaceCarriesItsBuildId();
+		TEST_FUNC(Script.HostInterface)
+		void AnUnchangedInterfaceIsNotWrittenAgain();
 	};
 } // namespace Testing

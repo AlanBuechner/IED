@@ -113,8 +113,9 @@ namespace Scripting
 		QueryResult<void> CheckFieldValues(const ProgramModel& model, const ObjectType* obj)
 		{
 			for (const auto& f : obj->GetFields())
-				if (Core::String why = Abstractness::ByValue(model, "field '" + f.mName + "'", f.m_Type); !why.empty())
-					return QueryResult<void>::Fail(QueryError::NotAValue, why, f.m_DeclaringNode ? f.m_DeclaringNode->startLocation : SourceLocation());
+				if (Core::String why = Abstractness::WhyNoValue(model, f.m_Type); !why.empty())
+					return QueryResult<void>::Fail(QueryError::NotAValue, Abstractness::ByValue("field '" + f.mName + "'", why),
+						f.m_DeclaringNode ? f.m_DeclaringNode->startLocation : SourceLocation());
 			return QueryResult<void>::Success();
 		}
 
@@ -146,8 +147,9 @@ namespace Scripting
 		{
 			model.Symbols()->ForEachGlobalVariable([&](const SymbolInfo& sym, const Scope& scope) {
 				if (scope.GetKind() == Scope::Kind::Class || !sym.type || !errors) return;
-				if (Core::String why = Abstractness::ByValue(model, "'" + sym.plainName + "'", sym.type); !why.empty())
-					errors->AddError(sym.declNode ? sym.declNode->startLocation : SourceLocation(), why, ErrorSeverity::Error);
+				if (Core::String why = Abstractness::WhyNoValue(model, sym.type); !why.empty())
+					errors->AddError(sym.declNode ? sym.declNode->startLocation : SourceLocation(), Abstractness::ByValue("'" + sym.plainName + "'", why),
+						ErrorSeverity::Error);
 			});
 		}
 	}

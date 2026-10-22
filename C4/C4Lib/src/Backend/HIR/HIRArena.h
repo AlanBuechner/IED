@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <new>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -35,6 +36,16 @@ namespace Scripting
 			T* made = new (Allocate(sizeof(T), alignof(T))) T(std::forward<Args>(args)...);
 			if constexpr (!std::is_trivially_destructible_v<T>) m_Destructors.push_back({ made, [](void* object) { static_cast<T*>(object)->~T(); } });
 			return made;
+		}
+
+		/// `count` default-made `T`s, for a T with nothing to destroy (an lvalue's lanes): they live as long as the arena.
+		template <typename T>
+		std::span<T> MakeArray(size_t count)
+		{
+			static_assert(std::is_trivially_destructible_v<T>);
+			T* made = static_cast<T*>(Allocate(sizeof(T) * count, alignof(T)));
+			for (size_t i = 0; i < count; ++i) new (made + i) T();
+			return { made, count };
 		}
 
 	private:

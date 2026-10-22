@@ -4,12 +4,23 @@
 
 namespace Scripting
 {
-	std::span<const Ref<AstNode>> CastExpressionNode::Children() const
+	void CastExpressionNode::SetOperand(Ref<AstNode> operand)
+	{
+		m_Operand = operand;
+		KeepChildren();
+	}
+
+	void CastExpressionNode::SetTargetType(Ref<QualTypeNode> type)
+	{
+		m_TargetType = type;
+		KeepChildren();
+	}
+
+	void CastExpressionNode::KeepChildren()
 	{
 		m_Children.Clear();
 		if (m_Operand) m_Children.Push(m_Operand);
 		if (m_TargetType) m_Children.Push(m_TargetType);
-		return m_Children;
 	}
 
 	Core::String CastExpressionNode::ToString() const

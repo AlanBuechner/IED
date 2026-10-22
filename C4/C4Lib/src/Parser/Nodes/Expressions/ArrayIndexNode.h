@@ -9,9 +9,9 @@ namespace Scripting
 	{
 		ArrayIndexNode() = default;
 
-		const Ref<AstNode>& GetArrayExpression() const { return m_ArrayExpression; }
+		const Ref<AstNode>& GetArrayExpression() const { return m_Children[0]; }
 		const Token& GetOpenBracketToken() const { return m_OpenBracketToken; }
-		const Ref<AstNode>& GetIndexExpression() const { return m_IndexExpression; }
+		const Ref<AstNode>& GetIndexExpression() const { return m_Children[1]; }
 		const Token& GetCloseBracketToken() const { return m_CloseBracketToken; }
 
 		std::span<const Ref<AstNode>> Children() const override;
@@ -22,10 +22,8 @@ protected:
 		friend struct PrattParser;
 
 	private:
-		Ref<AstNode> m_ArrayExpression;
 		Token m_OpenBracketToken;
-		Ref<AstNode> m_IndexExpression;
 		Token m_CloseBracketToken;
-		mutable Ref<AstNode> m_Children[2] = { nullptr, nullptr };
+		Ref<AstNode> m_Children[2]; // the array, then the index: Children is a span of them
 	};
 }

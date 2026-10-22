@@ -14,7 +14,12 @@ namespace Scripting
 		const Token& GetIsToken() const { return m_IsToken; }
 		const Ref<QualTypeNode>& GetTargetType() const { return m_TargetType; }
 
-		std::span<const Ref<AstNode>> Children() const override;
+		/// The parser fills it through these, which keep Children (the operand, then the type) as they go: two threads
+		/// walking one body read them, never rebuild them.
+		void SetOperand(Ref<AstNode> operand);
+		void SetTargetType(Ref<QualTypeNode> type);
+
+		std::span<const Ref<AstNode>> Children() const override { return m_Children; }
 		Core::String ToString() const override;
 protected:
 		NodeType Type() const override { return NodeType::TypeCheck; }
@@ -25,6 +30,8 @@ protected:
 		Ref<AstNode> m_Operand;
 		Token m_IsToken;
 		Ref<QualTypeNode> m_TargetType;
-		mutable Core::Vector<Ref<AstNode>> m_Children;
+		Core::Vector<Ref<AstNode>> m_Children;
+
+		void KeepChildren();
 	};
 }

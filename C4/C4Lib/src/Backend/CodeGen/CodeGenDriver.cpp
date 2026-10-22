@@ -282,29 +282,55 @@ namespace Scripting
 		return m_MCtx.GetOrCreateFunction(record);
 	}
 
+	// Each round's new thunks are emitted at once, each in its partition: an own thunk where its target is, a shared one
+	// by its name, so an edit that adds a reflected method changes only its partition, not partition 0.
 	bool CodeGenDriver::EmitInvokeThunks(ProgramModel& model, std::string* errorMessage)
 	{
 		while (true)
 		{
 			Core::Vector<const FunctionRecord*> targets = NewInvokeTargets(model);
 			if (targets.Empty()) return true;
-			for (const FunctionRecord* target : targets) EmitInvokeThunk(model, *target);
-			if (!EmitReachable(model, {}, errorMessage)) return false;
+			std::vector<Placed> lowered;
+			std::vector<std::pair<const FunctionRecord*, const FunctionRecord*>> thunkOf; // each target and its thunk
+			for (const FunctionRecord* target : targets)
+				if (const FunctionRecord* thunk = ThunkFor(model, *target, lowered)) thunkOf.push_back({ target, thunk });
+			Core::Vector<const FunctionRecord*> batch;
+			EmitPlaced(model, lowered, batch);
+			for (const Placed& placed : lowered) FinishThunk(*placed.tree->record, placed.partition);
+			for (const auto& [target, thunk] : thunkOf) RecordThunk(model, *target, *thunk);
+			if (!EmitReachable(model, batch, errorMessage)) return false;
 		}
 	}
 
-	void CodeGenDriver::EmitInvokeThunk(ProgramModel& model, const FunctionRecord& target)
+	// `target`'s thunk: its own, or the one its signature shares, lowered into `lowered` when new. Null when it cannot
+	// be lowered: reflection reports the function as not invokable.
+	const FunctionRecord* CodeGenDriver::ThunkFor(ProgramModel& model, const FunctionRecord& target, std::vector<Placed>& lowered)
 	{
-		if (!SharesInvokeThunk(model, target))
-		{
-			if (llvm::Function* own = LowerInvokeThunk(model, target, InvokeThunkSymbol(target), false))
-				m_Thunks[&target] = { own, nullptr, CodeOf(target) };
-			return;
-		}
+		if (!SharesInvokeThunk(model, target)) return LowerInvokeThunk(model, target, InvokeThunkSymbol(target), false, lowered);
 		const std::string symbol = SharedInvokeThunkSymbol(target);
 		auto [entry, fresh] = m_SharedThunks.try_emplace(symbol, nullptr);
-		if (fresh) entry->second = LowerInvokeThunk(model, target, symbol, true);
-		if (entry->second) m_Thunks[&target] = { entry->second, m_MCtx.GetOrCreateFunction(target), CodeOf(target) };
+		if (fresh) entry->second = LowerInvokeThunk(model, target, symbol, true, lowered);
+		return entry->second;
+	}
+
+	// Only the reflection image names a thunk: a local of the program, which a split program's image module reaches.
+	// Reflection calls through it seldom: small, with its target called rather than copied into it.
+	void CodeGenDriver::FinishThunk(const FunctionRecord& thunk, unsigned partition)
+	{
+		ModuleContext& home = Partition(partition);
+		llvm::Function* emitted = home.GetOrCreateFunction(thunk);
+		emitted->setName(home.LocalName(thunk.mangledName.c_str()));
+		home.MakeLocal(*emitted);
+		emitted->addFnAttr(llvm::Attribute::MinSize);
+		emitted->addFnAttr(llvm::Attribute::OptimizeForSize);
+		m_ThunkFunctions[&thunk] = emitted;
+	}
+
+	void CodeGenDriver::RecordThunk(ProgramModel& model, const FunctionRecord& target, const FunctionRecord& thunk)
+	{
+		llvm::Function* emitted = m_ThunkFunctions.at(&thunk);
+		m_Thunks[&target] = SharesInvokeThunk(model, target) ? InvokeEntry{ emitted, m_MCtx.GetOrCreateFunction(target), CodeOf(target) }
+			: InvokeEntry{ emitted, nullptr, CodeOf(target) };
 	}
 
 	llvm::Function* CodeGenDriver::CodeOf(const FunctionRecord& target)
@@ -312,7 +338,8 @@ namespace Scripting
 		return HasCode(target) ? m_MCtx.GetOrCreateFunction(target) : nullptr;
 	}
 
-	llvm::Function* CodeGenDriver::LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol, bool shared)
+	const FunctionRecord* CodeGenDriver::LowerInvokeThunk(ProgramModel& model, const FunctionRecord& target, const std::string& symbol,
+		bool shared, std::vector<Placed>& lowered)
 	{
 		FunctionRecord& thunk = m_ThunkRecords.emplace_back();
 		thunk.type = InvokeThunkType(model);
@@ -320,16 +347,9 @@ namespace Scripting
 		ErrorTracker notCallable; // reflection reports the function as not invokable instead
 		auto tree = std::make_unique<HIRFunction>(Scripting::LowerInvokeThunk(model, notCallable, target, thunk, shared));
 		if (!tree->complete) return nullptr;
-		m_Emitter.Emit(*tree);
+		lowered.push_back({ tree.get(), shared ? PartitionOf(thunk) : PartitionOf(target) });
 		m_Trees.push_back(std::move(tree));
-		llvm::Function* emitted = m_MCtx.GetOrCreateFunction(thunk);
-		// Only the reflection image names it: a local of the program, which a split program's image module reaches.
-		emitted->setName(m_MCtx.LocalName(symbol));
-		m_MCtx.MakeLocal(*emitted);
-		// Reflection calls through it seldom: small, with its target called rather than copied into it.
-		emitted->addFnAttr(llvm::Attribute::MinSize);
-		emitted->addFnAttr(llvm::Attribute::OptimizeForSize);
-		return emitted;
+		return &thunk;
 	}
 
 	Core::Vector<const FunctionRecord*> CodeGenDriver::NewInvokeTargets(ProgramModel& model)

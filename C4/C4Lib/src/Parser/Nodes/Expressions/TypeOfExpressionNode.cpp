@@ -110,8 +110,7 @@ namespace Scripting
 		}
 		state.GetErrorTracker().CommitSuppressedErrors();
 		undo.Commit();
-		m_TargetType = type;
-		m_Operand = expression;
+		SetOperand(type, expression);
 		if (m_Kind == Kind::OffsetOf)
 			return ParseFieldPath(state);
 		endLocation = lexer.NextCompoundToken().GetEndLocation(); // )
@@ -151,21 +150,20 @@ namespace Scripting
 	{
 		if (m_Kind != Kind::SizeOf && m_Kind != Kind::AlignOf && m_Kind != Kind::NameOf)
 			return false;
-		m_Operand = PrattParser::ParseExpression(state, BindPower::PrefixOperand);
+		SetOperand(nullptr, PrattParser::ParseExpression(state, BindPower::PrefixOperand));
 		if (!m_Operand)
 			return false;
 		endLocation = m_Operand->endLocation;
 		return true;
 	}
 
-	std::span<const Ref<AstNode>> TypeOfExpressionNode::Children() const
+	void TypeOfExpressionNode::SetOperand(Ref<QualTypeNode> type, Ref<AstNode> expression)
 	{
-		if (m_Children.Count() == 0)
-		{
-			if (m_TargetType) m_Children.Push(m_TargetType);
-			else if (m_Operand) m_Children.Push(m_Operand);
-		}
-		return m_Children;
+		m_TargetType = type;
+		m_Operand = expression;
+		m_Children.Clear();
+		if (m_TargetType) m_Children.Push(m_TargetType);
+		else if (m_Operand) m_Children.Push(m_Operand);
 	}
 
 	Core::String TypeOfExpressionNode::ToString() const

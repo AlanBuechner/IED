@@ -68,6 +68,22 @@ namespace Scripting::Toolchain
 		return InRepository(fs::path("vendor") / "llvm" / "bin" / "clang.exe");
 	}
 
+	fs::path LldLink()
+	{
+		const fs::path clang = Clang();
+		return !clang.empty() && IsFile(clang.parent_path() / "lld-link.exe") ? clang.parent_path() / "lld-link.exe" : fs::path();
+	}
+
+	fs::path ClangRuntimeLibraries()
+	{
+		const fs::path clang = Clang();
+		if (clang.empty()) return {};
+		std::error_code ec;
+		for (const fs::directory_entry& version : fs::directory_iterator(ExtendedPath(clang.parent_path().parent_path() / "lib" / "clang"), ec))
+			if (const fs::path windows = PlainPath(version.path()) / "lib" / "windows"; IsFolder(windows)) return windows;
+		return {};
+	}
+
 	fs::path Runtime()
 	{
 		const fs::path installed = Home() / "C4Runtime";

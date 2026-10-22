@@ -78,7 +78,7 @@ namespace Scripting
 		std::vector<FileResult> out;
 		out.reserve(done.size());
 		for (const auto& [abs, file] : ctx.files)
-			out.push_back(done.at(abs));
+			out.push_back(std::move(done.at(abs))); // each file's text and tables, moved: every file is in `done` once
 		return out;
 	}
 

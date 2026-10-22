@@ -30,7 +30,9 @@ namespace Scripting
 		{
 			LValue lv; lv.kind = LValue::Kind::Swizzle; lv.base = storage;
 			lv.type = ctx.queries().TypeStore()->Swizzle(region->GetElementType(), region->GetLaneCount());
-			for (uint32 i = 0; i < region->GetLaneCount(); ++i) lv.laneIndices.push_back(i);
+			std::vector<uint32> lanes(region->GetLaneCount());
+			for (uint32 i = 0; i < region->GetLaneCount(); ++i) lanes[i] = i;
+			lv.laneIndices = ctx.NewLanes(lanes);
 			return ctx.NewLValue(lv);
 		}
 
@@ -56,7 +58,7 @@ namespace Scripting
 			if (indices.size() < 2) return nullptr;
 			LValue lv; lv.kind = LValue::Kind::Swizzle; lv.base = storage;
 			lv.type = ctx.queries().TypeStore()->Swizzle(region->GetElementType(), static_cast<uint32>(indices.size()));
-			lv.laneIndices = std::move(indices);
+			lv.laneIndices = ctx.NewLanes(indices);
 			lv.isUnpacked = !region->IsPacked(); // an unpacked run stores field by field, not with a shufflevector
 			return ctx.NewLValue(lv);
 		}

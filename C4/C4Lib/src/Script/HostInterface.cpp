@@ -1,6 +1,7 @@
 #include "Script/HostInterface.h"
 #include "Compiler/CpuTarget.h"
 #include "Compiler/FileIo.h"
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/xxhash.h>
 #include <cstring>
 #include <iterator>
@@ -256,6 +257,16 @@ namespace Scripting
 	{
 		if (!WriteFileBytes(path, bytes)) return Fail(error, "cannot write " + path);
 		return true;
+	}
+
+	bool WriteSealedInterface(const std::string& bytes, const std::string& path, std::string* error)
+	{
+		const size_t head = kBuildIdOffset + std::tuple_size_v<decltype(HostInterface::buildId)>;
+		const std::optional<FileStamp> kept = StampOf(path);
+		if (kept && kept->size == bytes.size() && bytes.size() >= head)
+			if (auto read = llvm::MemoryBuffer::getFileSlice(path, head, 0); read && (*read)->getBuffer() == llvm::StringRef(bytes.data(), head))
+				return true;
+		return WriteInterfaceBytes(bytes, path, error);
 	}
 
 	bool ReadInterface(const std::string& path, HostInterface& host, std::string* error)

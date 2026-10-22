@@ -3,6 +3,8 @@
 #include "Model/ConstantValue.h"
 #include "Lexer/Token.h" // SourceLocation
 #include <cstdint>
+#include <span>
+#include <type_traits>
 
 namespace Scripting
 {
@@ -51,7 +53,7 @@ namespace Scripting
 		// the WHOLE <fullLaneCount x T> vector; laneIndices selects (reorders/repeats) the K lanes. The
 		// location's type is the sub-vector <K x T>. A swizzle run is not a single memory element, so
 		// Load builds it by extractelement per lane and Store writes it back by insertelement per lane.
-		std::vector<uint32> laneIndices;
+		std::span<const uint32> laneIndices; // in the function's arena (HIRFunction::NewLanes)
 		bool isUnpacked = false; // the run's region is an UNPACKED struct-of-fields (per-field store), not a SIMD vector
 
 		// VectorLaneDyn: a DYNAMICALLY-indexed element of a packed SIMD vector - the whole-vector
@@ -80,6 +82,8 @@ namespace Scripting
 		// local. Other read-only locations are recognized from their kind (ReadOnly.h: ReadOnlyReason).
 		bool readOnly = false;
 	};
+	// The arena keeps no destructor for an lvalue, and copying one copies a few words.
+	static_assert(std::is_trivially_destructible_v<LValue>);
 
 	// =====================================================================
 	// VALUE - what a resolved expression IS (03.2). Either an rvalue (a quantity,

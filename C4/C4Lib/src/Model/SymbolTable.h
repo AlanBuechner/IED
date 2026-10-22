@@ -195,7 +195,8 @@ namespace Scripting
 		/// tree by recursing through children.
 		void ForEachSymbol(const std::function<void(const SymbolInfo&)>& visit) const
 		{
-			for (const auto& [name, infos] : m_Symbols)
+			if (!m_Symbols) return;
+			for (const auto& [name, infos] : *m_Symbols)
 				for (const auto& info : infos)
 					visit(*info);
 		}
@@ -210,7 +211,9 @@ namespace Scripting
 		Core::String m_Name;
 		Scope* m_Parent = nullptr;
 		static constexpr size_t kComparedNames = 4; // Entries compares names in a layer of at most this many
-		std::unordered_map<Core::String, Core::Vector<std::unique_ptr<SymbolInfo>>> m_Symbols;
+		using Symbols = std::unordered_map<Core::String, Core::Vector<std::unique_ptr<SymbolInfo>>>;
+		// Made by the first Register: most of lowering's block layers declare nothing, and an empty map allocates.
+		std::unique_ptr<Symbols> m_Symbols;
 		Core::Vector<std::unique_ptr<Scope>> m_Children;
 	};
 

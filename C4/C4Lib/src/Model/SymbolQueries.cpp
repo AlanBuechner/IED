@@ -287,14 +287,18 @@ namespace Scripting
 	{
 		ClassHierarchy::ForEachSubobject(type, [&](const ObjectType* t, int64) {
 			auto recsIt = model.m_MethodRecords.find(t);
-			for (uint32 i = 0; i < t->GetMethodCount(); ++i)
-			{
-				const auto& m = t->GetMethods()[i];
-				bool match = isOperatorName ? m.HasOperator(annotation) : m.mName == name;
-				if (!match) continue;
+			auto take = [&](uint32 i) {
 				const FunctionRecord* rec = (recsIt != model.m_MethodRecords.end() && i < recsIt->second.Count()) ? recsIt->second[i] : nullptr;
 				if (rec) out.Push({ rec->type, rec, rec->minArity });
+			};
+			if (!isOperatorName)
+			{
+				if (const Core::Vector<uint32>* named = t->MethodsNamed(name))
+					for (uint32 i : *named) take(i);
+				return;
 			}
+			for (uint32 i = 0; i < t->GetMethodCount(); ++i)
+				if (t->GetMethods()[i].HasOperator(annotation)) take(i);
 		});
 	}
 

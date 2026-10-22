@@ -33,5 +33,7 @@ namespace Testing
 		void TheReflectionImageKeyFollowsWhatItHolds();
 		TEST_FUNC(Semantic.SplitEmission)
 		void APartitionsInlineBodiesDependOnItsOwnCode();
+		TEST_FUNC(Semantic.SplitEmission)
+		void AThunkLivesWithItsTarget();
 	};
 } // namespace Testing

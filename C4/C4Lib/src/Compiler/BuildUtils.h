@@ -68,6 +68,10 @@ namespace Scripting
 	// The toolchain's clang.exe (Toolchain::Clang), or empty after printing where it was looked for.
 	std::string ClangPath();
 
+	/// What clang's driver would hand lld-link for one argument of a link's libraries: `-l<name>` is `<name>.lib`,
+	/// `-L<dir>` a search folder, `-Wl,a,b` its arguments; an object, a library or a resource file goes as it is.
+	std::vector<std::string> LinkerArguments(const std::string& argument);
+
 	// Compile a foreign C/C++ source file to an object file using the bundled clang.
 	// language is "c" or "c++"; defines/includeDirs are passed as -D / -I flags, targetFlags (D-62) and compileFlags (the
 	// build's -O and -g, BUG-285) as written. clang also writes the headers it read to `<objPath>.d`.

@@ -1,5 +1,6 @@
 #include "HostInterfaceTest.h"
 #include "Script/HostInterface.h"
+#include "Compiler/FileIo.h"
 #include <filesystem>
 
 namespace Testing
@@ -173,6 +174,29 @@ namespace Testing
 		other.symbols.push_back("Plan_0");
 		SealInterface(other);
 		TEST_ASSERT(other.buildId != host.buildId);
+		TEST_PASSED();
+	}
+
+	// A sealed interface whose build id the file already has is not written again: a file whose tail was changed
+	// behind its id's back stays as it is, and another interface replaces it.
+	void HostInterfaceTest::AnUnchangedInterfaceIsNotWrittenAgain()
+	{
+		const std::string path = (std::filesystem::temp_directory_path() / "c4-sealed-interface.c4i").string();
+		HostInterface host = Sample();
+		const std::string bytes = SealInterface(host);
+		std::string error;
+		TEST_ASSERT(WriteSealedInterface(bytes, path, &error));
+		std::string changed = bytes;
+		changed.back() ^= 0x5A;
+		TEST_ASSERT(WriteFileBytes(path, changed));
+		TEST_ASSERT(WriteSealedInterface(bytes, path, &error));
+		TEST_ASSERT(ReadFileBytes(path) == changed);
+		HostInterface other = Sample();
+		other.symbols.push_back("Plan_0");
+		const std::string otherBytes = SealInterface(other);
+		TEST_ASSERT(WriteSealedInterface(otherBytes, path, &error));
+		TEST_ASSERT(ReadFileBytes(path) == otherBytes);
+		std::filesystem::remove(path);
 		TEST_PASSED();
 	}
 } // namespace Testing

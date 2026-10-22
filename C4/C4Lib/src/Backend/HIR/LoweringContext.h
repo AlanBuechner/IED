@@ -60,6 +60,7 @@ namespace Scripting
 		// --- slots ---------------------------------------------------------------------------
 		uint32 AllocSlot(const Type* t, const Core::String& name, SlotClass c) { return out->AddSlot(t, name, c); }
 		LValue* NewLValue(const LValue& v) { return out->NewLValue(v); }
+		std::span<const uint32> NewLanes(const std::vector<uint32>& lanes) { return out->NewLanes(lanes); }
 
 		// The one way a parameter or body local enters scope: register `name` in the current layer, bound to
 		// `slot`. A reference local's slot holds the referent's address (its symbol type is a pointer to the

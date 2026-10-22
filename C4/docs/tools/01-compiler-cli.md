@@ -104,9 +104,12 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
    header's, so it is rebuilt exactly when one of them changes, whatever the files' times; each is written to a
    private file and renamed into place, so parallel builds never link a half-written object. All of them are linked into **every** exe; a missing runtime folder or a source that does not
    compile is an error.
-8. Link with `clang -fuse-ld=lld`: the main object (reflection registration is part of it), the runtime
-   objects, foreign objects, `lib(...)` libraries and the `-l` / `-L` arguments, `/SUBSYSTEM:CONSOLE`. With `-g` the link
-   also passes `/DEBUG`, which writes `<base>.pdb` beside the exe.
+8. Link with `lld-link` (beside `clang.exe`), given what clang's driver would give it: the main object (reflection
+   registration is part of it), the runtime objects, foreign objects, `lib(...)` libraries and the `-l` / `-L` / `-Wl,`
+   arguments, `libcmt`, `oldnames` and clang's runtime libraries, `/SUBSYSTEM:CONSOLE`. lld-link finds the MSVC and
+   Windows SDK libraries itself, or through `LIB` when it is set. With `-g` the link also passes `/DEBUG`, which writes
+   `<base>.pdb` beside the exe; the objects carry their CodeView types' global hashes (`.debug$H`), so the link does
+   not compute them.
 
 ---
 

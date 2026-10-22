@@ -29,7 +29,7 @@ namespace Scripting
 		if (opType == TokenType::QuestionMark)
 		{
 			auto node = CreateRef<TernaryExpressionNode>();
-			node->m_Condition = left;
+			node->m_Children[0] = left;
 			node->m_QuestionToken = opToken;
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken(); // consume ?
@@ -40,10 +40,10 @@ namespace Scripting
 				state.GetErrorTracker().AddError(
 					opToken.GetStartLocation(),
 					"Expected expression after '?'", ErrorSeverity::Error);
-				node->m_ThenBranch = nullptr;
+				node->m_Children[1] = nullptr;
 			}
 			else
-				node->m_ThenBranch = thenBranch;
+				node->m_Children[1] = thenBranch;
 
 			Token colon = lexer.PeekCompound();
 			if (colon.GetType() != TokenType::Colon)
@@ -53,8 +53,8 @@ namespace Scripting
 					Core::StringFormat::Format("Expected ':' in ternary expression, got '{0}'", colon.GetText()),
 					ErrorSeverity::Error);
 				node->m_ColonToken = colon;
-				if (node->m_ThenBranch)
-					node->endLocation = node->m_ThenBranch->endLocation;
+				if (node->m_Children[1])
+					node->endLocation = node->m_Children[1]->endLocation;
 				return node;
 			}
 			node->m_ColonToken = colon;
@@ -69,7 +69,7 @@ namespace Scripting
 			}
 			else
 			{
-				node->m_ElseBranch = elseBranch;
+				node->m_Children[2] = elseBranch;
 				node->endLocation = elseBranch->endLocation;
 			}
 
@@ -80,12 +80,12 @@ namespace Scripting
 		if (opType == TokenType::Is)
 		{
 			auto node = CreateRef<TypeCheckNode>();
-			node->m_Operand = left;
+			node->SetOperand(left);
 			node->m_IsToken = opToken;
 			node->startLocation = left->startLocation;
 			node->endLocation = opToken.GetEndLocation();
 			lexer.NextCompoundToken(); // consume 'is'
-			node->m_TargetType = ParseTargetType(state, opToken);
+			node->SetTargetType(ParseTargetType(state, opToken));
 			if (node->m_TargetType)
 				node->endLocation = node->m_TargetType->endLocation;
 			return node;
@@ -95,12 +95,12 @@ namespace Scripting
 		if (opType == TokenType::As)
 		{
 			auto node = CreateRef<SafeCastNode>();
-			node->m_Operand = left;
+			node->SetOperand(left);
 			node->m_AsToken = opToken;
 			node->startLocation = left->startLocation;
 			node->endLocation = opToken.GetEndLocation();
 			lexer.NextCompoundToken(); // consume 'as'
-			node->m_TargetType = ParseTargetType(state, opToken);
+			node->SetTargetType(ParseTargetType(state, opToken));
 			if (node->m_TargetType)
 				node->endLocation = node->m_TargetType->endLocation;
 			return node;
@@ -115,7 +115,7 @@ namespace Scripting
 			opType == TokenType::GreaterGreaterEquals)
 		{
 			auto node = CreateRef<AssignmentExpressionNode>();
-			node->m_LeftOperand = left;
+			node->m_Children[0] = left;
 			node->m_OperatorToken = opToken;
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken(); // consume operator
@@ -130,7 +130,7 @@ namespace Scripting
 			}
 			else
 			{
-				node->m_RightOperand = right;
+				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
 			}
 			return node;
@@ -140,7 +140,7 @@ namespace Scripting
 		if (opType == TokenType::DoublePipe)
 		{
 			auto node = CreateRef<ConditionalOrNode>();
-			node->m_LeftOperand = left;
+			node->m_Children[0] = left;
 			node->m_OperatorToken = opToken;
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken();
@@ -153,7 +153,7 @@ namespace Scripting
 			}
 			else
 			{
-				node->m_RightOperand = right;
+				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
 			}
 			return node;
@@ -163,7 +163,7 @@ namespace Scripting
 		if (opType == TokenType::DoubleAmpersand)
 		{
 			auto node = CreateRef<ConditionalAndNode>();
-			node->m_LeftOperand = left;
+			node->m_Children[0] = left;
 			node->m_OperatorToken = opToken;
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken();
@@ -176,7 +176,7 @@ namespace Scripting
 			}
 			else
 			{
-				node->m_RightOperand = right;
+				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
 			}
 			return node;
@@ -185,7 +185,7 @@ namespace Scripting
 		// --- All other binary operators: +, -, *, /, %, **, <, >, <=, >=, ==, !=, |, ^, &, <<, >> ---
 		{
 			auto node = CreateRef<BinaryExpressionNode>();
-			node->m_LeftOperand = left;
+			node->m_Children[0] = left;
 			node->m_OperatorToken = opToken;
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken(); // consume operator
@@ -200,7 +200,7 @@ namespace Scripting
 			}
 			else
 			{
-				node->m_RightOperand = right;
+				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
 			}
 			return node;

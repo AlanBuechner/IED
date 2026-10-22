@@ -20,6 +20,9 @@ namespace Testing
 		void TestFullProgram();
 
 		TEST_FUNC(Parser.Integration)
+		void ChildrenAreWhatEachNodeHolds();
+
+		TEST_FUNC(Parser.Integration)
 		void TestEnumWithUnderlyingType();
 
 		TEST_FUNC(Parser.Integration)

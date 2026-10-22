@@ -4,12 +4,23 @@
 
 namespace Scripting
 {
-	std::span<const Ref<AstNode>> SafeCastNode::Children() const
+	void SafeCastNode::SetOperand(Ref<AstNode> operand)
+	{
+		m_Operand = operand;
+		KeepChildren();
+	}
+
+	void SafeCastNode::SetTargetType(Ref<QualTypeNode> type)
+	{
+		m_TargetType = type;
+		KeepChildren();
+	}
+
+	void SafeCastNode::KeepChildren()
 	{
 		m_Children.Clear();
 		if (m_Operand) m_Children.Push(m_Operand);
 		if (m_TargetType) m_Children.Push(m_TargetType);
-		return m_Children;
 	}
 
 	Core::String SafeCastNode::ToString() const

@@ -2,6 +2,7 @@
 #include "Model/Types/Type.h"
 #include "Model/ConstantValue.h"
 #include "Parser/AstNode.h" // AccessModifier (member visibility)
+#include <unordered_map>
 #include <vector>
 
 namespace Scripting
@@ -121,7 +122,19 @@ namespace Scripting
 		void AddPackedRegion(const SwizzleType* region, const AstNode* declared);
 		// The storage field of a packed region (null for a region without one).
 		const FieldInfo* PackedStorage(const PackedViewRegion& region) const;
-		void AddMethod(const MethodInfo& method) { m_Methods.Push(method); }
+		void AddMethod(const MethodInfo& method)
+		{
+			m_MethodsNamed[method.mName].Push(m_Methods.Count());
+			m_DeclaresVirtual = m_DeclaresVirtual || (!method.m_IsStatic && (method.m_IsVirtual || method.m_IsOverride));
+			m_Methods.Push(method);
+		}
+		/// The indices into GetMethods of the methods named `name`, in order; null when none is: a call's lookup reads
+		/// these instead of every method of every class it passes.
+		const Core::Vector<uint32>* MethodsNamed(const Core::String& name) const
+		{
+			const auto named = m_MethodsNamed.find(name);
+			return named == m_MethodsNamed.end() ? nullptr : &named->second;
+		}
 
 		/// Size/alignment, lazily computed. Once the type is fully defined and every non-static field
 		/// has a resolved type, GetSize computes the layout on demand (memoized in m_LaidOut). This makes
@@ -260,6 +273,8 @@ namespace Scripting
 		struct UnionRegion { size_t Offset = 0; size_t Size = 0; size_t Alignment = 1; };
 		Core::Vector<UnionRegion> m_UnionRegions;
 		Core::Vector<MethodInfo> m_Methods;
+		std::unordered_map<Core::String, Core::Vector<uint32>> m_MethodsNamed; // MethodsNamed's, kept by AddMethod
+		bool m_DeclaresVirtual = false; // a method of its own is virtual or overrides (IsPolymorphic), kept by AddMethod
 		Core::Vector<const ObjectType*> m_BaseTypes;
 		Core::Vector<size_t> m_BaseOffsets;        // parallel to m_BaseTypes, set by CalculateLayout
 		const ObjectType* m_PrimaryBase = nullptr;

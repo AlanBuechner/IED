@@ -1,9 +1,98 @@
 #include "FullProgramTest.h"
 #include "SourceManager/Source.h"
 #include "Compiler/ErrorTracker.h"
+#include "Parser/Nodes/Expressions/CastExpressionNode.h"
+#include "Parser/Nodes/Expressions/FunctionCallNode.h"
+#include "Parser/Nodes/Expressions/SafeCastNode.h"
+#include "Parser/Nodes/Expressions/TypeCheckNode.h"
+#include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
+#include <initializer_list>
+#include <optional>
+#include <set>
+#include <string>
+#include <typeinfo>
+#include <vector>
 
 namespace Testing
 {
+	namespace
+	{
+		using Listed = std::vector<const Scripting::AstNode*>;
+
+		Listed Present(std::initializer_list<const Scripting::AstNode*> parts)
+		{
+			Listed held;
+			for (const Scripting::AstNode* part : parts)
+				if (part) held.push_back(part);
+			return held;
+		}
+
+		// What a node the parser fills through setters holds, in Children's order; none for another kind.
+		std::optional<Listed> Held(const Scripting::AstNode& node)
+		{
+			using namespace Scripting;
+			if (const auto* call = dynamic_cast<const FunctionCallNode*>(&node))
+			{
+				Listed held = Present({ call->GetCallee().Get() });
+				for (const Ref<AstNode>& argument : call->GetArguments()) held.push_back(argument.Get());
+				return held;
+			}
+			if (const auto* cast = dynamic_cast<const CastExpressionNode*>(&node)) return Present({ cast->GetOperand().Get(), cast->GetTargetType().Get() });
+			if (const auto* as = dynamic_cast<const SafeCastNode*>(&node)) return Present({ as->GetOperand().Get(), as->GetTargetType().Get() });
+			if (const auto* is = dynamic_cast<const TypeCheckNode*>(&node)) return Present({ is->GetOperand().Get(), is->GetTargetType().Get() });
+			if (const auto* size = dynamic_cast<const TypeOfExpressionNode*>(&node))
+				return size->GetTargetType() ? Present({ size->GetTargetType().Get() }) : Present({ size->GetOperand().Get() });
+			return std::nullopt;
+		}
+
+		// Every node under `node`: the children of a kind Held knows are what it holds, and asking again gives the same.
+		void CheckChildren(const Scripting::AstNode& node, std::set<std::string>& kinds, int& wrong)
+		{
+			const std::span<const Ref<Scripting::AstNode>> children = node.Children();
+			Listed listed;
+			for (const Ref<Scripting::AstNode>& child : children) listed.push_back(child.Get());
+			if (const std::optional<Listed> held = Held(node))
+			{
+				kinds.insert(typeid(node).name());
+				if (*held != listed) wrong++;
+			}
+			const std::span<const Ref<Scripting::AstNode>> again = node.Children();
+			if (again.data() != children.data() || again.size() != children.size()) wrong++;
+			for (const Ref<Scripting::AstNode>& child : children)
+				if (child) CheckChildren(*child, kinds, wrong);
+		}
+	}
+
+	// The parser keeps each node's children as it fills the node, so a walk reads them and never rebuilds them (two
+	// threads may walk one body): a call, the casts and the size queries list exactly what they hold.
+	void FullProgramTest::ChildrenAreWhatEachNodeHolds()
+	{
+		auto stream = Scripting::Source::FromMemory(Core::String(
+			"class Shape { public int32 sides; }\n"
+			"class Square : public Shape { }\n"
+			"int32 Probe(Shape* s, int32* values, int32 n)\n"
+			"{\n"
+			"    int32 total = (int32)sizeof(int32) + static_cast<int32>(n) + sizeof n;\n"
+			"    Square* q = s as Square*;\n"
+			"    bool square = s is Square*;\n"
+			"    total = total > 0 && n < 3 || values[1] == 2 ? Probe(s, values, n - 1) : 0;\n"
+			"    return total;\n"
+			"}\n"));
+		Scripting::Lexer lexer(*stream, 0);
+		Scripting::ErrorTracker errorTracker;
+		Scripting::ParserState state(lexer, errorTracker);
+		auto root = CreateRef<Scripting::NamespaceNode>();
+		root->SetIsRoot(true);
+		root->ParseBody(state);
+		TEST_ASSERT(errorTracker.GetErrors().Empty());
+		std::set<std::string> kinds;
+		int wrong = 0;
+		CheckChildren(*root, kinds, wrong);
+		TEST_ASSERT_EQ(wrong, 0);
+		TEST_ASSERT_EQ(kinds.size(), size_t(5));
+		TEST_PASSED();
+	}
+
 	void FullProgramTest::TestFullProgram()
 	{
 		auto source = Core::String(R"(

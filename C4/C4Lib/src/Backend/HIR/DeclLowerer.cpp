@@ -67,8 +67,8 @@ namespace Scripting
 		auto typeR = m_Ctx.Fail(n, m_Ctx.queries().ResolveTypeCtx(*n->GetType().Get(), m_Ctx.unitId, m_Ctx.scope));
 		if (!typeR.Ok()) return QueryResult<void>::Fail(typeR.error, typeR.message);
 		const Type* t = typeR.value;
-		if (Core::String why = Abstractness::ByValue(m_Ctx.model(), "'" + n->GetNameToken().GetText() + "'", t); !why.empty())
-			return m_Ctx.Fail(n, QueryResult<void>::Fail(QueryError::NotAValue, why));
+		if (Core::String why = Abstractness::WhyNoValue(m_Ctx.model(), t); !why.empty())
+			return m_Ctx.Fail(n, QueryResult<void>::Fail(QueryError::NotAValue, Abstractness::ByValue("'" + n->GetNameToken().GetText() + "'", why)));
 
 		// A thread_local local has static storage, as in C++.
 		if (n->IsStatic() || n->IsThreadLocal())

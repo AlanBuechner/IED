@@ -43,7 +43,8 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
   IsolatedCorpusModelTest - the last one loads real `assets/IsolatedTest` files with the headers beside each;
   DebugInfoTest - the `-g` metadata of a lowered module; ConstEvaluatorTest - constant folding; ScopeGuardTest;
   AliasTagsTest - the strict-aliasing class of each access, D-64),
-  `Compiler/` (the runtime objects, the error tracker, project sets, the object cache and the module split:
+  `Compiler/` (the runtime objects, the error tracker, project sets, the arguments a link hands lld-link, the object
+  cache and the module split:
   every partition verifies, a definition is in one partition, private data lives with its user, and adding a
   function leaves the other partitions' bitcode byte for byte the same; partitions with the same code share one object,
   BUG-366; a keyed module, the reflection image, is built only when its object is missing), `Protocol/` (the JSON values and framing of `C4Protocol`), `LSP/` (the language server, linked

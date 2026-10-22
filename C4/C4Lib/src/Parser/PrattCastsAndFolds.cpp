@@ -164,8 +164,8 @@ namespace Scripting
 				auto node = CreateRef<CastExpressionNode>();
 				node->m_Kind = CastExpressionNode::CastKind::CStyle;
 				node->m_CastKeywordToken = openParen;
-				node->m_TargetType = parsedType;
-				node->m_Operand = operand;
+				node->SetTargetType(parsedType);
+				node->SetOperand(operand);
 				node->startLocation = openParen.GetStartLocation();
 				node->endLocation = operand->endLocation;
 
@@ -266,7 +266,7 @@ namespace Scripting
 				ErrorSeverity::Error);
 		}
 		else
-			node->m_TargetType = targetType;
+			node->SetTargetType(targetType);
 
 		// Expect >
 		Token gt = lexer.PeekCompound();
@@ -303,7 +303,7 @@ namespace Scripting
 				ErrorSeverity::Error);
 		}
 		else
-			node->m_Operand = operand;
+			node->SetOperand(operand);
 
 		Token close = lexer.PeekCompound();
 		if (close.GetType() != TokenType::CloseParen)

@@ -6,8 +6,9 @@ namespace Scripting
 
 	bool Scope::Register(const Core::String& name, const SymbolInfo& info, const FunctionRecord* fn)
 	{
-		auto it = m_Symbols.find(name);
-		if (it != m_Symbols.end())
+		if (!m_Symbols) m_Symbols = std::make_unique<Symbols>();
+		auto it = m_Symbols->find(name);
+		if (it != m_Symbols->end())
 		{
 			Core::Vector<std::unique_ptr<SymbolInfo>>& entries = it->second;
 			for (auto& e : entries)
@@ -30,7 +31,7 @@ namespace Scripting
 		auto stored = std::make_unique<SymbolInfo>(info);
 		stored->declaringScope = this;
 		if (fn) stored->functions.Push(fn);
-		m_Symbols[name].Push(std::move(stored));
+		(*m_Symbols)[name].Push(std::move(stored));
 		return true;
 	}
 
@@ -39,38 +40,41 @@ namespace Scripting
 	const Core::Vector<std::unique_ptr<SymbolInfo>>& Scope::Entries(const Core::String& name) const
 	{
 		static const Core::Vector<std::unique_ptr<SymbolInfo>> kEmpty;
-		if (m_Symbols.size() <= kComparedNames)
+		if (!m_Symbols) return kEmpty;
+		if (m_Symbols->size() <= kComparedNames)
 		{
-			for (const auto& [held, entries] : m_Symbols)
+			for (const auto& [held, entries] : *m_Symbols)
 				if (held == name) return entries;
 			return kEmpty;
 		}
-		auto it = m_Symbols.find(name);
-		return it != m_Symbols.end() ? it->second : kEmpty;
+		auto it = m_Symbols->find(name);
+		return it != m_Symbols->end() ? it->second : kEmpty;
 	}
 
 	const SymbolInfo* Scope::Find(const Core::String& name) const
 	{
-		auto it = m_Symbols.find(name);
-		if (it != m_Symbols.end() && !it->second.Empty()) return it->second[0].get();
+		if (m_Symbols)
+			if (auto it = m_Symbols->find(name); it != m_Symbols->end() && !it->second.Empty()) return it->second[0].get();
 		return m_Parent ? m_Parent->Find(name) : nullptr;
 	}
 
 	void Scope::SetFunctionVisibilityUnit(const Core::String& name, uint32 unit)
 	{
-		auto it = m_Symbols.find(name);
-		if (it == m_Symbols.end()) return;
+		if (!m_Symbols) return;
+		auto it = m_Symbols->find(name);
+		if (it == m_Symbols->end()) return;
 		for (auto& e : it->second)
 			if (e->kind == SymbolKind::Function && e->definingUnit != unit) e->definingUnit = unit;
 	}
 
+	// From the back: the layer a guard pops is the last one pushed under its parent, which may hold many.
 	std::unique_ptr<Scope> Scope::TakeChild(Scope* child)
 	{
-		for (auto it = m_Children.begin(); it != m_Children.end(); ++it)
+		for (uint32 i = m_Children.Count(); i-- > 0;)
 		{
-			if (it->get() != child) continue;
-			std::unique_ptr<Scope> taken = std::move(*it);
-			m_Children.Remove(it);
+			if (m_Children[i].get() != child) continue;
+			std::unique_ptr<Scope> taken = std::move(m_Children[i]);
+			m_Children.Remove(m_Children.begin() + i);
 			return taken;
 		}
 		return nullptr;
@@ -78,7 +82,8 @@ namespace Scripting
 
 	void Scope::Enumerate(Core::Vector<std::pair<Core::String, SymbolInfo*>>& out) const
 	{
-		for (const auto& [name, entries] : m_Symbols)
+		if (!m_Symbols) return;
+		for (const auto& [name, entries] : *m_Symbols)
 			for (auto& e : entries) out.Push({ name, e.get() });
 	}
 

@@ -58,7 +58,7 @@ build that changed nothing and 100 MB more at the peak; 256 saves no more and co
 | a global's storage | defined where code first names it | defined in its declaring file's partition, its initial data (`StartAsData`) there; declared elsewhere |
 | a constant with no symbol (an unscoped enum's member) | no storage | no storage |
 | vtables and their thunks, RTTI locators, EH tables, strings, GUIDs, census records and counters, `c4.ipow.*`, finalizers, `func` thunks | internal or private | internal or private in each partition that uses them: dispatch and casts work through any copy (type identity is the RTTI type descriptor, `linkonce_odr`), and the runtime merges census records by name |
-| invoke thunks | internal | hidden external `<name>.local` in partition 0, which the image's module names |
+| invoke thunks | internal | hidden external `<name>.local`, which the image's module names: an own thunk in its target's partition, a shared one where its name places it, emitted at once with the round's others |
 | the reflection image and its rows and strings | in partition 0: external, private | in the image's own module (D-82): `__c4_reflect_image` external, the rest private; partition 0 declares the image |
 
 ## The reflection image (D-82)

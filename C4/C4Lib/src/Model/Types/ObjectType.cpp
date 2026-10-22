@@ -146,9 +146,7 @@ namespace Scripting
 
 	bool ObjectType::IsPolymorphic() const
 	{
-		if (IsInterface()) return true;
-		for (const auto& method : m_Methods)
-			if (!method.m_IsStatic && (method.m_IsVirtual || method.m_IsOverride)) return true;
+		if (IsInterface() || m_DeclaresVirtual) return true;
 		for (const ObjectType* base : m_BaseTypes)
 			if (base && base->IsPolymorphic()) return true;
 		return false;

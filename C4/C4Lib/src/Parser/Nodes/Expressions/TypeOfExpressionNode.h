@@ -33,7 +33,7 @@ namespace Scripting
 		const Core::Vector<Token>& GetFieldPath() const { return m_FieldPath; }
 		const Token& GetPackName() const { return m_PackName; }
 
-		std::span<const Ref<AstNode>> Children() const override;
+		std::span<const Ref<AstNode>> Children() const override { return m_Children; }
 		Core::String ToString() const override;
 
 	protected:
@@ -44,6 +44,8 @@ namespace Scripting
 		bool ParseTypeOperand(ParserState& state);
 		bool ParseFieldPath(ParserState& state);
 		bool ParseExpressionOperand(ParserState& state);
+		/// The operand, a type or an expression, and Children with it.
+		void SetOperand(Ref<QualTypeNode> type, Ref<AstNode> expression);
 
 		Ref<QualTypeNode> m_TargetType;
 		Ref<AstNode> m_Operand;
@@ -51,6 +53,6 @@ namespace Scripting
 		Token m_KeywordToken;
 		Kind m_Kind = Kind::SizeOf;
 		Token m_PackName;
-		mutable Core::Vector<Ref<AstNode>> m_Children;
+		Core::Vector<Ref<AstNode>> m_Children; // the type operand, else the expression
 	};
 }

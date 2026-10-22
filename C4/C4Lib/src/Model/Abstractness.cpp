@@ -10,6 +10,7 @@ namespace Scripting::Abstractness
 		// The first virtual method of `type`'s vtables whose final overrider has no implementation.
 		const ObjectType::MethodInfo* Unimplemented(const ProgramModel& model, const ObjectType* type)
 		{
+			if (!type->IsPolymorphic()) return nullptr;
 			for (const VirtualTables::VptrLocation& location : VirtualTables::VptrLocations(type))
 				for (const VirtualTables::Slot& slot : VirtualTables::PrimarySlots(location.layout))
 				{
@@ -30,11 +31,10 @@ namespace Scripting::Abstractness
 
 	Core::String WhyAbstract(const ProgramModel& model, const ObjectType* type)
 	{
-		const Core::String name = "'" + type->GetName() + "'";
-		if (type->IsInterface()) return name + " is an interface";
-		if (type->IsAbstract()) return name + " is abstract";
+		if (type->IsInterface()) return "'" + type->GetName() + "' is an interface";
+		if (type->IsAbstract()) return "'" + type->GetName() + "' is abstract";
 		if (const ObjectType::MethodInfo* missing = Unimplemented(model, type))
-			return name + " is abstract: '" + missing->mName + "' is not implemented";
+			return "'" + type->GetName() + "' is abstract: '" + missing->mName + "' is not implemented";
 		return "";
 	}
 
@@ -45,22 +45,20 @@ namespace Scripting::Abstractness
 		return WhyAbstract(model, static_cast<const ObjectType*>(t));
 	}
 
-	Core::String ByValue(const ProgramModel& model, const Core::String& what, const Type* type)
+	Core::String ByValue(const Core::String& what, const Core::String& why)
 	{
-		Core::String why = WhyNoValue(model, type);
-		return why.empty() ? why : what + ": " + why + "; use a pointer or a reference";
+		return what + ": " + why + "; use a pointer or a reference";
 	}
 
 	Core::String Signature(const ProgramModel& model, const FunctionRecord& fn)
 	{
 		if (!fn.type) return "";
-		if (Core::String why = ByValue(model, "the return value of '" + fn.name + "'", fn.type->GetReturnType()); !why.empty()) return why;
+		if (Core::String why = WhyNoValue(model, fn.type->GetReturnType()); !why.empty())
+			return ByValue("the return value of '" + fn.name + "'", why);
 		const auto& params = fn.type->GetParameters();
 		for (uint32 i = 0; i < params.Count(); ++i)
-		{
-			const Core::String name = i < fn.paramNames.Count() ? fn.paramNames[i] : Core::String("?");
-			if (Core::String why = ByValue(model, "parameter '" + name + "' of '" + fn.name + "'", params[i].m_Type); !why.empty()) return why;
-		}
+			if (Core::String why = WhyNoValue(model, params[i].m_Type); !why.empty())
+				return ByValue("parameter '" + (i < fn.paramNames.Count() ? fn.paramNames[i] : Core::String("?")) + "' of '" + fn.name + "'", why);
 		return "";
 	}
 

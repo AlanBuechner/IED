@@ -3,6 +3,7 @@
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/Toolchain.h"
+#include "Model/Types/QualifiedName.h"
 #include "Script/HostTable.h"
 #include "Script/InlineBodies.h"
 #include <algorithm>
@@ -245,6 +246,32 @@ namespace Testing
 				reused += bodies.empty() ? 0 : 1;
 			}
 		TEST_ASSERT(reused > 0);
+	}
+
+	// An invoke thunk is emitted where its target is, a shared one by its name, and none in partition 0: an edit that
+	// adds a reflected method changes only its own partition.
+	void SplitEmissionTest::AThunkLivesWithItsTarget()
+	{
+		TEST_ASSERT(LowerSplit(4, [](const std::vector<llvm::Module*>& modules) {
+			const llvm::StringRef prefix = "__c4_invoke_", shared = "__c4_invoke_sig_";
+			std::map<std::string, size_t> home; // each definition by its escaped program name, as a thunk names its target
+			for (size_t i = 0; i < modules.size(); ++i)
+				for (const llvm::Function& f : *modules[i])
+					if (!f.isDeclaration()) home[EscapedText(Core::String(ProgramName(f).str().c_str())).c_str()] = i;
+			int own = 0;
+			for (size_t i = 0; i < modules.size(); ++i)
+				for (const llvm::Function& f : *modules[i])
+				{
+					const llvm::StringRef name = ProgramName(f);
+					if (f.isDeclaration() || !name.starts_with(prefix)) continue;
+					TEST_ASSERT(i != 0);
+					if (name.starts_with(shared)) continue;
+					const auto target = home.find(name.drop_front(prefix.size()).str());
+					TEST_ASSERT(target != home.end() && target->second == i);
+					own++;
+				}
+			TEST_ASSERT(own > 0);
+		}));
 	}
 
 	// An unscoped enum's members are constants the model lists with the globals: no partition gives them storage, so

@@ -58,8 +58,8 @@ namespace Scripting
 		// A compiled resource file (llvm-rc or rc.exe output) goes to the linker as it is.
 		bool IsResourceFile(const std::string& v) { return fs::path(v).extension() == ".res"; }
 
-		// The objects and libraries a link takes, one quoted argument a line, in a response file at `path`; forward
-		// slashes, which neither quoting convention escapes.
+		// The objects and libraries a link takes, as lld-link's arguments, one quoted argument a line, in a response
+		// file at `path`; forward slashes, which neither quoting convention escapes.
 		bool WriteLinkInputs(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries, const std::string& path)
 		{
 			std::string text;
@@ -67,8 +67,9 @@ namespace Scripting
 				std::replace(argument.begin(), argument.end(), '\\', '/');
 				text += "\"" + argument + "\"\n";
 			};
-			for (const Core::String& object : objects) add(object);
-			for (const Core::String& library : libraries) add(library);
+			for (const Core::String& object : objects) add(object.c_str());
+			for (const Core::String& library : libraries)
+				for (const std::string& argument : LinkerArguments(library.c_str())) add(argument);
 			if (WriteFileBytes(path, text)) return true;
 			std::cerr << "error: cannot write the link's inputs to " << path << std::endl;
 			return false;
@@ -210,6 +211,30 @@ namespace Scripting
 		return clang.string();
 	}
 
+	std::vector<std::string> LinkerArguments(const std::string& argument)
+	{
+		if (argument.rfind("-Wl,", 0) == 0)
+		{
+			std::vector<std::string> split;
+			for (size_t from = 4; from <= argument.size();)
+			{
+				const size_t found = argument.find(',', from);
+				const size_t comma = found == std::string::npos ? argument.size() : found;
+				if (comma > from) split.push_back(argument.substr(from, comma - from));
+				from = comma + 1;
+			}
+			return split;
+		}
+		if (argument.rfind("-l", 0) == 0)
+		{
+			const std::string name = argument.substr(2);
+			const bool named = name.size() >= 4 && _stricmp(name.c_str() + name.size() - 4, ".lib") == 0;
+			return { named ? name : name + ".lib" };
+		}
+		if (argument.rfind("-L", 0) == 0) return { "-libpath:" + argument.substr(2) };
+		return { argument };
+	}
+
 	bool RunTool(const std::vector<std::string>& args)
 	{
 		std::wstring cmdLine;
@@ -327,24 +352,27 @@ namespace Scripting
 	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
 		const Core::String& outputPath, Subsystem subsystem, bool verbose)
 	{
-		const std::string clangPath = ClangPath();
-		if (clangPath.empty()) return false;
-
-		// Link directly with clang - it handles CRT discovery and MSVC import libs correctly. The objects and libraries
-		// go in a response file: a split program's object paths outgrow a Windows command line (32,767 characters).
+		const fs::path lld = Toolchain::LldLink();
+		if (lld.empty())
+		{
+			std::cerr << "error: lld-link.exe was not found beside clang.exe (" << ClangPath() << ")" << std::endl;
+			return false;
+		}
+		// lld-link itself, as clang's driver would run it: it finds the MSVC and Windows SDK libraries on its own (or
+		// through LIB when that is set), and one process less starts. The objects and libraries go in a response file:
+		// a split program's object paths outgrow a Windows command line (32,767 characters).
 		const std::string inputs = std::string(outputPath.c_str()) + ".link.rsp";
 		if (!WriteLinkInputs(objects, libraries, inputs)) return false;
-		std::vector<std::string> args = { clangPath, "-target", "x86_64-pc-windows-msvc", "-fuse-ld=lld", "@" + inputs };
-
-		args.push_back("-o");
-		args.push_back(outputPath);
-		args.push_back("-mstackrealign");
+		std::vector<std::string> args = { lld.string(), "-nologo", "-out:" + std::string(outputPath.c_str()), "-defaultlib:libcmt",
+			"-defaultlib:oldnames" };
+		if (const fs::path builtins = Toolchain::ClangRuntimeLibraries(); !builtins.empty()) args.push_back("-libpath:" + builtins.string());
+		args.push_back("@" + inputs);
 		if (subsystem == Subsystem::Windows)
 		{
-			args.push_back("-Wl,/SUBSYSTEM:WINDOWS");
-			args.push_back("-Wl,/ENTRY:mainCRTStartup"); // the C runtime's console entry, which calls main, not WinMain
+			args.push_back("/SUBSYSTEM:WINDOWS");
+			args.push_back("/ENTRY:mainCRTStartup"); // the C runtime's console entry, which calls main, not WinMain
 		}
-		else args.push_back("-Wl,/SUBSYSTEM:CONSOLE");
+		else args.push_back("/SUBSYSTEM:CONSOLE");
 
 		if (verbose)
 		{

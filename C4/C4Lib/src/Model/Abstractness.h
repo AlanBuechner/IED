@@ -14,8 +14,9 @@ namespace Scripting
 		/// type counts; a pointer or a reference is not an object of its pointee.
 		Core::String WhyNoValue(const ProgramModel& model, const Type* type);
 
-		/// `what` (a local, a field, a parameter) cannot be a value of its abstract type: the message, or empty.
-		Core::String ByValue(const ProgramModel& model, const Core::String& what, const Type* type);
+		/// The message for `what` (a local, a field, a parameter), whose type WhyNoValue said `why` of. Asked only then:
+		/// every local, field and parameter is checked, few fail.
+		Core::String ByValue(const Core::String& what, const Core::String& why);
 
 		/// A by-value parameter or return value of `fn` whose type is abstract: the message, or empty.
 		Core::String Signature(const ProgramModel& model, const FunctionRecord& fn);

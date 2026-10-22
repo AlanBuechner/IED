@@ -434,7 +434,7 @@ bool ProgramOutput::WriteScriptInterface()
 {
 	const std::string interfacePath = fs::path(m_In.options.outputFile.c_str()).replace_extension(".c4i").string();
 	std::string error;
-	if (!Scripting::WriteInterfaceBytes(m_InterfaceBytes, interfacePath, &error))
+	if (!Scripting::WriteSealedInterface(m_InterfaceBytes, interfacePath, &error))
 	{
 		m_In.result.AddBackendError(Core::String(error.c_str()));
 		return false;
