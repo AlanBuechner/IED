@@ -3,8 +3,9 @@
 // heap pointer for the GC-finalizer close path. Each test writes a file in the temp directory and removes it.
 
 include "bedrock.ch"
+include "scratch.ch"
 
-FS::Path ScratchFile(const char* name) { return FS::TempDirectory() / name; }
+FS::Path ScratchFile(const char* name) { return TestScratch() / name; }
 
 [test("fs.file.write_read")]
 public static void TestFileWriteRead() {

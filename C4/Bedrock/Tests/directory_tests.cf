@@ -2,9 +2,10 @@
 // removes itself. Paths are UTF-8 on every platform (BUG-176).
 
 include "bedrock.ch"
+include "scratch.ch"
 
 FS::Path ScratchFolder(const char* test) {
-	FS::Path folder = FS::TempDirectory() / "c4_bedrock_fs" / test;
+	FS::Path folder = TestScratch() / "c4_bedrock_fs" / test;
 	FS::RemoveAll(folder.CStr());
 	FS::MakeDirectories(folder.CStr());
 	return folder;

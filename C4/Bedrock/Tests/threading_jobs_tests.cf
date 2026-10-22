@@ -72,14 +72,22 @@ class JobTests {
 		assert_eq(11, g_observedBegins.Load(), "an empty observer is told nothing");
 	}
 
+	// A background worker also takes frame jobs while the frame workers are busy, so the background job holds it until
+	// the frame job has run: then only the frame worker can have run that.
 	[test("worker_names")]
 	public static void TestWorkerNames() {
 		Threading::JobSystem jobs(Workers(1, 1));
 		RanOn* frame = new RanOn;
 		RanOn* background = new RanOn;
+		Threading::Atomic<int32> stage;   // 1: the background job runs; 2: the frame job ran
 		Threading::WaitGroup group;
-		jobs.Submit([frame]() { frame->Record(); }, Threading::JobPriority::High, &group);
-		jobs.Submit([background]() { background->Record(); }, Threading::JobPriority::Background, &group);
+		jobs.Submit([background, &stage]() {
+			background->Record();
+			stage.Store(1);
+			while (stage.Load() != 2) Threading::Thread::Yield();
+		}, Threading::JobPriority::Background, &group);
+		while (stage.Load() != 1) Threading::Thread::Yield();
+		jobs.Submit([frame, &stage]() { frame->Record(); stage.Store(2); }, Threading::JobPriority::High, &group);
 		group.Wait();
 		assert_se("Job Worker 0", frame->name.CStr(), "a frame worker's thread is named for it");
 		assert_se("Background Worker 0", background->name.CStr(), "and a background worker's");

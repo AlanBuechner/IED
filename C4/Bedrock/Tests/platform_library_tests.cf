@@ -2,6 +2,7 @@
 // symbols, files that are no library, closed and moved libraries, and two handles to one module.
 
 include "bedrock.ch"
+include "scratch.ch"
 
 const char* kMissingLibrary = "c4_platform_no_such_library.dll";
 
@@ -80,7 +81,7 @@ class LibraryTests {
 
 	[test("not_a_library")]
 	public static void TestNotALibrary() {
-		FS::Path path = FS::TempDirectory() / "c4_platform_not_a_library.dll";
+		FS::Path path = TestScratch() / "c4_platform_not_a_library.dll";
 		FS::File file = FS::File(path.CStr(), "wb");
 		file.Write("plain text", 10);
 		file.Close();

@@ -3,11 +3,12 @@
 // watched folder removed, and failures.
 
 include "bedrock.ch"
+include "scratch.ch"
 
 const int32 kWatchWaitMs = 10000;
 
 static FS::Path WatchScratch(const char* test) {
-	FS::Path folder = FS::TempDirectory() / "c4_bedrock_fs_watch" / test;
+	FS::Path folder = TestScratch() / "c4_bedrock_fs_watch" / test;
 	FS::RemoveAll(folder.CStr());
 	FS::MakeDirectories(folder.CStr());
 	return folder;
@@ -105,6 +106,7 @@ class WatchTests {
 			if (change.kind == FS::ChangeKind::Overflow) overflowed = true;
 			else if (change.kind == FS::ChangeKind::Added) seen.Insert(change.path, true);
 		}
+		assert_se("", watcher.Error(), "it ends quiet, not failed");
 		assert_true(watcher.TimedOut(), "it ends quiet, not failed");
 		assert_true(overflowed || seen.Count() == (int64)count, "every file seen, or an Overflow said some were not");
 		FS::RemoveAll(folder.CStr());

@@ -3,6 +3,7 @@
 // strings and long streams; FS::ChunkReader, JsonFileStream over a real file, BinaryStream and DomDoc::Clear.
 
 include "bedrock.ch"
+include "scratch.ch"
 
 struct StreamedEntity
 {
@@ -311,7 +312,7 @@ class JsonStreamTests {
 class ChunkReaderTests {
 	[test("chunks_in_order")]
 	public static void TestChunksInOrder() {
-		FS::Path path = FS::TempDirectory() / "c4_bedrock_chunks_test.bin";
+		FS::Path path = TestScratch() / "c4_bedrock_chunks_test.bin";
 		Core::StringBuilder bytes;
 		for (int32 i = 0; i < 2500; ++i) bytes.AppendByte(i % 251);
 		assert_true(WriteFile(path, bytes.View()), "the file is written");
@@ -338,9 +339,9 @@ class ChunkReaderTests {
 
 	[test("missing_and_empty")]
 	public static void TestMissingAndEmpty() {
-		FS::ChunkReader missing = FS::ChunkReader((FS::TempDirectory() / "c4_no_such_file.bin").CStr());
+		FS::ChunkReader missing = FS::ChunkReader((TestScratch() / "c4_no_such_file.bin").CStr());
 		assert_true(!missing.IsOpen() && missing.Next().IsEmpty(), "a missing file has no chunks");
-		FS::Path path = FS::TempDirectory() / "c4_bedrock_chunks_empty.bin";
+		FS::Path path = TestScratch() / "c4_bedrock_chunks_empty.bin";
 		assert_true(WriteFile(path, Core::StringView("")), "an empty file");
 		FS::ChunkReader empty = FS::ChunkReader(path.CStr(), 64);
 		assert_true(empty.IsOpen() && empty.Next().IsEmpty() && !empty.Failed(), "an empty file has none");
@@ -350,7 +351,7 @@ class ChunkReaderTests {
 
 	[test("closed_while_reading")]
 	public static void TestClosedWhileReading() {
-		FS::Path path = FS::TempDirectory() / "c4_bedrock_chunks_close.bin";
+		FS::Path path = TestScratch() / "c4_bedrock_chunks_close.bin";
 		Core::StringBuilder bytes;
 		for (int32 i = 0; i < 100000; ++i) bytes.AppendByte('z');
 		assert_true(WriteFile(path, bytes.View()), "the file is written");
@@ -369,7 +370,7 @@ class ChunkReaderTests {
 class JsonFileStreamTests {
 	[test("entities_from_a_file")]
 	public static void TestEntitiesFromAFile() {
-		FS::Path path = FS::TempDirectory() / "c4_bedrock_level_test.json";
+		FS::Path path = TestScratch() / "c4_bedrock_level_test.json";
 		Core::StringBuilder text;
 		text.Append("{\"level\": \"test\", \"entities\": [\n");
 		for (int32 i = 0; i < 2000; ++i) {
@@ -384,36 +385,38 @@ class JsonFileStreamTests {
 		}
 		text.Append("\n], \"done\": true}");
 		assert_true(WriteFile(path, text.View()), "the level is written");
-		Serialization::JsonFileStream level = Serialization::JsonFileStream(path.CStr(), 777);
-		assert_true(level.IsOpen(), "it opens");
-		assert_true(level.Next() == Serialization::JsonEvent::BeginObject, "{");
-		assert_true(level.Next() == Serialization::JsonEvent::Key, "\"level\"");
-		assert_true(level.SkipValue() == Serialization::JsonEvent::Value, "skipped");
-		assert_true(level.Next() == Serialization::JsonEvent::Key && level.Stream().Text() == Core::StringView("entities"), "\"entities\"");
-		assert_true(level.Next() == Serialization::JsonEvent::BeginArray, "[");
-		int64 count = 0;
-		int64 hp = 0;
-		int64 tags = 0;
-		StreamedEntity entity;
-		Serialization::JsonEvent event = level.ReadNext(entity);
-		for (; event == Serialization::JsonEvent::Value; event = level.ReadNext(entity)) {
-			count += 1;
-			hp += entity.hp;
-			tags += entity.tags[0];
-			entity = StreamedEntity();
+		{   // the stream closes the file at the block's end, so it can be removed
+			Serialization::JsonFileStream level = Serialization::JsonFileStream(path.CStr(), 777);
+			assert_true(level.IsOpen(), "it opens");
+			assert_true(level.Next() == Serialization::JsonEvent::BeginObject, "{");
+			assert_true(level.Next() == Serialization::JsonEvent::Key, "\"level\"");
+			assert_true(level.SkipValue() == Serialization::JsonEvent::Value, "skipped");
+			assert_true(level.Next() == Serialization::JsonEvent::Key && level.Stream().Text() == Core::StringView("entities"), "\"entities\"");
+			assert_true(level.Next() == Serialization::JsonEvent::BeginArray, "[");
+			int64 count = 0;
+			int64 hp = 0;
+			int64 tags = 0;
+			StreamedEntity entity;
+			Serialization::JsonEvent event = level.ReadNext(entity);
+			for (; event == Serialization::JsonEvent::Value; event = level.ReadNext(entity)) {
+				count += 1;
+				hp += entity.hp;
+				tags += entity.tags[0];
+				entity = StreamedEntity();
+			}
+			assert_true(event == Serialization::JsonEvent::EndArray, "the array ends the loop");
+			assert_eq((int64)2000, count, "every entity");
+			assert_eq((int64)99000, hp, "with its hp");
+			assert_eq((int64)1999000, tags, "and its tags");
+			assert_true(level.Next() == Serialization::JsonEvent::Key && level.Next() == Serialization::JsonEvent::Bool, "\"done\": true");
+			assert_true(level.Next() == Serialization::JsonEvent::EndObject && level.Next() == Serialization::JsonEvent::End, "}, then the end");
 		}
-		assert_true(event == Serialization::JsonEvent::EndArray, "the array ends the loop");
-		assert_eq((int64)2000, count, "every entity");
-		assert_eq((int64)99000, hp, "with its hp");
-		assert_eq((int64)1999000, tags, "and its tags");
-		assert_true(level.Next() == Serialization::JsonEvent::Key && level.Next() == Serialization::JsonEvent::Bool, "\"done\": true");
-		assert_true(level.Next() == Serialization::JsonEvent::EndObject && level.Next() == Serialization::JsonEvent::End, "}, then the end");
-		FS::RemoveFile(path.CStr());
+		assert_true(FS::RemoveFile(path.CStr()), "the closed file is removed");
 	}
 
 	[test("missing_file")]
 	public static void TestMissingFile() {
-		Serialization::JsonFileStream missing = Serialization::JsonFileStream((FS::TempDirectory() / "c4_no_such_level.json").CStr());
+		Serialization::JsonFileStream missing = Serialization::JsonFileStream((TestScratch() / "c4_no_such_level.json").CStr());
 		assert_true(!missing.IsOpen() && missing.Next() == Serialization::JsonEvent::Error, "a missing file is an error");
 		assert_se("the file cannot be opened", missing.Stream().Failure().error, "that says so");
 	}

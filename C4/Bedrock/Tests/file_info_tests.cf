@@ -3,9 +3,10 @@
 // which needs no privilege.
 
 include "bedrock.ch"
+include "scratch.ch"
 
 static FS::Path InfoScratch(const char* test) {
-	FS::Path folder = FS::TempDirectory() / "c4_bedrock_fs_info" / test;
+	FS::Path folder = TestScratch() / "c4_bedrock_fs_info" / test;
 	FS::RemoveAll(folder.CStr());
 	FS::MakeDirectories(folder.CStr());
 	return folder;
