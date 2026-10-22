@@ -10,7 +10,7 @@ namespace Ied
 	const int64 kLspWriterSliceMs = 200;
 	// The capabilities after `general` (ClientCapabilities).
 	const char* kTextDocumentCapabilities =
-		"\"textDocument\":{\"synchronization\":{\"didSave\":true},\"completion\":{\"completionItem\":{\"snippetSupport\":true,\"documentationFormat\":[\"markdown\",\"plaintext\"],\"resolveSupport\":{\"properties\":[\"documentation\",\"detail\"]}},\"contextSupport\":true},\"hover\":{\"contentFormat\":[\"markdown\",\"plaintext\"]},\"signatureHelp\":{\"signatureInformation\":{\"documentationFormat\":[\"markdown\",\"plaintext\"],\"parameterInformation\":{\"labelOffsetSupport\":true}}},\"definition\":{\"linkSupport\":true},\"declaration\":{\"linkSupport\":true},\"typeDefinition\":{\"linkSupport\":true},\"implementation\":{\"linkSupport\":true},\"references\":{},\"documentHighlight\":{},\"documentSymbol\":{\"hierarchicalDocumentSymbolSupport\":true},\"codeAction\":{\"codeActionLiteralSupport\":{\"codeActionKind\":{\"valueSet\":[\"\",\"quickfix\",\"refactor\",\"refactor.extract\",\"refactor.inline\",\"refactor.rewrite\",\"source\",\"source.organizeImports\"]}},\"isPreferredSupport\":true},\"formatting\":{},\"rangeFormatting\":{},\"rename\":{\"prepareSupport\":true},\"publishDiagnostics\":{\"relatedInformation\":true,\"tagSupport\":{\"valueSet\":[1,2]},\"versionSupport\":true},\"foldingRange\":{\"lineFoldingOnly\":false},\"semanticTokens\":{\"requests\":{\"full\":true},\"formats\":[\"relative\"],\"tokenTypes\":[\"namespace\",\"type\",\"class\",\"enum\",\"interface\",\"struct\",\"typeParameter\",\"parameter\",\"variable\",\"property\",\"enumMember\",\"event\",\"function\",\"method\",\"macro\",\"keyword\",\"modifier\",\"comment\",\"string\",\"number\",\"regexp\",\"operator\",\"decorator\"],\"tokenModifiers\":[\"declaration\",\"definition\",\"readonly\",\"static\",\"deprecated\",\"abstract\",\"async\",\"modification\",\"documentation\",\"defaultLibrary\"]},\"inlayHint\":{}},\"workspace\":{\"workspaceFolders\":true,\"configuration\":true,\"applyEdit\":true,\"symbol\":{},\"semanticTokens\":{\"refreshSupport\":true}},\"window\":{\"workDoneProgress\":true}";
+		"\"textDocument\":{\"synchronization\":{\"didSave\":true},\"completion\":{\"completionItem\":{\"snippetSupport\":true,\"documentationFormat\":[\"markdown\",\"plaintext\"],\"resolveSupport\":{\"properties\":[\"documentation\",\"detail\"]}},\"contextSupport\":true},\"hover\":{\"contentFormat\":[\"markdown\",\"plaintext\"]},\"signatureHelp\":{\"signatureInformation\":{\"documentationFormat\":[\"markdown\",\"plaintext\"],\"parameterInformation\":{\"labelOffsetSupport\":true}}},\"definition\":{\"linkSupport\":true},\"declaration\":{\"linkSupport\":true},\"typeDefinition\":{\"linkSupport\":true},\"implementation\":{\"linkSupport\":true},\"references\":{},\"documentHighlight\":{},\"documentSymbol\":{\"hierarchicalDocumentSymbolSupport\":true},\"codeAction\":{\"codeActionLiteralSupport\":{\"codeActionKind\":{\"valueSet\":[\"\",\"quickfix\",\"refactor\",\"refactor.extract\",\"refactor.inline\",\"refactor.rewrite\",\"source\",\"source.organizeImports\"]}},\"isPreferredSupport\":true},\"formatting\":{},\"rangeFormatting\":{},\"rename\":{\"prepareSupport\":true},\"publishDiagnostics\":{\"relatedInformation\":true,\"tagSupport\":{\"valueSet\":[1,2]},\"versionSupport\":true},\"foldingRange\":{\"lineFoldingOnly\":false},\"semanticTokens\":{\"requests\":{\"full\":true},\"formats\":[\"relative\"],\"tokenTypes\":[\"namespace\",\"type\",\"class\",\"enum\",\"interface\",\"struct\",\"typeParameter\",\"parameter\",\"variable\",\"property\",\"enumMember\",\"event\",\"function\",\"method\",\"macro\",\"keyword\",\"modifier\",\"comment\",\"string\",\"number\",\"regexp\",\"operator\",\"decorator\"],\"tokenModifiers\":[\"declaration\",\"definition\",\"readonly\",\"static\",\"deprecated\",\"abstract\",\"async\",\"modification\",\"documentation\",\"defaultLibrary\"]},\"inlayHint\":{},\"callHierarchy\":{},\"typeHierarchy\":{}},\"workspace\":{\"workspaceFolders\":true,\"configuration\":true,\"applyEdit\":true,\"symbol\":{},\"semanticTokens\":{\"refreshSupport\":true}},\"window\":{\"workDoneProgress\":true}";
 
 	const char* LspStateName(LspState state) {
 		if (state == LspState::Starting) return "starting";
@@ -132,6 +132,10 @@ namespace Ied
 		problem = Core::String();
 		capabilities = Core::String("{}");
 		documents.Clear();
+		transient.Clear();
+		progress.Clear();
+		progressed = false;
+		startedNs = clock_now_ns();
 		LanguageServer* self = this;
 		Process::Child* process = child;
 		MessageQueue* queue = outgoing;
@@ -325,6 +329,8 @@ namespace Ied
 		}
 		answers.Clear();
 		documents.Clear();
+		transient.Clear();
+		progress.Clear();
 		if (outgoing) outgoing->Close();
 		if (state == LspState::Stopped) return;
 		const int64 now = clock_now_ns();

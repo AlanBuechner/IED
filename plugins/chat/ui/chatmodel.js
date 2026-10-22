@@ -247,6 +247,7 @@ export function argsLine(tool, argsText) {
 	if (tool === "tasks_set" && Array.isArray(args.items)) rest.push(args.items.length + " tasks");
 	if (tool === "task_update") rest.push(args.id + " " + args.status);
 	if (tool === "clipboard_copy") return [args.name + ":", args.path || (args.result ? "result " + args.result : "text"), args.start_line || args.end_line ? (args.start_line || 1) + "-" + (args.end_line || "end") : ""].filter(Boolean).join(" ");
+	if (tool.startsWith("code_")) return [args.symbol || args.query || args.method, args.path ? args.path + (args.line ? ":" + args.line : "") : "", args.direction].filter(Boolean).join(" ") || "{}";
 	return [lead].concat(rest).filter(Boolean).join(" ") || JSON.stringify(args).slice(0, 200);
 }
 

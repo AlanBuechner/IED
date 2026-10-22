@@ -29,6 +29,7 @@ namespace Ied
 		public bool integerIds;
 		public Core::Array<Core::String> refetch;       // refetchOnDiagnostics
 		public bool filterCodeActions;
+		public Core::String aiRequests;                 // aiExposedRequests as JSON text, "[]" without any
 		public Core::String when;
 	}
 

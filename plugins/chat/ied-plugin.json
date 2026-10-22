@@ -12,7 +12,7 @@
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "entry": "Ai::Activate", "ui": "ui/index.js" },
-	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn"],
+	"permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp"],
 	"contributes": {
 		"outputSources": [ { "id": "ai", "title": "AI" } ],
 		"settings": { "schema": "settings.schema.json", "page": "AI" },

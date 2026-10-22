@@ -94,6 +94,9 @@ test("chat: a call's arguments on one line", () => {
 	assertEqual(argsLine("task_update", "{\"id\": \"t2\", \"status\": \"done\"}"), "t2 done");
 	assertEqual(argsLine("clipboard_copy", "{\"name\": \"push\", \"path\": \"src/ring.cf\", \"start_line\": 40, \"end_line\": 62}"), "push: src/ring.cf 40-62");
 	assertEqual(argsLine("clipboard_copy", "{\"name\": \"err\", \"result\": 1}"), "err: result 1");
+	assertEqual(argsLine("code_call_hierarchy", "{\"symbol\": \"Ring::Push\", \"direction\": \"incoming\"}"), "Ring::Push incoming");
+	assertEqual(argsLine("code_definition", "{\"symbol\": \"Push\", \"path\": \"src/game.cpp\", \"line\": 4}"), "Push src/game.cpp:4");
+	assertEqual(argsLine("code_symbols", "{\"path\": \"src/ring.h\"}"), "src/ring.h");
 	assertEqual(argsLine("fs_read", "{\"path\": \"src/Log"), "{\"path\": \"src/Log", "streaming arguments show as they are");
 });
 

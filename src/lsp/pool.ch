@@ -9,6 +9,11 @@ include "services/documents.ch"
 
 namespace Ied
 {
+	const int64 kLspTransientMost = 16;      // files open on one server for plugin code alone
+	const int64 kLspIndexWaitMs = 30000;     // how long workspace symbols wait for the servers' indexes
+	const int64 kLspIndexGraceMs = 2000;     // a server this new is given this long to begin indexing
+	const int64 kLspIndexSliceNs = 50000000;
+
 	// The server that named a file outside its workspace in a result passed to a client.
 	class NamedFile
 	{
@@ -49,6 +54,22 @@ namespace Ied
 		// test hooks name one with no server.
 		public void NameFile(Workspace* ws, Core::StringView uri, Core::StringView profile, Core::StringView project);
 
+		// For plugin code (src/api/lsp.cf, docs/24 "Plugin code asks language servers"). `path` is a workspace path, or
+		// the file: URI of a file outside the workspace a server named.
+		// `method` to the server serving `path`, the file opened on it when no document holds it; `withDocument` sets the
+		// params' textDocument. The result as a client gets it; throws as lsp.request does.
+		public Core::String RequestFor(Call& call, Workspace* ws, Core::StringView path, Core::StringView method, Core::StringView params, bool withDocument);
+		// {profile, capabilities, aiRequests} of the server serving `path`, started; {profile: null} when none does.
+		public Core::String ServingFor(Call& call, Workspace* ws, Core::StringView path);
+		// Whether the servers `ws`'s files call for were started (StartFor) in this server run.
+		public bool Scanned(Workspace* ws) const;
+		// Starts the servers `paths` (the workspace's files) call for, and waits for the workspace's servers to run.
+		public void StartFor(Call& call, Workspace* ws, const Core::Array<Core::String>& paths);
+		// workspace/symbol of every running server of `ws`: a JSON array, each symbol with its `source`.
+		public Core::String SymbolsFor(Call& call, Workspace* ws, Core::StringView query);
+		// The text of a file outside `ws` one of its servers named; false for another.
+		public bool NamedText(Workspace* ws, Core::StringView uri, Core::String& text);
+
 	private:
 		// Its profile's initializationOptions with its initializationOptionsFile merged over them.
 		private Core::String ProfileOptions(const LanguageServer* language);
@@ -59,10 +80,24 @@ namespace Ied
 		private LanguageServer* Create(Workspace* ws, LspProfile* profile, const ProjectModel* project);
 		// The server that serves `doc` - created and started, with `start`, when there is none yet - or null.
 		private LanguageServer* Serving(Document* doc, bool start);
-		// The server that named an external document's file, if it is still there.
-		private LanguageServer* NamerOf(const Document* doc) const;
+		private LanguageServer* ServingPath(Workspace* ws, Core::StringView path, bool start);
+		// The server that named a file outside `ws` (its file: URI), if it is still there.
+		private LanguageServer* NamerOf(Workspace* ws, Core::StringView uri) const;
+		// The server running, or throws unavailable.
+		private void AwaitServer(Call& call, LanguageServer* language);
 		private LanguageServer* Ready(Call& call, Document* doc);
+		// The server serving plugin code's `path`, running, with the file open on it; throws not_found or unavailable.
+		private LanguageServer* ReadyFor(Call& call, Workspace* ws, Core::StringView path);
 		private void OpenOn(LanguageServer* language, Document* doc);
+		// `path`, held by no document, opened on `language` with its text on disk, or its copy there brought up to date;
+		// past kLspTransientMost the oldest is closed.
+		private void OpenTransient(LanguageServer* language, Workspace* ws, Core::StringView path);
+		// `method` with `params` (a client's: UTF-16, ied: URIs) to `language` about the file `clientUri` / `serverUri`:
+		// the result for clients.
+		private Core::String Asked(Call& call, LanguageServer* language, Core::StringView clientUri, Core::StringView serverUri, Core::StringView method, Core::StringView params);
+		// Waits, the lock released, while one of `servers` reports work in progress (an index being built), and while one
+		// started less than kLspIndexGraceMs ago has not begun any; at most `ms`.
+		private void AwaitIndexes(Call& call, const Core::Array<LanguageServer*>& servers, int64 ms);
 		private void Diagnostics(LanguageServer* language, const Serialization::DomNode& params);
 		private void ClearDiagnostics(LanguageServer* language);
 		// Every source's diagnostics of a path, gone (its file is not there any more).
@@ -88,7 +123,8 @@ namespace Ied
 		private Server* server;
 		private Core::Array<LanguageServer*> languages;
 		private Core::HashMap<Core::String, LineIndex*> lineCache;           // by URI, for one message
-		private Core::HashMap<Core::String, NamedFile*> named;               // "<wsId>|<file URI>" 
+		private Core::HashMap<Core::String, NamedFile*> named;               // "<wsId>|<file URI>"
+		private Core::HashMap<Core::String, bool> scanned;                   // wsIds StartFor has walked
 	}
 
 	// A params object's JSON with "textDocument": {"uri": `uri`} in place of any it had.

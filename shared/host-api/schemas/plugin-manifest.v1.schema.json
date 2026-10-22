@@ -555,7 +555,7 @@
 					"items": {
 						"type": "object",
 						"required": ["method", "description"],
-						"properties": { "method": { "type": "string" }, "description": { "type": "string" }, "paramsSchema": { "type": "object" } }
+						"properties": { "method": { "type": "string" }, "description": { "type": "string" }, "paramsSchema": { "type": "object" }, "purpose": { "enum": ["expandMacro"], "description": "A request IED's own code tools call for this purpose (docs/13 code_expand_macro): expandMacro takes TextDocumentPositionParams and answers {name, expansion} or the expansion as a string." } }
 					}
 				},
 				"when": { "$ref": "#/$defs/when" }

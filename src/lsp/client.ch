@@ -27,6 +27,15 @@ namespace Ied
 		public CancelToken* wake;    // the waiting request's token, notified when the answer comes; null when none waits
 	}
 
+	// A file plugin code asked about that no document holds, opened on the server alone (docs/24 "Plugin code asks
+	// language servers").
+	class TransientFile
+	{
+		public Core::String path;     // the workspace path, or the file: URI of a file outside it
+		public int64 revision;        // its revision on disk when its text was sent
+		public int64 version;
+	}
+
 	class LanguageServer
 	{
 		[operator("create")] public void Init() {}
@@ -45,6 +54,10 @@ namespace Ied
 		public int32 restarts;
 		public Core::HashMap<Core::String, bool> documents;   // paths it has open
 		public Core::HashMap<Core::String, bool> published;   // paths it published diagnostics for
+		public Core::Array<TransientFile*> transient;         // of `documents`, those open for plugin code alone, oldest first
+		public Core::HashMap<Core::String, bool> progress;    // $/progress tokens begun and not ended: work it does (indexing)
+		public bool progressed;                               // it began some since it last started
+		public int64 startedNs;                               // when it last started
 
 		// Starts the process (again) and sends initialize; Failed with `problem` when it cannot start.
 		public void Start();

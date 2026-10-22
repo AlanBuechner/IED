@@ -1,0 +1,455 @@
+include "api/plugin.ch"
+include "codenav.ch"
+
+namespace Ai
+{
+	const int64 kCodeCommentLinesMost = 30;
+	const int64 kCodeDeclarationLinesMost = 6;
+	const int64 kCodeBraceScanLines = 4000;
+
+	// --- Shared by the code tools --------------------------------------------------------------------------------------
+
+	ToolSpec* CodeToolSpec(const char* name, const char* description, Core::StringView parameters, bool deferred) {
+		ToolSpec* spec = new ToolSpec();
+		spec->name = Core::String(name);
+		spec->description = Core::String(description);
+		spec->parameters = Core::String(parameters);
+		spec->toolClass = ToolClass::Read;
+		spec->parallelSafe = true;
+		spec->inPlan = true;
+		spec->deferred = deferred;
+		if (deferred) spec->group = Core::String("code");
+		return spec;
+	}
+
+	ToolPlan CodePlan(const ToolInvocation& call, const char* verb) {
+		Core::StringView named = call.args.Member("symbol").AsView();
+		if (named.IsEmpty()) named = call.args.Member("path").AsView();
+		if (named.IsEmpty()) named = call.args.Member("query").AsView();
+		ToolPlan plan;
+		plan.subject = (Core::String("code(") + named) + ")";
+		plan.summary = (Core::String(verb) + " ") + named;
+		return plan;
+	}
+
+	static bool IsCommentLine(Core::StringView line) {
+		Core::StringView text = line.Trimmed();
+		return text.StartsWith(Core::StringView("//")) || text.StartsWith(Core::StringView("/*")) || text.StartsWith(Core::StringView("*")) || text.StartsWith(Core::StringView("@")) || text.StartsWith(Core::StringView("["));
+	}
+
+	int64 CommentStart(CodeQuery& query, Core::StringView path, int64 line) {
+		int64 first = line;
+		while (first > 0 && line - first < kCodeCommentLinesMost && IsCommentLine(query.Line(path, first - 1))) first -= 1;
+		return first;
+	}
+
+	static bool EndsDeclaration(Core::StringView line) {
+		Core::StringView text = line.Trimmed();
+		return text.Contains(Core::StringView("{")) || text.EndsWith(Core::StringView(";")) || text.EndsWith(Core::StringView(":"));
+	}
+
+	Core::String DeclarationLines(CodeQuery& query, const CodeSpan& range) {
+		int64 last = range.startLine;
+		while (last < range.startLine + kCodeDeclarationLinesMost - 1 && !EndsDeclaration(query.Line(range.path.View(), last)) && !query.Line(range.path.View(), last + 1).IsEmpty()) last += 1;
+		const int64 first = CommentStart(query, range.path.View(), range.startLine);
+		return NumberedSpan(query.Text(range.path.View()), first, last, kCodeCommentLinesMost + kCodeDeclarationLinesMost);
+	}
+
+	Core::String SymbolHeading(CodeQuery& query, const CodeSymbol* symbol) {
+		Core::StringBuilder out;
+		out.Append(SymbolKindName(symbol->kind));
+		out.Append(" ");
+		out.Append(symbol->Qualified().View());
+		if (!symbol->detail.IsEmpty() && symbol->detail.View() != SymbolKindName(symbol->kind)) {
+			out.Append(": ");
+			out.Append(symbol->detail.View());
+		}
+		out.Append(" - ");
+		out.Append(query.Shown(symbol->range.path.View()).View());
+		out.Append(symbol->range.endLine > symbol->range.startLine ? " lines " : " line ");
+		out.Append(LinesOf(symbol->range).View());
+		return out.ToString();
+	}
+
+	Core::Array<CodeSpan> SpansOf(const CodeQuery& query, const Serialization::DomNode& answer, bool selection) {
+		Core::Array<CodeSpan> spans;
+		if (answer.Kind() == Serialization::DomKind::Object) spans.Push(query.SpanOf(answer, selection));
+		for (int64 i = 0; answer.Kind() == Serialization::DomKind::Array && i < answer.Count(); ++i) spans.Push(query.SpanOf(answer.At(i), selection));
+		return spans;
+	}
+
+	CodeSymbol* SymbolAt(CodeQuery& query, const CodeSpan& span) {
+		try {
+			return query.Enclosing(span.path.View(), span.startLine);
+		}
+		catch (IED::RpcError& error) {
+			return nullptr;
+		}
+	}
+
+	// --- code_symbols ------------------------------------------------------------------------------------------------------
+
+	static void AppendOutline(Core::StringBuilder& out, const Core::Array<CodeSymbol*>& symbols, int64 depth, int64 most, int64& count) {
+		for (CodeSymbol* symbol : symbols) {
+			if (count >= kCodeOutlineMost) return;
+			for (int64 i = 0; i < depth; ++i) out.Append("  ");
+			out.Append(SymbolKindName(symbol->kind));
+			out.Append(" ");
+			out.Append(symbol->name.View());
+			if (!symbol->detail.IsEmpty() && symbol->detail.View() != SymbolKindName(symbol->kind)) {
+				out.Append(": ");
+				out.Append(symbol->detail.View());
+			}
+			out.Append("  [");
+			out.Append(LinesOf(symbol->range).View());
+			out.Append("]\n");
+			count += 1;
+			if (depth + 1 < most) AppendOutline(out, symbol->children, depth + 1, most, count);
+		}
+	}
+
+	static int64 CountSymbols(const Core::Array<CodeSymbol*>& symbols) {
+		int64 count = symbols.Count();
+		for (CodeSymbol* symbol : symbols) count += CountSymbols(symbol->children);
+		return count;
+	}
+
+	static ToolOutcome OutlineRun(CodeQuery& query, Core::StringView path, int64 depth) {
+		Core::Array<CodeSymbol*> symbols = query.Outline(path);
+		const int64 total = CountSymbols(symbols);
+		Core::StringBuilder out;
+		out.Append(query.Shown(path).View());
+		out.Append(": ");
+		out.AppendInt(total);
+		out.Append(total == 1 ? " symbol (lines in [])\n" : " symbols (lines in [])\n");
+		int64 count = 0;
+		AppendOutline(out, symbols, 0, depth, count);
+		if (count < total) {
+			out.Append("[");
+			out.AppendInt(total - count);
+			out.Append(" more not shown; give depth, or code_symbols with query]\n");
+		}
+		if (total == 0) out.Append("[the language server gives no symbols for this file]\n");
+		Core::StringBuilder preview;
+		preview.Append(query.Shown(path).View());
+		preview.Append(": ");
+		preview.AppendInt(total);
+		preview.Append(" symbols");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	// Whether `symbol` is of the kind the model asked for ("class", "function", ...).
+	static bool KindMatches(const CodeSymbol* symbol, Core::StringView kind) { return kind.IsEmpty() || Core::StringView(SymbolKindName(symbol->kind)) == kind; }
+
+	static ToolOutcome SearchRun(CodeQuery& query, Core::StringView text, Core::StringView kind) {
+		Core::Array<CodeSymbol*> found = query.Search(text);
+		Core::Array<CodeSymbol*> shown;
+		for (int64 pass = 0; pass < 2; ++pass)
+			for (CodeSymbol* symbol : found) {
+				const bool exact = NameParts(symbol->name.View()).Count() > 0 && NameParts(symbol->name.View())[NameParts(symbol->name.View()).Count() - 1].View() == text;
+				if (KindMatches(symbol, kind) && exact == (pass == 0)) shown.Push(symbol);
+			}
+		Core::StringBuilder out;
+		out.AppendInt(shown.Count());
+		out.Append(shown.Count() == 1 ? " symbol for \"" : " symbols for \"");
+		out.Append(text);
+		out.Append("\"\n");
+		for (int64 i = 0; i < shown.Count() && i < kCodeOutlineMost; ++i) {
+			out.Append(SymbolKindName(shown[i]->kind));
+			out.Append(" ");
+			out.Append(shown[i]->Qualified().View());
+			out.Append("  ");
+			out.Append(WhereOf(shown[i]->selection, query.Shown(shown[i]->selection.path.View()).View()).View());
+			out.Append("\n");
+		}
+		if (shown.IsEmpty()) out.Append("[nothing; the servers match names, not text - search_text finds text]\n");
+		Core::StringBuilder preview;
+		preview.AppendInt(shown.Count());
+		preview.Append(" symbols");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	static ToolOutcome SymbolsRun(const ToolInvocation& call) {
+		CodeQuery query = CodeQuery(call.ws);
+		Core::String path = IED::NormalizePath(call.args.Member("path").AsView());
+		if (!path.IsEmpty()) return OutlineRun(query, path.View(), call.args.Member("depth").IsValid() ? call.args.Member("depth").AsInt() : 100);
+		Core::StringView text = call.args.Member("query").AsView();
+		if (text.IsEmpty()) return ToolError(Core::StringView("code_symbols: give path (a file's outline) or query (symbols named like it across the workspace)"));
+		return SearchRun(query, text, call.args.Member("kind").AsView());
+	}
+
+	// --- code_read_symbol ----------------------------------------------------------------------------------------------------
+
+	// The line of the brace that closes the first one opened at or after `line`, for a symbol whose server gave only its
+	// name's line; `line` itself when it ends before opening one.
+	static int64 BraceEnd(CodeQuery& query, Core::StringView path, int64 line) {
+		int64 depth = 0;
+		bool opened = false;
+		const int64 lines = query.LineCount(path);
+		for (int64 at = line; at < line + kCodeBraceScanLines && at < lines; ++at) {
+			Core::StringView text = query.Line(path, at);
+			bool quoted = false;
+			char8 quote = 0;
+			for (int64 i = 0; i < text.ByteLength(); ++i) {
+				const char8 c = (char8)text.ByteAt(i);
+				if (quoted) {
+					if (c == '\\') i += 1;
+					else if (c == quote) quoted = false;
+					continue;
+				}
+				if (c == '/' && i + 1 < text.ByteLength() && text.ByteAt(i + 1) == '/') break;
+				if (c == '"' || c == '\'') {
+					quoted = true;
+					quote = c;
+				}
+				else if (c == ';' && !opened) return line;
+				else if (c == '{') {
+					depth += 1;
+					opened = true;
+				}
+				else if (c == '}') {
+					depth -= 1;
+					if (opened && depth == 0) return at;
+				}
+			}
+		}
+		return line;
+	}
+
+	// The symbol's whole span: its range, the comment lines above it, and its body when the server named only its line.
+	static CodeSpan WholeSpan(CodeQuery& query, const CodeSymbol* symbol) {
+		CodeSpan span = symbol->range;
+		if (span.endLine == span.startLine) span.endLine = BraceEnd(query, span.path.View(), span.startLine);
+		span.startLine = CommentStart(query, span.path.View(), span.startLine);
+		return span;
+	}
+
+	// Whether the symbol has a body: a brace from its name to its end (a definition, not a declaration).
+	static bool HasBody(CodeQuery& query, const CodeSymbol* symbol) {
+		CodeSpan span = WholeSpan(query, symbol);
+		for (int64 line = symbol->selection.startLine; line <= span.endLine; ++line)
+			if (query.Line(span.path.View(), line).Contains(Core::StringView("{"))) return true;
+		return false;
+	}
+
+	// The definition (with `declaration`, the declaration) the server knows of the first candidate, added when none of
+	// them is one: a header's declaration finds its source's definition, a definition its declaration.
+	static void AddCounterparts(CodeQuery& query, Core::Array<CodeSymbol*>& candidates, bool declaration) {
+		for (CodeSymbol* symbol : candidates)
+			if (HasBody(query, symbol) != declaration) return;
+		CodeSymbol* first = candidates[0];
+		if (declaration && !query.Offers(first->selection.path.View(), "declarationProvider")) return;
+		Serialization::DomNode answer;
+		try {
+			answer = query.Request(first->selection.path.View(), Core::StringView(declaration ? "textDocument/declaration" : "textDocument/definition"), PositionParams(first->selection, Core::StringView("")).View(), true);
+		}
+		catch (IED::RpcError& error) {
+			return;
+		}
+		for (const CodeSpan& span : SpansOf(query, answer, true)) {
+			CodeSymbol* found = SymbolAt(query, span);
+			if (!found || found->selection.startLine != span.startLine) continue;
+			bool known = false;
+			for (CodeSymbol* candidate : candidates) known = known || (candidate->selection.path == found->selection.path && candidate->selection.startLine == found->selection.startLine);
+			if (!known) candidates.Push(found);
+		}
+	}
+
+	static ToolOutcome ReadSymbolRun(const ToolInvocation& call) {
+		CodeQuery query = CodeQuery(call.ws);
+		CodeTarget target = TargetOf(query, call.args);
+		Core::Array<CodeSymbol*> candidates = target.symbols;
+		if (candidates.IsEmpty()) {
+			CodeSymbol* enclosing = query.Enclosing(target.at.path.View(), target.at.startLine);
+			if (!enclosing) return ToolError((Core::String("code_read_symbol: no symbol of ") + target.label.View() + " holds that line; fs_read reads it").View());
+			candidates.Push(enclosing);
+		}
+		const bool declaration = call.args.Member("declaration").AsBool();
+		AddCounterparts(query, candidates, declaration);
+		AddCounterparts(query, candidates, !declaration);
+		Core::Array<CodeSymbol*> shown;
+		Core::Array<CodeSymbol*> others;
+		bool anyBody = false;
+		for (CodeSymbol* symbol : candidates) anyBody = anyBody || HasBody(query, symbol);
+		for (CodeSymbol* symbol : candidates) {
+			if (!anyBody || HasBody(query, symbol) != declaration) shown.Push(symbol);
+			else others.Push(symbol);
+		}
+		if (shown.IsEmpty()) shown = candidates;
+		Core::StringBuilder out;
+		int64 budget = kCodeReadMostLines;
+		for (CodeSymbol* symbol : shown) {
+			CodeSpan span = WholeSpan(query, symbol);
+			out.Append(SymbolHeading(query, symbol).View());
+			out.Append("\n");
+			out.Append(NumberedSpan(query.Text(span.path.View()), span.startLine, span.endLine, budget > 0 ? budget : 1).View());
+			budget -= span.endLine - span.startLine + 1;
+			if (budget <= 0) break;
+		}
+		for (CodeSymbol* symbol : others) {
+			out.Append(declaration ? "Defined at " : "Also declared at ");
+			out.Append(WhereOf(symbol->selection, query.Shown(symbol->selection.path.View()).View()).View());
+			out.Append("\n");
+		}
+		Core::StringBuilder preview;
+		preview.Append(target.label.View());
+		preview.Append(" (");
+		preview.Append(query.Shown(shown[0]->range.path.View()).View());
+		preview.Append(" ");
+		preview.Append(LinesOf(WholeSpan(query, shown[0])).View());
+		preview.Append(")");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	// --- code_definition -----------------------------------------------------------------------------------------------------
+
+	void AppendPlace(Core::StringBuilder& out, CodeQuery& query, const CodeSpan& span) {
+		CodeSymbol* symbol = SymbolAt(query, span);
+		if (symbol && symbol->range.startLine <= span.startLine && span.startLine <= symbol->selection.endLine + 1) {
+			out.Append(SymbolHeading(query, symbol).View());
+			out.Append("\n");
+			out.Append(DeclarationLines(query, symbol->range).View());
+			return;
+		}
+		out.Append(WhereOf(span, query.Shown(span.path.View()).View()).View());
+		out.Append("\n");
+		out.Append(DeclarationLines(query, span).View());
+	}
+
+	static bool Listed(const Core::Array<CodeSpan>& spans, const CodeSpan& span) {
+		for (const CodeSpan& known : spans)
+			if (known.path == span.path && known.startLine == span.startLine) return true;
+		return false;
+	}
+
+	static ToolOutcome DefinitionRun(const ToolInvocation& call) {
+		CodeQuery query = CodeQuery(call.ws);
+		CodeTarget target = TargetOf(query, call.args);
+		Core::Array<CodeSpan> places;
+		for (CodeSymbol* symbol : target.symbols) places.Push(symbol->selection);
+		if (places.IsEmpty()) {
+			Core::String asked = PositionParams(target.at, Core::StringView(""));
+			for (const CodeSpan& span : SpansOf(query, query.Request(target.at.path.View(), Core::StringView("textDocument/definition"), asked.View(), true), true)) places.Push(span);
+			if (query.Offers(target.at.path.View(), "declarationProvider"))
+				for (const CodeSpan& span : SpansOf(query, query.Request(target.at.path.View(), Core::StringView("textDocument/declaration"), asked.View(), true), true))
+					if (!Listed(places, span)) places.Push(span);
+		}
+		if (places.IsEmpty()) return ToolError((Core::String("code_definition: the language server knows no definition of what is at ") + target.label.View() + "; is a name there? code_hover says what it sees").View());
+		Core::StringBuilder out;
+		for (const CodeSpan& span : places) {
+			AppendPlace(out, query, span);
+			out.Append("\n");
+		}
+		Core::StringBuilder preview;
+		preview.Append(target.label.View());
+		preview.Append(": ");
+		preview.AppendInt(places.Count());
+		preview.Append(places.Count() == 1 ? " place" : " places");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	// --- code_references -----------------------------------------------------------------------------------------------------
+
+	static bool Before(const CodeSpan& a, const CodeSpan& b) { return a.path < b.path || (a.path == b.path && a.startLine < b.startLine); }
+
+	static Core::Array<CodeSpan> Sorted(const Core::Array<CodeSpan>& spans) {
+		Core::Array<CodeSpan> sorted;
+		for (const CodeSpan& span : spans) {
+			int64 at = sorted.Count();
+			while (at > 0 && Before(span, sorted[at - 1])) at -= 1;
+			sorted.Insert(at, span);
+		}
+		return sorted;
+	}
+
+	static int64 FileCount(const Core::Array<CodeSpan>& spans) {
+		int64 files = 0;
+		for (int64 i = 0; i < spans.Count(); ++i)
+			if (i == 0 || spans[i].path != spans[i - 1].path) files += 1;
+		return files;
+	}
+
+	static ToolOutcome ReferencesRun(const ToolInvocation& call) {
+		CodeQuery query = CodeQuery(call.ws);
+		CodeTarget target = TargetOf(query, call.args);
+		int64 limit = call.args.Member("limit").IsValid() ? call.args.Member("limit").AsInt() : kCodeReferencesDefault;
+		limit = limit < 1 ? 1 : limit > kCodeReferencesMost ? kCodeReferencesMost : limit;
+		const bool declaration = !call.args.Member("include_declaration").IsValid() || call.args.Member("include_declaration").AsBool();
+		Core::String context = (Core::String("\"context\": {\"includeDeclaration\": ") + (declaration ? "true" : "false")) + "}";
+		Core::String asked = PositionParams(target.at, context.View());
+		Core::Array<CodeSpan> spans = Sorted(SpansOf(query, query.Request(target.at.path.View(), Core::StringView("textDocument/references"), asked.View(), true), true));
+		const int64 files = FileCount(spans);
+		Core::StringBuilder out;
+		out.AppendInt(spans.Count());
+		out.Append(spans.Count() == 1 ? " reference to " : " references to ");
+		out.Append(target.label.View());
+		out.Append(" in ");
+		out.AppendInt(files);
+		out.Append(files == 1 ? " file\n" : " files\n");
+		for (int64 i = 0; i < spans.Count() && i < limit; ++i) {
+			const CodeSpan& span = spans[i];
+			if (i == 0 || span.path != spans[i - 1].path) {
+				out.Append(query.Shown(span.path.View()).View());
+				out.Append("\n");
+			}
+			out.Append("  ");
+			out.AppendInt(span.startLine + 1);
+			CodeSymbol* inside = files <= kCodeReferenceFilesNamed ? SymbolAt(query, span) : nullptr;
+			if (inside) {
+				out.Append(" (in ");
+				out.Append(inside->Qualified().View());
+				out.Append(")");
+			}
+			out.Append(": ");
+			Core::StringView line = query.Line(span.path.View(), span.startLine).Trimmed();
+			out.Append(line.Substring(0, line.ByteLength() < kCodeLineShownBytes ? line.ByteLength() : kCodeLineShownBytes));
+			out.Append("\n");
+		}
+		if (spans.Count() > limit) {
+			out.Append("[");
+			out.AppendInt(spans.Count() - limit);
+			out.Append(" more; give a larger limit]\n");
+		}
+		Core::StringBuilder preview;
+		preview.AppendInt(spans.Count());
+		preview.Append(" references in ");
+		preview.AppendInt(files);
+		preview.Append(files == 1 ? " file" : " files");
+		return ToolResult(out.View(), preview.View());
+	}
+
+	// --- The tools ----------------------------------------------------------------------------------------------------------
+
+	Core::String CodeTargetSchema(const char* more) {
+		Core::StringBuilder out;
+		out.Append("{\"type\": \"object\", \"properties\": {");
+		out.Append(kCodeTargetProperties);
+		out.Append(more);
+		out.Append("}, \"additionalProperties\": false}");
+		return out.ToString();
+	}
+
+	void AddCodeNavTools(ToolRegistry& registry) {
+		ToolSpec* symbols = CodeToolSpec("code_symbols", "A file's symbols as a tree with kinds, signatures and line ranges (path), or the workspace's symbols named like query, from the language servers. Read code by symbol, not whole files. Example: code_symbols({\"path\": \"src/ring.cf\"}) or code_symbols({\"query\": \"Push\", \"kind\": \"method\"})",
+			Core::StringView("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"query\": {\"type\": \"string\", \"minLength\": 1}, \"kind\": {\"type\": \"string\", \"description\": \"only symbols of this kind: class, method, function, field, variable, enum, ...\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"levels of an outline\"}}, \"additionalProperties\": false}"),
+			false);
+		symbols->plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "List symbols of"); };
+		symbols->run = SymbolsRun;
+		registry.Add(symbols);
+		ToolSpec* read = CodeToolSpec("code_read_symbol", "The whole source of one symbol - a function with its body, a type with its members, a macro - numbered, with the comment above it; a definition before its declaration. Example: code_read_symbol({\"symbol\": \"Ring::Push\"}) or code_read_symbol({\"path\": \"src/ring.cf\", \"line\": 120})",
+			CodeTargetSchema(", \"declaration\": {\"type\": \"boolean\", \"description\": \"the declaration (a header's) instead of the definition\"}").View(), false);
+		read->plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "Read"); };
+		read->run = ReadSymbolRun;
+		registry.Add(read);
+		ToolSpec* definition = CodeToolSpec("code_definition", "Where a symbol, or the name at a place, is defined and declared, with its first lines. Example: code_definition({\"path\": \"src/game.cf\", \"line\": 44, \"symbol\": \"Push\"})",
+			CodeTargetSchema("").View(), false);
+		definition->plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "Find the definition of"); };
+		definition->run = DefinitionRun;
+		registry.Add(definition);
+		ToolSpec* references = CodeToolSpec("code_references", "Every use of a symbol, by file, each line with the function it is in. Example: code_references({\"symbol\": \"Ring::Push\", \"limit\": 50})",
+			CodeTargetSchema(", \"limit\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 500}, \"include_declaration\": {\"type\": \"boolean\"}").View(), false);
+		references->plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "Find references to"); };
+		references->run = ReferencesRun;
+		registry.Add(references);
+	}
+}

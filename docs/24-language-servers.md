@@ -45,6 +45,13 @@ Positions are found wherever LSP puts them: any object with numeric `line` and `
 
 Server-initiated requests are answered by the host: `workspace/configuration` with a null per item (until `settingsBindings` are bound), `workspace/workspaceFolders` with the workspace folder, `workspace/<kind>/refresh` by publishing `lsp.refresh`, `workspace/applyEdit` refused (`applied: false`) for now, and anything else (registrations, `window/workDoneProgress/create`) with null. `window/logMessage`, `window/showMessage` and the beginning and end of `$/progress` go to the workspace's IED output.
 
+## Plugin code asks language servers (2026-10-21)
+
+The AI's code tools (`docs/13` `code_*`) ask the same servers a person's editor does, through `src/api/lsp.ch` (permission `lsp`): a request about a file, a request without a document (a call or type hierarchy item carries its own URI), the workspace's symbols, and the text of a file a server named. Results come as clients get them: positions in UTF-16, workspace files as `ied://` URIs, others as `file:` URIs recorded as named.
+
+- **A file nobody has open.** A request about a file that is not an open document still needs it open on its server, but the document store is not burdened with it (a store document never closes) and a server like clangd keeps an AST per open file. So the pool opens it on the server alone - a *transient* open, `didOpen` with the text on disk - and keeps the last 16 per server, closing the oldest with `didClose`. Before each use it compares the file's revision on disk with the one it sent and sends the new text (`didChange`) when it moved; when the store opens the file later, the store's document takes the server's copy over (a full-text `didChange`, then it is the store's). A file outside the workspace is asked of the server that named it, opened the same way under its `file:` URI.
+- **Servers nobody started.** `workspace/symbol` reaches only running servers, and a person may not have opened a file of every language yet. For plugin code the pool first starts the servers the workspace's files call for: one walk of the workspace (build output, `.git` and the default excludes skipped; at most 20 000 files, once per workspace and server run) maps each file to its profile and, for a project-scoped profile in a solution, its owning project (files outside every project start none); each server that is missing starts, and the request waits up to 20 s in all for them to run.
+
 ## Open items
 
 - Incremental `didChange` for servers that ask for it (C4LSP takes full text).

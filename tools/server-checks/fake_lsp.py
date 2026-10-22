@@ -1,9 +1,10 @@
 """A language server for the checks (docs/24): speaks LSP over stdio, takes UTF-8 positions when the client offers them,
 publishes a diagnostic on every "bad" of an open document, answers hover with the position it got and definition with
-another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
+another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents, expands the word at a position on "fake/expand" ({name, expansion}: the word, lowercased, with "(1)"), echoes "fake/echo" params, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
 first argument - after a {"argv": [...]} line with the arguments that follow it."""
 
 import json
+import re
 import sys
 
 LOG = open(sys.argv[1], "a", encoding="utf-8")
@@ -78,6 +79,13 @@ def answer(message):
 					start = {"line": number, "character": column(line, at)}
 					symbols.append({"name": "bad", "kind": 13, "location": {"uri": uri, "range": {"start": start, "end": dict(start, character=column(line, at + 3))}}})
 		return symbols
+	if method == "fake/expand":
+		position = params["position"]
+		rest = documents.get(params["textDocument"]["uri"], "").split("\n")[position["line"]][position["character"]:]
+		word = re.match(r"\w+", rest)
+		return {"name": word.group(0), "expansion": word.group(0).lower() + "(1)"} if word else None
+	if method == "fake/echo":
+		return {"got": params}
 	if method == "fake/crash":
 		sys.exit(3)
 	return None

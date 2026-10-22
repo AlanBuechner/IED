@@ -27,10 +27,10 @@ Permission handling per class is defined in `docs/11`.
 | T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob. |
 | T-SRCH-1 | `search_text(pattern, regex?, glob?, scope?, context_lines?)` | read | ripgrep-backed workspace search; scopes: project / solution / member / federation. |
 | T-SHELL-1 | `shell_run(command, cwd?, timeout_s?, background?)` | exec | Run in the chat's AI terminal; returns exit code + output tail; `background` returns a handle. |
-| T-LSP-1 | `code_symbols(path or query)` | read | Outline of a file, or workspace symbol search. |
-| T-LSP-2 | `code_definition(symbol or path+line+col)` | read | Definition location(s) + a short excerpt. |
-| T-LSP-3 | `code_references(symbol or position, limit?)` | read | References grouped by file with one-line excerpts. |
-| T-LSP-4 | `code_read_symbol(symbol)` | read | The full source of one function/type/member - the main way to read code without whole files. |
+| T-LSP-1 | `code_symbols(path or query, kind?, depth?)` | read | Outline of a file (kinds, signatures, line ranges), or the workspace's symbols named like `query`. **Built**, "Navigating code". |
+| T-LSP-2 | `code_definition(target)` | read | Where it is defined and declared, each with its first lines. **Built**. |
+| T-LSP-3 | `code_references(target, limit?, include_declaration?)` | read | References by file, each line with the function it sits in. **Built**. |
+| T-LSP-4 | `code_read_symbol(target, declaration?)` | read | The full source of one function/type/member/macro with the comment above it, the definition before the declaration - the main way to read code without whole files. **Built**. |
 | T-BLD-1 | `build_run(task?: "build", project?, config?)` | exec | Run a toolbar task; returns status + structured problems (from the Error List), not raw logs. |
 | T-BLD-2 | `problems_list(scope?, severity?, source?)` | read | Current Error List (build + LSP + spell) as structured items. |
 | T-META-1 | `tasks_set(items)` / `task_update(id, status, note?)` | meta | Chat task list (F-CHT-80). |
@@ -55,18 +55,32 @@ Every tool definition sent costs context at every step, and the list grows with 
 | T-FS-14 | `fix_indentation(path, range?, style?: "tabs" | "spaces:<n>")` | write | The indentation fixer (F-EDT-31), default = project style (tabs). |
 | T-FS-15 | `fs_apply_patch(patch)` | write | Unified-diff patch application (for models that prefer patches). |
 
-### `code` (LSP extras)
+### `code` (LSP extras; built 2026-10-21 but for T-LSP-13..16, deferred)
 
 | ID | Tool | Class | Notes |
 |---|---|---|---|
-| T-LSP-10 | `code_hover(symbol or position)` | read | Type/signature/doc info. |
-| T-LSP-11 | `code_implementations(symbol)` | read | |
-| T-LSP-12 | `code_call_hierarchy(symbol, direction: in|out, depth?)` | read | When supported. |
-| T-LSP-13 | `code_diagnostics(path?)` | read | LSP diagnostics for a file or the workspace. |
+| T-LSP-10 | `code_hover(target)` | read | What the server says: declaration, type, documentation. **Built**. |
+| T-LSP-11 | `code_implementations(target)` | read | **Built**. |
+| T-LSP-12 | `code_call_hierarchy(target, direction: incoming|outgoing, depth?)` | read | Callers or callees as a tree with the lines of each call; when the server has a call hierarchy. **Built**. |
+| T-LSP-13 | `code_diagnostics(path?)` | read | LSP diagnostics for a file or the workspace. (`problems_list` covers it today.) |
 | T-LSP-14 | `code_rename(symbol, new_name, preview?)` | write | WorkspaceEdit applied through the document store. |
 | T-LSP-15 | `code_format(path, range?)` | write | Language formatter. |
 | T-LSP-16 | `code_actions(path, line, apply?: id)` | write | List/apply quick fixes for a location. |
-| T-LSP-17 | `code_custom(server, method, params)` | read | Call a language plugin's custom LSP request that it marked `aiExposed`. |
+| T-LSP-17 | `code_custom(method, path, line?, column?, symbol?, params?)` | read | A request the serving profile lists in `aiExposedRequests`; with `line`, the params get the position. **Built**. |
+| T-LSP-18 | `code_members(target, inherited?, limit?)` | read | A type's members, each with its declaration as the server shows it (types, return type, parameters, `static`, `const`, `inline`, `virtual`), its semantic-token modifiers and doc summary; `inherited` adds the base types' (type hierarchy). **Built**. |
+| T-LSP-19 | `code_type_definition(target)` | read | The type of a variable or expression and where it is defined. **Built**. |
+| T-LSP-20 | `code_type_hierarchy(target, direction: supertypes|subtypes, depth?)` | read | Base or derived types as a tree. **Built**. |
+| T-LSP-21 | `code_expand_macro(target)` | read | What a macro use expands to: the request a profile's `aiExposedRequests` marks `purpose: "expandMacro"`, else the hover (clangd shows the expansion) and the definition. **Built**. |
+
+### Navigating code (built, 2026-10-21)
+
+The `code_*` tools let a model read code by symbol instead of whole files, through the workspace's language servers - the same ones the editor uses (`docs/24` "Plugin code asks language servers"; nothing language-specific in IED). As built: `plugins/chat/code/lspquery.cf` (requests, answers read, a name found), `codenav.cf` (the four core tools), `codeinfo.cf` (the `code` group), `src/api/lsp.ch` (the host API, permission `lsp`).
+
+- **A target** is `symbol` - a name, qualified to narrow it (`Ring::Push`, `game.Ring.Push`; `::` and `.` alike) - or `path` and `line` (and `column`, or `symbol` naming the word on that line, else the line's first word). A name is looked up with `workspace/symbol` (in `path`'s outline when given), matched on its last part and its owners, and given its whole range from its file's outline. A name of several symbols with one qualified name (declaration and definition, overloads) is one target; of different ones, the call fails listing them with their places; a type and its own constructor are the type. A name nothing has fails with similar names.
+- **Answers** are compact text: lines from 1, workspace paths (a file outside the workspace that a server named - a library header - as its absolute path, and readable through these tools), symbols as `kind qualified-name: detail`, source numbered as `fs_read` numbers it.
+- **What the first search does.** `workspace/symbol` reaches only running servers, so the first one starts the servers the workspace's files call for and opens one file on each (clangd only finds `compile_commands.json` from an open file), then waits while they index (`$/progress`, at most 30 s).
+- **What a server cannot do** is said with the tool that can: no call hierarchy - `code_references`; no type hierarchy - `code_implementations`; no expand request - the hover and definition.
+- **Checked** against clangd (`tools/server-checks/tests/test_code_tools.py`: outline, search, a method's body with its comment and declaration, references by function, members with `static`, `inline bool Empty() const [readonly]`, `override [virtual]`, inherited `= 0 [abstract]` and doc summaries, type definition, implementations, both call directions, subtypes, macro expansion) and the fake server (plugin requests, transient opens); unit cases `server.ai.codetools`. C4LSP answers what it has today; `docs/17` L10-L14 list what it needs for the same depth (member kinds and signatures, markdown hovers with modifiers and docs, hierarchies, `c4/expandMacro`).
 
 ### `build`
 
@@ -285,4 +299,4 @@ Budgets scale down automatically for models with small context windows (proporti
 
 The core set in `plugins/chat/code/`: `fs_read`, `fs_write`, `fs_edit` (exact text, all or none; `\n` in old and new matches a file's `\r\n`), `fs_list`, `fs_glob`, `image_view` (T-MED-1, a workspace image shown to the model), `image_info` (T-MED-4, an image's header), `search_text` (the open documents as edited), `shell_run`, `build_run`, `problems_list`, `tasks_set`, `task_update`, `ask_user`, `finish`. Files are read as the editors have them and written through the document store (an open editor shows the change; the file is saved). Arguments are checked against each tool's JSON Schema (Bedrock's validator); an unknown name is answered with the nearest tools; every result is bounded with how to read on. Writes plan a unified diff for the approval card. `shell_run` runs the command with the system shell in the workspace and shows it with its output in the Output window's "AI" source (the visible AI terminal is to come); it and `build_run` need a trusted workspace.
 
-Not yet: the `code_*` LSP tools, `tools_enable` and every group.
+Not yet: `tools_enable` and most groups (built: `media`, `chats`, `clipboard`, `code`; "Navigating code").

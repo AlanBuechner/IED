@@ -1,0 +1,241 @@
+"""The AI's code tools (docs/13 "Navigating code", docs/24 "Plugin code asks language servers"). Against a real clangd
+on a small C++ project (skipped without the vendored clangd, which setup.bat installs): a file's outline, the
+workspace's symbols - the servers started and indexed for the first search - a symbol's whole source, definitions,
+references by the function they sit in, hover, a type's members with their declarations and modifiers (inherited ones
+through the type hierarchy), the type of a variable, implementations, callers and callees, base and derived types, and
+a macro. Against the fake language server: a language plugin's own requests (aiExposedRequests, the expandMacro
+purpose), a file no server serves, and files nobody has open - opened on the server alone, refreshed after a write,
+the oldest closed past 16, taken over by the store when a document opens."""
+
+import asyncio
+import json
+import os
+import shutil
+import sys
+import unittest
+
+from test_chat import REPO, ChatCase, call_step, text_step, write
+
+CLANGD = os.path.join(REPO, "C4", "Frost", "vendor", "Compiler", "bin", "clangd.exe")
+FAKE_LSP = os.path.join(REPO, "tools", "server-checks", "fake_lsp.py")
+TURN_SECONDS = 120
+
+RING_H = """#pragma once
+#define RING_CAPACITY 64
+#define TWICE(x) ((x) * 2)
+
+namespace game {
+
+/// Something values can be written to.
+class Sink {
+public:
+	virtual ~Sink() = default;
+	/// Writes one value.
+	virtual void Write(int value) = 0;
+};
+
+/// A ring buffer of ints.
+class Ring : public Sink {
+public:
+	Ring();
+	/// Pushes one value; drops it when full.
+	void Push(int value);
+	/// How many values it holds.
+	int Count() const;
+	static int Capacity() { return RING_CAPACITY; }
+	inline bool Empty() const { return count == 0; }
+	void Write(int value) override;
+
+private:
+	int values[RING_CAPACITY];
+	int count = 0;
+	static const int kLimit = TWICE(RING_CAPACITY);
+};
+
+}
+"""
+
+RING_CPP = """#include "ring.h"
+
+namespace game {
+
+Ring::Ring() {}
+
+// Adds the value at the end.
+void Ring::Push(int value) {
+	if (count < Capacity()) {
+		values[count] = value;
+		count += 1;
+	}
+}
+
+int Ring::Count() const { return count; }
+
+void Ring::Write(int value) { Push(value); }
+
+}
+"""
+
+GAME_CPP = """#include "ring.h"
+
+int Fill(game::Ring& ring) {
+	ring.Push(TWICE(3));
+	ring.Write(4);
+	return ring.Count();
+}
+
+int main() {
+	game::Ring ring;
+	return Fill(ring);
+}
+"""
+
+
+class CodeToolCase(ChatCase):
+	"""A chat server whose workspace a language plugin serves (`prepare` adds it), the server started again with it."""
+
+	def setUp(self):
+		super().setUp()
+		self.prepare()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+
+	async def results(self, *calls, permission="ask"):
+		"""Each call run in one turn; the model's results by call id."""
+		chat_id, _ = await self.chat(permission=permission)
+		self.model.queue(*[call_step(name, args, call_id) for call_id, name, args in calls], text_step("Done."))
+		self.assertEqual("finished", (await self.turn(chat_id, timeout=TURN_SECONDS))["stop"])
+		sent = self.model.requests()[-1]["body"]["messages"]
+		results = {m["tool_call_id"]: m["content"] for m in sent if m["role"] == "tool"}
+		dump = os.environ.get("IED_CODE_TOOLS_DUMP")
+		if dump:
+			with open(dump, "a", encoding="utf-8") as f:
+				for call_id, name, args in calls:
+					f.write("=== %s %s\n%s\n\n" % (name, json.dumps(args), results.get(call_id)))
+		return results
+
+
+@unittest.skipUnless(os.path.exists(CLANGD), "no vendored clangd (setup.bat installs it)")
+class ClangdCodeToolTests(CodeToolCase):
+	def prepare(self):
+		shutil.copytree(os.path.join(REPO, "plugins", "cpp"), os.path.join(self.home, "plugins", "cpp"))
+		write(os.path.join(self.repo, "src", "ring.h"), RING_H)
+		write(os.path.join(self.repo, "src", "ring.cpp"), RING_CPP)
+		write(os.path.join(self.repo, "src", "game.cpp"), GAME_CPP)
+		commands = [{"directory": self.repo, "file": os.path.join(self.repo, "src", name), "arguments": ["clang++", "-std=c++17", "-c", os.path.join("src", name)]} for name in ("ring.cpp", "game.cpp")]
+		write(os.path.join(self.repo, "compile_commands.json"), json.dumps(commands))
+
+	async def asyncSetUp(self):
+		await super().asyncSetUp()
+		await self.client.request("settings.set", {"tier": "app", "key": "cpp.clangd.path", "value": CLANGD})
+
+	async def test_navigating_a_cpp_project(self):
+		results = await self.results(
+			("s1", "code_symbols", {"query": "Push"}),
+			("o1", "code_symbols", {"path": "src/ring.h"}),
+			("r1", "code_read_symbol", {"symbol": "Ring::Push"}),
+			("r2", "code_read_symbol", {"symbol": "game::Ring::Push", "declaration": True}),
+			("r3", "code_read_symbol", {"path": "src/ring.cpp", "line": 10}),
+			("d1", "code_definition", {"path": "src/game.cpp", "line": 4, "symbol": "Push"}),
+			("f1", "code_references", {"symbol": "Ring::Push"}),
+			("h1", "code_hover", {"symbol": "Ring::Count"}),
+			("h2", "code_hover", {"symbol": "Ring::values"}),
+			("m1", "code_members", {"symbol": "Ring", "inherited": True}),
+			("t1", "code_type_definition", {"path": "src/game.cpp", "line": 10, "symbol": "ring"}),
+			("i1", "code_implementations", {"symbol": "Sink::Write"}),
+			("c1", "code_call_hierarchy", {"symbol": "Ring::Push", "direction": "incoming", "depth": 2}),
+			("c2", "code_call_hierarchy", {"symbol": "Fill", "direction": "outgoing"}),
+			("y1", "code_type_hierarchy", {"symbol": "Sink", "direction": "subtypes"}),
+			("x1", "code_expand_macro", {"path": "src/game.cpp", "line": 4, "symbol": "TWICE"}),
+			("n1", "code_read_symbol", {"symbol": "Pop"}),
+			("a1", "code_hover", {"symbol": "Write"}))
+		for call_id in ("s1", "o1", "r1", "r2", "r3", "d1", "f1", "h1", "m1", "t1", "i1", "c1", "c2", "y1", "x1"):
+			self.assertNotIn("did not run", results[call_id], call_id)
+		self.assertIn("method game::Ring::Push  src/ring.cpp:8", results["s1"], "the servers started and indexed for the first search")
+		self.assertIn("class Ring", results["o1"])
+		self.assertIn("Push", results["o1"])
+		self.assertIn("8\tvoid Ring::Push(int value) {", results["r1"], "the definition, with its body")
+		self.assertIn("13\t}", results["r1"])
+		self.assertIn("7\t// Adds the value at the end.", results["r1"], "the comment above it")
+		self.assertIn("Also declared at src/ring.h:20", results["r1"])
+		self.assertIn("Defined at src/ring.cpp:8", results["r2"])
+		self.assertIn("20\t\tvoid Push(int value);", results["r2"], "the declaration when asked")
+		self.assertIn("10\t\t\tvalues[count] = value;", results["r3"], "the function holding the line")
+		self.assertIn("method game::Ring::Push: void (int) - src/ring.cpp lines 8-13", results["d1"], "the definition")
+		self.assertIn("src/ring.h line 20", results["d1"], "and the declaration")
+		self.assertIn("src/game.cpp", results["f1"])
+		self.assertIn("(in Fill): ring.Push(TWICE(3));", results["f1"], "each use with the function it is in")
+		self.assertIn("(in game::Ring::Write)", results["f1"])
+		self.assertIn("int Ring::Count() const", results["h1"])
+		self.assertIn("How many values it holds.", results["h1"])
+		self.assertIn("L23  method  public: static int Capacity()", results["m1"], "a member's declaration with its modifiers")
+		self.assertIn("inline bool Empty() const  [readonly]", results["m1"], "and the modifiers its semantic tokens add")
+		self.assertIn("void Write(int value) override  [virtual]", results["m1"])
+		self.assertIn("L28  field  private: int values[64]\n", results["m1"], "a field has no doc summary from the hover's facts")
+		self.assertIn("Pushes one value", results["m1"], "its doc comment")
+		self.assertIn("from Sink (src/ring.h:8)\n", results["m1"], "inherited members")
+		self.assertIn("virtual void Write(int value) = 0  [abstract]  - Writes one value.", results["m1"])
+		self.assertIn("1 type definition for src/game.cpp:10:\nclass game::Ring - src/ring.h lines 16-31", results["t1"])
+		self.assertIn("method game::Ring::Write: void (int) - src/ring.cpp line 17", results["i1"])
+		self.assertIn("  function Fill - src/game.cpp:3 (call at line 4)\n    function main - src/game.cpp:9 (call at line 11)", results["c1"], "callers two levels up")
+		self.assertIn("  method Push (game::Ring::Push) - src/ring.cpp:8 (call at line 4)", results["c2"])
+		self.assertIn("class Sink - src/ring.h:8 is derived by:\n  class Ring (game::Ring) - src/ring.h:16", results["y1"])
+		self.assertIn("// Expands to\n((3) * 2)", results["x1"], "clangd's hover says what the use expands to")
+		self.assertIn("Defined at src/ring.h:3", results["x1"])
+		self.assertIn("no symbol Pop", results["n1"])
+		self.assertIn("names several symbols", results["a1"], "Sink::Write and Ring::Write")
+
+
+class FakeServerCodeToolTests(CodeToolCase):
+	def prepare(self):
+		self.log = os.path.join(self.root, "fake-lsp.jsonl")
+		plugin = os.path.join(self.home, "plugins", "fake")
+		os.makedirs(plugin)
+		shutil.copy(FAKE_LSP, plugin)
+		requests = [{"method": "fake/expand", "purpose": "expandMacro", "description": "What a macro use expands to."}, {"method": "fake/echo", "description": "Its params back."}]
+		write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+			"contributes": {"languages": [{"id": "fake", "extensions": [".fk"]}],
+				"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", self.log], "selector": {"languages": ["fake"]}, "aiExposedRequests": requests}]}}))
+		write(os.path.join(self.repo, "a.fk"), "use MAKE_IT here\n")
+		for i in range(18):
+			write(os.path.join(self.repo, "f%d.fk" % i), "word %d\n" % i)
+
+	def received(self, method):
+		with open(self.log, encoding="utf-8") as f:
+			return [m for m in map(json.loads, f) if m.get("method") == method]
+
+	def uris(self, method):
+		return [m["params"]["textDocument"]["uri"].rsplit("/", 1)[-1] for m in self.received(method)]
+
+	async def test_a_language_plugins_own_requests(self):
+		results = await self.results(
+			("x1", "code_expand_macro", {"path": "a.fk", "line": 1, "symbol": "MAKE_IT"}),
+			("u1", "code_custom", {"method": "fake/echo", "path": "a.fk", "line": 1, "symbol": "here", "params": {"extra": 1}}),
+			("u2", "code_custom", {"method": "fake/nope", "path": "a.fk"}),
+			("n1", "code_hover", {"path": "src/main.c", "line": 1}))
+		self.assertIn("MAKE_IT at a.fk:1 expands to:", results["x1"], "the request its profile names for the purpose")
+		self.assertIn("make_it(1)", results["x1"])
+		self.assertIn('"extra":1', results["u1"], "the params given")
+		self.assertIn('"position":{"line":0,"character":12}', results["u1"], "and the place, at the symbol on the line")
+		self.assertIn("does not expose fake/nope; it exposes fake/expand, fake/echo", results["u2"])
+		self.assertIn("no language server serves src/main.c", results["n1"])
+		self.assertEqual(["a.fk"], self.uris("textDocument/didOpen"), "opened on the server once for the asking")
+
+	async def test_files_nobody_has_open(self):
+		calls = [("h%d" % i, "code_hover", {"path": "f%d.fk" % i, "line": 1}) for i in range(17)]
+		calls += [("w1", "fs_write", {"path": "f16.fk", "content": "changed\n"}), ("h99", "code_hover", {"path": "f16.fk", "line": 1})]
+		results = await self.results(*calls, permission="acceptEdits")
+		self.assertIn("at 0:0", results["h0"], "each answered")
+		self.assertEqual(["f%d.fk" % i for i in range(17)], self.uris("textDocument/didOpen"), "each opened on the server for the asking")
+		self.assertEqual(["f0.fk"], self.uris("textDocument/didClose"), "past 16 the oldest is closed")
+		changes = self.received("textDocument/didChange")
+		self.assertEqual(["f16.fk"], [m["params"]["textDocument"]["uri"].rsplit("/", 1)[-1] for m in changes], "a file written since is sent again")
+		self.assertEqual("changed\n", changes[0]["params"]["contentChanges"][0]["text"])
+		await self.client.request("doc.open", {"wsId": "w1", "path": "f15.fk"})
+		for _ in range(50):
+			if self.uris("textDocument/didClose").count("f15.fk") == 1 and self.uris("textDocument/didOpen").count("f15.fk") == 2:
+				break
+			await asyncio.sleep(0.1)
+		self.assertEqual(["f0.fk", "f15.fk"], self.uris("textDocument/didClose"), "a document that opens takes the file over")
+		self.assertEqual(2, self.uris("textDocument/didOpen").count("f15.fk"))

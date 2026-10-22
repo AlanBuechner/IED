@@ -123,7 +123,20 @@ namespace Ai
 		return problems;
 	}
 
-	// Letters of `a` found in order in `b`, plus a bonus for a shared word.
+	// Whether `word` is one of the underscore-separated words of `name`.
+	static bool HasWord(Core::StringView name, Core::StringView word) {
+		int64 at = 0;
+		while (at <= name.ByteLength()) {
+			int64 end = name.IndexOf('_', at);
+			if (end < 0) end = name.ByteLength();
+			if (name.Substring(at, end - at) == word) return true;
+			at = end + 1;
+		}
+		return false;
+	}
+
+	// Letters of `a` found in order in `b`, plus a bonus for its tail after an underscore and for each word they share,
+	// less a third of what `b` is longer: "read_file" is as like fs_read as code_read_symbol.
 	static int64 Likeness(Core::StringView a, Core::StringView b) {
 		int64 score = 0;
 		int64 at = 0;
@@ -135,6 +148,14 @@ namespace Ai
 		}
 		const int64 underscore = a.IndexOf('_', 0);
 		if (underscore > 0 && b.Contains(a.Substring(underscore, a.ByteLength() - underscore))) score += 4;
+		int64 start = 0;
+		while (start < a.ByteLength()) {
+			int64 end = a.IndexOf('_', start);
+			if (end < 0) end = a.ByteLength();
+			if (end - start >= 2 && HasWord(b, a.Substring(start, end - start))) score += 4;
+			start = end + 1;
+		}
+		if (b.ByteLength() > a.ByteLength()) score -= (b.ByteLength() - a.ByteLength()) / 3;
 		return score;
 	}
 

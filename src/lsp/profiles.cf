@@ -38,6 +38,7 @@ namespace Ied
 		profile->integerIds = node.Member("requestIds").AsView() == "integer";
 		profile->refetch = StringsOf(node.Member("refetchOnDiagnostics"));
 		profile->filterCodeActions = node.Member("codeActionsNeedClientFilter").AsBool();
+		profile->aiRequests = node.Member("aiExposedRequests").IsValid() ? NodeJson(node.Member("aiExposedRequests")) : Core::String("[]");
 		profile->when = Core::String(node.Member("when").AsView());
 		return profile;
 	}
