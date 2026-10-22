@@ -68,6 +68,10 @@ by their source file and line and points in time in milliseconds from the captur
   pool the objects, reserve capacity once. A capture with only allocation samples (Go, a pprof heap profile) answers
   by function.
 - `profile_memory` - how often collections run, their pauses, and how many fell in slow frames.
+- A collected program (C4) counts its allocations per zone instead of sending each one: `profile_allocations` then
+  shows each zone's own allocations and the process's per frame (no churn: everything a frame drops is garbage the
+  collector finds later), and `profile_leaks` reads the collector's census of live objects by type - a type that keeps
+  accumulating from one collection to the next is still referenced by something that lives on.
 
 ### Then
 

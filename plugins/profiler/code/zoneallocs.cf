@@ -1,0 +1,114 @@
+// Allocations a client counted instead of sending each one (docs/16 ZoneAllocs, AllocCount): what each zone allocated
+// itself - its count less its children's - and the allocations in each frame, from whichever the capture has.
+include "investigate.ch"
+
+namespace Profiler
+{
+	static int64 Inclusive(const ThreadTrack* track, const ZoneLevel* level, int64 i, bool bytes) {
+		const uint32 index = level->extras[i];
+		if (index == 0) return 0;
+		const ZoneExtra& extra = track->extras[(int64)index - 1];
+		if (!extra.hasAllocs) return 0;
+		return (int64)(bytes ? extra.allocBytes : extra.allocObjects);
+	}
+
+	void ZoneSelfAllocations(const Capture& capture, Range range, const func<void(int64, int64, int64, int64, int64)>& visit) {
+		for (int64 t = 0; t < capture.tracks.Count(); ++t) {
+			const ThreadTrack* track = capture.tracks[t];
+			Core::Array<Core::Array<int64>*> objects;
+			Core::Array<Core::Array<int64>*> bytes;
+			for (int64 d = 0; d < track->levels.Count(); ++d) {
+				const ZoneLevel* level = track->levels[d];
+				Core::Array<int64>* o = new Core::Array<int64>();
+				Core::Array<int64>* b = new Core::Array<int64>();
+				for (int64 i = 0; i < level->Count(); ++i) {
+					o->Push(Inclusive(track, level, i, false));
+					b->Push(Inclusive(track, level, i, true));
+				}
+				objects.Push(o);
+				bytes.Push(b);
+			}
+			for (int64 d = 1; d < track->levels.Count(); ++d) {
+				const ZoneLevel* parents = track->levels[d - 1];
+				const ZoneLevel* level = track->levels[d];
+				for (int64 j = 0; j < level->Count(); ++j) {
+					const int64 childObjects = Inclusive(track, level, j, false);
+					const int64 childBytes = Inclusive(track, level, j, true);
+					if (childObjects == 0 && childBytes == 0) continue;
+					const int64 i = parents->FirstEndingAfter(level->starts[j]);
+					if (i >= parents->Count() || parents->starts[i] > level->starts[j]) continue;
+					(*objects[d - 1])[i] -= childObjects;
+					(*bytes[d - 1])[i] -= childBytes;
+				}
+			}
+			for (int64 d = 0; d < track->levels.Count(); ++d) {
+				const ZoneLevel* level = track->levels[d];
+				const int64 stop = level->FirstStartingAt(range.end);
+				for (int64 i = level->FirstStartingAt(range.begin); i < stop; ++i) {
+					const int64 o = (*objects[d])[i] > 0 ? (*objects[d])[i] : 0;
+					const int64 b = (*bytes[d])[i] > 0 ? (*bytes[d])[i] : 0;
+					if (o > 0 || b > 0) visit(t, d, i, o, b);
+				}
+			}
+		}
+	}
+
+	// The process's allocations so far at `t`: the last count at or before it.
+	static void CountedAt(const AllocCounter& counter, int64 t, int64& objects, int64& bytes) {
+		const int64 i = counter.times.UpperBound(t) - 1;
+		objects = i < 0 ? 0 : counter.objects[i];
+		bytes = i < 0 ? 0 : counter.bytes[i];
+	}
+
+	void CountedBetween(const Capture& capture, Range range, int64& objects, int64& bytes) {
+		int64 beginObjects;
+		int64 beginBytes;
+		CountedAt(capture.allocCounter, range.begin, beginObjects, beginBytes);
+		CountedAt(capture.allocCounter, range.end, objects, bytes);
+		objects -= beginObjects;
+		bytes -= beginBytes;
+	}
+
+	bool FrameAllocations(const Capture& capture, const FrameSet* set, Core::Array<int64>& objects, Core::Array<int64>& bytes) {
+		if (!set) return false;
+		objects.Resize(set->starts.Count());
+		bytes.Resize(set->starts.Count());
+		if (!capture.allocations.IsEmpty()) {
+			for (const Allocation& allocation : capture.allocations) {
+				const int64 f = FrameAt(set, allocation.t);
+				if (f < 0) continue;
+				objects[f] += 1;
+				bytes[f] += allocation.size;
+			}
+			return true;
+		}
+		if (!capture.allocCounter.times.IsEmpty()) {
+			for (int64 f = 0; f < set->starts.Count(); ++f) {
+				if (set->ends[f] == kOpen) continue;
+				Range frame;
+				frame.begin = set->starts[f];
+				frame.end = set->ends[f];
+				CountedBetween(capture, frame, objects[f], bytes[f]);
+			}
+			return true;
+		}
+		if (capture.zoneAllocs == 0) return false;
+		Core::Array<int64>* o = &objects;
+		Core::Array<int64>* b = &bytes;
+		ZoneSelfAllocations(capture, Everything(capture), [&capture, set, o, b](int64 t, int64 d, int64 i, int64 count, int64 size) {
+			const int64 f = FrameAt(set, capture.tracks[t]->levels[d]->starts[i]);
+			if (f < 0) return;
+			(*o)[f] += count;
+			(*b)[f] += size;
+		});
+		return true;
+	}
+
+	int64 AllocationTotal(const Capture& capture) {
+		if (!capture.allocations.IsEmpty()) return capture.allocations.Count();
+		if (!capture.allocCounter.objects.IsEmpty()) return capture.allocCounter.objects.Back();
+		int64 total = 0;
+		ZoneSelfAllocations(capture, Everything(capture), [&total](int64 t, int64 d, int64 i, int64 count, int64 size) { total += count; });
+		return total;
+	}
+}

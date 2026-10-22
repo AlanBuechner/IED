@@ -74,12 +74,18 @@ namespace Profiler
 		int64 depth;
 		int64 index;
 		if (!InnermostZoneAt(*capture, allocation.track, allocation.t, depth, index)) return 0;
-		const ThreadTrack* track = capture->tracks[(int64)allocation.track];
-		if (by == AllocGroup::Zone) return (uint64)track->levels[depth]->sites[index];
+		return KeyOfZone((int64)allocation.track, depth, index);
+	}
+
+	uint64 AllocGrouper::KeyOfZone(int64 trackIndex, int64 depth, int64 index) {
+		const ThreadTrack* track = capture->tracks[trackIndex];
+		if (by == AllocGroup::Thread) return (uint64)trackIndex;
+		if (by != AllocGroup::Path) return (uint64)track->levels[depth]->sites[index];
+		const int64 at = track->levels[depth]->starts[index];
 		Core::StringBuilder path;
 		for (int64 d = 0; d <= depth; ++d) {
 			const ZoneLevel* level = track->levels[d];
-			const int64 i = level->FirstEndingAfter(allocation.t);
+			const int64 i = d == depth ? index : level->FirstEndingAfter(at);
 			if (d > 0) path.Append(" > ");
 			path.Append(capture->SiteName((uint64)level->sites[i]));
 		}

@@ -80,6 +80,44 @@ namespace Profiler
 		}
 	}
 
+	// What a collected program keeps: the types whose live objects grew from one collection's census to the next.
+	static Core::String CensusText(const Capture& capture, const Serialization::DomNode& args) {
+		Serialization::DomNode c = ParseJson(CensusTrend(capture, MsArg(args, "from_ms"), MsArg(args, "to_ms"), kToolLeakGroups));
+		Core::StringBuilder out;
+		out.Append("Live objects by type, from the census after each of ");
+		out.Append(Number(c.Member("censuses").AsInt()).View());
+		out.Append(" collections between ");
+		out.Append(Instant(c.Member("firstNs").AsInt()).View());
+		out.Append(" and ");
+		out.Append(Instant(c.Member("lastNs").AsInt()).View());
+		out.Append(", the most growth first (");
+		out.Append(Number(c.Member("typeCount").AsInt()).View());
+		out.Append(" types):\n");
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[7] titles = { "type", "objects first", "objects last", "bytes first", "bytes last", "rose in", "pattern" };
+		for (int32 i = 0; i < 7; ++i) head->Push(Core::String(titles[i]));
+		Serialization::DomNode types = c.Member("types");
+		for (int64 i = 0; i < types.Count(); ++i) {
+			Serialization::DomNode t = types.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(t.Member("name").AsView()));
+			row->Push(Number(t.Member("firstObjects").AsInt()));
+			row->Push(Number(t.Member("lastObjects").AsInt()));
+			row->Push(Bytes(t.Member("firstBytes").AsInt()));
+			row->Push(Bytes(t.Member("lastBytes").AsInt()));
+			Core::StringBuilder rose;
+			rose.AppendInt(t.Member("rises").AsInt());
+			rose.Append(" of ");
+			rose.AppendInt(t.Member("steps").AsInt());
+			row->Push(rose.ToString());
+			row->Push(Core::String(t.Member("accumulating").AsBool() ? "keeps accumulating" : (t.Member("lastBytes").AsInt() > t.Member("firstBytes").AsInt() ? "grew" : "steady")));
+		}
+		table.Write(out);
+		out.Append("In a collected heap a leak is objects still reachable: a type that keeps accumulating is held by something that lives on (a cache, a list, an event handler never removed). Find who keeps references to it.\n");
+		return out.ToString();
+	}
+
 	Core::String LeaksText(const Capture& capture, const Serialization::DomNode& args) {
 		LeakAsk ask;
 		ask.groupBy = GroupArg(capture, args);
@@ -95,8 +133,9 @@ namespace Profiler
 			out.Append(Instant(leaks.Member("teardownNs").AsInt()).View());
 			out.Append(", so this reads what was live just before that (at_ms asks another time).\n");
 		}
+		if (capture.allocations.IsEmpty() && !capture.censuses.IsEmpty()) return CensusText(capture, args);
 		if (capture.allocations.IsEmpty()) {
-			out.Append("The capture has no allocation events, so there is nothing to find live: profile_memory shows whether memory keeps growing (a GC heap, a pool) and profile_allocations reads allocation samples.\n");
+			out.Append("The capture has no allocation events and no census of live objects, so there is nothing to find live: profile_memory shows whether memory keeps growing (a GC heap, a pool) and profile_allocations reads what the program counted or sampled.\n");
 			return out.ToString();
 		}
 		out.Append(Number(leaks.Member("count").AsInt()).View());
@@ -145,6 +184,19 @@ namespace Profiler
 	// --- profile_allocations ------------------------------------------------------------------------------------------
 
 	static void AllocationTotals(Core::StringBuilder& out, const Serialization::DomNode& a) {
+		AllocationTotalsLine(out, a);
+		const int64 count = a.Member("count").AsInt();
+		out.Append("Churn: ");
+		out.Append(Percent(count == 0 ? 0.0 : (double)a.Member("churn").AsInt() / (double)count).View());
+		out.Append(a.Member("churnWindow").AsView() == "frame" ? " were freed within the frame they were made in" : " were freed within 10 ms");
+		out.Append(". Still live at the range's end: ");
+		out.Append(Number(a.Member("live").AsInt()).View());
+		out.Append(" (");
+		out.Append(Bytes(a.Member("liveBytes").AsInt()).View());
+		out.Append(").\n");
+	}
+
+	static void AllocationTotalsLine(Core::StringBuilder& out, const Serialization::DomNode& a) {
 		out.Append("Allocations from ");
 		out.Append(Instant(a.Member("fromNs").AsInt()).View());
 		out.Append(" to ");
@@ -180,15 +232,6 @@ namespace Profiler
 			out.Append(Instant(frames.Member("maxStartNs").AsInt()).View());
 			out.Append(".\n");
 		}
-		const int64 count = a.Member("count").AsInt();
-		out.Append("Churn: ");
-		out.Append(Percent(count == 0 ? 0.0 : (double)a.Member("churn").AsInt() / (double)count).View());
-		out.Append(a.Member("churnWindow").AsView() == "frame" ? " were freed within the frame they were made in" : " were freed within 10 ms");
-		out.Append(". Still live at the range's end: ");
-		out.Append(Number(a.Member("live").AsInt()).View());
-		out.Append(" (");
-		out.Append(Bytes(a.Member("liveBytes").AsInt()).View());
-		out.Append(").\n");
 	}
 
 	static void AllocationRows(Core::StringBuilder& out, const Serialization::DomNode& groups, AllocGroup group) {
@@ -264,6 +307,38 @@ namespace Profiler
 			}
 	}
 
+	// A client that counted allocations per zone (C4's collector): no event each, so no churn or what stays live, but
+	// each zone's own count and the process's per frame.
+	static void CountedRows(Core::StringBuilder& out, const Serialization::DomNode& a, AllocGroup group) {
+		AllocationTotalsLine(out, a);
+		out.Append("Counted by the program's collector, not sent one by one: ");
+		out.Append(Number(a.Member("inZones").AsInt()).View());
+		out.Append(" of them (");
+		out.Append(Bytes(a.Member("inZoneBytes").AsInt()).View());
+		out.Append(") inside zones. By ");
+		out.Append(GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone));
+		out.Append(", each zone's own (its children's left to them):\n");
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[8] titles = { GroupTitle(group == AllocGroup::Path || group == AllocGroup::Thread ? group : AllocGroup::Zone), "allocations", "per frame", "bytes", "bytes a frame", "mean size", "thread", "source" };
+		for (int32 i = 0; i < 8; ++i) head->Push(Core::String(titles[i]));
+		Serialization::DomNode groups = a.Member("groups");
+		for (int64 i = 0; i < groups.Count(); ++i) {
+			Serialization::DomNode g = groups.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(g.Member("label").AsView()));
+			row->Push(Number(g.Member("count").AsInt()));
+			row->Push(Decimal(g.Member("perFrame").AsFloat()));
+			row->Push(Bytes(g.Member("bytes").AsInt()));
+			row->Push(Bytes(g.Member("bytesPerFrame").AsInt()));
+			row->Push(Bytes(g.Member("meanSize").AsInt()));
+			row->Push(Core::String(g.Member("thread").AsView()));
+			row->Push(Source(g));
+		}
+		table.Write(out);
+		out.Append("In a collected heap whatever a frame allocates and drops is garbage the collector must find: fewer allocations in a hot zone mean fewer and shorter collections (profile_memory). Reuse objects and buffers across frames.\n");
+	}
+
 	Core::String AllocationsText(const Capture& capture, const Serialization::DomNode& args) {
 		AllocAsk ask;
 		ask.groupBy = GroupArg(capture, args);
@@ -280,6 +355,10 @@ namespace Profiler
 		}
 		if (source == "samples") {
 			SampleRows(out, a, ask.groupBy);
+			return out.ToString();
+		}
+		if (source == "zones") {
+			CountedRows(out, a, ask.groupBy);
 			return out.ToString();
 		}
 		AllocationTotals(out, a);
@@ -433,6 +512,11 @@ namespace Profiler
 			out.Append(": the values at the end are its teardown, the floor's highest is what it held.\n");
 		}
 		CollectionLines(out, m.Member("gc"));
+		if (!capture.censuses.IsEmpty()) {
+			out.Append("The collector took a census of live objects by type after ");
+			out.Append(Number(capture.censuses.Count()).View());
+			out.Append(" collections: profile_leaks says which types keep accumulating.\n");
+		}
 		out.Append("Reading it: a floor that keeps rising is memory the program keeps (profile_leaks finds what, for allocation events); a high peak over a flat floor is churn (profile_allocations); collections in slow frames make hitches (profile_hitches).\n");
 		return out.ToString();
 	}

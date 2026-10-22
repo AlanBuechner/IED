@@ -161,7 +161,7 @@ namespace Profiler
 		WriteFrameOf(json, capture, start);
 		WriteParents(json, capture, ref, track, start);
 		WriteChildren(json, capture, ref, track, start, end);
-		WriteInside(json, capture, (int32)ref.Track(), start, end);
+		WriteInside(json, capture, ref, start, end);
 		json.EndObject();
 		return json.ToString();
 	}

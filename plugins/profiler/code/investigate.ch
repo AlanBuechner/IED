@@ -48,8 +48,19 @@ namespace Profiler
 	// What happened in a window, per thread in time order.
 	Core::String Window(const Capture& capture, const WindowAsk& ask);
 
+	// What each zone allocated itself (its ZoneAllocs less its children's), for the zones starting in a range:
+	// visit(track, depth, index, objects, bytes).
+	void ZoneSelfAllocations(const Capture& capture, Range range, const func<void(int64, int64, int64, int64, int64)>& visit);
+	// The allocations each frame of `set` held (indexed like its starts): from allocation events, else the process's
+	// count, else the zones'; false when the capture has none of them.
+	bool FrameAllocations(const Capture& capture, const FrameSet* set, Core::Array<int64>& objects, Core::Array<int64>& bytes);
+	// What the process counted (AllocCount) between a range's ends.
+	void CountedBetween(const Capture& capture, Range range, int64& objects, int64& bytes);
+	// Live objects by type over the censuses in a range (HeapCensus), the types that grew most first.
+	Core::String CensusTrend(const Capture& capture, int64 fromNs, int64 toNs, int32 limit);
+
 	// What happened inside one zone on its thread: allocations, lock waits, messages and collections.
-	void WriteInside(IED::JsonWriter& json, const Capture& capture, int32 track, int64 begin, int64 end);
+	void WriteInside(IED::JsonWriter& json, const Capture& capture, ZoneRef ref, int64 begin, int64 end);
 	// The frames over a threshold (`thresholdTicks`; twice the median when negative): their indices, longest first.
 	void SlowFrames(const Capture& capture, const FrameSet* set, int64 thresholdTicks, Core::Array<int64>& out, int64& threshold, int64& median);
 }

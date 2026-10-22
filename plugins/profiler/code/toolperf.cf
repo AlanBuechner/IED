@@ -221,9 +221,12 @@ namespace Profiler
 		out.Append(Number(allocs.Member("count").AsInt()).View());
 		out.Append(" (");
 		out.Append(Bytes(allocs.Member("bytes").AsInt()).View());
-		out.Append("), ");
-		out.Append(Number(allocs.Member("freedInside").AsInt()).View());
-		out.Append(" freed before it ended\n");
+		if (allocs.Member("freedInside").AsInt() < 0) out.Append("), its children's included\n");
+		else {
+			out.Append("), ");
+			out.Append(Number(allocs.Member("freedInside").AsInt()).View());
+			out.Append(" freed before it ended\n");
+		}
 		if (inside.Member("waitNs").AsInt() > 0) {
 			out.Append("Lock waits inside: ");
 			out.Append(Duration(inside.Member("waitNs").AsInt()).View());

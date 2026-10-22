@@ -18,6 +18,9 @@ namespace Profiler
 		public bool hasValue;
 		public uint32 color;
 		public uint64 callstack;
+		public uint64 allocObjects;  // ZoneAllocs: what the zone allocated, its children's included
+		public uint64 allocBytes;
+		public bool hasAllocs;
 	}
 
 	// The zones of one depth of one thread, in time order.

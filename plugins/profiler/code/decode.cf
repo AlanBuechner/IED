@@ -21,6 +21,7 @@ namespace Profiler
 			case EventType::ZoneValue: return "v";
 			case EventType::ZoneColor: return "v";
 			case EventType::ZoneCallstack: return "v";
+			case EventType::ZoneAllocs: return "vv";
 			case EventType::TaskBegin: return "tvvv";
 			case EventType::TaskEnd: return "tv";
 			case EventType::TaskSuspend: return "tv";
@@ -37,6 +38,9 @@ namespace Profiler
 			case EventType::PoolReset: return "tv";
 			case EventType::GcBegin: return "tvv";
 			case EventType::GcEnd: return "tvvvvv";
+			case EventType::AllocCount: return "tvv";
+			case EventType::HeapCensus: return "tv";
+			case EventType::HeapCensusType: return "vvv";
 			case EventType::LockDef: return "vvv";
 			case EventType::LockWait: return "tv";
 			case EventType::LockObtain: return "tv";

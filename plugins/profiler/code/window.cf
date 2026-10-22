@@ -69,6 +69,12 @@ namespace Profiler
 		}
 	}
 
+	// What a zone said it allocated, its children's included (ZoneAllocs); 0 when it said nothing.
+	static int64 CountedIn(const ThreadTrack* track, const ZoneLevel* level, int64 i) {
+		const uint32 index = level->extras[i];
+		return index == 0 || !track->extras[(int64)index - 1].hasAllocs ? 0 : (int64)track->extras[(int64)index - 1].allocObjects;
+	}
+
 	static int64 CountBetween(const Core::Array<int64>& sorted, int64 begin, int64 end) {
 		return sorted.LowerBound(end) - sorted.LowerBound(begin);
 	}
@@ -86,7 +92,7 @@ namespace Profiler
 			json.IntField("depth", entry.depth);
 			json.IntField("durationNs", capture.clock.Ns(end - entry.t));
 			json.Field("ref", ZoneRef::Of(t, entry.depth, entry.index).Text().View());
-			json.IntField("allocations", CountBetween(allocs, entry.t, end));
+			json.IntField("allocations", capture.allocations.IsEmpty() ? CountedIn(track, level, entry.index) : CountBetween(allocs, entry.t, end));
 		}
 		else if (entry.kind == 1) {
 			LockInfo* lock = nullptr;
@@ -160,7 +166,22 @@ namespace Profiler
 
 	// --- Inside one zone ----------------------------------------------------------------------------------------------
 
-	static void WriteInsideAllocations(IED::JsonWriter& json, const Capture& capture, int32 track, Range span) {
+	// The zone's allocations: the events its thread made in it, else what it counted itself (its children's included;
+	// what was freed in it is not known then, -1).
+	static void WriteInsideAllocations(IED::JsonWriter& json, const Capture& capture, ZoneRef ref, Range span) {
+		const int32 track = (int32)ref.Track();
+		if (capture.allocations.IsEmpty() && capture.zoneAllocs > 0) {
+			const ThreadTrack* thread = capture.tracks[ref.Track()];
+			const uint32 extra = thread->levels[ref.Depth()]->extras[ref.Index()];
+			const bool counted = extra != 0 && thread->extras[(int64)extra - 1].hasAllocs;
+			json.Key(Core::StringView("allocations"));
+			json.BeginObject();
+			json.IntField("count", counted ? (int64)thread->extras[(int64)extra - 1].allocObjects : 0);
+			json.IntField("bytes", counted ? (int64)thread->extras[(int64)extra - 1].allocBytes : 0);
+			json.IntField("freedInside", -1);
+			json.EndObject();
+			return;
+		}
 		int64 count = 0;
 		int64 bytes = 0;
 		int64 freedInside = 0;
@@ -178,13 +199,14 @@ namespace Profiler
 		json.EndObject();
 	}
 
-	void WriteInside(IED::JsonWriter& json, const Capture& capture, int32 track, int64 begin, int64 end) {
+	void WriteInside(IED::JsonWriter& json, const Capture& capture, ZoneRef ref, int64 begin, int64 end) {
+		const int32 track = (int32)ref.Track();
 		Range span;
 		span.begin = begin;
 		span.end = end > begin ? end : begin + 1;
 		json.Key(Core::StringView("inside"));
 		json.BeginObject();
-		WriteInsideAllocations(json, capture, track, span);
+		WriteInsideAllocations(json, capture, ref, span);
 		Core::Array<int64> noAllocations;
 		Core::Array<WindowEntry> waits;
 		WaitEntries(capture, (int64)track, span, waits);

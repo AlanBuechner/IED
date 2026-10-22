@@ -60,6 +60,8 @@ namespace Profiler
 	{
 		[operator("create")] public void Init(const Capture& of, AllocGroup groupBy);
 		public uint64 KeyOf(const Allocation& allocation);
+		// The group of what a zone allocated itself (ZoneAllocs): by its site, its path, or its thread.
+		public uint64 KeyOfZone(int64 track, int64 depth, int64 index);
 		// The group's `label`, and for a zone its `file` and `line`, for a call stack its frames (`callstack`).
 		public void WriteLabel(IED::JsonWriter& json, uint64 key, uint64 callstack) const;
 
@@ -74,6 +76,8 @@ namespace Profiler
 	bool InnermostZoneAt(const Capture& capture, int32 track, int64 t, int64& depth, int64& index);
 	// The frame of `set` that holds `t`, or -1.
 	int64 FrameAt(const FrameSet* set, int64 t);
+	// The allocations a capture holds: its allocation events, else what the process counted, else what its zones said.
+	int64 AllocationTotal(const Capture& capture);
 	// When a program freed most of its memory as it ended - the last time its largest pool was near its high in the
 	// capture's last tenth, when it then dropped below a quarter of that - in ticks; -1 when it did not.
 	int64 TeardownAt(const Capture& capture);

@@ -135,6 +135,43 @@ def troubled_stream(token):
 	return w.bytes()
 
 
+def collected_stream(token):
+	"""A collected program that counts its allocations (1 ns ticks): 60 frames of 10 ms on Main, each Frame with Spawn
+	(300 objects) and Cache (one 4 KiB object) inside it; the process's count at each frame; the GC heap plotted every
+	frame, its floor rising; a collection every 10 frames, each followed by a census in which CacheEntry grows."""
+	w = itp.Writer().hello(app="Collected", pid=8, freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK, 0, 0)
+	frame = w.srcloc("Frame", defs, file="src/game.cf", line=5)
+	spawn = w.srcloc("Particles::Spawn", defs, file="src/particles.cf", line=8)
+	cache = w.srcloc("Cache::Remember", defs, file="src/cache.cf", line=20)
+	main = w.string("Main", defs)
+	particle = w.string("Particle", defs)
+	entry = w.string("CacheEntry", defs)
+	defs.event("PlotDef", plotId=1, nameStr=w.string("GC heap", defs), kind=1, flags=0)
+	w.add(defs)
+	chunk = w.chunk(itp.THREAD_CHUNK, 1, 0).event("ThreadName", 0, nameStr=main)
+	memory = w.chunk(itp.GLOBAL_CHUNK, 0, 0)
+	for i in range(60):
+		start = i * 10 * MS
+		chunk.event("FrameMark", start, frameSetStr=0).event("ZoneBegin", start, srcLocId=frame)
+		chunk.event("ZoneBegin", start + 1 * MS, srcLocId=spawn).event("ZoneAllocs", objects=300, bytes=43200).event("ZoneEnd", start + 2 * MS)
+		chunk.event("ZoneBegin", start + 3 * MS, srcLocId=cache).event("ZoneAllocs", objects=1, bytes=4096).event("ZoneEnd", start + 4 * MS)
+		chunk.event("ZoneAllocs", objects=306, bytes=47796).event("ZoneEnd", start + 8 * MS)
+		memory.event("AllocCount", start, objects=316 * i, bytes=48296 * i)
+		memory.event("PlotValue", start + 5 * MS, plotId=1, value=float(4_000_000 + i * 4096 + (i % 10) * 48296))
+		if i % 10 == 9:
+			memory.event("GcBegin", start + 9 * MS, kind=2, generation=0).event("GcEnd", start + 9 * MS + 200_000, bytesBefore=0, bytesAfter=4_000_000 + i * 4096, objectsFreed=0, pinned=0, roots=0)
+			memory.event("HeapCensus", start + 9 * MS + 200_000, types=2)
+			memory.event("HeapCensusType", nameStr=particle, objects=300, bytes=43200)
+			memory.event("HeapCensusType", nameStr=entry, objects=i + 1, bytes=(i + 1) * 4096 * 4)
+	chunk.event("FrameMark", 60 * 10 * MS, frameSetStr=0)
+	memory.event("AllocCount", 60 * 10 * MS, objects=316 * 60, bytes=48296 * 60)
+	w.add(chunk)
+	w.add(memory)
+	w.add(w.chunk(itp.GLOBAL_CHUNK, 0, 0).event("Bye", reason=0))
+	return w.bytes()
+
+
 def lock_stream(token):
 	"""A lock, "Queue", used by two threads (1 ns ticks): thread 1 holds it 10..50 us while thread 2 waits from 20 us,
 	then thread 2 holds it to 60 us."""
@@ -493,6 +530,27 @@ class ProfilerTests(ProfilerServer):
 		self.assertEqual("Entities", (await self.query("prof.plots", captureId=capture))["plots"][0]["name"])
 		with self.assertRaises(RpcFailure):
 			await ask("zone", ref="nonsense")
+
+	async def test_a_collected_programs_counts_and_censuses_answer(self):
+		capture = await self.capture_that_ends(collected_stream(self.token()))
+		async def ask(tool, **args):
+			return (await self.client.request("plugins.call", {"name": "profiler.query", "wsId": "w1", "args": {"wsId": "w1", "tool": tool, "args": args}}))["result"]["text"]
+		allocations = await ask("allocations")
+		self.assertIn("Counted by the program's collector", allocations)
+		self.assertIn("Per frame (60 frames): mean 316.0", allocations)
+		self.assertRegex(allocations, r"Particles::Spawn +18,000 +300\.0")
+		leaks = await ask("leaks")
+		self.assertIn("census after each of 6 collections", leaks)
+		self.assertRegex(leaks, r"CacheEntry .* keeps accumulating")
+		self.assertIn("a census of live objects by type after 6 collections", await ask("memory"))
+		diagnosis = await ask("diagnose", focus="memory")
+		self.assertIn("Allocations every frame: 316.0 a frame", diagnosis)
+		self.assertIn("garbage for the collector", diagnosis)
+		self.assertIn("CacheEntry: 10 -> 60 live objects", diagnosis)
+		self.assertIn("its children's included", await ask("zone", ref="0:0:0"))
+		census = await self.query("prof.census", captureId=capture)
+		self.assertEqual(("CacheEntry", True, 6), (census["types"][0]["name"], census["types"][0]["accumulating"], census["censuses"]))
+		self.assertEqual(316 * 60, (await self.query("prof.summary", captureId=capture))["memory"]["allocations"], "the summary counts what the process counted")
 
 	async def test_the_ai_reads_captures_through_the_binding(self):
 		await self.capture_that_ends(game_stream(self.token()))

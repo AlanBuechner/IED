@@ -66,13 +66,10 @@ namespace Profiler
 					}
 				}
 			}
+			Core::Array<int64> bytesOf;
+			if (!FrameAllocations(capture, set, allocsOf, bytesOf)) return;
 			int64 allocs = 0;
-			for (const Allocation& allocation : capture.allocations) {
-				const int64 f = FrameAt(set, allocation.t);
-				if (f < 0 || f >= frames) continue;
-				allocsOf[f] += 1;
-				allocs += 1;
-			}
+			for (int64 f = 0; f < frames; ++f) allocs += allocsOf[f];
 			allocMean = (double)allocs / (double)frames;
 		}
 

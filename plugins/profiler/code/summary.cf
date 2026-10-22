@@ -65,7 +65,8 @@ namespace Profiler
 		json.Key(Core::StringView("memory"));
 		json.BeginObject();
 		json.IntField("pools", capture.pools.Count());
-		json.IntField("allocations", capture.allocations.Count());
+		json.IntField("allocations", AllocationTotal(capture));
+		json.IntField("censuses", capture.censuses.Count());
 		json.IntField("liveAtEnd", live);
 		json.IntField("liveBytesAtEnd", liveBytes);
 		json.IntField("collections", capture.gcs.Count());
@@ -179,8 +180,9 @@ namespace Profiler
 		const int64 frames = set ? set->Completed() : 0;
 		json.Key(Core::StringView(key));
 		json.BeginObject();
-		json.IntField("allocations", capture.allocations.Count());
-		NumberField(json, "allocationsPerFrame", frames == 0 ? 0.0 : (double)capture.allocations.Count() / (double)frames, 1);
+		const int64 allocations = AllocationTotal(capture);
+		json.IntField("allocations", allocations);
+		NumberField(json, "allocationsPerFrame", frames == 0 ? 0.0 : (double)allocations / (double)frames, 1);
 		json.IntField("peakBytes", peak);
 		json.IntField("collections", capture.gcs.Count());
 		json.IntField("gcPauseNs", capture.clock.Ns(pause));

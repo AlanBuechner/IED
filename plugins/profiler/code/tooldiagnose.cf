@@ -298,7 +298,8 @@ namespace Profiler
 			}
 			return;
 		}
-		if (a.Member("source").AsView() != "events" || a.Member("count").AsInt() == 0) return;
+		const bool counted = a.Member("source").AsView() == "zones";
+		if ((!counted && a.Member("source").AsView() != "events") || a.Member("count").AsInt() == 0) return;
 		Serialization::DomNode frames = a.Member("frames");
 		const bool framed = frames.IsValid() && !frames.IsNull();
 		const double perFrame = framed ? frames.Member("meanCount").AsFloat() : 0.0;
@@ -320,9 +321,12 @@ namespace Profiler
 			title.Append(Decimal(perSecond).View());
 			title.Append(" a second");
 		}
-		title.Append(", ");
-		title.Append(Percent((double)a.Member("churn").AsInt() / (double)a.Member("count").AsInt()).View());
-		title.Append(" freed again right away (churn)");
+		if (counted) title.Append(", garbage for the collector to find");
+		else {
+			title.Append(", ");
+			title.Append(Percent((double)a.Member("churn").AsInt() / (double)a.Member("count").AsInt()).View());
+			title.Append(" freed again right away (churn)");
+		}
 		Finding* finding = out.Add(rank, Area::Memory, title.ToString(), "profile_allocations");
 		for (int64 i = 0; i < groups.Count(); ++i) {
 			Serialization::DomNode g = groups.At(i);
@@ -379,6 +383,31 @@ namespace Profiler
 		}
 	}
 
+	// The types a collected heap's census says keep accumulating.
+	static void CensusEvidence(Core::Array<Core::String>& lines, const Capture& capture) {
+		Serialization::DomNode types = ParseJson(CensusTrend(capture, -1, -1, 10)).Member("types");
+		for (int64 i = 0; i < types.Count(); ++i) {
+			Serialization::DomNode t = types.At(i);
+			if (!t.Member("accumulating").AsBool()) continue;
+			Core::StringBuilder line;
+			line.Append(t.Member("name").AsView());
+			line.Append(": ");
+			line.Append(Number(t.Member("firstObjects").AsInt()).View());
+			line.Append(" -> ");
+			line.Append(Number(t.Member("lastObjects").AsInt()).View());
+			line.Append(" live objects (");
+			line.Append(Bytes(t.Member("firstBytes").AsInt()).View());
+			line.Append(" -> ");
+			line.Append(Bytes(t.Member("lastBytes").AsInt()).View());
+			line.Append("), more after ");
+			line.AppendInt(t.Member("rises").AsInt());
+			line.Append(" of ");
+			line.AppendInt(t.Member("steps").AsInt());
+			line.Append(" collections");
+			lines.Push(line.ToString());
+		}
+	}
+
 	static void GrowthFinding(Findings& out, const Capture& capture, const Serialization::DomNode& trend) {
 		Serialization::DomNode leaks;
 		bool haveLeaks = false;
@@ -423,11 +452,13 @@ namespace Profiler
 			if (!finding) finding = out.Add(0, Area::Memory, Core::String("Memory keeps growing"), "profile_memory, then profile_leaks");
 			finding->evidence.Push(line.ToString());
 		}
-		if (!haveLeaks) return;
+		const bool census = !haveLeaks && !capture.censuses.IsEmpty();
 		Core::Array<Core::String> kept;
-		LeakEvidence(kept, leaks);
+		if (census) CensusEvidence(kept, capture);
+		else if (!haveLeaks) return;
+		else LeakEvidence(kept, leaks);
 		if (kept.IsEmpty()) return;
-		if (!finding) finding = out.Add(1, Area::Memory, Core::String("Allocations never freed keep accumulating"), "profile_leaks");
+		if (!finding) finding = out.Add(1, Area::Memory, Core::String(census ? "Live objects keep accumulating from one collection to the next" : "Allocations never freed keep accumulating"), "profile_leaks");
 		for (const Core::String& line : kept) finding->evidence.Push(line);
 	}
 

@@ -118,6 +118,30 @@ namespace Profiler
 		public int64 earlierFrees;                  // frees of blocks allocated before the capture began
 	}
 
+	// What the process allocated so far, at the times a client counted it (AllocCount): for clients that count
+	// allocations instead of sending each one.
+	class AllocCounter
+	{
+		public Core::Array<int64> times;
+		public Core::Array<int64> objects;
+		public Core::Array<int64> bytes;
+	}
+
+	struct CensusType
+	{
+		public uint64 nameStr;
+		public int64 objects;
+		public int64 bytes;
+	}
+
+	// Live objects by type after one collection (HeapCensus and its HeapCensusType lines).
+	class HeapCensus
+	{
+		public int64 t;
+		public int64 expected;
+		public Core::Array<CensusType> types;
+	}
+
 	struct GcRecord
 	{
 		public int64 begin;
@@ -288,6 +312,9 @@ namespace Profiler
 		public Core::Array<Pool*> pools;
 		public Core::Array<Allocation> allocations;
 		public Core::Array<GcRecord> gcs;
+		public AllocCounter allocCounter;
+		public Core::Array<HeapCensus*> censuses;
+		public int64 zoneAllocs;                             // zones that said what they allocated (ZoneAllocs)
 		public Core::HashMap<uint64, TaskInfo*> tasks;
 		public Core::HashMap<uint64, TaskLane*> taskLaneOf;  // task name string id -> lane
 		public Core::Array<TaskLane*> taskLanes;

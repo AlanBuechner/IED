@@ -1,0 +1,156 @@
+// Allocations a collected program counts instead of sending (ZoneAllocs, AllocCount) and its censuses of live objects
+// (HeapCensus): each zone's own allocations, per frame, inside a zone, in a slow frame's usual, and the types that keep
+// accumulating - checked on a capture built event by event.
+
+include "investigate.ch"
+include "ingest.ch"
+
+// One thread (1 ns ticks) marks a frame every 100 ns from 0 to 500. Each frame: Frame 0..80 (its own 5 allocations)
+// with Spawn 10..20 (300 objects, 43200 bytes) and Cache 30..31 (one object, 4096 bytes). The process counts 316
+// allocations a frame at each mark (10 outside any zone). Censuses at 50, 150, 250, 350: Particle steady, CacheEntry
+// growing 100 KB each time, Texture shrinking.
+static Profiler::Capture* CountedCapture() {
+	Profiler::WireWriter w;
+	w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+	w.Type(Profiler::EventType::Hello);
+	w.Varint(1);
+	w.Text(Core::StringView("c4game"));
+	w.Varint(3);
+	w.Varint(1000000000);
+	w.Varint(0);
+	w.Varint(0);
+	w.Varint(0);
+	w.Text(Core::StringView(""));
+	const char*[7] names = { "", "Frame", "Spawn", "Cache", "Particle", "CacheEntry", "Texture" };
+	for (uint64 id = 1; id <= 6; ++id) {
+		w.Type(Profiler::EventType::StringDef);
+		w.Varint(id);
+		w.Text(Core::StringView(names[id]));
+		if (id > 3) continue;
+		w.Type(Profiler::EventType::SrcLocDef);
+		w.Varint(id);
+		w.Varint(id);
+		w.Varint(0);
+		w.Varint(0);
+		w.Varint(id * 10);
+		w.Varint(0);
+	}
+	w.EndChunk();
+	FramesCountingAllocations(w);
+	CountsAndCensuses(w);
+	Profiler::Capture* capture = new Profiler::Capture();
+	Profiler::ChunkStream stream;
+	stream.Feed(w.Bytes().Data(), w.Length());
+	const uint8* chunk;
+	int64 length;
+	while (stream.Next(chunk, length)) Profiler::ApplyChunk(*capture, chunk, length);
+	Profiler::Finish(*capture);
+	return capture;
+}
+
+static void CountedZone(Profiler::WireWriter& w, uint64 site, int64 begin, int64 end, uint64 objects, uint64 bytes) {
+	w.Type(Profiler::EventType::ZoneBegin);
+	w.Time(begin);
+	w.Varint(site);
+	w.Type(Profiler::EventType::ZoneAllocs);
+	w.Varint(objects);
+	w.Varint(bytes);
+	w.Type(Profiler::EventType::ZoneEnd);
+	w.Time(end);
+}
+
+static void FramesCountingAllocations(Profiler::WireWriter& w) {
+	w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+	for (int64 f = 0; f <= 5; ++f) {
+		const int64 t = f * 100;
+		w.Type(Profiler::EventType::FrameMark);
+		w.Time(t);
+		w.Varint(0);
+		if (f == 5) break;
+		w.Type(Profiler::EventType::ZoneBegin);
+		w.Time(t);
+		w.Varint(1);
+		CountedZone(w, 2, t + 10, t + 20, 300, 43200);
+		CountedZone(w, 3, t + 30, t + 31, 1, 4096);
+		w.Type(Profiler::EventType::ZoneAllocs);
+		w.Varint(306);
+		w.Varint(43200 + 4096 + 500);
+		w.Type(Profiler::EventType::ZoneEnd);
+		w.Time(t + 80);
+	}
+	w.EndChunk();
+}
+
+static void CensusLine(Profiler::WireWriter& w, uint64 name, uint64 objects, uint64 bytes) {
+	w.Type(Profiler::EventType::HeapCensusType);
+	w.Varint(name);
+	w.Varint(objects);
+	w.Varint(bytes);
+}
+
+static void CountsAndCensuses(Profiler::WireWriter& w) {
+	w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+	for (int64 f = 0; f <= 5; ++f) {
+		w.Type(Profiler::EventType::AllocCount);
+		w.Time(f * 100);
+		w.Varint((uint64)(316 * f));
+		w.Varint((uint64)(48296 * f));
+		if (f == 4 || f == 5) continue;
+		w.Type(Profiler::EventType::HeapCensus);
+		w.Time(f * 100 + 50);
+		w.Varint(3);
+		CensusLine(w, 4, 300, 43200);
+		CensusLine(w, 5, (uint64)(100 * (f + 1)), (uint64)(100000 * (f + 1)));
+		CensusLine(w, 6, (uint64)(10 - f), (uint64)(1000000 - f * 100000));
+	}
+	w.EndChunk();
+}
+
+static Serialization::DomNode Json(const Core::String& json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(json.View(), *doc).root;
+}
+
+[test("server.profiler.counted")]
+class ProfilerCountedTests {
+	[test("each_zone_its_own_allocations")]
+	public static void TestZones() {
+		Profiler::Capture* capture = CountedCapture();
+		assert_true(capture->zoneAllocs == 15 && capture->allocCounter.times.Count() == 6 && capture->censuses.Count() == 4, "read as sent");
+		Profiler::AllocAsk ask;
+		ask.groupBy = Profiler::AllocGroup::Zone;
+		Serialization::DomNode a = Json(Profiler::Allocations(*capture, ask));
+		assert_true(a.Member("source").AsView() == "zones" && a.Member("count").AsInt() == 1580 && a.Member("inZones").AsInt() == 1530, "the process's count, and the zones' share of it");
+		Serialization::DomNode groups = a.Member("groups");
+		assert_true(groups.At(0).Member("label").AsView() == "Spawn" && groups.At(0).Member("count").AsInt() == 1500 && groups.At(0).Member("perFrame").AsFloat() == 300.0, "Spawn's 300 a frame");
+		assert_true(groups.At(1).Member("label").AsView() == "Frame" && groups.At(1).Member("count").AsInt() == 25, "Frame's own five, its children's left to them");
+		assert_true(a.Member("frames").Member("medianCount").AsInt() == 316, "a frame's allocations from the process's count");
+		ask.groupBy = Profiler::AllocGroup::Path;
+		assert_true(Json(Profiler::Allocations(*capture, ask)).Member("groups").At(0).Member("label").AsView() == "Frame > Spawn", "by path");
+		assert_true(Profiler::AllocationTotal(*capture) == 1580, "the total the summaries show");
+	}
+
+	[test("a_frame_and_a_zone_count_them_too")]
+	public static void TestFramesAndInside() {
+		Profiler::Capture* capture = CountedCapture();
+		Core::Array<int64> objects;
+		Core::Array<int64> bytes;
+		assert_true(Profiler::FrameAllocations(*capture, Profiler::MainFrameSet(*capture), objects, bytes) && objects[2] == 316 && bytes[2] == 48296, "each frame's from the count");
+		Profiler::ZoneRef ref;
+		assert_true(Profiler::ZoneRef::Parse(Core::StringView("0:0:1"), ref), "a ref");
+		Serialization::DomNode inside = Json(Profiler::ZoneDetails(*capture, ref)).Member("inside").Member("allocations");
+		assert_true(inside.Member("count").AsInt() == 306 && inside.Member("freedInside").AsInt() == -1, "a zone's own count, its children's included");
+	}
+
+	[test("types_that_keep_accumulating")]
+	public static void TestCensus() {
+		Profiler::Capture* capture = CountedCapture();
+		Serialization::DomNode c = Json(Profiler::CensusTrend(*capture, -1, -1, 10));
+		assert_true(c.Member("censuses").AsInt() == 4 && c.Member("typeCount").AsInt() == 3, "four censuses of three types");
+		Serialization::DomNode first = c.Member("types").At(0);
+		assert_true(first.Member("name").AsView() == "CacheEntry" && first.Member("accumulating").AsBool(), "CacheEntry grew the most and keeps accumulating");
+		assert_true(first.Member("rises").AsInt() == 3 && first.Member("lastObjects").AsInt() == 400, "more after each collection");
+		for (int64 i = 1; i < c.Member("types").Count(); ++i) assert_true(!c.Member("types").At(i).Member("accumulating").AsBool(), "the others do not");
+		assert_true(Json(Profiler::CensusTrend(*capture, 100, 260, 10)).Member("censuses").AsInt() == 2, "the censuses in a range");
+	}
+}

@@ -1,7 +1,8 @@
 // Where a program allocates (T-PRF-13): each group's allocations and bytes in all and per frame, its churn - blocks
 // freed within the frame they were made in, the garbage a frame leaves - and what it still holds at the range's end.
-// A capture with no allocation events but allocation samples (a pprof heap profile, the Go client) is read by the
-// function each sample was taken in.
+// A client that counts allocations instead of sending each one (C4's collector: ZoneAllocs, AllocCount) is read by
+// what each zone allocated itself; a capture with only allocation samples (a pprof heap profile, the Go client) by
+// the function each sample was taken in.
 include "investigate.ch"
 
 namespace Profiler
@@ -220,14 +221,67 @@ namespace Profiler
 		json.EndArray();
 	}
 
+	// --- From the zones' counts ----------------------------------------------------------------------------------
+
+	static void FromZones(IED::JsonWriter& json, const Capture& capture, const AllocAsk& ask, Range range) {
+		AllocAsk asked = ask;
+		if (asked.groupBy != AllocGroup::Path && asked.groupBy != AllocGroup::Thread) asked.groupBy = AllocGroup::Zone;
+		AllocGrouper grouper(capture, asked.groupBy);
+		Core::HashMap<uint64, AllocRow*> rowOf;
+		Core::Array<AllocRow*> rows;
+		int64 inZones = 0;
+		int64 inZoneBytes = 0;
+		AllocGrouper* g = &grouper;
+		Core::HashMap<uint64, AllocRow*>* of = &rowOf;
+		Core::Array<AllocRow*>* all = &rows;
+		ZoneSelfAllocations(capture, range, [g, of, all, &inZones, &inZoneBytes](int64 t, int64 d, int64 i, int64 objects, int64 bytes) {
+			AllocRow* row = RowFor(*of, *all, g->KeyOfZone(t, d, i), 0);
+			row->count += objects;
+			row->bytes += bytes;
+			if (row->firstTrack < 0) row->firstTrack = (int32)t;
+			if (!row->tracks.Contains((int32)t)) row->tracks.Insert((int32)t, true);
+			inZones += objects;
+			inZoneBytes += bytes;
+		});
+		int64 count = inZones;
+		int64 bytes = inZoneBytes;
+		if (!capture.allocCounter.times.IsEmpty()) CountedBetween(capture, range, count, bytes);
+		FrameTally tally;
+		tally.Init(capture, range);
+		Core::Array<int64> frameObjects;
+		Core::Array<int64> frameBytes;
+		if (tally.Frames() > 0 && FrameAllocations(capture, tally.set, frameObjects, frameBytes))
+			for (int64 f = tally.first; f < tally.last; ++f) {
+				tally.counts[f - tally.first] = frameObjects[f];
+				tally.bytes[f - tally.first] = frameBytes[f];
+			}
+		if (asked.byBytes) rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->bytes > b->bytes; });
+		else rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->count > b->count; });
+		const double seconds = (double)capture.clock.Ns(range.Length()) / 1e9;
+		json.Field("source", "zones");
+		json.IntField("count", count);
+		json.IntField("bytes", bytes);
+		json.IntField("inZones", inZones);
+		json.IntField("inZoneBytes", inZoneBytes);
+		NumberField(json, "perSecond", seconds > 0.0 ? (double)count / seconds : 0.0, 1);
+		NumberField(json, "bytesPerSecond", seconds > 0.0 ? (double)bytes / seconds : 0.0, 0);
+		WriteFrameTally(json, capture, tally);
+		json.IntField("groupCount", rows.Count());
+		json.Key(Core::StringView("groups"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)asked.limit; ++i) WriteAllocRow(json, capture, grouper, rows[i], tally.Frames());
+		json.EndArray();
+	}
+
 	Core::String Allocations(const Capture& capture, const AllocAsk& ask) {
 		const Range range = RangeOfNs(capture, ask.fromNs, ask.toNs);
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.IntField("fromNs", capture.clock.Ns(range.begin));
 		json.IntField("toNs", capture.clock.Ns(range.end > capture.lastTicks ? capture.lastTicks : range.end));
-		if (capture.allocations.IsEmpty()) FromSamples(json, capture, ask, range);
-		else FromEvents(json, capture, ask, range);
+		if (!capture.allocations.IsEmpty()) FromEvents(json, capture, ask, range);
+		else if (capture.zoneAllocs > 0 || !capture.allocCounter.times.IsEmpty()) FromZones(json, capture, ask, range);
+		else FromSamples(json, capture, ask, range);
 		json.EndObject();
 		return json.ToString();
 	}

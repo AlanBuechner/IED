@@ -131,7 +131,7 @@
 			},
 			{
 				"name": "profile_leaks",
-				"description": "Allocations still live at the end of a capture (or at at_ms), only those made between from_ms and to_ms when given (a level loaded and unloaded), grouped by zone (the default without call stacks), zone path, call stack, pool, thread or size, the most bytes first; each group's first and last allocation and whether it keeps accumulating (a likely leak) or was made at once (a cache); plus each pool's peak.",
+				"description": "Allocations still live at the end of a capture (or at at_ms), only those made between from_ms and to_ms when given (a level loaded and unloaded), grouped by zone (the default without call stacks), zone path, call stack, pool, thread or size, the most bytes first; each group's first and last allocation and whether it keeps accumulating (a likely leak) or was made at once (a cache); plus each pool's peak. For a collected program (C4): the types whose live objects keep accumulating from one collection's census to the next.",
 				"class": "read",
 				"group": "profiler",
 				"parallelSafe": true,
@@ -140,7 +140,7 @@
 			},
 			{
 				"name": "profile_allocations",
-				"description": "Where a program allocates: per zone (the innermost zone open on the allocating thread; the default without call stacks), zone path, thread, pool, size class or call stack - allocations and bytes in all and per frame, mean size, churn (the share freed within the frame it was made in) and what is still live at the range's end; the range's allocations per frame (mean, median, p95, the worst frame) and per second. Reads allocation samples by function when the capture has no allocation events.",
+				"description": "Where a program allocates: per zone (the innermost zone open on the allocating thread; the default without call stacks), zone path, thread, pool, size class or call stack - allocations and bytes in all and per frame, mean size, churn (the share freed within the frame it was made in) and what is still live at the range's end; the range's allocations per frame (mean, median, p95, the worst frame) and per second. A collected program (C4) that counts its allocations is read by each zone's own count; a capture with only allocation samples, by function.",
 				"class": "read",
 				"group": "profiler",
 				"parallelSafe": true,
