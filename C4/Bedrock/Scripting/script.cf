@@ -1,5 +1,6 @@
 include "script.ch"
 include "Platform/library.ch"
+include "Platform/system.ch"
 
 namespace Scripting
 {
@@ -112,11 +113,16 @@ namespace Scripting
 	{
 		Host* host = new Host();
 		// A --script-host program loads C4Script.dll on its first call into it (the link delay-loads it): loaded here
-		// first, a missing one is this error, not a crash in that call.
-		Platform::Library library("C4Script.dll");
+		// first, a missing one is this error, not a crash in that call. Loaded by its full path beside the program, so
+		// another build's C4Script.dll on PATH is never the one used (BUG-341); the delayed load then finds this module
+		// already loaded under its name.
+		FS::Path beside = Platform::ExecutablePath().Parent() / "C4Script.dll";
+		Platform::Library library(beside.CStr());
 		if (!library.IsOpen())
 		{
-			Core::String why("the script host library C4Script.dll does not load (");
+			Core::String why("the script host library C4Script.dll does not load from ");
+			why.Append(beside.View());
+			why.Append(Core::StringView(" ("));
 			why.Append(Core::StringView(library.Error()));
 			why.Append(Core::StringView("): ship it beside the program, where a --script-host build puts it"));
 			host->error = why;

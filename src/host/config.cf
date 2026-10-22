@@ -51,6 +51,10 @@ namespace Ied
 		else if (option == "--workspace") config.workspaces.Push(Core::String(value));
 		else if (option == "--allow-origin") config.allowOrigins.Push(Core::String(value));
 		else if (option == "--allow-host") config.allowHosts.Push(Core::String(value));
+		else if (option == "--debug-scripts") {
+			if (value != "on" && value != "off") return Fail(error, option, "is on or off");
+			config.debugScripts = value == "on" ? 1 : 0;
+		}
 		else if (!ParseCount(value, number)) return Fail(error, option, "is unknown, or its value is not a count");
 		else if (option == "--port" && number <= 65535) {
 			config.port = (int32)number;

@@ -1,0 +1,27 @@
+// host/config: the command line - --debug-scripts on, off or as the server was built, and a value it does not take.
+
+include "host/config.ch"
+
+static bool Parse(const char* option, const char* value, Ied::ServerConfig& config, Core::String& error) {
+	Core::Array<Core::String> arguments;
+	arguments.Push(Core::String(option));
+	arguments.Push(Core::String(value));
+	config = Ied::DefaultConfig();
+	return Ied::ParseArguments(arguments, config, error);
+}
+
+[test("server.config")]
+class ConfigTests {
+	[test("debug_scripts")]
+	public static void TestDebugScripts() {
+		Ied::ServerConfig config = Ied::DefaultConfig();
+		assert_eq((int64)-1, (int64)config.debugScripts, "as the server was built");
+		Core::String error;
+		assert_true(Parse("--debug-scripts", "on", config, error), error.CStr());
+		assert_eq((int64)1, (int64)config.debugScripts, "on");
+		assert_true(Parse("--debug-scripts", "off", config, error), error.CStr());
+		assert_eq((int64)0, (int64)config.debugScripts, "off");
+		assert_true(!Parse("--debug-scripts", "yes", config, error), "only on or off");
+		assert_se("--debug-scripts: is on or off", error.CStr(), "the error says what it takes");
+	}
+}

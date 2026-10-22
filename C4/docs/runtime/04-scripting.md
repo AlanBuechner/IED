@@ -190,6 +190,8 @@ bitcode: the script lowers their bodies from the template (section 4.3).
 `Game.exe`, `Game.c4i` and `C4Script.dll` (the compiler, LLVM and the JIT; about the size of `C4.exe`). The
 scripts' own files are the program's data. The program loads `C4Script.dll` on its first call into it (the link
 delay-loads it), so one shipped without the DLL still starts, and `Host::Open` reports the missing DLL as its error.
+`Host::Open` loads the DLL from beside the program by its full path, never through the search path: another
+build's `C4Script.dll` on `PATH` (an installed program's) would compile against an interface it was not made for.
 
 ---
 

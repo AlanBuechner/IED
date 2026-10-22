@@ -1,14 +1,20 @@
 // A --script-host program loads C4Script.dll on its first call into it (the link delay-loads it): without the DLL
-// beside it, the program still starts and Host::Open says what is missing.
+// beside it, the program still starts and Host::Open says what is missing - also when a C4Script.dll is on PATH (an
+// installed program's, maybe another build's), which is never the one used (BUG-341).
 include "scripttest.ch"
 
 int32 main(int32 argc, char** argv)
 {
 	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
-	FS::Path library = Platform::ExecutablePath().Parent() / "C4Script.dll";
-	checks.That(FS::RemoveFile(library.CStr()), "the host removes the DLL beside it");
+	FS::Path folder = Platform::ExecutablePath().Parent();
+	FS::Path library = folder / "C4Script.dll";
+	FS::Path elsewhere = folder / "elsewhere";
+	FS::MakeDirectories(elsewhere.CStr());
+	checks.That(FS::Rename(library.CStr(), (elsewhere / "C4Script.dll").CStr()), "the host moves the DLL beside it to another folder");
+	Core::String path = Core::String(elsewhere.View()) + ";" + Platform::GetEnvironmentVariable("PATH").View();
+	checks.That(Platform::SetEnvironmentVariable("PATH", path.CStr()), "and puts that folder first on PATH");
 	Scripting::Host* host = Scripting::Host::Open();
-	checks.That(!host->IsOpen(), "the host does not open without C4Script.dll");
+	checks.That(!host->IsOpen(), "the host does not open without C4Script.dll beside it");
 	checks.Contains(host->Error(), "C4Script.dll does not load", "its error names the DLL");
 	return checks.End("MissingLibrary");
 }

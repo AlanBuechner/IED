@@ -2,7 +2,7 @@
 //     ied-server [--host 127.0.0.1] [--port 8765] [--home <folder>] [--static frontend] [--data <folder>]
 //                [--app-data <folder>] [--control <name>] [--workspace <folder>]... [--test-hooks]
 //                [--idle-timeout <s>] [--outbound-budget-mb <n>] [--coalesce-kb <n>] [--allow-origin <o>]...
-//                [--allow-host <h>]... [--quiet]
+//                [--allow-host <h>]... [--quiet] [--debug-scripts on|off]
 
 include "bedrock.ch"
 
@@ -24,6 +24,9 @@ namespace Ied
 		public Core::Array<Core::String> allowHosts;
 		public bool testHooks;                         // testhooks.* (tools/conformance), never in normal use
 		public bool quiet;
+		// Plugin code as debug scripts, DLLs with PDBs that are never kept in the script cache (C4/docs/runtime/04
+		// section 6.4): 1 on, 0 off, -1 as the server was built (on for a -g build).
+		public int32 debugScripts = -1;
 		public int64 idleTimeoutMs;
 		public int64 outboundBudget;
 		public int64 coalesceBytes;

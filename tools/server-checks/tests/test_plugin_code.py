@@ -174,8 +174,8 @@ class PluginCodeTests(ServerTestCase):
 	def builtin(self, body, code):
 		return self.add(os.path.join(self.home, "plugins", body["id"]), body, code)
 
-	def start(self, data=None, executable=None):
-		self.server = IedServer(data=data, extra=("--home", self.home, "--workspace", self.repo), executable=executable)
+	def start(self, data=None, executable=None, options=()):
+		self.server = IedServer(data=data, extra=("--home", self.home, "--workspace", self.repo) + tuple(options), executable=executable)
 		self.assertTrue(self.server.started, self.server.error)
 		self.cookie = self.server.sign_in()
 
@@ -339,21 +339,40 @@ class PluginCodeTests(ServerTestCase):
 		self.assertEqual(2, (await self.echo("v"))["version"], "the build that compiled still answers")
 
 	async def test_a_restart_links_the_kept_build(self):
+		# Debug scripts are never kept (C4/docs/runtime/04 section 6.4), and a -g server debugs its scripts by default.
 		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "5")})
 		data = os.path.join(self.root, "data")
-		self.start(data)
+		self.start(data, options=("--debug-scripts", "off"))
 		await self.connect()
 		code = await self.settled("test.probe")
 		self.assertEqual("active", code["state"], code)
 		self.assertNotIn("cached", code, "the first start compiles")
+		self.assertNotIn("debug", code, "not as a debug script")
 		self.assertTrue(os.listdir(os.path.join(data, "script-cache")), "and keeps the build")
 		self.client.abort()
 		self.server.stop(remove_data=False)
-		self.start(data)
+		self.start(data, options=("--debug-scripts", "off"))
 		await self.connect()
 		code = await self.settled("test.probe")
 		self.assertEqual(("active", True), (code["state"], code.get("cached")), code)
 		self.assertEqual(5, (await self.echo("x"))["version"], "the kept build runs")
+
+	async def test_debug_scripts_compile_at_every_start(self):
+		"""--debug-scripts on (a -g server's default): plugin code is linked as a DLL with a PDB a debugger reads, never
+		kept in the script cache, so a restart compiles it again."""
+		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "7")})
+		data = os.path.join(self.root, "data")
+		self.start(data, options=("--debug-scripts", "on"))
+		await self.connect()
+		code = await self.settled("test.probe")
+		self.assertEqual(("active", True), (code["state"], code.get("debug")), code)
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.start(data, options=("--debug-scripts", "on"))
+		await self.connect()
+		code = await self.settled("test.probe")
+		self.assertEqual(("active", True, None), (code["state"], code.get("debug"), code.get("cached")), code)
+		self.assertEqual(7, (await self.echo("x"))["version"], "compiled again, it runs")
 
 	async def test_a_server_without_its_script_library_runs_and_says_why_code_cannot(self):
 		self.builtin(probe_manifest(), {"code/probe.cf": PROBE.replace("VERSION", "6")})

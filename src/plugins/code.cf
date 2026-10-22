@@ -353,7 +353,10 @@ namespace Ied
 			hostTried = true;
 			host = Scripting::Host::Open();
 			if (!host->IsOpen()) hostProblem = Core::String("the server cannot run plugin code: ") + host->Error();
-			else UseScriptCache();
+			else {
+				if (server->config.debugScripts >= 0) host->SetDebugScripts(server->config.debugScripts == 1);
+				UseScriptCache();
+			}
 		}
 		if (!hostProblem.IsEmpty()) {
 			problem = hostProblem;
@@ -678,6 +681,7 @@ namespace Ied
 		if (!instance->problem.IsEmpty()) json.Field("problem", instance->problem.View());
 		json.IntField("builds", instance->builds);
 		if (!instance->builtin && instance->script && instance->script->Cached()) json.BoolField("cached", true);
+		if (!instance->builtin && instance->script && host != nullptr && host->IsOpen() && host->DebugScripts()) json.BoolField("debug", true);
 		json.EndObject();
 		return json.ToString();
 	}

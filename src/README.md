@@ -16,7 +16,8 @@ link within a minute to sign this machine's browser in (`docs/11`). Options: `--
 beyond loopback needs an owner password), `--port` (0: a free one), `--static <dir>`, `--data <dir>` (the server's own
 state; default `%LOCALAPPDATA%\IED`, with `--test-hooks` a fresh temporary folder), `--workspace <dir>` (repeatable),
 `--test-hooks` (the test suites' `testhooks.*`, never in normal use), `--idle-timeout <s>`, `--outbound-budget-mb`,
-`--coalesce-kb`, `--allow-origin`, `--allow-host`, `--quiet`. `nuke conformance` builds the server and runs
+`--coalesce-kb`, `--allow-origin`, `--allow-host`, `--quiet`, `--debug-scripts on|off` (plugin code as debug scripts,
+DLLs with PDBs that are never kept in the script cache; default: on for a `-g` build). `nuke conformance` builds the server and runs
 `tools/conformance` (51 checks) and `tools/server-checks` (79 checks: access rules, trust, file watching, the control pipe,
 the CLI, plugins, settings, solutions, outputs, layouts and the web client's files) against it; `nuke e2e` drives the web client against it; `nuke test ied-server ied` runs the unit tests in `tests/` and `../cli/tests/`. All pass. With
 no `--port`, a taken 8765 falls back to a free port; `--control <name>` names the control pipe; `--home <dir>` is the install
