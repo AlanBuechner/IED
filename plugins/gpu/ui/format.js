@@ -25,6 +25,11 @@ export function count(n) {
 	return String(n);
 }
 
+// "1 submission", "3 submissions".
+export function counted(n, noun) {
+	return count(n) + " " + noun + (n === 1 ? "" : "s");
+}
+
 // A sidecar time "20261021-174337" as "Oct 21 17:43".
 export function captureTime(stamp) {
 	const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(stamp || "");

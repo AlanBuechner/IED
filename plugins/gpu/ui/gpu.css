@@ -158,7 +158,7 @@
 .gpu-facts .k { color: var(--text-2); }
 .gpu-facts .v { color: var(--text-0); }
 .gpu-facts .warn { color: var(--accent-warn); }
-.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 80px 70px 80px 80px 90px; }
+.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 80px 60px 84px 80px 80px 80px 64px; }
 .gpu-pgrid .nm { padding-left: calc(var(--space-3) + var(--d, 0) * 14px); }
 
 @media (max-width: 1500px) {
@@ -190,6 +190,8 @@ or the API calls and the other grids */
 	.gpu-main.pipeline > .gpu-col.grow { flex: none; height: 44vh; order: 1; }
 	.gpu-events .gpu-head, .gpu-events .gpu-r { grid-template-columns: 48px minmax(0, 1fr) 70px; }
 	.gpu-events .gpu-head > span:nth-child(n+4), .gpu-events .gpu-r > span:nth-child(n+4) { display: none; }
+	.gpu-pgrid .gpu-head, .gpu-pgrid .gpu-r { grid-template-columns: minmax(0, 1fr) 70px 56px 84px; }
+	.gpu-pgrid .gpu-head > span:nth-child(n+5), .gpu-pgrid .gpu-r > span:nth-child(n+5) { display: none; }
 	.gpu-r { height: 36px; }
 	.gpu-captures { grid-template-columns: 1fr; }
 	.gpu-overview { flex-direction: column; }

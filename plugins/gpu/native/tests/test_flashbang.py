@@ -173,6 +173,151 @@ class D3D12CaptureReplay(unittest.TestCase):
 			client.close()
 
 
+def read_bmp(path):
+	"""A top-down 32-bit BMP's width, height and BGRA bytes."""
+	with open(path, "rb") as f:
+		data = f.read()
+	width, height = struct.unpack_from("<ii", data, 18)
+	return width, abs(height), data[54:]
+
+
+class VulkanCaptureReplay(unittest.TestCase):
+	"""The Vulkan sample captured through the layer (VK_INSTANCE_LAYERS), its last frame, and its replay - down to the
+	presented image matching the program's own screenshot of that frame."""
+
+	@classmethod
+	def setUpClass(cls):
+		cls.folder = tempfile.mkdtemp(prefix="flashbang-vk-")
+		cls.screenshot = os.path.join(cls.folder, "last.bmp")
+		captures = os.path.join(cls.folder, "captures")
+		env = dict(os.environ, FLASHBANG_CAPTURE_DIR=captures, VK_ADD_LAYER_PATH=BIN, VK_INSTANCE_LAYERS="VK_LAYER_IED_flashbang")
+		# A capture triggered in frame 6 records frame 7, the last one, which the screenshot shows too.
+		sample = run([os.path.join(BIN, "fb-sample-vulkan.exe"), "--frames", "8", "--capture-frame", "6", "--hidden", "--flashbang", os.path.join(BIN, "flashbang.dll"),
+			"--screenshot", cls.screenshot], env=env)
+		if sample.returncode == 2:
+			raise unittest.SkipTest(f"the Vulkan sample does not run here: {sample.stderr.strip()}")
+		if sample.returncode != 0:
+			raise AssertionError(f"the Vulkan sample failed: {sample.stdout} {sample.stderr}")
+		cls.captures = glob.glob(os.path.join(captures, "*.flash"))
+		if len(cls.captures) != 1:
+			raise AssertionError(f"expected one capture, found {cls.captures}")
+		cls.capture = cls.captures[0]
+		cls.events = replay(cls.capture, "events", device=False)["events"]
+
+	@classmethod
+	def tearDownClass(cls):
+		shutil.rmtree(cls.folder, ignore_errors=True)
+
+	def event_named(self, name):
+		for event in self.events:
+			if event[6] == name:
+				return event
+		self.fail(f"no event {name}")
+
+	def draws_under(self, marker):
+		return [e for e in self.events if e[1] == self.event_named(marker)[0] and e[2] == "draw"]
+
+	def test_capture_leaves_its_files(self):
+		base = self.capture[:-len(".flash")]
+		self.assertTrue(os.path.exists(base + ".png"))
+		with open(base + ".json", encoding="utf-8") as f:
+			sidecar = json.load(f)
+		self.assertEqual(("fb-sample-vulkan", "Vulkan", 1280, 720), (sidecar["program"], sidecar["api"], sidecar["width"], sidecar["height"]))
+		self.assertEqual([], sidecar["warnings"])
+		self.assertEqual(len(self.events), sidecar["events"])
+
+	def test_events_follow_the_labels(self):
+		frame = self.event_named("Frame")
+		self.assertEqual("marker", frame[2])
+		self.assertEqual(frame[0], self.event_named("Scene")[1])
+		self.assertEqual(1, len(self.draws_under("Cube A")))
+		self.assertEqual(["vkCmdDispatch(32, 32, 1)"], [e[6] for e in self.events if e[2] == "dispatch"])
+		self.assertEqual("vkQueuePresentKHR", self.events[-1][6])
+
+	def test_state_names_attachments_and_descriptors(self):
+		draw = self.draws_under("Cube B")[0]
+		state = replay(self.capture, "state", str(draw[0]), device=False)
+		self.assertEqual("Lit", state["pipeline"])
+		items = {}
+		for group in state["groups"]:
+			for item in group["items"]:
+				items[item["label"]] = item
+				for child in item.get("children", []):
+					items[child["label"]] = child
+		dot = chr(0xB7)
+		self.assertEqual((f"HDR {dot} R16G16B16A16_SFLOAT", "rt"), (items["Color 0"]["value"], items["Color 0"]["role"]))
+		self.assertEqual("depth", items["Depth"]["role"])
+		self.assertTrue(items["b1 COMBINED_IMAGE_SAMPLER"]["value"].startswith(f"Pattern {dot} R8G8B8A8_UNORM"))
+		self.assertTrue(items["b0 UNIFORM_BUFFER"]["value"].startswith("Frame constants"))
+		self.assertEqual(["position (0)", "normal (1)", "uv (2)"], [label for label in items if label.endswith(")") and "(" in label and label[0].islower()][:3])
+		self.assertIn("fs", [i.get("shader") for i in items.values()])
+
+	def test_partial_replay_reads_the_target(self):
+		floor = self.draws_under("Floor")[0][0]
+		cube = self.draws_under("Cube C")[0][0]
+		resources = {r["name"]: r for r in replay(self.capture, "resources", device=False)["resources"]}
+		hdr = resources["HDR"]["id"]
+		client = RpcClient()
+		try:
+			opened, _ = client.call("initialize", {"capture": self.capture})
+			self.assertEqual([], opened["result"]["warnings"])
+			before, _ = client.call("pixel", {"id": hdr, "eid": floor, "x": 880, "y": 300})
+			after, _ = client.call("pixel", {"id": hdr, "eid": cube, "x": 880, "y": 300})
+			self.assertNotEqual(before["result"]["values"], after["result"]["values"])
+			blue = after["result"]["values"]
+			self.assertGreater(blue[2], blue[0])
+			texture, data = client.call("texture", {"id": hdr, "eid": cube, "maxSize": 640})
+			info = texture["result"]
+			self.assertEqual((info["width"], info["height"], info["step"]), (640, 360, 2))
+			self.assertEqual(len(data), 640 * 360 * 16)
+		finally:
+			client.close()
+
+	def test_replayed_frame_matches_the_program(self):
+		present = self.events[-1][0]
+		client = RpcClient()
+		try:
+			client.call("initialize", {"capture": self.capture})
+			calls, _ = client.call("apiCalls", {"eid": present})
+			image = calls["result"]["calls"][0]["args"]["image"]
+			texture, data = client.call("texture", {"id": image, "eid": present, "maxSize": 4096})
+		finally:
+			client.close()
+		width, height, bgra = read_bmp(self.screenshot)
+		info = texture["result"]
+		self.assertEqual((width, height), (info["width"], info["height"]))
+		# The replay decodes B8G8R8A8 to RGBA floats; the screenshot is the program's own bytes of the same frame.
+		worst, total = 0, 0
+		for i in range(0, width * height, 97):
+			r, g, b, a = struct.unpack_from("<4f", data, i * 16)
+			bb, gg, rr = bgra[i * 4], bgra[i * 4 + 1], bgra[i * 4 + 2]
+			for replayed, shown in ((r, rr), (g, gg), (b, bb)):
+				difference = abs(round(replayed * 255) - shown)
+				worst = max(worst, difference)
+				total += difference
+		self.assertLessEqual(worst, 2, "the replayed frame differs from the program's")
+
+	def test_mesh_shader_and_timing(self):
+		draw = self.draws_under("Cube A")[0][0]
+		client = RpcClient()
+		try:
+			client.call("initialize", {"capture": self.capture})
+			mesh, data = client.call("mesh", {"eid": draw})
+			self.assertEqual(["position", "normal", "uv"], [a["name"] for a in mesh["result"]["attributes"]])
+			self.assertEqual((24, 36), (mesh["result"]["count"], len(mesh["result"]["indices"])))
+			self.assertEqual(len(data), 3 * 24 * 16)
+			shader, _ = client.call("shader", {"stage": "fs", "eid": draw})
+			result = shader["result"]
+			self.assertEqual(["frame", "patternTexture", "checkerTexture"], [b["name"] for b in result["bindings"]])
+			self.assertIn("OpEntryPoint Fragment %main \"main\"", result["disassembly"])
+			timing, _ = client.call("timing", {"repeat": 2})
+			stats = {s[0]: s for s in timing["result"]["stats"]}
+			dispatch = [e for e in self.events if e[2] == "dispatch"][0][0]
+			self.assertEqual(256 * 256, stats[dispatch][11])   # csInvocations
+		finally:
+			client.close()
+
+
 class C4CaptureReplay(unittest.TestCase):
 	"""The C4 sample: Gpu::Capture loads the library from FLASHBANG_DLL, wraps the device, and captures the one frame it
 	triggers between StartFrame and EndFrame."""

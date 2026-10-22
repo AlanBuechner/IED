@@ -317,7 +317,8 @@ namespace fb::vk
 	struct DrawIndexedArgs { u32 indexCount; u32 instanceCount; u32 firstIndex; i32 vertexOffset; u32 firstInstance; };
 	struct DrawIndirectArgs { VkBuffer buffer; VkDeviceSize offset; u32 drawCount; u32 stride; };
 	struct DrawIndirectCountArgs { VkBuffer buffer; VkDeviceSize offset; VkBuffer countBuffer; VkDeviceSize countOffset; u32 maxDrawCount; u32 stride; };
-	struct DispatchArgs { u32 baseX; u32 baseY; u32 baseZ; u32 x; u32 y; u32 z; };
+	struct DispatchArgs { u32 x; u32 y; u32 z; };
+	struct DispatchBaseArgs { u32 baseX; u32 baseY; u32 baseZ; u32 x; u32 y; u32 z; };
 	struct DispatchIndirectArgs { VkBuffer buffer; VkDeviceSize offset; };
 	struct CopyBufferArgs { VkBuffer src; VkBuffer dst; u32 count; const VkBufferCopy* regions; };
 	struct CopyImageArgs { VkImage src; VkImageLayout srcLayout; VkImage dst; VkImageLayout dstLayout; u32 count; const VkImageCopy* regions; };

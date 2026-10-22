@@ -120,6 +120,13 @@ namespace fb::replay::d3d12
 		}
 		// A command's arguments decoded into `args` (the command's *Args structure, at least CommandArgsSize bytes).
 		bool DecodeCommand(const CommandRef& command, void* args, SerReadMap* map, JsonWriter* describe = nullptr) const;
+		// Decoding into a caller's arena, which a replay resets as it goes (the model's own arena never shrinks).
+		bool DecodeCommandIn(Arena& arena, const CommandRef& command, void* args, SerReadMap* map) const {
+			ByteReader reader(command.args, command.size);
+			Ser s(reader, arena, map);
+			SerializeCommand(s, command.command, args);
+			return !s.Failed();
+		}
 
 		const ObjectEntry* Find(u64 id) const;
 		std::string NameOf(u64 id) const;

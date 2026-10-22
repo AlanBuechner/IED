@@ -17,7 +17,8 @@ from server import REPO, IedServer, ServerTestCase
 
 NATIVE = os.path.join(REPO, "build", "bin", "Development-windows-x64", "flashbang")
 SAMPLE = os.path.join(NATIVE, "fb-sample-d3d12.exe")
-HAS_NATIVE = all(os.path.isfile(os.path.join(NATIVE, name)) for name in ("flashbang.dll", "flashbang-replay.exe", "fb-sample-d3d12.exe"))
+VULKAN_SAMPLE = os.path.join(NATIVE, "fb-sample-vulkan.exe")
+HAS_NATIVE = all(os.path.isfile(os.path.join(NATIVE, name)) for name in ("flashbang.dll", "flashbang-replay.exe", "fb-sample-d3d12.exe", "fb-sample-vulkan.exe"))
 
 
 def write(path, value):
@@ -47,7 +48,9 @@ class GpuTests(ServerTestCase):
 		shutil.copy(os.path.join(REPO, "plugins", "gpu", "settings.schema.json"), plugin)
 		write(os.path.join(plugin, "ied-plugin.json"), gpu_manifest())
 		launch = {"type": "native", "request": "launch", "program": SAMPLE.replace("\\", "/"), "args": ["--hidden"], "cwd": "${projectRoot}"}
-		write(os.path.join(self.repo, "Scene.ied.proj"), {"version": 1, "name": "Scene", "root": ".", "kind": "executable", "debug": {"default": "Launch", "configurations": {"Launch": launch}}})
+		vulkan = dict(launch, program=VULKAN_SAMPLE.replace("\\", "/"))
+		write(os.path.join(self.repo, "Scene.ied.proj"), {"version": 1, "name": "Scene", "root": ".", "kind": "executable",
+			"debug": {"default": "Launch", "configurations": {"Launch": launch, "Vulkan": vulkan}}})
 		write(os.path.join(self.repo, "Scene.ied.sln"), {"version": 1, "name": "Scene", "projects": [{"file": "Scene.ied.proj"}]})
 		self.server = IedServer(extra=("--home", self.home, "--workspace", os.path.join(self.repo, "Scene.ied.sln")))
 		self.assertTrue(self.server.started, self.server.error)
@@ -72,14 +75,14 @@ class GpuTests(ServerTestCase):
 		frames = await self.client.wait_for("gpu:w1", lambda f: f.get("kind") == "targets" and any(predicate(t) for t in f["data"]["targets"]), timeout=timeout)
 		return next(t for t in frames[-1]["data"]["targets"] if predicate(t))
 
-	async def capture_frame(self):
+	async def capture_frame(self, configuration="Launch", api="D3D12"):
 		"""Launches the startup project for capture, captures one frame and stops it: the new capture."""
 		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
-		target = await self.client.request("gpu.launch", {"wsId": "w1"})
+		target = await self.client.request("gpu.launch", {"wsId": "w1", "configuration": configuration})
 		self.assertEqual("running", target["state"])
 		# The program says which APIs it uses once it has made its device, after it connects.
 		connected = await self.targets(lambda t: t["id"] == target["id"] and t["connected"] and t["apis"])
-		self.assertEqual(["D3D12"], connected["apis"])
+		self.assertEqual([api], connected["apis"])
 		await self.client.request("gpu.capture", {"wsId": "w1", "targetId": target["id"]})
 		frames = await self.client.wait_for("gpu:w1", lambda f: f.get("kind") == "captures" and f["data"]["captures"], timeout=60)
 		capture = frames[-1]["data"]["captures"][0]
@@ -143,6 +146,24 @@ class GpuTests(ServerTestCase):
 		self.assertFalse(os.path.exists(os.path.join(folder, capture["id"] + ".flash")))
 		frames = await self.client.wait_for("gpu:w1", lambda f: f.get("kind") == "captures" and not f["data"]["captures"], timeout=20)
 		self.assertEqual([], frames[-1]["data"]["captures"])
+
+	async def test_vulkan_through_the_layer(self):
+		# Launch for Capture puts the layer on the program's loader path (VK_ADD_LAYER_PATH, VK_INSTANCE_LAYERS).
+		capture = await self.capture_frame("Vulkan", "Vulkan")
+		self.assertEqual(("fb-sample-vulkan", "Vulkan"), (capture["meta"]["program"], capture["meta"]["api"]))
+		opened = await self.client.request("gpu.open", {"wsId": "w1", "captureId": capture["id"]})
+		self.assertEqual(("ready", "Vulkan"), (opened["state"], opened["summary"]["api"]))
+		session = opened["sessionId"]
+		events = (await self.replay(session, "events"))["result"]["events"]
+		self.assertIn("Cube A", [e[6] for e in events])
+		present = events[-1]
+		self.assertEqual("present", present[2])
+		resources = {r["name"]: r["id"] for r in (await self.replay(session, "resources"))["result"]["resources"]}
+		reply = await self.replay(session, "texture", {"id": resources["HDR"], "eid": present[0], "maxSize": 320})
+		self.assertEqual(("R16G16B16A16_SFLOAT", 320, 180), (reply["result"]["format"], reply["result"]["width"], reply["result"]["height"]))
+		blob = self.server.request("GET", "/api/blob/" + reply["blob"], headers={"Cookie": self.cookie})
+		self.assertEqual(320 * 180 * 16, len(blob.body))
+		await self.client.request("gpu.close", {"sessionId": session})
 
 	async def test_refusals(self):
 		with self.assertRaises(RpcFailure) as caught:

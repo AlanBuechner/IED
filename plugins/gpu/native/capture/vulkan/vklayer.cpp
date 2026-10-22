@@ -314,7 +314,9 @@ namespace fb::capture::vulkan
 	}
 }
 
-extern "C" __declspec(dllexport) VKAPI_ATTR VkResult VKAPI_CALL vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* version) {
+#pragma comment(linker, "/EXPORT:vkNegotiateLoaderLayerInterfaceVersion")
+
+extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* version) {
 	if (!version || version->sType != LAYER_NEGOTIATE_INTERFACE_STRUCT) return VK_ERROR_INITIALIZATION_FAILED;
 	if (version->loaderLayerInterfaceVersion > 2) version->loaderLayerInterfaceVersion = 2;
 	version->pfnGetInstanceProcAddr = fb::capture::vulkan::hook_vkGetInstanceProcAddr;

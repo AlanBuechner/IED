@@ -85,7 +85,7 @@ namespace fb::replay::d3d12
 		info.Uint("vendorId", model_.device.vendorId);
 		info.Uint("deviceId", model_.device.deviceId);
 		info.String("driver", model_.device.driver);
-		info.String("featureLevel", EnumName(model_.device.featureLevel) ? EnumName(model_.device.featureLevel) : "");
+		info.String("level", EnumName(model_.device.featureLevel) ? std::string("FL ") + EnumName(model_.device.featureLevel) : "");
 		info.EndObject();
 		info.BeginObject("replayDevice");
 		if (device_) {

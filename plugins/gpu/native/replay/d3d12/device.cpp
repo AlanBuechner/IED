@@ -649,7 +649,8 @@ namespace fb::replay::d3d12
 		size_t first = 0;
 		if (listRef.commands.front().command == Cmd::Reset) {
 			ResetArgs reset = {};
-			model_.DecodeCommand(listRef.commands.front(), &reset, this);
+			scratch_.Reset();
+			model_.DecodeCommandIn(scratch_, listRef.commands.front(), &reset, this);
 			initial = reset.pipelineState;
 			first = 1;
 		}

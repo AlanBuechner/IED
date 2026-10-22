@@ -66,15 +66,16 @@ export class StateTree {
 		if (this.state) this.show(this.state);
 	}
 
-	// The resource the event writes first: its first render target, else its depth target, else the first UAV it binds.
+	// The resource the event writes first: its first render target, else its depth target, else the first storage
+	// resource it binds - by the role the replayer gives an item ("rt", "depth", "uav").
 	static outputOf(state) {
 		let first = null, depth = null, uav = null;
 		const visit = (items) => {
 			for (const item of items || []) {
 				if (item.resource) {
-					if (!first && /^RTV/.test(item.value)) first = item;
-					if (!depth && /^DSV/.test(item.value)) depth = item;
-					if (!uav && /^UAV/.test(item.value)) uav = item;
+					if (!first && item.role === "rt") first = item;
+					if (!depth && item.role === "depth") depth = item;
+					if (!uav && item.role === "uav") uav = item;
 				}
 				visit(item.children);
 			}

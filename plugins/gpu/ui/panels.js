@@ -23,7 +23,10 @@ export class ShaderPanel {
 	}
 
 	show(shader) {
-		const stage = { vs: "Vertex", ps: "Pixel", cs: "Compute", hs: "Hull", ds: "Domain", gs: "Geometry", as: "Amplification", ms: "Mesh" }[shader.stage] || shader.stage;
+		const stage = {
+			vs: "Vertex", ps: "Pixel", cs: "Compute", hs: "Hull", ds: "Domain", gs: "Geometry", as: "Amplification", ms: "Mesh",
+			fs: "Fragment", tcs: "Tessellation control", tes: "Tessellation evaluation", task: "Task", mesh: "Mesh",
+		}[shader.stage] || shader.stage;
 		this.title.textContent = stage + " shader " + DOT + " " + shader.pipeline + " " + DOT + " " + (shader.model || shader.kind) + " " + DOT + " " + shader.size + " B";
 		const rows = [];
 		const section = (name, items, render) => {

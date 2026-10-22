@@ -106,6 +106,7 @@ namespace fb::replay::d3d12
 		const QueueInfo* QueueOf(u64 id) const;
 
 		const Model& model_;
+		Arena scratch_;   // what a replay decodes, reset for each command
 		IDXGIAdapter1* adapter_ = nullptr;
 		ID3D12Device* device_ = nullptr;
 		ID3D12Device2* device2_ = nullptr;

@@ -2,6 +2,7 @@
 // textures decoded to RGBA32F for the browser's viewer, the exact texel of a pixel pick, and a draw's vertex inputs
 // for the mesh viewer.
 #include "d3d12replay.h"
+#include "replay/texels.h"
 #include "d3d12_names.h"
 #include "formats.h"
 
@@ -137,59 +138,11 @@ namespace fb::replay::d3d12
 		if (info->codec == Codec::BC6H || info->codec == Codec::BC7) Fail("%s is decoded on the GPU, which lands later", info->name);
 		const u32 width = r.footprint.Width, height = r.footprint.Height;
 		const u32 z = desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? std::min<u32>((u32)params["slice"].Uint(0), r.footprint.Depth - 1) : 0;
-		std::vector<float> texels((size_t)width * height * 4);
-		DecodeRows(*info, r.bytes.data() + (size_t)z * r.footprint.RowPitch * r.rows, r.footprint.RowPitch, width, height, texels.data());
-
 		const u32 maxSize = (u32)params["maxSize"].Uint(2048);
-		const u32 step = std::max<u32>(1, (std::max(width, height) + maxSize - 1) / maxSize);
-		const u32 outWidth = (width + step - 1) / step, outHeight = (height + step - 1) / step;
-		std::vector<float> shown((size_t)outWidth * outHeight * 4);
-		double minimum[4] = {INFINITY, INFINITY, INFINITY, INFINITY}, maximum[4] = {-INFINITY, -INFINITY, -INFINITY, -INFINITY};
-		u64 nans = 0, infs = 0, negatives = 0;
-		for (size_t i = 0; i < texels.size(); ++i) {
-			const float v = texels[i];
-			if (std::isnan(v)) ++nans;
-			else if (std::isinf(v)) ++infs;
-			else {
-				if (v < 0) ++negatives;
-				minimum[i % 4] = std::min<double>(minimum[i % 4], v);
-				maximum[i % 4] = std::max<double>(maximum[i % 4], v);
-			}
-		}
-		for (u32 y = 0; y < outHeight; ++y) {
-			for (u32 x = 0; x < outWidth; ++x) {
-				// A box over the step x step texels; a NaN or Inf in the box stays visible.
-				float sum[4] = {};
-				float special[4] = {};
-				bool hasSpecial[4] = {};
-				u32 count = 0;
-				for (u32 dy = 0; dy < step && y * step + dy < height; ++dy) {
-					for (u32 dx = 0; dx < step && x * step + dx < width; ++dx) {
-						const float* t = &texels[(((size_t)(y * step + dy)) * width + (x * step + dx)) * 4];
-						for (int c = 0; c < 4; ++c) {
-							if (std::isnan(t[c]) || std::isinf(t[c])) {
-								special[c] = t[c];
-								hasSpecial[c] = true;
-							}
-							else sum[c] += t[c];
-						}
-						++count;
-					}
-				}
-				float* o = &shown[((size_t)y * outWidth + x) * 4];
-				for (int c = 0; c < 4; ++c) o[c] = hasSpecial[c] ? special[c] : sum[c] / (float)std::max<u32>(count, 1);
-			}
-		}
-		binary.resize(shown.size() * sizeof(float));
-		memcpy(binary.data(), shown.data(), binary.size());
+		ShowTexels(*info, r.bytes.data() + (size_t)z * r.footprint.RowPitch * r.rows, r.footprint.RowPitch, width, height, maxSize, out, binary);
 		out.Uint("eid", eid);
 		out.Uint("id", id);
 		out.String("name", model_.NameOf(id));
-		out.Uint("width", outWidth);
-		out.Uint("height", outHeight);
-		out.Uint("srcWidth", width);
-		out.Uint("srcHeight", height);
-		out.Uint("step", step);
 		out.Uint("mips", desc.MipLevels);
 		out.Uint("slices", desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? r.footprint.Depth : desc.DepthOrArraySize);
 		out.String("format", DxgiFormatName(desc.Format) ? DxgiFormatName(desc.Format) : "?");
@@ -199,16 +152,6 @@ namespace fb::replay::d3d12
 		out.Bool("linear", info->component == Component::Float || info->component == Component::Srgb);
 		out.Bool("depth", info->depth);
 		out.Uint("channels", info->channels);
-		out.BeginArray("min");
-		for (double v : minimum) out.Double(std::isinf(v) ? 0.0 : v);
-		out.EndArray();
-		out.BeginArray("max");
-		for (double v : maximum) out.Double(std::isinf(v) ? 0.0 : v);
-		out.EndArray();
-		out.Uint("nan", nans);
-		out.Uint("inf", infs);
-		out.Uint("negative", negatives);
-		out.String("encoding", "rgba32f");
 	}
 
 	void D3D12Replay::Pixel(const JsonValue& params, JsonWriter& out) {
@@ -227,34 +170,7 @@ namespace fb::replay::d3d12
 		out.Uint("x", x);
 		out.Uint("y", y);
 		out.String("format", info->name);
-		if (IsBlock(info->codec)) {
-			float block[16 * 4];
-			const u8* at = slice + (y / 4) * (size_t)r.footprint.RowPitch + (x / 4) * info->bytes;
-			DecodeRows(*info, at, r.footprint.RowPitch, 4, 4, block);
-			const float* t = &block[((y % 4) * 4 + (x % 4)) * 4];
-			out.BeginArray("values");
-			for (int c = 0; c < 4; ++c) out.Double(t[c]);
-			out.EndArray();
-			out.String("text", Format("%.6g, %.6g, %.6g, %.6g", t[0], t[1], t[2], t[3]));
-			return;
-		}
-		const u8* texel = slice + (size_t)y * r.footprint.RowPitch + (size_t)x * info->bytes;
-		double values[4];
-		u32 count = 0;
-		TexelValues(*info, texel, values, count);
-		std::string raw;
-		for (u32 i = 0; i < info->bytes; ++i) raw += Format("%02X", texel[info->bytes - 1 - i]);
-		out.String("raw", raw);
-		out.BeginArray("values");
-		for (u32 c = 0; c < count; ++c) out.Double(values[c]);
-		out.EndArray();
-		std::string text;
-		const bool integer = info->component == Component::UInt || info->component == Component::SInt;
-		for (u32 c = 0; c < count; ++c) {
-			if (c) text += ", ";
-			text += integer ? Format("%.0f", values[c]) : Format("%.6g", values[c]);
-		}
-		out.String("text", text);
+		PixelValues(*info, slice, r.footprint.RowPitch, x, y, out);
 	}
 
 	void D3D12Replay::Buffer(const JsonValue& params, JsonWriter& out, std::vector<u8>& binary) {

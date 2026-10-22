@@ -33,6 +33,9 @@ namespace fb::replay::d3d12
 				out_.String("value", value);
 				if (resource) out_.Uint("resource", resource);
 				if (shader) out_.String("shader", shader);
+				// A view's role, which the UI's "the event's output" looks for.
+				const char* role = value.compare(0, 3, "RTV") == 0 ? "rt" : value.compare(0, 3, "DSV") == 0 ? "depth" : value.compare(0, 3, "UAV") == 0 ? "uav" : nullptr;
+				if (resource && role) out_.String("role", role);
 				out_.EndObject();
 			}
 			void Parent(const std::string& label, const std::string& value, u64 resource = 0) {

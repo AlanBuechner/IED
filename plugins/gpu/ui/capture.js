@@ -10,7 +10,7 @@ import { StateTree } from "./statetree.js";
 import { TextureViewer } from "./texview.js";
 import { ShaderPanel, MeshPanel } from "./panels.js";
 import { ReplaySession } from "./session.js";
-import { DOT, bytes, captureTime, count, gpuMs } from "./format.js";
+import { DOT, bytes, captureTime, count, counted, gpuMs } from "./format.js";
 
 const VIEWS = [["overview", "Overview", "info"], ["pipeline", "Pipeline", "symbol-structure"], ["performance", "Performance", "dashboard"]];
 const BOTTOM = [["calls", "API Calls"], ["messages", "Messages"], ["resources", "Resources"], ["warnings", "Warnings"]];
@@ -386,10 +386,10 @@ export class CaptureView {
 		const facts = [
 			["Program", meta.program], ["Path", meta.programPath], ["API", summary.api], ["Frame", meta.frame], ["Captured", captureTime(meta.time)],
 			["Size", bytes(summary.bytes)], ["Resolution", meta.width ? meta.width + " x " + meta.height : ""],
-			["Captured on", [capture.adapter, capture.driver && "driver " + capture.driver, capture.featureLevel && "FL " + capture.featureLevel].filter(Boolean).join(" " + DOT + " ")],
+			["Captured on", [capture.adapter, capture.driver && "driver " + capture.driver, capture.level].filter(Boolean).join(" " + DOT + " ")],
 			["Replayed on", replay.adapter ? replay.adapter + " " + DOT + " driver " + replay.driver : replay.problem],
-			["Events", counts.events !== undefined ? count(counts.events) + " (" + count(counts.actions) + " actions, " + counts.submissions + " submissions)" : ""],
-			["Objects", counts.objects !== undefined ? counts.objects + " (" + counts.resources + " resources)" : ""],
+			["Events", counts.events !== undefined ? count(counts.events) + " (" + counted(counts.actions, "action") + ", " + counted(counts.submissions, "submission") + ")" : ""],
+			["Objects", counts.objects !== undefined ? counts.objects + " (" + counted(counts.resources, "resource") + ")" : ""],
 			["Comment", meta.comment],
 		].filter(([, v]) => v !== undefined && v !== null && v !== "");
 		const thumbnail = "/w/" + encodeURIComponent(this.ctx.wsId) + "/files/.ied/local/gpu-captures/" + encodeURIComponent(this.captureId) + ".png";
@@ -407,11 +407,14 @@ export class CaptureView {
 		const walk = (list, depth) => {
 			for (const e of list) {
 				if (e.kind !== "marker" || e.hidden) continue;
-				const draws = this.events.events.filter((x) => x.eid > e.eid && x.eid <= e.last && x.kind === "draw").length;
+				const inside = this.events.events.filter((x) => x.eid > e.eid && x.eid <= e.last);
+				const draws = inside.filter((x) => x.kind === "draw").length;
+				const dispatches = inside.filter((x) => x.kind === "dispatch").length;
 				const stats = this.events.stats && this.events.stats.get(e.eid);
 				rows.push(h("div.gpu-r", { on: { click: () => { this.setView("pipeline"); this.select(e.eid); } } },
 					h("span.nm", { style: { "--d": depth } }, e.name), h("span.n", null, gpuMs(markerTime.get(e.eid))), h("span.n", null, String(draws)),
-					h("span.n", null, stats ? count(stats.prims) : ""), h("span.n", null, stats ? count(stats.ps) : ""), h("span.n.d", null, String(e.eid))));
+					h("span.n", null, String(dispatches)), h("span.n", null, stats ? count(stats.prims) : ""), h("span.n", null, stats ? count(stats.ps) : ""),
+					h("span.n", null, stats ? count(stats.cs) : ""), h("span.n.d", null, String(e.eid))));
 				walk(e.children, depth + 1);
 			}
 		};
@@ -419,7 +422,8 @@ export class CaptureView {
 		return h("div.gpu-col.grow", null,
 			h("div.gpu-title", null, h("b", null, "Passes"), h("span.muted", null, "GPU " + gpuMs(this.timing.frameMs) + " ms " + DOT + " median of " + this.timing.repeat + " replays")),
 			h("div.gpu-grid.gpu-pgrid", null,
-				h("div.gpu-head", null, h("span", null, "Pass"), h("span.n", null, "GPU ms"), h("span.n", null, "Draws"), h("span.n", null, "Prims"), h("span.n", null, "PS inv."), h("span.n", null, "EID")),
+				h("div.gpu-head", null, h("span", null, "Pass"), h("span.n", null, "GPU ms"), h("span.n", null, "Draws"), h("span.n", null, "Dispatches"), h("span.n", null, "Prims"), h("span.n", null, "PS inv."),
+					h("span.n", null, "CS inv."), h("span.n", null, "EID")),
 				h("div.viewport", null, rows.length ? rows : h("div.gpu-state-msg", null, "The frame has no markers."))));
 	}
 

@@ -272,7 +272,7 @@ namespace fb::vk
 	X(BindDescriptorSets, BindDescriptorSetsArgs) X(BindIndexBuffer, BindIndexBufferArgs) X(BindVertexBuffers, BindVertexBuffersArgs) \
 	X(Draw, DrawArgs) X(DrawIndexed, DrawIndexedArgs) X(DrawIndirect, DrawIndirectArgs) X(DrawIndexedIndirect, DrawIndirectArgs) \
 	X(DrawIndirectCount, DrawIndirectCountArgs) X(DrawIndexedIndirectCount, DrawIndirectCountArgs) X(Dispatch, DispatchArgs) \
-	X(DispatchBase, DispatchArgs) X(DispatchIndirect, DispatchIndirectArgs) X(CopyBuffer, CopyBufferArgs) X(CopyImage, CopyImageArgs) \
+	X(DispatchBase, DispatchBaseArgs) X(DispatchIndirect, DispatchIndirectArgs) X(CopyBuffer, CopyBufferArgs) X(CopyImage, CopyImageArgs) \
 	X(BlitImage, BlitImageArgs) X(CopyBufferToImage, CopyBufferToImageArgs) X(CopyImageToBuffer, CopyImageToBufferArgs) \
 	X(UpdateBuffer, UpdateBufferArgs) X(FillBuffer, FillBufferArgs) X(ClearColorImage, ClearColorImageArgs) \
 	X(ClearDepthStencilImage, ClearDepthStencilImageArgs) X(ClearAttachments, ClearAttachmentsArgs) X(ResolveImage, ResolveImageArgs) \
@@ -432,6 +432,11 @@ namespace fb::vk
 		s.Field("stride", a.stride);
 	}
 	static void SerArgs(Ser& s, DispatchArgs& a) {
+		s.Field("groupCountX", a.x);
+		s.Field("groupCountY", a.y);
+		s.Field("groupCountZ", a.z);
+	}
+	static void SerArgs(Ser& s, DispatchBaseArgs& a) {
 		s.Field("baseGroupX", a.baseX);
 		s.Field("baseGroupY", a.baseY);
 		s.Field("baseGroupZ", a.baseZ);

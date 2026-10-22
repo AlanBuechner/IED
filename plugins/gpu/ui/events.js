@@ -70,12 +70,12 @@ export class EventsGrid {
 		// Markers add up their actions' statistics.
 		for (const event of [...this.events].reverse()) {
 			if (event.kind !== "marker") continue;
-			let prims = 0, ps = 0;
+			let prims = 0, ps = 0, cs = 0;
 			for (const child of event.children) {
 				const s = this.stats.get(child.eid);
-				if (s) prims += s.prims, ps += s.ps;
+				if (s) prims += s.prims, ps += s.ps, cs += s.cs;
 			}
-			if (prims || ps) this.stats.set(event.eid, { prims, ps, cs: 0 });
+			if (prims || ps || cs) this.stats.set(event.eid, { prims, ps, cs });
 		}
 		this.maxMs = Math.max(0.000001, ...[...this.timing.values()]);
 		this.paint(true);

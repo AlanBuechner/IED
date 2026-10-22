@@ -88,5 +88,5 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 | F-GPU-90 | `ied-gpu/1`: JSON-RPC with binary parts over stdio, binary parts handed to the browser as blobs; one replayer per open capture; crash restart without losing UI state | P1 | US-GPU-4 | - |
 | F-GPU-91 | Dropped 2026-10-21 (`docs/99` #23): a RenderDoc backend - Flashbang captures and replays | - | - | - |
 | F-GPU-92 | Flashbang capture for any program without injection: D3D12 by handing the device to the library (Bedrock `Gpu::Capture`, `flashbang_app.h`), Vulkan through the loader's layer; metadata chunk (bindless names, entities, materials), rolling capture | P1 | US-GPU-9 | engine semantics in the capture |
-| F-GPU-93 | Flashbang replayer implementing `ied-gpu/1` (D3D12 built; Vulkan next; work graphs, unbounded/bindless resources) | P1 | US-GPU-9 | covers what RenderDoc does not |
+| F-GPU-93 | Flashbang replayer implementing `ied-gpu/1` (D3D12 and Vulkan built; next: work graphs, unbounded/bindless resources) | P1 | US-GPU-9 | covers what RenderDoc does not |
 | F-GPU-94 | Capture GPU/driver shown beside the replay GPU/driver; replay device selection | P1 | US-GPU-1 | - |

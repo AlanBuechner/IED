@@ -13,7 +13,8 @@ namespace fb::replay::d3d12
 
 	void ReplayDevice::RunCommand(ID3D12GraphicsCommandList* list, const CommandRef& command, std::vector<u8>& args) {
 		args.assign(CommandArgsSize(command.command) + 16, 0);
-		if (!model_.DecodeCommand(command, args.data(), this)) {
+		scratch_.Reset();
+		if (!model_.DecodeCommandIn(scratch_, command, args.data(), this)) {
 			warnings.push_back(Format("a damaged %s command was skipped", CmdName(command.command)));
 			return;
 		}

@@ -257,14 +257,14 @@ namespace fb::capture::vulkan
 	static VKAPI_ATTR void VKAPI_CALL hook_vkCmdDispatch(VkCommandBuffer cb, uint32_t x, uint32_t y, uint32_t z) {
 		FB_DEVICE;
 		device->next.vkCmdDispatch(cb, x, y, z);
-		DispatchArgs args = {0, 0, 0, x, y, z};
+		DispatchArgs args = {x, y, z};
 		Rec(device, cb, Cmd::Dispatch, args);
 	}
 
 	static VKAPI_ATTR void VKAPI_CALL hook_vkCmdDispatchBase(VkCommandBuffer cb, uint32_t bx, uint32_t by, uint32_t bz, uint32_t x, uint32_t y, uint32_t z) {
 		FB_DEVICE;
 		device->next.vkCmdDispatchBase(cb, bx, by, bz, x, y, z);
-		DispatchArgs args = {bx, by, bz, x, y, z};
+		DispatchBaseArgs args = {bx, by, bz, x, y, z};
 		Rec(device, cb, Cmd::DispatchBase, args);
 	}
 

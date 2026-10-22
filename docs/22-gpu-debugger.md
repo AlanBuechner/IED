@@ -67,7 +67,7 @@ The server never ships GPU objects to the browser. Textures go as decoded float 
 - Command lists are recorded always (each call serialized into the list's buffer, cleared by `Reset`), because a list recorded before the captured frame may run in it. Barriers in submitted lists move the tracked state of each resource, which the snapshot needs.
 - A capture: the trigger arms it; at the next `Present` the DLL waits for every queue to idle, snapshots the **initial contents** of every live resource (default-heap resources by GPU copies into readback buffers, upload-heap resources by reading their mapped memory, which is then shadowed so the frame's CPU writes are recorded as diffs before each `ExecuteCommandLists`), records every submission until the next `Present`, waits for idle again and writes the file.
 
-**Vulkan** (`native/capture/vulkan/`): the same DLL is a regular Vulkan layer (`VK_LAYER_IED_flashbang`, its manifest written beside the DLL), which the Vulkan loader itself loads when IED's launch environment names it (`VK_ADD_LAYER_PATH`, `VK_INSTANCE_LAYERS`), with the loader's dispatch tables - the mechanism the loader documents for tools, so a Vulkan program needs no code change. It tracks the same things the Vulkan way: memory allocations and bindings, buffers, images and views, samplers, descriptor set layouts, pools and sets (writes and copies), pipeline layouts, shader modules, pipelines, render passes, framebuffers; image layouts from barriers and render pass final layouts; command buffers recorded always; the snapshot copies buffers' and images' contents into host-visible memory at the frame start.
+**Vulkan** (`native/capture/vulkan/`): the same DLL is a regular Vulkan layer (`VK_LAYER_IED_flashbang`, its manifest written beside the DLL), which the Vulkan loader itself loads when IED's launch environment names it (`VK_ADD_LAYER_PATH`, `VK_INSTANCE_LAYERS`), with the loader's dispatch tables - the mechanism the loader documents for tools, so a Vulkan program needs no code change. It tracks the same things the Vulkan way: memory allocations and bindings, buffers, images and views, samplers, descriptor set layouts, pools and sets (writes and copies), pipeline layouts, shader modules, pipelines, render passes, framebuffers; image layouts from barriers and render pass final layouts; command buffers recorded always (a secondary command buffer is inlined where `vkCmdExecuteCommands` runs it); descriptor sets shadowed from their writes and copies; the frame's writes to mapped memory as diffs before each submit. Buffers and images get `TRANSFER_SRC` / `TRANSFER_DST` usage added at creation (swap chain images too, when the surface allows it), so the snapshot can copy any of them: host-visible memory is read in place, the rest is copied into readback buffers at the frame start. The thumbnail is copied from the presented image before the present, which waits for the copy. Every Vulkan structure's serialization is generated from the registry (`native/common/gen_vulkan.py` reads `vk.xml`); a `pNext` structure the generator does not know is left out of the record and named in the capture's warnings.
 
 **Triggers:** IED's *Capture Next Frame* (the control pipe), or the program itself through `Gpu::Capture::TriggerCapture(n)` (bound to whatever key or console command the program likes). A frame ends at `Present` / `vkQueuePresentKHR`; a program without a swap chain marks frames with `Gpu::Capture::StartFrame` / `EndFrame`.
 
@@ -101,6 +101,8 @@ One process per open capture, started by the server with the capture's path. Mes
 | `pixelHistory {id, x, y, eid}` | every event before `eid` that wrote the pixel, with values before and after |
 | `messages {}` | the debug layer's messages during replay, each with its event |
 | `shutdown {}` | ends the process |
+
+**Vulkan replay** (`native/replay/vulkan/`) creates its own instance and device on the GPU with the capture's vendor and device ID when there is one (else the first), with the captured device extensions the GPU has and the captured features, then the capture's objects in three passes (memory, buffers and images; their bindings; everything else). Swap chain images become plain images. SPIR-V is disassembled and reflected by Flashbang's own code (`vkspirv.cpp`), with no SPIRV-Tools dependency; the shader panel shows bindings by set and binding, uniform blocks and push constants with their members, and the stage's inputs and outputs by location.
 
 Replaying to an event re-applies the initial contents and replays every submission before it, then the event's command list up to the event (closing an open render pass or query so the list stays valid), and waits for the GPU. Pipeline state, resource states and bindings at an event are simulated on the CPU from the records, so the Pipeline view needs no GPU work.
 
@@ -171,15 +173,16 @@ Roadmap placement: `docs/18` M12 (G1-G2) and M13 (G3).
 
 ## Status (2026-10-21)
 
-Built (G1 for D3D12), in `plugins/gpu/`:
+Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
 
 - **Capture** (`native/capture/`): the D3D12 proxies, the state and descriptor tracking, initial contents, the frame
   recording, the `.flash` writer with its sidecar and thumbnail (only when a frame was presented), the control pipe, and
   frame bounds from `Present` or from `StartFrame` / `EndFrame` (each `StartFrame` is a frame, captured when one was
-  triggered). The C/C++ helper `native/include/flashbang_app.h`.
+  triggered). The C/C++ helper `native/include/flashbang_app.h`. The Vulkan layer (`VK_LAYER_IED_flashbang`) with the
+  same coverage: object and layout tracking, descriptor shadows, mapped-memory diffs, initial contents, the thumbnail.
 - **Replay** (`native/replay/`): `flashbang-replay --rpc` answers `initialize`, `events`, `apiCalls`, `state`,
   `resources`, `texture`, `pixel`, `buffer`, `mesh`, `shader`, `timing` and `messages` on `ied-gpu/1`; its CLI does the
-  same for scripts and tests. A Vulkan capture is refused with a message.
+  same for scripts and tests, for D3D12 and Vulkan captures alike.
 - **Server** (`code/`, namespace `GpuDebug`): the `gpu.*` methods and the `gpu:` / `gpurs:` topics above, Launch for
   Capture from the startup project's debug configuration (its pre-launch task first), one replayer per open capture
   (ended with its capture's delete, after 30 idle minutes, or with the server).
@@ -190,12 +193,12 @@ Built (G1 for D3D12), in `plugins/gpu/`:
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample
   `plugins/gpu/samples/c4`.
 - **Checks:** `nuke test flashbang` (`flashbang-tests`, and `native/tests/test_flashbang.py`, which captures the D3D12
-  sample and the C4 sample and replays them; the C4 one needs a toolchain whose Bedrock has `gpu.ch`),
-  `tools/server-checks/tests/test_gpu.py` (launch, capture, open, replay, blobs, comment, delete, refusals), Bedrock
+  sample, the C4 sample and the Vulkan sample through the layer and replays them, the Vulkan frame compared with the
+  program's own screenshot; the C4 one needs a toolchain whose Bedrock has `gpu.ch`), `tools/server-checks/tests/test_gpu.py`
+  (launch, capture, open, replay, blobs, comment, delete, refusals; a Vulkan launch through the layer), Bedrock
   `gpu_tests.cf`.
 
-Not yet: the Vulkan layer's capture, its records and its replay (the layer manifest and the launch variables are in
-place); a buffer view in the UI (the replayer's `buffer` method has none yet); the AI tools; the control pipe's DACL
+Not yet: a buffer view in the UI (the replayer's `buffer` method has none yet); the AI tools; the control pipe's DACL
 limited to the user; Pixel History and the rest of G2.
 
 ## Risks
