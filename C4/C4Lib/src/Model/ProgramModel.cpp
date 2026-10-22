@@ -1,4 +1,5 @@
 #include "Model/ProgramModel.h"
+#include <functional>
 #include "Model/Templates/FunctionTemplates.h"
 #include "Model/OverloadResolution.h"
 #include "Model/ConstEvaluator.h"
@@ -104,11 +105,15 @@ namespace Scripting
 		if (recsIt == m_MethodRecords.end()) return nullptr;
 		const auto& recs = recsIt->second;
 		// The method list and the record list grow together (one Push per AddMethod), so the
-		// method's index in the list IS its index in the records. Find by pointer identity first;
-		// fall back to name+arity match if the caller holds a copy of the MethodInfo.
+		// method's index in the list IS its index in the records: a method of the list is found by its
+		// address; a copy of a MethodInfo by name and arity.
 		const auto& methods = type->GetMethods();
-		for (uint32 i = 0; i < methods.Count(); ++i)
-			if (&methods[i] == method) return i < recs.Count() ? recs[i] : nullptr;
+		const std::less<const ObjectType::MethodInfo*> before;
+		if (methods.Count() > 0 && !before(method, &methods[0]) && before(method, &methods[0] + methods.Count()))
+		{
+			const uint32 i = (uint32)(method - &methods[0]);
+			return i < recs.Count() ? recs[i] : nullptr;
+		}
 		for (uint32 i = 0; i < methods.Count(); ++i)
 			if (methods[i].mName == method->mName && methods[i].m_ParameterTypes.Count() == method->m_ParameterTypes.Count())
 				return i < recs.Count() ? recs[i] : nullptr;

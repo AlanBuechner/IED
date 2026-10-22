@@ -33,7 +33,7 @@ bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions)
 	llvm::Module& module = *partitions.front();
 	if (!PrepareScriptHost(partitions)) return false;
 	if (partitions.size() > 1 ? !WriteSplitProgram(partitions, base) : !WriteProgram(module, base)) return false;
-	return !m_Interface || WriteScriptInterface(*m_Interface); // only beside the program it describes: a failed link keeps the old pair
+	return !m_Interface || WriteScriptInterface(); // only beside the program it describes: a failed link keeps the old pair
 }
 
 bool ProgramOutput::WriteProgram(llvm::Module& module, const std::string& base)
@@ -360,7 +360,7 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 bool ProgramOutput::FinishInterface(llvm::Module& module)
 {
 	std::string error;
-	m_Interface = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(*m_HostBuild), &error);
+	m_Interface = Scripting::BuildInterface(m_In.compiler, m_In.exportedMacros, std::move(*m_HostBuild), &error, &m_InterfaceBytes);
 	m_HostBuild.reset();
 	if (!m_Interface)
 	{
@@ -390,11 +390,11 @@ bool ProgramOutput::FinishScriptHost(const llvm::Module& program, const Scriptin
 	return written;
 }
 
-bool ProgramOutput::WriteScriptInterface(const Scripting::HostInterface& host)
+bool ProgramOutput::WriteScriptInterface()
 {
 	const std::string interfacePath = fs::path(m_In.options.outputFile.c_str()).replace_extension(".c4i").string();
 	std::string error;
-	if (!Scripting::WriteInterface(host, interfacePath, &error))
+	if (!Scripting::WriteInterfaceBytes(m_InterfaceBytes, interfacePath, &error))
 	{
 		m_In.result.AddBackendError(Core::String(error.c_str()));
 		return false;

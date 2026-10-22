@@ -53,6 +53,12 @@ namespace Scripting
 	/// that ends early, or one whose target this compiler does not know.
 	bool DeserializeInterface(std::string_view bytes, HostInterface& host, std::string* error);
 
+	/// SerializeInterface's bytes with the build id they get: XXH3's 128-bit hash of them with the id zero, written
+	/// into the bytes and `host`. One serialization of an interface whose inline bodies are tens of megabytes.
+	std::string SealInterface(HostInterface& host);
+
 	bool WriteInterface(const HostInterface& host, const std::string& path, std::string* error);
+	/// Bytes SerializeInterface or SealInterface made.
+	bool WriteInterfaceBytes(const std::string& bytes, const std::string& path, std::string* error);
 	bool ReadInterface(const std::string& path, HostInterface& host, std::string* error);
 } // namespace Scripting

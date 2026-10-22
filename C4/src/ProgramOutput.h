@@ -73,7 +73,7 @@ private:
 	bool FinishInterface(llvm::Module& module);
 	bool FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
 		std::vector<std::string>& objects);
-	bool WriteScriptInterface(const Scripting::HostInterface& host);
+	bool WriteScriptInterface();
 	bool ShipScriptHost(const std::filesystem::path& scriptHost);
 	void Timed(const char* phase, std::chrono::steady_clock::time_point since);
 
@@ -86,4 +86,5 @@ private:
 	std::optional<Scripting::HostBuild> m_HostBuild;       // a script host's, until its inline bodies are in
 	Scripting::Extracts m_InlineBodies;                    // the inline bodies the split extracts for it
 	std::optional<Scripting::HostInterface> m_Interface;   // what goes beside the program
+	std::string m_InterfaceBytes;                          // its bytes, made once with its build id
 };

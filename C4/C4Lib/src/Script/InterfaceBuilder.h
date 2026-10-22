@@ -23,10 +23,10 @@ namespace Scripting
 
 	/// The interface of the program `compiler` compiled (docs/runtime/04 section 3.2): its projects and folders, and
 	/// every source with its interface text and the macros it exports (`exportedMacros`, by MacroIdentity, from the
-	/// macro pass), plus `build`. The build id is a hash of all of it. Empty, with the reason, when a file's
-	/// declarations do not fit its text.
+	/// macro pass), plus `build`. The build id is a hash of all of it (SealInterface), and `serialized`, when given,
+	/// gets the interface's bytes. Empty, with the reason, when a file's declarations do not fit its text.
 	std::optional<HostInterface> BuildInterface(CompilerInstance& compiler, const std::unordered_map<std::string, MacroTable>& exportedMacros,
-		HostBuild build, std::string* error);
+		HostBuild build, std::string* error, std::string* serialized = nullptr);
 
 	/// The C functions the prelude declares (their link symbols): a host lists them whether or not it calls them.
 	std::vector<std::string> PreludeFunctionSymbols(const ProgramModel& model);

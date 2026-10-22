@@ -216,6 +216,10 @@ namespace Scripting
 		const Core::String& name, TemplateArgs& args, const TemplateCall& call)
 	{
 		using Result = QueryResult<const FunctionRecord*>;
+		// An instance made before for arguments written in full needs no binding scope; an extension's key has its
+		// receiver, which the binding finds.
+		if (!def.functionBody->IsExtensionMethod() && TemplateArgumentResolver::Complete(*def.params, args))
+			if (const FunctionRecord* made = TemplateInstantiator().MadeFunction(model, def, name, args)) return Result::Success(made);
 		Scope* parent = def.bindingParent ? def.bindingParent : const_cast<Scope*>(def.declScope ? def.declScope : model.m_Symbols->GetRoot());
 		Scope* binding = model.m_Symbols->CreateScope(Scope::Kind::Block, "inst", parent);
 		auto complete = TemplateArgumentResolver::CompleteAndBind(model, *def.params, args, call.unitId, binding, name);

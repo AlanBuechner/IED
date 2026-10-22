@@ -49,16 +49,19 @@ namespace Scripting
 			return fn.IsStatic() && !fn.IsExtensionMethod() && scope && scope->HoldsFileStatics();
 		}
 
+		// The ones left keep their order, moved down over the settled ones in one pass.
 		template<typename Pending, typename Settle>
 		bool SettleEach(Core::Vector<Pending>& pending, Settle settle)
 		{
-			bool changed = false;
-			for (uint32 i = 0; i < pending.Count(); )
+			uint32 kept = 0;
+			for (uint32 i = 0; i < pending.Count(); ++i)
 			{
-				if (!settle(pending[i])) { ++i; continue; }
-				pending.Remove(i);
-				changed = true;
+				if (settle(pending[i])) continue;
+				if (kept != i) pending[kept] = std::move(pending[i]);
+				++kept;
 			}
+			const bool changed = kept != pending.Count();
+			pending.RemoveRange(kept, pending.Count());
 			return changed;
 		}
 	}

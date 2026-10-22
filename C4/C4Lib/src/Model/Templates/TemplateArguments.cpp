@@ -176,6 +176,15 @@ namespace Scripting
 		return given;
 	}
 
+	bool TemplateArgumentResolver::Complete(const TemplateDefinitionNode& params, const TemplateArgs& given)
+	{
+		const uint32 fixed = FixedCount(params);
+		if (given.Count() < fixed) return false;
+		for (uint32 i = 0; i < fixed; ++i)
+			if (!given[i].IsSet()) return false;
+		return true;
+	}
+
 	void TemplateArgumentResolver::BindAll(const ProgramModel& model, Scope* binding, const TemplateDefinitionNode& params, const TemplateArgs& args)
 	{
 		const uint32 fixed = FixedCount(params);

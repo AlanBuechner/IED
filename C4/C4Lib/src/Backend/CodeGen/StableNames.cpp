@@ -1,4 +1,5 @@
 #include "Backend/CodeGen/StableNames.h"
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -11,15 +12,24 @@ namespace Scripting::StableNames
 {
 	namespace
 	{
-		void Append(std::string& out, uint64_t value) { out.append(reinterpret_cast<const char*>(&value), sizeof(value)); }
+		// What a hash is made of: a few words on the stack for most constants.
+		using Bytes = llvm::SmallString<128>;
 
-		void AppendText(std::string& out, llvm::StringRef text)
+		void AppendRaw(Bytes& out, const void* data, size_t size)
 		{
-			Append(out, text.size());
-			out.append(text.data(), text.size());
+			const char* bytes = static_cast<const char*>(data);
+			out.append(bytes, bytes + size);
 		}
 
-		void AppendType(std::string& out, const llvm::Type& type)
+		void Append(Bytes& out, uint64_t value) { AppendRaw(out, &value, sizeof(value)); }
+
+		void AppendText(Bytes& out, llvm::StringRef text)
+		{
+			Append(out, text.size());
+			AppendRaw(out, text.data(), text.size());
+		}
+
+		void AppendType(Bytes& out, const llvm::Type& type)
 		{
 			Append(out, type.getTypeID());
 			if (const auto* integer = llvm::dyn_cast<llvm::IntegerType>(&type)) Append(out, integer->getBitWidth());
@@ -39,21 +49,26 @@ namespace Scripting::StableNames
 		}
 	}
 
-	// The kinds reflection tables are made of are encoded by their parts; any other by its printed form.
-	void ConstantNamer::Append(std::string& out, const llvm::Constant& value)
+	// The kinds reflection tables are made of are encoded by their parts (an aggregate by its elements' hashes); any
+	// other by its printed form. A global is its name, which may change, so only aggregates are remembered.
+	uint64_t ConstantNamer::Hash(const llvm::Constant& value)
 	{
+		const auto* aggregate = llvm::dyn_cast<llvm::ConstantAggregate>(&value);
+		if (aggregate)
+			if (auto known = m_Aggregates.find(&value); known != m_Aggregates.end()) return known->second;
+		Bytes out;
 		StableNames::Append(out, value.getValueID());
-		out += TypeBytes(*value.getType());
+		StableNames::Append(out, TypeHash(*value.getType()));
 		if (const auto* global = llvm::dyn_cast<llvm::GlobalValue>(&value)) AppendText(out, global->getName());
 		else if (const auto* integer = llvm::dyn_cast<llvm::ConstantInt>(&value))
 		{
 			const llvm::APInt& bits = integer->getValue();
-			out.append(reinterpret_cast<const char*>(bits.getRawData()), bits.getNumWords() * sizeof(uint64_t));
+			AppendRaw(out, bits.getRawData(), bits.getNumWords() * sizeof(uint64_t));
 		}
 		else if (const auto* real = llvm::dyn_cast<llvm::ConstantFP>(&value)) StableNames::Append(out, real->getValueAPF().bitcastToAPInt().getZExtValue());
 		else if (const auto* data = llvm::dyn_cast<llvm::ConstantDataSequential>(&value)) AppendText(out, data->getRawDataValues());
-		else if (const auto* aggregate = llvm::dyn_cast<llvm::ConstantAggregate>(&value))
-			for (const llvm::Use& element : aggregate->operands()) Append(out, *llvm::cast<llvm::Constant>(element.get()));
+		else if (aggregate)
+			for (const llvm::Use& element : aggregate->operands()) StableNames::Append(out, Hash(*llvm::cast<llvm::Constant>(element.get())));
 		else if (!llvm::isa<llvm::ConstantPointerNull, llvm::ConstantAggregateZero, llvm::UndefValue>(value))
 		{
 			std::string printed;
@@ -61,6 +76,9 @@ namespace Scripting::StableNames
 			value.print(text);
 			AppendText(out, text.str());
 		}
+		const uint64_t hash = llvm::xxh3_64bits(out.str());
+		if (aggregate) m_Aggregates.emplace(&value, hash);
+		return hash;
 	}
 
 	std::string ForBytes(std::string_view prefix, std::string_view bytes)
@@ -70,18 +88,23 @@ namespace Scripting::StableNames
 		return std::string(prefix) + "." + hash;
 	}
 
-	const std::string& ConstantNamer::TypeBytes(const llvm::Type& type)
+	uint64_t ConstantNamer::TypeHash(const llvm::Type& type)
 	{
 		auto [entry, fresh] = m_Types.try_emplace(&type);
-		if (fresh) AppendType(entry->second, type);
+		if (fresh)
+		{
+			Bytes bytes;
+			AppendType(bytes, type);
+			entry->second = llvm::xxh3_64bits(bytes.str());
+		}
 		return entry->second;
 	}
 
 	std::string ConstantNamer::Name(std::string_view prefix, const llvm::Constant& value)
 	{
-		std::string encoded;
-		Append(encoded, value);
-		return ForBytes(prefix, encoded);
+		char hash[24];
+		snprintf(hash, sizeof(hash), "%016llx", static_cast<unsigned long long>(Hash(value)));
+		return std::string(prefix) + "." + hash;
 	}
 
 	std::string ForConstant(std::string_view prefix, const llvm::Constant& value)

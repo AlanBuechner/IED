@@ -44,6 +44,8 @@ namespace Scripting
 			void (*destroy)(void*);
 		};
 
+		// Most trees are a few hundred bytes: blocks start small and double, up to the largest.
+		static constexpr size_t kFirstBlockBytes = 1024;
 		static constexpr size_t kBlockBytes = 32 * 1024;
 
 		void* Allocate(size_t bytes, size_t align)
@@ -51,7 +53,8 @@ namespace Scripting
 			std::byte* at = AlignUp(m_Next, align);
 			if (!m_Next || at + bytes > m_End)
 			{
-				const size_t size = bytes + align > kBlockBytes ? bytes + align : kBlockBytes;
+				const size_t block = m_Blocks.size() >= 5 ? kBlockBytes : kFirstBlockBytes << m_Blocks.size();
+				const size_t size = bytes + align > block ? bytes + align : block;
 				m_Blocks.push_back(std::make_unique_for_overwrite<std::byte[]>(size));
 				m_Next = m_Blocks.back().get();
 				m_End = m_Next + size;

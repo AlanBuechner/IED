@@ -1538,7 +1538,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 and 2 done).
+  progress (steps 1 to 3 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1571,13 +1571,39 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
   | a constant in a header | 4.66 / 3.42 / 1.90 | 7.08 / 5.18 / 3.44 |
 
   Peak memory of an edit fell from 3.1 GB to 1.6 GB.
-- **Tests:** C4Testing `Compiler.IncludeMerge` (2), `Compiler.ObjectCache.InvalidCodeIsReportedWhenItsPartitionIsAssembled`,
+- **Tests:** C4Testing `Compiler.IncludeMerge` (2),
+  `Compiler.ObjectCache.InvalidCodeIsReportedWhenItsPartitionIsAssembled`,
   `Compiler.ModulePartitions.DataNoFileNamesHasTheFirstPartitionAlone` and `.ExtractsSeeTheProgramAsItWas`,
-  `Script.HostTable.BodiesComeInChunksWithTheirConstants`, `Semantic.SplitEmission` (6); TestCode `-Incremental`
-  (e2e-incremental) builds TestCode in partitions; the IED server's 248 tests pass built in partitions;
-  `Benchmarks/buildspeed` measures C4 against Go and Rust.
-- **Next:** what is left of an edit is serial: HIR lowering (about 0.45 s), the link (0.3 s), the model (0.15 s),
-  parsing and macros (0.2 s).
+  `Script.HostTable.BodiesComeInChunksWithTheirConstants`, `Semantic.SplitEmission` (6),
+  `Script.HostInterface.ASealedInterfaceCarriesItsBuildId`, `Lexer.Undo.Arena.TestPeekedTokensKeepTheirAddresses`;
+  TestCode `-Incremental` (e2e-incremental) builds TestCode in partitions; the IED server's 248 tests pass built in
+  partitions; `Benchmarks/buildspeed` measures C4 against Go and Rust.
+- **Done notes (step 3, profiled):** a sampling profile of no-op builds of the IED server put the serial work in HIR
+  lowering (30% of the samples), the reflection image (12%), the model (9%), writing the output (9%), static state and
+  invoke thunks (6%) and the process teardown (7%). Fixed from it: each lexer default-made 4096 tokens up front and
+  destroyed them all (`TokenArena` is now chunks of 1024 made when reached, which never move, so a token `Peek`
+  returned stays valid while the parser peeks further; the discard and compaction functions, unused and unsound, are gone); a method's
+  record is found from its address instead of a scan (`RecordForMethod`); the model builder settles its pending
+  functions in one pass instead of shifting the list for each; an HIR tree's arena starts at 1 KB and doubles instead
+  of taking 32 KB for every function; the script interface is serialized once and its build id is XXH3's
+  (`SealInterface`) instead of two byte-wise FNV passes; stable constant names hash a constant from its own bytes and
+  its parts' hashes, remembered per aggregate and per type, on the stack; and the template instantiation caches are
+  hash maps, checked before a binding scope is made when the arguments are written in full (`Complete`). The cache and
+  scope work was under 1% of a build: nearly all of a template's cost is making the instance.
+  IED server, 16 threads, `-O3 -g --incremental --script-host` (before / after, the mean of two runs; seconds):
+
+  | Build | Before | After |
+  |---|---|---|
+  | nothing changed | 2.08 | 1.93 |
+  | a statement in one function | 3.37 | 3.21 |
+  | a constant in a header | 3.75 | 3.41 |
+  | the constant back | 3.78 | 3.36 |
+
+  Peak memory of an edit fell from about 2.05 GB to 1.9 GB.
+- **Next:** the reflection image is built after lowering, on partition 0: given a module of its own and the invoke
+  thunk set up front, it can be built while HIR lowering runs (about 0.2 s of every build). HIR lowering itself (about
+  0.6 s) needs a scope chain per lowering context instead of the symbol table's one cursor, a locked type store and
+  instantiation, and errors gathered per function to run on several threads.
 
 ### Testing framework
 

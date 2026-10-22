@@ -64,6 +64,8 @@ namespace Scripting
 		/// that gets no argument.
 		static QueryResult<TemplateArgs> CompleteAndBind(const ProgramModel& model, const TemplateDefinitionNode& params,
 			TemplateArgs given, uint32 unitId, Scope* binding, const Core::String& templateName);
+		/// Whether `given` writes every parameter before the pack, so CompleteAndBind would return it as it is.
+		static bool Complete(const TemplateDefinitionNode& params, const TemplateArgs& given);
 
 		/// Registers `param := arg` in `binding`: a type alias, or a named constant.
 		static void Bind(Scope* binding, const TemplateParameterNode& param, const TemplateArg& arg);

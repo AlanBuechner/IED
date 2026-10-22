@@ -152,4 +152,27 @@ namespace Testing
 		TEST_ASSERT(error.find("cannot read") != std::string::npos);
 		TEST_PASSED();
 	}
+
+	void HostInterfaceTest::ASealedInterfaceCarriesItsBuildId()
+	{
+		HostInterface host = Sample();
+		const std::string bytes = SealInterface(host);
+		HostInterface read;
+		std::string error;
+		TEST_ASSERT(DeserializeInterface(bytes, read, &error));
+		const std::array<uint8, 16> unset{};
+		TEST_ASSERT(read.buildId == host.buildId && host.buildId != unset);
+		TEST_ASSERT(bytes == SerializeInterface(host)); // the bytes are the interface as it now is
+
+		HostInterface again = Sample(); // another starting id seals to the same one: it is not hashed
+		again.buildId[0] ^= 0xFF;
+		SealInterface(again);
+		TEST_ASSERT(again.buildId == host.buildId);
+
+		HostInterface other = Sample();
+		other.symbols.push_back("Plan_0");
+		SealInterface(other);
+		TEST_ASSERT(other.buildId != host.buildId);
+		TEST_PASSED();
+	}
 } // namespace Testing

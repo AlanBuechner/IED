@@ -391,10 +391,10 @@ namespace Scripting
 		std::unordered_map<Core::String, Core::Vector<TemplateDef>> m_FunctionSpecializations; // name -> explicit specializations of function templates
 		mutable std::unordered_map<const FunctionRecord*, const TemplateDef*> m_TemplateOfInstance; // function template instance -> its template (partial ordering)
 		// Lazy caches: populated on first use from const query methods, hence mutable.
-		mutable Core::Vector<std::pair<Core::String, const Type*>> m_TypeInstantiations;        // cache key -> concrete type
+		mutable std::unordered_map<Core::String, const Type*> m_TypeInstantiations;        // cache key -> concrete type
 		mutable Core::Vector<std::pair<const Type*, InstantiationBindings>> m_InstantiationBindings; // concrete type -> bindings
 		mutable Core::Vector<std::pair<const FunctionRecord*, InstantiationBindings>> m_FuncInstantiationBindings; // instantiated free-function record -> its bound params (a free function template has no containingType, so the method path's TypeInstantiationBindings cannot carry them)
-		mutable Core::Vector<std::pair<Core::String, const FunctionRecord*>> m_FunctionInstantiations; // cache key -> record
+		mutable std::unordered_map<Core::String, const FunctionRecord*> m_FunctionInstantiations; // cache key -> record
 		mutable std::unordered_map<const ObjectType*, Core::Vector<const FunctionRecord*>> m_ExtensionMethods;
 		// Extension methods on a primitive receiver (`extends float`), by receiver type: they are in no method list.
 		mutable std::unordered_map<const Type*, Core::Vector<const FunctionRecord*>> m_PrimitiveExtensions;

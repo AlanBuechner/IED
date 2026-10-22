@@ -240,4 +240,18 @@ namespace Testing
 		TEST_ASSERT(remaining[7] == "j");
 		TEST_PASSED();
 	}
+
+	void LexerUndoArenaCorruptionTest::TestPeekedTokensKeepTheirAddresses()
+	{
+		std::string text;
+		for (int i = 0; i < 5000; ++i) text += "t" + std::to_string(i) + " ";
+		auto stream = Scripting::Source::FromMemory(text);
+		Scripting::Lexer lexer(*stream, 0);
+		const Scripting::Token& first = lexer.Peek(0);
+		const Scripting::Token& second = lexer.Peek(1);
+		TEST_ASSERT(lexer.Peek(4500).GetText() == "t4500");
+		TEST_ASSERT(&lexer.Peek(0) == &first && &lexer.Peek(1) == &second);
+		TEST_ASSERT(first.GetText() == "t0" && second.GetText() == "t1");
+		TEST_PASSED();
+	}
 }

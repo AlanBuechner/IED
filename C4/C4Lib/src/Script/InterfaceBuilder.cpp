@@ -84,22 +84,10 @@ namespace Scripting
 			}
 			return definitions;
 		}
-
-		// Two FNV-1a hashes of the interface with different starting points.
-		std::array<uint8, 16> BuildIdOf(const HostInterface& host)
-		{
-			const std::string bytes = SerializeInterface(host);
-			uint64 hashes[2] = { 14695981039346656037ull, 0x6c62272e07bb0142ull };
-			for (uint64& hash : hashes)
-				for (unsigned char c : bytes) { hash ^= c; hash *= 1099511628211ull; }
-			std::array<uint8, 16> id{};
-			for (int i = 0; i < 16; ++i) id[i] = static_cast<uint8>(hashes[i / 8] >> (8 * (i % 8)));
-			return id;
-		}
 	}
 
 	std::optional<HostInterface> BuildInterface(CompilerInstance& compiler, const std::unordered_map<std::string, MacroTable>& exportedMacros,
-		HostBuild build, std::string* error)
+		HostBuild build, std::string* error, std::string* serialized)
 	{
 		const SourceManager& sources = compiler.GetSourceManager();
 		const std::unordered_set<const AstNode*> declaredElsewhere = DeclaredElsewhere(compiler.GetProgramModel());
@@ -134,7 +122,8 @@ namespace Scripting
 		host.reflectedTypes = std::move(build.reflectedTypes);
 		host.debugInfo = build.debugInfo;
 		host.inlineBodies = std::move(build.inlineBodies);
-		host.buildId = BuildIdOf(host);
+		std::string bytes = SealInterface(host);
+		if (serialized) *serialized = std::move(bytes);
 		return host;
 	}
 

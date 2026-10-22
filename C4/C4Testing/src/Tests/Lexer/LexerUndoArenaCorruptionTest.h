@@ -44,5 +44,10 @@ namespace Testing
 		// Mixed Undo and ApplyUndo with lazy allocation at each level.
 		TEST_FUNC(Lexer.Undo.Arena)
 		void TestMixedUndoApply_LazyAllocation();
+
+		// A token Peek returned stays where it is while peeking reads thousands more (the arena grows by chunks that
+		// never move).
+		TEST_FUNC(Lexer.Undo.Arena)
+		void TestPeekedTokensKeepTheirAddresses();
 	};
 }

@@ -1,6 +1,7 @@
 #include "Script/HostInterface.h"
 #include "Compiler/CpuTarget.h"
 #include "Compiler/FileIo.h"
+#include <llvm/Support/xxhash.h>
 #include <cstring>
 #include <iterator>
 
@@ -10,6 +11,7 @@ namespace Scripting
 	{
 		constexpr char kMagic[4] = { 'C', '4', 'I', 'F' };
 		constexpr uint32 kFormatVersion = 4;
+		constexpr size_t kBuildIdOffset = sizeof(kMagic) + sizeof(uint32); // after the magic and the version
 
 		// Little-endian fields: integers of fixed width, strings and lists after their length.
 		class Writer
@@ -233,10 +235,26 @@ namespace Scripting
 		return true;
 	}
 
-	// Through FileIo, so an interface in a deep folder is written and read (BUG-356).
+	std::string SealInterface(HostInterface& host)
+	{
+		host.buildId = {};
+		std::string bytes = SerializeInterface(host);
+		const llvm::XXH128_hash_t hash = llvm::xxh3_128bits(llvm::ArrayRef<uint8_t>(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()));
+		const uint64 halves[2] = { hash.low64, hash.high64 };
+		for (size_t i = 0; i < host.buildId.size(); ++i) host.buildId[i] = static_cast<uint8>(halves[i / 8] >> (8 * (i % 8)));
+		std::memcpy(bytes.data() + kBuildIdOffset, host.buildId.data(), host.buildId.size());
+		return bytes;
+	}
+
 	bool WriteInterface(const HostInterface& host, const std::string& path, std::string* error)
 	{
-		if (!WriteFileBytes(path, SerializeInterface(host))) return Fail(error, "cannot write " + path);
+		return WriteInterfaceBytes(SerializeInterface(host), path, error);
+	}
+
+	// Through FileIo, so an interface in a deep folder is written and read (BUG-356).
+	bool WriteInterfaceBytes(const std::string& bytes, const std::string& path, std::string* error)
+	{
+		if (!WriteFileBytes(path, bytes)) return Fail(error, "cannot write " + path);
 		return true;
 	}
 

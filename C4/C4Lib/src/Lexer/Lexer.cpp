@@ -11,7 +11,7 @@ namespace Scripting
 	// -----------------------------------------------------------------------
 
 	Lexer::Lexer(Source& source, uint32 sourceId)
-		: m_Source(source), m_SourceId(sourceId), m_SourceData(source.Data()), m_Arena(4096)
+		: m_Source(source), m_SourceId(sourceId), m_SourceData(source.Data())
 	{
 	}
 
@@ -173,8 +173,6 @@ namespace Scripting
 	{
 		SkipWhitespace();
 		Token* slot = m_Arena.Alloc();
-		if (!slot)
-			return nullptr;
 
 		const size_t start = m_Source.GetReadPosition();
 		slot->SetByteOffset(start);

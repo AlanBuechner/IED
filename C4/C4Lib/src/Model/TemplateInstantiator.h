@@ -31,11 +31,15 @@ namespace Scripting
 		/// lowering record. An extension template's record has `receiver` (the extended type) as receiver.
 		QueryResult<const FunctionRecord*> InstantiateFunction(const ProgramModel& model, const ProgramModel::TemplateDef& def,
 			const Core::String& name, const TemplateArgs& args, Scope* binding, const Type* receiver, uint32 unitId) const;
+		/// The instance of the function template `def` (not an extension) for complete `args` made before, or null.
+		const FunctionRecord* MadeFunction(const ProgramModel& model, const ProgramModel::TemplateDef& def, const Core::String& name,
+			const TemplateArgs& args) const;
 
 		/// The type template `name` a use in `declScope` names: the one declared innermost on its lookup chain.
 		const ProgramModel::TemplateDef* ChooseTypeDefinition(const ProgramModel& model, const Core::String& name, const Scope* declScope) const;
 
 	private:
+		static Core::String FunctionKey(const Core::String& name, const ProgramModel::TemplateDef& def, const TemplateArgs& args, const Type* receiver);
 		static Scope* BodyParent(const ProgramModel& model, const ProgramModel::TemplateDef& def);
 		static bool DeclaredIn(const ProgramModel::TemplateDef& def, const Scope* s);
 		/// `def` is the definition whose body builds the instance (the primary or a specialization) and `args`
