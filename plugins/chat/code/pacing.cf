@@ -1,0 +1,147 @@
+include "api/plugin.ch"
+include "pacing.ch"
+
+namespace Ai
+{
+	static const char* StateName(PlaceState state) { return state == PlaceState::Use ? "use" : state == PlaceState::Over ? "over" : "used_up"; }
+
+	static Core::String Number(double value) {
+		Core::StringBuilder out;
+		out.AppendDouble(value, 2);
+		return out.ToString();
+	}
+
+	ChainPlace* PlaceNow(const ModelProfile& profile, const PaceLimit& pace, bool pinned, const ClaudeAccount& account, int64 nowMs) {
+		ChainPlace* place = new ChainPlace();
+		place->model = profile.name;
+		place->claude = profile.IsClaude();
+		place->pace = pace;
+		place->state = PlaceState::Use;
+		if (!profile.IsClaude()) return place;
+		const int64 blocked = account.BlockedUntil(nowMs);
+		UsageWindow* own = ModelWindow(account.usage, profile.model.View());
+		if (blocked > 0) {
+			place->state = PlaceState::UsedUp;
+			place->why = Core::String("the plan's usage is used up; it frees ") + ResetText(blocked, nowMs).View();
+		}
+		else if (own && UsedUp(*own, nowMs)) {
+			place->state = PlaceState::UsedUp;
+			place->why = (own->label + " is used up; it frees ") + ResetText(own->resetsAtMs, nowMs).View();
+		}
+		else if (!pinned && pace.max > 0) {
+			Core::String why;
+			const double now = PaceAgainst(account.usage, profile.model.View(), pace.target.View(), nowMs, why);
+			if (now > pace.max) {
+				place->state = PlaceState::Over;
+				place->over = now / pace.max;
+				place->why = (why + ", over its ") + Number(pace.max).View() + "x";
+			}
+		}
+		return place;
+	}
+
+	Core::Array<ChainPlace*> TurnOrder(const Core::Array<ChainPlace*>& places) {
+		Core::Array<ChainPlace*> ordered;
+		for (ChainPlace* place : places)
+			if (place->state == PlaceState::Use) ordered.Push(place);
+		const int64 used = ordered.Count();
+		for (ChainPlace* place : places) {
+			if (place->state != PlaceState::Over) continue;
+			int64 at = ordered.Count();
+			while (at > used && ordered[at - 1]->over > place->over) at -= 1;
+			ordered.Insert(at, place);
+		}
+		return ordered;
+	}
+
+	static RoleChain* ChainOf(const Core::Array<ModelProfile*>& models, const RoleModel& role, const ClaudeAccount& account, int64 nowMs) {
+		RoleChain* chain = new RoleChain();
+		for (int64 i = -1; i < role.fallback.Count(); ++i) {
+			ModelProfile* profile = FindModel(models, i < 0 ? role.model.View() : role.fallback[i].View());
+			if (profile) chain->places.Push(PlaceNow(*profile, i < 0 ? role.pace : role.fallbackPaces[i], false, account, nowMs));
+		}
+		Core::Array<ChainPlace*> order = TurnOrder(chain->places);
+		if (!order.IsEmpty()) chain->now = order[0]->model;
+		return chain;
+	}
+
+	static bool HasClaude(const RoleChain* chain) {
+		for (const ChainPlace* place : chain->places)
+			if (place->claude) return true;
+		return false;
+	}
+
+	Core::Array<RoleChain*> ClaudeChains(const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, const ClaudeAccount& account, int64 nowMs) {
+		Core::Array<RoleChain*> chains;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode groups = Serialization::ReadJson(groupsJson, *doc).root;
+		for (int64 g = 0; groups.Kind() == Serialization::DomKind::Object && g < groups.Count(); ++g) {
+			Serialization::DomNode roles = groups.ValueAt(g);
+			for (int64 r = 0; roles.Kind() == Serialization::DomKind::Object && r < roles.Count(); ++r) {
+				RoleModel role;
+				if (!ReadRole(groupsJson, groups.KeyAt(g), roles.KeyAt(r), role)) continue;
+				RoleChain* chain = ChainOf(models, role, account, nowMs);
+				if (!HasClaude(chain)) continue;
+				chain->group = Core::String(groups.KeyAt(g));
+				chain->role = Core::String(roles.KeyAt(r));
+				chains.Push(chain);
+			}
+		}
+		return chains;
+	}
+
+	void WriteChains(IED::JsonWriter& json, const Core::Array<RoleChain*>& chains) {
+		json.BeginArray();
+		for (const RoleChain* chain : chains) {
+			json.BeginObject();
+			json.Field("group", chain->group.View());
+			json.Field("role", chain->role.View());
+			json.Field("now", chain->now.View());
+			json.Key(Core::StringView("places"));
+			json.BeginArray();
+			for (const ChainPlace* place : chain->places) {
+				json.BeginObject();
+				json.Field("model", place->model.View());
+				json.BoolField("claude", place->claude);
+				if (place->pace.max > 0) {
+					json.Key(Core::StringView("pace"));
+					json.BeginObject();
+					json.RawField("max", Number(place->pace.max).View());
+					json.Field("target", place->pace.target.View());
+					json.EndObject();
+				}
+				json.Field("state", StateName(place->state));
+				if (!place->why.IsEmpty()) json.Field("why", place->why.View());
+				json.EndObject();
+			}
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	Core::String ChainText(const RoleChain& chain) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < chain.places.Count(); ++i) {
+			const ChainPlace* place = chain.places[i];
+			if (i > 0) out.Append(" > ");
+			out.Append(place->model.View());
+			if (place->pace.max > 0) {
+				out.Append(" (pace up to ");
+				out.Append(Number(place->pace.max).View());
+				out.Append("x, ");
+				out.Append(place->pace.target.View());
+				out.Append(")");
+			}
+			if (place->state != PlaceState::Use) {
+				out.Append(place->state == PlaceState::Over ? Core::StringView(" [over: ") : Core::StringView(" [used up: "));
+				out.Append(place->why.View());
+				out.Append("]");
+			}
+		}
+		out.Append(" - a turn uses ");
+		out.Append(chain.now.IsEmpty() ? Core::StringView("none (Claude is used up)") : chain.now.View());
+		out.Append(" now");
+		return out.ToString();
+	}
+}

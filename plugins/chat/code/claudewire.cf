@@ -1,5 +1,6 @@
 include "api/plugin.ch"
 include "claudewire.ch"
+include "models.ch"
 
 namespace Ai
 {
@@ -281,8 +282,6 @@ namespace Ai
 		return out.ToString();
 	}
 
-	static double RungLimit(int64 rung) { return rung == 0 ? 1.0 : rung == 1 ? 1.25 : 1.5; }
-
 	// The windows that pace `model` under `target`.
 	static Core::Array<UsageWindow*> PacedWindows(const ClaudeUsage& usage, Core::StringView model, Core::StringView target) {
 		Core::Array<UsageWindow*> windows;
@@ -304,55 +303,19 @@ namespace Ai
 		return out.ToString();
 	}
 
-	PacedChoice ChoosePaced(const ClaudeUsage& usage, const Core::Array<Core::String>& ladder, Core::StringView target, int64 nowMs) {
-		PacedChoice choice;
-		if (ladder.IsEmpty()) {
-			choice.model = Core::String("default");
-			choice.why = Core::String("no ladder: the CLI's default model");
-			return choice;
+	double PaceAgainst(const ClaudeUsage& usage, Core::StringView model, Core::StringView target, int64 nowMs, Core::String& why) {
+		why = Core::String();
+		if (!usage.known || !usage.available) return 0.0;
+		double worst = 0.0;
+		UsageWindow* worstWindow = nullptr;
+		for (UsageWindow* window : PacedWindows(usage, model, target)) {
+			const double pace = Pace(*window, nowMs);
+			if (worstWindow && pace <= worst) continue;
+			worst = pace;
+			worstWindow = window;
 		}
-		if (!usage.known || !usage.available) {
-			choice.model = ladder[0];
-			choice.why = Core::String("the plan's usage is not known yet");
-			return choice;
-		}
-		for (UsageWindow* window : usage.windows) {
-			if (!window->model.IsEmpty() || !UsedUp(*window, nowMs)) continue;
-			choice.untilMs = window->resetsAtMs > choice.untilMs ? window->resetsAtMs : choice.untilMs;
-			choice.why = (Core::String("the plan's ") + (window->id == "five_hour" ? Core::StringView("5-hour session") : Core::StringView("week"))) + " is used up";
-		}
-		if (choice.untilMs > 0 || !choice.why.IsEmpty()) return choice;
-		int64 fallback = -1;
-		Core::String fallbackWhy;
-		for (int64 rung = 0; rung < ladder.Count(); ++rung) {
-			UsageWindow* own = ModelWindow(usage, ladder[rung].View());
-			if (own && UsedUp(*own, nowMs)) continue;
-			double worst = 0.0;
-			UsageWindow* worstWindow = nullptr;
-			for (UsageWindow* window : PacedWindows(usage, ladder[rung].View(), target)) {
-				const double pace = Pace(*window, nowMs);
-				if (worstWindow && pace <= worst) continue;
-				worst = pace;
-				worstWindow = window;
-			}
-			Core::String why = worstWindow ? PaceText(worstWindow, worst) : Core::String("no window paces it");
-			if (worst <= RungLimit(rung)) {
-				choice.model = ladder[rung];
-				choice.rung = rung;
-				choice.why = why;
-				return choice;
-			}
-			fallback = rung;
-			fallbackWhy = why;
-		}
-		if (fallback < 0) {
-			choice.why = Core::String("every model of the ladder has used up its week");
-			return choice;
-		}
-		choice.model = ladder[fallback];
-		choice.rung = fallback;
-		choice.why = fallbackWhy;
-		return choice;
+		if (worstWindow) why = PaceText(worstWindow, worst);
+		return worst;
 	}
 
 	// --- A response ------------------------------------------------------------------------------------------------------
@@ -622,14 +585,15 @@ namespace Ai
 
 	// --- Setting Claude up ----------------------------------------------------------------------------------------------
 
-	const int64 kClaudeProfileCount = 5;
-	const char*[5] kClaudeProfileNames = { "claude-auto", "claude-fable", "claude-opus", "claude-sonnet", "claude-haiku" };
-	const char*[5] kClaudeProfiles = {
-		"{\"provider\":\"claude-code\",\"model\":\"auto\",\"pacing\":{\"ladder\":[\"opus\",\"sonnet\",\"haiku\"],\"target\":\"both\"}}",
-		"{\"provider\":\"claude-code\",\"model\":\"fable\"}",
+	const int64 kClaudeProfileCount = 4;
+	const char*[4] kClaudeProfileNames = { "claude-opus", "claude-sonnet", "claude-haiku", "claude-fable" };
+	const char*[4] kClaudeProfiles = {
 		"{\"provider\":\"claude-code\",\"model\":\"opus\"}",
 		"{\"provider\":\"claude-code\",\"model\":\"sonnet\"}",
-		"{\"provider\":\"claude-code\",\"model\":\"haiku\"}" };
+		"{\"provider\":\"claude-code\",\"model\":\"haiku\"}",
+		"{\"provider\":\"claude-code\",\"model\":\"fable\"}" };
+	// The pace each place of a ladder (the setup's chain, an old `auto` profile's) is used to, strongest first.
+	static double RungLimit(int64 rung) { return rung == 0 ? 1.0 : rung == 1 ? 1.25 : 1.5; }
 
 	static Serialization::DomNode ParsedValue(Core::StringView json) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
@@ -658,6 +622,69 @@ namespace Ai
 		return Core::String();
 	}
 
+	static PaceLimit Limit(double max, Core::StringView target) {
+		PaceLimit pace;
+		pace.max = max;
+		pace.target = Core::String(target);
+		return pace;
+	}
+
+	// `model` as the next place of `role`'s chain, unless it has a place already.
+	static void Place(RoleModel& role, Core::StringView model, const PaceLimit& pace) {
+		if (role.model.IsEmpty()) {
+			role.model = Core::String(model);
+			role.pace = pace;
+			return;
+		}
+		if (role.model.View() == model) return;
+		for (const Core::String& name : role.fallback)
+			if (name.View() == model) return;
+		role.fallback.Push(Core::String(model));
+		role.fallbackPaces.Push(pace);
+	}
+
+	static void WritePace(IED::JsonWriter& json, const PaceLimit& pace) {
+		Core::StringBuilder out;
+		out.Append("{\"max\": ");
+		out.AppendDouble(pace.max, 2);
+		out.Append(", \"target\": \"");
+		out.Append(pace.target.View());
+		out.Append("\"}");
+		json.Raw(out.View());
+	}
+
+	static void WriteRole(IED::JsonWriter& json, const RoleModel& role) {
+		json.BeginObject();
+		json.Field("model", role.model.View());
+		if (role.pace.max > 0) {
+			json.Key(Core::StringView("pace"));
+			WritePace(json, role.pace);
+		}
+		if (role.hasTemperature) {
+			Core::StringBuilder temperature;
+			temperature.AppendDouble(role.temperature, 2);
+			json.RawField("temperature", temperature.View());
+		}
+		if (!role.effort.IsEmpty()) json.Field("effort", role.effort.View());
+		if (!role.fallback.IsEmpty()) {
+			json.Key(Core::StringView("fallback"));
+			json.BeginArray();
+			for (int64 i = 0; i < role.fallback.Count(); ++i) {
+				if (role.fallbackPaces[i].max <= 0) {
+					json.String(role.fallback[i].View());
+					continue;
+				}
+				json.BeginObject();
+				json.Field("model", role.fallback[i].View());
+				json.Key(Core::StringView("pace"));
+				WritePace(json, role.fallbackPaces[i]);
+				json.EndObject();
+			}
+			json.EndArray();
+		}
+		json.EndObject();
+	}
+
 	void WithClaudeModels(Core::StringView models, Core::StringView groups, Core::StringView defaultGroup, Core::String& modelsOut, Core::String& groupsOut) {
 		Serialization::DomNode oldModels = ParsedValue(models);
 		Serialization::DomNode oldGroups = ParsedValue(groups);
@@ -672,23 +699,110 @@ namespace Ai
 		out.BeginObject();
 		for (int64 i = 0; oldGroups.Kind() == Serialization::DomKind::Object && i < oldGroups.Count(); ++i) out.RawField(Core::String(oldGroups.KeyAt(i)).CStr(), IED::NodeJson(oldGroups.ValueAt(i)).View());
 		if (!oldGroups.Member("claude").IsValid()) {
+			RoleModel primary;
+			for (int64 rung = 0; rung < 3; ++rung) Place(primary, Core::StringView(kClaudeProfileNames[rung]), Limit(RungLimit(rung), Core::StringView("both")));
 			Core::String fallback = ClaudeFallback(oldModels, oldGroups, defaultGroup);
+			if (!fallback.IsEmpty()) Place(primary, fallback.View(), PaceLimit());
 			out.Key(Core::StringView("claude"));
 			out.BeginObject();
 			out.Key(Core::StringView("primary"));
-			out.BeginObject();
-			out.Field("model", "claude-auto");
-			if (!fallback.IsEmpty()) {
-				out.Key(Core::StringView("fallback"));
-				out.BeginArray();
-				out.String(fallback.View());
-				out.EndArray();
-			}
-			out.EndObject();
+			WriteRole(out, primary);
 			out.EndObject();
 		}
 		out.EndObject();
 		groupsOut = out.ToString();
+	}
+
+	static bool IsAutoEntry(const Serialization::DomNode& entry) { return IsClaudeEntry(entry) && entry.Member("model").AsView() == "auto"; }
+
+	// An `auto` profile's ladder, strongest first: opus, sonnet, haiku when it names none.
+	static Core::Array<Core::String> LadderOf(const Serialization::DomNode& entry) {
+		Core::Array<Core::String> ladder;
+		Serialization::DomNode rungs = entry.Member("pacing").Member("ladder");
+		for (int64 i = 0; rungs.Kind() == Serialization::DomKind::Array && i < rungs.Count(); ++i)
+			if (!rungs.At(i).AsView().IsEmpty()) ladder.Push(Core::String(rungs.At(i).AsView()));
+		if (!ladder.IsEmpty()) return ladder;
+		ladder.Push(Core::String("opus"));
+		ladder.Push(Core::String("sonnet"));
+		ladder.Push(Core::String("haiku"));
+		return ladder;
+	}
+
+	// The claude-code profile of `models` whose model is `rungModel`, else claude-<rungModel>.
+	static Core::String RungProfile(const Serialization::DomNode& models, Core::StringView rungModel) {
+		for (int64 i = 0; models.Kind() == Serialization::DomKind::Object && i < models.Count(); ++i)
+			if (IsClaudeEntry(models.ValueAt(i)) && models.ValueAt(i).Member("model").AsView() == rungModel) return Core::String(models.KeyAt(i));
+		return Core::String("claude-") + rungModel;
+	}
+
+	// `role` with each place that names an `auto` profile of `models` replaced by its ladder.
+	static RoleModel WithoutAuto(const RoleModel& role, const Serialization::DomNode& models) {
+		RoleModel next;
+		next.temperature = role.temperature;
+		next.hasTemperature = role.hasTemperature;
+		next.effort = role.effort;
+		for (int64 i = -1; i < role.fallback.Count(); ++i) {
+			Core::StringView name = i < 0 ? role.model.View() : role.fallback[i].View();
+			const PaceLimit pace = i < 0 ? role.pace : role.fallbackPaces[i];
+			Core::String key = Core::String(name);
+			Serialization::DomNode entry = models.Member(key.CStr());
+			if (!IsAutoEntry(entry)) {
+				Place(next, name, pace);
+				continue;
+			}
+			Core::StringView target = entry.Member("pacing").Member("target").AsView();
+			Core::Array<Core::String> ladder = LadderOf(entry);
+			for (int64 rung = 0; rung < ladder.Count(); ++rung)
+				Place(next, RungProfile(models, ladder[rung].View()).View(), Limit(RungLimit(rung), target == "session" || target == "week" ? target : Core::StringView("both")));
+		}
+		return next;
+	}
+
+	bool WithoutAutoProfiles(Core::StringView models, Core::StringView groups, Core::String& modelsOut, Core::String& groupsOut) {
+		Serialization::DomNode oldModels = ParsedValue(models);
+		bool any = false;
+		for (int64 i = 0; oldModels.Kind() == Serialization::DomKind::Object && i < oldModels.Count(); ++i) any = any || IsAutoEntry(oldModels.ValueAt(i));
+		if (!any) return false;
+		IED::JsonWriter json;
+		json.BeginObject();
+		Core::Array<Core::String> added;
+		for (int64 i = 0; oldModels.Kind() == Serialization::DomKind::Object && i < oldModels.Count(); ++i) {
+			if (!IsAutoEntry(oldModels.ValueAt(i))) {
+				json.RawField(Core::String(oldModels.KeyAt(i)).CStr(), IED::NodeJson(oldModels.ValueAt(i)).View());
+				continue;
+			}
+			for (const Core::String& rungModel : LadderOf(oldModels.ValueAt(i))) {
+				Core::String name = RungProfile(oldModels, rungModel.View());
+				if (oldModels.Member(name.CStr()).IsValid() || added.Contains(name)) continue;
+				added.Push(name);
+				json.Key(name.View());
+				json.BeginObject();
+				json.Field("provider", "claude-code");
+				json.Field("model", rungModel.View());
+				json.EndObject();
+			}
+		}
+		json.EndObject();
+		modelsOut = json.ToString();
+		Serialization::DomNode oldGroups = ParsedValue(groups);
+		IED::JsonWriter out;
+		out.BeginObject();
+		for (int64 g = 0; oldGroups.Kind() == Serialization::DomKind::Object && g < oldGroups.Count(); ++g) {
+			Core::String group = Core::String(oldGroups.KeyAt(g));
+			Serialization::DomNode roles = oldGroups.ValueAt(g);
+			out.Key(group.View());
+			out.BeginObject();
+			for (int64 r = 0; roles.Kind() == Serialization::DomKind::Object && r < roles.Count(); ++r) {
+				RoleModel role;
+				out.Key(roles.KeyAt(r));
+				if (ReadRole(groups, group.View(), roles.KeyAt(r), role)) WriteRole(out, WithoutAuto(role, oldModels));
+				else out.Raw(IED::NodeJson(roles.ValueAt(r)).View());
+			}
+			out.EndObject();
+		}
+		out.EndObject();
+		groupsOut = out.ToString();
+		return true;
 	}
 
 	// --- The history a new session is told -------------------------------------------------------------------------------

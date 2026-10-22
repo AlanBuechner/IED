@@ -31,6 +31,9 @@ namespace Ai
 		// state folder - unless `force` (Add Claude models, a sign-in). True when it wrote them; false with `problem` when it
 		// could not, and with none when there was nothing to do. Any thread, without the host lock.
 		public bool Setup(bool force, Core::String& problem);
+		// The first pacing design's `model: "auto"` profiles in the app settings rewritten into ai.groups (WithoutAutoProfiles).
+		// Any thread, without the host lock.
+		public void MigrateAuto();
 		// Inside the host lock: a session's get_usage answer, a rate_limit_event's rate_limit_info.
 		public void TookUsage(const Serialization::DomNode& response);
 		public void TookRateLimit(const Serialization::DomNode& info);
@@ -41,7 +44,7 @@ namespace Ai
 		// Inside the host lock: when Claude's shared windows are used up until, or 0 when they are not.
 		public int64 BlockedUntil(int64 nowMs) const;
 		// {claude: {offered, configured, cli: {asked, path, version, signIn, authMethod, subscription, signingIn, installing},
-		// refreshing, blockedUntilMs, nowMs, paced: [{profile, target, ladder, model, why, untilMs}], usage: WriteUsage}}
+		// refreshing, blockedUntilMs, nowMs, chains: WriteChains, usage: WriteUsage}}
 		public Core::String SnapshotJson();
 		// Whether ai.models names a claude-code profile.
 		public bool Configured() const;

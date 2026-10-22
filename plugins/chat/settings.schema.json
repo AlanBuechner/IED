@@ -8,10 +8,10 @@
 			"properties": {
 				"provider": { "enum": ["openai", "claude-code"], "default": "openai", "description": "What serves it: an OpenAI-compatible endpoint, or your own signed-in Claude Code CLI on your Claude subscription (docs/04 The Claude Code provider; never an API key)." },
 				"endpoint": { "type": "string", "pattern": "^http://", "description": "An OpenAI-compatible base URL: http://127.0.0.1:8080/v1 (llama.cpp, vLLM, LM Studio, Ollama's /v1). Not for claude-code." },
-				"model": { "type": "string", "description": "The model id a request names; the profile's name when unset. For claude-code: opus, sonnet, haiku, fable, a full id, or auto (pacing picks per turn); default: the CLI's." },
+				"model": { "type": "string", "description": "The model id a request names; the profile's name when unset. For claude-code: opus, sonnet, haiku, fable or a full id; default: the CLI's. Which Claude model a turn uses as the plan runs ahead of pace is a group's chain (ai.groups, docs/04 Pacing)." },
 				"pacing": {
 					"type": "object",
-					"description": "claude-code with model auto: the models to pick from, strongest first, and the plan's windows to pace against (docs/04 Pacing).",
+					"description": "Gone with model auto (the first pacing design): the server moves it into ai.groups once, as paced places of each role that named the profile (docs/04 Pacing).",
 					"properties": {
 						"ladder": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "default": ["opus", "sonnet", "haiku"] },
 						"target": { "enum": ["session", "week", "both"], "default": "both", "description": "session: spend each 5-hour window fully; week: stretch the weekly limit across the week; both: the stricter of the two." }
@@ -57,13 +57,33 @@
 			],
 			"additionalProperties": false
 		},
+		"pace": {
+			"type": "object",
+			"description": "A Claude model's place is used while the plan's pace against target is at most max; over it, a turn goes on down the chain (docs/04 Pacing). Left out: always.",
+			"properties": {
+				"max": { "type": "number", "exclusiveMinimum": 0, "description": "1.0 runs out exactly at the reset; 1.25 spends a quarter faster." },
+				"target": { "enum": ["session", "week", "both"], "default": "both", "description": "session: spend each 5-hour window fully; week: stretch the weekly limit across the week; both: the stricter of the two." }
+			},
+			"required": ["max"],
+			"additionalProperties": false
+		},
 		"role": {
 			"type": "object",
 			"properties": {
 				"model": { "type": "string", "minLength": 1 },
+				"pace": { "$ref": "#/$defs/pace" },
 				"temperature": { "type": "number", "minimum": 0, "maximum": 2 },
 				"effort": { "enum": ["low", "medium", "high"] },
-				"fallback": { "type": "array", "items": { "type": "string" } }
+				"fallback": {
+					"type": "array",
+					"description": "Tried in order after the role's model: a model's name, or {model, pace} for a Claude model used only while on pace.",
+					"items": {
+						"anyOf": [
+							{ "type": "string", "minLength": 1 },
+							{ "type": "object", "properties": { "model": { "type": "string", "minLength": 1 }, "pace": { "$ref": "#/$defs/pace" } }, "required": ["model"], "additionalProperties": false }
+						]
+					}
+				}
 			},
 			"required": ["model"],
 			"additionalProperties": false
@@ -83,7 +103,7 @@
 			"default": {},
 			"x-ied-tiers": ["app"],
 			"x-ied-merge": "merge",
-			"description": "Model groups by name: per role (primary, planning, worker, summarizer, ...) a model, temperature, effort and fallbacks (docs/04 Model groups).",
+			"description": "Model groups by name: per role (primary, planning, implementation, worker, summarizer, ...) a model, temperature, effort and fallbacks; a Claude model in a chain may have a pace. A chat's mode picks the role: Ask primary, Plan planning, Agent implementation; a role left off is primary (docs/04 Model groups, Pacing).",
 			"additionalProperties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/role" } }
 		},
 		"ai.defaultGroup": {

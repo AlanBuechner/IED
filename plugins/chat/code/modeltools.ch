@@ -8,6 +8,7 @@ include "service.ch"
 namespace Ai
 {
 	void AddModelTools(ToolRegistry& registry, Chats* chats, Chat* chat);
-	// ai_usage's text: the plan's windows, the CLI's sign-in, each profile and pacing's pick for the paced ones.
-	Core::String UsageText(const ClaudeAccount& account, const Core::Array<ModelProfile*>& models, int64 nowMs);
+	// ai_usage's text: the plan's windows, the CLI's sign-in, each profile, and each chain of `groupsJson` (ai.groups) with a
+	// Claude model as pacing has it now.
+	Core::String UsageText(const ClaudeAccount& account, const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, int64 nowMs);
 }

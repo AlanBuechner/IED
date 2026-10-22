@@ -2,6 +2,7 @@ include "api/plugin.ch"
 include "run.ch"
 include "effort.ch"
 include "images.ch"
+include "pacing.ch"
 
 namespace Ai
 {
@@ -19,46 +20,25 @@ namespace Ai
 
 	Core::String TurnRun::ChooseClaude() {
 		const int64 now = ClaudeNowMs();
-		ClaudeAccount* account = chats->claude;
-		Core::Array<ModelProfile*> kept;
-		Core::String out;
-		for (ModelProfile* profile : candidates) {
-			if (!profile->IsClaude()) {
-				kept.Push(profile);
-				continue;
-			}
-			Core::String why;
-			const int64 blocked = account->BlockedUntil(now);
-			if (blocked > 0) why = Core::String("the plan's usage is used up; it frees ") + ResetText(blocked, now).View();
-			else if (profile->IsPaced()) {
-				PacedChoice choice = ChoosePaced(account->usage, profile->ladder, profile->pacingTarget.View(), now);
-				if (choice.model.IsEmpty()) why = choice.why + (choice.untilMs > 0 ? (Core::String("; it frees ") + ResetText(choice.untilMs, now).View()) : Core::String());
-				else {
-					claudePicks.At(profile->name) = choice.model;
-					if (kept.IsEmpty()) UiNote(Core::StringView("routing"), ((((profile->name + ": ") + choice.model.View()) + " (") + choice.why.View() + ")").View());
-				}
-			}
-			else {
-				UsageWindow* own = ModelWindow(account->usage, profile->model.View());
-				if (own && UsedUp(*own, now)) why = ((own->label + " is used up; it frees ") + ResetText(own->resetsAtMs, now).View());
-			}
-			if (why.IsEmpty()) {
-				kept.Push(profile);
-				continue;
-			}
-			out = why;
-			UiNote(Core::StringView("routing"), ((profile->name + " left out: ") + why.View()).View());
+		Core::Array<ChainPlace*> places;
+		for (int64 i = 0; i < candidates.Count(); ++i) {
+			ModelProfile* profile = candidates[i];
+			const bool pinned = i == 0 && profile->name == chat->pinnedModel;
+			places.Push(PlaceNow(*profile, role.PaceOf(profile->name.View()), pinned, *chats->claude, now));
 		}
+		Core::String out;
+		for (const ChainPlace* place : places) {
+			if (place->state == PlaceState::Use) continue;
+			out = place->why;
+			UiNote(Core::StringView("routing"), ((place->model + (place->state == PlaceState::Over ? " skipped for pace: " : " left out: ")) + place->why.View()).View());
+		}
+		Core::Array<ModelProfile*> kept;
+		for (const ChainPlace* place : TurnOrder(places)) kept.Push(FindModel(candidates, place->model.View()));
 		candidates = kept;
 		return candidates.IsEmpty() ? out : Core::String();
 	}
 
-	Core::String TurnRun::ClaudeModel() const {
-		ModelProfile* profile = candidates[candidate];
-		Core::String picked;
-		if (profile->IsPaced() && claudePicks.TryGet(profile->name, picked)) return picked;
-		return profile->IsPaced() && !profile->ladder.IsEmpty() ? profile->ladder[0] : profile->model;
-	}
+	Core::String TurnRun::ClaudeModel() const { return candidates[candidate]->model; }
 
 	// --- The session -----------------------------------------------------------------------------------------------------
 

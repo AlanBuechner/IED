@@ -2,7 +2,7 @@
 // and color from the aiusage snapshot, a window's line, when a window frees, and the step that sets Claude up.
 
 import { test, assertEqual } from "./harness.js";
-import { CLAUDE_PROFILE_NAMES, onSubscription, resetText, setupStep, usageStatus, windowLine } from "/plugins/ied.chat/ui/claudeusage.js";
+import { CLAUDE_PROFILE_NAMES, chainLine, onSubscription, resetText, setupStep, usageStatus, windowLine } from "/plugins/ied.chat/ui/claudeusage.js";
 import { ChatModel } from "/plugins/ied.chat/ui/chatmodel.js";
 
 const NOW = 1761150000000;
@@ -10,7 +10,7 @@ const HOUR = 3600000;
 
 function claude(windows, extra) {
 	return Object.assign({
-		configured: true, nowMs: NOW, blockedUntilMs: 0, paced: [],
+		configured: true, nowMs: NOW, blockedUntilMs: 0, chains: [],
 		cli: { path: "C:/claude.exe", version: "2.1.304", signIn: "signed_in", authMethod: "claude.ai", subscription: true },
 		usage: { known: true, available: true, plan: "max", status: "allowed", windows },
 	}, extra || {});
@@ -40,8 +40,13 @@ test("claude: the status bar says the session and the week", () => {
 	const spent = usageStatus(claude([window("five_hour", "Session (5 h)", 100, 2, { usedUp: true })], { blockedUntilMs: NOW + HOUR }));
 	assertEqual(spent.level, "error");
 	assertEqual(spent.tooltip.includes("Used up; Claude frees in 1 h 0 min"), true);
-	const paced = usageStatus(claude([window("seven_day", "Week", 60, 1.2)], { paced: [{ profile: "claude-auto", model: "sonnet", why: "the week is at 1.20x pace" }] }));
-	assertEqual(paced.tooltip.includes("claude-auto picks sonnet now (the week is at 1.20x pace)"), true);
+	const chain = { group: "claude", role: "primary", now: "claude-sonnet", places: [
+		{ model: "claude-opus", claude: true, pace: { max: 1, target: "both" }, state: "over", why: "the week is at 1.20x pace, over its 1.00x" },
+		{ model: "claude-sonnet", claude: true, pace: { max: 1.25, target: "both" }, state: "use" },
+		{ model: "qwen", claude: false, state: "use" }] };
+	const paced = usageStatus(claude([window("seven_day", "Week", 60, 1.2)], { chains: [chain] }));
+	assertEqual(paced.tooltip.includes("claude / primary: claude-sonnet now (claude-opus over its pace)"), true);
+	assertEqual(chainLine(Object.assign({}, chain, { now: "", places: [{ model: "claude-opus", state: "used_up" }] })), "claude / primary: nothing now (claude-opus used up)");
 });
 
 test("claude: only a subscription sign-in runs Claude", () => {
@@ -65,8 +70,8 @@ test("claude: a chat set up after its snapshot shows the model its turns use", (
 	const model = new ChatModel();
 	model.snapshot({ chatId: "c1", title: "Hello", mode: "agent", state: "idle", model: "", groupInUse: "", tasks: [], queued: [], modified: [], context: null, turns: [], pendingApprovals: [], pendingQuestion: null });
 	assertEqual(model.model, "", "no model when the snapshot was taken");
-	model.event("turn.start", { turnId: "u2", mode: "agent", model: "claude-auto", group: "claude", user: { text: "hi" } });
-	assertEqual([model.model, model.groupInUse], ["claude-auto", "claude"]);
+	model.event("turn.start", { turnId: "u2", mode: "agent", model: "claude-sonnet", group: "claude", user: { text: "hi" } });
+	assertEqual([model.model, model.groupInUse], ["claude-sonnet", "claude"]);
 });
 
 test("claude: the one step that sets Claude up", () => {
@@ -80,5 +85,5 @@ test("claude: the one step that sets Claude up", () => {
 	assertEqual(setupStep(claude([], { cli: cli({ authMethod: "api_key", subscription: false }) })), "sign_in", "an API key is no sign-in");
 	assertEqual(setupStep(claude([], { cli: cli({ signingIn: true, subscription: false }) })), "signing_in");
 	assertEqual(setupStep(claude([], { cli: cli({}) })), "ready");
-	assertEqual(CLAUDE_PROFILE_NAMES.includes("claude-auto"), true);
+	assertEqual(CLAUDE_PROFILE_NAMES, ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"]);
 });

@@ -267,4 +267,25 @@ class ModelTests {
 		assert_true(first.Count() == 1 && first[0]->name.View() == "a", "no group: the first model");
 		assert_true(problems.IsEmpty(), "both profiles read");
 	}
+
+	[test("a_chain_with_paces")]
+	public static void TestChainPaces() {
+		const char* groups = "{\"g\": {\"primary\": {\"model\": \"opus\", \"pace\": {\"max\": 1.0, \"target\": \"week\"}, \"fallback\": [{\"model\": \"haiku\", \"pace\": {\"max\": 1.5}}, \"local\", {\"model\": \"sonnet\"}]}}}";
+		Ai::RoleModel role;
+		assert_true(Ai::ReadRole(View(groups), View("g"), View("primary"), role), "read");
+		assert_true(role.pace.max == 1.0 && role.pace.target == "week", "the role's model has its pace");
+		assert_true(role.fallback.Count() == 3 && role.fallback[0] == "haiku" && role.fallback[1] == "local" && role.fallback[2] == "sonnet", "a fallback is a name or {model, pace}");
+		assert_true(role.PaceOf(View("haiku")).max == 1.5 && role.PaceOf(View("haiku")).target == "both", "target both when it names none");
+		assert_true(role.PaceOf(View("local")).max == 0 && role.PaceOf(View("sonnet")).max == 0 && role.PaceOf(View("nowhere")).max == 0, "no pace: always");
+		Core::Array<Core::String> problems;
+		Ai::ReadModels(View("{\"old\": {\"provider\": \"claude-code\", \"model\": \"auto\"}}"), problems);
+		assert_true(problems.Count() == 1 && problems[0].View().Contains(View("model auto is gone")), "an auto profile is refused");
+	}
+
+	[test("a_turns_role_comes_from_its_mode")]
+	public static void TestRoleOfMode() {
+		assert_se("primary", Core::String(Ai::RoleOfMode(View("ask"))).CStr(), "ask");
+		assert_se("planning", Core::String(Ai::RoleOfMode(View("plan"))).CStr(), "plan");
+		assert_se("implementation", Core::String(Ai::RoleOfMode(View("agent"))).CStr(), "agent");
+	}
 }

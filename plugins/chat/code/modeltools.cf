@@ -1,5 +1,6 @@
 include "api/plugin.ch"
 include "modeltools.ch"
+include "pacing.ch"
 
 namespace Ai
 {
@@ -29,7 +30,7 @@ namespace Ai
 		out.Append("\n");
 	}
 
-	static void ProfileLine(Core::StringBuilder& out, const ModelProfile* profile, const ClaudeAccount& account, int64 now) {
+	static void ProfileLine(Core::StringBuilder& out, const ModelProfile* profile) {
 		out.Append("- ");
 		out.Append(profile->name.View());
 		out.Append(": ");
@@ -40,28 +41,12 @@ namespace Ai
 			out.Append("\n");
 			return;
 		}
-		if (!profile->IsPaced()) {
-			out.Append("Claude ");
-			out.Append(profile->model.View());
-			out.Append("\n");
-			return;
-		}
-		out.Append("Claude, paced (");
-		for (int64 i = 0; i < profile->ladder.Count(); ++i) {
-			if (i > 0) out.Append(" > ");
-			out.Append(profile->ladder[i].View());
-		}
-		out.Append(", against ");
-		out.Append(profile->pacingTarget.View());
-		out.Append("): now ");
-		PacedChoice choice = ChoosePaced(account.usage, profile->ladder, profile->pacingTarget.View(), now);
-		out.Append(choice.model.IsEmpty() ? Core::StringView("none - Claude is used up") : choice.model.View());
-		out.Append(" (");
-		out.Append(choice.why.View());
-		out.Append(")\n");
+		out.Append("Claude ");
+		out.Append(profile->model.View());
+		out.Append("\n");
 	}
 
-	Core::String UsageText(const ClaudeAccount& account, const Core::Array<ModelProfile*>& models, int64 now) {
+	Core::String UsageText(const ClaudeAccount& account, const Core::Array<ModelProfile*>& models, Core::StringView groupsJson, int64 now) {
 		Core::StringBuilder out;
 		out.Append("Claude Code: ");
 		if (account.cliPath.IsEmpty()) out.Append("no CLI found yet");
@@ -93,7 +78,19 @@ namespace Ai
 			out.Append("\n");
 		}
 		out.Append("Models (ai.models):\n");
-		for (const ModelProfile* profile : models) ProfileLine(out, profile, account, now);
+		for (const ModelProfile* profile : models) ProfileLine(out, profile);
+		Core::Array<RoleChain*> chains = ClaudeChains(models, groupsJson, account, now);
+		if (chains.IsEmpty()) return out.ToString();
+		out.Append("Chains with Claude (ai.groups; a chat's mode picks the role - ask: primary, plan: planning, agent: implementation; a role left off is primary):\n");
+		for (const RoleChain* chain : chains) {
+			out.Append("- ");
+			out.Append(chain->group.View());
+			out.Append(" / ");
+			out.Append(chain->role.View());
+			out.Append(": ");
+			out.Append(ChainText(*chain).View());
+			out.Append("\n");
+		}
 		return out.ToString();
 	}
 
@@ -105,9 +102,10 @@ namespace Ai
 	static ToolOutcome UsageRun(Chats* chats, const ToolInvocation& call) {
 		if (call.args.Member("refresh").AsBool()) chats->claude->Refresh(false);
 		Core::Array<ModelProfile*> models = ModelsOf(call);
+		Core::String groups = call.context->Setting(Core::StringView("ai.groups"), WsId(call.ws));
 		IED::HostLock guard(*call.context);
 		Core::StringBuilder out;
-		out.Append(UsageText(*chats->claude, models, ToolsNowMs()).View());
+		out.Append(UsageText(*chats->claude, models, groups.View(), ToolsNowMs()).View());
 		out.Append("This chat: ");
 		out.Append(call.chat->pinnedModel.IsEmpty() ? Core::StringView("its group's model") : (Core::String("pinned to ") + call.chat->pinnedModel.View()).View());
 		out.Append(" (chat_set_model changes it for the next turns)\n");

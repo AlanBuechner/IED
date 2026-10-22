@@ -1,4 +1,5 @@
 include "claudeaccount.ch"
+include "pacing.ch"
 
 namespace Ai
 {
@@ -159,7 +160,20 @@ namespace Ai
 		return answer;
 	}
 
+	void ClaudeAccount::MigrateAuto() {
+		Core::String models;
+		Core::String groups;
+		if (!WithoutAutoProfiles(context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), context->Setting(Core::StringView("ai.groups"), Core::StringView("")).View(), models, groups)) return;
+		Core::String problem;
+		if (!context->SetSetting(Core::StringView("ai.groups"), groups.View(), problem) || !context->SetSetting(Core::StringView("ai.models"), models.View(), problem)) {
+			context->Log((Core::String("Claude's pacing could not be moved into ai.groups: ") + problem.View()).View());
+			return;
+		}
+		context->Log(Core::StringView("Claude's pacing moved into ai.groups: each role that named a model auto profile has its ladder as paced places (docs/04 Pacing)"));
+	}
+
 	void ClaudeAccount::Refresh(bool force) {
+		MigrateAuto();
 		{
 			IED::HostLock guard(*context);
 			if (refreshing) return;
@@ -256,25 +270,10 @@ namespace Ai
 		json.BoolField("refreshing", refreshing);
 		json.IntField("blockedUntilMs", BlockedUntil(now));
 		json.IntField("nowMs", now);
-		json.Key(Core::StringView("paced"));
-		json.BeginArray();
+		json.Key(Core::StringView("chains"));
 		Core::Array<Core::String> problems;
-		for (ModelProfile* profile : ReadModels(context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), problems)) {
-			if (!profile->IsPaced()) continue;
-			PacedChoice choice = ChoosePaced(usage, profile->ladder, profile->pacingTarget.View(), now);
-			json.BeginObject();
-			json.Field("profile", profile->name.View());
-			json.Field("target", profile->pacingTarget.View());
-			json.Key(Core::StringView("ladder"));
-			json.BeginArray();
-			for (const Core::String& rung : profile->ladder) json.String(rung.View());
-			json.EndArray();
-			json.Field("model", choice.model.View());
-			json.Field("why", choice.why.View());
-			json.IntField("untilMs", choice.untilMs);
-			json.EndObject();
-		}
-		json.EndArray();
+		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), problems);
+		WriteChains(json, ClaudeChains(models, context->Setting(Core::StringView("ai.groups"), Core::StringView("")).View(), *this, now));
 		json.Key(Core::StringView("usage"));
 		WriteUsage(json, usage, now);
 		json.EndObject();

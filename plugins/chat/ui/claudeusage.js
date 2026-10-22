@@ -2,19 +2,19 @@
 // status bar's "Claude 5h 42% wk 61%" (yellow while a window runs ahead of pace, red when one is used up or the CLI is not
 // on a subscription), and Settings > AI > Claude - the CLI (where it is, its version, whether it is signed in to a Claude
 // subscription; IED never runs Claude on an API key) with the one step that sets it up (Install, Sign in: the CLI's own
-// windows, docs/04 "Setting it up"), each window as a bar with the even line marked, its pace and when it resets, what
-// pacing picks now, Refresh, and Add Claude models.
+// windows, docs/04 "Setting it up"), each window as a bar with the even line marked, its pace and when it resets, each
+// group chain with a Claude model as pacing has it now (docs/04 "Pacing"), Refresh, and Add Claude models.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
+import { paceLabel } from "./pacing.js";
 
 const SHORT = { five_hour: "5h", seven_day: "wk" };
 export const WARN_PACE = 1.25;
 // The profiles the server's Add Claude models (ai.claude.setup) adds.
-export const CLAUDE_PROFILE_NAMES = ["claude-auto", "claude-fable", "claude-opus", "claude-sonnet", "claude-haiku"];
+export const CLAUDE_PROFILE_NAMES = ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"];
 export const INSTALL_SCRIPT = "irm https://claude.ai/install.ps1 | iex";
 const ELLIPSIS = "\u2026";
-const TARGETS = [["both", "The session and the week"], ["session", "Each 5-hour session"], ["week", "The week"]];
 
 // When `at` comes, from `now`, as the server says it: "in 2 h 14 min", "in 35 min", "in 3 d 4 h", "now".
 export function resetText(at, now) {
@@ -42,6 +42,13 @@ export function windowLine(window, now) {
 	return line;
 }
 
+// A chain as the tooltip says it: "claude / primary: claude-sonnet now (claude-opus over its pace)".
+export function chainLine(chain) {
+	const passed = (chain.places || []).filter((place) => place.state !== "use");
+	const why = passed.map((place) => place.model + (place.state === "over" ? " over its pace" : " used up")).join(", ");
+	return chain.group + " / " + chain.role + ": " + (chain.now || "nothing") + " now" + (why ? " (" + why + ")" : "");
+}
+
 // The status bar item for the snapshot's `claude`: {text, level ("", "warn", "error"), tooltip}; null when no claude-code
 // model is set up.
 export function usageStatus(claude) {
@@ -60,7 +67,7 @@ export function usageStatus(claude) {
 	else if (usage.status === "allowed_warning" || windows.some((w) => w.pace > WARN_PACE)) level = "warn";
 	const lines = windows.map((w) => windowLine(w, now));
 	if (claude.blockedUntilMs > now) lines.push("Used up; Claude frees " + resetText(claude.blockedUntilMs, now));
-	for (const paced of claude.paced || []) lines.push(paced.profile + " picks " + (paced.model || "nothing") + " now (" + paced.why + ")");
+	for (const chain of claude.chains || []) lines.push(chainLine(chain));
 	return { text: "Claude " + shown.map((w) => SHORT[w.id] + " " + percent(w.utilization)).join(" "), level, tooltip: lines.join("\n") };
 }
 
@@ -199,18 +206,27 @@ export class ClaudePage {
 			...notes);
 	}
 
+	// Each group role whose chain has a Claude model: its places in order - the one a turn uses now marked, those over their
+	// pace or used up with why - and the way to Model Groups, where the chains are edited.
 	pacingCard(claude) {
-		const models = this.settings.value("ai.models").value || {};
-		const paced = claude.paced || [];
-		if (!paced.length) return null;
+		const chains = claude.chains || [];
+		if (!chains.length) return null;
 		return h("div.set-model.claude-pacing", null,
-			h("div.set-model-head", null, h("b", null, "Pacing")),
-			h("p.muted", null, "A model with \"model\": \"auto\" picks, each turn, the strongest model of its ladder whose pace is within its limit (1.00x for the first, 1.25x for the second, 1.50x for the third), so the plan's usage lasts to its reset."),
-			...paced.map((p) => h("div.claude-paced", { dataset: { profile: p.profile } },
-				h("b", null, p.profile), h("span.mono", null, (p.ladder || []).join(" > ")),
-				h("select.input-field", { "aria-label": "Pace " + p.profile + " against", on: { change: (event) => this.setTarget(p.profile, event.target.value, models) } },
-					...TARGETS.map(([value, label]) => h("option", Object.assign({ value }, value === p.target ? { selected: true } : {}), label))),
-				h("span", null, "now ", h("b", null, p.model || "none"), " - " + p.why))));
+			h("div.set-model-head", null, h("b", null, "Pacing"), h("span.grow"),
+				h("button.btn", { on: { click: () => this.ctx.ied.commands.run("shell.settings", { page: "custom:ied.chat.groups" }) } }, icon("edit"), "Edit in Model Groups")),
+			h("p.muted", null, "A turn tries its role's chain in order. A Claude model with a pace is passed over while your plan runs ahead of it, so the session or the week lasts; one without is used whatever the pace. A chat's mode picks the role: Ask primary, Plan planning, Agent implementation."),
+			...chains.map((chain) => h("div.claude-chain", { dataset: { group: chain.group, role: chain.role } },
+				h("span.claude-chain-name", null, h("b", null, chain.group), " / " + chain.role),
+				h("span.claude-places", null, ...(chain.places || []).map((place, i) => this.placeChip(place, i, chain.now))),
+				h("span.claude-chain-now", null, "now ", h("b", null, chain.now || "nothing")))));
+	}
+
+	placeChip(place, index, now) {
+		const state = place.state === "over" ? ".warn" : place.state === "used_up" ? ".err" : place.model === now ? ".info" : "";
+		const pace = place.claude ? paceLabel(place.pace) : "";
+		const why = place.why ? (place.model === now ? place.why + "; a turn still uses it: nothing earlier fits" : place.why) : place.model === now ? "A turn uses it now" : "";
+		return h("span.chip.claude-place" + state, { dataset: { place: place.model, state: place.state }, title: why },
+			(index > 0 ? "> " : "") + place.model, pace ? h("span.muted", null, " " + pace) : null);
 	}
 
 	setupBar(claude) {
@@ -219,7 +235,7 @@ export class ClaudePage {
 		const missing = CLAUDE_PROFILE_NAMES.filter((name) => !models[name]);
 		return h("div.set-bar", null,
 			missing.length ? h("button.btn" + (claude.configured ? "" : ".primary"), { on: { click: () => this.addModels() } }, icon("add"), claude.configured ? "Add the other Claude models" : "Add Claude models") : null,
-			h("span.muted", null, claude.configured ? "Claude models are in Settings > AI > Models; the claude group uses claude-auto." : "Adds claude-auto (paced), claude-fable, claude-opus, claude-sonnet and claude-haiku to ai.models and a claude group."));
+			h("span.muted", null, claude.configured ? "Claude models are in Settings > AI > Models; their chains and paces in Model Groups." : "Adds claude-opus, claude-sonnet, claude-haiku and claude-fable to ai.models and a claude group whose chain steps down from Opus as your plan runs ahead of pace."));
 	}
 
 	async refresh() {
@@ -234,14 +250,6 @@ export class ClaudePage {
 		}
 		this.refreshing = false;
 		this.render();
-	}
-
-	async setTarget(profile, target, models) {
-		const entry = Object.assign({}, models[profile]);
-		entry.pacing = Object.assign({}, entry.pacing || {}, { target });
-		const error = await this.settings.set("ai.models", Object.assign({}, models, { [profile]: entry }), "app");
-		if (error) this.ctx.ied.toast(error, { level: "error" });
-		else this.refresh();
 	}
 
 	async ask(method) {

@@ -209,7 +209,7 @@ class Chats:
 	def usage_snapshot(self):
 		"""aiusage (docs/10): the mock sets up no claude-code model, so the clients hide Claude's usage."""
 		return {"claude": {"offered": True, "configured": False, "cli": {"asked": True, "path": "", "version": "", "signIn": "", "authMethod": "", "subscription": False, "signingIn": False, "installing": False}, "refreshing": False,
-			"blockedUntilMs": 0, "nowMs": now_ms(), "paced": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
+			"blockedUntilMs": 0, "nowMs": now_ms(), "chains": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
 				"limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": 0, "windows": []}}}
 
 	# --- methods -----------------------------------------------------------------------------------------------------

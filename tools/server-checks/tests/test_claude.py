@@ -1,6 +1,6 @@
 """Claude through the owner's Claude Code CLI (docs/04 "The Claude Code provider") against tools/fake-claude: a turn streams
 and its tool calls run through IED's own path, the session is kept between turns and resumed after a restart, the plan's
-usage reaches the aiusage topic, pacing picks the model, a usage limit moves the turn to the fallback, a pinned model
+usage reaches the aiusage topic, pacing walks a group's chain, a chat's mode picks its role, a usage limit moves the turn to the fallback, a pinned model
 wins over the group's, and Claude runs on the subscription only - never an API key."""
 
 import datetime
@@ -225,18 +225,65 @@ class ClaudeUsageTests(ClaudeCase):
 		final = await self.client.request("ai.usage", {})
 		self.assertAlmostEqual(30, {w["id"]: w for w in final["claude"]["usage"]["windows"]}["five_hour"]["utilization"], msg="the session's own get_usage after the turn")
 
-	async def test_pacing_picks_the_model_for_the_turn(self):
-		await self.use_claude(models={"claude-auto": {"provider": "claude-code", "model": "auto", "pacing": {"ladder": ["opus", "sonnet", "haiku"], "target": "both"}}},
-			groups={"claude": {"primary": {"model": "claude-auto", "fallback": ["fake"]}}})
+	# The setup's chain: opus while the plan is on pace, sonnet a quarter faster, then the local model.
+	LADDER = {"claude": {"primary": {"model": "claude-opus", "pace": {"max": 1.0}, "fallback": [{"model": "claude-sonnet", "pace": {"max": 1.25}}, "fake"]}}}
+	SONNET = {"claude-sonnet": {"provider": "claude-code", "model": "sonnet"}}
+
+	async def test_pacing_walks_the_groups_chain(self):
+		await self.use_claude(models=self.SONNET, groups=self.LADDER)
 		self.put("usage.json", plan_usage(session=(10, 4 * HOUR), week=(60, int(3.5 * 24 * HOUR))))
-		await self.client.request("ai.usage", {"refresh": True})
+		usage = await self.client.request("ai.usage", {"refresh": True})
+		chain = [c for c in usage["claude"]["chains"] if (c["group"], c["role"]) == ("claude", "primary")][0]
+		self.assertEqual("claude-sonnet", chain["now"])
+		self.assertEqual([("claude-opus", "over"), ("claude-sonnet", "use"), ("fake", "use")], [(p["model"], p["state"]) for p in chain["places"]])
+		self.assertEqual({"max": 1.0, "target": "both"}, chain["places"][0]["pace"])
 		self.script({"blocks": [{"text": "Paced."}]})
 		chat_id, _ = await self.chat()
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		turn = await self.last_turn(chat_id)
-		self.assertTrue(any(n.startswith("claude-auto: sonnet (the week is at 1.20x pace") for n in self.notes(turn)), turn["segments"])
+		self.assertIn("claude-opus skipped for pace: the week is at 1.20x pace, over its 1.00x", self.notes(turn))
 		argv = self.sessions_started()[-1]
 		self.assertEqual("sonnet", argv[argv.index("--model") + 1])
+		self.assertEqual("claude-sonnet", turn["model"])
+
+	async def test_a_plan_ahead_of_pace_falls_to_the_local_model(self):
+		await self.use_claude(models=self.SONNET, groups=self.LADDER)
+		self.put("usage.json", plan_usage(session=(10, 4 * HOUR), week=(90, int(3.5 * 24 * HOUR))))
+		await self.client.request("ai.usage", {"refresh": True})
+		self.model.queue(text_step("Local, to stretch the week."))
+		chat_id, _ = await self.chat()
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		turn = await self.last_turn(chat_id)
+		self.assertEqual("fake", turn["model"])
+		notes = self.notes(turn)
+		self.assertTrue(any(n.startswith("claude-opus skipped for pace") for n in notes) and any(n.startswith("claude-sonnet skipped for pace: the week is at 1.80x pace, over its 1.25x") for n in notes), notes)
+		self.assertEqual([], self.sessions_started(), "no Claude session for a turn the chain sent to the local model")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": dict(self.SONNET, **{
+			"claude-opus": {"provider": "claude-code", "model": "opus"}, "claude-haiku": {"provider": "claude-code", "model": "haiku"}, "fake": {"endpoint": self.model.url + "/v1"}})})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"claude": {"primary": {"model": "claude-opus", "pace": {"max": 1.0},
+			"fallback": [{"model": "claude-sonnet", "pace": {"max": 1.25}}, {"model": "claude-haiku", "pace": {"max": 1.5}}]}}}})
+		self.script({"blocks": [{"text": "Still Claude: nothing else to try."}]})
+		self.assertEqual("finished", (await self.turn(chat_id, "again"))["stop"])
+		self.assertEqual("claude-haiku", (await self.last_turn(chat_id))["model"], "every place over its pace: the least over (haiku 1.2x past its 1.5x), not opus")
+		argv = self.sessions_started()[-1]
+		self.assertEqual("haiku", argv[argv.index("--model") + 1])
+
+	async def test_a_chats_mode_picks_its_role(self):
+		await self.use_claude(groups={"local, claude plans": {"primary": {"model": "fake"}, "planning": {"model": "claude-opus"}}}, default_group="local, claude plans")
+		self.put("usage.json", plan_usage(session=(95, 4 * HOUR), week=(90, int(3.5 * 24 * HOUR))))
+		await self.client.request("ai.usage", {"refresh": True})
+		self.script({"blocks": [{"text": "1. Read main.c. 2. Change the greeting."}]})
+		plan, _ = await self.chat(mode="plan")
+		self.assertEqual("finished", (await self.turn(plan))["stop"])
+		self.assertEqual("claude-opus", (await self.last_turn(plan))["model"], "Plan mode: planning, a Claude model without a pace whatever the pace")
+		self.model.queue(text_step("Asked locally."))
+		ask, _ = await self.chat(mode="ask")
+		self.assertEqual("finished", (await self.turn(ask))["stop"])
+		self.assertEqual("fake", (await self.last_turn(ask))["model"], "Ask mode: primary")
+		self.model.queue(text_step("Implemented locally."), call_step("finish", {"summary": "done", "verification": "none needed"}, "f1"))
+		agent, _ = await self.chat(mode="agent", permission="auto")
+		await self.turn(agent)
+		self.assertEqual("fake", (await self.last_turn(agent))["model"], "Agent mode: implementation, off here, so primary")
 
 	async def test_a_usage_limit_moves_the_turn_to_the_fallback(self):
 		await self.use_claude()
@@ -280,10 +327,12 @@ class ClaudeSetupTests(ClaudeCase):
 		usage = await self.client.request("ai.usage", {"refresh": True})
 		self.assertTrue(usage["claude"]["configured"] and usage["claude"]["offered"] and usage["claude"]["cli"]["asked"], usage["claude"])
 		models = await self.setting("ai.models")
-		self.assertEqual(["claude-auto", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models))
-		self.assertEqual("auto", models["claude-auto"]["model"])
+		self.assertEqual(["claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models))
+		self.assertEqual("opus", models["claude-opus"]["model"])
 		groups = await self.setting("ai.groups")
-		self.assertEqual({"primary": {"model": "claude-auto", "fallback": ["fake"]}}, groups["claude"], "falling back to the local model")
+		self.assertEqual({"primary": {"model": "claude-opus", "pace": {"max": 1.0, "target": "both"}, "fallback": [
+			{"model": "claude-sonnet", "pace": {"max": 1.25, "target": "both"}}, {"model": "claude-haiku", "pace": {"max": 1.5, "target": "both"}}, "fake"]}},
+			groups["claude"], "a chain stepping down as the plan runs ahead of pace, then the local model")
 		self.assertEqual("local", await self.setting("ai.defaultGroup"), "the owner's default group is left as it is")
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": self.model.url + "/v1"}}})
 		self.assertFalse((await self.client.request("ai.usage", {"refresh": True}))["claude"]["configured"], "removed Claude models stay removed")
@@ -305,7 +354,19 @@ class ClaudeSetupTests(ClaudeCase):
 		self.assertEqual(1, len(logins), logins)
 		self.assertEqual(["auth", "login", "--claudeai"], logins[0]["argv"], "the subscription login, not the Console's")
 		self.assertEqual(([], []), (logins[0]["billed"], logins[0]["inherited"]), "the login window gets IED's clean environment")
-		self.assertIn("claude-auto", await self.setting("ai.models"))
+		self.assertIn("claude-opus", await self.setting("ai.models"))
+
+	async def test_an_auto_profile_of_the_first_design_becomes_a_chain(self):
+		await self.local_only()
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": self.model.url + "/v1"},
+			"claude-auto": {"provider": "claude-code", "model": "auto", "pacing": {"ladder": ["opus", "sonnet", "haiku"], "target": "week"}}}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"claude": {"primary": {"model": "claude-auto", "fallback": ["fake"]}}}})
+		await self.client.request("ai.usage", {"refresh": True})
+		models = await self.setting("ai.models")
+		self.assertEqual(["claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models))
+		self.assertEqual({"primary": {"model": "claude-opus", "pace": {"max": 1.0, "target": "week"}, "fallback": [
+			{"model": "claude-sonnet", "pace": {"max": 1.25, "target": "week"}}, {"model": "claude-haiku", "pace": {"max": 1.5, "target": "week"}}, "fake"]}},
+			(await self.setting("ai.groups"))["claude"])
 
 	async def test_install_is_refused_when_a_cli_is_there(self):
 		await self.local_only()

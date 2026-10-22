@@ -97,24 +97,25 @@ namespace Ai
 		return names.IsEmpty() ? Core::String() : names[0];
 	}
 
-	// The models the primary role of the chat's group tries, in order; `role` gets the role.
-	static Core::Array<ModelProfile*> PrimaryOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
+	// The models the chat's group gives a turn in the chat's mode, in order (docs/04 "Which role a turn uses"); `role` gets the
+	// role.
+	static Core::Array<ModelProfile*> CandidatesOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
-		Core::Array<ModelProfile*> candidates = RoleCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), Core::StringView("primary"), role);
+		Core::Array<ModelProfile*> candidates = RoleCandidates(models, context->Setting(Core::StringView("ai.groups"), WsId(ws)).View(), GroupOf(context, chat, ws).View(), RoleOfMode(Core::StringView(ChatModeName(chat->mode))), role);
 		return PinnedFirst(models, candidates, chat->pinnedModel.View());
 	}
 
 	Core::String Chats::ModelOf(const Chat* chat) const {
 		RoleModel role;
-		Core::Array<ModelProfile*> candidates = PrimaryOf(context, chat, WorkspaceOf(chat), role);
+		Core::Array<ModelProfile*> candidates = CandidatesOf(context, chat, WorkspaceOf(chat), role);
 		return candidates.IsEmpty() ? Core::String() : candidates[0]->name;
 	}
 
 	Core::String Chats::Snapshot(Chat* chat) {
 		IED::Workspace ws = WorkspaceOf(chat);
 		RoleModel role;
-		Core::Array<ModelProfile*> candidates = PrimaryOf(context, chat, ws, role);
+		Core::Array<ModelProfile*> candidates = CandidatesOf(context, chat, ws, role);
 		Core::StringView model = candidates.IsEmpty() ? Core::StringView("") : candidates[0]->name.View();
 		return chat->SnapshotJson(model, GroupOf(context, chat, ws).View(), role.effort.View(), kChatSnapshotTurns);
 	}

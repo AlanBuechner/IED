@@ -5,7 +5,8 @@ import { test, assertEqual, assertThrows } from "./harness.js";
 import { controlKind, findPage, inputText, matches, parseInput, problemsFor, settingTitle, settingsPages, sourceLabel } from "../src/shell/settingsmodel.js";
 import { refusal } from "../src/shell/settingsview.js";
 import { probeLine, profileFrom } from "/plugins/ied.chat/ui/modelsettings.js";
-import { freshName, roleDefault, withRole } from "/plugins/ied.chat/ui/groupsettings.js";
+import { freshName, movedEarlier, roleDefault, withRole } from "/plugins/ied.chat/ui/groupsettings.js";
+import { fallbackPlaces, paceFromValue, paceLabel, paceValue, storedFallback } from "/plugins/ied.chat/ui/pacing.js";
 
 const SETTINGS = {
 	"ai.maxSteps": { page: "AI", schema: { type: "integer", description: "Model requests per turn" } },
@@ -70,4 +71,16 @@ test("settings: group roles", () => {
 	assertEqual(withRole(group, "primary", { fallback: [] }), group, "an empty fallback list goes");
 	assertEqual([freshName({}, "group"), freshName({ group: {}, "group 2": {} }, "group")], ["group", "group 3"]);
 	assertEqual([roleDefault(group, ["b", "a"]), roleDefault({}, ["b", "a"]), roleDefault(group, ["b"]), roleDefault({}, [])], ["a", "b", "b", ""], "a role turned on gets the primary's model, else the first");
+});
+
+test("settings: a Claude model's pace in a chain", () => {
+	assertEqual([paceLabel(undefined), paceLabel({ max: 1.25 }), paceLabel({ max: 1, target: "week" })], ["always", "up to 1.25x, session and week", "up to 1.00x, week"]);
+	assertEqual([paceValue(undefined), paceValue({ max: 1.25 }), paceValue({ max: 1.5, target: "session" })], ["", "1.25|both", "1.5|session"]);
+	assertEqual([paceFromValue(""), paceFromValue("1.25|both"), paceFromValue("2|week")], [undefined, { max: 1.25 }, { max: 2, target: "week" }], "both is left out");
+	const role = { model: "claude-opus", pace: { max: 1 }, fallback: [{ model: "claude-haiku", pace: { max: 1.5 } }, "qwen"] };
+	const places = fallbackPlaces(role);
+	assertEqual(places, [{ model: "claude-haiku", pace: { max: 1.5 } }, { model: "qwen", pace: undefined }]);
+	assertEqual(storedFallback(movedEarlier(places, 1)), ["qwen", { model: "claude-haiku", pace: { max: 1.5 } }], "moved earlier, a place without a pace kept as a name");
+	assertEqual(movedEarlier(places, 0), places, "the first stays");
+	assertEqual(withRole({ primary: role }, "primary", { pace: undefined }).primary, { model: "claude-opus", fallback: role.fallback }, "always: the pace goes");
 });

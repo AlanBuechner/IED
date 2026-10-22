@@ -46,6 +46,16 @@ A **model group** assigns, per **role**, a model + temperature + effort + fallba
 
 Groups are defined at app tier; a solution can pick its default group or override roles; each chat selects a group (and effort). A role a group leaves unset is **off** and uses the group's `primary` (a group without `primary` uses the first model in `ai.models`); a new group turns on `primary` alone, so the finer roles stay off until the owner gives one its own model. This is the plan's "Claude plans, a temp-0 local model implements" made concrete (journey J3).
 
+A role's **chain** is its model, then its fallbacks in order. A fallback is a model's name, or `{"model": <name>, "pace": {...}}`
+for a Claude model that is used only while the plan's usage is on pace (see Pacing under Claude); the role's own model takes a
+`pace` beside it the same way.
+
+**Which role a turn uses** (owner, 2026-10-22: "have the local ai be the primary then have opus as the planning always then have
+fallback for the implementation so it would use haiku then fall back to local"): the chat's mode picks it - Ask uses `primary`,
+Plan uses `planning`, Agent uses `implementation` - and a role the group leaves off is `primary`. So one chat plans on one chain
+and implements on another as it switches modes, and a group without `planning` and `implementation` behaves as one model did
+before. The other roles (worker, research, summarizer, titler, ...) wait for the features that use them.
+
 **Effort** is how much a reasoning model thinks before it answers: `low`, `medium` or `high`, or unset for what its server does by default. A turn's effort is its chat's, when the chat picked one (the composer's Effort, `chat.set`), else its role's (`ai.groups`). A model profile says what each effort adds to the chat completion request in its `effort` (`{"low": {<fields>}, "medium": {...}, "high": {...}}`, the fields written into the request; a level it leaves out adds nothing, so `{}` never sends one). Without one, a llama.cpp server is sent `chat_template_kwargs: {"reasoning_effort": <effort>}`, which its chat template reads, and any other server OpenAI's top-level `reasoning_effort`: llama.cpp (b10222) ignores the top-level field, and a template that does not read the variable ignores it too. A template that reads only `enable_thinking` (Qwen3's) takes `"effort": {"low": {"chat_template_kwargs": {"enable_thinking": false}}}`. Qwen3.8's template reads both: unset is its `xhigh`, which `high` also means, and an effort it does not know fails the request (400). A turn records the effort it used. Measured with `tools/ai-evals` on Qwen3.8 27B at temperature 0: its default (xhigh) took 730 s for the eight questions, `medium` 494 s and `low` 458 s, every answer keeping its facts; medium thinks least per step and keeps reading by symbol, low takes fewer steps by reading whole files.
 
 ## Scheduling and routing
@@ -77,9 +87,10 @@ Flags and event shapes must be re-verified against the installed CLI version whe
 ### The Claude Code provider (built 2026-10-22, checked against Claude Code 2.1.304)
 
 **Profiles.** An `ai.models` entry with `"provider": "claude-code"` is a Claude model the owner's own CLI serves:
-`{provider: "claude-code", model: "opus" | "sonnet" | "haiku" | "fable" | a full id | "auto", pacing?, contextWindow?}`. It has no
-endpoint and its privacy is always `cloud`. Effort goes to the CLI as `--effort` (Claude takes low, medium, high, xhigh and max;
-IED's three are sent as they are). `model: "auto"` lets pacing pick the model per turn (below).
+`{provider: "claude-code", model: "opus" | "sonnet" | "haiku" | "fable" | a full id, contextWindow?}`. It has no endpoint and
+its privacy is always `cloud`. Effort goes to the CLI as `--effort` (Claude takes low, medium, high, xhigh and max; IED's three
+are sent as they are). Which Claude model a turn uses, and when it steps down to a cheaper one or a local model, is the group's
+chain (Pacing, below).
 
 **The CLI.** `ai.claude.command` (app tier) is the program and its leading arguments; empty, IED looks for `claude` on PATH, then
 `%USERPROFILE%\.local\bin\claude.exe` (the native installer), then the newest copy the Claude desktop app keeps
@@ -123,11 +134,11 @@ with the CLI's own windows - IED never sees what is typed into them:
   the CLI needs its own, and this is it (one click, and an Authorize in the browser where claude.ai is usually signed in).
 - **Set up by itself.** The first time the server finds the CLI signed in to a subscription - after Sign in, or a login made
   anywhere else (the keeper asks every 5 minutes while no Claude model is set up) - it adds the Claude profiles
-  (`claude-auto`, paced, and `claude-fable`, `claude-opus`, `claude-sonnet`, `claude-haiku`) and a `claude` group (primary
-  `claude-auto`, falling back to the default group's primary when that is not Claude) to the app settings, through the plugin
-  API's `PluginContext::SetSetting` (`docs/26`). With no other model, `claude` is the only group, so chats use it at once. It
-  does so once (a mark in the plugin's state folder): Claude models the owner removes stay removed; Add Claude models adds them
-  again.
+  (`claude-opus`, `claude-sonnet`, `claude-haiku`, `claude-fable`) and a `claude` group whose primary chain steps down as the
+  plan runs ahead of pace - `claude-opus` (pace 1.0), `claude-sonnet` (1.25), `claude-haiku` (1.5), then the default group's
+  primary when that is not Claude - to the app settings, through the plugin API's `PluginContext::SetSetting` (`docs/26`).
+  With no other model, `claude` is the only group, so chats use it at once. It does so once (a mark in the plugin's state
+  folder): Claude models the owner removes stay removed; Add Claude models adds them again.
 
 **Distributed builds.** Anthropic's terms (the Agent SDK overview, checked 2026-10-22): "Unless previously approved, Anthropic
 does not allow third party developers to offer claude.ai login or rate limits for their products." The owner's own builds
@@ -186,42 +197,71 @@ turn, and every `ai.claude.usageRefreshMinutes` (default 10; 0 never) while a `c
 `rate_limit_event` a session streams updates the windows it names. It is on the app-wide topic `aiusage` (`docs/10`).
 
 **Pacing.** A window of length L (5 h, 7 d) at utilization u resetting at R is `e = 1 - (R - now) / L` through, and its pace is
-`p = u / (100 e)`: 1.0 is the even line that runs out exactly at the reset, 2.0 is spending twice as fast. A profile with
-`model: "auto"` names a ladder, strongest first, and what to pace against:
+`p = u / (100 e)`: 1.0 is the even line that runs out exactly at the reset, 2.0 is spending twice as fast. Early in a window
+(under 5% through and under 5% used) its pace counts as 0.
 
-    "claude-auto": {"provider": "claude-code", "model": "auto",
-                    "pacing": {"ladder": ["opus", "sonnet", "haiku"], "target": "both"}}
+Pacing is part of a group's chains (owner, 2026-10-22: "the stretch it over the week should use the fallback models in the
+group ... there are lots of other ways to build out the topology that we should give the user control over"). Any Claude model
+in a role's chain - its model or a fallback - may have a pace:
 
-`target` is `session` (spend each 5-hour window fully: pace against `five_hour` only), `week` (stretch the week: `seven_day` and
-the rung's own weekly window) or `both` (the higher of the two). Each turn takes the first rung whose pace is at most its limit -
-1.0 for the first, 1.25 for the second, 1.5 for the third - and the last rung otherwise; early in a window (under 5% through and
-under 5% used) its pace counts as 0. A window at 100% (or a `rejected` rate-limit status) leaves Claude out: the turn goes to
-the role's fallback. The pick holds for the whole turn (a model change mid-turn would read the whole context into a new
-cache), and the turn says why in a routing note: "auto: sonnet (the week is at 1.31x pace)". `ladder` may name `fable` first for
-the strongest model while it is under pace.
+    "ai.groups": {
+      "local, claude plans": {
+        "primary":        { "model": "qwen3.8-27b@lan" },
+        "planning":       { "model": "claude-opus" },
+        "implementation": { "model": "claude-haiku", "pace": { "max": 1.0, "target": "week" },
+                            "fallback": ["qwen3.8-27b@lan"] }
+      },
+      "claude": {
+        "primary": { "model": "claude-opus", "pace": { "max": 1.0 },
+                     "fallback": [{ "model": "claude-sonnet", "pace": { "max": 1.25 } },
+                                  { "model": "claude-haiku", "pace": { "max": 1.5 } }, "qwen3.8-27b@lan"] }
+      }
+    }
+
+A turn skips a paced Claude model while its pace against `target` is over `max`, and goes on down the chain - to a cheaper
+Claude model or a local one - with a routing note ("claude-opus left out: the week is at 1.85x pace, over its 1.00x"). `target`
+is `session` (spend each 5-hour window fully: `five_hour`), `week` (stretch the week: `seven_day` and the model's own weekly
+window) or `both` (the default: the higher). A Claude model without a pace is used whatever the pace - "Opus for planning,
+always" - and only a used-up window leaves it out (100%, or a `rejected` rate-limit status; a model's own weekly window for that
+model). Models skipped for pace stay at the end of the chain as a last resort, the least over its pace first (pace over
+`max`: with the week at 1.85x, Haiku at 1.5 comes before Sonnet at 1.25 and Opus at 1.0): a turn whose every other candidate
+fails (a local server down) still gets one, and the cheapest that fits. A pace on a model that is not Claude does nothing; a pinned model
+(`chat.set {model}`) is the owner's choice and is never skipped for pace. The choice holds for the whole turn (a model change
+mid-turn would read the whole context into a new cache).
+
+The first design (also 2026-10-22) hid a ladder inside one profile, `model: "auto"` with `pacing: {ladder, target}`; the ladder
+is the `claude` chain above now, and the owner edits it like any other. An `auto` profile in the app settings is rewritten once:
+the profile goes, each role that named it gets its ladder as paced places (1.0, 1.25, 1.5 down the ladder, against its target),
+and a `claude-<model>` profile is added for a rung that had none.
 
 **Switching models.** A chat may pin a model of `ai.models` over its group's primary (`chat.set {model}`, the composer's Model
 menu, `""` back to the group's): the group's fallbacks stay behind it. The AI has two tools (group `models`, `docs/13`):
-`ai_usage` (the plan's windows with their pace and resets, and what `auto` picks now and why) and `chat_set_model` (pin a model
-for this chat's next turns or another chat's, an Exec call: in Ask mode the owner approves it).
+`ai_usage` (the plan's windows with their pace and resets, and for each paced chain which model a turn uses now and why) and
+`chat_set_model` (pin a model for this chat's next turns or another chat's, an Exec call: in Ask mode the owner approves it).
 
 **In the UI.** The status bar's Claude item (`Claude 5h 42% wk 61%`; yellow when a window runs ahead of pace or the CLI warns,
 red when one is used up; its tooltip each window and when it resets) opens Settings > AI > Claude: the CLI (where it is, its
-version, whether it is signed in), each window as a bar with the even line marked, its pace and reset, Refresh, and Add Claude
-models, which adds `claude-auto`, `claude-opus`, `claude-sonnet`, `claude-haiku` and `claude-fable` profiles and a `claude`
-group (primary `claude-auto`, falling back to the current default group's primary). The command Chat: Claude Usage opens the page
-(on a phone, which has no status bar, from the command palette).
+version, whether it is signed in), each window as a bar with the even line marked, its pace and reset, each paced chain with
+every place's state (used now, over its pace, used up) and the model a turn uses now, Refresh, and Add Claude models (the
+automatic setup's profiles and `claude` group). Settings > AI > Model Groups edits the chains: a role's model and its pace, the
+fallbacks in order (moved up, removed) each with its own pace - always, or at most 0.75x to 2x against the session, the week or
+both - and says which mode uses each role. The command Chat: Claude Usage opens the Claude page (on a phone, which has no status
+bar, from the command palette).
 
-**As built.** Server (`plugins/chat/code/`): `claudewire` (usage windows from `get_usage` and `rate_limit_event`, pace and the
-pacing pick, a response from stream events, the CLI's errors, the lines IED writes, the history a new session is told),
+**As built.** Server (`plugins/chat/code/`): `claudewire` (usage windows from `get_usage` and `rate_limit_event`, a model's pace
+against a target, the setup's chain and the one-time rewrite of `auto` profiles, a response from stream events, the CLI's
+errors, the lines IED writes, the history a new session is told), `pacing` (each place of a chain now - in use, over its pace,
+used up - the order a turn tries them, and the chains `aiusage` and `ai_usage` show),
 `claudecli` (finding the CLI, a running one with its reader thread and control requests, the environment and arguments,
 `auth status`), `claudesession` (a chat's session: start and resume, IED's MCP server and permission answers, `tools/call`
 kept for its run, `set_model`, settling a query), `claudeaccount` (the usage record, `aiusage`, `ai.usage`), `claudechats` (the
 sessions by chat, the keeper thread: the periodic usage ask, idle sessions stopped), `runclaude` (the step, the tool answers,
-the turn's end, usage limits and refusals routed), `modeltools` (`ai_usage`, `chat_set_model`); `models` reads `provider` and
-`pacing`, a chat's `pinnedModel` and its session (`claude: {session, turns}`) are kept in `chat.json`. Client
-(`plugins/chat/ui/`): `claudeusage.js` (the status item, Settings > AI > Claude, Add Claude models), the composer's Model menu.
-Tests: unit `server.ai.claude` (`claudewire_tests.cf`), server checks `test_claude.py` (16, against `tools/fake-claude`, a fake
+the turn's end, usage limits and refusals routed, the chain ordered by pace), `modeltools` (`ai_usage`, `chat_set_model`);
+`models` reads `provider`, a role's chain with its paces and the role a mode uses, a chat's `pinnedModel` and its session
+(`claude: {session, turns}`) are kept in `chat.json`. Client (`plugins/chat/ui/`): `claudeusage.js` (the status item, Settings >
+AI > Claude with its Pacing card, Add Claude models), `groupsettings.js` and `pacing.js` (Model Groups: each role's mode, a
+Claude model's pace, fallbacks moved earlier), the composer's Model menu. Tests: unit `server.ai.claude`
+(`claudewire_tests.cf`, 16) and `server.ai.models` (`ai_tests.cf`), server checks `test_claude.py` (22, against `tools/fake-claude`, a fake
 CLI that speaks the same protocol and records what IED sent), frontend `claude.test.js`. Checked by hand against the real CLI
 (2.1.304, the Claude desktop app's copy, not signed in): discovery, `--version`, `auth status`, `get_usage`, IED's exact session
 arguments with the MCP handshake, and the refusal before anything is sent. A signed-in turn was checked against the fake only:

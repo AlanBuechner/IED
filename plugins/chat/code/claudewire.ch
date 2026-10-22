@@ -65,17 +65,9 @@ namespace Ai
 	// utilization, resetsAtMs, lengthMs, through, pace}]} - the clients' and the AI's view.
 	void WriteUsage(IED::JsonWriter& json, const ClaudeUsage& usage, int64 nowMs);
 
-	// The model pacing picks for a turn (docs/04 "Pacing").
-	class PacedChoice
-	{
-		public Core::String model;       // the rung; empty when Claude is used up
-		public int64 rung;
-		public Core::String why;         // "the week is at 1.31x pace"
-		public int64 untilMs;            // used up: when it frees again
-	}
-
-	// The first rung of `ladder` (strongest first) whose pace against `target` (session, week, both) is within its limit.
-	PacedChoice ChoosePaced(const ClaudeUsage& usage, const Core::Array<Core::String>& ladder, Core::StringView target, int64 nowMs);
+	// The pace of `model` against `target` (session, week, both) now: the worst of the windows that pace it, `why` which
+	// ("the week is at 1.85x pace"; docs/04 "Pacing"); 0 and empty when the usage is unknown or no window paces it.
+	double PaceAgainst(const ClaudeUsage& usage, Core::StringView model, Core::StringView target, int64 nowMs, Core::String& why);
 	// Whether `target` is one pacing knows.
 	bool IsPacingTarget(Core::StringView target);
 	// When `atMs` comes, from `nowMs`, as a note says it: "in 2 h 14 min", "in 35 min", "in 3 d 4 h", "now".
@@ -143,13 +135,18 @@ namespace Ai
 	Core::String McpCallResult(Core::StringView text, const Core::Array<ClaudeImage>& images, bool isError);
 	// IED's name for a tool the model names (mcp__ied__fs_read -> fs_read); others as they are.
 	Core::StringView IedToolName(Core::StringView claudeName);
-	// ai.models and ai.groups (their JSON) with Claude set up (docs/04 "Setting it up"): the Claude profiles added - claude-auto
-	// (paced), claude-fable, claude-opus, claude-sonnet, claude-haiku; one already there of a name kept as it is - and a
-	// `claude` group unless one is there: primary claude-auto, falling back to the default group's primary when that is not
-	// Claude (else to the first model that is not), `defaultGroup` the ai.defaultGroup value (empty: the first group).
+	// ai.models and ai.groups (their JSON) with Claude set up (docs/04 "Setting it up"): the Claude profiles added - claude-opus,
+	// claude-sonnet, claude-haiku, claude-fable; one already there of a name kept as it is - and a `claude` group unless one is
+	// there, its primary chain stepping down as the plan runs ahead of pace: claude-opus (1.0), claude-sonnet (1.25),
+	// claude-haiku (1.5), then the default group's primary when that is not Claude (else the first model that is not);
+	// `defaultGroup` the ai.defaultGroup value (empty: the first group).
 	void WithClaudeModels(Core::StringView models, Core::StringView groups, Core::StringView defaultGroup, Core::String& modelsOut, Core::String& groupsOut);
 	// Whether the ai.models value (JSON) names a claude-code profile.
 	bool HasClaudeModel(Core::StringView models);
+	// ai.models and ai.groups without the first pacing design's `model: "auto"` profiles (docs/04 "Pacing"): each role that
+	// named one gets its ladder as paced places instead - 1.0, 1.25, 1.5 down the ladder against its target - and a rung
+	// without a claude-code profile of its model gets claude-<model>. False, and nothing written, when there is none.
+	bool WithoutAutoProfiles(Core::StringView models, Core::StringView groups, Core::String& modelsOut, Core::String& groupsOut);
 	// The chat's turns before a new session, written out for its first message: the owner's messages, the answers and the
 	// tool calls with a line of each result, the newest kept when they pass kHistoryTextBytes. Empty when there are none.
 	Core::String HistoryText(const Core::Array<Turn*>& turns);

@@ -74,7 +74,7 @@ namespace Ai
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
 		for (const Core::String& problem : problems) context->Log(problem.View());
 		Core::String groups = context->Setting(Core::StringView("ai.groups"), WsId(ws));
-		candidates = PinnedFirst(models, RoleCandidates(models, groups.View(), turn->group.View(), Core::StringView("primary"), role), chat->pinnedModel.View());
+		candidates = PinnedFirst(models, RoleCandidates(models, groups.View(), turn->group.View(), RoleOfMode(Core::StringView(ChatModeName(turn->mode))), role), chat->pinnedModel.View());
 		rules = ReadPermissionRules(context->Setting(Core::StringView("ai.permissions"), WsId(ws)).View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		maxSteps = Serialization::ReadJson(context->Setting(Core::StringView("ai.maxSteps"), WsId(ws)).View(), *doc).root.AsInt();

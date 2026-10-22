@@ -32,8 +32,6 @@ namespace Ai
 		public Provider provider;
 		public Core::String endpoint;      // an OpenAI-compatible base URL ("http://127.0.0.1:8080/v1"); empty for Claude Code
 		public Core::String model;         // the id a request names; the profile's name when unset (Claude Code: "default")
-		public Core::Array<Core::String> ladder;   // Claude Code's "auto": the models pacing picks from, strongest first
-		public Core::String pacingTarget;  // session, week or both
 		public int64 contextWindow;        // tokens; 0 when unknown
 		public int64 maxOutput;            // tokens a reply may take; 0: the server's default
 		public Privacy privacy;
@@ -49,23 +47,39 @@ namespace Ai
 
 		public Core::String CompletionsUrl() const;
 		public bool IsClaude() const { return provider == Provider::ClaudeCode; }
-		// A Claude profile whose model pacing picks per turn.
-		public bool IsPaced() const { return provider == Provider::ClaudeCode && model == "auto"; }
+	}
+
+	// When a Claude model's place in a chain is used (docs/04 "Pacing"): while the plan's pace against `target` (session, week,
+	// both) is at most `max`; `max` 0 is always.
+	struct PaceLimit
+	{
+		public double max;
+		public Core::String target;
 	}
 
 	class RoleModel
 	{
 		public Core::String model;
+		public PaceLimit pace;
 		public double temperature;
 		public bool hasTemperature;
 		public Core::String effort;
 		public Core::Array<Core::String> fallback;
+		public Core::Array<PaceLimit> fallbackPaces;   // each fallback's, in order
+
+		// The pace of `name`'s place in the chain; `max` 0 when it has none.
+		public PaceLimit PaceOf(Core::StringView name) const;
 	}
 
 	// The profiles in the ai.models value (JSON); one that cannot be used is named in `problems` instead.
 	Core::Array<ModelProfile*> ReadModels(Core::StringView json, Core::Array<Core::String>& problems);
 	ModelProfile* FindModel(const Core::Array<ModelProfile*>& models, Core::StringView name);
-	// The role `role` of `group` in the ai.groups value; false when the group has no such role.
+	// The role a turn in `mode` uses (docs/04 "Which role a turn uses"): ask primary, plan planning, agent implementation.
+	Core::StringView RoleOfMode(Core::StringView mode);
+	// A place's pace: `{"max": 1.25, "target": "week"}` (target both when it names none); `max` 0 when there is none.
+	PaceLimit ReadPace(const Serialization::DomNode& node);
+	// The role `role` of `group` in the ai.groups value; false when the group has no such role. A fallback is a model's name or
+	// {model, pace}.
 	bool ReadRole(Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& into);
 	// The models `role` of `group` tries in order - its model, then its fallbacks - of those `models` has; `chosen` gets
 	// the role. A role the group leaves off is its primary; without a primary either, the first model alone.

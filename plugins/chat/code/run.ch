@@ -101,10 +101,10 @@ namespace Ai
 		private void TrackModified(Core::StringView path, int64 plus, int64 minus);
 
 		// --- runclaude.cf: Claude through the owner's CLI (docs/04 "The Claude Code provider") ---
-		// The Claude candidates the plan's usage leaves in, with each paced profile's pick; why the last went, when every
-		// candidate did. The lock is held.
+		// The candidates in the order the plan's usage leaves them (docs/04 "Pacing"): a Claude model over its place's pace
+		// after the rest, a used-up one left out; why the last went, when every candidate did. The lock is held.
 		private Core::String ChooseClaude();
-		// The model the candidate in use runs on Claude: pacing's pick, or its profile's model.
+		// The model the candidate in use runs on Claude.
 		private Core::String ClaudeModel() const;
 		// One step: what the session has not seen sent, the CLI's stream read to the response's end.
 		private StepResult* ClaudeStep(const StepEvents& events);
@@ -129,7 +129,6 @@ namespace Ai
 		private ClaudeSession* claude;                               // the chat's session once a Claude step used it
 		private int64 claudeSent;                                    // the turn's messages before this the session has
 		private Core::String claudeAside;                            // steering that came mid-query, for the next tool result
-		private Core::HashMap<Core::String, Core::String> claudePicks;   // a paced profile -> the model pacing picked
 		private Core::String claudeBlocked;                          // why Claude cannot serve this turn; empty while it can
 		private Core::String claudeBlockedStop;                      // the stop a pause for it records: usage_limit, not_subscription
 

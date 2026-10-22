@@ -70,9 +70,7 @@ namespace Ai
 		json.Field("server", (Core::String("Claude Code ") + account->cliVersion.View()).View());
 		json.Key(Core::StringView("models"));
 		json.BeginArray();
-		if (profile.IsPaced())
-			for (const Core::String& rung : profile.ladder) json.String(rung.View());
-		else json.String(profile.model.View());
+		json.String(profile.model.View());
 		json.EndArray();
 		json.BoolField("modelServed", true);
 		json.IntField("contextWindow", profile.contextWindow);

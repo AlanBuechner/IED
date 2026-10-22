@@ -35,8 +35,8 @@ namespace Ai
 		return true;
 	}
 
-	// A Claude Code profile (docs/04 "The Claude Code provider"): the CLI's model, always cloud; `model: "auto"` with its
-	// pacing - a ladder of models, strongest first (opus, sonnet, haiku when it names none), and what it paces against.
+	// A Claude Code profile (docs/04 "The Claude Code provider"): the CLI's model, always cloud. `model: "auto"` (the first
+	// pacing design) is refused: the server rewrites it into ai.groups once (claudewire.ch WithoutAutoProfiles).
 	static ModelProfile* ReadClaude(ModelProfile* profile, const Serialization::DomNode& entry, Core::Array<Core::String>& problems) {
 		if (!kClaudeSubscriptionOffered) {
 			problems.Push(((Core::String("ai.models.") + profile->name.View()) + ": ") + kClaudeNotOffered);
@@ -45,18 +45,8 @@ namespace Ai
 		profile->model = entry.Member("model").Kind() == Serialization::DomKind::String ? Core::String(entry.Member("model").AsView()) : Core::String("default");
 		profile->privacy = Privacy::Cloud;
 		profile->contextWindow = entry.Member("contextWindow").AsInt();
-		Serialization::DomNode pacing = entry.Member("pacing");
-		Serialization::DomNode ladder = pacing.Member("ladder");
-		for (int64 i = 0; ladder.Kind() == Serialization::DomKind::Array && i < ladder.Count(); ++i)
-			if (!ladder.At(i).AsView().IsEmpty()) profile->ladder.Push(Core::String(ladder.At(i).AsView()));
-		if (profile->ladder.IsEmpty()) {
-			profile->ladder.Push(Core::String("opus"));
-			profile->ladder.Push(Core::String("sonnet"));
-			profile->ladder.Push(Core::String("haiku"));
-		}
-		profile->pacingTarget = pacing.Member("target").IsValid() ? Core::String(pacing.Member("target").AsView()) : Core::String("both");
-		if (profile->pacingTarget != "session" && profile->pacingTarget != "week" && profile->pacingTarget != "both") {
-			problems.Push((Core::String("ai.models.") + profile->name.View()) + ": pacing.target must be session, week or both");
+		if (profile->model == "auto") {
+			problems.Push((Core::String("ai.models.") + profile->name.View()) + ": model auto is gone - pacing is a group's chain now (docs/04 Pacing)");
 			return nullptr;
 		}
 		Serialization::DomNode watchdog = entry.Member("watchdog");
@@ -127,17 +117,44 @@ namespace Ai
 		return nullptr;
 	}
 
+	Core::StringView RoleOfMode(Core::StringView mode) {
+		if (mode == "plan") return Core::StringView("planning");
+		if (mode == "agent") return Core::StringView("implementation");
+		return Core::StringView("primary");
+	}
+
+	PaceLimit ReadPace(const Serialization::DomNode& node) {
+		PaceLimit pace;
+		pace.max = node.Member("max").AsFloat() > 0 ? node.Member("max").AsFloat() : 0.0;
+		Core::StringView target = node.Member("target").AsView();
+		pace.target = Core::String(target == "session" || target == "week" ? target : Core::StringView("both"));
+		return pace;
+	}
+
+	PaceLimit RoleModel::PaceOf(Core::StringView name) const {
+		if (model.View() == name) return pace;
+		for (int64 i = 0; i < fallback.Count(); ++i)
+			if (fallback[i].View() == name) return fallbackPaces[i];
+		return PaceLimit();
+	}
+
 	bool ReadRole(Core::StringView groupsJson, Core::StringView group, Core::StringView role, RoleModel& into) {
 		Core::String groupName = Core::String(group);
 		Core::String roleName = Core::String(role);
 		Serialization::DomNode entry = ParseValue(groupsJson).Member(groupName.CStr()).Member(roleName.CStr());
 		if (entry.Member("model").Kind() != Serialization::DomKind::String) return false;
 		into.model = Core::String(entry.Member("model").AsView());
+		into.pace = ReadPace(entry.Member("pace"));
 		into.hasTemperature = entry.Member("temperature").IsValid();
 		into.temperature = entry.Member("temperature").AsFloat();
 		into.effort = Core::String(entry.Member("effort").AsView());
 		Serialization::DomNode fallback = entry.Member("fallback");
-		for (int64 i = 0; fallback.Kind() == Serialization::DomKind::Array && i < fallback.Count(); ++i) into.fallback.Push(Core::String(fallback.At(i).AsView()));
+		for (int64 i = 0; fallback.Kind() == Serialization::DomKind::Array && i < fallback.Count(); ++i) {
+			Serialization::DomNode place = fallback.At(i);
+			const bool named = place.Kind() == Serialization::DomKind::String;
+			into.fallback.Push(Core::String(named ? place.AsView() : place.Member("model").AsView()));
+			into.fallbackPaces.Push(named ? PaceLimit() : ReadPace(place.Member("pace")));
+		}
 		return true;
 	}
 
