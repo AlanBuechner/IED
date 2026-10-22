@@ -8,6 +8,7 @@ import asyncio
 import gzip
 import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -90,6 +91,47 @@ def game_stream(token, frames=3, bye=True):
 	w.add(memory)
 	if bye:
 		w.add(w.chunk(itp.GLOBAL_CHUNK, 0, t).event("Bye", reason=0))
+	return w.bytes()
+
+
+def troubled_stream(token):
+	"""A game with problems to find (1 ns ticks): 60 frames of 10 ms on Main, frame 30 stalled 30 ms by Level::Stream;
+	every frame Particles::Spawn allocates 50 blocks it frees within the frame and Cache::Remember 2 blocks of 32 KiB it
+	never frees; an Entities plot."""
+	w = itp.Writer().hello(app="Troubled", pid=7, freq=1_000_000_000, start_ticks=0, token=token)
+	defs = w.chunk(itp.GLOBAL_CHUNK, 0, 0)
+	frame = w.srcloc("Frame", defs, file="src/game.cf", line=5)
+	spawn = w.srcloc("Particles::Spawn", defs, file="src/particles.cf", line=8)
+	cache = w.srcloc("Cache::Remember", defs, file="src/cache.cf", line=20)
+	stream = w.srcloc("Level::Stream", defs, file="src/level.cf", line=33)
+	main = w.string("Main", defs)
+	defs.event("PlotDef", plotId=1, nameStr=w.string("Entities", defs), kind=0, flags=0)
+	w.add(defs)
+	chunk = w.chunk(itp.THREAD_CHUNK, 1, 0).event("ThreadName", 0, nameStr=main)
+	memory = w.chunk(itp.GLOBAL_CHUNK, 0, 0)
+	address = 0x100000
+	start = 0
+	for i in range(60):
+		length = 40 * MS if i == 30 else 10 * MS
+		chunk.event("FrameMark", start, frameSetStr=0).event("ZoneBegin", start, srcLocId=frame)
+		chunk.event("ZoneBegin", start + 1 * MS, srcLocId=spawn).event("ZoneEnd", start + 2 * MS)
+		chunk.event("ZoneBegin", start + 3 * MS, srcLocId=cache).event("ZoneEnd", start + 4 * MS)
+		if i == 30:
+			chunk.event("ZoneBegin", start + 5 * MS, srcLocId=stream).event("ZoneEnd", start + 35 * MS)
+		chunk.event("ZoneEnd", start + length - 2 * MS).event("PlotValue", start + length - 1 * MS, plotId=1, value=1000.0 + i)
+		for k in range(50):
+			memory.event("Alloc", start + 1 * MS + k, threadId=1, poolId=0, address=address + k * 64, size=64, callstackId=0)
+		for k in range(50):
+			memory.event("Free", start + 2 * MS + k, threadId=1, poolId=0, address=address + k * 64)
+		address += 0x10000
+		for k in range(2):
+			memory.event("Alloc", start + 3 * MS + k, threadId=1, poolId=0, address=address + k * 32768, size=32768, callstackId=0)
+		address += 0x10000
+		start += length
+	chunk.event("FrameMark", start, frameSetStr=0)
+	w.add(chunk)
+	w.add(memory)
+	w.add(w.chunk(itp.GLOBAL_CHUNK, 0, 0).event("Bye", reason=0))
 	return w.bytes()
 
 
@@ -418,6 +460,40 @@ class ProfilerTests(ProfilerServer):
 			await self.query("prof.import", wsId="w1", path="notes.json")
 		self.assertEqual("bad_request", refused.exception.code)
 
+	async def test_the_investigation_tools_find_what_is_wrong(self):
+		capture = await self.capture_that_ends(troubled_stream(self.token()))
+		async def ask(tool, **args):
+			return (await self.client.request("plugins.call", {"name": "profiler.query", "wsId": "w1", "args": {"wsId": "w1", "tool": tool, "args": args}}))["result"]["text"]
+		diagnosis = await ask("diagnose")
+		for found in ("Slow frames", "Level::Stream on Main", "Memory keeps growing", "Cache::Remember holds 120 allocations", "Allocations every frame", "Particles::Spawn: 50.0 a frame"):
+			self.assertIn(found, diagnosis)
+		self.assertNotIn("Lock contention", await ask("diagnose", focus="memory"), "focus keeps one area")
+		allocations = await ask("allocations")
+		self.assertIn("Particles::Spawn", allocations.splitlines()[5], "the most allocations first")
+		self.assertIn("src/particles.cf:8", allocations)
+		self.assertIn("Frame > Particles::Spawn", await ask("allocations", group_by="path"))
+		leaks = await ask("leaks")
+		self.assertIn("keeps accumulating", leaks)
+		self.assertIn("src/cache.cf:20", leaks)
+		self.assertIn("rose in", await ask("memory"))
+		hitches = await ask("hitches")
+		self.assertIn("Frame 30 at", hitches)
+		self.assertIn("Level::Stream on Main: 30.0 ms of its own time", hitches)
+		ref = re.search(r"\[(\d+:\d+:\d+)\]", hitches).group(1)
+		self.assertIn("Zone Level::Stream [" + ref + "]", await ask("zone", ref=ref))
+		self.assertIn("Particles::Spawn", await ask("timeline", from_ms=300, to_ms=340))
+		self.assertIn("Main", await ask("threads"))
+		self.assertIn("Plot Entities: min 1000", await ask("plots"))
+		allocated = await self.query("prof.allocations", captureId=capture)
+		self.assertEqual(("Particles::Spawn", 3000, 120), (allocated["groups"][0]["label"], allocated["groups"][0]["count"], allocated["live"]))
+		self.assertEqual(1, (await self.query("prof.hitches", captureId=capture))["slow"])
+		self.assertGreaterEqual((await self.query("prof.memoryTrend", captureId=capture))["series"][0]["floorRises"], 7)
+		self.assertTrue((await self.query("prof.threads", captureId=capture))["threads"][0]["marksFrames"])
+		self.assertEqual("Main", (await self.query("prof.window", captureId=capture, **{"from": 300 * MS, "to": 340 * MS}))["threads"][0]["name"])
+		self.assertEqual("Entities", (await self.query("prof.plots", captureId=capture))["plots"][0]["name"])
+		with self.assertRaises(RpcFailure):
+			await ask("zone", ref="nonsense")
+
 	async def test_the_ai_reads_captures_through_the_binding(self):
 		await self.capture_that_ends(game_stream(self.token()))
 		async def ask(tool, **args):
@@ -434,7 +510,7 @@ class ProfilerTests(ProfilerServer):
 		self.assertIn("4 instances", await ask("find_zone", name="Physics::Step"))
 		self.assertIn("Physics::Step", await ask("flame"))
 		self.assertIn("arena loaded", await ask("messages"))
-		self.assertIn("1 allocations (4.0 KiB) live", await ask("leaks"))
+		self.assertIn("1 allocations (4.0 KiB) are live", await ask("leaks"))
 		self.assertIn("A = ", await ask("compare", a="latest", b="latest"))
 		with self.assertRaises(RpcFailure):
 			await ask("summary", capture="no-such-capture")

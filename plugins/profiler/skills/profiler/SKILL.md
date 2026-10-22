@@ -1,7 +1,7 @@
 ---
 name: profiler
-description: Find where a program spends its time and memory with IED's profiler - read captures with the profile_* tools, find lock contention, leave notes on a capture, record one with profile_capture, instrument C4, C/C++, Go or Rust code, and import Chrome traces and pprof profiles.
-keywords: [profile, profiler, performance, slow, frame time, hitch, stutter, spike, latency, flame graph, zones, capture, trace, pprof, leak, allocation, gc pause, lock, mutex, contention, deadlock, annotate, note]
+description: Find why a program is slow, stutters, leaks memory or allocates too much with IED's profiler - start with profile_diagnose, follow its leads with the profile_* tools (hitches, zones, timeline, threads, locks, memory, leaks, allocations), leave notes on a capture, record one with profile_capture, instrument C4, C/C++, Go or Rust code, and import Chrome traces and pprof profiles.
+keywords: [profile, profiler, performance, slow, frame time, hitch, stutter, spike, latency, flame graph, zones, capture, trace, pprof, leak, memory leak, memory growth, allocation, allocations, churn, garbage, gc pause, collection, lock, mutex, contention, deadlock, threads, annotate, note]
 ---
 
 # Profiler
@@ -13,32 +13,70 @@ thread, frames, plots, log messages, tasks, locks, allocations, garbage collecti
 
 ## Reading a capture
 
-Work from the top down; each tool names zones by their source file and line.
+Load the tools you need with one tool search (`select:profile_diagnose,profile_hitches,...`); every answer names zones
+by their source file and line and points in time in milliseconds from the capture's start, as `from_ms` takes them.
 
-1. `profile_list` - the captures, newest first. Most tools default to `capture: "latest"`.
-2. `profile_summary` - duration, frame times (mean, median, p95, p99, max), the costliest zones by **self** time (time
-   in the zone itself, not its children) and by **total** time, tasks, memory and GC, and any warnings (a warning
-   means the program's instrumentation was unbalanced - say so, it can skew numbers).
-3. For stutter or a slow frame: `profile_frame` (`index: "worst"` by default) - each thread's work in that frame,
-   its costliest zones, collections and GPU work in it. Compare with the median frame from the summary.
-4. `profile_top_zones` - rank by `self` to find where the CPU goes, by `total` for which subsystem is expensive, by
-   `max` or `p95` for spikes; `group_by: "thread"` or `"task"` splits a zone by where it ran; `from_ms`/`to_ms`
-   limit to a range (from `profile_frame` or the summary).
-5. `profile_find_zone` - one zone's distribution: whether it is always slow (raise the median) or sometimes slow
-   (look at the slowest instances and when they happened).
-6. `profile_flame` - the call tree merged by name: where a zone's time goes beneath it.
-7. `profile_messages` - the program's own log in time order, filtered by severity or text.
-8. `profile_leaks` - allocations still live at the end (or `at_ms`), by call stack, pool or thread; with the pools'
-   peaks and GC pauses.
-9. `profile_locks` - when threads are busy but frames are slow, or work that should run in parallel does not: each
-   lock's **waits** (time a thread was blocked on it), **contended** holds (another thread waited as it was released),
-   holds and threads, most waited for first, and the longest waits with the thread and the time. The summary lists the
-   three busiest. A lock "still waited for at the end" is a deadlock or a stuck thread. Fix contention by holding the
-   lock for less (move work out of it), splitting it, or not sharing the data; a short hold taken very often costs too.
-10. After a change: record again and `profile_compare` the two captures (`a` before, `b` after).
+1. `profile_list` - the captures, newest first. Every tool defaults to `capture: "latest"`.
+2. **`profile_diagnose` first.** It lists the problems that stand out, most costly first - slow frames and their
+   causes, memory that keeps growing, allocations never freed, lock contention, allocations every frame (churn),
+   collections, where the frame thread's time goes, work stuck on one thread, dropped events - each with its evidence
+   and the tool that looks closer. Follow those leads with the playbooks below; `focus` narrows it to one area.
+3. `profile_summary` - the capture at a glance: frame times, the costliest zones by **self** time (time in the zone
+   itself, not its children) and by **total** time, threads, tasks, memory, locks, warnings (a warning means the
+   instrumentation was unbalanced - say so, it can skew numbers) and the notes on it.
 
-Report findings with numbers (median and p95, not only the mean), the zone's source location, and what you would
-change; open the source before proposing an edit.
+### It stutters, or a frame is slow
+
+- `profile_hitches` - the slow frames (over `threshold_ms`, else twice the median), each with the zones far past
+  their usual time a frame, collections, lock waits, allocations against the usual and warnings; then the causes
+  counted over every slow frame. A frame whose thread was barely busy is not slowed by its code: it waited, slept or
+  ran code without zones.
+- `profile_zone` with a `[ref]` from any answer - one zone up close: the zones it is inside, its children, and the
+  allocations, lock waits, messages and collections inside it.
+- `profile_timeline` (`from_ms`, `to_ms` - a slow frame's span) - what every thread did in that window, in order.
+- `profile_frame` (`index`, `"worst"` by default) - one frame's threads and costliest zones.
+- `profile_find_zone` - one zone's distribution: always slow (raise the median) or sometimes slow (its slowest
+  instances, when and where).
+
+### It is slow everywhere
+
+- `profile_top_zones` by `self` for where the CPU goes, by `total` for which subsystem costs most, by `p95`/`max` for
+  spikes; `group_by` thread or task; `from_ms`/`to_ms` for a range.
+- `profile_flame` - the call tree merged by name: where a zone's time goes beneath it.
+- `profile_threads` - each thread's busy share, idle gaps and lock waits: one thread near 100% while the others idle
+  is work to split or move off it.
+- `profile_locks` - each lock's **waits** (time threads were blocked), **contended** holds (another thread waited as
+  it was released), holds and threads, and the longest waits. A lock "still waited for at the end" is a deadlock or a
+  stuck thread. Fix contention by holding the lock for less, splitting it, or not sharing the data.
+
+### Memory keeps growing (a leak)
+
+- `profile_memory` - each pool and memory plot over time with its **floor**, the lowest it got in each step: a floor
+  that keeps rising is memory the program keeps, a high peak over a flat floor is churn. Also the heap left after each
+  collection and the collections themselves. A program that frees everything as it exits ends low: read the floor's
+  highest, not the last value.
+- `profile_leaks` - the allocations still live (just before the program's teardown, or at `at_ms`), by zone (or call
+  stack), with when they were made: a group that **keeps accumulating** - made all through the capture, never freed -
+  is the leak; one made at once is a cache or a load. `from_ms`/`to_ms` around a level's load and unload finds what it
+  left behind.
+
+### Too many allocations, or collections stall it
+
+- `profile_allocations` - who allocates: per zone (or zone path, thread, pool, size, call stack) the allocations and
+  bytes in all and per frame, the churn (freed within the frame they were made in) and what stays live; with the
+  range's allocations per frame. Allocating every frame in a hot path means garbage and collections: reuse a buffer,
+  pool the objects, reserve capacity once. A capture with only allocation samples (Go, a pprof heap profile) answers
+  by function.
+- `profile_memory` - how often collections run, their pauses, and how many fell in slow frames.
+
+### Then
+
+- `profile_plots` - the program's own counters (entities, draw calls) over time; `profile_messages` - its log.
+- After a change: record again (`profile_capture`) and `profile_compare` the two captures (`a` before, `b` after):
+  frame times, allocations, peak memory and pauses side by side, and the zones that changed most.
+
+Report findings with numbers (median and p95, not only the mean; allocations per frame; bytes a second of growth),
+the zone's source location, and what you would change; open the source before proposing an edit.
 
 ## Notes on a capture
 
@@ -148,7 +186,8 @@ func update(ctx context.Context) {
 - `ctx, task := profiler.Task(ctx, "Request")` ... `task.End()` groups work across goroutines in the Tasks view.
 - Locks: `var queue = profiler.NewMutex("Queue")` (or `NewRWMutex`), then `queue.Lock(ctx)` ... `queue.Unlock(ctx)`:
   a `sync.Mutex` whose waits and holds show on ctx's track.
-- Collections, the heap and the goroutine count are reported by themselves.
+- Collections, the heap and the goroutine count are reported by themselves, and so are the runtime's sampled
+  allocations (`runtime.MemProfile`, every 64 KiB): `profile_allocations` names the functions that allocate most.
 - Go's own tracer: `runtime/trace` (`go test -trace trace.out`, or `trace.Start`) writes an execution trace; Solution
   Explorer > Import into Profiler on the `.out` converts it with the workspace's Go toolchain: each P's goroutines,
   each goroutine's regions, tasks and logs, the collector, the heap.

@@ -1,0 +1,234 @@
+// Where a program allocates (T-PRF-13): each group's allocations and bytes in all and per frame, its churn - blocks
+// freed within the frame they were made in, the garbage a frame leaves - and what it still holds at the range's end.
+// A capture with no allocation events but allocation samples (a pprof heap profile, the Go client) is read by the
+// function each sample was taken in.
+include "investigate.ch"
+
+namespace Profiler
+{
+	const int64 kChurnWindowNs = 10000000;
+
+	class AllocRow
+	{
+		public uint64 key;
+		public uint64 callstack;
+		public int64 count;
+		public int64 bytes;
+		public int64 churn;
+		public int64 live;
+		public int64 liveBytes;
+		public int32 firstTrack = -1;
+		public Core::HashMap<int32, bool> tracks;
+	}
+
+	// The range's allocations per frame, over the frames that began in it.
+	class FrameTally
+	{
+		public const FrameSet* set;
+		public int64 first;
+		public int64 last;                  // one past
+		public Core::Array<int64> counts;
+		public Core::Array<int64> bytes;
+
+		public int64 Frames() const { return last - first; }
+
+		public void Init(const Capture& capture, Range range) {
+			set = MainFrameSet(capture);
+			first = set ? set->starts.LowerBound(range.begin) : 0;
+			last = set ? set->starts.LowerBound(range.end) : 0;
+			while (last > first && set->ends[last - 1] == kOpen) last -= 1;
+			counts.Resize(Frames());
+			bytes.Resize(Frames());
+		}
+
+		// The frame an allocation fell in, counted; -1 outside the tallied frames.
+		public int64 Add(const Allocation& allocation) {
+			const int64 f = FrameAt(set, allocation.t);
+			if (f < first || f >= last) return -1;
+			counts[f - first] += 1;
+			bytes[f - first] += allocation.size;
+			return f;
+		}
+	}
+
+	static AllocRow* RowFor(Core::HashMap<uint64, AllocRow*>& rowOf, Core::Array<AllocRow*>& rows, uint64 key, uint64 callstack) {
+		AllocRow* row = nullptr;
+		if (rowOf.TryGet(key, row)) return row;
+		row = new AllocRow();
+		row->key = key;
+		row->callstack = callstack;
+		rows.Push(row);
+		rowOf.Insert(key, row);
+		return row;
+	}
+
+	static void WriteFrameTally(IED::JsonWriter& json, const Capture& capture, const FrameTally& tally) {
+		json.Key(Core::StringView("frames"));
+		if (tally.Frames() == 0) {
+			json.Null();
+			return;
+		}
+		Core::Array<int64> sorted;
+		for (int64 n : tally.counts) sorted.Push(n);
+		sorted.Sort();
+		int64 total = 0;
+		int64 totalBytes = 0;
+		int64 worst = 0;
+		for (int64 i = 0; i < tally.Frames(); ++i) {
+			total += tally.counts[i];
+			totalBytes += tally.bytes[i];
+			if (tally.counts[i] > tally.counts[worst]) worst = i;
+		}
+		json.BeginObject();
+		json.IntField("count", tally.Frames());
+		NumberField(json, "meanCount", (double)total / (double)tally.Frames(), 1);
+		json.IntField("medianCount", Quantile(sorted, 0.5));
+		json.IntField("p95Count", Quantile(sorted, 0.95));
+		json.IntField("maxCount", tally.counts[worst]);
+		json.IntField("maxIndex", tally.first + worst);
+		json.IntField("maxStartNs", capture.clock.Ns(tally.set->starts[tally.first + worst]));
+		json.IntField("meanBytes", totalBytes / tally.Frames());
+		json.IntField("maxBytes", tally.bytes[worst]);
+		json.EndObject();
+	}
+
+	static void WriteAllocRow(IED::JsonWriter& json, const Capture& capture, const AllocGrouper& grouper, const AllocRow* row, int64 frames) {
+		json.BeginObject();
+		grouper.WriteLabel(json, row->key, row->callstack);
+		json.IntField("count", row->count);
+		json.IntField("bytes", row->bytes);
+		json.IntField("meanSize", row->count == 0 ? 0 : row->bytes / row->count);
+		NumberField(json, "perFrame", frames == 0 ? 0.0 : (double)row->count / (double)frames, 1);
+		json.IntField("bytesPerFrame", frames == 0 ? 0 : row->bytes / frames);
+		json.IntField("churn", row->churn);
+		json.IntField("live", row->live);
+		json.IntField("liveBytes", row->liveBytes);
+		json.Field("thread", row->firstTrack < 0 ? Core::StringView("") : TrackLabel(capture, capture.tracks[(int64)row->firstTrack], capture.lastTicks).View());
+		json.IntField("threads", row->tracks.Count());
+		json.EndObject();
+	}
+
+	static void FromEvents(IED::JsonWriter& json, const Capture& capture, const AllocAsk& ask, Range range) {
+		AllocGrouper grouper(capture, ask.groupBy);
+		FrameTally tally;
+		tally.Init(capture, range);
+		const int64 churnTicks = capture.clock.Ticks(kChurnWindowNs);
+		Core::HashMap<uint64, AllocRow*> rowOf;
+		Core::Array<AllocRow*> rows;
+		int64 count = 0;
+		int64 bytes = 0;
+		int64 churn = 0;
+		int64 live = 0;
+		int64 liveBytes = 0;
+		for (const Allocation& allocation : capture.allocations) {
+			if (!range.Holds(allocation.t)) continue;
+			AllocRow* row = RowFor(rowOf, rows, grouper.KeyOf(allocation), allocation.callstack);
+			const int64 f = tally.Add(allocation);
+			const bool freedSoon = allocation.freed != kOpen && (tally.set ? f >= 0 && allocation.freed < tally.set->ends[f] : allocation.freed - allocation.t <= churnTicks);
+			const bool stays = allocation.freed == kOpen || allocation.freed >= range.end;
+			row->count += 1;
+			row->bytes += allocation.size;
+			if (freedSoon) row->churn += 1;
+			if (stays) {
+				row->live += 1;
+				row->liveBytes += allocation.size;
+			}
+			if (row->firstTrack < 0) row->firstTrack = allocation.track;
+			if (!row->tracks.Contains(allocation.track)) row->tracks.Insert(allocation.track, true);
+			count += 1;
+			bytes += allocation.size;
+			churn += freedSoon ? 1 : 0;
+			live += stays ? 1 : 0;
+			liveBytes += stays ? allocation.size : 0;
+		}
+		if (ask.byBytes) rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->bytes > b->bytes; });
+		else rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->count > b->count; });
+		const double seconds = (double)capture.clock.Ns(range.Length()) / 1e9;
+		json.Field("source", "events");
+		json.IntField("count", count);
+		json.IntField("bytes", bytes);
+		NumberField(json, "perSecond", seconds > 0.0 ? (double)count / seconds : 0.0, 1);
+		NumberField(json, "bytesPerSecond", seconds > 0.0 ? (double)bytes / seconds : 0.0, 0);
+		json.IntField("churn", churn);
+		json.Field("churnWindow", tally.set ? "frame" : "10 ms");
+		json.IntField("live", live);
+		json.IntField("liveBytes", liveBytes);
+		WriteFrameTally(json, capture, tally);
+		json.IntField("groupCount", rows.Count());
+		json.Key(Core::StringView("groups"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)ask.limit; ++i) WriteAllocRow(json, capture, grouper, rows[i], tally.Frames());
+		json.EndArray();
+	}
+
+	// --- From samples -------------------------------------------------------------------------------------------------
+
+	static bool IsAllocationSample(const SampleRecord& sample) {
+		return sample.kind == 2 || sample.kind == 3;
+	}
+
+	static uint64 LeafOf(const Capture& capture, uint64 callstack) {
+		const Core::Array<uint64>* frames = capture.callstacks.Find(callstack);
+		return frames && !frames->IsEmpty() ? (*frames)[0] : 0;
+	}
+
+	static void WriteSampleLabel(IED::JsonWriter& json, const Capture& capture, const AllocAsk& ask, uint64 key, uint64 callstack) {
+		if (ask.groupBy == AllocGroup::Thread) {
+			json.Field("label", TrackLabel(capture, capture.tracks[(int64)key], capture.lastTicks).View());
+			return;
+		}
+		const SymbolRecord* symbol = capture.symbols.Find(LeafOf(capture, callstack));
+		json.Field("label", symbol ? capture.Text(symbol->functionStr) : Core::StringView("(unknown function)"));
+		json.Field("file", symbol ? capture.Text(symbol->fileStr) : Core::StringView(""));
+		json.IntField("line", symbol ? (int64)symbol->line : 0);
+		json.Key(Core::StringView("callstack"));
+		WriteCallstack(json, capture, ask.groupBy == AllocGroup::Callstack ? callstack : 0);
+	}
+
+	static void FromSamples(IED::JsonWriter& json, const Capture& capture, const AllocAsk& ask, Range range) {
+		Core::HashMap<uint64, AllocRow*> rowOf;
+		Core::Array<AllocRow*> rows;
+		int64 weight = 0;
+		int64 count = 0;
+		int32 kind = 2;
+		for (const SampleRecord& sample : capture.samples) {
+			if (!IsAllocationSample(sample) || !range.Holds(sample.t)) continue;
+			kind = sample.kind;
+			const uint64 key = ask.groupBy == AllocGroup::Thread ? (uint64)sample.track : (ask.groupBy == AllocGroup::Callstack ? sample.callstack : LeafOf(capture, sample.callstack));
+			AllocRow* row = RowFor(rowOf, rows, key, sample.callstack);
+			row->count += 1;
+			row->bytes += sample.weight;
+			weight += sample.weight;
+			count += 1;
+		}
+		rows.SortBy([](AllocRow* a, AllocRow* b) -> bool { return a->bytes > b->bytes; });
+		json.Field("source", count > 0 ? "samples" : "none");
+		json.Field("unit", kind == 3 ? "objects" : "bytes");
+		json.IntField("samples", count);
+		json.IntField("weight", weight);
+		json.IntField("groupCount", rows.Count());
+		json.Key(Core::StringView("groups"));
+		json.BeginArray();
+		for (int64 i = 0; i < rows.Count() && i < (int64)ask.limit; ++i) {
+			json.BeginObject();
+			WriteSampleLabel(json, capture, ask, rows[i]->key, rows[i]->callstack);
+			json.IntField("samples", rows[i]->count);
+			json.IntField("weight", rows[i]->bytes);
+			NumberField(json, "share", weight == 0 ? 0.0 : (double)rows[i]->bytes / (double)weight, 4);
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	Core::String Allocations(const Capture& capture, const AllocAsk& ask) {
+		const Range range = RangeOfNs(capture, ask.fromNs, ask.toNs);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("fromNs", capture.clock.Ns(range.begin));
+		json.IntField("toNs", capture.clock.Ns(range.end > capture.lastTicks ? capture.lastTicks : range.end));
+		if (capture.allocations.IsEmpty()) FromSamples(json, capture, ask, range);
+		else FromEvents(json, capture, ask, range);
+		json.EndObject();
+		return json.ToString();
+	}
+}

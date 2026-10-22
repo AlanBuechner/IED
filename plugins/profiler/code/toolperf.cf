@@ -1,0 +1,475 @@
+// The AI's answers about time (T-PRF-15 profile_hitches, T-PRF-16 profile_threads, T-PRF-17 profile_zone, T-PRF-18
+// profile_timeline): why the slow frames are slow, how busy each thread is, one zone up close, and a window in order.
+include "tooltext.ch"
+include "investigate.ch"
+
+namespace Profiler
+{
+	const int32 kToolHitches = 8;
+	const int32 kToolWindowEntries = 300;
+	const int32 kToolChildren = 12;
+	const int32 kRunAtLeast = 4;             // calls of one zone side by side shown as one line
+
+	static const char* SeverityName(int64 severity) {
+		const char*[6] names = { "trace", "debug", "info", "warning", "error", "fatal" };
+		return severity >= 0 && severity < 6 ? names[severity] : "?";
+	}
+
+	static Core::String SourceOf(const Serialization::DomNode& row) {
+		Core::StringBuilder text;
+		text.Append(row.Member("file").AsView());
+		if (row.Member("line").AsInt() > 0) {
+			text.AppendByte(':');
+			text.AppendInt(row.Member("line").AsInt());
+		}
+		return text.ToString();
+	}
+
+	// --- profile_hitches ----------------------------------------------------------------------------------------------
+
+	static void SlowFrameLines(Core::StringBuilder& out, const Serialization::DomNode& f) {
+		out.Append("Frame ");
+		out.AppendInt(f.Member("index").AsInt());
+		out.Append(" at ");
+		out.Append(Instant(f.Member("startNs").AsInt()).View());
+		out.Append(" took ");
+		out.Append(Duration(f.Member("durationNs").AsInt()).View());
+		out.Append(" (+");
+		out.Append(Duration(f.Member("overNs").AsInt()).View());
+		out.Append(" over the median):\n");
+		if (f.Member("frameThreadBusyNs").AsInt() >= 0) {
+			out.Append("  ");
+			out.Append(f.Member("frameThread").AsView());
+			out.Append(" was busy ");
+			out.Append(Duration(f.Member("frameThreadBusyNs").AsInt()).View());
+			out.Append(" of it, the rest outside its zones (waiting, sleeping, or in code without zones)\n");
+		}
+		Serialization::DomNode zones = f.Member("zones");
+		for (int64 i = 0; i < zones.Count(); ++i) {
+			Serialization::DomNode z = zones.At(i);
+			out.Append("  ");
+			out.Append(z.Member("name").AsView());
+			out.Append(" on ");
+			out.Append(z.Member("thread").AsView());
+			out.Append(": ");
+			out.Append(Duration(z.Member("selfNs").AsInt()).View());
+			out.Append(" of its own time, usually ");
+			out.Append(Duration(z.Member("usualNs").AsInt()).View());
+			out.Append(" a frame [");
+			out.Append(z.Member("ref").AsView());
+			out.Append("] ");
+			out.Append(SourceOf(z).View());
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode gc = f.Member("gc");
+		if (gc.Member("count").AsInt() > 0) {
+			out.Append("  collections: ");
+			out.AppendInt(gc.Member("count").AsInt());
+			out.Append(", paused ");
+			out.Append(Duration(gc.Member("ns").AsInt()).View());
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode waits = f.Member("waits");
+		for (int64 i = 0; i < waits.Count(); ++i) {
+			out.Append("  ");
+			out.Append(waits.At(i).Member("thread").AsView());
+			out.Append(" waited ");
+			out.Append(Duration(waits.At(i).Member("ns").AsInt()).View());
+			out.Append(" for lock ");
+			out.Append(waits.At(i).Member("lock").AsView());
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode allocs = f.Member("allocations");
+		if (allocs.Member("count").AsInt() > 0) {
+			out.Append("  allocations: ");
+			out.Append(Number(allocs.Member("count").AsInt()).View());
+			out.Append(" (usually ");
+			out.Append(Decimal(allocs.Member("usual").AsFloat()).View());
+			out.Append(")\n");
+		}
+		Serialization::DomNode messages = f.Member("messages");
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			out.Append("  [");
+			out.Append(SeverityName(messages.At(i).Member("severity").AsInt()));
+			out.Append("] ");
+			out.Append(Instant(messages.At(i).Member("timeNs").AsInt()).View());
+			out.Append(": ");
+			out.Append(messages.At(i).Member("text").AsView());
+			out.AppendByte('\n');
+		}
+	}
+
+	static void CauseLines(Core::StringBuilder& out, const Serialization::DomNode& h) {
+		Serialization::DomNode causes = h.Member("causes");
+		if (causes.Count() == 0) return;
+		out.Append("Causes over the ");
+		out.Append(Number(h.Member("slow").AsInt()).View());
+		out.Append(" slow frames:\n");
+		for (int64 i = 0; i < causes.Count(); ++i) {
+			Serialization::DomNode c = causes.At(i);
+			Core::StringView kind = c.Member("kind").AsView();
+			out.Append("  ");
+			out.Append(c.Member("name").AsView());
+			if (!c.Member("thread").AsView().IsEmpty()) {
+				out.Append(kind == "lock" ? " (waited for by " : " on ");
+				out.Append(c.Member("thread").AsView());
+				out.Append(kind == "lock" ? ")" : "");
+			}
+			out.Append(": in ");
+			out.Append(Number(c.Member("frames").AsInt()).View());
+			out.Append(" frames");
+			if (kind == "zone") {
+				out.Append(", +");
+				out.Append(Duration(c.Member("meanNs").AsInt()).View());
+				out.Append(" over its usual time on average");
+			}
+			else if (kind == "allocations") out.Append(", over twice the usual count");
+			else {
+				out.Append(", ");
+				out.Append(Duration(c.Member("meanNs").AsInt()).View());
+				out.Append(" on average");
+			}
+			out.AppendByte('\n');
+		}
+	}
+
+	Core::String HitchesText(const Capture& capture, const Serialization::DomNode& args) {
+		HitchAsk ask;
+		ask.thresholdNs = MsArg(args, "threshold_ms");
+		ask.limit = args.Member("n").IsValid() ? (int32)args.Member("n").AsInt() : kToolHitches;
+		Serialization::DomNode h = ParseJson(Hitches(capture, ask));
+		Core::StringBuilder out;
+		if (h.Member("frames").AsInt() == 0) {
+			out.Append("The capture marks no frames, so no frame is slow: profile_top_zones by max and profile_find_zone find the longest zones instead.\n");
+			return out.ToString();
+		}
+		out.Append("Frames: ");
+		out.Append(Number(h.Member("frames").AsInt()).View());
+		out.Append(", median ");
+		out.Append(Duration(h.Member("medianNs").AsInt()).View());
+		out.Append("; ");
+		out.Append(Number(h.Member("slow").AsInt()).View());
+		out.Append(" slower than ");
+		out.Append(Duration(h.Member("thresholdNs").AsInt()).View());
+		out.Append(ask.thresholdNs < 0 ? " (twice the median)" : "");
+		if (h.Member("slow").AsInt() == 0) {
+			out.Append(".\n");
+			return out.ToString();
+		}
+		out.Append("; the worst ");
+		out.Append(Duration(h.Member("worstNs").AsInt()).View());
+		out.Append(". The slowest first:\n");
+		Serialization::DomNode list = h.Member("list");
+		for (int64 i = 0; i < list.Count(); ++i) SlowFrameLines(out, list.At(i));
+		CauseLines(out, h);
+		out.Append("A zone's own time excludes its children; profile_zone opens a [ref], profile_timeline with a frame's from_ms/to_ms shows its threads in order.\n");
+		return out.ToString();
+	}
+
+	// --- profile_threads ----------------------------------------------------------------------------------------------
+
+	Core::String ThreadsText(const Capture& capture, const Serialization::DomNode& args) {
+		Serialization::DomNode t = ParseJson(Threads(capture, MsArg(args, "from_ms"), MsArg(args, "to_ms")));
+		Core::StringBuilder out;
+		out.Append("Threads from ");
+		out.Append(Instant(t.Member("fromNs").AsInt()).View());
+		out.Append(" to ");
+		out.Append(Instant(t.Member("toNs").AsInt()).View());
+		out.Append("; on average ");
+		out.AppendDouble(t.Member("meanBusyThreads").AsFloat(), 2);
+		out.Append(" busy at once (busy: inside a top-level zone).\n");
+		TextTable table;
+		Core::Array<Core::String>* head = table.Row();
+		const char*[7] titles = { "thread", "busy", "share", "zones", "longest idle", "lock waits", "costliest zones (own time)" };
+		for (int32 i = 0; i < 7; ++i) head->Push(Core::String(titles[i]));
+		Serialization::DomNode threads = t.Member("threads");
+		for (int64 i = 0; i < threads.Count(); ++i) {
+			Serialization::DomNode th = threads.At(i);
+			Core::Array<Core::String>* row = table.Row();
+			row->Push(Core::String(th.Member("name").AsView()));
+			row->Push(Duration(th.Member("busyNs").AsInt()));
+			row->Push(Percent(th.Member("share").AsFloat()));
+			row->Push(Number(th.Member("zones").AsInt()));
+			Core::StringBuilder idle;
+			idle.Append(Duration(th.Member("longestIdleNs").AsInt()).View());
+			if (th.Member("longestIdleAtNs").AsInt() >= 0) {
+				idle.Append(" from ");
+				idle.Append(Instant(th.Member("longestIdleAtNs").AsInt()).View());
+			}
+			row->Push(idle.ToString());
+			row->Push(Duration(th.Member("waitNs").AsInt()));
+			Core::StringBuilder top;
+			Serialization::DomNode zones = th.Member("top");
+			for (int64 k = 0; k < zones.Count(); ++k) {
+				if (k > 0) top.Append(", ");
+				top.Append(zones.At(k).Member("name").AsView());
+				top.AppendByte(' ');
+				top.Append(Duration(zones.At(k).Member("selfNs").AsInt()).View());
+			}
+			row->Push(top.ToString());
+		}
+		table.Write(out);
+		out.Append("One thread near 100% while the others idle is work on one thread that could be split or moved; lock waits are time a thread was blocked (profile_locks).\n");
+		return out.ToString();
+	}
+
+	// --- profile_zone -------------------------------------------------------------------------------------------------
+
+	static void InsideLines(Core::StringBuilder& out, const Serialization::DomNode& inside) {
+		Serialization::DomNode allocs = inside.Member("allocations");
+		out.Append("Allocations inside: ");
+		out.Append(Number(allocs.Member("count").AsInt()).View());
+		out.Append(" (");
+		out.Append(Bytes(allocs.Member("bytes").AsInt()).View());
+		out.Append("), ");
+		out.Append(Number(allocs.Member("freedInside").AsInt()).View());
+		out.Append(" freed before it ended\n");
+		if (inside.Member("waitNs").AsInt() > 0) {
+			out.Append("Lock waits inside: ");
+			out.Append(Duration(inside.Member("waitNs").AsInt()).View());
+			out.Append(" in all");
+			Serialization::DomNode waits = inside.Member("waits");
+			for (int64 i = 0; i < waits.Count(); ++i) {
+				out.Append(i == 0 ? ": " : ", ");
+				out.Append(waits.At(i).Member("lock").AsView());
+				out.AppendByte(' ');
+				out.Append(Duration(waits.At(i).Member("durationNs").AsInt()).View());
+				out.Append(" from ");
+				out.Append(Instant(waits.At(i).Member("startNs").AsInt()).View());
+			}
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode messages = inside.Member("messages");
+		for (int64 i = 0; i < messages.Count(); ++i) {
+			out.Append("Logged [");
+			out.Append(SeverityName(messages.At(i).Member("severity").AsInt()));
+			out.Append("] at ");
+			out.Append(Instant(messages.At(i).Member("startNs").AsInt()).View());
+			out.Append(": ");
+			out.Append(messages.At(i).Member("text").AsView());
+			out.AppendByte('\n');
+		}
+		if (inside.Member("gcCount").AsInt() > 0) {
+			out.Append("Collections during it: ");
+			out.AppendInt(inside.Member("gcCount").AsInt());
+			out.Append(", paused ");
+			out.Append(Duration(inside.Member("gcPauseNs").AsInt()).View());
+			out.AppendByte('\n');
+		}
+	}
+
+	Core::String ZoneText(const Capture& capture, const Serialization::DomNode& args) {
+		ZoneRef ref;
+		if (!ZoneRef::Parse(args.Member("ref").AsView(), ref)) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("ref is track:depth:index, as the other tools print it in brackets"));
+		Core::String json = ZoneDetails(capture, ref);
+		if (json.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no zone has that ref in this capture"));
+		Serialization::DomNode z = ParseJson(json);
+		Core::StringBuilder out;
+		out.Append("Zone ");
+		out.Append(ZoneTitle(z, "siteName").View());
+		out.Append(" [");
+		out.Append(z.Member("ref").AsView());
+		out.Append("] on ");
+		out.Append(z.Member("thread").AsView());
+		if (!z.Member("task").AsView().IsEmpty()) {
+			out.Append(", task ");
+			out.Append(z.Member("task").AsView());
+		}
+		out.Append(": ");
+		out.Append(Duration(z.Member("durationNs").AsInt()).View());
+		out.Append(z.Member("open").AsBool() ? " so far (still open)" : "");
+		out.Append(", its own time ");
+		out.Append(Duration(z.Member("selfNs").AsInt()).View());
+		out.Append(", from ");
+		out.Append(Instant(z.Member("startNs").AsInt()).View());
+		Serialization::DomNode frame = z.Member("frame");
+		if (frame.IsValid() && !frame.IsNull()) {
+			out.Append(", in frame ");
+			out.AppendInt(frame.Member("index").AsInt());
+			out.Append(" (");
+			out.Append(Duration(frame.Member("durationNs").AsInt()).View());
+			out.Append(")");
+		}
+		out.AppendByte('\n');
+		if (!z.Member("file").AsView().IsEmpty() || !z.Member("function").AsView().IsEmpty()) {
+			out.Append("Source: ");
+			out.Append(z.Member("function").AsView());
+			out.AppendByte(' ');
+			out.Append(SourceOf(z).View());
+			out.AppendByte('\n');
+		}
+		if (!z.Member("text").AsView().IsEmpty()) {
+			out.Append("Text: ");
+			out.Append(z.Member("text").AsView());
+			out.AppendByte('\n');
+		}
+		if (z.Member("value").IsValid() && !z.Member("value").IsNull()) {
+			out.Append("Value: ");
+			out.AppendInt(z.Member("value").AsInt());
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode parents = z.Member("parents");
+		if (parents.Count() > 0) {
+			out.Append("Inside: ");
+			for (int64 i = parents.Count() - 1; i >= 0; --i) {
+				out.Append(ZoneTitle(parents.At(i), "siteName").View());
+				out.Append(" [");
+				out.Append(parents.At(i).Member("ref").AsView());
+				out.Append("] > ");
+			}
+			out.Append(z.Member("name").AsView());
+			out.AppendByte('\n');
+		}
+		Serialization::DomNode children = z.Member("children");
+		if (children.Count() > 0) {
+			out.Append("Children (");
+			out.Append(Number(z.Member("childCount").AsInt()).View());
+			out.Append(" zones): ");
+			for (int64 i = 0; i < children.Count() && i < (int64)kToolChildren; ++i) {
+				if (i > 0) out.Append(", ");
+				out.Append(children.At(i).Member("name").AsView());
+				out.Append(" x");
+				out.AppendInt(children.At(i).Member("count").AsInt());
+				out.AppendByte(' ');
+				out.Append(Duration(children.At(i).Member("totalNs").AsInt()).View());
+			}
+			out.AppendByte('\n');
+		}
+		InsideLines(out, z.Member("inside"));
+		Serialization::DomNode stack = z.Member("callstack");
+		for (int64 i = 0; i < stack.Count(); ++i) {
+			out.Append(i == 0 ? "Call stack:\n  " : "  ");
+			out.Append(stack.At(i).AsView());
+			out.AppendByte('\n');
+		}
+		return out.ToString();
+	}
+
+	// --- profile_timeline ---------------------------------------------------------------------------------------------
+
+	// A zone's site, with the name it was given for this call when that differs: Level::Stream "chunk 16".
+	static Core::String ZoneTitle(const Serialization::DomNode& z, const char* siteKey) {
+		Core::StringView name = z.Member("name").AsView();
+		Core::StringView site = z.Member(siteKey).AsView();
+		if (site.IsEmpty() || site == name) return Core::String(name);
+		return Core::String(site) + " \"" + name + "\"";
+	}
+
+	static bool SameZone(const Serialization::DomNode& a, const Serialization::DomNode& b) {
+		return a.Member("kind").AsView() == "zone" && b.Member("kind").AsView() == "zone" && a.Member("depth").AsInt() == b.Member("depth").AsInt() && a.Member("name").AsView() == b.Member("name").AsView();
+	}
+
+	// A run of `count` calls of one zone side by side from entry `first`, as one line.
+	static void RunLine(Core::StringBuilder& out, const Serialization::DomNode& entries, int64 first, int64 count) {
+		Serialization::DomNode e = entries.At(first);
+		int64 total = 0;
+		int64 allocations = 0;
+		for (int64 k = first; k < first + count; ++k) {
+			total += entries.At(k).Member("durationNs").AsInt();
+			allocations += entries.At(k).Member("allocations").AsInt();
+		}
+		out.Append("  ");
+		for (int64 d = 0; d < e.Member("depth").AsInt(); ++d) out.Append("  ");
+		out.Append(Instant(e.Member("startNs").AsInt()).View());
+		out.Append("  ");
+		out.Append(ZoneTitle(e, "site").View());
+		out.Append(" x");
+		out.AppendInt(count);
+		out.Append("  ");
+		out.Append(Duration(total).View());
+		out.Append(" in all  [");
+		out.Append(e.Member("ref").AsView());
+		out.Append(" to ");
+		out.Append(entries.At(first + count - 1).Member("ref").AsView());
+		out.Append("]");
+		if (allocations > 0) {
+			out.Append("  ");
+			out.Append(Number(allocations).View());
+			out.Append(" allocations");
+		}
+		out.AppendByte('\n');
+	}
+
+	static void EntryLine(Core::StringBuilder& out, const Serialization::DomNode& e) {
+		Core::StringView kind = e.Member("kind").AsView();
+		out.Append("  ");
+		for (int64 d = 0; kind == "zone" && d < e.Member("depth").AsInt(); ++d) out.Append("  ");
+		out.Append(Instant(e.Member("startNs").AsInt()).View());
+		out.Append("  ");
+		if (kind == "zone") {
+			out.Append(ZoneTitle(e, "site").View());
+			out.Append("  ");
+			out.Append(Duration(e.Member("durationNs").AsInt()).View());
+			out.Append("  [");
+			out.Append(e.Member("ref").AsView());
+			out.Append("]");
+			if (e.Member("allocations").AsInt() > 0) {
+				out.Append("  ");
+				out.Append(Number(e.Member("allocations").AsInt()).View());
+				out.Append(" allocations");
+			}
+		}
+		else if (kind == "wait") {
+			out.Append("waited ");
+			out.Append(Duration(e.Member("durationNs").AsInt()).View());
+			out.Append(" for lock ");
+			out.Append(e.Member("lock").AsView());
+		}
+		else {
+			out.Append("[");
+			out.Append(SeverityName(e.Member("severity").AsInt()));
+			out.Append("] ");
+			out.Append(e.Member("text").AsView());
+		}
+		out.AppendByte('\n');
+	}
+
+	Core::String TimelineText(const Capture& capture, const Serialization::DomNode& args) {
+		WindowAsk ask;
+		ask.fromNs = MsArg(args, "from_ms");
+		ask.toNs = MsArg(args, "to_ms");
+		if (ask.fromNs < 0 || ask.toNs <= ask.fromNs) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("from_ms and to_ms are required, from_ms before to_ms"));
+		ask.depth = args.Member("depth").IsValid() ? (int32)args.Member("depth").AsInt() : 2;
+		ask.thread = Core::String(args.Member("thread").AsView());
+		ask.limit = kToolWindowEntries;
+		Serialization::DomNode w = ParseJson(Window(capture, ask));
+		Core::StringBuilder out;
+		out.Append("From ");
+		out.Append(Instant(w.Member("fromNs").AsInt()).View());
+		out.Append(" to ");
+		out.Append(Instant(w.Member("toNs").AsInt()).View());
+		out.Append(", zones to depth ");
+		out.AppendInt(ask.depth);
+		out.Append(" (0 is a thread's top level):\n");
+		Serialization::DomNode threads = w.Member("threads");
+		if (threads.Count() == 0) out.Append("Nothing happened on a thread in the window.\n");
+		for (int64 i = 0; i < threads.Count(); ++i) {
+			out.Append(threads.At(i).Member("name").AsView());
+			out.Append(":\n");
+			Serialization::DomNode entries = threads.At(i).Member("entries");
+			int64 k = 0;
+			while (k < entries.Count()) {
+				int64 run = 1;
+				while (k + run < entries.Count() && SameZone(entries.At(k), entries.At(k + run))) run += 1;
+				if (run >= kRunAtLeast) RunLine(out, entries, k, run);
+				else
+					for (int64 r = k; r < k + run; ++r) EntryLine(out, entries.At(r));
+				k += run;
+			}
+		}
+		Serialization::DomNode gc = w.Member("gc");
+		for (int64 i = 0; i < gc.Count(); ++i) {
+			out.Append("Collection at ");
+			out.Append(Instant(gc.At(i).Member("startNs").AsInt()).View());
+			out.Append(" paused ");
+			out.Append(Duration(gc.At(i).Member("pauseNs").AsInt()).View());
+			out.AppendByte('\n');
+		}
+		if (w.Member("left").AsInt() > 0) {
+			out.Append("(");
+			out.Append(Number(w.Member("left").AsInt()).View());
+			out.Append(" more entries left out: narrow the range, lower the depth or name a thread)\n");
+		}
+		return out.ToString();
+	}
+}

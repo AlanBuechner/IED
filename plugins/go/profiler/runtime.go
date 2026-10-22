@@ -18,11 +18,13 @@ const (
 var runtimeMetrics = []string{"/memory/classes/heap/objects:bytes", "/sched/goroutines:goroutines", "/gc/heap/live:bytes"}
 
 // runtimeSampler reports the Go runtime ten times a second: each collection's stop-the-world pauses as a GcBegin and
-// GcEnd (the runtime keeps when each ended and how long it took), and the heap and goroutine counts as plots.
+// GcEnd (the runtime keeps when each ended and how long it took), the heap and goroutine counts as plots, and the
+// runtime's allocation samples (allocSampler).
 type runtimeSampler struct {
 	seenGCs int64
 	stats   debug.GCStats
 	samples []metrics.Sample
+	allocs  allocSampler
 }
 
 // begin takes the collections so far as seen: a session reports those after its start.
@@ -33,6 +35,7 @@ func (r *runtimeSampler) begin() {
 	}
 	debug.ReadGCStats(&r.stats)
 	r.seenGCs = r.stats.NumGC
+	r.allocs.begin()
 }
 
 func (r *runtimeSampler) sample(s *session) {
@@ -41,6 +44,7 @@ func (r *runtimeSampler) sample(s *session) {
 	s.plot(heapPlot, plotBytes, float64(uintValue(r.samples[0])), at)
 	s.plot(goroutinesPlot, plotNumber, float64(uintValue(r.samples[1])), at)
 	r.collections(s, uintValue(r.samples[2]))
+	r.allocs.report(s)
 }
 
 // collections sends the pauses since the last sample, oldest first; the newest gets the live heap it left.

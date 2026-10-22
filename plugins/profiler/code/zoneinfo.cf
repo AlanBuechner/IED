@@ -1,6 +1,6 @@
 // One zone's details (F-PRF-15): its site, times, annotations, call stack, the chain of zones around it, its children
 // by name, the task it ran in and the frame it fell in.
-include "analysis.ch"
+include "investigate.ch"
 
 namespace Profiler
 {
@@ -53,6 +53,7 @@ namespace Profiler
 			json.BeginObject();
 			json.Field("ref", ZoneRef::Of(ref.Track(), depth, i).Text().View());
 			json.Field("name", capture.ZoneName(track, level, i));
+			json.Field("siteName", capture.SiteName((uint64)level->sites[i]));
 			json.IntField("durationNs", capture.clock.Ns(level->EndOr(i, capture.lastTicks) - level->starts[i]));
 			json.EndObject();
 		}
@@ -160,6 +161,7 @@ namespace Profiler
 		WriteFrameOf(json, capture, start);
 		WriteParents(json, capture, ref, track, start);
 		WriteChildren(json, capture, ref, track, start, end);
+		WriteInside(json, capture, (int32)ref.Track(), start, end);
 		json.EndObject();
 		return json.ToString();
 	}

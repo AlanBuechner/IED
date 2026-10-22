@@ -270,8 +270,9 @@ namespace Profiler
 
 	// --- Frames, plots, messages --------------------------------------------------------------------------------------
 
-	static void FrameEvent(Capture& capture, const Event& event, int64 t) {
+	static void FrameEvent(Capture& capture, int32 track, const Event& event, int64 t) {
 		FrameSet* set = FrameSetFor(capture, event.fields[0]);
+		if (set->track < 0 && event.chunkKind == kThreadChunk) set->track = track;
 		const bool open = !set->ends.IsEmpty() && set->ends.Back() == kOpen;
 		if (event.type == EventType::FrameEnd) {
 			if (open) set->ends.Back() = t;
@@ -541,7 +542,7 @@ namespace Profiler
 			track->nameStrs.Push(event.fields[0]);
 		}
 		else if (Within(type, EventType::TaskBegin, EventType::TaskResume)) TaskEvent(capture, TrackOfEvent(capture, event), event, t);
-		else if (Within(type, EventType::FrameMark, EventType::FrameEnd)) FrameEvent(capture, event, t);
+		else if (Within(type, EventType::FrameMark, EventType::FrameEnd)) FrameEvent(capture, TrackOfEvent(capture, event), event, t);
 		else if (type == EventType::PlotValue) PlotValue(capture, event, t);
 		else if (type == EventType::Message) Message(capture, TrackOfEvent(capture, event), event, t);
 		else if (type == EventType::Alloc) Alloc(capture, TrackOfEvent(capture, event), event, t);

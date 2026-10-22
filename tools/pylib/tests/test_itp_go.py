@@ -85,6 +85,19 @@ class FileTraceTests(unittest.TestCase):
 	def test_a_mutex_records_its_waits_and_holds(self):
 		clients.check_lock(self, self.events, "Queue", 1)
 
+	def test_the_runtimes_allocation_samples_start_in_the_programs_code(self):
+		symbols = {e["address"]: self.strings[e["functionStr"]] for e in of(self.events, "SymbolDef")}
+		stacks = {e["callstackId"]: e["addresses"] for e in of(self.events, "CallstackDef")}
+		samples = of(self.events, "Sample")
+		self.assertTrue(samples and all(e["kind"] == 2 for e in samples), "bytes allocated")
+		leaves = {symbols[stacks[e["callstackId"]][0]] for e in samples}
+		self.assertIn("main.decode", leaves)
+		allocators = ("runtime.mallocgc", "runtime.makeslice", "runtime.newobject", "runtime.growslice")
+		self.assertFalse(leaves & set(allocators) or any(leaf.startswith("internal/runtime/") for leaf in leaves), "the runtime's own frames are left off: %s" % leaves)
+		self.assertFalse(any("/plugins/go/profiler." in leaf for leaf in leaves), "the profiler's own allocations are not reported: %s" % leaves)
+		decoded = sum(e["weight"] for e in samples if symbols[stacks[e["callstackId"]][0]] == "main.decode")
+		self.assertGreater(decoded, 1 << 20, "most of the 5 MiB decoded is sampled")
+
 	def test_the_runtime_reports_collections_heap_and_goroutines(self):
 		begins, ends = of(self.events, "GcBegin"), of(self.events, "GcEnd")
 		self.assertGreaterEqual(len(begins), 1)

@@ -158,6 +158,36 @@ namespace Profiler
 		json.EndObject();
 	}
 
+	// One side's memory for a comparison: its allocations (and per frame), the highest any pool or memory plot got,
+	// and its collections.
+	static void WriteMemorySide(IED::JsonWriter& json, const char* key, const Capture& capture) {
+		int64 peak = 0;
+		for (const Pool* pool : capture.pools)
+			if (pool->peak > peak) peak = pool->peak;
+		for (const Plot* plot : capture.plots)
+			if (plot->kind == 1)
+				for (double value : plot->values)
+					if ((int64)value > peak) peak = (int64)value;
+		int64 pause = 0;
+		int64 longest = 0;
+		for (const GcRecord& gc : capture.gcs) {
+			if (gc.end == kOpen) continue;
+			pause += gc.end - gc.begin;
+			if (gc.end - gc.begin > longest) longest = gc.end - gc.begin;
+		}
+		const FrameSet* set = MainFrameSet(capture);
+		const int64 frames = set ? set->Completed() : 0;
+		json.Key(Core::StringView(key));
+		json.BeginObject();
+		json.IntField("allocations", capture.allocations.Count());
+		NumberField(json, "allocationsPerFrame", frames == 0 ? 0.0 : (double)capture.allocations.Count() / (double)frames, 1);
+		json.IntField("peakBytes", peak);
+		json.IntField("collections", capture.gcs.Count());
+		json.IntField("gcPauseNs", capture.clock.Ns(pause));
+		json.IntField("gcLongestNs", capture.clock.Ns(longest));
+		json.EndObject();
+	}
+
 	Core::String Compare(const Capture& a, const Capture& b, int32 limit) {
 		Core::HashMap<Core::String, SideTotals> left;
 		Core::HashMap<Core::String, SideTotals> right;
@@ -190,6 +220,11 @@ namespace Profiler
 		json.EndObject();
 		json.IntField("durationANs", a.DurationNs());
 		json.IntField("durationBNs", b.DurationNs());
+		json.Key(Core::StringView("memory"));
+		json.BeginObject();
+		WriteMemorySide(json, "a", a);
+		WriteMemorySide(json, "b", b);
+		json.EndObject();
 		json.Key(Core::StringView("zones"));
 		json.BeginArray();
 		for (int64 k = 0; k < order.Count() && k < (int64)limit; ++k) {

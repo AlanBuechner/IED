@@ -18,7 +18,7 @@
 		"skills": ["skills"],
 		"bindings": {
 			"provides": [
-				{ "name": "profiler.query", "version": "1", "kind": "function", "description": "A profile_* tool's answer as text: {wsId, tool: list|summary|top_zones|frame|find_zone|flame|messages|leaks|compare|capture, args} -> {text}." }
+				{ "name": "profiler.query", "version": "1", "kind": "function", "description": "A profile_* tool's answer as text: {wsId, tool: list|summary|diagnose|top_zones|frame|hitches|threads|zone|timeline|find_zone|flame|messages|allocations|leaks|memory|plots|locks|annotate|compare|capture, args} -> {text}." }
 			],
 			"consumes": [
 				{ "name": "profiler.query", "version": "1" }
@@ -63,7 +63,7 @@
 			{ "command": "ied.profiler.show", "key": "ctrl+alt+f2" }
 		],
 		"systemMessageSections": [
-			{ "id": "profiler", "text": "The profiler holds the workspace's captures (.ied/local/captures). To find where time goes, read captures with the profile_* tools: profile_list, then profile_summary, profile_top_zones, profile_frame (\"worst\" for the slowest frame), profile_find_zone, profile_flame, profile_messages, profile_leaks, profile_locks and profile_compare; profile_capture runs the project's Profile task and records; profile_annotate marks a finding on the capture's timeline. Read the profiler skill before instrumenting code." }
+			{ "id": "profiler", "text": "The profiler holds the workspace's captures (.ied/local/captures); the profile_* tools read them. Start with profile_diagnose: it lists the problems that stand out (slow frames, hot zones, work on one thread, lock contention, allocations every frame, memory that keeps growing, collections), each with its evidence and the tool that looks closer. Slow or stuttering: profile_hitches, profile_frame, profile_top_zones, profile_find_zone, profile_flame, profile_threads, profile_locks. Memory: profile_memory (growth, a rising floor, collections), profile_leaks (what is never freed), profile_allocations (who allocates, per frame, churn). Drill down with profile_zone (a [ref] other tools print) and profile_timeline (a window in order); profile_plots reads the program's counters, profile_messages its log; profile_compare checks a fix against the capture before it. profile_capture runs the project's Profile task and records; profile_annotate marks a finding on the capture's timeline. Report numbers with their source lines. Read the profiler skill before instrumenting code." }
 		],
 		"toolCalls": [
 			{
@@ -131,12 +131,84 @@
 			},
 			{
 				"name": "profile_leaks",
-				"description": "Allocations still live at the end of a capture (or at at_ms), grouped by call stack, pool or thread, largest first; plus each pool's peak and the GC totals.",
+				"description": "Allocations still live at the end of a capture (or at at_ms), only those made between from_ms and to_ms when given (a level loaded and unloaded), grouped by zone (the default without call stacks), zone path, call stack, pool, thread or size, the most bytes first; each group's first and last allocation and whether it keeps accumulating (a likely leak) or was made at once (a cache); plus each pool's peak.",
 				"class": "read",
 				"group": "profiler",
 				"parallelSafe": true,
-				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "group_by": { "enum": ["callstack", "pool", "thread"] }, "at_ms": { "type": "number" } }, "additionalProperties": false },
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "group_by": { "enum": ["zone", "path", "callstack", "pool", "thread", "size"] }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "at_ms": { "type": "number", "minimum": 0 } }, "additionalProperties": false },
 				"function": "Profiler::LeaksTool"
+			},
+			{
+				"name": "profile_allocations",
+				"description": "Where a program allocates: per zone (the innermost zone open on the allocating thread; the default without call stacks), zone path, thread, pool, size class or call stack - allocations and bytes in all and per frame, mean size, churn (the share freed within the frame it was made in) and what is still live at the range's end; the range's allocations per frame (mean, median, p95, the worst frame) and per second. Reads allocation samples by function when the capture has no allocation events.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "group_by": { "enum": ["zone", "path", "thread", "pool", "size", "callstack"] }, "by": { "enum": ["count", "bytes"] }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "n": { "type": "integer", "minimum": 1, "maximum": 200 } }, "additionalProperties": false },
+				"function": "Profiler::AllocationsTool"
+			},
+			{
+				"name": "profile_memory",
+				"description": "Memory over time: each pool and memory plot (the GC heap, the Go heap) at evenly spaced points with its growth, peak and floor (the lowest it got in each step - a floor that keeps rising is memory the program keeps), the heap left after each collection, and collections: how many, how often, their pauses, the longest and how many fell in slow frames.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "points": { "type": "integer", "minimum": 2, "maximum": 100 } }, "additionalProperties": false },
+				"function": "Profiler::MemoryTool"
+			},
+			{
+				"name": "profile_plots",
+				"description": "The program's own counters (plots: entities, draw calls, queue lengths) over time: each one's min, mean, max and last, and its values at evenly spaced points; `name` picks one (memory plots are in profile_memory).",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "name": { "type": "string" }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "points": { "type": "integer", "minimum": 2, "maximum": 100 } }, "additionalProperties": false },
+				"function": "Profiler::PlotsTool"
+			},
+			{
+				"name": "profile_hitches",
+				"description": "The slow frames (over threshold_ms, else twice the median), the slowest first, and what made each slow: the zones far past their usual time a frame (own time, thread, [ref], source line), collections, lock waits, allocations against the usual and warnings logged; then the causes counted over every slow frame.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "threshold_ms": { "type": "number", "minimum": 0 }, "n": { "type": "integer", "minimum": 1, "maximum": 50 } }, "additionalProperties": false },
+				"function": "Profiler::HitchesTool"
+			},
+			{
+				"name": "profile_threads",
+				"description": "Each thread's busy time and share of the range (time inside its top-level zones), its longest idle gap, its lock waits and its costliest zones; and how many threads were busy at once on average - whether the work runs side by side or on one thread.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 } }, "additionalProperties": false },
+				"function": "Profiler::ThreadsTool"
+			},
+			{
+				"name": "profile_zone",
+				"description": "One zone up close by the [ref] other tools print (track:depth:index): its time and own time, thread, task, frame, text and value, source, the zones it is inside, its children by name, and the allocations, lock waits, messages and collections inside it.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "ref": { "type": "string", "pattern": "^[0-9]+:[0-9]+:[0-9]+$" } }, "required": ["ref"], "additionalProperties": false },
+				"function": "Profiler::ZoneTool"
+			},
+			{
+				"name": "profile_timeline",
+				"description": "What happened between from_ms and to_ms, per thread in time order: zones down to `depth` (0 a thread's top level; default 2) with their times, [refs] and allocations, lock waits and messages; collections. `thread` keeps the threads whose name holds it.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "from_ms": { "type": "number", "minimum": 0 }, "to_ms": { "type": "number", "minimum": 0 }, "depth": { "type": "integer", "minimum": 0, "maximum": 64 }, "thread": { "type": "string" } }, "required": ["from_ms", "to_ms"], "additionalProperties": false },
+				"function": "Profiler::TimelineTool"
+			},
+			{
+				"name": "profile_diagnose",
+				"description": "The first look at a capture: the problems that stand out, most costly first, each with its evidence and the tool call that looks closer - slow frames and their causes, memory that keeps growing, allocations never freed, lock contention, allocations every frame and churn, collections, hot zones, work serialized on one thread, dropped events. `focus` keeps one area.",
+				"class": "read",
+				"group": "profiler",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string" }, "focus": { "enum": ["all", "frames", "cpu", "memory", "locks"] } }, "additionalProperties": false },
+				"function": "Profiler::DiagnoseTool"
 			},
 			{
 				"name": "profile_locks",
@@ -157,7 +229,7 @@
 			},
 			{
 				"name": "profile_compare",
-				"description": "Two captures compared: frame times side by side and the zones whose total time changed most.",
+				"description": "Two captures compared (a before b): frame times side by side, allocations, peak memory and collection pauses, and the zones whose total time changed most.",
 				"class": "read",
 				"group": "profiler",
 				"parallelSafe": true,

@@ -68,6 +68,7 @@ namespace Profiler
 	{
 		public uint64 nameStr;
 		public bool discontinuous;
+		public int32 track = -1;            // the thread that marked its first frame; -1 for the process
 		public Core::Array<int64> starts;
 		public Core::Array<int64> ends;     // kOpen for the frame still running
 

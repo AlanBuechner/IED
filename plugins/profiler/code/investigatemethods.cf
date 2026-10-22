@@ -1,0 +1,78 @@
+// The prof.* methods of the investigation analyses (docs/10, docs/16 "Finding problems"): the same JSON the profile_*
+// tools read, for a client or another plugin. Each names a capture and answers under the capture's lock.
+include "service.ch"
+include "investigate.ch"
+
+namespace Profiler
+{
+	static Core::String Answered(ProfilerPlugin* profiler, const IED::Params& params, const func<Core::String(const Capture&)>& query) {
+		Capture* capture = profiler->Loaded(params.Str("captureId").View());
+		Threading::LockGuard held(capture->lock);
+		return query(*capture);
+	}
+
+	static int32 PointsParam(const IED::Params& params) {
+		return (int32)params.Int("points", 10);
+	}
+
+	static Core::String AllocationsMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		AllocAsk ask;
+		ask.fromNs = params.Int("from", -1);
+		ask.toNs = params.Int("to", -1);
+		ask.byBytes = params.Str("order", Core::StringView("count")).View() == "bytes";
+		ask.limit = (int32)params.Int("limit", 50);
+		const bool named = AllocGroupNamed(params.Str("groupBy", Core::StringView("")).View(), ask.groupBy);
+		return Answered(profiler, params, [ask, named](const Capture& capture) -> Core::String {
+			AllocAsk asked = ask;
+			if (!named) asked.groupBy = DefaultAllocGroup(capture);
+			return Allocations(capture, asked);
+		});
+	}
+
+	static Core::String MemoryTrendMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const int64 from = params.Int("from", -1);
+		const int64 to = params.Int("to", -1);
+		const int32 points = PointsParam(params);
+		return Answered(profiler, params, [from, to, points](const Capture& capture) -> Core::String { return MemoryTrend(capture, from, to, points); });
+	}
+
+	static Core::String PlotsMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		Core::String name = params.Str("name", Core::StringView(""));
+		const int64 from = params.Int("from", -1);
+		const int64 to = params.Int("to", -1);
+		const int32 points = PointsParam(params);
+		return Answered(profiler, params, [name, from, to, points](const Capture& capture) -> Core::String { return Plots(capture, name.View(), from, to, points); });
+	}
+
+	static Core::String HitchesMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		HitchAsk ask;
+		ask.thresholdNs = params.Int("threshold", -1);
+		ask.limit = (int32)params.Int("limit", 10);
+		return Answered(profiler, params, [ask](const Capture& capture) -> Core::String { return Hitches(capture, ask); });
+	}
+
+	static Core::String ThreadsMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		const int64 from = params.Int("from", -1);
+		const int64 to = params.Int("to", -1);
+		return Answered(profiler, params, [from, to](const Capture& capture) -> Core::String { return Threads(capture, from, to); });
+	}
+
+	static Core::String WindowMethod(ProfilerPlugin* profiler, const IED::Params& params) {
+		WindowAsk ask;
+		ask.fromNs = params.Int("from", -1);
+		ask.toNs = params.Int("to", -1);
+		ask.depth = (int32)params.Int("depth", 2);
+		ask.thread = params.Str("thread", Core::StringView(""));
+		ask.limit = (int32)params.Int("limit", 400);
+		return Answered(profiler, params, [ask](const Capture& capture) -> Core::String { return Window(capture, ask); });
+	}
+
+	void RegisterInvestigationMethods(ProfilerPlugin* profiler) {
+		RegisterMethod(profiler, "prof.allocations", AllocationsMethod);
+		RegisterMethod(profiler, "prof.memoryTrend", MemoryTrendMethod);
+		RegisterMethod(profiler, "prof.plots", PlotsMethod);
+		RegisterMethod(profiler, "prof.hitches", HitchesMethod);
+		RegisterMethod(profiler, "prof.threads", ThreadsMethod);
+		RegisterMethod(profiler, "prof.window", WindowMethod);
+	}
+}

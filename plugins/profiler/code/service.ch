@@ -110,6 +110,9 @@ namespace Profiler
 	void RegisterMethod(ProfilerPlugin* profiler, const char* name, func<Core::String(ProfilerPlugin*, const IED::Params&)> method);
 	// prof.annotations, prof.annotate, prof.updateAnnotation, prof.deleteAnnotation.
 	void RegisterAnnotationMethods(ProfilerPlugin* profiler);
+	// prof.allocations, prof.memoryTrend, prof.plots, prof.hitches, prof.threads and prof.window (docs/16 "Finding
+	// problems").
+	void RegisterInvestigationMethods(ProfilerPlugin* profiler);
 	// Adds an annotation by `by` ("owner" or "ai") to a capture and saves it; throws not_found, bad_request or
 	// unavailable. Takes the plugin's lock.
 	Annotation AddAnnotation(ProfilerPlugin* profiler, Core::StringView captureId, int64 fromNs, int64 toNs, Core::StringView text, Core::StringView by);

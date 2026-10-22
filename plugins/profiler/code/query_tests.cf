@@ -283,6 +283,7 @@ class ProfilerQueryTests {
 		b.Done();
 		Profiler::Capture* capture = b.Read();
 		Profiler::LeakAsk ask;
+		ask.groupBy = Profiler::AllocGroup::Callstack;
 		Serialization::DomNode answer = Parse(Profiler::Leaks(*capture, ask));
 		assert_true(answer.Member("count").AsInt() == 3 && answer.Member("bytes").AsInt() == 192, "what is live at the end");
 		assert_true(answer.Member("groups").Count() == 2 && answer.Member("groups").At(0).Member("count").AsInt() == 2, "grouped by call stack, largest first");

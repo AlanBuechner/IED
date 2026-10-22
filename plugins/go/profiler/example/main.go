@@ -1,6 +1,6 @@
 // The client's example, and the program test_itp_go.py runs: a game-like loop with zones on goroutines of their own
-// and on one without a context, named zones with text and a value, frames, plots, a message, tasks, a pool and a
-// collection. The target is the first argument ("file:<path>" or "host:port"); without one, IED_PROFILER.
+// and on one without a context, named zones with text and a value, frames, plots, a message, tasks, a pool, buffers
+// allocated every frame (the runtime's allocation samples) and a collection. The target is the first argument ("file:<path>" or "host:port"); without one, IED_PROFILER.
 package main
 
 import (
@@ -48,6 +48,7 @@ func update(ctx context.Context, frame int) {
 		spin(ctx, 1000)
 		zone.End()
 	}
+	decode()
 	load.End()
 	var done sync.WaitGroup
 	done.Add(1)
@@ -57,6 +58,17 @@ func update(ctx context.Context, frame int) {
 	}()
 	done.Wait()
 	profiler.Plot("Frame", float64(frame))
+}
+
+var decoded []byte
+
+// decode reads a file into fresh buffers every frame: 1 MiB the runtime's allocation profile samples.
+func decode() {
+	for i := 0; i < 16; i++ {
+		buffer := make([]byte, 64*1024)
+		buffer[i] = byte(i)
+		decoded = buffer
+	}
 }
 
 func physics(ctx context.Context) {

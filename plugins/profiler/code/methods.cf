@@ -52,11 +52,6 @@ namespace Profiler
 		return LockOrder::Wait;
 	}
 
-	static LeakGroup LeakGroupOf(Core::StringView text) {
-		if (text == "pool") return LeakGroup::Pool;
-		if (text == "thread") return LeakGroup::Thread;
-		return LeakGroup::Callstack;
-	}
 
 	static ProfWorkspace* WorkspaceOrThrow(ProfilerPlugin* profiler, Core::StringView wsId) {
 		ProfWorkspace* ws = profiler->Workspace(wsId);
@@ -244,9 +239,15 @@ namespace Profiler
 	static Core::String LeaksMethod(ProfilerPlugin* profiler, const IED::Params& params) {
 		LeakAsk ask;
 		ask.atNs = params.Int("at", -1);
-		ask.groupBy = LeakGroupOf(params.Str("groupBy", Core::StringView("callstack")).View());
+		ask.fromNs = params.Int("from", -1);
+		ask.toNs = params.Int("to", -1);
 		ask.limit = (int32)params.Int("limit", 200);
-		return Answer(profiler, params, [ask](const Capture& capture) -> Core::String { return Leaks(capture, ask); });
+		const bool named = AllocGroupNamed(params.Str("groupBy", Core::StringView("")).View(), ask.groupBy);
+		return Answer(profiler, params, [ask, named](const Capture& capture) -> Core::String {
+			LeakAsk asked = ask;
+			if (!named) asked.groupBy = DefaultAllocGroup(capture);
+			return Leaks(capture, asked);
+		});
 	}
 
 	static Core::String MessagesMethod(ProfilerPlugin* profiler, const IED::Params& params) {
@@ -338,5 +339,6 @@ namespace Profiler
 		RegisterMethod(profiler, "prof.locks", LocksMethod);
 		RegisterMethod(profiler, "prof.lockHold", LockHoldMethod);
 		RegisterAnnotationMethods(profiler);
+		RegisterInvestigationMethods(profiler);
 	}
 }

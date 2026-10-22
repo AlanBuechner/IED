@@ -123,5 +123,13 @@ namespace Profiler
 	IED::ToolResult CompareTool(const IED::ToolCall& call) { return Through("compare", call); }
 	IED::ToolResult LocksTool(const IED::ToolCall& call) { return Through("locks", call); }
 	IED::ToolResult AnnotateTool(const IED::ToolCall& call) { return Through("annotate", call); }
+	IED::ToolResult AllocationsTool(const IED::ToolCall& call) { return Through("allocations", call); }
+	IED::ToolResult MemoryTool(const IED::ToolCall& call) { return Through("memory", call); }
+	IED::ToolResult PlotsTool(const IED::ToolCall& call) { return Through("plots", call); }
+	IED::ToolResult HitchesTool(const IED::ToolCall& call) { return Through("hitches", call); }
+	IED::ToolResult ThreadsTool(const IED::ToolCall& call) { return Through("threads", call); }
+	IED::ToolResult ZoneTool(const IED::ToolCall& call) { return Through("zone", call); }
+	IED::ToolResult TimelineTool(const IED::ToolCall& call) { return Through("timeline", call); }
+	IED::ToolResult DiagnoseTool(const IED::ToolCall& call) { return Through("diagnose", call); }
 	IED::ToolResult CaptureTool(const IED::ToolCall& call) { return Through("capture", call); }
 }

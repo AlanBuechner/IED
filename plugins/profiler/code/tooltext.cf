@@ -6,7 +6,6 @@ namespace Profiler
 	const int32 kToolZones = 25;
 	const int32 kToolInstances = 10;
 	const int32 kToolMessages = 100;
-	const int32 kToolLeakGroups = 15;
 	const int32 kToolFlameDepth = 12;
 	const double kToolFlameMinPercent = 1.0;
 
@@ -49,7 +48,7 @@ namespace Profiler
 		return text.ToString();
 	}
 
-	static Core::String Bytes(int64 bytes) {
+	Core::String Bytes(int64 bytes) {
 		Core::StringBuilder text;
 		const double value = (double)bytes;
 		if (bytes < 1024) {
@@ -71,9 +70,29 @@ namespace Profiler
 		return text.ToString();
 	}
 
-	static Core::String Number(int64 value) {
+	Core::String Number(int64 value) {
+		Core::StringBuilder digits;
+		digits.AppendInt(value < 0 ? -value : value);
+		Core::StringView all = digits.View();
 		Core::StringBuilder text;
-		text.AppendInt(value);
+		if (value < 0) text.AppendByte('-');
+		for (int64 i = 0; i < all.ByteLength(); ++i) {
+			if (i > 0 && (all.ByteLength() - i) % 3 == 0) text.AppendByte(',');
+			text.AppendByte(all.Data()[i]);
+		}
+		return text.ToString();
+	}
+
+	Core::String Percent(double fraction) {
+		Core::StringBuilder text;
+		text.AppendDouble(fraction * 100.0, 1);
+		text.AppendByte('%');
+		return text.ToString();
+	}
+
+	Core::String Decimal(double value) {
+		Core::StringBuilder text;
+		text.AppendDouble(value, 1);
 		return text.ToString();
 	}
 
@@ -252,11 +271,11 @@ namespace Profiler
 		out.Append(Duration(s.Member("durationNs").AsInt()).View());
 		out.Append(s.Member("live").AsBool() ? ", still recording\n" : "\n");
 		out.Append("Events ");
-		out.AppendInt(s.Member("events").AsInt());
+		out.Append(Number(s.Member("events").AsInt()).View());
 		out.Append(", zones ");
-		out.AppendInt(s.Member("zones").AsInt());
+		out.Append(Number(s.Member("zones").AsInt()).View());
 		out.Append(", messages ");
-		out.AppendInt(s.Member("messages").AsInt());
+		out.Append(Number(s.Member("messages").AsInt()).View());
 		if (s.Member("samples").AsInt() > 0) {
 			out.Append(", samples ");
 			out.AppendInt(s.Member("samples").AsInt());
@@ -273,7 +292,7 @@ namespace Profiler
 			if (i > 0) out.Append(", ");
 			out.Append(threads.At(i).Member("name").AsView());
 			out.Append(" (");
-			out.AppendInt(threads.At(i).Member("zones").AsInt());
+			out.Append(Number(threads.At(i).Member("zones").AsInt()).View());
 			out.Append(" zones");
 			if (threads.At(i).Member("renames").AsInt() > 0) {
 				out.Append(", renamed ");
@@ -306,8 +325,15 @@ namespace Profiler
 		Serialization::DomNode memory = s.Member("memory");
 		if (memory.Member("allocations").AsInt() > 0 || memory.Member("collections").AsInt() > 0) {
 			out.Append("\nMemory: ");
-			out.AppendInt(memory.Member("allocations").AsInt());
-			out.Append(" allocations, ");
+			out.Append(Number(memory.Member("allocations").AsInt()).View());
+			out.Append(" allocations");
+			const int64 frames = s.Member("frames").IsNull() ? 0 : s.Member("frames").Member("count").AsInt();
+			if (frames > 0 && memory.Member("allocations").AsInt() > 0) {
+				out.Append(" (");
+				out.Append(Decimal((double)memory.Member("allocations").AsInt() / (double)frames).View());
+				out.Append(" a frame)");
+			}
+			out.Append(", ");
 			out.AppendInt(memory.Member("liveAtEnd").AsInt());
 			out.Append(" live at the end (");
 			out.Append(Bytes(memory.Member("liveBytesAtEnd").AsInt()).View());
@@ -555,74 +581,6 @@ namespace Profiler
 		return out.ToString();
 	}
 
-	static Core::String LeaksText(const Capture& capture, const Serialization::DomNode& args) {
-		LeakAsk ask;
-		Core::StringView group = args.Member("group_by").AsView();
-		ask.groupBy = group == "pool" ? LeakGroup::Pool : (group == "thread" ? LeakGroup::Thread : LeakGroup::Callstack);
-		ask.atNs = MsArg(args, "at_ms");
-		ask.limit = kToolLeakGroups;
-		Serialization::DomNode leaks = ParseJson(Leaks(capture, ask));
-		Serialization::DomNode memory = ParseJson(Memory(capture, -1, -1, 1));
-		Core::StringBuilder out;
-		out.AppendInt(leaks.Member("count").AsInt());
-		out.Append(" allocations (");
-		out.Append(Bytes(leaks.Member("bytes").AsInt()).View());
-		out.Append(") live at ");
-		out.Append(Instant(leaks.Member("atNs").AsInt()).View());
-		out.Append("\n");
-		Serialization::DomNode groups = leaks.Member("groups");
-		for (int64 i = 0; i < groups.Count(); ++i) {
-			Serialization::DomNode g = groups.At(i);
-			out.Append("- ");
-			out.AppendInt(g.Member("count").AsInt());
-			out.Append(" allocations, ");
-			out.Append(Bytes(g.Member("bytes").AsInt()).View());
-			out.Append(", ");
-			out.Append(g.Member("label").AsView());
-			out.AppendByte('\n');
-			Serialization::DomNode stack = g.Member("callstack");
-			for (int64 k = 0; k < stack.Count() && k < 12; ++k) {
-				out.Append("    ");
-				out.Append(stack.At(k).AsView());
-				out.AppendByte('\n');
-			}
-		}
-		Serialization::DomNode pools = memory.Member("pools");
-		for (int64 i = 0; i < pools.Count(); ++i) {
-			Serialization::DomNode p = pools.At(i);
-			out.Append("Pool ");
-			out.Append(p.Member("name").AsView());
-			out.Append(": peak ");
-			out.Append(Bytes(p.Member("peak").AsInt()).View());
-			out.Append(", in use at the end ");
-			out.Append(Bytes(p.Member("inUse").AsInt()).View());
-			out.Append(", ");
-			out.AppendInt(p.Member("allocs").AsInt());
-			out.Append(" allocations, ");
-			out.AppendInt(p.Member("frees").AsInt());
-			out.Append(" frees");
-			if (p.Member("earlierFrees").AsInt() > 0) {
-				out.Append(" (and ");
-				out.AppendInt(p.Member("earlierFrees").AsInt());
-				out.Append(" of blocks allocated before the capture began)");
-			}
-			out.Append("\n");
-		}
-		Serialization::DomNode gc = memory.Member("gc");
-		if (gc.Member("count").AsInt() > 0) {
-			out.Append("GC: ");
-			out.AppendInt(gc.Member("count").AsInt());
-			out.Append(" collections, paused ");
-			out.Append(Duration(gc.Member("pauseNs").AsInt()).View());
-			out.Append(" in all, the longest ");
-			out.Append(Duration(gc.Member("longestNs").AsInt()).View());
-			out.Append(", freed ");
-			out.Append(Bytes(gc.Member("freedBytes").AsInt()).View());
-			out.AppendByte('\n');
-		}
-		return out.ToString();
-	}
-
 	static Core::String CompareText(const Capture& a, const Capture& b, Core::StringView idA, Core::StringView idB, int32 limit) {
 		Serialization::DomNode c = ParseJson(Compare(a, b, limit));
 		Core::StringBuilder out;
@@ -638,6 +596,27 @@ namespace Profiler
 		FrameLine(out, c.Member("frames").Member("a"));
 		out.Append("B ");
 		FrameLine(out, c.Member("frames").Member("b"));
+		Serialization::DomNode memoryA = c.Member("memory").Member("a");
+		Serialization::DomNode memoryB = c.Member("memory").Member("b");
+		if (memoryA.Member("allocations").AsInt() + memoryB.Member("allocations").AsInt() + memoryA.Member("peakBytes").AsInt() + memoryB.Member("peakBytes").AsInt() + memoryA.Member("collections").AsInt() + memoryB.Member("collections").AsInt() > 0) {
+			TextTable memory;
+			Core::Array<Core::String>* head = memory.Row();
+			const char*[7] titles = { "memory", "allocations", "a frame", "peak", "collections", "paused", "longest" };
+			for (int32 i = 0; i < 7; ++i) head->Push(Core::String(titles[i]));
+			for (int32 side = 0; side < 2; ++side) {
+				Serialization::DomNode m = side == 0 ? memoryA : memoryB;
+				Core::Array<Core::String>* row = memory.Row();
+				row->Push(Core::String(side == 0 ? "A" : "B"));
+				row->Push(Number(m.Member("allocations").AsInt()));
+				row->Push(Decimal(m.Member("allocationsPerFrame").AsFloat()));
+				row->Push(Bytes(m.Member("peakBytes").AsInt()));
+				row->Push(Number(m.Member("collections").AsInt()));
+				row->Push(Duration(m.Member("gcPauseNs").AsInt()));
+				row->Push(Duration(m.Member("gcLongestNs").AsInt()));
+			}
+			out.AppendByte('\n');
+			memory.Write(out);
+		}
 		out.Append("\nZones whose total time changed most (B - A):\n");
 		TextTable table;
 		Core::Array<Core::String>* head = table.Row();
@@ -709,7 +688,7 @@ namespace Profiler
 		Core::String notes = tool == "summary" ? NotesOf(profiler, id.View()) : Core::String();
 		Capture* capture = profiler->Loaded(id.View());
 		Threading::LockGuard held(capture->lock);
-		if (tool == "summary") return SummaryText(*capture, id.View()) + notes.View();
+		if (tool == "summary") return SummaryText(*capture, id.View()) + notes.View() + "\nprofile_diagnose lists the problems that stand out, with where to look closer.\n";
 		if (tool == "locks") return LocksText(*capture, args);
 		if (tool == "top_zones") return TopZonesText(*capture, args);
 		if (tool == "frame") return FrameText(*capture, args);
@@ -717,6 +696,14 @@ namespace Profiler
 		if (tool == "flame") return FlameText(*capture, args);
 		if (tool == "messages") return MessagesText(*capture, args);
 		if (tool == "leaks") return LeaksText(*capture, args);
+		if (tool == "allocations") return AllocationsText(*capture, args);
+		if (tool == "memory") return MemoryText(*capture, args);
+		if (tool == "plots") return PlotsText(*capture, args);
+		if (tool == "hitches") return HitchesText(*capture, args);
+		if (tool == "threads") return ThreadsText(*capture, args);
+		if (tool == "zone") return ZoneText(*capture, args);
+		if (tool == "timeline") return TimelineText(*capture, args);
+		if (tool == "diagnose") return DiagnoseText(*capture, id.View(), args);
 		throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("no profiler tool ") + tool).View());
 	}
 }

@@ -6,19 +6,6 @@ namespace Profiler
 {
 	const int32 kToolLocks = 20;
 
-	static Core::String Percent(double fraction) {
-		Core::StringBuilder text;
-		text.AppendDouble(fraction * 100.0, 1);
-		text.AppendByte('%');
-		return text.ToString();
-	}
-
-	static Core::String Integer(int64 value) {
-		Core::StringBuilder text;
-		text.AppendInt(value);
-		return text.ToString();
-	}
-
 	static Core::String LockSource(const Serialization::DomNode& row) {
 		if (row.Member("file").AsView().IsEmpty()) return Core::String();
 		Core::StringBuilder text;
@@ -37,14 +24,14 @@ namespace Profiler
 			Serialization::DomNode r = rows.At(i);
 			Core::Array<Core::String>* row = table.Row();
 			row->Push(Core::String(r.Member("name").AsView()) + (r.Member("stuck").AsInt() > 0 ? " (still waited for at the end)" : ""));
-			row->Push(Integer(r.Member("blocked").AsInt()));
+			row->Push(Number(r.Member("blocked").AsInt()));
 			row->Push(Duration(r.Member("waitNs").AsInt()));
 			row->Push(Duration(r.Member("maxWaitNs").AsInt()));
-			row->Push(Integer(r.Member("contended").AsInt()) + " (" + Percent(r.Member("contention").AsFloat()).View() + ")");
-			row->Push(Integer(r.Member("acquisitions").AsInt()));
+			row->Push(Number(r.Member("contended").AsInt()) + " (" + Percent(r.Member("contention").AsFloat()).View() + ")");
+			row->Push(Number(r.Member("acquisitions").AsInt()));
 			row->Push(Duration(r.Member("holdNs").AsInt()));
 			row->Push(Duration(r.Member("maxHoldNs").AsInt()));
-			row->Push(Integer(r.Member("threads").AsInt()));
+			row->Push(Number(r.Member("threads").AsInt()));
 			row->Push(LockSource(r));
 		}
 		table.Write(out);

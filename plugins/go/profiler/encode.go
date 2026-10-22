@@ -38,6 +38,9 @@ const (
 	evLockWait       = 0x71
 	evLockObtain     = 0x72
 	evLockRelease    = 0x73
+	evCallstackDef   = 0x81
+	evSample         = 0x82
+	evSymbolDef      = 0x83
 )
 
 const (
