@@ -25,6 +25,9 @@ namespace fb::replay::d3d12
 		u32 count = 0;
 	};
 
+	// Each constant buffer the pipeline's shaders declare, by (space, register): the layout the buffer view reads it with.
+	std::map<std::pair<u32, u32>, std::string> ConstantBufferLayouts(const PipelineCreate& pso);
+
 	class D3D12Replay final : public ApiReplay
 	{
 	public:

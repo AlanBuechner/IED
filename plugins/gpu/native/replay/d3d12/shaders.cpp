@@ -1,6 +1,7 @@
 // A pipeline's shader for the UI (docs/22 "Views"): its kind (DXBC or DXIL), disassembly and reflection - bindings,
 // constant buffers with their variables, inputs and outputs. DXBC goes through Windows' own d3dcompiler_47.dll; DXIL
 // through dxcompiler.dll from the Windows SDK (FLASHBANG_DXCOMPILER names another), when it is there.
+#include "bufferlayout.h"
 #include "d3d12replay.h"
 
 #include <d3d12shader.h>
@@ -106,6 +107,68 @@ namespace fb::replay::d3d12
 			}
 		}
 
+		// The shader's reflection (DXBC through d3dcompiler_47, DXIL through dxcompiler), or null when the compiler it
+		// needs is not here. Release it.
+		ID3D12ShaderReflection* Reflect(const D3D12_SHADER_BYTECODE& code) {
+			ID3D12ShaderReflection* reflection = nullptr;
+			if (!IsDxil(code)) {
+				HMODULE module = Compiler47();
+				auto reflect = module ? (ReflectFn)GetProcAddress(module, "D3DReflect") : nullptr;
+				if (reflect) reflect(code.pShaderBytecode, code.BytecodeLength, __uuidof(ID3D12ShaderReflection), (void**)&reflection);
+				return reflection;
+			}
+			HMODULE module = DxCompiler();
+			auto create = module ? (DxcCreateInstanceProc)GetProcAddress(module, "DxcCreateInstance") : nullptr;
+			IDxcUtils* utils = nullptr;
+			if (create && SUCCEEDED(create(CLSID_DxcUtils, __uuidof(IDxcUtils), (void**)&utils))) {
+				const DxcBuffer buffer = {code.pShaderBytecode, code.BytecodeLength, DXC_CP_ACP};
+				utils->CreateReflection(&buffer, __uuidof(ID3D12ShaderReflection), (void**)&reflection);
+				utils->Release();
+			}
+			return reflection;
+		}
+
+		// A cbuffer variable placed by HLSL's packing: matrix columns (rows when row-major) and array elements each start
+		// a 16-byte register; a struct has no vector type.
+		BlockMember Placed(ID3D12ShaderReflectionVariable* variable) {
+			BlockMember out;
+			D3D12_SHADER_VARIABLE_DESC v;
+			D3D12_SHADER_TYPE_DESC t;
+			if (!variable || FAILED(variable->GetDesc(&v)) || !variable->GetType() || FAILED(variable->GetType()->GetDesc(&t))) return out;
+			out.name = v.Name ? v.Name : "";
+			out.offset = v.StartOffset;
+			out.bytes = v.Size;
+			const char* base = nullptr;
+			u32 bytes = 4;
+			switch (t.Type) {
+				case D3D_SVT_FLOAT: case D3D_SVT_MIN16FLOAT: case D3D_SVT_MIN10FLOAT: base = "float"; break;
+				case D3D_SVT_INT: case D3D_SVT_MIN16INT: case D3D_SVT_MIN12INT: base = "int"; break;
+				case D3D_SVT_UINT: case D3D_SVT_MIN16UINT: base = "uint"; break;
+				case D3D_SVT_BOOL: base = "bool"; break;
+				case D3D_SVT_DOUBLE: base = "double", bytes = 8; break;
+				case D3D_SVT_FLOAT16: base = "half", bytes = 2; break;
+				case D3D_SVT_INT16: base = "int16", bytes = 2; break;
+				case D3D_SVT_UINT16: base = "uint16", bytes = 2; break;
+				case D3D_SVT_INT64: base = "int64", bytes = 8; break;
+				case D3D_SVT_UINT64: base = "uint64", bytes = 8; break;
+				default: return out;
+			}
+			u32 components = 1;
+			switch (t.Class) {
+				case D3D_SVC_SCALAR: break;
+				case D3D_SVC_VECTOR: components = t.Columns; break;
+				case D3D_SVC_MATRIX_COLUMNS: out.vectors = t.Columns, components = t.Rows, out.vectorStride = 16; break;
+				case D3D_SVC_MATRIX_ROWS: out.vectors = t.Rows, components = t.Columns, out.vectorStride = 16; break;
+				default: return out;
+			}
+			out.vectorType = VectorType(base, components);
+			out.vectorBytes = bytes * components;
+			if (out.vectors == 1) out.vectorStride = out.vectorBytes;
+			out.elements = t.Elements ? t.Elements : 1;
+			out.elementStride = ((out.vectors - 1) * out.vectorStride + out.vectorBytes + 15) / 16 * 16;
+			return out;
+		}
+
 		void Reflection(ID3D12ShaderReflection* reflection, JsonWriter& out) {
 			D3D12_SHADER_DESC desc;
 			if (FAILED(reflection->GetDesc(&desc))) return;
@@ -185,17 +248,14 @@ namespace fb::replay::d3d12
 		out.String("kind", dxil ? "DXIL" : "DXBC");
 		out.Uint("size", code->BytecodeLength);
 		std::string disassembly;
-		ID3D12ShaderReflection* reflection = nullptr;
 		if (!dxil) {
 			HMODULE module = Compiler47();
 			auto disassemble = module ? (DisassembleFn)GetProcAddress(module, "D3DDisassemble") : nullptr;
-			auto reflect = module ? (ReflectFn)GetProcAddress(module, "D3DReflect") : nullptr;
 			ID3DBlob* text = nullptr;
 			if (disassemble && SUCCEEDED(disassemble(code->pShaderBytecode, code->BytecodeLength, 0, nullptr, &text))) {
 				disassembly.assign((const char*)text->GetBufferPointer(), text->GetBufferSize());
 				text->Release();
 			}
-			if (reflect) reflect(code->pShaderBytecode, code->BytecodeLength, __uuidof(ID3D12ShaderReflection), (void**)&reflection);
 		}
 		else {
 			HMODULE module = DxCompiler();
@@ -213,16 +273,41 @@ namespace fb::replay::d3d12
 					}
 					result->Release();
 				}
-				utils->CreateReflection(&buffer, __uuidof(ID3D12ShaderReflection), (void**)&reflection);
 			}
 			else out.String("problem", "DXIL needs dxcompiler.dll (the Windows SDK's, or FLASHBANG_DXCOMPILER)");
 			if (compiler) compiler->Release();
 			if (utils) utils->Release();
 		}
 		out.String("disassembly", disassembly);
-		if (reflection) {
+		if (ID3D12ShaderReflection* reflection = Reflect(*code)) {
 			Reflection(reflection, out);
 			reflection->Release();
 		}
+	}
+
+	std::map<std::pair<u32, u32>, std::string> ConstantBufferLayouts(const PipelineCreate& pso) {
+		std::map<std::pair<u32, u32>, std::string> layouts;
+		for (const D3D12_SHADER_BYTECODE* code : {&pso.vs, &pso.hs, &pso.ds, &pso.gs, &pso.ps, &pso.cs, &pso.as, &pso.ms}) {
+			if (!code->pShaderBytecode || !code->BytecodeLength) continue;
+			ID3D12ShaderReflection* reflection = Reflect(*code);
+			D3D12_SHADER_DESC desc;
+			if (!reflection || FAILED(reflection->GetDesc(&desc))) {
+				if (reflection) reflection->Release();
+				continue;
+			}
+			for (UINT i = 0; i < desc.BoundResources; ++i) {
+				D3D12_SHADER_INPUT_BIND_DESC bind;
+				if (FAILED(reflection->GetResourceBindingDesc(i, &bind)) || bind.Type != D3D_SIT_CBUFFER || !bind.Name) continue;
+				ID3D12ShaderReflectionConstantBuffer* buffer = reflection->GetConstantBufferByName(bind.Name);
+				D3D12_SHADER_BUFFER_DESC bufferDesc;
+				if (!buffer || FAILED(buffer->GetDesc(&bufferDesc))) continue;
+				std::vector<BlockMember> members;
+				for (UINT v = 0; v < bufferDesc.Variables; ++v) members.push_back(Placed(buffer->GetVariableByIndex(v)));
+				const std::string layout = BlockLayout(members, bufferDesc.Size);
+				for (UINT r = 0; r < std::max<UINT>(1, bind.BindCount) && r < 64; ++r) layouts.emplace(std::make_pair(bind.Space, bind.BindPoint + r), layout);
+			}
+			reflection->Release();
+		}
+		return layouts;
 	}
 }

@@ -13,16 +13,17 @@ const BASES = {
 };
 const NAMES = Object.keys(BASES).sort((a, b) => b.length - a.length);
 
-// A type token: a base, then a vector size (float3, uint16x2) or matrix rows x columns (float4x4).
+// A type token: a base, then a vector size (float3, uint16x2) or a matrix's vector size x vectors as stored (float4x3:
+// 3 vectors of 4). `width` is the vector size.
 function typeOf(token) {
 	const base = NAMES.find((name) => token.startsWith(name));
 	if (!base) return null;
 	const shape = /^(?:x?([1-4])(?:x([1-4]))?)?$/.exec(token.slice(base.length));
 	if (!shape) return null;
-	const rows = shape[2] ? Number(shape[1]) : 1;
-	const columns = shape[2] ? Number(shape[2]) : Number(shape[1] || 1);
+	const width = Number(shape[1] || 1);
+	const components = width * Number(shape[2] || 1);
 	const [size, read] = BASES[base];
-	return { base, read, size, components: rows * columns, bytes: size * rows * columns };
+	return { base, read, size, width, components, bytes: size * components };
 }
 
 // The layout text as fields at their offsets and the element's stride; throws an Error naming what it cannot read.

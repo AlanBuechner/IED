@@ -37,7 +37,8 @@ export class BufferPanel {
 			this.problem, this.table);
 	}
 
-	// Shows buffer `target` ({id, name, size, offset?, layout?}) as it is after event `eid`, from the binding's offset.
+	// Shows buffer `target` ({id, name, size, offset?, layout?, elements?}) as it is after event `eid`, from the binding's
+	// offset; a target of one element (a constant buffer) shows it as a list of its fields.
 	open(target, eid) {
 		this.target = target;
 		this.key = target.id + "|" + (target.layout || "");
@@ -85,7 +86,7 @@ export class BufferPanel {
 			replace(this.table);
 			return;
 		}
-		const size = Math.min(PAGE_ROWS * this.layout.stride, Math.max(0, (target.size || 0) - this.offset));
+		const size = Math.min((target.elements || PAGE_ROWS) * this.layout.stride, Math.max(0, (target.size || 0) - this.offset));
 		if (size < this.layout.stride && !this.layout.hex) {
 			this.status.textContent = "";
 			replace(this.table, h("div.gpu-state-msg", null, "No whole element at offset " + this.offset + " (" + this.layout.stride + " B each)."));
@@ -110,6 +111,10 @@ export class BufferPanel {
 				h("tr", null, h("td.d", null, String(this.offset + i * 16)), row.cells.map((cell) => h("td", null, cell)), h("td.t", null, row.text))))));
 			return;
 		}
+		if (this.target.elements === 1 && rows.length === 1) {
+			this.fieldList(rows[0].cells);
+			return;
+		}
 		// Elements count from the binding's start, so a row's number is its index there.
 		const first = Math.floor((this.offset - (this.target.offset || 0)) / layout.stride);
 		this.status.textContent = rows.length + " elements " + DOT + " " + layout.stride + " B each";
@@ -117,5 +122,21 @@ export class BufferPanel {
 			layout.fields.map((f) => h("th", { colspan: String(f.components), title: f.type + " +" + f.offset }, f.name)));
 		replace(this.table, h("table", null, h("thead", null, head), h("tbody", null, rows.map((row, i) =>
 			h("tr", null, h("td.d", null, String(first + i)), h("td.d", null, String(this.offset + i * layout.stride)), row.cells.map((cell) => h("td", null, cell)))))));
+	}
+
+	// One element as its fields, a line per vector (a matrix's columns as stored).
+	fieldList(cells) {
+		const layout = this.layout;
+		this.status.textContent = layout.fields.length + " fields " + DOT + " " + layout.stride + " B";
+		const lines = [];
+		let at = 0;
+		for (const field of layout.fields) {
+			for (let v = 0; v < field.components; v += field.width) {
+				lines.push(h("tr", null, h("td.t", null, v ? "" : field.name), h("td.t.d", null, v ? "" : field.type), h("td.d", null, "+" + (field.offset + v * field.size)),
+					cells.slice(at + v, at + v + field.width).map((cell) => h("td", null, cell))));
+			}
+			at += field.components;
+		}
+		replace(this.table, h("table", null, h("thead", null, h("tr", null, h("th.t", null, "Field"), h("th.t", null, "Type"), h("th", null, "Offset"), h("th", { colspan: "4" }, "Value"))), h("tbody", null, lines)));
 	}
 }

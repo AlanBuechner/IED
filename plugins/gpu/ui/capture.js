@@ -25,7 +25,7 @@ export class CaptureView {
 		this.view = "pipeline";
 		this.bottomTab = "calls";
 		this.generation = 0;
-		this.resource = null;      // the resource the viewer shows: {id, name, pinned, offset?, layout?}
+		this.resource = null;      // the resource the viewer shows: {id, name, pinned, offset?, layout?, elements?}
 		this.eid = 0;
 		this.outputEid = 0;   // the action the selection shows: itself, or a marker's last action
 		this.session = new ReplaySession(this.ied, ctx.wsId, captureId, {
@@ -194,7 +194,7 @@ export class CaptureView {
 			this.tree.show(this.state);
 			this.renderCalls(calls.result.calls);
 			const output = StateTree.outputOf(this.state);
-			if (!this.resource || !this.resource.pinned) this.resource = output ? { id: output.resource, name: output.value, pinned: false, offset: output.offset, layout: output.layout } : this.resource;
+			if (!this.resource || !this.resource.pinned) this.resource = output ? { id: output.resource, name: output.value, pinned: false, offset: output.offset, layout: output.layout, elements: output.elements } : this.resource;
 			if (this.resource) this.showResource();
 			else {
 				this.showPanel(this.viewer.el);
@@ -207,7 +207,7 @@ export class CaptureView {
 	}
 
 	pinResource(id, item) {
-		this.resource = { id, name: item.value, pinned: true, offset: item.offset, layout: item.layout };
+		this.resource = { id, name: item.value, pinned: true, offset: item.offset, layout: item.layout, elements: item.elements };
 		this.showResource({ mip: 0, slice: 0 });
 		if (this.bottomTab === "resources" && this.view === "pipeline") this.renderResources();
 	}
@@ -241,7 +241,7 @@ export class CaptureView {
 		}
 		if (this.panel.firstChild !== this.buffer.el) this.showPanel(this.buffer.el);
 		if (this.buffer.source === resource) this.buffer.at(this.outputEid);
-		else this.buffer.open({ id: resource.id, name: info.name, size: info.width, offset: resource.offset, layout: resource.layout }, this.outputEid);
+		else this.buffer.open({ id: resource.id, name: info.name, size: info.width, offset: resource.offset, layout: resource.layout, elements: resource.elements }, this.outputEid);
 		this.buffer.source = resource;
 	}
 

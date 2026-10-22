@@ -22,9 +22,39 @@ namespace fb
 		if (!info || !info->bytes) return "";
 		const char* base = info->codec == Codec::Channels ? BaseOf(info->component, info->bits) : nullptr;
 		if (!base) return info->bytes == 4 ? "uint " + name : "uint8 " + name + "[" + std::to_string(info->bytes) + "]";
-		std::string type = base;
-		if (info->channels > 1) type += (isdigit((unsigned char)type.back()) ? "x" : "") + std::to_string(info->channels);
-		return type + " " + name;
+		return VectorType(base, info->channels) + " " + name;
+	}
+
+	std::string VectorType(const std::string& base, u32 components) {
+		if (components <= 1) return base;
+		return base + (isdigit((unsigned char)base.back()) ? "x" : "") + std::to_string(components);
+	}
+
+	std::string BlockLayout(const std::vector<BlockMember>& members, u32 blockBytes) {
+		std::vector<LayoutField> fields;
+		for (const BlockMember& m : members) {
+			if (!m.elements) continue;    // a runtime array: its elements are the buffer's rows, not the block's
+			if (m.vectorType.empty()) {
+				if (m.bytes >= 4) fields.push_back({m.offset, m.bytes / 4 * 4, "uint " + m.name + "[" + std::to_string(m.bytes / 4) + "]"});
+				continue;
+			}
+			const bool tightVectors = m.vectors == 1 || m.vectorStride == m.vectorBytes;
+			const u32 elementBytes = tightVectors ? m.vectors * m.vectorBytes : (m.vectors - 1) * m.vectorStride + m.vectorBytes;
+			const bool tightElements = m.elements == 1 || m.elementStride == elementBytes;
+			const std::string type = m.vectors > 1 ? m.vectorType + "x" + std::to_string(m.vectors) : m.vectorType;
+			if (tightVectors && tightElements)
+				fields.push_back({m.offset, m.elements * elementBytes, type + " " + m.name + (m.elements > 1 ? "[" + std::to_string(m.elements) + "]" : "")});
+			else
+				for (u32 e = 0; e < m.elements; ++e) {
+					const std::string element = m.name + (m.elements > 1 ? "_" + std::to_string(e) : "");
+					const u32 at = m.offset + e * m.elementStride;
+					if (tightVectors) fields.push_back({at, elementBytes, type + " " + element});
+					else
+						for (u32 v = 0; v < m.vectors; ++v) fields.push_back({at + v * m.vectorStride, m.vectorBytes, m.vectorType + " " + element + "_" + std::to_string(v)});
+				}
+			if (fields.size() > 512) return "";
+		}
+		return BufferLayout(fields, blockBytes);
 	}
 
 	std::string BufferLayout(std::vector<LayoutField> fields, u32 stride) {

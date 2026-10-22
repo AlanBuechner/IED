@@ -251,6 +251,67 @@ namespace fb::replay::vulkan
 			}
 		}
 
+		bool MemberHas(const Info& info, u32 structId, u32 member, u32 decoration) {
+			auto members = info.memberDecorations.find(structId);
+			if (members == info.memberDecorations.end()) return false;
+			auto decorations = members->second.find(member);
+			return decorations != members->second.end() && decorations->second.count(decoration);
+		}
+
+		// A scalar type's layout base ("float", "half", "uint16", "bool") and bytes; empty for anything else.
+		std::string ScalarBase(const Info& info, u32 id, u32& bytes) {
+			auto t = info.types.find(id);
+			if (t == info.types.end()) return "";
+			switch (t->second[0]) {
+				case 20: bytes = 4; return "bool";
+				case 21: bytes = t->second[1] / 8; return std::string(t->second[2] ? "int" : "uint") + (t->second[1] != 32 ? std::to_string(t->second[1]) : "");
+				case 22: bytes = t->second[1] / 8; return t->second[1] == 16 ? "half" : t->second[1] == 64 ? "double" : "float";
+				default: return "";
+			}
+		}
+
+		// A struct member placed for the buffer view: its vectors (a matrix's columns, or rows when row-major) and array
+		// elements with their strides; no vector type for a struct or an array of arrays.
+		BlockMember Placed(const Info& info, u32 structId, u32 member, const std::string& name) {
+			BlockMember out;
+			out.name = name;
+			out.offset = MemberDecoration(info, structId, member, 35);
+			out.bytes = MemberSize(info, structId, member, 0);
+			u32 type = info.types.at(structId)[member + 1];
+			auto t = info.types.find(type);
+			if (t != info.types.end() && (t->second[0] == 28 || t->second[0] == 29)) {
+				auto length = info.constants.find(t->second[2]);
+				if (t->second[0] == 28 && length == info.constants.end()) return out;
+				out.elements = t->second[0] == 28 ? length->second : 0;
+				out.elementStride = Decoration(info, type, 6);
+				type = t->second[1];
+				t = info.types.find(type);
+			}
+			if (t == info.types.end()) return out;
+			u32 scalar = type, components = 1;
+			if (t->second[0] == 23) {
+				scalar = t->second[1];
+				components = t->second[2];
+			}
+			else if (t->second[0] == 24) {
+				auto column = info.types.find(t->second[1]);
+				if (column == info.types.end() || column->second[0] != 23) return out;
+				scalar = column->second[1];
+				const bool rowMajor = MemberHas(info, structId, member, 4);
+				out.vectors = rowMajor ? column->second[2] : t->second[2];
+				components = rowMajor ? t->second[2] : column->second[2];
+				out.vectorStride = MemberDecoration(info, structId, member, 7);
+			}
+			u32 bytes = 0;
+			const std::string base = ScalarBase(info, scalar, bytes);
+			if (base.empty()) return out;
+			out.vectorType = VectorType(base, components);
+			out.vectorBytes = bytes * components;
+			if (!out.vectorStride) out.vectorStride = out.vectorBytes;
+			if (!out.elementStride) out.elementStride = (out.vectors - 1) * out.vectorStride + out.vectorBytes;
+			return out;
+		}
+
 		bool Gather(const u32* words, size_t count, Info& info, SpirvModule& out) {
 			if (count < 5 || words[0] != 0x07230203) return false;
 			out.version = words[1];
@@ -367,6 +428,7 @@ namespace fb::replay::vulkan
 						member.offset = MemberDecoration(info, type, m, 35);
 						member.size = MemberSize(info, type, m, 0);
 						binding.members.push_back(member);
+						binding.block.push_back(Placed(info, type, m, member.name));
 					}
 					break;
 				}

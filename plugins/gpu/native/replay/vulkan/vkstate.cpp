@@ -37,13 +37,15 @@ namespace fb::replay::vulkan
 				out_.EndObject();
 			}
 			// A buffer binding: where in the buffer it starts and the layout its elements read with, for the buffer view.
-			void Buffer(const std::string& label, const std::string& value, u64 resource, u64 offset, const std::string& layout) {
+			// A constant buffer is one block: `elements` 1 has the view show that one element.
+			void Buffer(const std::string& label, const std::string& value, u64 resource, u64 offset, const std::string& layout, u32 elements = 0) {
 				out_.BeginObject();
 				out_.String("label", label);
 				out_.String("value", value);
 				out_.Uint("resource", resource);
 				out_.Uint("offset", offset);
 				if (!layout.empty()) out_.String("layout", layout);
+				if (elements) out_.Uint("elements", elements);
 				out_.EndObject();
 			}
 			void Parent(const std::string& label, const std::string& value) {
@@ -280,7 +282,36 @@ namespace fb::replay::vulkan
 			type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
 	}
 
-	static void DescriptorSets(const Model& model, u32 eid, const std::map<u32, u64>& bound, Tree& tree) {
+	static std::vector<SpirvModule> Reflect(const Model& model, const VkPipelineShaderStageCreateInfo* stages, u32 count) {
+		std::vector<SpirvModule> modules;
+		for (u32 i = 0; i < count; ++i) {
+			Create<VkShaderModuleCreateInfo> module = {};
+			SpirvModule spirv;
+			if (model.DecodeObject(IdOf(stages[i].module), module) && ParseSpirv(module.info.pCode, module.info.codeSize / 4, spirv)) modules.push_back(std::move(spirv));
+		}
+		return modules;
+	}
+
+	// The layout a buffer binding's block reads with, from the first stage that declares it; a block that is one runtime
+	// array reads an element a row, from the array's start (added to `offset`).
+	static std::string BlockLayoutAt(const std::vector<SpirvModule>& modules, u32 set, u32 binding, u64& offset) {
+		for (const SpirvModule& module : modules)
+			for (const SpirvBinding& b : module.bindings) {
+				if (b.set != set || b.binding != binding || b.block.empty()) continue;
+				const BlockMember& last = b.block.back();
+				if (b.block.size() == 1 && !last.elements && !last.vectorType.empty()) {
+					BlockMember row = last;
+					row.elements = 1;
+					row.offset = 0;
+					offset += last.offset;
+					return BlockLayout({row}, last.elementStride);
+				}
+				return BlockLayout(b.block, b.size);
+			}
+		return "";
+	}
+
+	static void DescriptorSets(const Model& model, u32 eid, const std::map<u32, u64>& bound, const std::vector<SpirvModule>& modules, Tree& tree) {
 		const auto contents = DescriptorsAt(model, eid);
 		tree.Group("Descriptor Sets", Format("%zu bound", bound.size()));
 		for (const auto& set : bound) {
@@ -315,8 +346,10 @@ namespace fb::replay::vulkan
 						else {
 							const u64 buffer = IdOf(d->buffer.buffer);
 							const bool uniform = d->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || d->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+							u64 offset = d->buffer.offset;
+							const std::string layout = BlockLayoutAt(modules, set.first, binding.binding, offset);
 							tree.Buffer(label, Format("%s +%llu " DOT " %s", model.NameOf(buffer).c_str(), (unsigned long long)d->buffer.offset,
-								d->buffer.range == VK_WHOLE_SIZE ? "whole" : Bytes(d->buffer.range).c_str()), buffer, d->buffer.offset, uniform ? "float4" : "");
+								d->buffer.range == VK_WHOLE_SIZE ? "whole" : Bytes(d->buffer.range).c_str()), buffer, offset, !layout.empty() ? layout : uniform ? "float4" : "", uniform && !layout.empty() ? 1 : 0);
 						}
 					}
 					if (binding.descriptorCount > shown) tree.Item(Format("b%u", binding.binding), Format("... %u more", binding.descriptorCount - shown));
@@ -362,7 +395,7 @@ namespace fb::replay::vulkan
 			tree.Group("Compute Shader", have ? ShaderText(model_, record.info.stage) : "no pipeline");
 			if (have) tree.Item("Shader", ShaderText(model_, record.info.stage), 0, "cs");
 			tree.EndGroup();
-			DescriptorSets(model_, eid, s.computeSets, tree);
+			DescriptorSets(model_, eid, s.computeSets, have ? Reflect(model_, &record.info.stage, 1) : std::vector<SpirvModule>(), tree);
 		}
 		else {
 			Create<VkGraphicsPipelineCreateInfo> record = {};
@@ -378,7 +411,7 @@ namespace fb::replay::vulkan
 				Rasterizer(s, record.info, tree);
 			}
 			OutputMerger(model_, s, have ? &record.info : nullptr, tree);
-			DescriptorSets(model_, eid, s.graphicsSets, tree);
+			DescriptorSets(model_, eid, s.graphicsSets, have ? Reflect(model_, record.info.pStages, record.info.stageCount) : std::vector<SpirvModule>(), tree);
 		}
 		PushConstants(s, tree);
 		out.EndArray();

@@ -16,6 +16,7 @@ test("gpu layout: sized bases, matrices, arrays and unnamed fields", () => {
 	assertEqual(shape(parseLayout("uint16x2 pair, float4x4 world")), [["pair", 0, 2, 4], ["world", 4, 16, 64]]);
 	assertEqual(shape(parseLayout("int index[3]")), [["index[0]", 0, 1, 4], ["index[1]", 4, 1, 4], ["index[2]", 8, 1, 4]]);
 	assertEqual(shape(parseLayout("half2")), [["half2", 0, 2, 4]]);
+	assertEqual(parseLayout("float4x3 basis").fields.map((f) => [f.width, f.components]), [[4, 12]], "a matrix is its vectors as stored");
 	assertTrue(parseLayout(" HEX ").hex, "hex in any case");
 });
 

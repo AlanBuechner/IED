@@ -35,11 +35,13 @@ namespace fb::replay::d3d12
 				out_.EndObject();
 			}
 			// A buffer binding: where in the buffer it starts and the layout its elements read with, for the buffer view.
-			void Buffer(const std::string& label, const std::string& value, u64 resource, u64 offset, const std::string& layout) {
+			// A constant buffer is one block: `elements` 1 has the view show that one element.
+			void Buffer(const std::string& label, const std::string& value, u64 resource, u64 offset, const std::string& layout, u32 elements = 0) {
 				out_.BeginObject();
 				Fields(label, value, resource);
 				out_.Uint("offset", offset);
 				if (!layout.empty()) out_.String("layout", layout);
+				if (elements) out_.Uint("elements", elements);
 				out_.EndObject();
 			}
 			void Parent(const std::string& label, const std::string& value, u64 resource = 0) {
@@ -117,11 +119,26 @@ namespace fb::replay::d3d12
 		return IdOf(view.resource);
 	}
 
-	// A descriptor's item: a view of a buffer says where it starts and how its elements read.
-	static void ViewItem(Tree& tree, const Model& model, const std::string& label, const DescriptorWrite& view) {
+	// The pipeline's constant buffer layouts by (space, register).
+	using CbLayouts = std::map<std::pair<u32, u32>, std::string>;
+
+	// The layout the shaders declare a constant buffer register with; empty when none reflects it.
+	static std::string CbLayoutAt(const CbLayouts& layouts, u32 space, u32 reg) {
+		auto found = layouts.find({space, reg});
+		return found != layouts.end() ? found->second : "";
+	}
+
+	// A constant buffer binding: one element of its declared layout, else float4 rows.
+	static void CbItem(Tree& tree, const std::string& label, const std::string& value, u64 resource, u64 offset, const std::string& declared) {
+		tree.Buffer(label, value, resource, offset, declared.empty() ? "float4" : declared, declared.empty() ? 0 : 1);
+	}
+
+	// A descriptor's item: a view of a buffer says where it starts and how its elements read; a constant buffer reads as
+	// `cbLayout`, what the shaders declare at its register.
+	static void ViewItem(Tree& tree, const Model& model, const std::string& label, const DescriptorWrite& view, const std::string& cbLayout) {
 		const u64 resource = ViewResource(view);
 		if (view.kind == ViewKind::Cbv && view.hasDesc) {
-			tree.Buffer(label, ViewText(model, view), resource, AddressOffset(view.cbv.BufferLocation), "float4");
+			CbItem(tree, label, ViewText(model, view), resource, AddressOffset(view.cbv.BufferLocation), cbLayout);
 			return;
 		}
 		const bool srvBuffer = view.kind == ViewKind::Srv && view.hasDesc && view.srv.ViewDimension == D3D12_SRV_DIMENSION_BUFFER;
@@ -160,7 +177,8 @@ namespace fb::replay::d3d12
 		}
 	}
 
-	static void TableItems(const Model& model, const Snapshot& s, const D3D12_ROOT_PARAMETER1& param, const RootArgument& arg, const std::string& label, Tree& tree) {
+	static void TableItems(const Model& model, const Snapshot& s, const D3D12_ROOT_PARAMETER1& param, const RootArgument& arg, const std::string& label, const CbLayouts& layouts,
+		Tree& tree) {
 		if (arg.kind != RootArgument::Kind::Table) {
 			tree.Item(label + " table", "not set");
 			return;
@@ -184,7 +202,7 @@ namespace fb::replay::d3d12
 				++shown;
 				const std::string reg = Format("%s%u space%u", RangeLetter(range.RangeType), range.BaseShaderRegister + i, range.RegisterSpace);
 				if (!present) tree.Item(reg, "(empty)");
-				else ViewItem(tree, model, reg, view);
+				else ViewItem(tree, model, reg, view, CbLayoutAt(layouts, range.RegisterSpace, range.BaseShaderRegister + i));
 			}
 			if (unbounded) tree.Item(Format("%s%u+ space%u", RangeLetter(range.RangeType), range.BaseShaderRegister, range.RegisterSpace), Format("unbounded: %u written slots shown", written));
 			offset += unbounded ? 0 : range.NumDescriptors;
@@ -193,7 +211,7 @@ namespace fb::replay::d3d12
 		tree.EndParent();
 	}
 
-	static void RootSignatureGroup(const Model& model, const Snapshot& s, u64 rootId, const std::vector<RootArgument>& args, Tree& tree) {
+	static void RootSignatureGroup(const Model& model, const Snapshot& s, u64 rootId, const std::vector<RootArgument>& args, const CbLayouts& layouts, Tree& tree) {
 		const ObjectEntry* entry = model.Find(rootId);
 		RootSignatureCreate record = {};
 		if (!entry || !model.DecodeModel(entry->record, entry->recordSize, record)) {
@@ -218,7 +236,7 @@ namespace fb::replay::d3d12
 			const RootArgument arg = p < args.size() ? args[p] : RootArgument();
 			const std::string label = Format("[%u] %s", p, Visibility(param.ShaderVisibility));
 			switch (param.ParameterType) {
-				case D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE: TableItems(model, s, param, arg, label, tree); break;
+				case D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE: TableItems(model, s, param, arg, label, layouts, tree); break;
 				case D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS: {
 					tree.Parent(Format("%s b%u space%u", label.c_str(), param.Constants.ShaderRegister, param.Constants.RegisterSpace),
 						arg.kind == RootArgument::Kind::Constants ? Format("%u values", param.Constants.Num32BitValues) : "not set");
@@ -237,8 +255,10 @@ namespace fb::replay::d3d12
 					if (arg.kind == RootArgument::Kind::None) tree.Item(where, "not set");
 					else {
 						const u64 resource = AddressId(arg.value);
-						tree.Buffer(where, Format("%s +%llu", model.NameOf(resource).c_str(), (unsigned long long)AddressOffset(arg.value)), resource, AddressOffset(arg.value),
-							param.ParameterType == D3D12_ROOT_PARAMETER_TYPE_CBV ? "float4" : "");
+						const std::string value = Format("%s +%llu", model.NameOf(resource).c_str(), (unsigned long long)AddressOffset(arg.value));
+						if (param.ParameterType == D3D12_ROOT_PARAMETER_TYPE_CBV)
+							CbItem(tree, where, value, resource, AddressOffset(arg.value), CbLayoutAt(layouts, param.Descriptor.RegisterSpace, param.Descriptor.ShaderRegister));
+						else tree.Buffer(where, value, resource, AddressOffset(arg.value), "");
 					}
 				}
 			}
@@ -397,11 +417,12 @@ namespace fb::replay::d3d12
 		PipelineCreate pso = {};
 		const ObjectEntry* psoEntry = model_.Find(s.pipeline);
 		const bool havePso = psoEntry && model_.DecodeModel(psoEntry->record, psoEntry->recordSize, pso);
+		const CbLayouts layouts = havePso ? ConstantBufferLayouts(pso) : CbLayouts();
 		if (compute) {
 			tree.Group("Compute Shader", havePso ? ShaderText(pso.cs) : "no pipeline");
 			if (havePso) tree.Item("Shader", ShaderText(pso.cs), 0, "cs");
 			tree.EndGroup();
-			RootSignatureGroup(model_, s, s.computeRoot, s.compute, tree);
+			RootSignatureGroup(model_, s, s.computeRoot, s.compute, layouts, tree);
 		}
 		else {
 			InputAssembler(model_, s, havePso ? &pso : nullptr, tree);
@@ -410,7 +431,7 @@ namespace fb::replay::d3d12
 				Rasterizer(s, pso, tree);
 			}
 			OutputMerger(model_, s, havePso ? &pso : nullptr, tree);
-			RootSignatureGroup(model_, s, s.graphicsRoot, s.graphics, tree);
+			RootSignatureGroup(model_, s, s.graphicsRoot, s.graphics, layouts, tree);
 		}
 		tree.Group("Descriptor Heaps", Format("%s%s%s", model_.NameOf(s.heaps[0]).c_str(), s.heaps[1] ? ", " : "", s.heaps[1] ? model_.NameOf(s.heaps[1]).c_str() : ""));
 		for (u64 heap : s.heaps) {

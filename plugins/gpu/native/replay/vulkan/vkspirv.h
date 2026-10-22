@@ -3,6 +3,7 @@
 // style, with friendly names for types and constants.
 #pragma once
 
+#include "bufferlayout.h"
 #include "fb_base.h"
 
 #include <map>
@@ -34,6 +35,7 @@ namespace fb::replay::vulkan
 		u32 count = 1;             // an array's length (0: unbounded)
 		u32 size = 0;              // a block's bytes
 		std::vector<SpirvMember> members;
+		std::vector<BlockMember> block;  // the members placed for the buffer view (a runtime array with 0 elements)
 	};
 
 	struct SpirvEntry
