@@ -33,7 +33,6 @@ namespace Ai
 		chat->WriteResources(data);
 		data.EndObject();
 		chats->Publish(chat, "resources.changed", data.View());
-		SaveChatHeader(FS::Path(chats->WorkspaceOf(chat).root.View()), chat);
 		return IED::Answer(Core::StringView("{}"));
 	}
 

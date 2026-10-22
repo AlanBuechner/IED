@@ -481,6 +481,13 @@ class ChatTests(ChatCase):
 			self.assertEqual("demo:page1", snapshot["resources"][0]["ref"], "the snapshot has it")
 		finally:
 			other.abort()
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		await self.client.sub([topic])
+		self.assertEqual([], (await self.client.next_frame(topic))["data"]["resources"], "after a restart nothing is open until a plugin says so again")
 
 	async def test_plugin_tools_load_on_demand(self):
 		names = lambda body: [t["function"]["name"] for t in body["tools"]]

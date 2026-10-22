@@ -130,7 +130,7 @@ The receiving turn says who sent it: its user message carries `from {chatId, tit
 
 ## What a chat has open (built, 2026-10-21)
 
-Other plugins open things on a chat's behalf - the Browser plugin's pages an AI drives (`docs/27`), and later terminals and processes. A plugin says so through the chat plugin's server binding `chat.resource` (`{chatId, ref, title?, kind?, open?}`; `open: false` takes it off): `ref` is the tab that shows it (`browser:pg-3`). The chat keeps the list in `chat.json` (`resources`), its topic says when it changes (`resources.changed`) and the side panel lists it under "Open by this chat", each row opening its tab, so the owner can watch the AI work in the page.
+Other plugins open things on a chat's behalf - the Browser plugin's pages an AI drives (`docs/27`), and later terminals and processes. A plugin says so through the chat plugin's server binding `chat.resource` (`{chatId, ref, title?, kind?, open?}`; `open: false` takes it off): `ref` is the tab that shows it (`browser:pg-3`). The list is what is open now, kept for the server run only (after a restart nothing is loaded, and a plugin reports a tab again when it loads it); the chat's topic says when it changes (`resources.changed`) and the side panel lists it under "Open by this chat", each row opening its tab, so the owner can watch the AI work in the page.
 
 ## Attachments and @-mentions
 

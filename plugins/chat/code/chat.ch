@@ -181,7 +181,7 @@ namespace Ai
 		public Core::Array<Core::String> allowed;     // rules the owner allowed for this chat ("Allow for this chat")
 		public Core::Array<ModifiedFile*> modified;   // what the AI wrote, with its lines added and removed
 		public Core::Array<Core::String> loadedTools; // deferred tools tool_search or a call loaded (docs/13)
-		public Core::Array<ChatResource*> resources;  // tabs it uses that plugins reported (chat.resource)
+		public Core::Array<ChatResource*> resources;  // tabs it uses that plugins reported (chat.resource), this run only
 		public Core::String context;                  // the last context.changed data (JSON); empty before a request
 		public ChatRun* run;                          // the running turn, or null
 		public int64 counter;
