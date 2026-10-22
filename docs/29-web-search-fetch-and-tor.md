@@ -104,6 +104,15 @@ DuckDuckGo, Brave and Wikipedia refused some and answered others; Bing, Yahoo, G
 Bing localizes results by the exit's country, and Yahoo serves Bing's results, so asking both ranks Bing's (sometimes
 poor) results first: the default engines leave Yahoo out. **Test engines** on the settings page shows the current exit's.
 
+**Waiting for a start.** A search that finds SearXNG not ready starts it on a thread of its own and waits for that
+start at most its `wait` (seconds): 20 by default, which keeps a `websearch.search` binding call inside the 30 s every
+binding call gets (`docs/26` section 2), and 100 for the `web_search` tool and the Search page's methods, which can wait.
+A start that takes longer - Tor's first bootstrap can take a minute - goes on, and the search fails with "web search
+is starting (waiting for Tor: 52% Loading relay descriptors); ask again in a few seconds"; a later search waits for the
+same start and hears how it ended (its error, when it failed). A search keeps preparing (its engines read) while a start
+waits for Tor. Measured on a cold start: a binding call with `wait: 2` answered "starting" in 2.1 s, Tor was ready
+18.7 s later, and the next search answered in 1.9 s.
+
 **Idle stop.** With no search for `websearch.stopAfterSeconds` (default 1800; 0: never) SearXNG stops; a watcher thread
 also notices a SearXNG that died.
 

@@ -77,6 +77,9 @@ namespace WebSearch
 		Core::StringView language = args.Member("language").AsView();
 		request.language = Core::String(language.IsEmpty() ? SettingOf(context, "websearch.language").AsView() : language);
 		request.safeSearch = SafeSearchLevel(SettingOf(context, "websearch.safeSearch").AsView());
+		Serialization::DomNode wait = args.Member("wait");
+		const int64 seconds = wait.IsValid() && !wait.IsNull() ? wait.AsInt() : kStartWaitSeconds;
+		request.startWaitNs = (seconds < 0 ? 0 : seconds > kLongestStartWaitSeconds ? kLongestStartWaitSeconds : seconds) * 1000000000;
 		return true;
 	}
 }

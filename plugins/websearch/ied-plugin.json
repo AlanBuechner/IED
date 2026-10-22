@@ -25,7 +25,7 @@
 		],
 		"bindings": {
 			"provides": [
-				{ "name": "websearch.search", "version": "1", "kind": "function", "description": "A web search: {query, engines?, count?, page?, time_range?, language?} -> {query, viaTor, text, results: [{title, url, content, engines, published?}], total, answers, suggestions, failed: [[engine, reason]]}" },
+				{ "name": "websearch.search", "version": "1", "kind": "function", "description": "A web search: {query, engines?, count?, page?, time_range?, language?, wait?} -> {query, viaTor, text, results: [{title, url, content, engines, published?}], total, answers, suggestions, failed: [[engine, reason]]}; wait: seconds for SearXNG and Tor to start (default 20, at most 120: a binding call is answered within 30 s), after which a start that takes longer goes on and the search says web search is starting" },
 				{ "name": "websearch.status", "version": "1", "kind": "function", "description": "{} -> {state, url?, summary?, error?, viaTor, engines, unknownEngines, lastSearch?}" }
 			],
 			"consumes": [

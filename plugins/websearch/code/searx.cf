@@ -91,19 +91,22 @@ namespace WebSearch
 		return configured.IsEmpty() ? Slashes(IED::HomeFolder().View()) + bundled : Slashes(configured);
 	}
 
-	Core::Array<Core::String> SearxService::Engines(Core::Array<Core::String>& unknown) {
-		Threading::LockGuard guard(starting);
-		return KnownEngines(unknown);
-	}
+	Core::Array<Core::String> SearxService::Engines(Core::Array<Core::String>& unknown) { return KnownEngines(unknown); }
 
-	// Under `starting`: the configured engines SearXNG has, its names read once from its settings.yml.
+	// The configured engines SearXNG has, its names read once from its settings.yml. Not under `starting`: a search
+	// prepares while a start waits for Tor.
 	Core::Array<Core::String> SearxService::KnownEngines(Core::Array<Core::String>& unknown) {
-		if (!catalogRead) {
-			catalogRead = true;
-			Serialization::DomDoc* doc = new Serialization::DomDoc();
-			Core::String yaml = ReadText((Folder("websearch.searxngFolder", "/vendor/searxng") + "/searx/settings.yml").View());
-			Serialization::DomNode list = Serialization::ReadYaml(yaml.View(), *doc).root.Member("engines");
-			for (int64 i = 0; i < list.Count(); ++i) catalog.Push(Lowercase(list.At(i).Member("name").AsView()));
+		Core::Array<Core::String> catalog;
+		{
+			Threading::LockGuard guard(catalogLock);
+			if (!catalogRead) {
+				catalogRead = true;
+				Serialization::DomDoc* doc = new Serialization::DomDoc();
+				Core::String yaml = ReadText((Folder("websearch.searxngFolder", "/vendor/searxng") + "/searx/settings.yml").View());
+				Serialization::DomNode list = Serialization::ReadYaml(yaml.View(), *doc).root.Member("engines");
+				for (int64 i = 0; i < list.Count(); ++i) catalogNames.Push(Lowercase(list.At(i).Member("name").AsView()));
+			}
+			catalog = catalogNames;
 		}
 		Core::Array<Core::String> known;
 		Core::Array<Core::String> configured = EngineNames(SettingNode(context, "websearch.engines"));
@@ -148,6 +151,53 @@ namespace WebSearch
 	}
 
 	// --- Starting ---------------------------------------------------------------------------------------------------
+
+	// Ready, or ready within `waitNs`: a start runs on a thread of its own, so one that takes longer goes on while the
+	// caller hears that web search is starting. False with `error`: that, or why the start failed.
+	bool SearxService::Started(int64 waitNs, Core::String& error) {
+		int64 run;
+		bool launch = false;
+		{
+			Threading::LockGuard guard(fields);
+			if (state == SearxState::Ready || state == SearxState::External) return true;
+			run = startsDone;
+			launch = !startRunning;
+			startRunning = true;
+		}
+		SearxService* self = this;
+		if (launch) context->StartThread([self]() { self->StartInBackground(); });
+		const int64 deadline = clock_now_ns() + waitNs;
+		while (true) {
+			{
+				Threading::LockGuard guard(fields);
+				if (startsDone > run) {
+					error = startProblem;
+					return startProblem.IsEmpty();
+				}
+				if (clock_now_ns() >= deadline) {
+					Core::StringView now = state == SearxState::Starting && !summary.IsEmpty() ? summary.View() : Core::StringView("starting SearXNG");
+					error = (Core::String("web search is starting (") + now) + "); ask again in a few seconds";
+					return false;
+				}
+			}
+			Threading::Thread::Sleep(kStartPollNs);
+		}
+	}
+
+	void SearxService::StartInBackground() {
+		Core::String base;
+		bool viaTor = false;
+		Core::String problem;
+		{
+			Threading::LockGuard guard(starting);
+			if (stopping) problem = Core::String("web search stopped");
+			else Ensure(base, viaTor, problem);
+		}
+		Threading::LockGuard guard(fields);
+		startRunning = false;
+		startsDone += 1;
+		startProblem = problem;
+	}
 
 	// Under `starting`: the instance a search uses now, started or restarted when needed.
 	bool SearxService::Ensure(Core::String& base, bool& viaTor, Core::String& error) {
@@ -373,8 +423,8 @@ namespace WebSearch
 	bool SearxService::Search(const SearchRequest& request, SearchResults& results, bool& viaTor, Core::String& error) {
 		const int64 begun = clock_now_ns();
 		Core::String base;
-		bool ready;
-		{
+		bool ready = Started(request.startWaitNs, error);
+		if (ready) {
 			Threading::LockGuard guard(starting);
 			ready = Ensure(base, viaTor, error);
 		}

@@ -7,6 +7,10 @@ include "searx.ch"
 namespace WebSearch
 {
 	const char* kTestQuery = "open source software";
+	// How long the Search page and the web_search tool wait for SearXNG and Tor to start; a binding call waits
+	// kStartWaitSeconds, within its 30 s.
+	const int64 kPatientWaitSeconds = 100;
+	const char*[6] kSearchArgs = { "query", "engines", "count", "page", "time_range", "language" };
 
 	static IED::RpcError Unavailable(Core::StringView why) { return IED::RpcError(IED::ErrorCode::Unavailable, why); }
 
@@ -21,16 +25,27 @@ namespace WebSearch
 		return true;
 	}
 
-	// A method's params as the arguments of a search.
+	// A method's params as the arguments of a search that waits for a start.
 	static Serialization::DomNode SearchArgs(const IED::Params& params) {
-		const char*[6] names = { "query", "engines", "count", "page", "time_range", "language" };
 		IED::JsonWriter json;
 		json.BeginObject();
 		for (int64 i = 0; i < 6; ++i)
-			if (params.Has(names[i])) json.RawField(names[i], IED::NodeJson(params.Field(names[i])).View());
+			if (params.Has(kSearchArgs[i])) json.RawField(kSearchArgs[i], IED::NodeJson(params.Field(kSearchArgs[i])).View());
+		json.IntField("wait", kPatientWaitSeconds);
 		json.EndObject();
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		return Serialization::ReadJson(json.View(), *doc).root;
+	}
+
+	// The web_search tool's arguments as those of a search that waits for a start, as JSON.
+	static Core::String ToolArgs(const Serialization::DomNode& args) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		for (int64 i = 0; i < 6; ++i)
+			if (args.Member(kSearchArgs[i]).IsValid()) json.RawField(kSearchArgs[i], IED::NodeJson(args.Member(kSearchArgs[i])).View());
+		json.IntField("wait", kPatientWaitSeconds);
+		json.EndObject();
+		return json.ToString();
 	}
 
 	// Every configured engine in one search: what each found, or why it failed.
@@ -41,6 +56,7 @@ namespace WebSearch
 		asked.BeginObject();
 		asked.Field("query", Core::StringView(kTestQuery));
 		asked.IntField("count", 20);
+		asked.IntField("wait", kPatientWaitSeconds);
 		asked.EndObject();
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		if (!searx->Prepare(Serialization::ReadJson(asked.View(), *doc).root, request, error)) throw Unavailable(error.View());
@@ -109,7 +125,7 @@ namespace WebSearch
 
 	// web_search (docs/13 T-WEB-1): through the websearch.search binding, which runs here at once.
 	IED::ToolResult SearchTool(const IED::ToolCall& call) {
-		IED::Result answer = IED::CallBinding(Core::StringView("websearch.search"), IED::NodeJson(call.args).View());
+		IED::Result answer = IED::CallBinding(Core::StringView("websearch.search"), ToolArgs(call.args).View());
 		if (!answer.Ok()) return IED::ToolFailure(answer.error.View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		return IED::ToolText(Serialization::ReadJson(answer.json.View(), *doc).root.Member("text").AsView());

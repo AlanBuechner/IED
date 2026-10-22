@@ -2,8 +2,10 @@
 // settings.yml made from the settings each time - a search whose text would differ (a setting changed, Tor came back on
 // another port, a new circuit was asked for) restarts it first - and stopped when unused for websearch.stopAfterSeconds.
 // With websearch.useTor its engines' requests go through the ied.tor plugin's proxy (tor.proxy), each start's under a
-// SOCKS user of its own so Tor gives it circuits of its own. `starting` serializes starts and stops (a search waits on
-// it while SearXNG starts); what the status shows is under `fields`, taken after `starting`, before the server's lock.
+// SOCKS user of its own so Tor gives it circuits of its own. `starting` serializes starts and stops; a start runs on a
+// thread of its own, and a search waits for it as long as its caller can (Tor's first bootstrap can take a minute, a
+// binding call is answered within 30 s). What the status shows is under `fields`, taken after `starting`, before the
+// server's lock.
 
 include "config.ch"
 include "results.ch"
@@ -20,6 +22,9 @@ namespace WebSearch
 	const int64 kWatchTickNs = 2000000000;
 	const int64 kDefaultStopAfterSeconds = 1800;
 	const int32 kSearchSlackMs = 15000;   // beyond twice the engines' timeout, for SearXNG and Tor themselves
+	const int64 kStartWaitSeconds = 20;   // a search's default wait for a start: a binding call has 30 s in all
+	const int64 kLongestStartWaitSeconds = 120;
+	const int64 kStartPollNs = 250000000;
 
 	const char* SearxStateName(SearxState state);
 
@@ -41,9 +46,10 @@ namespace WebSearch
 
 		// The status topic and the watcher thread.
 		public void Start();
-		// A search, starting SearXNG (and Tor) first when needed; one that engines refused through this Tor exit - it came
-		// back with almost nothing, or half the engines asked refused - is tried once more on new circuits, and one no
-		// engine answered at all once more as it is. False with `error`.
+		// A search, starting SearXNG (and Tor) first when needed: a start longer than the request's startWaitNs goes on, and
+		// the search says web search is starting. One that engines refused through this Tor exit - it came back with almost
+		// nothing, or half the engines asked refused - is tried once more on new circuits, and one no engine answered at
+		// all once more as it is. False with `error`.
 		public bool Search(const SearchRequest& request, SearchResults& results, bool& viaTor, Core::String& error);
 		// A search's arguments ({query, engines?, count?, page?, time_range?, language?}, as web_search takes them) with
 		// the settings' defaults; false with `error` naming what is wrong.
@@ -59,6 +65,8 @@ namespace WebSearch
 		public void Stop(bool final);
 
 		private Core::Array<Core::String> KnownEngines(Core::Array<Core::String>& unknown);
+		private bool Started(int64 waitNs, Core::String& error);
+		private void StartInBackground();
 		private bool Ensure(Core::String& base, bool& viaTor, Core::String& error);
 		private bool External(Core::StringView instance, Core::String& base, Core::String& error);
 		private bool TorProxy(Core::String& proxy, Core::String& error);
@@ -76,13 +84,15 @@ namespace WebSearch
 		private IED::PluginContext* context;
 		private Threading::Mutex starting;
 		private Threading::Mutex fields;
+		private Threading::Mutex catalogLock;
 		// Under `starting`.
 		private Process::Child* process;
 		private Core::String runningYaml;
 		private int64 circuit;
 		private bool stopping;
+		// Under `catalogLock`: SearXNG's engine names.
 		private bool catalogRead;
-		private Core::Array<Core::String> catalog;
+		private Core::Array<Core::String> catalogNames;
 		// Under `fields`.
 		private SearxState state;
 		private Core::String url;
@@ -95,5 +105,8 @@ namespace WebSearch
 		private bool searched;
 		private int64 usedNs;
 		private Core::String published;
+		private bool startRunning;          // a start on its own thread
+		private int64 startsDone;
+		private Core::String startProblem;  // why the last one failed; empty when it did not
 	}
 }

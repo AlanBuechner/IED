@@ -14,6 +14,7 @@ namespace WebSearch
 		public Core::String timeRange;               // "", day, week, month or year
 		public Core::String language;                // "" or "auto": SearXNG's guess
 		public int32 safeSearch;
+		public int64 startWaitNs;                    // how long it waits for SearXNG and Tor to start
 	}
 
 	struct SearchHit
