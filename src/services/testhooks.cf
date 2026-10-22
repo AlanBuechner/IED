@@ -24,6 +24,7 @@ namespace Ied
 		server->rpc.Register("testhooks.serverEdit", [self](Call& call, const Params& params) -> Core::String { return self->ServerEdit(call, params); });
 		server->rpc.Register("testhooks.external", [self](Call& call, const Params& params) -> Core::String { return self->External(call, params); });
 		server->rpc.Register("testhooks.mintToken", [self](Call& call, const Params& params) -> Core::String { return self->MintToken(call, params); });
+		server->rpc.Register("testhooks.gc", [self](Call& call, const Params& params) -> Core::String { return self->CollectGarbage(call, params); });
 	}
 
 	Core::String TestHooks::Info(Call& call, const Params& params) {
@@ -36,6 +37,22 @@ namespace Ied
 		for (int64 i = 0; i < names.Count(); ++i)
 			if (names[i].View().StartsWith(Core::StringView("testhooks."))) json.String(names[i].View());
 		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// Two full collections, then the collector's counts: live bytes after them are what a soak judges, since private
+	// memory also holds garbage the proportional trigger has not collected yet. The second frees what waited for its
+	// finalizer, which a collection keeps alive (with all it points to) until the finalizer has run.
+	Core::String TestHooks::CollectGarbage(Call& call, const Params& params) {
+		GC::Collect();
+		GC::Collect();
+		GC::Stats stats = GC::GetStats();
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("collections", (int64)stats.collections);
+		json.IntField("liveBytes", (int64)stats.liveBytes);
+		json.IntField("heapBytes", (int64)stats.heapBytes);
 		json.EndObject();
 		return json.ToString();
 	}

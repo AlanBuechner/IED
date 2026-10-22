@@ -1,8 +1,12 @@
 """The M1 idle soak (docs/18 "M1 exit", docs/19 "Soak / perf"): a real ied-server with a workspace and three connected
 clients (desktop, tablet, phone), idle but for their pings and a light request now and then, for --hours (24 by
-default). Each --interval it samples the server's memory and handles. It fails when the server exits, a client is
-dropped or sees a protocol violation, a request fails, or memory ends above the budget (docs/19: 300 MB idle) or grows
-past --growth percent of the level after the warm-up.
+default). Each --interval it samples the server's memory and handles, then has it collect its garbage
+(testhooks.gc) and records what stays live. It fails when the server exits, a client is dropped or sees a protocol
+violation, a request fails, the working set ends above the budget (docs/19: 300 MB idle), or live memory grows past
+--growth percent of the level after the warm-up. Live memory, not private, is the leak measure: the collector's trigger
+is proportional (C4 runs one once the heap doubles), so an idle server's private memory climbs for days with garbage
+nothing has collected yet (2026-10-21: 70 to 79 MB over a day with no collection), while the first forced collection
+takes a fresh server from 81 MB private to 18.
 
 	python -I tools/soak/idle_soak.py --server build/bin/Development-windows-x64/ied-server/ied-server.exe [--hours 24]
 
@@ -101,7 +105,7 @@ class Soak:
 		workspace = os.path.join(self.root, "workspace")
 		shutil.copytree(os.path.join(REPO, "tests", "e2e", "fixture", "workspace"), workspace)
 		argv = [executable, "--host", "127.0.0.1", "--port", "0", "--data", os.path.join(self.root, "data"), "--control", "ied-soak-%d" % os.getpid(),
-			"--home", REPO, "--static", os.path.join(REPO, "frontend"), "--quiet", "--workspace", workspace]
+			"--home", REPO, "--static", os.path.join(REPO, "frontend"), "--quiet", "--test-hooks", "--workspace", workspace]
 		self.process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 		self.job = bind_to_this_process(self.process)
 		listening = self.process.stdout.readline().strip()
@@ -142,13 +146,14 @@ class Soak:
 			if not snapshot["workspaces"]:
 				self.fail("the workspace is gone")
 
-	def sample(self, elapsed):
+	async def sample(self, elapsed):
 		if self.process.poll() is not None:
 			self.fail("the server exited with %s" % self.process.returncode)
 			return
 		working, private, handles = process_sample(self.process.pid)
-		self.samples.append({"s": round(elapsed), "workingMB": round(working / MB, 1), "privateMB": round(private / MB, 1), "handles": handles})
-		print("%8.0f s  working %7.1f MB  private %7.1f MB  handles %5d" % (elapsed, working / MB, private / MB, handles), flush=True)
+		live = (await self.clients[0].request("testhooks.gc"))["liveBytes"]
+		self.samples.append({"s": round(elapsed), "workingMB": round(working / MB, 1), "privateMB": round(private / MB, 1), "liveMB": round(live / MB, 2), "handles": handles})
+		print("%8.0f s  working %7.1f MB  private %7.1f MB  live %7.2f MB  handles %5d" % (elapsed, working / MB, private / MB, live / MB, handles), flush=True)
 
 	def fail(self, message):
 		print("FAIL " + message, flush=True)
@@ -161,9 +166,9 @@ class Soak:
 			return
 		base = warm[0]
 		last = warm[-1]
-		limit = base["privateMB"] * (1 + self.args.growth / 100) + 16
-		if last["privateMB"] > limit:
-			self.fail("private memory grew from %.1f MB to %.1f MB (limit %.1f)" % (base["privateMB"], last["privateMB"], limit))
+		limit = base["liveMB"] * (1 + self.args.growth / 100) + 1
+		if last["liveMB"] > limit:
+			self.fail("live memory grew from %.2f MB to %.2f MB (limit %.2f)" % (base["liveMB"], last["liveMB"], limit))
 		if last["workingMB"] > BUDGET_MB:
 			self.fail("working set %.1f MB is over the %d MB budget" % (last["workingMB"], BUDGET_MB))
 		if last["handles"] > base["handles"] + 200:
@@ -189,9 +194,9 @@ class Soak:
 			n += 1
 			try:
 				await self.tick(n)
+				await self.sample(time.monotonic() - started)
 			except Exception as e:
 				self.fail("a request failed: %r" % e)
-			self.sample(time.monotonic() - started)
 			await asyncio.sleep(self.args.interval)
 
 	def stop(self):
@@ -229,7 +234,7 @@ def main(argv):
 	parser.add_argument("--hours", type=float, default=24.0)
 	parser.add_argument("--interval", type=float, default=60.0, help="seconds between samples")
 	parser.add_argument("--warmup", type=float, default=600.0, help="seconds before the growth baseline")
-	parser.add_argument("--growth", type=float, default=20.0, help="allowed growth of private memory after the warm-up, percent")
+	parser.add_argument("--growth", type=float, default=20.0, help="allowed growth of live memory after the warm-up, percent (and 1 MB)")
 	args = parser.parse_args(argv)
 	soak = Soak(args)
 	try:

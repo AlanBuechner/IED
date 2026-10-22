@@ -1,7 +1,7 @@
 // testhooks.*: the deterministic control surface of the protocol conformance suite (tools/conformance/README.md):
 // test topics and event floods, streams, delays, counters, chosen failures, a simulated restart, scratch files and
-// server-side document edits, a file outside the workspace as a language server would name one. Only a server started
-// with --test-hooks has them.
+// server-side document edits, a file outside the workspace as a language server would name one, and a full garbage
+// collection with its counts (the idle soak's leak measure). Only a server started with --test-hooks has them.
 
 include "web/rpc.ch"
 
@@ -38,6 +38,7 @@ namespace Ied
 		private Core::String ServerEdit(Call& call, const Params& params);
 		private Core::String External(Call& call, const Params& params);
 		private Core::String Info(Call& call, const Params& params);
+		private Core::String CollectGarbage(Call& call, const Params& params);
 		private Core::String MintToken(Call& call, const Params& params);
 		private void RegisterMethods();
 
