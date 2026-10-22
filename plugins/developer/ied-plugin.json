@@ -1,20 +1,24 @@
 // Developer mode (docs/28): when IED runs from its source checkout, a chat can fix the C4 compiler, Bedrock, Nuke or
 // IED itself where a bug lives instead of working around it - the source as the root "ied:/" of its file tools (the
 // ai.roots binding, which the chat plugin consumes), a system-message section that says how, and the tools ied_rebuild,
-// ied_gates and ied_known_bugs, loaded on demand. Its server code (code/) is compiled into the server; on an installed
-// IED, which has no source, it contributes nothing.
+// ied_gates and ied_known_bugs, loaded on demand - and Rebuild and relaunch in its settings page, which keeps the desktop
+// build current with the checkout. Its server code (code/) is compiled into the server; an installed IED finds its
+// checkout through install.json, and one with none contributes nothing.
 {
 	"manifestVersion": 1,
 	"id": "ied.developer",
 	"name": "Developer Mode",
 	"version": "0.1.0",
-	"description": "When IED runs from its source, chats can fix IED and the C4 toolchain as they work.",
+	"description": "When IED is built from its source, chats can fix IED and the C4 toolchain as they work, and Settings rebuilds and relaunches it.",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "entry": "Developer::Activate", "ui": "ui/index.js" },
 	"permissions": ["process.spawn", "fs.read", "workspace.open"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Environment/Developer" },
+		"settingsPages": [
+			{ "id": "ied.developer", "page": "Environment", "title": "Developer", "view": "DeveloperSettings", "keys": ["developer.enabled"] }
+		],
 		"bindings": {
 			"provides": [
 				{

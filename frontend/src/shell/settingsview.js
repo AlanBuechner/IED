@@ -198,6 +198,9 @@ class SettingsView {
 			tier: () => this.tier,
 			set: (key, value, tier) => this.write(key, value, tier),
 			reset: (key, tier) => this.clear(key, tier),
+			// The window's own row for `key` (its control, source, Reset and problems), for a page that draws some keys
+			// its own way and leaves the others as every page shows them; drawn again by the page on a change.
+			row: (key) => this.row(key),
 			onChange: (fn) => {
 				this.listeners.add(fn);
 				return () => this.listeners.delete(fn);

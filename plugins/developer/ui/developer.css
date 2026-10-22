@@ -1,0 +1,13 @@
+/* developer.css - Settings > Environment > Developer (buildpage.js) and the status bar's DEV. */
+.dev-head { font-size: var(--font-size-lg); font-weight: var(--font-weight-normal); margin: var(--space-7) 0 var(--space-2); }
+.dev-desc { max-width: 760px; }
+.dev-desc code { font-family: var(--font-mono); white-space: nowrap; }
+.dev-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-6); max-width: 900px; margin: var(--space-4) 0; font-size: var(--font-size-sm); }
+.dev-rows .k { color: var(--text-2); }
+.dev-rows .v { color: var(--text-0); overflow-wrap: anywhere; }
+.dev-bar { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; margin: var(--space-4) 0; }
+.dev-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.dev-status { font-size: var(--font-size-sm); color: var(--text-1); }
+.dev-note[hidden] { display: none; }
+.dev-log { max-width: 900px; height: 300px; overflow: auto; margin: 0; padding: var(--space-3) var(--space-4); background: var(--editor-bg); border: var(--border-width) solid var(--border-0); border-radius: var(--radius-2); color: var(--text-1); font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dev-log:empty { display: none; }

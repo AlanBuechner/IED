@@ -5,7 +5,7 @@
 		"developer.enabled": {
 			"type": "boolean",
 			"default": true,
-			"description": "When IED runs from its source checkout, chats may read and fix IED, the C4 compiler, Bedrock and Nuke there (paths ied:/...), rebuild them and run their tests; every write and command there asks first. No effect on an installed IED (docs/28)."
+			"description": "When IED is built from a source checkout (it runs from one, or was installed from one), chats may read and fix IED, the C4 compiler, Bedrock and Nuke there (paths ied:/...), rebuild them and run their tests; every write and command there asks first (docs/28)."
 		}
 	}
 }

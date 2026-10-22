@@ -10,16 +10,6 @@ namespace Developer
 
 	// --- The source ------------------------------------------------------------------------------------------------
 
-	Core::String SourceFolder() {
-		Core::String home = IED::HomeFolder();
-		if (home.IsEmpty()) return Core::String();
-		FS::Path root = FS::Path(home.View());
-		const bool git = FS::IsDirectory((root / Core::StringView(".git")).CStr()) || FS::FileExists((root / Core::StringView(".git")).CStr());
-		const bool compiler = FS::IsDirectory((root / Core::StringView("C4/C4Lib/src")).CStr());
-		const bool server = FS::FileExists((root / Core::StringView("src/nuke.toml")).CStr());
-		return git && compiler && server ? home : Core::String();
-	}
-
 	// The source as a workspace: the open one rooted there, or opened now.
 	static bool SourceWorkspace(IED::Workspace& ws, Core::String& problem) {
 		Core::String source = SourceFolder();
@@ -34,7 +24,7 @@ namespace Developer
 
 	static Core::String SectionEntries(Core::StringView source) {
 		Core::StringBuilder text;
-		text.Append("# IED itself (developer mode)\n\nThis IED runs from its source checkout at ");
+		text.Append("# IED itself (developer mode)\n\nThis IED is built from its source checkout at ");
 		text.Append(source);
 		text.Append(". Paths that start with ied:/ name files there (fs_read, fs_list, fs_glob, search_text, fs_edit, fs_write; cwd for shell_run); every write and command there asks the owner. ");
 		text.Append("When a failure comes from the C4 compiler, Bedrock, Nuke or IED rather than from this workspace, fix it there instead of working around it: read ied:/AGENTS.md and ied:/C4/AGENTS.md first, check ied_known_bugs, record a new C4 bug in ied:/C4/docs/status/known-bugs.md, add a test that would have caught it, run ied_rebuild and ied_gates, and say in the chat what you fixed.");
@@ -100,14 +90,34 @@ namespace Developer
 		return IED::Answer(json.View());
 	}
 
+	// ied.developer/rebuild, /cancel and /refresh: the settings page's Rebuild and relaunch (builds.ch).
+	static void ProvideBuildMethods(IED::PluginContext& context, Builds* builds, Core::StringView source) {
+		const bool hasSource = !source.IsEmpty();
+		Core::String problem;
+		context.Method(Core::StringView("ied.developer/rebuild"), [builds, hasSource](const IED::Request& request) -> Core::String {
+			Core::String refused;
+			if (!hasSource) throw IED::RpcError(IED::ErrorCode::Unavailable, "IED has no source checkout to build: it is neither run from one nor installed from one");
+			if (!builds->Start(refused)) throw IED::RpcError(IED::ErrorCode::Conflict, refused.View());
+			return Core::String("{}");
+		}, problem);
+		context.Method(Core::StringView("ied.developer/cancel"), [builds](const IED::Request& request) -> Core::String {
+			builds->Cancel();
+			return Core::String("{}");
+		}, problem);
+		context.Method(Core::StringView("ied.developer/refresh"), [builds](const IED::Request& request) -> Core::String {
+			builds->Refresh();
+			return Core::String("{}");
+		}, problem);
+		if (!problem.IsEmpty()) context.Log(problem.View());
+	}
+
 	void Activate(IED::PluginContext& context) {
 		Core::String source = SourceFolder();
-		IED::JsonWriter state;
-		state.BeginObject();
-		state.Field("source", source.View());
-		state.EndObject();
-		context.Topic(Core::StringView("ied.developer/state"), state.View());
+		Builds* builds = new Builds(&context, source);
+		context.TopicFrom(Core::StringView("ied.developer/state"), [builds]() -> Core::String { return builds->SnapshotJson(); });
+		ProvideBuildMethods(context, builds, source.View());
 		if (source.IsEmpty()) return;
+		context.StartThread([builds]() { builds->Refresh(); });
 		Core::String problem;
 		if (!context.Contribute(Core::StringView("systemMessageSections"), Core::StringView(""), SectionEntries(source.View()).View(), problem)) context.Log(problem.View());
 		if (!context.Contribute(Core::StringView("toolCalls"), Core::StringView(""), ToolEntries().View(), problem)) context.Log(problem.View());

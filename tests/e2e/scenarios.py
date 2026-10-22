@@ -1222,6 +1222,21 @@ def settings_window(run):
 	run.shot("search")
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def developer_settings_page(run):
+	"""Environment > Developer (docs/28): the setting drawn as every row, the checkout the server is built from, and
+	Rebuild; a browser is offered no relaunch. Nothing is built: Rebuild would install this checkout."""
+	page = run.open()
+	open_settings(run, page)
+	page.click(".set-node[data-page='custom:ied.developer']")
+	page.wait_for_selector(".set-custom[data-page='custom:ied.developer'] .set-row[data-key='developer.enabled']")
+	run.wait_text(".dev-rows", "Source checkout")
+	run.wait_text(".dev-rows", "HEAD ")
+	check(page.is_visible(".dev-actions button:has-text('Rebuild')"), "a checkout can be rebuilt")
+	check(not page.is_visible(".dev-actions button:has-text('Rebuild and relaunch')"), "a browser cannot relaunch")
+	run.shot("developer")
+
+
 @scenario(viewports=("desktop",))
 def model_settings(run):
 	page = run.open()

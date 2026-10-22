@@ -2,13 +2,11 @@
 // (the ai.roots binding), the system-message section that tells them to fix a bug of IED or the C4 toolchain there, and
 // the tools that rebuild it, run its gates and list its known bugs.
 
-include "api/plugin.ch"
+include "source.ch"
+include "builds.ch"
 
 namespace Developer
 {
-	// The checkout the server runs from: its home when that holds .git, C4/C4Lib/src and src/nuke.toml; "" for an
-	// installed IED.
-	Core::String SourceFolder();
 	// The open entries of a known-bugs.md: each "### BUG-NNN" heading with the line after it.
 	Core::String OpenBugs(Core::StringView knownBugs);
 	// The end of a command's output that fits `most` bytes, starting at a line.

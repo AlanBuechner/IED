@@ -1,0 +1,76 @@
+// Developer mode (docs/28): a build's output cut into lines, the install record, and the checkout a server is built from.
+
+include "developer.ch"
+
+static void WriteText(const FS::Path& file, Core::StringView text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::File opened = FS::File(file.CStr(), "wb");
+	opened.Write((const void*)text.Data(), text.ByteLength());
+}
+
+static FS::Path MakeCheckout(const FS::Path& root) {
+	FS::MakeDirectories((root / ".git").CStr());
+	FS::MakeDirectories((root / "C4" / "C4Lib" / "src").CStr());
+	WriteText(root / "src" / "nuke.toml", Core::StringView("[project]\n"));
+	return root;
+}
+
+[test("server.developer")]
+class DeveloperTests
+{
+	[test("lines")]
+	public static void TestLines() {
+		Core::String pending;
+		Core::Array<Core::String> first = Developer::CompleteLines(pending, Core::StringView("one\r\ntw"));
+		assert_eq(1, first.Count(), "only the finished line");
+		assert_true(first[0].View() == "one", "without its CR");
+		assert_true(pending.View() == "tw", "the rest waits");
+		Core::Array<Core::String> second = Developer::CompleteLines(pending, Core::StringView("o\n\nthree\n"));
+		assert_eq(3, second.Count(), "a line across reads, an empty one, the last");
+		assert_true(second[0].View() == "two" && second[1].View() == "" && second[2].View() == "three", "in order");
+		assert_true(pending.IsEmpty(), "nothing left");
+		assert_eq(0, Developer::CompleteLines(pending, Core::StringView("no end")).Count(), "no newline, no line");
+	}
+
+	[test("tail")]
+	public static void TestTail() {
+		assert_true(Developer::OutputTail(Core::StringView("short\n"), 100).View() == "short\n", "what fits is whole");
+		assert_true(Developer::OutputTail(Core::StringView("first line\nsecond\nend\n"), 10).View() == "[...]\nend\n", "cut at a line");
+		assert_true(Developer::OutputTail(Core::StringView("abcdefghij"), 4).View() == "[...]\nghij", "no line to cut at");
+	}
+
+	[test("record")]
+	public static void TestRecord() {
+		FS::Path home = FS::TempDirectory() / "ied-developer-record-test";
+		FS::RemoveAll(home.CStr());
+		Developer::InstallRecord record;
+		FS::MakeDirectories(home.CStr());
+		assert_true(!Developer::ReadInstallRecord(Core::StringView(home.CStr()), record), "no install.json, no record");
+		WriteText(home / "install.json", Core::StringView("{\"source\": \"C:/work/IED\", \"commit\": \"abc123\", \"dirty\": true, \"installedMs\": 1792630000123, \"bin\": \"C:/work/IED/build/bin\"}"));
+		assert_true(Developer::ReadInstallRecord(Core::StringView(home.CStr()), record), "read");
+		assert_true(record.source.View() == "C:/work/IED" && record.commit.View() == "abc123", "the checkout and its commit");
+		assert_true(record.dirty && record.installedMs == 1792630000123, "dirty, and when");
+		WriteText(home / "install.json", Core::StringView("{\"commit\": \"307c681-dirty\", \"installed\": \"2026-10-21T20:18:34\"}"));
+		assert_true(!Developer::ReadInstallRecord(Core::StringView(home.CStr()), record), "an older record names no source");
+		WriteText(home / "install.json", Core::StringView("{\"source\": "));
+		assert_true(!Developer::ReadInstallRecord(Core::StringView(home.CStr()), record), "a broken one is none");
+		FS::RemoveAll(home.CStr());
+	}
+
+	[test("source")]
+	public static void TestSource() {
+		FS::Path root = FS::TempDirectory() / "ied-developer-source-test";
+		FS::RemoveAll(root.CStr());
+		FS::Path checkout = MakeCheckout(root / "checkout");
+		FS::Path install = root / "install";
+		FS::MakeDirectories(install.CStr());
+		Developer::InstallRecord record;
+		record.source = Core::String(checkout.CStr());
+		assert_true(Developer::SourceOf(Core::StringView(checkout.CStr()), nullptr).View() == checkout.CStr(), "a server in its checkout");
+		assert_true(Developer::SourceOf(Core::StringView(install.CStr()), &record).View() == checkout.CStr(), "an install, through its record");
+		assert_true(Developer::SourceOf(Core::StringView(install.CStr()), nullptr).IsEmpty(), "an install without a record has none");
+		FS::RemoveAll((checkout / "C4").CStr());
+		assert_true(Developer::SourceOf(Core::StringView(install.CStr()), &record).IsEmpty(), "a record whose folder is no longer a checkout");
+		FS::RemoveAll(root.CStr());
+	}
+}
