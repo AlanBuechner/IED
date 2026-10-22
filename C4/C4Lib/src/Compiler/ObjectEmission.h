@@ -2,10 +2,12 @@
 #include "Compiler/CpuTarget.h"
 #include "Compiler/ModulePartitions.h"
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
-namespace llvm { class Module; }
+namespace llvm { class LLVMContext; class Module; }
 
 namespace Scripting { class ObjectCache; }
 
@@ -45,9 +47,18 @@ namespace Scripting
 	bool WriteObject(llvm::Module& module, const ObjectSettings& settings, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics);
 
 	/// The objects of a module, in partition order, and how many of them an earlier build had already assembled.
+	/// A module the cache keeps by a key that says everything it is made of, so it is made only when no object of the
+	/// key is kept: built by `build` into a context of the thread that assembles it.
+	struct KeyedModule
+	{
+		using Builder = std::function<std::unique_ptr<llvm::Module>(llvm::LLVMContext&)>;
+		std::string key;
+		Builder build;
+	};
+
 	struct CachedObjects
 	{
-		std::vector<std::string> paths;
+		std::vector<std::string> paths; // each once: partitions with the same code share their object
 		size_t reused = 0;
 		double splitSeconds = 0;       // splitting the module into partitions and writing each one's bitcode
 		struct Assembled { uint64_t instructions = 0; double seconds = 0; };
@@ -65,7 +76,8 @@ namespace Scripting
 		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, const Extracts& extracts = {});
 
 	/// The objects of a program emitted in partitions (D-81), from each partition's bitcode (PartitionBitcode), as
-	/// above: an unchanged partition reuses its object.
-	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, const ObjectSettings& settings, const ObjectCache& cache,
-		std::vector<ObjectDiagnostic>& diagnostics);
+	/// above: an unchanged partition reuses its object. The `keyed` modules' objects follow, each built and assembled
+	/// only when missing, before the partitions that are.
+	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, std::vector<KeyedModule> keyed, const ObjectSettings& settings,
+		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics);
 }

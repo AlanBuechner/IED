@@ -37,15 +37,13 @@ namespace Scripting
 {
 	CodeGenDriver::CodeGenDriver(llvm::LLVMContext& ctx) : m_Context(ctx), m_MCtx(ctx), m_Emitter(m_MCtx) {}
 
-	CodeGenDriver::~CodeGenDriver()
+	std::unique_ptr<llvm::Module> CodeGenDriver::BuildReflectionModule(llvm::LLVMContext& context) const
 	{
-		if (m_ImageThread.joinable()) m_ImageThread.join();
-	}
-
-	llvm::Module* CodeGenDriver::ReflectionModule()
-	{
-		if (m_ImageThread.joinable()) m_ImageThread.join();
-		return m_ImageModule.get();
+		auto module = std::make_unique<llvm::Module>("c4_reflection", context);
+		module->setTargetTriple(llvm::Triple(m_ImageTriple));
+		module->setDataLayout(m_ImageLayout);
+		ReflectionTables(*module).Build(m_Image);
+		return module;
 	}
 
 	namespace
@@ -416,7 +414,7 @@ namespace Scripting
 		ImageDescription description = DescribeReflectionImage(m_MCtx, model, m_Thunks, host, m_LoweringErrors);
 		if (LoweringFailed(errorMessage)) return false;
 		if (description.Empty()) return true;
-		llvm::GlobalVariable* image = m_Others.empty() ? BuildImageHere(description) : BuildImageApart(std::move(description));
+		llvm::GlobalVariable* image = m_Others.empty() ? BuildImageHere(description) : KeepImageApart(std::move(description));
 		if (m_Script) return true; // a script's loader registers the image under the script's tag
 		auto* ptrTy = llvm::PointerType::get(m_Context, 0);
 		llvm::Function* registerImage = m_MCtx.RuntimeFunction("c4_reflect_register_image", llvm::Type::getVoidTy(m_Context), { ptrTy, ptrTy });
@@ -436,15 +434,14 @@ namespace Scripting
 		}).Build(image);
 	}
 
-	// Building the constants reads no model, so it goes on beside imports, the GC roots and the script host, in a context
-	// of its own (D-82).
-	llvm::GlobalVariable* CodeGenDriver::BuildImageApart(ImageDescription image)
+	// Building the constants reads no model, so the output builds them where it assembles the image's object, and only
+	// when no object of the image's key is kept (D-82).
+	llvm::GlobalVariable* CodeGenDriver::KeepImageApart(ImageDescription image)
 	{
-		m_ImageContext = std::make_unique<llvm::LLVMContext>();
-		m_ImageModule = std::make_unique<llvm::Module>("c4_reflection", *m_ImageContext);
-		m_ImageModule->setTargetTriple(m_MCtx.module().getTargetTriple());
-		m_ImageModule->setDataLayout(m_MCtx.module().getDataLayout());
-		m_ImageThread = std::thread([this, described = std::move(image)] { ReflectionTables(*m_ImageModule).Build(described); });
+		m_ImageTriple = m_MCtx.module().getTargetTriple().str();
+		m_ImageLayout = m_MCtx.module().getDataLayoutStr();
+		m_ImageKey = "reflection-" + image.Key(m_ImageTriple + " " + m_ImageLayout);
+		m_Image = std::move(image);
 		return new llvm::GlobalVariable(m_MCtx.module(), llvm::Type::getInt8Ty(m_Context), true, llvm::GlobalValue::ExternalLinkage, nullptr,
 			"__c4_reflect_image");
 	}

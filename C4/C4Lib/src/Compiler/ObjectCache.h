@@ -17,6 +17,8 @@ namespace Scripting
 
 		/// Where the object of `bitcode` is kept, whether or not it is there yet.
 		std::filesystem::path ObjectFor(const std::string& bitcode) const;
+		/// Where the object of a module is kept by `key`, which says everything the module is made of.
+		std::filesystem::path ObjectKeyed(const std::string& key) const;
 
 		/// Removes every object (and unfinished write) but `used`: the folder holds one build's objects.
 		void KeepOnly(const std::vector<std::filesystem::path>& used) const;

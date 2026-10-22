@@ -1,4 +1,5 @@
 #pragma once
+#include <llvm/ADT/StringRef.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,7 +18,7 @@ namespace Scripting
 
 	/// The name the program gave `value`: a split program's local without kLocalSuffix (what a script host's interface
 	/// and its scripts know it by), any other value's own.
-	std::string ProgramName(const llvm::GlobalValue& value);
+	llvm::StringRef ProgramName(const llvm::GlobalValue& value);
 
 	/// When a split module is optimized: whole, before the split, or each partition alone after it (an incremental
 	/// build, D-76), at -O0 only by the always-inliner, so a partition copies only the `inline` functions it calls.

@@ -23,6 +23,10 @@ namespace Testing
 		void ADeepFolderKeepsAndReusesItsObjects();
 		TEST_FUNC(Compiler.ObjectCache)
 		void InvalidCodeIsReportedWhenItsPartitionIsAssembled();
+		TEST_FUNC(Compiler.ObjectCache)
+		void AKeyedModuleIsBuiltOnlyWhenItsObjectIsMissing();
+		TEST_FUNC(Compiler.ObjectCache)
+		void Bug366PartitionsWithTheSameCodeShareOneObject();
 
 		TEST_FUNC(Compiler.ModulePartitions)
 		void EveryPartitionReadsBackAndVerifies();

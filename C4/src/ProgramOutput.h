@@ -37,12 +37,10 @@ public:
 
 	explicit ProgramOutput(const Inputs& inputs) : m_In(inputs) {}
 
-	/// The module a split program's reflection image is built in, waited for (D-82): null when it has none.
-	using ImageModule = std::function<llvm::Module*()>;
-
 	/// The program's output from its module, or, emitted in partitions (D-81), its partitions' (the first holding the
-	/// program's own code and data) and `image`'s, which is taken last, when its bitcode is wanted.
-	bool Write(const std::vector<llvm::Module*>& partitions, const ImageModule& image = nullptr);
+	/// program's own code and data) and its reflection image's (D-82): an object of its own after theirs, built only
+	/// when none of its key is kept (no key: no image).
+	bool Write(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image = {});
 
 	/// Whether the program's partitions are optimized each alone, after the split, and verified as they are assembled
 	/// (so lowering leaves the module unverified: CodeGenDriver::VerifyLater).
@@ -59,7 +57,7 @@ private:
 	bool MakeOutputFolder();
 	std::string IntermediateBase();
 	bool WriteProgram(llvm::Module& module, const std::string& base);
-	bool WriteSplitProgram(std::vector<llvm::Module*> partitions, const ImageModule& image, const std::string& base);
+	bool WriteSplitProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base);
 	bool WriteIR(const llvm::Module& module, const std::string& path);
 	bool WriteBitcode(const llvm::Module& module, const std::string& path);
 	bool Optimize(llvm::Module& module, const Scripting::ObjectSettings& settings);

@@ -291,6 +291,52 @@ namespace Testing
 		}
 	}
 
+	// A keyed module (a split program's reflection image, D-82) is built and assembled only when no object of its key is
+	// kept; its object follows the partitions'.
+	void ObjectCacheTest::AKeyedModuleIsBuiltOnlyWhenItsObjectIsMissing()
+	{
+		const fs::path folder = FreshFolder("keyed");
+		const ObjectCache cache(folder, "salt");
+		const CpuTarget target;
+		const ObjectSettings settings{ 0, &target, 2 };
+		const std::vector<std::string> partitions = Split("target triple = \"x86_64-pc-windows-msvc\"\n" + ProgramText(""));
+		int builds = 0;
+		const KeyedModule image{ "image", [&builds](llvm::LLVMContext& context) {
+			++builds;
+			return Parse("target triple = \"x86_64-pc-windows-msvc\"\n@image = constant [3 x i32] [i32 1, i32 2, i32 3]\n", context);
+		} };
+		std::vector<ObjectDiagnostic> diagnostics;
+		const CachedObjects first = WriteCachedObjects(partitions, { image }, settings, cache, diagnostics);
+		TEST_ASSERT_EQ(diagnostics.empty() ? std::string() : diagnostics.front().message, std::string());
+		TEST_ASSERT_EQ(builds, 1);
+		TEST_ASSERT_EQ(first.paths.size(), size_t(kPartitions + 1));
+		TEST_ASSERT(first.paths.back() == cache.ObjectKeyed("image").string());
+		TEST_ASSERT(llvm::sys::fs::exists(first.paths.back()));
+		const CachedObjects again = WriteCachedObjects(partitions, { image }, settings, cache, diagnostics);
+		TEST_ASSERT(diagnostics.empty());
+		TEST_ASSERT_EQ(builds, 1);
+		TEST_ASSERT_EQ(again.reused, size_t(kPartitions + 1));
+		TEST_ASSERT(again.paths == first.paths);
+		fs::remove_all(folder.parent_path());
+	}
+
+	// BUG-366: partitions with the same code (empty ones, in a small program split into many) name one object, which is
+	// assembled once, not by several threads into one file, and listed once for the link.
+	void ObjectCacheTest::Bug366PartitionsWithTheSameCodeShareOneObject()
+	{
+		const fs::path folder = FreshFolder("same");
+		const ObjectCache cache(folder, "salt");
+		const CpuTarget target;
+		const ObjectSettings settings{ 0, &target, 4 };
+		const std::vector<std::string> split = Split("target triple = \"x86_64-pc-windows-msvc\"\n" + ProgramText(""));
+		std::vector<ObjectDiagnostic> diagnostics;
+		const CachedObjects objects = WriteCachedObjects({ split[0], split[1], split[1], split[1] }, {}, settings, cache, diagnostics);
+		TEST_ASSERT_EQ(diagnostics.empty() ? std::string() : diagnostics.front().message, std::string());
+		TEST_ASSERT_EQ(objects.assembled.size(), size_t(2));
+		TEST_ASSERT_EQ(objects.paths.size(), size_t(2));
+		fs::remove_all(folder.parent_path());
+	}
+
 	void ObjectCacheTest::EveryPartitionReadsBackAndVerifies()
 	{
 		const std::vector<std::string> partitions = Split(ProgramText(""));

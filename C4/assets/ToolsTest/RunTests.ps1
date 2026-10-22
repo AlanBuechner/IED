@@ -697,9 +697,19 @@ int32 main()
     if ($symbols -notmatch "``main``" -or $symbols -notmatch "``Raise``") { $failures += "the partitioned -g build's .pdb lacks main or Raise" }
     $one = Invoke-Compiler $compiler @($src, "-o", (Join-Path $dir "c/app.exe"), "-c")
     if ($one.exit -ne 0 -or @(Get-ChildItem (Join-Path $dir "c") -Filter "*.obj").Count -ne 1) { $failures += "-c did not write exactly one object" }
-    foreach ($bad in @(@("-j", "0"), @("-j", "x"), @("-j65"), @("--partitions", "0"), @("--partitions", "-3"))) {
-        $r = Invoke-Compiler $compiler (@($src) + $bad)
-        if ($r.exit -ne 2 -or $r.output -notmatch "needs a count from 1 to 64") { $failures += "'$($bad -join ' ')': exit $($r.exit), '$($r.output)'" }
+    foreach ($bad in @(@{ args = @("-j", "0"); most = 64 }, @{ args = @("-j", "x"); most = 64 }, @{ args = @("-j65"); most = 64 },
+        @{ args = @("--partitions", "0"); most = 256 }, @{ args = @("--partitions", "-3"); most = 256 }, @{ args = @("--partitions", "257"); most = 256 })) {
+        $r = Invoke-Compiler $compiler (@($src) + $bad.args)
+        if ($r.exit -ne 2 -or $r.output -notmatch "needs a count from 1 to $($bad.most)") { $failures += "'$($bad.args -join ' ')': exit $($r.exit), '$($r.output)'" }
+    }
+    # 256 partitions in a deep folder: the link's inputs outgrow a Windows command line, so they go in a response file.
+    $many = Join-Path $dir ("many-" + ("x" * 100))
+    $built = Invoke-Compiler $compiler @($src, "-o", (Join-Path $many "app.exe"), "--incremental", "--partitions", "256")
+    if ($built.exit -ne 0) { $failures += "256 partitions did not build: $($built.output)" }
+    else {
+        & (Join-Path $many "app.exe") | Out-Null
+        if ($LASTEXITCODE -ne 0) { $failures += "256 partitions: the program exited $LASTEXITCODE" }
+        if (Test-Path (Join-Path $many "app.exe.link.rsp")) { $failures += "the link's response file was left behind" }
     }
     $c = Invoke-Compiler $compiler @($src, "-c", "--partitions", "2")
     if ($c.exit -ne 2 -or $c.output -notmatch "--partitions needs a link") { $failures += "-c with --partitions 2: exit $($c.exit), '$($c.output)'" }

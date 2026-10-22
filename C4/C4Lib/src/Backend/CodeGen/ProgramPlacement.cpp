@@ -9,7 +9,9 @@ namespace Scripting
 	namespace
 	{
 		constexpr uint64 kFunctionsPerPartition = 24;
-		constexpr uint64 kMaxPartitions = 64;
+		// An edit reassembles the partitions it touches: 128 keeps a large program's near 10k instructions each (64 left
+		// the IED server's at 32k, 0.8 s more per edit at -O3), for about 0.15 s more on a build that changed nothing.
+		constexpr uint64 kMaxPartitions = 128;
 		// A file's functions spread over one partition per this many of them, rounded down to a power of two, so its
 		// share changes only when the file doubles or halves.
 		constexpr uint64 kFunctionsPerFileShare = 48;

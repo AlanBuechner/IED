@@ -30,14 +30,19 @@ namespace Testing
 			"int32 g_other = 5;\n"
 			"int32 main() { Shape* s = new Square(); return Count() + s->Sides() + g_other - 14 + (int32)TopRight - 1; }\n";
 
-		// Lowers the program into `count` partitions and hands their modules, and the module its reflection image is built
-		// in (null when there is none), to `inspect` while they live.
+		std::string Replaced(std::string text, const std::string& from, const std::string& to)
+		{
+			text.replace(text.find(from), from.size(), to);
+			return text;
+		}
+
+		// Lowers the program, with `library` as its shapes.ch, into `count` partitions and hands the driver to `inspect`.
 		template <typename Inspect>
-		bool LowerSplitWithImage(unsigned count, Inspect inspect)
+		bool LowerSplitDriver(unsigned count, const std::string& library, Inspect inspect)
 		{
 			CompilerInstance compiler;
 			compiler.RegisterInMemory("main.cf", kMain);
-			compiler.RegisterInMemory("shapes.ch", kLibrary);
+			compiler.RegisterInMemory("shapes.ch", library.c_str());
 			compiler.RegisterIncludedLibraryFiles(Toolchain::Bedrock());
 			compiler.CompileAll();
 			compiler.AnalyzeProgram();
@@ -50,10 +55,22 @@ namespace Testing
 				printf("lowering failed: %s\n", error.c_str());
 				return false;
 			}
-			std::vector<llvm::Module*> modules;
-			for (unsigned i = 0; i < driver.PartitionCount(); ++i) modules.push_back(&driver.PartitionModule(i));
-			inspect(modules, driver.ReflectionModule());
+			inspect(driver);
 			return true;
+		}
+
+		// Lowers the program into `count` partitions and hands their modules, and the module its reflection image is built
+		// in (null when there is none), to `inspect` while they live.
+		template <typename Inspect>
+		bool LowerSplitWithImage(unsigned count, Inspect inspect)
+		{
+			return LowerSplitDriver(count, kLibrary, [&inspect](CodeGenDriver& driver) {
+				std::vector<llvm::Module*> modules;
+				for (unsigned i = 0; i < driver.PartitionCount(); ++i) modules.push_back(&driver.PartitionModule(i));
+				llvm::LLVMContext imageContext;
+				const std::unique_ptr<llvm::Module> image = driver.ReflectionImageKey().empty() ? nullptr : driver.BuildReflectionModule(imageContext);
+				inspect(modules, image.get());
+			});
 		}
 
 		template <typename Inspect>
@@ -183,6 +200,21 @@ namespace Testing
 			const llvm::GlobalVariable* own = modules[0]->getNamedGlobal("__c4_reflect_image");
 			TEST_ASSERT(own && !own->isDeclaration());
 		}));
+	}
+
+	// The image's object is kept by its key (D-82): the same program has the same key, and so does one whose edit changed
+	// a body, while a reflected member changes it.
+	void SplitEmissionTest::TheReflectionImageKeyFollowsWhatItHolds()
+	{
+		const std::string libraries[] = { kLibrary, kLibrary, Replaced(kLibrary, "v * 2", "v * 3"),
+			Replaced(kLibrary, "class Square : public Shape {", "class Square : public Shape { public int32 corners;") };
+		std::string keys[4];
+		for (int i = 0; i < 4; ++i)
+			TEST_ASSERT(LowerSplitDriver(4, libraries[i], [&keys, i](CodeGenDriver& driver) { keys[i] = driver.ReflectionImageKey(); }));
+		TEST_ASSERT(!keys[0].empty());
+		TEST_ASSERT_EQ(keys[1], keys[0]);
+		TEST_ASSERT_EQ(keys[2], keys[0]);
+		TEST_ASSERT(keys[3] != keys[0]);
 	}
 
 	// An unscoped enum's members are constants the model lists with the globals: no partition gives them storage, so

@@ -25,7 +25,7 @@
 
 namespace fs = std::filesystem;
 
-bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions, const ImageModule& image)
+bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image)
 {
 	if (!MakeOutputFolder()) return false;
 	const std::string base = IntermediateBase();
@@ -58,12 +58,9 @@ bool ProgramOutput::OptimizesPartitions(const Scripting::CompileOptions& options
 }
 
 // A program emitted in partitions (D-81): each partition's bitcode, its object reused or assembled, then the link.
-bool ProgramOutput::WriteSplitProgram(std::vector<llvm::Module*> partitions, const ImageModule& image, const std::string& base)
+bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base)
 {
 	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, true, true };
-	const auto waited = std::chrono::steady_clock::now();
-	if (llvm::Module* reflection = image ? image() : nullptr) partitions.push_back(reflection);
-	Timed("reflection", waited);
 	const auto start = std::chrono::steady_clock::now();
 	const Scripting::PartitionOptimization optimization = settings.optLevel == 0 ? Scripting::PartitionOptimization::AfterAtO0
 		: Scripting::PartitionOptimization::After;
@@ -74,15 +71,18 @@ bool ProgramOutput::WriteSplitProgram(std::vector<llvm::Module*> partitions, con
 	const auto assembly = std::chrono::steady_clock::now();
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
 	const Scripting::ObjectCache cache(base + ".objects", CacheSalt(settings));
-	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(std::move(bitcode), settings, cache, diagnostics);
+	std::vector<Scripting::KeyedModule> keyed;
+	if (!image.key.empty()) keyed.push_back(image);
+	const unsigned count = static_cast<unsigned>(partitions.size() + keyed.size());
+	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(std::move(bitcode), std::move(keyed), settings, cache, diagnostics);
 	Report(diagnostics);
 	Timed("optimize+codegen", assembly);
-	if (m_In.options.timePhases) ReportPartitions(objects, static_cast<unsigned>(partitions.size()), settings.threads);
+	if (m_In.options.timePhases) ReportPartitions(objects, count, settings.threads);
 	if (m_In.options.verbose)
 	{
 		uint64_t instructions = 0;
 		for (const llvm::Module* partition : partitions) instructions += Scripting::InstructionCount(*partition);
-		ReportObjects(instructions, static_cast<unsigned>(partitions.size()), objects.reused, settings.threads, cache);
+		ReportObjects(instructions, count, objects.reused, settings.threads, cache);
 	}
 	if (objects.paths.empty()) return false;
 	if (m_HostBuild && !FinishScriptHost(*partitions.front(), settings, base, objects.paths)) return false;
@@ -343,18 +343,19 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 		return false;
 	}
 	const bool whileSplitting = OptimizesPartitions(m_In.options);
+	const Scripting::HostNames hostNames(m_HostBuild->symbols);
 	if (partitions.size() > 1)
 	{
 		std::vector<std::vector<std::string>> chunks(partitions.size());
 		Scripting::ParallelFor(partitions.size(), m_In.options.threads,
-			[&](size_t i) { chunks[i] = Scripting::InlineBodies(*partitions[i], m_HostBuild->symbols, kInlineBodyChunksPerPartition); });
+			[&](size_t i) { chunks[i] = Scripting::InlineBodies(*partitions[i], hostNames, kInlineBodyChunksPerPartition); });
 		for (std::vector<std::string>& partition : chunks)
 			m_HostBuild->inlineBodies.insert(m_HostBuild->inlineBodies.end(), partition.begin(), partition.end());
 	}
 	else if (whileSplitting)
-		m_InlineBodies = { Scripting::InlineBodyGroups(module, m_HostBuild->symbols, kInlineBodyChunks), Scripting::InlineBodyBitcode };
+		m_InlineBodies = { Scripting::InlineBodyGroups(module, hostNames, kInlineBodyChunks), Scripting::InlineBodyBitcode };
 	else
-		m_HostBuild->inlineBodies = Scripting::InlineBodies(module, m_HostBuild->symbols);
+		m_HostBuild->inlineBodies = Scripting::InlineBodies(module, hostNames);
 	Timed("script host", start);
 	return whileSplitting || FinishInterface(module);
 }

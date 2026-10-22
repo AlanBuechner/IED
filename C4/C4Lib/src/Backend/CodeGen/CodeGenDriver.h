@@ -17,7 +17,6 @@
 #include <set>
 #include <deque>
 #include <mutex>
-#include <thread>
 
 namespace Scripting
 {
@@ -46,7 +45,6 @@ namespace Scripting
 
 	public:
 		explicit CodeGenDriver(llvm::LLVMContext& ctx);
-		~CodeGenDriver(); // waits for the reflection image
 
 		/// A lowered body and the partition it is emitted into.
 		struct Placed
@@ -102,10 +100,12 @@ namespace Scripting
 		unsigned PartitionCount() const { return 1 + static_cast<unsigned>(m_Others.size()); }
 		/// Partition `i`'s module (0: module()).
 		llvm::Module& PartitionModule(unsigned i) { return Partition(i).module(); }
-		/// A split program's reflection image is built in a module of its own while the build goes on (D-82): this waits
-		/// for it, then is that module, which defines `__c4_reflect_image` (partition 0 declares and registers it). Null
-		/// for a program that is not split or registers nothing.
-		llvm::Module* ReflectionModule();
+		/// A split program's reflection image is an object of its own (D-82), kept by this key, which changes with what
+		/// the image is made of; empty for a program that is not split or registers nothing.
+		const std::string& ReflectionImageKey() const { return m_ImageKey; }
+		/// That image built into a module of `context`, which defines `__c4_reflect_image` (partition 0 declares and
+		/// registers it). It reads no model: any thread may build it, once Lower has returned.
+		std::unique_ptr<llvm::Module> BuildReflectionModule(llvm::LLVMContext& context) const;
 
 		/// Lower a script (docs/runtime/04 section 4.2), with no entry point: the host's definitions and storage win
 		/// (Script/ScriptModulePasses), the host's globals are not started, the script's start from
@@ -126,8 +126,8 @@ namespace Scripting
 		bool EmitReflection(ProgramModel& model, std::string* errorMessage);
 		/// The image built into partition 0, sharing its strings.
 		llvm::GlobalVariable* BuildImageHere(const ImageDescription& image);
-		/// The image built into a module of its own on a thread of its own; partition 0's declaration of it.
-		llvm::GlobalVariable* BuildImageApart(ImageDescription image);
+		/// The image kept for a module of its own (BuildReflectionModule), and its key; partition 0's declaration of it.
+		llvm::GlobalVariable* KeepImageApart(ImageDescription image);
 		void FinishModule(ProgramModel& model);
 		bool Verify(std::string* errorMessage);
 
@@ -236,8 +236,9 @@ namespace Scripting
 		std::set<const FunctionRecord*> m_ThunkTargets; // considered for a thunk (one that failed too: no retry)
 		std::unordered_map<std::string, llvm::Function*> m_SharedThunks; // by symbol; null for a signature that cannot be passed
 		InvokeThunks m_Thunks;
-		std::unique_ptr<llvm::LLVMContext> m_ImageContext; // a split program's reflection image (D-82)
-		std::unique_ptr<llvm::Module> m_ImageModule;
-		std::thread m_ImageThread;
+		ImageDescription m_Image; // a split program's reflection image (D-82)
+		std::string m_ImageKey;
+		std::string m_ImageTriple;
+		std::string m_ImageLayout;
 	};
 } // namespace Scripting

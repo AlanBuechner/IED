@@ -21,7 +21,12 @@ namespace Scripting
 	std::filesystem::path ObjectCache::ObjectFor(const std::string& bitcode) const
 	{
 		const llvm::XXH128_hash_t code = llvm::xxh3_128bits(llvm::arrayRefFromStringRef(bitcode));
-		return m_Folder / (Hex(code.high64) + Hex(code.low64) + "-" + Hex(llvm::xxh3_64bits(llvm::StringRef(m_Salt))) + ".obj");
+		return ObjectKeyed(Hex(code.high64) + Hex(code.low64));
+	}
+
+	std::filesystem::path ObjectCache::ObjectKeyed(const std::string& key) const
+	{
+		return m_Folder / (key + "-" + Hex(llvm::xxh3_64bits(llvm::StringRef(m_Salt))) + ".obj");
 	}
 
 	// LLVM's file calls take paths longer than MAX_PATH (a deep build folder), std::filesystem's do not.

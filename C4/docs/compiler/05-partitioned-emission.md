@@ -43,8 +43,11 @@ the partitions' bitcode, and with it the object cache, does not depend on `-j`:
 A function's partition is decided before its code exists, from its record: the file it is defined in (a template
 instance's record names its template's), over that file's share of partitions 1 to n-1 by name, one partition per 48
 functions the file defines rounded down to a power of two; a function the compiler wrote by its name. A global goes
-by the file that declares it. How many partitions: `--partitions`, else one per 24 functions the program defines,
-rounded down to a power of two, 1 to 64, so the count changes only when the program doubles or halves.
+by the file that declares it. How many partitions: `--partitions` (up to 256), else one per 24 functions the program
+defines, rounded down to a power of two, 1 to 128, so the count changes only when the program doubles or halves. An
+edit reassembles the partitions it touches, so their size is most of an edit's code generation: 128 keeps the IED
+server's near 10k instructions each (64 left them at 32k, 0.8 s more per edit at `-O3`), for about 0.15 s more on a
+build that changed nothing and 100 MB more at the peak; 256 saves no more and costs 300 MB more.
 
 ## Symbols
 
@@ -65,12 +68,14 @@ the fixed point. It is made in two steps: `DescribeReflectionImage` reads the mo
 `ImageDescription` (rows of numbers, texts, references to tables and the names of the functions and globals it
 points at), folding annotation arguments and reporting those that do not fold as before; `ReflectionTables::Build`
 makes the LLVM constants from it and reads no model. One partition builds it in place, sharing the module's strings.
-A split program builds it in a module and LLVM context of its own on a thread (`CodeGenDriver::BuildImageApart`),
-declaring what it points at by name (a function as `void()`, a global as a byte, a program local hidden), while the
-coordinator emits the imports and the GC roots and the output writes the script host; `CodeGenDriver::ReflectionModule`
-waits for it, and the output takes it last, as one more object (`-ftime` reports the wait as `reflection`). Its
-object is reused like any partition's, so an edit that changes no reflected declaration reassembles no image, and an
-edit of partition 0 reassembles no image with it.
+A split program keeps the description (`CodeGenDriver::KeepImageApart`) with its key, a 128-bit hash of every value
+in it and of the target (`ImageDescription::Key`), and partition 0 declares the image. The output keeps the image's
+object in the object cache by that key (`ObjectCache::ObjectKeyed`, a `KeyedModule` after the partitions): when an
+object of the key is kept, the image is neither built nor written as bitcode; otherwise an assembly thread builds it
+first, in a module and LLVM context of its own (`CodeGenDriver::BuildReflectionModule`), declaring what it points at
+by name (a function as `void()`, a global as a byte, a program local hidden), and assembles it from memory. An edit
+that changes no reflected declaration builds no image, and an edit of partition 0 reassembles no image with it. In
+the IED server the image is a 6.4 MB constant whose bitcode alone took 0.1 s of every build.
 
 ## Imports (`Backend/CodeGen/ImportPlanner`)
 
@@ -86,7 +91,8 @@ emitted after.
 
 Thread-local accessors per partition; one symbol list across the partitions, in partition order (`HostSymbols`),
 which partition 0, where the table is, declares, leaving out another partition's own locals (its helpers); inline
-bodies extracted per partition, on its thread, up to four chunks each; the interface and its build id once the
+bodies extracted per partition, on its thread, up to four chunks each, against one set of the table's names
+(`HostNames`, made once); the interface and its build id once the
 partitions are assembled, the build id an object of its own (`<int>/<name>.build-id.obj`). A script knows a host's
 local (a static member, a static local) by the name the program gave it, so the interface, the table, the
 thread-local accessors and the inline bodies use that name (`ProgramName`: the `.local` suffix off), and the table

@@ -29,6 +29,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 
 namespace Scripting
 {
@@ -208,10 +209,11 @@ namespace Scripting
 			if (diagnostics.size() != before) llvm::sys::fs::remove(unfinished);
 		}
 
-		// One partition of the module and the object its code is kept as.
+		// One partition of the module and the object its code is kept as: its bitcode, or a keyed module's builder.
 		struct Partition
 		{
 			std::string bitcode;
+			KeyedModule::Builder build;
 			std::string objPath;
 			std::vector<ObjectDiagnostic> diagnostics;
 			CachedObjects::Assembled assembled;
@@ -229,21 +231,27 @@ namespace Scripting
 			return !invalid;
 		}
 
+		// The partition's module in `context`: built, or read back from its bitcode.
+		std::unique_ptr<llvm::Module> ModuleOf(Partition& partition, llvm::LLVMContext& context)
+		{
+			if (partition.build) return partition.build(context);
+			llvm::Expected<std::unique_ptr<llvm::Module>> module = llvm::parseBitcodeFile(
+				llvm::MemoryBufferRef(partition.bitcode, partition.objPath), context);
+			if (module) return std::move(*module);
+			partition.diagnostics.push_back({ 0, "cannot read a partition of the module back: " + llvm::toString(module.takeError()) });
+			return nullptr;
+		}
+
 		// Assembled on a thread of its own, in a context of its own.
 		void AssemblePartition(Partition& partition, const ObjectSettings& settings)
 		{
 			const auto start = std::chrono::steady_clock::now();
 			llvm::LLVMContext context;
-			llvm::Expected<std::unique_ptr<llvm::Module>> module = llvm::parseBitcodeFile(
-				llvm::MemoryBufferRef(partition.bitcode, partition.objPath), context);
-			if (!module)
-			{
-				partition.diagnostics.push_back({ 0, "cannot read a partition of the module back: " + llvm::toString(module.takeError()) });
-				return;
-			}
-			partition.assembled.instructions = InstructionCount(**module);
-			if (!Verified(**module, settings, partition.diagnostics)) return;
-			AssembleInto(**module, settings, partition.objPath, partition.diagnostics);
+			std::unique_ptr<llvm::Module> module = ModuleOf(partition, context);
+			if (!module) return;
+			partition.assembled.instructions = InstructionCount(*module);
+			if (!Verified(*module, settings, partition.diagnostics)) return;
+			AssembleInto(*module, settings, partition.objPath, partition.diagnostics);
 			partition.assembled.seconds = SecondsSince(start);
 		}
 
@@ -273,11 +281,15 @@ namespace Scripting
 			return partitions;
 		}
 
+		// The partitions whose objects are missing, each object once (partitions with the same code, empty ones, name
+		// the same object: BUG-366), keyed modules first: one is built before it is assembled.
 		std::vector<Partition*> NotCached(std::vector<Partition>& partitions)
 		{
 			std::vector<Partition*> missing;
+			std::unordered_set<std::string> named;
 			for (Partition& partition : partitions)
-				if (!llvm::sys::fs::exists(partition.objPath)) missing.push_back(&partition);
+				if (named.insert(partition.objPath).second && !llvm::sys::fs::exists(partition.objPath)) missing.push_back(&partition);
+			std::stable_partition(missing.begin(), missing.end(), [](const Partition* p) { return static_cast<bool>(p->build); });
 			return missing;
 		}
 
@@ -324,7 +336,9 @@ namespace Scripting
 			if (diagnostics.size() != before) return {};
 			cache.KeepOnly(used);
 			CachedObjects objects;
-			for (const Partition& partition : parts) objects.paths.push_back(partition.objPath);
+			std::unordered_set<std::string> listed; // an object partitions share is linked once
+			for (const Partition& partition : parts)
+				if (listed.insert(partition.objPath).second) objects.paths.push_back(partition.objPath);
 			objects.reused = parts.size() - assembled.size();
 			for (const Partition* partition : assembled) objects.assembled.push_back(partition->assembled);
 			return objects;
@@ -383,8 +397,8 @@ namespace Scripting
 		return objects;
 	}
 
-	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, const ObjectSettings& settings, const ObjectCache& cache,
-		std::vector<ObjectDiagnostic>& diagnostics)
+	CachedObjects WriteCachedObjects(std::vector<std::string> partitions, std::vector<KeyedModule> keyed, const ObjectSettings& settings,
+		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics)
 	{
 		InitializeX86();
 		const std::error_code ec = llvm::sys::fs::create_directories(cache.Folder().string());
@@ -393,11 +407,16 @@ namespace Scripting
 			diagnostics.push_back({ 0, "cannot create the object cache '" + cache.Folder().string() + "': " + ec.message() });
 			return {};
 		}
-		std::vector<Partition> parts(partitions.size());
+		std::vector<Partition> parts(partitions.size() + keyed.size());
 		for (size_t i = 0; i < partitions.size(); ++i)
 		{
 			parts[i].objPath = cache.ObjectFor(partitions[i]).string();
 			parts[i].bitcode = std::move(partitions[i]);
+		}
+		for (size_t i = 0; i < keyed.size(); ++i)
+		{
+			parts[partitions.size() + i].objPath = cache.ObjectKeyed(keyed[i].key).string();
+			parts[partitions.size() + i].build = std::move(keyed[i].build);
 		}
 		const std::vector<Partition*> missing = NotCached(parts);
 		AssembleInParallel(missing, settings);

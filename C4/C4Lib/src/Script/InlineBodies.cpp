@@ -24,11 +24,11 @@ namespace Scripting
 		class Reach
 		{
 		public:
-			explicit Reach(const std::vector<std::string>& hostSymbols) : m_Host(hostSymbols.begin(), hostSymbols.end()) {}
+			explicit Reach(const HostNames& host) : m_Host(host) {}
 
 			bool FunctionQualifies(const llvm::Function& f)
 			{
-				if (f.isDeclaration() || !HasAtMostInstructions(f, kInlineBodyLimit) || !m_Host.count(ProgramName(f))) return false;
+				if (f.isDeclaration() || !HasAtMostInstructions(f, kInlineBodyLimit) || !m_Host.Lists(f)) return false;
 				for (const llvm::BasicBlock& block : f)
 					for (const llvm::Instruction& instruction : block)
 						for (const llvm::Use& operand : instruction.operands())
@@ -50,10 +50,10 @@ namespace Scripting
 			bool GlobalAllowed(const llvm::GlobalValue& global)
 			{
 				if (const auto* function = llvm::dyn_cast<llvm::Function>(&global))
-					return function->isIntrinsic() || m_Host.count(ProgramName(*function));
+					return function->isIntrinsic() || m_Host.Lists(*function);
 				const auto* variable = llvm::dyn_cast<llvm::GlobalVariable>(&global);
 				if (!variable || variable->isThreadLocal()) return false;
-				if (variable->getName() == "__ImageBase" || m_Host.count(ProgramName(*variable))) return true;
+				if (variable->getName() == "__ImageBase" || m_Host.Lists(*variable)) return true;
 				if (!IsCopied(*variable)) return false;
 				auto [known, fresh] = m_Constants.try_emplace(variable, true);
 				if (!fresh) return known->second; // a cycle through constants (an RTTI table and its descriptor) is fine
@@ -61,7 +61,7 @@ namespace Scripting
 				return known->second;
 			}
 
-			std::unordered_set<std::string> m_Host;
+			const HostNames& m_Host;
 			std::unordered_map<const llvm::GlobalVariable*, bool> m_Constants;
 		};
 
@@ -97,8 +97,13 @@ namespace Scripting
 		}
 	}
 
-	std::vector<std::vector<const llvm::GlobalValue*>> InlineBodyGroups(const llvm::Module& module,
-		const std::vector<std::string>& hostSymbols, unsigned maxGroups)
+	bool HostNames::Lists(const llvm::GlobalValue& value) const
+	{
+		return m_Names.count(ProgramName(value)) != 0;
+	}
+
+	std::vector<std::vector<const llvm::GlobalValue*>> InlineBodyGroups(const llvm::Module& module, const HostNames& hostSymbols,
+		unsigned maxGroups)
 	{
 		Reach reach(hostSymbols);
 		std::vector<const llvm::Function*> functions;
@@ -119,7 +124,7 @@ namespace Scripting
 	{
 		for (llvm::GlobalValue& value : group.global_values())
 			if (!value.hasLocalLinkage())
-				if (const std::string name = ProgramName(value); name != value.getName())
+				if (const std::string name = ProgramName(value).str(); name != value.getName())
 				{
 					value.setName(name);
 					value.setVisibility(llvm::GlobalValue::DefaultVisibility);
@@ -130,11 +135,16 @@ namespace Scripting
 		return ModuleBitcode(group);
 	}
 
-	std::vector<std::string> InlineBodies(const llvm::Module& module, const std::vector<std::string>& hostSymbols, unsigned maxGroups)
+	std::vector<std::string> InlineBodies(const llvm::Module& module, const HostNames& hostSymbols, unsigned maxGroups)
 	{
 		std::vector<std::string> bodies;
 		for (const std::vector<const llvm::GlobalValue*>& group : InlineBodyGroups(module, hostSymbols, maxGroups))
 			bodies.push_back(InlineBodyBitcode(*ExtractDefinitions(module, group)));
 		return bodies;
+	}
+
+	std::vector<std::string> InlineBodies(const llvm::Module& module, const std::vector<std::string>& hostSymbols, unsigned maxGroups)
+	{
+		return InlineBodies(module, HostNames(hostSymbols), maxGroups);
 	}
 } // namespace Scripting

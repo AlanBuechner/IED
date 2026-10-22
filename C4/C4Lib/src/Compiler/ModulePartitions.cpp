@@ -454,11 +454,11 @@ namespace Scripting
 		return bitcode;
 	}
 
-	std::string ProgramName(const llvm::GlobalValue& value)
+	llvm::StringRef ProgramName(const llvm::GlobalValue& value)
 	{
 		const llvm::StringRef name = value.getName();
 		const llvm::StringRef suffix(kLocalSuffix);
-		return (value.hasHiddenVisibility() && name.ends_with(suffix) ? name.drop_back(suffix.size()) : name).str();
+		return value.hasHiddenVisibility() && name.ends_with(suffix) ? name.drop_back(suffix.size()) : name;
 	}
 
 	std::string PartitionBitcode(llvm::Module& partition, PartitionOptimization optimization)

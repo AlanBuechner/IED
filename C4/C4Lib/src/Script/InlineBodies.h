@@ -1,6 +1,8 @@
 #pragma once
 #include "Core/Core.h"
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace llvm
@@ -17,13 +19,27 @@ namespace Scripting
 	/// How many bodies make a group worth its own chunk.
 	constexpr uint32 kInlineBodiesPerGroup = 100;
 
+	/// A host table's names (HostSymbols), to look a function or global up by the name the program gave it
+	/// (ProgramName): made once for all of a split program's partitions. It points into `symbols`, which outlive it.
+	class HostNames
+	{
+	public:
+		explicit HostNames(const std::vector<std::string>& symbols) : m_Names(symbols.begin(), symbols.end()) {}
+		HostNames(std::vector<std::string>&&) = delete;
+
+		bool Lists(const llvm::GlobalValue& value) const;
+
+	private:
+		std::unordered_set<std::string_view> m_Names;
+	};
+
 	/// The host functions a script may inline (docs/runtime/04 section 3.3), in groups of the module's order, one per
 	/// kInlineBodiesPerGroup of them, at most `maxGroups`: each function `module` defines with at most kInlineBodyLimit
 	/// instructions whose body names only `hostSymbols`, intrinsics and private constants, and no thread_local. A group
 	/// lists the private constants its functions name (copied with them) before the functions. No group when no
 	/// function qualifies.
-	std::vector<std::vector<const llvm::GlobalValue*>> InlineBodyGroups(const llvm::Module& module,
-		const std::vector<std::string>& hostSymbols, unsigned maxGroups);
+	std::vector<std::vector<const llvm::GlobalValue*>> InlineBodyGroups(const llvm::Module& module, const HostNames& hostSymbols,
+		unsigned maxGroups);
 
 	/// A group's module (ExtractDefinitions of it, from the program as Lower finished it) as the interface keeps it:
 	/// its functions external, as the host table names them (a split program's local by ProgramName), without debug
@@ -32,5 +48,6 @@ namespace Scripting
 
 	/// Each of InlineBodyGroups' groups extracted from `module` and made bitcode, one after another: for a build that
 	/// does not split the module while it extracts them.
+	std::vector<std::string> InlineBodies(const llvm::Module& module, const HostNames& hostSymbols, unsigned maxGroups = 1);
 	std::vector<std::string> InlineBodies(const llvm::Module& module, const std::vector<std::string>& hostSymbols, unsigned maxGroups = 1);
 } // namespace Scripting

@@ -29,5 +29,7 @@ namespace Testing
 		void AHostListsItsLocalsByTheirProgramNames();
 		TEST_FUNC(Semantic.SplitEmission)
 		void TheReflectionImageIsAModuleOfItsOwn();
+		TEST_FUNC(Semantic.SplitEmission)
+		void TheReflectionImageKeyFollowsWhatItHolds();
 	};
 } // namespace Testing

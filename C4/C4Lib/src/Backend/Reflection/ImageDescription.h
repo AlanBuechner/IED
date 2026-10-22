@@ -56,6 +56,10 @@ namespace Scripting
 		const std::vector<ImageTable>& Tables() const { return m_Tables; }
 		const ImageRow& Image() const { return m_Image; }
 
+		/// What the image built for `target` (a module's triple and data layout) is made of, as 32 hex digits: a key
+		/// that changes with any of its values, which an object of the image is kept by.
+		std::string Key(const std::string& target) const;
+
 	private:
 		std::vector<std::string> m_Texts;
 		std::vector<ImageSymbol> m_Symbols;

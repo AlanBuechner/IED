@@ -35,15 +35,16 @@ namespace Scripting
 		};
 
 		constexpr unsigned kMaxCount = 64;
+		constexpr unsigned kMaxPartitions = 256; // as ProgramPlacement's
 
-		// A count of threads or objects, 1 to kMaxCount; 0 with the error recorded.
-		unsigned ParseCount(const std::string& v, const char* option, CompileOptions& o)
+		// A count of threads or objects, 1 to `most`; 0 with the error recorded.
+		unsigned ParseCount(const std::string& v, const char* option, CompileOptions& o, unsigned most = kMaxCount)
 		{
 			char* end = nullptr;
 			const unsigned long count = std::strtoul(v.c_str(), &end, 10);
-			if (!v.empty() && std::isdigit(static_cast<unsigned char>(v[0])) && *end == '\0' && count >= 1 && count <= kMaxCount)
+			if (!v.empty() && std::isdigit(static_cast<unsigned char>(v[0])) && *end == '\0' && count >= 1 && count <= most)
 				return static_cast<unsigned>(count);
-			o.error = std::string("'") + option + "' needs a count from 1 to " + std::to_string(kMaxCount);
+			o.error = std::string("'") + option + "' needs a count from 1 to " + std::to_string(most);
 			return 0;
 		}
 
@@ -56,6 +57,22 @@ namespace Scripting
 
 		// A compiled resource file (llvm-rc or rc.exe output) goes to the linker as it is.
 		bool IsResourceFile(const std::string& v) { return fs::path(v).extension() == ".res"; }
+
+		// The objects and libraries a link takes, one quoted argument a line, in a response file at `path`; forward
+		// slashes, which neither quoting convention escapes.
+		bool WriteLinkInputs(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries, const std::string& path)
+		{
+			std::string text;
+			auto add = [&text](std::string argument) {
+				std::replace(argument.begin(), argument.end(), '\\', '/');
+				text += "\"" + argument + "\"\n";
+			};
+			for (const Core::String& object : objects) add(object);
+			for (const Core::String& library : libraries) add(library);
+			if (WriteFileBytes(path, text)) return true;
+			std::cerr << "error: cannot write the link's inputs to " << path << std::endl;
+			return false;
+		}
 
 		const std::vector<Option>& Options()
 		{
@@ -71,8 +88,8 @@ namespace Scripting
 					o.optLevel = v.size() == 1 && v[0] >= '0' && v[0] <= '3' ? v[0] - '0' : -1; }, true },
 				{ { "-j", "--threads" }, "<n>", "Threads that generate code, 1 to 64 (default: the processors, at most 4)",
 					[](CompileOptions& o, const std::string& v) { o.threads = ParseCount(v, "-j", o); }, true },
-				{ { "--partitions" }, "<n>", "Assemble the program into <n> objects, 1 to 64 (default: by its size, at most -j)",
-					[](CompileOptions& o, const std::string& v) { o.partitions = ParseCount(v, "--partitions", o); } },
+				{ { "--partitions" }, "<n>", "Assemble the program into <n> objects, 1 to 256 (default: by its size)",
+					[](CompileOptions& o, const std::string& v) { o.partitions = ParseCount(v, "--partitions", o, kMaxPartitions); } },
 				{ { "--incremental" }, nullptr, "Optimize each object alone: an edit reoptimizes only the objects it changes, inlining across objects only small functions",
 					[](CompileOptions& o, const std::string&) { o.incremental = true; } },
 				{ { "-march=" }, "<cpu>", "The processor to compile for: x86-64 (default), x86-64-v2/v3/v4, native or an LLVM CPU name",
@@ -313,12 +330,11 @@ namespace Scripting
 		const std::string clangPath = ClangPath();
 		if (clangPath.empty()) return false;
 
-		// Link directly with clang - it handles CRT discovery and MSVC import libs correctly.
-		std::vector<std::string> args = { clangPath, "-target", "x86_64-pc-windows-msvc", "-fuse-ld=lld" };
-		for (const auto& object : objects)
-			args.push_back(object.c_str());
-		for (const auto& lib : libraries)
-			args.push_back(lib.c_str());
+		// Link directly with clang - it handles CRT discovery and MSVC import libs correctly. The objects and libraries
+		// go in a response file: a split program's object paths outgrow a Windows command line (32,767 characters).
+		const std::string inputs = std::string(outputPath.c_str()) + ".link.rsp";
+		if (!WriteLinkInputs(objects, libraries, inputs)) return false;
+		std::vector<std::string> args = { clangPath, "-target", "x86_64-pc-windows-msvc", "-fuse-ld=lld", "@" + inputs };
 
 		args.push_back("-o");
 		args.push_back(outputPath);
@@ -337,7 +353,9 @@ namespace Scripting
 			std::cout << std::endl;
 		}
 
-		return RunTool(args);
+		const bool linked = RunTool(args);
+		RemoveFile(inputs);
+		return linked;
 	}
 
 	void RemoveIfExists(const std::string& path) { RemoveFile(path); }

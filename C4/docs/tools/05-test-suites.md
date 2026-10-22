@@ -45,7 +45,8 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
   AliasTagsTest - the strict-aliasing class of each access, D-64),
   `Compiler/` (the runtime objects, the error tracker, project sets, the object cache and the module split:
   every partition verifies, a definition is in one partition, private data lives with its user, and adding a
-  function leaves the other partitions' bitcode byte for byte the same), `Protocol/` (the JSON values and framing of `C4Protocol`), `LSP/` (the language server, linked
+  function leaves the other partitions' bitcode byte for byte the same; partitions with the same code share one object,
+  BUG-366; a keyed module, the reflection image, is built only when its object is missing), `Protocol/` (the JSON values and framing of `C4Protocol`), `LSP/` (the language server, linked
   through `C4LSPLib`) and `DAP/` (the debug adapter, linked through `C4DAPLib`: its pieces, and sessions of
   programs it builds with `C4.exe -g`; those tests take up to 60 seconds, `TEST_FUNC_TIMEOUT`).
 - Filter with `--filter "Lexer.*"`.
@@ -199,7 +200,8 @@ assets\build-output\iso\SwizzleLanguage.exe
     file-scope assembly, virtual calls, template instances, exceptions, `thread_local`, reflection and a global with
     a create runs when assembled into 4 objects, into 3 with `-g` (its `.pdb` has the functions), into 3 on one
     thread at `-O2`, and by default; a one-line program is one object; `-c` writes one; bad `-j` / `--partitions`
-    counts and `-c --partitions 2` are usage errors.
+    counts and `-c --partitions 2` are usage errors; 256 partitions in a deep folder link (the inputs go in a response
+    file) and run.
   - `ObjectCache` (roadmap 5.3): an unchanged rebuild reuses every object, editing one function reassembles only its
     partitions and the program shows the edit (no stale object is linked), an `-O2` build after `-O0` reuses none,
     the cache keeps only the latest build's objects, and `-c` makes no cache.

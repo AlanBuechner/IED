@@ -6,6 +6,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Object/ObjectFile.h>
+#include <llvm/ADT/DenseSet.h>
 #include <llvm/Support/Error.h>
 #include <tuple>
 #include <unordered_set>
@@ -128,20 +129,20 @@ namespace Scripting
 		for (const char* name : ScriptRuntimeEntryPoints()) DeclareIfMissing(first, name); // in a fixed order: the table's
 		for (const std::string& name : alsoListed) DeclareIfMissing(first, name);
 		std::vector<std::string> names;
-		std::unordered_set<std::string> seen;
+		llvm::DenseSet<llvm::StringRef> seen; // the values' own names, which outlive the walk
 		for (llvm::Module* partition : partitions)
 		{
 			const bool isFirst = partition == &first;
 			for (const llvm::Function& f : *partition)
 				if (ListedFunction(f, always) && (isFirst || !f.hasLocalLinkage()) && seen.insert(ProgramName(f)).second)
 				{
-					names.push_back(ProgramName(f));
+					names.push_back(ProgramName(f).str());
 					DeclareIn(first, f);
 				}
 			for (const llvm::GlobalVariable& g : partition->globals())
 				if (ListedGlobal(g, always) && (isFirst || !g.hasLocalLinkage()) && seen.insert(ProgramName(g)).second)
 				{
-					names.push_back(ProgramName(g));
+					names.push_back(ProgramName(g).str());
 					DeclareIn(first, g);
 				}
 		}

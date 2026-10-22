@@ -175,7 +175,7 @@ Assembly order (details in [04-codegen-and-abi.md](04-codegen-and-abi.md)):
    reflection image from the model (`Backend/Reflection/RegistrationEmitter`) and emit `__c4_reflect_init`, a
    static constructor that registers it under the `-reflect-tag` tag before every other one. The image's constants
    (`Backend/Reflection/ReflectionTables`) go into the module; a split program's go into a module of their own,
-   built on a thread while the rest of the build goes on (D-82,
+   built only when the object cache keeps no object of the image's key (D-82,
    [05-partitioned-emission.md](05-partitioned-emission.md#the-reflection-image-d-82)).
 8. Emit `__c4_gc_roots`: `{address, size}` of every global, static member and static local that may hold a
    managed pointer.
@@ -223,8 +223,11 @@ straight from the module in memory).
 - The object cache (`Compiler/ObjectCache`, roadmap 5.3): a linked build keeps its objects in
   `<int>/<out name>.objects/`, each named after the hash of its partition's bitcode and of the compiler (its version,
   and the size and time of its executable) and the target settings, so a partition whose code is unchanged reuses
-  its object and a rebuilt compiler or another `-O` / `-march` reuses none. An object is written beside its name and
-  moved into place when complete; the folder keeps only the latest build's objects. `-v` says how many were reused.
+  its object and a rebuilt compiler or another `-O` / `-march` reuses none. A split program's reflection image is kept
+  by a key of its own, the hash of what it is made of, and built only when that object is missing (D-82). Partitions
+  with the same code (empty ones, in a small program split into many) share one object, assembled once and linked
+  once. An object is written beside its name and moved into place when complete; the folder keeps only the latest
+  build's objects. `-v` says how many were reused.
   The cache's files are handled with LLVM's file calls, which take paths longer than `MAX_PATH` (a deep build folder);
   the interop pass's and CBind's files are too (`Compiler/FileIo`).
   Names do not depend on the order code is generated in (`Backend/CodeGen/StableNames`: literals, test-runner strings
