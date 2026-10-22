@@ -26,10 +26,11 @@ import sys
 
 sys.dont_write_bytecode = True
 
-from ApiDigest import write_digest
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPOSITORY = os.path.dirname(HERE)
+
+sys.path.insert(0, HERE)  # Nuke runs this isolated (python -I), which leaves the script's own folder out
+from ApiDigest import write_digest
 COMPILER_FILES = (".exe", ".dll", ".pdb")
 COMPILER_FOLDERS = ("Bedrock", "C4Runtime", "toolchain")
 TOOLS = {
