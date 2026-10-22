@@ -14,7 +14,9 @@ from .log import Log
 from .session import Session
 
 VALUE_OPTIONS = {"-p": "projects", "--project": "projects", "-c": "config", "--config": "config", "-a": "arch",
-	"--arch": "arch", "-s": "system", "--system": "system", "-w": "workspace", "--workspace": "workspace", "--filter": "filter"}
+	"--arch": "arch", "-s": "system", "--system": "system", "-w": "workspace", "--workspace": "workspace", "--filter": "filter",
+	"-j": "jobs", "--jobs": "jobs"}
+JOBS_ENV = "NUKE_JOBS"
 FLAG_OPTIONS = {"--all": "all", "--json": "json", "-v": "verbose", "--verbose": "verbose", "-h": "help", "--help": "help",
 	"--version": "version"}
 ARGS_SEPARATOR = "--"
@@ -30,6 +32,7 @@ class Invocation:
 	projects: list = field(default_factory=list)
 	workspace: str = None
 	filter: str = None
+	jobs: str = None
 	all: bool = False
 	json: bool = False
 	verbose: bool = False
@@ -210,7 +213,7 @@ def run_commands(workspace, table, inv, log, store):
 	validate_phases(workspace, table)
 	configuration = choose_configuration(inv.configs, workspace)
 	session = Session(workspace, configuration, configs.require_architecture(inv.arch), configs.require_system(inv.system),
-		log, store, args=inv.program_args, test_filter=inv.filter)
+		log, store, args=inv.program_args, test_filter=inv.filter, jobs=choose_jobs(inv.jobs))
 	session.json = inv.json
 	if inv.json:
 		log.json_mode()
@@ -225,6 +228,20 @@ def run_commands(workspace, table, inv, log, store):
 		return 0
 	finally:
 		_write_trace(session)
+
+
+def choose_jobs(value):
+	"""-j N, else NUKE_JOBS, else None (each driver's own choice). A count below 1 is refused."""
+	value = value if value is not None else os.environ.get(JOBS_ENV)
+	if value is None or value == "":
+		return None
+	try:
+		jobs = int(value)
+	except ValueError:
+		raise NukeError(f"-j wants a number of jobs (got '{value}')") from None
+	if jobs < 1:
+		raise NukeError(f"-j wants at least 1 job (got {jobs})")
+	return jobs
 
 
 def choose_configuration(words, workspace):

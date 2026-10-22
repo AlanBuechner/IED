@@ -76,8 +76,43 @@ def pinned_plugins(workspace):
 	return pinned
 
 
+def listed_projects(workspace):
+	"""The projects IED's solution shows: those inside the workspace (a language package's library outside it, among IED's
+	plugins, builds with the workspace but has no files the Solution Explorer could list)."""
+	return [spec for spec in workspace.projects.values() if _inside(spec.dir, workspace.dir)]
+
+
+def groups(projects):
+	"""The solution's display folders from the projects' `group` ("C4", "Engine/Tools" nests): sorted by name, each with
+	its projects by name and the folders inside it; [] when no project names one."""
+	root = {"groups": {}, "projects": []}
+	for spec in projects:
+		if not spec.group:
+			continue
+		node = root
+		for name in [part for part in spec.group.replace("\\", "/").split("/") if part]:
+			node = node["groups"].setdefault(name, {"groups": {}, "projects": []})
+		node["projects"].append(spec.name)
+
+	def written(node):
+		folders = []
+		for name in sorted(node["groups"], key=str.lower):
+			inner = node["groups"][name]
+			body = {"name": name}
+			if inner["projects"]:
+				body["projects"] = sorted(inner["projects"], key=str.lower)
+			if inner["groups"]:
+				body["groups"] = written(inner)
+			folders.append(body)
+		return folders
+	return written(root)
+
+
 def solution(workspace, plugin):
 	body = {"version": 1, "name": workspace.name, "projects": [{"file": f"{PROJECTS_DIR}/*.iedproj", "optional": True}]}
+	folders = groups(listed_projects(workspace))
+	if folders:
+		body["groups"] = folders
 	items = [item for item in ITEMS if os.path.isfile(fsutil.join(workspace.dir, item))]
 	if items:
 		body["items"] = items
@@ -178,7 +213,7 @@ def generate(workspace, toolchain, log):
 	plugin = plugin_dir(toolchain) if toolchain else None
 	changed = int(generated.write(solution_path(workspace), _text(solution(workspace, plugin))))
 	wanted = set()
-	for spec in workspace.projects.values():
+	for spec in listed_projects(workspace):
 		path = project_path(workspace, spec)
 		wanted.add(os.path.normcase(path))
 		changed += int(generated.write(path, _text(project(workspace, spec))))

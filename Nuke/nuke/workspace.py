@@ -14,7 +14,7 @@ DISCOVERY_SKIP = {"build", "bin", "bin-int", "vendor", "third_party", "toolchain
 
 
 class Workspace:
-	def __init__(self, spec, projects, commands, steps):
+	def __init__(self, spec, projects, commands, steps, packages=None):
 		self.spec = spec
 		self.dir = spec.dir
 		self.name = spec.name
@@ -24,7 +24,7 @@ class Workspace:
 		self.configurations = configs.merge(spec.configurations)
 		default = spec.default_configuration or configs.DEFAULT_CONFIGURATION
 		self.default_configuration = configs.require(default, self.configurations)
-		self._packages = None             # language -> LanguagePackage, found on first use
+		self._packages = packages         # language -> LanguagePackage, found on first use
 
 	def project(self, name):
 		for project in self.projects.values():
@@ -99,10 +99,11 @@ def load_workspace(root):
 			raise NukeError(f"{manifest.path}: listed as a project of {spec.name} but has no [project] table")
 		manifests.append(manifest)
 	projects = _index_projects([m.project for m in manifests])
+	packages = _complete_projects(spec, projects)
 	commands = {c.name: c for c in spec.commands}
 	steps = list(spec.steps) + [s for c in spec.commands for s in c.steps]
 	_apply_extensions(spec, projects, commands, steps)
-	return Workspace(spec, projects, commands, steps)
+	return Workspace(spec, projects, commands, steps, packages)
 
 
 def _implicit_workspace(manifest):
@@ -119,6 +120,60 @@ def _index_projects(specs):
 			raise NukeError(f"two projects are named '{spec.name}': {clash.file} and {spec.file}")
 		projects[spec.name] = spec
 	return projects
+
+
+def _complete_projects(spec, projects):
+	"""Gives each project in another language the dependencies its driver adds (implicit_depends) and adds the
+	language packages' library projects the workspace depends on, until nothing more is needed. Returns the language
+	packages when they had to be found (None otherwise)."""
+	if not any(p.is_driven for p in projects.values()) and not _unresolved(projects):
+		return None
+	packages = languages.find_packages(spec.dir, spec.languages)
+	libraries = None
+	pending = list(projects)
+	while pending:
+		project = _with_implicit_depends(projects[pending.pop(0)], packages)
+		projects[project.name] = project
+		for name in project.depends:
+			if _find(projects, name) is not None:
+				continue
+			if libraries is None:
+				libraries = _package_libraries(packages)
+			library = libraries.get(name.lower())
+			if library is not None:
+				projects[library.name] = library
+				pending.append(library.name)
+	return packages
+
+
+def _find(projects, name):
+	return next((p for p in projects.values() if p.name.lower() == name.lower()), None)
+
+
+def _unresolved(projects):
+	return any(_find(projects, name) is None for p in projects.values() for name in p.depends)
+
+
+def _with_implicit_depends(project, packages):
+	package = packages.get(project.language) if project.is_driven else None
+	implicit = getattr(languages.load_driver(package), "implicit_depends", None) if package else None
+	if implicit is None:
+		return project
+	known = {name.lower() for name in project.depends} | {project.name.lower()}
+	extra = tuple(name for name in implicit(project) if name.lower() not in known)
+	return replace(project, depends=project.depends + extra) if extra else project
+
+
+def _package_libraries(packages):
+	"""name (lower case) -> ProjectSpec of every library project the packages bring; the first package wins a name."""
+	libraries = {}
+	for package in packages.values():
+		for folder in package.library_folders():
+			manifest = load(os.path.join(folder, MANIFEST_NAME))
+			if manifest.workspace is not None or manifest.project is None:
+				raise NukeError(f"{manifest.path}: a library of the {package.language} package must be a [project] and nothing else")
+			libraries.setdefault(manifest.project.name.lower(), manifest.project)
+	return libraries
 
 
 def _project_folders(spec):

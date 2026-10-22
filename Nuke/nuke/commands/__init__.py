@@ -13,8 +13,9 @@ from .toolchain import Toolchain
 
 def command_table(workspace=None):
 	table = {}
-	for command in (Build(), Run(), Test(), Clean(), Rebuild(), List(), Init(), Toolchain()):
+	for command in (Build(), Run(), Clean(), Rebuild(), List(), Init(), Toolchain()):
 		table[command.name] = command
+	table["test"] = Test(table)
 	table["info"] = Info(table)
 	table["help"] = Help(table)
 	for spec in (workspace.commands.values() if workspace else ()):

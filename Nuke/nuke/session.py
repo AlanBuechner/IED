@@ -11,7 +11,7 @@ from .variables import Variables, expand
 
 
 class Session:
-	def __init__(self, workspace, configuration, arch, system, log, store, args=(), test_filter=None):
+	def __init__(self, workspace, configuration, arch, system, log, store, args=(), test_filter=None, jobs=None):
 		self.workspace = workspace
 		self.configuration = configuration
 		self.arch = arch
@@ -20,11 +20,13 @@ class Session:
 		self.store = store
 		self.args = list(args)
 		self.test_filter = test_filter
+		self.jobs = jobs               # -j N: how many processes a driver may run at once (None: its own choice)
 		self.json = False              # list/info print JSON
 		self.done = set()              # (command, project name or None) already executed
 		self.trace = []                # (name, start, end) for build/int/.../nuke-trace.json
 		self.test_results = []         # (project name, exit code, results.json path) per harness run
 		self._toolchain = None
+		self._language_values = {}     # language -> its driver's variables(ctx)
 
 	# --- toolchain -------------------------------------------------------------------------------
 
@@ -64,7 +66,14 @@ class Session:
 
 	def driver_context(self, project):
 		return languages.DriverContext(project, self.configuration, self.arch, self.system, self.bin_dir(project), self.int_dir(project),
-			self.log, list(self.args), self.test_filter)
+			self.log, list(self.args), self.test_filter, settings=self.workspace.spec.language_settings.get(project.language, {}),
+			workspace_dir=self.workspace.dir, jobs=self.jobs,
+			dependencies=lambda: [self.driver_context(self.workspace.find_project(name)) for name in project.depends],
+			expander=lambda text: expand(text, self.variables(project)))
+
+	def builds_before_test(self, project):
+		"""A project whose language's package asks for it is built, with what it depends on, before its tests run."""
+		return project.is_driven and self.workspace.language_package(project.language).build_before_test
 
 	def output(self, project):
 		"""The file `nuke run` starts: a C4 executable's .exe, the program a driven project's driver names in its bin
@@ -125,7 +134,7 @@ class Session:
 			"toolchain.dir": lambda: self.toolchain().dir,
 			"toolchain.version": lambda: self.toolchain().version,
 			"c4": lambda: self.toolchain().compiler_path(),
-		})
+		}, fallback=self._language_variable)
 		return self._project_variables(project, base=root) if project else root
 
 	def _project_variables(self, project, base=None, with_output=True):
@@ -138,6 +147,18 @@ class Session:
 		if with_output:
 			values["output"] = lambda: self.output(project) or _no_output(project)
 		return (base or self.variables()).child(values)
+
+	def _language_variable(self, name):
+		"""${<language>.<name>}: a value the language's driver gives (variables(ctx)); KeyError when none does."""
+		language, _, key = name.partition(".")
+		if not key:
+			raise KeyError(name)
+		if language not in self._language_values:
+			package = self.workspace.language_packages().get(language)
+			function = getattr(languages.load_driver(package), "variables", None) if package else None
+			context = languages.WorkspaceContext(self.workspace.dir, self.workspace.spec.language_settings.get(language, {}), self.log)
+			self._language_values[language] = function(context) if function else {}
+		return self._language_values[language][key]
 
 	# --- tracing ---------------------------------------------------------------------------------
 

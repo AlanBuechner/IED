@@ -10,11 +10,13 @@ SPLICE = "${args}"
 
 
 class Variables:
-	"""A read-only view of named values; values may be callables resolved on first use (e.g. the toolchain)."""
+	"""A read-only view of named values; values may be callables resolved on first use (e.g. the toolchain). A
+	`fallback(name)` answers names no scope holds (a language driver's ${cpp.llvm}), raising KeyError for unknown ones."""
 
-	def __init__(self, values, parent=None):
+	def __init__(self, values, parent=None, fallback=None):
 		self.values = values
 		self.parent = parent
+		self.fallback = fallback if fallback is not None else (parent.fallback if parent else None)
 
 	def child(self, values):
 		return Variables(values, self)
@@ -34,6 +36,11 @@ class Variables:
 					scope.values[name] = value
 				return value
 			scope = scope.parent
+		if self.fallback is not None:
+			try:
+				return self.fallback(name)
+			except KeyError:
+				pass
 		raise NukeError(f"unknown variable ${{{name}}} (known: {', '.join(sorted(self.names()))})")
 
 	def names(self):

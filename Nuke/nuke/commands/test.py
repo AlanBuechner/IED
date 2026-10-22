@@ -2,7 +2,7 @@
 tests through its driver (`cargo test`, `go test`), custom projects through their "test" steps. Every harness runs even
 when an earlier one fails; the exit code is 1 if any failed."""
 
-from .. import fsutil, process
+from .. import engine, fsutil, process
 from ..c4 import compile as c4compile
 from ..c4 import ide_bridge
 from . import base
@@ -13,8 +13,16 @@ class Test(base.Command):
 	description = "Build and run the tests (named projects, default: every project with tests); --filter GLOB picks cases"
 	policy = base.TESTS
 
+	def __init__(self, command_table):
+		self.command_table = command_table
+
 	def work(self, session, project):
 		if project.is_driven:
+			if session.builds_before_test(project):
+				code = engine.execute(session, self.command_table, "build", [project.name])
+				if code:
+					session.test_results.append((project.name, code, None))
+					return
 			session.log.header(f"tests: {project.name}")
 			code = session.driver(project).test(session.driver_context(project))
 			session.test_results.append((project.name, code, None))

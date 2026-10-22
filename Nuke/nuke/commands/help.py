@@ -17,7 +17,8 @@ options:
   -w, --workspace DIR  use the workspace at DIR instead of searching up from the current folder
   --all                every project of the workspace
   --filter GLOB        test cases to run (nuke test --filter "math.*")
-  --json               machine-readable output (list, info)
+  -j, --jobs N         compiles a language driver may run at once (C++; default: NUKE_JOBS, else one per processor)
+  --json              machine-readable output (list, info)
   -v, --verbose        show the commands nuke runs
   --version            print Nuke's version"""
 

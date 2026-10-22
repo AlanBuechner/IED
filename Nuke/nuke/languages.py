@@ -1,21 +1,28 @@
 """Language drivers (IED docs/26 section 6): a project in a language other than C4 names its `language`, and Nuke
 builds, tests and runs it through that language's driver - Python in the language's package, an IED plugin folder with
-nuke/nuke-language.toml - which runs the language's own tool (cargo, go) and hands back the artifacts Nuke copies into
-build/bin. The tool's manifests, lockfiles and caches stay its own. A language's package is the one the workspace pins
-in [languages], else one of the workspace's own plugins (.ied/plugins/<id>/), else one of IED's (plugins/ beside Nuke,
-or the folders NUKE_LANGUAGE_PACKAGES names).
+nuke/nuke-language.toml - which runs the language's own tool (cargo, go), or is the language's build itself (C++), and
+hands back the artifacts Nuke copies into build/bin. The tool's manifests, lockfiles and caches stay its own. A
+language's package is the one the workspace pins in [languages], else one of the workspace's own plugins
+(.ied/plugins/<id>/), else one of IED's (plugins/ beside Nuke, or the folders NUKE_LANGUAGE_PACKAGES names).
 
-A driver module defines:
+A package may also bring library projects (`libraries` in its description: folders with a nuke.toml [project]); a
+workspace that depends on one by name gets it as one of its projects, built into the workspace's own build/ folder.
+
+A driver module (or package: a module named __init__.py loads with its folder as a Python package) defines:
 	build(ctx) -> [paths]     build the project; the artifacts to copy into its bin folder
 	program(ctx) -> name      the file in the bin folder `nuke run` starts (None: nothing to run)
-	test(ctx) -> exit code    run its tests
+	test(ctx) -> exit code    run its tests (after Nuke built the project, with `build-before-test = true`)
 	clean(ctx)                optional: what Nuke's clean should do beyond removing its own folders
 	has_tests(ctx) -> bool    optional (default True)
+	implicit_depends(spec)    optional: projects a project needs besides its `depends` (names), added to them
+	variables(ctx) -> dict    optional: values manifests read as ${<language>.<name>} (ctx: a WorkspaceContext)
 """
 
+import glob
 import importlib.util
 import os
 import subprocess
+import sys
 import threading
 import tomllib
 from dataclasses import dataclass, field
@@ -26,6 +33,7 @@ from .errors import NukeError, StepFailed
 DESCRIPTION = "nuke-language.toml"
 PACKAGES_ENV = "NUKE_LANGUAGE_PACKAGES"
 BUILT_IN_PACKAGES = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "plugins")
+DESCRIPTION_KEYS = {"id", "module", "preset", "libraries", "build-before-test"}
 
 
 @dataclass(frozen=True)
@@ -35,6 +43,17 @@ class LanguagePackage:
 	module: str            # the driver's Python file
 	preset: str            # the IED task preset of the language's Nuke projects (`<language>.nuke`)
 	pinned: bool = False   # named by the workspace's [languages]
+	libraries: tuple = ()  # globs, relative to the package, of the library projects it brings
+	build_before_test: bool = False   # `nuke test` builds a project (and what it depends on) before test(ctx)
+
+	def library_folders(self):
+		"""The folders of the package's library projects (each holding a nuke.toml)."""
+		found = []
+		for pattern in self.libraries:
+			for folder in sorted(glob.glob(os.path.join(self.folder, pattern))):
+				if os.path.isfile(os.path.join(folder, "nuke.toml")) and not any(fsutil.same_path(folder, f) for f in found):
+					found.append(fsutil.norm(folder))
+		return found
 
 
 def read_package(folder, pinned=False):
@@ -53,10 +72,17 @@ def read_package(folder, pinned=False):
 	module = os.path.join(folder, "nuke", table["module"])
 	if not os.path.isfile(module):
 		raise NukeError(f"{description}: its driver {table['module']} is not there")
-	unknown = sorted(set(table) - {"id", "module", "preset"})
+	unknown = sorted(set(table) - DESCRIPTION_KEYS)
 	if unknown:
 		raise NukeError(f"{description}: unknown key(s) in [language]: {', '.join(unknown)}")
-	return LanguagePackage(table["id"], fsutil.norm(folder), fsutil.norm(module), table.get("preset", f"{table['id']}.nuke"), pinned)
+	libraries = table.get("libraries", [])
+	if not isinstance(libraries, list) or not all(isinstance(entry, str) for entry in libraries):
+		raise NukeError(f"{description}: [language].libraries must be a list of folders or globs, relative to the package")
+	before_test = table.get("build-before-test", False)
+	if not isinstance(before_test, bool):
+		raise NukeError(f"{description}: [language].build-before-test must be true or false")
+	return LanguagePackage(table["id"], fsutil.norm(folder), fsutil.norm(module), table.get("preset", f"{table['id']}.nuke"), pinned,
+		tuple(libraries), before_test)
 
 
 def packages_in(parent):
@@ -99,25 +125,41 @@ _drivers = {}
 
 
 def load_driver(package):
-	"""The driver module of `package`, imported once."""
+	"""The driver module of `package`, imported once; a module named __init__.py is imported as a package, so the
+	driver can be split into modules of its own."""
 	if package.module not in _drivers:
-		spec = importlib.util.spec_from_file_location(f"nuke_language_{package.language.replace('-', '_')}", package.module)
+		name = f"nuke_language_{package.language.replace('-', '_')}"
+		folders = [os.path.dirname(package.module)] if os.path.basename(package.module) == "__init__.py" else None
+		spec = importlib.util.spec_from_file_location(name, package.module, submodule_search_locations=folders)
 		module = importlib.util.module_from_spec(spec)
 		try:
+			if folders:
+				sys.modules[name] = module
 			spec.loader.exec_module(module)
+		except NukeError:
+			raise
 		except Exception as error:
 			raise NukeError(f"{package.module}: the {package.language} driver does not load: {error}") from None
-		for name in ("build", "program", "test"):
-			if not callable(getattr(module, name, None)):
-				raise NukeError(f"{package.module}: the {package.language} driver has no {name}(ctx)")
+		for function in ("build", "program", "test"):
+			if not callable(getattr(module, function, None)):
+				raise NukeError(f"{package.module}: the {package.language} driver has no {function}(ctx)")
 		_drivers[package.module] = module
 	return _drivers[package.module]
 
 
 @dataclass
+class WorkspaceContext:
+	"""What a driver's variables(ctx) gets: the workspace's folder and its [languages.<id>] settings."""
+	workspace_dir: str
+	settings: dict
+	log: object = None
+
+
+@dataclass
 class DriverContext:
 	"""What a driver's functions get: the project, the configuration, its folders, the command line's extra arguments
-	and test filter, and ways to run the language's tool with its output in Nuke's log."""
+	and test filter, the workspace's settings for the language, the contexts of what the project depends on, and ways
+	to run the language's tool with its output in Nuke's log."""
 	project: object
 	configuration: object
 	arch: str
@@ -127,6 +169,11 @@ class DriverContext:
 	log: object
 	args: list = field(default_factory=list)
 	test_filter: str = None
+	settings: dict = field(default_factory=dict)   # the workspace's [languages.<id>] table
+	workspace_dir: str = ""
+	jobs: int = None                               # `nuke -j N`: how many tool processes may run at once (None: the driver's choice)
+	dependencies: object = None                    # () -> [DriverContext] of the projects in `depends`
+	expander: object = None                        # (text) -> text with the project's ${variables}
 
 	@property
 	def root(self):
@@ -136,6 +183,15 @@ class DriverContext:
 	def options(self):
 		"""The project's [project.driver] table."""
 		return self.project.driver_options
+
+	@property
+	def depends(self):
+		"""The contexts of the projects this one depends on, in `depends` order."""
+		return self.dependencies() if self.dependencies else []
+
+	def expand(self, text):
+		"""`text` with the project's ${variables} (the steps' ones, the language packages' included)."""
+		return self.expander(text) if self.expander else text
 
 	def tool(self, name):
 		"""The command of the language's tool: NUKE_TOOL_<NAME> when set (tests, a tool off PATH), else its name."""
@@ -176,6 +232,7 @@ def run_capturing(argv, log, cwd=None, env=None):
 
 def stage(artifacts, bin_dir, log, name):
 	"""Copies each artifact into `bin_dir` when it is newer than the copy there."""
-	copied = sum(fsutil.copy_if_newer(path, os.path.join(bin_dir, os.path.basename(path))) for path in artifacts if os.path.isfile(path))
+	copied = sum(fsutil.copy_if_newer(path, os.path.join(bin_dir, os.path.basename(path))) for path in artifacts
+		if os.path.isfile(path) and not fsutil.same_path(os.path.dirname(path), bin_dir))
 	if copied:
 		log.note(f"{name}: copied {copied} file(s) into {bin_dir}")

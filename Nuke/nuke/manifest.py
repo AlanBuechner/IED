@@ -111,6 +111,7 @@ class WorkspaceSpec:
 	commands: tuple = ()
 	ide: bool = True
 	languages: dict = field(default_factory=dict)   # [languages]: language -> its package's folder (languages.py)
+	language_settings: dict = field(default_factory=dict)   # [languages.<id>] tables: language -> what its driver reads
 
 
 @dataclass(frozen=True)
@@ -228,11 +229,11 @@ def parse(data, path):
 	project_table = root.table("project")
 	configurations = root.subtables("configurations")
 	commands = root.subtables("commands")
-	languages = root.string_map("languages")
+	languages = _languages(root.table("languages"))
 	root.done()
 	if workspace_table is None and project_table is None:
 		raise NukeError(f"{path}: needs a [workspace] or a [project] table")
-	if workspace_table is None and (configurations or commands or languages):
+	if workspace_table is None and (configurations or commands or any(languages)):
 		raise NukeError(f"{path}: [configurations], [commands] and [languages] belong to the workspace file")
 	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path) if workspace_table else None
 	project = _project(project_table, folder, path) if project_table else None
@@ -255,10 +256,34 @@ def _workspace(t, configurations, commands, languages, folder, path):
 		steps=tuple(_step(s, path) for s in t.tables("steps")),
 		commands=tuple(_command(name, c, path) for name, c in commands),
 		ide=t.boolean("ide", True),
-		languages=languages,
+		languages=languages[0],
+		language_settings=languages[1],
 	)
 	t.done()
 	return spec
+
+
+def _languages(t):
+	"""[languages]: each language is its package's folder (`rust = "tools/rust"`) or a table of what its driver reads,
+	with that folder as `package` when it pins one (`[languages.cpp] llvm = "vendor/llvm"`). (pins, settings)."""
+	pins, settings = {}, {}
+	if t is None:
+		return pins, settings
+	for language, value in t.data.items():
+		t.read.add(language)
+		if isinstance(value, str):
+			pins[language] = value
+		elif isinstance(value, dict):
+			table = dict(value)
+			package = table.pop("package", None)
+			if package is not None and not isinstance(package, str):
+				raise NukeError(f"{t.file}: languages.{language}.package must be a string (the package's folder)")
+			if package is not None:
+				pins[language] = package
+			settings[language] = table
+		else:
+			raise NukeError(f"{t.file}: languages.{language} must be its package's folder or a table of its driver's settings")
+	return pins, settings
 
 
 def _configuration(name, t):
