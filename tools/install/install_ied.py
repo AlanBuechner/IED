@@ -107,12 +107,30 @@ def mirror(source, target, skip, report):
 			os.rmdir(folder)
 
 
-def commit():
-	"""The checkout's commit, with "-dirty" when the build may hold changes not committed yet."""
+def checkout_state(repo):
+	"""(commit, dirty): the checkout's HEAD and whether a tracked file has changes not committed (untracked files, a
+	session's scratch, do not count); ("", False) without git."""
 	try:
-		return subprocess.run(["git", "-C", REPO, "describe", "--always", "--dirty"], capture_output=True, text=True, timeout=30).stdout.strip()
+		head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=30).stdout.strip()
+		changed = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, timeout=60).stdout
+		return head, bool(changed.strip())
 	except OSError:
-		return ""
+		return "", False
+
+
+def install_record(repo, bin_root, head, dirty, now_ms):
+	"""install.json: the checkout an install came from (`source`, forward slashes, so an installed IED finds it), its
+	commit and whether it had uncommitted changes, when, and the build folder it was copied from."""
+	return {"source": os.path.abspath(repo).replace("\\", "/"), "commit": head, "dirty": dirty, "installedMs": now_ms, "bin": os.path.abspath(bin_root).replace("\\", "/")}
+
+
+def write_record(target, record):
+	"""Written last and whole (renamed into place), so an install.json says the install is complete."""
+	temporary = os.path.join(target, "install.json.tmp")
+	with open(temporary, "w", encoding="utf-8") as f:
+		json.dump(record, f, indent="\t")
+		f.write("\n")
+	os.replace(temporary, os.path.join(target, "install.json"))
 
 
 def install(bin_root, target):
@@ -130,9 +148,8 @@ def install(bin_root, target):
 		if not os.path.isdir(source):
 			raise SystemExit("install-ied: %s is missing; run setup.bat (the web libraries) or check out the submodules" % tree)
 		mirror(source, os.path.join(target, tree), set(skip), report)
-	with open(os.path.join(target, "install.json"), "w", encoding="utf-8") as f:
-		json.dump({"commit": commit(), "installed": time.strftime("%Y-%m-%dT%H:%M:%S"), "from": os.path.abspath(bin_root)}, f, indent="\t")
-		f.write("\n")
+	head, dirty = checkout_state(REPO)
+	write_record(target, install_record(REPO, bin_root, head, dirty, int(time.time() * 1000)))
 	return report
 
 

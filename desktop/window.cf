@@ -144,6 +144,10 @@ namespace Desktop
 			app->OpenFolder(this);
 			return true;
 		}
+		if (message == kRelaunchMessage) {
+			app->Relaunch();
+			return true;
+		}
 		if (message == (uint32)WM_CLOSE) {
 			app->Closing(this);
 			if (controller != null) controller->Close();

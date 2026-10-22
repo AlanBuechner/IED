@@ -20,6 +20,7 @@ namespace Desktop
 		public bool help;
 		public bool registering;       // --register
 		public bool unregistering;     // --unregister
+		public Core::String relaunch;  // --relaunch <file>: the windows of the process this one replaces (relaunch.ch)
 	}
 
 	// `options` from the arguments after the program's name; false with `error` saying what is wrong.

@@ -74,6 +74,25 @@ def dialog_of(pid):
 	return found[0] if found else None
 
 
+def desktop_windows():
+	"""Every visible IED window on the desktop: {hwnd: (pid, (left, top, right, bottom))}."""
+	user32 = ctypes.WinDLL("user32")
+	found = {}
+
+	def visit(hwnd, _):
+		name = ctypes.create_unicode_buffer(64)
+		user32.GetClassNameW(hwnd, name, 64)
+		if name.value == "IedDesktopWindow" and user32.IsWindowVisible(hwnd):
+			owner = ctypes.wintypes.DWORD()
+			user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+			rect = ctypes.wintypes.RECT()
+			user32.GetWindowRect(hwnd, ctypes.byref(rect))
+			found[hwnd] = (owner.value, (rect.left, rect.top, rect.right, rect.bottom))
+		return True
+	user32.EnumWindows(ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)(visit), 0)
+	return found
+
+
 def resize_window(pid, width, height):
 	"""Sizes the app's IED window (its class is IedDesktopWindow); false when it has none."""
 	user32 = ctypes.WinDLL("user32")
@@ -182,6 +201,11 @@ class DesktopTests(ServerTestCase):
 		if self.app and self.app.poll() is None:
 			self.app.kill()
 			self.app.wait(10)
+		for pid in getattr(self, "relaunched", []):
+			try:
+				os.kill(pid, 9)
+			except OSError:
+				pass
 		# The window is gone, so nothing starts the server again once it stops.
 		status = self.status()
 		if status:
@@ -254,3 +278,26 @@ class DesktopTests(ServerTestCase):
 		evaluate(page, "ied_shell.commands.run('shell.startPage')")
 		listed = self.wait(lambda: evaluate(self.wait(self.home_page, "the start page again"), "[...document.querySelectorAll('.sp-section')].map(s => s.querySelector('h3').textContent + ':' + [...s.querySelectorAll('.sp-name')].map(n => n.textContent).join(','))"), "its lists", 15)
 		self.assertEqual(["Open:project"], listed, "the folder is open, and so not repeated under Recent")
+
+	def test_relaunch_comes_back_on_a_new_server_where_it_was(self):
+		"""docs/27 "Relaunch": the page's iedDesktop.relaunch() stops the server, starts the app again and exits; the new
+		process opens the window where it was, on the same folder, on a server of its own start."""
+		self.start_app()
+		page = self.wait(self.signed_in_page, "signed-in window")
+		first = self.wait(lambda: (lambda s: s if s and s["clients"] >= 1 else None)(self.status()), "connected window")
+		self.assertTrue(evaluate(page, "location.search").startswith("?ws="), "the address names the workspace")
+		user32 = ctypes.WinDLL("user32")
+		before = desktop_windows()
+		mine = [hwnd for hwnd, (pid, _) in before.items() if pid == self.app.pid]
+		user32.SetWindowPos(ctypes.wintypes.HWND(mine[0]), None, 80, 60, 1000, 700, 0x0004)
+		time.sleep(0.5)
+		where = desktop_windows()[mine[0]][1]
+		evaluate(page, "window.iedDesktop.relaunch()")
+		self.app.wait(30)
+		after = self.wait(lambda: {h: v for h, v in desktop_windows().items() if h not in before}, "the relaunched window", START_SECONDS)
+		self.relaunched = [pid for pid, _ in after.values()]
+		again = self.wait(lambda: (lambda s: s if s and s["pid"] != first["pid"] and s["clients"] >= 1 else None)(self.status()), "a new server and the window on it")
+		self.assertEqual([os.path.normcase(self.folder)], [os.path.normcase(w["root"]) for w in again["workspaces"]], "the folder opened again")
+		self.assertEqual("project - IED", self.wait(self.signed_in_page, "the window on the folder")["title"])
+		self.assertEqual([where], [rect for _, rect in after.values()], "where it was")
+		self.assertFalse(os.path.exists(os.path.join(self.root, "local", "IED", "desktop", "relaunch.json")), "the relaunch file is taken")

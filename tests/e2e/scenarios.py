@@ -1591,7 +1591,7 @@ def start_page_and_recent_projects(run):
 	Prototype (gone). Each viewport leaves it as it found it, but for Tools, which stays open."""
 	page = run.open()
 	page.goto(run.target.url + "/#start")
-	page.wait_for_function("window.ied_shell && ied_shell.client.state === 'live' && document.querySelectorAll('.start-page .sp-row').length >= 4", timeout=20000)
+	page.wait_for_function("window.ied_shell && ied_shell.client && ied_shell.client.state === 'live' && document.querySelectorAll('.start-page .sp-row').length >= 4", timeout=20000)
 
 	def names(section):
 		return page.eval_on_selector_all(".sp-section", "(els, title) => { const s = els.find(e => e.querySelector('h3').textContent === title); return s ? [...s.querySelectorAll('.sp-name')].map(n => n.textContent) : []; }", section)

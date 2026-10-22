@@ -98,7 +98,10 @@ namespace Desktop
 	}
 
 	Window* App::NewWindow() {
-		Placement placement = windows.IsEmpty() ? LoadPlacement(data) : Cascaded(windows[windows.Count() - 1]->CurrentPlacement());
+		return NewWindowAt(windows.IsEmpty() ? LoadPlacement(data) : Cascaded(windows[windows.Count() - 1]->CurrentPlacement()));
+	}
+
+	Window* App::NewWindowAt(const Placement& placement) {
 		App* self = this;
 		Window* window = new Window(self);
 		if (!window->Create(instance, placement)) return null;
@@ -190,6 +193,109 @@ namespace Desktop
 		}
 	}
 
+	void App::OpenInWeb(Core::StringView root) {
+		App* self = this;
+		Core::String path = Core::String(root);
+		Threading::Thread::Run([self, path]() {
+			Core::String error;
+			Net::LocalStream stream = self->EnsureServer(error);
+			if (stream.IsOpen()) {
+				Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(path.View(), 0, 0).View());
+				if (reply.ok) {
+					Launch::OpenExternal(Launch::ResultField(reply, "url").View());
+					return;
+				}
+				error = reply.error;
+			}
+			Core::Array<char16> body = Wide((Core::String("IED could not open this workspace in the browser: ") + error.View()).View());
+			Core::Array<char16> caption = Wide(Core::StringView("IED"));
+			MessageBoxW(null, body.Data(), caption.Data(), (uint32)MB_ICONERROR);
+		}).Detach();
+	}
+
+	// The windows and the workspace each shows go into <data>/relaunch.json; the watch stops first, so it does not start
+	// the server again while it stops. A failure is told, and the app goes on with a server started again.
+	void App::Relaunch() {
+		Core::String error;
+		Net::LocalStream stream = EnsureServer(error);
+		Core::String status;
+		if (stream.IsOpen()) {
+			Launch::Reply reply = Launch::Ask(stream, Core::StringView("status"), Core::StringView(""));
+			if (reply.ok) status = reply.result;
+		}
+		Core::Array<RelaunchWindow> kept;
+		for (Window* window : windows) {
+			RelaunchWindow entry;
+			entry.placement = window->CurrentPlacement();
+			entry.root = RootOf(status.View(), WorkspaceOf(window->CurrentUrl().View()).View());
+			kept.Push(entry);
+		}
+		FS::Path file = data / "relaunch.json";
+		Core::String json = RelaunchJson((int64)Platform::ProcessId(), kept);
+		FS::MakeDirectories(data.CStr());
+		watch.Stop();
+		if (stream.IsOpen()) Launch::Ask(stream, Core::StringView("stop"), Core::StringView(""));
+		Launch::AwaitGone(options.control.View());
+		if (!FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength()) || !StartAgain(file, error)) {
+			Report(Core::StringView("IED could not relaunch"), kFailed);
+			watch.Start(this);
+			return;
+		}
+		quitting = true;
+		for (Window* window : windows) window->Close();
+		PostQuitMessage(0);
+	}
+
+	bool App::StartAgain(const FS::Path& file, Core::String& error) {
+		Process::StartInfo info;
+		info.program = Core::String(Platform::ExecutablePath().View());
+		info.arguments.Push(Core::String("--relaunch"));
+		info.arguments.Push(Core::String(file.View()));
+		if (!options.control.IsEmpty()) {
+			info.arguments.Push(Core::String("--control"));
+			info.arguments.Push(options.control);
+		}
+		if (!options.dataDir.IsEmpty()) {
+			info.arguments.Push(Core::String("--data"));
+			info.arguments.Push(options.dataDir);
+		}
+		if (options.debugPort > 0) {
+			Core::StringBuilder port;
+			port.AppendInt(options.debugPort);
+			info.arguments.Push(Core::String("--debug-port"));
+			info.arguments.Push(port.ToString());
+		}
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		info.killOnClose = false;
+		Process::Child child = Process::Child::Start(info);
+		if (!child.IsOpen()) error = Core::String(child.Error());
+		return child.IsOpen();
+	}
+
+	Core::Array<RelaunchWindow> App::TakeRelaunch() {
+		Core::Array<RelaunchWindow> relaunched;
+		if (options.relaunch.IsEmpty() || !FS::FileExists(options.relaunch.CStr())) return relaunched;
+		FS::File opened = FS::File(options.relaunch.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		opened.Close();
+		FS::RemoveFile(options.relaunch.CStr());
+		int64 pid = 0;
+		if (!ParseRelaunch(text.View(), pid, relaunched)) return Core::Array<RelaunchWindow>();
+		AwaitExit(pid, kOldProcessWaitMs);
+		return relaunched;
+	}
+
+	void App::OpenRelaunched(const Core::Array<RelaunchWindow>& relaunched) {
+		for (const RelaunchWindow& entry : relaunched) {
+			Window* window = NewWindowAt(entry.placement.known ? entry.placement : LoadPlacement(data));
+			if (window == null) continue;
+			if (entry.root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::StartPage);
+			else Resolve(window, Core::StringView("open"), Launch::OpenParams(entry.root.View(), 0, 0).View(), Arrival::First);
+		}
+	}
+
 	void App::Retry() {
 		watch.Reset();
 		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), Arrival::First);
@@ -247,8 +353,10 @@ namespace Desktop
 			arguments.AppendInt(options.debugPort);
 			Platform::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments.ToString().CStr());
 		}
+		Core::Array<RelaunchWindow> relaunched = TakeRelaunch();
 		CreateEnvironment();
-		if (options.path.IsEmpty()) OpenHome();
+		if (!relaunched.IsEmpty()) OpenRelaunched(relaunched);
+		else if (options.path.IsEmpty()) OpenHome();
 		else OpenLocation(options.path.View(), options.line, options.col);
 		if (windows.IsEmpty()) return 1;
 		tagMSG message;

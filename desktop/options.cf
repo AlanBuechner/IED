@@ -41,13 +41,14 @@ namespace Desktop
 			options.unregistering = option == "--unregister";
 			return true;
 		}
-		if (option != "--control" && option != "--data" && option != "--debug-port") {
+		if (option != "--control" && option != "--data" && option != "--debug-port" && option != "--relaunch") {
 			error = Core::String("unknown option ") + option;
 			return false;
 		}
 		if (!TakeValue(arguments, i, value, error)) return false;
 		if (option == "--control") options.control = value;
 		else if (option == "--data") options.dataDir = value;
+		else if (option == "--relaunch") options.relaunch = value;
 		else return TakePort(value.View(), options.debugPort, error);
 		return true;
 	}

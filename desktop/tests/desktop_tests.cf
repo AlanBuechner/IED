@@ -83,6 +83,30 @@ class DesktopTests {
 		assert_true(kept, "an extension another program took is left to it");
 	}
 
+	[test("relaunch")]
+	public static void TestRelaunch() {
+		assert_se("w2", Desktop::WorkspaceOf(Core::StringView("http://127.0.0.1:8765/?ws=w2#open=w2/")).CStr(), "the workspace a window shows");
+		assert_se("w3", Desktop::WorkspaceOf(Core::StringView("http://127.0.0.1:8765/?x=1&ws=w3")).CStr(), "among other parameters");
+		assert_true(Desktop::WorkspaceOf(Core::StringView("http://127.0.0.1:8765/#start")).IsEmpty(), "the start page names none");
+		Core::StringView status = Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pid\":1,\"workspaces\":[{\"wsId\":\"w1\",\"root\":\"C:\\\\a\"},{\"wsId\":\"w2\",\"root\":\"C:\\\\Game\"}]}}");
+		assert_se("C:\\Game", Desktop::RootOf(status, Core::StringView("w2")).CStr(), "its folder");
+		assert_true(Desktop::RootOf(status, Core::StringView("w9")).IsEmpty(), "a workspace no longer open");
+		Core::Array<Desktop::RelaunchWindow> windows;
+		Desktop::RelaunchWindow game;
+		game.root = Core::String("C:\\Game");
+		game.placement = Desktop::ParsePlacement(Core::StringView("{\"x\":40,\"y\":30,\"width\":1200,\"height\":800,\"maximized\":true}"));
+		windows.Push(game);
+		windows.Push(Desktop::RelaunchWindow());
+		int64 pid = 0;
+		Core::Array<Desktop::RelaunchWindow> read;
+		assert_true(Desktop::ParseRelaunch(Desktop::RelaunchJson(4242, windows).View(), pid, read), "read back");
+		assert_true(pid == 4242 && read.Count() == 2, "the old process and both windows");
+		assert_true(read[0].root == "C:\\Game" && read[0].placement.known && read[0].placement.width == 1200 && read[0].placement.maximized, "where the first was, on what");
+		assert_true(read[1].root.IsEmpty() && !read[1].placement.known, "the second on the start page, placed by the system");
+		assert_true(!Desktop::ParseRelaunch(Core::StringView("{\"pid\":1}"), pid, read), "not a relaunch file");
+		assert_true(Desktop::AwaitExit(0, 100), "no process to wait for");
+	}
+
 	[test("placement")]
 	public static void TestPlacement() {
 		Desktop::Placement kept = Desktop::ParsePlacement(Core::StringView("{\"x\":-1900,\"y\":40,\"width\":1600,\"height\":1000,\"maximized\":true}"));
@@ -127,6 +151,8 @@ class DesktopTests {
 		Core::String script = Desktop::BridgeScript(Core::StringView("0.1.0"));
 		assert_true(script.View().Contains(Core::StringView("version: \"0.1.0\"")) && script.View().Contains(Core::StringView("devTools")), "the bridge");
 		assert_true(script.View().Contains(Core::StringView("openFolder: () => post(\"openFolder\")")), "File > Open Folder");
+		assert_true(script.View().Contains(Core::StringView("relaunch: () => post(\"relaunch\")")) && script.View().Contains(Core::StringView("openInWeb: (path) => post(\"openInWeb\", { path: String(path) })")), "relaunch, open in web");
+		assert_true(script.View().Contains(Core::StringView("post(\"location\", { url: location.href })")), "the address told as history changes it");
 	}
 
 	[test("restart_budget")]

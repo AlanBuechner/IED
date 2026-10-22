@@ -2,6 +2,7 @@
 is gone; a program in use is renamed aside and replaced, and the next install removes the old copy; the PATH gains the
 folder once and loses only it; an uninstall removes the folder whole or, while a program in it runs, not at all."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -53,6 +54,25 @@ class MirrorTests(unittest.TestCase):
 			self.assertEqual("main, changed", f.read())
 		self.assertFalse(os.path.exists(os.path.join(self.target, "index.html")))
 		self.assertFalse(os.path.exists(os.path.join(self.target, "src", "stale")), "an emptied folder goes too")
+
+
+class RecordTests(unittest.TestCase):
+	def test_the_record_names_its_checkout(self):
+		root = tempfile.mkdtemp(prefix="ied-install-")
+		self.addCleanup(shutil.rmtree, root, True)
+		record = install_ied.install_record(os.path.join(root, "IED"), os.path.join(root, "IED", "build", "bin", "Dist-windows-x64"), "a" * 40, True, 1792630000123)
+		self.assertEqual({"source", "commit", "dirty", "installedMs", "bin"}, set(record))
+		self.assertEqual((root.replace("\\", "/") + "/IED", "a" * 40, True, 1792630000123), (record["source"], record["commit"], record["dirty"], record["installedMs"]))
+		self.assertNotIn("\\", record["bin"], "forward slashes")
+		install_ied.write_record(root, record)
+		with open(os.path.join(root, "install.json"), encoding="utf-8") as f:
+			self.assertEqual(record, json.load(f))
+		self.assertFalse(os.path.exists(os.path.join(root, "install.json.tmp")), "renamed into place")
+
+	def test_the_checkout_state(self):
+		head, dirty = install_ied.checkout_state(install_ied.REPO)
+		self.assertRegex(head, r"^[0-9a-f]{40}$", "this checkout's full commit")
+		self.assertIsInstance(dirty, bool)
 
 
 class PathTests(unittest.TestCase):

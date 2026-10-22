@@ -10,6 +10,7 @@ namespace Desktop
 {
 	const uint32 kResolvedMessage = 0x8001;     // WM_APP + 1: a resolver thread left a URL or an error
 	const uint32 kOpenFolderMessage = 0x8004;   // WM_APP + 4: the page asked for File > Open Folder
+	const uint32 kRelaunchMessage = 0x8005;     // WM_APP + 5: the page asked the app to relaunch onto the newest install
 
 	// Why a window asked the server for a URL: its first page; IED's start page (a window opened without a path); the
 	// server back after the watch started it again (the page stays unless the server's origin moved); or a folder the
@@ -35,6 +36,8 @@ namespace Desktop
 		// A message box over this window.
 		public void Alert(Core::StringView text);
 		public Placement CurrentPlacement() const;
+		// The page's address now (as its script told it, else WebView2's Source); empty before it has one.
+		public Core::String CurrentUrl() const;
 		public void Close();
 
 		// The window procedure's work for one message; false: the default handling.
@@ -45,6 +48,7 @@ namespace Desktop
 		public ICoreWebView2Controller* controller;
 		public ICoreWebView2* webview;
 		public Core::String origin;        // the server's origin this window shows
+		public Core::String pageUrl;       // the page's address as its script last told it (history changes included)
 		public Core::String resolvedUrl;   // a resolver thread's result, under the app's lock
 		public Core::String resolveError;
 		public Arrival resolveArrival;

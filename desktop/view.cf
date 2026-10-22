@@ -117,6 +117,14 @@ namespace Desktop
 		}
 	}
 
+	Core::String Window::CurrentUrl() const {
+		if (!pageUrl.IsEmpty()) return pageUrl;
+		if (webview == null) return Core::String();
+		char16* raw = null;
+		webview->get_Source(&raw);
+		return TakeWide(raw);
+	}
+
 	void Window::Resolved(Core::StringView url, Core::StringView error, Arrival arrival) {
 		if (!url.IsEmpty() && arrival == Arrival::ServerBack && !showingStatus && OriginOf(url).View() == origin.View()) return;
 		Core::String shown = arrival == Arrival::StartPage ? StartPageUrl(url) : Core::String(url);
@@ -190,6 +198,9 @@ namespace Desktop
 		if (type == "devTools") webview->OpenDevToolsWindow();
 		// The picker is modal: it runs from the window's own message, not inside WebView2's event.
 		else if (type == "openFolder") PostMessageW(hwnd, kOpenFolderMessage, 0, 0);
+		else if (type == "openInWeb") app->OpenInWeb(parsed.root.Member("path").AsView());
+		else if (type == "location") pageUrl = Core::String(parsed.root.Member("url").AsView());
+		else if (type == "relaunch") PostMessageW(hwnd, kRelaunchMessage, 0, 0);
 		else if (type == "openExternal") Launch::OpenExternal(parsed.root.Member("url").AsView());
 		else if (type == "newWindow") {
 			Core::StringView url = parsed.root.Member("url").AsView();

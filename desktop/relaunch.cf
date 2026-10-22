@@ -1,0 +1,74 @@
+include "relaunch.ch"
+include "native.ch"
+
+namespace Desktop
+{
+	const uint32 kSynchronize = 0x00100000;   // SYNCHRONIZE
+	const uint32 kWaitTimeout = 0x102;        // WAIT_TIMEOUT
+
+	Core::String RelaunchJson(int64 pid, const Core::Array<RelaunchWindow>& windows) {
+		Core::StringBuilder json;
+		json.Append("{\"pid\":");
+		json.AppendInt(pid);
+		json.Append(",\"windows\":[");
+		for (int64 i = 0; i < windows.Count(); ++i) {
+			if (i > 0) json.AppendByte(',');
+			json.Append("{\"root\":");
+			Serialization::WriteJsonString(windows[i].root.View(), &json);
+			json.Append(",\"placement\":");
+			json.Append(PlacementJson(windows[i].placement).View());
+			json.AppendByte('}');
+		}
+		json.Append("]}");
+		return json.ToString();
+	}
+
+	bool ParseRelaunch(Core::StringView text, int64& pid, Core::Array<RelaunchWindow>& windows) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text, *doc);
+		if (!read.Ok() || read.root.Member("windows").Kind() != Serialization::DomKind::Array) return false;
+		pid = read.root.Member("pid").AsInt();
+		Serialization::DomNode list = read.root.Member("windows");
+		for (int64 i = 0; i < list.Count(); ++i) {
+			RelaunchWindow window;
+			window.root = Core::String(list.At(i).Member("root").AsView());
+			Core::StringBuilder placement;
+			Serialization::WriteJson(list.At(i).Member("placement"), &placement, 0);
+			window.placement = ParsePlacement(placement.View());
+			windows.Push(window);
+		}
+		return true;
+	}
+
+	Core::String WorkspaceOf(Core::StringView url) {
+		const int64 fragment = url.IndexOf(Core::StringView("#"));
+		Core::StringView address = fragment < 0 ? url : url.Substring(0, fragment);
+		const int64 query = address.IndexOf(Core::StringView("?"));
+		if (query < 0) return Core::String();
+		Core::StringView rest = address.Substring(query + 1, address.ByteLength() - query - 1);
+		while (!rest.IsEmpty()) {
+			const int64 end = rest.IndexOf(Core::StringView("&"));
+			Core::StringView pair = end < 0 ? rest : rest.Substring(0, end);
+			if (pair.StartsWith(Core::StringView("ws="))) return Core::String(pair.Substring(3, pair.ByteLength() - 3));   // ids need no decoding
+			rest = end < 0 ? Core::StringView("") : rest.Substring(end + 1, rest.ByteLength() - end - 1);
+		}
+		return Core::String();
+	}
+
+	Core::String RootOf(Core::StringView statusReply, Core::StringView wsId) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(statusReply, *doc);
+		Serialization::DomNode workspaces = read.Ok() ? read.root.Member("result").Member("workspaces") : Serialization::DomNode();
+		for (int64 i = 0; i < workspaces.Count(); ++i)
+			if (workspaces.At(i).Member("wsId").AsView() == wsId) return Core::String(workspaces.At(i).Member("root").AsView());
+		return Core::String();
+	}
+
+	bool AwaitExit(int64 pid, int32 ms) {
+		void* process = OpenProcess(kSynchronize, 0, (uint32)pid);
+		if (process == null) return true;
+		const uint32 waited = WaitForSingleObject(process, (uint32)ms);
+		CloseHandle(process);
+		return waited != kWaitTimeout;
+	}
+}

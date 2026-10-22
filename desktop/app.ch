@@ -4,6 +4,7 @@
 
 include "window.ch"
 include "folder.ch"
+include "relaunch.ch"
 include "watch.ch"
 include "options.ch"
 
@@ -29,6 +30,11 @@ namespace Desktop
 		public void OpenUrl(Core::StringView url);
 		// File > Open Folder: the folder the person picks, opened on the server and shown in `window`.
 		public void OpenFolder(Window* window);
+		// The workspace rooted at `root` in the system's default browser, through a one-time sign-in URL.
+		public void OpenInWeb(Core::StringView root);
+		// Onto the newest install (relaunch.ch): this process writes its windows down, stops its server, starts its
+		// program again and exits.
+		public void Relaunch();
 
 		// From windows (UI thread).
 		public void DeliverResolved(Window* window);
@@ -55,6 +61,11 @@ namespace Desktop
 		private void CreateEnvironment();
 		private void EnvironmentReady(int32 error, void* created);
 		private Window* NewWindow();
+		private Window* NewWindowAt(const Placement& placement);
+		// The windows a relaunch file names, once the process that wrote it is gone; none without one.
+		private Core::Array<RelaunchWindow> TakeRelaunch();
+		private void OpenRelaunched(const Core::Array<RelaunchWindow>& relaunched);
+		private bool StartAgain(const FS::Path& file, Core::String& error);
 		// Asks the server for the window's URL on a thread of its own; `arrival` says what the window does with it.
 		private void Resolve(Window* window, Core::StringView method, Core::StringView params, Arrival arrival);
 

@@ -200,12 +200,17 @@ export class Shell {
 			this.workspaceChanged();
 			this.chrome.contributionsChanged();
 			this.chrome.startPage();
+			if (location.search) history.replaceState(null, "", location.pathname + location.hash);
 			return;
 		}
 		if (this.startPageAsked) {
 			this.startPageAsked = false;
 			history.replaceState(null, "", location.pathname + location.search);
 		}
+		// The address names the workspace shown (`?ws=`, which preferredWorkspace reads), so a reload, a bookmark or the
+		// desktop app's relaunch comes back to it.
+		const named = "?ws=" + encodeURIComponent(wsId);
+		if (location.search !== named) history.replaceState(null, "", location.pathname + named + location.hash);
 		this.wsTopic = this.client.subscribe("ws:" + wsId, {
 			snap: (data) => this.workspaceSnapshot(data),
 			evt: (kind, data) => this.workspaceEvent(kind, data),

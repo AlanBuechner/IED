@@ -50,9 +50,20 @@ namespace Desktop
 		script.Append("\t\tnewWindow: (url) => post(\"newWindow\", { url: url ? String(url) : \"\" }),\n");
 		script.Append("\t\tdevTools: () => post(\"devTools\"),\n");
 		script.Append("\t\topenFolder: () => post(\"openFolder\"),\n");
+		script.Append("\t\trelaunch: () => post(\"relaunch\"),\n");
 		script.Append("\t\topenExternal: (url) => post(\"openExternal\", { url: String(url) }),\n");
+		script.Append("\t\topenInWeb: (path) => post(\"openInWeb\", { path: String(path) }),\n");
 		script.Append("\t\tretry: () => post(\"retry\"),\n");
 		script.Append("\t}) });\n");
+		// The page's address as history changes it (WebView2's Source does not follow history.replaceState).
+		script.Append("\tconst tell = () => post(\"location\", { url: location.href });\n");
+		script.Append("\tfor (const name of [\"pushState\", \"replaceState\"]) {\n");
+		script.Append("\t\tconst original = history[name];\n");
+		script.Append("\t\thistory[name] = function () { const done = original.apply(this, arguments); tell(); return done; };\n");
+		script.Append("\t}\n");
+		script.Append("\twindow.addEventListener(\"popstate\", tell);\n");
+		script.Append("\twindow.addEventListener(\"hashchange\", tell);\n");
+		script.Append("\tdocument.addEventListener(\"DOMContentLoaded\", tell);\n");
 		script.Append("})();\n");
 		return script.ToString();
 	}
