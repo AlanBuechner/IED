@@ -1,6 +1,7 @@
 #include "control.h"
 #include "capture.h"
 #include "json.h"
+#include "userpipe.h"
 
 #include <windows.h>
 
@@ -48,10 +49,8 @@ namespace fb::capture
 		const std::wstring name = L"\\\\.\\pipe\\flashbang-" + std::to_wstring(GetCurrentProcessId());
 		HANDLE readDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 		while (!stop_) {
-			// Only this user's processes may connect (the default security of a pipe this process makes).
-			HANDLE pipe = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-				PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 64 * 1024, 64 * 1024, 0, nullptr);
-			if (pipe == INVALID_HANDLE_VALUE) {
+			HANDLE pipe = (HANDLE)NewUserPipe(name.c_str(), 64 * 1024);
+			if (!pipe) {
 				Log("control pipe unavailable (error %lu)", GetLastError());
 				break;
 			}

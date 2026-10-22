@@ -71,7 +71,7 @@ The server never ships GPU objects to the browser. Textures go as decoded float 
 
 **Triggers:** IED's *Capture Next Frame* (the control pipe), or the program itself through `Gpu::Capture::TriggerCapture(n)` (bound to whatever key or console command the program likes). A frame ends at `Present` / `vkQueuePresentKHR`; a program without a swap chain marks frames with `Gpu::Capture::StartFrame` / `EndFrame`.
 
-**Control pipe** `\\.\pipe\flashbang-<pid>`, one JSON object per line. The server sends `{"cmd":"capture","frames":n}`, `{"cmd":"status"}`; the DLL answers `{"event":"hello","pid","program","apis","frame","captureDir"}` on connect, `{"event":"status",...}`, `{"event":"captured","path","frame","bytes"}`, `{"event":"error","message"}`.
+**Control pipe** `\\.\pipe\flashbang-<pid>`, one JSON object per line. The server sends `{"cmd":"capture","frames":n}`, `{"cmd":"status"}`; the DLL answers `{"event":"hello","pid","program","apis","frame","captureDir"}` on connect, `{"event":"status",...}`, `{"event":"captured","path","frame","bytes"}`, `{"event":"error","message"}`. Only the user who runs the program can open it: the pipe's descriptor has that user's access entry alone (a pipe's default one also lets Everyone and Anonymous read), it is created as the first instance of its name so it never joins a pipe another process made first, and it refuses remote clients. The server checks the other way that the pipe it connects to is served by a process of its own user (Bedrock `Net::LocalStream`).
 
 ## The capture file (`.flash`)
 
@@ -198,8 +198,7 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   (launch, capture, open, replay, blobs, comment, delete, refusals; a Vulkan launch through the layer), Bedrock
   `gpu_tests.cf`.
 
-Not yet: a buffer view in the UI (the replayer's `buffer` method has none yet); the AI tools; the control pipe's DACL
-limited to the user; Pixel History and the rest of G2.
+Not yet: a buffer view in the UI (the replayer's `buffer` method has none yet); the AI tools; Pixel History and the rest of G2.
 
 ## Risks
 
