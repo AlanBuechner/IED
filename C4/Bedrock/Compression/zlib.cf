@@ -1,0 +1,193 @@
+include "zlib.ch"
+
+namespace Compression
+{
+	const uint32 kAdlerModulus = 65521u;
+	// The most bytes whose sums fit in 32 bits before the modulus is taken (zlib's NMAX).
+	const int64 kAdlerRun = 5552;
+	const int64 kAdlerLanes = 16;
+	const int32 kZlibHeaderBytes = 2;
+	const int32 kZlibTrailerBytes = 4;
+	const int32 kGzipHeaderBytes = 10;
+	const int32 kGzipTrailerBytes = 8;
+	const uint8 kGzipText = 1u;
+	const uint8 kGzipHeaderCrc = 2u;
+	const uint8 kGzipExtra = 4u;
+	const uint8 kGzipName = 8u;
+	const uint8 kGzipComment = 16u;
+	const uint8 kGzipUnknownSystem = 255u;
+
+	uint32 Adler32(const uint8* data, int64 count) {
+		const bool wide = Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx2);
+		uint64 a = 1u;
+		uint64 b = 0u;
+		while (count > 0) {
+			const int64 run = count < kAdlerRun ? count : kAdlerRun;
+			if (wide) AddAdlerRunWide(data, run, a, b);
+			else AddAdlerRun(data, run, a, b);
+			a %= (uint64)kAdlerModulus;
+			b %= (uint64)kAdlerModulus;
+			data += run;
+			count -= run;
+		}
+		return (uint32)((b << 16u) | a);
+	}
+
+	// A run's bytes added to the sums, sixteen at a time in lanes: per lane the bytes' sum, the sum of those sums
+	// before each step (each earlier step's bytes count 16 more in `b` for every later step), and the bytes weighted 16
+	// down to 1. A run of kAdlerRun bytes keeps every lane in 32 bits.
+	void AddAdlerRun(const uint8* data, int64 run, uint64& a, uint64& b) {
+		const int64 steps = run / kAdlerLanes;
+		const packed uint32[16] weights = { 16u, 15u, 14u, 13u, 12u, 11u, 10u, 9u, 8u, 7u, 6u, 5u, 4u, 3u, 2u, 1u };
+		packed uint32[16] sums = { 0u };
+		packed uint32[16] earlier = { 0u };
+		packed uint32[16] weighted = { 0u };
+		for (int64 step = 0; step < steps; step++) {
+			const packed uint32[16] bytes = (packed uint32[16])simd_load(data + step * kAdlerLanes, 16);
+			earlier += sums;
+			sums += bytes;
+			weighted += bytes * weights;
+		}
+		b += (uint64)(steps * kAdlerLanes) * a + (uint64)kAdlerLanes * (uint64)simd_reduce_add(earlier) + (uint64)simd_reduce_add(weighted);
+		a += (uint64)simd_reduce_add(sums);
+		for (int64 i = steps * kAdlerLanes; i < run; i++) {
+			a += (uint64)data[i];
+			b += a;
+		}
+	}
+
+	void PutBigEndian32(Core::Array<uint8>& out, uint32 value) {
+		for (int32 shift = 24; shift >= 0; shift -= 8) out.Push((uint8)((value >> (uint32)shift) & 0xffu));
+	}
+
+	void PutLittleEndian32(Core::Array<uint8>& out, uint32 value) {
+		for (int32 shift = 0; shift < 32; shift += 8) out.Push((uint8)((value >> (uint32)shift) & 0xffu));
+	}
+
+	// The header's level field (FLEVEL) for a level: fastest, fast, default, best.
+	uint8 ZlibLevelFlags(int32 level) {
+		if (level <= kFastestLevel) return 0u;
+		if (level < kDefaultLevel) return 1u;
+		return level == kDefaultLevel ? 2u : 3u;
+	}
+
+	void ZlibCompress(const uint8* data, int64 size, int32 level, Core::Array<uint8>& out) {
+		const uint32 method = 0x78u; // DEFLATE with a 32 KiB window
+		uint32 flags = (uint32)ZlibLevelFlags(level) << 6;
+		flags += 31u - ((method << 8) | flags) % 31u;
+		out.Push((uint8)method);
+		out.Push((uint8)flags);
+		Deflate(data, size, level, out);
+		PutBigEndian32(out, Adler32(data, size));
+	}
+
+	// The header's extra flags (XFL): 2 for the best compression, 4 for the fastest.
+	uint8 GzipExtraFlags(int32 level) {
+		if (level >= kBestLevel) return 2u;
+		return level == kFastestLevel ? 4u : 0u;
+	}
+
+	void GzipCompress(const uint8* data, int64 size, int32 level, Core::Array<uint8>& out) {
+		const uint8[10] header = { 31u, 139u, 8u, 0u, 0u, 0u, 0u, 0u, GzipExtraFlags(level), kGzipUnknownSystem };
+		out.Append(&header[0], (int64)kGzipHeaderBytes);
+		Deflate(data, size, level, out);
+		PutLittleEndian32(out, Core::Crc32((const void*)data, size));
+		PutLittleEndian32(out, (uint32)(size & 0xffffffff));
+	}
+
+	// AddAdlerRun's sums thirty-two bytes a step, as two sixteen-lane halves in the AVX2 registers: only the lanes'
+	// totals matter, so the halves share the sums and the earlier sums, and each has its own weights.
+	const int64 kAdlerWideStep = 32;
+
+	void AddAdlerRunWide(const uint8* data, int64 run, uint64& a, uint64& b) {
+		const int64 steps = run / kAdlerWideStep;
+		const packed uint32[16] firstWeights = { 32u, 31u, 30u, 29u, 28u, 27u, 26u, 25u, 24u, 23u, 22u, 21u, 20u, 19u, 18u, 17u };
+		const packed uint32[16] secondWeights = { 16u, 15u, 14u, 13u, 12u, 11u, 10u, 9u, 8u, 7u, 6u, 5u, 4u, 3u, 2u, 1u };
+		packed uint32[16] sums = { 0u };
+		packed uint32[16] earlier = { 0u };
+		packed uint32[16] weighted = { 0u };
+		for (int64 step = 0; step < steps; step++) {
+			const uint8* at = data + step * kAdlerWideStep;
+			const packed uint32[16] first = (packed uint32[16])simd_load(at, 16);
+			const packed uint32[16] second = (packed uint32[16])simd_load(at + kAdlerLanes, 16);
+			earlier += sums;
+			sums += first + second;
+			weighted += first * firstWeights + second * secondWeights;
+		}
+		b += (uint64)(steps * kAdlerWideStep) * a + (uint64)kAdlerWideStep * (uint64)simd_reduce_add(earlier) + (uint64)simd_reduce_add(weighted);
+		a += (uint64)simd_reduce_add(sums);
+		for (int64 i = steps * kAdlerWideStep; i < run; i++) {
+			a += (uint64)data[i];
+			b += a;
+		}
+	}
+
+	uint32 BigEndian32(const uint8* at) { return ((uint32)at[0] << 24) | ((uint32)at[1] << 16) | ((uint32)at[2] << 8) | (uint32)at[3]; }
+	uint32 LittleEndian32(const uint8* at) { return (uint32)at[0] | ((uint32)at[1] << 8) | ((uint32)at[2] << 16) | ((uint32)at[3] << 24); }
+
+	InflateResult Failure(const char* why, int64 consumed) {
+		InflateResult result;
+		result.ok = false;
+		result.consumed = consumed;
+		result.error = why;
+		return result;
+	}
+
+	// The DEFLATE stream from `start` on, then a checksum of what it wrote whose bytes `trailer` checks.
+	InflateResult ZlibDecompress(const uint8* data, int64 size, Core::Array<uint8>& out) {
+		if (size < (int64)(kZlibHeaderBytes + kZlibTrailerBytes)) return Failure("too short for a zlib stream", 0);
+		const uint32 method = (uint32)data[0];
+		const uint32 flags = (uint32)data[1];
+		if ((method & 15u) != 8u || (method >> 4) > 7u) return Failure("not a DEFLATE zlib stream", 0);
+		if (((method << 8) | flags) % 31u != 0u) return Failure("a damaged zlib header", 0);
+		if ((flags & 32u) != 0u) return Failure("a zlib stream with a preset dictionary", 0);
+		const int64 start = out.Count();
+		InflateResult inner = Inflate(data + kZlibHeaderBytes, size - (int64)kZlibHeaderBytes, out);
+		const int64 end = (int64)kZlibHeaderBytes + inner.consumed;
+		if (!inner.ok) return Failure(inner.error, end);
+		if (end + (int64)kZlibTrailerBytes > size) return Failure("the zlib stream ends before its checksum", end);
+		if (BigEndian32(data + end) != Adler32(out.Data() + start, out.Count() - start)) return Failure("the zlib checksum does not match", end);
+		InflateResult result;
+		result.ok = true;
+		result.consumed = end + (int64)kZlibTrailerBytes;
+		return result;
+	}
+
+	// Past a zero-terminated field from `at`: its end, or -1 when the input ends first.
+	int64 PastText(const uint8* data, int64 size, int64 at) {
+		while (at < size && data[at] != 0u) at++;
+		return at < size ? at + 1 : -1;
+	}
+
+	// Where a gzip member's DEFLATE stream starts, or -1 when its header is damaged or short.
+	int64 GzipBodyStart(const uint8* data, int64 size) {
+		if (size < (int64)kGzipHeaderBytes || data[0] != 31u || data[1] != 139u || data[2] != 8u) return -1;
+		const uint8 flags = data[3];
+		int64 at = (int64)kGzipHeaderBytes;
+		if ((flags & kGzipExtra) != 0u) {
+			if (at + 2 > size) return -1;
+			at += 2 + ((int64)data[at] | ((int64)data[at + 1] << 8));
+		}
+		if ((flags & kGzipName) != 0u && at >= 0) at = PastText(data, size, at);
+		if ((flags & kGzipComment) != 0u && at >= 0) at = PastText(data, size, at);
+		if ((flags & kGzipHeaderCrc) != 0u && at >= 0) at += 2;
+		return at >= 0 && at <= size ? at : -1;
+	}
+
+	InflateResult GzipDecompress(const uint8* data, int64 size, Core::Array<uint8>& out) {
+		const int64 body = GzipBodyStart(data, size);
+		if (body < 0) return Failure("not a gzip member, or its header is damaged", 0);
+		const int64 start = out.Count();
+		InflateResult inner = Inflate(data + body, size - body, out);
+		const int64 end = body + inner.consumed;
+		if (!inner.ok) return Failure(inner.error, end);
+		if (end + (int64)kGzipTrailerBytes > size) return Failure("the gzip member ends before its checksum", end);
+		const int64 written = out.Count() - start;
+		if (LittleEndian32(data + end) != Core::Crc32((const void*)(out.Data() + start), written)) return Failure("the gzip checksum does not match", end);
+		if (LittleEndian32(data + end + 4) != (uint32)(written & 0xffffffff)) return Failure("the gzip member's size does not match", end);
+		InflateResult result;
+		result.ok = true;
+		result.consumed = end + (int64)kGzipTrailerBytes;
+		return result;
+	}
+}

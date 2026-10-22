@@ -1065,6 +1065,14 @@ if (got.ok) printf("%d\n", got.response.status);
   timeoutMs)` and `Post(url, contentType, body, timeoutMs)` take an `http://host[:port]/path?query` URL
   (`ParseUrl`; an IPv6 host in brackets). A `FetchResult` is `ok` with the `response`, or not, with `error`.
 
+- **Content codings** (`coding.ch`; RFC 9110 section 8.4): `CompressResponse(request, response, level)` gzips the
+  body (Compression section 19) when the request's Accept-Encoding takes gzip (`AcceptsCoding`: listed, or `*`, without
+  q=0), the body is `kCompressFromBytes` (1 KiB) or more, its type compresses (`CompressibleType`: text, JSON,
+  JavaScript, XML, SVG, WebAssembly, `+json` and `+xml`), it has no coding yet, and the result is smaller; it sets
+  Content-Encoding and Vary. `DecodeBody(headers, body, why)` decodes a received gzip or deflate body (a zlib stream,
+  or raw DEFLATE as some servers send) in place and drops the header; false for another coding or a damaged body,
+  which it leaves as it came.
+
 - **WebSockets** (`websocket.ch`, `frames.ch`; RFC 6455): in a handler, `Http::AcceptWebSocket(request, response,
   session)` answers the handshake (101; 400 for a request that is not one, 426 for another version) and the session
   runs with the connection's `WebSocket` on the connection's thread once the 101 is out; the connection closes when
@@ -1261,13 +1269,43 @@ C4 sample `plugins/gpu/samples/c4` with the toolchain and captures one triggered
 
 ---
 
-## 19. Tests
+## 19. Compression (`Compression/`)
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 68 files, 600 tests (array, list, initlist,
+**Status:** **Implemented**. Plain C4, checked against streams zlib wrote and read back by zlib.
+
+| Header | Gives |
+|---|---|
+| `inflate.ch` | `Compression::Inflate(data, size, out)`: a raw DEFLATE stream (RFC 1951) appended to `out`; an `InflateResult` (`ok`, `consumed`: the input bytes the stream took, `error`: why it failed) |
+| `deflate.ch` | `Compression::Deflate(data, size, level, out)`: `size` bytes as a raw DEFLATE stream appended to `out`. Levels as zlib's: `kStoreLevel` (0) stores, `kFastestLevel` (1) to `kBestLevel` (9), `kDefaultLevel` (6); each block is stored, fixed-coded or given codes of its own, whichever is smallest |
+| `zlib.ch` | `ZlibCompress` / `ZlibDecompress` (RFC 1950: a two-byte header, the DEFLATE stream, the Adler-32 of the data), `GzipCompress` / `GzipDecompress` (RFC 1952: one member; reading takes the optional name, comment, extra field and header CRC, and `consumed` says where a next member starts), `Adler32(data, count)` |
+
+Reading rejects what zlib rejects: a reserved block type, a stored length its complement does not match, an
+over-subscribed code, a distance back past the start of the output, a stream cut short, and (zlib, gzip) a damaged
+header, a preset dictionary, a checksum or size that does not match. Nothing is read past `size`.
+
+How fast, on one core of the development machine against zlib-ng 2.2.4 (Python's zlib, itself faster than zlib):
+reading runs at 850 MB/s on text and 1.8 GB/s on match-heavy data (zlib-ng: 650 MB/s and 960 MB/s). Writing is
+level with zlib-ng at the middle levels, ahead on data that compresses little (incompressible data at level 1:
+365 MB/s against 103; past 64 searches that find nothing, the fast levels search every second position, then every
+third, as LZ4 does) and at level 9, and behind at the fastest levels on text, where zlib-ng codes with the fixed codes
+only (its level 1 is a fifth larger). Adler-32 runs 16 bytes a step, 32 with AVX2 where the processor has it (23 GB/s).
+Levels 1 and 2 find matches in a hash table of two positions a bucket, the others along hash chains, both keyed by
+four bytes (zlib-ng's choice).
+
+Covered by `Bedrock/Tests/compression_tests.cf`: streams zlib wrote (stored, fixed and dynamic blocks, a zlib stream,
+a gzip member with a name), every cut of a stream, damaged blocks, checksums, sizes and headers, a gzip member with an
+extra field, a comment and a header CRC, the Adler-32 check values, every level's output of seven inputs (nothing, one
+byte, sentences, runs, noise, a mix, matches 32 KiB back) read back raw and wrapped, and the match finder's slide.
+
+---
+
+## 20. Tests
+
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 70 files, 618 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -1280,7 +1318,7 @@ The exit code is the number of failed assertions. The `GC` namespace is covered 
 
 ---
 
-## 20. Missing versus the plan
+## 21. Missing versus the plan
 
 From LongTermPlan.txt items 3 and 7 and roadmap item 3:
 

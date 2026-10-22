@@ -31,15 +31,17 @@ namespace Core
 
 	template<T>
 	public void Array::Init(InitList<T> items) {
-		Reserve((int64)items.size);
-		for (int64 k = 0; k < (int64)items.size; ++k) new (&data[k]) T(items[k]);
-		count = (int64)items.size;
+		const int64 n = (int64)items.size;
+		Reserve(n);
+		T* to = data;
+		for (int64 k = 0; k < n; ++k) new (&to[k]) T(items[k]);
+		count = n;
 	}
 
 	template<T>
 	public void Array::CopyFrom(const Array<T>& other) {
 		Reserve(other.count);
-		for (int64 k = 0; k < other.count; ++k) new (&data[k]) T(other.data[k]);
+		CopyElements(data, other.data, other.count);
 		count = other.count;
 	}
 
@@ -51,7 +53,7 @@ namespace Core
 
 	template<T>
 	public void Array::Clear() {
-		for (int64 k = 0; k < count; ++k) destroy(&data[k]);
+		DestroyElements(data, 0, count);
 		count = 0;
 	}
 
@@ -97,7 +99,7 @@ namespace Core
 			return;
 		}
 		if (count + n > capacity) Grow(count + n);
-		for (int64 k = 0; k < n; ++k) new (&data[count + k]) T(items[k]);
+		CopyElements(data + count, items, n);
 		count += n;
 	}
 
@@ -114,7 +116,7 @@ namespace Core
 		if (first < 0) first = 0;
 		if (end > count) end = count;
 		if (first >= end) return;
-		for (int64 k = first; k < end; ++k) destroy(&data[k]);
+		DestroyElements(data, first, end);
 		memmove((void*)&data[first], (void*)&data[end], (uint64)((count - end) * (int64)sizeof(T)));
 		count -= end - first;
 	}
@@ -132,8 +134,8 @@ namespace Core
 	public void Array::Resize(int64 newCount) {
 		if (newCount < 0) newCount = 0;
 		Reserve(newCount);
-		for (int64 k = count; k < newCount; ++k) new (&data[k]) T();
-		for (int64 k = newCount; k < count; ++k) destroy(&data[k]);
+		CreateElements(data, count, newCount);
+		DestroyElements(data, newCount, count);
 		count = newCount;
 	}
 
@@ -158,6 +160,7 @@ namespace Core
 
 	template<T>
 	public void Array::Reverse() {
-		for (int64 i = 0, j = count - 1; i < j; ++i, --j) SwapElements(data, i, j);
+		T* items = data;
+		for (int64 i = 0, j = count - 1; i < j; ++i, --j) SwapElements(items, i, j);
 	}
 }

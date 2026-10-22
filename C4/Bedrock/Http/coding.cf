@@ -1,0 +1,103 @@
+include "coding.ch"
+
+namespace Http
+{
+	const char* kContentEncoding = "Content-Encoding";
+
+	// One entry of a comma-separated list: its name, and whether its parameters give q=0 (refused).
+	struct ListEntry
+	{
+		public Core::StringView name;
+		public bool refused;
+	}
+
+	ListEntry ParseEntry(Core::StringView entry) {
+		ListEntry parsed;
+		const int64 semicolon = entry.IndexOf(';', 0);
+		parsed.name = (semicolon < 0 ? entry : entry.Substring(0, semicolon)).Trimmed();
+		if (semicolon < 0) return parsed;
+		Core::StringView parameters = entry.Substring(semicolon + 1, entry.ByteLength() - semicolon - 1).Trimmed();
+		if (parameters.ByteLength() < 2 || (parameters.ByteAt(0) != 'q' && parameters.ByteAt(0) != 'Q') || parameters.ByteAt(1) != '=') return parsed;
+		Core::StringView weight = parameters.Substring(2, parameters.ByteLength() - 2).Trimmed();
+		parsed.refused = true;
+		for (int64 i = 0; i < weight.ByteLength(); ++i)
+			if (weight.ByteAt(i) >= '1' && weight.ByteAt(i) <= '9') parsed.refused = false;
+		return parsed;
+	}
+
+	bool AcceptsCoding(const Core::String* accepted, const char* coding) {
+		if (!accepted) return false;
+		Core::StringView text = accepted->View();
+		bool viaStar = false;
+		int64 start = 0;
+		while (start <= text.ByteLength()) {
+			const int64 comma = text.IndexOf(',', start);
+			const int64 end = comma < 0 ? text.ByteLength() : comma;
+			const ListEntry entry = ParseEntry(text.Substring(start, end - start));
+			if (EqualsIgnoringCase(entry.name, Core::StringView(coding))) return !entry.refused;
+			if (entry.name == Core::StringView("*")) viaStar = !entry.refused;
+			start = end + 1;
+		}
+		return viaStar;
+	}
+
+	bool CompressibleType(const Core::String* contentType) {
+		if (!contentType) return false;
+		Core::StringView type = contentType->View();
+		const int64 semicolon = type.IndexOf(';', 0);
+		if (semicolon >= 0) type = type.Substring(0, semicolon);
+		type = type.Trimmed();
+		if (type.ByteLength() >= 5 && EqualsIgnoringCase(type.Substring(0, 5), Core::StringView("text/"))) return true;
+		const char*[6] compressible = { "application/json", "application/javascript", "application/xml", "image/svg+xml",
+			"application/wasm", "application/x-ndjson" };
+		for (int32 i = 0; i < 6; ++i)
+			if (EqualsIgnoringCase(type, Core::StringView(compressible[i]))) return true;
+		return type.EndsWith(Core::StringView("+json")) || type.EndsWith(Core::StringView("+xml"));
+	}
+
+	bool CompressResponse(const Request& request, Response& response, int32 level) {
+		if (response.body.Count() < kCompressFromBytes || response.headers.Has(Core::StringView(kContentEncoding))) return false;
+		if (!AcceptsCoding(request.headers.Find(Core::StringView("Accept-Encoding")), "gzip")) return false;
+		if (!CompressibleType(response.headers.Find(Core::StringView("Content-Type")))) return false;
+		Core::Array<uint8> compressed;
+		Compression::GzipCompress(response.body.Data(), response.body.Count(), level, compressed);
+		if (compressed.Count() >= response.body.Count()) return false;
+		response.body.Swap(compressed);
+		response.headers.Set(Core::StringView(kContentEncoding), Core::StringView("gzip"));
+		response.headers.Add(Core::StringView("Vary"), Core::StringView("Accept-Encoding"));
+		return true;
+	}
+
+	// The decoded body: a gzip member, or for deflate a zlib stream (RFC 9110) or, as some servers send, a raw one.
+	Compression::InflateResult Decode(Core::StringView coding, const Core::Array<uint8>& body, Core::Array<uint8>& out) {
+		if (EqualsIgnoringCase(coding, Core::StringView("gzip")) || EqualsIgnoringCase(coding, Core::StringView("x-gzip")))
+			return Compression::GzipDecompress(body.Data(), body.Count(), out);
+		Compression::InflateResult zlib = Compression::ZlibDecompress(body.Data(), body.Count(), out);
+		if (zlib.ok) return zlib;
+		out.Clear();
+		return Compression::Inflate(body.Data(), body.Count(), out);
+	}
+
+	bool DecodeBody(Headers& headers, Core::Array<uint8>& body, Core::String& why) {
+		const Core::String* coding = headers.Find(Core::StringView(kContentEncoding));
+		if (!coding || EqualsIgnoringCase(coding->View().Trimmed(), Core::StringView("identity"))) return true;
+		Core::StringView name = coding->View().Trimmed();
+		const bool known = EqualsIgnoringCase(name, Core::StringView("gzip")) || EqualsIgnoringCase(name, Core::StringView("x-gzip")) ||
+			EqualsIgnoringCase(name, Core::StringView("deflate"));
+		if (!known) {
+			why = Core::String("the body's coding is not one this client reads: ");
+			why.Append(name);
+			return false;
+		}
+		Core::Array<uint8> decoded;
+		Compression::InflateResult result = Decode(name, body, decoded);
+		if (!result.ok) {
+			why = Core::String("the compressed body is damaged: ");
+			why.Append(result.error);
+			return false;
+		}
+		body.Swap(decoded);
+		headers.Remove(Core::StringView(kContentEncoding));
+		return true;
+	}
+}

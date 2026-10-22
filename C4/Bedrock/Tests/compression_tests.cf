@@ -1,0 +1,265 @@
+// Compression: DEFLATE, zlib and gzip against streams zlib wrote, damaged and cut-off streams, and every level's output
+// read back.
+
+include "bedrock.ch"
+
+// Python's zlib: "hello, hello, hello world" stored, with the fixed codes, as a zlib stream and as a gzip member named
+// hello.txt; the text below with codes of its own.
+const uint8[30] kStoredHello = { 1u, 25u, 0u, 230u, 255u, 104u, 101u, 108u, 108u, 111u, 44u, 32u, 104u, 101u, 108u, 108u, 111u, 44u, 32u, 104u, 101u, 108u, 108u, 111u, 32u, 119u, 111u, 114u, 108u, 100u };
+const uint8[17] kFixedHello = { 203u, 72u, 205u, 201u, 201u, 215u, 81u, 200u, 64u, 162u, 20u, 202u, 243u, 139u, 114u, 82u, 0u };
+const uint8[80] kDynamicText = { 181u, 203u, 209u, 1u, 128u, 16u, 20u, 70u, 225u, 85u, 254u, 22u, 104u, 150u, 30u, 44u, 64u, 17u, 21u, 55u, 132u, 152u, 190u, 187u, 68u, 207u, 231u, 59u, 194u, 106u, 196u, 226u, 214u, 19u, 42u, 81u, 11u, 48u, 244u, 226u, 40u, 254u, 206u, 160u, 170u, 19u, 30u, 206u, 151u, 28u, 29u, 27u, 237u, 51u, 196u, 111u, 120u, 145u, 236u, 124u, 135u, 98u, 212u, 220u, 99u, 97u, 92u, 213u, 156u, 134u, 14u, 184u, 92u, 44u, 148u, 248u, 221u, 243u, 244u, 1u };
+const uint8[23] kZlibHello = { 120u, 156u, 203u, 72u, 205u, 201u, 201u, 215u, 81u, 200u, 64u, 162u, 20u, 202u, 243u, 139u, 114u, 82u, 0u, 116u, 135u, 9u, 29u };
+const uint8[45] kGzipNamedHello = { 31u, 139u, 8u, 8u, 0u, 0u, 0u, 0u, 2u, 255u, 104u, 101u, 108u, 108u, 111u, 46u, 116u, 120u, 116u, 0u, 203u, 72u, 205u, 201u, 201u, 215u, 81u, 200u, 64u, 162u, 20u, 202u, 243u, 139u, 114u, 82u, 0u, 150u, 101u, 109u, 253u, 25u, 0u, 0u, 0u };
+
+const char* kHello = "hello, hello, hello world";
+
+Core::String DynamicTextSource() {
+	Core::StringBuilder text;
+	for (int32 i = 0; i < 3; ++i) text.Append("The quick brown fox jumps over the lazy dog. ");
+	text.Append("Pack my box with five dozen liquor jugs!");
+	return text.ToString();
+}
+
+bool HoldsText(const Core::Array<uint8>& bytes, int64 from, const char* text, int64 length) {
+	if (bytes.Count() - from != length) return false;
+	for (int64 i = 0; i < length; ++i)
+		if (bytes[from + i] != (uint8)text[i]) return false;
+	return true;
+}
+
+bool SameBytes(const Core::Array<uint8>& a, const Core::Array<uint8>& b) {
+	if (a.Count() != b.Count()) return false;
+	for (int64 i = 0; i < a.Count(); ++i)
+		if (a[i] != b[i]) return false;
+	return true;
+}
+
+// The inputs every level compresses: nothing, one byte, sentences, runs, noise, a mix, long matches far back, and more
+// than a stored block holds.
+Core::Array<Core::Array<uint8>> RoundTripInputs() {
+	Core::Array<Core::Array<uint8>> inputs;
+	Core::Random random(12345u);
+	Core::Array<uint8> none;
+	inputs.Push(none);
+	Core::Array<uint8> one;
+	one.Push(42u);
+	inputs.Push(one);
+	Core::String sentences = DynamicTextSource();
+	Core::Array<uint8> text;
+	for (int32 i = 0; i < 200; ++i) text.Append((const uint8*)sentences.CStr(), sentences.ByteLength());
+	inputs.Push(text);
+	Core::Array<uint8> runs;
+	for (int32 i = 0; i < 3000; ++i) for (int64 k = random.Range(1, 600); k > 0; --k) runs.Push((uint8)(i % 3));
+	inputs.Push(runs);
+	Core::Array<uint8> noise;
+	for (int32 i = 0; i < 150000; ++i) noise.Push((uint8)random.Next32());
+	inputs.Push(noise);
+	Core::Array<uint8> mixed;
+	for (int32 i = 0; i < 40000; ++i) mixed.Push(random.Chance(0.8) ? (uint8)(97 + random.Range(0, 4)) : (uint8)random.Next32());
+	inputs.Push(mixed);
+	Core::Array<uint8> far;
+	for (int32 i = 0; i < 32700; ++i) far.Push((uint8)random.Next32());
+	for (int32 i = 0; i < 1000; ++i) far.Push(far[i]);
+	inputs.Push(far);
+	return inputs;
+}
+
+[test("compression")]
+class CompressionTests {
+	[test("inflate.stored_fixed_and_dynamic")]
+	public static void TestInflateKnownStreams() {
+		Core::Array<uint8> out;
+		Compression::InflateResult stored = Compression::Inflate(&kStoredHello[0], 30, out);
+		assert_true(stored.ok && stored.consumed == 30 && HoldsText(out, 0, kHello, 25), "a stored block");
+		Core::Array<uint8> fixed;
+		Compression::InflateResult fixedResult = Compression::Inflate(&kFixedHello[0], 17, fixed);
+		assert_true(fixedResult.ok && fixedResult.consumed == 17 && HoldsText(fixed, 0, kHello, 25), "the fixed codes");
+		Core::String source = DynamicTextSource();
+		Core::Array<uint8> dynamic;
+		Compression::InflateResult dynamicResult = Compression::Inflate(&kDynamicText[0], 80, dynamic);
+		assert_true(dynamicResult.ok && dynamicResult.consumed == 80 && HoldsText(dynamic, 0, source.CStr(), source.ByteLength()), "codes of its own");
+	}
+
+	[test("inflate.appends")]
+	public static void TestInflateAppends() {
+		Core::Array<uint8> out;
+		out.Push(7u);
+		out.Push(8u);
+		Compression::InflateResult result = Compression::Inflate(&kFixedHello[0], 17, out);
+		assert_true(result.ok && out[0] == 7u && out[1] == 8u && HoldsText(out, 2, kHello, 25), "after what the array held");
+	}
+
+	[test("inflate.cut_off_and_damaged")]
+	public static void TestInflateErrors() {
+		bool everyCutFails = true;
+		for (int64 length = 0; length < 80; ++length) {
+			Core::Array<uint8> out;
+			if (Compression::Inflate(&kDynamicText[0], length, out).ok) everyCutFails = false;
+		}
+		assert_true(everyCutFails, "a stream cut short anywhere fails");
+		const uint8[1] reserved = { 7u };
+		Core::Array<uint8> out;
+		Compression::InflateResult bad = Compression::Inflate(&reserved[0], 1, out);
+		assert_true(!bad.ok && bad.error != nullptr, "the reserved block type");
+		uint8[30] mismatched;
+		for (int32 i = 0; i < 30; ++i) mismatched[i] = kStoredHello[i];
+		mismatched[3] = 0u;
+		assert_true(!Compression::Inflate(&mismatched[0], 30, out).ok, "a stored length its complement does not match");
+		// A fixed block whose first symbol is a match: length 3 (code 257, 0000001), distance 1 (code 0, 00000).
+		const uint8[3] tooFar = { 3u, 2u, 0u };
+		assert_true(!Compression::Inflate(&tooFar[0], 3, out).ok, "a distance back past the start");
+	}
+
+	[test("zlib.known_and_damaged")]
+	public static void TestZlib() {
+		Core::Array<uint8> out;
+		Compression::InflateResult result = Compression::ZlibDecompress(&kZlibHello[0], 23, out);
+		assert_true(result.ok && result.consumed == 23 && HoldsText(out, 0, kHello, 25), "a zlib stream");
+		uint8[23] damaged;
+		for (int32 i = 0; i < 23; ++i) damaged[i] = kZlibHello[i];
+		damaged[22] ^= 1u;
+		Core::Array<uint8> ignored;
+		assert_true(!Compression::ZlibDecompress(&damaged[0], 23, ignored).ok, "a damaged checksum");
+		damaged[22] ^= 1u;
+		damaged[1] ^= 1u;
+		assert_true(!Compression::ZlibDecompress(&damaged[0], 23, ignored).ok, "a damaged header");
+		const uint8[6] dictionary = { 120u, 187u, 0u, 0u, 0u, 1u };
+		assert_true(!Compression::ZlibDecompress(&dictionary[0], 6, ignored).ok, "a preset dictionary");
+		assert_eq(1, (int64)Compression::Adler32(nullptr, 0), "the Adler-32 of nothing");
+		assert_eq(0x11E60398, (int64)Compression::Adler32((const uint8*)"Wikipedia", 9), "the Adler-32 of Wikipedia");
+	}
+
+	[test("zlib.adler32_long")]
+	public static void TestAdler32Long() {
+		Core::Array<uint8> bytes;
+		for (int32 i = 0; i < 20000; ++i) bytes.Push((uint8)255u);
+		uint32 a = 1u;
+		uint32 b = 0u;
+		for (int32 i = 0; i < 20000; ++i) {
+			a = (a + 255u) % 65521u;
+			b = (b + a) % 65521u;
+		}
+		assert_eq((int64)((b << 16) | a), (int64)Compression::Adler32(bytes.Data(), bytes.Count()), "past the sums' 32 bits");
+	}
+
+	[test("zlib.adler32_forms_agree")]
+	public static void TestAdler32Forms() {
+		Core::Random random(31u);
+		Core::Array<uint8> bytes;
+		for (int32 i = 0; i < 5552; ++i) bytes.Push((uint8)random.Next32());
+		const bool wide = Platform::HasProcessorFeature(Platform::ProcessorFeature::Avx2);
+		int32 differ = 0;
+		for (int64 run = 0; run <= 5552; run += run < 100 ? 1 : 97) {
+			uint64 a = 1u;
+			uint64 b = 0u;
+			for (int64 i = 0; i < run; ++i) {
+				a += (uint64)bytes[i];
+				b += a;
+			}
+			uint64 narrowA = 1u;
+			uint64 narrowB = 0u;
+			Compression::AddAdlerRun(bytes.Data(), run, narrowA, narrowB);
+			if (narrowA != a || narrowB != b) differ++;
+			if (!wide) continue;
+			uint64 wideA = 1u;
+			uint64 wideB = 0u;
+			Compression::AddAdlerRunWide(bytes.Data(), run, wideA, wideB);
+			if (wideA != a || wideB != b) differ++;
+		}
+		assert_eq(0, differ, "each form's sums are a byte at a time's, at every length");
+	}
+
+	[test("gzip.known_and_damaged")]
+	public static void TestGzip() {
+		Core::Array<uint8> out;
+		Compression::InflateResult result = Compression::GzipDecompress(&kGzipNamedHello[0], 45, out);
+		assert_true(result.ok && result.consumed == 45 && HoldsText(out, 0, kHello, 25), "a member with a name");
+		uint8[45] damaged;
+		for (int32 i = 0; i < 45; ++i) damaged[i] = kGzipNamedHello[i];
+		damaged[38] ^= 1u;
+		Core::Array<uint8> ignored;
+		assert_true(!Compression::GzipDecompress(&damaged[0], 45, ignored).ok, "a damaged CRC-32");
+		damaged[38] ^= 1u;
+		damaged[41] ^= 1u;
+		assert_true(!Compression::GzipDecompress(&damaged[0], 45, ignored).ok, "a damaged size");
+		damaged[41] ^= 1u;
+		damaged[2] = 7u;
+		assert_true(!Compression::GzipDecompress(&damaged[0], 45, ignored).ok, "another method");
+	}
+
+	[test("gzip.optional_fields")]
+	public static void TestGzipOptionalFields() {
+		Core::Array<uint8> member;
+		const uint8[10] header = { 31u, 139u, 8u, 22u, 0u, 0u, 0u, 0u, 0u, 255u };   // FEXTRA, FCOMMENT, FHCRC
+		member.Append(&header[0], 10);
+		const uint8[5] extra = { 3u, 0u, 1u, 2u, 3u };
+		member.Append(&extra[0], 5);
+		member.Append((const uint8*)"a comment", 10);
+		member.Push(0u);
+		member.Push(0u);   // the header's CRC-16, which nothing checks
+		Core::Array<uint8> body;
+		Compression::GzipCompress((const uint8*)kHello, 25, 6, body);
+		member.Append(body.Data() + 10, body.Count() - 10);
+		Core::Array<uint8> out;
+		Compression::InflateResult result = Compression::GzipDecompress(member.Data(), member.Count(), out);
+		assert_true(result.ok && result.consumed == member.Count() && HoldsText(out, 0, kHello, 25), "an extra field, a comment and a header CRC");
+	}
+
+	[test("deflate.every_level_reads_back")]
+	public static void TestDeflateRoundTrips() {
+		Core::Array<Core::Array<uint8>> inputs = RoundTripInputs();
+		int32 failures = 0;
+		for (int64 n = 0; n < inputs.Count(); ++n)
+			for (int32 level = Compression::kStoreLevel; level <= Compression::kBestLevel; ++level) {
+				Core::Array<uint8> compressed;
+				Compression::Deflate(inputs[n].Data(), inputs[n].Count(), level, compressed);
+				Core::Array<uint8> back;
+				Compression::InflateResult result = Compression::Inflate(compressed.Data(), compressed.Count(), back);
+				if (!result.ok || result.consumed != compressed.Count() || !SameBytes(back, inputs[n])) failures++;
+			}
+		assert_eq(0, failures, "each input at each level inflates to itself");
+	}
+
+	[test("deflate.compresses")]
+	public static void TestDeflateCompresses() {
+		Core::Array<Core::Array<uint8>> inputs = RoundTripInputs();
+		Core::Array<uint8> text;
+		Compression::Deflate(inputs[2].Data(), inputs[2].Count(), Compression::kDefaultLevel, text);
+		assert_true(text.Count() * 20 < inputs[2].Count(), "repeated sentences shrink twentyfold");
+		Core::Array<uint8> noise;
+		Compression::Deflate(inputs[4].Data(), inputs[4].Count(), Compression::kBestLevel, noise);
+		assert_true(noise.Count() <= inputs[4].Count() + inputs[4].Count() / 1000 + 16, "noise is stored, barely larger");
+		Core::Array<uint8> fastest;
+		Compression::Deflate(inputs[5].Data(), inputs[5].Count(), Compression::kFastestLevel, fastest);
+		Core::Array<uint8> best;
+		Compression::Deflate(inputs[5].Data(), inputs[5].Count(), Compression::kBestLevel, best);
+		assert_true(best.Count() <= fastest.Count(), "the best level is no larger than the fastest");
+	}
+
+	[test("zlib_and_gzip.compress_reads_back")]
+	public static void TestWrappedRoundTrips() {
+		Core::Array<Core::Array<uint8>> inputs = RoundTripInputs();
+		int32 failures = 0;
+		for (int64 n = 0; n < inputs.Count(); ++n)
+			for (int32 level = Compression::kStoreLevel; level <= Compression::kBestLevel; level += 3) {
+				Core::Array<uint8> zlib;
+				Compression::ZlibCompress(inputs[n].Data(), inputs[n].Count(), level, zlib);
+				Core::Array<uint8> zlibBack;
+				if (!Compression::ZlibDecompress(zlib.Data(), zlib.Count(), zlibBack).ok || !SameBytes(zlibBack, inputs[n])) failures++;
+				if ((((uint32)zlib[0] << 8) | (uint32)zlib[1]) % 31u != 0u) failures++;
+				Core::Array<uint8> gzip;
+				Compression::GzipCompress(inputs[n].Data(), inputs[n].Count(), level, gzip);
+				Core::Array<uint8> gzipBack;
+				if (!Compression::GzipDecompress(gzip.Data(), gzip.Count(), gzipBack).ok || !SameBytes(gzipBack, inputs[n])) failures++;
+			}
+		assert_eq(0, failures, "zlib streams and gzip members read back");
+	}
+
+	[test("deflate.window_slides")]
+	public static void TestWindowSlides() {
+		uint32[5] entries = { 0u, 5u, 10u, 11u, 20u };
+		Compression::SlideEntries(&entries[0], 5, 10u);
+		assert_true(entries[0] == 0u && entries[1] == 0u && entries[2] == 0u && entries[3] == 1u && entries[4] == 10u,
+			"entries move down, those at or below the shift are gone");
+	}
+}

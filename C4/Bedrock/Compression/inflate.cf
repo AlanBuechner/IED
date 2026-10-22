@@ -1,0 +1,464 @@
+include "inflate.ch"
+
+namespace Compression
+{
+	const int32 kTableBits = 11;
+	const int32 kTableSize = 2048;
+	const int32 kMaxCodeBits = 15;
+	const int32 kLiteralSymbols = 288;
+	const int32 kDistanceSymbols = 32;
+	const int32 kEndOfBlock = 256;
+	// The most bits one length and distance take: a 15-bit code, 5 extra bits, a 15-bit code, 13 extra bits.
+	const int32 kBitsPerMatch = 48;
+	// The most a match writes, and the slack a wide copy writes past it.
+	const int64 kMostMatchBytes = 258;
+	const int64 kCopySlack = 32;
+	// The fast loop reads whole words: it stops this many bytes before the input's end.
+	const int64 kFastInputMargin = 8;
+	// The room the fast loop is given each time it runs out.
+	const int64 kFastRunway = 32768;
+	const char* kEndsInsideBlock = "the stream ends inside a block";
+	// What the output is first given room for, as a multiple of the input: most data DEFLATE compresses shrinks to a
+	// fourth or so, so the output then grows once at most.
+	const int64 kExpectedRatio = 4;
+
+	const uint16[29] kLengthBase = { 3u, 4u, 5u, 6u, 7u, 8u, 9u, 10u, 11u, 13u, 15u, 17u, 19u, 23u, 27u, 31u, 35u, 43u, 51u, 59u, 67u, 83u, 99u, 115u, 131u, 163u, 195u, 227u, 258u };
+	const uint8[29] kLengthExtra = { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 2u, 2u, 2u, 2u, 3u, 3u, 3u, 3u, 4u, 4u, 4u, 4u, 5u, 5u, 5u, 5u, 0u };
+	const uint16[30] kDistanceBase = { 1u, 2u, 3u, 4u, 5u, 7u, 9u, 13u, 17u, 25u, 33u, 49u, 65u, 97u, 129u, 193u, 257u, 385u, 513u, 769u, 1025u, 1537u, 2049u, 3073u, 4097u, 6145u, 8193u, 12289u, 16385u, 24577u };
+	const uint8[30] kDistanceExtra = { 0u, 0u, 0u, 0u, 1u, 1u, 2u, 2u, 3u, 3u, 4u, 4u, 5u, 5u, 6u, 6u, 7u, 7u, 8u, 8u, 9u, 9u, 10u, 10u, 11u, 11u, 12u, 12u, 13u, 13u };
+	// The order a dynamic block lists the code-length code's lengths in.
+	const uint8[19] kCodeLengthOrder = { 16u, 17u, 18u, 0u, 8u, 7u, 9u, 6u, 10u, 5u, 11u, 4u, 12u, 3u, 13u, 2u, 14u, 1u, 15u };
+
+	// A decoded symbol as a table entry: the bits its code takes (0: decode it the slow way), the extra bits after it,
+	// what it is, and its value (a literal, or a length's or a distance's base).
+	const uint32 kKindLiteral = 0u;
+	const uint32 kKindLength = 1u;
+	const uint32 kKindEnd = 2u;
+	const uint32 kKindInvalid = 3u;
+
+	uint32 Entry(uint32 codeBits, uint32 extraBits, uint32 kind, uint32 value) { return codeBits | (extraBits << 8) | (kind << 12) | (value << 16); }
+	int32 EntryCodeBits(uint32 entry) { return (int32)(entry & 0xffu); }
+	int32 EntryExtraBits(uint32 entry) { return (int32)((entry >> 8) & 0xfu); }
+	uint32 EntryKind(uint32 entry) { return (entry >> 12) & 3u; }
+	int32 EntryValue(uint32 entry) { return (int32)(entry >> 16); }
+
+	// What a literal/length symbol decodes to, or a distance symbol, without its code's bits.
+	uint32 LiteralEntry(int32 symbol) {
+		if (symbol < 256) return Entry(0u, 0u, kKindLiteral, (uint32)symbol);
+		if (symbol == kEndOfBlock) return Entry(0u, 0u, kKindEnd, 0u);
+		if (symbol - 257 >= 29) return Entry(0u, 0u, kKindInvalid, 0u);
+		return Entry(0u, (uint32)kLengthExtra[symbol - 257], kKindLength, (uint32)kLengthBase[symbol - 257]);
+	}
+
+	uint32 DistanceEntry(int32 symbol) {
+		if (symbol >= 30) return Entry(0u, 0u, kKindInvalid, 0u);
+		return Entry(0u, (uint32)kDistanceExtra[symbol], kKindLength, (uint32)kDistanceBase[symbol]);
+	}
+
+	// A Huffman code (RFC 1951 section 3.2.2) for decoding: the next kTableBits bits as they arrive (least significant
+	// first) index `table`, whose entry is what the symbol decodes to (and its code's bits) for a code that short; a
+	// longer code is found from its canonical form.
+	struct HuffmanCode
+	{
+		public uint32[2048] table;
+		public int32[17] limit;        // one past the last code of each length, left-aligned in 16 bits
+		public int32[17] firstCode;
+		public int32[17] firstIndex;   // where each length's symbols start in `symbols`
+		public uint16[288] symbols;    // in code order
+		public bool distances;         // a distance code: its entries are DistanceEntry's
+	}
+
+	int32 ReverseBits(int32 value, int32 bits) {
+		int32 reversed = 0;
+		for (int32 i = 0; i < bits; i++) {
+			reversed = (reversed << 1) | (value & 1);
+			value >>= 1;
+		}
+		return reversed;
+	}
+
+	// From `count` symbols' code lengths (0: unused): false when they over-subscribe the code. An incomplete code is
+	// allowed (a distance code with one symbol is one).
+	bool BuildCode(HuffmanCode& code, const uint8* lengths, int32 count, bool distances) {
+		int32[17] sizes;
+		for (int32 i = 0; i < 17; i++) sizes[i] = 0;
+		for (int32 i = 0; i < count; i++) sizes[lengths[i]] += 1;
+		sizes[0] = 0;
+		int32 left = 1;
+		for (int32 len = 1; len <= kMaxCodeBits; len++) {
+			left = (left << 1) - sizes[len];
+			if (left < 0) return false;
+		}
+		int32[17] next;
+		int32 first = 0;
+		int32 index = 0;
+		for (int32 len = 1; len <= kMaxCodeBits; len++) {
+			code.firstCode[len] = first;
+			code.firstIndex[len] = index;
+			next[len] = first;
+			first += sizes[len];
+			code.limit[len] = first << (16 - len);
+			first <<= 1;
+			index += sizes[len];
+		}
+		code.limit[16] = 0x10000;
+		code.distances = distances;
+		for (int32 i = 0; i < kTableSize; i++) code.table[i] = 0u;
+		for (int32 symbol = 0; symbol < count; symbol++) {
+			const int32 len = (int32)lengths[symbol];
+			if (len == 0) continue;
+			const int32 value = next[len];
+			next[len] += 1;
+			code.symbols[code.firstIndex[len] + value - code.firstCode[len]] = (uint16)symbol;
+			if (len > kTableBits) continue;
+			const uint32 entry = (distances ? DistanceEntry(symbol) : LiteralEntry(symbol)) | (uint32)len;
+			for (int32 j = ReverseBits(value, len); j < kTableSize; j += 1 << len) code.table[j] = entry;
+		}
+		return true;
+	}
+
+	// The input as bits, least significant first, up to 63 at a time. Reading past the end gives zeros; Truncated says
+	// it happened.
+	struct BitReader
+	{
+		public const uint8* data;
+		public int64 size;
+		public int64 at;
+		public uint64 bits;
+		public int32 count;
+
+		public void Refill() {
+			if (at + 8 <= size) {
+				uint64 word = 0u;
+				memcpy((void*)&word, (void*)(data + at), 8u);
+				bits |= word << (uint64)count;
+				at += (int64)((63 - count) >> 3);
+				count |= 56;
+				return;
+			}
+			while (count <= 56) {
+				if (at < size) bits |= (uint64)data[at] << (uint64)count;
+				at += 1;
+				count += 8;
+			}
+		}
+
+		public bool Truncated() const { return at - (int64)(count >> 3) > size; }
+
+		public void Drop(int32 n) {
+			bits >>= (uint64)n;
+			count -= n;
+		}
+
+		// The next `n` bits, which the caller refilled for.
+		public int32 Peek(int32 n) const { return (int32)(bits & ((1u << (uint64)n) - 1u)); }
+
+		public int32 Take(int32 n) {
+			if (count < n) Refill();
+			const int32 value = Peek(n);
+			Drop(n);
+			return value;
+		}
+
+		public int64 Consumed() const { return at - (int64)(count >> 3); }
+
+		// The reader moved to whole byte `position` of the input, with nothing buffered.
+		public void Seek(int64 position) {
+			at = position;
+			bits = 0u;
+			count = 0;
+		}
+	}
+
+	// A code longer than kTableBits, from the next bits: its entry, with its bits; an invalid entry when no code of the
+	// code begins so.
+	uint32 DecodeSlow(uint64 bits, const HuffmanCode& code) {
+		const int32 k = ReverseBits((int32)(bits & 0xffffu), 16);
+		int32 len = kTableBits + 1;
+		while (len <= kMaxCodeBits && k >= code.limit[len]) len++;
+		if (len > kMaxCodeBits) return Entry(1u, 0u, kKindInvalid, 0u);
+		const int32 symbol = (int32)code.symbols[(k >> (16 - len)) - code.firstCode[len] + code.firstIndex[len]];
+		return (code.distances ? DistanceEntry(symbol) : LiteralEntry(symbol)) | (uint32)len;
+	}
+
+	// The next symbol's entry, its code's bits taken; the reader holds at least kMaxCodeBits bits.
+	uint32 Decode(BitReader& in, const HuffmanCode& code) {
+		uint32 entry = code.table[(int32)(in.bits & (uint64)(kTableSize - 1))];
+		if (EntryCodeBits(entry) == 0) entry = DecodeSlow(in.bits, code);
+		in.Drop(EntryCodeBits(entry));
+		return entry;
+	}
+
+	// The output of one stream, grown by doubling: `count` bytes written from `base` on, room for a match and a wide
+	// copy's slack after them whenever a symbol is decoded.
+	struct Output
+	{
+		public Core::Array<uint8>* array;
+		public int64 start;
+		public int64 count;
+		public uint8* base;
+		public int64 room;    // bytes `base` has
+
+		public void Ensure(int64 bytes) {
+			if (count + bytes <= room) return;
+			int64 grown = (start + count + bytes) * 2;
+			if (grown < 65536) grown = 65536;
+			array->Resize(grown);
+			base = array->Data() + start;
+			room = grown - start;
+		}
+	}
+
+	// A match: `length` bytes from `distance` back, to `to`, which may overlap what it writes; room was ensured for it
+	// and the slack a wide copy writes past it.
+	void CopyBytes(uint8* to, int32 distance, int32 length) {
+		const uint8* from = to - distance;
+		if (distance >= 16) {
+			for (int32 i = 0; i < length; i += 16) memcpy((void*)(to + i), (void*)(from + i), 16u);
+		}
+		else if (distance >= 8) {
+			for (int32 i = 0; i < length; i += 8) memcpy((void*)(to + i), (void*)(from + i), 8u);
+		}
+		else if (distance == 1) {
+			memset((void*)to, (int32)from[0], (uint64)length);
+		}
+		else {
+			for (int32 i = 0; i < length; i++) to[i] = from[i];
+		}
+	}
+
+	void CopyMatch(Output& out, int32 length, int32 distance) {
+		CopyBytes(out.base + out.count, distance, length);
+		out.count += (int64)length;
+	}
+
+	// How the fast loop stopped: at the end of the block, at an error, or near the input's end or the room's.
+	const int32 kFastEnded = 0;
+	const int32 kFastFailed = 1;
+	const int32 kFastLow = 2;
+
+	// Symbols while a whole word of input and room for a match remain, with the reader's and the output's state in
+	// locals: an output byte's store may alias anything, so state kept in memory would be reloaded after each one. One
+	// refill holds a literal and the next one, or a length and its distance (kBitsPerMatch). The tables are read in
+	// place, a long code alone the slow way: a call for each symbol would cost a third of the time.
+	int32 InflateFast(BitReader& in, Output& out, const HuffmanCode& literals, const HuffmanCode& distances, const char*& problem) {
+		uint64 bits = in.bits;
+		int32 count = in.count;
+		const uint8* next = in.data + in.at;
+		const uint8* inputEnd = in.data + in.size - kFastInputMargin;
+		uint8* to = out.base + out.count;
+		uint8* roomEnd = out.base + out.room - (kMostMatchBytes + kCopySlack);
+		const uint32* literalTable = &literals.table[0];
+		const uint32* distanceTable = &distances.table[0];
+		const uint64 tableMask = (uint64)(kTableSize - 1);
+		int32 stop = kFastLow;
+		while (next < inputEnd && to < roomEnd) {
+			uint64 word = 0u;
+			memcpy((void*)&word, (void*)next, 8u);
+			bits |= word << (uint64)count;
+			next += (int64)((63 - count) >> 3);
+			count |= 56;
+			uint32 entry = literalTable[(int32)(bits & tableMask)];
+			if (EntryCodeBits(entry) == 0) entry = DecodeSlow(bits, literals);
+			int32 used = EntryCodeBits(entry);
+			bits >>= (uint64)used;
+			count -= used;
+			uint32 kind = EntryKind(entry);
+			if (kind == kKindLiteral) {
+				to[0] = (uint8)EntryValue(entry);
+				to += 1;
+				entry = literalTable[(int32)(bits & tableMask)];
+				if (EntryKind(entry) != kKindLiteral || EntryCodeBits(entry) == 0) continue;
+				used = EntryCodeBits(entry);
+				bits >>= (uint64)used;
+				count -= used;
+				to[0] = (uint8)EntryValue(entry);
+				to += 1;
+				continue;
+			}
+			if (kind != kKindLength) {
+				stop = kind == kKindEnd ? kFastEnded : kFastFailed;
+				if (kind != kKindEnd) problem = "an invalid literal or length code";
+				break;
+			}
+			const int32 lengthExtra = EntryExtraBits(entry);
+			const int32 length = EntryValue(entry) + (int32)(bits & ((1u << (uint64)lengthExtra) - 1u));
+			bits >>= (uint64)lengthExtra;
+			count -= lengthExtra;
+			uint32 distanceEntry = distanceTable[(int32)(bits & tableMask)];
+			if (EntryCodeBits(distanceEntry) == 0) distanceEntry = DecodeSlow(bits, distances);
+			if (EntryKind(distanceEntry) == kKindInvalid) {
+				stop = kFastFailed;
+				problem = "an invalid distance code";
+				break;
+			}
+			const int32 distanceUsed = EntryCodeBits(distanceEntry);
+			bits >>= (uint64)distanceUsed;
+			count -= distanceUsed;
+			const int32 distanceExtra = EntryExtraBits(distanceEntry);
+			const int32 distance = EntryValue(distanceEntry) + (int32)(bits & ((1u << (uint64)distanceExtra) - 1u));
+			bits >>= (uint64)distanceExtra;
+			count -= distanceExtra;
+			if ((int64)distance > to - out.base) {
+				stop = kFastFailed;
+				problem = "a distance back past the start of the output";
+				break;
+			}
+			CopyBytes(to, distance, length);
+			to += length;
+		}
+		in.bits = bits;
+		in.count = count;
+		in.at = next - in.data;
+		out.count = to - out.base;
+		return stop;
+	}
+
+	const char* InflateCodes(BitReader& in, Output& out, const HuffmanCode& literals, const HuffmanCode& distances) {
+		while (in.at + kFastInputMargin < in.size) {
+			out.Ensure(kFastRunway);
+			const char* problem = nullptr;
+			const int32 stop = InflateFast(in, out, literals, distances, problem);
+			if (stop == kFastEnded) return nullptr;
+			if (stop == kFastFailed) return problem;
+		}
+		return InflateCodesCarefully(in, out, literals, distances);
+	}
+
+	// Symbols one at a time, each checked against the input's end and given room: the last few bytes of the input.
+	const char* InflateCodesCarefully(BitReader& in, Output& out, const HuffmanCode& literals, const HuffmanCode& distances) {
+		while (true) {
+			out.Ensure(kMostMatchBytes + kCopySlack);
+			if (in.count < kBitsPerMatch) in.Refill();
+			const uint32 entry = Decode(in, literals);
+			if (in.Truncated()) return kEndsInsideBlock; // past the end the reader gives zeros, which decode as symbols
+			const uint32 kind = EntryKind(entry);
+			if (kind == kKindLiteral) {
+				out.base[out.count] = (uint8)EntryValue(entry);
+				out.count += 1;
+				continue;
+			}
+			if (kind == kKindEnd) return nullptr;
+			if (kind == kKindInvalid) return "an invalid literal or length code";
+			const int32 lengthExtra = EntryExtraBits(entry);
+			const int32 length = EntryValue(entry) + in.Peek(lengthExtra);
+			in.Drop(lengthExtra);
+			const uint32 distanceEntry = Decode(in, distances);
+			if (EntryKind(distanceEntry) == kKindInvalid) return "an invalid distance code";
+			const int32 distanceExtra = EntryExtraBits(distanceEntry);
+			const int32 distance = EntryValue(distanceEntry) + in.Peek(distanceExtra);
+			in.Drop(distanceExtra);
+			if (in.Truncated()) return kEndsInsideBlock;
+			if ((int64)distance > out.count) return "a distance back past the start of the output";
+			CopyMatch(out, length, distance);
+		}
+	}
+
+	// A stored block's bytes are copied as they are, from the next whole byte.
+	const char* InflateStored(BitReader& in, Output& out) {
+		in.Drop(in.count & 7);
+		const int32 length = in.Take(16);
+		const int32 complement = in.Take(16);
+		if ((length ^ 0xffff) != complement) return "a stored block's length does not match its complement";
+		const int64 position = in.Consumed();
+		if (position + (int64)length > in.size) return "the stream ends inside a stored block";
+		out.Ensure((int64)length);
+		memcpy((void*)(out.base + out.count), (void*)(in.data + position), (uint64)length);
+		out.count += (int64)length;
+		in.Seek(position + (int64)length);
+		return nullptr;
+	}
+
+	void FixedCodes(HuffmanCode& literals, HuffmanCode& distances) {
+		uint8[288] lengths;
+		for (int32 i = 0; i < 144; i++) lengths[i] = 8u;
+		for (int32 i = 144; i < 256; i++) lengths[i] = 9u;
+		for (int32 i = 256; i < 280; i++) lengths[i] = 7u;
+		for (int32 i = 280; i < 288; i++) lengths[i] = 8u;
+		BuildCode(literals, &lengths[0], kLiteralSymbols, false);
+		uint8[32] distanceLengths;
+		for (int32 i = 0; i < 32; i++) distanceLengths[i] = 5u;
+		BuildCode(distances, &distanceLengths[0], kDistanceSymbols, true);
+	}
+
+	const char* ReadCodeLengths(BitReader& in, const HuffmanCode& lengthCode, uint8* lengths, int32 total) {
+		int32 filled = 0;
+		while (filled < total) {
+			if (in.count < 32) in.Refill();
+			const uint32 entry = Decode(in, lengthCode);
+			if (EntryKind(entry) == kKindInvalid) return "an invalid code-length symbol";
+			const int32 symbol = EntryValue(entry);
+			if (symbol < 16) {
+				lengths[filled] = (uint8)symbol;
+				filled++;
+				continue;
+			}
+			int32 repeat = 0;
+			uint8 value = 0u;
+			if (symbol == 16) {
+				if (filled == 0) return "a repeat with no length before it";
+				value = lengths[filled - 1];
+				repeat = 3 + in.Take(2);
+			}
+			else if (symbol == 17) repeat = 3 + in.Take(3);
+			else repeat = 11 + in.Take(7);
+			if (filled + repeat > total) return "code lengths past the codes' count";
+			for (int32 i = 0; i < repeat; i++) lengths[filled + i] = value;
+			filled += repeat;
+		}
+		return in.Truncated() ? "the stream ends inside a block's codes" : nullptr;
+	}
+
+	const char* DynamicCodes(BitReader& in, HuffmanCode& literals, HuffmanCode& distances) {
+		const int32 literalCount = in.Take(5) + 257;
+		const int32 distanceCount = in.Take(5) + 1;
+		const int32 lengthCount = in.Take(4) + 4;
+		uint8[19] codeLengths;
+		for (int32 i = 0; i < 19; i++) codeLengths[i] = 0u;
+		for (int32 i = 0; i < lengthCount; i++) codeLengths[(int32)kCodeLengthOrder[i]] = (uint8)in.Take(3);
+		HuffmanCode lengthCode;
+		if (!BuildCode(lengthCode, &codeLengths[0], 19, false)) return "an invalid code-length code";
+		uint8[320] lengths;
+		const char* problem = ReadCodeLengths(in, lengthCode, &lengths[0], literalCount + distanceCount);
+		if (problem != nullptr) return problem;
+		if (lengths[kEndOfBlock] == 0u) return "a code with no end of block";
+		if (!BuildCode(literals, &lengths[0], literalCount, false)) return "an invalid literal/length code";
+		if (!BuildCode(distances, &lengths[literalCount], distanceCount, true)) return "an invalid distance code";
+		return nullptr;
+	}
+
+	const char* InflateBlock(BitReader& in, Output& out, HuffmanCode& literals, HuffmanCode& distances, int32 type) {
+		if (type == 0) return InflateStored(in, out);
+		if (type == 1) FixedCodes(literals, distances);
+		else if (type == 2) {
+			const char* problem = DynamicCodes(in, literals, distances);
+			if (problem != nullptr) return problem;
+		}
+		else return "an invalid block type";
+		return InflateCodes(in, out, literals, distances);
+	}
+
+	InflateResult Inflate(const uint8* data, int64 size, Core::Array<uint8>& out) {
+		BitReader in;
+		in.data = data;
+		in.size = size;
+		Output output;
+		output.array = &out;
+		output.start = out.Count();
+		output.base = out.Data() + output.start;
+		output.Ensure(size * kExpectedRatio);
+		HuffmanCode literals;
+		HuffmanCode distances;
+		InflateResult result;
+		bool last = false;
+		while (!last && result.error == nullptr) {
+			last = in.Take(1) == 1;
+			result.error = InflateBlock(in, output, literals, distances, in.Take(2));
+			if (result.error == nullptr && in.Truncated()) result.error = "the stream ends early";
+		}
+		out.Resize(output.start + output.count);
+		result.ok = result.error == nullptr;
+		result.consumed = in.Consumed();
+		return result;
+	}
+}

@@ -1,0 +1,112 @@
+// Http content codings: which Accept-Encoding values accept gzip, which types compress, a response compressed only when
+// it should be, and bodies decoded from gzip, zlib and raw DEFLATE, or refused.
+
+include "bedrock.ch"
+
+Http::Request AcceptingRequest(const char* accepted) {
+	Http::Request request;
+	request.method = Core::String("GET");
+	if (accepted != nullptr) request.headers.Set(Core::StringView("Accept-Encoding"), Core::StringView(accepted));
+	return request;
+}
+
+Http::Response TextResponse(const char* type, int32 lines) {
+	Http::Response response;
+	Core::StringBuilder text;
+	for (int32 i = 0; i < lines; ++i) text.Append("{\"line\": \"the same words again and again\"}\n");
+	response.SetText(Core::StringView(type), text.View());
+	return response;
+}
+
+bool Accepts(const char* value, const char* coding) {
+	Core::String text(value);
+	return Http::AcceptsCoding(&text, coding);
+}
+
+bool Compressible(const char* type) {
+	Core::String text(type);
+	return Http::CompressibleType(&text);
+}
+
+[test("http.coding")]
+class HttpCodingTests {
+	[test("accept_encoding")]
+	public static void TestAcceptEncoding() {
+		assert_true(Accepts("gzip", "gzip") && Accepts("deflate, GZIP", "gzip") && Accepts("br;q=1.0, gzip;q=0.5", "gzip"), "listed");
+		assert_true(!Accepts("deflate, gzip;q=0", "gzip") && !Accepts("gzip; q=0.000", "gzip"), "refused with q=0");
+		assert_true(Accepts("*", "gzip") && !Accepts("*;q=0", "gzip") && Accepts("*;q=0, gzip", "gzip"), "the wildcard, unless refused");
+		assert_true(!Accepts("identity", "gzip") && !Accepts("", "gzip") && !Http::AcceptsCoding(nullptr, "gzip"), "not listed");
+	}
+
+	[test("compressible_types")]
+	public static void TestCompressibleTypes() {
+		assert_true(Compressible("text/html; charset=utf-8") && Compressible("application/json") && Compressible("image/svg+xml"), "text-like");
+		assert_true(Compressible("application/vnd.api+json") && Compressible("Application/JavaScript"), "suffixes and case");
+		assert_true(!Compressible("image/png") && !Compressible("application/octet-stream") && !Http::CompressibleType(nullptr), "the rest");
+	}
+
+	[test("compress_response")]
+	public static void TestCompressResponse() {
+		Http::Response response = TextResponse("application/json", 200);
+		const int64 size = response.body.Count();
+		Core::Array<uint8> original;
+		original.Append(response.body.Data(), size);
+		assert_true(Http::CompressResponse(AcceptingRequest("gzip, deflate"), response, Compression::kDefaultLevel), "compressed");
+		assert_true(response.body.Count() * 10 < size, "much smaller");
+		const Core::String* coding = response.headers.Find(Core::StringView("Content-Encoding"));
+		const Core::String* vary = response.headers.Find(Core::StringView("Vary"));
+		assert_true(coding != nullptr && *coding == Core::String("gzip") && vary != nullptr, "the headers say so");
+		Core::String why;
+		assert_true(Http::DecodeBody(response.headers, response.body, why), "decodes");
+		assert_true(response.body.Count() == size && memcmp((void*)response.body.Data(), (void*)original.Data(), (uint64)size) == 0, "to the original");
+		assert_true(!response.headers.Has(Core::StringView("Content-Encoding")), "and drops the coding");
+	}
+
+	[test("compress_response_declines")]
+	public static void TestCompressResponseDeclines() {
+		Http::Response small = TextResponse("text/plain", 2);
+		assert_true(!Http::CompressResponse(AcceptingRequest("gzip"), small, 6), "a small body");
+		Http::Response unasked = TextResponse("text/plain", 200);
+		assert_true(!Http::CompressResponse(AcceptingRequest(nullptr), unasked, 6), "a client that did not ask");
+		Http::Response image = TextResponse("image/png", 200);
+		assert_true(!Http::CompressResponse(AcceptingRequest("gzip"), image, 6), "a type that does not compress");
+		Http::Response coded = TextResponse("text/plain", 200);
+		coded.headers.Set(Core::StringView("Content-Encoding"), Core::StringView("br"));
+		assert_true(!Http::CompressResponse(AcceptingRequest("gzip"), coded, 6), "a body already coded");
+		Http::Response noise;
+		Core::Random random(9u);
+		for (int32 i = 0; i < 4000; ++i) noise.body.Push((uint8)random.Next32());
+		noise.headers.Set(Core::StringView("Content-Type"), Core::StringView("text/plain"));
+		assert_true(!Http::CompressResponse(AcceptingRequest("gzip"), noise, 6) && noise.body.Count() == 4000, "a body that would grow");
+	}
+
+	[test("decode_body")]
+	public static void TestDecodeBody() {
+		Core::String text("the deflate coding is a zlib stream, though some servers send raw DEFLATE");
+		const uint8* bytes = (const uint8*)text.CStr();
+		Core::Array<uint8> zlib;
+		Compression::ZlibCompress(bytes, text.ByteLength(), 6, zlib);
+		Http::Headers headers;
+		headers.Set(Core::StringView("Content-Encoding"), Core::StringView("deflate"));
+		Core::String why;
+		assert_true(Http::DecodeBody(headers, zlib, why) && zlib.Count() == text.ByteLength(), "deflate as zlib");
+		Core::Array<uint8> raw;
+		Compression::Deflate(bytes, text.ByteLength(), 6, raw);
+		headers.Set(Core::StringView("Content-Encoding"), Core::StringView("deflate"));
+		assert_true(Http::DecodeBody(headers, raw, why) && raw.Count() == text.ByteLength(), "deflate as a raw stream");
+		Core::Array<uint8> brotli;
+		brotli.Push(1u);
+		headers.Set(Core::StringView("Content-Encoding"), Core::StringView("br"));
+		assert_true(!Http::DecodeBody(headers, brotli, why) && why.ByteLength() > 0 && brotli.Count() == 1, "a coding it cannot read");
+		Core::Array<uint8> damaged;
+		Compression::GzipCompress(bytes, text.ByteLength(), 6, damaged);
+		damaged[damaged.Count() - 6] ^= 1u;
+		const int64 damagedSize = damaged.Count();
+		headers.Set(Core::StringView("Content-Encoding"), Core::StringView("gzip"));
+		assert_true(!Http::DecodeBody(headers, damaged, why) && damaged.Count() == damagedSize, "a damaged body stays as it came");
+		Http::Headers none;
+		Core::Array<uint8> plain;
+		plain.Push(7u);
+		assert_true(Http::DecodeBody(none, plain, why) && plain.Count() == 1, "no coding");
+	}
+}

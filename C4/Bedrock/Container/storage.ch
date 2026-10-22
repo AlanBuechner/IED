@@ -29,6 +29,21 @@ namespace Core
 		return moved;
 	}
 
+	// Element ranges, given as a pointer and bounds rather than read from a container's fields: a byte stored into an
+	// element may alias anything, so a loop over a container's own `data` reloads it after every store and never
+	// becomes a memset or memcpy.
+	template<T> void CreateElements(T* items, int64 first, int64 end) {
+		for (int64 k = first; k < end; ++k) new (&items[k]) T();
+	}
+
+	template<T> void CopyElements(T* to, const T* from, int64 count) {
+		for (int64 k = 0; k < count; ++k) new (&to[k]) T(from[k]);
+	}
+
+	template<T> void DestroyElements(T* items, int64 first, int64 end) {
+		for (int64 k = first; k < end; ++k) destroy(&items[k]);
+	}
+
 	template<T> T* ResizeScannedElements(T* elements, int64 oldCount, int64 keepCount, int64 newCount) {
 		const uint64 size = (uint64)sizeof(T);
 		return (T*)ResizeScannedBytes((void*)elements, (uint64)oldCount * size, (uint64)keepCount * size, (uint64)newCount * size, (uint64)alignof(T));
