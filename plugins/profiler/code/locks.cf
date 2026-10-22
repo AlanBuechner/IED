@@ -33,7 +33,7 @@ namespace Profiler
 		json.Field("name", LockName(capture, lock).View());
 		const SrcLoc* loc = lock->site != 0 ? capture.srclocs.Find(lock->site) : nullptr;
 		json.Field("function", loc ? capture.Text(loc->functionStr) : Core::StringView(""));
-		json.Field("file", loc ? capture.Text(loc->fileStr) : Core::StringView(""));
+		json.Field("file", loc ? capture.SourceText(loc->fileStr).View() : Core::StringView(""));
 		json.IntField("line", loc ? (int64)loc->line : 0);
 	}
 

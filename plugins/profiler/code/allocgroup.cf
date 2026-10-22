@@ -120,13 +120,13 @@ namespace Profiler
 			if (by == AllocGroup::Path) json.Field("label", key == 0 ? Core::StringView("(outside any zone)") : paths[(int64)key - 1].View());
 			else json.Field("label", key == 0 ? Core::StringView("(outside any zone)") : capture->SiteName(key));
 			const SrcLoc* loc = site == 0 ? nullptr : capture->srclocs.Find(site);
-			json.Field("file", loc ? capture->Text(loc->fileStr) : Core::StringView(""));
+			json.Field("file", loc ? capture->SourceText(loc->fileStr).View() : Core::StringView(""));
 			json.IntField("line", loc ? (int64)loc->line : 0);
 		}
 		else if (by == AllocGroup::Function) {
 			const SymbolRecord* symbol = capture->symbols.Find(key);
 			json.Field("label", symbol ? capture->Text(symbol->functionStr) : Core::StringView(key == 0 ? "(no call stack)" : "(unknown function)"));
-			json.Field("file", symbol ? capture->Text(symbol->fileStr) : Core::StringView(""));
+			json.Field("file", symbol ? capture->SourceText(symbol->fileStr).View() : Core::StringView(""));
 			json.IntField("line", symbol ? (int64)symbol->line : 0);
 		}
 		else json.Field("label", callstack == 0 ? Core::StringView("(no call stack)") : Core::StringView("call stack"));

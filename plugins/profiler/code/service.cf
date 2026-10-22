@@ -202,6 +202,7 @@ namespace Profiler
 
 	Capture* ProfilerPlugin::Loaded(Core::StringView captureId) {
 		Core::String path;
+		Core::String sourceRoot;
 		{
 			Threading::LockGuard guard(lock);
 			CaptureEntry* entry = Entry(captureId);
@@ -210,11 +211,14 @@ namespace Profiler
 			entry->lastUsed = clock;
 			if (entry->capture) return entry->capture;
 			path = entry->path;
+			const ProfWorkspace* ws = Workspace(entry->wsId.View());
+			if (ws) sourceRoot = ws->workspace.root;
 		}
 		Capture* capture = new Capture();
 		TraceLayout layout;
 		Core::String problem;
 		if (!LoadTraceFile(path.CStr(), *capture, layout, problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		capture->sourceRoot = sourceRoot;
 		Threading::LockGuard guard(lock);
 		CaptureEntry* entry = Entry(captureId);
 		if (!entry) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + captureId).View());
@@ -311,6 +315,7 @@ namespace Profiler
 			return nullptr;
 		}
 		CaptureEntry* entry = profiler->EntryForPath(ws, path.View());
+		capture->sourceRoot = ws->workspace.root;
 		entry->capture = capture;
 		entry->live = true;
 		entry->connection = stream;

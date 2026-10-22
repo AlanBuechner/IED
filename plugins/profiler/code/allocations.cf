@@ -188,7 +188,7 @@ namespace Profiler
 		}
 		const SymbolRecord* symbol = capture.symbols.Find(LeafAddress(capture, callstack));
 		json.Field("label", symbol ? capture.Text(symbol->functionStr) : Core::StringView("(unknown function)"));
-		json.Field("file", symbol ? capture.Text(symbol->fileStr) : Core::StringView(""));
+		json.Field("file", symbol ? capture.SourceText(symbol->fileStr).View() : Core::StringView(""));
 		json.IntField("line", symbol ? (int64)symbol->line : 0);
 		json.Key(Core::StringView("callstack"));
 		WriteCallstack(json, capture, ask.groupBy == AllocGroup::Callstack ? callstack : 0);

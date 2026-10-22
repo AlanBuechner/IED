@@ -315,6 +315,7 @@ namespace Profiler
 		public Core::Array<GcRecord> gcs;
 		public AllocCounter allocCounter;
 		public Core::Array<HeapCensus*> censuses;
+		public Core::String sourceRoot;                      // its workspace's folder: a source file under it is named relative to it
 		public int64 zoneAllocs;                             // zones that said what they allocated (ZoneAllocs, ZoneNative, ZoneNativeFreed)
 		public bool censusNative;                            // a census said what native memory its types hold
 		public Core::HashMap<uint64, TaskInfo*> tasks;
@@ -333,6 +334,9 @@ namespace Profiler
 
 		// The text of a string id ("" for 0 or one not defined).
 		public Core::StringView Text(uint64 id) const;
+		// A source file's name as the tools show it: relative to sourceRoot when the file is under it (a debug
+		// information's absolute path), else as the client named it.
+		public Core::String SourceText(uint64 fileStr) const;
 		// A source location's display name: its name, else its function, else "?".
 		public Core::StringView SiteName(uint64 site) const;
 		// A zone's name as the timeline shows it: its per-call name when it has one, else its site's.

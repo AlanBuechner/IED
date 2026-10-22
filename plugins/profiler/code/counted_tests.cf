@@ -353,6 +353,19 @@ class ProfilerCountedTests {
 		assert_true(!text.View().Contains(Core::StringView("Release:")), "Release, which only gave memory back, is not");
 	}
 
+	[test("a_source_under_the_workspace_is_named_relative_to_it")]
+	public static void TestSourceText() {
+		Profiler::Capture* capture = new Profiler::Capture();
+		capture->strings.Insert(1, Core::String("C:\\Work\\Game\\src\\main.cf"));
+		capture->strings.Insert(2, Core::String("D:\\Other\\lib.cf"));
+		capture->strings.Insert(3, Core::String("main.cf"));
+		assert_true(capture->SourceText(1) == "C:\\Work\\Game\\src\\main.cf", "without a workspace, as the client named it");
+		capture->sourceRoot = Core::String("c:/work/game");
+		assert_true(capture->SourceText(1) == "src/main.cf", "under the workspace, relative to it whatever the case and slashes");
+		assert_true(capture->SourceText(2) == "D:\\Other\\lib.cf" && capture->SourceText(3) == "main.cf", "elsewhere, or already relative, as named");
+		assert_true(capture->SourceText(0).IsEmpty(), "no file, none");
+	}
+
 	[test("samples_beside_the_counts_name_the_functions")]
 	public static void TestSamples() {
 		Profiler::Capture* capture = SampledCapture();

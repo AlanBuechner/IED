@@ -269,7 +269,7 @@ namespace Profiler
 			json.Field("name", capture.SiteName(zone->site));
 			json.Field("thread", TrackLabel(capture, capture.tracks[zone->track], frame.begin).View());
 			json.Field("ref", zone->ref.Text().View());
-			json.Field("file", loc ? capture.Text(loc->fileStr) : Core::StringView(""));
+			json.Field("file", loc ? capture.SourceText(loc->fileStr).View() : Core::StringView(""));
 			json.IntField("line", loc ? (int64)loc->line : 0);
 			json.IntField("selfNs", capture.clock.Ns(zone->self));
 			json.IntField("usualNs", capture.clock.Ns(usual.Usual(zone->key, zone->track, frame.Length())));

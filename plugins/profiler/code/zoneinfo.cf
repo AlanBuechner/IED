@@ -17,7 +17,7 @@ namespace Profiler
 				text.Append(capture.Text(symbol->functionStr));
 				if (symbol->fileStr != 0) {
 					text.Append(" (");
-					text.Append(capture.Text(symbol->fileStr));
+					text.Append(capture.SourceText(symbol->fileStr).View());
 					text.AppendByte(':');
 					text.AppendUInt(symbol->line);
 					text.AppendByte(')');
@@ -145,7 +145,7 @@ namespace Profiler
 		json.Field("siteName", capture.SiteName(site));
 		json.IntField("site", (int64)site);
 		json.Field("function", loc ? capture.Text(loc->functionStr) : Core::StringView(""));
-		json.Field("file", loc ? capture.Text(loc->fileStr) : Core::StringView(""));
+		json.Field("file", loc ? capture.SourceText(loc->fileStr).View() : Core::StringView(""));
 		json.IntField("line", loc ? (int64)loc->line : 0);
 		json.IntField("startNs", capture.clock.Ns(start));
 		json.IntField("endNs", capture.clock.Ns(end));

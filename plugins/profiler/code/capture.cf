@@ -1,4 +1,5 @@
 include "capture.ch"
+include "api/workspace.ch"
 
 namespace Profiler
 {
@@ -38,6 +39,12 @@ namespace Profiler
 		if (id == 0) return Core::StringView("");
 		const Core::String* text = strings.Find(id);
 		return text ? text->View() : Core::StringView("");
+	}
+
+	Core::String Capture::SourceText(uint64 fileStr) const {
+		Core::String relative;
+		if (!sourceRoot.IsEmpty() && IED::RelativeTo(sourceRoot.View(), Text(fileStr), relative)) return relative;
+		return Core::String(Text(fileStr));
 	}
 
 	Core::StringView Capture::SiteName(uint64 site) const {

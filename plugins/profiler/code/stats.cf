@@ -112,7 +112,7 @@ namespace Profiler
 		json.IntField("site", (int64)site);
 		const SrcLoc* loc = capture.srclocs.Find(site);
 		json.Field("function", loc ? capture.Text(loc->functionStr) : Core::StringView(""));
-		json.Field("file", loc ? capture.Text(loc->fileStr) : Core::StringView(""));
+		json.Field("file", loc ? capture.SourceText(loc->fileStr).View() : Core::StringView(""));
 		json.IntField("line", loc ? (int64)loc->line : 0);
 	}
 
