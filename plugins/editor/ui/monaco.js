@@ -29,6 +29,8 @@ function boot(ied) {
 			window.require(["vs/editor/editor.main"], () => {
 				const monaco = window.monaco;
 				defineTheme(monaco, controlKeywords(ied.contributions("languages")));
+				monaco.editor.setTheme(THEME);
+				shareThemeWithShadowRoots();
 				registerLanguages(monaco, ied).then(() => resolve(monaco), reject);
 			}, reject);
 		};
@@ -85,6 +87,8 @@ const COLORS = {
 	"editorHoverWidget.border": "border-1", "input.background": "bg-3", "input.border": "border-1", "focusBorder": "focus",
 	"scrollbarSlider.background": "scroll-thumb", "scrollbarSlider.hoverBackground": "scroll-thumb-hover", "minimap.background": "editor-bg",
 	"editorWhitespace.foreground": "text-3",
+	"menu.background": "bg-1", "menu.foreground": "text-0", "menu.selectionBackground": "bg-4", "menu.selectionForeground": "text-0",
+	"menu.separatorBackground": "border-0",
 };
 
 function defineTheme(monaco, control) {
@@ -99,6 +103,28 @@ function defineTheme(monaco, control) {
 		if (color) colors[key] = color;
 	}
 	monaco.editor.defineTheme(THEME, { base: "vs-dark", inherit: true, rules, colors });
+}
+
+// Monaco draws its context menu in a shadow root on the page, where the colors its theme sets on its own elements
+// (.monaco-component) do not reach: the same declarations go on the shadow roots' hosts, again whenever the theme changes.
+// Monaco makes its color styles when an editor first shows, so they are waited for.
+function shareThemeWithShadowRoots() {
+	const shared = document.createElement("style");
+	document.head.append(shared);
+	let colors = null;
+	const copy = () => {
+		const found = /\.monaco-component\s*\{([^}]*)\}/.exec(colors.textContent);
+		shared.textContent = found ? ".shadow-root-host {" + found[1] + "}" : "";
+	};
+	const follow = () => {
+		const made = document.querySelector("style.monaco-colors");
+		if (!made || made === colors) return;
+		colors = made;
+		copy();
+		new MutationObserver(copy).observe(colors, { childList: true, characterData: true, subtree: true });
+	};
+	follow();
+	new MutationObserver(follow).observe(document.head, { childList: true });
 }
 
 // Each `languages` contribution: registered when Monaco lacks the id, its configuration set, its grammar loaded.

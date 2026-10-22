@@ -142,6 +142,22 @@ def tab_context_menu(run):
 	check(tab_names(run) == ["README.md"], "only README.md is left: %s" % tab_names(run))
 
 
+@scenario(viewports=("desktop",))
+def editor_context_menu(run):
+	"""The editor's own context menu (Monaco draws it in a shadow root) has the theme's background, not bare text over
+	the code: the theme's colors reach the shadow root's host."""
+	page = run.open()
+	page.dblclick(".tree-row:has-text('README.md')")
+	page.wait_for_selector(".dock-body .monaco-editor .view-lines", timeout=30000)
+	page.click(".dock-body .monaco-editor .view-lines", button="right")
+	menu = "document.querySelector('.shadow-root-host') && document.querySelector('.shadow-root-host').shadowRoot.querySelector('.monaco-menu-container .monaco-scrollable-element')"
+	page.wait_for_function("!!(" + menu + ")", timeout=10000)
+	background = page.evaluate("getComputedStyle(" + menu + ").backgroundColor")
+	check(background not in ("", "transparent", "rgba(0, 0, 0, 0)"), "the menu has a background: %s" % background)
+	run.shot("menu")
+	page.keyboard.press("Escape")
+
+
 @scenario()
 def tool_windows_close_and_come_back(run):
 	page = run.open()
