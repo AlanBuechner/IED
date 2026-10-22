@@ -76,6 +76,7 @@ namespace C4LSP::Server
 	private:
 		struct Ctx { const Scripting::ObjectType* enclosingType = nullptr; const Scripting::Scope* scope = nullptr; uint32 unitId = 0; };
 		Ctx ContextFor(const Core::Vector<const Scripting::AstNode*>& path) const;
+		const Scripting::Scope* DeclarationScope(const Core::Vector<const Scripting::AstNode*>& path) const;
 		/// The record of the function `path[fi]` declares or defines (see the .cpp); null when the model has none.
 		const Scripting::FunctionRecord* RecordOf(const Core::Vector<const Scripting::AstNode*>& path, int fi, uint32 unitId) const;
 		bool ResolveLocal(const std::string& name, const Core::Vector<const Scripting::AstNode*>& path,

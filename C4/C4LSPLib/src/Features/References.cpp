@@ -35,11 +35,8 @@ namespace C4LSP::Features
 			for (const Scripting::AstNode* declaration : declarations)
 				result.Push(Definition::LocationForDeclaration(session, *declaration));
 		}
-		for (const Scripting::AstNode* ref : ReferenceScanner::FindEverywhere(session, targetDecl))
-		{
-			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
-			result.Push(session.ToEditorLocation(name.start, name.end));
-		}
+		for (const ReferenceScanner::Occurrence& occurrence : ReferenceScanner::FindEverywhere(session, targetDecl))
+			result.Push(session.ToEditorLocation(occurrence.name.start, occurrence.name.end));
 		return result;
 	}
 } // namespace C4LSP::Features

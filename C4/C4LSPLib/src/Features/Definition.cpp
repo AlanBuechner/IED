@@ -13,6 +13,7 @@
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Features/TypeDefinition.h"
+#include "Features/TypeText.h"
 #include "Features/DeclarationText.h"
 #include "Model/SymbolTable.h"
 #include <cctype>
@@ -211,10 +212,25 @@ namespace C4LSP::Features
 		return nullptr;
 	}
 
+	// A type written at the position (`LspPool` of `LspPool* lsp`, of `new LspPool(...)`, of a cast): its declaration;
+	// the innermost, so `T` of `Array<T>` is T.
+	static const Scripting::AstNode* TypeWrittenAt(Server::CompilationSession& session, const Server::LocatedNode& located)
+	{
+		for (uint32 i = located.path.Count(); i-- > 0;)
+			if (located.path[i]->Type() == Scripting::NodeType::QualType)
+				return DeclarationOfNamedType(session.GetResolver().ResolveQualType(static_cast<const Scripting::QualTypeNode&>(*located.path[i]), located.path));
+		return nullptr;
+	}
+
+	// A reference, else a declaration's own name, else a type written there: what references, highlight and rename
+	// are about.
 	const Scripting::AstNode* Definition::TargetAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
-		const Scripting::AstNode* target = FindTargetDeclaration(session, sourceId, located);
-		return target ? target : DeclarationNamedAt(session, sourceId, located, position);
+		if (const Scripting::AstNode* target = FindTargetDeclaration(session, sourceId, located))
+			return target;
+		if (const Scripting::AstNode* target = DeclarationNamedAt(session, sourceId, located, position))
+			return target;
+		return TypeWrittenAt(session, located);
 	}
 
 	const Scripting::AstNode* Definition::FindTargetDeclaration(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located)

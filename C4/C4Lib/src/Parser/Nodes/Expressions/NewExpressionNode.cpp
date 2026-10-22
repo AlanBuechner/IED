@@ -135,9 +135,12 @@ namespace Scripting
 		CollectChildren();
 	}
 
+	// In source order. The type is a child like any written type, so a walk of the tree (find-references, go-to-definition,
+	// semantic tokens) reaches `T` of `new T(args)`.
 	void NewExpressionNode::CollectChildren()
 	{
 		if (m_Placement) m_Children.Push(m_Placement);
+		if (m_Type) m_Children.Push(m_Type);
 		if (m_ArrayCount) m_Children.Push(m_ArrayCount);
 		if (m_ArrayInitializer) m_Children.Push(m_ArrayInitializer);
 		for (const auto& a : m_Arguments) m_Children.Push(a);

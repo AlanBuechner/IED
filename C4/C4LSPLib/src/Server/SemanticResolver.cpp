@@ -181,12 +181,18 @@ namespace C4LSP::Server
 		return nullptr;
 	}
 
+	// Outside any function (a field, a base type, a namespace's variable): its declarations' scope.
 	SemanticResolver::Ctx SemanticResolver::ContextFor(const Core::Vector<const Scripting::AstNode*>& path) const
 	{
 		Ctx ctx;
 		int fi = FindFunctionIndex(path);
 		if (fi < 0)
+		{
+			ctx.unitId = path.Count() ? UnitIdOf(*path.Back()) : 0;
+			ctx.enclosingType = EnclosingObject(path);
+			ctx.scope = DeclarationScope(path);
 			return ctx;
+		}
 		const auto& fn = static_cast<const Scripting::FunctionDefinitionNode&>(*path[fi]);
 		ctx.unitId = UnitIdOf(fn);
 		if (!fn.GetName())
@@ -198,6 +204,23 @@ namespace C4LSP::Server
 			ctx.scope = rec->scope; // the function's enclosing namespace/class - unqualified lookup context
 		}
 		return ctx;
+	}
+
+	// Where a declaration outside any function is: its innermost type's scope, else its innermost namespace's; null at
+	// file level. A field's type in `namespace Ied { class Server { LspPool* lsp; } }` is looked up from there, as the
+	// compiler looks it up, not from the file's top.
+	const Scripting::Scope* SemanticResolver::DeclarationScope(const Core::Vector<const Scripting::AstNode*>& path) const
+	{
+		if (const Scripting::ObjectType* object = EnclosingObject(path))
+			return m_Model.TypeScope(object);
+		std::string qualified;
+		for (const Scripting::AstNode* node : path)
+			if (node->Type() == Scripting::NodeType::Namespace && !static_cast<const Scripting::NamespaceNode&>(*node).IsRoot())
+				qualified += (qualified.empty() ? "" : "::") + std::string(static_cast<const Scripting::NamespaceNode&>(*node).Name());
+		if (qualified.empty())
+			return nullptr;
+		const Scripting::SymbolInfo* info = QuerySym(m_Model, qualified, path.Count() ? UnitIdOf(*path.Back()) : 0);
+		return info && info->kind == Scripting::SymbolKind::Namespace ? info->scope : nullptr;
 	}
 
 	// The record HIR lowers for the function `path[fi]` declares or defines, so containingType and scope match the
@@ -508,7 +531,7 @@ namespace C4LSP::Server
 			return cached->second;
 
 		uint32 unitId = UnitIdOf(qt);
-		const Scripting::Scope* ctx = FindFunctionIndex(path) >= 0 ? ContextFor(path).scope : nullptr;
+		const Scripting::Scope* ctx = ContextFor(path).scope;
 		auto r = m_Model.ResolveTypeInUnitContext(qt, unitId, ctx);
 		const Scripting::Type* type = r.Ok() ? r.value : nullptr;
 		m_TypeCache[&qt] = type;

@@ -413,15 +413,19 @@ int32 main() { return 0; }
 	{
 		auto session = Testing::Lsp::MakeSession("Registry.cf", kRegistry);
 		const std::string uri = Testing::Lsp::UriFor("Registry.cf");
+		// The qualifier of the out-of-line `ToolRegistry::Add` names the type too, as clangd counts it.
+		const auto qualifier = Testing::Lsp::PositionOf(kRegistry, "ToolRegistry::Add");
 		const auto use = Testing::Lsp::PositionOf(kRegistry, "ToolRegistry registry");
 		auto fromClass = References::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "ToolRegistry"));
-		TEST_ASSERT_EQ(fromClass.Count(), 1u);
-		TEST_ASSERT_EQ(fromClass[0].range.start.line, use.line);
-		TEST_ASSERT_EQ(fromClass[0].range.start.character, use.character);
-		// From the qualifier of an out-of-line definition: the type it names.
-		auto fromQualifier = References::At(session, uri, Testing::Lsp::PositionOf(kRegistry, "ToolRegistry::Add"));
-		TEST_ASSERT_EQ(fromQualifier.Count(), 1u);
-		TEST_ASSERT_EQ(fromQualifier[0].range.start.line, use.line);
+		TEST_ASSERT_EQ(fromClass.Count(), 2u);
+		TEST_ASSERT_EQ(fromClass[0].range.start.line, qualifier.line);
+		TEST_ASSERT_EQ(fromClass[0].range.start.character, qualifier.character);
+		TEST_ASSERT_EQ(fromClass[1].range.start.line, use.line);
+		TEST_ASSERT_EQ(fromClass[1].range.start.character, use.character);
+		// From the qualifier itself: the type it names.
+		auto fromQualifier = References::At(session, uri, qualifier);
+		TEST_ASSERT_EQ(fromQualifier.Count(), 2u);
+		TEST_ASSERT_EQ(fromQualifier[1].range.start.line, use.line);
 		TEST_PASSED();
 	}
 

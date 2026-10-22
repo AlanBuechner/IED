@@ -48,16 +48,23 @@ namespace C4LSP::Features
 			if (declSpan.valid)
 				result.occurrences.Push(MakeOccurrence(session, declaration->startLocation.sourceId, declSpan.start, declSpan.end));
 		}
-		for (const Scripting::AstNode* ref : ReferenceScanner::FindEverywhere(session, targetDecl))
-		{
-			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
-			result.occurrences.Push(MakeOccurrence(session, ref->startLocation.sourceId, name.start, name.end));
-		}
+		for (const ReferenceScanner::Occurrence& occurrence : ReferenceScanner::FindEverywhere(session, targetDecl))
+			if (occurrence.spellsTarget) // a construction calling a renamed create spells its type's name
+				result.occurrences.Push(MakeOccurrence(session, occurrence.name.start.sourceId, occurrence.name.start, occurrence.name.end));
 		// A script host's symbol is declared in its interface, which no editor document is: rename it in the host.
 		for (const RenameOccurrence& occurrence : result.occurrences)
 			if (occurrence.uri.empty()) return RenameResult();
 
 		return result;
+	}
+
+	// The innermost type written at the located position, or null.
+	static const Scripting::AstNode* WrittenType(const Server::LocatedNode& located)
+	{
+		for (uint32 i = located.path.Count(); i-- > 0;)
+			if (located.path[i]->Type() == Scripting::NodeType::QualType)
+				return located.path[i];
+		return nullptr;
 	}
 
 	PrepareResult Rename::PrepareAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
@@ -92,6 +99,15 @@ namespace C4LSP::Features
 		{
 			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
 			span = { true, name.start, name.end };
+		}
+		else if (const Scripting::AstNode* written = WrittenType(located))
+		{
+			// A type written here (`LspPool` of `LspPool* lsp`): its name here, when it names a declared type.
+			if (Definition::TargetAt(session, sourceId, located, position))
+			{
+				const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*written);
+				span = { true, name.start, name.end };
+			}
 		}
 		else
 		{

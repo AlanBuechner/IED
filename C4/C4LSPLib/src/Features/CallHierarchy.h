@@ -2,6 +2,7 @@
 #include "Core/Core.h"
 #include "Protocol/LspTypes.h"
 #include "Features/HierarchyItem.h"
+#include "Features/ReferenceScanner.h"
 #include <string>
 #include <unordered_map>
 
@@ -12,7 +13,7 @@ namespace C4LSP::Server { class CompilationSession; }
 namespace C4LSP::Features
 {
 	/// Call hierarchy: the function at a position, the functions that call it, and the functions it calls. A function's
-	/// declarations (in its type and out of line) are one function.
+	/// declarations (in its type and out of line) are one function; a construction (`new T(args)`) calls its create.
 	class CallHierarchy
 	{
 	public:
@@ -26,7 +27,7 @@ namespace C4LSP::Features
 	private:
 		using Grouped = std::unordered_map<const Scripting::AstNode*, uint32>; // function -> its entry in the result
 		static const Scripting::AstNode* FunctionAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
-		static void AddCall(Server::CompilationSession& session, const Scripting::AstNode& function, const Scripting::AstNode& reference, Grouped& grouped, Core::Vector<HierarchyCall>& out);
+		static void AddCall(Server::CompilationSession& session, const Scripting::AstNode& function, const ReferenceScanner::NameRange& name, Grouped& grouped, Core::Vector<HierarchyCall>& out);
 		static void CollectCalls(Server::CompilationSession& session, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& pathIn, Grouped& grouped, Core::Vector<HierarchyCall>& out);
 	};
 } // namespace C4LSP::Features

@@ -48,11 +48,10 @@ namespace C4LSP::Features
 			result.Push(declarationSite);
 		}
 
-		for (const Scripting::AstNode* ref : ReferenceScanner::FindOccurrences(session, sourceId, targetDecl))
+		for (const ReferenceScanner::Occurrence& occurrence : ReferenceScanner::FindOccurrences(session, sourceId, targetDecl))
 		{
 			Protocol::DocumentHighlight highlight;
-			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
-			highlight.range = session.ToEditorRange(ref->startLocation.sourceId, name.start, name.end);
+			highlight.range = session.ToEditorRange(occurrence.name.start.sourceId, occurrence.name.start, occurrence.name.end);
 			highlight.kind = Protocol::HighlightKind::Read; // uses only - the declaration was handled above
 			result.Push(highlight);
 		}

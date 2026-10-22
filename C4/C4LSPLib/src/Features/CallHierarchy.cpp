@@ -1,4 +1,5 @@
 #include "Features/CallHierarchy.h"
+#include "Features/Constructions.h"
 #include "Features/DeclarationText.h"
 #include "Features/Definition.h"
 #include "Features/ReferenceScanner.h"
@@ -10,6 +11,7 @@
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
+#include <set>
 
 namespace C4LSP::Features
 {
@@ -53,12 +55,11 @@ namespace C4LSP::Features
 		return items;
 	}
 
-	void CallHierarchy::AddCall(Server::CompilationSession& session, const Scripting::AstNode& function, const Scripting::AstNode& reference, Grouped& grouped, Core::Vector<HierarchyCall>& out)
+	void CallHierarchy::AddCall(Server::CompilationSession& session, const Scripting::AstNode& function, const ReferenceScanner::NameRange& name, Grouped& grouped, Core::Vector<HierarchyCall>& out)
 	{
 		const auto [entry, added] = grouped.emplace(&function, out.Count());
 		if (added)
 			out.Push(HierarchyCall{ HierarchyItem::Of(session, function), {} });
-		const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(reference);
 		out[entry->second].fromRanges.Push(session.ToEditorRange(name.start.sourceId, name.start, name.end));
 	}
 
@@ -68,7 +69,7 @@ namespace C4LSP::Features
 		const Scripting::AstNode* target = FunctionAt(session, item.uri, item.selectionRange.start);
 		Grouped grouped;
 		for (const ReferenceScanner::CallSite& call : ReferenceScanner::FindCallSites(session, target))
-			AddCall(session, *call.caller, *call.reference, grouped, out);
+			AddCall(session, *call.caller, call.name, grouped, out);
 		return out;
 	}
 
@@ -101,8 +102,15 @@ namespace C4LSP::Features
 				calleePath.Push(callee);
 				const Scripting::AstNode* called = session.GetResolver().ResolveReference(*callee, calleePath).declaration;
 				if (called && called->Type() == NodeType::FunctionDefinition)
-					AddCall(session, *Definition::WithBody(session, called), *callee, grouped, out);
+					AddCall(session, *Definition::WithBody(session, called), ReferenceScanner::NameOf(*callee), grouped, out);
 			}
+		}
+		for (const Constructions::Construction& construction : Constructions::Of(node, path, session.GetResolver()))
+		{
+			std::set<const Scripting::AstNode*> creates; // a create's declarations are one function
+			for (const Scripting::AstNode* created : Constructions::Called(session.GetCompiler().GetProgramModel(), construction))
+				if (created->Type() == NodeType::FunctionDefinition && creates.insert(Definition::WithBody(session, created)).second)
+					AddCall(session, *Definition::WithBody(session, created), construction.name, grouped, out);
 		}
 		for (const auto& child : node.Children())
 			if (child)
