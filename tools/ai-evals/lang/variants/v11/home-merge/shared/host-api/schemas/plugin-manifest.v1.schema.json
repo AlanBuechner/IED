@@ -1,0 +1,62 @@
+{
+	"$defs": {
+		"contributes": {
+			"properties": {
+				"aiHints": {
+					"type": "array",
+					"description": "Advice the AI sees under a tool output line its regex finds (a compiler error a model makes in this language).",
+					"items": {
+						"type": "object",
+						"properties": {
+							"match": {
+								"type": "string",
+								"minLength": 1
+							},
+							"hint": {
+								"type": "string",
+								"minLength": 1
+							},
+							"when": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"match",
+							"hint"
+						],
+						"additionalProperties": false
+					}
+				},
+				"aiDocs": {
+					"type": "array",
+					"description": "Reference docs the AI searches and reads with docs_search and docs_read: Markdown files under a folder inside the plugin.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"pattern": "^[a-z][a-z0-9-]*$",
+								"description": "The first part of the docs' paths for the AI (c4/library/bedrock.md)."
+							},
+							"title": {
+								"type": "string",
+								"minLength": 1
+							},
+							"folder": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Relative to the plugin's folder, inside it."
+							}
+						},
+						"required": [
+							"id",
+							"title",
+							"folder"
+						],
+						"additionalProperties": false
+					}
+				}
+			}
+		}
+	}
+}

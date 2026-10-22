@@ -1,0 +1,16 @@
+{
+	"description": "v10 on build/bin/langeval-drafts: the code blocks of each reply's thinking are kept as clips (draft, draft-<n>) before its tool calls run, and the prompt says to paste a drafted file with {{clip:draft}} instead of typing it again",
+	"apiDigests": [
+		{
+			"library": "Bedrock",
+			"out": "docs/library/bedrock-api.md",
+			"title": "Bedrock API digest"
+		}
+	],
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}
