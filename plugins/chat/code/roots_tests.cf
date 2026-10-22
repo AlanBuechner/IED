@@ -1,0 +1,35 @@
+// roots: a tool call's "<alias>:/" paths found, taken off and named in its permission subject (docs/28).
+
+include "roots.ch"
+
+static Serialization::DomNode RootArgs(const char* json) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(Core::StringView(json), *doc).root;
+}
+
+[test("server.ai.roots")]
+class RootsTests {
+	[test("aliases")]
+	public static void TestAliases() {
+		assert_se("ied", Ai::RootAlias(RootArgs("{\"path\": \"ied:/C4/a.cf\"}")).CStr(), "a path");
+		assert_se("ied", Ai::RootAlias(RootArgs("{\"pattern\": \"*.cf\", \"root\": \"ied:/\"}")).CStr(), "a glob's root");
+		assert_se("ied", Ai::RootAlias(RootArgs("{\"command\": \"nuke build\", \"cwd\": \"ied:/\"}")).CStr(), "a command's folder");
+		assert_se("", Ai::RootAlias(RootArgs("{\"path\": \"C:/x/a.cf\"}")).CStr(), "a drive is no alias");
+		assert_se("", Ai::RootAlias(RootArgs("{\"path\": \"src/a.cf\", \"content\": \"ied:/x\"}")).CStr(), "only path, root and cwd");
+		assert_se("", Ai::RootAlias(RootArgs("{\"path\": \"Ied:/a\"}")).CStr(), "lowercase");
+	}
+
+	[test("taken_off")]
+	public static void TestTakenOff() {
+		Serialization::DomNode args = RootArgs("{\"path\": \"ied:/C4/a.cf\", \"edits\": [{\"old\": \"ied:/\", \"new\": \"x\"}], \"cwd\": \"src\"}");
+		assert_se("{\"path\":\"C4/a.cf\",\"edits\":[{\"old\":\"ied:/\",\"new\":\"x\"}],\"cwd\":\"src\"}", Ai::WithoutAlias(args, Core::StringView("ied")).CStr(), "the path only");
+		assert_se("{\"root\":\"\"}", Ai::WithoutAlias(RootArgs("{\"root\": \"ied:/\"}"), Core::StringView("ied")).CStr(), "the root itself");
+	}
+
+	[test("subjects")]
+	public static void TestSubjects() {
+		assert_se("fs.write(ied:/C4/a.cf)", Ai::RootSubject(Core::StringView("fs.write(C4/a.cf)"), Core::StringView("ied")).CStr(), "a write");
+		assert_se("shell(ied:/nuke build)", Ai::RootSubject(Core::StringView("shell(nuke build)"), Core::StringView("ied")).CStr(), "a command");
+		assert_se("plain", Ai::RootSubject(Core::StringView("plain"), Core::StringView("ied")).CStr(), "no argument");
+	}
+}

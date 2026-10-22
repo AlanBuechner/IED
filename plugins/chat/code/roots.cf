@@ -1,0 +1,69 @@
+include "roots.ch"
+
+namespace Ai
+{
+	static const char*[3] kRootKeys = { "path", "root", "cwd" };
+
+	static bool IsRootKey(Core::StringView key) { return key == kRootKeys[0] || key == kRootKeys[1] || key == kRootKeys[2]; }
+
+	static Core::StringView AliasOf(Core::StringView value) {
+		const int64 colon = value.IndexOf(Core::StringView(":/"));
+		if (colon < 2) return Core::StringView();
+		for (int64 i = 0; i < colon; ++i)
+			if (value.ByteAt(i) < 'a' || value.ByteAt(i) > 'z') return Core::StringView();
+		return value.Substring(0, colon);
+	}
+
+	Core::String RootAlias(const Serialization::DomNode& args) {
+		for (int64 i = 0; i < 3; ++i) {
+			Core::StringView rootAlias = AliasOf(args.Member(kRootKeys[i]).AsView());
+			if (!rootAlias.IsEmpty()) return Core::String(rootAlias);
+		}
+		return Core::String();
+	}
+
+	Core::String WithoutAlias(const Serialization::DomNode& args, Core::StringView rootAlias) {
+		Core::String prefix = Core::String(rootAlias) + ":/";
+		IED::JsonWriter json;
+		json.BeginObject();
+		for (int64 i = 0; i < args.Count(); ++i) {
+			Core::StringView value = args.ValueAt(i).AsView();
+			json.Key(args.KeyAt(i));
+			if (IsRootKey(args.KeyAt(i)) && value.StartsWith(prefix.View())) json.String(value.Substring(prefix.ByteLength(), value.ByteLength() - prefix.ByteLength()));
+			else json.Raw(IED::NodeJson(args.ValueAt(i)).View());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String RootSubject(Core::StringView subject, Core::StringView rootAlias) {
+		const int64 open = subject.IndexOf('(', 0);
+		if (open < 0) return Core::String(subject);
+		return ((Core::String(subject.Substring(0, open + 1)) + rootAlias) + ":/") + subject.Substring(open + 1, subject.ByteLength() - open - 1);
+	}
+
+	bool OpenRoot(Core::StringView wsId, Core::StringView rootAlias, RootTarget& target, Core::String& problem) {
+		IED::JsonWriter args;
+		args.BeginObject();
+		args.Field("wsId", wsId);
+		args.Field("open", rootAlias);
+		args.EndObject();
+		IED::Result answer = IED::CallBinding(Core::StringView("ai.roots"), args.View());
+		Core::String nothing = (Core::String("nothing is reachable as ") + rootAlias) + ":/";
+		if (!answer.Ok()) {
+			problem = (nothing + " (") + answer.error.View() + ")";
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode roots = Serialization::ReadJson(answer.json.View(), *doc).root.Member("roots");
+		for (int64 i = 0; i < roots.Count(); ++i) {
+			Serialization::DomNode root = roots.At(i);
+			if (root.Member("alias").AsView() != rootAlias || root.Member("wsId").AsView().IsEmpty()) continue;
+			if (!IED::FindWorkspace(root.Member("wsId").AsView(), target.ws)) break;
+			target.confirm = root.Member("confirm").AsBool();
+			return true;
+		}
+		problem = nothing;
+		return false;
+	}
+}

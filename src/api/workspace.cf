@@ -19,6 +19,26 @@ namespace IED
 		return true;
 	}
 
+	bool OpenFolder(Core::StringView folder, Workspace& ws, Core::String& problem) {
+		Ied::CodeInstance* instance = Caller(problem);
+		if (!instance) return false;
+		if (!instance->May(Core::StringView("workspace.open"))) {
+			problem = Core::String("the plugin's manifest does not ask for the permission workspace.open");
+			return false;
+		}
+		FS::Path canonical = FS::CanonicalPath(Core::String(folder).CStr());
+		if (canonical.IsEmpty() || !FS::IsDirectory(canonical.CStr())) {
+			problem = Core::String("no folder ") + folder;
+			return false;
+		}
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		Ied::Workspace* found = server->workspaces->ForRoot(canonical);
+		if (!found) found = server->workspaces->Open(canonical, Core::StringView("folder"));
+		ws = Ied::PluginWorkspace(server, found);
+		return true;
+	}
+
 	Core::Array<Workspace> Workspaces() {
 		Core::Array<Workspace> open;
 		Core::String problem;

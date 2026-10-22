@@ -79,7 +79,7 @@
 				"net.egress", "net.listen",
 				"ai.invoke", "ai.tools", "ai.context",
 				"lsp", "dap", "git", "sandbox", "profiler",
-				"secrets", "settings.write",
+				"secrets", "settings.write", "workspace.open",
 				"ui.notifications", "ui.clipboard", "ui.externalLinks"
 			]
 		},

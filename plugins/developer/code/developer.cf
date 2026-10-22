@@ -1,0 +1,200 @@
+include "developer.ch"
+
+namespace Developer
+{
+	const char* kAlias = "ied";
+	const char* kKnownBugs = "C4/docs/status/known-bugs.md";
+	// Only an owner's chat in a trusted workspace gets it: an untrusted workspace's files could steer the AI into IED's own
+	// source.
+	const char* kWhen = "config.developer.enabled && workspaceTrusted";
+
+	// --- The source ------------------------------------------------------------------------------------------------
+
+	Core::String SourceFolder() {
+		Core::String home = IED::HomeFolder();
+		if (home.IsEmpty()) return Core::String();
+		FS::Path root = FS::Path(home.View());
+		const bool git = FS::IsDirectory((root / Core::StringView(".git")).CStr()) || FS::FileExists((root / Core::StringView(".git")).CStr());
+		const bool compiler = FS::IsDirectory((root / Core::StringView("C4/C4Lib/src")).CStr());
+		const bool server = FS::FileExists((root / Core::StringView("src/nuke.toml")).CStr());
+		return git && compiler && server ? home : Core::String();
+	}
+
+	// The source as a workspace: the open one rooted there, or opened now.
+	static bool SourceWorkspace(IED::Workspace& ws, Core::String& problem) {
+		Core::String source = SourceFolder();
+		if (source.IsEmpty()) {
+			problem = Core::String("IED is not running from its source checkout");
+			return false;
+		}
+		return IED::OpenFolder(source.View(), ws, problem);
+	}
+
+	// --- What a chat is told and given ----------------------------------------------------------------------------
+
+	static Core::String SectionEntries(Core::StringView source) {
+		Core::StringBuilder text;
+		text.Append("# IED itself (developer mode)\n\nThis IED runs from its source checkout at ");
+		text.Append(source);
+		text.Append(". Paths that start with ied:/ name files there (fs_read, fs_list, fs_glob, search_text, fs_edit, fs_write; cwd for shell_run); every write and command there asks the owner. ");
+		text.Append("When a failure comes from the C4 compiler, Bedrock, Nuke or IED rather than from this workspace, fix it there instead of working around it: read ied:/AGENTS.md and ied:/C4/AGENTS.md first, check ied_known_bugs, record a new C4 bug in ied:/C4/docs/status/known-bugs.md, add a test that would have caught it, run ied_rebuild and ied_gates, and say in the chat what you fixed.");
+		IED::JsonWriter json;
+		json.BeginArray();
+		json.BeginObject();
+		json.Field("id", "source");
+		json.Field("text", text.View());
+		json.IntField("maxTokens", 300);
+		json.Field("when", kWhen);
+		json.EndObject();
+		json.EndArray();
+		return json.ToString();
+	}
+
+	static void ToolEntry(IED::JsonWriter& json, const char* name, const char* toolClass, const char* description, const char* function, int64 seconds) {
+		json.BeginObject();
+		json.Field("name", name);
+		json.Field("description", description);
+		json.Field("class", toolClass);
+		json.RawField("inputSchema", Core::StringView("{\"type\": \"object\", \"properties\": {}, \"additionalProperties\": false}"));
+		json.Field("function", function);
+		json.IntField("timeoutSeconds", seconds);
+		json.Field("when", kWhen);
+		json.EndObject();
+	}
+
+	static Core::String ToolEntries() {
+		IED::JsonWriter json;
+		json.BeginArray();
+		ToolEntry(json, "ied_rebuild", "exec", "Build IED's source checkout (ied:/) with nuke build: the C4 toolchain (the dev toolchain workspaces pinned to dev use at once) and the IED server. Restarting IED onto a new server is the owner's. Returns the end of the output.", "Developer::RebuildTool", kBuildSeconds);
+		ToolEntry(json, "ied_gates", "exec", "Run nuke gates in IED's source checkout: every C4 test suite. Returns the end of the output.", "Developer::GatesTool", kBuildSeconds);
+		ToolEntry(json, "ied_known_bugs", "read", "The open entries of ied:/C4/docs/status/known-bugs.md and the next free BUG id, to check whether a bug is known before recording it.", "Developer::KnownBugsTool", 30);
+		json.EndArray();
+		return json.ToString();
+	}
+
+	// ai.roots: {wsId, open?} -> {roots: [{alias, title, folder, confirm, wsId?}]}; empty while developer.enabled is off
+	// in `wsId`, or `wsId` is not trusted.
+	static IED::Result Roots(IED::PluginContext* context, Core::StringView source, const Serialization::DomNode& args) {
+		IED::Workspace asking;
+		const bool trusted = IED::FindWorkspace(args.Member("wsId").AsView(), asking) && asking.trusted;
+		const bool enabled = trusted && context->Setting(Core::StringView("developer.enabled"), args.Member("wsId").AsView()) != "false";
+		IED::Workspace ws;
+		Core::String problem;
+		const bool opening = enabled && args.Member("open").AsView() == kAlias;
+		if (opening && !IED::OpenFolder(source, ws, problem)) return IED::Refusal(problem.View());
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("roots"));
+		json.BeginArray();
+		if (enabled) {
+			json.BeginObject();
+			json.Field("alias", kAlias);
+			json.Field("title", "IED source");
+			json.Field("folder", source);
+			json.BoolField("confirm", true);
+			if (opening) json.Field("wsId", ws.id.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return IED::Answer(json.View());
+	}
+
+	void Activate(IED::PluginContext& context) {
+		Core::String source = SourceFolder();
+		IED::JsonWriter state;
+		state.BeginObject();
+		state.Field("source", source.View());
+		state.EndObject();
+		context.Topic(Core::StringView("ied.developer/state"), state.View());
+		if (source.IsEmpty()) return;
+		Core::String problem;
+		if (!context.Contribute(Core::StringView("systemMessageSections"), Core::StringView(""), SectionEntries(source.View()).View(), problem)) context.Log(problem.View());
+		if (!context.Contribute(Core::StringView("toolCalls"), Core::StringView(""), ToolEntries().View(), problem)) context.Log(problem.View());
+		IED::PluginContext* at = &context;
+		context.Provide(Core::StringView("ai.roots"), [at, source](const Serialization::DomNode& args) -> IED::Result { return Roots(at, source.View(), args); });
+	}
+
+	// --- Tools ----------------------------------------------------------------------------------------------------
+
+	Core::String OutputTail(Core::StringView output, int64 most) {
+		if (output.ByteLength() <= most) return Core::String(output);
+		Core::StringView tail = output.Substring(output.ByteLength() - most, most);
+		const int64 line = tail.IndexOf(Core::StringView("\n"));
+		return Core::String("[...]\n") + (line >= 0 ? tail.Substring(line + 1, tail.ByteLength() - line - 1) : tail);
+	}
+
+	// `nuke <verb>` in the source, its exit and the end of its output.
+	static IED::ToolResult Nuke(const char* verb) {
+		IED::Workspace ws;
+		Core::String problem;
+		if (!SourceWorkspace(ws, problem)) return IED::ToolFailure(problem.View());
+		Core::Array<Core::String> argv;
+		argv.Push(Core::String("cmd.exe"));
+		argv.Push(Core::String("/d"));
+		argv.Push(Core::String("/c"));
+		argv.Push(Core::String((FS::Path(ws.root.View()) / Core::StringView("nuke.bat")).View()));
+		argv.Push(Core::String(verb));
+		IED::CommandResult ran = IED::RunCommand(ws, argv, Core::StringView(""), kBuildSeconds);
+		if (!ran.started || !ran.problem.IsEmpty()) return IED::ToolFailure(((Core::String("nuke ") + verb) + ": " + ran.problem.View()).View());
+		Core::StringBuilder out;
+		out.Append("nuke ");
+		out.Append(verb);
+		out.Append(ran.exitCode == 0 ? " succeeded" : " failed (exit ");
+		if (ran.exitCode != 0) {
+			out.AppendInt(ran.exitCode);
+			out.Append(")");
+		}
+		out.Append(":\n");
+		out.Append(OutputTail(ran.output.View(), kTailBytes).View());
+		IED::ToolResult result = IED::ToolText(out.View());
+		result.isError = ran.exitCode != 0;
+		return result;
+	}
+
+	IED::ToolResult RebuildTool(const IED::ToolCall& call) { return Nuke("build"); }
+
+	IED::ToolResult GatesTool(const IED::ToolCall& call) { return Nuke("gates"); }
+
+	Core::String OpenBugs(Core::StringView knownBugs) {
+		Core::StringBuilder out;
+		bool fenced = false;
+		bool inBug = false;
+		int64 count = 0;
+		int64 at = 0;
+		while (at < knownBugs.ByteLength()) {
+			int64 end = knownBugs.IndexOf('\n', at);
+			end = end < 0 ? knownBugs.ByteLength() : end;
+			Core::StringView line = knownBugs.Substring(at, end - at).Trimmed();
+			at = end + 1;
+			if (line.StartsWith(Core::StringView("```"))) fenced = !fenced;
+			if (fenced) continue;
+			if (line.StartsWith(Core::StringView("Next ID:"))) {
+				out.Append(line);
+				out.Append("\n");
+			}
+			if (line.StartsWith(Core::StringView("#"))) inBug = line.StartsWith(Core::StringView("### BUG-"));
+			if (line.StartsWith(Core::StringView("### BUG-"))) {
+				out.Append("\n");
+				out.Append(line.Substring(4, line.ByteLength() - 4));
+				out.Append("\n");
+				count += 1;
+			}
+			else if (inBug && (line.StartsWith(Core::StringView("- **Severity:**")) || line.StartsWith(Core::StringView("- **Status:**")) || line.StartsWith(Core::StringView("- **Symptom:**")))) {
+				out.Append(line);
+				out.Append("\n");
+			}
+		}
+		if (count == 0) out.Append("\nNo open bugs.\n");
+		return out.ToString();
+	}
+
+	IED::ToolResult KnownBugsTool(const IED::ToolCall& call) {
+		IED::Workspace ws;
+		Core::String problem;
+		if (!SourceWorkspace(ws, problem)) return IED::ToolFailure(problem.View());
+		Core::String text;
+		if (!IED::ReadFile(ws, Core::StringView(kKnownBugs), text, problem)) return IED::ToolFailure(problem.View());
+		return IED::ToolText(OpenBugs(text.View()).View());
+	}
+}

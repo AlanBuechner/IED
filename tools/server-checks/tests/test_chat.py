@@ -182,7 +182,9 @@ class FakeModel:
 		self.process.wait(10)
 
 
-class ChatTests(ServerTestCase):
+class ChatCase(ServerTestCase):
+	"""A server with the chat plugin against the fake model, and the helpers the chat checks share."""
+
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="ied-chat-")
 		self.repo = os.path.join(self.root, "Game")
@@ -245,6 +247,8 @@ class ChatTests(ServerTestCase):
 
 	# --- Answers -----------------------------------------------------------------------------------------------------
 
+
+class ChatTests(ChatCase):
 	async def test_an_answer_streams_into_a_text_segment(self):
 		chat_id, topic = await self.chat()
 		self.model.queue("ok-text")

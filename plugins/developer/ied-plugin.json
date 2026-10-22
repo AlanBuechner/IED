@@ -1,0 +1,35 @@
+// Developer mode (docs/28): when IED runs from its source checkout, a chat can fix the C4 compiler, Bedrock, Nuke or
+// IED itself where a bug lives instead of working around it - the source as the root "ied:/" of its file tools (the
+// ai.roots binding, which the chat plugin consumes), a system-message section that says how, and the tools ied_rebuild,
+// ied_gates and ied_known_bugs, loaded on demand. Its server code (code/) is compiled into the server; on an installed
+// IED, which has no source, it contributes nothing.
+{
+	"manifestVersion": 1,
+	"id": "ied.developer",
+	"name": "Developer Mode",
+	"version": "0.1.0",
+	"description": "When IED runs from its source, chats can fix IED and the C4 toolchain as they work.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "Developer::Activate", "ui": "ui/index.js" },
+	"permissions": ["process.spawn", "fs.read", "workspace.open"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Environment/Developer" },
+		"bindings": {
+			"provides": [
+				{
+					"name": "ai.roots",
+					"version": "1.0.0",
+					"kind": "function",
+					"description": "Other workspaces a chat of `wsId` may reach by an alias: {wsId, open?: alias} -> {roots: [{alias, title, folder, confirm, wsId?}]}; `open` opens the alias's folder as a workspace and gives its wsId (docs/28)."
+				}
+			]
+		},
+		"statusBarItems": [
+			{ "id": "ied.developer.status", "alignment": "left", "priority": 5, "view": "DeveloperStatus", "command": "ied.developer.settings" }
+		],
+		"commands": [
+			{ "id": "ied.developer.settings", "title": "Developer Mode Settings", "category": "Developer", "icon": "$(tools)" }
+		]
+	}
+}

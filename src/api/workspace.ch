@@ -48,6 +48,10 @@ namespace IED
 	bool FindWorkspace(Core::StringView wsId, Workspace& ws);
 	// The open workspaces the calling plugin is loaded for.
 	Core::Array<Workspace> Workspaces();
+	// Opens `folder` (an absolute path) as a workspace, or finds the open one rooted there, as the owner opening it would:
+	// its watcher, documents and plugins start, and clients list it (permission workspace.open; it does not go in the
+	// recent projects). False with `problem` when it is no folder.
+	bool OpenFolder(Core::StringView folder, Workspace& ws, Core::String& problem);
 	// A file of `ws` by its workspace-relative path; false with `problem` when it cannot be read.
 	bool ReadFile(const Workspace& ws, Core::StringView path, Core::String& text, Core::String& problem);
 	// Writes a file of `ws` (its folders made); false with `problem` when it cannot be written.

@@ -1,5 +1,6 @@
 include "api/plugin.ch"
 include "run.ch"
+include "roots.ch"
 
 namespace Ai
 {
@@ -128,14 +129,28 @@ namespace Ai
 		invocation.callId = segment->callId;
 		invocation.args = args;
 		invocation.cancelled = &run->cancelled;
+		Core::String rootAlias = RootAlias(args);
+		RootTarget root;
+		if (!rootAlias.IsEmpty()) {
+			Core::String problem;
+			if (!OpenRoot(WsId(ws), rootAlias.View(), root, problem)) return ToolError(((spec->name + ": ") + problem.View()).View());
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			invocation.ws = root.ws;
+			invocation.args = Serialization::ReadJson(WithoutAlias(args, rootAlias.View()).View(), *doc).root;
+		}
 		try {
 			ToolPlan plan = spec->plan(invocation);
 			if (!plan.error.IsEmpty()) return ToolError(plan.error.View());
+			if (!rootAlias.IsEmpty()) plan.subject = RootSubject(plan.subject.View(), rootAlias.View());
 			Core::String why;
 			Permit permit = Permit::Allow;
 			{
 				IED::HostLock guard(*context);
 				permit = Decide(chat->permission, spec->toolClass, rules, chat->allowed, plan.subject.View(), why);
+			}
+			if (!rootAlias.IsEmpty() && root.confirm && spec->toolClass != ToolClass::Read && permit == Permit::Allow) {
+				permit = Permit::Ask;
+				why = (Core::String("every write and command in ") + rootAlias) + ":/ asks the owner";
 			}
 			if (permit == Permit::Deny) {
 				Core::Array<Core::String> values;
@@ -159,7 +174,7 @@ namespace Ai
 			ToolOutcome outcome = spec->run(invocation);
 			outcome.ms = ToolNowMs() - ran;
 			outcome.timed = true;
-			if (spec->toolClass == ToolClass::Write && !outcome.isError) {
+			if (spec->toolClass == ToolClass::Write && !outcome.isError && rootAlias.IsEmpty()) {
 				IED::HostLock guard(*context);
 				TrackModified(IED::NormalizePath(args.Member("path").AsView()).View(), outcome.plus, outcome.minus);
 			}
