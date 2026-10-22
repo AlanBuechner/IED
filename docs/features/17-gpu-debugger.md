@@ -75,7 +75,7 @@ PIX is the UI reference - layout and styling (owner decision 2026-10-19; RenderD
 
 | ID | Feature | Pri | Stories | Beyond |
 |---|---|---|---|---|
-| F-GPU-70 | AI tools `T-GPU-*` (`docs/13`) | P1 | US-GPU-5 | - |
+| F-GPU-70 | AI tools `T-GPU-*` (`docs/13`) | P1 | US-GPU-5 | the read tools built 2026-10-21 |
 | F-GPU-71 | Chat attachments `@gpu:` capture, event, pixel, resource; GPU tool cards render thumbnails and value tables | P1 | US-GPU-5 | - |
 | F-GPU-72 | "Explain this event / pixel / pass" on context menus | P1 | US-GPU-5 | - |
 | F-GPU-73 | Golden-capture tests (pixel assertions, image compare) through the test provider binding | P2 | US-GPU-6 | - |

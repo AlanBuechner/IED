@@ -1,4 +1,5 @@
 #include "texels.h"
+#include "png.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,16 +14,22 @@ namespace fb::replay
 		const u32 outWidth = (width + step - 1) / step, outHeight = (height + step - 1) / step;
 		std::vector<float> shown((size_t)outWidth * outHeight * 4);
 		double minimum[4] = {INFINITY, INFINITY, INFINITY, INFINITY}, maximum[4] = {-INFINITY, -INFINITY, -INFINITY, -INFINITY};
+		double sum[4] = {};
+		u64 finite[4] = {};
 		u64 nans = 0, infs = 0, negatives = 0;
+		size_t firstBad = SIZE_MAX;
 		for (size_t i = 0; i < texels.size(); ++i) {
 			const float v = texels[i];
-			if (std::isnan(v)) ++nans;
-			else if (std::isinf(v)) ++infs;
-			else {
-				if (v < 0) ++negatives;
-				minimum[i % 4] = std::min<double>(minimum[i % 4], v);
-				maximum[i % 4] = std::max<double>(maximum[i % 4], v);
+			if (std::isnan(v) || std::isinf(v)) {
+				++(std::isnan(v) ? nans : infs);
+				firstBad = std::min(firstBad, i / 4);
+				continue;
 			}
+			if (v < 0) ++negatives;
+			minimum[i % 4] = std::min<double>(minimum[i % 4], v);
+			maximum[i % 4] = std::max<double>(maximum[i % 4], v);
+			sum[i % 4] += v;
+			++finite[i % 4];
 		}
 		for (u32 y = 0; y < outHeight; ++y) {
 			for (u32 x = 0; x < outWidth; ++x) {
@@ -61,10 +68,33 @@ namespace fb::replay
 		out.BeginArray("max");
 		for (double v : maximum) out.Double(std::isinf(v) ? 0.0 : v);
 		out.EndArray();
+		out.BeginArray("mean");
+		for (int c = 0; c < 4; ++c) out.Double(finite[c] ? sum[c] / (double)finite[c] : 0.0);
+		out.EndArray();
 		out.Uint("nan", nans);
 		out.Uint("inf", infs);
 		out.Uint("negative", negatives);
+		if (firstBad != SIZE_MAX) out.BeginObject("firstBad").Uint("x", firstBad % width).Uint("y", firstBad / width).EndObject();
 		out.String("encoding", "rgba32f");
+	}
+
+	bool SaveShownPng(const JsonValue& shown, const std::vector<u8>& rgba, double lo, double hi, const std::wstring& path) {
+		const u32 width = (u32)shown["width"].Uint(), height = (u32)shown["height"].Uint();
+		if (!width || !height || rgba.size() < (size_t)width * height * 16) return false;
+		const float* texels = (const float*)rgba.data();
+		const bool encode = shown["linear"].Bool();
+		const double span = hi > lo ? hi - lo : 1.0;
+		std::vector<u8> bytes((size_t)width * height * 4);
+		for (size_t i = 0; i < (size_t)width * height; ++i) {
+			for (int c = 0; c < 3; ++c) {
+				const float raw = texels[i * 4 + c];
+				double v = std::isnan(raw) ? 0.0 : std::min(std::max((raw - lo) / span, 0.0), 1.0);
+				if (encode) v = v <= 0.0031308 ? v * 12.92 : 1.055 * std::pow(v, 1 / 2.4) - 0.055;
+				bytes[i * 4 + c] = (u8)std::lround(v * 255.0);
+			}
+			bytes[i * 4 + 3] = 255;
+		}
+		return WritePng(path, width, height, bytes.data(), (size_t)width * 4);
 	}
 
 	void PixelValues(const FormatInfo& info, const u8* data, size_t rowPitch, u32 x, u32 y, JsonWriter& out) {

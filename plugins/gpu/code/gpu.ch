@@ -129,6 +129,8 @@ namespace GpuDebug
 		public Session* Open(Core::StringView wsId, Capture* capture);
 		// One ied-gpu/1 request: the result's JSON, with `blob` the id of its binary part ("" when none).
 		public Core::String Call(Session* session, Core::StringView method, Core::StringView params, Core::String& blob);
+		// The same with the binary part as bytes.
+		public Core::String Ask(Session* session, Core::StringView method, Core::StringView params, Core::Array<uint8>& binary);
 		public void Close(Session* session, Core::StringView why);
 		public void CloseIdle();
 
@@ -143,5 +145,7 @@ namespace GpuDebug
 	}
 
 	void RegisterMethods(Debugger* debugger);
+	// The gpu.query binding the gpu_* AI tools answer through (tools.cf).
+	void ProvideQuery(Debugger* debugger);
 	void Activate(IED::PluginContext& context);
 }

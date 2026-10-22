@@ -154,6 +154,8 @@ Phone (one pane at a time, `docs/15`): capture library, event list with timings,
 
 GPU tools (`docs/13`, group `gpu`) let the agent work the debugger the way the owner does: list and search events, read state, read pixel values and histories, run shader debugging and get the trace as data, scan a render target for NaN/Inf, bisect which event first wrote a bad value, fetch timing and counters, compare two captures, and look at a texture (vision models only; privacy rules apply). Typical asks: "why is this pixel black?", "which pass got slower since yesterday's build?", "why does the shadow pass take 3 ms?". Answers cite EIDs, which the UI turns into links.
 
+Built (2026-10-21, `docs/13` T-GPU): `gpu_captures`, `gpu_events`, `gpu_resources`, `gpu_event_state`, `gpu_shader`, `gpu_pixel`, `gpu_texture` (statistics and the image, written by the replayer's `png` method under `.ied/local/gpu-captures/ai/`), `gpu_buffer`, `gpu_scan` and `gpu_timing`, plain C4 `function` tools answering through the plugin's `gpu.query` binding from the capture's replay session, with the `gpu` skill and a system-message section. Not yet: `gpu_capture`, the pixel history, shader debugging, `gpu_compare` and edit-and-replay.
+
 ## Integrations
 
 - **Profiler:** shared marker names; GPU zone -> capture event and back; capture on hitch.
@@ -191,6 +193,8 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   and Performance; the timeline, the events grid with its filter, the state tree, the resource viewer (channels, range,
   NaN / Inf / negative visualizing, mips and slices, picks), the buffer view, the shader and Mesh panels, and the API Calls, Messages,
   Resources and Warnings grids; at phone width the events below one of Output, State or Calls.
+- **AI:** the read-only `gpu_*` tools ("AI" above), `plugins/gpu/code/tools.cf`, `tooltext.cf`, `toolinspect.cf`, and
+  the `gpu` skill.
 - **C4:** Bedrock `Gpu::Capture` (`C4/docs/library/bedrock.md` section 18) and the headless sample
   `plugins/gpu/samples/c4`.
 - **Checks:** `nuke test flashbang` (`flashbang-tests`, and `native/tests/test_flashbang.py`, which captures the D3D12
@@ -199,7 +203,7 @@ Built (G1 for D3D12 and Vulkan), in `plugins/gpu/`:
   (launch, capture, open, replay, blobs, comment, delete, refusals; a Vulkan launch through the layer), Bedrock
   `gpu_tests.cf`.
 
-Not yet: the AI tools; Pixel History and the rest of G2.
+Not yet: Pixel History and the rest of G2.
 
 ## Risks
 

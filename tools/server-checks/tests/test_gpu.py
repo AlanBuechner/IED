@@ -2,7 +2,7 @@
 control pipe and shows on gpu:<wsId>; Capture Next Frame writes a .flash with its sidecar and thumbnail into
 .ied/local/gpu-captures, published as it lands; gpu.open starts a replay whose ied-gpu/1 requests answer through
 gpu.replay, binary parts as blobs; comments land in the sidecar; a delete ends the capture's replay and moves its files
-to the trash; refusals. Needs the native parts (nuke build flashbang) and a D3D12 device; skipped without them."""
+to the trash; the gpu_* AI tools answer through the gpu.query binding; refusals. Needs the native parts (nuke build flashbang) and a D3D12 device; skipped without them."""
 
 import json
 import os
@@ -46,6 +46,7 @@ class GpuTests(ServerTestCase):
 		plugin = os.path.join(self.home, "plugins", "gpu")
 		os.makedirs(plugin)
 		shutil.copy(os.path.join(REPO, "plugins", "gpu", "settings.schema.json"), plugin)
+		shutil.copytree(os.path.join(REPO, "plugins", "gpu", "skills"), os.path.join(plugin, "skills"))
 		write(os.path.join(plugin, "ied-plugin.json"), gpu_manifest())
 		launch = {"type": "native", "request": "launch", "program": SAMPLE.replace("\\", "/"), "args": ["--hidden"], "cwd": "${projectRoot}"}
 		vulkan = dict(launch, program=VULKAN_SAMPLE.replace("\\", "/"))
@@ -164,6 +165,45 @@ class GpuTests(ServerTestCase):
 		blob = self.server.request("GET", "/api/blob/" + reply["blob"], headers={"Cookie": self.cookie})
 		self.assertEqual(320 * 180 * 16, len(blob.body))
 		await self.client.request("gpu.close", {"sessionId": session})
+
+	async def test_the_ai_reads_captures_through_the_binding(self):
+		capture = await self.capture_frame()
+		async def ask(tool, **args):
+			return (await self.client.request("plugins.call", {"name": "gpu.query", "wsId": "w1", "args": {"wsId": "w1", "tool": tool, "args": args}}))["result"]
+		async def text(tool, **args):
+			return (await ask(tool, **args))["text"]
+		self.assertIn(capture["id"] + " | fb-sample-d3d12 | D3D12", await text("captures"))
+		events = await text("events")
+		self.assertIn("marker  Cube A", events)
+		draws = [line for line in (await text("events", filter="kind:draw")).splitlines() if line[:1].isdigit()]
+		self.assertTrue(draws and all("  draw  " in line for line in draws), draws)
+		last_draw = int(draws[-1].split()[0])
+		cube = int(draws[2].split()[0])   # Cube B: Floor, Cube A, Cube B, Cube C, Tonemap
+
+		state = await text("state", eid=cube)
+		self.assertIn(f"Pipeline state at EID {cube}, pipeline Lit", state)
+		self.assertIn(", rt]", state, "what the draw writes is marked")
+		self.assertIn("layout float3 POSITION0; float3 NORMAL0; float2 TEXCOORD0", state)
+		vb = int(state.split("VB 0: ")[1].split("[#")[1].split(",")[0])
+		self.assertIn("+0: ", await text("buffer", eid=cube, resource=vb, size=64))
+		shader = await text("shader", eid=cube, stage="ps")
+		self.assertIn("ps shader of pipeline Lit", shader)
+		self.assertIn("HDR", await text("resources"))
+
+		texture = await ask("texture", eid=cube)
+		self.assertIn("1280x720 R16G16B16A16_FLOAT", texture["text"])
+		self.assertIn("NaN 0, Inf 0", texture["text"])
+		self.assertTrue(os.path.isfile(os.path.join(self.repo, texture["image"])), texture["image"])
+		self.assertIn(f"after EID {cube}: ", await text("pixel", eid=cube, x=640, y=360))
+		self.assertIn("none after the frame's last action", await text("scan"))
+		timing = await text("timing", repeat=2)
+		self.assertIn("GPU time of the frame: ", timing)
+		self.assertIn("Cube A", timing)
+		self.assertIn(f" | {last_draw} | ", await text("timing", by="event", repeat=2, top=50))
+		with self.assertRaises(RpcFailure):
+			await ask("state")
+		with self.assertRaises(RpcFailure):
+			await ask("events", capture="nope")
 
 	async def test_refusals(self):
 		with self.assertRaises(RpcFailure) as caught:

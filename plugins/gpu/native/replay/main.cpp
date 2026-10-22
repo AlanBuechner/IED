@@ -8,9 +8,6 @@
 //   flashbang-replay <capture> png <resource id> <eid> <out.png> [mip]
 #include "session.h"
 
-#include "png.h"
-
-#include <cmath>
 #include <cstdio>
 #include <fcntl.h>
 #include <io.h>
@@ -106,26 +103,6 @@ namespace
 		fprintf(stderr, "usage: flashbang-replay --rpc | <capture> [--no-device] [--debug-layer] info|events|resources|messages|state <eid>|calls <eid>|timing [repeat]|png <id> <eid> <out.png> [mip]\n");
 		return 2;
 	}
-
-	// A texture's RGBA32F as an 8-bit PNG: values clamped, linear ones sRGB-encoded.
-	bool SavePng(const JsonValue& info, const std::vector<u8>& binary, const char* path) {
-		const u32 width = (u32)info["width"].Uint(), height = (u32)info["height"].Uint();
-		if (binary.size() < (size_t)width * height * 16) return false;
-		const float* texels = (const float*)binary.data();
-		std::vector<u8> rgba((size_t)width * height * 4);
-		const bool encode = info["linear"].Bool();
-		for (size_t i = 0; i < (size_t)width * height; ++i) {
-			for (int c = 0; c < 4; ++c) {
-				float v = texels[i * 4 + c];
-				if (std::isnan(v)) v = 0;
-				v = std::min(std::max(v, 0.0f), 1.0f);
-				if (c < 3 && encode) v = v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1 / 2.4f) - 0.055f;
-				rgba[i * 4 + c] = (u8)std::lround(v * 255.0f);
-			}
-			rgba[i * 4 + 3] = 255;
-		}
-		return WritePng(Widen(path), width, height, rgba.data(), (size_t)width * 4);
-	}
 }
 
 int main(int argc, char** argv) {
@@ -164,12 +141,10 @@ int main(int argc, char** argv) {
 	else if ((command == "state" || command == "calls") && at + 1 < argc) answer = run(command == "state" ? "state" : "apiCalls", Format("{\"eid\":%s}", argv[at + 1]));
 	else if (command == "timing") answer = run("timing", Format("{\"repeat\":%s}", at + 1 < argc ? argv[at + 1] : "3"));
 	else if (command == "png" && at + 3 < argc) {
-		answer = run("texture", Format("{\"id\":%s,\"eid\":%s,\"mip\":%s,\"maxSize\":8192}", argv[at + 1], argv[at + 2], at + 4 < argc ? argv[at + 4] : "0"));
-		if (answer.error.empty()) {
-			JsonValue info;
-			JsonValue::Parse(answer.result.data(), answer.result.size(), info, error);
-			if (!SavePng(info, answer.binary, argv[at + 3])) answer.error = "the PNG could not be written";
-		}
+		JsonWriter request;
+		request.BeginObject().Uint("id", strtoull(argv[at + 1], nullptr, 10)).Uint("eid", strtoul(argv[at + 2], nullptr, 10)).String("path", argv[at + 3]);
+		request.Uint("mip", at + 4 < argc ? strtoul(argv[at + 4], nullptr, 10) : 0).Uint("maxSize", 8192).EndObject();
+		answer = run("png", request.Text());
 	}
 	else return Usage();
 	if (!answer.error.empty()) {

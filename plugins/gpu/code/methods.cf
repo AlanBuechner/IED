@@ -234,6 +234,7 @@ namespace GpuDebug
 	void Activate(IED::PluginContext& context) {
 		Debugger* debugger = new Debugger(&context);
 		RegisterMethods(debugger);
+		ProvideQuery(debugger);
 		context.OnWorkspace([debugger](const IED::Workspace& ws) { debugger->Opened(ws); });
 		context.OnFilesChanged([debugger](const IED::FileChanges& changes) { FilesChanged(debugger, changes); });
 	}

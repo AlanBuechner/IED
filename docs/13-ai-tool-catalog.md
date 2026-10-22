@@ -211,20 +211,24 @@ Chats of one workspace talking to each other (`docs/04` "Chats talk to each othe
 
 ### `gpu`
 
-From `ied.gpu` (`docs/22`). Results cite EIDs, which the UI renders as links; images go only to vision-capable models the chat's privacy allows.
+From `ied.gpu` (`docs/22` "AI"). **Built** (2026-10-21): the read tools below marked built, `function` tools of the plugin's C4 code (`plugins/gpu/code/tools.cf`) answering through its `gpu.query` binding from the capture's replay session - the same answers the UI shows - as compact text (`tooltext.cf`, `toolinspect.cf`); the `gpu` skill (`plugins/gpu/skills/gpu`) says how to debug a frame with them. Every tool takes `capture` (an id from `gpu_captures`, default `"latest"`); answers cite EIDs and resources as `[#id]`, marked `rt`, `depth` or `uav` when the event writes them; a refusal (no such capture, a missing `eid`) is the tool's error. Images go only to vision-capable models (the chat's images in tool results).
 
 | ID | Tool | Class | Notes |
 |---|---|---|---|
-| T-GPU-1 | `gpu_capture(task?, frames?)` | exec | Build + launch under the active backend, capture N frames, return the capture id. |
-| T-GPU-2 | `gpu_events(capture, filter?, range?)` | read | Marker tree slice with EIDs, kinds and GPU times; same filter language as the Event Browser. |
-| T-GPU-3 | `gpu_event_state(capture, eid, stages?)` | read | Normalized pipeline state: shaders, bindings (bindless resolved with names), targets, blend/depth/raster. |
-| T-GPU-4 | `gpu_pixel(capture, eid, target, x, y)` | read | Typed value plus pixel history with failed tests and a one-line summary. |
-| T-GPU-5 | `gpu_debug_shader(capture, eid, target: pixel(x,y)|vertex(i)|thread(xyz))` | read | Runs the shader debugger; returns executed source lines with variable values (bounded). |
-| T-GPU-6 | `gpu_scan(capture, target, check: nan|inf|negative|range, eids?)` | read | Bisects the first event that produced bad values; returns EID and pixel count. |
-| T-GPU-7 | `gpu_timing(capture, by: event|pass, top?)` | read | GPU times (median of N replays), pipeline statistics, counters when a provider is present. |
-| T-GPU-8 | `gpu_compare(a, b)` | read | Aligned events: state diffs, output image diffs (changed-pixel %), timing deltas per pass. |
-| T-GPU-9 | `gpu_texture(capture, eid, resource, mip?, region?)` | read | Image for vision models plus stats (min/max/mean, NaN count, histogram). |
-| T-GPU-10 | `gpu_replay_with_shader(capture, shader, source)` | exec | Edit and Replay without saving; returns the output diff. |
+| T-GPU-1 | `gpu_capture(task?, frames?)` | exec | Build + launch under the active backend, capture N frames, return the capture id. Not yet. |
+| T-GPU-2 | `gpu_events(capture?, filter?, all?, max?)` | read | **Built.** The events in order with EID, kind and name, indented under their markers; `filter` words must all be in the name, `kind:draw` words pick kinds (the UI's filter language without the time terms); `all` adds the state-setting calls; 400 lines unless `max`. GPU times come from `gpu_timing`. |
+| T-GPU-3 | `gpu_event_state(capture?, eid, all?)` | read | **Built.** The state tree by stage (a marker: its last action's): shaders, bindings resolved with names, targets, blend/depth/raster, descriptor sets or root signature, push constants; buffers with their offset and layout; `all` adds the descriptor heaps. |
+| T-GPU-4 | `gpu_pixel(capture?, eid, resource?, x, y, mip?, slice?)` | read | **Built**: the texel's typed value and raw bits, the texture defaulting to what the event writes. Not yet: the pixel history with failed tests. |
+| T-GPU-5 | `gpu_debug_shader(capture, eid, target: pixel(x,y)|vertex(i)|thread(xyz))` | read | Runs the shader debugger; returns executed source lines with variable values (bounded). Not yet (G2). |
+| T-GPU-6 | `gpu_scan(capture?, resource?, check: nan|inf|negative)` | read | **Built.** The first action (draw, dispatch, copy, clear, resolve) after which the texture holds bad values, by bisection over the frame (a frame of up to 64 actions whose end is clean is checked action by action), with the count before it; the texture defaults to what the last action writes. Not yet: `range` and an EID window. |
+| T-GPU-7 | `gpu_timing(capture?, by: pass|event, top?, repeat?)` | read | **Built.** The frame's GPU time (median of `repeat` replays), by pass (markers, nested) or the `top` costliest actions with primitives and PS and CS invocations. Not yet: vendor counters. |
+| T-GPU-8 | `gpu_compare(a, b)` | read | Aligned events: state diffs, output image diffs (changed-pixel %), timing deltas per pass. Not yet. |
+| T-GPU-9 | `gpu_texture(capture?, eid, resource?, mip?, slice?)` | read | **Built.** Size, format, each channel's min/max/mean, NaN/Inf/negative counts and where the first NaN or Inf is, and the image (a PNG of at most 1024 on a side under `.ied/local/gpu-captures/ai/`, a float texture brighter than 1 scaled to its brightest); the texture defaults to what the event writes. Not yet: a region, a histogram. |
+| T-GPU-10 | `gpu_replay_with_shader(capture, shader, source)` | exec | Edit and Replay without saving; returns the output diff. Not yet. |
+| T-GPU-11 | `gpu_captures()` | read | **Built.** The workspace's captures, newest first: id, program, API, frame, time, GPU, size, comment. |
+| T-GPU-12 | `gpu_resources(capture?, filter?)` | read | **Built.** Id, name, type, format, size, first using EID and use count. |
+| T-GPU-13 | `gpu_shader(capture?, eid, stage)` | read | **Built.** A stage's kind (DXBC, DXIL, SPIR-V), bindings, constant buffers or blocks with members and offsets, and up to 300 lines of disassembly. |
+| T-GPU-14 | `gpu_buffer(capture?, eid, resource, offset?, size?, as?: float|uint|int|hex)` | read | **Built.** Up to 4 KiB of a buffer after the event, 16 bytes a line. |
 
 ### Plugin and MCP tools
 

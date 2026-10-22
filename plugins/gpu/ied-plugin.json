@@ -3,7 +3,7 @@
 // .ied/local/gpu-captures; each capture opens as a document in PIX's layout - the timing timeline, the events grid,
 // the Pipeline view with the resource viewer, and the docked API Calls, Messages and Warnings - replayed on the
 // server by flashbang-replay, one process per open capture. Its server code (code/) runs on the plugin API (docs/26
-// "Built-ins on the API"): the gpu.* methods and the gpu: and gpurs: topics.
+// "Built-ins on the API"): the gpu.* methods, the gpu: and gpurs: topics, and the gpu_* AI tools.
 {
 	"manifestVersion": 1,
 	"id": "ied.gpu",
@@ -13,9 +13,17 @@
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "entry": "GpuDebug::Activate", "ui": "ui/index.js" },
-	"permissions": ["process.spawn", "fs.read", "fs.write", "fs.watch"],
+	"permissions": ["process.spawn", "fs.read", "fs.write", "fs.watch", "ai.tools"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "GPU Debugger" },
+		"bindings": {
+			"provides": [
+				{ "name": "gpu.query", "version": "1", "kind": "function", "description": "A gpu_* tool's answer: {wsId, tool: captures|events|resources|state|shader|pixel|buffer|texture|scan|timing, args} -> {text, image?} (image: a PNG relative to the workspace root)." }
+			],
+			"consumes": [
+				{ "name": "gpu.query", "version": "1" }
+			]
+		},
 		"outputSources": [ { "id": "gpu", "title": "GPU" } ],
 		"activities": [
 			{ "id": "ied.gpu", "title": "GPU", "icon": "$(device-camera)", "order": 45 }
@@ -47,6 +55,104 @@
 		"keybindings": [
 			{ "command": "ied.gpu.launch", "key": "alt+f5" },
 			{ "command": "ied.gpu.show", "key": "ctrl+alt+f5" }
+		],
+		"skills": ["skills"],
+		"systemMessageSections": [
+			{ "id": "gpu", "text": "The GPU debugger holds the workspace's frame captures (.ied/local/gpu-captures) from D3D12 and Vulkan programs. To find why a frame renders wrong or slowly, read them with the gpu_* tools: gpu_captures, then gpu_events, gpu_event_state, gpu_texture (which shows the image), gpu_pixel, gpu_buffer, gpu_shader, gpu_scan for the first event that wrote NaN, Inf or negative values, and gpu_timing. Read the gpu skill before debugging a frame." }
+		],
+		"toolCalls": [
+			{
+				"name": "gpu_captures",
+				"description": "The workspace's GPU frame captures, newest first: id, program, API (D3D12 or Vulkan), frame, when, GPU, size and comment.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": {  }, "additionalProperties": false },
+				"function": "GpuDebug::CapturesTool"
+			},
+			{
+				"name": "gpu_events",
+				"description": "A capture's events in order: EID, kind (marker, draw, dispatch, copy, clear, barrier, present, ...) and name (the API call with its arguments, or the marker's text), indented under their markers. `filter` keeps events whose name has every word, and `kind:draw` words keep those kinds; `all` adds the state-setting calls.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "filter": { "type": "string" }, "all": { "type": "boolean" }, "max": { "type": "integer", "minimum": 1, "maximum": 5000 } }, "additionalProperties": false },
+				"function": "GpuDebug::EventsTool"
+			},
+			{
+				"name": "gpu_resources",
+				"description": "A capture's resources: id, name, type, format, size, the first event that uses it and how many do. `filter` keeps names that hold it.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "filter": { "type": "string" } }, "additionalProperties": false },
+				"function": "GpuDebug::ResourcesTool"
+			},
+			{
+				"name": "gpu_event_state",
+				"description": "The pipeline state an event sees, by stage: input assembly with vertex and index buffers, the shaders, rasterizer, render and depth targets with blend and depth-stencil, the root signature or descriptor sets with every binding resolved to its resource and name, push constants. A marker shows its last action's state. Resources carry their [#id] and what the event writes is marked rt, depth or uav; buffers say their offset and layout.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The event, by its EID from gpu_events." }, "all": { "type": "boolean", "description": "Also list the descriptor heaps." } }, "required": ["eid"], "additionalProperties": false },
+				"function": "GpuDebug::StateTool"
+			},
+			{
+				"name": "gpu_shader",
+				"description": "A pipeline stage's shader at an event: its kind (DXBC, DXIL or SPIR-V), bindings, constant buffers or uniform blocks with their members and offsets, and the disassembly (up to 300 lines).",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The event, by its EID from gpu_events." }, "stage": { "enum": ["vs", "hs", "ds", "gs", "ps", "fs", "cs", "as", "ms", "tcs", "tes", "task", "mesh"] } }, "required": ["eid", "stage"], "additionalProperties": false },
+				"function": "GpuDebug::ShaderTool"
+			},
+			{
+				"name": "gpu_pixel",
+				"description": "One texel of a texture after an event, as stored: its typed value and raw bits. The texture defaults to what the event writes (its render target, else depth, else storage texture).",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The event, by its EID from gpu_events." }, "resource": { "type": "integer", "minimum": 1, "description": "A resource id ([#id] in gpu_event_state, or gpu_resources)." }, "x": { "type": "integer", "minimum": 0 }, "y": { "type": "integer", "minimum": 0 }, "mip": { "type": "integer", "minimum": 0 }, "slice": { "type": "integer", "minimum": 0 } }, "required": ["eid", "x", "y"], "additionalProperties": false },
+				"function": "GpuDebug::PixelTool"
+			},
+			{
+				"name": "gpu_texture",
+				"description": "A texture after an event: its size and format, each channel's min, max and mean over every texel, NaN, Inf and negative counts with where the first NaN or Inf is, and the image itself (up to 1024 pixels on a side; a float texture brighter than 1 is scaled to its brightest). The texture defaults to what the event writes.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The event, by its EID from gpu_events." }, "resource": { "type": "integer", "minimum": 1, "description": "A resource id ([#id] in gpu_event_state, or gpu_resources)." }, "mip": { "type": "integer", "minimum": 0 }, "slice": { "type": "integer", "minimum": 0 } }, "required": ["eid"], "additionalProperties": false },
+				"function": "GpuDebug::TextureTool"
+			},
+			{
+				"name": "gpu_buffer",
+				"description": "A buffer's bytes after an event, 16 a line, read as 32-bit floats (the default), uint, int or hex. Offsets are in bytes; gpu_event_state gives a binding's offset and layout.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "eid": { "type": "integer", "minimum": 1, "description": "The event, by its EID from gpu_events." }, "resource": { "type": "integer", "minimum": 1, "description": "A resource id ([#id] in gpu_event_state, or gpu_resources)." }, "offset": { "type": "integer", "minimum": 0 }, "size": { "type": "integer", "minimum": 1, "maximum": 4096 }, "as": { "enum": ["float", "uint", "int", "hex"] } }, "required": ["eid", "resource"], "additionalProperties": false },
+				"function": "GpuDebug::BufferTool"
+			},
+			{
+				"name": "gpu_scan",
+				"description": "Finds the first action after which a texture holds NaN (the default), Inf or negative values: bisects the frame's draws, dispatches, copies and clears (or checks each one in a frame of up to 64 when the end is clean), and gives that event and the count before it. The texture defaults to what the frame's last action writes.",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "resource": { "type": "integer", "minimum": 1, "description": "A resource id ([#id] in gpu_event_state, or gpu_resources)." }, "check": { "enum": ["nan", "inf", "negative"] } }, "additionalProperties": false },
+				"function": "GpuDebug::ScanTool",
+				"timeoutSeconds": 600
+			},
+			{
+				"name": "gpu_timing",
+				"description": "GPU time of the frame on the replay GPU (the median of `repeat` replays with timestamps): by pass (the markers, nested) or by event (the costliest actions with their primitives and pixel and compute shader invocations).",
+				"class": "read",
+				"group": "gpu",
+				"parallelSafe": true,
+				"inputSchema": { "type": "object", "properties": { "capture": { "type": "string", "description": "A capture id from gpu_captures, or \"latest\" (the default)." }, "by": { "enum": ["pass", "event"] }, "top": { "type": "integer", "minimum": 1, "maximum": 500 }, "repeat": { "type": "integer", "minimum": 1, "maximum": 25 } }, "additionalProperties": false },
+				"function": "GpuDebug::TimingTool",
+				"timeoutSeconds": 600
+			}
 		]
 	}
 }

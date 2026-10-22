@@ -21,6 +21,7 @@ namespace fb::replay
 
 	private:
 		void Initialize(const JsonValue& params, JsonWriter& out);
+		void Png(const JsonValue& params, JsonWriter& out);
 
 		std::unique_ptr<CaptureReader> file_;
 		std::unique_ptr<ApiReplay> replay_;

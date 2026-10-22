@@ -108,6 +108,17 @@ namespace GpuDebug
 	}
 
 	Core::String Debugger::Call(Session* session, Core::StringView method, Core::StringView params, Core::String& blob) {
+		Core::Array<uint8> binary;
+		Core::String result = Ask(session, method, params, binary);
+		if (!binary.IsEmpty()) {
+			Core::String problem;
+			blob = IED::PutBlob(Core::StringView("application/octet-stream"), binary, problem);
+			if (blob.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		}
+		return result;
+	}
+
+	Core::String Debugger::Ask(Session* session, Core::StringView method, Core::StringView params, Core::Array<uint8>& binary) {
 		Pending* pending = new Pending();
 		int64 id = 0;
 		{
@@ -135,11 +146,7 @@ namespace GpuDebug
 		}
 		if (!pending->done) throw IED::RpcError(IED::ErrorCode::Unavailable, session->alive ? Core::StringView("the replayer did not answer in time") : (Core::String("the replay ended: ") + session->problem.View()).View());
 		if (!pending->error.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, pending->error.View());
-		if (!pending->binary.IsEmpty()) {
-			Core::String problem;
-			blob = IED::PutBlob(Core::StringView("application/octet-stream"), pending->binary, problem);
-			if (blob.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
-		}
+		binary = pending->binary;
 		return pending->result;
 	}
 
