@@ -40,7 +40,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 
 ## Chat activity
 
-**As built (M4, first slice):** the `chat` plugin's activity (`docs/05` "chat"), checked by screenshot at 1366x768 and 375x812 against mockup 02: a running turn with an approval card and the right panel, the same card at phone width as a bottom-stacked button grid, and the resume path: a page reloaded mid-turn gets the turn's text so far from the snapshot and keeps streaming to the end (e2e `chat_reload_mid_turn`), and after a server restart the chats come back from disk (a turn the restart cut off ends `interrupted` and its chat waits paused: server checks). A turn against a real local model (llama.cpp) streamed its thinking, ran its tool calls and finished. On a phone the right panel is a sheet over the transcript, opened from the tab bar's details button and closed by its own; opening a file or a page from it closes it (2026-10-21).
+**As built (M4, first slice):** the `chat` plugin's activity (`docs/05` "chat"), checked by screenshot at 1366x768 and 375x812 against mockup 02: a running turn with an approval card and the right panel, the same card at phone width as a bottom-stacked button grid, and the resume path: a page reloaded mid-turn gets the turn's text so far from the snapshot and keeps streaming to the end (e2e `chat_reload_mid_turn`), and after a server restart the chats come back from disk (a turn the restart cut off ends `interrupted` and its chat waits paused: server checks). A turn against a real local model (llama.cpp) streamed its thinking, ran its tool calls and finished. On a phone the right panel is a sheet over the transcript, opened from the tab bar's details button and closed by its own; opening a file or a page from it closes it (2026-10-21). A chat opens as a tab of the editor area too ("Open in Editor Area" on its tab's menu; `chat:<chatId>`, titled by the chat), so it can stand beside the page it drives: what it opens from its details panel opens beside it, tethered. A chat narrower than 640 px (a tab in a side group) shows its details as that sheet too.
 
 ```
 +----+-------------------------------------------------------------------------+------------------+
@@ -106,7 +106,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 
 ### Tethered tabs
 
-Two tabs can be **tethered**: they belong together and show together. A Markdown file and its preview, a header and its code file, and (once chats dock as tabs) a chat and the page it drives.
+Two tabs can be **tethered**: they belong together and show together. A Markdown file and its preview, a header and its code file, and a chat opened as a tab and the page it drives.
 
 - Activating either tab (clicking it, Ctrl+Tab, Go to Definition into it) also shows the other in its own group, so the pair stays side by side. A partner in the same group stays behind; tethering is about groups beside each other.
 - A tether may **close** its follower with its lead: closing a Markdown file closes the preview opened beside it. Closing either tab, or "Untether" on its context menu, drops the tether.

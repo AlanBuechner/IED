@@ -1116,6 +1116,26 @@ def chat_tool_image(run):
 
 
 @scenario(viewports=("desktop",))
+def chat_opens_as_a_tab(run):
+	"""A chat opens as a tab of the editor area from its tab's menu (docs/15 "Chat"): titled by the chat, a turn runs
+	from its own composer."""
+	page = open_chat(run)
+	chat_id = page.get_attribute(".chat-tab.on", "data-chat")
+	if run.target.kind == "real":
+		run.target.queue_model(model_script({"text": "Answered in the tab.", "chunk": 6}, {"finish": "stop"}))
+	page.click(".chat-tab.on", button="right")
+	page.click(".menu .menu-item:has-text('Open in Editor Area')")
+	tab = ".dock-group.well .tab[data-ref='chat:%s']" % chat_id
+	page.wait_for_selector(tab)
+	page.wait_for_selector(".dock-body .chat-tabhead")
+	page.fill(".dock-body .chat-input", "answer here")
+	page.press(".dock-body .chat-input", "Enter")
+	page.wait_for_selector(".dock-body .chat-foot:has-text('Finished')", timeout=30000)
+	check(page.inner_text(tab + " .name") not in ("", "Chat"), "the tab is titled by the chat: %s" % page.inner_text(tab + " .name"))
+	run.shot("tab")
+
+
+@scenario(viewports=("desktop",))
 def chat_reload_mid_turn(run):
 	page = open_chat(run)
 	text = " ".join("Sentence %d of a long answer." % i for i in range(1, 301))

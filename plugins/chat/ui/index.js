@@ -1,9 +1,10 @@
-// index.js - the chat plugin's UI module (docs/04, docs/15 "Chat"): the Chat activity, the status bar's "AI: 1 running,
-// 1 needs you" (from chats:<wsId>), Settings > AI > Models and Model Groups, and the commands that open the activity,
-// start a chat and stop the turn.
+// index.js - the chat plugin's UI module (docs/04, docs/15 "Chat"): the Chat activity, a chat as a tab of the editor
+// area ("chat:<chatId>"), the status bar's "AI: 1 running, 1 needs you" (from chats:<wsId>), Settings > AI > Models and
+// Model Groups, and the commands that open the activity, start a chat and stop the turn.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { ChatActivityView } from "./activity.js";
+import { ChatTabView } from "./chattab.js";
 import { ChatList } from "./chatmodel.js";
 import { ModelsPage } from "./modelsettings.js";
 import { ModelGroupsPage } from "./groupsettings.js";
@@ -22,6 +23,7 @@ export function activate(ied) {
 		if (last()) last().newChat();
 	});
 	ied.commands.handle("ied.chat.stop", () => last() && last().stop());
+	ied.tabs.kind("chat", { view: "ChatTab", title: () => "Chat", icon: () => "$(comment-discussion)" });
 }
 
 export function ChatActivity(ctx) {
@@ -31,6 +33,10 @@ export function ChatActivity(ctx) {
 		views.delete(view);
 		view.dispose();
 	} };
+}
+
+export function ChatTab(ctx) {
+	return new ChatTabView(ctx, ctx.ref.slice("chat:".length));
 }
 
 // Settings > AI > Models and Model Groups (the settingsPages of the manifest).
