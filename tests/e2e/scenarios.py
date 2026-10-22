@@ -375,6 +375,44 @@ def trust_banner(run):
 	page.wait_for_selector(".banner[data-banner='trust']", state="detached")
 
 
+FANCY_PLUGIN = {
+	"manifestVersion": 1, "id": "fancy", "name": "Fancy", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
+	"contributes": {"languages": [{"id": "fancy", "extensions": [".fy"], "lineComment": "//", "grammar": "fancy.json"}]},
+}
+FANCY_GRAMMAR = {"tokenizer": {"root": [[r"\bfancy\b", "keyword"], [r"//.*$", "comment"]]}}
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def a_language_trust_brings_reaches_open_tabs(run):
+	"""A tab open while the workspace is untrusted takes the language its project plugin brings once the owner trusts
+	it, without a reload: the server tells the document (doc.language, docs/10) and the editor registers the language
+	with Monaco when the contributions are read again (contributions.on, docs/02)."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	trusted = page.evaluate("ied_shell.workspace.trusted")
+	path = "notes-%s.fy" % run.viewport
+	model = "ied_shell.views.entries.get('doc:' + path).instance.model"
+	try:
+		run.request("ws.setTrust", {"wsId": ws, "trusted": False})
+		page.wait_for_selector(".banner[data-banner='trust']")
+		run.request("fs.write", {"wsId": ws, "path": ".ied/plugins/fancy/ied-plugin.json", "text": json.dumps(FANCY_PLUGIN)})
+		run.request("fs.write", {"wsId": ws, "path": ".ied/plugins/fancy/fancy.json", "text": json.dumps(FANCY_GRAMMAR)})
+		run.request("fs.write", {"wsId": ws, "path": path, "text": "fancy words // and a comment\n"})
+		page.evaluate("(path) => ied_shell.openTab('doc:' + path)", path)
+		page.wait_for_function("(path) => { const e = ied_shell.views.entries.get('doc:' + path); return !!(e && e.instance && e.instance.model); }", arg=path, timeout=20000)
+		check(page.evaluate("(path) => " + model + ".getLanguageId()", path) == "plaintext", "no plugin knows .fy while untrusted")
+		run.shot("untrusted")
+		page.click(".banner[data-banner='trust'] button:has-text('Trust Workspace')")
+		page.wait_for_function("(path) => " + model + ".getLanguageId() === 'fancy'", arg=path, timeout=15000)
+		if run.viewport != "phone":
+			run.wait_text(".statusbar [data-item='ied.editor.status']", "fancy")
+		run.shot("trusted")
+	finally:
+		run.request("ws.setTrust", {"wsId": ws, "trusted": trusted})
+		run.request("fs.delete", {"wsId": ws, "path": ".ied/plugins/fancy", "recursive": True})
+		run.request("fs.delete", {"wsId": ws, "path": path})
+
+
 @scenario()
 def plugins_page(run):
 	page = run.open()

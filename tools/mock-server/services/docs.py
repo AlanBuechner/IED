@@ -21,6 +21,7 @@ class Doc:
 		self.saved = text  # the file's text as last read, saved or seen changed on disk
 		self.external = False  # a file outside the workspace, read-only; `path` is its file: URI (docs/10)
 		self.opened = text  # the text when the server opened it: the track-changes margin's baseline
+		self.language = None  # the language its clients were last told
 		self.history = collections.deque(maxlen=HISTORY_VERSIONS)
 
 	@property
@@ -38,11 +39,20 @@ class Documents:
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def snapshot(self, doc):
+		doc.language = self.server.plugins.language_of(doc.path)
 		return {
 			"docId": doc.doc_id, "wsId": doc.ws_id, "path": doc.path, "text": doc.text, "version": doc.version,
 			"lease": {"holder": doc.holder}, "dirty": doc.dirty, "readOnly": doc.external,
-			"languageId": self.server.plugins.language_of(doc.path),
+			"languageId": doc.language,
 		}
+
+	def languages_changed(self):
+		"""The loaded plugins changed: an open document whose language is another now is told (doc.language)."""
+		for doc in self.by_id.values():
+			language = self.server.plugins.language_of(doc.path)
+			if language != doc.language:
+				doc.language = language
+				self.server.hub.publish(doc.topic, "doc.language", {"docId": doc.doc_id, "languageId": language})
 
 	def get(self, doc_id):
 		doc = self.by_id.get(doc_id)

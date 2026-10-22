@@ -98,6 +98,7 @@ namespace Ied
 		doc->saved = doc->text;
 		doc->opened = doc->text;
 		doc->version = 1;
+		doc->languageId = server->plugins->LanguageOf(ws, path);
 		byId.Insert(doc->docId, doc);
 		byPath.Insert(Core::String(key), doc);
 		Documents* self = this;
@@ -180,6 +181,22 @@ namespace Ied
 		data.EndObject();
 		server->hub.Publish(doc->Topic().View(), "doc.renamed", data.View());
 		server->lsp->DocumentRenamed(doc, from);
+	}
+
+	void Documents::LanguagesChanged(Workspace* ws) {
+		for (const Core::KeyValue<Core::String, Document*>& entry : byId) {
+			Document* doc = entry.value;
+			if (doc->ws != ws) continue;
+			Core::String languageId = server->plugins->LanguageOf(ws, doc->path.View());
+			if (languageId.View() == doc->languageId.View()) continue;
+			doc->languageId = languageId;
+			JsonWriter data;
+			data.BeginObject();
+			data.Field("docId", doc->docId.View());
+			data.Field("languageId", languageId.View());
+			data.EndObject();
+			server->hub.Publish(doc->Topic().View(), "doc.language", data.View());
+		}
 	}
 
 	void Documents::OnDiskDeleted(Workspace* ws, Core::StringView path) {

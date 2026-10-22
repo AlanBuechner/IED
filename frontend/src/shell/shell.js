@@ -733,7 +733,7 @@ export class Shell {
 				onClose: (kind, fn) => shell.onTabClose(kind, fn),
 			},
 			context: { set: (key, value) => shell.context.set(key, value), get: (key) => shell.context.get(key) },
-			contributions: (point) => shell.contributions.of(point),
+			contributions: Object.assign((point) => shell.contributions.of(point), { on: (fn) => shell.contributions.on(fn) }),
 			icons: {
 				file: (name, extraClass) => shell.contributions.icons.file(name, extraClass),
 				fileSpec: (name) => shell.contributions.icons.fileSpec(name),

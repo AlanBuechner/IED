@@ -39,7 +39,7 @@ class SolutionTests(ServerTestCase):
 		write(os.path.join(self.repo, "tools", "Tool.iedproj"), project("Tool", "Tool", kind="other"))
 		write(os.path.join(self.repo, "Nuke", "tools", "ied", "ied-plugin.json"), {
 			"manifestVersion": 1, "id": "c4", "name": "C4", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative", "ui": "ui/main.js"},
-			"contributes": {"commands": [{"id": "c4.hello", "title": "Hello"}], "settings": {"schema": "settings.schema.json"}}})
+			"contributes": {"commands": [{"id": "c4.hello", "title": "Hello"}], "settings": {"schema": "settings.schema.json"}, "languages": [{"id": "c4", "extensions": [".cf"]}]}})
 		write(os.path.join(self.repo, "Nuke", "tools", "ied", "settings.schema.json"), SETTINGS_SCHEMA)
 		write(os.path.join(self.repo, "Nuke", "tools", "ied", "ui", "main.js"), "export function activate(ied) {}\n")
 		self.solution = os.path.join(self.repo, "MyGame.iedsln")
@@ -110,6 +110,23 @@ class SolutionTests(ServerTestCase):
 		self.assertEqual([("c4", "project", "/w/w1/plugins/c4/ui/main.js")], [(p["id"], p["source"], p["ui"]) for p in contributed])
 		self.assertIn("local.indent", (await self.client.request("settings.schema", {"wsId": "w1"}))["settings"])
 		self.assertNotIn("local.indent", (await self.client.request("settings.schema"))["settings"], "not for the app tier")
+
+	async def test_an_open_document_is_told_the_language_trust_brings(self):
+		write(os.path.join(self.repo, "src", "Game", "main.cf"), "x\n")
+		doc = await self.client.request("doc.open", {"wsId": "w1", "path": "src/Game/main.cf"})
+		topic = "doc:" + doc["docId"]
+		await self.client.sub([topic])
+		self.assertEqual("plaintext", (await self.client.wait_for(topic, lambda f: f["t"] == "snap"))[-1]["data"]["languageId"], "no plugin knows .cf yet")
+		told = lambda language: lambda f: f["t"] == "evt" and f["kind"] == "doc.language" and f["data"]["languageId"] == language
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+		self.assertEqual({"docId": doc["docId"], "languageId": "c4"}, (await self.client.wait_for(topic, told("c4"), 10))[-1]["data"], "the local plugin's language")
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": False})
+		await self.client.wait_for(topic, told("plaintext"), 10)
+		await self.client.request("ws.setTrust", {"wsId": "w1", "trusted": False})
+		await self.client.request("plugins.list", {"wsId": "w1"})
+		self.assertEqual([], [f for f in self.client.drain(topic) if f.get("kind") == "doc.language"], "only a change is told")
+		again = await self.client.request("doc.open", {"wsId": "w1", "path": "src/Game/main.cf"})
+		self.assertEqual(doc["docId"], again["docId"])
 
 	async def test_a_local_plugin_files_are_served_per_workspace_once_trusted(self):
 		cookie = {"Cookie": self.cookie}

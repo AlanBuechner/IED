@@ -44,7 +44,7 @@ Not implemented (later milestones): auth (`docs/11` login, tokens, cookies), `/w
 | `ws:w1` | workspace summary, `trusted`, `plugins`, `chats` | `tree.changed {changes:[{path, change: created\|changed\|deleted}]}`, `trust.changed`, `chat.created` |
 | `layout:w1:<desktop\|tablet\|phone>` | `{revision, layout}`: the client's layout document (`docs/15`), verbatim; revision 0 holds null | `layout.changed {revision, layout, by}` |
 | `plugins` | `{plugins: [summary]}` of the repository's built-in plugins (`plugins/*/ied-plugin.json`, schema-checked) | `plugins.changed` |
-| `doc:<docId>` | `docId, wsId, path, text, version, lease: {holder}, dirty, languageId` | `doc.edit {version, changes, origin, rebasedFrom?, opId?}`, `doc.lease {holder}`, `doc.saved {version, revision}`, `doc.diskChanged {revision}` |
+| `doc:<docId>` | `docId, wsId, path, text, version, lease: {holder}, dirty, languageId` | `doc.edit {version, changes, origin, rebasedFrom?, opId?}`, `doc.lease {holder}`, `doc.saved {version, revision}`, `doc.diskChanged {revision}`, `doc.language {languageId}` |
 | `diag:w1` | `{files: {path: {source: [diagnostic]}}}` | `diag.set {path, source, items}` |
 | `chat:<chatId>` | header, `state`, `tasks`, last 20 `turns` (in-flight segment text included), `hasMore`, `pendingApprovals` | `turn.start {user}`, `segment.start/delta/end`, `tool.state`, `approval.request`, `approval.resolved`, `tasks.changed`, `turn.end {stop, tokensIn, tokensOut, error?}` |
 | `run:<runId>` | `status, steps, exitCode, tail` (64 KB) | `step.start`, `output {step, source, text}`, `step.end`, `run.end {status, exitCode, ms}` |

@@ -87,7 +87,7 @@ A plugin's `runtime.ui` names an ES module in its folder; `plugins.contributions
 | `tabs.openBeside(anchor, ref, {tether, closes})` | opens `ref` in a document group beside `anchor`'s (a new one to the right when there is none); `tether` tethers them, `closes` closes `ref` with `anchor` (docs/15 "Tethered tabs") |
 | `tabs.tether(lead, follower, {closes})`, `tabs.untether(ref)` | tethers two open tabs, or drops every tether of `ref` |
 | `context.set(key, value)`, `context.get(key)` | context keys for when-clauses |
-| `contributions(point)` | every loaded plugin's entries of a contribution point, in load order: `[{plugin: {id, base}, value}]` (the editor reads `languages` this way) |
+| `contributions(point)` | every loaded plugin's entries of a contribution point, in load order: `[{plugin: {id, base}, value}]` (the editor reads `languages` this way); `contributions.on(fn)` calls `fn()` each time they are read again (a plugin loaded or unloaded, the workspace trusted) or cleared, once every UI module is activated, and returns the function that stops it (the editor registers the languages a plugin brings later with Monaco this way) |
 | `menus.show(menuId, at, args)` | shows a contributed menu (e.g. `explorer/context`) at a mouse event or element; its commands get `args` |
 | `workspace` | `{wsId, name, kind, root, trusted}` of the shown workspace; `workspace.on(fn)` for changes |
 | `notify(text, level)` | a notification for every device (`server.notify`) |

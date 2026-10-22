@@ -90,6 +90,7 @@ class Plugins:
 
 	def changed(self):
 		self.server.hub.publish("plugins", "plugins.changed", self.snapshot())
+		self.server.docs.languages_changed()
 
 	def language_of(self, path):
 		"""The language the loaded plugins give a file (as src/plugins/languages.ch): a file name wins over an extension,

@@ -23,6 +23,14 @@ export class Contributions {
 		this.toolbarItems = [];
 		this.panel = null;
 		this.icons = new Icons((point) => this.of(point));
+		this.listeners = new Set();
+	}
+
+	// `fn()` each time the contributions are read again or cleared, once every UI module is activated; returns the
+	// function that stops it.
+	on(fn) {
+		this.listeners.add(fn);
+		return () => this.listeners.delete(fn);
 	}
 
 	// Reads the contributions of `wsId` and registers them; resolves once every UI module is imported and activated.
@@ -35,6 +43,18 @@ export class Contributions {
 		}));
 		this.register();
 		await Promise.all(this.plugins.map((plugin) => this.importModule(plugin)));
+		this.changed();
+	}
+
+	changed() {
+		for (const fn of [...this.listeners]) {
+			try {
+				fn();
+			}
+			catch (e) {
+				this.shell.report("A change of the plugins' contributions was not taken: " + (e && e.message ? e.message : e), e);
+			}
+		}
 	}
 
 	register() {
@@ -69,6 +89,7 @@ export class Contributions {
 		this.plugins = [];
 		this.register();
 		this.activities = [];
+		this.changed();
 	}
 
 	async importModule(plugin) {

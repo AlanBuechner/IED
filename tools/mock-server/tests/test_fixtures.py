@@ -265,6 +265,21 @@ class TerminalLayoutFsTests(MockCase):
 		flagged = (await client.wait_for(topic, lambda f: f.get("kind") == "doc.diskChanged"))[-1]["data"]
 		self.assertEqual(doc["docId"], flagged["docId"])
 
+	async def test_an_open_doc_is_told_when_its_language_plugin_goes_and_comes(self):
+		client = await self.client()
+		doc = await client.request("doc.open", {"wsId": "w1", "path": "README.md"})
+		topic = "doc:" + doc["docId"]
+		self.assertEqual("markdown", (await self.subscribed(client, topic))["languageId"])
+		await client.request("plugins.setEnabled", {"id": "ied.markdown", "enabled": False})
+		told = (await client.wait_for(topic, lambda f: f.get("kind") == "doc.language"))[-1]["data"]
+		self.assertEqual({"docId": doc["docId"], "languageId": "plaintext"}, told)
+		await client.request("plugins.setEnabled", {"id": "ied.markdown", "enabled": True})
+		told = (await client.wait_for(topic, lambda f: f.get("kind") == "doc.language"))[-1]["data"]
+		self.assertEqual("markdown", told["languageId"])
+		await client.request("plugins.reload", {})
+		await client.request("plugins.list", {})
+		self.assertEqual([], [f for f in client.drain(topic) if f.get("kind") == "doc.language"], "only a change is told")
+
 
 class HttpTests(MockCase):
 	config = {"allow_origins": ["http://127.0.0.1:9999"]}

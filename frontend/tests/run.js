@@ -10,6 +10,7 @@ import "./client.test.js";
 import "./textedits.test.js";
 import "./keybindings.test.js";
 import "./docsync.test.js";
+import "./contributions.test.js";
 import "./lspconvert.test.js";
 import "./tree.test.js";
 import "./navigation.test.js";

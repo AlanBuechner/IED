@@ -202,6 +202,7 @@ namespace Ied
 	}
 
 	void Workspaces::ContributionsChanged(Workspace* ws) {
+		server->documents->LanguagesChanged(ws);
 		server->outputs->PluginsChanged(ws);
 		server->settings->PluginsChanged(ws);
 		server->tasks->ProjectsChanged(ws);
@@ -648,6 +649,7 @@ namespace Ied
 		server->lsp->TrustChanged(ws);
 		server->code->Reconcile(ws);
 		server->code->TrustChanged(ws);
+		server->documents->LanguagesChanged(ws);
 		server->auth->Record(trusted ? "workspace-trusted" : "workspace-untrusted", (Core::String("\"root\":") + JsonString(ws->root.View()).View()).View());
 		JsonWriter data;
 		data.BeginObject();

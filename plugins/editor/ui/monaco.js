@@ -8,6 +8,7 @@ const BASE = "/vendor/monaco-editor/min/vs";
 const THEME = "ied-dark";
 
 let loading = null;
+const registered = new Set();   // "<plugin id> <language id>": the `languages` contributions Monaco has
 
 // Resolves to the `monaco` namespace; rejects when the library is not installed (setup.bat installs it).
 export function loadMonaco(ied) {
@@ -127,10 +128,26 @@ function shareThemeWithShadowRoots() {
 	new MutationObserver(follow).observe(document.head, { childList: true });
 }
 
-// Each `languages` contribution: registered when Monaco lacks the id, its configuration set, its grammar loaded.
+// The plugins' contributions were read again (`ied.contributions.on`): the languages a plugin brought since Monaco
+// loaded are registered, their control keywords put in the theme. Resolves to `monaco` once they are; null when Monaco
+// has not loaded (it registers every language when it does) or cannot.
+export async function languagesChanged(ied) {
+	const monaco = loading ? await loading.catch(() => null) : null;
+	if (!monaco) return null;
+	if (await registerLanguages(monaco, ied)) {
+		defineTheme(monaco, controlKeywords(ied.contributions("languages")));
+		monaco.editor.setTheme(THEME);
+	}
+	return monaco;
+}
+
+// Each `languages` contribution not registered yet: registered when Monaco lacks the id, its configuration set, its
+// grammar loaded. How many there were.
 async function registerLanguages(monaco, ied) {
 	const known = new Set(monaco.languages.getLanguages().map((l) => l.id));
-	const work = ied.contributions("languages").map(async ({ plugin, value }) => {
+	const fresh = ied.contributions("languages").filter(({ plugin, value }) => !registered.has(plugin.id + " " + value.id));
+	const work = fresh.map(async ({ plugin, value }) => {
+		registered.add(plugin.id + " " + value.id);
 		if (!known.has(value.id)) monaco.languages.register({ id: value.id, extensions: value.extensions, filenames: value.fileNames, aliases: value.aliases });
 		const configuration = languageConfiguration(value);
 		if (configuration) monaco.languages.setLanguageConfiguration(value.id, configuration);
@@ -145,6 +162,7 @@ async function registerLanguages(monaco, ied) {
 		}
 	});
 	await Promise.all(work);
+	return fresh.length;
 }
 
 function languageConfiguration(language) {

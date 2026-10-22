@@ -100,6 +100,11 @@ export class DocumentSync {
 			this.state({ renamed: data.path });
 			return;
 		}
+		else if (kind === "doc.language") {
+			this.languageId = data.languageId || "plaintext";
+			this.state({ language: this.languageId });
+			return;
+		}
 		this.state(baselineMoved ? { baselineMoved } : {});
 	}
 

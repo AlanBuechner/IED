@@ -8,7 +8,7 @@ import { Output as OutputView, remember as rememberOutputSource } from "./output
 import { DocumentView } from "./document.js";
 import { CodeEditor, editorEnvironment } from "./editorview.js";
 import { Editors } from "./editors.js";
-import { loadMonaco } from "./monaco.js";
+import { loadMonaco, languagesChanged } from "./monaco.js";
 import { colorize, languageOf } from "./colorize.js";
 import { EditorSettings } from "./editorsettings.js";
 import { Diagnostics } from "./diagnostics.js";
@@ -56,8 +56,13 @@ export function activate(ied) {
 		debug.follow(editor.ctx.wsId);
 		const margin = new BreakpointMargin(editor, editor.monaco, breakpoints, debug);
 		debugHover(editor.monaco, editor.model.getLanguageId());
-		return () => margin.dispose();
+		const relabeled = editor.model.onDidChangeLanguage((change) => debugHover(editor.monaco, change.newLanguage));
+		return () => {
+			margin.dispose();
+			relabeled.dispose();
+		};
 	});
+	ied.contributions.on(() => relabel(ied));
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => ied.icons.fileSpec(fileName(path)), resource: (path) => path });
 	const pathOf = (args) => (args && args.path !== undefined ? args.path : last(explorers) && last(explorers).selected() ? last(explorers).selected().path : null);
 	ied.bindings.provide("editor.colorize", (args) => colorize(ied, args));
@@ -126,6 +131,17 @@ function statusState(tasks, debug) {
 // While the program is stopped, a hover shows the value of the expression under it (VS DataTips), beside the language
 // server's hover. One provider per language.
 const hoverLanguages = new Set();
+// The plugins' contributions changed: a language a plugin brought (the workspace trusted) reaches Monaco, and each open
+// editor takes the language its document has now (doc.language).
+async function relabel(ied) {
+	try {
+		if (await languagesChanged(ied)) for (const editor of editors.all()) editor.applyLanguage();
+	}
+	catch (e) {
+		ied.report("the plugins' languages did not reach the editors: " + e.message, e);
+	}
+}
+
 function debugHover(monaco, language) {
 	if (hoverLanguages.has(language)) return;
 	hoverLanguages.add(language);

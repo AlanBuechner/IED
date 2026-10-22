@@ -354,6 +354,16 @@ test("docsync: the lease decides who edits", async () => {
 	assertEqual(target.readOnly, false, "editable after taking it over");
 });
 
+test("docsync: the language the server names later is taken and told", async () => {
+	const { client, target, sync, states } = await opened("x");
+	assertEqual(sync.languageId, "plaintext", "as the snapshot said");
+	client.handler.evt("doc.language", { docId: "d1", languageId: "c4" }, 2);
+	assertEqual([sync.languageId, states[states.length - 1].language], ["c4", "c4"], "the editor hears of it");
+	assertEqual(target.text, "x", "the text stays");
+	client.handler.evt("doc.language", { docId: "d1" }, 3);
+	assertEqual(sync.languageId, "plaintext", "none named is plain text");
+});
+
 test("docsync: save waits for pending edits", async () => {
 	const { client, target, sync } = await opened("a");
 	target.type(sync, [change(0, 1, 0, 1, "b")]);

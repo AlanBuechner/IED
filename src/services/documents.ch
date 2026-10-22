@@ -29,6 +29,7 @@ namespace Ied
 		public Core::String saved;    // the file's text as last read, saved or seen changed on disk
 		public Core::String opened;   // the text when the server opened it: the track-changes margin's baseline
 		public bool external;         // a file outside the workspace, read-only; `path` is its file: URI (docs/10)
+		public Core::String languageId;   // the language its clients were last told
 		public Core::Queue<VersionChanges*> history;
 
 		public Core::String Topic() const { return Core::String("doc:") + docId.View(); }
@@ -50,6 +51,9 @@ namespace Ied
 		public void OnDiskDeleted(Workspace* ws, Core::StringView path);
 		// A file moved by the server (fs.rename): its open document follows, and is told (doc.renamed {docId, path}).
 		public void Renamed(Workspace* ws, Core::StringView from, Core::StringView to);
+		// The plugins loaded for `ws` changed: each open document whose language is another now is told
+		// (doc.language {docId, languageId}).
+		public void LanguagesChanged(Workspace* ws);
 		public bool IsOpen(Workspace* ws, Core::StringView path) const;
 		// Writes the document's text to its file: doc.saved, and its language servers' didSave. The file's revision.
 		public int64 Save(Document* doc);

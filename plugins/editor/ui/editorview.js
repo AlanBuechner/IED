@@ -177,7 +177,20 @@ export class CodeEditor {
 		return "Another window is editing this document. Use Edit Here to take over.";
 	}
 
+	// The document's language as the server names it now, once Monaco knows it: a language a plugin brings later is
+	// registered when the contributions are read again, and applied then (index.js).
+	applyLanguage() {
+		const model = this.model;
+		if (!model || model.isDisposed() || model.getLanguageId() === this.sync.languageId) return;
+		if (!this.monaco.languages.getLanguages().some((language) => language.id === this.sync.languageId)) return;
+		this.monaco.editor.setModelLanguage(model, this.sync.languageId);
+		if (this.editors.last() === this) this.ied.context.set("editorLanguage", this.sync.languageId);
+		this.features.prepare(this);
+		this.changed();
+	}
+
 	stateChanged(state) {
+		if (state.language) this.applyLanguage();
 		if (state.renamed && state.renamed !== this.path) this.moveTo(state.renamed);
 		if (state.baselineMoved) this.margin.refresh(this.sync.docId);
 		this.ctx.tab.setDirty(state.dirty);

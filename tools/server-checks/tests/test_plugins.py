@@ -170,5 +170,11 @@ class PluginTests(ServerTestCase):
 				await client.sub([topic])
 				seen[path] = (await client.wait_for(topic, lambda f: f["t"] == "snap"))[-1]["data"]["languageId"]
 			self.assertEqual({"src/a.fy": "fancy", "Buildfile": "build", "notes.txt": "plaintext"}, seen, "the plugins decide; the host knows no language")
+			fancy = "doc:" + (await client.request("doc.open", {"wsId": "w1", "path": "src/a.fy"}))["docId"]
+			told = lambda language: lambda f: f["t"] == "evt" and f["kind"] == "doc.language" and f["data"]["languageId"] == language
+			await client.request("plugins.setEnabled", {"id": "langs", "enabled": False})
+			await client.wait_for(fancy, told("plaintext"), 10)
+			await client.request("plugins.setEnabled", {"id": "langs", "enabled": True})
+			await client.wait_for(fancy, told("fancy"), 10)
 		finally:
 			client.abort()

@@ -166,6 +166,7 @@ namespace Ied
 		for (Workspace* ws : server->workspaces->All()) {
 			server->code->Reconcile(ws);
 			server->outputs->PluginsChanged(ws);
+			server->documents->LanguagesChanged(ws);
 		}
 	}
 
