@@ -351,6 +351,7 @@ namespace Profiler
 		Finding* finding = out.Add(rank, Area::Memory, title.ToString(), "profile_allocations");
 		for (int64 i = 0; i < groups.Count(); ++i) {
 			Serialization::DomNode g = groups.At(i);
+			if (g.Member("count").AsInt() == 0) continue;   // a zone in the counts only for the native memory it gave back
 			Core::StringBuilder line;
 			line.Append(g.Member("label").AsView());
 			line.Append(": ");

@@ -300,6 +300,56 @@ class ProfilerCountedTests {
 		assert_true(Json(Profiler::CensusTrend(*capture, 100, 260, 10)).Member("censuses").AsInt() == 2, "the censuses in a range");
 	}
 
+	// Frames of 200 objects in Spawn, and a Release zone that only gives native memory back: the allocation finding
+	// names Spawn and leaves out a zone that allocated nothing.
+	[test("a_zone_that_only_gave_memory_back_is_no_allocator")]
+	public static void TestOnlyGaveBack() {
+		Profiler::WireWriter w;
+		w.BeginChunk(Profiler::kGlobalChunk, 0, 0);
+		w.Type(Profiler::EventType::Hello);
+		w.Varint(1);
+		w.Text(Core::StringView("c4game"));
+		w.Varint(3);
+		w.Varint(1000000000);
+		w.Varint(0);
+		w.Varint(0);
+		w.Varint(0);
+		w.Text(Core::StringView(""));
+		const char*[3] names = { "", "Spawn", "Release" };
+		for (uint64 id = 1; id <= 2; ++id) {
+			w.Type(Profiler::EventType::StringDef);
+			w.Varint(id);
+			w.Text(Core::StringView(names[id]));
+			w.Type(Profiler::EventType::SrcLocDef);
+			w.Varint(id);
+			w.Varint(id);
+			w.Varint(0);
+			w.Varint(0);
+			w.Varint(id * 10);
+			w.Varint(0);
+		}
+		w.EndChunk();
+		w.BeginChunk(Profiler::kThreadChunk, 1, 0);
+		for (int64 f = 0; f <= 5; ++f) {
+			w.Type(Profiler::EventType::FrameMark);
+			w.Time(f * 100);
+			w.Varint(0);
+			if (f == 5) break;
+			CountedZone(w, 1, f * 100 + 10, f * 100 + 20, 200, 4800, 0);
+			w.Type(Profiler::EventType::ZoneBegin);
+			w.Time(f * 100 + 30);
+			w.Varint(2);
+			ZoneNativeFreed(w, 4096);
+			w.Type(Profiler::EventType::ZoneEnd);
+			w.Time(f * 100 + 31);
+		}
+		w.EndChunk();
+		Profiler::Capture* capture = Read(w);
+		Core::String text = Profiler::DiagnoseText(*capture, Core::StringView("w1:c"), Json(Core::String("{}")));
+		assert_true(text.View().Contains(Core::StringView("Spawn: 200.0 a frame")), "Spawn is named as allocating every frame");
+		assert_true(!text.View().Contains(Core::StringView("Release:")), "Release, which only gave memory back, is not");
+	}
+
 	[test("samples_beside_the_counts_name_the_functions")]
 	public static void TestSamples() {
 		Profiler::Capture* capture = SampledCapture();
