@@ -54,7 +54,11 @@ the toolchain copy (`toolchainCopies`: `[["docs", "ied/docs"]]`), after writing 
 the run's own toolchain, so it always matches the headers). `starter/` files go over what `nuke init` writes for
 a C4 task that starts from nothing (`{name}` becomes the project's name). Each run prepares its own copies under
 `%TEMP%/ied-langeval/{toolchains,homes}/<run>`, so two runs of one variant never rewrite each other's files. Changes to
-tools (C4 code under `plugins/chat/code/`) need a server build: pass that build's exe with `--server`.
+tools (C4 code under `plugins/chat/code/`) need a server build: pass that build's exe with `--server`, and with it
+`--home-base`, a snapshot of the tree's home from the commit it was built at (`git archive <commit> plugins frontend
+shared`): the home otherwise comes from the tree, whose plugins may since need code the build does not have (a chat
+manifest newer than the build left the chat without its methods). A variant's `home-merge/` JSON files are merged
+into that home (a schema the variant adds to) rather than copied over it.
 
 ## Tasks (`tasks/<id>/task.toml`)
 

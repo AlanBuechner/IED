@@ -120,6 +120,7 @@ def merge_overlay(source, target):
 		for name in files:
 			dst = os.path.join(target, os.path.relpath(os.path.join(root, name), source))
 			merged = deep_merge(read_json(dst, {}), read_json(os.path.join(root, name), {}))
+			os.makedirs(os.path.dirname(dst), exist_ok=True)
 			with open(dst, "w", encoding="utf-8", newline="\n") as f:
 				json.dump(merged, f, indent="\t")
 				f.write("\n")

@@ -69,11 +69,13 @@ def prepare_toolchain(variant, base=common.DEV_TOOLCHAIN, name=None):
 	return target
 
 
-def prepare_home(variant, name=None):
-	"""A copy of IED's home (plugins, frontend, shared) with the variant's home/ files over it, named as the toolchain."""
+def prepare_home(variant, name=None, base=common.REPO):
+	"""A copy of IED's home (plugins, frontend, shared) with the variant's home/ files over it, named as the toolchain.
+	`base` is where the home comes from: the tree by default, or a snapshot of it from the commit the --server was
+	built at (a plugin newer than the server's compiled code may not start in it)."""
 	target = os.path.join(common.WORK, "homes", name or os.path.basename(variant))
 	for part in HOME_PARTS:
-		common.mirror(os.path.join(common.REPO, part), os.path.join(target, part), ignore=lambda rel: os.path.basename(rel) in ("target", "__pycache__", "node_modules"))
+		common.mirror(os.path.join(base, part), os.path.join(target, part), ignore=lambda rel: os.path.basename(rel) in ("target", "__pycache__", "node_modules"))
 	common.overlay(os.path.join(variant, "home"), target)
 	common.merge_overlay(os.path.join(variant, "home-merge"), target)
 	return target
@@ -325,6 +327,7 @@ def main():
 	parser.add_argument("--variant", default="baseline", help="variants/<name> (or a folder): files over IED's home and the toolchain")
 	parser.add_argument("--label", default="", help="a note for the run's record")
 	parser.add_argument("--base-toolchain", default=common.DEV_TOOLCHAIN, help="the toolchain the variant's files go over (default: dev, which other work refreshes; a frozen copy keeps runs comparable)")
+	parser.add_argument("--home-base", default=common.REPO, help="where IED's home (plugins, frontend, shared) comes from: the tree (default), or a snapshot from the commit --server was built at (git archive <commit> plugins frontend shared)")
 	parser.add_argument("--settings", default=os.path.join(os.environ.get("APPDATA", ""), "IED", "settings.json"), help="the app settings holding ai.models")
 	parser.add_argument("--model", help="the ai.models profile (default: the first)")
 	parser.add_argument("--temperature", type=float, default=0.6, help="0.6 (the default) as Qwen3 asks for its thinking mode; greedy decoding (0) falls into endless repetition on long replies")
@@ -343,7 +346,7 @@ def main():
 	os.makedirs(out)
 	print("preparing the %s toolchain and home" % os.path.basename(variant), flush=True)
 	starter = os.path.join(variant, "starter")
-	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain, run_id), "home": prepare_home(variant, run_id), "slots": args.slots,
+	config = {"server": os.path.abspath(args.server), "toolchain": prepare_toolchain(variant, args.base_toolchain, run_id), "home": prepare_home(variant, run_id, args.home_base), "slots": args.slots,
 		"starter": starter if os.path.isdir(starter) else None}
 	jobs = []
 	for repeat in range(1, args.repeat + 1):
