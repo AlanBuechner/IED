@@ -279,4 +279,25 @@ namespace Testing
 		TEST_ASSERT(!any);
 		TEST_PASSED();
 	}
+
+	// BUG-351: the linker's @main has no lines, so the program's main inlined into it had none either and a debugger's
+	// breakpoints bound to an out-of-line copy that never ran. With or without -g, main stays a call of its own.
+	void DebugInfoTest::TheEntryWrapperNeverInlinesMain()
+	{
+		for (const bool debugInfo : { true, false })
+		{
+			int calls = 0, noInline = 0;
+			TEST_ASSERT(WithModule(debugInfo, [&](llvm::Module& m) {
+				for (llvm::Instruction& instruction : m.getFunction("main")->getEntryBlock())
+					if (const auto* call = llvm::dyn_cast<llvm::CallInst>(&instruction))
+					{
+						++calls;
+						noInline += call->isNoInline() ? 1 : 0;
+					}
+			}));
+			TEST_ASSERT_EQ(calls, 1);
+			TEST_ASSERT_EQ(noInline, 1);
+		}
+		TEST_PASSED();
+	}
 } // namespace Testing

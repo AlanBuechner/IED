@@ -8,6 +8,12 @@ namespace C4DAP::Target
 	namespace
 	{
 		constexpr size_t kMaxFrames = 256;
+		// What Visual Studio shows for a variable optimized code keeps nowhere at the stop.
+		constexpr const char* kOptimizedAway = "<optimized away>";
+		// A local in a register the adapter cannot read.
+		constexpr const char* kUnreadable = "<unreadable>";
+
+		bool OptimizedAway(const VariableSymbol& symbol) { return symbol.storage.kind == SymbolStorage::Kind::OptimizedAway; }
 	}
 
 	void Engine::ClearStopTables()
@@ -15,6 +21,7 @@ namespace C4DAP::Target
 		m_Frames.clear();
 		m_FramesOfThread.clear();
 		m_References.clear();
+		m_InlinedLeftOut = 0;
 	}
 
 	std::vector<ThreadInfo> Engine::Threads() const
@@ -40,26 +47,37 @@ namespace C4DAP::Target
 		total = 0;
 		if (m_State != State::Stopped || !m_Process.Thread(thread)) return {};
 		std::vector<uint32_t>& ids = m_FramesOfThread[thread];
-		if (ids.empty())
-		{
-			const std::vector<FrameRegisters> walked = WalkStack(m_Process, thread, kMaxFrames);
-			for (size_t depth = 0; depth < walked.size(); ++depth)
-			{
-				m_Frames.push_back(FrameRecord{ thread, depth, walked[depth] });
-				ids.push_back(static_cast<uint32_t>(m_Frames.size()));
-			}
-		}
+		if (ids.empty()) ids = RecordFrames(thread);
 		total = static_cast<uint32_t>(ids.size());
 		std::vector<FrameInfo> page;
 		for (uint32_t i = start; i < ids.size() && (count == 0 || page.size() < count); ++i)
 		{
 			const FrameRecord& record = m_Frames[ids[i] - 1];
-			const uint64_t lookup = record.frame.Lookup(record.depth);
-			FrameInfo frame{ ids[i], AddressText(record.frame.pc), m_Symbols.PositionOf(lookup) };
-			if (const std::optional<FunctionFacts> function = m_Symbols.FunctionOf(lookup)) frame.name = function->name;
+			FrameInfo frame{ ids[i], AddressText(record.frame.pc), m_Symbols.PositionOf(record.Place()), AddressText(record.frame.pc) };
+			if (const std::optional<FunctionFacts> function = m_Symbols.FunctionOf(record.Place())) frame.name = function->name;
 			page.push_back(std::move(frame));
 		}
 		return page;
+	}
+
+	// Each call's inlined calls come before it, innermost first, as frames of their own; the stopped thread's top
+	// call leaves out those its stop shows it outside of.
+	std::vector<uint32_t> Engine::RecordFrames(DWORD thread)
+	{
+		std::vector<uint32_t> ids;
+		const std::vector<FrameRegisters> walked = WalkStack(m_Process, thread, kMaxFrames);
+		for (size_t depth = 0; depth < walked.size(); ++depth)
+		{
+			const size_t leftOut = depth == 0 && thread == m_Held.dwThreadId ? m_InlinedLeftOut : 0;
+			for (size_t inner = leftOut; inner < walked[depth].inlined.size(); ++inner)
+			{
+				m_Frames.push_back(FrameRecord{ thread, depth, walked[depth], walked[depth].inlined[inner] });
+				ids.push_back(static_cast<uint32_t>(m_Frames.size()));
+			}
+			m_Frames.push_back(FrameRecord{ thread, depth, walked[depth] });
+			ids.push_back(static_cast<uint32_t>(m_Frames.size()));
+		}
+		return ids;
 	}
 
 	uint32_t Engine::LocalsOf(uint32_t frameId)
@@ -81,6 +99,14 @@ namespace C4DAP::Target
 		return variable;
 	}
 
+	VariableInfo Engine::DescribeLocal(const VariableSymbol& symbol, const FrameRegisters& frame)
+	{
+		if (OptimizedAway(symbol)) return VariableInfo{ symbol.name, kOptimizedAway, m_Values.TypeName(symbol.type) };
+		const std::optional<ValueRef> value = VariableValue(symbol, frame);
+		if (!value) return VariableInfo{ symbol.name, kUnreadable, m_Values.TypeName(symbol.type) };
+		return Describe(symbol.name, *value);
+	}
+
 	std::vector<VariableInfo> Engine::Variables(uint32_t reference)
 	{
 		std::vector<VariableInfo> variables;
@@ -89,8 +115,8 @@ namespace C4DAP::Target
 		if (const auto* locals = std::get_if<LocalsReference>(&target))
 		{
 			const FrameRecord record = m_Frames[locals->frame];
-			for (const VariableSymbol& symbol : m_Symbols.VariablesAt(record.frame.Lookup(record.depth)))
-				if (const std::optional<ValueRef> value = VariableValue(symbol, record.frame)) variables.push_back(Describe(symbol.name, *value));
+			for (const VariableSymbol& symbol : m_Symbols.VariablesAt(record.Place()))
+				variables.push_back(DescribeLocal(symbol, record.frame));
 			return variables;
 		}
 		for (const NamedValue& child : m_Values.Children(std::get<ValueRef>(target))) variables.push_back(Describe(child.name, child.value));
@@ -100,10 +126,18 @@ namespace C4DAP::Target
 	std::optional<ValueRef> Engine::Variable(const std::string& name, const FrameRecord* frame) const
 	{
 		if (frame)
-			for (const VariableSymbol& symbol : m_Symbols.VariablesAt(frame->frame.Lookup(frame->depth)))
+			for (const VariableSymbol& symbol : m_Symbols.VariablesAt(frame->Place()))
 				if (symbol.name == name) return VariableValue(symbol, frame->frame);
 		if (const std::optional<VariableSymbol> global = m_Symbols.Global(name)) return ValueRef{ global->type, static_cast<uint64_t>(global->storage.offset) };
 		return std::nullopt;
+	}
+
+	std::string Engine::Unavailable(const std::string& name, const FrameRecord* frame) const
+	{
+		if (frame)
+			for (const VariableSymbol& symbol : m_Symbols.VariablesAt(frame->Place()))
+				if (symbol.name == name) return name + (OptimizedAway(symbol) ? " is optimized away here" : " is unreadable here");
+		return "no variable named " + name;
 	}
 
 	EvaluateResult Engine::Evaluate(const std::string& text, uint32_t frameId)
@@ -114,7 +148,7 @@ namespace C4DAP::Target
 		if (!expression) return result;
 		const FrameRecord* frame = frameId > 0 && frameId <= m_Frames.size() ? &m_Frames[frameId - 1] : nullptr;
 		std::optional<ValueRef> value = Variable(expression->variable, frame);
-		if (!value) { result.error = "no variable named " + expression->variable; return result; }
+		if (!value) { result.error = Unavailable(expression->variable, frame); return result; }
 		std::string spelled = expression->variable;
 		for (const PathStep& step : expression->path)
 		{

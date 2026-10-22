@@ -34,7 +34,7 @@ namespace Testing::Dap
 		}
 	}
 
-	DebugProgram BuildProgram(const std::string& name, const std::string& source)
+	DebugProgram BuildProgram(const std::string& name, const std::string& source, int optLevel)
 	{
 		const fs::path folder = fs::temp_directory_path() / "c4dap_tests" / name;
 		std::error_code ignored;
@@ -44,7 +44,7 @@ namespace Testing::Dap
 		program.source = folder / "main.cf";
 		program.exe = folder / "app.exe";
 		std::ofstream(program.source, std::ios::binary) << source;
-		program.built = Run(C4DAP::Target::CommandLine(Compiler().string(), { folder.string(), "-g", "-o", program.exe.string() }));
+		program.built = Run(C4DAP::Target::CommandLine(Compiler().string(), { folder.string(), "-g", "-O" + std::to_string(optLevel), "-o", program.exe.string() }));
 		return program;
 	}
 

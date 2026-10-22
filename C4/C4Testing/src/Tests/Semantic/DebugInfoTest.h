@@ -36,5 +36,7 @@ namespace Testing
 		void GlobalsHaveTheirScopedNamesOnce();
 		TEST_FUNC(Semantic.DebugInfo)
 		void WithoutDebugInfoThereIsNone();
+		TEST_FUNC(Semantic.DebugInfo)
+		void TheEntryWrapperNeverInlinesMain();
 	};
 } // namespace Testing

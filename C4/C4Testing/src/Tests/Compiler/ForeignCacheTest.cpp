@@ -11,9 +11,15 @@ namespace Testing
 
 	namespace
 	{
+		// Windows' path limit for calls that do not take long paths.
+		constexpr size_t kMaxPath = 260;
+
+		// The spelling of an absolute path that the standard library's calls take past MAX_PATH.
+		fs::path LongPath(const fs::path& path) { return fs::path(L"\\\\?\\" + path.wstring()); }
+
 		void Write(const fs::path& path, const std::string& text)
 		{
-			std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+			std::ofstream(LongPath(path), std::ios::binary | std::ios::trunc) << text;
 		}
 
 		// A source including a header, a stand-in compiler, and an object with the depfile a compile of it writes.
@@ -23,11 +29,12 @@ namespace Testing
 			ForeignObject object;
 			std::string compiler;
 
-			Fixture()
+			explicit Fixture(const fs::path& at = fs::temp_directory_path() / "c4_foreign_cache_test")
 			{
-				folder = fs::temp_directory_path() / "c4_foreign_cache_test";
-				fs::remove_all(folder);
-				fs::create_directories(folder);
+				folder = at;
+				std::error_code ignored;
+				fs::remove_all(LongPath(folder), ignored);
+				fs::create_directories(LongPath(folder));
 				Write(folder / "util.c", "#include \"util.h\"\nint util(void) { return UTIL; }\n");
 				Write(folder / "util.h", "#define UTIL 1\n");
 				Write(folder / "clang.exe", "compiler");
@@ -37,7 +44,7 @@ namespace Testing
 				compiler = (folder / "clang.exe").string();
 				Compile();
 			}
-			~Fixture() { std::error_code ignored; fs::remove_all(folder, ignored); }
+			~Fixture() { std::error_code ignored; fs::remove_all(LongPath(folder), ignored); }
 
 			void Compile()
 			{
@@ -97,5 +104,19 @@ namespace Testing
 		fixture.Compile();
 		fs::remove(fixture.object.objPath);
 		TEST_ASSERT(!ForeignObjectIsCurrent(fixture.object, fixture.compiler)); // no object
+	}
+
+	// BUG-354: an object, its depfile and its record in a folder whose paths are longer than MAX_PATH.
+	void ForeignCacheTest::ADeepFolderKeepsItsRecord()
+	{
+		Fixture fixture(fs::temp_directory_path() / "c4_foreign_cache_deep" / std::string(120, 'd') / std::string(120, 'e'));
+		TEST_ASSERT(fixture.object.objPath.size() > kMaxPath);
+		TEST_ASSERT(ForeignObjectIsCurrent(fixture.object, fixture.compiler));
+		Write(fixture.folder / "util.h", "#define UTIL 2\n");
+		TEST_ASSERT(!ForeignObjectIsCurrent(fixture.object, fixture.compiler));
+		fixture.Compile();
+		TEST_ASSERT(ForeignObjectIsCurrent(fixture.object, fixture.compiler));
+		std::error_code ignored;
+		fs::remove_all(LongPath(fs::temp_directory_path() / "c4_foreign_cache_deep"), ignored);
 	}
 } // namespace Testing

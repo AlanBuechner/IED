@@ -1,31 +1,17 @@
 #include "Interop/ForeignCache.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/RuntimeObjects.h"
 #include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-
-namespace fs = std::filesystem;
 
 namespace Scripting
 {
 	namespace
 	{
-		std::string ReadBytes(const fs::path& path)
-		{
-			std::ifstream file(path, std::ios::binary);
-			std::ostringstream bytes;
-			bytes << file.rdbuf();
-			return bytes.str();
-		}
-
 		// What a compiler binary is: its path, size and modification time, so a new clang makes new objects.
 		std::string CompilerIdentity(const std::string& compiler)
 		{
-			std::error_code ec;
-			const auto size = fs::file_size(compiler, ec);
-			const auto time = fs::last_write_time(compiler, ec).time_since_epoch().count();
-			return compiler + "|" + std::to_string(ec ? 0 : size) + "|" + std::to_string(ec ? 0 : time);
+			const std::optional<FileStamp> stamp = StampOf(compiler);
+			return compiler + "|" + std::to_string(stamp ? stamp->size : 0) + "|" + std::to_string(stamp ? stamp->modified : 0);
 		}
 
 		uint64_t Mix(uint64_t key, const std::string& text) { return RuntimeContentKey(text + '\0', key); }
@@ -47,13 +33,13 @@ namespace Scripting
 		// finished) or names a file that is gone.
 		bool CurrentKey(const ForeignObject& fo, const std::string& compiler, uint64_t& key)
 		{
-			const fs::path depfile = fo.objPath + ".d";
-			if (!fs::exists(depfile)) return false;
+			const std::string depfile = fo.objPath + ".d";
+			if (!FileExists(depfile)) return false;
 			key = FlagsKey(fo, compiler);
-			for (const std::string& input : DepfileInputs(ReadBytes(depfile)))
+			for (const std::string& input : DepfileInputs(ReadFileBytes(depfile)))
 			{
-				if (!fs::exists(input)) return false;
-				key = RuntimeContentKey(ReadBytes(input), Mix(key, input));
+				if (!FileExists(input)) return false;
+				key = RuntimeContentKey(ReadFileBytes(input), Mix(key, input));
 			}
 			return true;
 		}
@@ -96,20 +82,19 @@ namespace Scripting
 	bool ForeignObjectIsCurrent(const ForeignObject& fo, const std::string& compiler)
 	{
 		uint64_t key = 0;
-		if (!fs::exists(fo.objPath) || !CurrentKey(fo, compiler, key)) return false;
-		std::string recorded = ReadBytes(fo.objPath + ".key");
+		if (!FileExists(fo.objPath) || !CurrentKey(fo, compiler, key)) return false;
+		std::string recorded = ReadFileBytes(fo.objPath + ".key");
 		return recorded == Hex(key);
 	}
 
 	void RecordForeignObject(const ForeignObject& fo, const std::string& compiler)
 	{
 		uint64_t key = 0;
-		std::error_code ignored;
 		if (!CurrentKey(fo, compiler, key))
 		{
-			fs::remove(fo.objPath + ".key", ignored);
+			RemoveFile(fo.objPath + ".key");
 			return;
 		}
-		std::ofstream(fo.objPath + ".key", std::ios::binary | std::ios::trunc) << Hex(key);
+		WriteFileBytes(fo.objPath + ".key", Hex(key));
 	}
 }

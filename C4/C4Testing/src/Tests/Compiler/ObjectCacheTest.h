@@ -19,6 +19,8 @@ namespace Testing
 		void AnotherCompilerOrTargetNamesAnotherObject();
 		TEST_FUNC(Compiler.ObjectCache)
 		void KeepOnlyRemovesEverythingElse();
+		TEST_FUNC(Compiler.ObjectCache)
+		void ADeepFolderKeepsAndReusesItsObjects();
 
 		TEST_FUNC(Compiler.ModulePartitions)
 		void EveryPartitionReadsBackAndVerifies();

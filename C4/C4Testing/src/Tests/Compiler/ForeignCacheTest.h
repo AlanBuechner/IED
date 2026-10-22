@@ -20,5 +20,7 @@ namespace Testing
 		void FlagsAndTheCompilerArePartOfTheKey();
 		TEST_FUNC(Compiler.ForeignCache)
 		void AnObjectWithoutItsRecordIsNotCurrent();
+		TEST_FUNC(Compiler.ForeignCache)
+		void ADeepFolderKeepsItsRecord();
 	};
 } // namespace Testing

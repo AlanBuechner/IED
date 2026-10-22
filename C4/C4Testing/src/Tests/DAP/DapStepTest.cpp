@@ -21,6 +21,14 @@ namespace Testing
 		{
 			return At(callee, calleeLine, kRsp - 8, from + 5);
 		}
+
+		// The thread inside `depth` calls the optimizer inlined, on a line of the innermost.
+		ThreadState Inlined(uint64_t rip, uint32_t line, uint32_t depth)
+		{
+			ThreadState state = At(rip, line);
+			state.inlineDepth = depth;
+			return state;
+		}
 	}
 
 	void DapStepTest::OverAndIntoSingleStepOutRunsToTheCaller()
@@ -109,6 +117,42 @@ namespace Testing
 		TEST_ASSERT(Step(StepKind::Over, kThread, At(0x10, 3)).AfterReturn(At(0x15, 4)).action == Action::Stop);
 		TEST_ASSERT(Step(StepKind::Out, kThread, At(0x10, 3)).AfterReturn(At(0x15, 8)).action == Action::Stop);
 		TEST_ASSERT(Step(StepKind::Out, kThread, At(0x10, 3)).AfterReturn(At(0x7000, 0)).action == Action::Run);
+		TEST_PASSED();
+	}
+
+	// BUG-352: a call the optimizer inlined has no call instruction; the inline depth says the step entered it.
+	void DapStepTest::OverRunsThroughAnInlinedCall()
+	{
+		const Step step(StepKind::Over, kThread, At(0x10, 9));
+		TEST_ASSERT(step.AfterInstruction(At(0x10, 9), Inlined(0x14, 3, 1)).action == Action::SingleStep);
+		TEST_ASSERT(step.AfterInstruction(Inlined(0x14, 3, 1), Inlined(0x18, 4, 2)).action == Action::SingleStep);
+		TEST_ASSERT(step.AfterInstruction(Inlined(0x18, 4, 2), At(0x1c, 10)).action == Action::Stop);
+		const Step inside(StepKind::Over, kThread, Inlined(0x14, 3, 1));
+		TEST_ASSERT(inside.AfterInstruction(Inlined(0x14, 3, 1), Inlined(0x16, 4, 1)).action == Action::Stop); // its next line
+		TEST_ASSERT(inside.AfterInstruction(Inlined(0x14, 3, 1), At(0x1c, 10)).action == Action::Stop);         // back in the caller
+		TEST_PASSED();
+	}
+
+	void DapStepTest::IntoStopsInAnInlinedCall()
+	{
+		const Step step(StepKind::Into, kThread, At(0x10, 9));
+		TEST_ASSERT(step.AfterInstruction(At(0x10, 9), Inlined(0x14, 3, 1)).action == Action::Stop);
+		TEST_PASSED();
+	}
+
+	void DapStepTest::OutOfAnInlinedCallEndsWhereItDoes()
+	{
+		const Step step(StepKind::Out, kThread, Inlined(0x14, 3, 1));
+		TEST_ASSERT(step.OutOfInlined());
+		TEST_ASSERT(!Step(StepKind::Out, kThread, At(0x10, 9)).OutOfInlined());
+		TEST_ASSERT(step.Begin(0, 0).action == Action::SingleStep);
+		TEST_ASSERT(step.AfterInstruction(Inlined(0x14, 3, 1), Inlined(0x16, 4, 1)).action == Action::SingleStep);
+		TEST_ASSERT(step.AfterInstruction(Inlined(0x16, 4, 1), Inlined(0x18, 0, 0)).action == Action::SingleStep); // no line yet
+		TEST_ASSERT(step.AfterInstruction(Inlined(0x18, 0, 0), At(0x1c, 9)).action == Action::Stop);
+		const Step::Decision call = step.AfterInstruction(Inlined(0x16, 4, 1), AfterCall(0x16, 0x900, 20));
+		TEST_ASSERT(call.action == Action::RunToReturn); // a real call inside it runs to its return
+		TEST_ASSERT(step.AfterReturn(Inlined(0x1b, 4, 1)).action == Action::SingleStep);
+		TEST_ASSERT(step.AfterReturn(At(0x1c, 9)).action == Action::Stop);
 		TEST_PASSED();
 	}
 } // namespace Testing

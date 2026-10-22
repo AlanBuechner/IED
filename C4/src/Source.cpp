@@ -3,6 +3,7 @@
 #include "Compiler/SourceMacros.h"
 #include "Core/Core.h"
 #include "Compiler/BuildUtils.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/Version.h"
 #include "Compiler/CompilationResult.h"
 #include "Compiler/DiagnosticReporter.h"
@@ -329,8 +330,7 @@ namespace
 			// The build's own folder: two programs built at once never share a foreign object. Absolute, as CBind and clang
 			// run in other working folders (BUG-318).
 			const fs::path interopFolder = fs::absolute(Scripting::IntermediateFolder(m_Options) / (fs::path(m_Options.outputFile.c_str()).stem().string() + ".interop"));
-			std::error_code ec;
-			fs::create_directories(interopFolder, ec);
+			const std::error_code ec = Scripting::CreateFolders(interopFolder.string());
 			if (ec)
 			{
 				m_Result.AddBackendError("cannot create the interop folder " + Core::String(interopFolder.string().c_str()) + ": " + Core::String(ec.message().c_str()));

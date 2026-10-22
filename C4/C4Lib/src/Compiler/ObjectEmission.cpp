@@ -1,5 +1,6 @@
 #include "Compiler/ObjectEmission.h"
 #include "Compiler/AggregateCopies.h"
+#include "Compiler/CodeViewLocations.h"
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
 #include <llvm/Analysis/TargetLibraryInfo.h>
@@ -156,6 +157,7 @@ namespace Scripting
 			llvm::ModulePassManager pipeline = optLevel == 0 ? builder.buildO0DefaultPipeline(llvm::OptimizationLevel::O0)
 				: builder.buildPerModuleDefaultPipeline(PipelineLevel(optLevel));
 			pipeline.run(module, modules);
+			DropPartialConstantLocations(module);
 		}
 
 		void WriteObject(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
@@ -190,16 +192,17 @@ namespace Scripting
 		}
 
 		// Written beside its final name and moved there once complete, so an interrupted build never leaves a partial
-		// object where a later build would take it for a finished one.
+		// object where a later build would take it for a finished one. LLVM's file calls take paths longer than
+		// MAX_PATH (a deep build folder), std::filesystem's do not.
 		void AssembleInto(llvm::Module& module, const ObjectSettings& settings, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
 		{
 			const std::string unfinished = objPath + ".tmp";
 			const size_t before = diagnostics.size();
 			Assemble(module, settings, unfinished, diagnostics);
 			std::error_code ec;
-			if (diagnostics.size() == before) std::filesystem::rename(unfinished, objPath, ec);
+			if (diagnostics.size() == before) ec = llvm::sys::fs::rename(unfinished, objPath);
 			if (ec) diagnostics.push_back({ 0, "cannot move the object '" + unfinished + "' into place: " + ec.message() });
-			if (diagnostics.size() != before) std::filesystem::remove(unfinished, ec);
+			if (diagnostics.size() != before) llvm::sys::fs::remove(unfinished);
 		}
 
 		// One partition of the module and the object its code is kept as.
@@ -241,9 +244,8 @@ namespace Scripting
 		std::vector<Partition*> NotCached(std::vector<Partition>& partitions)
 		{
 			std::vector<Partition*> missing;
-			std::error_code ec;
 			for (Partition& partition : partitions)
-				if (!std::filesystem::exists(partition.objPath, ec)) missing.push_back(&partition);
+				if (!llvm::sys::fs::exists(partition.objPath)) missing.push_back(&partition);
 			return missing;
 		}
 
@@ -304,8 +306,8 @@ namespace Scripting
 	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
 		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics)
 	{
-		std::error_code ec;
-		std::filesystem::create_directories(cache.Folder(), ec);
+		InitializeX86(); // the bitcode that names an object lists its file-scope assembly's symbols only once X86 is in
+		const std::error_code ec = llvm::sys::fs::create_directories(cache.Folder().string());
 		if (ec)
 		{
 			diagnostics.push_back({ 0, "cannot create the object cache '" + cache.Folder().string() + "': " + ec.message() });

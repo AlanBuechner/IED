@@ -8,9 +8,10 @@
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Tooling.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -68,10 +69,12 @@ namespace
 			std::string text = gen.Generate(ctx);
 			text += ConstantDeclarations(ConstantCandidates(m_Preprocessor), gen.BoundNames(), g_args.header, g_args.clangArgs, g_args.language == "c++");
 
+			// LLVM's file calls take paths longer than MAX_PATH (a deep build folder); the standard streams do not.
 			fs::path outPath(g_args.outFile);
 			if (outPath.has_parent_path())
-				fs::create_directories(outPath.parent_path());
-			std::ofstream f(outPath, std::ios::trunc);
+				llvm::sys::fs::create_directories(outPath.parent_path().string());
+			std::error_code ec;
+			llvm::raw_fd_ostream f(outPath.string(), ec, llvm::sys::fs::OF_TextWithCRLF);
 			f << text;
 
 			// C++ virtual dispatch: emit a companion C++ shim with one vtable trampoline per
@@ -81,12 +84,11 @@ namespace
 			std::string shim = gen.GenerateShim(ctx);
 			const bool cxx = g_args.language == "c++";
 			const std::string stem = (outPath.parent_path() / outPath.filename().stem()).string();
-			std::error_code ignored;
-			fs::remove(stem + ".cbind_shim.cpp", ignored);
-			fs::remove(stem + ".cbind_shim.c", ignored);
+			llvm::sys::fs::remove(stem + ".cbind_shim.cpp");
+			llvm::sys::fs::remove(stem + ".cbind_shim.c");
 			if (!shim.empty())
 			{
-				std::ofstream sf(stem + (cxx ? ".cbind_shim.cpp" : ".cbind_shim.c"), std::ios::trunc);
+				llvm::raw_fd_ostream sf(stem + (cxx ? ".cbind_shim.cpp" : ".cbind_shim.c"), ec, llvm::sys::fs::OF_TextWithCRLF);
 				sf << "#define _CRT_SECURE_NO_WARNINGS\n";
 				if (cxx) sf << "#include <new>\n"; // placement new in constructor wrappers; the header may not include it
 				sf << "#include \"" + fs::absolute(g_args.header).filename().string() + "\"\n";

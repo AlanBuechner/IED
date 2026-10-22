@@ -103,11 +103,11 @@ namespace C4DAP::Target
 			Stop(event, DBG_CONTINUE, StopInfo{ StopReason::Exception, thread, {}, (thrown.empty() ? "an exception" : thrown) + " was thrown and not caught" });
 			return;
 		}
-		const std::vector<uint32_t> ids = m_Breakpoints.IdsAt(address);
+		std::vector<uint32_t> ids = m_Breakpoints.IdsAt(address);
 		if (!ids.empty())
 		{
 			CancelStep();
-			Stop(event, DBG_CONTINUE, StopInfo{ StopReason::Breakpoint, thread, ids });
+			StopAtBreakpoint(event, thread, address, std::move(ids));
 			return;
 		}
 		// A step's return breakpoint reached by another thread or a deeper call: not a stop.
@@ -253,11 +253,33 @@ namespace C4DAP::Target
 	bool Engine::LandedOnBreakpoint(const DEBUG_EVENT& event)
 	{
 		const ThreadState now = Observe(event.dwThreadId);
-		const std::vector<uint32_t> ids = m_Breakpoints.IdsAt(now.rip);
+		std::vector<uint32_t> ids = m_Breakpoints.IdsAt(now.rip);
 		if (ids.empty() || (now.position.line == m_Step->step.Start().line && now.position.path == m_Step->step.Start().path)) return false;
 		CancelStep();
-		Stop(event, DBG_CONTINUE, StopInfo{ StopReason::Breakpoint, event.dwThreadId, ids });
+		StopAtBreakpoint(event, event.dwThreadId, now.rip, std::move(ids));
 		return true;
+	}
+
+	// A breakpoint on the line of a call the optimizer inlined stops in the inlined function's code: the stop shows
+	// the thread in the frame whose line the breakpoint is on.
+	void Engine::StopAtBreakpoint(const DEBUG_EVENT& event, DWORD thread, uint64_t address, std::vector<uint32_t> ids)
+	{
+		const size_t leftOut = InlinedInsideBreakpointLine(thread, address);
+		Stop(event, DBG_CONTINUE, StopInfo{ StopReason::Breakpoint, thread, std::move(ids) });
+		m_InlinedLeftOut = leftOut; // after Stop, which clears what the last stop knew
+	}
+
+	size_t Engine::InlinedInsideBreakpointLine(DWORD thread, uint64_t address) const
+	{
+		const std::vector<FrameRegisters> top = WalkStack(m_Process, thread, 1);
+		if (top.empty()) return 0;
+		const std::vector<uint32_t>& inlined = top[0].inlined;
+		for (size_t depth = 0; depth <= inlined.size(); ++depth)
+		{
+			const uint32_t context = depth < inlined.size() ? inlined[depth] : 0;
+			if (m_Breakpoints.SetOn(address, m_Symbols.PositionOf(CodePlace{ address, context }))) return depth;
+		}
+		return 0;
 	}
 
 	void Engine::Continue()
@@ -268,17 +290,18 @@ namespace C4DAP::Target
 	void Engine::Step(StepKind kind, DWORD thread)
 	{
 		if (m_State != State::Stopped || !m_Process.Thread(thread)) return;
-		const ThreadState start = Observe(thread);
+		const ThreadState start = ObserveStopped(thread);
 		if (!start.position.Known()) kind = StepKind::Out; // no lines to step through here: out to the caller
+		const Target::Step step(kind, thread, start);
 		uint64_t returnAddress = 0, returnRsp = 0;
-		if (kind == StepKind::Out)
+		if (kind == StepKind::Out && !step.OutOfInlined())
 		{
 			const std::vector<FrameRegisters> frames = WalkStack(m_Process, thread, kReturnFrames);
 			if (frames.size() < kReturnFrames) { Continue(); return; }
 			returnAddress = frames[1].pc;
 			returnRsp = frames[1].registers.Rsp;
 		}
-		m_Step.emplace(ActiveStep{ Target::Step(kind, thread, start), start });
+		m_Step.emplace(ActiveStep{ step, start });
 		m_Step->frameRsp = start.rsp;
 		const Target::Step::Decision first = m_Step->step.Begin(returnAddress, returnRsp);
 		if (first.action == Target::Step::Action::RunToReturn)
@@ -338,7 +361,23 @@ namespace C4DAP::Target
 		state.rip = registers.Rip;
 		state.rsp = registers.Rsp;
 		m_Process.Read(registers.Rsp, state.top);
-		state.position = m_Symbols.PositionOf(registers.Rip);
+		const InlinedCalls inlined = m_Symbols.InlinedAt(registers.Rip);
+		state.position = m_Symbols.PositionOf(CodePlace{ registers.Rip, inlined.innermost });
+		state.inlineDepth = inlined.depth;
+		return state;
+	}
+
+	// The thread as its stop shows it: outside the inlined calls a breakpoint on their call's line stopped in.
+	ThreadState Engine::ObserveStopped(DWORD thread) const
+	{
+		ThreadState state = Observe(thread);
+		if (thread != m_Held.dwThreadId || m_InlinedLeftOut == 0) return state;
+		const std::vector<FrameRegisters> top = WalkStack(m_Process, thread, 1);
+		if (top.empty() || m_InlinedLeftOut > top[0].inlined.size()) return state;
+		const std::vector<uint32_t>& inlined = top[0].inlined;
+		const uint32_t context = m_InlinedLeftOut < inlined.size() ? inlined[m_InlinedLeftOut] : 0;
+		state.position = m_Symbols.PositionOf(CodePlace{ state.rip, context });
+		state.inlineDepth = static_cast<uint32_t>(inlined.size() - m_InlinedLeftOut);
 		return state;
 	}
 } // namespace C4DAP::Target

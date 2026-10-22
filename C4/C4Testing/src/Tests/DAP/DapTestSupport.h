@@ -22,8 +22,8 @@ namespace Testing::Dap
 		bool built = false;
 	};
 
-	/// Builds `source` as main.cf of its own folder (under the temp folder, named `name`).
-	DebugProgram BuildProgram(const std::string& name, const std::string& source);
+	/// Builds `source` as main.cf of its own folder (under the temp folder, named `name`), optimized at `optLevel`.
+	DebugProgram BuildProgram(const std::string& name, const std::string& source, int optLevel = 0);
 
 	/// The 1-based line of the first line of `source` that contains `marker`; 0 when none does.
 	uint32_t LineOf(const std::string& source, const std::string& marker);

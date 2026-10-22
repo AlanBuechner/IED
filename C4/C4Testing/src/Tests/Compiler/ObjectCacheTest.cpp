@@ -1,12 +1,15 @@
 #include "ObjectCacheTest.h"
+#include "Compiler/CpuTarget.h"
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
+#include "Compiler/ObjectEmission.h"
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SourceMgr.h>
 #include <filesystem>
@@ -170,6 +173,32 @@ namespace Testing
 			fs::create_directories(folder);
 			return folder;
 		}
+
+		// Windows' path limit for calls that do not take long paths.
+		constexpr size_t kMaxPath = 260;
+
+		fs::path DeepRoot() { return fs::temp_directory_path() / "c4-objectcache-deep"; }
+
+		// The spelling of an absolute path that std::filesystem's calls take past MAX_PATH.
+		fs::path LongPath(const fs::path& path) { return fs::path(L"\\\\?\\" + path.wstring()); }
+
+		// A folder deep enough that an object's path in it is longer than MAX_PATH.
+		fs::path DeepFolder()
+		{
+			std::error_code ec;
+			fs::remove_all(LongPath(DeepRoot()), ec);
+			const fs::path folder = DeepRoot() / std::string(120, 'd') / std::string(120, 'e');
+			return llvm::sys::fs::create_directories(folder.string()) ? fs::path() : folder;
+		}
+
+		CachedObjects WriteProgramObjects(const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics)
+		{
+			llvm::LLVMContext context;
+			std::unique_ptr<llvm::Module> module = Parse("target triple = \"x86_64-pc-windows-msvc\"\n" + ProgramText(""), context);
+			const CpuTarget target;
+			const ObjectSettings settings{ 0, &target, 1, false };
+			return module ? WriteCachedObjects(*module, settings, 2, cache, diagnostics) : CachedObjects{};
+		}
 	}
 
 	void ObjectCacheTest::TheSameCodeNamesTheSameObject()
@@ -210,6 +239,33 @@ namespace Testing
 		cache.KeepOnly({});
 		TEST_ASSERT(fs::is_empty(folder));
 		fs::remove_all(folder.parent_path());
+	}
+
+	// BUG-354: objects whose paths are longer than MAX_PATH are moved into place, found again and pruned. BUG-355: the
+	// first build of a process names its objects as the next does (the partition with the file-scope assembly lists its
+	// symbols whether or not the backend was set up before).
+	void ObjectCacheTest::ADeepFolderKeepsAndReusesItsObjects()
+	{
+		const fs::path folder = DeepFolder();
+		TEST_ASSERT(!folder.empty());
+		const ObjectCache cache(folder, "salt");
+		std::vector<ObjectDiagnostic> diagnostics;
+		const CachedObjects first = WriteProgramObjects(cache, diagnostics);
+		TEST_ASSERT_EQ(diagnostics.empty() ? std::string() : diagnostics.front().message, std::string());
+		TEST_ASSERT_EQ(first.paths.size(), size_t(2));
+		for (const std::string& path : first.paths)
+		{
+			TEST_ASSERT(path.size() > kMaxPath);
+			TEST_ASSERT(llvm::sys::fs::exists(path));
+		}
+		const CachedObjects again = WriteProgramObjects(cache, diagnostics);
+		TEST_ASSERT_EQ(diagnostics.empty() ? std::string() : diagnostics.front().message, std::string());
+		TEST_ASSERT(again.paths == first.paths);
+		TEST_ASSERT_EQ(again.reused, size_t(2));
+		cache.KeepOnly({});
+		for (const std::string& path : first.paths) TEST_ASSERT(!llvm::sys::fs::exists(path));
+		std::error_code ec;
+		fs::remove_all(LongPath(DeepRoot()), ec);
 	}
 
 	void ObjectCacheTest::EveryPartitionReadsBackAndVerifies()

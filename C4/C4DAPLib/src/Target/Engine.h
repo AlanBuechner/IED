@@ -52,6 +52,7 @@ namespace C4DAP::Target
 		uint32_t id = 0;
 		std::string name;
 		SourcePosition position;
+		std::string instructionPointer; // the frame's pc: inlined calls share their caller's
 	};
 
 	struct VariableInfo
@@ -121,11 +122,14 @@ namespace C4DAP::Target
 			uint64_t frameRsp = 0;  // the stepped frame's stack pointer: it and its callers are at or above it
 			std::vector<uint64_t> catchPatches; // a throw left the frame: its handlers' and its callers'
 		};
+		// A frame as the client sees it: a call (inlineContext 0) or a call the optimizer inlined into it.
 		struct FrameRecord
 		{
 			DWORD thread = 0;
-			size_t depth = 0;
+			size_t depth = 0; // of the call it is in
 			FrameRegisters frame;
+			uint32_t inlineContext = 0;
+			CodePlace Place() const { return CodePlace{ frame.Lookup(depth), inlineContext }; }
 		};
 		struct LocalsReference { size_t frame = 0; };
 		using Reference = std::variant<LocalsReference, ValueRef>;
@@ -153,10 +157,16 @@ namespace C4DAP::Target
 		void ReleaseCatchStops();
 		void ArmUncaughtHook();
 		void ClearStopTables();
+		void StopAtBreakpoint(const DEBUG_EVENT& event, DWORD thread, uint64_t address, std::vector<uint32_t> ids);
+		size_t InlinedInsideBreakpointLine(DWORD thread, uint64_t address) const;
 		ThreadState Observe(DWORD thread) const;
+		ThreadState ObserveStopped(DWORD thread) const;
 		uint32_t Remember(const Reference& reference);
+		std::vector<uint32_t> RecordFrames(DWORD thread);
 		VariableInfo Describe(const std::string& name, const ValueRef& value);
+		VariableInfo DescribeLocal(const VariableSymbol& symbol, const FrameRegisters& frame);
 		std::optional<ValueRef> Variable(const std::string& name, const FrameRecord* frame) const;
+		std::string Unavailable(const std::string& name, const FrameRecord* frame) const;
 
 		EngineEvents m_Events;
 		Process m_Process;
@@ -189,5 +199,6 @@ namespace C4DAP::Target
 		std::vector<FrameRecord> m_Frames;
 		std::unordered_map<DWORD, std::vector<uint32_t>> m_FramesOfThread;
 		std::vector<Reference> m_References;
+		size_t m_InlinedLeftOut = 0; // of the calls inlined at the stopped thread's pc, those its stop shows it outside of
 	};
 } // namespace C4DAP::Target

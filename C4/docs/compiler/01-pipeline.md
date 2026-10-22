@@ -215,6 +215,8 @@ straight from the module in memory).
   and the size and time of its executable) and the target settings, so a partition whose code is unchanged reuses
   its object and a rebuilt compiler or another `-O` / `-march` reuses none. An object is written beside its name and
   moved into place when complete; the folder keeps only the latest build's objects. `-v` says how many were reused.
+  The cache's files are handled with LLVM's file calls, which take paths longer than `MAX_PATH` (a deep build folder);
+  the interop pass's and CBind's files are too (`Compiler/FileIo`).
   Names do not depend on the order code is generated in (`Backend/CodeGen/StableNames`: literals, test-runner strings
   and reflection tables are named after their content; exception and RTTI records after the type they describe), so
   an edit renames nothing it did not change. On the Bedrock tests at `-O0` (32 partitions): a cold build 0.96 s, an

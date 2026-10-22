@@ -29,6 +29,8 @@ namespace C4DAP::Target
 		std::vector<BoundBreakpoint> BindPending(const Symbols& symbols, const Process& process, Patches& patches);
 		/// The client's ids of the breakpoints at `address`.
 		std::vector<uint32_t> IdsAt(uint64_t address) const;
+		/// Whether a breakpoint at `address` is on `position`'s line.
+		bool SetOn(uint64_t address, const SourcePosition& position) const;
 
 	private:
 		struct Entry

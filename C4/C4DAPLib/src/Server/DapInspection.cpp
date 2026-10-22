@@ -21,6 +21,7 @@ namespace C4DAP::Server
 			entry.SetMember("id", Json::Value::Int(frame.id));
 			entry.SetMember("name", Json::Value::String(frame.name));
 			entry.SetMember("line", Json::Value::Int(frame.position.line));
+			entry.SetMember("instructionPointerReference", Json::Value::String(frame.instructionPointer));
 			// A frame whose source is not on this machine (the C runtime's, built elsewhere) shows as one without.
 			std::error_code ignored;
 			const bool hasSource = frame.position.Known() && std::filesystem::exists(frame.position.path, ignored);

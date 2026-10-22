@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-343**
+Next ID: **BUG-357**
 
 ## Rules for this file
 
@@ -43,6 +43,7 @@ Next ID: **BUG-343**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
+| BUG-356 | A source, macro output, project file or script cache path longer than MAX_PATH is not read or written | Driver | Low |
 
 ---
 
@@ -51,6 +52,20 @@ Next ID: **BUG-343**
 ## Model, templates and semantics
 
 ## HIR and codegen
+
+### BUG-356 A source, macro output, project file or script cache path longer than MAX_PATH is not read or written
+- **Area:** Driver
+- **Severity:** Low
+- **Status:** Open
+- **Found:** 2026-10-22
+- **Symptom:** a C4 source whose own path passes 260 characters (a deep project folder) is not found or read; the same
+  for the macro pass's output, project files and the script host's caches and sources.
+- **Where:** `SourceManager/Source.cpp`, `SourceManager/SourceManager.cpp`, `Macro/MacroPass.cpp`,
+  `Compiler/ProjectFile.cpp`, `Compiler/RuntimeObjects.cpp`, `Script/HostInterface.cpp`, `Script/ScriptDll.cpp`,
+  `Script/ScriptSources.cpp` read and write with the standard streams and `std::filesystem`,
+  which do not take long paths (unless Windows' `LongPathsEnabled` is on and the program's manifest opts in).
+- **Notes:** the build-output side (objects, interop, CBind, the output, intermediate and interop folders, the
+  `.pdb`, the script cache) goes through `Compiler/FileIo` since BUG-354; these go the same way.
 
 ## Interop, runtime and Bedrock
 

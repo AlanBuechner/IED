@@ -174,8 +174,11 @@ handles.)
   to addresses, an address to its function and line, the scope's parameters and locals (`SymSetContext`,
   `SymEnumSymbols`), and their types (`SymGetTypeInfo`).
 - **Breakpoints** are `int3` patches keyed by address. A source breakpoint binds to every address of its line
-  (every instance of a template, every piece of a `for` header); a line without code binds to the next line
-  that has some, and the response reports that line. Breakpoints set before the program starts bind when
+  (every instance of a template, every piece of a `for` header, every place the optimizer inlined a call of its
+  function: `ESLFLAG_INLINE_SITE`); a line without code binds to the next line that has some, and the response
+  reports that line. A function's line table gives an inlined call's code the call's line all the way through, so
+  a line binds to its own code (where the innermost frame is on it), and only where a function has none of that, to
+  the first of the inlined code; a stop there shows the caller's frame on the line, outside the inlined calls. Breakpoints set before the program starts bind when
   the program's module loads (a `breakpoint` event says so). Resuming from a breakpoint steps the original
   instruction with the trap flag, then puts the patch back.
 - **Stepping** is by source line, single-stepping instructions:
@@ -189,14 +192,27 @@ handles.)
   - a throw that leaves the call a step runs over ends the step in the catch that takes it: on the throw's
     first chance the adapter puts stops on the catch handlers of the stepped frame and its callers, read from
     each function's x64 unwind information and MSVC C++ tables (`CatchHandlers`), at the first line of each
-    handler's body (a funclet's prologue has no line of its own).
+    handler's body (a funclet's prologue has no line of its own);
+  - a call the optimizer inlined has no call instruction, so each instruction's inline depth stands for it
+    (`SymAddrIncludeInlineTrace`, its line from the innermost inlined call's): `next` single-steps through code
+    deeper than where it started, `stepIn` stops on its first line, and `stepOut` of an inlined call single-steps
+    until the instruction is no longer in it.
 - **Stack**: `StackWalkEx` over the thread's context; each frame keeps its own registers, which locate its
-  variables. A caller's line is looked up at its return address minus one.
-- **Values** come from a symbol's storage (relative to a register, the frame or in a register), read with
+  variables. A caller's line is looked up at its return address minus one. The walk reports each call inlined at a
+  frame's pc as a frame of its own (`InlineFrameContext`), innermost first; its name, line and locals come from
+  `SymFromInlineContext`, `SymGetLineFromInlineContext` and `SymSetScopeFromInlineContext`, and it shares its
+  caller's registers and pc (`instructionPointerReference`).
+- **Values** come from a symbol's storage (relative to a register, the frame or in a register: any part of a general
+  register, `rax` to `al` and `ah`, `r8` to `r8b`, or the low 64 bits of `xmm0` to `xmm15`), read with
   `ReadProcessMemory`, and are shown by their types: integers in decimal, floats, `bool`, characters,
   enums by name, pointers as addresses (a `char8*` with its text) with what they point at as children,
   references as their referent, objects and unions with their bases and fields, arrays and swizzle lanes
   with their elements. Type names use C4 spellings (`int32`, `uint8`, `float`).
+- **Optimized code** (`-O1` to `-O3`, so Nuke's Development) keeps a variable in a register, on the stack or
+  nowhere, and that changes along the function: DbgHelp gives the storage at the frame's address. A variable with no
+  location there shows `<optimized away>` (as in Visual Studio) and `evaluate` says it is optimized away here; one
+  the debug info gives as a constant shows that constant. A local in a register the adapter does not know shows
+  `<unreadable>`.
 - **Exceptions**: a C4 exception (MSVC C++ EH) stops the program when nothing catches it (`uncaught`, on by
   default) and when it is thrown (`thrown`); the stop names the thrown type, read from the throw's MSVC
   tables (`ThrownType`). With a debugger attached, Windows hands an uncaught exception to the debugger (a
@@ -242,12 +258,14 @@ which` prints the workspace's toolchain folder), adapter id `c4`. A launch confi
 
 ### Validation
 
-- C4Testing `Dap.*` (48 tests): the honest pieces (`Formatting`: scalars, strings, thrown type names, UTF-8
+- C4Testing `Dap.*` (57 tests): the honest pieces (`Formatting`: scalars, strings, thrown type names, UTF-8
   output boundaries, command lines; `Expression`; `Step`: every stepping decision), the server's messages with no
   program (`Server`: capabilities and `initialized`, sequence numbers, errors for an unknown request, a missing
   program, a missing source, inspecting nothing), and sessions of programs built with `C4.exe -g` (`Session`:
   the stack and locals at a breakpoint, a caller frame's locals, every kind of step, a breakpoint inside a
   step over, recursion, a step over a throw into a catch (and the variables there), a line without code, every instance of a template, a lambda, stop on entry, output and
   exit code, pause and terminate; `Inspection`: every kind of value, children, `evaluate` and its errors;
-  `Exception`: uncaught, thrown, no filters).
+  `Exception`: uncaught, thrown, no filters; `Optimized`: DbgHelp's flags to storage, every part of a
+  register, constants and variables optimized away, an `-O3` loop's locals, an inlined call's frame, locals and
+  step out, and a breakpoint on an inlined call's line).
 - ToolsTest `DapAdapter`: `StdioClient.py` drives the built `C4DAP.exe` over real stdio through a session.

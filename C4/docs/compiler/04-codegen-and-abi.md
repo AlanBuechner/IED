@@ -370,7 +370,9 @@ without it nothing below is emitted.
   its display name).
 - **Functions.** A function written in C4 (its record has a body) gets a subprogram named as the program
   spells it (`Ns::Free`, `Type::Method`), with its signature, at its body's line. Compiler-written functions
-  (the `@main` wrapper, global init rounds, thunks, EH helpers) get none.
+  (the `@main` wrapper, global init rounds, thunks, EH helpers) get none. So that the program's `main` keeps its
+  lines, the `@main` wrapper's call of it is `noinline` (with or without `-g`): inlined into the wrapper it would
+  have none, and a debugger's breakpoints would bind to an out-of-line copy that never runs.
 - **Lines.** Every HIR node carries `origin`, the start of the statement it was lowered for:
   `HIRFunction::NewNode` stamps it from `HIRFunction::location`, which `StmtLowerer::LowerStmt` sets per
   statement and restores after it. `RegionEmitter::EmitStatement` sets the builder's location from it
@@ -388,9 +390,16 @@ without it nothing below is emitted.
   a `funcptr` as a pointer to its signature, and a `func` as `{ code, environment }`.
 - **Globals.** `MaterializeGlobals` describes every global and static member once, named as the program
   spells it (`Ns::g`, `Type::s`), at its declaration.
+- **Optimized locations.** From `-O1` on the optimizer turns a variable's slot into `#dbg_value` locations that
+  change along the function (a register, a constant, nothing). LLVM writes a CodeView variable with any constant
+  location as one `S_CONSTANT` for the whole function and drops its other ranges, so after the pipeline
+  `DropPartialConstantLocations` (`Compiler/CodeViewLocations`) removes the constant locations of a variable that
+  also has another one, or whose constants disagree: it keeps its register and stack ranges, and the stretches
+  where it was a constant read as optimized away. A variable that is one constant throughout stays `S_CONSTANT`.
 
 The object is compiled from IR with the metadata, and the link passes `/DEBUG`, so lld writes the `.pdb`
-beside the exe. C4Testing `Semantic.DebugInfo` checks the metadata; ToolsTest `DebugInfoFlag` reads a real
+beside the exe. C4Testing `Semantic.DebugInfo` checks the metadata and `Compiler.CodeViewLocations` the
+constant locations; `Dap.Optimized` debugs an `-O3` program; ToolsTest `DebugInfoFlag` reads a real
 `.pdb`; IsolatedTest `-DebugInfo` builds the corpus with `-g`.
 
 ## Strict aliasing (`!tbaa`)

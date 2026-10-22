@@ -1,4 +1,5 @@
 #include "Script/ScriptCache.h"
+#include "Compiler/FileIo.h"
 #include "Script/ScriptCompiler.h"
 #include <llvm/Support/BLAKE3.h>
 #include <llvm/Support/FileSystem.h>
@@ -8,7 +9,6 @@
 #include <cctype>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <iterator>
 #include <thread>
 #include <windows.h>
@@ -48,9 +48,8 @@ namespace Scripting
 
 		bool ReadText(const std::string& path, std::string& text)
 		{
-			std::ifstream file(path, std::ios::binary);
-			if (!file) return false;
-			text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			if (!FileExists(path)) return false;
+			text = ReadFileBytes(path);
 			return true;
 		}
 
@@ -137,10 +136,11 @@ namespace Scripting
 		void RemoveOthers(const std::string& folder, const std::string& prefix, const std::string& kept)
 		{
 			std::error_code ec;
-			for (const fs::directory_entry& entry : fs::directory_iterator(folder, ec))
+			for (llvm::sys::fs::directory_iterator entry(folder, ec), end; !ec && entry != end; entry.increment(ec))
 			{
-				const std::string name = entry.path().filename().string();
-				if (name != kept && name.rfind(prefix, 0) == 0 && entry.path().extension() == kEntryExtension) fs::remove(entry.path(), ec);
+				const fs::path path(entry->path());
+				const std::string name = path.filename().string();
+				if (name != kept && name.rfind(prefix, 0) == 0 && path.extension() == kEntryExtension) RemoveFile(entry->path());
 			}
 		}
 	}
@@ -163,17 +163,13 @@ namespace Scripting
 
 	void ScriptCache::Write(const std::string& entry, const CachedScript& script) const
 	{
-		std::error_code ec;
-		fs::create_directories(m_Folder, ec);
-		// Written aside and renamed into place, so a reader never sees half an entry.
+		CreateFolders(m_Folder);
+		// Written aside and renamed into place, so a reader never sees half an entry. Through LLVM's file calls, which
+		// take paths longer than MAX_PATH (a deep build folder).
 		const std::string written = entry + ".tmp" + std::to_string(llvm::sys::Process::getProcessId()) + "-" +
 			std::to_string(std::hash<std::thread::id>()(std::this_thread::get_id()));
-		{
-			std::ofstream out(written, std::ios::binary | std::ios::trunc);
-			const std::string bytes = Encode(script);
-			if (!out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()))) return;
-		}
-		if (llvm::sys::fs::rename(written, entry)) { fs::remove(written, ec); return; }
+		if (!WriteFileBytes(written, Encode(script))) return;
+		if (RenameFile(written, entry)) { RemoveFile(written); return; }
 		const std::string name = fs::path(entry).filename().string();
 		RemoveOthers(m_Folder, name.substr(0, name.rfind('-') + 1), name); // the digest holds no '-'
 	}

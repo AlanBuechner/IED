@@ -1,5 +1,6 @@
 #include "Compiler/ObjectCache.h"
 #include <llvm/ADT/StringExtras.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/xxhash.h>
 #include <cstdio>
 #include <set>
@@ -23,11 +24,13 @@ namespace Scripting
 		return m_Folder / (Hex(code.high64) + Hex(code.low64) + "-" + Hex(llvm::xxh3_64bits(llvm::StringRef(m_Salt))) + ".obj");
 	}
 
+	// LLVM's file calls take paths longer than MAX_PATH (a deep build folder), std::filesystem's do not.
 	void ObjectCache::KeepOnly(const std::vector<std::filesystem::path>& used) const
 	{
 		std::set<std::filesystem::path> keep(used.begin(), used.end());
 		std::error_code ec;
-		for (const auto& entry : std::filesystem::directory_iterator(m_Folder, ec))
-			if (entry.is_regular_file(ec) && !keep.count(entry.path())) std::filesystem::remove(entry.path(), ec);
+		for (llvm::sys::fs::directory_iterator entry(m_Folder.string(), ec), end; !ec && entry != end; entry.increment(ec))
+			if (entry->type() == llvm::sys::fs::file_type::regular_file && !keep.count(std::filesystem::path(entry->path())))
+				llvm::sys::fs::remove(entry->path());
 	}
 }

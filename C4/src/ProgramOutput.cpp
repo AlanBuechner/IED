@@ -1,5 +1,6 @@
 #include "ProgramOutput.h"
 #include "Core/Core.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/ObjectCache.h"
 #include "Compiler/ObjectEmission.h"
 #include "Compiler/Version.h"
@@ -49,9 +50,7 @@ bool ProgramOutput::MakeOutputFolder()
 {
 	fs::path folder = fs::path(m_In.options.outputFile.c_str()).parent_path();
 	if (folder.empty()) folder = fs::current_path();
-	std::error_code ec;
-	fs::create_directories(folder, ec);
-	if (!ec) return true;
+	if (!Scripting::CreateFolders(folder.string())) return true;
 	m_In.result.AddBackendError("failed to create output folder: " + Core::String(folder.string().c_str()));
 	return false;
 }
@@ -61,9 +60,7 @@ bool ProgramOutput::MakeOutputFolder()
 std::string ProgramOutput::IntermediateBase()
 {
 	const fs::path folder = Scripting::IntermediateFolder(m_In.options);
-	std::error_code ec;
-	if (!folder.empty()) fs::create_directories(folder, ec);
-	if (ec)
+	if (!folder.empty() && Scripting::CreateFolders(folder.string()))
 	{
 		m_In.result.AddBackendError("failed to create the intermediate folder: " + Core::String(folder.string().c_str()));
 		return "";
@@ -210,8 +207,7 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects)
 	}
 	if (!Scripting::LinkWithLLD(objects, libraries, out, m_In.options.subsystem, m_In.options.verbose))
 	{
-		std::error_code ec;
-		fs::remove(debugInfo.partial, ec);
+		Scripting::RemoveFile(debugInfo.partial.string());
 		m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
 		return false;
 	}
@@ -231,10 +227,8 @@ ProgramOutput::DebugInfoPaths ProgramOutput::DebugInfoPathsFor(const Core::Strin
 // The new .pdb over the old one, now that the program it describes is in place.
 bool ProgramOutput::PlaceDebugInfo(const DebugInfoPaths& paths)
 {
-	std::error_code ec;
-	fs::rename(paths.partial, paths.final, ec);
-	if (!ec) return true;
-	fs::remove(paths.partial, ec);
+	if (!Scripting::RenameFile(paths.partial.string(), paths.final.string())) return true;
+	Scripting::RemoveFile(paths.partial.string());
 	m_In.result.AddBackendError(Core::String(("cannot replace " + paths.final.string() + " (is a debugger holding it?)").c_str()));
 	return false;
 }
@@ -297,8 +291,7 @@ bool ProgramOutput::WriteScriptInterface(const Scripting::HostInterface& host)
 bool ProgramOutput::ShipScriptHost(const fs::path& scriptHost)
 {
 	const fs::path target = fs::path(m_In.options.outputFile.c_str()).parent_path() / "C4Script.dll";
-	std::error_code ec;
-	fs::copy_file(scriptHost / "C4Script.dll", target, fs::copy_options::update_existing, ec);
+	const std::error_code ec = Scripting::UpdateFile((scriptHost / "C4Script.dll").string(), target.string());
 	if (!ec) return true;
 	m_In.result.AddBackendError(Core::String(("cannot copy C4Script.dll beside the program: " + ec.message()).c_str()));
 	return false;

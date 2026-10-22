@@ -15,12 +15,24 @@ static int64_t FileTimeNs(FILETIME time)
 	return (int64_t)ticks.QuadPart * 100;
 }
 
+// An ended process stays openable by id while any handle anywhere keeps it; it is gone all the same.
+static BOOL Running(HANDLE process)
+{
+	DWORD exitCode = 0;
+	return GetExitCodeProcess(process, &exitCode) && exitCode == STILL_ACTIVE;
+}
+
 int32_t c4_process_usage(uint32_t id, c4_process_counters* usage)
 {
 	if (!usage) return -1;
 	memset(usage, 0, sizeof(*usage));
 	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, id);
 	if (!process) return -1;
+	if (!Running(process))
+	{
+		CloseHandle(process);
+		return -1;
+	}
 	FILETIME created, exited, kernel, user;
 	PROCESS_MEMORY_COUNTERS_EX counters;
 	const BOOL timed = GetProcessTimes(process, &created, &exited, &kernel, &user);

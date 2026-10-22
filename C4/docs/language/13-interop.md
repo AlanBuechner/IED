@@ -113,7 +113,9 @@ void TestCounter() {
 
 Generated bindings are cached as `<hash>_<header>.c4bind` files (the hash is of the header's
 absolute path). A cached binding is reused while the header, CBind.exe, the language, the defines,
-the include dirs and the build's target flags are unchanged.
+the include dirs and the build's target flags are unchanged. The bindings, their stamps, the shims and the foreign
+objects' records are read and written with LLVM's file calls (`Compiler/FileIo`), so a build or project folder deep
+enough that their paths pass `MAX_PATH` works.
 
 ---
 

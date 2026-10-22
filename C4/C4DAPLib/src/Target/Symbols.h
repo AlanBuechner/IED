@@ -49,6 +49,21 @@ namespace C4DAP::Target
 		bool Known() const { return line != 0; }
 	};
 
+	/// An address in the program's code and, where the optimizer inlined calls, which of the inlined functions it
+	/// stands for: DbgHelp's inline frame context, 0 for the function the address is in itself.
+	struct CodePlace
+	{
+		uint64_t address = 0;
+		uint32_t inlineContext = 0;
+	};
+
+	/// The calls the optimizer inlined at an address: how many enclose it, and the innermost one's context.
+	struct InlinedCalls
+	{
+		uint32_t depth = 0;
+		uint32_t innermost = 0;
+	};
+
 	struct FunctionFacts
 	{
 		std::string name;
@@ -56,14 +71,20 @@ namespace C4DAP::Target
 		uint64_t size = 0;
 	};
 
-	/// Where a variable's storage is, as its symbol says.
+	/// Where a variable's storage is at an address, as its symbol says. Optimized code may keep it nowhere there
+	/// (OptimizedAway) or give it as a constant.
 	struct SymbolStorage
 	{
-		enum class Kind { Address, RegisterRelative, FrameRelative, Register };
+		enum class Kind { Address, RegisterRelative, FrameRelative, Register, Constant, OptimizedAway };
 		Kind kind = Kind::Address;
-		uint32_t reg = 0;   // a CodeView register (CV_AMD64_*)
-		int64_t offset = 0; // the address itself, or the offset from the register or the frame
+		uint32_t reg = 0;      // a CodeView register (CV_AMD64_*)
+		int64_t offset = 0;    // the address itself, or the offset from the register or the frame
+		uint64_t constant = 0; // a constant's bits
 	};
+
+	/// Where DbgHelp's description of a symbol at the scope's address puts its storage: SYMBOL_INFO's Flags,
+	/// Register, Address and Value.
+	SymbolStorage StorageOf(uint32_t flags, uint32_t reg, uint64_t address, uint64_t value);
 
 	struct VariableSymbol
 	{
@@ -83,20 +104,22 @@ namespace C4DAP::Target
 		void ModuleLoaded(HANDLE file, uint64_t base);
 		void ModuleUnloaded(uint64_t base);
 
-		/// Every address of `line` in `path` (each template instance, each piece of a `for` header). When the line
-		/// has no code, those of the next line that has some; `bound` is the line they belong to (0: none).
+		/// Every address of `line` in `path` (each template instance, each piece of a `for` header, each place a call
+		/// of its function was inlined). When the line has no code, those of the next line that has some; `bound` is
+		/// the line they belong to (0: none).
 		std::vector<uint64_t> AddressesOfLine(const std::string& path, uint32_t line, uint32_t& bound) const;
-		SourcePosition PositionOf(uint64_t address) const;
+		SourcePosition PositionOf(CodePlace place) const;
 		/// `address` when a line's code starts there, else where the next line's code starts. Code with no line of
 		/// its own (a catch funclet's prologue) belongs to the line before it in the line table, which is not its.
 		uint64_t NextStatementFrom(uint64_t address) const;
-		std::optional<FunctionFacts> FunctionOf(uint64_t address) const;
+		std::optional<FunctionFacts> FunctionOf(CodePlace place) const;
+		InlinedCalls InlinedAt(uint64_t address) const;
 		/// The entry addresses of the functions called `name` that have source lines.
 		std::vector<uint64_t> FunctionsNamed(const std::string& name) const;
 		/// A function the program links without debug information (the runtime's), by its public symbol.
 		std::optional<uint64_t> PublicFunction(const std::string& name) const;
-		/// The parameters and locals in scope at `address`, parameters first.
-		std::vector<VariableSymbol> VariablesAt(uint64_t address) const;
+		/// The parameters and locals in scope at `place`, parameters first.
+		std::vector<VariableSymbol> VariablesAt(CodePlace place) const;
 		std::optional<VariableSymbol> Global(const std::string& name) const;
 
 		TypeFacts Describe(TypeRef type) const;
@@ -105,6 +128,10 @@ namespace C4DAP::Target
 
 	private:
 		std::vector<uint64_t> ExactLine(const std::wstring& path, uint32_t line) const;
+		std::vector<uint64_t> OwnCode(const std::vector<uint64_t>& addresses, const std::wstring& path, uint32_t line) const;
+		bool OnLineItself(uint64_t address, const std::wstring& path, uint32_t line) const;
+		uint64_t FunctionStart(uint64_t address) const;
+		void SetScope(CodePlace place) const;
 		TypeRef WithoutAliases(TypeRef type) const;
 		uint32_t Tag(TypeRef type) const;
 		std::vector<uint32_t> Children(TypeRef type) const;

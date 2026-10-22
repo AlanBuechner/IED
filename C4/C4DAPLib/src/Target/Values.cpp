@@ -110,7 +110,7 @@ namespace C4DAP::Target
 		}
 		else if (target.shape == TypeShape::Function)
 		{
-			if (const std::optional<FunctionFacts> function = m_Symbols.FunctionOf(*address)) text += " " + function->name;
+			if (const std::optional<FunctionFacts> function = m_Symbols.FunctionOf(CodePlace{ *address })) text += " " + function->name;
 		}
 		return text;
 	}

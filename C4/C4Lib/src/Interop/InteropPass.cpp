@@ -1,11 +1,11 @@
 #include "InteropPass.h"
 #include "Interop/ForeignCache.h"
 #include "Compiler/BuildUtils.h"
+#include "Compiler/FileIo.h"
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/Toolchain.h"
 #include "Core/Core.h"
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -26,15 +26,6 @@ namespace Scripting
 			std::string r = p;
 			std::replace(r.begin(), r.end(), '\\', '/');
 			return r;
-		}
-
-		std::string ReadFileText(const fs::path& path)
-		{
-			std::ifstream f(path, std::ios::binary);
-			if (!f.is_open()) return "";
-			std::ostringstream ss;
-			ss << f.rdbuf();
-			return ss.str();
 		}
 
 		// A binding's macro constants (BUG-284) that an earlier binding in the same file already declared, left out: two
@@ -67,31 +58,21 @@ namespace Scripting
 			return cbind.empty() ? std::string() : Norm(cbind.string());
 		}
 
-		struct FileStamp { bool exists = false; uintmax_t mtime = 0; uintmax_t size = 0; };
-		FileStamp Stamp(const std::string& path)
-		{
-			FileStamp s;
-			std::error_code ec;
-			if (!fs::exists(path, ec)) return s;
-			s.exists = true;
-			s.mtime = fs::last_write_time(path, ec).time_since_epoch().count();
-			s.size = fs::file_size(path, ec);
-			return s;
-		}
-
 		// A binding is reusable when the header and CBind.exe are unchanged since it was written.
 		// This turns the LSP's per-recompile interop pass from "CBind every file every time"
 		// (~minutes for SDK headers) into a cache hit, without ever serving stale bindings: any
 		// edit to the header or a rebuild of CBind changes one of the stamps.
 		bool BindingIsCached(const std::string& outFile, const std::string& headerAbs, const std::string& cbindExe, const BindingFlags& flags)
 		{
-			FileStamp h = Stamp(headerAbs), cb = Stamp(cbindExe);
-			if (!h.exists || !cb.exists) return false;
+			const std::optional<FileStamp> h = StampOf(headerAbs), cb = StampOf(cbindExe);
+			if (!h || !cb) return false;
 
-			std::ifstream f(outFile + ".cache");
-			if (!f.is_open()) return false;
+			const std::string cached = ReadFileBytes(outFile + ".cache");
+			if (cached.empty()) return false;
+			std::istringstream f(cached);
 
-			uintmax_t hm, hs, cm, cs;
+			int64_t hm = 0, cm = 0;
+			uint64_t hs = 0, cs = 0;
 			std::string l;
 			if (!(f >> hm >> hs >> cm >> cs)) return false;
 			std::getline(f, l); // trailing \n after the stamp line
@@ -113,11 +94,11 @@ namespace Scripting
 			std::vector<std::string> d, inc, target;
 			if (!readCountedList(d) || !readCountedList(inc) || !readCountedList(target)) return false;
 
-			return hm == h.mtime && hs == h.size && cm == cb.mtime && cs == cb.size && d == flags.defines && inc == flags.includeDirs &&
+			return hm == h->modified && hs == h->size && cm == cb->modified && cs == cb->size && d == flags.defines && inc == flags.includeDirs &&
 				target == flags.targetFlags;
 		}
 
-		void WriteCountedList(std::ofstream& f, const std::vector<std::string>& list)
+		void WriteCountedList(std::ostream& f, const std::vector<std::string>& list)
 		{
 			f << list.size() << "\n";
 			for (const auto& entry : list) f << entry << "\n";
@@ -125,13 +106,14 @@ namespace Scripting
 
 		void WriteBindingCache(const std::string& outFile, const std::string& headerAbs, const std::string& cbindExe, const BindingFlags& flags)
 		{
-			FileStamp h = Stamp(headerAbs), cb = Stamp(cbindExe);
-			std::ofstream f(outFile + ".cache", std::ios::binary | std::ios::trunc);
-			if (!f.is_open()) return;
-			f << h.mtime << " " << h.size << " " << cb.mtime << " " << cb.size << "\n" << flags.language << "\n";
+			const std::optional<FileStamp> h = StampOf(headerAbs), cb = StampOf(cbindExe);
+			if (!h || !cb) return;
+			std::ostringstream f;
+			f << h->modified << " " << h->size << " " << cb->modified << " " << cb->size << "\n" << flags.language << "\n";
 			WriteCountedList(f, flags.defines);
 			WriteCountedList(f, flags.includeDirs);
 			WriteCountedList(f, flags.targetFlags);
+			WriteFileBytes(outFile + ".cache", f.str());
 		}
 
 		// Case-insensitive whole-word match for a keyword at position i (bounded by non-identifier chars).
@@ -312,7 +294,7 @@ namespace Scripting
 		{
 			std::string hp = Norm(headerPath);
 			bool isAbs = (hp.size() >= 2 && hp[1] == ':') || (hp.front() == '/');
-			if (isAbs && fs::exists(hp)) return hp;
+			if (isAbs && FileExists(hp)) return hp;
 
 			std::vector<std::string> candidates;
 			candidates.push_back(Norm(fileDir + "/" + hp));
@@ -322,7 +304,7 @@ namespace Scripting
 				candidates.push_back(Norm(inc + "/" + hp));
 
 			for (const auto& c : candidates)
-				if (fs::exists(c)) return c;
+				if (FileExists(c)) return c;
 			return "";
 		}
 
@@ -337,7 +319,7 @@ namespace Scripting
 
 			std::string kitsRoot = "C:/Program Files (x86)/Windows Kits/10/Lib";
 			std::vector<std::string> versions;
-			if (fs::exists(kitsRoot))
+			if (FileExists(kitsRoot))
 				for (const auto& entry : fs::directory_iterator(kitsRoot))
 					if (entry.is_directory()) versions.push_back(entry.path().filename().string());
 			if (versions.empty()) return "";
@@ -348,7 +330,7 @@ namespace Scripting
 				for (const char* sub : { "um/x64", "um/x86" })
 				{
 					fs::path candidate = fs::path(kitsRoot) / v / sub / libName;
-					if (fs::exists(candidate)) return Norm(candidate.string());
+					if (FileExists(candidate.string())) return Norm(candidate.string());
 				}
 			}
 			return "";
@@ -396,7 +378,7 @@ namespace Scripting
 			CORE_WARN("Interop: CBind failed on {0}:\n{1}", headerAbs, se);
 			return false;
 		}
-		std::string text = ReadFileText(outFile);
+		std::string text = ReadFileBytes(outFile);
 		if (text.empty())
 		{
 			CORE_WARN("Interop: CBind produced no bindings for {0}", headerAbs);
@@ -409,7 +391,7 @@ namespace Scripting
 
 	bool InteropPass::CompileForeign(const ForeignObject& fo, bool verbose)
 	{
-		if (!fs::exists(fo.srcPath))
+		if (!FileExists(fo.srcPath))
 		{
 			CORE_WARN("Interop: foreign source not found: {0}", fo.srcPath);
 			return false;
@@ -491,7 +473,7 @@ namespace Scripting
 				std::string outFile = Norm(objDir + "/" + PathTag(absPath) + ".c4bind");
 				bool haveBindings = false;
 				const BindingFlags flags{ d.language, d.defines, includeDirs, targetFlags };
-				if (fs::exists(outFile) && BindingIsCached(outFile, absPath, cbindExe, flags))
+				if (FileExists(outFile) && BindingIsCached(outFile, absPath, cbindExe, flags))
 				{
 					if (verbose) CORE_INFO("Interop: using cached bindings for {0}", absPath);
 					haveBindings = true;
@@ -515,7 +497,7 @@ namespace Scripting
 					// Append: file-scope declarations are order independent (docs/language/01 1.7), and after the
 					// user's text no user line moves, so diagnostics keep their lines. Record the first bound
 					// directive's offset so the LSP can map F12 on a generated symbol to it.
-					transformed = transformed + "\n" + WithoutRepeatedConstants(ReadFileText(outFile), boundConstants);
+					transformed = transformed + "\n" + WithoutRepeatedConstants(ReadFileBytes(outFile), boundConstants);
 					if (dirOffset == SIZE_MAX) dirOffset = d.offset;
 					changed = true;
 
@@ -524,9 +506,9 @@ namespace Scripting
 					// references to the trampolines resolve.
 					// A C header's shim is C: it forwards the header's static and inline functions (BUG-283).
 					const fs::path shimStem = fs::path(outFile).parent_path() / fs::path(outFile).stem();
-					const bool cxxShim = fs::exists(shimStem.string() + ".cbind_shim.cpp");
+					const bool cxxShim = FileExists(shimStem.string() + ".cbind_shim.cpp");
 					const fs::path shimPath = shimStem.string() + (cxxShim ? ".cbind_shim.cpp" : ".cbind_shim.c");
-					if (!declarationsOnly && fs::exists(shimPath))
+					if (!declarationsOnly && FileExists(shimPath.string()))
 					{
 						ForeignObject fo;
 						fo.srcPath = Norm(shimPath.string());
@@ -544,7 +526,7 @@ namespace Scripting
 							result.errors.push_back(
 								"Failed to compile the generated shim for '" + d.path +
 								"' referenced in " + name + ".");
-						if (fs::exists(fo.objPath))
+						if (FileExists(fo.objPath))
 							result.objects.push_back(fo);
 					}
 				}
@@ -566,7 +548,7 @@ namespace Scripting
 								"Failed to compile foreign C/C++ source '" + d.path + "' referenced in " + name +
 								" (see the compiler diagnostics above).");
 					}
-					if (fs::exists(fo.objPath))
+					if (FileExists(fo.objPath))
 						result.objects.push_back(fo);
 				}
 			}

@@ -460,8 +460,9 @@ namespace Scripting
 		std::vector<llvm::Value*> arguments;
 		for (llvm::Argument& argument : mainFn->args())
 			arguments.push_back(&argument);
-		llvm::Value* result = B.CreateCall(callee, arguments);
-		if (result && !result->getType()->isVoidTy()) B.CreateRet(result);
+		llvm::CallInst* result = B.CreateCall(callee, arguments);
+		result->setIsNoInline(); // the wrapper has no debug info: the program's main inlined into it would have no lines
+		if (!result->getType()->isVoidTy()) B.CreateRet(result);
 		else B.CreateRet(llvm::ConstantInt::get(exitCodeType, 0));
 	}
 

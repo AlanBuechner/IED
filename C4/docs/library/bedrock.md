@@ -1154,7 +1154,7 @@ if (git.exitCode == 0) printf("%s", git.output.CStr());
 - **Usage** (`usage.ch`): `Process::GetUsage(id, usage)` reads what a running process uses, found by the system's id
   (`Child::Id()`, `Platform::ProcessId()`, or a program another tool started): `Usage { cpuTimeNs, workingSetBytes,
   privateBytes, peakPrivateBytes }`, its processor time in user and kernel mode so far and its memory now. false, with
-  `usage` zeroed, when there is no such process (it ended and nothing holds it) or the system will not say; it asks
+  `usage` zeroed, when there is no such process (it ended, even while something still holds it) or the system will not say; it asks
   only for limited query rights. A watcher works out CPU use from two readings: the time's growth over the wall
   clock's, divided by `Platform::GetProcessorInfo().logicalProcessors` for a share of the whole machine.
 

@@ -31,5 +31,11 @@ namespace Testing
 		void APushIsNotACall();
 		TEST_FUNC(Dap.Step)
 		void AfterTheReturnBreakpoint();
+		TEST_FUNC(Dap.Step)
+		void OverRunsThroughAnInlinedCall();
+		TEST_FUNC(Dap.Step)
+		void IntoStopsInAnInlinedCall();
+		TEST_FUNC(Dap.Step)
+		void OutOfAnInlinedCallEndsWhereItDoes();
 	};
 } // namespace Testing

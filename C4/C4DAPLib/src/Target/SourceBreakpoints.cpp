@@ -70,4 +70,14 @@ namespace C4DAP::Target
 				if (std::find(entry.addresses.begin(), entry.addresses.end(), address) != entry.addresses.end()) ids.push_back(entry.reported.id);
 		return ids;
 	}
+
+	bool SourceBreakpoints::SetOn(uint64_t address, const SourcePosition& position) const
+	{
+		const auto source = m_BySource.find(SourceKey(position.path));
+		if (source == m_BySource.end()) return false;
+		for (const Entry& entry : source->second)
+			if (entry.reported.line == position.line && std::find(entry.addresses.begin(), entry.addresses.end(), address) != entry.addresses.end())
+				return true;
+		return false;
+	}
 } // namespace C4DAP::Target
