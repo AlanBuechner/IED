@@ -17,6 +17,15 @@ namespace Ai
 	const double kModelPrefillRate = 150.0;
 	const int32 kClaudeFirstEventMs = 300000;   // a Claude step's wait for the CLI's first event (it retries the API itself)
 
+	// Whether this build offers Claude through a Pro or Max login (docs/04 "Distributed builds"): the owner's own builds do;
+	// a Dist build only once it defines CLAUDE_SUBSCRIPTION_APPROVED (Anthropic's approval of claude.ai login in IED).
+#if defined(DIST) && !defined(CLAUDE_SUBSCRIPTION_APPROVED)
+	const bool kClaudeSubscriptionOffered = false;
+#else
+	const bool kClaudeSubscriptionOffered = true;
+#endif
+	const char* kClaudeNotOffered = "Claude through a Pro or Max login is not in distributed builds of IED: Anthropic's terms do not let a third-party product offer claude.ai login without its approval (docs/04)";
+
 	class ModelProfile
 	{
 		public Core::String name;          // its key in ai.models: what groups and chats name

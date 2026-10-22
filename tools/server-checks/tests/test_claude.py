@@ -262,6 +262,58 @@ class ClaudeUsageTests(ClaudeCase):
 		self.assertEqual("paused", (await self.summary(chat_id))["state"])
 
 
+class ClaudeSetupTests(ClaudeCase):
+	"""docs/04 "Setting it up": a CLI signed in to a subscription sets Claude up by itself, once; Sign in opens the CLI's own
+	login in a window of its own and watches it; Install is only for a machine without a CLI."""
+
+	async def local_only(self):
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.claude.command", "value": [sys.executable, "-I", FAKE_CLAUDE, "--state", self.state]})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": self.model.url + "/v1"}}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.groups", "value": {"local": {"primary": {"model": "fake"}}}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.defaultGroup", "value": "local"})
+
+	async def setting(self, key):
+		return (await self.client.request("settings.get", {"wsId": "w1"}))["values"][key]["value"]
+
+	async def test_a_cli_signed_in_to_a_subscription_sets_claude_up_by_itself_once(self):
+		await self.local_only()
+		usage = await self.client.request("ai.usage", {"refresh": True})
+		self.assertTrue(usage["claude"]["configured"] and usage["claude"]["offered"], usage["claude"])
+		models = await self.setting("ai.models")
+		self.assertEqual(["claude-auto", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models))
+		self.assertEqual("auto", models["claude-auto"]["model"])
+		groups = await self.setting("ai.groups")
+		self.assertEqual({"primary": {"model": "claude-auto", "fallback": ["fake"]}}, groups["claude"], "falling back to the local model")
+		self.assertEqual("local", await self.setting("ai.defaultGroup"), "the owner's default group is left as it is")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": self.model.url + "/v1"}}})
+		self.assertFalse((await self.client.request("ai.usage", {"refresh": True}))["claude"]["configured"], "removed Claude models stay removed")
+		self.assertTrue((await self.client.request("ai.claude.setup", {}))["claude"]["configured"], "Add Claude models puts them back")
+
+	async def test_sign_in_opens_the_cli_login_and_sets_claude_up(self):
+		await self.local_only()
+		self.put("auth.json", {"loggedIn": False, "authMethod": "none", "apiProvider": "firstParty"})
+		await self.client.sub(["aiusage"])
+		await self.client.next_frame("aiusage")
+		self.assertFalse((await self.client.request("ai.usage", {"refresh": True}))["claude"]["configured"], "not signed in: nothing set up")
+		started = await self.client.request("ai.claude.signIn", {})
+		self.assertTrue(started["claude"]["cli"]["signingIn"], started["claude"]["cli"])
+		again = await self.client.request("ai.claude.signIn", {})
+		self.assertTrue(again["claude"]["cli"]["signingIn"], "a second click while the window is open opens no other")
+		frames = await self.client.wait_for("aiusage", lambda f: f.get("kind") == "usage.changed" and f["data"]["claude"]["configured"] and not f["data"]["claude"]["cli"]["signingIn"], timeout=40)
+		self.assertEqual(("signed_in", "claude.ai", True), tuple(frames[-1]["data"]["claude"]["cli"][k] for k in ("signIn", "authMethod", "subscription")), "done means signed in, on the page at once")
+		logins = [entry for entry in self.log() if "argv" in entry and entry["argv"][:2] == ["auth", "login"]]
+		self.assertEqual(1, len(logins), logins)
+		self.assertEqual(["auth", "login", "--claudeai"], logins[0]["argv"], "the subscription login, not the Console's")
+		self.assertEqual(([], []), (logins[0]["billed"], logins[0]["inherited"]), "the login window gets IED's clean environment")
+		self.assertIn("claude-auto", await self.setting("ai.models"))
+
+	async def test_install_is_refused_when_a_cli_is_there(self):
+		await self.local_only()
+		with self.assertRaises(Exception) as refused:
+			await self.client.request("ai.claude.install", {})
+		self.assertIn("installed already", str(refused.exception))
+
+
 class ClaudeToolTests(ClaudeCase):
 	async def test_the_ai_reads_the_usage_and_pins_a_model_for_another_chat(self):
 		await self.use_claude(groups={"local": {"primary": {"model": "fake"}}}, default_group="local")

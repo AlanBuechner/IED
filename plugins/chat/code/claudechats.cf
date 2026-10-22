@@ -1,6 +1,8 @@
 // The chats' Claude Code sessions and the plan's usage kept current (docs/04 "The Claude Code provider"): a session per chat
 // that uses a Claude profile, made from what its header kept; a thread that asks for the usage every
-// ai.claude.usageRefreshMinutes while a claude-code profile is set up, and stops sessions idle for kClaudeIdleMs.
+// ai.claude.usageRefreshMinutes while a claude-code profile is set up - and, while none is, asks every
+// kClaudeDetectEveryMs whether the CLI is signed in to a subscription, which sets Claude up (docs/04 "Setting it up") -
+// and stops sessions idle for kClaudeIdleMs.
 
 include "api/plugin.ch"
 include "service.ch"
@@ -9,6 +11,7 @@ namespace Ai
 {
 	const int64 kClaudeKeeperTickNs = 15000000000;   // how often the keeper looks
 	const int64 kClaudeRefreshDefaultMinutes = 10;
+	const int64 kClaudeDetectEveryMs = 5 * 60 * 1000;
 
 	static int64 KeeperNowMs() { return Platform::UnixTimeNs() / 1000000; }
 
@@ -45,8 +48,9 @@ namespace Ai
 			}
 			Serialization::DomDoc* doc = new Serialization::DomDoc();
 			Serialization::DomNode minutes = Serialization::ReadJson(context->Setting(Core::StringView("ai.claude.usageRefreshMinutes"), Core::StringView("")).View(), *doc).root;
-			const int64 every = (minutes.Kind() == Serialization::DomKind::Int ? minutes.AsInt() : kClaudeRefreshDefaultMinutes) * 60 * 1000;
-			if (!configured || every <= 0 || KeeperNowMs() - askedMs < every) continue;
+			int64 every = (minutes.Kind() == Serialization::DomKind::Int ? minutes.AsInt() : kClaudeRefreshDefaultMinutes) * 60 * 1000;
+			if (!configured) every = kClaudeSubscriptionOffered ? kClaudeDetectEveryMs : 0;
+			if (every <= 0 || KeeperNowMs() - askedMs < every) continue;
 			askedMs = KeeperNowMs();
 			claude->Refresh(false);
 		}

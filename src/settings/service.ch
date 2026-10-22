@@ -29,6 +29,9 @@ namespace Ied
 		public void AppFileChanged();
 		// The effective value of `key` for `ws` (null: the app tier alone) and a project of it (empty: none), JSON.
 		public Core::String Effective(Workspace* ws, Core::StringView project, Core::StringView key);
+		// Sets `key` to `valueJson` in the app tier, as settings.set does (a known app-tier key, a value that fits its
+		// schema); false with `problem`. For a plugin's PluginContext::SetSetting (docs/26).
+		public bool SetApp(Core::StringView key, Core::StringView valueJson, Core::String& problem);
 
 	private:
 		private SettingsCatalog* CatalogFor(Workspace* ws);

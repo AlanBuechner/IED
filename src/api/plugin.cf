@@ -37,6 +37,17 @@ namespace IED
 		return server->settings->Effective(ws, Core::StringView(""), key);
 	}
 
+	bool PluginContext::SetSetting(Core::StringView key, Core::StringView valueJson, Core::String& problem) const {
+		Ied::CodeInstance* instance = Of(host);
+		if (!instance->May(Core::StringView("settings.write"))) {
+			problem = Core::String("the plugin's manifest does not ask for the permission settings.write");
+			return false;
+		}
+		Ied::Server* server = instance->runtime->server;
+		Ied::ApiLock guard(server);
+		return server->settings->SetApp(key, valueJson, problem);
+	}
+
 	void PluginContext::Provide(Core::StringView name, Binding handler) {
 		Ied::CodeInstance* instance = Of(host);
 		if (!OnItsThread(instance, "Provide")) return;

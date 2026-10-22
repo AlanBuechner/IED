@@ -1,8 +1,9 @@
 // claude.test.js - Claude's plan usage in the chat plugin's UI (docs/04 "The Claude Code provider"): the status bar's text
-// and color from the aiusage snapshot, a window's line, when a window frees, and Add Claude models.
+// and color from the aiusage snapshot, a window's line, when a window frees, and the step that sets Claude up.
 
 import { test, assertEqual } from "./harness.js";
-import { CLAUDE_PROFILES, onSubscription, resetText, usageStatus, windowLine, withClaudeModels } from "/plugins/ied.chat/ui/claudeusage.js";
+import { CLAUDE_PROFILE_NAMES, onSubscription, resetText, setupStep, usageStatus, windowLine } from "/plugins/ied.chat/ui/claudeusage.js";
+import { ChatModel } from "/plugins/ied.chat/ui/chatmodel.js";
 
 const NOW = 1761150000000;
 const HOUR = 3600000;
@@ -60,16 +61,23 @@ test("claude: a window's line", () => {
 	assertEqual(windowLine(window("x", "Fable week", 5, 0, { resetsAtMs: 0 }), NOW), "Fable week: 5% used");
 });
 
-test("claude: Add Claude models keeps what is there and falls back to the default group's model", () => {
-	const local = { endpoint: "http://127.0.0.1:8080/v1" };
-	const made = withClaudeModels({ qwen: local, "claude-opus": { provider: "claude-code", model: "opus", contextWindow: 5 } }, { local: { primary: { model: "qwen" } } }, "local");
-	assertEqual(Object.keys(made.models).sort(), ["claude-auto", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "qwen"]);
-	assertEqual(made.models["claude-opus"].contextWindow, 5, "a profile already there is kept");
-	assertEqual(made.models["claude-auto"], CLAUDE_PROFILES["claude-auto"]);
-	assertEqual(made.groups.claude, { primary: { model: "claude-auto", fallback: ["qwen"] } });
-	assertEqual(made.groups.local, { primary: { model: "qwen" } });
-	const bare = withClaudeModels({}, {}, "");
-	assertEqual(bare.groups.claude, { primary: { model: "claude-auto" } }, "nothing local to fall back to");
-	const already = withClaudeModels({}, { claude: { primary: { model: "claude-opus" } } }, "claude");
-	assertEqual(already.groups.claude, { primary: { model: "claude-opus" } }, "a claude group already there is kept");
+test("claude: a chat set up after its snapshot shows the model its turns use", () => {
+	const model = new ChatModel();
+	model.snapshot({ chatId: "c1", title: "Hello", mode: "agent", state: "idle", model: "", groupInUse: "", tasks: [], queued: [], modified: [], context: null, turns: [], pendingApprovals: [], pendingQuestion: null });
+	assertEqual(model.model, "", "no model when the snapshot was taken");
+	model.event("turn.start", { turnId: "u2", mode: "agent", model: "claude-auto", group: "claude", user: { text: "hi" } });
+	assertEqual([model.model, model.groupInUse], ["claude-auto", "claude"]);
+});
+
+test("claude: the one step that sets Claude up", () => {
+	const cli = (fields) => Object.assign({ path: "C:/claude.exe", signIn: "signed_in", authMethod: "claude.ai", subscription: true, signingIn: false, installing: false }, fields);
+	assertEqual(setupStep(claude([], { offered: false })), "not_offered", "a distributed build");
+	assertEqual(setupStep(claude([], { cli: cli({ path: "" }) })), "install");
+	assertEqual(setupStep(claude([], { cli: cli({ path: "", installing: true }) })), "installing");
+	assertEqual(setupStep(claude([], { cli: cli({ signIn: "" }) })), "asking", "the CLI not asked yet");
+	assertEqual(setupStep(claude([], { cli: cli({ signIn: "signed_out", authMethod: "none", subscription: false }) })), "sign_in");
+	assertEqual(setupStep(claude([], { cli: cli({ authMethod: "api_key", subscription: false }) })), "sign_in", "an API key is no sign-in");
+	assertEqual(setupStep(claude([], { cli: cli({ signingIn: true, subscription: false }) })), "signing_in");
+	assertEqual(setupStep(claude([], { cli: cli({}) })), "ready");
+	assertEqual(CLAUDE_PROFILE_NAMES.includes("claude-auto"), true);
 });

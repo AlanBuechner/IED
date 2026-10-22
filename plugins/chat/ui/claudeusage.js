@@ -1,20 +1,19 @@
 // claudeusage.js - Claude's plan usage in the UI (docs/04 "The Claude Code provider"), from the server's aiusage topic: the
 // status bar's "Claude 5h 42% wk 61%" (yellow while a window runs ahead of pace, red when one is used up or the CLI is not
 // on a subscription), and Settings > AI > Claude - the CLI (where it is, its version, whether it is signed in to a Claude
-// subscription; IED never runs Claude on an API key), each window as a bar with the even line marked, its pace and when
-// it resets, what pacing picks now, Refresh, and Add Claude models.
+// subscription; IED never runs Claude on an API key) with the one step that sets it up (Install, Sign in: the CLI's own
+// windows, docs/04 "Setting it up"), each window as a bar with the even line marked, its pace and when it resets, what
+// pacing picks now, Refresh, and Add Claude models.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
+import { confirmDialog } from "/ui-kit/dialog.js";
 
 const SHORT = { five_hour: "5h", seven_day: "wk" };
 export const WARN_PACE = 1.25;
-export const CLAUDE_PROFILES = {
-	"claude-auto": { provider: "claude-code", model: "auto", pacing: { ladder: ["opus", "sonnet", "haiku"], target: "both" } },
-	"claude-fable": { provider: "claude-code", model: "fable" },
-	"claude-opus": { provider: "claude-code", model: "opus" },
-	"claude-sonnet": { provider: "claude-code", model: "sonnet" },
-	"claude-haiku": { provider: "claude-code", model: "haiku" },
-};
+// The profiles the server's Add Claude models (ai.claude.setup) adds.
+export const CLAUDE_PROFILE_NAMES = ["claude-auto", "claude-fable", "claude-opus", "claude-sonnet", "claude-haiku"];
+export const INSTALL_SCRIPT = "irm https://claude.ai/install.ps1 | iex";
+const ELLIPSIS = "\u2026";
 const TARGETS = [["both", "The session and the week"], ["session", "Each 5-hour session"], ["week", "The week"]];
 
 // When `at` comes, from `now`, as the server says it: "in 2 h 14 min", "in 35 min", "in 3 d 4 h", "now".
@@ -52,7 +51,7 @@ export function usageStatus(claude) {
 	const cli = claude.cli || {};
 	if (!cli.path && usage.error) return { text: "Claude: no CLI", level: "error", tooltip: usage.error };
 	if (cli.signIn && !onSubscription(claude))
-		return { text: "Claude: not on a subscription", level: "error", tooltip: "Claude Code signs in with " + (cli.signIn === "signed_in" ? cli.authMethod : "nothing") + ". IED runs Claude on your subscription only: run claude auth login in a terminal of your own." };
+		return { text: "Claude: not on a subscription", level: "error", tooltip: "Claude Code signs in with " + (cli.signIn === "signed_in" ? cli.authMethod : "nothing") + ". IED runs Claude on your subscription only: sign in from Settings > AI > Claude." };
 	const windows = usage.windows || [];
 	const shown = windows.filter((w) => SHORT[w.id]);
 	if (!shown.length) return { text: "Claude", level: "", tooltip: usage.error ? "The usage is not known: " + usage.error : "The plan's usage is not known yet" };
@@ -65,19 +64,16 @@ export function usageStatus(claude) {
 	return { text: "Claude " + shown.map((w) => SHORT[w.id] + " " + percent(w.utilization)).join(" "), level, tooltip: lines.join("\n") };
 }
 
-// ai.models and ai.groups with the Claude profiles added (those already there kept as they are) and a `claude` group whose
-// primary is claude-auto, falling back to the default group's primary when that is not Claude (a local model).
-export function withClaudeModels(models, groups, defaultGroup) {
-	const nextModels = Object.assign({}, CLAUDE_PROFILES, models);
-	const nextGroups = Object.assign({}, groups);
-	if (!nextGroups.claude) {
-		const current = groups[defaultGroup] || groups[Object.keys(groups)[0]];
-		let fallback = current && current.primary && current.primary.model;
-		if (!fallback) fallback = Object.keys(models).find((name) => (models[name].provider || "openai") !== "claude-code");
-		if (fallback && nextModels[fallback] && nextModels[fallback].provider === "claude-code") fallback = null;
-		nextGroups.claude = { primary: Object.assign({ model: "claude-auto" }, fallback ? { fallback: [fallback] } : {}) };
-	}
-	return { models: nextModels, groups: nextGroups };
+// The one step that sets Claude up now (docs/04 "Setting it up"): "not_offered" (a distributed build), "installing",
+// "install" (no CLI), "signing_in", "sign_in" (not on a subscription), "asking" (the CLI not asked yet) or "ready".
+export function setupStep(claude) {
+	const cli = (claude && claude.cli) || {};
+	if (claude && claude.offered === false) return "not_offered";
+	if (cli.installing) return "installing";
+	if (!cli.path) return "install";
+	if (cli.signingIn) return "signing_in";
+	if (!cli.signIn) return "asking";
+	return onSubscription(claude) ? "ready" : "sign_in";
 }
 
 // The status bar item (statusBarItems ied.chat.claude): the aiusage topic as usageStatus says it.
@@ -118,7 +114,7 @@ export class ClaudePage {
 		replace(ctx.el,
 			h("div.set-crumbs", null, "AI \u203a Claude \u00b7 ", h("span.mono", null, "ai.claude.command")),
 			h("h1", null, "Claude"),
-			h("p.set-lead", null, "Claude runs through your own Claude Code CLI, signed in to your Claude subscription (Pro or Max): its 5-hour session and its weekly limits are what IED shows and paces. IED never reads or stores Claude credentials and never runs Claude on an API key: sign in yourself, in a terminal of your own, with ", h("span.mono", null, "claude auth login"), "."),
+			h("p.set-lead", null, "Claude runs through your own Claude Code CLI on your Claude subscription (Pro or Max): its 5-hour session and its weekly limits are what IED shows and paces. Sign in once below - Claude Code's own login opens in a window of its own and in your browser; IED never sees or stores your credentials and never runs Claude on an API key - and IED sets the Claude models up by itself."),
 			this.body);
 		this.stop = ctx.ied.client.subscribe("aiusage", {
 			snap: (data) => this.show(data),
@@ -140,6 +136,10 @@ export class ClaudePage {
 			return;
 		}
 		const now = claude.nowMs || Date.now();
+		if (claude.offered === false) {
+			replace(this.body, h("div.set-probe.warn", null, icon("warning"), h("span", null, "Claude through a Pro or Max login is not in distributed builds of IED: Anthropic's terms do not let a third-party product offer claude.ai login without its approval. Your own builds of IED (Development) have it.")));
+			return;
+		}
 		replace(this.body, this.cliCard(claude), this.usageCard(claude, now), this.pacingCard(claude), this.setupBar(claude));
 	}
 
@@ -155,8 +155,22 @@ export class ClaudePage {
 				cli.path ? h("span.mono", { title: cli.path }, cli.path) : h("span", null, "no claude.exe on PATH, in %USERPROFILE%\\.local\\bin or the Claude desktop app"),
 				cli.version ? h("span", null, "version " + cli.version) : null,
 				cli.authMethod && cli.authMethod !== "none" ? h("span", null, "signs in with " + cli.authMethod) : null),
-			cli.path && cli.signIn && !onSubscription(claude) ? h("div.set-probe.bad", null, icon("error"),
-				h("span", null, "Claude turns are refused until it is signed in to your Claude subscription. In a terminal of your own run ", h("span.mono", null, "\"" + cli.path + "\" auth login"), ".")) : null);
+			this.stepRow(claude));
+	}
+
+	// What it takes to get Claude running from here: one button, or what IED is waiting for.
+	stepRow(claude) {
+		const step = setupStep(claude);
+		const cli = claude.cli || {};
+		if (step === "install") return h("div.claude-step", null,
+			h("span", null, "Claude Code is not on this computer. Install it - or the Claude desktop app, which brings it."),
+			h("button.btn.primary", { on: { click: () => this.install() } }, icon("cloud-download"), "Install Claude Code"));
+		if (step === "installing") return h("div.claude-step", null, icon("loading", "spin"), h("span", null, "Installing in the PowerShell window that opened on the computer IED runs on" + ELLIPSIS));
+		if (step === "sign_in") return h("div.claude-step", null,
+			h("span", null, cli.signIn === "signed_in" ? "It signs in with " + cli.authMethod + ", not your subscription: sign in with your Claude account instead." : "Sign in with your Claude account (Pro or Max) to use Claude here."),
+			h("button.btn.primary", { on: { click: () => this.signIn() } }, icon("account"), "Sign in with your Claude subscription"));
+		if (step === "signing_in") return h("div.claude-step", null, icon("loading", "spin"), h("span", null, "Finish signing in in the Claude Code window and the browser page that opened on the computer IED runs on" + ELLIPSIS));
+		return null;
 	}
 
 	usageCard(claude, now) {
@@ -174,7 +188,7 @@ export class ClaudePage {
 		if (usage.extraEnabled) notes.push(h("div.muted", null, "Extra usage is on" + (usage.extraUtilization >= 0 ? " (" + percent(usage.extraUtilization) + " of its monthly limit used)" : "") + "."));
 		return h("div.set-model.claude-usage", null,
 			h("div.set-model-head", null, h("b", null, "Usage"), h("span.grow"), usage.updatedMs ? h("span.muted", null, "asked " + new Date(usage.updatedMs).toLocaleTimeString()) : null),
-			rows.length ? h("div.claude-windows", null, ...rows) : h("p.muted", null, usage.known && !usage.available ? "This sign-in has no plan limits to show." : "The plan's usage is not known yet."),
+			rows.length ? h("div.claude-windows", null, ...rows) : h("p.muted", null, usage.known && !usage.available ? "This sign-in has no plan limits to show." : onSubscription(claude) ? "The plan's usage is not known yet." : "Sign in with your subscription to see its usage."),
 			...notes);
 	}
 
@@ -193,8 +207,9 @@ export class ClaudePage {
 	}
 
 	setupBar(claude) {
+		if (setupStep(claude) !== "ready") return null;
 		const models = this.settings.value("ai.models").value || {};
-		const missing = Object.keys(CLAUDE_PROFILES).filter((name) => !models[name]);
+		const missing = CLAUDE_PROFILE_NAMES.filter((name) => !models[name]);
 		return h("div.set-bar", null,
 			missing.length ? h("button.btn" + (claude.configured ? "" : ".primary"), { on: { click: () => this.addModels() } }, icon("add"), claude.configured ? "Add the other Claude models" : "Add Claude models") : null,
 			h("span.muted", null, claude.configured ? "Claude models are in Settings > AI > Models; the claude group uses claude-auto." : "Adds claude-auto (paced), claude-fable, claude-opus, claude-sonnet and claude-haiku to ai.models and a claude group."));
@@ -222,11 +237,26 @@ export class ClaudePage {
 		else this.refresh();
 	}
 
-	async addModels() {
-		const made = withClaudeModels(this.settings.value("ai.models").value || {}, this.settings.value("ai.groups").value || {}, this.settings.value("ai.defaultGroup").value || "");
-		const error = (await this.settings.set("ai.models", made.models, "app")) || (await this.settings.set("ai.groups", made.groups, "app"));
-		if (error) this.ctx.ied.toast(error, { level: "error" });
-		else this.refresh();
+	async ask(method) {
+		try {
+			this.show(await this.ctx.ied.client.request(method, {}));
+		}
+		catch (e) {
+			this.ctx.ied.toast(e.message, { level: "error" });
+		}
+	}
+
+	addModels() {
+		return this.ask("ai.claude.setup");
+	}
+
+	signIn() {
+		return this.ask("ai.claude.signIn");
+	}
+
+	async install() {
+		const ok = await confirmDialog({ title: "Install Claude Code", message: "IED opens a PowerShell window on the computer it runs on and runs Anthropic's installer there: " + INSTALL_SCRIPT, confirm: "Install" });
+		if (ok) await this.ask("ai.claude.install");
 	}
 
 	dispose() {

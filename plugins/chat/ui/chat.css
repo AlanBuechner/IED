@@ -316,6 +316,9 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .claude-bar.warn .fill { background: var(--accent-warn); }
 .claude-bar.err .fill { background: var(--accent-error); }
 .claude-bar .even { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--text-0); }
+.claude-step { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; color: var(--text-1); }
+.claude-step > span { min-width: 0; overflow-wrap: anywhere; flex: 1 1 260px; }
+.claude-step .ci { width: 14px; height: 14px; flex: none; }
 .claude-paced { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; color: var(--text-1); }
 .claude-paced .input-field { width: auto; }
 

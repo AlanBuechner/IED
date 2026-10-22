@@ -68,8 +68,8 @@ Privacy always wins: a private request waits for a local slot rather than fall b
 
 IED is primarily local-AI; Claude is optional. Anthropic's policy (Agent SDK overview and legal docs, checked 2026-10-19) says third-party products may not offer claude.ai login or route requests through Free/Pro/Max credentials, and may not collect or intermediate claude.ai credentials; an end user may run the unmodified Claude Code CLI signed in themselves. So:
 
-1. **Anthropic API provider** (API key in the Windows credential store): clean for any use. Usage view from `anthropic-ratelimit-*` response headers + cost estimates.
-2. **Claude Code bridge** (personal use): IED spawns the owner's own installed `claude` CLI headless (`-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`), removes its built-in tools (`--tools ""`), exposes IED's tools to it through an MCP server config (`--mcp-config ... --strict-mcp-config`), routes its permission prompts to an IED approval tool (`--permission-prompt-tool`), and maps its stream (assistant/tool/result/`rate_limit_event`) onto IED's chat events. IED never reads, stores or asks for Claude credentials; the owner signs in to the CLI themselves. Subscription usage (5-hour and 7-day utilization, reset times) comes from the CLI's `rate_limit_event` stream and status data. Whether this path is enabled for anyone other than the owner is open question O2.
+1. **No Anthropic API provider** (owner, 2026-10-22: "i only care about using the max/pro subscriptions"): Claude runs on the owner's Pro/Max subscription only (`docs/99` #24).
+2. **Claude Code bridge** (personal use): IED spawns the owner's own installed `claude` CLI headless (`-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`), removes its built-in tools (`--tools ""`), exposes IED's tools to it through an MCP server config (`--mcp-config ... --strict-mcp-config`), routes its permission prompts to an IED approval tool (`--permission-prompt-tool`), and maps its stream (assistant/tool/result/`rate_limit_event`) onto IED's chat events. IED never reads, stores or asks for Claude credentials; the owner signs in to the CLI themselves. Subscription usage (5-hour and 7-day utilization, reset times) comes from the CLI's `rate_limit_event` stream and status data. Distributed builds leave it out unless Anthropic approves (`docs/99` #24; "Distributed builds" below).
 3. Model ids current at writing: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-1` (verify at implementation time).
 
 Flags and event shapes must be re-verified against the installed CLI version when implementing (they change across releases).
@@ -100,6 +100,34 @@ owner's Claude subscription and never on an API key or another provider's billin
 - A refusal is a routing note and the turn moves to the role's next candidate that is not Claude, or pauses `not_subscription`
   with how to sign in. The status bar's Claude item turns red ("Claude: not on a subscription") and Settings > AI > Claude
   says so with the exact `claude auth login` command for the CLI found.
+- A Claude Code session the server itself was started from never reaches the CLI: its variables (`CLAUDE_CODE_SIMPLE` - bare
+  mode, which never reads the login - `CLAUDECODE`, the session's ids and sockets) are taken out too.
+
+**Setting it up** (owner, 2026-10-22: "do whatever tooling/automation that is allowed to make the user experience easy";
+"i only care about using the max/pro subscriptions"). Everything a person would do in a terminal, IED does in one click,
+with the CLI's own windows - IED never sees what is typed into them:
+
+- **Found by itself.** The CLI is looked for on PATH, in the native installer's folder, in WinGet's links
+  (`%LOCALAPPDATA%\Microsoft\WinGet\Links`) and in the Claude desktop app, so a machine with the desktop app needs no install.
+- **Install** (Settings > AI > Claude, when no CLI is found): opens a PowerShell window running the official installer,
+  `irm https://claude.ai/install.ps1 | iex`, after the owner confirms the command; the page shows the CLI once it is there.
+- **Sign in** (when the CLI is not signed in to a subscription): opens a window running the CLI's own subscription login,
+  `claude auth login --claudeai`, which opens the browser at claude.ai; IED asks `auth status` every few seconds (at most 15
+  minutes) and the page and status bar change as soon as it says `claude.ai`. The Claude desktop app's own login is the app's:
+  the CLI needs its own, and this is it (one click, and an Authorize in the browser where claude.ai is usually signed in).
+- **Set up by itself.** The first time the server finds the CLI signed in to a subscription - after Sign in, or a login made
+  anywhere else (the keeper asks every 5 minutes while no Claude model is set up) - it adds the Claude profiles
+  (`claude-auto`, paced, and `claude-fable`, `claude-opus`, `claude-sonnet`, `claude-haiku`) and a `claude` group (primary
+  `claude-auto`, falling back to the default group's primary when that is not Claude) to the app settings, through the plugin
+  API's `PluginContext::SetSetting` (`docs/26`). With no other model, `claude` is the only group, so chats use it at once. It
+  does so once (a mark in the plugin's state folder): Claude models the owner removes stay removed; Add Claude models adds them
+  again.
+
+**Distributed builds.** Anthropic's terms (the Agent SDK overview, checked 2026-10-22): "Unless previously approved, Anthropic
+does not allow third party developers to offer claude.ai login or rate limits for their products." The owner's own builds
+(`Development`, `Debug`) run Claude on their own login; a `Dist` build - what IED ships to others - offers none of this: a
+`claude-code` profile is refused with that reason, and Install, Sign in and the automatic setup are off, unless the build
+defines `CLAUDE_SUBSCRIPTION_APPROVED` (once Anthropic approves claude.ai login in IED).
 
 **A chat's session.** A chat that uses a Claude profile gets one CLI process, started at its first Claude step and kept between
 turns so its prompt cache stays warm; it stops when the chat is deleted, the server stops, or after 10 idle minutes (a
@@ -356,4 +384,4 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`), and llama.cpp's `/props` whether it takes images (`vision`, its `modalities`); a turn asks each profile's server once per server run: a profile without `contextWindow` uses the slot context it reports, a profile without `vision` takes what the server says of images, and a llama.cpp server streams the prompt read so far (`docs/12` "Watchdogs"). Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier; "Images tool results show" is `vision`: as its server says - left out -, send them, or never); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 
-**Not yet:** the Anthropic API provider (an API key; Bedrock's HTTP has no TLS yet, and the owner wants Claude on the subscription), Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, sub-agents, checkpoints and rewind, the trajectory files.
+**Not yet:** Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), MCP, sub-agents, checkpoints and rewind, the trajectory files.

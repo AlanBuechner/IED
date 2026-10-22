@@ -78,6 +78,9 @@ export class ChatModel {
 			case "turn.start": {
 				const turn = normalTurn({ turnId: data.turnId, user: data.user, mode: data.mode, model: data.model, group: data.group, startedMs: data.startedMs, segments: [], stop: null, recoveries: [] });
 				this.turns.push(turn);
+				// what the turn uses is what the chat uses now: the settings may have changed since the snapshot
+				if (data.model) this.model = data.model;
+				if (data.group) this.groupInUse = data.group;
 				return { turn };
 			}
 			case "segment.start": {

@@ -13,6 +13,128 @@ namespace Ai
 		context->TopicFrom(Core::StringView(kUsageTopic), [self]() -> Core::String { return self->SnapshotJson(); });
 		Core::String problem;
 		if (!context->Method(Core::StringView("ai.usage"), [self](const IED::Request& request) -> Core::String { return self->UsageMethod(request); }, problem)) context->Log(problem.View());
+		if (!context->Method(Core::StringView("ai.claude.signIn"), [self](const IED::Request& request) -> Core::String { return self->SignInMethod(request); }, problem)) context->Log(problem.View());
+		if (!context->Method(Core::StringView("ai.claude.install"), [self](const IED::Request& request) -> Core::String { return self->InstallMethod(request); }, problem)) context->Log(problem.View());
+		if (!context->Method(Core::StringView("ai.claude.setup"), [self](const IED::Request& request) -> Core::String { return self->SetupMethod(request); }, problem)) context->Log(problem.View());
+	}
+
+	Core::Array<Core::String> ClaudeAccount::Command() const {
+		return FindClaude(ClaudeCommandSetting(context->Setting(Core::StringView("ai.claude.command"), Core::StringView("")).View()));
+	}
+
+	void ClaudeAccount::Watch(func<bool()> done, func<void(bool)> after) {
+		context->StartThread([done, after]() {
+			const int64 until = AccountNowMs() + kClaudeWindowWatchMs;
+			bool succeeded = false;
+			while (!succeeded && AccountNowMs() < until) {
+				Threading::Thread::Sleep(kClaudeWindowPollNs);
+				succeeded = done();
+			}
+			after(succeeded);
+		});
+	}
+
+	bool ClaudeAccount::Claim(bool& waiting) {
+		IED::HostLock guard(*context);
+		if (waiting) return false;
+		waiting = true;
+		Changed();
+		return true;
+	}
+
+	void ClaudeAccount::Release(bool& waiting) {
+		IED::HostLock guard(*context);
+		waiting = false;
+		Changed();
+	}
+
+	Core::String ClaudeAccount::SignInMethod(const IED::Request& request) {
+		if (!kClaudeSubscriptionOffered) throw IED::RpcError(IED::ErrorCode::Unavailable, kClaudeNotOffered);
+		Core::Array<Core::String> command = Command();
+		if (command.IsEmpty()) throw IED::RpcError(IED::ErrorCode::NotFound, "no Claude Code CLI was found: install it first");
+		if (!Claim(signingIn)) {
+			IED::HostLock guard(*context);
+			return SnapshotJson();
+		}
+		Core::Array<Core::String> login = command;
+		login.Push(Core::String("auth"));
+		login.Push(Core::String("login"));
+		login.Push(Core::String("--claudeai"));
+		Core::String problem;
+		if (!OpenClaudeWindow(Core::StringView("Claude Code sign-in"), login, problem)) {
+			Release(signingIn);
+			throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		}
+		ClaudeAccount* self = this;
+		Core::String folder = context->StateFolder();
+		IED::HostLock guard(*context);
+		Watch([command, folder]() -> bool {
+			bool signedIn = false;
+			Core::String method = ClaudeAuthMethod(command, folder.View(), signedIn);
+			return signedIn && IsSubscriptionAuth(method.View());
+		}, [self](bool succeeded) {
+			self->Refresh(true);
+			Core::String problem;
+			if (succeeded && !self->Configured() && !self->Setup(true, problem)) self->context->Log((Core::String("Claude could not be set up: ") + problem.View()).View());
+			self->Release(self->signingIn);
+		});
+		return SnapshotJson();
+	}
+
+	Core::String ClaudeAccount::InstallMethod(const IED::Request& request) {
+		if (!kClaudeSubscriptionOffered) throw IED::RpcError(IED::ErrorCode::Unavailable, kClaudeNotOffered);
+		if (!Command().IsEmpty()) throw IED::RpcError(IED::ErrorCode::Conflict, "Claude Code is installed already");
+		if (!Claim(installing)) {
+			IED::HostLock guard(*context);
+			return SnapshotJson();
+		}
+		Core::Array<Core::String> install;
+		const char*[6] words = { "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-Command" };
+		for (int64 i = 0; i < 6; ++i) install.Push(Core::String(words[i]));
+		install.Push(Core::String(kClaudeInstallScript));
+		Core::String problem;
+		if (!OpenClaudeWindow(Core::StringView("Install Claude Code"), install, problem)) {
+			Release(installing);
+			throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		}
+		ClaudeAccount* self = this;
+		IED::HostLock guard(*context);
+		Watch([self]() -> bool { return !self->Command().IsEmpty(); }, [self](bool found) {
+			if (found) self->Refresh(true);
+			self->Release(self->installing);
+		});
+		return SnapshotJson();
+	}
+
+	Core::String ClaudeAccount::SetupMethod(const IED::Request& request) {
+		Core::String problem;
+		if (!Setup(true, problem) && !problem.IsEmpty()) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+		IED::HostLock guard(*context);
+		return SnapshotJson();
+	}
+
+	bool ClaudeAccount::Setup(bool force, Core::String& problem) {
+		if (!kClaudeSubscriptionOffered) {
+			problem = Core::String(kClaudeNotOffered);
+			return false;
+		}
+		FS::Path mark = FS::Path(context->StateFolder().View()) / "claude-setup.json";
+		if (!force && FS::FileExists(mark.CStr())) return false;
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::String defaultGroup = Core::String(Serialization::ReadJson(context->Setting(Core::StringView("ai.defaultGroup"), Core::StringView("")).View(), *doc).root.AsView());
+		Core::String models;
+		Core::String groups;
+		WithClaudeModels(context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), context->Setting(Core::StringView("ai.groups"), Core::StringView("")).View(), defaultGroup.View(), models, groups);
+		if (!context->SetSetting(Core::StringView("ai.models"), models.View(), problem) || !context->SetSetting(Core::StringView("ai.groups"), groups.View(), problem)) return false;
+		Core::StringBuilder stamp;
+		stamp.Append("{\"setUpMs\": ");
+		stamp.AppendInt(AccountNowMs());
+		stamp.Append("}");
+		FS::WriteFileAtomically(mark.CStr(), (const void*)stamp.View().Data(), stamp.View().ByteLength());
+		context->Log(Core::StringView("Claude is set up: the Claude models and the claude group are in the app settings (Settings > AI > Claude)"));
+		IED::HostLock guard(*context);
+		Changed();
+		return true;
 	}
 
 	// ai.usage {refresh?}: the snapshot, the CLI asked first when `refresh`.
@@ -45,7 +167,7 @@ namespace Ai
 			refreshing = true;
 			Changed();
 		}
-		Core::Array<Core::String> command = FindClaude(ClaudeCommandSetting(context->Setting(Core::StringView("ai.claude.command"), Core::StringView("")).View()));
+		Core::Array<Core::String> command = Command();
 		Core::String folder = context->StateFolder();
 		Core::String version = ClaudeVersion(command, folder.View());
 		bool signedIn = false;
@@ -53,7 +175,10 @@ namespace Ai
 		Core::String error;
 		Serialization::DomNode answer;
 		if (command.IsEmpty()) error = Core::String("no Claude Code CLI was found: install it, or set ai.claude.command");
-		else answer = AskUsage(command, folder.View(), error);
+		else if (signedIn) answer = AskUsage(command, folder.View(), error);
+		Core::String problem;
+		if (signedIn && IsSubscriptionAuth(method.View()) && kClaudeSubscriptionOffered && !Configured() && !Setup(false, problem) && !problem.IsEmpty())
+			context->Log((Core::String("Claude could not be set up: ") + problem.View()).View());
 		IED::HostLock guard(*context);
 		refreshing = false;
 		cliPath = command.IsEmpty() ? Core::String() : command[0];
@@ -63,6 +188,7 @@ namespace Ai
 			authMethod = method;
 		}
 		if (answer.IsValid() && ReadUsage(answer, usage, AccountNowMs())) usage.error = Core::String();
+		else if (!signedIn && !command.IsEmpty()) usage.Forget();
 		else usage.error = error.IsEmpty() ? Core::String("the CLI's usage answer was not one IED reads") : error;
 		Changed();
 	}
@@ -113,6 +239,7 @@ namespace Ai
 		json.BeginObject();
 		json.Key(Core::StringView("claude"));
 		json.BeginObject();
+		json.BoolField("offered", kClaudeSubscriptionOffered);
 		json.BoolField("configured", Configured());
 		json.Key(Core::StringView("cli"));
 		json.BeginObject();
@@ -121,6 +248,8 @@ namespace Ai
 		json.Field("signIn", signIn.View());
 		json.Field("authMethod", authMethod.View());
 		json.BoolField("subscription", signIn == "signed_in" && IsSubscriptionAuth(authMethod.View()));
+		json.BoolField("signingIn", signingIn);
+		json.BoolField("installing", installing);
 		json.EndObject();
 		json.BoolField("refreshing", refreshing);
 		json.IntField("blockedUntilMs", BlockedUntil(now));

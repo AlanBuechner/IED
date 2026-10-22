@@ -38,6 +38,10 @@ namespace Ai
 	// A Claude Code profile (docs/04 "The Claude Code provider"): the CLI's model, always cloud; `model: "auto"` with its
 	// pacing - a ladder of models, strongest first (opus, sonnet, haiku when it names none), and what it paces against.
 	static ModelProfile* ReadClaude(ModelProfile* profile, const Serialization::DomNode& entry, Core::Array<Core::String>& problems) {
+		if (!kClaudeSubscriptionOffered) {
+			problems.Push(((Core::String("ai.models.") + profile->name.View()) + ": ") + kClaudeNotOffered);
+			return nullptr;
+		}
 		profile->model = entry.Member("model").Kind() == Serialization::DomKind::String ? Core::String(entry.Member("model").AsView()) : Core::String("default");
 		profile->privacy = Privacy::Cloud;
 		profile->contextWindow = entry.Member("contextWindow").AsInt();

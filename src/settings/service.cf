@@ -212,6 +212,30 @@ namespace Ied
 		return file;
 	}
 
+	bool Settings::SetApp(Core::StringView key, Core::StringView valueJson, Core::String& problem) {
+		SettingInfo* setting = catalog.Get(key);
+		if (!setting || !catalog.AllowedIn(setting, Core::StringView("app"))) {
+			problem = (Core::String("no setting ") + key) + " in the app tier";
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(valueJson, *doc);
+		if (!read.Ok()) {
+			problem = (Core::String("the value of ") + key) + " is not JSON";
+			return false;
+		}
+		Core::Array<Core::String> problems = catalog.Check(setting, read.root);
+		if (!problems.IsEmpty()) {
+			problem = ((Core::String("the value does not fit ") + key) + ": ") + problems[0].View();
+			return false;
+		}
+		app->Reload(catalog, false);
+		Core::String edited;
+		if (!SetMember(app->text.View(), key, valueJson, edited, problem) || !app->Write(catalog, edited.View(), problem)) return false;
+		PublishAll();
+		return true;
+	}
+
 	static RpcError Refused(Core::StringView message, const Core::Array<Core::String>& problems) {
 		JsonWriter data;
 		data.BeginObject();

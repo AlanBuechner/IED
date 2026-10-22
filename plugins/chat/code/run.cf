@@ -87,7 +87,7 @@ namespace Ai
 		}
 		if (!candidates.IsEmpty()) turn->model = candidates[0]->name;
 		if (candidates.IsEmpty()) {
-			UiNote(Core::StringView("no_model"), Core::StringView("No model is set up for this chat: add one to ai.models (an OpenAI-compatible endpoint) and, optionally, a group to ai.groups, in Settings."));
+			UiNote(Core::StringView("no_model"), Core::StringView(kClaudeSubscriptionOffered ? "No model is set up for this chat: sign in to Claude with your Pro or Max subscription in Settings > AI > Claude, or add a model to ai.models (an OpenAI-compatible endpoint) in Settings." : "No model is set up for this chat: add one to ai.models (an OpenAI-compatible endpoint) and, optionally, a group to ai.groups, in Settings."));
 			Finish(Core::StringView("no_model"));
 			return false;
 		}

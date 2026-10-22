@@ -46,6 +46,20 @@ namespace Ai
 		return window;
 	}
 
+	void ClaudeUsage::Forget() {
+		windows.Clear();
+		known = false;
+		available = false;
+		plan = Core::String();
+		status = Core::String();
+		limitedBy = Core::String();
+		limitResetsAtMs = 0;
+		extraEnabled = false;
+		extraUtilization = -1;
+		updatedMs = 0;
+		error = Core::String();
+	}
+
 	static void TakeWindow(ClaudeUsage& usage, const char* id, const Serialization::DomNode& node) {
 		if (node.Kind() != Serialization::DomKind::Object || !node.Member("utilization").IsValid() || node.Member("utilization").IsNull()) return;
 		UsageWindow* window = usage.Window(Core::StringView(id));
@@ -604,6 +618,77 @@ namespace Ai
 	Core::StringView IedToolName(Core::StringView claudeName) {
 		Core::StringView prefix = Core::StringView(kClaudeToolPrefix);
 		return claudeName.StartsWith(prefix) ? claudeName.Substring(prefix.ByteLength(), claudeName.ByteLength() - prefix.ByteLength()) : claudeName;
+	}
+
+	// --- Setting Claude up ----------------------------------------------------------------------------------------------
+
+	const int64 kClaudeProfileCount = 5;
+	const char*[5] kClaudeProfileNames = { "claude-auto", "claude-fable", "claude-opus", "claude-sonnet", "claude-haiku" };
+	const char*[5] kClaudeProfiles = {
+		"{\"provider\":\"claude-code\",\"model\":\"auto\",\"pacing\":{\"ladder\":[\"opus\",\"sonnet\",\"haiku\"],\"target\":\"both\"}}",
+		"{\"provider\":\"claude-code\",\"model\":\"fable\"}",
+		"{\"provider\":\"claude-code\",\"model\":\"opus\"}",
+		"{\"provider\":\"claude-code\",\"model\":\"sonnet\"}",
+		"{\"provider\":\"claude-code\",\"model\":\"haiku\"}" };
+
+	static Serialization::DomNode ParsedValue(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json, *doc).root;
+	}
+
+	static bool IsClaudeEntry(const Serialization::DomNode& entry) { return entry.Member("provider").AsView() == "claude-code"; }
+
+	bool HasClaudeModel(Core::StringView models) {
+		Serialization::DomNode root = ParsedValue(models);
+		for (int64 i = 0; root.Kind() == Serialization::DomKind::Object && i < root.Count(); ++i)
+			if (IsClaudeEntry(root.ValueAt(i))) return true;
+		return false;
+	}
+
+	// The model the claude group falls back to: the default group's primary when it is not Claude, else the first model that is not.
+	static Core::String ClaudeFallback(const Serialization::DomNode& models, const Serialization::DomNode& groups, Core::StringView defaultGroup) {
+		Serialization::DomNode group = defaultGroup.IsEmpty() || !groups.Member(Core::String(defaultGroup).CStr()).IsValid()
+			? (groups.Kind() == Serialization::DomKind::Object && groups.Count() > 0 ? groups.ValueAt(0) : Serialization::DomNode())
+			: groups.Member(Core::String(defaultGroup).CStr());
+		Core::StringView primary = group.Member("primary").Member("model").AsView();
+		Core::String primaryName = Core::String(primary);
+		if (!primary.IsEmpty() && models.Member(primaryName.CStr()).IsValid() && !IsClaudeEntry(models.Member(primaryName.CStr()))) return primaryName;
+		for (int64 i = 0; models.Kind() == Serialization::DomKind::Object && i < models.Count(); ++i)
+			if (!IsClaudeEntry(models.ValueAt(i))) return Core::String(models.KeyAt(i));
+		return Core::String();
+	}
+
+	void WithClaudeModels(Core::StringView models, Core::StringView groups, Core::StringView defaultGroup, Core::String& modelsOut, Core::String& groupsOut) {
+		Serialization::DomNode oldModels = ParsedValue(models);
+		Serialization::DomNode oldGroups = ParsedValue(groups);
+		IED::JsonWriter json;
+		json.BeginObject();
+		for (int64 i = 0; oldModels.Kind() == Serialization::DomKind::Object && i < oldModels.Count(); ++i) json.RawField(Core::String(oldModels.KeyAt(i)).CStr(), IED::NodeJson(oldModels.ValueAt(i)).View());
+		for (int64 i = 0; i < kClaudeProfileCount; ++i)
+			if (!oldModels.Member(kClaudeProfileNames[i]).IsValid()) json.RawField(kClaudeProfileNames[i], Core::StringView(kClaudeProfiles[i]));
+		json.EndObject();
+		modelsOut = json.ToString();
+		IED::JsonWriter out;
+		out.BeginObject();
+		for (int64 i = 0; oldGroups.Kind() == Serialization::DomKind::Object && i < oldGroups.Count(); ++i) out.RawField(Core::String(oldGroups.KeyAt(i)).CStr(), IED::NodeJson(oldGroups.ValueAt(i)).View());
+		if (!oldGroups.Member("claude").IsValid()) {
+			Core::String fallback = ClaudeFallback(oldModels, oldGroups, defaultGroup);
+			out.Key(Core::StringView("claude"));
+			out.BeginObject();
+			out.Key(Core::StringView("primary"));
+			out.BeginObject();
+			out.Field("model", "claude-auto");
+			if (!fallback.IsEmpty()) {
+				out.Key(Core::StringView("fallback"));
+				out.BeginArray();
+				out.String(fallback.View());
+				out.EndArray();
+			}
+			out.EndObject();
+			out.EndObject();
+		}
+		out.EndObject();
+		groupsOut = out.ToString();
 	}
 
 	// --- The history a new session is told -------------------------------------------------------------------------------

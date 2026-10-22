@@ -295,6 +295,13 @@ def main(argv):
 			auth = state.read("auth.json", {"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
 		print(json.dumps({k: v for k, v in auth.items() if k != "apiKeySource"}))
 		return 0
+	if args[:2] == ["auth", "login"]:
+		# the person finishes the login in the browser: the CLI is signed in from now on
+		method = "console" if "--console" in args else "claude.ai"
+		with open(state.path("auth.json"), "w", encoding="utf-8") as f:
+			json.dump({"loggedIn": True, "authMethod": method, "apiProvider": "firstParty"}, f)
+		print("Login successful.")
+		return 0
 	if "-p" not in args:
 		print("the fake only knows print mode", file=sys.stderr)
 		return 2

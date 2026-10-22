@@ -55,6 +55,10 @@ namespace IED
 		public void Log(Core::StringView line) const;
 		// A setting's effective value as JSON text ("null" when it has none), in `wsId` ("": the app's). Any thread.
 		public Core::String Setting(Core::StringView key, Core::StringView wsId) const;
+		// Writes `key` = `valueJson` in the app tier (the User settings file), as settings.set does: a key some plugin
+		// declares for the app tier, a value that fits its schema. Permission settings.write; false with `problem`. Any
+		// thread.
+		public bool SetSetting(Core::StringView key, Core::StringView valueJson, Core::String& problem) const;
 
 		// Answers calls of `name`, a server binding the manifest lists under bindings.provides.
 		public void Provide(Core::StringView name, Binding handler);

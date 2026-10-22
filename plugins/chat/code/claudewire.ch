@@ -42,6 +42,8 @@ namespace Ai
 		public UsageWindow* Find(Core::StringView id) const;
 		// The window `id`, added when it is not there yet.
 		public UsageWindow* Window(Core::StringView id);
+		// Nothing known any more: the CLI signed out.
+		public void Forget();
 	}
 
 	// get_usage's answer into `usage`, its windows replacing those before; false when it is not one.
@@ -141,6 +143,13 @@ namespace Ai
 	Core::String McpCallResult(Core::StringView text, const Core::Array<ClaudeImage>& images, bool isError);
 	// IED's name for a tool the model names (mcp__ied__fs_read -> fs_read); others as they are.
 	Core::StringView IedToolName(Core::StringView claudeName);
+	// ai.models and ai.groups (their JSON) with Claude set up (docs/04 "Setting it up"): the Claude profiles added - claude-auto
+	// (paced), claude-fable, claude-opus, claude-sonnet, claude-haiku; one already there of a name kept as it is - and a
+	// `claude` group unless one is there: primary claude-auto, falling back to the default group's primary when that is not
+	// Claude (else to the first model that is not), `defaultGroup` the ai.defaultGroup value (empty: the first group).
+	void WithClaudeModels(Core::StringView models, Core::StringView groups, Core::StringView defaultGroup, Core::String& modelsOut, Core::String& groupsOut);
+	// Whether the ai.models value (JSON) names a claude-code profile.
+	bool HasClaudeModel(Core::StringView models);
 	// The chat's turns before a new session, written out for its first message: the owner's messages, the answers and the
 	// tool calls with a line of each result, the newest kept when they pass kHistoryTextBytes. Empty when there are none.
 	Core::String HistoryText(const Core::Array<Turn*>& turns);

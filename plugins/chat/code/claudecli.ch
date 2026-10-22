@@ -11,10 +11,20 @@ namespace Ai
 	const int32 kClaudeRequestMs = 30000;
 	const int32 kClaudeCommandMs = 15000;   // `claude --version`, `claude auth status`
 
+	// The official installer (docs/04 "Setting it up"), run in a PowerShell window of its own.
+	const char* kClaudeInstallScript = "irm https://claude.ai/install.ps1 | iex";
+
 	// The CLI's program and leading arguments: `configured` (the ai.claude.command setting) when it names one, else
-	// claude.exe on PATH, the native installer's (%USERPROFILE%\.local\bin), then the newest the Claude desktop app keeps
+	// claude.exe on PATH, the native installer's (%USERPROFILE%\.local\bin), WinGet's link
+	// (%LOCALAPPDATA%\Microsoft\WinGet\Links), then the newest the Claude desktop app keeps
 	// (%APPDATA%\Claude\claude-code\<version>\<build>\claude.exe). Empty when there is none.
 	Core::Array<Core::String> FindClaude(const Core::Array<Core::String>& configured);
+	// Opens a console window of its own titled `title` running `command` (the program, then its arguments) with
+	// ClaudeEnvironment's changes - the CLI's login, the installer: IED never reads or writes what happens in it. False with
+	// `problem`.
+	bool OpenClaudeWindow(Core::StringView title, const Core::Array<Core::String>& command, Core::String& problem);
+	// The command line the window's shell runs: `start "<title>" "<program>" <arguments>`, each quoted.
+	Core::String ClaudeWindowCommand(Core::StringView title, const Core::Array<Core::String>& command);
 	// The settings value of ai.claude.command (a JSON array of strings) as a list; empty when it names nothing.
 	Core::Array<Core::String> ClaudeCommandSetting(Core::StringView json);
 	// Whether `a` is a later version than `b` ("2.1.304" > "2.1.299").

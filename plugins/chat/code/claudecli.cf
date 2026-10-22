@@ -102,9 +102,54 @@ namespace Ai
 			FS::Path native = FS::Path(home.View()) / ".local" / "bin" / "claude.exe";
 			if (FS::FileExists(native.CStr())) found = Core::String(native.View());
 		}
+		Core::String local;
+		if (found.IsEmpty() && Platform::TryGetEnvironmentVariable("LOCALAPPDATA", local)) {
+			FS::Path winget = FS::Path(local.View()) / "Microsoft" / "WinGet" / "Links" / "claude.exe";
+			if (FS::FileExists(winget.CStr())) found = Core::String(winget.View());
+		}
 		if (found.IsEmpty()) found = DesktopAppCli();
 		if (!found.IsEmpty()) command.Push(found);
 		return command;
+	}
+
+	static Core::String Quoted(Core::StringView text) {
+		Core::StringBuilder out;
+		out.AppendByte('"');
+		out.Append(text);
+		out.AppendByte('"');
+		return out.ToString();
+	}
+
+	Core::String ClaudeWindowCommand(Core::StringView title, const Core::Array<Core::String>& command) {
+		Core::StringBuilder line;
+		line.Append("start ");
+		line.Append(Quoted(title).View());
+		for (const Core::String& word : command) {
+			line.AppendByte(' ');
+			line.Append(Quoted(word.View()).View());
+		}
+		return line.ToString();
+	}
+
+	bool OpenClaudeWindow(Core::StringView title, const Core::Array<Core::String>& command, Core::String& problem) {
+		Process::StartInfo info;
+		info.shellCommand = ClaudeWindowCommand(title, command);
+		info.environment = ClaudeEnvironment();
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		info.killOnClose = false;
+		Process::Child shell = Process::Child::Start(info);
+		if (!shell.IsOpen()) {
+			problem = Core::String("cannot open a window: ") + shell.Error();
+			return false;
+		}
+		const int64 exitCode = shell.Wait(kClaudeCommandMs);
+		if (exitCode != 0) {
+			problem = Core::String("the window did not open");
+			return false;
+		}
+		return true;
 	}
 
 	Core::Array<Core::String> ClaudeEnvironment() {
@@ -152,8 +197,8 @@ namespace Ai
 	}
 
 	Core::String NotSubscription(Core::StringView method) {
-		if (method.IsEmpty() || method == "none") return Core::String("Claude Code is not signed in: run `claude auth login` in a terminal of your own and sign in with your Claude subscription");
-		return ((Core::String("Claude Code signs in with ") + method) + ", not your Claude subscription, and IED runs Claude on the subscription only: run `claude auth login` in a terminal of your own and sign in with your Claude account");
+		if (method.IsEmpty() || method == "none") return Core::String("Claude Code is not signed in: sign in with your Claude subscription from Settings > AI > Claude (Sign in), or run `claude auth login` in a terminal of your own");
+		return ((Core::String("Claude Code signs in with ") + method) + ", not your Claude subscription, and IED runs Claude on the subscription only: sign in with your Claude subscription from Settings > AI > Claude (Sign in), or run `claude auth login` in a terminal of your own");
 	}
 
 	Core::Array<Core::String> ClaudeBaseArguments() {
