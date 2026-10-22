@@ -156,6 +156,7 @@ class ObjectBuilder:
 		self.compileEndTime = 0.0
 		self.reflectionCollectStartTime = 0.0
 		self.reflectionCollectEndTime = 0.0
+		self._inputsReadAt = None   # when this build first read the sources (ns), the time its object is stamped with
 
 	def Log(self, text):
 		self._log += str(text)
@@ -271,6 +272,7 @@ class ObjectBuilder:
 				f.write(formattedArgs)
 
 			# run command with timing
+			self._inputsReadAt = time.time_ns()
 			startTime = time.perf_counter()
 			self.compileStartTime = time.time()
 			result = RunRetryingCrashes(args, self.workingDir, self.LogLine, file, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -304,6 +306,8 @@ class ObjectBuilder:
 				args.extend(["--", Config.compiler])
 				args.extend(CreateBaseArgs(self.includeDirs, self.sysIncludeDirs, self.defines, False, self.sourceFile))
 				args.append(f"-DHEADER_TOOL")
+				if self._inputsReadAt is None:
+					self._inputsReadAt = time.time_ns()
 				startTime = time.perf_counter()
 				self.reflectionCollectStartTime = time.time()
 				result = RunRetryingCrashes(args, self.workingDir, self.LogLine, file, capture_output=True)
@@ -312,17 +316,22 @@ class ObjectBuilder:
 				self.reflectionCollectTime = endTime - startTime
 				self.Log(str(result.stdout))
 				self.LogLine(f"collecting reflection completed in {self.reflectionCollectTime:.4f}s with error code {result.returncode}")
-				# update last modify time on obj
-				os.utime(self.objFile)
 				# always propagate HeaderTool failure - fail the build if reflection collection fails
 				if(result.returncode != 0):
 					self.LogLine(f"ERROR: HeaderTool failed with return code {result.returncode}.")
 					error = result.returncode
 		
+		if(error == 0 and self._inputsReadAt is not None):
+			self.StampInputsRead()
 		if(self._log != ""):
 			print(self._log)
 		self.buildError = error
 		return error
+
+	# The object takes the time its sources were read, not the time it was written: a source saved while it compiled
+	# (another session's edit) is then newer than it, so the next build compiles it again (BUG-346).
+	def StampInputsRead(self):
+		os.utime(self.objFile, ns=(self._inputsReadAt, self._inputsReadAt))
 
 
 def BuildObjects(objects, jobs = 0):

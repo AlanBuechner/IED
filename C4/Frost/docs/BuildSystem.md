@@ -270,6 +270,8 @@ The linker takes every `.obj` in the intermediate directory, so the object of a 
 
 A compile that fails (a non-zero exit, or success without an object) deletes the `.obj` and `.d` it may have written, so the next build compiles the file again: a compiler that crashed after writing its object would otherwise leave an object newer than the source, which the next build would link.
 
+A compiled object is stamped with the time its compile (or, when only reflection ran, its HeaderTool run) began reading the sources, not the time it was written: a source saved while it compiled (another session editing the same checkout) is then newer than the object, so the next build compiles it again instead of keeping an object made from the old text (BUG-346). `Frost/tests` checks it against a stub compiler that edits its source mid-compile: `python -m unittest discover -s C4/Frost/tests`.
+
 An object is named after its source's base name, so two sources with the same base name in one project would overwrite each other's object. `SharedObjectNames(sources)` finds them and the build fails with an error naming both.
 
 ### Compile Database
