@@ -12,6 +12,7 @@ namespace Scripting
 	class ObjectType : public Type
 	{
 	public:
+		static constexpr TypeKind kTypeKind = TypeKind::Object;
 		enum class ObjectKind { Class, Struct, Interface };
 
 		struct FieldInfo

@@ -13,6 +13,7 @@ namespace Scripting
 	/// This is the most common expression leaf alongside LiteralNode.
 	struct IdentifierExpressionNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::IdentifierExpression;
 		IdentifierExpressionNode() = default;
 
 		// --- Getters ---

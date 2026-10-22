@@ -365,6 +365,6 @@ namespace Scripting
 	void ObjectTemplateBody::RecordOwnBindings(const FunctionRecord* rec, const FunctionDefinitionNode& definition) const
 	{
 		const TemplateDefinitionNode* own = definition.GetTemplateDefinition().Get();
-		if (own) m_Model.m_FuncInstantiationBindings.Push({ rec, BindingsFor(m_Model, *own, m_Args) });
+		if (own) m_Model.m_FuncInstantiationBindings.emplace(rec, BindingsFor(m_Model, *own, m_Args));
 	}
 } // namespace Scripting

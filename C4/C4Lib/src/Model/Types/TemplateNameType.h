@@ -14,6 +14,7 @@ namespace Scripting
 	class TemplateNameType : public Type
 	{
 	public:
+		static constexpr TypeKind kTypeKind = TypeKind::TemplateName;
 		using InstanceFor = std::function<QueryResult<const FunctionRecord*>(const SignatureType& target)>;
 
 		TemplateNameType(const Core::String& name, InstanceFor instanceFor)

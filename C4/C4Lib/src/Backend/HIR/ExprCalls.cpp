@@ -127,7 +127,7 @@ namespace Scripting
 		const TemplateArgumentListNode* written = n->GetTemplateArgs() ? n->GetTemplateArgs().Get() : nullptr;
 		auto type = written ? m_Ctx.queries().QueryTemplateInstance(name, *written, m_Ctx.unitId, m_Ctx.scope)
 			: m_Ctx.queries().QueryType(name, m_Ctx.unitId, m_Ctx.scope);
-		return type.Ok() && type.value ? dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(type.value)) : nullptr;
+		return type.Ok() && type.value ? TypeAs<ObjectType>(TypeHandle::UnwrapToValue(type.value)) : nullptr;
 	}
 
 	// `T(args)` makes a temporary `T` through its create operator; `T({a, b})` is `T{a, b}`.
@@ -248,7 +248,7 @@ namespace Scripting
 		CallArgumentList list;
 		for (const auto& node : nodes)
 		{
-			if (const auto* brace = dynamic_cast<const BracedInitializerNode*>(node.Get()))
+			if (const auto* brace = NodeAs<BracedInitializerNode>(node.Get()))
 			{
 				list.types.Push(m_Ctx.queries().TypeStore()->BracedList(brace->EntryCount()));
 				list.nodes.push_back(nullptr);
@@ -299,7 +299,7 @@ namespace Scripting
 	{
 		for (uint32 i = 0; i < list.types.Count(); ++i)
 		{
-			const auto* named = dynamic_cast<const TemplateNameType*>(list.types[i]);
+			const auto* named = TypeAs<TemplateNameType>(list.types[i]);
 			if (!named) continue;
 			const auto* signature = i < params.Count() ? dynamic_cast<const SignatureType*>(TypeHandle::UnwrapToValue(params[i])) : nullptr;
 			if (!signature)
@@ -316,15 +316,15 @@ namespace Scripting
 	bool ExprLowerer::HasTemplateNames(const CallArgumentList& list)
 	{
 		for (const Type* t : list.types)
-			if (dynamic_cast<const TemplateNameType*>(t)) return true;
+			if (TypeAs<TemplateNameType>(t)) return true;
 		return false;
 	}
 
 	const TemplateNameType* ExprLowerer::TemplateNameOf(const AstNode* node)
 	{
 		Core::String name;
-		if (const auto* id = dynamic_cast<const IdentifierExpressionNode*>(node)) name = id->GetName();
-		else if (const auto* qualified = dynamic_cast<const StaticAccessNode*>(node); !qualified || !QualifiedCallName(qualified, name)) return nullptr;
+		if (const auto* id = NodeAs<IdentifierExpressionNode>(node)) name = id->GetName();
+		else if (const auto* qualified = NodeAs<StaticAccessNode>(node); !qualified || !QualifiedCallName(qualified, name)) return nullptr;
 		if (name.empty() || m_Ctx.queries().FindLocal(name)) return nullptr;
 		const TemplateNameType* named = m_Ctx.queries().QueryTemplateName(name, m_Ctx.unitId, m_Ctx.scope);
 		if (!named || m_Ctx.queries().QueryVariable(name, nullptr, m_Ctx.unitId, m_Ctx.enclosingType, m_Ctx.scope).Ok()) return nullptr;

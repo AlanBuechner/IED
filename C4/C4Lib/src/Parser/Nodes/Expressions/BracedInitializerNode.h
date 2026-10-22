@@ -10,6 +10,7 @@ namespace Scripting
 	/// Used for struct initialization, array initialization, and return Type{args};
 	struct BracedInitializerNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::BracedInitializer;
 		BracedInitializerNode() = default;
 
 		const Core::Vector<Ref<AstNode>>& GetElements() const { return m_Elements; }

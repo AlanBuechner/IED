@@ -122,6 +122,11 @@ namespace Scripting
 		Ref<AstNode> Shared() const { return Ref<AstNode>(const_cast<AstNode*>(this)); }
 	};
 
+	/// `node` as a `T` when it is one, by its kind (`T::kNodeType`), for a node class nothing derives from: a
+	/// dynamic_cast walks the class hierarchy, and lowering asks of most nodes.
+	template <typename T>
+	const T* NodeAs(const AstNode* node) { return node && node->Type() == T::kNodeType ? static_cast<const T*>(node) : nullptr; }
+
 	Core::String NodeTypeToName(NodeType type);
 
 } // namespace Scripting

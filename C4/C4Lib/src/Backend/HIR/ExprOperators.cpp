@@ -37,12 +37,12 @@ namespace Scripting
 
 		// Compound literal `T{a, b}`: the parser chains it as a BinaryExpression (left=type name,
 		// right=BracedInitializer). It is NOT an operator - resolve it as an aggregate construction.
-		if (const auto* brace = dynamic_cast<const BracedInitializerNode*>(n->GetRightOperand().Get()))
+		if (const auto* brace = NodeAs<BracedInitializerNode>(n->GetRightOperand().Get()))
 		{
 			const AstNode* written = n->GetLeftOperand().Get();
 			auto type = QualifierType(written);
 			if (!type.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(type.error, type.message));
-			if (const auto* obj = dynamic_cast<const ObjectType*>(type.value)) return ResolveBracedObject(written, obj, brace);
+			if (const auto* obj = TypeAs<ObjectType>(type.value)) return ResolveBracedObject(written, obj, brace);
 		}
 
 		if (const Core::String misread = TypeAsOperand(n, tok); !misread.empty())
@@ -61,7 +61,7 @@ namespace Scripting
 		const auto* paren = dynamic_cast<const ParenthesizedExpressionNode*>(n->GetLeftOperand().Get());
 		const AstNode* inner = paren ? paren->GetExpression().Get() : nullptr;
 		if (!inner) return "";
-		if (const auto* id = dynamic_cast<const IdentifierExpressionNode*>(inner);
+		if (const auto* id = NodeAs<IdentifierExpressionNode>(inner);
 			id && m_Ctx.queries().QueryVariable(id->GetName(), nullptr, m_Ctx.unitId, m_Ctx.enclosingType, m_Ctx.scope).Ok())
 			return "";
 		auto type = QualifierType(inner);
@@ -203,7 +203,7 @@ namespace Scripting
 		// the short-circuit ternary below.
 		const Type* l = TypeHandle::UnwrapToValue(lhs.type);
 		const Type* r = TypeHandle::UnwrapToValue(rhs.type);
-		if (dynamic_cast<const ObjectType*>(l) || dynamic_cast<const ObjectType*>(r))
+		if (TypeAs<ObjectType>(l) || TypeAs<ObjectType>(r))
 		{
 			const char* tok = isAnd ? "&&" : "||";
 			auto op = m_Ctx.queries().QueryOperator(tok, l, r, m_Ctx.unitId, m_Ctx.enclosingType, AccessOf(lhs), AccessOf(rhs));
@@ -389,8 +389,8 @@ namespace Scripting
 
 	std::optional<Value> ExprLowerer::SameLanesAs(const Value& operand, const Type* other)
 	{
-		const auto* run = dynamic_cast<const SwizzleType*>(other);
-		const auto* object = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(operand.type));
+		const auto* run = TypeAs<SwizzleType>(other);
+		const auto* object = TypeAs<ObjectType>(TypeHandle::UnwrapToValue(operand.type));
 		if (!run || !run->IsPacked() || !object || !object->IsPurePackedVector()) return std::nullopt;
 		const SwizzleType* lanes = object->GetPackedVectorSwizzle();
 		if (lanes->GetLaneCount() != run->GetLaneCount() || lanes->GetElementType() != run->GetElementType()) return std::nullopt;

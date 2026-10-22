@@ -57,30 +57,30 @@ namespace Scripting
 	QueryResult<void> StmtLowerer::Dispatch(const AstNode* node, BlockNode* block)
 	{
 		switch (node->Type()) {
-		case NodeType::CodeBlock:           return LowerNestedBlock(dynamic_cast<const CodeBlockNode*>(node), block);
-		case NodeType::VariableDefinition:  return DeclLowerer(m_Ctx).LowerLocalDecl(dynamic_cast<const VariableDefinitionNode*>(node), block);
-		case NodeType::Destructuring:       return DestructuringLowerer(m_Ctx).Lower(*dynamic_cast<const DestructuringNode*>(node), block);
-		case NodeType::ExpressionStatement: return LowerExprStmt(dynamic_cast<const ExpressionStatementNode*>(node), block);
-		case NodeType::ReturnStatement:     return LowerReturn(dynamic_cast<const ReturnStatementNode*>(node), block);
-		case NodeType::IfStatement:         return LowerIf(dynamic_cast<const IfStatementNode*>(node), block);
-		case NodeType::WhileLoop:           return LoopLowerer(m_Ctx, *this).LowerWhile(dynamic_cast<const WhileLoopNode*>(node), block);
-		case NodeType::DoWhileLoop:         return LoopLowerer(m_Ctx, *this).LowerDoWhile(dynamic_cast<const DoWhileLoopNode*>(node), block);
-		case NodeType::ForLoop:             return LoopLowerer(m_Ctx, *this).LowerFor(dynamic_cast<const ForLoopNode*>(node), block);
-		case NodeType::SwitchStatement:     return LowerSwitch(dynamic_cast<const SwitchStatementNode*>(node), block);
-		case NodeType::BreakStatement:      return LowerBreak(dynamic_cast<const BreakStatementNode*>(node), block);
-		case NodeType::ContinueStatement:   return LowerContinue(dynamic_cast<const ContinueStatementNode*>(node), block);
-		case NodeType::GotoStatement:       return LowerGoto(dynamic_cast<const GotoStatementNode*>(node), block);
-		case NodeType::LabelStatement:      return LowerLabel(dynamic_cast<const LabelStatementNode*>(node), block);
+		case NodeType::CodeBlock:           return LowerNestedBlock(static_cast<const CodeBlockNode*>(node), block);
+		case NodeType::VariableDefinition:  return DeclLowerer(m_Ctx).LowerLocalDecl(static_cast<const VariableDefinitionNode*>(node), block);
+		case NodeType::Destructuring:       return DestructuringLowerer(m_Ctx).Lower(*static_cast<const DestructuringNode*>(node), block);
+		case NodeType::ExpressionStatement: return LowerExprStmt(static_cast<const ExpressionStatementNode*>(node), block);
+		case NodeType::ReturnStatement:     return LowerReturn(static_cast<const ReturnStatementNode*>(node), block);
+		case NodeType::IfStatement:         return LowerIf(static_cast<const IfStatementNode*>(node), block);
+		case NodeType::WhileLoop:           return LoopLowerer(m_Ctx, *this).LowerWhile(static_cast<const WhileLoopNode*>(node), block);
+		case NodeType::DoWhileLoop:         return LoopLowerer(m_Ctx, *this).LowerDoWhile(static_cast<const DoWhileLoopNode*>(node), block);
+		case NodeType::ForLoop:             return LoopLowerer(m_Ctx, *this).LowerFor(static_cast<const ForLoopNode*>(node), block);
+		case NodeType::SwitchStatement:     return LowerSwitch(static_cast<const SwitchStatementNode*>(node), block);
+		case NodeType::BreakStatement:      return LowerBreak(static_cast<const BreakStatementNode*>(node), block);
+		case NodeType::ContinueStatement:   return LowerContinue(static_cast<const ContinueStatementNode*>(node), block);
+		case NodeType::GotoStatement:       return LowerGoto(static_cast<const GotoStatementNode*>(node), block);
+		case NodeType::LabelStatement:      return LowerLabel(static_cast<const LabelStatementNode*>(node), block);
 		// `fallthrough;` is only meaningful as a switch case's statement (LowerSwitch handles it there).
 		case NodeType::FallthroughStatement: return m_Ctx.Fail(node, QueryResult<void>::Fail(QueryError::NotAValue, "'fallthrough' is only valid inside a switch case"));
 		case NodeType::ObjectDefinition:    return LowerLocalType(node);
 		case NodeType::EnumDefinition:      return LowerLocalType(node);
-		case NodeType::AliasDefinition:     return LowerLocalAlias(dynamic_cast<const AliasDefinitionNode*>(node));
-		case NodeType::FunctionDefinition:  return LowerLocalFunction(dynamic_cast<const FunctionDefinitionNode*>(node));
-		case NodeType::TryCatch:            return ExceptionLowerer(m_Ctx, *this).LowerTryCatch(dynamic_cast<const TryCatchNode*>(node), block);
-		case NodeType::ThrowStatement:      return ExceptionLowerer(m_Ctx, *this).LowerThrow(dynamic_cast<const ThrowStatementNode*>(node), block);
-		case NodeType::DeferStatement:      return ExceptionLowerer(m_Ctx, *this).LowerDefer(dynamic_cast<const DeferStatementNode*>(node), block);
-		case NodeType::AsmStatement:        return AsmLowerer(m_Ctx).Lower(dynamic_cast<const AsmStatementNode*>(node), block);
+		case NodeType::AliasDefinition:     return LowerLocalAlias(static_cast<const AliasDefinitionNode*>(node));
+		case NodeType::FunctionDefinition:  return LowerLocalFunction(static_cast<const FunctionDefinitionNode*>(node));
+		case NodeType::TryCatch:            return ExceptionLowerer(m_Ctx, *this).LowerTryCatch(static_cast<const TryCatchNode*>(node), block);
+		case NodeType::ThrowStatement:      return ExceptionLowerer(m_Ctx, *this).LowerThrow(static_cast<const ThrowStatementNode*>(node), block);
+		case NodeType::DeferStatement:      return ExceptionLowerer(m_Ctx, *this).LowerDefer(static_cast<const DeferStatementNode*>(node), block);
+		case NodeType::AsmStatement:        return AsmLowerer(m_Ctx).Lower(static_cast<const AsmStatementNode*>(node), block);
 		case NodeType::EmptyStatement:      return QueryResult<void>::Success();
 		default:
 			return QueryResult<void>::Fail(QueryError::Unsupported, "statement not yet lowered");
@@ -116,7 +116,7 @@ namespace Scripting
 		bool Names(const AstNode* node, const std::vector<Core::String>& names)
 		{
 			if (!node || names.empty()) return false;
-			if (const auto* id = dynamic_cast<const IdentifierExpressionNode*>(node))
+			if (const auto* id = NodeAs<IdentifierExpressionNode>(node))
 				if (std::find(names.begin(), names.end(), id->GetName()) != names.end()) return true;
 			for (const Ref<AstNode>& child : node->Children())
 				if (Names(child.Get(), names)) return true;

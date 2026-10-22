@@ -9,6 +9,7 @@ namespace Scripting
 	class SwizzleType : public Type
 	{
 	public:
+		static constexpr TypeKind kTypeKind = TypeKind::Swizzle;
 		struct LaneInfo
 		{
 			Core::String m_Name;   // single-character lane name

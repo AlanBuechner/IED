@@ -14,6 +14,7 @@ namespace Scripting
 	/// literals, and boolean/null keywords into a single AST node type.
 	struct LiteralNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::LiteralExpression;
 		enum class LiteralKind
 		{
 			Number,   // TokenType::Number: an integer or floating-point spelling (Model/Literals.h types it)

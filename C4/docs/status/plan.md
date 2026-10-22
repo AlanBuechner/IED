@@ -1539,7 +1539,7 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
 #### B69 - Build time: the serial work around code generation (roadmap 5.1, 5.3)
 - **Design:** D-76, D-81, [compiler 05](../compiler/05-partitioned-emission.md). **Depends on:** B61. **Status:** In
-  progress (steps 1 to 4 done).
+  progress (steps 1 to 5 done).
 - **Done notes (step 1):** `-ftime` shows the split as a phase of its own and a line on the partitions (how many were
   reused; of those assembled the longest, the total and the largest), and a sampling profile of the compiler building
   the IED server (about 60k lines of its own plus the Bedrock it uses, `--script-host`, `-g`) showed an edit spending
@@ -1621,9 +1621,20 @@ folder (`Parser/`, `Model/`, `Backend/`, ...).
 
   The header edits gain most because partition 0 no longer carries the image: an edit that reassembles it reassembles
   no image with it. The coordinator's share of the image fell from about 12% of a no-op build's samples to 2.5%.
-- **Next:** HIR lowering (about 0.6 s of an edit, the largest serial part) needs a scope chain per lowering context
+- **Done notes (step 5, profiled again):** the type store interns signatures in hash maps (a scan over every
+  function signature before); the model remembers each type's lifecycle methods (`ProgramModel::LifecycleMethodsOf`)
+  and its instantiation bindings in hash maps (scans before, whose returned pointers a later instance could move);
+  `Scope::Entries` compares names in a layer of up to four instead of hashing them; the interop pass skips a file
+  without `extern`; the compiler ends with `TerminateProcess` once its output is flushed (the allocator's shutdown
+  handed back every span, about 75 ms); and lowering reads a node's or a type's kind instead of a `dynamic_cast`
+  where the class is a leaf (`NodeAs`, `TypeAs`, and `static_cast` in the switches on a node's kind), which took the
+  casts from 11% of lowering to 5%. IED server, mean of two runs (before / after, seconds): nothing changed 1.80 /
+  1.75, a statement 3.16 / 3.03, a header constant 3.41 / 3.24, back 3.44 / 3.17. Parsing on reused threads saved
+  12 ms but kept 100 MB more in the allocator's thread caches, so each unit still parses on a thread of its own.
+- **Next:** HIR lowering (about 0.55 s of an edit, the largest serial part) needs a scope chain per lowering context
   instead of the symbol table's one cursor, a locked type store and instantiation, and errors gathered per function
-  to run on several threads.
+  to run on several threads. What is left inside it is spread thin: the arenas' blocks (each function's own), vector
+  growth, the remaining casts.
 
 ### Testing framework
 

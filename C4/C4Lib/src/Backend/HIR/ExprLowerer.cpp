@@ -48,28 +48,28 @@ namespace Scripting
 	{
 		if (!node) return QueryResult<Value>::Fail(QueryError::NotAValue, "empty expression");
 		switch (node->Type()) {
-		case NodeType::LiteralExpression:       return ResolveLiteral(dynamic_cast<const LiteralNode*>(node));
-		case NodeType::IdentifierExpression:    return ResolveIdentifier(dynamic_cast<const IdentifierExpressionNode*>(node));
-		case NodeType::MemberAccess:            return ResolveMemberAccess(dynamic_cast<const MemberAccessNode*>(node));
-		case NodeType::BinaryExpression:        return ResolveBinary(dynamic_cast<const BinaryExpressionNode*>(node));
+		case NodeType::LiteralExpression:       return ResolveLiteral(static_cast<const LiteralNode*>(node));
+		case NodeType::IdentifierExpression:    return ResolveIdentifier(static_cast<const IdentifierExpressionNode*>(node));
+		case NodeType::MemberAccess:            return ResolveMemberAccess(static_cast<const MemberAccessNode*>(node));
+		case NodeType::BinaryExpression:        return ResolveBinary(static_cast<const BinaryExpressionNode*>(node));
 		case NodeType::ConditionalAnd:          return ResolveShortCircuit(node, true);
 		case NodeType::ConditionalOr:           return ResolveShortCircuit(node, false);
-		case NodeType::UnaryExpression:         return ResolveUnary(dynamic_cast<const UnaryExpressionNode*>(node));
-		case NodeType::AssignmentExpression:    return ResolveAssignment(dynamic_cast<const AssignmentExpressionNode*>(node));
-		case NodeType::FunctionCall:            return ResolveCall(dynamic_cast<const FunctionCallNode*>(node));
-		case NodeType::CastExpression:          return ResolveCast(dynamic_cast<const CastExpressionNode*>(node));
-		case NodeType::TernaryExpression:       return ResolveTernary(dynamic_cast<const TernaryExpressionNode*>(node));
-		case NodeType::ParenthesizedExpression: return ResolveParen(dynamic_cast<const ParenthesizedExpressionNode*>(node));
-		case NodeType::ArrayIndex:              return ResolveArrayIndex(dynamic_cast<const ArrayIndexNode*>(node));
-		case NodeType::TypeCheck:               return ResolveTypeCheck(dynamic_cast<const TypeCheckNode*>(node));
-		case NodeType::SafeCast:                return ResolveSafeCast(dynamic_cast<const SafeCastNode*>(node));
-		case NodeType::StaticAccess:            return ResolveStaticAccess(dynamic_cast<const StaticAccessNode*>(node));
-		case NodeType::NamespaceQualifiedName:  return ResolveInstanceName(dynamic_cast<const NamespaceQualifiedNameNode*>(node));
-		case NodeType::NewExpression:           return ResolveNew(dynamic_cast<const NewExpressionNode*>(node));
-		case NodeType::TypeOfExpression:        return ResolveTypeOf(dynamic_cast<const TypeOfExpressionNode*>(node));
+		case NodeType::UnaryExpression:         return ResolveUnary(static_cast<const UnaryExpressionNode*>(node));
+		case NodeType::AssignmentExpression:    return ResolveAssignment(static_cast<const AssignmentExpressionNode*>(node));
+		case NodeType::FunctionCall:            return ResolveCall(static_cast<const FunctionCallNode*>(node));
+		case NodeType::CastExpression:          return ResolveCast(static_cast<const CastExpressionNode*>(node));
+		case NodeType::TernaryExpression:       return ResolveTernary(static_cast<const TernaryExpressionNode*>(node));
+		case NodeType::ParenthesizedExpression: return ResolveParen(static_cast<const ParenthesizedExpressionNode*>(node));
+		case NodeType::ArrayIndex:              return ResolveArrayIndex(static_cast<const ArrayIndexNode*>(node));
+		case NodeType::TypeCheck:               return ResolveTypeCheck(static_cast<const TypeCheckNode*>(node));
+		case NodeType::SafeCast:                return ResolveSafeCast(static_cast<const SafeCastNode*>(node));
+		case NodeType::StaticAccess:            return ResolveStaticAccess(static_cast<const StaticAccessNode*>(node));
+		case NodeType::NamespaceQualifiedName:  return ResolveInstanceName(static_cast<const NamespaceQualifiedNameNode*>(node));
+		case NodeType::NewExpression:           return ResolveNew(static_cast<const NewExpressionNode*>(node));
+		case NodeType::TypeOfExpression:        return ResolveTypeOf(static_cast<const TypeOfExpressionNode*>(node));
 		case NodeType::VaArgExpression:         return VarArgs::LowerArgument(m_Ctx, *this, *static_cast<const VaArgExpressionNode*>(node));
-		case NodeType::LambdaExpression:        return ResolveLambda(dynamic_cast<const LambdaNode*>(node));
-		case NodeType::FoldExpression:          return FoldLowerer(m_Ctx, *this).Lower(*dynamic_cast<const FoldExpressionNode*>(node));
+		case NodeType::LambdaExpression:        return ResolveLambda(static_cast<const LambdaNode*>(node));
+		case NodeType::FoldExpression:          return FoldLowerer(m_Ctx, *this).Lower(*static_cast<const FoldExpressionNode*>(node));
 		case NodeType::ValueList:
 			return m_Ctx.Fail(node, QueryResult<Value>::Fail(QueryError::NotAValue,
 				"a value list '" + node->ToString() + "' is only returned from a function that returns a list, or destructured"));
@@ -146,14 +146,14 @@ namespace Scripting
 			// only knows ordinary fields, so a view fails there. Checked before function decay.
 			if (m_Ctx.enclosingType)
 			{
-				const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(m_Ctx.enclosingType));
+				const auto* obj = TypeAs<ObjectType>(TypeHandle::UnwrapToValue(m_Ctx.enclosingType));
 				if (const LValue* view = PackedViewLValue(m_Ctx, obj, m_Ctx.ReceiverLValue(), name)) return Value::L(view);
 			}
 
 			// Function-to-pointer decay: a function name used in expression position (`f = Add`,
 			// `Apply(Add, 1, 2)`, `Type::Make`) is the function's address as a funcptr of its exact signature.
 			// A free function or a static method; an instance method has no address without an object.
-			if (const auto* enclosing = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(m_Ctx.enclosingType)))
+			if (const auto* enclosing = TypeAs<ObjectType>(TypeHandle::UnwrapToValue(m_Ctx.enclosingType)))
 				if (auto method = MethodValue(n, enclosing, name); method.Ok() || method.error != QueryError::NotFound) return method;
 			if (auto function = FunctionValue(n, name); function.Ok() || function.error != QueryError::NotFound) return function;
 			return m_Ctx.Fail(n, QueryResult<Value>::Fail(q.error, q.message));
@@ -270,9 +270,9 @@ namespace Scripting
 
 	QueryResult<Value> ExprLowerer::ResolveFor(const AstNode* node, const Type* target)
 	{
-		if (const auto* list = dynamic_cast<const ValueListNode*>(node))
+		if (const auto* list = NodeAs<ValueListNode>(node))
 		{
-			const auto* returned = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(target));
+			const auto* returned = TypeAs<ObjectType>(TypeHandle::UnwrapToValue(target));
 			if (!returned || !returned->IsReturnList())
 				return m_Ctx.Fail(node, QueryResult<Value>::Fail(QueryError::NotAValue, "a value list starts only a return list, not '" +
 					(target ? TypeHandle::UnwrapToValue(target)->GetName() : Core::String("?")) + "'"));
@@ -281,16 +281,16 @@ namespace Scripting
 		const auto* signature = dynamic_cast<const SignatureType*>(TypeHandle::UnwrapToValue(target));
 		if (const TemplateNameType* named = signature ? TemplateNameOf(node) : nullptr) return TemplateAddress(node, *named, *signature);
 		// `p = { 3, 4 }`, `arr = { 1, 2, 3 }`: the braces build a value of the target's type.
-		if (const auto* brace = dynamic_cast<const BracedInitializerNode*>(node); brace && target) return ResolveBracedAs(brace, target);
-		const auto* text = dynamic_cast<const LiteralNode*>(node);
-		const auto* array = dynamic_cast<const ArrayType*>(TypeHandle::UnwrapToValue(target));
+		if (const auto* brace = NodeAs<BracedInitializerNode>(node); brace && target) return ResolveBracedAs(brace, target);
+		const auto* text = NodeAs<LiteralNode>(node);
+		const auto* array = TypeAs<ArrayType>(TypeHandle::UnwrapToValue(target));
 		if (text && array && text->GetKind() == LiteralNode::LiteralKind::String) return ResolveTextAs(text, array);
 		return ResolveExpr(node);
 	}
 
 	QueryResult<std::vector<Value>> ExprLowerer::ResolveArgument(const AstNode* node)
 	{
-		if (const auto* expansion = dynamic_cast<const PackExpansionNode*>(node)) return ResolveExpansion(expansion);
+		if (const auto* expansion = NodeAs<PackExpansionNode>(node)) return ResolveExpansion(expansion);
 		auto value = ResolveExpr(node);
 		if (!value.Ok()) return QueryResult<std::vector<Value>>::Fail(value.error, value.message);
 		return std::vector<Value>{ value.value };
@@ -299,7 +299,7 @@ namespace Scripting
 	QueryResult<std::vector<Value>> ExprLowerer::ResolveExpansion(const PackExpansionNode* n)
 	{
 		using Result = QueryResult<std::vector<Value>>;
-		if (dynamic_cast<const BracedInitializerNode*>(n->GetPattern().Get()))
+		if (NodeAs<BracedInitializerNode>(n->GetPattern().Get()))
 			return m_Ctx.Fail(n, Result::Fail(QueryError::Unsupported,
 				"a braced list is not expanded in arguments: expand the pack inside it, as in {args...}"));
 		auto copies = PackElements::Of(m_Ctx, *n->GetPattern());

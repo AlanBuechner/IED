@@ -9,6 +9,7 @@ namespace Scripting
 	class BracedListType : public Type
 	{
 	public:
+		static constexpr TypeKind kTypeKind = TypeKind::BracedList;
 		explicit BracedListType(uint32 entries) : Type(TypeKind::BracedList), m_Entries(entries) {}
 		Core::String GetName() const override { return "{" + std::to_string(m_Entries) + " entries}"; }
 

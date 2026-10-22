@@ -8,6 +8,7 @@ namespace Scripting
 	class ArrayType : public Type
 	{
 	public:
+		static constexpr TypeKind kTypeKind = TypeKind::Array;
 		ArrayType(const Type* elementType, uint64 elementCount);
 		Core::String GetName() const override;
 		Core::String ToString() const override;

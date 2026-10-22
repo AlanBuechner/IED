@@ -15,12 +15,12 @@ namespace Scripting
 	{
 		const AstNode* base = sa->GetBaseType().Get();
 		if (!base) return false;
-		const auto* inner = dynamic_cast<const StaticAccessNode*>(base);
+		const auto* inner = NodeAs<StaticAccessNode>(base);
 		if (inner)
 		{
 			if (!QualifiedCallName(inner, out)) return false; // out now holds "A::B"
 		}
-		else if (const auto* id = dynamic_cast<const IdentifierExpressionNode*>(base))
+		else if (const auto* id = NodeAs<IdentifierExpressionNode>(base))
 			out = id->GetName();                              // out now holds "M"
 		else
 			return false; // a qualified TYPE base (e.g. `Ns::Vec2`) is not a function call target here
@@ -32,12 +32,12 @@ namespace Scripting
 	bool ExprLowerer::IsCallableValue(const Type* t)
 	{
 		t = TypeHandle::UnwrapToValue(t);
-		return dynamic_cast<const SignatureType*>(t) || dynamic_cast<const ObjectType*>(t);
+		return dynamic_cast<const SignatureType*>(t) || TypeAs<ObjectType>(t);
 	}
 
 	bool ExprLowerer::IsCallableField(const Type* owner, const Core::String& name) const
 	{
-		const auto* obj = dynamic_cast<const ObjectType*>(owner);
+		const auto* obj = TypeAs<ObjectType>(owner);
 		if (!obj) return false;
 		ClassHierarchy::FieldHit hit = ClassHierarchy::FindField(obj, name);
 		return hit.field && IsCallableValue(hit.field->m_Type);
@@ -54,7 +54,7 @@ namespace Scripting
 			c.signature = signature;
 			return Result::Success(c);
 		}
-		const auto* obj = dynamic_cast<const ObjectType*>(t);
+		const auto* obj = TypeAs<ObjectType>(t);
 		if (!obj)
 			return Result::Fail(QueryError::NotCallable, "a '" + Core::String(t ? t->GetName() : "?") +
 				"' cannot be called: only functions, funcptrs, funcs and objects with a call operator can");
@@ -69,10 +69,10 @@ namespace Scripting
 
 	QueryResult<ExprLowerer::CallTarget> ExprLowerer::ResolveCallTarget(const AstNode* callee)
 	{
-		if (const auto* id = dynamic_cast<const IdentifierExpressionNode*>(callee)) return NamedCallTarget(id);
-		if (const auto* ma = dynamic_cast<const MemberAccessNode*>(callee)) return MemberCallTarget(ma);
-		if (const auto* sa = dynamic_cast<const StaticAccessNode*>(callee)) return StaticCallTarget(sa);
-		if (const auto* qn = dynamic_cast<const NamespaceQualifiedNameNode*>(callee))
+		if (const auto* id = NodeAs<IdentifierExpressionNode>(callee)) return NamedCallTarget(id);
+		if (const auto* ma = NodeAs<MemberAccessNode>(callee)) return MemberCallTarget(ma);
+		if (const auto* sa = NodeAs<StaticAccessNode>(callee)) return StaticCallTarget(sa);
+		if (const auto* qn = NodeAs<NamespaceQualifiedNameNode>(callee))
 		{
 			// `Ns::F<args>(...)`: the parser keeps a namespaced template call's target as one qualified name.
 			CallTarget target;

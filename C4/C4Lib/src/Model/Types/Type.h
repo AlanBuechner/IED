@@ -66,4 +66,9 @@ namespace Scripting
 		size_t m_Size = 0;
 		size_t m_Alignment = 1;
 	};
+
+	/// `type` as a `T` when it is one, by its kind (`T::kTypeKind`), for a type class nothing derives from and no other
+	/// class shares its kind with.
+	template <typename T>
+	const T* TypeAs(const Type* type) { return type && type->GetKind() == T::kTypeKind ? static_cast<const T*>(type) : nullptr; }
 } // namespace Scripting

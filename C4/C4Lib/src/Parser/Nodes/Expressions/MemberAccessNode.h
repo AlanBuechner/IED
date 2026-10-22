@@ -7,6 +7,7 @@ namespace Scripting
 	/// Member access expression: baseObject.memberName (dot or arrow).
 	struct MemberAccessNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::MemberAccess;
 		MemberAccessNode() = default;
 
 		const Ref<AstNode>& GetBaseObject() const { return m_BaseObject; }

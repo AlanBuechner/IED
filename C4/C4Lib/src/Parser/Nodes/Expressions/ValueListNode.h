@@ -10,6 +10,7 @@ namespace Scripting
 	/// of a destructuring (`[a, b] = [b, a];`). An element may be a pack expansion (`[args...]`).
 	struct ValueListNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::ValueList;
 		static Ref<ValueListNode> Parse(ParserState& state);
 
 		const Core::Vector<Ref<AstNode>>& GetElements() const { return m_Elements; }

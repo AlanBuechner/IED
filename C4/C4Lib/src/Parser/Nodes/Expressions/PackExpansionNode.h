@@ -9,6 +9,7 @@ namespace Scripting
 	/// elements of a braced list, or a template argument list - `G(args...)`, `G(Wrap(args)...)`, `Tuple<Ts...>`.
 	struct PackExpansionNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::PackExpansion;
 		static Ref<PackExpansionNode> Around(const Ref<AstNode>& pattern, const Token& ellipsis);
 
 		const Ref<AstNode>& GetPattern() const { return m_Children[0]; }

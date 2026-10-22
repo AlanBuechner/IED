@@ -7,6 +7,7 @@ namespace Scripting
 	/// Static/scope resolution access: baseType::memberName.
 	struct StaticAccessNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::StaticAccess;
 		StaticAccessNode() = default;
 
 		const Ref<AstNode>& GetBaseType() const { return m_BaseType; }

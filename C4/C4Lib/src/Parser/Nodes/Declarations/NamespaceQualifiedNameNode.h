@@ -41,6 +41,7 @@ namespace Scripting
 	/// Example: `NC::SomeClass<float>::SubType<NC::Other<int>>::Type3`
 	struct NamespaceQualifiedNameNode : public AstNode
 	{
+		static constexpr NodeType kNodeType = NodeType::NamespaceQualifiedName;
 		struct Segment
 		{
 			Token nameToken;

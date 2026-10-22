@@ -80,16 +80,14 @@ namespace Scripting
 
 	const InstantiationBindings* ProgramModel::TypeInstantiationBindings(const Type* instantiated) const
 	{
-		for (uint32 i = 0; i < m_InstantiationBindings.Count(); ++i)
-			if (m_InstantiationBindings[i].first == instantiated) return &m_InstantiationBindings[i].second;
-		return nullptr;
+		auto found = m_InstantiationBindings.find(instantiated);
+		return found != m_InstantiationBindings.end() ? &found->second : nullptr;
 	}
 
 	const InstantiationBindings* ProgramModel::FunctionInstantiationBindings(const FunctionRecord* rec) const
 	{
-		for (uint32 i = 0; i < m_FuncInstantiationBindings.Count(); ++i)
-			if (m_FuncInstantiationBindings[i].first == rec) return &m_FuncInstantiationBindings[i].second;
-		return nullptr;
+		auto found = m_FuncInstantiationBindings.find(rec);
+		return found != m_FuncInstantiationBindings.end() ? &found->second : nullptr;
 	}
 
 	const FunctionRecord* ProgramModel::RecordFor(const FunctionType* sig) const

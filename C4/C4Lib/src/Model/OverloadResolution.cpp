@@ -55,7 +55,7 @@ namespace Scripting
 			return target->HasSignature(source->GetReturnType(), source->GetParameterTypes()) &&
 				(toFunc || source->GetKind() == TypeKind::FunPtr) ? (source->GetKind() == target->GetKind() ? 0 : 1) : -1;
 		if (toFunc && IsUniversalHandle(arg)) return 1; // null
-		const auto* obj = dynamic_cast<const ObjectType*>(arg);
+		const auto* obj = TypeAs<ObjectType>(arg);
 		const ObjectType::MethodInfo* call = obj ? CallOperatorFor(obj, target) : nullptr;
 		if (!call) return -1;
 		return toFunc || call->m_IsStatic ? 1 : -1;
@@ -112,8 +112,8 @@ namespace Scripting
 		while (declared && declared->GetKind() == TypeKind::Alias) declared = static_cast<const AliasType*>(declared)->GetAliasedType();
 		if (declared && declared->GetKind() == TypeKind::Reference && !static_cast<const ReferenceType*>(declared)->IsConstReferent()) return -1;
 		const Type* value = TypeHandle::UnwrapToValue(param);
-		if (const auto* array = dynamic_cast<const ArrayType*>(value)) return array->GetElementCount() >= entries ? kBracedBuildCost : -1;
-		if (const auto* object = dynamic_cast<const ObjectType*>(value)) return BracesBuild(object, entries) ? kBracedBuildCost : -1;
+		if (const auto* array = TypeAs<ArrayType>(value)) return array->GetElementCount() >= entries ? kBracedBuildCost : -1;
+		if (const auto* object = TypeAs<ObjectType>(value)) return BracesBuild(object, entries) ? kBracedBuildCost : -1;
 		return -1;
 	}
 
@@ -123,14 +123,14 @@ namespace Scripting
 
 		// A function template's name binds a funcptr whose signature has an instance (the function's address,
 		// exact), or a func through that address (D-17).
-		if (const auto* named = dynamic_cast<const TemplateNameType*>(arg))
+		if (const auto* named = TypeAs<TemplateNameType>(arg))
 		{
 			const auto* signature = dynamic_cast<const SignatureType*>(TypeHandle::UnwrapToValue(param));
 			if (!signature || !named->Instance(*signature).Ok()) return -1;
 			return signature->GetKind() == TypeKind::FunPtr ? 0 : 1;
 		}
 
-		if (const auto* braces = dynamic_cast<const BracedListType*>(arg)) return BracedCost(param, braces->GetEntryCount());
+		if (const auto* braces = TypeAs<BracedListType>(arg)) return BracedCost(param, braces->GetEntryCount());
 		if (!arg) return -1;
 
 		const Type* p = TypeHandle::UnwrapToValue(param); // aliases are transparent in matching
@@ -145,8 +145,8 @@ namespace Scripting
 		// strips the reference.
 		const Type* declared = param;
 		while (declared && declared->GetKind() == TypeKind::Alias) declared = static_cast<const AliasType*>(declared)->GetAliasedType();
-		const auto* baseObj = dynamic_cast<const ObjectType*>(p);
-		const auto* argObj = dynamic_cast<const ObjectType*>(a);
+		const auto* baseObj = TypeAs<ObjectType>(p);
+		const auto* argObj = TypeAs<ObjectType>(a);
 		if (baseObj && argObj)
 			return ClassHierarchy::DerivesFrom(argObj, baseObj) ? 1 : -1;
 		// A non-const reference names the argument itself, so it binds only its own type (D-32); a const one
@@ -208,8 +208,8 @@ namespace Scripting
 		{
 			const auto* pp = static_cast<const PointerType*>(p)->GetPointeeType();
 			const auto* aa = static_cast<const PointerType*>(a)->GetPointeeType();
-			const auto* pobj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(pp));
-			const auto* aobj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(aa));
+			const auto* pobj = TypeAs<ObjectType>(TypeHandle::UnwrapToValue(pp));
+			const auto* aobj = TypeAs<ObjectType>(TypeHandle::UnwrapToValue(aa));
 			bool constOk = static_cast<const PointerType*>(p)->IsConstReferent() || !static_cast<const PointerType*>(a)->IsConstReferent();
 			if (pobj && aobj && constOk && ClassHierarchy::DerivesFrom(aobj, pobj)) return 1;
 		}
@@ -229,7 +229,7 @@ namespace Scripting
 		}
 	}
 
-	if (const auto* lanes = dynamic_cast<const SwizzleType*>(p); lanes && lanes->IsPacked() && a->IsNumeric())
+	if (const auto* lanes = TypeAs<SwizzleType>(p); lanes && lanes->IsPacked() && a->IsNumeric())
 	{
 		const int element = ParamCost(lanes->GetElementType(), a);
 		return element < 0 ? -1 : element + kBroadcastCost;

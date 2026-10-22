@@ -100,7 +100,7 @@ namespace Scripting
 			// An alias template is transparent: the bound target IS the answer.
 			auto target = model.ResolveTypeInternal(*def->aliasTarget, unitId, binding, nullptr);
 			if (!target.Ok()) return target;
-			model.m_InstantiationBindings.Push({ target.value, BindingsFor(model, *def->params, complete.value) });
+			model.m_InstantiationBindings.emplace(target.value, BindingsFor(model, *def->params, complete.value));
 			model.m_TypeInstantiations.emplace(key, target.value);
 			return target;
 		}
@@ -175,7 +175,7 @@ namespace Scripting
 		obj->CalculateLayout();
 		InstantiationBindings bindings = BindingsFor(model, *def.params, args);
 		bindings.typeParams.Push({ name, self });
-		model.m_InstantiationBindings.Push({ self, bindings });
+		model.m_InstantiationBindings.emplace(self, bindings);
 		FunctionTemplates::AttachExtensions(model, obj, unitId);
 		return QueryResult<const Type*>::Success(self);
 	}
@@ -201,7 +201,7 @@ namespace Scripting
 		obj->CalculateLayout();
 		InstantiationBindings bindings = site.ownerBindings;
 		bindings.typeParams.Push({ name, self });
-		model.m_InstantiationBindings.Push({ self, bindings });
+		model.m_InstantiationBindings.emplace(self, bindings);
 		FunctionTemplates::AttachExtensions(model, obj, site.unitId);
 		return QueryResult<const Type*>::Success(self);
 	}
@@ -305,7 +305,7 @@ namespace Scripting
 		model.m_RecordBySignature.emplace(rec.type, stored);
 		if (rec.primitiveReceiverType) model.m_PrimitiveExtensions[rec.primitiveReceiverType].Push(stored);
 		model.m_FunctionInstantiations.emplace(key, stored);
-		model.m_FuncInstantiationBindings.Push({ stored, WithOwnerNames(BindingsFor(model, *def.params, args), def.ownerNames) }); // the body binds T := int32 too
+		model.m_FuncInstantiationBindings.emplace(stored, WithOwnerNames(BindingsFor(model, *def.params, args), def.ownerNames)); // the body binds T := int32 too
 		model.m_TemplateOfInstance[stored] = &def;
 		return QueryResult<const FunctionRecord*>::Success(stored);
 	}
