@@ -5,16 +5,24 @@
 
 include "skills.ch"
 include "tool.ch"
+include "docs.ch"
+include "hints.ch"
 
 namespace Ai
 {
 	// .ied/skills/, then each loaded plugin's `skills` folders, then the app's skills/ (a name's first one wins).
 	Core::Array<Skill*> SkillsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
+	// The plugins' reference docs (`aiDocs`: an id, a title and a folder inside the plugin), in load order.
+	Core::Array<DocsFolder*> DocsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
+	// The plugins' error hints (`aiHints`: a regex `match`, its `hint`, an optional `when`), in load order.
+	Core::Array<ErrorHint*> HintsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
+	// The same, for a tool call: what it shows the model gets them.
+	Core::Array<ErrorHint*> CallHints(const ToolInvocation& call);
 	// The plugins' sections for the system message (docs/14 item 5): in load order, each within its maxTokens and all
 	// within kSectionsMostTokens; empty when none holds.
 	Core::String PluginSections(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
-	// The core tools and the plugins' tool calls that run a command and whose `when` holds; a tool whose name is taken,
-	// or that is implemented some other way, is a problem.
+	// The core tools, docs_search and docs_read when the plugins have reference docs, and the plugins' tool calls that run
+	// a command and whose `when` holds; a tool whose name is taken, or that is implemented some other way, is a problem.
 	ToolRegistry* ToolsFor(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
 
 	const int64 kSectionDefaultTokens = 200;

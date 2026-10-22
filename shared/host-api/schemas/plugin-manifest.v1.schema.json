@@ -248,6 +248,34 @@
 					"items": { "type": "string" }
 				},
 				"systemMessageSections": { "type": "array", "items": { "$ref": "#/$defs/systemMessageSection" } },
+				"aiDocs": {
+					"type": "array",
+					"description": "Reference docs the AI searches and reads with docs_search and docs_read: Markdown files under a folder inside the plugin (a language's manual, its library's API).",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "The first part of the docs' paths for the AI (c4/library/bedrock.md)." },
+							"title": { "type": "string", "minLength": 1 },
+							"folder": { "type": "string", "minLength": 1, "description": "Relative to the plugin's folder, inside it." }
+						},
+						"required": ["id", "title", "folder"],
+						"additionalProperties": false
+					}
+				},
+				"aiHints": {
+					"type": "array",
+					"description": "Advice the AI sees under a line of a tool's output its regex finds: a compiler error a model makes in this language, and what to write instead.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"match": { "type": "string", "minLength": 1, "description": "A regex searched for in each line of build_run, problems_list, shell_run and program_run results." },
+							"hint": { "type": "string", "minLength": 1 },
+							"when": { "type": "string" }
+						},
+						"required": ["match", "hint"],
+						"additionalProperties": false
+					}
+				},
 				"agentModes": { "type": "array", "items": { "type": "string", "description": "Path to an agent-mode.v1 JSON file." } },
 				"mcpServers": { "type": "array", "items": { "$ref": "#/$defs/mcpServer" } },
 				"modelProviders": {

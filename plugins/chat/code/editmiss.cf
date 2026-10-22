@@ -1,0 +1,71 @@
+include "editmiss.ch"
+
+namespace Ai
+{
+	Core::String Visible(Core::StringView text) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			const int32 c = text.ByteAt(i);
+			if (c == '\n') out.Append("\\n");
+			else if (c == '\r') out.Append("\\r");
+			else if (c == '\t') out.Append("\\t");
+			else if (c < 32) Core::Format(&out, "\\x{0:x.2}", c);
+			else out.AppendByte(c);
+		}
+		return out.ToString();
+	}
+
+	// The most bytes of `old`'s start (`fromEnd` false) or end found in `text`, and where that part is in `text`.
+	static int64 LongestAgreement(Core::StringView text, Core::StringView old, bool fromEnd, int64& at) {
+		int64 low = 0;
+		int64 high = old.ByteLength();
+		at = -1;
+		while (low < high) {
+			const int64 middle = (low + high + 1) / 2;
+			const int64 found = text.IndexOf(fromEnd ? old.Substring(old.ByteLength() - middle, middle) : old.Substring(0, middle));
+			if (found >= 0) {
+				low = middle;
+				at = found;
+			}
+			else high = middle - 1;
+		}
+		return low;
+	}
+
+	static int64 LineOf(Core::StringView text, int64 at) {
+		int64 line = 1;
+		for (int64 i = 0; i < at; ++i)
+			if (text.ByteAt(i) == '\n') line += 1;
+		return line;
+	}
+
+	static Core::StringView Clipped(Core::StringView text, int64 start, int64 length) {
+		if (start < 0) {
+			length += start;
+			start = 0;
+		}
+		return text.Substring(start, length < 0 ? 0 : length);
+	}
+
+	Core::String EditMiss(Core::StringView text, Core::StringView old) {
+		int64 headAt = -1;
+		int64 tailAt = -1;
+		const int64 head = LongestAgreement(text, old, false, headAt);
+		const int64 tail = LongestAgreement(text, old, true, tailAt);
+		if (head < kEditMissLeast && tail < kEditMissLeast) return Core::String("");
+		Core::StringBuilder out;
+		if (head >= tail) {
+			const int64 split = headAt + head;
+			Core::Format(&out, "line {0}: the file agrees with the start of old up to `{1}`, then has `{2}` where old has `{3}`",
+				LineOf(text, split), Visible(Clipped(text, split - kEditMissShownBytes, kEditMissShownBytes)), Visible(text.Substring(split, kEditMissShownBytes)),
+				Visible(old.Substring(head, kEditMissShownBytes)));
+		}
+		else {
+			const int64 cut = old.ByteLength() - tail;
+			Core::Format(&out, "line {0}: the file agrees with the end of old from `{1}`, but before it has `{2}` where old has `{3}`",
+				LineOf(text, tailAt), Visible(text.Substring(tailAt, kEditMissShownBytes)), Visible(Clipped(text, tailAt - kEditMissShownBytes, kEditMissShownBytes)),
+				Visible(Clipped(old, cut - kEditMissShownBytes, kEditMissShownBytes)));
+		}
+		return out.ToString();
+	}
+}

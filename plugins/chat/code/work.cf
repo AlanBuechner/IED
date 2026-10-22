@@ -1,6 +1,8 @@
 include "api/plugin.ch"
 include "work.ch"
+include "contributed.ch"
 include "files.ch"
+include "sourcelines.ch"
 
 namespace Ai
 {
@@ -189,7 +191,175 @@ namespace Ai
 		command.seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : kShellDefaultSeconds;
 		if (command.seconds < 1 || command.seconds > kShellMostSeconds) command.seconds = kShellMostSeconds;
 		command.tool = Core::String("shell_run");
-		return RunToolCommand(call, command, false);
+		ToolOutcome outcome = RunToolCommand(call, command, false);
+		outcome.content = WithHints(outcome.content.View(), CallHints(call));
+		return outcome;
+	}
+
+	// --- program_run -------------------------------------------------------------------------------------------------
+
+	// What a program wrote to one of its streams, kept to its end.
+	class StreamTail
+	{
+		public Core::String text;
+		public int64 bytes;
+	}
+
+	// Reads the child's two streams apart until it ends, then what it used in all (its totals, read through its handle).
+	static int64 DrainApart(const ToolInvocation& call, Process::Child& child, int64 seconds, StreamTail& output, StreamTail& errors, Core::String& stopped, Process::Usage& usage, bool& measured) {
+		const int64 deadline = WorkNowMs() + seconds * 1000;
+		int64 exitedAt = -1;
+		char8[16384] buffer;
+		while (child.HasOutput()) {
+			if (*call.cancelled || WorkNowMs() > deadline) {
+				stopped = Core::String(*call.cancelled ? "stopped with the run" : "ran out of time and was stopped");
+				child.Kill();
+				break;
+			}
+			if (exitedAt < 0 && child.Wait(0) != Process::kTimedOut) exitedAt = WorkNowMs();
+			if (exitedAt >= 0 && WorkNowMs() - exitedAt > kShellDrainMs) break;
+			Process::Stream from;
+			const int64 got = child.ReadAny((void*)&buffer[0], 16384, from, kShellPollMs);
+			if (got > 0) {
+				Core::StringView chunk = Core::StringView(&buffer[0], got);
+				StreamTail* into = from == Process::Stream::Errors ? &errors : &output;
+				into->text = IED::BoundedText(into->text.View(), chunk, kShellKeptBytes);
+				into->bytes += got;
+				ShellOutput(call, chunk);
+			}
+			else if (got != Process::kTimedOut && got != 0) break;
+		}
+		const int64 code = child.Wait(5000);
+		measured = child.GetUsage(usage);
+		return stopped.IsEmpty() ? code : -1;
+	}
+
+	static void AppendStream(Core::StringBuilder& out, const char* name, const StreamTail& stream) {
+		out.Append("--- ");
+		out.Append(name);
+		if (stream.bytes == 0) {
+			out.Append(": nothing\n");
+			return;
+		}
+		Core::Format(&out, " ({0:D} bytes{1:s}) ---\n", stream.bytes, stream.bytes > stream.text.ByteLength() ? ", the end of it" : "");
+		out.Append(TailOf(stream.text.View(), kShellTailLines, kShellTailBytes).View());
+		if (!stream.text.View().EndsWith(Core::StringView("\n"))) out.Append("\n");
+	}
+
+	// A program the call names: a file of the workspace (a path), else a name looked for on PATH.
+	static Core::String ProgramPath(const ToolInvocation& call) {
+		Core::StringView program = call.args.Member("program").AsView();
+		FS::Path inside = FS::Path(call.ws.root.View()) / IED::NormalizePath(program).View();
+		const bool path = program.Contains(Core::StringView("/")) || program.Contains(Core::StringView("\\"));
+		return path && FS::FileExists(inside.CStr()) ? Core::String(inside.View()) : Core::String(program);
+	}
+
+	static Core::String ProgramLine(const ToolInvocation& call) {
+		Core::StringBuilder line;
+		line.Append(call.args.Member("program").AsView());
+		Serialization::DomNode args = call.args.Member("args");
+		for (int64 i = 0; i < args.Count(); ++i) {
+			line.Append(" ");
+			line.Append(args.At(i).AsView());
+		}
+		return line.ToString();
+	}
+
+	static ToolPlan ProgramPlan(const ToolInvocation& call) {
+		ToolPlan plan;
+		Core::String line = ProgramLine(call);
+		plan.subject = (Core::String("shell(") + line.View()) + ")";
+		plan.summary = (Core::String("Run `") + line.View()) + "`";
+		if (!call.ws.trusted) plan.error = Core::String("program_run: the workspace is not trusted, so nothing may run in it; ask the owner to trust it");
+		return plan;
+	}
+
+	// One run of the program: how it ended, how long it took and what it used.
+	class ProgramRunResult
+	{
+		public int64 code;
+		public Core::String stopped;
+		public int64 ms;
+		public Process::Usage usage;
+		public bool measured;
+		public StreamTail output;
+		public StreamTail errors;
+	}
+
+	static int64 MedianOf(Core::Array<int64> values) {
+		values.Sort();
+		return values[values.Count() / 2];
+	}
+
+	static void AppendRunLine(Core::StringBuilder& out, const ProgramRunResult& run, const Core::Array<int64>& times) {
+		if (run.stopped.IsEmpty()) Core::Format(&out, "exit {0:D}", run.code);
+		else Core::Format(&out, "the program {0:s}", run.stopped.CStr());
+		if (times.Count() == 1) Core::Format(&out, " after {0:D} ms", run.ms);
+		else {
+			out.Append(" - runs took");
+			for (int64 ms : times) Core::Format(&out, " {0:D}", ms);
+			Core::Format(&out, " ms, median {0:D} ms", MedianOf(times));
+		}
+		if (run.measured) Core::Format(&out, " (CPU {0:F.2} s, peak memory {1:F.1} MB)", (double)run.usage.cpuTimeNs / 1e9, (double)run.usage.peakWorkingSetBytes / 1048576.0);
+		out.Append("\n");
+	}
+
+	static ToolOutcome ProgramRun(const ToolInvocation& call) {
+		int64 repeat = call.args.Member("repeat").IsValid() ? call.args.Member("repeat").AsInt() : 1;
+		if (repeat < 1) repeat = 1;
+		Core::Array<int64> times;
+		ProgramRunResult last;
+		for (int64 i = 0; i < repeat; ++i) {
+			Core::String problem;
+			last = RunProgramOnce(call, problem);
+			if (!problem.IsEmpty()) return ToolError(problem.View());
+			times.Push(last.ms);
+			if (last.code != 0 || !last.stopped.IsEmpty()) break;
+		}
+		Core::StringBuilder said;
+		AppendRunLine(said, last, times);
+		AppendStream(said, "stdout", last.output);
+		AppendStream(said, "stderr", last.errors);
+		ShellOutput(call, ((Core::String("[") + said.View().Substring(0, said.View().IndexOf('\n', 0))) + "]\n").View());
+		ToolOutcome outcome = ToolResult(WithHints(said.View(), CallHints(call)).View(), said.View().Substring(0, said.View().IndexOf('\n', 0)));
+		outcome.isError = last.code != 0;
+		outcome.source = Core::String("Output: AI");
+		return outcome;
+	}
+
+	static ProgramRunResult RunProgramOnce(const ToolInvocation& call, Core::String& problem) {
+		ProgramRunResult result;
+		ShellOutput(call, ((Core::String("> ") + ProgramLine(call).View()) + "\n").View());
+		Process::StartInfo info;
+		info.program = ProgramPath(call);
+		Serialization::DomNode args = call.args.Member("args");
+		for (int64 i = 0; i < args.Count(); ++i) info.arguments.Push(Core::String(args.At(i).AsView()));
+		info.workingDirectory = Core::String((FS::Path(call.ws.root.View()) / IED::NormalizePath(call.args.Member("cwd").AsView()).View()).View());
+		Core::String input;
+		if (call.args.Member("stdin").IsValid()) {
+			FS::File file = FS::File((FS::Path(call.ws.root.View()) / IED::NormalizePath(call.args.Member("stdin").AsView()).View()).CStr(), "rb");
+			if (!file.IsOpen()) {
+				problem = Core::String("program_run: no file ") + call.args.Member("stdin").AsView() + " to give the program as its input";
+				return result;
+			}
+			input = file.ReadText();
+		}
+		info.input = call.args.Member("stdin").IsValid() ? Process::Redirect::Pipe : Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		Process::Child child = Process::Child::Start(info);
+		if (!child.IsOpen()) {
+			problem = Core::String("program_run: ") + info.program.View() + " did not start: " + child.Error() + "; a program of the workspace is named by its path (build/bin/...), another by its name on PATH";
+			return result;
+		}
+		if (!input.IsEmpty()) child.WriteAll((const void*)input.CStr(), input.ByteLength(), 10000);
+		if (call.args.Member("stdin").IsValid()) child.CloseInput();
+		int64 seconds = call.args.Member("timeout_s").IsValid() ? call.args.Member("timeout_s").AsInt() : kShellDefaultSeconds;
+		if (seconds < 1 || seconds > kShellMostSeconds) seconds = kShellMostSeconds;
+		const int64 started = WorkNowMs();
+		result.code = DrainApart(call, child, seconds, result.output, result.errors, result.stopped, result.usage, result.measured);
+		result.ms = WorkNowMs() - started;
+		return result;
 	}
 
 	// --- problems ----------------------------------------------------------------------------------------------------
@@ -243,6 +413,14 @@ namespace Ai
 		return Serialization::ReadJson(json, *doc).root;
 	}
 
+	// The problems' error lines with the source lines they name, read as the editor has them.
+	static Core::String WithWorkspaceLines(const ToolInvocation& call, Core::StringView problems) {
+		return WithSourceLines(problems, [&call](Core::StringView path, Core::String& text) -> bool {
+			Core::String problem;
+			return IED::TextAsEdited(call.ws, path, text, problem);
+		});
+	}
+
 	static ToolOutcome ProblemsRun(const ToolInvocation& call) {
 		Core::String snapshot;
 		{
@@ -257,6 +435,7 @@ namespace Ai
 		preview.AppendInt(warnings);
 		preview.Append(warnings == 1 ? " warning" : " warnings");
 		if (lines.IsEmpty()) lines = Core::String("[no problems]\n");
+		else lines = WithWorkspaceLines(call, WithHints(lines.View(), CallHints(call)).View());
 		return ToolResult(lines.View(), preview.View());
 	}
 
@@ -279,7 +458,7 @@ namespace Ai
 		const bool succeeded = run.succeeded;
 		int64 errors = 0;
 		int64 warnings = 0;
-		Core::String problems = ProblemLines(ParsedObject(run.problems.View()), Core::StringView(""), false, kProblemsMost, errors, warnings);
+		Core::String problems = WithWorkspaceLines(call, WithHints(ProblemLines(ParsedObject(run.problems.View()), Core::StringView(""), false, kProblemsMost, errors, warnings).View(), CallHints(call)).View());
 		Core::StringBuilder said;
 		said.Append(run.label.View());
 		said.Append(succeeded ? " succeeded" : run.cancelled ? " was cancelled" : " failed");
@@ -323,6 +502,12 @@ namespace Ai
 		shell->plan = ShellPlan;
 		shell->run = ShellRun;
 		registry.Add(shell);
+		ToolSpec* program = WorkSpec("program_run", "Run a program with arguments - no shell, so nothing needs quoting - and get its exit code, its time, CPU and peak memory, its standard output and its standard error apart (their ends); repeat runs it again for timing. For trying or timing a command-line program: the program's path in the workspace (as its build prints it), or a name on PATH; stdin names a file the program reads as its input. Example: program_run({\"program\": \"build/bin/Development-windows-x64/tool/tool.exe\", \"args\": [\"data/in.txt\", \"5\"]})",
+			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
+			ToolClass::Exec, false);
+		program->plan = ProgramPlan;
+		program->run = ProgramRun;
+		registry.Add(program);
 		ToolSpec* build = WorkSpec("build_run", "Run one of the project's tasks as the toolbar does and return the result with its errors and warnings as path:line: build (the default), test (runs the tests; failed ones as path:line, then the output's end) or run (the program, without arguments; the end of its output). Example: build_run({}) or build_run({\"task\": \"test\", \"project\": \"Game\"})",
 			"{\"type\": \"object\", \"properties\": {\"project\": {\"type\": \"string\"}, \"task\": {\"type\": \"string\", \"description\": \"build (default), test, run, or another task of the project by its key\"}}, \"additionalProperties\": false}",
 			ToolClass::Exec, false);

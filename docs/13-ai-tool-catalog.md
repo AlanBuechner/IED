@@ -22,7 +22,7 @@ Permission handling per class is defined in `docs/11`.
 |---|---|---|---|
 | T-FS-1 | `fs_read(path, offset?, limit?, around_line?)` | read | Read a text file (line-numbered). Large files return the first window + outline. |
 | T-FS-2 | `fs_write(path, content)` | write | Create or overwrite a file (through the document store; checkpointed). |
-| T-FS-3 | `fs_edit(path, edits: [{old, new, replace_all?}])` | write | Exact-match replacements, all-or-nothing; whitespace-tolerant fallback with a warning. |
+| T-FS-3 | `fs_edit(path, edits: [{old, new, replace_all?}])` | write | Exact-match replacements, all-or-nothing; an `old` not in the file is answered with where it differs (**built**: the line where the file agrees longest with the start or the end of `old`, and what the file has there against what `old` has, line breaks and tabs shown as escapes). |
 | T-FS-4 | `fs_list(path, depth?, glob?)` | read | Directory listing (respects ignore rules). |
 | T-FS-5 | `fs_glob(pattern, root?)` | read | Find files by glob. |
 | T-SRCH-1 | `search_text(pattern, regex?, glob?, scope?, context_lines?)` | read | ripgrep-backed workspace search; scopes: project / solution / member / federation. |
@@ -31,8 +31,9 @@ Permission handling per class is defined in `docs/11`.
 | T-LSP-2 | `code_definition(target)` | read | Where it is defined and declared, each with its first lines. **Built**. |
 | T-LSP-3 | `code_references(target, limit?, include_declaration?)` | read | References by file, each line with the function it sits in. **Built**. |
 | T-LSP-4 | `code_read_symbol(target, declaration?)` | read | The full source of one function/type/member/macro with the comment above it, the definition before the declaration - the main way to read code without whole files. **Built**. |
-| T-BLD-1 | `build_run(task?: "build", project?, config?)` | exec | Run a toolbar task; returns status + structured problems (from the Error List), not raw logs. |
-| T-BLD-2 | `problems_list(scope?, severity?, source?)` | read | Current Error List (build + LSP + spell) as structured items. |
+| T-BLD-1 | `build_run(task?: "build", project?, config?)` | exec | Run a toolbar task; returns status + structured problems (from the Error List), not raw logs. **Built**: each error with the source line it names under it, and the language plugins' hints (`aiHints`, `docs/26`) under the errors they match. |
+| T-BLD-2 | `problems_list(scope?, severity?, source?)` | read | Current Error List (build + LSP + spell) as structured items; source lines and hints as `build_run`. |
+| T-BLD-3 | `program_run(program, args?, stdin?, cwd?, timeout_s?, repeat?)` | exec | **Built**: a program run without a shell (arguments as given, nothing to quote): its exit code, time (each of `repeat` runs and their median), CPU time and peak memory (read once it ended), and its stdout and stderr apart, their ends. The program by its workspace path, as its build prints it, or by its name on PATH; `stdin` a workspace file. For trying a command-line program and timing it. |
 | T-META-1 | `tasks_set(items)` / `task_update(id, status, note?)` | meta | Chat task list (F-CHT-80). |
 | T-META-2 | `ask_user(question, options?, allow_text?)` | meta | Structured question; the run waits for the answer. |
 | T-META-3 | `tools_enable(group)` | meta | Enable a tool group for the rest of the turn. |
@@ -170,7 +171,8 @@ As built: `browser_open(url, width?, height?)`, `browser_navigate(page, url)` (T
 | T-KNW-4 | `history_search(query)` / `history_read(turn or range)` | meta | Retrieve compressed-away chat history. |
 | T-KNW-5 | `scratchpad(action: read|write|append|replace_section, section?, text?)` | meta | Chat scratchpad (F-CHT-71). |
 | T-KNW-6 | `memory_read()` / `memory_add(fact)` | meta | Project memory (P2, F-AIR-66). |
-| T-KNW-7 | `docs_search(query)` | read | Search the workspace's docs folders (paths declared by plugins' system-message sections and settings). |
+| T-KNW-7 | `docs_search(query)` | read | **Built**: the reference docs of the workspace's language plugins (`aiDocs`, `docs/26`: a language's manual, its library's API) searched by words - the best Markdown sections with their path, line range and the lines that match. |
+| T-KNW-8 | `docs_read(path, heading? or line?)` | read | **Built**: a section of those docs by its path (`c4/library/bedrock.md`) and heading or line, as `docs_search` names them; a path alone lists the file's headings. |
 
 ### `agents`
 
@@ -312,6 +314,6 @@ Budgets scale down automatically for models with small context windows (proporti
 
 ## As built (M4, first slice, 2026-10-21)
 
-The core set in `plugins/chat/code/`: `fs_read`, `fs_write`, `fs_edit` (exact text, all or none; `\n` in old and new matches a file's `\r\n`), `fs_list`, `fs_glob`, `image_view` (T-MED-1, a workspace image shown to the model), `image_info` (T-MED-4, an image's header), `search_text` (the open documents as edited), `shell_run`, `build_run`, `problems_list`, `tasks_set`, `task_update`, `ask_user`, `finish`. Files are read as the editors have them and written through the document store (an open editor shows the change; the file is saved). Arguments are checked against each tool's JSON Schema (Bedrock's validator); an unknown name is answered with the nearest tools; every result is bounded with how to read on. Writes plan a unified diff for the approval card. `shell_run` runs the command with the system shell in the workspace and shows it with its output in the Output window's "AI" source (the visible AI terminal is to come); it and `build_run` need a trusted workspace.
+The core set in `plugins/chat/code/`: `fs_read`, `fs_write`, `fs_edit` (exact text, all or none; `\n` in old and new matches a file's `\r\n`), `fs_list`, `fs_glob`, `image_view` (T-MED-1, a workspace image shown to the model), `image_info` (T-MED-4, an image's header), `search_text` (the open documents as edited), `shell_run`, `build_run`, `problems_list`, `program_run`, `tasks_set`, `task_update`, `ask_user`, `finish`, and `docs_search` and `docs_read` when a plugin of the workspace has reference docs. Files are read as the editors have them and written through the document store (an open editor shows the change; the file is saved). Arguments are checked against each tool's JSON Schema (Bedrock's validator); an unknown name is answered with the nearest tools; every result is bounded with how to read on. Writes plan a unified diff for the approval card. `shell_run` runs the command with the system shell in the workspace and shows it with its output in the Output window's "AI" source (the visible AI terminal is to come); it, `build_run` and `program_run` need a trusted workspace. Why these tools exist, from the language eval (`tools/ai-evals/lang`, 2026-10-22): a model learning C4 read its library's headers through `shell_run` (15 to 25 calls a task) until it had `docs_search` over the toolchain's docs and API digest; it built ad hoc PowerShell timing scripts until `program_run` measured a program; it re-read files to see the line an error named; and it retried an `fs_edit` with the same wrong text until the miss said where it differed.
 
 Not yet: `tools_enable` and most groups (built: `media`, `chats`, `clipboard`, `code`; "Navigating code").

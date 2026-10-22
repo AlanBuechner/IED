@@ -16,6 +16,7 @@ namespace Ai
 		public Core::String sections;    // its plugins' sections (item 5)
 		public Core::String workspace;   // the summary (item 6)
 		public Core::String skills;      // the list of its skills (item 8)
+		public Core::String docs;        // its plugins' reference docs, one line each
 		public Core::String deferred;    // the tools tool_search loads, one line each (item 7, docs/13)
 	}
 

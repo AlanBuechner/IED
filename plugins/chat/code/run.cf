@@ -102,6 +102,7 @@ namespace Ai
 		prompt.sections = PluginSections(context, ws, contributed);
 		prompt.workspace = WorkspaceSummary(ws);
 		prompt.skills = SkillsIndex(SkillsOf(context, ws, contributed), turn->userText.View(), DefaultSkillsIndexLimits());
+		prompt.docs = DocsIndex(DocsOf(context, ws, contributed));
 		prompt.deferred = tools->DeferredIndex(chat->mode, chat->loadedTools);
 		for (const Core::String& problem : contributed) context->Log(problem.View());
 		system = chats->prompts.System(chat->mode, prompt);

@@ -1,0 +1,24 @@
+include "hints.ch"
+include "linediff.ch"
+
+namespace Ai
+{
+	Core::String WithHints(Core::StringView text, const Core::Array<ErrorHint*>& hints) {
+		if (hints.IsEmpty()) return Core::String(text);
+		Core::Array<const ErrorHint*> shown;
+		Core::Array<Core::StringView> lines = SplitLines(text);
+		Core::StringBuilder out;
+		for (Core::StringView line : lines) {
+			out.Append(line);
+			out.Append("\n");
+			for (const ErrorHint* hint : hints) {
+				if (shown.Count() >= kHintsMostPerResult || shown.Contains(hint) || !hint->pattern.Contains(line)) continue;
+				shown.Push(hint);
+				out.Append("  hint: ");
+				out.Append(hint->text.View());
+				out.Append("\n");
+			}
+		}
+		return out.ToString();
+	}
+}

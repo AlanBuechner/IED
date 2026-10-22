@@ -1,0 +1,44 @@
+// docs: Markdown split into sections at headings (not inside fenced code), the words a query looks for, and how a
+// section scores against them.
+
+include "docs.ch"
+
+[test("server.ai.docs")]
+class DocsTests {
+	[test("sections")]
+	public static void TestSections() {
+		Core::Array<Ai::DocSection> sections = Ai::SplitSections(Core::StringView("intro line\n# Title\ntext\n```c4\n# not a heading\n```\n## Core::HashMap\nInsert(k, v)\n"), Core::StringView("c4/library/x.md"));
+		assert_eq((int64)3, sections.Count(), "the text before the first heading, Title, Core::HashMap");
+		assert_se("x.md", sections[0].heading.CStr(), "text before a heading is named by the file");
+		assert_eq((int64)1, sections[0].last, "it ends before the heading");
+		assert_se("Title", sections[1].heading.CStr(), "the heading without its #s");
+		assert_eq((int64)2, sections[1].first, "from its heading's line");
+		assert_eq((int64)6, sections[1].last, "a # inside fenced code does not end it");
+		assert_se("Core::HashMap", sections[2].heading.CStr(), "a level-2 heading");
+		assert_se("c4/library/x.md", sections[2].path.CStr(), "the path as given");
+	}
+
+	[test("no_heading_text_and_hash_words")]
+	public static void TestNotHeadings() {
+		Core::Array<Ai::DocSection> sections = Ai::SplitSections(Core::StringView("#hashtag\n####### seven\nplain\n"), Core::StringView("c4/a.md"));
+		assert_eq((int64)1, sections.Count(), "#word and seven #s are text");
+	}
+
+	[test("query_words")]
+	public static void TestQueryWords() {
+		Core::Array<Core::String> words = Ai::QueryWords(Core::StringView("How to insert into a Core::HashMap, HashMap find"));
+		assert_eq((int64)4, words.Count(), "insert, core, hashmap, find - the small words and the repeat left out");
+		assert_se("insert", words[0].CStr(), "lowercased, in order");
+		assert_se("hashmap", words[2].CStr(), "a qualified name split at ::");
+	}
+
+	[test("scores")]
+	public static void TestScores() {
+		Core::Array<Core::String> words = Ai::QueryWords(Core::StringView("hashmap insert"));
+		const int64 heading = Ai::SectionScore(Core::StringView("Core::HashMap"), Core::StringView("insert(k, v) adds"), words, Core::StringView("hashmap insert"));
+		const int64 body = Ai::SectionScore(Core::StringView("Containers"), Core::StringView("a hashmap has insert"), words, Core::StringView("hashmap insert"));
+		const int64 one = Ai::SectionScore(Core::StringView("Containers"), Core::StringView("insert only"), words, Core::StringView("hashmap insert"));
+		assert_true(heading > body && body > one && one > 0, "a word in the heading counts most, every word more than some");
+		assert_eq((int64)0, Ai::SectionScore(Core::StringView("Files"), Core::StringView("open and read"), words, Core::StringView("hashmap insert")), "no word: no score");
+	}
+}

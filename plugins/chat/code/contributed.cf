@@ -46,6 +46,50 @@ namespace Ai
 		return ReadSkills(folders, problems);
 	}
 
+	Core::Array<DocsFolder*> DocsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+		Core::Array<DocsFolder*> folders;
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("aiDocs"))) {
+			FS::Path folder = InsidePlugin(given, given.entry.Member("folder").AsView());
+			if (folder.IsEmpty()) {
+				problems.Push((Who(given) + ": a docs folder must be inside the plugin: ") + given.entry.Member("folder").AsView());
+				continue;
+			}
+			DocsFolder* docs = new DocsFolder();
+			docs->id = Core::String(given.entry.Member("id").AsView());
+			docs->title = Core::String(given.entry.Member("title").AsView());
+			docs->folder = folder;
+			folders.Push(docs);
+		}
+		return folders;
+	}
+
+	Core::Array<ErrorHint*> HintsOf(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+		Core::Array<ErrorHint*> hints;
+		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("aiHints"))) {
+			Core::String error;
+			if (!IED::WhenHolds(ws, given.entry.Member("when").AsView(), error)) continue;
+			ErrorHint* hint = new ErrorHint();
+			hint->pattern = Core::Regex(given.entry.Member("match").AsView());
+			if (!hint->pattern.IsValid()) {
+				problems.Push((Who(given) + ": an error hint's match is not a regex: ") + given.entry.Member("match").AsView());
+				continue;
+			}
+			hint->text = Core::String(given.entry.Member("hint").AsView());
+			hints.Push(hint);
+		}
+		return hints;
+	}
+
+	Core::Array<ErrorHint*> CallHints(const ToolInvocation& call) {
+		Core::Array<Core::String> problems;
+		return HintsOf(call.context, call.ws, problems);
+	}
+
+	static Core::Array<DocsFolder*> CallDocs(const ToolInvocation& call) {
+		Core::Array<Core::String> problems;
+		return DocsOf(call.context, call.ws, problems);
+	}
+
 	// --- System-message sections -------------------------------------------------------------------------------------
 
 	static Core::String ReadAll(const FS::Path& file) {
@@ -102,6 +146,7 @@ namespace Ai
 
 	ToolRegistry* ToolsFor(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
 		ToolRegistry* registry = CoreTools();
+		if (!DocsOf(context, ws, problems).IsEmpty()) AddDocsTools(*registry, CallDocs);
 		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("toolCalls"))) {
 			Serialization::DomNode entry = given.entry;
 			Core::String error;

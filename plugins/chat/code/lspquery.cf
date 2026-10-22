@@ -466,13 +466,25 @@ namespace Ai
 		return kept;
 	}
 
+	// The workspace's own symbol when only one of `symbols` is the workspace's: a plain name the project defines is not
+	// made ambiguous by a library's (Bedrock's private InputLines::Fill against the project's Fill).
+	static Core::Array<CodeSymbol*> OwnFirst(const Core::Array<CodeSymbol*>& symbols) {
+		Core::Array<CodeSymbol*> own;
+		for (CodeSymbol* symbol : symbols)
+			if (!symbol->selection.path.View().StartsWith(Core::StringView("file:"))) own.Push(symbol);
+		if (own.IsEmpty() || own.Count() == symbols.Count()) return symbols;
+		for (CodeSymbol* symbol : own)
+			if (symbol->Qualified() != own[0]->Qualified()) return symbols;
+		return own;
+	}
+
 	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args) {
 		if (args.Member("line").IsValid()) return PlaceTarget(query, args);
 		Core::StringView name = args.Member("symbol").AsView();
 		if (name.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give symbol (a name; Ring::Push narrows it), or path and line; code_symbols with a path lists a file's symbols"));
 		Core::String path = query.FileOf(args.Member("path").AsView());
 		CodeTarget target;
-		target.symbols = WithoutMembersOfFound(query.Find(name, path.View()));
+		target.symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, path.View())));
 		if (target.symbols.IsEmpty()) {
 			Core::String where = path.IsEmpty() ? Core::String(" in the workspace") : Core::String(" in ") + path.View();
 			throw IED::RpcError(IED::ErrorCode::NotFound, ((((Core::String("no symbol ") + name) + where.View()) + Similar(query, name).View()) + "; code_symbols lists a file's symbols or searches by name").View());

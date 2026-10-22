@@ -1,0 +1,34 @@
+// editmiss: an edit whose old text is not in the file is told where the file differs from it.
+
+include "editmiss.ch"
+
+static Core::StringView MissView(const char* text) { return Core::StringView(text); }
+
+[test("server.ai.editmiss")]
+class EditMissTests {
+	[test("a_changed_word")]
+	public static void TestChangedWord() {
+		Core::String said = Ai::EditMiss(MissView("int32 main() {\n\tassert_se(\"orders 3\\naverage 0.33\\n\", Report());\n}\n"),
+			MissView("\tassert_se(\"orders 3\\navg 0.33\\n\", Report());"));
+		assert_true(said.View().StartsWith(MissView("line 2: the file agrees with the start of old up to `")), "the line and the agreeing start");
+		assert_true(said.View().Contains(MissView("then has `erage 0.33")), "what the file has");
+		assert_true(said.View().Contains(MissView("where old has `g 0.33")), "against what old has");
+	}
+
+	[test("a_wrong_start")]
+	public static void TestWrongStart() {
+		Core::String said = Ai::EditMiss(MissView("one\n\treturn total + shipping;\n"), MissView("    return total + shipping;"));
+		assert_true(said.View().StartsWith(MissView("line 2: the file agrees with the end of old from `return total")), "the end agrees");
+		assert_true(said.View().Contains(MissView("has `one\\n\\t` where old has `    `")), "the tab is shown, against old's spaces");
+	}
+
+	[test("nothing_alike")]
+	public static void TestNothingAlike() {
+		assert_true(Ai::EditMiss(MissView("int32 main() { return 0; }\n"), MissView("func main() { os.Exit(0) }")).IsEmpty(), "no place to point at");
+	}
+
+	[test("visible")]
+	public static void TestVisible() {
+		assert_se("a\\tb\\r\\n\\x01", Ai::Visible(MissView("a\tb\r\n\x01")).CStr(), "control bytes as escapes");
+	}
+}

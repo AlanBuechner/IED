@@ -1,5 +1,6 @@
 include "api/plugin.ch"
 include "files.ch"
+include "editmiss.ch"
 include "linediff.ch"
 include "lspquery.ch"
 
@@ -99,7 +100,8 @@ namespace Ai
 		int64 first = -1;
 		const int64 count = Occurrences(text.View(), old.View(), first);
 		if (count == 0) {
-			error = which.ToString() + ": old was not found; read the file again (fs_read) and copy the text exactly, tabs included";
+			Core::String miss = EditMiss(text.View(), old.View());
+			error = which.ToString() + ": old was not found" + (miss.IsEmpty() ? Core::String("; no part of it is in the file: is it the right file?") : Core::String("; ") + miss.View()) + "; copy the text from the file exactly, tabs included";
 			return false;
 		}
 		if (count > 1 && !edit.Member("replace_all").AsBool()) {
