@@ -25,7 +25,8 @@ Design and decisions: [`../docs/23-nuke-build-system.md`](../docs/23-nuke-build-
 `setup.bat` at the repository root installs the private Python Nuke runs on (`vendor/python`). Then:
 
 - `bin/nuke.cmd` (and `bin/nuke` for POSIX shells) is the launcher. `setup.bat --add-to-path` (or answering
-  yes when it asks) puts `bin/` on your user PATH so `nuke` works in any folder.
+  yes when it asks) puts `bin/` on your user PATH so `nuke` works in any folder, also run by a quoted name as IED's
+  tasks run it (`"nuke" build ...`, which gives a batch file's top level the wrong folder for `%~dp0`).
 - `nuke.bat` at the repository root does the same without PATH.
 - A workspace needs no copy of Nuke or of the compiler: it names a toolchain version (section 8).
 
