@@ -1,0 +1,9 @@
+{
+	"description": "v2, and C4 error hints under the compiler errors models make (aiHints): needs a server with docs and hints (build/bin/langeval-hints)",
+	"toolchainCopies": [
+		[
+			"docs",
+			"ied/docs"
+		]
+	]
+}
