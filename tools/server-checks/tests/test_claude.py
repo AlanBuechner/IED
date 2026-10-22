@@ -290,21 +290,29 @@ class ClaudeToolTests(ClaudeCase):
 
 
 class ClaudeSubscriptionTests(ClaudeCase):
+	# The server is started with an API key and a parent Claude Code session's variables (bare mode) in its environment.
+	PARENT = {"ANTHROPIC_API_KEY": "sk-ant-not-a-real-key", "CLAUDE_CODE_SIMPLE": "1", "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent"}
+
 	def setUp(self):
-		os.environ["ANTHROPIC_API_KEY"] = "sk-ant-not-a-real-key"
+		saved = {k: os.environ.get(k) for k in self.PARENT}
+		os.environ.update(self.PARENT)
 		try:
 			super().setUp()
 		finally:
-			del os.environ["ANTHROPIC_API_KEY"]
+			for key, value in saved.items():
+				if value is None:
+					os.environ.pop(key, None)
+				else:
+					os.environ[key] = value
 
-	async def test_an_api_key_in_the_environment_never_reaches_the_cli(self):
+	async def test_an_api_key_or_a_parent_session_in_the_environment_never_reaches_the_cli(self):
 		await self.use_claude()
 		self.script({"blocks": [{"text": "On the subscription."}]})
 		chat_id, _ = await self.chat()
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		for entry in self.log():
 			if "billed" in entry:
-				self.assertEqual([], entry["billed"], entry["argv"])
+				self.assertEqual(([], []), (entry["billed"], entry["inherited"]), entry["argv"])
 		self.assertTrue(self.sessions_started())
 
 	async def test_a_cli_signed_in_with_an_api_key_is_refused(self):

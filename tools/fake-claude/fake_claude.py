@@ -280,12 +280,19 @@ def main(argv):
 	args = [a for i, a in enumerate(argv) if a != "--state" and (i == 0 or argv[i - 1] != "--state")]
 	# the names of the variables that would bill an API key or another provider - never their values
 	billed = sorted(k for k in os.environ if k.startswith("ANTHROPIC_") or k in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"))
-	state.log({"argv": args, "cwd": os.getcwd(), "env": {k: v for k, v in os.environ.items() if k.startswith("CLAUDE_CODE_DISABLE_")}, "billed": billed})
+	# a parent Claude Code session's variables (bare mode, its ids) that would make this CLI ignore the owner's login
+	inherited = sorted(k for k in os.environ if k in ("CLAUDECODE", "CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_OAUTH_SCOPES"))
+	state.log({"argv": args, "cwd": os.getcwd(), "env": {k: v for k, v in os.environ.items() if k.startswith("CLAUDE_CODE_DISABLE_")}, "billed": billed, "inherited": inherited})
 	if args[:1] == ["--version"]:
 		print(VERSION + " (Claude Code)")
 		return 0
 	if args[:2] == ["auth", "status"]:
-		auth = {"loggedIn": True, "authMethod": "api_key", "apiProvider": "firstParty"} if os.environ.get("ANTHROPIC_API_KEY") else state.read("auth.json", {"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
+		if os.environ.get("ANTHROPIC_API_KEY"):
+			auth = {"loggedIn": True, "authMethod": "api_key", "apiProvider": "firstParty"}
+		elif os.environ.get("CLAUDE_CODE_SIMPLE"):
+			auth = {"loggedIn": False, "authMethod": "none", "apiProvider": "firstParty"}   # bare mode never reads the login
+		else:
+			auth = state.read("auth.json", {"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
 		print(json.dumps({k: v for k, v in auth.items() if k != "apiKeySource"}))
 		return 0
 	if "-p" not in args:

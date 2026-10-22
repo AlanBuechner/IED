@@ -205,6 +205,8 @@ class ClaudeWireTests {
 		const char*[6] removed = { "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY" };
 		for (int64 i = 0; i < 6; ++i) assert_true(environment.Contains(Core::String(removed[i])), removed[i]);
 		assert_true(environment.Contains(Core::String("CLAUDE_CODE_DISABLE_CLAUDE_MDS=1")), "the CLI's own CLAUDE.md reading off");
+		assert_true(environment.Contains(Core::String("CLAUDE_CODE_SIMPLE")) && environment.Contains(Core::String("CLAUDECODE")) && environment.Contains(Core::String("CLAUDE_CODE_SESSION_ID")), "a parent Claude Code session's bare mode and ids taken out");
+		assert_true(!environment.Contains(Core::String("CLAUDE_CODE_OAUTH_TOKEN")) && !environment.Contains(Core::String("CLAUDE_CONFIG_DIR")), "the owner's own long-lived token and config folder kept");
 		assert_true(Ai::NotSubscription(Text("api_key")).View().Contains(Text("subscription only")), "why an API key is refused");
 		assert_true(Ai::LaterVersion(Text("2.1.304"), Text("2.1.299")) && !Ai::LaterVersion(Text("2.1.299"), Text("2.1.304")) && !Ai::LaterVersion(Text("2.1.0"), Text("2.1.0")), "versions");
 	}

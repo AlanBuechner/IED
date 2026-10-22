@@ -21,8 +21,9 @@ namespace Ai
 	bool LaterVersion(Core::StringView a, Core::StringView b);
 	// The changes to the environment IED's CLI processes run with: every way to bill an API key or another provider
 	// instead of the owner's subscription taken out (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL,
-	// CLAUDE_CODE_USE_BEDROCK / _VERTEX / _FOUNDRY), and the CLI's own CLAUDE.md and AGENTS.md reading, memory, bundled
-	// skills, background tasks, cron, workflows, the advisor tool and file checkpoints off (docs/04).
+	// CLAUDE_CODE_USE_BEDROCK / _VERTEX / _FOUNDRY), what a Claude Code session the server was started from hands on
+	// (CLAUDE_CODE_SIMPLE, CLAUDECODE, its session's ids and sockets) taken out too, and the CLI's own CLAUDE.md and AGENTS.md
+	// reading, memory, bundled skills, background tasks, cron, workflows, the advisor tool and file checkpoints off (docs/04).
 	Core::Array<Core::String> ClaudeEnvironment();
 	// How `claude auth status` says the CLI signs in - its authMethod: claude.ai, oauth_token, api_key, api_key_helper,
 	// third_party, none - and whether it is signed in; empty when it did not answer. It never reads a credential.
