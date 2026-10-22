@@ -298,11 +298,29 @@ namespace Desktop
 
 	void App::Retry() {
 		watch.Reset();
-		for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), Arrival::First);
+		for (int64 i = 0; i < windows.Count(); ++i) Reconnect(windows[i], Arrival::First);
 	}
 
 	void App::ServerBack() {
 		if (messages != null) PostMessageW(messages, kServerBackMessage, 0, 0);
+	}
+
+	void App::Remember(Core::StringView status) {
+		Threading::LockGuard guard(lock);
+		lastStatus = Core::String(status);
+	}
+
+	// A server started again has no workspace open: the one the window showed (its address's ?ws=, which the last
+	// status names) is opened again - a workspace closed before is not in it, so it stays closed.
+	void App::Reconnect(Window* window, Arrival arrival) {
+		Core::String status;
+		{
+			Threading::LockGuard guard(lock);
+			status = lastStatus;
+		}
+		Core::String root = RootOf(status.View(), WorkspaceOf(window->CurrentUrl().View()).View());
+		if (root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), arrival);
+		else Resolve(window, Core::StringView("open"), Launch::OpenParams(root.View(), 0, 0).View(), Arrival::Reopened);
 	}
 
 	void App::ServerFailed(Core::StringView why) {
@@ -315,7 +333,7 @@ namespace Desktop
 
 	bool App::Handle(uint32 message) {
 		if (message == kServerBackMessage) {
-			for (int64 i = 0; i < windows.Count(); ++i) Resolve(windows[i], Core::StringView("url"), Core::StringView(""), Arrival::ServerBack);
+			for (int64 i = 0; i < windows.Count(); ++i) Reconnect(windows[i], Arrival::ServerBack);
 			return true;
 		}
 		if (message == kServerFailedMessage) {

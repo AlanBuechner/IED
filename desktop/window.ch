@@ -13,9 +13,10 @@ namespace Desktop
 	const uint32 kRelaunchMessage = 0x8005;     // WM_APP + 5: the page asked the app to relaunch onto the newest install
 
 	// Why a window asked the server for a URL: its first page; IED's start page (a window opened without a path); the
-	// server back after the watch started it again (the page stays unless the server's origin moved); or a folder the
-	// person picked (a failure is told, the page stays).
-	enum class Arrival { First, StartPage, ServerBack, Folder }
+	// server back after the watch started it again (the page stays unless the server's origin moved); a folder the
+	// person picked (a failure is told, the page stays); or its workspace opened again on a server started anew (the
+	// window goes to that workspace's page, which a page still on the old server's would not find by itself).
+	enum class Arrival { First, StartPage, ServerBack, Folder, Reopened }
 
 	class Window
 	{

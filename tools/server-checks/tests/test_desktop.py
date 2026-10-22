@@ -20,6 +20,7 @@ import ws
 from server import CLI_ENV, DESKTOP_ENV, ServerTestCase, remove_tree
 
 START_SECONDS = 40
+WATCH_SECONDS = 2.5   # the app's watch looks at its server every 2 s
 WM_SETTEXT, WM_COMMAND, IDOK, IDCANCEL = 0x000C, 0x0111, 1, 2
 FOLDER_BOX, NAME_BOX = 1152, 1148   # the folder picker's "Folder:" edit (edt1); a file dialog's name combo (cmb13)
 
@@ -232,16 +233,21 @@ class DesktopTests(ServerTestCase):
 		self.assertTrue(os.path.isfile(os.path.join(self.root, "local", "IED", "desktop", "webview", "EBWebView", "Local State")) or
 			os.path.isdir(os.path.join(self.root, "local", "IED", "desktop", "webview")), "the WebView2 profile is the app's own")
 
-	def test_a_server_that_dies_is_started_again(self):
+	def test_a_server_that_dies_is_started_again_with_the_windows_workspace(self):
+		"""docs/27 "The server dies while windows are open": the app starts the server again and opens the workspace the
+		window showed on it, and the window shows it again - killed or stopped (`ied stop`) alike."""
 		self.start_app()
 		self.wait(self.signed_in_page, "signed-in window")
 		first = self.wait(lambda: (lambda s: s if s and s["clients"] >= 1 else None)(self.status()), "connected window")
-		os.kill(first["pid"], 9)
-		again = self.wait(lambda: (lambda s: s if s and s["pid"] != first["pid"] and s["clients"] >= 1 else None)(self.status()), "server started again and the page back")
-		self.assertNotEqual(first["pid"], again["pid"])
-		# On the same port the page reconnects by itself; on another (8765 taken) the window goes to the new address.
-		origin = again["url"].rstrip("/")
-		self.wait(lambda: [p for p in page_targets(self.port) if p["url"].startswith(origin + "/") and "login" not in p["url"]], "the window on the server again", 15)
+		for stop in (lambda pid: os.kill(pid, 9), lambda pid: self.ied("stop")):
+			time.sleep(WATCH_SECONDS)
+			stop(first["pid"])
+			again = self.wait(lambda: (lambda s: s if s and s["pid"] != first["pid"] and s["clients"] >= 1 and s["workspaces"] else None)(self.status()), "server started again with the window's workspace")
+			self.assertEqual([os.path.normcase(self.folder)], [os.path.normcase(w["root"]) for w in again["workspaces"]], "the folder the window showed opened again")
+			# On the same port or another (8765 taken), the window goes to the workspace's page on the new server.
+			origin = again["url"].rstrip("/")
+			self.wait(lambda: [p for p in page_targets(self.port) if p["url"].startswith(origin + "/") and "login" not in p["url"] and p["title"] == "project - IED"], "the window on its folder again", 20)
+			first = again
 
 	def home_page(self):
 		pages = [p for p in page_targets(self.port) if p["url"].startswith("http://127.0.0.1:") and "login" not in p["url"]]

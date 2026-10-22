@@ -50,6 +50,9 @@ namespace Desktop
 		public Net::LocalStream EnsureServer(Core::String& error);
 		public void ServerBack();
 		public void ServerFailed(Core::StringView why);
+		// The watch's last `status` reply from the server (the workspaces it has open), kept so that a server started
+		// again opens the windows' workspaces again.
+		public void Remember(Core::StringView status);
 
 		public Options options;
 		public FS::Path data;
@@ -68,6 +71,9 @@ namespace Desktop
 		private bool StartAgain(const FS::Path& file, Core::String& error);
 		// Asks the server for the window's URL on a thread of its own; `arrival` says what the window does with it.
 		private void Resolve(Window* window, Core::StringView method, Core::StringView params, Arrival arrival);
+		// The window back on a server started again: the workspace it showed, when the server had it open, is opened
+		// again and shown; any other window resolves its URL as `arrival` says.
+		private void Reconnect(Window* window, Arrival arrival);
 
 		private HINSTANCE__* instance;
 		private HWND__* messages;
@@ -78,6 +84,7 @@ namespace Desktop
 		private Threading::Mutex lock;         // what resolver threads and the watch hand over
 		private Threading::Mutex startLock;    // one server start at a time
 		private Core::String watchError;
+		private Core::String lastStatus;       // the server's last `status` reply, under `lock` (Remember)
 		private bool quitting;
 	}
 

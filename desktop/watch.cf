@@ -32,7 +32,16 @@ namespace Desktop
 		exhausted = false;
 	}
 
+	// The workspaces the server has open, while it answers, for the app to open again if it has to start it again.
+	void Watch::Look() {
+		Net::LocalStream stream = Net::LocalStream::Connect(Launch::ControlName(app->options.control.View()).CStr(), Launch::kConnectMs);
+		if (!stream.IsOpen()) return;
+		Launch::Reply reply = Launch::Ask(stream, Core::StringView("status"), Core::StringView(""));
+		if (reply.ok) app->Remember(reply.result.View());
+	}
+
 	void Watch::Loop() {
+		Look();
 		while (!stopping.Load()) {
 			for (int64 slept = 0; slept < kWatchIntervalNs && !stopping.Load(); slept += kWatchSliceNs) Threading::Thread::Sleep(kWatchSliceNs);
 			if (!stopping.Load()) Check();
@@ -40,7 +49,10 @@ namespace Desktop
 	}
 
 	void Watch::Check() {
-		if (!Launch::ServerGone(app->options.control.View())) return;
+		if (!Launch::ServerGone(app->options.control.View())) {
+			Look();
+			return;
+		}
 		{
 			Threading::LockGuard guard(mutex);
 			if (exhausted) return;
