@@ -1,0 +1,57 @@
+{
+	"customers": {
+		"ann": {
+			"favorite_sku": "E-5",
+			"orders": 3,
+			"paid_orders": 2,
+			"spent": 18.62
+		},
+		"bob": {
+			"favorite_sku": "C-3",
+			"orders": 3,
+			"paid_orders": 2,
+			"spent": 24.58
+		},
+		"cid": {
+			"favorite_sku": null,
+			"orders": 1,
+			"paid_orders": 0,
+			"spent": 0.0
+		},
+		"dee": {
+			"favorite_sku": "G-7",
+			"orders": 1,
+			"paid_orders": 1,
+			"spent": 1235.73
+		}
+	},
+	"top_skus": [
+		{
+			"qty": 9,
+			"sku": "C-3"
+		},
+		{
+			"qty": 7,
+			"sku": "E-5"
+		},
+		{
+			"qty": 4,
+			"sku": "A-1"
+		},
+		{
+			"qty": 3,
+			"sku": "B-2"
+		},
+		{
+			"qty": 3,
+			"sku": "G-7"
+		}
+	],
+	"totals": {
+		"cancelled": 1,
+		"orders": 8,
+		"paid": 5,
+		"refunded": 2,
+		"revenue": 1278.93
+	}
+}

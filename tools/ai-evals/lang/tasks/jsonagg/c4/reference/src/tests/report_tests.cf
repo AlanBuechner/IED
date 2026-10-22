@@ -1,0 +1,87 @@
+include "report.ch"
+include "reportjson.ch"
+
+static JsonAgg::Item ReportItem(const char* sku, int64 qty, int64 cents) { return JsonAgg::Item{ Core::String(sku), qty, cents }; }
+
+static JsonAgg::Order ReportOrder(const char* customer, JsonAgg::Status status, Core::Array<JsonAgg::Item> items) {
+	return JsonAgg::Order{ Core::String(customer), status, items };
+}
+
+static Core::HashMap<Core::String, int64> UnitsOf(const Core::Array<JsonAgg::SkuUnits>& entries) {
+	Core::HashMap<Core::String, int64> units;
+	for (const JsonAgg::SkuUnits& entry : entries) units.Insert(entry.sku, entry.units);
+	return units;
+}
+
+[test("jsonagg.aggregate.paid_orders_only")]
+static void AggregateCountsMoneyAndUnitsOfPaidOrdersOnly() {
+	Core::Array<JsonAgg::Order> orders;
+	orders.Push(ReportOrder("ann", JsonAgg::Status::Paid, { ReportItem("A", 2, 350), ReportItem("B", 1, 1000) }));
+	orders.Push(ReportOrder("ann", JsonAgg::Status::Cancelled, { ReportItem("B", 9, 1000) }));
+	orders.Push(ReportOrder("bob", JsonAgg::Status::Refunded, { ReportItem("C", 1, 99) }));
+	orders.Push(ReportOrder("ann", JsonAgg::Status::Paid, { ReportItem("B", 1, 999) }));
+	JsonAgg::Report report = JsonAgg::Aggregate(orders);
+	JsonAgg::CustomerTotals* ann = report.customers.FindAs(Core::StringView("ann"));
+	JsonAgg::CustomerTotals* bob = report.customers.FindAs(Core::StringView("bob"));
+	assert_true(ann != nullptr && bob != nullptr, "both customers");
+	assert_eq((int64)3, ann->orders, "ann's orders");
+	assert_eq((int64)2, ann->paidOrders, "ann's paid orders");
+	assert_eq((int64)2699, ann->spentCents, "ann spent");
+	assert_true(*JsonAgg::FavoriteSku(ann->units) == "A", "ann's favorite");
+	assert_eq((int64)0, bob->paidOrders, "bob paid nothing");
+	assert_true(JsonAgg::FavoriteSku(bob->units) == nullptr, "bob has no favorite");
+	assert_eq((int64)4, report.totals.orders, "orders");
+	assert_eq((int64)2, report.totals.paid, "paid");
+	assert_eq((int64)1, report.totals.cancelled, "cancelled");
+	assert_eq((int64)1, report.totals.refunded, "refunded");
+	assert_eq((int64)2699, report.totals.revenueCents, "revenue");
+}
+
+[test("jsonagg.aggregate.no_orders")]
+static void AggregateOfNoOrdersIsEmpty() {
+	JsonAgg::Report report = JsonAgg::Aggregate(Core::Array<JsonAgg::Order>());
+	assert_eq((int64)0, report.customers.Count(), "no customers");
+	assert_eq((int64)0, report.totals.orders, "no orders");
+	assert_eq((int64)0, report.topSkus.Count(), "no skus");
+	assert_true(JsonAgg::ReportJson(report) == "{\n  \"customers\": {},\n  \"totals\": {\n    \"orders\": 0,\n    \"paid\": 0,\n    \"cancelled\": 0,\n    \"refunded\": 0,\n    \"revenue\": 0.0\n  },\n  \"top_skus\": []\n}\n", "empty report");
+}
+
+[test("jsonagg.favorite.ties_to_smallest_sku")]
+static void FavoriteSkuTiesToTheSmallestSku() {
+	Core::HashMap<Core::String, int64> units;
+	units.Insert(Core::String("m-2"), 2);
+	units.Insert(Core::String("x"), 2);
+	units.Insert(Core::String("m-10"), 2);
+	units.Insert(Core::String("a"), 1);
+	assert_true(*JsonAgg::FavoriteSku(units) == "m-10", "m-10 sorts first");
+	assert_true(JsonAgg::FavoriteSku(Core::HashMap<Core::String, int64>()) == nullptr, "none without units");
+}
+
+[test("jsonagg.top_skus.units_then_sku")]
+static void TopSkusRankByUnitsThenSkuAndKeepTheLimit() {
+	Core::Array<JsonAgg::SkuUnits> all = { JsonAgg::SkuUnits{ Core::String("b"), 5 }, JsonAgg::SkuUnits{ Core::String("a"), 5 },
+		JsonAgg::SkuUnits{ Core::String("sku-9"), 3 }, JsonAgg::SkuUnits{ Core::String("Z-9"), 3 }, JsonAgg::SkuUnits{ Core::String("e"), 3 },
+		JsonAgg::SkuUnits{ Core::String("sku-10"), 3 }, JsonAgg::SkuUnits{ Core::String("f"), 1 } };
+	Core::Array<JsonAgg::SkuUnits> top = JsonAgg::TopSkus(UnitsOf(all), 5);
+	assert_eq((int64)5, top.Count(), "five");
+	assert_true(top[0].sku == "a" && top[1].sku == "b", "most units first, then by sku");
+	assert_true(top[2].sku == "Z-9" && top[3].sku == "e" && top[4].sku == "sku-10", "byte order");
+	assert_eq((int64)3, top[4].units, "units");
+	assert_eq((int64)1, JsonAgg::TopSkus(UnitsOf({ JsonAgg::SkuUnits{ Core::String("a"), 1 } }), 5).Count(), "fewer than the limit");
+}
+
+[test("jsonagg.json.money_in_dollars")]
+static void ReportJsonWritesMoneyAsDollarsAndNullFavorites() {
+	Core::Array<JsonAgg::Order> orders;
+	orders.Push(ReportOrder("ann", JsonAgg::Status::Paid, { ReportItem("A-1", 3, 29) }));
+	orders.Push(ReportOrder("cid", JsonAgg::Status::Refunded, { ReportItem("A-1", 1, 29) }));
+	Core::String json = JsonAgg::ReportJson(JsonAgg::Aggregate(orders));
+	Serialization::DomDoc doc;
+	Serialization::ReadResult read = Serialization::ReadJson(json.View(), doc);
+	assert_true(read.Ok(), "valid JSON");
+	assert_feq(0.87, read.root.Member("customers").Member("ann").Member("spent").AsFloat(), 1e-9, "ann spent");
+	assert_true(read.root.Member("customers").Member("ann").Member("favorite_sku").AsView() == "A-1", "ann's favorite");
+	assert_true(read.root.Member("customers").Member("cid").Member("favorite_sku").Kind() == Serialization::DomKind::Null, "cid's favorite is null");
+	assert_feq(0.87, read.root.Member("totals").Member("revenue").AsFloat(), 1e-9, "revenue");
+	assert_eq((int64)3, read.root.Member("top_skus").At(0).Member("qty").AsInt(), "top sku units");
+}

@@ -1,0 +1,51 @@
+{
+	"customers": {
+		"kim": {
+			"favorite_sku": "b",
+			"orders": 2,
+			"paid_orders": 1,
+			"spent": 15.0
+		},
+		"lee": {
+			"favorite_sku": "a",
+			"orders": 2,
+			"paid_orders": 2,
+			"spent": 32.5
+		},
+		"max": {
+			"favorite_sku": "e",
+			"orders": 2,
+			"paid_orders": 1,
+			"spent": 1.5
+		}
+	},
+	"top_skus": [
+		{
+			"qty": 5,
+			"sku": "a"
+		},
+		{
+			"qty": 5,
+			"sku": "b"
+		},
+		{
+			"qty": 3,
+			"sku": "Z-9"
+		},
+		{
+			"qty": 3,
+			"sku": "e"
+		},
+		{
+			"qty": 3,
+			"sku": "sku-10"
+		}
+	],
+	"totals": {
+		"cancelled": 1,
+		"orders": 6,
+		"paid": 4,
+		"refunded": 1,
+		"revenue": 49.0
+	}
+}

@@ -1,0 +1,65 @@
+include "report.ch"
+
+namespace JsonAgg
+{
+	static void CountStatus(OrderTotals& totals, Status status) {
+		totals.orders += 1;
+		switch (status) {
+			case Status::Paid: totals.paid += 1; break;
+			case Status::Cancelled: totals.cancelled += 1; break;
+			case Status::Refunded: totals.refunded += 1; break;
+		}
+	}
+
+	// Adds the items' units to both tallies by sku; what they cost.
+	static int64 AddPaidItems(const Core::Array<Item>& items, Core::HashMap<Core::String, int64>& customerUnits, Core::HashMap<Core::String, int64>& allUnits) {
+		int64 cents = 0;
+		for (const Item& item : items) {
+			cents += item.cents * item.qty;
+			customerUnits[item.sku] += item.qty;
+			allUnits[item.sku] += item.qty;
+		}
+		return cents;
+	}
+
+	Report Aggregate(const Core::Array<Order>& orders) {
+		Report report;
+		Core::HashMap<Core::String, int64> units;
+		for (const Order& order : orders) {
+			CustomerTotals& customer = report.customers[order.customer];
+			customer.orders += 1;
+			CountStatus(report.totals, order.status);
+			if (order.status != Status::Paid) continue;
+			customer.paidOrders += 1;
+			int64 cents = AddPaidItems(order.items, customer.units, units);
+			customer.spentCents += cents;
+			report.totals.revenueCents += cents;
+		}
+		report.topSkus = TopSkus(units, kTopSkuCount);
+		return report;
+	}
+
+	static bool MoreUnits(const SkuUnits& a, const SkuUnits& b) {
+		return a.units != b.units ? a.units > b.units : a.sku < b.sku;
+	}
+
+	Core::Array<SkuUnits> TopSkus(const Core::HashMap<Core::String, int64>& units, int64 limit) {
+		Core::Array<SkuUnits> ranked = Core::Array<SkuUnits>(units.Count());
+		for (const Core::KeyValue<Core::String, int64>& entry : units) ranked.Push(SkuUnits{ entry.key, entry.value });
+		ranked.SortBy(MoreUnits);
+		if (ranked.Count() > limit) ranked.Resize(limit);
+		return ranked;
+	}
+
+	const Core::String* FavoriteSku(const Core::HashMap<Core::String, int64>& units) {
+		const Core::String* favorite = nullptr;
+		int64 most = 0;
+		for (const Core::KeyValue<Core::String, int64>& entry : units) {
+			if (favorite == nullptr || entry.value > most || (entry.value == most && entry.key < *favorite)) {
+				favorite = &entry.key;
+				most = entry.value;
+			}
+		}
+		return favorite;
+	}
+}

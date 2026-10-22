@@ -1,0 +1,4 @@
+{"orders": [
+	{"id": 1, "customer": "ann", "date": "2024-03-02", "status": "paid", "items": [{"sku": "A-1", "qty": 2, "price": 3.5}]},
+	{"id": 2, "customer": "bob", "date": "2024-03-02", "status": "paid", "items": [{"sku": "B-2", "qty": 1, "price": "3.50"}]}
+]}

@@ -1,0 +1,57 @@
+include "reportjson.ch"
+
+namespace JsonAgg
+{
+	const int32 kReportIndent = 2;
+
+	static Serialization::DomNode MoneyNode(Serialization::DomDoc& doc, int64 cents) { return doc.NewFloat((double)cents / 100.0); }
+
+	static Serialization::DomNode CustomerNode(Serialization::DomDoc& doc, const CustomerTotals& customer) {
+		const Core::String* favorite = FavoriteSku(customer.units);
+		Serialization::DomNode node = doc.NewObject();
+		doc.AddMember(node, "orders", doc.NewInt(customer.orders));
+		doc.AddMember(node, "paid_orders", doc.NewInt(customer.paidOrders));
+		doc.AddMember(node, "spent", MoneyNode(doc, customer.spentCents));
+		doc.AddMember(node, "favorite_sku", favorite ? doc.NewString(favorite->View()) : doc.NewNull());
+		return node;
+	}
+
+	static Serialization::DomNode CustomersNode(Serialization::DomDoc& doc, const Core::HashMap<Core::String, CustomerTotals>& customers) {
+		Serialization::DomNode node = doc.NewObject();
+		for (const Core::KeyValue<Core::String, CustomerTotals>& entry : customers) doc.AddMember(node, entry.key.View(), CustomerNode(doc, entry.value));
+		return node;
+	}
+
+	static Serialization::DomNode TotalsNode(Serialization::DomDoc& doc, const OrderTotals& totals) {
+		Serialization::DomNode node = doc.NewObject();
+		doc.AddMember(node, "orders", doc.NewInt(totals.orders));
+		doc.AddMember(node, "paid", doc.NewInt(totals.paid));
+		doc.AddMember(node, "cancelled", doc.NewInt(totals.cancelled));
+		doc.AddMember(node, "refunded", doc.NewInt(totals.refunded));
+		doc.AddMember(node, "revenue", MoneyNode(doc, totals.revenueCents));
+		return node;
+	}
+
+	static Serialization::DomNode TopSkusNode(Serialization::DomDoc& doc, const Core::Array<SkuUnits>& skus) {
+		Serialization::DomNode node = doc.NewArray();
+		for (const SkuUnits& each : skus) {
+			Serialization::DomNode entry = doc.NewObject();
+			doc.AddMember(entry, "sku", doc.NewString(each.sku.View()));
+			doc.AddMember(entry, "qty", doc.NewInt(each.units));
+			doc.Add(node, entry);
+		}
+		return node;
+	}
+
+	Core::String ReportJson(const Report& report) {
+		Serialization::DomDoc doc;
+		Serialization::DomNode root = doc.NewObject();
+		doc.AddMember(root, "customers", CustomersNode(doc, report.customers));
+		doc.AddMember(root, "totals", TotalsNode(doc, report.totals));
+		doc.AddMember(root, "top_skus", TopSkusNode(doc, report.topSkus));
+		Core::StringBuilder text;
+		Serialization::WriteJson(root, &text, kReportIndent);
+		text.Append("\n");
+		return text.ToString();
+	}
+}

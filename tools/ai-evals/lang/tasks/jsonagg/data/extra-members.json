@@ -1,0 +1,27 @@
+{
+	"version": 2,
+	"source": {"system": "shop", "orders": 3, "items": []},
+	"orders": [
+		{
+			"items": [
+				{"price": 12.25, "name": "Lamp", "qty": 1, "sku": "L-1", "tags": ["home", "light"]},
+				{"discount": null, "qty": 2, "sku": "B-7", "price": 0.99, "status": "backorder"}
+			],
+			"status": "paid",
+			"note": {"text": "gift", "customer": "someone else"},
+			"customer": "fay",
+			"id": 101
+		},
+		{
+			"date": "2024-07-02",
+			"customer": "gus",
+			"coupon": {"code": "SPRING", "items": [{"sku": "X-0", "qty": -1}]},
+			"status": "paid",
+			"paid": false,
+			"items": [{"qty": 3, "sku": "B-7", "price": 1}],
+			"id": 102
+		},
+		{"status": "cancelled", "items": [{"sku": "L-1", "qty": 5, "price": 12.25, "extra": [1, 2, {"three": 3}]}], "customer": "fay", "shipping": null}
+	],
+	"generated": "2024-07-03T10:00:00Z"
+}

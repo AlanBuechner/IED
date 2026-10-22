@@ -1,0 +1,150 @@
+title = "JSON order report command-line tool, from an empty project"
+category = "stdlib"
+set = "holdout"
+timeout_minutes = 45
+
+[c4]
+project = "jsonagg"
+prompt = """
+This workspace is a new, empty C4 program, `jsonagg` (a Nuke workspace: `nuke.toml`, entry point `src/main.cf`). Write the program:
+
+`jsonagg <orders.json> <report.json>` reads a JSON file of orders and writes a JSON report about them.
+- The input looks like `{"orders": [{"id": 17, "customer": "ann", "date": "2024-03-02", "status": "paid", "items": [{"sku": "A-1", "qty": 2, "price": 3.5}]}, ...]}`. `status` is `paid`, `cancelled` or `refunded`; `qty` is a positive integer; `price` is a number with at most two decimals. Members can come in any order, and members not named here are ignored.
+- The report is `{"customers": {"<name>": {"orders": ..., "paid_orders": ..., "spent": ..., "favorite_sku": ...}, ...}, "totals": {"orders": ..., "paid": ..., "cancelled": ..., "refunded": ..., "revenue": ...}, "top_skus": [{"sku": ..., "qty": ...}, ...]}`:
+  - per customer: `orders` counts all its orders and `paid_orders` the paid ones; `spent` is the money of its paid orders; `favorite_sku` is the sku it bought the most units of in its paid orders (ties: the smallest sku in byte order), or null when it has no paid orders.
+  - `totals`: the number of orders, the number of each status, and `revenue`, the money of all paid orders.
+  - `top_skus`: the 5 skus with the most units over all paid orders, most first, equal units by sku in byte order (all of them when there are fewer).
+  - Money is computed in whole cents: each price rounded to the nearest cent, times the quantity, summed. It is written as a JSON number of dollars (`12.5`).
+  - Key order and whitespace in the report do not matter.
+- Wrong number of arguments: print `usage: jsonagg <orders.json> <report.json>` to standard error and exit with code 2.
+- An input file that cannot be read: print `error: cannot read <file>` to standard error and exit with code 1; a report that cannot be written: `error: cannot write <file>`, exit code 1.
+- Input that is not JSON, or not of this shape (no `orders` array; an order without `customer`, `status` or `items`; another status; an item without `sku`, with a `qty` that is not a positive integer, or with a `price` that is not a number): print `error: invalid input` to standard error, exit with code 1, and write no report.
+
+Keep reading the orders and computing the report in their own functions, apart from main, with unit tests for the aggregation. Build and test it before you finish.
+"""
+
+[go]
+project = "jsonagg"
+prompt = """
+This workspace is a new, empty Go module, `jsonagg` (`go.mod`). Write the program, package main in this folder:
+
+`jsonagg <orders.json> <report.json>` reads a JSON file of orders and writes a JSON report about them.
+- The input looks like `{"orders": [{"id": 17, "customer": "ann", "date": "2024-03-02", "status": "paid", "items": [{"sku": "A-1", "qty": 2, "price": 3.5}]}, ...]}`. `status` is `paid`, `cancelled` or `refunded`; `qty` is a positive integer; `price` is a number with at most two decimals. Members can come in any order, and members not named here are ignored.
+- The report is `{"customers": {"<name>": {"orders": ..., "paid_orders": ..., "spent": ..., "favorite_sku": ...}, ...}, "totals": {"orders": ..., "paid": ..., "cancelled": ..., "refunded": ..., "revenue": ...}, "top_skus": [{"sku": ..., "qty": ...}, ...]}`:
+  - per customer: `orders` counts all its orders and `paid_orders` the paid ones; `spent` is the money of its paid orders; `favorite_sku` is the sku it bought the most units of in its paid orders (ties: the smallest sku in byte order), or null when it has no paid orders.
+  - `totals`: the number of orders, the number of each status, and `revenue`, the money of all paid orders.
+  - `top_skus`: the 5 skus with the most units over all paid orders, most first, equal units by sku in byte order (all of them when there are fewer).
+  - Money is computed in whole cents: each price rounded to the nearest cent, times the quantity, summed. It is written as a JSON number of dollars (`12.5`).
+  - Key order and whitespace in the report do not matter.
+- Wrong number of arguments: print `usage: jsonagg <orders.json> <report.json>` to standard error and exit with code 2.
+- An input file that cannot be read: print `error: cannot read <file>` to standard error and exit with code 1; a report that cannot be written: `error: cannot write <file>`, exit code 1.
+- Input that is not JSON, or not of this shape (no `orders` array; an order without `customer`, `status` or `items`; another status; an item without `sku`, with a `qty` that is not a positive integer, or with a `price` that is not a number): print `error: invalid input` to standard error, exit with code 1, and write no report.
+
+Keep reading the orders and computing the report in their own functions, apart from main, with unit tests for the aggregation. Build and test it before you finish.
+"""
+
+[[checks]]
+name = "sample"
+args = ["{data}/sample.json", "sample.json"]
+json_file = "data/expected/sample.json"
+json_output = "sample.json"
+
+[[checks]]
+name = "top-sku-ties"
+args = ["{data}/sku-ties.json", "sku-ties.json"]
+json_file = "data/expected/sku-ties.json"
+json_output = "sku-ties.json"
+
+[[checks]]
+name = "favorite-ties"
+args = ["{data}/favorite-ties.json", "favorite-ties.json"]
+json_file = "data/expected/favorite-ties.json"
+json_output = "favorite-ties.json"
+
+[[checks]]
+name = "no-paid-orders"
+args = ["{data}/no-paid.json", "no-paid.json"]
+json_file = "data/expected/no-paid.json"
+json_output = "no-paid.json"
+
+[[checks]]
+name = "empty-orders"
+args = ["{data}/empty.json", "empty.json"]
+json_file = "data/expected/empty.json"
+json_output = "empty.json"
+
+[[checks]]
+name = "member-order-and-unknown-members"
+args = ["{data}/extra-members.json", "extra-members.json"]
+json_file = "data/expected/extra-members.json"
+json_output = "extra-members.json"
+
+[[checks]]
+name = "not-json"
+args = ["{data}/not-json.json", "not-json.json"]
+exit = 1
+stderr_contains = "error: invalid input"
+
+[[checks]]
+name = "no-orders-array"
+args = ["{data}/no-orders.json", "no-orders.json"]
+exit = 1
+stderr_contains = "error: invalid input"
+
+[[checks]]
+name = "order-without-customer"
+args = ["{data}/missing-customer.json", "missing-customer.json"]
+exit = 1
+stderr_contains = "error: invalid input"
+
+[[checks]]
+name = "bad-status"
+args = ["{data}/bad-status.json", "bad-status.json"]
+exit = 1
+stderr_contains = "error: invalid input"
+
+[[checks]]
+name = "fractional-qty"
+args = ["{data}/fractional-qty.json", "fractional-qty.json"]
+exit = 1
+stderr_contains = "error: invalid input"
+
+[[checks]]
+name = "zero-qty"
+args = ["{data}/zero-qty.json", "zero-qty.json"]
+exit = 1
+stderr_contains = "error: invalid input"
+
+[[checks]]
+name = "string-price"
+args = ["{data}/string-price.json", "string-price.json"]
+exit = 1
+stderr_contains = "error: invalid input"
+
+[[checks]]
+name = "missing-file"
+args = ["{data}/no-such-orders.json", "missing.json"]
+exit = 1
+stderr_contains = "error: cannot read"
+
+[[checks]]
+name = "no-arguments"
+args = []
+exit = 2
+stderr_contains = "usage: jsonagg <orders.json> <report.json>"
+
+[[checks]]
+name = "extra-argument"
+args = ["{data}/sample.json", "extra.json", "more"]
+exit = 2
+stderr_contains = "usage: jsonagg <orders.json> <report.json>"
+
+[bench]
+generate = "data/gen.py"
+args = ["{bench}/input.json", "report.json"]
+runs = 3
+
+[idioms.c4]
+good = [["Serialization::(ReadJson|FromJson|JsonStream|JsonFileStream)", "Bedrock JSON reading"], ["Serialization::(WriteJson|ToJson)", "Bedrock JSON writing"]]
+[idioms.go]
+good = [["json\\.(Unmarshal|NewDecoder)", "encoding/json reading"], ["json\\.(Marshal|MarshalIndent|NewEncoder)", "encoding/json writing"]]

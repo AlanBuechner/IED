@@ -1,0 +1,59 @@
+include "orders.ch"
+
+namespace JsonAgg
+{
+	static bool IsNumber(const Serialization::DomNode& node) {
+		return node.Kind() == Serialization::DomKind::Int || node.Kind() == Serialization::DomKind::Float;
+	}
+
+	static int64 ToCents(double price) { return (int64)floor(price * 100.0 + 0.5); }
+
+	static bool ParseStatus(Core::StringView text, Status& status) {
+		if (text == "paid") status = Status::Paid;
+		else if (text == "cancelled") status = Status::Cancelled;
+		else if (text == "refunded") status = Status::Refunded;
+		else return false;
+		return true;
+	}
+
+	static bool ParseItem(const Serialization::DomNode& node, Item& item) {
+		Serialization::DomNode sku = node.Member("sku");
+		Serialization::DomNode qty = node.Member("qty");
+		Serialization::DomNode price = node.Member("price");
+		if (sku.Kind() != Serialization::DomKind::String || qty.Kind() != Serialization::DomKind::Int || qty.AsInt() <= 0 || !IsNumber(price)) return false;
+		item.sku = Core::String(sku.AsView());
+		item.qty = qty.AsInt();
+		item.cents = ToCents(price.AsFloat());
+		return true;
+	}
+
+	static bool ParseOrder(const Serialization::DomNode& node, Order& order) {
+		Serialization::DomNode customer = node.Member("customer");
+		Serialization::DomNode items = node.Member("items");
+		if (customer.Kind() != Serialization::DomKind::String || items.Kind() != Serialization::DomKind::Array) return false;
+		if (!ParseStatus(node.Member("status").AsView(), order.status)) return false;
+		order.customer = Core::String(customer.AsView());
+		order.items.Reserve(items.Count());
+		for (int64 i = 0; i < items.Count(); ++i) {
+			Item item;
+			if (!ParseItem(items.At(i), item)) return false;
+			order.items.Push(take(item));
+		}
+		return true;
+	}
+
+	bool ParseOrders(Core::StringView text, Core::Array<Order>& orders) {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(text, doc);
+		if (!read.Ok()) return false;
+		Serialization::DomNode list = read.root.Member("orders");
+		if (list.Kind() != Serialization::DomKind::Array) return false;
+		orders.Reserve(list.Count());
+		for (int64 i = 0; i < list.Count(); ++i) {
+			Order order;
+			if (!ParseOrder(list.At(i), order)) return false;
+			orders.Push(take(order));
+		}
+		return true;
+	}
+}

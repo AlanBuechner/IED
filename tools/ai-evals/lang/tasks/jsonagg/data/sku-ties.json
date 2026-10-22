@@ -1,0 +1,8 @@
+{"orders": [
+	{"id": 1, "customer": "kim", "date": "2024-05-01", "status": "paid", "items": [{"sku": "b", "qty": 5, "price": 1}, {"sku": "sku-9", "qty": 3, "price": 2}, {"sku": "d", "qty": 2, "price": 2}]},
+	{"id": 2, "customer": "lee", "date": "2024-05-01", "status": "paid", "items": [{"sku": "a", "qty": 2, "price": 1}, {"sku": "Z-9", "qty": 3, "price": 4.5}, {"sku": "sku-10", "qty": 3, "price": 2}]},
+	{"id": 3, "customer": "lee", "date": "2024-05-02", "status": "paid", "items": [{"sku": "a", "qty": 3, "price": 1}, {"sku": "f", "qty": 1, "price": 8}]},
+	{"id": 4, "customer": "kim", "date": "2024-05-02", "status": "cancelled", "items": [{"sku": "f", "qty": 40, "price": 8}, {"sku": "e", "qty": 40, "price": 1}]},
+	{"id": 5, "customer": "max", "date": "2024-05-03", "status": "paid", "items": [{"sku": "e", "qty": 3, "price": 0.5}]},
+	{"id": 6, "customer": "max", "date": "2024-05-03", "status": "refunded", "items": [{"sku": "f", "qty": 30, "price": 8}]}
+]}

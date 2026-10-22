@@ -1,0 +1,26 @@
+include "bedrock.ch"
+include "orders.ch"
+include "report.ch"
+include "reportjson.ch"
+
+const int32 kExitFailure = 1;
+const int32 kExitUsage = 2;
+
+static int32 Fail(const Core::String& message) {
+	Platform::WriteError((Core::String("error: ") + message + "\n").View());
+	return kExitFailure;
+}
+
+int32 main(int32 argc, char** argv) {
+	if (argc != 3) {
+		Platform::WriteError(Core::StringView("usage: jsonagg <orders.json> <report.json>\n"));
+		return kExitUsage;
+	}
+	FS::File input = FS::File(argv[1], "rb");
+	if (!input.IsOpen()) return Fail(Core::String("cannot read ") + argv[1]);
+	Core::Array<JsonAgg::Order> orders;
+	if (!JsonAgg::ParseOrders(input.ReadText().View(), orders)) return Fail(Core::String("invalid input"));
+	Core::String report = JsonAgg::ReportJson(JsonAgg::Aggregate(orders));
+	if (!FS::WriteFileAtomically(argv[2], report.CStr(), report.ByteLength())) return Fail(Core::String("cannot write ") + argv[2]);
+	return 0;
+}

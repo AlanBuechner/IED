@@ -1,0 +1,51 @@
+{
+	"customers": {
+		"nia": {
+			"favorite_sku": "m-10",
+			"orders": 3,
+			"paid_orders": 2,
+			"spent": 5.6
+		},
+		"oto": {
+			"favorite_sku": "x",
+			"orders": 2,
+			"paid_orders": 2,
+			"spent": 8.0
+		},
+		"pia": {
+			"favorite_sku": "q",
+			"orders": 2,
+			"paid_orders": 1,
+			"spent": 1.0
+		}
+	},
+	"top_skus": [
+		{
+			"qty": 4,
+			"sku": "q"
+		},
+		{
+			"qty": 4,
+			"sku": "x"
+		},
+		{
+			"qty": 2,
+			"sku": "m-10"
+		},
+		{
+			"qty": 2,
+			"sku": "m-2"
+		},
+		{
+			"qty": 2,
+			"sku": "y"
+		}
+	],
+	"totals": {
+		"cancelled": 1,
+		"orders": 7,
+		"paid": 5,
+		"refunded": 1,
+		"revenue": 14.6
+	}
+}

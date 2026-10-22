@@ -1,0 +1,9 @@
+{"orders": [
+	{"id": 1, "customer": "nia", "date": "2024-06-01", "status": "paid", "items": [{"sku": "m-2", "qty": 2, "price": 1.1}, {"sku": "x", "qty": 1, "price": 0.5}]},
+	{"id": 2, "customer": "nia", "date": "2024-06-02", "status": "paid", "items": [{"sku": "m-10", "qty": 2, "price": 1.2}, {"sku": "x", "qty": 1, "price": 0.5}]},
+	{"id": 3, "customer": "nia", "date": "2024-06-03", "status": "cancelled", "items": [{"sku": "zz", "qty": 9, "price": 3}]},
+	{"id": 4, "customer": "oto", "date": "2024-06-03", "status": "paid", "items": [{"sku": "y", "qty": 1, "price": 2}, {"sku": "x", "qty": 1, "price": 2}, {"sku": "y", "qty": 1, "price": 2}]},
+	{"id": 5, "customer": "oto", "date": "2024-06-04", "status": "paid", "items": [{"sku": "x", "qty": 1, "price": 2}]},
+	{"id": 6, "customer": "pia", "date": "2024-06-04", "status": "paid", "items": [{"sku": "q", "qty": 4, "price": 0.25}]},
+	{"id": 7, "customer": "pia", "date": "2024-06-05", "status": "refunded", "items": [{"sku": "r", "qty": 8, "price": 0.25}]}
+]}

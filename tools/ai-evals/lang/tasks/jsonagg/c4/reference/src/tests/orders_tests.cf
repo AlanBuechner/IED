@@ -1,0 +1,56 @@
+include "orders.ch"
+
+static bool Parses(const char* text) {
+	Core::Array<JsonAgg::Order> orders;
+	return JsonAgg::ParseOrders(Core::StringView(text), orders);
+}
+
+[test("jsonagg.parse.members_in_any_order")]
+static void ParseOrdersReadsMembersInAnyOrderAndIgnoresUnknownOnes() {
+	Core::Array<JsonAgg::Order> orders;
+	bool ok = JsonAgg::ParseOrders(Core::StringView("{\"version\": 2, \"orders\": ["
+		"{\"items\": [{\"price\": 0.29, \"qty\": 3, \"sku\": \"G-7\", \"name\": \"x\"}], \"status\": \"refunded\", \"note\": {\"customer\": \"z\"}, \"customer\": \"ann\"},"
+		"{\"id\": 2, \"customer\": \"bob\", \"date\": \"2024-03-02\", \"status\": \"paid\", \"items\": [{\"sku\": \"A-1\", \"qty\": 1, \"price\": 10}]}]}"), orders);
+	assert_true(ok, "parses");
+	assert_eq((int64)2, orders.Count(), "two orders");
+	assert_true(orders[0].customer == "ann" && orders[0].status == JsonAgg::Status::Refunded, "first order");
+	assert_true(orders[0].items[0].sku == "G-7", "sku");
+	assert_eq((int64)3, orders[0].items[0].qty, "qty");
+	assert_eq((int64)29, orders[0].items[0].cents, "price in cents");
+	assert_true(orders[1].status == JsonAgg::Status::Paid, "second order paid");
+	assert_eq((int64)1000, orders[1].items[0].cents, "an integer price");
+}
+
+[test("jsonagg.parse.rounds_to_cents")]
+static void ParseOrdersRoundsPricesToTheNearestCent() {
+	Core::Array<JsonAgg::Order> orders;
+	assert_true(JsonAgg::ParseOrders(Core::StringView("{\"orders\": [{\"customer\": \"a\", \"status\": \"paid\", \"items\": [{\"sku\": \"s\", \"qty\": 1, \"price\": 1.13}, {\"sku\": \"t\", \"qty\": 1, \"price\": 0.07}]}]}"), orders), "parses");
+	assert_eq((int64)113, orders[0].items[0].cents, "1.13");
+	assert_eq((int64)7, orders[0].items[1].cents, "0.07");
+}
+
+[test("jsonagg.parse.empty_array")]
+static void ParseOrdersOfAnEmptyArray() {
+	Core::Array<JsonAgg::Order> orders;
+	assert_true(JsonAgg::ParseOrders(Core::StringView("{\"orders\": []}"), orders), "parses");
+	assert_eq((int64)0, orders.Count(), "no orders");
+}
+
+[test("jsonagg.parse.rejects")]
+static void ParseOrdersRejectsWhatIsNotOrders() {
+	assert_true(!Parses("{\"orders\": ["), "not JSON");
+	assert_true(!Parses("{\"order\": []}"), "no orders");
+	assert_true(!Parses("{\"orders\": {}}"), "orders not an array");
+	assert_true(!Parses("[]"), "root not an object");
+	assert_true(!Parses("{\"orders\": [3]}"), "order not an object");
+	assert_true(!Parses("{\"orders\": [{\"status\": \"paid\", \"items\": []}]}"), "no customer");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"items\": []}]}"), "no status");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": \"paid\"}]}"), "no items");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": \"shipped\", \"items\": []}]}"), "bad status");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": 1, \"items\": []}]}"), "status not a string");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": \"paid\", \"items\": [{\"qty\": 1, \"price\": 2}]}]}"), "no sku");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": \"paid\", \"items\": [{\"sku\": \"A\", \"qty\": 1.5, \"price\": 2}]}]}"), "fractional qty");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": \"cancelled\", \"items\": [{\"sku\": \"A\", \"qty\": 0, \"price\": 2}]}]}"), "zero qty");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": \"paid\", \"items\": [{\"sku\": \"A\", \"qty\": 1, \"price\": \"2\"}]}]}"), "string price");
+	assert_true(!Parses("{\"orders\": [{\"customer\": \"a\", \"status\": \"paid\", \"items\": [{\"sku\": \"A\", \"qty\": 1}]}]}"), "no price");
+}

@@ -1,0 +1,11 @@
+{
+	"customers": {},
+	"top_skus": [],
+	"totals": {
+		"cancelled": 0,
+		"orders": 0,
+		"paid": 0,
+		"refunded": 0,
+		"revenue": 0.0
+	}
+}

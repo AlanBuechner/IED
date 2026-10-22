@@ -1,0 +1,33 @@
+{
+	"customers": {
+		"fay": {
+			"favorite_sku": "B-7",
+			"orders": 2,
+			"paid_orders": 1,
+			"spent": 14.23
+		},
+		"gus": {
+			"favorite_sku": "B-7",
+			"orders": 1,
+			"paid_orders": 1,
+			"spent": 3.0
+		}
+	},
+	"top_skus": [
+		{
+			"qty": 5,
+			"sku": "B-7"
+		},
+		{
+			"qty": 1,
+			"sku": "L-1"
+		}
+	],
+	"totals": {
+		"cancelled": 1,
+		"orders": 3,
+		"paid": 2,
+		"refunded": 0,
+		"revenue": 17.23
+	}
+}

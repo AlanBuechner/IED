@@ -34,13 +34,13 @@
 	},
 	"jsonagg": {
 		"c4": {
-			"benchSeconds": 0.669,
+			"benchSeconds": 0.524,
 			"benchMB": 348.5,
 			"startSeconds": 0.006
 		},
 		"go": {
-			"benchSeconds": 0.646,
-			"benchMB": 169.2
+			"benchSeconds": 0.617,
+			"benchMB": 169.8
 		}
 	}
 }

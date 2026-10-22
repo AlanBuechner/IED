@@ -1,0 +1,24 @@
+{
+	"customers": {
+		"dan": {
+			"favorite_sku": null,
+			"orders": 2,
+			"paid_orders": 0,
+			"spent": 0.0
+		},
+		"eve": {
+			"favorite_sku": null,
+			"orders": 1,
+			"paid_orders": 0,
+			"spent": 0.0
+		}
+	},
+	"top_skus": [],
+	"totals": {
+		"cancelled": 1,
+		"orders": 3,
+		"paid": 0,
+		"refunded": 2,
+		"revenue": 0.0
+	}
+}
