@@ -136,6 +136,24 @@ static int32_t merge_names(c4_gc_census_entry* entries, int32_t count)
 	return kept;
 }
 
+static void forget_span(const GCSpan* span, uint32_t epoch, uintptr_t low, uintptr_t high)
+{
+	if (!span->tags || span->tagsEpoch != epoch) return;
+	for (uint32_t slot = 0; slot < span->nelems; ++slot)
+	{
+		const uintptr_t record = (uintptr_t)span->tags[slot];
+		if (record >= low && record < high) span->tags[slot] = NULL;
+	}
+}
+
+void gc_census_forget_in(const GCCensus* census, const GCHeap* heap, const void* low, const void* high)
+{
+	const uint32_t epoch = census->epoch;
+	for (uint32_t c = 0; c < GC_SPAN_CLASSES; ++c)
+		for (const GCSpan* span = heap->classes[c].all; span; span = span->next) forget_span(span, epoch, (uintptr_t)low, (uintptr_t)high);
+	for (const GCSpan* span = heap->large; span; span = span->next) forget_span(span, epoch, (uintptr_t)low, (uintptr_t)high);
+}
+
 void gc_census_take(GCCensus* census, const GCHeap* heap)
 {
 	Tally tally = { census->last, NULL, 0, census->capacity > 0 ? census->capacity : 64, NULL, 0 };

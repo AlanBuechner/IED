@@ -36,6 +36,7 @@ namespace Scripting
 		bool UsesMember(const OuterUses& uses) const;
 		bool HasThis() const;
 		QueryResult<void> LowerCallMethod(const Closure& closure);
+		Core::String OwnerName() const;
 
 		LoweringContext& m_Ctx;
 		ExprLowerer& m_Expr;

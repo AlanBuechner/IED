@@ -3,6 +3,7 @@
 #include "Backend/HIR/ExprLowerer.h"
 #include "Backend/HIR/LoweringDriver.h"
 #include "Model/Types/ClassHierarchy.h"
+#include "Model/Types/QualifiedName.h"
 #include "Parser/Nodes/Expressions/LambdaNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include "Parser/Nodes/Statements/SimpleStatementNodes.h"
@@ -89,6 +90,7 @@ namespace Scripting
 		spec.unitId = m_Ctx.unitId;
 		spec.isMutable = lambda.IsMutable();
 		spec.owner = m_Ctx.CodeSymbol();
+		spec.ownerName = OwnerName();
 		std::vector<ConstructionArgument> fields;
 		for (const PlannedCapture& p : plan.value)
 		{
@@ -100,6 +102,16 @@ namespace Scripting
 		const Closure* closure = m_Ctx.model().CreateClosure(spec);
 		if (auto body = LowerCallMethod(*closure); !body.Ok()) return QueryResult<Value>::Fail(body.error, body.message);
 		return m_Expr.ResolveConstruct(&lambda, closure->type, fields, true);
+	}
+
+	// The code the lambda is written in: a function by its qualified name, a lambda's body by that lambda's name.
+	Core::String LambdaLowerer::OwnerName() const
+	{
+		const FunctionRecord* fn = m_Ctx.fn;
+		if (fn && fn->containingType)
+			if (const Closure* outer = m_Ctx.model().ClosureOf(fn->containingType)) return outer->displayName;
+		if (fn) return QualifiedName(*fn);
+		return m_Ctx.startedGlobal ? "the start of " + m_Ctx.startedGlobal->plainName : Core::String("the program's start");
 	}
 
 	QueryResult<const FunctionType*> LambdaLowerer::Signature(const LambdaNode& lambda, Core::Vector<Core::String>& paramNames,

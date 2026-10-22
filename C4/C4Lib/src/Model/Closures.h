@@ -40,6 +40,7 @@ namespace Scripting
 		const ObjectType* enclosingType = nullptr; // the object `this` names in the body (null outside a method)
 		bool isMutable = false;
 		Core::String owner;                     // the symbol of the code that writes the lambda: it is named for it
+		Core::String ownerName;                 // that code as people read it: `Profile::StartSession`
 	};
 
 	/// A lambda's closure type: an object whose fields are the captures, with an `[operator("call")]` method
@@ -52,6 +53,7 @@ namespace Scripting
 		Core::Vector<ClosureCapture> captures;
 		const ObjectType* enclosingType = nullptr;
 		bool isMutable = false;
+		Core::String displayName;   // "lambda in Profile::StartSession", "lambda #2 in ...": the census shows it
 
 		bool CapturesNothing() const { return captures.Empty(); }
 		/// Whether the closure is one pointer (`[this]`, `[&x]`): a func then holds that pointer as its

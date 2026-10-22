@@ -52,6 +52,7 @@ namespace Scripting
 			Take(table, "c4_gc_add_root_table", runtime.addRootTable, error) &&
 			Take(table, "c4_gc_remove_root_table", runtime.removeRootTable, error) &&
 			Take(table, "c4_gc_drop_finalizers_in", runtime.dropFinalizersIn, error) &&
+			Take(table, "c4_gc_forget_types_in", runtime.forgetTypesIn, error) &&
 			Take(table, "c4_reflect_register_image", runtime.registerImage, error) &&
 			Take(table, "c4_reflect_notify_unload", runtime.notifyUnload, error) &&
 			Take(table, "c4_reflect_remove_source", runtime.removeSource, error);
@@ -143,6 +144,7 @@ namespace Scripting
 		if (m_Roots) m_Runtime.removeRootTable(m_Roots);
 		const ScriptImage image = m_Linked->Image();
 		const uint64 dropped = m_Runtime.dropFinalizersIn(reinterpret_cast<const void*>(image.low), reinterpret_cast<const void*>(image.high));
+		m_Runtime.forgetTypesIn(reinterpret_cast<const void*>(image.low), reinterpret_cast<const void*>(image.high));
 		m_Runtime.removeSource(m_Tag.c_str());
 		m_Runtime.moduleDestroy(m_Record);
 		m_Linked.reset();

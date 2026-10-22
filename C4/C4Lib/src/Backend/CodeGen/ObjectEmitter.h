@@ -32,6 +32,8 @@ namespace Scripting
 			uint64 stride;
 		};
 
+		/// The name the census shows for `type`: its QualifiedName, or a lambda's closure by the code it is in.
+		std::string CensusName(const Type* type) const;
 		/// The allocator for `type`, given its census record (c4_alloc_typed / _noscan).
 		llvm::Value* AllocateTyped(const Type* type, llvm::Constant* census, llvm::Value* size, uint64 align);
 		llvm::Value* EmitNewArray(const NewNode* n);

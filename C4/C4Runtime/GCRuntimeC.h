@@ -262,6 +262,9 @@ void c4_gc_remove_root_table(const c4_gc_root_range* table);
 // Drops the finalizer of every object whose finalizer lies in [low, high) - code about to be unloaded, a
 // script's - registered or waiting to run; the objects themselves stay. Returns how many it dropped.
 uint64_t c4_gc_drop_finalizers_in(const void* low, const void* high);
+// The census forgets the types whose records lie in [low, high) - an image about to be unloaded, a script's: the
+// objects it made count as of no known type from then on.
+void c4_gc_forget_types_in(const void* low, const void* high);
 
 #ifdef __cplusplus
 }

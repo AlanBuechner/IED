@@ -44,7 +44,8 @@ Every C4 function has its own emitted symbol, which is also its identity in refl
   `Twice_Tint32_E_1int32`, plus `_on_<receiver>` for an extension template; a member type of an instance names
   the instance (`Node_IBox_3cint32_3e_E`).
 - A lambda is named for the code that writes it and its place there: `__c4_closure_<function symbol>_<k>` (the
-  k-th lambda of that function, or of that global's start). A compiler-written lifecycle function is named for its
+  k-th lambda of that function, or of that global's start). The census shows it as people read it
+  (`Closure::displayName`): `lambda in Profile::StartSession`, `lambda #2 in ...` from the second on. A compiler-written lifecycle function is named for its
   operation and its type's scope: `__c4_delete_Holder_Tint32_E`.
 - `SymbolTable::AddFunctionRecord` appends `_<n>` to a symbol another function already has, so no two
   functions share one. A builtin or `[link]` symbol names a foreign function and is used as written.

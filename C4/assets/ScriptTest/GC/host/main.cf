@@ -65,6 +65,36 @@ void CheckGc(Scripting::Script* script, ScriptTest::Checks& checks)
 	checks.That(Pool::g_finalized - before >= 990, "dropping the script global frees its list");
 }
 
+// The last census's entry for `type` (nullptr: of no known type), or an empty one.
+GC::CensusEntry CensusOf(const char* type)
+{
+	GC::CensusEntry[512] entries;
+	const int32 count = GC::LastCensus(&entries[0], 512);
+	for (int32 i = 0; i < count && i < 512; ++i)
+	{
+		const bool same = type == nullptr ? entries[i].type == nullptr : entries[i].type != nullptr && strcmp((void*)entries[i].type, (void*)type) == 0;
+		if (same) return entries[i];
+	}
+	GC::CensusEntry none;
+	return none;
+}
+
+// The census names the script's types and counts what their objects hold; once the script is unloaded, the objects
+// the host still keeps are of no known type (the records went with the script).
+void CheckCensus(Scripting::Script* script, ScriptTest::Checks& checks)
+{
+	const bool was = GC::SetCensus(true);
+	CallWith(script, "KeepHolding", 10);
+	Collect();
+	const GC::CensusEntry held = CensusOf("HoldingNode");
+	checks.That(held.objects == 10u && held.nativeBytes >= 1000u, "the census counts the script's objects and what they hold");
+	script->Unload();
+	Collect();
+	checks.Equal(0, (int64)CensusOf("HoldingNode").objects, "an unloaded script's objects are of no known type");
+	checks.That(CensusOf(nullptr).objects >= 10u, "and still counted");
+	GC::SetCensus(was);
+}
+
 int32 main(int32 argc, char** argv)
 {
 	ScriptTest::Checks checks = ScriptTest::Begin(argc, argv);
@@ -72,5 +102,6 @@ int32 main(int32 argc, char** argv)
 	if (!host->IsOpen()) return checks.End("GC");
 	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "gc", "gc.cf"));
 	if (script->Ok()) CheckGc(script, checks);
+	if (script->Ok()) CheckCensus(script, checks);
 	return checks.End("GC");
 }

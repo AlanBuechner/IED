@@ -436,6 +436,14 @@ uint64_t c4_gc_drop_finalizers_in(const void* low, const void* high)
 	return dropped;
 }
 
+void c4_gc_forget_types_in(const void* low, const void* high)
+{
+	gc_os_lock();
+	GCState* gc = collector();
+	gc_census_forget_in(&gc->census, &gc->heap, low, high);
+	gc_os_unlock();
+}
+
 void c4_gc_register_root_enumerator(void* key, c4_gc_enum_roots_fn fn, void* user_data)
 {
 	if (!key || !fn) return;

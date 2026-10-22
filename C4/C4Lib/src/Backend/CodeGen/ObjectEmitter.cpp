@@ -4,6 +4,7 @@
 #include "Backend/CodeGen/CallEmitter.h"
 #include "Backend/CodeGen/ExprEmitter.h"
 #include "Backend/CodeGen/VtableEmitter.h"
+#include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/QualifiedName.h"
 #include "Model/Types/AggregateSlots.h"
@@ -48,8 +49,14 @@ namespace Scripting
 	{
 		const size_t size = objT && objT->GetSize() ? objT->GetSize() : kUnlaidObjectSize;
 		const size_t align = objT && objT->GetAlignment() ? objT->GetAlignment() : kDefaultAlignment;
-		const std::string name = objT ? QualifiedName(objT).c_str() : "";
-		return AllocateTyped(objT, m_Ctx.mctx().census().ObjectRecord(objT, name), m_Ctx.builder().getInt64(size), align);
+		return AllocateTyped(objT, m_Ctx.mctx().census().ObjectRecord(objT, CensusName(objT)), m_Ctx.builder().getInt64(size), align);
+	}
+
+	std::string ObjectEmitter::CensusName(const Type* type) const
+	{
+		if (!type) return "";
+		const Closure* closure = m_Ctx.mctx().model() ? m_Ctx.mctx().model()->ClosureOf(type) : nullptr;
+		return closure ? closure->displayName.c_str() : QualifiedName(type).c_str();
 	}
 
 	llvm::Value* ObjectEmitter::AllocateTyped(const Type* type, llvm::Constant* census, llvm::Value* size, uint64 align)
@@ -98,7 +105,7 @@ namespace Scripting
 		const uint64 countBytes = n->finalizer ? ArrayStorage::CountBytes(element->GetAlignment()) : 0;
 		const uint64 align = std::max<uint64>(element->GetAlignment(), kDefaultAlignment);
 		llvm::Value* size = B.CreateAdd(B.CreateBinaryIntrinsic(llvm::Intrinsic::umax, bytes, B.getInt64(1)), B.getInt64(countBytes));
-		llvm::Constant* census = m_Ctx.mctx().census().ArrayRecord(element, std::string(QualifiedName(element).c_str()) + "[]", countBytes);
+		llvm::Constant* census = m_Ctx.mctx().census().ArrayRecord(element, CensusName(element) + "[]", countBytes);
 		llvm::Value* base = AllocateTyped(element, census, size, align);
 		if (!countBytes) return base;
 		B.CreateStore(count, base);

@@ -63,7 +63,7 @@ namespace Scripting
 			// script support (C4Runtime/ScriptRuntimeC.h) and what the script host asks of the GC and reflection
 			"c4_script_module_create", "c4_script_at_exit", "c4_script_thread_at_exit", "c4_script_module_finish",
 			"c4_script_module_destroy", "__emutls_get_address", "c4_script_tls_release", "c4_script_image_add", "c4_script_image_remove",
-			"c4_script_throw", "c4_gc_add_root_table", "c4_gc_remove_root_table", "c4_gc_drop_finalizers_in", "c4_reflect_unload_source",
+			"c4_script_throw", "c4_gc_add_root_table", "c4_gc_remove_root_table", "c4_gc_drop_finalizers_in", "c4_gc_forget_types_in", "c4_reflect_unload_source",
 			"c4_reflect_notify_unload", "c4_reflect_remove_source",
 		};
 		return kNames;

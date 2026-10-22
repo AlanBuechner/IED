@@ -4,8 +4,8 @@
 #include <llvm/IR/GlobalVariable.h>
 #include <deque>
 #include <functional>
+#include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace Scripting
@@ -36,12 +36,13 @@ namespace Scripting
 		std::vector<Function> TakeFunctions() { return std::move(m_New); }
 
 	private:
-		llvm::Constant* Record(const std::string& name, const std::function<llvm::Constant*()>& counter);
-		llvm::Constant* Counter(const Type* type, const std::string& name, uint64 countBytes);
+		// The record of `type` (`array`: of arrays of it), made by `counter` the first time.
+		llvm::Constant* Record(const Type* type, bool array, const std::string& name, const std::function<llvm::Constant*()>& counter);
+		llvm::Constant* Counter(const Type* type, uint64 countBytes);
 		llvm::Constant* NoCounter();
 
 		ModuleContext& m_MCtx;
-		std::unordered_map<std::string, llvm::GlobalVariable*> m_Records;
+		std::map<std::pair<const Type*, bool>, llvm::GlobalVariable*> m_Records;   // by type, and whether of arrays
 		std::deque<FunctionRecord> m_Functions;
 		std::vector<Function> m_New;
 	};

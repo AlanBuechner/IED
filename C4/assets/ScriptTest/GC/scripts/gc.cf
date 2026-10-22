@@ -62,6 +62,21 @@ void KeepInHost(int32 count)
 	}
 }
 
+class HoldingNode : public Pool::Node
+{
+	public Core::Array<uint8> bytes;
+}
+
+void KeepHolding(int32 count)
+{
+	for (int32 i = 0; i < count; i++)
+	{
+		HoldingNode* node = new HoldingNode();
+		node->bytes.Reserve(100);
+		Pool::Keep(node);
+	}
+}
+
 void MakeGarbage(int32 count)
 {
 	for (int32 i = 0; i < count; i++)

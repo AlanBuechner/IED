@@ -6,11 +6,16 @@ namespace Scripting
 	class Type;
 	class ObjectType;
 	struct ConstantValue;
+	struct FunctionRecord;
 
 	/// A type's unique, readable name (D-50): enclosing namespaces and classes, the type's own name and its
 	/// template arguments - `Geo::Pair<float, int32>`, `Outer::Inner`, `Box<Geo::Point>*`. Two distinct types
 	/// never share one, so reflection can key types by it.
 	Core::String QualifiedName(const Type* type);
+
+	/// A function's readable name: `Geo::Shape::Area` for a method, `Geo::Distance` for a free function. Overloads
+	/// share it.
+	Core::String QualifiedName(const FunctionRecord& function);
 
 	/// QualifiedName in symbol characters (letters, digits, `_`): `*` is `P`, `&` is `R`, an extent `A<n>`,
 	/// template arguments `T...E`, so `int32*`, `int32&` and `int32[2]` stay distinct in a function's symbol.

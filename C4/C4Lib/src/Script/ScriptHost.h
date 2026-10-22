@@ -35,6 +35,7 @@ namespace Scripting
 		void (*addRootTable)(const void*) = nullptr;
 		void (*removeRootTable)(const void*) = nullptr;
 		uint64 (*dropFinalizersIn)(const void*, const void*) = nullptr;
+		void (*forgetTypesIn)(const void*, const void*) = nullptr;
 		void (*registerImage)(const char*, const void*) = nullptr;
 		void (*notifyUnload)(const char*) = nullptr;
 		uint32 (*removeSource)(const char*) = nullptr;

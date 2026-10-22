@@ -102,6 +102,23 @@ class GcCensusTests {
 		assert_true(dates->index == 3 && plain.objects == 4u && plain.nativeBytes == 0u, "a type that holds none");
 	}
 
+	[test("closures_by_the_code_they_are_in")]
+	public static void TestClosuresByTheCodeTheyAreIn() {
+		const bool was = GC::SetCensus(true);
+		Core::Array<uint8> seeds;
+		seeds.Resize(500);
+		// The first copies the array; the second, its last use, takes it.
+		func<int64()> first = [seeds]() -> int64 { return seeds.Capacity(); };
+		func<int64()> second = [seeds]() -> int64 { return seeds.Capacity(); };
+		GC::Collect();
+		const GC::CensusEntry one = CensusOf("lambda in GcCensusTests::TestClosuresByTheCodeTheyAreIn");
+		const GC::CensusEntry two = CensusOf("lambda #2 in GcCensusTests::TestClosuresByTheCodeTheyAreIn");
+		GC::SetCensus(was);
+		assert_true(first() >= 500 && second() >= 500, "the closures");
+		assert_true(one.objects == 1u && one.nativeBytes == (uint64)first(), "the first, with the array it captured");
+		assert_true(two.objects == 1u && two.nativeBytes == (uint64)second(), "the second");
+	}
+
 	[test("objects_from_before_have_no_type")]
 	public static void TestObjectsFromBeforeHaveNoType() {
 		const bool was = GC::SetCensus(false);

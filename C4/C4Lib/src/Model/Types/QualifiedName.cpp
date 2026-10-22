@@ -6,6 +6,7 @@
 #include "Model/Types/PointerType.h"
 #include "Model/Types/ReferenceType.h"
 #include "Model/Types/UnionType.h"
+#include "Model/SymbolTable.h"
 #include <cctype>
 #include <charconv>
 
@@ -108,6 +109,15 @@ namespace Scripting
 		}
 		default: return std::to_string(value.AsInt());
 		}
+	}
+
+	Core::String QualifiedName(const FunctionRecord& function)
+	{
+		const Core::String plain = function.name.empty() ? function.mangledName : function.name;
+		if (function.containingType) return QualifiedName(function.containingType) + "::" + plain;
+		Core::String scoped;
+		for (const Core::String& part : EnclosingNames(function.scope)) scoped += part + "::";
+		return scoped + plain;
 	}
 
 	Core::String SymbolToken(const Type* type) { return SymbolTokenOf(QualifiedName(type)); }

@@ -33,5 +33,7 @@ static inline void gc_census_note(const GCCensus* census, GCSpan* span, void* p,
 // Counts the heap's objects by the types noted, and what their types' nativeBytes say they hold: after a sweep, with
 // every other thread stopped and no span owned.
 void gc_census_take(GCCensus* census, const GCHeap* heap);
+// Every slot noted with a type whose record lies in [low, high) is of no known type again. Under the lock.
+void gc_census_forget_in(const GCCensus* census, const GCHeap* heap, const void* low, const void* high);
 // Copies up to `capacity` of the last census's entries to `out`: how many types it had.
 int32_t gc_census_last(const GCCensus* census, c4_gc_census_entry* out, int32_t capacity);
