@@ -106,6 +106,7 @@ An `error` or `cut` as the very first step happens before any header. When the s
 | `max_tokens` | `max-tokens` | 2 | text cut by `finish_reason=length`; the 2nd request finishes |
 | `max_tokens` | `max-tokens-mid-tool-args` | 2 | tool-call arguments cut by `length` (invalid JSON); the 2nd request sends the full call |
 | `empty` | `empty` | 1 | `finish_reason=stop`, no content, no tool calls |
+| `repetition` | `repetition-loop` | 2 | reasoning that repeats one sentence ~190 times (cut and discarded once its tail is one passage repeated); the 2nd request answers |
 | `reasoning_only` | `reasoning-only` | 1 | only `reasoning_content`, then stop |
 | `reasoning_only` | `reasoning-only-think-tag` | 1 | content that is only an unclosed `<think>` |
 | `announced_no_action` | `announced-no-action` | 1 | "Now I'll edit src/game/player.c to fix it:" and stop |

@@ -2,6 +2,7 @@ include "step.ch"
 include "request.ch"
 include "sse.ch"
 include "dialect.ch"
+include "repetition.ch"
 
 namespace Ai
 {
@@ -25,6 +26,11 @@ namespace Ai
 		public int64 lastByteMs;
 		public int64 prefillDeadlineMs;
 		public int64 prefillExtendMs;     // what a keepalive comment or a progress report adds before the first token
+		public int64 thinkingChecked;     // the lengths at their last repetition check
+		public int64 visibleChecked;
+		public int64 argumentsChecked;    // of call `checkedCall`, the one streaming
+		public int64 checkedCall;
+		public bool repeating;            // the reply is caught in a loop: the stream ends
 	}
 
 	// Never cuts a UTF-8 sequence: the end moves back to the start of the code point it falls in.
@@ -65,6 +71,25 @@ namespace Ai
 		if (stream.result->ttftMs < 0 && extended > stream.prefillDeadlineMs) stream.prefillDeadlineMs = extended;
 	}
 
+	// Whether `text` grew enough since its last check to be checked again, and now ends in a loop; moves the mark.
+	static bool Loops(Core::StringView text, int64& checked, int64 tailBytes) {
+		if (text.ByteLength() - checked < kRepetitionCheckBytes) return false;
+		checked = text.ByteLength();
+		return RepeatedTailPeriod(text, tailBytes) > 0;
+	}
+
+	static void CheckRepetition(StepStream& stream, const CompletionDelta& delta) {
+		if (delta.kind == DeltaKind::ToolCall) {
+			if (delta.call != stream.checkedCall) {
+				stream.checkedCall = delta.call;
+				stream.argumentsChecked = 0;
+			}
+			if (Loops(stream.result->completion->calls[delta.call]->arguments.View(), stream.argumentsChecked, kRepetitionArgumentBytes)) stream.repeating = true;
+			return;
+		}
+		if (Loops(stream.result->thinking.View(), stream.thinkingChecked, kRepetitionTailBytes) || Loops(stream.visible.View(), stream.visibleChecked, kRepetitionTailBytes)) stream.repeating = true;
+	}
+
 	static void TakeDelta(StepStream& stream, const CompletionDelta& delta, int64& knownCalls) {
 		if (delta.kind == DeltaKind::Progress) {
 			ExtendPrefill(stream);
@@ -85,6 +110,7 @@ namespace Ai
 			}
 			if (!delta.text.IsEmpty()) (*stream.events)(StepEventKind::CallArguments, delta.text.View(), delta.call);
 		}
+		CheckRepetition(stream, delta);
 	}
 
 	static void TakeEvent(StepStream& stream, const SseEvent& event, int64& knownCalls) {
@@ -188,6 +214,10 @@ namespace Ai
 				stream.lastByteMs = StepNowMs();
 				sse.Feed(bytes.View());
 				while (sse.Next(event)) TakeEvent(stream, event, knownCalls);
+				if (stream.repeating) {
+					stream.result->end = WireEnd::Repetition;
+					return;
+				}
 				if (stream.result->completion->done) {
 					stream.result->end = WireEnd::Completed;
 					return;
@@ -234,7 +264,7 @@ namespace Ai
 	}
 
 	const char* WireEndName(WireEnd end) {
-		const char*[8] names = { "completed", "connect_failed", "http_error", "disconnected_mid_stream", "stalled_prefill", "stalled_stream", "step_cap", "user_cancelled" };
+		const char*[9] names = { "completed", "connect_failed", "http_error", "disconnected_mid_stream", "stalled_prefill", "stalled_stream", "step_cap", "user_cancelled", "repetition" };
 		return names[(int32)end];
 	}
 }

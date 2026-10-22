@@ -253,6 +253,7 @@ namespace Ai
 			values.Push(action);
 			Nudge("announced_no_action", 2, chats->prompts.Note("announced_no_action", values).View());
 		}
+		else if (verdict == StepVerdict::Repetition) Nudge("repetition", 2, chats->prompts.Note("repeated_output").View());
 		else if (verdict == StepVerdict::Empty) Nudge("empty", 2, chats->prompts.Note("empty_reply").View());
 		else if (verdict == StepVerdict::ReasoningOnly) Nudge("reasoning_only", 2, chats->prompts.Note("reasoning_only").View());
 		else if (verdict == StepVerdict::MaxTokens) {

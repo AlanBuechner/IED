@@ -10,6 +10,7 @@ namespace Ai
 		if (step.end == WireEnd::Disconnected) return StepVerdict::Disconnected;
 		if (step.end == WireEnd::StalledPrefill) return StepVerdict::StalledPrefill;
 		if (step.end == WireEnd::StalledStream) return StepVerdict::StalledStream;
+		if (step.end == WireEnd::Repetition) return StepVerdict::Repetition;
 		return StepVerdict::StepCap;
 	}
 
@@ -25,10 +26,10 @@ namespace Ai
 	}
 
 	const char* VerdictName(StepVerdict verdict) {
-		const char*[15] names = {
+		const char*[16] names = {
 			"tool_calls", "answer", "user_cancelled",
 			"connect_failed", "http_error", "context_overflow", "disconnected_mid_stream", "stalled_prefill", "stalled_stream", "step_cap",
-			"max_tokens", "empty", "reasoning_only", "announced_no_action", "unparsed_tool_call"
+			"max_tokens", "empty", "reasoning_only", "announced_no_action", "unparsed_tool_call", "repetition"
 		};
 		return names[(int32)verdict];
 	}

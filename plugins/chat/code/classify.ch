@@ -9,7 +9,7 @@ namespace Ai
 	{
 		ToolCalls, Answer, Cancelled,
 		ConnectFailed, HttpError, ContextOverflow, Disconnected, StalledPrefill, StalledStream, StepCap,
-		MaxTokens, Empty, ReasoningOnly, AnnouncedNoAction, UnparsedToolCall
+		MaxTokens, Empty, ReasoningOnly, AnnouncedNoAction, UnparsedToolCall, Repetition
 	}
 
 	StepVerdict Classify(const StepResult& step);

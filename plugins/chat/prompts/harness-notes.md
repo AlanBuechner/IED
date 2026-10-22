@@ -11,6 +11,9 @@ The connection dropped while you were replying. Continue exactly where you stopp
 ## retry_tool_call_after_cut
 Your last tool call was cut off before its arguments were complete. Send the {tool} call again, complete.
 
+## repeated_output
+Your last reply was stopped and discarded because it kept repeating the same text. Do not go over it again: decide the next concrete step and take it with a tool call, keeping your reasoning short.
+
 ## empty_reply
 Your previous reply contained no answer and no tool call. Respond now: call a tool, or give your answer.
 

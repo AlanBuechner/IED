@@ -1,5 +1,6 @@
 // One model request of a run (docs/12 "The loop": a step): the streamed POST read under the watchdogs - the prefill
-// deadline until the first token (keepalive comments extend it), the idle one between chunks after it, a hard cap -
+// deadline until the first token (keepalive comments extend it), the idle one between chunks after it, a hard cap, a
+// reply caught repeating one passage (repetition.ch) -
 // and what arrived put together: reasoning from its fields and <think> blocks, text with any tool calls written as text
 // taken out of it, native tool calls merged by id then index. Text is handed out as it streams, a short tail held back
 // so a tool-call opener cut across chunks never shows as prose.
@@ -9,7 +10,7 @@ include "completion.ch"
 namespace Ai
 {
 	// How the request ended on the wire (docs/12 taxonomy, the transport and stall rows).
-	enum class WireEnd { Completed, ConnectFailed, HttpError, Disconnected, StalledPrefill, StalledStream, StepCap, Cancelled }
+	enum class WireEnd { Completed, ConnectFailed, HttpError, Disconnected, StalledPrefill, StalledStream, StepCap, Cancelled, Repetition }
 
 	enum class StepEventKind { Thinking, Text, CallStarted, CallArguments, Progress }
 

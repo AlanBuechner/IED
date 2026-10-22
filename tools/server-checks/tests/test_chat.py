@@ -814,6 +814,19 @@ class ChatTests(ChatCase):
 		turn = await self.last_turn(chat_id)
 		self.assertEqual(["empty", "empty", "paused"], [s["kind"] for s in self.segments(turn, "harness")])
 
+	async def test_a_looping_reply_is_cut_and_dropped(self):
+		chat_id, _ = await self.chat()
+		await self.use_model({}, script="repetition-loop")
+		self.model.post("/_fake/reset", {})
+		end = await self.turn(chat_id)
+		self.assertEqual("finished", end["stop"], end)
+		self.assertTrue(any(r.startswith("nudged after repetition") for r in end["recoveries"]), end["recoveries"])
+		requests = self.model.requests()
+		self.assertEqual(2, len(requests), "the loop was cut and asked again once")
+		sent = json.dumps(requests[-1]["body"]["messages"])
+		self.assertNotIn("check the header again", sent, "the looping reply is not sent back")
+		self.assertIn("kept repeating the same text", sent, "the note says why")
+
 	async def test_a_refused_request_pauses_with_the_servers_words(self):
 		chat_id, _ = await self.chat()
 		await self.use_model({}, script="context-overflow-openai")
