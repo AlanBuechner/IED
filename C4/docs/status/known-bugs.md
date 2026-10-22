@@ -82,8 +82,9 @@ Next ID: **BUG-365**
   together never share a slot even at -O3: a function returning an 80-byte struct from each of eight switch cases has
   a 704-byte frame (144 with one case). A tree-walking interpreter written in C4 (IED's language eval) overflows the
   1 MiB stack at about 209 nested script calls where the same program in Go reaches 100000.
-- **Repro:** `C:\Users\Alan\AppData\Local\Temp\ied-langeval\authoring\interp\repro-frame-size` (nuke build run):
-  prints both frame sizes.
+- **Repro:** `struct Value { int32 kind; int64 integer; Core::String text; int64* a; int64* b; int64* c; }` and a
+  recursive `static Value F(int64 n, int32 which)` whose switch has eight `case k: return F(n - 1, which - k);`;
+  the distance between `&local` at two depths is the frame size (one case: 144 bytes).
 - **Notes:** return into the caller's slot directly (copy elision for `return f(...)`), and emit lifetime markers
   for temporaries and locals so LLVM's stack coloring can share slots.
 
