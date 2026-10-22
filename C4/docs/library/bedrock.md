@@ -656,6 +656,10 @@ as `[link]` declarations, with no wrappers.
 |---|---|
 | `Collect()` | collect now (also while disabled) |
 | `GetStats()` | `GC::Stats { allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes, lastPauseNs }` |
+| `ThreadAllocated()` | `GC::AllocCounts { objects, bytes }`: the calling thread's allocations since it started, never reset (a pool slot counts at its size when `Take` hands it out); its own counters, no lock, so a profiler can read it around any scope |
+| `Allocated()` | every thread's `AllocCounts` so far, threads that ended included (takes the collector's lock) |
+| `SetAllocSampling(uint64 everyBytes)` | records about one allocation in every `everyBytes` a thread allocates, with its call stack, at points drawn at random so each sample stands for `everyBytes` bytes on average; 0 (default) turns it off; returns the previous setting. The calling thread takes a change up at once, another within 64 KiB |
+| `TakeAllocSamples(AllocSample* out, int32 capacity)` | moves up to `capacity` of the oldest waiting samples to `out` as `GC::AllocSample { bytes, timeNs, threadId, frameCount, frames[32] }` (return addresses, the allocating function's first; `timeNs` on `LastPauses`' clock); returns how many. The latest 4096 are kept |
 | `LastPauses(Pause* out, int32 capacity)` | the last collection's stops of the program, oldest first, as `GC::Pause { startNs, endNs }` in nanoseconds of the high-resolution counter (`Platform::Ticks()` scaled by 1e9 / `TickFrequency()`); returns how many there were: one for a stop-the-world collection, one per root copy and one to finish for a concurrent cycle. Read it in a collection callback for exact GC lanes in a profiler |
 | `SetPercent(int32)` | live-heap growth that starts the next automatic collection (default 100); returns the previous value |
 | `SetMarkThreads(int32)` | threads that mark a heap past 8 MiB, the collecting one included (-1 default: the processors, up to 8; 1: alone); returns the previous value |
@@ -1333,11 +1337,11 @@ PNG lacks, a palette index past the palette).
 
 ## 21. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 71 files, 623 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 72 files, 636 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test
@@ -1345,7 +1349,7 @@ assets\build-output\bedrock\tests.exe
 ```
 
 The exit code is the number of failed assertions. The `GC` namespace is covered by
-`assets/IsolatedTest/MemoryGC/`. Performance against the C++ standard library is `Benchmarks/bedrock/`
+`assets/IsolatedTest/MemoryGC/` and the gc, gc_pool and gc_alloc tests. Performance against the C++ standard library is `Benchmarks/bedrock/`
 ([test suites 8](../tools/05-test-suites.md#8-benchmarks)). Thin areas: reflection groups.
 
 ---

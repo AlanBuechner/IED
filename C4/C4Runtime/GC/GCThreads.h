@@ -7,6 +7,7 @@
 #include "GC/GCHeap.h"
 #include "GC/GCMark.h"
 #include "GCRuntimeC.h"
+#include "GC/GCSampling.h"
 
 typedef struct GCThreadCache
 {
@@ -22,6 +23,8 @@ typedef struct GCThread
 	c4_gc_root_range* locals;         // this thread's copies of the program's thread_local roots
 	size_t localCount;
 	volatile long inAllocator;        // inside the cache fast path
+	c4_gc_alloc_counts allocated;     // since it registered, never reset; only the thread itself writes it
+	GCSampler sampler;                // its countdown to the next sampled allocation
 	struct GCThread* next;
 } GCThread;
 

@@ -47,6 +47,8 @@ typedef struct GCState
 	const c4_gc_root_range* globals;
 	uint64_t collections;
 	uint64_t allocs;
+	c4_gc_alloc_counts ended;           // what threads that ended allocated
+	GCSampling sampling;                // sampled allocations (GCSampling.h)
 	uint64_t pauseNs;
 	uint64_t lastPauseNs;
 	GCStops cycleStops;                 // the running collection's stops so far

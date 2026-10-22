@@ -224,6 +224,51 @@ void gc_os_release_thread(GCOsThread* thread)
 
 uint64_t gc_os_this_thread_id(void) { return GetCurrentThreadId(); }
 
+#define GC_CAPTURE_MOST 64
+
+// Return addresses from the caller out, by each function's unwind data (none: a leaf), within the thread's stack.
+// RtlCaptureStackBackTrace finds no frame at all when called deeper than the stack has been before (BUG-342).
+static uint32_t walk_stack(void** all, uint32_t capacity)
+{
+	CONTEXT context;
+	RtlCaptureContext(&context);
+	ULONG_PTR low = 0, high = 0;
+	GetCurrentThreadStackLimits(&low, &high);
+	uint32_t count = 0;
+	while (count < capacity)
+	{
+		DWORD64 imageBase = 0;
+		PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(context.Rip, &imageBase, NULL);
+		if (function)
+		{
+			void* handlerData = NULL;
+			DWORD64 establisherFrame = 0;
+			RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, context.Rip, function, &context, &handlerData, &establisherFrame, NULL);
+		}
+		else if (context.Rsp >= low && context.Rsp + sizeof(DWORD64) <= high)
+		{
+			context.Rip = *(const DWORD64*)context.Rsp;
+			context.Rsp += sizeof(DWORD64);
+		}
+		else break;
+		if (!context.Rip || context.Rsp < low || context.Rsp >= high) break;
+		all[count++] = (void*)context.Rip;
+	}
+	return count;
+}
+
+uint32_t gc_os_capture_stack(void** frames, uint32_t capacity, const void* from)
+{
+	void* all[GC_CAPTURE_MOST];
+	const uint32_t count = walk_stack(all, GC_CAPTURE_MOST);
+	uint32_t start = 0;
+	while (start < count && all[start] != from) ++start;
+	if (start == count) start = 0;
+	uint32_t taken = 0;
+	for (uint32_t i = start; i < count && taken < capacity; ++i) frames[taken++] = all[i];
+	return taken;
+}
+
 void gc_os_yield(void) { SwitchToThread(); }
 
 int gc_os_suspend(const GCOsThread* thread)

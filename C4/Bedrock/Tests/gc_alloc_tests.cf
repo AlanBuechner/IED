@@ -1,0 +1,205 @@
+// GC: the allocations counted per thread and in all, and the sampled ones with their call stacks.
+
+include "bedrock.ch"
+
+class CountedBox {
+	public int64 index;
+	public CountedBox* next;
+}
+
+// `count` boxes, each reached from the next, so none can be left out: the last one made.
+static CountedBox* AllocateBoxes(int32 count) {
+	CountedBox* last = nullptr;
+	for (int32 i = 0; i < count; ++i) {
+		CountedBox* box = new CountedBox();
+		box->index = i;
+		box->next = last;
+		last = box;
+	}
+	return last;
+}
+
+// A box made at a site of its own.
+static CountedBox* AllocateOneBox() { return new CountedBox(); }
+
+// One box at each level on the way down, each level's frame over a page, so every allocation is made deeper in the
+// stack than the thread has been before.
+static CountedBox* Descend(int32 depth, CountedBox* above) {
+	uint8[6000] page;
+	page[(int64)depth % 6000] = (uint8)depth;
+	CountedBox* box = new CountedBox();
+	box->index = (int64)page[(int64)depth % 6000];
+	box->next = above;
+	return depth == 0 ? box : Descend(depth - 1, box);
+}
+
+// Takes every waiting sample: how many there were.
+static int32 DrainSamples() {
+	GC::AllocSample[64] samples;
+	int32 total = 0;
+	for (int32 taken = GC::TakeAllocSamples(&samples[0], 64); taken > 0; taken = GC::TakeAllocSamples(&samples[0], 64))
+		total += taken;
+	return total;
+}
+
+[test("gc_alloc")]
+class GcAllocTests {
+	[test("thread_counts_each_allocation")]
+	public static void TestThreadCountsEachAllocation() {
+		const GC::AllocCounts before = GC::ThreadAllocated();
+		CountedBox* first = AllocateBoxes(1);
+		const GC::AllocCounts one = GC::ThreadAllocated();
+		CountedBox* more = AllocateBoxes(1000);
+		const GC::AllocCounts after = GC::ThreadAllocated();
+		assert_true(first->index == 0 && more->index == 999, "the boxes were made");
+		assert_true(one.objects == before.objects + 1u, "one object");
+		assert_true(one.bytes - before.bytes >= sizeof(CountedBox), "of at least its size");
+		assert_true(after.objects == one.objects + 1000u, "a thousand more");
+		assert_true(after.bytes - one.bytes == 1000u * (one.bytes - before.bytes), "each of the same size");
+	}
+
+	[test("collections_keep_the_counts")]
+	public static void TestCollectionsKeepTheCounts() {
+		assert_true(AllocateBoxes(100)->index == 99, "boxes to free");
+		const GC::AllocCounts before = GC::ThreadAllocated();
+		GC::Collect();
+		const GC::AllocCounts after = GC::ThreadAllocated();
+		assert_true(after.objects == before.objects && after.bytes == before.bytes, "freeing objects takes nothing back");
+	}
+
+	[test("pool_slots_count")]
+	public static void TestPoolSlotsCount() {
+		GC::Pool pool = GC::Pool(sizeof(CountedBox), 8);
+		const GC::AllocCounts before = GC::ThreadAllocated();
+		void* slot = pool.Take();
+		const GC::AllocCounts after = GC::ThreadAllocated();
+		assert_true(slot != nullptr, "a slot");
+		assert_true(after.objects == before.objects + 1u, "a slot taken is one object");
+		assert_true(after.bytes - before.bytes == (uint64)pool.SlotBytes(), "of the slot's size");
+		pool.Give(slot);
+		pool.Close();
+	}
+
+	[test("all_threads_count")]
+	public static void TestAllThreadsCount() {
+		const GC::AllocCounts before = GC::Allocated();
+		const GC::AllocCounts mineBefore = GC::ThreadAllocated();
+		uint64 theirs = 0u;
+		Threading::Thread worker = Threading::Thread::Run([&theirs]() {
+			const GC::AllocCounts start = GC::ThreadAllocated();
+			CountedBox* boxes = AllocateBoxes(5000);
+			const GC::AllocCounts end = GC::ThreadAllocated();
+			theirs = boxes->index == 4999 ? end.objects - start.objects : 0u;
+		});
+		worker.Join();
+		const GC::AllocCounts mine = GC::ThreadAllocated();
+		const GC::AllocCounts after = GC::Allocated();
+		assert_true(theirs == 5000u, "the worker counted its own");
+		assert_true(mine.objects - mineBefore.objects < 5000u, "which are not this thread's");
+		assert_true(after.objects - before.objects >= 5000u + (mine.objects - mineBefore.objects), "the total keeps an ended thread's");
+	}
+
+	[test("sampling_every_byte_takes_each_allocation")]
+	public static void TestSamplingEveryByte() {
+		const uint64 previous = GC::SetAllocSampling(1u);
+		DrainSamples();
+		const GC::AllocCounts before = GC::ThreadAllocated();
+		CountedBox* boxes = AllocateBoxes(10);
+		const GC::AllocCounts after = GC::ThreadAllocated();
+		GC::SetAllocSampling(previous);
+		GC::AllocSample[64] samples;
+		const int32 count = GC::TakeAllocSamples(&samples[0], 64);
+		assert_true(boxes->index == 9 && after.objects == before.objects + 10u, "ten boxes");
+		assert_eq(10, count, "each one sampled");
+		const uint64 boxBytes = (after.bytes - before.bytes) / 10u;
+		for (int32 i = 0; i < count; ++i) {
+			assert_true(samples[i].bytes == boxBytes, "of a box's size");
+			assert_true(samples[i].frameCount >= 2, "from the allocating function out");
+			assert_true(samples[i].frames[1] == samples[0].frames[1], "all from the one function's frame");
+			assert_true(samples[i].threadId == samples[0].threadId && samples[i].threadId != 0u, "on this thread");
+			assert_true(samples[i].timeNs >= samples[0].timeNs, "oldest first");
+		}
+	}
+
+	[test("sampling_tells_sites_apart")]
+	public static void TestSamplingTellsSitesApart() {
+		const uint64 previous = GC::SetAllocSampling(1u);
+		DrainSamples();
+		CountedBox* first = AllocateBoxes(1);
+		CountedBox* second = AllocateOneBox();
+		GC::SetAllocSampling(previous);
+		GC::AllocSample[64] samples;
+		const int32 count = GC::TakeAllocSamples(&samples[0], 64);
+		assert_true(first != second, "two boxes");
+		assert_eq(2, count, "both sampled");
+		assert_true(samples[0].frames[0] != samples[1].frames[0], "each at its own site, not the runtime's");
+	}
+
+	[test("sampling_tells_pool_slots")]
+	public static void TestSamplingTellsPoolSlots() {
+		GC::Pool pool = GC::Pool(sizeof(CountedBox), 4);
+		const uint64 previous = GC::SetAllocSampling(1u);
+		DrainSamples();
+		void* slot = pool.Take();
+		GC::SetAllocSampling(previous);
+		GC::AllocSample[4] samples;
+		const int32 count = GC::TakeAllocSamples(&samples[0], 4);
+		assert_true(slot != nullptr, "a slot");
+		assert_eq(1, count, "the slot taken is sampled");
+		assert_true(samples[0].bytes == (uint64)pool.SlotBytes() && samples[0].frameCount >= 2, "at its size, with its stack");
+		pool.Give(slot);
+		pool.Close();
+	}
+
+	[test("bug342_samples_from_a_fresh_stack")]
+	public static void TestSamplesFromAFreshStack() {
+		const uint64 previous = GC::SetAllocSampling(1u);
+		DrainSamples();
+		int64 bottom = -1;
+		Threading::Thread worker = Threading::Thread::Run([&bottom]() {
+			GC::SetAllocSampling(1u);
+			bottom = Descend(40, nullptr)->index;
+		});
+		worker.Join();
+		GC::SetAllocSampling(previous);
+		GC::AllocSample[64] samples;
+		const int32 count = GC::TakeAllocSamples(&samples[0], 64);
+		int32 cut = 0;
+		for (int32 i = 0; i < count; ++i)
+			if (samples[i].frameCount < 2) cut += 1;
+		assert_true(bottom == 0 && count >= 41, "each level sampled");
+		assert_eq(0, cut, "each stack walked past the allocating function, however deep the thread had been");
+	}
+
+	[test("sampling_off_takes_nothing")]
+	public static void TestSamplingOffTakesNothing() {
+		const uint64 previous = GC::SetAllocSampling(0u);
+		DrainSamples();
+		assert_true(AllocateBoxes(100000)->index == 99999, "boxes");
+		const int32 count = DrainSamples();
+		GC::SetAllocSampling(previous);
+		assert_eq(0, count, "no samples while it is off");
+	}
+
+	[test("sampling_draws_about_one_in_every")]
+	public static void TestSamplingRate() {
+		const uint64 previous = GC::SetAllocSampling(16384u);
+		DrainSamples();
+		const GC::AllocCounts before = GC::ThreadAllocated();
+		assert_true(AllocateBoxes(200000)->index == 199999, "boxes");
+		const GC::AllocCounts after = GC::ThreadAllocated();
+		const int32 count = DrainSamples();
+		GC::SetAllocSampling(previous);
+		const double expected = (double)(after.bytes - before.bytes) / 16384.0;
+		assert_true((double)count > expected * 0.5 && (double)count < expected * 1.5, "about one sample in every 16 KiB");
+	}
+
+	[test("ring_keeps_the_latest")]
+	public static void TestRingKeepsTheLatest() {
+		const uint64 previous = GC::SetAllocSampling(1u);
+		DrainSamples();
+		assert_true(AllocateBoxes(5000)->index == 4999, "boxes");
+		GC::SetAllocSampling(previous);
+		assert_eq(4096, DrainSamples(), "the latest 4096 kept");
+	}
+}

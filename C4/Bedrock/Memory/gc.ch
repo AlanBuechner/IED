@@ -23,6 +23,34 @@ namespace GC
 	[link("c4_gc_collect")] void Collect();
 	[link("c4_gc_get_stats")] Stats GetStats();
 
+	// Allocations counted as they are made: objects, and the bytes asked for (a slot's size when a Pool hands one out).
+	struct AllocCounts
+	{
+		public uint64 objects;
+		public uint64 bytes;
+	}
+	// The calling thread's allocations since it started, never reset; reads the thread's own counters, no lock, so a
+	// profiler can take it around any scope.
+	[link("c4_gc_thread_allocated")] AllocCounts ThreadAllocated();
+	// Every thread's allocations so far, those of threads that ended included (takes the collector's lock).
+	[link("c4_gc_allocated")] AllocCounts Allocated();
+
+	// One sampled allocation (SetAllocSampling).
+	struct AllocSample
+	{
+		public uint64 bytes;        // the allocation's size
+		public uint64 timeNs;       // when, on LastPauses' clock
+		public uint64 threadId;     // the allocating thread's OS id
+		public int32 frameCount;
+		public void*[32] frames;    // return addresses, the allocating function's first
+	}
+	// About one allocation in every `everyBytes` bytes a thread allocates is recorded with its call stack, at points
+	// drawn at random so that each sample stands for `everyBytes` bytes on average; 0 (the default) turns it off.
+	// Returns the previous setting. The calling thread takes a change up at once, another within 64 KiB.
+	[link("c4_gc_set_alloc_sampling")] uint64 SetAllocSampling(uint64 everyBytes);
+	// Moves up to `capacity` of the oldest waiting samples to `out`: how many. The latest 4096 are kept.
+	[link("c4_gc_take_alloc_samples")] int32 TakeAllocSamples(AllocSample* out, int32 capacity);
+
 	// One stop of the program by a collection, in nanoseconds of the system's high-resolution counter
 	// (Platform::Ticks() scaled by 1e9 / Platform::TickFrequency()).
 	struct Pause

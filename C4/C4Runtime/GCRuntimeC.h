@@ -132,6 +132,34 @@ typedef struct c4_gc_stats
 
 c4_gc_stats c4_gc_get_stats(void);
 
+// Allocations counted as they are made: objects, and the bytes asked for (an occupied pool slot's size).
+typedef struct c4_gc_alloc_counts
+{
+	uint64_t objects;
+	uint64_t bytes;
+} c4_gc_alloc_counts;
+// The calling thread's allocations since it registered, never reset: a read of the thread's own counters, no lock.
+c4_gc_alloc_counts c4_gc_thread_allocated(void);
+// Every thread's, those that ended included (takes the lock).
+c4_gc_alloc_counts c4_gc_allocated(void);
+
+// Sampled allocations, for a profiler: about one allocation in every `everyBytes` bytes a thread allocates is recorded
+// with its call stack, at points drawn at random so that each sample stands for `everyBytes` bytes on average whatever
+// the program's pattern. 0 (the default) turns it off. Returns the previous setting. The calling thread takes a change
+// up at once, another thread within 64 KiB of its allocations.
+#define C4_GC_SAMPLE_FRAMES 32
+typedef struct c4_gc_alloc_sample
+{
+	uint64_t bytes;                       // the allocation's size
+	uint64_t timeNs;                      // when, on c4_gc_last_pauses' clock
+	uint64_t threadId;                    // the allocating thread's OS id
+	uint32_t frameCount;
+	void* frames[C4_GC_SAMPLE_FRAMES];    // return addresses, the allocating function's first
+} c4_gc_alloc_sample;
+uint64_t c4_gc_set_alloc_sampling(uint64_t everyBytes);
+// Moves up to `capacity` of the oldest waiting samples to `out`: how many. The runtime keeps the latest 4096.
+int32_t c4_gc_take_alloc_samples(c4_gc_alloc_sample* out, int32_t capacity);
+
 // One stop of the program by a collection, in nanoseconds of the system's high-resolution counter
 // (QueryPerformanceCounter scaled to nanoseconds).
 typedef struct c4_gc_pause

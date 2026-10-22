@@ -63,6 +63,8 @@ static void on_thread_exit(void* data)
 	gc_os_lock();
 	GCState* gc = collector();
 	gc_thread_flush_cache(thread, &gc->heap, &gc->allocs);
+	gc->ended.objects += thread->allocated.objects;
+	gc->ended.bytes += thread->allocated.bytes;
 	gc_threads_remove(&gc->threads, thread);
 	gc_os_unlock();
 	t_self = NULL;
@@ -178,9 +180,32 @@ static int cycle_outrun(const GCState* gc)
 	return gc_concurrent_busy(gc) && gc_heap_live_bytes(&gc->heap) >= gc->nextCollection * 2;
 }
 
-static void* allocate(GCAllocRequest request)
+static void sample(GCThread* self, uint64_t bytes, const void* caller)
 {
-	GCThread* self = this_thread();
+	GCState* gc = collector();
+	c4_gc_alloc_sample record;
+	record.bytes = bytes;
+	record.timeNs = gc_os_now_ns();
+	record.threadId = self->os.id;
+	record.frameCount = gc_os_capture_stack(record.frames, C4_GC_SAMPLE_FRAMES, caller);
+	gc_os_lock();
+	gc_sampling_push(&gc->sampling, &record);
+	gc_os_unlock();
+}
+
+// Counts an allocation `caller` made on `self`, and samples it when its turn has come.
+static void note_allocation(GCThread* self, uint64_t bytes, const void* caller)
+{
+	self->allocated.objects += 1;
+	self->allocated.bytes += bytes;
+	self->sampler.untilCheck -= (int64_t)bytes;
+	if (self->sampler.untilCheck >= 0) return;
+	const uint64_t seed = (uint64_t)(uintptr_t)self ^ gc_os_now_ns();
+	if (gc_sampler_due(&self->sampler, &collector()->sampling, bytes, seed)) sample(self, bytes, caller);
+}
+
+static void* allocate_object(GCThread* self, GCAllocRequest request)
+{
 	const int spanClass = gc_heap_small_class(request);
 	if (spanClass >= 0)
 	{
@@ -205,14 +230,22 @@ static void* allocate(GCAllocRequest request)
 	}
 }
 
+static void* allocate(GCAllocRequest request, const void* caller)
+{
+	GCThread* self = this_thread();
+	void* p = allocate_object(self, request);
+	note_allocation(self, request.size, caller);
+	return p;
+}
+
 static GCAllocRequest request_of(size_t size, size_t align, int noscan)
 {
 	GCAllocRequest request = { size, align, noscan };
 	return request;
 }
 
-void* c4_alloc(size_t size, size_t align) { return allocate(request_of(size, align, 0)); }
-void* c4_alloc_noscan(size_t size, size_t align) { return allocate(request_of(size, align, 1)); }
+void* c4_alloc(size_t size, size_t align) { return allocate(request_of(size, align, 0), __builtin_return_address(0)); }
+void* c4_alloc_noscan(size_t size, size_t align) { return allocate(request_of(size, align, 1), __builtin_return_address(0)); }
 
 void c4_free(void* ptr)
 {
@@ -430,18 +463,28 @@ void* c4_gc_pool_base(const c4_gc_pool* pool) { return pool ? ((const GCPool*)po
 size_t c4_gc_pool_slot_size(const c4_gc_pool* pool) { return pool ? ((const GCPool*)pool)->desc.slot_size : 0; }
 size_t c4_gc_pool_slot_count(const c4_gc_pool* pool) { return pool ? ((const GCPool*)pool)->desc.slot_count : 0; }
 
-static bool set_occupied(c4_gc_pool* pool, void* object, int occupied)
+// Whether the slot was occupied before (-1: `object` starts no slot of the pool).
+static int set_occupied(c4_gc_pool* pool, void* object, int occupied)
 {
 	const int64_t slot = pool ? gc_pool_slot_of((const GCPool*)pool, object) : -1;
-	if (slot < 0) return false;
+	if (slot < 0) return -1;
 	gc_os_lock();
+	const int was = gc_pool_occupied((const GCPool*)pool, (size_t)slot) != 0;
 	gc_pool_set_occupied((GCPool*)pool, (size_t)slot, occupied, __atomic_load_n(&collector()->heap.allocateMarked, __ATOMIC_ACQUIRE));
 	gc_os_unlock();
-	return true;
+	return was;
 }
 
-bool c4_gc_pool_occupy(c4_gc_pool* pool, void* object) { return set_occupied(pool, object, 1); }
-bool c4_gc_pool_vacate(c4_gc_pool* pool, void* object) { return set_occupied(pool, object, 0); }
+// Occupying a vacant slot is an allocation of the slot's size.
+bool c4_gc_pool_occupy(c4_gc_pool* pool, void* object)
+{
+	GCThread* self = this_thread();
+	const int was = set_occupied(pool, object, 1);
+	if (was == 0) note_allocation(self, c4_gc_pool_slot_size(pool), __builtin_return_address(0));
+	return was >= 0;
+}
+
+bool c4_gc_pool_vacate(c4_gc_pool* pool, void* object) { return set_occupied(pool, object, 0) >= 0; }
 
 bool c4_gc_pool_occupied(const c4_gc_pool* pool, const void* object)
 {
@@ -480,6 +523,41 @@ static c4_gc_stats locked_stats(void)
 }
 
 c4_gc_stats c4_gc_get_stats(void) { return locked_stats(); }
+
+c4_gc_alloc_counts c4_gc_thread_allocated(void) { return this_thread()->allocated; }
+
+uint64_t c4_gc_set_alloc_sampling(uint64_t everyBytes)
+{
+	GCThread* self = this_thread();
+	gc_os_lock();
+	const uint64_t previous = gc_sampling_set(&collector()->sampling, everyBytes);
+	gc_os_unlock();
+	self->sampler.untilCheck = 0;
+	self->sampler.checkSpan = 0;
+	return previous;
+}
+
+int32_t c4_gc_take_alloc_samples(c4_gc_alloc_sample* out, int32_t capacity)
+{
+	gc_os_lock();
+	const int32_t taken = gc_sampling_take(&collector()->sampling, out, capacity);
+	gc_os_unlock();
+	return taken;
+}
+
+c4_gc_alloc_counts c4_gc_allocated(void)
+{
+	gc_os_lock();
+	const GCState* gc = collector();
+	c4_gc_alloc_counts total = gc->ended;
+	for (const GCThread* thread = gc->threads.all; thread; thread = thread->next)
+	{
+		total.objects += thread->allocated.objects;
+		total.bytes += thread->allocated.bytes;
+	}
+	gc_os_unlock();
+	return total;
+}
 
 int32_t c4_gc_last_pauses(c4_gc_pause* out, int32_t capacity)
 {
