@@ -1,0 +1,5 @@
+class Handle {
+	public int32 id;
+	~Handle() { id = 0; }
+}
+int32 main() { Handle h; return h.id; }

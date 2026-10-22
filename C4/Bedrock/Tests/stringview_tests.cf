@@ -184,6 +184,23 @@ public static void TestAffixesAndOrder() {
 	assert_true(Core::StringView("same").Hash() == Core::StringView("xsame").Substring(1, 4).Hash(), "equal bytes hash alike");
 }
 
+[test("str.index_of_from")]
+public static void TestIndexOfFrom() {
+	Core::StringView s = Core::StringView("aaab aab ab");
+	assert_eq(1, s.IndexOf(Core::StringView("aab"), 0), "past a first byte that starts no match");
+	assert_eq(5, s.IndexOf(Core::StringView("aab"), 2), "from a start");
+	assert_eq(-1, s.IndexOf(Core::StringView("aab"), 6), "none after it");
+	assert_eq(9, s.IndexOf(Core::StringView("ab"), 9), "a match that ends the text");
+	assert_eq(-1, s.IndexOf(Core::StringView("abc"), 9), "a part longer than what is left");
+	assert_eq(-1, s.IndexOf('a', 11), "a start at the end");
+	assert_eq(-1, s.IndexOf('a', 50), "a start past the end");
+	assert_eq(11, s.IndexOf(Core::StringView(""), 11), "the empty part at the end");
+	assert_eq(-1, s.IndexOf(Core::StringView(""), 12), "and not past it");
+	Core::StringView high = Core::StringView("x\xc3\xa9y\xc3\xa9");
+	assert_eq(1, high.IndexOf((char)0xC3, 0), "a byte above 127");
+	assert_eq(4, high.IndexOf(Core::StringView("\xc3\xa9"), 2), "a part that starts with one");
+}
+
 
 // BUG-288: making a view decoded every byte, so views of a growing buffer made reading it quadratic.
 [test("str.views_cost_nothing_to_make")]

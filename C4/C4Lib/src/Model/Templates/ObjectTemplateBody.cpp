@@ -219,7 +219,7 @@ namespace Scripting
 		}
 		const FunctionDefinitionNode& named = ool.fn ? *ool.fn : fn;
 
-		FunctionType* sig = new FunctionType(rt.value, params);
+		FunctionType* sig = new FunctionType(rt.value, params, fn.IsVariadic());
 		FunctionRecord rec;
 		rec.type = m_Model.m_Types->Own(sig);
 		rec.scope = m_Scope;

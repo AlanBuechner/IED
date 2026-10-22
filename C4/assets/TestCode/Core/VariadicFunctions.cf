@@ -80,3 +80,28 @@ double SumDoubles(int32 count, ...) {
 	va_end(list);
 	return sum;
 }
+
+// '...' is part of a function's type: a method can be variadic, and a function with a variadic one's parameters is not.
+struct VarTally {
+	public int32 total;
+	public void AddAll(int32 count, ...) {
+		va_list list;
+		va_start(list);
+		for (int32 i = 0; i < count; i++) total += va_arg(list, int32);
+		va_end(list);
+	}
+	public static int32 CountOf(int32 count, ...) { return count; }
+}
+
+int32 VarFirstOf(int32 count, ...) { return count; }
+int32 VarTwice(int32 v) { return v * 2; }
+
+void TestVariadicSignatures() {
+	VarTally tally;
+	tally.total = 0;
+	tally.AddAll(3, 1, 2, 3);
+	AssertEqual(6, tally.total);
+	AssertEqual(2, VarTally::CountOf(2, 7, 8));
+	AssertEqual(4, VarFirstOf(4, 1.5, 2));
+	AssertEqual(10, VarTwice(5));
+}

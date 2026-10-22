@@ -51,6 +51,8 @@ namespace Scripting
 		/// Pick one signature from a candidate set against the call's argument types (doc 08):
 		/// Resolved -> its signature; Ambiguous/NotFound -> an actionable error.
 		static Core::String BracedArgumentHint(const Core::Vector<const Type*>& argTypes);
+		/// "no member 'x' in 'T'", with the member it most likely meant (MemberSuggestion).
+		static Core::String NoMember(const ProgramModel& model, const ObjectType* type, const Core::String& name);
 		QueryResult<const FunctionType*> ResolveAndReturn(const ProgramModel& model, const Core::Vector<OverloadCandidate>& candidates,
 			const Core::Vector<const Type*>& argTypes, const Core::String& name, const FunctionRecord** outRecord = nullptr) const;
 

@@ -188,6 +188,9 @@ namespace Scripting
 			if (!bound.Ok()) return m_Ctx.Fail(n->GetCallee().Get(), QueryResult<void>::Fail(bound.error, bound.message));
 			args.nodes[i] = bound.value;
 		}
+		for (size_t i = sig.GetParameterCount(); i < args.nodes.size(); ++i)
+			if (auto passed = VarArgs::CheckPassed(m_Ctx, args.nodes[i] ? args.nodes[i]->type : nullptr, i); !passed.Ok())
+				return m_Ctx.Fail(n->GetCallee().Get(), passed);
 		return QueryResult<void>::Success();
 	}
 
@@ -199,7 +202,7 @@ namespace Scripting
 		for (uint32 i = (uint32)nodes.size(); i < sig.GetParameterCount(); ++i)
 		{
 			const FunctionType::ParameterInfo& param = sig.GetParameters()[i];
-			if (!param.m_Type || param.m_IsVariadic) break; // a variadic tail has no defaults
+			if (!param.m_Type) break;
 			if (rec.paramDefaults.Count() <= i || !rec.paramDefaults[i])
 				return m_Ctx.Fail(callee, QueryResult<void>::Fail(QueryError::NotFound,
 					"too few arguments for '" + name + "': parameter " + std::to_string((int)(i + 1)) + " has no default value"));

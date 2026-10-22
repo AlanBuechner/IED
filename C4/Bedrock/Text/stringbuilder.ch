@@ -35,7 +35,8 @@ namespace Core
 		// Rounded to `decimals` fraction digits; a negative `decimals` writes the shortest text that reads
 		// back as the same value. Infinities and NaN are written as `inf` and `nan`.
 		public void AppendDouble(double value, int32 decimals);
-		public void AppendFloat(float value, int32 decimals) { AppendDouble((double)value, decimals); }
+		// As AppendDouble, the shortest text being the shortest that reads back as the same float (0.1f is 0.1).
+		public void AppendFloat(float value, int32 decimals);
 
 		public void Clear() { length = 0; if (buffer) buffer[0] = (char)0; }
 		// Keeps the first `byteLength` bytes; a longer length changes nothing.

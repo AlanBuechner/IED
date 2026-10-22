@@ -92,7 +92,11 @@ class ProcessUsageTests {
 		assert_true(Process::GetUsage(id, usage) && usage.workingSetBytes > 0, "a child it started, read by its id");
 		child.Kill();
 		child.Wait(kProcessWaitMs);
+		Process::Usage final;
+		assert_true(child.GetUsage(final), "the Child answers after its process ended");
+		assert_true(final.peakWorkingSetBytes > 0 && final.peakPrivateBytes > 0 && final.cpuTimeNs >= 0, "with its totals");
 		child.Close();
+		assert_true(!child.GetUsage(final), "a closed Child has no usage");
 		usage.privateBytes = 7;
 		assert_true(!Process::GetUsage(id, usage), "an ended process is gone");
 		assert_eq((int64)0, usage.privateBytes, "and says nothing");
@@ -107,6 +111,7 @@ class ProcessRunTests {
 		assert_eq((int64)0, result.exitCode, "cmd exits with 0");
 		assert_true(result.output.View() == "hello\r\n", "what it printed");
 		assert_true(result.errors.View().IsEmpty() && result.error.View().IsEmpty(), "nothing on stderr, no failure");
+		assert_true(result.usage.peakWorkingSetBytes > 0, "what the program used in all");
 	}
 
 	[test("exit_codes")]

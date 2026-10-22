@@ -90,7 +90,7 @@ namespace Scripting
 			if (p->HasDefaultValue()) ++defaults;
 		}
 		out.returnType = returned.value;
-		out.type = m_Ctx.model->m_Types->Function(returned.value, types);
+		out.type = m_Ctx.model->m_Types->Function(returned.value, types, fn.IsVariadic());
 		out.minArity = out.params.Count() > defaults ? out.params.Count() - defaults : 0;
 		return true;
 	}
@@ -184,7 +184,6 @@ namespace Scripting
 	{
 		const FunctionRecord rec = FreeRecord(f, sig, receiver);
 		CheckFreeModifiers(f, rec);
-		if (f.fn->IsVariadic()) sig.type->SetVariadic(true); // overload resolution accepts the extra arguments
 		const FunctionRecord* stored = m_Ctx.model->Symbols()->AddFunctionRecord(rec);
 		m_Ctx.model->m_RecordBySignature.emplace(sig.type, stored);
 		if (receiver.primitive) m_Ctx.model->m_PrimitiveExtensions[receiver.primitive].Push(stored);

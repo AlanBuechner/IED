@@ -89,11 +89,13 @@ Adding a test:
 ```text
 "FolderName": {
     "expect": ["substring of the expected diagnostic"],
+    "reject": ["substring the output must not hold"],
     "reason": "why this must be an error and what a good message says"
 }
 ```
 
-- The runner compiles each folder and requires compilation to **fail** with every expected substring.
+- The runner compiles each folder and requires compilation to **fail** with one of the expected substrings
+  and none of the rejected ones (`reject` is optional: it pins that a follow-on error is not reported).
   A folder that compiles, a message that drifted, or an unregistered folder are all failures.
 - Substrings match literally (brackets, quotes and `?` included).
 - The manifest's `reason` fields also record known weak diagnostics (for example
@@ -352,6 +354,23 @@ a module per module, wrapping arithmetic), and each is built cold, again with no
 one function of the middle module changes, and after it changes back: C4 as Nuke's Debug (`-O0 -g --incremental`),
 Development (`-O3 -g --incremental`) and Dist (`-O3`) build it, Go with `go build` (a fresh `GOCACHE`), Rust with
 `cargo build` and `cargo build --release` (a fresh target folder). A toolchain that is not installed is skipped.
+
+Results (2026-10-22, 16 threads, after B69; seconds; Go 1.26.6, Rust 1.98.1):
+
+| Build | cold | unchanged | edit | undo |
+|---|---|---|---|---|
+| C4 Debug (`-O0 -g --incremental`) | 2.20 | 1.16 | 1.25 | 1.28 |
+| C4 Development (`-O3 -g --incremental`) | 4.55 | 1.25 | 1.77 | 2.42 |
+| C4 Dist (`-O3`) | 21.27 | 12.84 | 12.96 | 13.14 |
+| Go (`go build`) | 12.04 | 0.49 | 0.63 | 0.52 |
+| Rust dev (`cargo build`) | 5.76 | 0.04 | 1.83 | 1.35 |
+| Rust release (`cargo build --release`) | 10.24 | 0.04 | 10.56 | 6.76 |
+
+C4's incremental builds beat Rust's in every column but the unchanged one, and Go's cold build (which compiles
+its standard library into the fresh cache). The unchanged column calls the compiler; Nuke does not call it for an
+unchanged project, as cargo and go check their own caches first. Go's edit loop is still twice as fast: what is
+left of C4's is the front end (parsing, the model, HIR lowering) and the link, serial and run in full every build.
+A Dist build optimizes the whole program on one thread (12 s of its 21).
 
 `Benchmarks/bedrock/` (`run-benchmark.ps1`): Bedrock against the C++ standard library at `-O2`, the same kernels
 over the same pseudo-random data in `bedrock.cf` and `bedrock.cpp`, each timed in process (median of 5 runs) with a

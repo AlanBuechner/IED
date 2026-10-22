@@ -350,8 +350,7 @@ namespace Scripting
 				out.source.push_back(index);
 			}
 		}
-		FunctionType* sig = new FunctionType(rt.value, params);
-		if (fn.IsVariadic()) sig->SetVariadic(true);
+		FunctionType* sig = new FunctionType(rt.value, params, fn.IsVariadic());
 		out.type = model.m_Types->Own(sig);
 		return Result::Success(out);
 	}

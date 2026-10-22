@@ -1,0 +1,6 @@
+include "bedrock.ch"
+int32 main() {
+	Core::String name = Core::String("ada");
+	printf("%s\n", name);
+	return 0;
+}

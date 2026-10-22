@@ -1,0 +1,69 @@
+// Text helpers (Text/textparts.ch): Split and SplitParts, ASCII case, ParseDouble.
+
+include "bedrock.ch"
+
+static bool TpViewIs(Core::StringView view, const char* text) { return view == text; }
+
+[test("text.split")]
+class TextSplitTests {
+	[test("views")]
+	public static void TestViews() {
+		Core::String line = Core::String("a,,b,c");
+		Core::Array<Core::StringView> parts = line.View().Split(',');
+		assert_eq((int64)4, parts.Count(), "n separators give n + 1 parts");
+		assert_true(TpViewIs(parts[0], "a") && TpViewIs(parts[1], "") && TpViewIs(parts[2], "b") && TpViewIs(parts[3], "c"), "empty parts kept");
+		assert_true(parts[2].Data() == line.CStr() + 3, "a part is a view into the text");
+	}
+
+	[test("strings")]
+	public static void TestStrings() {
+		Core::Array<Core::String> words = Core::String("x::y::").Split("::");
+		assert_eq((int64)3, words.Count(), "a separator of several bytes");
+		assert_true(words[0] == "x" && words[1] == "y" && words[2] == "", "a trailing separator ends with an empty part");
+		Core::Array<Core::String> one = Core::String("").Split(',');
+		assert_true(one.Count() == 1 && one[0].IsEmpty(), "an empty text is one empty part");
+		Core::Array<Core::String> whole = Core::String("abc").Split("");
+		assert_true(whole.Count() == 1 && whole[0] == "abc", "an empty separator gives the whole text");
+	}
+
+	[test("walk_without_allocating")]
+	public static void TestWalk() {
+		Core::SplitParts parts = Core::SplitParts(Core::StringView("k=v=w"), '=');
+		Core::StringView part;
+		int32 count = 0;
+		Core::StringBuilder seen;
+		while (parts.Next(part)) { seen.Append(part); seen.AppendByte('|'); ++count; }
+		assert_eq(3, count, "three parts");
+		assert_se("k|v|w|", seen.CStr(), "in order");
+		assert_true(!parts.Next(part), "and then none");
+	}
+}
+
+[test("text.case")]
+class TextCaseTests {
+	[test("ascii")]
+	public static void TestAscii() {
+		assert_se("HELLO, WORLD! 09", Core::String("Hello, World! 09").ToUpper().CStr(), "upper");
+		assert_se("mixed", Core::StringView("MiXeD").ToLower().CStr(), "lower, from a view");
+		Core::String accented = Core::String("\xc3\x89t\xc3\xa9");
+		assert_true(accented.ToUpper().View() == Core::StringView("\xc3\x89T\xc3\xa9"), "bytes past ASCII are kept");
+		assert_eq(accented.CharCount(), accented.ToLower().CharCount(), "and so is the character count");
+	}
+}
+
+[test("text.parse_double")]
+class TextParseDoubleTests {
+	[test("whole_text")]
+	public static void TestWholeText() {
+		double value = 0;
+		assert_true(Core::ParseDouble(Core::StringView("3.25"), value) && value == 3.25, "a decimal");
+		assert_true(Core::ParseDouble(Core::StringView("-1e3"), value) && value == -1000.0, "an exponent");
+		assert_true(Core::ParseDouble(Core::StringView("inf"), value) && value > 1e308, "infinity");
+		value = 7.0;
+		assert_true(!Core::ParseDouble(Core::StringView(" 1"), value), "a leading space");
+		assert_true(!Core::ParseDouble(Core::StringView("1 "), value), "a trailing space");
+		assert_true(!Core::ParseDouble(Core::StringView("1x"), value), "a trailing letter");
+		assert_true(!Core::ParseDouble(Core::StringView(""), value), "nothing");
+		assert_true(value == 7.0, "a failure leaves the value as it was");
+	}
+}

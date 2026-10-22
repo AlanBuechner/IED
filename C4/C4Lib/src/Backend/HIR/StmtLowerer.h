@@ -61,6 +61,9 @@ namespace Scripting
 		QueryResult<const HIRNode*> ReturnFromVoid(const ReturnStatementNode* n, const Value& value);
 		Core::String FunctionName() const;
 		QueryResult<void> LowerStatements(const CodeBlockNode* n, BlockNode* target);
+		/// Statements [from, to) of `n`, each lowered even after one before it failed, so every failure is reported
+		/// where it happened; the result is the first failure.
+		QueryResult<void> LowerEach(const CodeBlockNode* n, uint32 from, uint32 to, BlockNode* target);
 		QueryResult<void> LowerNestedBlock(const CodeBlockNode* n, HIRNode* region);
 		QueryResult<void> LowerLocalType(const AstNode* decl);
 		QueryResult<void> LowerLocalAlias(const AliasDefinitionNode* alias);

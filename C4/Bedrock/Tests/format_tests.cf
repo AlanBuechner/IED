@@ -80,7 +80,7 @@ public static void TestFormatOrderAndRepeat() {
 	assert_se("20 before 10, 20 again", b.CStr(), "any order, any number of times");
 	b.Clear();
 	Core::Format(&b, "{2:F.1}", 1, 2.5, 3.25);
-	assert_se("3.2", b.CStr(), "an unnamed argument is skipped by its size (3.25 rounds to even)");
+	assert_se("3.2", b.CStr(), "arguments a placeholder skips are not read (3.25 rounds to even)");
 }
 
 [test("format.escapes_and_strings")]
@@ -91,4 +91,41 @@ public static void TestFormatEscapesAndStrings() {
 	b.Clear();
 	Core::Format(&b, "{x} {0 {99} {0:d", 5);
 	assert_se("{x} {0 {99} {0:d", b.CStr(), "malformed placeholders are written as text");
+}
+
+[test("format.each_argument_as_its_type")]
+public static void TestFormatEachArgumentAsItsType() {
+	Core::StringBuilder b;
+	int64 big = 5000000000;
+	Core::Format(&b, "{0} {1} {2}", big, (uint64)18446744073709551615u, (int16)-3);
+	assert_se("5000000000 18446744073709551615 -3", b.CStr(), "integers keep their width and sign");
+	b.Clear();
+	Core::Format(&b, "{0:x} {1:x.4}", -1, (uint8)10);
+	assert_se("ffffffffffffffff 000a", b.CStr(), "a negative integer in hex is its two's complement");
+	b.Clear();
+	Core::Format(&b, "{0} {1} [{2}]", true, false, 'z');
+	assert_se("true false [z]", b.CStr(), "bool and char");
+}
+
+[test("format.reals_shortest")]
+public static void TestFormatRealsShortest() {
+	Core::StringBuilder b;
+	Core::Format(&b, "{0} {1} {2}", 0.1f, 0.1, 2.5f);
+	assert_se("0.1 0.1 2.5", b.CStr(), "{n} of a real is the shortest text that reads back as it");
+	b.Clear();
+	Core::Format(&b, "{0:x}", 1.25);
+	assert_se("1.25", b.CStr(), "a kind of another family writes the value as {n} does");
+}
+
+[test("format.text_arguments")]
+public static void TestFormatTextArguments() {
+	Core::StringBuilder b;
+	Core::String name = Core::String("ada");
+	Core::StringView view = Core::StringView("lovelace");
+	Core::Format(&b, "{0} {1} {2:s}", name, view, "count");
+	assert_se("ada lovelace count", b.CStr(), "String, StringView and const char* are text");
+	b.Clear();
+	const char* none = nullptr;
+	Core::Format(&b, "[{0}]", none);
+	assert_se("[]", b.CStr(), "a null const char* is empty text");
 }

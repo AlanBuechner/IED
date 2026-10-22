@@ -60,7 +60,7 @@ namespace Scripting
 		/// one pointer, and attaches the body instead of adding a duplicate overload. Method and
 		/// template-instantiation signatures are NOT interned: two instantiations may share a
 		/// spelling but must stay distinct records (their bodies differ).
-		const FunctionType* Function(const Type* returnType, const Core::Vector<const Type*>& paramTypes);
+		const FunctionType* Function(const Type* returnType, const Core::Vector<const Type*>& paramTypes, bool variadic = false);
 
 		// --- Layout (order-independent fixed point, doc 02 pass 2) ------------------------
 		/// Compute size/alignment for every object type to a fixpoint: forward references resolve
@@ -86,7 +86,7 @@ namespace Scripting
 		Core::Vector<const Type*> m_FuncValues;                                        // parallel to m_FuncKeys
 		// Interned free-function signatures: (return type, param types) -> canonical instance. A
 		// vector (not a map): the key holds a Core::Vector, which has no ==/hash; the set is small.
-		Core::Vector<std::tuple<const Type*, Core::Vector<const Type*>, const FunctionType*>> m_FunctionCache;
+		Core::Vector<std::tuple<const Type*, Core::Vector<const Type*>, bool, const FunctionType*>> m_FunctionCache;
 	};
 
 } // namespace Scripting

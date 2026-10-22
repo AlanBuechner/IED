@@ -26,8 +26,10 @@
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
+#include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/AliasType.h"
+#include <algorithm>
 
 namespace Scripting
 {
@@ -96,20 +98,58 @@ namespace Scripting
 	{
 		RegionScope scope(m_Ctx, root, "block");
 		const uint32 count = n->StatementCount();
-		for (uint32 i = 0; i < leading && i < count; ++i)
-			if (auto r = LowerStmt(n->GetStatements()[i].Get(), root); !r.Ok()) return r;
+		const uint32 split = leading < count ? leading : count;
+		if (auto r = LowerEach(n, 0, split, root); !r.Ok()) return r;
 		if (between)
 			if (auto r = between(); !r.Ok()) return r;
-		for (uint32 i = leading; i < count; ++i)
-			if (auto r = LowerStmt(n->GetStatements()[i].Get(), root); !r.Ok()) return r;
-		return QueryResult<void>::Success();
+		return LowerEach(n, split, count, root);
 	}
 
 	QueryResult<void> StmtLowerer::LowerStatements(const CodeBlockNode* n, BlockNode* target)
 	{
-		for (uint32 i = 0; i < n->StatementCount(); ++i)
-			if (auto r = LowerStmt(n->GetStatements()[i].Get(), target); !r.Ok()) return r;
-		return QueryResult<void>::Success();
+		return LowerEach(n, 0, n->StatementCount(), target);
+	}
+
+	namespace
+	{
+		// Whether `node` names one of `names`.
+		bool Names(const AstNode* node, const std::vector<Core::String>& names)
+		{
+			if (!node || names.empty()) return false;
+			if (const auto* id = dynamic_cast<const IdentifierExpressionNode*>(node))
+				if (std::find(names.begin(), names.end(), id->GetName()) != names.end()) return true;
+			for (const Ref<AstNode>& child : node->Children())
+				if (Names(child.Get(), names)) return true;
+			return false;
+		}
+
+		void AddDeclaredNames(const AstNode* statement, std::vector<Core::String>& names)
+		{
+			if (const auto* declaration = dynamic_cast<const VariableDefinitionNode*>(statement))
+				for (const Declarator& d : declaration->GetDeclarators()) names.push_back(d.m_NameToken.GetText());
+		}
+	}
+
+	QueryResult<void> StmtLowerer::LowerEach(const CodeBlockNode* n, uint32 from, uint32 to, BlockNode* target)
+	{
+		QueryResult<void> first = QueryResult<void>::Success();
+		std::vector<Core::String> undeclared; // the locals of failed declarations: a use of one is not reported again
+		for (uint32 i = from; i < to; ++i)
+		{
+			const AstNode* statement = n->GetStatements()[i].Get();
+			if (Names(statement, undeclared))
+			{
+				AddDeclaredNames(statement, undeclared);
+				continue;
+			}
+			auto r = m_Ctx.Fail(statement, LowerStmt(statement, target));
+			if (r.Ok()) continue;
+			if (first.Ok()) first = r;
+			AddDeclaredNames(statement, undeclared);
+			m_Ctx.ReportNextFailure();
+		}
+		if (!first.Ok()) m_Ctx.NoteReported();
+		return first;
 	}
 
 	QueryResult<void> StmtLowerer::LowerBody(const CodeBlockNode* block, const AstNode* single, BlockNode* target)

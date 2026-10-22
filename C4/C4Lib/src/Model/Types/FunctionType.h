@@ -11,10 +11,10 @@ namespace Scripting
 		{
 			Core::String mName;
 			const Type* m_Type = nullptr;
-			mutable bool m_IsVariadic = false;
 		};
 
-		FunctionType(const Type* returnType, const Core::Vector<ParameterInfo>& params);
+		/// A variadic signature (`...` after its parameters) is a different type from the same one without.
+		FunctionType(const Type* returnType, const Core::Vector<ParameterInfo>& params, bool variadic = false);
 		Core::String GetName() const override;
 		Core::String ToString() const override;
 
@@ -22,7 +22,6 @@ namespace Scripting
 		const Core::Vector<ParameterInfo>& GetParameters() const { return m_Parameters; }
 		uint32 GetParameterCount() const { return m_Parameters.Count(); }
 		bool IsVariadic() const { return m_IsVariadic; }
-		void SetVariadic(bool variadic) const { m_IsVariadic = variadic; }
 
 		// A stable, symbol-safe token derived from the parameter types (and the variadic flag). Appended to a
 		// function's mangled name so OVERLOADS get distinct symbols: `Construct()` vs `Construct(int32)` must not
@@ -33,6 +32,6 @@ namespace Scripting
 	private:
 		const Type* m_ReturnType = nullptr;
 		Core::Vector<ParameterInfo> m_Parameters;
-		mutable bool m_IsVariadic = false;
+		bool m_IsVariadic = false;
 	};
 } // namespace Scripting

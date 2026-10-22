@@ -15,5 +15,9 @@ namespace Scripting
 		bool IsIntrinsic(const Core::String& name);
 		QueryResult<Value> LowerIntrinsic(LoweringContext& ctx, const Core::String& name, const std::vector<Value>& args);
 		QueryResult<Value> LowerArgument(LoweringContext& ctx, ExprLowerer& expr, const VaArgExpressionNode& node);
+
+		/// Whether argument `position` of a call can pass through `...` as a value of `type`: a scalar, a pointer or
+		/// plain data can; an object that copies or destroys itself cannot, as in C++.
+		QueryResult<void> CheckPassed(LoweringContext& ctx, const Type* type, size_t position);
 	}
 } // namespace Scripting

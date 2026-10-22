@@ -11,6 +11,12 @@ static int64 HmSumOfConst(const Core::HashMap<int32, int32>& map) {
 	return total;
 }
 
+// The age a const map holds for `name`, or -1.
+static int64 HmAgeOf(const Core::HashMap<Core::String, int32>& ages, Core::StringView name) {
+	const int32* age = ages.FindAs(name);
+	return age != nullptr ? (int64)*age : -1;
+}
+
 // A key that hashes and compares itself.
 struct HmName {
 	public int32 id;
@@ -217,6 +223,15 @@ class HashMapTests {
 		assert_true(ages.FindAs(Core::StringView("ad")) == nullptr, "a prefix is another key");
 		assert_true(ages.RemoveAs(Core::StringView("alan")) && ages.Count() == 1, "removed by a view");
 		assert_true(!ages.RemoveAs(Core::StringView("alan")), "removed once");
+	}
+
+	// BUG-364: a query by a view is const, as Find is.
+	[test("const_view_lookup")]
+	public static void TestConstViewLookup() {
+		Core::HashMap<Core::String, int32> ages;
+		ages.Insert(Core::String("ada"), 36);
+		assert_eq((int64)36, HmAgeOf(ages, Core::StringView("ada")), "a const map found by a view");
+		assert_eq((int64)-1, HmAgeOf(ages, Core::StringView("alan")), "a const map without the key");
 	}
 
 	// A table smaller than a 16-byte control group probes its copies past the end.

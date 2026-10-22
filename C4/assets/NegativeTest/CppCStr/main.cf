@@ -1,0 +1,2 @@
+include "bedrock.ch"
+int32 main() { Core::String s = Core::String("x"); printf("%s", s.c_str()); return 0; }

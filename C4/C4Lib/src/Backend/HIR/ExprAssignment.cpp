@@ -18,6 +18,15 @@
 
 namespace Scripting
 {
+	namespace
+	{
+		// Binding a reference field in its create writes the field, not its referent, so a `const T&` binds too.
+		bool BindsReference(const LoweringContext& ctx, const Value& target)
+		{
+			return target.isLValue && ReferenceBinding::BindsInCreate(ctx, target.lvalue);
+		}
+	}
+
 	// Assignments: `target = value` and the compound forms. The target is resolved, checked writable, and
 	// given the value - by its lifecycle when it has one (D-06), else by a store.
 
@@ -26,7 +35,8 @@ namespace Scripting
 		const Core::String tok = n->GetOperatorToken().GetText();
 		auto target = ResolveExpr(n->GetLeftOperand().Get());
 		if (!target.Ok()) return target;
-		if (auto writable = CheckWritable(n, target.value); !writable.Ok()) return QueryResult<Value>::Fail(writable.error, writable.message);
+		if (tok != "=" || !BindsReference(m_Ctx, target.value))
+			if (auto writable = CheckWritable(n, target.value); !writable.Ok()) return QueryResult<Value>::Fail(writable.error, writable.message);
 		if (const auto* brace = dynamic_cast<const BracedInitializerNode*>(n->GetRightOperand().Get()); brace && LanesTakeBraces(target.value, *brace))
 			return AssignLanes(n, target.value, *brace);
 		auto value = tok == "=" ? ResolveFor(n->GetRightOperand().Get(), target.value.type) : ResolveExpr(n->GetRightOperand().Get());
@@ -39,7 +49,8 @@ namespace Scripting
 	{
 		auto target = ResolveExpr(targetNode);
 		if (!target.Ok()) return target;
-		if (auto writable = CheckWritable(site, target.value); !writable.Ok()) return QueryResult<Value>::Fail(writable.error, writable.message);
+		if (!BindsReference(m_Ctx, target.value))
+			if (auto writable = CheckWritable(site, target.value); !writable.Ok()) return QueryResult<Value>::Fail(writable.error, writable.message);
 		return AssignValue(site, target.value, value);
 	}
 

@@ -1,0 +1,6 @@
+class Point {
+	public int32 x;
+	Point(int32 px) { x = px; }
+	public int32 y;
+}
+int32 main() { Point p; p.y = 1; return p.y; }

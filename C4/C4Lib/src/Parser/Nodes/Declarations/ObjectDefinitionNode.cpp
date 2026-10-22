@@ -18,6 +18,37 @@ namespace Scripting
 		return type == TokenType::Public || type == TokenType::Private || type == TokenType::Protected;
 	}
 
+	// What a C++ constructor (`Point(...)`, `public Point(...)`) or destructor (`~Point()`) at the lexer's position is in
+	// C4 (BUG-361); empty when the member is not one.
+	static Core::String CppLifecycleMessage(const Lexer& lexer, const Core::String& typeName)
+	{
+		const uint32 at = IsAccessModifier(lexer.PeekCompound().GetType()) ? 1 : 0;
+		const bool destructor = lexer.PeekCompound(at).GetType() == TokenType::Tilde;
+		const uint32 name = at + (destructor ? 1 : 0);
+		if (typeName.empty() || lexer.PeekCompound(name).GetText() != typeName || lexer.PeekCompound(name + 1).GetType() != TokenType::OpenParen)
+			return "";
+		if (destructor)
+			return "C4 has no destructors: the method that ends an object is marked [operator(\"delete\")], as in "
+				"'[operator(\"delete\")] public void Done() { ... }'";
+		return "C4 has no constructors: a method that starts an object is marked [operator(\"create\")], as in "
+			"'[operator(\"create\")] public void Init(int32 x) { ... }', and '" + typeName + "(1)' calls it";
+	}
+
+	// Past a member: through the closing brace of its body, or its `;` when it has none.
+	static void SkipMember(Lexer& lexer)
+	{
+		int braces = 0;
+		while (true)
+		{
+			const TokenType type = lexer.PeekCompound().GetType();
+			if (type == TokenType::EndOfFile || (type == TokenType::CloseCurl && braces == 0)) return;
+			lexer.NextCompoundToken();
+			if (type == TokenType::SemiColon && braces == 0) return;
+			if (type == TokenType::OpenCurl) ++braces;
+			else if (type == TokenType::CloseCurl && --braces == 0) return;
+		}
+	}
+
 	static bool IsClassModifier(const Token& token)
 	{
 		return token.GetType() == TokenType::Identifier && (token.GetText() == "abstract" || token.GetText() == "final");
@@ -464,6 +495,12 @@ namespace Scripting
 
 #undef TRY_PARSE_MEMBER
 
+			if (Core::String lifecycle = CppLifecycleMessage(lexer, m_NameToken.GetText()); !lifecycle.empty())
+			{
+				errorTracker.AddError(t.GetStartLocation(), lifecycle, ErrorSeverity::Error);
+				SkipMember(lexer);
+				continue;
+			}
 			errorTracker.AddError(
 				t.GetStartLocation(),
 				Core::StringFormat::Format("Unexpected token '{0}' in type body", t.GetText()),

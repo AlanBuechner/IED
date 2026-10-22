@@ -4,8 +4,8 @@
 
 namespace Scripting
 {
-	FunctionType::FunctionType(const Type* returnType, const Core::Vector<ParameterInfo>& params)
-		: Type(TypeKind::Function), m_ReturnType(returnType), m_Parameters(params)
+	FunctionType::FunctionType(const Type* returnType, const Core::Vector<ParameterInfo>& params, bool variadic)
+		: Type(TypeKind::Function), m_ReturnType(returnType), m_Parameters(params), m_IsVariadic(variadic)
 	{
 		// Functions have no size in the type system - they're addresses
 		m_Size = sizeof(void*);

@@ -5,7 +5,8 @@
 #
 # One folder = one invalid program. Every folder MUST be listed in NegativeTests.json with an
 # "expect" substring; an unregistered folder is a FAIL so the manifest stays complete by construction.
-# Expect substrings match literally (brackets, quotes and ? included).
+# Expect substrings match literally (brackets, quotes and ? included). An optional "reject" list names substrings
+# the output must NOT hold (a cascade of follow-on errors, say).
 #
 # Usage:  .\RunTests.ps1 [-Filter "Identifier"] [-O2]
 param(
@@ -25,8 +26,8 @@ $json = Get-Content (Join-Path $root "NegativeTests.json") -Raw | ConvertFrom-Js
 $manifest = @{}
 foreach ($p in $json.PSObject.Properties) {
     $v = $p.Value
-    if ($v -is [string]) { $manifest[$p.Name] = @{ expect = @(); reason = $v } }
-    else { $manifest[$p.Name] = @{ expect = @($v.expect); reason = [string]$v.reason } }
+    if ($v -is [string]) { $manifest[$p.Name] = @{ expect = @(); reject = @(); reason = $v } }
+    else { $manifest[$p.Name] = @{ expect = @($v.expect); reject = @($v.reject | Where-Object { $_ }); reason = [string]$v.reason } }
 }
 
 $flags = @()
@@ -63,8 +64,13 @@ foreach ($f in $folders) {
         $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "expected a compile error but it COMPILED (error was swallowed)" }
         continue
     }
+    $joined = $output -join "`n"
+    $rejected = $spec.reject | Where-Object { $joined.Contains($_) } | Select-Object -First 1
+    if ($rejected) {
+        $results += [pscustomobject]@{ Name = $rel; Status = "FAIL"; Detail = "the output holds the rejected [$rejected]" }
+        continue
+    }
     if ($spec.expect.Count -gt 0) {
-        $joined = $output -join "`n"
         $hit = $spec.expect | Where-Object { $joined.Contains($_) } | Select-Object -First 1
         if ($hit) { $results += [pscustomobject]@{ Name = $rel; Status = "PASS"; Detail = "clear error: '$hit'" } }
         else {

@@ -270,7 +270,7 @@ namespace Scripting
 			m_Errors->AddError(n ? n->startLocation : SourceLocation(), message, ErrorSeverity::Warning);
 		}
 
-		// --- diagnostics (06): one channel; the first failure aborts the function and is its one report --
+		// --- diagnostics (06): one channel; the first failure aborts its statement and is that statement's one report --
 		template <typename T> QueryResult<T> Fail(const AstNode* n, const QueryResult<T>& r) const
 		{
 			if (r.Ok() || m_Reported) return r;
@@ -280,6 +280,8 @@ namespace Scripting
 		}
 		// A failure an inner lowering (a lambda body) already reported: this function's own report is suppressed.
 		void NoteReported() const { m_Reported = true; }
+		// After a statement's failure was reported, the next statement's own failure is reported too.
+		void ReportNextFailure() const { m_Reported = false; }
 
 		/// While alive, a failure reported inside ends with `note`: why the code is lowered where it is.
 		class FailureNote

@@ -20,7 +20,9 @@
 
 // 64-bit stream positions: `long` is 32 bits on Windows, so fseek/ftell stop at 2 GiB.
 #ifdef _WIN32
+#include <fcntl.h>
 #include <io.h>
+#include <limits.h>
 #define c4_fseek _fseeki64
 #define c4_ftell _ftelli64
 typedef struct _stat64 c4_stat_t;
@@ -172,6 +174,43 @@ int32_t file_delete(const char* path)
 {
 	if (!path) return -1;
 	return RemovePath(path) == 0 ? 0 : -1;
+}
+
+#ifdef _WIN32
+// The standard streams carry the bytes the program writes and reads: a line feed stays one byte, as Go and Rust
+// write it, where the C runtime's text mode would add a carriage return (a C initializer of the C runtime, before
+// any output).
+static int console_streams_as_bytes(void)
+{
+	_setmode(_fileno(stdin), _O_BINARY);
+	_setmode(_fileno(stdout), _O_BINARY);
+	_setmode(_fileno(stderr), _O_BINARY);
+	return 0;
+}
+__attribute__((section(".CRT$XIU"), used)) static int (*const g_consoleStreamsAsBytes)(void) = console_streams_as_bytes;
+
+static int read_input(void* bytes, int64_t capacity)
+{
+	const int read = _read(_fileno(stdin), bytes, capacity > INT_MAX ? INT_MAX : (unsigned int)capacity);
+	// Ctrl+Z starting a console line ends the input, as a console's text mode has it.
+	if (read > 0 && ((const char*)bytes)[0] == 0x1A && _isatty(_fileno(stdin))) return 0;
+	return read;
+}
+#else
+static int read_input(void* bytes, int64_t capacity)
+{
+	return (int)read(STDIN_FILENO, bytes, capacity > 0x7fffffff ? 0x7fffffff : (size_t)capacity);
+}
+#endif
+
+// Reads up to `capacity` bytes of the process's standard input into `bytes` as they come (a line from a console, what
+// a pipe holds), past the C runtime's buffer: the bytes read, 0 at its end, -1 when the read failed.
+int64_t c4_console_read(void* bytes, int64_t capacity)
+{
+	if (capacity < 0 || (capacity > 0 && !bytes)) return -1;
+	if (capacity == 0) return 0;
+	const int read = read_input(bytes, capacity);
+	return read < 0 ? -1 : (int64_t)read;
 }
 
 // Writes `count` bytes to the process's standard output (stream 1) or error (stream 2) and flushes them, through the

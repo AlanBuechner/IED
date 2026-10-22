@@ -136,7 +136,7 @@ element is removed: the handle an LRU cache keeps. Each node is one allocation r
 | Create / delete | `Init()` (allocates nothing), `Init(int64 capacity)`, copy, `Delete()` |
 | Size | `Count()`, `Capacity()`, `IsEmpty()` |
 | Use | `Insert(k, v)` -> `true` when added, `false` when the value was replaced; `At(k)` and `m[k]` -> `V&` (default-creates an absent key); `Find(k)` -> `V*` or null (valid until the map changes); `TryGet(k, out)`; `Get(k)` (a copy, zero `V` when absent); `Contains(k)`; `Remove(k)`; `Clear()`; `Reserve(n)` |
-| By another key type | `FindAs(q)`, `ContainsAs(q)`, `RemoveAs(q)` take a key of a type `Q` that hashes as `K` does (`KeyTraits<Q>`) and compares with `==` to a `K`: a `Core::StringView` for `Core::String` keys, so no `String` is made to look one up |
+| By another key type | `FindAs(q)`, `ContainsAs(q)`, `RemoveAs(q)` take a key of a type `Q` that hashes as `K` does (`KeyTraits<Q>`) and compares with `==` to a `K`: a `Core::StringView` for `Core::String` keys, so no `String` is made to look one up; `FindAs` of a const map gives a `const V*` |
 | Iteration | range-for yields `Core::KeyValue<K, V>&` (`key`, `value`) in table order; do not change a key through it. A const map yields `const KeyValue<K, V>&` |
 
 The table (`hashtable.ch`, shared with `HashSet`) is in the style of Swiss tables: beside the entries, one control byte
@@ -301,32 +301,37 @@ A growable buffer for composing text. `Init(int64 capacity)`, copy, `Delete`, `A
 A zero builder (`Core::StringBuilder b;`) is empty and allocates on its first append. Number appends
 handle every value: binary up to 64 digits, `INT64_MIN`, `UINT64_MAX`. Floats are rounded to `decimals`
 fraction digits by the C runtime (`1.995` at 2 is `2.00`, `2.5` at 0 is `2`); a negative `decimals`
-writes the shortest text that reads back as the same double (`0.1`, `1000`, `0.3333333333333333`), in plain
+writes the shortest text that reads back as the same double (`0.1`, `1000`, `0.3333333333333333`; `AppendFloat`
+the same float, so `0.1f` is `0.1`), in plain
 decimals for exponents from -5 to 15 and scientific otherwise (`1e+16`, `1e-06`), as Python's `repr` does;
 infinities and NaN are `inf`, `-inf` and `nan`.
 
 ### `Core::Format` (`format.ch`)
 
-`void Core::Format(StringBuilder* out, const char* format, ...)` appends formatted text to a
-caller-owned builder. A placeholder is `{index}` or `{index:kind.width}`; indices name the arguments in
-call order, may come in any order and may repeat; `{{` and `}}` are literal braces. Up to
-`Core::kFormatArgumentLimit` (16) arguments.
+`template<...Ts> void Core::Format(StringBuilder* out, const char* format, const Ts&... args)` appends formatted
+text to a caller-owned builder. A placeholder is `{index}` or `{index:kind.width}`; indices name the arguments in
+call order, may come in any order and may repeat; `{{` and `}}` are literal braces. Each argument is written as its
+own type (a `Core::FormatArgument` made from it, read in place: a `String` is not copied), so there is no argument
+limit, an `int64` keeps its 64 bits, and an argument Format cannot write (an object other than `Core::String` and
+`Core::StringView`) is a compile error.
 
-| Kind | Argument | Written as | `.N` |
+| Argument | `{n}` | Kinds | `.N` |
 |---|---|---|---|
-| `d` (default) | `int32` | decimal | zero-pad to N digits |
-| `D` | `int64` | decimal | zero-pad to N digits |
-| `u` | `uint64` | decimal | zero-pad to N digits |
-| `x` / `b` / `o` | `uint64` | hexadecimal / binary / octal | zero-pad to N digits |
-| `f` / `F` | `float` / `double` | fixed point | N fraction digits (default 0) |
-| `s` | `const char*` | the null-terminated text | - |
+| `int8` to `int64`, `uint8` to `uint64` | decimal | `d`/`D`/`u` decimal, `x` hexadecimal, `b` binary, `o` octal | zero-pad to N digits |
+| `float`, `double` | the shortest text that reads back as the value (`0.1f` is `0.1`) | `f`/`F` fixed point | N fraction digits (default 0) |
+| `const char*` (null is empty), `Core::String`, `Core::StringView` | the text | `s` | - |
+| `bool` | `true` or `false` | - | - |
+| `char` | the character | - | - |
 
 ```c4
 Core::StringBuilder b;
 Core::Format(&b, "id={0:d.4} val={1:x.8} again={0}", 255, 4096);   // "id=0255 val=00001000 again=255"
+Core::Format(&b, "{0} is {1} bytes", name, size);                  // a String and an int64, as they are
 ```
 
-A malformed placeholder is written as text.
+A signed integer in another base is its two's complement (`{0:x}` of `-1` is `ffffffffffffffff`). A kind of another
+family (`{0:x}` of a double) writes the argument as `{n}` does. A placeholder that names no argument, or a
+malformed one, is written as text.
 
 ### Regular expressions (`regex.ch`)
 
@@ -386,6 +391,21 @@ for text that is not padded base64.
 
 `Core::ParseInt64(text, value)` reads decimal text - an optional `-` and at least one digit, nothing around them - and
 returns false, leaving `value` as it was, for anything else or a number outside `int64`. The JSON readers use it.
+
+### Splitting, case and reals (`textparts.ch`)
+
+- `text.Split(separator)` on a `StringView` gives the parts between separators as views into the text (no copies); on
+  a `String` it gives `String`s of their own. The separator is a `char`, a `StringView` or a `const char*`; n
+  separators give n + 1 parts, empty ones included (`"a,,b"` is `a`, ``, `b`; an empty text is one empty part),
+  and an empty separator gives the whole text. `Core::SplitParts(text, separator)` walks the same parts one
+  `Next(part)` at a time without allocating.
+- `ToLower()` / `ToUpper()` on a `String` or a `StringView` give a new `String` with the ASCII letters changed; every
+  other byte, UTF-8 sequences included, is kept.
+- `Core::ParseDouble(text, value)` reads the whole text as a double in strtod's syntax (digits, a fraction, an
+  exponent, `inf`, `nan`, hexadecimal) and returns false, leaving `value` as it was, for anything else, leading or
+  trailing spaces included.
+
+`StringView::IndexOf(part, start)` finds `part` at or after `start`.
 
 ---
 
@@ -926,7 +946,10 @@ never scans this memory: `GC::RegisterRegion` a range that holds managed pointer
 | `GetEnvironmentVariable(name)` | empty when it is not set |
 | `SetEnvironmentVariable(name, value)`, `RemoveEnvironmentVariable(name)` | for this process and the processes it starts; removing an unset variable succeeds. A name is not empty and has no `=`; names and values must be UTF-8 |
 | `RandomBytes(out, count)` | bytes from the system's cryptographically secure generator (keys, nonces, masks); false when it fails |
-| `WriteOutput(text)`, `WriteError(text)` (`console.ch`) | the text to standard output or standard error, whole and flushed, in order with `printf`; false when the stream is closed or the write failed |
+| `WriteOutput(text)`, `WriteError(text)` (`console.ch`) | the text to standard output or standard error, whole and flushed, in order with `printf`; false when the stream is closed or the write failed. The standard streams carry the bytes as written: a line feed is one byte, never a carriage return and a line feed |
+| `ReadInput(bytes, capacity)` (`console.ch`) | up to `capacity` bytes of standard input as they come (a line from a console, what a pipe holds): how many, 0 at its end, -1 when the read failed |
+| `ReadAllInput(out)` (`console.ch`) | all of standard input, to its end, appended to a `StringBuilder`, for a filter (`tool < file`, a pipe); false when a read failed |
+| `InputLines` (`console.ch`) | standard input a line at a time: `Next(line)` gives each line without its line feed or carriage return and line feed (the last one also without a break), false at the end |
 
 Setting a variable changes the system's block, not a copy the C runtime's `getenv` may hold.
 
@@ -1165,13 +1188,16 @@ if (git.exitCode == 0) printf("%s", git.output.CStr());
   `Resize(columns, rows)` changes its size. Its output does not end when the child does, only when the `Child`
   closes, so wait for the child itself with `Wait`.
 - **Run** (`run.ch`): `Process::Run(info, timeoutMs)` runs a program to its end with its input from nowhere and its
-  stdout and stderr captured into an `Output` (`exitCode`, `output`, `errors`, `error`); a program still running at
-  the timeout is ended with everything it started, and `exitCode` is `kTimedOut`.
+  stdout and stderr captured into an `Output` (`exitCode`, `output`, `errors`, `error`, and `usage`: its processor
+  time and peak memory in all); a program still running at the timeout is ended with everything it started, and
+  `exitCode` is `kTimedOut`.
 - **Usage** (`usage.ch`): `Process::GetUsage(id, usage)` reads what a running process uses, found by the system's id
   (`Child::Id()`, `Platform::ProcessId()`, or a program another tool started): `Usage { cpuTimeNs, workingSetBytes,
-  privateBytes, peakPrivateBytes }`, its processor time in user and kernel mode so far and its memory now. false, with
-  `usage` zeroed, when there is no such process (it ended, even while something still holds it) or the system will not say; it asks
-  only for limited query rights. A watcher works out CPU use from two readings: the time's growth over the wall
+  privateBytes, peakPrivateBytes, peakWorkingSetBytes }`, its processor time in user and kernel mode so far and its
+  memory now. false, with `usage` zeroed, when there is no such process (it ended, even while something still holds
+  it) or the system will not say; it asks only for limited query rights. `child.GetUsage(usage)` reads the same
+  through the `Child`'s own handle, so it also answers after the child ended, with its exact totals (after `Wait`);
+  false once the `Child` is closed. A watcher works out CPU use from two readings: the time's growth over the wall
   clock's, divided by `Platform::GetProcessorInfo().logicalProcessors` for a share of the whole machine.
 
 Covered by `Bedrock/Tests/process_tests.cf` (20 tests) against the system's own programs (`cmd`, `sort`, `findstr`,
@@ -1386,11 +1412,11 @@ PNG lacks, a palette index past the palette).
 
 ## 21. Tests
 
-`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 77 files, 678 tests (array, list, initlist,
+`Bedrock/Tests/*_tests.cf` use the built-in `[test]` framework: 78 files, 688 tests (array, list, initlist,
 container, container_alignment, element_lifetime, path, directory, json_reader, yaml_reader, hashmap, stringview, string, stringbuilder, format, file, dom, binary, reflection,
 reflection_invoke, reflection_annotation, reflection_layout, namespaced_template, overload, int_width, math_scalar, math_vector,
 math_matrix, math_quaternion, math_transform, math_batch, threading, threading_jobs, platform_memory, platform_system,
-platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4, native_bytes, platform_source_line). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
+platform_library, platform_time, net, loop, http, websocket, encoding, process, file_info, watch, container_move, regex, reflect_value, utf16, jsonstream, gc_pool, crypto, local, schema, number_text, hashset, bitset, random, priorityqueue, lrucache, crc32, uuid, stopwatch, sort, profile, gpu, gc, buffer, compression, http_coding, png, gc_alloc, gc_census, reflection_address, lz4, native_bytes, platform_source_line, textparts). They also pass built for `-O2 -march=x86-64-v3` and `-march=native`. Run them with:
 
 ```bat
 bin\Development-windows-x64\C4\C4.exe Bedrock\Tests -o assets\build-output\bedrock\tests.exe -test

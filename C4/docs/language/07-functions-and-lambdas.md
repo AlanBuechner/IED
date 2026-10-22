@@ -215,8 +215,13 @@ int32 SumInts(int32 count, ...) {
 int32 s = SumInts(3, 1, 2, 3);
 ```
 
-- A trailing `...` parameter makes a function variadic; calls promote arguments with the C rules
-  (`float` -> `double`, small integers -> `int32`).
+- A trailing `...` parameter makes a function (or method) variadic; calls promote arguments with the C rules
+  (`float` -> `double`, small integers -> `int32`). The `...` is part of the function's type: `int32(int32, ...)`
+  and `int32(int32)` are different signatures.
+- An argument passes through `...` as its bytes: a scalar, a pointer or plain data (a struct without a lifecycle)
+  can; an object that copies or destroys itself (`Core::String`, anything with `[operator("copy")]` or
+  `[operator("delete")]`) is an error, as in C++, and `va_arg` cannot read one. A string goes to `printf` as
+  `name.CStr()`; `Core::Format` takes strings and numbers as they are.
 - The arguments are read through a `va_list` (D-35): `va_start(ap)` opens them (only in a variadic
   function), `va_arg(ap, T)` reads the next one as a `T`, `va_copy(dst, src)` copies a list so its arguments
   can be read again, and `va_end(ap)` closes it ([14-builtins](14-builtins.md#8-variadic-argument-access)).

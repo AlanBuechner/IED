@@ -8,6 +8,8 @@
 #include "Model/TypeHandle.h" // UnwrapToValue brick (receiver unwraps to the value type)
 #include "Model/Types/InitListType.h" // built-in aggregate members (data/size)
 #include "Model/Types/ClassHierarchy.h" // every base sub-object, not only the first
+#include "Model/Types/QualifiedName.h"
+#include "Model/MemberSuggestion.h"
 #include "Model/Templates/FunctionTemplates.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Compiler/ErrorTracker.h"
@@ -126,14 +128,12 @@ namespace Scripting
 			CollectMethods(model, recvObj, name, isOperatorName, annotation, candidates);
 			if (auto clash = InheritedSignatureClash(recvObj, candidates, name); !clash.Ok())
 				return QueryResult<const FunctionType*>::Fail(clash.error, clash.message);
-			auto extIt = model.m_ExtensionMethods.find(recvObj);
+			// A named extension method is one of the type's methods (AddExtensionMethod), so CollectMethods found it;
+			// an operator extension is found by its annotation.
+			auto extIt = isOperatorName ? model.m_ExtensionMethods.find(recvObj) : model.m_ExtensionMethods.end();
 			if (extIt != model.m_ExtensionMethods.end())
 				for (const FunctionRecord* rec : extIt->second)
-					// Filter by NAME exactly like the own-methods loop: without this, every extension method on
-					// the receiver type becomes a candidate for ANY member call - `p.Length()` would see SetXY,
-					// Normalized, ... and report "ambiguous". Operator calls match by annotation instead.
-					if (isOperatorName ? ContainsAnnotation(rec, annotation) : (rec->type && rec->type->GetName() == name))
-						candidates.Push({ rec->type, rec, rec->minArity });
+					if (ContainsAnnotation(rec, annotation)) candidates.Push({ rec->type, rec, rec->minArity });
 			if (!isOperatorName)
 			{
 				if (tmplArgs) candidates.Clear(); // a call that writes template arguments names only templates
@@ -142,6 +142,8 @@ namespace Scripting
 				FunctionTemplates::Collect(model, templates, candidates, reasons);
 			}
 			if (candidates.Empty() && !reasons.Empty()) return QueryResult<const FunctionType*>::Fail(QueryError::NotFound, reasons[0]);
+			if (candidates.Empty() && !isOperatorName && !recvObj->FindMethodByName(name))
+				return QueryResult<const FunctionType*>::Fail(QueryError::NotFound, NoMember(model, recvObj, name));
 			if (auto access = SelectByReceiverAccess(candidates, ctx.receiver, name); !access.Ok())
 				return QueryResult<const FunctionType*>::Fail(access.error, access.message);
 			// A member access (`a.DoThing()`) does NOT fall through to free functions: either a
@@ -436,7 +438,7 @@ namespace Scripting
 			if (!t || t->GetKind() != TypeKind::Object)
 				return QueryResult<VariableInfo>::Fail(QueryError::NotCallable, "not an object type: " + name);
 			ClassHierarchy::FieldHit hit = ClassHierarchy::FindField(static_cast<const ObjectType*>(t), name);
-			if (!hit.field) return QueryResult<VariableInfo>::Fail(QueryError::NotFound, "no member '" + name + "'");
+			if (!hit.field) return QueryResult<VariableInfo>::Fail(QueryError::NotFound, NoMember(model, static_cast<const ObjectType*>(t), name));
 			VariableInfo v;
 			v.type = hit.field->m_Type;
 			v.isConst = hit.field->m_IsConst;
@@ -538,7 +540,21 @@ namespace Scripting
 				if (m.mName == name) { method.method = &m; method.owner = ty; method.ownerOffset = offset; return; }
 		});
 		if (method.method) return QueryResult<MemberBinding>::Success(method);
-		return QueryResult<MemberBinding>::Fail(QueryError::NotFound, "no member '" + name + "'");
+		return QueryResult<MemberBinding>::Fail(QueryError::NotFound, NoMember(model, obj, name));
+	}
+
+	Core::String SymbolQueries::NoMember(const ProgramModel& model, const ObjectType* type, const Core::String& name)
+	{
+		std::vector<Core::String> members;
+		ClassHierarchy::ForEachSubobject(type, [&](const ObjectType* part, int64) {
+			for (const auto& field : part->GetFields()) members.push_back(field.mName);
+			for (const auto& method : part->GetMethods()) members.push_back(method.mName);
+		});
+		if (auto extensions = model.m_ExtensionMethods.find(type); extensions != model.m_ExtensionMethods.end())
+			for (const FunctionRecord* extension : extensions->second) members.push_back(extension->name);
+		Core::String message = "no member '" + name + "' in '" + QualifiedName(type) + "'";
+		if (Core::String meant = SuggestedMember(name, members); !meant.empty()) message += "; did you mean '" + meant + "'?";
+		return message;
 	}
 
 	// ---------------------------------------------------------------------------

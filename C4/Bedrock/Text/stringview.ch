@@ -24,9 +24,10 @@ namespace Core
 		// The code point at character (not byte) index charIndex; -1 when out of range or malformed.
 		public int32 CodePointAt(int64 charIndex) const;
 
-		// Byte index of the first `c` at or after `start`, or of `part`; -1 when absent.
+		// Byte index of the first `c` or `part` at or after `start` (0 when not given); -1 when absent.
 		public int64 IndexOf(char c, int64 start) const;
-		public int64 IndexOf(StringView part) const;
+		public int64 IndexOf(StringView part, int64 start) const;
+		public int64 IndexOf(StringView part) const { return IndexOf(part, 0); }
 		public bool Contains(StringView part) const { return IndexOf(part) >= 0; }
 		public bool StartsWith(StringView prefix) const;
 		public bool EndsWith(StringView suffix) const;

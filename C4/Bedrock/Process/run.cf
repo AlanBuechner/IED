@@ -54,6 +54,7 @@ namespace Process
 			result.error = Core::String("the program ran past its time");
 		}
 		else if (result.exitCode == kError) result.error = Core::String(child.Error());
+		child.GetUsage(result.usage);
 		return result;
 	}
 }

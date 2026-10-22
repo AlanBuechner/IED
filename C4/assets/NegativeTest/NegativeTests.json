@@ -92,7 +92,7 @@
         "reason": "Visibility violations must name the field and type."
     },
     "MissingMethodCall": {
-        "expect": ["no matching overload of Missing"],
+        "expect": ["no member 'Missing' in 'P'"],
         "reason": "Calling a nonexistent method must be a clear error naming the member."
     },
     "MissingMemberAccess": {
@@ -2102,6 +2102,75 @@
     "TooManyArguments": {
         "expect": ["main.cf (2:21) error: f takes 1 argument, not 3"],
         "reason": "Revived from the disabled IsoDriver suite (IsoNegativeTest::TestTooManyArgumentsError)."
+    },
+    "VariadicSignatureTooManyArguments": {
+        "expect": ["error: Twice takes 1 argument, not 2"],
+        "reason": "A function with a variadic one's parameters is not variadic itself: '...' is part of the function type."
+    },
+    "ConstReferenceFieldWriteInCreate": {
+        "expect": ["main.cf (3:84) error: cannot write through this location: it is reached through a pointer or reference to const"],
+        "reason": "BUG-362: `=` binds a const reference field in its create, but any other write goes to the const referent."
+    },
+    "CppPushBack": {
+        "expect": ["main.cf (2:38) error: no member 'push_back' in 'Core::Array<int32>'; did you mean 'Push'?"],
+        "reason": "BUG-361: a C++ standard library member names the Bedrock member that does the same."
+    },
+    "CppSizeOfString": {
+        "expect": ["no member 'size' in 'Core::String'; did you mean 'ByteLength'?"],
+        "reason": "BUG-361: size() on a String names ByteLength (a String has no Count)."
+    },
+    "CppCStr": {
+        "expect": ["no member 'c_str' in 'Core::String'; did you mean 'CStr'?"],
+        "reason": "BUG-361: c_str() names CStr()."
+    },
+    "MemberTypo": {
+        "expect": ["no member 'Lenght' in 'Path'; did you mean 'Length'?"],
+        "reason": "BUG-361: a misspelt method names the one a typo away."
+    },
+    "FieldTypo": {
+        "expect": ["no member 'widht' in 'Box'; did you mean 'width'?"],
+        "reason": "BUG-361: a misspelt field names the one a typo away."
+    },
+    "CppAuto": {
+        "expect": ["type not found: auto: C4 has no 'auto': write the type"],
+        "reason": "BUG-361: C4 has no type inference for variables."
+    },
+    "CArrayDeclarator": {
+        "expect": ["an array's extent belongs to its type in C4: write 'int[4] values', not 'int values[4]'"],
+        "reason": "BUG-361: C's array declarator gets the C4 form."
+    },
+    "CppConstructor": {
+        "expect": ["main.cf (3:2) error: C4 has no constructors: a method that starts an object is marked [operator(\"create\")]"],
+        "reason": "BUG-361: a C++ constructor in a class body is one error naming the create method, and the members after it still parse."
+    },
+    "CppDestructor": {
+        "expect": ["main.cf (3:2) error: C4 has no destructors: the method that ends an object is marked [operator(\"delete\")]"],
+        "reason": "BUG-361: a C++ destructor names the delete method."
+    },
+    "CppStdString": {
+        "expect": ["type not found: std: C4 has no 'std': Bedrock has Core::String"],
+        "reason": "BUG-361: std:: names Bedrock's types."
+    },
+    "EveryStatementReported": {
+        "expect": ["main.cf (1:50) error: no variable named undefinedTwo"],
+        "reason": "BUG-361: each failed statement of a function is reported, not only the first."
+    },
+    "FailedDeclarationNotRepeated": {
+        "expect": ["no variable named undefinedThing"],
+        "reject": ["no variable named x", "no variable named y"],
+        "reason": "BUG-361: the statements after a failed declaration are reported, but a use of its local (or of a local declared from it) is not a second error."
+    },
+    "VariadicLifecycleArgument": {
+        "expect": ["argument 2 cannot pass through '...': a 'Core::String' copies or destroys itself, and '...' passes only bytes (pass its text as .CStr())"],
+        "reason": "A C variadic function reads raw bytes; an object with a lifecycle has none it could read (C++ rejects non-trivial types the same way)."
+    },
+    "VaArgLifecycleType": {
+        "expect": ["va_arg cannot read this type: a 'Core::String' copies or destroys itself"],
+        "reason": "No caller can pass an object with a lifecycle through '...', so none can be read."
+    },
+    "VaStartVariadicSignature": {
+        "expect": ["va_start(ap) opens the arguments of a variadic function: 'Read' has no '...'"],
+        "reason": "A function with a variadic one's parameters has no arguments to read."
     },
     "TestUndefinedIdentifierError": {
         "expect": ["main.cf (1:22) error: no variable named undefined_var"],

@@ -10,6 +10,7 @@
 [link("strcmp")] int32 strcmp(void* a, void* b);
 [link("strncmp")] int32 strncmp(void* a, void* b, uint64 n);
 [link("memcmp")] int32 memcmp(void* a, void* b, uint64 n);
+[link("memchr")] void* memchr(void* s, int32 value, uint64 n);
 [link("printf")] int32 printf(void* format, ...);
 [link("fflush")] int32 fflush(void* stream);
 
@@ -134,6 +135,7 @@
 
 // --- Number text (C4Runtime/TextRuntimeC.c) --------------------------------------------------------------
 [link("c4_format_double")] int32 format_double(void* out, int32 capacity, double value, int32 decimals);
+[link("c4_format_float")] int32 format_float(void* out, int32 capacity, float value, int32 decimals);
 [link("c4_parse_double")] int64 parse_double(void* text, int64 length, void* out);
 
 // --- Reflection: the registry behind Bedrock's Reflection namespace (C4Runtime/ReflectRuntimeC.c) --------

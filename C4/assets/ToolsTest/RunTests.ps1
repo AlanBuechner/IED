@@ -792,10 +792,64 @@ int32 main()
     return $failures
 }
 
+# BUG-360: a filter reads standard input (Platform::InputLines, Platform::ReadAllInput), a line ending in "\r\n" or
+# "\n" or nothing; the standard streams carry the bytes as written, so a "\n" written is one byte.
+function Test-StandardInput {
+    $lines = @'
+include "bedrock.ch"
+int32 main()
+{
+	Platform::InputLines lines;
+	Core::String line;
+	Core::StringBuilder out;
+	int32 count = 0;
+	while (lines.Next(line)) {
+		out.Append("[");
+		out.Append(line.View());
+		out.Append("]\n");
+		count += 1;
+	}
+	Platform::WriteOutput(out.View());
+	printf("printf %d\n", count);
+	return count;
+}
+'@
+    $all = @'
+include "bedrock.ch"
+int32 main()
+{
+	Core::StringBuilder text;
+	if (!Platform::ReadAllInput(text)) return -1;
+	return (int32)text.ByteLength();
+}
+'@
+    $failures = @()
+    $dir = New-Sources "stdin" @{ "lines/main.cf" = $lines; "all/main.cf" = $all }
+    $linesExe = Join-Path $dir "lines.exe"
+    $allExe = Join-Path $dir "all.exe"
+    foreach ($program in @(@{ src = "lines"; exe = $linesExe }, @{ src = "all"; exe = $allExe })) {
+        $build = Invoke-Compiler $compiler @((Join-Path $dir $program.src), "-o", $program.exe)
+        if ($build.exit -ne 0) { return @("the $($program.src) program did not build: $($build.output)") }
+    }
+    $inputFile = Join-Path $dir "input.txt"
+    $output = Join-Path $dir "output.txt"
+    [System.IO.File]::WriteAllBytes($inputFile, [System.Text.Encoding]::ASCII.GetBytes("one`r`ntwo`nthree"))
+    cmd /c "`"$linesExe`" < `"$inputFile`" > `"$output`""
+    if ($LASTEXITCODE -ne 3) { $failures += "the line reader read $LASTEXITCODE lines, expected 3" }
+    $written = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($output))
+    if ($written -ne "[one]`n[two]`n[three]`nprintf 3`n") { $failures += "the filter wrote '$($written -replace "`r", '\r' -replace "`n", '\n')'" }
+    cmd /c "`"$allExe`" < `"$inputFile`""
+    if ($LASTEXITCODE -ne 14) { $failures += "ReadAllInput read $LASTEXITCODE bytes, expected 14" }
+    [System.IO.File]::WriteAllBytes($inputFile, [byte[]]@())
+    cmd /c "`"$allExe`" < `"$inputFile`""
+    if ($LASTEXITCODE -ne 0) { $failures += "ReadAllInput read $LASTEXITCODE bytes of an empty input" }
+    return $failures
+}
+
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ProjectDefines", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
-    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild")
+    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-StandardInput")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

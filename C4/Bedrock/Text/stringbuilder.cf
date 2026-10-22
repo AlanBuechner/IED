@@ -147,4 +147,12 @@ namespace Core
 		if (written > 0) length += written;
 		buffer[length] = (char)0;
 	}
+
+	void StringBuilder::AppendFloat(float value, int32 decimals) {
+		int32 room = decimals < 0 ? kShortestDoubleBytes : kFixedDoubleBytes;
+		Reserve(length + room);
+		int32 written = format_float(buffer + length, room + 1, value, decimals > kMostDecimals ? kMostDecimals : decimals);
+		if (written > 0) length += written;
+		buffer[length] = (char)0;
+	}
 }

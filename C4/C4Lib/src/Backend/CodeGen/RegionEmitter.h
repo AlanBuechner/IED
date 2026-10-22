@@ -34,6 +34,8 @@ namespace Scripting
 		void EmitAtExit(const AtExitNode* n);
 		void EmitReturn(const ReturnNode* r);
 		void EmitReturnValue(llvm::Value* v, const Type* ret);
+		/// The call `return f(...)` returns when it can build its result in this function's own result pointer.
+		const CallNode* ResultCall(const ReturnNode* r);
 		void EmitGoto(const GotoNode* g);
 		void EmitLabel(const LabelNode* l);
 		void EmitIf(const IfNode* n);

@@ -20,18 +20,28 @@ namespace Core
 		this.charCount = charCount;
 	}
 
+	// The C runtime's memchr compares 16 or 32 bytes at a time.
 	int64 StringView::IndexOf(char c, int64 start) const {
-		const char* p = bytes;
-		for (int64 i = start < 0 ? 0 : start; i < byteLength; ++i)
-			if (p[i] == c) return i;
-		return -1;
+		const int64 from = start < 0 ? 0 : start;
+		if (from >= byteLength) return -1;
+		const char* found = (const char*)memchr((void*)(bytes + from), (int32)(uint8)c, (uint64)(byteLength - from));
+		return found ? (int64)(found - bytes) : -1;
 	}
 
-	int64 StringView::IndexOf(StringView part) const {
-		if (part.byteLength == 0) return 0;
-		const char* p = bytes;
-		for (int64 i = 0; i + part.byteLength <= byteLength; ++i)
-			if (p[i] == part.bytes[0] && memcmp(p + i, part.bytes, (uint64)part.byteLength) == 0) return i;
+	// Each place the first byte matches, found by memchr, is compared whole.
+	int64 StringView::IndexOf(StringView part, int64 start) const {
+		const int64 from = start < 0 ? 0 : start;
+		if (part.byteLength == 0) return from <= byteLength ? from : -1;
+		const int64 last = byteLength - part.byteLength;
+		const int32 first = (int32)(uint8)part.bytes[0];
+		int64 at = from;
+		while (at <= last) {
+			const char* hit = (const char*)memchr((void*)(bytes + at), first, (uint64)(last - at + 1));
+			if (!hit) return -1;
+			at = (int64)(hit - bytes);
+			if (memcmp((void*)(bytes + at), (void*)part.bytes, (uint64)part.byteLength) == 0) return at;
+			at += 1;
+		}
 		return -1;
 	}
 

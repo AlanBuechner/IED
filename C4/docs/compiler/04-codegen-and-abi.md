@@ -138,6 +138,10 @@ link with clang-compiled C/C++ in both directions. All of it lives in `Abi`:
   - **Free / static function, funcptr call:** `[sret?] [params...]`.
 - `FunctionEmitter` reinterprets register-passed aggregates back into the object slot and loads
   hidden-pointer aggregates through the pointer; the sret pointer is `IRContext::Sret()`.
+- A call's sret result is built where it goes: `return f(...)` passes the function's own `Sret()` (copy elision,
+  `RegionEmitter::ResultCall`), and any other call gets a temporary whose `llvm.lifetime` spans the call and the
+  read of the result, so calls that never run together share one stack slot (BUG-363). A result read through its
+  address later (`materialize`) keeps a temporary of its own for the whole function.
 - `-mstackrealign` is always passed to clang.
 
 The model is the size authority (`Type::GetSize`); `Abi` only classifies. Interop tests under

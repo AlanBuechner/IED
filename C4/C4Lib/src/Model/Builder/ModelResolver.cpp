@@ -396,7 +396,7 @@ namespace Scripting
 			const Core::String name = fn.GetName()->GetFirstIdentifierToken().GetText();
 			Core::Vector<const Type*> paramTypes;
 			for (const auto& p : params) paramTypes.Push(p.m_Type);
-			const FunctionType* signature = ctx.model->m_Types->Function(rt.value, paramTypes); // interned
+			const FunctionType* signature = ctx.model->m_Types->Function(rt.value, paramTypes, fn.IsVariadic()); // interned
 
 			FunctionRecord rec;
 			rec.type = signature;

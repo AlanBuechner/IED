@@ -24,6 +24,12 @@ class Holder {
 	[operator("create")] public void Init(int32& c, Tracked& t) { count = c; tracked = t; }
 	public void Bump() { count++; }
 }
+class Reader {
+	private const int32& value;
+	[operator("create")] public void Init(const int32& source) { this.value = source; }
+	public int32 Get() const { return value; }
+	public const int32* Where() const { return &value; }
+}
 class Pair {
 	public int32& first;
 	public int32 second;
@@ -72,5 +78,9 @@ int32 main() {
 	int32 y = 8;
 	Pair p = Pair(y);
 	Check(&p.first == &y && p.second == 2, "this.field binds in a create");
+	int32 n = 42;
+	Reader r = Reader(n);
+	n = 43;
+	Check(r.Get() == 43 && r.Where() == &n, "a const reference field binds in a create (BUG-362)");
 	return g_failures;
 }

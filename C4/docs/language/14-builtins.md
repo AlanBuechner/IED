@@ -218,7 +218,9 @@ int32 SumInts(int32 count, ...) {
 | `va_end(ap)` | closes the list |
 
 - On Win64 every argument takes one 8-byte slot; an object of 1, 2, 4 or 8 bytes rides in its slot and any
-  other object arrives as a pointer to a copy, as C does it, so `va_arg(ap, Triple)` works for both.
+  other object arrives as a pointer to a copy, as C does it, so `va_arg(ap, Triple)` works for both. Only plain
+  data travels this way: an object that copies or destroys itself cannot be passed or read
+  ([07-functions-and-lambdas](07-functions-and-lambdas.md#77-c-variadic-functions)).
 - `va_arg` reads the promoted type: a `float` arrives as a `double`, and integers narrower than 32 bits as
   an `int32` (reading the narrow type is an error that names the right one).
 - A function of the program named `va_start`, `va_end` or `va_copy` wins over the intrinsic; `va_arg` is

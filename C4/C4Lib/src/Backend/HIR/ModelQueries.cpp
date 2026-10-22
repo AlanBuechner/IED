@@ -1,4 +1,5 @@
 #include "Backend/HIR/ModelQueries.h"
+#include "Model/TypeNotFound.h"
 #include "Backend/HIR/HIRNodes.h" // IntrinsicOp
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include "Model/TypeHandle.h" // UnwrapToValue
@@ -74,7 +75,7 @@ namespace Scripting
 			auto segment = SegmentType(seg, from, unitId, scopeContext);
 			if (!segment.Ok()) return segment;
 			if (i + 1 == nqn->SegmentCount())
-				return segment.value ? Result(TypeHandle::UnwrapToValue(segment.value)) : Result::Fail(QueryError::NotFound, "type not found: " + seg.nameToken.GetText());
+				return segment.value ? Result(TypeHandle::UnwrapToValue(segment.value)) : Result::Fail(QueryError::NotFound, TypeNotFound(seg.nameToken.GetText()));
 			if (segment.value)
 			{
 				const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(segment.value));

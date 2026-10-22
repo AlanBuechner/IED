@@ -38,20 +38,39 @@ namespace Scripting
 		}
 	}
 
-	llvm::Value* CallEmitter::Emit(const CallNode* n)
+	Abi::Signature CallEmitter::SignatureOf(const CallNode* n)
+	{
+		// A func's code is called like a member function whose `this` is the func's environment.
+		ModuleContext& mc = m_Ctx.mctx();
+		if (n->callee) return mc.SignatureOf(*n->callee);
+		return mc.abi().SignatureOf(ReturnTypeOf(n), CallsThroughFunc(n) ? Abi::CallKind::Member : Abi::CallKind::Free);
+	}
+
+	bool CallEmitter::ReturnsInMemory(const CallNode* n) { return !n->materialize && SignatureOf(n).sret; }
+
+	llvm::AllocaInst* CallEmitter::ResultTemporary(llvm::Type* type, const char* name)
+	{
+		llvm::AllocaInst* temporary = m_Ctx.EntryAlloca(type, name);
+		m_Ctx.builder().CreateLifetimeStart(temporary);
+		return temporary;
+	}
+
+	llvm::Value* CallEmitter::Emit(const CallNode* n, llvm::Value* destination)
 	{
 		ModuleContext& mc = m_Ctx.mctx();
 		const Type* retType = ReturnTypeOf(n);
-		// A func's code is called like a member function whose `this` is the func's environment.
 		const bool throughFunc = CallsThroughFunc(n);
-		const Abi::Signature sig = n->callee ? mc.SignatureOf(*n->callee)
-			: mc.abi().SignatureOf(retType, throughFunc ? Abi::CallKind::Member : Abi::CallKind::Free);
+		const Abi::Signature sig = SignatureOf(n);
 		llvm::Value* func = throughFunc ? m_Expr.Emit(n->target) : nullptr;
 
 		// Hidden parameters first (MSVC x64: `this`, then the sret pointer), then the declared arguments. The
-		// receiver is evaluated once: a virtual call reads its vptr from the same `this` it passes.
+		// receiver is evaluated once: a virtual call reads its vptr from the same `this` it passes. A materialized
+		// result is read through its address later, so its temporary lives to the end of the function.
 		std::vector<llvm::Value*> args(sig.firstParam, nullptr);
-		llvm::Value* sret = sig.sret ? m_Ctx.EntryAlloca(mc.Lower(retType), "sret") : nullptr;
+		llvm::Value* sret = nullptr;
+		if (sig.sret && destination) sret = destination;
+		else if (sig.sret && n->materialize) sret = m_Ctx.EntryAlloca(mc.Lower(retType), "sret");
+		else if (sig.sret) sret = ResultTemporary(mc.Lower(retType), "sret");
 		llvm::Value* thisArg = nullptr;
 		if (sig.thisIndex >= 0)
 		{
@@ -66,6 +85,7 @@ namespace Scripting
 			: ResolveCallee(n, thisArg);
 		const bool mayThrow = !(n->callee && n->callee->isNoexcept);
 		llvm::CallBase* call = m_Ctx.Call(callee.type, callee.target, args, mayThrow);
+		if (destination) return nullptr;
 		return Result(n, call, sret, retType);
 	}
 
@@ -214,10 +234,15 @@ namespace Scripting
 			B.CreateStore(call, tmp);
 			return tmp;
 		}
-		if (sret) return B.CreateLoad(mc.Lower(retType), sret);
-		if (retIntSize == 0) return call;
-		llvm::Value* tmp = m_Ctx.EntryAlloca(mc.Lower(retType));
-		B.CreateStore(call, tmp);
-		return B.CreateLoad(mc.Lower(retType), tmp);
+		llvm::Value* temporary = sret;
+		if (!sret && retIntSize == 0) return call;
+		if (!sret)
+		{
+			temporary = ResultTemporary(mc.Lower(retType), "tmp");
+			B.CreateStore(call, temporary);
+		}
+		llvm::Value* result = B.CreateLoad(mc.Lower(retType), temporary);
+		B.CreateLifetimeEnd(temporary);
+		return result;
 	}
 } // namespace Scripting

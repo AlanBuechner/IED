@@ -1,0 +1,9 @@
+include "bedrock.ch"
+int64 Length(int32 count, ...) {
+	va_list ap;
+	va_start(ap);
+	Core::String text = va_arg(ap, Core::String);
+	va_end(ap);
+	return text.ByteLength();
+}
+int32 main() { return 0; }

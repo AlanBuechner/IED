@@ -1,4 +1,5 @@
 #include "Model/TypeResolver.h"
+#include "Model/TypeNotFound.h"
 #include "Model/Types/ReturnLists.h"
 #include "Model/Templates/Packs.h"
 #include "Model/OverloadResolution.h"
@@ -169,7 +170,7 @@ namespace Scripting
 				const Type* b = model.m_Types->FindBuiltin(name);
 				if (b && isFinal)
 					return ApplyIndirections(model, b, node, unitId, bindingScope, context);
-				return QueryResult<const Type*>::Fail(QueryError::NotFound, "type not found: " + name);
+				return QueryResult<const Type*>::Fail(QueryError::NotFound, TypeNotFound(name));
 			}
 
 		if (info->kind == SymbolKind::Namespace)
@@ -357,7 +358,7 @@ namespace Scripting
 		// falls back to the builtin table so QueryType("int32") matches ResolveType(int32).
 		const Type* b = model.m_Types->FindBuiltin(name);
 		if (b) return QueryResult<const Type*>::Success(b);
-		return QueryResult<const Type*>::Fail(QueryError::NotFound, "type not found: " + name);
+		return QueryResult<const Type*>::Fail(QueryError::NotFound, TypeNotFound(name));
 	}
 
 	// ---------------------------------------------------------------------------

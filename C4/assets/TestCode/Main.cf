@@ -186,6 +186,7 @@ int32 main() {
 	TestPrimitiveTypes();
 	TestVariadicPrintf();
 	TestVariadicUserDefined();
+	TestVariadicSignatures();
 	TestDefaultParameters();
 	TestMacroObjectLike();
 	TestMacroFunctionLike();

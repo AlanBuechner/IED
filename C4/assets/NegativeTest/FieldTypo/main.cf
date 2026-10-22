@@ -1,0 +1,2 @@
+struct Box { public int32 width; }
+int32 main() { Box b; return b.widht; }

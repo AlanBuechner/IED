@@ -200,13 +200,16 @@ subsystem in `Backend/HIR/`; every other lowerer calls it instead of storing obj
 ## Diagnostics
 
 - One channel: `LoweringContext::Fail` / `Report` write to the build's `ErrorTracker`. The first failure in a
-  function aborts that function (it returns an incomplete tree) and is its only report (the layers the
-  failure propagates through add nothing); other functions keep lowering, so one run
+  statement aborts that statement and is its only report (the layers the failure propagates through add
+  nothing); the statements after it still lower (`StmtLowerer::LowerEach`), so a function reports one error per
+  failed statement (BUG-361), and its tree stays incomplete. Other functions keep lowering, so one run
   reports errors from many functions. `CodeGenDriver` lowers every body before emitting any; if any
   lowering error exists it stops and reports them (at most the first 16, prefixed `lowering:`) instead of
   emitting a partial module.
 - Messages come from the model's `QueryResult` where the model detected the problem, with the AST node's
-  location as fallback. Examples of what HIR rejects: `no variable named y`, `no matching overload of Add`,
+  location as fallback. Examples of what HIR rejects: `no variable named y`, `no matching overload of Add`, `no member
+  'push_back' in 'Core::Array<int32>'; did you mean 'Push'?` (MemberSuggestion: the C4 name of a C++ standard library
+  member, or a close spelling),
   `Cannot access private field 'f'`, `cannot write through this location: ...`, `cannot bind a reference to a
   prvalue`, `'break' with no enclosing loop or switch`, `missing return value for non-void function`,
   `index assignment on a by-value-only indexer` (with a fix suggestion), `iterator protocol: 'end' has no

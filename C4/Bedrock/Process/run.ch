@@ -16,6 +16,7 @@ namespace Process
 		public Core::String output;    // what it wrote to stdout, and to stderr when `info.errors` is ToOutput
 		public Core::String errors;    // what it wrote to stderr
 		public Core::String error;     // why exitCode is kError
+		public Usage usage;            // what the child used in all: its processor time and peak memory
 	}
 
 	// Runs `info` with its stdout and stderr read into the Output (in the order they arrive) and its input from

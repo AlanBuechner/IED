@@ -1,5 +1,6 @@
-// What a running process uses, by its id, for Bedrock's Process::GetUsage (ProcessRuntimeC.h): its processor time so
-// far and its memory now. Asks only for limited query rights, which a program started by another user may still refuse.
+// What a process uses, for Bedrock's Process::GetUsage and Child::GetUsage (ProcessRuntimeC.h): its processor time so
+// far and its memory now. By id it asks only for limited query rights, which a program started by another user may
+// still refuse, and answers only while the process runs; through a handle it answers after the end too, with totals.
 
 #include "ProcessRuntimeC.h"
 #define WIN32_LEAN_AND_MEAN
@@ -22,26 +23,30 @@ static BOOL Running(HANDLE process)
 	return GetExitCodeProcess(process, &exitCode) && exitCode == STILL_ACTIVE;
 }
 
+int32_t c4_process_handle_usage(void* process, c4_process_counters* usage)
+{
+	if (!usage) return -1;
+	memset(usage, 0, sizeof(*usage));
+	if (!process) return -1;
+	FILETIME created, exited, kernel, user;
+	PROCESS_MEMORY_COUNTERS_EX counters;
+	if (!GetProcessTimes((HANDLE)process, &created, &exited, &kernel, &user)) return -1;
+	if (!GetProcessMemoryInfo((HANDLE)process, (PROCESS_MEMORY_COUNTERS*)&counters, sizeof(counters))) return -1;
+	usage->cpuTimeNs = FileTimeNs(kernel) + FileTimeNs(user);
+	usage->workingSetBytes = (int64_t)counters.WorkingSetSize;
+	usage->privateBytes = (int64_t)counters.PrivateUsage;
+	usage->peakPrivateBytes = (int64_t)counters.PeakPagefileUsage;
+	usage->peakWorkingSetBytes = (int64_t)counters.PeakWorkingSetSize;
+	return 0;
+}
+
 int32_t c4_process_usage(uint32_t id, c4_process_counters* usage)
 {
 	if (!usage) return -1;
 	memset(usage, 0, sizeof(*usage));
 	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, id);
 	if (!process) return -1;
-	if (!Running(process))
-	{
-		CloseHandle(process);
-		return -1;
-	}
-	FILETIME created, exited, kernel, user;
-	PROCESS_MEMORY_COUNTERS_EX counters;
-	const BOOL timed = GetProcessTimes(process, &created, &exited, &kernel, &user);
-	const BOOL measured = GetProcessMemoryInfo(process, (PROCESS_MEMORY_COUNTERS*)&counters, sizeof(counters));
+	const int32_t result = Running(process) ? c4_process_handle_usage(process, usage) : -1;
 	CloseHandle(process);
-	if (!timed || !measured) return -1;
-	usage->cpuTimeNs = FileTimeNs(kernel) + FileTimeNs(user);
-	usage->workingSetBytes = (int64_t)counters.WorkingSetSize;
-	usage->privateBytes = (int64_t)counters.PrivateUsage;
-	usage->peakPrivateBytes = (int64_t)counters.PeakPagefileUsage;
-	return 0;
+	return result;
 }

@@ -149,15 +149,15 @@ namespace Scripting
 		return t;
 	}
 
-	const FunctionType* TypeStore::Function(const Type* returnType, const Core::Vector<const Type*>& paramTypes)
+	const FunctionType* TypeStore::Function(const Type* returnType, const Core::Vector<const Type*>& paramTypes, bool variadic)
 	{
 		for (const auto& entry : m_FunctionCache)
-			if (std::get<0>(entry) == returnType && std::get<1>(entry) == paramTypes)
-				return std::get<2>(entry);
+			if (std::get<0>(entry) == returnType && std::get<1>(entry) == paramTypes && std::get<2>(entry) == variadic)
+				return std::get<3>(entry);
 		Core::Vector<FunctionType::ParameterInfo> infos;
 		for (const Type* p : paramTypes) { FunctionType::ParameterInfo pi; pi.m_Type = p; infos.Push(pi); }
-		const FunctionType* t = Own(new FunctionType(returnType, infos));
-		m_FunctionCache.Push({ returnType, paramTypes, t });
+		const FunctionType* t = Own(new FunctionType(returnType, infos, variadic));
+		m_FunctionCache.Push({ returnType, paramTypes, variadic, t });
 		return t;
 	}
 

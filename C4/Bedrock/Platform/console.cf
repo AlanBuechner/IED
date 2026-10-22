@@ -1,0 +1,53 @@
+include "console.ch"
+
+namespace Platform
+{
+	const int64 kInputChunk = 4096;
+
+	bool ReadAllInput(Core::StringBuilder& out) {
+		char[kInputChunk] chunk;
+		while (true) {
+			const int64 read = ReadInput((void*)&chunk[0], kInputChunk);
+			if (read < 0) return false;
+			if (read == 0) return true;
+			out.AppendBytes((const char*)&chunk[0], read);
+		}
+		return true;
+	}
+
+	bool InputLines::Next(Core::String& line) {
+		while (true) {
+			const Core::StringView text = pending.View();
+			const int64 lineFeed = text.IndexOf('\n', start);
+			if (lineFeed >= 0) {
+				const int64 end = lineFeed > start && text.ByteAt(lineFeed - 1) == 13 ? lineFeed - 1 : lineFeed;
+				line = Core::String(text.Substring(start, end - start));
+				start = lineFeed + 1;
+				return true;
+			}
+			if (ended) {
+				if (start >= text.ByteLength()) return false;
+				line = Core::String(text.Substring(start, text.ByteLength() - start));
+				start = text.ByteLength();
+				return true;
+			}
+			ended = !Fill();
+		}
+		return false;
+	}
+
+	// The bytes not given yet move to the front, then the next chunk follows them; false at the end of the input.
+	bool InputLines::Fill() {
+		if (start > 0) {
+			Core::StringBuilder kept;
+			kept.Append(pending.View().Substring(start, pending.ByteLength() - start));
+			pending = kept;
+			start = 0;
+		}
+		char[kInputChunk] chunk;
+		const int64 read = ReadInput((void*)&chunk[0], kInputChunk);
+		if (read <= 0) return false;
+		pending.AppendBytes((const char*)&chunk[0], read);
+		return true;
+	}
+}

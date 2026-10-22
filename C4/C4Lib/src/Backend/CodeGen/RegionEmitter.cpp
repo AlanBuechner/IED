@@ -1,7 +1,9 @@
 #include "Backend/CodeGen/RegionEmitter.h"
 #include "Backend/CodeGen/AsmEmitter.h"
+#include "Backend/CodeGen/CallEmitter.h"
 #include "Backend/CodeGen/EhTables.h"
 #include "Backend/CodeGen/StaticStorage.h"
+#include "Model/TypeHandle.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Instructions.h>
@@ -308,7 +310,9 @@ namespace Scripting
 		auto& B = m_Ctx.builder();
 		const FunctionRecord* rec = m_Ctx.hir().record;
 		const Type* ret = rec && rec->type ? rec->type->GetReturnType() : nullptr;
-		llvm::Value* v = r->value ? m_Expr.Emit(r->value) : nullptr;
+		llvm::Value* v = nullptr;
+		if (const CallNode* call = ResultCall(r)) CallEmitter(m_Ctx, m_Expr).EmitInto(call, m_Ctx.Sret()); // copy elision
+		else if (r->value) v = m_Expr.Emit(r->value);
 		if (m_Ctx.Cleanups().Depth() == 0)
 		{
 			EmitReturnValue(v, ret);
@@ -329,6 +333,16 @@ namespace Scripting
 		if (IsOpen())
 			EmitReturnValue(staged ? B.CreateLoad(v->getType(), staged) : nullptr, ret);
 		ContinueAfterTerminator();
+	}
+
+	const CallNode* RegionEmitter::ResultCall(const ReturnNode* r)
+	{
+		if (!m_Ctx.Sret() || !r->value || r->value->kind != HIRNode::Kind::Call) return nullptr;
+		const auto* call = static_cast<const CallNode*>(r->value);
+		const FunctionRecord* rec = m_Ctx.hir().record;
+		const Type* ret = rec && rec->type ? rec->type->GetReturnType() : nullptr;
+		if (!ret || TypeHandle::UnwrapToValue(call->type) != TypeHandle::UnwrapToValue(ret)) return nullptr;
+		return CallEmitter(m_Ctx, m_Expr).ReturnsInMemory(call) ? call : nullptr;
 	}
 
 	void RegionEmitter::EmitReturnValue(llvm::Value* v, const Type* ret)

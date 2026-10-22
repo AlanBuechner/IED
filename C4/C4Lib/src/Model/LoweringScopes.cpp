@@ -129,7 +129,7 @@ namespace Scripting
 					m.m_IsConst = fn->IsConstMethod();
 					t->AddMethod(m);
 
-					FunctionType* sig = new FunctionType(rt.value, paramInfos);
+					FunctionType* sig = new FunctionType(rt.value, paramInfos, fn->IsVariadic());
 					FunctionRecord rec;
 					rec.type = model.m_Types->Own(sig);
 					rec.scope = layer;
@@ -237,7 +237,7 @@ namespace Scripting
 			paramInfos.Push(pi);
 			if (p->HasDefaultValue()) trailingDefaults++;
 		}
-		FunctionType* sig = new FunctionType(rt.value, paramInfos);
+		FunctionType* sig = new FunctionType(rt.value, paramInfos, fn.IsVariadic());
 		const Type* ownedSig = model.m_Types->Own(sig); // local: not interned (a body-local name is not global)
 		FunctionRecord rec;
 		rec.name = name;

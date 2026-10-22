@@ -1,8 +1,11 @@
 #include "Backend/HIR/VarArgs.h"
 #include "Backend/HIR/ExprLowerer.h"
+#include "Backend/HIR/LifecycleFacts.h"
 #include "Backend/HIR/ReadOnly.h"
 #include "Model/TypeHandle.h"
+#include "Model/Types/ObjectType.h"
 #include "Model/Types/PointerType.h"
+#include "Model/Types/QualifiedName.h"
 #include "Parser/Nodes/Expressions/VaArgExpressionNode.h"
 
 namespace Scripting::VarArgs
@@ -71,6 +74,16 @@ namespace Scripting::VarArgs
 			default: return "";
 			}
 		}
+
+		// Its bytes are not a copy of an object with a lifecycle, so a C variadic function can neither take nor give one.
+		Core::String LifecycleProblem(LoweringContext& ctx, const Type* t)
+		{
+			if (!LifecycleFacts::NeedsCopy(ctx.queries(), t) && !LifecycleFacts::NeedsDestroy(ctx.queries(), t)) return "";
+			const ObjectType* object = dynamic_cast<const ObjectType*>(t);
+			const bool text = object && object->FindMethodByName("CStr");
+			return "a '" + QualifiedName(t) + "' copies or destroys itself, and '...' passes only bytes" +
+				(text ? Core::String(" (pass its text as .CStr())") : Core::String());
+		}
 	}
 
 	bool IsIntrinsic(const Core::String& name)
@@ -96,6 +109,15 @@ namespace Scripting::VarArgs
 		const Type* read = TypeHandle::UnwrapToValue(type.value);
 		if (type.value->GetKind() == TypeKind::Reference) read = type.value;
 		if (Core::String why = ReadProblem(read); !why.empty()) return ctx.Fail(&node, Fail(why));
+		if (Core::String why = LifecycleProblem(ctx, read); !why.empty()) return ctx.Fail(&node, Fail("va_arg cannot read this type: " + why));
 		return Value::R(ctx.out->NewNode<VaNode>(read, VaNode::Op::Arg, address.value), read);
+	}
+
+	QueryResult<void> CheckPassed(LoweringContext& ctx, const Type* type, size_t position)
+	{
+		const Type* passed = type ? TypeHandle::UnwrapToValue(type) : nullptr;
+		Core::String why = passed ? LifecycleProblem(ctx, passed) : Core::String();
+		if (why.empty()) return QueryResult<void>::Success();
+		return QueryResult<void>::Fail(QueryError::NotAValue, "argument " + std::to_string(position + 1) + " cannot pass through '...': " + why);
 	}
 } // namespace Scripting::VarArgs

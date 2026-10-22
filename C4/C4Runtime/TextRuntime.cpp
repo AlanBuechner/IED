@@ -91,6 +91,19 @@ extern "C" int32_t c4_format_double(char* out, int32_t cap, double value, int32_
 	return FormatShortest(out, cap, value);
 }
 
+// `value` as c4_format_double writes a double, the shortest text being the shortest that reads back as the same
+// float (charconv's): 0.1f is `0.1`, not the double it widens to.
+extern "C" int32_t c4_format_float(char* out, int32_t cap, float value, int32_t decimals)
+{
+	if (!out || cap <= 0) return -1;
+	if (const char* nonFinite = NonFiniteText(value)) return Copied(out, cap, nonFinite, std::strlen(nonFinite));
+	if (decimals >= 0) return FormatFixed(out, cap, value, decimals > 100 ? 100 : decimals);
+	const std::to_chars_result written = std::to_chars(out, out + cap - 1, value);
+	if (written.ec != std::errc()) return -1;
+	*written.ptr = 0;
+	return (int32_t)(written.ptr - out);
+}
+
 // The double that text[0, length) starts with, in strtod's syntax. Returns how many bytes it took, 0 when the text does
 // not start with a number.
 extern "C" int64_t c4_parse_double(const char* text, int64_t length, double* out)

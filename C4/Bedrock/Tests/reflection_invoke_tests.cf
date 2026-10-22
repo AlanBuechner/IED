@@ -11,6 +11,7 @@ struct RiPoint { public int32 x; public int32 y; }
 RiPoint RiMake(int32 x, int32 y) { RiPoint p; p.x = x; p.y = y; return p; }
 Core::String RiGreeting() { return Core::String("hi"); }
 int32 RiAppendLength(Core::String s) { s.Append("!!"); return (int32)s.ByteLength(); }
+int32 RiFirstOf(int32 count, ...) { return count; }
 
 interface IRiArea { int32 Area(); }
 class RiAnimal {
@@ -109,9 +110,9 @@ class ReflectionInvokeTests {
 		int32 r = 0;
 		assert_true(!Reflection::FindFunction("RiAdd").Call(&r, 1), "wrong argument count");
 		assert_true(!Reflection::FindType("RiAnimal").FindMethod("Bump").Call(nullptr, nullptr, 1), "an instance method without an object");
-		Reflection::Function format = Reflection::FindFunction("Core::Format");
-		assert_true(format.IsValid(), "a variadic function is registered");
-		assert_true(!format.IsInvokable(), "but has no thunk");
+		Reflection::Function variadic = Reflection::FindFunction("RiFirstOf");
+		assert_true(variadic.IsValid(), "a variadic function is registered");
+		assert_true(!variadic.IsInvokable(), "but has no thunk");
 		assert_true(!Reflection::FindFunction("RiMissing").Invoke(&r, nullptr), "an invalid handle");
 	}
 

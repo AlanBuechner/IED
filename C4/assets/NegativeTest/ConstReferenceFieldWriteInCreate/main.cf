@@ -1,0 +1,5 @@
+class Reader {
+	private const int32& value;
+	[operator("create")] public void Init(const int32& source) { this.value = source; this.value += 1; }
+}
+int32 main() { int32 n = 1; Reader r = Reader(n); return 0; }

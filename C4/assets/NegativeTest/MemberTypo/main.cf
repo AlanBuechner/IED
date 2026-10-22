@@ -1,0 +1,2 @@
+struct Path { public int32 Length() { return 3; } }
+int32 main() { Path p; return p.Lenght(); }

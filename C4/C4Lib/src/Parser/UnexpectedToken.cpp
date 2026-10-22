@@ -11,6 +11,20 @@ namespace Scripting
 			return t == TokenType::Equal || t == TokenType::SemiColon || t == TokenType::Comma || t == TokenType::OpenParen ||
 				t == TokenType::OpenBracket || t == TokenType::CloseParen;
 		}
+
+		// C's array declarator `int values[4]` (BUG-361): in C4 the extent belongs to the type.
+		Core::String CArrayDeclaratorMessage(const Lexer& lexer)
+		{
+			const Token& type = lexer.PeekCompound();
+			const Token& name = lexer.PeekCompound(1);
+			if (type.GetType() != TokenType::Identifier || name.GetType() != TokenType::Identifier ||
+				lexer.PeekCompound(2).GetType() != TokenType::OpenBracket)
+				return "";
+			const bool oneToken = lexer.PeekCompound(4).GetType() == TokenType::CloseBracket;
+			const Core::String extent = oneToken ? Core::String(lexer.PeekCompound(3).GetText()) : Core::String("N");
+			return Core::StringFormat::Format("an array's extent belongs to its type in C4: write '{0}[{1}] {2}', not '{0} {2}[{1}]'",
+				type.GetText(), extent, name.GetText());
+		}
 	}
 
 	Core::String UnexpectedTokenMessage(const Lexer& lexer)
@@ -19,6 +33,7 @@ namespace Scripting
 		const Token& name = lexer.PeekCompound(1);
 		if (token.GetType() == TokenType::Identifier && Token::IsKeyword(name.GetType()) && EndsAName(lexer.PeekCompound(2).GetType()))
 			return KeywordNameMessage(name);
+		if (Core::String array = CArrayDeclaratorMessage(lexer); !array.empty()) return array;
 		return Core::StringFormat::Format("Unexpected token '{0}'", token.GetText());
 	}
 

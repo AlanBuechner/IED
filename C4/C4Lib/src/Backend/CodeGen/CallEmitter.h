@@ -13,7 +13,13 @@ namespace Scripting
 	public:
 		CallEmitter(IRContext& ctx, ExprEmitter& expr) : m_Ctx(ctx), m_Expr(expr) {}
 
-		llvm::Value* Emit(const CallNode* n);
+		llvm::Value* Emit(const CallNode* n) { return Emit(n, nullptr); }
+
+		/// Whether the call's result comes back through a hidden result pointer (sret) rather than in registers.
+		bool ReturnsInMemory(const CallNode* n);
+		/// A call that ReturnsInMemory, its result built at `destination` (the function's own result pointer for
+		/// `return f()`): no temporary, no copy.
+		void EmitInto(const CallNode* n, llvm::Value* destination) { Emit(n, destination); }
 
 		/// Run the constructor `ctor` on the storage at `object` (`new T(args)`, `T(args)`). A create method
 		/// that returns its object builds it in place: `object` is also its result pointer.
@@ -29,6 +35,13 @@ namespace Scripting
 			const HIRNode* target = nullptr;
 			const std::vector<const HIRNode*>& args;
 		};
+
+		Abi::Signature SignatureOf(const CallNode* n);
+		/// The call, its sret result built at `destination` when given, else in a temporary alive only while the
+		/// result is read (lifetime markers let calls that never run together share one stack slot).
+		llvm::Value* Emit(const CallNode* n, llvm::Value* destination);
+		/// A temporary the result is read from at once: its lifetime starts here and ends in Result.
+		llvm::AllocaInst* ResultTemporary(llvm::Type* type, const char* name);
 
 		std::vector<const Type*> ParameterTypes(const CallSite& site) const;
 		void AppendArguments(const CallSite& site, std::vector<llvm::Value*>& args);

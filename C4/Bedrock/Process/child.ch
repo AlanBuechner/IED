@@ -14,6 +14,7 @@
 include "Text/string.ch"
 include "Text/stringview.ch"
 include "Container/array.ch"
+include "usage.ch"
 
 namespace Process
 {
@@ -90,6 +91,8 @@ namespace Process
 		public int64 Wait(int32 timeoutMs = kWaitForever);
 		// Ends the child and every process it started; its exit code is then 1.
 		public bool Kill();
+		// What the child uses, or used in all once it has ended (exact totals after Wait); false when closed.
+		public bool GetUsage(Usage& usage) const { return IsOpen() && c4_process_handle_usage(handles.process, &usage) == 0; }
 		// A terminal's new size; false for a child that is not one.
 		public bool Resize(int32 columns, int32 rows);
 		public void Close();   // idempotent

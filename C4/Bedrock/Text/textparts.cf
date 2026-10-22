@@ -1,0 +1,76 @@
+include "textparts.ch"
+
+namespace Core
+{
+	[operator("create")] void SplitParts::Init(StringView text, StringView separator) {
+		this.text = text;
+		this.separator = separator;
+		single = -1;
+		at = 0;
+		done = false;
+	}
+
+	[operator("create")] void SplitParts::Init(StringView text, char separator) {
+		this.text = text;
+		single = (int32)(uint8)separator;
+		at = 0;
+		done = false;
+	}
+
+	bool SplitParts::Next(StringView& part) {
+		if (done) return false;
+		int64 found = -1;
+		if (single >= 0) found = text.IndexOf((char)single, at);
+		else if (!separator.IsEmpty()) found = text.IndexOf(separator, at);
+		const int64 end = found >= 0 ? found : text.ByteLength();
+		part = text.Substring(at, end - at);
+		done = found < 0;
+		at = end + (single >= 0 ? 1 : separator.ByteLength());
+		return true;
+	}
+
+	Array<StringView> SplitViews(SplitParts parts) {
+		Array<StringView> views;
+		StringView part;
+		while (parts.Next(part)) views.Push(part);
+		return views;
+	}
+
+	Array<String> SplitStrings(SplitParts parts) {
+		Array<String> strings;
+		StringView part;
+		while (parts.Next(part)) strings.Push(String(part));
+		return strings;
+	}
+
+	Array<StringView> Split(StringView separator) extends StringView { return SplitViews(SplitParts(*this, separator)); }
+	Array<StringView> Split(const char* separator) extends StringView { return SplitViews(SplitParts(*this, StringView(separator))); }
+	Array<StringView> Split(char separator) extends StringView { return SplitViews(SplitParts(*this, separator)); }
+	Array<String> Split(StringView separator) extends String { return SplitStrings(SplitParts(this.View(), separator)); }
+	Array<String> Split(const char* separator) extends String { return SplitStrings(SplitParts(this.View(), StringView(separator))); }
+	Array<String> Split(char separator) extends String { return SplitStrings(SplitParts(this.View(), separator)); }
+
+	String WithAsciiCase(StringView text, bool upper) {
+		String changed = String(text);
+		char* bytes = (char*)changed.CStr();
+		const int32 from = upper ? 'a' : 'A';
+		for (int64 i = 0; i < changed.ByteLength(); ++i) {
+			const int32 c = bytes[i];
+			if (c >= from && c <= from + 25) bytes[i] = (char)(c ^ 32);
+		}
+		return changed;
+	}
+
+	String ToLower() extends StringView { return WithAsciiCase(*this, false); }
+	String ToUpper() extends StringView { return WithAsciiCase(*this, true); }
+	String ToLower() extends String { return WithAsciiCase(this.View(), false); }
+	String ToUpper() extends String { return WithAsciiCase(this.View(), true); }
+
+	bool ParseDouble(StringView text, double& value) {
+		if (text.IsEmpty() || IsSpace(text.ByteAt(0))) return false;
+		double read = 0;
+		if (parse_double((void*)text.Data(), text.ByteLength(), (void*)&read) != text.ByteLength()) return false;
+		value = read;
+		return true;
+	}
+}

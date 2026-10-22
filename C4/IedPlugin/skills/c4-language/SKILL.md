@@ -159,7 +159,10 @@ Bedrock's names live in one-level namespaces: `Core` (containers `Array<T>`, `Ha
     Core::HashMap<Core::String, int32> ages;
     ages[Core::String("ada")] = 36;
     Core::StringBuilder text;
-    Core::Format(&text, "{0:s} is {1}", "ada", ages.Get(Core::String("ada")));
+    Core::String name = Core::String("ada");
+    Core::Format(&text, "{0} is {1}", name, ages.Get(name));   // each argument written as its own type
+
+`Core::Format` takes integers, floats, `bool`, `char`, `const char*`, `String` and `StringView` and writes each as what it is; `printf` is C's, so a string goes to it as `name.CStr()`.
 
 A `String` is never made from a `char*` implicitly (`Core::String s = Core::String("ada");`), but strings and views compare with `==`, `!=`, `<`, `>`, `<=`, `>=`, and with `==` / `!=` against a literal directly: `if (name == "ada")`.
 

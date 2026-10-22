@@ -76,6 +76,7 @@ namespace Core
 		// Lookups by a key of another type Q that hashes as K does (KeyTraits<Q>) and compares with == to a K: a
 		// Core::StringView for Core::String keys, so no String is made to look one up.
 		template<Q> public V* FindAs(const Q& key) { int64 slot = SlotAs(key); return slot >= 0 ? &entries[slot].value : nullptr; }
+		template<Q> public const V* FindAs(const Q& key) const { int64 slot = SlotAs(key); return slot >= 0 ? &entries[slot].value : nullptr; }
 		template<Q> public bool ContainsAs(const Q& key) const { return SlotAs(key) >= 0; }
 		template<Q> public bool RemoveAs(const Q& key) { return RemoveSlot(SlotAs(key)); }
 

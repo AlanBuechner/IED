@@ -1,0 +1,1 @@
+int32 main() { auto x = 1; int32 y = x + 1; if (y > 0) { return x; } return undefinedThing; }

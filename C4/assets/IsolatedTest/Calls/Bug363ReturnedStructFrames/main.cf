@@ -1,0 +1,82 @@
+// BUG-363: `return f(...)` of a struct builds the result in the caller's own result pointer (no temporary, no copy),
+// and a call's result temporary lives only while it is read, so a recursive function's frame does not grow with
+// the number of call sites that never run together. Each returned object is still destroyed exactly once.
+int32 g_destroyed = 0;
+
+class Owner {
+	public int64 id;
+	[operator("delete")] public void Done() { if (id != 0) g_destroyed++; id = 0; }
+}
+
+struct Value {
+	public int32 kind;
+	public int64 integer;
+	public Owner owner;
+	public int64* a;
+	public int64* b;
+	public int64* c;
+}
+
+struct Probe { public uint64 deeper; public uint64 shallower; }
+
+Value Leaf(int64 n) {
+	Value value;
+	value.integer = n;
+	value.owner.id = n + 100;
+	return value;
+}
+
+Value OneCase(int64 n, int32 which, Probe* probe) {
+	int64 marker = n;
+	Owner scoped;
+	if (n == 2) probe->shallower = (uint64)&marker;
+	if (n == 1) { probe->deeper = (uint64)&marker; return Leaf(marker); }
+	switch (which) {
+		case 0: return OneCase(n - 1, which, probe);
+		default: return Leaf(0);
+	}
+}
+
+Value EightCases(int64 n, int32 which, Probe* probe) {
+	int64 marker = n;
+	Owner scoped;                          // a cleanup runs after the result is built
+	scoped.id = 7;
+	if (n == 2) probe->shallower = (uint64)&marker;
+	if (n == 1) { probe->deeper = (uint64)&marker; return Leaf(marker); }
+	switch (which) {
+		case 0: return EightCases(n - 1, which, probe);
+		case 1: return EightCases(n - 1, which - 1, probe);
+		case 2: return EightCases(n - 1, which - 2, probe);
+		case 3: return EightCases(n - 1, which - 3, probe);
+		case 4: return EightCases(n - 1, which - 4, probe);
+		case 5: return EightCases(n - 1, which - 5, probe);
+		case 6: return EightCases(n - 1, which - 6, probe);
+		case 7: return EightCases(n - 1, which - 7, probe);
+		default: return Leaf(0);
+	}
+}
+
+int64 Sum(int32 which) {
+	Probe probe;
+	Value a = EightCases(4, which, &probe);
+	return a.integer + a.owner.id;
+}
+
+int32 main() {
+	Probe one;
+	Probe eight;
+	int64 total = 0;
+	{
+		Value a = OneCase(4, 0, &one);
+		Value b = EightCases(4, 0, &eight);
+		total = a.integer + b.integer + a.owner.id + b.owner.id;
+	}
+	const int64 oneFrame = (int64)(one.shallower - one.deeper);
+	const int64 eightFrame = (int64)(eight.shallower - eight.deeper);
+	if (total != 1 + 1 + 101 + 101) { printf("Bug363 results: %lld\n", total); return 1; }
+	// One Owner per EightCases level (4 levels) plus the two results; nothing destroyed twice.
+	if (g_destroyed != 4 + 2) { printf("Bug363 destroyed %d objects, expected 6\n", g_destroyed); return 2; }
+	if (eightFrame > oneFrame + 16) { printf("Bug363 frames: one case %lld bytes, eight cases %lld\n", oneFrame, eightFrame); return 3; }
+	if (Sum(0) != 102) { printf("Bug363 Sum\n"); return 4; }
+	return 0;
+}
