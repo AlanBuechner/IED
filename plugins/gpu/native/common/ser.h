@@ -143,6 +143,20 @@ namespace fb
 			Items(name, items, (C)wide);
 		}
 
+		// Whether something optional follows: a byte, not described. Writing gives back `present`.
+		bool Presence(bool present) {
+			u8 flag = present ? 1 : 0;
+			if (writer_) writer_->Put(flag);
+			else flag = reader_->Get<u8>();
+			return flag != 0;
+		}
+
+		// A number that is not described (a pNext chain's sType, which the structure it introduces names again).
+		void RawU32(u32& value) {
+			if (writer_) writer_->Put(value);
+			else value = reader_->Get<u32>();
+		}
+
 		// A structure behind a pointer that may be null.
 		template <class T> void Optional(const char* name, T*& item) {
 			using U = std::remove_const_t<T>;
@@ -167,6 +181,8 @@ namespace fb
 			size = (C)wide;
 		}
 		void Str(const char* name, const char*& text);
+		// `count` strings (Vulkan's layer and extension name lists); reading allocates the array.
+		void StrArray(const char* name, const char* const*& items, u32 count);
 		void WStr(const char* name, const wchar_t*& text);
 		void Text(const char* name, std::string& text);
 

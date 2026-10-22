@@ -25,6 +25,11 @@ TARGETS = {
 	"flashbang-tests": ("exe", COMMON + ["tests"], ["kernel32", "user32", "ole32"]),
 }
 
+# Headers a target's sources include that a script writes first (into the target's int folder, on its include path).
+GENERATED = {
+	"fb-sample-vulkan": [("samples/vulkan/make_shaders.py", "shaders.h")],
+}
+
 CONFIGS = {
 	"Debug": ["-O0", "-g", "-gcodeview"],
 	"Development": ["-O2", "-g", "-gcodeview"],
@@ -95,12 +100,14 @@ def up_to_date(obj, dep_file, stamp_file, stamp):
 	return True
 
 
-def compile_one(clang, source, obj, flags, defines):
+def compile_one(clang, source, obj, flags, defines, includes):
 	is_c = source.endswith(".c")
 	args = [clang, "--target=x86_64-pc-windows-msvc", "-c", source, "-o", obj, "-MD", "-MF", obj + ".d"]
 	args += ["-std=c11"] if is_c else ["-std=c++20", "-fms-extensions"]
 	args += flags + defines
 	args += ["-I", os.path.join(HERE, "common"), "-I", HERE, "-I", VULKAN_INCLUDE]
+	for include in includes:
+		args += ["-I", include]
 	args += ["-Wall", "-Wno-unused-function", "-Wno-missing-braces", "-Wno-unused-private-field", "-Wno-unknown-pragmas",
 		"-Wno-microsoft-enum-forward-reference", "-Wno-nonportable-include-path", "-Wno-switch", "-Wno-unused-variable",
 		"-Wno-unused-but-set-variable", "-Wno-pragma-pack", "-Wno-microsoft-cast", "-Wno-language-extension-token",
@@ -121,6 +128,12 @@ def build_target(name, kind, folders, libs, options, pool):
 	sources = sources_of(folders)
 	if not sources:
 		return True
+	generated = os.path.join(int_dir, "gen")
+	for script, header in GENERATED.get(name, []):
+		result = subprocess.run([sys.executable, "-I", os.path.join(HERE, script), os.path.join(generated, header)], capture_output=True, text=True)
+		if result.returncode != 0:
+			log(f"[{name}] {script} failed: {(result.stdout + result.stderr).strip()}")
+			return False
 	jobs = []
 	objects = []
 	for source in sources:
@@ -132,7 +145,7 @@ def build_target(name, kind, folders, libs, options, pool):
 			continue
 		jobs.append((source, obj, stamp_file))
 	failed = False
-	futures = {pool.submit(compile_one, options.clang, s, o, flags, defines): (s, o, f) for (s, o, f) in jobs}
+	futures = {pool.submit(compile_one, options.clang, s, o, flags, defines, [generated]): (s, o, f) for (s, o, f) in jobs}
 	for future in concurrent.futures.as_completed(futures):
 		source, obj, stamp_file = futures[future]
 		code, output = future.result()

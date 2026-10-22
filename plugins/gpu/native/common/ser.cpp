@@ -84,6 +84,14 @@ namespace fb
 		}
 	}
 
+	void Ser::StrArray(const char* name, const char* const*& items, u32 count) {
+		const char** at = writer_ ? const_cast<const char**>(items) : arena_->Array<const char*>(count);
+		if (json_) json_->BeginArray(name);
+		for (u32 i = 0; i < count; ++i) Str(nullptr, at[i]);
+		if (json_) json_->EndArray();
+		if (reader_) items = at;
+	}
+
 	void Ser::WStr(const char* name, const wchar_t*& text) {
 		std::string narrow = writer_ && text ? Narrow(text) : std::string();
 		u8 present = text ? 1 : 0;

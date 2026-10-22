@@ -1,7 +1,9 @@
 // The capture library's C API (native/include/flashbang_app.h; Bedrock Gpu::Capture binds the same exports): a program
-// hands its D3D12 device and DXGI factory over to be captured, asks for captures and marks frames.
+// hands its D3D12 device and DXGI factory over to be captured (a Vulkan program's devices are the layer's already), asks
+// for captures and marks frames.
 #include "capture.h"
 #include "d3d12/wrappers.h"
+#include "vulkan/vklayer.h"
 
 #include <windows.h>
 
@@ -40,13 +42,16 @@ extern "C"
 	// Frame bounds for a program that does not Present: each StartFrame is a frame, captured when one was triggered.
 	__declspec(dllexport) void FlashbangStartFrame(void) {
 		const std::vector<capture::d3d12::WrappedDevice*> devices = capture::d3d12::Devices();
+		const bool vulkan = !capture::vulkan::Devices().empty();
 		const uint64_t frame = capture::Session::Get().NextFrame();
-		if (devices.empty() || !capture::Session::Get().TakeTrigger()) return;
+		if ((devices.empty() && !vulkan) || !capture::Session::Get().TakeTrigger()) return;
 		for (capture::d3d12::WrappedDevice* device : devices) device->Frames().ManualStart(frame);
+		capture::vulkan::ManualStart(frame);
 	}
 
 	__declspec(dllexport) void FlashbangEndFrame(void) {
 		for (capture::d3d12::WrappedDevice* device : capture::d3d12::Devices()) device->Frames().ManualEnd();
+		capture::vulkan::ManualEnd();
 	}
 
 	__declspec(dllexport) int32_t FlashbangIsCapturing(void) { return capture::Session::Get().Capturing() ? 1 : 0; }
