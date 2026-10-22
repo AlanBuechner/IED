@@ -10,6 +10,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/FunPtrType.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
+#include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 // IntegerType / PointerType / VectorType live in DerivedTypes.h on this vendored LLVM 22; the constant
 // builders (ConstantInt / ConstantFP) live in Constants.h.
@@ -204,6 +205,15 @@ namespace Scripting
 		return llvm::FunctionType::get(retTy, paramTys, ft ? ft->IsVariadic() : false);
 	}
 
+	// Whether a declaration of the function says `inline` (BUG-357): any of them, so a header's declaration and an
+	// out-of-line definition each may.
+	static bool DeclaredInline(const FunctionRecord& rec)
+	{
+		for (const AstNode* declaration : rec.declarations)
+			if (const auto* function = dynamic_cast<const FunctionDefinitionNode*>(declaration); function && function->IsInline()) return true;
+		return false;
+	}
+
 	llvm::Function* ModuleContext::GetOrCreateFunction(const FunctionRecord& rec)
 	{
 		auto it = m_FuncCache.find(&rec);
@@ -226,6 +236,7 @@ namespace Scripting
 		llvm::Function* fn = llvm::Function::Create(fty,
 			fileStatic ? llvm::Function::InternalLinkage : llvm::Function::ExternalLinkage,
 			rec.mangledName.c_str(), m_Module);
+		if (DeclaredInline(rec)) fn->addFnAttr(llvm::Attribute::AlwaysInline);
 		m_FuncCache[&rec] = fn;
 		m_NewFunctions.push_back(&rec);
 		return fn;

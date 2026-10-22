@@ -46,7 +46,10 @@ namespace Core
 		[operator("+=")] public void Append(const char* text) { Append(StringView(text)); }
 		[operator("+=")] public void Append(const String& text) { Append(text.View()); }
 		public void Clear();                  // empty, keeping the buffer
-		public void Reserve(int64 bytes);     // room for at least `bytes` without growing again
+		// Room for at least `bytes` without growing again. Inline: every append asks, and only growth costs a call.
+		public inline void Reserve(int64 bytes) { if (bytes > capacity || !buffer) Grow(bytes); }
+
+		private void Grow(int64 bytes);   // room for `bytes`, at least twice what it had
 
 		private char* buffer;   // null-terminated at [length]; null for the zero String
 		private int64 length;   // bytes, the terminator excluded

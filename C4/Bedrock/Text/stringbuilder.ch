@@ -16,7 +16,12 @@ namespace Core
 
 		public void Append(StringView text);
 		public void Append(const char* text) { Append(StringView(text)); }
-		public void AppendByte(int32 byte);
+		public inline void AppendByte(int32 byte) {
+			Reserve(length + 1);
+			buffer[length] = (char)byte;
+			length += 1;
+			buffer[length] = (char)0;
+		}
 		// The UTF-8 bytes of a code point; a surrogate or anything past U+10FFFF is written as U+FFFD.
 		public void AppendCodePoint(int32 codePoint);
 		public void AppendBytes(const char* bytes, int64 count);   // raw bytes, no terminator searched for
@@ -35,7 +40,8 @@ namespace Core
 		public void Clear() { length = 0; if (buffer) buffer[0] = (char)0; }
 		// Keeps the first `byteLength` bytes; a longer length changes nothing.
 		public void Truncate(int64 byteLength) { if (byteLength >= 0 && byteLength < length) { length = byteLength; buffer[length] = (char)0; } }
-		public void Reserve(int64 bytes);
+		// Inline: every append asks, and only growth costs a call.
+		public inline void Reserve(int64 bytes) { if (bytes > capacity || !buffer) Grow(bytes); }
 		public int64 ByteLength() const { return length; }
 		public bool IsEmpty() const { return length == 0; }
 		public const char* CStr() const { return buffer ? buffer : ""; }   // valid until the next change
@@ -44,6 +50,7 @@ namespace Core
 
 		// A sign when `negative`, then `magnitude`'s digits, at least `minWidth` of them: one reservation, one terminator.
 		private void AppendDecimal(bool negative, uint64 magnitude, int32 minWidth);
+		private void Grow(int64 bytes);   // room for `bytes`, at least twice what it had
 
 		private char* buffer;   // null-terminated at [length]; null for the zero builder
 		private int64 length;

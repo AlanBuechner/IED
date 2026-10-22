@@ -287,6 +287,32 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void CodeGenTest::InlineFunctionsAreAlwaysInlined()
+	{
+		// BUG-357: `inline` (docs/language/07) did not parse; a free function, a method, and a method declared in its type
+		// and defined out of line with `inline` on one of the two are each always inlined.
+		CompilerInstance compiler;
+		std::map<std::string, bool> inlined; // function name -> AlwaysInline
+		TEST_ASSERT(LowerAndInspect(compiler,
+			"inline int32 Twice(int32 x) { return x * 2; }\n"
+			"int32 Plain(int32 x) { return x + 1; }\n"
+			"class Box { public int32 v; public inline int32 Get() const { return v; } public int32 Set(int32 x); }\n"
+			"inline int32 Box::Set(int32 x) { v = x; return x; }\n"
+			"int32 main() { Box b; b.Set(2); return Twice(b.Get()) + Plain(0) - 5; }", [&](llvm::Module& m) {
+				for (const llvm::Function& f : m)
+				{
+					const std::string name = f.getName().str();
+					for (const char* wanted : { "Twice", "Plain", "Get", "Set" })
+						if (name.find(wanted) != std::string::npos && !f.isDeclaration()) inlined[wanted] = f.hasFnAttribute(llvm::Attribute::AlwaysInline);
+				}
+			}));
+		TEST_ASSERT(inlined.count("Twice") && inlined["Twice"]);
+		TEST_ASSERT(inlined.count("Get") && inlined["Get"]);
+		TEST_ASSERT(inlined.count("Set") && inlined["Set"]);
+		TEST_ASSERT(inlined.count("Plain") && !inlined["Plain"]);
+		TEST_PASSED();
+	}
+
 	void CodeGenTest::GcRootsListEveryPointerHoldingGlobal()
 	{
 		// BUG-008: statics, static members, static locals, arrays and structs holding pointers are roots;

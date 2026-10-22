@@ -24,8 +24,7 @@ namespace Core
 		chars = 0;
 	}
 
-	void String::Reserve(int64 bytes) {
-		if (bytes <= capacity && buffer) return;
+	void String::Grow(int64 bytes) {
 		int64 grown = capacity * 2 > bytes ? capacity * 2 : bytes;
 		if (grown < 15) grown = 15;
 		char* larger = (char*)raw_alloc((uint64)(grown + 1));

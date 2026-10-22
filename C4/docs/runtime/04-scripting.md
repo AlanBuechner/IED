@@ -292,7 +292,8 @@ Rules:
 - Nothing may still run the script's code while it unloads, and the host must drop every pointer into it (script
   objects, function pointers, reflection handles of its entities) first. Objects of script types that are still
   alive keep their memory, but their finalizers are dropped (they would call freed code): unload reports how
-  many there were.
+  many there were. The GC census forgets their types too (`c4_gc_forget_types_in`): the records it noted with
+  them live in the script's image, so from then on they count as of no known type.
 - Reflection keeps every registration of an identity: registering one that another tag holds puts the new one in
   front; unloading a tag removes only its own, so the previous one is found again.
 - State that must survive a reload is the host's to carry (for example through `Serialization` and reflection,

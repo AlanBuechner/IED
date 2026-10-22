@@ -49,6 +49,9 @@ namespace Scripting
 
 		bool IsAbstract() const { return m_IsAbstract; }
 		const Token& GetAbstractToken() const { return m_AbstractToken; }
+		/// `inline` (docs/language/07): every call of the function is replaced by its body, at every optimization level.
+		bool IsInline() const { return m_IsInline; }
+		const Token& GetInlineToken() const { return m_InlineToken; }
 
 		const Ref<QualTypeNode>& GetReturnType() const { return m_ReturnType; }
 		const Ref<NamespaceQualifiedNameNode>& GetName() const { return m_Name; }
@@ -115,6 +118,8 @@ namespace Scripting
 
 		bool m_IsAbstract = false;
 		Token m_AbstractToken;
+		bool m_IsInline = false;
+		Token m_InlineToken;
 
 		Ref<QualTypeNode> m_ReturnType;
 

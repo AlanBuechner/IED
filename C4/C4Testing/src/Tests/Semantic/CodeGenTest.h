@@ -48,6 +48,9 @@ namespace Testing
 		void NewGivesTheCensusItsTypesRecord();
 
 		TEST_FUNC(Semantic.CodeGen)
+		void InlineFunctionsAreAlwaysInlined();
+
+		TEST_FUNC(Semantic.CodeGen)
 		void GcRootsListEveryPointerHoldingGlobal();
 
 		TEST_FUNC(Semantic.CodeGen)

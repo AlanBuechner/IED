@@ -24,6 +24,10 @@ General shape (in order): annotations, `template<...>`, access modifier, modifie
 `virtual`, `override`, `abstract`, `final`), return type, qualified name, parameter list, trailing
 qualifiers (`const`, `override`, `final`, `noexcept`), `= 0`, `extends T`, then a body or `;`.
 
+- `inline` puts the function's body in place of every call it can, at every optimization level (LLVM's
+  `alwaysinline`): for a hot path too small to be worth a call, such as a container's capacity check. A function
+  declared in its type and defined out of line is inline when either says so. Its address can still be taken, and
+  a recursive or virtual call stays a call.
 - The return type comes first, as in C++. There is no trailing-return form for named functions.
 - Parameter names may be omitted in a declaration: `void F(int32);`.
 - `return;` without a value in a non-`void` function is an error (`missing return value for non-void

@@ -230,7 +230,7 @@ namespace Scripting
 			next = lexer.PeekCompound();
 		}
 
-		// 3. Function modifiers: static, virtual, override, final, abstract
+		// 3. Function modifiers: static, virtual, override, final, abstract, inline
 		while (true)
 		{
 			Token mod = lexer.PeekCompound();
@@ -264,6 +264,12 @@ namespace Scripting
 			{
 				m_IsAbstract = true;
 				m_AbstractToken = mod;
+				foundModifier = true;
+			}
+			else if (mod.GetType() == TokenType::Identifier && mod.GetText() == "inline")
+			{
+				m_IsInline = true;
+				m_InlineToken = mod;
 				foundModifier = true;
 			}
 			else if (mod.GetType() == TokenType::Identifier && mod.GetText() == "concurrent")

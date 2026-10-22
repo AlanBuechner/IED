@@ -19,8 +19,7 @@ namespace Core
 	}
 
 	// Past 1 MiB the text grows in place: the pages after it are committed instead of the text being copied.
-	void StringBuilder::Reserve(int64 bytes) {
-		if (bytes <= capacity && buffer) return;
+	void StringBuilder::Grow(int64 bytes) {
 		int64 grown = capacity * 2 > bytes ? capacity * 2 : bytes;
 		if (grown < 31) grown = 31;
 		const bool fresh = buffer == nullptr;
@@ -58,13 +57,6 @@ namespace Core
 		AppendByte(0x80 | ((point >> 12) & 0x3F));
 		AppendByte(0x80 | ((point >> 6) & 0x3F));
 		AppendByte(0x80 | (point & 0x3F));
-	}
-
-	void StringBuilder::AppendByte(int32 byte) {
-		Reserve(length + 1);
-		buffer[length] = (char)byte;
-		length += 1;
-		buffer[length] = (char)0;
 	}
 
 	// A uint64 has at most 64 binary digits.
