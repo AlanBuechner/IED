@@ -369,13 +369,18 @@ export class Shell {
 	}
 
 	treeOf(activityId) {
-		return treeOf(this.doc, activityId, this.contributions.toolsOf(activityId).map((t) => ({ id: t.id, dock: t.dock })));
+		return this.treeIn(this.doc, activityId);
+	}
+
+	// A tablet starts with its tool windows auto-hidden (docs/15 "Phone layout").
+	treeIn(doc, activityId) {
+		return treeOf(doc, activityId, this.contributions.toolsOf(activityId).map((t) => ({ id: t.id, dock: t.dock })), this.deviceClass === "tablet");
 	}
 
 	changeTree(activityId, fn) {
 		if (!this.layout || !activityId) return;
 		this.layout.update((doc) => {
-			const before = treeOf(doc, activityId, this.contributions.toolsOf(activityId).map((t) => ({ id: t.id, dock: t.dock })));
+			const before = this.treeIn(doc, activityId);
 			const after = fn(before);
 			return after === before ? doc : withTree(doc, activityId, after);
 		});
@@ -410,6 +415,7 @@ export class Shell {
 		const groupPath = this.focus && this.focus.activity === activityId && this.focus.well ? this.focus.path : null;
 		this.layout.update((doc) => withActivity(doc, activityId));
 		this.changeTree(activityId, (tree) => T.revealPartners(T.openTab(tree, ref, { preview: opts.preview, groupPath }), ref, partnersOf(this.doc, ref)));
+		this.slideOut(activityId, ref);
 		if (!opts.preview || opts.focus) requestAnimationFrame(() => this.views.focus(ref));
 	}
 
@@ -458,7 +464,13 @@ export class Shell {
 		}
 		this.layout.update((doc) => withActivity(doc, tool.activity));
 		this.changeTree(tool.activity, (tree) => T.ensureTool(tree, id, tool.dock, true));
+		this.slideOut(tool.activity, id);
 		requestAnimationFrame(() => this.views.focus(id));
+	}
+
+	// An auto-hidden tab that is asked for slides out over the documents (VS).
+	slideOut(activityId, ref) {
+		if (T.isAutoHidden(this.treeOf(activityId), ref) && activityId === this.currentActivity() && this.chrome && this.chrome.slideOut) this.chrome.slideOut(activityId, ref);
 	}
 
 	// The activity whose tree holds `ref` (the current one first).
@@ -470,7 +482,10 @@ export class Shell {
 
 	activateTab(ref) {
 		const activityId = this.activityOf(ref);
-		if (activityId) this.changeTree(activityId, (tree) => T.revealPartners(T.activateTab(tree, ref), ref, partnersOf(this.doc, ref)));
+		if (activityId) {
+			this.changeTree(activityId, (tree) => T.revealPartners(T.activateTab(tree, ref), ref, partnersOf(this.doc, ref)));
+			this.slideOut(activityId, ref);
+		}
 		requestAnimationFrame(() => this.views.focus(ref));
 	}
 
@@ -533,6 +548,23 @@ export class Shell {
 		this.changeTree(activityId, (tree) => T.moveTab(tree, ref, T.pathOf(tree, T.groupOf(tree, ref)), zone));
 	}
 
+	// Auto-hides the tool window `ref` to its group's edge (VS's pin), or docks it back into its group.
+	autoHideTab(ref, hidden) {
+		const activityId = this.activityOf(ref);
+		if (activityId) this.changeTree(activityId, (tree) => (hidden ? T.autoHideTab(tree, ref) : T.dockTab(tree, ref)));
+		this.tabKeys(this.focus ? this.focus.ref : null);
+	}
+
+	autoHideAll() {
+		const activityId = this.currentActivity();
+		if (activityId && this.isDockHost(activityId)) this.changeTree(activityId, (tree) => T.autoHideAll(tree));
+	}
+
+	resizeAutoHidden(ref, share) {
+		const activityId = this.activityOf(ref);
+		if (activityId) this.changeTree(activityId, (tree) => T.setAutoHideSize(tree, ref, share));
+	}
+
 	resetLayout() {
 		if (!this.layout) return;
 		const activityId = this.currentActivity();
@@ -547,7 +579,7 @@ export class Shell {
 	focused(activity, ref, path, well) {
 		this.focus = { activity, ref, path, well };
 		this.context.set("activeTab", ref || undefined);
-		this.context.set("tabTethered", (ref && partnersOf(this.doc, ref).length > 0) || undefined);
+		this.tabKeys(ref);
 		this.context.set("activeTabKind", ref && ref.includes(":") ? ref.slice(0, ref.indexOf(":")) : ref ? "tool" : undefined);
 		const resource = ref ? this.views.resourceOf(ref) : null;
 		this.context.set("resourcePath", resource || undefined);
@@ -567,13 +599,24 @@ export class Shell {
 		this.views.releaseExcept(keep);
 	}
 
+	// What the menus about a tab ask of it: tethered, in a tool-window group, auto-hidden.
+	tabKeys(ref) {
+		const activityId = ref ? this.activityOf(ref) : null;
+		const owner = activityId ? T.groupOf(this.treeOf(activityId), ref) : null;
+		this.context.set("tabTethered", (ref && partnersOf(this.doc, ref).length > 0) || undefined);
+		this.context.set("tabInToolGroup", (owner && !owner.well) || undefined);
+		this.context.set("tabAutoHidden", (owner && T.hiddenIn(owner, ref)) || undefined);
+	}
+
 	showMenu(menuId, at, args) {
-		if (args && args.ref) this.context.set("tabTethered", partnersOf(this.doc, args.ref).length > 0 || undefined);
+		if (args && args.ref) this.tabKeys(args.ref);
 		const rows = this.menus.resolve(menuId);
 		return this.menuHost.show({
 			rows, at, label: menuId,
 			pick: (row) => this.commands.run(row.command, row.args !== undefined ? row.args : args),
 			submenu: (id) => this.menus.resolve(id),
+			// The keys go back to the focused tab's once the pick (which runs after the close) has been checked.
+			onClose: args && args.ref ? () => setTimeout(() => this.tabKeys(this.focus ? this.focus.ref : null), 0) : undefined,
 		});
 	}
 

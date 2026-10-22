@@ -1,11 +1,17 @@
 // layouttree.js - an activity's layout tree (docs/15 "Layout document") and the operations on it. Pure: each takes a
 // tree and returns a new, normalized one; the argument is never changed.
 //
-// node: {kind: "split", dir: "row" | "column", sizes, children} | {kind: "tabs", tabs, active, well?, preview?, dock?}
+// node: {kind: "split", dir: "row" | "column", sizes, children}
+//     | {kind: "tabs", tabs, active, well?, preview?, dock?, autoHidden?, autoHide?, autoHideSize?}
 // `well` marks a document group (tabs on top, documents open into it); `preview` is its VS preview tab; `dock` is the
 // region a tool-window group was made for ("left", "right", "bottom"), so a tool window added later finds it.
+// `autoHidden` are the group's tabs unpinned to the activity edge `autoHide` (VS auto-hide): each keeps its place in the
+// group, out of the layout, and slides out over the documents `autoHideSize` of the dock host wide (or high). A group
+// whose every tab is hidden takes no room.
 
 const EDGE_SIZES = { left: 0.2, right: 0.22, bottom: 0.3, top: 0.3 };
+const AUTO_HIDE_MIN = 0.05;
+const AUTO_HIDE_MAX = 0.9;
 
 export function group(tabs, extra) {
 	return Object.assign({ kind: "tabs", tabs: [...tabs], active: tabs[0] || null }, extra || {});
@@ -50,6 +56,20 @@ export function groupOf(tree, ref) {
 
 export function wellsOf(tree) {
 	return groupsOf(tree).filter((g) => g.well);
+}
+
+// The groups with auto-hidden tabs.
+export function autoHiddenOf(tree) {
+	return groupsOf(tree).filter((g) => g.autoHidden);
+}
+
+export function hiddenIn(group, ref) {
+	return Boolean(group.autoHidden) && group.autoHidden.includes(ref);
+}
+
+export function isAutoHidden(tree, ref) {
+	const owner = groupOf(tree, ref);
+	return Boolean(owner) && hiddenIn(owner, ref);
 }
 
 // The path (child indexes) of the node `target` (by identity), or null.
@@ -98,6 +118,9 @@ function normalizeNode(node, seen) {
 		if (!node.tabs.includes(node.active)) node.active = node.tabs[0] || null;
 		if (node.preview && !node.tabs.includes(node.preview)) delete node.preview;
 		if (!node.well) delete node.well;
+		const hidden = Array.isArray(node.autoHidden) ? node.tabs.filter((ref) => node.autoHidden.includes(ref)) : [];
+		if (node.well || !hidden.length || !ZONE_DIR[node.autoHide]) clearAutoHide(node);
+		else Object.assign(node, { autoHidden: hidden, autoHideSize: clampShare(node.autoHideSize) });
 		return node;
 	}
 	if (!isSplit(node) || !Array.isArray(node.children)) return null;
@@ -171,7 +194,7 @@ export function openTab(tree, ref, options) {
 	const next = clone(tree);
 	const existing = groupOf(next, ref);
 	if (existing) {
-		existing.active = ref;
+		show(existing, ref);
 		if (!opts.preview && existing.preview === ref) delete existing.preview;
 		return normalize(next);
 	}
@@ -189,8 +212,13 @@ export function activateTab(tree, ref) {
 	const next = clone(tree);
 	const owner = groupOf(next, ref);
 	if (!owner) return tree;
-	owner.active = ref;
+	show(owner, ref);
 	return normalize(next);
+}
+
+// A group shows `ref` unless it is auto-hidden: that one slides out (the dock's), and the group keeps the tab it shows.
+function show(owner, ref) {
+	if (!hiddenIn(owner, ref)) owner.active = ref;
 }
 
 // Shows each of `partners` that is open in a group other than `ref`'s in its group (tethered tabs, docs/15): one tab of
@@ -201,7 +229,7 @@ export function revealPartners(tree, ref, partners) {
 	const home = groupOf(next, ref);
 	for (const partner of partners) {
 		const owner = groupOf(next, partner);
-		if (owner && owner !== home) owner.active = partner;
+		if (owner && owner !== home) show(owner, partner);
 	}
 	return normalize(next);
 }
@@ -252,6 +280,7 @@ function removeRef(owner, ref) {
 	owner.tabs.splice(index, 1);
 	if (owner.active === ref) owner.active = owner.tabs[Math.min(index, owner.tabs.length - 1)] || null;
 	if (owner.preview === ref) delete owner.preview;
+	if (owner.autoHidden) owner.autoHidden = owner.autoHidden.filter((r) => r !== ref);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -346,8 +375,11 @@ export function ensureTool(tree, id, dock, activate) {
 	}
 	const home = groupsOf(next).find((g) => g.dock === dock);
 	if (home) {
+		// A region whose every tab is auto-hidden stays hidden.
+		const hiddenRegion = Boolean(home.autoHidden) && home.autoHidden.length === home.tabs.length;
 		home.tabs.push(id);
-		if (activate || !home.active) home.active = id;
+		if (hiddenRegion) home.autoHidden.push(id);
+		else if (activate || !home.active) home.active = id;
 		return normalize(next);
 	}
 	const made = group([id], { dock });
@@ -358,9 +390,98 @@ export function ensureTool(tree, id, dock, activate) {
 	return normalize(withEdge(next, made, dock, EDGE_SIZES[dock]));
 }
 
-// The VS starting point: tool windows by their dock around one document group, the first of each group active.
-export function defaultTree(toolWindows) {
+// The VS starting point: tool windows by their dock around one document group, the first of each group active; with
+// `autoHide` (a tablet), every tool window auto-hidden.
+export function defaultTree(toolWindows, autoHide) {
 	let tree = group([], { well: true });
 	for (const tool of toolWindows) tree = ensureTool(tree, tool.id, tool.dock, false);
-	return tree;
+	return autoHide ? autoHideAll(tree) : tree;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Auto-hide (VS): a tool window unpinned to the activity edge nearest its group
+
+// Auto-hides the tab `ref` of a tool-window group (VS's pin); the group's other tabs stay where they are.
+export function autoHideTab(tree, ref) {
+	const next = clone(tree);
+	const owner = groupOf(next, ref);
+	if (!owner || owner.well || hiddenIn(owner, ref)) return tree;
+	hide(next, owner, [ref]);
+	return normalize(next);
+}
+
+export function autoHideAll(tree) {
+	const next = clone(tree);
+	const shown = groupsOf(next).filter((g) => !g.well && g.tabs.some((ref) => !hiddenIn(g, ref)));
+	if (!shown.length) return tree;
+	for (const owner of shown) hide(next, owner, owner.tabs);
+	return normalize(next);
+}
+
+// Puts the auto-hidden tab `ref` back in its group, shown.
+export function dockTab(tree, ref) {
+	const next = clone(tree);
+	const owner = groupOf(next, ref);
+	if (!owner || !hiddenIn(owner, ref)) return tree;
+	owner.autoHidden = owner.autoHidden.filter((r) => r !== ref);
+	owner.active = ref;
+	return normalize(next);
+}
+
+export function setAutoHideSize(tree, ref, share) {
+	const next = clone(tree);
+	const owner = groupOf(next, ref);
+	if (!owner || !hiddenIn(owner, ref) || !Number.isFinite(share)) return tree;
+	owner.autoHideSize = share;
+	return normalize(next);
+}
+
+// A group's first hidden tab fixes its edge and its size: where the group lies, and as large as it is in the layout.
+// The group then shows the nearest tab still docked.
+function hide(root, owner, refs) {
+	if (!owner.autoHidden) {
+		const edge = autoHideEdge(root, owner);
+		Object.assign(owner, { autoHidden: [], autoHide: edge, autoHideSize: clampShare(shareAlong(root, pathOf(root, owner), ZONE_DIR[edge])) });
+	}
+	owner.autoHidden = owner.tabs.filter((ref) => owner.autoHidden.includes(ref) || refs.includes(ref));
+	const docked = owner.tabs.filter((ref) => !owner.autoHidden.includes(ref));
+	const at = owner.tabs.indexOf(owner.active);
+	if (docked.length && !docked.includes(owner.active)) owner.active = docked.find((ref) => owner.tabs.indexOf(ref) > at) || docked[docked.length - 1];
+}
+
+function clearAutoHide(group) {
+	delete group.autoHidden;
+	delete group.autoHide;
+	delete group.autoHideSize;
+}
+
+// The edge a group hides to: the side of the first document group it lies on, judged where their branches part.
+export function autoHideEdge(tree, target) {
+	const path = pathOf(tree, target);
+	const well = wellsOf(tree)[0];
+	const wellPath = well ? pathOf(tree, well) : null;
+	if (path && wellPath) {
+		for (let depth = 0; depth < Math.min(path.length, wellPath.length); depth++) {
+			if (path[depth] === wellPath[depth]) continue;
+			const before = path[depth] < wellPath[depth];
+			if (nodeAt(tree, path.slice(0, depth)).dir === "row") return before ? "left" : "right";
+			return before ? "top" : "bottom";
+		}
+	}
+	return ZONE_DIR[target.dock] ? target.dock : "bottom";
+}
+
+// The share of the whole tree's width ("row") or height ("column") the node at `path` gets.
+function shareAlong(tree, path, dir) {
+	let share = 1;
+	for (let depth = 0; depth < path.length; depth++) {
+		const split = nodeAt(tree, path.slice(0, depth));
+		if (split.dir === dir) share *= split.sizes[path[depth]];
+	}
+	return share;
+}
+
+function clampShare(share) {
+	const value = Number(share);
+	return Number.isFinite(value) ? Math.min(AUTO_HIDE_MAX, Math.max(AUTO_HIDE_MIN, value)) : EDGE_SIZES.bottom;
 }

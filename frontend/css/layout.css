@@ -224,6 +224,56 @@ a { color: var(--link); text-decoration: none; }
 .tw-tab.on { color: var(--text-0); background: var(--bg-1); }
 .tw-tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--text-1); }
 
+/* auto-hide (VS): strips of tabs along the edges, the window slid out over the documents */
+.dock-frame {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+	grid-template-areas: "left top right" "left center right" "left bottom right";
+}
+.dock-center { grid-area: center; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.ah-park { display: none; }
+.ah-strip { display: flex; gap: var(--space-6); background: var(--bg-0); overflow: hidden; }
+.ah-strip[hidden] { display: none; }
+.ah-left, .ah-right { flex-direction: column; width: 24px; padding: var(--space-4) 0; }
+.ah-top, .ah-bottom { flex-direction: row; height: 24px; padding: 0 var(--space-4); }
+.ah-left { grid-area: left; border-right: var(--border-width) solid var(--border-0); }
+.ah-right { grid-area: right; border-left: var(--border-width) solid var(--border-0); }
+.ah-top { grid-area: top; border-bottom: var(--border-width) solid var(--border-0); }
+.ah-bottom { grid-area: bottom; border-top: var(--border-width) solid var(--border-0); }
+.ah-group { display: flex; gap: var(--space-2); flex: none; }
+.ah-left .ah-group, .ah-right .ah-group { flex-direction: column; }
+.ah-tab { display: flex; align-items: center; justify-content: center; position: relative; color: var(--text-2); font-size: var(--font-size-sm); white-space: nowrap; user-select: none; touch-action: none; outline: none; }
+.ah-left .ah-tab, .ah-right .ah-tab { writing-mode: vertical-rl; padding: var(--space-4) 0; }
+.ah-top .ah-tab, .ah-bottom .ah-tab { padding: 0 var(--space-4); }
+.ah-tab::after { content: ""; position: absolute; background: var(--border-1); }
+.ah-left .ah-tab::after { left: 0; top: 0; bottom: 0; width: 2px; }
+.ah-right .ah-tab::after { right: 0; top: 0; bottom: 0; width: 2px; }
+.ah-top .ah-tab::after { top: 0; left: 0; right: 0; height: 2px; }
+.ah-bottom .ah-tab::after { bottom: 0; left: 0; right: 0; height: 2px; }
+.ah-tab:hover, .ah-tab:focus-visible { color: var(--text-0); }
+.ah-tab:hover::after, .ah-tab:focus-visible::after { background: var(--text-2); }
+.ah-tab.on { color: var(--text-0); }
+.ah-tab.on::after { background: var(--text-0); }
+.ah-flyout { position: absolute; z-index: 20; box-shadow: var(--shadow-popup); --ah-size: 30%; }
+.ah-flyout[data-edge="left"], .ah-flyout[data-edge="right"] { top: 0; bottom: 0; width: clamp(min(160px, 100%), var(--ah-size), 100%); }
+.ah-flyout[data-edge="top"], .ah-flyout[data-edge="bottom"] { left: 0; right: 0; height: clamp(min(120px, 100%), var(--ah-size), 100%); }
+.ah-flyout[data-edge="left"] { left: 0; animation: ah-from-left var(--motion-normal) ease-out; }
+.ah-flyout[data-edge="right"] { right: 0; animation: ah-from-right var(--motion-normal) ease-out; }
+.ah-flyout[data-edge="top"] { top: 0; animation: ah-from-top var(--motion-normal) ease-out; }
+.ah-flyout[data-edge="bottom"] { bottom: 0; animation: ah-from-bottom var(--motion-normal) ease-out; }
+.ah-sash { position: absolute; z-index: 1; touch-action: none; }
+.ah-flyout[data-edge="left"] .ah-sash { top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; }
+.ah-flyout[data-edge="right"] .ah-sash { top: 0; bottom: 0; left: -3px; width: 6px; cursor: col-resize; }
+.ah-flyout[data-edge="top"] .ah-sash { left: 0; right: 0; bottom: -3px; height: 6px; cursor: row-resize; }
+.ah-flyout[data-edge="bottom"] .ah-sash { left: 0; right: 0; top: -3px; height: 6px; cursor: row-resize; }
+@keyframes ah-from-left { from { transform: translateX(-100%); } }
+@keyframes ah-from-right { from { transform: translateX(100%); } }
+@keyframes ah-from-top { from { transform: translateY(-100%); } }
+@keyframes ah-from-bottom { from { transform: translateY(100%); } }
+
 /* dragging */
 .dock.dragging, .dock.dragging * { cursor: grabbing !important; }
 .dock-drop {

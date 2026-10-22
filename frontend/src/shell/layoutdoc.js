@@ -9,11 +9,12 @@ export function emptyDocument() {
 	return { v: LAYOUT_DOC_VERSION, activity: null, activities: {}, phone: { pane: null, back: [] } };
 }
 
-// The tree of a dock host: the stored one, or the default from `tools` ([{id, dock}] of the activity). A tool window
-// the stored tree lacks (closed, or new) comes back when it is shown (ensureTool).
-export function treeOf(doc, activityId, tools) {
+// The tree of a dock host: the stored one, or the default from `tools` ([{id, dock}] of the activity), its tool windows
+// auto-hidden with `autoHide` (a tablet's). A tool window the stored tree lacks (closed, or new) comes back when it is
+// shown (ensureTool).
+export function treeOf(doc, activityId, tools, autoHide) {
 	const stored = doc && doc.activities ? doc.activities[activityId] : null;
-	return stored ? normalize(stored) : defaultTree(tools);
+	return stored ? normalize(stored) : defaultTree(tools, autoHide);
 }
 
 export function withTree(doc, activityId, tree) {

@@ -36,8 +36,7 @@ export class DesktopChrome {
 		this.toolbarItems.release();
 		this.panel.release();
 		this.status.dispose();
-		for (const dock of this.docks.values()) dock.container.remove();
-		this.docks.clear();
+		this.dropDocks();
 		this.app.remove();
 	}
 
@@ -90,8 +89,7 @@ export class DesktopChrome {
 
 	// The start page takes the whole area: the activities' docks go with what it replaces, and come back on render.
 	startPage() {
-		for (const dock of this.docks.values()) dock.container.remove();
-		this.docks.clear();
+		this.dropDocks();
 		this.renderMenubar();
 		replace(this.area, startPageView(this.shell));
 	}
@@ -216,6 +214,7 @@ export class DesktopChrome {
 		const activityId = shell.currentActivity();
 		for (const [id, dock] of [...this.docks]) {
 			if (!shell.contributions.activity(id)) {
+				dock.dispose();
 				dock.container.remove();
 				this.docks.delete(id);
 			}
@@ -235,6 +234,20 @@ export class DesktopChrome {
 		}
 	}
 
+	dropDocks() {
+		for (const dock of this.docks.values()) {
+			dock.dispose();
+			dock.container.remove();
+		}
+		this.docks.clear();
+	}
+
+	// A tab of an auto-hidden group slides out (shell.slideOut).
+	slideOut(activityId, ref) {
+		const dock = this.docks.get(activityId);
+		if (dock) dock.showFlyout(ref);
+	}
+
 	dockFor(activityId) {
 		let dock = this.docks.get(activityId);
 		if (dock) return dock;
@@ -251,6 +264,8 @@ export class DesktopChrome {
 			pin: (ref) => shell.pinTab(ref),
 			move: (ref, path, zone, index) => shell.moveTab(ref, path, zone, index),
 			resize: (path, sizes) => shell.changeTree(activityId, (tree) => T.setSizes(tree, path, sizes)),
+			autoHide: (ref, hidden) => shell.autoHideTab(ref, hidden),
+			resizeAutoHidden: (ref, share) => shell.resizeAutoHidden(ref, share),
 			hold: (on) => shell.layout && shell.layout.hold(on),
 			focused: (ref, path, well) => shell.focused(activityId, ref, path, well),
 		}, container);

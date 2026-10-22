@@ -100,7 +100,7 @@ Pin down what IED looks like and how it is operated - desktop and phone - so the
 
 - Each activity has a **layout tree**: splits (row/column with sizes) whose leaves are **tab groups**.
 - Drag a tab: drop targets appear on the hovered group (left/right/top/bottom/center) and on the activity edges. Dropping in a center target joins the group; edges create a split. No floating windows (plan).
-- Tool windows (Output, Error List, Find Results, Call Stack, Locals, Watch, Breakpoints, Test Explorer, Bookmarks, Task List, Document Outline, Git Changes...) are tabs in **dock regions** (left/right/bottom of the Editor activity) with VS auto-hide: unpinning a region collapses it to edge tabs that slide out on click.
+- Tool windows (Output, Error List, Find Results, Call Stack, Locals, Watch, Breakpoints, Test Explorer, Bookmarks, Task List, Document Outline, Git Changes...) are tabs in **dock regions** (left/right/bottom of the Editor activity) with VS auto-hide: each tool window is either docked or unpinned to a tab on the activity's edge that slides out over the documents on click (as built: "Auto-hide" below).
 - Chats can be docked into the Editor activity and editors into the Chat activity (F-SHL-14): a tab carries its kind; any group can host any kind.
 - Layout state is server-side per workspace x device class (F-SHL-13). "Window > Reset Window Layout" restores the default for the activity.
 
@@ -193,22 +193,34 @@ The terminal dock and the chat activity are contributions of the `terminal` and 
   "activities": { "ied.editor": <node> },
   "phone": { "pane": "<ref>", "back": ["<ref>"] } }
 // node: { "kind": "split", "dir": "row" | "column", "sizes": [0.2, 0.8], "children": [<node>, ...] }
-//     | { "kind": "tabs", "tabs": ["<ref>", ...], "active": "<ref>", "well": true, "preview": "<ref>", "dock": "left" }
+//     | { "kind": "tabs", "tabs": ["<ref>", ...], "active": "<ref>", "well": true, "preview": "<ref>", "dock": "left",
+//         "autoHidden": ["<ref>", ...], "autoHide": "left" | "right" | "top" | "bottom", "autoHideSize": 0.3 }
 // ref:  a tool window id ("ied.output"), "<kind>:<argument>" for a tab a plugin opens ("doc:src/main.cf"),
 //       or "activity:<id>" for an activity that renders itself (the phone's pane)
 ```
 
 `well` marks a document group (tabs on top; documents open into it, VS); `preview` is that group's preview tab; `dock`
-is the region a tool-window group was made for, so a tool window shown later joins it. The operations on a tree are
-pure functions in `frontend/src/shell/layouttree.js`.
+is the region a tool-window group was made for, so a tool window shown later joins it. `autoHidden` are the group's
+tabs that are auto-hidden to the activity's edge `autoHide`, and `autoHideSize` is how much of the activity's width
+(left, right) or height (top, bottom) they take when they slide out. The operations on a tree are pure functions in
+`frontend/src/shell/layouttree.js`.
 
-- No stored layout (revision 0), or one of another `v`, starts from the default the contributions imply: tool windows placed by `defaultDock` (left, right, bottom; `document` joins the well) around one document well.
+- No stored layout (revision 0), or one of another `v`, starts from the default the contributions imply: tool windows placed by `defaultDock` (left, right, bottom; `document` joins the well) around one document well. A tablet's default has every tool window auto-hidden.
 - A tab whose ref nothing resolves (its plugin is disabled) stays in the tree, hidden, and comes back with its plugin. A tool window the tree lacks is added where its `defaultDock` says when it is first shown.
 - A split has at least two children and sizes that sum to 1; a group has one active tab; closing the last tab of a group removes the group, except the well, which stays (empty, as in VS).
 - Changes are written with `layout.set` 400 ms after the last one. A conflict retries on the new revision (last writer wins, `docs/11`); a `layout.changed` from another client of the same device class is applied unless a drag is under way.
 - Window > Reset Window Layout writes the default.
 
-**Docking.** Dragging a tab shows targets on the hovered group (center joins it, the four edges split it) and on the activity's edges, with a preview overlay. Splitters resize their neighbors (80 px minimum). A tab's context menu: Close, Close All But This, Close All, Move to New Group Right, Move to New Group Below, Copy Reference. No floating windows.
+**Docking.** Dragging a tab shows targets on the hovered group (center joins it, the four edges split it) and on the activity's edges, with a preview overlay. Splitters resize their neighbors (80 px minimum). A tab's context menu: Close, Close All But This, Close All, Move to New Group Right, Move to New Group Below, Tether with the Tab Beside / Untether, Auto Hide / Dock (tool windows), Copy Reference; a tool window's title bar has the same menu. No floating windows.
+
+**Auto-hide** (VS, F-SHL-11). Each tool window is docked, as in the layout above, or auto-hidden, on its own: a tool window's title bar has VS's pin (Auto Hide) beside Close, and it hides that window alone to the edge of the activity its group lies on (the side of the document group where their branches of the tree part: Solution Explorer left, Output and Error List bottom). The rest of its group stays docked; a group with no window left docked takes no room, and the documents get it. A hidden window keeps its place among its group's tabs, so Dock puts it back there.
+
+- The edges carry strips of the hidden windows' tabs, clustered by group: vertical text on the left and right, horizontal on the top and bottom.
+- A click on a strip tab slides that window out over the documents, focused, from its edge (as large as its group was in the layout; a drag on its inner edge resizes it, kept as `autoHideSize` for the group's hidden windows). One window is out at a time. Dragging a strip tab onto a group docks it there.
+- It slides back when a click or the focus goes anywhere else (menus and popups excepted, so a context menu in it works), on Escape (the focus goes back where it was), or on a second click of its strip tab.
+- Asking for a hidden window (View > Output, Ctrl+Alt+O, a build showing its output, Ctrl+Shift+F) slides it out, as VS does.
+- Its slid-out title bar has Dock (the pin turned sideways) and Close. Auto Hide and Dock are also on the tab's context menu and the Window menu, with Window > Auto Hide All for every tool window of the activity; Reset Window Layout docks them all again.
+- Hidden or docked is layout state, so it follows the person to every window of the device class and survives reloads; which window is slid out belongs to the browser window. A tool window added to a group whose every window is hidden is hidden too. Documents never hide. A phone has no edges: its tool windows are panes, whatever the desktop layout says.
 
 **Commands and keys.**
 
@@ -216,12 +228,12 @@ pure functions in `frontend/src/shell/layouttree.js`.
 
 
 - A command has an id, a title, a category, an icon, an `enablement` when-clause and a handler: a UI module's (`ied.commands.handle`), a server binding (`binding`, from M11), or the shell's own (`shell.*`).
-- When-clauses: `!`, `&&`, `||`, parentheses, `==`, `!=`, `<`, `<=`, `>`, `>=`, `=~ /re/flags`, quoted strings, numbers, `true`/`false`; a bare key is true when its value is truthy. The shell sets `deviceClass`, `connected`, `desktopApp` (inside IED's desktop app, `docs/27`), `workspaceTrusted`, `workspaceKind`, `activeActivity`, `activeTab` (its ref), `activeTabKind`, `inputFocus`, `resourcePath` and `resourceExtname` (when the active tab names a file).
+- When-clauses: `!`, `&&`, `||`, parentheses, `==`, `!=`, `<`, `<=`, `>`, `>=`, `=~ /re/flags`, quoted strings, numbers, `true`/`false`; a bare key is true when its value is truthy. The shell sets `deviceClass`, `connected`, `desktopApp` (inside IED's desktop app, `docs/27`), `workspaceTrusted`, `workspaceKind`, `activeActivity`, `activeTab` (its ref), `activeTabKind`, `inputFocus`, `resourcePath` and `resourceExtname` (when the active tab names a file), and for the focused tab (or the one a tab menu is for) `tabTethered`, `tabInToolGroup` and `tabAutoHidden`.
 - A key is `[ctrl+][shift+][alt+][meta+]<key>` (modifiers in any order), and a chord is two keys separated by a space (`ctrl+k ctrl+d`). `<key>` is the physical key (`KeyboardEvent.code`) named as on a US keyboard: `a`-`z`, `0`-`9`, `f1`-`f24`, `` ` ``, `-`, `=`, `[`, `]`, `\`, `;`, `'`, `,`, `.`, `/`, `enter`, `escape`, `tab`, `space`, `backspace`, `delete`, `insert`, `home`, `end`, `pageup`, `pagedown`, `up`, `down`, `left`, `right`, `break`.
 - The first key of a chord waits 2 s for the second; the status bar shows it. For one key, the last binding whose when-clause holds wins (shell, then plugins in load order, then the owner's). A key without a modifier other than Shift does nothing while a text field has focus, except F-keys and Escape.
 - Browser-reserved keys (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+T, Ctrl+Shift+N, Ctrl+Shift+W, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PageUp, Ctrl+PageDown) are never bound by default. A binding on one is marked "app window only" in Help > Keyboard Shortcuts: it fires only in an installed app window.
 
-Shell commands: `shell.commandPalette` (Ctrl+Shift+P, Ctrl+Q), `shell.showView {id}` (View > tool windows), `shell.showActivity {id}`, `shell.closeTab` (Ctrl+F4), `shell.nextTab` / `shell.previousTab` (Ctrl+Alt+PageDown / PageUp), `shell.resetLayout`, `shell.showNotifications`, `shell.clearNotifications`, `shell.switchWorkspace`, `shell.keyboardShortcuts`, `shell.plugins` (Extensions > Manage Plugins), `shell.trustWorkspace`, `shell.startPage` (File > Start Page), `shell.about`, and inside the desktop app `shell.openFolder` (File > Open Folder..., Ctrl+Shift+Alt+O: the system's folder picker, the folder opened on the server and shown in the window; `docs/27`). The menu `shell/openWorkspace` holds the ways to open a workspace: a page without one shows them as buttons above the server's command line (`ied <folder or .iedsln>`), and the workspace switcher lists them under the open workspaces.
+Shell commands: `shell.commandPalette` (Ctrl+Shift+P, Ctrl+Q), `shell.showView {id}` (View > tool windows), `shell.showActivity {id}`, `shell.closeTab` (Ctrl+F4), `shell.nextTab` / `shell.previousTab` (Ctrl+Alt+PageDown / PageUp), `shell.autoHideTab` / `shell.dockTab` {ref} (Auto Hide / Dock), `shell.autoHideAll`, `shell.resetLayout`, `shell.showNotifications`, `shell.clearNotifications`, `shell.switchWorkspace`, `shell.keyboardShortcuts`, `shell.plugins` (Extensions > Manage Plugins), `shell.trustWorkspace`, `shell.startPage` (File > Start Page), `shell.about`, and inside the desktop app `shell.openFolder` (File > Open Folder..., Ctrl+Shift+Alt+O: the system's folder picker, the folder opened on the server and shown in the window; `docs/27`). The menu `shell/openWorkspace` holds the ways to open a workspace: a page without one shows them as buttons above the server's command line (`ied <folder or .iedsln>`), and the workspace switcher lists them under the open workspaces.
 
 **Start page.** A window with no workspace shows IED's start page, and so does one asked for it: the `#start` fragment (what the desktop app opens without a path, even while workspaces are open on the server) and File > Start Page (the workspace stays open on the server). On the left, "Open recent": the workspaces open on the server, then the owner's favorites and the other recent projects not open, newest first, from the server's list (`docs/10` "Workspaces"); a row is a project's kind glyph, its name and path, how long ago it was opened (or "open", "shown", "not found"), a star that makes it a favorite or not, and, unless it is open, a button that takes it off the list. A click shows an open workspace or opens a listed project again (`ws.openRecent`); a project that is gone stays dim and only says so. On the right, "Get started": the ways to open a new project (the menu `shell/openWorkspace`) as buttons, and the server's command line. Nothing of a workspace's plugins stays on it: no activities, toolbars or panel, as on a page that never showed one. The workspace switcher (the sidebar's workspace button, the phone header's) lists the same: the open workspaces, the favorites, the ten newest recent projects, then a star for the shown workspace, Start Page and the ways to open one. On a phone the rows are a column, their buttons always shown.
 

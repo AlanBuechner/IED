@@ -1,4 +1,4 @@
-// layouttree.test.js - the layout tree: normal form, the default, tabs, preview tabs, docking and resizing.
+// layouttree.test.js - the layout tree: normal form, the default, tabs, preview tabs, docking, resizing and auto-hide.
 
 import { test, assertEqual, assertTrue } from "./harness.js";
 import * as L from "../src/shell/layouttree.js";
@@ -13,7 +13,7 @@ const TOOLS = [
 ];
 
 function shape(node) {
-	if (L.isGroup(node)) return (node.well ? "W" : "G") + "[" + node.tabs.join(",") + (node.active ? "|" + node.active : "") + "]";
+	if (L.isGroup(node)) return (node.well ? "W" : "G") + "[" + node.tabs.join(",") + (node.active ? "|" + node.active : "") + "]" + (node.autoHidden ? "^" + node.autoHide + "(" + node.autoHidden.join(",") + ")" : "");
 	return node.dir + "(" + node.children.map(shape).join(" ") + ")";
 }
 
@@ -149,6 +149,76 @@ test("layout: tool windows are added where their dock says", () => {
 	assertEqual(L.groupOf(tree, "output").active, "output", "activated where it is");
 	tree = L.ensureTool(tree, "start", "document", false);
 	assertEqual(L.wellsOf(tree)[0].tabs, ["doc:a", "start"]);
+});
+
+test("layout: a tool window auto-hides by itself to the edge its group lies on, and docks back into its group", () => {
+	const tree = L.defaultTree(TOOLS);
+	const one = L.autoHideTab(tree, "output");
+	assertEqual(shape(one), "row(G[explorer|explorer] column(W[welcome|welcome] G[output,errors|errors]^bottom(output)) G[props|props])", "Error List stays docked, shown");
+	assertEqual(Math.round(L.groupOf(one, "output").autoHideSize * 100), 30, "the share of the height its group had");
+	assertTrue(L.isAutoHidden(one, "output") && !L.isAutoHidden(one, "errors"));
+	assertEqual(L.groupOf(L.activateTab(one, "output"), "output").active, "errors", "a hidden tab slides out; its group keeps showing Error List");
+	const both = L.autoHideTab(one, "errors");
+	assertEqual(shape(L.groupOf(both, "errors")), "G[output,errors|errors]^bottom(output,errors)", "every tab hidden: the group takes no room");
+	assertEqual(L.autoHideTab(one, "output"), one, "already hidden");
+	assertEqual(L.autoHideTab(tree, "welcome"), tree, "a document never hides");
+	assertEqual(L.autoHideTab(tree, "nothing"), tree);
+	const back = L.dockTab(both, "output");
+	assertEqual(shape(L.groupOf(back, "output")), "G[output,errors|output]^bottom(errors)", "back in its group where it was, shown");
+	assertEqual(shape(L.groupOf(L.dockTab(back, "errors"), "errors")), "G[output,errors|errors]", "nothing hidden: no edge left");
+	assertEqual(L.dockTab(tree, "output"), tree, "not hidden");
+	const left = L.autoHideTab(tree, "explorer");
+	assertEqual(L.groupOf(left, "explorer").autoHide, "left");
+	assertEqual(Math.round(L.groupOf(left, "explorer").autoHideSize * 100), 16, "the share of the width it had");
+	assertEqual(L.groupOf(L.autoHideTab(tree, "props"), "props").autoHide, "right");
+});
+
+test("layout: hiding the shown tab shows the nearest docked one; tabs come and go in a hidden group", () => {
+	let tree = L.normalize(L.group(["doc:a"], { well: true }));
+	for (const id of ["a", "b", "c"]) tree = L.ensureTool(tree, id, "bottom", false);
+	tree = L.activateTab(tree, "b");
+	assertEqual(L.groupOf(L.autoHideTab(tree, "b"), "b").active, "c", "the next one");
+	assertEqual(L.groupOf(L.autoHideTab(L.activateTab(tree, "c"), "c"), "c").active, "b", "else the one before");
+	const partly = L.autoHideTab(tree, "a");
+	assertEqual(shape(L.groupOf(L.ensureTool(partly, "d", "bottom", true), "d")), "G[a,b,c,d|d]^bottom(a)", "a new tool window joins the docked part");
+	const all = L.autoHideAll(tree);
+	assertEqual(shape(L.groupOf(L.ensureTool(all, "d", "bottom", true), "d")), "G[a,b,c,d|b]^bottom(a,b,c,d)", "a region all hidden stays hidden");
+	assertEqual(shape(L.groupOf(L.closeTab(partly, "a"), "b")), "G[b,c|b]", "closing the hidden tab");
+	const moved = L.moveTab(partly, "a", L.pathOf(partly, L.wellsOf(partly)[0]), "center");
+	assertEqual(L.isAutoHidden(moved, "a"), false, "dragged into a group, it is docked there");
+	assertEqual(shape(L.wellsOf(moved)[0]), "W[doc:a,a|a]");
+});
+
+test("layout: the edge is the side of the document group where their branches part", () => {
+	const above = L.normalize({ kind: "split", dir: "column", sizes: [0.25, 0.75], children: [L.group(["find"]), { kind: "split", dir: "row", sizes: [0.5, 0.5], children: [L.group(["doc:a"], { well: true }), L.group(["props"])] }] });
+	assertEqual(L.groupOf(L.autoHideTab(above, "find"), "find").autoHide, "top");
+	assertEqual(L.groupOf(L.autoHideTab(above, "find"), "find").autoHideSize, 0.25);
+	assertEqual(L.groupOf(L.autoHideTab(above, "props"), "props").autoHide, "right", "inside the lower row");
+	assertEqual(L.groupOf(L.autoHideTab(above, "props"), "props").autoHideSize, 0.5);
+});
+
+test("layout: auto-hide all, sizes and the normal form of hidden tabs", () => {
+	let tree = L.autoHideAll(L.defaultTree(TOOLS));
+	assertEqual(L.autoHiddenOf(tree).map((g) => g.autoHide + ":" + g.autoHidden.join(",")), ["left:explorer", "bottom:output,errors", "right:props"], "every tool window");
+	assertEqual(L.wellsOf(tree)[0].autoHidden, undefined, "not the documents");
+	assertEqual(L.autoHideAll(tree), tree, "nothing left to hide");
+	assertEqual(shape(L.defaultTree(TOOLS, true)), shape(tree), "a tablet's default");
+	assertEqual(shape(D.treeOf(D.emptyDocument(), "ied.editor", TOOLS, true)), shape(tree), "a tablet's tree without a stored one");
+	tree = L.setAutoHideSize(tree, "output", 0.5);
+	assertEqual(L.groupOf(tree, "errors").autoHideSize, 0.5, "one size for the group's hidden tabs");
+	assertEqual(L.groupOf(L.setAutoHideSize(tree, "output", 4), "output").autoHideSize, 0.9, "at most 90%");
+	assertEqual(L.groupOf(L.setAutoHideSize(tree, "output", 0), "output").autoHideSize, 0.05, "at least 5%");
+	assertEqual(L.setAutoHideSize(tree, "welcome", 0.5), tree, "only a hidden tab's group has one");
+	const odd = L.normalize({ kind: "split", dir: "row", sizes: [1, 1, 1, 1], children: [
+		L.group(["a"], { autoHidden: ["a"], autoHide: "sideways" }),
+		L.group(["doc:a"], { well: true, autoHidden: ["doc:a"], autoHide: "left" }),
+		L.group(["b", "c"], { autoHidden: ["zz", "c", "c"], autoHide: "right", autoHideSize: "big" }),
+		L.group(["d"], { autoHide: "left", autoHideSize: 0.5 }),
+	] });
+	assertEqual(shape(odd), "row(G[a|a] W[doc:a|doc:a] G[b,c|b]^right(c) G[d|d])", "no edge, a document, or nothing hidden: shown");
+	assertEqual(odd.children[0].autoHideSize, undefined);
+	assertEqual(odd.children[2].autoHideSize, 0.3, "a size that is no number");
+	assertEqual(odd.children[3].autoHide, undefined);
 });
 
 test("layout: a tab opens beside another, in a new group when there is no other", () => {
