@@ -14,7 +14,7 @@ IDEplan: "a strong system prompt to help the ai design and write high quality co
 
 Built per request, cached per chat; the order is fixed so the prefix stays byte-identical across steps (prefix caching on llama.cpp and Anthropic):
 
-1. **Base** (`base-system.md`) - ~1,100 tokens.
+1. **Base** (`base-system.md`) - ~1,200 tokens.
 2. **Style** (`style-default.md` or the owner's override) - ~550 tokens.
 3. **Mode instructions** (Ask / Plan / Agent / custom) - 50-300 tokens.
 4. **Solution `AGENTS.md`** (verbatim; for federations, each member's file headed by the member name). Soft cap 2,500 tokens per file; above it, the head is included plus a note "AGENTS.md continues; read it with fs_read".
