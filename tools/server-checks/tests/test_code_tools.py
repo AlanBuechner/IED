@@ -17,7 +17,7 @@ import unittest
 
 from test_chat import REPO, ChatCase, call_step, text_step, write
 
-CLANGD = os.path.join(REPO, "C4", "Frost", "vendor", "Compiler", "bin", "clangd.exe")
+CLANGD = os.path.join(REPO, "vendor", "llvm", "bin", "clangd.exe")
 FAKE_LSP = os.path.join(REPO, "tools", "server-checks", "fake_lsp.py")
 C4LSP = os.path.join(REPO, "toolchains", "c4", "dev", "tools", "C4LSP", "C4LSP.exe")
 NUKE = os.path.join(REPO, "nuke.bat")

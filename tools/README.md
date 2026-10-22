@@ -31,9 +31,9 @@ setup.bat --only llvm --force     re-download and re-extract one package
 ```
 
 - **Pins and SHA256s live in `setup/deps.toml`** - the manifest of record. Bump a package by changing its `url` and `sha256` together, then `setup.bat --only <name> --force`. A download that does not match its hash is never installed.
-- Downloads land in `vendor/` (gitignored; the archives in `vendor/_downloads/` are deleted after extraction unless `--keep-downloads`), except LLVM, which Frost expects at `C4/Frost/vendor/Compiler` (gitignored by `C4/.gitignore`).
+- Downloads land in `vendor/` (gitignored; the archives in `vendor/_downloads/` are deleted after extraction unless `--keep-downloads`); LLVM in `vendor/llvm`, which the workspace's `[languages.cpp] llvm` names.
 - In a linked **git worktree**, packages marked `share-with-worktrees` (LLVM, 4 GB) become a directory junction to the main checkout's copy instead of a second download; `--force` replaces the junction, never the main copy.
-- Sources that are git repositories are **submodules** instead (`.gitmodules`): `third_party/codicons`, `third_party/libgit2`, `third_party/quickjs-ng`, and the compiler's `C4/Frost/Projects/Core/Modules/yaml/yaml-cpp`.
+- Sources that are git repositories are **submodules** instead (`.gitmodules`): `third_party/codicons`, `third_party/libgit2`, `third_party/quickjs-ng`, and the C++ libraries' `plugins/cpp/libraries/yaml/yaml-cpp`.
 - setup updates submodules with `core.longpaths=true` (yaml-cpp's bundled gtest and other fixtures pass Windows' 260-character limit when the checkout is in a deep folder), which is why the README clones without `--recursive` and lets setup do it.
 - `third_party/libgit2` is not checked out by a clone or by setup (`update = none`): nothing uses it yet, and its test fixtures exceed Windows' 260-character path limit in deep folders. Fetch it when needed with `git -c core.longpaths=true submodule update --init --checkout third_party/libgit2`.
 
@@ -41,7 +41,7 @@ setup.bat --only llvm --force     re-download and re-extract one package
 
 | Dependency | Version | How | Used by | Notes |
 |---|---|---|---|---|
-| LLVM (`clang+llvm-...-windows-msvc`) | 22.1.0 | download (core) | C4 compiler build (Frost), C4 toolchain's clang + lld-link | 860 MB archive, ~4 GB extracted |
+| LLVM (`clang+llvm-...-windows-msvc`) | 22.1.0 | download (core) | C4 compiler build (Nuke's C/C++ driver), C4 toolchain's clang + lld-link, clangd | 860 MB archive, ~4 GB extracted |
 | `monaco-editor` | 0.57.0 | download (ied) | editor plugin | npm tarball; `esm/` is the ESM build, `min/vs/` the minified one, `dev/vs/` for local dev |
 | `@xterm/xterm` + addon-fit + addon-web-links | 6.0.0 / 0.11.0 / 0.12.0 | download (ied) | terminal plugin, output window | npm tarballs |
 | `codicons` | v0.0.46-45 (`8853e0b`) | submodule | shared/ui-kit icon set, `frontend/mocks/build.py icons` | icons CC BY 4.0, code MIT |
@@ -55,4 +55,4 @@ setup.bat --only llvm --force     re-download and re-extract one package
 1. npm scoped packages download as `<name>-<ver>.tgz` from `registry.npmjs.org/@scope/name/-/`; `npm pack` produces the same bytes.
 2. ChakraCore's aka.ms shortlinks are dead - do not resurrect that dependency.
 3. SearXNG cannot be checked out on Windows (illegal path names); use the codeload tarball and skip the 4 bad entries.
-4. The embeddable Python pins `sys.path` in `python312._pth`; setup keeps the file but enables `import site` (Frost and Nuke rely on the `exit` builtin and normal startup).
+4. The embeddable Python pins `sys.path` in `python312._pth`; setup keeps the file but enables `import site` (Nuke relies on the `exit` builtin and normal startup).
